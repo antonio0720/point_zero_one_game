@@ -19,12 +19,10 @@ while true; do
   
   if "$SCRIPT_DIR/task_runner.sh" "$task_json"; then
     log_success "Completed: $task_id"
-    
     tail -n +2 "$PZO_QUEUE/tasks.ndjson" > "$PZO_QUEUE/tasks.ndjson.tmp"
     mv "$PZO_QUEUE/tasks.ndjson.tmp" "$PZO_QUEUE/tasks.ndjson"
   else
     log_error "Failed: $task_id"
-    
     retry_count=$(echo "$task_json" | jq -r '.retry_count // 0')
     new_retry=$((retry_count + 1))
     
