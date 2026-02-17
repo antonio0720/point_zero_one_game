@@ -1,0 +1,39 @@
+# SECRETS
+*.key
+*.pem
+.env
+.env.*
+!.env.example
+**/secrets/
+github_pat_*
+*secret*
+*api*key*
+deploy_moltbook*.sh
+*.autopublish.sh
+
+# RUNTIME
+pzo_complete_automation/docs/pzo1/runtime/
+**/artifacts/
+**/bundles/
+logs/
+*.log
+
+# BUILD
+**/target/
+node_modules/
+dist/
+__pycache__/
+*.pyc
+
+# DATABASE
+*.sqlite
+*.db
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/*
+!.vscode/settings.json
+.idea/
