@@ -1,10 +1,10 @@
 #!/bin/bash
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-source "$SCRIPT_DIR/env.sh"
-source "$SCRIPT_DIR/logging.sh"
+source "$SCRIPT_DIR/../_lib/env.sh"
+source "$SCRIPT_DIR/../_lib/logging.sh"
 
 task_json="$1"
 task_id=$(echo "$task_json" | jq -r '.task_id')
