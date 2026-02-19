@@ -1,4 +1,27 @@
 #!/bin/bash
+# EMERGENCY FIX DEPLOYMENT - Point Zero One Worker Recovery
+# Fixes JSON parsing bug causing UNKNOWN task failures
+
+set -e
+
+PROJECT_ROOT="/Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/pzo_complete_automation"
+
+echo "════════════════════════════════════════════════"
+echo "POINT ZERO ONE - EMERGENCY WORKER FIX"
+echo "════════════════════════════════════════════════"
+echo ""
+
+cd "$PROJECT_ROOT"
+
+# Backup current worker
+echo "[1/5] Backing up current task_runner.sh..."
+cp scripts/worker/task_runner.sh scripts/worker/task_runner.sh.backup-$(date +%Y%m%d-%H%M%S)
+echo "✓ Backup created"
+
+# Deploy fixed script
+echo "[2/5] Deploying fixed task_runner.sh..."
+cat > scripts/worker/task_runner.sh << 'EOFSCRIPT'
+#!/bin/bash
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -136,3 +159,63 @@ fi
 
 log_success "Task $task_id completed"
 exit 0
+EOFSCRIPT
+
+chmod +x scripts/worker/task_runner.sh
+echo "✓ Fixed script deployed"
+
+# Kill existing workers
+echo "[3/5] Stopping existing workers..."
+tmux kill-session -t pzo-adam 2>/dev/null || echo "  (no active session)"
+echo "✓ Workers stopped"
+
+# Clear any corrupted queue entries
+echo "[4/5] Validating queue integrity..."
+QUEUE_FILE="docs/pzo1/runtime/task_queue/tasks.ndjson"
+if [ -f "$QUEUE_FILE" ]; then
+  # Backup queue
+  cp "$QUEUE_FILE" "$QUEUE_FILE.pre-fix-$(date +%Y%m%d-%H%M%S)"
+  
+  # Filter out any malformed JSON lines
+  VALID_TASKS=0
+  INVALID_TASKS=0
+  while IFS= read -r line; do
+    if echo "$line" | jq empty 2>/dev/null; then
+      echo "$line" >> "$QUEUE_FILE.tmp"
+      ((VALID_TASKS++))
+    else
+      ((INVALID_TASKS++))
+    fi
+  done < "$QUEUE_FILE"
+  
+  if [ -f "$QUEUE_FILE.tmp" ]; then
+    mv "$QUEUE_FILE.tmp" "$QUEUE_FILE"
+    echo "✓ Queue validated: $VALID_TASKS valid, $INVALID_TASKS removed"
+  else
+    echo "✓ Queue empty or all tasks invalid"
+    > "$QUEUE_FILE"
+  fi
+else
+  echo "✗ Queue file not found"
+fi
+
+# Restart workers
+echo "[5/5] Starting workers..."
+tmux new-session -d -s pzo-adam -n worker-1 "cd $PROJECT_ROOT && bash scripts/worker/worker_loop.sh"
+tmux new-window -t pzo-adam:1 -n worker-2 "cd $PROJECT_ROOT && bash scripts/worker/worker_loop.sh"
+tmux new-window -t pzo-adam:2 -n worker-3 "cd $PROJECT_ROOT && bash scripts/worker/worker_loop.sh"
+tmux new-window -t pzo-adam:3 -n worker-4 "cd $PROJECT_ROOT && bash scripts/worker/worker_loop.sh"
+echo "✓ 4 workers started in tmux session 'pzo-adam'"
+
+echo ""
+echo "════════════════════════════════════════════════"
+echo "FIX DEPLOYED SUCCESSFULLY"
+echo "════════════════════════════════════════════════"
+echo ""
+echo "Workers are now processing remaining tasks."
+echo "Monitor progress with:"
+echo "  tmux attach -t pzo-adam"
+echo ""
+echo "Or check logs:"
+echo "  tail -f docs/pzo1/runtime/logs/worker-*.log"
+echo ""

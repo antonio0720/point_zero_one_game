@@ -7,13 +7,10 @@ source "$SCRIPT_DIR/../_lib/env.sh"
 source "$SCRIPT_DIR/../_lib/logging.sh"
 
 task_json="$1"
-
-# ROBUST JSON PARSING - extract all fields with safe defaults
-task_id=$(echo "$task_json" | jq -r '.task_id // "UNKNOWN"' 2>/dev/null || echo "UNKNOWN")
-task_type=$(echo "$task_json" | jq -r '.type // "unknown"' 2>/dev/null || echo "unknown")
-task_input=$(echo "$task_json" | jq -r '.input // ""' 2>/dev/null || echo "")
-task_phase=$(echo "$task_json" | jq -r '.phase // "UNKNOWN"' 2>/dev/null || echo "UNKNOWN")
-retry_count=$(echo "$task_json" | jq -r '.retry_count // 0' 2>/dev/null || echo "0")
+task_id=$(echo "$task_json" | jq -r '.task_id' 2>/dev/null || echo "UNKNOWN")
+task_type=$(echo "$task_json" | jq -r '.type' 2>/dev/null || echo "unknown")
+task_input=$(echo "$task_json" | jq -r '.input' 2>/dev/null || echo "")
+task_phase=$(echo "$task_json" | jq -r '.phase' 2>/dev/null || echo "UNKNOWN")
 
 # Skip if invalid JSON
 if [ "$task_id" = "UNKNOWN" ] || [ -z "$task_input" ]; then
@@ -21,10 +18,9 @@ if [ "$task_id" = "UNKNOWN" ] || [ -z "$task_input" ]; then
     exit 1
 fi
 
-# FIXED: Pass retry_count as extracted variable, not nested command substitution
-model=$("$SCRIPT_DIR/../router/route_task.sh" "$task_type" "$retry_count")
+model=$("$SCRIPT_DIR/../router/route_task.sh" "$task_type" "$(echo "$task_json" | jq -r '.retry_count // 0')")
 
-log_info "Task $task_id: $task_type (retry: $retry_count)"
+log_info "Task $task_id: $task_type"
 
 mkdir -p "$PZO_RUNTIME/artifacts"
 
