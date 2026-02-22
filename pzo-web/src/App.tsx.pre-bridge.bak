@@ -10,9 +10,6 @@ import ShieldIcons from './components/ShieldIcons';
 import MomentFlash from './components/MomentFlash';
 import ProofCard from './components/ProofCard';
 import BankruptcyScreen from './components/BankruptcyScreen';
-import { MechanicsBridgeProvider } from './context/MechanicsBridgeContext';
-import { MechanicsVerticalSlice } from './mechanics/vertical_slice';
-import MechanicsBridgeDevPanel from './components/MechanicsBridgeDevPanel';
 
 const STARTING_CASH = 50_000;
 const STARTING_INCOME = 3_500;
@@ -729,10 +726,6 @@ export default function App() {
   const coreCatalog = useMemo(() => catalog.filter((m) => m.kind === 'core'), [catalog]);
   const mlCatalog = useMemo(() => catalog.filter((m) => m.kind === 'ml'), [catalog]);
   const deckPool = useMemo(() => buildGeneratedDeck(coreCatalog), [coreCatalog]);
-  const validMechanicIds = useMemo(
-    () => new Set(catalog.map((m) => m.id)),
-    [catalog],
-  );
 
   const rngRef = useRef<() => number>(() => Math.random());
   const seedRef = useRef<number>(0);
@@ -1174,26 +1167,6 @@ export default function App() {
     }
   }, [hand, cash, shields, catalog, deckPool, intelligence, log, emitTelemetry, touchMechanic, touchFamily]);
 
-  const bridgeSnapshot = useMemo(() => ({
-    tick,
-    cash,
-    regime,
-    intelligence: {
-      alpha: intelligence.alpha,
-      risk: intelligence.risk,
-      volatility: intelligence.volatility,
-      momentum: intelligence.momentum,
-      churnRisk: intelligence.churnRisk,
-      recommendationPower: intelligence.recommendationPower,
-    },
-    season: {
-      xp: season.xp,
-      passTier: season.passTier,
-      dominionControl: season.dominionControl,
-      winStreak: season.winStreak,
-    },
-  }), [tick, cash, regime, intelligence, season]);
-
   const startRun = useCallback(() => {
     const seed = randomSeed();
     seedRef.current = seed;
@@ -1352,13 +1325,6 @@ export default function App() {
 
   // ── Run ───────────────────────────────────────────────────────────────────
   return (
-    <MechanicsBridgeProvider
-      validIds={validMechanicIds}
-      runtime={runtime}
-      onTouchMechanic={touchMechanic}
-      onTouchFamily={touchFamily}
-      snapshot={bridgeSnapshot}
-    >
     <div className="min-h-screen bg-zinc-950 flex flex-col text-white">
       <HUD
         cash={cash}
@@ -1481,6 +1447,5 @@ export default function App() {
         <MomentFlash events={events} tick={tick} maxVisible={3} />
       </div>
     </div>
-    </MechanicsBridgeProvider>
   );
 }

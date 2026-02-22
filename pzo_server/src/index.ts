@@ -1,6 +1,6 @@
 // pzo_server/src/index.ts
 
-import * as express from 'express';
+import express from 'express';
 import { Server } from 'socket.io';
 
 const app = express();

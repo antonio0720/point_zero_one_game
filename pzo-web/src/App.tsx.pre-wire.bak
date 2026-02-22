@@ -5,14 +5,6 @@ import MECHANICS_DATA from './data/mechanics_core.json';
 import ML_DATA        from './data/ml_core.json';
 
 import CardHand, { Card, DeckType } from './components/CardHand';
-import GameBoard from './components/GameBoard';
-import ShieldIcons from './components/ShieldIcons';
-import MomentFlash from './components/MomentFlash';
-import ProofCard from './components/ProofCard';
-import BankruptcyScreen from './components/BankruptcyScreen';
-import { MechanicsBridgeProvider } from './context/MechanicsBridgeContext';
-import { MechanicsVerticalSlice } from './mechanics/vertical_slice';
-import MechanicsBridgeDevPanel from './components/MechanicsBridgeDevPanel';
 
 const STARTING_CASH = 50_000;
 const STARTING_INCOME = 3_500;
@@ -729,10 +721,6 @@ export default function App() {
   const coreCatalog = useMemo(() => catalog.filter((m) => m.kind === 'core'), [catalog]);
   const mlCatalog = useMemo(() => catalog.filter((m) => m.kind === 'ml'), [catalog]);
   const deckPool = useMemo(() => buildGeneratedDeck(coreCatalog), [coreCatalog]);
-  const validMechanicIds = useMemo(
-    () => new Set(catalog.map((m) => m.id)),
-    [catalog],
-  );
 
   const rngRef = useRef<() => number>(() => Math.random());
   const seedRef = useRef<number>(0);
@@ -743,7 +731,6 @@ export default function App() {
   const [expenses, setExpenses] = useState(STARTING_EXPENSES);
   const [netWorth, setNetWorth] = useState(STARTING_CASH);
   const [shields, setShields] = useState(0);
-  const [shieldConsuming, setShieldConsuming] = useState(false);
   const [tick, setTick] = useState(0);
   const [hand, setHand] = useState<Card[]>([]);
   const [events, setEvents] = useState<string[]>([]);
@@ -894,8 +881,6 @@ export default function App() {
           }
           if (next <= 0 && shields > 0) {
             setShields((s) => s - 1);
-            setShieldConsuming(true);
-            setTimeout(() => setShieldConsuming(false), 400);
             log('🛡️ Shield absorbed bankruptcy!');
             emitTelemetry('shield.proc', { cashBefore: c, settlement, shields });
             touchFamily('risk', 0.20);
@@ -1174,26 +1159,6 @@ export default function App() {
     }
   }, [hand, cash, shields, catalog, deckPool, intelligence, log, emitTelemetry, touchMechanic, touchFamily]);
 
-  const bridgeSnapshot = useMemo(() => ({
-    tick,
-    cash,
-    regime,
-    intelligence: {
-      alpha: intelligence.alpha,
-      risk: intelligence.risk,
-      volatility: intelligence.volatility,
-      momentum: intelligence.momentum,
-      churnRisk: intelligence.churnRisk,
-      recommendationPower: intelligence.recommendationPower,
-    },
-    season: {
-      xp: season.xp,
-      passTier: season.passTier,
-      dominionControl: season.dominionControl,
-      winStreak: season.winStreak,
-    },
-  }), [tick, cash, regime, intelligence, season]);
-
   const startRun = useCallback(() => {
     const seed = randomSeed();
     seedRef.current = seed;
@@ -1305,60 +1270,49 @@ export default function App() {
   // ── Bankrupt ───────────────────────────────────────────────────────────────
   if (screen === 'bankrupt') {
     return (
-      <BankruptcyScreen
-        seed={seedRef.current}
-        tick={tick}
-        regime={regime}
-        intelligence={intelligence}
-        season={season}
-        events={events}
-        equityHistory={equityHistory}
-        onPlayAgain={() => setScreen('landing')}
-      />
+      <div className="min-h-screen bg-zinc-950 text-white flex flex-col items-center justify-center gap-6 p-8">
+        <div className="text-6xl font-black text-red-500">BANKRUPTCY</div>
+        <p className="text-zinc-400 text-lg">Cash hit zero. No shields remaining. Run terminated.</p>
+        <div className="bg-zinc-900 rounded-xl p-6 border border-red-900 max-w-2xl w-full">
+          <p className="text-zinc-500 text-xs uppercase mb-3">Cause of Death</p>
+          <div className="grid md:grid-cols-2 gap-4">
+            <div>
+              {events.slice(-6).reverse().map((e, i) => (
+                <p key={i} className="text-xs font-mono text-zinc-400">{e}</p>
+              ))}
+            </div>
+            <div className="space-y-2 text-xs">
+              <div className="bg-zinc-950 rounded p-2">Seed: <span className="font-mono">{seedRef.current || '—'}</span></div>
+              <div className="bg-zinc-950 rounded p-2">Regime: <span className="font-mono">{regime}</span></div>
+              <div className="bg-zinc-950 rounded p-2">AI Risk: <span className="font-mono">{fmtPct01(intelligence.risk)}</span></div>
+              <div className="bg-zinc-950 rounded p-2">Node Pressure: <span className="font-mono">{season.nodePressure}</span></div>
+            </div>
+          </div>
+        </div>
+        <button onClick={() => setScreen('landing')} className="px-8 py-3 bg-zinc-700 hover:bg-zinc-600 rounded-xl font-bold transition-colors">
+          Back to Menu
+        </button>
+      </div>
     );
   }
 
   // ── Result ────────────────────────────────────────────────────────────────
   if (screen === 'result') {
     return (
-      <div className="min-h-screen bg-zinc-950 flex flex-col gap-6 items-center justify-start p-6 overflow-auto">
-        <ResultScreen
-          cash={cash}
-          netWorth={netWorth}
-          income={income}
-          expenses={expenses}
-          season={season}
-          intelligence={intelligence}
-          onRestart={() => setScreen('landing')}
-        />
-        <div className="w-full max-w-xl">
-          <ProofCard
-            seed={seedRef.current}
-            tick={tick}
-            totalTicks={RUN_TICKS}
-            cash={cash}
-            netWorth={netWorth}
-            income={income}
-            expenses={expenses}
-            intelligence={intelligence}
-            season={season}
-            regime={regime}
-            topEvents={events}
-          />
-        </div>
-      </div>
+      <ResultScreen
+        cash={cash}
+        netWorth={netWorth}
+        income={income}
+        expenses={expenses}
+        season={season}
+        intelligence={intelligence}
+        onRestart={() => setScreen('landing')}
+      />
     );
   }
 
   // ── Run ───────────────────────────────────────────────────────────────────
   return (
-    <MechanicsBridgeProvider
-      validIds={validMechanicIds}
-      runtime={runtime}
-      onTouchMechanic={touchMechanic}
-      onTouchFamily={touchFamily}
-      snapshot={bridgeSnapshot}
-    >
     <div className="min-h-screen bg-zinc-950 flex flex-col text-white">
       <HUD
         cash={cash}
@@ -1381,10 +1335,7 @@ export default function App() {
         <div className="grid grid-cols-1 2xl:grid-cols-[1.2fr_0.8fr] gap-4">
           <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-3">
             <div className="flex items-center justify-between mb-2">
-              <div className="flex items-center gap-3">
-                <div className="font-bold text-sm">Playable Hand</div>
-                <ShieldIcons count={shields} consuming={shieldConsuming} />
-              </div>
+              <div className="font-bold text-sm">Playable Hand</div>
               <div className="text-xs text-zinc-500">Seed {seedRef.current || '—'} · Tick {tick}/{RUN_TICKS}</div>
             </div>
             <CardHand cards={hand} playerEnergy={cash} onPlayCard={handlePlayCard} onCardHover={() => {}} />
@@ -1436,19 +1387,6 @@ export default function App() {
           </div>
         </div>
 
-        <GameBoard
-          equityHistory={equityHistory}
-          cash={cash}
-          netWorth={netWorth}
-          income={income}
-          expenses={expenses}
-          regime={regime}
-          intelligence={intelligence}
-          tick={tick}
-          totalTicks={RUN_TICKS}
-          freezeTicks={freezeTicks}
-        />
-
         <MechanicsPanel
           catalog={catalog}
           runtime={runtime}
@@ -1475,12 +1413,6 @@ export default function App() {
       </div>
 
       <LogFeed events={events} />
-
-      {/* MomentFlash — fixed overlay, bottom-right */}
-      <div className="fixed bottom-36 right-4 w-80 z-50 pointer-events-auto">
-        <MomentFlash events={events} tick={tick} maxVisible={3} />
-      </div>
     </div>
-    </MechanicsBridgeProvider>
   );
 }

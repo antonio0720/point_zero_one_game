@@ -1,0 +1,3947 @@
+{
+  "project": "Point Zero One \u2014 Digital",
+  "schema_version": "1.0.0",
+  "total_mechanics": 150,
+  "canonical_directory": "pzo-web/src/data/mechanics_core.json",
+  "ndjson_source": "pzo-web/src/data/mechanics_core.ndjson",
+  "batch_files": {
+    "batch_1": "pzo-web/src/data/mechanics_batch_1.ndjson",
+    "batch_2": "pzo-web/src/data/mechanics_batch_2.ndjson",
+    "batch_3": "pzo-web/src/data/mechanics_batch_3.ndjson"
+  },
+  "how_game_loads_mechanics": [
+    "1. App.tsx imports mechanics_core.json at build time (Vite JSON import)",
+    "2. buildCatalog() merges JSON records with CORE_MECHANIC_TITLES for full registry",
+    "3. Each mechanic's 'layer' routes execution: tick_engine | card_handler | ui_component | season_runtime | api_endpoint | backend_service",
+    "4. Each mechanic's 'status' drives CI: done=skip, in_progress=review, todo=build",
+    "5. touchMechanic(id, signal) fires the exec_hook at runtime"
+  ],
+  "tasks": [
+    {
+      "task_id": "PZO-M001",
+      "mechanic_id": "M01",
+      "title": "Run Seed + Deterministic Replay",
+      "purpose": "Every run is generated from a seed so outcomes are reproducible (for replays, challenges, and anti-cheat). The seed drives deck shuffles, macro schedule, and social chaos windows. Sharing a run shares the seed + your decisions, not just the result.",
+      "family": "anti_cheat",
+      "kind": "core",
+      "layer": "card_handler",
+      "priority": 1,
+      "status": "done",
+      "ml_pair": "M01a",
+      "inputs": [
+        "state.regime",
+        "state.deckPool",
+        "state.seed",
+        "state.heat"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m1.fired",
+        "integrity.m1.check"
+      ],
+      "module_path": "src/mechanics/m01_run_seed_deterministic_replay.ts",
+      "exec_hook": "touchMechanic('M01', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 1
+    },
+    {
+      "task_id": "PZO-M002",
+      "mechanic_id": "M02",
+      "title": "12\u2011Minute Run Clock + Turn Timer",
+      "purpose": "Runs are short, tense, and losable fast. The clock is real-time: each turn has a decision timer; unused time converts into 'Inertia' that increases Missed Opportunity odds. When the run clock hits zero, any unresolved liabilities can wipe you.",
+      "family": "risk",
+      "kind": "core",
+      "layer": "tick_engine",
+      "priority": 1,
+      "status": "done",
+      "ml_pair": "M02a",
+      "inputs": [
+        "state.freezeTicks"
+      ],
+      "outputs": [
+        "screen=bankrupt"
+      ],
+      "telemetry_events": [
+        "mechanic.m2.fired",
+        "risk.m2.triggered"
+      ],
+      "module_path": "src/mechanics/m02_12_minute_run_clock_turn_timer.ts",
+      "exec_hook": "touchMechanic('M02', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 1
+    },
+    {
+      "task_id": "PZO-M003",
+      "mechanic_id": "M03",
+      "title": "Solvency Wipe Conditions",
+      "purpose": "Define 'death' clearly: cash < 0 with owed amount, forced sale chain that can't clear debt service, or macro-decay pushing cash to zero at end-of-rotation. Wipes end the run and snapshot the clip-worthy cause.",
+      "family": "telemetry",
+      "kind": "core",
+      "layer": "backend_service",
+      "priority": 1,
+      "status": "done",
+      "ml_pair": "M03a",
+      "inputs": [
+        "state.cash",
+        "state.regime"
+      ],
+      "outputs": [
+        "screen=bankrupt",
+        "state.cash",
+        "telemetry.clip_event"
+      ],
+      "telemetry_events": [
+        "mechanic.m3.fired",
+        "telemetry.m3.event"
+      ],
+      "module_path": "src/mechanics/m03_solvency_wipe_conditions.ts",
+      "exec_hook": "touchMechanic('M03', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 1
+    },
+    {
+      "task_id": "PZO-M004",
+      "mechanic_id": "M04",
+      "title": "Deck Reactor (Dynamic Draw Mixing)",
+      "purpose": "A deterministic 'reactor' chooses which deck to draw from each turn based on macro.creditTightness, player state (leverage, shields), and recent pass streaks. This is the digital equivalent of your recommended deck mixing rules.",
+      "family": "cards",
+      "kind": "core",
+      "layer": "tick_engine",
+      "priority": 1,
+      "status": "in_progress",
+      "ml_pair": "M04a",
+      "inputs": [
+        "state.shields",
+        "state.leverage",
+        "state.regime",
+        "state.creditTightness",
+        "state.deckPool"
+      ],
+      "outputs": [
+        "state.hand",
+        "state.shields"
+      ],
+      "telemetry_events": [
+        "mechanic.m4.fired",
+        "cards.m4.draw"
+      ],
+      "module_path": "src/mechanics/m04_deck_reactor_dynamic_draw_mixing.ts",
+      "exec_hook": "touchMechanic('M04', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 1
+    },
+    {
+      "task_id": "PZO-M005",
+      "mechanic_id": "M05",
+      "title": "Macro State + Cash Decay Loop",
+      "purpose": "Macro Shift sets inflation (1\u20135) and credit tightness. End-of-rotation applies cash decay to idle cash. The UI makes this visible as a looming 'erosion meter' so players feel time pressure.",
+      "family": "market",
+      "kind": "core",
+      "layer": "tick_engine",
+      "priority": 1,
+      "status": "todo",
+      "ml_pair": "M05a",
+      "inputs": [
+        "state.cash",
+        "state.regime",
+        "state.creditTightness"
+      ],
+      "outputs": [
+        "state.cash"
+      ],
+      "telemetry_events": [
+        "mechanic.m5.fired",
+        "market.m5.pulse"
+      ],
+      "module_path": "src/mechanics/m05_macro_state_cash_decay_loop.ts",
+      "exec_hook": "touchMechanic('M05', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 1
+    },
+    {
+      "task_id": "PZO-M006",
+      "mechanic_id": "M06",
+      "title": "Cashflow Tick Engine (Assets + IPA)",
+      "purpose": "At defined cadence (per turn or per round), assets + IPA produce monthly cashflow. Digital adds an 'auto-ledger' that itemizes sources and shows how close you are to escaping the current tier.",
+      "family": "anti_cheat",
+      "kind": "core",
+      "layer": "backend_service",
+      "priority": 1,
+      "status": "done",
+      "ml_pair": "M06a",
+      "inputs": [
+        "state.cash"
+      ],
+      "outputs": [
+        "state.cash"
+      ],
+      "telemetry_events": [
+        "mechanic.m6.fired",
+        "integrity.m6.check"
+      ],
+      "module_path": "src/mechanics/m06_cashflow_tick_engine_assets_ipa.ts",
+      "exec_hook": "touchMechanic('M06', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 1
+    },
+    {
+      "task_id": "PZO-M007",
+      "mechanic_id": "M07",
+      "title": "Leverage Purchase Resolver (Buff Order)",
+      "purpose": "Purchasing big deals executes strict resolution order: leverage blocks \u2192 downpay credits \u2192 debt service credits/penalties. The app prevents illegal buys and shows exactly why you can\u2019t afford something.",
+      "family": "economy",
+      "kind": "core",
+      "layer": "tick_engine",
+      "priority": 1,
+      "status": "in_progress",
+      "ml_pair": "M07a",
+      "inputs": [
+        "state.leverage",
+        "state.creditTightness"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m7.fired",
+        "economy.m7.settlement"
+      ],
+      "module_path": "src/mechanics/m07_leverage_purchase_resolver_buff_order.ts",
+      "exec_hook": "touchMechanic('M07', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 1
+    },
+    {
+      "task_id": "PZO-M008",
+      "mechanic_id": "M08",
+      "title": "Shield / Cancel System",
+      "purpose": "Shields cancel the next FUBAR or SO (or forced sale). Digital adds 'shield windows' so friends can donate a shield in clutch moments, creating shareable saves.",
+      "family": "risk",
+      "kind": "core",
+      "layer": "tick_engine",
+      "priority": 1,
+      "status": "done",
+      "ml_pair": "M08a",
+      "inputs": [
+        "state.shields",
+        "state.fubarStack"
+      ],
+      "outputs": [
+        "state.shields"
+      ],
+      "telemetry_events": [
+        "mechanic.m8.fired",
+        "risk.m8.triggered"
+      ],
+      "module_path": "src/mechanics/m08_shield_cancel_system.ts",
+      "exec_hook": "touchMechanic('M08', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 1
+    },
+    {
+      "task_id": "PZO-M009",
+      "mechanic_id": "M09",
+      "title": "Opportunity Window + Open\u2011Table Auction",
+      "purpose": "Passing on certain opportunities opens a timed auction to the table (or your friend list). If someone buys your passed deal, you get a small 'regret kick' + the clip labels it as a missed bag moment.",
+      "family": "telemetry",
+      "kind": "core",
+      "layer": "card_handler",
+      "priority": 1,
+      "status": "in_progress",
+      "ml_pair": "M09a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.clip_event"
+      ],
+      "telemetry_events": [
+        "mechanic.m9.fired",
+        "telemetry.m9.event"
+      ],
+      "module_path": "src/mechanics/m09_opportunity_window_open_table_auction.ts",
+      "exec_hook": "touchMechanic('M09', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 1
+    },
+    {
+      "task_id": "PZO-M010",
+      "mechanic_id": "M10",
+      "title": "Market Pulse Exit Engine",
+      "purpose": "Market Pulse cards create liquidation windows (sell eligible asset, forced sale, cashout offers). Digital adds a one-tap 'exit simulation' so players can see best/worst exits fast under time pressure.",
+      "family": "cards",
+      "kind": "core",
+      "layer": "tick_engine",
+      "priority": 1,
+      "status": "in_progress",
+      "ml_pair": "M10a",
+      "inputs": [
+        "state.cash"
+      ],
+      "outputs": [
+        "state.cash"
+      ],
+      "telemetry_events": [
+        "mechanic.m10.fired",
+        "cards.m10.draw"
+      ],
+      "module_path": "src/mechanics/m10_market_pulse_exit_engine.ts",
+      "exec_hook": "touchMechanic('M10', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 1
+    },
+    {
+      "task_id": "PZO-M011",
+      "mechanic_id": "M11",
+      "title": "Missed Opportunity Streak & Inertia Tax",
+      "purpose": "Repeated hesitation triggers Missed Opportunity cards automatically. Digital tracks a visible 'hesitation meter' and injects inertia penalties (cash loss, turn loss, open-table reveal).",
+      "family": "cards",
+      "kind": "core",
+      "layer": "tick_engine",
+      "priority": 1,
+      "status": "done",
+      "ml_pair": "M11a",
+      "inputs": [
+        "state.cash",
+        "state.freezeTicks"
+      ],
+      "outputs": [
+        "state.cash"
+      ],
+      "telemetry_events": [
+        "mechanic.m11.fired",
+        "cards.m11.draw"
+      ],
+      "module_path": "src/mechanics/m11_missed_opportunity_streak_inertia_tax.ts",
+      "exec_hook": "touchMechanic('M11', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 1
+    },
+    {
+      "task_id": "PZO-M012",
+      "mechanic_id": "M12",
+      "title": "FUBAR Escalation Ladder",
+      "purpose": "Small doodads stack into crises. Conditional FUBARs read your portfolio to compute the right pain. The ladder guarantees a 'FUBAR killed me' moment if you ignore risk too long.",
+      "family": "risk",
+      "kind": "core",
+      "layer": "tick_engine",
+      "priority": 1,
+      "status": "in_progress",
+      "ml_pair": "M12a",
+      "inputs": [
+        "state.assets",
+        "state.fubarStack"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m12.fired",
+        "risk.m12.triggered"
+      ],
+      "module_path": "src/mechanics/m12_fubar_escalation_ladder.ts",
+      "exec_hook": "touchMechanic('M12', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 1
+    },
+    {
+      "task_id": "PZO-M013",
+      "mechanic_id": "M13",
+      "title": "Systemic Friction Modules (SO)",
+      "purpose": "SO isn\u2019t random annoyance\u2014it's a module system: loan denials, delays, fees, leverage blocks. Modules are season-rotated so the meta changes without rewriting decks.",
+      "family": "season",
+      "kind": "core",
+      "layer": "season_runtime",
+      "priority": 1,
+      "status": "in_progress",
+      "ml_pair": "M13a",
+      "inputs": [
+        "state.leverage",
+        "state.deckPool"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m13.fired",
+        "season.m13.tick"
+      ],
+      "module_path": "src/mechanics/m13_systemic_friction_modules_so.ts",
+      "exec_hook": "touchMechanic('M13', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 1
+    },
+    {
+      "task_id": "PZO-M014",
+      "mechanic_id": "M14",
+      "title": "Disadvantage Draft (Run Start)",
+      "purpose": "Instead of a flat start, players draft 1 disadvantage (and optionally 1 privilege) that shapes the run. Digital keeps it non-preachy by framing disadvantages as constraints, not moral judgment.",
+      "family": "replay",
+      "kind": "core",
+      "layer": "tick_engine",
+      "priority": 1,
+      "status": "todo",
+      "ml_pair": "M14a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m14.fired",
+        "system.m14.pulse"
+      ],
+      "module_path": "src/mechanics/m14_disadvantage_draft_run_start.ts",
+      "exec_hook": "touchMechanic('M14', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 1
+    },
+    {
+      "task_id": "PZO-M015",
+      "mechanic_id": "M15",
+      "title": "Social Chaos Tokens (Friends as Co\u2011Authors)",
+      "purpose": "Each run grants limited 'Chaos Tokens' to your invited friends: they can trigger boosts, dilemmas, or minor FUBARs during specific windows. This makes your best moments socially authored.",
+      "family": "risk",
+      "kind": "core",
+      "layer": "tick_engine",
+      "priority": 1,
+      "status": "todo",
+      "ml_pair": "M15a",
+      "inputs": [
+        "state.fubarStack"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m15.fired",
+        "risk.m15.triggered"
+      ],
+      "module_path": "src/mechanics/m15_social_chaos_tokens_friends_coauthors.ts",
+      "exec_hook": "touchMechanic('M15', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 1
+    },
+    {
+      "task_id": "PZO-M016",
+      "mechanic_id": "M16",
+      "title": "Live Table Trigger: 'Hot Seat Vote'",
+      "purpose": "At key decisions, the table can force a 10\u2011second vote: buy vs pass, sell vs hold. You can override once per run (at a cost). Great for opportunity flips and regret moments.",
+      "family": "replay",
+      "kind": "core",
+      "layer": "tick_engine",
+      "priority": 1,
+      "status": "todo",
+      "ml_pair": "M16a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m16.fired",
+        "system.m16.pulse"
+      ],
+      "module_path": "src/mechanics/m16_live_table_trigger_hot_seat_vote.ts",
+      "exec_hook": "touchMechanic('M16', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 1
+    },
+    {
+      "task_id": "PZO-M017",
+      "mechanic_id": "M17",
+      "title": "Clutch Assist: Friend Bailouts",
+      "purpose": "Friends can send one bailout per run (cash grant, shield, downpay credit) using earned tokens. Bailouts are logged and rendered as shareable 'saved by ___' moments.",
+      "family": "risk",
+      "kind": "core",
+      "layer": "tick_engine",
+      "priority": 1,
+      "status": "todo",
+      "ml_pair": "M17a",
+      "inputs": [
+        "state.cash",
+        "state.shields",
+        "state.creditTightness"
+      ],
+      "outputs": [
+        "state.cash",
+        "state.shields",
+        "state.events"
+      ],
+      "telemetry_events": [
+        "mechanic.m17.fired",
+        "risk.m17.triggered"
+      ],
+      "module_path": "src/mechanics/m17_clutch_assist_friend_bailouts.ts",
+      "exec_hook": "touchMechanic('M17', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 1
+    },
+    {
+      "task_id": "PZO-M018",
+      "mechanic_id": "M18",
+      "title": "Rival Sabotage: Controlled Griefing",
+      "purpose": "Allow adversarial play without ruining fairness: a rival can spend tokens to increase your next deck\u2019s 'friction' weighting, but only within bounded ranges and with full disclosure post-run.",
+      "family": "pvp",
+      "kind": "core",
+      "layer": "card_handler",
+      "priority": 1,
+      "status": "todo",
+      "ml_pair": "M18a",
+      "inputs": [
+        "state.deckPool"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m18.fired",
+        "system.m18.pulse"
+      ],
+      "module_path": "src/mechanics/m18_rival_sabotage_controlled_griefing.ts",
+      "exec_hook": "touchMechanic('M18', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 1
+    },
+    {
+      "task_id": "PZO-M019",
+      "mechanic_id": "M19",
+      "title": "Season System (Rule Modules + Rewards)",
+      "purpose": "Seasons rotate rule modules (macro volatility, credit tightness baseline, deck weights, social token budgets). Rewards are cosmetic + meta-unlocks that don\u2019t pay-to-win.",
+      "family": "season",
+      "kind": "core",
+      "layer": "season_runtime",
+      "priority": 1,
+      "status": "done",
+      "ml_pair": "M19a",
+      "inputs": [
+        "state.regime",
+        "state.creditTightness",
+        "state.deckPool"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m19.fired",
+        "season.m19.tick"
+      ],
+      "module_path": "src/mechanics/m19_season_system_rule_modules_rewards.ts",
+      "exec_hook": "touchMechanic('M19', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 1
+    },
+    {
+      "task_id": "PZO-M020",
+      "mechanic_id": "M20",
+      "title": "Macro Shock Scheduler (Live Economy)",
+      "purpose": "A server-driven schedule injects macro shocks (rate hikes, liquidity crunch, boom cycles). Shocks are seeded per season so runs are comparable while still feeling alive.",
+      "family": "season",
+      "kind": "core",
+      "layer": "ui_component",
+      "priority": 1,
+      "status": "done",
+      "ml_pair": "M20a",
+      "inputs": [
+        "state.regime",
+        "state.seed"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m20.fired",
+        "season.m20.tick"
+      ],
+      "module_path": "src/mechanics/m20_macro_shock_scheduler_live_economy.ts",
+      "exec_hook": "touchMechanic('M20', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 1
+    },
+    {
+      "task_id": "PZO-M021",
+      "mechanic_id": "M21",
+      "title": "Meta\u2011Progression: Unlockable Rule Modules",
+      "purpose": "Winning or dying unlocks modules: new starting loadouts, new chaos token types, new deck mix presets. Meta progression is about options, not raw power.",
+      "family": "cards",
+      "kind": "core",
+      "layer": "tick_engine",
+      "priority": 2,
+      "status": "todo",
+      "ml_pair": "M21a",
+      "inputs": [
+        "state.deckPool"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m21.fired",
+        "cards.m21.draw"
+      ],
+      "module_path": "src/mechanics/m21_meta_progression_unlockable_rule_modules.ts",
+      "exec_hook": "touchMechanic('M21', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 1
+    },
+    {
+      "task_id": "PZO-M022",
+      "mechanic_id": "M22",
+      "title": "Moment Forge: 3\u2011Moment Guarantee System",
+      "purpose": "The engine tracks whether your run has produced: (1) FUBAR kill/scare, (2) opportunity flip, (3) missed bag. If not, it gently nudges probabilities (within the seed) to surface those beats before the run ends.",
+      "family": "risk",
+      "kind": "core",
+      "layer": "tick_engine",
+      "priority": 2,
+      "status": "done",
+      "ml_pair": "M22a",
+      "inputs": [
+        "state.seed",
+        "state.fubarStack"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m22.fired",
+        "risk.m22.triggered"
+      ],
+      "module_path": "src/mechanics/m22_moment_forge_three_moment_guarantee.ts",
+      "exec_hook": "touchMechanic('M22', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 1
+    },
+    {
+      "task_id": "PZO-M023",
+      "mechanic_id": "M23",
+      "title": "Auto\u2011Clip + Caption Packager",
+      "purpose": "Every share moment generates a 10\u201320s replay: state before, decision, outcome, and a caption template. One-tap share to socials or to your friend table feed.",
+      "family": "telemetry",
+      "kind": "core",
+      "layer": "card_handler",
+      "priority": 2,
+      "status": "todo",
+      "ml_pair": "M23a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m23.fired",
+        "telemetry.m23.event"
+      ],
+      "module_path": "src/mechanics/m23_auto_clip_caption_packager.ts",
+      "exec_hook": "touchMechanic('M23', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 1
+    },
+    {
+      "task_id": "PZO-M024",
+      "mechanic_id": "M24",
+      "title": "Challenge Links: Seed + Decision Ghosts",
+      "purpose": "Players can share a challenge link that loads the same seed and shows a 'ghost' of their decision timeline. Friends can try to beat the outcome and post their own flips.",
+      "family": "social",
+      "kind": "core",
+      "layer": "card_handler",
+      "priority": 2,
+      "status": "todo",
+      "ml_pair": "M24a",
+      "inputs": [
+        "state.seed"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m24.fired",
+        "social.m24.action"
+      ],
+      "module_path": "src/mechanics/m24_challenge_links_seed_decision_ghosts.ts",
+      "exec_hook": "touchMechanic('M24', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 1
+    },
+    {
+      "task_id": "PZO-M025",
+      "mechanic_id": "M25",
+      "title": "Personal Improvement Overlay (Optional Metrics)",
+      "purpose": "Optional layer that measures decisions (speed, risk balance, pass streaks, diversification) and gives neutral feedback. No preaching\u2014just dashboards and tiny experiments you can toggle on/off.",
+      "family": "risk",
+      "kind": "core",
+      "layer": "tick_engine",
+      "priority": 2,
+      "status": "todo",
+      "ml_pair": "M25a",
+      "inputs": [
+        "state.season.xp"
+      ],
+      "outputs": [
+        "state.season.xp"
+      ],
+      "telemetry_events": [
+        "mechanic.m25.fired",
+        "risk.m25.triggered"
+      ],
+      "module_path": "src/mechanics/m25_personal_improvement_overlay_optional_metrics.ts",
+      "exec_hook": "touchMechanic('M25', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 1
+    },
+    {
+      "task_id": "PZO-M026",
+      "mechanic_id": "M26",
+      "title": "M26 \u2014 Co-op Contracts (Deal Binding Between Players)",
+      "purpose": "",
+      "family": "social",
+      "kind": "core",
+      "layer": "api_endpoint",
+      "priority": 2,
+      "status": "todo",
+      "ml_pair": "M26a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m26.fired",
+        "social.m26.action"
+      ],
+      "module_path": "src/mechanics/M26_coop_contracts_deal_binding_between_players.ts",
+      "exec_hook": "touchMechanic('M26', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 1
+    },
+    {
+      "task_id": "PZO-M027",
+      "mechanic_id": "M27",
+      "title": "M27 \u2014 Contract Clauses (Triggers, Escapes, Penalties)",
+      "purpose": "",
+      "family": "social",
+      "kind": "core",
+      "layer": "api_endpoint",
+      "priority": 2,
+      "status": "todo",
+      "ml_pair": "M27a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m27.fired",
+        "social.m27.action"
+      ],
+      "module_path": "src/mechanics/M27_contract_clauses_triggers_escapes_penalties.ts",
+      "exec_hook": "touchMechanic('M27', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 1
+    },
+    {
+      "task_id": "PZO-M028",
+      "mechanic_id": "M28",
+      "title": "M28 \u2014 Handshake Windows (Fast Negotiation UI)",
+      "purpose": "",
+      "family": "cards",
+      "kind": "core",
+      "layer": "tick_engine",
+      "priority": 2,
+      "status": "todo",
+      "ml_pair": "M28a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m28.fired",
+        "cards.m28.draw"
+      ],
+      "module_path": "src/mechanics/M28_handshake_windows_fast_negotiation_ui.ts",
+      "exec_hook": "touchMechanic('M28', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 1
+    },
+    {
+      "task_id": "PZO-M029",
+      "mechanic_id": "M29",
+      "title": "M29 \u2014 Co-op Risk Pool (Run-Scoped Mutual Insurance)",
+      "purpose": "",
+      "family": "risk",
+      "kind": "core",
+      "layer": "tick_engine",
+      "priority": 2,
+      "status": "todo",
+      "ml_pair": "M29a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m29.fired",
+        "risk.m29.triggered"
+      ],
+      "module_path": "src/mechanics/M29_coop_risk_pool_run_scoped_mutual_insurance.ts",
+      "exec_hook": "touchMechanic('M29', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 1
+    },
+    {
+      "task_id": "PZO-M030",
+      "mechanic_id": "M30",
+      "title": "M30 \u2014 Default & Betrayal (Contract Failure Drama, Controlled)",
+      "purpose": "",
+      "family": "social",
+      "kind": "core",
+      "layer": "api_endpoint",
+      "priority": 2,
+      "status": "todo",
+      "ml_pair": "M30a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m30.fired",
+        "social.m30.action"
+      ],
+      "module_path": "src/mechanics/M30_default_and_betrayal_controlled_drama.ts",
+      "exec_hook": "touchMechanic('M30', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 1
+    },
+    {
+      "task_id": "PZO-M031",
+      "mechanic_id": "M31",
+      "title": "M31 \u2014 Synergy Sets (Combo Bonuses for Portfolio Themes)",
+      "purpose": "",
+      "family": "cards",
+      "kind": "core",
+      "layer": "tick_engine",
+      "priority": 2,
+      "status": "todo",
+      "ml_pair": "M31a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m31.fired",
+        "cards.m31.draw"
+      ],
+      "module_path": "src/mechanics/M31_synergy_sets_combo_bonuses.ts",
+      "exec_hook": "touchMechanic('M31', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 1
+    },
+    {
+      "task_id": "PZO-M032",
+      "mechanic_id": "M32",
+      "title": "M32 \u2014 Liquidity Ladder (Tiered Cash Conversion Strategy)",
+      "purpose": "",
+      "family": "economy",
+      "kind": "core",
+      "layer": "tick_engine",
+      "priority": 2,
+      "status": "todo",
+      "ml_pair": "M32a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m32.fired",
+        "economy.m32.settlement"
+      ],
+      "module_path": "src/mechanics/M32_liquidity_ladder_tiered_cash_conversion.ts",
+      "exec_hook": "touchMechanic('M32', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 1
+    },
+    {
+      "task_id": "PZO-M033",
+      "mechanic_id": "M33",
+      "title": "M33 \u2014 Hedge Pairs (Correlation Shielding)",
+      "purpose": "",
+      "family": "risk",
+      "kind": "core",
+      "layer": "tick_engine",
+      "priority": 2,
+      "status": "todo",
+      "ml_pair": "M33a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m33.fired",
+        "risk.m33.triggered"
+      ],
+      "module_path": "src/mechanics/M33_hedge_pairs_correlation_shielding.ts",
+      "exec_hook": "touchMechanic('M33', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 1
+    },
+    {
+      "task_id": "PZO-M034",
+      "mechanic_id": "M34",
+      "title": "M34 \u2014 Asset Mods (Socketable Micro-Upgrades)",
+      "purpose": "",
+      "family": "cards",
+      "kind": "core",
+      "layer": "tick_engine",
+      "priority": 2,
+      "status": "todo",
+      "ml_pair": "M34a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m34.fired",
+        "cards.m34.draw"
+      ],
+      "module_path": "src/mechanics/M34_asset_mods_socketable_micro_upgrades.ts",
+      "exec_hook": "touchMechanic('M34', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 1
+    },
+    {
+      "task_id": "PZO-M035",
+      "mechanic_id": "M35",
+      "title": "M35 \u2014 Exposure Caps (Portfolio Heat & Overconcentration Penalty)",
+      "purpose": "",
+      "family": "cards",
+      "kind": "core",
+      "layer": "tick_engine",
+      "priority": 2,
+      "status": "todo",
+      "ml_pair": "M35a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m35.fired",
+        "cards.m35.draw"
+      ],
+      "module_path": "src/mechanics/M35_exposure_caps_portfolio_heat.ts",
+      "exec_hook": "touchMechanic('M35', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 1
+    },
+    {
+      "task_id": "PZO-M036",
+      "mechanic_id": "M36",
+      "title": "M36 \u2014 Achievement Ledger (Proof-Based Badges)",
+      "purpose": "",
+      "family": "anti_cheat",
+      "kind": "core",
+      "layer": "backend_service",
+      "priority": 2,
+      "status": "todo",
+      "ml_pair": "M36a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m36.fired",
+        "integrity.m36.check"
+      ],
+      "module_path": "src/mechanics/M36_achievement_ledger_proof_based_badges.ts",
+      "exec_hook": "touchMechanic('M36', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 1
+    },
+    {
+      "task_id": "PZO-M037",
+      "mechanic_id": "M37",
+      "title": "M37 \u2014 Streak Bounties (High-Risk, High-Reward Challenges)",
+      "purpose": "",
+      "family": "risk",
+      "kind": "core",
+      "layer": "tick_engine",
+      "priority": 2,
+      "status": "todo",
+      "ml_pair": "M37a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m37.fired",
+        "risk.m37.triggered"
+      ],
+      "module_path": "src/mechanics/M37_streak_bounties_high_risk_high_reward.ts",
+      "exec_hook": "touchMechanic('M37', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 1
+    },
+    {
+      "task_id": "PZO-M038",
+      "mechanic_id": "M38",
+      "title": "M38 \u2014 Moment Quests (Share-Driven Optional Objectives)",
+      "purpose": "",
+      "family": "progression",
+      "kind": "core",
+      "layer": "ui_component",
+      "priority": 2,
+      "status": "todo",
+      "ml_pair": "M38a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m38.fired",
+        "system.m38.pulse"
+      ],
+      "module_path": "src/mechanics/M38_moment_quests_share_driven_optional_objectives.ts",
+      "exec_hook": "touchMechanic('M38', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 1
+    },
+    {
+      "task_id": "PZO-M039",
+      "mechanic_id": "M39",
+      "title": "M39 \u2014 Season Trophy Currency (Earned, Non-P2W)",
+      "purpose": "",
+      "family": "season",
+      "kind": "core",
+      "layer": "season_runtime",
+      "priority": 2,
+      "status": "todo",
+      "ml_pair": "M39a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m39.fired",
+        "season.m39.tick"
+      ],
+      "module_path": "src/mechanics/M39_season_trophy_currency_earned_non_p2w.ts",
+      "exec_hook": "touchMechanic('M39', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 1
+    },
+    {
+      "task_id": "PZO-M040",
+      "mechanic_id": "M40",
+      "title": "M40 \u2014 Achievement Exchange (Cosmetic Market + Crafting)",
+      "purpose": "",
+      "family": "market",
+      "kind": "core",
+      "layer": "tick_engine",
+      "priority": 2,
+      "status": "todo",
+      "ml_pair": "M40a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m40.fired",
+        "market.m40.pulse"
+      ],
+      "module_path": "src/mechanics/M40_achievement_exchange_cosmetic_market_crafting.ts",
+      "exec_hook": "touchMechanic('M40', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 1
+    },
+    {
+      "task_id": "PZO-M041",
+      "mechanic_id": "M41",
+      "title": "M41 \u2014 90-Second Boot Run (Onboarding Sprint)",
+      "purpose": "",
+      "family": "progression",
+      "kind": "core",
+      "layer": "ui_component",
+      "priority": 2,
+      "status": "todo",
+      "ml_pair": "M41a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m41.fired",
+        "system.m41.pulse"
+      ],
+      "module_path": "src/mechanics/M41_90_second_boot_run_onboarding_sprint.ts",
+      "exec_hook": "touchMechanic('M41', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 1
+    },
+    {
+      "task_id": "PZO-M042",
+      "mechanic_id": "M42",
+      "title": "M42 \u2014 Guided Prompts (Opt-In, Minimal, Non-Preachy)",
+      "purpose": "",
+      "family": "economy",
+      "kind": "core",
+      "layer": "tick_engine",
+      "priority": 2,
+      "status": "todo",
+      "ml_pair": "M42a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m42.fired",
+        "economy.m42.settlement"
+      ],
+      "module_path": "src/mechanics/M42_guided_prompts_opt_in_minimal.ts",
+      "exec_hook": "touchMechanic('M42', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 1
+    },
+    {
+      "task_id": "PZO-M043",
+      "mechanic_id": "M43",
+      "title": "M43 \u2014 Practice Sandbox (Rewind + What-If)",
+      "purpose": "",
+      "family": "economy",
+      "kind": "core",
+      "layer": "tick_engine",
+      "priority": 2,
+      "status": "todo",
+      "ml_pair": "M43a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m43.fired",
+        "economy.m43.settlement"
+      ],
+      "module_path": "src/mechanics/M43_practice_sandbox_rewind_what_if.ts",
+      "exec_hook": "touchMechanic('M43', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 1
+    },
+    {
+      "task_id": "PZO-M044",
+      "mechanic_id": "M44",
+      "title": "M44 \u2014 Starter Paths (Archetype Onboarding Builds)",
+      "purpose": "",
+      "family": "progression",
+      "kind": "core",
+      "layer": "ui_component",
+      "priority": 2,
+      "status": "todo",
+      "ml_pair": "M44a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m44.fired",
+        "system.m44.pulse"
+      ],
+      "module_path": "src/mechanics/M44_starter_paths_archetype_builds.ts",
+      "exec_hook": "touchMechanic('M44', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 1
+    },
+    {
+      "task_id": "PZO-M045",
+      "mechanic_id": "M45",
+      "title": "M45 \u2014 Training Wheels Toggle (Grace Period, Then Off)",
+      "purpose": "",
+      "family": "economy",
+      "kind": "core",
+      "layer": "tick_engine",
+      "priority": 2,
+      "status": "todo",
+      "ml_pair": "M45a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m45.fired",
+        "economy.m45.settlement"
+      ],
+      "module_path": "src/mechanics/M45_training_wheels_grace_period_then_off.ts",
+      "exec_hook": "touchMechanic('M45', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 1
+    },
+    {
+      "task_id": "PZO-M046",
+      "mechanic_id": "M46",
+      "title": "M46 \u2014 Event-Sourced Ledger (Append-Only Run Truth)",
+      "purpose": "",
+      "family": "anti_cheat",
+      "kind": "core",
+      "layer": "backend_service",
+      "priority": 2,
+      "status": "done",
+      "ml_pair": "M46a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m46.fired",
+        "integrity.m46.check"
+      ],
+      "module_path": "src/mechanics/M46_event_sourced_ledger_append_only_run_truth.ts",
+      "exec_hook": "touchMechanic('M46', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 1
+    },
+    {
+      "task_id": "PZO-M047",
+      "mechanic_id": "M47",
+      "title": "M47 \u2014 Signed Actions (Client \u2192 Server Integrity)",
+      "purpose": "",
+      "family": "anti_cheat",
+      "kind": "core",
+      "layer": "backend_service",
+      "priority": 2,
+      "status": "todo",
+      "ml_pair": "M47a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m47.fired",
+        "integrity.m47.check"
+      ],
+      "module_path": "src/mechanics/M47_signed_actions_client_server_integrity.ts",
+      "exec_hook": "touchMechanic('M47', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 1
+    },
+    {
+      "task_id": "PZO-M048",
+      "mechanic_id": "M48",
+      "title": "M48 \u2014 Deterministic Validator (Server Replay Verification)",
+      "purpose": "",
+      "family": "replay",
+      "kind": "core",
+      "layer": "tick_engine",
+      "priority": 2,
+      "status": "todo",
+      "ml_pair": "M48a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m48.fired",
+        "system.m48.pulse"
+      ],
+      "module_path": "src/mechanics/M48_deterministic_validator_server_replay_verification.ts",
+      "exec_hook": "touchMechanic('M48', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 1
+    },
+    {
+      "task_id": "PZO-M049",
+      "mechanic_id": "M49",
+      "title": "M49 \u2014 Exploit Taxonomy + Auto-Response (Fail-Closed)",
+      "purpose": "",
+      "family": "anti_cheat",
+      "kind": "core",
+      "layer": "backend_service",
+      "priority": 2,
+      "status": "todo",
+      "ml_pair": "M49a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m49.fired",
+        "integrity.m49.check"
+      ],
+      "module_path": "src/mechanics/M49_exploit_taxonomy_auto_response_fail_closed.ts",
+      "exec_hook": "touchMechanic('M49', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 1
+    },
+    {
+      "task_id": "PZO-M050",
+      "mechanic_id": "M50",
+      "title": "M50 \u2014 Proof Cards (Shareable Receipts with Hashes)",
+      "purpose": "",
+      "family": "anti_cheat",
+      "kind": "core",
+      "layer": "backend_service",
+      "priority": 2,
+      "status": "done",
+      "ml_pair": "M50a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m50.fired",
+        "integrity.m50.check"
+      ],
+      "module_path": "src/mechanics/M50_proof_cards_shareable_receipts_with_hashes.ts",
+      "exec_hook": "touchMechanic('M50', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 1
+    },
+    {
+      "task_id": "PZO-M051",
+      "mechanic_id": "M51",
+      "title": "M51 \u2014 Syndicate Deals (Multi-Party Co-op Acquisitions)",
+      "purpose": "",
+      "family": "economy",
+      "kind": "core",
+      "layer": "tick_engine",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M51a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m51.fired",
+        "system.m51.pulse"
+      ],
+      "module_path": "src/mechanics/M51_syndicate_deals_multi_party_coop_acquisitions.ts",
+      "exec_hook": "touchMechanic('M51', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 2
+    },
+    {
+      "task_id": "PZO-M052",
+      "mechanic_id": "M52",
+      "title": "M52 \u2014 Escrow + Milestone Release (Conditional Co-op Funding)",
+      "purpose": "",
+      "family": "economy",
+      "kind": "core",
+      "layer": "tick_engine",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M52a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m52.fired",
+        "system.m52.pulse"
+      ],
+      "module_path": "src/mechanics/M52_escrow_milestone_release_conditional_coop_funding.ts",
+      "exec_hook": "touchMechanic('M52', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 2
+    },
+    {
+      "task_id": "PZO-M053",
+      "mechanic_id": "M53",
+      "title": "M53 \u2014 Reputation Stake (Collateralized Trust in Co-op Contracts)",
+      "purpose": "",
+      "family": "anti_cheat",
+      "kind": "core",
+      "layer": "backend_service",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M53a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m53.fired",
+        "system.m53.pulse"
+      ],
+      "module_path": "src/mechanics/M53_reputation_stake_collateralized_trust_in_coop_contracts.ts",
+      "exec_hook": "touchMechanic('M53', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 2
+    },
+    {
+      "task_id": "PZO-M054",
+      "mechanic_id": "M54",
+      "title": "M54 \u2014 Restructure Window (Mid-Run Contract Re-Negotiation)",
+      "purpose": "",
+      "family": "social",
+      "kind": "core",
+      "layer": "api_endpoint",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M54a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m54.fired",
+        "social.m54.action"
+      ],
+      "module_path": "src/mechanics/M54_restructure_window_mid_run_contract_renegotiation.ts",
+      "exec_hook": "touchMechanic('M54', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 2
+    },
+    {
+      "task_id": "PZO-M055",
+      "mechanic_id": "M55",
+      "title": "M55 \u2014 Arbitration Mode (Dispute Resolution via Replay + Table Vote)",
+      "purpose": "",
+      "family": "social",
+      "kind": "core",
+      "layer": "api_endpoint",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M55a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m55.fired",
+        "system.m55.pulse"
+      ],
+      "module_path": "src/mechanics/M55_arbitration_mode_dispute_resolution_via_replay_table_vote.ts",
+      "exec_hook": "touchMechanic('M55', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 2
+    },
+    {
+      "task_id": "PZO-M056",
+      "mechanic_id": "M56",
+      "title": "M56 \u2014 Doctrine Draft (Portfolio Playstyle Contracts)",
+      "purpose": "",
+      "family": "social",
+      "kind": "core",
+      "layer": "api_endpoint",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M56a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m56.fired",
+        "system.m56.pulse"
+      ],
+      "module_path": "src/mechanics/M56_doctrine_draft_portfolio_playstyle_contracts.ts",
+      "exec_hook": "touchMechanic('M56', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 2
+    },
+    {
+      "task_id": "PZO-M057",
+      "mechanic_id": "M57",
+      "title": "M57 \u2014 Rebalancing Pulse (Swap/Net Portfolio Rungs Under Time Pressure)",
+      "purpose": "",
+      "family": "market",
+      "kind": "core",
+      "layer": "tick_engine",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M57a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m57.fired",
+        "system.m57.pulse"
+      ],
+      "module_path": "src/mechanics/M57_rebalancing_pulse_swap_net_portfolio_rungs_under_time_pressure.ts",
+      "exec_hook": "touchMechanic('M57', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 2
+    },
+    {
+      "task_id": "PZO-M058",
+      "mechanic_id": "M58",
+      "title": "M58 \u2014 Voluntary Stress Test (High-Risk Proof Challenge)",
+      "purpose": "",
+      "family": "anti_cheat",
+      "kind": "core",
+      "layer": "backend_service",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M58a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m58.fired",
+        "integrity.m58.check"
+      ],
+      "module_path": "src/mechanics/M58_voluntary_stress_test_high_risk_proof_challenge.ts",
+      "exec_hook": "touchMechanic('M58', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 2
+    },
+    {
+      "task_id": "PZO-M059",
+      "mechanic_id": "M59",
+      "title": "M59 \u2014 Synergy Overload (Complexity Heat for Combo Stacking)",
+      "purpose": "",
+      "family": "market",
+      "kind": "core",
+      "layer": "tick_engine",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M59a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m59.fired",
+        "system.m59.pulse"
+      ],
+      "module_path": "src/mechanics/M59_synergy_overload_complexity_heat_for_combo_stacking.ts",
+      "exec_hook": "touchMechanic('M59', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 2
+    },
+    {
+      "task_id": "PZO-M060",
+      "mechanic_id": "M60",
+      "title": "M60 \u2014 Liability Netting (Cross-Asset Obligation Offsets)",
+      "purpose": "",
+      "family": "economy",
+      "kind": "core",
+      "layer": "tick_engine",
+      "priority": 2,
+      "status": "todo",
+      "ml_pair": "M60a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m60.fired",
+        "economy.m60.settlement"
+      ],
+      "module_path": "src/mechanics/M60_liability_netting_cross_asset_obligation_offsets.ts",
+      "exec_hook": "touchMechanic('M60', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 2
+    },
+    {
+      "task_id": "PZO-M061",
+      "mechanic_id": "M61",
+      "title": "M61 \u2014 Tiered Badges (Bronze\u2192Platinum Proof Levels)",
+      "purpose": "",
+      "family": "anti_cheat",
+      "kind": "core",
+      "layer": "backend_service",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M61a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m61.fired",
+        "integrity.m61.check"
+      ],
+      "module_path": "src/mechanics/M61_tiered_badges_bronze_to_platinum_proof_levels.ts",
+      "exec_hook": "touchMechanic('M61', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 2
+    },
+    {
+      "task_id": "PZO-M062",
+      "mechanic_id": "M62",
+      "title": "M62 \u2014 Team Achievements (Co-op Proof Badges for Shared Contracts)",
+      "purpose": "",
+      "family": "anti_cheat",
+      "kind": "core",
+      "layer": "backend_service",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M62a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m62.fired",
+        "system.m62.pulse"
+      ],
+      "module_path": "src/mechanics/M62_team_achievements_coop_proof_badges_for_shared_contracts.ts",
+      "exec_hook": "touchMechanic('M62', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 2
+    },
+    {
+      "task_id": "PZO-M063",
+      "mechanic_id": "M63",
+      "title": "M63 \u2014 Sponsored Bounties (Player-Funded Challenges for the Table)",
+      "purpose": "",
+      "family": "economy",
+      "kind": "core",
+      "layer": "tick_engine",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M63a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m63.fired",
+        "system.m63.pulse"
+      ],
+      "module_path": "src/mechanics/M63_sponsored_bounties_player_funded_challenges_for_the_table.ts",
+      "exec_hook": "touchMechanic('M63', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 2
+    },
+    {
+      "task_id": "PZO-M064",
+      "mechanic_id": "M64",
+      "title": "M64 \u2014 Proof-Weighted Leaderboards (Verified Runs Only)",
+      "purpose": "",
+      "family": "anti_cheat",
+      "kind": "core",
+      "layer": "backend_service",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M64a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m64.fired",
+        "system.m64.pulse"
+      ],
+      "module_path": "src/mechanics/M64_proof_weighted_leaderboards_verified_runs_only.ts",
+      "exec_hook": "touchMechanic('M64', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 2
+    },
+    {
+      "task_id": "PZO-M065",
+      "mechanic_id": "M65",
+      "title": "M62 \u2014 Team Achievements (Co-op Proof Badges for Shared Contracts)",
+      "purpose": "",
+      "family": "anti_cheat",
+      "kind": "core",
+      "layer": "backend_service",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M65a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m65.fired",
+        "integrity.m65.check"
+      ],
+      "module_path": "src/mechanics/M62_team_achievements_coop_proof_badges_for_shared_contracts.ts",
+      "exec_hook": "touchMechanic('M65', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 2
+    },
+    {
+      "task_id": "PZO-M066",
+      "mechanic_id": "M66",
+      "title": "M66 \u2014 Mentor Queue (Guided Co-op Onboarding Contracts)",
+      "purpose": "",
+      "family": "progression",
+      "kind": "core",
+      "layer": "ui_component",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M66a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m66.fired",
+        "system.m66.pulse"
+      ],
+      "module_path": "src/mechanics/M66_mentor_queue_guided_coop_onboarding_contracts.ts",
+      "exec_hook": "touchMechanic('M66', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 2
+    },
+    {
+      "task_id": "PZO-M067",
+      "mechanic_id": "M67",
+      "title": "M67 \u2014 Progressive Disclosure UI (Unlock Complexity, Not Power)",
+      "purpose": "",
+      "family": "market",
+      "kind": "core",
+      "layer": "tick_engine",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M67a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m67.fired",
+        "market.m67.pulse"
+      ],
+      "module_path": "src/mechanics/M67_progressive_disclosure_ui_unlock_complexity_not_power.ts",
+      "exec_hook": "touchMechanic('M67', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 2
+    },
+    {
+      "task_id": "PZO-M068",
+      "mechanic_id": "M68",
+      "title": "M68 \u2014 Failure Rehab (2-Minute Targeted Recovery Run)",
+      "purpose": "",
+      "family": "market",
+      "kind": "core",
+      "layer": "tick_engine",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M68a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m68.fired",
+        "market.m68.pulse"
+      ],
+      "module_path": "src/mechanics/M68_failure_rehab_2_minute_targeted_recovery_run.ts",
+      "exec_hook": "touchMechanic('M68', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 2
+    },
+    {
+      "task_id": "PZO-M069",
+      "mechanic_id": "M69",
+      "title": "M69 \u2014 Choice Drills (30\u201360s Micro-Sim Skill Tests)",
+      "purpose": "",
+      "family": "market",
+      "kind": "core",
+      "layer": "tick_engine",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M69a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m69.fired",
+        "market.m69.pulse"
+      ],
+      "module_path": "src/mechanics/M69_choice_drills_30_60s_micro_sim_skill_tests.ts",
+      "exec_hook": "touchMechanic('M69', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 2
+    },
+    {
+      "task_id": "PZO-M070",
+      "mechanic_id": "M70",
+      "title": "M70 \u2014 Co-op Bootcamp (Team Onboarding Run)",
+      "purpose": "",
+      "family": "progression",
+      "kind": "core",
+      "layer": "ui_component",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M70a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m70.fired",
+        "system.m70.pulse"
+      ],
+      "module_path": "src/mechanics/M70_coop_bootcamp_team_onboarding_run.ts",
+      "exec_hook": "touchMechanic('M70', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 2
+    },
+    {
+      "task_id": "PZO-M071",
+      "mechanic_id": "M71",
+      "title": "M71 \u2014 Device Attestation (Trust Tiers for Competitive + Markets)",
+      "purpose": "",
+      "family": "anti_cheat",
+      "kind": "core",
+      "layer": "backend_service",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M71a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m71.fired",
+        "system.m71.pulse"
+      ],
+      "module_path": "src/mechanics/M71_device_attestation_trust_tiers_for_competitive_and_markets.ts",
+      "exec_hook": "touchMechanic('M71', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 2
+    },
+    {
+      "task_id": "PZO-M072",
+      "mechanic_id": "M72",
+      "title": "M72 \u2014 Action Budget (Rate-Limited Inputs + Anti-Bot Pace Control)",
+      "purpose": "",
+      "family": "anti_cheat",
+      "kind": "core",
+      "layer": "backend_service",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M72a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m72.fired",
+        "system.m72.pulse"
+      ],
+      "module_path": "src/mechanics/M72_action_budget_rate_limited_inputs_anti_bot_pace_control.ts",
+      "exec_hook": "touchMechanic('M72', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 2
+    },
+    {
+      "task_id": "PZO-M073",
+      "mechanic_id": "M73",
+      "title": "M73 \u2014 Market Escrow + Finality (Anti-Dupe Exchange Settlement)",
+      "purpose": "",
+      "family": "market",
+      "kind": "core",
+      "layer": "tick_engine",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M73a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m73.fired",
+        "market.m73.pulse"
+      ],
+      "module_path": "src/mechanics/M73_market_escrow_finality_anti_dupe_exchange_settlement.ts",
+      "exec_hook": "touchMechanic('M73', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 2
+    },
+    {
+      "task_id": "PZO-M074",
+      "mechanic_id": "M74",
+      "title": "M74 \u2014 Forensic Snapshot Bundles (Exportable Run Truth Packets)",
+      "purpose": "",
+      "family": "anti_cheat",
+      "kind": "core",
+      "layer": "backend_service",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M74a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m74.fired",
+        "integrity.m74.check"
+      ],
+      "module_path": "src/mechanics/M74_forensic_snapshot_bundles_exportable_run_truth_packets.ts",
+      "exec_hook": "touchMechanic('M74', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 2
+    },
+    {
+      "task_id": "PZO-M075",
+      "mechanic_id": "M75",
+      "title": "M75 \u2014 Integrity Digest (Seasonal Transparency + Audit Trails)",
+      "purpose": "",
+      "family": "anti_cheat",
+      "kind": "core",
+      "layer": "backend_service",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M75a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m75.fired",
+        "integrity.m75.check"
+      ],
+      "module_path": "src/mechanics/M75_integrity_digest_seasonal_transparency_audit_trails.ts",
+      "exec_hook": "touchMechanic('M75', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 2
+    },
+    {
+      "task_id": "PZO-M076",
+      "mechanic_id": "M76",
+      "title": "M130 \u2014 Table Vault (Shared Cosmetic Stash)",
+      "purpose": "",
+      "family": "market",
+      "kind": "core",
+      "layer": "tick_engine",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M76a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m76.fired",
+        "market.m76.pulse"
+      ],
+      "module_path": "src/mechanics/M130_table_vault_shared_cosmetic_stash.ts",
+      "exec_hook": "touchMechanic('M76', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 2
+    },
+    {
+      "task_id": "PZO-M077",
+      "mechanic_id": "M77",
+      "title": "M77_delegated_operator_temporary_table_lead",
+      "purpose": "",
+      "family": "market",
+      "kind": "core",
+      "layer": "tick_engine",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M77a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m77.fired",
+        "market.m77.pulse"
+      ],
+      "module_path": "src/mechanics/M77_delegated_operator_temporary_table_lead.ts",
+      "exec_hook": "touchMechanic('M77', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 2
+    },
+    {
+      "task_id": "PZO-M078",
+      "mechanic_id": "M78",
+      "title": "M78_collateral_calls_margin_style_contract_enforcement",
+      "purpose": "",
+      "family": "social",
+      "kind": "core",
+      "layer": "tick_engine",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M78a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m78.fired",
+        "social.m78.action"
+      ],
+      "module_path": "src/mechanics/M78_collateral_calls_margin_style_contract_enforcement.ts",
+      "exec_hook": "touchMechanic('M78', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 2
+    },
+    {
+      "task_id": "PZO-M079",
+      "mechanic_id": "M79",
+      "title": "M79_shared_objective_bonds_team_wide_incentive_locks",
+      "purpose": "",
+      "family": "market",
+      "kind": "core",
+      "layer": "tick_engine",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M79a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m79.fired",
+        "market.m79.pulse"
+      ],
+      "module_path": "src/mechanics/M79_shared_objective_bonds_team_wide_incentive_locks.ts",
+      "exec_hook": "touchMechanic('M79', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 2
+    },
+    {
+      "task_id": "PZO-M080",
+      "mechanic_id": "M80",
+      "title": "M80_contract_receipt_cards_portable_verifiable_coop_proofs",
+      "purpose": "",
+      "family": "anti_cheat",
+      "kind": "core",
+      "layer": "backend_service",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M80a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m80.fired",
+        "integrity.m80.check"
+      ],
+      "module_path": "src/mechanics/M80_contract_receipt_cards_portable_verifiable_coop_proofs.ts",
+      "exec_hook": "touchMechanic('M80', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 2
+    },
+    {
+      "task_id": "PZO-M081",
+      "mechanic_id": "M81",
+      "title": "M81_synergy_tree_paths_branching_portfolio_identity",
+      "purpose": "",
+      "family": "progression",
+      "kind": "core",
+      "layer": "ui_component",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M81a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m81.fired",
+        "system.m81.pulse"
+      ],
+      "module_path": "src/mechanics/M81_synergy_tree_paths_branching_portfolio_identity.ts",
+      "exec_hook": "touchMechanic('M81', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 2
+    },
+    {
+      "task_id": "PZO-M082",
+      "mechanic_id": "M82",
+      "title": "M82_timing_chains_tick_window_synergy_combos",
+      "purpose": "",
+      "family": "progression",
+      "kind": "core",
+      "layer": "ui_component",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M82a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m82.fired",
+        "system.m82.pulse"
+      ],
+      "module_path": "src/mechanics/M82_timing_chains_tick_window_synergy_combos.ts",
+      "exec_hook": "touchMechanic('M82', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 2
+    },
+    {
+      "task_id": "PZO-M083",
+      "mechanic_id": "M83",
+      "title": "M83_risk_parity_dial_optional_stability_lever_under_heat",
+      "purpose": "",
+      "family": "risk",
+      "kind": "core",
+      "layer": "tick_engine",
+      "priority": 2,
+      "status": "todo",
+      "ml_pair": "M83a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m83.fired",
+        "risk.m83.triggered"
+      ],
+      "module_path": "src/mechanics/M83_risk_parity_dial_optional_stability_lever_under_heat.ts",
+      "exec_hook": "touchMechanic('M83', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 2
+    },
+    {
+      "task_id": "PZO-M084",
+      "mechanic_id": "M84",
+      "title": "M84_catalyst_slots_cross_set_bridges_without_degeneracy",
+      "purpose": "",
+      "family": "progression",
+      "kind": "core",
+      "layer": "ui_component",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M84a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m84.fired",
+        "system.m84.pulse"
+      ],
+      "module_path": "src/mechanics/M84_catalyst_slots_cross_set_bridges_without_degeneracy.ts",
+      "exec_hook": "touchMechanic('M84', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 2
+    },
+    {
+      "task_id": "PZO-M085",
+      "mechanic_id": "M85",
+      "title": "M85_mutation_draft_mid_run_portfolio_rewrite",
+      "purpose": "",
+      "family": "progression",
+      "kind": "core",
+      "layer": "ui_component",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M85a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m85.fired",
+        "system.m85.pulse"
+      ],
+      "module_path": "src/mechanics/M85_mutation_draft_mid_run_portfolio_rewrite.ts",
+      "exec_hook": "touchMechanic('M85', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 2
+    },
+    {
+      "task_id": "PZO-M086",
+      "mechanic_id": "M86",
+      "title": "M86_micro_proofs_moment_scoped_achievement_stamps",
+      "purpose": "",
+      "family": "anti_cheat",
+      "kind": "core",
+      "layer": "backend_service",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M86a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m86.fired",
+        "integrity.m86.check"
+      ],
+      "module_path": "src/mechanics/M86_micro_proofs_moment_scoped_achievement_stamps.ts",
+      "exec_hook": "touchMechanic('M86', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 2
+    },
+    {
+      "task_id": "PZO-M087",
+      "mechanic_id": "M87",
+      "title": "M87_season_relics_limited_cosmetic_mints_from_verified_feats",
+      "purpose": "",
+      "family": "season",
+      "kind": "core",
+      "layer": "season_runtime",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M87a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m87.fired",
+        "season.m87.tick"
+      ],
+      "module_path": "src/mechanics/M87_season_relics_limited_cosmetic_mints_from_verified_feats.ts",
+      "exec_hook": "touchMechanic('M87', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 2
+    },
+    {
+      "task_id": "PZO-M088",
+      "mechanic_id": "M88",
+      "title": "M88_team_titles_coop_identity_names_with_shared_root_hash",
+      "purpose": "",
+      "family": "social",
+      "kind": "core",
+      "layer": "tick_engine",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M88a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m88.fired",
+        "social.m88.action"
+      ],
+      "module_path": "src/mechanics/M88_team_titles_coop_identity_names_with_shared_root_hash.ts",
+      "exec_hook": "touchMechanic('M88', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 2
+    },
+    {
+      "task_id": "PZO-M089",
+      "mechanic_id": "M89",
+      "title": "M89_trust_weighted_cosmetic_multipliers_integrity_incentives",
+      "purpose": "",
+      "family": "anti_cheat",
+      "kind": "core",
+      "layer": "backend_service",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M89a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m89.fired",
+        "integrity.m89.check"
+      ],
+      "module_path": "src/mechanics/M89_trust_weighted_cosmetic_multipliers_integrity_incentives.ts",
+      "exec_hook": "touchMechanic('M89', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 2
+    },
+    {
+      "task_id": "PZO-M090",
+      "mechanic_id": "M90",
+      "title": "M90_salvage_and_reroll_recycling_achievements_into_new_challenges",
+      "purpose": "",
+      "family": "progression",
+      "kind": "core",
+      "layer": "ui_component",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M90a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m90.fired",
+        "system.m90.pulse"
+      ],
+      "module_path": "src/mechanics/M90_salvage_and_reroll_recycling_achievements_into_new_challenges.ts",
+      "exec_hook": "touchMechanic('M90', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 2
+    },
+    {
+      "task_id": "PZO-M091",
+      "mechanic_id": "M91",
+      "title": "M91_first_table_invite_safe_social_onboarding_run",
+      "purpose": "",
+      "family": "progression",
+      "kind": "core",
+      "layer": "ui_component",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M91a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m91.fired",
+        "system.m91.pulse"
+      ],
+      "module_path": "src/mechanics/M91_first_table_invite_safe_social_onboarding_run.ts",
+      "exec_hook": "touchMechanic('M91', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 2
+    },
+    {
+      "task_id": "PZO-M092",
+      "mechanic_id": "M92",
+      "title": "M92_ghost_mentor_theater_watch_copy_decision_ghosts",
+      "purpose": "",
+      "family": "progression",
+      "kind": "core",
+      "layer": "ui_component",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M92a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m92.fired",
+        "system.m92.pulse"
+      ],
+      "module_path": "src/mechanics/M92_ghost_mentor_theater_watch_copy_decision_ghosts.ts",
+      "exec_hook": "touchMechanic('M92', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 2
+    },
+    {
+      "task_id": "PZO-M093",
+      "mechanic_id": "M93",
+      "title": "M93_loadout_lab_preset_builder_constraint_preview",
+      "purpose": "",
+      "family": "progression",
+      "kind": "core",
+      "layer": "ui_component",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M93a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m93.fired",
+        "system.m93.pulse"
+      ],
+      "module_path": "src/mechanics/M93_loadout_lab_preset_builder_constraint_preview.ts",
+      "exec_hook": "touchMechanic('M93', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 2
+    },
+    {
+      "task_id": "PZO-M094",
+      "mechanic_id": "M94",
+      "title": "M94_inline_glossary_pings_micro_explain_without_handholding",
+      "purpose": "",
+      "family": "cards",
+      "kind": "core",
+      "layer": "tick_engine",
+      "priority": 2,
+      "status": "todo",
+      "ml_pair": "M94a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m94.fired",
+        "cards.m94.draw"
+      ],
+      "module_path": "src/mechanics/M94_inline_glossary_pings_micro_explain_without_handholding.ts",
+      "exec_hook": "touchMechanic('M94', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 2
+    },
+    {
+      "task_id": "PZO-M095",
+      "mechanic_id": "M95",
+      "title": "M95_wipe_clinic_interactive_death_snapshot_review",
+      "purpose": "",
+      "family": "risk",
+      "kind": "core",
+      "layer": "tick_engine",
+      "priority": 2,
+      "status": "todo",
+      "ml_pair": "M95a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m95.fired",
+        "risk.m95.triggered"
+      ],
+      "module_path": "src/mechanics/M95_wipe_clinic_interactive_death_snapshot_review.ts",
+      "exec_hook": "touchMechanic('M95', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 2
+    },
+    {
+      "task_id": "PZO-M096",
+      "mechanic_id": "M96",
+      "title": "M96_server_time_authority_anti_time_travel_lag_exploit_guard",
+      "purpose": "",
+      "family": "anti_cheat",
+      "kind": "core",
+      "layer": "backend_service",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M96a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m96.fired",
+        "integrity.m96.check"
+      ],
+      "module_path": "src/mechanics/M96_server_time_authority_anti_time_travel_lag_exploit_guard.ts",
+      "exec_hook": "touchMechanic('M96', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 2
+    },
+    {
+      "task_id": "PZO-M097",
+      "mechanic_id": "M97",
+      "title": "M97_seed_commit_reveal_deterministic_randomness_you_can_audit",
+      "purpose": "",
+      "family": "anti_cheat",
+      "kind": "core",
+      "layer": "backend_service",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M97a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m97.fired",
+        "integrity.m97.check"
+      ],
+      "module_path": "src/mechanics/M97_seed_commit_reveal_deterministic_randomness_you_can_audit.ts",
+      "exec_hook": "touchMechanic('M97', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 2
+    },
+    {
+      "task_id": "PZO-M098",
+      "mechanic_id": "M98",
+      "title": "M98_quarantine_routing_isolate_suspicious_runs_without_killing_play",
+      "purpose": "",
+      "family": "anti_cheat",
+      "kind": "core",
+      "layer": "backend_service",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M98a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m98.fired",
+        "integrity.m98.check"
+      ],
+      "module_path": "src/mechanics/M98_quarantine_routing_isolate_suspicious_runs_without_killing_play.ts",
+      "exec_hook": "touchMechanic('M98', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 2
+    },
+    {
+      "task_id": "PZO-M099",
+      "mechanic_id": "M99",
+      "title": "M99_integrity_challenges_lightweight_proof_of_play_checks",
+      "purpose": "",
+      "family": "anti_cheat",
+      "kind": "core",
+      "layer": "backend_service",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M99a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m99.fired",
+        "integrity.m99.check"
+      ],
+      "module_path": "src/mechanics/M99_integrity_challenges_lightweight_proof_of_play_checks.ts",
+      "exec_hook": "touchMechanic('M99', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 2
+    },
+    {
+      "task_id": "PZO-M100",
+      "mechanic_id": "M100",
+      "title": "M100_appeal_evidence_chain_verifiable_enforcement_pipeline",
+      "purpose": "",
+      "family": "telemetry",
+      "kind": "core",
+      "layer": "backend_service",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M100a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m100.fired",
+        "telemetry.m100.event"
+      ],
+      "module_path": "src/mechanics/M100_appeal_evidence_chain_verifiable_enforcement_pipeline.ts",
+      "exec_hook": "touchMechanic('M100', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 2
+    },
+    {
+      "task_id": "PZO-M101",
+      "mechanic_id": "M101",
+      "title": "M101 \u2014 Mutator Draft (Run Rules You Choose)",
+      "purpose": "",
+      "family": "season",
+      "kind": "core",
+      "layer": "season_runtime",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M101a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m101.fired",
+        "season.m101.tick"
+      ],
+      "module_path": "src/mechanics/M101_mutator_draft_run_rules_you_choose.ts",
+      "exec_hook": "touchMechanic('M101', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 3
+    },
+    {
+      "task_id": "PZO-M102",
+      "mechanic_id": "M102",
+      "title": "M102 \u2014 Forked Timeline Choice (One Decision, Two Branches, One Final)",
+      "purpose": "",
+      "family": "season",
+      "kind": "core",
+      "layer": "season_runtime",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M102a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m102.fired",
+        "season.m102.tick"
+      ],
+      "module_path": "src/mechanics/M102_forked_timeline_choice_two_branches_one_final.ts",
+      "exec_hook": "touchMechanic('M102', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 3
+    },
+    {
+      "task_id": "PZO-M103",
+      "mechanic_id": "M103",
+      "title": "M103 \u2014 Emergency Liquidity Actions (Sell Fast, Pay the Price)",
+      "purpose": "",
+      "family": "market",
+      "kind": "core",
+      "layer": "tick_engine",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M103a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m103.fired",
+        "market.m103.pulse"
+      ],
+      "module_path": "src/mechanics/M103_emergency_liquidity_actions_sell_fast_pay_price.ts",
+      "exec_hook": "touchMechanic('M103', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 3
+    },
+    {
+      "task_id": "PZO-M104",
+      "mechanic_id": "M104",
+      "title": "M104 \u2014 Deal Scarcity Index (The Market Goes Thin)",
+      "purpose": "",
+      "family": "market",
+      "kind": "core",
+      "layer": "tick_engine",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M104a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m104.fired",
+        "market.m104.pulse"
+      ],
+      "module_path": "src/mechanics/M104_deal_scarcity_index_the_market_goes_thin.ts",
+      "exec_hook": "touchMechanic('M104', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 3
+    },
+    {
+      "task_id": "PZO-M105",
+      "mechanic_id": "M105",
+      "title": "M105 \u2014 \u201cLast Look\u201d Window (One Final Chance, No Debates)",
+      "purpose": "",
+      "family": "risk",
+      "kind": "core",
+      "layer": "tick_engine",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M105a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m105.fired",
+        "system.m105.pulse"
+      ],
+      "module_path": "src/mechanics/M105_last_look_window_one_final_chance_no_debates.ts",
+      "exec_hook": "touchMechanic('M105', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 3
+    },
+    {
+      "task_id": "PZO-M106",
+      "mechanic_id": "M106",
+      "title": "M106 \u2014 Asset Condition System (Wear, Maintenance, Failure)",
+      "purpose": "",
+      "family": "season",
+      "kind": "core",
+      "layer": "season_runtime",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M106a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m106.fired",
+        "season.m106.tick"
+      ],
+      "module_path": "src/mechanics/M106_asset_condition_system_wear_maintenance_failure.ts",
+      "exec_hook": "touchMechanic('M106', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 3
+    },
+    {
+      "task_id": "PZO-M107",
+      "mechanic_id": "M107",
+      "title": "M107 \u2014 Refi Ladder (Restructure Without Escaping Reality)",
+      "purpose": "",
+      "family": "economy",
+      "kind": "core",
+      "layer": "tick_engine",
+      "priority": 2,
+      "status": "todo",
+      "ml_pair": "M107a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m107.fired",
+        "economy.m107.settlement"
+      ],
+      "module_path": "src/mechanics/M107_refi_ladder_restructure_without_escaping_reality.ts",
+      "exec_hook": "touchMechanic('M107', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 3
+    },
+    {
+      "task_id": "PZO-M108",
+      "mechanic_id": "M108",
+      "title": "M108 \u2014 Partial Fills (You Don\u2019t Get The Whole Deal)",
+      "purpose": "",
+      "family": "economy",
+      "kind": "core",
+      "layer": "tick_engine",
+      "priority": 2,
+      "status": "todo",
+      "ml_pair": "M108a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m108.fired",
+        "economy.m108.settlement"
+      ],
+      "module_path": "src/mechanics/M108_partial_fills_you_dont_get_the_whole_deal.ts",
+      "exec_hook": "touchMechanic('M108', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 3
+    },
+    {
+      "task_id": "PZO-M109",
+      "mechanic_id": "M109",
+      "title": "M109 \u2014 Macro News Bursts (Headlines That Move Ticks)",
+      "purpose": "",
+      "family": "market",
+      "kind": "core",
+      "layer": "tick_engine",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M109a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m109.fired",
+        "market.m109.pulse"
+      ],
+      "module_path": "src/mechanics/M109_macro_news_bursts_headlines_that_move_ticks.ts",
+      "exec_hook": "touchMechanic('M109', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 3
+    },
+    {
+      "task_id": "PZO-M110",
+      "mechanic_id": "M110",
+      "title": "M110 \u2014 \u201cNo-Pause\u201d Menu Law (Every UI Is Timer-Safe)",
+      "purpose": "",
+      "family": "season",
+      "kind": "core",
+      "layer": "season_runtime",
+      "priority": 3,
+      "status": "done",
+      "ml_pair": "M110a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m110.fired",
+        "season.m110.tick"
+      ],
+      "module_path": "src/mechanics/M110_no_pause_menu_law_every_ui_is_timer_safe.ts",
+      "exec_hook": "touchMechanic('M110', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 3
+    },
+    {
+      "task_id": "PZO-M111",
+      "mechanic_id": "M111",
+      "title": "M111 \u2014 Portfolio Rules Macros (If/Then Autopilot, Hard-Capped)",
+      "purpose": "",
+      "family": "market",
+      "kind": "core",
+      "layer": "tick_engine",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M111a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m111.fired",
+        "market.m111.pulse"
+      ],
+      "module_path": "src/mechanics/M111_portfolio_rules_macros_if_then_autopilot_hard_capped.ts",
+      "exec_hook": "touchMechanic('M111', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 3
+    },
+    {
+      "task_id": "PZO-M112",
+      "mechanic_id": "M112",
+      "title": "M112 \u2014 Precision Split (Sell Part, Keep Part)",
+      "purpose": "",
+      "family": "season",
+      "kind": "core",
+      "layer": "season_runtime",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M112a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m112.fired",
+        "season.m112.tick"
+      ],
+      "module_path": "src/mechanics/M112_precision_split_sell_part_keep_part.ts",
+      "exec_hook": "touchMechanic('M112', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 3
+    },
+    {
+      "task_id": "PZO-M113",
+      "mechanic_id": "M113",
+      "title": "M113 \u2014 Order Priority Stack (You Choose What Dies First)",
+      "purpose": "",
+      "family": "season",
+      "kind": "core",
+      "layer": "season_runtime",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M113a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m113.fired",
+        "season.m113.tick"
+      ],
+      "module_path": "src/mechanics/M113_order_priority_stack_you_choose_what_dies_first.ts",
+      "exec_hook": "touchMechanic('M113', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 3
+    },
+    {
+      "task_id": "PZO-M114",
+      "mechanic_id": "M114",
+      "title": "M114 \u2014 Timing Tax (Fast Choices Get Better Terms)",
+      "purpose": "",
+      "family": "season",
+      "kind": "core",
+      "layer": "season_runtime",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M114a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m114.fired",
+        "season.m114.tick"
+      ],
+      "module_path": "src/mechanics/M114_timing_tax_fast_choices_get_better_terms.ts",
+      "exec_hook": "touchMechanic('M114', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 3
+    },
+    {
+      "task_id": "PZO-M115",
+      "mechanic_id": "M115",
+      "title": "M115 \u2014 Heat-Swap (Move Risk Without Removing It)",
+      "purpose": "",
+      "family": "risk",
+      "kind": "core",
+      "layer": "tick_engine",
+      "priority": 2,
+      "status": "todo",
+      "ml_pair": "M115a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m115.fired",
+        "risk.m115.triggered"
+      ],
+      "module_path": "src/mechanics/M115_heat_swap_move_risk_without_removing_it.ts",
+      "exec_hook": "touchMechanic('M115', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 3
+    },
+    {
+      "task_id": "PZO-M116",
+      "mechanic_id": "M116",
+      "title": "M116 \u2014 Table Roles (Caller, Treasurer, Saboteur, Historian)",
+      "purpose": "",
+      "family": "season",
+      "kind": "core",
+      "layer": "season_runtime",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M116a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m116.fired",
+        "season.m116.tick"
+      ],
+      "module_path": "src/mechanics/M116_table_roles_caller_treasurer_saboteur_historian.ts",
+      "exec_hook": "touchMechanic('M116', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 3
+    },
+    {
+      "task_id": "PZO-M117",
+      "mechanic_id": "M117",
+      "title": "M117 \u2014 Table Feed (Run Moments As A Social Timeline)",
+      "purpose": "",
+      "family": "social",
+      "kind": "core",
+      "layer": "tick_engine",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M117a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m117.fired",
+        "social.m117.action"
+      ],
+      "module_path": "src/mechanics/M117_table_feed_run_moments_as_a_social_timeline.ts",
+      "exec_hook": "touchMechanic('M117', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 3
+    },
+    {
+      "task_id": "PZO-M118",
+      "mechanic_id": "M118",
+      "title": "M118 \u2014 Clip Remix Chains (Duet/Stitch But Verified)",
+      "purpose": "",
+      "family": "telemetry",
+      "kind": "core",
+      "layer": "backend_service",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M118a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m118.fired",
+        "telemetry.m118.event"
+      ],
+      "module_path": "src/mechanics/M118_clip_remix_chains_duet_stitch_but_verified.ts",
+      "exec_hook": "touchMechanic('M118', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 3
+    },
+    {
+      "task_id": "PZO-M119",
+      "mechanic_id": "M119",
+      "title": "M119 \u2014 Rivalry Ledger (Nemesis Tracking Over Seasons)",
+      "purpose": "",
+      "family": "anti_cheat",
+      "kind": "core",
+      "layer": "backend_service",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M119a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m119.fired",
+        "integrity.m119.check"
+      ],
+      "module_path": "src/mechanics/M119_rivalry_ledger_nemesis_tracking_over_seasons.ts",
+      "exec_hook": "touchMechanic('M119', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 3
+    },
+    {
+      "task_id": "PZO-M120",
+      "mechanic_id": "M120",
+      "title": "M120 \u2014 Consent Gates (Social Chaos Must Be Opt-In)",
+      "purpose": "",
+      "family": "social",
+      "kind": "core",
+      "layer": "tick_engine",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M120a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m120.fired",
+        "social.m120.action"
+      ],
+      "module_path": "src/mechanics/M120_consent_gates_social_chaos_must_be_opt_in.ts",
+      "exec_hook": "touchMechanic('M120', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 3
+    },
+    {
+      "task_id": "PZO-M121",
+      "mechanic_id": "M121",
+      "title": "M121 \u2014 Daily Gauntlet (Same Seed For Everyone)",
+      "purpose": "",
+      "family": "replay",
+      "kind": "core",
+      "layer": "tick_engine",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M121a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m121.fired",
+        "system.m121.pulse"
+      ],
+      "module_path": "src/mechanics/M121_daily_gauntlet_same_seed_for_everyone.ts",
+      "exec_hook": "touchMechanic('M121', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 3
+    },
+    {
+      "task_id": "PZO-M122",
+      "mechanic_id": "M122",
+      "title": "M122 \u2014 Weekly Draft League (Snake Draft Rule Modules)",
+      "purpose": "",
+      "family": "ops",
+      "kind": "core",
+      "layer": "backend_service",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M122a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m122.fired",
+        "system.m122.pulse"
+      ],
+      "module_path": "src/mechanics/M122_weekly_draft_league_snake_draft_rule_modules.ts",
+      "exec_hook": "touchMechanic('M122', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 3
+    },
+    {
+      "task_id": "PZO-M123",
+      "mechanic_id": "M123",
+      "title": "M123 \u2014 King-of-the-Hill Table (Winner Stays, Stakes Rotate)",
+      "purpose": "",
+      "family": "pvp",
+      "kind": "core",
+      "layer": "tick_engine",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M123a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m123.fired",
+        "system.m123.pulse"
+      ],
+      "module_path": "src/mechanics/M123_king_of_the_hill_table_winner_stays_stakes_rotate.ts",
+      "exec_hook": "touchMechanic('M123', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 3
+    },
+    {
+      "task_id": "PZO-M124",
+      "mechanic_id": "M124",
+      "title": "M124 \u2014 Speedrun Mode (Timer Is Even Harsher)",
+      "purpose": "",
+      "family": "pvp",
+      "kind": "core",
+      "layer": "tick_engine",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M124a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m124.fired",
+        "system.m124.pulse"
+      ],
+      "module_path": "src/mechanics/M124_speedrun_mode_timer_is_even_harsher.ts",
+      "exec_hook": "touchMechanic('M124', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 3
+    },
+    {
+      "task_id": "PZO-M125",
+      "mechanic_id": "M125",
+      "title": "M125 \u2014 \u201cNo-Ghost\u201d Hardcore (You Own Every Mistake)",
+      "purpose": "",
+      "family": "pvp",
+      "kind": "core",
+      "layer": "tick_engine",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M125a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m125.fired",
+        "system.m125.pulse"
+      ],
+      "module_path": "src/mechanics/M125_no_ghost_hardcore_you_own_every_mistake.ts",
+      "exec_hook": "touchMechanic('M125', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 3
+    },
+    {
+      "task_id": "PZO-M126",
+      "mechanic_id": "M126",
+      "title": "M126 \u2014 Cosmetic Loadouts (Titles, Frames, Proof Skins)",
+      "purpose": "",
+      "family": "anti_cheat",
+      "kind": "core",
+      "layer": "backend_service",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M126a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m126.fired",
+        "integrity.m126.check"
+      ],
+      "module_path": "src/mechanics/M126_cosmetic_loadouts_titles_frames_proof_skins.ts",
+      "exec_hook": "touchMechanic('M126', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 3
+    },
+    {
+      "task_id": "PZO-M127",
+      "mechanic_id": "M127",
+      "title": "M127 \u2014 Proof-Bound Crafting (Craft From Verified Fragments)",
+      "purpose": "",
+      "family": "anti_cheat",
+      "kind": "core",
+      "layer": "backend_service",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M127a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m127.fired",
+        "integrity.m127.check"
+      ],
+      "module_path": "src/mechanics/M127_proof_bound_crafting_craft_from_verified_fragments.ts",
+      "exec_hook": "touchMechanic('M127', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 3
+    },
+    {
+      "task_id": "PZO-M128",
+      "mechanic_id": "M128",
+      "title": "M128 \u2014 Season Sinks (Burn To Keep Economy Clean)",
+      "purpose": "",
+      "family": "season",
+      "kind": "core",
+      "layer": "season_runtime",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M128a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m128.fired",
+        "season.m128.tick"
+      ],
+      "module_path": "src/mechanics/M128_season_sinks_burn_to_keep_economy_clean.ts",
+      "exec_hook": "touchMechanic('M128', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 3
+    },
+    {
+      "task_id": "PZO-M129",
+      "mechanic_id": "M129",
+      "title": "M129 \u2014 Creator Packs (Caption Templates + Sound Stingers)",
+      "purpose": "",
+      "family": "pvp",
+      "kind": "core",
+      "layer": "tick_engine",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M129a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m129.fired",
+        "system.m129.pulse"
+      ],
+      "module_path": "src/mechanics/M129_creator_packs_caption_templates_sound_stingers.ts",
+      "exec_hook": "touchMechanic('M129', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 3
+    },
+    {
+      "task_id": "PZO-M130",
+      "mechanic_id": "M130",
+      "title": "M130 \u2014 Table Vault (Shared Cosmetic Stash)",
+      "purpose": "",
+      "family": "season",
+      "kind": "core",
+      "layer": "season_runtime",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M130a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m130.fired",
+        "system.m130.pulse"
+      ],
+      "module_path": "src/mechanics/M130_table_vault_shared_cosmetic_stash.ts",
+      "exec_hook": "touchMechanic('M130', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 3
+    },
+    {
+      "task_id": "PZO-M131",
+      "mechanic_id": "M131",
+      "title": "M131 \u2014 Faction Sponsorship (Season Flavor Without Power)",
+      "purpose": "",
+      "family": "season",
+      "kind": "core",
+      "layer": "season_runtime",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M131a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m131.fired",
+        "season.m131.tick"
+      ],
+      "module_path": "src/mechanics/M131_faction_sponsorship_season_flavor_without_power.ts",
+      "exec_hook": "touchMechanic('M131', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 3
+    },
+    {
+      "task_id": "PZO-M132",
+      "mechanic_id": "M132",
+      "title": "M132 \u2014 Case Files (Run Post-Mortems As Narrative Dossiers)",
+      "purpose": "",
+      "family": "narrative",
+      "kind": "core",
+      "layer": "ui_component",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M132a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m132.fired",
+        "system.m132.pulse"
+      ],
+      "module_path": "src/mechanics/M132_case_files_run_post_mortems_as_narrative_dossiers.ts",
+      "exec_hook": "touchMechanic('M132', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 3
+    },
+    {
+      "task_id": "PZO-M133",
+      "mechanic_id": "M133",
+      "title": "M133 \u2014 Seasonal Story Beats (Headlines + Court Dates + Deadlines)",
+      "purpose": "",
+      "family": "season",
+      "kind": "core",
+      "layer": "season_runtime",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M133a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m133.fired",
+        "season.m133.tick"
+      ],
+      "module_path": "src/mechanics/M133_seasonal_story_beats_headlines_court_dates_deadlines.ts",
+      "exec_hook": "touchMechanic('M133', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 3
+    },
+    {
+      "task_id": "PZO-M134",
+      "mechanic_id": "M134",
+      "title": "M134 \u2014 NPC Counterparties (Deterministic Personalities, No AI)",
+      "purpose": "",
+      "family": "replay",
+      "kind": "core",
+      "layer": "tick_engine",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M134a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m134.fired",
+        "system.m134.pulse"
+      ],
+      "module_path": "src/mechanics/M134_npc_counterparties_deterministic_personalities_no_ai.ts",
+      "exec_hook": "touchMechanic('M134', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 3
+    },
+    {
+      "task_id": "PZO-M135",
+      "mechanic_id": "M135",
+      "title": "M135 \u2014 Reputation Labels (Earned, Reversible, Proof-Based)",
+      "purpose": "",
+      "family": "anti_cheat",
+      "kind": "core",
+      "layer": "backend_service",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M135a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m135.fired",
+        "integrity.m135.check"
+      ],
+      "module_path": "src/mechanics/M135_reputation_labels_earned_reversible_proof_based.ts",
+      "exec_hook": "touchMechanic('M135', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 3
+    },
+    {
+      "task_id": "PZO-M136",
+      "mechanic_id": "M136",
+      "title": "M136 \u2014 Ruleset Signature Banner (Players Always Know What\u2019s Live)",
+      "purpose": "",
+      "family": "telemetry",
+      "kind": "core",
+      "layer": "backend_service",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M136a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m136.fired",
+        "telemetry.m136.event"
+      ],
+      "module_path": "src/mechanics/M136_ruleset_signature_banner_players_always_know_whats_live.ts",
+      "exec_hook": "touchMechanic('M136', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 3
+    },
+    {
+      "task_id": "PZO-M137",
+      "mechanic_id": "M137",
+      "title": "M137 \u2014 Mid-Run Hotfix Lock (No Surprise Changes Inside A Run)",
+      "purpose": "",
+      "family": "ops",
+      "kind": "core",
+      "layer": "backend_service",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M137a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m137.fired",
+        "system.m137.pulse"
+      ],
+      "module_path": "src/mechanics/M137_mid_run_hotfix_lock_no_surprise_changes_inside_a_run.ts",
+      "exec_hook": "touchMechanic('M137', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 3
+    },
+    {
+      "task_id": "PZO-M138",
+      "mechanic_id": "M138",
+      "title": "M138 \u2014 Degraded Mode (Server Load Shedding Without Breaking Runs)",
+      "purpose": "",
+      "family": "ops",
+      "kind": "core",
+      "layer": "backend_service",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M138a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m138.fired",
+        "system.m138.pulse"
+      ],
+      "module_path": "src/mechanics/M138_degraded_mode_server_load_shedding_without_breaking_runs.ts",
+      "exec_hook": "touchMechanic('M138', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 3
+    },
+    {
+      "task_id": "PZO-M139",
+      "mechanic_id": "M139",
+      "title": "M139 \u2014 Offline Queue Runs (Play Now, Verify Later)",
+      "purpose": "",
+      "family": "telemetry",
+      "kind": "core",
+      "layer": "backend_service",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M139a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m139.fired",
+        "telemetry.m139.event"
+      ],
+      "module_path": "src/mechanics/M139_offline_queue_runs_play_now_verify_later.ts",
+      "exec_hook": "touchMechanic('M139', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 3
+    },
+    {
+      "task_id": "PZO-M140",
+      "mechanic_id": "M140",
+      "title": "M140 \u2014 Player Evidence Export (Redacted Truth Packet)",
+      "purpose": "",
+      "family": "telemetry",
+      "kind": "core",
+      "layer": "backend_service",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M140a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m140.fired",
+        "telemetry.m140.event"
+      ],
+      "module_path": "src/mechanics/M140_player_evidence_export_redacted_truth_packet.ts",
+      "exec_hook": "touchMechanic('M140', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 3
+    },
+    {
+      "task_id": "PZO-M141",
+      "mechanic_id": "M141",
+      "title": "M141 \u2014 Asynchronous Table (Friends Vote Later, Still Timer-Bound)",
+      "purpose": "",
+      "family": "social",
+      "kind": "core",
+      "layer": "tick_engine",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M141a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m141.fired",
+        "social.m141.action"
+      ],
+      "module_path": "src/mechanics/M141_asynchronous_table_friends_vote_later_still_timer_bound.ts",
+      "exec_hook": "touchMechanic('M141', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 3
+    },
+    {
+      "task_id": "PZO-M142",
+      "mechanic_id": "M142",
+      "title": "M142 \u2014 House Rules (Custom Lobbies With Published Constraints)",
+      "purpose": "",
+      "family": "telemetry",
+      "kind": "core",
+      "layer": "backend_service",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M142a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m142.fired",
+        "telemetry.m142.event"
+      ],
+      "module_path": "src/mechanics/M142_house_rules_custom_lobbies_with_published_constraints.ts",
+      "exec_hook": "touchMechanic('M142', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 3
+    },
+    {
+      "task_id": "PZO-M143",
+      "mechanic_id": "M143",
+      "title": "M143 \u2014 Table Penalties (Toxicity Without ML: Pure Rule Enforcement)",
+      "purpose": "",
+      "family": "telemetry",
+      "kind": "core",
+      "layer": "backend_service",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M143a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m143.fired",
+        "telemetry.m143.event"
+      ],
+      "module_path": "src/mechanics/M143_table_penalties_toxicity_without_ml_pure_rule_enforcement.ts",
+      "exec_hook": "touchMechanic('M143', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 3
+    },
+    {
+      "task_id": "PZO-M144",
+      "mechanic_id": "M144",
+      "title": "M144 \u2014 Spectator Theater (Watch Live Runs With Delay)",
+      "purpose": "",
+      "family": "social",
+      "kind": "core",
+      "layer": "tick_engine",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M144a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m144.fired",
+        "social.m144.action"
+      ],
+      "module_path": "src/mechanics/M144_spectator_theater_watch_live_runs_with_delay.ts",
+      "exec_hook": "touchMechanic('M144', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 3
+    },
+    {
+      "task_id": "PZO-M145",
+      "mechanic_id": "M145",
+      "title": "M145 \u2014 Tournament Brackets (Verified Seeds + Published Scoring)",
+      "purpose": "",
+      "family": "replay",
+      "kind": "core",
+      "layer": "tick_engine",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M145a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m145.fired",
+        "system.m145.pulse"
+      ],
+      "module_path": "src/mechanics/M145_tournament_brackets_verified_seeds_published_scoring.ts",
+      "exec_hook": "touchMechanic('M145', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 3
+    },
+    {
+      "task_id": "PZO-M146",
+      "mechanic_id": "M146",
+      "title": "M146 \u2014 Audit Event (Forced Documentation Under Timer)",
+      "purpose": "",
+      "family": "anti_cheat",
+      "kind": "core",
+      "layer": "backend_service",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M146a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m146.fired",
+        "integrity.m146.check"
+      ],
+      "module_path": "src/mechanics/M146_audit_event_forced_documentation_under_timer.ts",
+      "exec_hook": "touchMechanic('M146', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 3
+    },
+    {
+      "task_id": "PZO-M147",
+      "mechanic_id": "M147",
+      "title": "M147 \u2014 Litigation Risk (Civil Shock, Deterministic Triggers)",
+      "purpose": "",
+      "family": "risk",
+      "kind": "core",
+      "layer": "tick_engine",
+      "priority": 2,
+      "status": "todo",
+      "ml_pair": "M147a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m147.fired",
+        "risk.m147.triggered"
+      ],
+      "module_path": "src/mechanics/M147_litigation_risk_civil_shock_deterministic_triggers.ts",
+      "exec_hook": "touchMechanic('M147', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 3
+    },
+    {
+      "task_id": "PZO-M148",
+      "mechanic_id": "M148",
+      "title": "M148 \u2014 Counterparty Freeze (Market Doesn\u2019t Always Clear)",
+      "purpose": "",
+      "family": "market",
+      "kind": "core",
+      "layer": "tick_engine",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M148a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m148.fired",
+        "market.m148.pulse"
+      ],
+      "module_path": "src/mechanics/M148_counterparty_freeze_market_doesnt_always_clear.ts",
+      "exec_hook": "touchMechanic('M148', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 3
+    },
+    {
+      "task_id": "PZO-M149",
+      "mechanic_id": "M149",
+      "title": "M149 \u2014 Regulatory Window (One Chance To Comply, Or Pay Forever)",
+      "purpose": "",
+      "family": "telemetry",
+      "kind": "core",
+      "layer": "backend_service",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M149a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m149.fired",
+        "telemetry.m149.event"
+      ],
+      "module_path": "src/mechanics/M149_regulatory_window_one_chance_to_comply_or_pay_forever.ts",
+      "exec_hook": "touchMechanic('M149', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 3
+    },
+    {
+      "task_id": "PZO-M150",
+      "mechanic_id": "M150",
+      "title": "M150 \u2014 Finality Ceremony (Run Ends With A Verifiable Stamp)",
+      "purpose": "",
+      "family": "telemetry",
+      "kind": "core",
+      "layer": "backend_service",
+      "priority": 3,
+      "status": "todo",
+      "ml_pair": "M150a",
+      "inputs": [
+        "state.tick"
+      ],
+      "outputs": [
+        "telemetry.envelope"
+      ],
+      "telemetry_events": [
+        "mechanic.m150.fired",
+        "telemetry.m150.event"
+      ],
+      "module_path": "src/mechanics/M150_finality_ceremony_run_ends_with_a_verifiable_stamp.ts",
+      "exec_hook": "touchMechanic('M150', signal)",
+      "dir": "pzo-web/src/data/mechanics/",
+      "batch": 3
+    }
+  ]
+}
