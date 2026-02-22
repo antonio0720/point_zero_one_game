@@ -1,0 +1,52 @@
+# Fastlane configuration for Point Zero One Digital mobile app deployment
+
+platform :ios do
+  # TestFlight and App Store deployments for iOS
+
+  # Apple App Store Connect API credentials
+  apple_app_store_connect(
+    team_id: "TEAM_ID",
+    api_key_id: "API_KEY_ID",
+    private_key_path: "PATH_TO_PRIVATE_KEY"
+  )
+
+  # TestFlight configuration
+  testflight(app_store_connect_api_key: "APP_STORE_CONNECT_API_KEY") do
+    # Environment-specific configurations for each build
+    # Example: 'staging' and 'production' environments
+    # Each environment should have its own Fastlane match block
+  end
+
+  # Automatic version bumping using Git tags or semantic versioning
+  increment_build_number(xcodeproj: "PROJECT.xcworkspace")
+end
+
+platform :android do
+  # Internal track and production promote for Android
+
+  # Google Play API credentials
+  google_play(
+    api_key: "API_KEY",
+    private_key_path: "PATH_TO_PRIVATE_KEY"
+  )
+
+  # Internal track deployment
+  alpha do
+    # Environment-specific configurations for each build
+    # Example: 'staging' and 'production' environments
+    # Each environment should have its own Fastlane match block
+  end
+
+  # Production promote from internal track to Google Play Store
+  production do
+    # Promote the latest internal track build to production
+    # This assumes that you have already deployed a new build to the internal track
+  end
+end
+
+# Release notes from Git log
+lane :release_notes do
+  git_short_log(since: "LAST_RELEASE_TAG", limit: 5) do |commit|
+    puts commit.message
+  end
+end

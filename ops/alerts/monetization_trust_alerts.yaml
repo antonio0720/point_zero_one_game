@@ -1,0 +1,50 @@
+Here is the `ops/alerts/monetization_trust_alerts.yaml` file as requested:
+
+```yaml
+# Monetization Trust Alerts Configuration
+version: v1
+
+metadata:
+  name: Monetization Trust Alerts
+  description: Alerts for monitoring pay-to-win sentiment, refund spikes, ladder participation drops, and rage quit spikes after offers.
+
+alerts:
+  - name: Pay-to-Win Sentiment Spike
+    annotations:
+      summary: A sudden increase in pay-to-win sentiment indicates potential issues with game balance or player engagement.
+      description: Monitor the ratio of paying players to non-paying players for significant deviations from the norm.
+    expr: (paying_players / (paying_players + non_paying_players)) > 0.85
+    for: 1h
+    labels:
+      alertname: Pay-to-Win Sentiment Spike
+      severity: Critical
+
+  - name: Refund Spike
+    annotations:
+      summary: A sudden increase in refunds may indicate player dissatisfaction or technical issues.
+      description: Monitor the number of refund requests for significant deviations from the norm.
+    expr: sum(rate(refunds[1h])) > 50
+    for: 1h
+    labels:
+      alertname: Refund Spike
+      severity: High
+
+  - name: Ladder Participation Drop Post Policy Rollout
+    annotations:
+      summary: A drop in ladder participation after a policy rollout may indicate player dissatisfaction or unintended consequences.
+      description: Monitor the number of players participating in ladders before and after policy rollouts for significant deviations from the norm.
+    expr: (ladder_participation[1h] - ladder_participation[24h]) < -50
+    for: 1h
+    labels:
+      alertname: Ladder Participation Drop Post Policy Rollout
+      severity: High
+
+  - name: Rage Quit Spike After Offers
+    annotations:
+      summary: A sudden increase in rage quits after offers may indicate player dissatisfaction with the offer or game balance.
+      description: Monitor the number of rage quits for significant deviations from the norm, especially after offers are sent out.
+    expr: sum(rate(rage_quits[1h])) > 20
+    for: 1h
+    labels:
+      alertname: Rage Quit Spike After Offers
+      severity: Medium

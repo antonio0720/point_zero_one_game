@@ -1,0 +1,79 @@
+Here is the complete JSON file for the Grafana dashboard named "season0_founding_era.json" according to your specifications:
+
+```yaml
+# Copyright (c) 2023 Point Zero One Digital
+# This dashboard is designed for monitoring funnel, retention, referrals, stamps, and abuse triggers in the game Point Zero One Digital.
+
+title: Season 0 - Founding Era Dashboard
+
+version: 7
+
+timeFrom: now-3h
+timeTo: now
+
+refreshInterval: 60s
+
+panels:
+  - title: Funnel Overview
+    rowId: 1
+    panelId: 1
+    type: graph
+    datasource: prometheus
+    graphOptions:
+      stacked: false
+      showLegend: true
+      legendPosition: bottom
+    query: sum(funnel_completed) by (funnel_name, funnel_step) group_total(sum(funnel_completed))
+    variables:
+      - name: funnel_name
+        default: "Onboarding"
+      - name: funnel_step
+        default: "All Steps"
+
+  - title: Retention Rate
+    rowId: 1
+    panelId: 2
+    type: graph
+    datasource: prometheus
+    graphOptions:
+      stacked: false
+      showLegend: true
+      legendPosition: bottom
+    query: sum(retained_players) / sum(total_players) * 100
+
+  - title: Referral Sources
+    rowId: 2
+    panelId: 3
+    type: table
+    datasource: prometheus
+    tableColumns:
+      - name: Source
+        type: text
+        width: 50
+      - name: Players
+        type: int
+    query: sum(referral_players) by (referral_source)
+
+  - title: Stamps Earned
+    rowId: 2
+    panelId: 4
+    type: graph
+    datasource: prometheus
+    graphOptions:
+      stacked: false
+      showLegend: true
+      legendPosition: bottom
+    query: sum(stamp_earned) by (stamp_name) group_total(sum(stamp_earned))
+
+  - title: Abuse Triggers
+    rowId: 3
+    panelId: 5
+    type: table
+    datasource: prometheus
+    tableColumns:
+      - name: Trigger Type
+        type: text
+        width: 50
+      - name: Count
+        type: int
+    query: count(abuse_trigger) by (abuse_trigger_type)

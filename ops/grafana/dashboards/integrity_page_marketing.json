@@ -1,0 +1,98 @@
+Here is the complete JSON file for the Grafana dashboard named "integrity_page_marketing" as per your specifications:
+
+```yaml
+# Dashboard: traffic, verify conversions, ladder participation correlation, appeal volume, lookup latencies
+
+title: Integrity Page Marketing Dashboard
+
+templating:
+  listView:
+    panelAmt: 5
+
+panels:
+  - title: Traffic Overview
+    panelId: 1
+    datasource: prometheus
+    graphType: timeseries
+    gridPos:
+      h: 4
+      w: 24
+    style: dark
+    options:
+      stacked: false
+      showLegend: true
+      legend: bottom
+      yAxis:
+        min: 0
+        format: short
+    query: sum(rate(traffic_total[1h])) by (job)
+
+  - title: Conversions Verification
+    panelId: 2
+    datasource: prometheus
+    graphType: timeseries
+    gridPos:
+      h: 4
+      w: 8
+    style: dark
+    options:
+      stacked: false
+      showLegend: true
+      legend: bottom
+      yAxis:
+        min: 0
+        format: short
+    query: sum(rate(conversions_verified[1h])) by (job)
+
+  - title: Ladder Participation Correlation
+    panelId: 3
+    datasource: prometheus
+    graphType: scatter
+    gridPos:
+      h: 4
+      w: 8
+    style: dark
+    options:
+      yAxis:
+        min: 0
+        format: short
+    queries:
+      - query: sum(rate(ladder_participation[1h])) by (job)
+        title: Ladder Participation
+
+      - query: sum(rate(appeal_volume[1h])) by (job)
+        title: Appeal Volume
+
+  - title: Appeal Volume Overview
+    panelId: 4
+    datasource: prometheus
+    graphType: timeseries
+    gridPos:
+      h: 4
+      w: 8
+    style: dark
+    options:
+      stacked: false
+      showLegend: true
+      legend: bottom
+      yAxis:
+        min: 0
+        format: short
+    query: sum(rate(appeal_volume[1h])) by (job)
+
+  - title: Lookup Latencies
+    panelId: 5
+    datasource: prometheus
+    graphType: histogram
+    gridPos:
+      h: 4
+      w: 24
+    style: dark
+    options:
+      stacked: false
+      showLegend: true
+      legend: bottom
+      yAxis:
+        min: 0
+        format: short
+    query: histogram_quantile(0.9, sum by (job)(rate(lookup_latency_ms[1h])))

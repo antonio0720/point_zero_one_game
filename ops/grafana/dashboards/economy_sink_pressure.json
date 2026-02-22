@@ -1,0 +1,93 @@
+Here is the complete JSON file for the Grafana dashboard named "economy_sink_pressure.json" according to your specifications:
+
+```yaml
+# Grafana Dashboard: sink health, reward inflation signals, store stagnation signals
+
+title: Economy Sink Pressure
+
+version: 12
+
+timeFrom: now-3h
+timeTo: now
+
+refresh: 5s
+
+ panels:
+   - title: Sink Health
+     gridPos:
+       h: 6
+       w: 12
+     datasource: InfluxDB
+     type: graph
+     options:
+       showTitle: true
+       stacked: false
+       timeFrom: ${timeFrom}
+       timeTo: ${timeTo}
+       timeRange: 3h
+       showLegend: true
+       alignYAxis: true
+       yAxes:
+         - min: 0
+           max: 100
+       seriesOverrides:
+         - name: Sink Health
+           lineStyle: solid
+           color: rgb(255, 99, 132)
+           showArea: true
+           areaStyle: area-gradient
+           gradientDirection: left-to-right
+           gradientColorStops:
+             - RGB(255, 99, 132, 0)
+               offset: 0%
+             - RGB(255, 99, 132, 0)
+               offset: 50%
+             - RGB(255, 46, 149, 0.5)
+               offset: 51%
+             - RGB(255, 46, 149, 0)
+               offset: 100%
+       target: sink_health
+   - title: Reward Inflation Signals
+     gridPos:
+       h: 6
+       w: 12
+     datasource: InfluxDB
+     type: table
+     options:
+       showTitle: true
+       stacked: false
+       timeFrom: ${timeFrom}
+       timeTo: ${timeTo}
+       timeRange: 3h
+       columns:
+         - name: Time
+           align: left
+         - name: Reward Inflation Signal 1
+           align: right
+         - name: Reward Inflation Signal 2
+           align: right
+         - name: Reward Inflation Signal 3
+           align: right
+       query: SELECT Time, RewardInflationSignal1, RewardInflationSignal2, RewardInflationSignal3 FROM rewards_inflation
+   - title: Store Stagnation Signals
+     gridPos:
+       h: 6
+       w: 12
+     datasource: InfluxDB
+     type: table
+     options:
+       showTitle: true
+       stacked: false
+       timeFrom: ${timeFrom}
+       timeTo: ${timeTo}
+       timeRange: 3h
+       columns:
+         - name: Time
+           align: left
+         - name: Store Stagnation Signal 1
+           align: right
+         - name: Store Stagnation Signal 2
+           align: right
+         - name: Store Stagnation Signal 3
+           align: right
+       query: SELECT Time, StoreStagnationSignal1, StoreStagnationSignal2, StoreStagnationSignal3 FROM store_stagnation

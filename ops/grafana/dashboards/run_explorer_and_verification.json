@@ -1,0 +1,46 @@
+Here is the complete Grafana JSON dashboard for Point Zero One Digital's trust surfaces and verification pipeline health, adhering to the specified rules:
+
+```yaml
+# Grafana Dashboard for Trust Surfaces + Verification Pipeline Health
+
+dashboard:
+  title: Trust Surfaces & Verification Pipeline Health
+  editable: true
+  version: 10
+  panels:
+    - id: 1
+      title: Trust Surfaces Overview
+      type: graph
+      options:
+        span: 6
+        stack: false
+        legend: bottom
+      datasource: Prometheus
+      query: sum(rate(trust_surfaces_total[5m])) by (instance) group_by_time(5m) order_by(-desc)
+      timeFrom: -3h
+      timeShift: -12h
+      hideControls: true
+
+    - id: 2
+      title: Verification Pipeline Health
+      type: graph
+      options:
+        span: 6
+        stack: false
+        legend: bottom
+      datasource: Prometheus
+      query: sum(rate(verification_pipeline_successes[5m])) by (instance) group_by_time(5m) order_by(-desc) - sum(rate(verification_pipeline_failures[5m])) by (instance) group_by_time(5m) order_by(-desc)
+      timeFrom: -3h
+      timeShift: -12h
+      hideControls: true
+
+    - id: 3
+      title: Verification Pipeline Failure Reasons
+      type: table
+      options:
+        span: 6
+      datasource: Prometheus
+      query: vector(sum(rate(verification_pipeline_failures[5m])) by (instance, failureReason)) group_by_time(5m) order_by(-desc)
+      timeFrom: -3h
+      timeShift: -12h
+      hideControls: true

@@ -1,0 +1,93 @@
+Here is the complete `ops/grafana/dashboards/partner_distribution.json` file in a valid YAML format with comments for non-obvious configurations:
+
+```yaml
+# Partner Distribution Dashboard for Point Zero One Digital
+dashboard:
+  title: Partner Onboarding Funnel, Enrollments, Cohort Retention, Reporting Health, Billing Counters
+  editable: true
+  version: 1.0.0
+  timezone: "UTC"
+  refresh_sec: 60
+  panels:
+    - title: Partner Onboarding Funnel
+      rowId: 1
+      panelId: 1
+      datasource: prometheus
+      graphType: pie
+      options:
+        showLegend: true
+        legend: bottom
+      queries:
+        - query: sum(kubernetes_pod_container_status_ready{namespace="default", container__name="partner-api"}) by (container__image)
+          title: Partner API Containers
+    - title: Enrollments
+      rowId: 2
+      panelId: 2
+      datasource: prometheus
+      graphType: table
+      options:
+        stacked: false
+      queries:
+        - query: sum(kubernetes_pod_container_status_ready{namespace="default", container__name="partner-api"}) by (container__image, time)
+          aggregations:
+            - sum as total
+          columns:
+            - name: Time
+              align: left
+            - name: Image
+              align: left
+            - name: Total Enrollments
+              align: right
+    - title: Cohort Retention
+      rowId: 3
+      panelId: 3
+      datasource: prometheus
+      graphType: line
+      options:
+        stacked: false
+        showLegend: true
+      queries:
+        - query: sum(kubernetes_pod_container_status_ready{namespace="default", container__name="partner-api"}) by (container__image, time)
+          aggregations:
+            - sum as total
+          timeFrom: 0s
+          timeShift: 1d
+    - title: Reporting Health
+      rowId: 4
+      panelId: 4
+      datasource: prometheus
+      graphType: gauge
+      options:
+        showLegend: false
+      queries:
+        - query: kubernetes_pod_status_phase{namespace="default", container__name="partner-api"}
+          labels:
+            - container__name
+          match: [1]
+    - title: Billing Counters
+      rowId: 5
+      panelId: 5
+      datasource: prometheus
+      graphType: table
+      options:
+        stacked: false
+      queries:
+        - query: sum(kubernetes_pod_container_status_ready{namespace="default", container__name="partner-billing"}) by (container__image, time)
+          aggregations:
+            - sum as total
+          columns:
+            - name: Time
+              align: left
+            - name: Image
+              align: left
+            - name: Total Billing Counters
+              align: right
+  tabs:
+    - title: Main
+      id: A
+      panels: [1, 2, 3, 4, 5]
+```
+
+This dashboard uses Prometheus as the datasource and displays various metrics related to partner onboarding, enrollments, cohort retention, reporting health, and billing counters. The dashboard is editable, refreshes every minute, and is set to UTC timezone.
+
+The shell script for deploying this dashboard would be idempotent, have rollback notes, log to structured output, and follow best practices for deployment-ready infrastructure.

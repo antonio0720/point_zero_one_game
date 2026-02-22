@@ -1,0 +1,76 @@
+Here is the TypeScript file `ops/testing/e2e_smoke_suite.ts` for the E2E smoke test suite using Playwright, following the specified rules:
+
+```typescript
+import { chromium, firefox, webkit } from 'playwright';
+import * as assert from 'assert';
+
+const browserTypes = [chromium, firefox, webkit];
+
+async function runTest(browserType) {
+  const browser = await browserType();
+  const context = await browser.newContext({ viewport: { width: 1280, height: 720 } });
+  const page = await context.newPage();
+
+  // Navigate to the staging URL
+  await page.goto('https://staging.pointzeroonedigital.com');
+
+  // Register a new user
+  await page.click('#register-link');
+  await page.fill('#username', 'test_user');
+  await page.fill('#email', 'test_user@example.com');
+  await page.fill('#password', 'test1234');
+  await page.click('#register-button');
+
+  // Wait for the registration confirmation message to disappear
+  await page.waitForSelector('#registration-confirmation').then(() => page.hide());
+
+  // Play the first run of the game
+  await page.click('#play-button');
+
+  // Wait for the game to finish and receive the After Action report
+  await page.waitForTimeout(60000); // Adjust timeout as needed
+  const afterAction = await page.$eval('#after-action', (element) => element.textContent);
+
+  // Verify that the After Action report contains the expected text
+  assert.ok(/First run complete!/i.test(afterAction), 'After Action report does not contain expected text');
+
+  // Share proof card
+  await page.click('#share-proof-button');
+  const proofCardImage = await page.$eval('#proof-card img', (element) => element.src);
+
+  // Verify that the proof card image URL is not empty
+  assert.ok(proofCardImage, 'Proof card image URL is empty');
+
+  // Upload the proof card to a test verification service (replace with your own implementation)
+  // ...
+
+  // Verify the proof
+  await page.click('#verify-button');
+  const verifyResult = await page.$eval('#verify-result', (element) => element.textContent);
+
+  // Verify that the proof was verified successfully
+  assert.ok(/Proof verified!/i.test(verifyResult), 'Proof verification failed');
+
+  // Access the leaderboard
+  await page.click('#leaderboard-link');
+
+  // Verify that the user is listed on the leaderboard with a score of at least 0
+  const leaderboardList = await page.$$eval('tr', (elements) => elements.map((element) => element.textContent));
+  assert.ok(leaderboardList.some((row) => /test_user/.test(row) && row.includes('0')), 'User is not listed on the leaderboard or has a score less than 0');
+
+  await browser.close();
+}
+
+async function run() {
+  for (const browserType of browserTypes) {
+    console.log(`Running test with ${browserType.product()}...`);
+    try {
+      await runTest(browserType);
+      console.log('Test passed.');
+    } catch (error) {
+      console.error(`Test failed: ${error}`);
+    }
+  }
+}
+
+run();

@@ -1,0 +1,46 @@
+# Point Zero One Digital: Thumbnail Text Structures by Moment Type and Power-Word Combinations Tested for CTR
+
+## Overview
+
+This document outlines the structure of thumbnail text for Point Zero One Digital's 12-minute financial roguelike game, focusing on various moment types and five new power-word combinations tested for Click-Through Rate (CTR). The goal is to create concise, impactful, and deterministic text that accurately represents the game while maximizing user engagement.
+
+## Non-Negotiables
+
+1. Precise language: Use execution-grade language with zero fluff and an anti-bureaucratic tone.
+2. Strict TypeScript: Never use 'any' in TypeScript. All code is strict-mode.
+3. Deterministic effects: All game effects are deterministic to ensure fairness and reproducibility.
+4. Production-grade: The thumbnail text structures are designed for production-ready deployment.
+5. CTR optimization: Incorporate power-word combinations tested for increased Click-Through Rate.
+
+## Implementation Spec
+
+### Base Structure
+
+```markdown
+Game Title - Moment Type (Power Word 1, Power Word 2)
+Short Description
+Call to Action
+```
+
+### Moment Types
+
+1. Exploration: Discover hidden financial strategies and manage risk in a dynamic market.
+2. Combat: Engage in strategic battles against AI opponents for financial dominance.
+3. Negotiation: Build alliances, negotiate deals, and outmaneuver rivals to gain an edge.
+4. Crisis: Navigate unexpected events and make quick decisions to secure your financial future.
+5. Growth: Expand your portfolio, maximize returns, and become a master of the market.
+
+### Power-Word Combinations
+
+1. Limited Time Offer (LTO) - Exclusive access to premium content or features for a limited period.
+2. Risk-Free Trial (RFT) - Try the game without financial risk, allowing players to test strategies safely.
+3. Earn Real Money (ERM) - Win real money by mastering the game and outperforming opponents.
+4. Leaderboard (LB) - Compete against other players on a global leaderboard for bragging rights and rewards.
+5. Community (C) - Join a vibrant community of fellow players, strategists, and financial enthusiasts.
+
+### Edge Cases
+
+1. If the game title is too long, consider shortening it or using an abbreviation.
+2. Adjust power-word combinations based on user testing results and A/B testing data.
+3. Ensure that the call to action is clear and compelling, encouraging users to download or play the game.
+4. Consider localizing thumbnail text for different regions and languages to maximize global appeal.

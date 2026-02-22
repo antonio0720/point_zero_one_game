@@ -1,0 +1,29 @@
+Here is the JSON file content for `frontend/apps/web/content/integrity/copy_keys.json` following the specified rules:
+
+```json
+/*
+ * i18n keys for integrity copy; supports localization
+ */
+
+{
+  "IntegrityCopyTitle": {
+    "en-US": "Point Zero One Digital - Integrity Copy",
+    "fr-FR": "Point Zero One Digital - Copie de l'intégrité"
+  },
+  "IntegrityCopyDescription": {
+    "en-US": "Ensure your game data is secure and up-to-date.",
+    "fr-FR": "Assurez-vous que vos données de jeu sont sécurisées et à jour."
+  },
+  "IntegrityCopyButton": {
+    "en-US": "Start Integrity Copy",
+    "fr-FR": "Démarrer la copie d'intégrité"
+  },
+  "IntegrityCopyConfirmation": {
+    "en-US": "Your game data has been successfully copied.",
+    "fr-FR": "Vos données de jeu ont été correctement copiées."
+  },
+  "IntegrityCopyError": {
+    "en-US": "An error occurred while copying your game data. Please try again later.",
+    "fr-FR": "Une erreur est survenue lors de la copie de vos données de jeu. Veuillez réessayer plus tard."
+  }
+}

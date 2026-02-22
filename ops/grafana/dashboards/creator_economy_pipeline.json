@@ -1,0 +1,74 @@
+{
+  "dashboard": {
+    "id": null,
+    "uid": "${PZ1_DASHBOARD_UID}",
+    "title": "Creator Economy Pipeline",
+    "tags": [
+      "creator economy",
+      "pipeline"
+    ],
+    "schemaVersion": 16,
+    "version": 0,
+    "timezone": "",
+    "panels": [],
+    "rows": [],
+    "columns": []
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "ingest_status",
+        "query": "SELECT status FROM ingest WHERE id = '${INGEST_ID}'",
+        "type": "query",
+        "datasource": "${PZ1_DS_INGEST}",
+        "label": "Ingest Status"
+      },
+      {
+        "name": "lint_status",
+        "query": "SELECT status FROM lint WHERE id = '${LINT_ID}'",
+        "type": "query",
+        "datasource": "${PZ1_DS_LINT}",
+        "label": "Lint Status"
+      },
+      {
+        "name": "policy_status",
+        "query": "SELECT status FROM policy WHERE id = '${POLICY_ID}'",
+        "type": "query",
+        "datasource": "${PZ1_DS_POLICY}",
+        "label": "Policy Status"
+      },
+      {
+        "name": "verification_status",
+        "query": "SELECT status FROM verification WHERE id = '${VERIFICATION_ID}'",
+        "type": "query",
+        "datasource": "${PZ1_DS_VERIFICATION}",
+        "label": "Verification Status"
+      },
+      {
+        "name": "placement_status",
+        "query": "SELECT status FROM placement WHERE id = '${PLACEMENT_ID}'",
+        "type": "query",
+        "datasource": "${PZ1_DS_PLACEMENT}",
+        "label": "Placement Status"
+      },
+      {
+        "name": "revshare_status",
+        "query": "SELECT status FROM revshare WHERE id = '${REVSHARE_ID}'",
+        "type": "query",
+        "datasource": "${PZ1_DS_REVSHARE}",
+        "label": "Revshare Status"
+      }
+    ]
+  },
+  "annotations": {
+    "list": [
+      {
+        "name": "abuse_triggers",
+        "datasource": "${PZ1_DS_ABUSE}",
+        "enableTags": true,
+        "query": "SELECT * FROM abuse WHERE id = '${ABUSE_ID}'"
+      }
+    ]
+  },
+  "variables": []
+}

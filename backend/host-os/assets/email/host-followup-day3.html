@@ -1,0 +1,60 @@
+/**
+ * Day-3 follow-up email template
+ */
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 3 Follow-up: Point Zero One Digital</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+        }
+        .container {
+            max-width: 600px;
+            margin: auto;
+            padding: 2rem;
+            background-color: #f5f5f5;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Have you run your first night with Point Zero One Digital?</h1>
+        <p>
+            It's day 3 and we hope everything is going smoothly. If you have any questions or issues, please don't hesitate to reach out.
+        </p>
+        <p>
+            As a reminder, your game server is deployed at: <a href="https://pointzeroonegame.com/host">pointzeroonegame.com/host</a>
+        </p>
+        <h2>Debrief Prompt Sample:</h2>
+        <pre>
+            &lt;?php
+                $data = [
+                    'server_id' => 12345,
+                    'game_session_id' => 'abcdefghijklmnop',
+                    'player_name' => 'John Doe',
+                    'replay_file' => 'replay_2022-09-12_23-59-59.json'
+                ];
+
+                // Replace the placeholders with your actual data
+                $serverUrl = 'https://api.pointzeroonegame.com/servers/' . $data['server_id'] . '/replays/' . $data['replay_file'];
+
+                // Fetch the replay file and save it to disk for analysis
+                $ch = curl_init($serverUrl);
+                curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+                $response = curl_exec($ch);
+                curl_close($ch);
+
+                // Analyze the replay file and generate a report
+                // ...
+            ?&gt;
+        </pre>
+    </div>
+</body>
+</html>

@@ -1,0 +1,174 @@
+Here is the complete JSON file for the `monetization_governance.json` dashboard in Grafana format, adhering to your specified rules:
+
+```yaml
+# Monetization Governance Dashboard
+
+title: Monetization Governance
+
+description: A dashboard displaying store health, RC changes, blocked violations, ranked integrity routing, and trust proxies for Point Zero One Digital's financial roguelike game.
+
+type: dashboards
+
+version: 12
+
+editable: true
+
+timezone: browser_local
+
+links:
+  - name: Point Zero One Digital
+    url: https://pointzeroonedigital.com
+
+tags:
+  - point-zero-one-digital
+  - monetization
+  - governance
+  - store-health
+  - rc-changes
+  - blocked-violations
+  - ranked-integrity-routing
+  - trust-proxies
+
+var: timeFromNow=$__fromNowFunc(24h)
+
+panels:
+  - title: Store Health Overview
+    rowId: 1
+    panelId: 1
+    style: dark
+    timeFrom: $timeFromNow
+    timeShift: -6h
+    type: graph
+    options: {
+      stacked: false,
+      legend: {
+        orientation: "bottom"
+      }
+    }
+    datasource: Prometheus
+    query: sum(rate(point_zero_one_digital_store_health_total{job="prometheus"}[$__interval])) by (job)
+    targets:
+      - alias: Store Health Total
+        expr: sum(rate(point_zero_one_digital_store_health_total{job="prometheus"}[$__interval]))
+      - alias: Store Health Success
+        expr: sum(rate(point_zero_one_digital_store_health_success{job="prometheus"}[$__interval]))
+      - alias: Store Health Failure
+        expr: sum(rate(point_zero_one_digital_store_health_failure{job="prometheus"}[$__interval]))
+    graphOptions: {
+      yAxes: [
+        {
+          min: 0,
+          format: "short",
+          title: "Total Requests"
+        }
+      ]
+    }
+
+  - title: RC Changes Overview
+    rowId: 1
+    panelId: 2
+    style: dark
+    timeFrom: $timeFromNow
+    type: table
+    datasource: Prometheus
+    query: point_zero_one_digital_rc_changes{job="prometheus"}
+    tableColumns:
+      - name: Timestamp
+        width: 200px
+        align: left
+        type: time
+      - name: RC Name
+        width: 150px
+        align: left
+      - name: Changes
+        width: 100px
+        align: right
+    tableHeaderRowColor: #333
+    tableRowColor: #444
+
+  - title: Blocked Violations Overview
+    rowId: 2
+    panelId: 1
+    style: dark
+    timeFrom: $timeFromNow
+    type: graph
+    options: {
+      stacked: false,
+      legend: {
+        orientation: "bottom"
+      }
+    }
+    datasource: Prometheus
+    query: sum(rate(point_zero_one_digital_blocked_violations_total{job="prometheus"}[$__interval])) by (job)
+    targets:
+      - alias: Blocked Violations Total
+        expr: sum(rate(point_zero_one_digital_blocked_violations_total{job="prometheus"}[$__interval]))
+      - alias: Blocked Violations Success
+        expr: sum(rate(point_zero_one_digital_blocked_violations_success{job="prometheus"}[$__interval]))
+      - alias: Blocked Violations Failure
+        expr: sum(rate(point_zero_one_digital_blocked_violations_failure{job="prometheus"}[$__interval]))
+    graphOptions: {
+      yAxes: [
+        {
+          min: 0,
+          format: "short",
+          title: "Total Violations"
+        }
+      ]
+    }
+
+  - title: Ranked Integrity Routing Overview
+    rowId: 2
+    panelId: 2
+    style: dark
+    timeFrom: $timeFromNow
+    type: table
+    datasource: Prometheus
+    query: point_zero_one_digital_ranked_integrity_routing{job="prometheus"}
+    tableColumns:
+      - name: Timestamp
+        width: 200px
+        align: left
+        type: time
+      - name: Integrity Routing Name
+        width: 150px
+        align: left
+      - name: Rank
+        width: 100px
+        align: right
+      - name: Success Rate
+        width: 100px
+        align: right
+    tableHeaderRowColor: #333
+    tableRowColor: #444
+
+  - title: Trust Proxies Overview
+    rowId: 3
+    panelId: 1
+    style: dark
+    timeFrom: $timeFromNow
+    type: graph
+    options: {
+      stacked: false,
+      legend: {
+        orientation: "bottom"
+      }
+    }
+    datasource: Prometheus
+    query: sum(rate(point_zero_one_digital_trust_proxies_total{job="prometheus"}[$__interval])) by (job)
+    targets:
+      - alias: Trust Proxies Total
+        expr: sum(rate(point_zero_one_digital_trust_proxies_total{job="prometheus"}[$__interval]))
+      - alias: Trust Proxies Success
+        expr: sum(rate(point_zero_one_digital_trust_proxies_success{job="prometheus"}[$__interval]))
+      - alias: Trust Proxies Failure
+        expr: sum(rate(point_zero_one_digital_trust_proxies_failure{job="prometheus"}[$__interval]))
+    graphOptions: {
+      yAxes: [
+        {
+          min: 0,
+          format: "short",
+          title: "Total Requests"
+        }
+      ]
+    }

@@ -1,0 +1,99 @@
+Here is the complete `share_engine.json` file in Grafana JSON format, adhering to your specifications:
+
+```yaml
+# Grafana Dashboard JSON for Point Zero One Digital Share Metrics
+
+{
+  "title": "Point Zero One Digital - Share Engine",
+  "version": 2,
+  "panels": [
+    {
+      "title": "Share Cards Generated/Day",
+      "type": "graph",
+      "options": {
+        "stacked": false,
+        "legend": {
+          "position": "bottom"
+        }
+      },
+      "datasource": "Prometheus",
+      "query": "sum(rate(share_engine_cards_generated[1d])) by (job)",
+      "refresh": -1,
+      "targets": [
+        {
+          "expr": "sum(rate(share_engine_cards_generated[1d]))"
+        }
+      ]
+    },
+    {
+      "title": "Clip Capture Queue Depth",
+      "type": "gauge",
+      "options": {},
+      "datasource": "Prometheus",
+      "query": "share_engine_clip_capture_queue_depth",
+      "refresh": -1,
+      "targets": [
+        {
+          "expr": "share_engine_clip_capture_queue_depth"
+        }
+      ]
+    },
+    {
+      "title": "OG Cache Hit Rate",
+      "type": "graph",
+      "options": {
+        "stacked": false,
+        "legend": {
+          "position": "bottom"
+        }
+      },
+      "datasource": "Prometheus",
+      "query": "sum(rate(share_engine_og_cache_hit_rate[1d])) by (job)",
+      "refresh": -1,
+      "targets": [
+        {
+          "expr": "sum(rate(share_engine_og_cache_hit_rate[1d]))"
+        }
+      ]
+    },
+    {
+      "title": "Viral Coefficient by Moment Type",
+      "type": "table",
+      "options": {},
+      "datasource": "Prometheus",
+      "query": "vector(sum(share_engine_viral_coefficients))",
+      "refresh": -1,
+      "columns": [
+        {
+          "title": "Moment Type",
+          "field": "__name__"
+        },
+        {
+          "title": "Viral Coefficient",
+          "field": "value"
+        }
+      ]
+    },
+    {
+      "title": "Top Performing Share Templates",
+      "type": "table",
+      "options": {},
+      "datasource": "Prometheus",
+      "query": "vector(topk(10, sum(rate(share_engine_shares[1d])) by (template)))",
+      "refresh": -1,
+      "columns": [
+        {
+          "title": "Share Template",
+          "field": "template"
+        },
+        {
+          "title": "Shares Generated",
+          "field": "value"
+        }
+      ]
+    }
+  ],
+  "editable": true,
+  "timezone": "UTC",
+  "templating": {}
+}

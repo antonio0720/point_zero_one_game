@@ -1,0 +1,94 @@
+Here is the complete `ops/data/kafka_topics.yaml` file for Point Zero One Digital's Kafka topic definitions:
+
+```yaml
+# Kafka topics configuration for Point Zero One Digital
+
+game-events:
+  partitions: 10
+  replication-factor: 3
+  config:
+    cleanup.policy: compact
+    max.message.bytes: 1048576
+    retention.ms: 7d
+    isolation.levels: "read_uncommitted,read_committed,read_committed"
+    transaction.max.age.ms: 300000
+    enable.auto.commit: false
+    auto.offset.reset: earliest
+
+verification-events:
+  partitions: 5
+  replication-factor: 3
+  config:
+    cleanup.policy: compact
+    max.message.bytes: 1048576
+    retention.ms: 7d
+    isolation.levels: "read_uncommitted,read_committed,read_committed"
+    transaction.max.age.ms: 300000
+    enable.auto.commit: false
+    auto.offset.reset: earliest
+
+ladder-events:
+  partitions: 5
+  replication-factor: 3
+  config:
+    cleanup.policy: compact
+    max.message.bytes: 1048576
+    retention.ms: 7d
+    isolation.levels: "read_uncommitted,read_committed,read_committed"
+    transaction.max.age.ms: 300000
+    enable.auto.commit: false
+    auto.offset.reset: earliest
+
+social-events:
+  partitions: 5
+  replication-factor: 3
+  config:
+    cleanup.policy: compact
+    max.message.bytes: 1048576
+    retention.ms: 7d
+    isolation.levels: "read_uncommitted,read_committed,read_committed"
+    transaction.max.age.ms: 300000
+    enable.auto.commit: false
+    auto.offset.reset: earliest
+
+economy-events:
+  partitions: 5
+  replication-factor: 3
+  config:
+    cleanup.policy: compact
+    max.message.bytes: 1048576
+    retention.ms: 7d
+    isolation.levels: "read_uncommitted,read_committed,read_committed"
+    transaction.max.age.ms: 300000
+    enable.auto.commit: false
+    auto.offset.reset: earliest
+
+biometric-events:
+  partitions: 5
+  replication-factor: 3
+  config:
+    cleanup.policy: compact
+    max.message.bytes: 1048576
+    retention.ms: 7d
+    isolation.levels: "read_uncommitted,read_committed,read_committed"
+    transaction.max.age.ms: 300000
+    enable.auto.commit: false
+    auto.offset.reset: earliest
+
+macro-events:
+  partitions: 5
+  replication-factor: 3
+  config:
+    cleanup.policy: compact
+    max.message.bytes: 1048576
+    retention.ms: 7d
+    isolation.levels: "read_uncommitted,read_committed,read_committed"
+    transaction.max.age.ms: 300000
+    enable.auto.commit: false
+    auto.offset.reset: earliest
+
+# Dead-Letter Queue configuration for Kafka topics
+dlq:
+  topic: kafka-dlq
+  partition: 1
+  replication-factor: 3

@@ -1,0 +1,51 @@
+Here is the `ops/alerts/licensing_alerts.yaml` file for Point Zero One Digital's Sovereign infrastructure, adhering to the specified rules:
+
+```yaml
+# Licensing Alerts Configuration
+version: v1
+
+metadata:
+  name: Licensing Alerts
+  description: Alerts for licensing-related issues in the Point Zero One Digital game.
+  namespace: pointzeroonedigital
+
+alerts:
+  - name: Licensing Roster Import Failures
+    annotations:
+      description: Notifies when there are failures during the import of the licensing roster.
+      severity: Critical
+    expr: kube_state_metrics_pod_container_status_phase{namespace="pointzeroonedigital", container="licensing-roster-importer", phase!="Running"} > 0
+    for: 5m
+    labels:
+      alertname: Licensing Roster Import Failures
+      severity: critical
+
+  - name: Report Job Backlog
+    annotations:
+      description: Notifies when the report job backlog exceeds a certain threshold.
+      severity: High
+    expr: kube_state_metrics_job_completed{namespace="pointzeroonedigital", job="report-generator"} < kube_state_metrics_cronjob_last_successful_run{namespace="pointzeroonedigital", name="report-generator"} - (time() - 24h)
+    for: 5m
+    labels:
+      alertname: Report Job Backlog
+      severity: high
+
+  - name: Export Failures
+    annotations:
+      description: Notifies when there are failures during the export of game data.
+      severity: High
+    expr: kube_state_metrics_pod_container_status_phase{namespace="pointzeroonedigital", container="data-exporter", phase!="Running"} > 0
+    for: 5m
+    labels:
+      alertname: Export Failures
+      severity: high
+
+  - name: Comparability Guard Violations
+    annotations:
+      description: Notifies when there are violations of the comparability guard rules.
+      severity: Medium
+    expr: kube_state_metrics_pod_container_status_phase{namespace="pointzeroonedigital", container="comparability-guard", phase!="Running"} > 0
+    for: 5m
+    labels:
+      alertname: Comparability Guard Violations
+      severity: medium

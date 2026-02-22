@@ -1,0 +1,127 @@
+Here is the complete JSON file for the Grafana dashboard named "monetization_trust_health" according to your specifications:
+
+```yaml
+# Monetization Trust Health Dashboard
+# This dashboard provides an overview of the monetization and trust health of Point Zero One Digital's game.
+# All effects are deterministic, ensuring consistent data across runs.
+
+dashboard:
+  title: Monetization Trust Health
+  editable: false
+  version: 10
+  panels:
+    - id: 1
+      title: Monetization Overview
+      style: dark
+      gridPos:
+        h: 6
+        w: 24
+      panel:
+        datasource: prometheus
+        graph:
+          autozoom: true
+          alignY: left
+          showLegend: false
+          values: [total_revenue, average_daily_revenue]
+          targetFraf: 10s
+          timeFrom: -3h
+          timeShift: -3h
+          refId: A
+          legend:
+            position: bottom
+          yAxes:
+            - min: 0
+              format: $
+          series:
+            - name: Total Revenue
+              query: sum(rate(total_revenue[1h])) by (instance)
+              color: #ff7f50
+            - name: Average Daily Revenue
+              query: avg(sum(rate(total_revenue[1d]))) by (instance)
+              color: #4caf50
+          yAxis: left
+    - id: 2
+      title: Daily Active Users
+      style: dark
+      gridPos:
+        h: 6
+        w: 8
+      panel:
+        datasource: prometheus
+        graph:
+          autozoom: true
+          alignY: left
+          showLegend: false
+          values: [daily_active_users]
+          targetFraf: 10s
+          timeFrom: -3h
+          timeShift: -3h
+          refId: A
+          legend:
+            position: bottom
+          yAxes:
+            - min: 0
+              format: integer
+          series:
+            - name: Daily Active Users
+              query: sum(rate(daily_active_users[1h])) by (instance)
+              color: #3f51b5
+          yAxis: left
+    - id: 3
+      title: Trust Health Overview
+      style: dark
+      gridPos:
+        h: 6
+        w: 8
+      panel:
+        datasource: prometheus
+        graph:
+          autozoom: true
+          alignY: left
+          showLegend: false
+          values: [trust_score, trust_health_index]
+          targetFraf: 10s
+          timeFrom: -3h
+          timeShift: -3h
+          refId: A
+          legend:
+            position: bottom
+          yAxes:
+            - min: 0
+              format: integer
+          series:
+            - name: Trust Score
+              query: sum(rate(trust_score[1h])) by (instance)
+              color: #f44336
+            - name: Trust Health Index
+              query: sum(rate(trust_health_index[1h])) by (instance)
+              color: #e91e63
+          yAxis: left
+    - id: 4
+      title: Alert Notifications
+      style: dark
+      gridPos:
+        h: 6
+        w: 24
+      panel:
+        datasource: prometheus
+        table:
+          query: alertmanager_alerts{state='firing'}
+          timeFrom: -3h
+          timeShift: -3h
+          refId: A
+          columns:
+            - name: AlertName
+              type: text
+            - name: AlertState
+              type: text
+            - name: AlertLabels.alertname
+              type: text
+            - name: AlertLabels.severity
+              type: text
+            - name: AlertLabels.instance
+              type: text
+            - name: AlertLabels.ruleid
+              type: text
+            - name: AlertLabels.annotations.message
+              type: text

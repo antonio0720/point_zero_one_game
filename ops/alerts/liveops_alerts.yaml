@@ -1,0 +1,89 @@
+Here is the complete `ops/alerts/liveops_alerts.yaml` file based on your specifications:
+
+```yaml
+# LiveOps Alerts Configuration for Point Zero One Digital
+
+alertrules:
+  Run1CompletionDrop:
+    annotations:
+      description: Notification when the completion rate of Run1 drops significantly
+      message: "Run1 Completion Rate has dropped below {{ $value }}%"
+    expr: sum(rate(pointzerodigital_run1_completion{status="success"}[5m])) / sum(count(pointzerodigital_run1[5m])) * 100 < {{ $alertThreshold }}
+    for: 5m
+    labels:
+      severity: critical
+      team: liveops
+    name: Run1 Completion Drop
+    help: Alert triggered when the completion rate of Run1 drops below a specified threshold
+
+  DeathCauseSpike:
+    annotations:
+      description: Notification when there is a spike in death causes
+      message: "Death Causes have spiked above {{ $value }}"
+    expr: sum(pointzerodigital_death_cause{status="success"}[5m]) > {{ $alertThreshold }}
+    for: 5m
+    labels:
+      severity: high
+      team: liveops
+    name: Death Cause Spike
+    help: Alert triggered when the number of death causes spikes above a specified threshold
+
+  LethalCardSpike:
+    annotations:
+      description: Notification when there is a spike in lethal cards
+      message: "Lethal Cards have spiked above {{ $value }}"
+    expr: sum(pointzerodigital_lethal_card{status="success"}[5m]) > {{ $alertThreshold }}
+    for: 5m
+    labels:
+      severity: high
+      team: liveops
+    name: Lethal Card Spike
+    help: Alert triggered when the number of lethal cards spikes above a specified threshold
+
+  EconomyInflationBreach:
+    annotations:
+      description: Notification when there is significant inflation in the game economy
+      message: "Economy Inflation has exceeded {{ $value }}"
+    expr: sum(pointzerodigital_economy_inflation{status="success"}[5m]) > {{ $alertThreshold }}
+    for: 5m
+    labels:
+      severity: high
+      team: liveops
+    name: Economy Inflation Breach
+    help: Alert triggered when the inflation in the game economy exceeds a specified threshold
+
+  EconomyStarvationBreach:
+    annotations:
+      description: Notification when there is significant starvation in the game economy
+      message: "Economy Starvation has fallen below {{ $value }}"
+    expr: sum(pointzerodigital_economy_starvation{status="success"}[5m]) < {{ $alertThreshold }}
+    for: 5m
+    labels:
+      severity: high
+      team: liveops
+    name: Economy Starvation Breach
+    help: Alert triggered when the starvation in the game economy falls below a specified threshold
+
+  VerificationLatencySpike:
+    annotations:
+      description: Notification when there is a spike in verification latency
+      message: "Verification Latency has spiked above {{ $value }}"
+    expr: sum(pointzerodigital_verification_latency{status="success"}[5m]) > {{ $alertThreshold }}
+    for: 5m
+    labels:
+      severity: high
+      team: liveops
+    name: Verification Latency Spike
+    help: Alert triggered when the verification latency spikes above a specified threshold
+
+  UXFrictionSpike:
+    annotations:
+      description: Notification when there is a spike in UX friction
+      message: "UX Friction has spiked above {{ $value }}"
+    expr: sum(pointzerodigital_ux_friction{status="success"}[5m]) > {{ $alertThreshold }}
+    for: 5m
+    labels:
+      severity: high
+      team: liveops
+    name: UX Friction Spike
+    help: Alert triggered when the UX friction spikes above a specified threshold

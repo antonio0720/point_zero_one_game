@@ -1,0 +1,79 @@
+Here is the complete `ops/grafana/dashboards/verification_health.json` file in a valid YAML format with comments for non-obvious configurations:
+
+```yaml
+# Verification Health Dashboard for Point Zero One Digital
+dashboard:
+  title: Verification Health
+  editable: false
+  version: 1
+  panels:
+    - title: Queue Depth
+      rowId: 1
+      panelType: graph
+      datasource: prometheus
+      refresh: 5s
+      options:
+        stacked: false
+        showLegend: true
+        seriesOverrides:
+          - match: [queue_depth]
+            renderAs: gauge
+            thresholdStyles:
+              - colorMode: critical
+                maxValue: 100
+                value: 80
+    - title: Latency Percentiles
+      rowId: 2
+      panelType: table
+      datasource: prometheus
+      refresh: 5s
+      query:
+        rawSql: |-
+          SELECT quantile(0.9, sum by (rate(histogram_quantile_bucket(http_request_duration_milliseconds_bucket, 0.9))) as p90,
+                              quantile(0.5, sum by (rate(histogram_quantile_bucket(http_request_duration_milliseconds_bucket, 0.5))) as p50,
+                              quantile(0.1, sum by (rate(histogram_quantile_bucket(http_request_duration_milliseconds_bucket, 0.1))) as p10
+      columns:
+        - name: Metric
+          type: text
+        - name: P90
+          type: gauge
+        - name: P50
+          type: gauge
+        - name: P10
+          type: gauge
+    - title: Quarantine Rates
+      rowId: 3
+      panelType: graph
+      datasource: prometheus
+      refresh: 5s
+      options:
+        stacked: false
+        showLegend: true
+        seriesOverrides:
+          - match: [quarantine_rate]
+            renderAs: gauge
+            thresholdStyles:
+              - colorMode: critical
+                maxValue: 100
+                value: 50
+    - title: Gating Triggers
+      rowId: 4
+      panelType: table
+      datasource: prometheus
+      refresh: 5s
+      query:
+        rawSql: |-
+          SELECT alertname, state as status, last_transition_time as last_transition
+          FROM alertmanager_alerts
+          WHERE severity = 'critical' AND alertname like '/gating/triggered%'
+          ORDER BY last_transition DESC
+      columns:
+        - name: Alert Name
+          type: text
+        - name: Status
+          type: text
+        - name: Last Transition Time
+          type: time
+```
+
+This YAML file defines a Grafana dashboard with four panels displaying queue depth, latency percentiles, quarantine rates, and gating triggers using Prometheus as the datasource. The dashboard is set to refresh every 5 seconds and is not editable by users.

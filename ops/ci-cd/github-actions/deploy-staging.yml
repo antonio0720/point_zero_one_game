@@ -1,0 +1,60 @@
+Here is the complete `ops/ci-cd/github-actions/deploy-staging.yml` file based on your specifications:
+
+```yaml
+name: Deploy to Staging
+on:
+  push:
+    branches:
+      - main
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+      with:
+        fetch-depth: 0 # Fetch the entire repository history for dependency resolution
+
+    - name: Set up Helm 3
+      uses: helm/helm-action@master
+      with:
+        helmVersion: 3.5.1
+
+    - name: Install Tiller (Helm server)
+      run: |
+        kubectl apply -f https://raw.githubusercontent.com/helm/helm/master/scripts/get-tiller-3
+        mktemp -d /tmp/tiller-creds && kubectl --namespace kube-system create serviceaccount tiller \
+          && kubectl create clusterrolebinding tiller-cluster-rule \
+            --clusterrole=cluster-admin --serviceaccount=kube-system:tiller \
+            --namespace=kube-system && kubectl get secret -n kube-system tiller-token -o json | jq -r '.data.token' > /tmp/tiller-creds/tiller-token
+        export HELM_HOME=$(mktemp -d)
+        export HELM_EXPERIMENTAL_OCTOPUS=1
+        export KUBECONFIG=/dev/null
+        export TILLER_NAMESPACE=kube-system
+        export TILLER_TOKEN=$(cat /tmp/tiller-creds/tiller-token)
+        export TILLER_CA_CERTS=$(kubectl get secret tiller-ca -n kube-system -o json | jq -r '.data.ca.crt')
+        export TILLER_ROOT_URL=https://api.helm.tiller.sh
+        helm init --client-only
+
+    - name: Deploy to Staging
+      run: |
+        helm upgrade --atomic my-app-staging ./charts/my-app \
+          --set image.tag=$(git rev-parse HEAD) \
+          --set image.repository=pointzeroonedigital/my-app
+
+    - name: Smoke Test Suite
+      run: |
+        # Replace the following command with your smoke test suite commands
+        # For example, you can use a combination of curl, jq, and assertj to test API endpoints.
+        # Ensure that the test suite is idempotent and does not modify any state.
+
+    - name: Notify on Success/Fail
+      uses: actions/slack/send-channel-message@v2
+      with:
+        channel: '#staging-deployments'
+        text: |
+          *Deployment:* my-app-staging
+          *Branch:* ${{ github.ref }}
+          *Status:* ${{ job.status }}
+          *Details:* ${{ steps.Smoke_Test_Suite.outputs.test_result }}
+          *Logs:* [${{ steps.Deploy.logsUrl }}]
+      if: success() || failure()

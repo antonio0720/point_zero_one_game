@@ -1,0 +1,51 @@
+Here is the complete JSON file for the LossIsContent engagement dashboard in Grafana format:
+
+```yaml
+dashboard:
+  title: LossIsContent Engagement Dashboard
+  editable: true
+  version: 10
+  panels:
+    - datasource: prometheus
+      panelId: 1
+      title: Fork Abuse Controls
+      type: graph
+      graphOptions:
+        showLegend: false
+        stacked: false
+        seriesOverrides: []
+      yAxis:
+        min: 0
+      query: sum(rate(fork_abuse_total[5m])) by (job) group_left() having (job != 'snippet_job') order by (desc) (count(fork_abuse_total))
+    - datasource: prometheus
+      panelId: 2
+      title: Snippet Job Health
+      type: graph
+      graphOptions:
+        showLegend: false
+        stacked: false
+        seriesOverrides: []
+      yAxis:
+        min: 0
+      query: sum(rate(snippet_job_status_total[5m])) by (job) group_left() having (job == 'snippet_job') order by (desc) (count(snippet_job_status_total))
+    - datasource: prometheus
+      panelId: 3
+      title: Re-engagement Funnel
+      type: table
+      tableOptions:
+        columns:
+          - name: Time
+            align: left
+            decimals: 0
+          - name: Users
+            align: right
+            decimals: 0
+          - name: Engaged
+            align: right
+            decimals: 0
+          - name: Dropped
+            align: right
+            decimals: 0
+        timeFrom: 1h
+        timeShift: -1h
+      query: sum(rate(user_engagement[5m])) by (job, user) group_left() having (job == 'snippet_job') order by (desc) (count(user_engagement))

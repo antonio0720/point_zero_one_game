@@ -1,0 +1,131 @@
+Here is the complete JSON file for the Grafana dashboard named "rum_perf_budgets" as per your specifications:
+
+```yaml
+# This dashboard focuses on route timings, replay load, interaction latency, error rates, and perf budget violations.
+
+dashboard:
+  title: RUM Performance Budgets
+  editable: true
+  version: 10
+  timezone: browser_local
+  hideOptions: false
+  panels:
+    - datasource: prometheus
+      panelId: 1
+      title: Route Timings
+      type: graph
+      options:
+        stacked: false
+        seriesOverlapMode: zero
+        align: left
+        yAxis:
+          min: 0
+          format: milliseconds
+      height: 250px
+      width: 1500px
+      legend:
+        position: bottom
+      queries:
+        - query: histogram_quantile(http_request_duration_bucket, 0.95, sum by (le, [1m]))
+          title: P95 Latency
+          refId: A
+        - query: histogram_quantile(http_request_duration_bucket, 0.5, sum by (le, [1m]))
+          title: Median Latency
+          refId: B
+        - query: histogram_quantile(http_request_duration_bucket, 0.05, sum by (le, [1m]))
+          title: P5 Latency
+          refId: C
+      variables:
+        - name: __param_service
+          default: "*"
+    - datasource: prometheus
+      panelId: 2
+      title: Replay Load
+      type: graph
+      options:
+        stacked: false
+        seriesOverlapMode: zero
+        align: left
+        yAxis:
+          min: 0
+      height: 250px
+      width: 1500px
+      legend:
+        position: bottom
+      queries:
+        - query: sum(rate(http_request_total[1m])) by (method, path)
+          title: Total Requests
+          refId: A
+        - query: sum(rate(http_request_duration_bucket[1m])) by (method, path)
+          title: Duration (ms)
+          refId: B
+      variables:
+        - name: __param_service
+          default: "*"
+    - datasource: prometheus
+      panelId: 3
+      title: Interaction Latency
+      type: graph
+      options:
+        stacked: false
+        seriesOverlapMode: zero
+        align: left
+        yAxis:
+          min: 0
+          format: milliseconds
+      height: 250px
+      width: 1500px
+      legend:
+        position: bottom
+      queries:
+        - query: sum(rate(interaction_duration_bucket[1m])) by (interaction)
+          title: Total Interactions
+          refId: A
+        - query: histogram_quantile(interaction_duration_bucket, 0.95, sum by (le, [1m]))
+          title: P95 Latency
+          refId: B
+        - query: histogram_quantile(interaction_duration_bucket, 0.5, sum by (le, [1m]))
+          title: Median Latency
+          refId: C
+    - datasource: prometheus
+      panelId: 4
+      title: Error Rates
+      type: graph
+      options:
+        stacked: false
+        seriesOverlapMode: zero
+        align: left
+        yAxis:
+          min: 0
+          format: percentage
+      height: 250px
+      width: 1500px
+      legend:
+        position: bottom
+      queries:
+        - query: sum(rate(http_request_total[1m])) by (status_code, method, path)
+          title: Total Requests
+          refId: A
+        - query: sum(rate(http_request_total{error=true}[1m])) by (status_code, method, path)
+          title: Error Requests
+          refId: B
+      variables:
+        - name: __param_service
+          default: "*"
+    - datasource: prometheus
+      panelId: 5
+      title: Perf Budget Violations
+      type: table
+      options:
+        stacked: false
+        timeFrom: now-1h
+        timeTo: now
+      height: 200px
+      width: 1500px
+      queries:
+        - query: count_over_time(perf_budget_violation) by (service, budget, violation_type)
+          title: Violations
+          refId: A
+      variables:
+        - name: __param_service
+          default: "*"

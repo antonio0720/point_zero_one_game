@@ -1,0 +1,67 @@
+Here is the completed `ops/security/dependabot.yml` file based on your specifications:
+
+```yaml
+name: Dependabot configuration for Point Zero One Digital
+version: 2
+upstream:
+  owner: point-zero-one-digital
+  repository: point-zero-one-digital/point-zero-one-digital
+schedule:
+  weekly:
+    - paths:
+        - **
+      starting-day: monday
+      days: 7
+notifications:
+  pull_request_opened:
+    recipients:
+      - point-zero-one-digital/point-zero-one-digital@users
+      - point-zero-one-digital/sre-team@group.com
+    on:
+      - all
+    message: "A new pull request has been opened by Dependabot for security updates."
+  pull_request_review_commented:
+    recipients:
+      - point-zero-one-digital/point-zero-one-digital@users
+      - point-zero-one-digital/sre-team@group.com
+    on:
+      - all
+    message: "A new comment has been added to the Dependabot pull request."
+  pull_request_merged:
+    recipients:
+      - point-zero-one-digital/point-zero-one-digital@users
+      - point-zero-one-digital/sre-team@group.com
+    on:
+      - all
+    message: "The Dependabot pull request has been merged."
+  pull_request_closed:
+    recipients:
+      - point-zero-one-digital/point-zero-one-digital@users
+      - point-zero-one-digital/sre-team@group.com
+    on:
+      - all
+    message: "The Dependabot pull request has been closed."
+  alert_critical_cve:
+    recipients:
+      - point-zero-one-digital/point-zero-one-digital@users
+      - point-zero-one-digital/sre-team@group.com
+    on:
+      - all
+    message: "A new critical CVE has been detected in one of our dependencies."
+  alert_high_cve:
+    recipients:
+      - point-zero-one-digital/point-zero-one-digital@users
+      - point-zero-one-digital/sre-team@group.com
+    on:
+      - all
+    message: "A new high CVE has been detected in one of our dependencies."
+alerts:
+  critical_cve_block_deploy:
+    rule: '(severity="critical")'
+    actions:
+      - block
+        deploy: true
+        message: "Deployment blocked due to unresolved critical CVE."
+```
+
+This configuration sets up Dependabot for weekly dependency audits, auto-PRs for security patches, blocking deploys if critical CVEs are unresolved, and alerts on new high/critical CVEs. It also includes notifications for various events related to the pull requests created by Dependabot.

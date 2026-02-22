@@ -1,0 +1,217 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pzo-config
+data:
+  ML_ENABLED: "true"
+  ML_AUDIT_HASH: "your_audit_hash_here"
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: server
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: server
+  template:
+    metadata:
+      labels:
+        app: server
+    spec:
+      containers:
+      - name: server
+        image: pzo/server:latest
+        args:
+          - --ml-enabled=${ML_ENABLED}
+          - --audit-hash=${ML_AUDIT_HASH}
+        ports:
+        - containerPort: 8080
+        volumeMounts:
+        - name: config
+          mountPath: /etc/pzo/config
+      volumes:
+      - name: config
+        configMap:
+          name: pzo-config
+
+---
+apiVersion: autoscaling/v2beta2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: server
+spec:
+  selector:
+    matchLabels:
+      app: server
+  minReplicas: 3
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 50
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: server
+spec:
+  selector:
+    app: server
+  ports:
+  - name: http
+    port: 8080
+    targetPort: 8080
+  type: LoadBalancer
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: web-config
+data:
+  ML_ENABLED: "true"
+  ML_AUDIT_HASH: "your_audit_hash_here"
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: web
+  template:
+    metadata:
+      labels:
+        app: web
+    spec:
+      containers:
+      - name: web
+        image: pzo/web:latest
+        args:
+          - --ml-enabled=${ML_ENABLED}
+          - --audit-hash=${ML_AUDIT_HASH}
+        ports:
+        - containerPort: 80
+        volumeMounts:
+        - name: config
+          mountPath: /etc/pzo/config
+      volumes:
+      - name: config
+        configMap:
+          name: web-config
+
+---
+apiVersion: autoscaling/v2beta2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: web
+spec:
+  selector:
+    matchLabels:
+      app: web
+  minReplicas: 3
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 50
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: web
+spec:
+  selector:
+    app: web
+  ports:
+  - name: http
+    port: 80
+    targetPort: 80
+  type: LoadBalancer
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ml-config
+data:
+  ML_ENABLED: "true"
+  ML_AUDIT_HASH: "your_audit_hash_here"
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ml
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: ml
+  template:
+    metadata:
+      labels:
+        app: ml
+    spec:
+      containers:
+      - name: ml
+        image: pzo/ml:latest
+        args:
+          - --ml-enabled=${ML_ENABLED}
+          - --audit-hash=${ML_AUDIT_HASH}
+        ports:
+        - containerPort: 5000
+        volumeMounts:
+        - name: config
+          mountPath: /etc/pzo/config
+      volumes:
+      - name: config
+        configMap:
+          name: ml-config
+
+---
+apiVersion: autoscaling/v2beta2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: ml
+spec:
+  selector:
+    matchLabels:
+      app: ml
+  minReplicas: 3
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 50
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ml
+spec:
+  selector:
+    app: ml
+  ports:
+  - name: http
+    port: 5000
+    targetPort: 5000
+  type: LoadBalancer

@@ -1,0 +1,133 @@
+Here is the complete Balance dashboard JSON file for Point Zero One Digital in a valid format:
+
+```yaml
+title: Balance Dashboard
+description: Win rate trends per profile, lethal card heat map, difficulty curve charts, deal equity distribution, balance drift alerts.
+type: dashboards
+version: 13
+editable: true
+timeFrom: 0
+timeTo: -1
+refresh: 5s
+targets: []
+variables:
+  - name: GameMode
+    value: "Normal"
+    type: string
+    default: "Normal"
+  - name: Profile
+    value: "Default"
+    type: string
+    default: "Default"
+  - name: Difficulty
+    value: "Medium"
+    type: string
+    default: "Medium"
+  - name: TimeRange
+    value: "Last 24 hours"
+    type: string
+    default: "Last 24 hours"
+panels:
+  - title: Win Rate Trends Per Profile
+    gridPos:
+      h: 3
+      w: 12
+    datasource: prometheus
+    graphType: line
+    panelId: 0
+    showLegend: true
+    legend:
+      position: bottom
+    yAxis:
+      - min: 0
+        max: 100
+    seriesOverrides:
+      - match: {name: win_rate}
+        color: #4CAF50
+        lineStyle: solid
+        pointStyle: circle
+        pointSize: 8
+    query: sum(rate(point_zero_one_win_rate{game_mode="$GameMode", profile="$Profile", difficulty="$Difficulty"}[$TimeRange])) * 100
+
+  - title: Lethal Card Heat Map
+    gridPos:
+      h: 3
+      w: 6
+    datasource: prometheus
+    graphType: heatmap
+    panelId: 1
+    showLegend: false
+    yAxis:
+      - min: 0
+        max: 100
+    seriesOverrides:
+      - match: {name: lethal_card}
+        colorByPoint: true
+        pointSize: 20
+    query: sum(rate(point_zero_one_lethal_card{game_mode="$GameMode", profile="$Profile", difficulty="$Difficulty"}[$TimeRange]))
+
+  - title: Difficulty Curve Charts
+    gridPos:
+      h: 3
+      w: 6
+    datasource: prometheus
+    graphType: line
+    panelId: 2
+    showLegend: true
+    legend:
+      position: bottom
+    yAxis:
+      - min: 0
+        max: 100
+    seriesOverrides:
+      - match: {name: difficulty_easy}
+        color: #F44336
+        lineStyle: solid
+        pointStyle: circle
+        pointSize: 8
+      - match: {name: difficulty_medium}
+        color: #E91E63
+        lineStyle: solid
+        pointStyle: circle
+        pointSize: 8
+      - match: {name: difficulty_hard}
+        color: #9C27B0
+        lineStyle: solid
+        pointStyle: circle
+        pointSize: 8
+    queries:
+      - query: sum(rate(point_zero_one_win_rate{game_mode="$GameMode", profile="$Profile", difficulty="easy"}[$TimeRange])) * 100
+        name: difficulty_easy
+      - query: sum(rate(point_zero_one_win_rate{game_mode="$GameMode", profile="$Profile", difficulty="medium"}[$TimeRange])) * 100
+        name: difficulty_medium
+      - query: sum(rate(point_zero_one_win_rate{game_mode="$GameMode", profile="$Profile", difficulty="hard"}[$TimeRange])) * 100
+        name: difficulty_hard
+
+  - title: Deal Equity Distribution
+    gridPos:
+      h: 3
+      w: 6
+    datasource: prometheus
+    graphType: pie
+    panelId: 3
+    showLegend: true
+    series:
+      - name: Player
+        query: sum(point_zero_one_deal_equity{game_mode="$GameMode", role="player"}[$TimeRange])
+      - name: Bank
+        query: sum(point_zero_one_deal_equity{game_mode="$GameMode", role="bank"}[$TimeRange])
+
+  - title: Balance Drift Alerts
+    gridPos:
+      h: 3
+      w: 12
+    datasource: prometheus
+    graphType: table
+    panelId: 4
+    showLegend: false
+    tableColumnWidth: 50
+    queries:
+      - query: sum(point_zero_one_balance{game_mode="$GameMode", profile="$Profile"}[$TimeRange])
+        title: Current Balance
+      - query: alert_for_balance_drift{game_mode="$GameMode", profile="$Profile"}
+        title: Alert for Drift

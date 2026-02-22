@@ -1,0 +1,18 @@
+# Point Zero One Digital - Captions Template for HOS Moment Types and Hook-Story-Lesson Format
+
+## Overview
+
+This document outlines the ready-to-fill caption hooks by HOS (Human-Operated System) moment type (A01–E01), along with 10 new hooks for the hook-story-lesson format. The captions are designed to provide clear, concise, and execution-grade language, adhering to Point Zero One Digital's anti-bureaucratic principles.
+
+## Non-Negotiables
+
+1. Strict TypeScript usage: Never use 'any'. All code is strict-mode.
+2. Deterministic effects: All game events and system behaviors are predictable and reproducible.
+3. Production-grade, deployment-ready: The captions are designed for seamless integration into the game's infrastructure.
+4. Precise language: Use clear, concise, and execution-focused language in all captions.
+
+## Implementation Spec
+
+### HOS Moment Type Captions (A01–E01)
+
+| HOS Moment Type | Caption Hook

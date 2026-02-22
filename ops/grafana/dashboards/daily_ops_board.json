@@ -1,0 +1,174 @@
+Here is the complete `daily_ops_board.json` file in a valid YAML format with comments for non-obvious configurations:
+
+```yaml
+# Grafana Dashboard JSON
+dashboard:
+  title: Daily Operations Board - Point Zero One Digital
+  editable: true
+  version: 12
+  panels:
+    # Run1/2/3 funnel
+    - panelId: run-funnel
+      title: Run Funnel
+      style: dark
+      gridPos:
+        h: 6
+        w: 24
+      datasource: grafana-sdk-mimir
+      frame: none
+      timeFrom: now-3h
+      timeShift: -3h
+      refresh: 5s
+      targets:
+        - match: Run1
+          type: metric
+          expr: count(Run1) by (run_number)
+        - match: Run2
+          type: metric
+          expr: count(Run2) by (run_number)
+        - match: Run3
+          type: metric
+          expr: count(Run3) by (run_number)
+      options:
+        legend: bottom
+        stack: true
+
+    # Time-to-death/Survival
+    - panelId: time-to-death-survival
+      title: Time to Death & Survival
+      style: dark
+      gridPos:
+        h: 6
+        w: 12
+      datasource: grafana-sdk-mimir
+      frame: none
+      timeFrom: now-3h
+      timeShift: -3h
+      refresh: 5s
+      targets:
+        - match: TimeToDeath
+          type: metric
+          expr: avg(TimeToDeath) by (run_number)
+        - match: Survival
+          type: metric
+          expr: max(Survival) by (run_number)
+      options:
+        legend: bottom
+        stack: true
+
+    # Conversion after Run3
+    - panelId: conversion-after-run3
+      title: Conversion After Run3
+      style: dark
+      gridPos:
+        h: 6
+        w: 12
+      datasource: grafana-sdk-mimir
+      frame: none
+      timeFrom: now-3h
+      timeShift: -3h
+      refresh: 5s
+      targets:
+        - match: ConversionAfterRun3
+          type: metric
+          expr: count(ConversionAfterRun3) by (run_number)
+      options:
+        legend: bottom
+        stack: true
+
+    # Death causes
+    - panelId: death-causes
+      title: Death Causes
+      style: dark
+      gridPos:
+        h: 6
+        w: 12
+      datasource: grafana-sdk-mimir
+      frame: none
+      timeFrom: now-3h
+      timeShift: -3h
+      refresh: 5s
+      targets:
+        - match: DeathCause_1
+          type: metric
+          expr: count(DeathCause_1) by (run_number)
+        - match: DeathCause_2
+          type: metric
+          expr: count(DeathCause_2) by (run_number)
+        - match: DeathCause_3
+          type: metric
+          expr: count(DeathCause_3) by (run_number)
+      options:
+        legend: bottom
+        stack: true
+
+    # Lethal content
+    - panelId: lethal-content
+      title: Lethal Content
+      style: dark
+      gridPos:
+        h: 6
+        w: 12
+      datasource: grafana-sdk-mimir
+      frame: none
+      timeFrom: now-3h
+      timeShift: -3h
+      refresh: 5s
+      targets:
+        - match: LethalContent_1
+          type: metric
+          expr: count(LethalContent_1) by (run_number)
+        - match: LethalContent_2
+          type: metric
+          expr: count(LethalContent_2) by (run_number)
+        - match: LethalContent_3
+          type: metric
+          expr: count(LethalContent_3) by (run_number)
+      options:
+        legend: bottom
+        stack: true
+
+    # Verification health
+    - panelId: verification-health
+      title: Verification Health
+      style: dark
+      gridPos:
+        h: 6
+        w: 12
+      datasource: grafana-sdk-mimir
+      frame: none
+      timeFrom: now-3h
+      timeShift: -3h
+      refresh: 5s
+      targets:
+        - match: VerificationHealth_1
+          type: metric
+          expr: count(VerificationHealth_1) by (run_number)
+        - match: VerificationHealth_2
+          type: metric
+          expr: count(VerificationHealth_2) by (run_number)
+        - match: VerificationHealth_3
+          type: metric
+          expr: count(VerificationHealth_3) by (run_number)
+      options:
+        legend: bottom
+        stack: true
+
+    # Economy sink pressure
+    - panelId: economy-sink-pressure
+      title: Economy Sink Pressure
+      style: dark
+      gridPos:
+        h: 6
+        w: 24
+      datasource: grafana-sdk-mimir
+      frame: none
+      timeFrom: now-3h
+      timeShift: -3h
+      refresh: 5s
+      targets:
+        - match: EconomySinkPressure
+          type: metric
+          expr: avg(EconomySinkPressure) by (run_number)
+      options:
+        legend: bottom

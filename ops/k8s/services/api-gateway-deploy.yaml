@@ -1,0 +1,110 @@
+Here is the complete `ops/k8s/services/api-gateway-deploy.yaml` file for the Point Zero One Digital project, adhering to the specified rules:
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-gateway
+  labels:
+    app: point-zero-one-digital
+    tier: gateway
+    environment: production
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/path: "/metrics"
+    kubernetes.io/limit-ranger: "LimitRanger plugin is restricted from limiting api-gateway"
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: point-zero-one-digital
+      tier: gateway
+      environment: production
+  template:
+    metadata:
+      labels:
+        app: point-zero-one-digital
+        tier: gateway
+        environment: production
+    spec:
+      containers:
+      - name: api-gateway
+        image: pointzeroonedigital/api-gateway:latest
+        ports:
+        - containerPort: 80
+          name: http
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: http
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: http
+          initialDelaySeconds: 60
+          periodSeconds: 30
+      imagePullSecrets:
+      - name: registry-credentials
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+              - key: tier
+                operator: In
+                values:
+                - gateway
+            preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                  - key: tier
+                    operator: In
+                    values:
+                    - gateway
+                topologyKey: kubernetes.io/hostname
+      tolerations:
+      - effect: NoSchedule
+        operator: Exists
+        tolerationSeconds: 300
+      serviceAccountName: point-zero-one-digital-sa
+---
+apiVersion: autoscaling/v2beta2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: api-gateway-hpa
+  labels:
+    app: point-zero-one-digital
+    tier: gateway
+    environment: production
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: api-gateway
+  minReplicas: 2
+  maxReplicas: 5
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      targetAverageUtilization: 80
+  externalMetrics:
+  - metricName: http_requests_total
+    kubernetes.io/horizontal-pod-autoscaler.minutes: "5"
+    kubernetes.io/horizontal-pod-autoscaler.target-cpu-utilization-average-utilization: "80"
+---
+apiVersion: policy/v1beta1
+kind: PodDisruptionBudget
+metadata:
+  name: api-gateway-pdb
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: point-zero-one-digital
+      tier: gateway
+      environment: production

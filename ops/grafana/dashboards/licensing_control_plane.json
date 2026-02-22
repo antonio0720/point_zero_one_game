@@ -1,0 +1,88 @@
+Here is the complete `licensing_control_plane.json` file for the specified specifications:
+
+```yaml
+# Licensing Control Plane Dashboard
+# This dashboard provides an overview of cohort health, benchmarks pre/post deltas, report pipeline latencies, and export errors.
+
+title: Licensing Control Plane
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+
+panels:
+  - title: Cohort Health
+    gridPos:
+      h: 4
+      w: 24
+    datasource: Prometheus
+    graphType: table
+    var: cohort
+    valueMaps:
+      - name: Status
+        values:
+          OK: 'Healthy'
+          Warning: 'Warning'
+          Critical: 'Critical'
+        legendFormat: Status
+    query: sum(up{point_zero_one_digital_cohort_status{$__meta_json_cohort='$var', $__meta_json_status!='OK'}}) by (cohort)
+
+  - title: Benchmarks Pre/Post Delay Comparison
+    gridPos:
+      h: 4
+      w: 12
+    datasource: Prometheus
+    graphType: barStacked
+    var: cohort
+    valueMaps:
+      - name: Status
+        values:
+          OK: 'Healthy'
+          Warning: 'Warning'
+          Critical: 'Critical'
+        legendFormat: Status
+    queries:
+      - query: sum(rate(point_zero_one_digital_benchmark_duration_total{cohort='$var', $__meta_json_status='OK'}[1m]))
+        title: Pre-Delta Duration
+      - query: sum(rate(point_zero_one_digital_benchmark_duration_total{cohort='$var', $__meta_json_status='Post-Delta'}[1m]))
+        title: Post-Delta Duration
+
+  - title: Benchmarks Pre/Post Delta Percentage
+    gridPos:
+      h: 4
+      w: 12
+    datasource: Prometheus
+    graphType: gauge
+    var: cohort
+    queries:
+      - query: (sum(rate(point_zero_one_digital_benchmark_duration_total{cohort='$var', $__meta_json_status='Post-Delta'}[1m])) - sum(rate(point_zero_one_digital_benchmark_duration_total{cohort='$var', $__meta_json_status='Pre-Delta'}[1m]))) / sum(rate(point_zero_one_digital_benchmark_duration_total{cohort='$var', $__meta_json_status='Pre-Delta'}[1m])) * 100
+        title: Delta Percentage
+
+  - title: Report Pipeline Latencies
+    gridPos:
+      h: 4
+      w: 24
+    datasource: Prometheus
+    graphType: histogram
+    var: report_pipeline
+    queries:
+      - query: histogram_quantile(0.9, sum by (report_pipeline)(rate(point_zero_one_digital_report_pipeline_latency_total[1m])) )
+        title: 90th Percentile Latency
+      - query: histogram_quantile(0.5, sum by (report_pipeline)(rate(point_zero_one_digital_report_pipeline_latency_total[1m])) )
+        title: Median Latency
+
+  - title: Export Errors
+    gridPos:
+      h: 4
+      w: 24
+    datasource: Prometheus
+    graphType: table
+    var: error_type
+    valueMaps:
+      - name: Error Type
+        values:
+          Failed: 'Failed'
+          Timeout: 'Timeout'
+          Other: 'Other'
+        legendFormat: Error Type
+    query: sum(up{point_zero_one_digital_export_error{$__meta_json_error_type='$var'}}) by (error_type)

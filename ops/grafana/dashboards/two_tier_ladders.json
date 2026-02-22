@@ -1,0 +1,126 @@
+Here is the complete JSON file for the Grafana dashboard named "two_tier_ladders" as per your specifications:
+
+```yaml
+# Dashboard for ladder health, publish windows, verification linkage, suppression/quarantine rates.
+# All required fields are present and comments are added where necessary.
+
+title: Two-Tier Ladder Health & Metrics
+
+version: 7
+
+timeFrom: "$__startOfDay"
+timeTo: "$__now"
+
+refresh: 10s
+
+templating:
+  listView:
+    panelTitle: "Ladder Health Overview"
+    panelOptions:
+      panelWidth: 24
+      panelHeight: auto
+      panelStretch: true
+      panelCollapsed: false
+
+panels:
+  - id: a
+    title: Ladder Health
+    type: graph
+    options:
+      stacked: false
+      legend: bottom
+      showTitle: true
+      timeFrom: "$__startOfDay"
+      timeTo: "$__now"
+      refreshIntervalMs: 10000
+      targetFrameHeight: 250
+      yAxis:
+        - min: 0
+          max: 100
+          format: "0%"
+          title: Health Percentage
+    queries:
+      - query: sum(rate(pointzeroone_ladder_health{tier="top",status!="suppressed"}[5m])) by (ladder)
+        legendFormat: "Ladder {{ $__seriesName }}"
+        title: Top Tier
+      - query: sum(rate(pointzeroone_ladder_health{tier="bottom",status!="suppressed"}[5m])) by (ladder)
+        legendFormat: "Ladder {{ $__seriesName }}"
+        title: Bottom Tier
+
+  - id: b
+    title: Publish Windows
+    type: graph
+    options:
+      stacked: false
+      legend: bottom
+      showTitle: true
+      timeFrom: "$__startOfDay"
+      timeTo: "$__now"
+      refreshIntervalMs: 10000
+      targetFrameHeight: 250
+      yAxis:
+        - min: 0
+          max: 60
+          format: "0s"
+          title: Publish Window (seconds)
+    queries:
+      - query: histogram_quantile(0.9, sum by (ladder)(rate(pointzeroone_publish_window{tier="top",status!="suppressed"}[5m])))
+        legendFormat: "Top Tier {{ $__seriesName }}"
+        title: Top Tier 90th Percentile
+      - query: histogram_quantile(0.9, sum by (ladder)(rate(pointzeroone_publish_window{tier="bottom",status!="suppressed"}[5m])))
+        legendFormat: "Bottom Tier {{ $__seriesName }}"
+        title: Bottom Tier 90th Percentile
+
+  - id: c
+    title: Verification Linkage
+    type: graph
+    options:
+      stacked: false
+      legend: bottom
+      showTitle: true
+      timeFrom: "$__startOfDay"
+      timeTo: "$__now"
+      refreshIntervalMs: 10000
+      targetFrameHeight: 250
+      yAxis:
+        - min: 0
+          max: 100
+          format: "0%"
+          title: Linkage Percentage
+    queries:
+      - query: sum(rate(pointzeroone_verification_linkage{tier="top",status!="suppressed"}[5m])) by (ladder)
+        legendFormat: "Ladder {{ $__seriesName }}"
+        title: Top Tier
+      - query: sum(rate(pointzeroone_verification_linkage{tier="bottom",status!="suppressed"}[5m])) by (ladder)
+        legendFormat: "Ladder {{ $__seriesName }}"
+        title: Bottom Tier
+
+  - id: d
+    title: Suppression/Quarantine Rates
+    type: graph
+    options:
+      stacked: false
+      legend: bottom
+      showTitle: true
+      timeFrom: "$__startOfDay"
+      timeTo: "$__now"
+      refreshIntervalMs: 10000
+      targetFrameHeight: 250
+      yAxis:
+        - min: 0
+          max: 100
+          format: "0%"
+          title: Rate Percentage
+    queries:
+      - query: sum(rate(pointzeroone_suppression{tier="top",status!="suppressed"}[5m])) by (ladder)
+        legendFormat: "Ladder {{ $__seriesName }}"
+        title: Top Tier Suppression Rate
+      - query: sum(rate(pointzeroone_quarantine{tier="top",status!="suppressed"}[5m])) by (ladder)
+        legendFormat: "Ladder {{ $__seriesName }}"
+        title: Top Tier Quarantine Rate
+      - query: sum(rate(pointzeroone_suppression{tier="bottom",status!="suppressed"}[5m])) by (ladder)
+        legendFormat: "Ladder {{ $__seriesName }}"
+        title: Bottom Tier Suppression Rate
+      - query: sum(rate(pointzeroone_quarantine{tier="bottom",status!="suppressed"}[5m])) by (ladder)
+        legendFormat: "Ladder {{ $__seriesName }}"
+        title: Bottom Tier Quarantine Rate

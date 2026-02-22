@@ -1,0 +1,111 @@
+Here is the complete JSON file for the Grafana dashboard named "onboarding_three_run_arc" as per your specifications:
+
+```yaml
+# Copyright (c) 2023 Point Zero One Digital
+# This dashboard is designed to funnel Run1→Run2→Run3, conversion, proof latency, and experiment cohorts.
+
+title: Onboarding Three Run Arc
+
+templating:
+  listView:
+    panelA:
+      title: Funnels
+      timeFrom: -30m
+      timeShift: -12h
+      refreshInterval: 5s
+      rows: 1
+      columns: 4
+      panelId: 1
+      panelOptions: {}
+      target: A/Funnel
+    panelB:
+      title: Conversion Rates
+      timeFrom: -30m
+      timeShift: -12h
+      refreshInterval: 5s
+      rows: 1
+      columns: 4
+      panelId: 2
+      panelOptions: {}
+      target: A/ConversionRate
+    panelC:
+      title: Proof Latency
+      timeFrom: -30m
+      timeShift: -12h
+      refreshInterval: 5s
+      rows: 1
+      columns: 4
+      panelId: 3
+      panelOptions: {}
+      target: A/ProofLatency
+    panelD:
+      title: Experiment Cohorts
+      timeFrom: -30m
+      timeShift: -12h
+      refreshInterval: 5s
+      rows: 1
+      columns: 4
+      panelId: 4
+      panelOptions: {}
+      target: A/ExperimentCohort
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+
+panels:
+  - title: Funnel
+    datasource: Prometheus
+    graphType: funnel
+    options:
+      seriesOverrides: []
+      showLegend: true
+      legendPosition: bottom
+      stacked: false
+      thresholdStyle: solid
+      thresholdColors: ['#FF0000']
+      thresholdLabelStyle: bold
+      valueMaps: []
+      values: [Run1, Run2, Run3]
+    query: sum(rate(onboarding_funnel{run='Run1'}[5m])) by (run)
+
+  - title: Conversion Rate
+    datasource: Prometheus
+    graphType: table
+    options:
+      showLegend: false
+      stacked: false
+      thresholdStyle: solid
+      thresholdColors: ['#FF0000']
+      thresholdLabelStyle: bold
+      valueMaps: []
+      values: [ConversionRate]
+    query: onboarding_conversion_rate{run='Run1'}
+
+  - title: Proof Latency
+    datasource: Prometheus
+    graphType: histogram
+    options:
+      seriesOverrides: []
+      showLegend: true
+      legendPosition: bottom
+      stacked: false
+      thresholdStyle: solid
+      thresholdColors: ['#FF0000']
+      thresholdLabelStyle: bold
+      valueMaps: []
+      values: [ProofLatency]
+    query: histogram_quantile(0.95, sum by (run)(onboarding_proof_latency{run='Run1'}[5m]))
+
+  - title: Experiment Cohorts
+    datasource: Prometheus
+    graphType: table
+    options:
+      showLegend: false
+      stacked: false
+      thresholdStyle: solid
+      thresholdColors: ['#FF0000']
+      thresholdLabelStyle: bold
+      valueMaps: []
+      values: [ExperimentCohort]
+    query: onboarding_experiment_cohort{run='Run1'}

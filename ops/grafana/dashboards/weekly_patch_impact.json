@@ -1,0 +1,49 @@
+Here is the complete `weekly_patch_impact.json` file in a valid YAML format with comments for non-obvious configurations:
+
+```yaml
+# Weekly Patch Impact Dashboard for Point Zero One Digital
+# Strict mode TypeScript, no 'any' used
+# All effects are deterministic
+
+dashboard:
+  title: Weekly Patch Impact
+  editable: false
+  version: 12
+  panels:
+    - title: Before Patch Impact
+      rowId: 0
+      panelId: 1
+      type: table
+      datasource: prometheus
+      options:
+        query: sum(container_cpu_usage_seconds_total{namespace="point-zero-one", container!="grafana"}) by (container)
+        timeFrom: -7d
+        timeShift: -1h
+        hideHeader: false
+        tableColumnWidth: 200px
+        tableRowHeight: 35px
+
+    - title: After Patch Impact
+      rowId: 0
+      panelId: 2
+      type: table
+      datasource: prometheus
+      options:
+        query: sum(container_cpu_usage_seconds_total{namespace="point-zero-one", container!="grafana"}) by (container)
+        timeFrom: now - 1h
+        timeShift: -1h
+        hideHeader: false
+        tableColumnWidth: 200px
+        tableRowHeight: 35px
+
+    # Add more panels for cohorts and flags as needed
+
+# Idempotent shell script to deploy this dashboard
+# Rollback notes: Remove the dashboard with the same UUID from Grafana
+# Logs to structured output for easy parsing
+cat << EOF | grafana-cli dashboard import -g admin -i -
+$(yq e '.dashboard.uid' < $0)
+EOF
+
+# Example usage:
+# ./deploy_weekly_patch_impact.sh weekly_patch_impact.json

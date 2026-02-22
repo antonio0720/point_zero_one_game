@@ -1,0 +1,99 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Setup Node.js and npm
+        uses: actions/setup-node@v1
+        with:
+          node-version: '14'
+
+      - name: Install dependencies
+        run: |
+          npm install --production
+
+      - name: Lint code
+        run: |
+          npx eslint . --cache --fix
+
+      - name: Run tests
+        run: |
+          npx jest --config=jest.config.js
+
+      - name: Build game engine
+        run: |
+          npm run build
+
+      - name: Run determinism regression suite
+        env:
+          ML_ENABLED: 'false'
+        run: |
+          npm run test-determinism
+
+      - name: Publish artifacts
+        uses: actions/upload-artifact@v2
+        with:
+          name: game-engine-build
+          path: dist/game-engine.js
+
+  ml-models:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Setup Node.js and npm
+        uses: actions/setup-node@v1
+        with:
+          node-version: '14'
+
+      - name: Install dependencies
+        run: |
+          npm install --production
+
+      - name: Build ML models
+        env:
+          ML_ENABLED: 'true'
+        run: |
+          npx ml-build --bounded-outputs 0-1 --audit-hash
+
+      - name: Publish artifacts
+        uses: actions/upload-artifact@v2
+        with:
+          name: ml-models-build
+          path: dist/ml-models.js
+
+determinism-regression-suite:
+  runs-on: ubuntu-latest
+  steps:
+    - name: Checkout code
+      uses: actions/checkout@v2
+
+    - name: Setup Node.js and npm
+      uses: actions/setup-node@v1
+      with:
+        node-version: '14'
+
+    - name: Install dependencies
+      run: |
+        npm install --production
+
+    - name: Run determinism regression suite
+      env:
+        ML_ENABLED: 'false'
+      run: |
+        npm run test-determinism
+
+artifacts:
+  paths:
+    - dist/game-engine.js
+    - dist/ml-models.js

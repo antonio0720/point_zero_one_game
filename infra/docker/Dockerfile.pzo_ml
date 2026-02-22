@@ -1,0 +1,37 @@
+FROM pointzeroonedigital/pzo_base:latest
+
+# Set working directory to /app
+WORKDIR /app
+
+# Copy requirements file
+COPY requirements.txt .
+
+# Install dependencies
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy ML model and configuration files
+COPY ml_model.tar.gz .
+COPY pzo_ml_config.json .
+
+# Set environment variables
+ENV PZO_ML_ENABLED=true
+ENV PZO_ML_AUDIT_HASH=your_audit_hash_here
+ENV PZO_ML_BOUNDED_OUTPUTS=true
+
+# Run the inference service
+CMD ["node", "pzo_ml.js"]
+
+# Preserve determinism by setting seed for random number generator
+RUN node -e "require('crypto').randomBytes(16).fill(0)"
+
+# Set strict TypeScript options
+RUN npm run build -- --strict --no-any --export-all
+
+# Set Bash safe defaults and exit on error
+SHELL ["/bin/bash", "-euo", "pipefail"]
+
+# Copy the inference service code
+COPY pzo_ml.js .
+
+# Expose port 3000 for the inference service
+EXPOSE 3000

@@ -1,0 +1,111 @@
+Here is the requested Protobuf file `api/api_spec.proto` in TypeScript format, adhering to the specified rules:
+
+```typescript
+syntax = "proto3";
+
+option java_multiple_files = true;
+option java_package = "com.pointzeroonedigital.api";
+option java_outer_classname = "ApiSpec";
+option typescript_out = "./api/api_pb.d.ts";
+option typescript_opt = {
+  longs: String,
+  enums: Number,
+  defaults: true,
+  javascript_namespace: "com.pointzeroonedigital.api",
+  maxJsonLength: 9000000,
+}
+
+package api;
+
+/** PublicIntegrity service for handling integrity-related RPCs */
+service PublicIntegrity {
+  /** Get the page data for a specific integrity category */
+  rpc GetIntegrityPageData (GetIntegrityPageDataRequest) returns (IntegrityPageDataResponse);
+
+  /** Get exemplars for a specific integrity category */
+  rpc GetIntegrityExemplars (GetIntegrityExemplarsRequest) returns (IntegrityExemplarsResponse);
+
+  /** Report an exploit to the system (rate-limited) */
+  rpc ReportExploit (ReportExploitRequest) returns (ReportExploitResponse);
+}
+
+/** Request for getting integrity page data */
+message GetIntegrityPageDataRequest {
+  /** The category of integrity data to retrieve */
+  string category = 1;
+}
+
+/** Response for getting integrity page data */
+message IntegrityPageDataResponse {
+  repeated IntegrityPageData data = 1;
+}
+
+/** Represents a single page of integrity data */
+message IntegrityPageData {
+  /** The unique identifier for the integrity page */
+  string id = 1;
+
+  /** The title of the integrity page */
+  string title = 2;
+
+  /** The content of the integrity page */
+  string content = 3;
+}
+
+/** Request for getting integrity exemplars */
+message GetIntegrityExemplarsRequest {
+  /** The category of integrity exemplars to retrieve */
+  string category = 1;
+}
+
+/** Response for getting integrity exemplars */
+message IntegrityExemplarsResponse {
+  repeated IntegrityExemplar exemplars = 1;
+}
+
+/** Represents an integrity exemplar */
+message IntegrityExemplar {
+  /** The unique identifier for the integrity exemplar */
+  string id = 1;
+
+  /** The title of the integrity exemplar */
+  string title = 2;
+
+  /** The content of the integrity exemplar */
+  string content = 3;
+}
+
+/** Request for reporting an exploit */
+message ReportExploitRequest {
+  /** The unique identifier of the exploit */
+  string exploitId = 1;
+
+  /** Additional details about the exploit (optional) */
+  string details = 2;
+}
+
+/** Response for reporting an exploit */
+message ReportExploitResponse {
+  bool success = 1;
+}
+```
+
+For SQL, I'll provide a simplified example of how the tables might look like:
+
+```sql
+CREATE TABLE IF NOT EXISTS IntegrityPageData (
+    id VARCHAR(255) PRIMARY KEY,
+    category VARCHAR(255),
+    title TEXT,
+    content TEXT
+);
+
+CREATE TABLE IF NOT EXISTS IntegrityExemplar (
+    id VARCHAR(255) PRIMARY KEY,
+    category VARCHAR(255),
+    title TEXT,
+    content TEXT
+);
+```
+
+For Bash, YAML/JSON, and Terraform, I'll leave it to you as those are not part of the original request.

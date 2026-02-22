@@ -1,0 +1,64 @@
+name: CI Pipeline (Lint, Unit Tests, Integration Tests, Coverage Gate, Docker Build, Push to ECR)
+on: [push, pull_request]
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v2
+      with:
+        fetch-depth: 0 # Fetch the entire repository history for dependency resolution
+
+    - name: Set up TypeScript
+      uses: typescript-action/setup@v2
+      with:
+        typescript-version: '4.1'
+        skip-npm-install: true
+
+    - name: Lint
+      run: npm run lint
+      if: startsWith(github.event_name, 'push') || (github.event_name == 'pull_request' && github.event.action != 'opened')
+
+    - name: Unit Tests
+      run: npm test
+      if: startsWith(github.event_name, 'push') || (github.event_name == 'pull_request' && github.event.action != 'opened')
+
+    - name: Integration Tests
+      uses: actions/setup-node@v2
+      with:
+        node-version: 14
+      run: npm run test:integration
+      if: startsWith(github.event_name, 'push') || (github.event_name == 'pull_request' && github.event.action != 'opened')
+
+    - name: Coverage Report
+      id: coverage-report
+      run: npm run coverage
+      if: startsWith(github.event_name, 'push') || (github.event_name == 'pull_request' && github.event.action != 'opened')
+
+    - name: Coverage Gate
+      uses: actions/upload-artifact@v2
+      with:
+        name: coverage-report
+        path: coverage/lcov-report.info
+
+      run: |
+        if [ $(coverage gate) -lt 80 ]; then
+          echo "Coverage threshold (80%) not met. Aborting pipeline."
+          exit 1
+        fi
+
+    - name: Docker Build
+      uses: docker/build-push-action@v2
+      with:
+        context: . # Build the Dockerfile in the current directory
+        push: true # Push the built image to ECR (replace 'your-account-id.dkr.ecr.region.amazonaws.com/point-zero-one-digital' with your actual ECR repository URL)
+        tags: your-account-id.dkr.ecr.region.amazonaws.com/point-zero-one-digital:latest
+
+    - name: Artifact Registry Push (Optional)
+      uses: google-github-actions/artifact-registry@master
+      with:
+        project_id: your-project-id # Replace with your Google Cloud Project ID
+        location: us-central1 # Replace with your desired GCP region
+        artifact_name: point-zero-one-digital
+        artifact_path: .

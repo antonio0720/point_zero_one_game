@@ -1,0 +1,117 @@
+Here is the complete `ops/grafana/dashboards/platform_overview.json` file in a valid YAML format with comments for non-obvious configurations:
+
+```yaml
+# Platform Overview Dashboard for Point Zero One Digital
+dashboard:
+  title: Platform Overview
+  editable: true
+  version: 1
+  panels:
+    - title: Request Rate
+      timeFrom: now-3h
+      timeShift: -3h
+      refresh: 1s
+      type: graph
+      datasource: prometheus
+      graphOptions:
+        stacked: false
+        showLegend: true
+        alignZero: false
+      query: sum(rate(request_total{job="platform"})) by (job, instance)
+
+    - title: P50/P95/P99 Latency
+      timeFrom: now-3h
+      timeShift: -3h
+      refresh: 1s
+      type: graph
+      datasource: prometheus
+      graphOptions:
+        stacked: false
+        showLegend: true
+        alignZero: false
+      queries:
+        - query: histogram_quantile(0.5, sum(rate(request_duration_seconds{job="platform"}[5m])) by (job, instance))
+          title: P50 Latency
+        - query: histogram_quantile(0.95, sum(rate(request_duration_seconds{job="platform"}[5m])) by (job, instance))
+          title: P95 Latency
+        - query: histogram_quantile(0.99, sum(rate(request_duration_seconds{job="platform"}[5m])) by (job, instance))
+          title: P99 Latency
+
+    - title: Error Rates
+      timeFrom: now-3h
+      timeShift: -3h
+      refresh: 1s
+      type: graph
+      datasource: prometheus
+      graphOptions:
+        stacked: false
+        showLegend: true
+        alignZero: false
+      queries:
+        - query: sum(rate(request_total{job="platform", error=true})) by (job, instance)
+          title: Error Rate
+
+    - title: Queue Depths
+      timeFrom: now-3h
+      timeShift: -3h
+      refresh: 1s
+      type: graph
+      datasource: prometheus
+      graphOptions:
+        stacked: false
+        showLegend: true
+        alignZero: false
+      queries:
+        - query: sum(kube_pod_container_status_ready{job="platform"}) by (job, instance)
+          title: Ready Pods
+        - query: kubernetes_pod_status_phase{job="platform", phase!="Running"} by (job, instance)
+          title: Unready Pods
+        - query: sum(kube_queue_length{job="platform"}) by (job, instance)
+          title: Queue Depth
+
+    - title: DB Connections
+      timeFrom: now-3h
+      timeShift: -3h
+      refresh: 1s
+      type: graph
+      datasource: prometheus
+      graphOptions:
+        stacked: false
+        showLegend: true
+        alignZero: false
+      queries:
+        - query: sum(rate(db_connection_duration_seconds{job="platform"})) by (job, instance)
+          title: DB Connection Duration
+        - query: count(kubernetes_pod_container_status_ready{job="platform", container_name="db"}) by (job, instance)
+          title: Active DB Connections
+
+    - title: Cache Hit Rate
+      timeFrom: now-3h
+      timeShift: -3h
+      refresh: 1s
+      type: graph
+      datasource: prometheus
+      graphOptions:
+        stacked: false
+        showLegend: true
+        alignZero: false
+      queries:
+        - query: sum(rate(cache_hit_total{job="platform"})) by (job, instance)
+          title: Cache Hit Rate
+
+    - title: Pod Restart Rate
+      timeFrom: now-3h
+      timeShift: -3h
+      refresh: 1s
+      type: graph
+      datasource: prometheus
+      graphOptions:
+        stacked: false
+        showLegend: true
+        alignZero: false
+      queries:
+        - query: sum(rate(kube_pod_container_status_restarts{job="platform"})) by (job, instance)
+          title: Pod Restart Rate
+```
+
+This YAML file defines a Grafana dashboard with panels displaying various metrics related to the platform's performance and health. The queries use Prometheus as the datasource for gathering the metrics. Each panel is configured with appropriate options, such as time range, refresh rate, and graph type.

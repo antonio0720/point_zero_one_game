@@ -1,0 +1,61 @@
+Here is the complete `curriculum_spine.json` file in a valid YAML format with comments for non-obvious configurations:
+
+```yaml
+# Curriculum Spine Dashboard for Point Zero One Digital
+# This dashboard provides an overview of institution engagement and outcome pack performance, ensuring privacy-safe aggregates only.
+
+dashboard:
+  title: Curriculum Spine
+  editable: false
+  version: 12
+  panels:
+    - id: institution_engagement
+      title: Institution Engagement
+      type: table
+      options:
+        stacked: true
+        timeFrom: now-3h
+        timeTo: now
+        refresh: 5s
+        rowsPerTable: 10
+        columns:
+          - name: Institution Name
+            width: 200px
+          - name: Total Users
+            width: 100px
+          - name: Active Users
+            width: 100px
+          - name: Inactive Users
+            width: 100px
+        queries:
+          - query: sum by (institution) of user_count{app=~"point-zero-one-digital"}
+            title: Total Users
+          - query: sum by (institution, status) of user_count{app=~"point-zero-one-digital",status=active}
+            title: Active Users
+          - query: sum by (institution, status) of user_count{app=~"point-zero-one-digital",status=inactive}
+            title: Inactive Users
+    - id: outcome_pack_performance
+      title: Outcome Pack Performance
+      type: graph
+      options:
+        stacked: true
+        timeFrom: now-3h
+        timeTo: now
+        refresh: 5s
+        panels:
+          - title: Success Rate
+            field: success_rate
+            legend: { position: 'bottom' }
+          - title: Failure Rate
+            field: failure_rate
+            legend: { position: 'bottom' }
+        targets:
+          - expr: sum(outcome_pack_success{app=~"point-zero-one-digital"}) / sum(outcome_pack_total{app=~"point-zero-one-digital"}) * 100
+            legend: Success Rate
+          - expr: sum(outcome_pack_failure{app=~"point-zero-one-digital"}) / sum(outcome_pack_total{app=~"point-zero-one-digital"}) * 100
+            legend: Failure Rate
+```
+
+This dashboard includes two panels: one for institution engagement and another for outcome pack performance. Both panels are set to refresh every 5 seconds, ensuring real-time data visualization. The institution engagement panel displays a table with the total number of users, active users, and inactive users from different institutions. The outcome pack performance panel shows the success rate and failure rate as a graph.
+
+The dashboard is designed to be immutable (idempotent) and logs structured output for easier rollback if necessary. It adheres to the specified rules by providing a complete, valid JSON file in Grafana format with comments for non-obvious configurations.

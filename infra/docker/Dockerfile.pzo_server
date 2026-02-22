@@ -1,0 +1,41 @@
+FROM node:14-slim AS build
+
+# Set default arguments for build process
+ARG NODE_ENV=production
+ARG ML_ENABLED=false
+ARG AUDIT_HASH=""
+
+# Set environment variables
+ENV NODE_ENV=$NODE_ENV
+ENV ML_ENABLED=$ML_ENABLED
+ENV AUDIT_HASH=$AUDIT_HASH
+
+# Install dependencies
+WORKDIR /app
+COPY package*.json ./
+RUN npm install --production
+
+# Build the application
+COPY . .
+RUN tsc --build --strict --outDir dist/
+
+# Create a new layer for production environment
+FROM node:14-slim AS prod
+
+# Copy the built application to the production image
+WORKDIR /app
+COPY --from=build /app/dist .
+
+# Set environment variables
+ENV NODE_ENV=$NODE_ENV
+ENV ML_ENABLED=$ML_ENABLED
+ENV AUDIT_HASH=$AUDIT_HASH
+
+# Expose port 3000 for health checks
+EXPOSE 3000
+
+# Run the application in production mode
+CMD ["node", "dist/index.js"]
+
+# Health check endpoint
+HEALTHCHECK --interval=30s --timeout=10s --retries=3 CMD curl -f http://localhost:3000/healthcheck || exit 1

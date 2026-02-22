@@ -1,0 +1,140 @@
+Here is the complete JSON file for the Grafana dashboard named "integrity_page.json" based on your specifications:
+
+```yaml
+# Integrity Traffic, CTA Clickthrough, Conversion to Verified, Retention Lift Proxy Dashboard
+
+title: Integrity Page Metrics
+
+description: A dashboard displaying key metrics related to the Point Zero One Digital game's integrity page.
+
+type: dashboards
+
+version: 12
+
+timezone: browser_local
+
+editable: true
+
+links:
+  - name: Point Zero One Digital Game Integrity Page Metrics
+    url: https://pointzeroonedigital.com/integrity-page
+    iconUrl: https://pointzeroonedigital.com/favicon.ico
+
+panels:
+  - title: Integrity Traffic Overview
+    panelId: 1
+    style: dark
+    gridPos:
+      h: 6
+      w: 24
+    datasource: prometheus
+    graphType: timeseries
+    unit: requests
+    refId: A
+    options:
+      showLegend: true
+      stacked: false
+      yAxes:
+        - min: 0
+          max: 100000
+          format: short
+      yAxisTitle: Requests per Minute
+      seriesOverrides:
+        - name: integrity_traffic
+          lineStyle: solid
+          color: #3e95cd
+          showArea: true
+          areaStyle: default
+          fillColor: rgba(62, 149, 205, 0.1)
+
+  - title: CTA Clickthrough Rate
+    panelId: 2
+    style: dark
+    gridPos:
+      h: 3
+      w: 12
+    datasource: prometheus
+    graphType: gauge
+    refId: B
+    options:
+      decimals: 2
+      min: 0
+      max: 1.0
+      title: CTR
+      thresholdStyle: solid
+      thresholdColor: #f44336
+      valueDecimals: 2
+      hideMinMax: false
+      hideValue: false
+      hideUnits: false
+      statics: []
+      ranges:
+        - color: #e74c3c
+          from: 0.5
+          to: 1.0
+          label: Excellent
+      seriesOverrides:
+        - name: cta_clickthrough_rate
+          lineStyle: solid
+          color: #f44336
+
+  - title: Conversion to Verified Users
+    panelId: 3
+    style: dark
+    gridPos:
+      h: 3
+      w: 12
+    datasource: prometheus
+    graphType: gauge
+    refId: C
+    options:
+      decimals: 2
+      min: 0
+      max: 1.0
+      title: Conversion Rate
+      thresholdStyle: solid
+      thresholdColor: #4caf50
+      valueDecimals: 2
+      hideMinMax: false
+      hideValue: false
+      hideUnits: false
+      statics: []
+      ranges:
+        - color: #4caf50
+          from: 0.1
+          to: 0.5
+          label: Good
+        - color: #673ab7
+          from: 0.5
+          to: 0.8
+          label: Excellent
+      seriesOverrides:
+        - name: conversion_to_verified_users
+          lineStyle: solid
+          color: #4caf50
+
+  - title: Retention Lift Proxy
+    panelId: 4
+    style: dark
+    gridPos:
+      h: 3
+      w: 12
+    datasource: prometheus
+    graphType: timeseries
+    unit: %
+    refId: D
+    options:
+      showLegend: true
+      stacked: false
+      yAxes:
+        - min: 0
+          max: 150
+          format: short
+      yAxisTitle: Retention Lift (%)
+      seriesOverrides:
+        - name: retention_lift_proxy
+          lineStyle: solid
+          color: #9c27b0
+          showArea: true
+          areaStyle: default
+          fillColor: rgba(156, 39, 176, 0.1)

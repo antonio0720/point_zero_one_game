@@ -1,0 +1,38 @@
+# Frontend - Host OS Pages (host.html)
+
+## Overview
+
+The `host.html` file is a static HTML shell for the `/host` route in our frontend application. It serves as the primary interface for the Host Operating System (Host OS Kit) within Point Zero One Digital's game, Sovereign Infrastructure Architect.
+
+## Non-negotiables
+
+1. Compliance with strict TypeScript mode and adherence to never using 'any'.
+2. Inclusion of meta tags and Open Graph (OG) tags for proper web page configuration.
+3. Title set to 'Host OS Kit — Point Zero One' and a description suitable for social sharing.
+4. Deterministic effects to ensure consistency across all deployments.
+
+## Implementation Spec
+
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Host OS Kit — Point Zero One</title>
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://pointzeroonegame.com/host" />
+  <meta property="og:title" content="Host OS Kit — Point Zero One" />
+  <meta property="og:description" content="Explore the Host Operating System (Host OS Kit) within Sovereign Infrastructure Architect, a 12-minute financial roguelike game by Point Zero One Digital." />
+  <!-- Add additional meta tags and styles as needed -->
+</head>
+<body>
+  <!-- Main content for /host route goes here -->
+</body>
+</html>
+```
+
+## Edge Cases
+
+- Ensure that all added meta tags and styles are compatible with the frontend framework being used.
+- Test the page's appearance and functionality across various browsers and devices to maintain a consistent user experience.

@@ -1,0 +1,12 @@
+/**
+ * Quarantine Reason Categories Enum (HIGH_LEVEL only)
+ */
+
+export enum QuarantineReasonCategories {
+  NON_REPLAYABLE = "NON_REPLAYABLE",
+  TAMPER_SIGNAL = "TAMPER_SIGNAL",
+  BOT_SUSPECT = "BOT_SUSPECT",
+  VERSION_MISMATCH = "VERSION_MISMATCH",
+  NETWORK_INCOMPLETE = "NETWORK_INCOMPLETE",
+  POLICY_HOLD = "POLICY_HOLD"
+}

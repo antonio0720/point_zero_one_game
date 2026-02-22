@@ -1,0 +1,69 @@
+FROM node:14-slim AS build
+
+# Set default arguments for subsequent stages
+ARG NODE_ENV=production
+ARG ML_ENABLED=false
+ARG AUDIT_HASH=
+ARG BOUND_OUTPUTS=true
+
+WORKDIR /app
+
+COPY package*.json ./
+RUN npm install --strict-peer-deps --unsafe-perm && \
+    npm prune --production
+
+COPY tsconfig.json .
+COPY src/ .
+
+# TypeScript settings
+ENV NODE_OPTIONS=--enable-source-maps
+ENV TS_NODE_PROJECT=tsconfig.json
+ENV TSCONFIG_PATH=/app/tsconfig.json
+
+RUN tsc --build --strict --noEmitOnError --outDir dist/
+
+COPY .env.production ./
+COPY static/* /static/
+
+WORKDIR /app/dist
+
+# Set environment variables for the production stage
+ENV NODE_ENV=$NODE_ENV
+ENV ML_ENABLED=$ML_ENABLED
+ENV AUDIT_HASH=$AUDIT_HASH
+ENV BOUND_OUTPUTS=$BOUND_OUTPUTS
+
+RUN npm install --production && \
+    npm run build:prod
+
+FROM node:14-slim AS prod
+
+WORKDIR /app/dist
+
+COPY --from=build /app/dist/* .
+
+# Set environment variables for the production stage
+ENV NODE_ENV=$NODE_ENV
+ENV ML_ENABLED=$ML_ENABLED
+ENV AUDIT_HASH=$AUDIT_HASH
+ENV BOUND_OUTPUTS=$BOUND_OUTPUTS
+
+RUN npm install --production && \
+    npm run start:prod
+
+EXPOSE 3000
+
+CMD ["npm", "start"]
+
+# Static asset caching
+RUN mkdir -p /tmp/cache
+WORKDIR /tmp/cache
+
+COPY static/* /tmp/cache/
+
+RUN npm install serve-static && \
+    npm install cache-manager
+
+RUN serve-static --cache /tmp/cache/ &
+
+CMD ["serve-static", "--cache", "/tmp/cache/", "-l", "3000"]
