@@ -1,666 +1,404 @@
 /**
- * ============================================================================
- * FILE: pzo_client/src/components/chat/SovereignChat.tsx
- * Point Zero One — Sovereign Chat UI
- * 
- * Game of War / Mobile Strike-inspired compact chat panel
- * Channels: GLOBAL | SERVER | ALLIANCE | OFFICER | ROOM | DM
- * Features: Channel tabs, Rank badges, Stickers, Block, Unsend (15s),
- *           War Alerts, System messages, Unread counts, Presence dots
- * ============================================================================
+ * SovereignChat.tsx
+ * T208: War phase transition SYSTEM message styling within main chat view.
+ * Renders high-signal banners for WAR_STARTED, ONE_HOUR_WARNING,
+ * SETTLEMENT_STARTED, WAR_OUTCOME inline in the chat feed.
  */
 
-import React, {
-  useState, useEffect, useRef, useCallback, useMemo,
-} from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 
-// ─── TYPES ────────────────────────────────────────────────────────────────────
+// ─── Types ────────────────────────────────────────────────────────────────────
 
-type ChannelType = 'GLOBAL' | 'SERVER' | 'ALLIANCE' | 'OFFICER' | 'ROOM' | 'DM';
-type MessageType = 'TEXT' | 'STICKER' | 'SYSTEM' | 'WAR_ALERT' | 'DEAL_INVITE' | 'PROOF_SHARE';
-type MessageStatus = 'SENT' | 'DELIVERED' | 'READ' | 'UNSENT' | 'DELETED_BY_MOD';
+export type ChannelType = 'GLOBAL' | 'SERVER' | 'ALLIANCE' | 'OFFICER' | 'ROOM' | 'DM' | 'WAR_ROOM';
+export type MessageType = 'TEXT' | 'STICKER' | 'SYSTEM' | 'WAR_ALERT' | 'DEAL_INVITE' | 'PROOF_SHARE';
+export type WarSystemSubtype = 'WAR_STARTED' | 'ONE_HOUR_WARNING' | 'SETTLEMENT_STARTED' | 'WAR_OUTCOME';
 
-interface Message {
-  id:          string;
-  channelId:   string;
+export interface WarAlertPayload {
+  warId:              string;
+  attackerName:       string;
+  defenderName:       string;
+  attackerBanner:     string;
+  defenderBanner:     string;
+  currentPhase:       string;
+  phaseEndsAt:        string;
+  countdownMs:        number;
+  attackerPoints:     number;
+  defenderPoints:     number;
+  deepLinkUrl:        string;
+}
+
+export interface ChatMessage {
+  messageId:   string;
   senderId:    string;
-  senderName:  string;
-  senderRank:  string | null;
-  senderTitle: string | null;
+  senderName?: string;
   type:        MessageType;
-  body:        string;
-  status:      MessageStatus;
-  sentAt:      Date;
-  replyToId:   string | null;
-  isMine:      boolean;
+  channelType: ChannelType;
+  text?:       string;
+  subtype?:    WarSystemSubtype;
+  warAlert?:   WarAlertPayload;
+  status:      'ACTIVE' | 'UNSENT' | 'REMOVED';
+  immutable:   boolean;
+  createdAt:   string;
 }
 
-interface Channel {
-  id:          string;
-  type:        ChannelType;
-  label:       string;
-  unread:      number;
-  isLocked:    boolean;
-  minRank?:    number;   // 3 for OFFICER
+export interface SovereignChatProps {
+  channelType:   ChannelType;
+  channelName:   string;
+  messages:      ChatMessage[];
+  currentUserId: string;
+  onSend:        (text: string) => void;
+  onUnsend?:     (messageId: string) => void;
+  onWarAlertClick?: (warId: string, url: string) => void;
+  degraded?:     boolean;
 }
 
-interface SovereignChatProps {
-  playerId:    string;
-  playerRank:  string | null;   // "R1"–"R5"
-  playerTitle: string | null;
-  allianceId:  string | null;
-  serverId:    string;
-  // Callbacks wired to ChatService
-  onSend:      (channelId: string, body: string, type?: MessageType) => Promise<Message | { error: string }>;
-  onUnsend:    (messageId: string) => Promise<{ success: boolean; reason?: string }>;
-  onBlock:     (targetId: string) => Promise<void>;
-  onLoadHistory: (channelId: string, before?: Date) => Promise<Message[]>;
-  onOpenDM:    (targetId: string, targetName: string) => void;
-}
+// ─── T208: War phase SYSTEM message styles ────────────────────────────────────
 
-// ─── STICKERS ─────────────────────────────────────────────────────────────────
-
-const STICKERS: Array<{ id: string; emoji: string; label: string }> = [
-  { id: 'pzo_fist',       emoji: '✊',  label: 'Fist' },
-  { id: 'pzo_fire',       emoji: '🔥',  label: 'Fire' },
-  { id: 'pzo_money_bag',  emoji: '💰',  label: 'Bag' },
-  { id: 'pzo_crown',      emoji: '👑',  label: 'Crown' },
-  { id: 'pzo_skull',      emoji: '💀',  label: 'Skull' },
-  { id: 'pzo_swords',     emoji: '⚔️', label: 'War' },
-  { id: 'pzo_handshake',  emoji: '🤝',  label: 'Deal' },
-  { id: 'pzo_chart_up',   emoji: '📈',  label: 'Up' },
-  { id: 'pzo_fubar',      emoji: '💥',  label: 'FUBAR' },
-  { id: 'pzo_missed',     emoji: '😬',  label: 'Missed' },
-  { id: 'pzo_privileged', emoji: '🎩',  label: 'Priv' },
-  { id: 'pzo_receipt',    emoji: '🧾',  label: 'Receipt' },
-];
-
-// ─── RANK BADGE ───────────────────────────────────────────────────────────────
-
-const RANK_COLORS: Record<string, string> = {
-  R5: '#FFD700', R4: '#C0C0C0', R3: '#CD7F32', R2: '#4FC3F7', R1: '#78909C',
+const WAR_SYSTEM_CONFIG: Record<WarSystemSubtype, {
+  icon:       string;
+  label:      string;
+  bg:         string;
+  border:     string;
+  textColor:  string;
+  pulse:      boolean;
+}> = {
+  WAR_STARTED: {
+    icon:      '🔥',
+    label:     'WAR HAS BEGUN',
+    bg:        'linear-gradient(135deg, #EF4444, #B91C1C)',
+    border:    '#EF4444',
+    textColor: '#FFFFFF',
+    pulse:     true,
+  },
+  ONE_HOUR_WARNING: {
+    icon:      '⏳',
+    label:     '1 HOUR REMAINING',
+    bg:        'linear-gradient(135deg, #F59E0B, #D97706)',
+    border:    '#F59E0B',
+    textColor: '#FFFFFF',
+    pulse:     true,
+  },
+  SETTLEMENT_STARTED: {
+    icon:      '⚖️',
+    label:     'SETTLEMENT IN PROGRESS',
+    bg:        'linear-gradient(135deg, #8B5CF6, #6D28D9)',
+    border:    '#8B5CF6',
+    textColor: '#FFFFFF',
+    pulse:     false,
+  },
+  WAR_OUTCOME: {
+    icon:      '🏆',
+    label:     'WAR RESULT',
+    bg:        'linear-gradient(135deg, #1E293B, #0F172A)',
+    border:    '#F59E0B',
+    textColor: '#F9FAFB',
+    pulse:     false,
+  },
 };
 
-function RankBadge({ rank }: { rank: string }) {
+// ─── War SYSTEM message component ────────────────────────────────────────────
+
+const WarSystemBanner: React.FC<{ message: ChatMessage }> = ({ message }) => {
+  if (!message.subtype) return null;
+  const conf = WAR_SYSTEM_CONFIG[message.subtype];
+
   return (
-    <span style={{
-      display: 'inline-block',
-      fontSize: '9px',
-      fontWeight: 700,
-      padding: '1px 4px',
-      borderRadius: '3px',
-      background: RANK_COLORS[rank] ?? '#666',
-      color: rank === 'R5' ? '#000' : '#fff',
-      marginRight: 4,
-      letterSpacing: '0.5px',
+    <div style={{
+      background:   conf.bg,
+      border:       `2px solid ${conf.border}`,
+      borderRadius: 12,
+      padding:      '14px 18px',
+      margin:       '10px 4px',
+      color:        conf.textColor,
+      textAlign:    'center',
+      position:     'relative',
+      overflow:     'hidden',
+      boxShadow:    `0 4px 20px ${conf.border}44`,
+      animation:    conf.pulse ? 'warPulse 2s ease-in-out 2' : 'none',
     }}>
-      {rank}
-    </span>
+      <div style={{ fontSize: 22, marginBottom: 4 }}>{conf.icon}</div>
+      <div style={{ fontWeight: 800, fontSize: 13, letterSpacing: 1.5, opacity: 0.85 }}>
+        {conf.label}
+      </div>
+      <div style={{ fontWeight: 500, fontSize: 14, marginTop: 6, lineHeight: 1.5 }}>
+        {message.text}
+      </div>
+      <div style={{ marginTop: 6, fontSize: 11, opacity: 0.6 }}>
+        {new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+      </div>
+    </div>
   );
-}
-
-// ─── TITLE BADGE ──────────────────────────────────────────────────────────────
-
-const TITLE_DISPLAY: Record<string, string> = {
-  THE_SOVEREIGN: '⚡ Sovereign',
-  THE_ARCHITECT: '🏗 Architect',
-  FUBAR_PROOF:   '🛡 FUBAR-Proof',
-  THE_CLOSER:    '🤝 Closer',
-  VAULT_LORD:    '🏦 Vault Lord',
-  WAR_GENERAL:   '⚔️ General',
 };
 
-function TitleBadge({ title }: { title: string }) {
-  const label = TITLE_DISPLAY[title] ?? title;
-  return (
-    <span style={{
-      fontSize: '9px', color: '#FFD700', marginRight: 4, fontStyle: 'italic',
-    }}>
-      {label}
-    </span>
-  );
-}
+// ─── WAR_ALERT card component ─────────────────────────────────────────────────
 
-// ─── MESSAGE BUBBLE ───────────────────────────────────────────────────────────
+const WarAlertCard: React.FC<{
+  payload:  WarAlertPayload;
+  onClick?: (warId: string, url: string) => void;
+}> = ({ payload, onClick }) => (
+  <div
+    onClick={() => onClick?.(payload.warId, payload.deepLinkUrl)}
+    style={{
+      background:   '#1E293B',
+      border:       '2px solid #EF4444',
+      borderRadius: 14,
+      padding:      '14px 16px',
+      margin:       '8px 4px',
+      cursor:       onClick ? 'pointer' : 'default',
+      boxShadow:    '0 4px 16px rgba(239,68,68,0.2)',
+      transition:   'transform 0.15s',
+    }}
+    onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.transform = 'scale(1.01)'; }}
+    onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.transform = 'scale(1)'; }}
+  >
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+      <span style={{ color: '#EF4444', fontWeight: 800, fontSize: 12, letterSpacing: 1 }}>⚔️ WAR DECLARED</span>
+      <span style={{ color: '#9CA3AF', fontSize: 11 }}>{payload.currentPhase}</span>
+    </div>
 
-function MessageBubble({
-  msg,
-  onUnsend,
-  onBlock,
-  onReply,
-  onOpenDM,
-  playerId,
-}: {
-  msg:       Message;
-  onUnsend:  (id: string) => void;
-  onBlock:   (id: string, name: string) => void;
-  onReply:   (id: string, name: string) => void;
-  onOpenDM:  (id: string, name: string) => void;
-  playerId:  string;
-}) {
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [canUnsend, setCanUnsend] = useState(msg.isMine && msg.status !== 'UNSENT');
-  const menuRef = useRef<HTMLDivElement>(null);
+    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+      <div style={{ textAlign: 'center', flex: 1 }}>
+        <img src={payload.attackerBanner} alt="" style={{ width: 40, height: 40, borderRadius: 8, objectFit: 'cover' }} />
+        <div style={{ color: '#F8FAFC', fontWeight: 700, fontSize: 12, marginTop: 4 }}>{payload.attackerName}</div>
+        <div style={{ color: '#EF4444', fontWeight: 800, fontSize: 18 }}>{payload.attackerPoints}</div>
+      </div>
+      <div style={{ color: '#6B7280', fontWeight: 700, fontSize: 16 }}>VS</div>
+      <div style={{ textAlign: 'center', flex: 1 }}>
+        <img src={payload.defenderBanner} alt="" style={{ width: 40, height: 40, borderRadius: 8, objectFit: 'cover' }} />
+        <div style={{ color: '#F8FAFC', fontWeight: 700, fontSize: 12, marginTop: 4 }}>{payload.defenderName}</div>
+        <div style={{ color: '#EF4444', fontWeight: 800, fontSize: 18 }}>{payload.defenderPoints}</div>
+      </div>
+    </div>
 
-  // Disable unsend after 15s
-  useEffect(() => {
-    if (!msg.isMine || msg.status === 'UNSENT') return;
-    const age  = Date.now() - new Date(msg.sentAt).getTime();
-    const left = 15000 - age;
-    if (left <= 0) { setCanUnsend(false); return; }
-    const t = setTimeout(() => setCanUnsend(false), left);
-    return () => clearTimeout(t);
-  }, [msg]);
-
-  // Close context menu on outside click
-  useEffect(() => {
-    if (!menuOpen) return;
-    const handler = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [menuOpen]);
-
-  const isSystem    = msg.type === 'SYSTEM' || msg.type === 'WAR_ALERT';
-  const isUnsent    = msg.status === 'UNSENT' || msg.status === 'DELETED_BY_MOD';
-  const isWarAlert  = msg.type === 'WAR_ALERT';
-
-  if (isSystem) {
-    return (
+    {onClick && (
       <div style={{
-        textAlign: 'center',
-        fontSize: '10px',
-        color: isWarAlert ? '#FF4444' : '#888',
-        padding: '2px 0',
-        fontStyle: isWarAlert ? 'normal' : 'italic',
-        fontWeight: isWarAlert ? 700 : 400,
+        marginTop:    10,
+        textAlign:    'center',
+        color:        '#EF4444',
+        fontSize:     12,
+        fontWeight:   600,
       }}>
-        {isWarAlert && '⚔️ '}
-        {msg.body}
+        View War Room →
+      </div>
+    )}
+  </div>
+);
+
+// ─── Regular bubble ───────────────────────────────────────────────────────────
+
+const ChatBubble: React.FC<{
+  message:  ChatMessage;
+  isOwn:    boolean;
+  onUnsend?: (id: string) => void;
+}> = ({ message, isOwn, onUnsend }) => {
+  const [hovered, setHovered] = useState(false);
+  const canUnsend = isOwn && !message.immutable && message.status === 'ACTIVE';
+  if (message.status === 'UNSENT') {
+    return (
+      <div style={{ textAlign: isOwn ? 'right' : 'left', color: '#9CA3AF', fontSize: 12, fontStyle: 'italic', margin: '2px 4px' }}>
+        Message unsent
       </div>
     );
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', marginBottom: 2, position: 'relative' }}
-         onContextMenu={e => { e.preventDefault(); setMenuOpen(true); }}>
-      {/* Sender line */}
-      <div style={{ fontSize: '10px', marginBottom: 1, lineHeight: '14px' }}>
-        {msg.senderRank && <RankBadge rank={msg.senderRank} />}
-        {msg.senderTitle && <TitleBadge title={msg.senderTitle} />}
-        <span style={{
-          color: msg.isMine ? '#FFD700' : '#90CAF9',
-          fontWeight: 600,
-          cursor: msg.isMine ? 'default' : 'pointer',
-        }}
-          onClick={() => !msg.isMine && setMenuOpen(true)}
-        >
-          {msg.senderName}
-        </span>
-        <span style={{ color: '#555', marginLeft: 4, fontSize: '9px' }}>
-          {new Date(msg.sentAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-        </span>
-      </div>
-
-      {/* Body */}
-      <div style={{
-        fontSize: '11px',
-        color: isUnsent ? '#555' : '#E0E0E0',
-        fontStyle: isUnsent ? 'italic' : 'normal',
-        wordBreak: 'break-word',
-        paddingLeft: 2,
-      }}>
-        {isUnsent
-          ? (msg.status === 'DELETED_BY_MOD' ? '[message removed]' : '[message unsent]')
-          : msg.type === 'STICKER'
-            ? <span style={{ fontSize: 20 }}>
-                {STICKERS.find(s => s.id === msg.body)?.emoji ?? '?'}
-              </span>
-            : msg.body
-        }
-      </div>
-
-      {/* Context Menu */}
-      {menuOpen && (
-        <div ref={menuRef} style={{
-          position: 'absolute', top: 0, left: msg.isMine ? 'auto' : '0', right: msg.isMine ? 0 : 'auto',
-          background: '#1E1E2E',
-          border: '1px solid #333',
-          borderRadius: 6,
-          padding: '4px 0',
-          zIndex: 100,
-          minWidth: 130,
-          boxShadow: '0 4px 12px rgba(0,0,0,0.6)',
-        }}>
-          {[
-            { label: '↩ Reply', action: () => { onReply(msg.id, msg.senderName); setMenuOpen(false); } },
-            !msg.isMine && { label: '✉️ DM', action: () => { onOpenDM(msg.senderId, msg.senderName); setMenuOpen(false); } },
-            canUnsend && { label: '↩ Unsend', action: () => { onUnsend(msg.id); setMenuOpen(false); }, color: '#FFA726' },
-            !msg.isMine && { label: '🚫 Block', action: () => { onBlock(msg.senderId, msg.senderName); setMenuOpen(false); }, color: '#EF5350' },
-          ].filter(Boolean).map((item: unknown) => {
-            const it = item as { label: string; action: () => void; color?: string };
-            return (
-              <div key={it.label}
-                style={{
-                  padding: '5px 12px',
-                  fontSize: '11px',
-                  color: it.color ?? '#E0E0E0',
-                  cursor: 'pointer',
-                }}
-                onMouseEnter={e => (e.currentTarget.style.background = '#2A2A3E')}
-                onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
-                onClick={it.action}
-              >
-                {it.label}
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ─── CHANNEL TAB ──────────────────────────────────────────────────────────────
-
-function ChannelTab({
-  channel, active, onClick,
-}: { channel: Channel; active: boolean; onClick: () => void }) {
-  const TAB_COLORS: Record<ChannelType, string> = {
-    GLOBAL:   '#4FC3F7', SERVER:   '#81C784',
-    ALLIANCE: '#FFD700', OFFICER: '#FF8A65',
-    ROOM:     '#CE93D8', DM:      '#F48FB1',
-  };
-  return (
-    <button
-      onClick={onClick}
-      style={{
-        background:   active ? TAB_COLORS[channel.type] + '22' : 'transparent',
-        border:       'none',
-        borderBottom: active ? `2px solid ${TAB_COLORS[channel.type]}` : '2px solid transparent',
-        color:        active ? TAB_COLORS[channel.type] : '#666',
-        padding:      '4px 8px',
-        fontSize:     '10px',
-        fontWeight:   active ? 700 : 400,
-        cursor:       'pointer',
-        position:     'relative',
-        whiteSpace:   'nowrap',
-        transition:   'all 0.15s',
-      }}
+    <div
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{ display: 'flex', flexDirection: 'column', alignItems: isOwn ? 'flex-end' : 'flex-start', margin: '3px 4px' }}
     >
-      {channel.label}
-      {channel.unread > 0 && (
-        <span style={{
-          position: 'absolute', top: 1, right: 1,
-          background: '#EF5350',
-          color: '#fff',
-          fontSize: '8px',
-          fontWeight: 700,
-          borderRadius: '50%',
-          width: 14, height: 14,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          lineHeight: 1,
-        }}>
-          {channel.unread > 9 ? '9+' : channel.unread}
-        </span>
+      {!isOwn && message.senderName && (
+        <div style={{ fontSize: 11, color: '#6B7280', marginBottom: 2, marginLeft: 4 }}>{message.senderName}</div>
       )}
-    </button>
-  );
-}
-
-// ─── STICKER PICKER ───────────────────────────────────────────────────────────
-
-function StickerPicker({ onSelect, onClose }: { onSelect: (id: string) => void; onClose: () => void }) {
-  return (
-    <div style={{
-      position: 'absolute',
-      bottom: '100%',
-      right: 0,
-      background: '#1E1E2E',
-      border: '1px solid #333',
-      borderRadius: 8,
-      padding: 8,
-      display: 'grid',
-      gridTemplateColumns: 'repeat(4, 1fr)',
-      gap: 4,
-      zIndex: 50,
-      boxShadow: '0 4px 16px rgba(0,0,0,0.7)',
-    }}>
-      {STICKERS.map(s => (
-        <button key={s.id}
-          title={s.label}
-          onClick={() => { onSelect(s.id); onClose(); }}
-          style={{
-            background: 'transparent', border: 'none',
-            fontSize: 20, cursor: 'pointer',
-            borderRadius: 4, padding: '2px 4px',
-            transition: 'background 0.1s',
-          }}
-          onMouseEnter={e => (e.currentTarget.style.background = '#2A2A3E')}
-          onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
-        >
-          {s.emoji}
-        </button>
-      ))}
+      <div style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 6, flexDirection: isOwn ? 'row-reverse' : 'row' }}>
+        <div style={{
+          maxWidth:     '70%',
+          background:   isOwn ? '#3B82F6' : '#1E293B',
+          color:        '#F8FAFC',
+          borderRadius: isOwn ? '16px 16px 4px 16px' : '16px 16px 16px 4px',
+          padding:      '10px 14px',
+          fontSize:     14,
+          lineHeight:   1.5,
+        }}>
+          {message.text}
+        </div>
+        {canUnsend && hovered && (
+          <button
+            onClick={() => onUnsend?.(message.messageId)}
+            style={{
+              background:   'transparent',
+              border:       'none',
+              color:        '#9CA3AF',
+              fontSize:     11,
+              cursor:       'pointer',
+              padding:      '2px 4px',
+            }}
+          >
+            Unsend
+          </button>
+        )}
+        {message.immutable && (
+          <span title="Immutable" style={{ fontSize: 10, color: '#6B7280' }}>🔒</span>
+        )}
+      </div>
+      <span style={{ fontSize: 10, color: '#6B7280', marginTop: 2 }}>
+        {new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+      </span>
     </div>
   );
-}
+};
 
-// ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
+// ─── SovereignChat ────────────────────────────────────────────────────────────
 
-export default function SovereignChat({
-  playerId,
-  playerRank,
-  playerTitle,
-  allianceId,
-  serverId,
+export const SovereignChat: React.FC<SovereignChatProps> = ({
+  channelType,
+  channelName,
+  messages,
+  currentUserId,
   onSend,
   onUnsend,
-  onBlock,
-  onLoadHistory,
-  onOpenDM,
-}: SovereignChatProps) {
+  onWarAlertClick,
+  degraded = false,
+}) => {
+  const [input, setInput] = useState('');
+  const bottomRef = useRef<HTMLDivElement>(null);
+  const isWarRoom = channelType === 'WAR_ROOM';
 
-  const rankNum = playerRank ? parseInt(playerRank.replace('R', '')) : 0;
-
-  const channels = useMemo<Channel[]>(() => [
-    { id: 'global',              type: 'GLOBAL',   label: 'GLOBAL',   unread: 0, isLocked: false },
-    { id: `server_${serverId}`,  type: 'SERVER',   label: 'SERVER',   unread: 0, isLocked: false },
-    ...(allianceId ? [
-      { id: `alliance_${allianceId}`, type: 'ALLIANCE' as ChannelType, label: 'ALLIANCE', unread: 0, isLocked: false },
-      ...(rankNum >= 3 ? [{ id: `officer_${allianceId}`, type: 'OFFICER' as ChannelType, label: 'OFFICER', unread: 0, isLocked: false, minRank: 3 }] : []),
-    ] : []),
-  ], [allianceId, serverId, rankNum]);
-
-  const [activeChannelId, setActiveChannelId] = useState(channels[0].id);
-  const [messages, setMessages] = useState<Record<string, Message[]>>({});
-  const [draft, setDraft] = useState('');
-  const [replyTo, setReplyTo] = useState<{ id: string; name: string } | null>(null);
-  const [showStickers, setShowStickers] = useState(false);
-  const [isMinimized, setIsMinimized] = useState(false);
-  const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({});
-  const [sending, setSending] = useState(false);
-
-  const listRef    = useRef<HTMLDivElement>(null);
-  const inputRef   = useRef<HTMLTextAreaElement>(null);
-
-  const activeChannel = channels.find(c => c.id === activeChannelId) ?? channels[0];
-  const activeMsgs    = messages[activeChannelId] ?? [];
-
-  // Load history when channel changes
   useEffect(() => {
-    if (messages[activeChannelId]) return;
-    onLoadHistory(activeChannelId).then(msgs => {
-      setMessages(prev => ({
-        ...prev,
-        [activeChannelId]: [...msgs].reverse(),
-      }));
-    });
-    // Mark channel as read
-    setUnreadCounts(prev => ({ ...prev, [activeChannelId]: 0 }));
-  }, [activeChannelId]);
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages.length]);
 
-  // Auto-scroll to bottom
-  useEffect(() => {
-    if (listRef.current) {
-      listRef.current.scrollTop = listRef.current.scrollHeight;
-    }
-  }, [activeMsgs.length, isMinimized]);
-
-  const handleSend = useCallback(async (body: string, type: MessageType = 'TEXT') => {
-    if (!body.trim() && type === 'TEXT') return;
-    if (sending) return;
-    setSending(true);
-    setDraft('');
-    setReplyTo(null);
-
-    const result = await onSend(activeChannelId, body, type);
-    setSending(false);
-
-    if ('error' in result) {
-      // Show inline error briefly
-      console.warn('Chat send error:', result.error);
-      return;
-    }
-
-    setMessages(prev => ({
-      ...prev,
-      [activeChannelId]: [...(prev[activeChannelId] ?? []), result],
-    }));
-  }, [activeChannelId, onSend, sending]);
-
-  const handleUnsend = useCallback(async (messageId: string) => {
-    const result = await onUnsend(messageId);
-    if (!result.success) return;
-    setMessages(prev => ({
-      ...prev,
-      [activeChannelId]: (prev[activeChannelId] ?? []).map(m =>
-        m.id === messageId ? { ...m, status: 'UNSENT' } : m
-      ),
-    }));
-  }, [activeChannelId, onUnsend]);
-
-  const handleBlock = useCallback(async (targetId: string, _targetName: string) => {
-    await onBlock(targetId);
-    // Hide all messages from that user in current channel
-    setMessages(prev => ({
-      ...prev,
-      [activeChannelId]: (prev[activeChannelId] ?? []).filter(m => m.senderId !== targetId),
-    }));
-  }, [activeChannelId, onBlock]);
-
-  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSend(draft);
-    }
-  }, [draft, handleSend]);
-
-  if (isMinimized) {
-    const totalUnread = Object.values(unreadCounts).reduce((a, b) => a + b, 0);
-    return (
-      <button
-        onClick={() => setIsMinimized(false)}
-        style={{
-          position: 'fixed', bottom: 16, left: 16,
-          background: '#1A1A2E',
-          border: '1px solid #333',
-          borderRadius: 20,
-          padding: '6px 14px',
-          color: '#E0E0E0',
-          fontSize: '12px',
-          cursor: 'pointer',
-          display: 'flex',
-          alignItems: 'center',
-          gap: 6,
-          zIndex: 1000,
-        }}
-      >
-        💬 Chat
-        {totalUnread > 0 && (
-          <span style={{ background: '#EF5350', color: '#fff', borderRadius: '50%', width: 18, height: 18, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px' }}>
-            {totalUnread > 99 ? '99+' : totalUnread}
-          </span>
-        )}
-      </button>
-    );
-  }
+  const handleSend = () => {
+    const text = input.trim();
+    if (!text || degraded) return;
+    onSend(text);
+    setInput('');
+  };
 
   return (
     <div style={{
-      position:     'fixed',
-      bottom:       16,
-      left:         16,
-      width:        280,
-      height:       340,
-      background:   'rgba(10, 10, 20, 0.95)',
-      border:       '1px solid #2A2A3E',
-      borderRadius: 10,
-      display:      'flex',
+      display:       'flex',
       flexDirection: 'column',
-      overflow:     'hidden',
-      zIndex:       1000,
-      boxShadow:    '0 8px 32px rgba(0,0,0,0.7)',
-      fontFamily:   '"Inter", "Segoe UI", sans-serif',
-      backdropFilter: 'blur(12px)',
+      height:        '100%',
+      background:    '#0F172A',
+      color:         '#F8FAFC',
+      fontFamily:    'system-ui, sans-serif',
     }}>
+      {/* pulse keyframe */}
+      <style>{`
+        @keyframes warPulse {
+          0%, 100% { opacity: 1; transform: scale(1); }
+          50% { opacity: 0.9; transform: scale(1.01); }
+        }
+      `}</style>
 
-      {/* ── Header ── */}
+      {/* Header */}
       <div style={{
-        display:    'flex',
-        alignItems: 'center',
-        padding:    '4px 6px',
-        background: 'rgba(26, 26, 46, 0.8)',
-        borderBottom: '1px solid #1E1E2E',
-        gap: 2,
-        flexShrink: 0,
+        padding:       '12px 16px',
+        borderBottom:  '1px solid rgba(255,255,255,0.08)',
+        background:    '#1E293B',
+        display:       'flex',
+        alignItems:    'center',
+        gap:           8,
       }}>
-        {/* Channel tabs */}
-        <div style={{ display: 'flex', flex: 1, overflowX: 'auto', scrollbarWidth: 'none' }}>
-          {channels.map(ch => (
-            <ChannelTab key={ch.id} channel={{ ...ch, unread: unreadCounts[ch.id] ?? 0 }}
-              active={activeChannelId === ch.id}
-              onClick={() => setActiveChannelId(ch.id)}
-            />
-          ))}
-        </div>
-        {/* Minimize */}
-        <button onClick={() => setIsMinimized(true)} style={{
-          background: 'transparent', border: 'none',
-          color: '#555', cursor: 'pointer', fontSize: 14, padding: '0 4px', flexShrink: 0,
-        }}>—</button>
-      </div>
-
-      {/* ── Message List ── */}
-      <div ref={listRef} style={{
-        flex:     1,
-        overflowY: 'auto',
-        padding:  '6px 8px',
-        display:  'flex',
-        flexDirection: 'column',
-        gap:      1,
-        scrollbarWidth: 'thin',
-        scrollbarColor: '#333 transparent',
-      }}>
-        {activeMsgs.length === 0 && (
-          <div style={{ color: '#444', fontSize: '11px', textAlign: 'center', marginTop: 20 }}>
-            No messages yet.
-          </div>
+        {isWarRoom && <span>⚔️</span>}
+        <span style={{ fontWeight: 700, fontSize: 15 }}>{channelName}</span>
+        {isWarRoom && (
+          <span style={{ fontSize: 11, color: '#EF4444', marginLeft: 'auto', fontWeight: 600 }}>
+            🔒 Immutable
+          </span>
         )}
-        {activeMsgs.map(msg => (
-          <MessageBubble key={msg.id} msg={msg}
-            onUnsend={handleUnsend}
-            onBlock={handleBlock}
-            onReply={(id, name) => setReplyTo({ id, name })}
-            onOpenDM={onOpenDM}
-            playerId={playerId}
-          />
-        ))}
+        {degraded && (
+          <span style={{ fontSize: 11, color: '#F59E0B', marginLeft: 'auto' }}>
+            ⚠️ History only
+          </span>
+        )}
       </div>
 
-      {/* ── Reply Banner ── */}
-      {replyTo && (
+      {/* Messages */}
+      <div style={{ flex: 1, overflowY: 'auto', padding: '8px 4px' }}>
+        {messages.map((msg) => {
+          if (msg.type === 'SYSTEM' && msg.subtype) {
+            return <WarSystemBanner key={msg.messageId} message={msg} />;
+          }
+          if (msg.type === 'WAR_ALERT' && msg.warAlert) {
+            return (
+              <WarAlertCard
+                key={msg.messageId}
+                payload={msg.warAlert}
+                onClick={onWarAlertClick}
+              />
+            );
+          }
+          return (
+            <ChatBubble
+              key={msg.messageId}
+              message={msg}
+              isOwn={msg.senderId === currentUserId}
+              onUnsend={onUnsend}
+            />
+          );
+        })}
+        <div ref={bottomRef} />
+      </div>
+
+      {/* Input */}
+      {!degraded ? (
         <div style={{
-          display:    'flex',
-          alignItems: 'center',
-          padding:    '3px 8px',
-          background: '#1E1E2E',
-          fontSize:   '10px',
-          color:      '#90CAF9',
-          borderTop:  '1px solid #2A2A3E',
-          gap: 6,
-          flexShrink: 0,
+          display:     'flex',
+          gap:         8,
+          padding:     '10px 12px',
+          borderTop:   '1px solid rgba(255,255,255,0.08)',
+          background:  '#1E293B',
         }}>
-          ↩ Replying to <strong>{replyTo.name}</strong>
-          <button onClick={() => setReplyTo(null)} style={{
-            marginLeft: 'auto', background: 'transparent', border: 'none',
-            color: '#555', cursor: 'pointer', fontSize: 12,
-          }}>✕</button>
+          <input
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && handleSend()}
+            placeholder={isWarRoom ? 'War room message…' : 'Send a message…'}
+            maxLength={500}
+            style={{
+              flex:         1,
+              background:   '#0F172A',
+              border:       '1px solid rgba(255,255,255,0.1)',
+              borderRadius: 10,
+              color:        '#F8FAFC',
+              padding:      '9px 14px',
+              fontSize:     14,
+              outline:      'none',
+            }}
+          />
+          <button
+            onClick={handleSend}
+            disabled={!input.trim()}
+            style={{
+              background:   input.trim() ? (isWarRoom ? '#EF4444' : '#3B82F6') : '#374151',
+              color:        '#fff',
+              border:       'none',
+              borderRadius: 10,
+              padding:      '9px 16px',
+              fontWeight:   700,
+              cursor:       input.trim() ? 'pointer' : 'not-allowed',
+              fontSize:     14,
+            }}
+          >
+            →
+          </button>
+        </div>
+      ) : (
+        <div style={{
+          padding:    '10px',
+          textAlign:  'center',
+          color:      '#6B7280',
+          fontSize:   12,
+          borderTop:  '1px solid rgba(255,255,255,0.06)',
+          background: '#1E293B',
+        }}>
+          ⚠️ Chat unavailable — showing history
         </div>
       )}
-
-      {/* ── Input Area ── */}
-      <div style={{
-        display:    'flex',
-        alignItems: 'flex-end',
-        padding:    '4px 6px',
-        borderTop:  '1px solid #1E1E2E',
-        gap: 4,
-        position:   'relative',
-        flexShrink: 0,
-      }}>
-        {/* Sticker toggle */}
-        <button
-          onClick={() => setShowStickers(s => !s)}
-          style={{
-            background: 'transparent', border: 'none',
-            fontSize: 16, cursor: 'pointer', padding: '0 2px',
-            opacity: 0.7, flexShrink: 0,
-          }}
-          title="Stickers"
-        >
-          😀
-        </button>
-
-        {/* Sticker picker */}
-        {showStickers && (
-          <StickerPicker
-            onSelect={id => handleSend(id, 'STICKER')}
-            onClose={() => setShowStickers(false)}
-          />
-        )}
-
-        {/* Text input */}
-        <textarea
-          ref={inputRef}
-          value={draft}
-          onChange={e => setDraft(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder={activeChannel.isLocked ? '🔒 Channel locked' : 'Message...'}
-          disabled={activeChannel.isLocked || sending}
-          maxLength={500}
-          rows={1}
-          style={{
-            flex:       1,
-            background: '#1E1E2E',
-            border:     '1px solid #333',
-            borderRadius: 6,
-            color:      '#E0E0E0',
-            fontSize:   '11px',
-            padding:    '5px 8px',
-            resize:     'none',
-            outline:    'none',
-            lineHeight: '15px',
-            maxHeight:  60,
-            overflowY:  'auto',
-            fontFamily: 'inherit',
-          }}
-        />
-
-        {/* Send button */}
-        <button
-          onClick={() => handleSend(draft)}
-          disabled={!draft.trim() || sending}
-          style={{
-            background: draft.trim() ? '#FFD700' : '#333',
-            border:     'none',
-            borderRadius: 6,
-            width:      28,
-            height:     28,
-            cursor:     draft.trim() ? 'pointer' : 'default',
-            display:    'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            fontSize:   14,
-            flexShrink: 0,
-            transition: 'background 0.15s',
-          }}
-          title="Send (Enter)"
-        >
-          {sending ? '…' : '➤'}
-        </button>
-      </div>
     </div>
   );
-}
+};
+
+export default SovereignChat;
