@@ -13,6 +13,7 @@ import BankruptcyScreen from './components/BankruptcyScreen';
 import { MechanicsBridgeProvider } from './context/MechanicsBridgeContext';
 import { MechanicsVerticalSlice } from './mechanics/vertical_slice';
 import MechanicsBridgeDevPanel from './components/MechanicsBridgeDevPanel';
+import { ChatPanel } from './components/chat/ChatPanel';
 
 const STARTING_CASH = 50_000;
 const STARTING_INCOME = 3_500;
@@ -1476,6 +1477,18 @@ export default function App() {
 
       <LogFeed events={events} />
 
+      {/* ── Sovereign Chat ── */}
+      <ChatPanel
+        gameCtx={{
+          tick,
+          cash,
+          regime,
+          events,
+          netWorth,
+          income,
+          expenses,
+        }}
+      />
       {/* MomentFlash — fixed overlay, bottom-right */}
       <div className="fixed bottom-36 right-4 w-80 z-50 pointer-events-auto">
         <MomentFlash events={events} tick={tick} maxVisible={3} />
