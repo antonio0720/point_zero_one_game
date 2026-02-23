@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 // ─── Data Registry (300 mechanics from pzo-web/src/data/) ─────────────────
 import MECHANICS_DATA from './data/mechanics_core.json';
@@ -14,11 +13,20 @@ import { MechanicsBridgeProvider } from './context/MechanicsBridgeContext';
 import { MechanicsVerticalSlice } from './mechanics/vertical_slice';
 import MechanicsBridgeDevPanel from './components/MechanicsBridgeDevPanel';
 import { ChatPanel } from './components/chat/ChatPanel';
+import { AuthGate }                from './components/auth/AuthGate';
+import { useAuth }                 from './hooks/useAuth';
+import type { SabotageEvent, SabotageCardType } from './components/chat/useChatEngine';
 
-const STARTING_CASH = 50_000;
-const STARTING_INCOME = 3_500;
-const STARTING_EXPENSES = 4_200;
-const RUN_TICKS = 720;
+const STARTING_CASH     = 28_000;   // Brutal — barely enough for 1 opportunity card
+const STARTING_INCOME   = 2_100;   // Below expenses from tick 0. You start losing.
+const STARTING_EXPENSES = 4_800;   // Rent + bills + life = always negative to start
+const RUN_TICKS         = 720;
+const FATE_TICKS        = 18;      // How often life forces a card on you (every 18 ticks)
+const FATE_FUBAR_PCT    = 0.42;    // 42% of fate cards are FUBAR
+const FATE_MISSED_PCT   = 0.32;    // 32% are MISSED_OPPORTUNITY
+const FATE_SO_PCT       = 0.21;    // 21% are SO (obstacle)
+// PRIVILEGED = remaining ~5% — life VERY rarely hands you one
+
 const TICK_MS = 1000;
 const MONTH_TICKS = 12;
 const DRAW_TICKS = 24;
@@ -446,10 +454,11 @@ function HUD(props: {
   activeMechanics: number;
   telemetryCount: number;
   freezeTicks: number;
+  haterSabotages: number;
 }) {
   const {
     cash, income, expenses, tick, shields, netWorth, equityHistory, regime,
-    intelligence, season, runMode, activeMechanics, telemetryCount, freezeTicks,
+    intelligence, season, runMode, activeMechanics, telemetryCount, freezeTicks, haterSabotages,
   } = props;
   const cashflow = income - expenses;
   const pct = Math.round((tick / RUN_TICKS) * 100);
@@ -470,6 +479,7 @@ function HUD(props: {
       <Metric label="Mechs" value={`${activeMechanics}/300`} />
       <Metric label="Events" value={`${telemetryCount}`} />
       <Metric label="Freeze" value={freezeTicks > 0 ? `${freezeTicks}t` : '—'} />
+      <Metric label="Sabotaged" value={`${haterSabotages}x`} danger={haterSabotages > 0} />
       <div className="flex flex-col">
         <span className="text-zinc-500 uppercase tracking-wide">Shields</span>
         <span className="text-yellow-400 font-mono">{Array(shields).fill('🛡️').join(' ') || '—'}</span>
@@ -750,6 +760,8 @@ export default function App() {
   const [events, setEvents] = useState<string[]>([]);
   const [equityHistory, setEquityHistory] = useState<number[]>([STARTING_CASH]);
   const [freezeTicks, setFreezeTicks] = useState(0);
+  const [haterSabotageCount, setHaterSabotageCount] = useState(0);
+  const auth = useAuth();
 
   const [runMode, setRunMode] = useState<RunMode>('solo');
   const [regime, setRegime] = useState<MarketRegime>('Stable');
@@ -814,6 +826,80 @@ export default function App() {
     if (corePick) touchMechanic(corePick.id, baseSignal);
     if (mlPick) touchMechanic(mlPick.id, baseSignal + 0.04);
   }, [coreCatalog, mlCatalog, touchMechanic]);
+
+  const handleSabotage = useCallback((event: SabotageEvent) => {
+    setHaterSabotageCount((n) => n + 1);
+    const { cardType, intensity } = event;
+
+    switch (cardType as SabotageCardType) {
+      case 'EMERGENCY_EXPENSE': {
+        const hit = Math.round(2_500 * intensity);
+        setCash((c) => Math.max(0, c - hit));
+        log(`💥 ${event.haterName}: EMERGENCY EXPENSE — -$${hit.toLocaleString()}`);
+        touchFamily('risk', 0.30);
+        break;
+      }
+      case 'INCOME_SEIZURE': {
+        const cuts = Math.ceil(3 * intensity);
+        setFreezeTicks((f) => f + cuts);
+        setIncome((i) => Math.max(500, Math.round(i * (1 - 0.15 * intensity))));
+        log(`💥 ${event.haterName}: INCOME SEIZURE — income cut, ${cuts} tick freeze`);
+        break;
+      }
+      case 'DEBT_SPIRAL': {
+        const expenseSpike = Math.round(800 * intensity);
+        setExpenses((e) => e + expenseSpike);
+        log(`💥 ${event.haterName}: DEBT SPIRAL — +$${expenseSpike}/mo expenses, compounding`);
+        touchFamily('risk', 0.28);
+        break;
+      }
+      case 'INSPECTION_NOTICE': {
+        const freeze = Math.ceil(4 * intensity);
+        setFreezeTicks((f) => f + freeze);
+        log(`💥 ${event.haterName}: INSPECTION NOTICE — ${freeze} tick action freeze`);
+        break;
+      }
+      case 'MARKET_CORRECTION': {
+        const haircut = Math.round(0.12 * intensity);
+        setNetWorth((nw) => Math.round(nw * (1 - haircut)));
+        log(`💥 ${event.haterName}: MARKET CORRECTION — net worth -${Math.round(haircut * 100)}%`);
+        touchFamily('market', 0.30);
+        break;
+      }
+      case 'TAX_AUDIT': {
+        const drain  = Math.round(3_500 * intensity);
+        const freeze = Math.ceil(2 * intensity);
+        setCash((c) => Math.max(0, c - drain));
+        setFreezeTicks((f) => f + freeze);
+        log(`💥 ${event.haterName}: TAX AUDIT — -$${drain.toLocaleString()} + ${freeze} tick freeze`);
+        break;
+      }
+      case 'LAYOFF_EVENT': {
+        const duration = Math.ceil(5 * intensity);
+        setFreezeTicks((f) => f + duration);
+        setIncome((i) => Math.max(0, Math.round(i * 0.3)));
+        log(`💥 ${event.haterName}: LAYOFF EVENT — income gutted for ~${duration} ticks`);
+        break;
+      }
+      case 'RENT_HIKE': {
+        const hike = Math.round(600 * intensity);
+        setExpenses((e) => e + hike);
+        log(`💥 ${event.haterName}: RENT HIKE — permanent +$${hike}/mo expenses`);
+        break;
+      }
+      case 'CREDIT_DOWNGRADE': {
+        const expenseHit = Math.round(400 * intensity);
+        setExpenses((e) => e + expenseHit);
+        log(`💥 ${event.haterName}: CREDIT DOWNGRADE — leverage costs increased`);
+        break;
+      }
+      case 'SYSTEM_GLITCH': {
+        setFreezeTicks((f) => f + 3);
+        log(`💥 ${event.haterName}: SYSTEM GLITCH — runtime disruption`);
+        break;
+      }
+    }
+  }, [log, touchFamily]);
 
   const activeMechanics = useMemo(
     () => Object.values(runtime).filter((r) => r.enabled).length,
@@ -930,9 +1016,71 @@ export default function App() {
         touchFamily('ai', 0.14);
       }
 
+      // ── FATE DECK — Life forces cards on you. You don't choose these. ────────
+      // FUBAR 42% | MISSED 32% | SO 21% | PRIVILEGED ~5% (rare)
+      if (tick % FATE_TICKS === 0 && tick > 0) {
+        const fateRoll = rngRef.current();
+        let fateType: DeckType;
+
+        if (fateRoll < FATE_FUBAR_PCT) {
+          fateType = 'FUBAR';
+        } else if (fateRoll < FATE_FUBAR_PCT + FATE_MISSED_PCT) {
+          fateType = 'MISSED_OPPORTUNITY';
+        } else if (fateRoll < FATE_FUBAR_PCT + FATE_MISSED_PCT + FATE_SO_PCT) {
+          fateType = 'SO';
+        } else {
+          fateType = 'PRIVILEGED';
+        }
+
+        const fatePool = deckPool.filter((c) => c.type === (fateType as unknown as DeckType));
+        if (fatePool.length > 0) {
+          const fateCard = fatePool[Math.floor(rngRef.current() * fatePool.length)];
+
+          // AUTO-EXECUTE fate cards — player does NOT choose
+          if (fateCard.type === ('FUBAR' as DeckType)) {
+            if (shields > 0) {
+              setShields((s) => s - 1);
+              log(`🛡️ Shield blocked fate FUBAR: ${fateCard.name}`);
+              emitTelemetry('fate.fubar_blocked', { cardId: fateCard.id, shields });
+            } else {
+              // BRUTAL — 2x base hit, scaled by risk/volatility
+              const base         = fateCard.cashImpact ?? -2_000;
+              const riskScale    = 1.5 + intelligence.risk * 0.6 + intelligence.volatility * 0.4;
+              const adjustedHit  = Math.round(base * riskScale);
+              setCash((c) => Math.max(0, c + adjustedHit));
+              setSeason((prev) => ({ ...prev, nodePressure: prev.nodePressure + 3, winStreak: 0 }));
+              log(`💥 FATE DEALT: ${fateCard.name} → ${fmtMoney(adjustedHit)} FORCED`);
+              emitTelemetry('fate.fubar_hit', { cardId: fateCard.id, hit: adjustedHit, riskScale: Number(riskScale.toFixed(2)) });
+              touchFamily('risk', 0.25);
+            }
+          } else if (fateCard.type === ('MISSED_OPPORTUNITY' as DeckType)) {
+            const lost = Math.max(2, (fateCard.turnsLost ?? 1) + Math.floor(rngRef.current() * 3));
+            setFreezeTicks((f) => f + lost);
+            setSeason((prev) => ({ ...prev, nodePressure: prev.nodePressure + 2, winStreak: 0 }));
+            log(`😬 FATE DEALT: ${fateCard.name} — FORCED freeze ${lost} ticks. Life happened.`);
+            emitTelemetry('fate.missed', { cardId: fateCard.id, turnsLost: lost });
+          } else if (fateCard.type === ('SO' as DeckType)) {
+            // Obstacle — auto-hits before player can choose
+            const expenseHit = Math.round(200 + rngRef.current() * 500);
+            setExpenses((e) => e + expenseHit);
+            setSeason((prev) => ({ ...prev, nodePressure: prev.nodePressure + 1 }));
+            log(`🚧 FATE DEALT: ${fateCard.name} — FORCED expenses +${fmtMoney(expenseHit)}/mo`);
+            emitTelemetry('fate.obstacle', { cardId: fateCard.id, expenseHit });
+          } else if (fateCard.type === ('PRIVILEGED' as DeckType)) {
+            // Rare privilege — auto-applied (born into it or you don't)
+            const v = fateCard.value ?? 0;
+            setNetWorth((nw) => nw + v);
+            setSeason((prev) => ({ ...prev, xp: prev.xp + 20, rewardsPending: prev.rewardsPending + 1 }));
+            log(`⭐ FATE DEALT (RARE): ${fateCard.name} — +${fmtMoney(v)} privilege applied`);
+            emitTelemetry('fate.privilege', { cardId: fateCard.id, value: v });
+          }
+        }
+      }
+
       // Draw cadence (ML recommendation engine shapes hazard/opportunity mix)
       if (tick % DRAW_TICKS === 0 && hand.length < MAX_HAND && freezeTicks === 0) {
-        const draws = drawRandomCards(deckPool, 1, rngRef.current);
+        const playablePool = deckPool.filter((c) => c.type === 'OPPORTUNITY' || c.type === 'IPA');
+        const draws = drawRandomCards(playablePool, 1, rngRef.current);
         const recBias = intelligence.recommendationPower - intelligence.risk;
         const card = draws[0];
 
@@ -956,7 +1104,7 @@ export default function App() {
       }
 
       // Macro events / market regime
-      if (tick % 90 === 0 && tick > 0) {
+      if (tick % 55 === 0 && tick > 0) {
         const macroEvents: MacroEvent[] = [
           {
             id: 'bull',
@@ -1128,7 +1276,7 @@ export default function App() {
         emitTelemetry('cards.fubar_blocked', { cardId: card.id, shieldCount: shields });
       } else {
         const hit = card.cashImpact ?? -1500;
-        const riskScale = 1 + intelligence.risk * 0.4 + intelligence.volatility * 0.2;
+        const riskScale = 2.0 + intelligence.risk * 0.8 + intelligence.volatility * 0.5; // BRUTAL
         const adjustedHit = Math.round(hit * riskScale);
         setCash((c) => Math.max(0, c + adjustedHit));
         setSeason((prev) => ({ ...prev, nodePressure: prev.nodePressure + 2, winStreak: 0 }));
@@ -1203,6 +1351,7 @@ export default function App() {
     setCash(STARTING_CASH);
     setIncome(STARTING_INCOME);
     setExpenses(STARTING_EXPENSES);
+    setHaterSabotageCount(0);
     setNetWorth(STARTING_CASH);
     setShields(0);
     setTick(0);
@@ -1243,6 +1392,19 @@ export default function App() {
       .sort((a, b) => (runtime[b.id]?.activations ?? 0) - (runtime[a.id]?.activations ?? 0))
       .slice(0, 5);
   }, [catalog, runtime]);
+
+  // ── Auth Gate ─────────────────────────────────────────────────────────────
+  if (!auth.isAuthed && !auth.loading) {
+    return <AuthGate auth={auth} onAuth={() => {}} />;
+  }
+
+  if (auth.loading) {
+    return (
+      <div className="min-h-screen bg-zinc-950 text-white flex items-center justify-center">
+        <div className="text-zinc-500 text-sm font-mono animate-pulse">LOADING SYSTEM...</div>
+      </div>
+    );
+  }
 
   // ── Landing ───────────────────────────────────────────────────────────────
   if (screen === 'landing') {
@@ -1376,6 +1538,7 @@ export default function App() {
         activeMechanics={activeMechanics}
         telemetryCount={telemetry.length}
         freezeTicks={freezeTicks}
+        haterSabotages={haterSabotageCount}
       />
 
       <div className="flex-1 overflow-auto p-4 space-y-4">
@@ -1488,6 +1651,8 @@ export default function App() {
           income,
           expenses,
         }}
+        accessToken={auth.accessToken}
+        onSabotage={handleSabotage}
       />
       {/* MomentFlash — fixed overlay, bottom-right */}
       <div className="fixed bottom-36 right-4 w-80 z-50 pointer-events-auto">
