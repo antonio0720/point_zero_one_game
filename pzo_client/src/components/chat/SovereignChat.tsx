@@ -1,278 +1,287 @@
 /**
  * SovereignChat.tsx
- * T208: War phase transition SYSTEM message styling within main chat view.
- * Renders high-signal banners for WAR_STARTED, ONE_HOUR_WARNING,
- * SETTLEMENT_STARTED, WAR_OUTCOME inline in the chat feed.
+ * ─────────────────────────────────────────────────────────────────────────────
+ * T208: Main chat surface with inline Market Move Alert cards and
+ *       Market Phase Bulletin rendering for Rivalry phase transitions.
+ *
+ * Covers:
+ *   - Inline MarketMoveAlertCard — banner, Capital Score, countdown, deep link
+ *   - Inline MarketPhaseBulletinBanner — phase-specific high-signal styling
+ *   - DEAL_ROOM channel policy: unsend disabled, immutable transcript cues
+ *   - All UI copy in financial voice (no military language)
  */
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-export type ChannelType = 'GLOBAL' | 'SERVER' | 'ALLIANCE' | 'OFFICER' | 'ROOM' | 'DM' | 'WAR_ROOM';
-export type MessageType = 'TEXT' | 'STICKER' | 'SYSTEM' | 'WAR_ALERT' | 'DEAL_INVITE' | 'PROOF_SHARE';
-export type WarSystemSubtype = 'WAR_STARTED' | 'ONE_HOUR_WARNING' | 'SETTLEMENT_STARTED' | 'WAR_OUTCOME';
+export type RivalryPhase =
+  | 'NOTICE_FILED'
+  | 'DUE_DILIGENCE'
+  | 'CAPITAL_BATTLE'
+  | 'LEDGER_CLOSE'
+  | 'CLOSED';
 
-export interface WarAlertPayload {
-  warId:              string;
-  attackerName:       string;
-  defenderName:       string;
-  attackerBanner:     string;
-  defenderBanner:     string;
-  currentPhase:       string;
-  phaseEndsAt:        string;
-  countdownMs:        number;
-  attackerPoints:     number;
-  defenderPoints:     number;
-  deepLinkUrl:        string;
+export type ChannelType = 'GLOBAL' | 'SERVER' | 'SYNDICATE' | 'DEAL_ROOM' | 'DIRECT';
+
+export interface MarketMoveAlertPayload {
+  rivalryId:           string;
+  phase:               RivalryPhase;
+  challenger:          { syndicateId: string; name: string; banner: string; capitalScore: number };
+  defender:            { syndicateId: string; name: string; banner: string; capitalScore: number };
+  phaseEndsAt:         string;
+  deepLink:            string;
+  proofHash?:          string;
+  yieldCaptureAmount?: number;
 }
 
 export interface ChatMessage {
-  messageId:   string;
-  senderId:    string;
-  senderName?: string;
-  type:        MessageType;
-  channelType: ChannelType;
-  text?:       string;
-  subtype?:    WarSystemSubtype;
-  warAlert?:   WarAlertPayload;
-  status:      'ACTIVE' | 'UNSENT' | 'REMOVED';
-  immutable:   boolean;
-  createdAt:   string;
+  messageId:    string;
+  channelId:    string;
+  channelType:  ChannelType;
+  senderId:     string | 'SYSTEM';
+  senderName?:  string;
+  body:         string;
+  createdAt:    string;
+  immutable:    boolean;
+  marketMoveAlert?: MarketMoveAlertPayload;
+  bulletinType?:   'MARKET_PHASE_BULLETIN';
+  bulletinPhase?:  RivalryPhase;
 }
 
 export interface SovereignChatProps {
-  channelType:   ChannelType;
-  channelName:   string;
-  messages:      ChatMessage[];
-  currentUserId: string;
-  onSend:        (text: string) => void;
-  onUnsend?:     (messageId: string) => void;
-  onWarAlertClick?: (warId: string, url: string) => void;
-  degraded?:     boolean;
+  channelId:      string;
+  channelType:    ChannelType;
+  messages:       ChatMessage[];
+  onSend:         (body: string) => void;
+  onAlertClick:   (rivalryId: string) => void;
+  currentUserId:  string;
 }
 
-// ─── T208: War phase SYSTEM message styles ────────────────────────────────────
+// ─── Countdown ────────────────────────────────────────────────────────────────
 
-const WAR_SYSTEM_CONFIG: Record<WarSystemSubtype, {
-  icon:       string;
-  label:      string;
-  bg:         string;
-  border:     string;
-  textColor:  string;
-  pulse:      boolean;
-}> = {
-  WAR_STARTED: {
-    icon:      '🔥',
-    label:     'WAR HAS BEGUN',
-    bg:        'linear-gradient(135deg, #EF4444, #B91C1C)',
-    border:    '#EF4444',
-    textColor: '#FFFFFF',
-    pulse:     true,
-  },
-  ONE_HOUR_WARNING: {
-    icon:      '⏳',
-    label:     '1 HOUR REMAINING',
-    bg:        'linear-gradient(135deg, #F59E0B, #D97706)',
-    border:    '#F59E0B',
-    textColor: '#FFFFFF',
-    pulse:     true,
-  },
-  SETTLEMENT_STARTED: {
-    icon:      '⚖️',
-    label:     'SETTLEMENT IN PROGRESS',
-    bg:        'linear-gradient(135deg, #8B5CF6, #6D28D9)',
-    border:    '#8B5CF6',
-    textColor: '#FFFFFF',
-    pulse:     false,
-  },
-  WAR_OUTCOME: {
-    icon:      '🏆',
-    label:     'WAR RESULT',
-    bg:        'linear-gradient(135deg, #1E293B, #0F172A)',
-    border:    '#F59E0B',
-    textColor: '#F9FAFB',
-    pulse:     false,
-  },
+function useCountdown(isoDate: string): string {
+  const calc = useCallback(() => {
+    const ms = new Date(isoDate).getTime() - Date.now();
+    if (ms <= 0) return 'CLOSED';
+    const h = Math.floor(ms / 3_600_000);
+    const m = Math.floor((ms % 3_600_000) / 60_000);
+    const s = Math.floor((ms % 60_000) / 1_000);
+    return [h, m, s].map((v) => String(v).padStart(2, '0')).join(':');
+  }, [isoDate]);
+
+  const [display, setDisplay] = useState(calc);
+  useEffect(() => {
+    const t = setInterval(() => setDisplay(calc()), 1_000);
+    return () => clearInterval(t);
+  }, [calc]);
+  return display;
+}
+
+// ─── Phase accent colors ──────────────────────────────────────────────────────
+
+const PHASE_ACCENT: Record<RivalryPhase, { color: string; label: string; icon: string }> = {
+  NOTICE_FILED:   { color: '#3B82F6', label: 'NOTICE FILED',    icon: '📋' },
+  DUE_DILIGENCE:  { color: '#F59E0B', label: 'DUE DILIGENCE',   icon: '🔍' },
+  CAPITAL_BATTLE: { color: '#EF4444', label: 'CAPITAL BATTLE',  icon: '⚡' },
+  LEDGER_CLOSE:   { color: '#8B5CF6', label: 'LEDGER CLOSE',    icon: '⚖️' },
+  CLOSED:         { color: '#64748B', label: 'CLOSED',           icon: '🏁' },
 };
 
-// ─── War SYSTEM message component ────────────────────────────────────────────
+// ─── T208: Market Move Alert card ─────────────────────────────────────────────
 
-const WarSystemBanner: React.FC<{ message: ChatMessage }> = ({ message }) => {
-  if (!message.subtype) return null;
-  const conf = WAR_SYSTEM_CONFIG[message.subtype];
-
-  return (
-    <div style={{
-      background:   conf.bg,
-      border:       `2px solid ${conf.border}`,
-      borderRadius: 12,
-      padding:      '14px 18px',
-      margin:       '10px 4px',
-      color:        conf.textColor,
-      textAlign:    'center',
-      position:     'relative',
-      overflow:     'hidden',
-      boxShadow:    `0 4px 20px ${conf.border}44`,
-      animation:    conf.pulse ? 'warPulse 2s ease-in-out 2' : 'none',
-    }}>
-      <div style={{ fontSize: 22, marginBottom: 4 }}>{conf.icon}</div>
-      <div style={{ fontWeight: 800, fontSize: 13, letterSpacing: 1.5, opacity: 0.85 }}>
-        {conf.label}
-      </div>
-      <div style={{ fontWeight: 500, fontSize: 14, marginTop: 6, lineHeight: 1.5 }}>
-        {message.text}
-      </div>
-      <div style={{ marginTop: 6, fontSize: 11, opacity: 0.6 }}>
-        {new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-      </div>
-    </div>
-  );
-};
-
-// ─── WAR_ALERT card component ─────────────────────────────────────────────────
-
-const WarAlertCard: React.FC<{
-  payload:  WarAlertPayload;
-  onClick?: (warId: string, url: string) => void;
-}> = ({ payload, onClick }) => (
-  <div
-    onClick={() => onClick?.(payload.warId, payload.deepLinkUrl)}
-    style={{
-      background:   '#1E293B',
-      border:       '2px solid #EF4444',
-      borderRadius: 14,
-      padding:      '14px 16px',
-      margin:       '8px 4px',
-      cursor:       onClick ? 'pointer' : 'default',
-      boxShadow:    '0 4px 16px rgba(239,68,68,0.2)',
-      transition:   'transform 0.15s',
-    }}
-    onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.transform = 'scale(1.01)'; }}
-    onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.transform = 'scale(1)'; }}
-  >
-    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-      <span style={{ color: '#EF4444', fontWeight: 800, fontSize: 12, letterSpacing: 1 }}>⚔️ WAR DECLARED</span>
-      <span style={{ color: '#9CA3AF', fontSize: 11 }}>{payload.currentPhase}</span>
-    </div>
-
-    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-      <div style={{ textAlign: 'center', flex: 1 }}>
-        <img src={payload.attackerBanner} alt="" style={{ width: 40, height: 40, borderRadius: 8, objectFit: 'cover' }} />
-        <div style={{ color: '#F8FAFC', fontWeight: 700, fontSize: 12, marginTop: 4 }}>{payload.attackerName}</div>
-        <div style={{ color: '#EF4444', fontWeight: 800, fontSize: 18 }}>{payload.attackerPoints}</div>
-      </div>
-      <div style={{ color: '#6B7280', fontWeight: 700, fontSize: 16 }}>VS</div>
-      <div style={{ textAlign: 'center', flex: 1 }}>
-        <img src={payload.defenderBanner} alt="" style={{ width: 40, height: 40, borderRadius: 8, objectFit: 'cover' }} />
-        <div style={{ color: '#F8FAFC', fontWeight: 700, fontSize: 12, marginTop: 4 }}>{payload.defenderName}</div>
-        <div style={{ color: '#EF4444', fontWeight: 800, fontSize: 18 }}>{payload.defenderPoints}</div>
-      </div>
-    </div>
-
-    {onClick && (
-      <div style={{
-        marginTop:    10,
-        textAlign:    'center',
-        color:        '#EF4444',
-        fontSize:     12,
-        fontWeight:   600,
-      }}>
-        View War Room →
-      </div>
-    )}
-  </div>
-);
-
-// ─── Regular bubble ───────────────────────────────────────────────────────────
-
-const ChatBubble: React.FC<{
-  message:  ChatMessage;
-  isOwn:    boolean;
-  onUnsend?: (id: string) => void;
-}> = ({ message, isOwn, onUnsend }) => {
-  const [hovered, setHovered] = useState(false);
-  const canUnsend = isOwn && !message.immutable && message.status === 'ACTIVE';
-  if (message.status === 'UNSENT') {
-    return (
-      <div style={{ textAlign: isOwn ? 'right' : 'left', color: '#9CA3AF', fontSize: 12, fontStyle: 'italic', margin: '2px 4px' }}>
-        Message unsent
-      </div>
-    );
-  }
+const MarketMoveAlertCard: React.FC<{
+  alert:      MarketMoveAlertPayload;
+  onClick:    (rivalryId: string) => void;
+}> = ({ alert, onClick }) => {
+  const countdown = useCountdown(alert.phaseEndsAt);
+  const accent    = PHASE_ACCENT[alert.phase];
+  const isClosed  = alert.phase === 'CLOSED';
 
   return (
     <div
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-      style={{ display: 'flex', flexDirection: 'column', alignItems: isOwn ? 'flex-end' : 'flex-start', margin: '3px 4px' }}
+      onClick={() => onClick(alert.rivalryId)}
+      style={{
+        background:   '#0F172A',
+        border:       `2px solid ${accent.color}`,
+        borderRadius: 14,
+        padding:      '14px 16px',
+        margin:       '10px 0',
+        cursor:       'pointer',
+        transition:   'opacity 0.15s',
+      }}
     >
-      {!isOwn && message.senderName && (
-        <div style={{ fontSize: 11, color: '#6B7280', marginBottom: 2, marginLeft: 4 }}>{message.senderName}</div>
-      )}
-      <div style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 6, flexDirection: isOwn ? 'row-reverse' : 'row' }}>
-        <div style={{
-          maxWidth:     '70%',
-          background:   isOwn ? '#3B82F6' : '#1E293B',
-          color:        '#F8FAFC',
-          borderRadius: isOwn ? '16px 16px 4px 16px' : '16px 16px 16px 4px',
-          padding:      '10px 14px',
-          fontSize:     14,
-          lineHeight:   1.5,
+      {/* Phase badge */}
+      <div style={{
+        display:      'flex',
+        alignItems:   'center',
+        gap:          8,
+        marginBottom: 12,
+      }}>
+        <span style={{
+          background:   accent.color,
+          color:        '#fff',
+          borderRadius: 6,
+          padding:      '2px 10px',
+          fontSize:     11,
+          fontWeight:   800,
+          letterSpacing: 1,
         }}>
-          {message.text}
-        </div>
-        {canUnsend && hovered && (
-          <button
-            onClick={() => onUnsend?.(message.messageId)}
-            style={{
-              background:   'transparent',
-              border:       'none',
-              color:        '#9CA3AF',
-              fontSize:     11,
-              cursor:       'pointer',
-              padding:      '2px 4px',
-            }}
-          >
-            Unsend
-          </button>
-        )}
-        {message.immutable && (
-          <span title="Immutable" style={{ fontSize: 10, color: '#6B7280' }}>🔒</span>
+          {accent.icon} {accent.label}
+        </span>
+        {!isClosed && (
+          <span style={{
+            marginLeft:        'auto',
+            fontVariantNumeric: 'tabular-nums',
+            fontSize:          12,
+            color:             accent.color,
+            fontWeight:        700,
+          }}>
+            {countdown}
+          </span>
         )}
       </div>
-      <span style={{ fontSize: 10, color: '#6B7280', marginTop: 2 }}>
-        {new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-      </span>
+
+      {/* Syndicate banners + Capital Score */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <div style={{ textAlign: 'center', flex: 1 }}>
+          <img
+            src={alert.challenger.banner}
+            alt={alert.challenger.name}
+            style={{ width: 36, height: 36, borderRadius: 8, objectFit: 'cover' }}
+          />
+          <div style={{ fontSize: 10, color: '#94A3B8', marginTop: 4, fontWeight: 600 }}>
+            {alert.challenger.name}
+          </div>
+          <div style={{ fontSize: 18, fontWeight: 800, color: '#F1F5F9' }}>
+            {alert.challenger.capitalScore}
+          </div>
+        </div>
+
+        <div style={{ color: '#475569', fontWeight: 800, fontSize: 14 }}>vs</div>
+
+        <div style={{ textAlign: 'center', flex: 1 }}>
+          <img
+            src={alert.defender.banner}
+            alt={alert.defender.name}
+            style={{ width: 36, height: 36, borderRadius: 8, objectFit: 'cover' }}
+          />
+          <div style={{ fontSize: 10, color: '#94A3B8', marginTop: 4, fontWeight: 600 }}>
+            {alert.defender.name}
+          </div>
+          <div style={{ fontSize: 18, fontWeight: 800, color: '#F1F5F9' }}>
+            {alert.defender.capitalScore}
+          </div>
+        </div>
+      </div>
+
+      {/* Yield Capture — shown on CLOSED */}
+      {isClosed && alert.yieldCaptureAmount !== undefined && (
+        <div style={{
+          marginTop:    10,
+          background:   'rgba(245,158,11,0.1)',
+          border:       '1px solid rgba(245,158,11,0.3)',
+          borderRadius: 8,
+          padding:      '6px 12px',
+          fontSize:     12,
+          color:        '#F59E0B',
+          fontWeight:   700,
+          textAlign:    'center',
+        }}>
+          💰 Yield Capture: {alert.yieldCaptureAmount.toLocaleString()} transferred
+        </div>
+      )}
+
+      {/* Settlement Hash */}
+      {isClosed && alert.proofHash && (
+        <div style={{
+          marginTop:  8,
+          fontSize:   10,
+          color:      '#475569',
+          fontFamily: 'monospace',
+          wordBreak:  'break-all',
+        }}>
+          HASH: {alert.proofHash}
+        </div>
+      )}
+
+      {/* CTA */}
+      <div style={{
+        marginTop:   12,
+        color:       accent.color,
+        fontSize:    12,
+        fontWeight:  700,
+        textAlign:   'right',
+        letterSpacing: 0.3,
+      }}>
+        {isClosed ? 'VIEW DEAL RECAP →' : 'ENTER DEAL ROOM →'}
+      </div>
     </div>
   );
 };
+
+// ─── T208: Inline Market Phase Bulletin banner ─────────────────────────────────
+
+const MarketPhaseBulletinBanner: React.FC<{
+  msg:   ChatMessage;
+  phase: RivalryPhase;
+}> = ({ msg, phase }) => {
+  const accent = PHASE_ACCENT[phase];
+  const isHot  = phase === 'CAPITAL_BATTLE';
+
+  return (
+    <div style={{
+      background:   isHot ? 'rgba(220,38,38,0.08)' : `rgba(${hexToRgb(accent.color)},0.07)`,
+      borderLeft:   `4px solid ${accent.color}`,
+      borderRadius: '0 10px 10px 0',
+      padding:      '10px 14px',
+      margin:       '8px 0',
+      animation:    isHot ? 'battlePulse 3s ease-in-out infinite' : 'none',
+    }}>
+      <div style={{
+        fontSize:     10,
+        fontWeight:   800,
+        color:        accent.color,
+        letterSpacing: 1.2,
+        marginBottom: 4,
+      }}>
+        {accent.icon} MARKET PHASE BULLETIN — {accent.label}
+      </div>
+      <div style={{ fontSize: 12, color: '#94A3B8', lineHeight: 1.5 }}>
+        {msg.body}
+      </div>
+      <div style={{ fontSize: 10, color: '#475569', marginTop: 6 }}>
+        🔒 Transcript integrity enforced
+      </div>
+    </div>
+  );
+};
+
+function hexToRgb(hex: string): string {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return `${r},${g},${b}`;
+}
 
 // ─── SovereignChat ────────────────────────────────────────────────────────────
 
 export const SovereignChat: React.FC<SovereignChatProps> = ({
+  channelId,
   channelType,
-  channelName,
   messages,
-  currentUserId,
   onSend,
-  onUnsend,
-  onWarAlertClick,
-  degraded = false,
+  onAlertClick,
+  currentUserId,
 }) => {
-  const [input, setInput] = useState('');
-  const bottomRef = useRef<HTMLDivElement>(null);
-  const isWarRoom = channelType === 'WAR_ROOM';
-
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages.length]);
+  const [draft, setDraft]   = useState('');
+  const isDealRoom          = channelType === 'DEAL_ROOM';
 
   const handleSend = () => {
-    const text = input.trim();
-    if (!text || degraded) return;
-    onSend(text);
-    setInput('');
+    const trimmed = draft.trim();
+    if (!trimmed) return;
+    onSend(trimmed);
+    setDraft('');
   };
 
   return (
@@ -281,122 +290,137 @@ export const SovereignChat: React.FC<SovereignChatProps> = ({
       flexDirection: 'column',
       height:        '100%',
       background:    '#0F172A',
-      color:         '#F8FAFC',
       fontFamily:    'system-ui, sans-serif',
     }}>
-      {/* pulse keyframe */}
       <style>{`
-        @keyframes warPulse {
-          0%, 100% { opacity: 1; transform: scale(1); }
-          50% { opacity: 0.9; transform: scale(1.01); }
+        @keyframes battlePulse {
+          0%, 100% { box-shadow: inset 0 0 0 0 rgba(220,38,38,0.05); }
+          50%       { box-shadow: inset 0 0 20px 0 rgba(220,38,38,0.12); }
         }
       `}</style>
 
-      {/* Header */}
-      <div style={{
-        padding:       '12px 16px',
-        borderBottom:  '1px solid rgba(255,255,255,0.08)',
-        background:    '#1E293B',
-        display:       'flex',
-        alignItems:    'center',
-        gap:           8,
-      }}>
-        {isWarRoom && <span>⚔️</span>}
-        <span style={{ fontWeight: 700, fontSize: 15 }}>{channelName}</span>
-        {isWarRoom && (
-          <span style={{ fontSize: 11, color: '#EF4444', marginLeft: 'auto', fontWeight: 600 }}>
-            🔒 Immutable
-          </span>
-        )}
-        {degraded && (
-          <span style={{ fontSize: 11, color: '#F59E0B', marginLeft: 'auto' }}>
-            ⚠️ History only
-          </span>
-        )}
-      </div>
+      {/* Deal Room integrity notice */}
+      {isDealRoom && (
+        <div style={{
+          background:   'rgba(100,116,139,0.1)',
+          borderBottom: '1px solid rgba(100,116,139,0.15)',
+          padding:      '5px 14px',
+          fontSize:     10,
+          color:        '#475569',
+          fontWeight:   600,
+          letterSpacing: 0.4,
+        }}>
+          🔒 DEAL ROOM — Transcript integrity enforced. Unsend disabled. Logs are part of the official rivalry record.
+        </div>
+      )}
 
-      {/* Messages */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '8px 4px' }}>
+      {/* Message list */}
+      <div style={{ flex: 1, overflowY: 'auto', padding: '12px 14px' }}>
         {messages.map((msg) => {
-          if (msg.type === 'SYSTEM' && msg.subtype) {
-            return <WarSystemBanner key={msg.messageId} message={msg} />;
-          }
-          if (msg.type === 'WAR_ALERT' && msg.warAlert) {
+          // Market Move Alert card
+          if (msg.marketMoveAlert) {
             return (
-              <WarAlertCard
+              <MarketMoveAlertCard
                 key={msg.messageId}
-                payload={msg.warAlert}
-                onClick={onWarAlertClick}
+                alert={msg.marketMoveAlert}
+                onClick={onAlertClick}
               />
             );
           }
+          // Market Phase Bulletin
+          if (msg.bulletinType === 'MARKET_PHASE_BULLETIN' && msg.bulletinPhase) {
+            return (
+              <MarketPhaseBulletinBanner
+                key={msg.messageId}
+                msg={msg}
+                phase={msg.bulletinPhase}
+              />
+            );
+          }
+          // Standard message
+          const isMe     = msg.senderId === currentUserId;
+          const isSystem = msg.senderId === 'SYSTEM';
           return (
-            <ChatBubble
-              key={msg.messageId}
-              message={msg}
-              isOwn={msg.senderId === currentUserId}
-              onUnsend={onUnsend}
-            />
+            <div key={msg.messageId} style={{
+              display:       'flex',
+              flexDirection: isMe ? 'row-reverse' : 'row',
+              marginBottom:  8,
+              gap:           8,
+            }}>
+              <div style={{ maxWidth: '70%' }}>
+                {!isMe && !isSystem && (
+                  <div style={{
+                    fontSize:  10,
+                    color:     '#64748B',
+                    marginBottom: 3,
+                    fontWeight: 600,
+                    display:   'flex',
+                    gap:       6,
+                    alignItems: 'center',
+                  }}>
+                    {msg.senderName}
+                    {msg.immutable && <span title="Transcript integrity enforced">🔒</span>}
+                  </div>
+                )}
+                <div style={{
+                  background:   isSystem
+                    ? 'rgba(100,116,139,0.1)'
+                    : isMe
+                      ? 'rgba(59,130,246,0.25)'
+                      : 'rgba(255,255,255,0.06)',
+                  borderRadius: 10,
+                  padding:      '8px 12px',
+                  fontSize:     13,
+                  color:        isSystem ? '#64748B' : '#F1F5F9',
+                  fontStyle:    isSystem ? 'italic' : 'normal',
+                }}>
+                  {msg.body}
+                </div>
+              </div>
+            </div>
           );
         })}
-        <div ref={bottomRef} />
       </div>
 
       {/* Input */}
-      {!degraded ? (
-        <div style={{
-          display:     'flex',
-          gap:         8,
-          padding:     '10px 12px',
-          borderTop:   '1px solid rgba(255,255,255,0.08)',
-          background:  '#1E293B',
-        }}>
-          <input
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-            placeholder={isWarRoom ? 'War room message…' : 'Send a message…'}
-            maxLength={500}
-            style={{
-              flex:         1,
-              background:   '#0F172A',
-              border:       '1px solid rgba(255,255,255,0.1)',
-              borderRadius: 10,
-              color:        '#F8FAFC',
-              padding:      '9px 14px',
-              fontSize:     14,
-              outline:      'none',
-            }}
-          />
-          <button
-            onClick={handleSend}
-            disabled={!input.trim()}
-            style={{
-              background:   input.trim() ? (isWarRoom ? '#EF4444' : '#3B82F6') : '#374151',
-              color:        '#fff',
-              border:       'none',
-              borderRadius: 10,
-              padding:      '9px 16px',
-              fontWeight:   700,
-              cursor:       input.trim() ? 'pointer' : 'not-allowed',
-              fontSize:     14,
-            }}
-          >
-            →
-          </button>
-        </div>
-      ) : (
-        <div style={{
-          padding:    '10px',
-          textAlign:  'center',
-          color:      '#6B7280',
-          fontSize:   12,
-          borderTop:  '1px solid rgba(255,255,255,0.06)',
-          background: '#1E293B',
-        }}>
-          ⚠️ Chat unavailable — showing history
-        </div>
-      )}
+      <div style={{
+        borderTop:  '1px solid rgba(100,116,139,0.15)',
+        padding:    '10px 14px',
+        display:    'flex',
+        gap:        8,
+      }}>
+        <input
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && handleSend()}
+          placeholder={isDealRoom ? 'Deal Room — transcript is recorded...' : 'Message...'}
+          style={{
+            flex:         1,
+            background:   'rgba(255,255,255,0.04)',
+            border:       '1px solid rgba(100,116,139,0.2)',
+            borderRadius: 10,
+            padding:      '9px 14px',
+            color:        '#F1F5F9',
+            fontSize:     13,
+            outline:      'none',
+          }}
+        />
+        <button
+          onClick={handleSend}
+          style={{
+            background:   '#2563EB',
+            color:        '#fff',
+            border:       'none',
+            borderRadius: 10,
+            padding:      '9px 16px',
+            fontWeight:   700,
+            cursor:       'pointer',
+            fontSize:     13,
+          }}
+        >
+          Send
+        </button>
+      </div>
     </div>
   );
 };

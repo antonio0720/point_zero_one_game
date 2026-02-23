@@ -1,230 +1,263 @@
 /**
- * WarRoomPanel.tsx
- * T208: Special styling for war phase transition SYSTEM messages.
- * High-signal formatting for: ACTIVE start, 1h warning, settlement, outcome.
- * WAR_ROOM policy: no unsend, immutable transcript, server-authoritative phase.
+ * WarRoomPanel.tsx — DEAL ROOM PANEL
+ * ─────────────────────────────────────────────────────────────────────────────
+ * T208: Phase-aware Rivalry Deal Room with Market Phase Bulletin styling.
+ *
+ * What the Deal Room is:
+ *   Not just another chat channel. It's a pressure chamber where Syndicate
+ *   partners coordinate under a live Market Clock. Phase Bulletins land as
+ *   system truth. Transcript integrity is enforced — the log is part of the
+ *   official rivalry record.
+ *
+ * Phase bulletin styling per phase:
+ *   NOTICE_FILED   → Blue — formal, procedural
+ *   DUE_DILIGENCE  → Amber — preparation pressure
+ *   CAPITAL_BATTLE → Red gradient + pulse — maximum urgency
+ *   LEDGER_CLOSE   → Purple — settlement ceremony in progress
+ *   CLOSED         → Dark + gold border — permanent record published
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-export type WarPhase = 'DECLARED' | 'PREPARATION' | 'ACTIVE' | 'SETTLEMENT' | 'ENDED';
+export type RivalryPhase =
+  | 'NOTICE_FILED'
+  | 'DUE_DILIGENCE'
+  | 'CAPITAL_BATTLE'
+  | 'LEDGER_CLOSE'
+  | 'CLOSED';
 
-export type WarSystemSubtype =
-  | 'WAR_STARTED'
-  | 'ONE_HOUR_WARNING'
-  | 'SETTLEMENT_STARTED'
-  | 'WAR_OUTCOME';
-
-export interface WarMessage {
+export interface DealRoomMessage {
   messageId:   string;
-  senderId:    string;
-  type:        'TEXT' | 'SYSTEM' | 'WAR_ALERT';
-  text?:       string;
-  subtype?:    WarSystemSubtype;
-  immutable:   boolean;
+  senderId:    string | 'SYSTEM';
+  senderName?: string;
+  body:        string;
   createdAt:   string;
-  warMeta?: {
-    phase:          WarPhase;
-    phaseEndsAt:    string;
-    attackerPoints: number;
-    defenderPoints: number;
-    winnerId?:      string;
-    attackerName:   string;
-    defenderName:   string;
-  };
+  immutable:   boolean;
+  bulletinType?: 'MARKET_PHASE_BULLETIN' | 'SETTLEMENT_HASH_CARD';
+  phase?:      RivalryPhase;
 }
 
 export interface WarRoomPanelProps {
-  warId:              string;
-  currentPhase:       WarPhase;
-  phaseEndsAt:        Date;
-  attackerName:       string;
-  defenderName:       string;
-  attackerPoints:     number;
-  defenderPoints:     number;
-  myAllianceId:       string;
-  attackerAllianceId: string;
-  messages:           WarMessage[];
-  onSend:             (text: string) => void;
-  degraded?:          boolean;  // fallback: history-only if live endpoints down
+  rivalryId:       string;
+  phase:           RivalryPhase;
+  phaseEndsAt:     string;
+  challengerName:  string;
+  defenderName:    string;
+  challengerScore: number;
+  defenderScore:   number;
+  myScore:         number;
+  messages:        DealRoomMessage[];
+  onSend:          (body: string) => void;
+  isLive:          boolean;   // false = degraded mode, history-only
+  proofHash?:      string;
 }
 
-// ─── Phase config ─────────────────────────────────────────────────────────────
+// ─── T208: Phase config — financial voice ─────────────────────────────────────
 
-const PHASE_CONFIG: Record<WarPhase, { label: string; color: string; bg: string; icon: string }> = {
-  DECLARED:    { label: 'War Declared',    color: '#F59E0B', bg: '#FEF3C7', icon: '⚔️' },
-  PREPARATION: { label: 'Preparation',     color: '#3B82F6', bg: '#EFF6FF', icon: '🛡️' },
-  ACTIVE:      { label: 'WAR ACTIVE',      color: '#EF4444', bg: '#FEF2F2', icon: '🔥' },
-  SETTLEMENT:  { label: 'Settlement',      color: '#8B5CF6', bg: '#F5F3FF', icon: '⚖️' },
-  ENDED:       { label: 'War Ended',       color: '#6B7280', bg: '#F9FAFB', icon: '🏁' },
+const PHASE_CONFIG: Record<RivalryPhase, {
+  label:          string;
+  sublabel:       string;
+  headerBg:       string;
+  headerColor:    string;
+  bulletinBg:     string;
+  bulletinBorder: string;
+  bulletinColor:  string;
+  pulse:          boolean;
+  icon:           string;
+}> = {
+  NOTICE_FILED: {
+    label:          'NOTICE FILED',
+    sublabel:       'Due Diligence opens shortly',
+    headerBg:       'linear-gradient(135deg, #1E3A5F, #2563EB)',
+    headerColor:    '#BFDBFE',
+    bulletinBg:     '#EFF6FF',
+    bulletinBorder: '#3B82F6',
+    bulletinColor:  '#1D4ED8',
+    pulse:          false,
+    icon:           '📋',
+  },
+  DUE_DILIGENCE: {
+    label:          'DUE DILIGENCE',
+    sublabel:       'Prepare your Market Plays',
+    headerBg:       'linear-gradient(135deg, #78350F, #D97706)',
+    headerColor:    '#FEF3C7',
+    bulletinBg:     '#FFFBEB',
+    bulletinBorder: '#F59E0B',
+    bulletinColor:  '#92400E',
+    pulse:          false,
+    icon:           '🔍',
+  },
+  CAPITAL_BATTLE: {
+    label:          'CAPITAL BATTLE — OPEN',
+    sublabel:       'Qualifying runs are scoring now',
+    headerBg:       'linear-gradient(135deg, #7F1D1D, #DC2626)',
+    headerColor:    '#FEE2E2',
+    bulletinBg:     'linear-gradient(135deg, #7F1D1D, #991B1B)',
+    bulletinBorder: '#EF4444',
+    bulletinColor:  '#FEE2E2',
+    pulse:          true,
+    icon:           '⚡',
+  },
+  LEDGER_CLOSE: {
+    label:          'LEDGER CLOSE',
+    sublabel:       'Settlement Ceremony in progress',
+    headerBg:       'linear-gradient(135deg, #4C1D95, #7C3AED)',
+    headerColor:    '#EDE9FE',
+    bulletinBg:     '#F5F3FF',
+    bulletinBorder: '#8B5CF6',
+    bulletinColor:  '#4C1D95',
+    pulse:          false,
+    icon:           '⚖️',
+  },
+  CLOSED: {
+    label:          'RIVALRY CLOSED',
+    sublabel:       'Receipts locked. Settlement Hash published.',
+    headerBg:       'linear-gradient(135deg, #0F172A, #1E293B)',
+    headerColor:    '#F8FAFC',
+    bulletinBg:     '#0F172A',
+    bulletinBorder: '#F59E0B',
+    bulletinColor:  '#F8FAFC',
+    pulse:          false,
+    icon:           '🏁',
+  },
 };
 
-// ─── Countdown hook ───────────────────────────────────────────────────────────
+// ─── Countdown ────────────────────────────────────────────────────────────────
 
-function useCountdown(endsAt: Date): string {
+function useCountdown(isoDate: string): string {
   const calc = useCallback(() => {
-    const ms = endsAt.getTime() - Date.now();
+    const ms = new Date(isoDate).getTime() - Date.now();
     if (ms <= 0) return '00:00:00';
     const h = Math.floor(ms / 3_600_000);
     const m = Math.floor((ms % 3_600_000) / 60_000);
     const s = Math.floor((ms % 60_000) / 1_000);
     return [h, m, s].map((v) => String(v).padStart(2, '0')).join(':');
-  }, [endsAt]);
+  }, [isoDate]);
 
   const [display, setDisplay] = useState(calc);
   useEffect(() => {
     const t = setInterval(() => setDisplay(calc()), 1_000);
     return () => clearInterval(t);
   }, [calc]);
-
   return display;
 }
 
-// ─── T208: War phase SYSTEM message renderer ──────────────────────────────────
+// ─── T208: Market Phase Bulletin renderer ─────────────────────────────────────
 
-const WAR_SYSTEM_STYLES: Record<WarSystemSubtype, React.CSSProperties> = {
-  WAR_STARTED: {
-    background:   'linear-gradient(135deg, #EF4444 0%, #B91C1C 100%)',
-    color:        '#fff',
-    borderRadius: 12,
-    padding:      '16px 20px',
-    margin:       '12px 0',
-    fontWeight:   700,
-    fontSize:     16,
-    textAlign:    'center',
-    boxShadow:    '0 4px 16px rgba(239,68,68,0.35)',
-    letterSpacing: 0.5,
-  },
-  ONE_HOUR_WARNING: {
-    background:   'linear-gradient(135deg, #F59E0B 0%, #D97706 100%)',
-    color:        '#fff',
-    borderRadius: 12,
-    padding:      '14px 18px',
-    margin:       '10px 0',
-    fontWeight:   700,
-    fontSize:     15,
-    textAlign:    'center',
-    boxShadow:    '0 3px 12px rgba(245,158,11,0.35)',
-  },
-  SETTLEMENT_STARTED: {
-    background:   'linear-gradient(135deg, #8B5CF6 0%, #6D28D9 100%)',
-    color:        '#fff',
-    borderRadius: 12,
-    padding:      '14px 18px',
-    margin:       '10px 0',
-    fontWeight:   600,
-    fontSize:     14,
-    textAlign:    'center',
-    boxShadow:    '0 3px 12px rgba(139,92,246,0.3)',
-  },
-  WAR_OUTCOME: {
-    background:   'linear-gradient(135deg, #1F2937 0%, #111827 100%)',
-    color:        '#F9FAFB',
-    borderRadius: 14,
-    padding:      '18px 22px',
-    margin:       '14px 0',
-    fontWeight:   700,
-    fontSize:     17,
-    textAlign:    'center',
-    boxShadow:    '0 6px 24px rgba(0,0,0,0.4)',
-    border:       '1px solid rgba(255,255,255,0.1)',
-  },
-};
-
-const SUBTYPE_ICON: Record<WarSystemSubtype, string> = {
-  WAR_STARTED:        '🔥',
-  ONE_HOUR_WARNING:   '⏳',
-  SETTLEMENT_STARTED: '⚖️',
-  WAR_OUTCOME:        '🏆',
-};
-
-interface WarSystemMessageProps {
-  message: WarMessage;
-}
-
-const WarSystemMessage: React.FC<WarSystemMessageProps> = ({ message }) => {
-  if (!message.subtype) return null;
-  const style = WAR_SYSTEM_STYLES[message.subtype];
-  const icon  = SUBTYPE_ICON[message.subtype];
-
-  return (
-    <div style={style}>
-      <span style={{ marginRight: 8, fontSize: 18 }}>{icon}</span>
-      {message.text}
-    </div>
-  );
-};
-
-// ─── Regular chat bubble ──────────────────────────────────────────────────────
-
-interface ChatBubbleProps {
-  message:  WarMessage;
-  isOwn:    boolean;
-}
-
-const ChatBubble: React.FC<ChatBubbleProps> = ({ message, isOwn }) => {
-  // WAR_ROOM: no unsend UI shown (immutable policy)
+const MarketPhaseBulletin: React.FC<{ msg: DealRoomMessage; phase: RivalryPhase }> = ({ msg, phase }) => {
+  const conf = PHASE_CONFIG[phase];
   return (
     <div style={{
-      display:       'flex',
-      flexDirection: 'column',
-      alignItems:    isOwn ? 'flex-end' : 'flex-start',
-      margin:        '4px 0',
+      background:   conf.bulletinBg,
+      border:       `2px solid ${conf.bulletinBorder}`,
+      borderRadius: 12,
+      padding:      '12px 16px',
+      margin:       '12px 0',
+      animation:    conf.pulse ? 'battlePulse 3s ease-in-out infinite' : 'none',
     }}>
       <div style={{
-        maxWidth:     '72%',
-        background:   isOwn ? '#3B82F6' : '#F3F4F6',
-        color:        isOwn ? '#fff' : '#111827',
-        borderRadius: isOwn ? '16px 16px 4px 16px' : '16px 16px 16px 4px',
-        padding:      '10px 14px',
-        fontSize:     14,
-        lineHeight:   1.5,
-        boxShadow:    '0 1px 3px rgba(0,0,0,0.08)',
+        color:        conf.bulletinColor,
+        fontSize:     12,
+        fontWeight:   800,
+        letterSpacing: 1.5,
+        textTransform: 'uppercase',
+        marginBottom: 6,
       }}>
-        {message.text}
+        {conf.icon} MARKET PHASE BULLETIN — {conf.label}
       </div>
-      <span style={{ fontSize: 10, color: '#9CA3AF', marginTop: 2 }}>
-        {new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-        {message.immutable && (
-          <span style={{ marginLeft: 4, color: '#D1FAE5' }} title="Immutable — cannot be unsent">
-            🔒
-          </span>
-        )}
-      </span>
+      <div style={{
+        color:      conf.bulletinColor,
+        fontSize:   13,
+        lineHeight: 1.5,
+        opacity:    0.9,
+      }}>
+        {msg.body}
+      </div>
+      <div style={{
+        color:    conf.bulletinColor,
+        fontSize: 10,
+        marginTop: 8,
+        opacity:  0.6,
+        display:  'flex',
+        alignItems: 'center',
+        gap:      6,
+      }}>
+        🔒 TRANSCRIPT INTEGRITY ENFORCED — This bulletin is part of the official rivalry record
+      </div>
     </div>
   );
 };
+
+// ─── Settlement Hash card ──────────────────────────────────────────────────────
+
+const SettlementHashCard: React.FC<{ msg: DealRoomMessage; proofHash?: string }> = ({ msg, proofHash }) => (
+  <div style={{
+    background:   'linear-gradient(135deg, #0F172A, #1E293B)',
+    border:       '2px solid #F59E0B',
+    borderRadius: 12,
+    padding:      '14px 16px',
+    margin:       '12px 0',
+  }}>
+    <div style={{ color: '#F59E0B', fontSize: 11, fontWeight: 800, letterSpacing: 1.5, marginBottom: 8 }}>
+      🏁 SETTLEMENT HASH PUBLISHED — RIVALRY CLOSED
+    </div>
+    <div style={{ color: '#94A3B8', fontSize: 13, marginBottom: 10, lineHeight: 1.5 }}>
+      {msg.body}
+    </div>
+    {proofHash && (
+      <div style={{
+        background:   'rgba(245,158,11,0.1)',
+        border:       '1px solid rgba(245,158,11,0.3)',
+        borderRadius: 8,
+        padding:      '8px 12px',
+        fontFamily:   'monospace',
+        fontSize:     11,
+        color:        '#F59E0B',
+        wordBreak:    'break-all',
+      }}>
+        HASH: {proofHash}
+      </div>
+    )}
+    <div style={{ color: '#475569', fontSize: 10, marginTop: 10 }}>
+      🔒 RECEIPTS LOCKED — Rivalries end in a record, not an argument.
+    </div>
+  </div>
+);
 
 // ─── WarRoomPanel ─────────────────────────────────────────────────────────────
 
 export const WarRoomPanel: React.FC<WarRoomPanelProps> = ({
-  warId,
-  currentPhase,
+  rivalryId,
+  phase,
   phaseEndsAt,
-  attackerName,
+  challengerName,
   defenderName,
-  attackerPoints,
-  defenderPoints,
-  myAllianceId,
-  attackerAllianceId,
+  challengerScore,
+  defenderScore,
+  myScore,
   messages,
   onSend,
-  degraded = false,
+  isLive,
+  proofHash,
 }) => {
-  const [input, setInput] = useState('');
-  const countdown  = useCountdown(phaseEndsAt);
-  const phaseConf  = PHASE_CONFIG[currentPhase];
-  const isActive   = currentPhase === 'ACTIVE';
-  const isEnded    = currentPhase === 'ENDED';
-  const canSend    = !degraded && !isEnded;
+  const [draft, setDraft] = useState('');
+  const conf             = PHASE_CONFIG[phase];
+  const countdown        = useCountdown(phaseEndsAt);
+  const bottomRef        = useRef<HTMLDivElement>(null);
+  const isClosed         = phase === 'CLOSED';
+  const isBattle        = phase === 'CAPITAL_BATTLE';
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
 
   const handleSend = () => {
-    const text = input.trim();
-    if (!text || !canSend) return;
-    onSend(text);
-    setInput('');
+    const trimmed = draft.trim();
+    if (!trimmed || isClosed) return;
+    onSend(trimmed);
+    setDraft('');
   };
 
   return (
@@ -236,146 +269,188 @@ export const WarRoomPanel: React.FC<WarRoomPanelProps> = ({
       color:         '#F8FAFC',
       fontFamily:    'system-ui, sans-serif',
     }}>
-      {/* ── Phase header ── */}
+      <style>{`
+        @keyframes battlePulse {
+          0%, 100% { box-shadow: 0 0 0 0 rgba(220,38,38,0.1); }
+          50%       { box-shadow: 0 0 20px 6px rgba(220,38,38,0.25); }
+        }
+      `}</style>
+
+      {/* Phase header */}
       <div style={{
-        background: phaseConf.bg,
-        borderBottom: `3px solid ${phaseConf.color}`,
-        padding:    '12px 16px',
+        background:  conf.headerBg,
+        padding:     '14px 16px',
+        animation:   conf.pulse ? 'battlePulse 3s ease-in-out infinite' : 'none',
       }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <div style={{ fontWeight: 700, color: phaseConf.color, fontSize: 15 }}>
-            {phaseConf.icon} {phaseConf.label}
+          <div>
+            <div style={{ fontWeight: 900, fontSize: 13, letterSpacing: 1.2, color: conf.headerColor }}>
+              {conf.icon} DEAL ROOM — {conf.label}
+            </div>
+            <div style={{ fontSize: 11, color: conf.headerColor, opacity: 0.75, marginTop: 2 }}>
+              {conf.sublabel}
+            </div>
           </div>
-          {!isEnded && (
+          {!isClosed && (
             <div style={{
-              background:   phaseConf.color,
-              color:        '#fff',
-              borderRadius: 8,
-              padding:      '4px 10px',
-              fontSize:     13,
-              fontVariantNumeric: 'tabular-nums',
-              fontWeight:   700,
+              background:          'rgba(0,0,0,0.35)',
+              color:               conf.headerColor,
+              borderRadius:        8,
+              padding:             '4px 10px',
+              fontWeight:          800,
+              fontSize:            13,
+              fontVariantNumeric:  'tabular-nums',
             }}>
               {countdown}
             </div>
           )}
         </div>
 
-        {/* Scoreboard */}
-        <div style={{
-          display:        'flex',
-          justifyContent: 'space-between',
-          marginTop:      8,
-          background:     'rgba(0,0,0,0.06)',
-          borderRadius:   8,
-          padding:        '6px 12px',
-        }}>
-          <div style={{ textAlign: 'center' }}>
-            <div style={{ fontSize: 11, color: '#6B7280', fontWeight: 600 }}>{attackerName}</div>
-            <div style={{ fontSize: 22, fontWeight: 800, color: phaseConf.color }}>{attackerPoints}</div>
-          </div>
-          <div style={{ fontSize: 13, color: '#9CA3AF', alignSelf: 'center' }}>vs</div>
-          <div style={{ textAlign: 'center' }}>
-            <div style={{ fontSize: 11, color: '#6B7280', fontWeight: 600 }}>{defenderName}</div>
-            <div style={{ fontSize: 22, fontWeight: 800, color: phaseConf.color }}>{defenderPoints}</div>
-          </div>
-        </div>
-
-        {/* Immutable policy notice */}
-        <div style={{ marginTop: 6, fontSize: 11, color: '#6B7280', textAlign: 'center' }}>
-          🔒 War Room transcript is permanent — messages cannot be unsent
-        </div>
-
-        {/* Degraded mode banner */}
-        {degraded && (
-          <div style={{
-            marginTop:    6,
-            background:   '#FEF3C7',
-            color:        '#92400E',
-            borderRadius: 6,
-            padding:      '4px 10px',
-            fontSize:     11,
-            textAlign:    'center',
-          }}>
-            ⚠️ Live updates paused — showing history only
+        {/* Capital Score — live during CAPITAL_BATTLE */}
+        {isBattle && (
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 12 }}>
+            <div style={{ textAlign: 'center', flex: 1 }}>
+              <div style={{ fontSize: 10, color: conf.headerColor, opacity: 0.7, fontWeight: 700 }}>
+                {challengerName}
+              </div>
+              <div style={{ fontSize: 22, fontWeight: 900, color: conf.headerColor }}>
+                {challengerScore}
+              </div>
+            </div>
+            <div style={{ color: conf.headerColor, opacity: 0.5, fontWeight: 700, alignSelf: 'center' }}>
+              vs
+            </div>
+            <div style={{ textAlign: 'center', flex: 1 }}>
+              <div style={{ fontSize: 10, color: conf.headerColor, opacity: 0.7, fontWeight: 700 }}>
+                {defenderName}
+              </div>
+              <div style={{ fontSize: 22, fontWeight: 900, color: conf.headerColor }}>
+                {defenderScore}
+              </div>
+            </div>
           </div>
         )}
       </div>
 
-      {/* ── Message list ── */}
-      <div style={{
-        flex:       1,
-        overflowY:  'auto',
-        padding:    '12px 14px',
-        display:    'flex',
-        flexDirection: 'column',
-        gap:        2,
-      }}>
-        {messages.map((msg) => {
-          if (msg.type === 'SYSTEM' && msg.subtype) {
-            return <WarSystemMessage key={msg.messageId} message={msg} />;
-          }
-          const isOwn = msg.senderId === myAllianceId;
-          return <ChatBubble key={msg.messageId} message={msg} isOwn={isOwn} />;
-        })}
-      </div>
-
-      {/* ── Input ── */}
-      {canSend ? (
+      {/* Degraded banner */}
+      {!isLive && (
         <div style={{
-          display:      'flex',
-          gap:          8,
-          padding:      '10px 14px',
-          borderTop:    '1px solid rgba(255,255,255,0.08)',
-          background:   '#1E293B',
-        }}>
-          <input
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-            placeholder="Message war room…"
-            maxLength={500}
-            style={{
-              flex:         1,
-              background:   '#0F172A',
-              border:       '1px solid rgba(255,255,255,0.12)',
-              borderRadius: 10,
-              color:        '#F8FAFC',
-              padding:      '10px 14px',
-              fontSize:     14,
-              outline:      'none',
-            }}
-          />
-          <button
-            onClick={handleSend}
-            disabled={!input.trim()}
-            style={{
-              background:   input.trim() ? '#EF4444' : '#374151',
-              color:        '#fff',
-              border:       'none',
-              borderRadius: 10,
-              padding:      '10px 18px',
-              fontWeight:   700,
-              cursor:       input.trim() ? 'pointer' : 'not-allowed',
-              fontSize:     14,
-              transition:   'background 0.2s',
-            }}
-          >
-            Send
-          </button>
-        </div>
-      ) : (
-        <div style={{
-          padding:    '12px',
-          textAlign:  'center',
-          color:      '#6B7280',
-          fontSize:   13,
-          borderTop:  '1px solid rgba(255,255,255,0.08)',
           background: '#1E293B',
+          borderBottom: '1px solid #F59E0B',
+          padding:    '6px 16px',
+          fontSize:   11,
+          color:      '#F59E0B',
+          fontWeight: 700,
+          letterSpacing: 0.5,
         }}>
-          {isEnded ? '⚔️ War ended — transcript preserved' : '⚠️ Read-only mode'}
+          ⚠️ LIVE DEAL ROOM UPDATES PAUSED — History preserved. Transcript integrity maintained.
         </div>
       )}
+
+      {/* Immutable notice */}
+      <div style={{
+        background: 'rgba(100,116,139,0.1)',
+        borderBottom: '1px solid rgba(100,116,139,0.2)',
+        padding:    '4px 16px',
+        fontSize:   10,
+        color:      '#64748B',
+        letterSpacing: 0.3,
+      }}>
+        🔒 TRANSCRIPT INTEGRITY ENFORCED — Deal Room logs are part of the official rivalry record. Unsend is disabled.
+      </div>
+
+      {/* Message thread */}
+      <div style={{ flex: 1, overflowY: 'auto', padding: '12px 16px' }}>
+        {messages.map((msg) => {
+          if (msg.bulletinType === 'MARKET_PHASE_BULLETIN') {
+            return <MarketPhaseBulletin key={msg.messageId} msg={msg} phase={msg.phase ?? phase} />;
+          }
+          if (msg.bulletinType === 'SETTLEMENT_HASH_CARD') {
+            return <SettlementHashCard key={msg.messageId} msg={msg} proofHash={proofHash} />;
+          }
+          const isSystem = msg.senderId === 'SYSTEM';
+          return (
+            <div key={msg.messageId} style={{
+              marginBottom: 10,
+              opacity:      isSystem ? 0.7 : 1,
+            }}>
+              {!isSystem && (
+                <div style={{ fontSize: 11, color: '#64748B', marginBottom: 2, fontWeight: 600 }}>
+                  {msg.senderName}
+                  {msg.immutable && (
+                    <span style={{ marginLeft: 6, color: '#475569' }}>🔒</span>
+                  )}
+                </div>
+              )}
+              <div style={{
+                background:   isSystem ? 'rgba(100,116,139,0.1)' : 'rgba(255,255,255,0.05)',
+                borderRadius: 10,
+                padding:      '8px 12px',
+                fontSize:     13,
+                color:        isSystem ? '#94A3B8' : '#F1F5F9',
+                fontStyle:    isSystem ? 'italic' : 'normal',
+              }}>
+                {msg.body}
+              </div>
+            </div>
+          );
+        })}
+        <div ref={bottomRef} />
+      </div>
+
+      {/* Input — disabled when CLOSED */}
+      <div style={{
+        borderTop:  '1px solid rgba(100,116,139,0.2)',
+        padding:    '12px 16px',
+        background: '#0F172A',
+      }}>
+        {isClosed ? (
+          <div style={{
+            textAlign:  'center',
+            color:      '#475569',
+            fontSize:   12,
+            padding:    '8px',
+            fontWeight: 600,
+            letterSpacing: 0.3,
+          }}>
+            🏁 RIVALRY CLOSED — RECEIPTS LOCKED
+          </div>
+        ) : (
+          <div style={{ display: 'flex', gap: 8 }}>
+            <input
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && handleSend()}
+              placeholder="Deal Room — transcript is recorded..."
+              style={{
+                flex:         1,
+                background:   'rgba(255,255,255,0.05)',
+                border:       '1px solid rgba(100,116,139,0.3)',
+                borderRadius: 10,
+                padding:      '10px 14px',
+                color:        '#F1F5F9',
+                fontSize:     13,
+                outline:      'none',
+              }}
+            />
+            <button
+              onClick={handleSend}
+              style={{
+                background:   conf.headerBg,
+                color:        '#fff',
+                border:       'none',
+                borderRadius: 10,
+                padding:      '10px 18px',
+                fontWeight:   700,
+                cursor:       'pointer',
+                fontSize:     13,
+              }}
+            >
+              Send
+            </button>
+          </div>
+        )}
+      </div>
     </div>
   );
 };

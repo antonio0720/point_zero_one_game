@@ -1,143 +1,234 @@
 /**
  * ChatRouter.ts
- * HTTP + WS endpoints for WAR_ALERT broadcast and War Room policy.
- * Covers: T194 (payload endpoints), T198 (load test endpoint)
+ * ─────────────────────────────────────────────────────────────────────────────
+ * DEAL ROOM & MARKET MOVE ALERT — HTTP ENDPOINTS
+ * ─────────────────────────────────────────────────────────────────────────────
+ *
+ * Routes:
+ *   POST /api/rivalries/:rivalryId/market-move-alert
+ *     Publish Market Move Alert card to all surfaces for a rivalry phase.
+ *     Idempotent — safe to retry. Minted once per rivalryId + phase.
+ *
+ *   POST /api/rivalries/:rivalryId/market-phase-bulletin
+ *     Publish Market Phase Bulletin (SYSTEM message) into Deal Room
+ *     and Syndicate channels.
+ *
+ *   POST /api/internal/stress/fanout
+ *     War Fanout Stress Protocol — staging-only, feature-flag gated.
+ *     Simulates concurrent rivalry fanout at Syndicate scale.
  */
 
-import { ChatService } from './ChatService';
+import type { Request, Response, NextFunction } from 'express';
+import type { ChatService, RivalryPhase, SyndicateBannerMeta } from './ChatService';
 
-// ─── Types (Express-compatible, no direct import needed) ──────────────────────
+// ─── Middleware helpers ───────────────────────────────────────────────────────
 
-export interface Request {
-  params: Record<string, string>;
-  body:   Record<string, unknown>;
-  query:  Record<string, string>;
-  actor?: { playerId: string; allianceId: string; rank: string };
+function requireSeniorPartner(req: Request, res: Response, next: NextFunction): void {
+  // Inject your auth middleware here.
+  // Only Senior Partner (R4) or Managing Partner (R5) may trigger Market Move Alerts.
+  const rank = (req as unknown as { user?: { rank?: string } }).user?.rank;
+  if (rank !== 'SENIOR_PARTNER' && rank !== 'MANAGING_PARTNER') {
+    res.status(403).json({ error: 'Senior Partner or Managing Partner authority required to publish Market Move Alerts.' });
+    return;
+  }
+  next();
 }
 
-export interface Response {
-  status(code: number): Response;
-  json(body: unknown): void;
+function requireSystemPublisher(req: Request, res: Response, next: NextFunction): void {
+  // System-internal calls only — bypasses per-user rate limits.
+  const token = req.headers['x-internal-token'];
+  if (!token || token !== process.env.INTERNAL_SYSTEM_TOKEN) {
+    res.status(403).json({ error: 'System publisher token required.' });
+    return;
+  }
+  next();
 }
 
-export type NextFn = (err?: Error) => void;
-export type Handler = (req: Request, res: Response, next: NextFn) => Promise<void>;
+function requireStressFlag(req: Request, res: Response, next: NextFunction): void {
+  // War Fanout Stress Protocol — staging only.
+  if (process.env.RIVALRY_LOAD_TEST_ENABLED !== 'true') {
+    res.status(404).json({ error: 'Stress protocol not available in this environment.' });
+    return;
+  }
+  next();
+}
 
-// ─── ChatRouter ───────────────────────────────────────────────────────────────
+// ─── Route handlers ───────────────────────────────────────────────────────────
 
-export class ChatRouter {
-  constructor(
-    private readonly chatService: ChatService,
-    private readonly featureFlags: { warEnabled: boolean; loadTestEnabled: boolean },
-  ) {}
+/**
+ * POST /api/rivalries/:rivalryId/market-move-alert
+ *
+ * T194: Publish a Market Move Alert card for a rivalry phase transition.
+ *
+ * Behavior:
+ *   - Idempotent per rivalryId + phase — safe to retry, never double-mints.
+ *   - Requires Senior Partner or Managing Partner authority.
+ *   - Returns 200 with payload if already published (idempotent success).
+ *   - Returns 429 if Global Broadcast Quota is exceeded — retry after 60s.
+ */
+export async function handlePublishMarketMoveAlert(
+  chatService: ChatService,
+  req: Request,
+  res: Response,
+): Promise<void> {
+  const { rivalryId } = req.params;
 
-  // POST /api/wars/:warId/alert
-  broadcastWarAlert(): Handler {
-    return async (req, res, next) => {
-      try {
-        if (!this.featureFlags.warEnabled) {
-          res.status(503).json({ code: 'FEATURE_DISABLED', message: 'War system is disabled.' });
-          return;
-        }
+  const {
+    phase,
+    challenger,
+    defender,
+    phaseEndsAt,
+    shardId,
+    proofHash,
+    yieldCaptureAmount,
+  } = req.body as {
+    phase:               RivalryPhase;
+    challenger:          SyndicateBannerMeta;
+    defender:            SyndicateBannerMeta;
+    phaseEndsAt:         string;
+    shardId:             string;
+    proofHash?:          string;
+    yieldCaptureAmount?: number;
+  };
 
-        const { warId } = req.params;
-        const {
-          attackerAllianceId,
-          defenderAllianceId,
-          phase,
-          phaseEndsAt,
-          attackerPoints = 0,
-          defenderPoints = 0,
-          proofHash,
-        } = req.body as {
-          attackerAllianceId: string;
-          defenderAllianceId: string;
-          phase: string;
-          phaseEndsAt: string;
-          attackerPoints?: number;
-          defenderPoints?: number;
-          proofHash?: string;
-        };
-
-        if (!attackerAllianceId || !defenderAllianceId || !phase || !phaseEndsAt) {
-          res.status(400).json({ code: 'VALIDATION', message: 'Missing required fields.' });
-          return;
-        }
-
-        const result = await this.chatService.broadcastWarAlert(
-          warId,
-          attackerAllianceId,
-          defenderAllianceId,
-          phase as import('./ChatService').WarPhase,
-          new Date(phaseEndsAt),
-          Number(attackerPoints),
-          Number(defenderPoints),
-          proofHash as string | undefined,
-        );
-
-        res.status(200).json({ ok: true, result });
-      } catch (err) {
-        next(err as Error);
-      }
-    };
+  if (!phase || !challenger || !defender || !phaseEndsAt || !shardId) {
+    res.status(400).json({ error: 'phase, challenger, defender, phaseEndsAt, and shardId are required.' });
+    return;
   }
 
-  // POST /api/wars/:warId/system-message
-  publishWarSystemMessage(): Handler {
-    return async (req, res, next) => {
-      try {
-        const { warId } = req.params;
-        const { subtype, body, meta } = req.body as {
-          subtype: 'WAR_STARTED' | 'ONE_HOUR_WARNING' | 'SETTLEMENT_STARTED' | 'WAR_OUTCOME';
-          body: string;
-          meta?: Record<string, unknown>;
-        };
+  try {
+    const result = await chatService.publishMarketMoveAlert(
+      rivalryId,
+      phase,
+      challenger,
+      defender,
+      new Date(phaseEndsAt),
+      shardId,
+      proofHash,
+      yieldCaptureAmount,
+    );
 
-        if (!subtype || !body) {
-          res.status(400).json({ code: 'VALIDATION', message: 'subtype and body required.' });
-          return;
-        }
+    if (result === null) {
+      // Already minted — idempotent success
+      res.status(200).json({ status: 'already_published', rivalryId, phase });
+      return;
+    }
 
-        const message = await this.chatService.publishWarRoomSystemMessage(
-          warId, subtype, body, meta,
-        );
+    res.status(201).json({ status: 'published', payload: result });
+  } catch (err) {
+    if (err instanceof Error && err.message.includes('quota exceeded')) {
+      res.status(429).json({ error: err.message, retryAfterMs: 60_000 });
+      return;
+    }
+    throw err;
+  }
+}
 
-        res.status(200).json({ ok: true, message });
-      } catch (err) {
-        next(err as Error);
-      }
-    };
+/**
+ * POST /api/rivalries/:rivalryId/market-phase-bulletin
+ *
+ * T194 / T195: Publish Market Phase Bulletin into Deal Room + Syndicate channels.
+ *
+ * Behavior:
+ *   - System-publisher only (bypasses user rate limits — this is server-authoritative).
+ *   - Immutable once written. Transcript integrity enforced.
+ *   - Part of the official rivalry record.
+ */
+export async function handlePublishMarketPhaseBulletin(
+  chatService: ChatService,
+  req: Request,
+  res: Response,
+): Promise<void> {
+  const { rivalryId } = req.params;
+  const { phase, challengerName, defenderName } = req.body as {
+    phase:          RivalryPhase;
+    challengerName: string;
+    defenderName:   string;
+  };
+
+  if (!phase || !challengerName || !defenderName) {
+    res.status(400).json({ error: 'phase, challengerName, and defenderName are required.' });
+    return;
   }
 
-  // POST /api/internal/load-test/war-fanout  — staging only
-  runLoadTest(): Handler {
-    return async (req, res, next) => {
-      try {
-        if (!this.featureFlags.loadTestEnabled) {
-          res.status(403).json({ code: 'FORBIDDEN', message: 'Load test not enabled.' });
-          return;
-        }
+  const bulletins = await chatService.publishMarketPhaseBulletin(
+    rivalryId,
+    phase,
+    challengerName,
+    defenderName,
+  );
 
-        const {
-          concurrentWars    = 10,
-          membersPerAlliance = 50,
-          durationMs        = 30_000,
-        } = req.body as {
-          concurrentWars?: number;
-          membersPerAlliance?: number;
-          durationMs?: number;
-        };
+  res.status(201).json({ status: 'published', count: bulletins.length, bulletins });
+}
 
-        const stats = await this.chatService.runWarFanoutLoadTest({
-          concurrentWars:    Math.min(concurrentWars, 100),  // cap at 100 in test env
-          membersPerAlliance: Math.min(membersPerAlliance, 500),
-          durationMs:         Math.min(durationMs, 120_000),
-        });
+/**
+ * POST /api/internal/stress/fanout
+ *
+ * T198: War Fanout Stress Protocol.
+ * Staging-only. Gated by RIVALRY_LOAD_TEST_ENABLED env flag.
+ *
+ * Simulates concurrent rivalry alert fanout at Syndicate scale.
+ * Returns p50 / p95 / p99 latency breakdown.
+ */
+export async function handleWarFanoutStressProtocol(
+  chatService: ChatService,
+  req: Request,
+  res: Response,
+): Promise<void> {
+  const {
+    concurrentRivalries  = 10,
+    syndicatesPerRivalry = 2,
+    alertsPerRivalry     = 5,
+  } = req.body as {
+    concurrentRivalries?:  number;
+    syndicatesPerRivalry?: number;
+    alertsPerRivalry?:     number;
+  };
 
-        res.status(200).json({ ok: true, stats });
-      } catch (err) {
-        next(err as Error);
-      }
-    };
-  }
+  const result = await chatService.runWarFanoutStressProtocol({
+    concurrentRivalries,
+    syndicatesPerRivalry,
+    alertsPerRivalry,
+  });
+
+  res.status(200).json({ status: 'complete', result });
+}
+
+// ─── Router factory ───────────────────────────────────────────────────────────
+
+/**
+ * Attach all Deal Room + Market Move Alert routes to an Express router.
+ * Call this from your main app router.
+ */
+export function attachChatRivalryRoutes(
+  router: {
+    post: (
+      path: string,
+      ...handlers: Array<(req: Request, res: Response, next: NextFunction) => void>
+    ) => void;
+  },
+  chatService: ChatService,
+): void {
+
+  // Market Move Alert — Senior Partner / Managing Partner authority required
+  router.post(
+    '/rivalries/:rivalryId/market-move-alert',
+    requireSeniorPartner,
+    (req, res) => handlePublishMarketMoveAlert(chatService, req, res),
+  );
+
+  // Market Phase Bulletin — system publisher only
+  router.post(
+    '/rivalries/:rivalryId/market-phase-bulletin',
+    requireSystemPublisher,
+    (req, res) => handlePublishMarketPhaseBulletin(chatService, req, res),
+  );
+
+  // War Fanout Stress Protocol — staging only
+  router.post(
+    '/internal/stress/fanout',
+    requireStressFlag,
+    requireSystemPublisher,
+    (req, res) => handleWarFanoutStressProtocol(chatService, req, res),
+  );
 }

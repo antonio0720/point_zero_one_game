@@ -1,333 +1,351 @@
 /**
  * ChatService.ts
- * Covers: T194 (rich WAR_ALERT payload with banners + countdowns)
- *         T198 (load-test harness for War Room + WAR_ALERT broadcast fanout)
+ * ─────────────────────────────────────────────────────────────────────────────
+ * DEAL ROOM & MARKET MOVE ALERT SERVICE
+ * ─────────────────────────────────────────────────────────────────────────────
+ *
+ * What this covers:
+ *   T194 — Publish rich Market Move Alert cards with Syndicate banners,
+ *           phase countdowns, Capital Score, and deep links.
+ *   T198 — War Fanout Stress Protocol: load-test Deal Room + alert fanout
+ *           under concurrent rivalry simulation.
+ *
+ * Design law:
+ *   Market Move Alerts are minted once per rivalry + phase.
+ *   Safe to retry. No duplicate broadcasts. No vibes. Platform-provable.
+ *
+ * Deal Room transcript integrity:
+ *   UNSEND is forbidden in any DEAL_ROOM channel.
+ *   Logs are part of the official rivalry record.
+ *   The platform can prove what was said.
  */
-
-import { EventEmitter } from 'events';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-export type MessageType =
-  | 'TEXT'
-  | 'STICKER'
-  | 'SYSTEM'
-  | 'WAR_ALERT'
-  | 'DEAL_INVITE'
-  | 'PROOF_SHARE';
+export type RivalryPhase =
+  | 'NOTICE_FILED'
+  | 'DUE_DILIGENCE'
+  | 'CAPITAL_BATTLE'
+  | 'LEDGER_CLOSE'
+  | 'CLOSED';
 
 export type ChannelType =
   | 'GLOBAL'
   | 'SERVER'
-  | 'ALLIANCE'
-  | 'OFFICER'
-  | 'ROOM'
-  | 'DM'
-  | 'WAR_ROOM';
+  | 'SYNDICATE'
+  | 'DEAL_ROOM'   // Rivalry-scoped private channel — transcript integrity enforced
+  | 'DIRECT';
 
-export type WarPhase = 'DECLARED' | 'PREPARATION' | 'ACTIVE' | 'SETTLEMENT' | 'ENDED';
+export interface SyndicateBannerMeta {
+  syndicateId: string;
+  name:        string;
+  banner:      string;   // CDN URL
+  capitalScore: number;
+}
 
-/** T194: Rich WAR_ALERT payload */
-export interface WarAlertPayload {
-  warId: string;
-  attackerAllianceId: string;
-  defenderAllianceId: string;
-  attackerName: string;
-  defenderName: string;
-  attackerBanner: string;        // CDN URL
-  defenderBanner: string;
-  currentPhase: WarPhase;
-  phaseStartedAt: string;        // ISO
-  phaseEndsAt: string;           // ISO — used to render live countdown client-side
-  countdownMs: number;           // snapshot at publish time
-  attackerPoints: number;
-  defenderPoints: number;
-  deepLinkUrl: string;           // e.g. pzo://war/{warId}
-  proofHash?: string;
+/**
+ * T194: Market Move Alert payload.
+ * Rich card published to GLOBAL / SERVER / SYNDICATE channels when a rivalry
+ * files a notice, enters CAPITAL_BATTLE, or closes with final outcome.
+ *
+ * Client renders: banners, live countdown, Capital Score delta, deep link CTA.
+ * No text-only fallback — this is a first-class card object.
+ */
+export interface MarketMoveAlertPayload {
+  rivalryId:           string;
+  phase:               RivalryPhase;
+  challenger:          SyndicateBannerMeta;
+  defender:            SyndicateBannerMeta;
+  phaseEndsAt:         string;          // ISO — client renders countdown
+  deepLink:            string;          // Routes to Deal Room or Rivalry History
+  proofHash?:          string;          // Present only on CLOSED phase
+  yieldCaptureAmount?: number;          // Present only on CLOSED phase
+  alertFingerprint:    string;          // Idempotency key — mint once per rivalryId+phase
+  publishedAt:         string;          // ISO
+}
+
+/**
+ * Market Phase Bulletin — system message published into Deal Room and
+ * Syndicate channels at every rivalry phase transition.
+ *
+ * Immutable once written. No unsend. Part of the official rivalry record.
+ */
+export interface MarketPhaseBulletin {
+  bulletinId:  string;
+  rivalryId:   string;
+  phase:       RivalryPhase;
+  channelId:   string;
+  body:        string;          // Rendered bulletin copy
+  publishedAt: string;          // ISO
+  immutable:   true;            // Always true — transcript integrity
 }
 
 export interface ChatMessage {
-  messageId: string;
-  channelId: string;
+  messageId:   string;
+  channelId:   string;
   channelType: ChannelType;
-  senderId: string;
-  type: MessageType;
-  text?: string;
-  warAlert?: WarAlertPayload;
-  status: 'ACTIVE' | 'UNSENT' | 'REMOVED';
-  immutable: boolean;            // true in WAR_ROOM — unsend disabled
-  createdAt: Date;
-  idempotencyKey?: string;
+  senderId:    string | 'SYSTEM';
+  body:        string;
+  metadata?:   Record<string, unknown>;
+  createdAt:   Date;
+  immutable:   boolean;
 }
 
-export interface BroadcastResult {
-  messageId: string;
-  channelIds: string[];
-  deliveredCount: number;
-  failedCount: number;
-  latencyMs: number;
-}
+// ─── Market Phase Bulletin copy — financial voice ─────────────────────────────
+
+/**
+ * T194: Canonical Market Phase Bulletin copy per phase.
+ * Published as SYSTEM messages at each rivalry phase transition.
+ * Voice: declarative, proof-backed, pressure-driven.
+ */
+export const MARKET_PHASE_BULLETIN_COPY: Record<RivalryPhase, (challengerName: string, defenderName: string) => string> = {
+  NOTICE_FILED: (c, d) =>
+    `📋 RIVALRY NOTICE FILED — ${c} has filed a formal capital challenge against ${d}. Due Diligence window is open. Review your portfolio and activate your Market Plays before the CAPITAL_BATTLE window opens.`,
+
+  DUE_DILIGENCE: (c, d) =>
+    `🔍 DUE DILIGENCE PHASE ACTIVE — ${c} vs. ${d}. Capital Battle opens when this window closes. Final preparation window. No vibes — only verified moves count when the clock opens.`,
+
+  CAPITAL_BATTLE: (c, d) =>
+    `⚡ CAPITAL BATTLE OPEN — ${c} vs. ${d}. Qualifying runs are now scoring. Every verified cashflow move accrues Capital Score. The Market Clock is running. The platform tracks the line.`,
+
+  LEDGER_CLOSE: (c, d) =>
+    `⚖️ LEDGER CLOSE IN PROGRESS — ${c} vs. ${d}. Scoring window is frozen. Settlement Ceremony is executing. Yield Capture is being calculated. Outcome publishes with a Settlement Hash. Rivalries end in a record, not an argument.`,
+
+  CLOSED: (c, d) =>
+    `🏁 RIVALRY CLOSED — ${c} vs. ${d}. Settlement Hash published. Yield Capture transferred. Liquidity Shields activated for both Syndicates. Full Deal Recap Bundle is available in Rivalry History.`,
+};
+
+// ─── Interfaces ───────────────────────────────────────────────────────────────
 
 export interface IChatDatabase {
-  getChannelsByType(type: ChannelType): Promise<{ channelId: string }[]>;
-  getWarRoomChannel(warId: string): Promise<{ channelId: string } | null>;
-  writeMessage(message: ChatMessage): Promise<void>;
-  existsMessage(idempotencyKey: string): Promise<boolean>;
-  getRecentMessages(channelId: string, limit: number): Promise<ChatMessage[]>;
+  getChannel(channelId: string): Promise<{ channelId: string; type: ChannelType; rivalryId?: string } | null>;
+  getChannelsByRivalry(rivalryId: string): Promise<string[]>;
+  getGlobalChannelIds(): Promise<string[]>;
+  getServerChannelIds(shardId: string): Promise<string[]>;
+  getSyndicateChannelIds(syndicateIds: string[]): Promise<string[]>;
+  writeMessage(msg: ChatMessage): Promise<void>;
+  existsAlertFingerprint(fingerprint: string): Promise<boolean>;
+  writeAlertFingerprint(fingerprint: string): Promise<void>;
 }
 
 export interface IFanoutService {
-  broadcast(channelIds: string[], message: ChatMessage): Promise<{ delivered: number; failed: number }>;
-  fanoutToWarRoom(warId: string, message: ChatMessage): Promise<void>;
+  publish(channelIds: string[], payload: unknown): Promise<void>;
 }
 
-export interface IAllianceService {
-  getBannerMetadata(allianceId: string): Promise<{ banner: string; name: string }>;
+export interface IMetrics {
+  histogram(name: string, value: number, tags?: Record<string, string>): void;
+  increment(name: string, tags?: Record<string, string>): void;
 }
 
 // ─── ChatService ──────────────────────────────────────────────────────────────
 
-export class ChatService extends EventEmitter {
-  /** Global broadcast rate limiter — system messages still quota-limited */
-  private broadcastQuota = { count: 0, windowStart: Date.now(), windowMax: 100 };
+export class ChatService {
+  /** Global broadcast quota: 100 Market Move Alerts per minute across all rivalries */
+  private static readonly GLOBAL_BROADCAST_QUOTA_PER_MINUTE = 100;
+  private globalBroadcastCount = 0;
+  private quotaWindowStart     = Date.now();
 
   constructor(
-    private readonly db: IChatDatabase,
-    private readonly fanout: IFanoutService,
-    private readonly allianceService: IAllianceService,
-  ) {
-    super();
-  }
+    private readonly db:      IChatDatabase,
+    private readonly fanout:  IFanoutService,
+    private readonly metrics: IMetrics,
+  ) {}
 
-  // ── T194: Rich WAR_ALERT broadcast ─────────────────────────────────────────
+  // ── T194: Market Move Alert — mint once per rivalryId + phase ──────────────
 
   /**
-   * T194: Publishes a rich WAR_ALERT to GLOBAL channel and both alliance channels.
-   * Includes banners, phase timer, deep link, live countdown snapshot.
-   * Idempotent by warId + phase.
+   * T194: Publish Market Move Alert card.
+   *
+   * Minted once per rivalry phase — idempotent by alertFingerprint.
+   * Safe to retry on worker restart. No duplicate broadcasts.
+   * Published simultaneously to:
+   *   - All GLOBAL channels
+   *   - Both Syndicate channels
+   *   - SERVER channel on the rivalry shard
+   *
+   * The platform can prove every alert was published and when.
    */
-  async broadcastWarAlert(
-    warId: string,
-    attackerAllianceId: string,
-    defenderAllianceId: string,
-    phase: WarPhase,
+  async publishMarketMoveAlert(
+    rivalryId:   string,
+    phase:       RivalryPhase,
+    challenger:  SyndicateBannerMeta,
+    defender:    SyndicateBannerMeta,
     phaseEndsAt: Date,
-    attackerPoints: number,
-    defenderPoints: number,
-    proofHash?: string,
-  ): Promise<BroadcastResult> {
-    const idempotencyKey = `war_alert:${warId}:${phase}`;
+    shardId:     string,
+    proofHash?:  string,
+    yieldCaptureAmount?: number,
+  ): Promise<MarketMoveAlertPayload | null> {
 
-    if (await this.db.existsMessage(idempotencyKey)) {
-      return { messageId: idempotencyKey, channelIds: [], deliveredCount: 0, failedCount: 0, latencyMs: 0 };
+    // Idempotency — mint once per rivalryId + phase
+    const fingerprint = `market_move_alert:${rivalryId}:${phase}`;
+    if (await this.db.existsAlertFingerprint(fingerprint)) return null;
+
+    // Global broadcast quota guard
+    const now = Date.now();
+    if (now - this.quotaWindowStart > 60_000) {
+      this.globalBroadcastCount = 0;
+      this.quotaWindowStart     = now;
+    }
+    if (this.globalBroadcastCount >= ChatService.GLOBAL_BROADCAST_QUOTA_PER_MINUTE) {
+      throw new Error('Global Market Move Alert quota exceeded — retry after 1 minute.');
     }
 
-    this.assertBroadcastQuota();
-
-    const [attackerMeta, defenderMeta] = await Promise.all([
-      this.allianceService.getBannerMetadata(attackerAllianceId),
-      this.allianceService.getBannerMetadata(defenderAllianceId),
-    ]);
-
-    const now = new Date();
-    const payload: WarAlertPayload = {
-      warId,
-      attackerAllianceId,
-      defenderAllianceId,
-      attackerName:   attackerMeta.name,
-      defenderName:   defenderMeta.name,
-      attackerBanner: attackerMeta.banner,
-      defenderBanner: defenderMeta.banner,
-      currentPhase:   phase,
-      phaseStartedAt: now.toISOString(),
-      phaseEndsAt:    phaseEndsAt.toISOString(),
-      countdownMs:    Math.max(0, phaseEndsAt.getTime() - now.getTime()),
-      attackerPoints,
-      defenderPoints,
-      deepLinkUrl:    `pzo://war/${warId}`,
+    const payload: MarketMoveAlertPayload = {
+      rivalryId,
+      phase,
+      challenger,
+      defender,
+      phaseEndsAt:         phaseEndsAt.toISOString(),
+      deepLink:            `/rivalries/${rivalryId}`,
       proofHash,
+      yieldCaptureAmount,
+      alertFingerprint:    fingerprint,
+      publishedAt:         new Date().toISOString(),
     };
 
-    const message: ChatMessage = {
-      messageId:      idempotencyKey,
-      channelId:      'GLOBAL',
-      channelType:    'GLOBAL',
-      senderId:       'SYSTEM',
-      type:           'WAR_ALERT',
-      warAlert:       payload,
-      status:         'ACTIVE',
-      immutable:      true,   // WAR_ALERTs cannot be unsent
-      createdAt:      now,
-      idempotencyKey,
-    };
-
-    const t0 = Date.now();
-
-    // Get all global + both alliance channels
-    const globalChannels = await this.db.getChannelsByType('GLOBAL');
-    const allianceChannels = await Promise.all([
-      this.db.getChannelsByType('ALLIANCE'),
+    // Resolve all channel targets in parallel
+    const [globalIds, serverIds, syndicateIds] = await Promise.all([
+      this.db.getGlobalChannelIds(),
+      this.db.getServerChannelIds(shardId),
+      this.db.getSyndicateChannelIds([challenger.syndicateId, defender.syndicateId]),
     ]);
-    const channelIds = [
-      ...globalChannels.map((c) => c.channelId),
-      ...allianceChannels.flat().map((c) => c.channelId),
-    ];
 
-    await this.db.writeMessage(message);
-    const { delivered, failed } = await this.fanout.broadcast(channelIds, message);
+    const allChannels = [...new Set([...globalIds, ...serverIds, ...syndicateIds])];
+    const t0 = Date.now();
+    await this.fanout.publish(allChannels, { type: 'MARKET_MOVE_ALERT', payload });
 
-    const latencyMs = Date.now() - t0;
+    // T194 telemetry
+    this.metrics.histogram('market_move_alert_fanout_latency_ms', Date.now() - t0, { phase });
+    this.metrics.increment('market_move_alert_published', { phase });
 
-    this.emit('WAR_ALERT_BROADCAST', { warId, phase, channelCount: channelIds.length, latencyMs });
-    this.broadcastQuota.count++;
+    await this.db.writeAlertFingerprint(fingerprint);
+    this.globalBroadcastCount++;
 
-    return {
-      messageId:      idempotencyKey,
-      channelIds,
-      deliveredCount: delivered,
-      failedCount:    failed,
-      latencyMs,
-    };
+    return payload;
   }
 
-  // ── War Room system messages ────────────────────────────────────────────────
+  // ── T194: Market Phase Bulletin — publish into Deal Room + Syndicate channels
 
   /**
-   * T194: Publish a high-signal SYSTEM message to the War Room channel.
-   * These are immutable — unsend is disabled in WAR_ROOM by policy.
+   * Publish a Market Phase Bulletin (SYSTEM message) into Deal Room
+   * and both Syndicate channels on every rivalry phase transition.
+   *
+   * Immutable — transcript integrity enforced. No unsend.
+   * Part of the official rivalry record. The platform can prove what was said.
    */
-  async publishWarRoomSystemMessage(
-    warId: string,
-    subtype: 'WAR_STARTED' | 'ONE_HOUR_WARNING' | 'SETTLEMENT_STARTED' | 'WAR_OUTCOME',
-    body: string,
-    meta: Record<string, unknown> = {},
-  ): Promise<ChatMessage> {
-    const idempotencyKey = `war_system:${warId}:${subtype}`;
+  async publishMarketPhaseBulletin(
+    rivalryId:       string,
+    phase:           RivalryPhase,
+    challengerName:  string,
+    defenderName:    string,
+  ): Promise<MarketPhaseBulletin[]> {
+    const channelIds = await this.db.getChannelsByRivalry(rivalryId);
+    const bulletins: MarketPhaseBulletin[] = [];
+    const body        = MARKET_PHASE_BULLETIN_COPY[phase](challengerName, defenderName);
+    const publishedAt = new Date();
 
-    if (await this.db.existsMessage(idempotencyKey)) {
-      // Return existing message — idempotent
-      const recent = await this.db.getRecentMessages(warId, 1);
-      return recent[0];
+    for (const channelId of channelIds) {
+      const bulletinId = `bulletin:${rivalryId}:${phase}:${channelId}`;
+      const msg: ChatMessage = {
+        messageId:   bulletinId,
+        channelId,
+        channelType: 'DEAL_ROOM',
+        senderId:    'SYSTEM',
+        body,
+        metadata:    { rivalryId, phase, bulletinType: 'MARKET_PHASE_BULLETIN' },
+        createdAt:   publishedAt,
+        immutable:   true,
+      };
+
+      await this.db.writeMessage(msg);
+      this.metrics.increment('market_phase_bulletin_published', { phase });
+
+      bulletins.push({
+        bulletinId,
+        rivalryId,
+        phase,
+        channelId,
+        body,
+        publishedAt: publishedAt.toISOString(),
+        immutable:   true,
+      });
     }
 
-    const channel = await this.db.getWarRoomChannel(warId);
-    if (!channel) throw new Error(`War Room channel not found for war: ${warId}`);
-
-    const message: ChatMessage = {
-      messageId:      idempotencyKey,
-      channelId:      channel.channelId,
-      channelType:    'WAR_ROOM',
-      senderId:       'SYSTEM',
-      type:           'SYSTEM',
-      text:           body,
-      status:         'ACTIVE',
-      immutable:      true,    // T194: WAR_ROOM messages cannot be unsent
-      createdAt:      new Date(),
-      idempotencyKey,
-    };
-
-    await this.db.writeMessage(message);
-    await this.fanout.fanoutToWarRoom(warId, message);
-
-    this.emit('WAR_CHAT_SYSTEM_MESSAGE_PUBLISHED', {
-      warId, subtype, channelId: channel.channelId, meta,
-    });
-
-    return message;
+    return bulletins;
   }
 
-  // ── T198: Load test harness ─────────────────────────────────────────────────
+  // ── T198: War Fanout Stress Protocol ──────────────────────────────────────
 
   /**
-   * T198: Simulates alliance-scale concurrent war broadcasts.
-   * Use in staging/load environment only — guarded by flag.
-   * Returns timing stats for each simulated war.
+   * T198: War Fanout Stress Protocol.
+   *
+   * Simulates concurrent rivalry alert fanout at Syndicate scale.
+   * Measures p50 / p95 / p99 latency across all broadcast paths.
+   *
+   * Staging-only — gated by RIVALRY_LOAD_TEST feature flag at router level.
+   * Run this before every Deal Room + alert infrastructure change.
    */
-  async runWarFanoutLoadTest(options: {
-    concurrentWars: number;
-    membersPerAlliance: number;
-    durationMs: number;
-  }): Promise<LoadTestResult> {
-    const { concurrentWars, membersPerAlliance, durationMs } = options;
-    const results: { warId: string; latencyMs: number; delivered: number; failed: number }[] = [];
-    const startTime = Date.now();
+  async runWarFanoutStressProtocol(params: {
+    concurrentRivalries: number;
+    syndicatesPerRivalry: number;
+    alertsPerRivalry:    number;
+  }): Promise<{
+    totalAlerts:    number;
+    successCount:   number;
+    failureCount:   number;
+    latencyMs:      { p50: number; p95: number; p99: number };
+    channelsHit:    number;
+    durationMs:     number;
+  }> {
+    const { concurrentRivalries, syndicatesPerRivalry, alertsPerRivalry } = params;
+    const latencies: number[] = [];
+    let successCount = 0;
+    let failureCount = 0;
+    let channelsHit  = 0;
+    const start      = Date.now();
 
-    const warBatches = Array.from({ length: concurrentWars }, (_, i) => ({
-      warId:              `loadtest-war-${i}-${startTime}`,
-      attackerAllianceId: `loadtest-attacker-${i}`,
-      defenderAllianceId: `loadtest-defender-${i}`,
-    }));
+    const rivalryJobs = Array.from({ length: concurrentRivalries }, async (_, ri) => {
+      const mockSyndicateIds = Array.from({ length: syndicatesPerRivalry }, (__, si) =>
+        `stress_syndicate_${ri}_${si}`
+      );
 
-    await Promise.all(
-      warBatches.map(async (w) => {
+      for (let ai = 0; ai < alertsPerRivalry; ai++) {
         const t0 = Date.now();
         try {
-          // Simulate WAR_ALERT broadcast
-          const phaseEndsAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
-          const result = await this.broadcastWarAlert(
-            w.warId,
-            w.attackerAllianceId,
-            w.defenderAllianceId,
-            'ACTIVE',
-            phaseEndsAt,
-            0, 0,
-          );
-          results.push({
-            warId:       w.warId,
-            latencyMs:   Date.now() - t0,
-            delivered:   result.deliveredCount,
-            failed:      result.failedCount,
+          const channelIds = await this.db.getSyndicateChannelIds(mockSyndicateIds);
+          await this.fanout.publish(channelIds, {
+            type: 'MARKET_MOVE_ALERT_STRESS',
+            rivalryId: `stress_rivalry_${ri}`,
+            alertIndex: ai,
           });
-        } catch (err) {
-          results.push({ warId: w.warId, latencyMs: Date.now() - t0, delivered: 0, failed: 1 });
+          latencies.push(Date.now() - t0);
+          channelsHit += mockSyndicateIds.length;
+          successCount++;
+        } catch {
+          failureCount++;
+          latencies.push(Date.now() - t0);
         }
-      })
-    );
+      }
+    });
 
-    const latencies = results.map((r) => r.latencyMs);
-    return {
-      totalWars:    concurrentWars,
-      membersPerAlliance,
-      durationMs:   Date.now() - startTime,
-      p50LatencyMs: percentile(latencies, 50),
-      p95LatencyMs: percentile(latencies, 95),
-      p99LatencyMs: percentile(latencies, 99),
-      totalDelivered: results.reduce((s, r) => s + r.delivered, 0),
-      totalFailed:    results.reduce((s, r) => s + r.failed, 0),
-      successRate:    results.filter((r) => r.failed === 0).length / results.length,
+    await Promise.all(rivalryJobs);
+
+    const sorted = [...latencies].sort((a, b) => a - b);
+    const p = (pct: number) => sorted[Math.floor(sorted.length * pct)] ?? 0;
+
+    const result = {
+      totalAlerts:  successCount + failureCount,
+      successCount,
+      failureCount,
+      latencyMs:    { p50: p(0.5), p95: p(0.95), p99: p(0.99) },
+      channelsHit,
+      durationMs:   Date.now() - start,
     };
+
+    this.metrics.histogram('fanout_stress_p99_ms', result.latencyMs.p99);
+    this.metrics.histogram('fanout_stress_p95_ms', result.latencyMs.p95);
+    this.metrics.increment('fanout_stress_run');
+
+    return result;
   }
-
-  // ── Helpers ─────────────────────────────────────────────────────────────────
-
-  /** T198: System publisher bypasses user rate limits but is still quota-limited globally */
-  private assertBroadcastQuota(): void {
-    const now = Date.now();
-    const windowMs = 60_000;
-    if (now - this.broadcastQuota.windowStart > windowMs) {
-      this.broadcastQuota = { count: 0, windowStart: now, windowMax: 100 };
-    }
-    if (this.broadcastQuota.count >= this.broadcastQuota.windowMax) {
-      throw new Error('Global broadcast quota exceeded. Retry after 1 minute.');
-    }
-  }
-}
-
-export interface LoadTestResult {
-  totalWars: number;
-  membersPerAlliance: number;
-  durationMs: number;
-  p50LatencyMs: number;
-  p95LatencyMs: number;
-  p99LatencyMs: number;
-  totalDelivered: number;
-  totalFailed: number;
-  successRate: number;
-}
-
-function percentile(values: number[], p: number): number {
-  if (!values.length) return 0;
-  const sorted = [...values].sort((a, b) => a - b);
-  const idx = Math.ceil((p / 100) * sorted.length) - 1;
-  return sorted[Math.max(0, idx)];
 }
