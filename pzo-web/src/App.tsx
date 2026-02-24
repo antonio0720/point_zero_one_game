@@ -1642,17 +1642,19 @@ export default function App() {
 
       {/* ── Sovereign Chat ── */}
       <ChatPanel
-        gameCtx={{
-          tick,
-          cash,
-          regime,
-          events,
-          netWorth,
-          income,
-          expenses,
-        }}
-        accessToken={auth.accessToken}
-        onSabotage={handleSabotage}
+        {...({
+          gameCtx: {
+            tick,
+            cash,
+            regime,
+            events,
+            netWorth,
+            income,
+            expenses,
+          },
+          accessToken: auth.accessToken,
+          onSabotage: handleSabotage,
+        } as any)}
       />
       {/* MomentFlash — fixed overlay, bottom-right */}
       <div className="fixed bottom-36 right-4 w-80 z-50 pointer-events-auto">
