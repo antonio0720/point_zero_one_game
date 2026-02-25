@@ -1,25 +1,22 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // POINT ZERO ONE — pzo-web/src/App.tsx
-// SPRINT 8 FINAL — Shell only. Zero card/tick/fate/mode logic.
+// SPRINT 1+2 REFACTOR — Shell only. Zero card/tick/fate logic.
 // Density6 LLC · Confidential
 //
-// Responsibilities (ONLY):
-//   1. Auth gate
-//   2. Mechanic catalog + deck pool (memoized deps)
-//   3. Run state (useReducer) + run loop (useRunLoop)
+// What this file does (and ONLY this):
+//   1. Auth gate + loading
+//   2. Mechanic catalog + deck pool (memoized, passed as deps)
+//   3. Run state (useReducer) + run loop (useRunLoop hook)
 //   4. Lobby / mode select → startRun
 //   5. Route to mode container
 //   6. ChatPanel overlay
-//
-// TS FIX #1: import.meta → VITE_DEV_BYPASS accessed via env check pattern
-// TS FIX #2: BattlePhase imported from canonical battlePhase.ts
 // ═══════════════════════════════════════════════════════════════════════════
 
-import React, { useState, useReducer, useCallback, useMemo, useRef } from 'react';
+import React, { useState, useReducer, useCallback, useMemo, useRef, useEffect } from 'react';
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
-import { AuthGate } from './components/auth/AuthGate';
-import { useAuth }  from './hooks/useAuth';
+import { AuthGate }  from './components/auth/AuthGate';
+import { useAuth }   from './hooks/useAuth';
 
 // ── Engine Bridge ─────────────────────────────────────────────────────────────
 import { useGameMode } from './hooks/useGameMode';
@@ -30,121 +27,119 @@ import { useRunLoop }            from './game/runtime/useRunLoop';
 import { createInitialRunState } from './game/types/runState';
 import { LEGACY_MODE_MAP }       from './game/types/modes';
 import { randomSeed, mulberry32, drawRandom } from './game/core/rng';
-import { buildCatalog, buildGeneratedDeck }   from './game/core/mechanicCatalog';
+import { buildCatalog, buildGeneratedDeck, initRuntime, decayRuntime } from './game/core/mechanicCatalog';
 
 // ── Card Pipeline ─────────────────────────────────────────────────────────────
-import { resolveCardPlay } from './game/cards/cardResolver';
+import { resolveCardPlay }  from './game/cards/cardResolver';
 
 // ── Screens ───────────────────────────────────────────────────────────────────
 import LobbyScreen      from './components/LobbyScreen';
 import BankruptcyScreen from './components/BankruptcyScreen';
-import { ResultScreen } from './components/ResultScreen';
+import EmpireGameScreen    from './components/EmpireGameScreen';
+import PredatorGameScreen  from './components/PredatorGameScreen';
+import SyndicateGameScreen from './components/SyndicateGameScreen';
+import PhantomGameScreen   from './components/PhantomGameScreen';
 
-// ── Mode Containers (Sprint 8) ────────────────────────────────────────────────
-import { EmpireModeContainer }   from './features/modes/EmpireModeContainer';
-import { PredatorModeContainer } from './features/modes/PredatorModeContainer';
-import { SyndicateModeContainer } from './features/modes/SyndicateModeContainer';
-import { PhantomModeContainer }  from './features/modes/PhantomModeContainer';
+// ── Legacy result screen (pre-Sprint 8 polish) ────────────────────────────────
+import { ResultScreen } from './components/ResultScreen';
 
 // ── Bridge / Context ──────────────────────────────────────────────────────────
 import { MechanicsBridgeProvider } from './context/MechanicsBridgeContext';
 import { ChatPanel }               from './components/chat/ChatPanel';
 
-// ── Telemetry ─────────────────────────────────────────────────────────────────
+// ── Mechanic telemetry hook ───────────────────────────────────────────────────
 import { useMechanicTelemetry } from './hooks/useMechanicTelemetry';
 
+// ── Replay helpers ────────────────────────────────────────────────────────────
+import { buildReplayEvents } from './game/core/replayBuilder';
+
 // ── Types ─────────────────────────────────────────────────────────────────────
+import type { RunEvent }   from './game/types/events';
 import type { SabotageEvent } from './components/chat/useChatEngine';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 import { RUN_TICKS } from './game/core/constants';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// TS FIX #1 — safe env read without import.meta
-const isDev = typeof process !== 'undefined'
-  ? process.env.VITE_DEV_BYPASS === 'true'
-  : false;
-// Vite replaces import.meta.env at build time — but for the TS checker we
-// use the window fallback so the compiler doesn't error on --module commonjs
-const devBypass: boolean = (() => {
-  try {
-    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-    // @ts-ignore — resolved by Vite at build time
-    return (import.meta as any).env?.VITE_DEV_BYPASS === 'true';
-  } catch {
-    return isDev;
-  }
-})();
-
-// ─────────────────────────────────────────────────────────────────────────────
 export default function App() {
-
   // ── Auth ─────────────────────────────────────────────────────────────────
   const auth = useAuth();
+
+  // ── Engine layer bridge (runs alongside, Sprint 3+ takes over) ───────────
   const gameModeHook = useGameMode();
 
-  // ── Catalog ───────────────────────────────────────────────────────────────
+  // ── Mechanic catalog (300 mechanics — memoized, never changes) ───────────
   const catalog     = useMemo(() => buildCatalog(), []);
   const coreCatalog = useMemo(() => catalog.filter((m) => m.kind === 'core'), [catalog]);
   const deckPool    = useMemo(() => buildGeneratedDeck(coreCatalog), [coreCatalog]);
   const validIds    = useMemo(() => new Set(catalog.map((m) => m.id)), [catalog]);
 
-  // ── Telemetry ─────────────────────────────────────────────────────────────
+  // ── Mechanic runtime (separate from runReducer — telemetry concern) ───────
   const { runtime, touchMechanic, touchFamily, decayAll, resetRuntime } = useMechanicTelemetry(catalog);
 
   // ── RNG ──────────────────────────────────────────────────────────────────
   const rngRef  = useRef<() => number>(() => Math.random());
   const seedRef = useRef<number>(0);
 
-  // ── Run State ─────────────────────────────────────────────────────────────
+  // ── Run state machine ─────────────────────────────────────────────────────
   const [runState, dispatch] = useReducer(
     runReducer,
     createInitialRunState('EMPIRE', 0),
   );
+  // Exposed as ref for useRunLoop internals
   const runStateRef = useRef(runState);
   runStateRef.current = runState;
 
-  // ── Tick Loop ─────────────────────────────────────────────────────────────
+  // ── Tick loop ─────────────────────────────────────────────────────────────
   useRunLoop({
     state: runState,
     dispatch,
     rng:      rngRef.current,
     deckPool: deckPool as any,
-    onMechanicPulse: (tick) => {
-      const mlCat = catalog.filter((m) => m.kind === 'ml');
-      touchMechanic(coreCatalog[tick % coreCatalog.length]?.id, 0.05);
-      touchMechanic(mlCat[tick % mlCat.length]?.id, 0.07);
+    onMechanicPulse: (tick, _mode) => {
+      const pulseA = coreCatalog[tick % coreCatalog.length];
+      const mlCat  = catalog.filter((m) => m.kind === 'ml');
+      const pulseB = mlCat[tick % mlCat.length];
+      if (pulseA) touchMechanic(pulseA.id, 0.05);
+      if (pulseB) touchMechanic(pulseB.id, 0.07);
       decayAll();
     },
   });
 
-  // ── Start Run ─────────────────────────────────────────────────────────────
+  // ── Start run ─────────────────────────────────────────────────────────────
   const startRun = useCallback((legacyMode: string) => {
     const seed = randomSeed();
     seedRef.current = seed;
     rngRef.current  = mulberry32(seed);
+
     const mode = LEGACY_MODE_MAP[legacyMode] ?? 'EMPIRE';
     const initialHand = drawRandom(
       deckPool.filter((c) => c.type === 'OPPORTUNITY' || c.type === 'IPA'),
       4,
       rngRef.current,
     );
+
     dispatch({ type: 'RUN_START', mode, seed });
+
+    // Draw initial hand — emit CARD_DRAWN for each
     for (const card of initialHand) {
       dispatch({ type: 'CARD_DRAWN', card: { ...card, origin: 'PLAYER_DRAW', visibility: 'SELF' } as any });
     }
+
     resetRuntime();
+
+    // Wire engine layer in parallel
     gameModeHook.startRun(legacyMode as any, seed).catch(console.error);
   }, [deckPool, dispatch, gameModeHook, resetRuntime]);
 
-  // ── Card Play ─────────────────────────────────────────────────────────────
+  // ── Card play ─────────────────────────────────────────────────────────────
   const handlePlayCard = useCallback((cardId: string) => {
     resolveCardPlay(cardId, runState as any, dispatch, (type, payload) => {
       dispatch({ type: 'TELEMETRY_EMIT', telemetryType: type, payload: payload as any });
     });
   }, [runState, dispatch]);
 
-  // ── Sabotage ──────────────────────────────────────────────────────────────
+  // ── Sabotage (from ChatPanel) ─────────────────────────────────────────────
   const handleSabotage = useCallback((event: SabotageEvent) => {
     const { cardType, intensity, haterName } = event;
     dispatch({
@@ -154,45 +149,51 @@ export default function App() {
       sourceDisplayName: haterName,
       intensity,
     });
+    // Direct economic effects — routed through dispatch for reducer ownership
     if (intensity > 0) {
-      dispatch({ type: 'CARD_PLAY_RESOLVED', card: {} as any, cashDelta: -Math.round(2_500 * intensity), incomeDelta: 0, netWorthDelta: 0 });
+      const hit = Math.round(2_500 * intensity);
+      dispatch({ type: 'CARD_PLAY_RESOLVED', card: {} as any, cashDelta: -hit, incomeDelta: 0, netWorthDelta: 0 });
     }
   }, [runState.tick, dispatch]);
 
-  // ── Aid / Rescue / Mitigate ───────────────────────────────────────────────
+  // ── Aid submit ────────────────────────────────────────────────────────────
   const handleAidSubmit = useCallback((contract: { recipientId: string; aidType: string; amount: number }) => {
     dispatch({ type: 'AID_SUBMITTED', ...contract });
   }, [dispatch]);
 
+  // ── Rescue ────────────────────────────────────────────────────────────────
   const handleRescueContribute = useCallback(() => {
-    const { rescueWindow, cash } = runState;
-    if (!rescueWindow) return;
-    const amount = Math.round(Math.min(cash * 0.1, rescueWindow.contributionRequired - rescueWindow.totalContributed));
+    if (!runState.rescueWindow) return;
+    const amount = Math.round(Math.min(runState.cash * 0.1, runState.rescueWindow.contributionRequired - runState.rescueWindow.totalContributed));
     dispatch({ type: 'RESCUE_CONTRIBUTION', amount });
-  }, [runState, dispatch]);
+  }, [runState.cash, runState.rescueWindow, dispatch]);
 
+  // ── Threat mitigate ───────────────────────────────────────────────────────
   const handleMitigate = useCallback((id: string) => {
     if (runState.cash >= 2_000) {
       dispatch({ type: 'CARD_PLAY_RESOLVED', card: {} as any, cashDelta: -2_000, incomeDelta: 0, netWorthDelta: 0 });
-      dispatch({ type: 'TELEMETRY_EMIT', telemetryType: 'threat.mitigated', payload: { threatId: id } });
+      dispatch({ type: 'TELEMETRY_EMIT', telemetryType: 'threat.mitigated', payload: { threatId: id, cost: 2000 } });
     }
   }, [runState.cash, dispatch]);
 
-  // ── Bridge snapshot ───────────────────────────────────────────────────────
+  // ── Derived values ────────────────────────────────────────────────────────
+  const replayEvents = useMemo(() => buildReplayEvents(runState.telemetry), [runState.telemetry]);
+  const gameCtx = useMemo(() => ({
+    tick: runState.tick, cash: runState.cash, regime: runState.regime,
+    netWorth: runState.netWorth, income: runState.income, expenses: runState.expenses,
+    events: runState.events,
+  }), [runState]);
+
+  const userAccessToken: string | null = (auth.user as any)?.accessToken ?? null;
+
+  // ── Bridge snapshot (MechanicsBridgeProvider) ─────────────────────────────
   const bridgeSnapshot = useMemo(() => ({
     tick: runState.tick, cash: runState.cash, regime: runState.regime,
     intelligence: runState.intelligence as any, season: runState.season as any,
   }), [runState]);
 
-  const userAccessToken: string | null = (auth.user as any)?.accessToken ?? null;
-  const gameCtx = useMemo(() => ({
-    tick: runState.tick, cash: runState.cash, regime: runState.regime,
-    netWorth: runState.netWorth, income: runState.income,
-    expenses: runState.expenses, events: runState.events,
-  }), [runState]);
-
-  // ── Auth Gate ─────────────────────────────────────────────────────────────
-  if (!auth.isAuthed && !auth.loading && !devBypass) {
+  // ── Auth gate ─────────────────────────────────────────────────────────────
+  if (!auth.isAuthed && !auth.loading && import.meta.env.VITE_DEV_BYPASS !== 'true') {
     return <AuthGate auth={auth} onAuth={() => {}} />;
   }
   if (auth.loading) {
@@ -203,11 +204,12 @@ export default function App() {
     );
   }
 
-  // ── Screen Router ─────────────────────────────────────────────────────────
+  // ── Landing ───────────────────────────────────────────────────────────────
   if (runState.screen === 'landing') {
     return <LobbyScreen onStart={startRun} />;
   }
 
+  // ── Bankrupt ──────────────────────────────────────────────────────────────
   if (runState.screen === 'bankrupt') {
     return (
       <div className="min-h-screen bg-zinc-950 flex flex-col gap-6 overflow-auto p-4">
@@ -221,9 +223,10 @@ export default function App() {
     );
   }
 
+  // ── Result ────────────────────────────────────────────────────────────────
   if (runState.screen === 'result') {
     return (
-      <div className="min-h-screen bg-zinc-950 flex flex-col items-center justify-start p-6 overflow-auto">
+      <div className="min-h-screen bg-zinc-950 flex flex-col gap-6 items-center justify-start p-6 overflow-auto">
         <ResultScreen
           cash={runState.cash} netWorth={runState.netWorth}
           income={runState.income} expenses={runState.expenses}
@@ -234,8 +237,11 @@ export default function App() {
     );
   }
 
-  // ── Active Run — Mode Containers ──────────────────────────────────────────
-  const { mode } = runState;
+  // ── Run ────────────────────────────────────────────────────────────────────
+  const commonEvents = runState.events.slice(-30);
+  const { cash, income, expenses, netWorth, shields, shieldConsuming, tick,
+          freezeTicks, regime, intelligence, equityHistory, hand, battleState,
+          activeSabotages, rescueWindow, mode } = runState;
 
   return (
     <MechanicsBridgeProvider
@@ -243,34 +249,59 @@ export default function App() {
       onTouchMechanic={touchMechanic} onTouchFamily={touchFamily}
       snapshot={bridgeSnapshot}
     >
+      {/* ── Mode Containers ── */}
       {mode === 'EMPIRE' && (
-        <EmpireModeContainer
-          runState={runState} modeState={gameModeHook.modeState}
-          onPlayCard={handlePlayCard} onMitigate={handleMitigate}
+        <EmpireGameScreen
+          cash={cash} income={income} expenses={expenses} netWorth={netWorth}
+          shields={shields} shieldConsuming={shieldConsuming}
+          tick={tick} totalTicks={RUN_TICKS} freezeTicks={freezeTicks}
+          regime={regime} intelligence={intelligence as any} equityHistory={equityHistory}
+          hand={hand as any} onPlayCard={handlePlayCard}
+          threats={[]} onMitigate={handleMitigate}
+          events={commonEvents} modeState={gameModeHook.modeState}
         />
       )}
       {mode === 'PREDATOR' && (
-        <PredatorModeContainer
-          runState={runState} modeState={gameModeHook.modeState}
+        <PredatorGameScreen
+          cash={cash} income={income} expenses={expenses} netWorth={netWorth}
+          shields={shields} shieldConsuming={shieldConsuming}
+          tick={tick} totalTicks={RUN_TICKS} freezeTicks={freezeTicks}
+          regime={regime} intelligence={intelligence as any} equityHistory={equityHistory}
+          events={commonEvents} modeState={gameModeHook.modeState}
+          battlePhase={battleState.phase} battleParticipants={[]}
+          battleScore={battleState.score} battleRound={battleState.round}
+          activeSabotages={activeSabotages as any}
+          pendingCounterplay={null}
           onForfeit={() => dispatch({ type: 'SCREEN_TRANSITION', to: 'result' })}
           onCounterplay={() => {}}
         />
       )}
       {mode === 'SYNDICATE' && (
-        <SyndicateModeContainer
-          runState={runState} modeState={gameModeHook.modeState}
-          onAidSubmit={handleAidSubmit}
+        <SyndicateGameScreen
+          cash={cash} income={income} expenses={expenses} netWorth={netWorth}
+          shields={shields} shieldConsuming={shieldConsuming}
+          tick={tick} totalTicks={RUN_TICKS} freezeTicks={freezeTicks}
+          regime={regime} intelligence={intelligence as any} equityHistory={equityHistory}
+          events={commonEvents} modeState={gameModeHook.modeState}
+          rescueWindow={rescueWindow as any}
+          allianceMembers={[]}
+          onAidSubmit={handleAidSubmit as any}
           onRescueContribute={handleRescueContribute}
           onRescueDismiss={() => dispatch({ type: 'RESCUE_DISMISSED' })}
         />
       )}
       {mode === 'PHANTOM' && (
-        <PhantomModeContainer
-          runState={runState} modeState={gameModeHook.modeState}
-          seed={seedRef.current}
+        <PhantomGameScreen
+          cash={cash} income={income} expenses={expenses} netWorth={netWorth}
+          shields={shields}
+          tick={tick} totalTicks={RUN_TICKS} freezeTicks={freezeTicks}
+          regime={regime} intelligence={intelligence as any} equityHistory={equityHistory}
+          events={commonEvents} replayEvents={replayEvents}
+          modeState={gameModeHook.modeState} seed={seedRef.current}
         />
       )}
 
+      {/* ── ChatPanel — fixed overlay ── */}
       <ChatPanel
         gameCtx={gameCtx}
         onSabotage={handleSabotage}
