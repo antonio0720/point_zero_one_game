@@ -69,86 +69,86 @@ const MODES = {
   solo: {
     id:        'solo' as RunMode,
     label:     'EMPIRE',
-    tagline:   'You vs. The Market',
-    badge:     'SOLO RUN',
+    tagline:   'Build income that works while you sleep — or lose everything.',
+    badge:     'GO ALONE',
     accent:    '#FFB800',
     accentRgb: 'rgba(255,184,0,',
     bg:        'from-[#0D0900] via-[#110C00] to-[#0A0700]',
     borderCss: '#FFB80055',
     glow:      'shadow-[0_0_80px_rgba(255,184,0,0.25)]',
     btnBg:     'bg-[#FFB800] hover:bg-[#FFCA40] text-black',
-    desc:      'Build a passive income empire before your burn rate kills you. 12 minutes. 720 ticks. One shot.',
+    desc:      'Most people spend 40 years trading hours for dollars and never break the cycle. EMPIRE gives you 12 minutes to do what most people never figure out — build something that pays you whether you show up or not. Every instinct you sharpen here works the same way when real money is on the line.',
     features: [
-      { icon: '💸', name: 'Income vs. Burn',  detail: 'Push passive income past monthly expenses before the clock runs out' },
-      { icon: '🎴', name: '300-Card Engine',   detail: 'Every decision pulls from a living deck of market forces, risks, and power moves' },
-      { icon: '📈', name: 'Market Regimes',    detail: 'Stable, Expansion, Panic, Euphoria — the market shifts beneath you without warning' },
-      { icon: '💀', name: 'Permadeath',        detail: 'Hit zero with no shields and it\'s over. No second chances. No pausing.' },
+      { icon: '💸', name: 'Your Money Has to Work For You',       detail: 'The only way to win is making your income outgrow your expenses — automatically. That\'s not a game rule. That\'s the secret the wealthy figured out early.' },
+      { icon: '🎯', name: 'Every Decision Has a Permanent Cost',  detail: 'Nothing resets. Every choice shifts your cash flow forward or backward. Master this and you\'ll start reading real financial decisions the same way.' },
+      { icon: '🌊', name: 'The Market Doesn\'t Care About You',   detail: 'Calm turns to chaos without warning. The players who win here don\'t fight the market — they learn to move with it. That skill lives in your body after this.' },
+      { icon: '🔥', name: 'No Safety Net. Like Real Life.',        detail: 'When your cash hits zero with no protection left, it\'s over. That pressure isn\'t punishment — it\'s the exact feeling that separates people who build wealth from people who almost did.' },
     ],
-    cta: 'LAUNCH EMPIRE',
-    flavor: '"Build the machine that runs without you — or go bankrupt trying."',
+    cta: 'START BUILDING',
+    flavor: '"Every wealthy person built something that pays them while they sleep. This is where you learn how."',
   },
   'asymmetric-pvp': {
     id:        'asymmetric-pvp' as RunMode,
     label:     'PREDATOR',
-    tagline:   'Hunt. Sabotage. Collapse.',
-    badge:     'ASYMMETRIC PVP',
+    tagline:   'Learn to recognize when someone is attacking your money.',
+    badge:     'HEAD TO HEAD',
     accent:    '#FF3030',
     accentRgb: 'rgba(255,48,48,',
     bg:        'from-[#0D0000] via-[#120000] to-[#080000]',
     borderCss: '#FF303055',
     glow:      'shadow-[0_0_80px_rgba(255,48,48,0.3)]',
     btnBg:     'bg-[#FF3030] hover:bg-[#FF5555] text-white',
-    desc:      'One player builds. One player is the Hater. Deploy sabotage cards to detonate their income streams in real time.',
+    desc:      'The market isn\'t neutral — and neither are the people around you. Bad partners, bad deals, competitors who want you to fail. PREDATOR puts a live adversary behind your worst financial nightmares and trains you to smell the attack before it lands, absorb the hit, and keep building while they\'re still swinging.',
     features: [
-      { icon: '🗡️',  name: 'Asymmetric Roles',  detail: 'Builder races to profits; Hater deploys sabotage cards every 24 ticks to wreck their run' },
-      { icon: '💣',  name: 'Sabotage Deck',      detail: 'Freeze income, trigger fake taxes, corrupt shields — 40+ sabotage mechanics live in rotation' },
-      { icon: '🛡️',  name: 'Counterplay Window', detail: 'Builders get a 6-tick window to detect and block incoming attacks before impact' },
-      { icon: '⚡',  name: 'Pulse Lanes',        detail: 'Ghost pulse attacks land every 75 ticks with escalating damage the longer the Builder survives' },
+      { icon: '⚔️', name: 'See The Attack Before It Lands',        detail: 'Your opponent fires real financial disruptions at you in real time. You have seconds to read it and counter. That reaction speed? It follows you into every real negotiation you\'ll ever have.' },
+      { icon: '💣', name: 'Your Income Stream Is a Target',         detail: 'Frozen revenue. Surprise losses. Collapsed shields. The most dangerous vulnerability in real life — and in this game — is always the income you took for granted.' },
+      { icon: '🛡️', name: 'Defense Is Half the Game',              detail: 'Most people only think about making money. The wealthy think about protecting it. PREDATOR forces you to master both at the same time under fire.' },
+      { icon: '📈', name: 'Success Attracts Resistance',            detail: 'The longer you survive, the harder the attacks get. That\'s not a difficulty curve — that\'s what scaling a real business actually feels like.' },
     ],
-    cta: 'ENTER THE WAR',
-    flavor: '"The market has enemies. In this mode, one of them is sitting across from you."',
+    cta: 'BECOME UNBREAKABLE',
+    flavor: '"The wealthy aren\'t just good at making money. They\'re impossible to tear down."',
   },
   'co-op': {
     id:        'co-op' as RunMode,
     label:     'SYNDICATE',
-    tagline:   'Build Together. Fall Together.',
-    badge:     'CO-OP',
+    tagline:   'Your financial circle determines your financial ceiling.',
+    badge:     'TEAM UP',
     accent:    '#00E5C8',
     accentRgb: 'rgba(0,229,200,',
     bg:        'from-[#000D0B] via-[#001210] to-[#000908]',
     borderCss: '#00E5C855',
     glow:      'shadow-[0_0_80px_rgba(0,229,200,0.2)]',
     btnBg:     'bg-[#00E5C8] hover:bg-[#33EDD5] text-black',
-    desc:      'Two players, one shared clock. Pool income streams, share shields, and bail each other out before bankruptcy takes you both.',
+    desc:      'Your net worth reflects the 5 people closest to you — whether you like it or not. SYNDICATE makes that literal. You and your partner share one economy. Their blind spots drain your account. Your strengths are their lifeline. This is the most honest 12-minute simulation of a real financial partnership you\'ll ever experience.',
     features: [
-      { icon: '🤝',  name: 'Shared Economy',     detail: 'Income and expense events affect both players — one bad trade can bankrupt the whole syndicate' },
-      { icon: '🆘',  name: 'Rescue Windows',      detail: 'When your partner enters distress, you have a 12-tick window to send emergency capital or lose them' },
-      { icon: '📜',  name: 'Aid Contracts',       detail: 'Negotiate real-time income sharing, debt transfers, and shield lending mid-run' },
-      { icon: '🏆',  name: 'Syndicate XP',        detail: 'Season dominion points are doubled but only awarded if both players survive the full 720 ticks' },
+      { icon: '🤝', name: 'You\'re Only As Strong As Who You Build With', detail: 'One bad decision by your partner hits your income too. This is not a metaphor — it\'s a direct simulation of every business relationship you\'ll ever enter.' },
+      { icon: '🆘', name: 'Real Loyalty Gets Tested Under Pressure',      detail: 'When your partner starts burning, you have a narrow window to send capital and pull them back — or protect yourself and let them fall. Some partnerships end right here.' },
+      { icon: '📜', name: 'Negotiate Like Your Future Depends On It',     detail: 'Split income, transfer debt, lend protection. The deals you broker mid-run are exactly how real wealth-building partnerships get tested. Learn the skill before real money is on the table.' },
+      { icon: '🏆', name: 'Both Survive or Neither Wins',                 detail: 'You only earn rewards if both players make it. There is no individual glory in SYNDICATE. Shared success — or shared failure. Just like the real thing.' },
     ],
-    cta: 'FORM SYNDICATE',
-    flavor: '"Two incomes. Two risk profiles. One bankruptcy screen."',
+    cta: 'BUILD THE ALLIANCE',
+    flavor: '"The person you choose to build with will either multiply your wealth — or quietly drain it."',
   },
   ghost: {
     id:        'ghost' as RunMode,
     label:     'PHANTOM',
-    tagline:   'Race the Ghost of a Champion',
-    badge:     'GHOST MODE',
+    tagline:   'Find out exactly where your thinking falls short.',
+    badge:     'CHASE A LEGEND',
     accent:    '#B57BFF',
     accentRgb: 'rgba(181,123,255,',
     bg:        'from-[#08000D] via-[#0A0012] to-[#060009]',
     borderCss: '#B57BFF55',
     glow:      'shadow-[0_0_80px_rgba(181,123,255,0.25)]',
     btnBg:     'bg-[#B57BFF] hover:bg-[#C99AFF] text-black',
-    desc:      'Your decisions run in parallel with a ghost replay of a verified champion run. Same seed. Same market. Different choices.',
+    desc:      'There\'s a version of you that made all the right calls. PHANTOM lets you race a verified champion who played the exact same market you\'re about to face — same starting position, same events, same forces working against you. Every point of separation in the score is a decision where your thinking diverged from elite thinking. Most players learn more in one PHANTOM run than in ten normal runs.',
     features: [
-      { icon: '👻',  name: 'Ghost Replay',        detail: 'A verified champion\'s run is mirrored on your board — you see their net worth at every tick' },
-      { icon: '🔑',  name: 'Deterministic Seeds', detail: 'Same market sequence. Same card draw order. The only variable is you.' },
-      { icon: '📊',  name: 'Live Delta Tracker',  detail: 'At every decision point, see exactly how far ahead or behind the ghost your net worth is' },
-      { icon: '🏅',  name: 'Proof Badge',         detail: 'Beat the ghost and earn a cryptographic proof badge tied to your run seed — impossible to fake' },
+      { icon: '👻', name: 'Watch How a Champion Thinks, Live',       detail: 'A proven winner\'s run plays beside yours, tick by tick. You see every response they made to the same events you\'re facing right now. Study the pattern.' },
+      { icon: '🎯', name: 'The Market Is Identical. The Gap Is You.', detail: 'Same starting cash. Same shocks. Same market forces. The only variable is the quality of your decisions. This mode shows you exactly what those decisions cost.' },
+      { icon: '📊', name: 'Track Your Thinking Gaps in Real Time',    detail: 'A live score delta follows you through every major moment. Ahead of the ghost, you\'re thinking like a winner. Behind it, you just found something to fix.' },
+      { icon: '🏅', name: 'Beat a Champion and Prove It Forever',     detail: 'Outperform the ghost and earn a permanent, verified proof badge tied to your exact run. Unfakeable. Unbeatable. You either did it or you didn\'t.' },
     ],
-    cta: 'CHASE THE GHOST',
-    flavor: '"The champion already ran this exact market. Let\'s see if you do better."',
+    cta: 'FACE YOUR GHOST',
+    flavor: '"You don\'t rise to your goals. You fall to the level of your decisions. This mode shows you exactly where that level is."',
   },
 };
 
@@ -219,7 +219,7 @@ export default function LobbyScreen({ onStart }: LobbyScreenProps) {
             className="inline-block text-xs tracking-[0.4em] uppercase mb-4 px-3 py-1 rounded-full border"
             style={{ color: mode.accent, borderColor: mode.borderCss, background: mode.accentRgb + '0.08)' }}
           >
-            Financial Roguelike · 300 Mechanics · 12 Minutes
+            Master This Game. Master Real Money.
           </div>
           <h1
             className="text-[clamp(3rem,10vw,7rem)] font-black leading-none tracking-tighter text-white"
@@ -237,7 +237,7 @@ export default function LobbyScreen({ onStart }: LobbyScreenProps) {
             </span>
           </h1>
           <p className="mt-3 text-[#888] text-sm tracking-widest uppercase">
-            Make your passive income outlast your expenses — or go bankrupt trying
+            Most people never figure out why their money disappears. You're about to.
           </p>
         </header>
 
@@ -353,7 +353,7 @@ export default function LobbyScreen({ onStart }: LobbyScreenProps) {
                 {mode.cta}
               </button>
               <div className="text-[#555] text-xs text-center">
-                720 ticks · seeded deterministic run · permadeath enabled
+                No saving. No pausing. No excuses. Just like real money.
               </div>
             </div>
           </div>
@@ -366,11 +366,11 @@ export default function LobbyScreen({ onStart }: LobbyScreenProps) {
             style={{ borderColor: '#222', background: 'rgba(0,0,0,0.4)' }}
           >
             {[
-              ['300', 'Live Mechanics'],
-              ['150', 'ML/AI Companions'],
-              ['12', 'Minute Runs'],
-              ['4', 'Market Regimes'],
-              ['∞', 'Unique Seeds'],
+              ['12 Min',    'To change how you see money forever'],
+              ['No Resets', 'Your decisions have permanent weight'],
+              ['Real Rules','Same wealth principles as real life'],
+              ['No Excuses','The market is the same for everyone'],
+              ['Elite',     'What you become when you master it'],
             ].map(([val, label]) => (
               <div key={label} className="text-center">
                 <div
