@@ -18,6 +18,7 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import type { ChatChannel, ChatMessage, GameChatContext } from './chatTypes';
 import { useChatEngine } from './useChatEngine';
+import type { SabotageEvent } from './useChatEngine';
 
 // ─── Message renderer ─────────────────────────────────────────────────────────
 
@@ -124,15 +125,19 @@ function Tab({
 // ─── ChatPanel ────────────────────────────────────────────────────────────────
 
 interface ChatPanelProps {
-  gameCtx: GameChatContext;
+  gameCtx:      GameChatContext;
+  /** Wire App.tsx handleSabotage here — engine fires it on hater:sabotage events */
+  onSabotage?:  (event: SabotageEvent) => void;
+  /** Optional access token for live socket.io connection */
+  accessToken?: string | null;
 }
 
-export function ChatPanel({ gameCtx }: ChatPanelProps) {
+export function ChatPanel({ gameCtx, onSabotage, accessToken }: ChatPanelProps) {
   const {
     messages, activeTab, switchTab,
     chatOpen, toggleChat, sendMessage,
     unread, totalUnread,
-  } = useChatEngine(gameCtx);
+  } = useChatEngine(gameCtx, accessToken, onSabotage);
 
   const [draft, setDraft]       = useState('');
   const [flashNew, setFlashNew] = useState(false);

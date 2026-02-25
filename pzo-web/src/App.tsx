@@ -796,6 +796,14 @@ export default function App() {
 
   const topMechanics = useMemo(() => [...catalog].sort((a, b) => (runtime[b.id]?.activations ?? 0) - (runtime[a.id]?.activations ?? 0)).slice(0, 5), [catalog, runtime]);
 
+  // ── Chat context — passed to ChatPanel so useChatEngine can react to game state ──
+  const gameCtx = useMemo(() => ({
+    tick, cash, regime, netWorth, income, expenses, events,
+  }), [tick, cash, regime, netWorth, income, expenses, events]);
+
+  // access token may not exist on AuthUser; cast to any to safely read if present
+  const userAccessToken: string | null = (auth.user as any)?.accessToken ?? null;
+
   const startRun = useCallback(() => {
     const seed = randomSeed(); seedRef.current = seed; rngRef.current = mulberry32(seed);
     setCash(STARTING_CASH); setIncome(STARTING_INCOME); setExpenses(STARTING_EXPENSES);
@@ -893,7 +901,8 @@ export default function App() {
 
   // ── Run ────────────────────────────────────────────────────────────────
   return (
-    <MechanicsBridgeProvider validIds={validMechanicIds} runtime={runtime} onTouchMechanic={touchMechanic} onTouchFamily={touchFamily} snapshot={bridgeSnapshot}>
+    <>
+      <MechanicsBridgeProvider validIds={validMechanicIds} runtime={runtime} onTouchMechanic={touchMechanic} onTouchFamily={touchFamily} snapshot={bridgeSnapshot}>
       {runMode === 'solo' && (
         <EmpireGameScreen
           cash={cash} income={income} expenses={expenses} netWorth={netWorth}
@@ -945,5 +954,12 @@ export default function App() {
         />
       )}
     </MechanicsBridgeProvider>
+      {/* ── ChatPanel — fixed overlay, present on all 4 game modes ── */}
+      <ChatPanel
+        gameCtx={gameCtx}
+        onSabotage={handleSabotage}
+        accessToken={userAccessToken}
+      />
+    </>
   );
 }
