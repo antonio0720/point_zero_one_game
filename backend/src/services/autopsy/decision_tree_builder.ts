@@ -52,6 +52,11 @@ export class RunEventLog {
 export abstract class DecisionTreeNode {
   protected children: DecisionTreeForkNode[] = [];
 
+  /** Public accessor for children so other instances can read the list. */
+  public getChildren(): DecisionTreeForkNode[] {
+    return this.children;
+  }
+
   /** The outcome delta computed from children (set during computeOutcomeDeltas pass). */
   public outcomeDelta: number = 0;
 
@@ -98,7 +103,7 @@ export class RootNode extends DecisionTreeNode {
    * For leaf forks (no children), delta = outcome itself (relative to siblings).
    */
   public computeOutcomeDeltas(): void {
-    this.computeSubtreeDeltas(this.children);
+    this.computeSubtreeDeltas(this.getChildren());
   }
 
   private computeSubtreeDeltas(forks: DecisionTreeForkNode[]): void {
@@ -106,7 +111,7 @@ export class RootNode extends DecisionTreeNode {
 
     // Recurse depth-first
     for (const fork of forks) {
-      this.computeSubtreeDeltas(fork.children);
+      this.computeSubtreeDeltas(fork.getChildren());
     }
 
     // Compute sibling-relative deltas at this level
@@ -114,13 +119,14 @@ export class RootNode extends DecisionTreeNode {
     const mean     = outcomes.reduce((s, v) => s + v, 0) / outcomes.length;
 
     for (const fork of forks) {
-      const childMean = fork.children.length
-        ? fork.children.reduce((s, c) => s + c.runState.outcome, 0) / fork.children.length
+      const childList = fork.getChildren();
+      const childMean = childList.length
+        ? childList.reduce((s, c) => s + c.runState.outcome, 0) / childList.length
         : fork.runState.outcome;
 
       // Delta = deviation from sibling mean, amplified by child divergence
       fork.outcomeDelta = Math.abs(fork.runState.outcome - mean)
-        + (fork.children.length
+        + (childList.length
             ? Math.abs(fork.runState.outcome - childMean)
             : 0);
     }
