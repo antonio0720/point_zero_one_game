@@ -1,3 +1,6 @@
+///Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/pzo_complete_automation/frontend/web/components/onboarding/practice-sandbox-8.tsx
+
+
 import React, { useState } from 'react';
 import { Box, Button, Heading, Text } from '@chakra-ui/core';
 import CodeEditor from './CodeEditor';

@@ -34,6 +34,12 @@ import type { AidContract }     from './components/AidContractComposer';
 import { ReplayTimeline }       from './components/ReplayTimeline';
 import type { ReplayEvent }     from './components/ReplayTimeline';
 
+// ─── Mode Game Screens ────────────────────────────────────────────────────────
+import EmpireGameScreen    from './components/EmpireGameScreen';
+import PredatorGameScreen  from './components/PredatorGameScreen';
+import SyndicateGameScreen from './components/SyndicateGameScreen';
+import PhantomGameScreen   from './components/PhantomGameScreen';
+
 const STARTING_CASH     = 28_000;
 const STARTING_INCOME   = 2_100;
 const STARTING_EXPENSES = 4_800;
@@ -842,153 +848,101 @@ export default function App() {
     );
   }
 
+  // ── Run — shared handlers ─────────────────────────────────────────────
+  const handleMitigate = useCallback((id: string) => {
+    if (cash >= 2_000) { setCash((c) => c - 2_000); log(`🛡️ Threat mitigated (${id}) — -$2K`); emitTelemetry('threat.mitigated', { threatId: id, cost: 2000 }); touchFamily('anti_cheat', 0.18); }
+    else log(`❌ Cannot mitigate ${id} — insufficient cash`);
+  }, [cash, setCash, log, emitTelemetry, touchFamily]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleRescueContribute = useCallback(() => {
+    if (!rescueWindow) return;
+    const contrib = Math.min(cash * 0.1, rescueWindow.contributionRequired - rescueWindow.totalContributed);
+    const rounded = Math.round(contrib);
+    setCash((c) => Math.max(0, c - rounded));
+    setRescueWindow((rw) => rw ? { ...rw, totalContributed: rw.totalContributed + rounded } : null);
+    log(`🤝 Contributed ${fmtMoney(rounded)} to rescue`);
+    emitTelemetry('alliance.rescue_contribution', { amount: rounded });
+    touchFamily('social', 0.20);
+  }, [cash, rescueWindow, setCash, setRescueWindow, log, emitTelemetry, touchFamily]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleSabotageCounterplay = useCallback((id: string) => {
+    const sab = activeSabotages.find((s) => s.id === id);
+    if (!sab) return;
+    setPendingCounterplay({
+      eventLabel: sab.label, eventDescription: `Active sabotage from ${sab.sourceDisplayName}.`, eventEmoji: '💣', ticksToRespond: 6,
+      actions: [
+        { id: 'counter-legal',  label: 'Legal Countermeasure', description: 'File a formal challenge.',   cost: 5_000, successChance: 0.80, emoji: '⚖️', available: cash >= 5_000 },
+        { id: 'counter-shield', label: 'Shield Deploy',        description: 'Burn a shield to nullify.', cost: 0,     successChance: shields > 0 ? 1.0 : 0.0, emoji: '🛡️', available: shields > 0 },
+      ],
+      onChoose: (actionId: string) => {
+        setActiveSabotages((prev) => prev.filter((s) => s.id !== id));
+        if (actionId === 'counter-shield' && shields > 0) setShields((s) => s - 1);
+        else if (actionId === 'counter-legal') setCash((c) => Math.max(0, c - 5_000));
+        log(`✅ Sabotage countered: ${sab.label}`);
+        emitTelemetry('sabotage.countered', { sabotageId: id, actionId });
+        touchFamily('anti_cheat', 0.22);
+        setPendingCounterplay(null);
+      },
+      onIgnore: () => setPendingCounterplay(null),
+    });
+  }, [activeSabotages, cash, shields, log, emitTelemetry, touchFamily]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Run — mode screen router ──────────────────────────────────────────
+  const commonEvents = useMemo(() => events.slice(-30), [events]);
+
   // ── Run ────────────────────────────────────────────────────────────────
   return (
     <MechanicsBridgeProvider validIds={validMechanicIds} runtime={runtime} onTouchMechanic={touchMechanic} onTouchFamily={touchFamily} snapshot={bridgeSnapshot}>
-      <div className="min-h-screen bg-zinc-950 flex flex-col text-white">
-        <HUD cash={cash} income={income} expenses={expenses} tick={tick} shields={shields} netWorth={netWorth} equityHistory={equityHistory} regime={regime} intelligence={intelligence} season={season} runMode={runMode} activeMechanics={activeMechanics} telemetryCount={telemetry.length} freezeTicks={freezeTicks} haterSabotages={haterSabotageCount} />
-
-        <div className="flex-1 overflow-auto p-4 space-y-4">
-
-          {/* BattleHUD — PvP only */}
-          {runMode === 'asymmetric-pvp' && (
-            <BattleHUD phase={battlePhase} participants={battleParticipants} ticksRemaining={Math.max(0, RUN_TICKS - tick)} roundNumber={battleRound} totalRounds={12} localScore={battleScore.local} opponentScore={battleScore.opponent} onForfeit={() => { log('🏳️ Match forfeited.'); setScreen('result'); }} />
-          )}
-
-          {/* Main grid */}
-          <div className="grid grid-cols-1 2xl:grid-cols-[1.2fr_0.8fr] gap-4">
-            <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-3">
-              <div className="flex items-center justify-between mb-2">
-                <div className="flex items-center gap-3"><div className="font-bold text-sm">Playable Hand</div><ShieldIcons count={shields} consuming={shieldConsuming} /></div>
-                <div className="text-xs text-zinc-500">Seed {seedRef.current || '—'} · Tick {tick}/{RUN_TICKS}</div>
-              </div>
-              <CardHand cards={hand} playerEnergy={cash} onPlayCard={handlePlayCard} onCardHover={() => {}} />
-            </div>
-
-            <div className="space-y-3">
-              {/* Intelligence snapshot */}
-              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
-                <div className="font-bold text-sm mb-3">Run Intelligence / Season Snapshot</div>
-                <div className="grid grid-cols-2 gap-2 text-xs">
-                  {[['Alpha', fmtPct01(intelligence.alpha)], ['Risk', fmtPct01(intelligence.risk)], ['Volatility', fmtPct01(intelligence.volatility)], ['Anti-Cheat', fmtPct01(intelligence.antiCheat)], ['Personalization', fmtPct01(intelligence.personalization)], ['Reward Fit', fmtPct01(intelligence.rewardFit)], ['Reco Power', fmtPct01(intelligence.recommendationPower)], ['Churn Risk', fmtPct01(intelligence.churnRisk)], ['Momentum', fmtPct01(intelligence.momentum)], ['XP', `${season.xp}`], ['Pass Tier', `T${season.passTier}`], ['Dominion', `${season.dominionControl}`], ['Node Pressure', `${season.nodePressure}`], ['Win Streak', `${season.winStreak}`], ['Rewards Pending', `${season.rewardsPending}`], ['Freeze', freezeTicks > 0 ? `${freezeTicks} ticks` : '—']].map(([label, value]) => (
-                    <div key={label} className="bg-zinc-950 border border-zinc-800 rounded p-2"><div className="text-zinc-500 uppercase tracking-wide">{label}</div><div className="font-mono text-zinc-100">{value}</div></div>
-                  ))}
-                </div>
-                <div className="mt-4 border-t border-zinc-800 pt-3">
-                  <div className="text-xs font-bold mb-2">Top Activated Mechanics</div>
-                  <div className="space-y-1">
-                    {topMechanics.map((m) => { const r = runtime[m.id]; return <div key={m.id} className="text-xs bg-zinc-950 border border-zinc-800 rounded p-2 flex items-center gap-2"><span className="font-mono text-zinc-300">{m.id}</span><span className="text-zinc-400 truncate">{m.title}</span><span className="ml-auto font-mono text-emerald-300">{r?.activations ?? 0}</span></div>; })}
-                  </div>
-                </div>
-              </div>
-
-              {/* ThreatRadarPanel */}
-              <ThreatRadarPanel threats={threats} tick={tick} onMitigate={(id) => {
-                if (cash >= 2_000) { setCash((c) => c - 2_000); log(`🛡️ Threat mitigated (${id}) — -$2K`); emitTelemetry('threat.mitigated', { threatId: id, cost: 2000 }); touchFamily('anti_cheat', 0.18); }
-                else log(`❌ Cannot mitigate ${id} — insufficient cash`);
-              }} />
-            </div>
-          </div>
-
-          {/* SabotageImpactPanel */}
-          {activeSabotages.length > 0 && (
-            <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-3">
-              <SabotageImpactPanel activeSabotages={activeSabotages} tick={tick}
-                onCounterplay={(id) => {
-                  const sab = activeSabotages.find((s) => s.id === id);
-                  if (!sab) return;
-                  setPendingCounterplay({
-                    eventLabel: sab.label, eventDescription: `Active sabotage from ${sab.sourceDisplayName}.`, eventEmoji: '💣', ticksToRespond: 6,
-                    actions: [
-                      { id: 'counter-legal', label: 'Legal Countermeasure', description: 'File a formal challenge.', cost: 5_000, successChance: 0.80, emoji: '⚖️', available: cash >= 5_000 },
-                      { id: 'counter-shield', label: 'Shield Deploy', description: 'Burn a shield to nullify immediately.', cost: 0, successChance: shields > 0 ? 1.0 : 0.0, emoji: '🛡️', available: shields > 0 },
-                    ],
-                    onChoose: (actionId) => { setActiveSabotages((prev) => prev.filter((s) => s.id !== id)); if (actionId === 'counter-shield' && shields > 0) setShields((s) => s - 1); else if (actionId === 'counter-legal') setCash((c) => Math.max(0, c - 5_000)); log(`✅ Sabotage countered: ${sab.label}`); emitTelemetry('sabotage.countered', { sabotageId: id, actionId }); touchFamily('anti_cheat', 0.22); setPendingCounterplay(null); },
-                    onIgnore: () => setPendingCounterplay(null),
-                  });
-                }}
-              />
-            </div>
-          )}
-
-          {/* Alliance controls */}
-          {runMode !== 'solo' && (
-            <div className="flex items-center gap-3">
-              <button onClick={() => setShowAidComposer((v) => !v)} className="px-3 py-2 bg-indigo-900 hover:bg-indigo-800 border border-indigo-700 text-indigo-300 text-xs font-mono rounded transition-colors">
-                {showAidComposer ? 'CLOSE AID COMPOSER' : '📤 SEND ALLIANCE AID'}
-              </button>
-              {rescueWindow && <span className="text-xs font-mono text-amber-400 animate-pulse">🚨 RESCUE WINDOW ACTIVE</span>}
-            </div>
-          )}
-
-          {showAidComposer && runMode !== 'solo' && (
-            <AidContractComposer allianceMembers={allianceMembers} senderCash={cash} maxAidPct={0.25} onSubmit={handleAidSubmit} onCancel={() => setShowAidComposer(false)} />
-          )}
-
-          <GameBoard equityHistory={equityHistory} cash={cash} netWorth={netWorth} income={income} expenses={expenses} regime={regime} intelligence={intelligence} tick={tick} totalTicks={RUN_TICKS} freezeTicks={freezeTicks} />
-
-          <MechanicsPanel catalog={catalog} runtime={runtime} filter={mechanicsFilter} setFilter={setMechanicsFilter} search={mechanicsSearch} setSearch={setMechanicsSearch} selectedId={selectedMechanicId} setSelectedId={setSelectedMechanicId} />
-
-          <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
-            <div className="font-bold text-sm mb-2">Recent TelemetryEnvelopeV2 Events</div>
-            <div className="max-h-40 overflow-auto space-y-1">
-              {[...telemetry].slice(-20).reverse().map((ev, i) => (
-                <div key={`${ev.tick}-${ev.type}-${i}`} className="text-xs font-mono bg-zinc-950 border border-zinc-800 rounded p-2">
-                  <span className="text-zinc-500">T{ev.tick}</span>{' '}<span className="text-cyan-300">{ev.type}</span>{' '}<span className="text-zinc-400">{JSON.stringify(ev.payload)}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        <LogFeed events={events} />
-
-        {/* Sovereign Chat */}
-        <ChatPanel {...({ gameCtx: { tick, cash, regime, events, netWorth, income, expenses }, accessToken: auth.accessToken, onSabotage: handleSabotage } as any)} />
-
-        {/* MomentFlash */}
-        <div className="fixed bottom-36 right-4 w-80 z-50 pointer-events-auto">
-          <MomentFlash events={events} tick={tick} maxVisible={3} />
-        </div>
-
-        {/* CounterplayModal */}
-        {pendingCounterplay && (
-          <CounterplayModal
-            eventLabel={pendingCounterplay.eventLabel}
-            eventDescription={pendingCounterplay.eventDescription}
-            eventEmoji={pendingCounterplay.eventEmoji}
-            ticksToRespond={pendingCounterplay.ticksToRespond}
-            actions={pendingCounterplay.actions}
-            cash={cash}
-            onChoose={(actionId) => { pendingCounterplay.onChoose(actionId); }}
-            onIgnore={() => { pendingCounterplay.onIgnore(); }}
-          />
-        )}
-
-        {/* RescueWindowBanner */}
-        {rescueWindow && runMode !== 'solo' && (
-          <div className="fixed bottom-36 left-4 w-80 z-50">
-            <RescueWindowBanner
-              rescueeDisplayName={rescueWindow.rescueeDisplayName}
-              rescueeNetWorth={rescueWindow.rescueeNetWorth}
-              ticksRemaining={rescueWindow.ticksRemaining}
-              allianceName={rescueWindow.allianceName}
-              contributionRequired={rescueWindow.contributionRequired}
-              totalContributed={rescueWindow.totalContributed}
-              onContribute={() => {
-                const contrib = Math.min(cash * 0.1, rescueWindow.contributionRequired - rescueWindow.totalContributed);
-                const rounded = Math.round(contrib);
-                setCash((c) => Math.max(0, c - rounded));
-                setRescueWindow((rw) => rw ? { ...rw, totalContributed: rw.totalContributed + rounded } : null);
-                log(`🤝 Contributed ${fmtMoney(rounded)} to rescue of ${rescueWindow.rescueeDisplayName}`);
-                emitTelemetry('alliance.rescue_contribution', { amount: rounded, rescuee: rescueWindow.rescueeDisplayName });
-                touchFamily('social', 0.20);
-              }}
-              onDismiss={() => setRescueWindow(null)}
-            />
-          </div>
-        )}
-      </div>
+      {runMode === 'solo' && (
+        <EmpireGameScreen
+          cash={cash} income={income} expenses={expenses} netWorth={netWorth}
+          shields={shields} shieldConsuming={shieldConsuming}
+          tick={tick} totalTicks={RUN_TICKS} freezeTicks={freezeTicks}
+          regime={regime} intelligence={intelligence} equityHistory={equityHistory}
+          hand={hand} onPlayCard={handlePlayCard}
+          threats={threats} onMitigate={handleMitigate}
+          events={commonEvents} modeState={gameModeHook.modeState}
+        />
+      )}
+      {runMode === 'asymmetric-pvp' && (
+        <PredatorGameScreen
+          cash={cash} income={income} expenses={expenses} netWorth={netWorth}
+          shields={shields} shieldConsuming={shieldConsuming}
+          tick={tick} totalTicks={RUN_TICKS} freezeTicks={freezeTicks}
+          regime={regime} intelligence={intelligence} equityHistory={equityHistory}
+          events={commonEvents} modeState={gameModeHook.modeState}
+          battlePhase={battlePhase} battleParticipants={battleParticipants}
+          battleScore={battleScore} battleRound={battleRound}
+          activeSabotages={activeSabotages}
+          pendingCounterplay={pendingCounterplay}
+          onForfeit={() => { log('🏳️ Match forfeited.'); setScreen('result'); }}
+          onCounterplay={handleSabotageCounterplay}
+        />
+      )}
+      {runMode === 'co-op' && (
+        <SyndicateGameScreen
+          cash={cash} income={income} expenses={expenses} netWorth={netWorth}
+          shields={shields} shieldConsuming={shieldConsuming}
+          tick={tick} totalTicks={RUN_TICKS} freezeTicks={freezeTicks}
+          regime={regime} intelligence={intelligence} equityHistory={equityHistory}
+          events={commonEvents} modeState={gameModeHook.modeState}
+          rescueWindow={rescueWindow}
+          allianceMembers={allianceMembers}
+          onAidSubmit={handleAidSubmit}
+          onRescueContribute={handleRescueContribute}
+          onRescueDismiss={() => setRescueWindow(null)}
+        />
+      )}
+      {runMode === 'ghost' && (
+        <PhantomGameScreen
+          cash={cash} income={income} expenses={expenses} netWorth={netWorth}
+          shields={shields}
+          tick={tick} totalTicks={RUN_TICKS} freezeTicks={freezeTicks}
+          regime={regime} intelligence={intelligence} equityHistory={equityHistory}
+          events={commonEvents} replayEvents={replayEvents}
+          modeState={gameModeHook.modeState} seed={seedRef.current}
+        />
+      )}
     </MechanicsBridgeProvider>
   );
 }

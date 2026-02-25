@@ -1,3 +1,5 @@
+///Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/pzo_engine/src/integrity/signed-actions.ts
+
 // tslint:disable:no-any strict-type-checking no-object-literal-keys-are-number
 
 import { Action } from '../action';
