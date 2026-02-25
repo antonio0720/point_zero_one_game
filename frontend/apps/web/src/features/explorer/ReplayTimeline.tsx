@@ -1,5 +1,6 @@
 /**
  * ReplayTimeline component for Point Zero One Digital's financial roguelike game.
+ * /Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/frontend/apps/web/src/features/explorer/ReplayTimeline.tsx
  */
 
 import React, { useEffect, useState } from 'react';

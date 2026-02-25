@@ -1,5 +1,6 @@
 /**
  * Leaderboard Tabs - Casual and Verified
+ * /Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/frontend/apps/web/app/(app)/leaderboards/page.tsx
  */
 
 import React, { useState } from 'react';

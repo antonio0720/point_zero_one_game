@@ -1,3 +1,5 @@
+///Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/pzo_complete_automation/backend/game-engine/__tests__/core-rules-3.test.ts
+
 import { createTestGame, GameState } from './test-utilities';
 import { Engine } from '../../src/core-rules-3/Engine';
 import { Player } from '../../src/Player';
