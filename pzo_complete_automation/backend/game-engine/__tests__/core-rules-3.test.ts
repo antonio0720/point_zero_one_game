@@ -11,9 +11,10 @@
  */
 
 import { createTestGame, GameState, applyCard, advanceTurn, serializeState } from './test-utilities';
-import { Engine } from '../../src/core-rules-3/Engine';
-import { Player } from '../../src/Player';
-import { Card } from '../../src/Card';
+import { Engine } from '../src/core-rules-3/Engine';
+import { Player } from '../src/Player';
+import { Card } from '../src/Card';
+import { describe, it, expect, beforeEach } from '@jest/globals';
 
 // ── Seed constants (do NOT change — determinism depends on these) ─────────────
 const SEED_BASIC      = 42;

@@ -211,7 +211,7 @@ export class ReferralService {
         successfulInvites: newInvites,
         lastCreditedAt:    new Date(),
         lastCreditedTo:    newPlayerId,
-      });
+      } as any);
 
       // Resolve reward detail on tier upgrade
       let rewardDetail: string | null = null;

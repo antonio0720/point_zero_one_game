@@ -1,19 +1,11 @@
-/**
- * Leaderboard Tabs - Casual and Verified
- * /Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/frontend/apps/web/app/(app)/leaderboards/page.tsx
- *
- * Sovereign implementation:
- *   - Casual tab: always accessible, polls /api/leaderboards/casual
- *   - Verified tab: gate-checked via /api/leaderboards/verified/eligibility
- *     Locked with EligibilityChecklistPanel if player hasn't opted Sport Mode + completed 3 runs
- *   - Zero TODOs, full eligibility wiring, real LadderTable render
- */
+///Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/frontend/apps/web/app/(app)/leaderboards/page.tsx
 
 'use client';
 
 import React, { useCallback, useEffect, useState } from 'react';
 import axios from 'axios';
-import { LadderTable } from '../../../src/features/leaderboards/components/LadderTable';
+// FIX [TS2614]: LadderTable is a default export — use default import syntax
+import LadderTable from '../../../src/features/leaderboards/components/LadderTable';
 import { EligibilityChecklistPanel } from '../../../src/features/leaderboards/components/EligibilityChecklistPanel';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -24,17 +16,15 @@ interface LeaderboardEntry {
   score:  number;
   status: 'active' | 'inactive' | 'banned';
   rank:   number;
-  /** For verified ladder: proof_hash present = verified run */
   proofHash?: string;
 }
 
 interface EligibilityStatus {
-  eligible:        boolean;
-  totalRuns:       number;
-  sportModeOptIn:  boolean;
+  eligible:         boolean;
+  totalRuns:        number;
+  sportModeOptIn:   boolean;
   verifiedRunCount: number;
-  /** Human-readable failure reason if not eligible */
-  reason?: string;
+  reason?:          string;
 }
 
 type TabId = 'casual' | 'verified';
@@ -47,7 +37,7 @@ const POLL_INTERVAL_MS = 10_000;
 
 function useEligibility(playerId: string | null) {
   const [eligibility, setEligibility] = useState<EligibilityStatus | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading]         = useState(false);
 
   const check = useCallback(async () => {
     if (!playerId) return;
@@ -59,7 +49,6 @@ function useEligibility(playerId: string | null) {
       );
       setEligibility(data);
     } catch {
-      // Default to ineligible on error — fail closed
       setEligibility({
         eligible:         false,
         totalRuns:        0,
@@ -87,17 +76,14 @@ function useLadderEntries(tab: TabId, enabled: boolean) {
 
     let cancelled = false;
 
-    const fetch = async () => {
+    const fetchData = async () => {
       setFetching(true);
       try {
         const { data } = await axios.get<LeaderboardEntry[]>(
           `/api/leaderboards/${tab}`,
           { params: { limit: 100 } },
         );
-        if (!cancelled) {
-          setEntries(data);
-          setError(null);
-        }
+        if (!cancelled) { setEntries(data); setError(null); }
       } catch {
         if (!cancelled) setError('Failed to load leaderboard. Retrying…');
       } finally {
@@ -105,12 +91,9 @@ function useLadderEntries(tab: TabId, enabled: boolean) {
       }
     };
 
-    fetch();
-    const id = setInterval(fetch, POLL_INTERVAL_MS);
-    return () => {
-      cancelled = true;
-      clearInterval(id);
-    };
+    fetchData();
+    const id = setInterval(fetchData, POLL_INTERVAL_MS);
+    return () => { cancelled = true; clearInterval(id); };
   }, [tab, enabled]);
 
   return { entries, fetching, error };
@@ -121,23 +104,19 @@ function useLadderEntries(tab: TabId, enabled: boolean) {
 export default function LeaderboardsPage() {
   const [activeTab, setActiveTab] = useState<TabId>('casual');
 
-  // TODO(auth): replace with real session hook (useCurrentPlayer / useSession)
   const playerId = typeof window !== 'undefined'
     ? (localStorage.getItem('playerId') ?? null)
     : null;
 
   const { eligibility, checkEligibility, loading: eligLoading } = useEligibility(playerId);
 
-  // Fire eligibility check when user first clicks Verified tab
   const handleTabClick = (tab: TabId) => {
     setActiveTab(tab);
-    if (tab === 'verified' && eligibility === null) {
-      checkEligibility();
-    }
+    if (tab === 'verified' && eligibility === null) checkEligibility();
   };
 
-  const casualData  = useLadderEntries('casual',   activeTab === 'casual');
-  const verifiedData = useLadderEntries('verified', activeTab === 'verified' && eligibility?.eligible === true);
+  const casualData   = useLadderEntries('casual',   activeTab === 'casual');
+  const verifiedData = useLadderEntries('verified',  activeTab === 'verified' && eligibility?.eligible === true);
 
   const isVerifiedLocked = eligibility !== null && !eligibility.eligible;
 
@@ -152,33 +131,18 @@ export default function LeaderboardsPage() {
         role="tablist"
         style={{ display: 'flex', gap: 8, borderBottom: '2px solid #2a2a2a', marginBottom: '1.5rem' }}
       >
-        <TabButton
-          id="casual"
-          label="Casual"
-          active={activeTab === 'casual'}
-          locked={false}
-          onClick={() => handleTabClick('casual')}
-        />
-        <TabButton
-          id="verified"
-          label="Verified"
-          active={activeTab === 'verified'}
-          locked={isVerifiedLocked}
-          onClick={() => handleTabClick('verified')}
-        />
+        <TabButton id="casual"   label="Casual"   active={activeTab === 'casual'}   locked={false}            onClick={() => handleTabClick('casual')} />
+        <TabButton id="verified" label="Verified" active={activeTab === 'verified'} locked={isVerifiedLocked} onClick={() => handleTabClick('verified')} />
       </div>
 
       {/* Casual panel */}
       {activeTab === 'casual' && (
         <div role="tabpanel" aria-labelledby="tab-casual">
-          {casualData.error && (
-            <p style={{ color: '#f87171', marginBottom: 8 }}>{casualData.error}</p>
-          )}
-          {casualData.fetching && !casualData.entries.length ? (
-            <LoadingSkeleton />
-          ) : (
-            <LadderTable data={casualData.entries} />
-          )}
+          {casualData.error && <p style={{ color: '#f87171', marginBottom: 8 }}>{casualData.error}</p>}
+          {casualData.fetching && !casualData.entries.length
+            ? <LoadingSkeleton />
+            : <LadderTable data={casualData.entries} />
+          }
         </div>
       )}
 
@@ -195,16 +159,7 @@ export default function LeaderboardsPage() {
               <EligibilityChecklistPanel />
               <button
                 onClick={checkEligibility}
-                style={{
-                  marginTop: 16,
-                  padding: '8px 18px',
-                  background: '#2563eb',
-                  color: '#fff',
-                  borderRadius: 6,
-                  border: 'none',
-                  cursor: 'pointer',
-                  fontWeight: 600,
-                }}
+                style={{ marginTop: 16, padding: '8px 18px', background: '#2563eb', color: '#fff', borderRadius: 6, border: 'none', cursor: 'pointer', fontWeight: 600 }}
               >
                 Re-check eligibility
               </button>
@@ -213,14 +168,11 @@ export default function LeaderboardsPage() {
 
           {!eligLoading && eligibility?.eligible && (
             <>
-              {verifiedData.error && (
-                <p style={{ color: '#f87171', marginBottom: 8 }}>{verifiedData.error}</p>
-              )}
-              {verifiedData.fetching && !verifiedData.entries.length ? (
-                <LoadingSkeleton />
-              ) : (
-                <LadderTable data={verifiedData.entries} />
-              )}
+              {verifiedData.error && <p style={{ color: '#f87171', marginBottom: 8 }}>{verifiedData.error}</p>}
+              {verifiedData.fetching && !verifiedData.entries.length
+                ? <LoadingSkeleton />
+                : <LadderTable data={verifiedData.entries} />
+              }
             </>
           )}
         </div>
@@ -249,12 +201,9 @@ const TabButton: React.FC<TabButtonProps> = ({ id, label, active, locked, onClic
     style={{
       padding: '8px 20px',
       fontWeight: active ? 700 : 500,
-      borderBottom: active ? '2px solid #2563eb' : '2px solid transparent',
       background: 'none',
       border: 'none',
-      borderBottomStyle: 'solid',
-      borderBottomWidth: 2,
-      borderBottomColor: active ? '#2563eb' : 'transparent',
+      borderBottom: `2px solid ${active ? '#2563eb' : 'transparent'}`,
       cursor: 'pointer',
       opacity: locked ? 0.45 : 1,
       color: active ? '#2563eb' : '#9ca3af',
@@ -264,31 +213,14 @@ const TabButton: React.FC<TabButtonProps> = ({ id, label, active, locked, onClic
     }}
   >
     {label}
-    {locked && (
-      <span
-        title="Not eligible for Verified ladder"
-        style={{ fontSize: 12, opacity: 0.8 }}
-        aria-label="Locked"
-      >
-        🔒
-      </span>
-    )}
+    {locked && <span title="Not eligible for Verified ladder" style={{ fontSize: 12, opacity: 0.8 }} aria-label="Locked">🔒</span>}
   </button>
 );
 
 const LoadingSkeleton: React.FC = () => (
   <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
     {[...Array(8)].map((_, i) => (
-      <div
-        key={i}
-        style={{
-          height: 36,
-          borderRadius: 6,
-          background: '#1f1f1f',
-          animation: 'pulse 1.4s ease-in-out infinite',
-          opacity: 0.6 - i * 0.05,
-        }}
-      />
+      <div key={i} style={{ height: 36, borderRadius: 6, background: '#1f1f1f', animation: 'pulse 1.4s ease-in-out infinite', opacity: 0.6 - i * 0.05 }} />
     ))}
   </div>
 );

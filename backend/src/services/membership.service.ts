@@ -105,7 +105,7 @@ function entityToMembership(
   iab: Season0IAB,
   waitlistPos: number,
 ): FoundingMembership {
-  const iabBundle = iab.bundle as IdentityArtifactBundle;
+  const iabBundle = iab.bundle as unknown as IdentityArtifactBundle;
   return {
     playerId:         member.playerId,
     email:            member.email,
@@ -233,7 +233,7 @@ export class MembershipService {
       // ── Insert IAB ─────────────────────────────────────────────────────────
       const iabRow = mgr.create(Season0IAB, {
         playerId,
-        bundle: iabBundle,
+        bundle: iabBundle as unknown as Record<string, unknown>,
       });
       await mgr.save(Season0IAB, iabRow);
 
