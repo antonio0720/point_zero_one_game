@@ -1,3 +1,5 @@
+///Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/pzo-web/src/App.tsx
+
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import LobbyScreen from './components/LobbyScreen';
 import { useGameMode } from './hooks/useGameMode';
@@ -808,6 +810,47 @@ export default function App() {
     setEquityHistory([STARTING_CASH]); setSelectedMechanicId('M01'); setScreen('run');
   }, [catalog, deckPool]);
 
+  // ── Run — shared handlers (MUST be above all conditional returns — React Rules of Hooks) ──
+  const handleMitigate = useCallback((id: string) => {
+    if (cash >= 2_000) { setCash((c) => c - 2_000); log(`🛡️ Threat mitigated (${id}) — -$2K`); emitTelemetry('threat.mitigated', { threatId: id, cost: 2000 }); touchFamily('anti_cheat', 0.18); }
+    else log(`❌ Cannot mitigate ${id} — insufficient cash`);
+  }, [cash, setCash, log, emitTelemetry, touchFamily]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleRescueContribute = useCallback(() => {
+    if (!rescueWindow) return;
+    const contrib = Math.min(cash * 0.1, rescueWindow.contributionRequired - rescueWindow.totalContributed);
+    const rounded = Math.round(contrib);
+    setCash((c) => Math.max(0, c - rounded));
+    setRescueWindow((rw) => rw ? { ...rw, totalContributed: rw.totalContributed + rounded } : null);
+    log(`🤝 Contributed ${fmtMoney(rounded)} to rescue`);
+    emitTelemetry('alliance.rescue_contribution', { amount: rounded });
+    touchFamily('social', 0.20);
+  }, [cash, rescueWindow, setCash, setRescueWindow, log, emitTelemetry, touchFamily]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleSabotageCounterplay = useCallback((id: string) => {
+    const sab = activeSabotages.find((s) => s.id === id);
+    if (!sab) return;
+    setPendingCounterplay({
+      eventLabel: sab.label, eventDescription: `Active sabotage from ${sab.sourceDisplayName}.`, eventEmoji: '💣', ticksToRespond: 6,
+      actions: [
+        { id: 'counter-legal',  label: 'Legal Countermeasure', description: 'File a formal challenge.',   cost: 5_000, successChance: 0.80, emoji: '⚖️', available: cash >= 5_000 },
+        { id: 'counter-shield', label: 'Shield Deploy',        description: 'Burn a shield to nullify.', cost: 0,     successChance: shields > 0 ? 1.0 : 0.0, emoji: '🛡️', available: shields > 0 },
+      ],
+      onChoose: (actionId: string) => {
+        setActiveSabotages((prev) => prev.filter((s) => s.id !== id));
+        if (actionId === 'counter-shield' && shields > 0) setShields((s) => s - 1);
+        else if (actionId === 'counter-legal') setCash((c) => Math.max(0, c - 5_000));
+        log(`✅ Sabotage countered: ${sab.label}`);
+        emitTelemetry('sabotage.countered', { sabotageId: id, actionId });
+        touchFamily('anti_cheat', 0.22);
+        setPendingCounterplay(null);
+      },
+      onIgnore: () => setPendingCounterplay(null),
+    });
+  }, [activeSabotages, cash, shields, log, emitTelemetry, touchFamily]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const commonEvents = useMemo(() => events.slice(-30), [events]);
+
   // ── Auth gate ──────────────────────────────────────────────────────────
   if (!auth.isAuthed && !auth.loading && import.meta.env.VITE_DEV_BYPASS !== 'true') return <AuthGate auth={auth} onAuth={() => {}} />;
   if (auth.loading) return <div className="min-h-screen bg-zinc-950 text-white flex items-center justify-center"><div className="text-zinc-500 text-sm font-mono animate-pulse">LOADING SYSTEM...</div></div>;
@@ -847,48 +890,6 @@ export default function App() {
       </div>
     );
   }
-
-  // ── Run — shared handlers ─────────────────────────────────────────────
-  const handleMitigate = useCallback((id: string) => {
-    if (cash >= 2_000) { setCash((c) => c - 2_000); log(`🛡️ Threat mitigated (${id}) — -$2K`); emitTelemetry('threat.mitigated', { threatId: id, cost: 2000 }); touchFamily('anti_cheat', 0.18); }
-    else log(`❌ Cannot mitigate ${id} — insufficient cash`);
-  }, [cash, setCash, log, emitTelemetry, touchFamily]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const handleRescueContribute = useCallback(() => {
-    if (!rescueWindow) return;
-    const contrib = Math.min(cash * 0.1, rescueWindow.contributionRequired - rescueWindow.totalContributed);
-    const rounded = Math.round(contrib);
-    setCash((c) => Math.max(0, c - rounded));
-    setRescueWindow((rw) => rw ? { ...rw, totalContributed: rw.totalContributed + rounded } : null);
-    log(`🤝 Contributed ${fmtMoney(rounded)} to rescue`);
-    emitTelemetry('alliance.rescue_contribution', { amount: rounded });
-    touchFamily('social', 0.20);
-  }, [cash, rescueWindow, setCash, setRescueWindow, log, emitTelemetry, touchFamily]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const handleSabotageCounterplay = useCallback((id: string) => {
-    const sab = activeSabotages.find((s) => s.id === id);
-    if (!sab) return;
-    setPendingCounterplay({
-      eventLabel: sab.label, eventDescription: `Active sabotage from ${sab.sourceDisplayName}.`, eventEmoji: '💣', ticksToRespond: 6,
-      actions: [
-        { id: 'counter-legal',  label: 'Legal Countermeasure', description: 'File a formal challenge.',   cost: 5_000, successChance: 0.80, emoji: '⚖️', available: cash >= 5_000 },
-        { id: 'counter-shield', label: 'Shield Deploy',        description: 'Burn a shield to nullify.', cost: 0,     successChance: shields > 0 ? 1.0 : 0.0, emoji: '🛡️', available: shields > 0 },
-      ],
-      onChoose: (actionId: string) => {
-        setActiveSabotages((prev) => prev.filter((s) => s.id !== id));
-        if (actionId === 'counter-shield' && shields > 0) setShields((s) => s - 1);
-        else if (actionId === 'counter-legal') setCash((c) => Math.max(0, c - 5_000));
-        log(`✅ Sabotage countered: ${sab.label}`);
-        emitTelemetry('sabotage.countered', { sabotageId: id, actionId });
-        touchFamily('anti_cheat', 0.22);
-        setPendingCounterplay(null);
-      },
-      onIgnore: () => setPendingCounterplay(null),
-    });
-  }, [activeSabotages, cash, shields, log, emitTelemetry, touchFamily]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // ── Run — mode screen router ──────────────────────────────────────────
-  const commonEvents = useMemo(() => events.slice(-30), [events]);
 
   // ── Run ────────────────────────────────────────────────────────────────
   return (

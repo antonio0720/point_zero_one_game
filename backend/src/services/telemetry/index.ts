@@ -1,6 +1,7 @@
 /**
  * Telemetry Service for Point Zero One Digital's financial roguelike game.
  * This service is responsible for ingesting, batching, validating, persisting, and rolling up telemetry data.
+ * /Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/backend/src/services/telemetry/index.ts
  */
 
 declare namespace Telemetry {
