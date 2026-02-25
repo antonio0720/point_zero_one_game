@@ -1,6 +1,3 @@
-Here is the TypeScript file `backend/src/licensing_control_plane/exports/trust_packet_generator.ts` following the specified rules:
-
-```typescript
 /**
  * Trust Packet Generator
  */

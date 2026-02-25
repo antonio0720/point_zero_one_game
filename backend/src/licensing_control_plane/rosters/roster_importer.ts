@@ -108,13 +108,3 @@ async function main(args: string[]) {
 
 // Database schema for the rosters table
 const rostersTableSchema = `
-CREATE TABLE IF NOT EXISTS rosters (
-  id TEXT PRIMARY KEY,
-  name TEXT NOT NULL,
-  email TEXT,
-  role TEXT NOT NULL
-);
-`;
-```
-
-This TypeScript file includes a RosterImporter class that handles CSV and API roster ingestion, validation, deduplication, idempotent upserts, and PII minimization. It follows the specified rules for strict types, no 'any', exporting public symbols, and including JSDoc comments. The SQL schema for the rosters table is also provided.

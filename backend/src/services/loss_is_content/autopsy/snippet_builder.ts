@@ -1,6 +1,3 @@
-Here is the TypeScript file `backend/src/services/loss_is_content/autopsy/snippet_builder.ts` following the specified rules:
-
-```typescript
 /**
  * Build guided replay snippet timeline with captions 'here it crossed' and 'here recovery died'.
  */

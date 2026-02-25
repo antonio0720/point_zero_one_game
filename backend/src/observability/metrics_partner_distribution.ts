@@ -88,12 +88,3 @@ export class MetricsPartnerDistributionServiceFactory {
  * SQL schema for the metrics_partner_distributions table.
  */
 export const metricsPartnerDistributionsSchema = `
-CREATE TABLE IF NOT EXISTS ${MetricsPartnerDistributionServiceFactory.tableName} (
-  id INT PRIMARY KEY AUTO_INCREMENT,
-  metric_id INT NOT NULL,
-  partner_id INT NOT NULL,
-  value DECIMAL(10, 2) NOT NULL,
-  FOREIGN KEY (metric_id) REFERENCES metrics(id),
-  FOREIGN KEY (partner_id) REFERENCES partners(id)
-);
-`;

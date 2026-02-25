@@ -1,6 +1,3 @@
-Here is the TypeScript code for the `report_templates.ts` file as per your specifications:
-
-```typescript
 /**
  * Report Templates
  */
@@ -50,6 +47,4 @@ const INSTITUTION_REPORT_TEMPLATE_1: InstitutionReportTemplate = {
     // Additional metadata fields as needed...
   },
 };
-```
 
-This TypeScript code defines an `InstitutionReportTemplate` interface with properties for the template's id, name, schema, and metadata. The `JsonSchema` and `JsonProperty` interfaces are used to describe the structure of the JSON data that will be rendered in the report. The example `INSTITUTION_REPORT_TEMPLATE_1` provides a concrete instance of an institution report template with a simple financial statement schema.

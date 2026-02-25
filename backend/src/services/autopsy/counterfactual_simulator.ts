@@ -1,6 +1,3 @@
-Here is the TypeScript file `backend/src/services/autopsy/counterfactual_simulator.ts` as per your specifications:
-
-```typescript
 /**
  * Counterfactual Simulator Service
  */
@@ -51,6 +48,4 @@ export class CounterfactualSimulatorServiceImpl implements CounterfactualSimulat
     return { game: originalGame, replay: forkedReplay };
   }
 }
-```
 
-This TypeScript file defines a `CounterfactualSimulatorService` that allows you to simulate alternate choices in a game by forking a turn with an alternate choice and the same seed. The service returns the updated game and replay after the simulation.

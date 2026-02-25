@@ -1,6 +1,3 @@
-Here is the TypeScript file `backend/src/services/loss_is_content/training/scenario_picker.ts`:
-
-```typescript
 /**
  * Scenario picker service for Point Zero One Digital's financial roguelike game.
  */
@@ -33,6 +30,3 @@ export class ScenarioPickerService {
     return this.scenarioModel.findOne(query);
   }
 }
-```
-
-This TypeScript file exports a `ScenarioPickerService` class that provides a method for picking a suitable scenario from the catalog based on the user's stage and short-launchability requirement. The service uses Mongoose to interact with MongoDB, which is used as the database in this project.

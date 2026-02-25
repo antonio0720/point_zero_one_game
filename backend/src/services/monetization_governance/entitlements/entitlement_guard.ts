@@ -1,6 +1,3 @@
-Here is the TypeScript file `backend/src/services/monetization_governance/entitlements/entitlement_guard.ts`:
-
-```typescript
 /**
  * Entitlement Guard service for evaluating active entitlements based on run mode and ladder, with fail-closed behavior in ranked contexts.
  */

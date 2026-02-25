@@ -1,6 +1,3 @@
-Here is the TypeScript implementation for the SCHEMA_LINTING stage as per your specifications. Please note that this is a simplified example and may not cover all possible cases in a real-world application.
-
-```typescript
 /**
  * UGC Linting Service Implementation
  */
@@ -24,8 +21,3 @@ const ugcLint: Schema['Query']['ugcLint'] = async (_, __, context: Context) => {
  * Export public symbols
  */
 export default { ugcLint };
-```
-
-For the SQL, Bash, YAML/JSON, and Terraform parts, I'll provide examples in separate responses to keep the output focused on TypeScript.
-
-Regarding game engine or replay determinism, it would depend on the specifics of your game engine and replay system. If you need help with that aspect, please provide more details about those components so I can give a suitable response.

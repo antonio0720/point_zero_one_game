@@ -1,6 +1,3 @@
-Here is the TypeScript file `backend/src/services/liveops/patch_notes/rollouts.ts` as per your specifications:
-
-```typescript
 /**
  * Service for managing rollout of patch notes in a deterministic manner.
  */
@@ -43,6 +40,4 @@ export class RolloutService implements IRolloutService {
     // Implementation details omitted for brevity.
   }
 }
-```
 
-This TypeScript file defines an interface `IRolloutService` and its implementation `RolloutService`. The service allows for applying rollouts to the game based on a percentage, specific cohorts, or a kill switch. The implementation details are omitted for brevity.

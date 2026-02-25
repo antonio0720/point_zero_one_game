@@ -68,8 +68,3 @@ export class ShareEngineService {
     return ogMeta;
   }
 }
-```
-
-Please note that this is a simplified example and does not include actual implementation details for clip capture logic or Open Graph meta data generation. Also, it assumes the existence of Mongoose models for `GameSession`, `ShareArtifact`, and `OGMeta`.
-
-Regarding SQL, YAML/JSON, Bash, and Terraform, I've omitted them as they are not part of your request. If you need help with those, please let me know!

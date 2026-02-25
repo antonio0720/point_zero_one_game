@@ -1,6 +1,3 @@
-Here is the TypeScript file `backend/src/game/modes/solo_mode.ts` with strict types, no 'any', exporting public symbols, and JSDoc comments:
-
-```typescript
 /**
  * Solo mode for Point Zero One Digital's financial roguelike game.
  */

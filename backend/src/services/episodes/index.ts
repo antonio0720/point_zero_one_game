@@ -48,42 +48,4 @@ export class EpisodesService {
     return this.episodeRepository.save(episode);
   }
 }
-```
 
-```sql
--- Episodes table creation
-CREATE TABLE IF NOT EXISTS episodes (
-  id SERIAL PRIMARY KEY,
-  template_id INTEGER NOT NULL REFERENCES templates(id),
-  version INTEGER NOT NULL,
-  pin VARCHAR(255) NOT NULL UNIQUE,
-  hash VARCHAR(255) NOT NULL,
-);
-```
-
-```bash
-#!/bin/bash
-set -euo pipefail
-
-echo "Creating episodes table"
-psql -f scripts/create_episodes.sql
-
-echo "Seeding episodes data"
-# Replace the following command with your seeding logic
-# For example, using a JSON file:
-# psql -f scripts/seed_episodes.json
-```
-
-```yaml
-data:
-  episodes:
-    - id: 1
-      templateId: 1
-      version: 1
-      pin: "sha256-abcdefg"
-      hash: "hash1"
-    - id: 2
-      templateId: 1
-      version: 2
-      pin: "sha256-hijklmnop"
-      hash: "hash2"

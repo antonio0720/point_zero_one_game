@@ -79,8 +79,3 @@ export class BackfillPublicReadModelsJob extends Job {
     this.context.telemetryService.emitProgressEvent({ message });
   }
 }
-```
-
-Please note that the code above assumes the existence of a job framework, event-log repository, and four read model repositories (run-explorer-public-repository, ladder-rankings-repository, season0-memberships-repository, creator-submissions-repository) which are not provided in this example.
-
-Regarding SQL, foreign keys, indexes, comments, and idempotent CREATE statements, they would typically be defined within the respective repository classes or separate schema files, depending on your project's structure and preferences.

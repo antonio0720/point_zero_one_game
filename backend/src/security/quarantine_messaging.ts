@@ -1,6 +1,3 @@
-Here is the TypeScript file `backend/src/security/quarantine_messaging.ts` that adheres to the specified rules:
-
-```typescript
 /**
  * Quarantine Messaging Module
  */
@@ -48,6 +45,4 @@ export function createPublicQuarantineMessage(timestamp: Date, message: string):
 export function createInternalQuarantineMessage(timestamp: Date, message: string, reasonCode: string): InternalQuarantineMessage {
   return { id: crypto.randomUUID(), timestamp, message, reasonCode };
 }
-```
 
-This TypeScript file defines two interfaces for public and internal quarantine messages, as well as functions to create each type of message. The functions use the `crypto.randomUUID()` method to generate unique identifiers for each quarantine event.

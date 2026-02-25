@@ -70,47 +70,4 @@ export class GuestSessionsService {
     return this.guestSessionModel.findOneAndUpdate(conditions, update, options);
   }
 }
-```
 
-SQL:
-
-```sql
--- Guest Sessions Collection
-CREATE TABLE IF NOT EXISTS guest_sessions (
-  _id UUID PRIMARY KEY,
-  deviceFingerprint JSONB NOT NULL,
-  runHistory JSONB[] DEFAULT '[]'::jsonb[],
-  createdAt TIMESTAMP WITH TIME ZONE NOT NULL,
-  updatedAt TIMESTAMP WITH TIME ZONE NOT NULL
-);
-
--- Indexes for Guest Sessions Collection
-CREATE INDEX IF NOT EXISTS idx_guest_sessions_deviceFingerprint ON guest_sessions (deviceFingerprint);
-CREATE INDEX IF NOT EXISTS idx_guest_sessions_createdAt ON guest_sessions (createdAt);
-```
-
-Bash:
-
-```bash
-#!/bin/sh
-set -euo pipefail
-
-echo "Creating guest session"
-# Implement rate limiting logic here (e.g., using Redis or another solution)
-
-# Example usage of the GuestSessionsService
-node backend/src/services/auth/guest_sessions.ts create \
-  '{"userAgent": "example-user-agent", "ipAddress": "123.456.789.0"}'
-```
-
-Terraform:
-
-```hcl
-resource "mongodb_database" "point_zero_one_digital" {
-  name = "point_zero_one_digital"
-}
-
-resource "mongodb_collection" "guest_sessions" {
-  database_name = mongodb_database.point_zero_one_digital.name
-  name          = "guest_sessions"
-}

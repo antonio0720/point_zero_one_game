@@ -1,6 +1,3 @@
-Here is the TypeScript file `backend/src/services/monetization_governance/remote_config/policy_validator.ts` as per your specifications:
-
-```typescript
 /**
  * Policy validator service for monetization policies.
  */

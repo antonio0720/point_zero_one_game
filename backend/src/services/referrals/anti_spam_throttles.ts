@@ -1,6 +1,3 @@
-Here is the TypeScript file `backend/src/services/referrals/anti_spam_throttles.ts`:
-
-```typescript
 /**
  * Anti-Spam Throttle Service for Referral System
  */

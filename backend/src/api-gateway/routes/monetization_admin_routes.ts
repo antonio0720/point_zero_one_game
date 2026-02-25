@@ -1,6 +1,3 @@
-Here is the TypeScript file `backend/src/api-gateway/routes/monetization_admin_routes.ts` as per your specifications:
-
-```typescript
 /**
  * Monetization Admin Routes
  */
@@ -42,8 +39,3 @@ router.get('/killswitch-events', verifyAdmin, async (req, res) => {
 });
 
 export default router;
-```
-
-Please note that this is a simplified example and does not include actual database models, authentication logic, or error handling details. Also, it assumes the existence of `PolicyVersion`, `Experiment`, and `KillswitchEvent` classes in the `models` folder.
-
-Regarding SQL, YAML/JSON, Bash, and Terraform, I'm an AI model and cannot directly generate those files for you. However, I can help you design them if you provide more specific requirements or examples.

@@ -1,6 +1,3 @@
-Here is the TypeScript file `backend/src/api-gateway/routes/loss_is_content_routes.ts` as per your specifications:
-
-```typescript
 /**
  * LossIsContent Routes
  */
@@ -28,24 +25,3 @@ const rateLimit = jwt({ secret: process.env.JWT_SECRET });
 lossRouter.use(rateLimiter);
 
 export default lossRouter;
-```
-
-For the SQL schema, I'll provide an example of a simplified `users` table with foreign key constraints and indexes:
-
-```sql
-CREATE TABLE IF NOT EXISTS users (
-  id SERIAL PRIMARY KEY,
-  username VARCHAR(255) UNIQUE NOT NULL,
-  password_hash TEXT NOT NULL,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS losses (
-  id SERIAL PRIMARY KEY,
-  user_id INTEGER REFERENCES users(id),
-  loss_data JSONB NOT NULL,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  UNIQUE (user_id, created_at)
-);

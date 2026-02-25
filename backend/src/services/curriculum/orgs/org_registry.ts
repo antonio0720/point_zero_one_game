@@ -114,10 +114,5 @@ export class OrgRegistryService {
     if (deletedCount === 0) throw new NotFoundException('Cohort not found');
   }
 }
-```
 
-For the SQL schema, I'll provide it in a separate response to keep the output clean.
 
-Regarding the Bash, YAML/JSON, and Terraform files, they are not directly related to this TypeScript service file and would require additional specifications and context to generate accurately.
-
-For the game engine or replay determinism, it's important to note that the provided TypeScript code does not contain any game-specific logic or randomness, ensuring deterministic behavior.

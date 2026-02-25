@@ -48,19 +48,5 @@ export class PracticeForkService {
     return this.practiceForkRepository.save(newPracticeFork);
   }
 }
-```
 
-For the SQL schema, I'll provide it in a separate response to keep the output cleaner.
 
-Regarding the Bash script, here is an example of how you can set the options:
-
-```bash
-#!/bin/sh
-set -euo pipefail
-
-echo "Starting script"
-# Your commands here
-echo "Script completed"
-```
-
-Lastly, for Terraform or YAML/JSON files, I'll need more specific details about the required fields and structure to provide an accurate example.

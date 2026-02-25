@@ -46,33 +46,5 @@ export class EconomySinkRollupsService {
     // Implement the logic to compute sink pressure signals here
   }
 }
-```
 
-Regarding SQL, YAML/JSON, and Bash, I'm an AI model and don't have the ability to generate actual files or commands. However, I can provide you with examples of how those parts might look like:
 
-SQL:
-
-```sql
-CREATE TABLE IF NOT EXISTS earn_vs_sink (
-  id SERIAL PRIMARY KEY,
-  earn DECIMAL(10,2) NOT NULL,
-  sink DECIMAL(10,2) NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_earn_vs_sink_earn ON earn_vs_sink (earn);
-CREATE INDEX IF NOT EXISTS idx_earn_vs_sink_sink ON earn_vs_sink (sink);
-```
-
-Terraform:
-
-```hcl
-resource "aws_rds_table" "earn_vs_sink" {
-  name           = "earn_vs_sink"
-  read_capacity  = 5
-  write_capacity = 5
-
-  engine         = "postgres"
-  engine_version = "13.2"
-
-  schema = file("schema.sql")
-}

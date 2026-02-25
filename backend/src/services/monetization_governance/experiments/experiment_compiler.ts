@@ -1,6 +1,3 @@
-Here is the TypeScript code for the `experiment_compiler.ts` file as per your specifications:
-
-```typescript
 /**
  * Experiment Compiler Service
  */
@@ -45,6 +42,4 @@ function generateRolloutPlan(manifest: ExperimentManifest): any {
   // Generate the rollout plan here
   return {};
 }
-```
 
-This TypeScript code defines an `ExperimentCompilerService` with a `compile` function that takes an `ExperimentManifest`, validates it for safety, generates a rollout plan based on the safe manifest, and returns the rollout plan as JSON. The service also includes helper functions for checking if a manifest is safe and generating the rollout plan.

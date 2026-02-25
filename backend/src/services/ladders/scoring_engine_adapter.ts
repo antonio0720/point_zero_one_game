@@ -1,6 +1,3 @@
-Here is the TypeScript file `backend/src/services/ladders/scoring_engine_adapter.ts` as per your specifications:
-
-```typescript
 /**
  * Scoring Engine Adapter for Ladders
  */

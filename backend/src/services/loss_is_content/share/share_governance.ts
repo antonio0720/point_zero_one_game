@@ -1,6 +1,3 @@
-Here is the TypeScript file `backend/src/services/loss_is_content/share/share_governance.ts` with strict types, no 'any', exporting all public symbols, and including JSDoc comments:
-
-```typescript
 /**
  * Share Governance Service
  */

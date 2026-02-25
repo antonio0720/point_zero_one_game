@@ -21,8 +21,3 @@ router.get('/runs/:id/verification', (req, res) => {
 });
 
 export default router;
-```
-
-Regarding SQL, as this is a TypeScript file and not SQL, I will not provide the SQL code here. However, if you need help with creating an SQL schema that meets your requirements, please let me know!
-
-For Bash scripts, YAML/JSON files, or Terraform configurations, you can create separate files for them following the provided rules.

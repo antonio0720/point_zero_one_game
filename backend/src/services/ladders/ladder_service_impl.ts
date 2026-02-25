@@ -1,6 +1,3 @@
-Here is the TypeScript implementation for the specified functions:
-
-```typescript
 /**
  * LadderServiceImpl
  */
@@ -65,6 +62,4 @@ export class LadderServiceImpl {
     await this.ladderRepository.save(ladder);
   }
 }
-```
 
-This TypeScript implementation includes strict types, no 'any', exports all public symbols, and follows the JSDoc conventions. The code uses NestJS's dependency injection to access the `Ladder` and `Run` entities from TypeORM. The functions `submitRunToCasualLadder` and `submitRunToVerifiedLadder` perform the specified actions, checking for prerequisites before adding runs to their respective ladders.

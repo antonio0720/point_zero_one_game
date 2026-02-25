@@ -41,15 +41,3 @@ export class PermissionsMatrixService {
     }
   }
 }
-```
-
-For the SQL schema, I'll provide it in a separate response to keep this answer focused on TypeScript:
-
-```sql
-CREATE TABLE IF NOT EXISTS creator_profiles_permissions (
-  _id MongoID PRIMARY KEY,
-  level VARCHAR(255) NOT NULL,
-  publishType VARCHAR(255) NOT NULL,
-  canPublish BOOLEAN NOT NULL DEFAULT false,
-  UNIQUE INDEX creator_profiles_permissions_level_publishType_unique (level, publishType)
-);

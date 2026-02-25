@@ -1,6 +1,3 @@
-Here is the TypeScript file `backend/src/services/ugc_verification/hard_gate_publish_policy.ts` as per your specifications:
-
-```typescript
 /**
  * Hard gate publish policy service for UGC verification
  */
@@ -35,6 +32,3 @@ export class HardGatePublishPolicyService {
     await this.hardGatePublishPolicyRepository.update(hardGatePublishPolicy.id, { verified: true });
   }
 }
-```
-
-This TypeScript file exports a service class `HardGatePublishPolicyService` that verifies user-generated content (UGC) and enforces the publish policy. The service uses TypeORM to interact with the database and throws an error if UGC fails verification, preventing it from going live.

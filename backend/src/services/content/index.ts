@@ -1,6 +1,3 @@
-Here is the TypeScript file `backend/src/services/content/index.ts` based on your specifications:
-
-```typescript
 /**
  * Content service for Point Zero One Digital
  */
@@ -77,54 +74,3 @@ const contentService: ContentService = {
 export default contentService;
 
 // Database schema (SQL)
-
-CREATE TABLE IF NOT EXISTS cards (
-  id SERIAL PRIMARY KEY,
-  version INTEGER NOT NULL,
-  data JSONB NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS decks (
-  id SERIAL PRIMARY KEY,
-  data JSONB NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS scenarios (
-  id SERIAL PRIMARY KEY,
-  data JSONB NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS rulesets (
-  id SERIAL PRIMARY KEY,
-  data JSONB NOT NULL
-);
-
-// Database queries (TypeScript)
-
-async function fetchCardFromDB(id: string): Promise<Card> {
-  // Query the database for the card with the given ID and version
-}
-
-async function fetchDeckFromDB(id: string): Promise<Deck> {
-  // Query the database for the deck with the given ID
-}
-
-async function fetchScenarioFromDB(id: string): Promise<Scenario> {
-  // Query the database for the scenario with the given ID
-}
-
-async function fetchRulesetFromDB(): Promise<Ruleset> {
-  // Query the database for the ruleset
-}
-
-async function fetchActiveScenariosFromDB(): Promise<Scenario[]> {
-  // Query the database for all active scenarios
-}
-
-async function updateCardVersionInDB(cardId: string, version: number) {
-  // Update the card with the given ID and version in the database
-}
-
-async function retireCardFromDB(cardId: string) {
-  // Retire the card with the given ID in the database
-}

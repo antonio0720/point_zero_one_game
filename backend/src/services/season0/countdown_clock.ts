@@ -21,7 +21,7 @@ export class CountdownClockService {
     }
 
     const currentTime = this.timeService.getCurrentTime();
-    const endTime = new Date(20XX, 12 - 1, 31, 23, 59, 59); // Replace '20XX' with the actual year for the specific season
+    const endTime = new Date(2026, 12 - 1, 31, 23, 59, 59); // Replace '2026' with the actual year for the specific season
 
     const remainingSeconds = Math.floor((endTime.getTime() - currentTime.getTime()) / 1000);
     const ended = remainingSeconds <= 0;
@@ -31,8 +31,3 @@ export class CountdownClockService {
     return { remainingSeconds, ended };
   }
 }
-```
-
-Please note that the specific year for the season should be replaced with '20XX' in the code above. Also, the TimeService and CacheService are assumed to be existing classes with their respective implementations.
-
-Regarding SQL, YAML/JSON, Bash, and Terraform, they are not provided as part of this request since they were not explicitly mentioned in the spec for the CountdownClockService file.

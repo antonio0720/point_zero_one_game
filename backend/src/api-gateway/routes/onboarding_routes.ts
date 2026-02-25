@@ -29,8 +29,3 @@ onboardingRoutes.post('/start-game', (req, res) => {
 
 // Export public symbols
 export { onboardingRoutes };
-```
-
-Regarding SQL, as it is not provided in the spec, I will not include any SQL code. However, if you need help with creating idempotent CREATE IF NOT EXISTS SQL statements, please let me know!
-
-For Bash, YAML/JSON, and Terraform, I'll follow your guidelines for production-ready configurations with all required fields when the specifications are provided.

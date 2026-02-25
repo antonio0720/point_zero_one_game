@@ -62,8 +62,3 @@ export class ShareCardRenderer {
     return '';
   }
 }
-```
-
-Please note that the templates (BalanceSheetTemplate, CauseOfDeathTemplate, DealFlipTemplate, RegretTemplate) are not included in this example. They should be separate files with their own TypeScript definitions and implementations.
-
-Regarding SQL, Bash, YAML/JSON, and Terraform, they are not required for the given spec and were omitted from this response.

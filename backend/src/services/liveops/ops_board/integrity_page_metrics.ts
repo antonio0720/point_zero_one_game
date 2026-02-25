@@ -52,32 +52,5 @@ export class IntegrityPageMetricsService {
     await this.integrityPageMetricsRepository.update(id, updates);
   }
 }
-```
 
-Regarding the SQL and Bash parts of your request, they are not included as it was not specified in the provided context that those files were needed for this particular TypeScript service. However, I can provide an example of how those might look if you'd like:
 
-SQL (PostgreSQL):
-
-```sql
-CREATE TABLE IF NOT EXISTS integrity_page_metrics (
-  id SERIAL PRIMARY KEY,
-  view_count INTEGER NOT NULL,
-  cta_click_count INTEGER NOT NULL,
-  verified_ladder_join_correlation DECIMAL(10,2) NOT NULL,
-  retention_correlation DECIMAL(10,2) NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_integrity_page_metrics_id ON integrity_page_metrics (id);
-```
-
-Bash:
-
-```bash
-#!/bin/sh
-set -euo pipefail
-
-echo "Creating or updating the table..."
-psql -f create_table.sql your_database
-
-echo "Inserting data..."
-psql -f insert_data.sql your_database

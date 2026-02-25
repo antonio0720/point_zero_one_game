@@ -69,19 +69,3 @@ export class LadderService {
     return this.scoreModel.find({ playerId, isPublished: false });
   }
 }
-```
-
-For the SQL schema, I'll provide a simplified version as it wasn't explicitly requested in your spec:
-
-```sql
-CREATE TABLE IF NOT EXISTS scores (
-    _id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    player_id uuid NOT NULL,
-    score float NOT NULL,
-    is_published boolean NOT NULL DEFAULT false,
-    created_at timestamp WITH TIME ZONE NOT NULL DEFAULT now(),
-    updated_at timestamp WITH TIME ZONE NOT NULL DEFAULT now(),
-    UNIQUE (player_id)
-);
-
-CREATE INDEX IF NOT EXISTS player_id_index ON scores (player_id);

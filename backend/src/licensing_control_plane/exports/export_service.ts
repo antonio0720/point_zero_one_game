@@ -1,6 +1,3 @@
-Here is the TypeScript code for the `export_service.ts` file as per your specifications:
-
-```typescript
 /**
  * Export Service for handling PDF/CSV generation jobs, signed URLs, retention TTL, and audit receipts.
  */

@@ -1,6 +1,3 @@
-Here is the TypeScript file `backend/src/services/ladder/ranked_compat/rejection_handling.ts` as per your specifications:
-
-```typescript
 /**
  * Rejection handling for ranked compatibility in Point Zero One Digital's game.
  * Strict types, no 'any', export all public symbols, include JSDoc.

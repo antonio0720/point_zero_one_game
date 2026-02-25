@@ -1,6 +1,3 @@
-Here is the TypeScript file for the share rendering of death cards in Point Zero One Digital's financial roguelike game, adhering to the specified rules:
-
-```typescript
 /**
  * Share rendering service for death cards.
  */
@@ -54,6 +51,4 @@ export class ShareService implements DeathCardRepository {
     return this.deathCardRepository.find();
   }
 }
-```
 
-The TypeScript file exports a `ShareService` class that implements the `DeathCardRepository` interface, which includes methods for saving and retrieving death cards from the database. The `DeathCard` class represents the structure of a single death card in the game.

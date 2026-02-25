@@ -35,12 +35,3 @@ export function calculateScore(input: BenchmarkInput): BenchmarkOutput {
  * Creates a new SQL table to store benchmark runs and their results.
  */
 const createBenchmarkTableSql = `
-CREATE TABLE IF NOT EXISTS benchmarks (
-  id SERIAL PRIMARY KEY,
-  timestamp TIMESTAMP WITH TIME ZONE NOT NULL,
-  initial_state JSONB NOT NULL,
-  final_state JSONB NOT NULL,
-  score DOUBLE PRECISION NOT NULL,
-  delta_score DOUBLE PRECISION NOT NULL
-);
-`;

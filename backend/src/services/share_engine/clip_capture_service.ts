@@ -100,16 +100,3 @@ export class ClipCaptureService implements ClipCaptureService {
     await this.cdnClient.put(fileName, clipData);
   }
 }
-```
-
-For the SQL schema, I'll provide it in a separate response to keep the output cleaner:
-
-```sql
-CREATE TABLE IF NOT EXISTS clip_metadata (
-  id INT AUTO_INCREMENT PRIMARY KEY,
-  run_id VARCHAR(255) NOT NULL,
-  moment_type VARCHAR(255) NOT NULL,
-  turn_range TINYINT UNSIGNED NOT NULL,
-  status ENUM('pending', 'processing', 'completed', 'failed') NOT NULL DEFAULT 'pending',
-  FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE
-);

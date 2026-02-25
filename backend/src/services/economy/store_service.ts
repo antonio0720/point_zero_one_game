@@ -42,22 +42,5 @@ export class StoreService {
     return { success: true, item };
   }
 }
-```
 
-For the SQL schema, I will provide it in a separate response due to character limitations.
 
-Regarding the Bash script and YAML/JSON/Terraform files, they are not directly related to this TypeScript file and would require additional context or specifications to generate.
-
-SQL Schema:
-
-```sql
-CREATE TABLE IF NOT EXISTS cosmetic_store_items (
-  id VARCHAR(255) PRIMARY KEY,
-  name VARCHAR(255) NOT NULL,
-  description TEXT,
-  price DECIMAL(10, 2) NOT NULL,
-  image_url TEXT,
-  FOREIGN KEY (id) REFERENCES users(id) ON DELETE CASCADE -- Assuming a foreign key to the User table for inventory management purposes
-);
-
-CREATE INDEX IF NOT EXISTS cosmetic_store_items_id_index ON cosmetic_store_items (id);

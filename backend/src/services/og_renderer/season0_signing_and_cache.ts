@@ -1,6 +1,3 @@
-Here is the TypeScript code for the `og_renderer` service's `season0_signing_and_cache.ts` file, adhering to the specified rules:
-
-```typescript
 /**
  * Signed URL policy + cache TTL rules; fail-closed for private visibility.
  */

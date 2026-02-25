@@ -1,6 +1,3 @@
-Here is the TypeScript file `backend/src/services/moderation_actions/moderation_actions_impl.ts` based on your specifications:
-
-```typescript
 /**
  * ModerationActionsImpl - Implementation of moderation actions service
  */

@@ -1,6 +1,3 @@
-Here is the TypeScript file `backend/src/services/toxicity_scan/toxicity_scan_impl.ts`:
-
-```typescript
 /**
  * Toxicity Scan Service Implementation
  */

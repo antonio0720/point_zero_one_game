@@ -1,6 +1,3 @@
-Here is the TypeScript file `backend/src/content_ops/pack_authoring/validation_lints.ts` following the specified rules:
-
-```typescript
 /**
  * Validation Lints for Pack Authoring
  */

@@ -79,26 +79,5 @@ export class DiscordStrategy extends PassportStrategy(StrategyType.oauth2) {
     return this.jwtService.signAsync(payload);
   }
 }
-```
 
-For the SQL, I'll provide a simplified example as it is not included in your request:
 
-```sql
--- Users table
-CREATE TABLE IF NOT EXISTS users (
-  id SERIAL PRIMARY KEY,
-  email VARCHAR(255) UNIQUE NOT NULL,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-);
-
--- Accounts table
-CREATE TABLE IF NOT EXISTS accounts (
-  id SERIAL PRIMARY KEY,
-  user_id INTEGER REFERENCES users(id),
-  provider VARCHAR(255) NOT NULL,
-  access_token TEXT NOT NULL,
-  refresh_token TEXT,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-);

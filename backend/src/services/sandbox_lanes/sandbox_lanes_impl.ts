@@ -1,6 +1,3 @@
-Here is the TypeScript file `backend/src/services/sandbox_lanes/sandbox_lanes_impl.ts` based on your specifications:
-
-```typescript
 /**
  * SandboxLanesService implementation for Point Zero One Digital's financial roguelike game.
  */
@@ -61,6 +58,3 @@ export class SandboxLane {
     return this;
   }
 }
-```
-
-This TypeScript file includes strict types, no 'any', exports all public symbols, and includes JSDoc comments for documentation purposes. The code is designed to be production-grade and deployment-ready.

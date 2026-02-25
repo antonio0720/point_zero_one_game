@@ -1,6 +1,3 @@
-Here is the TypeScript file `backend/src/services/streaks/streaks_impl.ts` with strict types, no 'any', exporting public symbols, and including JSDoc comments:
-
-```typescript
 /**
  * Streak service implementation for Point Zero One Digital's financial roguelike game.
  */
@@ -58,6 +55,3 @@ export class StreaksService {
     await this.artifactEvolutionService.triggerArtifactEvolutions(userId, streak.currentDayStreak);
   }
 }
-```
-
-This TypeScript file includes strict types, no 'any', exports the public symbol `StreaksService`, and includes JSDoc comments for each function and class. The code follows the specified rules for TypeScript and is production-ready.

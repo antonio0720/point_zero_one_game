@@ -69,33 +69,5 @@ export class ToxicityScanService {
     return '';
   }
 }
-```
 
-For the SQL, I'll provide it in a separate response to keep the output cleaner:
 
-```sql
--- Toxicity Scan Table
-CREATE TABLE IF NOT EXISTS toxicity_scans (
-  id VARCHAR(255) PRIMARY KEY,
-  audio_metadata JSON,
-  text_metadata JSON,
-  risk_score DECIMAL(10, 2),
-  receipt TEXT,
-  INDEX idx_risk_score (risk_score)
-);
-
--- Audio Metadata Foreign Key Constraint
-CREATE TABLE IF NOT EXISTS audio_metadata (
-  id VARCHAR(255) PRIMARY KEY,
-  -- Add other required fields here
-);
-
-ALTER TABLE toxicity_scans ADD FOREIGN KEY (audio_metadata) REFERENCES audio_metadata(id);
-
--- Text Metadata Foreign Key Constraint
-CREATE TABLE IF NOT EXISTS text_metadata (
-  id VARCHAR(255) PRIMARY KEY,
-  -- Add other required fields here
-);
-
-ALTER TABLE toxicity_scans ADD FOREIGN KEY (text_metadata) REFERENCES text_metadata(id);

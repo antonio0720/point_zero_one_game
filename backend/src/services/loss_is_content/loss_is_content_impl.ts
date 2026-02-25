@@ -1,6 +1,3 @@
-Here is the TypeScript file `backend/src/services/loss_is_content/loss_is_content_impl.ts`:
-
-```typescript
 /**
  * LossIsContentImpl class for handling end-of-run actions, including generating death artifacts, forking options, and training recommendations.
  */

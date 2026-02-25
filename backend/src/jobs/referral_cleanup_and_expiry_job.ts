@@ -46,35 +46,4 @@ export class ReferralCleanupAndExpiryJob extends Job {
 // Queue setup
 const queueRunner = new QueueRunner('default', { connection: pool });
 queueRunner.add(ReferralCleanupAndExpiryJob, new ReferralCleanupAndExpiryJob());
-```
 
-```sql
--- Database schema for Point Zero One Digital
-
-CREATE TABLE IF NOT EXISTS invites (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  referrer_id UUID NOT NULL,
-  invite_code VARCHAR(255) UNIQUE NOT NULL,
-  used_at TIMESTAMP,
-  expires_at TIMESTAMP NOT NULL,
-  FOREIGN KEY (referrer_id) REFERENCES users (id) ON DELETE CASCADE
-);
-
-CREATE TABLE IF NOT EXISTS authentication_tokens (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  user_id UUID NOT NULL,
-  token VARCHAR(255) UNIQUE NOT NULL,
-  created_at TIMESTAMP NOT NULL,
-  FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
-);
-```
-
-```bash
-#!/bin/sh
-set -euo pipefail
-
-# Log all actions
-exec > >(tee /var/log/referral-cleanup-and-expiry.log >&2) 2>&1
-
-# Run the job
-node backend/src/jobs/referral_cleanup_and_expiry_job.ts

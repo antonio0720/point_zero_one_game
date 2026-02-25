@@ -53,15 +53,3 @@ export class SandboxLanesService {
     return sandboxLane;
   }
 }
-```
-
-For the SQL, I'll provide a simplified example without the full schema for brevity:
-
-```sql
-CREATE TABLE IF NOT EXISTS sandbox_lanes (
-  id INT PRIMARY KEY AUTO_INCREMENT,
-  privateId VARCHAR(255) NOT NULL,
-  cohortId VARCHAR(255),
-  eventId VARCHAR(255),
-  UNIQUE INDEX sandbox_lanes_private_id (privateId)
-);

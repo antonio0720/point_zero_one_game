@@ -1,6 +1,3 @@
-Here is the TypeScript file `backend/src/services/creator-economy/submission_pipeline.ts` as per your specifications:
-
-```typescript
 /**
  * Submission pipeline service for Creator Economy
  */

@@ -90,49 +90,4 @@ const inviteSchema = new mongoose.Schema({
 
 // Mongoose model for invites.
 export const Invite = mongoose.model<IInvite>('Invite', inviteSchema);
-```
 
-SQL (PostgreSQL):
-
-```sql
--- Referral table
-CREATE TABLE IF NOT EXISTS referrals (
-    id SERIAL PRIMARY KEY,
-    code VARCHAR(255) UNIQUE NOT NULL,
-    created_at TIMESTAMP WITH TIME ZONE NOT NULL,
-    used BOOLEAN NOT NULL DEFAULT false,
-    runs INTEGER NOT NULL DEFAULT 0,
-    user_id INT REFERENCES users(id)
-);
-
--- Invite table
-CREATE TABLE IF NOT EXISTS invites (
-    id SERIAL PRIMARY KEY,
-    referral_code VARCHAR(255) NOT NULL,
-    data JSONB NOT NULL,
-    user_id INT NOT NULL REFERENCES users(id),
-    used BOOLEAN NOT NULL DEFAULT false
-);
-```
-
-Terraform (example):
-
-```hcl
-resource "aws_rds_instance" "referral_db" {
-  allocated_storage = 20
-  engine            = "postgres"
-  instance_class    = "db.t3.micro"
-  name              = "referral-db"
-  username          = "referral_user"
-  password          = random_password.password.result
-  skip_final_snapshot = true
-}
-
-resource "aws_rds_cluster" "invite_db" {
-  cluster_identifier      = "invite-db"
-  engine                  = "postgres"
-  master_username         = "invite_user"
-  master_password         = random_password.password.result
-  skip_final_snapshot     = true
-  vpc_security_group_ids   = [aws_security_group.default.id]
-}

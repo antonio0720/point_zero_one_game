@@ -49,16 +49,5 @@ export class CreatorRoyaltyService implements CreatorRoyalityServiceInterface {
     await this.economyService.creditRevenue(revenueCredit, communityCard.creatorId);
   }
 }
-```
 
-For the SQL schema, I'll provide it as a separate response due to character limitations:
 
-```sql
--- Community Card Schema
-CREATE TABLE IF NOT EXISTS community_cards (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    creator_id UUID NOT NULL REFERENCES users(id),
-    price INT NOT NULL,
-    games_played INT DEFAULT 0,
-    UNIQUE (creator_id, id)
-);

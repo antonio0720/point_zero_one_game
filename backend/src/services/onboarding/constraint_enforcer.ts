@@ -1,6 +1,3 @@
-Here is the TypeScript file `backend/src/services/onboarding/constraint_enforcer.ts` that enforces the specified rules for decision surfaces per run, following the given guidelines:
-
-```typescript
 /**
  * Constraint Enforcer service for managing allowed decision surfaces per game run.
  */

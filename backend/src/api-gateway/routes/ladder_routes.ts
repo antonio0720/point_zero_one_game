@@ -1,6 +1,3 @@
-Here is the TypeScript code for mounting ladder routes with auth and public read access policy, adding caching headers per ladder.
-
-```typescript
 /**
  * API Gateway - Ladder Routes
  */

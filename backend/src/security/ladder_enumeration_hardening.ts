@@ -49,44 +49,4 @@ export const isValidPaginationToken = (token: PaginationToken, currentEntry: Ran
   if (token.endId && token.endId < currentEntry.id) return false;
   return true;
 };
-```
 
-SQL:
-
-```sql
-CREATE TABLE IF NOT EXISTS rank_entries (
-  id VARCHAR(255) PRIMARY KEY,
-  userId VARCHAR(255) NOT NULL,
-  rank INT NOT NULL,
-  score BIGINT NOT NULL,
-  timestamp TIMESTAMP NOT NULL,
-  version INT NOT NULL DEFAULT 1
-);
-
-CREATE INDEX IF NOT EXISTS idx_rank_entries_userId ON rank_entries (userId);
-CREATE INDEX IF NOT EXISTS idx_rank_entries_id ON rank_entries (id);
-```
-
-Bash:
-
-```bash
-#!/bin/sh
-set -euo pipefail
-echo "Executing action"
-command
-```
-
-YAML:
-
-```yaml
-resource "aws_rds_cluster" "point_zero_one_digital" {
-  cluster_identifier = "point-zero-one-digital"
-  engine = "postgres"
-  master_username = "master_user"
-  master_password = "master_password"
-  skip_final_snapshot = true
-
-  tags = {
-    Name = "Point Zero One Digital"
-  }
-}

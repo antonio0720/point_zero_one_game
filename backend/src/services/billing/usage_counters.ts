@@ -42,8 +42,5 @@ export class BillingUsageCountersService {
     return this.usageCounterRepository.save(usageCounter);
   }
 }
-```
 
-For the SQL schema, I'll provide it in a separate response due to character limitations here.
 
-Regarding the bash script and YAML/JSON/Terraform files, they are not directly related to this TypeScript file and would require additional context or specifications to generate accurately.

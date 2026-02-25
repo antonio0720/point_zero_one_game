@@ -38,20 +38,3 @@ export function structuredErrorResponse(statusCode: number): (res: Response) => 
  * SQL schema for explorer lookups table with indexes and foreign keys.
  */
 const sqlSchema = `
-CREATE TABLE IF NOT EXISTS explorers (
-  id SERIAL PRIMARY KEY,
-  name VARCHAR(255) UNIQUE NOT NULL,
-  hash SHA256 NOT NULL,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-);
-
-CREATE INDEX IF NOT EXISTS explorers_name_index ON explorers (name);
-CREATE INDEX IF NOT EXISTS explorers_hash_index ON explorers (hash);
-
-CREATE TABLE IF NOT EXISTS games (
-  id SERIAL PRIMARY KEY,
-  explorer_id INTEGER REFERENCES explorers(id),
-  // Other game-related columns omitted for brevity.
-);
-`;

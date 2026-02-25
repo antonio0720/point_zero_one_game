@@ -1,6 +1,3 @@
-Here is the TypeScript file `backend/src/services/onboarding/onboarding_arc_impl.ts` with strict types, no 'any', exporting all public symbols, and including JSDoc comments:
-
-```typescript
 import { OnboardingArc } from './onboarding_arc';
 import { UserRepository } from '../repositories/user_repository';
 import { GameEventRepository } from '../repositories/game_event_repository';

@@ -40,29 +40,4 @@ export const FounderNightSchema = new Mongoose.Schema<IFounderNight>({
 
 FounderNightSchema.index({ code: 1 }, { unique: true });
 FounderNightSchema.index({ ladderId: 1 });
-```
 
-```sql
--- Founder Night Table
-CREATE TABLE IF NOT EXISTS `founder_nights` (
-  `id` INT(11) UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  `code` VARCHAR(255) NOT NULL UNIQUE,
-  `ladderId` INT(11) UNSIGNED NOT NULL,
-  `createdAt` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  `updatedAt` TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  FOREIGN KEY (`ladderId`) REFERENCES `ladders` (`id`) ON DELETE CASCADE,
-);
-```
-
-```bash
-#!/bin/sh
-set -euo pipefail
-echo "Creating Founder Night event"
-npm run typeorm migration:run -- quiet
-```
-
-```yaml
-resource "aws_s3_bucket" "founder_night_receipts" {
-  bucket = "founder-night-receipts"
-  acl    = "private"
-}

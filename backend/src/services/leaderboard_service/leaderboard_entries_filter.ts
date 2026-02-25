@@ -1,6 +1,3 @@
-Here is the TypeScript file `backend/src/services/leaderboard_service/leaderboard_entries_filter.ts` that enforces VERIFIED-only entries for primary leaderboards and allows separate unverified sandbox boards, following the specified rules:
-
-```typescript
 /**
  * LeaderboardEntriesFilter service filters leaderboard entries based on their verification status.
  */
@@ -36,6 +33,3 @@ export class LeaderboardEntriesFilterService {
     return await query.getMany();
   }
 }
-```
-
-This TypeScript file exports a `LeaderboardEntriesFilterService` class that filters leaderboard entries based on their verification status. The service uses the TypeORM repository for the `LeaderboardEntry` entity to perform database queries. The `filterPrimaryLeaderboard` method filters primary leaderboards to only include VERIFIED entries and allows separate unverified sandbox boards.

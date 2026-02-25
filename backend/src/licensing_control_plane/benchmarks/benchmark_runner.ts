@@ -1,6 +1,3 @@
-Here is the TypeScript file `benchmark_runner.ts` following the specified rules:
-
-```typescript
 /**
  * Benchmark Runner for Point Zero One Digital's Financial Roguelike Game
  */

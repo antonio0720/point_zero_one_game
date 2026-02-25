@@ -1,6 +1,3 @@
-Here is the TypeScript file `backend/src/services/leaderboards/verification_flip_listener.ts` as per your specifications:
-
-```typescript
 /**
  * Verification Flip Listener service for handling status changes on leaderboard standings and writing audit entries.
  */

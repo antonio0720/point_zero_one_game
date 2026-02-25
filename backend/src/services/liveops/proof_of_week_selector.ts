@@ -69,8 +69,3 @@ export class ProofOfWeekSelector implements ProofOfWeekSelectorService {
     // Implement notification logic here
   }
 }
-```
-
-Please note that I have assumed the existence of `GameRun`, `WeeklyVerifiedRunsService`, and `ImpactScoreCalculatorService` interfaces/classes. Also, I have not included any database schema definitions as they were not explicitly requested in your spec.
-
-Regarding SQL, YAML/JSON, Bash, and Terraform files, I'm an AI model and cannot directly generate those for you. However, I can help you design them if you provide more specific details about the required structure and fields.

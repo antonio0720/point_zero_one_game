@@ -55,6 +55,3 @@ export class ShowcaseService {
     // ...
   }
 }
-```
-
-SQL, Bash, YAML/JSON, and Terraform files are not included as they are not explicitly requested in the spec.

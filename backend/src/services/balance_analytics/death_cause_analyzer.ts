@@ -74,16 +74,3 @@ export class DeathCauseAnalyzerService {
     return groupedByFailureModeAndCardId;
   }
 }
-```
-
-For the SQL, I'll provide a simplified version as it wasn't explicitly requested in your spec:
-
-```sql
-CREATE TABLE IF NOT EXISTS run_outcomes (
-  id INT PRIMARY KEY AUTO_INCREMENT,
-  turn_id INT NOT NULL,
-  card_id INT NOT NULL,
-  failure_mode ENUM('RUN_OUT_OF_CARDS', 'OTHER') NOT NULL,
-  FOREIGN KEY (turn_id) REFERENCES turns(id),
-  FOREIGN KEY (card_id) REFERENCES cards(id)
-);

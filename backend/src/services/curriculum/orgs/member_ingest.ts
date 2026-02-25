@@ -90,6 +90,3 @@ async function ingest(input: string | URL): Promise<void> {
 
 // Export the ingest function as a public symbol
 export { ingest };
-```
-
-Please note that this is just an example implementation and does not include actual database schema, SQL queries, bash scripts, or Terraform configurations. The TypeScript code follows the specified rules for strict types, no 'any', exporting all public symbols, and including JSDoc comments.

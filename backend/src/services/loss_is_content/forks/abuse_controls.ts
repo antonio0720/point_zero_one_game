@@ -1,6 +1,3 @@
-Here is the TypeScript file `backend/src/services/loss_is_content/forks/abuse_controls.ts` with strict types, no 'any', exporting all public symbols, and including JSDoc comments:
-
-```typescript
 /**
  * Abuse control service for managing player forks to prevent abuse and ensure fairness in the game.
  */

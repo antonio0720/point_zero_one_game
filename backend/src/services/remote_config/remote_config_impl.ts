@@ -1,6 +1,3 @@
-Here is the TypeScript file `backend/src/services/remote_config/remote_config_impl.ts` with strict types, no 'any', exporting public symbols, and including JSDoc comments:
-
-```typescript
 import { RemoteConfigService } from './remote-config.service';
 
 declare class RemoteConfigImpl implements RemoteConfigService {
@@ -43,8 +40,4 @@ declare class RemoteConfigImpl implements RemoteConfigService {
 }
 
 export { RemoteConfigImpl };
-```
 
-In this example, I've created a class `RemoteConfigImpl` that implements the `RemoteConfigService` interface. The class has methods to get flags for cockpit modules, overlays, and after-screen variants, as well as functions to inject early pressure events and set macro twist timing. Each method is asynchronous (using `Promise`) where appropriate.
-
-The class exports the `RemoteConfigImpl` constructor function, making it publicly accessible. I've also included JSDoc comments for each public symbol to provide documentation on their purpose and usage.

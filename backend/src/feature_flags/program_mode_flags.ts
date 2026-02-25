@@ -1,6 +1,3 @@
-Here is the TypeScript file `backend/src/feature_flags/program_mode_flags.ts` as per your specifications:
-
-```typescript
 /**
  * Feature flags for institution program overlays.
  */

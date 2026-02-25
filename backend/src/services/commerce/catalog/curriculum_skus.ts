@@ -56,48 +56,4 @@ export class CurriculumSkuService {
     // Implement updating logic here
   }
 }
-```
 
-SQL (PostgreSQL):
-
-```sql
--- Commerce Catalog - Curriculum SKUs Table
-CREATE TABLE IF NOT EXISTS commerce_curriculum_skus (
-  id SERIAL PRIMARY KEY,
-  curriculum_id UUID NOT NULL,
-  sku_id UUID NOT NULL,
-  content_access_tags JSONB[] NOT NULL,
-  CONSTRAINT fk_commerce_curriculum_skus_curriculum FOREIGN KEY (curriculum_id) REFERENCES commerce_curriculums(id),
-  CONSTRAINT fk_commerce_curriculum_skus_sku FOREIGN KEY (sku_id) REFERENCES commerce_skus(id)
-);
-```
-
-Terraform:
-
-```hcl
-resource "postgresql_table" "commerce_curriculum_skus" {
-  schema = "public"
-  name   = "commerce_curriculum_skus"
-
-  columns = [
-    { name = "id"; type = "serial" },
-    { name = "curriculum_id"; type = "uuid" },
-    { name = "sku_id"; type = "uuid" },
-    { name = "content_access_tags"; type = "jsonb[]" },
-  ]
-
-  foreign_keys = [
-    {
-      name        = "fk_commerce_curriculum_skus_curriculum"
-      references  = "${postgresql_table.commerce_curriculums.name}"
-      columns     = ["curriculum_id"]
-      referenced_columns = ["id"]
-    },
-    {
-      name        = "fk_commerce_curriculum_skus_sku"
-      references  = "${postgresql_table.commerce_skus.name}"
-      columns     = ["sku_id"]
-      referenced_columns = ["id"]
-    },
-  ]
-}

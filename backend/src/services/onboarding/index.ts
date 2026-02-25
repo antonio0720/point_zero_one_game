@@ -87,29 +87,5 @@ export const canProceedToNextEpisode = async (req: Request, res: Response) => {
   // Send response with the result of the check
   res.json({ canProceed: episodeCompleted });
 };
-```
 
 Please replace `your_database_*` with your actual database credentials and adjust the SQL queries as needed for your specific database schema.
-
-Regarding the SQL, here's an example of how you might create the tables in PostgreSQL:
-
-```sql
-CREATE TABLE players (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  currentStage INTEGER NOT NULL,
-  currentEpisode INTEGER NOT NULL
-);
-
-CREATE TABLE onboarding_arcs (
-  stage INTEGER PRIMARY KEY,
-  episode INTEGER NOT NULL,
-  UNIQUE (stage, episode)
-);
-
-CREATE TABLE game_data (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  playerId UUID NOT NULL REFERENCES players(id),
-  currentStage INTEGER NOT NULL,
-  currentEpisode INTEGER NOT NULL,
-  FOREIGN KEY (playerId, currentStage) REFERENCES players(id, currentStage)
-);

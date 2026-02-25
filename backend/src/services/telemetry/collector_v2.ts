@@ -46,26 +46,3 @@ export class Collector {
  * Payload allowlist configuration for the Collector.
  */
 export const payloadAllowlist = new PayloadAllowlist();
-```
-
-Regarding SQL, I'm unable to generate SQL code without knowing the specific database system and table structure. However, here is an example of how you might create a table in PostgreSQL:
-
-```sql
-CREATE TABLE IF NOT EXISTS events (
-  id SERIAL PRIMARY KEY,
-  event_type VARCHAR(255) NOT NULL,
-  payload JSONB,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-);
-```
-
-For Bash, YAML/JSON, and Terraform, I'm unable to generate code without knowing the specific context or requirements. However, here is an example of how you might set up a Bash script with the specified options:
-
-```bash
-#!/bin/bash
-set -euo pipefail
-
-echo "Starting script"
-# Perform actions here
-echo "Script completed"

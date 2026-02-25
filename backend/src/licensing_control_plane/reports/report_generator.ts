@@ -1,6 +1,3 @@
-Here is the TypeScript file `backend/src/licensing_control_plane/reports/report_generator.ts` following the specified rules:
-
-```typescript
 /**
  * Report Generator for Point Zero One Digital's financial roguelike game.
  */

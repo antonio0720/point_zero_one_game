@@ -1,6 +1,3 @@
-Here is the TypeScript file `backend/src/services/biometric/biometric_oracle.ts` as per your specifications:
-
-```typescript
 /**
  * BiometricOracle service for Point Zero One Digital's financial roguelike game.
  */
@@ -68,8 +65,3 @@ export class BiometricOracle {
     this.logger.info(`Applied multiplier: ${multiplier}`);
   }
 }
-```
-
-Please note that the actual implementation of the `computeMultiplier` method should be replaced with your deterministic logic for calculating the card effect multiplier based on the provided stress score.
-
-Regarding SQL, Bash, YAML/JSON, and Terraform files, I cannot generate them as they are not part of the TypeScript file you requested. However, I can help you create those files if needed, following your specifications for each respective language.

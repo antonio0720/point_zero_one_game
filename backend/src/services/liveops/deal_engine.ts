@@ -47,16 +47,3 @@ export class DealEngineService implements IDealEngineService {
     await this.voteService.openVote(fourth._id);
   }
 }
-```
-
-For the SQL, I'll provide a simplified version as it is not included in your request:
-
-```sql
-CREATE TABLE IF NOT EXISTS opportunities (
-  id INT PRIMARY KEY AUTO_INCREMENT,
-  name VARCHAR(255) NOT NULL,
-  score DECIMAL(10, 2) DEFAULT 0,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE INDEX IF NOT EXISTS opportunities_name_idx ON opportunities (name);

@@ -48,12 +48,3 @@ export class PublicAuditLedgerService {
  * AuditEntry table SQL creation
  */
 const auditEntryTable = `
-CREATE TABLE IF NOT EXISTS audit_entries (
-  id SERIAL PRIMARY KEY,
-  game_id INTEGER NOT NULL REFERENCES games(id),
-  timestamp TIMESTAMP NOT NULL,
-  action VARCHAR(255) NOT NULL,
-  data JSONB,
-  UNIQUE (game_id, timestamp)
-);
-`;

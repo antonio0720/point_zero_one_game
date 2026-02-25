@@ -1,6 +1,3 @@
-Here is the TypeScript file `backend/src/services/after_autopsy/after_autopsy_impl.ts` with strict types, no 'any', export all public symbols, and JSDoc comments:
-
-```typescript
 /**
  * AfterAutopsyImpl service implementation for Point Zero One Digital's financial roguelike game.
  */
@@ -15,9 +12,7 @@ export class AfterAutopsyImpl {
     // Implementation details omitted for brevity.
   }
 }
-```
 
-Regarding the SQL, Bash, YAML/JSON, and Terraform files, I cannot generate them without specific requirements or examples as per your request. However, I can provide you with guidelines on how to write those files following the given rules:
 
 - SQL: Use `CREATE TABLE IF NOT EXISTS` for tables, include indexes, foreign keys, comments, and proper naming conventions.
 - Bash: Set environment variables, use set -euo pipefail, log all actions with echo or similar commands.

@@ -1,6 +1,3 @@
-Here is the TypeScript file `backend/src/content_ops/pack_authoring/publish_receipts.ts` following the specified rules:
-
-```typescript
 /**
  * PublishReceipt represents a receipt for publishing content packs.
  */

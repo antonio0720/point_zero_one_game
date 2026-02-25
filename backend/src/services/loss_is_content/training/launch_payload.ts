@@ -1,6 +1,3 @@
-Here is the TypeScript file `backend/src/services/loss_is_content/training/launch_payload.ts` following the specified rules:
-
-```typescript
 /**
  * Launch payload for training a weakness in the game.
  */

@@ -1,6 +1,3 @@
-Here is the TypeScript file `backend/src/deploy/deployment_orchestrator/index.ts` as per your specifications:
-
-```typescript
 /**
  * DeploymentOrchestrator class for managing deployments
  */
@@ -55,8 +52,5 @@ export class DeploymentOrchestrator {
     // Implement DeploymentReceipt emitting logic here
   }
 }
-```
 
-Please note that this is a basic structure and you would need to implement the actual logic for each method (migrate, flipRemoteConfigGates, triggerCDNInvalidations, emitDeploymentReceipt). Also, SQL, Bash, YAML/JSON/Terraform code snippets are not included as they were not explicitly requested in this example.
 
-Regarding the game engine or replay determinism, it would be best to consult with the game development team to ensure that any relevant parts of the codebase maintain deterministic behavior.

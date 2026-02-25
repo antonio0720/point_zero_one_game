@@ -1,6 +1,3 @@
-Here is the TypeScript file `backend/src/services/streaks/grace_rules_registry.ts` as per your specifications:
-
-```typescript
 /**
  * Grace Rules Registry for Point Zero One Digital's financial roguelike game
  */

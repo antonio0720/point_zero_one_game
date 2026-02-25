@@ -70,30 +70,3 @@ export class CreatorProfileService {
     return creatorProfile;
   }
 }
-```
-
-For the SQL schema, I'll provide a simplified version without the foreign keys and indexes for brevity:
-
-```sql
-CREATE TABLE IF NOT EXISTS CreatorProfiles (
-  id SERIAL PRIMARY KEY,
-  level VARCHAR(255) NOT NULL,
-  apprentice_id INTEGER REFERENCES Apprentices(id),
-  certified_id INTEGER REFERENCES Certified(id),
-  season_partner_id INTEGER REFERENCES SeasonPartners(id)
-);
-
-CREATE TABLE IF NOT EXISTS Apprentices (
-  id SERIAL PRIMARY KEY,
-  // apprentice-specific columns here
-);
-
-CREATE TABLE IF NOT EXISTS Certified (
-  id SERIAL PRIMARY KEY,
-  // certified-specific columns here
-);
-
-CREATE TABLE IF NOT EXISTS SeasonPartners (
-  id SERIAL PRIMARY KEY,
-  // season_partner-specific columns here
-);

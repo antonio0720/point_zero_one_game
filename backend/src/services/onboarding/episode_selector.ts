@@ -1,6 +1,3 @@
-Here is the TypeScript file `backend/src/services/onboarding/episode_selector.ts` as per your specifications:
-
-```typescript
 /**
  * Episode Selector Service
  */
@@ -41,6 +38,4 @@ export class EpisodeSelectorService implements IEpisodeSelectorService {
     return baseQuery.exec();
   }
 }
-```
 
-This TypeScript file defines an `EpisodeSelectorService` that retrieves a list of episodes for a given stage, taking into account remote overrides via feature flags. The service uses the NestJS framework and Mongoose to interact with MongoDB. It follows strict types, exports all public symbols, and includes JSDoc comments.

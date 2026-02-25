@@ -54,44 +54,4 @@ const PatchNoteSchema = new Mongoose.Schema({
 });
 
 export const PatchNote = PatchNoteSchema.index({ cardId: 1 });
-```
 
-```sql
--- Patch Note Collection
-CREATE TABLE IF NOT EXISTS patch_notes (
-    _id INT AUTO_INCREMENT PRIMARY KEY,
-    card_id VARCHAR(255) NOT NULL,
-    version INT NOT NULL,
-    rollout TINYINT(1) DEFAULT 0,
-    content TEXT NOT NULL,
-    INDEX (card_id)
-);
-```
-
-```bash
-#!/bin/bash
-set -euo pipefail
-
-echo "Creating patch_notes table"
-psql -f ./db/schema.sql
-
-echo "Migrating database"
-npm run migrate
-```
-
-```yaml
-patch_notes:
-  type: object
-  properties:
-    cardId:
-      type: string
-      description: The unique identifier of the card.
-    version:
-      type: number
-      description: The version number of the patch note.
-    rollout:
-      type: boolean
-      description: Indicates whether this patch note is currently rolled out.
-    content:
-      type: string
-      description: The content of the patch note.

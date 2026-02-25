@@ -1,6 +1,3 @@
-Here is the TypeScript file `backend/src/services/partners/share_governance/share_governance_impl.ts` based on your specifications:
-
-```typescript
 /**
  * Share Governance Implementation
  */

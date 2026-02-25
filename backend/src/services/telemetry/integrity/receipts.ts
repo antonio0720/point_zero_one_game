@@ -52,31 +52,3 @@ export class ReceiptsService {
     return this.receiptsRepository.save(receipt);
   }
 }
-```
-
-For SQL, I'll provide a PostgreSQL example:
-
-```sql
--- Receipts table
-CREATE TABLE IF NOT EXISTS receipts (
-  id SERIAL PRIMARY KEY,
-  rollup_id INTEGER NOT NULL REFERENCES rollups(id),
-  anomaly_id INTEGER,
-  patch_note_publication_id INTEGER,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-);
-
--- Indexes for foreign keys
-CREATE INDEX IF NOT EXISTS idx_receipts_anomaly_id ON receipts (anomaly_id);
-CREATE INDEX IF NOT EXISTS idx_receipts_patch_note_publication_id ON receipts (patch_note_publication_id);
-```
-
-For Bash, I'll provide an example of logging all actions:
-
-```bash
-#!/bin/bash
-set -euo pipefail
-
-echo "Starting action"
-command
-echo "Action completed"

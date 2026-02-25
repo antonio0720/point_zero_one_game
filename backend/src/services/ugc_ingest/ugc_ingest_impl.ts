@@ -1,6 +1,3 @@
-Here is the TypeScript code for implementing the SUBMITTED state as requested:
-
-```typescript
 /**
  * UGC Ingest Service Implementation
  */
@@ -42,6 +39,3 @@ class UgcIngestImpl {
 }
 
 export { UgcIngestImpl };
-```
-
-This code defines the `UgcIngestImpl` class that implements the `submitUgc` method to handle the SUBMITTED state. It computes the content hash, stores a new version of the UGC in the database, emits an event for UGC_SUBMITTED, and starts stage timers (assuming there's a separate service or function for managing game stages). The code follows strict TypeScript types, exports all public symbols, and includes JSDoc comments.

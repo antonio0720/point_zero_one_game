@@ -61,8 +61,4 @@ export class FeatureFlagRolloutService {
     await this.featureFlagRolloutRepository.save(currentRollout);
   }
 }
-```
 
-This TypeScript file defines a `FeatureFlagRolloutService` that manages feature flag rollouts in the game. It uses the NestJS framework and TypeORM for database operations. The service provides two methods: `startRollout` and `revertRollout`. The former starts a new rollout for a given feature flag, while the latter reverts the rollout to the previous state.
-
-The code follows strict types, uses no 'any', exports all public symbols, and includes JSDoc comments.

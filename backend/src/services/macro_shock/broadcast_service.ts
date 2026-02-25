@@ -22,8 +22,3 @@ export function broadcastMacroShockCard(macroShockCard: MacroShockCard): void {
   const shockBroadcastEvent = new ShockBroadcastEvent(macroShockCard.id);
   // (Assuming there's a database or storage system to persist events)
 }
-```
-
-Please note that the code above assumes the existence of `EventBus`, `GameEvent`, `MacroShockCard`, and `ShockBroadcastEvent`. These should be imported from other modules, as per your project structure. Also, I've assumed there is a mechanism in place for enqueuing events for next-turn injection.
-
-Regarding the SQL, YAML/JSON, Bash parts of your request, they are not included since you specifically asked for TypeScript output only. If you need help with those parts later, feel free to ask!

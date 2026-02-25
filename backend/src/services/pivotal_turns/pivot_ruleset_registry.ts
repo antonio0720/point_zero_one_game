@@ -1,6 +1,3 @@
-Here is the TypeScript code for `backend/src/services/pivotal_turns/pivot_ruleset_registry.ts`:
-
-```typescript
 /**
  * Pivot Ruleset Registry service
  */

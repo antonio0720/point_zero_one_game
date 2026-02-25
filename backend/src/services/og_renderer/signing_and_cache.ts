@@ -1,6 +1,3 @@
-Here is the TypeScript code for the `signing_and_cache.ts` file as per your specifications:
-
-```typescript
 /**
  * Signing and Cache Service for Point Zero One Digital
  */
@@ -47,6 +44,4 @@ export function getSignedUrlIfNotQuarantined(fileType: FileType, policy: Policy)
   }
   return getSignedUrl(fileType, policy);
 }
-```
 
-This TypeScript code defines a `signing_and_cache.ts` file that includes functions for generating signed URLs with given policies and types, managing a cache of signed URLs, checking if a file is quarantined, and retrieving a signed URL only if the file is not quarantined. The code follows strict TypeScript type rules, exports all public symbols, and includes JSDoc comments for each function.

@@ -1,6 +1,3 @@
-Here is the TypeScript file `backend/src/services/ugc_verification/deterministic_sim_check.ts` as requested:
-
-```typescript
 /**
  * Deterministic Simulation Check Service
  */

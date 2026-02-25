@@ -81,29 +81,3 @@ export class ReferralRewardUnlocksService {
     }
   }
 }
-```
-
-For the SQL, I'll provide a simplified version as it's not included in your request:
-
-```sql
-CREATE TABLE IF NOT EXISTS referrals (
-  id VARCHAR(255) PRIMARY KEY,
-  userId VARCHAR(255),
-  referrerId VARCHAR(255),
-  completionTime DATETIME DEFAULT NULL,
-);
-
-CREATE TABLE IF NOT EXISTS reward_unlocks (
-  id VARCHAR(255) PRIMARY KEY,
-  referralId VARCHAR(255),
-  cosmeticEvolutionVariantId VARCHAR(255),
-  stampVariantId VARCHAR(255),
-  FOREIGN KEY (referralId) REFERENCES referrals(id),
-);
-
-CREATE TABLE IF NOT EXISTS receipts (
-  id VARCHAR(255) PRIMARY KEY,
-  referralId VARCHAR(255),
-  timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (referralId) REFERENCES referrals(id),
-);

@@ -1,6 +1,3 @@
-Here is the TypeScript file `backend/src/services/ladders/casual_controls/plausibility_caps.ts` as per your specifications:
-
-```typescript
 /**
  * Plausibility Caps Service for Casual Controls
  */

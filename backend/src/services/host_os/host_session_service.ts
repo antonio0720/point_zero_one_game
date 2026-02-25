@@ -62,24 +62,3 @@ export class HostSessionService implements IHostSessionService {
     this.retentionAnalyticsService.emitHostSessionCompletedEvent(sessionId);
   }
 }
-```
-
-For the SQL, I'll provide a simplified version as it's not included in your request:
-
-```sql
-CREATE TABLE IF NOT EXISTS game_sessions (
-    id VARCHAR(255) PRIMARY KEY,
-    game_id VARCHAR(255),
-    status ENUM('upcoming', 'in-progress', 'completed'),
-    attendees JSON DEFAULT '[]'
-);
-
-CREATE TABLE IF NOT EXISTS moment_captures (
-    id VARCHAR(255) PRIMARY KEY,
-    session_id VARCHAR(255),
-    timestamp TIMESTAMP,
-    event ENUM('start', 'end'),
-    data JSON
-);
-
-ALTER TABLE game_sessions ADD FOREIGN KEY (game_id) REFERENCES games(id);

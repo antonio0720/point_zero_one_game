@@ -1,6 +1,3 @@
-Here is the TypeScript file `backend/src/services/curriculum/guides/next_run_recommendations.ts` as per your specifications:
-
-```typescript
 /**
  * Service for generating next-run recommendations based on run behavior and pack objective.
  */

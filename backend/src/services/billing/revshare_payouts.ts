@@ -72,48 +72,4 @@ export const RevsharePayoutSchema = new Mongoose.Schema({
 });
 RevsharePayoutSchema.index({ deal_id: 1, broker_id: 1 }, { unique: true });
 export const RevsharePayout = RevsharePayoutSchema.options({ strict: true, toJSON: { virtuals: true } });
-```
 
-SQL (PostgreSQL):
-
-```sql
-CREATE TABLE IF NOT EXISTS revenue_share_payouts (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  deal_id UUID NOT NULL REFERENCES deals(id),
-  broker_id UUID NOT NULL REFERENCES brokers(id),
-  schedule VARCHAR(255) NOT NULL CHECK (schedule IN ('monthly', 'quarterly')),
-  UNIQUE (deal_id, broker_id)
-);
-```
-
-Terraform:
-
-```hcl
-resource "postgresql_table" "revshare_payouts" {
-  name = "revenue_share_payouts"
-  schema = postgresql_schema.public
-
-  columns = [
-    { name = "id"; type = "uuid"; is_primary_key = true },
-    { name = "deal_id"; type = "uuid"; references = { table = "deals", column = "id" } },
-    { name = "broker_id"; type = "uuid"; references = { table = "brokers", column = "id" } },
-    { name = "schedule"; type = "varchar(255)" },
-  ]
-
-  unique_indexes = [
-    { columns = ["deal_id", "broker_id"] },
-  ]
-
-  check_constraints = [
-    { name = "check_revshare_payout_schedule", expression = "schedule IN ('monthly', 'quarterly')" }
-  ]
-}
-```
-
-Bash (example script for creating the table):
-
-```bash
-#!/bin/sh
-set -euo pipefail
-
-psql -h localhost -U postgres -f ./migrations/20230315_create_revenue_share_payouts.sql

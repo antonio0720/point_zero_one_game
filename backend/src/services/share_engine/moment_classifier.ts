@@ -76,15 +76,3 @@ export class MomentClassifier {
     return Math.max(...this.moments.map((moment) => moment.id)) + 1;
   }
 }
-```
-
-Regarding the SQL schema, I'll provide an example for a PostgreSQL database:
-
-```sql
-CREATE TABLE IF NOT EXISTS share_moments (
-    id SERIAL PRIMARY KEY,
-    run_id INTEGER NOT NULL REFERENCES runs(id),
-    type VARCHAR(255) NOT NULL CHECK (type IN ('Opportunity_Flip', 'FUBAR_Death', 'Missed_Bag', 'Survival')),
-    confidence_score DECIMAL(5, 4) NOT NULL,
-    timestamp TIMESTAMP WITH TIME ZONE NOT NULL
-);

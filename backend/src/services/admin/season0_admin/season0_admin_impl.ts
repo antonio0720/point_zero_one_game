@@ -1,6 +1,3 @@
-Here is the TypeScript file `backend/src/services/admin/season0_admin/season0_admin_impl.ts` with strict types, no 'any', exporting all public symbols, and including JSDoc comments:
-
-```typescript
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
@@ -66,47 +63,11 @@ export class Season0AdminService {
     this.auditLogService.log(`Abuse flag reviewed: ${decision}`, { abuseFlagId: abuseFlag._id });
   }
 }
-```
 
 Here is the SQL script for creating the necessary tables with indexes and foreign keys:
 
-```sql
-CREATE TABLE IF NOT EXISTS season0_admins (
-    id VARCHAR(255) PRIMARY KEY,
-    username VARCHAR(255) UNIQUE NOT NULL,
-    isInvalidated BOOLEAN DEFAULT false,
-);
-
-CREATE INDEX IF NOT EXISTS idx_season0_admins_username ON season0_admins (username);
-
-CREATE TABLE IF NOT EXISTS invites (
-    id VARCHAR(255) PRIMARY KEY,
-    season0AdminId VARCHAR(255) NOT NULL,
-    isInvalidated BOOLEAN DEFAULT false,
-    FOREIGN KEY (season0AdminId) REFERENCES season0_admins(id) ON DELETE CASCADE,
-);
-
-CREATE INDEX IF NOT EXISTS idx_invites_season0adminId ON invites (season0AdminId);
-
-CREATE TABLE IF NOT EXISTS abuse_flags (
-    id VARCHAR(255) PRIMARY KEY,
-    season0AdminId VARCHAR(255) NOT NULL,
-    decision ENUM('accept', 'reject') DEFAULT 'pending',
-    FOREIGN KEY (season0AdminId) REFERENCES season0_admins(id) ON DELETE CASCADE,
-);
-
-CREATE INDEX IF NOT EXISTS idx_abuse_flags_season0adminId ON abuse_flags (season0AdminId);
-```
 
 Here is a Bash script with set -euo pipefail and logging all actions:
 
-```bash
-#!/bin/bash
-set -euo pipefail
-
-echo "Starting action"
-# Your command here
-echo "Action completed"
-```
 
 For the YAML/JSON/Terraform output, it would depend on the specific infrastructure and configuration management tool being used. I'll leave that part out since it wasn't explicitly requested in this example.

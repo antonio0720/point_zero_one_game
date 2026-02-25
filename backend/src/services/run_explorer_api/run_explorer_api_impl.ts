@@ -1,6 +1,3 @@
-Here is the TypeScript implementation for the specified endpoints:
-
-```typescript
 // backend/src/services/run_explorer_api/run_explorer_api_impl.ts
 
 import express from 'express';
@@ -48,8 +45,5 @@ router.get('/verification', async (req: Request, res: Response) => {
 });
 
 export default router;
-```
 
-Please note that this is a TypeScript implementation for the specified endpoints and assumes the existence of models `RunExplorer`, `Turn`, and `VerificationPanel`. The models should be defined elsewhere in your project, and they should have strict types with no 'any'.
 
-Also, I've assumed that you are using Mongoose as the ORM for MongoDB. If that is not the case, please adjust the code accordingly.

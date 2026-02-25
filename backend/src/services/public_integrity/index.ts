@@ -60,42 +60,4 @@ export class PublicIntegrityService {
     await this.replayRepository.save(replay);
   }
 }
-```
 
-```sql
--- PublicIntegrity service database schema
-
-CREATE TABLE IF NOT EXISTS proofs (
-  id SERIAL PRIMARY KEY,
-  game_session_id INTEGER NOT NULL,
-  proof_data BYTEA NOT NULL,
-  UNIQUE (game_session_id)
-);
-
-CREATE TABLE IF NOT EXISTS replays (
-  id SERIAL PRIMARY KEY,
-  game_session_id INTEGER NOT NULL,
-  replay_data BYTEA NOT NULL,
-  UNIQUE (game_session_id)
-);
-```
-
-```bash
-#!/bin/sh
-set -euo pipefail
-
-echo "Saving proof data"
-# Save proof data here
-
-echo "Saving replay data"
-# Save replay data here
-```
-
-```yaml
-apiVersion: v1
-kind: GameSession
-metadata:
-  name: example-game-session
-spec:
-  proofData: <base64 encoded proof data>
-  replayData: <base64 encoded replay data>

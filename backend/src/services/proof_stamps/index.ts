@@ -59,44 +59,4 @@ export class ProofStampService {
     return this.proofStampVariantsRepository.find();
   }
 }
-```
 
-SQL:
-
-```sql
--- Proof Stamps table
-CREATE TABLE IF NOT EXISTS proof_stamps (
-  id SERIAL PRIMARY KEY,
-  game_id INTEGER NOT NULL REFERENCES games(id),
-  variant_id INTEGER NOT NULL REFERENCES proof_stamp_variants(id),
-  timestamp TIMESTAMP NOT NULL,
-  proof_hash VARCHAR(255) NOT NULL,
-);
-
--- Proof Stamp Variants table
-CREATE TABLE IF NOT EXISTS proof_stamp_variants (
-  id SERIAL PRIMARY KEY,
-  name VARCHAR(255) NOT NULL,
-  description TEXT,
-);
-```
-
-Bash:
-
-```bash
-#!/bin/sh
-set -euo pipefail
-echo "Action: $0"
-```
-
-Terraform (example):
-
-```hcl
-resource "aws_rds_instance" "proof_stamps_db" {
-  allocated_storage = 20
-  engine            = "postgres"
-  instance_class    = "db.t3.micro"
-  name              = "proof-stamps-db"
-  username           = "proof_stamps_user"
-  password           = "secret_password"
-}

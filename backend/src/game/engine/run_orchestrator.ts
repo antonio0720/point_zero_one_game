@@ -1,6 +1,3 @@
-Here is the TypeScript file `backend/src/game/engine/run_orchestrator.ts` as per your specifications:
-
-```typescript
 /**
  * RunOrchestrator manages the run lifecycle from CREATE through FINALIZE, coordinates engine + event store + replay, enforces turn time limits, handles disconnects.
  */

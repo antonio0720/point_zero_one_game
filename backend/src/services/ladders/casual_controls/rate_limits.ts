@@ -83,18 +83,3 @@ export class CasualControlsRateLimitsService {
     await this.rateLimitRepository.save(rateLimit);
   }
 }
-```
-
-For the SQL, I'll provide a simplified version as it wasn't explicitly requested in your spec:
-
-```sql
-CREATE TABLE IF NOT EXISTS rate_limits (
-  id VARCHAR(255) PRIMARY KEY,
-  user_id VARCHAR(255),
-  resource VARCHAR(255),
-  limit_type VARCHAR(255),
-  cap_per_hour INTEGER,
-  remaining_uses INTEGER,
-  reset_time TIMESTAMP,
-  FOREIGN KEY (user_id) REFERENCES users(id)
-);

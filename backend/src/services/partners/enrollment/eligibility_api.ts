@@ -40,8 +40,3 @@ router.post('/', partnerAuth, async (req, res) => {
 });
 
 export default router;
-```
-
-This TypeScript file exports a router for handling partner-provided roster deltas via the Eligibility API. The `partnerAuth` middleware is used to authenticate partners, and the `/api/eligibility` endpoint processes the roster deltas from partners. The code follows strict TypeScript rules, uses JSDoc for documentation, and exports the public symbols.
-
-Regarding SQL, foreign keys, indexes, comments, and idempotent CREATE statements are not provided as they are not part of the given specification. Similarly, Bash scripts, YAML/JSON files, or Terraform configurations are not included since they were not explicitly requested in this example.

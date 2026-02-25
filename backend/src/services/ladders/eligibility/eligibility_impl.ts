@@ -1,6 +1,3 @@
-Here is the TypeScript file `backend/src/services/ladders/eligibility/eligibility_impl.ts` with strict types, no 'any', exporting all public symbols, and including JSDoc:
-
-```typescript
 /**
  * Eligibility service implementation for Point Zero One Digital's financial roguelike game.
  */

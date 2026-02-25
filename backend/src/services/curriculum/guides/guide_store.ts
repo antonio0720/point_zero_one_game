@@ -55,14 +55,3 @@ export class Guide {
   /** The redacted guide data */
   redaction: string;
 }
-```
-
-For SQL, I'll provide a simplified example as TypeORM handles database schema management and does not require manual SQL creation in this case. However, if you need help with the SQL for creating the necessary tables, here is an example:
-
-```sql
-CREATE TABLE `guides` (
-  `id` INT AUTO_INCREMENT PRIMARY KEY,
-  `scenario_version_id` INT NOT NULL,
-  `redaction` TEXT,
-  FOREIGN KEY (`scenario_version_id`) REFERENCES `scenario_versions`(`id`) ON DELETE CASCADE
-);

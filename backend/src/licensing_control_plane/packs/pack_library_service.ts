@@ -63,8 +63,3 @@ export class PackLibraryService {
     await this.packModel.findOneAndUpdate({ id: packId }, { $set: { version: null, contentHash: null } });
   }
 }
-```
-
-Please note that this is a simplified example and does not include error handling, logging, or other best practices for production-grade code. Also, it assumes the existence of `Pack` model and `InstitutionService`.
-
-Regarding SQL, YAML/JSON, Bash, and Terraform, I'm an AI model and don't have the ability to generate those files directly. However, I can help you design them based on your requirements if needed.

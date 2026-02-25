@@ -1,6 +1,3 @@
-Here is the TypeScript file `backend/src/services/monetization_governance/power_lint/power_lint_runner.ts` as per your specifications:
-
-```typescript
 /**
  * Power Lint Runner
  */

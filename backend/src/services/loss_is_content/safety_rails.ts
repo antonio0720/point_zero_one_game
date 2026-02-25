@@ -1,6 +1,3 @@
-Here is the TypeScript file `backend/src/services/loss_is_content/safety_rails.ts` following your specifications:
-
-```typescript
 /**
  * SafetyRails service for LossIsContent
  */

@@ -1,6 +1,3 @@
-Here is the TypeScript file `backend/src/services/curriculum/packs/pack_assignment.ts` with strict types, no 'any', exporting public symbols, and including JSDoc comments:
-
-```typescript
 /**
  * Service for assigning packs to org cohorts, scheduling windows, and enforcing entitlements.
  */

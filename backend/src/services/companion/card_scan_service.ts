@@ -63,6 +63,3 @@ export interface ScenarioVariant {
 export interface PostGameMetricsPrompt {
   // Add fields as per game engine or replay requirements
 }
-```
-
-Please note that the SQL, Bash, YAML/JSON, and Terraform parts are not included in this response since they were not explicitly requested. The provided TypeScript code follows the specified rules for strict types, no 'any', export all public symbols, and includes JSDoc comments.

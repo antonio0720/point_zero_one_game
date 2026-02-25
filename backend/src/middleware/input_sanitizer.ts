@@ -22,16 +22,3 @@ interface SanitizedRequest extends Request {
    */
   sanitizedInput: string;
 }
-```
-
-For the SQL schema, I'll provide a simplified example as it is not explicitly mentioned in your spec. Here's an example of how you might structure a table for storing sanitization events:
-
-```sql
-CREATE TABLE IF NOT EXISTS SanitizationEvents (
-  id INT PRIMARY KEY AUTO_INCREMENT,
-  userId INT NOT NULL,
-  inputText TEXT NOT NULL,
-  sanitizedInput TEXT NOT NULL,
-  timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (userId) REFERENCES Users(id)
-);

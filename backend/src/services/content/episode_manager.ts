@@ -1,6 +1,3 @@
-Here is the TypeScript file `backend/src/services/content/episode_manager.ts` as per your specifications:
-
-```typescript
 /**
  * Episode Manager service for managing episodes (scenario packs) in Point Zero One Digital's financial roguelike game.
  */

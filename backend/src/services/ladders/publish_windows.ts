@@ -1,6 +1,3 @@
-Here is the TypeScript code for implementing verified publish windows with anti-flicker rules and audit storage, adhering to the specified rules:
-
-```typescript
 /**
  * Service for managing publish windows and their associated data.
  */
@@ -72,35 +69,3 @@ class PublishWindowsService {
     this.audits.push({ windowId: undefined, action, timestamp });
   }
 }
-```
-
-For SQL schema creation, I'll provide a PostgreSQL example:
-
-```sql
-CREATE TABLE publish_windows (
-  id SERIAL PRIMARY KEY,
-  start_time TIMESTAMP NOT NULL,
-  end_time TIMESTAMP NOT NULL
-);
-
-CREATE TABLE audit_records (
-  id SERIAL PRIMARY KEY,
-  window_id INTEGER REFERENCES publish_windows(id),
-  action VARCHAR(255) NOT NULL,
-  data JSONB NOT NULL,
-  timestamp TIMESTAMP NOT NULL
-);
-```
-
-Lastly, here's a Bash script example for logging actions:
-
-```bash
-#!/bin/sh
-set -euo pipefail
-
-ACTION="$1"
-DATA="$2"
-TIMESTAMP="$(date)"
-echo "Action: $ACTION"
-echo "Data: $DATA"
-echo "Timestamp: $TIMESTAMP" >> audit.log

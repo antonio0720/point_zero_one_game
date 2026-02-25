@@ -1,6 +1,3 @@
-Here is the TypeScript file `backend/src/services/creator_quotas/creator_quotas_impl.ts` as requested:
-
-```typescript
 /**
  * Creator Quotas Implementation
  */
@@ -45,6 +42,3 @@ export class CreatorQuotasService {
     return this.quotaRepository.save(newQuota);
   }
 }
-```
-
-This TypeScript file exports an `CreatorQuotasService` class that handles the creation and management of creator quotas in the game. The service uses the TypeORM repository pattern to interact with a `Quota` entity, which represents a creator's quota for a specific level. The `create()` method takes a `CreateQuotaDto` object as an argument, which contains the necessary data to create or update a creator's quota. If a quota already exists for the given level, it will be updated with new limits and throttle settings; otherwise, a new quota will be created.

@@ -1,6 +1,3 @@
-Here is the TypeScript file `backend/src/services/after_action/failure_mode_classifier.ts`:
-
-```typescript
 /**
  * FailureModeClassifier service for classifying failure modes from run outcome and event log.
  */

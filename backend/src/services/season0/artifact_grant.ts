@@ -1,6 +1,3 @@
-Here is the TypeScript file `backend/src/services/season0/artifact_grant.ts` based on your specifications:
-
-```typescript
 /**
  * Grant artifact bundle on join, ensure atomic issuance, attach receipt, return immediate identity payload
  */
@@ -18,15 +15,3 @@ async function grantArtifact(playerId: number): Promise<IdentityPayload> {
   }
 
   const receiptId = await db.one(`
-    INSERT INTO receipts (player_id, artifact_bundle_id)
-    VALUES ($1, $2) RETURNING id;
-  `, [playerId, artifactBundle.id]);
-
-  return {
-    playerId,
-    receiptId,
-    artifactBundle: artifactBundle.bundle,
-  };
-}
-
-export { grantArtifact };

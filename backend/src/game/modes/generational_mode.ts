@@ -1,6 +1,3 @@
-Here is the TypeScript file `backend/src/game/modes/generational_mode.ts` as per your specifications:
-
-```typescript
 /**
  * Generational Mode for Point Zero One Digital's financial roguelike game
  */

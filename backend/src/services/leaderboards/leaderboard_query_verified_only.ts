@@ -1,6 +1,3 @@
-Here is the TypeScript file `backend/src/services/leaderboards/leaderboard_query_verified_only.ts` as per your specifications:
-
-```typescript
 /**
  * Query leaderboard with only verified runs.
  */
@@ -26,8 +23,3 @@ export async function getCompetitiveLeaderboard(): Promise<Leaderboard[]> {
 
   return competitiveLeaderboard;
 }
-```
-
-Please note that this is a simplified example and may not cover all the complexities of your specific use case. You might need to adjust it according to your project's requirements.
-
-Regarding SQL, Bash, YAML/JSON, and Terraform, I am an AI model and cannot directly generate those files for you. However, I can help you design them based on the TypeScript code provided above.

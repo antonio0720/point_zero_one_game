@@ -1,0 +1,43 @@
+{
+  "name": "@density6/pzo-backend",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Point Zero One backend (NestJS + TypeORM + workers)",
+  "license": "UNLICENSED",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "main": "dist/src/index.js",
+  "scripts": {
+    "clean": "rimraf dist .tsbuildinfo",
+    "build": "npm run clean && tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "dev:index": "tsx watch --clear-screen=false src/index.ts",
+    "dev:main": "tsx watch --clear-screen=false src/main.ts",
+    "start:index": "node dist/src/index.js",
+    "start:main": "node dist/src/main.js"
+  },
+  "dependencies": {
+    "@nestjs/common": "^11.0.3",
+    "@nestjs/core": "^11.0.3",
+    "@nestjs/platform-express": "^11.0.3",
+    "@nestjs/typeorm": "^11.0.0",
+    "bullmq": "^5.34.10",
+    "express": "^4.21.2",
+    "ioredis": "^5.4.2",
+    "joi": "^17.13.3",
+    "pg": "^8.13.3",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.1",
+    "typeorm": "^0.3.20"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.13.10",
+    "rimraf": "^6.0.1",
+    "ts-node": "^10.9.2",
+    "tsx": "^4.19.3",
+    "typescript": "^5.7.3"
+  }
+}

@@ -1,6 +1,3 @@
-Here is the TypeScript file `backend/src/services/loss_is_content/cause_of_death/survival_hint_builder.ts`:
-
-```typescript
 /**
  * SurvivalHintBuilder class to generate minimal 'if you had X you survive' hint based on thresholds and missed actions.
  */

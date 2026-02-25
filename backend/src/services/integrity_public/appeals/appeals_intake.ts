@@ -1,6 +1,3 @@
-Here is the TypeScript file `backend/src/services/integrity_public/appeals/appeals_intrate.ts` with strict types, no 'any', JSDoc comments, and exporting all public symbols:
-
-```typescript
 /**
  * Appeals Intake Service
  */
@@ -56,6 +53,3 @@ export const appealsIntake = (req: Request, res: Response) => {
     res.json({ receipt });
   });
 };
-```
-
-This TypeScript file includes a rate limiter for appeals per account/device, validation of the appeal schema, storing events, and generating a receipt. The `appealsIntake` function handles incoming POST requests to create an appeal.

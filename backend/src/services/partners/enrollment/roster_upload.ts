@@ -91,10 +91,4 @@ export class PartnerGamePlayerEntity {
   @Column({ type: 'enum', enum: ['eligible', 'ineligible'], default: 'eligible' })
   eligibilityState: string;
 }
-```
 
-This TypeScript file defines a RosterUploadService that reads a CSV file containing partner rosters, validates the data, and performs idempotent upserts or updates to the PartnerGamePlayerEntity in a TypeORM database. The service follows strict types, uses JSDoc for documentation, and exports all public symbols as required.
-
-The SQL schema for the PartnerGamePlayerEntity is not included here since it was not explicitly requested in your spec. However, I would recommend creating an index on `partnerId`, `gameId`, and `playerId` to improve query performance. Additionally, foreign key constraints should be added between PartnerGamePlayerEntity and any other related entities in the database schema.
-
-For the Bash, YAML/JSON, or Terraform parts of your request, please create separate questions as they require different formats and contexts.

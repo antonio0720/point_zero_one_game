@@ -1,6 +1,3 @@
-Here is the TypeScript file `backend/src/services/ladders/verified_controls/verifier_integration.ts` as per your specifications:
-
-```typescript
 /**
  * Verifier Integration Service
  */

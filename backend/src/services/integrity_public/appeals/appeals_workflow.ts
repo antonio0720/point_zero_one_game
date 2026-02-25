@@ -1,6 +1,3 @@
-Here is the TypeScript file `backend/src/services/integrity_public/appeals/appeals_workflow.ts` as per your specifications:
-
-```typescript
 /**
  * Appeal state machine (SUBMITTED→UNDER_REVIEW→RESOLVED)
  */

@@ -1,6 +1,3 @@
-Here is the TypeScript file `backend/src/game/engine/run_finalizer.ts` as per your specifications:
-
-```typescript
 /**
  * Finalize run and compute outcome
  */
@@ -34,6 +31,3 @@ export class RunFinalizer {
     verifyRun.enqueue(gameState, outcome);
   }
 }
-```
-
-Please note that this is a simplified example and the actual implementation may vary based on your specific project requirements. Also, I've assumed the existence of `GameScript.GameState` and `Outcome`, which should be defined elsewhere in your codebase.

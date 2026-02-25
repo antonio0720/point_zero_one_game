@@ -1,6 +1,3 @@
-Here is the TypeScript file `backend/src/services/remote_config/monetization_guardrails/guardrails_enforcer.ts`:
-
-```typescript
 /**
  * Guardrails Enforcer for Remote Config changes
  */

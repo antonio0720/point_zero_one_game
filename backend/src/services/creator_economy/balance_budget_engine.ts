@@ -1,6 +1,3 @@
-Here is the TypeScript file `backend/src/services/creator_economy/balance_budget_engine.ts` as per your specifications:
-
-```typescript
 /**
  * Balance Budget Engine for Creator Economy
  */

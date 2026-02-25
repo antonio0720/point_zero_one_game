@@ -1,6 +1,3 @@
-Here is the TypeScript file `backend/src/services/integrity_public/abuse/rate_limiters.ts` with strict types, no 'any', exporting all public symbols, and including JSDoc comments:
-
-```typescript
 /**
  * Rate limiter service for handling abuse prevention in /appeals and /runs/:id/verification endpoints.
  */

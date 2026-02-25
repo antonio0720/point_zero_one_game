@@ -53,19 +53,5 @@ export class ExperimentService implements IExperimentService {
     await this.experimentModel.findOneAndUpdate({ id }, { status });
   }
 }
-```
 
-For the SQL schema, I will provide it in a separate response to keep the output clean and focused on TypeScript.
 
-Regarding the bash script, set -euo pipefail is already included by default when using modern shells like Bash 4.0 or higher. Here's an example of how you might log all actions:
-
-```bash
-#!/bin/bash
-set -euo pipefail
-
-echo "Starting script"
-# Your commands here
-echo "Script completed"
-```
-
-For YAML and JSON, I will not provide examples as they are not relevant to the given spec. However, for Terraform, I would recommend using the official best practices for writing production-ready infrastructure as code: https://www.terraform.io/docs/cloud/best-practices/index.html

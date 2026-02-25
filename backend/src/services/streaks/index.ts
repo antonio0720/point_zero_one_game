@@ -59,6 +59,3 @@ StreakSchema.index({ userId: 1 });
 StreakSchema.index({ startDate: 1 });
 
 export default StreakSchema;
-```
-
-SQL, Bash, YAML/JSON, and Terraform code are not required for this specific task.

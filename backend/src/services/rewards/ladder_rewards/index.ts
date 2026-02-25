@@ -42,28 +42,4 @@ export class LadderRewardsService implements ILadderRewardsService {
     return this.ladderRewardRepository.findOneBy({ id });
   }
 }
-```
 
-SQL (PostgreSQL):
-
-```sql
--- Ladder Rewards table schema
-CREATE TABLE IF NOT EXISTS ladder_rewards (
-  id SERIAL PRIMARY KEY,
-  item_id INTEGER NOT NULL,
-  participation_rank_threshold INTEGER NOT NULL,
-  prestige_rank_threshold INTEGER NOT NULL,
-);
-
--- Indexes for faster lookups
-CREATE INDEX IF NOT EXISTS idx_ladder_rewards_item_id ON ladder_rewards (item_id);
-```
-
-Bash:
-
-```bash
-#!/bin/sh
-set -euo pipefail
-
-echo "Creating table ladder_rewards"
-psql -f sql/ladder_rewards.sql

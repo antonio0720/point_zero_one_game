@@ -1,6 +1,3 @@
-Here is the TypeScript file `backend/src/services/loss_is_content/cause_of_death/delta_strip_builder.ts` as per your specifications:
-
-```typescript
 /**
  * Builds the last 3 deltas ledger strip and pins it to the turning point.
  */

@@ -1,6 +1,3 @@
-Here is the TypeScript file `backend/src/services/macro_shock/shock_card_generator.ts`:
-
-```typescript
 /**
  * Generates a MacroShockCard from a macro event and injects dynamic values.
  * Validates against balance budget and produces a deterministic card with shock_id.
@@ -28,8 +25,3 @@ export function generateMacroShockCard(macroEvent: MacroEvent, balance: Balance)
 
   return shockCard;
 }
-```
-
-Please note that this is a placeholder for the actual implementation and you would need to implement the logic to validate against balance budget and produce a deterministic card with shock_id.
-
-Regarding SQL, Bash, YAML/JSON, and Terraform, they are not provided in this response as per your instructions.

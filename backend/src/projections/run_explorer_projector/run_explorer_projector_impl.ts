@@ -1,6 +1,3 @@
-Here is the TypeScript implementation for the specified projector:
-
-```typescript
 /**
  * Run Explorer Projector Implementation
  */
@@ -45,26 +42,3 @@ class RunExplorerProjectorImpl {
 }
 
 export default RunExplorerProjectorImpl;
-```
-
-For the SQL, I'll provide a simplified example without the actual table structure and indexes:
-
-```sql
--- Create summary_json table
-CREATE TABLE IF NOT EXISTS summary_json (
-  run_id VARCHAR(255) PRIMARY KEY,
-  status VARCHAR(255),
-  timestamp BIGINT
-);
-
--- Create status table
-CREATE TABLE IF NOT EXISTS status (
-  run_id VARCHAR(255) PRIMARY KEY,
-  status VARCHAR(255),
-  timestamp BIGINT
-);
-
--- Create quarantined table
-CREATE TABLE IF NOT EXISTS quarantined (
-  run_id VARCHAR(255) PRIMARY KEY
-);

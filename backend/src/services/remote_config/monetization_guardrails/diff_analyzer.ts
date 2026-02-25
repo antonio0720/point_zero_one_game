@@ -1,6 +1,3 @@
-Here is the TypeScript file `backend/src/services/remote_config/monetization_guardrails/diff_analyzer.ts` as per your specifications:
-
-```typescript
 /**
  * Monetization Diff Analyzer service
  */
@@ -24,7 +21,7 @@ export class DiffAnalyzer {
    */
   public async analyze(): Promise<AuditReceipt> {
     const currentConfig = await this.remoteConfig.getCurrent();
-    const allowlistedPaths = [...]; // Add your allowlisted paths here
+    const allowlistedPaths = []; // Add your allowlisted paths here
 
     const violations: MonetizationGuardrailViolation[] = [];
 

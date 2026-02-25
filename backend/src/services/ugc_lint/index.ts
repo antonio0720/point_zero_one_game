@@ -1,6 +1,3 @@
-Here is the TypeScript file `backend/src/services/ugc_lint/index.ts` following the specified rules:
-
-```typescript
 /**
  * UGC Lint Service
  */
@@ -39,8 +36,3 @@ export const validateUGC = (ugc: any): { isValid: boolean, errors?: string[] } =
 
   return { isValid: true }; // Example validation result
 };
-```
-
-Please note that the actual implementation of the `validateUGC` function is not provided in this example. You should replace it with your own validation logic as needed.
-
-Regarding SQL, Bash, YAML/JSON, and Terraform files, I cannot generate them without specific requirements or examples. However, they should follow the specified rules for their respective languages.

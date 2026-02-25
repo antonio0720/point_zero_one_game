@@ -68,8 +68,6 @@ function generateSeeds(): number[] {
 async function submitForReview(card: any): Promise<void> {
   // Submit the card for review (not implemented)
 }
-```
 
-Please note that this is a TypeScript file with strict types, no 'any', and all public symbols are exported. The SQL, Bash, YAML/JSON, and Terraform parts are not included as they were not specified in the request.
 
 The code includes JSDoc comments for better understanding of each function's purpose. However, the actual implementation details (such as card validation logic, card simulation using the game engine or replay, and database operations) are left out since they are beyond the scope of this example.

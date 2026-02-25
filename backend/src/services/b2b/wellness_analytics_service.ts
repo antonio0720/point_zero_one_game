@@ -66,8 +66,5 @@ export class WellnessAnalyticsService {
     await this.model.findOneAndUpdate({ organizationId }, updates).exec();
   }
 }
-```
 
-Please note that the SQL, Bash, YAML/JSON, and Terraform files are not provided as they are not explicitly requested in your message. However, I can certainly help you generate those if needed.
 
-Regarding the game engine or replay determinism, it's important to ensure that any randomness involved is seeded based on a consistent source (such as a timestamp) to maintain determinism when running multiple times or across different instances.

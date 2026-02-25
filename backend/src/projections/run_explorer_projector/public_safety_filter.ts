@@ -1,6 +1,3 @@
-Here is the TypeScript code for implementing the public-safe summaries redaction rules, adhering to the specified guidelines:
-
-```typescript
 /**
  * Public Safety Filter for Redaction Rules
  */
@@ -41,8 +38,4 @@ function redactSensitiveData(data: RedactableData): RedactableData {
  * Export public symbols
  */
 export { RedactableData, redactSensitiveData };
-```
 
-This TypeScript code defines types for PII, DeviceTrustSignal, and InternalFlag. It also creates an interface `RedactableData` to represent the data that needs redaction. The `redactSensitiveData` function is responsible for removing sensitive information from the given data while preserving the actual data itself.
-
-The code exports both the `RedactableData` interface and the `redactSensitiveData` function as public symbols.

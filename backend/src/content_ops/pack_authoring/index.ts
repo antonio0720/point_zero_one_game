@@ -1,6 +1,3 @@
-Here is the TypeScript file `backend/src/content_ops/pack_authoring/index.ts` as per your specifications:
-
-```typescript
 /**
  * Pack Authoring API
  */
@@ -115,6 +112,3 @@ router.post('/drafts/:packDraftId/publish',
   });
 
 export default router;
-```
-
-This TypeScript file exports an Express router with routes for creating pack drafts, attaching scenarios, defining rubrics, defining benchmark seeds, and publishing versions of a pack draft. The code follows strict types, uses JSDoc for documentation, and does not use 'any'.

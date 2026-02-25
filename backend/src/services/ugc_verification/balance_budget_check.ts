@@ -1,6 +1,3 @@
-Here is the TypeScript file `backend/src/services/ugc_verification/balance_budget_check.ts` implementing the BALANCE_BUDGET_CHECK with strict types, no 'any', JSDoc comments, and exporting all public symbols:
-
-```typescript
 /**
  * Service for checking the budget balance of user-generated content (UGC) creators.
  */

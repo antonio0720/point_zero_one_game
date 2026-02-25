@@ -1,6 +1,3 @@
-Here is the TypeScript code for adding cache warmup and CDN hint headers for VERIFIED pages with short TTL for PENDING and longer TTL for VERIFIED:
-
-```typescript
 /**
  * Cache warming middleware for serving verified pages with CDN hints.
  */
@@ -78,6 +75,4 @@ function pendingCacheWarmupMiddleware(pendingPages: string[]): (req: Request, re
  * Export the middleware functions for use in the Express application.
  */
 export { cacheWarmupMiddleware, pendingCacheWarmupMiddleware };
-```
 
-This TypeScript code defines a `cacheWarmupMiddleware` function that warms up the cache for verified pages with a longer TTL and another `pendingCacheWarmupMiddleware` function for pending pages with a shorter TTL. Both functions include CDN hint headers in the response. The middleware functions can be easily integrated into an Express application to handle cache warming for specific URLs.

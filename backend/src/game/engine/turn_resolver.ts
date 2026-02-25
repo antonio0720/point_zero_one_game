@@ -1,6 +1,3 @@
-Here is the TypeScript file `backend/src/game/engine/turn_resolver.ts` as per your specifications:
-
-```typescript
 /**
  * Resolves a turn in the game engine.
  */

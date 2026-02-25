@@ -1,6 +1,3 @@
-Here is the TypeScript file `backend/src/services/ugc_pipeline/ugc_pipeline_impl.ts` with the requested specifications:
-
-```typescript
 /**
  * UGC Pipeline Implementation
  */

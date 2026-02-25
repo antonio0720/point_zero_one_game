@@ -1,6 +1,3 @@
-Here is the TypeScript file `backend/src/services/season0/founder_tier_logic.ts` with strict types, no 'any', exporting all public symbols, and including JSDoc comments:
-
-```typescript
 /**
  * Founder Tier Logic Service for Season 0
  */
@@ -34,8 +31,3 @@ export function assignFounderTier(userId: number, streak: number, referrals: num
 export function isEligibleForUpgrade(userId: number): boolean {
   // Implement the logic to check if a user is eligible for an upgrade in their founder tier.
 }
-```
-
-Please note that this file only contains the TypeScript code and does not include SQL, Bash, YAML/JSON, or Terraform files as they were not explicitly requested in your message. The logic for assigning tiers and checking eligibility for upgrades should be implemented according to the rules provided in the game's specification.
-
-Regarding determinism, it is essential to ensure that the same input will always produce the same output when using the game engine or replay functionality. This can be achieved by using a pseudorandom number generator with a fixed seed or by implementing other deterministic methods for generating randomness.

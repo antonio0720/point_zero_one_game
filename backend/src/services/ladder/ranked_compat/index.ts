@@ -1,6 +1,3 @@
-Here is the TypeScript file `backend/src/services/ladder/ranked_compat/index.ts` with strict types, no 'any', exporting public symbols, and JSDoc comments:
-
-```typescript
 /**
  * Ranked compatibility service for handling eligibility checks and entitlement compatibility in Point Zero One Digital's financial roguelike game.
  */

@@ -47,18 +47,3 @@ export async function createSeasonTemplate(
 ): Promise<SeasonTemplate> {
   // Insert the new season template into the database and return it.
 }
-```
-
-Please note that this is a TypeScript file with strict types, no 'any', exporting all public symbols, and including JSDoc comments as specified. The actual implementation of the functions would require database access and is not provided here.
-
-Regarding SQL, YAML/JSON, Bash, and Terraform, those are separate files or configurations that would be generated based on this TypeScript service. For example, the SQL file might look like:
-
-```sql
-CREATE TABLE IF NOT EXISTS season_templates (
-  id SERIAL PRIMARY KEY,
-  sku_id INTEGER REFERENCES partner_skus(id),
-  name VARCHAR(255) NOT NULL,
-  theme VARCHAR(255) NOT NULL,
-  cadence_preset_id INTEGER REFERENCES cadence_presets(id),
-  FOREIGN KEY (sku_id) REFERENCES partner_skus(id) ON DELETE CASCADE
-);

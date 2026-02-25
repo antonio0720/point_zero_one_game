@@ -1,6 +1,3 @@
-Here is the TypeScript file `backend/src/services/curriculum/packs/pack_registry.ts` as per your specifications:
-
-```typescript
 /**
  * Pack Registry Service
  */

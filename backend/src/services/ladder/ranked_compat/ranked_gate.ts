@@ -1,6 +1,3 @@
-Here is the TypeScript file `backend/src/services/ladder/ranked_compat/ranked_gate.ts` with strict types, no 'any', exporting all public symbols, and including JSDoc comments:
-
-```typescript
 /**
  * Ranked Gate Service
  */

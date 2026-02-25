@@ -28,14 +28,3 @@ class SentimentAnalyzer extends EventEmitter {
 }
 
 export default SentimentAnalyzer;
-```
-
-Regarding the SQL schema, it's important to note that since no message content is stored beyond classification, there won't be a need for any tables in this case. However, if you require a table for logging events or other purposes, here's an example:
-
-```sql
-CREATE TABLE IF NOT EXISTS sentiment_events (
-  id INT PRIMARY KEY AUTO_INCREMENT,
-  message TEXT NOT NULL,
-  sentiment ENUM('frustration', 'joy', 'fear', 'overconfidence', 'neutral') NOT NULL,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-);

@@ -1,6 +1,3 @@
-Here is the TypeScript file `backend/src/services/content/version_registry.ts` following the specified rules:
-
-```typescript
 /**
  * Immutable version registry service for content management.
  */

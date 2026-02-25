@@ -1,6 +1,3 @@
-Here is the TypeScript implementation for pivot extraction as requested:
-
-```typescript
 /**
  * PivotalTurnsImpl - Implements pivot extraction logic for Point Zero One Digital's financial roguelike game.
  */
@@ -61,6 +58,4 @@ export class PivotalTurnsImpl {
     return pivotsJson;
   }
 }
-```
 
-This TypeScript implementation defines a `PivotalTurnsImpl` class that extracts pivotal turns from a game replay and generates jump-to-turn anchors and impact deltas. The code follows strict types, uses JSDoc for documentation, and exports the public symbol `PivotalTurnsImpl`.

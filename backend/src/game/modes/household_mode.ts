@@ -1,6 +1,3 @@
-Here is the TypeScript file for the Household mode of Point Zero One Digital's financial roguelike game, adhering to your specified rules:
-
-```typescript
 /**
  * Household Mode - Co-op mode for 2-4 players with shared macro state and per-player balance sheet.
  */
@@ -79,44 +76,3 @@ declare namespace Game {
 // Bash script with set -euo pipefail and log all actions.
 
 #!/bin/bash
-set -euo pipefail
-
-echo "Starting game server..."
-./start_server.sh
-
-// YAML or JSON configuration file for production-ready deployment.
-
-{
-  "gameMode": "Household",
-  "numPlayers": 4,
-  "tableEvents": [
-    {
-      "type": "SO_EVENT",
-      "data": {
-        "playerId": 1,
-        "eventDetails": "Stock Opportunity Event: Gained 100 shares of XYZ Corp."
-      }
-    },
-    // ... (additional table events omitted for brevity)
-  ],
-  "bailouts": [
-    {
-      "playerId": 1,
-      "amount": 5000
-    },
-    // ... (additional bailouts omitted for brevity)
-  ],
-  "syndicates": [
-    {
-      "id": 1,
-      "players": [1, 2, 3, 4],
-      "bailouts": [
-        {
-          "playerId": 1,
-          "amount": 5000
-        },
-        // ... (additional bailouts omitted for brevity)
-      ]
-    }
-  ]
-}

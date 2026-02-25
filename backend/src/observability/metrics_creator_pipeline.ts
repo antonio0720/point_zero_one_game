@@ -62,8 +62,3 @@ export class DatabaseClient {
     // Save the metric in the database
   }
 }
-```
-
-Please note that this is a simplified example and does not include actual database connection logic or error handling. Also, the `Metric` class and its type definition are assumed to be defined elsewhere in your project.
-
-Regarding SQL, YAML/JSON/Terraform, and Bash files, they would require specific data structures and syntaxes that are not provided in the given spec. However, I can provide examples for those if needed.

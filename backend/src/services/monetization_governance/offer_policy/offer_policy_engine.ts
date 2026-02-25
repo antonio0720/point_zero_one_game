@@ -1,6 +1,3 @@
-Here is the TypeScript file `backend/src/services/monetization_governance/offer_policy/offer_policy_engine.ts`:
-
-```typescript
 /**
  * Offer Policy Engine
  */

@@ -1,6 +1,3 @@
-Here is the TypeScript file `backend/src/services/experiments/experiment_guardrails.ts` adhering to your specifications:
-
-```typescript
 /**
  * Experiment Guardrails Service
  */

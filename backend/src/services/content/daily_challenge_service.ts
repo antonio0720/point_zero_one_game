@@ -57,26 +57,4 @@ dailyChallengeSchema.index({ seed: 1 }, { unique: true });
 dailyChallengeSchema.index({ completed: 1 }, { sparse: true });
 
 export const DailyChallenge = dailyChallengeSchema;
-```
 
-SQL (PostgreSQL):
-
-```sql
--- Daily Challenge Table
-CREATE TABLE IF NOT EXISTS daily_challenges (
-    id SERIAL PRIMARY KEY,
-    seed INTEGER NOT NULL UNIQUE,
-    scenario TEXT NOT NULL,
-    completed BOOLEAN DEFAULT false,
-    completion_rate DECIMAL(10,2) DEFAULT 0
-);
-```
-
-Bash (example script for creating table):
-
-```bash
-#!/bin/sh
-set -euo pipefail
-
-echo "Creating daily_challenges table"
-psql -U your_user -d your_database -f create_table.sql

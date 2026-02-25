@@ -45,44 +45,6 @@ function calculateInitialScore(hash: string): number {
   // Implement the logic to calculate the initial score based on near-duplicate hashes, low novelty, repeated failure patterns, and suspicious engagement.
   // Ensure determinism where the spec involves game engine or replay.
 }
-```
 
-Please note that I have not implemented the `calculateInitialScore` function as it is not specified in your request. Also, I am assuming you are using NestJS for this project based on the import statements. If that's not the case, please adjust the imports accordingly.
 
-Regarding SQL, YAML/JSON, and Bash files, they would be created separately as per the specifications provided. For example:
 
-SQL (PostgreSQL):
-
-```sql
-CREATE TABLE IF NOT EXISTS anti_spam_scores (
-  id SERIAL PRIMARY KEY,
-  hash VARCHAR(255) NOT NULL UNIQUE,
-  score INTEGER NOT NULL DEFAULT 0
-);
-```
-
-Terraform:
-
-```hcl
-resource "postgresql_table" "anti_spam_scores" {
-  name = "anti_spam_scores"
-  schema = postgresql_schema.main
-
-  columns {
-    name = "id"
-    type = "SERIAL"
-    is_primary_key = true
-  }
-
-  columns {
-    name = "hash"
-    type = "VARCHAR(255)"
-    is_unique = true
-  }
-
-  columns {
-    name = "score"
-    type = "INTEGER"
-    default = 0
-  }
-}

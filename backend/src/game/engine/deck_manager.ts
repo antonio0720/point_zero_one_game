@@ -1,6 +1,3 @@
-Here is the TypeScript file `backend/src/game/engine/deck_manager.ts` with strict types, no 'any', exporting public symbols, and JSDoc comments:
-
-```typescript
 /**
  * Deck Manager class for managing game decks.
  */

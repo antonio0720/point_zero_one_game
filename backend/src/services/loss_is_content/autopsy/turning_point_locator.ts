@@ -1,6 +1,3 @@
-Here is the TypeScript file `backend/src/services/loss_is_content/autopsy/turning_point_locator.ts`:
-
-```typescript
 /**
  * Service for locating turning point threshold crossing and deriving snippet window around it.
  */

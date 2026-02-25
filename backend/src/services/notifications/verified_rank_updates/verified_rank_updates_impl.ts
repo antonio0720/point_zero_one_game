@@ -28,25 +28,5 @@ export class VerifiedRankUpdatesImpl implements Notification {
     await this.notificationRepository.save(notification);
   }
 }
-```
 
-For the SQL schema, I will provide it in a separate response due to the character limit.
 
-Regarding the Bash script and YAML/JSON/Terraform files, they are not directly related to the TypeScript code provided above. However, if you need help with those, feel free to ask!
-
-For the SQL schema:
-
-```sql
-CREATE TABLE IF NOT EXISTS users (
-  id SERIAL PRIMARY KEY,
-  username VARCHAR(255) UNIQUE NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS notifications (
-  id SERIAL PRIMARY KEY,
-  userId INTEGER REFERENCES users(id),
-  notificationType TEXT NOT NULL,
-  data JSONB NOT NULL,
-  createdAt TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-  UNIQUE (userId, notificationType)
-);

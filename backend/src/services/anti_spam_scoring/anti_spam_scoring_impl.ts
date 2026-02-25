@@ -1,6 +1,3 @@
-Here is the TypeScript file `backend/src/services/anti_spam_scoring/anti_spam_scoring_impl.ts`:
-
-```typescript
 /**
  * AntiSpamScoringImpl class for calculating anti-spam scores and managing actions such as throttling, sandbox mode, and manual review.
  */
@@ -77,16 +74,5 @@ export enum ActionType {
   LOGIN = 'login',
   REGISTRATION = 'registration'
 }
-```
 
 SQL schema for receipts table:
-
-```sql
-CREATE TABLE IF NOT EXISTS receipts (
-    id INT PRIMARY KEY AUTO_INCREMENT,
-    action_id INT NOT NULL,
-    user_id INT NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (action_id) REFERENCES actions(id),
-    FOREIGN KEY (user_id) REFERENCES users(id)
-);

@@ -1,6 +1,3 @@
-Here is the TypeScript file `backend/src/api-gateway/routes/curriculum_routes.ts` as per your specifications:
-
-```typescript
 /**
  * Curriculum Routes for Point Zero One Digital's financial roguelike game API Gateway
  */

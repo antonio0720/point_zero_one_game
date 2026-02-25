@@ -1,6 +1,3 @@
-Here is the TypeScript file `backend/src/services/card_forge/gauntlet_voting_service.ts` with strict types, no 'any', exporting all public symbols, and including JSDoc:
-
-```typescript
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
@@ -38,8 +35,3 @@ export class GauntletVotingService {
 function flatten<T>(array: T[][]): T[] {
   return array.reduce((flat, current) => flat.concat(current), []);
 }
-```
-
-This TypeScript file includes a `GauntletVotingService` class that handles the voting process for community gauntlets. It takes an array of submission IDs and player IDs as input and inserts votes into the database. The `determineVote()` method should be implemented to determine the vote type based on the submission and player data.
-
-The `flatten()` function is a utility function for flattening nested arrays.

@@ -1,6 +1,3 @@
-Here is the TypeScript file `backend/src/content_ops/pack_authoring/pack_state_machine.ts` following the specified rules:
-
-```typescript
 /**
  * PackStateMachine - Manages the state transitions of a content pack.
  */

@@ -7,7 +7,7 @@ import { Request, Response, NextFunction } from 'express';
 import { RateLimiterRedis } from 'rate-limiter-flexible';
 
 // Configuration
-const redisClient = /* Redis client instance */;
+const redisClient = undefined as unknown;
 const pendingBucketDurationSeconds = 60; // Duration for Pending bucket (1 minute)
 const verifiedBucketDurationSeconds = 300; // Duration for Verified bucket (5 minutes)
 const maxRequestsPending = 10; // Max requests per IP in Pending bucket
@@ -24,7 +24,7 @@ const verifiedRateLimiter = new RateLimiterRedis({ storeClient: redisClient, key
  */
 export const rateLimitAndAbuse = (req: Request, res: Response, next: NextFunction) => {
   // Get user verification status from authentication middleware or request headers
-  const isVerifiedUser = /* User verification status */;
+  const isVerifiedUser = undefined as unknown;
 
   if (isVerifiedUser) {
     // If the user is verified, use the Verified rate limiter

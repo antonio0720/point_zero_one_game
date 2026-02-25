@@ -1,6 +1,3 @@
-Here is the TypeScript code for the comparability guards as per your specifications:
-
-```typescript
 /**
  * Comparability Guards for Sovereign Infrastructure Architecture
  */

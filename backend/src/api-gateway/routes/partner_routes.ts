@@ -1,6 +1,3 @@
-Here is the TypeScript file `backend/src/api-gateway/routes/partner_routes.ts` as per your specifications:
-
-```typescript
 /**
  * Partner routes for Point Zero One Digital's financial roguelike game.
  */

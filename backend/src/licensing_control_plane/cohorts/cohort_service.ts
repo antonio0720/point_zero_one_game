@@ -63,8 +63,3 @@ export interface Cohort extends Document {
   scheduleWindow?: ScheduleWindow;
   ladderModePolicy?: LadderModePolicy;
 }
-```
-
-Please note that this is a TypeScript file for a service in a hypothetical NestJS application. It includes strict types, no 'any', and exports all public symbols as per your requirements. The JSDoc comments provide explanations for the functions and interfaces.
-
-Regarding SQL, YAML/JSON, Bash, and Terraform, those are not included in this output since they were not specified in the request. However, I would follow best practices for each of these languages when implementing them in a real-world project.

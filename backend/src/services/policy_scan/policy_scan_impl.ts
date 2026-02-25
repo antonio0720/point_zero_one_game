@@ -1,6 +1,3 @@
-Here is the TypeScript implementation for the STATIC_POLICY_SCAN stage as requested, adhering to the specified rules. Please note that this is a simplified example and does not include actual policy scanning logic or database interactions.
-
-```typescript
 /**
  * Policy Scan Service Implementation
  */

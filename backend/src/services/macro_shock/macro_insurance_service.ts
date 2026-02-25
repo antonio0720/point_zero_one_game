@@ -1,6 +1,3 @@
-Here is the TypeScript file for the Macro Insurance Service as per your specifications:
-
-```typescript
 /**
  * Macro Insurance Service
  */
@@ -81,6 +78,3 @@ export class MacroInsuranceService {
     console.log(`Sending notification for macro shock ${macroShockId}`);
   }
 }
-```
-
-Please note that this is a simplified example and does not include actual implementation details such as database connection, error handling, or production-ready configurations. Also, the SQL, Bash, YAML/JSON, and Terraform files are not provided since they were not explicitly requested in your specifications.

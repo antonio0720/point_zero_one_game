@@ -1,6 +1,3 @@
-Here is the TypeScript file `backend/src/services/commerce/taxonomy/taxonomy_validator.ts` that enforces the specified rules:
-
-```typescript
 /**
  * Taxonomy validator service for Point Zero One Digital's financial roguelike game.
  */
@@ -48,6 +45,3 @@ export class TaxonomyValidatorService {
     }
   }
 }
-```
-
-This TypeScript file includes strict types, exports the public symbol `TaxonomyValidatorService`, and uses JSDoc for documentation purposes. The service validates the taxonomy by finding a required tag and checking for forbidden SKUs in the database. If the validation fails, it throws an error to block the publish process.

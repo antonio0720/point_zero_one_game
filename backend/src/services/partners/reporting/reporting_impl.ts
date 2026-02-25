@@ -101,26 +101,3 @@ export class ReportingService {
     // Implement export logic here.
   }
 }
-```
-
-Please note that this is a TypeScript file with strict types, no 'any', and all public symbols are exported. The actual implementation of the methods is left blank as it depends on the specifics of your game engine or replay data.
-
-Regarding SQL, I'll provide an example for creating tables for `GameEvent` and `User` entities:
-
-```sql
-CREATE TABLE IF NOT EXISTS game_events (
-  id INT PRIMARY KEY AUTO_INCREMENT,
-  game_id INT NOT NULL,
-  user_id INT NOT NULL,
-  event_type VARCHAR(255) NOT NULL,
-  timestamp DATETIME NOT NULL,
-  FOREIGN KEY (game_id) REFERENCES games(id),
-  FOREIGN KEY (user_id) REFERENCES users(id)
-);
-
-CREATE TABLE IF NOT EXISTS users (
-  id INT PRIMARY KEY AUTO_INCREMENT,
-  game_id INT NOT NULL,
-  created_at DATETIME NOT NULL,
-  FOREIGN KEY (game_id) REFERENCES games(id)
-);

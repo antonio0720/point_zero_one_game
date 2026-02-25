@@ -1,6 +1,3 @@
-Here is the TypeScript file `backend/src/game/engine/seed_generator.ts` as per your specifications:
-
-```typescript
 /**
  * Generates a seed commitment for a given run ID.
  */
@@ -34,8 +31,3 @@ function sha256(data: Uint8Array): string {
   const crypto = require('crypto');
   return crypto.createHash('sha256').update(data).digest('hex');
 }
-```
-
-Please note that this is a simplified example and you should replace the `playerId`, `timestamp`, and `nonce` with actual values or implement a more robust PRNG algorithm for production use. Also, the crypto library is not included in TypeScript's standard library, so you may need to install it separately.
-
-Regarding SQL, Bash, YAML/JSON, and Terraform, I will provide those files if needed based on your specific requirements.

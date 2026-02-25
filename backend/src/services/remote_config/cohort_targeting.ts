@@ -25,11 +25,3 @@ export function determineCohort(playerId: string): RemoteConfig.CohortTargeting 
  * SQL schema for storing player cohort data.
  */
 const sqlSchema = `
-CREATE TABLE IF NOT EXISTS player_cohorts (
-  id SERIAL PRIMARY KEY,
-  player_id VARCHAR(255) NOT NULL UNIQUE,
-  new_player BOOLEAN DEFAULT false,
-  returning_player BOOLEAN DEFAULT false,
-  competitive_player BOOLEAN DEFAULT false,
-);
-`;

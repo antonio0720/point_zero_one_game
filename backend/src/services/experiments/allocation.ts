@@ -28,33 +28,3 @@ declare namespace Services {
     }
   }
 }
-```
-
-For SQL, I'll provide an example of a table schema for the allocation data:
-
-```sql
--- Allocation Data Table
-CREATE TABLE IF NOT EXISTS allocations (
-  id INT PRIMARY KEY AUTO_INCREMENT,
-  experiment_id INT NOT NULL,
-  user_id INT NOT NULL,
-  allocation_type ENUM('deterministic', 'sticky_bucket') NOT NULL,
-  kill_switch BOOLEAN DEFAULT FALSE,
-  rollout_percentage DECIMAL(5,2) NOT NULL CHECK (rollout_percentage >= 0 AND rollout_percentage <= 100),
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-
-  FOREIGN KEY (experiment_id) REFERENCES experiments(id),
-  FOREIGN KEY (user_id) REFERENCES users(id)
-);
-```
-
-For Bash scripting, I'll provide an example of a log-all-actions script:
-
-```bash
-#!/bin/bash
-set -euo pipefail
-
-echo "Starting script execution"
-command_to_execute
-echo "Script execution completed"

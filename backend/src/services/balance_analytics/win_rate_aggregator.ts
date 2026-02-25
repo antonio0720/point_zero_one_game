@@ -1,6 +1,3 @@
-Here is the TypeScript code for the `win_rate_aggregator.ts` file as per your specifications:
-
-```typescript
 /**
  * WinRateAggregator service for Balance Analytics
  */
@@ -72,6 +69,3 @@ export class WinRateAggregatorService {
     winRatesByKey.forEach((winRate) => this.winRateRepository.save(winRate));
   }
 }
-```
-
-Please note that this is a simplified example and you may need to adjust it according to your specific project requirements, such as filtering game replays based on deterministic game engine or replay events. Also, the actual implementation of the SQL, Bash, YAML/JSON, and Terraform files would depend on the specific tools and frameworks used in your project.

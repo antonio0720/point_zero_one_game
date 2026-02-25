@@ -1,6 +1,3 @@
-Here is the TypeScript file `backend/src/services/curriculum/guides/debrief_prompt_bank.ts` as per your specifications:
-
-```typescript
 /**
  * Debrief Prompt Bank Service
  */

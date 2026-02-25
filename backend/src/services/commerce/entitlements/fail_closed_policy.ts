@@ -1,6 +1,3 @@
-Here is the TypeScript file `backend/src/services/commerce/entitlements/fail_closed_policy.ts` based on your specifications:
-
-```typescript
 /**
  * Fail Closed Policy for Entitlements Service
  */

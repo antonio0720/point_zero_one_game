@@ -77,6 +77,3 @@ export class EmpathyModeService {
     await this.sentimentModel.deleteMany({ playerId, turn: { $lt: (Date.now() - (3 * 60 * 60 * 1000)) / 1000 } });
   }
 }
-```
-
-Please note that the SQL, Bash, YAML/JSON, and Terraform files are not included as they are not part of the TypeScript file you requested. The code above follows the rules you provided for TypeScript.

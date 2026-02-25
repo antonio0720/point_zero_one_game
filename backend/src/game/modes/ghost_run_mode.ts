@@ -1,6 +1,3 @@
-Here is the TypeScript file for the Ghost Run Mode as requested:
-
-```typescript
 /**
  * Ghost Run Mode for Point Zero One Digital's financial roguelike game.
  */
@@ -34,24 +31,3 @@ export class GhostRunMode extends GameMode {
     return opponentDecisions;
   }
 }
-```
-
-For the SQL schema, I will provide a simplified version as it is not included in the request:
-
-```sql
-CREATE TABLE IF NOT EXISTS players (
-  id SERIAL PRIMARY KEY,
-  username VARCHAR(255) UNIQUE NOT NULL,
-  run_data JSONB NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS seed_variants (
-  id SERIAL PRIMARY KEY,
-  variant TEXT UNIQUE NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS opponent_decisions (
-  id SERIAL PRIMARY KEY,
-  seed_variant_id INTEGER REFERENCES seed_variants(id),
-  decision JSONB NOT NULL
-);

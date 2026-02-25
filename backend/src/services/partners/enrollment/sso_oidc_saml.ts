@@ -39,8 +39,6 @@ export class SsoStrategy extends PassportStrategy(Strategy as PassportStrategyTy
     return user;
   }
 }
-```
 
-Please note that this is a simplified example and does not include actual database schema, SQL queries, bash scripts, YAML/JSON configurations, or Terraform files. The provided TypeScript code assumes the existence of necessary entities (User, Domain, Tenant) and their relationships.
 
 Also, the SSO_SECRET environment variable should be securely managed in a production environment.

@@ -1,6 +1,3 @@
-Here is the TypeScript code for the `alert_engine.ts` file as per your specifications:
-
-```typescript
 /**
  * Alert Engine service for Point Zero One Digital's financial roguelike game.
  */
