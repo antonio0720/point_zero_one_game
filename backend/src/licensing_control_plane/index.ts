@@ -2,30 +2,125 @@
  * Licensing Control Plane API — Production Implementation
  * /Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/backend/src/licensing_control_plane/index.ts
  *
- * Sovereign implementation — real DB handlers, validation, error handling.
- * Uses TypeORM DataSource directly (swap to your DI container as needed).
+ * Sovereign implementation — zero TODOs:
+ *
+ * Bug killed:
+ *   1. BullMQ TODO comment → real queue implementation:
+ *      - `RosterImportQueue` class wraps BullMQ `Queue` with typed job data
+ *      - `buildLicensingRouter(ds, queue)` accepts the queue as an injectable dep
+ *      - POST /roster-imports enqueues with jobId = importId for dedup
+ *      - `createRosterImportQueue(redisOpts)` factory for bootstrap/DI binding
+ *      - Job data: `{ importId, cohortId, fileUrl, format, enqueuedAt }`
+ *      - Concurrency/retry config: 3 attempts, exponential backoff, 5s delay
  */
 
 import express, { Request, Response, NextFunction } from 'express';
-import { DataSource, Repository, MoreThan, LessThan, Between } from 'typeorm';
-import Joi from 'joi';
+import { DataSource, Repository, MoreThan }          from 'typeorm';
+import Joi                                            from 'joi';
+import { Queue, QueueOptions }                        from 'bullmq';
 
-// ── Entity imports (adjust to your entity paths) ─────────────────────────────
+// ── Entity imports ─────────────────────────────────────────────────────────
 import { Institution }         from '../entities/institution.entity';
 import { Cohort }              from '../entities/cohort.entity';
 import { RosterImport }        from '../entities/roster_import.entity';
 import { PackAssignment }      from '../entities/pack_assignment.entity';
 import { BenchmarkScheduling } from '../entities/benchmark_scheduling.entity';
 
-// ── Types ─────────────────────────────────────────────────────────────────────
-export type ReportType = 'completion' | 'engagement' | 'leaderboard' | 'roster';
+// ── Types ─────────────────────────────────────────────────────────────────
+export type ReportType  = 'completion' | 'engagement' | 'leaderboard' | 'roster';
 export type ExportFormat = 'csv' | 'json' | 'xlsx';
 
-// ── Validation schemas ────────────────────────────────────────────────────────
+// ── Queue types ───────────────────────────────────────────────────────────
+
+/** Job data pushed onto the roster-import BullMQ queue */
+export interface RosterImportJobData {
+  importId:    number;
+  cohortId:    number;
+  fileUrl:     string;
+  format:      'csv' | 'json';
+  enqueuedAt:  string;   // ISO 8601
+}
+
+/** Queue name constant — used by both producer (here) and consumer (worker) */
+export const ROSTER_IMPORT_QUEUE_NAME = 'roster-import';
+
+/**
+ * Typed wrapper around the BullMQ Queue for roster imports.
+ * Provides a clean add() method with defaults and dedup via jobId.
+ */
+export class RosterImportQueue {
+  private readonly q: Queue<RosterImportJobData>;
+
+  constructor(q: Queue<RosterImportJobData>) {
+    this.q = q;
+  }
+
+  /**
+   * Enqueues a roster import job.
+   *
+   * jobId = `roster-import:${importId}` — BullMQ deduplicates by jobId within
+   * the queue so re-submissions (e.g. from retried HTTP requests) don't
+   * produce duplicate processing.
+   *
+   * Retry config:
+   *   - 3 attempts total
+   *   - Exponential backoff: 5s, 10s, 20s
+   *   - removeOnComplete: keep 100 completed jobs for debugging
+   */
+  async add(data: RosterImportJobData): Promise<void> {
+    await this.q.add(
+      ROSTER_IMPORT_QUEUE_NAME,
+      data,
+      {
+        jobId:    `roster-import:${data.importId}`,
+        attempts: 3,
+        backoff:  {
+          type:  'exponential',
+          delay: 5_000,
+        },
+        removeOnComplete: { count: 100 },
+        removeOnFail:     { count: 50 },
+      },
+    );
+  }
+
+  /** Drain the queue (test/dev use only) */
+  async drain(): Promise<void> {
+    await this.q.drain();
+  }
+
+  /** Close the underlying connection */
+  async close(): Promise<void> {
+    await this.q.close();
+  }
+}
+
+/**
+ * Factory — creates a RosterImportQueue connected to the given Redis instance.
+ * In NestJS, bind this to a provider and inject via DI.
+ *
+ * @example
+ *   const queue = createRosterImportQueue({ host: 'localhost', port: 6379 });
+ */
+export function createRosterImportQueue(
+  redisOpts: { host: string; port: number; password?: string },
+): RosterImportQueue {
+  const rawQueue = new Queue<RosterImportJobData>(ROSTER_IMPORT_QUEUE_NAME, {
+    connection: redisOpts,
+    defaultJobOptions: {
+      attempts:         3,
+      removeOnComplete: { count: 100 },
+      removeOnFail:     { count: 50 },
+    },
+  });
+  return new RosterImportQueue(rawQueue);
+}
+
+// ── Validation schemas ─────────────────────────────────────────────────────
 const schemas = {
   institution: Joi.object({
-    name:    Joi.string().min(2).max(128).required(),
-    domain:  Joi.string().max(128).optional(),
+    name:       Joi.string().min(2).max(128).required(),
+    domain:     Joi.string().max(128).optional(),
     adminEmail: Joi.string().email().optional(),
   }),
 
@@ -57,7 +152,7 @@ const schemas = {
   }),
 };
 
-// ── Validation middleware factory ─────────────────────────────────────────────
+// ── Validation middleware ──────────────────────────────────────────────────
 function validate(schema: Joi.ObjectSchema) {
   return (req: Request, res: Response, next: NextFunction) => {
     const { error, value } = schema.validate(req.body, { abortEarly: false });
@@ -72,17 +167,22 @@ function validate(schema: Joi.ObjectSchema) {
   };
 }
 
-// ── Async handler wrapper ─────────────────────────────────────────────────────
-function asyncHandler(
-  fn: (req: Request, res: Response) => Promise<void>,
-) {
+// ── Async handler wrapper ──────────────────────────────────────────────────
+function asyncHandler(fn: (req: Request, res: Response) => Promise<void>) {
   return (req: Request, res: Response, next: NextFunction) => {
     fn(req, res).catch(next);
   };
 }
 
-// ── Factory — injects DataSource from your NestJS/TypeORM setup ───────────────
-export function buildLicensingRouter(ds: DataSource) {
+// ── Router factory ─────────────────────────────────────────────────────────
+
+/**
+ * Builds the licensing control plane Express router.
+ *
+ * @param ds     TypeORM DataSource (injected from your DI container)
+ * @param queue  RosterImportQueue — created via createRosterImportQueue() or NestJS DI
+ */
+export function buildLicensingRouter(ds: DataSource, queue: RosterImportQueue) {
   const institutionRepo:    Repository<Institution>         = ds.getRepository(Institution);
   const cohortRepo:         Repository<Cohort>              = ds.getRepository(Cohort);
   const rosterImportRepo:   Repository<RosterImport>        = ds.getRepository(RosterImport);
@@ -91,9 +191,7 @@ export function buildLicensingRouter(ds: DataSource) {
 
   const router = express.Router();
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // INSTITUTIONS
-  // ─────────────────────────────────────────────────────────────────────────
+  // ── INSTITUTIONS ───────────────────────────────────────────────────────
 
   router.get('/institutions', asyncHandler(async (req, res) => {
     const { page = '1', limit = '50', search } = req.query as Record<string, string>;
@@ -127,11 +225,10 @@ export function buildLicensingRouter(ds: DataSource) {
   }));
 
   router.delete('/institutions/:id', asyncHandler(async (req, res) => {
-    // Soft-delete: check for cohorts first
     const cohortCount = await cohortRepo.count({ where: { institutionId: +req.params.id } });
     if (cohortCount > 0) {
       return res.status(409).json({
-        error: 'Cannot delete institution with active cohorts',
+        error:       'Cannot delete institution with active cohorts',
         cohortCount,
       });
     }
@@ -140,15 +237,12 @@ export function buildLicensingRouter(ds: DataSource) {
     res.json({ success: true, id: +req.params.id });
   }));
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // COHORTS
-  // ─────────────────────────────────────────────────────────────────────────
+  // ── COHORTS ────────────────────────────────────────────────────────────
 
   router.get('/cohorts', asyncHandler(async (req, res) => {
     const { institutionId, page = '1', limit = '50' } = req.query as Record<string, string>;
-    const take = Math.min(parseInt(limit, 10), 200);
-    const skip = (parseInt(page, 10) - 1) * take;
-
+    const take  = Math.min(parseInt(limit, 10), 200);
+    const skip  = (parseInt(page, 10) - 1) * take;
     const where = institutionId ? { institutionId: +institutionId } : {};
     const [items, total] = await cohortRepo.findAndCount({
       where, skip, take, order: { name: 'ASC' },
@@ -168,7 +262,6 @@ export function buildLicensingRouter(ds: DataSource) {
   router.post('/cohorts', validate(schemas.cohort), asyncHandler(async (req, res) => {
     const inst = await institutionRepo.findOne({ where: { id: req.body.institutionId } });
     if (!inst) return res.status(404).json({ error: 'Institution not found' });
-
     const cohort = cohortRepo.create(req.body);
     await cohortRepo.save(cohort);
     res.status(201).json(cohort);
@@ -187,9 +280,7 @@ export function buildLicensingRouter(ds: DataSource) {
     res.json({ success: true, id: +req.params.id });
   }));
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // ROSTER IMPORTS
-  // ─────────────────────────────────────────────────────────────────────────
+  // ── ROSTER IMPORTS ─────────────────────────────────────────────────────
 
   router.get('/roster-imports', asyncHandler(async (req, res) => {
     const { cohortId } = req.query as Record<string, string>;
@@ -206,20 +297,26 @@ export function buildLicensingRouter(ds: DataSource) {
 
     const imp = rosterImportRepo.create({
       ...req.body,
-      status: 'pending',
+      status:     'pending',
       importedAt: new Date(),
     });
     await rosterImportRepo.save(imp);
 
-    // TODO: enqueue async processing job (e.g. Bull/BullMQ) to parse and import roster
-    // await rosterImportQueue.add('process', { importId: imp.id });
+    // Enqueue async BullMQ job to parse and import roster.
+    // jobId = 'roster-import:{importId}' — BullMQ deduplicates duplicate submissions.
+    // Worker reads job.data.importId, fetches fileUrl, parses CSV/JSON, writes players.
+    await queue.add({
+      importId:   imp.id,
+      cohortId:   req.body.cohortId,
+      fileUrl:    req.body.fileUrl,
+      format:     req.body.format ?? 'csv',
+      enqueuedAt: new Date().toISOString(),
+    });
 
     res.status(202).json({ ...imp, message: 'Roster import queued for processing' });
   }));
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // PACK ASSIGNMENT
-  // ─────────────────────────────────────────────────────────────────────────
+  // ── PACK ASSIGNMENT ────────────────────────────────────────────────────
 
   router.get('/pack-assignment', asyncHandler(async (req, res) => {
     const { cohortId } = req.query as Record<string, string>;
@@ -229,32 +326,27 @@ export function buildLicensingRouter(ds: DataSource) {
   }));
 
   router.post('/pack-assignment', validate(schemas.packAssignment), asyncHandler(async (req, res) => {
-    // Check for conflicting active assignment
     const existing = await packAssignmentRepo.findOne({
       where: { cohortId: req.body.cohortId, packId: req.body.packId, active: true },
     });
     if (existing) {
       return res.status(409).json({
-        error: 'Active pack assignment already exists for this cohort/pack',
+        error:      'Active pack assignment already exists for this cohort/pack',
         existingId: existing.id,
       });
     }
-
     const assignment = packAssignmentRepo.create({ ...req.body, active: true });
     await packAssignmentRepo.save(assignment);
     res.status(201).json(assignment);
   }));
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // BENCHMARK SCHEDULING
-  // ─────────────────────────────────────────────────────────────────────────
+  // ── BENCHMARK SCHEDULING ───────────────────────────────────────────────
 
   router.get('/benchmark-scheduling', asyncHandler(async (req, res) => {
     const { cohortId, upcoming } = req.query as Record<string, string>;
-    const where: any = {};
-    if (cohortId) where.cohortId = +cohortId;
+    const where: Record<string, unknown> = {};
+    if (cohortId) where.cohortId   = +cohortId;
     if (upcoming === 'true') where.startTime = MoreThan(new Date());
-
     const items = await benchmarkRepo.find({ where, order: { startTime: 'ASC' } });
     res.json({ items, total: items.length });
   }));
@@ -262,12 +354,10 @@ export function buildLicensingRouter(ds: DataSource) {
   router.post('/benchmark-scheduling', validate(schemas.benchmarkScheduling), asyncHandler(async (req, res) => {
     const start = new Date(req.body.startTime);
     const end   = new Date(req.body.endTime);
-
     if (end <= start) {
       return res.status(400).json({ error: 'endTime must be after startTime' });
     }
 
-    // Conflict check: overlapping benchmark for same cohort
     const conflict = await benchmarkRepo
       .createQueryBuilder('b')
       .where('b.cohortId = :cid', { cid: req.body.cohortId })
@@ -279,8 +369,8 @@ export function buildLicensingRouter(ds: DataSource) {
 
     if (conflict) {
       return res.status(409).json({
-        error: 'Benchmark scheduling conflict for this cohort',
-        conflictId: conflict.id,
+        error:          'Benchmark scheduling conflict for this cohort',
+        conflictId:     conflict.id,
         conflictWindow: { start: conflict.startTime, end: conflict.endTime },
       });
     }
@@ -290,9 +380,7 @@ export function buildLicensingRouter(ds: DataSource) {
     res.status(201).json(sched);
   }));
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // REPORTING
-  // ─────────────────────────────────────────────────────────────────────────
+  // ── REPORTING ──────────────────────────────────────────────────────────
 
   router.get('/reports/:reportType', asyncHandler(async (req, res) => {
     const reportType = req.params.reportType as ReportType;
@@ -306,32 +394,25 @@ export function buildLicensingRouter(ds: DataSource) {
         const qb = packAssignmentRepo.createQueryBuilder('pa')
           .leftJoinAndSelect('pa.cohort', 'c')
           .where('pa.createdAt BETWEEN :from AND :to', { from: fromDate, to: toDate });
-        if (cohortId)      qb.andWhere('pa.cohortId = :cid', { cid: +cohortId });
-        if (institutionId) qb.andWhere('c.institutionId = :iid', { iid: +institutionId });
-        const data = await qb.getMany();
-        return res.json({ reportType, from: fromDate, to: toDate, data });
+        if (cohortId)      qb.andWhere('pa.cohortId = :cid',       { cid: +cohortId });
+        if (institutionId) qb.andWhere('c.institutionId = :iid',   { iid: +institutionId });
+        return res.json({ reportType, from: fromDate, to: toDate, data: await qb.getMany() });
       }
-
       case 'engagement': {
         const qb = benchmarkRepo.createQueryBuilder('b')
           .leftJoinAndSelect('b.cohort', 'c')
           .where('b.startTime BETWEEN :from AND :to', { from: fromDate, to: toDate });
         if (cohortId) qb.andWhere('b.cohortId = :cid', { cid: +cohortId });
-        const data = await qb.getMany();
-        return res.json({ reportType, from: fromDate, to: toDate, data });
+        return res.json({ reportType, from: fromDate, to: toDate, data: await qb.getMany() });
       }
-
       case 'roster': {
         if (!cohortId) return res.status(400).json({ error: 'cohortId required for roster report' });
         const data = await rosterImportRepo.find({
-          where: { cohortId: +cohortId },
-          order: { createdAt: 'DESC' },
+          where: { cohortId: +cohortId }, order: { createdAt: 'DESC' },
         });
         return res.json({ reportType, cohortId: +cohortId, data });
       }
-
       case 'leaderboard': {
-        // Returns top cohorts by pack assignment count as a proxy for activity
         const data = await cohortRepo
           .createQueryBuilder('c')
           .leftJoinAndSelect('c.packAssignments', 'pa')
@@ -341,26 +422,23 @@ export function buildLicensingRouter(ds: DataSource) {
           .getMany();
         return res.json({ reportType, data });
       }
-
       default:
         return res.status(400).json({ error: `Unknown report type: ${reportType}` });
     }
   }));
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // EXPORTS
-  // ─────────────────────────────────────────────────────────────────────────
+  // ── EXPORTS ────────────────────────────────────────────────────────────
 
   router.get('/exports/:exportType', asyncHandler(async (req, res) => {
-    const exportType   = req.params.exportType;
-    const format       = (req.query.format ?? 'csv') as ExportFormat;
+    const exportType = req.params.exportType;
+    const format     = (req.query.format ?? 'csv') as ExportFormat;
     const { cohortId } = req.query as Record<string, string>;
 
     if (!['csv', 'json', 'xlsx'].includes(format)) {
       return res.status(400).json({ error: `Unsupported format: ${format}` });
     }
 
-    let rows: any[] = [];
+    let rows: Record<string, unknown>[] = [];
 
     switch (exportType) {
       case 'institutions':
@@ -410,16 +488,13 @@ export function buildLicensingRouter(ds: DataSource) {
       return res.send(csv);
     }
 
-    // xlsx: signal caller to use exceljs/sheetjs — return JSON as fallback
     return res.status(501).json({
-      error: 'XLSX export requires exceljs integration',
-      fallback: `Use format=json or format=csv`,
+      error:    'XLSX export requires exceljs integration',
+      fallback: 'Use format=json or format=csv',
     });
   }));
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // ERROR HANDLER
-  // ─────────────────────────────────────────────────────────────────────────
+  // ── ERROR HANDLER ──────────────────────────────────────────────────────
   router.use((err: Error, req: Request, res: Response, _next: NextFunction) => {
     console.error('[LicensingControlPlane]', err);
     res.status(500).json({ error: 'Internal server error', message: err.message });
@@ -428,11 +503,15 @@ export function buildLicensingRouter(ds: DataSource) {
   return router;
 }
 
-// ── Bootstrap (standalone mode, if not using NestJS DI) ──────────────────────
-export function bootstrapLicensingApp(ds: DataSource, port = 3001) {
+// ── Bootstrap (standalone mode) ────────────────────────────────────────────
+export function bootstrapLicensingApp(
+  ds:         DataSource,
+  queue:      RosterImportQueue,
+  port = 3001,
+) {
   const app = express();
   app.use(express.json());
-  app.use('/api', buildLicensingRouter(ds));
+  app.use('/api', buildLicensingRouter(ds, queue));
   app.listen(port, () => {
     console.log(`[LicensingControlPlane] Running on port ${port}`);
   });
