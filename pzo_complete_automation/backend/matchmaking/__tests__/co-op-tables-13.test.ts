@@ -11,8 +11,8 @@ import { NotFoundException }                   from '@nestjs/common';
 import { MatchmakingService }                  from '../matchmaking.service';
 import { SessionController }                   from '../../session.controller';
 import { SessionService }                      from '../../session.service';
-import { CoopTable13Repository }               from 'src/repositories/co-op-table-13.repository';
-import { Player }                              from 'src/entities/player.entity';
+import { CoopTable13Repository }               from '../../src/repositories/co-op-table-13.repository';
+import { Player }                              from '../../src/entities/player.entity';
 import { CreateSessionDto }                    from '../../dto/create-session.dto';
 
 // ── Type-safe mock factories ───────────────────────────────────────────────────

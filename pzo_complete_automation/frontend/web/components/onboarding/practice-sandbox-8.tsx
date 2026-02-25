@@ -2,20 +2,24 @@
  * PracticeSandbox8 — Average Age Challenge
  * /Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/pzo_complete_automation/frontend/web/components/onboarding/practice-sandbox-8.tsx
  *
- * Sovereign implementation — zero TODOs:
- *   - handleCodeSubmit: validates code, executes it against 3 fixture test cases,
- *     shows per-test pass/fail feedback, increments step only on all-pass
- *   - Error boundary around eval so a syntax error shows a readable message
- *   - Does NOT use string equality (solution match) as the sole gate —
- *     tests against actual function behaviour so any valid implementation passes
+ * Fix log:
+ *   [TS2307] @chakra-ui/core  → migrated to @chakra-ui/react (React 19 ✓)
+ *   [TS2307] ./CodeEditor, ./ChallengeCard, ./ExplanationModal  → created
+ *   [TS2307] ../../stores/useOnboardingStore                    → created (Zustand)
+ *   [TS2307] ../../data/onboarding-data                         → created
+ *
+ * Chakra v1 → v2 migration notes:
+ *   Box, Heading, Text  — same names, same import path (@chakra-ui/react)
+ *   No breaking API changes for these primitives between v1 and v2/v3
+ *   Requires ChakraProvider wrapping the app (add to _app.tsx / main.tsx if not present)
  */
 
 import React, { useState } from 'react';
-import { Box, Button, Heading, Text } from '@chakra-ui/core';
-import CodeEditor from './CodeEditor';
-import ChallengeCard from './ChallengeCard';
-import ExplanationModal from './ExplanationModal';
-import useOnboardingStore from '../../stores/useOnboardingStore';
+import { Box, Heading, Text } from '@chakra-ui/react';   // v2/v3 — React 19 compatible
+import CodeEditor             from './CodeEditor';
+import ChallengeCard          from './ChallengeCard';
+import ExplanationModal       from './ExplanationModal';
+import useOnboardingStore     from '../../stores/useOnboardingStore';
 import { PracticeSandbox8Data } from '../../data/onboarding-data';
 
 // ── Test fixture types ────────────────────────────────────────────────────────
@@ -31,7 +35,7 @@ interface TestCase {
   expected: number;
 }
 
-// ── Fixtures — cover normal, edge, and float-result cases ─────────────────────
+// ── Fixtures ──────────────────────────────────────────────────────────────────
 
 const TEST_CASES: TestCase[] = [
   {
@@ -70,23 +74,9 @@ interface SubmissionResult {
 
 // ── Code execution ────────────────────────────────────────────────────────────
 
-/**
- * Executes the user's submitted code against all test cases.
- *
- * Strategy:
- *   1. Wrap submitted code in a function that exposes the user's top-level
- *      function definition into scope, then call it with each test input.
- *   2. The user is expected to define a function named `averageAge` (or any
- *      name — we extract the first declared function from their code).
- *   3. Uses `new Function(...)` instead of bare `eval` so the user's
- *      variables are scoped and don't bleed into the outer closure.
- *   4. Any thrown error becomes a per-test 'error' result — we never crash.
- */
 function runTestCases(code: string): SubmissionResult {
   const results: TestResult[] = [];
 
-  // Extract the function name from the submitted code.
-  // Handles: `function foo(...)` and `const foo = (...) =>`
   const fnNameMatch =
     code.match(/function\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\(/) ??
     code.match(/(?:const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=/);
@@ -108,22 +98,12 @@ function runTestCases(code: string): SubmissionResult {
 
   for (const tc of TEST_CASES) {
     try {
-      // Build an isolated executor: define the user's code, then call the fn
       // eslint-disable-next-line no-new-func
-      const executor = new Function(
-        'input',
-        `${code}\n; return ${fnName}(input);`,
-      );
-
+      const executor = new Function('input', `${code}\n; return ${fnName}(input);`);
       const received = executor(tc.input);
       const pass     = typeof received === 'number' && Math.abs(received - tc.expected) < 1e-9;
 
-      results.push({
-        label:    tc.label,
-        status:   pass ? 'pass' : 'fail',
-        expected: tc.expected,
-        received,
-      });
+      results.push({ label: tc.label, status: pass ? 'pass' : 'fail', expected: tc.expected, received });
     } catch (err) {
       results.push({
         label:    tc.label,
@@ -135,8 +115,7 @@ function runTestCases(code: string): SubmissionResult {
     }
   }
 
-  const allPassed = results.every(r => r.status === 'pass');
-  return { allPassed, results };
+  return { allPassed: results.every(r => r.status === 'pass'), results };
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -154,13 +133,10 @@ const PracticeSandbox8 = () => {
     setIsExplanationOpen(true);
   };
 
-  // ── Real submission logic ─────────────────────────────────────────────────
   const handleCodeSubmit = (code: string) => {
     if (!code.trim()) return;
-
     const result = runTestCases(code);
     setSubmission(result);
-
     if (result.allPassed && !hasCompleted) {
       setHasCompleted(true);
       onboardingStore.incrementCompletedStep();
@@ -198,9 +174,11 @@ const PracticeSandbox8 = () => {
           </Text>
 
           {submission.results.map((r, i) => (
-            <Box key={i} mb={2} pl={3} borderLeft="3px solid" borderColor={
-              r.status === 'pass' ? 'green.400' : r.status === 'fail' ? 'red.400' : 'yellow.400'
-            }>
+            <Box
+              key={i} mb={2} pl={3}
+              borderLeft="3px solid"
+              borderColor={r.status === 'pass' ? 'green.400' : r.status === 'fail' ? 'red.400' : 'yellow.400'}
+            >
               <Text fontSize="sm" fontWeight="600">
                 {r.status === 'pass' ? '✓' : r.status === 'fail' ? '✗' : '⚠'} {r.label}
               </Text>

@@ -276,7 +276,14 @@ export type PZOEventType =
   // Sovereignty
   | 'PROOF_HASH_GENERATED'
   | 'RUN_GRADED'
-  | 'PROOF_EXPORT_READY';
+  | 'PROOF_EXPORT_READY'
+  // Decision Timer
+  | 'decision:window_opened'
+  | 'decision:resolve_failed'
+  | 'decision:hold_denied'
+  | 'decision:hold_applied'
+  | 'decision:hold_released'
+  | 'decision:resolved';
 
 export interface PZOEvent<T = unknown> {
   type:    PZOEventType;
