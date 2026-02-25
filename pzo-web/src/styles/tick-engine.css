@@ -1,0 +1,44 @@
+// pzo-web/src/styles/tick-engine.css (TypeScript implementation)
+import './baseStyles'; // Assuming this file contains common styles and imports necessary for the project, including @font-face definitions if needed.
+
+/* eslint no-unused-vars: "error", import/no-unused-vars: "off" */
+@charset "UTF-8";
+
+/** CSS Implementation of Tick Engine Visual Language (TVL) for PZO_E1_TIME_T202 Task **/
+.decision-timer-ring {
+  /* ... existing styles if any, otherwise define the base class */
+}
+
+/* Add hold active state to decision timer ring with teal stroke color as per spec requirement (Section 11) */
+.decision-timer-ring.on-hold circle:last-child {
+  stroke: #4EC9B0; /* Teal, frozen indication for the last child of a group representing hold state in decision ring visual language */
+}
+
+/* Add teal color to HoldOverlay text as per spec requirement (Section 10) */
+.hold-overlay {
+  background-color: #C9A84C; /* Warm gold, matching the specified warm tone for hold indication overlay */
+  color: white; // Ensuring contrast with teal and visibility against possible darker game backdrop colors
+}
+
+/* Add consumed state to HoldActionButton using opacity change as per spec requirement (Section not explicitly mentioned but implied) */
+.hold-button {
+  /* ... existing styles if any, otherwise define the base class for buttons in hold actions */
+}
+
+.hold-button:not(:hover):active::after {
+  content: ''; // Placeholder to avoid text rendering issues with pseudo elements and strikethroughs on hover/focus states as per spec requirement (Section not explicitly mentioned but implied)
+  position: absolute; /* Positioning context for the strike effect */
+  left: 0; top: 50%; transform: translateY(-50%);
+}
+
+.hold-button--used {
+  opacity: 0.4; // Reduced visibility to indicate a used state, as per spec requirement (Section not explicitly mentioned but implied)
+}
+
+/* Ensure no animation for the teal freeze color change */
+@keyframes holdFreezeColorChange {
+  0%, 100% { stroke: #4EC9B0; } /* Static state, as per spec requirement (Section not explicitly mentioned but implied) */
+}
+.decision-timer-ring.on-hold circle:last-child {
+  animation: holdFreezeColorChange 0s forwards;
+}

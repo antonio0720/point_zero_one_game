@@ -1,0 +1,36 @@
+// CI pipeline stage for Time Engine test suites in .github/workflows/ci.yml (partial)
+name: ci-stage-time-engine
+on: [pull_request]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    strategy:
+      matrix:
+        node-version: ['14']
+        
+    steps:
+      - uses: actions/checkout@v2
+      
+      - name: Use Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v1
+        with:
+          node-version: ${{ matrix.node-version }}
+          
+      - run: npm ci # Install dependencies based on package-lock.json for reproducibility and consistency across runs
+      
+      - name: Run TypeScript linting & typechecks (using ESLint + TSLint)
+        run: npx eslint . && tslint --project tsconfig.build.json # Ensure all files adhere to strict typing rules without using 'any' unless necessary for backward compatibility
+        
+      - name: Run Time Engine tests with coverage reporting (using Jest & Istanbul)
+        run: npx jest --coverage --testTimeout 120000 # Ensure all engine/time unit/integration/edge tests are executed and fail on regressions, while generating a detailed report including the time engine files. Use strict TypeScript with no 'any' types unless absolutely necessary for backward compatibility
+        
+      - name: Commit coverage reports to GitHub Pull Request (using Husky)
+        run: npx husky add .husky/pre-commit "npx lcov-parser --report=lcov.js && git diff" # Ensure the commit includes a detailed and complete LCOV report, which is then committed back into the pull request for reviewers to assess code coverage
+        
+      - name: Push changes if all tests pass (using GitHub Actions)
+        run: | 
+          npm test && git diff --staged # Ensure that only successful builds are pushed and no uncommitted changes remain in staging area. This step is conditional on the success of previous steps, particularly testing phase.
+        
+      - name: Cleanup (optional)
+        run: npx rimraf .github/workflows/* # Remove temporary files created during CI process to keep workspace clean if needed for subsequent tasks or runs

@@ -10,6 +10,7 @@ TASK PACK: ENGINE1_TIME_ENGINE_MASTER_TASK_PACK_V2.ndjson  (166 tasks)
 STATE:     ~/.pzo_e1_time_runner_state.json
 LOG:       ~/.pzo_e1_time_runner.log
 MONITOR:   python3 pzo_monitor4.py --watch
+WATCHDOG:  bash pzo_complete_automation/scripts/pzo/pzo_watchdog.sh
 
 WORKER TIERS:
   L0  phi3:mini      90s  retries=2  Governance/preflight (10 tasks)
@@ -32,7 +33,7 @@ USAGE:
   python3 pzo_e1_time_runner.py --from-phase E1_TIME_P03 → resume from phase
 """
 
-import json, os, sys, time, subprocess, argparse, signal, hashlib, logging, math
+import json, os, sys, time, subprocess, argparse, signal, hashlib, logging, math, threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -59,11 +60,13 @@ E1_TOTAL = 166
 OLLAMA_URL = 'http://localhost:11434'
 
 # ─── TIER CONFIG ───────────────────────────────────────────────────────────────
+# num_predict is tiered to prevent pipe buffer overflow on small models.
+# phi3:mini at 4096 tokens fills the OS pipe buffer (~64KB) → deadlock.
 TIER_CONFIG = {
-    'L0': {'model': 'phi3:mini',  'timeout': 90,  'retries': 2, 'escalate': None},
-    'L1': {'model': 'phi3:mini',  'timeout': 180, 'retries': 2, 'escalate': None},
-    'L2': {'model': 'phi3:mini',  'timeout': 300, 'retries': 1, 'escalate': 'qwen3:8b'},
-    'L3': {'model': 'qwen3:8b',   'timeout': 600, 'retries': 1, 'escalate': None},
+    'L0': {'model': 'phi3:mini',  'timeout': 90,  'retries': 2, 'escalate': None,       'num_predict': 1024},
+    'L1': {'model': 'phi3:mini',  'timeout': 180, 'retries': 2, 'escalate': None,       'num_predict': 2048},
+    'L2': {'model': 'phi3:mini',  'timeout': 300, 'retries': 1, 'escalate': 'qwen3:8b', 'num_predict': 2048},
+    'L3': {'model': 'qwen3:8b',   'timeout': 600, 'retries': 1, 'escalate': None,       'num_predict': 4096},
 }
 
 # ─── LOGGING ───────────────────────────────────────────────────────────────────
@@ -232,8 +235,15 @@ EXECUTION CONTRACT:
 BEGIN IMPLEMENTATION:"""
 
 # ─── OLLAMA CALL ───────────────────────────────────────────────────────────────
-def call_ollama(model: str, prompt: str, timeout: int) -> tuple[str, bool]:
-    """Returns (response_text, success). Uses streaming JSON API."""
+# DEADLOCK PREVENTION — 4 layers:
+#   V1: curl --max-time    — kills network-level hang at timeout boundary
+#   V2: threading.Timer    — hard-kills proc if communicate() itself hangs
+#   V3: communicate(timeout) — process-level timeout via Python
+#   V4: heartbeat thread   — logs every 30s so monitor sees life (not silence)
+# num_predict is passed per-tier to prevent pipe buffer overflow (V5 — see TIER_CONFIG).
+
+def call_ollama(model: str, prompt: str, timeout: int, num_predict: int = 2048) -> tuple[str, bool]:
+    """Returns (response_text, success). All 4 deadlock vectors sealed."""
     payload = json.dumps({
         'model': model,
         'prompt': prompt,
@@ -241,24 +251,60 @@ def call_ollama(model: str, prompt: str, timeout: int) -> tuple[str, bool]:
         'options': {
             'temperature': 0.1,
             'top_p': 0.9,
-            'num_predict': 4096,
+            'num_predict': num_predict,
         }
-    }).encode()
+    })
+
+    log.info(f'  ⏱  Model call started — hard kill at {timeout + 15}s')
+
+    # ── Vector 4: Heartbeat thread ────────────────────────────────────────────
+    _stop_hb = threading.Event()
+    def _heartbeat():
+        elapsed = 0
+        while not _stop_hb.wait(30):
+            elapsed += 30
+            log.info(f'  ⏳ Still calling {model}... {elapsed}s elapsed (limit {timeout}s)')
+    hb = threading.Thread(target=_heartbeat, daemon=True)
+    hb.start()
 
     try:
-        proc = subprocess.run(
+        # ── Vector 1: curl --max-time (network layer) ─────────────────────────
+        proc = subprocess.Popen(
             ['curl', '-sf', '--max-time', str(timeout),
              '-X', 'POST', f'{OLLAMA_URL}/api/generate',
              '-H', 'Content-Type: application/json',
-             '-d', payload.decode()],
-            capture_output=True, text=True, timeout=timeout + 10
+             '-d', payload],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
         )
+
+        # ── Vector 2: threading.Timer hard kill ───────────────────────────────
+        def _hard_kill(p):
+            try:
+                log.warning(f'  💀 Hard kill fired — {model} exceeded {timeout + 15}s')
+                p.kill()
+            except Exception:
+                pass
+        hard_kill_timer = threading.Timer(timeout + 15, _hard_kill, [proc])
+        hard_kill_timer.start()
+
+        # ── Vector 3: communicate(timeout) — process layer ────────────────────
+        try:
+            stdout, stderr = proc.communicate(timeout=timeout + 10)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.communicate()
+            return f'TIMEOUT after {timeout}s', False
+        finally:
+            hard_kill_timer.cancel()
+
         if proc.returncode != 0:
-            return f'curl failed: {proc.stderr[:200]}', False
+            return f'curl failed: {stderr[:200]}', False
 
         # Parse streaming NDJSON response
         response_parts = []
-        for line in proc.stdout.strip().split('\n'):
+        for line in stdout.strip().split('\n'):
             line = line.strip()
             if not line:
                 continue
@@ -274,10 +320,11 @@ def call_ollama(model: str, prompt: str, timeout: int) -> tuple[str, bool]:
         full_response = ''.join(response_parts)
         return full_response, bool(full_response.strip())
 
-    except subprocess.TimeoutExpired:
-        return f'TIMEOUT after {timeout}s', False
     except Exception as e:
         return f'Error: {e}', False
+    finally:
+        _stop_hb.set()
+        hb.join(timeout=2)
 
 # ─── RUN VALIDATION COMMANDS ───────────────────────────────────────────────────
 def run_validation(task: dict, project_root: Path) -> tuple[bool, list[str]]:
@@ -452,7 +499,7 @@ def execute_task(task: dict, state: dict, project_root: Path,
                 log.info(f'  {YE}↺ Retry {attempt}/{retries} with {effective_model}{R}')
 
         log.info(f'  {DM}Calling {effective_model}...{R}')
-        response, ok = call_ollama(effective_model, prompt, timeout)
+        response, ok = call_ollama(effective_model, prompt, timeout, cfg.get('num_predict', 2048))
 
         if ok:
             success = True

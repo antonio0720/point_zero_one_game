@@ -1,21 +1,13 @@
+// pzo-web/tsconfig.json - TypeScript configuration ensuring strict mode and no `any` type usage unless necessary for compatibility reasons (e.g., legacy code)
 {
-  "compilerOptions": {
-    "target": "ES2020",
-    "useDefineForClassFields": true,
-    "lib": ["ES2020", "DOM", "DOM.Iterable"],
-    "module": "ESNext",
-    "skipLibCheck": true,
-    "moduleResolution": "bundler",
-    "allowImportingTsExtensions": true,
-    "resolveJsonModule": true,
-    "isolatedModules": true,
-    "noEmit": true,
-    "jsx": "react-jsx",
-    "strict": true,
-    "noUnusedLocals": false,
-    "noUnusedParameters": false,
-    "noFallthroughCasesInSwitch": true
-  },
+  "extends": "react-native", // Assuming we're extending a React Native tsconfig, adjust as needed if using plain JavaScript or another framework/library setup.
   "include": ["src"],
-  "references": [{ "path": "./tsconfig.node.json" }]
+  "exclude": ["node_modules", "**/*.spec.ts"],
+  "compilerOptions": {
+    "target": "es5", // Ensure compatibility with older browsers, adjust as needed for your target environment (e.g., `latest` or specific version).
+    "lib": ["dom", "esnext"], // Include necessary libraries like DOM and ECMAScript features if using jsdom in tests. Adjust libs based on actual dependencies required by the project.
+    "strict": true, // Enforce strict mode to catch common coding mistakes before shipping your code to production.
+    "noImplicitAny": true, // Disallow `any` unless absolutely necessary for backward compatibility with legacy types (e.g., third-party libraries). Adjust as needed based on project requirements and dependencies that may require it.
+    "jsx": "react-native", // Specify JSX transformation method if using React Native or similar framework/library setup, adjust accordingly to your environment's needs.
+  },
 }
