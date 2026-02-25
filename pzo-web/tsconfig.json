@@ -4,6 +4,8 @@
   "include": ["src"],
   "exclude": ["node_modules", "**/*.spec.ts"],
   "compilerOptions": {
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
     "target": "es5", // Ensure compatibility with older browsers, adjust as needed for your target environment (e.g., `latest` or specific version).
     "lib": ["dom", "esnext"], // Include necessary libraries like DOM and ECMAScript features if using jsdom in tests. Adjust libs based on actual dependencies required by the project.
     "strict": true, // Enforce strict mode to catch common coding mistakes before shipping your code to production.
