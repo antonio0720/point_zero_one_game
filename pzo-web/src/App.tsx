@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import LobbyScreen from './components/LobbyScreen';
 // ─── Data Registry (300 mechanics from pzo-web/src/data/) ─────────────────
 import MECHANICS_DATA from './data/mechanics_core.json';
 import ML_DATA        from './data/ml_core.json';
@@ -802,24 +803,12 @@ export default function App() {
   // ── Landing ────────────────────────────────────────────────────────────
   if (screen === 'landing') {
     return (
-      <div className="min-h-screen bg-zinc-950 text-white flex flex-col items-center justify-center gap-8 p-8">
-        <div className="text-center">
-          <h1 className="text-5xl font-black tracking-tight text-white mb-2">POINT <span className="text-indigo-400">ZERO ONE</span></h1>
-          <p className="text-zinc-400 text-lg max-w-3xl">Financial roguelike + systems simulator. 300 mechanics live in runtime registry — deck logic, market behavior, risk, progression, season dominion, telemetry, and anti-cheat.</p>
-        </div>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-center text-sm max-w-5xl w-full">
-          {[['🧠', '300 Mechanics', '150 core + 150 ML/DL companions'], ['🃏', 'Generated Deck', 'Core mechanics become playable cards'], ['📡', 'TelemetryV2', 'Runtime pulses + settlements + events'], ['🏛️', 'Season Dominion', 'XP, pass tier, node pressure, control'], ['⚔️', 'PvP Hooks', 'Ghost/asymmetric pulse lanes'], ['🛡️', 'Integrity Layer', 'Anti-cheat heartbeat & shield events'], ['🔁', 'Deterministic Seeds', 'Replay-ready run seed'], ['💀', 'Permadeath Pressure', 'Bankruptcy + time bounded run']].map(([icon, title, sub]) => (
-            <div key={title} className="bg-zinc-900 rounded-xl p-4 border border-zinc-800"><div className="text-2xl mb-1">{icon}</div><div className="font-bold text-white">{title}</div><div className="text-zinc-500 text-xs">{sub}</div></div>
-          ))}
-        </div>
-        <div className="flex flex-wrap items-center justify-center gap-3">
-          {(['solo', 'asymmetric-pvp', 'co-op', 'ghost'] as const).map((mode) => (
-            <button key={mode} onClick={() => setRunMode(mode)} className={`px-3 py-2 rounded-lg text-sm border ${runMode === mode ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-zinc-900 border-zinc-800 text-zinc-300'}`}>{mode}</button>
-          ))}
-        </div>
-        <button onClick={startRun} className="px-12 py-4 bg-indigo-600 hover:bg-indigo-500 rounded-2xl font-black text-xl tracking-wide transition-all hover:scale-105 active:scale-95 shadow-lg shadow-indigo-900">START RUN</button>
-        <p className="text-zinc-600 text-xs">Goal: passive income &gt; expenses before 720 ticks · Seeded deterministic runtime · 300 mechanics represented</p>
-      </div>
+      <LobbyScreen
+        onStart={(mode) => {
+          setRunMode(mode);
+          startRun();
+        }}
+      />
     );
   }
 
