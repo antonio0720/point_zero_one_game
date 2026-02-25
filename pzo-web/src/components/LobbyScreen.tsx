@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 
-type RunMode = 'solo' | 'asymmetric-pvp' | 'co-op' | 'ghost';
+// Import RunMode from the engine layer — single source of truth
+import type { RunMode } from '../engines/core/types';
 
 interface LobbyScreenProps {
+  /** Called when player clicks a mode CTA. Receives the selected RunMode. */
   onStart: (mode: RunMode) => void;
 }
 

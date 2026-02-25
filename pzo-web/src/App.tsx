@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import LobbyScreen from './components/LobbyScreen';
+import { useGameMode } from './hooks/useGameMode';
 // ─── Data Registry (300 mechanics from pzo-web/src/data/) ─────────────────
 import MECHANICS_DATA from './data/mechanics_core.json';
 import ML_DATA        from './data/ml_core.json';
@@ -432,6 +433,11 @@ function MechanicsPanel({ catalog, runtime, filter, setFilter, search, setSearch
 
 // ─── App ──────────────────────────────────────────────────────────────────────
 export default function App() {
+  // ── Engine Layer Bridge ───────────────────────────────────────────────
+  // useGameMode wires LobbyScreen selections to the sovereign engine stack.
+  // modeState is available here for passing down to game screens.
+  const gameModeHook = useGameMode();
+
   const catalog = useMemo(() => buildCatalog(), []);
   const coreCatalog = useMemo(() => catalog.filter((m) => m.kind === 'core'), [catalog]);
   const mlCatalog   = useMemo(() => catalog.filter((m) => m.kind === 'ml'),   [catalog]);
@@ -807,6 +813,9 @@ export default function App() {
         onStart={(mode) => {
           setRunMode(mode);
           startRun();
+          // Also wire to engine layer — mode engines now run in parallel
+          // with existing tick loop during transition period
+          gameModeHook.startRun(mode).catch(console.error);
         }}
       />
     );
