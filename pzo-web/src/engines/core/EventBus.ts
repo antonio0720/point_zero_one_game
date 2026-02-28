@@ -1,143 +1,147 @@
-// ═══════════════════════════════════════════════════════════════════════════
-// POINT ZERO ONE — EVENT BUS
-// pzo-web/src/engines/core/EventBus.ts
-// Density6 LLC · Confidential
-// ═══════════════════════════════════════════════════════════════════════════
-// The single and only communication channel between all engines.
-// DEFERRED dispatch: events queued during Steps 1–12, flushed at Step 13.
-// An engine that needs to tell another engine something emits here.
-// An engine that needs to react subscribes here.
-// No engine imports another engine class directly — ever.
+/**
+ * FILE: pzo-web/src/engines/core/EventBus.ts
+ *
+ * Extended to include Tension Engine channels (Engine 3 of 7).
+ * Generic constraint broadened from PressureEventInterface → object
+ * so both Pressure and Tension events can be emitted without casting.
+ *
+ * DELIVERY MODE: Synchronous. emit() calls handlers inline. flush() is a no-op.
+ *
+ * Density6 LLC · Point Zero One · Confidential
+ */
+import { PZOEventType, PressureEventInterface } from "./event-bus";
 
-import type { PZOEvent, PZOEventType } from './types';
+// ── Event Channels ─────────────────────────────────────────────────────────
+// Add new channels here when a new engine is integrated.
+// Channels must be registered in registerEventChannels() below.
 
-type EventHandler<T = unknown> = (event: PZOEvent<T>) => void;
-type UnsubscribeFn = () => void;
+export enum PZOEventChannel {
+  // ── Pressure Engine (Engine 2) ─────────────────────────────────
+  PRESSURE_SCORE_UPDATED    = "PRESSURE_SCORE_UPDATED",
+  PRESSURE_TIER_CHANGED     = "PRESSURE_TIER_CHANGED",
+  PRESSURE_CRITICAL_ENTERED = "PRESSURE_CRITICAL_ENTERED",
 
-export class EventBus {
-  // ── Subscriber registry ────────────────────────────────────────────────
-  private readonly subscribers = new Map<PZOEventType, Set<EventHandler>>();
-
-  // ── Deferred queue: filled during tick, flushed at Step 13 ─────────────
-  private queue: PZOEvent[] = [];
-
-  // ── Flush lock: prevents double-flush in same tick ──────────────────────
-  private flushing = false;
-
-  // ── Debug mode: logs all events to console ─────────────────────────────
-  private debug = false;
-
-  // ──────────────────────────────────────────────────────────────────────
-
-  /**
-   * Subscribe to an event type.
-   * Returns an unsubscribe function — call it to clean up.
-   */
-  public on<T = unknown>(type: PZOEventType, handler: EventHandler<T>): UnsubscribeFn {
-    if (!this.subscribers.has(type)) {
-      this.subscribers.set(type, new Set());
-    }
-    const handlers = this.subscribers.get(type)!;
-    handlers.add(handler as EventHandler);
-
-    return () => {
-      handlers.delete(handler as EventHandler);
-      if (handlers.size === 0) {
-        this.subscribers.delete(type);
-      }
-    };
-  }
-
-  /**
-   * Enqueue an event for deferred dispatch.
-   * Events do NOT fire until flush() is called (Step 13 of tick sequence).
-   * This guarantees all engines complete their work before any reacts.
-   */
-  public emit<T = unknown>(type: PZOEventType, tick: number, payload: T): void {
-    const event: PZOEvent<T> = { type, tick, payload };
-    this.queue.push(event as PZOEvent);
-
-    if (this.debug) {
-      console.debug(`[EventBus] queued: ${type} @ tick ${tick}`);
-    }
-  }
-
-  /**
-   * Immediate emit — bypasses the queue and fires directly to subscribers.
-   * Use ONLY for lifecycle events (RUN_STARTED, RUN_ENDED) that must
-   * notify synchronously outside the tick sequence.
-   * DO NOT use inside tick steps 1–12.
-   */
-  public emitImmediate<T = unknown>(type: PZOEventType, tick: number, payload: T): void {
-    const event: PZOEvent<T> = { type, tick, payload };
-    this.deliverEvent(event as PZOEvent);
-  }
-
-  /**
-   * Flush the deferred queue. Called ONLY by EngineOrchestrator at Step 13.
-   * All events queued during Steps 1–12 fire here, in order.
-   * Engines receive real-time feedback only at this moment.
-   */
-  public flush(): void {
-    if (this.flushing) {
-      console.error('[EventBus] flush() called while already flushing — re-entry prevented.');
-      return;
-    }
-    this.flushing = true;
-
-    const batch = [...this.queue];
-    this.queue = [];
-
-    for (const event of batch) {
-      this.deliverEvent(event);
-    }
-
-    this.flushing = false;
-
-    if (this.debug && batch.length > 0) {
-      console.debug(`[EventBus] flushed ${batch.length} events`);
-    }
-  }
-
-  /**
-   * Returns the number of events currently in the deferred queue.
-   * Used by Orchestrator for health checks.
-   */
-  public queueDepth(): number {
-    return this.queue.length;
-  }
-
-  /**
-   * Clear all queued events and all subscribers.
-   * Called on run reset. Never called mid-tick.
-   */
-  public reset(): void {
-    this.queue = [];
-    this.subscribers.clear();
-  }
-
-  /** Enable verbose event logging (development only). */
-  public setDebug(enabled: boolean): void {
-    this.debug = enabled;
-  }
-
-  // ── Private delivery ────────────────────────────────────────────────────
-
-  private deliverEvent(event: PZOEvent): void {
-    const handlers = this.subscribers.get(event.type);
-    if (!handlers || handlers.size === 0) return;
-
-    for (const handler of handlers) {
-      try {
-        handler(event);
-      } catch (err) {
-        console.error(`[EventBus] handler error for event ${event.type}:`, err);
-        // Never let a handler error kill the bus — financial combat continues
-      }
-    }
-  }
+  // ── Tension Engine (Engine 3) ──────────────────────────────────
+  TENSION_SCORE_UPDATED      = "TENSION_SCORE_UPDATED",
+  TENSION_PULSE_FIRED        = "TENSION_PULSE_FIRED",
+  TENSION_VISIBILITY_CHANGED = "TENSION_VISIBILITY_CHANGED",
+  THREAT_ARRIVED             = "THREAT_ARRIVED",
+  THREAT_MITIGATED           = "THREAT_MITIGATED",
+  THREAT_EXPIRED             = "THREAT_EXPIRED",
+  ANTICIPATION_QUEUE_UPDATED = "ANTICIPATION_QUEUE_UPDATED",
 }
 
-// ── Singleton instance shared across the entire engine stack ─────────────────
-// Import this singleton — never instantiate EventBus directly in engines.
-export const globalEventBus = new EventBus();
+// ── Base event wrapper ─────────────────────────────────────────────────────
+// T broadened to object — PressureEventInterface and TensionEvent both satisfy this.
+export interface PZOEvent<T extends object> {
+  type: PZOEventType;
+  payload: T;
+}
+
+// ── EventBus ───────────────────────────────────────────────────────────────
+
+export class EventBus {
+  private eventRegistry: Set<PZOEventChannel> = new Set();
+  // Handler storage: channel → list of handlers
+  private handlers: Map<PZOEventChannel, Array<(event: object) => void>> = new Map();
+
+  constructor() {
+    this.registerEventChannels();
+  }
+
+  private registerEventChannels(): void {
+    // ── Pressure channels ──────────────────────────────────────────
+    this.register(PZOEventChannel.PRESSURE_SCORE_UPDATED);
+    this.register(PZOEventChannel.PRESSURE_TIER_CHANGED);
+    this.register(PZOEventChannel.PRESSURE_CRITICAL_ENTERED);
+
+    // ── Tension channels ───────────────────────────────────────────
+    this.register(PZOEventChannel.TENSION_SCORE_UPDATED);
+    this.register(PZOEventChannel.TENSION_PULSE_FIRED);
+    this.register(PZOEventChannel.TENSION_VISIBILITY_CHANGED);
+    this.register(PZOEventChannel.THREAT_ARRIVED);
+    this.register(PZOEventChannel.THREAT_MITIGATED);
+    this.register(PZOEventChannel.THREAT_EXPIRED);
+    this.register(PZOEventChannel.ANTICIPATION_QUEUE_UPDATED);
+  }
+
+  private register(channel: PZOEventChannel): void {
+    this.eventRegistry.add(channel);
+    if (!this.handlers.has(channel)) {
+      this.handlers.set(channel, []);
+    }
+  }
+
+  // ── Subscribe ──────────────────────────────────────────────────────────
+
+  /**
+   * Subscribe to a channel. T is the specific event payload type.
+   * Constraint broadened to object — works for both Pressure and Tension events.
+   */
+  public on<T extends object>(
+    channel: PZOEventChannel,
+    handler: (event: T) => void
+  ): void {
+    if (!this.eventRegistry.has(channel)) {
+      throw new Error(`[EventBus] Invalid event channel: ${channel}`);
+    }
+    const list = this.handlers.get(channel)!;
+    list.push(handler as (event: object) => void);
+  }
+
+  /**
+   * Unsubscribe a specific handler from a channel.
+   */
+  public off<T extends object>(
+    channel: PZOEventChannel,
+    handler: (event: T) => void
+  ): void {
+    const list = this.handlers.get(channel);
+    if (!list) return;
+    const idx = list.indexOf(handler as (event: object) => void);
+    if (idx !== -1) list.splice(idx, 1);
+  }
+
+  // ── Emit ───────────────────────────────────────────────────────────────
+
+  /**
+   * Emit a payload to all handlers on a channel.
+   * Synchronous delivery — handlers called immediately.
+   * Constraint broadened to object — works for any engine event type.
+   */
+  public emit<T extends object>(
+    channel: PZOEventChannel,
+    payload: T
+  ): void {
+    if (!this.eventRegistry.has(channel)) {
+      throw new Error(`[EventBus] Invalid event channel: ${channel}`);
+    }
+    const list = this.handlers.get(channel);
+    if (!list || list.length === 0) return;
+    for (const handler of list) {
+      handler(payload);
+    }
+  }
+
+  /**
+   * No-op flush — delivery is synchronous, no queue to drain.
+   * Kept for API compatibility with EngineOrchestrator tick sequence.
+   */
+  public flush(): void {
+    // Synchronous bus — nothing to flush.
+  }
+
+  // ── Pressure-typed convenience overloads (backwards compat) ───────────
+
+  /**
+   * Pressure engine overload — accepts PressureEventInterface payloads.
+   * Kept so existing PressureEngine code compiles without changes.
+   * @deprecated Use the generic on<T extends object>() overload instead.
+   */
+  public onPressure<T extends PressureEventInterface>(
+    channel: PZOEventChannel,
+    handler: (event: PZOEvent<T>) => void
+  ): void {
+    this.on(channel, handler as (e: object) => void);
+  }
+}

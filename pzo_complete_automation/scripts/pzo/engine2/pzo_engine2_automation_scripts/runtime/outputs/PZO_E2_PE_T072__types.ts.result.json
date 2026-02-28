@@ -1,0 +1,14 @@
+{
+  "task_id": "PZO_E2_PE_T072",
+  "file": "/Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/pzo-web/src/engines/pressure/types.ts",
+  "tier": "L3",
+  "model": "qwen3:8b",
+  "timeout_s": 420,
+  "num_predict": 4096,
+  "ok": false,
+  "rc": 124,
+  "duration_s": 430.0,
+  "utc": "2026-02-27T20:40:45Z",
+  "failure": "timeout_expired",
+  "stderr": "TimeoutExpired"
+}

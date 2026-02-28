@@ -1,0 +1,16 @@
+{
+  "task_id": "PZO_E2_PE_T025",
+  "file": "/Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/pzo-web/src/engines/pressure/PressureEventEmitter.ts",
+  "tier": "L1",
+  "model": "phi3:mini",
+  "timeout_s": 150,
+  "num_predict": 2048,
+  "ok": true,
+  "rc": 0,
+  "duration_s": 20.34,
+  "utc": "2026-02-27T16:35:17Z",
+  "postprocess_ok": true,
+  "postprocess_reason": "",
+  "sha256": "773c692764399eca16b29c077d20afa7b237944866bdac019c287f520c02b61a",
+  "bytes": 868
+}

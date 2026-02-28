@@ -1,0 +1,23 @@
+#!/bin/bash
+set -euo pipefail
+export PYTHONPATH="${PWD}"
+npx tsc --noEmit src/*.ts > /dev/null
+echo "Compilation step completed successfully."
+
+if [ $? -ne 0 ]; then echo 'TypeScript compilation failed'; exit 1; fi
+
+# Run tests for PressureEngine and ensure exactly five pressure engine .ts files exist (excluding test) in the directory.
+npx vitest run src/engines/pressure/PressureEngine.test.ts --tag "Testing Engine" && echo '[TESTING] PASS' || { echo '[TESTING] FAIL'; exit 1; }
+if [ $? -ne 0 ]; then echo 'Tests failed for PressureEngine.'; fi
+
+# Verify that exactly five pressure engine .ts files exist (excluding test) in the directory.
+count=$(find src/engines/pressure -maxdepth 1 -type f ! -name "*.test.ts" | wc -l)
+if [ "$count" -ne 5 ]; then echo '[FILES] MISSING_COUNT'; exit 1; fi
+echo '[FILES] PASS'
+
+# Check for forbidden imports in the pressure module files and ensure they are absent.
+forbidden_imports=("TimeEngine/BattleEngine/CascadeEngine/ShieldEngine")
+for engine in "${forbidden_imports[@]}"; do
+  grep -Rl "$engine" src/engines/pressure/* | xargs echo "Forbidden import found: $engine." && { echo '[IMPORTS] FAIL'; exit 1; } || true
+done
+echo '[IMPORTS] PASS'

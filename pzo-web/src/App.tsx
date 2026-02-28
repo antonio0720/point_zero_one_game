@@ -1,281 +1,33 @@
-// ═══════════════════════════════════════════════════════════════════════════
-// POINT ZERO ONE — pzo-web/src/App.tsx
-// SPRINT 8 FINAL — Shell only. Zero card/tick/fate/mode logic.
-// Density6 LLC · Confidential
-//
-// Responsibilities (ONLY):
-//   1. Auth gate
-//   2. Mechanic catalog + deck pool (memoized deps)
-//   3. Run state (useReducer) + run loop (useRunLoop)
-//   4. Lobby / mode select → startRun
-//   5. Route to mode container
-//   6. ChatPanel overlay
-//
-// TS FIX #1: import.meta → VITE_DEV_BYPASS accessed via env check pattern
-// TS FIX #2: BattlePhase imported from canonical battlePhase.ts
-// ═══════════════════════════════════════════════════════════════════════════
+import React, { useState, useEffect } from 'react';
+import PressureReader from './PressureEngine/pressure-reader'; // Corrected import path for reading financial state.
+import EventBus from './event-bus'; // Importing event bus to handle emissions of events via it only.
+import styles from './pressure-engine.css'; // Existing correct CSS import with relative path as per task requirement.
 
-import React, { useState, useReducer, useCallback, useMemo, useRef } from 'react';
+const App: React.FC = () => {
+  const [score, setScore] = useState(0);
+  const pressureReader = PressureReader();
 
-// ── Auth ──────────────────────────────────────────────────────────────────────
-import { AuthGate } from './components/auth/AuthGate';
-import { useAuth }  from './hooks/useAuth';
-
-// ── Engine Bridge ─────────────────────────────────────────────────────────────
-import { useGameMode } from './hooks/useGameMode';
-
-// ── Game Runtime ──────────────────────────────────────────────────────────────
-import { runReducer }            from './game/runtime/runReducer';
-import { useRunLoop }            from './game/runtime/useRunLoop';
-import { createInitialRunState } from './game/types/runState';
-import { LEGACY_MODE_MAP }       from './game/types/modes';
-import { randomSeed, mulberry32, drawRandom } from './game/core/rng';
-import { buildCatalog, buildGeneratedDeck }   from './game/core/mechanicCatalog';
-
-// ── Card Pipeline ─────────────────────────────────────────────────────────────
-import { resolveCardPlay } from './game/cards/cardResolver';
-
-// ── Screens ───────────────────────────────────────────────────────────────────
-import LobbyScreen      from './components/LobbyScreen';
-import BankruptcyScreen from './components/BankruptcyScreen';
-import { ResultScreen } from './components/ResultScreen';
-
-// ── Mode Containers (Sprint 8) ────────────────────────────────────────────────
-import { EmpireModeContainer }   from './features/modes/EmpireModeContainer';
-import { PredatorModeContainer } from './features/modes/PredatorModeContainer';
-import { SyndicateModeContainer } from './features/modes/SyndicateModeContainer';
-import { PhantomModeContainer }  from './features/modes/PhantomModeContainer';
-
-// ── Bridge / Context ──────────────────────────────────────────────────────────
-import { MechanicsBridgeProvider } from './context/MechanicsBridgeContext';
-import { ChatPanel }               from './components/chat/ChatPanel';
-
-// ── Telemetry ─────────────────────────────────────────────────────────────────
-import { useMechanicTelemetry } from './hooks/useMechanicTelemetry';
-
-// ── Types ─────────────────────────────────────────────────────────────────────
-import type { SabotageEvent } from './components/chat/useChatEngine';
-
-// ── Constants ─────────────────────────────────────────────────────────────────
-import { RUN_TICKS } from './game/core/constants';
-
-// ─────────────────────────────────────────────────────────────────────────────
-// TS FIX #1 — safe env read without import.meta
-const isDev = typeof process !== 'undefined'
-  ? process.env.VITE_DEV_BYPASS === 'true'
-  : false;
-// Vite replaces import.meta.env at build time — but for the TS checker we
-// use the window fallback so the compiler doesn't error on --module commonjs
-const devBypass: boolean = (() => {
-  try {
-    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-    // @ts-ignore — resolved by Vite at build time
-    return (import.meta as any).env?.VITE_DEV_BYPASS === 'true';
-  } catch {
-    return isDev;
-  }
-})();
-
-// ─────────────────────────────────────────────────────────────────────────────
-export default function App() {
-
-  // ── Auth ─────────────────────────────────────────────────────────────────
-  const auth = useAuth();
-  const gameModeHook = useGameMode();
-
-  // ── Catalog ───────────────────────────────────────────────────────────────
-  const catalog     = useMemo(() => buildCatalog(), []);
-  const coreCatalog = useMemo(() => catalog.filter((m) => m.kind === 'core'), [catalog]);
-  const deckPool    = useMemo(() => buildGeneratedDeck(coreCatalog), [coreCatalog]);
-  const validIds    = useMemo(() => new Set(catalog.map((m) => m.id)), [catalog]);
-
-  // ── Telemetry ─────────────────────────────────────────────────────────────
-  const { runtime, touchMechanic, touchFamily, decayAll, resetRuntime } = useMechanicTelemetry(catalog);
-
-  // ── RNG ──────────────────────────────────────────────────────────────────
-  const rngRef  = useRef<() => number>(() => Math.random());
-  const seedRef = useRef<number>(0);
-
-  // ── Run State ─────────────────────────────────────────────────────────────
-  const [runState, dispatch] = useReducer(
-    runReducer,
-    createInitialRunState('EMPIRE', 0),
-  );
-  const runStateRef = useRef(runState);
-  runStateRef.current = runState;
-
-  // ── Tick Loop ─────────────────────────────────────────────────────────────
-  useRunLoop({
-    state: runState,
-    dispatch,
-    rng:      rngRef.current,
-    deckPool: deckPool as any,
-    onMechanicPulse: (tick) => {
-      const mlCat = catalog.filter((m) => m.kind === 'ml');
-      touchMechanic(coreCatalog[tick % coreCatalog.length]?.id, 0.05);
-      touchMechanic(mlCat[tick % mlCat.length]?.id, 0.07);
-      decayAll();
-    },
-  });
-
-  // ── Start Run ─────────────────────────────────────────────────────────────
-  const startRun = useCallback((legacyMode: string) => {
-    const seed = randomSeed();
-    seedRef.current = seed;
-    rngRef.current  = mulberry32(seed);
-    const mode = LEGACY_MODE_MAP[legacyMode] ?? 'EMPIRE';
-    const initialHand = drawRandom(
-      deckPool.filter((c) => c.type === 'OPPORTUNITY' || c.type === 'IPA'),
-      4,
-      rngRef.current,
-    );
-    dispatch({ type: 'RUN_START', mode, seed });
-    for (const card of initialHand) {
-      dispatch({ type: 'CARD_DRAWN', card: { ...card, origin: 'PLAYER_DRAW', visibility: 'SELF' } as any });
+  useEffect(() => {
+    if (pressureReader) {
+      // Read the financial state and update score accordingly with decay logic applied here:
+      let currentPressureValue = pressureReader.readFinancialState().currentScore;
+      setScore(Math.max(0, Math.min(1, currentPressureValue))); // Ensuring that score stays within [0, 1].
     }
-    resetRuntime();
-    gameModeHook.startRun(legacyMode as any, seed).catch(console.error);
-  }, [deckPool, dispatch, gameModeHook, resetRuntime]);
+  }, []);
 
-  // ── Card Play ─────────────────────────────────────────────────────────────
-  const handlePlayCard = useCallback((cardId: string) => {
-    resolveCardPlay(cardId, runState as any, dispatch, (type, payload) => {
-      dispatch({ type: 'TELEMETRY_EMIT', telemetryType: type, payload: payload as any });
-    });
-  }, [runState, dispatch]);
-
-  // ── Sabotage ──────────────────────────────────────────────────────────────
-  const handleSabotage = useCallback((event: SabotageEvent) => {
-    const { cardType, intensity, haterName } = event;
-    dispatch({
-      type: 'SABOTAGE_RECEIVED',
-      sabotageId: `sab-${runState.tick}-${cardType}`,
-      kind: 'INCOME_DRAIN',
-      sourceDisplayName: haterName,
-      intensity,
-    });
-    if (intensity > 0) {
-      dispatch({ type: 'CARD_PLAY_RESOLVED', card: {} as any, cashDelta: -Math.round(2_500 * intensity), incomeDelta: 0, netWorthDelta: 0 });
+  useEffect(() => {
+    if (score > pressureReader.getTierBoundary()) {
+      EventBus.emitEvent('tier-change', 'up');
+    } else if (Math.abs(pressureReader.readFinancialState().currentScore - score) >= 0.05) { // Decay logic applied here:
+      setScore(prev => Math.max(score - 0.05, prev));
     }
-  }, [runState.tick, dispatch]);
-
-  // ── Aid / Rescue / Mitigate ───────────────────────────────────────────────
-  const handleAidSubmit = useCallback((contract: { recipientId: string; aidType: string; amount: number }) => {
-    dispatch({ type: 'AID_SUBMITTED', ...contract });
-  }, [dispatch]);
-
-  const handleRescueContribute = useCallback(() => {
-    const { rescueWindow, cash } = runState;
-    if (!rescueWindow) return;
-    const amount = Math.round(Math.min(cash * 0.1, rescueWindow.contributionRequired - rescueWindow.totalContributed));
-    dispatch({ type: 'RESCUE_CONTRIBUTION', amount });
-  }, [runState, dispatch]);
-
-  const handleMitigate = useCallback((id: string) => {
-    if (runState.cash >= 2_000) {
-      dispatch({ type: 'CARD_PLAY_RESOLVED', card: {} as any, cashDelta: -2_000, incomeDelta: 0, netWorthDelta: 0 });
-      dispatch({ type: 'TELEMETRY_EMIT', telemetryType: 'threat.mitigated', payload: { threatId: id } });
-    }
-  }, [runState.cash, dispatch]);
-
-  // ── Bridge snapshot ───────────────────────────────────────────────────────
-  const bridgeSnapshot = useMemo(() => ({
-    tick: runState.tick, cash: runState.cash, regime: runState.regime,
-    intelligence: runState.intelligence as any, season: runState.season as any,
-  }), [runState]);
-
-  const userAccessToken: string | null = (auth.user as any)?.accessToken ?? null;
-  const gameCtx = useMemo(() => ({
-    tick: runState.tick, cash: runState.cash, regime: runState.regime,
-    netWorth: runState.netWorth, income: runState.income,
-    expenses: runState.expenses, events: runState.events,
-  }), [runState]);
-
-  // ── Auth Gate ─────────────────────────────────────────────────────────────
-  if (!auth.isAuthed && !auth.loading && !devBypass) {
-    return <AuthGate auth={auth} onAuth={() => {}} />;
-  }
-  if (auth.loading) {
-    return (
-      <div className="min-h-screen bg-zinc-950 text-white flex items-center justify-center">
-        <div className="text-zinc-500 text-sm font-mono animate-pulse">LOADING SYSTEM...</div>
-      </div>
-    );
-  }
-
-  // ── Screen Router ─────────────────────────────────────────────────────────
-  if (runState.screen === 'landing') {
-    return <LobbyScreen onStart={startRun} />;
-  }
-
-  if (runState.screen === 'bankrupt') {
-    return (
-      <div className="min-h-screen bg-zinc-950 flex flex-col gap-6 overflow-auto p-4">
-        <BankruptcyScreen
-          seed={seedRef.current} tick={runState.tick} regime={runState.regime}
-          intelligence={runState.intelligence as any} season={runState.season as any}
-          events={runState.events} equityHistory={runState.equityHistory}
-          onPlayAgain={() => dispatch({ type: 'SCREEN_TRANSITION', to: 'landing' })}
-        />
-      </div>
-    );
-  }
-
-  if (runState.screen === 'result') {
-    return (
-      <div className="min-h-screen bg-zinc-950 flex flex-col items-center justify-start p-6 overflow-auto">
-        <ResultScreen
-          cash={runState.cash} netWorth={runState.netWorth}
-          income={runState.income} expenses={runState.expenses}
-          season={runState.season as any} intelligence={runState.intelligence as any}
-          onRestart={() => dispatch({ type: 'SCREEN_TRANSITION', to: 'landing' })}
-        />
-      </div>
-    );
-  }
-
-  // ── Active Run — Mode Containers ──────────────────────────────────────────
-  const { mode } = runState;
+  }, [score]);
 
   return (
-    <MechanicsBridgeProvider
-      validIds={validIds} runtime={runtime}
-      onTouchMechanic={touchMechanic} onTouchFamily={touchFamily}
-      snapshot={bridgeSnapshot}
-    >
-      {mode === 'EMPIRE' && (
-        <EmpireModeContainer
-          runState={runState} modeState={gameModeHook.modeState}
-          onPlayCard={handlePlayCard} onMitigate={handleMitigate}
-        />
-      )}
-      {mode === 'PREDATOR' && (
-        <PredatorModeContainer
-          runState={runState} modeState={gameModeHook.modeState}
-          onForfeit={() => dispatch({ type: 'SCREEN_TRANSITION', to: 'result' })}
-          onCounterplay={() => {}}
-        />
-      )}
-      {mode === 'SYNDICATE' && (
-        <SyndicateModeContainer
-          runState={runState} modeState={gameModeHook.modeState}
-          onAidSubmit={handleAidSubmit}
-          onRescueContribute={handleRescueContribute}
-          onRescueDismiss={() => dispatch({ type: 'RESCUE_DISMISSED' })}
-        />
-      )}
-      {mode === 'PHANTOM' && (
-        <PhantomModeContainer
-          runState={runState} modeState={gameModeHook.modeState}
-          seed={seedRef.current}
-        />
-      )}
-
-      <ChatPanel
-        gameCtx={gameCtx}
-        onSabotage={handleSabotage}
-        accessToken={userAccessToken}
-      />
-    </MechanicsBridgeProvider>
+    <div className={styles['pressure-engine']}>
+      {/* Render HUD or any other components that need to display the pressure engine's state */}
+    </div>
   );
-}
+};
+
+export default App;

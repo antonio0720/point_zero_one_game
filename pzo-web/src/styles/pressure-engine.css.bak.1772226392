@@ -1,0 +1,10 @@
+import React from 'react';
+import PressureEngine from './styles/pressure-engine.css'; // Import pressure engine CSS once at a top level or appropriate entry point
+
+const AppShell: React.FC = () => {
+  return (
+    <div>
+      {/* Render your HUD components here */}
+    </div>
+  );
+};

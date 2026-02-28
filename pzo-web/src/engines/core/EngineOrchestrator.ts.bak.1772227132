@@ -1,0 +1,26 @@
+import type EventBus from '../../time/EventBus';
+import { PressureEngine, DEFAULT_SIGNAL_WEIGHTS } from '../../engines/pressure';
+import pressureStoreHandlers from '../../store/engineStore';
+import DecisionTimer from './DecisionTimer';
+import type TimeEngine from '../../time/TimeEngine';
+
+export class EngineOrchestrator {
+  private eventBus: EventBus;
+  private pressureEngine: PressureEngine;
+  private decisionTimer: DecisionTimer;
+  private timeEngine: TimeEngine | null = null;
+
+  constructor(eventBus: EventBus) {
+    this.eventBus = eventBus;
+    this.pressureEngine = new PressureEngine(DEFAULT_SIGNAL_WEIGHTS);
+    this.decisionTimer = new DecisionTimer();
+    
+    this.eventBus.on('PRESSURE_SCORE_UPDATED', (event) => {
+      pressureStoreHandlers.onScoreUpdated(engineStore.set, event.payload);
+    });
+    
+    this.eventBus.on('PRESSURE_TIER_CHANGED', (event) => {
+      pressureStoreHandlers.onTierChanged(engineStore.set, event.payload);
+    });
+  }
+}

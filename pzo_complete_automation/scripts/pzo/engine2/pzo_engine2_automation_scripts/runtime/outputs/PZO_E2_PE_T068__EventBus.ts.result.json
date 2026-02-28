@@ -1,0 +1,16 @@
+{
+  "task_id": "PZO_E2_PE_T068",
+  "file": "/Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/pzo-web/src/engines/core/EventBus.ts",
+  "tier": "L3",
+  "model": "qwen3:8b",
+  "timeout_s": 420,
+  "num_predict": 4096,
+  "ok": true,
+  "rc": 0,
+  "duration_s": 139.82,
+  "utc": "2026-02-27T21:27:18Z",
+  "postprocess_ok": true,
+  "postprocess_reason": "",
+  "sha256": "4df96c70ac7b4f7efc9fd1319e4e335915258b6e65d196ba46e2d309530ac7f0",
+  "bytes": 1414
+}

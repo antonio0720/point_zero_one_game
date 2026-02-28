@@ -1,0 +1,16 @@
+{
+  "task_id": "PZO_E2_PE_T057",
+  "file": "/Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/pzo-web/src/telemetry/pressureTelemetry.ts",
+  "tier": "L2",
+  "model": "phi3:mini",
+  "timeout_s": 300,
+  "num_predict": 2048,
+  "ok": true,
+  "rc": 0,
+  "duration_s": 21.76,
+  "utc": "2026-02-27T21:19:14Z",
+  "postprocess_ok": true,
+  "postprocess_reason": "",
+  "sha256": "9bb29f53aa3545c71683457184bd508f7cd945c907f9d976d63d5ec89b9d01a6",
+  "bytes": 2237
+}

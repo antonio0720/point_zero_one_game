@@ -1,0 +1,16 @@
+{
+  "task_id": "PZO_E2_PE_T052",
+  "file": "/Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/pzo-web/src/engines/core/EngineOrchestrator.ts",
+  "tier": "L3",
+  "model": "qwen3:8b",
+  "timeout_s": 420,
+  "num_predict": 4096,
+  "ok": true,
+  "rc": 0,
+  "duration_s": 167.03,
+  "utc": "2026-02-27T21:22:03Z",
+  "postprocess_ok": true,
+  "postprocess_reason": "",
+  "sha256": "7f983e018d433410d182cdced9083eef430e023262b572b99f68607f0108fe70",
+  "bytes": 2430
+}

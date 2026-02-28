@@ -1,0 +1,16 @@
+{
+  "task_id": "PZO_E2_PE_T041",
+  "file": "/Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/pzo-web/src/features/run/components/PressureSignalTooltip.tsx",
+  "tier": "L2",
+  "model": "phi3:mini",
+  "timeout_s": 300,
+  "num_predict": 2048,
+  "ok": true,
+  "rc": 0,
+  "duration_s": 11.49,
+  "utc": "2026-02-27T21:13:42Z",
+  "postprocess_ok": true,
+  "postprocess_reason": "",
+  "sha256": "af7c8c6ab90ae6dde93ffa02748b6c0b3a376bfe81c91775d41990832a00df49",
+  "bytes": 951
+}

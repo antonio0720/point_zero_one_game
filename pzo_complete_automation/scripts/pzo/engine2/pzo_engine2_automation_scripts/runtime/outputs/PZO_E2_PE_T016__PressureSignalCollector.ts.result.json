@@ -1,0 +1,16 @@
+{
+  "task_id": "PZO_E2_PE_T016",
+  "file": "/Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/pzo-web/src/engines/pressure/PressureSignalCollector.ts",
+  "tier": "L2",
+  "model": "phi3:mini",
+  "timeout_s": 300,
+  "num_predict": 2048,
+  "ok": true,
+  "rc": 0,
+  "duration_s": 64.16,
+  "utc": "2026-02-27T16:44:58Z",
+  "postprocess_ok": true,
+  "postprocess_reason": "",
+  "sha256": "f7c2a3dd466f8e687d91eb858b5993123526acf3539fe3616df0554e34947e50",
+  "bytes": 1506
+}

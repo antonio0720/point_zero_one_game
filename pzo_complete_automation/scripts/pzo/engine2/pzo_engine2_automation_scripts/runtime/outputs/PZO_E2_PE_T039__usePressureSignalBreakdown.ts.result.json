@@ -1,0 +1,16 @@
+{
+  "task_id": "PZO_E2_PE_T039",
+  "file": "/Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/pzo-web/src/features/run/hooks/usePressureSignalBreakdown.ts",
+  "tier": "L2",
+  "model": "phi3:mini",
+  "timeout_s": 300,
+  "num_predict": 2048,
+  "ok": true,
+  "rc": 0,
+  "duration_s": 27.68,
+  "utc": "2026-02-27T21:13:07Z",
+  "postprocess_ok": true,
+  "postprocess_reason": "",
+  "sha256": "a9d39594849043d4b7e7b346722e15e1350cd31e59d0959f742a66e033ded862",
+  "bytes": 1864
+}

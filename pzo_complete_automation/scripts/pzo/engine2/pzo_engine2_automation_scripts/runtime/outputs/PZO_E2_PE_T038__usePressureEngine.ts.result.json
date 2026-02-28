@@ -1,0 +1,16 @@
+{
+  "task_id": "PZO_E2_PE_T038",
+  "file": "/Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/pzo-web/src/features/run/hooks/usePressureEngine.ts",
+  "tier": "L2",
+  "model": "phi3:mini",
+  "timeout_s": 300,
+  "num_predict": 2048,
+  "ok": true,
+  "rc": 0,
+  "duration_s": 14.75,
+  "utc": "2026-02-27T21:09:58Z",
+  "postprocess_ok": true,
+  "postprocess_reason": "",
+  "sha256": "c1060014027edd6ed754c23dcf975a30b1f5491b4eaa9abbb48f85f6497c42a8",
+  "bytes": 1016
+}

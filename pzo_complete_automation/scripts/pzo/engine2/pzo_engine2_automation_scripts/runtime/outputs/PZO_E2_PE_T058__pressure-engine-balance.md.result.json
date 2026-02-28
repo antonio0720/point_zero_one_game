@@ -1,0 +1,16 @@
+{
+  "task_id": "PZO_E2_PE_T058",
+  "file": "/Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/pzo-web/docs/balance/pressure-engine-balance.md",
+  "tier": "L2",
+  "model": "phi3:mini",
+  "timeout_s": 300,
+  "num_predict": 2048,
+  "ok": true,
+  "rc": 0,
+  "duration_s": 27.69,
+  "utc": "2026-02-27T21:07:00Z",
+  "postprocess_ok": true,
+  "postprocess_reason": "",
+  "sha256": "67aec993a4a5e4b73591640795cc818e16a3600841532e7a81b2aabab17bfbfa",
+  "bytes": 4212
+}

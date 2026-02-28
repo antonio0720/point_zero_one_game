@@ -1,0 +1,14 @@
+{
+  "task_id": "PZO_E2_PE_T071",
+  "file": "/Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/pzo-web/src/engines/pressure/types.ts",
+  "tier": "L2",
+  "model": "phi3:mini",
+  "timeout_s": 300,
+  "num_predict": 2048,
+  "ok": false,
+  "rc": 28,
+  "duration_s": 752.41,
+  "utc": "2026-02-27T17:08:00Z",
+  "failure": "curl rc=28",
+  "stderr": "curl: (28) Operation timed out after 752389 milliseconds with 0 bytes received"
+}

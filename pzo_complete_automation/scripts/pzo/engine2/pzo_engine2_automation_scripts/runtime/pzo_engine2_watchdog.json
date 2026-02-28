@@ -1,0 +1,8 @@
+{
+  "watchdog_utc": "2026-02-27T20:50:13Z",
+  "runner_pid": 14601,
+  "restarts": 0,
+  "last_reason": "initial_start",
+  "hb_age_s": 1.8,
+  "status": "healthy"
+}

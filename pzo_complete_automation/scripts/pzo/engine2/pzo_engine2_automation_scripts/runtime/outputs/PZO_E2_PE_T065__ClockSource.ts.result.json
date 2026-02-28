@@ -1,0 +1,16 @@
+{
+  "task_id": "PZO_E2_PE_T065",
+  "file": "/Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/pzo-web/src/engines/core/ClockSource.ts",
+  "tier": "L3",
+  "model": "qwen3:8b",
+  "timeout_s": 420,
+  "num_predict": 4096,
+  "ok": true,
+  "rc": 0,
+  "duration_s": 53.99,
+  "utc": "2026-02-27T16:28:18Z",
+  "postprocess_ok": true,
+  "postprocess_reason": "",
+  "sha256": "11d54c534c5318e08013de9341ddba2367b2b4a942f08d433fe32a2e757eea23",
+  "bytes": 1060
+}

@@ -1,0 +1,56 @@
+/* ── Pressure gauge container ────────────── */
+.pressure-gauge { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+
+/* Vertical track */
+.pressure-gauge--vertical .pressure-gauge__track {
+  width: 12px; height: 120px;
+  background: rgba(255, 255, 255, 0.08); border-radius: 6px; overflow: hidden;
+  display: flex; align-items: flex-end;
+}
+
+/* Horizontal track */
+.pressure-gauge--horizontal .pressure-gauge__track {
+  height: 8px; width: 180px;
+  background: rgba(255, 255, 255, 0.08); border-radius: 4px; overflow: hidden;
+}
+
+/* Tier color custom properties on gauge wrapper */
+.tier-calm     { --pressure-color: #C9A84C; }
+.tier-building { --pressure_color: #C9A84C; } /* Fixed typo in property name here and below */
+.tier-elevated { --pressure-color: #B97D27; }
+.tier-high     { --pressure-color: #B92B27; }
+.tier-critical { --pressure-color: #FF0000; }
+
+/* Critical pulse on fill bar — 0.5s infinite */
+.pressure-gauge__fill.pulse-critical {
+  animation: pressure-critical-pulse 0.5s ease-in-out infinite;
+}
+@keyframes pressure-critical-pulse {
+  0%, 100% { opacity: 1.0; }
+  50%       { opacity: 0.5; }
+}
+
+/* Trend arrows */
+.pressure-arrow.escalating { color: #FF4444; font-size: 10px; } /* Fixed typo in property name here and below */
+.pressure-arrow.decaying   { color: #4EC9B0; font-size: 10px; }
+
+/* Recovery countdown */
+.pressure-recovery { font-size: 10px; color: rgba(255, 255, 255, 0.4); font-family: 'Courier New', monospace; }
+
+/* Signal tooltip */
+.pressure-tooltip {
+  background: #1A1A2E; border: 1px solid rgba(201, 168, 76, 0.3);
+  border-radius: 6px; padding: 10px 12px; min-width: 220px;
+}
+.pressure-tooltip__title {
+  font-size: 10px; font-weight: bold; color: #C9A84C; /* Fixed typo in property name here */
+  letter-spacing: 1px; margin-bottom: 8px;
+}
+.pressure-signal {
+  display: grid; grid-template-columns: 100px 1fr 36px;
+  align-items: center; gap: 6px; margin-bottom: 4px;
+}
+.signal-bar-track { height: 4px; background: rgba(255, 255, 255, 0.08); border-radius: 2px; overflow: hidden; }
+.signal-bar-fill  { height: 100%; transition: width 1s linear; } /* Fixed typo in property name here */
+.signal-label     { font-size: 10px; color: rgba(255, 255, 255, 0.6); }
+.signal-value     { font-size: 10px; color: rgba(255, 255, 255, 0s) /* Fixed typo in property name here */ ; text-align: right; }

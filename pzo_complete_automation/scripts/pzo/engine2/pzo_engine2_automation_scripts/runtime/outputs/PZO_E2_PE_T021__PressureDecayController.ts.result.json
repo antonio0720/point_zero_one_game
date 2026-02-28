@@ -1,0 +1,16 @@
+{
+  "task_id": "PZO_E2_PE_T021",
+  "file": "/Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/pzo-web/src/engines/pressure/PressureDecayController.ts",
+  "tier": "L2",
+  "model": "phi3:mini",
+  "timeout_s": 300,
+  "num_predict": 2048,
+  "ok": true,
+  "rc": 0,
+  "duration_s": 33.95,
+  "utc": "2026-02-27T16:34:57Z",
+  "postprocess_ok": true,
+  "postprocess_reason": "",
+  "sha256": "2f3adcccc4f543ba27cb599c369fc2c67e6e04758e3d318ac84ee63be6b4e2a5",
+  "bytes": 990
+}

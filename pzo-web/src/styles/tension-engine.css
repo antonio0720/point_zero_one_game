@@ -1,0 +1,436 @@
+/**
+ * FILE: //Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/pzo-web/src/styles/tension-engine.css
+ * All Tension Engine visual classes and animations.
+ * Purple palette distinguishes tension from the gold/red Pressure gauge.
+ *
+ * DO NOT override these classes outside this file.
+ * All tension-related UI must reference these classes exclusively.
+ *
+ * Color palette:
+ *   Base purple:   #7B5EA7
+ *   Mid purple:    #9B4EA7
+ *   Deep magenta:  #B92B7A
+ *   Crisis red:    #FF0066
+ *   Gold accent:   #C9A84C  (visibility badge — borrowed from sovereign palette)
+ *   Teal:          #4EC9B0  (mitigation path text)
+ *
+ * Density6 LLC · Point Zero One · Engine 3 of 7 · Confidential
+ */
+
+/* ─────────────────────────────────────────────────────────────────────────
+   TENSION GAUGE
+   ──────────────────────────────────────────────────────────────────────── */
+
+.tension-gauge {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  position: relative;
+  user-select: none;
+}
+
+/* ── Vertical track ──────────────────────────────────────────────────────── */
+.tension-gauge--vertical .tension-gauge__track {
+  width: 12px;
+  height: 120px;
+  background: rgba(123, 94, 167, 0.15);
+  border: 1px solid rgba(123, 94, 167, 0.25);
+  border-radius: 6px;
+  overflow: hidden;
+  display: flex;
+  align-items: flex-end;
+}
+
+/* ── Horizontal track ────────────────────────────────────────────────────── */
+.tension-gauge--horizontal .tension-gauge__track {
+  height: 8px;
+  width: 180px;
+  background: rgba(123, 94, 167, 0.15);
+  border: 1px solid rgba(123, 94, 167, 0.25);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.tension-gauge__fill {
+  height: 100%;
+  transition: all 1s linear;
+}
+
+/* ── Label row ───────────────────────────────────────────────────────────── */
+.tension-gauge__label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.tension-label {
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  color: rgba(123, 94, 167, 0.9);
+  font-family: 'Courier New', Courier, monospace;
+  text-transform: uppercase;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   PULSE STATES
+   ──────────────────────────────────────────────────────────────────────── */
+
+/* Active pulse (score >= 0.90) — fill breathes */
+.tension-pulse-active .tension-gauge__fill {
+  animation: tension-pulse 0.6s ease-in-out infinite;
+}
+
+@keyframes tension-pulse {
+  0%, 100% { opacity: 1.0; }
+  50%       { opacity: 0.4; }
+}
+
+/* Sustained pulse (3+ consecutive ticks at >= 0.90) — whole gauge glows */
+.tension-pulse-sustained {
+  animation: tension-crisis-pulse 0.4s ease-in-out infinite;
+}
+
+@keyframes tension-crisis-pulse {
+  0%, 100% { filter: none; }
+  50%       { filter: drop-shadow(0 0 8px rgba(185, 43, 122, 0.8)); }
+}
+
+/* Urgent state — arrived threats present */
+.tension-gauge--urgent .tension-gauge__track {
+  border-color: rgba(255, 0, 102, 0.5);
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   GAUGE BADGES
+   ──────────────────────────────────────────────────────────────────────── */
+
+.tension-visibility-badge {
+  font-size: 9px;
+  letter-spacing: 1px;
+  color: rgba(123, 94, 167, 0.8);
+  font-family: 'Courier New', Courier, monospace;
+  text-transform: uppercase;
+}
+
+.tension-arrived-badge {
+  font-size: 10px;
+  font-weight: 700;
+  color: #FF0066;
+  font-family: 'Courier New', Courier, monospace;
+  text-transform: uppercase;
+  animation: arrived-blink 0.8s step-end infinite;
+}
+
+@keyframes arrived-blink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0; }
+}
+
+.tension-queue-badge {
+  font-size: 9px;
+  color: rgba(255, 255, 255, 0.4);
+  font-family: 'Courier New', Courier, monospace;
+}
+
+.tension-queue-badge--clear {
+  color: rgba(123, 94, 167, 0.4);
+}
+
+.tension-escalating {
+  color: #FF4466;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   ANTICIPATION QUEUE PANEL
+   ──────────────────────────────────────────────────────────────────────── */
+
+.queue-panel {
+  background: #1A1A2E;
+  border: 1px solid rgba(123, 94, 167, 0.3);
+  border-radius: 6px;
+  padding: 10px 12px;
+  min-width: 240px;
+  max-width: 320px;
+  font-family: 'Courier New', Courier, monospace;
+}
+
+.queue-panel--empty {
+  opacity: 0.4;
+  text-align: center;
+  padding: 16px 12px;
+}
+
+.queue-empty-label {
+  font-size: 10px;
+  color: rgba(123, 94, 167, 0.6);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+/* ── Panel Header ────────────────────────────────────────────────────────── */
+.queue-panel__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.queue-panel__title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #7B5EA7;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+.queue-arrived-count {
+  font-size: 9px;
+  color: #FF0066;
+  font-weight: 700;
+  padding: 1px 5px;
+  background: rgba(255, 0, 102, 0.12);
+  border-radius: 3px;
+  animation: arrived-blink 0.8s step-end infinite;
+}
+
+.visibility-badge {
+  font-size: 9px;
+  color: #C9A84C;
+  padding: 2px 6px;
+  border: 1px solid rgba(201, 168, 76, 0.3);
+  border-radius: 3px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+/* ── SHADOWED mode summary ───────────────────────────────────────────────── */
+.queue-shadowed-summary {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 8px 4px;
+}
+
+.shadowed-count {
+  font-size: 28px;
+  font-weight: 700;
+  color: rgba(123, 94, 167, 0.6);
+  line-height: 1;
+}
+
+.shadowed-label {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.3);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+/* ── Entries Container ───────────────────────────────────────────────────── */
+.queue-panel__entries {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+/* ── Single Queue Entry ──────────────────────────────────────────────────── */
+.queue-entry {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.03);
+  border-left: 3px solid transparent;
+  transition: background 0.2s ease;
+}
+
+/* ARRIVED — action window open, player can mitigate */
+.queue-entry--arrived {
+  border-left-color: #FF0066;
+  background: rgba(255, 0, 102, 0.08);
+  animation: arrived-entry-pulse 1s ease-in-out infinite;
+}
+
+@keyframes arrived-entry-pulse {
+  0%, 100% { background: rgba(255, 0, 102, 0.08); }
+  50%       { background: rgba(255, 0, 102, 0.18); }
+}
+
+/* QUEUED — scheduled, not yet arrived */
+.queue-entry--queued {
+  border-left-color: #7B5EA7;
+}
+
+/* OVERDUE — arrived but past action window (about to expire) */
+.queue-entry--overdue {
+  border-left-color: #FF4400;
+  background: rgba(255, 68, 0, 0.08);
+}
+
+/* CASCADE — entry was triggered by a cascade event */
+.queue-entry--cascade {
+  background: rgba(185, 43, 122, 0.06);
+}
+
+/* ── Entry Header Row ────────────────────────────────────────────────────── */
+.entry-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.entry-type {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.85);
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  flex: 1;
+}
+
+.entry-type--hidden {
+  color: rgba(255, 255, 255, 0.25);
+  font-style: italic;
+  font-weight: 400;
+}
+
+/* ── Severity Badge ──────────────────────────────────────────────────────── */
+.entry-severity {
+  font-size: 8px;
+  font-weight: 700;
+  padding: 1px 4px;
+  border-radius: 2px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.entry-severity--minor       { color: #7B5EA7; background: rgba(123, 94, 167, 0.15); }
+.entry-severity--moderate    { color: #C9A84C; background: rgba(201, 168, 76, 0.15); }
+.entry-severity--severe      { color: #E07840; background: rgba(224, 120, 64, 0.15); }
+.entry-severity--critical    { color: #FF4466; background: rgba(255, 68, 102, 0.15); }
+.entry-severity--existential { color: #FF0066; background: rgba(255, 0, 102, 0.2); animation: arrived-blink 1.2s step-end infinite; }
+
+.entry-cascade-badge {
+  font-size: 10px;
+  color: #B92B7A;
+  flex-shrink: 0;
+}
+
+/* ── Countdown ───────────────────────────────────────────────────────────── */
+.entry-countdown {
+  font-size: 10px;
+  color: #C9A84C;
+  font-family: 'Courier New', Courier, monospace;
+  letter-spacing: 0.5px;
+}
+
+/* ── Worst Case ──────────────────────────────────────────────────────────── */
+.entry-worst-case {
+  font-size: 9px;
+  color: rgba(255, 68, 102, 0.8);
+  font-style: italic;
+  padding-top: 2px;
+  border-top: 1px solid rgba(255, 0, 102, 0.1);
+  margin-top: 1px;
+}
+
+/* ── Mitigation Path ─────────────────────────────────────────────────────── */
+.entry-mitigation {
+  font-size: 9px;
+  color: #4EC9B0;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  padding-top: 2px;
+}
+
+/* ── Section Divider ─────────────────────────────────────────────────────── */
+.queue-section-divider {
+  font-size: 8px;
+  color: rgba(255, 255, 255, 0.2);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  padding: 4px 0 2px;
+  border-top: 1px solid rgba(123, 94, 167, 0.15);
+  margin-top: 2px;
+}
+
+/* ── Overflow indicator ──────────────────────────────────────────────────── */
+.queue-overflow-indicator {
+  font-size: 9px;
+  color: rgba(255, 255, 255, 0.25);
+  text-align: center;
+  padding: 4px 0;
+  letter-spacing: 1px;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   VISIBILITY STATE MODIFIERS ON QUEUE PANEL
+   ──────────────────────────────────────────────────────────────────────── */
+
+/* SHADOWED — muted, mysterious */
+.queue-panel--shadowed .queue-panel__title {
+  color: rgba(123, 94, 167, 0.5);
+}
+
+.queue-panel--shadowed .entry-type {
+  color: rgba(255, 255, 255, 0.25);
+}
+
+/* SIGNALED — awareness increases */
+.queue-panel--signaled {
+  border-color: rgba(123, 94, 167, 0.5);
+}
+
+/* TELEGRAPHED — countdown urgency */
+.queue-panel--telegraphed {
+  border-color: rgba(201, 168, 76, 0.4);
+}
+
+.queue-panel--telegraphed .entry-countdown {
+  color: #B92B27;
+  font-weight: 700;
+}
+
+/* EXPOSED — crisis mode, full information, near-death */
+.queue-panel--exposed {
+  border-color: rgba(255, 0, 102, 0.5);
+  background: #1F1020;
+  box-shadow: 0 0 16px rgba(255, 0, 102, 0.08);
+}
+
+.queue-panel--exposed .queue-panel__title {
+  color: #FF0066;
+}
+
+.queue-panel--exposed .entry-type {
+  color: rgba(255, 255, 255, 1);
+}
+
+.queue-panel--exposed .entry-countdown {
+  color: #FF4466;
+  font-weight: 700;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   CRISIS MODE — full-screen effects triggered at sustained pulse (3+ ticks)
+   Applied at the document level by the frontend layout when isSustainedPulse = true.
+   ──────────────────────────────────────────────────────────────────────── */
+
+.tension-crisis-mode {
+  /* Screen border shift — borrowed from TimeEngine T4 COLLAPSE_IMMINENT class */
+  box-shadow: inset 0 0 0 3px rgba(255, 0, 102, 0.6);
+  animation: crisis-border-pulse 0.4s ease-in-out infinite;
+}
+
+@keyframes crisis-border-pulse {
+  0%, 100% { box-shadow: inset 0 0 0 3px rgba(255, 0, 102, 0.6); }
+  50%       { box-shadow: inset 0 0 0 3px rgba(255, 0, 102, 1.0); }
+}

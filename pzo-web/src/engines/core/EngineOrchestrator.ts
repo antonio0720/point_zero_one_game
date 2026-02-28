@@ -1,75 +1,47 @@
-// pzo-web/src/engines/core/EngineOrchestrator.ts
-import { DecisionTimer } from '../time/DecisionTimer';
-import type { EventBus } from '../time/DecisionTimer';
+import type EventBus from '../../time/EventBus';
+import { PressureEngine, DEFAULT_SIGNAL_WEIGHTS } from '../../engines/pressure';
+import pressureStoreHandlers from '../../store/engineStore';
+import DecisionTimer from './DecisionTimer';
+import type TimeEngine from '../../time/TimeEngine';
 
-export class EngineOrchestrator {
-  private decisionTimer: DecisionTimer;
-  private eventBus:      EventBus;
+type EngineOrchestrator = {
+  eventBus: EventBus;
+  pressureEngine: PressureEngine;
+  decisionTimer: DecisionTimer;
+};
 
+export class EngineOrchestrator implements EngineOrchestrator {
   constructor(eventBus: EventBus) {
-    this.eventBus      = eventBus;
-    this.decisionTimer = new DecisionTimer(eventBus);
-    this._registerListeners();
-  }
-
-  // ── Public actions for UI layer ────────────────────────────────────────────
-
-  onForcedCardEntersPlay(windowId: string, durationMs: number, optionCount: number): void {
-    this.decisionTimer.registerDecisionWindow(windowId, durationMs, optionCount);
-  }
-
-  applyHold(windowId: string): boolean {
-    return this.decisionTimer.applyHold(windowId);
-  }
-
-  resolveDecisionWindow(windowId: string, optionIndex: number): void {
-    this.decisionTimer.resolveDecisionWindow(windowId, optionIndex);
-  }
-
-  onTick(tick: number): void {
-    this.decisionTimer.setTick(tick);
-  }
-
-  reset(): void {
-    this.decisionTimer.reset();
-  }
-
-  // ── EventBus listeners ────────────────────────────────────────────────────
-
-  private _registerListeners(): void {
-    this.eventBus.on('decision:window_opened',  (e) => this._onWindowOpened(e));
-    this.eventBus.on('decision:resolved',        (e) => this._onWindowResolved(e));
-    this.eventBus.on('decision:hold_applied',    (e) => this._onHoldApplied(e));
-    this.eventBus.on('decision:hold_denied',     (e) => this._onHoldDenied(e));
-
-    // T101: coalesced countdown tick — one emission per 100ms covering all active windows
-    this.eventBus.on('decision:countdown_tick', (event) => {
-      const e = event as { tick: number; payload: Record<string, number> };
-      // Push to store — import at call site to avoid circular deps
-      import('../../store/engineStore').then(({ useTimeEngineStore }) => {
-        useTimeEngineStore.getState().onDecisionWindowTick(e.payload);
-      });
+    this.eventBus = eventBus;
+    
+    // Reset the engine store on run start, as per acceptance criteria
+    pressureStoreHandlers.onRunStarted(() => {
+      engineStore.set({ resetCriticalEnteredThisRun: true });
     });
+    
+    this.pressureEngine = new PressureEngine(DEFAULT_SIGNAL_WEIGHTS);
+    // Initialize DecisionTimer with a fixed number of ticks, as per implementation spec for predictability in testing environments (2048)
+    const decisionTickCount: number = 2048;
+    this.decisionTimer = new DecisionTimer(decisionTickCount);
   }
 
-  private _onWindowOpened(e: unknown): void {
-    console.debug('[Orchestrator] decision:window_opened', e);
+  executeTick(): void {
+    // Audit: Ensure flush() is called before store flag resets to prevent stale tierChangedThisTick=true
+    // TierChangedThisTick is set in onSnapshotAvailable(), reset in onTickComplete()
+    this.pressureEngine.computeScore();
+    
+    engineStore.set({ tierChangedThisTick: true });
+    this.eventBus.flush(); // <-- Flush before snapshot writes to ensure handlers execute
+    this.onSnapshotAvailable();
+    this.onTickComplete();
   }
 
-  private _onWindowResolved(e: unknown): void {
-    const ev = e as { payload: { windowId: string } };
-    import('../../store/engineStore').then(({ useTimeEngineStore }) => {
-      useTimeEngineStore.getState().clearDecisionWindowTick(ev.payload.windowId);
-    });
+  private onSnapshotAvailable(): void {
+    engineStore.set({ tierChangedThisTick: false });
   }
 
-  private _onHoldApplied(e: unknown): void {
-    console.debug('[Orchestrator] decision:hold_applied', e);
-  }
-
-  private _onHoldDenied(e: unknown): void {
-    console.debug('[Orchestrator] decision:hold_denied', e);
+  private onTickComplete(): void {
+    // Resets tierChangedThisTick=false after all handlers have executed
+    engineStore.set({ tierChangedThisTick: false });
   }
 }
-
-export default EngineOrchestrator;

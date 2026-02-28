@@ -1,0 +1,16 @@
+{
+  "task_id": "PZO_E2_PE_T054",
+  "file": "/Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/pzo-web/src/features/run/components/RunHUD.tsx",
+  "tier": "L2",
+  "model": "phi3:mini",
+  "timeout_s": 300,
+  "num_predict": 2048,
+  "ok": true,
+  "rc": 0,
+  "duration_s": 7.32,
+  "utc": "2026-02-27T21:23:32Z",
+  "postprocess_ok": true,
+  "postprocess_reason": "",
+  "sha256": "ef571c78e04e2a4d0471f1ca9eceb13db8ce001244646ebd9e9dd74a0927c6da",
+  "bytes": 734
+}

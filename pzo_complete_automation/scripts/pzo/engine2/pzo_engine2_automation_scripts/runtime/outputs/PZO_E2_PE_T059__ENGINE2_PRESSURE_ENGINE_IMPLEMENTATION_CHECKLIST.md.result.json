@@ -1,0 +1,16 @@
+{
+  "task_id": "PZO_E2_PE_T059",
+  "file": "/Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/pzo-web/docs/handoffs/ENGINE2_PRESSURE_ENGINE_IMPLEMENTATION_CHECKLIST.md",
+  "tier": "L2",
+  "model": "phi3:mini",
+  "timeout_s": 300,
+  "num_predict": 2048,
+  "ok": true,
+  "rc": 0,
+  "duration_s": 84.02,
+  "utc": "2026-02-27T21:43:22Z",
+  "postprocess_ok": true,
+  "postprocess_reason": "",
+  "sha256": "0282c839e4331139cfc51187850a84f97b2406bc30515c5587c8aff5780840df",
+  "bytes": 2146
+}

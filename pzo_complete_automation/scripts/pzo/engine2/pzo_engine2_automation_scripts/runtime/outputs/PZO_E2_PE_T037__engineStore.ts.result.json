@@ -1,0 +1,16 @@
+{
+  "task_id": "PZO_E2_PE_T037",
+  "file": "/Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/pzo-web/src/store/engineStore.ts",
+  "tier": "L2",
+  "model": "phi3:mini",
+  "timeout_s": 300,
+  "num_predict": 2048,
+  "ok": true,
+  "rc": 0,
+  "duration_s": 27.62,
+  "utc": "2026-02-27T21:05:56Z",
+  "postprocess_ok": true,
+  "postprocess_reason": "",
+  "sha256": "4e3cc4fde7d6323ca39de6c0673c58442ce1131e3372937205ce58d2d7055f67",
+  "bytes": 1748
+}

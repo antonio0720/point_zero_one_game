@@ -1,0 +1,16 @@
+{
+  "task_id": "PZO_E2_PE_T010",
+  "file": "/Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/pzo-web/src/engines/pressure/types.ts",
+  "tier": "L1",
+  "model": "phi3:mini",
+  "timeout_s": 150,
+  "num_predict": 2048,
+  "ok": true,
+  "rc": 0,
+  "duration_s": 6.28,
+  "utc": "2026-02-27T16:32:23Z",
+  "postprocess_ok": true,
+  "postprocess_reason": "",
+  "sha256": "20a6f7968a56862896d3e9efe496a9ac9d6aa3e4b014e964160cd1af367e9d61",
+  "bytes": 268
+}

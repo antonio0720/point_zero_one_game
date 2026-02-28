@@ -1,0 +1,46 @@
+import { PZOEventType, PressureEventInterface } from "./event-bus";
+
+export enum PZOEventChannel {
+  PRESSURE_SCORE_UPDATED = "PRESSURE_SCORE_UPDATED",
+  PRESSURE_TIER_CHANGED = "PRESSURE_TIER_CHANGED",
+  PRESSURE_CRITICAL_ENTERED = "PRESSURE_CRITICAL_ENTERED",
+}
+
+export interface PZOEvent<T extends PressureEventInterface> {
+  type: PZOEventType;
+  payload: T;
+}
+
+export class EventBus {
+  private eventRegistry: Set<PZOEventChannel> = new Set();
+
+  constructor() {
+    this.registerEventChannels();
+  }
+
+  private registerEventChannels(): void {
+    this.eventRegistry.add(PZOEventChannel.PRESSURE_SCORE_UPDATED);
+    this.eventRegistry.add(PZOEventChannel.PRESSURE_TIER_CHANGED);
+    this.eventRegistry.add(PZOEventChannel.PRESSURE_CRITICAL_ENTERED);
+  }
+
+  public on<T extends PressureEventInterface>(
+    channel: PZOEventChannel,
+    handler: (event: PZOEvent<T>) => void
+  ): void {
+    if (!this.eventRegistry.has(channel)) {
+      throw new Error(`Invalid event channel: ${channel}`);
+    }
+    // Implementation for event subscription
+  }
+
+  public emit<T extends PressureEventInterface>(
+    channel: PZOEventChannel,
+    payload: T
+  ): void {
+    if (!this.eventRegistry.has(channel)) {
+      throw new Error(`Invalid event channel: ${channel}`);
+    }
+    // Implementation for event emission
+  }
+}

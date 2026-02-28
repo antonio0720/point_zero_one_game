@@ -1,0 +1,16 @@
+{
+  "task_id": "PZO_E2_PE_T034",
+  "file": "/Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/pzo-web/src/engines/pressure/PressureEngine.ts",
+  "tier": "L3",
+  "model": "qwen3:8b",
+  "timeout_s": 420,
+  "num_predict": 4096,
+  "ok": true,
+  "rc": 0,
+  "duration_s": 319.44,
+  "utc": "2026-02-27T20:22:17Z",
+  "postprocess_ok": true,
+  "postprocess_reason": "",
+  "sha256": "8ccfbb166d07a0a66c35e788d56677aecabcf660e978a46ef29114e45b6cdd8e",
+  "bytes": 4444
+}

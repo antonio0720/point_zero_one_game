@@ -1,0 +1,16 @@
+{
+  "task_id": "PZO_E2_PE_T060",
+  "file": "/Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/pzo-web/scripts/verify_pressure_engine_spec.sh",
+  "tier": "L2",
+  "model": "phi3:mini",
+  "timeout_s": 300,
+  "num_predict": 2048,
+  "ok": true,
+  "rc": 0,
+  "duration_s": 127.37,
+  "utc": "2026-02-27T21:45:29Z",
+  "postprocess_ok": true,
+  "postprocess_reason": "",
+  "sha256": "6ae306e57ec3076f0090bb1f8fe4868e28202798a38179ca1d40f584985d462b",
+  "bytes": 1186
+}

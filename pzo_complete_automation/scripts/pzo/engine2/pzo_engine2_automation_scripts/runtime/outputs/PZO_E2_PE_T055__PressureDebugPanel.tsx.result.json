@@ -1,0 +1,16 @@
+{
+  "task_id": "PZO_E2_PE_T055",
+  "file": "/Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/pzo-web/src/features/run/components/PressureDebugPanel.tsx",
+  "tier": "L1",
+  "model": "phi3:mini",
+  "timeout_s": 150,
+  "num_predict": 2048,
+  "ok": true,
+  "rc": 0,
+  "duration_s": 15.34,
+  "utc": "2026-02-27T21:13:59Z",
+  "postprocess_ok": true,
+  "postprocess_reason": "",
+  "sha256": "177f71105a50d3175f84493b40076e2d7b2c71557560f23fadcb6180eb70f5ea",
+  "bytes": 1674
+}
