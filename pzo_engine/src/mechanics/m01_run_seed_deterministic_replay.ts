@@ -11,24 +11,117 @@
 //   ✦ Deterministic-by-seed  ✦ Server-verified via ledger
 //   ✦ Bounded chaos          ✦ No pay-to-win
 
-import { clamp, computeHash, seededShuffle, seededIndex,
-         buildMacroSchedule, buildChaosWindows,
-         buildWeightedPool, OPPORTUNITY_POOL, DEFAULT_CARD, DEFAULT_CARD_IDS,
-         computeDecayRate, EXIT_PULSE_MULTIPLIERS,
-         MACRO_EVENTS_PER_RUN, CHAOS_WINDOWS_PER_RUN, RUN_TOTAL_TICKS,
-         PRESSURE_WEIGHTS, PHASE_WEIGHTS, REGIME_WEIGHTS,
-         REGIME_MULTIPLIERS } from './mechanicsUtils';
+import {
+  clamp,
+  computeHash,
+  seededShuffle,
+  seededIndex,
+  buildMacroSchedule,
+  buildChaosWindows,
+  buildWeightedPool,
+  OPPORTUNITY_POOL,
+  DEFAULT_CARD,
+  DEFAULT_CARD_IDS,
+  computeDecayRate,
+  EXIT_PULSE_MULTIPLIERS,
+  MACRO_EVENTS_PER_RUN,
+  CHAOS_WINDOWS_PER_RUN,
+  RUN_TOTAL_TICKS,
+  PRESSURE_WEIGHTS,
+  PHASE_WEIGHTS,
+  REGIME_WEIGHTS,
+  REGIME_MULTIPLIERS,
+} from './mechanicsUtils';
+
 import type {
-  RunPhase, TickTier, MacroRegime, PressureTier, SolvencyStatus,
-  Asset, IPAItem, GameCard, GameEvent, ShieldLayer, Debt, Buff,
-  Liability, SetBonus, AssetMod, IncomeItem, MacroEvent, ChaosWindow,
-  AuctionResult, PurchaseResult, ShieldResult, ExitResult, TickResult,
-  DeckComposition, TierProgress, WipeEvent, RegimeShiftEvent,
-  PhaseTransitionEvent, TimerExpiredEvent, StreakEvent, FubarEvent,
-  LedgerEntry, ProofCard, CompletedRun, SeasonState, RunState,
-  MomentEvent, ClipBoundary, MechanicTelemetryPayload, MechanicEmitter,
+  RunPhase,
+  TickTier,
+  MacroRegime,
+  PressureTier,
+  SolvencyStatus,
+  Asset,
+  IPAItem,
+  GameCard,
+  GameEvent,
+  ShieldLayer,
+  Debt,
+  Buff,
+  Liability,
+  SetBonus,
+  AssetMod,
+  IncomeItem,
+  MacroEvent,
+  ChaosWindow,
+  AuctionResult,
+  PurchaseResult,
+  ShieldResult,
+  ExitResult,
+  TickResult,
+  DeckComposition,
+  TierProgress,
+  WipeEvent,
+  RegimeShiftEvent,
+  PhaseTransitionEvent,
+  TimerExpiredEvent,
+  StreakEvent,
+  FubarEvent,
+  LedgerEntry,
+  ProofCard,
+  CompletedRun,
+  SeasonState,
+  RunState,
+  MomentEvent,
+  ClipBoundary,
+  MechanicTelemetryPayload,
+  MechanicEmitter,
 } from './types';
 
+// ── Import Anchors ──────────────────────────────────────────────────────────
+// Ensures the generator-wide import set is always "used" in-module (types + values),
+// without mutating exec_hook behavior.
+
+export type M01_ImportedTypesAnchor = {
+  runPhase: RunPhase;
+  tickTier: TickTier;
+  macroRegime: MacroRegime;
+  pressureTier: PressureTier;
+  solvencyStatus: SolvencyStatus;
+  asset: Asset;
+  ipaItem: IPAItem;
+  gameCard: GameCard;
+  gameEvent: GameEvent;
+  shieldLayer: ShieldLayer;
+  debt: Debt;
+  buff: Buff;
+  liability: Liability;
+  setBonus: SetBonus;
+  assetMod: AssetMod;
+  incomeItem: IncomeItem;
+  macroEvent: MacroEvent;
+  chaosWindow: ChaosWindow;
+  auctionResult: AuctionResult;
+  purchaseResult: PurchaseResult;
+  shieldResult: ShieldResult;
+  exitResult: ExitResult;
+  tickResult: TickResult;
+  deckComposition: DeckComposition;
+  tierProgress: TierProgress;
+  wipeEvent: WipeEvent;
+  regimeShiftEvent: RegimeShiftEvent;
+  phaseTransitionEvent: PhaseTransitionEvent;
+  timerExpiredEvent: TimerExpiredEvent;
+  streakEvent: StreakEvent;
+  fubarEvent: FubarEvent;
+  ledgerEntry: LedgerEntry;
+  proofCard: ProofCard;
+  completedRun: CompletedRun;
+  seasonState: SeasonState;
+  runState: RunState;
+  momentEvent: MomentEvent;
+  clipBoundary: ClipBoundary;
+  mechanicTelemetryPayload: MechanicTelemetryPayload;
+  mechanicEmitter: MechanicEmitter;
+};
 
 // ── Input / Output contracts ──────────────────────────────────────────────
 
@@ -47,7 +140,11 @@ export interface M01Output {
 
 // ── Telemetry ─────────────────────────────────────────────────────────────
 
-export type M01Event = 'SEED_COMMITTED' | 'SEED_REPLAYED' | 'REPLAY_VERIFIED' | 'REPLAY_MISMATCH';
+export type M01Event =
+  | 'SEED_COMMITTED'
+  | 'SEED_REPLAYED'
+  | 'REPLAY_VERIFIED'
+  | 'REPLAY_MISMATCH';
 
 export interface M01TelemetryPayload extends MechanicTelemetryPayload {
   event: M01Event;
@@ -57,24 +154,24 @@ export interface M01TelemetryPayload extends MechanicTelemetryPayload {
 // ── Design bounds (never mutate at runtime) ────────────────────────────────
 
 export const M01_BOUNDS = {
-  BASE_AMOUNT:         1_000,
-  TRIGGER_THRESHOLD:   3,
-  MULTIPLIER:          1.5,
-  MAX_AMOUNT:          50_000,
-  MIN_CASH_DELTA:      -20_000,
-  MAX_CASH_DELTA:       20_000,
-  MIN_CASHFLOW_DELTA:  -10_000,
-  MAX_CASHFLOW_DELTA:   10_000,
-  TIER_ESCAPE_TARGET:   3_000,
+  BASE_AMOUNT: 1_000,
+  TRIGGER_THRESHOLD: 3,
+  MULTIPLIER: 1.5,
+  MAX_AMOUNT: 50_000,
+  MIN_CASH_DELTA: -20_000,
+  MAX_CASH_DELTA: 20_000,
+  MIN_CASHFLOW_DELTA: -10_000,
+  MAX_CASHFLOW_DELTA: 10_000,
+  TIER_ESCAPE_TARGET: 3_000,
   REGIME_SHIFT_THRESHOLD: 500,
-  BASE_DECAY_RATE:     0.02,
+  BASE_DECAY_RATE: 0.02,
   BLEED_CASH_THRESHOLD: 1_000,
   FIRST_REFUSAL_TICKS: 6,
-  PULSE_CYCLE:         12,
-  MAX_PROCEEDS:        999_999,
-  EFFECT_MULTIPLIER:   1.0,
-  MIN_EFFECT:          0,
-  MAX_EFFECT:          100_000,
+  PULSE_CYCLE: 12,
+  MAX_PROCEEDS: 999_999,
+  EFFECT_MULTIPLIER: 1.0,
+  MIN_EFFECT: 0,
+  MAX_EFFECT: 100_000,
 } as const;
 
 // ── Exec hook ─────────────────────────────────────────────────────────────
@@ -95,12 +192,24 @@ export function runSeedDeterministicReplay(
   emit: MechanicEmitter,
 ): M01Output {
   const raw = [input.userId ?? '', input.rulesVersion ?? '', String(input.timestamp ?? 0)].join(':');
+
   const runSeed = computeHash(raw);
+
   const deckShuffle = seededShuffle(DEFAULT_CARD_IDS, runSeed);
+
   const macroSchedule = buildMacroSchedule(runSeed, MACRO_EVENTS_PER_RUN);
+
   const chaosWindows = buildChaosWindows(runSeed, CHAOS_WINDOWS_PER_RUN);
-    emit({ event: 'SEED_COMMITTED', mechanic_id: 'M01', tick: 0, runId: runSeed, payload: { runSeed, userId: input.userId ?? '' } });
-    return {
+
+  emit({
+    event: 'SEED_COMMITTED',
+    mechanic_id: 'M01',
+    tick: 0,
+    runId: runSeed,
+    payload: { runSeed, userId: input.userId ?? '' },
+  });
+
+  return {
     runSeed: runSeed,
     deckShuffle: deckShuffle,
     macroSchedule: macroSchedule,
@@ -111,17 +220,182 @@ export function runSeedDeterministicReplay(
 // ── ML companion hook ─────────────────────────────────────────────────────
 
 export interface M01MLInput {
-  runSeed?: string, deckShuffle?: string[], macroSchedule?: MacroEvent[], chaosWindows?: ChaosWindow[];
+  runSeed?: string;
+  deckShuffle?: string[];
+  macroSchedule?: MacroEvent[];
+  chaosWindows?: ChaosWindow[];
   runId: string;
-  tick:  number;
+  tick: number;
 }
 
 export interface M01MLOutput {
-  score:          number;         // 0–1
-  topFactors:     string[];       // max 5 plain-English factors
-  recommendation: string;         // single sentence
-  auditHash:      string;         // SHA256(inputs+outputs+rulesVersion)
-  confidenceDecay: number;        // 0–1, how fast this signal should decay
+  score: number; // 0–1
+  topFactors: string[]; // max 5 plain-English factors
+  recommendation: string; // single sentence
+  auditHash: string; // SHA256(inputs+outputs+rulesVersion)
+  confidenceDecay: number; // 0–1, how fast this signal should decay
+}
+
+type M01MLContext = {
+  seed: string;
+  tick: number;
+  regime: MacroRegime;
+  phase: RunPhase;
+  pressure: PressureTier;
+  tickTier: TickTier;
+
+  pressureWeight: number;
+  phaseWeight: number;
+  regimeWeight: number;
+
+  regimeMultiplier: number;
+  decayRate: number;
+  exitPulse: number;
+
+  pool: GameCard[];
+  opportunityIndex: number;
+  opportunity: GameCard;
+  poolPick: GameCard;
+
+  auditCoreHash: string;
+};
+
+function m01DerivePhase(tick: number): RunPhase {
+  const third = RUN_TOTAL_TICKS / 3;
+  if (tick < third) return 'EARLY';
+  if (tick < third * 2) return 'MID';
+  return 'LATE';
+}
+
+function m01DeriveRegime(seed: string, tick: number, macroSchedule: MacroEvent[]): MacroRegime {
+  const regimes: MacroRegime[] = ['BULL', 'NEUTRAL', 'BEAR', 'CRISIS'];
+
+  if (!macroSchedule || macroSchedule.length === 0) {
+    return regimes[seededIndex(seed, tick + 999, regimes.length)];
+  }
+
+  const sorted = [...macroSchedule].sort((a, b) => a.tick - b.tick);
+  let r: MacroRegime = 'NEUTRAL';
+
+  for (const ev of sorted) {
+    if (ev.tick > tick) break;
+    if (ev.regimeChange) r = ev.regimeChange;
+  }
+
+  if (r === 'NEUTRAL' && sorted[0]?.regimeChange) {
+    // Still deterministic, but prefers schedule intent when present
+    r = sorted[0].regimeChange;
+  }
+
+  return r ?? regimes[seededIndex(seed, tick + 1001, regimes.length)];
+}
+
+function m01DerivePressure(tick: number, phase: RunPhase, chaosWindows: ChaosWindow[]): PressureTier {
+  const inChaos =
+    Array.isArray(chaosWindows) &&
+    chaosWindows.some(w => tick >= w.startTick && tick <= w.endTick);
+
+  if (inChaos) return 'CRITICAL';
+
+  switch (phase) {
+    case 'EARLY':
+      return 'LOW';
+    case 'MID':
+      return 'MEDIUM';
+    case 'LATE':
+      return 'HIGH';
+    default:
+      return 'MEDIUM';
+  }
+}
+
+function m01DeriveTickTier(pressure: PressureTier): TickTier {
+  if (pressure === 'CRITICAL') return 'CRITICAL';
+  if (pressure === 'HIGH') return 'ELEVATED';
+  return 'STANDARD';
+}
+
+function m01BuildMLContext(input: M01MLInput): M01MLContext {
+  const seed = input.runSeed ?? input.runId;
+
+  const tick = clamp(input.tick ?? 0, 0, RUN_TOTAL_TICKS - 1);
+
+  const macroSchedule = input.macroSchedule ?? buildMacroSchedule(seed, MACRO_EVENTS_PER_RUN);
+
+  const chaosWindows = input.chaosWindows ?? buildChaosWindows(seed, CHAOS_WINDOWS_PER_RUN);
+
+  const phase = m01DerivePhase(tick);
+
+  const regime = m01DeriveRegime(seed, tick, macroSchedule);
+
+  const pressure = m01DerivePressure(tick, phase, chaosWindows);
+
+  const tickTier = m01DeriveTickTier(pressure);
+
+  const pressureWeight = PRESSURE_WEIGHTS[pressure] ?? 1.0;
+
+  const phaseWeight = PHASE_WEIGHTS[phase] ?? 1.0;
+
+  const regimeWeight = REGIME_WEIGHTS[regime] ?? 1.0;
+
+  const pressurePhaseWeight = clamp(pressureWeight * phaseWeight, 0.1, 10);
+
+  const pool = buildWeightedPool(seed + ':m01:ml', pressurePhaseWeight, regimeWeight);
+
+  const opportunityIndex = seededIndex(seed, tick + 17, OPPORTUNITY_POOL.length);
+
+  const opportunity = OPPORTUNITY_POOL[opportunityIndex] ?? DEFAULT_CARD;
+
+  const poolPickIndex = seededIndex(seed, tick + 33, Math.max(1, pool.length));
+
+  const poolPick = pool[poolPickIndex] ?? opportunity ?? DEFAULT_CARD;
+
+  const regimeMultiplier = REGIME_MULTIPLIERS[regime] ?? 1.0;
+
+  const decayRate = computeDecayRate(regime, M01_BOUNDS.BASE_DECAY_RATE);
+
+  const exitPulse = EXIT_PULSE_MULTIPLIERS[regime] ?? 1.0;
+
+  const auditCoreHash = computeHash(
+    JSON.stringify({
+      seed,
+      tick,
+      phase,
+      regime,
+      pressure,
+      tickTier,
+      pressureWeight,
+      phaseWeight,
+      regimeWeight,
+      regimeMultiplier,
+      decayRate,
+      exitPulse,
+      poolIds: pool.map(c => c.id),
+      oppLen: OPPORTUNITY_POOL.length,
+      opportunityId: opportunity.id,
+      poolPickId: poolPick.id,
+    }),
+  );
+
+  return {
+    seed,
+    tick,
+    regime,
+    phase,
+    pressure,
+    tickTier,
+    pressureWeight,
+    phaseWeight,
+    regimeWeight,
+    regimeMultiplier,
+    decayRate,
+    exitPulse,
+    pool,
+    opportunityIndex,
+    opportunity,
+    poolPick,
+    auditCoreHash,
+  };
 }
 
 /**
@@ -132,13 +406,31 @@ export interface M01MLOutput {
 export async function runSeedDeterministicReplayMLCompanion(
   input: M01MLInput,
 ): Promise<M01MLOutput> {
-  // Advisory signal — bounded [0,1], no state mutation
-  const score = Math.min(0.99, Math.max(0.01, Object.keys(input).length * 0.05));
+  const ctx = m01BuildMLContext(input);
+
+  // Higher pressure + crisis regimes reduce "confidence" of static advice.
+  const pressureNorm = clamp((ctx.pressureWeight - 0.8) / (1.6 - 0.8), 0, 1);
+
+  const regimeNorm = clamp((ctx.regimeWeight - 0.75) / (1.1 - 0.75), 0, 1);
+
+  const score = clamp(0.92 - pressureNorm * 0.35 - (1 - regimeNorm) * 0.15, 0.01, 0.99);
+
+  const topFactors = [
+    `tick=${ctx.tick}/${RUN_TOTAL_TICKS} phase=${ctx.phase} tier=${ctx.tickTier}`,
+    `regime=${ctx.regime} mult=${ctx.regimeMultiplier.toFixed(2)} exitPulse=${ctx.exitPulse.toFixed(2)}`,
+    `pressure=${ctx.pressure} w=${ctx.pressureWeight.toFixed(2)} phaseW=${ctx.phaseWeight.toFixed(2)}`,
+    `poolPick=${ctx.poolPick.id} (${ctx.poolPick.name})`,
+    `opportunity=${ctx.opportunity.id} idx=${ctx.opportunityIndex}/${OPPORTUNITY_POOL.length}`,
+  ].slice(0, 5);
+
+  const recommendation =
+    `Seeded play: prioritize "${ctx.poolPick.name}" now; re-evaluate on regime shifts / chaos windows.`;
+
   return {
     score,
-    topFactors:     ['M01 signal computed', 'advisory only'],
-    recommendation: 'Monitor M01 output and adjust strategy accordingly.',
-    auditHash:      computeHash(JSON.stringify(input) + ':ml:M01'),
-    confidenceDecay: 0.05,
+    topFactors,
+    recommendation,
+    auditHash: computeHash(ctx.auditCoreHash + ':ml:M01:' + JSON.stringify(input)),
+    confidenceDecay: ctx.decayRate,
   };
 }

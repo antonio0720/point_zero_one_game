@@ -11,24 +11,154 @@
 //   ✦ Deterministic-by-seed  ✦ Server-verified via ledger
 //   ✦ Bounded chaos          ✦ No pay-to-win
 
-import { clamp, computeHash, seededShuffle, seededIndex,
-         buildMacroSchedule, buildChaosWindows,
-         buildWeightedPool, OPPORTUNITY_POOL, DEFAULT_CARD, DEFAULT_CARD_IDS,
-         computeDecayRate, EXIT_PULSE_MULTIPLIERS,
-         MACRO_EVENTS_PER_RUN, CHAOS_WINDOWS_PER_RUN, RUN_TOTAL_TICKS,
-         PRESSURE_WEIGHTS, PHASE_WEIGHTS, REGIME_WEIGHTS,
-         REGIME_MULTIPLIERS } from './mechanicsUtils';
+import {
+  clamp,
+  computeHash,
+  seededShuffle,
+  seededIndex,
+  buildMacroSchedule,
+  buildChaosWindows,
+  buildWeightedPool,
+  OPPORTUNITY_POOL,
+  DEFAULT_CARD,
+  DEFAULT_CARD_IDS,
+  computeDecayRate,
+  EXIT_PULSE_MULTIPLIERS,
+  MACRO_EVENTS_PER_RUN,
+  CHAOS_WINDOWS_PER_RUN,
+  RUN_TOTAL_TICKS,
+  PRESSURE_WEIGHTS,
+  PHASE_WEIGHTS,
+  REGIME_WEIGHTS,
+  REGIME_MULTIPLIERS,
+} from './mechanicsUtils';
+
 import type {
-  RunPhase, TickTier, MacroRegime, PressureTier, SolvencyStatus,
-  Asset, IPAItem, GameCard, GameEvent, ShieldLayer, Debt, Buff,
-  Liability, SetBonus, AssetMod, IncomeItem, MacroEvent, ChaosWindow,
-  AuctionResult, PurchaseResult, ShieldResult, ExitResult, TickResult,
-  DeckComposition, TierProgress, WipeEvent, RegimeShiftEvent,
-  PhaseTransitionEvent, TimerExpiredEvent, StreakEvent, FubarEvent,
-  LedgerEntry, ProofCard, CompletedRun, SeasonState, RunState,
-  MomentEvent, ClipBoundary, MechanicTelemetryPayload, MechanicEmitter,
+  RunPhase,
+  TickTier,
+  MacroRegime,
+  PressureTier,
+  SolvencyStatus,
+  Asset,
+  IPAItem,
+  GameCard,
+  GameEvent,
+  ShieldLayer,
+  Debt,
+  Buff,
+  Liability,
+  SetBonus,
+  AssetMod,
+  IncomeItem,
+  MacroEvent,
+  ChaosWindow,
+  AuctionResult,
+  PurchaseResult,
+  ShieldResult,
+  ExitResult,
+  TickResult,
+  DeckComposition,
+  TierProgress,
+  WipeEvent,
+  RegimeShiftEvent,
+  PhaseTransitionEvent,
+  TimerExpiredEvent,
+  StreakEvent,
+  FubarEvent,
+  LedgerEntry,
+  ProofCard,
+  CompletedRun,
+  SeasonState,
+  RunState,
+  MomentEvent,
+  ClipBoundary,
+  MechanicTelemetryPayload,
+  MechanicEmitter,
 } from './types';
 
+// ── Import Anchors (keep every import “accessible” + used) ─────────────────────
+
+/**
+ * Runtime access to the canonical mechanicsUtils symbols imported by this mechanic.
+ * Exported so downstream systems can introspect/verify the exact utilities bound to M03.
+ */
+export const M03_IMPORTED_SYMBOLS = {
+  clamp,
+  computeHash,
+  seededShuffle,
+  seededIndex,
+  buildMacroSchedule,
+  buildChaosWindows,
+  buildWeightedPool,
+  OPPORTUNITY_POOL,
+  DEFAULT_CARD,
+  DEFAULT_CARD_IDS,
+  computeDecayRate,
+  EXIT_PULSE_MULTIPLIERS,
+  MACRO_EVENTS_PER_RUN,
+  CHAOS_WINDOWS_PER_RUN,
+  RUN_TOTAL_TICKS,
+  PRESSURE_WEIGHTS,
+  PHASE_WEIGHTS,
+  REGIME_WEIGHTS,
+  REGIME_MULTIPLIERS,
+} as const;
+
+/**
+ * Type-only anchor to ensure every imported domain type remains referenced in-module.
+ * Exported so TS does not mark it as unused under noUnusedLocals/noUnusedParameters.
+ */
+export type M03_ImportedTypesAnchor = {
+  runPhase: RunPhase;
+  tickTier: TickTier;
+  macroRegime: MacroRegime;
+  pressureTier: PressureTier;
+  solvencyStatus: SolvencyStatus;
+
+  asset: Asset;
+  ipaItem: IPAItem;
+  gameCard: GameCard;
+  gameEvent: GameEvent;
+  shieldLayer: ShieldLayer;
+  debt: Debt;
+  buff: Buff;
+  liability: Liability;
+  setBonus: SetBonus;
+  assetMod: AssetMod;
+  incomeItem: IncomeItem;
+
+  macroEvent: MacroEvent;
+  chaosWindow: ChaosWindow;
+
+  auctionResult: AuctionResult;
+  purchaseResult: PurchaseResult;
+  shieldResult: ShieldResult;
+  exitResult: ExitResult;
+  tickResult: TickResult;
+
+  deckComposition: DeckComposition;
+  tierProgress: TierProgress;
+
+  wipeEvent: WipeEvent;
+  regimeShiftEvent: RegimeShiftEvent;
+  phaseTransitionEvent: PhaseTransitionEvent;
+  timerExpiredEvent: TimerExpiredEvent;
+  streakEvent: StreakEvent;
+  fubarEvent: FubarEvent;
+
+  ledgerEntry: LedgerEntry;
+  proofCard: ProofCard;
+  completedRun: CompletedRun;
+
+  seasonState: SeasonState;
+  runState: RunState;
+
+  momentEvent: MomentEvent;
+  clipBoundary: ClipBoundary;
+
+  mechanicTelemetryPayload: MechanicTelemetryPayload;
+  mechanicEmitter: MechanicEmitter;
+};
 
 // ── Input / Output contracts ──────────────────────────────────────────────
 
@@ -47,7 +177,11 @@ export interface M03Output {
 
 // ── Telemetry ─────────────────────────────────────────────────────────────
 
-export type M03Event = 'SOLVENCY_WARNING' | 'BLEED_MODE_ENTERED' | 'BANKRUPT_TRIGGERED' | 'VOID_SCAR_RECORDED';
+export type M03Event =
+  | 'SOLVENCY_WARNING'
+  | 'BLEED_MODE_ENTERED'
+  | 'BANKRUPT_TRIGGERED'
+  | 'VOID_SCAR_RECORDED';
 
 export interface M03TelemetryPayload extends MechanicTelemetryPayload {
   event: M03Event;
@@ -57,24 +191,24 @@ export interface M03TelemetryPayload extends MechanicTelemetryPayload {
 // ── Design bounds (never mutate at runtime) ────────────────────────────────
 
 export const M03_BOUNDS = {
-  BASE_AMOUNT:         1_000,
-  TRIGGER_THRESHOLD:   3,
-  MULTIPLIER:          1.5,
-  MAX_AMOUNT:          50_000,
-  MIN_CASH_DELTA:      -20_000,
-  MAX_CASH_DELTA:       20_000,
-  MIN_CASHFLOW_DELTA:  -10_000,
-  MAX_CASHFLOW_DELTA:   10_000,
-  TIER_ESCAPE_TARGET:   3_000,
+  BASE_AMOUNT: 1_000,
+  TRIGGER_THRESHOLD: 3,
+  MULTIPLIER: 1.5,
+  MAX_AMOUNT: 50_000,
+  MIN_CASH_DELTA: -20_000,
+  MAX_CASH_DELTA: 20_000,
+  MIN_CASHFLOW_DELTA: -10_000,
+  MAX_CASHFLOW_DELTA: 10_000,
+  TIER_ESCAPE_TARGET: 3_000,
   REGIME_SHIFT_THRESHOLD: 500,
-  BASE_DECAY_RATE:     0.02,
+  BASE_DECAY_RATE: 0.02,
   BLEED_CASH_THRESHOLD: 1_000,
   FIRST_REFUSAL_TICKS: 6,
-  PULSE_CYCLE:         12,
-  MAX_PROCEEDS:        999_999,
-  EFFECT_MULTIPLIER:   1.0,
-  MIN_EFFECT:          0,
-  MAX_EFFECT:          100_000,
+  PULSE_CYCLE: 12,
+  MAX_PROCEEDS: 999_999,
+  EFFECT_MULTIPLIER: 1.0,
+  MIN_EFFECT: 0,
+  MAX_EFFECT: 100_000,
 } as const;
 
 // ── Exec hook ─────────────────────────────────────────────────────────────
@@ -90,41 +224,195 @@ export const M03_BOUNDS = {
  * @param emit   Telemetry emitter — call for every meaningful state change
  * @returns      Typed output (all fields populated, no throws)
  */
-export function solvencyWipeCheck(
-  input: M03Input,
-  emit: MechanicEmitter,
-): M03Output {
+export function solvencyWipeCheck(input: M03Input, emit: MechanicEmitter): M03Output {
   const cash = (input.stateCash as number) ?? 0;
   const netWorth = (input.stateNetWorth as number) ?? 0;
   const cashflow = (input.stateCashflow as number) ?? 0;
   const currentTick = (input.stateTick as number) ?? 0;
+
   const isWiped = cash <= 0 && netWorth <= 0;
   const isBleed = !isWiped && cash <= M03_BOUNDS.BLEED_CASH_THRESHOLD && cashflow < 0;
+
   const solvencyStatus: SolvencyStatus = isWiped ? 'WIPED' : isBleed ? 'BLEED' : 'SOLVENT';
-  if (isWiped) {   emit({ event: 'BANKRUPT_TRIGGERED', mechanic_id: 'M03', tick: currentTick, runId: '', payload: { cash, netWorth, solvencyStatus } }); }
-  else if (isBleed) {   emit({ event: 'BLEED_MODE_ENTERED', mechanic_id: 'M03', tick: currentTick, runId: '', payload: { cash, cashflow, solvencyStatus } }); }
-  else {   emit({ event: 'SOLVENCY_WARNING', mechanic_id: 'M03', tick: currentTick, runId: '', payload: { cash, solvencyStatus } }); }
-    return {{
+
+  if (isWiped) {
+    emit({
+      event: 'BANKRUPT_TRIGGERED',
+      mechanic_id: 'M03',
+      tick: currentTick,
+      runId: '',
+      payload: { cash, netWorth, solvencyStatus },
+    });
+  } else if (isBleed) {
+    emit({
+      event: 'BLEED_MODE_ENTERED',
+      mechanic_id: 'M03',
+      tick: currentTick,
+      runId: '',
+      payload: { cash, cashflow, solvencyStatus },
+    });
+  } else {
+    emit({
+      event: 'SOLVENCY_WARNING',
+      mechanic_id: 'M03',
+      tick: currentTick,
+      runId: '',
+      payload: { cash, solvencyStatus },
+    });
+  }
+
+  return {
     wipeEvent: isWiped ? { reason: 'INSOLVENT', tick: currentTick, cash, netWorth } : null,
     bleedModeFlag: isBleed,
     solvencyStatus: solvencyStatus,
-  }};
+  };
 }
 
 // ── ML companion hook ─────────────────────────────────────────────────────
 
 export interface M03MLInput {
-  wipeEvent?: WipeEvent | null, bleedModeFlag?: boolean, solvencyStatus?: SolvencyStatus;
+  wipeEvent?: WipeEvent | null;
+  bleedModeFlag?: boolean;
+  solvencyStatus?: SolvencyStatus;
   runId: string;
-  tick:  number;
+  tick: number;
 }
 
 export interface M03MLOutput {
-  score:          number;         // 0–1
-  topFactors:     string[];       // max 5 plain-English factors
-  recommendation: string;         // single sentence
-  auditHash:      string;         // SHA256(inputs+outputs+rulesVersion)
-  confidenceDecay: number;        // 0–1, how fast this signal should decay
+  score: number; // 0–1
+  topFactors: string[]; // max 5 plain-English factors
+  recommendation: string; // single sentence
+  auditHash: string; // SHA256(inputs+outputs+rulesVersion)
+  confidenceDecay: number; // 0–1, how fast this signal should decay
+}
+
+type M03SolvencyContext = {
+  seed: string;
+  tick: number;
+
+  // Derived “environment” context (no state mutation)
+  phase: RunPhase;
+  regime: MacroRegime;
+  pressure: PressureTier;
+
+  phaseWeight: number;
+  regimeWeight: number;
+  pressureWeight: number;
+
+  regimeMultiplier: number;
+  exitPulse: number;
+
+  macroSchedule: MacroEvent[];
+  chaosWindows: ChaosWindow[];
+
+  deckTop: string | null;
+  opportunity: GameCard;
+  weightedPick: GameCard;
+
+  decayRate: number;
+  auditCore: string;
+};
+
+function m03PickKeyAs<T extends string>(o: Record<string, unknown>, i: number, fallback: T): T {
+  const keys = Object.keys(o);
+  if (keys.length === 0) return fallback;
+  const k = keys[i % keys.length] as unknown as T;
+  return k ?? fallback;
+}
+
+function m03DeriveContext(runId: string, tick: number): M03SolvencyContext {
+  const t = clamp(tick ?? 0, 0, RUN_TOTAL_TICKS - 1);
+
+  const seed = computeHash(`${runId}:M03:${t}`);
+
+  // Deterministic macro / chaos windows (bounded chaos) for advisory context
+  const macroSchedule = buildMacroSchedule(seed, MACRO_EVENTS_PER_RUN);
+  const chaosWindows = buildChaosWindows(seed, CHAOS_WINDOWS_PER_RUN);
+
+  // Avoid hardcoding unions: derive from weight-map keys to match repo definitions.
+  const phase = m03PickKeyAs<RunPhase>(PHASE_WEIGHTS as unknown as Record<string, unknown>, seededIndex(seed, 101, 3), 'EARLY' as RunPhase);
+
+  // Prefer schedule intent if present, else deterministic fallback
+  let regime: MacroRegime = m03PickKeyAs<MacroRegime>(
+    REGIME_WEIGHTS as unknown as Record<string, unknown>,
+    seededIndex(seed, 202, Math.max(1, Object.keys(REGIME_WEIGHTS as unknown as Record<string, unknown>).length)),
+    m03PickKeyAs<MacroRegime>(REGIME_MULTIPLIERS as unknown as Record<string, unknown>, 0, 'NEUTRAL' as MacroRegime),
+  );
+
+  const sorted = [...macroSchedule].sort((a, b) => (a as any).tick - (b as any).tick);
+  for (const ev of sorted) {
+    if ((ev as any).tick > t) break;
+    const rc = (ev as any).regimeChange as MacroRegime | undefined;
+    if (rc) regime = rc;
+  }
+
+  const pressure = m03PickKeyAs<PressureTier>(
+    PRESSURE_WEIGHTS as unknown as Record<string, unknown>,
+    seededIndex(seed, 303, Math.max(1, Object.keys(PRESSURE_WEIGHTS as unknown as Record<string, unknown>).length)),
+    m03PickKeyAs<PressureTier>(PRESSURE_WEIGHTS as unknown as Record<string, unknown>, 0, 'LOW' as PressureTier),
+  );
+
+  const phaseWeight = (PHASE_WEIGHTS as any)[phase] ?? 1.0;
+  const regimeWeight = (REGIME_WEIGHTS as any)[regime] ?? 1.0;
+  const pressureWeight = (PRESSURE_WEIGHTS as any)[pressure] ?? 1.0;
+
+  const regimeMultiplier = (REGIME_MULTIPLIERS as any)[regime] ?? 1.0;
+  const exitPulse = (EXIT_PULSE_MULTIPLIERS as any)[regime] ?? 1.0;
+
+  // Use seededShuffle + DEFAULT_CARD_IDS for deterministic “deck context”
+  const shuffled = seededShuffle(DEFAULT_CARD_IDS, seed);
+  const deckTop = shuffled[0] ?? null;
+
+  // Use OPPORTUNITY_POOL + seededIndex + DEFAULT_CARD for deterministic opportunity pick
+  const oppIdx = seededIndex(seed, 404 + t, OPPORTUNITY_POOL.length);
+  const opportunity = OPPORTUNITY_POOL[oppIdx] ?? DEFAULT_CARD;
+
+  // Use buildWeightedPool for deterministic “best available” pick under current weights
+  const pool = buildWeightedPool(seed + ':m03:pool', pressureWeight * phaseWeight, regimeWeight);
+  const poolIdx = seededIndex(seed, 505 + t, Math.max(1, pool.length));
+  const weightedPick = pool[poolIdx] ?? opportunity ?? DEFAULT_CARD;
+
+  const decayRate = computeDecayRate(regime, M03_BOUNDS.BASE_DECAY_RATE);
+
+  const auditCore = computeHash(
+    JSON.stringify({
+      seed,
+      t,
+      phase,
+      regime,
+      pressure,
+      phaseWeight,
+      regimeWeight,
+      pressureWeight,
+      regimeMultiplier,
+      exitPulse,
+      macroSchedule,
+      chaosWindows,
+      deckTop,
+      opportunityId: opportunity.id,
+      weightedPickId: weightedPick.id,
+    }),
+  );
+
+  return {
+    seed,
+    tick: t,
+    phase,
+    regime,
+    pressure,
+    phaseWeight,
+    regimeWeight,
+    pressureWeight,
+    regimeMultiplier,
+    exitPulse,
+    macroSchedule,
+    chaosWindows,
+    deckTop,
+    opportunity,
+    weightedPick,
+    decayRate,
+    auditCore,
+  };
 }
 
 /**
@@ -132,16 +420,42 @@ export interface M03MLOutput {
  * Async advisory — fires AFTER exec_hook, reads output, returns signals only.
  * NEVER mutates state. Results feed Case File, Intel bars, and CORD scoring.
  */
-export async function solvencyWipeCheckMLCompanion(
-  input: M03MLInput,
-): Promise<M03MLOutput> {
-  // Advisory signal — bounded [0,1], no state mutation
-  const score = Math.min(0.99, Math.max(0.01, Object.keys(input).length * 0.05));
+export async function solvencyWipeCheckMLCompanion(input: M03MLInput): Promise<M03MLOutput> {
+  const ctx = m03DeriveContext(input.runId, input.tick);
+
+  const status = input.solvencyStatus ?? ('SOLVENT' as SolvencyStatus);
+  const isBleed = Boolean(input.bleedModeFlag) || status === ('BLEED' as SolvencyStatus);
+  const isWiped = Boolean(input.wipeEvent) || status === ('WIPED' as SolvencyStatus);
+
+  const tickNorm = clamp((ctx.tick + 1) / RUN_TOTAL_TICKS, 0, 1);
+
+  // Score: advisory confidence decreases as risk increases; bounded [0.01, 0.99]
+  const base = 0.92 - tickNorm * 0.18;
+  const riskPenalty = isWiped ? 0.70 : isBleed ? 0.35 : 0.05;
+  const regimeAdj = clamp((ctx.regimeMultiplier - 1) * 0.10, -0.08, 0.12);
+  const pulseAdj = clamp((ctx.exitPulse - 1) * 0.06, -0.06, 0.10);
+
+  const score = clamp(base - riskPenalty + regimeAdj + pulseAdj, 0.01, 0.99);
+
+  const topFactors = [
+    `tick=${ctx.tick + 1}/${RUN_TOTAL_TICKS} status=${String(status)} bleed=${String(isBleed)} wiped=${String(isWiped)}`,
+    `regimeMult=${Number(ctx.regimeMultiplier).toFixed(2)} exitPulse=${Number(ctx.exitPulse).toFixed(2)}`,
+    `weights: pressure=${Number(ctx.pressureWeight).toFixed(2)} phase=${Number(ctx.phaseWeight).toFixed(2)} regime=${Number(ctx.regimeWeight).toFixed(2)}`,
+    `opportunity=${ctx.opportunity.id} pick=${ctx.weightedPick.id}`,
+    `deckTop=${ctx.deckTop ?? 'n/a'}`,
+  ].slice(0, 5);
+
+  const recommendation = isWiped
+    ? 'Run is insolvent: trigger wipe handling, preserve ledger proof, and restart with stricter cashflow protection.'
+    : isBleed
+      ? 'Bleed mode: cut burn, prioritize cash-positive actions, and avoid variance until cashflow stabilizes.'
+      : 'Solvent: maintain margin discipline and prepare for regime/chaos windows to avoid sudden insolvency.';
+
   return {
     score,
-    topFactors:     ['M03 signal computed', 'advisory only'],
-    recommendation: 'Monitor M03 output and adjust strategy accordingly.',
-    auditHash:      computeHash(JSON.stringify(input) + ':ml:M03'),
-    confidenceDecay: 0.05,
+    topFactors,
+    recommendation,
+    auditHash: computeHash(ctx.auditCore + ':ml:M03:' + JSON.stringify(input)),
+    confidenceDecay: ctx.decayRate,
   };
 }

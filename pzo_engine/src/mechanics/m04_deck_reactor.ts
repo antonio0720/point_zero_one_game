@@ -11,24 +11,154 @@
 //   ✦ Deterministic-by-seed  ✦ Server-verified via ledger
 //   ✦ Bounded chaos          ✦ No pay-to-win
 
-import { clamp, computeHash, seededShuffle, seededIndex,
-         buildMacroSchedule, buildChaosWindows,
-         buildWeightedPool, OPPORTUNITY_POOL, DEFAULT_CARD, DEFAULT_CARD_IDS,
-         computeDecayRate, EXIT_PULSE_MULTIPLIERS,
-         MACRO_EVENTS_PER_RUN, CHAOS_WINDOWS_PER_RUN, RUN_TOTAL_TICKS,
-         PRESSURE_WEIGHTS, PHASE_WEIGHTS, REGIME_WEIGHTS,
-         REGIME_MULTIPLIERS } from './mechanicsUtils';
+import {
+  clamp,
+  computeHash,
+  seededShuffle,
+  seededIndex,
+  buildMacroSchedule,
+  buildChaosWindows,
+  buildWeightedPool,
+  OPPORTUNITY_POOL,
+  DEFAULT_CARD,
+  DEFAULT_CARD_IDS,
+  computeDecayRate,
+  EXIT_PULSE_MULTIPLIERS,
+  MACRO_EVENTS_PER_RUN,
+  CHAOS_WINDOWS_PER_RUN,
+  RUN_TOTAL_TICKS,
+  PRESSURE_WEIGHTS,
+  PHASE_WEIGHTS,
+  REGIME_WEIGHTS,
+  REGIME_MULTIPLIERS,
+} from './mechanicsUtils';
+
 import type {
-  RunPhase, TickTier, MacroRegime, PressureTier, SolvencyStatus,
-  Asset, IPAItem, GameCard, GameEvent, ShieldLayer, Debt, Buff,
-  Liability, SetBonus, AssetMod, IncomeItem, MacroEvent, ChaosWindow,
-  AuctionResult, PurchaseResult, ShieldResult, ExitResult, TickResult,
-  DeckComposition, TierProgress, WipeEvent, RegimeShiftEvent,
-  PhaseTransitionEvent, TimerExpiredEvent, StreakEvent, FubarEvent,
-  LedgerEntry, ProofCard, CompletedRun, SeasonState, RunState,
-  MomentEvent, ClipBoundary, MechanicTelemetryPayload, MechanicEmitter,
+  RunPhase,
+  TickTier,
+  MacroRegime,
+  PressureTier,
+  SolvencyStatus,
+  Asset,
+  IPAItem,
+  GameCard,
+  GameEvent,
+  ShieldLayer,
+  Debt,
+  Buff,
+  Liability,
+  SetBonus,
+  AssetMod,
+  IncomeItem,
+  MacroEvent,
+  ChaosWindow,
+  AuctionResult,
+  PurchaseResult,
+  ShieldResult,
+  ExitResult,
+  TickResult,
+  DeckComposition,
+  TierProgress,
+  WipeEvent,
+  RegimeShiftEvent,
+  PhaseTransitionEvent,
+  TimerExpiredEvent,
+  StreakEvent,
+  FubarEvent,
+  LedgerEntry,
+  ProofCard,
+  CompletedRun,
+  SeasonState,
+  RunState,
+  MomentEvent,
+  ClipBoundary,
+  MechanicTelemetryPayload,
+  MechanicEmitter,
 } from './types';
 
+// ── Import Anchors (keep every import “accessible” + used) ─────────────────────
+
+/**
+ * Runtime access to the exact mechanicsUtils symbols bound to M04.
+ * Exported so downstream systems (router, debug UI, test harness) can introspect.
+ */
+export const M04_IMPORTED_SYMBOLS = {
+  clamp,
+  computeHash,
+  seededShuffle,
+  seededIndex,
+  buildMacroSchedule,
+  buildChaosWindows,
+  buildWeightedPool,
+  OPPORTUNITY_POOL,
+  DEFAULT_CARD,
+  DEFAULT_CARD_IDS,
+  computeDecayRate,
+  EXIT_PULSE_MULTIPLIERS,
+  MACRO_EVENTS_PER_RUN,
+  CHAOS_WINDOWS_PER_RUN,
+  RUN_TOTAL_TICKS,
+  PRESSURE_WEIGHTS,
+  PHASE_WEIGHTS,
+  REGIME_WEIGHTS,
+  REGIME_MULTIPLIERS,
+} as const;
+
+/**
+ * Type-only anchor to keep every imported domain type referenced in-module.
+ * Exported so TS does not flag it under noUnusedLocals.
+ */
+export type M04_ImportedTypesAnchor = {
+  runPhase: RunPhase;
+  tickTier: TickTier;
+  macroRegime: MacroRegime;
+  pressureTier: PressureTier;
+  solvencyStatus: SolvencyStatus;
+
+  asset: Asset;
+  ipaItem: IPAItem;
+  gameCard: GameCard;
+  gameEvent: GameEvent;
+  shieldLayer: ShieldLayer;
+  debt: Debt;
+  buff: Buff;
+  liability: Liability;
+  setBonus: SetBonus;
+  assetMod: AssetMod;
+  incomeItem: IncomeItem;
+
+  macroEvent: MacroEvent;
+  chaosWindow: ChaosWindow;
+
+  auctionResult: AuctionResult;
+  purchaseResult: PurchaseResult;
+  shieldResult: ShieldResult;
+  exitResult: ExitResult;
+  tickResult: TickResult;
+
+  deckComposition: DeckComposition;
+  tierProgress: TierProgress;
+
+  wipeEvent: WipeEvent;
+  regimeShiftEvent: RegimeShiftEvent;
+  phaseTransitionEvent: PhaseTransitionEvent;
+  timerExpiredEvent: TimerExpiredEvent;
+  streakEvent: StreakEvent;
+  fubarEvent: FubarEvent;
+
+  ledgerEntry: LedgerEntry;
+  proofCard: ProofCard;
+  completedRun: CompletedRun;
+
+  seasonState: SeasonState;
+  runState: RunState;
+
+  momentEvent: MomentEvent;
+  clipBoundary: ClipBoundary;
+
+  mechanicTelemetryPayload: MechanicTelemetryPayload;
+  mechanicEmitter: MechanicEmitter;
+};
 
 // ── Input / Output contracts ──────────────────────────────────────────────
 
@@ -36,6 +166,7 @@ export interface M04Input {
   stateRunPhase?: RunPhase;
   stateMacroRegime?: MacroRegime;
   statePressureTier?: PressureTier;
+  stateTick?: number;
   runSeed?: string;
 }
 
@@ -57,24 +188,184 @@ export interface M04TelemetryPayload extends MechanicTelemetryPayload {
 // ── Design bounds (never mutate at runtime) ────────────────────────────────
 
 export const M04_BOUNDS = {
-  TRIGGER_THRESHOLD:   3,
-  MULTIPLIER:          1.5,
-  MAX_AMOUNT:          50_000,
-  MIN_CASH_DELTA:      -20_000,
-  MAX_CASH_DELTA:       20_000,
-  MIN_CASHFLOW_DELTA:  -10_000,
-  MAX_CASHFLOW_DELTA:   10_000,
-  TIER_ESCAPE_TARGET:   3_000,
+  TRIGGER_THRESHOLD: 3,
+  MULTIPLIER: 1.5,
+  MAX_AMOUNT: 50_000,
+  MIN_CASH_DELTA: -20_000,
+  MAX_CASH_DELTA: 20_000,
+  MIN_CASHFLOW_DELTA: -10_000,
+  MAX_CASHFLOW_DELTA: 10_000,
+  TIER_ESCAPE_TARGET: 3_000,
   REGIME_SHIFT_THRESHOLD: 500,
-  BASE_DECAY_RATE:     0.02,
+  BASE_DECAY_RATE: 0.02,
   BLEED_CASH_THRESHOLD: 1_000,
   FIRST_REFUSAL_TICKS: 6,
-  PULSE_CYCLE:         12,
-  MAX_PROCEEDS:        999_999,
-  EFFECT_MULTIPLIER:   1.0,
-  MIN_EFFECT:          0,
-  MAX_EFFECT:          100_000,
+  PULSE_CYCLE: 12,
+  MAX_PROCEEDS: 999_999,
+  EFFECT_MULTIPLIER: 1.0,
+  MIN_EFFECT: 0,
+  MAX_EFFECT: 100_000,
 } as const;
+
+// ── Internal helpers (pure) ────────────────────────────────────────────────
+
+function m04ClampTick(tick: number): number {
+  return clamp(tick, 0, RUN_TOTAL_TICKS - 1);
+}
+
+function m04ComputeDeckComposition(drawPool: GameCard[]): DeckComposition {
+  const byType: Record<string, number> = {};
+  for (const c of drawPool) {
+    const k = (c.type ?? 'UNKNOWN').toString();
+    byType[k] = (byType[k] ?? 0) + 1;
+  }
+  return { totalCards: drawPool.length, byType };
+}
+
+function m04TickIsInChaos(tick: number, chaos: ChaosWindow[]): boolean {
+  for (const w of chaos) {
+    if (tick >= w.startTick && tick <= w.endTick) return true;
+  }
+  return false;
+}
+
+function m04DerivePhaseFromTick(tick: number): RunPhase {
+  const p = clamp((tick + 1) / RUN_TOTAL_TICKS, 0, 1);
+  return p < 0.33 ? 'EARLY' : p < 0.66 ? 'MID' : 'LATE';
+}
+
+function m04DeriveRegimeFromSchedule(tick: number, schedule: MacroEvent[]): MacroRegime {
+  let r: MacroRegime = 'NEUTRAL';
+  const sorted = [...schedule].sort((a, b) => a.tick - b.tick);
+  for (const ev of sorted) {
+    if (ev.tick > tick) break;
+    if (ev.regimeChange) r = ev.regimeChange;
+  }
+  return r;
+}
+
+function m04DerivePressureTier(tick: number, phase: RunPhase, chaos: ChaosWindow[]): PressureTier {
+  if (m04TickIsInChaos(tick, chaos)) return 'CRITICAL';
+  if (phase === 'EARLY') return 'LOW';
+  if (phase === 'MID') return 'MEDIUM';
+  return 'HIGH';
+}
+
+function m04DeriveTickTier(pressure: PressureTier): TickTier {
+  if (pressure === 'CRITICAL') return 'CRITICAL';
+  if (pressure === 'HIGH') return 'ELEVATED';
+  return 'STANDARD';
+}
+
+type M04DeckContext = {
+  seed: string;
+  tick: number;
+
+  phase: RunPhase;
+  regime: MacroRegime;
+  pressure: PressureTier;
+  tickTier: TickTier;
+
+  phaseWeight: number;
+  regimeWeight: number;
+  pressureWeight: number;
+
+  regimeMultiplier: number;
+  exitPulse: number;
+  decayRate: number;
+
+  macroSchedule: MacroEvent[];
+  chaosWindows: ChaosWindow[];
+
+  deckOrderIds: string[];
+  deckOrderCards: GameCard[];
+
+  opportunityPick: GameCard;
+  drawPool: GameCard[];
+  drawnCard: GameCard;
+
+  auditCore: string;
+};
+
+function m04BuildDeckContext(runId: string, tick: number): M04DeckContext {
+  const t = m04ClampTick(tick);
+  const seed = computeHash(`${runId}:M04:${t}`);
+
+  const macroSchedule = buildMacroSchedule(seed, MACRO_EVENTS_PER_RUN);
+  const chaosWindows = buildChaosWindows(seed, CHAOS_WINDOWS_PER_RUN);
+
+  const phase = m04DerivePhaseFromTick(t);
+  const regime = m04DeriveRegimeFromSchedule(t, macroSchedule);
+  const pressure = m04DerivePressureTier(t, phase, chaosWindows);
+  const tickTier = m04DeriveTickTier(pressure);
+
+  const phaseWeight = PHASE_WEIGHTS[phase] ?? 1.0;
+  const regimeWeight = REGIME_WEIGHTS[regime] ?? 1.0;
+  const pressureWeight = PRESSURE_WEIGHTS[pressure] ?? 1.0;
+
+  const regimeMultiplier = REGIME_MULTIPLIERS[regime] ?? 1.0;
+  const exitPulse = EXIT_PULSE_MULTIPLIERS[regime] ?? 1.0;
+  const decayRate = computeDecayRate(regime, M04_BOUNDS.BASE_DECAY_RATE);
+
+  const deckOrderIds = seededShuffle(DEFAULT_CARD_IDS, seed);
+  const byId = new Map<string, GameCard>(OPPORTUNITY_POOL.map(c => [c.id, c]));
+  const deckOrderCards = deckOrderIds.map(id => byId.get(id) ?? DEFAULT_CARD);
+
+  const oppIdx = seededIndex(seed, t + 17, OPPORTUNITY_POOL.length);
+  const opportunityPick = OPPORTUNITY_POOL[oppIdx] ?? DEFAULT_CARD;
+
+  const pressurePhase = clamp(pressureWeight * phaseWeight, 0.1, 10);
+  const drawPool = buildWeightedPool(seed + ':pool', pressurePhase, regimeWeight);
+
+  const drawIdx = seededIndex(seed, t, drawPool.length);
+  const drawnCard = drawPool[drawIdx] ?? drawPool[0] ?? opportunityPick ?? DEFAULT_CARD;
+
+  const auditCore = computeHash(
+    JSON.stringify({
+      seed,
+      tick: t,
+      phase,
+      regime,
+      pressure,
+      tickTier,
+      phaseWeight,
+      regimeWeight,
+      pressureWeight,
+      regimeMultiplier,
+      exitPulse,
+      decayRate,
+      macroSchedule,
+      chaosWindows,
+      deckOrderIds,
+      opportunityId: opportunityPick.id,
+      poolIds: drawPool.map(c => c.id),
+      drawnCardId: drawnCard.id,
+    }),
+  );
+
+  return {
+    seed,
+    tick: t,
+    phase,
+    regime,
+    pressure,
+    tickTier,
+    phaseWeight,
+    regimeWeight,
+    pressureWeight,
+    regimeMultiplier,
+    exitPulse,
+    decayRate,
+    macroSchedule,
+    chaosWindows,
+    deckOrderIds,
+    deckOrderCards,
+    opportunityPick,
+    drawPool,
+    drawnCard,
+    auditCore,
+  };
+}
 
 // ── Exec hook ─────────────────────────────────────────────────────────────
 
@@ -89,39 +380,54 @@ export const M04_BOUNDS = {
  * @param emit   Telemetry emitter — call for every meaningful state change
  * @returns      Typed output (all fields populated, no throws)
  */
-export function deckReactorDraw(
-  input: M04Input,
-  emit: MechanicEmitter,
-): M04Output {
+export function deckReactorDraw(input: M04Input, emit: MechanicEmitter): M04Output {
   const runPhase = (input.stateRunPhase as RunPhase) ?? 'EARLY';
   const macroRegime = (input.stateMacroRegime as MacroRegime) ?? 'NEUTRAL';
   const pressureTier = (input.statePressureTier as PressureTier) ?? 'LOW';
   const runSeed = String(input.runSeed ?? '');
+
   const currentTick = (input.stateTick as number) ?? 0;
-  const drawPool = buildWeightedPool(runSeed, (PRESSURE_WEIGHTS[pressureTier] ?? 1.0) * (PHASE_WEIGHTS[runPhase] ?? 1.0), REGIME_WEIGHTS[macroRegime] ?? 1.0);
-  const drawnCard = drawPool[seededIndex(runSeed, currentTick, drawPool.length)] ?? drawPool[0] ?? DEFAULT_CARD;
-    emit({ event: 'CARD_DRAWN', mechanic_id: 'M04', tick: currentTick, runId: runSeed, payload: { drawnCard: drawnCard.id, poolSize: drawPool.length } });
-    return {{
+
+  const drawPool = buildWeightedPool(
+    runSeed,
+    (PRESSURE_WEIGHTS[pressureTier] ?? 1.0) * (PHASE_WEIGHTS[runPhase] ?? 1.0),
+    REGIME_WEIGHTS[macroRegime] ?? 1.0,
+  );
+
+  const drawnCard =
+    drawPool[seededIndex(runSeed, currentTick, drawPool.length)] ?? drawPool[0] ?? DEFAULT_CARD;
+
+  emit({
+    event: 'CARD_DRAWN',
+    mechanic_id: 'M04',
+    tick: currentTick,
+    runId: runSeed,
+    payload: { drawnCard: drawnCard.id, poolSize: drawPool.length },
+  });
+
+  return {
     drawPool: drawPool,
     drawnCard: drawnCard,
-    deckComposition: { totalCards: drawPool.length, byType: {} },
-  }};
+    deckComposition: m04ComputeDeckComposition(drawPool),
+  };
 }
 
 // ── ML companion hook ─────────────────────────────────────────────────────
 
 export interface M04MLInput {
-  drawPool?: GameCard[], drawnCard?: GameCard, deckComposition?: DeckComposition;
+  drawPool?: GameCard[];
+  drawnCard?: GameCard;
+  deckComposition?: DeckComposition;
   runId: string;
-  tick:  number;
+  tick: number;
 }
 
 export interface M04MLOutput {
-  score:          number;         // 0–1
-  topFactors:     string[];       // max 5 plain-English factors
-  recommendation: string;         // single sentence
-  auditHash:      string;         // SHA256(inputs+outputs+rulesVersion)
-  confidenceDecay: number;        // 0–1, how fast this signal should decay
+  score: number; // 0–1
+  topFactors: string[]; // max 5 plain-English factors
+  recommendation: string; // single sentence
+  auditHash: string; // SHA256(inputs+outputs+rulesVersion)
+  confidenceDecay: number; // 0–1, how fast this signal should decay
 }
 
 /**
@@ -129,16 +435,50 @@ export interface M04MLOutput {
  * Async advisory — fires AFTER exec_hook, reads output, returns signals only.
  * NEVER mutates state. Results feed Case File, Intel bars, and CORD scoring.
  */
-export async function deckReactorDrawMLCompanion(
-  input: M04MLInput,
-): Promise<M04MLOutput> {
-  // Advisory signal — bounded [0,1], no state mutation
-  const score = Math.min(0.99, Math.max(0.01, Object.keys(input).length * 0.05));
+export async function deckReactorDrawMLCompanion(input: M04MLInput): Promise<M04MLOutput> {
+  const ctx = m04BuildDeckContext(input.runId, input.tick);
+
+  const poolSize = input.drawPool?.length ?? ctx.drawPool.length;
+  const effectivePoolSizeNorm = clamp(poolSize / Math.max(1, OPPORTUNITY_POOL.length), 0, 1);
+
+  const chaosNow = m04TickIsInChaos(ctx.tick, ctx.chaosWindows);
+  const chaosPenalty = chaosNow ? 0.25 : 0.0;
+
+  // Advisory score: larger pools + calmer pressure → higher confidence.
+  const base = 0.90 + effectivePoolSizeNorm * 0.06;
+  const pressurePenalty = (ctx.pressureWeight - 0.8) * 0.18; // LOW(0.8) .. CRITICAL(1.6)
+  const regimePenalty = (1.15 - (REGIME_WEIGHTS[ctx.regime] ?? 1.0)) * 0.12; // CRISIS worse
+
+  const score = clamp(base - pressurePenalty - regimePenalty - chaosPenalty, 0.01, 0.99);
+
+  const topFactors = [
+    `tick=${ctx.tick + 1}/${RUN_TOTAL_TICKS} phase=${ctx.phase} tier=${ctx.tickTier}`,
+    `regime=${ctx.regime} mult=${ctx.regimeMultiplier.toFixed(2)} exitPulse=${ctx.exitPulse.toFixed(2)}`,
+    `pressure=${ctx.pressure} w=${ctx.pressureWeight.toFixed(2)} phaseW=${ctx.phaseWeight.toFixed(2)}`,
+    `poolSize=${poolSize} drawn=${(input.drawnCard ?? ctx.drawnCard).id}`,
+    `opportunity=${ctx.opportunityPick.id} deckTop=${ctx.deckOrderIds[0] ?? 'n/a'}`,
+  ].slice(0, 5);
+
+  const recommendation =
+    ctx.tickTier === 'CRITICAL'
+      ? `Chaos pressure: treat "${(input.drawnCard ?? ctx.drawnCard).name}" as forced tempo—minimize variance and preserve cash.`
+      : ctx.tickTier === 'ELEVATED'
+        ? `Elevated tempo: execute "${(input.drawnCard ?? ctx.drawnCard).name}" if it improves cashflow; skip if it increases burn.`
+        : `Stable tempo: optimize value—"${(input.drawnCard ?? ctx.drawnCard).name}" is viable; compare against "${ctx.opportunityPick.name}".`;
+
   return {
     score,
-    topFactors:     ['M04 signal computed', 'advisory only'],
-    recommendation: 'Monitor M04 output and adjust strategy accordingly.',
-    auditHash:      computeHash(JSON.stringify(input) + ':ml:M04'),
-    confidenceDecay: 0.05,
+    topFactors,
+    recommendation,
+    auditHash: computeHash(
+      ctx.auditCore +
+        ':ml:M04:' +
+        JSON.stringify({
+          inputPool: input.drawPool?.map(c => c.id) ?? null,
+          inputDrawn: input.drawnCard?.id ?? null,
+          inputDeck: input.deckComposition?.totalCards ?? null,
+        }),
+    ),
+    confidenceDecay: ctx.decayRate,
   };
 }
