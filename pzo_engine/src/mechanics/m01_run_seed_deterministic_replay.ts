@@ -100,12 +100,12 @@ export function runSeedDeterministicReplay(
   const macroSchedule = buildMacroSchedule(runSeed, MACRO_EVENTS_PER_RUN);
   const chaosWindows = buildChaosWindows(runSeed, CHAOS_WINDOWS_PER_RUN);
     emit({ event: 'SEED_COMMITTED', mechanic_id: 'M01', tick: 0, runId: runSeed, payload: { runSeed, userId: input.userId ?? '' } });
-    return {{
+    return {
     runSeed: runSeed,
     deckShuffle: deckShuffle,
     macroSchedule: macroSchedule,
     chaosWindows: chaosWindows,
-  }};
+  };
 }
 
 // ── ML companion hook ─────────────────────────────────────────────────────

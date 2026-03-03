@@ -100,12 +100,12 @@ export function runClockTickEngine(
   const newPhase: RunPhase = progress < 0.33 ? 'EARLY' : progress < 0.66 ? 'MID' : 'LATE';
   const phaseChanged = newPhase !== ((input.stateRunPhase as string) ?? 'EARLY');
     emit({ event: 'TICK_COMPLETE', mechanic_id: 'M02', tick: nextTick, runId: '', payload: { nextTick, newPhase, timerExpired } });
-    emit({ event: 'PHASE_TRANSITION', mechanic_id: 'M02', tick: 'nextTick', runId: '', payload: { newPhase } });
-    return {{
+    emit({ event: 'PHASE_TRANSITION', mechanic_id: 'M02', tick: nextTick, runId: '', payload: { newPhase } });
+    return {
     tickResult: { tick: nextTick, runPhase: newPhase, timerExpired },
-    phaseTransitionEvent: phaseChanged ? { from: (input.stateRunPhase as string) ?? 'EARLY', to: newPhase } : null,
+    phaseTransitionEvent: phaseChanged ? { from: (input.stateRunPhase as RunPhase) ?? 'EARLY', to: newPhase } : null,
     timerExpiredEvent: timerExpired ? { tick: nextTick } : null,
-  }};
+  };
 }
 
 // ── ML companion hook ─────────────────────────────────────────────────────
