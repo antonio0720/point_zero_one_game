@@ -232,6 +232,19 @@ export class EventBus {
     this.isFlushing      = false;
   }
 
+  /**
+   * Clears only the pending event queue — does NOT remove subscribers.
+   *
+   * Use this inside startRun() to discard any stale queued events from a
+   * previous run WITHOUT killing React store wiring, UI hooks, or telemetry
+   * listeners. Full reset() (which wipes subscribers) belongs only in
+   * orchestrator.reset() between runs.
+   */
+  public clearQueue(): void {
+    this.pendingQueue = [];
+    this.isFlushing   = false;
+  }
+
   // ═══════════════════════════════════════════════════════════════════════════
   // PRIVATE
   // ═══════════════════════════════════════════════════════════════════════════

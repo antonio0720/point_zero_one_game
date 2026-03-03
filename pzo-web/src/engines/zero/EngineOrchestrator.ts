@@ -169,8 +169,10 @@ export class EngineOrchestrator {
     this.freedomThreshold = params.freedomThreshold;
     this.tickErrorCount   = 0;
 
-    // Reset event bus from any previous run — clears subscribers AND queue
-    this.eventBus.reset();
+    // Clear any stale queued events from a previous run.
+    // clearQueue() preserves all subscribers (React store wiring, UI hooks, telemetry).
+    // Full eventBus.reset() — which wipes subscribers — belongs ONLY in orchestrator.reset().
+    this.eventBus.clearQueue();
 
     // Initialize all 7 engines
     const initParams: EngineInitParams = {
