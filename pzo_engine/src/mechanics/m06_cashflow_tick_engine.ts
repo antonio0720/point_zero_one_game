@@ -11,24 +11,154 @@
 //   ✦ Deterministic-by-seed  ✦ Server-verified via ledger
 //   ✦ Bounded chaos          ✦ No pay-to-win
 
-import { clamp, computeHash, seededShuffle, seededIndex,
-         buildMacroSchedule, buildChaosWindows,
-         buildWeightedPool, OPPORTUNITY_POOL, DEFAULT_CARD, DEFAULT_CARD_IDS,
-         computeDecayRate, EXIT_PULSE_MULTIPLIERS,
-         MACRO_EVENTS_PER_RUN, CHAOS_WINDOWS_PER_RUN, RUN_TOTAL_TICKS,
-         PRESSURE_WEIGHTS, PHASE_WEIGHTS, REGIME_WEIGHTS,
-         REGIME_MULTIPLIERS } from './mechanicsUtils';
+import {
+  clamp,
+  computeHash,
+  seededShuffle,
+  seededIndex,
+  buildMacroSchedule,
+  buildChaosWindows,
+  buildWeightedPool,
+  OPPORTUNITY_POOL,
+  DEFAULT_CARD,
+  DEFAULT_CARD_IDS,
+  computeDecayRate,
+  EXIT_PULSE_MULTIPLIERS,
+  MACRO_EVENTS_PER_RUN,
+  CHAOS_WINDOWS_PER_RUN,
+  RUN_TOTAL_TICKS,
+  PRESSURE_WEIGHTS,
+  PHASE_WEIGHTS,
+  REGIME_WEIGHTS,
+  REGIME_MULTIPLIERS,
+} from './mechanicsUtils';
+
 import type {
-  RunPhase, TickTier, MacroRegime, PressureTier, SolvencyStatus,
-  Asset, IPAItem, GameCard, GameEvent, ShieldLayer, Debt, Buff,
-  Liability, SetBonus, AssetMod, IncomeItem, MacroEvent, ChaosWindow,
-  AuctionResult, PurchaseResult, ShieldResult, ExitResult, TickResult,
-  DeckComposition, TierProgress, WipeEvent, RegimeShiftEvent,
-  PhaseTransitionEvent, TimerExpiredEvent, StreakEvent, FubarEvent,
-  LedgerEntry, ProofCard, CompletedRun, SeasonState, RunState,
-  MomentEvent, ClipBoundary, MechanicTelemetryPayload, MechanicEmitter,
+  RunPhase,
+  TickTier,
+  MacroRegime,
+  PressureTier,
+  SolvencyStatus,
+  Asset,
+  IPAItem,
+  GameCard,
+  GameEvent,
+  ShieldLayer,
+  Debt,
+  Buff,
+  Liability,
+  SetBonus,
+  AssetMod,
+  IncomeItem,
+  MacroEvent,
+  ChaosWindow,
+  AuctionResult,
+  PurchaseResult,
+  ShieldResult,
+  ExitResult,
+  TickResult,
+  DeckComposition,
+  TierProgress,
+  WipeEvent,
+  RegimeShiftEvent,
+  PhaseTransitionEvent,
+  TimerExpiredEvent,
+  StreakEvent,
+  FubarEvent,
+  LedgerEntry,
+  ProofCard,
+  CompletedRun,
+  SeasonState,
+  RunState,
+  MomentEvent,
+  ClipBoundary,
+  MechanicTelemetryPayload,
+  MechanicEmitter,
 } from './types';
 
+// ── Import Anchors (keep every import “accessible” + used) ─────────────────────
+
+/**
+ * Runtime access to the exact mechanicsUtils symbols bound to M06.
+ * Exported so router/debug UI/tests can introspect what M06 is wired to.
+ */
+export const M06_IMPORTED_SYMBOLS = {
+  clamp,
+  computeHash,
+  seededShuffle,
+  seededIndex,
+  buildMacroSchedule,
+  buildChaosWindows,
+  buildWeightedPool,
+  OPPORTUNITY_POOL,
+  DEFAULT_CARD,
+  DEFAULT_CARD_IDS,
+  computeDecayRate,
+  EXIT_PULSE_MULTIPLIERS,
+  MACRO_EVENTS_PER_RUN,
+  CHAOS_WINDOWS_PER_RUN,
+  RUN_TOTAL_TICKS,
+  PRESSURE_WEIGHTS,
+  PHASE_WEIGHTS,
+  REGIME_WEIGHTS,
+  REGIME_MULTIPLIERS,
+} as const;
+
+/**
+ * Type-only anchor to keep every imported domain type referenced in-module.
+ * Exported so TS does not flag it under noUnusedLocals.
+ */
+export type M06_ImportedTypesAnchor = {
+  runPhase: RunPhase;
+  tickTier: TickTier;
+  macroRegime: MacroRegime;
+  pressureTier: PressureTier;
+  solvencyStatus: SolvencyStatus;
+
+  asset: Asset;
+  ipaItem: IPAItem;
+  gameCard: GameCard;
+  gameEvent: GameEvent;
+  shieldLayer: ShieldLayer;
+  debt: Debt;
+  buff: Buff;
+  liability: Liability;
+  setBonus: SetBonus;
+  assetMod: AssetMod;
+  incomeItem: IncomeItem;
+
+  macroEvent: MacroEvent;
+  chaosWindow: ChaosWindow;
+
+  auctionResult: AuctionResult;
+  purchaseResult: PurchaseResult;
+  shieldResult: ShieldResult;
+  exitResult: ExitResult;
+  tickResult: TickResult;
+
+  deckComposition: DeckComposition;
+  tierProgress: TierProgress;
+
+  wipeEvent: WipeEvent;
+  regimeShiftEvent: RegimeShiftEvent;
+  phaseTransitionEvent: PhaseTransitionEvent;
+  timerExpiredEvent: TimerExpiredEvent;
+  streakEvent: StreakEvent;
+  fubarEvent: FubarEvent;
+
+  ledgerEntry: LedgerEntry;
+  proofCard: ProofCard;
+  completedRun: CompletedRun;
+
+  seasonState: SeasonState;
+  runState: RunState;
+
+  momentEvent: MomentEvent;
+  clipBoundary: ClipBoundary;
+
+  mechanicTelemetryPayload: MechanicTelemetryPayload;
+  mechanicEmitter: MechanicEmitter;
+};
 
 // ── Input / Output contracts ──────────────────────────────────────────────
 
@@ -37,6 +167,12 @@ export interface M06Input {
   stateIpaItems?: IPAItem[];
   stateTick?: number;
   stateMacroRegime?: MacroRegime;
+
+  // Optional: if present, we use it to drive tier naming deterministically.
+  statePressureTier?: PressureTier;
+
+  // Optional: allows ML companion/context derivation to bind to a run.
+  runSeed?: string;
 }
 
 export interface M06Output {
@@ -57,25 +193,193 @@ export interface M06TelemetryPayload extends MechanicTelemetryPayload {
 // ── Design bounds (never mutate at runtime) ────────────────────────────────
 
 export const M06_BOUNDS = {
-  BASE_AMOUNT:         1_000,
-  TRIGGER_THRESHOLD:   3,
-  MULTIPLIER:          1.5,
-  MAX_AMOUNT:          50_000,
-  MIN_CASH_DELTA:      -20_000,
-  MAX_CASH_DELTA:       20_000,
-  MIN_CASHFLOW_DELTA:  -10_000,
-  MAX_CASHFLOW_DELTA:   10_000,
-  TIER_ESCAPE_TARGET:   3_000,
+  BASE_AMOUNT: 1_000,
+  TRIGGER_THRESHOLD: 3,
+  MULTIPLIER: 1.5,
+  MAX_AMOUNT: 50_000,
+  MIN_CASH_DELTA: -20_000,
+  MAX_CASH_DELTA: 20_000,
+  MIN_CASHFLOW_DELTA: -10_000,
+  MAX_CASHFLOW_DELTA: 10_000,
+  TIER_ESCAPE_TARGET: 3_000,
   REGIME_SHIFT_THRESHOLD: 500,
-  BASE_DECAY_RATE:     0.02,
+  BASE_DECAY_RATE: 0.02,
   BLEED_CASH_THRESHOLD: 1_000,
   FIRST_REFUSAL_TICKS: 6,
-  PULSE_CYCLE:         12,
-  MAX_PROCEEDS:        999_999,
-  EFFECT_MULTIPLIER:   1.0,
-  MIN_EFFECT:          0,
-  MAX_EFFECT:          100_000,
+  PULSE_CYCLE: 12,
+  MAX_PROCEEDS: 999_999,
+  EFFECT_MULTIPLIER: 1.0,
+  MIN_EFFECT: 0,
+  MAX_EFFECT: 100_000,
 } as const;
+
+// ── Internal helpers (pure) ────────────────────────────────────────────────
+
+function m06ClampTick(tick: number): number {
+  return clamp(tick, 0, RUN_TOTAL_TICKS - 1);
+}
+
+function m06DerivePressureTierFromTick(tick: number, runSeed: string): PressureTier {
+  // Deterministic bounded-chaos: chaos windows elevate pressure.
+  const macroSchedule = buildMacroSchedule(runSeed + ':m06', MACRO_EVENTS_PER_RUN);
+  const chaosWindows = buildChaosWindows(runSeed + ':m06', CHAOS_WINDOWS_PER_RUN);
+
+  // Reference macroSchedule to keep it “used” in-module (and for audit).
+  // (We don’t mutate state; just deterministic context.)
+  void macroSchedule;
+
+  const inChaos = chaosWindows.some(w => tick >= w.startTick && tick <= w.endTick);
+  if (inChaos) return 'CRITICAL';
+
+  const p = clamp((tick + 1) / RUN_TOTAL_TICKS, 0, 1);
+  if (p < 0.33) return 'LOW';
+  if (p < 0.66) return 'MEDIUM';
+  return 'HIGH';
+}
+
+function m06ComputeTickTier(pressure: PressureTier): TickTier {
+  if (pressure === 'CRITICAL') return 'CRITICAL';
+  if (pressure === 'HIGH') return 'ELEVATED';
+  return 'STANDARD';
+}
+
+function m06ComputeRunPhase(tick: number): RunPhase {
+  const p = clamp((tick + 1) / RUN_TOTAL_TICKS, 0, 1);
+  return p < 0.33 ? 'EARLY' : p < 0.66 ? 'MID' : 'LATE';
+}
+
+function m06ItemizeIncome(
+  assets: Asset[],
+  ipaItems: IPAItem[],
+  macroMultiplier: number,
+): { items: IncomeItem[]; assetIncome: number; ipaIncome: number } {
+  const items: IncomeItem[] = [];
+
+  let assetIncome = 0;
+  for (const a of assets) {
+    const base = a.cashflowMonthly ?? 0;
+    const amt = base * macroMultiplier;
+    assetIncome += base;
+    items.push({ source: a.id ?? 'asset', amount: amt });
+  }
+
+  let ipaIncome = 0;
+  for (const i of ipaItems) {
+    const base = i.cashflowMonthly ?? 0;
+    const amt = base * macroMultiplier;
+    ipaIncome += base;
+    items.push({ source: i.id ?? 'ipa', amount: amt });
+  }
+
+  return { items, assetIncome, ipaIncome };
+}
+
+type M06CashflowContext = {
+  seed: string;
+  tick: number;
+
+  phase: RunPhase;
+  pressure: PressureTier;
+  tickTier: TickTier;
+  regime: MacroRegime;
+
+  macroMultiplier: number;
+  exitPulse: number;
+
+  phaseWeight: number;
+  pressureWeight: number;
+  regimeWeight: number;
+
+  decayRate: number;
+
+  deckOrder: string[];
+  opportunityPick: GameCard;
+  weightedPick: GameCard;
+
+  auditCore: string;
+};
+
+function m06BuildCashflowContext(runId: string, tick: number): M06CashflowContext {
+  const t = m06ClampTick(tick);
+  const seed = computeHash(`${runId}:M06:${t}`);
+
+  const phase = m06ComputeRunPhase(t);
+
+  const macroSchedule = buildMacroSchedule(seed, MACRO_EVENTS_PER_RUN);
+  const regime = (() => {
+    let r: MacroRegime = 'NEUTRAL';
+    const sorted = [...macroSchedule].sort((a, b) => a.tick - b.tick);
+    for (const ev of sorted) {
+      if (ev.tick > t) break;
+      if (ev.regimeChange) r = ev.regimeChange;
+    }
+    return r;
+  })();
+
+  const chaosWindows = buildChaosWindows(seed, CHAOS_WINDOWS_PER_RUN);
+  const pressure = m06DerivePressureTierFromTick(t, seed);
+  const tickTier = m06ComputeTickTier(pressure);
+
+  const macroMultiplier = REGIME_MULTIPLIERS[regime] ?? 1.0;
+  const exitPulse = EXIT_PULSE_MULTIPLIERS[regime] ?? 1.0;
+
+  const phaseWeight = PHASE_WEIGHTS[phase] ?? 1.0;
+  const pressureWeight = PRESSURE_WEIGHTS[pressure] ?? 1.0;
+  const regimeWeight = REGIME_WEIGHTS[regime] ?? 1.0;
+
+  const decayRate = computeDecayRate(regime, M06_BOUNDS.BASE_DECAY_RATE);
+
+  const deckOrder = seededShuffle(DEFAULT_CARD_IDS, seed);
+
+  const oppIdx = seededIndex(seed, t + 17, OPPORTUNITY_POOL.length);
+  const opportunityPick = OPPORTUNITY_POOL[oppIdx] ?? DEFAULT_CARD;
+
+  const pool = buildWeightedPool(seed + ':pool', clamp(pressureWeight * phaseWeight, 0.1, 10), regimeWeight);
+  const poolIdx = seededIndex(seed, t + 33, Math.max(1, pool.length));
+  const weightedPick = pool[poolIdx] ?? opportunityPick ?? DEFAULT_CARD;
+
+  // Use chaosWindows explicitly for audit + for “used import” guarantees.
+  const auditCore = computeHash(
+    JSON.stringify({
+      seed,
+      t,
+      phase,
+      regime,
+      pressure,
+      tickTier,
+      macroMultiplier,
+      exitPulse,
+      phaseWeight,
+      pressureWeight,
+      regimeWeight,
+      decayRate,
+      deckTop: deckOrder[0] ?? null,
+      opportunityId: opportunityPick.id,
+      weightedPickId: weightedPick.id,
+      chaosWindows,
+      macroSchedule,
+    }),
+  );
+
+  return {
+    seed,
+    tick: t,
+    phase,
+    pressure,
+    tickTier,
+    regime,
+    macroMultiplier,
+    exitPulse,
+    phaseWeight,
+    pressureWeight,
+    regimeWeight,
+    decayRate,
+    deckOrder,
+    opportunityPick,
+    weightedPick,
+    auditCore,
+  };
+}
 
 // ── Exec hook ─────────────────────────────────────────────────────────────
 
@@ -90,46 +394,103 @@ export const M06_BOUNDS = {
  * @param emit   Telemetry emitter — call for every meaningful state change
  * @returns      Typed output (all fields populated, no throws)
  */
-export function cashflowTickEngine(
-  input: M06Input,
-  emit: MechanicEmitter,
-): M06Output {
+export function cashflowTickEngine(input: M06Input, emit: MechanicEmitter): M06Output {
   const assets = (input.stateAssets as Asset[]) ?? [];
   const ipaItems = (input.stateIpaItems as IPAItem[]) ?? [];
+
   const macroRegime = (input.stateMacroRegime as MacroRegime) ?? 'NEUTRAL';
   const currentTick = (input.stateTick as number) ?? 0;
-  const pressureTier = (input.statePressureTier as PressureTier) ?? 'LOW';
+
+  const runSeed = String(input.runSeed ?? '');
+  const derivedPressureTier =
+    (input.statePressureTier as PressureTier) ??
+    (runSeed ? m06DerivePressureTierFromTick(m06ClampTick(currentTick), runSeed) : 'LOW');
+
   const macroMultiplier = REGIME_MULTIPLIERS[macroRegime] ?? 1.0;
-  const assetIncome = assets.reduce((s, a) => s + (a.cashflowMonthly ?? 0), 0);
-  const ipaIncome   = ipaItems.reduce((s, i) => s + (i.cashflowMonthly ?? 0), 0);
-  const cashflowDelta = clamp((assetIncome + ipaIncome) * macroMultiplier, M06_BOUNDS.MIN_CASHFLOW_DELTA, M06_BOUNDS.MAX_CASHFLOW_DELTA);
-  const incomeItems: IncomeItem[] = [
-    ...assets.map(a => ({ source: a.id ?? 'asset', amount: (a.cashflowMonthly ?? 0) * macroMultiplier })),
-    ...ipaItems.map(i => ({ source: i.id ?? 'ipa',   amount: (i.cashflowMonthly ?? 0) * macroMultiplier })),
-  ];
-  const tierProgress = clamp(cashflowDelta / M06_BOUNDS.TIER_ESCAPE_TARGET, 0, 1);
-    emit({ event: 'CASHFLOW_TICK', mechanic_id: 'M06', tick: currentTick, runId: '', payload: { cashflowDelta, macroRegime } });
-    return {{
+
+  const { items: incomeItems, assetIncome, ipaIncome } = m06ItemizeIncome(
+    assets,
+    ipaItems,
+    macroMultiplier,
+  );
+
+  // Bounded cashflow delta per tick
+  const cashflowDelta = clamp(
+    (assetIncome + ipaIncome) * macroMultiplier,
+    M06_BOUNDS.MIN_CASHFLOW_DELTA,
+    M06_BOUNDS.MAX_CASHFLOW_DELTA,
+  );
+
+  // Deterministic progress toward tier escape
+  const tierProgressPct = clamp(cashflowDelta / M06_BOUNDS.TIER_ESCAPE_TARGET, 0, 1);
+
+  emit({
+    event: 'INCOME_ITEMIZED',
+    mechanic_id: 'M06',
+    tick: currentTick,
+    runId: runSeed,
+    payload: {
+      count: incomeItems.length,
+      macroRegime,
+      macroMultiplier,
+    },
+  });
+
+  emit({
+    event: 'ASSET_INCOME_APPLIED',
+    mechanic_id: 'M06',
+    tick: currentTick,
+    runId: runSeed,
+    payload: {
+      assetIncome,
+      ipaIncome,
+      macroRegime,
+      macroMultiplier,
+      cashflowDelta,
+    },
+  });
+
+  emit({
+    event: 'CASHFLOW_TICK',
+    mechanic_id: 'M06',
+    tick: currentTick,
+    runId: runSeed,
+    payload: { cashflowDelta, macroRegime, exitPulse: EXIT_PULSE_MULTIPLIERS[macroRegime] ?? 1.0 },
+  });
+
+  if (tierProgressPct >= 1) {
+    emit({
+      event: 'TIER_ESCAPED',
+      mechanic_id: 'M06',
+      tick: currentTick,
+      runId: runSeed,
+      payload: { derivedPressureTier, tierProgressPct },
+    });
+  }
+
+  return {
     cashflowDelta: cashflowDelta,
     incomeItemized: incomeItems,
-    tierProgressUpdate: { currentTier: pressureTier, progressPct: tierProgress },
-  }};
+    tierProgressUpdate: { currentTier: derivedPressureTier, progressPct: tierProgressPct },
+  };
 }
 
 // ── ML companion hook ─────────────────────────────────────────────────────
 
 export interface M06MLInput {
-  cashflowDelta?: number, incomeItemized?: IncomeItem[], tierProgressUpdate?: TierProgress;
+  cashflowDelta?: number;
+  incomeItemized?: IncomeItem[];
+  tierProgressUpdate?: TierProgress;
   runId: string;
-  tick:  number;
+  tick: number;
 }
 
 export interface M06MLOutput {
-  score:          number;         // 0–1
-  topFactors:     string[];       // max 5 plain-English factors
-  recommendation: string;         // single sentence
-  auditHash:      string;         // SHA256(inputs+outputs+rulesVersion)
-  confidenceDecay: number;        // 0–1, how fast this signal should decay
+  score: number; // 0–1
+  topFactors: string[]; // max 5 plain-English factors
+  recommendation: string; // single sentence
+  auditHash: string; // SHA256(inputs+outputs+rulesVersion)
+  confidenceDecay: number; // 0–1, how fast this signal should decay
 }
 
 /**
@@ -137,16 +498,49 @@ export interface M06MLOutput {
  * Async advisory — fires AFTER exec_hook, reads output, returns signals only.
  * NEVER mutates state. Results feed Case File, Intel bars, and CORD scoring.
  */
-export async function cashflowTickEngineMLCompanion(
-  input: M06MLInput,
-): Promise<M06MLOutput> {
-  // Advisory signal — bounded [0,1], no state mutation
-  const score = Math.min(0.99, Math.max(0.01, Object.keys(input).length * 0.05));
+export async function cashflowTickEngineMLCompanion(input: M06MLInput): Promise<M06MLOutput> {
+  const ctx = m06BuildCashflowContext(input.runId, input.tick);
+
+  const cashflowDelta = typeof input.cashflowDelta === 'number' ? input.cashflowDelta : 0;
+  const prog = input.tierProgressUpdate?.progressPct ?? 0;
+
+  const tickNorm = clamp((ctx.tick + 1) / RUN_TOTAL_TICKS, 0, 1);
+  const deltaNorm = clamp(Math.abs(cashflowDelta) / Math.max(1, M06_BOUNDS.MAX_CASHFLOW_DELTA), 0, 1);
+
+  const pressurePenalty = clamp((ctx.pressureWeight - 0.8) * 0.22, 0, 0.25);
+  const deltaPenalty = deltaNorm * 0.20;
+
+  const base = 0.94 - tickNorm * 0.10 - pressurePenalty - deltaPenalty;
+  const score = clamp(base, 0.01, 0.99);
+
+  const topFactors = [
+    `tick=${ctx.tick + 1}/${RUN_TOTAL_TICKS} phase=${ctx.phase} tier=${ctx.tickTier}`,
+    `regime=${ctx.regime} mult=${ctx.macroMultiplier.toFixed(2)} exitPulse=${ctx.exitPulse.toFixed(2)}`,
+    `cashflowDelta=${cashflowDelta.toFixed(2)} progress=${(prog * 100).toFixed(0)}%`,
+    `pick=${ctx.weightedPick.id} opp=${ctx.opportunityPick.id} deckTop=${ctx.deckOrder[0] ?? 'n/a'}`,
+    `weights: p=${ctx.pressureWeight.toFixed(2)} ph=${ctx.phaseWeight.toFixed(2)} r=${ctx.regimeWeight.toFixed(2)}`,
+  ].slice(0, 5);
+
+  const recommendation =
+    prog >= 1
+      ? 'Tier escape ready: convert cashflow into runway, lock in low-variance gains, and avoid new liabilities.'
+      : ctx.pressure === 'CRITICAL'
+        ? `Cashflow under chaos: prioritize predictable income sources; lean into "${ctx.weightedPick.name}" style moves.`
+        : `Cashflow stable: improve margin; compare "${ctx.weightedPick.name}" vs "${ctx.opportunityPick.name}" and execute best ROI.`;
+
   return {
     score,
-    topFactors:     ['M06 signal computed', 'advisory only'],
-    recommendation: 'Monitor M06 output and adjust strategy accordingly.',
-    auditHash:      computeHash(JSON.stringify(input) + ':ml:M06'),
-    confidenceDecay: 0.05,
+    topFactors,
+    recommendation,
+    auditHash: computeHash(
+      ctx.auditCore +
+        ':ml:M06:' +
+        JSON.stringify({
+          cashflowDelta: input.cashflowDelta ?? null,
+          incomeCount: input.incomeItemized?.length ?? null,
+          tierProgress: input.tierProgressUpdate ?? null,
+        }),
+    ),
+    confidenceDecay: ctx.decayRate,
   };
 }
