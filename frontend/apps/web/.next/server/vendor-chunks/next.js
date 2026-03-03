@@ -373,6 +373,17 @@ eval("\nObject.defineProperty(exports, \"__esModule\", ({\n    value: true\n}));
 
 /***/ }),
 
+/***/ "(ssr)/./node_modules/next/dist/api/navigation.js":
+/*!**************************************************!*\
+  !*** ./node_modules/next/dist/api/navigation.js ***!
+  \**************************************************/
+/***/ ((__unused_webpack_module, __webpack_exports__, __webpack_require__) => {
+
+"use strict";
+eval("__webpack_require__.r(__webpack_exports__);\n/* harmony import */ var _client_components_navigation__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(/*! ../client/components/navigation */ \"(ssr)/./node_modules/next/dist/client/components/navigation.js\");\n/* harmony import */ var _client_components_navigation__WEBPACK_IMPORTED_MODULE_0___default = /*#__PURE__*/__webpack_require__.n(_client_components_navigation__WEBPACK_IMPORTED_MODULE_0__);\n/* harmony reexport (unknown) */ var __WEBPACK_REEXPORT_OBJECT__ = {};\n/* harmony reexport (unknown) */ for(const __WEBPACK_IMPORT_KEY__ in _client_components_navigation__WEBPACK_IMPORTED_MODULE_0__) if(__WEBPACK_IMPORT_KEY__ !== \"default\") __WEBPACK_REEXPORT_OBJECT__[__WEBPACK_IMPORT_KEY__] = () => _client_components_navigation__WEBPACK_IMPORTED_MODULE_0__[__WEBPACK_IMPORT_KEY__]\n/* harmony reexport (unknown) */ __webpack_require__.d(__webpack_exports__, __WEBPACK_REEXPORT_OBJECT__);\n\n\n//# sourceMappingURL=navigation.js.map//# sourceURL=[module]\n//# sourceMappingURL=data:application/json;charset=utf-8;base64,eyJ2ZXJzaW9uIjozLCJmaWxlIjoiKHNzcikvLi9ub2RlX21vZHVsZXMvbmV4dC9kaXN0L2FwaS9uYXZpZ2F0aW9uLmpzIiwibWFwcGluZ3MiOiI7Ozs7OztBQUFnRDs7QUFFaEQiLCJzb3VyY2VzIjpbIndlYnBhY2s6Ly9AcHpvL3dlYi8uL25vZGVfbW9kdWxlcy9uZXh0L2Rpc3QvYXBpL25hdmlnYXRpb24uanM/ZWMzMyJdLCJzb3VyY2VzQ29udGVudCI6WyJleHBvcnQgKiBmcm9tIFwiLi4vY2xpZW50L2NvbXBvbmVudHMvbmF2aWdhdGlvblwiO1xuXG4vLyMgc291cmNlTWFwcGluZ1VSTD1uYXZpZ2F0aW9uLmpzLm1hcCJdLCJuYW1lcyI6W10sInNvdXJjZVJvb3QiOiIifQ==\n//# sourceURL=webpack-internal:///(ssr)/./node_modules/next/dist/api/navigation.js\n");
+
+/***/ }),
+
 /***/ "(ssr)/./node_modules/next/dist/client/add-base-path.js":
 /*!********************************************************!*\
   !*** ./node_modules/next/dist/client/add-base-path.js ***!
@@ -2178,6 +2189,17 @@ const { createProxy } = __webpack_require__(/*! next/dist/build/webpack/loaders/
 module.exports = createProxy("/Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/frontend/apps/web/node_modules/next/dist/client/components/client-page.js");
  //# sourceMappingURL=client-page.js.map
 
+
+/***/ }),
+
+/***/ "(rsc)/./node_modules/next/dist/client/components/default-layout.js":
+/*!********************************************************************!*\
+  !*** ./node_modules/next/dist/client/components/default-layout.js ***!
+  \********************************************************************/
+/***/ ((module, exports, __webpack_require__) => {
+
+"use strict";
+eval("\nObject.defineProperty(exports, \"__esModule\", ({\n    value: true\n}));\nObject.defineProperty(exports, \"default\", ({\n    enumerable: true,\n    get: function() {\n        return DefaultLayout;\n    }\n}));\nconst _interop_require_default = __webpack_require__(/*! @swc/helpers/_/_interop_require_default */ \"(rsc)/./node_modules/@swc/helpers/esm/_interop_require_default.js\");\nconst _jsxruntime = __webpack_require__(/*! react/jsx-runtime */ \"(rsc)/./node_modules/next/dist/server/future/route-modules/app-page/vendored/rsc/react-jsx-runtime.js\");\nconst _react = /*#__PURE__*/ _interop_require_default._(__webpack_require__(/*! react */ \"(rsc)/./node_modules/next/dist/server/future/route-modules/app-page/vendored/rsc/react.js\"));\nfunction DefaultLayout(param) {\n    let { children } = param;\n    return /*#__PURE__*/ (0, _jsxruntime.jsx)(\"html\", {\n        children: /*#__PURE__*/ (0, _jsxruntime.jsx)(\"body\", {\n            children: children\n        })\n    });\n}\nif ((typeof exports.default === \"function\" || typeof exports.default === \"object\" && exports.default !== null) && typeof exports.default.__esModule === \"undefined\") {\n    Object.defineProperty(exports.default, \"__esModule\", {\n        value: true\n    });\n    Object.assign(exports.default, exports);\n    module.exports = exports.default;\n} //# sourceMappingURL=default-layout.js.map\n//# sourceURL=[module]\n//# sourceMappingURL=data:application/json;charset=utf-8;base64,eyJ2ZXJzaW9uIjozLCJmaWxlIjoiKHJzYykvLi9ub2RlX21vZHVsZXMvbmV4dC9kaXN0L2NsaWVudC9jb21wb25lbnRzL2RlZmF1bHQtbGF5b3V0LmpzIiwibWFwcGluZ3MiOiI7Ozs7MkNBRUE7OztlQUF3QkE7Ozs7OzRFQUZOO0FBRUgsU0FBU0EsY0FBY0MsS0FJckM7SUFKcUMsTUFDcENDLFFBQVEsRUFHVCxHQUpxQ0Q7SUFLcEMsT0FDRSxXQURGLEdBQ0UsSUFBQUUsWUFBQUMsR0FBQSxFQUFDQyxRQUFBQTtrQkFDQyxrQkFBQUYsWUFBQUMsR0FBQSxFQUFDRSxRQUFBQTtzQkFBTUo7OztBQUdiIiwic291cmNlcyI6WyJ3ZWJwYWNrOi8vQHB6by93ZWIvLi4vLi4vLi4vc3JjL2NsaWVudC9jb21wb25lbnRzL2RlZmF1bHQtbGF5b3V0LnRzeD80ZTRjIl0sIm5hbWVzIjpbIkRlZmF1bHRMYXlvdXQiLCJwYXJhbSIsImNoaWxkcmVuIiwiX2pzeHJ1bnRpbWUiLCJqc3giLCJodG1sIiwiYm9keSJdLCJzb3VyY2VSb290IjoiIn0=\n//# sourceURL=webpack-internal:///(rsc)/./node_modules/next/dist/client/components/default-layout.js\n");
 
 /***/ }),
 
