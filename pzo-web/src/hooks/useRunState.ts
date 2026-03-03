@@ -218,7 +218,7 @@ export function useRunState(startingCash = 28_000): RunStateSlices & RunStateAct
       const { stat, amount } = result.capabilityGained;
       setCapabilities(prev => ({
         ...prev,
-        [stat]: Math.min(10, (prev[stat] ?? 0) + amount),
+        [stat]: Math.min(10, ((prev as Record<string, number>)[stat] ?? 0) + amount),
       }));
       logs.push(`Capability: +${amount} ${stat}`);
     }
@@ -380,7 +380,7 @@ export function useRunState(startingCash = 28_000): RunStateSlices & RunStateAct
   const incrementCapability = useCallback((stat: CapabilityStat, amount: number) => {
     setCapabilities(prev => ({
       ...prev,
-      [stat]: Math.min(10, (prev[stat] ?? 0) + amount),
+      [stat]: Math.min(10, ((prev as Record<string, number>)[stat] ?? 0) + amount),
     }));
   }, []);
 

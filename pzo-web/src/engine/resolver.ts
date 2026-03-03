@@ -33,6 +33,7 @@ import type {
   BiasState,
   DamageType,
 } from '../types/game';
+export type { ResolutionResult } from '../types/game';
 
 import {
   ZONE_CONFIGS,

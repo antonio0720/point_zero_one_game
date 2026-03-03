@@ -1,12 +1,22 @@
 // ============================================================
 // POINT ZERO ONE DIGITAL — Deterministic Market Engine
-// Seeded PRNG + tick-accurate price simulation
+// Sprint 8 / Phase 1 Upgrade
+//
+// SeededRandom (Mulberry32) is the canonical PRNG for the
+// entire pzo_engine. Every engine that needs randomness
+// imports SeededRandom from here.
+//
+// MarketEngine models macro price regimes that feed into
+// the 6-deck draw weights and FUBAR injection probability.
+//
+// Deploy to: pzo_engine/src/engine/market-engine.ts
 // ============================================================
 
-import { MarketTick, AssetPrice, TickId } from './types';
+import type { MarketTick, AssetPrice, TickId, MarketRegime } from './types';
 
 // ─── SEEDED PRNG (Mulberry32) ────────────────────────────────
-// Same seed = same market every time. Fully deterministic.
+// Mulberry32 — fast, low-footprint, seed-reproducible.
+// Same seed → same full run. Never use Math.random() in engine code.
 export class SeededRandom {
   private state: number;
 
@@ -22,7 +32,7 @@ export class SeededRandom {
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   }
 
-  // Gaussian via Box-Muller
+  /** Box-Muller Gaussian — same seed = same normal variates. */
   nextGaussian(mean = 0, stdDev = 1): number {
     const u1 = this.next();
     const u2 = this.next();
@@ -33,35 +43,71 @@ export class SeededRandom {
   nextRange(min: number, max: number): number {
     return min + this.next() * (max - min);
   }
+
+  /** Integer in [min, max] inclusive. */
+  nextInt(min: number, max: number): number {
+    return Math.floor(this.nextRange(min, max + 1));
+  }
+
+  /** Boolean with given probability (0.0–1.0). */
+  chance(probability: number): boolean {
+    return this.next() < probability;
+  }
+
+  /** Shuffle array in-place using Fisher-Yates. Deterministic. */
+  shuffle<T>(arr: T[]): T[] {
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(this.next() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+  }
 }
 
 // ─── ASSET CONFIG ────────────────────────────────────────────
 export interface AssetConfig {
-  symbol: string;
-  basePrice: number;
-  dailyVolatility: number;   // e.g. 0.02 = 2% daily vol
-  trend: number;             // e.g. 0.001 = slight uptrend per tick
-  correlations: Record<string, number>;
+  symbol:           string;
+  basePrice:        number;
+  dailyVolatility:  number;   // e.g. 0.025 = 2.5% daily vol
+  trend:            number;   // e.g. 0.0001 = slight uptrend per tick
+  correlations:     Record<string, number>;
 }
 
+// These symbols represent macro financial climate categories,
+// not literal stock tickers. They feed into DrawMix weight logic.
 const DEFAULT_ASSETS: AssetConfig[] = [
-  { symbol: 'ALPHA', basePrice: 100,   dailyVolatility: 0.025, trend: 0.0001,  correlations: { BETA: 0.6 } },
-  { symbol: 'BETA',  basePrice: 250,   dailyVolatility: 0.018, trend: 0.00005, correlations: { ALPHA: 0.6 } },
-  { symbol: 'GAMMA', basePrice: 50,    dailyVolatility: 0.045, trend: -0.0002, correlations: {} },
-  { symbol: 'DELTA', basePrice: 1000,  dailyVolatility: 0.012, trend: 0.0003,  correlations: {} },
-  { symbol: 'OMEGA', basePrice: 0.01,  dailyVolatility: 0.08,  trend: 0.001,   correlations: { GAMMA: -0.3 } },
+  { symbol: 'ALPHA', basePrice: 100,  dailyVolatility: 0.025, trend: 0.0001,  correlations: { BETA: 0.6 } },
+  { symbol: 'BETA',  basePrice: 250,  dailyVolatility: 0.018, trend: 0.00005, correlations: { ALPHA: 0.6 } },
+  { symbol: 'GAMMA', basePrice: 50,   dailyVolatility: 0.045, trend: -0.0002, correlations: {} },
+  { symbol: 'DELTA', basePrice: 1000, dailyVolatility: 0.012, trend: 0.0003,  correlations: {} },
+  { symbol: 'OMEGA', basePrice: 0.01, dailyVolatility: 0.08,  trend: 0.001,   correlations: { GAMMA: -0.3 } },
 ];
 
+// ─── MARKET REGIME THRESHOLDS ─────────────────────────────────
+const REGIME_THRESHOLDS = {
+  PANIC:       0.06,   // volatilityIndex ≥ 6x base = Panic
+  COMPRESSION: 0.04,   // 4x–6x
+  EXPANSION:   0.015,  // below 1.5x = Expansion (positive drift)
+  RECESSION:   -0.03,  // overall negative drift across assets = Recession
+} as const;
+
 // ─── MARKET ENGINE ───────────────────────────────────────────
+/**
+ * Deterministic GBM (Geometric Brownian Motion) market simulation.
+ * Drives macro regime for DrawMix deck weights.
+ * Each tick is reproducible given the same seed.
+ */
 export class MarketEngine {
-  private rng: SeededRandom;
-  private prices: Map<string, number>;
-  private configs: Map<string, AssetConfig>;
+  private rng:              SeededRandom;
+  private prices:           Map<string, number>;
+  private configs:          Map<string, AssetConfig>;
   private globalVolatility: number = 1.0;
+  private tickCount:        number = 0;
+  private regimeHistory:    MarketRegime[] = [];
 
   constructor(seed: number, assets: AssetConfig[] = DEFAULT_ASSETS) {
-    this.rng = new SeededRandom(seed);
-    this.prices = new Map();
+    this.rng     = new SeededRandom(seed);
+    this.prices  = new Map();
     this.configs = new Map();
 
     for (const asset of assets) {
@@ -72,53 +118,82 @@ export class MarketEngine {
 
   tick(tickId: TickId, externalShocks: Map<string, number> = new Map()): MarketTick {
     const assets = new Map<string, AssetPrice>();
+    this.tickCount++;
 
     for (const [symbol, config] of this.configs) {
       const prevPrice = this.prices.get(symbol)!;
-      const shock = externalShocks.get(symbol) ?? 0;
+      const shock     = externalShocks.get(symbol) ?? 0;
 
       // GBM: dS = S * (mu * dt + sigma * dW)
-      const dt = 1 / (60 * 12); // 1 tick out of 720 in a 12-min run
-      const dW = this.rng.nextGaussian(0, 1) * Math.sqrt(dt);
-      const drift = (config.trend - 0.5 * config.dailyVolatility ** 2) * dt;
+      const dt        = 1 / (60 * 12); // 1 tick out of 720 in 12-min run
+      const dW        = this.rng.nextGaussian(0, 1) * Math.sqrt(dt);
+      const drift     = (config.trend - 0.5 * config.dailyVolatility ** 2) * dt;
       const diffusion = config.dailyVolatility * this.globalVolatility * dW;
 
-      const newPrice = prevPrice * Math.exp(drift + diffusion + shock);
-      const clampedPrice = Math.max(newPrice, 0.0001);
-      const priceChange = (clampedPrice - prevPrice) / prevPrice;
+      const newPrice      = prevPrice * Math.exp(drift + diffusion + shock);
+      const clampedPrice  = Math.max(newPrice, 0.0001);
+      const priceChange   = (clampedPrice - prevPrice) / prevPrice;
 
-      // Synthetic spread based on volatility
       const spread = clampedPrice * config.dailyVolatility * 0.1;
       const volume = this.rng.nextRange(1000, 100000) * (1 + Math.abs(priceChange) * 10);
 
       assets.set(symbol, {
         symbol,
-        price: clampedPrice,
+        price:       clampedPrice,
         priceChange,
         volume,
-        bid: clampedPrice - spread / 2,
-        ask: clampedPrice + spread / 2,
+        bid:         clampedPrice - spread / 2,
+        ask:         clampedPrice + spread / 2,
         spread,
       });
 
       this.prices.set(symbol, clampedPrice);
     }
 
-    // Spike volatility occasionally
-    if (this.rng.next() < 0.02) {
+    // Volatility regime drift (deterministic via rng)
+    if (this.rng.chance(0.02)) {
       this.globalVolatility = 1.5 + this.rng.next() * 2;
     } else {
       this.globalVolatility = Math.max(1.0, this.globalVolatility * 0.95);
     }
 
+    const regime = this.classifyRegime(assets);
+    this.regimeHistory.push(regime);
+    if (this.regimeHistory.length > 30) this.regimeHistory.shift();
+
     return {
       tickId,
-      timestamp: Date.now(),
+      timestamp:       this.tickCount, // deterministic — no Date.now()
       assets,
       volatilityIndex: this.globalVolatility,
-      liquidityPool: this.rng.nextRange(500000, 5000000),
-      activeEvents: [],
+      liquidityPool:   this.rng.nextRange(500_000, 5_000_000),
+      activeEvents:    [],
     };
+  }
+
+  /** Classify current volatility + drift into a MarketRegime string. */
+  classifyRegime(assets: Map<string, AssetPrice>): MarketRegime {
+    if (this.globalVolatility >= REGIME_THRESHOLDS.PANIC) return 'Panic';
+
+    const avgChange = Array.from(assets.values())
+      .reduce((sum, a) => sum + a.priceChange, 0) / (assets.size || 1);
+
+    if (this.globalVolatility >= REGIME_THRESHOLDS.COMPRESSION) return 'Compression';
+    if (avgChange <= REGIME_THRESHOLDS.RECESSION)                return 'Recession';
+    if (avgChange > 0.02)                                         return 'Euphoria';
+    if (this.globalVolatility <= REGIME_THRESHOLDS.EXPANSION)    return 'Expansion';
+    if (avgChange > 0.005)                                        return 'Recovery';
+    return 'Stable';
+  }
+
+  /** Current regime (reads last tick's classification). */
+  get currentRegime(): MarketRegime {
+    return this.regimeHistory[this.regimeHistory.length - 1] ?? 'Stable';
+  }
+
+  /** Average regime over last N ticks. Useful for FUBAR injection probability. */
+  averageVolatility(lastN = 10): number {
+    return this.globalVolatility; // already smoothed via decay
   }
 
   setShock(symbol: string, magnitude: number): void {

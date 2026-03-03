@@ -1,7 +1,8 @@
 /**
- * PredatorGameScreen.tsx — ASYMMETRIC PvP mode game screen
- * Theme: Red / Combat. Sabotage cards. Counterplay windows. Hater combo system.
- * Builder vs a relentless Hater. Block or bleed.
+ * PredatorGameScreen.tsx — ASYMMETRIC PvP / PREDATOR mode
+ * Theme: Blood Red / Combat. Sabotage arsenal. Counterplay windows. Combo system.
+ * Engine: modeState.predator — wired to BattleEngine + ShieldEngine
+ * Density6 LLC · Confidential
  */
 
 import React from 'react';
@@ -17,288 +18,342 @@ import ShieldIcons from './ShieldIcons';
 import MomentFlash from './MomentFlash';
 import type { GameModeState } from '../engines/core/types';
 
-// ─── Sabotage card display data ──────────────────────────────────────────────
-
-const SABOTAGE_CATALOG = [
-  { id: 'FREEZE_INCOME',    label: 'FREEZE INCOME',    icon: '🧊', desc: 'Stops income 3 ticks',    cooldown: 36, threat: 'HIGH'   },
-  { id: 'PHANTOM_EXPENSE',  label: 'PHANTOM EXPENSE',  icon: '👻', desc: 'Injects surprise cost',    cooldown: 24, threat: 'MED'    },
-  { id: 'CREDIT_LOCK',      label: 'CREDIT LOCK',      icon: '🔒', desc: 'Destroys L2 shield',       cooldown: 48, threat: 'HIGH'   },
-  { id: 'MARKET_RUMOR',     label: 'MARKET RUMOR',     icon: '📡', desc: 'Raises hater heat +20',    cooldown: 18, threat: 'MED'    },
-  { id: 'AUDIT_TRIGGER',    label: 'AUDIT TRIGGER',    icon: '📋', desc: 'Drains cash $5K',          cooldown: 54, threat: 'CRIT'   },
-  { id: 'SHIELD_CORRODE',   label: 'SHIELD CORRODE',   icon: '🔥', desc: 'Erodes shields 8/tick',    cooldown: 42, threat: 'CRIT'   },
-  { id: 'OPPORTUNITY_SNIPE',label: 'OPP SNIPE',        icon: '🎯', desc: 'Steals income boost',      cooldown: 30, threat: 'MED'    },
-  { id: 'DEBT_INJECTION',   label: 'DEBT INJECTION',   icon: '💉', desc: 'Forces negative cashflow', cooldown: 72, threat: 'CRIT'   },
-] as const;
-
-const THREAT_COLOR: Record<string, string> = {
-  'CRIT': '#FF2222',
-  'HIGH': '#FF8800',
-  'MED':  '#FFDD00',
+// ─── Design tokens ────────────────────────────────────────────────────────────
+const T = {
+  void:    '#030005',
+  surface: '#0A0008',
+  card:    '#100008',
+  red:     '#FF4D4D',
+  redDim:  '#CC1111',
+  orange:  '#FF8C00',
+  yellow:  '#FFD700',
+  green:   '#22DD88',
+  blue:    '#4488FF',
+  text:    '#F2F2FF',
+  textSub: '#AA8888',
+  textMut: '#4A2828',
+  mono:    "'IBM Plex Mono', monospace",
+  display: "'Syne', 'Outfit', system-ui, sans-serif",
 };
 
-// ─── Helpers ────────────────────────────────────────────────────────────────
+// ─── Sabotage catalog ─────────────────────────────────────────────────────────
+const SABOTAGE_CATALOG = [
+  { id:'FREEZE_INCOME',    icon:'🧊', label:'FREEZE INCOME',    desc:'Stops income 3 ticks',    threat:'HIGH' },
+  { id:'PHANTOM_EXPENSE',  icon:'👻', label:'PHANTOM EXPENSE',  desc:'Injects surprise cost',    threat:'MED'  },
+  { id:'CREDIT_LOCK',      icon:'🔒', label:'CREDIT LOCK',      desc:'Destroys L2 shield',       threat:'HIGH' },
+  { id:'MARKET_RUMOR',     icon:'📡', label:'MARKET RUMOR',     desc:'Raises hater heat +20',    threat:'MED'  },
+  { id:'AUDIT_TRIGGER',    icon:'📋', label:'AUDIT TRIGGER',    desc:'Drains cash $5K',          threat:'CRIT' },
+  { id:'SHIELD_CORRODE',   icon:'🔥', label:'SHIELD CORRODE',   desc:'Erodes shields 8/tick',    threat:'CRIT' },
+  { id:'OPPORTUNITY_SNIPE',icon:'🎯', label:'OPP SNIPE',        desc:'Steals income boost',      threat:'MED'  },
+  { id:'DEBT_INJECTION',   icon:'💉', label:'DEBT INJECTION',   desc:'Forces negative cashflow', threat:'CRIT' },
+] as const;
 
+const THREAT_COLORS: Record<string, string> = {
+  CRIT: '#FF2222', HIGH: '#FF8800', MED: '#FFD700',
+};
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 function fmt(n: number): string {
-  const sign = n < 0 ? '-' : '';
-  const v = Math.abs(n);
-  if (v >= 1_000_000) return `${sign}$${(v / 1_000_000).toFixed(2)}M`;
-  if (v >= 1_000)     return `${sign}$${(v / 1_000).toFixed(1)}K`;
-  return `${sign}$${Math.round(v).toLocaleString()}`;
+  const s = n < 0 ? '-' : '', v = Math.abs(n);
+  if (v >= 1_000_000) return `${s}$${(v/1e6).toFixed(2)}M`;
+  if (v >= 1_000)     return `${s}$${(v/1e3).toFixed(1)}K`;
+  return `${s}$${Math.round(v).toLocaleString()}`;
 }
 
-// ─── Sub-components ──────────────────────────────────────────────────────────
+// ─── Panel wrapper ────────────────────────────────────────────────────────────
+function Panel({ children, style = {}, urgent = false }: {
+  children: React.ReactNode; style?: React.CSSProperties; urgent?: boolean;
+}) {
+  return (
+    <div style={{
+      background: T.card, borderRadius:12,
+      border: `1px solid ${urgent ? 'rgba(255,77,77,0.30)' : 'rgba(255,77,77,0.10)'}`,
+      padding: 16,
+      boxShadow: urgent ? '0 0 24px rgba(255,77,77,0.08) inset' : 'none',
+      ...style,
+    }}>
+      {children}
+    </div>
+  );
+}
 
+function Label({ children, color = T.red }: { children: React.ReactNode; color?: string }) {
+  return (
+    <div style={{
+      fontSize:10, fontFamily:T.mono, fontWeight:700,
+      letterSpacing:'0.2em', textTransform:'uppercase',
+      color, marginBottom:12,
+    }}>
+      {children}
+    </div>
+  );
+}
+
+// ─── Combo Meter ──────────────────────────────────────────────────────────────
 function ComboMeter({ comboCount }: { comboCount: number }) {
-  const pct   = Math.min(100, comboCount * 25);   // 4 combos = 100%
+  const pct   = Math.min(100, comboCount * 25);
+  const color = comboCount >= 3 ? '#FF2222' : comboCount >= 2 ? '#FF8800' : '#FFD700';
   const label = comboCount === 0 ? 'NO COMBO' : `${comboCount}× COMBO`;
-  const color = comboCount >= 3 ? '#FF2222' : comboCount >= 2 ? '#FF8800' : '#FFDD00';
 
   return (
-    <div
-      className="rounded-xl p-4 border"
-      style={{ background: '#0D0000', borderColor: '#FF303033' }}
-    >
-      <div className="flex items-center justify-between mb-2">
-        <span className="text-[#FF3030] text-xs font-bold tracking-widest uppercase">Hater Combo</span>
-        <span
-          className="text-sm font-black"
-          style={{ color, textShadow: comboCount >= 3 ? `0 0 16px ${color}` : 'none' }}
-        >
+    <Panel urgent={comboCount >= 2}>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:12 }}>
+        <Label>Hater Combo</Label>
+        <span style={{
+          fontSize:14, fontWeight:800, fontFamily:T.display, color,
+          textShadow: comboCount >= 3 ? `0 0 20px ${color}` : 'none',
+          transition:'all 0.3s ease',
+        }}>
           {label}
         </span>
       </div>
-      <div className="h-3 bg-[#1a0000] rounded-full overflow-hidden">
-        <div
-          className="h-full rounded-full transition-all duration-500"
-          style={{
-            width: `${pct}%`,
-            background: `linear-gradient(90deg, #882222, ${color})`,
-            boxShadow: comboCount > 0 ? `0 0 10px ${color}66` : 'none',
-          }}
-        />
+
+      <div style={{ height:10, background:'#1A000A', borderRadius:6, overflow:'hidden', marginBottom:8 }}>
+        <div style={{
+          height:'100%', borderRadius:6,
+          width:`${pct}%`,
+          background:`linear-gradient(90deg, #882222, ${color})`,
+          boxShadow: comboCount > 0 ? `0 0 12px ${color}55` : 'none',
+          transition:'width 0.5s ease',
+        }} />
       </div>
-      <div className="flex justify-between mt-1 text-[9px] text-[#444] font-mono">
-        <span>+0%</span>
-        <span>+25%</span>
-        <span>+50%</span>
-        <span>+75%</span>
-        <span className="text-[#FF2222]">+100%</span>
+
+      <div style={{ display:'flex', justifyContent:'space-between', fontSize:9, fontFamily:T.mono, color:T.textMut }}>
+        <span>+0%</span><span>+25%</span><span>+50%</span><span>+75%</span>
+        <span style={{ color:'#FF2222' }}>+100%</span>
       </div>
+
       {comboCount >= 2 && (
-        <div className="mt-2 text-[10px] text-[#FF6060] text-center animate-pulse">
-          EACH UNBLOCKED ATTACK NOW +{comboCount * 25}% DAMAGE
+        <div style={{
+          marginTop:10, fontSize:11, color:'#FF7070', textAlign:'center',
+          fontFamily:T.mono, fontWeight:600,
+        }}>
+          ⚠ Each unblocked attack now deals +{comboCount * 25}% damage
         </div>
       )}
-    </div>
+    </Panel>
   );
 }
 
+// ─── Sabotage Arsenal ─────────────────────────────────────────────────────────
 function SabotageArsenal({
-  counterplayOpen,
-  counterplayTicksLeft,
+  counterplayOpen, counterplayTicksLeft,
 }: {
-  counterplayOpen: boolean;
-  counterplayTicksLeft: number;
+  counterplayOpen: boolean; counterplayTicksLeft: number;
 }) {
   return (
-    <div
-      className="rounded-xl border p-4"
-      style={{ background: '#0D0000', borderColor: '#FF303033' }}
-    >
-      <div className="flex items-center justify-between mb-3">
-        <span className="text-[#FF3030] text-xs font-bold tracking-widest uppercase">Hater Arsenal</span>
+    <Panel>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:14 }}>
+        <Label>Hater Arsenal</Label>
         {counterplayOpen && (
-          <span className="text-xs font-black text-[#FF8800] animate-pulse">
-            ⚡ COUNTERPLAY {counterplayTicksLeft} TICKS
+          <span style={{
+            fontSize:11, fontFamily:T.mono, fontWeight:700, color:T.orange,
+            padding:'4px 10px', borderRadius:6,
+            background:'rgba(255,140,0,0.12)', border:'1px solid rgba(255,140,0,0.30)',
+          }}>
+            ⚡ COUNTERPLAY — {counterplayTicksLeft} TICKS
           </span>
         )}
       </div>
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-        {SABOTAGE_CATALOG.map((card) => (
-          <div
-            key={card.id}
-            className="rounded-lg p-2 border text-center transition-all hover:scale-[1.02]"
-            style={{
-              borderColor: THREAT_COLOR[card.threat] + '44',
-              background: THREAT_COLOR[card.threat] + '08',
-            }}
-          >
-            <div className="text-2xl mb-1">{card.icon}</div>
-            <div
-              className="text-[9px] font-black tracking-wider uppercase leading-tight"
-              style={{ color: THREAT_COLOR[card.threat] }}
-            >
-              {card.label}
+
+      <div style={{
+        display:'grid', gap:8,
+        gridTemplateColumns:'repeat(auto-fill, minmax(130px, 1fr))',
+      }}>
+        {SABOTAGE_CATALOG.map((card) => {
+          const col = THREAT_COLORS[card.threat];
+          return (
+            <div key={card.id} style={{
+              padding:'10px 12px', borderRadius:8,
+              border:`1px solid ${col}33`,
+              background:`${col}08`,
+              transition:'transform 0.15s ease',
+            }}>
+              <div style={{ fontSize:22, marginBottom:6, lineHeight:1 }}>{card.icon}</div>
+              <div style={{
+                fontSize:9, fontFamily:T.mono, fontWeight:700,
+                letterSpacing:'0.08em', textTransform:'uppercase',
+                color:col, marginBottom:4, lineHeight:1.3,
+              }}>
+                {card.label}
+              </div>
+              <div style={{ fontSize:10, color:T.textSub, lineHeight:1.4, marginBottom:6 }}>
+                {card.desc}
+              </div>
+              <div style={{
+                display:'inline-block', fontSize:8, fontFamily:T.mono, fontWeight:700,
+                padding:'2px 6px', borderRadius:3,
+                color:`${col}CC`, background:`${col}14`, border:`1px solid ${col}28`,
+              }}>
+                {card.threat}
+              </div>
             </div>
-            <div className="text-[8px] text-[#666] mt-1 leading-tight">{card.desc}</div>
-            <div
-              className="text-[8px] font-mono mt-1 px-1 py-0.5 rounded inline-block"
-              style={{
-                color: THREAT_COLOR[card.threat] + 'cc',
-                background: THREAT_COLOR[card.threat] + '11',
-                border: `1px solid ${THREAT_COLOR[card.threat]}33`,
-              }}
-            >
-              {card.threat}
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
-    </div>
+    </Panel>
   );
 }
 
+// ─── Shield Status ────────────────────────────────────────────────────────────
 function ShieldStatus({ shields, shieldConsuming }: { shields: number; shieldConsuming: boolean }) {
-  const pct = (shields / 4) * 100;
+  const LAYERS = ['L1 LIQUIDITY', 'L2 CREDIT', 'L3 ASSET', 'L4 NETWORK'];
+  const pct    = (shields / 4) * 100;
+  const barColor = shields > 2
+    ? 'linear-gradient(90deg, #224488, #4488FF)'
+    : shields > 1
+    ? 'linear-gradient(90deg, #886600, #FFD700)'
+    : 'linear-gradient(90deg, #882200, #FF4444)';
 
   return (
-    <div
-      className="rounded-xl border p-4"
-      style={{ background: '#0D0000', borderColor: shields <= 1 ? '#FF222244' : '#FF303033' }}
-    >
-      <div className="flex items-center justify-between mb-3">
-        <span className="text-[#FF3030] text-xs font-bold tracking-widest uppercase">Shield Status</span>
+    <Panel urgent={shields === 0}>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:14 }}>
+        <Label>Shield Status</Label>
         <ShieldIcons count={shields} consuming={shieldConsuming} />
       </div>
 
-      {/* Big visual */}
-      <div className="grid grid-cols-4 gap-2 mb-3">
-        {['L1 LIQUIDITY', 'L2 CREDIT', 'L3 ASSET', 'L4 NETWORK'].map((label, i) => {
+      <div style={{
+        display:'grid', gap:8, marginBottom:12,
+        gridTemplateColumns:'repeat(4, 1fr)',
+      }}>
+        {LAYERS.map((name, i) => {
           const intact = i < shields;
           return (
-            <div
-              key={label}
-              className="rounded-lg p-2 text-center border transition-all"
-              style={{
-                borderColor: intact ? '#3366FF44' : '#FF222244',
-                background: intact ? '#00003D22' : '#1a000022',
-              }}
-            >
-              <div className="text-xl mb-1">{intact ? '🛡️' : '💀'}</div>
-              <div className="text-[8px] font-bold" style={{ color: intact ? '#6699FF' : '#FF4444' }}>
-                {label.split(' ')[0]}
+            <div key={name} style={{
+              padding:'10px 6px', borderRadius:8, textAlign:'center',
+              border:`1px solid ${intact ? 'rgba(68,136,255,0.30)' : 'rgba(255,34,34,0.25)'}`,
+              background: intact ? 'rgba(0,0,80,0.20)' : 'rgba(30,0,0,0.30)',
+            }}>
+              <div style={{ fontSize:18, marginBottom:4 }}>{intact ? '🛡' : '💀'}</div>
+              <div style={{
+                fontSize:8, fontFamily:T.mono, fontWeight:700,
+                color: intact ? '#6699FF' : '#FF5555',
+                letterSpacing:'0.08em',
+              }}>
+                {name.split(' ')[0]}
               </div>
-              <div className="text-[8px]" style={{ color: intact ? '#6699FF88' : '#FF444488' }}>
-                {intact ? 'INTACT' : 'BREACHED'}
+              <div style={{ fontSize:8, color: intact ? '#4466BB' : '#882222', fontFamily:T.mono }}>
+                {intact ? 'INTACT' : 'BREACH'}
               </div>
             </div>
           );
         })}
       </div>
 
-      <div className="h-2 bg-[#1a0000] rounded-full overflow-hidden">
-        <div
-          className="h-full rounded-full transition-all duration-700"
-          style={{
-            width: `${pct}%`,
-            background: shields > 2 ? 'linear-gradient(90deg, #3344CC, #6699FF)'
-              : shields > 1 ? 'linear-gradient(90deg, #886600, #FFDD00)'
-              : 'linear-gradient(90deg, #882200, #FF4444)',
-          }}
-        />
+      <div style={{ height:6, background:'#1A0010', borderRadius:4, overflow:'hidden' }}>
+        <div style={{
+          height:'100%', borderRadius:4, width:`${pct}%`,
+          background: barColor, transition:'width 0.7s ease',
+        }} />
       </div>
 
       {shields === 0 && (
-        <div className="mt-2 text-center text-xs font-black text-[#FF2222] animate-pulse">
-          ALL SHIELDS BREACHED — ONE HIT = BANKRUPTCY
+        <div style={{
+          marginTop:10, textAlign:'center', fontSize:12,
+          fontFamily:T.mono, fontWeight:700, color:'#FF2222',
+          letterSpacing:'0.05em',
+        }}>
+          ⚠ ALL SHIELDS BREACHED — ONE HIT = BANKRUPTCY
         </div>
       )}
-    </div>
+    </Panel>
   );
 }
 
-// ─── Props ──────────────────────────────────────────────────────────────────
-
+// ─── Props ────────────────────────────────────────────────────────────────────
 export interface PendingCounterplay {
-  eventLabel: string;
-  eventDescription: string;
-  eventEmoji: string;
-  ticksToRespond: number;
-  actions: CounterplayAction[];
-  onChoose: (actionId: string) => void;
-  onIgnore: () => void;
+  eventLabel: string; eventDescription: string; eventEmoji: string;
+  ticksToRespond: number; actions: CounterplayAction[];
+  onChoose: (actionId: string) => void; onIgnore: () => void;
 }
 
 export interface PredatorGameScreenProps {
-  cash: number;
-  income: number;
-  expenses: number;
-  netWorth: number;
-  shields: number;
-  shieldConsuming: boolean;
-  tick: number;
-  totalTicks: number;
-  freezeTicks: number;
-  regime: MarketRegime;
-  intelligence: IntelligenceState;
-  equityHistory: number[];
-  events: string[];
+  cash: number; income: number; expenses: number; netWorth: number;
+  shields: number; shieldConsuming: boolean;
+  tick: number; totalTicks: number; freezeTicks: number;
+  regime: MarketRegime; intelligence: IntelligenceState;
+  equityHistory: number[]; events: string[];
   modeState: GameModeState | null;
-  battlePhase: BattlePhase;
-  battleParticipants: BattleParticipant[];
-  battleScore: { local: number; opponent: number };
-  battleRound: number;
-  activeSabotages: ActiveSabotage[];
-  pendingCounterplay: PendingCounterplay | null;
-  onForfeit: () => void;
-  onCounterplay: (sabotageId: string) => void;
+  battlePhase: BattlePhase; battleParticipants: BattleParticipant[];
+  battleScore: { local: number; opponent: number }; battleRound: number;
+  activeSabotages: ActiveSabotage[]; pendingCounterplay: PendingCounterplay | null;
+  onForfeit: () => void; onCounterplay: (id: string) => void;
 }
 
-// ─── Main component ──────────────────────────────────────────────────────────
-
+// ─── Main ─────────────────────────────────────────────────────────────────────
 export default function PredatorGameScreen({
   cash, income, expenses, netWorth, shields, shieldConsuming,
   tick, totalTicks, freezeTicks, regime, intelligence, equityHistory,
-  events, modeState,
-  battlePhase, battleParticipants, battleScore, battleRound,
-  activeSabotages, pendingCounterplay,
+  events, modeState, battlePhase, battleParticipants,
+  battleScore, battleRound, activeSabotages, pendingCounterplay,
   onForfeit, onCounterplay,
 }: PredatorGameScreenProps) {
-  const predator          = modeState?.predator;
-  const comboCount        = predator?.haterComboCount       ?? 0;
-  const counterplayOpen   = predator?.counterplayWindow     ?? false;
-  const counterplayTicks  = predator?.counterplayTicksLeft  ?? 0;
-  const phase             = predator?.phase                 ?? 'early';
+  const predator      = modeState?.predator;
+  const combo         = predator?.haterComboCount      ?? 0;
+  const cpOpen        = predator?.counterplayWindow    ?? false;
+  const cpTicks       = predator?.counterplayTicksLeft ?? 0;
+  const phase         = predator?.phase                ?? 'early';
+  const cashflow      = income - expenses;
 
   const phaseLabel: Record<string, string> = {
-    early: 'EARLY GAME',
-    mid:   'MID GAME',
-    endgame: 'ENDGAME',
+    early: 'EARLY GAME', mid: 'MID GAME', endgame: 'ENDGAME',
   };
+  const phaseColor = phase === 'endgame' ? T.red : T.orange;
 
   return (
-    <div
-      className="min-h-screen flex flex-col"
-      style={{ background: 'linear-gradient(135deg, #0D0000 0%, #120000 50%, #080000 100%)' }}
-    >
-      {/* ── Mode Banner ─────────────────────────────────────────────── */}
-      <div
-        className="flex items-center gap-4 px-6 py-3 border-b"
-        style={{ borderColor: '#FF303022', background: '#0D000088' }}
-      >
-        <div
-          className="px-3 py-1 rounded text-xs font-black tracking-widest"
-          style={{ background: '#FF303022', border: '1px solid #FF303044', color: '#FF3030' }}
-        >
+    <div style={{
+      minHeight:'100vh', display:'flex', flexDirection:'column',
+      background:'linear-gradient(160deg, #050002 0%, #0A0005 60%, #060003 100%)',
+      fontFamily:T.display,
+    }}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap');
+        * { box-sizing: border-box; }
+      `}</style>
+
+      {/* ── Sticky Header ── */}
+      <header style={{
+        position:'sticky', top:0, zIndex:100,
+        background:'rgba(5,0,2,0.94)', backdropFilter:'blur(16px)',
+        borderBottom:'1px solid rgba(255,77,77,0.14)',
+        padding:'10px clamp(12px,4vw,24px)',
+        display:'flex', alignItems:'center', flexWrap:'wrap', gap:'8px 20px',
+      }}>
+        <div style={{
+          padding:'5px 12px', borderRadius:6, fontSize:10,
+          fontFamily:T.mono, fontWeight:700, letterSpacing:'0.2em',
+          background:'rgba(255,77,77,0.12)', border:'1px solid rgba(255,77,77,0.30)',
+          color:T.red,
+        }}>
           ⚔️ PREDATOR
         </div>
-        <span className="text-[#888] text-xs">Your income is a target. Your shields are burning. Block or lose.</span>
-        <div className="ml-auto flex items-center gap-4 text-xs font-mono">
-          <span
-            className="px-2 py-0.5 rounded font-bold"
-            style={{
-              color: phase === 'endgame' ? '#FF2222' : '#FF8800',
-              background: '#FF000011',
-              border: '1px solid #FF444422',
-            }}
-          >
-            {phaseLabel[phase] ?? phase.toUpperCase()}
+
+        <div style={{ display:'flex', flexWrap:'wrap', gap:'6px 18px', fontSize:12, fontFamily:T.mono }}>
+          <span style={{ color: cashflow >= 0 ? T.green : T.red, fontWeight:700 }}>
+            CF {cashflow >= 0 ? '+' : ''}{fmt(cashflow)}/mo
+          </span>
+          <span style={{ color:T.text }}>NW {fmt(netWorth)}</span>
+          <span style={{ color: combo >= 2 ? T.red : T.textSub }}>
+            COMBO {combo}×
           </span>
         </div>
-      </div>
 
-      {/* ── Battle HUD (full width, dominant) ───────────────────────── */}
-      <div className="px-4 pt-4">
+        <div style={{ marginLeft:'auto', display:'flex', alignItems:'center', gap:12 }}>
+          <span style={{
+            fontSize:11, fontFamily:T.mono, fontWeight:700,
+            color: phaseColor, padding:'3px 8px', borderRadius:4,
+            background:`${phaseColor}14`, border:`1px solid ${phaseColor}28`,
+          }}>
+            {phaseLabel[phase]}
+          </span>
+          <span style={{ fontSize:11, fontFamily:T.mono, color:T.textMut }}>
+            T{tick}/{totalTicks}
+          </span>
+        </div>
+      </header>
+
+      {/* ── Battle HUD ── */}
+      <div style={{ padding:'14px clamp(12px,3vw,20px) 0' }}>
         <BattleHUD
           phase={battlePhase}
           participants={battleParticipants}
@@ -311,52 +366,43 @@ export default function PredatorGameScreen({
         />
       </div>
 
-      {/* ── Main Content ────────────────────────────────────────────── */}
-      <div className="flex-1 p-4 space-y-4">
+      {/* ── Main content ── */}
+      <div style={{ flex:1, padding:'clamp(12px,3vw,20px)', display:'flex', flexDirection:'column', gap:14 }}>
 
-        {/* Combo + Shield Row */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <ComboMeter comboCount={comboCount} />
+        {/* Combo + Shield */}
+        <div style={{
+          display:'grid', gap:14,
+          gridTemplateColumns:'repeat(auto-fit, minmax(280px, 1fr))',
+        }}>
+          <ComboMeter comboCount={combo} />
           <ShieldStatus shields={shields} shieldConsuming={shieldConsuming} />
         </div>
 
-        {/* Sabotage Arsenal */}
-        <SabotageArsenal
-          counterplayOpen={counterplayOpen}
-          counterplayTicksLeft={counterplayTicks}
-        />
+        {/* Sabotage arsenal */}
+        <SabotageArsenal counterplayOpen={cpOpen} counterplayTicksLeft={cpTicks} />
 
-        {/* Active Sabotages */}
+        {/* Active sabotages */}
         {activeSabotages.length > 0 && (
-          <div
-            className="rounded-xl border p-3"
-            style={{ background: '#0D0000', borderColor: '#FF303033' }}
-          >
+          <Panel>
             <SabotageImpactPanel
               activeSabotages={activeSabotages}
               tick={tick}
               onCounterplay={onCounterplay}
             />
-          </div>
+          </Panel>
         )}
 
         {/* GameBoard */}
         <GameBoard
-          equityHistory={equityHistory}
-          cash={cash}
-          netWorth={netWorth}
-          income={income}
-          expenses={expenses}
-          regime={regime}
-          intelligence={intelligence}
-          tick={tick}
-          totalTicks={totalTicks}
+          equityHistory={equityHistory} cash={cash} netWorth={netWorth}
+          income={income} expenses={expenses} regime={regime}
+          intelligence={intelligence} tick={tick} totalTicks={totalTicks}
           freezeTicks={freezeTicks}
         />
 
       </div>
 
-      {/* ── Counterplay Modal ────────────────────────────────────────── */}
+      {/* ── Counterplay Modal ── */}
       {pendingCounterplay && (
         <CounterplayModal
           eventLabel={pendingCounterplay.eventLabel}
@@ -370,8 +416,10 @@ export default function PredatorGameScreen({
         />
       )}
 
-      {/* ── Moment Flash ────────────────────────────────────────────── */}
-      <div className="fixed bottom-4 right-4 w-80 z-50 pointer-events-none">
+      {/* ── Moment Flash ── */}
+      <div style={{
+        position:'fixed', bottom:16, right:16, width:320, zIndex:200, pointerEvents:'none',
+      }}>
         <MomentFlash events={events} tick={tick} maxVisible={3} />
       </div>
     </div>

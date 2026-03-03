@@ -1,32 +1,135 @@
-import React from 'react';
+/**
+ * PZO_FE_T0152 — P17_TESTING_STORYBOOK_QA: CapabilitiesPanel
+ * Manually authored — executor failure recovery
+ */
 import { render } from '@testing-library/react';
 import { describe, it, expect } from 'vitest';
+import type { ComponentProps } from 'react';
 import CapabilitiesPanel from '../components/CapabilitiesPanel';
 
-const baseCaps = { underwriting: 3, negotiation: 5, bookkeeping: 4, marketing: 6, compliance: 2, analytics: 7, systems: 4 };
-const baseRep = { score: 320, tier: 'Established' as const, recentEvents: ['Won challenge'] };
-const baseBS = { cash: 30000, reserves: 8000, illiquidValue: 55000, monthlyObligations: 3200, obligationCoverage: 3.75 };
-const baseSnap = { cash: 30000, netWorth: 93000, income: 12000, expenses: 4800, balanceSheet: baseBS, portfolio: [], capabilities: baseCaps, reputation: baseRep, tick: 240, wasEverInDistress: false };
-const baseProps = { capabilities: baseCaps, reputation: baseRep, objectives: [] as string[], gameStateSnapshot: baseSnap };
+type Props = ComponentProps<typeof CapabilitiesPanel>;
+
+const baseCaps: Props['capabilities'] = {
+  underwriting: 3,
+  negotiation: 5,
+  bookkeeping: 4,
+  marketing: 6,
+  compliance: 2,
+  analytics: 7,
+  systems: 4,
+};
+
+const baseRep: Props['reputation'] = {
+  score: 320,
+  tier: 'Established' as const,
+  recentEvents: ['Won challenge'],
+};
+
+const baseBS = {
+  cash: 30000,
+  reserves: 8000,
+  illiquidValue: 55000,
+  monthlyObligations: 3200,
+  obligationCoverage: 3.75,
+};
+
+const baseSnap: Props['gameStateSnapshot'] = {
+  cash: 30000,
+  netWorth: 93000,
+  income: 12000,
+  expenses: 4800,
+  balanceSheet: baseBS as Props['gameStateSnapshot']['balanceSheet'],
+  portfolio: [],
+  capabilities: baseCaps,
+  reputation: baseRep,
+  tick: 240,
+  wasEverInDistress: false,
+};
+
+const baseProps: Props = {
+  capabilities: baseCaps,
+  reputation: baseRep,
+  objectives: [] as Props['objectives'], // ✅ ObjectiveId[] without guessing the union
+  gameStateSnapshot: baseSnap,
+};
 
 describe('CapabilitiesPanel', () => {
-  it('renders without crashing', () => { render(<CapabilitiesPanel {...baseProps} />); expect(document.body.firstChild).toBeTruthy(); });
-  it('displays capability stats', () => { render(<CapabilitiesPanel {...baseProps} />); expect((document.body.textContent ?? '').length).toBeGreaterThan(0); });
-  it('renders all capability labels', () => { render(<CapabilitiesPanel {...baseProps} />); expect(document.body.firstChild).toBeTruthy(); });
+  it('renders without crashing', () => {
+    render(<CapabilitiesPanel {...baseProps} />);
+    expect(document.body.firstChild).toBeTruthy();
+  });
+
+  it('displays capability stats', () => {
+    render(<CapabilitiesPanel {...baseProps} />);
+    expect((document.body.textContent ?? '').length).toBeGreaterThan(0);
+  });
+
+  it('renders all capability labels', () => {
+    render(<CapabilitiesPanel {...baseProps} />);
+    expect(document.body.firstChild).toBeTruthy();
+  });
+
   it('renders with maxed-out stats', () => {
-    const maxCaps = { underwriting: 10, negotiation: 10, bookkeeping: 10, marketing: 10, compliance: 10, analytics: 10, systems: 10 };
-    render(<CapabilitiesPanel {...baseProps} capabilities={maxCaps} gameStateSnapshot={{ ...baseSnap, capabilities: maxCaps }} />);
+    const maxCaps: Props['capabilities'] = {
+      underwriting: 10,
+      negotiation: 10,
+      bookkeeping: 10,
+      marketing: 10,
+      compliance: 10,
+      analytics: 10,
+      systems: 10,
+    };
+
+    render(
+      <CapabilitiesPanel
+        {...baseProps}
+        capabilities={maxCaps}
+        gameStateSnapshot={{ ...baseSnap, capabilities: maxCaps }}
+      />
+    );
     expect(document.body.firstChild).toBeTruthy();
   });
+
   it('renders with zero stats', () => {
-    const zeroCaps = { underwriting: 0, negotiation: 0, bookkeeping: 0, marketing: 0, compliance: 0, analytics: 0, systems: 0 };
-    render(<CapabilitiesPanel {...baseProps} capabilities={zeroCaps} gameStateSnapshot={{ ...baseSnap, capabilities: zeroCaps }} />);
+    const zeroCaps: Props['capabilities'] = {
+      underwriting: 0,
+      negotiation: 0,
+      bookkeeping: 0,
+      marketing: 0,
+      compliance: 0,
+      analytics: 0,
+      systems: 0,
+    };
+
+    render(
+      <CapabilitiesPanel
+        {...baseProps}
+        capabilities={zeroCaps}
+        gameStateSnapshot={{ ...baseSnap, capabilities: zeroCaps }}
+      />
+    );
     expect(document.body.firstChild).toBeTruthy();
   });
+
   it('handles Unknown reputation tier', () => {
-    const lowRep = { score: 50, tier: 'Unknown' as const, recentEvents: [] };
-    render(<CapabilitiesPanel {...baseProps} reputation={lowRep} gameStateSnapshot={{ ...baseSnap, reputation: lowRep }} />);
+    const lowRep: Props['reputation'] = {
+      score: 50,
+      tier: 'Unknown' as const,
+      recentEvents: [],
+    };
+
+    render(
+      <CapabilitiesPanel
+        {...baseProps}
+        reputation={lowRep}
+        gameStateSnapshot={{ ...baseSnap, reputation: lowRep }}
+      />
+    );
     expect(document.body.firstChild).toBeTruthy();
   });
-  it('renders expanded state', () => { render(<CapabilitiesPanel {...baseProps} isExpanded={true} />); expect(document.body.firstChild).toBeTruthy(); });
+
+  it('renders expanded state', () => {
+    render(<CapabilitiesPanel {...baseProps} isExpanded={true} />);
+    expect(document.body.firstChild).toBeTruthy();
+  });
 });

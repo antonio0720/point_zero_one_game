@@ -145,3 +145,47 @@ export class EventBus {
     this.on(channel, handler as (e: object) => void);
   }
 }
+// ── Legacy Global Event Bus ────────────────────────────────────────────────────
+// Permissive bus used by EmpireEngine, PredatorEngine, SyndicateEngine,
+// PhantomEngine (pre-zero generation). Supports arbitrary string event names,
+// 3-argument emit, and emitImmediate.
+// ModeEventBridge translates these events onto the zero/EventBus for the store.
+// DO NOT use in new engines — use zero/EventBus exclusively.
+
+import type { PZOEvent as CorePZOEvent } from '../core/types';
+
+export class LegacyEventBus {
+  private handlers: Map<string, Array<(event: CorePZOEvent) => void>> = new Map();
+
+  public on(
+    eventName: string,
+    handler:   (event: CorePZOEvent) => void,
+  ): () => void {
+    if (!this.handlers.has(eventName)) {
+      this.handlers.set(eventName, []);
+    }
+    this.handlers.get(eventName)!.push(handler);
+    return () => {
+      const list = this.handlers.get(eventName);
+      if (list) {
+        const i = list.indexOf(handler);
+        if (i !== -1) list.splice(i, 1);
+      }
+    };
+  }
+
+  public emit(eventName: string, tick: number, payload: object): void {
+    const list = this.handlers.get(eventName);
+    if (!list || list.length === 0) return;
+    const event: CorePZOEvent = { type: eventName as any, tick, payload };
+    for (const h of list) h(event);
+  }
+
+  /** Synchronous immediate dispatch — bypasses any deferred queue. */
+  public emitImmediate(eventName: string, tick: number, payload: object): void {
+    this.emit(eventName, tick, payload);
+  }
+}
+
+/** Shared instance for all legacy mode engines. */
+export const globalEventBus = new LegacyEventBus();

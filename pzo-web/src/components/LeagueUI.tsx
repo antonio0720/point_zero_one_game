@@ -1,11 +1,11 @@
 /**
- * PZO SPRINT 8 — src/components/LeagueUI.tsx
+ * LeagueUI.tsx — PZO Sprint 8
+ * LadderStandingsPanel · ReplayReportPanel · MatchExportCard · SeasonBadge · AchievementBadges
  *
- * UI for the full League / Season infrastructure:
- *   1. LadderStandingsPanel — live rankings with rating, points, grade
- *   2. ReplayReportPanel    — anti-cheat verification report display
- *   3. MatchExportCard      — shareable proof card (text + clipboard export)
- *   4. SeasonBadge          — inline badge for use in ProofCardV2
+ * Rebuilt: Syne + IBM Plex Mono · Inline styles · Mobile-first · High contrast
+ * Engine: SovereigntyEngine · RunGrade · GRADE_THRESHOLDS · IntegrityStatus
+ * 20M-player scale — no Tailwind dependency, no external CSS.
+ * Density6 LLC · Confidential
  */
 
 'use client';
@@ -13,25 +13,97 @@
 import React, { useState } from 'react';
 import type { LadderEntry, ClubStandingEntry, RunRecord } from '../engine/seasonLadder';
 import type { ReplayReport } from '../engine/antiCheat';
+import type { RunGrade, IntegrityStatus } from '../engines/sovereignty/types';
+import { GRADE_THRESHOLDS } from '../engines/sovereignty/types';
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function fmt(n: number): string {
-  if (Math.abs(n) >= 1_000_000) return `$${(n / 1e6).toFixed(1)}M`;
-  if (Math.abs(n) >= 1_000) return `$${(n / 1e3).toFixed(0)}K`;
-  return `$${n.toLocaleString()}`;
-}
-
-const GRADE_STYLE: Record<string, { color: string; bg: string }> = {
-  S: { color: 'text-yellow-300', bg: 'bg-yellow-900/30 border-yellow-700/50' },
-  A: { color: 'text-emerald-400', bg: 'bg-emerald-900/30 border-emerald-700/50' },
-  B: { color: 'text-blue-400',   bg: 'bg-blue-900/30 border-blue-700/50' },
-  C: { color: 'text-zinc-300',   bg: 'bg-zinc-800/60 border-zinc-700/50' },
-  D: { color: 'text-orange-400', bg: 'bg-orange-900/20 border-orange-800/50' },
-  F: { color: 'text-red-400',    bg: 'bg-red-900/20 border-red-800/50' },
+// ─── Design tokens ────────────────────────────────────────────────────────────
+const T = {
+  void:    '#030308',
+  card:    '#0C0C1E',
+  cardHi:  '#131328',
+  border:  'rgba(255,255,255,0.08)',
+  borderM: 'rgba(255,255,255,0.14)',
+  text:    '#F2F2FF',
+  textSub: '#9090B4',
+  textMut: '#44445A',
+  green:   '#22DD88',
+  red:     '#FF4D4D',
+  orange:  '#FF8C00',
+  yellow:  '#FFD700',
+  indigo:  '#818CF8',
+  purple:  '#A855F7',
+  teal:    '#22D3EE',
+  blue:    '#4488FF',
+  mono:    "'IBM Plex Mono', 'JetBrains Mono', monospace",
+  display: "'Syne', 'Outfit', system-ui, sans-serif",
 };
 
-// ─── Ladder Standings Panel ───────────────────────────────────────────────────
+const FONT_IMPORT = `@import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap');*{box-sizing:border-box;}`;
+
+// ─── Grade palette — mapped directly from SovereigntyEngine.GRADE_THRESHOLDS ─
+const GRADE_CFG: Record<RunGrade, { color: string; bg: string; border: string; label: string }> = {
+  A: { color: T.yellow,  bg: 'rgba(255,215,0,0.08)',    border: 'rgba(255,215,0,0.28)',    label: 'Sovereign' },
+  B: { color: T.teal,    bg: 'rgba(34,211,238,0.08)',   border: 'rgba(34,211,238,0.25)',   label: 'Architect' },
+  C: { color: T.indigo,  bg: 'rgba(129,140,248,0.08)',  border: 'rgba(129,140,248,0.22)',  label: 'Builder'   },
+  D: { color: T.orange,  bg: 'rgba(255,140,0,0.07)',    border: 'rgba(255,140,0,0.22)',    label: 'Developing'},
+  F: { color: T.red,     bg: 'rgba(255,77,77,0.07)',    border: 'rgba(255,77,77,0.22)',    label: 'Liquidated'},
+};
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+function fmt(n: number): string {
+  const s = n < 0 ? '-' : '', v = Math.abs(n);
+  if (v >= 1_000_000) return `${s}$${(v / 1e6).toFixed(1)}M`;
+  if (v >= 1_000)     return `${s}$${(v / 1e3).toFixed(0)}K`;
+  return `${s}$${v.toLocaleString()}`;
+}
+
+// ─── Panel wrapper ────────────────────────────────────────────────────────────
+function Panel({ children, style }: { children: React.ReactNode; style?: React.CSSProperties }) {
+  return (
+    <div style={{
+      background: T.card, borderRadius: 12,
+      border: `1px solid ${T.border}`,
+      overflow: 'hidden', fontFamily: T.display,
+      ...style,
+    }}>
+      <style>{FONT_IMPORT}</style>
+      {children}
+    </div>
+  );
+}
+
+function PanelHeader({ children, right }: { children: React.ReactNode; right?: React.ReactNode }) {
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+      padding: '10px 14px', borderBottom: `1px solid ${T.border}`,
+      flexWrap: 'wrap', gap: 8,
+    }}>
+      <span style={{ fontSize: 13, fontWeight: 700, color: T.text, fontFamily: T.display }}>
+        {children}
+      </span>
+      {right}
+    </div>
+  );
+}
+
+// ─── Grade Badge (inline) ─────────────────────────────────────────────────────
+function GradeBadge({ grade, size = 'sm' }: { grade: RunGrade; size?: 'sm' | 'md' | 'lg' }) {
+  const cfg  = GRADE_CFG[grade];
+  const sizes = { sm: 12, md: 18, lg: 28 };
+  return (
+    <span style={{
+      fontSize: sizes[size], fontWeight: 800, fontFamily: T.display,
+      color: cfg.color, textShadow: `0 0 16px ${cfg.color}55`,
+    }}>
+      {grade}
+    </span>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// LADDER STANDINGS PANEL
+// ═══════════════════════════════════════════════════════════════════
 
 interface LadderStandingsPanelProps {
   entries: LadderEntry[];
@@ -42,44 +114,57 @@ interface LadderStandingsPanelProps {
 }
 
 export function LadderStandingsPanel({
-  entries,
-  myPlayerId,
-  clubEntries,
-  seasonName,
-  format,
+  entries, myPlayerId, clubEntries, seasonName, format,
 }: LadderStandingsPanelProps) {
   const [tab, setTab] = useState<'players' | 'clubs'>('players');
-  const myRank = entries.find(e => e.playerId === myPlayerId);
+  const myEntry = entries.find(e => e.playerId === myPlayerId);
+  const MEDALS  = ['🥇', '🥈', '🥉'];
 
   return (
-    <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
+    <Panel>
       {/* Header */}
-      <div className="px-4 py-3 border-b border-zinc-800">
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="text-white font-black text-sm">🏆 {seasonName}</p>
-            <p className="text-zinc-500 text-xs capitalize">{format} format</p>
-          </div>
-          {myRank && (
-            <div className="text-right">
-              <p className="text-zinc-400 text-xs">Your rank</p>
-              <p className="text-white font-black text-lg">#{myRank.rank}</p>
-              <p className="text-indigo-300 text-xs font-mono">{myRank.ladderRating} ELO</p>
-            </div>
-          )}
+      <div style={{
+        padding: '12px 14px', borderBottom: `1px solid ${T.border}`,
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10,
+      }}>
+        <div>
+          <p style={{ fontSize: 14, fontWeight: 800, color: T.text, fontFamily: T.display, marginBottom: 2 }}>
+            🏆 {seasonName}
+          </p>
+          <p style={{ fontSize: 10, color: T.textSub, fontFamily: T.mono, textTransform: 'capitalize' }}>
+            {format} format
+          </p>
         </div>
+        {myEntry && (
+          <div style={{ textAlign: 'right' }}>
+            <p style={{ fontSize: 9, fontFamily: T.mono, color: T.textSub, marginBottom: 3 }}>Your rank</p>
+            <p style={{ fontSize: 24, fontWeight: 800, color: T.text, fontFamily: T.display, lineHeight: 1, marginBottom: 2 }}>
+              #{myEntry.rank}
+            </p>
+            <p style={{ fontSize: 10, fontFamily: T.mono, color: T.indigo, fontWeight: 700 }}>
+              {myEntry.ladderRating} ELO
+            </p>
+          </div>
+        )}
       </div>
 
       {/* Tabs */}
       {clubEntries && (
-        <div className="flex border-b border-zinc-800">
+        <div style={{ display: 'flex', borderBottom: `1px solid ${T.border}` }}>
           {(['players', 'clubs'] as const).map(t => (
             <button
               key={t}
               onClick={() => setTab(t)}
-              className={`flex-1 py-2 text-xs font-bold uppercase tracking-wide transition-colors ${
-                tab === t ? 'text-white border-b-2 border-indigo-500 bg-zinc-800/30' : 'text-zinc-500 hover:text-zinc-300'
-              }`}
+              style={{
+                flex: 1, padding: '10px 0', cursor: 'pointer',
+                fontSize: 10, fontFamily: T.mono, fontWeight: 700,
+                letterSpacing: '0.12em', textTransform: 'uppercase',
+                background: 'transparent', border: 'none',
+                borderBottom: tab === t ? `2px solid ${T.indigo}` : '2px solid transparent',
+                color: tab === t ? T.text : T.textMut,
+                transition: 'color 0.15s, border-color 0.15s',
+                minHeight: 40,
+              }}
             >
               {t === 'players' ? '👤 Players' : '🏠 Clubs'}
             </button>
@@ -87,75 +172,102 @@ export function LadderStandingsPanel({
         </div>
       )}
 
-      {/* Player Table */}
+      {/* Player table */}
       {tab === 'players' && (
         <div>
           {/* Column headers */}
-          <div className="grid grid-cols-12 px-3 py-1.5 border-b border-zinc-800/50">
-            <span className="col-span-1 text-zinc-600 text-xs">#</span>
-            <span className="col-span-4 text-zinc-600 text-xs">Player</span>
-            <span className="col-span-2 text-zinc-600 text-xs text-right">ELO</span>
-            <span className="col-span-2 text-zinc-600 text-xs text-right">Pts</span>
-            <span className="col-span-1 text-zinc-600 text-xs text-center">Gr</span>
-            <span className="col-span-2 text-zinc-600 text-xs text-right">Runs</span>
+          <div style={{
+            display: 'grid', gridTemplateColumns: '28px 1fr 64px 50px 24px 48px',
+            gap: 4, padding: '6px 14px',
+            borderBottom: `1px solid rgba(255,255,255,0.04)`,
+          }}>
+            {['#', 'Player', 'ELO', 'Pts', 'Gr', 'Runs'].map((h, i) => (
+              <span key={h} style={{
+                fontSize: 9, fontFamily: T.mono, color: T.textMut, fontWeight: 700,
+                textTransform: 'uppercase', letterSpacing: '0.1em',
+                textAlign: i >= 2 ? 'right' : 'left',
+              }}>
+                {h}
+              </span>
+            ))}
           </div>
 
-          <div className="divide-y divide-zinc-800/50 max-h-80 overflow-y-auto">
+          <div style={{ maxHeight: 360, overflowY: 'auto' }}>
             {entries.map(entry => {
-              const isMe = entry.playerId === myPlayerId;
-              const gradeStyle = GRADE_STYLE[entry.grade] ?? GRADE_STYLE['C'];
+              const isMe       = entry.playerId === myPlayerId;
+              const gradeCfg   = GRADE_CFG[entry.grade as RunGrade] ?? GRADE_CFG['C'];
+              const deltaColor = entry.ratingDelta !== null && entry.ratingDelta >= 0 ? T.green : T.red;
 
               return (
                 <div
                   key={entry.playerId}
-                  className={`grid grid-cols-12 items-center px-3 py-2 ${
-                    isMe ? 'bg-indigo-900/20' : 'hover:bg-zinc-800/30'
-                  }`}
+                  style={{
+                    display: 'grid', gridTemplateColumns: '28px 1fr 64px 50px 24px 48px',
+                    gap: 4, padding: '9px 14px', alignItems: 'center',
+                    background: isMe ? 'rgba(129,140,248,0.07)' : 'transparent',
+                    borderBottom: `1px solid rgba(255,255,255,0.04)`,
+                    transition: 'background 0.15s',
+                  }}
                 >
                   {/* Rank */}
-                  <span className="col-span-1 text-xs font-mono text-zinc-400">
-                    {entry.rank <= 3
-                      ? ['🥇', '🥈', '🥉'][entry.rank - 1]
-                      : entry.rank}
+                  <span style={{
+                    fontSize: entry.rank <= 3 ? 14 : 10,
+                    fontFamily: T.mono, color: T.textSub, fontWeight: 700,
+                    textAlign: 'center',
+                  }}>
+                    {entry.rank <= 3 ? MEDALS[entry.rank - 1] : entry.rank}
                   </span>
 
                   {/* Player */}
-                  <div className="col-span-4 flex items-center gap-1.5 overflow-hidden">
-                    <span className="text-sm shrink-0">{entry.avatarEmoji}</span>
-                    <div className="overflow-hidden">
-                      <p className={`text-xs font-semibold truncate ${isMe ? 'text-indigo-300' : 'text-white'}`}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 7, minWidth: 0 }}>
+                    <span style={{ fontSize: 14, flexShrink: 0 }}>{entry.avatarEmoji}</span>
+                    <div style={{ minWidth: 0 }}>
+                      <p style={{
+                        fontSize: 11, fontWeight: 700, fontFamily: T.display,
+                        color: isMe ? T.indigo : T.text,
+                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                      }}>
                         {entry.displayName}
                       </p>
                       {entry.isVerified && (
-                        <span className="text-emerald-500 text-xs">✓ verified</span>
+                        <span style={{ fontSize: 9, fontFamily: T.mono, color: T.green }}>
+                          ✓ verified
+                        </span>
                       )}
                     </div>
                   </div>
 
                   {/* ELO */}
-                  <div className="col-span-2 text-right">
-                    <span className="text-white text-xs font-mono font-bold">{entry.ladderRating}</span>
+                  <div style={{ textAlign: 'right' }}>
+                    <span style={{ fontSize: 11, fontFamily: T.mono, fontWeight: 700, color: T.text }}>
+                      {entry.ladderRating}
+                    </span>
                     {entry.ratingDelta !== null && (
-                      <span className={`text-xs font-mono ml-0.5 ${entry.ratingDelta >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>
+                      <span style={{ fontSize: 9, fontFamily: T.mono, color: deltaColor, marginLeft: 2 }}>
                         {entry.ratingDelta >= 0 ? '+' : ''}{entry.ratingDelta}
                       </span>
                     )}
                   </div>
 
                   {/* Points */}
-                  <span className="col-span-2 text-zinc-300 text-xs font-mono text-right">
+                  <span style={{
+                    fontSize: 10, fontFamily: T.mono, color: T.textSub,
+                    textAlign: 'right', fontWeight: 600,
+                  }}>
                     {entry.seasonPoints.toLocaleString()}
                   </span>
 
                   {/* Grade */}
-                  <span className={`col-span-1 text-center text-xs font-black ${gradeStyle.color}`}>
-                    {entry.grade}
-                  </span>
+                  <div style={{ textAlign: 'center' }}>
+                    <GradeBadge grade={entry.grade as RunGrade} size="sm" />
+                  </div>
 
-                  {/* Runs */}
-                  <div className="col-span-2 text-right">
-                    <span className="text-zinc-400 text-xs font-mono">{entry.totalRuns}</span>
-                    <span className="text-zinc-600 text-xs ml-1">
+                  {/* Runs + win rate */}
+                  <div style={{ textAlign: 'right' }}>
+                    <span style={{ fontSize: 10, fontFamily: T.mono, color: T.textSub }}>
+                      {entry.totalRuns}
+                    </span>
+                    <span style={{ fontSize: 9, fontFamily: T.mono, color: T.textMut, marginLeft: 4 }}>
                       {Math.round(entry.winRate * 100)}%W
                     </span>
                   </div>
@@ -166,31 +278,53 @@ export function LadderStandingsPanel({
         </div>
       )}
 
-      {/* Club Table */}
+      {/* Club table */}
       {tab === 'clubs' && clubEntries && (
-        <div className="divide-y divide-zinc-800/50 max-h-80 overflow-y-auto">
+        <div style={{ maxHeight: 360, overflowY: 'auto' }}>
           {clubEntries.map(club => (
-            <div key={club.clubId} className="flex items-center gap-3 px-3 py-2 hover:bg-zinc-800/30">
-              <span className="text-zinc-500 text-xs font-mono w-5 text-center">
-                {club.rank <= 3 ? ['🥇', '🥈', '🥉'][club.rank - 1] : club.rank}
+            <div
+              key={club.clubId}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 10,
+                padding: '10px 14px', borderBottom: `1px solid rgba(255,255,255,0.04)`,
+              }}
+            >
+              <span style={{
+                fontSize: club.rank <= 3 ? 14 : 10,
+                fontFamily: T.mono, color: T.textSub, width: 22, textAlign: 'center',
+              }}>
+                {club.rank <= 3 ? MEDALS[club.rank - 1] : club.rank}
               </span>
-              <div className="flex-1">
-                <p className="text-white text-xs font-bold">{club.clubName}</p>
-                <p className="text-zinc-500 text-xs">{club.memberCount} members · Top: {club.topPlayerName}</p>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <p style={{
+                  fontSize: 11, fontWeight: 700, color: T.text, fontFamily: T.display, marginBottom: 2,
+                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                }}>
+                  {club.clubName}
+                </p>
+                <p style={{ fontSize: 9, fontFamily: T.mono, color: T.textSub }}>
+                  {club.memberCount} members · Top: {club.topPlayerName}
+                </p>
               </div>
-              <div className="text-right">
-                <p className="text-white text-xs font-mono font-bold">{club.totalSeasonPoints.toLocaleString()}</p>
-                <p className="text-zinc-500 text-xs">avg {club.avgLadderRating} ELO</p>
+              <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                <p style={{ fontSize: 11, fontFamily: T.mono, fontWeight: 700, color: T.text }}>
+                  {club.totalSeasonPoints.toLocaleString()}
+                </p>
+                <p style={{ fontSize: 9, fontFamily: T.mono, color: T.textSub }}>
+                  avg {club.avgLadderRating} ELO
+                </p>
               </div>
             </div>
           ))}
         </div>
       )}
-    </div>
+    </Panel>
   );
 }
 
-// ─── Replay Report Panel ──────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════
+// REPLAY REPORT PANEL
+// ═══════════════════════════════════════════════════════════════════
 
 interface ReplayReportPanelProps {
   report: ReplayReport;
@@ -200,41 +334,71 @@ interface ReplayReportPanelProps {
 export function ReplayReportPanel({ report, onDismiss }: ReplayReportPanelProps) {
   const [showDetails, setShowDetails] = useState(false);
 
-  const verdictStyle = {
-    CLEAN:      { icon: '✅', color: 'text-emerald-400', bg: 'bg-emerald-900/20 border-emerald-700/50' },
-    SUSPICIOUS: { icon: '⚠️', color: 'text-orange-400', bg: 'bg-orange-900/20 border-orange-700/50' },
-    INVALID:    { icon: '❌', color: 'text-red-400',    bg: 'bg-red-900/20 border-red-700/50' },
-  }[report.verdict];
+  const VERDICT_CFG: Record<IntegrityStatus, { icon: string; color: string; bg: string; border: string }> = {
+    VERIFIED:   { icon: '✅', color: T.green,  bg: 'rgba(34,221,136,0.08)',  border: 'rgba(34,221,136,0.25)' },
+    TAMPERED:   { icon: '❌', color: T.red,    bg: 'rgba(255,77,77,0.08)',   border: 'rgba(255,77,77,0.25)'  },
+    UNVERIFIED: { icon: '⚠️', color: T.orange, bg: 'rgba(255,140,0,0.08)',  border: 'rgba(255,140,0,0.25)'  },
+  };
+
+  const vcfg = VERDICT_CFG[report.verdict as IntegrityStatus] ?? VERDICT_CFG['UNVERIFIED'];
+
+  const quickStats = [
+    { label: 'Chain Intact', value: report.logVerification.chainIntact ? '✅ Yes' : '❌ Broken',           color: report.logVerification.chainIntact ? T.green : T.red    },
+    { label: 'Actions',      value: String(report.logVerification.totalActions),                              color: T.text                                                  },
+    { label: 'Plausible',    value: report.plausibilityCheck.plausible ? '✅ Yes' : '⚠️ Flags',             color: report.plausibilityCheck.plausible ? T.green : T.orange },
+    { label: 'Confidence',   value: `${Math.round(report.plausibilityCheck.confidence * 100)}%`,             color: T.text                                                  },
+    { label: 'Rule Pack',    value: report.rulePackHash.slice(0, 12) + '…',                                  color: T.textSub                                               },
+  ];
 
   return (
-    <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
-      <div className="px-4 py-3 border-b border-zinc-800">
-        <p className="text-white font-bold text-xs">🔍 Replay Verification</p>
-        <p className="text-zinc-600 text-xs font-mono truncate">{report.matchHash}</p>
-      </div>
+    <Panel>
+      <PanelHeader>🔍 Replay Verification</PanelHeader>
 
-      <div className="p-4 space-y-3">
-        {/* Verdict */}
-        <div className={`flex items-start gap-3 p-3 rounded-xl border ${verdictStyle.bg}`}>
-          <span className="text-xl">{verdictStyle.icon}</span>
+      <div style={{ padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {/* Hash */}
+        <p style={{
+          fontSize: 9, fontFamily: T.mono, color: T.textMut,
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        }}>
+          {report.matchHash}
+        </p>
+
+        {/* Verdict banner */}
+        <div style={{
+          display: 'flex', alignItems: 'flex-start', gap: 12,
+          padding: '12px 14px', borderRadius: 10,
+          background: vcfg.bg, border: `1px solid ${vcfg.border}`,
+        }}>
+          <span style={{ fontSize: 22, lineHeight: 1, flexShrink: 0 }}>{vcfg.icon}</span>
           <div>
-            <p className={`font-black text-sm ${verdictStyle.color}`}>{report.verdict}</p>
-            <p className="text-zinc-400 text-xs">{report.verdictReason}</p>
+            <p style={{ fontSize: 14, fontWeight: 800, color: vcfg.color, fontFamily: T.display, marginBottom: 3 }}>
+              {report.verdict}
+            </p>
+            <p style={{ fontSize: 11, color: T.textSub, fontFamily: T.mono, lineHeight: 1.5 }}>
+              {report.verdictReason}
+            </p>
           </div>
         </div>
 
-        {/* Quick Stats */}
-        <div className="grid grid-cols-2 gap-2">
-          {[
-            ['Chain Intact', report.logVerification.chainIntact ? '✅ Yes' : '❌ Broken', report.logVerification.chainIntact ? 'text-emerald-400' : 'text-red-400'],
-            ['Actions', String(report.logVerification.totalActions), 'text-white'],
-            ['Plausible', report.plausibilityCheck.plausible ? '✅ Yes' : '⚠️ Flags', report.plausibilityCheck.plausible ? 'text-emerald-400' : 'text-orange-400'],
-            ['Confidence', `${Math.round(report.plausibilityCheck.confidence * 100)}%`, 'text-white'],
-            ['Rule Pack', report.rulePackHash, 'text-zinc-400'],
-          ].map(([label, val, color]) => (
-            <div key={label} className="bg-zinc-800/50 rounded-lg p-2">
-              <p className="text-zinc-500 text-xs">{label}</p>
-              <p className={`text-xs font-mono font-semibold truncate ${color}`}>{val}</p>
+        {/* Quick stats grid */}
+        <div style={{
+          display: 'grid', gap: 8,
+          gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))',
+        }}>
+          {quickStats.map(({ label, value, color }) => (
+            <div key={label} style={{
+              padding: '9px 10px', borderRadius: 8,
+              background: 'rgba(255,255,255,0.03)', border: `1px solid ${T.border}`,
+            }}>
+              <p style={{ fontSize: 9, fontFamily: T.mono, color: T.textSub, marginBottom: 4, letterSpacing: '0.08em' }}>
+                {label}
+              </p>
+              <p style={{
+                fontSize: 11, fontFamily: T.mono, fontWeight: 700, color,
+                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+              }}>
+                {value}
+              </p>
             </div>
           ))}
         </div>
@@ -244,15 +408,28 @@ export function ReplayReportPanel({ report, onDismiss }: ReplayReportPanelProps)
           <div>
             <button
               onClick={() => setShowDetails(v => !v)}
-              className="w-full text-left flex items-center justify-between py-1"
+              style={{
+                width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                background: 'transparent', border: 'none', cursor: 'pointer', padding: '4px 0',
+                minHeight: 32,
+              }}
             >
-              <span className="text-orange-400 text-xs font-semibold">{report.discrepancies.length} discrepancy(s)</span>
-              <span className="text-zinc-600 text-xs">{showDetails ? '▲' : '▼'}</span>
+              <span style={{ fontSize: 11, fontFamily: T.mono, fontWeight: 700, color: T.orange }}>
+                {report.discrepancies.length} discrepancy{report.discrepancies.length > 1 ? 'ies' : ''}
+              </span>
+              <span style={{ fontSize: 11, color: T.textMut }}>{showDetails ? '▲' : '▼'}</span>
             </button>
             {showDetails && (
-              <div className="space-y-1 mt-1">
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 4 }}>
                 {report.discrepancies.map((d, i) => (
-                  <p key={i} className="text-red-400 text-xs font-mono bg-red-900/10 rounded px-2 py-1">{d}</p>
+                  <p key={i} style={{
+                    fontSize: 10, fontFamily: T.mono, color: T.red,
+                    padding: '5px 8px', borderRadius: 6,
+                    background: 'rgba(255,77,77,0.08)', border: '1px solid rgba(255,77,77,0.20)',
+                    lineHeight: 1.4,
+                  }}>
+                    {d}
+                  </p>
                 ))}
               </div>
             )}
@@ -262,17 +439,24 @@ export function ReplayReportPanel({ report, onDismiss }: ReplayReportPanelProps)
         {onDismiss && (
           <button
             onClick={onDismiss}
-            className="w-full py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-bold rounded-xl transition-colors"
+            style={{
+              width: '100%', padding: '10px', borderRadius: 9, cursor: 'pointer',
+              fontSize: 11, fontFamily: T.mono, fontWeight: 700,
+              background: 'rgba(255,255,255,0.04)', border: `1px solid ${T.border}`,
+              color: T.textSub, minHeight: 40, transition: 'all 0.15s',
+            }}
           >
             Close
           </button>
         )}
       </div>
-    </div>
+    </Panel>
   );
 }
 
-// ─── Match Export Card ────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════
+// MATCH EXPORT CARD
+// ═══════════════════════════════════════════════════════════════════
 
 interface MatchExportCardProps {
   run: RunRecord;
@@ -284,32 +468,28 @@ interface MatchExportCardProps {
 }
 
 export function MatchExportCard({
-  run,
-  matchHash,
-  playerName,
-  seasonName,
-  ladderRank,
-  onCopyText,
+  run, matchHash, playerName, seasonName, ladderRank, onCopyText,
 }: MatchExportCardProps) {
   const [copied, setCopied] = useState(false);
 
-  const gradeStyle = GRADE_STYLE[run.grade] ?? GRADE_STYLE['C'];
+  const grade    = run.grade as RunGrade;
+  const gcfg     = GRADE_CFG[grade] ?? GRADE_CFG['F'];
   const cashflow = run.finalIncome - run.finalExpenses;
-  const date = new Date(run.timestamp).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  const date     = new Date(run.timestamp).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 
   const shareText = [
     `🃏 PZO PROOF CARD`,
     `──────────────────`,
-    `Player : ${playerName}`,
-    `Season : ${seasonName}`,
-    `Date   : ${date}`,
-    `Grade  : ${run.grade}  (${run.difficultyPreset})`,
-    `Score  : ${run.totalScore.toLocaleString()}`,
+    `Player  : ${playerName}`,
+    `Season  : ${seasonName}`,
+    `Date    : ${date}`,
+    `Grade   : ${run.grade}  (${run.difficultyPreset})`,
+    `Score   : ${run.totalScore.toLocaleString()}`,
     `──────────────────`,
-    `💵 Money     : ${run.moneyScore}`,
-    `🛡 Resilience: ${run.resilienceScore}`,
-    `🧠 Discipline: ${run.disciplineScore}`,
-    `⚖️ Risk IQ   : ${run.riskMgmtScore}`,
+    `💵 Money      : ${run.moneyScore}`,
+    `🛡 Resilience : ${run.resilienceScore}`,
+    `🧠 Discipline : ${run.disciplineScore}`,
+    `⚖️ Risk IQ    : ${run.riskMgmtScore}`,
     `──────────────────`,
     `Net Worth : ${fmt(run.finalNetWorth)}`,
     `Cashflow  : ${cashflow >= 0 ? '+' : ''}${fmt(cashflow)}/mo`,
@@ -324,67 +504,128 @@ export function MatchExportCard({
   const handleCopy = async () => {
     await navigator.clipboard.writeText(shareText);
     setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    setTimeout(() => setCopied(false), 2200);
     onCopyText?.();
   };
 
+  const SCORE_PILLARS = [
+    { icon: '💵', label: 'Money',    score: run.moneyScore      },
+    { icon: '🛡',  label: 'Shield',   score: run.resilienceScore  },
+    { icon: '🧠', label: 'Mind',     score: run.disciplineScore  },
+    { icon: '⚖️', label: 'Risk IQ',  score: run.riskMgmtScore   },
+  ];
+
   return (
-    <div className={`border-2 rounded-xl overflow-hidden ${gradeStyle.bg}`}>
-      {/* Visual Card Header */}
-      <div className="px-4 py-4 text-center border-b border-zinc-800/50">
-        <div className={`text-5xl font-black ${gradeStyle.color}`}>{run.grade}</div>
-        <p className="text-white font-black text-base mt-0.5">{playerName}</p>
-        <p className="text-zinc-400 text-xs">{seasonName} · {date}</p>
+    <div style={{
+      borderRadius: 12, overflow: 'hidden', fontFamily: T.display,
+      border: `2px solid ${gcfg.border}`,
+      background: gcfg.bg,
+    }}>
+      <style>{FONT_IMPORT}</style>
+
+      {/* Hero section */}
+      <div style={{
+        padding: 'clamp(16px,4vw,24px)', textAlign: 'center',
+        borderBottom: `1px solid rgba(255,255,255,0.07)`,
+      }}>
+        <div style={{
+          fontSize: 'clamp(3rem,8vw,5rem)', fontWeight: 800,
+          fontFamily: T.display, color: gcfg.color,
+          textShadow: `0 0 40px ${gcfg.color}55`,
+          lineHeight: 1, marginBottom: 8,
+        }}>
+          {run.grade}
+        </div>
+        <p style={{ fontSize: 15, fontWeight: 800, color: T.text, fontFamily: T.display, marginBottom: 3 }}>
+          {playerName}
+        </p>
+        <p style={{ fontSize: 11, color: T.textSub, fontFamily: T.mono }}>
+          {seasonName} · {date}
+        </p>
         {ladderRank && (
-          <p className="text-indigo-300 text-xs mt-0.5">Ranked #{ladderRank}</p>
+          <p style={{ fontSize: 11, color: T.indigo, fontFamily: T.mono, fontWeight: 700, marginTop: 4 }}>
+            Ranked #{ladderRank}
+          </p>
         )}
       </div>
 
-      {/* Score Pillars */}
-      <div className="grid grid-cols-4 divide-x divide-zinc-800 border-b border-zinc-800">
-        {[
-          ['💵', 'Money', run.moneyScore],
-          ['🛡', 'Shield', run.resilienceScore],
-          ['🧠', 'Mind', run.disciplineScore],
-          ['⚖️', 'Risk', run.riskMgmtScore],
-        ].map(([icon, label, score]) => (
-          <div key={label as string} className="text-center py-3 px-1">
-            <p className="text-base">{icon}</p>
-            <p className="text-white font-black text-sm font-mono">{score}</p>
-            <p className="text-zinc-600 text-xs">{label}</p>
+      {/* Score pillars */}
+      <div style={{
+        display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)',
+        borderBottom: `1px solid rgba(255,255,255,0.07)`,
+      }}>
+        {SCORE_PILLARS.map(({ icon, label, score }) => (
+          <div key={label} style={{
+            textAlign: 'center', padding: '12px 6px',
+            borderRight: `1px solid rgba(255,255,255,0.07)`,
+          }}>
+            <div style={{ fontSize: 18, lineHeight: 1, marginBottom: 5 }}>{icon}</div>
+            <div style={{
+              fontSize: 16, fontFamily: T.mono, fontWeight: 700, color: T.text, marginBottom: 3,
+            }}>
+              {score}
+            </div>
+            <div style={{ fontSize: 9, fontFamily: T.mono, color: T.textSub, letterSpacing: '0.08em' }}>
+              {label}
+            </div>
           </div>
         ))}
       </div>
 
-      {/* Financial Row */}
-      <div className="grid grid-cols-3 divide-x divide-zinc-800/50 border-b border-zinc-800/50">
+      {/* Financial row */}
+      <div style={{
+        display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)',
+        borderBottom: `1px solid rgba(255,255,255,0.07)`,
+      }}>
         {[
-          ['Net Worth', fmt(run.finalNetWorth), 'text-white'],
-          ['Cashflow', `${cashflow >= 0 ? '+' : ''}${fmt(cashflow)}/mo`, cashflow >= 0 ? 'text-emerald-400' : 'text-red-400'],
-          ['Score', run.totalScore.toLocaleString(), gradeStyle.color],
-        ].map(([label, val, color]) => (
-          <div key={label as string} className="text-center py-2 px-1">
-            <p className="text-zinc-500 text-xs">{label}</p>
-            <p className={`text-xs font-mono font-bold ${color}`}>{val}</p>
+          { label: 'Net Worth', value: fmt(run.finalNetWorth), color: T.text },
+          { label: 'Cashflow',  value: `${cashflow >= 0 ? '+' : ''}${fmt(cashflow)}/mo`, color: cashflow >= 0 ? T.green : T.red },
+          { label: 'Score',     value: run.totalScore.toLocaleString(), color: gcfg.color },
+        ].map(({ label, value, color }) => (
+          <div key={label} style={{
+            textAlign: 'center', padding: '10px 8px',
+            borderRight: `1px solid rgba(255,255,255,0.07)`,
+          }}>
+            <p style={{ fontSize: 9, fontFamily: T.mono, color: T.textSub, marginBottom: 4, letterSpacing: '0.08em' }}>
+              {label}
+            </p>
+            <p style={{ fontSize: 11, fontFamily: T.mono, fontWeight: 700, color }}>
+              {value}
+            </p>
           </div>
         ))}
       </div>
 
-      {/* Verification Footer */}
-      <div className="px-4 py-2 flex items-center justify-between">
-        <div>
-          <p className={`text-xs font-mono ${run.verified ? 'text-emerald-500' : 'text-zinc-500'}`}>
+      {/* Verification + copy */}
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        padding: '10px 14px', gap: 10, flexWrap: 'wrap',
+      }}>
+        <div style={{ minWidth: 0 }}>
+          <p style={{
+            fontSize: 10, fontFamily: T.mono, fontWeight: 700,
+            color: run.verified ? T.green : T.textSub, marginBottom: 2,
+          }}>
             {run.verified ? '✅ VERIFIED' : '⚠️ UNVERIFIED'}
           </p>
-          <p className="text-zinc-700 text-xs font-mono truncate max-w-32">{matchHash}</p>
+          <p style={{
+            fontSize: 9, fontFamily: T.mono, color: T.textMut,
+            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 160,
+          }}>
+            {matchHash}
+          </p>
         </div>
         <button
           onClick={handleCopy}
-          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${
-            copied
-              ? 'bg-emerald-700 text-emerald-200'
-              : 'bg-zinc-800 hover:bg-zinc-700 text-zinc-300'
-          }`}
+          style={{
+            padding: '9px 16px', borderRadius: 8, cursor: 'pointer',
+            fontSize: 11, fontFamily: T.mono, fontWeight: 700,
+            background: copied ? T.green : 'rgba(255,255,255,0.05)',
+            border: `1px solid ${copied ? T.green : T.borderM}`,
+            color: copied ? '#000' : T.text,
+            transition: 'all 0.2s ease', minHeight: 36, flexShrink: 0,
+            boxShadow: copied ? `0 0 16px rgba(34,221,136,0.35)` : 'none',
+          }}
         >
           {copied ? '✅ Copied!' : '📋 Copy Proof'}
         </button>
@@ -393,7 +634,9 @@ export function MatchExportCard({
   );
 }
 
-// ─── Season Badge (inline, for ProofCardV2) ───────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════
+// SEASON BADGE
+// ═══════════════════════════════════════════════════════════════════
 
 interface SeasonBadgeProps {
   rank: number;
@@ -404,45 +647,72 @@ interface SeasonBadgeProps {
 }
 
 export function SeasonBadge({ rank, rating, seasonName, grade, compact }: SeasonBadgeProps) {
-  const gradeStyle = GRADE_STYLE[grade] ?? GRADE_STYLE['C'];
+  const gcfg = GRADE_CFG[grade as RunGrade] ?? GRADE_CFG['F'];
 
   if (compact) {
     return (
-      <div className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-lg border text-xs ${gradeStyle.bg}`}>
-        <span className={`font-black ${gradeStyle.color}`}>{grade}</span>
-        <span className="text-zinc-500">·</span>
-        <span className="text-zinc-400 font-mono">#{rank}</span>
-        <span className="text-zinc-600">·</span>
-        <span className="text-indigo-300 font-mono">{rating}</span>
+      <div style={{
+        display: 'inline-flex', alignItems: 'center', gap: 8,
+        padding: '5px 12px', borderRadius: 20,
+        background: gcfg.bg, border: `1px solid ${gcfg.border}`,
+        fontFamily: T.mono,
+      }}>
+        <style>{FONT_IMPORT}</style>
+        <span style={{ fontSize: 13, fontWeight: 800, color: gcfg.color, fontFamily: T.display }}>
+          {grade}
+        </span>
+        <span style={{ fontSize: 10, color: T.textMut }}>·</span>
+        <span style={{ fontSize: 10, color: T.textSub }}>#{rank}</span>
+        <span style={{ fontSize: 10, color: T.textMut }}>·</span>
+        <span style={{ fontSize: 10, color: T.indigo, fontWeight: 700 }}>{rating}</span>
       </div>
     );
   }
 
   return (
-    <div className={`flex items-center gap-3 px-3 py-2 rounded-xl border ${gradeStyle.bg}`}>
-      <div className={`text-2xl font-black ${gradeStyle.color}`}>{grade}</div>
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 14,
+      padding: '12px 16px', borderRadius: 10,
+      background: gcfg.bg, border: `1px solid ${gcfg.border}`,
+      fontFamily: T.display,
+    }}>
+      <style>{FONT_IMPORT}</style>
+      <div style={{
+        fontSize: 28, fontWeight: 800, fontFamily: T.display, color: gcfg.color,
+        textShadow: `0 0 20px ${gcfg.color}55`, lineHeight: 1,
+      }}>
+        {grade}
+      </div>
       <div>
-        <p className="text-white text-xs font-bold">{seasonName}</p>
-        <div className="flex gap-2">
-          <span className="text-zinc-400 text-xs font-mono">#{rank} ladder</span>
-          <span className="text-indigo-300 text-xs font-mono">{rating} ELO</span>
+        <p style={{ fontSize: 12, fontWeight: 700, color: T.text, fontFamily: T.display, marginBottom: 3 }}>
+          {seasonName}
+        </p>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          <span style={{ fontSize: 10, fontFamily: T.mono, color: T.textSub, fontWeight: 600 }}>
+            #{rank} ladder
+          </span>
+          <span style={{ fontSize: 10, fontFamily: T.mono, color: T.indigo, fontWeight: 700 }}>
+            {rating} ELO
+          </span>
         </div>
       </div>
     </div>
   );
 }
 
-// ─── Achievement Badges ───────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════
+// ACHIEVEMENT BADGES
+// ═══════════════════════════════════════════════════════════════════
 
-const ACHIEVEMENT_META: Record<string, { icon: string; label: string; desc: string }> = {
-  MILLENNIAL_MIND:    { icon: '🧠', label: 'Millennial Mind',    desc: 'Score 1000+ on a single run' },
-  CONSISTENCY_KING:   { icon: '👑', label: 'Consistency King',   desc: '75%+ win rate across 5+ runs' },
-  HOT_STREAK:         { icon: '🔥', label: 'Hot Streak',         desc: '5 consecutive cashflow-positive runs' },
-  PERFECT_RUN:        { icon: '💎', label: 'Perfect Run',        desc: 'Grade S on any difficulty' },
-  PHOENIX:            { icon: '🦅', label: 'Phoenix',            desc: 'Recover from distress and earn A or S' },
-  IRON_RESERVE:       { icon: '🛡️', label: 'Iron Reserve',       desc: 'Maintain 25%+ liquidity all run' },
-  DIVERSIFIED:        { icon: '📊', label: 'Diversified',        desc: 'End with HHI below 25%' },
-  BIAS_BREAKER:       { icon: '⚡', label: 'Bias Breaker',       desc: 'Clear 5 bias states in one run' },
+const ACHIEVEMENT_META: Record<string, { icon: string; label: string; desc: string; color: string }> = {
+  MILLENNIAL_MIND:  { icon: '🧠', label: 'Millennial Mind',    desc: 'Score 1000+ on a single run',           color: T.purple  },
+  CONSISTENCY_KING: { icon: '👑', label: 'Consistency King',   desc: '75%+ win rate across 5+ runs',          color: T.yellow  },
+  HOT_STREAK:       { icon: '🔥', label: 'Hot Streak',         desc: '5 consecutive cashflow-positive runs',  color: T.orange  },
+  PERFECT_RUN:      { icon: '💎', label: 'Perfect Run',        desc: 'Grade A on any difficulty',             color: T.teal    },
+  PHOENIX:          { icon: '🦅', label: 'Phoenix',            desc: 'Recover from distress and earn A',      color: T.orange  },
+  IRON_RESERVE:     { icon: '🛡️', label: 'Iron Reserve',       desc: 'Maintain 25%+ liquidity all run',       color: T.indigo  },
+  DIVERSIFIED:      { icon: '📊', label: 'Diversified',        desc: 'End with HHI below 25%',                color: T.blue    },
+  BIAS_BREAKER:     { icon: '⚡', label: 'Bias Breaker',       desc: 'Clear 5 bias states in one run',        color: T.green   },
 };
 
 interface AchievementBadgesProps {
@@ -451,7 +721,11 @@ interface AchievementBadgesProps {
 
 export function AchievementBadges({ achievements }: AchievementBadgesProps) {
   return (
-    <div className="flex flex-wrap gap-2">
+    <div style={{
+      display: 'flex', flexWrap: 'wrap', gap: 8,
+      fontFamily: T.display,
+    }}>
+      <style>{FONT_IMPORT}</style>
       {achievements.map(id => {
         const meta = ACHIEVEMENT_META[id];
         if (!meta) return null;
@@ -459,10 +733,28 @@ export function AchievementBadges({ achievements }: AchievementBadgesProps) {
           <div
             key={id}
             title={meta.desc}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 bg-zinc-800 border border-zinc-700 rounded-xl cursor-help hover:border-zinc-500 transition-colors"
+            style={{
+              display: 'flex', alignItems: 'center', gap: 7,
+              padding: '7px 12px', borderRadius: 20, cursor: 'help',
+              background: `${meta.color}10`, border: `1px solid ${meta.color}30`,
+              transition: 'all 0.15s ease',
+            }}
+            onMouseEnter={e => {
+              (e.currentTarget as HTMLDivElement).style.background = `${meta.color}18`;
+              (e.currentTarget as HTMLDivElement).style.border = `1px solid ${meta.color}50`;
+            }}
+            onMouseLeave={e => {
+              (e.currentTarget as HTMLDivElement).style.background = `${meta.color}10`;
+              (e.currentTarget as HTMLDivElement).style.border = `1px solid ${meta.color}30`;
+            }}
           >
-            <span className="text-sm">{meta.icon}</span>
-            <span className="text-zinc-300 text-xs font-semibold">{meta.label}</span>
+            <span style={{ fontSize: 14, lineHeight: 1 }}>{meta.icon}</span>
+            <span style={{
+              fontSize: 10, fontFamily: T.mono, fontWeight: 700,
+              color: meta.color, letterSpacing: '0.04em',
+            }}>
+              {meta.label}
+            </span>
           </div>
         );
       })}

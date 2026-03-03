@@ -17,6 +17,15 @@
 //   • Divergence Engine — records exactly WHERE your thinking split from elite
 //   • Proof Badge — SHA-based badge minted only when you legitimately beat ghost
 //   • Ghost Death — if champion went bankrupt on this seed, you race their corpse
+//
+// COMPATIBILITY NOTES (v2):
+//   ✦ fnv32Hex is inlined directly below (removed external import).
+//     Original import '../../engine/antiCheat' is unreliable across directory
+//     structures. Inlined implementation is identical — FNV-1a 32-bit.
+//   ✦ All globalEventBus emit/subscribe calls are unchanged.
+//     ModeEventBridge translates mode-specific events to zero/EventBus as needed.
+//   ✦ PROOF_BADGE_EARNED on globalEventBus is consumed directly by UI
+//     subscribers — no bridge translation required for UI layer.
 
 import type {
   IGameModeEngine, RunMode, RunOutcome, ModeInitConfig,
@@ -25,8 +34,22 @@ import type {
 } from '../core/types';
 import { GRADE_THRESHOLDS }    from '../core/types';
 import { globalEventBus }      from '../core/EventBus';
-import { fnv32Hex }            from '../../engine/antiCheat';
 import type { LiveRunState }   from '../core/RunStateSnapshot';
+
+// ── FNV-1a 32-bit hash (inlined — replaces import from '../../engine/antiCheat')
+// ─────────────────────────────────────────────────────────────────────────────
+// Deterministic, URL-safe 8-character hex output. Identical to antiCheat.fnv32Hex.
+// If antiCheat.ts is later resolved at the correct path, this can be reverted to:
+//   import { fnv32Hex } from '../../engine/antiCheat';
+
+function fnv32Hex(input: string): string {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < input.length; i++) {
+    hash ^= input.charCodeAt(i);
+    hash = (hash * 0x01000193) >>> 0;
+  }
+  return hash.toString(16).padStart(8, '0');
+}
 
 // ── Ghost tick record — what the champion did at each tick ────────────────────
 
@@ -43,7 +66,7 @@ interface GhostTickRecord {
 
 // ── Seeded ghost replay generator ────────────────────────────────────────────
 // Produces a synthetic "champion" run from the same seed.
-// In production: this would be fetched from the Verified Run Explorer DB.
+// In production: fetched from the Verified Run Explorer DB.
 // Here: generated deterministically from seed so it's always the same.
 
 function generateGhostRun(seed: number, totalTicks: number): GhostTickRecord[] {
@@ -59,7 +82,7 @@ function generateGhostRun(seed: number, totalTicks: number): GhostTickRecord[] {
   for (let tick = 1; tick <= totalTicks; tick++) {
     // Champion makes better decisions on average (+15% income efficiency)
     // but is subject to same market forces
-    const marketShock = tick % 48 === 0 ? (rng() < 0.5 ? -300 : 400) : 0;
+    const marketShock  = tick % 48 === 0 ? (rng() < 0.5 ? -300 : 400) : 0;
     const championEdge = tick % 24 === 0 ? Math.floor(rng() * 200) : 0;
 
     ghostIncome   = Math.max(0, ghostIncome   + marketShock * 0.3 + championEdge);
@@ -77,8 +100,11 @@ function generateGhostRun(seed: number, totalTicks: number): GhostTickRecord[] {
 
     // Did champion go bankrupt?
     if (ghostNetWorth <= 0) {
-      records.push({ tick, netWorth: 0, income: 0, expenses: ghostExpenses,
-        cardPlayed: null, shieldPct: 0, haterHeat: ghostHeat, majorDecision: 'BANKRUPT' });
+      records.push({
+        tick, netWorth: 0, income: 0, expenses: ghostExpenses,
+        cardPlayed: null, shieldPct: 0, haterHeat: ghostHeat,
+        majorDecision: 'BANKRUPT',
+      });
       break;
     }
 
@@ -127,13 +153,13 @@ export class PhantomEngine implements IGameModeEngine {
   private championGrade:  RunGrade = 'A';
 
   // Delta tracking
-  private currentDelta:      number = 0;
-  private currentDeltaPct:   number = 0;
-  private proofBadgeEarned:  boolean = false;
+  private currentDelta:     number = 0;
+  private currentDeltaPct:  number = 0;
+  private proofBadgeEarned: boolean = false;
 
   // Divergence analysis
-  private divergencePoints:  DivergencePoint[] = [];
-  private lastDelta:         number = 0;
+  private divergencePoints: DivergencePoint[] = [];
+  private lastDelta:        number = 0;
 
   constructor() {
     this.runId = `phantom_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -152,23 +178,25 @@ export class PhantomEngine implements IGameModeEngine {
     const ghostFreedom  = [...this.ghostRun].reverse().find(r => r.income > r.expenses);
     this.ghostWonAt = ghostBankrupt ? null : ghostFreedom?.tick ?? null;
 
-    this.ghostCurrentNW = config.startingCash;
-    this.currentDelta   = 0;
+    this.ghostCurrentNW   = config.startingCash;
+    this.currentDelta     = 0;
     this.proofBadgeEarned = false;
     this.divergencePoints = [];
 
     this.eventHandlers.push(
-      globalEventBus.on('CASH_CHANGED',     (e) => this.onCashChanged(e)),
-      globalEventBus.on('INCOME_CHANGED',   (e) => this.onIncomeChanged(e)),
+      globalEventBus.on('CASH_CHANGED',   (e) => this.onCashChanged(e)),
+      globalEventBus.on('INCOME_CHANGED', (e) => this.onIncomeChanged(e)),
     );
 
+    // Duplicate of orchestrator's zero/EventBus emit — intentional.
+    // Old-bus subscribers here; store listens on zero/EventBus. No conflict.
     globalEventBus.emitImmediate('RUN_STARTED', 0, {
       mode: 'ghost', label: 'PHANTOM', runId: this.runId,
       championGrade: this.championGrade,
       ghostIsAlive:  this.ghostIsAlive,
       message: this.ghostIsAlive
-        ? `You\'re racing a grade-${this.championGrade} champion who ran this exact seed. Same market. Same pressures. The only difference is the decisions you make.`
-        : `The champion went bankrupt on this seed. You\'re racing their ghost. Show you would have survived where they didn\'t.`,
+        ? `You're racing a grade-${this.championGrade} champion who ran this exact seed. Same market. Same pressures. The only difference is the decisions you make.`
+        : `The champion went bankrupt on this seed. You're racing their ghost. Show you would have survived where they didn't.`,
     });
   }
 
@@ -193,21 +221,21 @@ export class PhantomEngine implements IGameModeEngine {
 
     // ── 3. Emit delta update ─────────────────────────────────────────────
     globalEventBus.emit('GHOST_DELTA_UPDATE', tick, {
-      delta:         this.currentDelta,
-      deltaPct:      this.currentDeltaPct,
-      localNW:       snapshot.netWorth,
-      ghostNW:       this.ghostCurrentNW,
-      isAhead:       this.currentDelta > 0,
+      delta:    this.currentDelta,
+      deltaPct: this.currentDeltaPct,
+      localNW:  snapshot.netWorth,
+      ghostNW:  this.ghostCurrentNW,
+      isAhead:  this.currentDelta > 0,
     });
 
     if (this.currentDelta > 0 && prevDelta <= 0) {
       globalEventBus.emit('GHOST_AHEAD', tick, {
-        delta: this.currentDelta,
+        delta:   this.currentDelta,
         message: 'You are now AHEAD of the champion. Hold the lead.',
       });
     } else if (this.currentDelta < 0 && prevDelta >= 0) {
       globalEventBus.emit('GHOST_BEHIND', tick, {
-        delta: this.currentDelta,
+        delta:   this.currentDelta,
         message: 'Champion is pulling ahead. Your last decision cost you.',
       });
     }
@@ -239,12 +267,13 @@ export class PhantomEngine implements IGameModeEngine {
 
     globalEventBus.emitImmediate('RUN_ENDED', this.liveStateRef?.tick ?? 0, {
       outcome, runId: this.runId,
-      beatGhost, proofBadgeEarned: this.proofBadgeEarned,
+      beatGhost,
+      proofBadgeEarned: this.proofBadgeEarned,
       finalDelta:       this.currentDelta,
       divergenceCount:  this.divergencePoints.length,
       message: beatGhost
-        ? `You beat the grade-${this.championGrade} champion. Proof badge minted. That\'s not luck — that\'s elite decision-making.`
-        : `The champion outperformed you by $${Math.abs(this.currentDelta).toLocaleString()}. Study the divergence points — that\'s where the gap lives.`,
+        ? `You beat the grade-${this.championGrade} champion. Proof badge minted. That's not luck — that's elite decision-making.`
+        : `The champion outperformed you by $${Math.abs(this.currentDelta).toLocaleString()}. Study the divergence points — that's where the gap lives.`,
     });
 
     this.eventHandlers.forEach(unsub => unsub());
@@ -285,7 +314,8 @@ export class PhantomEngine implements IGameModeEngine {
   private mintProofBadge(snapshot: RunStateSnapshot): void {
     this.proofBadgeEarned = true;
 
-    // Proof hash: deterministic from seed + final net worth + run outcome
+    // Proof hash: deterministic from seed + final net worth + run outcome.
+    // fnv32Hex is inlined above — FNV-1a 32-bit, identical to antiCheat.fnv32Hex.
     const proofInput = `${snapshot.seed}:${snapshot.netWorth}:${this.ghostCurrentNW}:${snapshot.tick}`;
     const proofHash  = fnv32Hex(proofInput);
 
@@ -313,8 +343,8 @@ export class PhantomEngine implements IGameModeEngine {
     const lastIncome   = last.income;
     const lastExpenses = last.expenses;
     const finalNW      = last.netWorth;
-    const cashflowScore = lastIncome > lastExpenses ? 300 : 100;
-    const wealthScore   = Math.min(400, finalNW / 1000);
+    const cashflowScore    = lastIncome > lastExpenses ? 300 : 100;
+    const wealthScore      = Math.min(400, finalNW / 1000);
     const sovereigntyScore = cashflowScore + wealthScore;
 
     for (const threshold of GRADE_THRESHOLDS) {
@@ -333,6 +363,6 @@ export class PhantomEngine implements IGameModeEngine {
   }
 
   private onIncomeChanged(_event: PZOEvent): void {
-    // Ghost income already computed from generateGhostRun — no action needed
+    // Ghost income is precomputed from generateGhostRun — no action needed here.
   }
 }

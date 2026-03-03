@@ -1,21 +1,33 @@
-import React, { useState } from 'react';
-import PressureGauge from './PressureGauge/PressureGauge'; // Adjust the import path as necessary.
-import withTooltip from './withTooltip';
+/**
+ * FILE: RunHUD.tsx
+ * Density6 LLC · Point Zero One · Confidential
+ *
+ * RunHUD — thin wrapper that mounts GameHUD with live engine data.
+ * GameHUD is self-contained: all engine hooks run inside it.
+ * RunHUD's only job is gate-keeping visibility and supplying className/style.
+ */
+'use client';
+import React             from 'react';
+import GameHUD           from './GameHUD';
 
-interface RunHUDProps {}
+export interface RunHUDProps {
+  readonly isActiveRun?: boolean;
+  readonly showIntel?:   boolean;
+  readonly className?:   string;
+  readonly style?:       React.CSSProperties;
+}
 
-const RunHUD: React.FC<RunHUDProps> = () => {
-  const [pressure, setPressure] = useState(0); // Assuming initial pressure is zero for simplicity.
+export default function RunHUD({
+  isActiveRun = true,
+  showIntel   = true,
+  className,
+  style,
+}: RunHUDProps) {
+  if (!isActiveRun) return null;
 
   return (
-    <div className="run-hud">
-      <PressureGauge value={pressure} onChange={setPressure} />
-      {/* Ensuring PressureSignalTooltip appears only when gauge has focus */}
-      <withTooltip asChild>
-        <PressureGauge ref={(g) => g && setFocusOnGauge(g)} value={pressure} onChange={setPressure} />
-      </withTooltip>
+    <div className={className} style={style}>
+      <GameHUD isActiveRun={isActiveRun} showIntel={showIntel} />
     </div>
   );
-};
-
-export default RunHUD;
+}

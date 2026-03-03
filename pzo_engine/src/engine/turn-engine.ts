@@ -1,101 +1,77 @@
-/**
- * Turn Engine — Core Game Loop Orchestrator
- * Drives the 7-step turn sequence:
- *   validate → drawCard → resolveCard → applyBuffsDebuffs
- *   → checkWipe → checkWin → emitEvents → incrementTurn
- *
- * All state mutations are deterministic, ledger-emitting, and audit-hashed.
- *
- * Deploy to: pzo_engine/src/engine/turn-engine.ts
- */
+// ============================================================
+// POINT ZERO ONE DIGITAL — Turn Engine (Canonical)
+// Sprint 8 / Phase 1 Upgrade
+//
+// TurnEngine is the server-side simulation authority.
+// All state mutations are deterministic, ledger-emitting,
+// and audit-hashed. This is the ONLY engine that writes
+// PlayerState — all other engines are called from here.
+//
+// BREAKING CHANGES from Sprint 0 turn-engine.ts:
+//   - Internal Card class REMOVED → use CardDefinition / CardInHand from types.ts
+//   - Internal OwnedAsset REMOVED → use OwnedAsset from player-state.ts
+//   - Internal ActiveBuff REMOVED → use ActiveBuff from player-state.ts
+//   - TurnEnginePlayerState REMOVED → use PlayerState from player-state.ts
+//   - Internal Deck class REMOVED → use DrawEngine from deck.ts
+//   - TurnContext.runSeed is now numeric (SeededRandom seed)
+//   - GameMode added to TurnContext
+//   - MacroEngine, PortfolioEngine, SolvencyEngine wired in
+//   - Date.now() REMOVED from acquireAsset (non-deterministic)
+//     → replaced with sha256(playerId + cardId + turnNumber)
+//
+// 7-step turn sequence:
+//   1. validate
+//   2. drawCard
+//   3. resolveCard      (mode-aware card effect dispatch)
+//   4. applyBuffsDebuffs
+//   5. checkWipe
+//   6. checkWin
+//   7. emitEvents → incrementTurn
+//
+// Deploy to: pzo_engine/src/engine/turn-engine.ts
+// ============================================================
 
-import { createHash } from 'crypto';
+import { createHash }       from 'crypto';
+import { SeededRandom }     from './market-engine';
+import { DrawEngine }       from './deck';
+import { MacroEngine }      from './macro-engine';
+import { PortfolioEngine }  from './portfolio-engine';
+import { SolvencyEngine }   from './wipe-checker';
+import {
+  PlayerState,
+  OwnedAsset,
+  ActiveBuff,
+  MacroPhase,
+  RunPhase,
+  createInitialPlayerState,
+  applyCashDelta,
+  recalcCashflow,
+  deriveRunPhase,
+  expireBuffs,
+  validatePlayerState,
+} from './player-state';
+import {
+  GameMode,
+  CardDefinition,
+  CardInHand,
+  BaseDeckType,
+  ModeDeckType,
+  CardBaseEffect,
+  RunOutcome,
+  STARTING_CASH,
+  FREEDOM_THRESHOLD,
+  BATTLE_BUDGET_MAX,
+  TRUST_SCORE_INITIAL,
+  RUN_TICKS,
+} from './types';
 
-// ─── Card & Deck Types ────────────────────────────────────────────────────────
+// ─── RE-EXPORTS ──────────────────────────────────────────────
+// Consumers that previously imported from turn-engine.ts
+// can still get these from here (backwards compat).
+export type { PlayerState, OwnedAsset, ActiveBuff } from './player-state';
+export type { CardDefinition, CardInHand, GameMode } from './types';
 
-export type DeckType = 'OPPORTUNITY' | 'IPA' | 'FUBAR' | 'MISSED_OPPORTUNITY' | 'PRIVILEGED' | 'SO';
-
-export interface CardEcon {
-  assetKind?: 'REAL_ESTATE' | 'BUSINESS';
-  cost?: number;
-  debtLabel?: 'MORTGAGE' | 'LIABILITY';
-  debt?: number;
-  downPayment?: number;
-  cashflowMonthly?: number;
-  roiPct?: number;
-  exitMin?: number;
-  exitMax?: number;
-  setupCost?: number;
-  cashImpact?: number;
-  turnsLost?: number;
-  value?: number;
-}
-
-export class Card {
-  readonly id: string;
-  readonly name: string;
-  readonly deckType: DeckType;
-  readonly econ: CardEcon;
-  readonly description: string;
-
-  constructor(
-    id: string,
-    name: string,
-    deckType: DeckType,
-    econ: CardEcon = {},
-    description = '',
-  ) {
-    this.id = id;
-    this.name = name;
-    this.deckType = deckType;
-    this.econ = econ;
-    this.description = description;
-  }
-}
-
-// ─── Player State ─────────────────────────────────────────────────────────────
-
-export interface ActiveBuff {
-  buffId: string;
-  buffType: 'SHIELD' | 'DOWNPAY_DISCOUNT' | 'RATE_DISCOUNT' | 'CASHFLOW_BOOST';
-  value: number;
-  remainingUses: number;        // 1 = consume on next use; -1 = persistent for N turns
-  expiresAtTurn: number;
-}
-
-export interface OwnedAsset {
-  assetId: string;
-  cardId: string;
-  assetKind: 'REAL_ESTATE' | 'BUSINESS' | 'IPA';
-  originalCost: number;
-  currentDebt: number;
-  monthlyIncome: number;
-  monthlyDebtService: number;
-  exitMin: number;
-  exitMax: number;
-  acquiredAtTurn: number;
-}
-
-export interface TurnEnginePlayerState {
-  playerId: string;
-  cash: number;
-  passiveIncomeMonthly: number;
-  monthlyExpenses: number;
-  netWorth: number;
-  totalAssetsValue: number;
-  totalLiabilities: number;
-  assets: OwnedAsset[];
-  activeBuffs: ActiveBuff[];
-  activeShields: number;
-  turnsLocked: number;
-  nextEligibleTurn: number;
-  loanDenied: boolean;
-  hasExitedRatRace: boolean;
-  ratRaceExitTurn: number | null;
-  version: number;  // optimistic lock
-}
-
-// ─── Turn State ───────────────────────────────────────────────────────────────
+// ─── TURN TYPES ──────────────────────────────────────────────
 
 export type TurnPhase =
   | 'VALIDATING'
@@ -110,168 +86,162 @@ export type TurnPhase =
   | 'WIPE'
   | 'WIN';
 
-export type ActionType = 'PURCHASE' | 'PASS' | 'SELL' | 'EXECUTE_EVENT' | 'FORCED_ACTION';
+export type ActionType =
+  | 'PURCHASE'
+  | 'PASS'
+  | 'SELL'
+  | 'EXECUTE_EVENT'
+  | 'FORCED_ACTION'
+  | 'COUNTER'         // HEAD_TO_HEAD specific
+  | 'AID'             // TEAM_UP specific
+  | 'DEFECT'          // TEAM_UP specific
+  | 'GHOST_MIRROR';   // CHASE_A_LEGEND specific
 
 export interface TurnContext {
-  runSeed: string;
-  rulesetVersion: string;
-  turnNumber: number;
-  tickIndex: number;
-  mlEnabled: boolean;
-  phase: TurnPhase;
-  drawnCard: Card | null;
-  playerAction: ActionType | null;
-  events: TurnEvent[];
-  auditHash: string;
+  runId:           string;
+  runSeed:         number;       // numeric — fed to SeededRandom
+  rulesetVersion:  string;
+  turnNumber:      number;
+  tickIndex:       number;
+  gameMode:        GameMode;
+  mlEnabled:       boolean;      // always false server-side
+  phase:           TurnPhase;
+  drawnCard:       CardInHand | null;
+  playerAction:    ActionType | null;
+  events:          TurnEvent[];
+  auditHash:       string;
 }
 
 export interface TurnEvent {
-  eventType: string;
-  turnNumber: number;
-  tickIndex: number;
-  payload: Record<string, unknown>;
-  auditHash: string;
+  eventType:   string;
+  turnNumber:  number;
+  tickIndex:   number;
+  payload:     Record<string, unknown>;
+  auditHash:   string;
 }
 
 export interface TurnResult {
-  success: boolean;
-  phase: TurnPhase;
-  playerState: TurnEnginePlayerState;
-  drawnCard: Card | null;
-  action: ActionType | null;
-  cashDelta: number;
-  incomeDelta: number;
-  expenseDelta: number;
-  triggeredWipe: boolean;
-  wipeCause: string | null;
-  triggeredWin: boolean;
-  events: TurnEvent[];
-  auditHash: string;
+  success:         boolean;
+  phase:           TurnPhase;
+  playerState:     PlayerState;
+  drawnCard:       CardInHand | null;
+  action:          ActionType | null;
+  cashDelta:       number;
+  incomeDelta:     number;
+  expenseDelta:    number;
+  cordDeltaBasis:  number;
+  triggeredWipe:   boolean;
+  wipeCause:       string | null;
+  triggeredWin:    boolean;
+  outcome:         RunOutcome | null;
+  events:          TurnEvent[];
+  auditHash:       string;
 }
 
 export interface ValidationError {
-  code: string;
-  message: string;
+  code:     string;
+  message:  string;
   blocking: boolean;
 }
 
-// ─── Deck (deterministic draw) ────────────────────────────────────────────────
-
-export class Deck {
-  private readonly cards: Card[];
-  private readonly runSeed: string;
-  private drawIndex: number;
-
-  constructor(cards: Card[], runSeed: string, startIndex = 0) {
-    this.cards = cards;
-    this.runSeed = runSeed;
-    this.drawIndex = startIndex;
-  }
-
-  /**
-   * Deterministic draw: seed + drawIndex → card index.
-   * Same seed + same index always returns the same card.
-   */
-  draw(): Card {
-    if (this.cards.length === 0) throw new Error('Deck is empty');
-    const hash = createHash('sha256')
-      .update(`${this.runSeed}:draw:${this.drawIndex}`)
-      .digest('hex');
-    const idx = parseInt(hash.slice(0, 8), 16) % this.cards.length;
-    this.drawIndex++;
-    return this.cards[idx];
-  }
-
-  getDrawIndex(): number {
-    return this.drawIndex;
-  }
+// ─── RUN SESSION ─────────────────────────────────────────────
+/**
+ * Full engine session for one run.
+ * Instantiate once per run; pass seed from server.
+ */
+export interface RunSession {
+  ctx:        TurnContext;
+  state:      PlayerState;
+  rng:        SeededRandom;
+  drawEngine: DrawEngine;
+  drawPile:   CardInHand[];
+  discardPile:CardInHand[];
+  hand:       CardInHand[];
+  macro:      MacroEngine;
+  portfolio:  PortfolioEngine;
+  solvency:   SolvencyEngine;
 }
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+// ─── HELPERS (private module scope) ──────────────────────────
 
 function sha256(data: string): string {
   return createHash('sha256').update(data).digest('hex');
 }
 
-function buildEventHash(eventType: string, turnNumber: number, tickIndex: number, payload: unknown): string {
-  return sha256(JSON.stringify({ eventType, turnNumber, tickIndex, payload })).slice(0, 24);
+function buildEventHash(
+  eventType:  string,
+  turnNumber: number,
+  tickIndex:  number,
+  payload:    unknown,
+): string {
+  return sha256(
+    JSON.stringify({ eventType, turnNumber, tickIndex, payload }),
+  ).slice(0, 24);
 }
 
 function buildEvent(
   eventType: string,
-  ctx: TurnContext,
-  payload: Record<string, unknown>,
+  ctx:       TurnContext,
+  payload:   Record<string, unknown>,
 ): TurnEvent {
   return {
     eventType,
     turnNumber: ctx.turnNumber,
-    tickIndex: ctx.tickIndex,
+    tickIndex:  ctx.tickIndex,
     payload,
-    auditHash: buildEventHash(eventType, ctx.turnNumber, ctx.tickIndex, payload),
+    auditHash:  buildEventHash(eventType, ctx.turnNumber, ctx.tickIndex, payload),
   };
 }
 
-function computeNetWorth(state: TurnEnginePlayerState): number {
-  const totalAssets = state.assets.reduce((s, a) => s + a.originalCost, 0);
-  const totalLiabilities = state.assets.reduce((s, a) => s + a.currentDebt, 0);
-  return totalAssets - totalLiabilities + state.cash;
+/**
+ * Deterministic asset ID — no Date.now().
+ * Reproducible from seed + player + card + turn.
+ */
+function deterministicAssetId(
+  playerId:   string,
+  cardId:     string,
+  turnNumber: number,
+  runSeed:    number,
+): string {
+  return sha256(`asset:${runSeed}:${playerId}:${cardId}:${turnNumber}`).slice(0, 20);
 }
 
-function computePassiveIncome(state: TurnEnginePlayerState): number {
-  return state.assets.reduce((s, a) => s + a.monthlyIncome - a.monthlyDebtService, 0);
-}
-
-// ─── Turn Engine ──────────────────────────────────────────────────────────────
-
+// ─── TURN ENGINE ─────────────────────────────────────────────
 export class TurnEngine {
-  private mlEnabled: boolean;
-  private auditHash: string;
+  private readonly mlEnabled: boolean = false;
 
-  constructor(mlEnabled = false) {
-    this.mlEnabled = mlEnabled;
-    this.auditHash = '';
-  }
-
-  // ── Step 1: Validate ──────────────────────────────────────────────────────
-
-  public validate(
-    state: TurnEnginePlayerState,
-    ctx: TurnContext,
-  ): ValidationError[] {
+  // ── Step 1: Validate ─────────────────────────────────────
+  validate(state: PlayerState, ctx: TurnContext): ValidationError[] {
     const errors: ValidationError[] = [];
 
-    // Turn lock check
-    if (state.turnsLocked > 0 || ctx.turnNumber < state.nextEligibleTurn) {
+    if (state.turnsToSkip > 0) {
       errors.push({
-        code: 'TURN_LOCKED',
-        message: `Player locked until turn ${state.nextEligibleTurn}`,
+        code:     'TURN_LOCKED',
+        message:  `Player locked for ${state.turnsToSkip} more turn(s)`,
         blocking: true,
       });
     }
 
-    // Cash floor sanity (non-blocking warning)
     if (state.cash < -500_000) {
       errors.push({
-        code: 'CASH_BELOW_ABSOLUTE_FLOOR',
-        message: `Cash ${state.cash} below absolute floor — wipe imminent`,
+        code:     'CASH_BELOW_ABSOLUTE_FLOOR',
+        message:  `Cash ${state.cash} below absolute floor — wipe imminent`,
         blocking: false,
       });
     }
 
-    // Version sanity
-    if (state.version < 1) {
+    if (!ctx.rulesetVersion?.trim()) {
       errors.push({
-        code: 'INVALID_STATE_VERSION',
-        message: 'Player state version invalid',
+        code:     'MISSING_RULESET_VERSION',
+        message:  'Ruleset version not set on TurnContext',
         blocking: true,
       });
     }
 
-    // Ruleset version match
-    if (!ctx.rulesetVersion || ctx.rulesetVersion.trim() === '') {
+    if (ctx.turnNumber < 0 || ctx.tickIndex < 0) {
       errors.push({
-        code: 'MISSING_RULESET_VERSION',
-        message: 'Ruleset version not set on turn context',
+        code:     'INVALID_TURN_INDEX',
+        message:  `Turn ${ctx.turnNumber} / tick ${ctx.tickIndex} invalid`,
         blocking: true,
       });
     }
@@ -279,318 +249,459 @@ export class TurnEngine {
     return errors;
   }
 
-  // ── Step 2: Draw Card ─────────────────────────────────────────────────────
+  // ── Step 2: Draw Card ────────────────────────────────────
+  drawCard(session: RunSession): {
+    session:   RunSession;
+    card:      CardInHand;
+  } {
+    const result = session.drawEngine.draw(
+      session.drawPile,
+      session.discardPile,
+      session.hand,
+      1,
+      session.rng,
+    );
 
-  public drawCard(deck: Deck, ctx: TurnContext): Card {
-    const card = deck.draw();
-    return card;
+    const card = result.drawn[0];
+    const updatedSession: RunSession = {
+      ...session,
+      drawPile:    result.drawPile,
+      discardPile: result.discardPile,
+      hand:        result.hand,
+    };
+
+    return { session: updatedSession, card };
   }
 
-  // ── Step 3: Resolve Card ──────────────────────────────────────────────────
-
-  public resolveCard(
-    card: Card,
-    state: TurnEnginePlayerState,
-    action: ActionType,
-    ctx: TurnContext,
+  // ── Step 3: Resolve Card ─────────────────────────────────
+  /**
+   * Applies card effect to PlayerState based on BaseDeckType.
+   * Mode-specific cards (ModeDeckType) delegate to mode-specific logic below.
+   * Returns delta values for ledger + cordDeltaBasis for CORD tracking.
+   */
+  resolveCard(
+    card:    CardInHand,
+    state:   PlayerState,
+    action:  ActionType,
+    ctx:     TurnContext,
+    session: RunSession,
   ): {
-    updatedState: TurnEnginePlayerState;
-    cashDelta: number;
-    incomeDelta: number;
-    expenseDelta: number;
-    events: TurnEvent[];
+    updatedState:    PlayerState;
+    cashDelta:       number;
+    incomeDelta:     number;
+    expenseDelta:    number;
+    cordDeltaBasis:  number;
+    events:          TurnEvent[];
+    updatedSession:  RunSession;
   } {
     const events: TurnEvent[] = [];
-    let cashDelta = 0;
-    let incomeDelta = 0;
-    let expenseDelta = 0;
-    let updatedState = { ...state };
+    let cashDelta      = 0;
+    let incomeDelta    = 0;
+    let expenseDelta   = 0;
+    let cordDeltaBasis = card.definition.base_effect.cordDeltaBasis ?? 0;
+    let updatedState   = { ...state };
+    let updatedSession = session;
 
-    switch (card.deckType) {
-      case 'OPPORTUNITY': {
-        if (action === 'PURCHASE' && card.econ.downPayment !== undefined) {
-          const downPayment = this.applyDownPaymentDiscount(card.econ.downPayment, updatedState);
-          const debt = card.econ.debt ?? 0;
-          const monthlyIncome = card.econ.cashflowMonthly ?? 0;
+    const def = card.definition;
+    const fx  = def.base_effect;
 
-          if (!updatedState.loanDenied || debt === 0) {
-            cashDelta = -downPayment;
-            incomeDelta = monthlyIncome;
-            updatedState = this.acquireAsset(updatedState, card, downPayment, debt, monthlyIncome);
-            events.push(buildEvent('ASSET_PURCHASED', ctx, {
-              cardId: card.id,
-              cardName: card.name,
-              downPayment,
-              debt,
-              monthlyIncome,
-              cashDelta,
-            }));
-          } else {
-            // Loan denied — pass
-            cashDelta = 0;
-            events.push(buildEvent('PURCHASE_BLOCKED_LOAN_DENIED', ctx, { cardId: card.id }));
-          }
+    switch (def.deckType) {
+      // ── OPPORTUNITY ───────────────────────────────────────
+      case BaseDeckType.OPPORTUNITY: {
+        if (action !== 'PURCHASE') {
+          events.push(buildEvent('OPPORTUNITY_PASSED', ctx, { cardId: def.cardId }));
+          updatedState = { ...updatedState, consecutivePasses: updatedState.consecutivePasses + 1 };
+          break;
+        }
+        const cost = def.base_cost;
+        if (updatedState.cash < cost) {
+          events.push(buildEvent('PURCHASE_BLOCKED_INSUFFICIENT_CASH', ctx, { cardId: def.cardId, required: cost, available: updatedState.cash }));
+          break;
+        }
+
+        const income = fx.incomeDelta ?? 0;
+        cashDelta     = -(cost);
+        incomeDelta   = income;
+
+        const assetId = deterministicAssetId(state.playerId, def.cardId, ctx.turnNumber, ctx.runSeed);
+        const asset: OwnedAsset = {
+          assetId,
+          cardId:             def.cardId,
+          name:               def.name,
+          assetKind:          'BUSINESS',
+          originalCost:       cost,
+          currentDebt:        0,
+          monthlyIncome:      income,
+          monthlyDebtService: 0,
+          exitMin:            cost * 0.70,
+          exitMax:            cost * 1.40,
+          acquiredAtTurn:     ctx.turnNumber,
+          auditHash:          sha256(`${assetId}|${cost}|${ctx.turnNumber}`).slice(0, 16),
+        };
+
+        const acq = session.portfolio.acquire(updatedState, asset, ctx.tickIndex);
+        if (acq.success) {
+          updatedState = acq.state;
+          events.push(buildEvent('ASSET_PURCHASED', ctx, {
+            cardId:        def.cardId,
+            cardName:      def.name,
+            cost,
+            income,
+            cashDelta,
+            auditHash:     acq.auditHash,
+          }));
         } else {
-          events.push(buildEvent('OPPORTUNITY_PASSED', ctx, { cardId: card.id, reason: action }));
+          events.push(buildEvent('PURCHASE_BLOCKED', ctx, { cardId: def.cardId, reason: acq.reason }));
+          cashDelta = incomeDelta = 0;
         }
         break;
       }
 
-      case 'IPA': {
-        if (action === 'PURCHASE' && card.econ.setupCost !== undefined) {
-          const setupCost = card.econ.setupCost;
-          if (updatedState.cash >= setupCost) {
-            cashDelta = -setupCost;
-            incomeDelta = card.econ.cashflowMonthly ?? 0;
-            updatedState = this.acquireAsset(updatedState, card, setupCost, 0, incomeDelta);
-            events.push(buildEvent('IPA_BUILT', ctx, {
-              cardId: card.id,
-              setupCost,
-              monthlyIncome: incomeDelta,
-            }));
-          } else {
-            events.push(buildEvent('IPA_BUILD_FAILED', ctx, { cardId: card.id, reason: 'INSUFFICIENT_CASH' }));
-          }
+      // ── IPA ───────────────────────────────────────────────
+      case BaseDeckType.IPA: {
+        if (action !== 'PURCHASE') {
+          events.push(buildEvent('IPA_PASSED', ctx, { cardId: def.cardId }));
+          updatedState = { ...updatedState, consecutivePasses: updatedState.consecutivePasses + 1 };
+          break;
+        }
+        const cost   = def.base_cost;
+        const income = fx.incomeDelta ?? 0;
+        if (updatedState.cash < cost) {
+          events.push(buildEvent('IPA_BUILD_FAILED', ctx, { cardId: def.cardId, reason: 'INSUFFICIENT_CASH' }));
+          break;
+        }
+        cashDelta   = -cost;
+        incomeDelta = income;
+
+        const assetId = deterministicAssetId(state.playerId, def.cardId, ctx.turnNumber, ctx.runSeed);
+        const asset: OwnedAsset = {
+          assetId,
+          cardId:             def.cardId,
+          name:               def.name,
+          assetKind:          'DIGITAL',
+          originalCost:       cost,
+          currentDebt:        0,
+          monthlyIncome:      income,
+          monthlyDebtService: 0,
+          exitMin:            cost * 0.60,
+          exitMax:            cost * 2.00,
+          acquiredAtTurn:     ctx.turnNumber,
+          auditHash:          sha256(`${assetId}|${cost}|${ctx.turnNumber}`).slice(0, 16),
+        };
+
+        const acq = session.portfolio.acquire(updatedState, asset, ctx.tickIndex);
+        if (acq.success) {
+          updatedState = acq.state;
+          events.push(buildEvent('IPA_BUILT', ctx, {
+            cardId: def.cardId, cost, income, auditHash: acq.auditHash,
+          }));
+        } else {
+          events.push(buildEvent('IPA_BUILD_FAILED', ctx, { cardId: def.cardId, reason: acq.reason }));
+          cashDelta = incomeDelta = 0;
         }
         break;
       }
 
-      case 'FUBAR': {
-        // Check shield first
+      // ── FUBAR ─────────────────────────────────────────────
+      case BaseDeckType.FUBAR: {
         if (updatedState.activeShields > 0) {
           updatedState = { ...updatedState, activeShields: updatedState.activeShields - 1 };
-          events.push(buildEvent('FUBAR_SHIELDED', ctx, { cardId: card.id, shieldsRemaining: updatedState.activeShields }));
-        } else {
-          cashDelta = card.econ.cashImpact ?? 0;
-          updatedState = { ...updatedState, cash: updatedState.cash + cashDelta };
-          events.push(buildEvent('FUBAR_APPLIED', ctx, {
-            cardId: card.id,
-            cardName: card.name,
-            cashDelta,
-            momentLabel: `FUBAR_KILLED_ME: ${card.name} hit for $${Math.abs(cashDelta).toLocaleString()}`,
+          events.push(buildEvent('FUBAR_SHIELDED', ctx, {
+            cardId:          def.cardId,
+            shieldsRemaining:updatedState.activeShields,
           }));
+          cordDeltaBasis = 0.02; // shield use = positive CORD signal
+          break;
         }
-        break;
-      }
 
-      case 'MISSED_OPPORTUNITY': {
-        const turnsLost = card.econ.turnsLost ?? 1;
-        updatedState = {
-          ...updatedState,
-          turnsLocked: updatedState.turnsLocked + turnsLost,
-          nextEligibleTurn: ctx.turnNumber + turnsLost + 1,
-        };
-        events.push(buildEvent('MISSED_OPPORTUNITY_APPLIED', ctx, {
-          cardId: card.id,
-          turnsLost,
-          momentLabel: `MISSED_THE_BAG: ${card.name} — skipped ${turnsLost} turn(s)`,
+        cashDelta     = fx.cashDelta ?? 0;
+        expenseDelta  = fx.expensesDelta ?? 0;
+        incomeDelta   = fx.incomeDelta ?? 0;
+
+        updatedState = applyCashDelta(updatedState, cashDelta);
+        if (expenseDelta !== 0) {
+          updatedState = {
+            ...updatedState,
+            monthlyExpenses: updatedState.monthlyExpenses + expenseDelta,
+          };
+        }
+        if (incomeDelta !== 0) {
+          updatedState = recalcCashflow({ ...updatedState, monthlyIncome: updatedState.monthlyIncome + incomeDelta });
+        }
+
+        // Freeze ticks → turnsToSkip
+        const freeze = fx.freezeTicks ?? 0;
+        if (freeze > 0) {
+          updatedState = { ...updatedState, turnsToSkip: updatedState.turnsToSkip + freeze };
+        }
+
+        events.push(buildEvent('FUBAR_APPLIED', ctx, {
+          cardId:    def.cardId,
+          cardName:  def.name,
+          cashDelta,
+          expenseDelta,
+          freezeTicks: freeze,
+          momentLabel: `FUBAR_KILLED_ME: ${def.name} hit for $${Math.abs(cashDelta).toLocaleString()}`,
         }));
         break;
       }
 
-      case 'PRIVILEGED': {
-        const value = card.econ.value ?? 0;
-        cashDelta = value;
-        updatedState = this.applyPrivilegedCard(updatedState, card, value, ctx);
-        events.push(buildEvent('PRIVILEGED_APPLIED', ctx, { cardId: card.id, value }));
+      // ── PRIVILEGED ────────────────────────────────────────
+      case BaseDeckType.PRIVILEGED: {
+        cashDelta = fx.cashDelta ?? 0;
+        if (cashDelta > 0) updatedState = applyCashDelta(updatedState, cashDelta);
+        if ((fx.haterHeatDelta ?? 0) !== 0) {
+          // haterHeatDelta surfaces on TurnResult; HaterEngine picks it up
+          events.push(buildEvent('HATER_HEAT_DELTA', ctx, { delta: fx.haterHeatDelta }));
+        }
+        if ((fx.incomeDelta ?? 0) > 0) {
+          incomeDelta  = fx.incomeDelta!;
+          updatedState = recalcCashflow({ ...updatedState, monthlyIncome: updatedState.monthlyIncome + incomeDelta });
+        }
+        events.push(buildEvent('PRIVILEGED_APPLIED', ctx, {
+          cardId: def.cardId, cashDelta, incomeDelta, haterHeatDelta: fx.haterHeatDelta ?? 0,
+        }));
         break;
       }
 
-      case 'SO': {
-        // SO cards apply systemic friction — handled by M13 integration
-        // TurnEngine records the event; M13 module computes the effect externally
-        events.push(buildEvent('SO_DRAWN', ctx, {
-          cardId: card.id,
-          cardName: card.name,
+      // ── SO (Systemic Obstacle) ────────────────────────────
+      case BaseDeckType.SO: {
+        cashDelta    = fx.cashDelta ?? 0;
+        expenseDelta = fx.expensesDelta ?? 0;
+        if (cashDelta !== 0)    updatedState = applyCashDelta(updatedState, cashDelta);
+        if (expenseDelta !== 0) {
+          updatedState = { ...updatedState, monthlyExpenses: updatedState.monthlyExpenses + expenseDelta };
+          updatedState = recalcCashflow(updatedState);
+        }
+        events.push(buildEvent('SO_APPLIED', ctx, {
+          cardId:      def.cardId,
+          cardName:    def.name,
+          cashDelta,
+          expenseDelta,
           requiresM13Resolution: true,
         }));
         break;
       }
-    }
 
-    // Recalculate derived fields
-    updatedState = {
-      ...updatedState,
-      cash: updatedState.cash + (card.deckType !== 'FUBAR' ? cashDelta : 0), // FUBAR already applied above
-      passiveIncomeMonthly: computePassiveIncome(updatedState),
-      netWorth: computeNetWorth(updatedState),
-    };
+      // ── PHASE_BOUNDARY ────────────────────────────────────
+      case BaseDeckType.PHASE_BOUNDARY: {
+        const newPhase = deriveRunPhase(ctx.tickIndex);
+        updatedState   = { ...updatedState, runPhase: newPhase };
+        events.push(buildEvent('PHASE_BOUNDARY_CROSSED', ctx, { newPhase }));
+        break;
+      }
 
-    return { updatedState, cashDelta, incomeDelta, expenseDelta, events };
-  }
+      // ── MODE DECKS (HEAD_TO_HEAD, TEAM_UP, CHASE_A_LEGEND) ──────────────
+      case ModeDeckType.SABOTAGE:
+      case ModeDeckType.COUNTER:
+      case ModeDeckType.BLUFF: {
+        // HEAD_TO_HEAD: delegate to BattleEngine (server-side mode engine)
+        events.push(buildEvent('BATTLE_CARD_QUEUED', ctx, {
+          cardId: def.cardId, deckType: def.deckType, action,
+        }));
+        break;
+      }
 
-  // ── Step 4: Apply Buffs & Debuffs ─────────────────────────────────────────
+      case ModeDeckType.AID:
+      case ModeDeckType.RESCUE:
+      case ModeDeckType.TRUST:
+      case ModeDeckType.DEFECTION: {
+        // TEAM_UP: trust delta
+        const trustDelta = fx.trustDelta ?? 0;
+        if (trustDelta !== 0) {
+          updatedState = { ...updatedState, trustScore: Math.max(0, Math.min(1, updatedState.trustScore + trustDelta)) };
+        }
+        events.push(buildEvent('SYNDICATE_CARD_APPLIED', ctx, {
+          cardId: def.cardId, deckType: def.deckType, trustDelta,
+        }));
+        break;
+      }
 
-  public applyBuffsDebuffs(
-    state: TurnEnginePlayerState,
-    ctx: TurnContext,
-  ): { updatedState: TurnEnginePlayerState; events: TurnEvent[] } {
-    const events: TurnEvent[] = [];
-    let updatedState = { ...state };
+      case ModeDeckType.GHOST:
+      case ModeDeckType.DISCIPLINE: {
+        // CHASE_A_LEGEND: ghost delta
+        events.push(buildEvent('PHANTOM_CARD_APPLIED', ctx, {
+          cardId: def.cardId, deckType: def.deckType, action,
+        }));
+        break;
+      }
 
-    // Process turn-decrement on all timed buffs
-    const expiredBuffs: ActiveBuff[] = [];
-    const remainingBuffs: ActiveBuff[] = [];
-
-    for (const buff of updatedState.activeBuffs) {
-      if (buff.expiresAtTurn <= ctx.turnNumber) {
-        expiredBuffs.push(buff);
-      } else {
-        remainingBuffs.push(buff);
+      default: {
+        events.push(buildEvent('UNKNOWN_CARD_TYPE', ctx, { cardId: def.cardId, deckType: (def as any).deckType }));
       }
     }
 
-    if (expiredBuffs.length > 0) {
-      events.push(buildEvent('BUFFS_EXPIRED', ctx, {
-        expiredBuffIds: expiredBuffs.map(b => b.buffId),
-      }));
+    // Reset consecutivePasses when player acts
+    if (action === 'PURCHASE' || action === 'COUNTER' || action === 'AID') {
+      updatedState = { ...updatedState, consecutivePasses: 0 };
     }
 
-    // Decrement turn lock
-    if (updatedState.turnsLocked > 0) {
-      updatedState = {
-        ...updatedState,
-        turnsLocked: Math.max(0, updatedState.turnsLocked - 1),
-      };
-    }
-
-    // Apply cashflow tick (monthly income vs expenses)
-    const monthlyCashflow = updatedState.passiveIncomeMonthly - updatedState.monthlyExpenses;
-    if (monthlyCashflow !== 0) {
-      updatedState = {
-        ...updatedState,
-        cash: updatedState.cash + monthlyCashflow,
-      };
-      events.push(buildEvent('CASHFLOW_TICK', ctx, {
-        passiveIncome: updatedState.passiveIncomeMonthly,
-        expenses: updatedState.monthlyExpenses,
-        netCashflow: monthlyCashflow,
-      }));
-    }
-
-    updatedState = {
-      ...updatedState,
-      activeBuffs: remainingBuffs,
-      netWorth: computeNetWorth(updatedState),
+    return {
+      updatedState,
+      cashDelta,
+      incomeDelta,
+      expenseDelta,
+      cordDeltaBasis,
+      events,
+      updatedSession: { ...updatedSession, state: updatedState },
     };
+  }
+
+  // ── Step 4: Apply Buffs & Debuffs ────────────────────────
+  applyBuffsDebuffs(
+    state: PlayerState,
+    ctx:   TurnContext,
+  ): { updatedState: PlayerState; events: TurnEvent[] } {
+    const events: TurnEvent[] = [];
+
+    // Expire elapsed buffs
+    const beforeCount  = state.activeBuffs.length;
+    let updatedState   = expireBuffs(state, ctx.turnNumber);
+    const expiredCount = beforeCount - updatedState.activeBuffs.length;
+    if (expiredCount > 0) {
+      events.push(buildEvent('BUFFS_EXPIRED', ctx, { count: expiredCount }));
+    }
+
+    // Decrement turnsToSkip
+    if (updatedState.turnsToSkip > 0) {
+      updatedState = { ...updatedState, turnsToSkip: Math.max(0, updatedState.turnsToSkip - 1) };
+    }
+
+    // Monthly cashflow tick (every turn represents time passing)
+    const netCashflow = updatedState.netCashflow;
+    if (netCashflow !== 0) {
+      updatedState = applyCashDelta(updatedState, netCashflow);
+      events.push(buildEvent('CASHFLOW_TICK', ctx, {
+        monthlyIncome:   updatedState.monthlyIncome,
+        monthlyExpenses: updatedState.monthlyExpenses,
+        netCashflow,
+      }));
+    }
+
+    // Bleed mode check (GO_ALONE / Empire)
+    if (ctx.gameMode === 'GO_ALONE' && updatedState.cash < 12_000) {
+      const severity = updatedState.cash <= 0 ? 'TERMINAL'
+        : updatedState.cash < 5_000           ? 'CRITICAL'
+        : 'WATCH';
+      if (!updatedState.bleedModeActive || updatedState.bleedSeverity !== severity) {
+        updatedState = { ...updatedState, bleedModeActive: true, bleedSeverity: severity };
+        events.push(buildEvent('BLEED_MODE_UPDATED', ctx, { severity, cash: updatedState.cash }));
+      }
+    } else if (updatedState.bleedModeActive && updatedState.cash >= 12_000) {
+      updatedState = { ...updatedState, bleedModeActive: false, bleedSeverity: 'NONE' };
+      events.push(buildEvent('BLEED_MODE_CLEARED', ctx, {}));
+    }
 
     return { updatedState, events };
   }
 
-  // ── Step 5: Check Wipe ────────────────────────────────────────────────────
+  // ── Step 5: Check Wipe ───────────────────────────────────
+  checkWipe(
+    state:   PlayerState,
+    session: RunSession,
+    ctx:     TurnContext,
+  ): { isWipe: boolean; wipeCause: string | null; wipeEvent: TurnEvent | null } {
+    const wipeEvent = session.solvency.check(state, ctx.tickIndex);
+    if (!wipeEvent) return { isWipe: false, wipeCause: null, wipeEvent: null };
 
-  public checkWipe(state: TurnEnginePlayerState): {
-    isWipe: boolean;
-    wipeCause: string | null;
-    event: TurnEvent | null;
-    ctx: TurnContext | null;
-  } {
-    // Cash absolute floor
-    if (state.cash < -500_000) {
-      return {
-        isWipe: true,
-        wipeCause: 'CASH_BELOW_ABSOLUTE_FLOOR',
-        event: null,
-        ctx: null,
-      };
-    }
-
-    // Net worth floor
-    if (state.netWorth < -100_000) {
-      return {
-        isWipe: true,
-        wipeCause: 'NET_WORTH_BELOW_FLOOR',
-        event: null,
-        ctx: null,
-      };
-    }
-
-    // Cash negative AND no assets to liquidate
-    if (state.cash < 0) {
-      const maxRecovery = state.assets.reduce((sum, a) => {
-        const exitValue = a.exitMin > 0 ? a.exitMin : a.originalCost * 0.70;
-        return sum + Math.max(0, exitValue - a.currentDebt);
-      }, 0);
-      if (maxRecovery < Math.abs(state.cash)) {
-        return {
-          isWipe: true,
-          wipeCause: 'CASH_NEGATIVE_UNRECOVERABLE',
-          event: null,
-          ctx: null,
-        };
-      }
-    }
-
-    return { isWipe: false, wipeCause: null, event: null, ctx: null };
+    return {
+      isWipe:    true,
+      wipeCause: wipeEvent.cause,
+      wipeEvent: buildEvent('SOLVENCY_WIPE', ctx, {
+        type:      wipeEvent.type,
+        cause:     wipeEvent.cause,
+        cash:      wipeEvent.cashAtWipe,
+        netWorth:  wipeEvent.netWorthAtWipe,
+        auditHash: wipeEvent.auditHash,
+      }),
+    };
   }
 
-  // ── Step 6: Check Win ─────────────────────────────────────────────────────
-
-  public checkWin(state: TurnEnginePlayerState): boolean {
-    // Win = passive income > total monthly expenses (escaped the rat race)
-    return state.passiveIncomeMonthly > state.monthlyExpenses && state.passiveIncomeMonthly > 0;
+  // ── Step 6: Check Win ────────────────────────────────────
+  /**
+   * Win conditions differ by mode:
+   *  GO_ALONE       → passive income > expenses AND net worth ≥ FREEDOM_THRESHOLD
+   *  HEAD_TO_HEAD   → opponent eliminated
+   *  TEAM_UP        → joint net worth target hit
+   *  CHASE_A_LEGEND → positive ghostDelta at run end
+   */
+  checkWin(state: PlayerState, ctx: TurnContext): boolean {
+    switch (ctx.gameMode) {
+      case 'GO_ALONE':
+        return (
+          state.monthlyIncome > state.monthlyExpenses &&
+          state.netWorth >= FREEDOM_THRESHOLD
+        );
+      case 'HEAD_TO_HEAD':
+        return state.battleBudget >= BATTLE_BUDGET_MAX;
+      case 'TEAM_UP':
+        return state.trustScore >= 0.95 && state.netWorth >= FREEDOM_THRESHOLD;
+      case 'CHASE_A_LEGEND':
+        return state.ghostDelta > 0 && ctx.tickIndex >= RUN_TICKS - 1;
+      default:
+        return false;
+    }
   }
 
-  // ── Step 7: Emit Events ───────────────────────────────────────────────────
-
-  public emitEvents(
-    allEvents: TurnEvent[],
-    ctx: TurnContext,
-    isWipe: boolean,
-    isWin: boolean,
-    playerState: TurnEnginePlayerState,
+  // ── Step 7: Emit Events ──────────────────────────────────
+  emitEvents(
+    allEvents:   TurnEvent[],
+    ctx:         TurnContext,
+    isWipe:      boolean,
+    isWin:       boolean,
+    playerState: PlayerState,
+    drawnCard:   CardInHand | null,
+    cashDelta:   number,
   ): TurnEvent[] {
     const emitted = [...allEvents];
 
-    // Turn summary event — always emitted
     emitted.push({
-      eventType: 'TURN_COMPLETE',
+      eventType:  'TURN_COMPLETE',
       turnNumber: ctx.turnNumber,
-      tickIndex: ctx.tickIndex,
+      tickIndex:  ctx.tickIndex,
       payload: {
-        drawnCard: ctx.drawnCard?.id ?? null,
-        action: ctx.playerAction,
-        cash: playerState.cash,
-        netWorth: playerState.netWorth,
-        passiveIncome: playerState.passiveIncomeMonthly,
+        drawnCard:       drawnCard?.cardId ?? null,
+        action:          ctx.playerAction,
+        cash:            playerState.cash,
+        netWorth:        playerState.netWorth,
+        monthlyIncome:   playerState.monthlyIncome,
         monthlyExpenses: playerState.monthlyExpenses,
+        netCashflow:     playerState.netCashflow,
         isWipe,
         isWin,
-        eventCount: allEvents.length,
+        eventCount:      allEvents.length,
+        gameMode:        ctx.gameMode,
       },
       auditHash: buildEventHash('TURN_COMPLETE', ctx.turnNumber, ctx.tickIndex, {
-        runSeed: ctx.runSeed,
+        runSeed:        ctx.runSeed,
         rulesetVersion: ctx.rulesetVersion,
-        cash: playerState.cash,
-        netWorth: playerState.netWorth,
+        cash:           playerState.cash,
+        netWorth:       playerState.netWorth,
       }),
     });
 
     if (isWipe) {
       emitted.push({
-        eventType: 'RUN_WIPE',
+        eventType:  'RUN_WIPE',
         turnNumber: ctx.turnNumber,
-        tickIndex: ctx.tickIndex,
-        payload: {
-          cash: playerState.cash,
-          netWorth: playerState.netWorth,
-          runSeed: ctx.runSeed,
-        },
-        auditHash: buildEventHash('RUN_WIPE', ctx.turnNumber, ctx.tickIndex, { runSeed: ctx.runSeed }),
+        tickIndex:  ctx.tickIndex,
+        payload:    { cash: playerState.cash, netWorth: playerState.netWorth, runSeed: ctx.runSeed },
+        auditHash:  buildEventHash('RUN_WIPE', ctx.turnNumber, ctx.tickIndex, { runSeed: ctx.runSeed }),
       });
     }
 
     if (isWin) {
       emitted.push({
-        eventType: 'RUN_WIN',
+        eventType:  'RUN_WIN',
         turnNumber: ctx.turnNumber,
-        tickIndex: ctx.tickIndex,
+        tickIndex:  ctx.tickIndex,
         payload: {
-          passiveIncome: playerState.passiveIncomeMonthly,
+          monthlyIncome:   playerState.monthlyIncome,
           monthlyExpenses: playerState.monthlyExpenses,
-          netWorth: playerState.netWorth,
-          runSeed: ctx.runSeed,
-          momentLabel: 'OPPORTUNITY_FLIP: Escaped the rat race',
+          netWorth:        playerState.netWorth,
+          runSeed:         ctx.runSeed,
+          gameMode:        ctx.gameMode,
+          momentLabel:     'OPPORTUNITY_FLIP: Escaped the rat race',
         },
         auditHash: buildEventHash('RUN_WIN', ctx.turnNumber, ctx.tickIndex, { runSeed: ctx.runSeed }),
       });
@@ -599,208 +710,215 @@ export class TurnEngine {
     return emitted;
   }
 
-  // ── Step 8: Increment Turn ────────────────────────────────────────────────
-
-  public incrementTurn(state: TurnEnginePlayerState, ctx: TurnContext): {
-    updatedState: TurnEnginePlayerState;
-    nextCtx: TurnContext;
-    auditHash: string;
-  } {
-    const updatedState: TurnEnginePlayerState = {
-      ...state,
-      version: state.version + 1,
-    };
+  // ── Step 8: Increment Turn ───────────────────────────────
+  incrementTurn(
+    state: PlayerState,
+    ctx:   TurnContext,
+  ): { updatedState: PlayerState; nextCtx: TurnContext; auditHash: string } {
+    // Advance run phase
+    const runPhase    = deriveRunPhase(ctx.tickIndex + 1);
+    const updatedState = { ...state, runPhase };
 
     const nextCtx: TurnContext = {
       ...ctx,
-      turnNumber: ctx.turnNumber + 1,
-      phase: 'VALIDATING',
-      drawnCard: null,
+      turnNumber:   ctx.turnNumber + 1,
+      tickIndex:    ctx.tickIndex + 1,
+      phase:        'VALIDATING',
+      drawnCard:    null,
       playerAction: null,
-      events: [],
+      events:       [],
+      auditHash:    '',
     };
 
-    const newAuditHash = sha256(JSON.stringify({
-      runSeed: ctx.runSeed,
+    const auditHash = sha256(JSON.stringify({
+      runSeed:        ctx.runSeed,
       rulesetVersion: ctx.rulesetVersion,
-      turnNumber: nextCtx.turnNumber,
-      cash: updatedState.cash,
-      netWorth: updatedState.netWorth,
-      version: updatedState.version,
+      turnNumber:     nextCtx.turnNumber,
+      cash:           updatedState.cash,
+      netWorth:       updatedState.netWorth,
     })).slice(0, 32);
 
-    this.auditHash = newAuditHash;
-    nextCtx.auditHash = newAuditHash;
+    nextCtx.auditHash = auditHash;
 
-    return { updatedState, nextCtx, auditHash: newAuditHash };
+    return { updatedState, nextCtx, auditHash };
   }
 
-  // ── Full Turn Orchestrator ────────────────────────────────────────────────
-
+  // ── Full Turn Orchestrator ───────────────────────────────
   /**
-   * Execute a complete turn in sequence.
-   * Returns full TurnResult including updated state, events, wipe/win flags.
+   * Execute one complete turn (steps 1–8).
+   * Mutates nothing — all state returned in TurnResult.
    */
-  public executeTurn(
-    deck: Deck,
-    playerState: TurnEnginePlayerState,
-    ctx: TurnContext,
-    action: ActionType = 'PASS',
-  ): TurnResult {
+  executeTurn(
+    session: RunSession,
+    action:  ActionType = 'PASS',
+  ): { result: TurnResult; session: RunSession } {
+    let { ctx }        = session;
+    let playerState    = session.state;
     const allEvents: TurnEvent[] = [];
 
-    // Step 1: Validate
-    const validationErrors = this.validate(playerState, ctx);
-    const blockingErrors = validationErrors.filter(e => e.blocking);
-    if (blockingErrors.length > 0) {
+    // ── 1. Validate
+    const errors    = this.validate(playerState, ctx);
+    const blocking  = errors.filter(e => e.blocking);
+    if (blocking.length > 0) {
+      const failHash = sha256(JSON.stringify({ errors: blocking, runSeed: ctx.runSeed })).slice(0, 32);
       return {
-        success: false,
-        phase: 'VALIDATING',
-        playerState,
-        drawnCard: null,
-        action: null,
-        cashDelta: 0,
-        incomeDelta: 0,
-        expenseDelta: 0,
-        triggeredWipe: false,
-        wipeCause: null,
-        triggeredWin: false,
-        events: [],
-        auditHash: sha256(JSON.stringify({ errors: blockingErrors, ctx: ctx.runSeed })).slice(0, 32),
+        result: {
+          success: false, phase: 'VALIDATING', playerState,
+          drawnCard: null, action: null,
+          cashDelta: 0, incomeDelta: 0, expenseDelta: 0,
+          cordDeltaBasis: 0,
+          triggeredWipe: false, wipeCause: null,
+          triggeredWin: false, outcome: null,
+          events: [], auditHash: failHash,
+        },
+        session,
       };
     }
 
-    // Step 2: Draw
-    const card = this.drawCard(deck, ctx);
-    ctx = { ...ctx, drawnCard: card, phase: 'DRAWING' };
+    // ── 2. Draw
+    ctx = { ...ctx, phase: 'DRAWING' };
+    const { session: sessionAfterDraw, card } = this.drawCard(session);
+    let currentSession = sessionAfterDraw;
+    ctx = { ...ctx, drawnCard: card };
     allEvents.push(buildEvent('CARD_DRAWN', ctx, {
-      cardId: card.id,
-      cardName: card.name,
-      deckType: card.deckType,
+      cardId:   card.cardId,
+      cardName: card.definition.name,
+      deckType: card.definition.deckType,
     }));
 
-    // Step 3: Resolve
+    // ── 3. Resolve
     ctx = { ...ctx, phase: 'RESOLVING', playerAction: action };
-    const { updatedState: stateAfterCard, cashDelta, incomeDelta, expenseDelta, events: resolveEvents } =
-      this.resolveCard(card, playerState, action, ctx);
-    allEvents.push(...resolveEvents);
+    const resolved = this.resolveCard(card, playerState, action, ctx, currentSession);
+    playerState     = resolved.updatedState;
+    currentSession  = resolved.updatedSession;
+    allEvents.push(...resolved.events);
 
-    // Step 4: Buffs/Debuffs
+    // ── 4. Buffs / Debuffs
     ctx = { ...ctx, phase: 'APPLYING_BUFFS' };
-    const { updatedState: stateAfterBuffs, events: buffEvents } =
-      this.applyBuffsDebuffs(stateAfterCard, ctx);
+    const { updatedState: stateAfterBuffs, events: buffEvents } = this.applyBuffsDebuffs(playerState, ctx);
+    playerState = stateAfterBuffs;
     allEvents.push(...buffEvents);
 
-    // Step 5: Wipe check
+    // ── 5. Wipe check
     ctx = { ...ctx, phase: 'CHECKING_WIPE' };
-    const { isWipe, wipeCause } = this.checkWipe(stateAfterBuffs);
+    const { isWipe, wipeCause, wipeEvent } = this.checkWipe(playerState, currentSession, ctx);
+    if (wipeEvent) allEvents.push(wipeEvent);
+
     if (isWipe) {
-      const finalEvents = this.emitEvents(allEvents, { ...ctx, phase: 'EMITTING' }, true, false, stateAfterBuffs);
+      const finalEvents = this.emitEvents(allEvents, { ...ctx, phase: 'EMITTING' }, true, false, playerState, card, resolved.cashDelta);
       return {
-        success: true,
-        phase: 'WIPE',
-        playerState: stateAfterBuffs,
-        drawnCard: card,
-        action,
-        cashDelta,
-        incomeDelta,
-        expenseDelta,
-        triggeredWipe: true,
-        wipeCause,
-        triggeredWin: false,
-        events: finalEvents,
-        auditHash: sha256(JSON.stringify({ wipe: true, runSeed: ctx.runSeed, turn: ctx.turnNumber })).slice(0, 32),
+        result: {
+          success: true, phase: 'WIPE', playerState,
+          drawnCard: card, action,
+          cashDelta:      resolved.cashDelta,
+          incomeDelta:    resolved.incomeDelta,
+          expenseDelta:   resolved.expenseDelta,
+          cordDeltaBasis: resolved.cordDeltaBasis,
+          triggeredWipe: true, wipeCause,
+          triggeredWin: false, outcome: 'BANKRUPT',
+          events: finalEvents,
+          auditHash: sha256(JSON.stringify({ wipe: true, runSeed: ctx.runSeed, turn: ctx.turnNumber })).slice(0, 32),
+        },
+        session: { ...currentSession, state: playerState, ctx },
       };
     }
 
-    // Step 6: Win check
+    // ── 6. Win check
     ctx = { ...ctx, phase: 'CHECKING_WIN' };
-    const isWin = this.checkWin(stateAfterBuffs);
+    const isWin = this.checkWin(playerState, ctx);
 
-    // Step 7: Emit events
+    // ── 7. Emit events
     ctx = { ...ctx, phase: 'EMITTING' };
-    const finalEvents = this.emitEvents(allEvents, ctx, false, isWin, stateAfterBuffs);
+    const finalEvents = this.emitEvents(allEvents, ctx, false, isWin, playerState, card, resolved.cashDelta);
 
-    // Step 8: Increment turn
+    // ── 8. Increment
     ctx = { ...ctx, phase: 'INCREMENTING' };
-    const { updatedState: finalState, auditHash } = this.incrementTurn(stateAfterBuffs, ctx);
+    const { updatedState: finalState, nextCtx, auditHash } = this.incrementTurn(playerState, ctx);
 
-    return {
-      success: true,
-      phase: isWin ? 'WIN' : 'COMPLETE',
-      playerState: finalState,
-      drawnCard: card,
-      action,
-      cashDelta,
-      incomeDelta,
-      expenseDelta,
-      triggeredWipe: false,
-      wipeCause: null,
-      triggeredWin: isWin,
-      events: finalEvents,
-      auditHash,
-    };
-  }
+    const outcome: RunOutcome | null = isWin
+      ? 'FREEDOM'
+      : ctx.tickIndex >= RUN_TICKS - 1
+        ? 'TIMEOUT'
+        : null;
 
-  // ─── Private Helpers ──────────────────────────────────────────────────────
-
-  private applyDownPaymentDiscount(baseDownPayment: number, state: TurnEnginePlayerState): number {
-    const discountBuff = state.activeBuffs.find(b => b.buffType === 'DOWNPAY_DISCOUNT');
-    if (discountBuff) return Math.max(0, baseDownPayment - discountBuff.value);
-    return baseDownPayment;
-  }
-
-  private acquireAsset(
-    state: TurnEnginePlayerState,
-    card: Card,
-    downPayment: number,
-    debt: number,
-    monthlyIncome: number,
-  ): TurnEnginePlayerState {
-    const assetId = sha256(`asset:${state.playerId}:${card.id}:${Date.now()}`).slice(0, 20);
-    const newAsset: OwnedAsset = {
-      assetId,
-      cardId: card.id,
-      assetKind: card.econ.assetKind ?? 'BUSINESS',
-      originalCost: card.econ.cost ?? downPayment + debt,
-      currentDebt: debt,
-      monthlyIncome,
-      monthlyDebtService: 0,  // computed by debt service engine
-      exitMin: card.econ.exitMin ?? (card.econ.cost ?? 0) * 0.7,
-      exitMax: card.econ.exitMax ?? (card.econ.cost ?? 0) * 1.3,
-      acquiredAtTurn: 0, // injected by caller
+    const finalSession: RunSession = {
+      ...currentSession,
+      state: finalState,
+      ctx:   nextCtx,
     };
 
     return {
-      ...state,
-      cash: state.cash - downPayment,
-      assets: [...state.assets, newAsset],
-      totalAssetsValue: state.totalAssetsValue + newAsset.originalCost,
-      totalLiabilities: state.totalLiabilities + debt,
+      result: {
+        success: true,
+        phase:   isWin ? 'WIN' : 'COMPLETE',
+        playerState: finalState,
+        drawnCard:   card,
+        action,
+        cashDelta:      resolved.cashDelta,
+        incomeDelta:    resolved.incomeDelta,
+        expenseDelta:   resolved.expenseDelta,
+        cordDeltaBasis: resolved.cordDeltaBasis,
+        triggeredWipe:  false,
+        wipeCause:      null,
+        triggeredWin:   isWin,
+        outcome,
+        events:         finalEvents,
+        auditHash,
+      },
+      session: finalSession,
     };
   }
+}
 
-  private applyPrivilegedCard(
-    state: TurnEnginePlayerState,
-    card: Card,
-    value: number,
-    ctx: TurnContext,
-  ): TurnEnginePlayerState {
-    // Privileged cards can be cash grants, shields, or discounts
-    if (value > 0 && card.name.toLowerCase().includes('shield')) {
-      return { ...state, activeShields: state.activeShields + 1 };
-    }
-    if (value > 0 && card.name.toLowerCase().includes('discount')) {
-      const buff: ActiveBuff = {
-        buffId: sha256(`buff:${card.id}:${ctx.turnNumber}`).slice(0, 12),
-        buffType: 'DOWNPAY_DISCOUNT',
-        value,
-        remainingUses: 1,
-        expiresAtTurn: ctx.turnNumber + 3,
-      };
-      return { ...state, activeBuffs: [...state.activeBuffs, buff] };
-    }
-    // Default: cash grant
-    return { ...state, cash: state.cash + value };
-  }
+// ─── RUN SESSION FACTORY ─────────────────────────────────────
+/**
+ * Instantiate a fully wired RunSession.
+ * Call once per run. Pass the numeric seed from pzo-server.
+ */
+export function createRunSession(
+  playerId:       string,
+  runId:          string,
+  seed:           number,
+  gameMode:       GameMode,
+  rulesetVersion: string,
+  startingDeck:   CardInHand[],
+): RunSession {
+  const rng       = new SeededRandom(seed);
+  const drawEngine= new DrawEngine();
+  const macro     = new MacroEngine({
+    inflation:       0.02,
+    creditTightness: 0.20,
+    phase:           MacroPhase.EXPANSION,
+  });
+  const portfolio  = new PortfolioEngine();
+  const solvency   = new SolvencyEngine();
+  const state      = createInitialPlayerState(playerId);
+
+  const ctx: TurnContext = {
+    runId,
+    runSeed:        seed,
+    rulesetVersion,
+    turnNumber:     1,
+    tickIndex:      0,
+    gameMode,
+    mlEnabled:      false,
+    phase:          'VALIDATING',
+    drawnCard:      null,
+    playerAction:   null,
+    events:         [],
+    auditHash:      '',
+  };
+
+  return {
+    ctx,
+    state,
+    rng,
+    drawEngine,
+    drawPile:    rng.shuffle([...startingDeck]),
+    discardPile: [],
+    hand:        [],
+    macro,
+    portfolio,
+    solvency,
+  };
 }

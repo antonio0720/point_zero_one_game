@@ -1,47 +1,38 @@
-import type EventBus from '../../time/EventBus';
-import { PressureEngine, DEFAULT_SIGNAL_WEIGHTS } from '../../engines/pressure';
-import pressureStoreHandlers from '../../store/engineStore';
-import DecisionTimer from './DecisionTimer';
-import type TimeEngine from '../../time/TimeEngine';
+// ═══════════════════════════════════════════════════════════════════════════════
+// POINT ZERO ONE — ENGINE ORCHESTRATOR (CORE / LEGACY SHIM)
+// pzo-web/src/engines/core/EngineOrchestrator.ts
+//
+// ⚠️  THIS FILE IS A COMPATIBILITY SHIM.
+//
+// The canonical Orchestrator lives at: engines/zero/EngineOrchestrator.ts
+// This file exists solely to preserve backward compatibility for any
+// legacy imports that resolve through engines/core/.
+//
+// DO NOT add logic here. DO NOT import engine classes here.
+// All structural changes belong in engines/zero/EngineOrchestrator.ts.
+//
+// PREVIOUS BROKEN STATE (now resolved):
+//   ✗ import DecisionTimer from './DecisionTimer'        — file does not exist
+//   ✗ import EventBus from '../../time/EventBus'         — wrong bus path
+//   ✗ import { PressureEngine } from '../../engines/pressure' — bad barrel
+//   ✗ pressureStoreHandlers.onRunStarted(cb)             — wrong signature
+//   ✗ engineStore.set(...)                               — store never imported
+//   ✗ Single-engine executeTick() — missing all 7-engine 13-step sequence
+//
+// MIGRATION:
+//   Update all imports that reference this path to point directly to:
+//     engines/zero/EngineOrchestrator
+//   Once all call-sites are migrated, delete this shim.
+//
+// Density6 LLC · Point Zero One · Engine 0 (Shim) · Confidential
+// ═══════════════════════════════════════════════════════════════════════════════
 
-type EngineOrchestrator = {
-  eventBus: EventBus;
-  pressureEngine: PressureEngine;
-  decisionTimer: DecisionTimer;
-};
+export {
+  EngineOrchestrator,
+  type StartRunParams,
+} from '../zero/EngineOrchestrator';
 
-export class EngineOrchestrator implements EngineOrchestrator {
-  constructor(eventBus: EventBus) {
-    this.eventBus = eventBus;
-    
-    // Reset the engine store on run start, as per acceptance criteria
-    pressureStoreHandlers.onRunStarted(() => {
-      engineStore.set({ resetCriticalEnteredThisRun: true });
-    });
-    
-    this.pressureEngine = new PressureEngine(DEFAULT_SIGNAL_WEIGHTS);
-    // Initialize DecisionTimer with a fixed number of ticks, as per implementation spec for predictability in testing environments (2048)
-    const decisionTickCount: number = 2048;
-    this.decisionTimer = new DecisionTimer(decisionTickCount);
-  }
-
-  executeTick(): void {
-    // Audit: Ensure flush() is called before store flag resets to prevent stale tierChangedThisTick=true
-    // TierChangedThisTick is set in onSnapshotAvailable(), reset in onTickComplete()
-    this.pressureEngine.computeScore();
-    
-    engineStore.set({ tierChangedThisTick: true });
-    this.eventBus.flush(); // <-- Flush before snapshot writes to ensure handlers execute
-    this.onSnapshotAvailable();
-    this.onTickComplete();
-  }
-
-  private onSnapshotAvailable(): void {
-    engineStore.set({ tierChangedThisTick: false });
-  }
-
-  private onTickComplete(): void {
-    // Resets tierChangedThisTick=false after all handlers have executed
-    engineStore.set({ tierChangedThisTick: false });
-  }
-}
+// Re-export the singleton orchestrator instance so legacy callers that do:
+//   import { orchestrator } from '../core/EngineOrchestrator'
+// continue to work against the same instance.
+export { orchestrator } from '../zero/EngineOrchestrator';

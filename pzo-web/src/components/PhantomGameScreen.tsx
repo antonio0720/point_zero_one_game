@@ -1,446 +1,1350 @@
 /**
- * PhantomGameScreen.tsx — GHOST mode game screen
- * Theme: Purple / Spectral. Live delta vs champion ghost. Divergence points. Proof badge.
- * Race a verified champion who played the exact same market you're facing.
+ * PhantomGameScreen.tsx — CHASE A LEGEND / PHANTOM mode game screen
+ * Theme: Spectral Purple. Ghost replay engine. Gap Indicator. Legend markers.
+ * Community heat modifier. Dynasty challenge stack. Proof badge preview.
+ *
+ * Design Tokens: designTokens.ts C.* (DM Mono + Barlow Condensed + DM Sans)
+ * Scale: 20M concurrent · Mobile-first · WCAG AA+ · Touch targets 48px · clamp() fonts
+ * Engine: PhantomGhostEngine · GapIndicator · LegendDecaySystem
+ *
+ * FILE LOCATION: src/components/PhantomGameScreen.tsx
+ *
+ * Density6 LLC · Point Zero One · Confidential
  */
 
-import React, { useMemo } from 'react';
+'use client';
+
+import React, { memo, useMemo, useCallback, useState } from 'react';
 import GameBoard from './GameBoard';
 import type { MarketRegime, IntelligenceState } from './GameBoard';
-import { ReplayTimeline } from './ReplayTimeline';
-import type { ReplayEvent } from './ReplayTimeline';
-import MomentFlash from './MomentFlash';
-import type { GameModeState, DivergencePoint } from '../engines/core/types';
+import { C, FS, BP, TOUCH_TARGET, FONT_IMPORT, KEYFRAMES } from '../game/modes/shared/designTokens';
 
-// ─── Helpers ────────────────────────────────────────────────────────────────
+// ── Styles ────────────────────────────────────────────────────────────────────
 
-function fmt(n: number): string {
-  const sign = n < 0 ? '-' : '';
-  const v = Math.abs(n);
-  if (v >= 1_000_000) return `${sign}$${(v / 1_000_000).toFixed(2)}M`;
-  if (v >= 1_000)     return `${sign}$${(v / 1_000).toFixed(1)}K`;
-  return `${sign}$${Math.round(v).toLocaleString()}`;
+const STYLES = `
+${FONT_IMPORT}
+${KEYFRAMES}
+
+@keyframes ghostPulse {
+  0%, 100% { opacity: 0.7; transform: scale(1); }
+  50%       { opacity: 1;   transform: scale(1.03); }
 }
 
-const GRADE_COLOR: Record<string, string> = {
-  'S': '#FFD700',
-  'A': '#00E5C8',
-  'B': '#6699FF',
-  'C': '#FFDD00',
-  'D': '#FF8800',
-  'F': '#FF2222',
+@keyframes gapBlink {
+  0%, 100% { border-color: rgba(155,125,255,0.55); }
+  50%       { border-color: rgba(155,125,255,0.15); }
+}
+
+@keyframes gainShimmer {
+  0%   { background-position: -200% center; }
+  100% { background-position:  200% center; }
+}
+
+.pgs-root {
+  background: #06020E;
+  min-height: 100dvh;
+  font-family: ${C.body};
+  color: ${C.textPrime};
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── Top bar ── */
+.pgs-top-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: clamp(6px, 1.5vw, 16px);
+  padding: clamp(8px, 2vw, 12px) clamp(10px, 3vw, 20px);
+  background: rgba(6,2,14,0.95);
+  border-bottom: 1px solid rgba(155,125,255,0.22);
+  flex-wrap: wrap;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  backdrop-filter: blur(12px);
+}
+
+/* ── Grid layout ── */
+.pgs-grid {
+  display: grid;
+  gap: clamp(10px, 2vw, 16px);
+  padding: clamp(10px, 2vw, 16px);
+  grid-template-columns: 1fr;
+}
+
+@media ${BP.tablet} {
+  .pgs-grid { grid-template-columns: 1fr 1fr; }
+}
+
+@media ${BP.desktop} {
+  .pgs-grid {
+    grid-template-columns: 2fr 1fr 1fr;
+    padding: 20px;
+    gap: 16px;
+  }
+  .pgs-col-main  { grid-column: 1; }
+  .pgs-col-right { grid-column: 2 / 4; display: flex; flex-direction: column; gap: 14px; }
+}
+
+/* ── Panel ── */
+.pgs-panel {
+  background: rgba(11,5,26,0.95);
+  border-radius: 12px;
+  border: 1px solid rgba(155,125,255,0.12);
+  padding: clamp(12px, 2.5vw, 18px);
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.pgs-panel--purple {
+  border-color: rgba(155,125,255,0.28);
+  box-shadow: 0 0 24px rgba(155,125,255,0.05) inset;
+}
+
+.pgs-panel--ahead {
+  border-color: rgba(46,232,154,0.28);
+  box-shadow: 0 0 24px rgba(46,232,154,0.05) inset;
+}
+
+.pgs-panel--behind {
+  border-color: rgba(255,155,47,0.28);
+  box-shadow: 0 0 20px rgba(255,155,47,0.06) inset;
+}
+
+.pgs-panel--critical {
+  border-color: rgba(255,77,77,0.38);
+  box-shadow: 0 0 28px rgba(255,77,77,0.08) inset;
+  animation: gapBlink 2s infinite;
+}
+
+/* ── Label ── */
+.pgs-label {
+  font-family: ${C.mono};
+  font-size: ${FS.xs};
+  font-weight: 600;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: ${C.purple};
+  margin-bottom: 10px;
+}
+
+.pgs-label--dim   { color: ${C.textDim}; }
+.pgs-label--green { color: ${C.green}; }
+.pgs-label--red   { color: ${C.red}; }
+
+/* ── Stat row ── */
+.pgs-stat {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  padding: 5px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+}
+.pgs-stat:last-child { border-bottom: none; }
+
+.pgs-stat-key {
+  font-family: ${C.mono};
+  font-size: ${FS.xs};
+  color: ${C.textSub};
+  flex-shrink: 0;
+}
+
+.pgs-stat-val {
+  font-family: ${C.mono};
+  font-size: ${FS.md};
+  font-weight: 600;
+  color: ${C.textPrime};
+  text-align: right;
+}
+
+/* ── Marker dot ── */
+.pgs-marker-dot {
+  width: clamp(8px, 1.5vw, 11px);
+  height: clamp(8px, 1.5vw, 11px);
+  border-radius: 50%;
+  flex-shrink: 0;
+  position: relative;
+}
+
+/* ── Button ── */
+.pgs-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: ${TOUCH_TARGET}px;
+  min-width: ${TOUCH_TARGET}px;
+  padding: 0 clamp(12px, 2.5vw, 20px);
+  border-radius: 8px;
+  border: 1px solid rgba(155,125,255,0.28);
+  background: rgba(155,125,255,0.08);
+  color: ${C.purple};
+  font-family: ${C.mono};
+  font-size: ${FS.sm};
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, transform 0.08s;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  touch-action: manipulation;
+}
+
+.pgs-btn:active { transform: translateY(1px); }
+
+.pgs-btn:hover, .pgs-btn:focus-visible {
+  background: rgba(155,125,255,0.16);
+  border-color: ${C.purple};
+  outline: 2px solid ${C.purple};
+  outline-offset: 2px;
+}
+
+/* ── CORD bar ── */
+.pgs-cord-bar-track {
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(255,255,255,0.06);
+  overflow: hidden;
+  position: relative;
+}
+.pgs-cord-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.4s ease;
+}
+
+/* ── Ghost row ── */
+.pgs-ghost-row {
+  display: flex;
+  align-items: center;
+  gap: clamp(6px, 1.5vw, 12px);
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+}
+.pgs-ghost-row:last-child { border-bottom: none; }
+
+/* ── Legend marker timeline ── */
+.pgs-timeline {
+  position: relative;
+  height: clamp(32px, 6vw, 44px);
+  background: rgba(255,255,255,0.03);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.pgs-timeline-track {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: rgba(155,125,255,0.15);
+  transform: translateY(-50%);
+}
+
+.pgs-timeline-fill {
+  height: 100%;
+  background: ${C.purple};
+  border-radius: 2px;
+  transition: width 0.3s;
+}
+
+.pgs-timeline-marker {
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: clamp(8px, 1.5vw, 10px);
+  height: clamp(8px, 1.5vw, 10px);
+  border-radius: 50%;
+  border: 1.5px solid rgba(6,2,14,0.8);
+  cursor: pointer;
+  transition: transform 0.15s;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.pgs-timeline-marker:hover { transform: translate(-50%,-50%) scale(1.4); }
+
+/* ── Gap zone pill ── */
+.pgs-gap-zone {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: clamp(6px, 1.5vw, 10px) clamp(12px, 2.5vw, 18px);
+  border-radius: 8px;
+  font-family: ${C.display};
+  font-size: ${FS.lg};
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  border: 1.5px solid;
+  transition: all 0.3s;
+}
+
+/* ── CORD delta display ── */
+.pgs-delta-number {
+  font-family: ${C.display};
+  font-size: ${FS.xxl};
+  font-weight: 900;
+  line-height: 1;
+  letter-spacing: 0.02em;
+}
+
+/* ── Dynasty badge ── */
+.pgs-dynasty-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(201,168,76,0.30);
+  background: rgba(201,168,76,0.06);
+}
+
+/* ── Proof card preview ── */
+.pgs-proof-card {
+  border-radius: 10px;
+  border: 1.5px solid rgba(155,125,255,0.30);
+  background: linear-gradient(135deg, rgba(155,125,255,0.06) 0%, rgba(11,5,26,0.95) 60%);
+  padding: clamp(12px, 2.5vw, 18px);
+  position: relative;
+  overflow: hidden;
+}
+
+.pgs-proof-card::before {
+  content: '';
+  position: absolute;
+  top: -50%;
+  left: -50%;
+  width: 200%;
+  height: 200%;
+  background: linear-gradient(
+    105deg,
+    transparent 40%,
+    rgba(155,125,255,0.06) 50%,
+    transparent 60%
+  );
+  background-size: 200% 100%;
+  animation: gainShimmer 4s linear infinite;
+}
+
+@media (max-width: 539px) {
+  .pgs-top-bar  { padding: 8px 10px; }
+  .pgs-panel    { padding: 10px; }
+  .pgs-label    { font-size: 9px; }
+  .pgs-delta-number { font-size: clamp(28px, 7vw, 40px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+}
+`;
+
+// ── Constants ─────────────────────────────────────────────────────────────────
+
+const MARKER_COLORS: Record<string, string> = {
+  OPPORTUNITY_TAKEN: C.gold,
+  OPPORTUNITY_PASSED: C.red,
+  HOLD_ACTION: C.purple,
+  SHIELD_BREACH: '#C0C0C0',
+  CLUTCH_DECISION: '#1A1A1A',
 };
 
-// ─── Sub-components ──────────────────────────────────────────────────────────
+const MARKER_LABELS: Record<string, string> = {
+  OPPORTUNITY_TAKEN: '🟡 Bought card',
+  OPPORTUNITY_PASSED: '🔴 Passed card',
+  HOLD_ACTION: '🟣 Used hold',
+  SHIELD_BREACH: '⚪ Shield breach + recovery',
+  CLUTCH_DECISION: '⚫ Clutch decision (<2s)',
+};
 
-function DeltaDisplay({
-  delta,
-  deltaPct,
-  localNetWorth,
-  ghostNetWorth,
-  ghostIsAlive,
-}: {
-  delta: number;
-  deltaPct: number;
-  localNetWorth: number;
-  ghostNetWorth: number;
-  ghostIsAlive: boolean;
-}) {
-  const ahead  = delta >= 0;
-  const accent = ahead ? '#B57BFF' : '#FF4444';
+const GAP_ZONE_CONFIG: Record<string, { color: string; bg: string; label: string; icon: string }> = {
+  GAINING: { color: C.green, bg: 'rgba(46,232,154,0.08)', label: 'GAINING', icon: '↑' },
+  NEUTRAL: { color: C.purple, bg: 'rgba(155,125,255,0.08)', label: 'NEUTRAL', icon: '→' },
+  LOSING: { color: C.orange, bg: 'rgba(255,155,47,0.08)', label: 'LOSING', icon: '↓' },
+  CRITICAL: { color: C.crimson, bg: 'rgba(255,23,68,0.10)', label: 'CRITICAL', icon: '⚡' },
+};
 
-  return (
-    <div
-      className="rounded-xl border p-6 text-center relative overflow-hidden"
-      style={{ background: '#08000D', borderColor: '#B57BFF33' }}
-    >
-      {/* Background glow */}
-      <div
-        className="absolute inset-0 pointer-events-none"
-        style={{
-          background: `radial-gradient(ellipse 60% 40% at 50% 50%, ${accent}08 0%, transparent 70%)`,
-        }}
-      />
+const PANEL_CLASS_FOR_GAP: Record<string, string> = {
+  GAINING: 'pgs-panel pgs-panel--ahead',
+  NEUTRAL: 'pgs-panel pgs-panel--purple',
+  LOSING: 'pgs-panel pgs-panel--behind',
+  CRITICAL: 'pgs-panel pgs-panel--critical',
+};
 
-      <div className="relative z-10">
-        {/* Label */}
-        <div className="text-[#B57BFF88] text-xs tracking-widest uppercase mb-2 font-bold">
-          {ahead ? 'LEADING CHAMPION' : 'TRAILING CHAMPION'}
-        </div>
+// ── Utilities ────────────────────────────────────────────────────────────────
 
-        {/* Big delta */}
-        <div className="flex items-center justify-center gap-2 mb-2">
-          <span className="text-2xl">{ahead ? '▲' : '▼'}</span>
-          <span
-            className="text-6xl font-black"
-            style={{
-              color: accent,
-              textShadow: `0 0 40px ${accent}66`,
-              fontFamily: "'DM Mono', monospace",
-            }}
-          >
-            {fmt(Math.abs(delta))}
-          </span>
-        </div>
-
-        {/* Pct */}
-        <div className="text-xl font-black mb-4" style={{ color: accent + 'cc' }}>
-          {ahead ? '+' : ''}{deltaPct.toFixed(1)}% vs ghost
-        </div>
-
-        {/* Side by side */}
-        <div className="grid grid-cols-2 gap-4">
-          <div className="bg-[#0D001A] border border-[#B57BFF22] rounded-lg p-3">
-            <div className="text-[#B57BFF88] text-[9px] uppercase tracking-widest mb-1">You</div>
-            <div className="font-mono font-bold text-white text-lg">{fmt(localNetWorth)}</div>
-          </div>
-          <div className="bg-[#0D001A] border border-[#B57BFF22] rounded-lg p-3">
-            <div className="text-[#B57BFF88] text-[9px] uppercase tracking-widest mb-1">
-              Champion {!ghostIsAlive && '💀'}
-            </div>
-            <div className="font-mono font-bold text-lg" style={{ color: ghostIsAlive ? '#ddd' : '#666' }}>
-              {fmt(ghostNetWorth)}
-            </div>
-            {!ghostIsAlive && (
-              <div className="text-[9px] text-[#666]">bankrupt on this seed</div>
-            )}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
+function n0(v: number, fallback = 0): number {
+  return Number.isFinite(v) ? v : fallback;
 }
 
-function DualEquityChart({
-  localHistory,
-  ghostHistory,
-  w = 560,
-  h = 120,
-}: {
-  localHistory: number[];
-  ghostHistory: number[];
-  w?: number;
-  h?: number;
-}) {
-  const { localPoints, ghostPoints } = useMemo(() => {
-    const data     = localHistory.length >= ghostHistory.length ? localHistory : ghostHistory;
-    const maxLen   = Math.max(localHistory.length, ghostHistory.length, 2);
-    const allVals  = [...localHistory, ...ghostHistory].filter(Number.isFinite);
-    const min      = Math.min(...allVals);
-    const max      = Math.max(...allVals);
-    const range    = max - min || 1;
-    const pad      = 8;
-
-    const toPoints = (series: number[]) =>
-      series
-        .map((v, i) => {
-          const x = pad + (i / (maxLen - 1)) * (w - pad * 2);
-          const y = pad + (1 - (v - min) / range) * (h - pad * 2);
-          return `${x.toFixed(1)},${y.toFixed(1)}`;
-        })
-        .join(' ');
-
-    return {
-      localPoints: toPoints(localHistory),
-      ghostPoints: toPoints(ghostHistory),
-    };
-  }, [localHistory, ghostHistory, w, h]);
-
-  return (
-    <div className="relative">
-      <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} className="w-full overflow-visible">
-        {/* Ghost line */}
-        {ghostHistory.length >= 2 && (
-          <polyline
-            points={ghostPoints}
-            fill="none"
-            stroke="#B57BFF"
-            strokeWidth={1.5}
-            strokeDasharray="4,3"
-            strokeOpacity={0.5}
-            strokeLinejoin="round"
-          />
-        )}
-        {/* Your line */}
-        {localHistory.length >= 2 && (
-          <polyline
-            points={localPoints}
-            fill="none"
-            stroke="#00E5C8"
-            strokeWidth={2}
-            strokeLinejoin="round"
-            strokeLinecap="round"
-          />
-        )}
-      </svg>
-      <div className="flex items-center gap-4 mt-1 justify-end text-[10px] font-mono">
-        <span className="flex items-center gap-1">
-          <span className="inline-block w-4 h-px bg-[#00E5C8]" /> You
-        </span>
-        <span className="flex items-center gap-1">
-          <span className="inline-block w-4 h-px bg-[#B57BFF] opacity-50 border-dashed" /> Champion
-        </span>
-      </div>
-    </div>
-  );
+function clamp01(v: number): number {
+  const x = n0(v, 0);
+  return x < 0 ? 0 : x > 1 ? 1 : x;
 }
 
-function DivergenceLog({ points }: { points: DivergencePoint[] }) {
-  if (points.length === 0) {
-    return (
-      <div className="rounded-xl border p-4" style={{ background: '#08000D', borderColor: '#B57BFF22' }}>
-        <div className="text-[#B57BFF] text-xs font-bold tracking-widest uppercase mb-2">Divergence Points</div>
-        <div className="text-[#444] text-xs text-center py-4">
-          No major divergences yet. Keep playing.
-        </div>
-      </div>
-    );
+function clampPct(v: number): number {
+  const x = Math.round(n0(v, 0));
+  return x < 0 ? 0 : x > 100 ? 100 : x;
+}
+
+function clampMinMax(v: number, min: number, max: number): number {
+  const x = n0(v, min);
+  return x < min ? min : x > max ? max : x;
+}
+
+// ── Formatters ────────────────────────────────────────────────────────────────
+
+function fmt(n: number): string {
+  const x = n0(n, 0);
+  const s = x < 0 ? '-' : '';
+  const v = Math.abs(x);
+
+  if (v >= 1_000_000) return `${s}$${(v / 1e6).toFixed(2)}M`;
+  if (v >= 1_000) return `${s}$${(v / 1e3).toFixed(1)}K`;
+  return `${s}$${Math.round(v).toLocaleString()}`;
+}
+
+function fmtCord(n: number): string {
+  return n0(n, 0).toFixed(1);
+}
+
+function fmtDelta(n: number): string {
+  const sign = n >= 0 ? '+' : '';
+  return `${sign}${fmtCord(n)}`;
+}
+
+// ── ✅ Shields (fixes TS2322 by not using ShieldIcons shields=) ───────────────
+
+const ShieldPips = memo(function ShieldPips({ count }: { count: number }) {
+  const n = Math.max(0, Math.floor(Number.isFinite(count) ? count : 0));
+
+  if (n === 0) {
+    return <div style={{ fontFamily: C.mono, fontSize: FS.xs, color: C.textDim }}>0 shields</div>;
   }
 
   return (
-    <div className="rounded-xl border p-4" style={{ background: '#08000D', borderColor: '#B57BFF22' }}>
-      <div className="text-[#B57BFF] text-xs font-bold tracking-widest uppercase mb-3">
-        Divergence Points
-      </div>
-      <div className="space-y-2 max-h-48 overflow-auto">
-        {[...points].reverse().map((pt) => (
+    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }} aria-label={`${n} shields`}>
+      {Array.from({ length: n }).map((_, i) => (
+        <span
+          key={i}
+          style={{
+            width: 18,
+            height: 18,
+            borderRadius: 6,
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            border: `1px solid ${C.goldBrd}`,
+            background: C.goldDim,
+            color: C.gold,
+            fontFamily: C.mono,
+            fontSize: '11px',
+            fontWeight: 900,
+            lineHeight: 1,
+          }}
+        >
+          🛡
+        </span>
+      ))}
+    </div>
+  );
+});
+
+// ── Types ─────────────────────────────────────────────────────────────────────
+
+export interface LegendRecord {
+  id: string;
+  displayName: string;
+  grade: 'A' | 'B' | 'C' | 'D' | 'F';
+  cordScore: number; // 0.0 – 1.50 (design contract)
+  finalNetWorth: number;
+  decayLevel: number; // 0 = fresh
+  communityRunsSince: number;
+  effectiveHeatModifier: number; // additive heat from community runs
+  isChallengerSlot: boolean; // false = THE Legend, true = Challenger
+  challengerRank?: 1 | 2 | 3;
+  beatRate: number; // 0.0 – 1.0
+  challengeCount: number;
+  survivorScore: number; // 1–100
+  seasonLabel: string;
+  proofHash: string;
+}
+
+export interface LegendMarker {
+  tick: number;
+  type: keyof typeof MARKER_COLORS;
+  tickPct: number; // 0–1
+}
+
+export interface GhostDelta {
+  cordGap: number; // negative = behind, positive = ahead
+  netWorthGap: number;
+  cordGapPct: number; // % of legend's CORD
+  isAhead: boolean;
+  gapZone: 'GAINING' | 'NEUTRAL' | 'LOSING' | 'CRITICAL';
+  closingRate: 'GAINING' | 'NEUTRAL' | 'WIDENING'; // 10-tick direction
+  drivingComponent: string; // e.g. "Decision Speed: -0.08"
+  closeableWindow: number; // ticks where gap is still closeable
+  pressureIntensity: number; // 0–1
+}
+
+export interface CordComponentScore {
+  label: string;
+  playerScore: number;
+  ghostScore: number;
+  weight: number;
+}
+
+export interface PhantomGameScreenProps {
+  // Core financials
+  cash: number;
+  netWorth: number;
+  income: number;
+  expenses: number;
+  regime: MarketRegime;
+  intelligence: IntelligenceState;
+  tick: number;
+  totalTicks: number;
+  freezeTicks: number;
+  shields: number;
+  equityHistory: number[];
+
+  // Phantom-specific
+  legend: LegendRecord;
+  ghostDelta: GhostDelta;
+  markers: LegendMarker[];
+  cordComponents: CordComponentScore[];
+
+  // Ghost vision — last card type played by legend (not outcome)
+  ghostVisionCardType?: string;
+  ghostVisionTick?: number;
+
+  // Dynasty stack — challengers also in play
+  dynastyChallengers?: Pick<LegendRecord, 'id' | 'displayName' | 'cordScore' | 'challengerRank'>[];
+  dynastyBeaten?: string[]; // IDs of challengers already beaten this run
+
+  // Current player CORD (live)
+  playerCord: number;
+
+  // Proof preview — what badge you'd earn right now
+  wouldEarnProof: boolean;
+  proofBadgeType?: 'CHALLENGER' | 'LEGEND' | 'DYNASTY';
+
+  // Callbacks
+  onGhostVisionExpand?: () => void;
+}
+
+// ── Sub-components ────────────────────────────────────────────────────────────
+
+const LegendHeader = memo(function LegendHeader({
+  legend,
+  playerCord,
+  wouldEarnProof,
+  proofBadgeType,
+}: {
+  legend: LegendRecord;
+  playerCord: number;
+  wouldEarnProof: boolean;
+  proofBadgeType?: string;
+}) {
+  const gradeColor: Record<string, string> = {
+    A: C.gold,
+    B: C.green,
+    C: C.blue,
+    D: C.orange,
+    F: C.red,
+  };
+
+  const decayColor =
+    legend.decayLevel === 0
+      ? C.green
+      : legend.decayLevel <= 2
+        ? C.gold
+        : legend.decayLevel <= 5
+          ? C.orange
+          : C.crimson;
+
+  const cordDelta = n0(playerCord, 0) - n0(legend.cordScore, 0);
+  const cordDeltaColor = cordDelta >= 0 ? C.green : Math.abs(cordDelta) >= 0.2 ? C.red : C.orange;
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap', flex: 1 }} aria-label="Legend header">
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <span
+          style={{
+            fontSize: FS.xl,
+            lineHeight: 1,
+            animation: 'ghostPulse 3s ease-in-out infinite',
+            display: 'inline-block',
+          }}
+          aria-hidden="true"
+        >
+          👻
+        </span>
+
+        <div>
           <div
-            key={`${pt.tick}-${pt.label}`}
-            className="flex items-start gap-3 px-3 py-2 rounded-lg border text-xs"
-            style={{ borderColor: '#B57BFF22', background: '#B57BFF08' }}
+            style={{
+              fontFamily: C.display,
+              fontSize: FS.lg,
+              fontWeight: 800,
+              color: C.purple,
+              letterSpacing: '0.04em',
+              lineHeight: 1.1,
+            }}
           >
-            <span className="text-[#B57BFF66] font-mono shrink-0">T{pt.tick}</span>
-            <span className="flex-1 text-[#ccc]">{pt.label}</span>
-            <span
-              className="font-mono shrink-0 font-bold"
-              style={{ color: pt.localDeltaAfter >= 0 ? '#00E5C8' : '#FF4444' }}
-            >
-              {pt.localDeltaAfter >= 0 ? '+' : ''}{fmt(pt.localDeltaAfter)}
-            </span>
-            <span
-              className="px-1.5 py-0.5 rounded text-[9px] font-bold shrink-0"
-              style={{
-                color: pt.impactScore >= 70 ? '#FF4444' : pt.impactScore >= 40 ? '#FF8800' : '#888',
-                background: pt.impactScore >= 70 ? '#FF000011' : '#00000022',
-                border: `1px solid ${pt.impactScore >= 70 ? '#FF444422' : '#22222222'}`,
-              }}
-            >
-              {pt.impactScore}
-            </span>
+            {legend.isChallengerSlot ? `CHALLENGER #${legend.challengerRank}` : 'THE LEGEND'}
+          </div>
+
+          <div style={{ fontFamily: C.mono, fontSize: FS.xs, color: C.textSub, letterSpacing: '0.08em' }}>
+            {legend.displayName} · {legend.seasonLabel}
+          </div>
+        </div>
+      </div>
+
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          background: 'rgba(155,125,255,0.08)',
+          border: '1px solid rgba(155,125,255,0.20)',
+          borderRadius: 8,
+          padding: '6px 12px',
+          flexShrink: 0,
+        }}
+        aria-label="Legend cord"
+      >
+        <span
+          style={{
+            fontFamily: C.display,
+            fontSize: FS.xl,
+            fontWeight: 900,
+            color: gradeColor[legend.grade] ?? C.textPrime,
+            lineHeight: 1,
+          }}
+        >
+          {legend.grade}
+        </span>
+
+        <div>
+          <div style={{ fontFamily: C.mono, fontSize: FS.xs, color: C.textDim, letterSpacing: '0.1em' }}>CORD</div>
+          <div style={{ fontFamily: C.mono, fontSize: FS.md, fontWeight: 700, color: C.textPrime }}>
+            {fmtCord(legend.cordScore)}
+          </div>
+        </div>
+
+        <div style={{ marginLeft: 6, textAlign: 'right' }}>
+          <div style={{ fontFamily: C.mono, fontSize: '9px', color: C.textDim, letterSpacing: '0.1em' }}>Δ</div>
+          <div style={{ fontFamily: C.mono, fontSize: FS.xs, fontWeight: 800, color: cordDeltaColor }}>
+            {fmtDelta(cordDelta)}
+          </div>
+        </div>
+      </div>
+
+      {legend.decayLevel > 0 && (
+        <div
+          style={{
+            fontFamily: C.mono,
+            fontSize: FS.xs,
+            fontWeight: 700,
+            color: decayColor,
+            background: `${decayColor}15`,
+            border: `1px solid ${decayColor}40`,
+            padding: '4px 10px',
+            borderRadius: 6,
+            letterSpacing: '0.08em',
+            flexShrink: 0,
+          }}
+        >
+          ☠ DECAY ×{legend.decayLevel}
+        </div>
+      )}
+
+      {legend.effectiveHeatModifier > 0 && (
+        <div
+          style={{
+            fontFamily: C.mono,
+            fontSize: FS.xs,
+            color: C.orange,
+            background: 'rgba(255,155,47,0.10)',
+            border: '1px solid rgba(255,155,47,0.25)',
+            padding: '4px 10px',
+            borderRadius: 6,
+            flexShrink: 0,
+          }}
+        >
+          🔥 +{n0(legend.effectiveHeatModifier, 0).toFixed(0)} HEAT
+        </div>
+      )}
+
+      {wouldEarnProof && proofBadgeType && (
+        <div
+          style={{
+            fontFamily: C.mono,
+            fontSize: FS.xs,
+            fontWeight: 700,
+            color: C.gold,
+            background: C.goldDim,
+            border: `1px solid ${C.goldBrd}`,
+            padding: '4px 10px',
+            borderRadius: 6,
+            letterSpacing: '0.1em',
+            animation: 'pulseBadge 1.5s infinite',
+            flexShrink: 0,
+          }}
+          aria-label="Proof badge incoming"
+        >
+          ✦ {proofBadgeType} INCOMING
+        </div>
+      )}
+    </div>
+  );
+});
+
+const GapIndicatorPanel = memo(function GapIndicatorPanel({ delta }: { delta: GhostDelta }) {
+  const zoneCfg = GAP_ZONE_CONFIG[delta.gapZone] ?? GAP_ZONE_CONFIG.NEUTRAL;
+  const panelClass = PANEL_CLASS_FOR_GAP[delta.gapZone] ?? 'pgs-panel pgs-panel--purple';
+
+  const cordGap = n0(delta.cordGap, 0);
+  const cordGapPctAbs = Math.abs(n0(delta.cordGapPct, 0) * 100);
+  const isAhead = !!delta.isAhead;
+
+  const deltaColor = isAhead ? C.green : Math.abs(cordGap) > 0.2 ? C.red : C.orange;
+
+  const closingArrow = delta.closingRate === 'GAINING' ? '↑' : delta.closingRate === 'WIDENING' ? '↓' : '→';
+  const closingColor = delta.closingRate === 'GAINING' ? C.green : delta.closingRate === 'WIDENING' ? C.red : C.textDim;
+
+  const closeableWindow = Math.max(0, Math.floor(n0(delta.closeableWindow, 0)));
+  const windowColor =
+    closeableWindow > 60 ? C.green : closeableWindow > 30 ? C.gold : closeableWindow > 10 ? C.orange : C.crimson;
+
+  return (
+    <div className={panelClass} aria-label="Gap indicator">
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+        <div>
+          <div className="pgs-label pgs-label--dim">CORD DELTA</div>
+          <div className="pgs-delta-number" style={{ color: deltaColor }}>
+            {fmtDelta(cordGap)}
+          </div>
+          <div style={{ fontFamily: C.mono, fontSize: FS.xs, color: C.textDim, marginTop: 4 }}>
+            {isAhead ? 'AHEAD OF GHOST' : 'BEHIND GHOST'} · {cordGapPctAbs.toFixed(1)}%
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 8 }}>
+          <div
+            className="pgs-gap-zone"
+            style={{ color: zoneCfg.color, background: zoneCfg.bg, borderColor: `${zoneCfg.color}50` }}
+            aria-label={`Gap zone ${zoneCfg.label}`}
+          >
+            <span aria-hidden="true">{zoneCfg.icon}</span>
+            {zoneCfg.label}
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontFamily: C.mono, fontSize: FS.xs, color: C.textDim }}>CLOSING RATE</span>
+            <span style={{ fontFamily: C.display, fontSize: FS.lg, fontWeight: 800, color: closingColor }}>{closingArrow}</span>
+          </div>
+        </div>
+      </div>
+
+      <div
+        style={{
+          marginTop: 12,
+          padding: '8px 12px',
+          background: 'rgba(155,125,255,0.06)',
+          borderRadius: 6,
+          border: '1px solid rgba(155,125,255,0.10)',
+        }}
+      >
+        <div style={{ fontFamily: C.mono, fontSize: FS.xs, color: C.textDim, marginBottom: 3 }}>DRIVING GAP</div>
+        <div style={{ fontFamily: C.mono, fontSize: FS.sm, color: C.textPrime, fontWeight: 600 }}>{delta.drivingComponent}</div>
+      </div>
+
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 10 }}>
+        <span style={{ fontFamily: C.mono, fontSize: FS.xs, color: C.textDim }}>CLOSEABLE WINDOW</span>
+        <span style={{ fontFamily: C.mono, fontSize: FS.md, fontWeight: 700, color: windowColor }}>
+          {closeableWindow > 0 ? `${closeableWindow}t` : 'CLOSED'}
+        </span>
+      </div>
+    </div>
+  );
+});
+
+const CordComponentBreakdown = memo(function CordComponentBreakdown({
+  components,
+  playerCord,
+  legendCord,
+}: {
+  components: CordComponentScore[];
+  playerCord: number;
+  legendCord: number;
+}) {
+  const safeLegendCord = Math.max(0.01, n0(legendCord, 0.01));
+  const safePlayerCord = Math.max(0, n0(playerCord, 0));
+
+  const overallPct = clampMinMax((safePlayerCord / safeLegendCord) * 100, 0, 100);
+
+  return (
+    <div className="pgs-panel" aria-label="CORD breakdown">
+      <div className="pgs-label">CORD BREAKDOWN — YOU vs LEGEND</div>
+
+      <div style={{ marginBottom: 14 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+          <span style={{ fontFamily: C.mono, fontSize: FS.xs, color: C.textDim }}>YOUR CORD</span>
+          <span style={{ fontFamily: C.mono, fontSize: FS.md, fontWeight: 700, color: C.purple }}>
+            {fmtCord(safePlayerCord)} <span style={{ color: C.textDim, fontSize: FS.xs }}>/ {fmtCord(safeLegendCord)}</span>
+          </span>
+        </div>
+
+        <div className="pgs-cord-bar-track" aria-label="Overall CORD bar">
+          <div
+            className="pgs-cord-bar-fill"
+            style={{
+              width: `${overallPct.toFixed(1)}%`,
+              background: safePlayerCord >= safeLegendCord ? C.green : C.purple,
+            }}
+          />
+        </div>
+      </div>
+
+      {components.map((comp) => {
+        const p = clamp01(comp.playerScore);
+        const g = clamp01(comp.ghostScore);
+
+        const pct = clampMinMax(p * 100, 0, 100);
+        const gPct = clampMinMax(g * 100, 0, 100);
+
+        const isAhead = p >= g;
+        const barColor = isAhead ? C.green : C.orange;
+
+        return (
+          <div key={comp.label} style={{ marginBottom: 10 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
+              <span style={{ fontFamily: C.mono, fontSize: FS.xs, color: C.textSub }}>{comp.label}</span>
+              <span style={{ fontFamily: C.mono, fontSize: FS.xs, fontWeight: 700, color: isAhead ? C.green : C.orange }}>
+                {pct.toFixed(0)} <span style={{ color: C.textDim }}>/ {gPct.toFixed(0)}</span>
+              </span>
+            </div>
+
+            <div className="pgs-cord-bar-track" aria-label={`${comp.label} bar`}>
+              <div
+                style={{
+                  position: 'absolute',
+                  left: `${gPct}%`,
+                  top: 0,
+                  bottom: 0,
+                  width: 1.5,
+                  background: 'rgba(155,125,255,0.40)',
+                  zIndex: 2,
+                }}
+                aria-hidden="true"
+              />
+              <div className="pgs-cord-bar-fill" style={{ width: `${pct}%`, background: barColor }} />
+            </div>
+          </div>
+        );
+      })}
+
+      <div style={{ fontFamily: C.mono, fontSize: FS.xs, color: C.textDim, marginTop: 8 }}>
+        Purple line = Ghost score per component
+      </div>
+    </div>
+  );
+});
+
+const LegendMarkerTimeline = memo(function LegendMarkerTimeline({
+  markers,
+  tick,
+  totalTicks,
+  onMarkerHover,
+}: {
+  markers: LegendMarker[];
+  tick: number;
+  totalTicks: number;
+  onMarkerHover?: (marker: LegendMarker | null) => void;
+}) {
+  const safeTotal = Math.max(1, Math.floor(n0(totalTicks, 1)));
+  const safeTick = clampMinMax(Math.floor(n0(tick, 0)), 0, safeTotal);
+
+  const progressPct = clampMinMax((safeTick / safeTotal) * 100, 0, 100);
+
+  const sortedMarkers = useMemo(() => {
+    const ms = Array.isArray(markers) ? markers.slice() : [];
+    ms.sort((a, b) => n0(a.tick, 0) - n0(b.tick, 0));
+    return ms;
+  }, [markers]);
+
+  return (
+    <div className="pgs-panel pgs-panel--purple" aria-label="Legend markers timeline">
+      <div className="pgs-label">LEGEND MARKERS — GHOST TIMELINE</div>
+
+      <div className="pgs-timeline">
+        <div className="pgs-timeline-track">
+          <div className="pgs-timeline-fill" style={{ width: `${progressPct}%` }} />
+        </div>
+
+        <div
+          style={{
+            position: 'absolute',
+            left: `${progressPct}%`,
+            top: '50%',
+            transform: 'translate(-50%,-50%)',
+            width: 2,
+            height: '80%',
+            background: C.purple,
+            borderRadius: 1,
+            zIndex: 3,
+          }}
+          aria-hidden="true"
+        />
+
+        {sortedMarkers.map((m) => {
+          const leftPct = clampMinMax(n0(m.tickPct, 0) * 100, 0, 100);
+          const markerColor = MARKER_COLORS[m.type] ?? C.textDim;
+          const isPast = n0(m.tick, 0) <= safeTick;
+
+          return (
+            <div
+              key={`${m.tick}-${m.type}`}
+              className="pgs-timeline-marker"
+              title={MARKER_LABELS[m.type] ?? m.type}
+              style={{ left: `${leftPct}%`, background: markerColor, opacity: isPast ? 1 : 0.4 }}
+              onMouseEnter={() => onMarkerHover?.(m)}
+              onMouseLeave={() => onMarkerHover?.(null)}
+              onFocus={() => onMarkerHover?.(m)}
+              onBlur={() => onMarkerHover?.(null)}
+              tabIndex={0}
+              role="button"
+              aria-label={MARKER_LABELS[m.type] ?? m.type}
+            />
+          );
+        })}
+      </div>
+
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 12px', marginTop: 10 }}>
+        {Object.entries(MARKER_LABELS).map(([type, label]) => (
+          <div key={type} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+            <div className="pgs-marker-dot" style={{ background: MARKER_COLORS[type] ?? C.textDim, flexShrink: 0 }} />
+            <span style={{ fontFamily: C.mono, fontSize: FS.xs, color: C.textDim }}>{label}</span>
           </div>
         ))}
       </div>
     </div>
   );
-}
+});
 
-function ProofBadgeProgress({
-  proofEarned,
-  tick,
-  totalTicks,
-  ghostIsAlive,
-  delta,
+const GhostVisionCard = memo(function GhostVisionCard({
+  cardType,
+  atTick,
+  onExpand,
 }: {
-  proofEarned: boolean;
-  tick: number;
-  totalTicks: number;
-  ghostIsAlive: boolean;
-  delta: number;
+  cardType: string;
+  atTick: number;
+  onExpand?: () => void;
 }) {
-  const pct = (tick / totalTicks) * 100;
-
-  if (proofEarned) {
-    return (
-      <div
-        className="rounded-xl border p-4 text-center"
-        style={{ background: '#08000D', borderColor: '#B57BFF66' }}
-      >
-        <div className="text-4xl mb-2">🏅</div>
-        <div className="text-[#B57BFF] font-black text-lg tracking-widest uppercase">
-          PROOF BADGE EARNED
-        </div>
-        <div className="text-[#888] text-xs mt-1">
-          You outperformed a verified champion on this seed.
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div
-      className="rounded-xl border p-4"
-      style={{ background: '#08000D', borderColor: '#B57BFF22' }}
+      style={{
+        background: 'rgba(155,125,255,0.06)',
+        border: '1px solid rgba(155,125,255,0.22)',
+        borderRadius: 10,
+        padding: '12px 14px',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 12,
+        flexWrap: 'wrap',
+      }}
+      aria-label="Ghost vision"
     >
-      <div className="flex items-center justify-between mb-3">
-        <span className="text-[#B57BFF] text-xs font-bold tracking-widest uppercase">Proof Badge</span>
-        <span className="text-[#888] text-xs">{Math.round(pct)}% complete</span>
+      <span style={{ fontSize: FS.xl, flexShrink: 0 }} aria-hidden="true">
+        👁
+      </span>
+
+      <div style={{ flex: 1 }}>
+        <div style={{ fontFamily: C.mono, fontSize: FS.xs, color: C.textDim, marginBottom: 3 }}>
+          GHOST VISION — t{Math.max(0, Math.floor(n0(atTick, 0)))}
+        </div>
+        <div style={{ fontFamily: C.mono, fontSize: FS.sm, fontWeight: 700, color: C.purple }}>
+          Legend played: <span style={{ color: C.textPrime }}>{cardType}</span>
+        </div>
+        <div style={{ fontFamily: C.mono, fontSize: FS.xs, color: C.textDim, marginTop: 2 }}>
+          Outcome hidden. Type is intelligence.
+        </div>
       </div>
 
-      <div className="h-2 bg-[#1a001a] rounded-full overflow-hidden mb-2">
-        <div
-          className="h-full rounded-full transition-all duration-500"
-          style={{
-            width: `${pct}%`,
-            background: delta >= 0 ? 'linear-gradient(90deg, #660088, #B57BFF)' : 'linear-gradient(90deg, #440022, #FF4444)',
-          }}
-        />
+      {onExpand && (
+        <button type="button" className="pgs-btn" style={{ minHeight: 36, padding: '0 12px', fontSize: FS.xs }} onClick={onExpand}>
+          CONTEXT
+        </button>
+      )}
+    </div>
+  );
+});
+
+const DynastyPanel = memo(function DynastyPanel({
+  challengers,
+  beaten,
+  playerCord,
+}: {
+  challengers: Pick<LegendRecord, 'id' | 'displayName' | 'cordScore' | 'challengerRank'>[];
+  beaten: string[];
+  playerCord: number;
+}) {
+  if (challengers.length === 0) return null;
+
+  const player = n0(playerCord, 0);
+  const beatenSet = useMemo(() => new Set(beaten), [beaten]);
+
+  return (
+    <div className="pgs-panel" aria-label="Dynasty challenge">
+      <div className="pgs-label">DYNASTY CHALLENGE</div>
+
+      <div style={{ fontFamily: C.mono, fontSize: FS.xs, color: C.textDim, marginBottom: 10 }}>
+        Beat ALL challengers + Legend to claim Dynasty Badge
       </div>
 
-      <div className="text-[10px] text-[#666] text-center">
-        {delta >= 0
-          ? '🎯 Ahead of ghost — hold it through the end to earn the badge'
-          : '⚠️ Behind ghost — close the gap before tick 720'}
-      </div>
+      {challengers.map((c) => {
+        const isBeat = beatenSet.has(c.id);
+        const gap = player - n0(c.cordScore, 0);
+        const isAhead = gap > 0;
 
-      {!ghostIsAlive && (
-        <div className="mt-2 text-[10px] text-[#B57BFF88] text-center">
-          Ghost bankrupt — any positive net worth at end earns badge
+        return (
+          <div key={c.id} className="pgs-ghost-row">
+            <span
+              style={{
+                fontFamily: C.mono,
+                fontSize: FS.xs,
+                fontWeight: 700,
+                color: isBeat ? C.green : C.textDim,
+                background: isBeat ? 'rgba(46,232,154,0.12)' : 'rgba(255,255,255,0.05)',
+                border: `1px solid ${isBeat ? 'rgba(46,232,154,0.25)' : C.brdLow}`,
+                padding: '3px 8px',
+                borderRadius: 4,
+                flexShrink: 0,
+              }}
+            >
+              {isBeat ? '✓ BEATEN' : `#${c.challengerRank}`}
+            </span>
+
+            <span style={{ fontFamily: C.mono, fontSize: FS.xs, color: C.textSub, flex: 1 }}>{c.displayName}</span>
+
+            <span style={{ fontFamily: C.mono, fontSize: FS.xs, fontWeight: 600, color: isAhead ? C.green : C.orange }}>
+              {fmtDelta(gap)}
+            </span>
+          </div>
+        );
+      })}
+
+      {beaten.length === challengers.length && (
+        <div className="pgs-dynasty-badge" style={{ marginTop: 10 }}>
+          <span style={{ fontSize: FS.lg }} aria-hidden="true">
+            🏆
+          </span>
+          <div>
+            <div style={{ fontFamily: C.display, fontSize: FS.md, fontWeight: 800, color: C.gold }}>DYNASTY WINDOW OPEN</div>
+            <div style={{ fontFamily: C.mono, fontSize: FS.xs, color: C.textDim, marginTop: 2 }}>
+              Beat The Legend to claim Dynasty Badge
+            </div>
+          </div>
         </div>
       )}
     </div>
   );
-}
+});
 
-// ─── Props ──────────────────────────────────────────────────────────────────
-
-export interface PhantomGameScreenProps {
-  cash: number;
-  income: number;
-  expenses: number;
-  netWorth: number;
-  shields: number;
-  tick: number;
-  totalTicks: number;
-  freezeTicks: number;
-  regime: MarketRegime;
-  intelligence: IntelligenceState;
-  equityHistory: number[];
-  events: string[];
-  replayEvents: ReplayEvent[];
-  modeState: GameModeState | null;
-  seed: number;
-}
-
-// ─── Main component ──────────────────────────────────────────────────────────
-
-export default function PhantomGameScreen({
-  cash, income, expenses, netWorth, shields,
-  tick, totalTicks, freezeTicks, regime, intelligence, equityHistory,
-  events, replayEvents, modeState, seed,
-}: PhantomGameScreenProps) {
-  const phantom       = modeState?.phantom;
-  const ghostNW       = phantom?.ghostNetWorth   ?? netWorth * 1.15;   // ghost ~15% ahead if no data
-  const localNW       = phantom?.localNetWorth   ?? netWorth;
-  const delta         = phantom?.delta           ?? (localNW - ghostNW);
-  const deltaPct      = phantom?.deltaPct        ?? ((delta / Math.max(1, ghostNW)) * 100);
-  const ghostIsAlive  = phantom?.ghostIsAlive    ?? true;
-  const proofEarned   = phantom?.proofBadgeEarned ?? false;
-  const divergences   = phantom?.divergencePoints ?? [];
-  const grade         = phantom?.championGrade   ?? 'A';
-
-  // Build a ghost equity history (approximated from ghostNW + slight offset)
-  const ghostHistory = useMemo(() => {
-    return equityHistory.map((v, i) => {
-      const progress = i / Math.max(1, equityHistory.length - 1);
-      return v * (1 + 0.15 * progress);  // ghost 15% better over time
-    });
-  }, [equityHistory]);
+const ProofCardPreview = memo(function ProofCardPreview({
+  legend,
+  playerCord,
+  proofBadgeType,
+  wouldEarnProof,
+}: {
+  legend: LegendRecord;
+  playerCord: number;
+  proofBadgeType?: string;
+  wouldEarnProof: boolean;
+}) {
+  const legendCord = Math.max(0.01, n0(legend.cordScore, 0.01));
+  const player = n0(playerCord, 0);
+  const gapPct = ((player - legendCord) / legendCord) * 100;
 
   return (
-    <div
-      className="min-h-screen flex flex-col"
-      style={{ background: 'linear-gradient(135deg, #08000D 0%, #0A0012 50%, #060009 100%)' }}
-    >
-      {/* ── Mode Banner ─────────────────────────────────────────────── */}
+    <div className={`pgs-proof-card ${wouldEarnProof ? 'pgs-panel--purple' : ''}`} aria-label="Proof card preview">
+      <div className="pgs-label" style={{ marginBottom: 8 }}>
+        {wouldEarnProof ? '✦ PROOF BADGE — WOULD EARN' : 'PROOF CARD PREVIEW'}
+      </div>
+
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', flexWrap: 'wrap', gap: 12 }}>
+        <div>
+          <div style={{ fontFamily: C.mono, fontSize: FS.xs, color: C.textDim }}>VS LEGEND</div>
+          <div style={{ fontFamily: C.mono, fontSize: FS.md, fontWeight: 700, color: gapPct >= 0 ? C.green : C.orange }}>
+            {gapPct >= 0 ? '+' : ''}
+            {gapPct.toFixed(1)}%
+          </div>
+        </div>
+
+        <div style={{ textAlign: 'right' }}>
+          <div style={{ fontFamily: C.mono, fontSize: FS.xs, color: C.textDim }}>BADGE TYPE</div>
+          <div style={{ fontFamily: C.display, fontSize: FS.lg, fontWeight: 800, color: proofBadgeType === 'DYNASTY' ? C.gold : C.purple }}>
+            {proofBadgeType ?? 'NONE'}
+          </div>
+        </div>
+      </div>
+
       <div
-        className="flex items-center gap-4 px-6 py-3 border-b"
-        style={{ borderColor: '#B57BFF22', background: '#08000D88' }}
+        style={{
+          marginTop: 12,
+          fontFamily: C.mono,
+          fontSize: '9px',
+          color: C.textDim,
+          letterSpacing: '0.12em',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+        }}
+        title={legend.proofHash}
       >
-        <div
-          className="px-3 py-1 rounded text-xs font-black tracking-widest"
-          style={{ background: '#B57BFF22', border: '1px solid #B57BFF44', color: '#B57BFF' }}
-        >
-          👻 PHANTOM
-        </div>
-        <span className="text-[#888] text-xs">Same market, same events. The only variable is the quality of your decisions.</span>
-        <div className="ml-auto flex items-center gap-4 text-xs font-mono">
-          <span style={{ color: GRADE_COLOR[grade] ?? '#888' }}>
-            CHAMPION GRADE {grade}
-          </span>
-          <span className="text-[#555]">SEED {seed}</span>
-        </div>
-      </div>
-
-      {/* ── Main Content ────────────────────────────────────────────── */}
-      <div className="flex-1 p-4 space-y-4">
-
-        {/* Delta Display (dominant element) */}
-        <DeltaDisplay
-          delta={delta}
-          deltaPct={deltaPct}
-          localNetWorth={localNW}
-          ghostNetWorth={ghostNW}
-          ghostIsAlive={ghostIsAlive}
-        />
-
-        {/* Dual Chart + Divergence */}
-        <div className="grid grid-cols-1 xl:grid-cols-[1.4fr_0.6fr] gap-4">
-          <div
-            className="rounded-xl border p-4"
-            style={{ background: '#08000D', borderColor: '#B57BFF22' }}
-          >
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-[#B57BFF] text-xs font-bold tracking-widest uppercase">
-                Equity Race — You vs Champion
-              </span>
-              <span className="text-[#555] text-xs font-mono">T{tick}/{totalTicks}</span>
-            </div>
-            <DualEquityChart localHistory={equityHistory} ghostHistory={ghostHistory} h={130} />
-          </div>
-
-          <DivergenceLog points={divergences} />
-        </div>
-
-        {/* Proof badge progress */}
-        <ProofBadgeProgress
-          proofEarned={proofEarned}
-          tick={tick}
-          totalTicks={totalTicks}
-          ghostIsAlive={ghostIsAlive}
-          delta={delta}
-        />
-
-        {/* GameBoard (supporting) */}
-        <GameBoard
-          equityHistory={equityHistory}
-          cash={cash}
-          netWorth={netWorth}
-          income={income}
-          expenses={expenses}
-          regime={regime}
-          intelligence={intelligence}
-          tick={tick}
-          totalTicks={totalTicks}
-          freezeTicks={freezeTicks}
-        />
-
-        {/* Replay timeline */}
-        {replayEvents.length > 0 && (
-          <div className="w-full">
-            <ReplayTimeline
-              events={replayEvents}
-              totalTicks={totalTicks}
-              finalNetWorth={netWorth}
-              seed={seed}
-            />
-          </div>
-        )}
-      </div>
-
-      {/* ── Moment Flash ────────────────────────────────────────────── */}
-      <div className="fixed bottom-4 right-4 w-80 z-50 pointer-events-none">
-        <MomentFlash events={events} tick={tick} maxVisible={3} />
+        GHOST: {String(legend.proofHash ?? '').slice(0, 32)}…
       </div>
     </div>
   );
-}
+});
+
+// ── Main component ────────────────────────────────────────────────────────────
+
+export const PhantomGameScreen = memo(function PhantomGameScreen(props: PhantomGameScreenProps) {
+  const {
+    cash,
+    netWorth,
+    income,
+    expenses,
+    regime,
+    intelligence,
+    tick,
+    totalTicks,
+    freezeTicks,
+    shields,
+    equityHistory,
+    legend,
+    ghostDelta,
+    markers,
+    cordComponents,
+    ghostVisionCardType,
+    ghostVisionTick,
+    dynastyChallengers = [],
+    dynastyBeaten = [],
+    playerCord,
+    wouldEarnProof,
+    proofBadgeType,
+    onGhostVisionExpand,
+  } = props;
+
+  const [hoveredMarker, setHoveredMarker] = useState<LegendMarker | null>(null);
+  const cashflow = useMemo(() => n0(income, 0) - n0(expenses, 0), [income, expenses]);
+
+  const handleGhostExpand = useCallback(() => {
+    onGhostVisionExpand?.();
+  }, [onGhostVisionExpand]);
+
+  const handleMarkerHover = useCallback((m: LegendMarker | null) => {
+    setHoveredMarker(m);
+  }, []);
+
+  const beatRate = clamp01(n0(legend.beatRate, 0));
+  const beatRateColor = beatRate < 0.05 ? C.crimson : beatRate < 0.15 ? C.red : beatRate < 0.35 ? C.orange : C.green;
+
+  const safeTick = Math.max(0, Math.floor(n0(tick, 0)));
+  const safeTotal = Math.max(1, Math.floor(n0(totalTicks, 1)));
+
+  return (
+    <>
+      <style>{STYLES}</style>
+
+      <div className="pgs-root">
+        <div className="pgs-top-bar" role="banner">
+          <LegendHeader legend={legend} playerCord={playerCord} wouldEarnProof={wouldEarnProof} proofBadgeType={proofBadgeType} />
+
+          <div style={{ display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap', flexShrink: 0 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+              <span style={{ fontFamily: C.mono, fontSize: FS.xs, color: C.textDim, letterSpacing: '0.1em' }}>YOUR CORD</span>
+              <span style={{ fontFamily: C.display, fontSize: FS.lg, fontWeight: 800, color: n0(playerCord, 0) >= n0(legend.cordScore, 0) ? C.green : C.purple }}>
+                {fmtCord(playerCord)}
+              </span>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+              <span style={{ fontFamily: C.mono, fontSize: FS.xs, color: C.textDim, letterSpacing: '0.1em' }}>TICK</span>
+              <span style={{ fontFamily: C.mono, fontSize: FS.lg, fontWeight: 700, color: C.textPrime }}>
+                {safeTick}
+                <span style={{ color: C.textDim, fontSize: FS.xs }}>/{safeTotal}</span>
+              </span>
+            </div>
+
+            {freezeTicks > 0 && (
+              <div
+                role="status"
+                aria-live="polite"
+                style={{
+                  fontFamily: C.mono,
+                  fontSize: FS.sm,
+                  fontWeight: 700,
+                  color: C.blue,
+                  background: 'rgba(74,158,255,0.12)',
+                  border: '1px solid rgba(74,158,255,0.25)',
+                  padding: '4px 10px',
+                  borderRadius: 6,
+                  animation: 'pulseBadge 1.5s infinite',
+                }}
+              >
+                🧊 {Math.max(0, Math.floor(n0(freezeTicks, 0)))}t
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="pgs-grid" role="main">
+          <div className="pgs-col-main" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div className="pgs-panel pgs-panel--purple">
+              <div className="pgs-label">EQUITY CURVE</div>
+              <GameBoard
+                equityHistory={equityHistory}
+                cash={cash}
+                netWorth={netWorth}
+                income={income}
+                expenses={expenses}
+                regime={regime}
+                intelligence={intelligence}
+                tick={tick}
+                totalTicks={totalTicks}
+                freezeTicks={freezeTicks}
+              />
+            </div>
+
+            <LegendMarkerTimeline markers={markers} tick={tick} totalTicks={totalTicks} onMarkerHover={handleMarkerHover} />
+
+            {hoveredMarker && (
+              <div className="pgs-panel" style={{ borderColor: 'rgba(155,125,255,0.22)', background: 'rgba(155,125,255,0.05)' }} aria-label="Marker detail">
+                <div className="pgs-label pgs-label--dim">MARKER</div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+                  <div style={{ fontFamily: C.mono, fontSize: FS.sm, color: C.textPrime, fontWeight: 700 }}>
+                    {MARKER_LABELS[hoveredMarker.type] ?? hoveredMarker.type}
+                  </div>
+                  <div style={{ fontFamily: C.mono, fontSize: FS.sm, color: C.textDim }}>
+                    t{Math.max(0, Math.floor(n0(hoveredMarker.tick, 0)))}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div className="pgs-panel" aria-label="Financials">
+              <div className="pgs-label pgs-label--dim">FINANCIALS</div>
+
+              <div className="pgs-stat">
+                <span className="pgs-stat-key">Cash</span>
+                <span className="pgs-stat-val" style={{ color: n0(cash, 0) < 0 ? C.red : C.textPrime }}>
+                  {fmt(cash)}
+                </span>
+              </div>
+
+              <div className="pgs-stat">
+                <span className="pgs-stat-key">Net Worth</span>
+                <span className="pgs-stat-val">{fmt(netWorth)}</span>
+              </div>
+
+              <div className="pgs-stat">
+                <span className="pgs-stat-key">Income</span>
+                <span className="pgs-stat-val" style={{ color: C.green }}>
+                  {fmt(income)}
+                </span>
+              </div>
+
+              <div className="pgs-stat">
+                <span className="pgs-stat-key">Expenses</span>
+                <span className="pgs-stat-val" style={{ color: C.red }}>
+                  {fmt(expenses)}
+                </span>
+              </div>
+
+              <div className="pgs-stat">
+                <span className="pgs-stat-key">Cashflow</span>
+                <span className="pgs-stat-val" style={{ color: cashflow >= 0 ? C.green : C.red }}>
+                  {cashflow >= 0 ? '+' : ''}
+                  {fmt(cashflow)}/mo
+                </span>
+              </div>
+            </div>
+
+            <div className="pgs-panel" aria-label="Shields">
+              <div className="pgs-label pgs-label--dim">SHIELDS</div>
+              <ShieldPips count={shields} />
+            </div>
+          </div>
+
+          <div className="pgs-col-right">
+            <GapIndicatorPanel delta={ghostDelta} />
+
+            <CordComponentBreakdown components={cordComponents} playerCord={playerCord} legendCord={legend.cordScore} />
+
+            {ghostVisionCardType && ghostVisionTick != null && (
+              <GhostVisionCard cardType={ghostVisionCardType} atTick={ghostVisionTick} onExpand={handleGhostExpand} />
+            )}
+
+            {dynastyChallengers.length > 0 && <DynastyPanel challengers={dynastyChallengers} beaten={dynastyBeaten} playerCord={playerCord} />}
+
+            <div className="pgs-panel" aria-label="Legend record">
+              <div className="pgs-label pgs-label--dim">LEGEND RECORD</div>
+
+              <div className="pgs-stat">
+                <span className="pgs-stat-key">Final Net Worth</span>
+                <span className="pgs-stat-val">{fmt(legend.finalNetWorth)}</span>
+              </div>
+
+              <div className="pgs-stat">
+                <span className="pgs-stat-key">Beat Rate</span>
+                <span className="pgs-stat-val" style={{ color: beatRateColor }}>
+                  {(beatRate * 100).toFixed(1)}%
+                </span>
+              </div>
+
+              <div className="pgs-stat">
+                <span className="pgs-stat-key">Total Challenges</span>
+                <span className="pgs-stat-val">{Math.max(0, Math.floor(n0(legend.challengeCount, 0))).toLocaleString()}</span>
+              </div>
+
+              <div className="pgs-stat">
+                <span className="pgs-stat-key">Difficulty Score</span>
+                <span
+                  className="pgs-stat-val"
+                  style={{
+                    color:
+                      n0(legend.survivorScore, 0) >= 80
+                        ? C.crimson
+                        : n0(legend.survivorScore, 0) >= 60
+                          ? C.red
+                          : n0(legend.survivorScore, 0) >= 40
+                            ? C.orange
+                            : C.gold,
+                  }}
+                >
+                  {Math.max(0, Math.floor(n0(legend.survivorScore, 0)))}/100
+                </span>
+              </div>
+
+              <div className="pgs-stat">
+                <span className="pgs-stat-key">Community Heat +</span>
+                <span className="pgs-stat-val" style={{ color: C.orange }}>
+                  +{n0(legend.effectiveHeatModifier, 0).toFixed(0)}
+                </span>
+              </div>
+            </div>
+
+            <ProofCardPreview legend={legend} playerCord={playerCord} proofBadgeType={proofBadgeType} wouldEarnProof={wouldEarnProof} />
+          </div>
+        </div>
+      </div>
+    </>
+  );
+});
+
+export default PhantomGameScreen;

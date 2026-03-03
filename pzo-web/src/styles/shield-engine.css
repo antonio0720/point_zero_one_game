@@ -1,0 +1,251 @@
+
+/**
+ * FILE: /Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/pzo-web/src/styles/shield-engine.css
+ * Shield Engine visual layer — steel/teal palette.
+ * Layer color identity:
+ *   L1 LIQUIDITY_BUFFER  #4A9ECC  (steel blue)
+ *   L2 CREDIT_LINE       #4ACC7A  (growth green)
+ *   L3 ASSET_FLOOR       #C9A84C  (amber gold)
+ *   L4 NETWORK_CORE      #7B5EA7  (sovereign purple)
+ *
+ * Density6 LLC · Point Zero One · Engine 4 of 7 · Confidential
+ */
+
+/* ── Shield Stack Container ───────────────────────────────────────────────── */
+
+.shield-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  background: #1A1A2E;
+  border: 1px solid rgba(91, 141, 184, 0.3);
+  border-radius: 6px;
+  min-width: 200px;
+  position: relative;
+  overflow: hidden;
+}
+
+/* Fortified state — gold border shimmer, fires once on entry */
+.shield-stack--fortified {
+  border-color: rgba(201, 168, 76, 0.6);
+  animation: fortified-shimmer 2s ease-in-out forwards;
+}
+
+@keyframes fortified-shimmer {
+  0%   { box-shadow: none; }
+  50%  { box-shadow: 0 0 16px rgba(201, 168, 76, 0.4); }
+  100% { box-shadow: 0 0 8px rgba(201, 168, 76, 0.2); }
+}
+
+/* ── Stack Header ─────────────────────────────────────────────────────────── */
+
+.shield-stack__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.shield-stack__title {
+  font-size: 10px;
+  font-weight: bold;
+  color: #5B8DB8;
+  letter-spacing: 1px;
+  flex: 1;
+}
+
+.shield-stack__overall {
+  font-size: 11px;
+  font-weight: bold;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.shield-fortified-badge {
+  font-size: 9px;
+  font-weight: bold;
+  color: #C9A84C;
+  letter-spacing: 0.5px;
+  text-shadow: 0 0 6px rgba(201, 168, 76, 0.6);
+}
+
+/* ── Individual Layer ─────────────────────────────────────────────────────── */
+
+.shield-layer {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.shield-layer__label {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.shield-layer__name {
+  font-weight: 500;
+  letter-spacing: 0.3px;
+}
+
+.shield-layer__pct {
+  font-weight: bold;
+  font-variant-numeric: tabular-nums;
+}
+
+.shield-layer__track {
+  height: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.shield-layer__fill {
+  height: 100%;
+  border-radius: 3px;
+}
+
+.shield-layer__pts {
+  font-size: 9px;
+  color: rgba(255, 255, 255, 0.35);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Low Warning State (<30%) — flicker ───────────────────────────────────── */
+
+.shield-layer--low .shield-layer__fill {
+  animation: shield-flicker 0.5s ease-in-out infinite;
+}
+
+@keyframes shield-flicker {
+  0%, 100% { opacity: 1.0; }
+  50%       { opacity: 0.5; }
+}
+
+/* ── Critical Warning State (<10%) — red pulse ────────────────────────────── */
+
+.shield-layer--critical .shield-layer__fill {
+  background: #B92B27 !important;
+  animation: shield-crit-pulse 0.25s ease-in-out infinite;
+}
+
+.shield-layer--critical .shield-layer__pct {
+  color: #FF4444;
+}
+
+@keyframes shield-crit-pulse {
+  0%, 100% { opacity: 1.0; }
+  50%       { opacity: 0.3; }
+}
+
+/* ── Breached State (0%) ──────────────────────────────────────────────────── */
+
+.shield-layer--breached .shield-layer__track {
+  background: rgba(185, 43, 39, 0.15);
+}
+
+.shield-layer--breached .shield-layer__label {
+  color: rgba(255, 255, 255, 0.35);
+}
+
+.shield-breach-label {
+  font-size: 9px;
+  color: #B92B27;
+  font-weight: bold;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  animation: breach-blink 1s step-end infinite;
+}
+
+@keyframes breach-blink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0; }
+}
+
+/* ── Full-screen Breach Flash (L1/L2/L3 breaches) ────────────────────────── */
+
+.shield-breach-flash {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9999;
+  animation: breach-flash 0.8s ease-out forwards;
+}
+
+/* Layer-specific flash colors — set background via inline style */
+@keyframes breach-flash {
+  0%   { opacity: 0.6; }
+  20%  { opacity: 0.8; }
+  100% { opacity: 0; }
+}
+
+/* ── L4 Cascade Full-screen Flash (1.5s, blocks input) ──────────────────── */
+
+.shield-cascade-flash {
+  position: fixed;
+  inset: 0;
+  pointer-events: all; /* blocks input during cascade */
+  z-index: 9999;
+  background: rgba(185, 43, 39, 0.5);
+  animation: cascade-flash 1.5s ease-out forwards;
+}
+
+@keyframes cascade-flash {
+  0%   { opacity: 1.0; }
+  30%  { opacity: 0.7; }
+  100% { opacity: 0; }
+}
+
+/* ── Cascade Overlay Text ─────────────────────────────────────────────────── */
+
+.shield-cascade-overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: all;
+  z-index: 10000;
+  animation: cascade-flash 1.5s ease-out forwards;
+}
+
+.shield-cascade-overlay__text {
+  font-size: 28px;
+  font-weight: 900;
+  color: #FF4444;
+  letter-spacing: 4px;
+  text-transform: uppercase;
+  text-shadow: 0 0 24px rgba(255, 68, 68, 0.8);
+  animation: cascade-text-pulse 0.3s ease-in-out infinite alternate;
+}
+
+@keyframes cascade-text-pulse {
+  from { transform: scale(1.0); }
+  to   { transform: scale(1.04); }
+}
+
+/* ── Repair Flash ─────────────────────────────────────────────────────────── */
+
+.shield-layer--repairing .shield-layer__fill {
+  animation: repair-pulse 0.6s ease-in-out 2;
+}
+
+@keyframes repair-pulse {
+  0%, 100% { filter: brightness(1.0); }
+  50%       { filter: brightness(1.4); }
+}
+
+/* ── Any Critical — stack-level warning ───────────────────────────────────── */
+
+.shield-stack--any-critical {
+  border-color: rgba(185, 43, 39, 0.5);
+  animation: stack-critical-pulse 0.5s ease-in-out infinite;
+}
+
+@keyframes stack-critical-pulse {
+  0%, 100% { box-shadow: none; }
+  50%       { box-shadow: 0 0 10px rgba(185, 43, 39, 0.4); }
+}

@@ -1,159 +1,318 @@
-// ============================================================
-// POINT ZERO ONE DIGITAL — Demo Runner
-// Simulates a full run with AI auto-play for local testing
-// ============================================================
+// ═══════════════════════════════════════════════════════════════════════════════
+// POINT ZERO ONE — DEMO RUNNER  (v2 — FULL REWRITE)
+// pzo_engine/src/demo/run-demo.ts
+//
+// Entry point for the guided tutorial demo.
+//
+// ── WHAT THIS DEMO IS ──────────────────────────────────────────────────────────
+// An INTERACTIVE TUTORIAL that teaches players how Point Zero One works.
+// It is NOT a stress test. It is NOT a headless bench runner.
+// It is a NARRATIVE WALK-THROUGH of the game's core mechanics — executed
+// against real game logic (runReducer, game/types, game/core) so that
+// every number a player sees in this demo matches what they'll see in production.
+//
+// ── WHAT CHANGED FROM v1 ──────────────────────────────────────────────────────
+// v1 (dead): Imported from non-existent '../engine/game-engine' and '../engine/deck'.
+//            Used a flat 720-tick generic loop with no mode, no CORD, no sovereignty.
+//            Had no tutorial beats. Had no mode-specific AI. Dead code — never worked.
+//
+// v2 (this file):
+//   ✦ Imports from real paths: game/types, game/core, game/runtime, game/sovereignty
+//   ✦ DemoOrchestrator wraps the real runReducer — same state machine as production
+//   ✦ DemoNarrator handles all terminal display — rich ANSI panels
+//   ✦ DemoAI plays each mode with mode-specific strategy to teach core loops
+//   ✦ Tutorial beats fire at predetermined ticks — explain mechanics in context
+//   ✦ All 4 modes supported: EMPIRE, PREDATOR, SYNDICATE, PHANTOM
+//   ✦ Real CORD score calculation via game/sovereignty/cordCalculator
+//   ✦ Real proof hash via game/sovereignty/proofHash
+//   ✦ CLI menu for mode selection
+//   ✦ Deterministic seeds per mode for reproducible teaching runs
+//
+// ── HOW TO RUN ────────────────────────────────────────────────────────────────
+//   cd /path/to/pzo_engine
+//   npx ts-node src/demo/run-demo.ts                 # menu-driven mode select
+//   npx ts-node src/demo/run-demo.ts -- --mode EMPIRE  # direct mode select
+//   npx ts-node src/demo/run-demo.ts -- --mode all     # run all 4 modes
+//   npx ts-node src/demo/run-demo.ts -- --mode PREDATOR --fast  # silent fast
+//
+// ── ARCHITECTURE ──────────────────────────────────────────────────────────────
+//   run-demo.ts          → CLI entry, mode select, run loop
+//   DemoOrchestrator.ts  → State machine (wraps runReducer, no React deps)
+//   DemoAI.ts            → Mode-specific AI decisions with teaching rationale
+//   DemoNarrator.ts      → All terminal display (colors, panels, beats)
+//   demo-config.ts       → Seeds, beat definitions, AI configs
+//
+// Density6 LLC · Point Zero One · Confidential
+// ═══════════════════════════════════════════════════════════════════════════════
 
-import { GameEngine } from '../engine/game-engine';
-import { GameState } from '../engine/types';
-import { CARD_REGISTRY } from '../engine/deck';
+import * as readline from 'readline';
+import type { GameMode } from '../../../pzo-web/src/game/types/modes';
+import { DemoOrchestrator, type DemoRunState } from './DemoOrchestrator';
+import { DemoNarrator }                         from './DemoNarrator';
+import { DemoAI }                               from './DemoAI';
+import {
+  DEMO_TICK_BUDGET,
+  DEMO_TICK_DELAY_MS,
+  DEMO_REPORT_EVERY,
+} from './demo-config';
 
-const FAST_FORWARD = true;   // true = instant sim, false = real-time
-const PLAYER_ID    = 'demo-player-001';
-const DEMO_SEED    = 42;     // deterministic run
-
-// ─── TERMINAL COLORS ─────────────────────────────────────────
-const C = {
-  reset:  '\x1b[0m',
-  bold:   '\x1b[1m',
-  green:  '\x1b[32m',
-  red:    '\x1b[31m',
-  yellow: '\x1b[33m',
-  cyan:   '\x1b[36m',
-  magenta:'\x1b[35m',
-  gray:   '\x1b[90m',
-};
-
-function fmt(n: number, prefix = '$'): string {
-  const colored = n >= 0 ? C.green : C.red;
-  return `${colored}${prefix}${Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}${C.reset}`;
+// ─── CLI Arguments ─────────────────────────────────────────────────────────────
+interface CliArgs {
+  mode: GameMode | 'all' | null;
+  fast: boolean;
+  help: boolean;
 }
 
-function bar(value: number, max: number, width = 20, char = '█'): string {
-  const filled = Math.round((value / max) * width);
-  return C.cyan + char.repeat(filled) + C.gray + '░'.repeat(width - filled) + C.reset;
+function parseArgs(): CliArgs {
+  const args = process.argv.slice(2);
+  const modeIdx = args.indexOf('--mode');
+  const rawMode = modeIdx >= 0 ? args[modeIdx + 1]?.toUpperCase() : null;
+  const validModes: GameMode[] = ['EMPIRE', 'PREDATOR', 'SYNDICATE', 'PHANTOM'];
+
+  const mode = rawMode === 'ALL'
+    ? 'all'
+    : validModes.includes(rawMode as GameMode)
+      ? rawMode as GameMode
+      : null;
+
+  return {
+    mode,
+    fast: args.includes('--fast'),
+    help: args.includes('--help') || args.includes('-h'),
+  };
 }
 
-// ─── SIMPLE AI STRATEGY ──────────────────────────────────────
-function aiDecide(state: GameState): { action: 'play' | 'draw' | 'pass'; cardId?: string; symbol?: string } {
-  const { run, energy, market } = state;
-  const hand = run.deck.hand;
+function printHelp(): void {
+  console.log(`
+POINT ZERO ONE — Demo Runner v2
+────────────────────────────────
+Usage:
+  npx ts-node src/demo/run-demo.ts [options]
 
-  // Find best priced asset
-  const symbols = [...market.assets.keys()];
-  const trending = symbols.sort((a, b) => {
-    const pa = market.assets.get(a)!.priceChange;
-    const pb = market.assets.get(b)!.priceChange;
-    return Math.abs(pb) - Math.abs(pa);
-  })[0];
+Options:
+  --mode <MODE>   Run a specific mode (EMPIRE | PREDATOR | SYNDICATE | PHANTOM | all)
+  --fast          Skip delays, instant simulation
+  --help          Show this help
 
-  // Play if we have energy and playable cards
-  const playable = hand.filter(c => c.cost <= energy);
-  if (playable.length > 0 && Math.random() < 0.3) {
-    // Pick highest leverage card we can afford
-    const best = playable.sort((a, b) => b.leverage - a.leverage)[0];
-    const priceChange = market.assets.get(trending)?.priceChange ?? 0;
-    // Match card direction to market trend
-    const goLong = priceChange >= 0;
-    const preferred = playable.find(c =>
-      goLong ? (c.type === 'LONG' || c.type === 'MACRO') : (c.type === 'SHORT' || c.type === 'HEDGE')
-    ) ?? best;
-    return { action: 'play', cardId: preferred.id, symbol: trending };
-  }
-
-  // Draw if hand is low
-  if (hand.length < 3 && run.deck.drawPile.length > 0) {
-    return { action: 'draw' };
-  }
-
-  return { action: 'pass' };
+Examples:
+  npx ts-node src/demo/run-demo.ts
+  npx ts-node src/demo/run-demo.ts -- --mode EMPIRE
+  npx ts-node src/demo/run-demo.ts -- --mode all --fast
+  `);
 }
 
-// ─── MAIN DEMO ───────────────────────────────────────────────
-async function runDemo(): Promise<void> {
-  const engine = new GameEngine();
+// ─── Menu: select mode interactively ──────────────────────────────────────────
+async function selectMode(): Promise<GameMode> {
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 
-  // Subscribe to events
-  engine.events.on('*', (event) => {
-    switch (event.type) {
-      case 'CRISIS_TRIGGERED':
-        console.log(`\n${C.red}${C.bold}⚠  CRISIS TRIGGERED — Drawdown: ${(event.data.drawdown as number * 100).toFixed(1)}%${C.reset}`);
-        break;
-      case 'LIQUIDATION':
-        console.log(`${C.red}💀 LIQUIDATED: ${(event.data.positions as string[]).length} position(s)${C.reset}`);
-        break;
-      case 'CARD_PLAYED':
-        console.log(`${C.magenta}🃏 ${event.data.card} → ${event.data.symbol}${C.reset}`);
-        break;
-      case 'RUN_COMPLETE':
-        const d = event.data as Record<string, string | number>;
-        console.log(`\n${C.bold}${C.cyan}╔══════════════════════════════╗${C.reset}`);
-        console.log(`${C.bold}${C.cyan}  RUN COMPLETE${C.reset}`);
-        console.log(`${C.bold}${C.cyan}  Score:       ${C.yellow}${d.score}${C.reset}`);
-        console.log(`${C.bold}${C.cyan}  Final ROI:   ${d.roi}${C.reset}`);
-        console.log(`${C.bold}${C.cyan}  Max Drawdown:${d.maxDrawdown}${C.reset}`);
-        console.log(`${C.bold}${C.cyan}╚══════════════════════════════╝${C.reset}\n`);
-        break;
+  console.log('\n  Select a game mode to demo:\n');
+  console.log('  \x1b[35m[1]\x1b[0m  \x1b[1mEMPIRE\x1b[0m     — Build from nothing. Survive the bleed.');
+  console.log('  \x1b[31m[2]\x1b[0m  \x1b[1mPREDATOR\x1b[0m   — Counter haters. Protect your psyche.');
+  console.log('  \x1b[34m[3]\x1b[0m  \x1b[1mSYNDICATE\x1b[0m  — Trust your allies. Defection kills runs.');
+  console.log('  \x1b[36m[4]\x1b[0m  \x1b[1mPHANTOM\x1b[0m    — Race your ghost. Beat your dynasty.');
+  console.log('');
+
+  return new Promise((resolve) => {
+    rl.question('  Enter 1–4: ', (answer) => {
+      rl.close();
+      const map: Record<string, GameMode> = { '1': 'EMPIRE', '2': 'PREDATOR', '3': 'SYNDICATE', '4': 'PHANTOM' };
+      const mode = map[answer.trim()] ?? 'EMPIRE';
+      console.log(`\n  → ${mode} selected.\n`);
+      resolve(mode);
+    });
+  });
+}
+
+// ─── SLEEP ─────────────────────────────────────────────────────────────────────
+const sleep = (ms: number): Promise<void> => new Promise(r => setTimeout(r, ms));
+
+// ─── RUN A SINGLE DEMO ────────────────────────────────────────────────────────
+async function runSingleDemo(mode: GameMode, fast: boolean): Promise<void> {
+  const narrator = new DemoNarrator(mode);
+  const orch     = new DemoOrchestrator(mode);
+
+  // Initialize (loads runReducer dynamically)
+  await orch.init();
+
+  // Splash + mode intro
+  narrator.printBootSplash();
+  narrator.printModeIntro(mode);
+
+  if (!fast) await sleep(1500);
+
+  // Build initial state
+  let state: DemoRunState = orch.buildInitialState();
+
+  // Seed the AI with the same rng as orchestrator
+  const { seededRng } = await import('../../../pzo-web/src/game/core/rng');
+  const aiRng         = seededRng(`AI-${mode}`);
+  const ai            = new DemoAI(mode, aiRng);
+
+  // Initial card draw
+  const initialHand = orch.drawCards(3);
+  state._hand       = initialHand;
+  state._cardsDrawn = 3;
+
+  // ─── MAIN TICK LOOP ─────────────────────────────────────────────────────────
+  let runComplete = false;
+
+  for (let tick = 0; tick < DEMO_TICK_BUDGET && !runComplete; tick++) {
+
+    // 1. Execute tick (settlements, pressure, energy regen, beat checks)
+    const { state: nextState, beats, events } = orch.tick(state, tick);
+    state = nextState;
+
+    // 2. Fire tutorial beats
+    for (const beat of beats) {
+      narrator.printTutorialBeat(beat);
+      if (!fast) await sleep(beat.pauseMs);
     }
+
+    // 3. AI decision
+    const decision = ai.decide(state, tick, state._energy, state._hand);
+
+    if (decision.action === 'PLAY_CARD' && decision.cardId) {
+      const card = state._hand.find(c => c.id === decision.cardId);
+      if (card && state._energy >= card.cost) {
+        state = orch.playCard(state, card, tick);
+        if (decision.urgent || tick % DEMO_REPORT_EVERY === 0) {
+          narrator.printCardPlayed(
+            decision.cardName ?? card.name,
+            decision.reasoning,
+            card.cost,
+          );
+        }
+      }
+    } else if (decision.action === 'DRAW_CARD') {
+      const drawn       = orch.drawCards(1);
+      state._hand       = [...state._hand, ...drawn];
+      state._cardsDrawn++;
+    }
+
+    // 4. Log engine events to terminal
+    for (const evt of events) {
+      if (evt.startsWith('SETTLEMENT')) {
+        const net = state.income - state.expenses;
+        const xp  = Math.floor(state._settlementCount * 12);
+        narrator.printMonthlySettlement(tick, state.income, state.expenses, net, xp);
+        if (!fast) await sleep(200);
+      }
+      if (evt.startsWith('PRESSURE_CRISIS')) {
+        narrator.printCrisisWarning(state._pressureScore, 'CRITICAL');
+      }
+      if (evt === 'FREEDOM_ACHIEVED' || evt === 'BANKRUPT') {
+        runComplete = true;
+      }
+    }
+
+    // 5. Mode-specific event display
+    if (mode === 'EMPIRE') {
+      const bleedActive  = state.modeExt?.empire?.bleedActive ?? false;
+      const wasBleedLast = tick > 0 && bleedActive;
+      if (bleedActive && !wasBleedLast) {
+        narrator.printBleedActivated(
+          state.modeExt?.empire?.bleedSeverity ?? 'WATCH',
+          state.income - state.expenses,
+        );
+      }
+    }
+
+    if (mode === 'PHANTOM') {
+      const ghostDelta  = state.modeExt?.phantom?.ghostDelta  ?? 0;
+      const legendScore = state.modeExt?.phantom?.legendScore ?? 100;
+      if (tick > 0 && tick % DEMO_REPORT_EVERY === 0) {
+        narrator.printGhostDelta(ghostDelta, legendScore);
+      }
+    }
+
+    // 6. Periodic status report
+    if (tick > 0 && tick % DEMO_REPORT_EVERY === 0) {
+      narrator.printTickStatus({
+        tick,
+        totalTicks:  DEMO_TICK_BUDGET,
+        cash:        state.cash,
+        netWorth:    state.netWorth,
+        cashflow:    state.income - state.expenses,
+        pressure:    state._pressureScore,
+        phase:       state.phase,
+        shieldPct:   (state.shields ?? 4) / 4,
+        cardsInHand: state._hand.length,
+        energy:      state._energy,
+        maxEnergy:   state._maxEnergy,
+      });
+    }
+
+    // 7. End condition check
+    if (state.phase === 'FREEDOM' || state.phase === 'BANKRUPT' || state.phase === 'COMPLETE') {
+      runComplete = true;
+    }
+
+    // Delay for real-time playback
+    if (!fast && DEMO_TICK_DELAY_MS > 0) {
+      await sleep(DEMO_TICK_DELAY_MS);
+    }
+  }
+
+  // ─── FINALIZE ───────────────────────────────────────────────────────────────
+  const result = orch.finalize(state, DEMO_TICK_BUDGET);
+
+  narrator.printRunComplete({
+    outcome:   result.outcome,
+    cordScore: result.cordScore,
+    cordTier:  result.cordTier,
+    finalCash: state.cash,
+    finalNW:   state.netWorth,
+    totalXP:   result.totalXP,
+    cardsPlayed: result.cardsPlayed,
+    ticksRun:  result.ticksRun,
+    proofHash: result.proofHash,
+    grade:     result.grade,
+    mode,
   });
 
-  // Start run
-  console.log(`\n${C.bold}${C.cyan}POINT ZERO ONE DIGITAL${C.reset}`);
-  console.log(`${C.gray}Financial Roguelike Engine v1.0${C.reset}`);
-  console.log(`${C.gray}Seed: ${DEMO_SEED} | Duration: 12 min | Ticks: 720${C.reset}\n`);
+  narrator.printDemoStats({
+    cardsPlayed:     state._cardsPlayed,
+    cardsDrawn:      state._cardsDrawn,
+    beatsFired:      result.beatsTriggered.length,
+    crisisEvents:    state._crisisCount,
+    shieldBreaches:  state._shieldBreaches,
+    settlementCount: state._settlementCount,
+  });
 
-  let state = engine.createRun(PLAYER_ID, DEMO_SEED);
-
-  // Initial draw
-  state = engine.drawCards(state, 5);
-
-  const REPORT_INTERVAL = 60; // print status every 60 ticks
-
-  // Run loop
-  for (let t = 0; t < 720; t++) {
-    state = engine.tick(state);
-
-    // AI action
-    const decision = aiDecide(state);
-    if (decision.action === 'play' && decision.cardId && decision.symbol) {
-      state = engine.playCard(state, decision.cardId, decision.symbol);
-    } else if (decision.action === 'draw') {
-      state = engine.drawCards(state, 2);
-    }
-
-    // Periodic status report
-    if (t % REPORT_INTERVAL === 0 && t > 0) {
-      const { portfolio, currentTick, phase } = state.run;
-      const minuteLeft = ((720 - currentTick) / 60).toFixed(1);
-      const equity = portfolio.totalEquity;
-      const pnl = equity - 10_000;
-      const roi = (pnl / 10_000 * 100).toFixed(2);
-
-      console.log(
-        `T${String(currentTick).padStart(3,'0')} ` +
-        `[${phase.padEnd(10)}] ` +
-        `Equity: ${fmt(equity)} ` +
-        `PnL: ${fmt(pnl)} (${roi}%) ` +
-        `Energy: ${bar(state.energy, state.maxEnergy, 10)} ` +
-        `Positions: ${portfolio.positions.size} ` +
-        `${minuteLeft}m left`
-      );
-    }
-
-    if (state.run.phase === 'COMPLETE') break;
-
-    if (!FAST_FORWARD) {
-      await new Promise(r => setTimeout(r, 1000));
-    }
-  }
-
-  // Final state
-  if (state.run.phase !== 'COMPLETE') {
-    state = engine.finalizeRun(state);
-  }
-
-  console.log(`${C.gray}Actions logged: ${state.actionLog.length}${C.reset}`);
-  console.log(`${C.gray}Cards played:   ${state.actionLog.filter(a => a.type === 'PLAY_CARD').length}${C.reset}`);
-  console.log(`${C.gray}Cards drawn:    ${state.actionLog.filter(a => a.type === 'DRAW').length}${C.reset}`);
+  // Post-run CTA
+  console.log(`\x1b[36m  Ready to play? Run the full game:\x1b[0m`);
+  console.log(`\x1b[37m  cd pzo-web && npm run dev\x1b[0m\n`);
 }
 
-runDemo().catch(console.error);
+// ─── RUN ALL MODES ────────────────────────────────────────────────────────────
+async function runAllModes(fast: boolean): Promise<void> {
+  const modes: GameMode[] = ['EMPIRE', 'PREDATOR', 'SYNDICATE', 'PHANTOM'];
+  for (const mode of modes) {
+    await runSingleDemo(mode, fast);
+    if (!fast) await sleep(1000);
+    console.log('\n' + '═'.repeat(60) + '\n');
+  }
+}
+
+// ─── MAIN ─────────────────────────────────────────────────────────────────────
+async function main(): Promise<void> {
+  const args = parseArgs();
+
+  if (args.help) {
+    printHelp();
+    return;
+  }
+
+  let mode: GameMode | 'all' = args.mode ?? await selectMode();
+
+  if (mode === 'all') {
+    await runAllModes(args.fast);
+  } else {
+    await runSingleDemo(mode, args.fast);
+  }
+}
+
+main().catch((err) => {
+  console.error('\x1b[31m[DEMO ERROR]\x1b[0m', err);
+  process.exit(1);
+});

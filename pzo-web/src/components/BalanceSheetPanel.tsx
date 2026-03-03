@@ -1,116 +1,304 @@
 /**
- * PZO UPGRADE — src/components/BalanceSheetPanel.tsx
- * 
- * Real financial pressure display.
- * Shows: cash / reserves / illiquid / obligations / coverage ratio / liquidity stress
- * 
- * This is the "truth layer" that makes the game feel real.
+ * BalanceSheetPanel.tsx — PZO Engine-Integrated Truth Layer
+ * Engine: pressure/types · shield/types · cascade/types
+ * Scale: 20M concurrent · Mobile-first · Syne + IBM Plex Mono
+ * Density6 LLC · Point Zero One · Confidential
  */
 
 'use client';
 
-import React from 'react';
+import React, { memo, useMemo } from 'react';
 import type { BalanceSheet, ObligationRecord, PortfolioRecord, MitigationRecord } from '../types/game';
 import { liquidityRatio, computeConcentrationScore } from '../types/game';
+import type { PressureTier } from '../engines/pressure/types';
+import { PRESSURE_TIER_CONFIGS } from '../engines/pressure/types';
 
+// ─── Design Tokens (matches LeagueUI) ────────────────────────────────────────
+const T = {
+  void:    '#030308',
+  card:    '#0C0C1E',
+  cardHi:  '#131328',
+  cardEl:  '#17172E',
+  border:  'rgba(255,255,255,0.08)',
+  borderM: 'rgba(255,255,255,0.18)',
+  text:    '#F2F2FF',
+  textSub: '#9090B4',
+  textMut: '#44445A',
+  green:   '#22DD88',
+  greenD:  'rgba(34,221,136,0.12)',
+  red:     '#FF4D4D',
+  redD:    'rgba(255,77,77,0.12)',
+  orange:  '#FF8C00',
+  orangeD: 'rgba(255,140,0,0.10)',
+  yellow:  '#FFD700',
+  yellowD: 'rgba(255,215,0,0.10)',
+  indigo:  '#818CF8',
+  indigoD: 'rgba(129,140,248,0.12)',
+  teal:    '#22D3EE',
+  mono:    "'IBM Plex Mono', 'JetBrains Mono', 'Courier New', monospace",
+  display: "'Syne', 'Outfit', system-ui, sans-serif",
+};
+
+const FONT_IMPORT = `@import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap');*{box-sizing:border-box;}`;
+
+// ─── Formatters ───────────────────────────────────────────────────────────────
 function fmt(n: number): string {
-  if (Math.abs(n) >= 1_000_000) return `$${(n / 1e6).toFixed(1)}M`;
-  if (Math.abs(n) >= 1_000) return `$${(n / 1e3).toFixed(0)}K`;
-  return `$${n.toLocaleString()}`;
+  const s = n < 0 ? '-' : '', v = Math.abs(n);
+  if (v >= 1_000_000) return `${s}$${(v / 1e6).toFixed(2)}M`;
+  if (v >= 1_000)     return `${s}$${(v / 1e3).toFixed(1)}K`;
+  return `${s}$${v.toLocaleString()}`;
 }
 
-function MiniBar({ value, label, color }: { value: number; label: string; color: string }) {
+function pct(n: number) { return `${(n * 100).toFixed(0)}%`; }
+
+// ─── Pressure-tier → color mapping (engine-native) ───────────────────────────
+function pressureColor(tier: PressureTier | undefined): string {
+  if (!tier) return T.green;
+  return PRESSURE_TIER_CONFIGS[tier]?.colorHex ?? T.green;
+}
+
+// ─── Metric State ─────────────────────────────────────────────────────────────
+type MetricState = 'SAFE' | 'WARN' | 'DANGER';
+
+function liqState(r: number): MetricState {
+  return r > 0.5 ? 'SAFE' : r > 0.25 ? 'WARN' : 'DANGER';
+}
+function covState(r: number): MetricState {
+  return r >= 1.5 ? 'SAFE' : r >= 1.0 ? 'WARN' : 'DANGER';
+}
+function hhiState(h: number): MetricState {
+  return h < 0.35 ? 'SAFE' : h < 0.6 ? 'WARN' : 'DANGER';
+}
+
+const STATE_COLORS: Record<MetricState, { fg: string; bg: string; bar: string }> = {
+  SAFE:   { fg: T.green,  bg: 'rgba(34,221,136,0.10)', bar: '#22DD88' },
+  WARN:   { fg: '#FFD700', bg: 'rgba(255,215,0,0.10)',  bar: '#FFD700' },
+  DANGER: { fg: T.red,    bg: 'rgba(255,77,77,0.10)',   bar: '#FF4D4D' },
+};
+
+// ─── Sub-components ───────────────────────────────────────────────────────────
+
+const MiniBar = memo(function MiniBar({
+  value, label, state,
+}: { value: number; label: string; state: MetricState }) {
+  const { fg, bar } = STATE_COLORS[state];
+  const w = `${Math.min(100, Math.max(0, value * 100)).toFixed(1)}%`;
+
   return (
-    <div className="flex items-center gap-1.5">
-      <span className="text-zinc-500 text-xs w-20 text-right truncate">{label}</span>
-      <div className="flex-1 h-1 bg-zinc-800 rounded-full overflow-hidden">
-        <div className={`h-full ${color} rounded-full`} style={{ width: `${Math.min(100, Math.max(0, value * 100))}%` }} />
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+      <span style={{
+        fontFamily: T.mono, fontSize: 10, color: T.textSub,
+        width: 90, textAlign: 'right', textTransform: 'uppercase', letterSpacing: '0.06em',
+        flexShrink: 0,
+      }}>{label}</span>
+      <div style={{
+        flex: 1, height: 5, background: 'rgba(255,255,255,0.06)',
+        borderRadius: 99, overflow: 'hidden', minWidth: 0,
+      }}>
+        <div style={{
+          height: '100%', width: w, background: bar,
+          borderRadius: 99,
+          boxShadow: `0 0 8px ${bar}88`,
+          transition: 'width 0.4s cubic-bezier(0.4,0,0.2,1)',
+        }} />
       </div>
+      <span style={{
+        fontFamily: T.mono, fontSize: 10, color: fg,
+        fontWeight: 700, width: 34, textAlign: 'right', flexShrink: 0,
+      }}>{Math.round(value * 100)}%</span>
     </div>
   );
-}
+});
 
-interface BalanceSheetPanelProps {
+const StatCell = memo(function StatCell({
+  label, value, subValue, state,
+}: { label: string; value: string; subValue?: string; state?: MetricState }) {
+  const fg = state ? STATE_COLORS[state].fg : T.text;
+  return (
+    <div style={{ padding: '10px 0 4px' }}>
+      <div style={{
+        fontFamily: T.mono, fontSize: 9, color: T.textMut,
+        textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: 4,
+      }}>{label}</div>
+      <div style={{ fontFamily: T.mono, fontSize: 13, fontWeight: 700, color: fg, lineHeight: 1 }}>
+        {value}
+      </div>
+      {subValue && (
+        <div style={{ fontFamily: T.mono, fontSize: 9, color: T.textSub, marginTop: 3 }}>
+          {subValue}
+        </div>
+      )}
+    </div>
+  );
+});
+
+// ─── Props ────────────────────────────────────────────────────────────────────
+export interface BalanceSheetPanelProps {
   balanceSheet: BalanceSheet;
   obligations: ObligationRecord[];
   portfolio: PortfolioRecord[];
   mitigations: MitigationRecord[];
   income: number;
+  pressureTier?: PressureTier;
   isExpanded?: boolean;
   onToggle?: () => void;
 }
 
-export default function BalanceSheetPanel({
-  balanceSheet,
-  obligations,
-  portfolio,
-  mitigations,
-  income,
-  isExpanded = false,
-  onToggle,
+// ─── Main Component ───────────────────────────────────────────────────────────
+export default memo(function BalanceSheetPanel({
+  balanceSheet, obligations, portfolio, mitigations, income,
+  pressureTier, isExpanded = false, onToggle,
 }: BalanceSheetPanelProps) {
-  const liqRatio = liquidityRatio(balanceSheet);
-  const hhi = computeConcentrationScore(portfolio);
+  const liqRatio    = useMemo(() => liquidityRatio(balanceSheet), [balanceSheet]);
+  const hhi         = useMemo(() => computeConcentrationScore(portfolio), [portfolio]);
   const totalAssets = balanceSheet.cash + balanceSheet.reserves + balanceSheet.illiquidValue;
-  const netWorth = totalAssets;
-  const totalObligations = obligations.reduce((s, o) => s + o.amountPerMonth, 0);
-  const coverageRatio = income / Math.max(1, totalObligations);
+  const totalOblig  = useMemo(
+    () => obligations.reduce((s, o) => s + o.amountPerMonth, 0),
+    [obligations],
+  );
+  const coverage    = income / Math.max(1, totalOblig);
 
-  const liqColor = liqRatio > 0.5 ? 'bg-emerald-500' : liqRatio > 0.25 ? 'bg-yellow-500' : 'bg-red-500';
-  const coverageColor = coverageRatio > 1.5 ? 'bg-emerald-500' : coverageRatio > 1.0 ? 'bg-yellow-500' : 'bg-red-500';
-  const hhi_color = hhi < 0.35 ? 'bg-emerald-500' : hhi < 0.6 ? 'bg-yellow-500' : 'bg-red-500';
+  const liqSt = liqState(liqRatio);
+  const covSt = covState(coverage);
+  const hhiSt = hhiState(hhi);
+
+  const isUnderwater = coverage < 1.0;
+  const isLowCash    = balanceSheet.cash < 5_000;
 
   return (
-    <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
-      {/* Header */}
+    <div style={{
+      background: T.card, borderRadius: 14,
+      border: `1px solid ${isUnderwater ? 'rgba(255,77,77,0.35)' : T.border}`,
+      overflow: 'hidden', fontFamily: T.display,
+      boxShadow: isUnderwater ? '0 0 24px rgba(255,77,77,0.10)' : 'none',
+    }}>
+      <style>{FONT_IMPORT}</style>
+
+      {/* ── Header ── */}
       <button
         onClick={onToggle}
-        className="w-full flex items-center justify-between px-3 py-2 hover:bg-zinc-800/60 transition-colors"
+        style={{
+          width: '100%', display: 'flex', alignItems: 'center',
+          justifyContent: 'space-between', padding: '13px 16px',
+          background: 'transparent', border: 'none', cursor: 'pointer',
+          minHeight: 48,
+        }}
       >
-        <div className="flex items-center gap-2">
-          <span className="text-white font-bold text-xs">📊 Balance Sheet</span>
-          <span className={`text-xs px-1.5 py-0.5 rounded font-mono ${liqRatio < 0.3 ? 'bg-red-900/60 text-red-400' : 'bg-zinc-800 text-zinc-400'}`}>
-            {(liqRatio * 100).toFixed(0)}% liquid
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 13, fontWeight: 800, color: T.text, fontFamily: T.display }}>
+            📊 BALANCE SHEET
           </span>
-          {coverageRatio < 1.0 && (
-            <span className="text-xs bg-red-900/60 text-red-400 px-1.5 py-0.5 rounded font-semibold">⚠️ Underwater</span>
+
+          <span style={{
+            fontFamily: T.mono, fontSize: 10, fontWeight: 700,
+            padding: '3px 8px', borderRadius: 6,
+            color: STATE_COLORS[liqSt].fg,
+            background: STATE_COLORS[liqSt].bg,
+            border: `1px solid ${STATE_COLORS[liqSt].fg}33`,
+          }}>
+            {pct(liqRatio)} liquid
+          </span>
+
+          {isUnderwater && (
+            <span style={{
+              fontFamily: T.mono, fontSize: 10, fontWeight: 800,
+              padding: '3px 8px', borderRadius: 6,
+              color: T.red, background: T.redD,
+              border: `1px solid rgba(255,77,77,0.35)`,
+              animation: 'pzo-pulse 1.4s ease-in-out infinite',
+            }}>
+              ⚠ UNDERWATER
+            </span>
+          )}
+
+          {pressureTier && (
+            <span style={{
+              fontFamily: T.mono, fontSize: 9, fontWeight: 700,
+              padding: '2px 7px', borderRadius: 5,
+              color: pressureColor(pressureTier),
+              background: `${pressureColor(pressureTier)}18`,
+              border: `1px solid ${pressureColor(pressureTier)}30`,
+              textTransform: 'uppercase', letterSpacing: '0.08em',
+            }}>
+              {pressureTier}
+            </span>
           )}
         </div>
-        <span className="text-zinc-500 text-xs">{isExpanded ? '▲' : '▼'}</span>
+
+        <span style={{ color: T.textMut, fontSize: 11, lineHeight: 1 }}>
+          {isExpanded ? '▲' : '▼'}
+        </span>
       </button>
 
-      {/* Always Visible Summary */}
-      <div className="px-3 pb-2 grid grid-cols-3 gap-x-4 gap-y-1 border-t border-zinc-800/50">
-        <StatCell label="Cash" value={fmt(balanceSheet.cash)} color={balanceSheet.cash < 5000 ? 'text-red-400' : 'text-white'} />
-        <StatCell label="Reserves" value={fmt(balanceSheet.reserves)} color="text-blue-300" />
-        <StatCell label="Illiquid" value={fmt(balanceSheet.illiquidValue)} color="text-zinc-300" />
-        <StatCell label="Net Worth" value={fmt(netWorth)} color="text-white" />
-        <StatCell label="Obligations" value={`${fmt(totalObligations)}/mo`} color={totalObligations > income ? 'text-red-400' : 'text-orange-300'} />
-        <StatCell label="Coverage" value={`${coverageRatio.toFixed(2)}×`} color={coverageRatio >= 1.5 ? 'text-emerald-400' : coverageRatio >= 1.0 ? 'text-yellow-400' : 'text-red-400'} />
+      {/* ── Stats Grid ── */}
+      <div style={{
+        padding: '0 16px 14px',
+        borderTop: `1px solid ${T.border}`,
+        display: 'grid',
+        gridTemplateColumns: 'repeat(3, 1fr)',
+        gap: '0 12px',
+      }}>
+        <StatCell
+          label="Cash" value={fmt(balanceSheet.cash)}
+          state={isLowCash ? 'DANGER' : undefined}
+          subValue={isLowCash ? '⚠ LOW' : undefined}
+        />
+        <StatCell label="Reserves" value={fmt(balanceSheet.reserves)} />
+        <StatCell label="Illiquid" value={fmt(balanceSheet.illiquidValue)} />
+        <StatCell label="Net Worth" value={fmt(totalAssets)} />
+        <StatCell
+          label="Obligations" value={`${fmt(totalOblig)}/mo`}
+          state={totalOblig > income ? 'DANGER' : 'WARN'}
+        />
+        <StatCell
+          label="Coverage" value={`${coverage.toFixed(2)}×`}
+          state={covSt}
+        />
       </div>
 
-      {/* Mini Progress Bars */}
-      <div className="px-3 pb-2 space-y-1 border-t border-zinc-800/50 pt-1.5">
-        <MiniBar value={liqRatio} label="Liquidity" color={liqColor} />
-        <MiniBar value={Math.min(1, coverageRatio / 2)} label="Coverage" color={coverageColor} />
-        <MiniBar value={1 - hhi} label="Diversification" color={hhi_color} />
+      {/* ── Bars ── */}
+      <div style={{
+        padding: '12px 16px',
+        borderTop: `1px solid ${T.border}`,
+        display: 'flex', flexDirection: 'column', gap: 9,
+      }}>
+        <MiniBar value={liqRatio} label="Liquidity" state={liqSt} />
+        <MiniBar value={Math.min(1, coverage / 2)} label="Coverage" state={covSt} />
+        <MiniBar value={1 - hhi} label="Diversification" state={hhiSt} />
       </div>
 
-      {/* Expanded Detail */}
+      {/* ── Expanded Detail ── */}
       {isExpanded && (
-        <div className="border-t border-zinc-800 px-3 py-2 space-y-3">
+        <div style={{ borderTop: `1px solid ${T.border}`, padding: '14px 16px' }}>
 
-          {/* Obligations List */}
+          {/* Obligations */}
           {obligations.length > 0 && (
-            <div>
-              <p className="text-zinc-500 text-xs uppercase font-semibold tracking-wide mb-1.5">Obligations</p>
-              <div className="space-y-1">
+            <div style={{ marginBottom: 18 }}>
+              <div style={{
+                fontFamily: T.mono, fontSize: 9, color: T.textMut,
+                textTransform: 'uppercase', letterSpacing: '0.14em', marginBottom: 10,
+              }}>
+                Obligations ({obligations.length})
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
                 {obligations.map(o => (
-                  <div key={o.id} className="flex items-center justify-between text-xs">
-                    <span className="text-zinc-400 truncate max-w-[140px]">{o.label}</span>
-                    <div className="flex items-center gap-2">
-                      <span className="text-red-400 font-mono">−{fmt(o.amountPerMonth)}/mo</span>
-                      <span className="text-zinc-600">{o.ticksRemaining !== null ? `${Math.ceil(o.ticksRemaining / 12)}mo left` : 'permanent'}</span>
+                  <div key={o.id} style={{
+                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                    padding: '8px 10px', background: T.cardHi,
+                    borderRadius: 8, border: `1px solid ${T.border}`,
+                  }}>
+                    <span style={{ fontFamily: T.display, fontSize: 12, color: T.textSub }}>
+                      {o.label}
+                    </span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <span style={{ fontFamily: T.mono, fontSize: 12, color: T.red, fontWeight: 700 }}>
+                        −{fmt(o.amountPerMonth)}/mo
+                      </span>
+                      <span style={{ fontFamily: T.mono, fontSize: 9, color: T.textMut }}>
+                        {o.ticksRemaining !== null
+                          ? `${Math.ceil(o.ticksRemaining / 12)}mo`
+                          : '∞'}
+                      </span>
                     </div>
                   </div>
                 ))}
@@ -118,22 +306,42 @@ export default function BalanceSheetPanel({
             </div>
           )}
 
-          {/* Portfolio Summary */}
+          {/* Portfolio */}
           {portfolio.length > 0 && (
-            <div>
-              <p className="text-zinc-500 text-xs uppercase font-semibold tracking-wide mb-1.5">Portfolio ({portfolio.length})</p>
-              <div className="space-y-1">
-                {portfolio.slice(0, 5).map(p => (
-                  <div key={p.cardId} className="flex items-center justify-between text-xs">
-                    <span className="text-zinc-400 truncate max-w-[120px]">{p.cardName}</span>
-                    <div className="flex gap-2">
-                      <span className="text-zinc-600 capitalize">{p.assetClass}</span>
-                      <span className="text-emerald-400 font-mono">+{fmt(p.monthlyIncome)}/mo</span>
+            <div style={{ marginBottom: 18 }}>
+              <div style={{
+                fontFamily: T.mono, fontSize: 9, color: T.textMut,
+                textTransform: 'uppercase', letterSpacing: '0.14em', marginBottom: 10,
+              }}>
+                Portfolio ({portfolio.length} assets)
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+                {portfolio.slice(0, 6).map(p => (
+                  <div key={p.cardId} style={{
+                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                    padding: '8px 10px', background: T.cardHi,
+                    borderRadius: 8, border: `1px solid ${T.border}`,
+                  }}>
+                    <div>
+                      <div style={{ fontFamily: T.display, fontSize: 12, color: T.text }}>
+                        {p.cardName}
+                      </div>
+                      <div style={{
+                        fontFamily: T.mono, fontSize: 9, color: T.textMut,
+                        textTransform: 'capitalize', marginTop: 2,
+                      }}>
+                        {p.assetClass}
+                      </div>
                     </div>
+                    <span style={{ fontFamily: T.mono, fontSize: 12, color: T.green, fontWeight: 700 }}>
+                      +{fmt(p.monthlyIncome)}/mo
+                    </span>
                   </div>
                 ))}
-                {portfolio.length > 5 && (
-                  <p className="text-zinc-600 text-xs">+{portfolio.length - 5} more assets</p>
+                {portfolio.length > 6 && (
+                  <div style={{ fontFamily: T.mono, fontSize: 10, color: T.textMut, paddingLeft: 4 }}>
+                    +{portfolio.length - 6} more assets
+                  </div>
                 )}
               </div>
             </div>
@@ -141,13 +349,26 @@ export default function BalanceSheetPanel({
 
           {/* Mitigations */}
           {mitigations.length > 0 && (
-            <div>
-              <p className="text-zinc-500 text-xs uppercase font-semibold tracking-wide mb-1.5">Protections</p>
-              <div className="flex flex-wrap gap-1.5">
+            <div style={{ marginBottom: 18 }}>
+              <div style={{
+                fontFamily: T.mono, fontSize: 9, color: T.textMut,
+                textTransform: 'uppercase', letterSpacing: '0.14em', marginBottom: 10,
+              }}>
+                Active Protections
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                 {mitigations.map(m => (
-                  <div key={m.type} className="flex items-center gap-1 bg-blue-900/30 border border-blue-800/50 rounded-full px-2 py-0.5">
-                    <span className="text-blue-300 text-xs font-semibold">{m.label}</span>
-                    <span className="text-blue-500 text-xs">{fmt(m.remainingAbsorption)}</span>
+                  <div key={m.type} style={{
+                    display: 'flex', alignItems: 'center', gap: 6,
+                    padding: '6px 10px', borderRadius: 20,
+                    background: T.indigoD, border: `1px solid rgba(129,140,248,0.30)`,
+                  }}>
+                    <span style={{ fontFamily: T.display, fontSize: 12, color: T.indigo, fontWeight: 700 }}>
+                      {m.label}
+                    </span>
+                    <span style={{ fontFamily: T.mono, fontSize: 10, color: '#6366F1' }}>
+                      {fmt(m.remainingAbsorption)}
+                    </span>
                   </div>
                 ))}
               </div>
@@ -156,22 +377,27 @@ export default function BalanceSheetPanel({
 
           {/* Concentration Warning */}
           {hhi > 0.6 && (
-            <div className="bg-orange-900/20 border border-orange-800/40 rounded-lg px-2 py-1.5">
-              <p className="text-orange-400 text-xs font-semibold">⚠️ Concentrated Portfolio ({(hhi * 100).toFixed(0)}% HHI)</p>
-              <p className="text-orange-500/80 text-xs mt-0.5">Overconcentration amplifies downside in adverse regimes. Diversify across asset classes.</p>
+            <div style={{
+              background: T.orangeD, border: `1px solid rgba(255,140,0,0.30)`,
+              borderRadius: 10, padding: '12px 14px',
+            }}>
+              <div style={{ fontFamily: T.display, fontSize: 12, color: T.orange, fontWeight: 700, marginBottom: 4 }}>
+                ⚠ Concentrated Portfolio — {pct(hhi)} HHI
+              </div>
+              <div style={{ fontFamily: T.display, fontSize: 11, color: '#C07020', lineHeight: 1.5 }}>
+                Overconcentration amplifies downside in adverse regimes. Diversify across asset classes to reduce cascade exposure.
+              </div>
             </div>
           )}
         </div>
       )}
-    </div>
-  );
-}
 
-function StatCell({ label, value, color }: { label: string; value: string; color: string }) {
-  return (
-    <div className="pt-1.5">
-      <p className="text-zinc-500 text-xs uppercase tracking-wide">{label}</p>
-      <p className={`font-mono font-bold text-xs ${color}`}>{value}</p>
+      <style>{`
+        @keyframes pzo-pulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.55; }
+        }
+      `}</style>
     </div>
   );
-}
+});

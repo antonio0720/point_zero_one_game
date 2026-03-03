@@ -1,396 +1,591 @@
-import React, { useState, useEffect, useRef } from 'react';
+/**
+ * LobbyScreen.tsx — POINT ZERO ONE
+ * Post-auth mode selection. Auth-aware. 20M-user ready. Mobile-first.
+ * Typography: DM Mono (aligned with AuthGate) + system display
+ * Density6 LLC · Confidential
+ */
 
-// Import RunMode from the engine layer — single source of truth
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import type { RunMode } from '../engines/core/types';
 
+// ─── Props ────────────────────────────────────────────────────────────────────
 interface LobbyScreenProps {
-  /** Called when player clicks a mode CTA. Receives the selected RunMode. */
   onStart: (mode: RunMode) => void;
+  onLogout?: () => void;
+  user?: {
+    username:    string;
+    displayName: string;
+  };
 }
 
-// ─── Particle Canvas ─────────────────────────────────────────────────────────
-function ParticleField({ color }: { color: string }) {
+// ─── Design tokens — aligned with AuthGate (zinc/indigo terminal system) ─────
+const T = {
+  void:       '#030308',
+  surface:    '#0A0A16',
+  card:       '#0F0F20',
+  cardHi:     '#151530',
+  border:     'rgba(255,255,255,0.07)',
+  borderM:    'rgba(255,255,255,0.13)',
+  text:       '#F0F0FF',
+  textSub:    '#B8B8D8',
+  textDim:    '#6A6A90',
+  textMut:    '#3A3A58',
+  // AuthGate indigo — unified identity layer
+  indigo:     '#818CF8',
+  indigoBrd:  'rgba(99,102,241,0.28)',
+  indigoDim:  'rgba(99,102,241,0.10)',
+  mono:       "'DM Mono', 'JetBrains Mono', 'Fira Code', monospace",
+  display:    "'Barlow Condensed', 'Oswald', 'Impact', system-ui, sans-serif",
+  body:       "'DM Sans', 'Nunito', system-ui, sans-serif",
+};
+
+// ─── Particle Canvas ──────────────────────────────────────────────────────────
+function ParticleField({ accentRgb }: { accentRgb: string }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animRef   = useRef<number>(0);
+  const dotsRef   = useRef<Array<{ x:number; y:number; vx:number; vy:number; r:number }>>([]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d')!;
-    let W = canvas.width  = window.innerWidth;
-    let H = canvas.height = window.innerHeight;
+    let W = 0, H = 0;
 
-    const resize = () => { W = canvas.width = window.innerWidth; H = canvas.height = window.innerHeight; };
+    const resize = () => {
+      W = canvas.width  = window.innerWidth;
+      H = canvas.height = window.innerHeight;
+      dotsRef.current = Array.from({ length: 55 }, () => ({
+        x: Math.random() * W, y: Math.random() * H,
+        vx: (Math.random() - 0.5) * 0.35, vy: (Math.random() - 0.5) * 0.35,
+        r:  Math.random() * 1.8 + 0.4,
+      }));
+    };
+    resize();
     window.addEventListener('resize', resize);
-
-    const count = 60;
-    const dots = Array.from({ length: count }, () => ({
-      x: Math.random() * W, y: Math.random() * H,
-      vx: (Math.random() - 0.5) * 0.4, vy: (Math.random() - 0.5) * 0.4,
-      r: Math.random() * 2 + 0.5,
-    }));
 
     const draw = () => {
       ctx.clearRect(0, 0, W, H);
-      // connect nearby dots
-      for (let i = 0; i < count; i++) {
-        for (let j = i + 1; j < count; j++) {
-          const dx = dots[i].x - dots[j].x;
-          const dy = dots[i].y - dots[j].y;
-          const dist = Math.sqrt(dx * dx + dy * dy);
-          if (dist < 140) {
+      const dots = dotsRef.current;
+      for (let i = 0; i < dots.length; i++) {
+        for (let j = i + 1; j < dots.length; j++) {
+          const dx = dots[i].x - dots[j].x, dy = dots[i].y - dots[j].y;
+          const d  = Math.hypot(dx, dy);
+          if (d < 130) {
             ctx.beginPath();
-            ctx.strokeStyle = color.replace('1)', `${0.12 * (1 - dist / 140)})`);
-            ctx.lineWidth = 0.5;
+            ctx.strokeStyle = `rgba(${accentRgb},${0.10 * (1 - d / 130)})`;
+            ctx.lineWidth = 0.6;
             ctx.moveTo(dots[i].x, dots[i].y);
             ctx.lineTo(dots[j].x, dots[j].y);
             ctx.stroke();
           }
         }
-      }
-      for (const d of dots) {
         ctx.beginPath();
-        ctx.arc(d.x, d.y, d.r, 0, Math.PI * 2);
-        ctx.fillStyle = color.replace('1)', '0.5)');
+        ctx.arc(dots[i].x, dots[i].y, dots[i].r, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(${accentRgb},0.45)`;
         ctx.fill();
-        d.x += d.vx; d.y += d.vy;
-        if (d.x < 0 || d.x > W) d.vx *= -1;
-        if (d.y < 0 || d.y > H) d.vy *= -1;
+        dots[i].x += dots[i].vx; dots[i].y += dots[i].vy;
+        if (dots[i].x < 0 || dots[i].x > W) dots[i].vx *= -1;
+        if (dots[i].y < 0 || dots[i].y > H) dots[i].vy *= -1;
       }
       animRef.current = requestAnimationFrame(draw);
     };
     draw();
     return () => { cancelAnimationFrame(animRef.current); window.removeEventListener('resize', resize); };
-  }, [color]);
+  }, [accentRgb]);
 
-  return <canvas ref={canvasRef} className="absolute inset-0 w-full h-full pointer-events-none" />;
+  return (
+    <canvas
+      ref={canvasRef}
+      style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none' }}
+    />
+  );
 }
 
 // ─── Mode definitions ─────────────────────────────────────────────────────────
 const MODES = {
   solo: {
-    id:        'solo' as RunMode,
-    label:     'EMPIRE',
-    tagline:   'Build income that works while you sleep — or lose everything.',
-    badge:     'GO ALONE',
-    accent:    '#FFB800',
-    accentRgb: 'rgba(255,184,0,',
-    bg:        'from-[#0D0900] via-[#110C00] to-[#0A0700]',
-    borderCss: '#FFB80055',
-    glow:      'shadow-[0_0_80px_rgba(255,184,0,0.25)]',
-    btnBg:     'bg-[#FFB800] hover:bg-[#FFCA40] text-black',
-    desc:      'Most people spend 40 years trading hours for dollars and never break the cycle. EMPIRE gives you 12 minutes to do what most people never figure out — build something that pays you whether you show up or not. Every instinct you sharpen here works the same way when real money is on the line.',
+    id:          'solo' as RunMode,
+    label:       'EMPIRE',
+    badge:       'SOLO',
+    tagline:     'Build income that works while you sleep — or lose everything.',
+    accent:      '#F5C842',
+    accentRgb:   '245,200,66',
+    bg:          'linear-gradient(135deg, #0A0800 0%, #0E0C00 60%, #080600 100%)',
+    emoji:       '⚡',
+    desc:        'Most people spend 40 years trading hours for dollars and never break the cycle. EMPIRE gives you 12 minutes to do what most never figure out — build something that pays you whether you show up or not.',
     features: [
-      { icon: '💸', name: 'Your Money Has to Work For You',       detail: 'The only way to win is making your income outgrow your expenses — automatically. That\'s not a game rule. That\'s the secret the wealthy figured out early.' },
-      { icon: '🎯', name: 'Every Decision Has a Permanent Cost',  detail: 'Nothing resets. Every choice shifts your cash flow forward or backward. Master this and you\'ll start reading real financial decisions the same way.' },
-      { icon: '🌊', name: 'The Market Doesn\'t Care About You',   detail: 'Calm turns to chaos without warning. The players who win here don\'t fight the market — they learn to move with it. That skill lives in your body after this.' },
-      { icon: '🔥', name: 'No Safety Net. Like Real Life.',        detail: 'When your cash hits zero with no protection left, it\'s over. That pressure isn\'t punishment — it\'s the exact feeling that separates people who build wealth from people who almost did.' },
+      { icon: '💸', text: 'Your money must work for you — automatically' },
+      { icon: '🎯', text: 'Every decision has a permanent, irreversible cost' },
+      { icon: '🌊', text: "The market doesn't care about you — adapt or collapse" },
+      { icon: '🔥', text: 'No safety net. Zero resets. Exactly like real life.' },
     ],
     cta: 'START BUILDING',
-    flavor: '"Every wealthy person built something that pays them while they sleep. This is where you learn how."',
+    quote: '"Every wealthy person built something that pays them while they sleep."',
   },
   'asymmetric-pvp': {
-    id:        'asymmetric-pvp' as RunMode,
-    label:     'PREDATOR',
-    tagline:   'Learn to recognize when someone is attacking your money.',
-    badge:     'HEAD TO HEAD',
-    accent:    '#FF3030',
-    accentRgb: 'rgba(255,48,48,',
-    bg:        'from-[#0D0000] via-[#120000] to-[#080000]',
-    borderCss: '#FF303055',
-    glow:      'shadow-[0_0_80px_rgba(255,48,48,0.3)]',
-    btnBg:     'bg-[#FF3030] hover:bg-[#FF5555] text-white',
-    desc:      'The market isn\'t neutral — and neither are the people around you. Bad partners, bad deals, competitors who want you to fail. PREDATOR puts a live adversary behind your worst financial nightmares and trains you to smell the attack before it lands, absorb the hit, and keep building while they\'re still swinging.',
+    id:          'asymmetric-pvp' as RunMode,
+    label:       'PREDATOR',
+    badge:       '1v1',
+    tagline:     'Learn to recognize when someone is attacking your money.',
+    accent:      '#FF4D4D',
+    accentRgb:   '255,77,77',
+    bg:          'linear-gradient(135deg, #0D0000 0%, #120000 60%, #080000 100%)',
+    emoji:       '⚔️',
+    desc:        "The market isn't neutral — and neither are the people around you. PREDATOR trains you to smell the attack before it lands, absorb the hit, and keep building while they're still swinging.",
     features: [
-      { icon: '⚔️', name: 'See The Attack Before It Lands',        detail: 'Your opponent fires real financial disruptions at you in real time. You have seconds to read it and counter. That reaction speed? It follows you into every real negotiation you\'ll ever have.' },
-      { icon: '💣', name: 'Your Income Stream Is a Target',         detail: 'Frozen revenue. Surprise losses. Collapsed shields. The most dangerous vulnerability in real life — and in this game — is always the income you took for granted.' },
-      { icon: '🛡️', name: 'Defense Is Half the Game',              detail: 'Most people only think about making money. The wealthy think about protecting it. PREDATOR forces you to master both at the same time under fire.' },
-      { icon: '📈', name: 'Success Attracts Resistance',            detail: 'The longer you survive, the harder the attacks get. That\'s not a difficulty curve — that\'s what scaling a real business actually feels like.' },
+      { icon: '⚔️', text: 'See the attack before it lands — react in seconds' },
+      { icon: '💣', text: 'Your income stream is a live target at all times' },
+      { icon: '🛡️', text: 'Defense is half the game. Master both under fire.' },
+      { icon: '📈', text: 'Success attracts resistance — just like real scaling' },
     ],
     cta: 'BECOME UNBREAKABLE',
-    flavor: '"The wealthy aren\'t just good at making money. They\'re impossible to tear down."',
+    quote: '"The wealthy aren\'t just good at making money. They\'re impossible to tear down."',
   },
   'co-op': {
-    id:        'co-op' as RunMode,
-    label:     'SYNDICATE',
-    tagline:   'Your financial circle determines your financial ceiling.',
-    badge:     'TEAM UP',
-    accent:    '#00E5C8',
-    accentRgb: 'rgba(0,229,200,',
-    bg:        'from-[#000D0B] via-[#001210] to-[#000908]',
-    borderCss: '#00E5C855',
-    glow:      'shadow-[0_0_80px_rgba(0,229,200,0.2)]',
-    btnBg:     'bg-[#00E5C8] hover:bg-[#33EDD5] text-black',
-    desc:      'Your net worth reflects the 5 people closest to you — whether you like it or not. SYNDICATE makes that literal. You and your partner share one economy. Their blind spots drain your account. Your strengths are their lifeline. This is the most honest 12-minute simulation of a real financial partnership you\'ll ever experience.',
+    id:          'co-op' as RunMode,
+    label:       'SYNDICATE',
+    badge:       '2P CO-OP',
+    tagline:     'Your financial circle determines your financial ceiling.',
+    accent:      '#00D4B8',
+    accentRgb:   '0,212,184',
+    bg:          'linear-gradient(135deg, #000E0C 0%, #001410 60%, #000908 100%)',
+    emoji:       '🤝',
+    desc:        "Your net worth reflects the 5 people closest to you — whether you like it or not. SYNDICATE makes that literal. You and your partner share one economy. Their blind spots drain your account.",
     features: [
-      { icon: '🤝', name: 'You\'re Only As Strong As Who You Build With', detail: 'One bad decision by your partner hits your income too. This is not a metaphor — it\'s a direct simulation of every business relationship you\'ll ever enter.' },
-      { icon: '🆘', name: 'Real Loyalty Gets Tested Under Pressure',      detail: 'When your partner starts burning, you have a narrow window to send capital and pull them back — or protect yourself and let them fall. Some partnerships end right here.' },
-      { icon: '📜', name: 'Negotiate Like Your Future Depends On It',     detail: 'Split income, transfer debt, lend protection. The deals you broker mid-run are exactly how real wealth-building partnerships get tested. Learn the skill before real money is on the table.' },
-      { icon: '🏆', name: 'Both Survive or Neither Wins',                 detail: 'You only earn rewards if both players make it. There is no individual glory in SYNDICATE. Shared success — or shared failure. Just like the real thing.' },
+      { icon: '🤝', text: "You're only as strong as who you build with" },
+      { icon: '🆘', text: 'Real loyalty gets tested under financial pressure' },
+      { icon: '📜', text: 'Negotiate aid contracts like your future depends on it' },
+      { icon: '🏆', text: 'Both survive or neither wins — no individual glory' },
     ],
     cta: 'BUILD THE ALLIANCE',
-    flavor: '"The person you choose to build with will either multiply your wealth — or quietly drain it."',
+    quote: '"The person you choose to build with will either multiply your wealth — or quietly drain it."',
   },
   ghost: {
-    id:        'ghost' as RunMode,
-    label:     'PHANTOM',
-    tagline:   'Find out exactly where your thinking falls short.',
-    badge:     'CHASE A LEGEND',
-    accent:    '#B57BFF',
-    accentRgb: 'rgba(181,123,255,',
-    bg:        'from-[#08000D] via-[#0A0012] to-[#060009]',
-    borderCss: '#B57BFF55',
-    glow:      'shadow-[0_0_80px_rgba(181,123,255,0.25)]',
-    btnBg:     'bg-[#B57BFF] hover:bg-[#C99AFF] text-black',
-    desc:      'There\'s a version of you that made all the right calls. PHANTOM lets you race a verified champion who played the exact same market you\'re about to face — same starting position, same events, same forces working against you. Every point of separation in the score is a decision where your thinking diverged from elite thinking. Most players learn more in one PHANTOM run than in ten normal runs.',
+    id:          'ghost' as RunMode,
+    label:       'PHANTOM',
+    badge:       'GHOST RUN',
+    tagline:     'Find out exactly where your thinking falls short.',
+    accent:      '#A855F7',
+    accentRgb:   '168,85,247',
+    bg:          'linear-gradient(135deg, #08000E 0%, #0B0014 60%, #060009 100%)',
+    emoji:       '👻',
+    desc:        "There's a version of you that made all the right calls. PHANTOM lets you race a verified champion who played the exact same market — same starting position, same events, same forces working against you.",
     features: [
-      { icon: '👻', name: 'Watch How a Champion Thinks, Live',       detail: 'A proven winner\'s run plays beside yours, tick by tick. You see every response they made to the same events you\'re facing right now. Study the pattern.' },
-      { icon: '🎯', name: 'The Market Is Identical. The Gap Is You.', detail: 'Same starting cash. Same shocks. Same market forces. The only variable is the quality of your decisions. This mode shows you exactly what those decisions cost.' },
-      { icon: '📊', name: 'Track Your Thinking Gaps in Real Time',    detail: 'A live score delta follows you through every major moment. Ahead of the ghost, you\'re thinking like a winner. Behind it, you just found something to fix.' },
-      { icon: '🏅', name: 'Beat a Champion and Prove It Forever',     detail: 'Outperform the ghost and earn a permanent, verified proof badge tied to your exact run. Unfakeable. Unbeatable. You either did it or you didn\'t.' },
+      { icon: '👻', text: 'Watch how a champion thinks, live — tick by tick' },
+      { icon: '🎯', text: 'Same market, same shocks. The only variable is you.' },
+      { icon: '📊', text: 'Track your thinking gaps against elite decisions' },
+      { icon: '🏅', text: 'Beat a champion and earn a permanent proof badge' },
     ],
     cta: 'FACE YOUR GHOST',
-    flavor: '"You don\'t rise to your goals. You fall to the level of your decisions. This mode shows you exactly where that level is."',
+    quote: '"You don\'t rise to your goals. You fall to the level of your decisions."',
   },
-};
+} as const;
+
+type ModeKey = keyof typeof MODES;
+
+// ─── User Header Bar ──────────────────────────────────────────────────────────
+function UserBar({
+  user, onLogout, accentRgb,
+}: {
+  user:      LobbyScreenProps['user'];
+  onLogout?: () => void;
+  accentRgb: string;
+}) {
+  if (!user) return null;
+
+  const initial = (user.displayName || user.username).charAt(0).toUpperCase();
+
+  return (
+    <div style={{
+      position: 'absolute' as const, top: 16, right: 20, zIndex: 30,
+      display: 'flex', alignItems: 'center', gap: 10,
+    }}>
+      {/* Identity chip */}
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 8,
+        padding: '6px 14px 6px 8px',
+        borderRadius: 100,
+        background: T.indigoDim,
+        border: `1px solid ${T.indigoBrd}`,
+        backdropFilter: 'blur(8px)',
+      }}>
+        <div style={{
+          width: 26, height: 26, borderRadius: '50%',
+          background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          fontSize: 11, fontWeight: 800, color: '#fff', flexShrink: 0,
+          fontFamily: T.mono,
+        }}>
+          {initial}
+        </div>
+        <div>
+          <div style={{
+            fontSize: 11, fontFamily: T.mono, fontWeight: 700,
+            color: T.indigo, lineHeight: 1,
+          }}>
+            {user.displayName || user.username}
+          </div>
+          <div style={{
+            fontSize: 9, fontFamily: T.mono, color: T.textDim,
+            lineHeight: 1, marginTop: 2, letterSpacing: '0.05em',
+          }}>
+            @{user.username}
+          </div>
+        </div>
+      </div>
+
+      {/* Logout */}
+      {onLogout && (
+        <button
+          onClick={onLogout}
+          title="Sign out"
+          style={{
+            padding: '7px 12px',
+            borderRadius: 8,
+            background: 'rgba(255,255,255,0.04)',
+            border: `1px solid rgba(255,255,255,0.08)`,
+            cursor: 'pointer',
+            fontFamily: T.mono, fontSize: 10, fontWeight: 700,
+            color: T.textDim, letterSpacing: '0.08em',
+            transition: 'all 0.15s ease',
+          }}
+          onMouseEnter={e => {
+            (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(255,77,77,0.4)';
+            (e.currentTarget as HTMLButtonElement).style.color = '#FF4D4D';
+          }}
+          onMouseLeave={e => {
+            (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(255,255,255,0.08)';
+            (e.currentTarget as HTMLButtonElement).style.color = T.textDim;
+          }}
+        >
+          ⏏ OUT
+        </button>
+      )}
+    </div>
+  );
+}
 
 // ─── Main Component ───────────────────────────────────────────────────────────
-export default function LobbyScreen({ onStart }: LobbyScreenProps) {
-  const [selected,  setSelected]  = useState<RunMode>('solo');
+export default function LobbyScreen({ onStart, onLogout, user }: LobbyScreenProps) {
+  const [selected,  setSelected]  = useState<ModeKey>('solo');
   const [animating, setAnimating] = useState(false);
-  const [entered,   setEntered]   = useState(false);
-  const [pulse,     setPulse]     = useState(false);
+  const [visible,   setVisible]   = useState(false);
+  const [ctaPulse,  setCtaPulse]  = useState(false);
 
   const mode = MODES[selected];
 
-  useEffect(() => {
-    setTimeout(() => setEntered(true), 60);
-  }, []);
+  useEffect(() => { setTimeout(() => setVisible(true), 80); }, []);
 
-  // pulse the CTA button periodically
   useEffect(() => {
-    const id = setInterval(() => { setPulse(true); setTimeout(() => setPulse(false), 600); }, 4000);
+    const id = setInterval(() => {
+      setCtaPulse(true);
+      setTimeout(() => setCtaPulse(false), 700);
+    }, 3500);
     return () => clearInterval(id);
   }, []);
 
-  const switchMode = (m: RunMode) => {
-    if (m === selected) return;
+  const switchMode = useCallback((key: ModeKey) => {
+    if (key === selected) return;
     setAnimating(true);
-    setTimeout(() => { setSelected(m); setAnimating(false); }, 180);
-  };
+    setTimeout(() => { setSelected(key); setAnimating(false); }, 160);
+  }, [selected]);
 
-  const handleStart = () => onStart(selected);
+  // Greeting based on auth user
+  const greeting = user
+    ? `Welcome back, ${user.displayName || user.username}.`
+    : 'Master This Game. Master Real Money.';
 
   return (
-    <div
-      className={`relative min-h-screen overflow-hidden transition-all duration-500 bg-gradient-to-br ${mode.bg}`}
-      style={{ fontFamily: "'DM Mono', 'Courier New', monospace" }}
-    >
+    <div style={{
+      position: 'relative', minHeight: '100vh', overflow: 'hidden',
+      background: mode.bg, fontFamily: T.body,
+      transition: 'background 0.5s ease',
+    }}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800;900&family=DM+Mono:wght@400;500;600&family=DM+Sans:wght@400;500;600&display=swap');
+        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+        ::-webkit-scrollbar { width: 4px; background: #0A0A16; }
+        ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 2px; }
+      `}</style>
+
       {/* Particle layer */}
-      <ParticleField color={mode.accentRgb + '1)'} />
+      <ParticleField accentRgb={mode.accentRgb} />
 
-      {/* Noise overlay */}
-      <div
-        className="absolute inset-0 pointer-events-none opacity-[0.025]"
-        style={{
-          backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")`,
-          backgroundSize: '200px 200px',
-        }}
-      />
+      {/* Radial ambient */}
+      <div style={{
+        position: 'absolute', inset: 0, pointerEvents: 'none',
+        background: `radial-gradient(ellipse 70% 55% at 50% 35%, rgba(${mode.accentRgb},0.07) 0%, transparent 70%)`,
+        transition: 'background 0.5s ease',
+      }} />
 
-      {/* Radial glow behind content */}
-      <div
-        className="absolute inset-0 pointer-events-none transition-all duration-700"
-        style={{
-          background: `radial-gradient(ellipse 60% 50% at 50% 40%, ${mode.accentRgb}0.07) 0%, transparent 70%)`,
-        }}
-      />
+      {/* Noise grain */}
+      <div style={{
+        position: 'absolute', inset: 0, pointerEvents: 'none', opacity: 0.018,
+        backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")`,
+        backgroundSize: '180px',
+      }} />
 
-      {/* ── Content ── */}
-      <div
-        className="relative z-10 min-h-screen flex flex-col items-center justify-between px-4 py-10"
-        style={{
-          opacity:    entered ? 1 : 0,
-          transform:  entered ? 'none' : 'translateY(20px)',
-          transition: 'opacity 0.6s ease, transform 0.6s ease',
-        }}
-      >
-        {/* ── Title Block ── */}
-        <header className="text-center w-full max-w-4xl">
-          <div
-            className="inline-block text-xs tracking-[0.4em] uppercase mb-4 px-3 py-1 rounded-full border"
-            style={{ color: mode.accent, borderColor: mode.borderCss, background: mode.accentRgb + '0.08)' }}
-          >
-            Master This Game. Master Real Money.
+      {/* User bar */}
+      <UserBar user={user} onLogout={onLogout} accentRgb={mode.accentRgb} />
+
+      {/* Main content */}
+      <div style={{
+        position: 'relative', zIndex: 10, minHeight: '100vh',
+        display: 'flex', flexDirection: 'column', alignItems: 'center',
+        padding: 'clamp(24px, 5vw, 48px) clamp(16px, 4vw, 32px)',
+        opacity: visible ? 1 : 0, transform: visible ? 'none' : 'translateY(18px)',
+        transition: 'opacity 0.55s ease, transform 0.55s ease',
+      }}>
+
+        {/* ── Header ── */}
+        <header style={{
+          textAlign: 'center', width: '100%', maxWidth: 900,
+          marginBottom: 'clamp(28px, 5vw, 48px)',
+          marginTop: user ? 40 : 0,   // clear UserBar on mobile
+        }}>
+          {/* Status pill */}
+          <div style={{
+            display: 'inline-flex', alignItems: 'center', gap: 8,
+            fontSize: 11, letterSpacing: '0.3em', textTransform: 'uppercase' as const,
+            color: mode.accent, fontFamily: T.mono, fontWeight: 600,
+            padding: '6px 16px', borderRadius: 100,
+            border: `1px solid rgba(${mode.accentRgb},0.35)`,
+            background: `rgba(${mode.accentRgb},0.08)`,
+            marginBottom: 20, transition: 'all 0.5s ease',
+          }}>
+            <span style={{
+              width: 6, height: 6, borderRadius: '50%',
+              background: mode.accent, display: 'inline-block',
+            }} />
+            {greeting}
           </div>
-          <h1
-            className="text-[clamp(3rem,10vw,7rem)] font-black leading-none tracking-tighter text-white"
-            style={{ letterSpacing: '-0.03em' }}
-          >
+
+          <h1 style={{
+            fontSize: 'clamp(3.2rem, 12vw, 7.5rem)', fontWeight: 900,
+            lineHeight: 0.92, letterSpacing: '-0.04em', color: T.text,
+            fontFamily: T.display, margin: 0,
+          }}>
             POINT{' '}
-            <span
-              className="transition-all duration-500"
-              style={{
-                color:      mode.accent,
-                textShadow: `0 0 40px ${mode.accentRgb}0.6), 0 0 80px ${mode.accentRgb}0.3)`,
-              }}
-            >
+            <span style={{
+              color: mode.accent,
+              textShadow: `0 0 60px rgba(${mode.accentRgb},0.6), 0 0 120px rgba(${mode.accentRgb},0.3)`,
+              transition: 'all 0.5s ease',
+            }}>
               ZERO ONE
             </span>
           </h1>
-          <p className="mt-3 text-[#888] text-sm tracking-widest uppercase">
-            Most people never figure out why their money disappears. You're about to.
+
+          <p style={{
+            marginTop: 16, color: T.textSub,
+            fontSize: 'clamp(11px, 2vw, 13px)',
+            letterSpacing: '0.14em', textTransform: 'uppercase' as const,
+            fontFamily: T.mono,
+          }}>
+            {user
+              ? `Ready when you are. Choose your mode.`
+              : `Most people never figure out why their money disappears. You're about to.`
+            }
           </p>
         </header>
 
-        {/* ── Mode Selector Tabs ── */}
-        <nav className="flex flex-wrap justify-center gap-2 mt-8">
-          {(Object.values(MODES) as typeof MODES[RunMode][]).map((m) => {
-            const isActive = selected === m.id;
+        {/* ── Mode Tabs ── */}
+        <nav style={{
+          display: 'flex', flexWrap: 'wrap' as const, justifyContent: 'center',
+          gap: 8, marginBottom: 'clamp(20px, 4vw, 36px)',
+        }}>
+          {(Object.values(MODES) as typeof MODES[ModeKey][]).map((m) => {
+            const active = selected === m.id;
             return (
               <button
                 key={m.id}
-                onClick={() => switchMode(m.id)}
-                className="relative px-5 py-2 rounded-lg text-xs tracking-widest uppercase font-bold transition-all duration-300 outline-none"
+                onClick={() => switchMode(m.id as ModeKey)}
                 style={{
-                  color:      isActive ? m.accent : '#666',
-                  border:     `1px solid ${isActive ? m.accent : '#333'}`,
-                  background: isActive ? m.accentRgb + '0.1)' : 'transparent',
-                  boxShadow:  isActive ? `0 0 20px ${m.accentRgb}0.3), inset 0 0 20px ${m.accentRgb}0.05)` : 'none',
-                  transform:  isActive ? 'scale(1.05)' : 'scale(1)',
+                  padding: '10px 20px', borderRadius: 8, cursor: 'pointer',
+                  fontSize: 11, fontWeight: 700, letterSpacing: '0.2em',
+                  textTransform: 'uppercase' as const, fontFamily: T.mono,
+                  color: active ? m.accent : T.textSub,
+                  background: active ? `rgba(${m.accentRgb},0.12)` : 'rgba(255,255,255,0.03)',
+                  border: `1px solid ${active ? `rgba(${m.accentRgb},0.45)` : T.border}`,
+                  boxShadow: active
+                    ? `0 0 20px rgba(${m.accentRgb},0.25), inset 0 0 16px rgba(${m.accentRgb},0.06)`
+                    : 'none',
+                  transform: active ? 'scale(1.04)' : 'scale(1)',
+                  transition: 'all 0.25s ease',
+                  minHeight: 42, minWidth: 90,
                 }}
               >
-                {m.badge}
+                {m.emoji} {m.badge}
               </button>
             );
           })}
         </nav>
 
-        {/* ── Mode Detail Card ── */}
-        <div
-          className="w-full max-w-5xl mt-8 rounded-2xl border overflow-hidden transition-all duration-300"
-          style={{
-            borderColor:  mode.borderCss,
-            background:   `linear-gradient(135deg, ${mode.accentRgb}0.05) 0%, rgba(0,0,0,0.4) 100%)`,
-            opacity:      animating ? 0 : 1,
-            transform:    animating ? 'translateY(8px)' : 'none',
-            backdropFilter: 'blur(12px)',
-          }}
-        >
-          {/* Top stripe */}
-          <div
-            className="h-0.5 w-full"
-            style={{ background: `linear-gradient(90deg, transparent, ${mode.accent}, transparent)` }}
-          />
+        {/* ── Mode Card ── */}
+        <div style={{
+          width: '100%', maxWidth: 960, borderRadius: 16,
+          border: `1px solid rgba(${mode.accentRgb},0.20)`,
+          background: `linear-gradient(135deg, rgba(${mode.accentRgb},0.07) 0%, rgba(15,15,32,0.95) 100%)`,
+          backdropFilter: 'blur(16px)',
+          opacity: animating ? 0 : 1,
+          transform: animating ? 'translateY(10px)' : 'none',
+          transition: 'opacity 0.18s ease, transform 0.18s ease, border-color 0.5s ease',
+          overflow: 'hidden',
+        }}>
+          {/* Accent stripe */}
+          <div style={{
+            height: 2, width: '100%',
+            background: `linear-gradient(90deg, transparent, ${mode.accent}, rgba(${mode.accentRgb},0.5), transparent)`,
+          }} />
 
-          <div className="p-8 md:p-10">
+          <div style={{ padding: 'clamp(20px, 5vw, 40px)' }}>
+
             {/* Mode header */}
-            <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-6 mb-8">
+            <div style={{
+              display: 'flex', flexWrap: 'wrap' as const, gap: 24,
+              justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 28,
+            }}>
               <div>
-                <div
-                  className="text-xs tracking-[0.3em] uppercase mb-2 font-bold"
-                  style={{ color: mode.accent }}
-                >
-                  {mode.badge}
+                <div style={{
+                  fontSize: 10, fontFamily: T.mono, fontWeight: 700,
+                  letterSpacing: '0.3em', textTransform: 'uppercase' as const,
+                  color: mode.accent, marginBottom: 8,
+                }}>
+                  {mode.emoji} {mode.badge}
                 </div>
-                <h2
-                  className="text-5xl md:text-6xl font-black text-white leading-none"
-                  style={{ textShadow: `0 0 30px ${mode.accentRgb}0.4)` }}
-                >
+                <h2 style={{
+                  fontSize: 'clamp(2.8rem, 7vw, 4.5rem)', fontWeight: 900,
+                  color: T.text, lineHeight: 0.9, letterSpacing: '-0.03em',
+                  textShadow: `0 0 40px rgba(${mode.accentRgb},0.35)`,
+                  fontFamily: T.display, margin: 0,
+                }}>
                   {mode.label}
                 </h2>
-                <p className="text-lg text-[#aaa] mt-1 font-medium">{mode.tagline}</p>
+                <p style={{ color: T.textSub, fontSize: 15, marginTop: 10, fontWeight: 500, fontFamily: T.body }}>
+                  {mode.tagline}
+                </p>
               </div>
-              <p
-                className="text-sm leading-relaxed text-[#bbb] max-w-xs italic border-l-2 pl-4"
-                style={{ borderColor: mode.borderCss }}
-              >
-                {mode.flavor}
-              </p>
+
+              <blockquote style={{
+                maxWidth: 280, margin: 0, fontSize: 13, lineHeight: 1.65,
+                color: '#8888AA', fontStyle: 'italic',
+                borderLeft: `2px solid rgba(${mode.accentRgb},0.35)`,
+                paddingLeft: 16,
+                fontFamily: T.body,
+              }}>
+                {mode.quote}
+              </blockquote>
             </div>
 
             {/* Description */}
-            <p className="text-[#ddd] text-base md:text-lg leading-relaxed mb-8 max-w-2xl">
+            <p style={{
+              fontSize: 'clamp(14px, 2vw, 16px)', lineHeight: 1.75,
+              color: '#CCCCDD', marginBottom: 28, maxWidth: 700,
+              fontFamily: T.body,
+            }}>
               {mode.desc}
             </p>
 
             {/* Feature grid */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-8">
+            <div style={{
+              display: 'grid', gap: 10, marginBottom: 32,
+              gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+            }}>
               {mode.features.map((f) => (
                 <div
-                  key={f.name}
-                  className="rounded-xl p-4 border transition-all duration-200 hover:scale-[1.02]"
+                  key={f.text}
                   style={{
-                    borderColor: mode.borderCss,
-                    background:  mode.accentRgb + '0.04)',
+                    padding: '14px 16px', borderRadius: 10,
+                    border: `1px solid rgba(${mode.accentRgb},0.15)`,
+                    background: `rgba(${mode.accentRgb},0.05)`,
+                    display: 'flex', alignItems: 'flex-start', gap: 10,
                   }}
                 >
-                  <div className="flex items-center gap-3 mb-2">
-                    <span className="text-2xl">{f.icon}</span>
-                    <span
-                      className="font-bold text-sm tracking-wide uppercase"
-                      style={{ color: mode.accent }}
-                    >
-                      {f.name}
-                    </span>
-                  </div>
-                  <p className="text-[#999] text-sm leading-relaxed">{f.detail}</p>
+                  <span style={{ fontSize: 20, lineHeight: 1, flexShrink: 0, marginTop: 1 }}>{f.icon}</span>
+                  <span style={{ fontSize: 13, lineHeight: 1.5, color: '#C8C8E0', fontWeight: 500, fontFamily: T.body }}>
+                    {f.text}
+                  </span>
                 </div>
               ))}
             </div>
 
             {/* CTA row */}
-            <div className="flex flex-col sm:flex-row items-center gap-4">
+            <div style={{ display: 'flex', flexWrap: 'wrap' as const, alignItems: 'center', gap: 16 }}>
               <button
-                onClick={handleStart}
-                className={`relative px-12 py-4 rounded-2xl font-black text-lg tracking-widest uppercase transition-all duration-200 active:scale-95 ${mode.btnBg}`}
+                onClick={() => onStart(mode.id)}
                 style={{
-                  boxShadow: pulse
-                    ? `0 0 60px ${mode.accentRgb}0.8), 0 0 120px ${mode.accentRgb}0.4)`
-                    : `0 0 30px ${mode.accentRgb}0.4)`,
-                  transition: 'box-shadow 0.3s ease, transform 0.15s ease',
-                  transform: pulse ? 'scale(1.03)' : 'scale(1)',
+                  padding: 'clamp(12px, 2vw, 16px) clamp(28px, 5vw, 52px)',
+                  borderRadius: 12, cursor: 'pointer', border: 'none',
+                  background: mode.accent, color: '#000000',
+                  fontSize: 'clamp(14px, 2vw, 16px)', fontWeight: 900,
+                  letterSpacing: '0.12em', textTransform: 'uppercase' as const,
+                  fontFamily: T.display, minHeight: 52,
+                  boxShadow: ctaPulse
+                    ? `0 0 60px rgba(${mode.accentRgb},0.8), 0 0 120px rgba(${mode.accentRgb},0.4)`
+                    : `0 0 24px rgba(${mode.accentRgb},0.35)`,
+                  transform: ctaPulse ? 'scale(1.03)' : 'scale(1)',
+                  transition: 'box-shadow 0.35s ease, transform 0.2s ease',
                 }}
               >
                 {mode.cta}
               </button>
-              <div className="text-[#555] text-xs text-center">
-                No saving. No pausing. No excuses. Just like real money.
-              </div>
+              <p style={{
+                color: T.textMut, fontSize: 12, fontFamily: T.mono,
+                letterSpacing: '0.05em', lineHeight: 1.5, maxWidth: 260,
+              }}>
+                No saving. No pausing. No excuses.<br />Just like real money.
+              </p>
             </div>
           </div>
         </div>
 
-        {/* ── Bottom stats strip ── */}
-        <footer className="w-full max-w-5xl mt-8">
-          <div
-            className="rounded-xl border px-6 py-4 flex flex-wrap justify-center gap-8"
-            style={{ borderColor: '#222', background: 'rgba(0,0,0,0.4)' }}
-          >
-            {[
-              ['12 Min',    'To change how you see money forever'],
-              ['No Resets', 'Your decisions have permanent weight'],
-              ['Real Rules','Same wealth principles as real life'],
-              ['No Excuses','The market is the same for everyone'],
-              ['Elite',     'What you become when you master it'],
-            ].map(([val, label]) => (
-              <div key={label} className="text-center">
-                <div
-                  className="text-2xl font-black leading-none transition-all duration-500"
-                  style={{ color: mode.accent }}
-                >
-                  {val}
-                </div>
-                <div className="text-[#555] text-xs tracking-wider uppercase mt-1">{label}</div>
+        {/* ── Stats Strip ── */}
+        <footer style={{
+          width: '100%', maxWidth: 960, marginTop: 24,
+          borderRadius: 12, padding: 'clamp(16px, 3vw, 20px) clamp(20px, 4vw, 40px)',
+          border: `1px solid rgba(255,255,255,0.06)`,
+          background: 'rgba(10,10,22,0.7)',
+          display: 'flex', flexWrap: 'wrap' as const, justifyContent: 'center', gap: '16px 40px',
+        }}>
+          {([
+            ['12 Min',   'To change how you see money'],
+            ['4 Modes',  'Each teaches a real wealth principle'],
+            ['No Resets','Every decision has permanent weight'],
+            ['Real Rules','Same principles as actual wealth building'],
+            ['Elite Proof','Beat a champion and earn it forever'],
+          ] as [string, string][]).map(([val, label]) => (
+            <div key={label} style={{ textAlign: 'center' as const }}>
+              <div style={{
+                fontSize: 'clamp(1.1rem, 3vw, 1.5rem)', fontWeight: 800,
+                color: mode.accent, fontFamily: T.display, letterSpacing: '-0.02em',
+                transition: 'color 0.5s ease',
+              }}>
+                {val}
               </div>
-            ))}
-          </div>
+              <div style={{
+                color: T.textMut, fontSize: 10, fontFamily: T.mono,
+                letterSpacing: '0.1em', textTransform: 'uppercase' as const, marginTop: 3,
+              }}>
+                {label}
+              </div>
+            </div>
+          ))}
         </footer>
-      </div>
 
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&display=swap');
-      `}</style>
+        {/* ── Auth note (unauthenticated fallback) ── */}
+        {!user && (
+          <div style={{
+            marginTop: 24, textAlign: 'center' as const,
+            fontSize: 10, fontFamily: T.mono,
+            color: T.textMut, letterSpacing: '0.08em',
+          }}>
+            ⚖️ "The 1% is not a destination. It's an invitation list."
+            <span style={{ display: 'block', marginTop: 4, fontSize: 9, color: '#2a2a40' }}>
+              — STATUS_QUO_ML
+            </span>
+          </div>
+        )}
+
+      </div>
     </div>
   );
 }

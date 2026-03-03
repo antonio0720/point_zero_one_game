@@ -1,53 +1,67 @@
-/**
- * RunEvents — Ledger Event Persistence Layer
- * Writes and reads run events with SHA256 audit hashing and bounded output clamping.
- * ML kill-switch reads from process.env.ML_ENABLED (server sets this at boot).
- *
- * Deploy to: pzo_engine/src/persistence/run-events.ts
- */
+// ═══════════════════════════════════════════════════════════════════════════════
+// POINT ZERO ONE — ENGINE PERSISTENCE LAYER
+// pzo_engine/src/persistence/run-events.ts
+//
+// Ledger Event Persistence Layer
+//
+// UPDATED FROM SPRINT 0:
+//   ✦ Event interface: +mode, +rulesetVersion, +isDemoRun, +tensionScore
+//   ✦ LedgerFilter: +mode, +isDemoRun
+//   ✦ Mode-specific event enrichment in ML context hash chain
+//
+// Writes and reads run events with SHA-256 audit hashing and bounded output
+// clamping. ML kill-switch reads from process.env.ML_ENABLED.
+//
+// Density6 LLC · Point Zero One · Persistence Layer · Confidential
+// ═══════════════════════════════════════════════════════════════════════════════
 
-import { createHash } from 'crypto';
+import { createHash } from 'node:crypto';
+import { getDb }      from './db';
+import type { GameMode } from './types';
 
-// ─── Interfaces ───────────────────────────────────────────────────────────────
+// =============================================================================
+// INTERFACES
+// =============================================================================
 
 export interface Event {
-  eventId: string;
-  eventType: string;
-  runId: string;
-  runSeed: string;
+  eventId:        string;
+  eventType:      string;
+  runId:          string;
+  runSeed:        string;
   rulesetVersion: string;
-  playerId: string;
-  turnNumber: number;
-  tickIndex: number;
-  output: number;          // bounded [0, 1] — always clamped before storage
-  payload: Record<string, unknown>;
-  auditHash: string;
-  createdAt: number;       // unix ms
-}
-
-export interface LedgerTable {
-  addEvent(event: Event): Promise<void>;
-  getEvents(filter?: LedgerFilter): Promise<Event[]>;
-  getEventById(eventId: string): Promise<Event | null>;
+  mode:           GameMode;
+  playerId:       string;
+  turnNumber:     number;
+  tickIndex:      number;
+  output:         number;          // bounded [0, 1]
+  tensionScore:   number;          // 0.0–1.0 at event time
+  isDemoRun:      boolean;
+  payload:        Record<string, unknown>;
+  auditHash:      string;
+  createdAt:      number;          // unix ms
 }
 
 export interface LedgerFilter {
-  runId?: string;
-  playerId?: string;
+  runId?:     string;
+  playerId?:  string;
   eventType?: string;
-  fromTick?: number;
-  toTick?: number;
-  limit?: number;
+  mode?:      GameMode;
+  fromTick?:  number;
+  toTick?:    number;
+  isDemoRun?: boolean;
+  limit?:     number;
 }
 
 export interface WriteResult {
-  success: boolean;
-  eventId: string;
-  auditHash: string;
-  mlHashApplied: boolean;
+  success:        boolean;
+  eventId:        string;
+  auditHash:      string;
+  mlHashApplied:  boolean;
 }
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+// =============================================================================
+// HELPERS
+// =============================================================================
 
 function sha256(data: string): string {
   return createHash('sha256').update(data).digest('hex');
@@ -57,132 +71,145 @@ function clamp(v: number, min = 0, max = 1): number {
   return Math.max(min, Math.min(max, v));
 }
 
-/**
- * Compute canonical audit hash for an event.
- * Covers all fields that uniquely identify the event's causal chain.
- * Same inputs always produce the same hash (determinism guaranteed).
- */
 function computeEventAuditHash(event: Omit<Event, 'auditHash'>): string {
   return sha256(JSON.stringify({
-    eventId: event.eventId,
-    eventType: event.eventType,
-    runId: event.runId,
-    runSeed: event.runSeed,
+    eventId:        event.eventId,
+    eventType:      event.eventType,
+    runId:          event.runId,
+    runSeed:        event.runSeed,
     rulesetVersion: event.rulesetVersion,
-    playerId: event.playerId,
-    turnNumber: event.turnNumber,
-    tickIndex: event.tickIndex,
-    output: event.output,
-    payload: event.payload,
-    createdAt: event.createdAt,
+    mode:           event.mode,
+    playerId:       event.playerId,
+    turnNumber:     event.turnNumber,
+    tickIndex:      event.tickIndex,
+    output:         event.output,
+    tensionScore:   event.tensionScore,
+    isDemoRun:      event.isDemoRun,
+    payload:        event.payload,
+    createdAt:      event.createdAt,
   }));
 }
 
-/**
- * Compute a read-time verification hash — used to detect tampering
- * between write and read (e.g., direct DB edits).
- * Different from write-time hash: includes the stored auditHash itself.
- */
 function computeReadVerificationHash(event: Event): string {
   return sha256(JSON.stringify({
-    eventId: event.eventId,
-    runId: event.runId,
-    output: event.output,
+    eventId:   event.eventId,
+    runId:     event.runId,
+    output:    event.output,
     auditHash: event.auditHash,
     createdAt: event.createdAt,
+    mode:      event.mode,
   })).slice(0, 32);
 }
 
-// ─── ML Kill-Switch ───────────────────────────────────────────────────────────
-
-/**
- * ML is enabled when process.env.ML_ENABLED === 'true'.
- * Kill-switch: set ML_ENABLED=false in server env to disable all ML hashing.
- * Deterministic mode (ML off): audit hash still computed, but ML-specific
- * enrichment (e.g., model output embedding) is skipped.
- */
 function mlEnabled(): boolean {
-  return process.env.ML_ENABLED === 'true';
+  return process.env['ML_ENABLED'] === 'true';
 }
 
-// ─── RunEvents ────────────────────────────────────────────────────────────────
+// =============================================================================
+// RUN EVENTS CLASS
+// =============================================================================
 
 export class RunEvents {
-  private readonly ledgerTable: LedgerTable;
 
-  constructor(ledgerTable: LedgerTable) {
-    this.ledgerTable = ledgerTable;
-  }
+  // ── Write ─────────────────────────────────────────────────────────────────
 
-  /**
-   * Write an event to the ledger.
-   * 1. Clamp output to [0, 1] (bounded output guarantee).
-   * 2. Compute canonical audit hash over all event fields.
-   * 3. If ML enabled, embed ML-specific fingerprint into hash chain.
-   * 4. Persist to ledger.
-   */
   public async writeEvent(event: Event): Promise<WriteResult> {
-    // Step 1: Clamp output — non-negotiable
     event.output = clamp(event.output);
 
-    // Step 2: Canonical audit hash (always computed, ML or not)
     const baseHash = computeEventAuditHash(event);
     event.auditHash = baseHash;
 
-    // Step 3: ML-enriched hash chain (only when ML is on)
     let mlHashApplied = false;
+
     if (mlEnabled()) {
-      // Embed model fingerprint: hash of (baseHash + model run context)
-      // This creates an unbroken chain: base event → ML observation
       const mlContextHash = sha256(JSON.stringify({
         baseHash,
-        mlEnabled: true,
-        modelVersion: process.env.ML_MODEL_VERSION ?? 'unversioned',
-        runId: event.runId,
-        tickIndex: event.tickIndex,
+        mlEnabled:    true,
+        modelVersion: process.env['ML_MODEL_VERSION'] ?? 'unversioned',
+        runId:        event.runId,
+        tickIndex:    event.tickIndex,
+        mode:         event.mode,
+        isDemoRun:    event.isDemoRun,
       }));
-      // Final audit hash is a hash-of-hashes — tamper-evident chain
       event.auditHash = sha256(`${baseHash}:${mlContextHash}`);
       mlHashApplied = true;
     }
 
-    // Step 4: Persist
-    await this.ledgerTable.addEvent(event);
+    // Persist to SQLite
+    const db = getDb();
+    db.prepare(`
+      INSERT OR REPLACE INTO run_events (
+        event_id, event_type, run_id, run_seed, ruleset_version,
+        player_id, turn_number, tick_index, output, payload_json,
+        audit_hash, created_at
+      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+    `).run(
+      event.eventId, event.eventType, event.runId, event.runSeed, event.rulesetVersion,
+      event.playerId, event.turnNumber, event.tickIndex, event.output,
+      JSON.stringify(event.payload), event.auditHash, event.createdAt,
+    );
 
     return {
-      success: true,
-      eventId: event.eventId,
-      auditHash: event.auditHash,
+      success:       true,
+      eventId:       event.eventId,
+      auditHash:     event.auditHash,
       mlHashApplied,
     };
   }
 
-  /**
-   * Read all events, re-clamp outputs, and optionally re-verify audit hashes.
-   * Re-computing hashes at read time allows detecting post-write DB tampering.
-   */
+  // ── Read (all) ────────────────────────────────────────────────────────────
+
   public async readEvents(filter?: LedgerFilter): Promise<Event[]> {
-    const events = await this.ledgerTable.getEvents(filter);
+    const db = getDb();
 
-    for (const event of events) {
-      // Always re-clamp on read — defense in depth against raw DB edits
-      event.output = clamp(event.output);
+    const conditions: string[] = [];
+    const bindings:   unknown[] = [];
 
-      // If ML enabled: verify the stored hash is consistent with re-computation
-      if (mlEnabled()) {
+    if (filter?.runId)     { conditions.push('run_id = ?');     bindings.push(filter.runId); }
+    if (filter?.playerId)  { conditions.push('player_id = ?');  bindings.push(filter.playerId); }
+    if (filter?.eventType) { conditions.push('event_type = ?'); bindings.push(filter.eventType); }
+    if (filter?.fromTick != null) { conditions.push('tick_index >= ?'); bindings.push(filter.fromTick); }
+    if (filter?.toTick   != null) { conditions.push('tick_index <= ?'); bindings.push(filter.toTick); }
+
+    const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    const limit = filter?.limit ? `LIMIT ${filter.limit}` : '';
+
+    const rows = db.prepare(`
+      SELECT * FROM run_events ${where} ORDER BY turn_number, tick_index ${limit}
+    `).all(...bindings) as Record<string, unknown>[];
+
+    const events: Event[] = rows.map(r => ({
+      eventId:        r['event_id'] as string,
+      eventType:      r['event_type'] as string,
+      runId:          r['run_id'] as string,
+      runSeed:        r['run_seed'] as string,
+      rulesetVersion: r['ruleset_version'] as string,
+      mode:           'GO_ALONE' as GameMode,    // DB didn't have mode column before M008
+      playerId:       r['player_id'] as string,
+      turnNumber:     r['turn_number'] as number,
+      tickIndex:      r['tick_index'] as number,
+      output:         clamp(r['output'] as number),
+      tensionScore:   0,
+      isDemoRun:      false,
+      payload:        JSON.parse(r['payload_json'] as string ?? '{}'),
+      auditHash:      r['audit_hash'] as string,
+      createdAt:      r['created_at'] as number,
+    }));
+
+    if (mlEnabled()) {
+      for (const event of events) {
         const expectedBase = computeEventAuditHash(event);
         const expectedMlHash = sha256(JSON.stringify({
-          baseHash: expectedBase,
-          mlEnabled: true,
-          modelVersion: process.env.ML_MODEL_VERSION ?? 'unversioned',
-          runId: event.runId,
-          tickIndex: event.tickIndex,
+          baseHash:     expectedBase,
+          mlEnabled:    true,
+          modelVersion: process.env['ML_MODEL_VERSION'] ?? 'unversioned',
+          runId:        event.runId,
+          tickIndex:    event.tickIndex,
+          mode:         event.mode,
+          isDemoRun:    event.isDemoRun,
         }));
         const expectedFinal = sha256(`${expectedBase}:${expectedMlHash}`);
-
         if (event.auditHash !== expectedFinal) {
-          // Hash mismatch — mark event as tampered but do not throw.
-          // Caller sees the flag; integrity system logs and quarantines.
           (event as Event & { _tampered?: boolean })._tampered = true;
         }
       }
@@ -191,35 +218,48 @@ export class RunEvents {
     return events;
   }
 
-  /**
-   * Read a single event by ID with full hash verification.
-   */
+  // ── Read (single) ─────────────────────────────────────────────────────────
+
   public async readEvent(eventId: string): Promise<Event | null> {
-    const event = await this.ledgerTable.getEventById(eventId);
-    if (!event) return null;
+    const row = getDb()
+      .prepare('SELECT * FROM run_events WHERE event_id = ?')
+      .get(eventId) as Record<string, unknown> | undefined;
 
-    event.output = clamp(event.output);
+    if (!row) return null;
 
-    // Lightweight read-time verification (no ML context needed)
+    const event: Event = {
+      eventId:        row['event_id'] as string,
+      eventType:      row['event_type'] as string,
+      runId:          row['run_id'] as string,
+      runSeed:        row['run_seed'] as string,
+      rulesetVersion: row['ruleset_version'] as string,
+      mode:           'GO_ALONE' as GameMode,
+      playerId:       row['player_id'] as string,
+      turnNumber:     row['turn_number'] as number,
+      tickIndex:      row['tick_index'] as number,
+      output:         clamp(row['output'] as number),
+      tensionScore:   0,
+      isDemoRun:      false,
+      payload:        JSON.parse(row['payload_json'] as string ?? '{}'),
+      auditHash:      row['audit_hash'] as string,
+      createdAt:      row['created_at'] as number,
+    };
+
     const verificationHash = computeReadVerificationHash(event);
     (event as Event & { _verificationHash?: string })._verificationHash = verificationHash;
 
     return event;
   }
 
-  /**
-   * Build a chain-hash across a sequence of events for a run.
-   * Used to produce the run's finalStateHash.
-   * Deterministic: same events in same order → same hash.
-   */
+  // ── Chain hash ────────────────────────────────────────────────────────────
+
   public async computeRunChainHash(runId: string): Promise<string> {
     const events = await this.readEvents({ runId });
 
-    // Sort by turnNumber + tickIndex for determinism
     events.sort((a, b) =>
       a.turnNumber !== b.turnNumber
         ? a.turnNumber - b.turnNumber
-        : a.tickIndex - b.tickIndex,
+        : a.tickIndex - b.tickIndex
     );
 
     let chain = `chain:${runId}`;
@@ -228,4 +268,15 @@ export class RunEvents {
     }
     return chain.slice(0, 32);
   }
+}
+
+// =============================================================================
+// SINGLETON
+// =============================================================================
+
+let _runEvents: RunEvents | null = null;
+
+export function getRunEvents(): RunEvents {
+  if (!_runEvents) _runEvents = new RunEvents();
+  return _runEvents;
 }

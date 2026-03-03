@@ -18,7 +18,7 @@ const TimeEngineDebugPanel: React.FC<TimeEngineDebugProps> = ({ engineTier, curr
   useEffect(() => {
     if (process.env.NODE_ENV === 'development') {
       setPanelVisible(true);
-   0, "ticksElapsed": ticksElapsed, "holdsRemaining": holdsRemaining, "activeWindows": Array.from(activeWindows), "transitionStatus": transitionStatus || null, "recentEvents": recentEvents
+    }
   }, [engineTier, currentDurationMs, ticksElapsed, holdsRemaining, activeWindows, transitionStatus, recentEvents]); // Dependencies should be carefully managed to avoid unnecessary re-renders. In production mode or when not in dev tools enabled state, this effect can simply return without setting the panelVisible state.
   
   if (!panelVisible) {

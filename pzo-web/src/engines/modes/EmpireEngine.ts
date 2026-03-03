@@ -12,6 +12,22 @@
 //   • Momentum Engine — sustained positive cashflow unlocks positive cascades
 //   • Counter-Evidence Budget — per-tick resource to neutralize bots
 //   • Critical Hit Risk — bots that wait 2+ ticks in TARGETING bypass shields
+//
+// COMPATIBILITY NOTES (v2):
+//   ✦ CascadeChainId strings ('CHAIN_06_TOTAL_SYSTEMIC', 'CHAIN_08_POSITIVE_MOMENTUM')
+//     are kept as-is. ModeEventBridge translates them to new ChainId enum values
+//     on the zero/EventBus before they reach engineStore.
+//   ✦ shield layer keys ('L4_NETWORK_CORE', etc.) are kept as-is inside LiveRunState.
+//     getLegacyShieldLayer() from LegacyTypeCompat is available if a ShieldSnapshot
+//     is ever passed directly. computeSovereigntyScore() reads LiveRunState.shields
+//     which retains legacy string keys — no change required.
+//   ✦ 'PRESSURE_SCORE_UPDATE' emission is kept as-is. ModeEventBridge normalises
+//     the name → 'PRESSURE_SCORE_UPDATED' and shape on the zero/EventBus.
+//   ✦ Duplicate 'RUN_STARTED' on globalEventBus is harmless — only old-bus
+//     subscribers see it. The store listens on zero/EventBus via orchestrator.
+//   ✦ SHIELD_L4_BREACH: EmpireEngine subscribes to 'SHIELD_L4_BREACH' on
+//     globalEventBus. ModeEventBridge re-emits this whenever zero/EventBus
+//     fires SHIELD_LAYER_BREACHED with layerId === NETWORK_CORE.
 
 import type {
   IGameModeEngine, RunMode, RunOutcome, ModeInitConfig,
@@ -87,13 +103,17 @@ export class EmpireEngine implements IGameModeEngine {
     this.highestBotThreat  = 'None';
     this.nextThreatTick    = null;
 
-    // Subscribe to events from other engines
+    // Subscribe to events from other engines.
+    // SHIELD_L4_BREACH is re-emitted on globalEventBus by ModeEventBridge
+    // whenever zero/EventBus fires SHIELD_LAYER_BREACHED with layerId=NETWORK_CORE.
     this.eventHandlers.push(
-      globalEventBus.on('BOT_ATTACK_FIRED', (e) => this.onBotAttack(e)),
-      globalEventBus.on('SHIELD_L4_BREACH', (e) => this.onL4Breach(e)),
-      globalEventBus.on('PRESSURE_TIER_CHANGED', (e) => this.onPressureChanged(e)),
+      globalEventBus.on('BOT_ATTACK_FIRED',     (e: PZOEvent) => this.onBotAttack(e)),
+      globalEventBus.on('SHIELD_L4_BREACH',     (e: PZOEvent) => this.onL4Breach(e)),
+      globalEventBus.on('PRESSURE_TIER_CHANGED',(e: PZOEvent) => this.onPressureChanged(e)),
     );
 
+    // Note: also emitted by orchestrator on zero/EventBus — both are intentional.
+    // Old-bus subscribers here; store subscribers on zero/EventBus. No conflict.
     globalEventBus.emitImmediate('RUN_STARTED', 0, {
       mode: 'solo',
       label: 'EMPIRE',
@@ -152,6 +172,8 @@ export class EmpireEngine implements IGameModeEngine {
     const sovereigntyScore = this.computeSovereigntyScore(outcome);
     const grade = this.computeGrade(sovereigntyScore);
 
+    // 'RUN_GRADED' → ModeEventBridge translates to 'RUN_COMPLETED' on zero/EventBus
+    // so engineStore.sovereignty slice receives it correctly.
     globalEventBus.emitImmediate('RUN_GRADED', this.liveStateRef?.tick ?? 0, {
       outcome, sovereigntyScore, grade, runId: this.runId,
       label: outcome === 'FREEDOM'
@@ -161,7 +183,6 @@ export class EmpireEngine implements IGameModeEngine {
         : 'Time ran out. The empire was unfinished.',
     });
 
-    // Cleanup subscribers
     this.eventHandlers.forEach(unsub => unsub());
     this.eventHandlers = [];
   }
@@ -208,6 +229,8 @@ export class EmpireEngine implements IGameModeEngine {
       reason: `Wave ${wave.wave} extraction: ${wave.label}`,
     });
 
+    // 'PRESSURE_SCORE_UPDATE' → ModeEventBridge translates to 'PRESSURE_SCORE_UPDATED'
+    // on zero/EventBus so engineStore.pressure slice receives it.
     globalEventBus.emit('PRESSURE_SCORE_UPDATE', snapshot.tick, {
       waveEntry: true, wave: wave.wave, prevWave,
       message: `${wave.label} — ${wave.botActivations} adversaries escalating.`,
@@ -219,6 +242,8 @@ export class EmpireEngine implements IGameModeEngine {
   private triggerPositiveCascade(snapshot: RunStateSnapshot): void {
     const instance: CascadeChainInstance = {
       id:          `pos_cascade_${snapshot.tick}`,
+      // Legacy chain ID string — ModeEventBridge translates 'CHAIN_08_POSITIVE_MOMENTUM'
+      // → ChainId.PCHAIN_SUSTAINED_CASHFLOW on the zero/EventBus.
       chainId:     'CHAIN_08_POSITIVE_MOMENTUM' as CascadeChainId,
       triggerTick: snapshot.tick,
       severity:    'LOW',
@@ -232,6 +257,8 @@ export class EmpireEngine implements IGameModeEngine {
     this.cascadeInstances.push(instance);
     if (this.liveStateRef) this.liveStateRef.activeCascades.push(instance);
 
+    // 'CASCADE_TRIGGERED' → ModeEventBridge translates to 'CASCADE_CHAIN_STARTED'
+    // with ChainId.PCHAIN_SUSTAINED_CASHFLOW on the zero/EventBus.
     globalEventBus.emit('CASCADE_TRIGGERED', snapshot.tick, {
       chainId: instance.chainId, severity: 'LOW',
       label: 'Momentum cascade unlocked — sustained cashflow is paying off.',
@@ -250,7 +277,6 @@ export class EmpireEngine implements IGameModeEngine {
       { label: 'Insurance Premium Hike',  incomeD: 0,    expenseD: 450,  msg: 'Annual policy renewal comes in 20% higher.' },
     ];
 
-    // Seeded selection — deterministic per tick + seed
     const rng = this.mulberry32(snapshot.seed + snapshot.tick);
     const ev  = events[Math.floor(rng() * events.length)];
 
@@ -283,7 +309,6 @@ export class EmpireEngine implements IGameModeEngine {
       this.highestBotThreat = 'None';
     }
 
-    // Find soonest preloaded attack
     const soonest = Object.values(snapshot.botStates)
       .filter(s => s.preloadedArrival !== null)
       .sort((a, b) => (a.preloadedArrival ?? 9999) - (b.preloadedArrival ?? 9999))[0];
@@ -293,17 +318,21 @@ export class EmpireEngine implements IGameModeEngine {
   // ── Private: Event handlers ───────────────────────────────────────────────
 
   private onBotAttack(event: PZOEvent): void {
-    // Increase hater heat on successful attacks
+    // BOT_ATTACK_FIRED is re-emitted on globalEventBus by ModeEventBridge
+    // from zero/EventBus — payload shape is compatible.
     if (this.liveStateRef) {
       this.liveStateRef.haterHeat = Math.min(100, this.liveStateRef.haterHeat + 5);
     }
   }
 
   private onL4Breach(_event: PZOEvent): void {
-    // Trigger TOTAL SYSTEMIC CASCADE on L4 breach
+    // Triggered by ModeEventBridge when zero/EventBus fires
+    // SHIELD_LAYER_BREACHED with layerId === NETWORK_CORE.
     if (!this.liveStateRef) return;
     const instance: CascadeChainInstance = {
       id:          `chain06_${Date.now()}`,
+      // Legacy ID — ModeEventBridge translates 'CHAIN_06_TOTAL_SYSTEMIC'
+      // → ChainId.CHAIN_FULL_CASCADE_BREACH on zero/EventBus.
       chainId:     'CHAIN_06_TOTAL_SYSTEMIC' as CascadeChainId,
       triggerTick: this.liveStateRef.tick,
       severity:    'CATASTROPHIC',
@@ -326,6 +355,8 @@ export class EmpireEngine implements IGameModeEngine {
   }
 
   private onPressureChanged(event: PZOEvent): void {
+    // PRESSURE_TIER_CHANGED is re-emitted on globalEventBus by ModeEventBridge
+    // from zero/EventBus — 'current' field is the new tier string.
     const payload = event.payload as { current: string };
     if (payload.current === 'CRITICAL' && this.liveStateRef) {
       this.liveStateRef.haterHeat = Math.min(100, this.liveStateRef.haterHeat + 10);
@@ -342,11 +373,15 @@ export class EmpireEngine implements IGameModeEngine {
       FREEDOM: 1.0, TIMEOUT: 0.7, BANKRUPT: 0.3, ABANDONED: 0.0,
     };
 
-    const cashflowScore   = Math.min(300, Math.max(0, (live.income - live.expenses) / 10));
-    const shieldScore     = live.shields.layers.L4_NETWORK_CORE.current / 200 * 200;
-    const momentumBonus   = this.momentumScore * 2;
-    const waveBonus       = this.currentWave * 50;
-    const heatPenalty     = live.haterHeat * -0.5;
+    const cashflowScore = Math.min(300, Math.max(0, (live.income - live.expenses) / 10));
+
+    // live.shields.layers uses legacy string keys (L4_NETWORK_CORE) — no change needed.
+    // If transitioning to ShieldSnapshot, use getLegacyShieldLayer() from LegacyTypeCompat.
+    const shieldScore   = live.shields.layers.L4_NETWORK_CORE.current / 200 * 200;
+
+    const momentumBonus = this.momentumScore * 2;
+    const waveBonus     = this.currentWave * 50;
+    const heatPenalty   = live.haterHeat * -0.5;
 
     const raw = (cashflowScore + shieldScore + momentumBonus + waveBonus + heatPenalty) * OUTCOME_MULT[outcome];
     return Math.max(0, Math.round(raw));

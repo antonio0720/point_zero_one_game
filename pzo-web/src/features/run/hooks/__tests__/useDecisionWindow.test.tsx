@@ -8,7 +8,7 @@ import useDecisionWindow, { DecisionWindowState } from './useDecisionWindow'; //
 describe('useCountdownTimer', () => {
   it('should set isUrgent and isCritical based on progressPct thresholds correctly', () => {
     const wrapper = renderHook(() => useDecisionWindow(false, false), { container: document.body });
-    expect(wrapper.current).toEqual({ ..., urgencyLevels: {} }); // Initialize with empty object for isUrgent and isCritical properties.
+    expect(wrapper.current).toEqual({ urgencyLevels: {} }); // Initialize with empty object for isUrgent and isCritical properties.
     
     const progressPct = 0.2;
     act(() => wrapper.setCurrentState((state) => ({

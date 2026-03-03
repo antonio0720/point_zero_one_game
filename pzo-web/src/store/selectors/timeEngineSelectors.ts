@@ -1,18 +1,10 @@
 // pzo-web/src/store/selectors/timeEngineSelectors.ts
-import { createSelector } from 'reselect';
-import type { RootState } from 'pzo-web/src/store';
+import type { EngineStoreState } from '../engineStore';
 
-// Extract only the necessary parts of the time engine state
-export const getTimeEngineState = (state: RootState) => state.timeEngine;
+export const getTimeEngineState = (state: EngineStoreState) => state.time;
 
-// Selector for decision countdown (optimized for minimal subscription)
-export const getDecisionCountdown = createSelector(
-  getTimeEngineState,
-  (timeEngine) => timeEngine.decisionCountdown
-);
+export const getDecisionCountdown = (state: EngineStoreState) =>
+  state.time?.ticksRemaining ?? 0;
 
-// Selector for active windows (if needed for multiple windows)
-export const getActiveWindows = createSelector(
-  getTimeEngineState,
-  (timeEngine) => timeEngine.activeWindows
-);
+export const getActiveWindows = (state: EngineStoreState) =>
+  state.time?.activeDecisionWindows ?? [];

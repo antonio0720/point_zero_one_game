@@ -1,108 +1,63 @@
 /**
- * Season0 service module for Point Zero One Digital's financial roguelike game.
+ * Season 0 — Module Barrel
+ * Point Zero One · Density6 LLC · Confidential
+ *
+ * Re-exports all public Season 0 surface area.
+ * Import from here, not from individual files, to keep
+ * consumers insulated from internal restructuring.
  */
 
-import { Injectable } from '@nestjs/common';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model, Document } from 'mongoose';
-import * as _ from 'lodash';
+// ── Core Implementation ───────────────────────────────────────────────────────
 
-/**
- * Season0 status document interface.
- */
-export interface ISeason0StatusDocument extends Document {
-  userId: string;
-  currentLevel: number;
-  totalLevels: number;
-  currentMoney: number;
-  totalMoney: number;
-  createdAt: Date;
-  updatedAt: Date;
-}
+export { Season0Impl }              from './season0_impl';
+export type {
+  Season0Config,
+  PlayerRecord,
+  JoinResult,
+}                                   from './season0_impl';
 
-/**
- * Season0 status schema.
- */
-const season0StatusSchema = new mongoose.Schema<ISeason0StatusDocument>({
-  userId: { type: String, required: true },
-  currentLevel: { type: Number, default: 1 },
-  totalLevels: { type: Number, required: true },
-  currentMoney: { type: Number, default: 0 },
-  totalMoney: { type: Number, required: true },
-  createdAt: { type: Date, default: Date.now },
-  updatedAt: { type: Date, default: Date.now },
-});
-season0StatusSchema.index({ userId: 1 });
+// ── Artifact Grant ────────────────────────────────────────────────────────────
 
-/**
- * Season0 membership card document interface.
- */
-export interface ISeason0MembershipCardDocument extends Document {
-  userId: string;
-  seasonId: string;
-  level: number;
-  money: number;
-  createdAt: Date;
-  updatedAt: Date;
-}
+export { ArtifactGrantService, grantArtifact } from './artifact_grant';
+export type {
+  ArtifactBundle,
+  ArtifactItem,
+  ArtifactIssuance,
+  ArtifactGrantDb,
+  IdentityPayload,
+}                                              from './artifact_grant';
 
-/**
- * Season0 membership card schema.
- */
-const season0MembershipCardSchema = new mongoose.Schema<ISeason0MembershipCardDocument>({
-  userId: { type: String, required: true },
-  seasonId: { type: String, required: true, ref: 'Season' },
-  level: { type: Number, default: 1 },
-  money: { type: Number, default: 0 },
-  createdAt: { type: Date, default: Date.now },
-  updatedAt: { type: Date, default: Date.now },
-});
-season0MembershipCardSchema.index({ userId: 1 });
-season0MembershipCardSchema.index({ seasonId: 1 });
+// ── Countdown Clock ───────────────────────────────────────────────────────────
 
-/**
- * Season0 service.
- */
-@Injectable()
-export class Season0Service {
-  constructor(
-    @InjectModel('Season0Status') private readonly season0StatusModel: Model<ISeason0StatusDocument>,
-    @InjectModel('Season0MembershipCard') private readonly season0MembershipCardModel: Model<ISeason0MembershipCardDocument>
-  ) {}
+export { CountdownClockService }    from './countdown_clock';
+export type {
+  CountdownResult,
+  CountdownClockConfig,
+}                                   from './countdown_clock';
 
-  /**
-   * Check if a user has a valid membership card for the specified season.
-   * @param userId The user's ID.
-   * @param seasonId The season's ID.
-   */
-  async hasValidMembershipCard(userId: string, seasonId: string): Promise<boolean> {
-    const membershipCard = await this.season0MembershipCardModel.findOne({ userId, seasonId });
-    return !!membershipCard;
-  }
+// ── Founder Tier ──────────────────────────────────────────────────────────────
 
-  /**
-   * Join a new season for the specified user.
-   * @param userId The user's ID.
-   */
-  async join(userId: string): Promise<void> {
-    const currentSeason = await this.getCurrentSeason();
-    const newMembershipCard = new this.season0MembershipCardModel({ userId, seasonId: currentSeason._id });
-    await newMembershipCard.save();
-  }
+export {
+  FounderTierLogic,
+  assignFounderTier,
+  computeTierForMetrics,
+  isEligibleForUpgrade,
+}                                   from './founder_tier_logic';
+export type {
+  TierName,
+  FounderTier,
+  UserRef,
+}                                   from './founder_tier_logic';
 
-  /**
-   * Get the current season status for the specified user.
-   * @param userId The user's ID.
-   */
-  async getStatus(userId: string): Promise<ISeason0StatusDocument | null> {
-    return this.season0StatusModel.findOne({ userId });
-  }
+// ── Season 0 Constants ────────────────────────────────────────────────────────
 
-  /**
-   * Get the current season.
-   */
-  private async getCurrentSeason(): Promise<ISeason0MembershipCardDocument> {
-    const latestSeason = await this.season0MembershipCardModel.findOne().sort('-createdAt').limit(1);
-    return latestSeason;
-  }
-}
+export const SEASON0_ID      = 'SEASON_0';
+export const SEASON0_END_UTC = new Date('2026-12-31T23:59:59.000Z');
+export const SEASON0_BUNDLE_ID = 1;
+
+/** Tier promotion thresholds — exported for UI display. */
+export const TIER_THRESHOLDS = {
+  Bronze: { streak: 1,  referrals: 1, events: 1 },
+  Silver: { streak: 5,  referrals: 3, events: 2 },
+  Gold:   { streak: 9,  referrals: 5, events: 3 },
+} as const;

@@ -1,28 +1,19 @@
 /**
  * FILE: pzo-web/src/engines/tension/TensionUXBridge.ts
+ *
  * Wraps ALL EventBus.emit() calls from the Tension Engine.
  * Called by TensionEngine. Does NOT calculate anything.
- * All tension events that the frontend and audio system consume originate here.
  *
- * RULE: Zero calculation logic. Only eventBus.emit() calls.
- * IMPORTS: types.ts, EventBus, PZOEventChannel only. Never imports any engine class.
+ * CANONICAL BUS: zero/EventBus. Imports EventBus from '../zero/EventBus' only.
+ * NEVER imports from core/EventBus or uses PZOEventChannel enum.
+ *
+ * Payload shapes match EngineEventPayloadMap in zero/types.ts exactly.
+ * eventType, tickIndex, timestamp are in the EngineEvent ENVELOPE — not the payload.
  *
  * Density6 LLC · Point Zero One · Engine 3 of 7 · Confidential
  */
-import type {
-  TensionSnapshot,
-  VisibilityState,
-  ThreatType,
-  AnticipationEntry,
-  TensionScoreUpdatedEvent,
-  TensionVisibilityChangedEvent,
-  TensionPulseFiredEvent,
-  ThreatArrivedEvent,
-  ThreatMitigatedEvent,
-  ThreatExpiredEvent,
-  AnticipationQueueUpdatedEvent,
-} from './types';
-import { EventBus, PZOEventChannel } from '../core/EventBus';
+import type { TensionSnapshot, VisibilityState, AnticipationEntry } from './types';
+import type { EventBus } from '../zero/EventBus';
 
 export class TensionUXBridge {
   private readonly eventBus: EventBus;
@@ -31,116 +22,84 @@ export class TensionUXBridge {
     this.eventBus = eventBus;
   }
 
-  // ── Score & Pulse ──────────────────────────────────────────────────────
+  // ── Score — fires every tick ───────────────────────────────────────────────
 
-  /** Fires every tick — primary score update for store listeners and gauge components. */
+  /**
+   * Primary score update. Fires every tick.
+   * Payload: { score, tickIndex } — matches EngineEventPayloadMap['TENSION_SCORE_UPDATED'].
+   */
   public emitScoreUpdated(snapshot: TensionSnapshot): void {
-    const evt: TensionScoreUpdatedEvent = {
-      eventType: 'TENSION_SCORE_UPDATED',
-      score: snapshot.score,
-      visibilityState: snapshot.visibilityState,
-      tickNumber: snapshot.tickNumber,
-      timestamp: snapshot.timestamp,
-    };
-    this.eventBus.emit(PZOEventChannel.TENSION_SCORE_UPDATED, evt);
+    this.eventBus.emit('TENSION_SCORE_UPDATED', {
+      score:     snapshot.score,
+      tickIndex: snapshot.tickNumber,
+    });
   }
 
   /**
    * Fires when score >= PULSE_THRESHOLD (0.90).
-   * IMPORTANT: UI/audio signal only. No game state changes. No mechanical consequences.
+   * UI/audio signal only — no game state changes, no mechanical consequences.
+   * Payload: { tensionScore, queueDepth } — matches EngineEventPayloadMap['ANTICIPATION_PULSE'].
    */
   public emitPulseFired(snapshot: TensionSnapshot): void {
-    const evt: TensionPulseFiredEvent = {
-      eventType: 'TENSION_PULSE_FIRED',
-      score: snapshot.score,
-      queueLength: snapshot.queueLength,
-      pulseTicksActive: snapshot.pulseTicksActive,
-      tickNumber: snapshot.tickNumber,
-      timestamp: snapshot.timestamp,
-    };
-    this.eventBus.emit(PZOEventChannel.TENSION_PULSE_FIRED, evt);
+    this.eventBus.emit('ANTICIPATION_PULSE', {
+      tensionScore: snapshot.score,
+      queueDepth:   snapshot.queueLength,
+    });
   }
 
-  // ── Visibility ─────────────────────────────────────────────────────────
+  // ── Visibility — fires on state transition ─────────────────────────────────
 
-  /** Fires when visibility state transitions between levels. */
-  public emitVisibilityChanged(
-    from: VisibilityState,
-    to: VisibilityState,
-    tickNumber: number
-  ): void {
-    const evt: TensionVisibilityChangedEvent = {
-      eventType: 'TENSION_VISIBILITY_CHANGED',
-      from,
-      to,
-      tickNumber,
-      timestamp: Date.now(),
-    };
-    this.eventBus.emit(PZOEventChannel.TENSION_VISIBILITY_CHANGED, evt);
+  /**
+   * Fires when visibility state transitions.
+   * Payload: { from, to } — matches EngineEventPayloadMap['THREAT_VISIBILITY_CHANGED'].
+   */
+  public emitVisibilityChanged(from: VisibilityState, to: VisibilityState): void {
+    this.eventBus.emit('THREAT_VISIBILITY_CHANGED', { from, to });
   }
 
-  // ── Threat Lifecycle ───────────────────────────────────────────────────
+  // ── Threat lifecycle ───────────────────────────────────────────────────────
 
-  /** Fires when a queued threat transitions to ARRIVED. */
-  public emitThreatArrived(entry: AnticipationEntry, tickNumber: number): void {
-    const evt: ThreatArrivedEvent = {
-      eventType: 'THREAT_ARRIVED',
-      entryId: entry.entryId,
+  /**
+   * Fires when a queued threat transitions to ARRIVED.
+   * Maps entry.entryId → threatId per EngineEventPayloadMap['THREAT_ARRIVED'].
+   */
+  public emitThreatArrived(entry: AnticipationEntry): void {
+    this.eventBus.emit('THREAT_ARRIVED', {
+      threatId:   entry.entryId,
       threatType: entry.threatType,
-      threatSeverity: entry.threatSeverity,
-      worstCaseOutcome: entry.worstCaseOutcome,
-      mitigationCardTypes: entry.mitigationCardTypes,
-      tickNumber,
-      timestamp: Date.now(),
-    };
-    this.eventBus.emit(PZOEventChannel.THREAT_ARRIVED, evt);
+    });
   }
 
-  /** Fires when a player successfully mitigates an arrived threat. */
-  public emitThreatMitigated(
-    entryId: string,
-    threatType: ThreatType,
-    tickNumber: number
+  /**
+   * Fires when player successfully mitigates an arrived threat.
+   * Payload: { threatId, cardUsed } — matches EngineEventPayloadMap['THREAT_MITIGATED'].
+   */
+  public emitThreatMitigated(threatId: string, cardUsed: string): void {
+    this.eventBus.emit('THREAT_MITIGATED', { threatId, cardUsed });
+  }
+
+  /**
+   * Fires when a threat expires without player mitigation.
+   * Payload: { threatId, unmitigated } — matches EngineEventPayloadMap['THREAT_EXPIRED'].
+   */
+  public emitThreatExpired(entry: AnticipationEntry): void {
+    this.eventBus.emit('THREAT_EXPIRED', {
+      threatId:    entry.entryId,
+      unmitigated: true,
+    });
+  }
+
+  // ── Queue state ────────────────────────────────────────────────────────────
+
+  /**
+   * Fires when a threat enters the anticipation queue.
+   * Payload: { threatId, threatType, arrivalTick } — matches EngineEventPayloadMap['THREAT_QUEUED'].
+   */
+  public emitThreatQueued(
+    threatId:    string,
+    threatType:  string,
+    arrivalTick: number,
   ): void {
-    const evt: ThreatMitigatedEvent = {
-      eventType: 'THREAT_MITIGATED',
-      entryId,
-      threatType,
-      tickNumber,
-      timestamp: Date.now(),
-    };
-    this.eventBus.emit(PZOEventChannel.THREAT_MITIGATED, evt);
-  }
-
-  /** Fires when a threat expires without player mitigation. */
-  public emitThreatExpired(entry: AnticipationEntry, tickNumber: number): void {
-    const evt: ThreatExpiredEvent = {
-      eventType: 'THREAT_EXPIRED',
-      entryId: entry.entryId,
-      threatType: entry.threatType,
-      threatSeverity: entry.threatSeverity,
-      ticksOverdue: entry.ticksOverdue,
-      tickNumber,
-      timestamp: Date.now(),
-    };
-    this.eventBus.emit(PZOEventChannel.THREAT_EXPIRED, evt);
-  }
-
-  // ── Queue State ────────────────────────────────────────────────────────
-
-  /** Fires any time queue length changes (enqueue, mitigation, expiry, nullification). */
-  public emitQueueUpdated(
-    queueLength: number,
-    arrivedCount: number,
-    tickNumber: number
-  ): void {
-    const evt: AnticipationQueueUpdatedEvent = {
-      eventType: 'ANTICIPATION_QUEUE_UPDATED',
-      queueLength,
-      arrivedCount,
-      tickNumber,
-      timestamp: Date.now(),
-    };
-    this.eventBus.emit(PZOEventChannel.ANTICIPATION_QUEUE_UPDATED, evt);
+    this.eventBus.emit('THREAT_QUEUED', { threatId, threatType, arrivalTick });
   }
 }

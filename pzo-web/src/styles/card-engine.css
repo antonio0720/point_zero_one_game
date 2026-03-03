@@ -1,0 +1,843 @@
+//Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/pzo-web/src/styles/card-engine.css
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   POINT ZERO ONE — CARD ENGINE CSS
+   pzo-web/src/styles/card-engine.css
+
+   Complete card-layer styling:
+   • Hand fan layout
+   • Card face / back
+   • Timing class badges
+   • Mode-overlay color themes (Empire gold, Predator red, Syndicate teal, Phantom violet)
+   • Forced card indicator
+   • LEGENDARY glow
+   • Hold state
+   • Auto-resolve flash + decision ring animation keyframes
+   • Drag-to-play drop zone
+
+   Density6 LLC · Point Zero One · Cards Engine · Confidential
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── CUSTOM PROPERTIES ────────────────────────────────────────────────────── */
+
+:root {
+  /* Card dimensions */
+  --card-w:               80px;
+  --card-h:              112px;
+  --card-radius:          10px;
+  --card-border:           1px;
+
+  /* Fan layout */
+  --hand-fan-spread:       18deg;   /* total arc degrees */
+  --hand-fan-overlap:      56px;    /* horizontal overlap between cards */
+  --hand-y-lift:           14px;    /* center card lift above baseline */
+
+  /* Mode themes */
+  --empire-gold:           #f5c542;
+  --empire-gold-glow:      rgba(245, 197, 66, 0.55);
+  --empire-dark:           #1a1300;
+
+  --predator-red:          #ef4444;
+  --predator-red-glow:     rgba(239, 68, 68, 0.55);
+  --predator-dark:         #1a0000;
+
+  --syndicate-teal:        #14b8a6;
+  --syndicate-teal-glow:   rgba(20, 184, 166, 0.55);
+  --syndicate-dark:        #001a19;
+
+  --phantom-violet:        #8b5cf6;
+  --phantom-violet-glow:   rgba(139, 92, 246, 0.55);
+  --phantom-dark:          #0d0018;
+
+  /* Rarity glows */
+  --legendary-glow-color:  #f5c542;
+  --epic-glow-color:       #a855f7;
+  --rare-glow-color:       #3b82f6;
+
+  /* Timing badge */
+  --badge-h:               14px;
+  --badge-font:            10px;
+
+  /* Decision ring */
+  --ring-green:            #22c55e;
+  --ring-yellow:           #eab308;
+  --ring-red:              #ef4444;
+  --ring-orange:           #f97316;
+
+  /* Z-levels */
+  --z-card-base:           10;
+  --z-card-hover:          20;
+  --z-card-drag:           100;
+  --z-forced:              30;
+  --z-ring:                10;
+  --z-drop-zone:           5;
+}
+
+/* ── HAND CONTAINER ───────────────────────────────────────────────────────── */
+
+.pzo-hand {
+  position:        relative;
+  display:         flex;
+  align-items:     flex-end;
+  justify-content: center;
+  height:          calc(var(--card-h) + var(--hand-y-lift) + 24px);
+  width:           100%;
+  padding-bottom:  8px;
+  user-select:     none;
+}
+
+/* Fan layout — nth-child positional rotations injected at runtime via inline
+   style, but base slot styles are here. */
+.pzo-hand__slot {
+  position:         relative;
+  flex-shrink:      0;
+  margin-left:      calc(-1 * var(--hand-fan-overlap));
+  transition:       transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1),
+                    z-index 0s;
+  transform-origin: center bottom;
+  cursor:           pointer;
+  z-index:          var(--z-card-base);
+}
+
+.pzo-hand__slot:first-child {
+  margin-left: 0;
+}
+
+/* Hover lift */
+.pzo-hand__slot:hover,
+.pzo-hand__slot--hovered {
+  transform:   translateY(-20px) scale(1.06) !important;
+  z-index:     var(--z-card-hover) !important;
+}
+
+/* Dragging state */
+.pzo-hand__slot--dragging {
+  opacity:  0.55;
+  z-index:  var(--z-card-drag) !important;
+  cursor:   grabbing;
+}
+
+/* ── CARD BASE ─────────────────────────────────────────────────────────────── */
+
+.pzo-card {
+  position:         relative;
+  width:            var(--card-w);
+  height:           var(--card-h);
+  border-radius:    var(--card-radius);
+  border:           var(--card-border) solid rgba(255,255,255,0.12);
+  background:       #0f172a;
+  color:            #f8fafc;
+  font-family:      'Inter', 'SF Pro Display', system-ui, sans-serif;
+  box-shadow:       0 4px 16px rgba(0,0,0,0.6), 0 1px 0 rgba(255,255,255,0.06) inset;
+  overflow:         hidden;
+  transition:       box-shadow 0.18s ease, border-color 0.18s ease;
+  /* Hardware-accelerate every card */
+  will-change:      transform;
+  backface-visibility: hidden;
+}
+
+/* ── CARD BACK ─────────────────────────────────────────────────────────────── */
+
+.pzo-card--back {
+  background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%);
+}
+
+.pzo-card--back::after {
+  content:       '';
+  position:      absolute;
+  inset:         4px;
+  border-radius: 7px;
+  border:        1px solid rgba(255,255,255,0.05);
+  background:    repeating-linear-gradient(
+    45deg,
+    transparent,
+    transparent 4px,
+    rgba(255,255,255,0.02) 4px,
+    rgba(255,255,255,0.02) 5px
+  );
+}
+
+/* ── CARD FACE LAYOUT ──────────────────────────────────────────────────────── */
+
+.pzo-card__header {
+  position:    absolute;
+  top:         6px;
+  left:        6px;
+  right:       6px;
+  display:     flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap:         4px;
+}
+
+.pzo-card__name {
+  font-size:   9px;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color:       #f8fafc;
+  max-width:   56px;
+  overflow:    hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pzo-card__cost {
+  font-size:   10px;
+  font-weight: 800;
+  color:       #f8fafc;
+  background:  rgba(0,0,0,0.4);
+  border-radius: 4px;
+  padding:     1px 4px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.pzo-card__art {
+  position:    absolute;
+  top:         28px;
+  left:        6px;
+  right:       6px;
+  height:      44px;
+  border-radius: 5px;
+  background:  rgba(255,255,255,0.04);
+  overflow:    hidden;
+  display:     flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.pzo-card__art img {
+  width:       100%;
+  height:      100%;
+  object-fit:  cover;
+}
+
+.pzo-card__footer {
+  position:    absolute;
+  bottom:      6px;
+  left:        6px;
+  right:       6px;
+  display:     flex;
+  align-items: flex-end;
+  justify-content: space-between;
+}
+
+.pzo-card__desc {
+  font-size:   7.5px;
+  line-height: 1.3;
+  color:       rgba(248,250,252,0.65);
+  max-width:   52px;
+  overflow:    hidden;
+  display:     -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+}
+
+/* ── TIMING CLASS BADGES ───────────────────────────────────────────────────── */
+
+.pzo-badge {
+  display:         inline-flex;
+  align-items:     center;
+  height:          var(--badge-h);
+  padding:         0 4px;
+  border-radius:   3px;
+  font-size:       var(--badge-font);
+  font-weight:     700;
+  letter-spacing:  0.04em;
+  text-transform:  uppercase;
+  white-space:     nowrap;
+  flex-shrink:     0;
+}
+
+/* Default / STANDARD */
+.pzo-badge--STANDARD        { background: rgba(100,116,139,0.7); color: #e2e8f0; }
+/* IMMEDIATE */
+.pzo-badge--IMMEDIATE       { background: rgba(34,197,94,0.75);  color: #052e16; }
+/* REACTIVE */
+.pzo-badge--REACTIVE        { background: rgba(234,179,8,0.80);  color: #1c1000; }
+/* HOLD */
+.pzo-badge--HOLD            { background: rgba(245,197,66,0.80); color: #1a1300; }
+/* COUNTER_WINDOW */
+.pzo-badge--COUNTER_WINDOW  { background: rgba(239,68,68,0.75);  color: #fff;    }
+/* RESCUE_WINDOW */
+.pzo-badge--RESCUE_WINDOW   { background: rgba(20,184,166,0.80); color: #001a19; }
+/* PHASE_BOUNDARY */
+.pzo-badge--PHASE_BOUNDARY  { background: rgba(245,197,66,0.80); color: #1a1300; }
+/* FORCED */
+.pzo-badge--FORCED          { background: rgba(239,68,68,0.90);  color: #fff;    animation: pzo-badge-forced-pulse 1s ease-in-out infinite; }
+/* LEGENDARY */
+.pzo-badge--LEGENDARY       { background: linear-gradient(90deg, #f5c542, #fde68a); color: #1a1300; }
+/* BLUFF */
+.pzo-badge--BLUFF           { background: rgba(239,68,68,0.65);  color: #fff;    }
+/* DEFECTION_STEP */
+.pzo-badge--DEFECTION_STEP  { background: rgba(236,72,153,0.80); color: #fff;    }
+/* SOVEREIGNTY */
+.pzo-badge--SOVEREIGNTY_DECISION { background: linear-gradient(90deg, #f5c542, #8b5cf6); color: #fff; }
+
+@keyframes pzo-badge-forced-pulse {
+  0%, 100% { opacity: 1;    box-shadow: 0 0 0 0 rgba(239,68,68,0.5); }
+  50%       { opacity: 0.85; box-shadow: 0 0 6px 3px rgba(239,68,68,0.4); }
+}
+
+/* ── MODE OVERLAY COLOR THEMES ─────────────────────────────────────────────── */
+
+/* ── EMPIRE (GO_ALONE) — Gold ──────────────────────────────────────────────── */
+.pzo-card--mode-empire {
+  border-color: rgba(245,197,66,0.40);
+  background:   linear-gradient(160deg, #1a1300 0%, #0f0e00 100%);
+}
+
+.pzo-card--mode-empire::before {
+  content:        '';
+  position:       absolute;
+  inset:          -1px;
+  border-radius:  calc(var(--card-radius) + 1px);
+  background:     linear-gradient(135deg, var(--empire-gold) 0%, transparent 60%);
+  opacity:        0.10;
+  pointer-events: none;
+}
+
+.pzo-hand--empire .pzo-hand__slot--hovered .pzo-card {
+  box-shadow: 0 6px 24px var(--empire-gold-glow), 0 0 0 1px rgba(245,197,66,0.5);
+}
+
+/* ── PREDATOR (HEAD_TO_HEAD) — Red ─────────────────────────────────────────── */
+.pzo-card--mode-predator {
+  border-color: rgba(239,68,68,0.40);
+  background:   linear-gradient(160deg, #1a0000 0%, #0f0000 100%);
+}
+
+.pzo-card--mode-predator::before {
+  content:        '';
+  position:       absolute;
+  inset:          -1px;
+  border-radius:  calc(var(--card-radius) + 1px);
+  background:     linear-gradient(135deg, var(--predator-red) 0%, transparent 60%);
+  opacity:        0.10;
+  pointer-events: none;
+}
+
+.pzo-hand--predator .pzo-hand__slot--hovered .pzo-card {
+  box-shadow: 0 6px 24px var(--predator-red-glow), 0 0 0 1px rgba(239,68,68,0.5);
+}
+
+/* ── SYNDICATE (TEAM_UP) — Teal ────────────────────────────────────────────── */
+.pzo-card--mode-syndicate {
+  border-color: rgba(20,184,166,0.40);
+  background:   linear-gradient(160deg, #001a19 0%, #000f0e 100%);
+}
+
+.pzo-card--mode-syndicate::before {
+  content:        '';
+  position:       absolute;
+  inset:          -1px;
+  border-radius:  calc(var(--card-radius) + 1px);
+  background:     linear-gradient(135deg, var(--syndicate-teal) 0%, transparent 60%);
+  opacity:        0.10;
+  pointer-events: none;
+}
+
+.pzo-hand--syndicate .pzo-hand__slot--hovered .pzo-card {
+  box-shadow: 0 6px 24px var(--syndicate-teal-glow), 0 0 0 1px rgba(20,184,166,0.5);
+}
+
+/* ── PHANTOM (CHASE_A_LEGEND) — Violet ─────────────────────────────────────── */
+.pzo-card--mode-phantom {
+  border-color: rgba(139,92,246,0.40);
+  background:   linear-gradient(160deg, #0d0018 0%, #080010 100%);
+}
+
+.pzo-card--mode-phantom::before {
+  content:        '';
+  position:       absolute;
+  inset:          -1px;
+  border-radius:  calc(var(--card-radius) + 1px);
+  background:     linear-gradient(135deg, var(--phantom-violet) 0%, transparent 60%);
+  opacity:        0.10;
+  pointer-events: none;
+}
+
+.pzo-hand--phantom .pzo-hand__slot--hovered .pzo-card {
+  box-shadow: 0 6px 24px var(--phantom-violet-glow), 0 0 0 1px rgba(139,92,246,0.5);
+}
+
+/* ── FORCED CARD INDICATOR ──────────────────────────────────────────────────── */
+
+.pzo-card--forced {
+  border-color:   rgba(239,68,68,0.70) !important;
+  animation:      pzo-forced-border 1.2s ease-in-out infinite;
+}
+
+.pzo-card--forced::after {
+  content:        'MUST PLAY';
+  position:       absolute;
+  top:            -1px;
+  left:           50%;
+  transform:      translateX(-50%);
+  background:     var(--predator-red);
+  color:          #fff;
+  font-size:      6.5px;
+  font-weight:    900;
+  letter-spacing: 0.08em;
+  padding:        1px 4px;
+  border-radius:  0 0 3px 3px;
+  white-space:    nowrap;
+  z-index:        11;
+}
+
+.pzo-forced-card-indicator {
+  position:       absolute;
+  top:            -8px;
+  right:          -4px;
+  width:          16px;
+  height:         16px;
+  border-radius:  50%;
+  background:     var(--predator-red);
+  display:        flex;
+  align-items:    center;
+  justify-content: center;
+  font-size:      9px;
+  font-weight:    900;
+  color:          #fff;
+  box-shadow:     0 0 8px var(--predator-red-glow);
+  z-index:        var(--z-forced);
+  animation:      pzo-forced-ping 1s ease-out infinite;
+}
+
+@keyframes pzo-forced-border {
+  0%, 100% { border-color: rgba(239,68,68,0.70); box-shadow: 0 0 0 0 rgba(239,68,68,0.4); }
+  50%       { border-color: rgba(239,68,68,1.00); box-shadow: 0 0 12px 2px rgba(239,68,68,0.5); }
+}
+
+@keyframes pzo-forced-ping {
+  0%   { transform: scale(1);    opacity: 1; }
+  70%  { transform: scale(1.5);  opacity: 0; }
+  100% { transform: scale(1.5);  opacity: 0; }
+}
+
+/* ── LEGENDARY GLOW ─────────────────────────────────────────────────────────── */
+
+.pzo-card--legendary {
+  border-color: rgba(245,197,66,0.65) !important;
+  animation:    pzo-legendary-glow 2.4s ease-in-out infinite;
+}
+
+.pzo-card--legendary .pzo-card__name {
+  background:             linear-gradient(90deg, #f5c542, #fde68a, #f5c542);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip:         text;
+  background-size:         200% auto;
+  animation:               pzo-legendary-shimmer 2.4s linear infinite;
+}
+
+@keyframes pzo-legendary-glow {
+  0%, 100% { box-shadow: 0 0 12px 2px rgba(245,197,66,0.35), 0 4px 16px rgba(0,0,0,0.6); }
+  50%       { box-shadow: 0 0 24px 6px rgba(245,197,66,0.60), 0 4px 24px rgba(0,0,0,0.7); }
+}
+
+@keyframes pzo-legendary-shimmer {
+  0%   { background-position: 0% center; }
+  100% { background-position: 200% center; }
+}
+
+/* EPIC rarity glow */
+.pzo-card--rarity-epic {
+  box-shadow: 0 0 8px 1px rgba(168,85,247,0.30), 0 4px 16px rgba(0,0,0,0.6);
+}
+
+/* ── HOLD STATE (Empire GO_ALONE) ───────────────────────────────────────────── */
+
+.pzo-card--held {
+  opacity:      0.55;
+  border-color: rgba(245,197,66,0.60) !important;
+  filter:       saturate(0.4) brightness(0.75);
+  cursor:       default;
+  transform:    scale(0.94);
+  transition:   all 0.25s ease;
+}
+
+.pzo-hold-slot {
+  position:       relative;
+  width:          var(--card-w);
+  height:         var(--card-h);
+  border-radius:  var(--card-radius);
+  border:         1.5px dashed rgba(245,197,66,0.45);
+  display:        flex;
+  align-items:    center;
+  justify-content: center;
+  background:     rgba(245,197,66,0.04);
+  transition:     border-color 0.2s;
+}
+
+.pzo-hold-slot--occupied {
+  border-color:   rgba(245,197,66,0.70);
+  background:     rgba(245,197,66,0.06);
+  animation:      pzo-hold-pulse 2s ease-in-out infinite;
+}
+
+.pzo-hold-slot__label {
+  font-size:      8px;
+  font-weight:    700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color:          rgba(245,197,66,0.55);
+}
+
+@keyframes pzo-hold-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(245,197,66,0.20); }
+  50%       { box-shadow: 0 0 10px 3px rgba(245,197,66,0.25); }
+}
+
+/* ── AUTO-RESOLVE FLASH ─────────────────────────────────────────────────────── */
+
+/* Applied to .pzo-hand__slot when a card auto-resolves */
+.pzo-card--auto-resolve-flash {
+  animation: pzo-auto-resolve-strobe 0.20s steps(1, end) 6;
+}
+
+@keyframes pzo-auto-resolve-strobe {
+  0%   { border-color: rgba(239,68,68,1);    box-shadow: 0 0 20px 6px rgba(239,68,68,0.8); }
+  50%  { border-color: rgba(239,68,68,0.10); box-shadow: none; }
+  100% { border-color: rgba(239,68,68,1);    box-shadow: 0 0 20px 6px rgba(239,68,68,0.8); }
+}
+
+/* ── DECISION RING ANIMATION KEYFRAMES ─────────────────────────────────────── */
+
+/* Ring wrapper — pulse at <20% remaining */
+.pzo-timer-ring-wrapper {
+  position:    relative;
+  display:     inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Pulse: scale the entire ring wrapper when critical */
+.pzo-timer-ring--pulsing {
+  animation: pzo-ring-critical-pulse 0.65s ease-in-out infinite;
+}
+
+@keyframes pzo-ring-critical-pulse {
+  0%, 100% { transform: scale(1);    filter: none; }
+  50%       { transform: scale(1.04); filter: drop-shadow(0 0 6px rgba(239,68,68,0.8)); }
+}
+
+/* Flash wrapper strobe when auto-resolve fires */
+.pzo-timer-ring--flashing {
+  animation: pzo-ring-strobe 0.16s steps(1, end) 8;
+}
+
+@keyframes pzo-ring-strobe {
+  0%   { filter: none; }
+  50%  { filter: brightness(2.2) saturate(0); }
+  100% { filter: none; }
+}
+
+/* Arc progress animation — smooth draw on mount */
+.pzo-timer-ring__progress {
+  transform-origin: center;
+}
+
+/* Entry animation — arc draws in from full */
+@keyframes pzo-ring-draw-in {
+  from { stroke-dashoffset: 0; }
+  /* to value set inline via JS */
+}
+
+/* Rotate the SVG layer to keep 12-o'clock start */
+.pzo-timer-ring__svg {
+  transform-origin: center;
+}
+
+/* Tip dot trailing the arc head */
+.pzo-timer-ring__tip {
+  will-change: cx, cy;
+}
+
+/* ── CHAIN SYNERGY INDICATOR (Empire) ──────────────────────────────────────── */
+
+.pzo-card--chain-active {
+  border-color: rgba(245,197,66,0.55) !important;
+}
+
+.pzo-chain-indicator {
+  position:       absolute;
+  bottom:         -6px;
+  left:           50%;
+  transform:      translateX(-50%);
+  display:        flex;
+  gap:            3px;
+  align-items:    center;
+}
+
+.pzo-chain-indicator__dot {
+  width:          5px;
+  height:         5px;
+  border-radius:  50%;
+  background:     var(--empire-gold);
+  box-shadow:     0 0 4px var(--empire-gold-glow);
+}
+
+/* ── BATTLE BUDGET COST INDICATOR (Predator) ───────────────────────────────── */
+
+.pzo-card__bb-cost {
+  position:       absolute;
+  bottom:         5px;
+  right:          5px;
+  font-size:      8.5px;
+  font-weight:    800;
+  color:          var(--predator-red);
+  background:     rgba(239,68,68,0.12);
+  border:         1px solid rgba(239,68,68,0.30);
+  border-radius:  3px;
+  padding:        0 3px;
+  white-space:    nowrap;
+}
+
+/* Insufficient budget — card greyed out */
+.pzo-card--insufficient-bb {
+  opacity:   0.45;
+  filter:    grayscale(0.6);
+  cursor:    not-allowed;
+}
+
+/* ── TRUST SCORE MODIFIER (Syndicate) ─────────────────────────────────────── */
+
+.pzo-card__trust-mod {
+  position:       absolute;
+  top:            5px;
+  right:          5px;
+  font-size:      7.5px;
+  font-weight:    700;
+  border-radius:  3px;
+  padding:        1px 3px;
+}
+
+.pzo-card__trust-mod--positive {
+  color:      var(--syndicate-teal);
+  background: rgba(20,184,166,0.15);
+}
+
+.pzo-card__trust-mod--negative {
+  color:      var(--predator-red);
+  background: rgba(239,68,68,0.15);
+}
+
+/* ── DIVERGENCE INDICATOR (Phantom) ────────────────────────────────────────── */
+
+.pzo-card__divergence {
+  position:       absolute;
+  bottom:         5px;
+  right:          5px;
+  font-size:      7.5px;
+  font-weight:    700;
+  color:          var(--phantom-violet);
+  background:     rgba(139,92,246,0.15);
+  border-radius:  3px;
+  padding:        0 3px;
+}
+
+/* ── DRAG-TO-PLAY DROP ZONE ─────────────────────────────────────────────────── */
+
+.pzo-drop-zone {
+  position:       absolute;
+  bottom:         0;
+  left:           50%;
+  transform:      translateX(-50%) translateY(100%);
+  width:          min(360px, 90vw);
+  height:         72px;
+  border-radius:  12px 12px 0 0;
+  border:         2px dashed rgba(255,255,255,0.18);
+  background:     rgba(255,255,255,0.04);
+  display:        flex;
+  align-items:    center;
+  justify-content: center;
+  font-size:      12px;
+  font-weight:    600;
+  color:          rgba(255,255,255,0.35);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  transition:     all 0.18s ease;
+  z-index:        var(--z-drop-zone);
+  pointer-events: none;
+  opacity:        0;
+}
+
+/* Visible only when dragging */
+.pzo-drop-zone--active {
+  pointer-events: all;
+  opacity:        1;
+}
+
+/* Highlighted when a valid card hovers over it */
+.pzo-drop-zone--highlight {
+  border-color:   rgba(34,197,94,0.70);
+  background:     rgba(34,197,94,0.08);
+  color:          rgba(34,197,94,0.80);
+  box-shadow:     0 -4px 24px rgba(34,197,94,0.20);
+}
+
+/* Mode-specific drop zone highlight colors */
+.pzo-hand--empire   .pzo-drop-zone--highlight { border-color: rgba(245,197,66,0.70);  background: rgba(245,197,66,0.07);  }
+.pzo-hand--predator .pzo-drop-zone--highlight { border-color: rgba(239,68,68,0.70);   background: rgba(239,68,68,0.07);   }
+.pzo-hand--syndicate .pzo-drop-zone--highlight{ border-color: rgba(20,184,166,0.70);  background: rgba(20,184,166,0.07);  }
+.pzo-hand--phantom  .pzo-drop-zone--highlight { border-color: rgba(139,92,246,0.70);  background: rgba(139,92,246,0.07);  }
+
+/* ── PHASE BOUNDARY WINDOW INDICATOR ───────────────────────────────────────── */
+
+.pzo-phase-boundary-banner {
+  position:     absolute;
+  top:          -32px;
+  left:         50%;
+  transform:    translateX(-50%);
+  background:   linear-gradient(90deg, transparent, var(--empire-gold), transparent);
+  color:        #1a1300;
+  font-size:    9px;
+  font-weight:  800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  padding:      3px 16px;
+  border-radius: 4px;
+  white-space:  nowrap;
+  animation:    pzo-phase-banner-flash 1s ease-in-out 3;
+  pointer-events: none;
+}
+
+@keyframes pzo-phase-banner-flash {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.5; }
+}
+
+/* ── DECK / DRAW PILE ────────────────────────────────────────────────────────── */
+
+.pzo-deck {
+  position:        relative;
+  width:           var(--card-w);
+  height:          var(--card-h);
+  cursor:          default;
+}
+
+/* Stack shadow layers */
+.pzo-deck::before,
+.pzo-deck::after {
+  content:         '';
+  position:        absolute;
+  inset:           0;
+  border-radius:   var(--card-radius);
+  background:      #1e293b;
+  border:          1px solid rgba(255,255,255,0.07);
+}
+
+.pzo-deck::before { transform: translate(2px, -2px); z-index: 1; }
+.pzo-deck::after  { transform: translate(4px, -4px); z-index: 0; }
+
+.pzo-deck__top {
+  position:     relative;
+  z-index:      2;
+  width:        100%;
+  height:       100%;
+}
+
+.pzo-deck__count {
+  position:     absolute;
+  bottom:       8px;
+  left:         50%;
+  transform:    translateX(-50%);
+  font-size:    11px;
+  font-weight:  800;
+  color:        rgba(255,255,255,0.55);
+  z-index:      3;
+}
+
+/* ── REPLENISH SHIMMER ───────────────────────────────────────────────────────── */
+
+/* Applied to card slot during hand replenishment draw */
+.pzo-hand__slot--replenishing {
+  animation: pzo-card-draw-in 0.35s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+@keyframes pzo-card-draw-in {
+  from {
+    transform:   translateY(32px) scale(0.85);
+    opacity:     0;
+  }
+  to {
+    transform:   translateY(0)    scale(1);
+    opacity:     1;
+  }
+}
+
+/* ── CARD PLAYED EXIT ────────────────────────────────────────────────────────── */
+
+.pzo-hand__slot--playing {
+  animation: pzo-card-play-out 0.30s ease-in both;
+  pointer-events: none;
+}
+
+@keyframes pzo-card-play-out {
+  from {
+    transform: translateY(0) scale(1);
+    opacity:   1;
+  }
+  to {
+    transform: translateY(-48px) scale(0.80);
+    opacity:   0;
+  }
+}
+
+/* ── MISSED OPPORTUNITY STREAK INDICATOR ───────────────────────────────────── */
+
+.pzo-streak-indicator {
+  position:       absolute;
+  top:            -10px;
+  left:           50%;
+  transform:      translateX(-50%);
+  font-size:      8px;
+  font-weight:    800;
+  color:          var(--predator-red);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  white-space:    nowrap;
+  opacity:        0;
+  transition:     opacity 0.2s;
+}
+
+.pzo-streak-indicator--visible {
+  opacity: 1;
+}
+
+/* Escalating streak color */
+.pzo-streak-indicator--2 { color: var(--ring-orange); }
+.pzo-streak-indicator--3 { color: var(--ring-red);    }
+.pzo-streak-indicator--4 { color: var(--predator-red); animation: pzo-badge-forced-pulse 0.8s ease-in-out infinite; }
+
+/* ── SCROLLBAR RESET FOR HAND OVERFLOW ──────────────────────────────────────── */
+
+.pzo-hand::-webkit-scrollbar { display: none; }
+.pzo-hand { scrollbar-width: none; }
+
+/* ── REDUCED MOTION SUPPORT ─────────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  .pzo-card--forced,
+  .pzo-card--legendary,
+  .pzo-card--auto-resolve-flash,
+  .pzo-timer-ring--pulsing,
+  .pzo-timer-ring--flashing,
+  .pzo-hold-slot--occupied,
+  .pzo-badge--FORCED,
+  .pzo-forced-card-indicator,
+  .pzo-phase-boundary-banner,
+  .pzo-hand__slot--replenishing,
+  .pzo-hand__slot--playing,
+  .pzo-streak-indicator--4,
+  .pzo-legendary-shimmer {
+    animation: none;
+  }
+
+  .pzo-timer-ring__progress {
+    transition: none;
+  }
+}

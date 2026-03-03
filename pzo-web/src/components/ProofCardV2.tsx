@@ -18,16 +18,14 @@
 
 'use client';
 
-import React, { useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import type {
   CapabilityState,
   ReputationState,
   PortfolioRecord,
-  ObligationRecord,
   ObjectiveId,
-  GameStateSnapshot,
 } from '../types/game';
-import { OBJECTIVE_CONFIGS, CAPABILITY_LABELS_MAP } from '../types/game';
+import { OBJECTIVE_CONFIGS } from '../types/game';
 
 // ─── Score Computation ────────────────────────────────────────────────────────
 
@@ -41,25 +39,25 @@ export interface RunScoringInput {
 
   // Resilience signals
   totalFubarHits: number;
-  fubarsAbsorbed: number;         // absorbed by mitigations/shields
+  fubarsAbsorbed: number;
   wasEverInDistress: boolean;
   recoveredFromDistress: boolean;
-  bankruptcyTick: number | null;  // null = survived
+  bankruptcyTick: number | null;
 
   // Discipline signals
   biasActivations: number;
-  biasesCleared: number;          // cleared via discipline plays
-  wrongZonePlays: number;         // plays into incompatible zone
+  biasesCleared: number;
+  wrongZonePlays: number;
   correctZonePlays: number;
-  obligationCoverage: number;     // final ratio
+  obligationCoverage: number;
   decisionFatigueEvents: number;
 
   // Risk management signals
   mitigationsUsed: number;
-  mitigationTypes: string[];      // distinct types used
-  finalHhi: number;               // portfolio concentration 0–1
+  mitigationTypes: string[];
+  finalHhi: number;
   peakHubrisMeter: number;
-  hubrisEvents: number;           // times hubris triggered penalty
+  hubrisEvents: number;
 
   // Meta
   totalTicks: number;
@@ -84,10 +82,10 @@ export interface KeyMoment {
 }
 
 export interface ScoringBreakdown {
-  moneyScore: number;       // 0–1000
-  resilienceScore: number;  // 0–1000
-  disciplineScore: number;  // 0–1000
-  riskMgmtScore: number;    // 0–1000
+  moneyScore: number;
+  resilienceScore: number;
+  disciplineScore: number;
+  riskMgmtScore: number;
   objectiveBonus: number;
   difficultyMultiplier: number;
   totalScore: number;
@@ -119,50 +117,62 @@ function clamp(n: number, min: number, max: number) {
 export function computeScoring(input: RunScoringInput): ScoringBreakdown {
   // ── Money Score (0–1000) ──────────────────────────────────────────────────
   const cashflowRatio = input.finalIncome / Math.max(1, input.finalExpenses);
-  const netWorthGrowth = (input.finalNetWorth - input.startingCash) / Math.max(1, input.startingCash);
+  const netWorthGrowth =
+    (input.finalNetWorth - input.startingCash) / Math.max(1, input.startingCash);
+
   const moneyRaw =
-    clamp(cashflowRatio / 3, 0, 1) * 400 +     // cashflow coverage (max 400)
-    clamp(netWorthGrowth, 0, 3) / 3 * 400 +    // net worth growth (max 400)
-    clamp(input.finalCash / 50_000, 0, 1) * 200; // cash reserves (max 200)
+    clamp(cashflowRatio / 3, 0, 1) * 400 +
+    (clamp(netWorthGrowth, 0, 3) / 3) * 400 +
+    clamp(input.finalCash / 50_000, 0, 1) * 200;
+
   const moneyScore = Math.round(clamp(moneyRaw, 0, 1000));
 
   // ── Resilience Score (0–1000) ─────────────────────────────────────────────
   const survivalBonus = input.bankruptcyTick === null ? 300 : 0;
-  const absorptionRate = input.totalFubarHits > 0
-    ? input.fubarsAbsorbed / input.totalFubarHits
-    : 1;
-  const recoveryBonus = input.wasEverInDistress && input.recoveredFromDistress ? 200 : 0;
+  const absorptionRate =
+    input.totalFubarHits > 0 ? input.fubarsAbsorbed / input.totalFubarHits : 1;
+  const recoveryBonus =
+    input.wasEverInDistress && input.recoveredFromDistress ? 200 : 0;
+
   const resilienceRaw =
     survivalBonus +
     absorptionRate * 300 +
     recoveryBonus +
     clamp((12 - input.totalFubarHits) / 12, 0, 1) * 200;
+
   const resilienceScore = Math.round(clamp(resilienceRaw, 0, 1000));
 
   // ── Discipline Score (0–1000) ──────────────────────────────────────────────
-  const biasControl = input.biasActivations > 0
-    ? input.biasesCleared / input.biasActivations
-    : 1;
-  const zoneAccuracy = (input.correctZonePlays + input.wrongZonePlays) > 0
-    ? input.correctZonePlays / (input.correctZonePlays + input.wrongZonePlays)
-    : 0.5;
+  const biasControl =
+    input.biasActivations > 0 ? input.biasesCleared / input.biasActivations : 1;
+
+  const zoneAccuracy =
+    input.correctZonePlays + input.wrongZonePlays > 0
+      ? input.correctZonePlays /
+        (input.correctZonePlays + input.wrongZonePlays)
+      : 0.5;
+
   const oblCoverage = clamp(input.obligationCoverage, 0, 2) / 2;
+
   const disciplineRaw =
     biasControl * 350 +
     zoneAccuracy * 350 +
     oblCoverage * 200 +
     clamp((5 - input.decisionFatigueEvents) / 5, 0, 1) * 100;
+
   const disciplineScore = Math.round(clamp(disciplineRaw, 0, 1000));
 
   // ── Risk Management Score (0–1000) ────────────────────────────────────────
   const diversification = clamp(1 - input.finalHhi, 0, 1);
-  const mitigationBreadth = clamp(input.mitigationTypes.length / 4, 0, 1); // 4 types = full coverage
+  const mitigationBreadth = clamp(input.mitigationTypes.length / 4, 0, 1);
   const hubrisControl = clamp((100 - input.peakHubrisMeter) / 100, 0, 1);
+
   const riskMgmtRaw =
     diversification * 350 +
     mitigationBreadth * 350 +
     hubrisControl * 200 +
     clamp((3 - input.hubrisEvents) / 3, 0, 1) * 100;
+
   const riskMgmtScore = Math.round(clamp(riskMgmtRaw, 0, 1000));
 
   // ── Objective Bonus ───────────────────────────────────────────────────────
@@ -170,9 +180,11 @@ export function computeScoring(input: RunScoringInput): ScoringBreakdown {
     return sum + (OBJECTIVE_CONFIGS[id]?.bonusXp ?? 0);
   }, 0);
 
-  // ── Total ────────────────────────────────────────────────────────────────
+  // ── Total ─────────────────────────────────────────────────────────────────
   const difficultyMultiplier = DIFFICULTY_MULT[input.difficultyPreset] ?? 1.0;
-  const rawTotal = (moneyScore + resilienceScore + disciplineScore + riskMgmtScore) / 4;
+  const rawTotal =
+    (moneyScore + resilienceScore + disciplineScore + riskMgmtScore) / 4;
+
   const totalScore = Math.round((rawTotal + objectiveBonus) * difficultyMultiplier);
 
   // ── Grade ─────────────────────────────────────────────────────────────────
@@ -186,10 +198,12 @@ export function computeScoring(input: RunScoringInput): ScoringBreakdown {
   // ── Narrative ─────────────────────────────────────────────────────────────
   const strengths: string[] = [];
   const weaknesses: string[] = [];
+
   if (moneyScore >= 700) strengths.push('elite capital builder');
   if (resilienceScore >= 700) strengths.push('shock-resistant operator');
   if (disciplineScore >= 700) strengths.push('disciplined executor');
   if (riskMgmtScore >= 700) strengths.push('sophisticated risk architect');
+
   if (moneyScore < 300) weaknesses.push('weak cashflow engine');
   if (resilienceScore < 300) weaknesses.push('fragile under pressure');
   if (disciplineScore < 300) weaknesses.push('behavior-driven losses');
@@ -203,14 +217,14 @@ export function computeScoring(input: RunScoringInput): ScoringBreakdown {
       : `Mixed run. Strong: ${strengths.join(', ') || 'none'}. Exposed: ${weaknesses.join(', ') || 'none'}.`;
 
   // ── Shareable Tag ─────────────────────────────────────────────────────────
-  const bestDimension = [
+  const bestDimension = ([
     ['Money', moneyScore],
     ['Resilience', resilienceScore],
     ['Discipline', disciplineScore],
     ['Risk IQ', riskMgmtScore],
-  ].sort((a, b) => (b[1] as number) - (a[1] as number))[0][0];
+  ] as [string, number][]).sort((a, b) => b[1] - a[1])[0][0];
 
-  const shareableTag = `PZO ${grade} | ${bestDimension} ${Math.round((Math.max(moneyScore, resilienceScore, disciplineScore, riskMgmtScore) / 10))} | ${input.difficultyPreset}`;
+  const shareableTag = `PZO ${grade} | ${bestDimension} ${Math.round(Math.max(moneyScore, resilienceScore, disciplineScore, riskMgmtScore) / 10)} | ${input.difficultyPreset}`;
 
   return {
     moneyScore,
@@ -243,11 +257,13 @@ function ScorePillar({
 }) {
   const [showBreakdown, setShowBreakdown] = useState(false);
   const fillPct = (score / 1000) * 100;
+
   const tierLabel =
     score >= 800 ? 'ELITE' :
     score >= 600 ? 'STRONG' :
     score >= 400 ? 'AVERAGE' :
     score >= 200 ? 'WEAK' : 'CRITICAL';
+
   const tierColor =
     score >= 800 ? 'text-emerald-400' :
     score >= 600 ? 'text-indigo-400' :
@@ -269,31 +285,45 @@ function ScorePillar({
           <span className="text-zinc-600 text-xs font-mono">/1000</span>
         </div>
       </div>
-      {/* Bar */}
+
       <div className="h-2 bg-zinc-900 rounded-full overflow-hidden mb-1">
         <div
           className={`h-full rounded-full transition-all ${color.replace('text-', 'bg-')}`}
           style={{ width: `${fillPct}%` }}
         />
       </div>
+
       <div className="flex justify-between items-center">
         <span className={`text-xs font-bold ${tierColor}`}>{tierLabel}</span>
         <span className="text-zinc-600 text-xs">{showBreakdown ? '▲ hide' : '▼ why'}</span>
       </div>
+
       {showBreakdown && (
-        <p className="text-zinc-400 text-xs mt-2 leading-relaxed border-t border-zinc-700/50 pt-2">{breakdown}</p>
+        <p className="text-zinc-400 text-xs mt-2 leading-relaxed border-t border-zinc-700/50 pt-2">
+          {breakdown}
+        </p>
       )}
     </div>
   );
 }
 
-function KeyMomentRow({ moment, index }: { moment: KeyMoment; index: number }) {
+function KeyMomentRow({ moment }: { moment: KeyMoment }) {
   const typeIcon: Record<KeyMoment['type'], string> = {
-    play: '🃏', fubar: '💥', recovery: '🔄', maturity: '💰', bias: '🧠', objective: '🎯',
+    play: '🃏',
+    fubar: '💥',
+    recovery: '🔄',
+    maturity: '💰',
+    bias: '🧠',
+    objective: '🎯',
   };
+
   const typeColor: Record<KeyMoment['type'], string> = {
-    play: 'text-indigo-300', fubar: 'text-red-400', recovery: 'text-yellow-400',
-    maturity: 'text-emerald-400', bias: 'text-orange-400', objective: 'text-purple-400',
+    play: 'text-indigo-300',
+    fubar: 'text-red-400',
+    recovery: 'text-yellow-400',
+    maturity: 'text-emerald-400',
+    bias: 'text-orange-400',
+    objective: 'text-purple-400',
   };
 
   return (
@@ -307,12 +337,14 @@ function KeyMomentRow({ moment, index }: { moment: KeyMoment; index: number }) {
       <div className="text-right shrink-0">
         {moment.cashDelta !== 0 && (
           <p className={`text-xs font-mono ${moment.cashDelta > 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-            {moment.cashDelta > 0 ? '+' : ''}{fmt(moment.cashDelta)}
+            {moment.cashDelta > 0 ? '+' : ''}
+            {fmt(moment.cashDelta)}
           </p>
         )}
         {moment.cashflowDelta !== 0 && (
           <p className={`text-xs font-mono ${moment.cashflowDelta > 0 ? 'text-emerald-400' : 'text-orange-400'}`}>
-            {moment.cashflowDelta > 0 ? '+' : ''}{fmt(moment.cashflowDelta)}/mo
+            {moment.cashflowDelta > 0 ? '+' : ''}
+            {fmt(moment.cashflowDelta)}/mo
           </p>
         )}
       </div>
@@ -322,15 +354,20 @@ function KeyMomentRow({ moment, index }: { moment: KeyMoment; index: number }) {
 
 function ObjectiveBadgeResult({ id, completed }: { id: ObjectiveId; completed: boolean }) {
   const config = OBJECTIVE_CONFIGS[id];
+
   return (
-    <div className={`flex items-center gap-2 px-3 py-2 rounded-xl border ${
-      completed
-        ? 'bg-emerald-900/20 border-emerald-700/50'
-        : 'bg-zinc-800/40 border-zinc-700/50 opacity-50'
-    }`}>
+    <div
+      className={`flex items-center gap-2 px-3 py-2 rounded-xl border ${
+        completed
+          ? 'bg-emerald-900/20 border-emerald-700/50'
+          : 'bg-zinc-800/40 border-zinc-700/50 opacity-50'
+      }`}
+    >
       <span className="text-sm">{completed ? '✅' : '❌'}</span>
       <div className="flex-1">
-        <p className={`text-xs font-bold ${completed ? 'text-emerald-300' : 'text-zinc-500'}`}>{config.badgeLabel}</p>
+        <p className={`text-xs font-bold ${completed ? 'text-emerald-300' : 'text-zinc-500'}`}>
+          {config.badgeLabel}
+        </p>
         <p className="text-zinc-500 text-xs">{config.description}</p>
       </div>
       {completed && (
@@ -344,7 +381,7 @@ function ObjectiveBadgeResult({ id, completed }: { id: ObjectiveId; completed: b
 
 export interface ProofCardV2Props {
   input: RunScoringInput;
-  matchHash?: string;   // injected from Sprint 8 anti-cheat layer
+  matchHash?: string;
   onRestart?: () => void;
   onShare?: (tag: string) => void;
   onExport?: () => void;
@@ -371,19 +408,17 @@ export default function ProofCardV2({
     D: { color: 'text-orange-400', glow: 'shadow-orange-500/20', bg: 'from-orange-900/20 to-zinc-900' },
     F: { color: 'text-red-400', glow: 'shadow-red-500/30', bg: 'from-red-900/30 to-zinc-900' },
   };
+
   const gradeStyle = gradeStyles[scoring.grade];
 
   return (
-    <div className={`bg-gradient-to-b ${gradeStyle.bg} border border-zinc-700 rounded-2xl overflow-hidden shadow-2xl ${gradeStyle.glow} max-w-2xl mx-auto`}>
-
+    <div
+      className={`bg-gradient-to-b ${gradeStyle.bg} border border-zinc-700 rounded-2xl overflow-hidden shadow-2xl ${gradeStyle.glow} max-w-2xl mx-auto`}
+    >
       {/* ── Header ─────────────────────────────────────────────────────────── */}
       <div className="px-6 py-5 text-center border-b border-zinc-800">
-        <div className={`text-7xl font-black tracking-tighter ${gradeStyle.color} mb-1`}>
-          {scoring.grade}
-        </div>
-        <div className="text-white font-black text-xl mb-0.5">
-          {won ? 'SYSTEM BUILT' : 'SYSTEM FAILED'}
-        </div>
+        <div className={`text-7xl font-black tracking-tighter ${gradeStyle.color} mb-1`}>{scoring.grade}</div>
+        <div className="text-white font-black text-xl mb-0.5">{won ? 'SYSTEM BUILT' : 'SYSTEM FAILED'}</div>
         <p className="text-zinc-400 text-sm max-w-md mx-auto">{scoring.narrative}</p>
 
         <div className="flex items-center justify-center gap-4 mt-3">
@@ -391,25 +426,27 @@ export default function ProofCardV2({
             <p className="text-zinc-500 text-xs uppercase tracking-wide">Total Score</p>
             <p className="text-white font-black text-2xl font-mono">{scoring.totalScore.toLocaleString()}</p>
           </div>
+
           <div className="w-px h-10 bg-zinc-700" />
+
           <div className="text-center">
             <p className="text-zinc-500 text-xs uppercase tracking-wide">Difficulty</p>
             <p className="text-indigo-300 font-bold text-sm">{input.difficultyPreset}</p>
             <p className="text-zinc-600 text-xs">×{scoring.difficultyMultiplier.toFixed(1)}</p>
           </div>
+
           <div className="w-px h-10 bg-zinc-700" />
+
           <div className="text-center">
             <p className="text-zinc-500 text-xs uppercase tracking-wide">Objectives</p>
-            <p className="text-purple-300 font-bold text-sm">{input.completedObjectives.length}/{input.objectives.length}</p>
-            {scoring.objectiveBonus > 0 && (
-              <p className="text-purple-500 text-xs">+{scoring.objectiveBonus}xp</p>
-            )}
+            <p className="text-purple-300 font-bold text-sm">
+              {input.completedObjectives.length}/{input.objectives.length}
+            </p>
+            {scoring.objectiveBonus > 0 && <p className="text-purple-500 text-xs">+{scoring.objectiveBonus}xp</p>}
           </div>
         </div>
 
-        {matchHash && (
-          <p className="text-zinc-700 text-xs font-mono mt-2 truncate">#{matchHash}</p>
-        )}
+        {matchHash && <p className="text-zinc-700 text-xs font-mono mt-2 truncate">#{matchHash}</p>}
       </div>
 
       {/* ── Tabs ────────────────────────────────────────────────────────────── */}
@@ -433,11 +470,9 @@ export default function ProofCardV2({
 
       {/* ── Tab Content ─────────────────────────────────────────────────────── */}
       <div className="px-4 py-4">
-
         {/* OVERVIEW TAB */}
         {activeTab === 'overview' && (
           <div className="space-y-3">
-            {/* Score Pillars */}
             <div className="grid grid-cols-2 gap-3">
               <ScorePillar
                 label="Money"
@@ -469,7 +504,6 @@ export default function ProofCardV2({
               />
             </div>
 
-            {/* Financial Summary */}
             <div className="bg-zinc-800/60 rounded-xl p-3 grid grid-cols-3 gap-3">
               {[
                 ['Final Cash', fmt(input.finalCash), input.finalCash > 0 ? 'text-emerald-400' : 'text-red-400'],
@@ -486,17 +520,12 @@ export default function ProofCardV2({
               ))}
             </div>
 
-            {/* Objectives */}
             {input.objectives.length > 0 && (
               <div>
                 <p className="text-zinc-500 text-xs uppercase font-semibold tracking-wide mb-2">Run Objectives</p>
                 <div className="space-y-1.5">
                   {input.objectives.map(id => (
-                    <ObjectiveBadgeResult
-                      key={id}
-                      id={id}
-                      completed={input.completedObjectives.includes(id)}
-                    />
+                    <ObjectiveBadgeResult key={id} id={id} completed={input.completedObjectives.includes(id)} />
                   ))}
                 </div>
               </div>
@@ -518,7 +547,7 @@ export default function ProofCardV2({
                   .sort((a, b) => Math.abs(b.cashDelta + b.cashflowDelta * 12) - Math.abs(a.cashDelta + a.cashflowDelta * 12))
                   .slice(0, 8)
                   .map((m, i) => (
-                    <KeyMomentRow key={i} moment={m} index={i} />
+                    <KeyMomentRow key={i} moment={m} />
                   ))}
               </div>
             )}
@@ -547,14 +576,17 @@ export default function ProofCardV2({
                 </div>
               ))
             )}
-            {/* Concentration Readout */}
-            <div className={`rounded-xl px-3 py-2 border ${
-              input.finalHhi < 0.35 ? 'bg-emerald-900/20 border-emerald-800/40' :
-              input.finalHhi < 0.6  ? 'bg-yellow-900/20 border-yellow-800/40' :
-                                       'bg-red-900/20 border-red-800/40'
-            }`}>
+
+            <div
+              className={`rounded-xl px-3 py-2 border ${
+                input.finalHhi < 0.35 ? 'bg-emerald-900/20 border-emerald-800/40' :
+                input.finalHhi < 0.6  ? 'bg-yellow-900/20 border-yellow-800/40' :
+                                        'bg-red-900/20 border-red-800/40'
+              }`}
+            >
               <p className="text-zinc-400 text-xs">
-                Portfolio concentration: <span className="font-bold font-mono">{(input.finalHhi * 100).toFixed(0)}% HHI</span>
+                Portfolio concentration:{' '}
+                <span className="font-bold font-mono">{(input.finalHhi * 100).toFixed(0)}% HHI</span>
                 {input.finalHhi < 0.35 ? ' — diversified' : input.finalHhi < 0.6 ? ' — moderate' : ' — concentrated (risk amplified)'}
               </p>
             </div>
@@ -565,6 +597,7 @@ export default function ProofCardV2({
         {activeTab === 'capabilities' && (
           <div className="space-y-3">
             <p className="text-zinc-500 text-xs uppercase font-semibold tracking-wide mb-2">Capability Gains</p>
+
             <div className="space-y-2">
               {(Object.entries(input.capabilities) as [keyof CapabilityState, number][]).map(([k, v]) => (
                 <div key={k} className="flex items-center gap-3">
@@ -580,7 +613,6 @@ export default function ProofCardV2({
               ))}
             </div>
 
-            {/* Reputation */}
             <div className="bg-zinc-800/60 rounded-xl p-3">
               <div className="flex justify-between mb-1">
                 <span className="text-zinc-400 text-xs font-semibold">Reputation</span>
@@ -608,6 +640,7 @@ export default function ProofCardV2({
             📤 Share Proof
           </button>
         )}
+
         {onExport && (
           <button
             onClick={onExport}
@@ -616,6 +649,7 @@ export default function ProofCardV2({
             📋 Export Card
           </button>
         )}
+
         {onRestart && (
           <button
             onClick={onRestart}

@@ -1,15 +1,15 @@
 // pzo-web/src/telemetry/runTimeTelemetry.ts
-import { RunTimeSnapshot } from "./RunTimeSnapshot"; // Assuming this is the correct import path for your snapshot class or interface
-import TimeEngine, { TickBudget, TierAtEnd } from "../timeEngine"; // Adjust based on actual location of these types/interfaces in your project structure.
+import { RunTimeSnapshot } from "./RunTimeSnapshot.stub"; // Assuming this is the correct import path for your snapshot class or interface
+import { TickBudget, TierAtEnd } from "../engines/time/types";
 
-export const captureRunTimeSnapshot = async (runId: string, engine: TimeEngine): Promise<RunTimeSnapshot> => {
+export const captureRunTimeSnapshot = async (runId: string, engine: any): Promise<RunTimeSnapshot> => {
   try {
     console.log(`Capturing snapshot for run ${runId}`); // Replace with actual analytics endpoint logging if required and ANALYTICS_ENDPOINT is set in the environment variables.
     
     const start = Date.now();
     let ticksElapsed: number;
     let tickBudget: TickBudget;
-    let tierAtEnd: TierAtEnd | null; // Assuming this can be `null` if not determined at end of run yet, or a specific value/enum type as per your game logic.
+    let tierAtEnd: TierAtEnd | null = null; // Assuming this can be `null` if not determined at end of run yet, or a specific value/enum type as per your game logic.
     
     const snapshot = await engine.tick(async () => {}); // Replace with actual ticking mechanism that returns the number of ticks elapsed and budget remaining for this particular snapshots's duration (12 minutes).
     ticksElapsed = snapshot.ticksElapsed;
@@ -39,4 +39,5 @@ export const captureRunTimeSnapshot = async (runId: string, engine: TimeEngine):
   } catch (error) {
     console.error(`Failed to capture run time telemetry snapshot: ${error}`);
     throw error; // Rethrowing errors ensures that calling code can handle them appropriately, e.g., logging or retry mechanisms if needed in a production environment.
- 0-minute gameplay experience and the player's ability to make decisions within each tick is not affected by this telemetry capture process as it operates independently of the main game loop (async/fire-and-forget). The engine will continue running normally, unaffected by these non-blocking operations.
+  }
+}

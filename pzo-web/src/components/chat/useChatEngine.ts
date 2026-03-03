@@ -1,121 +1,247 @@
 /**
- * pzo-web/src/components/chat/useChatEngine.ts — PRODUCTION v2
+ * useChatEngine.ts — PZO Chat Engine Hook · PRODUCTION v3 · Engine-Integrated
  * ─────────────────────────────────────────────────────────────────────────────
- * CHANGES FROM v1:
- *   - Real socket.io connection (connects when accessToken is available)
- *   - Hater messages arrive via socket (not simulated) when server is live
- *   - Falls back to local NPC simulation when socket disconnected (dev mode)
- *   - Receives hater:sabotage events → exposes onSabotage callback
- *   - Player state synced to server every 10 ticks
- *   - Game events forwarded to server for hater reaction
+ * v3 CHANGES (engine integration):
+ *   - NPC pool uses real bot names (THE LIQUIDATOR, THE BUREAUCRAT, etc.)
+ *   - Bot taunts sourced from BotProfileRegistry.attackDialogue / retreatDialogue
+ *   - Event bridge maps real EventBus event names (BOT_ATTACK_FIRED,
+ *     SHIELD_LAYER_BREACHED, CASCADE_CHAIN_TRIGGERED, PRESSURE_TIER_CHANGED)
+ *   - SabotageEvent carries botId + attackType + targetLayer from engine
+ *   - PressureTier and TickTier surfaced in system messages
+ *   - Message dedup guard (100ms window) for EventBus flush-batch scenarios
+ *   - MAX_MESSAGES 500 (20M-scale: server handles pagination, client holds window)
+ *   - NPC cadence varies by TickTier: slower at SOVEREIGN, faster at CRISIS
  * ─────────────────────────────────────────────────────────────────────────────
+ * Density6 LLC · Point Zero One · Confidential
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import type { ChatChannel, ChatMessage, GameChatContext } from './chatTypes';
+import type { ChatChannel, ChatMessage, GameChatContext, SabotageEvent } from './chatTypes';
+// FIX: value import (not type-only) so PressureTier enum members are accessible at runtime
+import { BotId, BotState, AttackType } from '../../engines/battle/types';
+import { TickTier } from '../../engines/zero/types';
+import { PressureTier } from '../../engines/pressure/types';
 
-// ─── Sabotage card types (mirrored from HaterEngine) ──────────────────────────
+export type { SabotageEvent };
 
-export type SabotageCardType =
-  | 'EMERGENCY_EXPENSE'
-  | 'INCOME_SEIZURE'
-  | 'DEBT_SPIRAL'
-  | 'INSPECTION_NOTICE'
-  | 'MARKET_CORRECTION'
-  | 'TAX_AUDIT'
-  | 'LAYOFF_EVENT'
-  | 'RENT_HIKE'
-  | 'CREDIT_DOWNGRADE'
-  | 'SYSTEM_GLITCH';
-
-export interface SabotageEvent {
-  haterId:   string;
-  cardType:  SabotageCardType;
-  intensity: number;
-  haterName: string;
+// ─── Engine-sourced bot metadata ───────────────────────────────────────────────
+interface BotChatProfile {
+  id:             BotId;
+  displayName:    string;
+  archLabel:      string;
+  attackDialogue: string;
+  retreatDialogue:string;
+  emoji:          string;
+  attackType:     AttackType;
 }
 
-// ─── NPC simulation pool (active when socket is disconnected) ─────────────────
+const BOT_CHAT_PROFILES: Readonly<Record<BotId, BotChatProfile>> = {
+  [BotId.BOT_01_LIQUIDATOR]: {
+    id:             BotId.BOT_01_LIQUIDATOR,
+    displayName:    'THE LIQUIDATOR',
+    archLabel:      'Predatory Creditor',
+    attackDialogue: 'Your assets are priced for distress. I am simply here to help the market find the floor.',
+    retreatDialogue:'The market will correct again. I will return when the window reopens.',
+    emoji:          '🔱',
+    attackType:     AttackType.ASSET_STRIP,
+  },
+  [BotId.BOT_02_BUREAUCRAT]: {
+    id:             BotId.BOT_02_BUREAUCRAT,
+    displayName:    'THE BUREAUCRAT',
+    archLabel:      'Regulatory Burden',
+    attackDialogue: 'Every income stream requires verification. There are forms. I am simply doing my job.',
+    retreatDialogue:'Your paperwork appears to be in order. For now. We will revisit your compliance posture.',
+    emoji:          '📋',
+    attackType:     AttackType.REGULATORY_ATTACK,
+  },
+  [BotId.BOT_03_MANIPULATOR]: {
+    id:             BotId.BOT_03_MANIPULATOR,
+    displayName:    'THE MANIPULATOR',
+    archLabel:      'Disinformation Engine',
+    attackDialogue: 'Predictable decisions create exploitable markets. I have been studying your moves before you made them.',
+    retreatDialogue:'You changed your pattern. Interesting. I will need to recalibrate the model.',
+    emoji:          '🕸️',
+    attackType:     AttackType.FINANCIAL_SABOTAGE,
+  },
+  [BotId.BOT_04_CRASH_PROPHET]: {
+    id:             BotId.BOT_04_CRASH_PROPHET,
+    displayName:    'THE CRASH PROPHET',
+    archLabel:      'Macro Volatility',
+    attackDialogue: 'The market always corrects. The only question is whether you have positioned yourself to survive, or to be consumed.',
+    retreatDialogue:'Volatility windows open and close. You survived this one. The next will be different.',
+    emoji:          '🌪️',
+    attackType:     AttackType.EXPENSE_INJECTION,
+  },
+  [BotId.BOT_05_LEGACY_HEIR]: {
+    id:             BotId.BOT_05_LEGACY_HEIR,
+    displayName:    'THE LEGACY HEIR',
+    archLabel:      'Generational Advantage',
+    attackDialogue: 'You have done well. It would be a shame if the system remembered that you were not born into this position.',
+    retreatDialogue:'You found a way through. The system will need to recalibrate its thresholds for you.',
+    emoji:          '👑',
+    attackType:     AttackType.OPPORTUNITY_KILL,
+  },
+};
 
+// ─── NPC player pool ───────────────────────────────────────────────────────────
 const NPC_NAMES = [
-  'CashflowKing_ATL', 'SovereignSyd', 'RatRaceEscaper', 'PassiveIncomePhil',
-  'LiquidityLord', 'DebtFreeDevin', 'YieldHunterJax', 'NetWorthNora',
-  'CompoundKing_T', 'CapitalQueen_R', 'ArbitrageAndy', 'DividendDave',
-  'EquityElla', 'CashCowCarlos', 'FreedomFund_Z', 'Syndicate_Reese',
-  'BigDealBrendan', 'SmallDealSophie', 'LedgerLionel', 'TreasurySam',
+  'CashflowKing_ATL', 'SovereignSyd',     'RatRaceEscaper',  'PassivePhil',
+  'LiquidityLord',    'DebtFreeDevin',    'YieldHunterJax',  'NetWorthNora',
+  'CompoundKing_T',   'CapitalQueen_R',   'ArbitrageAndy',   'DividendDave',
+  'EquityElla',       'CashCowCarlos',    'FreedomFund_Z',   'Syndicate_Reese',
+  'BigDealBrendan',   'SmallDealSophie',  'LedgerLionel',    'TreasurySam',
+  'SovereignSophia',  'BreachBreaker_99', 'ShieldStacker_X', 'MomentumMarcus',
 ];
 
 const NPC_RANKS = ['Associate', 'Junior Partner', 'Partner', 'Senior Partner'];
 
-const GLOBAL_NPC = [
+const GLOBAL_NPC_MSGS = [
   'anyone surviving the new difficulty? this thing is BRUTAL 😅',
   'tip: hold 3 shields minimum before tick 200. learned that the hard way.',
-  'the haters just tanked my income mid run. WAGE_CAGE is ruthless.',
-  'SLUMLORD_7 hit me with an inspection notice right before my cashflow tipped positive. not okay.',
-  'finally broke $100K net worth. STATUS_QUO_ML immediately fired a market correction lmao',
-  'the privilege cards are rare but when they hit... game changer. got one in 47 runs.',
-  'DEBT_DAEMON is watching. do NOT carry high cash with no income assets.',
+  'THE LIQUIDATOR just stripped my best income card mid-run. not okay.',
+  'THE BUREAUCRAT hit me with an INSPECTION_NOTICE right before my cashflow tipped positive.',
+  'finally broke $100K net worth. THE CRASH PROPHET immediately fired an expense injection.',
   'freedom is real. I escaped. took 31 attempts but I\'m here.',
   'who else is learning more about real finance from this game than school ever taught?',
-  'INFLATION_GHOST barely says anything and somehow that\'s the most terrifying one.',
-  'pro tip: stack IPA cards first. don\'t touch OPPORTUNITY until income exceeds expenses.',
-  'just hit passive > expenses. the haters IMMEDIATELY coordinated on me.',
+  'THE LEGACY HEIR barely says anything in early game. late game? different story.',
+  'pro tip: stack income assets first. don\'t touch OPPORTUNITY cards until income > expenses.',
+  'just hit passive > expenses. THE MANIPULATOR immediately started pattern-matching my plays.',
   'what is the fastest strategy to build shields? asking for a run.',
   'the card forcing mechanic is so real. life hits you with FUBARs you didn\'t choose.',
+  'THE BUREAUCRAT targeting players with 3+ income streams is diabolical game design.',
+  'shield fortified = income buffer. never play aggressive without it.',
+  'CRASH PROPHET triggers when you least expect it. always hedge macro.',
+  'income > expenses is step one. sovereignty is the whole game.',
 ];
 
-const SYNDICATE_NPC = [
-  'partners — hater activity is elevated this cycle. double your shields.',
-  'DEBT_DAEMON triggered a debt spiral on two of us simultaneously. coordination suspected.',
+const SYNDICATE_NPC_MSGS = [
+  'partners — hater heat is elevated this cycle. double your shields before tick 100.',
+  'THE CRASH PROPHET triggered a debt spiral on two of us simultaneously. coordination suspected.',
   'treasury at 400K. activating market plays before CAPITAL_BATTLE.',
-  'if INFLATION_GHOST posts "..." — that means a market correction is coming. prep now.',
-  'our Capital Score is 80 points ahead. haters are desperate.',
+  'THE LIQUIDATOR is targeting late-game players this cycle. early game is safe.',
+  'our Capital Score is 80 points ahead. haters are getting desperate.',
+  'THE MANIPULATOR watched my pattern for 40 ticks before firing. change your play sequence.',
+  'SHIELD_FORTIFIED achieved. coordinated defense holding. good work.',
 ];
 
-// ─── Game event → chat message ─────────────────────────────────────────────────
+// ─── Engine event → chat message mapping ──────────────────────────────────────
+interface ParsedEngineMsg {
+  kind:         ChatMessage['kind'];
+  emoji:        string;
+  body:         string;
+  channel:      ChatChannel;
+  pressureTier?: PressureTier;
+}
 
-function eventToMessage(event: string): Partial<ChatMessage> | null {
+function parseEngineEvent(event: string): ParsedEngineMsg | null {
   const e = event.toLowerCase();
-  if (e.includes('bull run'))         return { kind: 'MARKET_ALERT', emoji: '📈', body: 'MARKET ALERT — Bull Run. Income assets surging. Stack cashflow plays NOW.' };
-  if (e.includes('recession'))        return { kind: 'MARKET_ALERT', emoji: '📉', body: 'MARKET ALERT — Recession active. Expense pressure +12%. Shield or get squeezed.' };
-  if (e.includes('market rally'))     return { kind: 'MARKET_ALERT', emoji: '💹', body: 'MARKET ALERT — Rally in progress. Net worth amplified. Euphoria window open.' };
-  if (e.includes('unexpected bill'))  return { kind: 'MARKET_ALERT', emoji: '🚨', body: 'MARKET ALERT — Panic event. Cash drain incoming. FUBAR probability elevated.' };
-  if (e.includes('freedom unlocked')) return { kind: 'ACHIEVEMENT', emoji: '🏆', body: '🏆 FREEDOM UNLOCKED — A player escaped the Rat Race. Point Zero One achieved.' };
-  if (e.includes('shield absorbed'))  return { kind: 'ACHIEVEMENT', emoji: '🛡️', body: 'SHIELD PROC — Bankruptcy absorbed. Run survives.' };
+
+  if (e.includes('bull run'))
+    return { channel: 'GLOBAL', kind: 'MARKET_ALERT', emoji: '📈', body: 'MARKET ALERT — Bull Run active. Income assets surging. Stack cashflow plays NOW.' };
+  if (e.includes('recession'))
+    return { channel: 'GLOBAL', kind: 'MARKET_ALERT', emoji: '📉', body: 'MARKET ALERT — Recession active. Expense pressure +12%. Shield or get squeezed.' };
+  if (e.includes('market rally'))
+    return { channel: 'GLOBAL', kind: 'MARKET_ALERT', emoji: '💹', body: 'MARKET ALERT — Rally in progress. Net worth amplified. Euphoria window open.' };
+  if (e.includes('panic'))
+    return { channel: 'GLOBAL', kind: 'MARKET_ALERT', emoji: '🚨', body: 'MARKET ALERT — Panic regime. FUBAR probability elevated. Shields mandatory.' };
+
+  // FIX: use PressureTier enum values (not string literals) for type correctness
+  if (e.includes('pressure: critical'))
+    return { channel: 'GLOBAL', kind: 'MARKET_ALERT', emoji: '🔴', body: 'PRESSURE: CRITICAL — Passive shield drain active. Hater injection window open.', pressureTier: PressureTier.CRITICAL };
+  if (e.includes('pressure: high'))
+    return { channel: 'GLOBAL', kind: 'MARKET_ALERT', emoji: '🟠', body: 'PRESSURE: HIGH — Shield drain initiated. Reinforce before next tick.', pressureTier: PressureTier.HIGH };
+
+  if (e.includes('shield_layer_breached') || e.includes('layer breached'))
+    return { channel: 'GLOBAL', kind: 'SHIELD_EVENT', emoji: '💔', body: 'SHIELD BREACHED — Layer integrity hit zero. Cascade trigger possible.' };
+  if (e.includes('shield_fortified') || e.includes('all layers'))
+    return { channel: 'GLOBAL', kind: 'SHIELD_EVENT', emoji: '🛡️', body: 'SHIELD FORTIFIED — All layers ≥80% integrity. Bonus resistance active.' };
+  if (e.includes('shield absorbed') || e.includes('shield proc'))
+    return { channel: 'GLOBAL', kind: 'SHIELD_EVENT', emoji: '🛡️', body: 'SHIELD PROC — Bankruptcy absorbed. Run survives.' };
+
+  if (e.includes('cascade_chain_triggered') || e.includes('cascade triggered'))
+    return { channel: 'GLOBAL', kind: 'CASCADE_ALERT', emoji: '⛓️', body: 'CASCADE TRIGGERED — Chain event initiated. Counter or absorb incoming links.' };
+  if (e.includes('cascade_chain_broken') || e.includes('chain broken'))
+    return { channel: 'GLOBAL', kind: 'CASCADE_ALERT', emoji: '✂️', body: 'CASCADE BROKEN — Chain intercepted. Recovery card effective.' };
+  if (e.includes('pchain_sovereign') || e.includes('positive cascade'))
+    return { channel: 'GLOBAL', kind: 'ACHIEVEMENT', emoji: '⚡', body: 'POSITIVE CASCADE — Sovereign momentum activated. Income multiplier online.' };
+
+  if (e.includes('freedom unlocked'))
+    return { channel: 'GLOBAL', kind: 'ACHIEVEMENT', emoji: '🏆', body: '🏆 FREEDOM UNLOCKED — A player escaped the Rat Race. Point Zero One achieved.' };
   if (e.includes('played:') && e.includes('/mo')) {
     const match = event.match(/Played: (.+?) →/);
-    return { kind: 'ACHIEVEMENT', emoji: '✅', body: `DEAL CLOSED — ${match?.[1] ?? 'Asset'} activated.` };
+    return { channel: 'GLOBAL', kind: 'ACHIEVEMENT', emoji: '✅', body: `DEAL CLOSED — ${match?.[1] ?? 'Asset'} activated.` };
   }
+  if (e.includes('legendary_card_drawn'))
+    return { channel: 'GLOBAL', kind: 'ACHIEVEMENT', emoji: '⭐', body: 'LEGENDARY CARD DRAWN — Rare play in progress. 1% drop rate.' };
+
+  if (e.includes('bot_attack_fired') || e.includes('bot attack')) {
+    const botMatch = Object.values(BOT_CHAT_PROFILES).find(b =>
+      e.includes(b.id.toLowerCase()) || e.includes(b.displayName.toLowerCase())
+    );
+    if (botMatch) {
+      return { channel: 'GLOBAL', kind: 'BOT_ATTACK', emoji: botMatch.emoji, body: `${botMatch.displayName} — ${botMatch.attackDialogue}` };
+    }
+    return { channel: 'GLOBAL', kind: 'BOT_ATTACK', emoji: '⚔️', body: 'HATER ATTACK FIRED — Check shield layers immediately.' };
+  }
+
   return null;
 }
 
-// ─── Hook ─────────────────────────────────────────────────────────────────────
+// ─── NPC interval by TickTier ──────────────────────────────────────────────────
+function npcInterval(tier: TickTier | undefined): [number, number] {
+  switch (tier) {
+    case TickTier.SOVEREIGN:         return [10000, 18000];
+    case TickTier.STABLE:            return [7000,  13000];
+    case TickTier.COMPRESSED:        return [5000,  9000];
+    case TickTier.CRISIS:            return [3000,  6000];
+    case TickTier.COLLAPSE_IMMINENT: return [1500,  4000];
+    default:                         return [7000,  12000];
+  }
+}
 
-const MAX_MESSAGES = 300;
-const API_WS = import.meta.env.VITE_API_URL ?? 'http://localhost:3001';
+const MAX_MESSAGES = 500;
+const API_WS = typeof import.meta !== 'undefined'
+  ? (import.meta as Record<string, any>).env?.VITE_API_URL ?? 'http://localhost:3001'
+  : 'http://localhost:3001';
 
+// ─── useChatEngine ─────────────────────────────────────────────────────────────
 export function useChatEngine(
-  ctx: GameChatContext,
+  ctx:          GameChatContext,
   accessToken?: string | null,
-  onSabotage?: (event: SabotageEvent) => void,
+  onSabotage?:  (event: SabotageEvent) => void,
 ) {
-  const [messages,   setMessages]   = useState<ChatMessage[]>([]);
-  const [activeTab,  setActiveTab]  = useState<ChatChannel>('GLOBAL');
-  const [unread,     setUnread]     = useState<Record<ChatChannel, number>>({ GLOBAL: 0, SYNDICATE: 0, DEAL_ROOM: 0 });
-  const [chatOpen,   setChatOpen]   = useState(false);
-  const [connected,  setConnected]  = useState(false);
+  const [messages,  setMessages]  = useState<ChatMessage[]>([]);
+  const [activeTab, setActiveTab] = useState<ChatChannel>('GLOBAL');
+  const [unread,    setUnread]    = useState<Record<ChatChannel, number>>({ GLOBAL: 0, SYNDICATE: 0, DEAL_ROOM: 0 });
+  const [chatOpen,  setChatOpen]  = useState(false);
+  const [connected, setConnected] = useState(false);
 
-  const socketRef        = useRef<{ emit: (ev: string, data: unknown) => void; disconnect: () => void } | null>(null);
-  const prevEventsLen    = useRef(0);
-  const prevTick         = useRef(-1);
-  const msgId            = useRef(0);
-  const npcIntervalRef   = useRef<ReturnType<typeof setInterval> | null>(null);
-  const onSabotageRef    = useRef(onSabotage);
-  onSabotageRef.current  = onSabotage;
+  const socketRef       = useRef<{ emit: (ev: string, d: unknown) => void; disconnect: () => void } | null>(null);
+  const prevEventsLen   = useRef(0);
+  const prevTick        = useRef(-1);
+  const msgId           = useRef(0);
+  const npcTimerRef     = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const onSabotageRef   = useRef(onSabotage);
+  const activeTabRef    = useRef(activeTab);
+  const chatOpenRef     = useRef(chatOpen);
+  const tickTierRef     = useRef(ctx.tickTier);
 
-  const nextId = () => `msg-${++msgId.current}-${Date.now()}`;
+  onSabotageRef.current = onSabotage;
+  activeTabRef.current  = activeTab;
+  chatOpenRef.current   = chatOpen;
+  tickTierRef.current   = ctx.tickTier;
 
-  const push = useCallback((partial: Partial<ChatMessage> & { channel: ChatChannel; body: string; kind: ChatMessage['kind'] }) => {
+  const recentBodyHashes = useRef(new Set<string>());
+  const nextId = useCallback(() => `msg-${++msgId.current}-${Date.now()}`, []);
+
+  const push = useCallback((
+    partial: Partial<ChatMessage> & { channel: ChatChannel; body: string; kind: ChatMessage['kind'] },
+  ) => {
+    const hash = `${partial.kind}:${partial.body.slice(0, 60)}`;
+    if (recentBodyHashes.current.has(hash)) return;
+    recentBodyHashes.current.add(hash);
+    setTimeout(() => recentBodyHashes.current.delete(hash), 100);
+
     const msg: ChatMessage = {
       id:         nextId(),
       senderId:   partial.senderId ?? 'SYSTEM',
@@ -123,130 +249,178 @@ export function useChatEngine(
       ts:         Date.now(),
       ...partial,
     };
-    setMessages((prev) => [...prev.slice(-(MAX_MESSAGES - 1)), msg]);
-    setUnread((prev) => {
-      if (chatOpen && activeTab === msg.channel) return prev;
+    setMessages(prev => [...prev.slice(-(MAX_MESSAGES - 1)), msg]);
+    setUnread(prev => {
+      if (chatOpenRef.current && activeTabRef.current === msg.channel) return prev;
       return { ...prev, [msg.channel]: prev[msg.channel] + 1 };
     });
-  }, [chatOpen, activeTab]);
+  }, [nextId]);
 
-  // ── Socket.io connection ────────────────────────────────────────────────
+  // ── NPC simulation ────────────────────────────────────────────────────────
+  const scheduleNextNpc = useCallback(() => {
+    if (npcTimerRef.current) clearTimeout(npcTimerRef.current);
+    const [minMs, maxMs] = npcInterval(tickTierRef.current);
+    const delay = minMs + Math.random() * (maxMs - minMs);
 
+    npcTimerRef.current = setTimeout(() => {
+      const rnd     = Math.random();
+      const channel: ChatChannel = rnd < 0.22 ? 'SYNDICATE' : 'GLOBAL';
+      const pool    = channel === 'SYNDICATE' ? SYNDICATE_NPC_MSGS : GLOBAL_NPC_MSGS;
+
+      if (rnd < 0.08) {
+        const bots      = Object.values(BOT_CHAT_PROFILES);
+        const bot       = bots[Math.floor(Math.random() * bots.length)];
+        const isRetreat = Math.random() < 0.3;
+        push({
+          channel:    'GLOBAL',
+          kind:       'BOT_TAUNT',
+          senderId:   bot.id,
+          senderName: bot.displayName,
+          emoji:      bot.emoji,
+          body:       isRetreat ? bot.retreatDialogue : bot.attackDialogue,
+          botSource: {
+            botId:      bot.id,
+            botName:    bot.displayName,
+            botState:   isRetreat ? BotState.RETREATING : BotState.ATTACKING,
+            attackType: bot.attackType,
+            dialogue:   isRetreat ? bot.retreatDialogue : bot.attackDialogue,
+            isRetreat,
+          },
+        });
+      } else {
+        push({
+          channel,
+          kind:       'PLAYER',
+          senderId:   'npc-local',
+          senderName: NPC_NAMES[Math.floor(Math.random() * NPC_NAMES.length)],
+          senderRank: NPC_RANKS[Math.floor(Math.random() * NPC_RANKS.length)],
+          body:       pool[Math.floor(Math.random() * pool.length)],
+        });
+      }
+      scheduleNextNpc();
+    }, delay);
+  }, [push]);
+
+  // ── Socket.io ─────────────────────────────────────────────────────────────
   useEffect(() => {
     if (!accessToken) return;
-
-    // Dynamic import so it doesn't break dev without server
-    let io: typeof import('socket.io-client') | null = null;
-    let sock: ReturnType<typeof import('socket.io-client').io> | null = null;
+    let sock: any = null;
 
     import('socket.io-client').then(({ io: createSocket }) => {
-      io = { io: createSocket } as unknown as typeof import('socket.io-client');
       sock = createSocket(API_WS, {
-        auth:           { token: accessToken },
-        transports:     ['websocket', 'polling'],
-        reconnection:   true,
-        reconnectionDelay: 1000,
+        auth:               { token: accessToken },
+        transports:         ['websocket', 'polling'],
+        reconnection:       true,
+        reconnectionDelay:  1000,
         reconnectionAttempts: 10,
       });
 
       sock.on('connect', () => {
         setConnected(true);
-        // Stop local NPC simulation — server takes over
-        if (npcIntervalRef.current) { clearInterval(npcIntervalRef.current); npcIntervalRef.current = null; }
+        if (npcTimerRef.current) { clearTimeout(npcTimerRef.current); npcTimerRef.current = null; }
       });
+      sock.on('disconnect', () => { setConnected(false); scheduleNextNpc(); });
 
-      sock.on('disconnect', () => {
-        setConnected(false);
-        // Restart local NPC simulation as fallback
-        _startNpcSimulation();
-      });
-
-      // Incoming chat messages (from real players + haters via server)
       sock.on('chat:message', (msg: ChatMessage) => {
-        setMessages((prev) => [...prev.slice(-(MAX_MESSAGES - 1)), msg]);
-        setUnread((prev) => {
-          if (chatOpen && activeTab === msg.channel) return prev;
+        setMessages(prev => [...prev.slice(-(MAX_MESSAGES - 1)), msg]);
+        setUnread(prev => {
+          if (chatOpenRef.current && activeTabRef.current === msg.channel) return prev;
           return { ...prev, [msg.channel]: prev[msg.channel] + 1 };
         });
       });
 
-      // Hater sabotage — forward to game engine
       sock.on('hater:sabotage', (event: SabotageEvent) => {
         onSabotageRef.current?.(event);
-        // Also post a system message in chat
+        const botProfile = event.botId ? BOT_CHAT_PROFILES[event.botId] : null;
         push({
           channel:    'GLOBAL',
-          kind:       'RIVAL_TAUNT',
+          kind:       'BOT_ATTACK',
           senderId:   event.haterId,
-          senderName: event.haterName ?? event.haterId,
-          emoji:      '⚠️',
-          body:       `⚠️ ${event.haterName ?? event.haterId} has injected a ${event.cardType.replace(/_/g,' ')} into your run. Intensity: ${event.intensity.toFixed(1)}x`,
+          senderName: botProfile?.displayName ?? event.haterName ?? event.haterId,
+          emoji:      botProfile?.emoji ?? '⚠️',
+          body:       botProfile
+            ? botProfile.attackDialogue
+            : `${event.haterName} injected ${event.cardType.replace(/_/g, ' ')} — intensity ${event.intensity.toFixed(1)}×`,
+          botSource: botProfile ? {
+            botId:      event.botId!,
+            botName:    botProfile.displayName,
+            botState:   BotState.ATTACKING,
+            attackType: event.attackType ?? botProfile.attackType,
+            targetLayer: event.targetLayer,
+            dialogue:   botProfile.attackDialogue,
+            isRetreat:  false,
+          } : undefined,
         });
       });
 
-      socketRef.current = { emit: sock.emit.bind(sock), disconnect: () => sock?.disconnect() };
-
-      // Signal run start
+      socketRef.current = { emit: (ev, d) => sock.emit(ev, d), disconnect: () => sock.disconnect() };
       sock.emit('run:start', { seed: 0 });
 
-    }).catch(() => {
-      // socket.io-client not available — use NPC simulation only
-      _startNpcSimulation();
-    });
+    }).catch(() => scheduleNextNpc());
 
-    return () => {
-      sock?.disconnect();
-      socketRef.current = null;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    return () => { sock?.disconnect(); socketRef.current = null; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accessToken]);
 
-  // ── Fallback NPC simulation (no server / disconnected) ────────────────
-
-  function _startNpcSimulation() {
-    if (npcIntervalRef.current) return;
-    npcIntervalRef.current = setInterval(() => {
-      const rnd     = Math.random();
-      const channel: ChatChannel = rnd < 0.25 ? 'SYNDICATE' : 'GLOBAL';
-      const pool    = channel === 'SYNDICATE' ? SYNDICATE_NPC : GLOBAL_NPC;
-      push({
-        channel,
-        kind:       'PLAYER',
-        senderId:   'npc-local',
-        senderName: NPC_NAMES[Math.floor(Math.random() * NPC_NAMES.length)],
-        senderRank: NPC_RANKS[Math.floor(Math.random() * NPC_RANKS.length)],
-        body:       pool[Math.floor(Math.random() * pool.length)],
-      });
-    }, 5000 + Math.random() * 6000);
-  }
-
-  // Start NPC simulation on mount (before socket connects)
+  // ── Bootstrap ─────────────────────────────────────────────────────────────
   useEffect(() => {
-    _startNpcSimulation();
-    // Bootstrap
-    ['💬 GLOBAL CHAT — The system is watching.', 'escape the rat race or fund those who already did.'].forEach((body, i) => {
-      setTimeout(() => push({ channel: 'GLOBAL', kind: 'SYSTEM', senderId: 'SYSTEM', senderName: 'SYSTEM', emoji: '📡', body }), i * 400);
+    scheduleNextNpc();
+    [
+      { body: '📡 PZO GLOBAL — The system is watching.',             delay: 0    },
+      { body: 'Escape the rat race or fund those who already did.',  delay: 500  },
+      { body: 'Five adversaries are monitoring your run. Shield up.',delay: 1200 },
+    ].forEach(({ body, delay }) => {
+      setTimeout(() => push({
+        channel: 'GLOBAL', kind: 'SYSTEM',
+        senderId: 'SYSTEM', senderName: 'SYSTEM', emoji: '📡', body,
+      }), delay);
     });
-    return () => { if (npcIntervalRef.current) clearInterval(npcIntervalRef.current); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    return () => { if (npcTimerRef.current) clearTimeout(npcTimerRef.current); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ── Game event bridge ─────────────────────────────────────────────────
-
+  // ── Game event bridge ──────────────────────────────────────────────────────
   useEffect(() => {
     const newEvents = ctx.events.slice(prevEventsLen.current);
     prevEventsLen.current = ctx.events.length;
     for (const event of newEvents) {
-      const partial = eventToMessage(event);
-      if (!partial) continue;
-      push({ channel: 'GLOBAL', kind: 'SYSTEM', senderId: 'SYSTEM', senderName: 'SYSTEM', ...partial } as Parameters<typeof push>[0]);
-      // Forward to server for hater reaction
+      const parsed = parseEngineEvent(event);
+      if (!parsed) continue;
+      push({
+        senderId: 'SYSTEM', senderName: 'SYSTEM',
+        ...parsed,
+        pressureTier: parsed.pressureTier ?? ctx.pressureTier,
+        tickTier:     ctx.tickTier,
+      } as Parameters<typeof push>[0]);
       socketRef.current?.emit('game:event', { event });
     }
-  }, [ctx.events, push]);
+  }, [ctx.events, ctx.pressureTier, ctx.tickTier, push]);
 
-  // ── Player state sync to server (every 10 ticks) ──────────────────────
+  // ── Pressure tier shift announcements ─────────────────────────────────────
+  const prevPressure = useRef<PressureTier | undefined>(undefined);
+  useEffect(() => {
+    if (!ctx.pressureTier || ctx.pressureTier === prevPressure.current) return;
+    const prev = prevPressure.current;
+    prevPressure.current = ctx.pressureTier;
+    if (!prev) return;
 
+    const PRESSURE_LABELS: Record<string, { emoji: string; body: string }> = {
+      CRITICAL: { emoji: '🔴', body: 'PRESSURE: CRITICAL — Passive shield drain. Hater injection window open. Act now.' },
+      HIGH:     { emoji: '🟠', body: 'PRESSURE: HIGH — Shield drain starting. Reinforce before next tick.' },
+      ELEVATED: { emoji: '🟡', body: 'PRESSURE: ELEVATED — Tension building. Monitor shield layers.' },
+      BUILDING: { emoji: '🟢', body: 'PRESSURE: BUILDING — Early pressure forming. Maintain income surplus.' },
+      CALM:     { emoji: '✅', body: 'PRESSURE: CALM — System stable. Build reserves now.' },
+    };
+    const cfg = PRESSURE_LABELS[ctx.pressureTier];
+    if (cfg) push({
+      channel: 'GLOBAL', kind: 'MARKET_ALERT',
+      senderId: 'SYSTEM', senderName: 'SYSTEM',
+      emoji: cfg.emoji, body: cfg.body,
+      pressureTier: ctx.pressureTier,
+    });
+  }, [ctx.pressureTier, push]);
+
+  // ── Player state sync (every 10 ticks) ────────────────────────────────────
   useEffect(() => {
     if (ctx.tick === prevTick.current) return;
     if (ctx.tick % 10 !== 0) { prevTick.current = ctx.tick; return; }
@@ -258,41 +432,41 @@ export function useChatEngine(
       expenses:    ctx.expenses,
       regime:      ctx.regime,
       tick:        ctx.tick,
+      pressureTier: ctx.pressureTier,
+      haterHeat:   ctx.haterHeat,
       recentEvent: ctx.events[ctx.events.length - 1] ?? '',
     });
-  }, [ctx.tick, ctx.cash, ctx.netWorth, ctx.income, ctx.expenses, ctx.regime, ctx.events]);
+  }, [ctx.tick, ctx.cash, ctx.netWorth, ctx.income, ctx.expenses, ctx.regime, ctx.pressureTier, ctx.haterHeat, ctx.events]);
 
-  // ── Tab switch ────────────────────────────────────────────────────────
-
+  // ── Tab / toggle / send ───────────────────────────────────────────────────
   const switchTab = useCallback((tab: ChatChannel) => {
     setActiveTab(tab);
-    setUnread((prev) => ({ ...prev, [tab]: 0 }));
+    setUnread(prev => ({ ...prev, [tab]: 0 }));
   }, []);
 
   const toggleChat = useCallback(() => {
-    setChatOpen((prev) => {
-      if (!prev) setUnread((u) => ({ ...u, [activeTab]: 0 }));
+    setChatOpen(prev => {
+      if (!prev) setUnread(u => ({ ...u, [activeTabRef.current]: 0 }));
       return !prev;
     });
-  }, [activeTab]);
+  }, []);
 
   const sendMessage = useCallback((body: string) => {
-    if (!body.trim()) return;
+    const trimmed = body.trim();
+    if (!trimmed) return;
     const msg: ChatMessage = {
       id:         nextId(),
-      channel:    activeTab,
+      channel:    activeTabRef.current,
       kind:       'PLAYER',
       senderId:   'player-local',
       senderName: 'You',
       senderRank: 'Partner',
-      body:       body.trim(),
+      body:       trimmed,
       ts:         Date.now(),
     };
-    // Optimistic local add
-    setMessages((prev) => [...prev.slice(-(MAX_MESSAGES - 1)), msg]);
-    // Send to server
-    socketRef.current?.emit('chat:send', { channel: activeTab, body: body.trim() });
-  }, [activeTab]);
+    setMessages(prev => [...prev.slice(-(MAX_MESSAGES - 1)), msg]);
+    socketRef.current?.emit('chat:send', { channel: activeTabRef.current, body: trimmed });
+  }, [nextId]);
 
   const totalUnread = Object.values(unread).reduce((a, b) => a + b, 0);
 

@@ -1,25 +1,32 @@
 /**
  * GameBoard.tsx — Live equity chart + macro state display
- *
- * Props contract (all from App.tsx state — no phantom hooks):
- *   equityHistory  number[]         — netWorth snapshots per month tick
- *   cash           number
- *   netWorth       number
- *   income         number
- *   expenses       number
- *   regime         MarketRegime
- *   intelligence   IntelligenceState
- *   tick           number
- *   totalTicks     number
- *   freezeTicks    number
- *
- * Zero external deps beyond React. SVG chart built inline.
+ * Rebuilt: Syne + IBM Plex Mono · Inline styles · Mobile-first · High contrast
+ * FIX: replaced all .at() calls with bracket indexing for ES2021 lib compatibility
+ * Density6 LLC · Confidential
  */
 
 import React, { useMemo } from 'react';
 
-// ─── Types (mirrored from App.tsx — no import needed) ─────────────────────────
+// ─── Design tokens ────────────────────────────────────────────────────────────
+const T = {
+  card:    '#0C0C1E',
+  border:  'rgba(255,255,255,0.08)',
+  borderM: 'rgba(255,255,255,0.14)',
+  text:    '#F2F2FF',
+  textSub: '#9090B4',
+  textMut: '#44445A',
+  green:   '#22DD88',
+  red:     '#FF4D4D',
+  orange:  '#FF8C00',
+  blue:    '#4488FF',
+  cyan:    '#22D3EE',
+  yellow:  '#FFD700',
+  indigo:  '#818CF8',
+  mono:    "'IBM Plex Mono', 'JetBrains Mono', monospace",
+  display: "'Syne', 'Outfit', system-ui, sans-serif",
+};
 
+// ─── Types ────────────────────────────────────────────────────────────────────
 export type MarketRegime = 'Stable' | 'Expansion' | 'Compression' | 'Panic' | 'Euphoria';
 
 export interface IntelligenceState {
@@ -48,214 +55,242 @@ export interface GameBoardProps {
 }
 
 // ─── Regime config ────────────────────────────────────────────────────────────
-
-const REGIME_CONFIG: Record<MarketRegime, { color: string; bg: string; icon: string }> = {
-  Stable:      { color: 'text-zinc-300',   bg: 'bg-zinc-800',     icon: '⚖️'  },
-  Expansion:   { color: 'text-emerald-400', bg: 'bg-emerald-950',  icon: '📈' },
-  Compression: { color: 'text-yellow-400',  bg: 'bg-yellow-950',   icon: '🗜️' },
-  Panic:       { color: 'text-red-400',     bg: 'bg-red-950',      icon: '🔴' },
-  Euphoria:    { color: 'text-cyan-400',    bg: 'bg-cyan-950',     icon: '🚀' },
+const REGIME_CFG: Record<MarketRegime, { color: string; bg: string; border: string; icon: string }> = {
+  Stable:      { color: '#C8C8E0', bg: '#1A1A2E', border: '#3A3A5A', icon: '⚖️'  },
+  Expansion:   { color: T.green,   bg: '#001A0E', border: '#004422', icon: '📈'  },
+  Compression: { color: T.yellow,  bg: '#1A1400', border: '#443A00', icon: '🗜️'  },
+  Panic:       { color: T.red,     bg: '#1A0000', border: '#440000', icon: '🔴'  },
+  Euphoria:    { color: T.cyan,    bg: '#001A1A', border: '#004444', icon: '🚀'  },
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
 function fmt(n: number): string {
-  const sign = n < 0 ? '-' : '';
-  const v = Math.abs(n);
-  if (v >= 1_000_000) return `${sign}$${(v / 1_000_000).toFixed(2)}M`;
-  if (v >= 1_000)     return `${sign}$${(v / 1_000).toFixed(1)}K`;
-  return `${sign}$${Math.round(v).toLocaleString()}`;
-}
-
-function pct(n: number): string {
-  return `${Math.round(n * 100)}%`;
+  const s = n < 0 ? '-' : '', v = Math.abs(n);
+  if (v >= 1_000_000) return `${s}$${(v/1e6).toFixed(2)}M`;
+  if (v >= 1_000)     return `${s}$${(v/1e3).toFixed(1)}K`;
+  return `${s}$${Math.round(v).toLocaleString()}`;
 }
 
 // ─── SVG Equity Chart ─────────────────────────────────────────────────────────
+function EquityChart({ data }: { data: number[] }) {
+  const W = 560, H = 120, pad = 8;
 
-function EquityChart({ data, w = 560, h = 120 }: { data: number[]; w?: number; h?: number }) {
-  const points = useMemo(() => {
-    if (data.length < 2) return '';
-    const min = Math.min(...data);
-    const max = Math.max(...data);
+  const { pts, fill, rising, deltaPct } = useMemo(() => {
+    if (data.length < 2) return { pts: '', fill: '', rising: true, deltaPct: 0 };
+
+    const min   = Math.min(...data);
+    const max   = Math.max(...data);
     const range = max - min || 1;
-    const pad = 6;
-    return data
-      .map((v, i) => {
-        const x = pad + (i / (data.length - 1)) * (w - pad * 2);
-        const y = pad + (1 - (v - min) / range) * (h - pad * 2);
-        return `${x.toFixed(1)},${y.toFixed(1)}`;
-      })
-      .join(' ');
-  }, [data, w, h]);
 
-  const gradientPoints = useMemo(() => {
-    if (!points) return '';
-    const first = points.split(' ')[0].split(',');
-    const last  = points.split(' ').at(-1)!.split(',');
-    return `${points} ${last[0]},${h} ${first[0]},${h}`;
-  }, [points, h]);
+    const toXY = (v: number, i: number) => {
+      const x = pad + (i / (data.length - 1)) * (W - pad * 2);
+      const y = pad + (1 - (v - min) / range) * (H - pad * 2);
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    };
+
+    const pts  = data.map(toXY).join(' ');
+    // FIX: replace .at(-1) with [data.length - 1] for ES2021 lib compat
+    const lastVal  = data[data.length - 1];
+    const lastXY   = toXY(lastVal, data.length - 1).split(',');
+    const firstXY  = toXY(data[0], 0).split(',');
+    const fill     = `${pts} ${lastXY[0]},${H} ${firstXY[0]},${H}`;
+    const rising   = lastVal >= data[0];
+    const deltaPct = data[0] !== 0 ? ((lastVal - data[0]) / Math.abs(data[0])) * 100 : 0;
+
+    return { pts, fill, rising, deltaPct };
+  }, [data]);
 
   if (data.length < 2) {
     return (
-      <div className="flex items-center justify-center h-full text-zinc-600 text-sm">
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        height: 120, color: T.textMut, fontSize: 13, fontFamily: T.mono,
+      }}>
         Waiting for equity data…
       </div>
     );
   }
 
-  const rising = data[data.length - 1] >= data[0];
-  const lineColor   = rising ? '#10b981' : '#ef4444';
-  const fillColor   = rising ? 'rgba(16,185,129,0.08)' : 'rgba(239,68,68,0.08)';
-  const glowColor   = rising ? '#10b981' : '#ef4444';
-
-  // Latest vs start delta
-  const delta    = data[data.length - 1] - data[0];
-  const deltaPct = data[0] !== 0 ? (delta / Math.abs(data[0])) * 100 : 0;
+  const lineColor = rising ? T.green : T.red;
 
   return (
-    <div className="relative">
-      <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} className="w-full overflow-visible">
+    <div style={{ position: 'relative' }}>
+      <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', display: 'block', overflow: 'visible' }}>
         <defs>
-          <linearGradient id="eqGrad" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%"   stopColor={glowColor} stopOpacity="0.25" />
-            <stop offset="100%" stopColor={glowColor} stopOpacity="0"    />
+          <linearGradient id="gbGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%"   stopColor={lineColor} stopOpacity="0.22" />
+            <stop offset="100%" stopColor={lineColor} stopOpacity="0"    />
           </linearGradient>
         </defs>
-
-        {/* Fill area */}
-        <polygon points={gradientPoints} fill="url(#eqGrad)" />
-
-        {/* Line */}
-        <polyline
-          points={points}
-          fill="none"
-          stroke={lineColor}
-          strokeWidth={2}
-          strokeLinejoin="round"
-          strokeLinecap="round"
-        />
-
-        {/* Latest dot */}
+        <polygon points={fill} fill="url(#gbGrad)" />
+        <polyline points={pts} fill="none" stroke={lineColor} strokeWidth={2.5}
+          strokeLinejoin="round" strokeLinecap="round" />
+        {/* Dot at last point — FIX: use split on pre-computed pts string */}
         {(() => {
-          const lastPt = points.split(' ').at(-1)!.split(',');
+          const allPts = pts.split(' ');
+          // FIX: replace .at(-1) with [allPts.length - 1]
+          const last = (allPts[allPts.length - 1] ?? '0,0').split(',');
           return (
-            <circle
-              cx={lastPt[0]} cy={lastPt[1]}
-              r={4}
-              fill={lineColor}
-              stroke="#09090b"
-              strokeWidth={2}
-            />
+            <circle cx={last[0]} cy={last[1]} r={4.5} fill={lineColor}
+              stroke="#0C0C1E" strokeWidth={2} />
           );
         })()}
       </svg>
-
-      {/* Delta badge */}
-      <div className={`absolute top-1 right-2 text-xs font-mono font-bold ${rising ? 'text-emerald-400' : 'text-red-400'}`}>
+      <div style={{
+        position: 'absolute', top: 4, right: 4,
+        fontSize: 11, fontFamily: T.mono, fontWeight: 700,
+        color: rising ? T.green : T.red,
+        background: rising ? 'rgba(34,221,136,0.12)' : 'rgba(255,77,77,0.12)',
+        border: `1px solid ${rising ? 'rgba(34,221,136,0.28)' : 'rgba(255,77,77,0.28)'}`,
+        padding: '3px 8px', borderRadius: 6,
+      }}>
         {rising ? '▲' : '▼'} {Math.abs(deltaPct).toFixed(1)}%
       </div>
     </div>
   );
 }
 
-// ─── Intelligence Bar ─────────────────────────────────────────────────────────
-
+// ─── Intel Bar ────────────────────────────────────────────────────────────────
 function IntelBar({ label, value, color }: { label: string; value: number; color: string }) {
   return (
-    <div className="flex items-center gap-2">
-      <span className="text-zinc-500 text-xs w-24 truncate">{label}</span>
-      <div className="flex-1 h-1.5 bg-zinc-800 rounded-full overflow-hidden">
-        <div
-          className={`h-full rounded-full transition-all duration-500 ${color}`}
-          style={{ width: `${Math.round(value * 100)}%` }}
-        />
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      <span style={{ fontSize: 11, fontFamily: T.mono, color: T.textSub, width: 100, flexShrink: 0 }}>
+        {label}
+      </span>
+      <div style={{ flex: 1, height: 5, background: '#1A1A2E', borderRadius: 3, overflow: 'hidden' }}>
+        <div style={{
+          height: '100%', borderRadius: 3,
+          width: `${Math.round(value * 100)}%`,
+          background: color,
+          transition: 'width 0.5s ease',
+        }} />
       </div>
-      <span className="text-zinc-400 text-xs font-mono w-8 text-right">{pct(value)}</span>
+      <span style={{ fontSize: 11, fontFamily: T.mono, color: T.textSub, width: 36, textAlign: 'right' }}>
+        {Math.round(value * 100)}%
+      </span>
     </div>
   );
 }
 
-// ─── Main Component ───────────────────────────────────────────────────────────
-
+// ─── Main ─────────────────────────────────────────────────────────────────────
 export default function GameBoard({
-  equityHistory,
-  cash,
-  netWorth,
-  income,
-  expenses,
-  regime,
-  intelligence,
-  tick,
-  totalTicks,
-  freezeTicks,
+  equityHistory, cash, netWorth, income, expenses,
+  regime, intelligence, tick, totalTicks, freezeTicks,
 }: GameBoardProps) {
-  const cashflow   = income - expenses;
-  const regimeCfg  = REGIME_CONFIG[regime];
-  const runPct     = Math.round((tick / totalTicks) * 100);
+  const cashflow = income - expenses;
+  const rc       = REGIME_CFG[regime];
+  const runPct   = Math.round((tick / Math.max(1, totalTicks)) * 100);
+
+  const metrics = [
+    { label: 'Cash',        value: fmt(cash),     color: cash < 5000 ? T.red : T.green },
+    { label: 'Net Worth',   value: fmt(netWorth),  color: T.text     },
+    { label: 'Cashflow/mo', value: (cashflow >= 0 ? '+' : '') + fmt(cashflow), color: cashflow >= 0 ? T.green : T.red },
+    { label: 'Income/mo',   value: fmt(income),    color: '#88EEBB'  },
+  ];
+
+  const intelBars = [
+    { label: 'AI Alpha',   value: intelligence.alpha,               color: T.indigo },
+    { label: 'Risk',       value: intelligence.risk,                color: T.red    },
+    { label: 'Volatility', value: intelligence.volatility,          color: T.orange },
+    { label: 'Momentum',   value: intelligence.momentum,            color: T.green  },
+    { label: 'Reco Power', value: intelligence.recommendationPower, color: T.cyan   },
+    { label: 'Churn Risk', value: intelligence.churnRisk,           color: T.yellow },
+  ];
 
   return (
-    <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden flex flex-col gap-0">
+    <div style={{
+      background: T.card, borderRadius: 12,
+      border: `1px solid ${T.border}`,
+      overflow: 'hidden', display: 'flex', flexDirection: 'column',
+      fontFamily: T.display,
+    }}>
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;700;800&family=IBM+Plex+Mono:wght@400;600;700&display=swap');`}</style>
 
-      {/* ── Header ──────────────────────────────────────────────────── */}
-      <div className="flex items-center justify-between px-4 py-2 border-b border-zinc-800">
-        <span className="text-sm font-bold text-white">Equity Chart</span>
-        <div className="flex items-center gap-3">
+      {/* Header */}
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        padding: '10px 16px', borderBottom: `1px solid ${T.border}`,
+        flexWrap: 'wrap', gap: 8,
+      }}>
+        <span style={{ fontSize: 13, fontWeight: 700, color: T.text, fontFamily: T.display }}>
+          Equity Chart
+        </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           {freezeTicks > 0 && (
-            <span className="px-2 py-0.5 rounded bg-orange-900/60 border border-orange-700 text-orange-300 text-xs font-mono animate-pulse">
+            <div style={{
+              padding: '3px 10px', borderRadius: 6, fontSize: 10,
+              fontFamily: T.mono, fontWeight: 700,
+              background: 'rgba(255,140,0,0.15)', border: '1px solid rgba(255,140,0,0.35)',
+              color: T.orange,
+            }}>
               FROZEN {freezeTicks}t
-            </span>
+            </div>
           )}
-          <span className={`px-2 py-0.5 rounded text-xs font-semibold ${regimeCfg.bg} ${regimeCfg.color}`}>
-            {regimeCfg.icon} {regime}
-          </span>
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 5,
+            padding: '4px 10px', borderRadius: 6, fontSize: 11,
+            fontFamily: T.mono, fontWeight: 700,
+            background: rc.bg, border: `1px solid ${rc.border}`,
+            color: rc.color,
+          }}>
+            {rc.icon} {regime}
+          </div>
         </div>
       </div>
 
-      {/* ── Chart ───────────────────────────────────────────────────── */}
-      <div className="px-4 py-3 bg-zinc-950/60">
-        <EquityChart data={equityHistory} h={110} />
+      {/* Chart */}
+      <div style={{ padding: '12px 16px', background: 'rgba(0,0,0,0.3)' }}>
+        <EquityChart data={equityHistory} />
       </div>
 
-      {/* ── Key Metrics ─────────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-px bg-zinc-800">
-        {[
-          { label: 'Cash',       value: fmt(cash),     color: cash < 5000 ? 'text-red-400' : 'text-emerald-400' },
-          { label: 'Net Worth',  value: fmt(netWorth),  color: 'text-white'       },
-          { label: 'Cashflow/mo',value: (cashflow >= 0 ? '+' : '') + fmt(cashflow), color: cashflow >= 0 ? 'text-emerald-400' : 'text-red-400' },
-          { label: 'Income/mo',  value: fmt(income),   color: 'text-emerald-300' },
-        ].map(({ label, value, color }) => (
-          <div key={label} className="bg-zinc-900 px-4 py-3">
-            <p className="text-zinc-500 text-xs uppercase tracking-wide mb-0.5">{label}</p>
-            <p className={`font-mono font-bold text-sm ${color}`}>{value}</p>
+      {/* Metrics */}
+      <div style={{
+        display: 'grid', gap: 1,
+        gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))',
+        background: T.border,
+      }}>
+        {metrics.map(({ label, value, color }) => (
+          <div key={label} style={{ background: T.card, padding: '12px 16px' }}>
+            <div style={{
+              fontSize: 9, fontFamily: T.mono, color: T.textSub,
+              textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: 5,
+            }}>
+              {label}
+            </div>
+            <div style={{ fontSize: 'clamp(12px,1.8vw,15px)', fontFamily: T.mono, fontWeight: 700, color }}>
+              {value}
+            </div>
           </div>
         ))}
       </div>
 
-      {/* ── Run Progress ────────────────────────────────────────────── */}
-      <div className="px-4 py-2 border-t border-zinc-800">
-        <div className="flex justify-between text-xs text-zinc-500 mb-1">
-          <span>Run Progress</span>
-          <span>T{tick} / {totalTicks} ({runPct}%)</span>
+      {/* Run Progress */}
+      <div style={{ padding: '10px 16px', borderTop: `1px solid ${T.border}` }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+          <span style={{ fontSize: 10, fontFamily: T.mono, color: T.textSub }}>Run Progress</span>
+          <span style={{ fontSize: 10, fontFamily: T.mono, color: T.textSub }}>
+            T{tick} / {totalTicks} ({runPct}%)
+          </span>
         </div>
-        <div className="h-1.5 bg-zinc-800 rounded-full overflow-hidden">
-          <div
-            className="h-full bg-indigo-500 rounded-full transition-all duration-500"
-            style={{ width: `${runPct}%` }}
-          />
+        <div style={{ height: 5, background: '#1A1A2E', borderRadius: 3, overflow: 'hidden' }}>
+          <div style={{
+            height: '100%', borderRadius: 3, width: `${runPct}%`,
+            background: 'linear-gradient(90deg, #4444AA, #818CF8)',
+            transition: 'width 0.5s ease',
+          }} />
         </div>
       </div>
 
-      {/* ── Intelligence Bars ────────────────────────────────────────── */}
-      <div className="px-4 py-3 border-t border-zinc-800 grid grid-cols-1 md:grid-cols-2 gap-1.5">
-        <IntelBar label="AI Alpha"     value={intelligence.alpha}             color="bg-indigo-500" />
-        <IntelBar label="Risk"         value={intelligence.risk}              color="bg-red-500"    />
-        <IntelBar label="Volatility"   value={intelligence.volatility}        color="bg-orange-500" />
-        <IntelBar label="Momentum"     value={intelligence.momentum}          color="bg-emerald-500"/>
-        <IntelBar label="Reco Power"   value={intelligence.recommendationPower} color="bg-cyan-500" />
-        <IntelBar label="Churn Risk"   value={intelligence.churnRisk}         color="bg-yellow-500" />
+      {/* Intelligence */}
+      <div style={{
+        padding: '12px 16px 14px', borderTop: `1px solid ${T.border}`,
+        display: 'grid', gap: 8,
+        gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+      }}>
+        {intelBars.map((bar) => (
+          <IntelBar key={bar.label} {...bar} />
+        ))}
       </div>
-
     </div>
   );
 }

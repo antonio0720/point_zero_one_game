@@ -1,5 +1,5 @@
 // pzo-web/src/telemetry/schemas/timeEngineTelemetry.ts
-import { TelemetryEnvelopeV2 } from '../types'; // Adjust the path as necessary based on your project structure
+import { TelemetryEnvelopeV2 } from '../../engines/time/types';
 
 export interface TimeTierDwell extends Record<string, unknown> {
   startTime: string;
@@ -23,24 +23,28 @@ export interface HoldUsage extends Record<string, unknown> {
   releaseTime?: string;
 }
 
-export interface RunTimeoutFlags extends Record<string, boolean | undefined> {
+export interface RunTimeoutFlags extends Record<string, boolean | string | undefined> {
   timeoutOccurred: boolean;
   runEndedTimestamp?: string;
 }
 
 export class TimeEngineTelemetry implements TelemetryEnvelopeV2 {
-  private static readonly eventName = 'time_engine_telemetry'; // Ensure stable versioning for the event name.
-  
+  private static readonly eventName = 'time_engine_telemetry';
+
   public tickTierDwell: TimeTierDwell;
   public tierTransitions: TierTransition[];
   public decisionWindowLifecycleMetrics: DecisionWindowLifecycleMetrics;
-  public holdUsage?: HoldUsage; // Optional field as it might not be used in all scenarios.
+  public holdUsage?: HoldUsage;
   public runTimeoutFlags: RunTimeoutFlags;
-  
+
   constructor(data: TelemetryEnvelopeV2) {
-    this.tickTierDwell = data.tickTierDwell || {};
-    this.tierTransitions = data.tierTransitions || [];
-    this013, PZO_E1_TIME_P14 — Telemetry & Instrumentation
-SPRINT:  S4
-TYPE:    schema_design
-PRIORITY:P1
+    this.tickTierDwell = (data.tickTierDwell as TimeTierDwell)
+      ?? { startTime: '', endTime: '' };
+    this.tierTransitions = (data.tierTransitions as TierTransition[]) ?? [];
+    this.decisionWindowLifecycleMetrics =
+      (data.decisionWindowLifecycleMetrics as DecisionWindowLifecycleMetrics)
+      ?? { openTimestamp: '', closeTimestamp: '', decisionsMade: 0 };
+    this.runTimeoutFlags = (data.runTimeoutFlags as RunTimeoutFlags)
+      ?? { timeoutOccurred: false };
+  }
+}

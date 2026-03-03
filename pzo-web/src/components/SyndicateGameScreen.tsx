@@ -1,7 +1,8 @@
 /**
- * SyndicateGameScreen.tsx — CO-OP mode game screen
- * Theme: Teal / Alliance. Partner panel. Synergy engine. Rescue windows.
- * You and your partner share one economy. Both survive or neither wins.
+ * SyndicateGameScreen.tsx — CO-OP / SYNDICATE mode
+ * Theme: Teal Alliance. Partner panels. Synergy engine. Rescue windows. Aid contracts.
+ * Engine: modeState.syndicate — SyndicateEngine + rescue events
+ * Density6 LLC · Confidential
  */
 
 import React, { useState } from 'react';
@@ -14,173 +15,215 @@ import ShieldIcons from './ShieldIcons';
 import MomentFlash from './MomentFlash';
 import type { GameModeState } from '../engines/core/types';
 
-// ─── Helpers ────────────────────────────────────────────────────────────────
+// ─── Design tokens ────────────────────────────────────────────────────────────
+const T = {
+  void:    '#030A08',
+  surface: '#06120F',
+  card:    '#0A1A16',
+  teal:    '#00D4B8',
+  tealDim: '#007766',
+  green:   '#22DD88',
+  red:     '#FF4D4D',
+  orange:  '#FF8C00',
+  text:    '#F0FFFC',
+  textSub: '#6A9A92',
+  textMut: '#1E3830',
+  mono:    "'IBM Plex Mono', monospace",
+  display: "'Syne', 'Outfit', system-ui, sans-serif",
+};
 
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 function fmt(n: number): string {
-  const sign = n < 0 ? '-' : '';
-  const v = Math.abs(n);
-  if (v >= 1_000_000) return `${sign}$${(v / 1_000_000).toFixed(2)}M`;
-  if (v >= 1_000)     return `${sign}$${(v / 1_000).toFixed(1)}K`;
-  return `${sign}$${Math.round(v).toLocaleString()}`;
+  const s = n < 0 ? '-' : '', v = Math.abs(n);
+  if (v >= 1_000_000) return `${s}$${(v/1e6).toFixed(2)}M`;
+  if (v >= 1_000)     return `${s}$${(v/1e3).toFixed(1)}K`;
+  return `${s}$${Math.round(v).toLocaleString()}`;
 }
 
-// ─── Sub-components ──────────────────────────────────────────────────────────
-
-function SynergyBar({ synergyBonus, combinedNetWorth }: { synergyBonus: number; combinedNetWorth: number }) {
-  // synergyBonus: 0.0–2.0 where 1.0 = no bonus, 2.0 = +100% (max)
-  const synergyScore = Math.max(0, Math.min(200, (synergyBonus - 1.0) * 200));
-  const pct          = synergyScore / 2;  // 0-100 for display
-  const bonusPct     = Math.max(0, (synergyBonus - 1.0) * 100);
-
-  const color = synergyScore >= 150 ? '#00E5C8'
-    : synergyScore >= 80  ? '#00BBAA'
-    : synergyScore >= 40  ? '#FF8800'
-    : '#FF4444';
-
+// ─── Panel wrapper ────────────────────────────────────────────────────────────
+function Panel({ children, style = {}, accent = T.teal }: {
+  children: React.ReactNode; style?: React.CSSProperties; accent?: string;
+}) {
   return (
-    <div
-      className="rounded-xl border p-4"
-      style={{ background: '#000D0B', borderColor: '#00E5C833' }}
-    >
-      <div className="flex items-center justify-between mb-2">
-        <span className="text-[#00E5C8] text-xs font-bold tracking-widest uppercase">Synergy Engine</span>
-        <span className="text-xs font-mono text-[#888]">Combined NW: {fmt(combinedNetWorth)}</span>
-      </div>
-
-      {/* Big score */}
-      <div className="flex items-baseline gap-2 mb-3">
-        <span
-          className="text-5xl font-black"
-          style={{ color, textShadow: synergyScore >= 150 ? `0 0 30px ${color}66` : 'none' }}
-        >
-          {Math.round(synergyScore)}
-        </span>
-        <span className="text-[#666] text-sm">/ 200</span>
-        {bonusPct > 0 && (
-          <span
-            className="ml-2 text-lg font-black"
-            style={{ color: '#00E5C8' }}
-          >
-            +{Math.round(bonusPct)}% INCOME
-          </span>
-        )}
-      </div>
-
-      {/* Bar */}
-      <div className="h-4 bg-[#001510] rounded-full overflow-hidden mb-2 relative">
-        <div
-          className="h-full rounded-full transition-all duration-700"
-          style={{
-            width: `${pct}%`,
-            background: `linear-gradient(90deg, #006655, ${color})`,
-            boxShadow: synergyScore > 100 ? `0 0 16px ${color}55` : 'none',
-          }}
-        />
-        {/* Bonus threshold at 100 */}
-        <div
-          className="absolute top-0 h-full w-px bg-[#00E5C844]"
-          style={{ left: '50%' }}
-        />
-      </div>
-
-      <div className="flex justify-between text-[9px] text-[#444] font-mono">
-        <span>FRICTION</span>
-        <span>NEUTRAL</span>
-        <span className="text-[#00E5C8]">MAX SYNERGY +30%</span>
-      </div>
-
-      <div className="mt-2 text-[10px] text-center"
-        style={{ color: synergyScore >= 100 ? '#00E5C8' : '#666' }}
-      >
-        {synergyScore >= 150 ? '🔥 APEX SYNERGY — Maximum income amplification active'
-          : synergyScore >= 80 ? '📈 Strong alliance — synergy bonus building'
-          : synergyScore >= 40 ? '⚠️ Moderate friction — coordinate decisions'
-          : '❌ Alliance strain — one of you is bleeding'}
-      </div>
+    <div style={{
+      background: T.card, borderRadius: 12,
+      border: `1px solid rgba(0,212,184,0.12)`,
+      padding: 16, ...style,
+    }}>
+      {children}
     </div>
   );
 }
 
-function PartnerPanel({
-  label,
-  cash,
-  income,
-  expenses,
-  netWorth,
-  shieldPct,
-  inDistress,
-  isLocal,
-}: {
-  label: string;
-  cash?: number;
-  income: number;
-  expenses: number;
-  netWorth: number;
-  shieldPct: number;
-  inDistress: boolean;
-  isLocal: boolean;
-}) {
-  const cashflow  = income - expenses;
-  const accent    = isLocal ? '#00E5C8' : '#7BFFE8';
-  const distColor = '#FF4444';
+function Label({ children, color = T.teal }: { children: React.ReactNode; color?: string }) {
+  return (
+    <div style={{
+      fontSize: 10, fontFamily: T.mono, fontWeight: 700,
+      letterSpacing: '0.2em', textTransform: 'uppercase',
+      color, marginBottom: 12,
+    }}>
+      {children}
+    </div>
+  );
+}
+
+// ─── Synergy Bar ──────────────────────────────────────────────────────────────
+function SynergyBar({ synergyBonus, combinedNW }: { synergyBonus: number; combinedNW: number }) {
+  // synergyBonus: 1.0 = neutral, 2.0 = +100% (max)
+  const score  = Math.max(0, Math.min(200, (synergyBonus - 1.0) * 200));
+  const pct    = score / 2;   // 0–100 display
+  const bonus  = Math.max(0, (synergyBonus - 1.0) * 100);
+  const color  = score >= 150 ? T.teal : score >= 80 ? '#00BBAA' : score >= 40 ? T.orange : T.red;
 
   return (
-    <div
-      className="rounded-xl border p-4 relative overflow-hidden"
-      style={{
-        background: inDistress ? '#1a000022' : '#000D0B',
-        borderColor: inDistress ? distColor + '66' : accent + '33',
-      }}
-    >
-      {inDistress && (
-        <div
-          className="absolute inset-0 pointer-events-none animate-pulse rounded-xl"
-          style={{ border: `2px solid ${distColor}55`, background: `${distColor}08` }}
-        />
-      )}
-
-      <div className="flex items-center gap-2 mb-3">
-        <div
-          className="w-2 h-2 rounded-full"
-          style={{ background: inDistress ? distColor : accent, boxShadow: `0 0 8px ${inDistress ? distColor : accent}` }}
-        />
-        <span className="text-xs font-black tracking-widest uppercase" style={{ color: inDistress ? distColor : accent }}>
-          {label}
+    <Panel>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:14 }}>
+        <Label>Synergy Engine</Label>
+        <span style={{ fontSize:11, fontFamily:T.mono, color:T.textSub }}>
+          Combined NW: {fmt(combinedNW)}
         </span>
-        {inDistress && (
-          <span className="ml-auto text-[10px] font-black text-[#FF4444] animate-pulse">🚨 DISTRESS</span>
+      </div>
+
+      <div style={{ display:'flex', alignItems:'baseline', gap:12, marginBottom:14 }}>
+        <span style={{
+          fontSize:'clamp(2.4rem, 5vw, 3.2rem)', fontWeight:800,
+          fontFamily:T.display, color,
+          textShadow: score >= 150 ? `0 0 36px ${color}66` : 'none',
+          transition:'all 0.5s ease',
+        }}>
+          {Math.round(score)}
+        </span>
+        <span style={{ color:T.textMut, fontSize:14, fontFamily:T.mono }}>/ 200</span>
+        {bonus > 0 && (
+          <span style={{
+            fontSize:'clamp(1rem, 2.5vw, 1.3rem)', fontWeight:800, color:T.teal, fontFamily:T.display,
+          }}>
+            +{Math.round(bonus)}% INCOME
+          </span>
         )}
       </div>
 
-      <div className="grid grid-cols-2 gap-2 text-xs">
+      <div style={{ height:12, background:'#001E18', borderRadius:6, overflow:'hidden', marginBottom:6, position:'relative' }}>
+        <div style={{
+          height:'100%', borderRadius:6, transition:'width 0.7s ease',
+          width:`${pct}%`,
+          background:`linear-gradient(90deg, #006655, ${color})`,
+          boxShadow: score > 100 ? `0 0 18px ${color}55` : 'none',
+        }} />
+        {/* Neutral line at 50% */}
+        <div style={{
+          position:'absolute', top:0, left:'50%', height:'100%',
+          width:1, background:'rgba(0,212,184,0.28)',
+        }} />
+      </div>
+
+      <div style={{ display:'flex', justifyContent:'space-between', fontSize:9, fontFamily:T.mono, color:T.textMut, marginBottom:10 }}>
+        <span>FRICTION</span><span>NEUTRAL</span><span style={{ color:T.teal }}>MAX +30%</span>
+      </div>
+
+      <p style={{
+        fontSize:11, textAlign:'center', fontFamily:T.mono, lineHeight:1.5,
+        color: score >= 100 ? T.teal : T.textSub,
+      }}>
+        {score >= 150 ? '🔥 APEX SYNERGY — Maximum income amplification active'
+          : score >= 80 ? '📈 Strong alliance — synergy bonus building'
+          : score >= 40 ? '⚠️ Moderate friction — coordinate your decisions'
+          : '❌ Alliance strain — someone is bleeding your economy'}
+      </p>
+    </Panel>
+  );
+}
+
+// ─── Partner Panel ────────────────────────────────────────────────────────────
+function PartnerPanel({
+  label, cash, income, expenses, netWorth, shieldPct, inDistress, isLocal,
+}: {
+  label: string; cash?: number; income: number; expenses: number;
+  netWorth: number; shieldPct: number; inDistress: boolean; isLocal: boolean;
+}) {
+  const cashflow = income - expenses;
+  const accent   = isLocal ? T.teal : '#7BFFE8';
+
+  return (
+    <div style={{
+      background: T.card, borderRadius:12, padding:16, position:'relative', overflow:'hidden',
+      border:`1px solid ${inDistress ? 'rgba(255,77,77,0.35)' : `rgba(0,212,184,${isLocal ? '0.20' : '0.12'})`}`,
+    }}>
+      {inDistress && (
+        <div style={{
+          position:'absolute', inset:0, borderRadius:12, pointerEvents:'none',
+          background:'rgba(255,77,77,0.05)',
+          border:'2px solid rgba(255,77,77,0.20)',
+        }} />
+      )}
+
+      {/* Header */}
+      <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:14 }}>
+        <div style={{
+          width:8, height:8, borderRadius:'50%',
+          background: inDistress ? T.red : accent,
+          boxShadow: `0 0 10px ${inDistress ? T.red : accent}`,
+        }} />
+        <span style={{
+          fontSize:11, fontFamily:T.mono, fontWeight:700, letterSpacing:'0.15em',
+          color: inDistress ? T.red : accent, flex:1,
+        }}>
+          {label}
+        </span>
+        {inDistress && (
+          <span style={{
+            fontSize:9, fontFamily:T.mono, fontWeight:700, color:T.red,
+            padding:'3px 8px', borderRadius:4,
+            background:'rgba(255,77,77,0.12)', border:'1px solid rgba(255,77,77,0.28)',
+          }}>
+            🚨 DISTRESS
+          </span>
+        )}
+      </div>
+
+      {/* Stats grid */}
+      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8 }}>
         {cash !== undefined && (
-          <div className="bg-[#00110E] border border-[#00221A] rounded p-2">
-            <div className="text-[#666] uppercase tracking-wide text-[9px]">Cash</div>
-            <div className="font-mono font-bold" style={{ color: cash < 3000 ? '#FF4444' : '#ddd' }}>{fmt(cash)}</div>
+          <div style={{
+            padding:'10px 12px', borderRadius:8,
+            background:'rgba(0,30,22,0.60)', border:'1px solid rgba(0,212,184,0.10)',
+          }}>
+            <div style={{ fontSize:9, fontFamily:T.mono, color:T.textSub, textTransform:'uppercase', letterSpacing:'0.1em', marginBottom:4 }}>Cash</div>
+            <div style={{ fontSize:14, fontFamily:T.mono, fontWeight:700, color: cash < 3000 ? T.red : T.text }}>
+              {fmt(cash)}
+            </div>
           </div>
         )}
-        <div className="bg-[#00110E] border border-[#00221A] rounded p-2">
-          <div className="text-[#666] uppercase tracking-wide text-[9px]">Net Worth</div>
-          <div className="font-mono font-bold text-white">{fmt(netWorth)}</div>
+        <div style={{
+          padding:'10px 12px', borderRadius:8,
+          background:'rgba(0,30,22,0.60)', border:'1px solid rgba(0,212,184,0.10)',
+        }}>
+          <div style={{ fontSize:9, fontFamily:T.mono, color:T.textSub, textTransform:'uppercase', letterSpacing:'0.1em', marginBottom:4 }}>Net Worth</div>
+          <div style={{ fontSize:14, fontFamily:T.mono, fontWeight:700, color:T.text }}>{fmt(netWorth)}</div>
         </div>
-        <div className="bg-[#00110E] border border-[#00221A] rounded p-2">
-          <div className="text-[#666] uppercase tracking-wide text-[9px]">Cashflow</div>
-          <div className="font-mono font-bold" style={{ color: cashflow >= 0 ? '#00E5C8' : '#FF4444' }}>
+        <div style={{
+          padding:'10px 12px', borderRadius:8,
+          background:'rgba(0,30,22,0.60)', border:'1px solid rgba(0,212,184,0.10)',
+        }}>
+          <div style={{ fontSize:9, fontFamily:T.mono, color:T.textSub, textTransform:'uppercase', letterSpacing:'0.1em', marginBottom:4 }}>Cashflow</div>
+          <div style={{ fontSize:14, fontFamily:T.mono, fontWeight:700, color: cashflow >= 0 ? T.teal : T.red }}>
             {cashflow >= 0 ? '+' : ''}{fmt(cashflow)}/mo
           </div>
         </div>
-        <div className="bg-[#00110E] border border-[#00221A] rounded p-2">
-          <div className="text-[#666] uppercase tracking-wide text-[9px]">Shields</div>
-          <div className="h-2 bg-[#001510] rounded-full mt-1 overflow-hidden">
-            <div
-              className="h-full rounded-full"
-              style={{
-                width: `${shieldPct * 100}%`,
-                background: shieldPct > 0.5 ? '#00E5C8' : shieldPct > 0.25 ? '#FF8800' : '#FF2222',
-              }}
-            />
+        <div style={{
+          padding:'10px 12px', borderRadius:8,
+          background:'rgba(0,30,22,0.60)', border:'1px solid rgba(0,212,184,0.10)',
+        }}>
+          <div style={{ fontSize:9, fontFamily:T.mono, color:T.textSub, textTransform:'uppercase', letterSpacing:'0.1em', marginBottom:6 }}>Shields</div>
+          <div style={{ height:5, background:'#001510', borderRadius:3, overflow:'hidden', marginBottom:4 }}>
+            <div style={{
+              height:'100%', borderRadius:3,
+              width:`${shieldPct * 100}%`,
+              background: shieldPct > 0.5 ? T.teal : shieldPct > 0.25 ? T.orange : T.red,
+              transition:'width 0.5s ease',
+            }} />
           </div>
-          <div className="text-[9px] font-mono mt-0.5" style={{ color: accent }}>
+          <div style={{ fontSize:10, fontFamily:T.mono, fontWeight:700, color:accent }}>
             {Math.round(shieldPct * 100)}%
           </div>
         </div>
@@ -189,79 +232,64 @@ function PartnerPanel({
   );
 }
 
-function AidContractList({ contracts }: { contracts: Array<{ id: string; type: string; status: string; terms: { amount: number } }> }) {
-  if (contracts.length === 0) return null;
-
+// ─── Aid Contract List ────────────────────────────────────────────────────────
+function AidContractList({ contracts }: {
+  contracts: Array<{ id:string; type:string; status:string; terms:{ amount:number } }>;
+}) {
+  if (!contracts.length) return null;
   return (
-    <div className="rounded-xl border p-4" style={{ background: '#000D0B', borderColor: '#00E5C822' }}>
-      <div className="text-[#00E5C8] text-xs font-bold tracking-widest uppercase mb-3">Active Aid Contracts</div>
-      <div className="space-y-2">
+    <Panel>
+      <Label>Active Aid Contracts</Label>
+      <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
         {contracts.map((c) => (
-          <div
-            key={c.id}
-            className="flex items-center justify-between px-3 py-2 rounded-lg border text-xs"
-            style={{ borderColor: '#00E5C822', background: '#00E5C808' }}
-          >
-            <span className="font-bold text-[#00E5C8]">{c.type.replace('_', ' ')}</span>
-            <span className="font-mono text-[#888]">{fmt(c.terms.amount)}</span>
-            <span
-              className="px-2 py-0.5 rounded text-[9px] font-bold"
-              style={{
-                color: c.status === 'ACTIVE' ? '#00E5C8' : '#888',
-                background: c.status === 'ACTIVE' ? '#00E5C811' : '#11111111',
-                border: `1px solid ${c.status === 'ACTIVE' ? '#00E5C822' : '#222'}`,
-              }}
-            >
+          <div key={c.id} style={{
+            display:'flex', alignItems:'center', justifyContent:'space-between',
+            padding:'8px 12px', borderRadius:8, fontSize:12,
+            background:'rgba(0,212,184,0.06)', border:'1px solid rgba(0,212,184,0.14)',
+          }}>
+            <span style={{ fontFamily:T.mono, fontWeight:700, color:T.teal }}>
+              {c.type.replace(/_/g,' ')}
+            </span>
+            <span style={{ fontFamily:T.mono, color:T.textSub }}>{fmt(c.terms.amount)}</span>
+            <span style={{
+              fontSize:9, fontFamily:T.mono, fontWeight:700,
+              padding:'2px 8px', borderRadius:4,
+              color: c.status === 'ACTIVE' ? T.teal : T.textSub,
+              background: c.status === 'ACTIVE' ? 'rgba(0,212,184,0.10)' : 'transparent',
+              border:`1px solid ${c.status === 'ACTIVE' ? 'rgba(0,212,184,0.22)' : '#1E3830'}`,
+            }}>
               {c.status}
             </span>
           </div>
         ))}
       </div>
-    </div>
+    </Panel>
   );
 }
 
-// ─── Props ──────────────────────────────────────────────────────────────────
-
-interface AllianceMember {
-  id: string;
-  displayName: string;
-  netWorth: number;
-}
+// ─── Props ────────────────────────────────────────────────────────────────────
+interface AllianceMember { id:string; displayName:string; netWorth:number; }
 
 export interface RescueWindowState {
-  rescueeDisplayName: string;
-  rescueeNetWorth: number;
-  ticksRemaining: number;
-  allianceName: string;
-  contributionRequired: number;
-  totalContributed: number;
+  rescueeDisplayName:string; rescueeNetWorth:number; ticksRemaining:number;
+  allianceName:string; contributionRequired:number; totalContributed:number;
 }
 
 export interface SyndicateGameScreenProps {
-  cash: number;
-  income: number;
-  expenses: number;
-  netWorth: number;
-  shields: number;
-  shieldConsuming: boolean;
-  tick: number;
-  totalTicks: number;
-  freezeTicks: number;
-  regime: MarketRegime;
-  intelligence: IntelligenceState;
-  equityHistory: number[];
-  events: string[];
-  modeState: GameModeState | null;
-  rescueWindow: RescueWindowState | null;
-  allianceMembers: AllianceMember[];
-  onAidSubmit: (contract: AidContract) => void;
-  onRescueContribute: () => void;
-  onRescueDismiss: () => void;
+  cash:number; income:number; expenses:number; netWorth:number;
+  shields:number; shieldConsuming:boolean;
+  tick:number; totalTicks:number; freezeTicks:number;
+  regime:MarketRegime; intelligence:IntelligenceState;
+  equityHistory:number[]; events:string[];
+  modeState:GameModeState | null;
+  rescueWindow:RescueWindowState | null;
+  allianceMembers:AllianceMember[];
+  onAidSubmit:(c:AidContract)=>void;
+  onRescueContribute:()=>void;
+  onRescueDismiss:()=>void;
 }
 
-// ─── Main component ──────────────────────────────────────────────────────────
-
+// ─── Main ─────────────────────────────────────────────────────────────────────
 export default function SyndicateGameScreen({
   cash, income, expenses, netWorth, shields, shieldConsuming,
   tick, totalTicks, freezeTicks, regime, intelligence, equityHistory,
@@ -270,88 +298,109 @@ export default function SyndicateGameScreen({
 }: SyndicateGameScreenProps) {
   const [showAid, setShowAid] = useState(false);
 
-  const syndicate = modeState?.syndicate;
+  const syn           = modeState?.syndicate;
+  const partnerIncome = syn?.partnerIncome     ?? 2100;
+  const partnerExp    = income * 0.9;
+  const partnerNW     = syn?.partnerNetWorth   ?? netWorth * 0.85;
+  const partnerShield = syn?.partnerShieldPct  ?? 0.75;
+  const partnerDist   = syn?.partnerInDistress ?? false;
+  const rescueOpen    = syn?.rescueWindowOpen  ?? !!rescueWindow;
+  const rescueTicks   = syn?.rescueWindowTicksLeft ?? rescueWindow?.ticksRemaining ?? 0;
+  const synBonus      = syn?.synergyBonus      ?? 1.0;
+  const combinedNW    = syn?.combinedNetWorth   ?? netWorth + partnerNW;
+  const contracts     = syn?.activeAidContracts ?? [];
+  const shieldPct     = shields / 4;
+  const cashflow      = income - expenses;
 
-  const partnerIncome    = syndicate?.partnerIncome    ?? 2100;
-  const partnerExpenses  = income * 0.9;  // approximation when no engine data
-  const partnerNetWorth  = syndicate?.partnerNetWorth  ?? netWorth * 0.85;
-  const partnerShieldPct = syndicate?.partnerShieldPct ?? 0.75;
-  const partnerDistress  = syndicate?.partnerInDistress ?? false;
-  const rescueOpen       = syndicate?.rescueWindowOpen ?? !!rescueWindow;
-  const rescueTicks      = syndicate?.rescueWindowTicksLeft ?? rescueWindow?.ticksRemaining ?? 0;
-  const synergyBonus     = syndicate?.synergyBonus ?? 1.0;
-  const combinedNW       = syndicate?.combinedNetWorth ?? (netWorth + partnerNetWorth);
-  const aidContracts     = syndicate?.activeAidContracts ?? [];
-  const shieldPct        = shields / 4;
+  const localDistress = cash < 3000 || (income / Math.max(1, expenses)) < 0.8;
 
   return (
-    <div
-      className="min-h-screen flex flex-col"
-      style={{ background: 'linear-gradient(135deg, #000D0B 0%, #001210 50%, #000908 100%)' }}
-    >
-      {/* ── Mode Banner ─────────────────────────────────────────────── */}
-      <div
-        className="flex items-center gap-4 px-6 py-3 border-b"
-        style={{ borderColor: '#00E5C822', background: '#000D0B88' }}
-      >
-        <div
-          className="px-3 py-1 rounded text-xs font-black tracking-widest"
-          style={{ background: '#00E5C822', border: '1px solid #00E5C844', color: '#00E5C8' }}
-        >
+    <div style={{
+      minHeight:'100vh', display:'flex', flexDirection:'column',
+      background:'linear-gradient(160deg, #020A08 0%, #040E0C 60%, #030808 100%)',
+      fontFamily:T.display,
+    }}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap');
+        * { box-sizing: border-box; }
+      `}</style>
+
+      {/* ── Sticky Header ── */}
+      <header style={{
+        position:'sticky', top:0, zIndex:100,
+        background:'rgba(2,10,8,0.94)', backdropFilter:'blur(16px)',
+        borderBottom:'1px solid rgba(0,212,184,0.12)',
+        padding:'10px clamp(12px,4vw,24px)',
+        display:'flex', alignItems:'center', flexWrap:'wrap', gap:'8px 20px',
+      }}>
+        <div style={{
+          padding:'5px 12px', borderRadius:6, fontSize:10,
+          fontFamily:T.mono, fontWeight:700, letterSpacing:'0.2em',
+          background:'rgba(0,212,184,0.10)', border:'1px solid rgba(0,212,184,0.28)',
+          color:T.teal,
+        }}>
           🤝 SYNDICATE
         </div>
-        <span className="text-[#888] text-xs">Both survive or neither wins. Your ceiling is their floor.</span>
-        <div className="ml-auto flex items-center gap-4 text-xs font-mono">
+
+        <div style={{ display:'flex', flexWrap:'wrap', gap:'6px 18px', fontSize:12, fontFamily:T.mono }}>
+          <span style={{ color: cashflow >= 0 ? T.teal : T.red, fontWeight:700 }}>
+            CF {cashflow >= 0 ? '+' : ''}{fmt(cashflow)}/mo
+          </span>
+          <span style={{ color:T.text }}>NW {fmt(netWorth)}</span>
           {(rescueOpen || !!rescueWindow) && (
-            <span className="text-[#FF8800] font-bold animate-pulse">🚨 RESCUE ACTIVE</span>
+            <span style={{
+              color:T.orange, fontWeight:700, fontFamily:T.mono,
+            }}>
+              🚨 RESCUE ACTIVE — {rescueTicks} TICKS
+            </span>
           )}
-          <span style={{ color: '#00E5C8' }}>T{tick}/{totalTicks}</span>
         </div>
+
+        <div style={{ marginLeft:'auto', display:'flex', alignItems:'center', gap:12 }}>
+          <ShieldIcons count={shields} consuming={shieldConsuming} />
+          <span style={{ fontSize:11, fontFamily:T.mono, color:T.textMut }}>T{tick}/{totalTicks}</span>
+        </div>
+      </header>
+
+      {/* ── Synergy bar — dominant ── */}
+      <div style={{ padding:'14px clamp(12px,3vw,20px) 0' }}>
+        <SynergyBar synergyBonus={synBonus} combinedNW={combinedNW} />
       </div>
 
-      {/* ── Synergy Bar (full width, dominant) ──────────────────────── */}
-      <div className="px-4 pt-4">
-        <SynergyBar synergyBonus={synergyBonus} combinedNetWorth={combinedNW} />
-      </div>
+      {/* ── Main content ── */}
+      <div style={{ flex:1, padding:'clamp(12px,3vw,20px)', display:'flex', flexDirection:'column', gap:14 }}>
 
-      {/* ── Main Content ────────────────────────────────────────────── */}
-      <div className="flex-1 p-4 space-y-4">
-
-        {/* Partner panels side by side */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {/* Partner panels */}
+        <div style={{
+          display:'grid', gap:14,
+          gridTemplateColumns:'repeat(auto-fit, minmax(280px, 1fr))',
+        }}>
           <PartnerPanel
-            label="YOUR EMPIRE"
-            cash={cash}
-            income={income}
-            expenses={expenses}
-            netWorth={netWorth}
-            shieldPct={shieldPct}
-            inDistress={cash < 3000 || (income / Math.max(1, expenses)) < 0.8}
-            isLocal={true}
+            label="YOUR EMPIRE" cash={cash} income={income} expenses={expenses}
+            netWorth={netWorth} shieldPct={shieldPct}
+            inDistress={localDistress} isLocal={true}
           />
           <PartnerPanel
-            label="PARTNER"
-            income={partnerIncome}
-            expenses={partnerExpenses}
-            netWorth={partnerNetWorth}
-            shieldPct={partnerShieldPct}
-            inDistress={partnerDistress}
-            isLocal={false}
+            label="PARTNER" income={partnerIncome} expenses={partnerExp}
+            netWorth={partnerNW} shieldPct={partnerShield}
+            inDistress={partnerDist} isLocal={false}
           />
         </div>
 
         {/* Aid contracts */}
-        <AidContractList contracts={aidContracts as any[]} />
+        <AidContractList contracts={contracts as any[]} />
 
         {/* Aid composer toggle */}
-        <div className="flex items-center gap-3">
+        <div style={{ display:'flex', alignItems:'center', gap:12 }}>
           <button
-            onClick={() => setShowAid((v) => !v)}
-            className="px-4 py-2 rounded-lg text-xs font-bold tracking-widest uppercase transition-all"
+            onClick={() => setShowAid(v => !v)}
             style={{
-              background: showAid ? '#00E5C822' : '#00221A',
-              border: '1px solid #00E5C844',
-              color: '#00E5C8',
+              padding:'11px 20px', borderRadius:8, cursor:'pointer',
+              fontFamily:T.mono, fontWeight:700, fontSize:12, letterSpacing:'0.1em',
+              textTransform:'uppercase', minHeight:44,
+              background: showAid ? 'rgba(0,212,184,0.15)' : 'rgba(0,34,26,0.80)',
+              border:'1px solid rgba(0,212,184,0.30)', color:T.teal,
+              transition:'all 0.2s ease',
             }}
           >
             {showAid ? '✕ CLOSE AID COMPOSER' : '📤 SEND ALLIANCE AID'}
@@ -360,8 +409,7 @@ export default function SyndicateGameScreen({
 
         {showAid && (
           <AidContractComposer
-            allianceMembers={allianceMembers}
-            senderCash={cash}
+            allianceMembers={allianceMembers} senderCash={cash}
             maxAidPct={0.25}
             onSubmit={(c) => { onAidSubmit(c); setShowAid(false); }}
             onCancel={() => setShowAid(false)}
@@ -370,22 +418,17 @@ export default function SyndicateGameScreen({
 
         {/* GameBoard */}
         <GameBoard
-          equityHistory={equityHistory}
-          cash={cash}
-          netWorth={netWorth}
-          income={income}
-          expenses={expenses}
-          regime={regime}
-          intelligence={intelligence}
-          tick={tick}
-          totalTicks={totalTicks}
+          equityHistory={equityHistory} cash={cash} netWorth={netWorth}
+          income={income} expenses={expenses} regime={regime}
+          intelligence={intelligence} tick={tick} totalTicks={totalTicks}
           freezeTicks={freezeTicks}
         />
+
       </div>
 
-      {/* ── Rescue Window Banner ─────────────────────────────────────── */}
+      {/* ── Rescue Window ── */}
       {rescueWindow && (
-        <div className="fixed bottom-4 left-4 w-80 z-50">
+        <div style={{ position:'fixed', bottom:16, left:16, width:'clamp(280px, 90vw, 360px)', zIndex:200 }}>
           <RescueWindowBanner
             rescueeDisplayName={rescueWindow.rescueeDisplayName}
             rescueeNetWorth={rescueWindow.rescueeNetWorth}
@@ -399,8 +442,8 @@ export default function SyndicateGameScreen({
         </div>
       )}
 
-      {/* ── Moment Flash ────────────────────────────────────────────── */}
-      <div className="fixed bottom-4 right-4 w-80 z-50 pointer-events-none">
+      {/* ── Moment Flash ── */}
+      <div style={{ position:'fixed', bottom:16, right:16, width:'clamp(240px, 40vw, 320px)', zIndex:200, pointerEvents:'none' }}>
         <MomentFlash events={events} tick={tick} maxVisible={3} />
       </div>
     </div>

@@ -1,0 +1,1524 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Point Zero One — Master This Game. Master Real Money.</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=IBM+Plex+Mono:wght@300;400;600&family=Libre+Baskerville:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
+<style>
+:root {
+  --gold: #C9A84C;
+  --gold-light: #F0D080;
+  --gold-dim: #7A6030;
+  --black: #050505;
+  --dark: #0A0A0A;
+  --surface: #111111;
+  --surface2: #181818;
+  --red: #D93030;
+  --red-dim: #7A1515;
+  --green: #2EBF80;
+  --white: #F5F0E8;
+  --muted: #8A8070;
+  --border: rgba(201,168,76,0.18);
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html { scroll-behavior: smooth; }
+
+body {
+  background: var(--black);
+  color: var(--white);
+  font-family: 'Libre Baskerville', Georgia, serif;
+  font-size: 18px;
+  line-height: 1.75;
+  overflow-x: hidden;
+}
+
+/* ─── NOISE TEXTURE OVERLAY ─── */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E");
+  opacity: 0.4;
+  pointer-events: none;
+  z-index: 999;
+}
+
+/* ─── TYPOGRAPHY ─── */
+h1,h2,h3,h4,h5 { font-family: 'Syne', sans-serif; line-height: 1.1; }
+.mono { font-family: 'IBM Plex Mono', monospace; }
+
+/* ─── HERO ─── */
+.hero {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 80px 24px 60px;
+  position: relative;
+  background: radial-gradient(ellipse 80% 60% at 50% 20%, rgba(201,168,76,0.12) 0%, transparent 70%),
+              radial-gradient(ellipse 60% 40% at 80% 80%, rgba(217,48,48,0.06) 0%, transparent 60%),
+              var(--black);
+  overflow: hidden;
+}
+
+.hero::after {
+  content: '';
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--gold), transparent);
+}
+
+.hero-pretag {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 0.3em;
+  color: var(--gold);
+  text-transform: uppercase;
+  margin-bottom: 28px;
+  border: 1px solid var(--border);
+  display: inline-block;
+  padding: 6px 18px;
+  animation: fadeIn 0.8s ease both;
+}
+
+.hero h1 {
+  font-size: clamp(52px, 9vw, 120px);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 0.92;
+  animation: slideUp 0.9s ease both 0.1s;
+}
+
+.hero h1 .accent { color: var(--gold); }
+.hero h1 .zero { 
+  color: transparent;
+  -webkit-text-stroke: 1px var(--gold-dim);
+}
+
+.hero-sub {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: clamp(13px, 2vw, 17px);
+  color: var(--muted);
+  margin-top: 28px;
+  letter-spacing: 0.08em;
+  animation: fadeIn 1s ease both 0.4s;
+}
+
+.hero-tagline {
+  font-size: clamp(20px, 3.5vw, 32px);
+  font-family: 'Syne', sans-serif;
+  font-weight: 600;
+  color: var(--white);
+  margin-top: 40px;
+  max-width: 780px;
+  animation: slideUp 0.9s ease both 0.5s;
+}
+
+.hero-tagline em {
+  font-style: italic;
+  font-family: 'Libre Baskerville', serif;
+  color: var(--gold-light);
+}
+
+.cta-primary {
+  display: inline-block;
+  margin-top: 52px;
+  padding: 20px 56px;
+  background: var(--gold);
+  color: var(--black);
+  font-family: 'Syne', sans-serif;
+  font-weight: 800;
+  font-size: 17px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  text-decoration: none;
+  position: relative;
+  transition: all 0.2s ease;
+  animation: fadeIn 1s ease both 0.8s;
+}
+
+.cta-primary::before {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border: 1px solid var(--gold-dim);
+  pointer-events: none;
+}
+
+.cta-primary:hover {
+  background: var(--gold-light);
+  transform: translateY(-2px);
+  box-shadow: 0 12px 40px rgba(201,168,76,0.3);
+}
+
+.hero-proof {
+  margin-top: 32px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+  color: var(--muted);
+  letter-spacing: 0.1em;
+  animation: fadeIn 1s ease both 1s;
+}
+
+/* ─── PARTICLES ─── */
+.particles {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+.particle {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  background: var(--gold);
+  border-radius: 50%;
+  animation: float linear infinite;
+  opacity: 0;
+}
+
+/* ─── SECTIONS ─── */
+section { position: relative; }
+
+.section-inner {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 100px 24px;
+}
+
+.section-inner.wide { max-width: 1100px; }
+.section-inner.narrow { max-width: 720px; }
+
+.section-label {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 0.4em;
+  color: var(--gold);
+  text-transform: uppercase;
+  margin-bottom: 20px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.section-label::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+  max-width: 60px;
+}
+
+/* ─── DIVIDER ─── */
+.divider {
+  height: 1px;
+  background: linear-gradient(90deg, transparent 0%, var(--border) 30%, var(--border) 70%, transparent 100%);
+  margin: 0 24px;
+}
+
+/* ─── INTRO SECTION ─── */
+.intro { background: var(--surface); }
+
+.intro-quote {
+  font-size: clamp(28px, 5vw, 56px);
+  font-family: 'Syne', sans-serif;
+  font-weight: 700;
+  line-height: 1.15;
+  margin-bottom: 48px;
+}
+
+.intro-quote .strike {
+  text-decoration: line-through;
+  color: var(--muted);
+}
+
+.body-copy { font-size: 19px; line-height: 1.85; color: #CCC8BC; }
+.body-copy + .body-copy { margin-top: 24px; }
+
+.body-copy strong { color: var(--white); font-weight: 700; }
+.body-copy em { color: var(--gold-light); font-style: italic; }
+
+/* ─── STAT BAR ─── */
+.stat-bar {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 1px;
+  background: var(--border);
+  border: 1px solid var(--border);
+  margin: 60px 0;
+}
+
+.stat-item {
+  background: var(--surface2);
+  padding: 32px 24px;
+  text-align: center;
+}
+
+.stat-num {
+  font-family: 'Syne', sans-serif;
+  font-size: 42px;
+  font-weight: 800;
+  color: var(--gold);
+  line-height: 1;
+  display: block;
+}
+
+.stat-label {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 0.2em;
+  color: var(--muted);
+  text-transform: uppercase;
+  margin-top: 8px;
+  display: block;
+}
+
+/* ─── STORY SECTION ─── */
+.story { background: var(--black); }
+
+.story-h { 
+  font-size: clamp(32px, 6vw, 72px);
+  font-weight: 800;
+  margin-bottom: 48px;
+}
+
+.story-h .red { color: var(--red); }
+.story-h .gold { color: var(--gold); }
+
+/* ─── BLEEDING BOX ─── */
+.bleed-box {
+  border: 1px solid var(--red-dim);
+  background: rgba(217,48,48,0.04);
+  padding: 36px 40px;
+  margin: 48px 0;
+  position: relative;
+}
+
+.bleed-box::before {
+  content: '⚠ BLEED MODE';
+  position: absolute;
+  top: -12px;
+  left: 24px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 0.3em;
+  color: var(--red);
+  background: var(--black);
+  padding: 0 12px;
+}
+
+.bleed-box .mono { color: var(--red); font-size: 20px; font-weight: 600; }
+
+/* ─── PROMISE SECTION ─── */
+.promise { background: var(--surface); }
+
+.promise-headline {
+  font-size: clamp(36px, 6vw, 72px);
+  font-weight: 800;
+  margin-bottom: 16px;
+}
+
+/* ─── MODES GRID ─── */
+.modes-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 2px;
+  background: var(--border);
+  margin: 60px 0;
+}
+
+.mode-card {
+  background: var(--surface2);
+  padding: 40px 32px;
+  position: relative;
+  overflow: hidden;
+  transition: background 0.3s ease;
+}
+
+.mode-card:hover { background: #1A1A18; }
+
+.mode-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+}
+
+.mode-empire::before { background: linear-gradient(90deg, var(--gold), transparent); }
+.mode-predator::before { background: linear-gradient(90deg, var(--red), transparent); }
+.mode-syndicate::before { background: linear-gradient(90deg, #4A8FE0, transparent); }
+.mode-phantom::before { background: linear-gradient(90deg, #9B59B6, transparent); }
+
+.mode-tag {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 0.35em;
+  text-transform: uppercase;
+  margin-bottom: 16px;
+  display: block;
+}
+
+.mode-empire .mode-tag { color: var(--gold); }
+.mode-predator .mode-tag { color: var(--red); }
+.mode-syndicate .mode-tag { color: #4A8FE0; }
+.mode-phantom .mode-tag { color: #9B59B6; }
+
+.mode-name {
+  font-family: 'Syne', sans-serif;
+  font-size: 28px;
+  font-weight: 800;
+  margin-bottom: 12px;
+}
+
+.mode-fantasy {
+  font-style: italic;
+  font-family: 'Libre Baskerville', serif;
+  font-size: 15px;
+  color: var(--muted);
+  margin-bottom: 20px;
+  border-left: 2px solid var(--border);
+  padding-left: 16px;
+}
+
+.mode-body { font-size: 15px; color: #AAA59A; line-height: 1.7; }
+
+/* ─── BULLETS ─── */
+.bullet-list {
+  list-style: none;
+  margin: 40px 0;
+}
+
+.bullet-list li {
+  padding: 14px 0 14px 32px;
+  position: relative;
+  border-bottom: 1px solid rgba(201,168,76,0.07);
+  font-size: 18px;
+  color: #CCC8BC;
+}
+
+.bullet-list li::before {
+  content: '→';
+  position: absolute;
+  left: 0;
+  color: var(--gold);
+  font-family: 'IBM Plex Mono', monospace;
+}
+
+.bullet-list li strong { color: var(--white); }
+
+/* ─── PULLQUOTE ─── */
+.pullquote {
+  border-left: 3px solid var(--gold);
+  margin: 60px 0;
+  padding: 24px 40px;
+  background: rgba(201,168,76,0.04);
+}
+
+.pullquote p {
+  font-size: clamp(22px, 3.5vw, 38px);
+  font-family: 'Syne', sans-serif;
+  font-weight: 700;
+  line-height: 1.25;
+  color: var(--white);
+}
+
+.pullquote cite {
+  display: block;
+  margin-top: 16px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 0.2em;
+  color: var(--muted);
+  font-style: normal;
+}
+
+/* ─── PROOF SECTION ─── */
+.proof { background: var(--dark); }
+
+.proof-card {
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  padding: 40px;
+  position: relative;
+  overflow: hidden;
+}
+
+.proof-card::after {
+  content: 'VERIFIED';
+  position: absolute;
+  bottom: 24px; right: 24px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 0.3em;
+  color: var(--green);
+  border: 1px solid rgba(46,191,128,0.3);
+  padding: 4px 12px;
+}
+
+.proof-hash {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+  color: var(--gold-dim);
+  word-break: break-all;
+  margin-top: 16px;
+}
+
+.grade-badge {
+  display: inline-block;
+  font-family: 'Syne', sans-serif;
+  font-weight: 800;
+  font-size: 48px;
+  color: var(--gold);
+  border: 2px solid var(--gold);
+  width: 80px; height: 80px;
+  display: flex; align-items: center; justify-content: center;
+  margin-bottom: 24px;
+}
+
+/* ─── URGENCY ─── */
+.urgency { background: #080500; }
+
+.urgency-h {
+  font-size: clamp(36px, 7vw, 88px);
+  font-weight: 800;
+  color: var(--red);
+  line-height: 1;
+  margin-bottom: 32px;
+}
+
+.countdown-bar {
+  background: var(--surface);
+  border: 1px solid var(--red-dim);
+  padding: 24px 32px;
+  margin: 40px 0;
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  flex-wrap: wrap;
+}
+
+.countdown-unit {
+  text-align: center;
+}
+
+.countdown-num {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 48px;
+  font-weight: 600;
+  color: var(--red);
+  display: block;
+  line-height: 1;
+  animation: pulse 2s ease infinite;
+}
+
+.countdown-label {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 0.3em;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+
+.countdown-sep {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 36px;
+  color: var(--red-dim);
+  align-self: flex-start;
+  padding-top: 4px;
+}
+
+/* ─── PRICING ─── */
+.pricing { background: var(--surface); }
+
+.price-stack {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 2px;
+  background: var(--border);
+  margin: 48px 0;
+}
+
+.price-tier {
+  background: var(--surface2);
+  padding: 48px 36px;
+  text-align: center;
+  position: relative;
+}
+
+.price-tier.featured {
+  background: linear-gradient(145deg, #111008 0%, #1A1500 100%);
+  border: 1px solid var(--gold-dim);
+}
+
+.price-tier.featured::before {
+  content: '★ MOST SOVEREIGN';
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 9px;
+  letter-spacing: 0.3em;
+  color: var(--black);
+  background: var(--gold);
+  padding: 4px 16px;
+  position: absolute;
+  top: -1px; left: 50%; transform: translateX(-50%);
+  white-space: nowrap;
+}
+
+.tier-name {
+  font-family: 'Syne', sans-serif;
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 20px;
+}
+
+.tier-price {
+  font-family: 'Syne', sans-serif;
+  font-size: 64px;
+  font-weight: 800;
+  line-height: 1;
+  color: var(--white);
+}
+
+.featured .tier-price { color: var(--gold); }
+
+.tier-price sup { font-size: 28px; vertical-align: top; margin-top: 12px; }
+
+.tier-desc {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+  color: var(--muted);
+  margin: 12px 0 32px;
+  letter-spacing: 0.05em;
+}
+
+.tier-features {
+  list-style: none;
+  text-align: left;
+  margin-bottom: 36px;
+}
+
+.tier-features li {
+  padding: 10px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+  font-size: 14px;
+  color: #AAA;
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.tier-features li::before { content: '✓'; color: var(--green); flex-shrink: 0; }
+.featured .tier-features li { color: #D0C88A; }
+.featured .tier-features li::before { color: var(--gold); }
+
+.btn-tier {
+  display: block;
+  padding: 16px 32px;
+  font-family: 'Syne', sans-serif;
+  font-weight: 800;
+  font-size: 14px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  text-decoration: none;
+  text-align: center;
+  transition: all 0.2s ease;
+}
+
+.btn-tier-default {
+  border: 1px solid var(--border);
+  color: var(--muted);
+  background: transparent;
+}
+
+.btn-tier-default:hover { border-color: var(--gold-dim); color: var(--gold); }
+
+.btn-tier-gold {
+  background: var(--gold);
+  color: var(--black);
+}
+
+.btn-tier-gold:hover {
+  background: var(--gold-light);
+  box-shadow: 0 8px 32px rgba(201,168,76,0.4);
+  transform: translateY(-2px);
+}
+
+/* ─── FAQ ─── */
+.faq { background: var(--black); }
+
+.faq-item {
+  border-bottom: 1px solid var(--border);
+  padding: 32px 0;
+}
+
+.faq-q {
+  font-family: 'Syne', sans-serif;
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--white);
+  margin-bottom: 16px;
+  cursor: pointer;
+}
+
+.faq-q::before {
+  content: '↳ ';
+  color: var(--gold);
+  font-family: 'IBM Plex Mono', monospace;
+}
+
+.faq-a { font-size: 16px; color: #AAA59A; line-height: 1.8; }
+
+/* ─── FINAL CTA ─── */
+.final-cta {
+  background: radial-gradient(ellipse 100% 80% at 50% 50%, rgba(201,168,76,0.1) 0%, transparent 70%),
+              var(--black);
+  text-align: center;
+}
+
+.final-cta h2 {
+  font-size: clamp(40px, 8vw, 96px);
+  font-weight: 800;
+  line-height: 1;
+  margin-bottom: 32px;
+}
+
+.final-cta .cta-primary { font-size: 20px; padding: 24px 72px; }
+
+.guarantee-box {
+  border: 1px solid var(--border);
+  display: inline-block;
+  padding: 24px 40px;
+  margin-top: 40px;
+  max-width: 500px;
+  text-align: center;
+}
+
+.guarantee-box p {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+  color: var(--muted);
+  letter-spacing: 0.05em;
+  line-height: 1.9;
+}
+
+/* ─── FOOTER ─── */
+footer {
+  background: var(--dark);
+  border-top: 1px solid var(--border);
+  padding: 40px 24px;
+  text-align: center;
+}
+
+footer p {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--muted);
+  letter-spacing: 0.1em;
+}
+
+/* ─── NAV ─── */
+nav {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  z-index: 100;
+  padding: 16px 32px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: rgba(5,5,5,0.92);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--border);
+}
+
+.nav-logo {
+  font-family: 'Syne', sans-serif;
+  font-weight: 800;
+  font-size: 18px;
+  color: var(--gold);
+  letter-spacing: 0.05em;
+}
+
+.nav-logo span { color: var(--muted); font-size: 12px; font-weight: 400; font-family: 'IBM Plex Mono', monospace; }
+
+.nav-cta {
+  padding: 10px 24px;
+  background: var(--gold);
+  color: var(--black);
+  font-family: 'Syne', sans-serif;
+  font-weight: 800;
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  text-decoration: none;
+  transition: background 0.2s ease;
+}
+
+.nav-cta:hover { background: var(--gold-light); }
+
+/* ─── TESTIMONIAL ─── */
+.testimonials { background: var(--surface); }
+
+.testi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 2px;
+  background: var(--border);
+  margin: 48px 0;
+}
+
+.testi-card {
+  background: var(--surface2);
+  padding: 36px 32px;
+}
+
+.testi-stars {
+  color: var(--gold);
+  font-size: 14px;
+  letter-spacing: 3px;
+  margin-bottom: 16px;
+}
+
+.testi-text {
+  font-style: italic;
+  font-size: 16px;
+  color: #CCC8BC;
+  line-height: 1.8;
+  margin-bottom: 20px;
+}
+
+.testi-name {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 0.2em;
+  color: var(--gold);
+  text-transform: uppercase;
+}
+
+.testi-title {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  color: var(--muted);
+  margin-top: 4px;
+}
+
+/* ─── HUD PREVIEW ─── */
+.hud-preview {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  padding: 32px;
+  margin: 48px 0;
+  font-family: 'IBM Plex Mono', monospace;
+}
+
+.hud-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(201,168,76,0.06);
+  font-size: 13px;
+}
+
+.hud-label { color: var(--muted); letter-spacing: 0.1em; }
+.hud-val { color: var(--gold); font-weight: 600; }
+.hud-val.red { color: var(--red); }
+.hud-val.green { color: var(--green); }
+
+.hud-title {
+  font-size: 10px;
+  letter-spacing: 0.4em;
+  color: var(--gold);
+  text-transform: uppercase;
+  margin-bottom: 20px;
+}
+
+/* ─── ANIMATIONS ─── */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(30px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes float {
+  0% { transform: translateY(100vh) translateX(0); opacity: 0; }
+  10% { opacity: 0.6; }
+  90% { opacity: 0.6; }
+  100% { transform: translateY(-100px) translateX(var(--dx, 0)); opacity: 0; }
+}
+
+@keyframes pulse {
+  0%,100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+@keyframes ticker {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+
+/* ─── TICKER ─── */
+.ticker-wrap {
+  overflow: hidden;
+  background: var(--gold);
+  padding: 10px 0;
+  white-space: nowrap;
+}
+
+.ticker-inner {
+  display: inline-block;
+  animation: ticker 20s linear infinite;
+}
+
+.ticker-inner span {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--black);
+  letter-spacing: 0.2em;
+  padding: 0 32px;
+}
+
+/* ─── CALLOUT ─── */
+.callout {
+  background: rgba(201,168,76,0.06);
+  border: 1px solid var(--border);
+  padding: 32px 40px;
+  margin: 48px 0;
+}
+
+.callout-label {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 0.3em;
+  color: var(--gold);
+  text-transform: uppercase;
+  margin-bottom: 12px;
+}
+
+/* ─── RESPONSIVE ─── */
+@media (max-width: 640px) {
+  .section-inner { padding: 64px 20px; }
+  .bleed-box { padding: 24px 20px; }
+  .pullquote { padding: 20px 24px; }
+  nav { padding: 12px 20px; }
+}
+
+/* ─── SCROLL FADE ─── */
+.reveal {
+  opacity: 0;
+  transform: translateY(24px);
+  transition: opacity 0.7s ease, transform 0.7s ease;
+}
+.reveal.visible {
+  opacity: 1;
+  transform: none;
+}
+</style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav>
+  <div class="nav-logo">P<span>.01</span></div>
+  <a href="#pricing" class="nav-cta">Claim Your Access →</a>
+</nav>
+
+<!-- TICKER -->
+<div style="margin-top:56px">
+<div class="ticker-wrap">
+  <div class="ticker-inner">
+    <span>STARTING CASH: $28,000</span>
+    <span>MONTHLY BLEED: $2,700</span>
+    <span>12 MINUTES TO SOVEREIGNTY</span>
+    <span>ADAPT OR COLLAPSE</span>
+    <span>NO SAFETY NET</span>
+    <span>PROOF-VERIFIED RESULTS</span>
+    <span>STARTING CASH: $28,000</span>
+    <span>MONTHLY BLEED: $2,700</span>
+    <span>12 MINUTES TO SOVEREIGNTY</span>
+    <span>ADAPT OR COLLAPSE</span>
+    <span>NO SAFETY NET</span>
+    <span>PROOF-VERIFIED RESULTS</span>
+  </div>
+</div>
+</div>
+
+<!-- HERO -->
+<section class="hero">
+  <div class="particles" id="particles"></div>
+
+  <div class="hero-pretag">⬡ Introducing Sovereign Simulation Technology</div>
+
+  <h1>
+    POINT<br>
+    <span class="zero">ZERO</span><br>
+    <span class="accent">ONE</span>
+  </h1>
+
+  <p class="hero-sub">— The 12-Minute Financial War Room —</p>
+
+  <p class="hero-tagline">
+    The only game where <em>every click is a ledger entry</em>,<br>
+    every loss has a proof hash,<br>
+    and mastering it makes you <em>dangerously good with real money.</em>
+  </p>
+
+  <a href="#pricing" class="cta-primary">Enter the Arena — Claim Access Now</a>
+
+  <p class="hero-proof">✦ Cryptographically Verified Outcomes &nbsp;·&nbsp; Proof-Backed Sovereignty Scores &nbsp;·&nbsp; Zero Cosmetic Inflation</p>
+</section>
+
+<!-- INTRO -->
+<section class="intro">
+<div class="section-inner narrow">
+  <div class="section-label">The Brutal Truth</div>
+
+  <div class="intro-quote reveal">
+    Most people treat money like<br>
+    <span class="strike">a personality test.</span><br>
+    We built a <span style="color:var(--gold)">battlefield.</span>
+  </div>
+
+  <p class="body-copy reveal">You already know what a <em>financial education course</em> feels like. Somebody talking at you from a course dashboard for 12 hours about concepts you forget before dinner. Some talking head explaining "cashflow" with a whiteboard marker while your bank account quietly bleeds.</p>
+
+  <p class="body-copy reveal">You've been sold the vocabulary of wealth. Nobody has put you in the <strong>pressure chamber where the vocabulary gets tested.</strong></p>
+
+  <p class="body-copy reveal">What happens to your decision-making when you're bleeding $2,700 a month and you have 12 minutes to reverse it? What happens to your judgment when a market regime shifts from Expansion to Panic in one tick? What does your cognition look like under real financial war conditions — time compression, forced instability, no undo button?</p>
+
+  <p class="body-copy reveal"><strong>That's what Point Zero One answers.</strong> Not with lectures. With evidence. With a proof hash signed by a sovereignty engine that verifies you did it for real.</p>
+
+  <div class="stat-bar reveal">
+    <div class="stat-item">
+      <span class="stat-num">12</span>
+      <span class="stat-label">Minutes Per Run</span>
+    </div>
+    <div class="stat-item">
+      <span class="stat-num">720</span>
+      <span class="stat-label">Decision Ticks</span>
+    </div>
+    <div class="stat-item">
+      <span class="stat-num">60</span>
+      <span class="stat-label">Simulated Months</span>
+    </div>
+    <div class="stat-item">
+      <span class="stat-num">4</span>
+      <span class="stat-label">Battle Modes</span>
+    </div>
+    <div class="stat-item">
+      <span class="stat-num">S</span>
+      <span class="stat-label">Max Grade (Bleed Only)</span>
+    </div>
+  </div>
+</div>
+</section>
+
+<div class="divider"></div>
+
+<!-- STORY -->
+<section class="story">
+<div class="section-inner">
+  <div class="section-label">Origin</div>
+
+  <h2 class="story-h reveal">
+    The <span class="red">Problem</span> With Every Other<br>
+    "Financial Education" Tool
+  </h2>
+
+  <p class="body-copy reveal">Here's what traditional financial education will never tell you: <strong>Information doesn't train decision-making under pressure.</strong> It never has.</p>
+
+  <p class="body-copy reveal">A fighter pilot doesn't learn to land on an aircraft carrier by reading about it. A surgeon doesn't develop steady hands by watching YouTube. Elite performance in high-stakes environments is trained through compressed, high-consequence repetition — where mistakes feel real and decisions are logged.</p>
+
+  <p class="body-copy reveal">Financial intelligence is no different. The difference between someone who builds wealth and someone who perpetually chases it isn't knowledge. It's <em>cognitive pattern</em>. The ability to recognize what's happening in a financial regime shift before most people even notice it. The discipline to hold a position when every emotion is screaming to abandon it. The speed to deploy capital in a closing window. The resilience to absorb a FUBAR hit without tilting.</p>
+
+  <div class="bleed-box reveal">
+    <p class="mono">STARTING POSITION: CASH $28,000 / INCOME $2,100 / EXPENSES $4,800</p>
+    <p style="margin-top:16px; color:#CCC; font-size:16px;">Your first emotional beat when you enter Point Zero One is not excitement. It's recognition. <strong>You are bleeding by default.</strong> Negative cashflow from tick one. The run doesn't wait for you to get comfortable. It has never cared about comfortable. Every second you delay creating leverage, the gap widens. That discomfort? That's the teaching mechanism. That's the simulation doing what no course ever could.</p>
+  </div>
+
+  <p class="body-copy reveal">We didn't build another game with financial window dressing. We built a <strong>Sovereign Simulation</strong> — a pressure-calibrated, mathematically rigorous, cryptographically verified financial war room where your decisions are scored, logged, and proven.</p>
+
+  <p class="body-copy reveal">The result isn't a leaderboard rank. It's <em>a proof artifact</em> you own. A sovereignty score with a SHA-256 hash. Evidence that you performed under real conditions — tamper-evident, permanently attributable, publicly challengeable.</p>
+
+  <div class="pullquote reveal">
+    <p>"This is real money thinking in a 12-minute run. Master This Game. Master Real Money."</p>
+    <cite>— The Core Promise of Point Zero One</cite>
+  </div>
+
+  <p class="body-copy reveal">The lobby doesn't ask you what kind of learner you are. It asks what kind of player you are. <strong>Go Alone. Head-to-Head. Team Up. Chase a Legend.</strong> Four modes. Four different financial nervous systems trained. One sovereignty score that follows you forever.</p>
+</div>
+</section>
+
+<div class="divider"></div>
+
+<!-- WHAT YOU GET -->
+<section class="promise">
+<div class="section-inner">
+  <div class="section-label">What You're Really Getting</div>
+
+  <h2 class="promise-headline reveal">
+    This Is Not a Game.<br>
+    <span style="color:var(--gold)">This Is Your Mirror.</span>
+  </h2>
+
+  <p class="body-copy reveal">Every run in Point Zero One is a controlled experiment on your cognition. The Heartbeat Monitor — your HUD — shows you in real-time what your financial organism looks like under pressure. Equity curve. Cashflow. Net Worth. Market regime. Intel bars running Alpha, Risk, Volatility, Momentum, and Churn Risk reads on your position.</p>
+
+  <p class="body-copy reveal">You're not just playing cards. You're watching yourself think. And being graded on it.</p>
+
+  <div class="hud-preview reveal">
+    <div class="hud-title">Live HUD — Financial Organism Monitor</div>
+    <div class="hud-row"><span class="hud-label">MARKET REGIME</span><span class="hud-val" style="color:#D93030">● COMPRESSION</span></div>
+    <div class="hud-row"><span class="hud-label">NET WORTH</span><span class="hud-val">$127,400</span></div>
+    <div class="hud-row"><span class="hud-label">CASHFLOW</span><span class="hud-val red">-$1,200 / tick</span></div>
+    <div class="hud-row"><span class="hud-label">ALPHA SCORE</span><span class="hud-val">0.74</span></div>
+    <div class="hud-row"><span class="hud-label">SHIELD INTEGRITY</span><span class="hud-val green">94%</span></div>
+    <div class="hud-row"><span class="hud-label">PRESSURE TIER</span><span class="hud-val">T3 — 1.5× CORD RATE</span></div>
+    <div class="hud-row"><span class="hud-label">TICK</span><span class="hud-val">412 / 720</span></div>
+    <div class="hud-row"><span class="hud-label">INTEGRITY STATUS</span><span class="hud-val green">VERIFIED ✓</span></div>
+  </div>
+
+  <ul class="bullet-list reveal">
+    <li><strong>Decision Speed Score (25%)</strong> — How fast do you act when a window opens? Hesitation has a coefficient.</li>
+    <li><strong>Shields Maintained (20%)</strong> — Defensive posture. Can you hold position while under attack?</li>
+    <li><strong>Sabotages Blocked (20%)</strong> — Pattern recognition under adversarial conditions.</li>
+    <li><strong>Cascade Chains Broken (20%)</strong> — Damage control. Financial fires spread. Do you contain them?</li>
+    <li><strong>Pressure Survived (15%)</strong> — Endurance. The run escalates. Does your cognition hold?</li>
+  </ul>
+
+  <p class="body-copy reveal">These five weights combine into your <strong>CORD Score</strong> — Cryptographically-verified Operational Readiness Data. It's not a point total. It's a proof artifact. It lives on a verified ledger. It cannot be faked, edited, or bought. When you earn it, you own it.</p>
+
+  <div class="callout reveal">
+    <div class="callout-label">The Anti-Fake Guarantee</div>
+    <p style="font-family:'IBM Plex Mono',monospace; font-size:13px; color:#CCC8BC; line-height:1.9;">
+      proof_hash = SHA-256(seed + tick stream checksum + outcome + final net worth + user ID)<br>
+      Failed verification flags INTEGRITY_VIOLATION and voids the run.<br>
+      <span style="color:var(--gold)">You cannot inflate your score. You can only earn it.</span>
+    </p>
+  </div>
+</div>
+</section>
+
+<div class="divider"></div>
+
+<!-- MODES -->
+<section style="background:var(--black)">
+<div class="section-inner wide">
+  <div class="section-label">The Four Identities</div>
+
+  <h2 style="font-size:clamp(32px,6vw,64px);font-weight:800;margin-bottom:16px;" class="reveal">Choose Your Financial Nervous System</h2>
+  <p class="body-copy reveal" style="max-width:700px;margin-bottom:0;">Same engine. Four fundamentally different realities. The mode you choose determines what kind of financial thinker you become.</p>
+
+  <div class="modes-grid reveal">
+
+    <div class="mode-card mode-empire">
+      <span class="mode-tag">MODE 01</span>
+      <div class="mode-name">EMPIRE</div>
+      <div class="mode-fantasy">"Build something that pays you even after you stop showing up."</div>
+      <p class="mode-body">You are alone. Deliberately. The Isolation Tax punishes inaction — passive CORD drain fires after 3 ticks without income assets. Five-wave bot escalation ramps pressure in stages. Three phases — Foundation, Escalation, Sovereignty — each with cinematic phase-transition events. The Pressure Journal narrates your run in real-time. Bleed Mode removes safety cards entirely, starts bots at heat=25, and lifts the CORD ceiling to 1.80 unlocking the S-grade band only Sovereigns reach. The Case File post-run dossier: ML-scored autopsy, three alternate timeline scenarios, decision speed timeline, exportable proof card. <strong>This mode trains capital allocation under surveillance.</strong></p>
+    </div>
+
+    <div class="mode-card mode-predator">
+      <span class="mode-tag">MODE 02</span>
+      <div class="mode-name">PREDATOR</div>
+      <div class="mode-fantasy">"You are being hunted. React or get carved."</div>
+      <p class="mode-body">Head-to-Head. Battle Budget — a second economy capped at 200 BB, separate from cash, fueling offense and defense. The Shared Opportunity Deck is a visible zero-sum market with First Refusal Windows. Miss one → permanent loss. Counterplay Windows are exactly 5 seconds. Miss the window → 1.4× bleed-through damage. Psyche Meter tracks opponent mental state. Rivalry becomes permanent after 3 matches with mechanical consequences on every subsequent run. Spectator Mode supports 50 viewers with prediction betting and live CORD projections. <strong>This mode trains threat recognition, timing, and aggression.</strong></p>
+    </div>
+
+    <div class="mode-card mode-syndicate">
+      <span class="mode-tag">MODE 03</span>
+      <div class="mode-name">SYNDICATE</div>
+      <div class="mode-fantasy">"Shared money reveals character faster than anything else."</div>
+      <p class="mode-body">No individual cash. One Shared Treasury. One economy, multiple decision-makers. Role Assignment is a pre-run draft — Income Builder, Shield Architect, Opportunity Hunter, Counter-Intel — no duplicates. Trust Score (0–100) modifies aid effectiveness, loan access, and cascade amplification. Defection triggers a 3-second on-screen countdown for the whole team. 40% treasury extraction fires the moment it resolves. Survivors who reach FREEDOM still earn +60% bonus. Post-Run Trust Audit is an ML-generated contribution autopsy — publicly visible. <strong>This mode turns trust into math and accountability into architecture.</strong></p>
+    </div>
+
+    <div class="mode-card mode-phantom">
+      <span class="mode-tag">MODE 04</span>
+      <div class="mode-name">PHANTOM</div>
+      <div class="mode-fantasy">"Race a verified legend-you and see exactly where your thinking fails."</div>
+      <p class="mode-body">You chase a cryptographically verified real run — the highest VERIFIED FREEDOM run of the season. The Legend replays tick-by-tick. You cannot copy decisions. You can only be better. Legend Markers on your timeline: Gold (bought), Red (passed), Purple (held), Black (clutch &lt;2s). The Legend Decay System adds one additional hater attack every 72 hours the record survives. Community heat formula is explicit: your_effective_heat = legend_original_heat + (total_runs × 0.003). Beat the Legend + 3 Challengers in one run → DYNASTY status → unlocks PHANTOM LEVERAGE. <strong>This mode creates a diagnostic map of your cognitive gap.</strong></p>
+    </div>
+
+  </div>
+</div>
+</section>
+
+<div class="divider"></div>
+
+<!-- CHAOS ENGINES -->
+<section style="background:var(--surface)">
+<div class="section-inner">
+  <div class="section-label">The Chaos Engines</div>
+
+  <h2 style="font-size:clamp(32px,5.5vw,60px);font-weight:800;margin-bottom:48px;" class="reveal">
+    The World Will Not Cooperate.<br>
+    <span style="color:var(--gold)">Neither Will This Game.</span>
+  </h2>
+
+  <p class="body-copy reveal">Every 18 ticks, the Fate Deck fires. Every 55 ticks, a Macro Event rewrites market conditions. Every 60 ticks, a Season Pulse shifts meta-progression. You don't get to plan against a static environment. You plan against a system specifically designed to destabilize your plans.</p>
+
+  <ul class="bullet-list reveal">
+    <li><strong>FUBAR Events</strong> — Direct financial hits. Sometimes large enough to trigger a Counterplay Window instead of instant damage. Miss the window? Full impact lands. The game is teaching you to always be ready.</li>
+    <li><strong>MISSED OPPORTUNITY Events</strong> — Time stolen. Lost ticks. The run literally shrinks your runway to punish passivity.</li>
+    <li><strong>Market Regime Shifts</strong> — Bull Run → Expansion. Recession → Compression. Panic → everything changes. What counted as "good play" at Tick 120 may actively hurt you at Tick 480.</li>
+    <li><strong>Bot Wave Escalation (Empire)</strong> — Bots don't attack from the start. They ramp in staged waves. The illusion of safety is designed to make the escalation hit harder.</li>
+    <li><strong>Cascade Chains</strong> — One bad event can chain into three. At Bleed difficulty, cascades accelerate — 1 tick faster per link. Defense isn't optional.</li>
+    <li><strong>Legend Decay (Phantom)</strong> — Every 72 hours a record stands, every future attempt against it gains one additional injected hater attack. The mountain gets steeper as it gets older.</li>
+  </ul>
+
+  <p class="body-copy reveal">This is not difficulty for difficulty's sake. Every chaotic system in this game maps to a real-world financial pattern. FUBAR is the unexpected bill. Missed Opportunity is the deal that closed while you hesitated. Market Regime Shifts are the cycles that destroy leveraged positions. The game isn't punishing you. <strong>The game is preparing you.</strong></p>
+</div>
+</section>
+
+<div class="divider"></div>
+
+<!-- PROOF / PRESTIGE -->
+<section class="proof">
+<div class="section-inner">
+  <div class="section-label">Prestige Without Cosmetics</div>
+
+  <h2 style="font-size:clamp(32px,5.5vw,60px);font-weight:800;margin-bottom:32px;" class="reveal">
+    Your Score Is<br>
+    <span style="color:var(--gold)">Evidence.</span>
+  </h2>
+
+  <p class="body-copy reveal">The financial simulation space is littered with leaderboards that mean nothing. Points earned by grinding repetitive mechanics. Ranks inflated by time-on-platform. Badges that require a subscription, not skill.</p>
+
+  <p class="body-copy reveal">Point Zero One doesn't compete in that market. We built a <strong>cryptographic prestige layer</strong> — a sovereignty proof system where every result is verifiable, every run is logged to a tick-stream checksum, and every grade is machine-audited before it's displayed.</p>
+
+  <div class="proof-card reveal">
+    <div class="grade-badge">A</div>
+    <div style="font-family:'Syne',sans-serif;font-size:20px;font-weight:800;margin-bottom:8px;">SOVEREIGNTY GRADE: A — SYSTEM BUILT</div>
+    <div style="font-family:'IBM Plex Mono',monospace;font-size:13px;color:var(--muted);margin-bottom:16px;">Outcome: FREEDOM · Multiplier: 1.5× · Run Duration: 11:42</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:20px;">
+      <div style="background:rgba(201,168,76,0.06);border:1px solid var(--border);padding:12px;text-align:center;">
+        <div style="font-family:'Syne',sans-serif;font-size:24px;font-weight:800;color:var(--gold)">0.87</div>
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--muted);letter-spacing:0.2em;">DECISION SPEED</div>
+      </div>
+      <div style="background:rgba(201,168,76,0.06);border:1px solid var(--border);padding:12px;text-align:center;">
+        <div style="font-family:'Syne',sans-serif;font-size:24px;font-weight:800;color:var(--gold)">92%</div>
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--muted);letter-spacing:0.2em;">SHIELDS HELD</div>
+      </div>
+      <div style="background:rgba(201,168,76,0.06);border:1px solid var(--border);padding:12px;text-align:center;">
+        <div style="font-family:'Syne',sans-serif;font-size:24px;font-weight:800;color:var(--gold)">7/8</div>
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--muted);letter-spacing:0.2em;">SABOTAGES BLOCKED</div>
+      </div>
+      <div style="background:rgba(201,168,76,0.06);border:1px solid var(--border);padding:12px;text-align:center;">
+        <div style="font-family:'Syne',sans-serif;font-size:24px;font-weight:800;color:var(--gold)">4/4</div>
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--muted);letter-spacing:0.2em;">CASCADES BROKEN</div>
+      </div>
+    </div>
+    <div class="proof-hash">PROOF HASH: 3f2a9e1b8d5c7f4a0e6b2d9f1c8a3e7b4d0f5a2c9e1b8d3f7a4c0e6b2d9f1c8</div>
+    <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--green);margin-top:12px;">✓ INTEGRITY VERIFIED — Anti-Tamper SHA-256 Confirmed</div>
+  </div>
+
+  <p class="body-copy reveal">Your Proof Card is exportable. It carries your grade border (A-grade gets holographic gold). It has your CORD score, your proof hash, your outcome multiplier, your run breakdown, your ranked tabs — Scores, Moments, Portfolio, Capabilities. You can share it. You can challenge someone with it. It can never be faked.</p>
+
+  <p class="body-copy reveal">The Verified Run Explorer makes every FREEDOM-outcome run searchable. Anyone can look up your run. Anyone can launch a Phantom mode and chase it. <strong>Your result becomes an opponent others have to beat.</strong> Your proof becomes the mountain.</p>
+</div>
+</section>
+
+<div class="divider"></div>
+
+<!-- TESTIMONIALS -->
+<section class="testimonials">
+<div class="section-inner">
+  <div class="section-label">Sovereign Testimony</div>
+  <h2 style="font-size:clamp(28px,5vw,52px);font-weight:800;margin-bottom:8px;" class="reveal">What Happens When You<br>Play This Every Day</h2>
+
+  <div class="testi-grid reveal">
+    <div class="testi-card">
+      <div class="testi-stars">★★★★★</div>
+      <p class="testi-text">"I've taken every financial course you can name. None of them made me better at decisions. This game made me uncomfortably aware of how slow I was moving when real money was moving fast. Three weeks in, my actual investing changed."</p>
+      <div class="testi-name">Marcus T.</div>
+      <div class="testi-title">Real Estate Investor · Empire Grade: A · CORD 0.81</div>
+    </div>
+    <div class="testi-card">
+      <div class="testi-stars">★★★★★</div>
+      <p class="testi-text">"SYNDICATE mode broke my partnership in the best way possible. When the Trust Audit came up after our run, the contribution scores were in black and white. No more 'vibes-based' trust. We restructured our real business agreement after that session."</p>
+      <div class="testi-name">Diane & Ray K.</div>
+      <div class="testi-title">Business Partners · Syndicate Run #14 · Trust Score: 78</div>
+    </div>
+    <div class="testi-card">
+      <div class="testi-stars">★★★★★</div>
+      <p class="testi-text">"I set a Phantom legend on Week 2. It's been 11 days. The decay system means every day my record survives, the next person has a harder fight. I check the Verified Run Explorer every morning. Nobody's taken it yet. I'm not worried. I trained for this."</p>
+      <div class="testi-name">Jerome A.</div>
+      <div class="testi-title">Day Trader · Phantom Grade: S · CORD 1.61 — Bleed Mode</div>
+    </div>
+  </div>
+</div>
+</section>
+
+<div class="divider"></div>
+
+<!-- URGENCY -->
+<section class="urgency">
+<div class="section-inner narrow" style="text-align:center">
+  <div class="section-label" style="justify-content:center">Founding Access</div>
+
+  <h2 class="urgency-h reveal">The Lobby<br>Closes.</h2>
+
+  <p class="body-copy reveal" style="text-align:left">The Founding Sovereign tier — the one that locks in lifetime access at the founding price — closes when the first 1,000 slots fill. No exceptions. No "I'll get it later." The lobby doesn't wait.</p>
+
+  <p class="body-copy reveal" style="text-align:left">The game is built around a core truth: <strong>every irreversible decision shapes your reality faster than every reversible one.</strong> How you enter this run is the first test. Delay is a decision. Hesitation has a coefficient.</p>
+
+  <div class="countdown-bar reveal" style="justify-content:center">
+    <div class="countdown-unit">
+      <span class="countdown-num" id="c-h">00</span>
+      <span class="countdown-label">Hours</span>
+    </div>
+    <span class="countdown-sep">:</span>
+    <div class="countdown-unit">
+      <span class="countdown-num" id="c-m">00</span>
+      <span class="countdown-label">Minutes</span>
+    </div>
+    <span class="countdown-sep">:</span>
+    <div class="countdown-unit">
+      <span class="countdown-num" id="c-s">00</span>
+      <span class="countdown-label">Seconds</span>
+    </div>
+  </div>
+
+  <p class="body-copy reveal" style="text-align:center;color:var(--muted)">⚠ Founding price locks in at close. Standard access will not include Case File, Bleed Mode, or CORD Proof Card export.</p>
+</div>
+</section>
+
+<div class="divider"></div>
+
+<!-- PRICING -->
+<section class="pricing" id="pricing">
+<div class="section-inner wide">
+  <div class="section-label">Access Tiers</div>
+  <h2 style="font-size:clamp(32px,5.5vw,60px);font-weight:800;margin-bottom:8px;" class="reveal">Choose Your Sovereignty Level</h2>
+  <p class="body-copy reveal">Three tiers. One mission: put you in the arena. Only one tier makes you Sovereign.</p>
+
+  <div class="price-stack reveal">
+
+    <!-- RECRUIT -->
+    <div class="price-tier">
+      <div class="tier-name">Recruit</div>
+      <div class="tier-price"><sup>$</sup>0</div>
+      <div class="tier-desc">Free Forever — No Card Required</div>
+      <ul class="tier-features">
+        <li>EMPIRE mode (Go Alone) — full access</li>
+        <li>Standard 12-minute runs</li>
+        <li>Basic CORD scoring</li>
+        <li>League ladder (read-only)</li>
+        <li>Counter-Intel: threat count only</li>
+        <li>Public Verified Run Explorer access</li>
+      </ul>
+      <a href="#" class="btn-tier btn-tier-default">Start Free →</a>
+    </div>
+
+    <!-- SOVEREIGN (FEATURED) -->
+    <div class="price-tier featured">
+      <div class="tier-name">Sovereign</div>
+      <div class="tier-price"><sup>$</sup>47<span style="font-size:24px;color:var(--gold-dim)">/mo</span></div>
+      <div class="tier-desc">Founding Price — $97/mo After Close</div>
+      <ul class="tier-features">
+        <li>All 4 modes — Empire, Predator, Syndicate, Phantom</li>
+        <li>Bleed Mode — S-grade access (CORD ceiling 1.80)</li>
+        <li>CORD Proof Card export (PDF/PNG, grade borders)</li>
+        <li>Post-Run Case File Dossier (M132 autopsy)</li>
+        <li>3 alternate timeline scenarios per run</li>
+        <li>Pressure Journal — live run narration</li>
+        <li>Pre-Run Loadout System + Handicap selection</li>
+        <li>Rivalry System — permanent profile layer</li>
+        <li>Spectator Mode (up to 50 viewers)</li>
+        <li>Counter-Intel: SOVEREIGN tier (full exposure)</li>
+        <li>Trust Audit — ML-generated post-Syndicate report</li>
+        <li>Legend Set Eligibility — your runs become the mountain</li>
+        <li>Dynasty Status eligibility — PHANTOM LEVERAGE unlock</li>
+      </ul>
+      <a href="#" class="btn-tier btn-tier-gold">Claim Founding Price — Lock It In →</a>
+    </div>
+
+    <!-- OPERATOR -->
+    <div class="price-tier">
+      <div class="tier-name">Operator</div>
+      <div class="tier-price"><sup>$</sup>147<span style="font-size:20px;color:var(--muted)">/mo</span></div>
+      <div class="tier-desc">For Teams, Clubs & Educators</div>
+      <ul class="tier-features">
+        <li>Everything in Sovereign</li>
+        <li>Club creation + management (up to 50 members)</li>
+        <li>Syndicate Duel Engine access (scheduled 48h events)</li>
+        <li>Team Trust Audit (full team contribution matrix)</li>
+        <li>White-label Proof Card for educational use</li>
+        <li>API access to run telemetry + CORD data</li>
+        <li>Priority support + early feature access</li>
+        <li>Dedicated Operator league tier</li>
+      </ul>
+      <a href="#" class="btn-tier btn-tier-default">Contact Us →</a>
+    </div>
+
+  </div>
+
+  <div class="callout reveal" style="text-align:center">
+    <div class="callout-label">Risk-Free Sovereignty</div>
+    <p style="font-size:17px;color:#D0C8A0;">Complete 10 runs in your first 30 days. If your decision speed, shield maintenance, or pressure survival scores haven't measurably improved — we refund every dollar. No argument. We'll even send you the Case File showing exactly what happened.</p>
+  </div>
+</div>
+</section>
+
+<div class="divider"></div>
+
+<!-- WHY THIS WORKS -->
+<section style="background:var(--dark)">
+<div class="section-inner narrow">
+  <div class="section-label">Why This Works</div>
+
+  <h2 style="font-size:clamp(28px,4.5vw,48px);font-weight:800;margin-bottom:40px;" class="reveal">
+    The Neuroscience Behind<br>
+    <span style="color:var(--gold)">12-Minute Financial Warfare</span>
+  </h2>
+
+  <p class="body-copy reveal">Most people learn financial concepts through <em>semantic memory</em> — declarative knowledge stored in the prefrontal cortex. "Cashflow is income minus expenses." True. Useless under pressure.</p>
+
+  <p class="body-copy reveal">Point Zero One forces <strong>procedural and episodic encoding</strong> — the systems that govern pattern recognition and emotional response under stress. When you've survived Bleed Mode with $2,100 in cash and three active bot attacks, your nervous system has logged what that feels like. It knows the solution pattern. That knowledge doesn't decay when the market shifts. It's encoded at the level of experience, not just information.</p>
+
+  <p class="body-copy reveal">The time compression mechanic — 1 tick = 1 second, 720 ticks = 60 simulated months — creates a unique training effect. Your decision-making adapts to compressed timelines. When real markets move quickly, you have <em>reference patterns</em> your brain already trained on. The counterplay window. The cascade chain. The regime shift. You've seen them before. Not in theory. In proof-hashed, timestamped, CORD-scored practice.</p>
+
+  <div class="pullquote reveal">
+    <p>"Most finance games reward optimization. Point Zero One rewards discipline under engineered pressure."</p>
+    <cite>— Core Design Principle</cite>
+  </div>
+
+  <p class="body-copy reveal">And the social modes — Predator's rivalry system, Syndicate's trust score, Phantom's legend decay — add the social dimension that learning science confirms accelerates skill acquisition. Competition. Stakes. Observation. When someone else can see your CORD score, when your runs become part of the public record, when your mistakes are logged in the Case File for anyone to audit — the feedback loop tightens. You improve faster.</p>
+</div>
+</section>
+
+<div class="divider"></div>
+
+<!-- FAQ -->
+<section class="faq">
+<div class="section-inner narrow">
+  <div class="section-label">Questions</div>
+  <h2 style="font-size:clamp(28px,4.5vw,48px);font-weight:800;margin-bottom:48px;" class="reveal">Before You Enter the Arena</h2>
+
+  <div class="faq-item reveal">
+    <div class="faq-q">Is this actually a game, or is it an educational course?</div>
+    <div class="faq-a">It's a Sovereign Simulation — a category we invented. It's structured like a game (real-time decisions, cards, modes, rankings), produces learning outcomes that exceed courses (pattern training under pressure), and generates verified artifacts (CORD proof cards) that function like credentials. It does all three things simultaneously. No prior financial knowledge required. No lectures. Just runs.</div>
+  </div>
+
+  <div class="faq-item reveal">
+    <div class="faq-q">I'm not a gamer. Will I even understand this?</div>
+    <div class="faq-a">The lobby introduces your financial posture in 10 seconds. The HUD is readable at a glance. The card system has a 5-card hand with a clear play pipeline. The most common feedback from non-gamers is "I understood what was happening within 3 minutes, and I was terrified by minute 5." That's the design intent. Accessibility is mandatory. The difficulty comes from the decisions, not the interface.</div>
+  </div>
+
+  <div class="faq-item reveal">
+    <div class="faq-q">What makes the CORD score meaningful? I've seen too many games with inflated scores.</div>
+    <div class="faq-a">CORD is not a points total. It's a cryptographic output — SHA-256 hash of your seed, tick stream checksum, outcome, final net worth, and user ID. If any element is tampered with, the hash fails verification and the run is flagged INTEGRITY_VIOLATION and voided. The weighting system is public (decision speed 0.25, shields 0.20, sabotages blocked 0.20, cascades broken 0.20, pressure survived 0.15). You know exactly what you're being scored on. No black box. No artificial inflation. If the hash says you earned it, you earned it.</div>
+  </div>
+
+  <div class="faq-item reveal">
+    <div class="faq-q">What's Bleed Mode and why does it cost more?</div>
+    <div class="faq-a">Bleed Mode is GO ALONE with everything removed: safety cards gone, no hold action, bots start at heat=25 and begin CIRCLING within 6 ticks, cascades accelerate, and BANKRUPT creates a VOID SCAR record notation on your profile. The CORD ceiling lifts to 1.80 and the S-grade band unlocks (1.50–1.80). S-grade is Bleed Mode exclusive. You cannot earn S without accepting the full cost of the run. It's gated in Sovereign tier because the tools required to survive it — the Pre-Run Loadout System, the Pressure Journal, the Case File autopsy — require Sovereign access.</div>
+  </div>
+
+  <div class="faq-item reveal">
+    <div class="faq-q">Can I play this with my business partner / co-founder / spouse?</div>
+    <div class="faq-a">SYNDICATE mode was built for exactly this scenario. Shared Treasury. Role Assignment. Trust Score. And a post-run Trust Audit that produces a contribution matrix showing exactly who built and who drained. The feedback from real partnerships and co-founders has been consistent: one Syndicate run reveals more about your operating dynamic than six months of weekly meetings. The data doesn't lie. The Trust Audit doesn't have feelings.</div>
+  </div>
+
+  <div class="faq-item reveal">
+    <div class="faq-q">What happens after I beat a Legend in Phantom mode?</div>
+    <div class="faq-a">If you beat the Legend by less than 5%, you become a Challenger Ghost — visible to all future attempts. Between 5–20% better, you become the new Legend. Over 20% better, you become the new Legend plus earn a +75% CORD bonus. Beat the Legend plus three Challengers in a single run — that's DYNASTY status — and you unlock PHANTOM LEVERAGE, the most powerful card in the Phantom toolkit. Your run is then the record. Every 72 hours it survives adds one more injected hater attack to every future attempt. You become the mountain.</div>
+  </div>
+
+  <div class="faq-item reveal">
+    <div class="faq-q">What if I want a refund?</div>
+    <div class="faq-a">Complete 10 runs in 30 days. If your measurable scores haven't improved — decision speed, shield maintenance, pressure survival — we refund. No argument, no process, no persuasion campaign. We'll also send you the Case File showing exactly where things went. If you can't commit to 10 runs over 30 days, Point Zero One is probably not for you. The game rewards consistency. So does the guarantee.</div>
+  </div>
+
+</div>
+</section>
+
+<div class="divider"></div>
+
+<!-- FINAL CTA -->
+<section class="final-cta" id="final-cta">
+<div class="section-inner narrow" style="text-align:center">
+
+  <div class="section-label" style="justify-content:center">The Run Starts Now</div>
+
+  <h2 class="reveal">
+    You're Bleeding.<br>
+    <span style="color:var(--gold)">Already.</span>
+  </h2>
+
+  <p class="body-copy reveal" style="margin:32px 0;">Every week you don't train your financial cognition under pressure, you're losing ground. Not because of what you spend. Because of what you don't learn. The decisions you make slowly. The patterns you don't recognize. The cascades you don't contain. Time doesn't wait for readiness. Neither does the market. Neither does this game.</p>
+
+  <p class="body-copy reveal" style="font-family:'Syne',sans-serif;font-size:24px;font-weight:700;color:var(--white);margin:40px 0;">12 minutes. A proof hash with your name on it.<br>Evidence that you can operate when it counts.</p>
+
+  <a href="#pricing" class="cta-primary reveal" style="font-size:20px;padding:24px 72px;">ENTER THE ARENA — CLAIM SOVEREIGN ACCESS</a>
+
+  <div class="guarantee-box reveal" style="margin:40px auto 0">
+    <p>30-Day Measurable Improvement Guarantee<br>
+    10 Runs · Verified CORD Growth · Or Full Refund<br>
+    <span style="color:var(--gold)">No Persuasion. No Process. Just the Case File and Your Money Back.</span></p>
+  </div>
+
+  <p style="margin-top:40px;font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--muted);letter-spacing:0.1em;" class="reveal">
+    POINT ZERO ONE · SOVEREIGN SIMULATION GAMES™<br>
+    Cryptographically Verified Outcomes · Anti-Fake Architecture · Proof-Backed Sovereignty
+  </p>
+</div>
+</section>
+
+<!-- FOOTER -->
+<footer>
+  <p>© 2025 Point Zero One — Sovereign Simulation Games™ &nbsp;·&nbsp; All run outcomes cryptographically verified &nbsp;·&nbsp; CORD scores are tamper-evident proof artifacts</p>
+  <p style="margin-top:8px">Privacy &nbsp;·&nbsp; Terms &nbsp;·&nbsp; Verified Run Explorer &nbsp;·&nbsp; Press Kit</p>
+</footer>
+
+<script>
+// ─── PARTICLES
+const container = document.getElementById('particles');
+for (let i = 0; i < 30; i++) {
+  const p = document.createElement('div');
+  p.className = 'particle';
+  const size = Math.random() * 2 + 1;
+  p.style.cssText = `
+    left: ${Math.random() * 100}%;
+    width: ${size}px; height: ${size}px;
+    animation-duration: ${8 + Math.random() * 20}s;
+    animation-delay: ${-Math.random() * 20}s;
+    --dx: ${(Math.random() - 0.5) * 200}px;
+    opacity: ${Math.random() * 0.8};
+  `;
+  container.appendChild(p);
+}
+
+// ─── COUNTDOWN (48 hours from page load)
+const end = Date.now() + 48 * 3600 * 1000;
+function updateCountdown() {
+  const diff = Math.max(0, end - Date.now());
+  const h = Math.floor(diff / 3600000);
+  const m = Math.floor((diff % 3600000) / 60000);
+  const s = Math.floor((diff % 60000) / 1000);
+  document.getElementById('c-h').textContent = String(h).padStart(2, '0');
+  document.getElementById('c-m').textContent = String(m).padStart(2, '0');
+  document.getElementById('c-s').textContent = String(s).padStart(2, '0');
+}
+updateCountdown();
+setInterval(updateCountdown, 1000);
+
+// ─── SCROLL REVEAL
+const obs = new IntersectionObserver((entries) => {
+  entries.forEach(e => { if (e.isIntersecting) e.target.classList.add('visible'); });
+}, { threshold: 0.08, rootMargin: '0px 0px -40px 0px' });
+document.querySelectorAll('.reveal').forEach(el => obs.observe(el));
+</script>
+
+</body>
+</html>

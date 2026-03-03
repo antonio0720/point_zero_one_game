@@ -46,7 +46,7 @@ export interface MLMechanicRecord {
   batch:                1 | 2 | 3;
 }
 
-import rawML from './ml_core.json';
+import rawML from './ml_mechanics_core.json';
 
 // ─── IntelligenceState (mirrored from App.tsx) ───────────────────────────────
 export type IntelligenceState = {
@@ -63,7 +63,31 @@ export type IntelligenceState = {
 
 
 
-export const ML_REGISTRY: MLMechanicRecord[] = rawML as MLMechanicRecord[];
+export const ML_REGISTRY: MLMechanicRecord[] = (rawML as any[]).map((raw) => ({
+  task_id: raw.task_id,
+  mechanic_id: raw.mechanic_id ?? raw.ml_id ?? '', // fallback if mechanic_id missing
+  core_pair: raw.core_pair ?? raw.core_id ?? '',
+  title: raw.title ?? raw.model_name ?? '',
+  what_it_adds: Array.isArray(raw.what_it_adds) ? raw.what_it_adds.join(', ') : (raw.what_it_adds ?? ''),
+  family: raw.family ?? '',
+  kind: 'ml',
+  model_category: raw.model_category ?? 'classifier',
+  inference_placement: raw.inference_placement ?? (Array.isArray(raw.placement) ? (raw.placement[0] as MLInferencePlacement) : 'server'),
+  intelligence_signal: raw.intelligence_signal ?? '',
+  heuristic_substitute: raw.heuristic_substitute ?? '',
+  training_phase: raw.training_phase ?? 1,
+  status: raw.status ?? 'simulated',
+  priority: raw.priority ?? 1,
+  inputs: raw.inputs ?? [],
+  outputs: raw.outputs ?? raw.primary_outputs ?? [],
+  telemetry_events: raw.telemetry_events ?? [],
+  guardrails: raw.guardrails ?? [],
+  model_options: raw.model_options ?? { baseline: '', sequence: '', policy: '' },
+  module_path: raw.module_path ?? '',
+  exec_hook: raw.exec_hook ?? '',
+  runtime_call: raw.runtime_call ?? '',
+  batch: raw.batch ?? 1,
+}));
 
 export function getMLMechanic(id: string): MLMechanicRecord | undefined {
   return ML_REGISTRY.find(m => m.mechanic_id === id);

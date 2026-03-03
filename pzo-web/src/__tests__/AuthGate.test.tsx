@@ -2,19 +2,19 @@
  * PZO_FE_T0161 — P17_TESTING_STORYBOOK_QA: AuthGate
  * Manually authored — executor failure recovery
  */
-import React from 'react';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';
 import { AuthGate } from '../components/auth/AuthGate';
 
-const makeAuth = (overrides = {}) => ({
+const makeAuth = (overrides: Record<string, unknown> = {}) => ({
   user: null,
   accessToken: null,
   loading: false,
   error: null,
+  isAuthed: false,
   login: vi.fn().mockResolvedValue(undefined),
   register: vi.fn().mockResolvedValue(undefined),
-  logout: vi.fn(),
+  logout: vi.fn().mockResolvedValue(undefined),
   clearError: vi.fn(),
   ...overrides,
 });
@@ -79,9 +79,8 @@ describe('AuthGate', () => {
     const submitBtn = screen.getAllByRole('button').find(b =>
       (b.textContent ?? '').match(/login|sign in|submit|enter/i)
     );
-    if (submitBtn) {
-      fireEvent.click(submitBtn);
-    }
+    if (submitBtn) fireEvent.click(submitBtn);
+
     expect(document.body.firstChild).toBeTruthy();
   });
 

@@ -1,47 +1,32 @@
-// loader.ts
+// ═══════════════════════════════════════════════════════════════════════════════
+// POINT ZERO ONE — CARD LOADER (REWRITTEN)
+// pzo_engine/src/cards/loader.ts
+//
+// Previous version was a broken stub referencing non-existent files:
+//   ✗ import { Card } from '../cards/card'          — file never existed
+//   ✗ import { CatalogDeck } from './catalog-deck'  — file never existed
+//   ✗ import { TemplateLookup } ...                 — file never existed
+//   ✗ import { SeedableShuffle } ...                — file never existed
+//   ✗ if (!mlEnabled)                               — undefined variable
+//
+// This rewrite is the correct thin re-export layer.
+// All logic lives in catalog-loader.ts.
+// This file is kept as the canonical import point for external consumers.
+//
+// USAGE:
+//   import { getCardDefinition, getDrawableCards } from './loader';
+//
+// Density6 LLC · Point Zero One · pzo_engine · Confidential
+// ═══════════════════════════════════════════════════════════════════════════════
 
-import { Card } from '../cards/card';
-import { CatalogDeck } from './catalog-deck';
-import { TemplateLookup } from './template-lookup';
-import { SeedableShuffle } from './seedable-shuffle';
+export {
+  getCardDefinition,
+  getDrawableCards,
+  getCardsByDeck,
+  getAllCards,
+  getCatalogStats,
+  reloadCatalog,
+} from './catalog-loader';
 
-export class CardsLoader {
-  private readonly templateLookup: TemplateLookup;
-  private readonly seedableShuffle: SeedableShuffle;
-
-  constructor(templateLookup: TemplateLookup, seedableShuffle: SeedableShuffle) {
-    this.templateLookup = templateLookup;
-    this.seedableShuffle = seedableShuffle;
-  }
-
-  public async loadCatalogDecks(): Promise<CatalogDeck[]> {
-    const catalogDecks = await CatalogDeck.loadAll();
-    return catalogDecks.sort((a, b) => a.name.localeCompare(b.name));
-  }
-
-  public async loadCardInstances(card: Card): Promise<Card[]> {
-    if (!mlEnabled) {
-      return [card];
-    }
-    const templateLookup = this.templateLookup;
-    const seedableShuffle = this.seedableShuffle;
-
-    // Load card templates
-    const cardTemplates = await templateLookup.lookup(card.name);
-
-    // Shuffle and sample from the templates
-    const shuffledCardTemplates = seedableShuffle.shuffle(cardTemplates);
-    const sampledCardTemplates = shuffledCardTemplates.slice(0, Math.min(shuffledCardTemplates.length, 1));
-
-    // Create card instances from the sampled templates
-    const cardInstances: Card[] = [];
-    for (const template of sampledCardTemplates) {
-      const cardInstance = await Card.fromTemplate(template);
-      cardInstances.push(cardInstance);
-    }
-
-    return cardInstances;
-  }
-}
-
-export { CardsLoader };
+export { adaptCard, adaptCards }       from './catalog-adapter';
+export type { CatalogCard, PzoCatalog } from './catalog-types';
