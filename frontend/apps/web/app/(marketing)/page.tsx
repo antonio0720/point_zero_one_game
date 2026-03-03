@@ -17,3 +17,5 @@ export const LandingPage: React.FC<LandingPageProps> = () => (
     <PressAsSeenIn />
   </div>
 );
+
+export default LandingPage;
