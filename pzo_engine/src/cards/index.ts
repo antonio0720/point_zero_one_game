@@ -20,7 +20,7 @@ export {
   getAllCards,
   getCatalogStats,
   reloadCatalog,
-} from './catalog-loader';
+} from './loader';
 
 // ── Adapter (JSON → engine format) ──────────────────────────────────────────
 export { adaptCard, adaptCards } from './catalog-adapter';

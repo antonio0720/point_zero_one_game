@@ -1,115 +1,212 @@
 /**
- * CounterfactualSimulator — src/ml/CounterfactualSimulator.ts
+ * FILE: pzo-web/src/ml/CounterfactualSimulator.ts
  * Point Zero One · Density6 LLC · Confidential
  *
  * Upgrade #11: "Three Alternate Timelines"
  *
- * Simulates 3 branch points from the actual run (same seed, altered choice)
- * and computes the delta on: final NW, CORD components, breach count.
- * Delivered as "You died because you missed THIS window."
+ * Purpose:
+ * - Given a few “branch snapshots” from a run, simulate 3 alternate decisions.
+ * - Output a tight report: deltas on Net Worth, CORD, breaches, and a headline.
+ *
+ * Constraints:
+ * - Deterministic, pure, and self-contained (no engine dependency).
+ * - Designed to be replaced later by real replay/forward-sim hooks.
  */
 
-// ─── Types ────────────────────────────────────────────────────────────────────
-
 export interface RunStateAtBranch {
-  tick:          number;
-  cash:          number;
-  netWorth:      number;
-  cashflow:      number;
-  cordScore:     number;
-  breachCount:   number;
-  label:         string;   // what actually happened
+  tick: number;
+  cash: number;
+  netWorth: number;
+  cashflow: number;
+  cordScore: number;
+  breachCount: number;
+  label: string; // what actually happened (human-readable)
 }
 
+export type ImpactLevel = 'HIGH' | 'MEDIUM' | 'LOW';
+
 export interface BranchScenario {
-  branchTick:       number;
-  actualChoice:     string;
-  altChoice:        string;
+  branchTick: number;
+  actualChoice: string;
+  altChoice: string;
   altOutcome: {
-    deltaNetWorth:  number;
-    deltaCord:      number;
-    deltaBreaches:  number;
-    finalCash:      number;
+    deltaNetWorth: number;
+    deltaCord: number;
+    deltaBreaches: number;
+    finalCash: number;
   };
-  verdict:          string;    // "Would have survived" / "Would have closed +$42K gap"
-  impactLevel:      'HIGH' | 'MEDIUM' | 'LOW';
+  verdict: string;
+  impactLevel: ImpactLevel;
 }
 
 export interface CounterfactualReport {
-  branches:         BranchScenario[];
-  biggestMissed:    BranchScenario;
-  totalRecoverable: number;    // sum of CORD delta across all branches
-  headline:         string;
+  branches: BranchScenario[];
+  biggestMissed: BranchScenario;
+  totalRecoverable: number; // sum of positive CORD deltas across all branches
+  headline: string;
 }
 
-// ─── Simulator ────────────────────────────────────────────────────────────────
-// We use a deterministic forward simulation from a branch point.
-// In production, plug in the full game engine's replay function.
-// This approximation uses per-tick heuristics to project outcomes.
+type SimParams = {
+  // Tunables (deterministic constants)
+  nwPerMinuteGood: number;
+  cordPerMinuteGood: number;
+  cashPerMinuteGood: number;
 
-const MONTHLY_INCOME_PER_GOOD_PLAY = 800;
-const NW_PER_GOOD_PLAY             = 12_000;
-const CORD_PER_GOOD_PLAY           = 18;
-const CORD_PER_MISSED_WINDOW       = -12;
-const NW_PER_MISSED_WINDOW         = -5_000;
+  nwPerMinuteBad: number;
+  cordPerMinuteBad: number;
+  cashPerMinuteBad: number;
 
-function simulateBranch(
-  state:         RunStateAtBranch,
-  altChoice:     string,
-  ticksRemaining: number,
-  isCorrectAlt:  boolean,
+  // How quickly breaches can be prevented by a “good” alternative
+  breachRecoveryCap: number;
+};
+
+const DEFAULT_SIM: SimParams = {
+  nwPerMinuteGood: 250, // +$250 NW per minute of “good play”
+  cordPerMinuteGood: 0.35,
+  cashPerMinuteGood: 18,
+
+  nwPerMinuteBad: -110,
+  cordPerMinuteBad: -0.18,
+  cashPerMinuteBad: -8,
+
+  breachRecoveryCap: 2,
+};
+
+function clampInt(n: number, min: number, max: number): number {
+  const x = Number.isFinite(n) ? Math.trunc(n) : 0;
+  return Math.max(min, Math.min(max, x));
+}
+
+function abs(n: number): number {
+  return n < 0 ? -n : n;
+}
+
+function pickAltChoice(i: number, state: RunStateAtBranch): string {
+  // Deterministic choice templates (no RNG).
+  // Bias suggestions based on state to keep it “contextual” without dependency.
+  const lowCash = state.cash < 500;
+  const highBreaches = state.breachCount >= 2;
+  const lowCord = state.cordScore < 40;
+
+  const menu: string[] = [
+    lowCash ? 'Preserved liquidity; deferred non-essential spend' : 'Held cash; avoided overextension',
+    highBreaches ? 'Activated shield mitigation before breach cascade' : 'Preempted breach with mitigation window',
+    lowCord ? 'Selected CORD-recovery line; executed the window cleanly' : 'Played BUILD zone card; stabilized fundamentals',
+  ];
+
+  return menu[i % menu.length] ?? 'Made optimal choice';
+}
+
+function impactLevelFromCord(deltaCord: number): ImpactLevel {
+  const a = abs(deltaCord);
+  if (a >= 40) return 'HIGH';
+  if (a >= 18) return 'MEDIUM';
+  return 'LOW';
+}
+
+function simulateBranchHeuristic(
+  state: RunStateAtBranch,
+  totalTicks: number,
+  branchTick: number,
+  improved: boolean,
+  params: SimParams,
 ): BranchScenario['altOutcome'] {
-  // If alt choice is correct: project positive trajectory
-  // If alt choice is also wrong: project smaller negative
-  const sign = isCorrectAlt ? 1 : -0.5;
-  const ticks = Math.min(ticksRemaining, 240); // simulate next 240 ticks
+  const ticksRemaining = Math.max(0, totalTicks - branchTick);
 
-  const deltaNetWorth = Math.round(sign * NW_PER_GOOD_PLAY * (ticks / 60));
-  const deltaCord     = Math.round(sign * CORD_PER_GOOD_PLAY * (ticks / 60));
-  const deltaBreaches = isCorrectAlt ? -1 : 0;
-  const finalCash     = state.cash + Math.round(sign * MONTHLY_INCOME_PER_GOOD_PLAY * (ticks / 12));
+  // Convert ticks → minutes with a deterministic assumption.
+  // If your engine uses different tick rate, replace here only.
+  const minutes = ticksRemaining / 60;
+
+  const nwRate = improved ? params.nwPerMinuteGood : params.nwPerMinuteBad;
+  const cordRate = improved ? params.cordPerMinuteGood : params.cordPerMinuteBad;
+  const cashRate = improved ? params.cashPerMinuteGood : params.cashPerMinuteBad;
+
+  const deltaNetWorth = Math.round(nwRate * minutes);
+  const deltaCord = Math.round(cordRate * minutes * 100) / 100; // 2dp stability
+  const finalCash = Math.round(state.cash + cashRate * minutes);
+
+  const deltaBreaches = improved
+    ? -Math.min(params.breachRecoveryCap, Math.max(0, state.breachCount))
+    : 0;
 
   return { deltaNetWorth, deltaCord, deltaBreaches, finalCash };
 }
 
+function emptyBranch(): BranchScenario {
+  return {
+    branchTick: 0,
+    actualChoice: 'N/A',
+    altChoice: 'N/A',
+    altOutcome: { deltaNetWorth: 0, deltaCord: 0, deltaBreaches: 0, finalCash: 0 },
+    verdict: 'N/A',
+    impactLevel: 'LOW',
+  };
+}
+
+function scoreBranchCandidate(state: RunStateAtBranch, totalTicks: number): number {
+  // Higher score = more worth simulating.
+  // Prefer earlier impactful mistakes (more runway) but also penalize heavy breach states.
+  const runway = Math.max(0, totalTicks - state.tick);
+  const runwayScore = runway / 60; // minutes remaining
+  const breachScore = state.breachCount * 22;
+  const cordPenalty = Math.max(0, 60 - state.cordScore) * 0.7;
+
+  // Deterministic composite
+  return runwayScore + breachScore + cordPenalty;
+}
+
 export function computeCounterfactuals(
-  branchStates:    RunStateAtBranch[],
-  totalTicks:      number,
-  finalCord:       number,
-  finalNetWorth:   number,
+  branchStates: RunStateAtBranch[],
+  totalTicks: number,
+  finalCord: number,
+  finalNetWorth: number,
 ): CounterfactualReport {
-  if (branchStates.length === 0) {
+  const cleanTotalTicks = Math.max(0, Math.trunc(totalTicks));
+
+  const states = (branchStates ?? [])
+    .filter((s) => s && Number.isFinite(s.tick))
+    .map((s) => ({
+      ...s,
+      tick: clampInt(s.tick, 0, cleanTotalTicks),
+      cash: Number.isFinite(s.cash) ? s.cash : 0,
+      netWorth: Number.isFinite(s.netWorth) ? s.netWorth : 0,
+      cashflow: Number.isFinite(s.cashflow) ? s.cashflow : 0,
+      cordScore: Number.isFinite(s.cordScore) ? s.cordScore : 0,
+      breachCount: clampInt(s.breachCount ?? 0, 0, 99),
+      label: typeof s.label === 'string' ? s.label : 'Unknown choice',
+    }));
+
+  if (states.length === 0) {
     return {
-      branches: [], biggestMissed: emptyBranch(),
-      totalRecoverable: 0, headline: 'No branch points identified.',
+      branches: [],
+      biggestMissed: emptyBranch(),
+      totalRecoverable: 0,
+      headline: 'No branch points identified.',
     };
   }
 
-  // Select top 3 most impactful branch points
-  const top3 = branchStates
-    .sort((a, b) => b.tick - a.tick)  // prefer later ticks (bigger impact)
+  // Select top 3 by deterministic scoring.
+  const top3 = [...states]
+    .sort((a, b) => scoreBranchCandidate(b, cleanTotalTicks) - scoreBranchCandidate(a, cleanTotalTicks))
     .slice(0, 3);
 
   const branches: BranchScenario[] = top3.map((state, i) => {
-    const ticksRemaining = totalTicks - state.tick;
-    const altChoices = ['Held cash instead', 'Played BUILD zone card', 'Activated shield mitigation'];
-    const altChoice = altChoices[i] ?? 'Made optimal choice';
-    const isCorrect = true; // alt is always the better path for counterfactual
+    const altChoice = pickAltChoice(i, state);
 
-    const altOutcome = simulateBranch(state, altChoice, ticksRemaining, isCorrect);
+    // By definition this is a “better” alt branch; keep deterministic.
+    const altOutcome = simulateBranchHeuristic(state, cleanTotalTicks, state.tick, true, DEFAULT_SIM);
 
-    const impactLevel: BranchScenario['impactLevel'] =
-      Math.abs(altOutcome.deltaCord) > 50 ? 'HIGH' :
-      Math.abs(altOutcome.deltaCord) > 20 ? 'MEDIUM' : 'LOW';
+    const impactLevel = impactLevelFromCord(altOutcome.deltaCord);
 
-    const verdict = altOutcome.deltaCord > 30
-      ? `Would have closed ${altOutcome.deltaCord} CORD gap — potentially decisive`
-      : altOutcome.deltaNetWorth > 20_000
-      ? `Would have added $${Math.round(altOutcome.deltaNetWorth / 1000)}K net worth`
-      : `Minor improvement — reduced breach count by ${Math.abs(altOutcome.deltaBreaches)}`;
+    const verdict =
+      impactLevel === 'HIGH'
+        ? `Decisive: +${altOutcome.deltaCord} CORD, ${altOutcome.deltaBreaches} breaches, ΔNW $${altOutcome.deltaNetWorth}`
+        : impactLevel === 'MEDIUM'
+          ? `Meaningful: +${altOutcome.deltaCord} CORD, ΔNW $${altOutcome.deltaNetWorth}`
+          : `Minor: +${altOutcome.deltaCord} CORD`;
 
     return {
-      branchTick:   state.tick,
+      branchTick: state.tick,
       actualChoice: state.label,
       altChoice,
       altOutcome,
@@ -118,24 +215,30 @@ export function computeCounterfactuals(
     };
   });
 
-  const biggestMissed = branches.sort((a, b) =>
-    Math.abs(b.altOutcome.deltaCord) - Math.abs(a.altOutcome.deltaCord),
-  )[0];
+  const biggestMissed =
+    branches
+      .slice()
+      .sort((a, b) => abs(b.altOutcome.deltaCord) - abs(a.altOutcome.deltaCord))[0] ?? emptyBranch();
 
-  const totalRecoverable = branches.reduce((s, b) => s + Math.max(0, b.altOutcome.deltaCord), 0);
+  const totalRecoverable = branches.reduce((sum, b) => {
+    const d = b.altOutcome.deltaCord;
+    return sum + (d > 0 ? d : 0);
+  }, 0);
+
+  const cordGap = Math.max(0, Math.round((100 - (Number.isFinite(finalCord) ? finalCord : 0)) * 100) / 100);
+  const nwGap = Math.max(0, Math.round((0 - (Number.isFinite(finalNetWorth) ? finalNetWorth : 0)) * 100) / 100);
 
   const headline =
     biggestMissed.impactLevel === 'HIGH'
-      ? `You lost ${biggestMissed.altOutcome.deltaCord} CORD at tick ${biggestMissed.branchTick}. That was the run.`
-      : `No single decision was decisive. The gap accumulated gradually.`;
+      ? `Tick ${biggestMissed.branchTick}: biggest miss. +${biggestMissed.altOutcome.deltaCord} CORD was recoverable.`
+      : totalRecoverable >= 25
+        ? `No single decisive miss. ${totalRecoverable} CORD was recoverable across 3 windows.`
+        : `Gap accumulated gradually (CORD gap ~${cordGap}).`;
 
-  return { branches, biggestMissed, totalRecoverable, headline };
-}
-
-function emptyBranch(): BranchScenario {
   return {
-    branchTick: 0, actualChoice: 'N/A', altChoice: 'N/A',
-    altOutcome: { deltaNetWorth: 0, deltaCord: 0, deltaBreaches: 0, finalCash: 0 },
-    verdict: 'N/A', impactLevel: 'LOW',
+    branches,
+    biggestMissed,
+    totalRecoverable,
+    headline,
   };
 }

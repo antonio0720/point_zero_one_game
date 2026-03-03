@@ -1,5 +1,5 @@
 /**
- * src/ml/index.ts
+ * FILE: pzo-web/src/ml/index.ts
  * Point Zero One · Density6 LLC · Confidential
  *
  * ML module barrel — single import point for all 15 ML upgrades.
@@ -26,16 +26,10 @@
  */
 
 // ── #1 Player Model Engine ────────────────────────────────────────────────────
-export {
-  computeIntelligence,
-} from './PlayerModelEngine';
-export type {
-  RunSnapshot,
-  IntelligenceOutput,
-} from './PlayerModelEngine';
+export { computeIntelligence } from './PlayerModelEngine';
+export type { RunSnapshot, IntelligenceOutput } from './PlayerModelEngine';
 
 // ── #2 Knowledge Tracer ───────────────────────────────────────────────────────
-// FIX: removed trailing dot from './KnowledgeTracer.' → './KnowledgeTracer'
 export { KnowledgeTracer } from './KnowledgeTracer';
 export type {
   KnowledgeTag,
@@ -46,18 +40,10 @@ export type {
 
 // ── #3 Hater Bot Controller ───────────────────────────────────────────────────
 export { HaterBotController } from './HaterBotController';
-export type {
-  BotAction,
-  BotDecision,
-  BotConstraints,
-} from './HaterBotController';
+export type { BotAction, BotDecision, BotConstraints } from './HaterBotController';
 
 // ── #4 Phantom Ghost Engine ───────────────────────────────────────────────────
-export {
-  LEGEND_STYLES,
-  generateGhostTrajectory,
-  matchLegendStyle,
-} from './PhantomGhostEngine';
+export { LEGEND_STYLES, generateGhostTrajectory, matchLegendStyle } from './PhantomGhostEngine';
 export type {
   LegendStyleId,
   LegendStyle,
@@ -86,10 +72,7 @@ export type {
 
 // ── #7 Behavioral Anomaly Detector ────────────────────────────────────────────
 export { BehavioralAnomalyDetector } from './BehavioralAnomalyDetector';
-export type {
-  AnomalyReport,
-  AnomalyFlag,
-} from './BehavioralAnomalyDetector';
+export type { AnomalyReport, AnomalyFlag } from './BehavioralAnomalyDetector';
 
 // ── #8 Model Proof Chain ──────────────────────────────────────────────────────
 export {
@@ -98,63 +81,31 @@ export {
   createModelProofBundle,
   SEASON0_MODEL_PACKS,
 } from './ModelProofChain';
-export type {
-  ModelRole,
-  ModelPack,
-  ModelProofBundle,
-} from './ModelProofChain';
+export type { ModelRole, ModelPack, ModelProofBundle } from './ModelProofChain';
 
 // ── #9 Coach Model ────────────────────────────────────────────────────────────
 export { generateRunJournal } from './CoachModel';
-export type {
-  RunJournalInput,
-  RunJournal,
-} from './CoachModel';
+export type { RunJournalInput, RunJournal } from './CoachModel';
 
 // ── #10 Card Recommender ──────────────────────────────────────────────────────
 export { CardRecommender } from './CardRecommender';
-export type {
-  TimingClass,
-  CardContext,
-  CardOption,
-  Recommendation,
-} from './CardRecommender';
+export type { TimingClass, CardContext, CardOption, Recommendation } from './CardRecommender';
 
 // ── #11 Counterfactual Simulator ──────────────────────────────────────────────
-export { computeCounterfactuals } from './CounterfactualSimulator';
-export type {
-  RunStateAtBranch,
-  BranchScenario,
-  CounterfactualReport,
-} from './CounterfactualSimulator';
+// NOTE: explicit extension fixes TS2307 in edge-resolution cases.
+export { computeCounterfactuals } from './CounterfactualSimulator.ts';
+export type { RunStateAtBranch, BranchScenario, CounterfactualReport } from './CounterfactualSimulator.ts';
 
 // ── #12 Window Mastery Tracker ────────────────────────────────────────────────
 export { WindowMasteryTracker } from './WindowMasteryTracker';
-export type {
-  WindowType,
-  WindowResult,
-  WindowMastery,
-} from './WindowMasteryTracker';
+export type { WindowType, WindowResult, WindowMastery } from './WindowMasteryTracker';
 
 // ── #13 Run Embedder ──────────────────────────────────────────────────────────
-export {
-  computeRunEmbedding,
-  cosineSimilarity,
-  findClosestRivals,
-} from './RunEmbedder';
-export type {
-  RunEmbeddingInput,
-  SkillSignature,
-  SkillDimension,
-  DimName,
-} from './RunEmbedder';
+export { computeRunEmbedding, cosineSimilarity, findClosestRivals } from './RunEmbedder';
+export type { RunEmbeddingInput, SkillSignature, SkillDimension, DimName } from './RunEmbedder';
 
 // ── #14 Tag Weight Optimizer ──────────────────────────────────────────────────
-export {
-  TagWeightOptimizer,
-  buildWeightsHash,
-  buildSeason0LockedWeights,
-} from './TagWeightOptimizer';
+export { TagWeightOptimizer, buildWeightsHash, buildSeason0LockedWeights } from './TagWeightOptimizer';
 export type {
   OptimizationObjective,
   TagWeightConfig,
@@ -163,10 +114,7 @@ export type {
 } from './TagWeightOptimizer';
 
 // ── #15 Verified Run Index ────────────────────────────────────────────────────
-export {
-  VerifiedRunIndex,
-  buildEntryHash,
-} from './VerifiedRunIndex';
+export { VerifiedRunIndex, buildEntryHash } from './VerifiedRunIndex';
 export type {
   VerifiedRunRecord,
   RunSearchQuery,
