@@ -2569,32 +2569,44 @@ def _pascal(s: str) -> str:
 
 def build_extended_registry(only: list[str] | None = None) -> list[dict]:
     """Extended registry — ml_mechanics_core.json schema."""
+    # Valid MLStatus values (matches mlLoader.ts MLStatus union)
+    _VALID_STATUS = {"simulated", "wiring", "training", "deployed"}
+
     records = []
     for meta in ML_TABLE:
-        mid = meta.ml_id.lower()
+        mid  = meta.ml_id.lower()
         if only and mid not in [x.lower() for x in only]:
             continue
         stem = f"{mid}_{_slug(meta.model_name)}"
+
+        # Guard: dataclass default is "simulated"; reject legacy "todo" if ever set
+        status = meta.status if meta.status in _VALID_STATUS else "simulated"
+
+        # md_source: canonical ML spec filename — M01Aa_<slug>.md
+        # Convention mirrors core mechanic naming but with uppercase ML ID + a suffix.
+        md_source = f"{meta.ml_id.upper()}a_{_slug(meta.model_name)}.md"
+
         records.append({
-            "task_id":          f"PZO-{meta.ml_id.upper()}",
-            "ml_id":            meta.ml_id.upper(),
-            "core_id":          meta.core_id,
-            "model_name":       meta.model_name,
-            "primary_function": meta.primary_function,
-            "what_it_adds":     meta.what_it_adds,
-            "tiers":            meta.tiers,
-            "placement":        meta.placement,
-            "budget":           meta.budget,
-            "primary_outputs":  meta.primary_outputs,
-            "eval_focus":       meta.eval_focus,
-            "can_lock_off":     meta.can_lock_off,
-            "status":           meta.status,
-            "module_path":      f"src/ml/{stem}.ts",
+            "task_id":             f"PZO-{meta.ml_id.upper()}",
+            "ml_id":               meta.ml_id.upper(),
+            "core_id":             meta.core_id,
+            "model_name":          meta.model_name,
+            "primary_function":    meta.primary_function,
+            "what_it_adds":        meta.what_it_adds,
+            "tiers":               meta.tiers,
+            "placement":           meta.placement,
+            "budget":              meta.budget,
+            "primary_outputs":     meta.primary_outputs,
+            "eval_focus":          meta.eval_focus,
+            "can_lock_off":        meta.can_lock_off,
+            "status":              status,
+            "module_path":         f"src/ml/{stem}.ts",
+            "md_source":           md_source,
             "intelligence_signal": meta.intelligence_signal,
-            "model_category":   meta.model_category,
-            "family":           meta.family,
-            "priority":         meta.priority,
-            "training_phase":   meta.training_phase,
+            "model_category":      meta.model_category,
+            "family":              meta.family,
+            "priority":            meta.priority,
+            "training_phase":      meta.training_phase,
         })
     return records
 

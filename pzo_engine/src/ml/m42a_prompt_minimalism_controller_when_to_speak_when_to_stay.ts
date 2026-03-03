@@ -5,6 +5,9 @@
 //
 // ML Companion : M42A — Prompt Minimalism Controller (When to Speak, When to Stay Silent)
 // Core Pair    : M42
+// Family       : progression
+// Category     : controller
+// IntelSignal  : personalization
 // Tiers        : BASELINE, SEQUENCE_DL, GRAPH_DL, POLICY_RL
 // Placement    : client
 // Budget       : real_time
@@ -14,7 +17,7 @@
 //   ✦ ML can suggest; rules decide — NEVER rewrite resolved ledger history
 //   ✦ Bounded nudges — all outputs have explicit caps + monotonic constraints
 //   ✦ Auditability — every inference writes (ruleset_version, seed, tick, cap, output)
-//   ✦ Privacy — no contact-graph mining; in-session signals only for social reasoning
+//   ✦ Privacy — no contact-graph mining; in-session signals only
 //
 // Density6 LLC · Point Zero One · Confidential · All Rights Reserved
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -31,10 +34,11 @@
  * 2. Enforces prompt minimalism: fewer, higher-signal prompts.
  * 3. Learns individual tolerance for guidance; respects opt-out permanently.
  *
- * Core mechanic pair: M42
+ * Intelligence signal → IntelligenceState.personalization
+ * Core mechanic pair  → M42
  */
 
-// ── Shared telemetry input (standard across all ML companions) ────────────────
+// ── Telemetry input ───────────────────────────────────────────────────────────
 export interface M42ATelemetryInput {
   runSeed:           string;
   tickIndex:         number;
@@ -45,28 +49,24 @@ export interface M42ATelemetryInput {
   uiInteraction:     Record<string, unknown>;
   socialEvents:      Record<string, unknown>[];
   outcomeEvents:     Record<string, unknown>[];
-  /** Optional — only included for mechanics that need ledger history */
   ledgerEvents?:     Record<string, unknown>[];
-  /** Optional — only included for contract-graph mechanics */
   contractGraph?:    Record<string, unknown>;
-  /** Player opt-in preferences — ML honours opt-out silently */
   userOptIn:         Record<string, boolean>;
+  // Extended inputs for M42A (progression family)
+
 }
+
+// Telemetry events subscribed by M42A
+// 
 
 // ── Primary output contract ───────────────────────────────────────────────────
-/** Standard base output — all ML mechanics return this shape + extensions */
 export interface M42ABaseOutput {
-  /** 0–1 score — semantic depends on mechanic (risk / value / trust / etc.) */
-  score:          number;
-  /** ≤5 plain-English factors explaining the score */
+  score:          number;  // 0–1, semantic depends on mechanic
   topFactors:     string[];
-  /** Single-sentence bounded recommendation (never a guarantee) */
   recommendation: string;
-  /** SHA256(inputs + outputs + ruleset_version + caps) */
-  auditHash:      string;
+  auditHash:      string;  // SHA256(inputs + outputs + ruleset_version + caps)
 }
 
-/** Extended output — M42A-specific signals */
 export interface M42AOutput extends M42ABaseOutput {
   promptValueScore: unknown;  // prompt_value_score
   immersionBreakRisk: unknown;  // immersion_break_risk
@@ -78,144 +78,128 @@ export interface M42AOutput extends M42ABaseOutput {
 export type M42ATier = 'baseline' | 'sequence_dl' | 'graph_dl' | 'policy_rl';
 
 /** M42A — Tier: BASELINE
- *  Gradient-boosted trees + calibrated logistic models (fast, low-cost, production default)
+ *  GBM + calibrated logistic (fast, low-cost, production default)
  */
 export interface M42ABaselineConfig {
-  enabled: boolean;
-  /** Model version string — increment on retrain */
-  modelVersion: string;
-  /** Feature schema hash — must match training schema */
+  enabled:          boolean;
+  modelVersion:     string;
   featureSchemaHash: string;
-  /** Inference latency SLO in ms (0 = batch/async) */
-  latencySLOMs: number;
+  latencySLOMs:     number;   // 0 = batch/async
 }
 
 /** M42A — Tier: SEQUENCE_DL
- *  TCN / Transformer encoder over event streams (higher accuracy, sequential patterns)
+ *  TCN / Transformer encoder over event streams (sequential patterns)
  */
 export interface M42ASequenceDlConfig {
-  enabled: boolean;
-  /** Model version string — increment on retrain */
-  modelVersion: string;
-  /** Feature schema hash — must match training schema */
+  enabled:          boolean;
+  modelVersion:     string;
   featureSchemaHash: string;
-  /** Inference latency SLO in ms (0 = batch/async) */
-  latencySLOMs: number;
+  latencySLOMs:     number;   // 0 = batch/async
 }
 
 /** M42A — Tier: GRAPH_DL
- *  GNN over contract / market / ledger graphs (relationship-aware, higher cost)
+ *  GNN over contract / market / ledger graphs (relationship-aware)
  */
 export interface M42AGraphDlConfig {
-  enabled: boolean;
-  /** Model version string — increment on retrain */
-  modelVersion: string;
-  /** Feature schema hash — must match training schema */
+  enabled:          boolean;
+  modelVersion:     string;
   featureSchemaHash: string;
-  /** Inference latency SLO in ms (0 = batch/async) */
-  latencySLOMs: number;
+  latencySLOMs:     number;   // 0 = batch/async
 }
 
 /** M42A — Tier: POLICY_RL
- *  Constrained contextual bandit / offline RL (decision routing + bounded nudges)
+ *  Constrained contextual bandit / offline PPO (bounded nudges)
  */
 export interface M42APolicyRlConfig {
-  enabled: boolean;
-  /** Model version string — increment on retrain */
-  modelVersion: string;
-  /** Feature schema hash — must match training schema */
+  enabled:          boolean;
+  modelVersion:     string;
   featureSchemaHash: string;
-  /** Inference latency SLO in ms (0 = batch/async) */
-  latencySLOMs: number;
+  latencySLOMs:     number;   // 0 = batch/async
 }
 
 // ── Inference placement ───────────────────────────────────────────────────────
 export type M42APlacement = 'client';
 
 export interface M42AInferencePlacement {
-  /** On-device inference — privacy-safe, low-latency UX signals */
+  /** On-device — privacy-safe, low-latency UX signals */
   client: boolean;
-  /** Inference budget: real_time | batch | hybrid */
   budget: 'real_time';
 }
 
 // ── Guardrails (non-negotiable) ───────────────────────────────────────────────
 export interface M42AGuardrails {
-  /** ML NEVER rewrites resolved ledger history */
-  determinismPreserved:   true;
-  /** All outputs have explicit caps + monotonic constraints */
-  boundedNudges:          true;
-  /** Every inference writes a signed receipt to the run ledger */
-  auditabilityRequired:   true;
-  /** No contact-graph mining; in-session signals only */
-  privacyEnforced:        true;
-  /** Competitive modes can lock off balance nudges (integrity always stays on) */
-  competitiveLockOffAllowed: true;
-  /** Output cap for the primary score field */
-  scoreCap:               1.0;
-  /** Minimum abstain threshold — below this confidence, output null recommendation */
-  abstainThreshold:       number;
+  determinismPreserved:        true;
+  boundedNudges:               true;
+  auditabilityRequired:        true;
+  privacyEnforced:             true;
+  competitiveLockOffAllowed:   true;
+  scoreCap:                    1.0;
+  abstainThreshold:            number;
 }
 
-// ── Evaluation contract (minimum bar) ────────────────────────────────────────
+// ── Evaluation contract ───────────────────────────────────────────────────────
 export interface M42AEvalContract {
   /** prompt_acceptance_rate */
   /** immersion_break_rate */
   /** guidance_satisfaction */
-  /** All mechanics: moment yield ≥ 3 share moments/run (FUBAR, flip, missed bag) */
-  momentYieldMinimum: 3;
-  /** All mechanics: trust metric — low 'rigged' reports */
+  momentYieldMinimum:  3;
   maxRiggedReportRate: number;
-  /** All mechanics: fairness drift across skill bands */
-  maxFairnessDrift: number;
+  maxFairnessDrift:    number;
 }
 
 // ── Model card ────────────────────────────────────────────────────────────────
-/** Identity stamp — emitted with every inference receipt */
 export interface M42AModelCard {
-  modelId:           'M42A';
-  coreMechanicPair:  'M42';
-  tier:              M42ATier;
-  modelVersion:      string;
-  trainCutDate:      string;
-  featureSchemaHash: string;
-  ruleset_version:   string;
+  modelId:            'M42A';
+  coreMechanicPair:   'M42';
+  intelligenceSignal: 'personalization';
+  modelCategory:      'controller';
+  family:             'progression';
+  tier:               M42ATier;
+  modelVersion:       string;
+  trainCutDate:       string;
+  featureSchemaHash:  string;
+  rulesetVersion:     string;
 }
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 export const M42A_ML_CONSTANTS = {
-  ML_ID:            'M42A',
-  CORE_PAIR:        'M42',
-  MODEL_NAME:       'Prompt Minimalism Controller (When to Speak, When to Stay Silent)',
-  TIERS:            ['baseline', 'sequence_dl', 'graph_dl', 'policy_rl'] as const,
-  PLACEMENT:        ['client'] as const,
-  BUDGET:           'real_time' as const,
-  CAN_LOCK_OFF:      true,
+  ML_ID:              'M42A',
+  CORE_PAIR:          'M42',
+  MODEL_NAME:         'Prompt Minimalism Controller (When to Speak, When to Stay Silent)',
+  INTEL_SIGNAL:       'personalization' as const,
+  MODEL_CATEGORY:     'controller' as const,
+  FAMILY:             'progression' as const,
+  TIERS:              ['baseline', 'sequence_dl', 'graph_dl', 'policy_rl'] as const,
+  PLACEMENT:          ['client'] as const,
+  BUDGET:             'real_time' as const,
+  CAN_LOCK_OFF:        true,
   GUARDRAILS: {
-    determinismPreserved:       true,
-    boundedNudges:              true,
-    auditabilityRequired:       true,
-    privacyEnforced:            true,
-    competitiveLockOffAllowed:  true,
-    scoreCap:                   1.0,
-    abstainThreshold:           0.35,
+    determinismPreserved:      true,
+    boundedNudges:             true,
+    auditabilityRequired:      true,
+    privacyEnforced:           true,
+    competitiveLockOffAllowed: true,
+    scoreCap:                  1.0,
+    abstainThreshold:          0.35,
   },
-  EVAL_FOCUS: ["prompt_acceptance_rate", "immersion_break_rate", "guidance_satisfaction"],
-  PRIMARY_OUTPUTS: ["prompt_value_score", "immersion_break_risk", "silence_recommendation", "individual_tolerance_estimate"],
+  EVAL_FOCUS:         ["prompt_acceptance_rate", "immersion_break_rate", "guidance_satisfaction"],
+  PRIMARY_OUTPUTS:    ["prompt_value_score", "immersion_break_risk", "silence_recommendation", "individual_tolerance_estimate"],
+  TELEMETRY_EVENTS:   [],
 } as const;
 
 // ── Main inference function ───────────────────────────────────────────────────
 /**
  * runM42aMl
  *
- * Async — fires after core exec_hook (M42), reads output, returns advisory signals.
- * NEVER mutates state. All suggestions are bounded. Competitive mode can disable
- * balance nudges (can_lock_off=true); integrity signals always run.
+ * Fires after M42 exec_hook, reads resolved output, returns advisory signals.
+ * NEVER mutates game state. All suggestions are bounded.
+ * Competitive mode may disable balance nudges (can_lock_off=true).
+ * Integrity signals always run regardless of lock-off state.
  *
- * @param input     - Telemetry input snapshot
- * @param tier      - Model tier to use (default: 'baseline' for latency budget)
- * @param modelCard - Identity stamp for audit receipt
- * @returns         - M42AOutput + signed audit_hash
+ * @param input     Telemetry snapshot
+ * @param tier      Model tier to route (default: 'baseline' for latency budget)
+ * @param modelCard Identity stamp written to every audit receipt
+ * @returns         M42AOutput with signed auditHash
  */
 export async function runM42aMl(
   input:     M42ATelemetryInput,
@@ -227,32 +211,30 @@ export async function runM42aMl(
   // Implementation checklist:
   // □ Validate input schema against featureSchemaHash
   // □ Select inference backend based on `tier` parameter
+  // □ tier === 'baseline' → GBM + calibrated logistic (fast, low-cost, production default)
+  // □ tier === 'sequence_dl' → TCN / Transformer encoder over event streams (sequential patterns)
+  // □ tier === 'graph_dl' → GNN over contract / market / ledger graphs (relationship-aware)
+  // □ tier === 'policy_rl' → Constrained contextual bandit / offline PPO (bounded nudges)
   // □ Apply input privacy filters (no PII, no cross-player contact graph)
   // □ Run inference → raw score + top_factors
   // □ Apply output caps: score = Math.min(score, M42A_ML_CONSTANTS.GUARDRAILS.scoreCap)
   // □ Apply monotonic constraints where relevant
-  // □ Abstain if confidence < abstainThreshold (return null recommendation)
+  // □ Abstain if confidence < M42A_ML_CONSTANTS.GUARDRAILS.abstainThreshold
   // □ Compute auditHash = SHA256(inputs + outputs + ruleset_version + caps)
-  // □ Write signed receipt to run ledger (never skip this step)
-  // □ Return M42AOutput — never mutate run state directly
-  //
-  // Tier routing:
-  // // □ tier === 'baseline' → Gradient-boosted trees + calibrated logistic models (fast, low-cost, production default)
-// □ tier === 'sequence_dl' → TCN / Transformer encoder over event streams (higher accuracy, sequential patterns)
-// □ tier === 'graph_dl' → GNN over contract / market / ledger graphs (relationship-aware, higher cost)
-// □ tier === 'policy_rl' → Constrained contextual bandit / offline RL (decision routing + bounded nudges)
+  // □ Write signed receipt to run ledger (NEVER skip)
+  // □ Return M42AOutput — NEVER mutate run state directly
   //
   // Placement: client | Budget: real_time
-  //
+  // ExecHook:  after_m42_resolve
   // ─────────────────────────────────────────────────────────────────────────
-  throw new Error('M42A (Prompt Minimalism Controller (When to Speak, When to Stay Silent)) ML inference is not yet implemented.');
+  throw new Error('M42A (Prompt Minimalism Controller (When to Speak, When to Stay Silent)) ML inference not yet implemented.');
 }
 
-// ── Degraded mode fallback ────────────────────────────────────────────────────
+// ── Degraded-mode fallback ────────────────────────────────────────────────────
 /**
- * M42AFallback — rule-based fallback when ML is unavailable.
- * Must never throw; must return a valid (degraded) M42AOutput.
- * Competitive modes may use this exclusively when ML is locked off.
+ * runM42aMlFallback — rule-based fallback when ML is unavailable.
+ * Must never throw. Returns valid (degraded) M42AOutput.
+ * Competitive modes use this when ML nudges are locked off.
  */
 export function runM42aMlFallback(
   _input: M42ATelemetryInput,
@@ -266,3 +248,9 @@ export function runM42aMlFallback(
   //   □ Zero-out all M42A-specific extended outputs
   throw new Error('M42A fallback not yet implemented.');
 }
+
+// ── IntelligenceState integration note ───────────────────────────────────────
+// This mechanic writes to IntelligenceState.personalization
+// Heuristic substitute (until ML is live):
+//   intelligence.personalization = skillBandIndex * sessionProgressionRate
+// Replace with: runM42aMl(telemetry, tier, modelCard).then(out => intelligence.personalization = out.score)

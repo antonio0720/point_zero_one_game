@@ -5,6 +5,9 @@
 //
 // ML Companion : M131A — Faction Sponsor Match + Power Guard
 // Core Pair    : M131
+// Family       : social
+// Category     : recommender
+// IntelSignal  : personalization
 // Tiers        : BASELINE, SEQUENCE_DL, POLICY_RL
 // Placement    : server
 // Budget       : batch
@@ -14,7 +17,7 @@
 //   ✦ ML can suggest; rules decide — NEVER rewrite resolved ledger history
 //   ✦ Bounded nudges — all outputs have explicit caps + monotonic constraints
 //   ✦ Auditability — every inference writes (ruleset_version, seed, tick, cap, output)
-//   ✦ Privacy — no contact-graph mining; in-session signals only for social reasoning
+//   ✦ Privacy — no contact-graph mining; in-session signals only
 //
 // Density6 LLC · Point Zero One · Confidential · All Rights Reserved
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -31,10 +34,11 @@
  * 2. Power guard: faction benefits never exceed cosmetic + narrative scope.
  * 3. Generates faction match receipts for transparency.
  *
- * Core mechanic pair: M131
+ * Intelligence signal → IntelligenceState.personalization
+ * Core mechanic pair  → M131
  */
 
-// ── Shared telemetry input (standard across all ML companions) ────────────────
+// ── Telemetry input ───────────────────────────────────────────────────────────
 export interface M131ATelemetryInput {
   runSeed:           string;
   tickIndex:         number;
@@ -45,28 +49,24 @@ export interface M131ATelemetryInput {
   uiInteraction:     Record<string, unknown>;
   socialEvents:      Record<string, unknown>[];
   outcomeEvents:     Record<string, unknown>[];
-  /** Optional — only included for mechanics that need ledger history */
   ledgerEvents?:     Record<string, unknown>[];
-  /** Optional — only included for contract-graph mechanics */
   contractGraph?:    Record<string, unknown>;
-  /** Player opt-in preferences — ML honours opt-out silently */
   userOptIn:         Record<string, boolean>;
+  // Extended inputs for M131A (social family)
+
 }
+
+// Telemetry events subscribed by M131A
+// 
 
 // ── Primary output contract ───────────────────────────────────────────────────
-/** Standard base output — all ML mechanics return this shape + extensions */
 export interface M131ABaseOutput {
-  /** 0–1 score — semantic depends on mechanic (risk / value / trust / etc.) */
-  score:          number;
-  /** ≤5 plain-English factors explaining the score */
+  score:          number;  // 0–1, semantic depends on mechanic
   topFactors:     string[];
-  /** Single-sentence bounded recommendation (never a guarantee) */
   recommendation: string;
-  /** SHA256(inputs + outputs + ruleset_version + caps) */
-  auditHash:      string;
+  auditHash:      string;  // SHA256(inputs + outputs + ruleset_version + caps)
 }
 
-/** Extended output — M131A-specific signals */
 export interface M131AOutput extends M131ABaseOutput {
   sponsorMatch: unknown;  // sponsor_match
   powerGuardVerified: unknown;  // power_guard_verified
@@ -78,42 +78,33 @@ export interface M131AOutput extends M131ABaseOutput {
 export type M131ATier = 'baseline' | 'sequence_dl' | 'policy_rl';
 
 /** M131A — Tier: BASELINE
- *  Gradient-boosted trees + calibrated logistic models (fast, low-cost, production default)
+ *  GBM + calibrated logistic (fast, low-cost, production default)
  */
 export interface M131ABaselineConfig {
-  enabled: boolean;
-  /** Model version string — increment on retrain */
-  modelVersion: string;
-  /** Feature schema hash — must match training schema */
+  enabled:          boolean;
+  modelVersion:     string;
   featureSchemaHash: string;
-  /** Inference latency SLO in ms (0 = batch/async) */
-  latencySLOMs: number;
+  latencySLOMs:     number;   // 0 = batch/async
 }
 
 /** M131A — Tier: SEQUENCE_DL
- *  TCN / Transformer encoder over event streams (higher accuracy, sequential patterns)
+ *  TCN / Transformer encoder over event streams (sequential patterns)
  */
 export interface M131ASequenceDlConfig {
-  enabled: boolean;
-  /** Model version string — increment on retrain */
-  modelVersion: string;
-  /** Feature schema hash — must match training schema */
+  enabled:          boolean;
+  modelVersion:     string;
   featureSchemaHash: string;
-  /** Inference latency SLO in ms (0 = batch/async) */
-  latencySLOMs: number;
+  latencySLOMs:     number;   // 0 = batch/async
 }
 
 /** M131A — Tier: POLICY_RL
- *  Constrained contextual bandit / offline RL (decision routing + bounded nudges)
+ *  Constrained contextual bandit / offline PPO (bounded nudges)
  */
 export interface M131APolicyRlConfig {
-  enabled: boolean;
-  /** Model version string — increment on retrain */
-  modelVersion: string;
-  /** Feature schema hash — must match training schema */
+  enabled:          boolean;
+  modelVersion:     string;
   featureSchemaHash: string;
-  /** Inference latency SLO in ms (0 = batch/async) */
-  latencySLOMs: number;
+  latencySLOMs:     number;   // 0 = batch/async
 }
 
 // ── Inference placement ───────────────────────────────────────────────────────
@@ -122,87 +113,83 @@ export type M131APlacement = 'server';
 export interface M131AInferencePlacement {
   /** Server-side — integrity, balancing, anti-abuse, economy */
   server: boolean;
-  /** Inference budget: real_time | batch | hybrid */
   budget: 'batch';
 }
 
 // ── Guardrails (non-negotiable) ───────────────────────────────────────────────
 export interface M131AGuardrails {
-  /** ML NEVER rewrites resolved ledger history */
-  determinismPreserved:   true;
-  /** All outputs have explicit caps + monotonic constraints */
-  boundedNudges:          true;
-  /** Every inference writes a signed receipt to the run ledger */
-  auditabilityRequired:   true;
-  /** No contact-graph mining; in-session signals only */
-  privacyEnforced:        true;
-  /** Competitive modes can lock off balance nudges (integrity always stays on) */
-  competitiveLockOffAllowed: true;
-  /** Output cap for the primary score field */
-  scoreCap:               1.0;
-  /** Minimum abstain threshold — below this confidence, output null recommendation */
-  abstainThreshold:       number;
+  determinismPreserved:        true;
+  boundedNudges:               true;
+  auditabilityRequired:        true;
+  privacyEnforced:             true;
+  competitiveLockOffAllowed:   true;
+  scoreCap:                    1.0;
+  abstainThreshold:            number;
 }
 
-// ── Evaluation contract (minimum bar) ────────────────────────────────────────
+// ── Evaluation contract ───────────────────────────────────────────────────────
 export interface M131AEvalContract {
   /** sponsor_match_acceptance */
   /** power_guard_AUC */
   /** identity_alignment_accuracy */
-  /** All mechanics: moment yield ≥ 3 share moments/run (FUBAR, flip, missed bag) */
-  momentYieldMinimum: 3;
-  /** All mechanics: trust metric — low 'rigged' reports */
+  momentYieldMinimum:  3;
   maxRiggedReportRate: number;
-  /** All mechanics: fairness drift across skill bands */
-  maxFairnessDrift: number;
+  maxFairnessDrift:    number;
 }
 
 // ── Model card ────────────────────────────────────────────────────────────────
-/** Identity stamp — emitted with every inference receipt */
 export interface M131AModelCard {
-  modelId:           'M131A';
-  coreMechanicPair:  'M131';
-  tier:              M131ATier;
-  modelVersion:      string;
-  trainCutDate:      string;
-  featureSchemaHash: string;
-  ruleset_version:   string;
+  modelId:            'M131A';
+  coreMechanicPair:   'M131';
+  intelligenceSignal: 'personalization';
+  modelCategory:      'recommender';
+  family:             'social';
+  tier:               M131ATier;
+  modelVersion:       string;
+  trainCutDate:       string;
+  featureSchemaHash:  string;
+  rulesetVersion:     string;
 }
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 export const M131A_ML_CONSTANTS = {
-  ML_ID:            'M131A',
-  CORE_PAIR:        'M131',
-  MODEL_NAME:       'Faction Sponsor Match + Power Guard',
-  TIERS:            ['baseline', 'sequence_dl', 'policy_rl'] as const,
-  PLACEMENT:        ['server'] as const,
-  BUDGET:           'batch' as const,
-  CAN_LOCK_OFF:      true,
+  ML_ID:              'M131A',
+  CORE_PAIR:          'M131',
+  MODEL_NAME:         'Faction Sponsor Match + Power Guard',
+  INTEL_SIGNAL:       'personalization' as const,
+  MODEL_CATEGORY:     'recommender' as const,
+  FAMILY:             'social' as const,
+  TIERS:              ['baseline', 'sequence_dl', 'policy_rl'] as const,
+  PLACEMENT:          ['server'] as const,
+  BUDGET:             'batch' as const,
+  CAN_LOCK_OFF:        true,
   GUARDRAILS: {
-    determinismPreserved:       true,
-    boundedNudges:              true,
-    auditabilityRequired:       true,
-    privacyEnforced:            true,
-    competitiveLockOffAllowed:  true,
-    scoreCap:                   1.0,
-    abstainThreshold:           0.35,
+    determinismPreserved:      true,
+    boundedNudges:             true,
+    auditabilityRequired:      true,
+    privacyEnforced:           true,
+    competitiveLockOffAllowed: true,
+    scoreCap:                  1.0,
+    abstainThreshold:          0.35,
   },
-  EVAL_FOCUS: ["sponsor_match_acceptance", "power_guard_AUC", "identity_alignment_accuracy"],
-  PRIMARY_OUTPUTS: ["sponsor_match", "power_guard_verified", "faction_receipt", "identity_alignment_score"],
+  EVAL_FOCUS:         ["sponsor_match_acceptance", "power_guard_AUC", "identity_alignment_accuracy"],
+  PRIMARY_OUTPUTS:    ["sponsor_match", "power_guard_verified", "faction_receipt", "identity_alignment_score"],
+  TELEMETRY_EVENTS:   [],
 } as const;
 
 // ── Main inference function ───────────────────────────────────────────────────
 /**
  * runM131aMl
  *
- * Async — fires after core exec_hook (M131), reads output, returns advisory signals.
- * NEVER mutates state. All suggestions are bounded. Competitive mode can disable
- * balance nudges (can_lock_off=true); integrity signals always run.
+ * Fires after M131 exec_hook, reads resolved output, returns advisory signals.
+ * NEVER mutates game state. All suggestions are bounded.
+ * Competitive mode may disable balance nudges (can_lock_off=true).
+ * Integrity signals always run regardless of lock-off state.
  *
- * @param input     - Telemetry input snapshot
- * @param tier      - Model tier to use (default: 'baseline' for latency budget)
- * @param modelCard - Identity stamp for audit receipt
- * @returns         - M131AOutput + signed audit_hash
+ * @param input     Telemetry snapshot
+ * @param tier      Model tier to route (default: 'baseline' for latency budget)
+ * @param modelCard Identity stamp written to every audit receipt
+ * @returns         M131AOutput with signed auditHash
  */
 export async function runM131aMl(
   input:     M131ATelemetryInput,
@@ -214,31 +201,29 @@ export async function runM131aMl(
   // Implementation checklist:
   // □ Validate input schema against featureSchemaHash
   // □ Select inference backend based on `tier` parameter
+  // □ tier === 'baseline' → GBM + calibrated logistic (fast, low-cost, production default)
+  // □ tier === 'sequence_dl' → TCN / Transformer encoder over event streams (sequential patterns)
+  // □ tier === 'policy_rl' → Constrained contextual bandit / offline PPO (bounded nudges)
   // □ Apply input privacy filters (no PII, no cross-player contact graph)
   // □ Run inference → raw score + top_factors
   // □ Apply output caps: score = Math.min(score, M131A_ML_CONSTANTS.GUARDRAILS.scoreCap)
   // □ Apply monotonic constraints where relevant
-  // □ Abstain if confidence < abstainThreshold (return null recommendation)
+  // □ Abstain if confidence < M131A_ML_CONSTANTS.GUARDRAILS.abstainThreshold
   // □ Compute auditHash = SHA256(inputs + outputs + ruleset_version + caps)
-  // □ Write signed receipt to run ledger (never skip this step)
-  // □ Return M131AOutput — never mutate run state directly
-  //
-  // Tier routing:
-  // // □ tier === 'baseline' → Gradient-boosted trees + calibrated logistic models (fast, low-cost, production default)
-// □ tier === 'sequence_dl' → TCN / Transformer encoder over event streams (higher accuracy, sequential patterns)
-// □ tier === 'policy_rl' → Constrained contextual bandit / offline RL (decision routing + bounded nudges)
+  // □ Write signed receipt to run ledger (NEVER skip)
+  // □ Return M131AOutput — NEVER mutate run state directly
   //
   // Placement: server | Budget: batch
-  //
+  // ExecHook:  after_m131_resolve
   // ─────────────────────────────────────────────────────────────────────────
-  throw new Error('M131A (Faction Sponsor Match + Power Guard) ML inference is not yet implemented.');
+  throw new Error('M131A (Faction Sponsor Match + Power Guard) ML inference not yet implemented.');
 }
 
-// ── Degraded mode fallback ────────────────────────────────────────────────────
+// ── Degraded-mode fallback ────────────────────────────────────────────────────
 /**
- * M131AFallback — rule-based fallback when ML is unavailable.
- * Must never throw; must return a valid (degraded) M131AOutput.
- * Competitive modes may use this exclusively when ML is locked off.
+ * runM131aMlFallback — rule-based fallback when ML is unavailable.
+ * Must never throw. Returns valid (degraded) M131AOutput.
+ * Competitive modes use this when ML nudges are locked off.
  */
 export function runM131aMlFallback(
   _input: M131ATelemetryInput,
@@ -252,3 +237,9 @@ export function runM131aMlFallback(
   //   □ Zero-out all M131A-specific extended outputs
   throw new Error('M131A fallback not yet implemented.');
 }
+
+// ── IntelligenceState integration note ───────────────────────────────────────
+// This mechanic writes to IntelligenceState.personalization
+// Heuristic substitute (until ML is live):
+//   intelligence.personalization = skillBandIndex * sessionProgressionRate
+// Replace with: runM131aMl(telemetry, tier, modelCard).then(out => intelligence.personalization = out.score)

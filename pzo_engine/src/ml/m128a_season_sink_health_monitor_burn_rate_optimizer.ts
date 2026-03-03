@@ -5,6 +5,9 @@
 //
 // ML Companion : M128A — Season Sink Health Monitor + Burn Rate Optimizer
 // Core Pair    : M128
+// Family       : economy
+// Category     : controller
+// IntelSignal  : volatility
 // Tiers        : BASELINE, SEQUENCE_DL, POLICY_RL
 // Placement    : server
 // Budget       : batch
@@ -14,7 +17,7 @@
 //   ✦ ML can suggest; rules decide — NEVER rewrite resolved ledger history
 //   ✦ Bounded nudges — all outputs have explicit caps + monotonic constraints
 //   ✦ Auditability — every inference writes (ruleset_version, seed, tick, cap, output)
-//   ✦ Privacy — no contact-graph mining; in-session signals only for social reasoning
+//   ✦ Privacy — no contact-graph mining; in-session signals only
 //
 // Density6 LLC · Point Zero One · Confidential · All Rights Reserved
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -31,10 +34,11 @@
  * 2. Optimize burn rate recommendations to prevent currency devaluation.
  * 3. Generates sink health digest for season design team.
  *
- * Core mechanic pair: M128
+ * Intelligence signal → IntelligenceState.volatility
+ * Core mechanic pair  → M128
  */
 
-// ── Shared telemetry input (standard across all ML companions) ────────────────
+// ── Telemetry input ───────────────────────────────────────────────────────────
 export interface M128ATelemetryInput {
   runSeed:           string;
   tickIndex:         number;
@@ -45,28 +49,24 @@ export interface M128ATelemetryInput {
   uiInteraction:     Record<string, unknown>;
   socialEvents:      Record<string, unknown>[];
   outcomeEvents:     Record<string, unknown>[];
-  /** Optional — only included for mechanics that need ledger history */
   ledgerEvents?:     Record<string, unknown>[];
-  /** Optional — only included for contract-graph mechanics */
   contractGraph?:    Record<string, unknown>;
-  /** Player opt-in preferences — ML honours opt-out silently */
   userOptIn:         Record<string, boolean>;
+  // Extended inputs for M128A (economy family)
+
 }
+
+// Telemetry events subscribed by M128A
+// 
 
 // ── Primary output contract ───────────────────────────────────────────────────
-/** Standard base output — all ML mechanics return this shape + extensions */
 export interface M128ABaseOutput {
-  /** 0–1 score — semantic depends on mechanic (risk / value / trust / etc.) */
-  score:          number;
-  /** ≤5 plain-English factors explaining the score */
+  score:          number;  // 0–1, semantic depends on mechanic
   topFactors:     string[];
-  /** Single-sentence bounded recommendation (never a guarantee) */
   recommendation: string;
-  /** SHA256(inputs + outputs + ruleset_version + caps) */
-  auditHash:      string;
+  auditHash:      string;  // SHA256(inputs + outputs + ruleset_version + caps)
 }
 
-/** Extended output — M128A-specific signals */
 export interface M128AOutput extends M128ABaseOutput {
   sinkHealthScore: unknown;  // sink_health_score
   burnRateRecommendation: unknown;  // burn_rate_recommendation
@@ -78,42 +78,33 @@ export interface M128AOutput extends M128ABaseOutput {
 export type M128ATier = 'baseline' | 'sequence_dl' | 'policy_rl';
 
 /** M128A — Tier: BASELINE
- *  Gradient-boosted trees + calibrated logistic models (fast, low-cost, production default)
+ *  GBM + calibrated logistic (fast, low-cost, production default)
  */
 export interface M128ABaselineConfig {
-  enabled: boolean;
-  /** Model version string — increment on retrain */
-  modelVersion: string;
-  /** Feature schema hash — must match training schema */
+  enabled:          boolean;
+  modelVersion:     string;
   featureSchemaHash: string;
-  /** Inference latency SLO in ms (0 = batch/async) */
-  latencySLOMs: number;
+  latencySLOMs:     number;   // 0 = batch/async
 }
 
 /** M128A — Tier: SEQUENCE_DL
- *  TCN / Transformer encoder over event streams (higher accuracy, sequential patterns)
+ *  TCN / Transformer encoder over event streams (sequential patterns)
  */
 export interface M128ASequenceDlConfig {
-  enabled: boolean;
-  /** Model version string — increment on retrain */
-  modelVersion: string;
-  /** Feature schema hash — must match training schema */
+  enabled:          boolean;
+  modelVersion:     string;
   featureSchemaHash: string;
-  /** Inference latency SLO in ms (0 = batch/async) */
-  latencySLOMs: number;
+  latencySLOMs:     number;   // 0 = batch/async
 }
 
 /** M128A — Tier: POLICY_RL
- *  Constrained contextual bandit / offline RL (decision routing + bounded nudges)
+ *  Constrained contextual bandit / offline PPO (bounded nudges)
  */
 export interface M128APolicyRlConfig {
-  enabled: boolean;
-  /** Model version string — increment on retrain */
-  modelVersion: string;
-  /** Feature schema hash — must match training schema */
+  enabled:          boolean;
+  modelVersion:     string;
   featureSchemaHash: string;
-  /** Inference latency SLO in ms (0 = batch/async) */
-  latencySLOMs: number;
+  latencySLOMs:     number;   // 0 = batch/async
 }
 
 // ── Inference placement ───────────────────────────────────────────────────────
@@ -122,87 +113,83 @@ export type M128APlacement = 'server';
 export interface M128AInferencePlacement {
   /** Server-side — integrity, balancing, anti-abuse, economy */
   server: boolean;
-  /** Inference budget: real_time | batch | hybrid */
   budget: 'batch';
 }
 
 // ── Guardrails (non-negotiable) ───────────────────────────────────────────────
 export interface M128AGuardrails {
-  /** ML NEVER rewrites resolved ledger history */
-  determinismPreserved:   true;
-  /** All outputs have explicit caps + monotonic constraints */
-  boundedNudges:          true;
-  /** Every inference writes a signed receipt to the run ledger */
-  auditabilityRequired:   true;
-  /** No contact-graph mining; in-session signals only */
-  privacyEnforced:        true;
-  /** Competitive modes can lock off balance nudges (integrity always stays on) */
-  competitiveLockOffAllowed: true;
-  /** Output cap for the primary score field */
-  scoreCap:               1.0;
-  /** Minimum abstain threshold — below this confidence, output null recommendation */
-  abstainThreshold:       number;
+  determinismPreserved:        true;
+  boundedNudges:               true;
+  auditabilityRequired:        true;
+  privacyEnforced:             true;
+  competitiveLockOffAllowed:   true;
+  scoreCap:                    1.0;
+  abstainThreshold:            number;
 }
 
-// ── Evaluation contract (minimum bar) ────────────────────────────────────────
+// ── Evaluation contract ───────────────────────────────────────────────────────
 export interface M128AEvalContract {
   /** sink_health_stability */
   /** devaluation_prediction_AUC */
   /** burn_rate_calibration */
-  /** All mechanics: moment yield ≥ 3 share moments/run (FUBAR, flip, missed bag) */
-  momentYieldMinimum: 3;
-  /** All mechanics: trust metric — low 'rigged' reports */
+  momentYieldMinimum:  3;
   maxRiggedReportRate: number;
-  /** All mechanics: fairness drift across skill bands */
-  maxFairnessDrift: number;
+  maxFairnessDrift:    number;
 }
 
 // ── Model card ────────────────────────────────────────────────────────────────
-/** Identity stamp — emitted with every inference receipt */
 export interface M128AModelCard {
-  modelId:           'M128A';
-  coreMechanicPair:  'M128';
-  tier:              M128ATier;
-  modelVersion:      string;
-  trainCutDate:      string;
-  featureSchemaHash: string;
-  ruleset_version:   string;
+  modelId:            'M128A';
+  coreMechanicPair:   'M128';
+  intelligenceSignal: 'volatility';
+  modelCategory:      'controller';
+  family:             'economy';
+  tier:               M128ATier;
+  modelVersion:       string;
+  trainCutDate:       string;
+  featureSchemaHash:  string;
+  rulesetVersion:     string;
 }
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 export const M128A_ML_CONSTANTS = {
-  ML_ID:            'M128A',
-  CORE_PAIR:        'M128',
-  MODEL_NAME:       'Season Sink Health Monitor + Burn Rate Optimizer',
-  TIERS:            ['baseline', 'sequence_dl', 'policy_rl'] as const,
-  PLACEMENT:        ['server'] as const,
-  BUDGET:           'batch' as const,
-  CAN_LOCK_OFF:      true,
+  ML_ID:              'M128A',
+  CORE_PAIR:          'M128',
+  MODEL_NAME:         'Season Sink Health Monitor + Burn Rate Optimizer',
+  INTEL_SIGNAL:       'volatility' as const,
+  MODEL_CATEGORY:     'controller' as const,
+  FAMILY:             'economy' as const,
+  TIERS:              ['baseline', 'sequence_dl', 'policy_rl'] as const,
+  PLACEMENT:          ['server'] as const,
+  BUDGET:             'batch' as const,
+  CAN_LOCK_OFF:        true,
   GUARDRAILS: {
-    determinismPreserved:       true,
-    boundedNudges:              true,
-    auditabilityRequired:       true,
-    privacyEnforced:            true,
-    competitiveLockOffAllowed:  true,
-    scoreCap:                   1.0,
-    abstainThreshold:           0.35,
+    determinismPreserved:      true,
+    boundedNudges:             true,
+    auditabilityRequired:      true,
+    privacyEnforced:           true,
+    competitiveLockOffAllowed: true,
+    scoreCap:                  1.0,
+    abstainThreshold:          0.35,
   },
-  EVAL_FOCUS: ["sink_health_stability", "devaluation_prediction_AUC", "burn_rate_calibration"],
-  PRIMARY_OUTPUTS: ["sink_health_score", "burn_rate_recommendation", "devaluation_risk", "design_digest"],
+  EVAL_FOCUS:         ["sink_health_stability", "devaluation_prediction_AUC", "burn_rate_calibration"],
+  PRIMARY_OUTPUTS:    ["sink_health_score", "burn_rate_recommendation", "devaluation_risk", "design_digest"],
+  TELEMETRY_EVENTS:   [],
 } as const;
 
 // ── Main inference function ───────────────────────────────────────────────────
 /**
  * runM128aMl
  *
- * Async — fires after core exec_hook (M128), reads output, returns advisory signals.
- * NEVER mutates state. All suggestions are bounded. Competitive mode can disable
- * balance nudges (can_lock_off=true); integrity signals always run.
+ * Fires after M128 exec_hook, reads resolved output, returns advisory signals.
+ * NEVER mutates game state. All suggestions are bounded.
+ * Competitive mode may disable balance nudges (can_lock_off=true).
+ * Integrity signals always run regardless of lock-off state.
  *
- * @param input     - Telemetry input snapshot
- * @param tier      - Model tier to use (default: 'baseline' for latency budget)
- * @param modelCard - Identity stamp for audit receipt
- * @returns         - M128AOutput + signed audit_hash
+ * @param input     Telemetry snapshot
+ * @param tier      Model tier to route (default: 'baseline' for latency budget)
+ * @param modelCard Identity stamp written to every audit receipt
+ * @returns         M128AOutput with signed auditHash
  */
 export async function runM128aMl(
   input:     M128ATelemetryInput,
@@ -214,31 +201,29 @@ export async function runM128aMl(
   // Implementation checklist:
   // □ Validate input schema against featureSchemaHash
   // □ Select inference backend based on `tier` parameter
+  // □ tier === 'baseline' → GBM + calibrated logistic (fast, low-cost, production default)
+  // □ tier === 'sequence_dl' → TCN / Transformer encoder over event streams (sequential patterns)
+  // □ tier === 'policy_rl' → Constrained contextual bandit / offline PPO (bounded nudges)
   // □ Apply input privacy filters (no PII, no cross-player contact graph)
   // □ Run inference → raw score + top_factors
   // □ Apply output caps: score = Math.min(score, M128A_ML_CONSTANTS.GUARDRAILS.scoreCap)
   // □ Apply monotonic constraints where relevant
-  // □ Abstain if confidence < abstainThreshold (return null recommendation)
+  // □ Abstain if confidence < M128A_ML_CONSTANTS.GUARDRAILS.abstainThreshold
   // □ Compute auditHash = SHA256(inputs + outputs + ruleset_version + caps)
-  // □ Write signed receipt to run ledger (never skip this step)
-  // □ Return M128AOutput — never mutate run state directly
-  //
-  // Tier routing:
-  // // □ tier === 'baseline' → Gradient-boosted trees + calibrated logistic models (fast, low-cost, production default)
-// □ tier === 'sequence_dl' → TCN / Transformer encoder over event streams (higher accuracy, sequential patterns)
-// □ tier === 'policy_rl' → Constrained contextual bandit / offline RL (decision routing + bounded nudges)
+  // □ Write signed receipt to run ledger (NEVER skip)
+  // □ Return M128AOutput — NEVER mutate run state directly
   //
   // Placement: server | Budget: batch
-  //
+  // ExecHook:  after_m128_resolve
   // ─────────────────────────────────────────────────────────────────────────
-  throw new Error('M128A (Season Sink Health Monitor + Burn Rate Optimizer) ML inference is not yet implemented.');
+  throw new Error('M128A (Season Sink Health Monitor + Burn Rate Optimizer) ML inference not yet implemented.');
 }
 
-// ── Degraded mode fallback ────────────────────────────────────────────────────
+// ── Degraded-mode fallback ────────────────────────────────────────────────────
 /**
- * M128AFallback — rule-based fallback when ML is unavailable.
- * Must never throw; must return a valid (degraded) M128AOutput.
- * Competitive modes may use this exclusively when ML is locked off.
+ * runM128aMlFallback — rule-based fallback when ML is unavailable.
+ * Must never throw. Returns valid (degraded) M128AOutput.
+ * Competitive modes use this when ML nudges are locked off.
  */
 export function runM128aMlFallback(
   _input: M128ATelemetryInput,
@@ -252,3 +237,9 @@ export function runM128aMlFallback(
   //   □ Zero-out all M128A-specific extended outputs
   throw new Error('M128A fallback not yet implemented.');
 }
+
+// ── IntelligenceState integration note ───────────────────────────────────────
+// This mechanic writes to IntelligenceState.volatility
+// Heuristic substitute (until ML is live):
+//   intelligence.volatility = macroRegimeConfidence * shockProbability
+// Replace with: runM128aMl(telemetry, tier, modelCard).then(out => intelligence.volatility = out.score)

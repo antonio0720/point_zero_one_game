@@ -5,16 +5,19 @@
 //
 // ML Companion : M72A — Action Budget Anomaly Detector (Anti-Bot Pace Control)
 // Core Pair    : M72
+// Family       : integrity
+// Category     : anomaly_detector
+// IntelSignal  : antiCheat
 // Tiers        : BASELINE, SEQUENCE_DL, GRAPH_DL, POLICY_RL
 // Placement    : server
 // Budget       : real_time
-// Lock-Off     : NO — always active (integrity/anti-cheat)
+// Lock-Off     : NO — always active (integrity / anti-cheat)
 //
 // ML Design Laws (non-negotiable):
 //   ✦ ML can suggest; rules decide — NEVER rewrite resolved ledger history
 //   ✦ Bounded nudges — all outputs have explicit caps + monotonic constraints
 //   ✦ Auditability — every inference writes (ruleset_version, seed, tick, cap, output)
-//   ✦ Privacy — no contact-graph mining; in-session signals only for social reasoning
+//   ✦ Privacy — no contact-graph mining; in-session signals only
 //
 // Density6 LLC · Point Zero One · Confidential · All Rights Reserved
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -31,10 +34,11 @@
  * 2. Distinguishes bots from high-skill humans: fast doesn't mean bot.
  * 3. Feeds Device Trust Fusion (M71a) with behavioral anomaly signals.
  *
- * Core mechanic pair: M72
+ * Intelligence signal → IntelligenceState.antiCheat
+ * Core mechanic pair  → M72
  */
 
-// ── Shared telemetry input (standard across all ML companions) ────────────────
+// ── Telemetry input ───────────────────────────────────────────────────────────
 export interface M72ATelemetryInput {
   runSeed:           string;
   tickIndex:         number;
@@ -45,28 +49,24 @@ export interface M72ATelemetryInput {
   uiInteraction:     Record<string, unknown>;
   socialEvents:      Record<string, unknown>[];
   outcomeEvents:     Record<string, unknown>[];
-  /** Optional — only included for mechanics that need ledger history */
   ledgerEvents?:     Record<string, unknown>[];
-  /** Optional — only included for contract-graph mechanics */
   contractGraph?:    Record<string, unknown>;
-  /** Player opt-in preferences — ML honours opt-out silently */
   userOptIn:         Record<string, boolean>;
+  // Extended inputs for M72A (integrity family)
+
 }
+
+// Telemetry events subscribed by M72A
+// 
 
 // ── Primary output contract ───────────────────────────────────────────────────
-/** Standard base output — all ML mechanics return this shape + extensions */
 export interface M72ABaseOutput {
-  /** 0–1 score — semantic depends on mechanic (risk / value / trust / etc.) */
-  score:          number;
-  /** ≤5 plain-English factors explaining the score */
+  score:          number;  // 0–1, semantic depends on mechanic
   topFactors:     string[];
-  /** Single-sentence bounded recommendation (never a guarantee) */
   recommendation: string;
-  /** SHA256(inputs + outputs + ruleset_version + caps) */
-  auditHash:      string;
+  auditHash:      string;  // SHA256(inputs + outputs + ruleset_version + caps)
 }
 
-/** Extended output — M72A-specific signals */
 export interface M72AOutput extends M72ABaseOutput {
   botProbability: unknown;  // bot_probability
   pacingAnomalyScore: unknown;  // pacing_anomaly_score
@@ -78,55 +78,43 @@ export interface M72AOutput extends M72ABaseOutput {
 export type M72ATier = 'baseline' | 'sequence_dl' | 'graph_dl' | 'policy_rl';
 
 /** M72A — Tier: BASELINE
- *  Gradient-boosted trees + calibrated logistic models (fast, low-cost, production default)
+ *  GBM + calibrated logistic (fast, low-cost, production default)
  */
 export interface M72ABaselineConfig {
-  enabled: boolean;
-  /** Model version string — increment on retrain */
-  modelVersion: string;
-  /** Feature schema hash — must match training schema */
+  enabled:          boolean;
+  modelVersion:     string;
   featureSchemaHash: string;
-  /** Inference latency SLO in ms (0 = batch/async) */
-  latencySLOMs: number;
+  latencySLOMs:     number;   // 0 = batch/async
 }
 
 /** M72A — Tier: SEQUENCE_DL
- *  TCN / Transformer encoder over event streams (higher accuracy, sequential patterns)
+ *  TCN / Transformer encoder over event streams (sequential patterns)
  */
 export interface M72ASequenceDlConfig {
-  enabled: boolean;
-  /** Model version string — increment on retrain */
-  modelVersion: string;
-  /** Feature schema hash — must match training schema */
+  enabled:          boolean;
+  modelVersion:     string;
   featureSchemaHash: string;
-  /** Inference latency SLO in ms (0 = batch/async) */
-  latencySLOMs: number;
+  latencySLOMs:     number;   // 0 = batch/async
 }
 
 /** M72A — Tier: GRAPH_DL
- *  GNN over contract / market / ledger graphs (relationship-aware, higher cost)
+ *  GNN over contract / market / ledger graphs (relationship-aware)
  */
 export interface M72AGraphDlConfig {
-  enabled: boolean;
-  /** Model version string — increment on retrain */
-  modelVersion: string;
-  /** Feature schema hash — must match training schema */
+  enabled:          boolean;
+  modelVersion:     string;
   featureSchemaHash: string;
-  /** Inference latency SLO in ms (0 = batch/async) */
-  latencySLOMs: number;
+  latencySLOMs:     number;   // 0 = batch/async
 }
 
 /** M72A — Tier: POLICY_RL
- *  Constrained contextual bandit / offline RL (decision routing + bounded nudges)
+ *  Constrained contextual bandit / offline PPO (bounded nudges)
  */
 export interface M72APolicyRlConfig {
-  enabled: boolean;
-  /** Model version string — increment on retrain */
-  modelVersion: string;
-  /** Feature schema hash — must match training schema */
+  enabled:          boolean;
+  modelVersion:     string;
   featureSchemaHash: string;
-  /** Inference latency SLO in ms (0 = batch/async) */
-  latencySLOMs: number;
+  latencySLOMs:     number;   // 0 = batch/async
 }
 
 // ── Inference placement ───────────────────────────────────────────────────────
@@ -135,87 +123,83 @@ export type M72APlacement = 'server';
 export interface M72AInferencePlacement {
   /** Server-side — integrity, balancing, anti-abuse, economy */
   server: boolean;
-  /** Inference budget: real_time | batch | hybrid */
   budget: 'real_time';
 }
 
 // ── Guardrails (non-negotiable) ───────────────────────────────────────────────
 export interface M72AGuardrails {
-  /** ML NEVER rewrites resolved ledger history */
-  determinismPreserved:   true;
-  /** All outputs have explicit caps + monotonic constraints */
-  boundedNudges:          true;
-  /** Every inference writes a signed receipt to the run ledger */
-  auditabilityRequired:   true;
-  /** No contact-graph mining; in-session signals only */
-  privacyEnforced:        true;
-  /** Competitive modes can lock off balance nudges (integrity always stays on) */
-  competitiveLockOffAllowed: false;
-  /** Output cap for the primary score field */
-  scoreCap:               1.0;
-  /** Minimum abstain threshold — below this confidence, output null recommendation */
-  abstainThreshold:       number;
+  determinismPreserved:        true;
+  boundedNudges:               true;
+  auditabilityRequired:        true;
+  privacyEnforced:             true;
+  competitiveLockOffAllowed:   false;
+  scoreCap:                    1.0;
+  abstainThreshold:            number;
 }
 
-// ── Evaluation contract (minimum bar) ────────────────────────────────────────
+// ── Evaluation contract ───────────────────────────────────────────────────────
 export interface M72AEvalContract {
   /** bot_detection_AUC */
   /** human_false_positive_rate */
   /** pacing_calibration */
-  /** All mechanics: moment yield ≥ 3 share moments/run (FUBAR, flip, missed bag) */
-  momentYieldMinimum: 3;
-  /** All mechanics: trust metric — low 'rigged' reports */
+  momentYieldMinimum:  3;
   maxRiggedReportRate: number;
-  /** All mechanics: fairness drift across skill bands */
-  maxFairnessDrift: number;
+  maxFairnessDrift:    number;
 }
 
 // ── Model card ────────────────────────────────────────────────────────────────
-/** Identity stamp — emitted with every inference receipt */
 export interface M72AModelCard {
-  modelId:           'M72A';
-  coreMechanicPair:  'M72';
-  tier:              M72ATier;
-  modelVersion:      string;
-  trainCutDate:      string;
-  featureSchemaHash: string;
-  ruleset_version:   string;
+  modelId:            'M72A';
+  coreMechanicPair:   'M72';
+  intelligenceSignal: 'antiCheat';
+  modelCategory:      'anomaly_detector';
+  family:             'integrity';
+  tier:               M72ATier;
+  modelVersion:       string;
+  trainCutDate:       string;
+  featureSchemaHash:  string;
+  rulesetVersion:     string;
 }
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 export const M72A_ML_CONSTANTS = {
-  ML_ID:            'M72A',
-  CORE_PAIR:        'M72',
-  MODEL_NAME:       'Action Budget Anomaly Detector (Anti-Bot Pace Control)',
-  TIERS:            ['baseline', 'sequence_dl', 'graph_dl', 'policy_rl'] as const,
-  PLACEMENT:        ['server'] as const,
-  BUDGET:           'real_time' as const,
-  CAN_LOCK_OFF:      false,
+  ML_ID:              'M72A',
+  CORE_PAIR:          'M72',
+  MODEL_NAME:         'Action Budget Anomaly Detector (Anti-Bot Pace Control)',
+  INTEL_SIGNAL:       'antiCheat' as const,
+  MODEL_CATEGORY:     'anomaly_detector' as const,
+  FAMILY:             'integrity' as const,
+  TIERS:              ['baseline', 'sequence_dl', 'graph_dl', 'policy_rl'] as const,
+  PLACEMENT:          ['server'] as const,
+  BUDGET:             'real_time' as const,
+  CAN_LOCK_OFF:        false,
   GUARDRAILS: {
-    determinismPreserved:       true,
-    boundedNudges:              true,
-    auditabilityRequired:       true,
-    privacyEnforced:            true,
-    competitiveLockOffAllowed:  false,
-    scoreCap:                   1.0,
-    abstainThreshold:           0.35,
+    determinismPreserved:      true,
+    boundedNudges:             true,
+    auditabilityRequired:      true,
+    privacyEnforced:           true,
+    competitiveLockOffAllowed: false,
+    scoreCap:                  1.0,
+    abstainThreshold:          0.35,
   },
-  EVAL_FOCUS: ["bot_detection_AUC", "human_false_positive_rate", "pacing_calibration"],
-  PRIMARY_OUTPUTS: ["bot_probability", "pacing_anomaly_score", "human_skill_estimate", "device_trust_signal"],
+  EVAL_FOCUS:         ["bot_detection_AUC", "human_false_positive_rate", "pacing_calibration"],
+  PRIMARY_OUTPUTS:    ["bot_probability", "pacing_anomaly_score", "human_skill_estimate", "device_trust_signal"],
+  TELEMETRY_EVENTS:   [],
 } as const;
 
 // ── Main inference function ───────────────────────────────────────────────────
 /**
  * runM72aMl
  *
- * Async — fires after core exec_hook (M72), reads output, returns advisory signals.
- * NEVER mutates state. All suggestions are bounded. Competitive mode can disable
- * balance nudges (can_lock_off=false); integrity signals always run.
+ * Fires after M72 exec_hook, reads resolved output, returns advisory signals.
+ * NEVER mutates game state. All suggestions are bounded.
+ * Competitive mode may disable balance nudges (can_lock_off=false).
+ * Integrity signals always run regardless of lock-off state.
  *
- * @param input     - Telemetry input snapshot
- * @param tier      - Model tier to use (default: 'baseline' for latency budget)
- * @param modelCard - Identity stamp for audit receipt
- * @returns         - M72AOutput + signed audit_hash
+ * @param input     Telemetry snapshot
+ * @param tier      Model tier to route (default: 'baseline' for latency budget)
+ * @param modelCard Identity stamp written to every audit receipt
+ * @returns         M72AOutput with signed auditHash
  */
 export async function runM72aMl(
   input:     M72ATelemetryInput,
@@ -227,32 +211,30 @@ export async function runM72aMl(
   // Implementation checklist:
   // □ Validate input schema against featureSchemaHash
   // □ Select inference backend based on `tier` parameter
+  // □ tier === 'baseline' → GBM + calibrated logistic (fast, low-cost, production default)
+  // □ tier === 'sequence_dl' → TCN / Transformer encoder over event streams (sequential patterns)
+  // □ tier === 'graph_dl' → GNN over contract / market / ledger graphs (relationship-aware)
+  // □ tier === 'policy_rl' → Constrained contextual bandit / offline PPO (bounded nudges)
   // □ Apply input privacy filters (no PII, no cross-player contact graph)
   // □ Run inference → raw score + top_factors
   // □ Apply output caps: score = Math.min(score, M72A_ML_CONSTANTS.GUARDRAILS.scoreCap)
   // □ Apply monotonic constraints where relevant
-  // □ Abstain if confidence < abstainThreshold (return null recommendation)
+  // □ Abstain if confidence < M72A_ML_CONSTANTS.GUARDRAILS.abstainThreshold
   // □ Compute auditHash = SHA256(inputs + outputs + ruleset_version + caps)
-  // □ Write signed receipt to run ledger (never skip this step)
-  // □ Return M72AOutput — never mutate run state directly
-  //
-  // Tier routing:
-  // // □ tier === 'baseline' → Gradient-boosted trees + calibrated logistic models (fast, low-cost, production default)
-// □ tier === 'sequence_dl' → TCN / Transformer encoder over event streams (higher accuracy, sequential patterns)
-// □ tier === 'graph_dl' → GNN over contract / market / ledger graphs (relationship-aware, higher cost)
-// □ tier === 'policy_rl' → Constrained contextual bandit / offline RL (decision routing + bounded nudges)
+  // □ Write signed receipt to run ledger (NEVER skip)
+  // □ Return M72AOutput — NEVER mutate run state directly
   //
   // Placement: server | Budget: real_time
-  //
+  // ExecHook:  after_m72_resolve
   // ─────────────────────────────────────────────────────────────────────────
-  throw new Error('M72A (Action Budget Anomaly Detector (Anti-Bot Pace Control)) ML inference is not yet implemented.');
+  throw new Error('M72A (Action Budget Anomaly Detector (Anti-Bot Pace Control)) ML inference not yet implemented.');
 }
 
-// ── Degraded mode fallback ────────────────────────────────────────────────────
+// ── Degraded-mode fallback ────────────────────────────────────────────────────
 /**
- * M72AFallback — rule-based fallback when ML is unavailable.
- * Must never throw; must return a valid (degraded) M72AOutput.
- * Competitive modes may use this exclusively when ML is locked off.
+ * runM72aMlFallback — rule-based fallback when ML is unavailable.
+ * Must never throw. Returns valid (degraded) M72AOutput.
+ * Competitive modes use this when ML nudges are locked off.
  */
 export function runM72aMlFallback(
   _input: M72ATelemetryInput,
@@ -266,3 +248,9 @@ export function runM72aMlFallback(
   //   □ Zero-out all M72A-specific extended outputs
   throw new Error('M72A fallback not yet implemented.');
 }
+
+// ── IntelligenceState integration note ───────────────────────────────────────
+// This mechanic writes to IntelligenceState.antiCheat
+// Heuristic substitute (until ML is live):
+//   intelligence.antiCheat = replayConsistencyScore * signatureValidity
+// Replace with: runM72aMl(telemetry, tier, modelCard).then(out => intelligence.antiCheat = out.score)

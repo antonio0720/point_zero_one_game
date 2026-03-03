@@ -5,6 +5,9 @@
 //
 // ML Companion : M76A — Contract Voting Dynamics Model (Deadlock + Manipulation Detection)
 // Core Pair    : M76
+// Family       : contract
+// Category     : predictor
+// IntelSignal  : antiCheat
 // Tiers        : BASELINE, SEQUENCE_DL, POLICY_RL
 // Placement    : server
 // Budget       : real_time
@@ -14,7 +17,7 @@
 //   ✦ ML can suggest; rules decide — NEVER rewrite resolved ledger history
 //   ✦ Bounded nudges — all outputs have explicit caps + monotonic constraints
 //   ✦ Auditability — every inference writes (ruleset_version, seed, tick, cap, output)
-//   ✦ Privacy — no contact-graph mining; in-session signals only for social reasoning
+//   ✦ Privacy — no contact-graph mining; in-session signals only
 //
 // Density6 LLC · Point Zero One · Confidential · All Rights Reserved
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -31,10 +34,11 @@
  * 2. Detect strategic manipulation: coordinated voting to block legitimate proposals.
  * 3. Surfaces minority-view confidence for fairer decision outcomes.
  *
- * Core mechanic pair: M76
+ * Intelligence signal → IntelligenceState.antiCheat
+ * Core mechanic pair  → M76
  */
 
-// ── Shared telemetry input (standard across all ML companions) ────────────────
+// ── Telemetry input ───────────────────────────────────────────────────────────
 export interface M76ATelemetryInput {
   runSeed:           string;
   tickIndex:         number;
@@ -45,28 +49,24 @@ export interface M76ATelemetryInput {
   uiInteraction:     Record<string, unknown>;
   socialEvents:      Record<string, unknown>[];
   outcomeEvents:     Record<string, unknown>[];
-  /** Optional — only included for mechanics that need ledger history */
   ledgerEvents?:     Record<string, unknown>[];
-  /** Optional — only included for contract-graph mechanics */
   contractGraph?:    Record<string, unknown>;
-  /** Player opt-in preferences — ML honours opt-out silently */
   userOptIn:         Record<string, boolean>;
+  // Extended inputs for M76A (contract family)
+
 }
+
+// Telemetry events subscribed by M76A
+// 
 
 // ── Primary output contract ───────────────────────────────────────────────────
-/** Standard base output — all ML mechanics return this shape + extensions */
 export interface M76ABaseOutput {
-  /** 0–1 score — semantic depends on mechanic (risk / value / trust / etc.) */
-  score:          number;
-  /** ≤5 plain-English factors explaining the score */
+  score:          number;  // 0–1, semantic depends on mechanic
   topFactors:     string[];
-  /** Single-sentence bounded recommendation (never a guarantee) */
   recommendation: string;
-  /** SHA256(inputs + outputs + ruleset_version + caps) */
-  auditHash:      string;
+  auditHash:      string;  // SHA256(inputs + outputs + ruleset_version + caps)
 }
 
-/** Extended output — M76A-specific signals */
 export interface M76AOutput extends M76ABaseOutput {
   deadlockProbability: unknown;  // deadlock_probability
   manipulationFlag: unknown;  // manipulation_flag
@@ -78,42 +78,33 @@ export interface M76AOutput extends M76ABaseOutput {
 export type M76ATier = 'baseline' | 'sequence_dl' | 'policy_rl';
 
 /** M76A — Tier: BASELINE
- *  Gradient-boosted trees + calibrated logistic models (fast, low-cost, production default)
+ *  GBM + calibrated logistic (fast, low-cost, production default)
  */
 export interface M76ABaselineConfig {
-  enabled: boolean;
-  /** Model version string — increment on retrain */
-  modelVersion: string;
-  /** Feature schema hash — must match training schema */
+  enabled:          boolean;
+  modelVersion:     string;
   featureSchemaHash: string;
-  /** Inference latency SLO in ms (0 = batch/async) */
-  latencySLOMs: number;
+  latencySLOMs:     number;   // 0 = batch/async
 }
 
 /** M76A — Tier: SEQUENCE_DL
- *  TCN / Transformer encoder over event streams (higher accuracy, sequential patterns)
+ *  TCN / Transformer encoder over event streams (sequential patterns)
  */
 export interface M76ASequenceDlConfig {
-  enabled: boolean;
-  /** Model version string — increment on retrain */
-  modelVersion: string;
-  /** Feature schema hash — must match training schema */
+  enabled:          boolean;
+  modelVersion:     string;
   featureSchemaHash: string;
-  /** Inference latency SLO in ms (0 = batch/async) */
-  latencySLOMs: number;
+  latencySLOMs:     number;   // 0 = batch/async
 }
 
 /** M76A — Tier: POLICY_RL
- *  Constrained contextual bandit / offline RL (decision routing + bounded nudges)
+ *  Constrained contextual bandit / offline PPO (bounded nudges)
  */
 export interface M76APolicyRlConfig {
-  enabled: boolean;
-  /** Model version string — increment on retrain */
-  modelVersion: string;
-  /** Feature schema hash — must match training schema */
+  enabled:          boolean;
+  modelVersion:     string;
   featureSchemaHash: string;
-  /** Inference latency SLO in ms (0 = batch/async) */
-  latencySLOMs: number;
+  latencySLOMs:     number;   // 0 = batch/async
 }
 
 // ── Inference placement ───────────────────────────────────────────────────────
@@ -122,87 +113,83 @@ export type M76APlacement = 'server';
 export interface M76AInferencePlacement {
   /** Server-side — integrity, balancing, anti-abuse, economy */
   server: boolean;
-  /** Inference budget: real_time | batch | hybrid */
   budget: 'real_time';
 }
 
 // ── Guardrails (non-negotiable) ───────────────────────────────────────────────
 export interface M76AGuardrails {
-  /** ML NEVER rewrites resolved ledger history */
-  determinismPreserved:   true;
-  /** All outputs have explicit caps + monotonic constraints */
-  boundedNudges:          true;
-  /** Every inference writes a signed receipt to the run ledger */
-  auditabilityRequired:   true;
-  /** No contact-graph mining; in-session signals only */
-  privacyEnforced:        true;
-  /** Competitive modes can lock off balance nudges (integrity always stays on) */
-  competitiveLockOffAllowed: true;
-  /** Output cap for the primary score field */
-  scoreCap:               1.0;
-  /** Minimum abstain threshold — below this confidence, output null recommendation */
-  abstainThreshold:       number;
+  determinismPreserved:        true;
+  boundedNudges:               true;
+  auditabilityRequired:        true;
+  privacyEnforced:             true;
+  competitiveLockOffAllowed:   true;
+  scoreCap:                    1.0;
+  abstainThreshold:            number;
 }
 
-// ── Evaluation contract (minimum bar) ────────────────────────────────────────
+// ── Evaluation contract ───────────────────────────────────────────────────────
 export interface M76AEvalContract {
   /** deadlock_calibration_ECE */
   /** manipulation_AUC */
   /** resolution_speed_lift */
-  /** All mechanics: moment yield ≥ 3 share moments/run (FUBAR, flip, missed bag) */
-  momentYieldMinimum: 3;
-  /** All mechanics: trust metric — low 'rigged' reports */
+  momentYieldMinimum:  3;
   maxRiggedReportRate: number;
-  /** All mechanics: fairness drift across skill bands */
-  maxFairnessDrift: number;
+  maxFairnessDrift:    number;
 }
 
 // ── Model card ────────────────────────────────────────────────────────────────
-/** Identity stamp — emitted with every inference receipt */
 export interface M76AModelCard {
-  modelId:           'M76A';
-  coreMechanicPair:  'M76';
-  tier:              M76ATier;
-  modelVersion:      string;
-  trainCutDate:      string;
-  featureSchemaHash: string;
-  ruleset_version:   string;
+  modelId:            'M76A';
+  coreMechanicPair:   'M76';
+  intelligenceSignal: 'antiCheat';
+  modelCategory:      'predictor';
+  family:             'contract';
+  tier:               M76ATier;
+  modelVersion:       string;
+  trainCutDate:       string;
+  featureSchemaHash:  string;
+  rulesetVersion:     string;
 }
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 export const M76A_ML_CONSTANTS = {
-  ML_ID:            'M76A',
-  CORE_PAIR:        'M76',
-  MODEL_NAME:       'Contract Voting Dynamics Model (Deadlock + Manipulation Detection)',
-  TIERS:            ['baseline', 'sequence_dl', 'policy_rl'] as const,
-  PLACEMENT:        ['server'] as const,
-  BUDGET:           'real_time' as const,
-  CAN_LOCK_OFF:      true,
+  ML_ID:              'M76A',
+  CORE_PAIR:          'M76',
+  MODEL_NAME:         'Contract Voting Dynamics Model (Deadlock + Manipulation Detection)',
+  INTEL_SIGNAL:       'antiCheat' as const,
+  MODEL_CATEGORY:     'predictor' as const,
+  FAMILY:             'contract' as const,
+  TIERS:              ['baseline', 'sequence_dl', 'policy_rl'] as const,
+  PLACEMENT:          ['server'] as const,
+  BUDGET:             'real_time' as const,
+  CAN_LOCK_OFF:        true,
   GUARDRAILS: {
-    determinismPreserved:       true,
-    boundedNudges:              true,
-    auditabilityRequired:       true,
-    privacyEnforced:            true,
-    competitiveLockOffAllowed:  true,
-    scoreCap:                   1.0,
-    abstainThreshold:           0.35,
+    determinismPreserved:      true,
+    boundedNudges:             true,
+    auditabilityRequired:      true,
+    privacyEnforced:           true,
+    competitiveLockOffAllowed: true,
+    scoreCap:                  1.0,
+    abstainThreshold:          0.35,
   },
-  EVAL_FOCUS: ["deadlock_calibration_ECE", "manipulation_AUC", "resolution_speed_lift"],
-  PRIMARY_OUTPUTS: ["deadlock_probability", "manipulation_flag", "minority_confidence", "resolution_eta"],
+  EVAL_FOCUS:         ["deadlock_calibration_ECE", "manipulation_AUC", "resolution_speed_lift"],
+  PRIMARY_OUTPUTS:    ["deadlock_probability", "manipulation_flag", "minority_confidence", "resolution_eta"],
+  TELEMETRY_EVENTS:   [],
 } as const;
 
 // ── Main inference function ───────────────────────────────────────────────────
 /**
  * runM76aMl
  *
- * Async — fires after core exec_hook (M76), reads output, returns advisory signals.
- * NEVER mutates state. All suggestions are bounded. Competitive mode can disable
- * balance nudges (can_lock_off=true); integrity signals always run.
+ * Fires after M76 exec_hook, reads resolved output, returns advisory signals.
+ * NEVER mutates game state. All suggestions are bounded.
+ * Competitive mode may disable balance nudges (can_lock_off=true).
+ * Integrity signals always run regardless of lock-off state.
  *
- * @param input     - Telemetry input snapshot
- * @param tier      - Model tier to use (default: 'baseline' for latency budget)
- * @param modelCard - Identity stamp for audit receipt
- * @returns         - M76AOutput + signed audit_hash
+ * @param input     Telemetry snapshot
+ * @param tier      Model tier to route (default: 'baseline' for latency budget)
+ * @param modelCard Identity stamp written to every audit receipt
+ * @returns         M76AOutput with signed auditHash
  */
 export async function runM76aMl(
   input:     M76ATelemetryInput,
@@ -214,31 +201,29 @@ export async function runM76aMl(
   // Implementation checklist:
   // □ Validate input schema against featureSchemaHash
   // □ Select inference backend based on `tier` parameter
+  // □ tier === 'baseline' → GBM + calibrated logistic (fast, low-cost, production default)
+  // □ tier === 'sequence_dl' → TCN / Transformer encoder over event streams (sequential patterns)
+  // □ tier === 'policy_rl' → Constrained contextual bandit / offline PPO (bounded nudges)
   // □ Apply input privacy filters (no PII, no cross-player contact graph)
   // □ Run inference → raw score + top_factors
   // □ Apply output caps: score = Math.min(score, M76A_ML_CONSTANTS.GUARDRAILS.scoreCap)
   // □ Apply monotonic constraints where relevant
-  // □ Abstain if confidence < abstainThreshold (return null recommendation)
+  // □ Abstain if confidence < M76A_ML_CONSTANTS.GUARDRAILS.abstainThreshold
   // □ Compute auditHash = SHA256(inputs + outputs + ruleset_version + caps)
-  // □ Write signed receipt to run ledger (never skip this step)
-  // □ Return M76AOutput — never mutate run state directly
-  //
-  // Tier routing:
-  // // □ tier === 'baseline' → Gradient-boosted trees + calibrated logistic models (fast, low-cost, production default)
-// □ tier === 'sequence_dl' → TCN / Transformer encoder over event streams (higher accuracy, sequential patterns)
-// □ tier === 'policy_rl' → Constrained contextual bandit / offline RL (decision routing + bounded nudges)
+  // □ Write signed receipt to run ledger (NEVER skip)
+  // □ Return M76AOutput — NEVER mutate run state directly
   //
   // Placement: server | Budget: real_time
-  //
+  // ExecHook:  after_m76_resolve
   // ─────────────────────────────────────────────────────────────────────────
-  throw new Error('M76A (Contract Voting Dynamics Model (Deadlock + Manipulation Detection)) ML inference is not yet implemented.');
+  throw new Error('M76A (Contract Voting Dynamics Model (Deadlock + Manipulation Detection)) ML inference not yet implemented.');
 }
 
-// ── Degraded mode fallback ────────────────────────────────────────────────────
+// ── Degraded-mode fallback ────────────────────────────────────────────────────
 /**
- * M76AFallback — rule-based fallback when ML is unavailable.
- * Must never throw; must return a valid (degraded) M76AOutput.
- * Competitive modes may use this exclusively when ML is locked off.
+ * runM76aMlFallback — rule-based fallback when ML is unavailable.
+ * Must never throw. Returns valid (degraded) M76AOutput.
+ * Competitive modes use this when ML nudges are locked off.
  */
 export function runM76aMlFallback(
   _input: M76ATelemetryInput,
@@ -252,3 +237,9 @@ export function runM76aMlFallback(
   //   □ Zero-out all M76A-specific extended outputs
   throw new Error('M76A fallback not yet implemented.');
 }
+
+// ── IntelligenceState integration note ───────────────────────────────────────
+// This mechanic writes to IntelligenceState.antiCheat
+// Heuristic substitute (until ML is live):
+//   intelligence.antiCheat = replayConsistencyScore * signatureValidity
+// Replace with: runM76aMl(telemetry, tier, modelCard).then(out => intelligence.antiCheat = out.score)

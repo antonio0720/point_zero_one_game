@@ -5,6 +5,9 @@
 //
 // ML Companion : M114A — Timing Tax Reaction-Time Coach + Window Predictor
 // Core Pair    : M114
+// Family       : balance
+// Category     : classifier
+// IntelSignal  : momentum
 // Tiers        : BASELINE, SEQUENCE_DL, POLICY_RL
 // Placement    : client
 // Budget       : real_time
@@ -14,7 +17,7 @@
 //   ✦ ML can suggest; rules decide — NEVER rewrite resolved ledger history
 //   ✦ Bounded nudges — all outputs have explicit caps + monotonic constraints
 //   ✦ Auditability — every inference writes (ruleset_version, seed, tick, cap, output)
-//   ✦ Privacy — no contact-graph mining; in-session signals only for social reasoning
+//   ✦ Privacy — no contact-graph mining; in-session signals only
 //
 // Density6 LLC · Point Zero One · Confidential · All Rights Reserved
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -31,10 +34,11 @@
  * 2. Predict upcoming decision windows so players can prepare.
  * 3. Distinguishes deliberate slow play from genuine hesitation.
  *
- * Core mechanic pair: M114
+ * Intelligence signal → IntelligenceState.momentum
+ * Core mechanic pair  → M114
  */
 
-// ── Shared telemetry input (standard across all ML companions) ────────────────
+// ── Telemetry input ───────────────────────────────────────────────────────────
 export interface M114ATelemetryInput {
   runSeed:           string;
   tickIndex:         number;
@@ -45,28 +49,24 @@ export interface M114ATelemetryInput {
   uiInteraction:     Record<string, unknown>;
   socialEvents:      Record<string, unknown>[];
   outcomeEvents:     Record<string, unknown>[];
-  /** Optional — only included for mechanics that need ledger history */
   ledgerEvents?:     Record<string, unknown>[];
-  /** Optional — only included for contract-graph mechanics */
   contractGraph?:    Record<string, unknown>;
-  /** Player opt-in preferences — ML honours opt-out silently */
   userOptIn:         Record<string, boolean>;
+  // Extended inputs for M114A (balance family)
+
 }
+
+// Telemetry events subscribed by M114A
+// 
 
 // ── Primary output contract ───────────────────────────────────────────────────
-/** Standard base output — all ML mechanics return this shape + extensions */
 export interface M114ABaseOutput {
-  /** 0–1 score — semantic depends on mechanic (risk / value / trust / etc.) */
-  score:          number;
-  /** ≤5 plain-English factors explaining the score */
+  score:          number;  // 0–1, semantic depends on mechanic
   topFactors:     string[];
-  /** Single-sentence bounded recommendation (never a guarantee) */
   recommendation: string;
-  /** SHA256(inputs + outputs + ruleset_version + caps) */
-  auditHash:      string;
+  auditHash:      string;  // SHA256(inputs + outputs + ruleset_version + caps)
 }
 
-/** Extended output — M114A-specific signals */
 export interface M114AOutput extends M114ABaseOutput {
   reactionTimeCoaching: unknown;  // reaction_time_coaching
   windowPrediction: unknown;  // window_prediction
@@ -78,131 +78,118 @@ export interface M114AOutput extends M114ABaseOutput {
 export type M114ATier = 'baseline' | 'sequence_dl' | 'policy_rl';
 
 /** M114A — Tier: BASELINE
- *  Gradient-boosted trees + calibrated logistic models (fast, low-cost, production default)
+ *  GBM + calibrated logistic (fast, low-cost, production default)
  */
 export interface M114ABaselineConfig {
-  enabled: boolean;
-  /** Model version string — increment on retrain */
-  modelVersion: string;
-  /** Feature schema hash — must match training schema */
+  enabled:          boolean;
+  modelVersion:     string;
   featureSchemaHash: string;
-  /** Inference latency SLO in ms (0 = batch/async) */
-  latencySLOMs: number;
+  latencySLOMs:     number;   // 0 = batch/async
 }
 
 /** M114A — Tier: SEQUENCE_DL
- *  TCN / Transformer encoder over event streams (higher accuracy, sequential patterns)
+ *  TCN / Transformer encoder over event streams (sequential patterns)
  */
 export interface M114ASequenceDlConfig {
-  enabled: boolean;
-  /** Model version string — increment on retrain */
-  modelVersion: string;
-  /** Feature schema hash — must match training schema */
+  enabled:          boolean;
+  modelVersion:     string;
   featureSchemaHash: string;
-  /** Inference latency SLO in ms (0 = batch/async) */
-  latencySLOMs: number;
+  latencySLOMs:     number;   // 0 = batch/async
 }
 
 /** M114A — Tier: POLICY_RL
- *  Constrained contextual bandit / offline RL (decision routing + bounded nudges)
+ *  Constrained contextual bandit / offline PPO (bounded nudges)
  */
 export interface M114APolicyRlConfig {
-  enabled: boolean;
-  /** Model version string — increment on retrain */
-  modelVersion: string;
-  /** Feature schema hash — must match training schema */
+  enabled:          boolean;
+  modelVersion:     string;
   featureSchemaHash: string;
-  /** Inference latency SLO in ms (0 = batch/async) */
-  latencySLOMs: number;
+  latencySLOMs:     number;   // 0 = batch/async
 }
 
 // ── Inference placement ───────────────────────────────────────────────────────
 export type M114APlacement = 'client';
 
 export interface M114AInferencePlacement {
-  /** On-device inference — privacy-safe, low-latency UX signals */
+  /** On-device — privacy-safe, low-latency UX signals */
   client: boolean;
-  /** Inference budget: real_time | batch | hybrid */
   budget: 'real_time';
 }
 
 // ── Guardrails (non-negotiable) ───────────────────────────────────────────────
 export interface M114AGuardrails {
-  /** ML NEVER rewrites resolved ledger history */
-  determinismPreserved:   true;
-  /** All outputs have explicit caps + monotonic constraints */
-  boundedNudges:          true;
-  /** Every inference writes a signed receipt to the run ledger */
-  auditabilityRequired:   true;
-  /** No contact-graph mining; in-session signals only */
-  privacyEnforced:        true;
-  /** Competitive modes can lock off balance nudges (integrity always stays on) */
-  competitiveLockOffAllowed: true;
-  /** Output cap for the primary score field */
-  scoreCap:               1.0;
-  /** Minimum abstain threshold — below this confidence, output null recommendation */
-  abstainThreshold:       number;
+  determinismPreserved:        true;
+  boundedNudges:               true;
+  auditabilityRequired:        true;
+  privacyEnforced:             true;
+  competitiveLockOffAllowed:   true;
+  scoreCap:                    1.0;
+  abstainThreshold:            number;
 }
 
-// ── Evaluation contract (minimum bar) ────────────────────────────────────────
+// ── Evaluation contract ───────────────────────────────────────────────────────
 export interface M114AEvalContract {
   /** window_prediction_accuracy */
   /** coaching_lift */
   /** hesitation_classification_AUC */
-  /** All mechanics: moment yield ≥ 3 share moments/run (FUBAR, flip, missed bag) */
-  momentYieldMinimum: 3;
-  /** All mechanics: trust metric — low 'rigged' reports */
+  momentYieldMinimum:  3;
   maxRiggedReportRate: number;
-  /** All mechanics: fairness drift across skill bands */
-  maxFairnessDrift: number;
+  maxFairnessDrift:    number;
 }
 
 // ── Model card ────────────────────────────────────────────────────────────────
-/** Identity stamp — emitted with every inference receipt */
 export interface M114AModelCard {
-  modelId:           'M114A';
-  coreMechanicPair:  'M114';
-  tier:              M114ATier;
-  modelVersion:      string;
-  trainCutDate:      string;
-  featureSchemaHash: string;
-  ruleset_version:   string;
+  modelId:            'M114A';
+  coreMechanicPair:   'M114';
+  intelligenceSignal: 'momentum';
+  modelCategory:      'classifier';
+  family:             'balance';
+  tier:               M114ATier;
+  modelVersion:       string;
+  trainCutDate:       string;
+  featureSchemaHash:  string;
+  rulesetVersion:     string;
 }
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 export const M114A_ML_CONSTANTS = {
-  ML_ID:            'M114A',
-  CORE_PAIR:        'M114',
-  MODEL_NAME:       'Timing Tax Reaction-Time Coach + Window Predictor',
-  TIERS:            ['baseline', 'sequence_dl', 'policy_rl'] as const,
-  PLACEMENT:        ['client'] as const,
-  BUDGET:           'real_time' as const,
-  CAN_LOCK_OFF:      true,
+  ML_ID:              'M114A',
+  CORE_PAIR:          'M114',
+  MODEL_NAME:         'Timing Tax Reaction-Time Coach + Window Predictor',
+  INTEL_SIGNAL:       'momentum' as const,
+  MODEL_CATEGORY:     'classifier' as const,
+  FAMILY:             'balance' as const,
+  TIERS:              ['baseline', 'sequence_dl', 'policy_rl'] as const,
+  PLACEMENT:          ['client'] as const,
+  BUDGET:             'real_time' as const,
+  CAN_LOCK_OFF:        true,
   GUARDRAILS: {
-    determinismPreserved:       true,
-    boundedNudges:              true,
-    auditabilityRequired:       true,
-    privacyEnforced:            true,
-    competitiveLockOffAllowed:  true,
-    scoreCap:                   1.0,
-    abstainThreshold:           0.35,
+    determinismPreserved:      true,
+    boundedNudges:             true,
+    auditabilityRequired:      true,
+    privacyEnforced:           true,
+    competitiveLockOffAllowed: true,
+    scoreCap:                  1.0,
+    abstainThreshold:          0.35,
   },
-  EVAL_FOCUS: ["window_prediction_accuracy", "coaching_lift", "hesitation_classification_AUC"],
-  PRIMARY_OUTPUTS: ["reaction_time_coaching", "window_prediction", "deliberate_vs_hesitation", "timing_tax_estimate"],
+  EVAL_FOCUS:         ["window_prediction_accuracy", "coaching_lift", "hesitation_classification_AUC"],
+  PRIMARY_OUTPUTS:    ["reaction_time_coaching", "window_prediction", "deliberate_vs_hesitation", "timing_tax_estimate"],
+  TELEMETRY_EVENTS:   [],
 } as const;
 
 // ── Main inference function ───────────────────────────────────────────────────
 /**
  * runM114aMl
  *
- * Async — fires after core exec_hook (M114), reads output, returns advisory signals.
- * NEVER mutates state. All suggestions are bounded. Competitive mode can disable
- * balance nudges (can_lock_off=true); integrity signals always run.
+ * Fires after M114 exec_hook, reads resolved output, returns advisory signals.
+ * NEVER mutates game state. All suggestions are bounded.
+ * Competitive mode may disable balance nudges (can_lock_off=true).
+ * Integrity signals always run regardless of lock-off state.
  *
- * @param input     - Telemetry input snapshot
- * @param tier      - Model tier to use (default: 'baseline' for latency budget)
- * @param modelCard - Identity stamp for audit receipt
- * @returns         - M114AOutput + signed audit_hash
+ * @param input     Telemetry snapshot
+ * @param tier      Model tier to route (default: 'baseline' for latency budget)
+ * @param modelCard Identity stamp written to every audit receipt
+ * @returns         M114AOutput with signed auditHash
  */
 export async function runM114aMl(
   input:     M114ATelemetryInput,
@@ -214,31 +201,29 @@ export async function runM114aMl(
   // Implementation checklist:
   // □ Validate input schema against featureSchemaHash
   // □ Select inference backend based on `tier` parameter
+  // □ tier === 'baseline' → GBM + calibrated logistic (fast, low-cost, production default)
+  // □ tier === 'sequence_dl' → TCN / Transformer encoder over event streams (sequential patterns)
+  // □ tier === 'policy_rl' → Constrained contextual bandit / offline PPO (bounded nudges)
   // □ Apply input privacy filters (no PII, no cross-player contact graph)
   // □ Run inference → raw score + top_factors
   // □ Apply output caps: score = Math.min(score, M114A_ML_CONSTANTS.GUARDRAILS.scoreCap)
   // □ Apply monotonic constraints where relevant
-  // □ Abstain if confidence < abstainThreshold (return null recommendation)
+  // □ Abstain if confidence < M114A_ML_CONSTANTS.GUARDRAILS.abstainThreshold
   // □ Compute auditHash = SHA256(inputs + outputs + ruleset_version + caps)
-  // □ Write signed receipt to run ledger (never skip this step)
-  // □ Return M114AOutput — never mutate run state directly
-  //
-  // Tier routing:
-  // // □ tier === 'baseline' → Gradient-boosted trees + calibrated logistic models (fast, low-cost, production default)
-// □ tier === 'sequence_dl' → TCN / Transformer encoder over event streams (higher accuracy, sequential patterns)
-// □ tier === 'policy_rl' → Constrained contextual bandit / offline RL (decision routing + bounded nudges)
+  // □ Write signed receipt to run ledger (NEVER skip)
+  // □ Return M114AOutput — NEVER mutate run state directly
   //
   // Placement: client | Budget: real_time
-  //
+  // ExecHook:  after_m114_resolve
   // ─────────────────────────────────────────────────────────────────────────
-  throw new Error('M114A (Timing Tax Reaction-Time Coach + Window Predictor) ML inference is not yet implemented.');
+  throw new Error('M114A (Timing Tax Reaction-Time Coach + Window Predictor) ML inference not yet implemented.');
 }
 
-// ── Degraded mode fallback ────────────────────────────────────────────────────
+// ── Degraded-mode fallback ────────────────────────────────────────────────────
 /**
- * M114AFallback — rule-based fallback when ML is unavailable.
- * Must never throw; must return a valid (degraded) M114AOutput.
- * Competitive modes may use this exclusively when ML is locked off.
+ * runM114aMlFallback — rule-based fallback when ML is unavailable.
+ * Must never throw. Returns valid (degraded) M114AOutput.
+ * Competitive modes use this when ML nudges are locked off.
  */
 export function runM114aMlFallback(
   _input: M114ATelemetryInput,
@@ -252,3 +237,9 @@ export function runM114aMlFallback(
   //   □ Zero-out all M114A-specific extended outputs
   throw new Error('M114A fallback not yet implemented.');
 }
+
+// ── IntelligenceState integration note ───────────────────────────────────────
+// This mechanic writes to IntelligenceState.momentum
+// Heuristic substitute (until ML is live):
+//   intelligence.momentum = recentDecisionSpeed * clutchWindowCapture
+// Replace with: runM114aMl(telemetry, tier, modelCard).then(out => intelligence.momentum = out.score)

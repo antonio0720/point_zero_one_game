@@ -5,6 +5,9 @@
 //
 // ML Companion : M87A — Season Relic Mint Governor (Scarcity + Anti-Farm Control)
 // Core Pair    : M87
+// Family       : economy
+// Category     : controller
+// IntelSignal  : volatility
 // Tiers        : BASELINE, SEQUENCE_DL, POLICY_RL
 // Placement    : server
 // Budget       : batch
@@ -14,7 +17,7 @@
 //   ✦ ML can suggest; rules decide — NEVER rewrite resolved ledger history
 //   ✦ Bounded nudges — all outputs have explicit caps + monotonic constraints
 //   ✦ Auditability — every inference writes (ruleset_version, seed, tick, cap, output)
-//   ✦ Privacy — no contact-graph mining; in-session signals only for social reasoning
+//   ✦ Privacy — no contact-graph mining; in-session signals only
 //
 // Density6 LLC · Point Zero One · Confidential · All Rights Reserved
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -31,10 +34,11 @@
  * 2. Anti-farm control: detect and suppress farm-driven relic production.
  * 3. Generates mint scarcity reports for season design.
  *
- * Core mechanic pair: M87
+ * Intelligence signal → IntelligenceState.volatility
+ * Core mechanic pair  → M87
  */
 
-// ── Shared telemetry input (standard across all ML companions) ────────────────
+// ── Telemetry input ───────────────────────────────────────────────────────────
 export interface M87ATelemetryInput {
   runSeed:           string;
   tickIndex:         number;
@@ -45,28 +49,24 @@ export interface M87ATelemetryInput {
   uiInteraction:     Record<string, unknown>;
   socialEvents:      Record<string, unknown>[];
   outcomeEvents:     Record<string, unknown>[];
-  /** Optional — only included for mechanics that need ledger history */
   ledgerEvents?:     Record<string, unknown>[];
-  /** Optional — only included for contract-graph mechanics */
   contractGraph?:    Record<string, unknown>;
-  /** Player opt-in preferences — ML honours opt-out silently */
   userOptIn:         Record<string, boolean>;
+  // Extended inputs for M87A (economy family)
+
 }
+
+// Telemetry events subscribed by M87A
+// 
 
 // ── Primary output contract ───────────────────────────────────────────────────
-/** Standard base output — all ML mechanics return this shape + extensions */
 export interface M87ABaseOutput {
-  /** 0–1 score — semantic depends on mechanic (risk / value / trust / etc.) */
-  score:          number;
-  /** ≤5 plain-English factors explaining the score */
+  score:          number;  // 0–1, semantic depends on mechanic
   topFactors:     string[];
-  /** Single-sentence bounded recommendation (never a guarantee) */
   recommendation: string;
-  /** SHA256(inputs + outputs + ruleset_version + caps) */
-  auditHash:      string;
+  auditHash:      string;  // SHA256(inputs + outputs + ruleset_version + caps)
 }
 
-/** Extended output — M87A-specific signals */
 export interface M87AOutput extends M87ABaseOutput {
   mintApproval: unknown;  // mint_approval
   farmFlag: unknown;  // farm_flag
@@ -78,42 +78,33 @@ export interface M87AOutput extends M87ABaseOutput {
 export type M87ATier = 'baseline' | 'sequence_dl' | 'policy_rl';
 
 /** M87A — Tier: BASELINE
- *  Gradient-boosted trees + calibrated logistic models (fast, low-cost, production default)
+ *  GBM + calibrated logistic (fast, low-cost, production default)
  */
 export interface M87ABaselineConfig {
-  enabled: boolean;
-  /** Model version string — increment on retrain */
-  modelVersion: string;
-  /** Feature schema hash — must match training schema */
+  enabled:          boolean;
+  modelVersion:     string;
   featureSchemaHash: string;
-  /** Inference latency SLO in ms (0 = batch/async) */
-  latencySLOMs: number;
+  latencySLOMs:     number;   // 0 = batch/async
 }
 
 /** M87A — Tier: SEQUENCE_DL
- *  TCN / Transformer encoder over event streams (higher accuracy, sequential patterns)
+ *  TCN / Transformer encoder over event streams (sequential patterns)
  */
 export interface M87ASequenceDlConfig {
-  enabled: boolean;
-  /** Model version string — increment on retrain */
-  modelVersion: string;
-  /** Feature schema hash — must match training schema */
+  enabled:          boolean;
+  modelVersion:     string;
   featureSchemaHash: string;
-  /** Inference latency SLO in ms (0 = batch/async) */
-  latencySLOMs: number;
+  latencySLOMs:     number;   // 0 = batch/async
 }
 
 /** M87A — Tier: POLICY_RL
- *  Constrained contextual bandit / offline RL (decision routing + bounded nudges)
+ *  Constrained contextual bandit / offline PPO (bounded nudges)
  */
 export interface M87APolicyRlConfig {
-  enabled: boolean;
-  /** Model version string — increment on retrain */
-  modelVersion: string;
-  /** Feature schema hash — must match training schema */
+  enabled:          boolean;
+  modelVersion:     string;
   featureSchemaHash: string;
-  /** Inference latency SLO in ms (0 = batch/async) */
-  latencySLOMs: number;
+  latencySLOMs:     number;   // 0 = batch/async
 }
 
 // ── Inference placement ───────────────────────────────────────────────────────
@@ -122,87 +113,83 @@ export type M87APlacement = 'server';
 export interface M87AInferencePlacement {
   /** Server-side — integrity, balancing, anti-abuse, economy */
   server: boolean;
-  /** Inference budget: real_time | batch | hybrid */
   budget: 'batch';
 }
 
 // ── Guardrails (non-negotiable) ───────────────────────────────────────────────
 export interface M87AGuardrails {
-  /** ML NEVER rewrites resolved ledger history */
-  determinismPreserved:   true;
-  /** All outputs have explicit caps + monotonic constraints */
-  boundedNudges:          true;
-  /** Every inference writes a signed receipt to the run ledger */
-  auditabilityRequired:   true;
-  /** No contact-graph mining; in-session signals only */
-  privacyEnforced:        true;
-  /** Competitive modes can lock off balance nudges (integrity always stays on) */
-  competitiveLockOffAllowed: true;
-  /** Output cap for the primary score field */
-  scoreCap:               1.0;
-  /** Minimum abstain threshold — below this confidence, output null recommendation */
-  abstainThreshold:       number;
+  determinismPreserved:        true;
+  boundedNudges:               true;
+  auditabilityRequired:        true;
+  privacyEnforced:             true;
+  competitiveLockOffAllowed:   true;
+  scoreCap:                    1.0;
+  abstainThreshold:            number;
 }
 
-// ── Evaluation contract (minimum bar) ────────────────────────────────────────
+// ── Evaluation contract ───────────────────────────────────────────────────────
 export interface M87AEvalContract {
   /** scarcity_maintenance */
   /** farm_detection_AUC */
   /** prestige_calibration */
-  /** All mechanics: moment yield ≥ 3 share moments/run (FUBAR, flip, missed bag) */
-  momentYieldMinimum: 3;
-  /** All mechanics: trust metric — low 'rigged' reports */
+  momentYieldMinimum:  3;
   maxRiggedReportRate: number;
-  /** All mechanics: fairness drift across skill bands */
-  maxFairnessDrift: number;
+  maxFairnessDrift:    number;
 }
 
 // ── Model card ────────────────────────────────────────────────────────────────
-/** Identity stamp — emitted with every inference receipt */
 export interface M87AModelCard {
-  modelId:           'M87A';
-  coreMechanicPair:  'M87';
-  tier:              M87ATier;
-  modelVersion:      string;
-  trainCutDate:      string;
-  featureSchemaHash: string;
-  ruleset_version:   string;
+  modelId:            'M87A';
+  coreMechanicPair:   'M87';
+  intelligenceSignal: 'volatility';
+  modelCategory:      'controller';
+  family:             'economy';
+  tier:               M87ATier;
+  modelVersion:       string;
+  trainCutDate:       string;
+  featureSchemaHash:  string;
+  rulesetVersion:     string;
 }
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 export const M87A_ML_CONSTANTS = {
-  ML_ID:            'M87A',
-  CORE_PAIR:        'M87',
-  MODEL_NAME:       'Season Relic Mint Governor (Scarcity + Anti-Farm Control)',
-  TIERS:            ['baseline', 'sequence_dl', 'policy_rl'] as const,
-  PLACEMENT:        ['server'] as const,
-  BUDGET:           'batch' as const,
-  CAN_LOCK_OFF:      true,
+  ML_ID:              'M87A',
+  CORE_PAIR:          'M87',
+  MODEL_NAME:         'Season Relic Mint Governor (Scarcity + Anti-Farm Control)',
+  INTEL_SIGNAL:       'volatility' as const,
+  MODEL_CATEGORY:     'controller' as const,
+  FAMILY:             'economy' as const,
+  TIERS:              ['baseline', 'sequence_dl', 'policy_rl'] as const,
+  PLACEMENT:          ['server'] as const,
+  BUDGET:             'batch' as const,
+  CAN_LOCK_OFF:        true,
   GUARDRAILS: {
-    determinismPreserved:       true,
-    boundedNudges:              true,
-    auditabilityRequired:       true,
-    privacyEnforced:            true,
-    competitiveLockOffAllowed:  true,
-    scoreCap:                   1.0,
-    abstainThreshold:           0.35,
+    determinismPreserved:      true,
+    boundedNudges:             true,
+    auditabilityRequired:      true,
+    privacyEnforced:           true,
+    competitiveLockOffAllowed: true,
+    scoreCap:                  1.0,
+    abstainThreshold:          0.35,
   },
-  EVAL_FOCUS: ["scarcity_maintenance", "farm_detection_AUC", "prestige_calibration"],
-  PRIMARY_OUTPUTS: ["mint_approval", "farm_flag", "scarcity_score", "prestige_projection"],
+  EVAL_FOCUS:         ["scarcity_maintenance", "farm_detection_AUC", "prestige_calibration"],
+  PRIMARY_OUTPUTS:    ["mint_approval", "farm_flag", "scarcity_score", "prestige_projection"],
+  TELEMETRY_EVENTS:   [],
 } as const;
 
 // ── Main inference function ───────────────────────────────────────────────────
 /**
  * runM87aMl
  *
- * Async — fires after core exec_hook (M87), reads output, returns advisory signals.
- * NEVER mutates state. All suggestions are bounded. Competitive mode can disable
- * balance nudges (can_lock_off=true); integrity signals always run.
+ * Fires after M87 exec_hook, reads resolved output, returns advisory signals.
+ * NEVER mutates game state. All suggestions are bounded.
+ * Competitive mode may disable balance nudges (can_lock_off=true).
+ * Integrity signals always run regardless of lock-off state.
  *
- * @param input     - Telemetry input snapshot
- * @param tier      - Model tier to use (default: 'baseline' for latency budget)
- * @param modelCard - Identity stamp for audit receipt
- * @returns         - M87AOutput + signed audit_hash
+ * @param input     Telemetry snapshot
+ * @param tier      Model tier to route (default: 'baseline' for latency budget)
+ * @param modelCard Identity stamp written to every audit receipt
+ * @returns         M87AOutput with signed auditHash
  */
 export async function runM87aMl(
   input:     M87ATelemetryInput,
@@ -214,31 +201,29 @@ export async function runM87aMl(
   // Implementation checklist:
   // □ Validate input schema against featureSchemaHash
   // □ Select inference backend based on `tier` parameter
+  // □ tier === 'baseline' → GBM + calibrated logistic (fast, low-cost, production default)
+  // □ tier === 'sequence_dl' → TCN / Transformer encoder over event streams (sequential patterns)
+  // □ tier === 'policy_rl' → Constrained contextual bandit / offline PPO (bounded nudges)
   // □ Apply input privacy filters (no PII, no cross-player contact graph)
   // □ Run inference → raw score + top_factors
   // □ Apply output caps: score = Math.min(score, M87A_ML_CONSTANTS.GUARDRAILS.scoreCap)
   // □ Apply monotonic constraints where relevant
-  // □ Abstain if confidence < abstainThreshold (return null recommendation)
+  // □ Abstain if confidence < M87A_ML_CONSTANTS.GUARDRAILS.abstainThreshold
   // □ Compute auditHash = SHA256(inputs + outputs + ruleset_version + caps)
-  // □ Write signed receipt to run ledger (never skip this step)
-  // □ Return M87AOutput — never mutate run state directly
-  //
-  // Tier routing:
-  // // □ tier === 'baseline' → Gradient-boosted trees + calibrated logistic models (fast, low-cost, production default)
-// □ tier === 'sequence_dl' → TCN / Transformer encoder over event streams (higher accuracy, sequential patterns)
-// □ tier === 'policy_rl' → Constrained contextual bandit / offline RL (decision routing + bounded nudges)
+  // □ Write signed receipt to run ledger (NEVER skip)
+  // □ Return M87AOutput — NEVER mutate run state directly
   //
   // Placement: server | Budget: batch
-  //
+  // ExecHook:  after_m87_resolve
   // ─────────────────────────────────────────────────────────────────────────
-  throw new Error('M87A (Season Relic Mint Governor (Scarcity + Anti-Farm Control)) ML inference is not yet implemented.');
+  throw new Error('M87A (Season Relic Mint Governor (Scarcity + Anti-Farm Control)) ML inference not yet implemented.');
 }
 
-// ── Degraded mode fallback ────────────────────────────────────────────────────
+// ── Degraded-mode fallback ────────────────────────────────────────────────────
 /**
- * M87AFallback — rule-based fallback when ML is unavailable.
- * Must never throw; must return a valid (degraded) M87AOutput.
- * Competitive modes may use this exclusively when ML is locked off.
+ * runM87aMlFallback — rule-based fallback when ML is unavailable.
+ * Must never throw. Returns valid (degraded) M87AOutput.
+ * Competitive modes use this when ML nudges are locked off.
  */
 export function runM87aMlFallback(
   _input: M87ATelemetryInput,
@@ -252,3 +237,9 @@ export function runM87aMlFallback(
   //   □ Zero-out all M87A-specific extended outputs
   throw new Error('M87A fallback not yet implemented.');
 }
+
+// ── IntelligenceState integration note ───────────────────────────────────────
+// This mechanic writes to IntelligenceState.volatility
+// Heuristic substitute (until ML is live):
+//   intelligence.volatility = macroRegimeConfidence * shockProbability
+// Replace with: runM87aMl(telemetry, tier, modelCard).then(out => intelligence.volatility = out.score)

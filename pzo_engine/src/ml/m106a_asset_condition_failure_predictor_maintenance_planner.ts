@@ -5,6 +5,9 @@
 //
 // ML Companion : M106A — Asset Condition Failure Predictor + Maintenance Planner
 // Core Pair    : M106
+// Family       : market
+// Category     : predictor
+// IntelSignal  : risk
 // Tiers        : BASELINE, SEQUENCE_DL, CAUSAL
 // Placement    : client, server
 // Budget       : real_time
@@ -14,7 +17,7 @@
 //   ✦ ML can suggest; rules decide — NEVER rewrite resolved ledger history
 //   ✦ Bounded nudges — all outputs have explicit caps + monotonic constraints
 //   ✦ Auditability — every inference writes (ruleset_version, seed, tick, cap, output)
-//   ✦ Privacy — no contact-graph mining; in-session signals only for social reasoning
+//   ✦ Privacy — no contact-graph mining; in-session signals only
 //
 // Density6 LLC · Point Zero One · Confidential · All Rights Reserved
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -31,10 +34,11 @@
  * 2. Generate maintenance plans that prevent cascade failure without over-maintaining.
  * 3. Causal model: distinguishes genuine wear from macro-shock damage.
  *
- * Core mechanic pair: M106
+ * Intelligence signal → IntelligenceState.risk
+ * Core mechanic pair  → M106
  */
 
-// ── Shared telemetry input (standard across all ML companions) ────────────────
+// ── Telemetry input ───────────────────────────────────────────────────────────
 export interface M106ATelemetryInput {
   runSeed:           string;
   tickIndex:         number;
@@ -45,28 +49,24 @@ export interface M106ATelemetryInput {
   uiInteraction:     Record<string, unknown>;
   socialEvents:      Record<string, unknown>[];
   outcomeEvents:     Record<string, unknown>[];
-  /** Optional — only included for mechanics that need ledger history */
   ledgerEvents?:     Record<string, unknown>[];
-  /** Optional — only included for contract-graph mechanics */
   contractGraph?:    Record<string, unknown>;
-  /** Player opt-in preferences — ML honours opt-out silently */
   userOptIn:         Record<string, boolean>;
+  // Extended inputs for M106A (market family)
+
 }
+
+// Telemetry events subscribed by M106A
+// 
 
 // ── Primary output contract ───────────────────────────────────────────────────
-/** Standard base output — all ML mechanics return this shape + extensions */
 export interface M106ABaseOutput {
-  /** 0–1 score — semantic depends on mechanic (risk / value / trust / etc.) */
-  score:          number;
-  /** ≤5 plain-English factors explaining the score */
+  score:          number;  // 0–1, semantic depends on mechanic
   topFactors:     string[];
-  /** Single-sentence bounded recommendation (never a guarantee) */
   recommendation: string;
-  /** SHA256(inputs + outputs + ruleset_version + caps) */
-  auditHash:      string;
+  auditHash:      string;  // SHA256(inputs + outputs + ruleset_version + caps)
 }
 
-/** Extended output — M106A-specific signals */
 export interface M106AOutput extends M106ABaseOutput {
   failurePredictionTimeline: unknown;  // failure_prediction_timeline
   maintenancePlan: unknown;  // maintenance_plan
@@ -78,133 +78,120 @@ export interface M106AOutput extends M106ABaseOutput {
 export type M106ATier = 'baseline' | 'sequence_dl' | 'causal';
 
 /** M106A — Tier: BASELINE
- *  Gradient-boosted trees + calibrated logistic models (fast, low-cost, production default)
+ *  GBM + calibrated logistic (fast, low-cost, production default)
  */
 export interface M106ABaselineConfig {
-  enabled: boolean;
-  /** Model version string — increment on retrain */
-  modelVersion: string;
-  /** Feature schema hash — must match training schema */
+  enabled:          boolean;
+  modelVersion:     string;
   featureSchemaHash: string;
-  /** Inference latency SLO in ms (0 = batch/async) */
-  latencySLOMs: number;
+  latencySLOMs:     number;   // 0 = batch/async
 }
 
 /** M106A — Tier: SEQUENCE_DL
- *  TCN / Transformer encoder over event streams (higher accuracy, sequential patterns)
+ *  TCN / Transformer encoder over event streams (sequential patterns)
  */
 export interface M106ASequenceDlConfig {
-  enabled: boolean;
-  /** Model version string — increment on retrain */
-  modelVersion: string;
-  /** Feature schema hash — must match training schema */
+  enabled:          boolean;
+  modelVersion:     string;
   featureSchemaHash: string;
-  /** Inference latency SLO in ms (0 = batch/async) */
-  latencySLOMs: number;
+  latencySLOMs:     number;   // 0 = batch/async
 }
 
 /** M106A — Tier: CAUSAL
- *  Causal inference + difference-in-differences (counterfactual explanations)
+ *  Causal inference + DiD (counterfactual explanations)
  */
 export interface M106ACausalConfig {
-  enabled: boolean;
-  /** Model version string — increment on retrain */
-  modelVersion: string;
-  /** Feature schema hash — must match training schema */
+  enabled:          boolean;
+  modelVersion:     string;
   featureSchemaHash: string;
-  /** Inference latency SLO in ms (0 = batch/async) */
-  latencySLOMs: number;
+  latencySLOMs:     number;   // 0 = batch/async
 }
 
 // ── Inference placement ───────────────────────────────────────────────────────
 export type M106APlacement = 'client' | 'server';
 
 export interface M106AInferencePlacement {
-  /** On-device inference — privacy-safe, low-latency UX signals */
+  /** On-device — privacy-safe, low-latency UX signals */
   client: boolean;
   /** Server-side — integrity, balancing, anti-abuse, economy */
   server: boolean;
-  /** Inference budget: real_time | batch | hybrid */
   budget: 'real_time';
 }
 
 // ── Guardrails (non-negotiable) ───────────────────────────────────────────────
 export interface M106AGuardrails {
-  /** ML NEVER rewrites resolved ledger history */
-  determinismPreserved:   true;
-  /** All outputs have explicit caps + monotonic constraints */
-  boundedNudges:          true;
-  /** Every inference writes a signed receipt to the run ledger */
-  auditabilityRequired:   true;
-  /** No contact-graph mining; in-session signals only */
-  privacyEnforced:        true;
-  /** Competitive modes can lock off balance nudges (integrity always stays on) */
-  competitiveLockOffAllowed: true;
-  /** Output cap for the primary score field */
-  scoreCap:               1.0;
-  /** Minimum abstain threshold — below this confidence, output null recommendation */
-  abstainThreshold:       number;
+  determinismPreserved:        true;
+  boundedNudges:               true;
+  auditabilityRequired:        true;
+  privacyEnforced:             true;
+  competitiveLockOffAllowed:   true;
+  scoreCap:                    1.0;
+  abstainThreshold:            number;
 }
 
-// ── Evaluation contract (minimum bar) ────────────────────────────────────────
+// ── Evaluation contract ───────────────────────────────────────────────────────
 export interface M106AEvalContract {
   /** failure_timing_AUC */
   /** maintenance_plan_optimality */
   /** cascade_prevention_rate */
-  /** All mechanics: moment yield ≥ 3 share moments/run (FUBAR, flip, missed bag) */
-  momentYieldMinimum: 3;
-  /** All mechanics: trust metric — low 'rigged' reports */
+  momentYieldMinimum:  3;
   maxRiggedReportRate: number;
-  /** All mechanics: fairness drift across skill bands */
-  maxFairnessDrift: number;
+  maxFairnessDrift:    number;
 }
 
 // ── Model card ────────────────────────────────────────────────────────────────
-/** Identity stamp — emitted with every inference receipt */
 export interface M106AModelCard {
-  modelId:           'M106A';
-  coreMechanicPair:  'M106';
-  tier:              M106ATier;
-  modelVersion:      string;
-  trainCutDate:      string;
-  featureSchemaHash: string;
-  ruleset_version:   string;
+  modelId:            'M106A';
+  coreMechanicPair:   'M106';
+  intelligenceSignal: 'risk';
+  modelCategory:      'predictor';
+  family:             'market';
+  tier:               M106ATier;
+  modelVersion:       string;
+  trainCutDate:       string;
+  featureSchemaHash:  string;
+  rulesetVersion:     string;
 }
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 export const M106A_ML_CONSTANTS = {
-  ML_ID:            'M106A',
-  CORE_PAIR:        'M106',
-  MODEL_NAME:       'Asset Condition Failure Predictor + Maintenance Planner',
-  TIERS:            ['baseline', 'sequence_dl', 'causal'] as const,
-  PLACEMENT:        ['client', 'server'] as const,
-  BUDGET:           'real_time' as const,
-  CAN_LOCK_OFF:      true,
+  ML_ID:              'M106A',
+  CORE_PAIR:          'M106',
+  MODEL_NAME:         'Asset Condition Failure Predictor + Maintenance Planner',
+  INTEL_SIGNAL:       'risk' as const,
+  MODEL_CATEGORY:     'predictor' as const,
+  FAMILY:             'market' as const,
+  TIERS:              ['baseline', 'sequence_dl', 'causal'] as const,
+  PLACEMENT:          ['client', 'server'] as const,
+  BUDGET:             'real_time' as const,
+  CAN_LOCK_OFF:        true,
   GUARDRAILS: {
-    determinismPreserved:       true,
-    boundedNudges:              true,
-    auditabilityRequired:       true,
-    privacyEnforced:            true,
-    competitiveLockOffAllowed:  true,
-    scoreCap:                   1.0,
-    abstainThreshold:           0.35,
+    determinismPreserved:      true,
+    boundedNudges:             true,
+    auditabilityRequired:      true,
+    privacyEnforced:           true,
+    competitiveLockOffAllowed: true,
+    scoreCap:                  1.0,
+    abstainThreshold:          0.35,
   },
-  EVAL_FOCUS: ["failure_timing_AUC", "maintenance_plan_optimality", "cascade_prevention_rate"],
-  PRIMARY_OUTPUTS: ["failure_prediction_timeline", "maintenance_plan", "cascade_prevention_score", "causal_wear_estimate"],
+  EVAL_FOCUS:         ["failure_timing_AUC", "maintenance_plan_optimality", "cascade_prevention_rate"],
+  PRIMARY_OUTPUTS:    ["failure_prediction_timeline", "maintenance_plan", "cascade_prevention_score", "causal_wear_estimate"],
+  TELEMETRY_EVENTS:   [],
 } as const;
 
 // ── Main inference function ───────────────────────────────────────────────────
 /**
  * runM106aMl
  *
- * Async — fires after core exec_hook (M106), reads output, returns advisory signals.
- * NEVER mutates state. All suggestions are bounded. Competitive mode can disable
- * balance nudges (can_lock_off=true); integrity signals always run.
+ * Fires after M106 exec_hook, reads resolved output, returns advisory signals.
+ * NEVER mutates game state. All suggestions are bounded.
+ * Competitive mode may disable balance nudges (can_lock_off=true).
+ * Integrity signals always run regardless of lock-off state.
  *
- * @param input     - Telemetry input snapshot
- * @param tier      - Model tier to use (default: 'baseline' for latency budget)
- * @param modelCard - Identity stamp for audit receipt
- * @returns         - M106AOutput + signed audit_hash
+ * @param input     Telemetry snapshot
+ * @param tier      Model tier to route (default: 'baseline' for latency budget)
+ * @param modelCard Identity stamp written to every audit receipt
+ * @returns         M106AOutput with signed auditHash
  */
 export async function runM106aMl(
   input:     M106ATelemetryInput,
@@ -216,31 +203,29 @@ export async function runM106aMl(
   // Implementation checklist:
   // □ Validate input schema against featureSchemaHash
   // □ Select inference backend based on `tier` parameter
+  // □ tier === 'baseline' → GBM + calibrated logistic (fast, low-cost, production default)
+  // □ tier === 'sequence_dl' → TCN / Transformer encoder over event streams (sequential patterns)
+  // □ tier === 'causal' → Causal inference + DiD (counterfactual explanations)
   // □ Apply input privacy filters (no PII, no cross-player contact graph)
   // □ Run inference → raw score + top_factors
   // □ Apply output caps: score = Math.min(score, M106A_ML_CONSTANTS.GUARDRAILS.scoreCap)
   // □ Apply monotonic constraints where relevant
-  // □ Abstain if confidence < abstainThreshold (return null recommendation)
+  // □ Abstain if confidence < M106A_ML_CONSTANTS.GUARDRAILS.abstainThreshold
   // □ Compute auditHash = SHA256(inputs + outputs + ruleset_version + caps)
-  // □ Write signed receipt to run ledger (never skip this step)
-  // □ Return M106AOutput — never mutate run state directly
-  //
-  // Tier routing:
-  // // □ tier === 'baseline' → Gradient-boosted trees + calibrated logistic models (fast, low-cost, production default)
-// □ tier === 'sequence_dl' → TCN / Transformer encoder over event streams (higher accuracy, sequential patterns)
-// □ tier === 'causal' → Causal inference + difference-in-differences (counterfactual explanations)
+  // □ Write signed receipt to run ledger (NEVER skip)
+  // □ Return M106AOutput — NEVER mutate run state directly
   //
   // Placement: client, server | Budget: real_time
-  //
+  // ExecHook:  after_m106_resolve
   // ─────────────────────────────────────────────────────────────────────────
-  throw new Error('M106A (Asset Condition Failure Predictor + Maintenance Planner) ML inference is not yet implemented.');
+  throw new Error('M106A (Asset Condition Failure Predictor + Maintenance Planner) ML inference not yet implemented.');
 }
 
-// ── Degraded mode fallback ────────────────────────────────────────────────────
+// ── Degraded-mode fallback ────────────────────────────────────────────────────
 /**
- * M106AFallback — rule-based fallback when ML is unavailable.
- * Must never throw; must return a valid (degraded) M106AOutput.
- * Competitive modes may use this exclusively when ML is locked off.
+ * runM106aMlFallback — rule-based fallback when ML is unavailable.
+ * Must never throw. Returns valid (degraded) M106AOutput.
+ * Competitive modes use this when ML nudges are locked off.
  */
 export function runM106aMlFallback(
   _input: M106ATelemetryInput,
@@ -254,3 +239,9 @@ export function runM106aMlFallback(
   //   □ Zero-out all M106A-specific extended outputs
   throw new Error('M106A fallback not yet implemented.');
 }
+
+// ── IntelligenceState integration note ───────────────────────────────────────
+// This mechanic writes to IntelligenceState.risk
+// Heuristic substitute (until ML is live):
+//   intelligence.risk = debtServiceRatio * cascadeExposure
+// Replace with: runM106aMl(telemetry, tier, modelCard).then(out => intelligence.risk = out.score)

@@ -3,14 +3,11 @@
     "task_id": "PZO-M01",
     "mechanic_id": "M01",
     "title": "Run Seed + Deterministic Replay",
-    "purpose": "Every run is generated from a seed so outcomes are reproducible (for replays, challenges, and anti-cheat). The seed drives deck shuffles, macro schedule, and social chaos windows. Sharing a run shares the seed + your decisions, not just the result.",
     "family": "run_core",
     "kind": "core",
     "layer": "tick_engine",
     "priority": 1,
-    "status": "todo",
-    "ml_pair": "m01a",
-    "ml_pair_path": "M01a_seed_integrity_replay_forensics.md",
+    "batch": 1,
     "inputs": [
       "userId",
       "rulesVersion",
@@ -28,24 +25,21 @@
       "REPLAY_VERIFIED",
       "REPLAY_MISMATCH"
     ],
-    "module_path": "src/mechanics/m01_run_seed_deterministic_replay.ts",
     "exec_hook": "runSeedDeterministicReplay",
-    "batch": 1,
     "deps": [],
-    "md_source": "M01_run_seed_deterministic_replay.md"
+    "status": "todo",
+    "ml_pair": "m01a",
+    "module_path": "pzo_engine/src/mechanics/m01_run_seed_deterministic_replay.ts"
   },
   {
     "task_id": "PZO-M02",
     "mechanic_id": "M02",
     "title": "12-Minute Run Clock + Turn Timer",
-    "purpose": "Runs are short, tense, and losable fast. The clock is real-time: each turn has a decision timer; unused time converts into 'Inertia' that increases Missed Opportunity odds. When the run clock hits zero, any unresolved liabilities can wipe you.",
     "family": "run_core",
     "kind": "core",
     "layer": "tick_engine",
     "priority": 1,
-    "status": "todo",
-    "ml_pair": "m02a",
-    "ml_pair_path": "M02a_timer_stress_model.md",
+    "batch": 1,
     "inputs": [
       "state.tick",
       "state.runPhase",
@@ -62,26 +56,23 @@
       "TIMER_EXPIRED",
       "CLOCK_ESCALATION"
     ],
-    "module_path": "src/mechanics/m02_12_minute_run_clock_turn_timer.ts",
     "exec_hook": "runClockTickEngine",
-    "batch": 1,
     "deps": [
       "M01"
     ],
-    "md_source": "M02_12_minute_run_clock_turn_timer.md"
+    "status": "todo",
+    "ml_pair": "m02a",
+    "module_path": "pzo_engine/src/mechanics/m02_12_minute_run_clock_turn_timer.ts"
   },
   {
     "task_id": "PZO-M03",
     "mechanic_id": "M03",
     "title": "Solvency Wipe Conditions",
-    "purpose": "Define 'death' clearly: cash < 0 with owed amount, forced sale chain that can't clear debt service, or macro-decay pushing cash to zero at end-of-rotation. Wipes end the run and snapshot the clip-worthy cause.",
     "family": "run_core",
     "kind": "core",
     "layer": "tick_engine",
     "priority": 1,
-    "status": "todo",
-    "ml_pair": "m03a",
-    "ml_pair_path": "M03a_solvency_collapse_predictor.md",
+    "batch": 1,
     "inputs": [
       "state.cash",
       "state.netWorth",
@@ -99,26 +90,23 @@
       "BANKRUPT_TRIGGERED",
       "VOID_SCAR_RECORDED"
     ],
-    "module_path": "src/mechanics/m03_solvency_wipe_conditions.ts",
     "exec_hook": "solvencyWipeCheck",
-    "batch": 1,
     "deps": [
       "M02"
     ],
-    "md_source": "M03_solvency_wipe_conditions.md"
+    "status": "todo",
+    "ml_pair": "m03a",
+    "module_path": "pzo_engine/src/mechanics/m03_solvency_wipe_conditions.ts"
   },
   {
     "task_id": "PZO-M04",
     "mechanic_id": "M04",
-    "title": "Deck Reactor (Dynamic Draw Mixing)",
-    "purpose": "A deterministic 'reactor' chooses which deck to draw from each turn based on macro.creditTightness, player state (leverage, shields), and recent pass streaks. This is the digital equivalent of your recommended deck mixing rules.",
+    "title": "Deck Reactor",
     "family": "run_core",
     "kind": "core",
     "layer": "card_handler",
     "priority": 1,
-    "status": "todo",
-    "ml_pair": "m04a",
-    "ml_pair_path": "M04a_deck_reactor_rl_policy.md",
+    "batch": 1,
     "inputs": [
       "state.runPhase",
       "state.macroRegime",
@@ -136,27 +124,24 @@
       "POOL_RECOMPOSED",
       "FORCED_CARD_QUEUED"
     ],
-    "module_path": "src/mechanics/m04_deck_reactor_dynamic_draw_mixing.ts",
     "exec_hook": "deckReactorDraw",
-    "batch": 1,
     "deps": [
       "M01",
       "M02"
     ],
-    "md_source": "M04_deck_reactor_dynamic_draw_mixing.md"
+    "status": "todo",
+    "ml_pair": "m04a",
+    "module_path": "pzo_engine/src/mechanics/m04_deck_reactor.ts"
   },
   {
     "task_id": "PZO-M05",
     "mechanic_id": "M05",
     "title": "Macro State + Cash Decay Loop",
-    "purpose": "Macro Shift sets inflation (1–5) and credit tightness. End-of-rotation applies cash decay to idle cash. The UI makes this visible as a looming 'erosion meter' so players feel time pressure.",
     "family": "run_core",
     "kind": "core",
     "layer": "tick_engine",
     "priority": 1,
-    "status": "todo",
-    "ml_pair": "m05a",
-    "ml_pair_path": "M05a_macro_regime_classifier_cash_decay.md",
+    "batch": 1,
     "inputs": [
       "state.macroRegime",
       "state.cash",
@@ -175,26 +160,23 @@
       "SETTLEMENT_TICK",
       "CASHFLOW_UPDATED"
     ],
-    "module_path": "src/mechanics/m05_macro_state_cash_decay_loop.ts",
     "exec_hook": "macroStateCashDecay",
-    "batch": 1,
     "deps": [
       "M02"
     ],
-    "md_source": "M05_macro_state_cash_decay_loop.md"
+    "status": "todo",
+    "ml_pair": "m05a",
+    "module_path": "pzo_engine/src/mechanics/m05_macro_state_cash_decay_loop.ts"
   },
   {
     "task_id": "PZO-M06",
     "mechanic_id": "M06",
-    "title": "Cashflow Tick Engine (Assets + IPA)",
-    "purpose": "At defined cadence (per turn or per round), assets + IPA produce monthly cashflow. Digital adds an 'auto-ledger' that itemizes sources and shows how close you are to escaping the current tier.",
+    "title": "Cashflow Tick Engine",
     "family": "run_core",
     "kind": "core",
     "layer": "tick_engine",
     "priority": 1,
-    "status": "todo",
-    "ml_pair": "m06a",
-    "ml_pair_path": "M06a_cashflow_forecast_portfolio_embeddings.md",
+    "batch": 1,
     "inputs": [
       "state.assets",
       "state.ipaItems",
@@ -212,27 +194,24 @@
       "ASSET_INCOME_APPLIED",
       "TIER_ESCAPED"
     ],
-    "module_path": "src/mechanics/m06_cashflow_tick_engine_assets_ipa.ts",
     "exec_hook": "cashflowTickEngine",
-    "batch": 1,
     "deps": [
       "M02",
       "M05"
     ],
-    "md_source": "M06_cashflow_tick_engine_assets_ipa.md"
+    "status": "todo",
+    "ml_pair": "m06a",
+    "module_path": "pzo_engine/src/mechanics/m06_cashflow_tick_engine.ts"
   },
   {
     "task_id": "PZO-M07",
     "mechanic_id": "M07",
-    "title": "Leverage Purchase Resolver (Buff Order)",
-    "purpose": "Purchasing big deals executes strict resolution order: leverage blocks → downpay credits → debt service credits/penalties. The app prevents illegal buys and shows exactly why you can’t afford something.",
+    "title": "Leverage Purchase Resolver",
     "family": "run_core",
     "kind": "core",
     "layer": "card_handler",
     "priority": 1,
-    "status": "todo",
-    "ml_pair": "m07a",
-    "ml_pair_path": "M07a_affordability_default_risk_scorer.md",
+    "batch": 1,
     "inputs": [
       "cardPlayed",
       "state.cash",
@@ -250,27 +229,24 @@
       "PURCHASE_DENIED",
       "AFFORDABILITY_CHECKED"
     ],
-    "module_path": "src/mechanics/m07_leverage_purchase_resolver_buff_order.ts",
     "exec_hook": "leveragePurchaseResolver",
-    "batch": 1,
     "deps": [
       "M04",
       "M06"
     ],
-    "md_source": "M07_leverage_purchase_resolver_buff_order.md"
+    "status": "todo",
+    "ml_pair": "m07a",
+    "module_path": "pzo_engine/src/mechanics/m07_leverage_purchase_resolver.ts"
   },
   {
     "task_id": "PZO-M08",
     "mechanic_id": "M08",
     "title": "Shield / Cancel System",
-    "purpose": "Shields cancel the next FUBAR or SO (or forced sale). Digital adds 'shield windows' so friends can donate a shield in clutch moments, creating shareable saves.",
     "family": "run_core",
     "kind": "core",
     "layer": "card_handler",
     "priority": 1,
-    "status": "todo",
-    "ml_pair": "m08a",
-    "ml_pair_path": "M08a_shield_timing_policy.md",
+    "batch": 1,
     "inputs": [
       "incomingEvent",
       "state.shieldLayers",
@@ -287,26 +263,23 @@
       "SHIELD_DEPLETED",
       "SHIELD_REGEN_APPLIED"
     ],
-    "module_path": "src/mechanics/m08_shield_cancel_system.ts",
     "exec_hook": "shieldCancelSystem",
-    "batch": 1,
     "deps": [
       "M04"
     ],
-    "md_source": "M08_shield_cancel_system.md"
+    "status": "todo",
+    "ml_pair": "m08a",
+    "module_path": "pzo_engine/src/mechanics/m08_shield_cancel_system.ts"
   },
   {
     "task_id": "PZO-M09",
     "mechanic_id": "M09",
     "title": "Opportunity Window + Open-Table Auction",
-    "purpose": "Passing on certain opportunities opens a timed auction to the table (or your friend list). If someone buys your passed deal, you get a small 'regret kick' + the clip labels it as a missed bag moment.",
     "family": "run_core",
     "kind": "core",
     "layer": "card_handler",
     "priority": 1,
-    "status": "todo",
-    "ml_pair": "m09a",
-    "ml_pair_path": "M09a_opportunity_value_regret_model.md",
+    "batch": 1,
     "inputs": [
       "state.tick",
       "RunSeed",
@@ -324,27 +297,24 @@
       "OPPORTUNITY_PURCHASED",
       "OPPORTUNITY_DISCARDED"
     ],
-    "module_path": "src/mechanics/m09_opportunity_window_open_table_auction.ts",
     "exec_hook": "opportunityWindowAuction",
-    "batch": 1,
     "deps": [
       "M01",
       "M04"
     ],
-    "md_source": "M09_opportunity_window_open_table_auction.md"
+    "status": "todo",
+    "ml_pair": "m09a",
+    "module_path": "pzo_engine/src/mechanics/m09_opportunity_window_open_table_auction.ts"
   },
   {
     "task_id": "PZO-M10",
     "mechanic_id": "M10",
     "title": "Market Pulse Exit Engine",
-    "purpose": "Market Pulse cards create liquidation windows (sell eligible asset, forced sale, cashout offers). Digital adds a one-tap 'exit simulation' so players can see best/worst exits fast under time pressure.",
     "family": "run_core",
     "kind": "core",
     "layer": "card_handler",
     "priority": 1,
-    "status": "todo",
-    "ml_pair": "m10a",
-    "ml_pair_path": "M10a_exit_timing_model.md",
+    "batch": 1,
     "inputs": [
       "state.assets",
       "state.macroRegime",
@@ -362,27 +332,24 @@
       "MARKET_PULSE_READ",
       "CAPITAL_GAIN_REALIZED"
     ],
-    "module_path": "src/mechanics/m10_market_pulse_exit_engine.ts",
     "exec_hook": "marketPulseExit",
-    "batch": 1,
     "deps": [
       "M05",
       "M09"
     ],
-    "md_source": "M10_market_pulse_exit_engine.md"
+    "status": "todo",
+    "ml_pair": "m10a",
+    "module_path": "pzo_engine/src/mechanics/m10_market_pulse_exit_engine.ts"
   },
   {
     "task_id": "PZO-M11",
     "mechanic_id": "M11",
     "title": "Missed Opportunity Streak & Inertia Tax",
-    "purpose": "Repeated hesitation triggers Missed Opportunity cards automatically. Digital tracks a visible 'hesitation meter' and injects inertia penalties (cash loss, turn loss, open-table reveal).",
     "family": "chaos_engine",
     "kind": "core",
     "layer": "tick_engine",
     "priority": 1,
-    "status": "todo",
-    "ml_pair": "m11a",
-    "ml_pair_path": "M11a_hesitation_inertia_detector.md",
+    "batch": 1,
     "inputs": [
       "state.missedOpportunityCount",
       "state.tick",
@@ -399,69 +366,61 @@
       "STREAK_BROKEN",
       "PASS_PENALIZED"
     ],
-    "module_path": "src/mechanics/m11_missed_opportunity_streak_inertia_tax.ts",
     "exec_hook": "missedOpportunityStreakTax",
-    "batch": 1,
     "deps": [
       "M09"
     ],
-    "md_source": "M11_missed_opportunity_streak_inertia_tax.md"
+    "status": "todo",
+    "ml_pair": "m11a",
+    "module_path": "pzo_engine/src/mechanics/m11_missed_opportunity_streak_inertia_tax.ts"
   },
   {
     "task_id": "PZO-M12",
     "mechanic_id": "M12",
     "title": "FUBAR Escalation Ladder",
-    "purpose": "Small doodads stack into crises. Conditional FUBARs read your portfolio to compute the right pain. The ladder guarantees a 'FUBAR killed me' moment if you ignore risk too long.",
     "family": "chaos_engine",
     "kind": "core",
     "layer": "tick_engine",
     "priority": 1,
-    "status": "todo",
-    "ml_pair": "m12a",
-    "ml_pair_path": "M12a_fubar_cascade_risk_model.md",
+    "batch": 1,
     "inputs": [
       "fateTick",
       "state.pressureTier",
-      "RunSeed",
-      "state.tick"
+      "state.cash"
     ],
     "outputs": [
       "fubarEvent",
       "counterplayWindow",
-      "directHitAmount"
+      "escalationLevel"
     ],
     "telemetry_events": [
       "FUBAR_TRIGGERED",
-      "FUBAR_CLASS_RESOLVED",
+      "FUBAR_ESCALATED",
       "COUNTERPLAY_WINDOW_OPENED",
-      "COUNTERPLAY_MISSED"
+      "FUBAR_DEFUSED"
     ],
-    "module_path": "src/mechanics/m12_fubar_escalation_ladder.ts",
     "exec_hook": "fubarEscalationLadder",
-    "batch": 1,
     "deps": [
-      "M01",
-      "M02"
+      "M02",
+      "M05"
     ],
-    "md_source": "M12_fubar_escalation_ladder.md"
+    "status": "todo",
+    "ml_pair": "m12a",
+    "module_path": "pzo_engine/src/mechanics/m12_fubar_escalation_ladder.ts"
   },
   {
     "task_id": "PZO-M13",
     "mechanic_id": "M13",
-    "title": "Systemic Friction Modules (SO)",
-    "purpose": "SO isn’t random annoyance—it's a module system: loan denials, delays, fees, leverage blocks. Modules are season-rotated so the meta changes without rewriting decks.",
+    "title": "Systemic Friction Module",
     "family": "chaos_engine",
     "kind": "core",
     "layer": "tick_engine",
     "priority": 1,
-    "status": "todo",
-    "ml_pair": "m13a",
-    "ml_pair_path": "M13a_friction_module_tuner.md",
+    "batch": 1,
     "inputs": [
       "fateTick",
       "state.cash",
-      "state.tick",
-      "RunSeed"
+      "state.macroRegime"
     ],
     "outputs": [
       "frictionExpenseEvent",
@@ -470,898 +429,759 @@
     ],
     "telemetry_events": [
       "SO_FRICTION_APPLIED",
-      "OBSTACLE_EXPENSE_CHARGED",
-      "FRICTION_CLASS_RESOLVED"
+      "CASH_DRAINED",
+      "FRICTION_CLASS_ASSIGNED",
+      "SO_DOUBLED"
     ],
-    "module_path": "src/mechanics/m13_systemic_friction_modules_so.ts",
     "exec_hook": "systemicFrictionModule",
-    "batch": 1,
     "deps": [
-      "M12"
+      "M05"
     ],
-    "md_source": "M13_systemic_friction_modules_so.md"
+    "status": "todo",
+    "ml_pair": "m13a",
+    "module_path": "pzo_engine/src/mechanics/m13_systemic_friction_module.ts"
   },
   {
     "task_id": "PZO-M14",
     "mechanic_id": "M14",
-    "title": "Disadvantage Draft (Run Start)",
-    "purpose": "Instead of a flat start, players draft 1 disadvantage (and optionally 1 privilege) that shapes the run. Digital keeps it non-preachy by framing disadvantages as constraints, not moral judgment.",
+    "title": "Disadvantage Draft",
     "family": "chaos_engine",
     "kind": "core",
     "layer": "card_handler",
     "priority": 1,
-    "status": "todo",
-    "ml_pair": "m14a",
-    "ml_pair_path": "M14a_disadvantage_draft_personalizer.md",
+    "batch": 1,
     "inputs": [
       "playerSelection",
-      "handicapOptions",
-      "cordPremiumTable"
+      "handicapOptions"
     ],
     "outputs": [
       "activeHandicaps",
-      "cordPremiumMultiplier",
-      "bleedModeFlag"
+      "cordPremiumMultiplier"
     ],
     "telemetry_events": [
       "HANDICAP_SELECTED",
-      "BLEED_MODE_ARMED",
       "CORD_PREMIUM_APPLIED",
-      "ADVANTAGE_SELECTED"
+      "DIFFICULTY_LOCKED"
     ],
-    "module_path": "src/mechanics/m14_disadvantage_draft_run_start.ts",
     "exec_hook": "disadvantageDraftResolver",
-    "batch": 1,
     "deps": [
       "M01"
     ],
-    "md_source": "M14_disadvantage_draft_run_start.md"
+    "status": "todo",
+    "ml_pair": "m14a",
+    "module_path": "pzo_engine/src/mechanics/m14_disadvantage_draft.ts"
   },
   {
     "task_id": "PZO-M15",
     "mechanic_id": "M15",
-    "title": "Social Chaos Tokens (Friends as Co-Authors)",
-    "purpose": "Each run grants limited 'Chaos Tokens' to your invited friends: they can trigger boosts, dilemmas, or minor FUBARs during specific windows. This makes your best moments socially authored.",
+    "title": "Social Chaos Token Play",
     "family": "social_engine",
     "kind": "core",
     "layer": "api_endpoint",
     "priority": 1,
-    "status": "todo",
-    "ml_pair": "m15a",
-    "ml_pair_path": "M15a_social_token_recommender.md",
+    "batch": 1,
     "inputs": [
       "friendInvitePayload",
-      "state.tick",
-      "tokenWindow"
+      "state.tick"
     ],
     "outputs": [
       "socialChaosEffect",
-      "tokenConsumed",
-      "friendEventBroadcast"
+      "tokenConsumed"
     ],
     "telemetry_events": [
       "SOCIAL_TOKEN_PLAYED",
-      "SOCIAL_TOKEN_EXPIRED",
-      "FRIEND_EFFECT_APPLIED"
+      "CHAOS_EFFECT_APPLIED",
+      "TOKEN_SPENT"
     ],
-    "module_path": "src/mechanics/m15_social_chaos_tokens_friends_coauthors.ts",
     "exec_hook": "socialChaosTokenPlay",
-    "batch": 1,
     "deps": [
       "M01"
     ],
-    "md_source": "M15_social_chaos_tokens_friends_coauthors.md"
+    "status": "todo",
+    "ml_pair": "m15a",
+    "module_path": "pzo_engine/src/mechanics/m15_social_chaos_token_play.ts"
   },
   {
     "task_id": "PZO-M16",
     "mechanic_id": "M16",
-    "title": "Live Table Trigger: Hot Seat Vote",
-    "purpose": "At key decisions, the table can force a 10‑second vote: buy vs pass, sell vs hold. You can override once per run (at a cost). Great for opportunity flips and regret moments.",
+    "title": "Live Table Hot Seat Vote",
     "family": "social_engine",
     "kind": "core",
     "layer": "api_endpoint",
     "priority": 1,
-    "status": "todo",
-    "ml_pair": "m16a",
-    "ml_pair_path": "M16a_hot_seat_vote_predictor.md",
+    "batch": 1,
     "inputs": [
       "tableVoteRequest",
-      "state.tick",
-      "participantList"
+      "state.tick"
     ],
     "outputs": [
       "voteResult",
-      "hotSeatEffect",
-      "voteWindowExpiry"
+      "hotSeatEffect"
     ],
     "telemetry_events": [
       "HOT_SEAT_VOTE_OPENED",
-      "HOT_SEAT_VOTE_RESOLVED",
-      "HOT_SEAT_TIMEOUT"
+      "VOTE_CAST",
+      "VOTE_RESOLVED",
+      "HOT_SEAT_EFFECT_APPLIED"
     ],
-    "module_path": "src/mechanics/m16_live_table_trigger_hot_seat_vote.ts",
     "exec_hook": "liveTableHotSeatVote",
-    "batch": 1,
     "deps": [
       "M15"
     ],
-    "md_source": "M16_live_table_trigger_hot_seat_vote.md"
+    "status": "todo",
+    "ml_pair": "m16a",
+    "module_path": "pzo_engine/src/mechanics/m16_live_table_hot_seat_vote.ts"
   },
   {
     "task_id": "PZO-M17",
     "mechanic_id": "M17",
-    "title": "Clutch Assist: Friend Bailouts",
-    "purpose": "Friends can send one bailout per run (cash grant, shield, downpay credit) using earned tokens. Bailouts are logged and rendered as shareable 'saved by ___' moments.",
+    "title": "Clutch Assist",
     "family": "social_engine",
     "kind": "core",
     "layer": "api_endpoint",
     "priority": 1,
-    "status": "todo",
-    "ml_pair": "m17a",
-    "ml_pair_path": "M17a_bailout_trigger_classifier.md",
+    "batch": 1,
     "inputs": [
       "state.cash",
-      "state.tick",
-      "bailoutRequest",
-      "friendId"
+      "state.tick"
     ],
     "outputs": [
       "bailoutResult",
-      "assistAmount",
-      "clutchEvent"
+      "assistAmount"
     ],
     "telemetry_events": [
       "BAILOUT_REQUESTED",
-      "BAILOUT_GRANTED",
-      "BAILOUT_DENIED",
-      "CLUTCH_RECORDED"
+      "BAILOUT_ACCEPTED",
+      "BAILOUT_APPLIED",
+      "BAILOUT_DENIED"
     ],
-    "module_path": "src/mechanics/m17_clutch_assist_friend_bailouts.ts",
     "exec_hook": "clutchAssistBailout",
-    "batch": 1,
     "deps": [
+      "M03",
       "M15"
     ],
-    "md_source": "M17_clutch_assist_friend_bailouts.md"
+    "status": "todo",
+    "ml_pair": "m17a",
+    "module_path": "pzo_engine/src/mechanics/m17_clutch_assist.ts"
   },
   {
     "task_id": "PZO-M18",
     "mechanic_id": "M18",
-    "title": "Rival Sabotage: Controlled Griefing",
-    "purpose": "Allow adversarial play without ruining fairness: a rival can spend tokens to increase your next deck’s 'friction' weighting, but only within bounded ranges and with full disclosure post-run.",
+    "title": "Rival Sabotage",
     "family": "social_engine",
     "kind": "core",
     "layer": "api_endpoint",
     "priority": 1,
-    "status": "todo",
-    "ml_pair": "m18a",
-    "ml_pair_path": "M18a_griefing_detection_adversarial_budgeting.md",
+    "batch": 1,
     "inputs": [
       "rivalId",
-      "sabotageCard",
-      "state.tick",
-      "state.battleBudget"
+      "sabotageCard"
     ],
     "outputs": [
       "sabotageEvent",
-      "targetImpact",
-      "counterplayWindowTriggered"
+      "targetImpact"
     ],
     "telemetry_events": [
       "SABOTAGE_LAUNCHED",
-      "SABOTAGE_LANDED",
-      "SABOTAGE_BLOCKED",
-      "COUNTERPLAY_TRIGGERED"
+      "SABOTAGE_RESOLVED",
+      "TARGET_IMPACTED",
+      "SABOTAGE_BLOCKED"
     ],
-    "module_path": "src/mechanics/m18_rival_sabotage_controlled_griefing.ts",
     "exec_hook": "rivalSabotageDispatch",
-    "batch": 1,
     "deps": [
       "M08",
-      "M12"
+      "M15"
     ],
-    "md_source": "M18_rival_sabotage_controlled_griefing.md"
+    "status": "todo",
+    "ml_pair": "m18a",
+    "module_path": "pzo_engine/src/mechanics/m18_rival_sabotage.ts"
   },
   {
     "task_id": "PZO-M19",
     "mechanic_id": "M19",
-    "title": "Season System (Rule Modules + Rewards)",
-    "purpose": "Seasons rotate rule modules (macro volatility, credit tightness baseline, deck weights, social token budgets). Rewards are cosmetic + meta-unlocks that don’t pay-to-win.",
+    "title": "Season System",
     "family": "meta_system",
     "kind": "core",
     "layer": "season_runtime",
     "priority": 1,
-    "status": "todo",
-    "ml_pair": "m19a",
-    "ml_pair_path": "M19a_season_meta_balancer.md",
+    "batch": 1,
     "inputs": [
       "seasonConfig",
-      "state.seasonState",
-      "completedRun"
+      "state.seasonState"
     ],
     "outputs": [
       "seasonProgressUpdated",
-      "rewardUnlocked",
-      "ruleModuleActivated"
+      "rewardUnlocked"
     ],
     "telemetry_events": [
       "SEASON_STARTED",
-      "SEASON_ENDED",
-      "RULE_MODULE_UNLOCKED",
-      "REWARD_GRANTED"
+      "SEASON_RULE_ACTIVATED",
+      "REWARD_UNLOCKED",
+      "SEASON_ENDED"
     ],
-    "module_path": "src/mechanics/m19_season_system_rule_modules_rewards.ts",
     "exec_hook": "seasonSystemRuntime",
-    "batch": 1,
-    "deps": [
-      "M01"
-    ],
-    "md_source": "M19_season_system_rule_modules_rewards.md"
+    "deps": [],
+    "status": "todo",
+    "ml_pair": "m19a",
+    "module_path": "pzo_engine/src/mechanics/m19_season_system.ts"
   },
   {
     "task_id": "PZO-M20",
     "mechanic_id": "M20",
-    "title": "Macro Shock Scheduler (Live Economy)",
-    "purpose": "A server-driven schedule injects macro shocks (rate hikes, liquidity crunch, boom cycles). Shocks are seeded per season so runs are comparable while still feeling alive.",
+    "title": "Macro Shock Scheduler",
     "family": "meta_system",
     "kind": "core",
     "layer": "tick_engine",
-    "priority": 1,
-    "status": "todo",
-    "ml_pair": "m20a",
-    "ml_pair_path": "M20a_macro_shock_generator.md",
+    "priority": 2,
+    "batch": 1,
     "inputs": [
       "state.tick",
-      "RunSeed",
-      "macroSchedule",
-      "state.macroRegime"
+      "RunSeed"
     ],
     "outputs": [
       "macroShockEvent",
-      "regimeUpdated",
-      "playerNotified"
+      "regimeUpdated"
     ],
     "telemetry_events": [
       "MACRO_SHOCK_SCHEDULED",
-      "MACRO_SHOCK_FIRED",
-      "REGIME_SHIFTED",
-      "MACRO_PULSE"
+      "MACRO_SHOCK_APPLIED",
+      "REGIME_FORCED",
+      "SHOCK_DEFERRED"
     ],
-    "module_path": "src/mechanics/m20_macro_shock_scheduler_live_economy.ts",
     "exec_hook": "macroShockScheduler",
-    "batch": 1,
     "deps": [
       "M01",
       "M05"
     ],
-    "md_source": "M20_macro_shock_scheduler_live_economy.md"
+    "status": "todo",
+    "ml_pair": "m20a",
+    "module_path": "pzo_engine/src/mechanics/m20_macro_shock_scheduler.ts"
   },
   {
     "task_id": "PZO-M21",
     "mechanic_id": "M21",
-    "title": "Meta-Progression: Unlockable Rule Modules",
-    "purpose": "Winning or dying unlocks modules: new starting loadouts, new chaos token types, new deck mix presets. Meta progression is about options, not raw power.",
+    "title": "Meta Progression Unlocker",
     "family": "meta_system",
     "kind": "core",
     "layer": "season_runtime",
-    "priority": 1,
-    "status": "todo",
-    "ml_pair": "m21a",
-    "ml_pair_path": "M21a_meta_progression_personalization.md",
+    "priority": 2,
+    "batch": 1,
     "inputs": [
       "playerProfile",
-      "completedRunCount",
-      "cordHistory"
+      "completedRunCount"
     ],
     "outputs": [
       "unlockedModules",
-      "progressionTier",
-      "nextUnlockThreshold"
+      "progressionTier"
     ],
     "telemetry_events": [
       "MODULE_UNLOCKED",
-      "PROGRESSION_TIER_ADVANCED",
-      "UNLOCK_PREVIEWED"
+      "TIER_REACHED",
+      "PROGRESSION_MILESTONE"
     ],
-    "module_path": "src/mechanics/m21_meta_progression_unlockable_rule_modules.ts",
     "exec_hook": "metaProgressionUnlocker",
-    "batch": 1,
     "deps": [
       "M19"
     ],
-    "md_source": "M21_meta_progression_unlockable_rule_modules.md"
+    "status": "todo",
+    "ml_pair": "m21a",
+    "module_path": "pzo_engine/src/mechanics/m21_meta_progression_unlocker.ts"
   },
   {
     "task_id": "PZO-M22",
     "mechanic_id": "M22",
-    "title": "Moment Forge: 3-Moment Guarantee System",
-    "purpose": "The engine tracks whether your run has produced: (1) FUBAR kill/scare, (2) opportunity flip, (3) missed bag. If not, it gently nudges probabilities (within the seed) to surface those beats before the run ends.",
+    "title": "Moment Forge",
     "family": "moment_engine",
     "kind": "core",
     "layer": "ui_component",
     "priority": 1,
-    "status": "todo",
-    "ml_pair": "m22a",
-    "ml_pair_path": "M22a_moment_forge_classifier_controller.md",
+    "batch": 1,
     "inputs": [
       "state.tick",
-      "eventStream",
-      "momentBudget"
+      "eventStream"
     ],
     "outputs": [
       "momentEvent",
-      "clipBoundary",
-      "sharePayload"
+      "clipBoundary"
     ],
     "telemetry_events": [
       "MOMENT_FORGED",
-      "MOMENT_BUDGET_MET",
       "CLIP_BOUNDARY_SET",
-      "MOMENT_SHARED"
+      "SHARE_TRIGGER_ARMED"
     ],
-    "module_path": "src/mechanics/m22_moment_forge_three_moment_guarantee.ts",
     "exec_hook": "momentForgeGuarantee",
-    "batch": 1,
     "deps": [
-      "M02",
-      "M12"
+      "M02"
     ],
-    "md_source": "M22_moment_forge_three_moment_guarantee.md"
+    "status": "todo",
+    "ml_pair": "m22a",
+    "module_path": "pzo_engine/src/mechanics/m22_moment_forge.ts"
   },
   {
     "task_id": "PZO-M23",
     "mechanic_id": "M23",
-    "title": "Auto-Clip + Caption Packager",
-    "purpose": "Every share moment generates a 10–20s replay: state before, decision, outcome, and a caption template. One-tap share to socials or to your friend table feed.",
+    "title": "Auto-Clip Caption Packager",
     "family": "moment_engine",
     "kind": "core",
     "layer": "ui_component",
-    "priority": 2,
-    "status": "todo",
-    "ml_pair": "m23a",
-    "ml_pair_path": "M23a_highlight_detection_autoclip.md",
+    "priority": 1,
+    "batch": 1,
     "inputs": [
       "clipBoundary",
-      "runSnapshot",
-      "momentEvent"
+      "runSnapshot"
     ],
     "outputs": [
       "clipPackage",
-      "captionText",
-      "shareableUrl"
+      "captionText"
     ],
     "telemetry_events": [
       "CLIP_PACKAGED",
       "CAPTION_GENERATED",
-      "CLIP_EXPORTED"
+      "SHARE_READY"
     ],
-    "module_path": "src/mechanics/m23_auto_clip_caption_packager.ts",
     "exec_hook": "autoClipCaptionPackager",
-    "batch": 1,
     "deps": [
       "M22"
     ],
-    "md_source": "M23_auto_clip_caption_packager.md"
+    "status": "todo",
+    "ml_pair": "m23a",
+    "module_path": "pzo_engine/src/mechanics/m23_auto_clip_caption_packager.ts"
   },
   {
     "task_id": "PZO-M24",
     "mechanic_id": "M24",
-    "title": "Challenge Links: Seed + Decision Ghosts",
-    "purpose": "Players can share a challenge link that loads the same seed and shows a 'ghost' of their decision timeline. Friends can try to beat the outcome and post their own flips.",
+    "title": "Challenge Link Generator",
     "family": "moment_engine",
     "kind": "core",
     "layer": "backend_service",
-    "priority": 2,
-    "status": "todo",
-    "ml_pair": "m24a",
-    "ml_pair_path": "M24a_challenge_matchmaking_seed_ghost_similarity.md",
+    "priority": 1,
+    "batch": 1,
     "inputs": [
       "runId",
-      "seed",
-      "decisionStream"
+      "seed"
     ],
     "outputs": [
       "challengeUrl",
-      "ghostPayload",
-      "inviteDeepLink"
+      "ghostPayload"
     ],
     "telemetry_events": [
       "CHALLENGE_LINK_CREATED",
-      "GHOST_LOADED",
-      "CHALLENGE_ACCEPTED"
+      "GHOST_PAYLOAD_BUILT",
+      "CHALLENGE_SHARED"
     ],
-    "module_path": "src/mechanics/m24_challenge_links_seed_decision_ghosts.ts",
     "exec_hook": "challengeLinkGenerator",
-    "batch": 1,
     "deps": [
       "M01",
       "M22"
     ],
-    "md_source": "M24_challenge_links_seed_decision_ghosts.md"
+    "status": "todo",
+    "ml_pair": "m24a",
+    "module_path": "pzo_engine/src/mechanics/m24_challenge_link_generator.ts"
   },
   {
     "task_id": "PZO-M25",
     "mechanic_id": "M25",
-    "title": "Personal Improvement Overlay (Optional Metrics)",
-    "purpose": "Optional layer that measures decisions (speed, risk balance, pass streaks, diversification) and gives neutral feedback. No preaching—just dashboards and tiny experiments you can toggle on/off.",
+    "title": "Personal Improvement Overlay",
     "family": "moment_engine",
     "kind": "core",
     "layer": "ui_component",
     "priority": 2,
-    "status": "todo",
-    "ml_pair": "m25a",
-    "ml_pair_path": "M25a_improvement_overlay_models.md",
+    "batch": 1,
     "inputs": [
       "runHistory",
-      "currentRunState",
-      "overlayEnabled"
+      "currentRunState"
     ],
     "outputs": [
       "improvementDeltas",
-      "comparisonOverlay",
-      "performanceAnnotations"
+      "comparisonOverlay"
     ],
     "telemetry_events": [
       "OVERLAY_VIEWED",
-      "IMPROVEMENT_DELTA_COMPUTED",
-      "PERSONAL_BEST_SET"
+      "DELTA_COMPUTED",
+      "PERSONAL_BEST_BROKEN"
     ],
-    "module_path": "src/mechanics/m25_personal_improvement_overlay_optional_metrics.ts",
     "exec_hook": "personalImprovementOverlay",
-    "batch": 1,
-    "deps": [
-      "M22"
-    ],
-    "md_source": "M25_personal_improvement_overlay_optional_metrics.md"
+    "deps": [],
+    "status": "todo",
+    "ml_pair": "m25a",
+    "module_path": "pzo_engine/src/mechanics/m25_personal_improvement_overlay.ts"
   },
   {
     "task_id": "PZO-M26",
     "mechanic_id": "M26",
-    "title": "Coop Contracts: Deal Binding Between Players",
-    "purpose": "Coop Contracts: Deal Binding Between Players — see mechanics/M26_coop_contracts_deal_binding_between_players.md",
+    "title": "Co-op Contract Binder",
     "family": "coop_contracts",
     "kind": "core",
     "layer": "api_endpoint",
-    "priority": 2,
-    "status": "in_progress",
-    "ml_pair": "m26a",
-    "ml_pair_path": "M26a_coop_contract_fairness_partner_risk.md",
+    "priority": 1,
+    "batch": 1,
     "inputs": [
       "contractDraft",
-      "participantIds",
-      "state.tick"
+      "participantIds"
     ],
     "outputs": [
       "contractId",
-      "bindingResult",
-      "contractHash"
+      "bindingResult"
     ],
     "telemetry_events": [
       "CONTRACT_DRAFTED",
-      "CONTRACT_SIGNED",
-      "CONTRACT_ACTIVE",
-      "CONTRACT_HASH_STORED"
+      "CONTRACT_BOUND",
+      "PARTICIPANT_SIGNED"
     ],
-    "module_path": "src/mechanics/m26_coop_contracts:_deal_binding_between_pla.ts",
     "exec_hook": "coopContractBinder",
-    "batch": 1,
-    "deps": [
-      "M01",
-      "M15"
-    ],
-    "md_source": "M26_coop_contracts_deal_binding_between_players.md"
+    "deps": [],
+    "status": "todo",
+    "ml_pair": "m26a",
+    "module_path": "pzo_engine/src/mechanics/m26_co_op_contract_binder.ts"
   },
   {
     "task_id": "PZO-M27",
     "mechanic_id": "M27",
-    "title": "Contract Clauses: Triggers, Escapes, Penalties",
-    "purpose": "Contract Clauses: Triggers, Escapes, Penalties — see mechanics/M27_contract_clauses_triggers_escapes_penalties.md",
+    "title": "Contract Clause Evaluator",
     "family": "coop_contracts",
     "kind": "core",
     "layer": "api_endpoint",
-    "priority": 2,
-    "status": "in_progress",
-    "ml_pair": "m27a",
-    "ml_pair_path": "M27a_clause_outcome_forecaster.md",
+    "priority": 1,
+    "batch": 1,
     "inputs": [
       "contractId",
-      "clauseDefinitions",
-      "state"
+      "clauseDefinitions"
     ],
     "outputs": [
       "clauseEvaluated",
-      "triggerFired",
-      "penaltyApplied"
+      "triggerFired"
     ],
     "telemetry_events": [
       "CLAUSE_TRIGGERED",
-      "ESCAPE_CLAUSE_INVOKED",
-      "PENALTY_ASSESSED"
+      "CLAUSE_SATISFIED",
+      "CLAUSE_BREACHED"
     ],
-    "module_path": "src/mechanics/m27_contract_clauses:_triggers_escapes_penal.ts",
     "exec_hook": "contractClauseEvaluator",
-    "batch": 1,
     "deps": [
       "M26"
     ],
-    "md_source": "M27_contract_clauses_triggers_escapes_penalties.md"
+    "status": "todo",
+    "ml_pair": "m27a",
+    "module_path": "pzo_engine/src/mechanics/m27_contract_clause_evaluator.ts"
   },
   {
     "task_id": "PZO-M28",
     "mechanic_id": "M28",
-    "title": "Handshake Windows: Fast Negotiation UI",
-    "purpose": "Handshake Windows: Fast Negotiation UI — see mechanics/M28_handshake_windows_fast_negotiation_ui.md",
+    "title": "Handshake Window Negotiation",
     "family": "coop_contracts",
     "kind": "core",
     "layer": "api_endpoint",
-    "priority": 2,
-    "status": "in_progress",
-    "ml_pair": "m28a",
-    "ml_pair_path": "M28a_handshake_negotiation_coach.md",
+    "priority": 1,
+    "batch": 1,
     "inputs": [
       "proposalPayload",
-      "windowDuration",
-      "participantIds"
+      "windowDuration"
     ],
     "outputs": [
       "handshakeResult",
-      "acceptedTerms",
-      "windowExpiry"
+      "acceptedTerms"
     ],
     "telemetry_events": [
       "HANDSHAKE_OPENED",
-      "HANDSHAKE_ACCEPTED",
-      "HANDSHAKE_REJECTED",
+      "TERMS_ACCEPTED",
       "HANDSHAKE_EXPIRED"
     ],
-    "module_path": "src/mechanics/m28_handshake_windows:_fast_negotiation_ui.ts",
     "exec_hook": "handshakeWindowNegotiation",
-    "batch": 1,
     "deps": [
       "M26"
     ],
-    "md_source": "M28_handshake_windows_fast_negotiation_ui.md"
+    "status": "todo",
+    "ml_pair": "m28a",
+    "module_path": "pzo_engine/src/mechanics/m28_handshake_window_negotiation.ts"
   },
   {
     "task_id": "PZO-M29",
     "mechanic_id": "M29",
-    "title": "Coop Risk Pool: Run-Scoped Mutual Insurance",
-    "purpose": "Coop Risk Pool: Run-Scoped Mutual Insurance — see mechanics/M29_coop_risk_pool_run_scoped_mutual_insurance.md",
+    "title": "Shared Risk Pool",
     "family": "coop_contracts",
     "kind": "core",
     "layer": "api_endpoint",
     "priority": 2,
-    "status": "in_progress",
-    "ml_pair": "m29a",
-    "ml_pair_path": "M29a_risk_pool_actuary_anti_abuse.md",
+    "batch": 1,
     "inputs": [
       "poolContributions",
-      "riskEvent",
-      "state.treasury"
+      "riskEvent"
     ],
     "outputs": [
       "poolPayout",
-      "riskDistributed",
-      "poolBalance"
+      "riskDistributed"
     ],
     "telemetry_events": [
       "RISK_POOL_FUNDED",
-      "RISK_EVENT_SHARED",
-      "PAYOUT_DISTRIBUTED"
+      "PAYOUT_TRIGGERED",
+      "POOL_EMPTY"
     ],
-    "module_path": "src/mechanics/m29_coop_risk_pool:_run_scoped_mutual_insura.ts",
-    "exec_hook": "coopRiskPoolResolver",
-    "batch": 1,
+    "exec_hook": "sharedRiskPool",
     "deps": [
-      "M26",
-      "M27"
+      "M26"
     ],
-    "md_source": "M29_coop_risk_pool_run_scoped_mutual_insurance.md"
+    "status": "todo",
+    "ml_pair": "m29a",
+    "module_path": "pzo_engine/src/mechanics/m29_shared_risk_pool.ts"
   },
   {
     "task_id": "PZO-M30",
     "mechanic_id": "M30",
-    "title": "Default and Betrayal: Controlled Drama",
-    "purpose": "Default and Betrayal: Controlled Drama — see mechanics/M30_default_and_betrayal_controlled_drama.md",
+    "title": "Defection Sequence",
     "family": "coop_contracts",
     "kind": "core",
     "layer": "api_endpoint",
-    "priority": 2,
-    "status": "in_progress",
-    "ml_pair": "m30a",
-    "ml_pair_path": "M30a_default_cascade_predictor.md",
+    "priority": 1,
+    "batch": 1,
     "inputs": [
       "contractId",
-      "defectionTrigger",
-      "state.tick",
-      "state.trustScore"
+      "defectionTrigger"
     ],
     "outputs": [
       "defectionEvent",
-      "treasuryExtraction",
-      "cordPenalty",
-      "runSplitEvent"
+      "treasuryExtraction"
     ],
     "telemetry_events": [
       "DEFECTION_INITIATED",
-      "DEFECTION_COUNTDOWN",
-      "DEFECTION_EXECUTED",
-      "BETRAYAL_RECORDED"
+      "TREASURY_DRAINED",
+      "PENALTY_APPLIED",
+      "DEFECTOR_FLAGGED"
     ],
-    "module_path": "src/mechanics/m30_default_and_betrayal:_controlled_drama.ts",
-    "exec_hook": "defaultAndBetrayalHandler",
-    "batch": 1,
+    "exec_hook": "defectionSequenceEngine",
     "deps": [
       "M26",
       "M27"
     ],
-    "md_source": "M30_default_and_betrayal_controlled_drama.md"
+    "status": "todo",
+    "ml_pair": "m30a",
+    "module_path": "pzo_engine/src/mechanics/m30_defection_sequence.ts"
   },
   {
     "task_id": "PZO-M31",
     "mechanic_id": "M31",
-    "title": "Synergy Sets: Combo Bonuses",
-    "purpose": "Synergy Sets: Combo Bonuses — see mechanics/M31_synergy_sets_combo_bonuses.md",
+    "title": "Asset Synergy Sets",
     "family": "portfolio_engine",
     "kind": "core",
     "layer": "card_handler",
-    "priority": 1,
-    "status": "in_progress",
-    "ml_pair": "m31a",
-    "ml_pair_path": "M31a_synergy_discovery_combo_mining.md",
+    "priority": 2,
+    "batch": 2,
     "inputs": [
       "state.assets",
-      "synergyDefinitions",
-      "state.tick"
+      "synergyDefinitions"
     ],
     "outputs": [
       "activeSetBonuses",
-      "comboMultiplier",
-      "synergyUnlocked"
+      "comboMultiplier"
     ],
     "telemetry_events": [
       "SYNERGY_SET_ACTIVATED",
       "COMBO_BONUS_APPLIED",
-      "SYNERGY_BROKEN"
+      "SET_BROKEN"
     ],
-    "module_path": "src/mechanics/m31_synergy_sets:_combo_bonuses.ts",
-    "exec_hook": "synergySetResolver",
-    "batch": 1,
+    "exec_hook": "assetSynergySetResolver",
     "deps": [
       "M07"
     ],
-    "md_source": "M31_synergy_sets_combo_bonuses.md"
+    "status": "todo",
+    "ml_pair": "m31a",
+    "module_path": "pzo_engine/src/mechanics/m31_asset_synergy_sets.ts"
   },
   {
     "task_id": "PZO-M32",
     "mechanic_id": "M32",
-    "title": "Liquidity Ladder: Tiered Cash Conversion",
-    "purpose": "Liquidity Ladder: Tiered Cash Conversion — see mechanics/M32_liquidity_ladder_tiered_cash_conversion.md",
+    "title": "Liquidity Ladder",
     "family": "portfolio_engine",
     "kind": "core",
     "layer": "card_handler",
-    "priority": 1,
-    "status": "in_progress",
-    "ml_pair": "m32a",
-    "ml_pair_path": "M32a_liquidity_ladder_planner_fragility.md",
+    "priority": 2,
+    "batch": 2,
     "inputs": [
       "state.assets",
-      "state.cash",
-      "liquidityRequest"
+      "state.cash"
     ],
     "outputs": [
       "liquidationResult",
-      "cashConverted",
-      "ladderTier"
+      "cashConverted"
     ],
     "telemetry_events": [
       "LIQUIDITY_CONVERTED",
-      "LADDER_TIER_CHANGED",
-      "EMERGENCY_LIQUIDATION"
+      "ASSET_SOLD",
+      "LADDER_RUNG_CLIMBED"
     ],
-    "module_path": "src/mechanics/m32_liquidity_ladder:_tiered_cash_conversion.ts",
     "exec_hook": "liquidityLadderConverter",
-    "batch": 1,
     "deps": [
       "M07",
       "M10"
     ],
-    "md_source": "M32_liquidity_ladder_tiered_cash_conversion.md"
+    "status": "todo",
+    "ml_pair": "m32a",
+    "module_path": "pzo_engine/src/mechanics/m32_liquidity_ladder.ts"
   },
   {
     "task_id": "PZO-M33",
     "mechanic_id": "M33",
-    "title": "Hedge Pairs: Correlation Shielding",
-    "purpose": "Hedge Pairs: Correlation Shielding — see mechanics/M33_hedge_pairs_correlation_shielding.md",
+    "title": "Correlation Shields",
     "family": "portfolio_engine",
     "kind": "core",
     "layer": "card_handler",
     "priority": 2,
-    "status": "in_progress",
-    "ml_pair": "m33a",
-    "ml_pair_path": "M33a_hedge_pair_validator_correlation_drift.md",
+    "batch": 2,
     "inputs": [
       "state.assets",
-      "hedgePairDefinitions",
-      "state.macroRegime"
+      "hedgePairDefinitions"
     ],
     "outputs": [
       "hedgeEffect",
-      "correlationShield",
-      "exposureCapped"
+      "correlationShield"
     ],
     "telemetry_events": [
       "HEDGE_ACTIVATED",
-      "CORRELATION_SHIELD_APPLIED",
+      "CORRELATION_SHIELD_UP",
       "HEDGE_BROKEN"
     ],
-    "module_path": "src/mechanics/m33_hedge_pairs:_correlation_shielding.ts",
-    "exec_hook": "hedgePairResolver",
-    "batch": 1,
+    "exec_hook": "correlationHedgeResolver",
     "deps": [
-      "M31",
-      "M35"
+      "M08",
+      "M31"
     ],
-    "md_source": "M33_hedge_pairs_correlation_shielding.md"
+    "status": "todo",
+    "ml_pair": "m33a",
+    "module_path": "pzo_engine/src/mechanics/m33_correlation_shields.ts"
   },
   {
     "task_id": "PZO-M34",
     "mechanic_id": "M34",
-    "title": "Asset Mods: Socketable Micro-Upgrades",
-    "purpose": "Asset Mods: Socketable Micro-Upgrades — see mechanics/M34_asset_mods_socketable_micro_upgrades.md",
+    "title": "Asset Mod Sockets",
     "family": "portfolio_engine",
     "kind": "core",
     "layer": "card_handler",
     "priority": 2,
-    "status": "in_progress",
-    "ml_pair": "m34a",
-    "ml_pair_path": "M34a_mod_impact_estimator_socket_choice.md",
+    "batch": 2,
     "inputs": [
       "assetId",
-      "modCard",
-      "state.tick"
+      "modCard"
     ],
     "outputs": [
       "modApplied",
-      "assetStatUpdated",
-      "modStack"
+      "assetStatUpdated"
     ],
     "telemetry_events": [
       "MOD_SOCKETED",
-      "MOD_REMOVED",
-      "MOD_STACK_FULL"
+      "STAT_BOOSTED",
+      "MOD_SLOT_FULL"
     ],
-    "module_path": "src/mechanics/m34_asset_mods:_socketable_micro_upgrades.ts",
-    "exec_hook": "assetModSocketer",
-    "batch": 1,
+    "exec_hook": "assetModSocketEngine",
     "deps": [
       "M07"
     ],
-    "md_source": "M34_asset_mods_socketable_micro_upgrades.md"
+    "status": "todo",
+    "ml_pair": "m34a",
+    "module_path": "pzo_engine/src/mechanics/m34_asset_mod_sockets.ts"
   },
   {
     "task_id": "PZO-M35",
     "mechanic_id": "M35",
-    "title": "Exposure Caps: Portfolio Heat",
-    "purpose": "Exposure Caps: Portfolio Heat — see mechanics/M35_exposure_caps_portfolio_heat.md",
+    "title": "Exposure Cap Enforcer",
     "family": "portfolio_engine",
     "kind": "core",
     "layer": "card_handler",
     "priority": 1,
-    "status": "in_progress",
-    "ml_pair": "m35a",
-    "ml_pair_path": "M35a_portfolio_heat_controller.md",
+    "batch": 2,
     "inputs": [
       "state.assets",
-      "exposureThresholds",
-      "state.macroRegime"
+      "exposureThresholds"
     ],
     "outputs": [
       "exposureHeat",
-      "cappedWarning",
-      "overloadPenalty"
+      "cappedWarning"
     ],
     "telemetry_events": [
       "EXPOSURE_THRESHOLD_BREACHED",
-      "OVERLOAD_WARNING",
-      "HEAT_REDUCED"
+      "EXPOSURE_CAPPED",
+      "OVEREXPOSURE_WARNING"
     ],
-    "module_path": "src/mechanics/m35_exposure_caps:_portfolio_heat.ts",
-    "exec_hook": "exposureCapMonitor",
-    "batch": 1,
+    "exec_hook": "exposureCapEnforcer",
     "deps": [
       "M07",
       "M31"
     ],
-    "md_source": "M35_exposure_caps_portfolio_heat.md"
+    "status": "todo",
+    "ml_pair": "m35a",
+    "module_path": "pzo_engine/src/mechanics/m35_exposure_cap_enforcer.ts"
   },
   {
     "task_id": "PZO-M36",
     "mechanic_id": "M36",
-    "title": "Achievement Ledger: Proof-Based Badges",
-    "purpose": "Achievement Ledger: Proof-Based Badges — see mechanics/M36_achievement_ledger_proof_based_badges.md",
+    "title": "Run Achievements + Proof Ledger",
     "family": "achievement_engine",
     "kind": "core",
     "layer": "season_runtime",
     "priority": 2,
-    "status": "in_progress",
-    "ml_pair": "m36a",
-    "ml_pair_path": "M36a_achievement_proof_verifier.md",
+    "batch": 2,
     "inputs": [
       "completedRun",
-      "achievementDefinitions",
-      "state.seasonState"
+      "achievementDefinitions"
     ],
     "outputs": [
       "badgeUnlocked",
-      "ledgerEntry",
-      "proofHash"
+      "ledgerEntry"
     ],
     "telemetry_events": [
       "ACHIEVEMENT_UNLOCKED",
-      "BADGE_ISSUED",
-      "LEDGER_ENTRY_WRITTEN"
+      "BADGE_MINTED",
+      "LEDGER_UPDATED"
     ],
-    "module_path": "src/mechanics/m36_achievement_ledger:_proof_based_badges.ts",
-    "exec_hook": "achievementLedgerIssuer",
-    "batch": 1,
+    "exec_hook": "runAchievementEngine",
     "deps": [
       "M19",
       "M50"
     ],
-    "md_source": "M36_achievement_ledger_proof_based_badges.md"
+    "status": "todo",
+    "ml_pair": "m36a",
+    "module_path": "pzo_engine/src/mechanics/m36_run_achievements_proof_ledger.ts"
   },
   {
     "task_id": "PZO-M37",
     "mechanic_id": "M37",
-    "title": "Streak Bounties: High-Risk High-Reward",
-    "purpose": "Streak Bounties: High-Risk High-Reward — see mechanics/M37_streak_bounties_high_risk_high_reward.md",
+    "title": "Streak Bounties",
     "family": "achievement_engine",
     "kind": "core",
     "layer": "season_runtime",
     "priority": 2,
-    "status": "in_progress",
-    "ml_pair": "m37a",
-    "ml_pair_path": "M37a_bounty_failure_forecaster.md",
+    "batch": 2,
     "inputs": [
       "runResults",
-      "streakCount",
-      "bountyTable"
+      "streakCount"
     ],
     "outputs": [
       "bountyActivated",
-      "streakMultiplier",
-      "bountyReward"
+      "streakMultiplier"
     ],
     "telemetry_events": [
       "STREAK_BOUNTY_ACTIVATED",
-      "STREAK_BROKEN",
-      "BOUNTY_COLLECTED"
+      "STREAK_EXTENDED",
+      "STREAK_BROKEN"
     ],
-    "module_path": "src/mechanics/m37_streak_bounties:_high_risk_high_reward.ts",
-    "exec_hook": "streakBountyResolver",
-    "batch": 1,
+    "exec_hook": "streakBountyEngine",
     "deps": [
       "M36"
     ],
-    "md_source": "M37_streak_bounties_high_risk_high_reward.md"
+    "status": "todo",
+    "ml_pair": "m37a",
+    "module_path": "pzo_engine/src/mechanics/m37_streak_bounties.ts"
   },
   {
     "task_id": "PZO-M38",
     "mechanic_id": "M38",
-    "title": "Moment Quests: Share-Driven Optional Objectives",
-    "purpose": "Moment Quests: Share-Driven Optional Objectives — see mechanics/M38_moment_quests_share_driven_optional_objectives.md",
+    "title": "Moment Quests",
     "family": "achievement_engine",
     "kind": "core",
     "layer": "season_runtime",
     "priority": 2,
-    "status": "in_progress",
-    "ml_pair": "m38a",
-    "ml_pair_path": "M38a_moment_quest_router_personalization.md",
+    "batch": 2,
     "inputs": [
       "activeQuests",
-      "momentEvent",
-      "sharePayload"
+      "momentEvent"
     ],
     "outputs": [
       "questProgressUpdated",
@@ -1371,1145 +1191,961 @@
     "telemetry_events": [
       "QUEST_PROGRESS",
       "QUEST_COMPLETED",
-      "QUEST_SHARED"
+      "QUEST_REWARD_ISSUED"
     ],
-    "module_path": "src/mechanics/m38_moment_quests:_share_driven_optional_obj.ts",
-    "exec_hook": "momentQuestTracker",
-    "batch": 1,
+    "exec_hook": "momentQuestEngine",
     "deps": [
       "M22",
       "M36"
     ],
-    "md_source": "M38_moment_quests_share_driven_optional_objectives.md"
+    "status": "todo",
+    "ml_pair": "m38a",
+    "module_path": "pzo_engine/src/mechanics/m38_moment_quests.ts"
   },
   {
     "task_id": "PZO-M39",
     "mechanic_id": "M39",
-    "title": "Season Trophy Currency: Earned Non-P2W",
-    "purpose": "Season Trophy Currency: Earned Non-P2W — see mechanics/M39_season_trophy_currency_earned_non_p2w.md",
+    "title": "Trophy Currency",
     "family": "achievement_engine",
     "kind": "core",
     "layer": "season_runtime",
     "priority": 2,
-    "status": "in_progress",
-    "ml_pair": "m39a",
-    "ml_pair_path": "M39a_trophy_economy_balancer.md",
+    "batch": 2,
     "inputs": [
       "completedRun",
-      "cordScore",
-      "seasonState"
+      "cordScore"
     ],
     "outputs": [
       "trophyCurrencyEarned",
-      "trophyBalance",
-      "p2wGuardPassed"
+      "trophyBalance"
     ],
     "telemetry_events": [
       "TROPHY_EARNED",
-      "TROPHY_SPENT",
-      "P2W_GUARD_VERIFIED"
+      "TROPHY_BALANCE_UPDATED",
+      "TROPHY_DECAY_APPLIED"
     ],
-    "module_path": "src/mechanics/m39_season_trophy_currency:_earned_non_p2w.ts",
-    "exec_hook": "trophyCurrencyAwarder",
-    "batch": 1,
+    "exec_hook": "trophyCurrencyEngine",
     "deps": [
-      "M19",
-      "M36"
+      "M36",
+      "M50"
     ],
-    "md_source": "M39_season_trophy_currency_earned_non_p2w.md"
+    "status": "todo",
+    "ml_pair": "m39a",
+    "module_path": "pzo_engine/src/mechanics/m39_trophy_currency.ts"
   },
   {
     "task_id": "PZO-M40",
     "mechanic_id": "M40",
-    "title": "Achievement Exchange: Cosmetic Market Crafting",
-    "purpose": "Achievement Exchange: Cosmetic Market Crafting — see mechanics/M40_achievement_exchange_cosmetic_market_crafting.md",
+    "title": "Cosmetic Crafting",
     "family": "achievement_engine",
     "kind": "core",
     "layer": "season_runtime",
-    "priority": 3,
-    "status": "in_progress",
-    "ml_pair": "m40a",
-    "ml_pair_path": "M40a_cosmetic_exchange_fraud_detector.md",
+    "priority": 2,
+    "batch": 2,
     "inputs": [
       "trophyCurrency",
-      "cosmeticRecipe",
-      "achievementId"
+      "cosmeticRecipe"
     ],
     "outputs": [
       "cosmeticCrafted",
-      "currencySpent",
-      "exchangeReceipt"
+      "currencySpent"
     ],
     "telemetry_events": [
       "COSMETIC_CRAFTED",
-      "EXCHANGE_COMPLETED",
-      "RECIPE_UNLOCKED"
+      "CURRENCY_SPENT",
+      "RECIPE_FAILED"
     ],
-    "module_path": "src/mechanics/m40_achievement_exchange:_cosmetic_market_cr.ts",
-    "exec_hook": "achievementExchangeCrafter",
-    "batch": 1,
+    "exec_hook": "cosmeticCraftingEngine",
     "deps": [
       "M39"
     ],
-    "md_source": "M40_achievement_exchange_cosmetic_market_crafting.md"
+    "status": "todo",
+    "ml_pair": "m40a",
+    "module_path": "pzo_engine/src/mechanics/m40_cosmetic_crafting.ts"
   },
   {
     "task_id": "PZO-M41",
     "mechanic_id": "M41",
-    "title": "90-Second Boot Run: Onboarding Sprint",
-    "purpose": "90-Second Boot Run: Onboarding Sprint — see mechanics/M41_90_second_boot_run_onboarding_sprint.md",
+    "title": "90-Second Boot Run",
     "family": "onboarding",
     "kind": "core",
     "layer": "backend_service",
     "priority": 1,
-    "status": "in_progress",
-    "ml_pair": "m41a",
-    "ml_pair_path": "M41a_boot_run_skill_estimator.md",
+    "batch": 2,
     "inputs": [
       "newPlayerFlag",
-      "onboardingConfig",
-      "RunSeed"
+      "onboardingConfig"
     ],
     "outputs": [
       "onboardingRunState",
-      "guidedPrompts",
-      "completionStatus"
+      "guidedPrompts"
     ],
     "telemetry_events": [
       "ONBOARDING_STARTED",
-      "ONBOARDING_COMPLETED",
-      "ONBOARDING_SKIPPED"
+      "TUTORIAL_STEP_COMPLETED",
+      "BOOT_RUN_FINISHED"
     ],
-    "module_path": "src/mechanics/m41_90_second_boot_run:_onboarding_sprint.ts",
-    "exec_hook": "bootRunOnboardingSprint",
-    "batch": 1,
-    "deps": [
-      "M01",
-      "M02"
-    ],
-    "md_source": "M41_90_second_boot_run_onboarding_sprint.md"
+    "exec_hook": "bootRunOnboardingEngine",
+    "deps": [],
+    "status": "todo",
+    "ml_pair": "m41a",
+    "module_path": "pzo_engine/src/mechanics/m41_90_second_boot_run.ts"
   },
   {
     "task_id": "PZO-M42",
     "mechanic_id": "M42",
-    "title": "Guided Prompts: Opt-In Minimal",
-    "purpose": "Guided Prompts: Opt-In Minimal — see mechanics/M42_guided_prompts_opt_in_minimal.md",
+    "title": "Contextual Prompt Engine",
     "family": "onboarding",
     "kind": "core",
     "layer": "ui_component",
     "priority": 2,
-    "status": "in_progress",
-    "ml_pair": "m42a",
-    "ml_pair_path": "M42a_prompt_minimalism_controller.md",
+    "batch": 2,
     "inputs": [
       "playerOptIn",
-      "gameState",
-      "promptLibrary"
+      "gameState"
     ],
     "outputs": [
       "promptDisplayed",
-      "promptDismissed",
-      "overlayConfig"
+      "promptDismissed"
     ],
     "telemetry_events": [
       "PROMPT_SHOWN",
       "PROMPT_DISMISSED",
-      "PROMPTS_DISABLED"
+      "TUTORIAL_COMPLETE"
     ],
-    "module_path": "src/mechanics/m42_guided_prompts:_opt_in_minimal.ts",
-    "exec_hook": "guidedPromptOverlay",
-    "batch": 1,
+    "exec_hook": "contextualPromptEngine",
     "deps": [
       "M41"
     ],
-    "md_source": "M42_guided_prompts_opt_in_minimal.md"
+    "status": "todo",
+    "ml_pair": "m42a",
+    "module_path": "pzo_engine/src/mechanics/m42_contextual_prompt_engine.ts"
   },
   {
     "task_id": "PZO-M43",
     "mechanic_id": "M43",
-    "title": "Practice Sandbox: Rewind + What-If",
-    "purpose": "Practice Sandbox: Rewind + What-If — see mechanics/M43_practice_sandbox_rewind_what_if.md",
+    "title": "Sandbox Rewind Mode",
     "family": "onboarding",
     "kind": "core",
     "layer": "backend_service",
     "priority": 2,
-    "status": "in_progress",
-    "ml_pair": "m43a",
-    "ml_pair_path": "M43a_what_if_tutor_counterfactual.md",
+    "batch": 2,
     "inputs": [
       "sandboxState",
-      "rewindTarget",
-      "whatIfScenario"
+      "rewindTarget"
     ],
     "outputs": [
       "rewindResult",
-      "alternateTimeline",
-      "whatIfOutcome"
+      "alternateTimeline"
     ],
     "telemetry_events": [
       "SANDBOX_ENTERED",
       "REWIND_EXECUTED",
-      "WHAT_IF_SIMULATED"
+      "ALTERNATE_SIMULATED"
     ],
-    "module_path": "src/mechanics/m43_practice_sandbox:_rewind___what_if.ts",
-    "exec_hook": "practiceSandboxRewind",
-    "batch": 1,
+    "exec_hook": "sandboxRewindEngine",
     "deps": [
-      "M01",
-      "M48"
+      "M01"
     ],
-    "md_source": "M43_practice_sandbox_rewind_what_if.md"
+    "status": "todo",
+    "ml_pair": "m43a",
+    "module_path": "pzo_engine/src/mechanics/m43_sandbox_rewind_mode.ts"
   },
   {
     "task_id": "PZO-M44",
     "mechanic_id": "M44",
-    "title": "Starter Paths: Archetype Builds",
-    "purpose": "Starter Paths: Archetype Builds — see mechanics/M44_starter_paths_archetype_builds.md",
+    "title": "Archetype Starter Kit",
     "family": "onboarding",
     "kind": "core",
     "layer": "backend_service",
     "priority": 2,
-    "status": "in_progress",
-    "ml_pair": "m44a",
-    "ml_pair_path": "M44a_starter_path_matchmaker.md",
+    "batch": 2,
     "inputs": [
       "archetypeSelection",
       "playerProfile"
     ],
     "outputs": [
       "starterDeck",
-      "suggestedStrategy",
-      "archetypeBonus"
+      "suggestedStrategy"
     ],
     "telemetry_events": [
       "ARCHETYPE_SELECTED",
-      "STARTER_PATH_ACTIVATED",
-      "ARCHETYPE_CHANGED"
+      "STARTER_DECK_ISSUED",
+      "STRATEGY_SUGGESTED"
     ],
-    "module_path": "src/mechanics/m44_starter_paths:_archetype_builds.ts",
-    "exec_hook": "starterPathBuilder",
-    "batch": 1,
-    "deps": [
-      "M04"
-    ],
-    "md_source": "M44_starter_paths_archetype_builds.md"
+    "exec_hook": "archetypeStarterKit",
+    "deps": [],
+    "status": "todo",
+    "ml_pair": "m44a",
+    "module_path": "pzo_engine/src/mechanics/m44_archetype_starter_kit.ts"
   },
   {
     "task_id": "PZO-M45",
     "mechanic_id": "M45",
-    "title": "Training Wheels: Grace Period Then Off",
-    "purpose": "Training Wheels: Grace Period Then Off — see mechanics/M45_training_wheels_grace_period_then_off.md",
+    "title": "New-Player Grace Period",
     "family": "onboarding",
     "kind": "core",
     "layer": "backend_service",
-    "priority": 2,
-    "status": "in_progress",
-    "ml_pair": "m45a",
-    "ml_pair_path": "M45a_training_wheels_scheduler.md",
+    "priority": 1,
+    "batch": 2,
     "inputs": [
       "runCount",
-      "playerSkillScore",
-      "gracePeriodConfig"
+      "playerSkillScore"
     ],
     "outputs": [
       "gracePeriodActive",
-      "protectionApplied",
-      "graceExpiredEvent"
+      "protectionApplied"
     ],
     "telemetry_events": [
       "GRACE_PERIOD_ACTIVE",
-      "GRACE_PERIOD_EXPIRED",
-      "PROTECTION_APPLIED"
+      "PROTECTION_APPLIED",
+      "GRACE_PERIOD_EXPIRED"
     ],
-    "module_path": "src/mechanics/m45_training_wheels:_grace_period_then_off.ts",
-    "exec_hook": "trainingWheelsGraceManager",
-    "batch": 1,
-    "deps": [
-      "M41"
-    ],
-    "md_source": "M45_training_wheels_grace_period_then_off.md"
+    "exec_hook": "newPlayerGracePeriod",
+    "deps": [],
+    "status": "todo",
+    "ml_pair": "m45a",
+    "module_path": "pzo_engine/src/mechanics/m45_new_player_grace_period.ts"
   },
   {
     "task_id": "PZO-M46",
     "mechanic_id": "M46",
-    "title": "Event-Sourced Ledger: Append-Only Run Truth",
-    "purpose": "Event-Sourced Ledger: Append-Only Run Truth — see mechanics/M46_event_sourced_ledger_append_only_run_truth.md",
+    "title": "Tamper-Proof Ledger",
     "family": "integrity_core",
     "kind": "core",
     "layer": "backend_service",
     "priority": 1,
-    "status": "in_progress",
-    "ml_pair": "m46a",
-    "ml_pair_path": "M46a_ledger_anomaly_detector_event_forensics.md",
+    "batch": 1,
     "inputs": [
       "gameAction",
-      "state.tick",
-      "state.runId"
+      "state.tick"
     ],
     "outputs": [
       "ledgerEntry",
-      "ledgerHash",
-      "appendConfirmed"
+      "ledgerHash"
     ],
     "telemetry_events": [
       "LEDGER_APPEND",
-      "LEDGER_SEALED",
-      "LEDGER_TAMPER_DETECTED"
+      "HASH_COMMITTED",
+      "LEDGER_VERIFIED"
     ],
-    "module_path": "src/mechanics/m46_event_sourced_ledger:_append_only_run_tr.ts",
-    "exec_hook": "eventSourcedLedgerAppend",
-    "batch": 1,
-    "deps": [
-      "M01"
-    ],
-    "md_source": "M46_event_sourced_ledger_append_only_run_truth.md"
+    "exec_hook": "tamperProofLedger",
+    "deps": [],
+    "status": "todo",
+    "ml_pair": "m46a",
+    "module_path": "pzo_engine/src/mechanics/m46_tamper_proof_ledger.ts"
   },
   {
     "task_id": "PZO-M47",
     "mechanic_id": "M47",
-    "title": "Signed Actions: Client-Server Integrity",
-    "purpose": "Signed Actions: Client-Server Integrity — see mechanics/M47_signed_actions_client_server_integrity.md",
+    "title": "Action Signing",
     "family": "integrity_core",
     "kind": "core",
     "layer": "backend_service",
     "priority": 1,
-    "status": "in_progress",
-    "ml_pair": "m47a",
-    "ml_pair_path": "M47a_signature_freshness_monitor.md",
+    "batch": 1,
     "inputs": [
       "clientAction",
-      "sessionToken",
-      "tickSignature"
+      "sessionToken"
     ],
     "outputs": [
       "signedAction",
-      "integrityVerified",
-      "signatureHash"
+      "integrityVerified"
     ],
     "telemetry_events": [
       "ACTION_SIGNED",
-      "SIGNATURE_VERIFIED",
-      "SIGNATURE_REJECTED"
+      "INTEGRITY_VERIFIED",
+      "SIGNATURE_INVALID"
     ],
-    "module_path": "src/mechanics/m47_signed_actions:_client_server_integrity.ts",
-    "exec_hook": "signedActionVerifier",
-    "batch": 1,
-    "deps": [
-      "M46"
-    ],
-    "md_source": "M47_signed_actions_client_server_integrity.md"
+    "exec_hook": "actionSigningEngine",
+    "deps": [],
+    "status": "todo",
+    "ml_pair": "m47a",
+    "module_path": "pzo_engine/src/mechanics/m47_action_signing.ts"
   },
   {
     "task_id": "PZO-M48",
     "mechanic_id": "M48",
-    "title": "Deterministic Validator: Server Replay Verification",
-    "purpose": "Deterministic Validator: Server Replay Verification — see mechanics/M48_deterministic_validator_server_replay_verification.md",
+    "title": "Deterministic Validator",
     "family": "integrity_core",
     "kind": "core",
     "layer": "backend_service",
     "priority": 1,
-    "status": "in_progress",
-    "ml_pair": "m48a",
-    "ml_pair_path": "M48a_replay_consistency_model_validator_assist.md",
+    "batch": 1,
     "inputs": [
       "runId",
-      "seed",
-      "actionStream"
+      "seed"
     ],
     "outputs": [
       "replayResult",
-      "verificationStatus",
-      "mismatchReport"
+      "verificationStatus"
     ],
     "telemetry_events": [
       "REPLAY_STARTED",
       "REPLAY_VERIFIED",
-      "REPLAY_FAILED",
-      "INTEGRITY_VIOLATION"
+      "REPLAY_MISMATCH",
+      "REPLAY_TAMPERED"
     ],
-    "module_path": "src/mechanics/m48_deterministic_validator:_server_replay_v.ts",
     "exec_hook": "deterministicValidator",
-    "batch": 1,
     "deps": [
       "M01",
-      "M46",
-      "M47"
+      "M46"
     ],
-    "md_source": "M48_deterministic_validator_server_replay_verification.md"
+    "status": "todo",
+    "ml_pair": "m48a",
+    "module_path": "pzo_engine/src/mechanics/m48_deterministic_validator.ts"
   },
   {
     "task_id": "PZO-M49",
     "mechanic_id": "M49",
-    "title": "Exploit Taxonomy: Auto-Response + Fail-Closed",
-    "purpose": "Exploit Taxonomy: Auto-Response + Fail-Closed — see mechanics/M49_exploit_taxonomy_auto_response_fail_closed.md",
+    "title": "Exploit Pattern Detector",
     "family": "integrity_core",
     "kind": "core",
     "layer": "backend_service",
     "priority": 1,
-    "status": "in_progress",
-    "ml_pair": "m49a",
-    "ml_pair_path": "M49a_exploit_response_policy.md",
+    "batch": 1,
     "inputs": [
       "suspiciousPattern",
-      "exploitTaxonomy",
-      "runId"
+      "exploitTaxonomy"
     ],
     "outputs": [
       "exploitClassified",
-      "autoResponse",
-      "quarantineTriggered"
+      "autoResponse"
     ],
     "telemetry_events": [
       "EXPLOIT_DETECTED",
-      "AUTO_RESPONSE_FIRED",
-      "RUN_QUARANTINED",
-      "EXPLOIT_CLEARED"
+      "EXPLOIT_CLASSIFIED",
+      "AUTO_RESPONSE_APPLIED"
     ],
-    "module_path": "src/mechanics/m49_exploit_taxonomy:_auto_response___fail_c.ts",
-    "exec_hook": "exploitTaxonomyAutoResponse",
-    "batch": 1,
+    "exec_hook": "exploitPatternDetector",
     "deps": [
-      "M48"
+      "M46"
     ],
-    "md_source": "M49_exploit_taxonomy_auto_response_fail_closed.md"
+    "status": "todo",
+    "ml_pair": "m49a",
+    "module_path": "pzo_engine/src/mechanics/m49_exploit_pattern_detector.ts"
   },
   {
     "task_id": "PZO-M50",
     "mechanic_id": "M50",
-    "title": "Proof Cards: Shareable Receipts with Hashes",
-    "purpose": "Proof Cards: Shareable Receipts with Hashes — see mechanics/M50_proof_cards_shareable_receipts_with_hashes.md",
+    "title": "Sovereignty Proof Card",
     "family": "integrity_core",
     "kind": "core",
     "layer": "backend_service",
     "priority": 1,
-    "status": "in_progress",
-    "ml_pair": "m50a",
-    "ml_pair_path": "M50a_proof_card_verifier_hash_trust.md",
+    "batch": 1,
     "inputs": [
       "completedRun",
-      "cordScore",
-      "integrityStatus"
+      "cordScore"
     ],
     "outputs": [
       "proofCard",
-      "proofHash",
-      "shareableProofUrl"
+      "proofHash"
     ],
     "telemetry_events": [
       "PROOF_CARD_ISSUED",
-      "PROOF_HASH_COMPUTED",
-      "PROOF_SHARED",
-      "PROOF_VERIFIED"
+      "SOVEREIGNTY_STAMP",
+      "RUN_CERTIFIED"
     ],
-    "module_path": "src/mechanics/m50_proof_cards:_shareable_receipts_with_has.ts",
-    "exec_hook": "proofCardIssuer",
-    "batch": 1,
+    "exec_hook": "sovereigntyProofCard",
     "deps": [
       "M46",
       "M47",
       "M48"
     ],
-    "md_source": "M50_proof_cards_shareable_receipts_with_hashes.md"
+    "status": "todo",
+    "ml_pair": "m50a",
+    "module_path": "pzo_engine/src/mechanics/m50_sovereignty_proof_card.ts"
   },
   {
     "task_id": "PZO-M51",
     "mechanic_id": "M51",
-    "title": "Syndicate Deals: Multi-Party Coop Acquisitions",
-    "purpose": "Syndicate Deals: Multi-Party Coop Acquisitions — see mechanics/M51_syndicate_deals_multi_party_coop_acquisitions.md",
+    "title": "Syndicate Deal Architecture",
     "family": "coop_advanced",
     "kind": "core",
     "layer": "api_endpoint",
     "priority": 2,
-    "status": "in_progress",
-    "ml_pair": "m51a",
-    "ml_pair_path": "M51a_syndicate_coalition_scoring_multi_party_deal_stability.md",
+    "batch": 2,
     "inputs": [
       "dealProposal",
-      "participantIds",
-      "state.treasury"
+      "participantIds"
     ],
     "outputs": [
       "syndicateDeal",
-      "splitTerms",
-      "acquisitionResult"
+      "splitTerms"
     ],
     "telemetry_events": [
       "SYNDICATE_DEAL_PROPOSED",
-      "SYNDICATE_DEAL_EXECUTED",
-      "SYNDICATE_DEAL_COLLAPSED"
+      "DEAL_RATIFIED",
+      "SPLIT_LOCKED"
     ],
-    "module_path": "src/mechanics/m51_syndicate_deals:_multi_party_coop_acquis.ts",
-    "exec_hook": "syndicateDealExecutor",
-    "batch": 2,
+    "exec_hook": "syndicateDealArchitecture",
     "deps": [
-      "M26",
-      "M29"
+      "M26"
     ],
-    "md_source": "M51_syndicate_deals_multi_party_coop_acquisitions.md"
+    "status": "todo",
+    "ml_pair": "m51a",
+    "module_path": "pzo_engine/src/mechanics/m51_syndicate_deal_architecture.ts"
   },
   {
     "task_id": "PZO-M52",
     "mechanic_id": "M52",
-    "title": "Escrow: Milestone-Release Conditional Funding",
-    "purpose": "Escrow: Milestone-Release Conditional Funding — see mechanics/M52_escrow_milestone_release_conditional_coop_funding.md",
+    "title": "Milestone Escrow",
     "family": "coop_advanced",
     "kind": "core",
     "layer": "api_endpoint",
     "priority": 2,
-    "status": "in_progress",
-    "ml_pair": "m52a",
-    "ml_pair_path": "M52a_escrow_milestone_success_model_gaming_resistant_release.md",
+    "batch": 2,
     "inputs": [
       "escrowAmount",
-      "milestoneConditions",
-      "participantIds"
+      "milestoneConditions"
     ],
     "outputs": [
       "escrowCreated",
-      "milestoneResult",
-      "releaseExecuted"
+      "milestoneResult"
     ],
     "telemetry_events": [
       "ESCROW_CREATED",
-      "MILESTONE_REACHED",
-      "ESCROW_RELEASED",
-      "ESCROW_DISPUTED"
+      "MILESTONE_MET",
+      "ESCROW_RELEASED"
     ],
-    "module_path": "src/mechanics/m52_escrow:_milestone_release_conditional_fu.ts",
-    "exec_hook": "escrowMilestoneReleaser",
-    "batch": 2,
+    "exec_hook": "milestoneEscrowEngine",
     "deps": [
       "M26",
-      "M27"
+      "M29"
     ],
-    "md_source": "M52_escrow_milestone_release_conditional_coop_funding.md"
+    "status": "todo",
+    "ml_pair": "m52a",
+    "module_path": "pzo_engine/src/mechanics/m52_milestone_escrow.ts"
   },
   {
     "task_id": "PZO-M53",
     "mechanic_id": "M53",
-    "title": "Reputation Stake: Collateralized Trust in Coop",
-    "purpose": "Reputation Stake: Collateralized Trust in Coop — see mechanics/M53_reputation_stake_collateralized_trust_in_coop_contracts.md",
+    "title": "Reputation Staking",
     "family": "coop_advanced",
     "kind": "core",
     "layer": "api_endpoint",
     "priority": 2,
-    "status": "in_progress",
-    "ml_pair": "m53a",
-    "ml_pair_path": "M53a_reliability_collusion_monitor_reputation_stake.md",
+    "batch": 2,
     "inputs": [
       "reputationScore",
-      "stakeAmount",
-      "contractId"
+      "stakeAmount"
     ],
     "outputs": [
       "stakeResult",
-      "trustCollateral",
-      "reputationUpdated"
+      "trustCollateral"
     ],
     "telemetry_events": [
       "STAKE_POSTED",
       "STAKE_SLASHED",
-      "REPUTATION_UPDATED"
+      "STAKE_RETURNED"
     ],
-    "module_path": "src/mechanics/m53_reputation_stake:_collateralized_trust_i.ts",
-    "exec_hook": "reputationStakeCollateralizer",
-    "batch": 2,
+    "exec_hook": "reputationStakingEngine",
     "deps": [
-      "M26",
-      "M30"
+      "M26"
     ],
-    "md_source": "M53_reputation_stake_collateralized_trust_in_coop_contracts.md"
+    "status": "todo",
+    "ml_pair": "m53a",
+    "module_path": "pzo_engine/src/mechanics/m53_reputation_staking.ts"
   },
   {
     "task_id": "PZO-M54",
     "mechanic_id": "M54",
-    "title": "Restructure Window: Mid-Run Contract Renegotiation",
-    "purpose": "Restructure Window: Mid-Run Contract Renegotiation — see mechanics/M54_restructure_window_mid_run_contract_renegotiation.md",
+    "title": "Obligation Restructuring Window",
     "family": "coop_advanced",
     "kind": "core",
     "layer": "api_endpoint",
     "priority": 2,
-    "status": "in_progress",
-    "ml_pair": "m54a",
-    "ml_pair_path": "M54a_restructure_acceptance_forecaster_distress_term_triage.md",
+    "batch": 2,
     "inputs": [
       "contractId",
-      "restructureProposal",
-      "state.tick"
+      "restructureProposal"
     ],
     "outputs": [
       "restructureResult",
-      "newTerms",
-      "acceptanceRequired"
+      "newTerms"
     ],
     "telemetry_events": [
       "RESTRUCTURE_PROPOSED",
-      "RESTRUCTURE_ACCEPTED",
-      "RESTRUCTURE_REJECTED"
+      "TERMS_AMENDED",
+      "RESTRUCTURE_DENIED"
     ],
-    "module_path": "src/mechanics/m54_restructure_window:_mid_run_contract_ren.ts",
-    "exec_hook": "restructureWindowHandler",
-    "batch": 2,
+    "exec_hook": "obligationRestructuringEngine",
     "deps": [
       "M26",
       "M27"
     ],
-    "md_source": "M54_restructure_window_mid_run_contract_renegotiation.md"
+    "status": "todo",
+    "ml_pair": "m54a",
+    "module_path": "pzo_engine/src/mechanics/m54_obligation_restructuring_window.ts"
   },
   {
     "task_id": "PZO-M55",
     "mechanic_id": "M55",
-    "title": "Arbitration Mode: Dispute Resolution via Replay",
-    "purpose": "Arbitration Mode: Dispute Resolution via Replay — see mechanics/M55_arbitration_mode_dispute_resolution_via_replay_table_vote.md",
+    "title": "On-Chain Arbitration",
     "family": "coop_advanced",
     "kind": "core",
     "layer": "api_endpoint",
     "priority": 2,
-    "status": "in_progress",
-    "ml_pair": "m55a",
-    "ml_pair_path": "M55a_arbitration_triage_verdict_summarizer_replay_evidence.md",
+    "batch": 2,
     "inputs": [
       "disputePayload",
-      "contractId",
-      "replayEvidence"
+      "contractId"
     ],
     "outputs": [
       "arbitrationResult",
-      "verdictApplied",
-      "penaltyDistributed"
+      "verdictApplied"
     ],
     "telemetry_events": [
       "DISPUTE_RAISED",
-      "ARBITRATION_STARTED",
+      "ARBITRATION_OPENED",
       "VERDICT_ISSUED"
     ],
-    "module_path": "src/mechanics/m55_arbitration_mode:_dispute_resolution_via.ts",
-    "exec_hook": "arbitrationModeResolver",
-    "batch": 2,
+    "exec_hook": "onChainArbitrationEngine",
     "deps": [
-      "M48",
-      "M26"
+      "M26",
+      "M27"
     ],
-    "md_source": "M55_arbitration_mode_dispute_resolution_via_replay_table_vote.md"
+    "status": "todo",
+    "ml_pair": "m55a",
+    "module_path": "pzo_engine/src/mechanics/m55_on_chain_arbitration.ts"
   },
   {
     "task_id": "PZO-M56",
     "mechanic_id": "M56",
-    "title": "Doctrine Draft: Portfolio Playstyle Contracts",
-    "purpose": "Doctrine Draft: Portfolio Playstyle Contracts — see mechanics/M56_doctrine_draft_portfolio_playstyle_contracts.md",
+    "title": "Doctrine Lock",
     "family": "portfolio_advanced",
     "kind": "core",
     "layer": "card_handler",
     "priority": 2,
-    "status": "in_progress",
-    "ml_pair": "m56a",
-    "ml_pair_path": "M56a_doctrine_alignment_model_playstyle_consistency.md",
+    "batch": 2,
     "inputs": [
       "doctrineSelection",
-      "state.assets",
-      "state.tick"
+      "state.assets"
     ],
     "outputs": [
       "doctrineActive",
-      "playstyleConstraints",
-      "cordModifier"
+      "playstyleConstraints"
     ],
     "telemetry_events": [
       "DOCTRINE_SELECTED",
-      "DOCTRINE_BREACHED",
-      "DOCTRINE_FULFILLED"
+      "CONSTRAINTS_APPLIED",
+      "DOCTRINE_VIOLATED"
     ],
-    "module_path": "src/mechanics/m56_doctrine_draft:_portfolio_playstyle_cont.ts",
-    "exec_hook": "doctrineDraftResolver",
-    "batch": 2,
+    "exec_hook": "doctrineSelectEngine",
     "deps": [
-      "M14",
       "M31"
     ],
-    "md_source": "M56_doctrine_draft_portfolio_playstyle_contracts.md"
+    "status": "todo",
+    "ml_pair": "m56a",
+    "module_path": "pzo_engine/src/mechanics/m56_doctrine_lock.ts"
   },
   {
     "task_id": "PZO-M57",
     "mechanic_id": "M57",
-    "title": "Rebalancing Pulse: Swap Net Portfolio Under Time",
-    "purpose": "Rebalancing Pulse: Swap Net Portfolio Under Time — see mechanics/M57_rebalancing_pulse_swap_net_portfolio_rungs_under_time_pressure.md",
+    "title": "Rebalance Pulse",
     "family": "portfolio_advanced",
     "kind": "core",
     "layer": "card_handler",
     "priority": 2,
-    "status": "in_progress",
-    "ml_pair": "m57a",
-    "ml_pair_path": "M57a_rebalancing_pulse_action_planner_seconds_to_save.md",
+    "batch": 2,
     "inputs": [
       "state.assets",
-      "rebalanceWindow",
-      "targetAllocation"
+      "rebalanceWindow"
     ],
     "outputs": [
       "swapExecuted",
-      "allocationUpdated",
-      "rebalanceCost"
+      "allocationUpdated"
     ],
     "telemetry_events": [
       "REBALANCE_PULSE_STARTED",
       "SWAP_EXECUTED",
-      "PULSE_EXPIRED"
+      "BALANCE_RESTORED"
     ],
-    "module_path": "src/mechanics/m57_rebalancing_pulse:_swap_net_portfolio_un.ts",
-    "exec_hook": "rebalancingPulseExecutor",
-    "batch": 2,
+    "exec_hook": "rebalancePulseEngine",
     "deps": [
-      "M32",
+      "M31",
       "M35"
     ],
-    "md_source": "M57_rebalancing_pulse_swap_net_portfolio_rungs_under_time_pressure.md"
+    "status": "todo",
+    "ml_pair": "m57a",
+    "module_path": "pzo_engine/src/mechanics/m57_rebalance_pulse.ts"
   },
   {
     "task_id": "PZO-M58",
     "mechanic_id": "M58",
-    "title": "Voluntary Stress Test: High-Risk Proof Challenge",
-    "purpose": "Voluntary Stress Test: High-Risk Proof Challenge — see mechanics/M58_voluntary_stress_test_high_risk_proof_challenge.md",
+    "title": "Stress-Test Proof Badge",
     "family": "portfolio_advanced",
     "kind": "core",
     "layer": "card_handler",
     "priority": 2,
-    "status": "in_progress",
-    "ml_pair": "m58a",
-    "ml_pair_path": "M58a_stress_test_selector_risk_reward_balancer_anti_farm.md",
+    "batch": 2,
     "inputs": [
       "stressTestConfig",
-      "state.assets",
-      "state.tick"
+      "state.assets"
     ],
     "outputs": [
       "stressTestResult",
-      "proofBadge",
-      "cordBonus"
+      "proofBadge"
     ],
     "telemetry_events": [
       "STRESS_TEST_ENTERED",
       "STRESS_TEST_PASSED",
-      "STRESS_TEST_FAILED"
+      "PROOF_BADGE_ISSUED"
     ],
-    "module_path": "src/mechanics/m58_voluntary_stress_test:_high_risk_proof_c.ts",
-    "exec_hook": "voluntaryStressTestRunner",
-    "batch": 2,
+    "exec_hook": "stressTestProofEngine",
     "deps": [
       "M35",
       "M50"
     ],
-    "md_source": "M58_voluntary_stress_test_high_risk_proof_challenge.md"
+    "status": "todo",
+    "ml_pair": "m58a",
+    "module_path": "pzo_engine/src/mechanics/m58_stress_test_proof_badge.ts"
   },
   {
     "task_id": "PZO-M59",
     "mechanic_id": "M59",
-    "title": "Synergy Overload: Complexity Heat for Combo Stacking",
-    "purpose": "Synergy Overload: Complexity Heat for Combo Stacking — see mechanics/M59_synergy_overload_complexity_heat_for_combo_stacking.md",
+    "title": "Complexity Heat Meter",
     "family": "portfolio_advanced",
     "kind": "core",
     "layer": "card_handler",
     "priority": 2,
-    "status": "in_progress",
-    "ml_pair": "m59a",
-    "ml_pair_path": "M59a_complexity_heat_calibrator_combo_degeneracy_detector.md",
+    "batch": 2,
     "inputs": [
       "state.activeSetBonuses",
-      "state.assetMods",
-      "complexityThresholds"
+      "state.assetMods"
     ],
     "outputs": [
       "complexityHeat",
-      "overloadWarning",
-      "simplifyPrompt"
+      "overloadWarning"
     ],
     "telemetry_events": [
       "COMPLEXITY_HEAT_UPDATED",
-      "OVERLOAD_WARNING_FIRED",
-      "SIMPLIFY_EXECUTED"
+      "OVERLOAD_WARNING",
+      "COMPLEXITY_CAP_HIT"
     ],
-    "module_path": "src/mechanics/m59_synergy_overload:_complexity_heat_for_co.ts",
-    "exec_hook": "synergyOverloadMonitor",
-    "batch": 2,
+    "exec_hook": "complexityHeatMeter",
     "deps": [
       "M31",
       "M34"
     ],
-    "md_source": "M59_synergy_overload_complexity_heat_for_combo_stacking.md"
+    "status": "todo",
+    "ml_pair": "m59a",
+    "module_path": "pzo_engine/src/mechanics/m59_complexity_heat_meter.ts"
   },
   {
     "task_id": "PZO-M60",
     "mechanic_id": "M60",
-    "title": "Liability Netting: Cross-Asset Obligation Offsets",
-    "purpose": "Liability Netting: Cross-Asset Obligation Offsets — see mechanics/M60_liability_netting_cross_asset_obligation_offsets.md",
+    "title": "Net Exposure + Liability Netting",
     "family": "portfolio_advanced",
     "kind": "core",
     "layer": "card_handler",
     "priority": 2,
-    "status": "in_progress",
-    "ml_pair": "m60a",
-    "ml_pair_path": "M60a_liability_netting_advisor_cascade_minimization_under_caps.md",
+    "batch": 2,
     "inputs": [
       "state.liabilities",
-      "state.assets",
-      "nettingRules"
+      "state.assets"
     ],
     "outputs": [
       "netExposure",
-      "nettingApplied",
-      "obligationOffset"
+      "nettingApplied"
     ],
     "telemetry_events": [
       "LIABILITY_NETTED",
-      "OBLIGATION_OFFSET",
-      "NET_EXPOSURE_UPDATED"
+      "NET_EXPOSURE_COMPUTED",
+      "NETTING_APPLIED"
     ],
-    "module_path": "src/mechanics/m60_liability_netting:_cross_asset_obligatio.ts",
-    "exec_hook": "liabilityNettingResolver",
-    "batch": 2,
+    "exec_hook": "liabilityNettingEngine",
     "deps": [
-      "M32",
-      "M35"
+      "M35",
+      "M07"
     ],
-    "md_source": "M60_liability_netting_cross_asset_obligation_offsets.md"
+    "status": "todo",
+    "ml_pair": "m60a",
+    "module_path": "pzo_engine/src/mechanics/m60_net_exposure_liability_netting.ts"
   },
   {
     "task_id": "PZO-M61",
     "mechanic_id": "M61",
-    "title": "Tiered Badges: Bronze to Platinum Proof Levels",
-    "purpose": "Tiered Badges: Bronze to Platinum Proof Levels — see mechanics/M61_tiered_badges_bronze_to_platinum_proof_levels.md",
+    "title": "Tiered Badges",
     "family": "achievement_advanced",
     "kind": "core",
     "layer": "season_runtime",
     "priority": 2,
-    "status": "in_progress",
-    "ml_pair": "m61a",
-    "ml_pair_path": "M61a_badge_tier_threshold_calibrator_distribution_control.md",
+    "batch": 2,
     "inputs": [
       "cordScore",
-      "runCount",
-      "badgeTierTable"
+      "runCount"
     ],
     "outputs": [
       "badgeTierAwarded",
-      "tierHash",
-      "displayBadge"
+      "tierHash"
     ],
     "telemetry_events": [
       "BADGE_TIER_UPGRADED",
-      "BADGE_DISPLAYED",
-      "TIER_THRESHOLD_MET"
+      "TIER_HASH_STORED",
+      "BADGE_DISPLAYED"
     ],
-    "module_path": "src/mechanics/m61_tiered_badges:_bronze_to_platinum_proof_.ts",
-    "exec_hook": "tieredBadgeAwarder",
-    "batch": 2,
+    "exec_hook": "tieredBadgeEngine",
     "deps": [
-      "M36",
-      "M50"
+      "M50",
+      "M36"
     ],
-    "md_source": "M61_tiered_badges_bronze_to_platinum_proof_levels.md"
+    "status": "todo",
+    "ml_pair": "m61a",
+    "module_path": "pzo_engine/src/mechanics/m61_tiered_badges.ts"
   },
   {
     "task_id": "PZO-M62",
     "mechanic_id": "M62",
-    "title": "Team Achievements: Coop Proof Badges for Shared Contracts",
-    "purpose": "Team Achievements: Coop Proof Badges for Shared Contracts — see mechanics/M62_team_achievements_coop_proof_badges_for_shared_contracts.md",
+    "title": "Co-op Team Achievements",
     "family": "achievement_advanced",
     "kind": "core",
     "layer": "season_runtime",
     "priority": 2,
-    "status": "in_progress",
-    "ml_pair": "m62a",
-    "ml_pair_path": "M62a_team_contribution_estimator_anti_tagalong_attribution.md",
+    "batch": 2,
     "inputs": [
       "coopRunResult",
-      "contractId",
-      "teamAchievementDefs"
+      "contractId"
     ],
     "outputs": [
       "teamBadge",
-      "sharedProofHash",
-      "rootHash"
+      "sharedProofHash"
     ],
     "telemetry_events": [
       "TEAM_BADGE_ISSUED",
-      "SHARED_ROOT_HASH_CREATED",
+      "SHARED_PROOF_STORED",
       "TEAM_ACHIEVEMENT_UNLOCKED"
     ],
-    "module_path": "src/mechanics/m62_team_achievements:_coop_proof_badges_for.ts",
-    "exec_hook": "teamAchievementIssuer",
-    "batch": 2,
+    "exec_hook": "coopTeamAchievementEngine",
     "deps": [
-      "M36",
-      "M50",
-      "M26"
+      "M26",
+      "M36"
     ],
-    "md_source": "M62_team_achievements_coop_proof_badges_for_shared_contracts.md"
+    "status": "todo",
+    "ml_pair": "m62a",
+    "module_path": "pzo_engine/src/mechanics/m62_co_op_team_achievements.ts"
   },
   {
     "task_id": "PZO-M63",
     "mechanic_id": "M63",
-    "title": "Sponsored Bounties: Player-Funded Challenges for the Table",
-    "purpose": "Sponsored Bounties: Player-Funded Challenges for the Table — see mechanics/M63_sponsored_bounties_player_funded_challenges_for_the_table.md",
+    "title": "Community Bounty Board",
     "family": "achievement_advanced",
     "kind": "core",
     "layer": "season_runtime",
-    "priority": 3,
-    "status": "in_progress",
-    "ml_pair": "m63a",
-    "ml_pair_path": "M63a_sponsored_bounty_integrity_guard_stake_escrow_collusion.md",
+    "priority": 2,
+    "batch": 2,
     "inputs": [
       "bountyFunding",
-      "bountyCriteria",
-      "sponsorId"
+      "bountyCriteria"
     ],
     "outputs": [
       "bountyLive",
-      "bountyWinner",
-      "rewardDistributed"
+      "bountyWinner"
     ],
     "telemetry_events": [
       "BOUNTY_CREATED",
       "BOUNTY_CLAIMED",
       "BOUNTY_EXPIRED"
     ],
-    "module_path": "src/mechanics/m63_sponsored_bounties:_player_funded_challe.ts",
-    "exec_hook": "sponsoredBountyEngine",
-    "batch": 2,
+    "exec_hook": "communityBountyBoardEngine",
     "deps": [
-      "M39",
-      "M37"
+      "M39"
     ],
-    "md_source": "M63_sponsored_bounties_player_funded_challenges_for_the_table.md"
+    "status": "todo",
+    "ml_pair": "m63a",
+    "module_path": "pzo_engine/src/mechanics/m63_community_bounty_board.ts"
   },
   {
     "task_id": "PZO-M64",
     "mechanic_id": "M64",
-    "title": "Proof-Weighted Leaderboards: Verified Runs Only",
-    "purpose": "Proof-Weighted Leaderboards: Verified Runs Only — see mechanics/M64_proof_weighted_leaderboards_verified_runs_only.md",
+    "title": "Leaderboards",
     "family": "achievement_advanced",
     "kind": "core",
     "layer": "season_runtime",
     "priority": 1,
-    "status": "in_progress",
-    "ml_pair": "m64a",
-    "ml_pair_path": "M64a_leaderboard_trust_reverify_scheduler_proof_weighted.md",
+    "batch": 2,
     "inputs": [
       "completedRun",
-      "proofHash",
-      "integrityStatus"
+      "proofHash"
     ],
     "outputs": [
       "leaderboardEntry",
-      "rankPosition",
-      "challengeEnabled"
+      "rankPosition"
     ],
     "telemetry_events": [
       "LEADERBOARD_SUBMIT",
-      "LEADERBOARD_VERIFY",
-      "LEADERBOARD_CHALLENGE",
-      "LEADERBOARD_QUARANTINE"
+      "RANK_UPDATED",
+      "PERSONAL_BEST_SET"
     ],
-    "module_path": "src/mechanics/m64_proof_weighted_leaderboards:_verified_ru.ts",
-    "exec_hook": "proofWeightedLeaderboard",
-    "batch": 2,
+    "exec_hook": "leaderboardRankingEngine",
     "deps": [
-      "M48",
-      "M49",
       "M50"
     ],
-    "md_source": "M64_proof_weighted_leaderboards_verified_runs_only.md"
+    "status": "todo",
+    "ml_pair": "m64a",
+    "module_path": "pzo_engine/src/mechanics/m64_leaderboards.ts"
   },
   {
     "task_id": "PZO-M65",
     "mechanic_id": "M65",
-    "title": "Diminishing Returns: Anti-Grind Trophy Curve",
-    "purpose": "Diminishing Returns: Anti-Grind Trophy Curve — see mechanics/M65_diminishing_returns_anti_grind_trophy_curve.md",
+    "title": "Diminishing Returns on Grinding",
     "family": "achievement_advanced",
     "kind": "core",
     "layer": "season_runtime",
-    "priority": 2,
-    "status": "in_progress",
-    "ml_pair": "m65a",
-    "ml_pair_path": "M65a_variety_index_abuse_detector_anti_grind_curve_hardening.md",
+    "priority": 1,
+    "batch": 2,
     "inputs": [
       "trophyEarnedCount",
-      "sessionRunCount",
-      "decayCurveConfig"
+      "sessionRunCount"
     ],
     "outputs": [
       "decayedTrophyAmount",
-      "grindGuardApplied",
-      "sessionCap"
+      "grindGuardApplied"
     ],
     "telemetry_events": [
       "DIMINISHING_RETURN_APPLIED",
-      "GRIND_CAP_HIT",
-      "DECAY_CURVE_UPDATED"
+      "GRIND_GUARD_TRIGGERED",
+      "NORMAL_RATE_RESTORED"
     ],
-    "module_path": "src/mechanics/m65_diminishing_returns:_anti_grind_trophy_c.ts",
-    "exec_hook": "diminishingReturnsTrophyCurve",
-    "batch": 2,
+    "exec_hook": "diminishingReturnEngine",
     "deps": [
       "M39"
     ],
-    "md_source": "M65_diminishing_returns_anti_grind_trophy_curve.md"
+    "status": "todo",
+    "ml_pair": "m65a",
+    "module_path": "pzo_engine/src/mechanics/m65_diminishing_returns_on_grinding.ts"
   },
   {
     "task_id": "PZO-M66",
     "mechanic_id": "M66",
-    "title": "Mentor Queue: Guided Coop Onboarding Contracts",
-    "purpose": "Mentor Queue: Guided Coop Onboarding Contracts — see mechanics/M66_mentor_queue_guided_coop_onboarding_contracts.md",
+    "title": "Mentor Pairing System",
     "family": "onboarding_advanced",
     "kind": "core",
     "layer": "backend_service",
     "priority": 2,
-    "status": "in_progress",
-    "ml_pair": "m66a",
-    "ml_pair_path": "M66a_mentor_matchmaker_quality_guard_guided_coop_onboarding.md",
+    "batch": 2,
     "inputs": [
       "newPlayerId",
-      "mentorId",
-      "mentorContractConfig"
+      "mentorId"
     ],
     "outputs": [
       "mentorPaired",
-      "guidedRunStarted",
-      "mentorReward"
+      "guidedRunStarted"
     ],
     "telemetry_events": [
       "MENTOR_PAIRED",
-      "MENTOR_CONTRACT_ACTIVE",
-      "MENTOR_CONTRACT_COMPLETED"
+      "GUIDED_RUN_STARTED",
+      "MENTOR_REWARD_QUEUED"
     ],
-    "module_path": "src/mechanics/m66_mentor_queue:_guided_coop_onboarding_con.ts",
-    "exec_hook": "mentorQueuePairer",
-    "batch": 2,
+    "exec_hook": "mentorPairingEngine",
     "deps": [
-      "M41",
-      "M26"
+      "M41"
     ],
-    "md_source": "M66_mentor_queue_guided_coop_onboarding_contracts.md"
+    "status": "todo",
+    "ml_pair": "m66a",
+    "module_path": "pzo_engine/src/mechanics/m66_mentor_pairing_system.ts"
   },
   {
     "task_id": "PZO-M67",
     "mechanic_id": "M67",
-    "title": "Progressive Disclosure: UI Unlock Complexity Not Power",
-    "purpose": "Progressive Disclosure: UI Unlock Complexity Not Power — see mechanics/M67_progressive_disclosure_ui_unlock_complexity_not_power.md",
+    "title": "Progressive UI Layer Unlock",
     "family": "onboarding_advanced",
     "kind": "core",
     "layer": "ui_component",
     "priority": 2,
-    "status": "in_progress",
-    "ml_pair": "m67a",
-    "ml_pair_path": "M67a_ui_unlock_gatekeeper_progressive_disclosure_smurf_detection.md",
+    "batch": 2,
     "inputs": [
       "runCount",
-      "uiUnlockThresholds",
-      "playerProfile"
+      "uiUnlockThresholds"
     ],
     "outputs": [
       "uiLayerUnlocked",
-      "complexityRevealed",
-      "discoveryEvent"
+      "complexityRevealed"
     ],
     "telemetry_events": [
       "UI_LAYER_UNLOCKED",
       "COMPLEXITY_REVEALED",
-      "PROGRESSIVE_UNLOCK"
+      "FULL_UI_ACTIVE"
     ],
-    "module_path": "src/mechanics/m67_progressive_disclosure:_ui_unlock_comple.ts",
-    "exec_hook": "progressiveDisclosureUnlocker",
-    "batch": 2,
+    "exec_hook": "progressiveUIUnlockEngine",
     "deps": [
-      "M21",
       "M41"
     ],
-    "md_source": "M67_progressive_disclosure_ui_unlock_complexity_not_power.md"
+    "status": "todo",
+    "ml_pair": "m67a",
+    "module_path": "pzo_engine/src/mechanics/m67_progressive_ui_layer_unlock.ts"
   },
   {
     "task_id": "PZO-M68",
     "mechanic_id": "M68",
-    "title": "Failure Rehab: 2-Minute Targeted Recovery Run",
-    "purpose": "Failure Rehab: 2-Minute Targeted Recovery Run — see mechanics/M68_failure_rehab_2_minute_targeted_recovery_run.md",
+    "title": "Failure Rehab Mode",
     "family": "onboarding_advanced",
     "kind": "core",
     "layer": "backend_service",
     "priority": 2,
-    "status": "in_progress",
-    "ml_pair": "m68a",
-    "ml_pair_path": "M68a_failure_rehab_scenario_generator_death_snapshot_curriculum.md",
+    "batch": 2,
     "inputs": [
       "wipedRunId",
-      "failureSnapshot",
-      "rehabConfig"
+      "failureSnapshot"
     ],
     "outputs": [
       "rehabRunState",
-      "targetedScenario",
-      "recoveryLesson"
+      "targetedScenario"
     ],
     "telemetry_events": [
       "FAILURE_REHAB_STARTED",
-      "REHAB_COMPLETED",
-      "RECOVERY_LEARNED"
+      "SCENARIO_TARGETED",
+      "REHAB_COMPLETE"
     ],
-    "module_path": "src/mechanics/m68_failure_rehab:_2_minute_targeted_recover.ts",
-    "exec_hook": "failureRehabRunner",
-    "batch": 2,
+    "exec_hook": "failureRehabEngine",
     "deps": [
       "M03",
-      "M41"
+      "M45"
     ],
-    "md_source": "M68_failure_rehab_2_minute_targeted_recovery_run.md"
+    "status": "todo",
+    "ml_pair": "m68a",
+    "module_path": "pzo_engine/src/mechanics/m68_failure_rehab_mode.ts"
   },
   {
     "task_id": "PZO-M69",
     "mechanic_id": "M69",
-    "title": "Choice Drills: 30-60s Micro-Sim Skill Tests",
-    "purpose": "Choice Drills: 30-60s Micro-Sim Skill Tests — see mechanics/M69_choice_drills_30_60s_micro_sim_skill_tests.md",
+    "title": "Skill Drills",
     "family": "onboarding_advanced",
     "kind": "core",
     "layer": "backend_service",
     "priority": 2,
-    "status": "in_progress",
-    "ml_pair": "m69a",
-    "ml_pair_path": "M69a_choice_drill_generator_skill_rating_micro_sim_tests.md",
+    "batch": 2,
     "inputs": [
       "drillScenario",
-      "playerAction",
-      "drillConfig"
+      "playerAction"
     ],
     "outputs": [
       "drillResult",
-      "skillScore",
-      "lessonSummary"
+      "skillScore"
     ],
     "telemetry_events": [
       "DRILL_STARTED",
-      "DRILL_COMPLETED",
+      "DRILL_EVALUATED",
       "SKILL_SCORE_UPDATED"
     ],
-    "module_path": "src/mechanics/m69_choice_drills:_30_60s_micro_sim_skill_te.ts",
-    "exec_hook": "choiceDrillRunner",
-    "batch": 2,
+    "exec_hook": "skillDrillEngine",
     "deps": [
-      "M41",
-      "M43"
+      "M41"
     ],
-    "md_source": "M69_choice_drills_30_60s_micro_sim_skill_tests.md"
+    "status": "todo",
+    "ml_pair": "m69a",
+    "module_path": "pzo_engine/src/mechanics/m69_skill_drills.ts"
   },
   {
     "task_id": "PZO-M70",
     "mechanic_id": "M70",
     "title": "Coop Bootcamp: Team Onboarding Run",
-    "purpose": "Coop Bootcamp: Team Onboarding Run — see mechanics/M70_coop_bootcamp_team_onboarding_run.md",
     "family": "onboarding_advanced",
     "kind": "core",
     "layer": "backend_service",
     "priority": 2,
-    "status": "in_progress",
-    "ml_pair": "m70a",
-    "ml_pair_path": "M70a_coop_bootcamp_orchestrator_team_flow_dropout_resilience.md",
+    "batch": 2,
     "inputs": [
       "teamIds",
       "bootcampConfig",
@@ -2525,27 +2161,24 @@
       "BOOTCAMP_COMPLETED",
       "TEAM_SYNERGY_EXPLAINED"
     ],
-    "module_path": "src/mechanics/m70_coop_bootcamp:_team_onboarding_run.ts",
     "exec_hook": "coopBootcampRunner",
-    "batch": 2,
     "deps": [
       "M41",
       "M26"
     ],
-    "md_source": "M70_coop_bootcamp_team_onboarding_run.md"
+    "status": "todo",
+    "ml_pair": "m70a",
+    "module_path": "pzo_engine/src/mechanics/m70_coop_bootcamp_team_onboarding_run.ts"
   },
   {
     "task_id": "PZO-M71",
     "mechanic_id": "M71",
     "title": "Device Attestation: Trust Tiers for Competitive + Markets",
-    "purpose": "Device Attestation: Trust Tiers for Competitive + Markets — see mechanics/M71_device_attestation_trust_tiers_for_competitive_and_markets.md",
     "family": "integrity_advanced",
     "kind": "core",
     "layer": "backend_service",
     "priority": 1,
-    "status": "in_progress",
-    "ml_pair": "m71a",
-    "ml_pair_path": "M71a_device_trust_fusion_model_attestation_behavior_network.md",
+    "batch": 2,
     "inputs": [
       "deviceFingerprint",
       "attestationChallenge",
@@ -2561,26 +2194,23 @@
       "TRUST_TIER_ASSIGNED",
       "ATTESTATION_FAILED"
     ],
-    "module_path": "src/mechanics/m71_device_attestation:_trust_tiers_for_comp.ts",
     "exec_hook": "deviceAttestationVerifier",
-    "batch": 2,
     "deps": [
       "M47"
     ],
-    "md_source": "M71_device_attestation_trust_tiers_for_competitive_and_markets.md"
+    "status": "todo",
+    "ml_pair": "m71a",
+    "module_path": "pzo_engine/src/mechanics/m71_device_attestation_trust_tiers_for_competitive_markets.ts"
   },
   {
     "task_id": "PZO-M72",
     "mechanic_id": "M72",
     "title": "Action Budget: Rate-Limited Inputs Anti-Bot Pace Control",
-    "purpose": "Action Budget: Rate-Limited Inputs Anti-Bot Pace Control — see mechanics/M72_action_budget_rate_limited_inputs_anti_bot_pace_control.md",
     "family": "integrity_advanced",
     "kind": "core",
     "layer": "backend_service",
     "priority": 1,
-    "status": "in_progress",
-    "ml_pair": "m72a",
-    "ml_pair_path": "M72a_action_budget_anomaly_detector_anti_bot_pace_control.md",
+    "batch": 2,
     "inputs": [
       "playerAction",
       "actionTimeline",
@@ -2596,26 +2226,23 @@
       "RATE_LIMIT_HIT",
       "BOT_PATTERN_DETECTED"
     ],
-    "module_path": "src/mechanics/m72_action_budget:_rate_limited_inputs_anti_.ts",
     "exec_hook": "actionBudgetRateLimiter",
-    "batch": 2,
     "deps": [
       "M47"
     ],
-    "md_source": "M72_action_budget_rate_limited_inputs_anti_bot_pace_control.md"
+    "status": "todo",
+    "ml_pair": "m72a",
+    "module_path": "pzo_engine/src/mechanics/m72_action_budget_rate_limited_inputs_anti_bot_pace_control.ts"
   },
   {
     "task_id": "PZO-M73",
     "mechanic_id": "M73",
     "title": "Market Escrow Finality: Anti-Dupe Exchange Settlement",
-    "purpose": "Market Escrow Finality: Anti-Dupe Exchange Settlement — see mechanics/M73_market_escrow_finality_anti_dupe_exchange_settlement.md",
     "family": "integrity_advanced",
     "kind": "core",
     "layer": "backend_service",
     "priority": 1,
-    "status": "in_progress",
-    "ml_pair": "m73a",
-    "ml_pair_path": "M73a_market_settlement_anomaly_model_finality_dupe_guard.md",
+    "batch": 2,
     "inputs": [
       "marketTransaction",
       "escrowId",
@@ -2631,27 +2258,24 @@
       "SETTLEMENT_FINALIZED",
       "DUPE_DETECTED"
     ],
-    "module_path": "src/mechanics/m73_market_escrow_finality:_anti_dupe_exchan.ts",
     "exec_hook": "marketEscrowFinalitySettler",
-    "batch": 2,
     "deps": [
       "M46",
       "M47"
     ],
-    "md_source": "M73_market_escrow_finality_anti_dupe_exchange_settlement.md"
+    "status": "todo",
+    "ml_pair": "m73a",
+    "module_path": "pzo_engine/src/mechanics/m73_market_escrow_finality_anti_dupe_exchange_settlement.ts"
   },
   {
     "task_id": "PZO-M74",
     "mechanic_id": "M74",
     "title": "Forensic Snapshot Bundles: Exportable Run Truth Packets",
-    "purpose": "Forensic Snapshot Bundles: Exportable Run Truth Packets — see mechanics/M74_forensic_snapshot_bundles_exportable_run_truth_packets.md",
     "family": "integrity_advanced",
     "kind": "core",
     "layer": "backend_service",
     "priority": 2,
-    "status": "in_progress",
-    "ml_pair": "m74a",
-    "ml_pair_path": "M74a_forensic_bundle_summarizer_redactor_truth_packets.md",
+    "batch": 2,
     "inputs": [
       "runId",
       "ledgerEntries",
@@ -2667,27 +2291,24 @@
       "PACKET_EXPORTED",
       "REDACTION_APPLIED"
     ],
-    "module_path": "src/mechanics/m74_forensic_snapshot_bundles:_exportable_ru.ts",
     "exec_hook": "forensicSnapshotBundler",
-    "batch": 2,
     "deps": [
       "M46",
       "M50"
     ],
-    "md_source": "M74_forensic_snapshot_bundles_exportable_run_truth_packets.md"
+    "status": "todo",
+    "ml_pair": "m74a",
+    "module_path": "pzo_engine/src/mechanics/m74_forensic_snapshot_bundles_exportable_run_truth_packets.ts"
   },
   {
     "task_id": "PZO-M75",
     "mechanic_id": "M75",
     "title": "Integrity Digest: Seasonal Transparency Audit Trails",
-    "purpose": "Integrity Digest: Seasonal Transparency Audit Trails — see mechanics/M75_integrity_digest_seasonal_transparency_audit_trails.md",
     "family": "integrity_advanced",
     "kind": "core",
     "layer": "backend_service",
     "priority": 2,
-    "status": "in_progress",
-    "ml_pair": "m75a",
-    "ml_pair_path": "M75a_integrity_digest_generator_privacy_safe_transparency.md",
+    "batch": 2,
     "inputs": [
       "seasonId",
       "runLedgers",
@@ -2703,27 +2324,24 @@
       "AUDIT_TRAIL_PUBLISHED",
       "ANOMALY_FLAGGED"
     ],
-    "module_path": "src/mechanics/m75_integrity_digest:_seasonal_transparency_.ts",
     "exec_hook": "integrityDigestPublisher",
-    "batch": 2,
     "deps": [
       "M48",
       "M74"
     ],
-    "md_source": "M75_integrity_digest_seasonal_transparency_audit_trails.md"
+    "status": "todo",
+    "ml_pair": "m75a",
+    "module_path": "pzo_engine/src/mechanics/m75_integrity_digest_seasonal_transparency_audit_trails.ts"
   },
   {
     "task_id": "PZO-M76",
     "mechanic_id": "M76",
     "title": "Contract Voting Modes: Unanimous, Majority, Weighted",
-    "purpose": "Contract Voting Modes: Unanimous, Majority, Weighted — see mechanics/M76_contract_voting_modes_unanimous_majority_weighted.md",
     "family": "coop_governance",
     "kind": "core",
     "layer": "api_endpoint",
     "priority": 2,
-    "status": "in_progress",
-    "ml_pair": "m76a",
-    "ml_pair_path": "M76a_contract_voting_dynamics_deadlock_manipulation_detection.md",
+    "batch": 2,
     "inputs": [
       "contractId",
       "voteConfig",
@@ -2740,27 +2358,24 @@
       "VOTE_RESOLVED",
       "QUORUM_REACHED"
     ],
-    "module_path": "src/mechanics/m76_contract_voting_modes:_unanimous_majorit.ts",
     "exec_hook": "contractVotingResolver",
-    "batch": 2,
     "deps": [
       "M26",
       "M28"
     ],
-    "md_source": "M76_contract_voting_modes_unanimous_majority_weighted.md"
+    "status": "todo",
+    "ml_pair": "m76a",
+    "module_path": "pzo_engine/src/mechanics/m76_contract_voting_modes_unanimous_majority_weighted.ts"
   },
   {
     "task_id": "PZO-M77",
     "mechanic_id": "M77",
     "title": "Delegated Operator: Temporary Table Lead",
-    "purpose": "Delegated Operator: Temporary Table Lead — see mechanics/M77_delegated_operator_temporary_table_lead.md",
     "family": "coop_governance",
     "kind": "core",
     "layer": "api_endpoint",
     "priority": 2,
-    "status": "in_progress",
-    "ml_pair": "m77a",
-    "ml_pair_path": "M77a_delegated_operator_oversight_scope_compliance_abuse_guard.md",
+    "batch": 2,
     "inputs": [
       "delegateId",
       "delegationScope",
@@ -2776,26 +2391,23 @@
       "DELEGATION_REVOKED",
       "OPERATOR_ACTION_TAKEN"
     ],
-    "module_path": "src/mechanics/m77_delegated_operator:_temporary_table_lead.ts",
     "exec_hook": "delegatedOperatorHandler",
-    "batch": 2,
     "deps": [
       "M76"
     ],
-    "md_source": "M77_delegated_operator_temporary_table_lead.md"
+    "status": "todo",
+    "ml_pair": "m77a",
+    "module_path": "pzo_engine/src/mechanics/m77_delegated_operator_temporary_table_lead.ts"
   },
   {
     "task_id": "PZO-M78",
     "mechanic_id": "M78",
     "title": "Collateral Calls: Margin-Style Contract Enforcement",
-    "purpose": "Collateral Calls: Margin-Style Contract Enforcement — see mechanics/M78_collateral_calls_margin_style_contract_enforcement.md",
     "family": "coop_governance",
     "kind": "core",
     "layer": "api_endpoint",
     "priority": 2,
-    "status": "in_progress",
-    "ml_pair": "m78a",
-    "ml_pair_path": "M78a_collateral_call_stress_forecaster_topup_likelihood_unwind_minimizer.md",
+    "batch": 2,
     "inputs": [
       "contractId",
       "collateralRequirement",
@@ -2811,27 +2423,24 @@
       "MARGIN_MET",
       "MARGIN_DEFAULT"
     ],
-    "module_path": "src/mechanics/m78_collateral_calls:_margin_style_contract_.ts",
     "exec_hook": "collateralCallEnforcer",
-    "batch": 2,
     "deps": [
       "M26",
       "M29"
     ],
-    "md_source": "M78_collateral_calls_margin_style_contract_enforcement.md"
+    "status": "todo",
+    "ml_pair": "m78a",
+    "module_path": "pzo_engine/src/mechanics/m78_collateral_calls_margin_style_contract_enforcement.ts"
   },
   {
     "task_id": "PZO-M79",
     "mechanic_id": "M79",
     "title": "Shared Objective Bonds: Team-Wide Incentive Locks",
-    "purpose": "Shared Objective Bonds: Team-Wide Incentive Locks — see mechanics/M79_shared_objective_bonds_team_wide_incentive_locks.md",
     "family": "coop_governance",
     "kind": "core",
     "layer": "api_endpoint",
     "priority": 2,
-    "status": "in_progress",
-    "ml_pair": "m79a",
-    "ml_pair_path": "M79a_shared_objective_bond_success_model_coordination_sandbagging_guard.md",
+    "batch": 2,
     "inputs": [
       "bondObjective",
       "participantIds",
@@ -2847,27 +2456,24 @@
       "OBJECTIVE_PROGRESS",
       "BOND_RESOLVED"
     ],
-    "module_path": "src/mechanics/m79_shared_objective_bonds:_team_wide_incent.ts",
     "exec_hook": "sharedObjectiveBondManager",
-    "batch": 2,
     "deps": [
       "M26",
       "M39"
     ],
-    "md_source": "M79_shared_objective_bonds_team_wide_incentive_locks.md"
+    "status": "todo",
+    "ml_pair": "m79a",
+    "module_path": "pzo_engine/src/mechanics/m79_shared_objective_bonds_team_wide_incentive_locks.ts"
   },
   {
     "task_id": "PZO-M80",
     "mechanic_id": "M80",
     "title": "Contract Receipt Cards: Portable Verifiable Coop Proofs",
-    "purpose": "Contract Receipt Cards: Portable Verifiable Coop Proofs — see mechanics/M80_contract_receipt_cards_portable_verifiable_coop_proofs.md",
     "family": "coop_governance",
     "kind": "core",
     "layer": "api_endpoint",
     "priority": 2,
-    "status": "in_progress",
-    "ml_pair": "m80a",
-    "ml_pair_path": "M80a_contract_receipt_card_generator_proof_compression_narrative_summaries.md",
+    "batch": 2,
     "inputs": [
       "contractId",
       "contractOutcome",
@@ -2883,27 +2489,24 @@
       "RECEIPT_SHARED",
       "RECEIPT_VERIFIED"
     ],
-    "module_path": "src/mechanics/m80_contract_receipt_cards:_portable_verifia.ts",
     "exec_hook": "contractReceiptCardIssuer",
-    "batch": 2,
     "deps": [
       "M50",
       "M26"
     ],
-    "md_source": "M80_contract_receipt_cards_portable_verifiable_coop_proofs.md"
+    "status": "todo",
+    "ml_pair": "m80a",
+    "module_path": "pzo_engine/src/mechanics/m80_contract_receipt_cards_portable_verifiable_coop_proofs.ts"
   },
   {
     "task_id": "PZO-M81",
     "mechanic_id": "M81",
     "title": "Synergy Tree Paths: Branching Portfolio Identity",
-    "purpose": "Synergy Tree Paths: Branching Portfolio Identity — see mechanics/M81_synergy_tree_paths_branching_portfolio_identity.md",
     "family": "portfolio_expert",
     "kind": "core",
     "layer": "card_handler",
     "priority": 2,
-    "status": "in_progress",
-    "ml_pair": "m81a",
-    "ml_pair_path": "M81a_synergy_tree_branch_recommender_identity_routing_novelty_control.md",
+    "batch": 2,
     "inputs": [
       "state.assets",
       "synergyTreeDef",
@@ -2919,27 +2522,24 @@
       "IDENTITY_FORGED",
       "PATH_LOCKED"
     ],
-    "module_path": "src/mechanics/m81_synergy_tree_paths:_branching_portfolio_.ts",
     "exec_hook": "synergyTreePathResolver",
-    "batch": 2,
     "deps": [
       "M31",
       "M56"
     ],
-    "md_source": "M81_synergy_tree_paths_branching_portfolio_identity.md"
+    "status": "todo",
+    "ml_pair": "m81a",
+    "module_path": "pzo_engine/src/mechanics/m81_synergy_tree_paths_branching_portfolio_identity.ts"
   },
   {
     "task_id": "PZO-M82",
     "mechanic_id": "M82",
     "title": "Timing Chains: Tick-Window Synergy Combos",
-    "purpose": "Timing Chains: Tick-Window Synergy Combos — see mechanics/M82_timing_chains_tick_window_synergy_combos.md",
     "family": "portfolio_expert",
     "kind": "core",
     "layer": "card_handler",
     "priority": 2,
-    "status": "in_progress",
-    "ml_pair": "m82a",
-    "ml_pair_path": "M82a_timing_chain_recognizer_sequence_dl_window_coach.md",
+    "batch": 2,
     "inputs": [
       "state.tick",
       "cardSequence",
@@ -2955,27 +2555,24 @@
       "CHAIN_COMPLETED",
       "CHAIN_BROKEN"
     ],
-    "module_path": "src/mechanics/m82_timing_chains:_tick_window_synergy_combo.ts",
     "exec_hook": "timingChainComboResolver",
-    "batch": 2,
     "deps": [
       "M31",
       "M82"
     ],
-    "md_source": "M82_timing_chains_tick_window_synergy_combos.md"
+    "status": "todo",
+    "ml_pair": "m82a",
+    "module_path": "pzo_engine/src/mechanics/m82_timing_chains_tick_window_synergy_combos.ts"
   },
   {
     "task_id": "PZO-M83",
     "mechanic_id": "M83",
     "title": "Risk Parity Dial: Optional Stability Lever Under Heat",
-    "purpose": "Risk Parity Dial: Optional Stability Lever Under Heat — see mechanics/M83_risk_parity_dial_optional_stability_lever_under_heat.md",
     "family": "portfolio_expert",
     "kind": "core",
     "layer": "card_handler",
     "priority": 2,
-    "status": "in_progress",
-    "ml_pair": "m83a",
-    "ml_pair_path": "M83a_risk_parity_dial_optimizer_constraint_aware_exposure_balancing.md",
+    "batch": 2,
     "inputs": [
       "state.exposureHeat",
       "riskParityTarget",
@@ -2991,27 +2588,24 @@
       "STABILITY_BONUS_APPLIED",
       "DIAL_CHANGED"
     ],
-    "module_path": "src/mechanics/m83_risk_parity_dial:_optional_stability_lev.ts",
     "exec_hook": "riskParityDialAdjuster",
-    "batch": 2,
     "deps": [
       "M35",
       "M57"
     ],
-    "md_source": "M83_risk_parity_dial_optional_stability_lever_under_heat.md"
+    "status": "todo",
+    "ml_pair": "m83a",
+    "module_path": "pzo_engine/src/mechanics/m83_risk_parity_dial_optional_stability_lever_under_heat.ts"
   },
   {
     "task_id": "PZO-M84",
     "mechanic_id": "M84",
     "title": "Catalyst Slots: Cross-Set Bridges Without Degeneracy",
-    "purpose": "Catalyst Slots: Cross-Set Bridges Without Degeneracy — see mechanics/M84_catalyst_slots_cross_set_bridges_without_degeneracy.md",
     "family": "portfolio_expert",
     "kind": "core",
     "layer": "card_handler",
     "priority": 2,
-    "status": "in_progress",
-    "ml_pair": "m84a",
-    "ml_pair_path": "M84a_catalyst_pairing_compatibility_model_bridge_safety_degeneracy_watch.md",
+    "batch": 2,
     "inputs": [
       "catalystCard",
       "activeSynergySets",
@@ -3027,27 +2621,24 @@
       "BRIDGE_ACTIVATED",
       "DEGENERACY_BLOCKED"
     ],
-    "module_path": "src/mechanics/m84_catalyst_slots:_cross_set_bridges_withou.ts",
     "exec_hook": "catalystSlotBridge",
-    "batch": 2,
     "deps": [
       "M31",
       "M59"
     ],
-    "md_source": "M84_catalyst_slots_cross_set_bridges_without_degeneracy.md"
+    "status": "todo",
+    "ml_pair": "m84a",
+    "module_path": "pzo_engine/src/mechanics/m84_catalyst_slots_cross_set_bridges_without_degeneracy.ts"
   },
   {
     "task_id": "PZO-M85",
     "mechanic_id": "M85",
     "title": "Mutation Draft: Mid-Run Portfolio Rewrite",
-    "purpose": "Mutation Draft: Mid-Run Portfolio Rewrite — see mechanics/M85_mutation_draft_mid_run_portfolio_rewrite.md",
     "family": "portfolio_expert",
     "kind": "core",
     "layer": "card_handler",
     "priority": 2,
-    "status": "in_progress",
-    "ml_pair": "m85a",
-    "ml_pair_path": "M85a_mutation_draft_planner_rewrite_selection_collapse_risk.md",
+    "batch": 2,
     "inputs": [
       "mutationOptions",
       "state.assets",
@@ -3063,27 +2654,24 @@
       "MUTATION_APPLIED",
       "PORTFOLIO_REWRITTEN"
     ],
-    "module_path": "src/mechanics/m85_mutation_draft:_mid_run_portfolio_rewrit.ts",
     "exec_hook": "mutationDraftExecutor",
-    "batch": 2,
     "deps": [
       "M04",
       "M31"
     ],
-    "md_source": "M85_mutation_draft_mid_run_portfolio_rewrite.md"
+    "status": "todo",
+    "ml_pair": "m85a",
+    "module_path": "pzo_engine/src/mechanics/m85_mutation_draft_mid_run_portfolio_rewrite.ts"
   },
   {
     "task_id": "PZO-M86",
     "mechanic_id": "M86",
     "title": "Micro Proofs: Moment-Scoped Achievement Stamps",
-    "purpose": "Micro Proofs: Moment-Scoped Achievement Stamps — see mechanics/M86_micro_proofs_moment_scoped_achievement_stamps.md",
     "family": "achievement_expert",
     "kind": "core",
     "layer": "season_runtime",
     "priority": 2,
-    "status": "in_progress",
-    "ml_pair": "m86a",
-    "ml_pair_path": "M86a_micro_proof_moment_detector_fine_grain_highlight_mining.md",
+    "batch": 2,
     "inputs": [
       "momentEvent",
       "microProofDefs"
@@ -3098,27 +2686,24 @@
       "MOMENT_ANNOTATED",
       "STAMP_VERIFIED"
     ],
-    "module_path": "src/mechanics/m86_micro_proofs:_moment_scoped_achievement_.ts",
     "exec_hook": "microProofStamper",
-    "batch": 2,
     "deps": [
       "M22",
       "M50"
     ],
-    "md_source": "M86_micro_proofs_moment_scoped_achievement_stamps.md"
+    "status": "todo",
+    "ml_pair": "m86a",
+    "module_path": "pzo_engine/src/mechanics/m86_micro_proofs_moment_scoped_achievement_stamps.ts"
   },
   {
     "task_id": "PZO-M87",
     "mechanic_id": "M87",
     "title": "Season Relics: Limited Cosmetic Mints from Verified Feats",
-    "purpose": "Season Relics: Limited Cosmetic Mints from Verified Feats — see mechanics/M87_season_relics_limited_cosmetic_mints_from_verified_feats.md",
     "family": "achievement_expert",
     "kind": "core",
     "layer": "season_runtime",
     "priority": 3,
-    "status": "in_progress",
-    "ml_pair": "m87a",
-    "ml_pair_path": "M87a_season_relic_mint_governor_scarcity_anti_farm_control.md",
+    "batch": 2,
     "inputs": [
       "seasonId",
       "verifiedFeat",
@@ -3134,27 +2719,24 @@
       "RELIC_SCARCITY_UPDATED",
       "MINT_GOVERNOR_DECISION"
     ],
-    "module_path": "src/mechanics/m87_season_relics:_limited_cosmetic_mints_fr.ts",
     "exec_hook": "seasonRelicMintGovernor",
-    "batch": 2,
     "deps": [
       "M50",
       "M19"
     ],
-    "md_source": "M87_season_relics_limited_cosmetic_mints_from_verified_feats.md"
+    "status": "todo",
+    "ml_pair": "m87a",
+    "module_path": "pzo_engine/src/mechanics/m87_season_relics_limited_cosmetic_mints_from_verified_feats.ts"
   },
   {
     "task_id": "PZO-M88",
     "mechanic_id": "M88",
     "title": "Team Titles: Coop Identity Names with Shared Root Hash",
-    "purpose": "Team Titles: Coop Identity Names with Shared Root Hash — see mechanics/M88_team_titles_coop_identity_names_with_shared_root_hash.md",
     "family": "achievement_expert",
     "kind": "core",
     "layer": "season_runtime",
     "priority": 3,
-    "status": "in_progress",
-    "ml_pair": "m88a",
-    "ml_pair_path": "M88a_team_title_attribution_model_contribution_eligibility_proof.md",
+    "batch": 2,
     "inputs": [
       "teamId",
       "titleDefinition",
@@ -3170,27 +2752,24 @@
       "ROOT_HASH_BOUND",
       "TITLE_DISPLAYED"
     ],
-    "module_path": "src/mechanics/m88_team_titles:_coop_identity_names_with_sh.ts",
     "exec_hook": "teamTitleAwarder",
-    "batch": 2,
     "deps": [
       "M62",
       "M88"
     ],
-    "md_source": "M88_team_titles_coop_identity_names_with_shared_root_hash.md"
+    "status": "todo",
+    "ml_pair": "m88a",
+    "module_path": "pzo_engine/src/mechanics/m88_team_titles_coop_identity_names_with_shared_root_hash.ts"
   },
   {
     "task_id": "PZO-M89",
     "mechanic_id": "M89",
     "title": "Trust-Weighted Cosmetic Multipliers: Integrity Incentives",
-    "purpose": "Trust-Weighted Cosmetic Multipliers: Integrity Incentives — see mechanics/M89_trust_weighted_cosmetic_multipliers_integrity_incentives.md",
     "family": "achievement_expert",
     "kind": "core",
     "layer": "season_runtime",
     "priority": 3,
-    "status": "in_progress",
-    "ml_pair": "m89a",
-    "ml_pair_path": "M89a_trust_multiplier_fairness_auditor_integrity_incentives_without_bias.md",
+    "batch": 2,
     "inputs": [
       "trustScore",
       "cosmeticBase",
@@ -3206,27 +2785,24 @@
       "COSMETIC_TIER_UPGRADED",
       "TRUST_WEIGHT_COMPUTED"
     ],
-    "module_path": "src/mechanics/m89_trust_weighted_cosmetic_multipliers:_int.ts",
     "exec_hook": "trustWeightedCosmeticMultiplier",
-    "batch": 2,
     "deps": [
       "M53",
       "M39"
     ],
-    "md_source": "M89_trust_weighted_cosmetic_multipliers_integrity_incentives.md"
+    "status": "todo",
+    "ml_pair": "m89a",
+    "module_path": "pzo_engine/src/mechanics/m89_trust_weighted_cosmetic_multipliers_integrity_incentives.ts"
   },
   {
     "task_id": "PZO-M90",
     "mechanic_id": "M90",
     "title": "Salvage and Reroll: Recycling Achievements into Challenges",
-    "purpose": "Salvage and Reroll: Recycling Achievements into Challenges — see mechanics/M90_salvage_and_reroll_recycling_achievements_into_new_challenges.md",
     "family": "achievement_expert",
     "kind": "core",
     "layer": "season_runtime",
     "priority": 3,
-    "status": "in_progress",
-    "ml_pair": "m90a",
-    "ml_pair_path": "M90a_salvage_reroll_economy_stabilizer_loop_detection_sink_tuning.md",
+    "batch": 2,
     "inputs": [
       "achievementId",
       "salvageValue",
@@ -3242,27 +2818,24 @@
       "REROLL_EXECUTED",
       "NEW_CHALLENGE_ISSUED"
     ],
-    "module_path": "src/mechanics/m90_salvage_and_reroll:_recycling_achievemen.ts",
     "exec_hook": "salvageAndRerollExecutor",
-    "batch": 2,
     "deps": [
       "M36",
       "M40"
     ],
-    "md_source": "M90_salvage_and_reroll_recycling_achievements_into_new_challenges.md"
+    "status": "todo",
+    "ml_pair": "m90a",
+    "module_path": "pzo_engine/src/mechanics/m90_salvage_and_reroll_recycling_achievements_into_challenges.ts"
   },
   {
     "task_id": "PZO-M91",
     "mechanic_id": "M91",
     "title": "First Table Invite: Safe Social Onboarding Run",
-    "purpose": "First Table Invite: Safe Social Onboarding Run — see mechanics/M91_first_table_invite_safe_social_onboarding_run.md",
     "family": "onboarding_expert",
     "kind": "core",
     "layer": "backend_service",
     "priority": 2,
-    "status": "in_progress",
-    "ml_pair": "m91a",
-    "ml_pair_path": "M91a_first_table_safety_model_social_onboarding_abuse_prevention.md",
+    "batch": 2,
     "inputs": [
       "inviterId",
       "newPlayerId",
@@ -3278,27 +2851,24 @@
       "SAFE_RUN_STARTED",
       "SOCIAL_MOMENT_CAPTURED"
     ],
-    "module_path": "src/mechanics/m91_first_table_invite:_safe_social_onboardi.ts",
     "exec_hook": "firstTableInviteSafeRun",
-    "batch": 2,
     "deps": [
       "M41",
       "M15"
     ],
-    "md_source": "M91_first_table_invite_safe_social_onboarding_run.md"
+    "status": "todo",
+    "ml_pair": "m91a",
+    "module_path": "pzo_engine/src/mechanics/m91_first_table_invite_safe_social_onboarding_run.ts"
   },
   {
     "task_id": "PZO-M92",
     "mechanic_id": "M92",
     "title": "Ghost Mentor Theater: Watch + Copy Decision Ghosts",
-    "purpose": "Ghost Mentor Theater: Watch + Copy Decision Ghosts — see mechanics/M92_ghost_mentor_theater_watch_copy_decision_ghosts.md",
     "family": "onboarding_expert",
     "kind": "core",
     "layer": "backend_service",
     "priority": 2,
-    "status": "in_progress",
-    "ml_pair": "m92a",
-    "ml_pair_path": "M92a_ghost_mentor_curation_engine_best_replays_overlay_alignment.md",
+    "batch": 2,
     "inputs": [
       "mentorRunId",
       "ghostPayload",
@@ -3314,27 +2884,24 @@
       "DECISION_COPIED",
       "GHOST_REPLAY_ENDED"
     ],
-    "module_path": "src/mechanics/m92_ghost_mentor_theater:_watch___copy_decis.ts",
     "exec_hook": "ghostMentorTheaterLoader",
-    "batch": 2,
     "deps": [
       "M24",
       "M48"
     ],
-    "md_source": "M92_ghost_mentor_theater_watch_copy_decision_ghosts.md"
+    "status": "todo",
+    "ml_pair": "m92a",
+    "module_path": "pzo_engine/src/mechanics/m92_ghost_mentor_theater_watch_copy_decision_ghosts.ts"
   },
   {
     "task_id": "PZO-M93",
     "mechanic_id": "M93",
     "title": "Loadout Lab: Preset Builder + Constraint Preview",
-    "purpose": "Loadout Lab: Preset Builder + Constraint Preview — see mechanics/M93_loadout_lab_preset_builder_constraint_preview.md",
     "family": "onboarding_expert",
     "kind": "core",
     "layer": "backend_service",
     "priority": 2,
-    "status": "in_progress",
-    "ml_pair": "m93a",
-    "ml_pair_path": "M93a_loadout_lab_constraint_explainer_preview_accuracy_anti_meta_leakage.md",
+    "batch": 2,
     "inputs": [
       "presetConfig",
       "advantageOptions",
@@ -3350,27 +2917,24 @@
       "CONSTRAINT_PREVIEWED",
       "LOADOUT_APPLIED"
     ],
-    "module_path": "src/mechanics/m93_loadout_lab:_preset_builder___constraint.ts",
     "exec_hook": "loadoutLabPresetBuilder",
-    "batch": 2,
     "deps": [
       "M14",
       "M44"
     ],
-    "md_source": "M93_loadout_lab_preset_builder_constraint_preview.md"
+    "status": "todo",
+    "ml_pair": "m93a",
+    "module_path": "pzo_engine/src/mechanics/m93_loadout_lab_preset_builder_constraint_preview.ts"
   },
   {
     "task_id": "PZO-M94",
     "mechanic_id": "M94",
     "title": "Inline Glossary Pings: Micro-Explain Without Handholding",
-    "purpose": "Inline Glossary Pings: Micro-Explain Without Handholding — see mechanics/M94_inline_glossary_pings_micro_explain_without_handholding.md",
     "family": "onboarding_expert",
     "kind": "core",
     "layer": "ui_component",
     "priority": 2,
-    "status": "in_progress",
-    "ml_pair": "m94a",
-    "ml_pair_path": "M94a_glossary_ping_relevance_model_speak_only_when_needed.md",
+    "batch": 2,
     "inputs": [
       "termEncountered",
       "playerOptIn",
@@ -3386,26 +2950,23 @@
       "GLOSSARY_PING_DISMISSED",
       "TERM_EXPLAINED"
     ],
-    "module_path": "src/mechanics/m94_inline_glossary_pings:_micro_explain_wit.ts",
     "exec_hook": "inlineGlossaryPing",
-    "batch": 2,
     "deps": [
       "M42"
     ],
-    "md_source": "M94_inline_glossary_pings_micro_explain_without_handholding.md"
+    "status": "todo",
+    "ml_pair": "m94a",
+    "module_path": "pzo_engine/src/mechanics/m94_inline_glossary_pings_micro_explain_without_handholding.ts"
   },
   {
     "task_id": "PZO-M95",
     "mechanic_id": "M95",
     "title": "Wipe Clinic: Interactive Death-Snapshot Review",
-    "purpose": "Wipe Clinic: Interactive Death-Snapshot Review — see mechanics/M95_wipe_clinic_interactive_death_snapshot_review.md",
     "family": "onboarding_expert",
     "kind": "core",
     "layer": "backend_service",
     "priority": 2,
-    "status": "in_progress",
-    "ml_pair": "m95a",
-    "ml_pair_path": "M95a_wipe_clinic_causal_explainer_minimal_counterfactual_set.md",
+    "batch": 2,
     "inputs": [
       "wipedRunId",
       "failureSnapshot",
@@ -3421,27 +2982,24 @@
       "ROOT_CAUSE_REVIEWED",
       "CLINIC_COMPLETED"
     ],
-    "module_path": "src/mechanics/m95_wipe_clinic:_interactive_death_snapshot_.ts",
     "exec_hook": "wipeClinicReviewer",
-    "batch": 2,
     "deps": [
       "M03",
       "M74"
     ],
-    "md_source": "M95_wipe_clinic_interactive_death_snapshot_review.md"
+    "status": "todo",
+    "ml_pair": "m95a",
+    "module_path": "pzo_engine/src/mechanics/m95_wipe_clinic_interactive_death_snapshot_review.ts"
   },
   {
     "task_id": "PZO-M96",
     "mechanic_id": "M96",
     "title": "Server Time Authority: Anti-Time-Travel Lag Exploit Guard",
-    "purpose": "Server Time Authority: Anti-Time-Travel Lag Exploit Guard — see mechanics/M96_server_time_authority_anti_time_travel_lag_exploit_guard.md",
     "family": "integrity_expert",
     "kind": "core",
     "layer": "tick_engine",
     "priority": 1,
-    "status": "in_progress",
-    "ml_pair": "m96a",
-    "ml_pair_path": "M96a_time_drift_lag_exploit_classifier_server_time_authority_assist.md",
+    "batch": 2,
     "inputs": [
       "clientTimestamp",
       "serverTimestamp",
@@ -3457,27 +3015,24 @@
       "LAG_EXPLOIT_BLOCKED",
       "SERVER_TIME_ANCHORED"
     ],
-    "module_path": "src/mechanics/m96_server_time_authority:_anti_time_travel_.ts",
     "exec_hook": "serverTimeAuthority",
-    "batch": 2,
     "deps": [
       "M02",
       "M47"
     ],
-    "md_source": "M96_server_time_authority_anti_time_travel_lag_exploit_guard.md"
+    "status": "todo",
+    "ml_pair": "m96a",
+    "module_path": "pzo_engine/src/mechanics/m96_server_time_authority_anti_time_travel_lag_exploit_guard.ts"
   },
   {
     "task_id": "PZO-M97",
     "mechanic_id": "M97",
     "title": "Seed Commit-Reveal: Deterministic Randomness You Can Audit",
-    "purpose": "Seed Commit-Reveal: Deterministic Randomness You Can Audit — see mechanics/M97_seed_commit_reveal_deterministic_randomness_you_can_audit.md",
     "family": "integrity_expert",
     "kind": "core",
     "layer": "tick_engine",
     "priority": 1,
-    "status": "in_progress",
-    "ml_pair": "m97a",
-    "ml_pair_path": "M97a_seed_commit_reveal_verifier_rng_integrity_bias_monitor.md",
+    "batch": 2,
     "inputs": [
       "playerCommitHash",
       "serverRevealHash",
@@ -3493,27 +3048,24 @@
       "SEED_REVEALED",
       "COMMIT_REVEAL_VERIFIED"
     ],
-    "module_path": "src/mechanics/m97_seed_commit_reveal:_deterministic_random.ts",
     "exec_hook": "seedCommitRevealVerifier",
-    "batch": 2,
     "deps": [
       "M01",
       "M47"
     ],
-    "md_source": "M97_seed_commit_reveal_deterministic_randomness_you_can_audit.md"
+    "status": "todo",
+    "ml_pair": "m97a",
+    "module_path": "pzo_engine/src/mechanics/m97_seed_commit_reveal_deterministic_randomness_you_can_audit.ts"
   },
   {
     "task_id": "PZO-M98",
     "mechanic_id": "M98",
     "title": "Quarantine Routing: Isolate Suspicious Runs Without Killing Play",
-    "purpose": "Quarantine Routing: Isolate Suspicious Runs Without Killing Play — see mechanics/M98_quarantine_routing_isolate_suspicious_runs_without_killing_play.md",
     "family": "integrity_expert",
     "kind": "core",
     "layer": "backend_service",
     "priority": 1,
-    "status": "in_progress",
-    "ml_pair": "m98a",
-    "ml_pair_path": "M98a_quarantine_compute_scheduler_fastpath_clean_runs_deepscan_suspects.md",
+    "batch": 2,
     "inputs": [
       "suspiciousRunId",
       "quarantineFlags",
@@ -3529,26 +3081,23 @@
       "QUARANTINE_LIFTED",
       "SUSPICIOUS_PATTERN_LOGGED"
     ],
-    "module_path": "src/mechanics/m98_quarantine_routing:_isolate_suspicious_r.ts",
     "exec_hook": "quarantineRoutingIsolator",
-    "batch": 2,
     "deps": [
       "M49"
     ],
-    "md_source": "M98_quarantine_routing_isolate_suspicious_runs_without_killing_play.md"
+    "status": "todo",
+    "ml_pair": "m98a",
+    "module_path": "pzo_engine/src/mechanics/m98_quarantine_routing_isolate_suspicious_runs_without_killing_p.ts"
   },
   {
     "task_id": "PZO-M99",
     "mechanic_id": "M99",
     "title": "Integrity Challenges: Lightweight Proof-of-Play Checks",
-    "purpose": "Integrity Challenges: Lightweight Proof-of-Play Checks — see mechanics/M99_integrity_challenges_lightweight_proof_of_play_checks.md",
     "family": "integrity_expert",
     "kind": "core",
     "layer": "backend_service",
     "priority": 1,
-    "status": "in_progress",
-    "ml_pair": "m99a",
-    "ml_pair_path": "M99a_integrity_challenge_placement_optimizer_non_disruptive_proof_of_play.md",
+    "batch": 2,
     "inputs": [
       "runId",
       "challengePrompt",
@@ -3564,27 +3113,24 @@
       "CHALLENGE_PASSED",
       "CHALLENGE_FAILED"
     ],
-    "module_path": "src/mechanics/m99_integrity_challenges:_lightweight_proof_.ts",
     "exec_hook": "integrityChallengeSolver",
-    "batch": 2,
     "deps": [
       "M47",
       "M48"
     ],
-    "md_source": "M99_integrity_challenges_lightweight_proof_of_play_checks.md"
+    "status": "todo",
+    "ml_pair": "m99a",
+    "module_path": "pzo_engine/src/mechanics/m99_integrity_challenges_lightweight_proof_of_play_checks.ts"
   },
   {
     "task_id": "PZO-M100",
     "mechanic_id": "M100",
     "title": "Appeal Evidence Chain: Verifiable Enforcement Pipeline",
-    "purpose": "Appeal Evidence Chain: Verifiable Enforcement Pipeline — see mechanics/M100_appeal_evidence_chain_verifiable_enforcement_pipeline.md",
     "family": "integrity_expert",
     "kind": "core",
     "layer": "backend_service",
     "priority": 2,
-    "status": "in_progress",
-    "ml_pair": "m100a",
-    "ml_pair_path": "M100a_appeal_triage_evidence_chain_checker_verifiable_enforcement.md",
+    "batch": 2,
     "inputs": [
       "appealId",
       "evidenceChain",
@@ -3601,27 +3147,24 @@
       "VERDICT_ISSUED",
       "ENFORCEMENT_APPLIED"
     ],
-    "module_path": "src/mechanics/m100_appeal_evidence_chain:_verifiable_enforc.ts",
     "exec_hook": "appealEvidenceChainPipeline",
-    "batch": 2,
     "deps": [
       "M48",
       "M49"
     ],
-    "md_source": "M100_appeal_evidence_chain_verifiable_enforcement_pipeline.md"
+    "status": "todo",
+    "ml_pair": "m100a",
+    "module_path": "pzo_engine/src/mechanics/m100_appeal_evidence_chain_verifiable_enforcement_pipeline.ts"
   },
   {
     "task_id": "PZO-M101",
     "mechanic_id": "M101",
     "title": "Mutator Draft: Run Rules You Choose",
-    "purpose": "Mutator Draft: Run Rules You Choose — see mechanics/M101_mutator_draft_run_rules_you_choose.md",
     "family": "portfolio_experimental",
     "kind": "core",
     "layer": "card_handler",
     "priority": 2,
-    "status": "in_progress",
-    "ml_pair": "m101a",
-    "ml_pair_path": "M101a_mutator_draft_ml_dl_companion_mutator_recommender_balance_forecaster.md",
+    "batch": 3,
     "inputs": [
       "mutatorOptions",
       "playerChoice",
@@ -3637,27 +3180,24 @@
       "RULE_OVERRIDDEN",
       "MUTATOR_EXPIRED"
     ],
-    "module_path": "src/mechanics/m101_mutator_draft:_run_rules_you_choose.ts",
     "exec_hook": "mutatorDraftSelector",
-    "batch": 3,
     "deps": [
       "M14",
       "M56"
     ],
-    "md_source": "M101_mutator_draft_run_rules_you_choose.md"
+    "status": "todo",
+    "ml_pair": "m101a",
+    "module_path": "pzo_engine/src/mechanics/m101_mutator_draft_run_rules_you_choose.ts"
   },
   {
     "task_id": "PZO-M102",
     "mechanic_id": "M102",
     "title": "Forked Timeline: Choice Two Branches One Final",
-    "purpose": "Forked Timeline: Choice Two Branches One Final — see mechanics/M102_forked_timeline_choice_two_branches_one_final.md",
     "family": "portfolio_experimental",
     "kind": "core",
     "layer": "card_handler",
     "priority": 2,
-    "status": "in_progress",
-    "ml_pair": "m102a",
-    "ml_pair_path": "M102a_forked_timeline_choice_ml_dl_companion_ghost_outcome_generator.md",
+    "batch": 3,
     "inputs": [
       "forkDecision",
       "branchAState",
@@ -3673,27 +3213,24 @@
       "BRANCH_SELECTED",
       "BRANCHES_MERGED"
     ],
-    "module_path": "src/mechanics/m102_forked_timeline:_choice_two_branches_one.ts",
     "exec_hook": "forkedTimelineResolver",
-    "batch": 3,
     "deps": [
       "M01",
       "M43"
     ],
-    "md_source": "M102_forked_timeline_choice_two_branches_one_final.md"
+    "status": "todo",
+    "ml_pair": "m102a",
+    "module_path": "pzo_engine/src/mechanics/m102_forked_timeline_choice_two_branches_one_final.ts"
   },
   {
     "task_id": "PZO-M103",
     "mechanic_id": "M103",
     "title": "Emergency Liquidity Actions: Sell Fast Pay Price",
-    "purpose": "Emergency Liquidity Actions: Sell Fast Pay Price — see mechanics/M103_emergency_liquidity_actions_sell_fast_pay_price.md",
     "family": "portfolio_experimental",
     "kind": "core",
     "layer": "card_handler",
     "priority": 2,
-    "status": "in_progress",
-    "ml_pair": "m103a",
-    "ml_pair_path": "M103a_emergency_liquidity_actions_ml_dl_companion_panic_button_coach.md",
+    "batch": 3,
     "inputs": [
       "emergencyTrigger",
       "state.assets",
@@ -3709,27 +3246,24 @@
       "DISCOUNT_APPLIED",
       "LIQUIDITY_RESTORED"
     ],
-    "module_path": "src/mechanics/m103_emergency_liquidity_actions:_sell_fast_p.ts",
     "exec_hook": "emergencyLiquidityAction",
-    "batch": 3,
     "deps": [
       "M32",
       "M03"
     ],
-    "md_source": "M103_emergency_liquidity_actions_sell_fast_pay_price.md"
+    "status": "todo",
+    "ml_pair": "m103a",
+    "module_path": "pzo_engine/src/mechanics/m103_emergency_liquidity_actions_sell_fast_pay_price.ts"
   },
   {
     "task_id": "PZO-M104",
     "mechanic_id": "M104",
     "title": "Deal Scarcity Index: The Market Goes Thin",
-    "purpose": "Deal Scarcity Index: The Market Goes Thin — see mechanics/M104_deal_scarcity_index_the_market_goes_thin.md",
     "family": "portfolio_experimental",
     "kind": "core",
     "layer": "card_handler",
     "priority": 2,
-    "status": "in_progress",
-    "ml_pair": "m104a",
-    "ml_pair_path": "M104a_deal_scarcity_index_ml_dl_companion_scarcity_anticipation_model.md",
+    "batch": 3,
     "inputs": [
       "sharedOpportunityDeck",
       "purchaseHistory",
@@ -3745,26 +3279,23 @@
       "DECK_EXHAUSTED",
       "FUBAR_BIAS_UPDATED"
     ],
-    "module_path": "src/mechanics/m104_deal_scarcity_index:_the_market_goes_thi.ts",
     "exec_hook": "dealScarcityIndexMonitor",
-    "batch": 3,
     "deps": [
       "M09"
     ],
-    "md_source": "M104_deal_scarcity_index_the_market_goes_thin.md"
+    "status": "todo",
+    "ml_pair": "m104a",
+    "module_path": "pzo_engine/src/mechanics/m104_deal_scarcity_index_the_market_goes_thin.ts"
   },
   {
     "task_id": "PZO-M105",
     "mechanic_id": "M105",
     "title": "Last Look Window: One Final Chance No Debates",
-    "purpose": "Last Look Window: One Final Chance No Debates — see mechanics/M105_last_look_window_one_final_chance_no_debates.md",
     "family": "portfolio_experimental",
     "kind": "core",
     "layer": "card_handler",
     "priority": 2,
-    "status": "in_progress",
-    "ml_pair": "m105a",
-    "ml_pair_path": "M105a_last_look_window_ml_dl_companion_misclick_guard_regret_amplifier.md",
+    "batch": 3,
     "inputs": [
       "lastLookTrigger",
       "state.tick",
@@ -3780,26 +3311,23 @@
       "FINAL_DECISION_MADE",
       "WINDOW_EXPIRED"
     ],
-    "module_path": "src/mechanics/m105_last_look_window:_one_final_chance_no_de.ts",
     "exec_hook": "lastLookWindowResolver",
-    "batch": 3,
     "deps": [
       "M09"
     ],
-    "md_source": "M105_last_look_window_one_final_chance_no_debates.md"
+    "status": "todo",
+    "ml_pair": "m105a",
+    "module_path": "pzo_engine/src/mechanics/m105_last_look_window_one_final_chance_no_debates.ts"
   },
   {
     "task_id": "PZO-M106",
     "mechanic_id": "M106",
     "title": "Asset Condition System: Wear, Maintenance, Failure",
-    "purpose": "Asset Condition System: Wear, Maintenance, Failure — see mechanics/M106_asset_condition_system_wear_maintenance_failure.md",
     "family": "portfolio_experimental",
     "kind": "core",
     "layer": "card_handler",
     "priority": 2,
-    "status": "in_progress",
-    "ml_pair": "m106a",
-    "ml_pair_path": "M106a_asset_condition_system_ml_dl_companion_failure_predictor_maintenance_planner.md",
+    "batch": 3,
     "inputs": [
       "assetId",
       "conditionState",
@@ -3815,27 +3343,24 @@
       "MAINTENANCE_PAID",
       "ASSET_FAILED"
     ],
-    "module_path": "src/mechanics/m106_asset_condition_system:_wear_maintenance.ts",
     "exec_hook": "assetConditionSystem",
-    "batch": 3,
     "deps": [
       "M07",
       "M34"
     ],
-    "md_source": "M106_asset_condition_system_wear_maintenance_failure.md"
+    "status": "todo",
+    "ml_pair": "m106a",
+    "module_path": "pzo_engine/src/mechanics/m106_asset_condition_system_wear_maintenance_failure.ts"
   },
   {
     "task_id": "PZO-M107",
     "mechanic_id": "M107",
     "title": "Refi Ladder: Restructure Without Escaping Reality",
-    "purpose": "Refi Ladder: Restructure Without Escaping Reality — see mechanics/M107_refi_ladder_restructure_without_escaping_reality.md",
     "family": "portfolio_experimental",
     "kind": "core",
     "layer": "card_handler",
     "priority": 2,
-    "status": "in_progress",
-    "ml_pair": "m107a",
-    "ml_pair_path": "M107a_refi_ladder_ml_dl_companion_refi_eligibility_estimator_term_optimizer.md",
+    "batch": 3,
     "inputs": [
       "liabilityId",
       "refiTerms",
@@ -3852,27 +3377,24 @@
       "REFI_DENIED",
       "TERMS_UPDATED"
     ],
-    "module_path": "src/mechanics/m107_refi_ladder:_restructure_without_escapin.ts",
     "exec_hook": "refiLadderRestructurer",
-    "batch": 3,
     "deps": [
       "M60",
       "M32"
     ],
-    "md_source": "M107_refi_ladder_restructure_without_escaping_reality.md"
+    "status": "todo",
+    "ml_pair": "m107a",
+    "module_path": "pzo_engine/src/mechanics/m107_refi_ladder_restructure_without_escaping_reality.ts"
   },
   {
     "task_id": "PZO-M108",
     "mechanic_id": "M108",
-    "title": "Partial Fills: You Don't Get the Whole Deal",
-    "purpose": "Partial Fills: You Don't Get the Whole Deal — see mechanics/M108_partial_fills_you_dont_get_the_whole_deal.md",
+    "title": "Partial Fills: You Dont Get the Whole Deal",
     "family": "portfolio_experimental",
     "kind": "core",
     "layer": "card_handler",
     "priority": 2,
-    "status": "in_progress",
-    "ml_pair": "m108a",
-    "ml_pair_path": "M108a_partial_fills_ml_dl_companion_fill_probability_timing_tutor.md",
+    "batch": 3,
     "inputs": [
       "dealRequest",
       "availableCapacity",
@@ -3888,27 +3410,24 @@
       "FILL_PROBABILITY_APPLIED",
       "PARTIAL_FILL_MISSED"
     ],
-    "module_path": "src/mechanics/m108_partial_fills:_you_don't_get_the_whole_d.ts",
     "exec_hook": "partialFillResolver",
-    "batch": 3,
     "deps": [
       "M09",
       "M104"
     ],
-    "md_source": "M108_partial_fills_you_dont_get_the_whole_deal.md"
+    "status": "todo",
+    "ml_pair": "m108a",
+    "module_path": "pzo_engine/src/mechanics/m108_partial_fills_you_dont_get_the_whole_deal.ts"
   },
   {
     "task_id": "PZO-M109",
     "mechanic_id": "M109",
     "title": "Macro News Bursts: Headlines That Move Ticks",
-    "purpose": "Macro News Bursts: Headlines That Move Ticks — see mechanics/M109_macro_news_bursts_headlines_that_move_ticks.md",
     "family": "portfolio_experimental",
     "kind": "core",
     "layer": "ui_component",
     "priority": 2,
-    "status": "in_progress",
-    "ml_pair": "m109a",
-    "ml_pair_path": "M109a_macro_news_bursts_ml_dl_companion_headline_impact_synth_regime_detector.md",
+    "batch": 3,
     "inputs": [
       "macroEvent",
       "state.macroRegime",
@@ -3924,27 +3443,24 @@
       "REGIME_HINT_SHOWN",
       "HEADLINE_DISMISSED"
     ],
-    "module_path": "src/mechanics/m109_macro_news_bursts:_headlines_that_move_t.ts",
     "exec_hook": "macroNewsBurstDisplay",
-    "batch": 3,
     "deps": [
       "M20",
       "M05"
     ],
-    "md_source": "M109_macro_news_bursts_headlines_that_move_ticks.md"
+    "status": "todo",
+    "ml_pair": "m109a",
+    "module_path": "pzo_engine/src/mechanics/m109_macro_news_bursts_headlines_that_move_ticks.ts"
   },
   {
     "task_id": "PZO-M110",
     "mechanic_id": "M110",
     "title": "No Pause Menu Law: Every UI Is Timer-Safe",
-    "purpose": "No Pause Menu Law: Every UI Is Timer-Safe — see mechanics/M110_no_pause_menu_law_every_ui_is_timer_safe.md",
     "family": "portfolio_experimental",
     "kind": "core",
     "layer": "tick_engine",
     "priority": 1,
-    "status": "in_progress",
-    "ml_pair": "m110a",
-    "ml_pair_path": "M110a_no_pause_menu_law_ml_dl_companion_ui_stall_predictor_auto_default_guard.md",
+    "batch": 3,
     "inputs": [
       "uiAction",
       "state.tick",
@@ -3960,26 +3476,23 @@
       "TIMER_SAFE_UI_RENDERED",
       "UI_STALL_DETECTED"
     ],
-    "module_path": "src/mechanics/m110_no_pause_menu_law:_every_ui_is_timer_saf.ts",
     "exec_hook": "noPauseMenuLawEnforcer",
-    "batch": 3,
     "deps": [
       "M02"
     ],
-    "md_source": "M110_no_pause_menu_law_every_ui_is_timer_safe.md"
+    "status": "todo",
+    "ml_pair": "m110a",
+    "module_path": "pzo_engine/src/mechanics/m110_no_pause_menu_law_every_ui_is_timer_safe.ts"
   },
   {
     "task_id": "PZO-M111",
     "mechanic_id": "M111",
     "title": "Portfolio Rules Macros: If-Then Autopilot Hard-Capped",
-    "purpose": "Portfolio Rules Macros: If-Then Autopilot Hard-Capped — see mechanics/M111_portfolio_rules_macros_if_then_autopilot_hard_capped.md",
     "family": "portfolio_experimental",
     "kind": "core",
     "layer": "api_endpoint",
     "priority": 2,
-    "status": "in_progress",
-    "ml_pair": "m111a",
-    "ml_pair_path": "M111a_portfolio_rules_macros_ml_dl_companion_macro_synth_safety_verifier.md",
+    "batch": 3,
     "inputs": [
       "macroRuleDefinition",
       "state",
@@ -3995,27 +3508,24 @@
       "AUTO_ACTION_EXECUTED",
       "CAP_ENFORCED"
     ],
-    "module_path": "src/mechanics/m111_portfolio_rules_macros:_if_then_autopilo.ts",
     "exec_hook": "portfolioRulesMacroEngine",
-    "batch": 3,
     "deps": [
       "M07",
       "M32"
     ],
-    "md_source": "M111_portfolio_rules_macros_if_then_autopilot_hard_capped.md"
+    "status": "todo",
+    "ml_pair": "m111a",
+    "module_path": "pzo_engine/src/mechanics/m111_portfolio_rules_macros_if_then_autopilot_hard_capped.ts"
   },
   {
     "task_id": "PZO-M112",
     "mechanic_id": "M112",
-    "title": "Precision Split: Sell Part, Keep Part",
-    "purpose": "Precision Split: Sell Part, Keep Part — see mechanics/M112_precision_split_sell_part_keep_part.md",
+    "title": "Precision Split: Sell Part Keep Part",
     "family": "portfolio_experimental",
     "kind": "core",
     "layer": "ui_component",
     "priority": 2,
-    "status": "in_progress",
-    "ml_pair": "m112a",
-    "ml_pair_path": "M112a_precision_split_ml_dl_companion_optimal_split_estimator.md",
+    "batch": 3,
     "inputs": [
       "assetId",
       "splitAmount",
@@ -4031,27 +3541,24 @@
       "SPLIT_AMOUNT_CONFIRMED",
       "HOLDING_UPDATED"
     ],
-    "module_path": "src/mechanics/m112_precision_split:_sell_part_keep_part.ts",
     "exec_hook": "precisionSplitExecutor",
-    "batch": 3,
     "deps": [
       "M10",
       "M32"
     ],
-    "md_source": "M112_precision_split_sell_part_keep_part.md"
+    "status": "todo",
+    "ml_pair": "m112a",
+    "module_path": "pzo_engine/src/mechanics/m112_precision_split_sell_part_keep_part.ts"
   },
   {
     "task_id": "PZO-M113",
     "mechanic_id": "M113",
     "title": "Order Priority Stack: You Choose What Dies First",
-    "purpose": "Order Priority Stack: You Choose What Dies First — see mechanics/M113_order_priority_stack_you_choose_what_dies_first.md",
     "family": "portfolio_experimental",
     "kind": "core",
     "layer": "card_handler",
     "priority": 2,
-    "status": "in_progress",
-    "ml_pair": "m113a",
-    "ml_pair_path": "M113a_order_priority_stack_ml_dl_companion_sacrifice_planner.md",
+    "batch": 3,
     "inputs": [
       "sacrificeOrder",
       "state.assets",
@@ -4067,27 +3574,24 @@
       "ASSET_SACRIFICED",
       "ORDER_EXHAUSTED"
     ],
-    "module_path": "src/mechanics/m113_order_priority_stack:_you_choose_what_di.ts",
     "exec_hook": "orderPriorityStackResolver",
-    "batch": 3,
     "deps": [
       "M08",
       "M32"
     ],
-    "md_source": "M113_order_priority_stack_you_choose_what_dies_first.md"
+    "status": "todo",
+    "ml_pair": "m113a",
+    "module_path": "pzo_engine/src/mechanics/m113_order_priority_stack_you_choose_what_dies_first.ts"
   },
   {
     "task_id": "PZO-M114",
     "mechanic_id": "M114",
     "title": "Timing Tax: Fast Choices Get Better Terms",
-    "purpose": "Timing Tax: Fast Choices Get Better Terms — see mechanics/M114_timing_tax_fast_choices_get_better_terms.md",
     "family": "portfolio_experimental",
     "kind": "core",
     "layer": "card_handler",
     "priority": 2,
-    "status": "in_progress",
-    "ml_pair": "m114a",
-    "ml_pair_path": "M114a_timing_tax_ml_dl_companion_reaction_time_coach_window_predictor.md",
+    "batch": 3,
     "inputs": [
       "decisionTime",
       "windowDuration",
@@ -4103,27 +3607,24 @@
       "TIMING_BONUS_AWARDED",
       "FAST_DECISION_RECORDED"
     ],
-    "module_path": "src/mechanics/m114_timing_tax:_fast_choices_get_better_term.ts",
     "exec_hook": "timingTaxResolver",
-    "batch": 3,
     "deps": [
       "M02",
       "M09"
     ],
-    "md_source": "M114_timing_tax_fast_choices_get_better_terms.md"
+    "status": "todo",
+    "ml_pair": "m114a",
+    "module_path": "pzo_engine/src/mechanics/m114_timing_tax_fast_choices_get_better_terms.ts"
   },
   {
     "task_id": "PZO-M115",
     "mechanic_id": "M115",
     "title": "Heat Swap: Move Risk Without Removing It",
-    "purpose": "Heat Swap: Move Risk Without Removing It — see mechanics/M115_heat_swap_move_risk_without_removing_it.md",
     "family": "portfolio_experimental",
     "kind": "core",
     "layer": "card_handler",
     "priority": 2,
-    "status": "in_progress",
-    "ml_pair": "m115a",
-    "ml_pair_path": "M115a_heat_swap_ml_dl_companion_exposure_rebalancer_suggestion.md",
+    "batch": 3,
     "inputs": [
       "sourceAssetId",
       "targetAssetId",
@@ -4139,27 +3640,24 @@
       "EXPOSURE_REBALANCED",
       "NET_HEAT_CONFIRMED"
     ],
-    "module_path": "src/mechanics/m115_heat_swap:_move_risk_without_removing_it.ts",
     "exec_hook": "heatSwapExecutor",
-    "batch": 3,
     "deps": [
       "M35",
       "M57"
     ],
-    "md_source": "M115_heat_swap_move_risk_without_removing_it.md"
+    "status": "todo",
+    "ml_pair": "m115a",
+    "module_path": "pzo_engine/src/mechanics/m115_heat_swap_move_risk_without_removing_it.ts"
   },
   {
     "task_id": "PZO-M116",
     "mechanic_id": "M116",
     "title": "Table Roles: Caller, Treasurer, Saboteur, Historian",
-    "purpose": "Table Roles: Caller, Treasurer, Saboteur, Historian — see mechanics/M116_table_roles_caller_treasurer_saboteur_historian.md",
     "family": "social_advanced",
     "kind": "core",
     "layer": "api_endpoint",
     "priority": 2,
-    "status": "in_progress",
-    "ml_pair": "m116a",
-    "ml_pair_path": "M116a_table_roles_ml_dl_companion_role_fit_matcher_conflict_predictor.md",
+    "batch": 3,
     "inputs": [
       "teamId",
       "roleAssignment",
@@ -4175,26 +3673,23 @@
       "PASSIVE_ACTIVE",
       "ABILITY_USED"
     ],
-    "module_path": "src/mechanics/m116_table_roles:_caller_treasurer_saboteur_h.ts",
     "exec_hook": "tableRoleAssignmentEngine",
-    "batch": 3,
     "deps": [
       "M26"
     ],
-    "md_source": "M116_table_roles_caller_treasurer_saboteur_historian.md"
+    "status": "todo",
+    "ml_pair": "m116a",
+    "module_path": "pzo_engine/src/mechanics/m116_table_roles_caller_treasurer_saboteur_historian.ts"
   },
   {
     "task_id": "PZO-M117",
     "mechanic_id": "M117",
     "title": "Table Feed: Run Moments as a Social Timeline",
-    "purpose": "Table Feed: Run Moments as a Social Timeline — see mechanics/M117_table_feed_run_moments_as_a_social_timeline.md",
     "family": "social_advanced",
     "kind": "core",
     "layer": "ui_component",
     "priority": 2,
-    "status": "in_progress",
-    "ml_pair": "m117a",
-    "ml_pair_path": "M117a_table_feed_ml_dl_companion_moment_ranking_auto_highlight_builder.md",
+    "batch": 3,
     "inputs": [
       "runMoments",
       "socialFeedConfig",
@@ -4210,26 +3705,23 @@
       "MOMENT_HIGHLIGHTED",
       "SHARE_PROMPTED"
     ],
-    "module_path": "src/mechanics/m117_table_feed:_run_moments_as_a_social_time.ts",
     "exec_hook": "tableFeedRenderer",
-    "batch": 3,
     "deps": [
       "M22"
     ],
-    "md_source": "M117_table_feed_run_moments_as_a_social_timeline.md"
+    "status": "todo",
+    "ml_pair": "m117a",
+    "module_path": "pzo_engine/src/mechanics/m117_table_feed_run_moments_as_a_social_timeline.ts"
   },
   {
     "task_id": "PZO-M118",
     "mechanic_id": "M118",
     "title": "Clip Remix Chains: Duet-Stitch but Verified",
-    "purpose": "Clip Remix Chains: Duet-Stitch but Verified — see mechanics/M118_clip_remix_chains_duet_stitch_but_verified.md",
     "family": "social_advanced",
     "kind": "core",
     "layer": "ui_component",
     "priority": 3,
-    "status": "in_progress",
-    "ml_pair": "m118a",
-    "ml_pair_path": "M118a_clip_remix_chains_ml_dl_companion_remix_suggestor_safety_filter.md",
+    "batch": 3,
     "inputs": [
       "sourceClipHash",
       "remixPayload",
@@ -4245,27 +3737,24 @@
       "CHAIN_EXTENDED",
       "REMIX_VERIFIED"
     ],
-    "module_path": "src/mechanics/m118_clip_remix_chains:_duet_stitch_but_verif.ts",
     "exec_hook": "clipRemixChainBuilder",
-    "batch": 3,
     "deps": [
       "M23",
       "M50"
     ],
-    "md_source": "M118_clip_remix_chains_duet_stitch_but_verified.md"
+    "status": "todo",
+    "ml_pair": "m118a",
+    "module_path": "pzo_engine/src/mechanics/m118_clip_remix_chains_duet_stitch_but_verified.ts"
   },
   {
     "task_id": "PZO-M119",
     "mechanic_id": "M119",
     "title": "Rivalry Ledger: Nemesis Tracking Over Seasons",
-    "purpose": "Rivalry Ledger: Nemesis Tracking Over Seasons — see mechanics/M119_rivalry_ledger_nemesis_tracking_over_seasons.md",
     "family": "social_advanced",
     "kind": "core",
     "layer": "api_endpoint",
     "priority": 2,
-    "status": "in_progress",
-    "ml_pair": "m119a",
-    "ml_pair_path": "M119a_rivalry_ledger_ml_dl_companion_nemesis_arc_detector.md",
+    "batch": 3,
     "inputs": [
       "rivalryHistory",
       "matchResult",
@@ -4281,26 +3770,23 @@
       "NEMESIS_DESIGNATED",
       "RIVALRY_CONSEQUENCE_APPLIED"
     ],
-    "module_path": "src/mechanics/m119_rivalry_ledger:_nemesis_tracking_over_se.ts",
     "exec_hook": "rivalryLedgerTracker",
-    "batch": 3,
     "deps": [
       "M18"
     ],
-    "md_source": "M119_rivalry_ledger_nemesis_tracking_over_seasons.md"
+    "status": "todo",
+    "ml_pair": "m119a",
+    "module_path": "pzo_engine/src/mechanics/m119_rivalry_ledger_nemesis_tracking_over_seasons.ts"
   },
   {
     "task_id": "PZO-M120",
     "mechanic_id": "M120",
     "title": "Consent Gates: Social Chaos Must Be Opt-In",
-    "purpose": "Consent Gates: Social Chaos Must Be Opt-In — see mechanics/M120_consent_gates_social_chaos_must_be_opt_in.md",
     "family": "social_advanced",
     "kind": "core",
     "layer": "ui_component",
     "priority": 1,
-    "status": "in_progress",
-    "ml_pair": "m120a",
-    "ml_pair_path": "M120a_consent_gates_ml_dl_companion_chaos_mode_recommender.md",
+    "batch": 3,
     "inputs": [
       "socialAction",
       "targetPlayerId",
@@ -4316,26 +3802,23 @@
       "CONSENT_GRANTED",
       "CONSENT_DENIED"
     ],
-    "module_path": "src/mechanics/m120_consent_gates:_social_chaos_must_be_opt_.ts",
     "exec_hook": "consentGateVerifier",
-    "batch": 3,
     "deps": [
       "M15"
     ],
-    "md_source": "M120_consent_gates_social_chaos_must_be_opt_in.md"
+    "status": "todo",
+    "ml_pair": "m120a",
+    "module_path": "pzo_engine/src/mechanics/m120_consent_gates_social_chaos_must_be_opt_in.ts"
   },
   {
     "task_id": "PZO-M121",
     "mechanic_id": "M121",
     "title": "Daily Gauntlet: Same Seed for Everyone",
-    "purpose": "Daily Gauntlet: Same Seed for Everyone — see mechanics/M121_daily_gauntlet_same_seed_for_everyone.md",
     "family": "social_advanced",
     "kind": "core",
     "layer": "season_runtime",
     "priority": 2,
-    "status": "in_progress",
-    "ml_pair": "m121a",
-    "ml_pair_path": "M121a_daily_gauntlet_ml_dl_companion_leaderboard_integrity_anomaly_detection.md",
+    "batch": 3,
     "inputs": [
       "dailySeed",
       "gauntletConfig",
@@ -4351,27 +3834,24 @@
       "GAUNTLET_COMPLETED",
       "DAILY_RANK_UPDATED"
     ],
-    "module_path": "src/mechanics/m121_daily_gauntlet:_same_seed_for_everyone.ts",
     "exec_hook": "dailyGauntletEngine",
-    "batch": 3,
     "deps": [
       "M01",
       "M64"
     ],
-    "md_source": "M121_daily_gauntlet_same_seed_for_everyone.md"
+    "status": "todo",
+    "ml_pair": "m121a",
+    "module_path": "pzo_engine/src/mechanics/m121_daily_gauntlet_same_seed_for_everyone.ts"
   },
   {
     "task_id": "PZO-M122",
     "mechanic_id": "M122",
     "title": "Weekly Draft League: Snake Draft Rule Modules",
-    "purpose": "Weekly Draft League: Snake Draft Rule Modules — see mechanics/M122_weekly_draft_league_snake_draft_rule_modules.md",
     "family": "social_advanced",
     "kind": "core",
     "layer": "season_runtime",
     "priority": 2,
-    "status": "in_progress",
-    "ml_pair": "m122a",
-    "ml_pair_path": "M122a_weekly_draft_league_ml_dl_companion_draft_advisor_autopick_brain.md",
+    "batch": 3,
     "inputs": [
       "leagueId",
       "draftPool",
@@ -4387,27 +3867,24 @@
       "MODULE_DRAFTED",
       "LEAGUE_STARTED"
     ],
-    "module_path": "src/mechanics/m122_weekly_draft_league:_snake_draft_rule_mo.ts",
     "exec_hook": "weeklyDraftLeagueEngine",
-    "batch": 3,
     "deps": [
       "M21",
       "M64"
     ],
-    "md_source": "M122_weekly_draft_league_snake_draft_rule_modules.md"
+    "status": "todo",
+    "ml_pair": "m122a",
+    "module_path": "pzo_engine/src/mechanics/m122_weekly_draft_league_snake_draft_rule_modules.ts"
   },
   {
     "task_id": "PZO-M123",
     "mechanic_id": "M123",
-    "title": "King of the Hill: Table Winner Stays, Stakes Rotate",
-    "purpose": "King of the Hill: Table Winner Stays, Stakes Rotate — see mechanics/M123_king_of_the_hill_table_winner_stays_stakes_rotate.md",
+    "title": "King of the Hill: Table Winner Stays Stakes Rotate",
     "family": "social_advanced",
     "kind": "core",
     "layer": "season_runtime",
     "priority": 2,
-    "status": "in_progress",
-    "ml_pair": "m123a",
-    "ml_pair_path": "M123a_king_of_the_hill_table_ml_dl_companion_streak_story_engine.md",
+    "batch": 3,
     "inputs": [
       "tableId",
       "winnerHistory",
@@ -4423,26 +3900,23 @@
       "STAKES_ROTATED",
       "CHALLENGER_JOINED"
     ],
-    "module_path": "src/mechanics/m123_king_of_the_hill:_table_winner_stays_sta.ts",
     "exec_hook": "kingOfHillTableEngine",
-    "batch": 3,
     "deps": [
       "M123"
     ],
-    "md_source": "M123_king_of_the_hill_table_winner_stays_stakes_rotate.md"
+    "status": "todo",
+    "ml_pair": "m123a",
+    "module_path": "pzo_engine/src/mechanics/m123_king_of_the_hill_table_winner_stays_stakes_rotate.ts"
   },
   {
     "task_id": "PZO-M124",
     "mechanic_id": "M124",
     "title": "Speedrun Mode: Timer Is Even Harsher",
-    "purpose": "Speedrun Mode: Timer Is Even Harsher — see mechanics/M124_speedrun_mode_timer_is_even_harsher.md",
     "family": "social_advanced",
     "kind": "core",
     "layer": "season_runtime",
     "priority": 2,
-    "status": "in_progress",
-    "ml_pair": "m124a",
-    "ml_pair_path": "M124a_speedrun_mode_ml_dl_companion_micro_coach_split_analysis.md",
+    "batch": 3,
     "inputs": [
       "speedrunConfig",
       "RunSeed",
@@ -4458,27 +3932,24 @@
       "SPLIT_RECORDED",
       "PERSONAL_BEST_SET"
     ],
-    "module_path": "src/mechanics/m124_speedrun_mode:_timer_is_even_harsher.ts",
     "exec_hook": "speedrunModeEngine",
-    "batch": 3,
     "deps": [
       "M02",
       "M64"
     ],
-    "md_source": "M124_speedrun_mode_timer_is_even_harsher.md"
+    "status": "todo",
+    "ml_pair": "m124a",
+    "module_path": "pzo_engine/src/mechanics/m124_speedrun_mode_timer_is_even_harsher.ts"
   },
   {
     "task_id": "PZO-M125",
     "mechanic_id": "M125",
     "title": "No Ghost Hardcore: You Own Every Mistake",
-    "purpose": "No Ghost Hardcore: You Own Every Mistake — see mechanics/M125_no_ghost_hardcore_you_own_every_mistake.md",
     "family": "social_advanced",
     "kind": "core",
     "layer": "season_runtime",
     "priority": 2,
-    "status": "in_progress",
-    "ml_pair": "m125a",
-    "ml_pair_path": "M125a_no_ghost_hardcore_ml_dl_companion_hardcore_integrity_monitor.md",
+    "batch": 3,
     "inputs": [
       "hardcoreFlag",
       "RunSeed",
@@ -4495,27 +3966,24 @@
       "HARDCORE_FAILED",
       "HARDCORE_COMPLETED"
     ],
-    "module_path": "src/mechanics/m125_no_ghost_hardcore:_you_own_every_mistake.ts",
     "exec_hook": "noGhostHardcoreEngine",
-    "batch": 3,
     "deps": [
       "M14",
       "M03"
     ],
-    "md_source": "M125_no_ghost_hardcore_you_own_every_mistake.md"
+    "status": "todo",
+    "ml_pair": "m125a",
+    "module_path": "pzo_engine/src/mechanics/m125_no_ghost_hardcore_you_own_every_mistake.ts"
   },
   {
     "task_id": "PZO-M126",
     "mechanic_id": "M126",
     "title": "Cosmetic Loadouts: Titles, Frames, Proof Skins",
-    "purpose": "Cosmetic Loadouts: Titles, Frames, Proof Skins — see mechanics/M126_cosmetic_loadouts_titles_frames_proof_skins.md",
     "family": "cosmetics",
     "kind": "core",
     "layer": "ui_component",
     "priority": 3,
-    "status": "in_progress",
-    "ml_pair": "m126a",
-    "ml_pair_path": "M126a_cosmetic_loadouts_ml_dl_companion_style_recommender_auto_set_builder.md",
+    "batch": 3,
     "inputs": [
       "playerInventory",
       "loadoutSelection",
@@ -4531,26 +3999,23 @@
       "LOADOUT_SAVED",
       "SKIN_HASH_VERIFIED"
     ],
-    "module_path": "src/mechanics/m126_cosmetic_loadouts:_titles_frames_proof_s.ts",
     "exec_hook": "cosmeticLoadoutApplier",
-    "batch": 3,
     "deps": [
       "M40"
     ],
-    "md_source": "M126_cosmetic_loadouts_titles_frames_proof_skins.md"
+    "status": "todo",
+    "ml_pair": "m126a",
+    "module_path": "pzo_engine/src/mechanics/m126_cosmetic_loadouts_titles_frames_proof_skins.ts"
   },
   {
     "task_id": "PZO-M127",
     "mechanic_id": "M127",
     "title": "Proof-Bound Crafting: Craft from Verified Fragments",
-    "purpose": "Proof-Bound Crafting: Craft from Verified Fragments — see mechanics/M127_proof_bound_crafting_craft_from_verified_fragments.md",
     "family": "cosmetics",
     "kind": "core",
     "layer": "backend_service",
     "priority": 3,
-    "status": "in_progress",
-    "ml_pair": "m127a",
-    "ml_pair_path": "M127a_proof_bound_crafting_ml_dl_companion_recipe_discovery_fragment_valuator.md",
+    "batch": 3,
     "inputs": [
       "verifiedFragments",
       "craftingRecipe",
@@ -4566,27 +4031,24 @@
       "CRAFTING_COMPLETED",
       "FRAGMENTS_VERIFIED"
     ],
-    "module_path": "src/mechanics/m127_proof_bound_crafting:_craft_from_verifie.ts",
     "exec_hook": "proofBoundCraftingEngine",
-    "batch": 3,
     "deps": [
       "M50",
       "M40"
     ],
-    "md_source": "M127_proof_bound_crafting_craft_from_verified_fragments.md"
+    "status": "todo",
+    "ml_pair": "m127a",
+    "module_path": "pzo_engine/src/mechanics/m127_proof_bound_crafting_craft_from_verified_fragments.ts"
   },
   {
     "task_id": "PZO-M128",
     "mechanic_id": "M128",
     "title": "Season Sinks: Burn to Keep Economy Clean",
-    "purpose": "Season Sinks: Burn to Keep Economy Clean — see mechanics/M128_season_sinks_burn_to_keep_economy_clean.md",
     "family": "cosmetics",
     "kind": "core",
     "layer": "season_runtime",
     "priority": 3,
-    "status": "in_progress",
-    "ml_pair": "m128a",
-    "ml_pair_path": "M128a_season_sinks_ml_dl_companion_sink_health_monitor_personalized_sink_paths.md",
+    "batch": 3,
     "inputs": [
       "trophyCurrency",
       "sinkConfig",
@@ -4602,27 +4064,24 @@
       "CURRENCY_BURNED",
       "ECONOMY_ADJUSTED"
     ],
-    "module_path": "src/mechanics/m128_season_sinks:_burn_to_keep_economy_clean.ts",
     "exec_hook": "seasonSinkBurner",
-    "batch": 3,
     "deps": [
       "M39",
       "M19"
     ],
-    "md_source": "M128_season_sinks_burn_to_keep_economy_clean.md"
+    "status": "todo",
+    "ml_pair": "m128a",
+    "module_path": "pzo_engine/src/mechanics/m128_season_sinks_burn_to_keep_economy_clean.ts"
   },
   {
     "task_id": "PZO-M129",
     "mechanic_id": "M129",
     "title": "Creator Packs: Caption Templates + Sound Stingers",
-    "purpose": "Creator Packs: Caption Templates + Sound Stingers — see mechanics/M129_creator_packs_caption_templates_sound_stingers.md",
     "family": "cosmetics",
     "kind": "core",
     "layer": "ui_component",
     "priority": 3,
-    "status": "in_progress",
-    "ml_pair": "m129a",
-    "ml_pair_path": "M129a_creator_packs_ml_dl_companion_caption_generator_sound_match.md",
+    "batch": 3,
     "inputs": [
       "creatorPackSelection",
       "momentEvent",
@@ -4638,27 +4097,24 @@
       "CAPTION_GENERATED",
       "STINGER_TRIGGERED"
     ],
-    "module_path": "src/mechanics/m129_creator_packs:_caption_templates___sound.ts",
     "exec_hook": "creatorPackApplier",
-    "batch": 3,
     "deps": [
       "M23",
       "M126"
     ],
-    "md_source": "M129_creator_packs_caption_templates_sound_stingers.md"
+    "status": "todo",
+    "ml_pair": "m129a",
+    "module_path": "pzo_engine/src/mechanics/m129_creator_packs_caption_templates_sound_stingers.ts"
   },
   {
     "task_id": "PZO-M130",
     "mechanic_id": "M130",
     "title": "Table Vault: Shared Cosmetic Stash",
-    "purpose": "Table Vault: Shared Cosmetic Stash — see mechanics/M130_table_vault_shared_cosmetic_stash.md",
     "family": "cosmetics",
     "kind": "core",
     "layer": "api_endpoint",
     "priority": 3,
-    "status": "in_progress",
-    "ml_pair": "m130a",
-    "ml_pair_path": "M130a_table_vault_ml_dl_companion_contribution_planner_fair_withdrawal_advisor.md",
+    "batch": 3,
     "inputs": [
       "teamId",
       "vaultContributions",
@@ -4674,27 +4130,24 @@
       "VAULT_COSMETIC_USED",
       "VAULT_BALANCE_UPDATED"
     ],
-    "module_path": "src/mechanics/m130_table_vault:_shared_cosmetic_stash.ts",
     "exec_hook": "tableVaultManager",
-    "batch": 3,
     "deps": [
       "M26",
       "M126"
     ],
-    "md_source": "M130_table_vault_shared_cosmetic_stash.md"
+    "status": "todo",
+    "ml_pair": "m130a",
+    "module_path": "pzo_engine/src/mechanics/m130_table_vault_shared_cosmetic_stash.ts"
   },
   {
     "task_id": "PZO-M131",
     "mechanic_id": "M131",
     "title": "Faction Sponsorship: Season Flavor Without Power",
-    "purpose": "Faction Sponsorship: Season Flavor Without Power — see mechanics/M131_faction_sponsorship_season_flavor_without_power.md",
     "family": "cosmetics",
     "kind": "core",
     "layer": "season_runtime",
     "priority": 3,
-    "status": "in_progress",
-    "ml_pair": "m131a",
-    "ml_pair_path": "M131a_faction_sponsorship_ml_dl_companion_sponsor_match_quest_tailoring.md",
+    "batch": 3,
     "inputs": [
       "factionChoice",
       "seasonId",
@@ -4710,27 +4163,24 @@
       "FACTION_BENEFIT_APPLIED",
       "POWER_GUARD_VERIFIED"
     ],
-    "module_path": "src/mechanics/m131_faction_sponsorship:_season_flavor_witho.ts",
     "exec_hook": "factionSponsorshipHandler",
-    "batch": 3,
     "deps": [
       "M19",
       "M126"
     ],
-    "md_source": "M131_faction_sponsorship_season_flavor_without_power.md"
+    "status": "todo",
+    "ml_pair": "m131a",
+    "module_path": "pzo_engine/src/mechanics/m131_faction_sponsorship_season_flavor_without_power.ts"
   },
   {
     "task_id": "PZO-M132",
     "mechanic_id": "M132",
     "title": "Case Files: Run Post-Mortems as Narrative Dossiers",
-    "purpose": "Case Files: Run Post-Mortems as Narrative Dossiers — see mechanics/M132_case_files_run_post_mortems_as_narrative_dossiers.md",
     "family": "narrative",
     "kind": "core",
     "layer": "ui_component",
     "priority": 2,
-    "status": "in_progress",
-    "ml_pair": "m132a",
-    "ml_pair_path": "M132a_case_files_ml_dl_companion_forensic_summarizer_root_cause_ranker.md",
+    "batch": 3,
     "inputs": [
       "completedRun",
       "m132MLOutput",
@@ -4746,28 +4196,25 @@
       "ALTERNATE_TIMELINE_COMPUTED",
       "DOSSIER_EXPORTED"
     ],
-    "module_path": "src/mechanics/m132_case_files:_run_post_mortems_as_narrativ.ts",
     "exec_hook": "caseFileDossierGenerator",
-    "batch": 3,
     "deps": [
       "M46",
       "M74",
       "M50"
     ],
-    "md_source": "M132_case_files_run_post_mortems_as_narrative_dossiers.md"
+    "status": "todo",
+    "ml_pair": "m132a",
+    "module_path": "pzo_engine/src/mechanics/m132_case_files_run_post_mortems_as_narrative_dossiers.ts"
   },
   {
     "task_id": "PZO-M133",
     "mechanic_id": "M133",
-    "title": "Seasonal Story Beats: Headlines, Court Dates, Deadlines",
-    "purpose": "Seasonal Story Beats: Headlines, Court Dates, Deadlines — see mechanics/M133_seasonal_story_beats_headlines_court_dates_deadlines.md",
+    "title": "Seasonal Story Beats: Headlines Court Dates Deadlines",
     "family": "narrative",
     "kind": "core",
     "layer": "ui_component",
     "priority": 2,
-    "status": "in_progress",
-    "ml_pair": "m133a",
-    "ml_pair_path": "M133a_seasonal_story_beats_ml_dl_companion_beat_planner_friction_mixer.md",
+    "batch": 3,
     "inputs": [
       "seasonConfig",
       "storyBeatSchedule",
@@ -4783,27 +4230,24 @@
       "HEADLINE_DISPLAYED",
       "DEADLINE_APPROACHING"
     ],
-    "module_path": "src/mechanics/m133_seasonal_story_beats:_headlines_court_da.ts",
     "exec_hook": "seasonalStoryBeatEngine",
-    "batch": 3,
     "deps": [
       "M19",
       "M20"
     ],
-    "md_source": "M133_seasonal_story_beats_headlines_court_dates_deadlines.md"
+    "status": "todo",
+    "ml_pair": "m133a",
+    "module_path": "pzo_engine/src/mechanics/m133_seasonal_story_beats_headlines_court_dates_deadlines.ts"
   },
   {
     "task_id": "PZO-M134",
     "mechanic_id": "M134",
     "title": "NPC Counterparties: Deterministic Personalities No AI",
-    "purpose": "NPC Counterparties: Deterministic Personalities No AI — see mechanics/M134_npc_counterparties_deterministic_personalities_no_ai.md",
     "family": "narrative",
     "kind": "core",
     "layer": "ui_component",
     "priority": 2,
-    "status": "in_progress",
-    "ml_pair": "m134a",
-    "ml_pair_path": "M134a_npc_counterparties_ml_dl_companion_behavioral_emulator_negotiation_coach.md",
+    "batch": 3,
     "inputs": [
       "npcDefinition",
       "RunSeed",
@@ -4819,26 +4263,23 @@
       "COUNTERPARTY_RESPONDED",
       "NPC_PERSONALITY_RESOLVED"
     ],
-    "module_path": "src/mechanics/m134_npc_counterparties:_deterministic_person.ts",
     "exec_hook": "npcCounterpartyEngine",
-    "batch": 3,
     "deps": [
       "M01"
     ],
-    "md_source": "M134_npc_counterparties_deterministic_personalities_no_ai.md"
+    "status": "todo",
+    "ml_pair": "m134a",
+    "module_path": "pzo_engine/src/mechanics/m134_npc_counterparties_deterministic_personalities_no_ai.ts"
   },
   {
     "task_id": "PZO-M135",
     "mechanic_id": "M135",
-    "title": "Reputation Labels: Earned, Reversible, Proof-Based",
-    "purpose": "Reputation Labels: Earned, Reversible, Proof-Based — see mechanics/M135_reputation_labels_earned_reversible_proof_based.md",
+    "title": "Reputation Labels: Earned Reversible Proof-Based",
     "family": "narrative",
     "kind": "core",
     "layer": "ui_component",
     "priority": 2,
-    "status": "in_progress",
-    "ml_pair": "m135a",
-    "ml_pair_path": "M135a_reputation_labels_ml_dl_companion_reputation_model_anti_gaming_guard.md",
+    "batch": 3,
     "inputs": [
       "runHistory",
       "reputationRules",
@@ -4854,27 +4295,24 @@
       "LABEL_REVERSED",
       "REPUTATION_VERIFIED"
     ],
-    "module_path": "src/mechanics/m135_reputation_labels:_earned_reversible_pro.ts",
     "exec_hook": "reputationLabelAwarder",
-    "batch": 3,
     "deps": [
       "M50",
       "M36"
     ],
-    "md_source": "M135_reputation_labels_earned_reversible_proof_based.md"
+    "status": "todo",
+    "ml_pair": "m135a",
+    "module_path": "pzo_engine/src/mechanics/m135_reputation_labels_earned_reversible_proof_based.ts"
   },
   {
     "task_id": "PZO-M136",
     "mechanic_id": "M136",
-    "title": "Ruleset Signature Banner: Players Always Know What's Live",
-    "purpose": "Ruleset Signature Banner: Players Always Know What's Live — see mechanics/M136_ruleset_signature_banner_players_always_know_whats_live.md",
+    "title": "Ruleset Signature Banner: Players Always Know Whats Live",
     "family": "ops",
     "kind": "core",
     "layer": "season_runtime",
     "priority": 1,
-    "status": "in_progress",
-    "ml_pair": "m136a",
-    "ml_pair_path": "M136a_ruleset_signature_banner_ml_dl_companion_signature_diff_explainer.md",
+    "batch": 3,
     "inputs": [
       "activeRuleset",
       "rulesVersion",
@@ -4890,26 +4328,23 @@
       "RULESET_VERSION_CONFIRMED",
       "PLAYER_ACKNOWLEDGED"
     ],
-    "module_path": "src/mechanics/m136_ruleset_signature_banner:_players_always.ts",
     "exec_hook": "rulesetSignatureBanner",
-    "batch": 3,
     "deps": [
       "M19"
     ],
-    "md_source": "M136_ruleset_signature_banner_players_always_know_whats_live.md"
+    "status": "todo",
+    "ml_pair": "m136a",
+    "module_path": "pzo_engine/src/mechanics/m136_ruleset_signature_banner_players_always_know_whats_live.ts"
   },
   {
     "task_id": "PZO-M137",
     "mechanic_id": "M137",
     "title": "Mid-Run Hotfix Lock: No Surprise Changes Inside a Run",
-    "purpose": "Mid-Run Hotfix Lock: No Surprise Changes Inside a Run — see mechanics/M137_mid_run_hotfix_lock_no_surprise_changes_inside_a_run.md",
     "family": "ops",
     "kind": "core",
     "layer": "tick_engine",
     "priority": 1,
-    "status": "in_progress",
-    "ml_pair": "m137a",
-    "ml_pair_path": "M137a_mid_run_hotfix_lock_ml_dl_companion_hotfix_triage_quarantine_router.md",
+    "batch": 3,
     "inputs": [
       "activeRunId",
       "hotfixPayload",
@@ -4925,26 +4360,23 @@
       "RUN_LOCK_ENFORCED",
       "HOTFIX_APPLIED"
     ],
-    "module_path": "src/mechanics/m137_mid_run_hotfix_lock:_no_surprise_changes.ts",
     "exec_hook": "midRunHotfixLockEnforcer",
-    "batch": 3,
     "deps": [
       "M02"
     ],
-    "md_source": "M137_mid_run_hotfix_lock_no_surprise_changes_inside_a_run.md"
+    "status": "todo",
+    "ml_pair": "m137a",
+    "module_path": "pzo_engine/src/mechanics/m137_mid_run_hotfix_lock_no_surprise_changes_inside_a_run.ts"
   },
   {
     "task_id": "PZO-M138",
     "mechanic_id": "M138",
     "title": "Degraded Mode: Server Load Shedding Without Breaking Runs",
-    "purpose": "Degraded Mode: Server Load Shedding Without Breaking Runs — see mechanics/M138_degraded_mode_server_load_shedding_without_breaking_runs.md",
     "family": "ops",
     "kind": "core",
     "layer": "tick_engine",
     "priority": 1,
-    "status": "in_progress",
-    "ml_pair": "m138a",
-    "ml_pair_path": "M138a_degraded_mode_ml_dl_companion_load_predictor_graceful_shedding_planner.md",
+    "batch": 3,
     "inputs": [
       "serverLoadMetric",
       "degradedModeConfig",
@@ -4960,27 +4392,24 @@
       "FEATURES_SHED",
       "DEGRADED_MODE_EXITED"
     ],
-    "module_path": "src/mechanics/m138_degraded_mode:_server_load_shedding_with.ts",
     "exec_hook": "degradedModeLoadShedder",
-    "batch": 3,
     "deps": [
       "M02",
       "M46"
     ],
-    "md_source": "M138_degraded_mode_server_load_shedding_without_breaking_runs.md"
+    "status": "todo",
+    "ml_pair": "m138a",
+    "module_path": "pzo_engine/src/mechanics/m138_degraded_mode_server_load_shedding_without_breaking_runs.ts"
   },
   {
     "task_id": "PZO-M139",
     "mechanic_id": "M139",
-    "title": "Offline Queue: Runs Play Now, Verify Later",
-    "purpose": "Offline Queue: Runs Play Now, Verify Later — see mechanics/M139_offline_queue_runs_play_now_verify_later.md",
+    "title": "Offline Queue: Runs Play Now Verify Later",
     "family": "ops",
     "kind": "core",
     "layer": "backend_service",
     "priority": 2,
-    "status": "in_progress",
-    "ml_pair": "m139a",
-    "ml_pair_path": "M139a_offline_queue_runs_ml_dl_companion_on_device_verifier_precheck.md",
+    "batch": 3,
     "inputs": [
       "offlineRunPayload",
       "verificationQueue",
@@ -4996,27 +4425,24 @@
       "SYNC_SCHEDULED",
       "VERIFICATION_PENDING"
     ],
-    "module_path": "src/mechanics/m139_offline_queue:_runs_play_now_verify_late.ts",
     "exec_hook": "offlineQueueRunManager",
-    "batch": 3,
     "deps": [
       "M48",
       "M46"
     ],
-    "md_source": "M139_offline_queue_runs_play_now_verify_later.md"
+    "status": "todo",
+    "ml_pair": "m139a",
+    "module_path": "pzo_engine/src/mechanics/m139_offline_queue_runs_play_now_verify_later.ts"
   },
   {
     "task_id": "PZO-M140",
     "mechanic_id": "M140",
     "title": "Player Evidence Export: Redacted Truth Packet",
-    "purpose": "Player Evidence Export: Redacted Truth Packet — see mechanics/M140_player_evidence_export_redacted_truth_packet.md",
     "family": "ops",
     "kind": "core",
     "layer": "backend_service",
     "priority": 2,
-    "status": "in_progress",
-    "ml_pair": "m140a",
-    "ml_pair_path": "M140a_player_evidence_export_ml_dl_companion_redaction_assistant_packet_summarizer.md",
+    "batch": 3,
     "inputs": [
       "exportRequest",
       "runId",
@@ -5032,27 +4458,24 @@
       "REDACTION_APPLIED",
       "PACKET_EXPORTED"
     ],
-    "module_path": "src/mechanics/m140_player_evidence_export:_redacted_truth_p.ts",
     "exec_hook": "playerEvidenceExporter",
-    "batch": 3,
     "deps": [
       "M74",
       "M50"
     ],
-    "md_source": "M140_player_evidence_export_redacted_truth_packet.md"
+    "status": "todo",
+    "ml_pair": "m140a",
+    "module_path": "pzo_engine/src/mechanics/m140_player_evidence_export_redacted_truth_packet.ts"
   },
   {
     "task_id": "PZO-M141",
     "mechanic_id": "M141",
-    "title": "Asynchronous Table: Friends Vote Later, Still Timer-Bound",
-    "purpose": "Asynchronous Table: Friends Vote Later, Still Timer-Bound — see mechanics/M141_asynchronous_table_friends_vote_later_still_timer_bound.md",
+    "title": "Asynchronous Table: Friends Vote Later Still Timer-Bound",
     "family": "ops",
     "kind": "core",
     "layer": "api_endpoint",
     "priority": 2,
-    "status": "in_progress",
-    "ml_pair": "m141a",
-    "ml_pair_path": "M141a_asynchronous_table_ml_dl_companion_proxy_vote_predictor_fairness_guard.md",
+    "batch": 3,
     "inputs": [
       "asyncVoteConfig",
       "participantIds",
@@ -5068,27 +4491,24 @@
       "ASYNC_VOTE_CAST",
       "ASYNC_VOTE_RESOLVED"
     ],
-    "module_path": "src/mechanics/m141_asynchronous_table:_friends_vote_later_s.ts",
     "exec_hook": "asyncTableVoteEngine",
-    "batch": 3,
     "deps": [
       "M16",
       "M76"
     ],
-    "md_source": "M141_asynchronous_table_friends_vote_later_still_timer_bound.md"
+    "status": "todo",
+    "ml_pair": "m141a",
+    "module_path": "pzo_engine/src/mechanics/m141_asynchronous_table_friends_vote_later_still_timer_bound.ts"
   },
   {
     "task_id": "PZO-M142",
     "mechanic_id": "M142",
     "title": "House Rules: Custom Lobbies with Published Constraints",
-    "purpose": "House Rules: Custom Lobbies with Published Constraints — see mechanics/M142_house_rules_custom_lobbies_with_published_constraints.md",
     "family": "ops",
     "kind": "core",
     "layer": "api_endpoint",
     "priority": 2,
-    "status": "in_progress",
-    "ml_pair": "m142a",
-    "ml_pair_path": "M142a_house_rules_ml_dl_companion_lobby_configuration_advisor.md",
+    "batch": 3,
     "inputs": [
       "houseRuleConfig",
       "constraintValidator",
@@ -5104,27 +4524,24 @@
       "CONSTRAINT_VALIDATED",
       "LOBBY_SIGNED"
     ],
-    "module_path": "src/mechanics/m142_house_rules:_custom_lobbies_with_publish.ts",
     "exec_hook": "houseRulesCustomLobby",
-    "batch": 3,
     "deps": [
       "M19",
       "M136"
     ],
-    "md_source": "M142_house_rules_custom_lobbies_with_published_constraints.md"
+    "status": "todo",
+    "ml_pair": "m142a",
+    "module_path": "pzo_engine/src/mechanics/m142_house_rules_custom_lobbies_with_published_constraints.ts"
   },
   {
     "task_id": "PZO-M143",
     "mechanic_id": "M143",
-    "title": "Table Penalties: Toxicity Without ML, Pure Rule Enforcement",
-    "purpose": "Table Penalties: Toxicity Without ML, Pure Rule Enforcement — see mechanics/M143_table_penalties_toxicity_without_ml_pure_rule_enforcement.md",
+    "title": "Table Penalties: Toxicity Without ML Pure Rule Enforcement",
     "family": "ops",
     "kind": "core",
     "layer": "api_endpoint",
     "priority": 1,
-    "status": "in_progress",
-    "ml_pair": "m143a",
-    "ml_pair_path": "M143a_table_penalties_ml_dl_companion_brigading_detector_support.md",
+    "batch": 3,
     "inputs": [
       "behaviorReport",
       "penaltyRules",
@@ -5140,26 +4557,23 @@
       "CORD_PENALIZED",
       "VIOLATION_LOGGED"
     ],
-    "module_path": "src/mechanics/m143_table_penalties:_toxicity_without_ml_pur.ts",
     "exec_hook": "tablePenaltyEnforcer",
-    "batch": 3,
     "deps": [
       "M46"
     ],
-    "md_source": "M143_table_penalties_toxicity_without_ml_pure_rule_enforcement.md"
+    "status": "todo",
+    "ml_pair": "m143a",
+    "module_path": "pzo_engine/src/mechanics/m143_table_penalties_toxicity_without_ml_pure_rule_enforcement.ts"
   },
   {
     "task_id": "PZO-M144",
     "mechanic_id": "M144",
     "title": "Spectator Theater: Watch Live Runs with Delay",
-    "purpose": "Spectator Theater: Watch Live Runs with Delay — see mechanics/M144_spectator_theater_watch_live_runs_with_delay.md",
     "family": "ops",
     "kind": "core",
     "layer": "ui_component",
     "priority": 2,
-    "status": "in_progress",
-    "ml_pair": "m144a",
-    "ml_pair_path": "M144a_spectator_theater_ml_dl_companion_delay_optimizer_spoiler_shield.md",
+    "batch": 3,
     "inputs": [
       "spectatorConfig",
       "runId",
@@ -5175,27 +4589,24 @@
       "PREDICTION_BET_PLACED",
       "SPECTATOR_CHAT_MESSAGE"
     ],
-    "module_path": "src/mechanics/m144_spectator_theater:_watch_live_runs_with_.ts",
     "exec_hook": "spectatorTheaterEngine",
-    "batch": 3,
     "deps": [
       "M22",
       "M64"
     ],
-    "md_source": "M144_spectator_theater_watch_live_runs_with_delay.md"
+    "status": "todo",
+    "ml_pair": "m144a",
+    "module_path": "pzo_engine/src/mechanics/m144_spectator_theater_watch_live_runs_with_delay.ts"
   },
   {
     "task_id": "PZO-M145",
     "mechanic_id": "M145",
-    "title": "Tournament Brackets: Verified Seeds, Published Scoring",
-    "purpose": "Tournament Brackets: Verified Seeds, Published Scoring — see mechanics/M145_tournament_brackets_verified_seeds_published_scoring.md",
+    "title": "Tournament Brackets: Verified Seeds Published Scoring",
     "family": "ops",
     "kind": "core",
     "layer": "api_endpoint",
     "priority": 2,
-    "status": "in_progress",
-    "ml_pair": "m145a",
-    "ml_pair_path": "M145a_tournament_brackets_ml_dl_companion_seeding_fairness_broadcast_pack.md",
+    "batch": 3,
     "inputs": [
       "tournamentConfig",
       "participantIds",
@@ -5211,27 +4622,24 @@
       "MATCH_SCHEDULED",
       "BRACKET_UPDATED"
     ],
-    "module_path": "src/mechanics/m145_tournament_brackets:_verified_seeds_publ.ts",
     "exec_hook": "tournamentBracketEngine",
-    "batch": 3,
     "deps": [
       "M64",
       "M01"
     ],
-    "md_source": "M145_tournament_brackets_verified_seeds_published_scoring.md"
+    "status": "todo",
+    "ml_pair": "m145a",
+    "module_path": "pzo_engine/src/mechanics/m145_tournament_brackets_verified_seeds_published_scoring.ts"
   },
   {
     "task_id": "PZO-M146",
     "mechanic_id": "M146",
     "title": "Audit Event: Forced Documentation Under Timer",
-    "purpose": "Audit Event: Forced Documentation Under Timer — see mechanics/M146_audit_event_forced_documentation_under_timer.md",
     "family": "ops",
     "kind": "core",
     "layer": "backend_service",
     "priority": 1,
-    "status": "in_progress",
-    "ml_pair": "m146a",
-    "ml_pair_path": "M146a_audit_event_ml_dl_companion_doc_burden_estimator_checklist_autogen.md",
+    "batch": 3,
     "inputs": [
       "auditTrigger",
       "state.tick",
@@ -5247,27 +4655,24 @@
       "DOCUMENTATION_SUBMITTED",
       "AUDIT_HASH_STORED"
     ],
-    "module_path": "src/mechanics/m146_audit_event:_forced_documentation_under_.ts",
     "exec_hook": "auditEventDocumenter",
-    "batch": 3,
     "deps": [
       "M46",
       "M47"
     ],
-    "md_source": "M146_audit_event_forced_documentation_under_timer.md"
+    "status": "todo",
+    "ml_pair": "m146a",
+    "module_path": "pzo_engine/src/mechanics/m146_audit_event_forced_documentation_under_timer.ts"
   },
   {
     "task_id": "PZO-M147",
     "mechanic_id": "M147",
     "title": "Litigation Risk: Civil Shock Deterministic Triggers",
-    "purpose": "Litigation Risk: Civil Shock Deterministic Triggers — see mechanics/M147_litigation_risk_civil_shock_deterministic_triggers.md",
     "family": "ops",
     "kind": "core",
     "layer": "backend_service",
     "priority": 2,
-    "status": "in_progress",
-    "ml_pair": "m147a",
-    "ml_pair_path": "M147a_litigation_risk_ml_dl_companion_early_warning_mitigation_advisor.md",
+    "batch": 3,
     "inputs": [
       "litigationTrigger",
       "state.cash",
@@ -5283,27 +4688,24 @@
       "LEGAL_HOLD_APPLIED",
       "CIVIL_SHOCK_RESOLVED"
     ],
-    "module_path": "src/mechanics/m147_litigation_risk:_civil_shock_determinist.ts",
     "exec_hook": "litigationRiskShockEngine",
-    "batch": 3,
     "deps": [
       "M12",
       "M13"
     ],
-    "md_source": "M147_litigation_risk_civil_shock_deterministic_triggers.md"
+    "status": "todo",
+    "ml_pair": "m147a",
+    "module_path": "pzo_engine/src/mechanics/m147_litigation_risk_civil_shock_deterministic_triggers.ts"
   },
   {
     "task_id": "PZO-M148",
     "mechanic_id": "M148",
-    "title": "Counterparty Freeze: Market Doesn't Always Clear",
-    "purpose": "Counterparty Freeze: Market Doesn't Always Clear — see mechanics/M148_counterparty_freeze_market_doesnt_always_clear.md",
+    "title": "Counterparty Freeze: Market Doesnt Always Clear",
     "family": "ops",
     "kind": "core",
     "layer": "backend_service",
     "priority": 2,
-    "status": "in_progress",
-    "ml_pair": "m148a",
-    "ml_pair_path": "M148a_counterparty_freeze_ml_dl_companion_freeze_forecast_premium_estimator.md",
+    "batch": 3,
     "inputs": [
       "marketTransaction",
       "counterpartyState",
@@ -5319,27 +4721,24 @@
       "TRANSACTION_HELD",
       "FREEZE_LIFTED"
     ],
-    "module_path": "src/mechanics/m148_counterparty_freeze:_market_doesn't_alwa.ts",
     "exec_hook": "counterpartyFreezeHandler",
-    "batch": 3,
     "deps": [
       "M09",
       "M73"
     ],
-    "md_source": "M148_counterparty_freeze_market_doesnt_always_clear.md"
+    "status": "todo",
+    "ml_pair": "m148a",
+    "module_path": "pzo_engine/src/mechanics/m148_counterparty_freeze_market_doesnt_always_clear.ts"
   },
   {
     "task_id": "PZO-M149",
     "mechanic_id": "M149",
     "title": "Regulatory Window: One Chance to Comply or Pay Forever",
-    "purpose": "Regulatory Window: One Chance to Comply or Pay Forever — see mechanics/M149_regulatory_window_one_chance_to_comply_or_pay_forever.md",
     "family": "ops",
     "kind": "core",
     "layer": "backend_service",
     "priority": 2,
-    "status": "in_progress",
-    "ml_pair": "m149a",
-    "ml_pair_path": "M149a_regulatory_window_ml_dl_companion_compliance_planner_penalty_forecaster.md",
+    "batch": 3,
     "inputs": [
       "regulatoryTrigger",
       "complianceWindow",
@@ -5355,27 +4754,24 @@
       "COMPLIANCE_SUBMITTED",
       "PENALTY_PERMANENT"
     ],
-    "module_path": "src/mechanics/m149_regulatory_window:_one_chance_to_comply_.ts",
     "exec_hook": "regulatoryWindowEnforcer",
-    "batch": 3,
     "deps": [
       "M13",
       "M27"
     ],
-    "md_source": "M149_regulatory_window_one_chance_to_comply_or_pay_forever.md"
+    "status": "todo",
+    "ml_pair": "m149a",
+    "module_path": "pzo_engine/src/mechanics/m149_regulatory_window_one_chance_to_comply_or_pay_forever.ts"
   },
   {
     "task_id": "PZO-M150",
     "mechanic_id": "M150",
     "title": "Finality Ceremony: Run Ends with a Verifiable Stamp",
-    "purpose": "Finality Ceremony: Run Ends with a Verifiable Stamp — see mechanics/M150_finality_ceremony_run_ends_with_a_verifiable_stamp.md",
     "family": "ops",
     "kind": "core",
     "layer": "season_runtime",
     "priority": 1,
-    "status": "in_progress",
-    "ml_pair": "m150a",
-    "ml_pair_path": "M150a_finality_ceremony_ml_dl_companion_verifier_assistant_final_card_composer.md",
+    "batch": 3,
     "inputs": [
       "completedRun",
       "cordScore",
@@ -5391,13 +4787,13 @@
       "SOVEREIGNTY_STAMP_ISSUED",
       "RUN_FINALIZED"
     ],
-    "module_path": "src/mechanics/m150_finality_ceremony:_run_ends_with_a_verif.ts",
     "exec_hook": "finalityCeremonyStamper",
-    "batch": 3,
     "deps": [
       "M50",
       "M46"
     ],
-    "md_source": "M150_finality_ceremony_run_ends_with_a_verifiable_stamp.md"
+    "status": "todo",
+    "ml_pair": "m150a",
+    "module_path": "pzo_engine/src/mechanics/m150_finality_ceremony_run_ends_with_a_verifiable_stamp.ts"
   }
 ]

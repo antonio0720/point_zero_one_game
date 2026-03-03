@@ -32,9 +32,14 @@
       "replay_consistency_delta"
     ],
     "can_lock_off": false,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m01a_seed_integrity_deterministic_replay_forensics.ts",
-    "md_source": "M01a_seed_integrity_replay_forensics.md"
+    "md_source": "M01Aa_seed_integrity_deterministic_replay_forensics.md",
+    "intelligence_signal": "antiCheat",
+    "model_category": "anomaly_detector",
+    "family": "integrity",
+    "priority": 1,
+    "training_phase": 1
   },
   {
     "task_id": "PZO-M02A",
@@ -69,9 +74,14 @@
       "lag_false_positive_rate"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m02a_pressure_aware_difficulty_shaping_timer_stress_model.ts",
-    "md_source": "M02a_timer_stress_model.md"
+    "md_source": "M02Aa_pressure_aware_difficulty_shaping_timer_stress_model.md",
+    "intelligence_signal": "personalization",
+    "model_category": "controller",
+    "family": "balance",
+    "priority": 1,
+    "training_phase": 1
   },
   {
     "task_id": "PZO-M03A",
@@ -106,9 +116,14 @@
       "opt_in_hint_acceptance_rate"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m03a_solvency_collapse_predictor_run_death_forecaster.ts",
-    "md_source": "M03a_solvency_collapse_predictor.md"
+    "md_source": "M03Aa_solvency_collapse_predictor_run_death_forecaster.md",
+    "intelligence_signal": "risk",
+    "model_category": "predictor",
+    "family": "market",
+    "priority": 1,
+    "training_phase": 1
   },
   {
     "task_id": "PZO-M04A",
@@ -142,9 +157,14 @@
       "skill_band_fairness"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m04a_deck_reactor_rl_policy_dynamic_draw_mixing.ts",
-    "md_source": "M04a_deck_reactor_rl_policy.md"
+    "md_source": "M04Aa_deck_reactor_rl_policy_dynamic_draw_mixing.md",
+    "intelligence_signal": "recommendationPower",
+    "model_category": "rl_policy",
+    "family": "balance",
+    "priority": 2,
+    "training_phase": 2
   },
   {
     "task_id": "PZO-M05A",
@@ -178,9 +198,14 @@
       "decay_calibration_ECE"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m05a_macro_regime_classifier_cash_decay_tuner.ts",
-    "md_source": "M05a_macro_regime_classifier_cash_decay.md"
+    "md_source": "M05Aa_macro_regime_classifier_cash_decay_tuner.md",
+    "intelligence_signal": "volatility",
+    "model_category": "classifier",
+    "family": "market",
+    "priority": 1,
+    "training_phase": 1
   },
   {
     "task_id": "PZO-M06A",
@@ -215,9 +240,14 @@
       "moment_card_precision"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m06a_cashflow_forecast_portfolio_health_embeddings.ts",
-    "md_source": "M06a_cashflow_forecast_portfolio_embeddings.md"
+    "md_source": "M06Aa_cashflow_forecast_portfolio_health_embeddings.md",
+    "intelligence_signal": "alpha",
+    "model_category": "embedding_model",
+    "family": "market",
+    "priority": 1,
+    "training_phase": 1
   },
   {
     "task_id": "PZO-M07A",
@@ -252,9 +282,14 @@
       "false_gate_rate"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m07a_affordability_default_risk_scorer_purchase_resolver.ts",
-    "md_source": "M07a_affordability_default_risk_scorer.md"
+    "md_source": "M07Aa_affordability_default_risk_scorer_purchase_resolver.md",
+    "intelligence_signal": "risk",
+    "model_category": "predictor",
+    "family": "market",
+    "priority": 1,
+    "training_phase": 1
   },
   {
     "task_id": "PZO-M08A",
@@ -289,9 +324,14 @@
       "cascade_detection_AUC"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m08a_shield_timing_policy_clutch_intervention_model.ts",
-    "md_source": "M08a_shield_timing_policy.md"
+    "md_source": "M08Aa_shield_timing_policy_clutch_intervention_model.md",
+    "intelligence_signal": "momentum",
+    "model_category": "rl_policy",
+    "family": "balance",
+    "priority": 1,
+    "training_phase": 1
   },
   {
     "task_id": "PZO-M09A",
@@ -326,9 +366,14 @@
       "share_moment_yield"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m09a_opportunity_value_model_regret_stamp_generator.ts",
-    "md_source": "M09a_opportunity_value_regret_model.md"
+    "md_source": "M09Aa_opportunity_value_model_regret_stamp_generator.md",
+    "intelligence_signal": "alpha",
+    "model_category": "predictor",
+    "family": "market",
+    "priority": 2,
+    "training_phase": 2
   },
   {
     "task_id": "PZO-M10A",
@@ -363,9 +408,14 @@
       "opportunity_flip_yield"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m10a_exit_timing_model_pulse_sell_flip_optimizer.ts",
-    "md_source": "M10a_exit_timing_model.md"
+    "md_source": "M10Aa_exit_timing_model_pulse_sell_flip_optimizer.md",
+    "intelligence_signal": "alpha",
+    "model_category": "predictor",
+    "family": "market",
+    "priority": 2,
+    "training_phase": 2
   },
   {
     "task_id": "PZO-M11A",
@@ -399,9 +449,14 @@
       "adaptive_difficulty_fairness"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m11a_hesitation_inertia_detector_micro_behavior_dl.ts",
-    "md_source": "M11a_hesitation_inertia_detector.md"
+    "md_source": "M11Aa_hesitation_inertia_detector_micro_behavior_dl.md",
+    "intelligence_signal": "personalization",
+    "model_category": "classifier",
+    "family": "balance",
+    "priority": 2,
+    "training_phase": 2
   },
   {
     "task_id": "PZO-M12A",
@@ -436,9 +491,14 @@
       "combo_balance_flag_precision"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m12a_fubar_cascade_risk_model_crisis_graph.ts",
-    "md_source": "M12a_fubar_cascade_risk_model.md"
+    "md_source": "M12Aa_fubar_cascade_risk_model_crisis_graph.md",
+    "intelligence_signal": "risk",
+    "model_category": "predictor",
+    "family": "market",
+    "priority": 1,
+    "training_phase": 1
   },
   {
     "task_id": "PZO-M13A",
@@ -470,9 +530,14 @@
       "season_stability"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m13a_friction_module_tuner_constrained_bandits.ts",
-    "md_source": "M13a_friction_module_tuner.md"
+    "md_source": "M13Aa_friction_module_tuner_constrained_bandits.md",
+    "intelligence_signal": "personalization",
+    "model_category": "controller",
+    "family": "balance",
+    "priority": 2,
+    "training_phase": 3
   },
   {
     "task_id": "PZO-M14A",
@@ -507,9 +572,14 @@
       "cord_premium_calibration"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m14a_disadvantage_draft_personalizer_style_aware.ts",
-    "md_source": "M14a_disadvantage_draft_personalizer.md"
+    "md_source": "M14Aa_disadvantage_draft_personalizer_style_aware.md",
+    "intelligence_signal": "personalization",
+    "model_category": "recommender",
+    "family": "progression",
+    "priority": 2,
+    "training_phase": 2
   },
   {
     "task_id": "PZO-M15A",
@@ -544,9 +614,14 @@
       "token_acceptance_rate"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m15a_social_token_recommender_co_author_engine.ts",
-    "md_source": "M15a_social_token_recommender.md"
+    "md_source": "M15Aa_social_token_recommender_co_author_engine.md",
+    "intelligence_signal": "rewardFit",
+    "model_category": "recommender",
+    "family": "social",
+    "priority": 2,
+    "training_phase": 2
   },
   {
     "task_id": "PZO-M16A",
@@ -580,9 +655,14 @@
       "groupthink_reduction_rate"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m16a_consensus_vs_contrarian_predictor_hot_seat_vote.ts",
-    "md_source": "M16a_hot_seat_vote_predictor.md"
+    "md_source": "M16Aa_consensus_vs_contrarian_predictor_hot_seat_vote.md",
+    "intelligence_signal": "recommendationPower",
+    "model_category": "predictor",
+    "family": "social",
+    "priority": 2,
+    "training_phase": 2
   },
   {
     "task_id": "PZO-M17A",
@@ -616,9 +696,14 @@
       "bailout_drama_yield"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m17a_bailout_trigger_classifier_clutch_assist_gate.ts",
-    "md_source": "M17a_bailout_trigger_classifier.md"
+    "md_source": "M17Aa_bailout_trigger_classifier_clutch_assist_gate.md",
+    "intelligence_signal": "momentum",
+    "model_category": "classifier",
+    "family": "balance",
+    "priority": 2,
+    "training_phase": 2
   },
   {
     "task_id": "PZO-M18A",
@@ -652,9 +737,14 @@
       "exploit_escalation_AUC"
     ],
     "can_lock_off": false,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m18a_griefing_detection_adversarial_budgeting.ts",
-    "md_source": "M18a_griefing_detection_adversarial_budgeting.md"
+    "md_source": "M18Aa_griefing_detection_adversarial_budgeting.md",
+    "intelligence_signal": "antiCheat",
+    "model_category": "anomaly_detector",
+    "family": "integrity",
+    "priority": 1,
+    "training_phase": 1
   },
   {
     "task_id": "PZO-M19A",
@@ -687,9 +777,14 @@
       "season_stability_KPI"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m19a_season_meta_balancer_offline_simulation_rl.ts",
-    "md_source": "M19a_season_meta_balancer.md"
+    "md_source": "M19Aa_season_meta_balancer_offline_simulation_rl.md",
+    "intelligence_signal": "volatility",
+    "model_category": "rl_policy",
+    "family": "balance",
+    "priority": 2,
+    "training_phase": 3
   },
   {
     "task_id": "PZO-M20A",
@@ -723,9 +818,14 @@
       "shock_perceived_fairness"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m20a_macro_shock_generator_distribution_constraints.ts",
-    "md_source": "M20a_macro_shock_generator.md"
+    "md_source": "M20Aa_macro_shock_generator_distribution_constraints.md",
+    "intelligence_signal": "volatility",
+    "model_category": "generator",
+    "family": "market",
+    "priority": 2,
+    "training_phase": 3
   },
   {
     "task_id": "PZO-M21A",
@@ -759,9 +859,14 @@
       "overwhelm_detection_AUC"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m21a_meta_progression_personalization_unlock_routing.ts",
-    "md_source": "M21a_meta_progression_personalization.md"
+    "md_source": "M21Aa_meta_progression_personalization_unlock_routing.md",
+    "intelligence_signal": "churnRisk",
+    "model_category": "recommender",
+    "family": "progression",
+    "priority": 2,
+    "training_phase": 2
   },
   {
     "task_id": "PZO-M22A",
@@ -796,9 +901,14 @@
       "false_moment_rate"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m22a_moment_forge_classifier_3_moment_guarantee_controller.ts",
-    "md_source": "M22a_moment_forge_classifier_controller.md"
+    "md_source": "M22Aa_moment_forge_classifier_3_moment_guarantee_controller.md",
+    "intelligence_signal": "rewardFit",
+    "model_category": "classifier",
+    "family": "social",
+    "priority": 1,
+    "training_phase": 1
   },
   {
     "task_id": "PZO-M23A",
@@ -832,9 +942,14 @@
       "privacy_audit_pass"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m23a_highlight_detection_auto_clip_dl.ts",
-    "md_source": "M23a_highlight_detection_autoclip.md"
+    "md_source": "M23Aa_highlight_detection_auto_clip_dl.md",
+    "intelligence_signal": "rewardFit",
+    "model_category": "classifier",
+    "family": "social",
+    "priority": 2,
+    "training_phase": 2
   },
   {
     "task_id": "PZO-M24A",
@@ -868,9 +983,14 @@
       "challenge_completion_rate"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m24a_challenge_matchmaking_seed_ghost_similarity.ts",
-    "md_source": "M24a_challenge_matchmaking_seed_ghost_similarity.md"
+    "md_source": "M24Aa_challenge_matchmaking_seed_ghost_similarity.md",
+    "intelligence_signal": "personalization",
+    "model_category": "embedding_model",
+    "family": "progression",
+    "priority": 2,
+    "training_phase": 2
   },
   {
     "task_id": "PZO-M25A",
@@ -906,9 +1026,14 @@
       "exploitation_guard_AUC"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m25a_improvement_overlay_models_skill_signals_causal_experim.ts",
-    "md_source": "M25a_improvement_overlay_models.md"
+    "md_source": "M25Aa_improvement_overlay_models_skill_signals_causal_experim.md",
+    "intelligence_signal": "personalization",
+    "model_category": "predictor",
+    "family": "progression",
+    "priority": 2,
+    "training_phase": 3
   },
   {
     "task_id": "PZO-M26A",
@@ -943,9 +1068,14 @@
       "exploitative_term_recall"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m26a_co_op_contract_fairness_partner_risk_scorer.ts",
-    "md_source": "M26a_coop_contract_fairness_partner_risk.md"
+    "md_source": "M26Aa_co_op_contract_fairness_partner_risk_scorer.md",
+    "intelligence_signal": "risk",
+    "model_category": "predictor",
+    "family": "contract",
+    "priority": 2,
+    "training_phase": 2
   },
   {
     "task_id": "PZO-M27A",
@@ -980,9 +1110,14 @@
       "arbitration_precompute_accuracy"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m27a_clause_outcome_forecaster_triggers_escapes_penalties.ts",
-    "md_source": "M27a_clause_outcome_forecaster.md"
+    "md_source": "M27Aa_clause_outcome_forecaster_triggers_escapes_penalties.md",
+    "intelligence_signal": "risk",
+    "model_category": "predictor",
+    "family": "contract",
+    "priority": 2,
+    "training_phase": 2
   },
   {
     "task_id": "PZO-M28A",
@@ -1018,9 +1153,14 @@
       "timer_utilization_efficiency"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m28a_handshake_negotiation_coach_timer_window_optimizer.ts",
-    "md_source": "M28a_handshake_negotiation_coach.md"
+    "md_source": "M28Aa_handshake_negotiation_coach_timer_window_optimizer.md",
+    "intelligence_signal": "recommendationPower",
+    "model_category": "recommender",
+    "family": "contract",
+    "priority": 2,
+    "training_phase": 2
   },
   {
     "task_id": "PZO-M29A",
@@ -1054,10 +1194,15 @@
       "abuse_detection_AUC",
       "pool_sustainability_KPI"
     ],
-    "can_lock_off": true,
-    "status": "todo",
+    "can_lock_off": false,
+    "status": "simulated",
     "module_path": "src/ml/m29a_mutual_risk_pool_actuary_payout_likelihood_anti_abuse.ts",
-    "md_source": "M29a_risk_pool_actuary_anti_abuse.md"
+    "md_source": "M29Aa_mutual_risk_pool_actuary_payout_likelihood_anti_abuse.md",
+    "intelligence_signal": "antiCheat",
+    "model_category": "anomaly_detector",
+    "family": "co_op",
+    "priority": 1,
+    "training_phase": 1
   },
   {
     "task_id": "PZO-M30A",
@@ -1092,9 +1237,14 @@
       "unwind_path_optimality"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m30a_default_cascade_predictor_takeover_vs_unwind_routing.ts",
-    "md_source": "M30a_default_cascade_predictor.md"
+    "md_source": "M30Aa_default_cascade_predictor_takeover_vs_unwind_routing.md",
+    "intelligence_signal": "risk",
+    "model_category": "predictor",
+    "family": "co_op",
+    "priority": 1,
+    "training_phase": 1
   },
   {
     "task_id": "PZO-M31A",
@@ -1129,9 +1279,14 @@
       "meta_diversity_index"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m31a_synergy_discovery_engine_combo_mining_balance_watchdog.ts",
-    "md_source": "M31a_synergy_discovery_combo_mining.md"
+    "md_source": "M31Aa_synergy_discovery_engine_combo_mining_balance_watchdog.md",
+    "intelligence_signal": "volatility",
+    "model_category": "anomaly_detector",
+    "family": "balance",
+    "priority": 2,
+    "training_phase": 3
   },
   {
     "task_id": "PZO-M32A",
@@ -1167,9 +1322,14 @@
       "rung_completion_rate"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m32a_liquidity_ladder_planner_rung_completion_fragility_scor.ts",
-    "md_source": "M32a_liquidity_ladder_planner_fragility.md"
+    "md_source": "M32Aa_liquidity_ladder_planner_rung_completion_fragility_scor.md",
+    "intelligence_signal": "risk",
+    "model_category": "predictor",
+    "family": "market",
+    "priority": 2,
+    "training_phase": 2
   },
   {
     "task_id": "PZO-M33A",
@@ -1204,9 +1364,14 @@
       "hedge_effectiveness_calibration"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m33a_hedge_pair_validator_correlation_drift_shock_stress.ts",
-    "md_source": "M33a_hedge_pair_validator_correlation_drift.md"
+    "md_source": "M33Aa_hedge_pair_validator_correlation_drift_shock_stress.md",
+    "intelligence_signal": "risk",
+    "model_category": "predictor",
+    "family": "market",
+    "priority": 2,
+    "training_phase": 2
   },
   {
     "task_id": "PZO-M34A",
@@ -1242,9 +1407,14 @@
       "recommendation_acceptance_rate"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m34a_mod_impact_estimator_socket_choice_counterfactual_regre.ts",
-    "md_source": "M34a_mod_impact_estimator_socket_choice.md"
+    "md_source": "M34Aa_mod_impact_estimator_socket_choice_counterfactual_regre.md",
+    "intelligence_signal": "alpha",
+    "model_category": "recommender",
+    "family": "market",
+    "priority": 2,
+    "training_phase": 2
   },
   {
     "task_id": "PZO-M35A",
@@ -1279,9 +1449,14 @@
       "cascade_prevention_rate"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m35a_portfolio_heat_controller_overconcentration_friction_tu.ts",
-    "md_source": "M35a_portfolio_heat_controller.md"
+    "md_source": "M35Aa_portfolio_heat_controller_overconcentration_friction_tu.md",
+    "intelligence_signal": "risk",
+    "model_category": "controller",
+    "family": "market",
+    "priority": 1,
+    "training_phase": 1
   },
   {
     "task_id": "PZO-M36A",
@@ -1316,9 +1491,14 @@
       "false_flag_rate"
     ],
     "can_lock_off": false,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m36a_achievement_proof_verifier_ledger_backed_badge_integrit.ts",
-    "md_source": "M36a_achievement_proof_verifier.md"
+    "md_source": "M36Aa_achievement_proof_verifier_ledger_backed_badge_integrit.md",
+    "intelligence_signal": "antiCheat",
+    "model_category": "anomaly_detector",
+    "family": "integrity",
+    "priority": 1,
+    "training_phase": 1
   },
   {
     "task_id": "PZO-M37A",
@@ -1353,9 +1533,14 @@
       "economy_inflation_rate"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m37a_bounty_failure_forecaster_streak_collapse_predictor.ts",
-    "md_source": "M37a_bounty_failure_forecaster.md"
+    "md_source": "M37Aa_bounty_failure_forecaster_streak_collapse_predictor.md",
+    "intelligence_signal": "churnRisk",
+    "model_category": "predictor",
+    "family": "economy",
+    "priority": 2,
+    "training_phase": 2
   },
   {
     "task_id": "PZO-M38A",
@@ -1390,9 +1575,14 @@
       "novelty_entropy"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m38a_quest_router_moment_quest_personalization_novelty.ts",
-    "md_source": "M38a_moment_quest_router_personalization.md"
+    "md_source": "M38Aa_quest_router_moment_quest_personalization_novelty.md",
+    "intelligence_signal": "recommendationPower",
+    "model_category": "recommender",
+    "family": "progression",
+    "priority": 2,
+    "training_phase": 2
   },
   {
     "task_id": "PZO-M39A",
@@ -1427,9 +1617,14 @@
       "sink_adequacy_KPI"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m39a_trophy_economy_balancer_inflation_control_anti_farm.ts",
-    "md_source": "M39a_trophy_economy_balancer.md"
+    "md_source": "M39Aa_trophy_economy_balancer_inflation_control_anti_farm.md",
+    "intelligence_signal": "volatility",
+    "model_category": "controller",
+    "family": "economy",
+    "priority": 2,
+    "training_phase": 3
   },
   {
     "task_id": "PZO-M40A",
@@ -1464,9 +1659,14 @@
       "false_positive_rate"
     ],
     "can_lock_off": false,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m40a_cosmetic_exchange_fraud_detector_market_integrity.ts",
-    "md_source": "M40a_cosmetic_exchange_fraud_detector.md"
+    "md_source": "M40Aa_cosmetic_exchange_fraud_detector_market_integrity.md",
+    "intelligence_signal": "antiCheat",
+    "model_category": "anomaly_detector",
+    "family": "integrity",
+    "priority": 1,
+    "training_phase": 1
   },
   {
     "task_id": "PZO-M41A",
@@ -1501,9 +1701,14 @@
       "onboarding_completion_lift"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m41a_onboarding_skill_estimator_90_second_boot_run_classifie.ts",
-    "md_source": "M41a_boot_run_skill_estimator.md"
+    "md_source": "M41Aa_onboarding_skill_estimator_90_second_boot_run_classifie.md",
+    "intelligence_signal": "personalization",
+    "model_category": "classifier",
+    "family": "progression",
+    "priority": 1,
+    "training_phase": 1
   },
   {
     "task_id": "PZO-M42A",
@@ -1538,9 +1743,14 @@
       "guidance_satisfaction"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m42a_prompt_minimalism_controller_when_to_speak_when_to_stay.ts",
-    "md_source": "M42a_prompt_minimalism_controller.md"
+    "md_source": "M42Aa_prompt_minimalism_controller_when_to_speak_when_to_stay.md",
+    "intelligence_signal": "personalization",
+    "model_category": "controller",
+    "family": "progression",
+    "priority": 2,
+    "training_phase": 2
   },
   {
     "task_id": "PZO-M43A",
@@ -1575,9 +1785,14 @@
       "exploitation_guard_AUC"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m43a_what_if_tutor_counterfactual_policy_explainer.ts",
-    "md_source": "M43a_what_if_tutor_counterfactual.md"
+    "md_source": "M43Aa_what_if_tutor_counterfactual_policy_explainer.md",
+    "intelligence_signal": "personalization",
+    "model_category": "predictor",
+    "family": "progression",
+    "priority": 3,
+    "training_phase": 3
   },
   {
     "task_id": "PZO-M44A",
@@ -1612,9 +1827,14 @@
       "first_run_completion_rate"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m44a_starter_path_matchmaker_archetype_routing_anti_boredom.ts",
-    "md_source": "M44a_starter_path_matchmaker.md"
+    "md_source": "M44Aa_starter_path_matchmaker_archetype_routing_anti_boredom.md",
+    "intelligence_signal": "personalization",
+    "model_category": "recommender",
+    "family": "progression",
+    "priority": 1,
+    "training_phase": 1
   },
   {
     "task_id": "PZO-M45A",
@@ -1649,9 +1869,14 @@
       "post_grace_retention"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m45a_training_wheels_scheduler_grace_period_optimization.ts",
-    "md_source": "M45a_training_wheels_scheduler.md"
+    "md_source": "M45Aa_training_wheels_scheduler_grace_period_optimization.md",
+    "intelligence_signal": "churnRisk",
+    "model_category": "controller",
+    "family": "progression",
+    "priority": 2,
+    "training_phase": 3
   },
   {
     "task_id": "PZO-M46A",
@@ -1686,9 +1911,14 @@
       "false_flag_rate"
     ],
     "can_lock_off": false,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m46a_ledger_anomaly_detector_event_stream_forensics.ts",
-    "md_source": "M46a_ledger_anomaly_detector_event_forensics.md"
+    "md_source": "M46Aa_ledger_anomaly_detector_event_stream_forensics.md",
+    "intelligence_signal": "antiCheat",
+    "model_category": "anomaly_detector",
+    "family": "integrity",
+    "priority": 1,
+    "training_phase": 1
   },
   {
     "task_id": "PZO-M47A",
@@ -1723,9 +1953,14 @@
       "false_flag_rate"
     ],
     "can_lock_off": false,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m47a_signature_freshness_monitor_client_action_integrity.ts",
-    "md_source": "M47a_signature_freshness_monitor.md"
+    "md_source": "M47Aa_signature_freshness_monitor_client_action_integrity.md",
+    "intelligence_signal": "antiCheat",
+    "model_category": "anomaly_detector",
+    "family": "integrity",
+    "priority": 1,
+    "training_phase": 1
   },
   {
     "task_id": "PZO-M48A",
@@ -1760,9 +1995,14 @@
       "validator_throughput_lift"
     ],
     "can_lock_off": false,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m48a_replay_consistency_model_deterministic_validator_assist.ts",
-    "md_source": "M48a_replay_consistency_model_validator_assist.md"
+    "md_source": "M48Aa_replay_consistency_model_deterministic_validator_assist.md",
+    "intelligence_signal": "antiCheat",
+    "model_category": "classifier",
+    "family": "integrity",
+    "priority": 1,
+    "training_phase": 1
   },
   {
     "task_id": "PZO-M49A",
@@ -1797,9 +2037,14 @@
       "taxonomy_drift_detection"
     ],
     "can_lock_off": false,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m49a_exploit_response_policy_auto_containment_optimizer.ts",
-    "md_source": "M49a_exploit_response_policy.md"
+    "md_source": "M49Aa_exploit_response_policy_auto_containment_optimizer.md",
+    "intelligence_signal": "antiCheat",
+    "model_category": "rl_policy",
+    "family": "integrity",
+    "priority": 1,
+    "training_phase": 1
   },
   {
     "task_id": "PZO-M50A",
@@ -1834,9 +2079,14 @@
       "false_flag_rate"
     ],
     "can_lock_off": false,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m50a_proof_card_verifier_receipt_hash_trust_layer.ts",
-    "md_source": "M50a_proof_card_verifier_hash_trust.md"
+    "md_source": "M50Aa_proof_card_verifier_receipt_hash_trust_layer.md",
+    "intelligence_signal": "antiCheat",
+    "model_category": "classifier",
+    "family": "integrity",
+    "priority": 1,
+    "training_phase": 1
   },
   {
     "task_id": "PZO-M51A",
@@ -1871,9 +2121,14 @@
       "restructure_acceptance_rate"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m51a_syndicate_coalition_scoring_multi_party_deal_stability.ts",
-    "md_source": "M51a_syndicate_coalition_scoring_multi_party_deal_stability.md"
+    "md_source": "M51Aa_syndicate_coalition_scoring_multi_party_deal_stability.md",
+    "intelligence_signal": "risk",
+    "model_category": "predictor",
+    "family": "co_op",
+    "priority": 2,
+    "training_phase": 2
   },
   {
     "task_id": "PZO-M52A",
@@ -1908,9 +2163,14 @@
       "false_gate_rate"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m52a_escrow_milestone_success_model_gaming_resistant_release.ts",
-    "md_source": "M52a_escrow_milestone_success_model_gaming_resistant_release.md"
+    "md_source": "M52Aa_escrow_milestone_success_model_gaming_resistant_release.md",
+    "intelligence_signal": "antiCheat",
+    "model_category": "anomaly_detector",
+    "family": "contract",
+    "priority": 2,
+    "training_phase": 2
   },
   {
     "task_id": "PZO-M53A",
@@ -1945,9 +2205,14 @@
       "false_ring_rate"
     ],
     "can_lock_off": false,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m53a_reliability_collusion_monitor_reputation_stake.ts",
-    "md_source": "M53a_reliability_collusion_monitor_reputation_stake.md"
+    "md_source": "M53Aa_reliability_collusion_monitor_reputation_stake.md",
+    "intelligence_signal": "antiCheat",
+    "model_category": "anomaly_detector",
+    "family": "integrity",
+    "priority": 1,
+    "training_phase": 1
   },
   {
     "task_id": "PZO-M54A",
@@ -1982,9 +2247,14 @@
       "distress_triage_accuracy"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m54a_restructure_acceptance_forecaster_distress_term_triage.ts",
-    "md_source": "M54a_restructure_acceptance_forecaster_distress_term_triage.md"
+    "md_source": "M54Aa_restructure_acceptance_forecaster_distress_term_triage.md",
+    "intelligence_signal": "recommendationPower",
+    "model_category": "predictor",
+    "family": "contract",
+    "priority": 2,
+    "training_phase": 2
   },
   {
     "task_id": "PZO-M55A",
@@ -2019,9 +2289,14 @@
       "resolution_speed_lift"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m55a_arbitration_triage_verdict_summarizer_replay_evidence.ts",
-    "md_source": "M55a_arbitration_triage_verdict_summarizer_replay_evidence.md"
+    "md_source": "M55Aa_arbitration_triage_verdict_summarizer_replay_evidence.md",
+    "intelligence_signal": "antiCheat",
+    "model_category": "classifier",
+    "family": "forensics",
+    "priority": 2,
+    "training_phase": 3
   },
   {
     "task_id": "PZO-M56A",
@@ -2056,9 +2331,14 @@
       "case_file_clarity"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m56a_doctrine_alignment_model_playstyle_consistency_hypocris.ts",
-    "md_source": "M56a_doctrine_alignment_model_playstyle_consistency.md"
+    "md_source": "M56Aa_doctrine_alignment_model_playstyle_consistency_hypocris.md",
+    "intelligence_signal": "personalization",
+    "model_category": "classifier",
+    "family": "forensics",
+    "priority": 2,
+    "training_phase": 2
   },
   {
     "task_id": "PZO-M57A",
@@ -2094,9 +2374,14 @@
       "tick_budget_efficiency"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m57a_rebalancing_pulse_action_planner_seconds_to_save_router.ts",
-    "md_source": "M57a_rebalancing_pulse_action_planner_seconds_to_save.md"
+    "md_source": "M57Aa_rebalancing_pulse_action_planner_seconds_to_save_router.md",
+    "intelligence_signal": "momentum",
+    "model_category": "rl_policy",
+    "family": "market",
+    "priority": 2,
+    "training_phase": 2
   },
   {
     "task_id": "PZO-M58A",
@@ -2131,9 +2416,14 @@
       "proof_prestige_distribution"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m58a_stress_test_selector_risk_reward_balancer_anti_farm.ts",
-    "md_source": "M58a_stress_test_selector_risk_reward_balancer_anti_farm.md"
+    "md_source": "M58Aa_stress_test_selector_risk_reward_balancer_anti_farm.md",
+    "intelligence_signal": "antiCheat",
+    "model_category": "recommender",
+    "family": "balance",
+    "priority": 2,
+    "training_phase": 2
   },
   {
     "task_id": "PZO-M59A",
@@ -2168,9 +2458,14 @@
       "calibration_ECE"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m59a_complexity_heat_calibrator_combo_degeneracy_detector.ts",
-    "md_source": "M59a_complexity_heat_calibrator_combo_degeneracy_detector.md"
+    "md_source": "M59Aa_complexity_heat_calibrator_combo_degeneracy_detector.md",
+    "intelligence_signal": "volatility",
+    "model_category": "anomaly_detector",
+    "family": "balance",
+    "priority": 2,
+    "training_phase": 3
   },
   {
     "task_id": "PZO-M60A",
@@ -2206,9 +2501,14 @@
       "netting_optimality"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m60a_liability_netting_advisor_cascade_minimization_under_ca.ts",
-    "md_source": "M60a_liability_netting_advisor_cascade_minimization_under_caps.md"
+    "md_source": "M60Aa_liability_netting_advisor_cascade_minimization_under_ca.md",
+    "intelligence_signal": "risk",
+    "model_category": "recommender",
+    "family": "market",
+    "priority": 2,
+    "training_phase": 2
   },
   {
     "task_id": "PZO-M61A",
@@ -2243,9 +2543,14 @@
       "prestige_calibration"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m61a_badge_tier_threshold_calibrator_bronze_platinum_distrib.ts",
-    "md_source": "M61a_badge_tier_threshold_calibrator_distribution_control.md"
+    "md_source": "M61Aa_badge_tier_threshold_calibrator_bronze_platinum_distrib.md",
+    "intelligence_signal": "volatility",
+    "model_category": "controller",
+    "family": "economy",
+    "priority": 2,
+    "training_phase": 3
   },
   {
     "task_id": "PZO-M62A",
@@ -2280,9 +2585,14 @@
       "badge_fairness_rating"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m62a_team_contribution_estimator_anti_tagalong_credit_attrib.ts",
-    "md_source": "M62a_team_contribution_estimator_anti_tagalong_attribution.md"
+    "md_source": "M62Aa_team_contribution_estimator_anti_tagalong_credit_attrib.md",
+    "intelligence_signal": "antiCheat",
+    "model_category": "predictor",
+    "family": "co_op",
+    "priority": 2,
+    "training_phase": 3
   },
   {
     "task_id": "PZO-M63A",
@@ -2317,9 +2627,14 @@
       "false_flag_rate"
     ],
     "can_lock_off": false,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m63a_sponsored_bounty_integrity_guard_stake_escrow_collusion.ts",
-    "md_source": "M63a_sponsored_bounty_integrity_guard_stake_escrow_collusion.md"
+    "md_source": "M63Aa_sponsored_bounty_integrity_guard_stake_escrow_collusion.md",
+    "intelligence_signal": "antiCheat",
+    "model_category": "anomaly_detector",
+    "family": "integrity",
+    "priority": 1,
+    "training_phase": 1
   },
   {
     "task_id": "PZO-M64A",
@@ -2354,9 +2669,14 @@
       "false_pending_rate"
     ],
     "can_lock_off": false,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m64a_leaderboard_trust_re_verify_scheduler_proof_weighted_ra.ts",
-    "md_source": "M64a_leaderboard_trust_reverify_scheduler_proof_weighted.md"
+    "md_source": "M64Aa_leaderboard_trust_re_verify_scheduler_proof_weighted_ra.md",
+    "intelligence_signal": "antiCheat",
+    "model_category": "classifier",
+    "family": "integrity",
+    "priority": 1,
+    "training_phase": 1
   },
   {
     "task_id": "PZO-M65A",
@@ -2391,9 +2711,14 @@
       "economy_stability"
     ],
     "can_lock_off": false,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m65a_variety_index_abuse_detector_anti_grind_curve_hardener.ts",
-    "md_source": "M65a_variety_index_abuse_detector_anti_grind_curve_hardening.md"
+    "md_source": "M65Aa_variety_index_abuse_detector_anti_grind_curve_hardener.md",
+    "intelligence_signal": "antiCheat",
+    "model_category": "anomaly_detector",
+    "family": "integrity",
+    "priority": 1,
+    "training_phase": 1
   },
   {
     "task_id": "PZO-M66A",
@@ -2428,9 +2753,14 @@
       "abuse_detection_precision"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m66a_mentor_matchmaker_quality_guard_guided_co_op_onboarding.ts",
-    "md_source": "M66a_mentor_matchmaker_quality_guard_guided_coop_onboarding.md"
+    "md_source": "M66Aa_mentor_matchmaker_quality_guard_guided_co_op_onboarding.md",
+    "intelligence_signal": "personalization",
+    "model_category": "recommender",
+    "family": "co_op",
+    "priority": 2,
+    "training_phase": 2
   },
   {
     "task_id": "PZO-M67A",
@@ -2465,9 +2795,14 @@
       "overwhelm_rate"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m67a_ui_unlock_gatekeeper_progressive_disclosure_smurf_detec.ts",
-    "md_source": "M67a_ui_unlock_gatekeeper_progressive_disclosure_smurf_detection.md"
+    "md_source": "M67Aa_ui_unlock_gatekeeper_progressive_disclosure_smurf_detec.md",
+    "intelligence_signal": "personalization",
+    "model_category": "classifier",
+    "family": "progression",
+    "priority": 2,
+    "training_phase": 2
   },
   {
     "task_id": "PZO-M68A",
@@ -2502,9 +2837,14 @@
       "retraumatization_rate"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m68a_failure_rehab_scenario_generator_death_snapshot_curricu.ts",
-    "md_source": "M68a_failure_rehab_scenario_generator_death_snapshot_curriculum.md"
+    "md_source": "M68Aa_failure_rehab_scenario_generator_death_snapshot_curricu.md",
+    "intelligence_signal": "personalization",
+    "model_category": "generator",
+    "family": "progression",
+    "priority": 3,
+    "training_phase": 3
   },
   {
     "task_id": "PZO-M69A",
@@ -2539,9 +2879,14 @@
       "skill_improvement_lift"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m69a_choice_drill_generator_skill_rating_micro_sim_test_engi.ts",
-    "md_source": "M69a_choice_drill_generator_skill_rating_micro_sim_tests.md"
+    "md_source": "M69Aa_choice_drill_generator_skill_rating_micro_sim_test_engi.md",
+    "intelligence_signal": "personalization",
+    "model_category": "generator",
+    "family": "progression",
+    "priority": 2,
+    "training_phase": 2
   },
   {
     "task_id": "PZO-M70A",
@@ -2576,9 +2921,14 @@
       "bootcamp_completion_rate"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m70a_co_op_bootcamp_orchestrator_team_flow_dropout_resilienc.ts",
-    "md_source": "M70a_coop_bootcamp_orchestrator_team_flow_dropout_resilience.md"
+    "md_source": "M70Aa_co_op_bootcamp_orchestrator_team_flow_dropout_resilienc.md",
+    "intelligence_signal": "churnRisk",
+    "model_category": "controller",
+    "family": "co_op",
+    "priority": 2,
+    "training_phase": 2
   },
   {
     "task_id": "PZO-M71A",
@@ -2613,9 +2963,14 @@
       "false_block_rate"
     ],
     "can_lock_off": false,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m71a_device_trust_fusion_model_attestation_behavior_network.ts",
-    "md_source": "M71a_device_trust_fusion_model_attestation_behavior_network.md"
+    "md_source": "M71Aa_device_trust_fusion_model_attestation_behavior_network.md",
+    "intelligence_signal": "antiCheat",
+    "model_category": "embedding_model",
+    "family": "integrity",
+    "priority": 1,
+    "training_phase": 1
   },
   {
     "task_id": "PZO-M72A",
@@ -2650,9 +3005,14 @@
       "pacing_calibration"
     ],
     "can_lock_off": false,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m72a_action_budget_anomaly_detector_anti_bot_pace_control.ts",
-    "md_source": "M72a_action_budget_anomaly_detector_anti_bot_pace_control.md"
+    "md_source": "M72Aa_action_budget_anomaly_detector_anti_bot_pace_control.md",
+    "intelligence_signal": "antiCheat",
+    "model_category": "anomaly_detector",
+    "family": "integrity",
+    "priority": 1,
+    "training_phase": 1
   },
   {
     "task_id": "PZO-M73A",
@@ -2687,9 +3047,14 @@
       "false_block_rate"
     ],
     "can_lock_off": false,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m73a_market_settlement_anomaly_model_2pc_finality_dupe_detec.ts",
-    "md_source": "M73a_market_settlement_anomaly_model_finality_dupe_guard.md"
+    "md_source": "M73Aa_market_settlement_anomaly_model_2pc_finality_dupe_detec.md",
+    "intelligence_signal": "antiCheat",
+    "model_category": "anomaly_detector",
+    "family": "integrity",
+    "priority": 1,
+    "training_phase": 1
   },
   {
     "task_id": "PZO-M74A",
@@ -2724,9 +3089,14 @@
       "evidentiary_value_preservation"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m74a_forensic_bundle_summarizer_redactor_truth_packets.ts",
-    "md_source": "M74a_forensic_bundle_summarizer_redactor_truth_packets.md"
+    "md_source": "M74Aa_forensic_bundle_summarizer_redactor_truth_packets.md",
+    "intelligence_signal": "antiCheat",
+    "model_category": "generator",
+    "family": "forensics",
+    "priority": 2,
+    "training_phase": 3
   },
   {
     "task_id": "PZO-M75A",
@@ -2761,9 +3131,14 @@
       "anomaly_cluster_recall"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m75a_integrity_digest_generator_privacy_safe_transparency_au.ts",
-    "md_source": "M75a_integrity_digest_generator_privacy_safe_transparency.md"
+    "md_source": "M75Aa_integrity_digest_generator_privacy_safe_transparency_au.md",
+    "intelligence_signal": "antiCheat",
+    "model_category": "generator",
+    "family": "forensics",
+    "priority": 2,
+    "training_phase": 3
   },
   {
     "task_id": "PZO-M76A",
@@ -2797,9 +3172,14 @@
       "resolution_speed_lift"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m76a_contract_voting_dynamics_model_deadlock_manipulation_de.ts",
-    "md_source": "M76a_contract_voting_dynamics_deadlock_manipulation_detection.md"
+    "md_source": "M76Aa_contract_voting_dynamics_model_deadlock_manipulation_de.md",
+    "intelligence_signal": "antiCheat",
+    "model_category": "predictor",
+    "family": "contract",
+    "priority": 2,
+    "training_phase": 2
   },
   {
     "task_id": "PZO-M77A",
@@ -2832,10 +3212,15 @@
       "abuse_prediction_AUC",
       "false_flag_rate"
     ],
-    "can_lock_off": true,
-    "status": "todo",
+    "can_lock_off": false,
+    "status": "simulated",
     "module_path": "src/ml/m77a_delegated_operator_oversight_scope_compliance_abuse_pre.ts",
-    "md_source": "M77a_delegated_operator_oversight_scope_compliance_abuse_guard.md"
+    "md_source": "M77Aa_delegated_operator_oversight_scope_compliance_abuse_pre.md",
+    "intelligence_signal": "antiCheat",
+    "model_category": "anomaly_detector",
+    "family": "integrity",
+    "priority": 1,
+    "training_phase": 1
   },
   {
     "task_id": "PZO-M78A",
@@ -2869,9 +3254,14 @@
       "timing_accuracy"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m78a_collateral_call_stress_forecaster_top_up_likelihood_def.ts",
-    "md_source": "M78a_collateral_call_stress_forecaster_topup_likelihood_unwind_minimizer.md"
+    "md_source": "M78Aa_collateral_call_stress_forecaster_top_up_likelihood_def.md",
+    "intelligence_signal": "risk",
+    "model_category": "predictor",
+    "family": "co_op",
+    "priority": 2,
+    "training_phase": 2
   },
   {
     "task_id": "PZO-M79A",
@@ -2905,9 +3295,14 @@
       "coordination_failure_recall"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m79a_shared_objective_bond_success_model_coordination_sabota.ts",
-    "md_source": "M79a_shared_objective_bond_success_model_coordination_sandbagging_guard.md"
+    "md_source": "M79Aa_shared_objective_bond_success_model_coordination_sabota.md",
+    "intelligence_signal": "antiCheat",
+    "model_category": "predictor",
+    "family": "co_op",
+    "priority": 2,
+    "training_phase": 2
   },
   {
     "task_id": "PZO-M80A",
@@ -2940,9 +3335,14 @@
       "hash_integrity_pass"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m80a_contract_receipt_card_generator_proof_compression_reada.ts",
-    "md_source": "M80a_contract_receipt_card_generator_proof_compression_narrative_summaries.md"
+    "md_source": "M80Aa_contract_receipt_card_generator_proof_compression_reada.md",
+    "intelligence_signal": "rewardFit",
+    "model_category": "generator",
+    "family": "contract",
+    "priority": 3,
+    "training_phase": 3
   },
   {
     "task_id": "PZO-M81A",
@@ -2977,9 +3377,14 @@
       "identity_match_accuracy"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m81a_synergy_tree_branch_recommender_identity_routing_non_de.ts",
-    "md_source": "M81a_synergy_tree_branch_recommender_identity_routing_novelty_control.md"
+    "md_source": "M81Aa_synergy_tree_branch_recommender_identity_routing_non_de.md",
+    "intelligence_signal": "recommendationPower",
+    "model_category": "recommender",
+    "family": "balance",
+    "priority": 2,
+    "training_phase": 2
   },
   {
     "task_id": "PZO-M82A",
@@ -3014,9 +3419,14 @@
       "abuse_detection_precision"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m82a_timing_chain_recognizer_sequence_dl_window_coach.ts",
-    "md_source": "M82a_timing_chain_recognizer_sequence_dl_window_coach.md"
+    "md_source": "M82Aa_timing_chain_recognizer_sequence_dl_window_coach.md",
+    "intelligence_signal": "momentum",
+    "model_category": "classifier",
+    "family": "market",
+    "priority": 2,
+    "training_phase": 2
   },
   {
     "task_id": "PZO-M83A",
@@ -3051,9 +3461,14 @@
       "constraint_compliance_rate"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m83a_risk_parity_dial_optimizer_constraint_aware_exposure_re.ts",
-    "md_source": "M83a_risk_parity_dial_optimizer_constraint_aware_exposure_balancing.md"
+    "md_source": "M83Aa_risk_parity_dial_optimizer_constraint_aware_exposure_re.md",
+    "intelligence_signal": "risk",
+    "model_category": "controller",
+    "family": "market",
+    "priority": 2,
+    "training_phase": 2
   },
   {
     "task_id": "PZO-M84A",
@@ -3087,9 +3502,14 @@
       "false_flag_rate"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m84a_catalyst_pairing_compatibility_model_bridge_safety_dege.ts",
-    "md_source": "M84a_catalyst_pairing_compatibility_model_bridge_safety_degeneracy_watch.md"
+    "md_source": "M84Aa_catalyst_pairing_compatibility_model_bridge_safety_dege.md",
+    "intelligence_signal": "volatility",
+    "model_category": "predictor",
+    "family": "balance",
+    "priority": 2,
+    "training_phase": 2
   },
   {
     "task_id": "PZO-M85A",
@@ -3124,9 +3544,14 @@
       "fragility_recall"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m85a_mutation_draft_planner_rewrite_selection_collapse_risk.ts",
-    "md_source": "M85a_mutation_draft_planner_rewrite_selection_collapse_risk.md"
+    "md_source": "M85Aa_mutation_draft_planner_rewrite_selection_collapse_risk.md",
+    "intelligence_signal": "alpha",
+    "model_category": "rl_policy",
+    "family": "market",
+    "priority": 2,
+    "training_phase": 2
   },
   {
     "task_id": "PZO-M86A",
@@ -3161,9 +3586,14 @@
       "share_yield_lift"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m86a_micro_proof_moment_detector_fine_grain_highlight_miner.ts",
-    "md_source": "M86a_micro_proof_moment_detector_fine_grain_highlight_mining.md"
+    "md_source": "M86Aa_micro_proof_moment_detector_fine_grain_highlight_miner.md",
+    "intelligence_signal": "rewardFit",
+    "model_category": "classifier",
+    "family": "social",
+    "priority": 2,
+    "training_phase": 2
   },
   {
     "task_id": "PZO-M87A",
@@ -3197,9 +3627,14 @@
       "prestige_calibration"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m87a_season_relic_mint_governor_scarcity_anti_farm_control.ts",
-    "md_source": "M87a_season_relic_mint_governor_scarcity_anti_farm_control.md"
+    "md_source": "M87Aa_season_relic_mint_governor_scarcity_anti_farm_control.md",
+    "intelligence_signal": "volatility",
+    "model_category": "controller",
+    "family": "economy",
+    "priority": 3,
+    "training_phase": 3
   },
   {
     "task_id": "PZO-M88A",
@@ -3233,9 +3668,14 @@
       "receipt_clarity"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m88a_team_title_attribution_model_contribution_eligibility_v.ts",
-    "md_source": "M88a_team_title_attribution_model_contribution_eligibility_proof.md"
+    "md_source": "M88Aa_team_title_attribution_model_contribution_eligibility_v.md",
+    "intelligence_signal": "antiCheat",
+    "model_category": "predictor",
+    "family": "co_op",
+    "priority": 2,
+    "training_phase": 3
   },
   {
     "task_id": "PZO-M89A",
@@ -3269,9 +3709,14 @@
       "multiplier_calibration"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m89a_trust_multiplier_fairness_auditor_integrity_incentives.ts",
-    "md_source": "M89a_trust_multiplier_fairness_auditor_integrity_incentives_without_bias.md"
+    "md_source": "M89Aa_trust_multiplier_fairness_auditor_integrity_incentives.md",
+    "intelligence_signal": "antiCheat",
+    "model_category": "anomaly_detector",
+    "family": "integrity",
+    "priority": 2,
+    "training_phase": 3
   },
   {
     "task_id": "PZO-M90A",
@@ -3305,9 +3750,14 @@
       "economy_stability_rate"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m90a_salvage_reroll_economy_stabilizer_loop_detection_sink_a.ts",
-    "md_source": "M90a_salvage_reroll_economy_stabilizer_loop_detection_sink_tuning.md"
+    "md_source": "M90Aa_salvage_reroll_economy_stabilizer_loop_detection_sink_a.md",
+    "intelligence_signal": "volatility",
+    "model_category": "anomaly_detector",
+    "family": "economy",
+    "priority": 2,
+    "training_phase": 3
   },
   {
     "task_id": "PZO-M91A",
@@ -3340,10 +3790,15 @@
       "farm_precision",
       "new_player_safety_rate"
     ],
-    "can_lock_off": true,
-    "status": "todo",
+    "can_lock_off": false,
+    "status": "simulated",
     "module_path": "src/ml/m91a_first_table_safety_model_social_onboarding_abuse_preven.ts",
-    "md_source": "M91a_first_table_safety_model_social_onboarding_abuse_prevention.md"
+    "md_source": "M91Aa_first_table_safety_model_social_onboarding_abuse_preven.md",
+    "intelligence_signal": "antiCheat",
+    "model_category": "anomaly_detector",
+    "family": "social",
+    "priority": 1,
+    "training_phase": 1
   },
   {
     "task_id": "PZO-M92A",
@@ -3377,9 +3832,14 @@
       "skill_improvement_lift"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m92a_ghost_mentor_curation_engine_best_replays_overlay_quali.ts",
-    "md_source": "M92a_ghost_mentor_curation_engine_best_replays_overlay_alignment.md"
+    "md_source": "M92Aa_ghost_mentor_curation_engine_best_replays_overlay_quali.md",
+    "intelligence_signal": "personalization",
+    "model_category": "recommender",
+    "family": "progression",
+    "priority": 3,
+    "training_phase": 3
   },
   {
     "task_id": "PZO-M93A",
@@ -3414,9 +3874,14 @@
       "degeneracy_recall"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m93a_loadout_lab_constraint_explainer_preview_accuracy_cord.ts",
-    "md_source": "M93a_loadout_lab_constraint_explainer_preview_accuracy_anti_meta_leakage.md"
+    "md_source": "M93Aa_loadout_lab_constraint_explainer_preview_accuracy_cord.md",
+    "intelligence_signal": "recommendationPower",
+    "model_category": "predictor",
+    "family": "progression",
+    "priority": 2,
+    "training_phase": 2
   },
   {
     "task_id": "PZO-M94A",
@@ -3450,9 +3915,14 @@
       "vocabulary_learning_accuracy"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m94a_glossary_ping_relevance_model_speak_only_when_needed.ts",
-    "md_source": "M94a_glossary_ping_relevance_model_speak_only_when_needed.md"
+    "md_source": "M94Aa_glossary_ping_relevance_model_speak_only_when_needed.md",
+    "intelligence_signal": "personalization",
+    "model_category": "classifier",
+    "family": "progression",
+    "priority": 2,
+    "training_phase": 2
   },
   {
     "task_id": "PZO-M95A",
@@ -3486,9 +3956,14 @@
       "exploitation_guard_AUC"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m95a_wipe_clinic_causal_explainer_minimal_counterfactual_gen.ts",
-    "md_source": "M95a_wipe_clinic_causal_explainer_minimal_counterfactual_set.md"
+    "md_source": "M95Aa_wipe_clinic_causal_explainer_minimal_counterfactual_gen.md",
+    "intelligence_signal": "personalization",
+    "model_category": "predictor",
+    "family": "forensics",
+    "priority": 3,
+    "training_phase": 3
   },
   {
     "task_id": "PZO-M96A",
@@ -3522,9 +3997,14 @@
       "drift_calibration"
     ],
     "can_lock_off": false,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m96a_time_drift_lag_exploit_classifier_server_time_authority.ts",
-    "md_source": "M96a_time_drift_lag_exploit_classifier_server_time_authority_assist.md"
+    "md_source": "M96Aa_time_drift_lag_exploit_classifier_server_time_authority.md",
+    "intelligence_signal": "antiCheat",
+    "model_category": "classifier",
+    "family": "integrity",
+    "priority": 1,
+    "training_phase": 1
   },
   {
     "task_id": "PZO-M97A",
@@ -3558,9 +4038,14 @@
       "false_flag_rate"
     ],
     "can_lock_off": false,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m97a_seed_commit_reveal_verifier_rng_integrity_bias_monitor.ts",
-    "md_source": "M97a_seed_commit_reveal_verifier_rng_integrity_bias_monitor.md"
+    "md_source": "M97Aa_seed_commit_reveal_verifier_rng_integrity_bias_monitor.md",
+    "intelligence_signal": "antiCheat",
+    "model_category": "anomaly_detector",
+    "family": "integrity",
+    "priority": 1,
+    "training_phase": 1
   },
   {
     "task_id": "PZO-M98A",
@@ -3594,9 +4079,14 @@
       "exploit_detection_speed"
     ],
     "can_lock_off": false,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m98a_quarantine_compute_scheduler_fast_path_clean_runs_deep.ts",
-    "md_source": "M98a_quarantine_compute_scheduler_fastpath_clean_runs_deepscan_suspects.md"
+    "md_source": "M98Aa_quarantine_compute_scheduler_fast_path_clean_runs_deep.md",
+    "intelligence_signal": "antiCheat",
+    "model_category": "controller",
+    "family": "integrity",
+    "priority": 1,
+    "training_phase": 1
   },
   {
     "task_id": "PZO-M99A",
@@ -3630,9 +4120,14 @@
       "placement_calibration"
     ],
     "can_lock_off": false,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m99a_integrity_challenge_placement_optimizer_non_disruptive.ts",
-    "md_source": "M99a_integrity_challenge_placement_optimizer_non_disruptive_proof_of_play.md"
+    "md_source": "M99Aa_integrity_challenge_placement_optimizer_non_disruptive.md",
+    "intelligence_signal": "antiCheat",
+    "model_category": "controller",
+    "family": "integrity",
+    "priority": 1,
+    "training_phase": 1
   },
   {
     "task_id": "PZO-M100A",
@@ -3666,9 +4161,14 @@
       "resolution_speed_lift"
     ],
     "can_lock_off": false,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m100a_appeal_triage_evidence_chain_checker_verifiable_enforce.ts",
-    "md_source": "M100a_appeal_triage_evidence_chain_checker_verifiable_enforcement.md"
+    "md_source": "M100Aa_appeal_triage_evidence_chain_checker_verifiable_enforce.md",
+    "intelligence_signal": "antiCheat",
+    "model_category": "classifier",
+    "family": "forensics",
+    "priority": 1,
+    "training_phase": 1
   },
   {
     "task_id": "PZO-M101A",
@@ -3702,9 +4202,14 @@
       "run_variety_index"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m101a_mutator_draft_recommender_balance_forecaster.ts",
-    "md_source": "M101a_mutator_draft_ml_dl_companion_mutator_recommender_balance_forecaster.md"
+    "md_source": "M101Aa_mutator_draft_recommender_balance_forecaster.md",
+    "intelligence_signal": "recommendationPower",
+    "model_category": "recommender",
+    "family": "balance",
+    "priority": 2,
+    "training_phase": 2
   },
   {
     "task_id": "PZO-M102A",
@@ -3738,9 +4243,14 @@
       "exploit_guard_AUC"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m102a_forked_timeline_ghost_outcome_generator.ts",
-    "md_source": "M102a_forked_timeline_choice_ml_dl_companion_ghost_outcome_generator.md"
+    "md_source": "M102Aa_forked_timeline_ghost_outcome_generator.md",
+    "intelligence_signal": "alpha",
+    "model_category": "generator",
+    "family": "forensics",
+    "priority": 3,
+    "training_phase": 3
   },
   {
     "task_id": "PZO-M103A",
@@ -3775,9 +4285,14 @@
       "window_utilization_rate"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m103a_emergency_liquidity_panic_button_coach.ts",
-    "md_source": "M103a_emergency_liquidity_actions_ml_dl_companion_panic_button_coach.md"
+    "md_source": "M103Aa_emergency_liquidity_panic_button_coach.md",
+    "intelligence_signal": "momentum",
+    "model_category": "recommender",
+    "family": "market",
+    "priority": 1,
+    "training_phase": 1
   },
   {
     "task_id": "PZO-M104A",
@@ -3812,9 +4327,14 @@
       "false_urgency_rate"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m104a_deal_scarcity_anticipation_model.ts",
-    "md_source": "M104a_deal_scarcity_index_ml_dl_companion_scarcity_anticipation_model.md"
+    "md_source": "M104Aa_deal_scarcity_anticipation_model.md",
+    "intelligence_signal": "alpha",
+    "model_category": "predictor",
+    "family": "market",
+    "priority": 2,
+    "training_phase": 2
   },
   {
     "task_id": "PZO-M105A",
@@ -3848,9 +4368,14 @@
       "regret_signal_precision"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m105a_last_look_window_misclick_guard_regret_amplifier.ts",
-    "md_source": "M105a_last_look_window_ml_dl_companion_misclick_guard_regret_amplifier.md"
+    "md_source": "M105Aa_last_look_window_misclick_guard_regret_amplifier.md",
+    "intelligence_signal": "personalization",
+    "model_category": "classifier",
+    "family": "balance",
+    "priority": 2,
+    "training_phase": 2
   },
   {
     "task_id": "PZO-M106A",
@@ -3885,9 +4410,14 @@
       "cascade_prevention_rate"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m106a_asset_condition_failure_predictor_maintenance_planner.ts",
-    "md_source": "M106a_asset_condition_system_ml_dl_companion_failure_predictor_maintenance_planner.md"
+    "md_source": "M106Aa_asset_condition_failure_predictor_maintenance_planner.md",
+    "intelligence_signal": "risk",
+    "model_category": "predictor",
+    "family": "market",
+    "priority": 2,
+    "training_phase": 2
   },
   {
     "task_id": "PZO-M107A",
@@ -3922,9 +4452,14 @@
       "debt_trap_recall"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m107a_refi_eligibility_estimator_term_optimizer.ts",
-    "md_source": "M107a_refi_ladder_ml_dl_companion_refi_eligibility_estimator_term_optimizer.md"
+    "md_source": "M107Aa_refi_eligibility_estimator_term_optimizer.md",
+    "intelligence_signal": "alpha",
+    "model_category": "predictor",
+    "family": "market",
+    "priority": 2,
+    "training_phase": 2
   },
   {
     "task_id": "PZO-M108A",
@@ -3959,9 +4494,14 @@
       "fill_rate_lift"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m108a_partial_fill_probability_timing_tutor.ts",
-    "md_source": "M108a_partial_fills_ml_dl_companion_fill_probability_timing_tutor.md"
+    "md_source": "M108Aa_partial_fill_probability_timing_tutor.md",
+    "intelligence_signal": "alpha",
+    "model_category": "predictor",
+    "family": "market",
+    "priority": 2,
+    "training_phase": 2
   },
   {
     "task_id": "PZO-M109A",
@@ -3995,9 +4535,14 @@
       "narrative_clarity"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m109a_macro_news_burst_impact_synth_regime_detector.ts",
-    "md_source": "M109a_macro_news_bursts_ml_dl_companion_headline_impact_synth_regime_detector.md"
+    "md_source": "M109Aa_macro_news_burst_impact_synth_regime_detector.md",
+    "intelligence_signal": "volatility",
+    "model_category": "predictor",
+    "family": "market",
+    "priority": 2,
+    "training_phase": 2
   },
   {
     "task_id": "PZO-M110A",
@@ -4032,9 +4577,14 @@
       "stall_forensic_integrity"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m110a_ui_stall_predictor_auto_default_guard.ts",
-    "md_source": "M110a_no_pause_menu_law_ml_dl_companion_ui_stall_predictor_auto_default_guard.md"
+    "md_source": "M110Aa_ui_stall_predictor_auto_default_guard.md",
+    "intelligence_signal": "antiCheat",
+    "model_category": "predictor",
+    "family": "integrity",
+    "priority": 2,
+    "training_phase": 2
   },
   {
     "task_id": "PZO-M111A",
@@ -4068,9 +4618,14 @@
       "cap_compliance_rate"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m111a_portfolio_macro_synth_safety_verifier.ts",
-    "md_source": "M111a_portfolio_rules_macros_ml_dl_companion_macro_synth_safety_verifier.md"
+    "md_source": "M111Aa_portfolio_macro_synth_safety_verifier.md",
+    "intelligence_signal": "risk",
+    "model_category": "controller",
+    "family": "market",
+    "priority": 1,
+    "training_phase": 1
   },
   {
     "task_id": "PZO-M112A",
@@ -4105,9 +4660,14 @@
       "coaching_acceptance_rate"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m112a_optimal_split_estimator_precision_sell_coach.ts",
-    "md_source": "M112a_precision_split_ml_dl_companion_optimal_split_estimator.md"
+    "md_source": "M112Aa_optimal_split_estimator_precision_sell_coach.md",
+    "intelligence_signal": "alpha",
+    "model_category": "recommender",
+    "family": "market",
+    "priority": 2,
+    "training_phase": 2
   },
   {
     "task_id": "PZO-M113A",
@@ -4142,9 +4702,14 @@
       "protection_accuracy"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m113a_order_priority_stack_sacrifice_planner_graph_aware.ts",
-    "md_source": "M113a_order_priority_stack_ml_dl_companion_sacrifice_planner.md"
+    "md_source": "M113Aa_order_priority_stack_sacrifice_planner_graph_aware.md",
+    "intelligence_signal": "momentum",
+    "model_category": "rl_policy",
+    "family": "market",
+    "priority": 1,
+    "training_phase": 1
   },
   {
     "task_id": "PZO-M114A",
@@ -4178,9 +4743,14 @@
       "hesitation_classification_AUC"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m114a_timing_tax_reaction_time_coach_window_predictor.ts",
-    "md_source": "M114a_timing_tax_ml_dl_companion_reaction_time_coach_window_predictor.md"
+    "md_source": "M114Aa_timing_tax_reaction_time_coach_window_predictor.md",
+    "intelligence_signal": "momentum",
+    "model_category": "classifier",
+    "family": "balance",
+    "priority": 2,
+    "training_phase": 2
   },
   {
     "task_id": "PZO-M115A",
@@ -4215,9 +4785,14 @@
       "suggestion_acceptance_rate"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m115a_heat_swap_exposure_rebalancer_suggestion.ts",
-    "md_source": "M115a_heat_swap_ml_dl_companion_exposure_rebalancer_suggestion.md"
+    "md_source": "M115Aa_heat_swap_exposure_rebalancer_suggestion.md",
+    "intelligence_signal": "risk",
+    "model_category": "recommender",
+    "family": "market",
+    "priority": 2,
+    "training_phase": 2
   },
   {
     "task_id": "PZO-M116A",
@@ -4251,9 +4826,14 @@
       "synergy_bonus_accuracy"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m116a_table_role_fit_matcher_conflict_predictor.ts",
-    "md_source": "M116a_table_roles_ml_dl_companion_role_fit_matcher_conflict_predictor.md"
+    "md_source": "M116Aa_table_role_fit_matcher_conflict_predictor.md",
+    "intelligence_signal": "personalization",
+    "model_category": "recommender",
+    "family": "co_op",
+    "priority": 2,
+    "training_phase": 2
   },
   {
     "task_id": "PZO-M117A",
@@ -4287,9 +4867,14 @@
       "privacy_audit_pass"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m117a_table_feed_moment_ranker_auto_highlight_builder.ts",
-    "md_source": "M117a_table_feed_ml_dl_companion_moment_ranking_auto_highlight_builder.md"
+    "md_source": "M117Aa_table_feed_moment_ranker_auto_highlight_builder.md",
+    "intelligence_signal": "rewardFit",
+    "model_category": "recommender",
+    "family": "social",
+    "priority": 2,
+    "training_phase": 3
   },
   {
     "task_id": "PZO-M118A",
@@ -4323,9 +4908,14 @@
       "consent_compliance_rate"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m118a_clip_remix_chain_suggestor_safety_filter.ts",
-    "md_source": "M118a_clip_remix_chains_ml_dl_companion_remix_suggestor_safety_filter.md"
+    "md_source": "M118Aa_clip_remix_chain_suggestor_safety_filter.md",
+    "intelligence_signal": "rewardFit",
+    "model_category": "classifier",
+    "family": "social",
+    "priority": 3,
+    "training_phase": 3
   },
   {
     "task_id": "PZO-M119A",
@@ -4359,9 +4949,14 @@
       "share_rate"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m119a_rivalry_ledger_nemesis_arc_detector.ts",
-    "md_source": "M119a_rivalry_ledger_ml_dl_companion_nemesis_arc_detector.md"
+    "md_source": "M119Aa_rivalry_ledger_nemesis_arc_detector.md",
+    "intelligence_signal": "rewardFit",
+    "model_category": "classifier",
+    "family": "social",
+    "priority": 3,
+    "training_phase": 3
   },
   {
     "task_id": "PZO-M120A",
@@ -4395,9 +4990,14 @@
       "chaos_impact_accuracy"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m120a_consent_gate_chaos_mode_recommender.ts",
-    "md_source": "M120a_consent_gates_ml_dl_companion_chaos_mode_recommender.md"
+    "md_source": "M120Aa_consent_gate_chaos_mode_recommender.md",
+    "intelligence_signal": "rewardFit",
+    "model_category": "recommender",
+    "family": "social",
+    "priority": 2,
+    "training_phase": 2
   },
   {
     "task_id": "PZO-M121A",
@@ -4431,9 +5031,14 @@
       "false_flag_rate"
     ],
     "can_lock_off": false,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m121a_daily_gauntlet_leaderboard_integrity_monitor.ts",
-    "md_source": "M121a_daily_gauntlet_ml_dl_companion_leaderboard_integrity_anomaly_detection.md"
+    "md_source": "M121Aa_daily_gauntlet_leaderboard_integrity_monitor.md",
+    "intelligence_signal": "antiCheat",
+    "model_category": "anomaly_detector",
+    "family": "integrity",
+    "priority": 1,
+    "training_phase": 1
   },
   {
     "task_id": "PZO-M122A",
@@ -4467,9 +5072,14 @@
       "manipulation_recall"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m122a_weekly_draft_league_advisor_draft_order_fairness.ts",
-    "md_source": "M122a_weekly_draft_league_ml_dl_companion_draft_advisor_autopick_brain.md"
+    "md_source": "M122Aa_weekly_draft_league_advisor_draft_order_fairness.md",
+    "intelligence_signal": "recommendationPower",
+    "model_category": "recommender",
+    "family": "balance",
+    "priority": 2,
+    "training_phase": 2
   },
   {
     "task_id": "PZO-M123A",
@@ -4503,9 +5113,14 @@
       "legitimacy_AUC"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m123a_king_of_the_hill_streak_story_arc_narrator.ts",
-    "md_source": "M123a_king_of_the_hill_table_ml_dl_companion_streak_story_engine.md"
+    "md_source": "M123Aa_king_of_the_hill_streak_story_arc_narrator.md",
+    "intelligence_signal": "rewardFit",
+    "model_category": "generator",
+    "family": "social",
+    "priority": 3,
+    "training_phase": 3
   },
   {
     "task_id": "PZO-M124A",
@@ -4540,9 +5155,14 @@
       "coaching_acceptance_rate"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m124a_speedrun_micro_coach_split_timer_optimizer.ts",
-    "md_source": "M124a_speedrun_mode_ml_dl_companion_micro_coach_split_analysis.md"
+    "md_source": "M124Aa_speedrun_micro_coach_split_timer_optimizer.md",
+    "intelligence_signal": "personalization",
+    "model_category": "controller",
+    "family": "balance",
+    "priority": 2,
+    "training_phase": 2
   },
   {
     "task_id": "PZO-M125A",
@@ -4576,9 +5196,14 @@
       "false_flag_rate"
     ],
     "can_lock_off": false,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m125a_no_ghost_hardcore_integrity_verifier.ts",
-    "md_source": "M125a_no_ghost_hardcore_ml_dl_companion_hardcore_integrity_monitor.md"
+    "md_source": "M125Aa_no_ghost_hardcore_integrity_verifier.md",
+    "intelligence_signal": "antiCheat",
+    "model_category": "classifier",
+    "family": "integrity",
+    "priority": 1,
+    "training_phase": 1
   },
   {
     "task_id": "PZO-M126A",
@@ -4612,9 +5237,14 @@
       "p2w_guard_pass_rate"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m126a_cosmetic_loadout_style_recommender_auto_set_builder.ts",
-    "md_source": "M126a_cosmetic_loadouts_ml_dl_companion_style_recommender_auto_set_builder.md"
+    "md_source": "M126Aa_cosmetic_loadout_style_recommender_auto_set_builder.md",
+    "intelligence_signal": "recommendationPower",
+    "model_category": "recommender",
+    "family": "progression",
+    "priority": 3,
+    "training_phase": 3
   },
   {
     "task_id": "PZO-M127A",
@@ -4648,9 +5278,14 @@
       "economy_impact_AUC"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m127a_proof_bound_crafting_recipe_discoverer_legibility_score.ts",
-    "md_source": "M127a_proof_bound_crafting_ml_dl_companion_recipe_discovery_fragment_valuator.md"
+    "md_source": "M127Aa_proof_bound_crafting_recipe_discoverer_legibility_score.md",
+    "intelligence_signal": "recommendationPower",
+    "model_category": "recommender",
+    "family": "economy",
+    "priority": 3,
+    "training_phase": 3
   },
   {
     "task_id": "PZO-M128A",
@@ -4684,9 +5319,14 @@
       "burn_rate_calibration"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m128a_season_sink_health_monitor_burn_rate_optimizer.ts",
-    "md_source": "M128a_season_sinks_ml_dl_companion_sink_health_monitor_personalized_sink_paths.md"
+    "md_source": "M128Aa_season_sink_health_monitor_burn_rate_optimizer.md",
+    "intelligence_signal": "volatility",
+    "model_category": "controller",
+    "family": "economy",
+    "priority": 2,
+    "training_phase": 3
   },
   {
     "task_id": "PZO-M129A",
@@ -4720,9 +5360,14 @@
       "safety_filter_AUC"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m129a_creator_pack_caption_generator_moment_stinger_selector.ts",
-    "md_source": "M129a_creator_packs_ml_dl_companion_caption_generator_sound_match.md"
+    "md_source": "M129Aa_creator_pack_caption_generator_moment_stinger_selector.md",
+    "intelligence_signal": "rewardFit",
+    "model_category": "generator",
+    "family": "social",
+    "priority": 3,
+    "training_phase": 3
   },
   {
     "task_id": "PZO-M130A",
@@ -4756,9 +5401,14 @@
       "fairness_calibration"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m130a_table_vault_contribution_planner_fairness_auditor.ts",
-    "md_source": "M130a_table_vault_ml_dl_companion_contribution_planner_fair_withdrawal_advisor.md"
+    "md_source": "M130Aa_table_vault_contribution_planner_fairness_auditor.md",
+    "intelligence_signal": "antiCheat",
+    "model_category": "predictor",
+    "family": "co_op",
+    "priority": 2,
+    "training_phase": 3
   },
   {
     "task_id": "PZO-M131A",
@@ -4792,9 +5442,14 @@
       "identity_alignment_accuracy"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m131a_faction_sponsor_match_power_guard.ts",
-    "md_source": "M131a_faction_sponsorship_ml_dl_companion_sponsor_match_quest_tailoring.md"
+    "md_source": "M131Aa_faction_sponsor_match_power_guard.md",
+    "intelligence_signal": "personalization",
+    "model_category": "recommender",
+    "family": "social",
+    "priority": 3,
+    "training_phase": 3
   },
   {
     "task_id": "PZO-M132A",
@@ -4828,9 +5483,14 @@
       "causal_chain_validity"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m132a_case_files_forensic_summarizer_root_cause_ranker.ts",
-    "md_source": "M132a_case_files_ml_dl_companion_forensic_summarizer_root_cause_ranker.md"
+    "md_source": "M132Aa_case_files_forensic_summarizer_root_cause_ranker.md",
+    "intelligence_signal": "personalization",
+    "model_category": "predictor",
+    "family": "forensics",
+    "priority": 2,
+    "training_phase": 3
   },
   {
     "task_id": "PZO-M133A",
@@ -4864,9 +5524,14 @@
       "contradiction_recall"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m133a_seasonal_story_beat_planner_narrative_coherence_guard.ts",
-    "md_source": "M133a_seasonal_story_beats_ml_dl_companion_beat_planner_friction_mixer.md"
+    "md_source": "M133Aa_seasonal_story_beat_planner_narrative_coherence_guard.md",
+    "intelligence_signal": "rewardFit",
+    "model_category": "generator",
+    "family": "social",
+    "priority": 3,
+    "training_phase": 3
   },
   {
     "task_id": "PZO-M134A",
@@ -4900,9 +5565,14 @@
       "drift_detection_AUC"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m134a_npc_counterparty_behavioral_emulator_deterministic_pers.ts",
-    "md_source": "M134a_npc_counterparties_ml_dl_companion_behavioral_emulator_negotiation_coach.md"
+    "md_source": "M134Aa_npc_counterparty_behavioral_emulator_deterministic_pers.md",
+    "intelligence_signal": "personalization",
+    "model_category": "controller",
+    "family": "market",
+    "priority": 2,
+    "training_phase": 2
   },
   {
     "task_id": "PZO-M135A",
@@ -4936,9 +5606,14 @@
       "reversibility_rate"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m135a_reputation_label_model_drift_detector.ts",
-    "md_source": "M135a_reputation_labels_ml_dl_companion_reputation_model_anti_gaming_guard.md"
+    "md_source": "M135Aa_reputation_label_model_drift_detector.md",
+    "intelligence_signal": "personalization",
+    "model_category": "classifier",
+    "family": "forensics",
+    "priority": 2,
+    "training_phase": 3
   },
   {
     "task_id": "PZO-M136A",
@@ -4971,10 +5646,15 @@
       "impact_estimate_calibration",
       "deployment_risk_recall"
     ],
-    "can_lock_off": true,
-    "status": "todo",
+    "can_lock_off": false,
+    "status": "simulated",
     "module_path": "src/ml/m136a_ruleset_signature_verifier_change_impact_estimator.ts",
-    "md_source": "M136a_ruleset_signature_banner_ml_dl_companion_signature_diff_explainer.md"
+    "md_source": "M136Aa_ruleset_signature_verifier_change_impact_estimator.md",
+    "intelligence_signal": "antiCheat",
+    "model_category": "classifier",
+    "family": "integrity",
+    "priority": 1,
+    "training_phase": 1
   },
   {
     "task_id": "PZO-M137A",
@@ -5007,10 +5687,15 @@
       "quarantine_success_rate",
       "determinism_guard_pass_rate"
     ],
-    "can_lock_off": true,
-    "status": "todo",
+    "can_lock_off": false,
+    "status": "simulated",
     "module_path": "src/ml/m137a_mid_run_hotfix_triage_quarantine_router.ts",
-    "md_source": "M137a_mid_run_hotfix_lock_ml_dl_companion_hotfix_triage_quarantine_router.md"
+    "md_source": "M137Aa_mid_run_hotfix_triage_quarantine_router.md",
+    "intelligence_signal": "antiCheat",
+    "model_category": "controller",
+    "family": "integrity",
+    "priority": 1,
+    "training_phase": 1
   },
   {
     "task_id": "PZO-M138A",
@@ -5043,10 +5728,15 @@
       "degradation_plan_quality",
       "integrity_preservation_rate"
     ],
-    "can_lock_off": true,
-    "status": "todo",
+    "can_lock_off": false,
+    "status": "simulated",
     "module_path": "src/ml/m138a_server_load_predictor_graceful_degradation_planner.ts",
-    "md_source": "M138a_degraded_mode_ml_dl_companion_load_predictor_graceful_shedding_planner.md"
+    "md_source": "M138Aa_server_load_predictor_graceful_degradation_planner.md",
+    "intelligence_signal": "antiCheat",
+    "model_category": "predictor",
+    "family": "integrity",
+    "priority": 1,
+    "training_phase": 1
   },
   {
     "task_id": "PZO-M139A",
@@ -5079,10 +5769,15 @@
       "sync_priority_calibration",
       "certificate_integrity_pass"
     ],
-    "can_lock_off": true,
-    "status": "todo",
+    "can_lock_off": false,
+    "status": "simulated",
     "module_path": "src/ml/m139a_offline_queue_on_device_verifier_sync_priority_ranker.ts",
-    "md_source": "M139a_offline_queue_runs_ml_dl_companion_on_device_verifier_precheck.md"
+    "md_source": "M139Aa_offline_queue_on_device_verifier_sync_priority_ranker.md",
+    "intelligence_signal": "antiCheat",
+    "model_category": "classifier",
+    "family": "integrity",
+    "priority": 1,
+    "training_phase": 1
   },
   {
     "task_id": "PZO-M140A",
@@ -5115,9 +5810,14 @@
       "evidentiary_value_preservation"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m140a_player_evidence_export_redaction_assistant_packet_summa.ts",
-    "md_source": "M140a_player_evidence_export_ml_dl_companion_redaction_assistant_packet_summarizer.md"
+    "md_source": "M140Aa_player_evidence_export_redaction_assistant_packet_summa.md",
+    "intelligence_signal": "antiCheat",
+    "model_category": "generator",
+    "family": "forensics",
+    "priority": 2,
+    "training_phase": 3
   },
   {
     "task_id": "PZO-M141A",
@@ -5151,9 +5851,14 @@
       "fairness_compliance_rate"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m141a_async_table_proxy_vote_predictor_fairness_guard.ts",
-    "md_source": "M141a_asynchronous_table_ml_dl_companion_proxy_vote_predictor_fairness_guard.md"
+    "md_source": "M141Aa_async_table_proxy_vote_predictor_fairness_guard.md",
+    "intelligence_signal": "antiCheat",
+    "model_category": "predictor",
+    "family": "contract",
+    "priority": 2,
+    "training_phase": 2
   },
   {
     "task_id": "PZO-M142A",
@@ -5187,9 +5892,14 @@
       "exploit_detection_AUC"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m142a_house_rules_lobby_configuration_advisor_safety_validato.ts",
-    "md_source": "M142a_house_rules_ml_dl_companion_lobby_configuration_advisor.md"
+    "md_source": "M142Aa_house_rules_lobby_configuration_advisor_safety_validato.md",
+    "intelligence_signal": "antiCheat",
+    "model_category": "classifier",
+    "family": "integrity",
+    "priority": 2,
+    "training_phase": 2
   },
   {
     "task_id": "PZO-M143A",
@@ -5223,9 +5933,14 @@
       "false_flag_rate"
     ],
     "can_lock_off": false,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m143a_table_penalties_brigading_detector_toxicity_classifier.ts",
-    "md_source": "M143a_table_penalties_ml_dl_companion_brigading_detector_support.md"
+    "md_source": "M143Aa_table_penalties_brigading_detector_toxicity_classifier.md",
+    "intelligence_signal": "antiCheat",
+    "model_category": "anomaly_detector",
+    "family": "integrity",
+    "priority": 1,
+    "training_phase": 1
   },
   {
     "task_id": "PZO-M144A",
@@ -5259,9 +5974,14 @@
       "collusion_AUC"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m144a_spectator_theater_delay_optimizer_prediction_bet_calibr.ts",
-    "md_source": "M144a_spectator_theater_ml_dl_companion_delay_optimizer_spoiler_shield.md"
+    "md_source": "M144Aa_spectator_theater_delay_optimizer_prediction_bet_calibr.md",
+    "intelligence_signal": "rewardFit",
+    "model_category": "controller",
+    "family": "social",
+    "priority": 2,
+    "training_phase": 2
   },
   {
     "task_id": "PZO-M145A",
@@ -5295,9 +6015,14 @@
       "fairness_rating"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m145a_tournament_bracket_seeding_fairness_model.ts",
-    "md_source": "M145a_tournament_brackets_ml_dl_companion_seeding_fairness_broadcast_pack.md"
+    "md_source": "M145Aa_tournament_bracket_seeding_fairness_model.md",
+    "intelligence_signal": "antiCheat",
+    "model_category": "predictor",
+    "family": "balance",
+    "priority": 2,
+    "training_phase": 3
   },
   {
     "task_id": "PZO-M146A",
@@ -5331,9 +6056,14 @@
       "completeness_recall"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m146a_audit_event_doc_burden_estimator_auto_fill_assistant.ts",
-    "md_source": "M146a_audit_event_ml_dl_companion_doc_burden_estimator_checklist_autogen.md"
+    "md_source": "M146Aa_audit_event_doc_burden_estimator_auto_fill_assistant.md",
+    "intelligence_signal": "personalization",
+    "model_category": "generator",
+    "family": "forensics",
+    "priority": 3,
+    "training_phase": 3
   },
   {
     "task_id": "PZO-M147A",
@@ -5368,9 +6098,14 @@
       "trigger_prediction_AUC"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m147a_litigation_risk_early_warning_mitigation_planner.ts",
-    "md_source": "M147a_litigation_risk_ml_dl_companion_early_warning_mitigation_advisor.md"
+    "md_source": "M147Aa_litigation_risk_early_warning_mitigation_planner.md",
+    "intelligence_signal": "risk",
+    "model_category": "predictor",
+    "family": "contract",
+    "priority": 2,
+    "training_phase": 2
   },
   {
     "task_id": "PZO-M148A",
@@ -5404,9 +6139,14 @@
       "freeze_prediction_AUC"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m148a_counterparty_freeze_forecast_premium_estimator.ts",
-    "md_source": "M148a_counterparty_freeze_ml_dl_companion_freeze_forecast_premium_estimator.md"
+    "md_source": "M148Aa_counterparty_freeze_forecast_premium_estimator.md",
+    "intelligence_signal": "risk",
+    "model_category": "predictor",
+    "family": "contract",
+    "priority": 2,
+    "training_phase": 2
   },
   {
     "task_id": "PZO-M149A",
@@ -5441,9 +6181,14 @@
       "cascade_prediction_AUC"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m149a_regulatory_window_compliance_planner_cost_minimizer.ts",
-    "md_source": "M149a_regulatory_window_ml_dl_companion_compliance_planner_penalty_forecaster.md"
+    "md_source": "M149Aa_regulatory_window_compliance_planner_cost_minimizer.md",
+    "intelligence_signal": "risk",
+    "model_category": "predictor",
+    "family": "contract",
+    "priority": 2,
+    "training_phase": 2
   },
   {
     "task_id": "PZO-M150A",
@@ -5476,8 +6221,13 @@
       "ceremony_presentation_rating"
     ],
     "can_lock_off": true,
-    "status": "todo",
+    "status": "simulated",
     "module_path": "src/ml/m150a_finality_ceremony_verifier_assistant_final_card_compose.ts",
-    "md_source": "M150a_finality_ceremony_ml_dl_companion_verifier_assistant_final_card_composer.md"
+    "md_source": "M150Aa_finality_ceremony_verifier_assistant_final_card_compose.md",
+    "intelligence_signal": "rewardFit",
+    "model_category": "generator",
+    "family": "integrity",
+    "priority": 2,
+    "training_phase": 3
   }
 ]

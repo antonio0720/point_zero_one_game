@@ -609,9 +609,11 @@ def _impl_api(r: dict) -> str:
         elif ts.endswith("[]"): overrides[oc] = "[]"
         elif "Record" in ts: overrides[oc] = "{ status: 'OK', timestamp: Date.now() }"
     ret = _build_return(r, overrides)
-    return f"""  {"\n  ".join(inputs_code)}
+    inputs_joined = "\n  ".join(inputs_code)
+    emit_line = _emit(mid, e0, "0", "requestId", [_camel_field(f) for f in r["inputs"][:2] if _infer_ts_type(f) in ("string","number")])
+    return f"""  {inputs_joined}
   const requestId = computeHash(JSON.stringify(input));
-  {_emit(mid, e0, "0", "requestId", [_camel_field(f) for f in r["inputs"][:2] if _infer_ts_type(f) in ("string","number")])}
+  {emit_line}
   {ret}"""
 
 def _impl_season(r: dict) -> str:
@@ -628,8 +630,10 @@ def _impl_season(r: dict) -> str:
         elif ts.endswith("[]"): overrides[oc] = "[]"
         elif "Record" in ts: overrides[oc] = "{ seasonId: '', tick: 0 }"
     ret = _build_return(r, overrides)
-    return f"""  {"\n  ".join(inputs_code)}
-  {_emit(mid, e0, "0", "computeHash(JSON.stringify(input))", [_camel_field(f) for f in r["inputs"][:2] if _infer_ts_type(f) in ("string","number")])}
+    inputs_joined = "\n  ".join(inputs_code)
+    emit_line = _emit(mid, e0, "0", "computeHash(JSON.stringify(input))", [_camel_field(f) for f in r["inputs"][:2] if _infer_ts_type(f) in ("string","number")])
+    return f"""  {inputs_joined}
+  {emit_line}
   {ret}"""
 
 def _impl_service(r: dict) -> str:
@@ -654,9 +658,11 @@ def _impl_service(r: dict) -> str:
         elif ts.endswith("[]"): overrides[oc] = "[]"
         elif "Record" in ts: overrides[oc] = "{ serviceId: '', status: 'OK', timestamp: Date.now() }"
     ret = _build_return(r, overrides)
-    return f"""  {"\n  ".join(inputs_code)}
+    inputs_joined = "\n  ".join(inputs_code)
+    emit_line = _emit(mid, e0, "0", "serviceHash", [_camel_field(f) for f in r["inputs"][:2] if _infer_ts_type(f) in ("string","number")])
+    return f"""  {inputs_joined}
   const serviceHash = computeHash(JSON.stringify(input));
-  {_emit(mid, e0, "0", "serviceHash", [_camel_field(f) for f in r["inputs"][:2] if _infer_ts_type(f) in ("string","number")])}
+  {emit_line}
   {ret}"""
 
 def _impl_ui(r: dict) -> str:
@@ -680,8 +686,10 @@ def _impl_ui(r: dict) -> str:
     ret = _build_return(r, overrides)
     tick_inputs = [_camel_field(f) for f in r["inputs"] if f == "state.tick"]
     tick_expr = f"input.{tick_inputs[0]} as number ?? 0" if tick_inputs else "0"
-    return f"""  {"\n  ".join(inputs_code)}
-  {_emit(mid, e0, tick_expr, "''", [_camel_field(f) for f in r["inputs"][:2] if _infer_ts_type(f) in ("string","number","boolean")])}
+    inputs_joined = "\n  ".join(inputs_code)
+    emit_line = _emit(mid, e0, tick_expr, "''", [_camel_field(f) for f in r["inputs"][:2] if _infer_ts_type(f) in ("string","number","boolean")])
+    return f"""  {inputs_joined}
+  {emit_line}
   {ret}"""
 
 def _pick_pattern(r: dict):

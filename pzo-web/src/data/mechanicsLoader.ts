@@ -1,5 +1,5 @@
 // pzo-web/src/data/mechanicsLoader.ts
-// Auto-generated from mechanics_core.ndjson
+// Auto-generated from mechanics_core.json
 // DO NOT EDIT MANUALLY — regenerate with: python3 scripts/build_mechanics.py
 
 export type MechanicLayer =
@@ -16,7 +16,7 @@ export interface MechanicRecord {
   task_id: string;          // PZO-M01
   mechanic_id: string;      // M01
   title: string;
-  purpose: string;
+  purpose: string;          // human-readable design intent
   family: string;
   kind: 'core' | 'ml';
   layer: MechanicLayer;
@@ -27,11 +27,11 @@ export interface MechanicRecord {
   inputs: string[];
   outputs: string[];
   telemetry_events: string[];
-  module_path: string;
+  module_path: string;      // pzo_engine/src/mechanics/{stem}.ts
   exec_hook: string;
   batch: 1 | 2 | 3;
   deps: string[];           // mechanic_ids this depends on
-  md_source: string;        // source markdown filename
+  md_source: string;        // source markdown filename e.g. m01_run_seed_deterministic_replay.md
 }
 
 // Loaded at build time — Vite resolves JSON imports natively
