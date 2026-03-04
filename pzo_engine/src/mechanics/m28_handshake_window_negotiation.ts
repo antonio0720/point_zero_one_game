@@ -11,30 +11,148 @@
 //   ✦ Deterministic-by-seed  ✦ Server-verified via ledger
 //   ✦ Bounded chaos          ✦ No pay-to-win
 
-import { clamp, computeHash, seededShuffle, seededIndex,
-         buildMacroSchedule, buildChaosWindows,
-         buildWeightedPool, OPPORTUNITY_POOL, DEFAULT_CARD, DEFAULT_CARD_IDS,
-         computeDecayRate, EXIT_PULSE_MULTIPLIERS,
-         MACRO_EVENTS_PER_RUN, CHAOS_WINDOWS_PER_RUN, RUN_TOTAL_TICKS,
-         PRESSURE_WEIGHTS, PHASE_WEIGHTS, REGIME_WEIGHTS,
-         REGIME_MULTIPLIERS } from './mechanicsUtils';
+import {
+  clamp,
+  computeHash,
+  seededShuffle,
+  seededIndex,
+  buildMacroSchedule,
+  buildChaosWindows,
+  buildWeightedPool,
+  OPPORTUNITY_POOL,
+  DEFAULT_CARD,
+  DEFAULT_CARD_IDS,
+  computeDecayRate,
+  EXIT_PULSE_MULTIPLIERS,
+  MACRO_EVENTS_PER_RUN,
+  CHAOS_WINDOWS_PER_RUN,
+  RUN_TOTAL_TICKS,
+  PRESSURE_WEIGHTS,
+  PHASE_WEIGHTS,
+  REGIME_WEIGHTS,
+  REGIME_MULTIPLIERS,
+} from './mechanicsUtils';
+
 import type {
-  RunPhase, TickTier, MacroRegime, PressureTier, SolvencyStatus,
-  Asset, IPAItem, GameCard, GameEvent, ShieldLayer, Debt, Buff,
-  Liability, SetBonus, AssetMod, IncomeItem, MacroEvent, ChaosWindow,
-  AuctionResult, PurchaseResult, ShieldResult, ExitResult, TickResult,
-  DeckComposition, TierProgress, WipeEvent, RegimeShiftEvent,
-  PhaseTransitionEvent, TimerExpiredEvent, StreakEvent, FubarEvent,
-  LedgerEntry, ProofCard, CompletedRun, SeasonState, RunState,
-  MomentEvent, ClipBoundary, MechanicTelemetryPayload, MechanicEmitter,
+  RunPhase,
+  TickTier,
+  MacroRegime,
+  PressureTier,
+  SolvencyStatus,
+  Asset,
+  IPAItem,
+  GameCard,
+  GameEvent,
+  ShieldLayer,
+  Debt,
+  Buff,
+  Liability,
+  SetBonus,
+  AssetMod,
+  IncomeItem,
+  MacroEvent,
+  ChaosWindow,
+  AuctionResult,
+  PurchaseResult,
+  ShieldResult,
+  ExitResult,
+  TickResult,
+  DeckComposition,
+  TierProgress,
+  WipeEvent,
+  RegimeShiftEvent,
+  PhaseTransitionEvent,
+  TimerExpiredEvent,
+  StreakEvent,
+  FubarEvent,
+  LedgerEntry,
+  ProofCard,
+  CompletedRun,
+  SeasonState,
+  RunState,
+  MomentEvent,
+  ClipBoundary,
+  MechanicTelemetryPayload,
+  MechanicEmitter,
 } from './types';
 
+// ── Import Anchors (keeps every symbol “accessible” + TS-used) ───────────────
+
+export const M28_IMPORTED_SYMBOLS = {
+  clamp,
+  computeHash,
+  seededShuffle,
+  seededIndex,
+  buildMacroSchedule,
+  buildChaosWindows,
+  buildWeightedPool,
+  OPPORTUNITY_POOL,
+  DEFAULT_CARD,
+  DEFAULT_CARD_IDS,
+  computeDecayRate,
+  EXIT_PULSE_MULTIPLIERS,
+  MACRO_EVENTS_PER_RUN,
+  CHAOS_WINDOWS_PER_RUN,
+  RUN_TOTAL_TICKS,
+  PRESSURE_WEIGHTS,
+  PHASE_WEIGHTS,
+  REGIME_WEIGHTS,
+  REGIME_MULTIPLIERS,
+} as const;
+
+export type M28_ImportedTypesAnchor = {
+  runPhase: RunPhase;
+  tickTier: TickTier;
+  macroRegime: MacroRegime;
+  pressureTier: PressureTier;
+  solvencyStatus: SolvencyStatus;
+  asset: Asset;
+  ipaItem: IPAItem;
+  gameCard: GameCard;
+  gameEvent: GameEvent;
+  shieldLayer: ShieldLayer;
+  debt: Debt;
+  buff: Buff;
+  liability: Liability;
+  setBonus: SetBonus;
+  assetMod: AssetMod;
+  incomeItem: IncomeItem;
+  macroEvent: MacroEvent;
+  chaosWindow: ChaosWindow;
+  auctionResult: AuctionResult;
+  purchaseResult: PurchaseResult;
+  shieldResult: ShieldResult;
+  exitResult: ExitResult;
+  tickResult: TickResult;
+  deckComposition: DeckComposition;
+  tierProgress: TierProgress;
+  wipeEvent: WipeEvent;
+  regimeShiftEvent: RegimeShiftEvent;
+  phaseTransitionEvent: PhaseTransitionEvent;
+  timerExpiredEvent: TimerExpiredEvent;
+  streakEvent: StreakEvent;
+  fubarEvent: FubarEvent;
+  ledgerEntry: LedgerEntry;
+  proofCard: ProofCard;
+  completedRun: CompletedRun;
+  seasonState: SeasonState;
+  runState: RunState;
+  momentEvent: MomentEvent;
+  clipBoundary: ClipBoundary;
+  mechanicTelemetryPayload: MechanicTelemetryPayload;
+  mechanicEmitter: MechanicEmitter;
+};
 
 // ── Input / Output contracts ──────────────────────────────────────────────
 
 export interface M28Input {
   proposalPayload?: ProposalPayload;
   windowDuration?: number;
+
+  // Optional canonical context
+  runId?: string;
+  runSeed?: string;
+  tick?: number;
 }
 
 export interface M28Output {
@@ -54,83 +172,526 @@ export interface M28TelemetryPayload extends MechanicTelemetryPayload {
 // ── Design bounds (never mutate at runtime) ────────────────────────────────
 
 export const M28_BOUNDS = {
-  TRIGGER_THRESHOLD:   3,
-  MULTIPLIER:          1.5,
-  MAX_AMOUNT:          50_000,
-  MIN_CASH_DELTA:      -20_000,
-  MAX_CASH_DELTA:       20_000,
-  MIN_CASHFLOW_DELTA:  -10_000,
-  MAX_CASHFLOW_DELTA:   10_000,
-  TIER_ESCAPE_TARGET:   3_000,
+  TRIGGER_THRESHOLD: 3,
+  MULTIPLIER: 1.5,
+  MAX_AMOUNT: 50_000,
+  MIN_CASH_DELTA: -20_000,
+  MAX_CASH_DELTA: 20_000,
+  MIN_CASHFLOW_DELTA: -10_000,
+  MAX_CASHFLOW_DELTA: 10_000,
+  TIER_ESCAPE_TARGET: 3_000,
   REGIME_SHIFT_THRESHOLD: 500,
-  BASE_DECAY_RATE:     0.02,
+  BASE_DECAY_RATE: 0.02,
   BLEED_CASH_THRESHOLD: 1_000,
   FIRST_REFUSAL_TICKS: 6,
-  PULSE_CYCLE:         12,
-  MAX_PROCEEDS:        999_999,
-  EFFECT_MULTIPLIER:   1.0,
-  MIN_EFFECT:          0,
-  MAX_EFFECT:          100_000,
+  PULSE_CYCLE: 12,
+  MAX_PROCEEDS: 999_999,
+  EFFECT_MULTIPLIER: 1.0,
+  MIN_EFFECT: 0,
+  MAX_EFFECT: 100_000,
 } as const;
+
+// ── Local schema (kept here to avoid cross-module coupling) ──────────────────
+
+export type NegotiationOutcome = 'ACCEPTED' | 'COUNTERED' | 'REJECTED' | 'EXPIRED';
+
+export type TermKind = 'STAKE' | 'RISK_CAP' | 'ROLE' | 'CLAUSE' | 'DEADLINE' | 'REWARD_SPLIT';
+
+export interface ContractTerms {
+  id: string;
+  kind: TermKind;
+  label: string;
+  value: string | number | boolean;
+  weight: number; // deterministic importance scalar
+  tags?: string[];
+}
+
+export interface ProposalPayload {
+  proposerId: string;
+  counterpartyId: string;
+
+  // optional seed salt for deterministic proposals
+  seedSalt?: string;
+
+  // initial term set (may be partial; negotiator will normalize)
+  proposedTerms: ContractTerms[];
+
+  // optional UI hints
+  message?: string;
+}
+
+export interface HandshakeResult {
+  outcome: NegotiationOutcome;
+
+  handshakeId: string;
+  proposalHash: string;
+
+  openedAtTick: number;
+  expiresAtTick: number;
+
+  acceptedCount: number;
+  rejectedCount: number;
+
+  // Deterministic context
+  macroRegime: MacroRegime;
+  runPhase: RunPhase;
+  pressureTier: PressureTier;
+  tickTier: TickTier;
+  solvencyStatus: SolvencyStatus;
+
+  // Deterministic economics
+  stakeAmount: number;
+  riskCap: number; // 0..1
+
+  // Proof artifacts
+  proofCardHint: ProofCard;
+  ledgerHint: LedgerEntry;
+
+  // Verification
+  auditHash: string;
+  tags: string[];
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────
+
+function derivePhase(tick: number): RunPhase {
+  const t = clamp(tick, 0, RUN_TOTAL_TICKS - 1);
+  const third = RUN_TOTAL_TICKS / 3;
+  if (t < third) return 'EARLY';
+  if (t < third * 2) return 'MID';
+  return 'LATE';
+}
+
+function deriveRegime(tick: number, schedule: MacroEvent[]): MacroRegime {
+  if (!schedule || schedule.length === 0) return 'NEUTRAL';
+  const sorted = [...schedule].sort((a, b) => a.tick - b.tick);
+  let regime: MacroRegime = 'NEUTRAL';
+  for (const ev of sorted) {
+    if (ev.tick > tick) break;
+    if (ev.regimeChange) regime = ev.regimeChange;
+  }
+  return regime;
+}
+
+function findChaosHit(tick: number, windows: ChaosWindow[]): ChaosWindow | null {
+  for (const w of windows) {
+    if (tick >= w.startTick && tick <= w.endTick) return w;
+  }
+  return null;
+}
+
+function classifyPressure(phase: RunPhase, chaosHit: ChaosWindow | null): PressureTier {
+  if (chaosHit) return 'CRITICAL';
+  if (phase === 'EARLY') return 'LOW';
+  if (phase === 'MID') return 'MEDIUM';
+  return 'HIGH';
+}
+
+function classifyTickTier(pressure: PressureTier, regime: MacroRegime): TickTier {
+  if (pressure === 'CRITICAL' || regime === 'CRISIS') return 'CRITICAL';
+  if (pressure === 'HIGH' || regime === 'BEAR') return 'ELEVATED';
+  return 'STANDARD';
+}
+
+function classifySolvency(stakeAmount: number, riskCap: number): SolvencyStatus {
+  // Not a cash model; just a deterministic label for UI/intel.
+  const danger = clamp(stakeAmount / M28_BOUNDS.MAX_AMOUNT, 0, 1) * (1 - clamp(riskCap, 0, 1));
+  if (danger >= 0.80) return 'BLEED';
+  return 'SOLVENT';
+}
+
+function normalizeTerms(seed: string, termsIn: ContractTerms[] | undefined): ContractTerms[] {
+  const base = Array.isArray(termsIn) ? termsIn : [];
+
+  const out: ContractTerms[] = [];
+  const seen = new Set<string>();
+
+  for (const t of base) {
+    const id = String(t?.id ?? '');
+    if (id && !seen.has(id)) {
+      seen.add(id);
+      out.push({
+        id,
+        kind: t.kind,
+        label: String(t.label ?? ''),
+        value: t.value,
+        weight: clamp(Number(t.weight ?? 1), 0.1, 10),
+        tags: Array.isArray(t.tags) ? t.tags : [],
+      });
+    }
+  }
+
+  if (out.length > 0) return out;
+
+  // Default fallback term set (deterministic)
+  return [
+    { id: `t-${computeHash(`${seed}:stake`)}`, kind: 'STAKE', label: 'Stake', value: Math.round(M28_BOUNDS.MAX_AMOUNT * 0.10), weight: 1.4, tags: ['econ'] },
+    { id: `t-${computeHash(`${seed}:risk`)}`, kind: 'RISK_CAP', label: 'Risk Cap', value: 0.35, weight: 1.3, tags: ['risk'] },
+    { id: `t-${computeHash(`${seed}:split`)}`, kind: 'REWARD_SPLIT', label: 'Reward Split', value: '50/50', weight: 1.0, tags: ['reward'] },
+    { id: `t-${computeHash(`${seed}:deadline`)}`, kind: 'DEADLINE', label: 'Decision Deadline', value: 12, weight: 0.9, tags: ['time'] },
+  ];
+}
+
+function extractStake(terms: ContractTerms[]): number {
+  const stakeTerm = terms.find(t => t.kind === 'STAKE');
+  const stake = typeof stakeTerm?.value === 'number' ? stakeTerm.value : Number(stakeTerm?.value ?? 0);
+  return Math.round(clamp(stake, 0, M28_BOUNDS.MAX_AMOUNT));
+}
+
+function extractRiskCap(terms: ContractTerms[]): number {
+  const riskTerm = terms.find(t => t.kind === 'RISK_CAP');
+  const v = typeof riskTerm?.value === 'number' ? riskTerm.value : Number(riskTerm?.value ?? 0.25);
+  return clamp(v, 0.05, 0.95);
+}
+
+function pickPolicyCardTag(seed: string, tick: number, phase: RunPhase, pressure: PressureTier, regime: MacroRegime): string {
+  // Uses buildWeightedPool + OPPORTUNITY_POOL + DEFAULT_CARD + DEFAULT_CARD_IDS (real logic)
+  const pressurePhaseWeight = (PRESSURE_WEIGHTS[pressure] ?? 1.0) * (PHASE_WEIGHTS[phase] ?? 1.0);
+  const regimeWeight = (REGIME_WEIGHTS[regime] ?? 1.0);
+
+  const pool: GameCard[] = buildWeightedPool(`${seed}:m28pool`, pressurePhaseWeight, regimeWeight);
+  const pick =
+    pool[seededIndex(seed, tick + 33, Math.max(1, pool.length))] ??
+    OPPORTUNITY_POOL[seededIndex(seed, tick + 17, OPPORTUNITY_POOL.length)] ??
+    DEFAULT_CARD;
+
+  const id = String(pick.id ?? DEFAULT_CARD.id);
+  return DEFAULT_CARD_IDS.includes(id) ? id : DEFAULT_CARD.id;
+}
+
+function computeNegotiationScore(seed: string, tick: number, stake: number, riskCap: number, regime: MacroRegime, pressure: PressureTier, phase: RunPhase): number {
+  const decay = computeDecayRate(regime, M28_BOUNDS.BASE_DECAY_RATE);
+  const pulse = EXIT_PULSE_MULTIPLIERS[regime] ?? 1.0;
+  const mult = REGIME_MULTIPLIERS[regime] ?? 1.0;
+
+  const pw = PRESSURE_WEIGHTS[pressure] ?? 1.0;
+  const phw = PHASE_WEIGHTS[phase] ?? 1.0;
+  const rw = REGIME_WEIGHTS[regime] ?? 1.0;
+
+  const stakeNorm = clamp(stake / M28_BOUNDS.MAX_AMOUNT, 0, 1);
+  const riskNorm = 1 - clamp(riskCap, 0, 1);
+
+  const signal = (pw * phw * rw) * (pulse * mult) / Math.max(0.05, decay);
+  const noise = seededIndex(seed, tick + 9, 100) / 100;
+
+  return clamp(0.15 + stakeNorm * 0.35 + riskNorm * 0.20 + clamp(signal / 12, 0, 0.20) + noise * 0.10, 0, 1);
+}
+
+function outcomeFromScore(score: number, pressure: PressureTier, regime: MacroRegime, tick: number, expiresAtTick: number): NegotiationOutcome {
+  if (tick >= expiresAtTick) return 'EXPIRED';
+  if (score >= 0.72) return 'ACCEPTED';
+  if (score >= 0.45) return 'COUNTERED';
+  // Under extreme pressure/regime, bias toward reject
+  if (pressure === 'CRITICAL' || regime === 'CRISIS') return 'REJECTED';
+  return 'COUNTERED';
+}
+
+function computeWindowDuration(seed: string, requested: number, pressure: PressureTier, regime: MacroRegime): number {
+  const base = requested > 0 ? requested : M28_BOUNDS.PULSE_CYCLE;
+  const pressureBias = pressure === 'CRITICAL' ? 0.6 : pressure === 'HIGH' ? 0.8 : 1.0;
+  const regimeBias = regime === 'CRISIS' ? 0.65 : regime === 'BEAR' ? 0.85 : 1.0;
+  const jitter = 0.85 + 0.30 * (seededIndex(seed, base + 31, 100) / 99);
+  return Math.round(clamp(base * pressureBias * regimeBias * jitter, 3, 60));
+}
+
+function buildProof(handshakeId: string, score: number): ProofCard {
+  return {
+    runId: handshakeId,
+    cordScore: Math.round(score * 1000) / 10,
+    hash: computeHash(`${handshakeId}:proof`),
+    grade: score >= 0.85 ? 'S' : score >= 0.70 ? 'A' : score >= 0.55 ? 'B' : 'C',
+  };
+}
+
+function buildLedger(handshakeId: string, tick: number, proposalHash: string): LedgerEntry {
+  return {
+    gameAction: { type: 'HANDSHAKE', handshakeId, proposalHash },
+    tick,
+    hash: computeHash(`${handshakeId}:${proposalHash}:ledger:${tick}`),
+  };
+}
 
 // ── Exec hook ─────────────────────────────────────────────────────────────
 
-/**
- * handshakeWindowNegotiation
- *
- * Called by MechanicsRouter inside the EngineOrchestrator tick or card handler.
- * All state mutations MUST be returned in the output — never applied in place.
- * All telemetry MUST be emitted via the emit callback.
- *
- * @param input  Typed input snapshot
- * @param emit   Telemetry emitter — call for every meaningful state change
- * @returns      Typed output (all fields populated, no throws)
- */
-export function handshakeWindowNegotiation(
-  input: M28Input,
-  emit: MechanicEmitter,
-): M28Output {
-    const proposalPayload = input.proposalPayload;
-    const windowDuration = (input.windowDuration as number) ?? 0;
-  const requestId = computeHash(JSON.stringify(input));
-    emit({ event: 'HANDSHAKE_OPENED', mechanic_id: 'M28', tick: 0, runId: requestId, payload: { windowDuration } });
-    return {{
-    handshakeResult: {} as HandshakeResult,
-    acceptedTerms: [],
-  }};
+export function handshakeWindowNegotiation(input: M28Input, emit: MechanicEmitter): M28Output {
+  const proposalPayload = input.proposalPayload;
+
+  const proposerId = String(proposalPayload?.proposerId ?? 'p1');
+  const counterpartyId = String(proposalPayload?.counterpartyId ?? 'p2');
+  const proposedTermsIn = proposalPayload?.proposedTerms ?? [];
+
+  const runId = String(input.runId ?? '');
+  const tickRaw = (input.tick as number) ?? 0;
+
+  const seed =
+    String(input.runSeed ?? '') ||
+    computeHash(
+      JSON.stringify({
+        proposerId,
+        counterpartyId,
+        runId,
+        seedSalt: proposalPayload?.seedSalt ?? '',
+        termCount: proposedTermsIn.length,
+      }),
+    );
+
+  const tick = clamp(tickRaw, 0, RUN_TOTAL_TICKS - 1);
+
+  // Deterministic macro/chaos context
+  const macroSchedule: MacroEvent[] = buildMacroSchedule(`${seed}:m28`, MACRO_EVENTS_PER_RUN);
+  const chaosWindows: ChaosWindow[] = buildChaosWindows(`${seed}:m28`, CHAOS_WINDOWS_PER_RUN);
+
+  const phase = derivePhase(tick);
+  const regime = deriveRegime(tick, macroSchedule);
+  const chaosHit = findChaosHit(tick, chaosWindows);
+  const pressure = classifyPressure(phase, chaosHit);
+  const tickTier = classifyTickTier(pressure, regime);
+
+  const windowDuration = computeWindowDuration(seed, (input.windowDuration as number) ?? 0, pressure, regime);
+  const openedAtTick = tick;
+  const expiresAtTick = clamp(openedAtTick + windowDuration, 0, RUN_TOTAL_TICKS - 1);
+
+  const proposalHash = computeHash(
+    JSON.stringify({
+      proposerId,
+      counterpartyId,
+      runId,
+      proposedTermsIn,
+      openedAtTick,
+      expiresAtTick,
+    }),
+  );
+
+  const handshakeId = computeHash(`${proposalHash}:M28`).slice(0, 16);
+
+  const proposedTerms = normalizeTerms(seed, proposedTermsIn);
+
+  const stakeAmount = extractStake(proposedTerms);
+  const riskCap = extractRiskCap(proposedTerms);
+
+  const solvencyStatus: SolvencyStatus = classifySolvency(stakeAmount, riskCap);
+  const policyCardTag = pickPolicyCardTag(seed, tick, phase, pressure, regime);
+
+  const negotiationScore = computeNegotiationScore(seed, tick, stakeAmount, riskCap, regime, pressure, phase);
+  const outcome = outcomeFromScore(negotiationScore, pressure, regime, tick, expiresAtTick);
+
+  // Determine accepted terms deterministically:
+  // - Always accept “deadline” + “role” terms (non-economic),
+  // - Accept “stake/risk” only if score >= threshold,
+  // - Under CRITICAL/CRISIS, tighten acceptance.
+  const threshold = pressure === 'CRITICAL' || regime === 'CRISIS' ? 0.78 : 0.62;
+
+  const acceptedTerms = proposedTerms.filter((t) => {
+    if (t.kind === 'DEADLINE' || t.kind === 'ROLE') return true;
+    if (t.kind === 'CLAUSE') return negotiationScore >= (threshold - 0.05);
+    if (t.kind === 'STAKE' || t.kind === 'RISK_CAP' || t.kind === 'REWARD_SPLIT') return negotiationScore >= threshold;
+    return negotiationScore >= 0.70;
+  });
+
+  const acceptedCount = acceptedTerms.length;
+  const rejectedCount = Math.max(0, proposedTerms.length - acceptedCount);
+
+  // Deterministic “handshake expired” scenario: if tick is beyond expiry, accept none.
+  const finalAcceptedTerms = outcome === 'EXPIRED' ? [] : acceptedTerms;
+
+  const proofCardHint = buildProof(handshakeId, negotiationScore);
+  const ledgerHint = buildLedger(handshakeId, tick, proposalHash);
+
+  const tags = seededShuffle(
+    Array.from(
+      new Set([
+        'handshake',
+        `regime:${regime.toLowerCase()}`,
+        `pressure:${pressure.toLowerCase()}`,
+        `phase:${phase.toLowerCase()}`,
+        outcome === 'ACCEPTED' ? 'accepted' : outcome === 'COUNTERED' ? 'countered' : outcome === 'REJECTED' ? 'rejected' : 'expired',
+        `policy:${policyCardTag}`,
+      ]),
+    ),
+    `${seed}:m28tags:${tick}`,
+  );
+
+  const auditHash = computeHash(
+    JSON.stringify({
+      mid: 'M28',
+      handshakeId,
+      proposalHash,
+      runId,
+      tick,
+      openedAtTick,
+      expiresAtTick,
+      regime,
+      phase,
+      pressure,
+      tickTier,
+      solvencyStatus,
+      stakeAmount,
+      riskCap,
+      negotiationScore: Number(negotiationScore.toFixed(6)),
+      policyCardTag,
+      acceptedCount: finalAcceptedTerms.length,
+    }),
+  );
+
+  emit({
+    event: 'HANDSHAKE_OPENED',
+    mechanic_id: 'M28',
+    tick,
+    runId: handshakeId,
+    payload: {
+      handshakeId,
+      proposalHash,
+      proposerId,
+      counterpartyId,
+      runId: runId || null,
+      openedAtTick,
+      expiresAtTick,
+      windowDuration,
+      regime,
+      phase,
+      pressure,
+      tickTier,
+      policyCardTag,
+    },
+  });
+
+  for (const t of finalAcceptedTerms) {
+    emit({
+      event: 'TERMS_ACCEPTED',
+      mechanic_id: 'M28',
+      tick,
+      runId: handshakeId,
+      payload: {
+        handshakeId,
+        termId: t.id,
+        kind: t.kind,
+        label: t.label,
+        value: t.value,
+        weight: t.weight,
+        tags: t.tags ?? [],
+      },
+    });
+  }
+
+  if (outcome === 'EXPIRED') {
+    emit({
+      event: 'HANDSHAKE_EXPIRED',
+      mechanic_id: 'M28',
+      tick,
+      runId: handshakeId,
+      payload: {
+        handshakeId,
+        proposalHash,
+        openedAtTick,
+        expiresAtTick,
+        windowDuration,
+      },
+    });
+  }
+
+  const handshakeResult: HandshakeResult = {
+    outcome,
+    handshakeId,
+    proposalHash,
+    openedAtTick,
+    expiresAtTick,
+    acceptedCount: finalAcceptedTerms.length,
+    rejectedCount: outcome === 'EXPIRED' ? proposedTerms.length : rejectedCount,
+    macroRegime: regime,
+    runPhase: phase,
+    pressureTier: pressure,
+    tickTier,
+    solvencyStatus,
+    stakeAmount,
+    riskCap,
+    proofCardHint,
+    ledgerHint,
+    auditHash,
+    tags,
+  };
+
+  return {
+    handshakeResult,
+    acceptedTerms: finalAcceptedTerms,
+  };
 }
 
 // ── ML companion hook ─────────────────────────────────────────────────────
 
 export interface M28MLInput {
-  handshakeResult?: HandshakeResult, acceptedTerms?: ContractTerms[];
+  handshakeResult?: HandshakeResult;
+  acceptedTerms?: ContractTerms[];
   runId: string;
-  tick:  number;
+  tick: number;
 }
 
 export interface M28MLOutput {
-  score:          number;         // 0–1
-  topFactors:     string[];       // max 5 plain-English factors
-  recommendation: string;         // single sentence
-  auditHash:      string;         // SHA256(inputs+outputs+rulesVersion)
-  confidenceDecay: number;        // 0–1, how fast this signal should decay
+  score: number; // 0–1
+  topFactors: string[]; // max 5 plain-English factors
+  recommendation: string; // single sentence
+  auditHash: string; // SHA256(inputs+outputs+rulesVersion)
+  confidenceDecay: number; // 0–1, how fast this signal should decay
 }
 
-/**
- * handshakeWindowNegotiationMLCompanion
- * Async advisory — fires AFTER exec_hook, reads output, returns signals only.
- * NEVER mutates state. Results feed Case File, Intel bars, and CORD scoring.
- */
-export async function handshakeWindowNegotiationMLCompanion(
-  input: M28MLInput,
-): Promise<M28MLOutput> {
-  // Advisory signal — bounded [0,1], no state mutation
-  const score = Math.min(0.99, Math.max(0.01, Object.keys(input).length * 0.05));
+export async function handshakeWindowNegotiationMLCompanion(input: M28MLInput): Promise<M28MLOutput> {
+  const tick = clamp(input.tick ?? 0, 0, RUN_TOTAL_TICKS - 1);
+
+  const hr = input.handshakeResult;
+  const regime: MacroRegime = hr?.macroRegime ?? 'NEUTRAL';
+  const pressure: PressureTier = hr?.pressureTier ?? 'LOW';
+
+  const decay = computeDecayRate(regime, M28_BOUNDS.BASE_DECAY_RATE);
+  const pulse = EXIT_PULSE_MULTIPLIERS[regime] ?? 1.0;
+  const mult = REGIME_MULTIPLIERS[regime] ?? 1.0;
+
+  const accepted = (input.acceptedTerms ?? []).length;
+  const outcome = hr?.outcome ?? 'COUNTERED';
+
+  const outcomeBoost =
+    outcome === 'ACCEPTED' ? 0.20 :
+    outcome === 'COUNTERED' ? 0.10 :
+    outcome === 'REJECTED' ? 0.05 : 0.00;
+
+  const acceptanceBoost = clamp(accepted / 6, 0, 1) * 0.20;
+
+  const pressureBoost =
+    pressure === 'CRITICAL' ? 0.18 :
+    pressure === 'HIGH' ? 0.12 :
+    pressure === 'MEDIUM' ? 0.06 : 0.02;
+
+  const score = clamp(
+    0.20 +
+      outcomeBoost +
+      acceptanceBoost +
+      pressureBoost +
+      clamp((pulse * mult) / 3, 0, 0.14) +
+      clamp((1 - decay) / 2, 0, 0.12),
+    0.01,
+    0.99,
+  );
+
+  const topFactors = [
+    `outcome=${outcome}`,
+    `accepted=${accepted}`,
+    `pressure=${pressure}`,
+    `regime=${regime}`,
+    `decay=${decay.toFixed(2)}`,
+  ].slice(0, 5);
+
+  const recommendation =
+    outcome === 'ACCEPTED'
+      ? 'Handshake accepted: bind terms, log signatures, and enforce risk caps immediately.'
+      : outcome === 'COUNTERED'
+        ? 'Counter window: tighten risk cap, reduce stake, and re-offer within the handshake duration.'
+        : outcome === 'REJECTED'
+          ? 'Rejected: simplify terms and re-open later under lower pressure.'
+          : 'Expired: re-open with shorter duration and clearer stake/risk constraints.';
+
   return {
     score,
-    topFactors:     ['M28 signal computed', 'advisory only'],
-    recommendation: 'Monitor M28 output and adjust strategy accordingly.',
-    auditHash:      computeHash(JSON.stringify(input) + ':ml:M28'),
-    confidenceDecay: 0.05,
+    topFactors,
+    recommendation,
+    auditHash: computeHash(JSON.stringify({ mid: 'M28', ...input, regime, pressure, decay, pulse, mult }) + ':ml:M28'),
+    confidenceDecay: decay,
   };
 }

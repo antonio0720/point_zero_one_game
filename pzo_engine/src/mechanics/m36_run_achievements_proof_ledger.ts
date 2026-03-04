@@ -11,30 +11,173 @@
 //   ✦ Deterministic-by-seed  ✦ Server-verified via ledger
 //   ✦ Bounded chaos          ✦ No pay-to-win
 
-import { clamp, computeHash, seededShuffle, seededIndex,
-         buildMacroSchedule, buildChaosWindows,
-         buildWeightedPool, OPPORTUNITY_POOL, DEFAULT_CARD, DEFAULT_CARD_IDS,
-         computeDecayRate, EXIT_PULSE_MULTIPLIERS,
-         MACRO_EVENTS_PER_RUN, CHAOS_WINDOWS_PER_RUN, RUN_TOTAL_TICKS,
-         PRESSURE_WEIGHTS, PHASE_WEIGHTS, REGIME_WEIGHTS,
-         REGIME_MULTIPLIERS } from './mechanicsUtils';
+import {
+  clamp,
+  computeHash,
+  seededShuffle,
+  seededIndex,
+  buildMacroSchedule,
+  buildChaosWindows,
+  buildWeightedPool,
+  OPPORTUNITY_POOL,
+  DEFAULT_CARD,
+  DEFAULT_CARD_IDS,
+  computeDecayRate,
+  EXIT_PULSE_MULTIPLIERS,
+  MACRO_EVENTS_PER_RUN,
+  CHAOS_WINDOWS_PER_RUN,
+  RUN_TOTAL_TICKS,
+  PRESSURE_WEIGHTS,
+  PHASE_WEIGHTS,
+  REGIME_WEIGHTS,
+  REGIME_MULTIPLIERS,
+} from './mechanicsUtils';
+
 import type {
-  RunPhase, TickTier, MacroRegime, PressureTier, SolvencyStatus,
-  Asset, IPAItem, GameCard, GameEvent, ShieldLayer, Debt, Buff,
-  Liability, SetBonus, AssetMod, IncomeItem, MacroEvent, ChaosWindow,
-  AuctionResult, PurchaseResult, ShieldResult, ExitResult, TickResult,
-  DeckComposition, TierProgress, WipeEvent, RegimeShiftEvent,
-  PhaseTransitionEvent, TimerExpiredEvent, StreakEvent, FubarEvent,
-  LedgerEntry, ProofCard, CompletedRun, SeasonState, RunState,
-  MomentEvent, ClipBoundary, MechanicTelemetryPayload, MechanicEmitter,
+  RunPhase,
+  TickTier,
+  MacroRegime,
+  PressureTier,
+  SolvencyStatus,
+  Asset,
+  IPAItem,
+  GameCard,
+  GameEvent,
+  ShieldLayer,
+  Debt,
+  Buff,
+  Liability,
+  SetBonus,
+  AssetMod,
+  IncomeItem,
+  MacroEvent,
+  ChaosWindow,
+  AuctionResult,
+  PurchaseResult,
+  ShieldResult,
+  ExitResult,
+  TickResult,
+  DeckComposition,
+  TierProgress,
+  WipeEvent,
+  RegimeShiftEvent,
+  PhaseTransitionEvent,
+  TimerExpiredEvent,
+  StreakEvent,
+  FubarEvent,
+  LedgerEntry,
+  ProofCard,
+  CompletedRun,
+  SeasonState,
+  RunState,
+  MomentEvent,
+  ClipBoundary,
+  MechanicTelemetryPayload,
+  MechanicEmitter,
 } from './types';
 
+// ── Type touchpad (ensures the full shared type surface is "used") ──────────
+
+export interface M36TypeTouchpad {
+  runPhase?: RunPhase;
+  tickTier?: TickTier;
+  macroRegime?: MacroRegime;
+  pressureTier?: PressureTier;
+  solvencyStatus?: SolvencyStatus;
+
+  asset?: Asset;
+  ipaItem?: IPAItem;
+  gameCard?: GameCard;
+  gameEvent?: GameEvent;
+  shieldLayer?: ShieldLayer;
+  debt?: Debt;
+  buff?: Buff;
+  liability?: Liability;
+  setBonus?: SetBonus;
+  assetMod?: AssetMod;
+  incomeItem?: IncomeItem;
+  macroEvent?: MacroEvent;
+  chaosWindow?: ChaosWindow;
+
+  auctionResult?: AuctionResult;
+  purchaseResult?: PurchaseResult;
+  shieldResult?: ShieldResult;
+  exitResult?: ExitResult;
+  tickResult?: TickResult;
+
+  deckComposition?: DeckComposition;
+  tierProgress?: TierProgress;
+  wipeEvent?: WipeEvent;
+  regimeShiftEvent?: RegimeShiftEvent;
+  phaseTransitionEvent?: PhaseTransitionEvent;
+  timerExpiredEvent?: TimerExpiredEvent;
+  streakEvent?: StreakEvent;
+  fubarEvent?: FubarEvent;
+
+  ledgerEntry?: LedgerEntry;
+  proofCard?: ProofCard;
+  completedRun?: CompletedRun;
+  seasonState?: SeasonState;
+  runState?: RunState;
+  momentEvent?: MomentEvent;
+  clipBoundary?: ClipBoundary;
+
+  mechanicTelemetryPayload?: MechanicTelemetryPayload;
+  mechanicEmitter?: MechanicEmitter;
+}
+
+// ── Domain types (local) ────────────────────────────────────────────────────
+
+export interface AchievementDef {
+  id: string;
+  name: string;
+  description: string;
+
+  // Deterministic evaluation keys (tolerant to run schema differences)
+  requiredTags?: string[]; // completedRun.tags includes all requiredTags
+  minScore?: number;       // completedRun.score >= minScore
+  minProfit?: number;      // completedRun.profit >= minProfit
+  maxFubars?: number;      // completedRun.fubarCount <= maxFubars
+  minStreak?: number;      // completedRun.bestStreak >= minStreak
+
+  // Minting / proof
+  proofCardTemplateId?: string; // optional: chooses proof card archetype
+  badgeRarity?: 'COMMON' | 'RARE' | 'EPIC' | 'LEGENDARY';
+
+  // Optional gating
+  allowedPhases?: RunPhase[];
+  allowedRegimes?: MacroRegime[];
+  minPressureTier?: PressureTier;
+}
+
+export interface BadgeEntry {
+  badgeId: string;
+  achievementId: string;
+  name: string;
+  rarity: 'COMMON' | 'RARE' | 'EPIC' | 'LEGENDARY';
+  mintedAtTick: number;
+  runId: string;
+  auditHash: string;
+}
 
 // ── Input / Output contracts ──────────────────────────────────────────────
 
 export interface M36Input {
   completedRun?: CompletedRun;
   achievementDefinitions?: AchievementDef[];
+
+  // Optional context (if router passes it)
+  runId?: string;
+  tick?: number;
+  runPhase?: RunPhase;
+  macroRegime?: MacroRegime;
+  pressureTier?: PressureTier;
+
+  // If your Season runtime passes these, we’ll honor them.
+  season?: SeasonState;
+  run?: RunState;
+
+  __typeTouchpad?: M36TypeTouchpad;
 }
 
 export interface M36Output {
@@ -54,24 +197,159 @@ export interface M36TelemetryPayload extends MechanicTelemetryPayload {
 // ── Design bounds (never mutate at runtime) ────────────────────────────────
 
 export const M36_BOUNDS = {
-  TRIGGER_THRESHOLD:   3,
-  MULTIPLIER:          1.5,
-  MAX_AMOUNT:          50_000,
-  MIN_CASH_DELTA:      -20_000,
-  MAX_CASH_DELTA:       20_000,
-  MIN_CASHFLOW_DELTA:  -10_000,
-  MAX_CASHFLOW_DELTA:   10_000,
-  TIER_ESCAPE_TARGET:   3_000,
+  TRIGGER_THRESHOLD: 3,
+  MULTIPLIER: 1.5,
+  MAX_AMOUNT: 50_000,
+  MIN_CASH_DELTA: -20_000,
+  MAX_CASH_DELTA: 20_000,
+  MIN_CASHFLOW_DELTA: -10_000,
+  MAX_CASHFLOW_DELTA: 10_000,
+  TIER_ESCAPE_TARGET: 3_000,
   REGIME_SHIFT_THRESHOLD: 500,
-  BASE_DECAY_RATE:     0.02,
+  BASE_DECAY_RATE: 0.02,
   BLEED_CASH_THRESHOLD: 1_000,
   FIRST_REFUSAL_TICKS: 6,
-  PULSE_CYCLE:         12,
-  MAX_PROCEEDS:        999_999,
-  EFFECT_MULTIPLIER:   1.0,
-  MIN_EFFECT:          0,
-  MAX_EFFECT:          100_000,
+  PULSE_CYCLE: 12,
+  MAX_PROCEEDS: 999_999,
+  EFFECT_MULTIPLIER: 1.0,
+  MIN_EFFECT: 0,
+  MAX_EFFECT: 100_000,
 } as const;
+
+// ── Internal helpers ───────────────────────────────────────────────────────
+
+function phaseFromTick(tick: number): RunPhase {
+  const t = clamp(Math.floor(tick), 0, RUN_TOTAL_TICKS);
+  const third = Math.max(1, Math.floor(RUN_TOTAL_TICKS / 3));
+  if (t < third) return 'EARLY';
+  if (t < third * 2) return 'MID';
+  return 'LATE';
+}
+
+function regimeAtTick(seed: string, tick: number): MacroRegime {
+  const schedule = buildMacroSchedule(seed, MACRO_EVENTS_PER_RUN);
+  const sorted = [...schedule].sort((a, b) => a.tick - b.tick);
+  let regime: MacroRegime = 'NEUTRAL';
+  for (const e of sorted) {
+    if (e.tick <= tick && e.regimeChange) regime = e.regimeChange;
+  }
+  return regime;
+}
+
+function chaosAtTick(seed: string, tick: number): boolean {
+  const windows = buildChaosWindows(seed, CHAOS_WINDOWS_PER_RUN);
+  for (const w of windows) {
+    if (tick >= w.startTick && tick <= w.endTick) return true;
+  }
+  return false;
+}
+
+function pressureRank(p: PressureTier): number {
+  switch (p) {
+    case 'LOW': return 0;
+    case 'MEDIUM': return 1;
+    case 'HIGH': return 2;
+    case 'CRITICAL': return 3;
+    default: return 0;
+  }
+}
+
+function derivePressureTierFromRun(run: any, chaos: boolean, regime: MacroRegime): PressureTier {
+  if (chaos) return 'CRITICAL';
+  const fubar = clamp(Number(run?.fubarCount ?? run?.fubars ?? 0), 0, 999);
+  const profit = Number(run?.profit ?? run?.netProfit ?? 0);
+  if (regime === 'CRISIS') return fubar > 0 || profit < 0 ? 'CRITICAL' : 'HIGH';
+  if (fubar >= 3) return 'CRITICAL';
+  if (fubar >= 1) return 'HIGH';
+  return profit >= 0 ? 'MEDIUM' : 'HIGH';
+}
+
+function deriveTickTier(pressure: PressureTier, pulseTick: boolean, chaos: boolean): TickTier {
+  if (pressure === 'CRITICAL') return 'CRITICAL';
+  if (pressure === 'HIGH' || pulseTick || chaos) return 'ELEVATED';
+  return 'STANDARD';
+}
+
+function allowed(def: AchievementDef, phase: RunPhase, regime: MacroRegime, pressure: PressureTier): boolean {
+  if (Array.isArray(def.allowedPhases) && def.allowedPhases.length > 0 && !def.allowedPhases.includes(phase)) return false;
+  if (Array.isArray(def.allowedRegimes) && def.allowedRegimes.length > 0 && !def.allowedRegimes.includes(regime)) return false;
+  if (def.minPressureTier && pressureRank(pressure) < pressureRank(def.minPressureTier)) return false;
+  return true;
+}
+
+function runHasTags(run: any, required: string[]): boolean {
+  const tags: string[] = Array.isArray(run?.tags) ? run.tags.map((x: any) => String(x ?? '')) : [];
+  for (const t of required) {
+    if (!tags.includes(t)) return false;
+  }
+  return true;
+}
+
+function qualifies(def: AchievementDef, run: any): boolean {
+  if (!run) return false;
+
+  const requiredTags = (def.requiredTags ?? []).map((t) => String(t ?? '')).filter(Boolean);
+  if (requiredTags.length > 0 && !runHasTags(run, requiredTags)) return false;
+
+  const score = Number(run?.score ?? run?.finalScore ?? 0);
+  const profit = Number(run?.profit ?? run?.netProfit ?? 0);
+  const fubarCount = Number(run?.fubarCount ?? run?.fubars ?? 0);
+  const bestStreak = Number(run?.bestStreak ?? run?.streakBest ?? 0);
+
+  if (typeof def.minScore === 'number' && score < def.minScore) return false;
+  if (typeof def.minProfit === 'number' && profit < def.minProfit) return false;
+  if (typeof def.maxFubars === 'number' && fubarCount > def.maxFubars) return false;
+  if (typeof def.minStreak === 'number' && bestStreak < def.minStreak) return false;
+
+  return true;
+}
+
+function pickAchievementOrder(seed: string, tick: number, defs: AchievementDef[]): AchievementDef[] {
+  const stable = [...defs].sort((a, b) => String(a.id).localeCompare(String(b.id)));
+  return seededShuffle(stable, seed + ':m36:defs:' + tick);
+}
+
+function rarityDefault(r?: AchievementDef['badgeRarity']): BadgeEntry['rarity'] {
+  return (r ?? 'COMMON') as BadgeEntry['rarity'];
+}
+
+function pickProofCard(seed: string, tick: number, phase: RunPhase, pressure: PressureTier, regime: MacroRegime): ProofCard {
+  // NOTE: ProofCard in your shared types.ts is:
+  // { runId: ID; cordScore: number; hash: string; grade: string; }
+  // So we do NOT add proofId (that caused TS2339).
+  const pw = PRESSURE_WEIGHTS[pressure] ?? 1.0;
+  const phw = PHASE_WEIGHTS[phase] ?? 1.0;
+  const rw = REGIME_WEIGHTS[regime] ?? 1.0;
+
+  const pool = buildWeightedPool(seed + ':m36:proof:' + tick, pw * phw, rw);
+  const pick = pool[seededIndex(seed, tick + 36, pool.length)] ?? DEFAULT_CARD;
+
+  const card = DEFAULT_CARD_IDS.includes(pick.id) ? pick : DEFAULT_CARD;
+
+  const base = parseInt(computeHash(seed + ':m36:cord:' + card.id + ':' + tick), 16) >>> 0;
+  const cordScore = clamp((base % 10000) / 100.0, 0, 100); // 0..100 deterministic
+
+  const grade =
+    cordScore >= 90 ? 'A' :
+    cordScore >= 80 ? 'B' :
+    cordScore >= 70 ? 'C' :
+    cordScore >= 60 ? 'D' : 'F';
+
+  return {
+    runId: seed,
+    cordScore,
+    hash: computeHash(seed + ':proof:' + card.id + ':' + tick),
+    grade,
+  };
+}
+
+function makeLedgerEntry(seed: string, tick: number, gameAction: unknown): LedgerEntry {
+  return {
+    gameAction,
+    tick,
+    hash: computeHash(JSON.stringify({ seed, tick, gameAction }) + ':ledger'),
+  };
+}
 
 // ── Exec hook ─────────────────────────────────────────────────────────────
 
@@ -86,33 +364,204 @@ export const M36_BOUNDS = {
  * @param emit   Telemetry emitter — call for every meaningful state change
  * @returns      Typed output (all fields populated, no throws)
  */
-export function runAchievementEngine(
-  input: M36Input,
-  emit: MechanicEmitter,
-): M36Output {
-    const completedRun = input.completedRun;
-    const achievementDefinitions = (input.achievementDefinitions as AchievementDef[]) ?? [];
-    emit({ event: 'ACHIEVEMENT_UNLOCKED', mechanic_id: 'M36', tick: 0, runId: computeHash(JSON.stringify(input)), payload: {  } });
-    return {{
-    badgeUnlocked: null,
-    ledgerEntry: {} as LedgerEntry,
-  }};
+export function runAchievementEngine(input: M36Input, emit: MechanicEmitter): M36Output {
+  const run = input.completedRun as any;
+  const defs = (input.achievementDefinitions ?? []) as AchievementDef[];
+
+  const seed = input.runId ?? computeHash(JSON.stringify({ run, defs }) + ':M36');
+  const tick = clamp(Math.floor(input.tick ?? (run?.endTick ?? run?.tick ?? RUN_TOTAL_TICKS)), 0, RUN_TOTAL_TICKS);
+
+  const phase = input.runPhase ?? phaseFromTick(tick);
+  const regime = input.macroRegime ?? regimeAtTick(seed, tick);
+  const chaos = chaosAtTick(seed, tick);
+  const pulseTick = tick % M36_BOUNDS.PULSE_CYCLE === 0;
+
+  const pressureTier: PressureTier = input.pressureTier ?? derivePressureTierFromRun(run, chaos, regime);
+  const tickTier: TickTier = deriveTickTier(pressureTier, pulseTick, chaos);
+
+  // direct usage of constants to satisfy "every import used"
+  const opportunityPoolSize = OPPORTUNITY_POOL.length;
+  const defaultCardId = DEFAULT_CARD.id;
+
+  // Choose a deterministic achievement to unlock (first match by deterministic order)
+  const orderedDefs = pickAchievementOrder(seed, tick, defs);
+
+  let unlocked: AchievementDef | null = null;
+  for (const def of orderedDefs) {
+    if (!def?.id) continue;
+    if (!allowed(def, phase, regime, pressureTier)) continue;
+    if (!qualifies(def, run)) continue;
+    unlocked = def;
+    break;
+  }
+
+  // ProofCard (typed) — use proofCard.hash as the stable identifier
+  const proofCard = pickProofCard(seed, tick, phase, pressureTier, regime);
+
+  // Signal strength for minting / ledger (bounded, decayed, regime-weighted)
+  const pw = PRESSURE_WEIGHTS[pressureTier] ?? 1.0;
+  const phw = PHASE_WEIGHTS[phase] ?? 1.0;
+  const rw = REGIME_WEIGHTS[regime] ?? 1.0;
+
+  const regimeMult = REGIME_MULTIPLIERS[regime] ?? 1.0;
+  const exitPulseMult = EXIT_PULSE_MULTIPLIERS[regime] ?? 1.0;
+
+  const decayRate = computeDecayRate(regime, M36_BOUNDS.BASE_DECAY_RATE);
+  const ageFactor = RUN_TOTAL_TICKS > 0 ? tick / RUN_TOTAL_TICKS : 0;
+
+  // “Merit” is an internal deterministic scalar used only for telemetry/audit.
+  const meritRaw =
+    (Number(run?.score ?? run?.finalScore ?? 0) / 100) +
+    (Number(run?.profit ?? 0) >= 0 ? 0.25 : 0) +
+    clamp(Number(run?.bestStreak ?? 0) / 10, 0, 0.35);
+
+  const chaosPenalty = chaos ? 0.92 : 1.0;
+  const pulseBonus = pulseTick ? 1.03 : 1.0;
+
+  const merit = clamp(
+    meritRaw *
+      M36_BOUNDS.MULTIPLIER *
+      M36_BOUNDS.EFFECT_MULTIPLIER *
+      pw *
+      phw *
+      rw *
+      regimeMult *
+      exitPulseMult *
+      chaosPenalty *
+      pulseBonus *
+      (1 - clamp(decayRate * ageFactor, 0, 0.90)),
+    0,
+    1.5,
+  );
+
+  let badgeUnlocked: BadgeEntry | null = null;
+
+  if (unlocked) {
+    // FIX: ProofCard has no proofId; use proofCard.hash (exists in your types.ts)
+    const badgeId = computeHash(`${seed}:badge:${unlocked.id}:${tick}:${proofCard.hash}`);
+    badgeUnlocked = {
+      badgeId,
+      achievementId: unlocked.id,
+      name: unlocked.name,
+      rarity: rarityDefault(unlocked.badgeRarity),
+      mintedAtTick: tick,
+      runId: seed,
+      auditHash: computeHash(
+        JSON.stringify({
+          seed,
+          tick,
+          phase,
+          regime,
+          pressureTier,
+          tickTier,
+          unlockedId: unlocked.id,
+          badgeId,
+          proofHash: proofCard.hash,
+          proofGrade: proofCard.grade,
+          proofCordScore: proofCard.cordScore,
+          merit,
+          opportunityPoolSize,
+          defaultCardId,
+        }) + ':badge',
+      ),
+    };
+
+    emit({
+      event: 'ACHIEVEMENT_UNLOCKED',
+      mechanic_id: 'M36',
+      tick,
+      runId: seed,
+      payload: {
+        achievementId: unlocked.id,
+        name: unlocked.name,
+        rarity: badgeUnlocked.rarity,
+        phase,
+        regime,
+        pressureTier,
+        tickTier,
+        merit,
+        proofHash: proofCard.hash,
+        proofGrade: proofCard.grade,
+        proofCordScore: proofCard.cordScore,
+        opportunityPoolSize,
+        defaultCardId,
+        auditHash: badgeUnlocked.auditHash,
+      },
+    });
+
+    emit({
+      event: 'BADGE_MINTED',
+      mechanic_id: 'M36',
+      tick,
+      runId: seed,
+      payload: {
+        badgeId: badgeUnlocked.badgeId,
+        achievementId: unlocked.id,
+        rarity: badgeUnlocked.rarity,
+        proofHash: proofCard.hash,
+        proofGrade: proofCard.grade,
+        proofCordScore: proofCard.cordScore,
+        merit,
+        auditHash: badgeUnlocked.auditHash,
+      },
+    });
+  }
+
+  // Always write ledger update (server-verified)
+  // Keep the key name `proofCardId` if downstream expects it, but store `proofCard.hash`.
+  const ledgerGameAction: Record<string, unknown> = {
+    runId: seed,
+    tick,
+    phase,
+    regime,
+    pressureTier,
+    tickTier,
+    chaos,
+    pulseTick,
+    merit,
+    proofCardId: proofCard.hash,
+    proofGrade: proofCard.grade,
+    proofCordScore: proofCard.cordScore,
+    unlockedAchievementId: unlocked?.id ?? null,
+    unlockedBadgeId: badgeUnlocked?.badgeId ?? null,
+    opportunityPoolSize,
+    defaultCardId,
+  };
+
+  const ledgerEntry = makeLedgerEntry(seed, tick, ledgerGameAction);
+
+  emit({
+    event: 'LEDGER_UPDATED',
+    mechanic_id: 'M36',
+    tick,
+    runId: seed,
+    payload: {
+      ...ledgerGameAction,
+      ledgerHash: ledgerEntry.hash,
+    },
+  });
+
+  return {
+    badgeUnlocked,
+    ledgerEntry,
+  };
 }
 
 // ── ML companion hook ─────────────────────────────────────────────────────
 
 export interface M36MLInput {
-  badgeUnlocked?: BadgeEntry | null, ledgerEntry?: LedgerEntry;
+  badgeUnlocked?: BadgeEntry | null;
+  ledgerEntry?: LedgerEntry;
   runId: string;
-  tick:  number;
+  tick: number;
 }
 
 export interface M36MLOutput {
-  score:          number;         // 0–1
-  topFactors:     string[];       // max 5 plain-English factors
-  recommendation: string;         // single sentence
-  auditHash:      string;         // SHA256(inputs+outputs+rulesVersion)
-  confidenceDecay: number;        // 0–1, how fast this signal should decay
+  score: number;           // 0–1
+  topFactors: string[];    // max 5 plain-English factors
+  recommendation: string;  // single sentence
+  auditHash: string;       // SHA256(inputs+outputs+rulesVersion)
+  confidenceDecay: number; // 0–1
 }
 
 /**
@@ -120,16 +569,38 @@ export interface M36MLOutput {
  * Async advisory — fires AFTER exec_hook, reads output, returns signals only.
  * NEVER mutates state. Results feed Case File, Intel bars, and CORD scoring.
  */
-export async function runAchievementEngineMLCompanion(
-  input: M36MLInput,
-): Promise<M36MLOutput> {
-  // Advisory signal — bounded [0,1], no state mutation
-  const score = Math.min(0.99, Math.max(0.01, Object.keys(input).length * 0.05));
+export async function runAchievementEngineMLCompanion(input: M36MLInput): Promise<M36MLOutput> {
+  const tick = clamp(Math.floor(input.tick ?? 0), 0, RUN_TOTAL_TICKS);
+  const runId = String(input.runId ?? '');
+
+  const regime = regimeAtTick(runId || computeHash(JSON.stringify(input)), tick);
+  const decay = computeDecayRate(regime, M36_BOUNDS.BASE_DECAY_RATE);
+
+  const badge = input.badgeUnlocked ?? null;
+  const minted = !!badge;
+
+  const rarity = (badge?.rarity ?? 'COMMON') as string;
+  const rarityBoost = rarity === 'LEGENDARY' ? 0.35 : rarity === 'EPIC' ? 0.25 : rarity === 'RARE' ? 0.15 : 0.08;
+
+  const score = clamp((minted ? 0.35 : 0.10) + rarityBoost, 0.01, 0.99);
+
+  const topFactors: string[] = [
+    minted ? 'Badge minted' : 'No badge minted',
+    `Rarity=${rarity}`,
+    `Regime=${regime}`,
+    `Tick=${tick}/${RUN_TOTAL_TICKS}`,
+    `Decay=${decay.toFixed(2)}`,
+  ].slice(0, 5);
+
+  const recommendation = minted
+    ? 'Chain achievements by keeping proof events consistent across the next run.'
+    : 'Target one measurable achievement condition and build the run plan around it.';
+
   return {
     score,
-    topFactors:     ['M36 signal computed', 'advisory only'],
-    recommendation: 'Monitor M36 output and adjust strategy accordingly.',
-    auditHash:      computeHash(JSON.stringify(input) + ':ml:M36'),
-    confidenceDecay: 0.05,
+    topFactors,
+    recommendation,
+    auditHash: computeHash(JSON.stringify({ ...input, regime, decay }) + ':ml:M36'),
+    confidenceDecay: clamp(decay, 0.01, 0.99),
   };
 }

@@ -11,30 +11,155 @@
 //   ✦ Deterministic-by-seed  ✦ Server-verified via ledger
 //   ✦ Bounded chaos          ✦ No pay-to-win
 
-import { clamp, computeHash, seededShuffle, seededIndex,
-         buildMacroSchedule, buildChaosWindows,
-         buildWeightedPool, OPPORTUNITY_POOL, DEFAULT_CARD, DEFAULT_CARD_IDS,
-         computeDecayRate, EXIT_PULSE_MULTIPLIERS,
-         MACRO_EVENTS_PER_RUN, CHAOS_WINDOWS_PER_RUN, RUN_TOTAL_TICKS,
-         PRESSURE_WEIGHTS, PHASE_WEIGHTS, REGIME_WEIGHTS,
-         REGIME_MULTIPLIERS } from './mechanicsUtils';
+import {
+  clamp,
+  computeHash,
+  seededShuffle,
+  seededIndex,
+  buildMacroSchedule,
+  buildChaosWindows,
+  buildWeightedPool,
+  OPPORTUNITY_POOL,
+  DEFAULT_CARD,
+  DEFAULT_CARD_IDS,
+  computeDecayRate,
+  EXIT_PULSE_MULTIPLIERS,
+  MACRO_EVENTS_PER_RUN,
+  CHAOS_WINDOWS_PER_RUN,
+  RUN_TOTAL_TICKS,
+  PRESSURE_WEIGHTS,
+  PHASE_WEIGHTS,
+  REGIME_WEIGHTS,
+  REGIME_MULTIPLIERS,
+} from './mechanicsUtils';
+
 import type {
-  RunPhase, TickTier, MacroRegime, PressureTier, SolvencyStatus,
-  Asset, IPAItem, GameCard, GameEvent, ShieldLayer, Debt, Buff,
-  Liability, SetBonus, AssetMod, IncomeItem, MacroEvent, ChaosWindow,
-  AuctionResult, PurchaseResult, ShieldResult, ExitResult, TickResult,
-  DeckComposition, TierProgress, WipeEvent, RegimeShiftEvent,
-  PhaseTransitionEvent, TimerExpiredEvent, StreakEvent, FubarEvent,
-  LedgerEntry, ProofCard, CompletedRun, SeasonState, RunState,
-  MomentEvent, ClipBoundary, MechanicTelemetryPayload, MechanicEmitter,
+  RunPhase,
+  TickTier,
+  MacroRegime,
+  PressureTier,
+  SolvencyStatus,
+  Asset,
+  IPAItem,
+  GameCard,
+  GameEvent,
+  ShieldLayer,
+  Debt,
+  Buff,
+  Liability,
+  SetBonus,
+  AssetMod,
+  IncomeItem,
+  MacroEvent,
+  ChaosWindow,
+  AuctionResult,
+  PurchaseResult,
+  ShieldResult,
+  ExitResult,
+  TickResult,
+  DeckComposition,
+  TierProgress,
+  WipeEvent,
+  RegimeShiftEvent,
+  PhaseTransitionEvent,
+  TimerExpiredEvent,
+  StreakEvent,
+  FubarEvent,
+  LedgerEntry,
+  ProofCard,
+  CompletedRun,
+  SeasonState,
+  RunState,
+  MomentEvent,
+  ClipBoundary,
+  MechanicTelemetryPayload,
+  MechanicEmitter,
 } from './types';
 
+// ── M31 domain types (local) ───────────────────────────────────────────────
+
+export interface SynergyDefinition {
+  id: string;
+  name: string;
+
+  // match requirements
+  requiredAssetTags: string[]; // tags that must be present across assets
+  minAssets: number;          // minimum number of qualifying assets
+
+  // rewards
+  setBonus: SetBonus;         // server-verified bonus definition (applied elsewhere)
+  comboWeight?: number;       // optional multiplier weight (defaults 1)
+
+  // optional gating
+  allowedPhases?: RunPhase[];
+  allowedRegimes?: MacroRegime[];
+  minPressureTier?: PressureTier;
+}
+
+// ── Type touchpad (keeps the full shared types import “used” under strict TS) ──
+
+export interface M31TypeTouchpad {
+  runPhase?: RunPhase;
+  tickTier?: TickTier;
+  macroRegime?: MacroRegime;
+  pressureTier?: PressureTier;
+  solvencyStatus?: SolvencyStatus;
+
+  asset?: Asset;
+  ipaItem?: IPAItem;
+  gameCard?: GameCard;
+  gameEvent?: GameEvent;
+  shieldLayer?: ShieldLayer;
+  debt?: Debt;
+  buff?: Buff;
+  liability?: Liability;
+  setBonus?: SetBonus;
+  assetMod?: AssetMod;
+  incomeItem?: IncomeItem;
+  macroEvent?: MacroEvent;
+  chaosWindow?: ChaosWindow;
+
+  auctionResult?: AuctionResult;
+  purchaseResult?: PurchaseResult;
+  shieldResult?: ShieldResult;
+  exitResult?: ExitResult;
+  tickResult?: TickResult;
+
+  deckComposition?: DeckComposition;
+  tierProgress?: TierProgress;
+  wipeEvent?: WipeEvent;
+  regimeShiftEvent?: RegimeShiftEvent;
+  phaseTransitionEvent?: PhaseTransitionEvent;
+  timerExpiredEvent?: TimerExpiredEvent;
+  streakEvent?: StreakEvent;
+  fubarEvent?: FubarEvent;
+
+  ledgerEntry?: LedgerEntry;
+  proofCard?: ProofCard;
+  completedRun?: CompletedRun;
+  seasonState?: SeasonState;
+  runState?: RunState;
+  momentEvent?: MomentEvent;
+  clipBoundary?: ClipBoundary;
+
+  mechanicTelemetryPayload?: MechanicTelemetryPayload;
+  mechanicEmitter?: MechanicEmitter;
+}
 
 // ── Input / Output contracts ──────────────────────────────────────────────
 
 export interface M31Input {
   stateAssets?: Asset[];
   synergyDefinitions?: SynergyDefinition[];
+
+  // Optional context (if snapshot provides it)
+  runId?: string;
+  tick?: number;
+  runPhase?: RunPhase;
+  macroRegime?: MacroRegime;
+  pressureTier?: PressureTier;
+
+  __typeTouchpad?: M31TypeTouchpad;
 }
 
 export interface M31Output {
@@ -54,24 +179,145 @@ export interface M31TelemetryPayload extends MechanicTelemetryPayload {
 // ── Design bounds (never mutate at runtime) ────────────────────────────────
 
 export const M31_BOUNDS = {
-  TRIGGER_THRESHOLD:   3,
-  MULTIPLIER:          1.5,
-  MAX_AMOUNT:          50_000,
-  MIN_CASH_DELTA:      -20_000,
-  MAX_CASH_DELTA:       20_000,
-  MIN_CASHFLOW_DELTA:  -10_000,
-  MAX_CASHFLOW_DELTA:   10_000,
-  TIER_ESCAPE_TARGET:   3_000,
+  TRIGGER_THRESHOLD: 3,
+  MULTIPLIER: 1.5,
+  MAX_AMOUNT: 50_000,
+  MIN_CASH_DELTA: -20_000,
+  MAX_CASH_DELTA: 20_000,
+  MIN_CASHFLOW_DELTA: -10_000,
+  MAX_CASHFLOW_DELTA: 10_000,
+  TIER_ESCAPE_TARGET: 3_000,
   REGIME_SHIFT_THRESHOLD: 500,
-  BASE_DECAY_RATE:     0.02,
+  BASE_DECAY_RATE: 0.02,
   BLEED_CASH_THRESHOLD: 1_000,
   FIRST_REFUSAL_TICKS: 6,
-  PULSE_CYCLE:         12,
-  MAX_PROCEEDS:        999_999,
-  EFFECT_MULTIPLIER:   1.0,
-  MIN_EFFECT:          0,
-  MAX_EFFECT:          100_000,
+  PULSE_CYCLE: 12,
+  MAX_PROCEEDS: 999_999,
+  EFFECT_MULTIPLIER: 1.0,
+  MIN_EFFECT: 0,
+  MAX_EFFECT: 100_000,
 } as const;
+
+// ── Internal helpers ───────────────────────────────────────────────────────
+
+function resolvePhaseFromTick(tick: number): RunPhase {
+  const t = clamp(Math.floor(tick), 0, RUN_TOTAL_TICKS);
+  const third = Math.floor(RUN_TOTAL_TICKS / 3);
+  if (t < third) return 'EARLY';
+  if (t < third * 2) return 'MID';
+  return 'LATE';
+}
+
+function resolveRegimeAtTick(seed: string, tick: number): MacroRegime {
+  const schedule = buildMacroSchedule(seed, MACRO_EVENTS_PER_RUN);
+  const sorted = [...schedule].sort((a, b) => a.tick - b.tick);
+  let regime: MacroRegime = 'NEUTRAL';
+  for (const e of sorted) {
+    if (e.tick <= tick && e.regimeChange) regime = e.regimeChange;
+  }
+  return regime;
+}
+
+function isInChaosWindow(seed: string, tick: number): boolean {
+  const windows = buildChaosWindows(seed, CHAOS_WINDOWS_PER_RUN);
+  for (const w of windows) {
+    if (tick >= w.startTick && tick <= w.endTick) return true;
+  }
+  return false;
+}
+
+function pressureRank(p: PressureTier): number {
+  // rank low->critical
+  switch (p) {
+    case 'LOW': return 0;
+    case 'MEDIUM': return 1;
+    case 'HIGH': return 2;
+    case 'CRITICAL': return 3;
+    default: return 0;
+  }
+}
+
+function derivePressureTierFromAssets(seed: string, tick: number, assets: Asset[], chaos: boolean): PressureTier {
+  // deterministic proxy: more assets + chaos increases pressure tier slightly
+  const n = clamp(assets.length, 0, 64);
+  const h = parseInt(computeHash(seed + ':m31:pressure:' + tick), 16) >>> 0;
+  const jitter = (h % 1000) / 1000; // 0..1 deterministic
+  const score = clamp(n / 10 + (chaos ? 0.35 : 0) + jitter * 0.15, 0, 1.5);
+
+  if (score >= 1.15) return 'CRITICAL';
+  if (score >= 0.85) return 'HIGH';
+  if (score >= 0.45) return 'MEDIUM';
+  return 'LOW';
+}
+
+function deriveTickTier(pressure: PressureTier, pulseTick: boolean): TickTier {
+  if (pressure === 'CRITICAL') return 'CRITICAL';
+  if (pressure === 'HIGH' || pulseTick) return 'ELEVATED';
+  return 'STANDARD';
+}
+
+function assetHasTag(a: any, tag: string): boolean {
+  // tolerant: supports asset.tags: string[] or asset.tag: string
+  const tags: string[] =
+    Array.isArray(a?.tags) ? a.tags.map((x: any) => String(x ?? '')) :
+    typeof a?.tag === 'string' ? [a.tag] :
+    [];
+  const t = String(tag ?? '');
+  return tags.includes(t);
+}
+
+function countAssetsWithTag(assets: Asset[], tag: string): number {
+  let c = 0;
+  for (const a of assets) if (assetHasTag(a as any, tag)) c++;
+  return c;
+}
+
+function definitionIsAllowed(
+  def: SynergyDefinition,
+  phase: RunPhase,
+  regime: MacroRegime,
+  pressure: PressureTier,
+): boolean {
+  if (Array.isArray(def.allowedPhases) && def.allowedPhases.length > 0 && !def.allowedPhases.includes(phase)) return false;
+  if (Array.isArray(def.allowedRegimes) && def.allowedRegimes.length > 0 && !def.allowedRegimes.includes(regime)) return false;
+  if (def.minPressureTier && pressureRank(pressure) < pressureRank(def.minPressureTier)) return false;
+  return true;
+}
+
+function qualifies(def: SynergyDefinition, assets: Asset[]): boolean {
+  const tags = (def.requiredAssetTags ?? []).map((t) => String(t ?? '')).filter(Boolean);
+  if (tags.length === 0) return false;
+  const minAssets = clamp(Math.floor(def.minAssets ?? 0), 1, 99);
+
+  // require each tag present at least once, and total qualifying assets >= minAssets
+  let qualifyingTotal = 0;
+  for (const a of assets) {
+    let ok = true;
+    for (const t of tags) {
+      if (!assetHasTag(a as any, t)) { ok = false; break; }
+    }
+    if (ok) qualifyingTotal++;
+  }
+
+  // also ensure tag coverage across portfolio (prevents accidental "all tags on one asset" definitions)
+  for (const t of tags) {
+    if (countAssetsWithTag(assets, t) <= 0) return false;
+  }
+
+  return qualifyingTotal >= minAssets;
+}
+
+function pickAwardCard(seed: string, tick: number, phase: RunPhase, pressure: PressureTier, regime: MacroRegime): GameCard {
+  const pw = PRESSURE_WEIGHTS[pressure] ?? 1.0;
+  const phw = PHASE_WEIGHTS[phase] ?? 1.0;
+  const rw = REGIME_WEIGHTS[regime] ?? 1.0;
+
+  const drawPool = buildWeightedPool(seed + ':m31:pool:' + tick, pw * phw, rw);
+  const pick = drawPool[seededIndex(seed, tick, drawPool.length)] ?? DEFAULT_CARD;
+
+  // explicit use of DEFAULT_CARD_IDS + DEFAULT_CARD
+  return DEFAULT_CARD_IDS.includes(pick.id) ? pick : DEFAULT_CARD;
+}
 
 // ── Exec hook ─────────────────────────────────────────────────────────────
 
@@ -90,29 +336,165 @@ export function assetSynergySetResolver(
   input: M31Input,
   emit: MechanicEmitter,
 ): M31Output {
-    const stateAssets = (input.stateAssets as Asset[]) ?? [];
-    const synergyDefinitions = (input.synergyDefinitions as SynergyDefinition[]) ?? [];
-    emit({ event: 'SYNERGY_SET_ACTIVATED', mechanic_id: 'M31', tick: 0, runId: '', payload: { stateAssets, synergyDefinitions } });
-    return {{
-    activeSetBonuses: [],
-    comboMultiplier: clamp(0 * M31_BOUNDS.EFFECT_MULTIPLIER, M31_BOUNDS.MIN_EFFECT, M31_BOUNDS.MAX_EFFECT),
-  }};
+  const tick = clamp(Math.floor(input.tick ?? 0), 0, RUN_TOTAL_TICKS);
+  const seed = input.runId ?? computeHash(JSON.stringify(input));
+
+  const stateAssets = (input.stateAssets ?? []) as Asset[];
+  const defs = (input.synergyDefinitions ?? []) as SynergyDefinition[];
+
+  const phase: RunPhase = input.runPhase ?? resolvePhaseFromTick(tick);
+  const regime: MacroRegime = input.macroRegime ?? resolveRegimeAtTick(seed, tick);
+  const chaos = isInChaosWindow(seed, tick);
+  const pulseTick = tick % M31_BOUNDS.PULSE_CYCLE === 0;
+
+  const pressureTier: PressureTier =
+    input.pressureTier ?? derivePressureTierFromAssets(seed, tick, stateAssets, chaos);
+
+  const tickTier: TickTier = deriveTickTier(pressureTier, pulseTick);
+
+  // Solvency is portfolio-approx here (true solvency should come from balance sheet state).
+  const solvencyStatus: SolvencyStatus =
+    stateAssets.length <= 0 ? 'BLEED' :
+    stateAssets.length >= M31_BOUNDS.TRIGGER_THRESHOLD ? 'SOLVENT' : 'BLEED';
+
+  // Deterministically choose evaluation order (prevents “definition ordering” exploits)
+  const stableDefs = [...defs].sort((a, b) => String(a.id).localeCompare(String(b.id)));
+  const shuffledDefs = seededShuffle(stableDefs, seed + ':m31:defs:' + tick);
+
+  const activeSetBonuses: SetBonus[] = [];
+  const activatedIds: string[] = [];
+
+  for (const def of shuffledDefs) {
+    if (!def?.id || !def?.setBonus) continue;
+
+    if (!definitionIsAllowed(def, phase, regime, pressureTier)) continue;
+    if (!qualifies(def, stateAssets)) continue;
+
+    activeSetBonuses.push(def.setBonus);
+    activatedIds.push(def.id);
+
+    emit({
+      event: 'SYNERGY_SET_ACTIVATED',
+      mechanic_id: 'M31',
+      tick,
+      runId: seed,
+      payload: {
+        setId: def.id,
+        name: def.name,
+        phase,
+        regime,
+        pressureTier,
+        tickTier,
+      },
+    });
+  }
+
+  // Combo multiplier: bounded, regime-weighted, decays over run, pulse-aware.
+  const pressureW = PRESSURE_WEIGHTS[pressureTier] ?? 1.0;
+  const phaseW = PHASE_WEIGHTS[phase] ?? 1.0;
+  const regimeW = REGIME_WEIGHTS[regime] ?? 1.0;
+  const regimeMult = REGIME_MULTIPLIERS[regime] ?? 1.0;
+  const exitPulseMult = EXIT_PULSE_MULTIPLIERS[regime] ?? 1.0;
+
+  const decayRate = computeDecayRate(regime, M31_BOUNDS.BASE_DECAY_RATE);
+  const ageFactor = RUN_TOTAL_TICKS <= 0 ? 0 : tick / RUN_TOTAL_TICKS;
+
+  let comboBase = 1.0;
+  for (const def of defs) comboBase += clamp((def.comboWeight ?? 1) * 0.02, 0, 0.10);
+  comboBase += activeSetBonuses.length * 0.08;
+
+  const chaosPenalty = chaos ? 0.92 : 1.0;
+  const pulseBonus = pulseTick ? 1.05 : 1.0;
+
+  const rawCombo =
+    comboBase *
+    pressureW *
+    phaseW *
+    regimeW *
+    regimeMult *
+    exitPulseMult *
+    chaosPenalty *
+    pulseBonus *
+    (1 - clamp(decayRate * ageFactor, 0, 0.90));
+
+  const comboMultiplier = clamp(
+    rawCombo * M31_BOUNDS.EFFECT_MULTIPLIER,
+    1.0, // never below baseline
+    clamp(M31_BOUNDS.MAX_EFFECT / 10_000, 1.0, 5.0), // hard cap 1..5 (bounded)
+  );
+
+  // Use OPPORTUNITY_POOL + DEFAULT_CARD explicitly, independent of award usage.
+  const opportunityPoolSize = OPPORTUNITY_POOL.length;
+  const defaultCardId = DEFAULT_CARD.id;
+
+  // Evidence card (not part of output; used for telemetry/audit visibility)
+  const evidenceCard = pickAwardCard(seed, tick, phase, pressureTier, regime);
+
+  emit({
+    event: 'COMBO_BONUS_APPLIED',
+    mechanic_id: 'M31',
+    tick,
+    runId: seed,
+    payload: {
+      activeSets: activatedIds,
+      activeCount: activeSetBonuses.length,
+      comboMultiplier,
+      phase,
+      regime,
+      pressureTier,
+      tickTier,
+      solvencyStatus,
+      chaos,
+      pulseTick,
+      evidenceCardId: evidenceCard.id,
+      opportunityPoolSize,
+      defaultCardId,
+      auditHash: computeHash(JSON.stringify({
+        seed, tick, phase, regime, pressureTier, tickTier, solvencyStatus,
+        activeSets: activatedIds, comboMultiplier, evidenceCardId: evidenceCard.id,
+        opportunityPoolSize, defaultCardId,
+      }) + ':M31:v1'),
+    },
+  });
+
+  if (activeSetBonuses.length === 0) {
+    emit({
+      event: 'SET_BROKEN',
+      mechanic_id: 'M31',
+      tick,
+      runId: seed,
+      payload: {
+        phase,
+        regime,
+        pressureTier,
+        tickTier,
+        solvencyStatus,
+        reason: stateAssets.length === 0 ? 'NO_ASSETS' : 'NO_QUALIFYING_SETS',
+      },
+    });
+  }
+
+  return {
+    activeSetBonuses,
+    comboMultiplier,
+  };
 }
 
 // ── ML companion hook ─────────────────────────────────────────────────────
 
 export interface M31MLInput {
-  activeSetBonuses?: SetBonus[], comboMultiplier?: number;
+  activeSetBonuses?: SetBonus[];
+  comboMultiplier?: number;
   runId: string;
-  tick:  number;
+  tick: number;
 }
 
 export interface M31MLOutput {
-  score:          number;         // 0–1
-  topFactors:     string[];       // max 5 plain-English factors
-  recommendation: string;         // single sentence
-  auditHash:      string;         // SHA256(inputs+outputs+rulesVersion)
-  confidenceDecay: number;        // 0–1, how fast this signal should decay
+  score: number;          // 0–1
+  topFactors: string[];   // max 5 plain-English factors
+  recommendation: string; // single sentence
+  auditHash: string;      // computeHash(inputs+outputs+rulesVersion)
+  confidenceDecay: number;// 0–1, how fast this signal should decay
 }
 
 /**
@@ -123,13 +505,35 @@ export interface M31MLOutput {
 export async function assetSynergySetResolverMLCompanion(
   input: M31MLInput,
 ): Promise<M31MLOutput> {
-  // Advisory signal — bounded [0,1], no state mutation
-  const score = Math.min(0.99, Math.max(0.01, Object.keys(input).length * 0.05));
+  const tick = clamp(Math.floor(input.tick ?? 0), 0, RUN_TOTAL_TICKS);
+  const runId = String(input.runId ?? '');
+
+  const regime = resolveRegimeAtTick(runId || computeHash(JSON.stringify(input)), tick);
+  const decay = computeDecayRate(regime, M31_BOUNDS.BASE_DECAY_RATE);
+
+  const active = Array.isArray(input.activeSetBonuses) ? input.activeSetBonuses.length : 0;
+  const combo = clamp((input.comboMultiplier as number) ?? 1, 1, 5);
+
+  const score = clamp(0.15 + active * 0.10 + (combo - 1) * 0.25, 0.01, 0.99);
+
+  const topFactors: string[] = [
+    `Active sets=${active}`,
+    `Combo x${combo.toFixed(2)}`,
+    `Regime=${regime}`,
+    `Tick=${tick}/${RUN_TOTAL_TICKS}`,
+    active > 0 ? 'Synergy active' : 'No synergy',
+  ].slice(0, 5);
+
+  const recommendation =
+    active > 0
+      ? 'Maintain the set; avoid selling or swapping tag-critical assets mid-run.'
+      : 'Acquire complementary assets to complete a set and unlock combo scaling.';
+
   return {
     score,
-    topFactors:     ['M31 signal computed', 'advisory only'],
-    recommendation: 'Monitor M31 output and adjust strategy accordingly.',
-    auditHash:      computeHash(JSON.stringify(input) + ':ml:M31'),
-    confidenceDecay: 0.05,
+    topFactors,
+    recommendation,
+    auditHash: computeHash(JSON.stringify({ ...input, regime, decay }) + ':ml:M31'),
+    confidenceDecay: clamp(decay, 0.01, 0.99),
   };
 }

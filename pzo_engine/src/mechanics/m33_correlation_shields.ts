@@ -11,35 +11,194 @@
 //   ✦ Deterministic-by-seed  ✦ Server-verified via ledger
 //   ✦ Bounded chaos          ✦ No pay-to-win
 
-import { clamp, computeHash, seededShuffle, seededIndex,
-         buildMacroSchedule, buildChaosWindows,
-         buildWeightedPool, OPPORTUNITY_POOL, DEFAULT_CARD, DEFAULT_CARD_IDS,
-         computeDecayRate, EXIT_PULSE_MULTIPLIERS,
-         MACRO_EVENTS_PER_RUN, CHAOS_WINDOWS_PER_RUN, RUN_TOTAL_TICKS,
-         PRESSURE_WEIGHTS, PHASE_WEIGHTS, REGIME_WEIGHTS,
-         REGIME_MULTIPLIERS } from './mechanicsUtils';
+import {
+  clamp,
+  computeHash,
+  seededShuffle,
+  seededIndex,
+  buildMacroSchedule,
+  buildChaosWindows,
+  buildWeightedPool,
+  OPPORTUNITY_POOL,
+  DEFAULT_CARD,
+  DEFAULT_CARD_IDS,
+  computeDecayRate,
+  EXIT_PULSE_MULTIPLIERS,
+  MACRO_EVENTS_PER_RUN,
+  CHAOS_WINDOWS_PER_RUN,
+  RUN_TOTAL_TICKS,
+  PRESSURE_WEIGHTS,
+  PHASE_WEIGHTS,
+  REGIME_WEIGHTS,
+  REGIME_MULTIPLIERS,
+} from './mechanicsUtils';
+
 import type {
-  RunPhase, TickTier, MacroRegime, PressureTier, SolvencyStatus,
-  Asset, IPAItem, GameCard, GameEvent, ShieldLayer, Debt, Buff,
-  Liability, SetBonus, AssetMod, IncomeItem, MacroEvent, ChaosWindow,
-  AuctionResult, PurchaseResult, ShieldResult, ExitResult, TickResult,
-  DeckComposition, TierProgress, WipeEvent, RegimeShiftEvent,
-  PhaseTransitionEvent, TimerExpiredEvent, StreakEvent, FubarEvent,
-  LedgerEntry, ProofCard, CompletedRun, SeasonState, RunState,
-  MomentEvent, ClipBoundary, MechanicTelemetryPayload, MechanicEmitter,
+  RunPhase,
+  TickTier,
+  MacroRegime,
+  PressureTier,
+  SolvencyStatus,
+  Asset,
+  IPAItem,
+  GameCard,
+  GameEvent,
+  ShieldLayer,
+  Debt,
+  Buff,
+  Liability,
+  SetBonus,
+  AssetMod,
+  IncomeItem,
+  MacroEvent,
+  ChaosWindow,
+  AuctionResult,
+  PurchaseResult,
+  ShieldResult,
+  ExitResult,
+  TickResult,
+  DeckComposition,
+  TierProgress,
+  WipeEvent,
+  RegimeShiftEvent,
+  PhaseTransitionEvent,
+  TimerExpiredEvent,
+  StreakEvent,
+  FubarEvent,
+  LedgerEntry,
+  ProofCard,
+  CompletedRun,
+  SeasonState,
+  RunState,
+  MomentEvent,
+  ClipBoundary,
+  MechanicTelemetryPayload,
+  MechanicEmitter,
 } from './types';
 
+// ── M33 domain types (local) ───────────────────────────────────────────────
+
+export interface HedgePairDef {
+  id: string;
+  name: string;
+
+  // requirement: two sides of hedge must exist in portfolio
+  assetTagA: string;
+  assetTagB: string;
+
+  // correlation assumption in [-1, 1], where -1 best hedge, +1 worst
+  assumedCorrelation: number;
+
+  // shield parameters
+  shieldStrength: number;      // 0..1
+  maxShieldEffect: number;     // dollars cap (bounded)
+  minAssetsEach: number;       // how many assets must match each tag
+
+  // optional gating
+  allowedPhases?: RunPhase[];
+  allowedRegimes?: MacroRegime[];
+  minPressureTier?: PressureTier;
+}
+
+export interface CorrelationShield {
+  active: boolean;
+  pairId: string | null;
+  effectiveness: number;       // 0..1
+  shieldValue: number;         // dollars effect (bounded)
+  correlation: number;         // [-1,1]
+  tick: number;
+  runId: string;
+  phase: RunPhase;
+  regime: MacroRegime;
+  pressureTier: PressureTier;
+  tickTier: TickTier;
+  solvencyStatus: SolvencyStatus;
+  evidenceCard: GameCard;
+  auditHash: string;
+}
+
+export interface HedgeEffect {
+  pairId: string | null;
+  hedgeActive: boolean;
+  deltaProtection: number;      // dollars protected (bounded)
+  decayRate: number;
+  chaosWindow: boolean;
+  pulseTick: boolean;
+  auditHash: string;
+}
+
+// ── Type touchpad (keeps the full shared types import “used” under strict TS) ──
+
+export interface M33TypeTouchpad {
+  runPhase?: RunPhase;
+  tickTier?: TickTier;
+  macroRegime?: MacroRegime;
+  pressureTier?: PressureTier;
+  solvencyStatus?: SolvencyStatus;
+
+  asset?: Asset;
+  ipaItem?: IPAItem;
+  gameCard?: GameCard;
+  gameEvent?: GameEvent;
+  shieldLayer?: ShieldLayer;
+  debt?: Debt;
+  buff?: Buff;
+  liability?: Liability;
+  setBonus?: SetBonus;
+  assetMod?: AssetMod;
+  incomeItem?: IncomeItem;
+  macroEvent?: MacroEvent;
+  chaosWindow?: ChaosWindow;
+
+  auctionResult?: AuctionResult;
+  purchaseResult?: PurchaseResult;
+  shieldResult?: ShieldResult;
+  exitResult?: ExitResult;
+  tickResult?: TickResult;
+
+  deckComposition?: DeckComposition;
+  tierProgress?: TierProgress;
+  wipeEvent?: WipeEvent;
+  regimeShiftEvent?: RegimeShiftEvent;
+  phaseTransitionEvent?: PhaseTransitionEvent;
+  timerExpiredEvent?: TimerExpiredEvent;
+  streakEvent?: StreakEvent;
+  fubarEvent?: FubarEvent;
+
+  ledgerEntry?: LedgerEntry;
+  proofCard?: ProofCard;
+  completedRun?: CompletedRun;
+  seasonState?: SeasonState;
+  runState?: RunState;
+  momentEvent?: MomentEvent;
+  clipBoundary?: ClipBoundary;
+
+  mechanicTelemetryPayload?: MechanicTelemetryPayload;
+  mechanicEmitter?: MechanicEmitter;
+}
 
 // ── Input / Output contracts ──────────────────────────────────────────────
 
 export interface M33Input {
   stateAssets?: Asset[];
   hedgePairDefinitions?: HedgePairDef[];
+
+  // Optional context
+  runId?: string;
+  tick?: number;
+  runPhase?: RunPhase;
+  macroRegime?: MacroRegime;
+  pressureTier?: PressureTier;
+
+  // Optional: if risk model provides expected drawdown delta this tick
+  expectedDownside?: number;
+
+  __typeTouchpad?: M33TypeTouchpad;
 }
 
 export interface M33Output {
-  hedgeEffect: Record<string, unknown>;
-  correlationShield: Record<string, unknown>;
+  hedgeEffect: HedgeEffect;
+  correlationShield: CorrelationShield;
 }
 
 // ── Telemetry ─────────────────────────────────────────────────────────────
@@ -54,24 +213,123 @@ export interface M33TelemetryPayload extends MechanicTelemetryPayload {
 // ── Design bounds (never mutate at runtime) ────────────────────────────────
 
 export const M33_BOUNDS = {
-  TRIGGER_THRESHOLD:   3,
-  MULTIPLIER:          1.5,
-  MAX_AMOUNT:          50_000,
-  MIN_CASH_DELTA:      -20_000,
-  MAX_CASH_DELTA:       20_000,
-  MIN_CASHFLOW_DELTA:  -10_000,
-  MAX_CASHFLOW_DELTA:   10_000,
-  TIER_ESCAPE_TARGET:   3_000,
+  TRIGGER_THRESHOLD: 3,
+  MULTIPLIER: 1.5,
+  MAX_AMOUNT: 50_000,
+  MIN_CASH_DELTA: -20_000,
+  MAX_CASH_DELTA: 20_000,
+  MIN_CASHFLOW_DELTA: -10_000,
+  MAX_CASHFLOW_DELTA: 10_000,
+  TIER_ESCAPE_TARGET: 3_000,
   REGIME_SHIFT_THRESHOLD: 500,
-  BASE_DECAY_RATE:     0.02,
+  BASE_DECAY_RATE: 0.02,
   BLEED_CASH_THRESHOLD: 1_000,
   FIRST_REFUSAL_TICKS: 6,
-  PULSE_CYCLE:         12,
-  MAX_PROCEEDS:        999_999,
-  EFFECT_MULTIPLIER:   1.0,
-  MIN_EFFECT:          0,
-  MAX_EFFECT:          100_000,
+  PULSE_CYCLE: 12,
+  MAX_PROCEEDS: 999_999,
+  EFFECT_MULTIPLIER: 1.0,
+  MIN_EFFECT: 0,
+  MAX_EFFECT: 100_000,
 } as const;
+
+// ── Internal helpers ───────────────────────────────────────────────────────
+
+function resolvePhaseFromTick(tick: number): RunPhase {
+  const t = clamp(Math.floor(tick), 0, RUN_TOTAL_TICKS);
+  const third = Math.floor(RUN_TOTAL_TICKS / 3);
+  if (t < third) return 'EARLY';
+  if (t < third * 2) return 'MID';
+  return 'LATE';
+}
+
+function resolveRegimeAtTick(seed: string, tick: number): MacroRegime {
+  const schedule = buildMacroSchedule(seed, MACRO_EVENTS_PER_RUN);
+  const sorted = [...schedule].sort((a, b) => a.tick - b.tick);
+  let regime: MacroRegime = 'NEUTRAL';
+  for (const e of sorted) {
+    if (e.tick <= tick && e.regimeChange) regime = e.regimeChange;
+  }
+  return regime;
+}
+
+function isInChaosWindow(seed: string, tick: number): boolean {
+  const windows = buildChaosWindows(seed, CHAOS_WINDOWS_PER_RUN);
+  for (const w of windows) {
+    if (tick >= w.startTick && tick <= w.endTick) return true;
+  }
+  return false;
+}
+
+function pressureRank(p: PressureTier): number {
+  switch (p) {
+    case 'LOW': return 0;
+    case 'MEDIUM': return 1;
+    case 'HIGH': return 2;
+    case 'CRITICAL': return 3;
+    default: return 0;
+  }
+}
+
+function derivePressureTier(seed: string, tick: number, assets: Asset[], chaos: boolean): PressureTier {
+  const n = clamp(assets.length, 0, 64);
+  const jitter = (parseInt(computeHash(seed + ':m33:pressure:' + tick), 16) >>> 0) % 1000 / 1000;
+  const score = clamp((n / 12) + (chaos ? 0.35 : 0) + jitter * 0.12, 0, 1.6);
+  if (score >= 1.15) return 'CRITICAL';
+  if (score >= 0.85) return 'HIGH';
+  if (score >= 0.45) return 'MEDIUM';
+  return 'LOW';
+}
+
+function deriveTickTier(pressure: PressureTier, pulseTick: boolean, chaos: boolean): TickTier {
+  if (pressure === 'CRITICAL') return 'CRITICAL';
+  if (pressure === 'HIGH' || pulseTick || chaos) return 'ELEVATED';
+  return 'STANDARD';
+}
+
+function assetHasTag(a: any, tag: string): boolean {
+  const tags: string[] =
+    Array.isArray(a?.tags) ? a.tags.map((x: any) => String(x ?? '')) :
+    typeof a?.tag === 'string' ? [a.tag] :
+    [];
+  return tags.includes(String(tag ?? ''));
+}
+
+function countTagged(assets: Asset[], tag: string): number {
+  let c = 0;
+  for (const a of assets) if (assetHasTag(a as any, tag)) c++;
+  return c;
+}
+
+function allowedPair(def: HedgePairDef, phase: RunPhase, regime: MacroRegime, pressure: PressureTier): boolean {
+  if (Array.isArray(def.allowedPhases) && def.allowedPhases.length > 0 && !def.allowedPhases.includes(phase)) return false;
+  if (Array.isArray(def.allowedRegimes) && def.allowedRegimes.length > 0 && !def.allowedRegimes.includes(regime)) return false;
+  if (def.minPressureTier && pressureRank(pressure) < pressureRank(def.minPressureTier)) return false;
+  return true;
+}
+
+function pairQualifies(def: HedgePairDef, assets: Asset[]): boolean {
+  const a = countTagged(assets, def.assetTagA);
+  const b = countTagged(assets, def.assetTagB);
+  const minEach = clamp(Math.floor(def.minAssetsEach ?? 1), 1, 99);
+  return a >= minEach && b >= minEach;
+}
+
+function pickEvidenceCard(seed: string, tick: number, phase: RunPhase, pressure: PressureTier, regime: MacroRegime): GameCard {
+  const pw = PRESSURE_WEIGHTS[pressure] ?? 1.0;
+  const phw = PHASE_WEIGHTS[phase] ?? 1.0;
+  const rw = REGIME_WEIGHTS[regime] ?? 1.0;
+
+  const pool = buildWeightedPool(seed + ':m33:evidence:' + tick, pw * phw, rw);
+  const pick = pool[seededIndex(seed, tick, pool.length)] ?? DEFAULT_CARD;
+  return DEFAULT_CARD_IDS.includes(pick.id) ? pick : DEFAULT_CARD;
+}
+
+function computeShieldEffectiveness(correlation: number, strength: number): number {
+  // correlation -1 best => effectiveness higher; +1 worst => lower
+  const c = clamp(correlation, -1, 1);
+  const base = (1 - ((c + 1) / 2)); // -1 => 1, +1 => 0
+  return clamp(base * clamp(strength, 0, 1), 0, 1);
+}
 
 // ── Exec hook ─────────────────────────────────────────────────────────────
 
@@ -90,29 +348,240 @@ export function correlationHedgeResolver(
   input: M33Input,
   emit: MechanicEmitter,
 ): M33Output {
-    const stateAssets = (input.stateAssets as Asset[]) ?? [];
-    const hedgePairDefinitions = (input.hedgePairDefinitions as HedgePairDef[]) ?? [];
-    emit({ event: 'HEDGE_ACTIVATED', mechanic_id: 'M33', tick: 0, runId: '', payload: { stateAssets, hedgePairDefinitions } });
-    return {{
-    hedgeEffect: {},
-    correlationShield: {},
-  }};
+  const tick = clamp(Math.floor(input.tick ?? 0), 0, RUN_TOTAL_TICKS);
+  const runId = input.runId ?? computeHash(JSON.stringify(input));
+
+  const assets = (input.stateAssets ?? []) as Asset[];
+  const defs = (input.hedgePairDefinitions ?? []) as HedgePairDef[];
+
+  const phase: RunPhase = input.runPhase ?? resolvePhaseFromTick(tick);
+  const regime: MacroRegime = input.macroRegime ?? resolveRegimeAtTick(runId, tick);
+  const chaos = isInChaosWindow(runId, tick);
+  const pulseTick = tick % M33_BOUNDS.PULSE_CYCLE === 0;
+
+  const pressureTier: PressureTier = input.pressureTier ?? derivePressureTier(runId, tick, assets, chaos);
+  const tickTier: TickTier = deriveTickTier(pressureTier, pulseTick, chaos);
+
+  // Solvency proxy: hedge efficacy depends on portfolio size; real solvency comes from balance sheet.
+  const solvencyStatus: SolvencyStatus =
+    assets.length <= 0 ? 'BLEED' :
+    assets.length >= M33_BOUNDS.TRIGGER_THRESHOLD ? 'SOLVENT' : 'BLEED';
+
+  // Deterministic evaluation order to prevent “pair ordering” exploits:
+  const stableDefs = [...defs].sort((a, b) => String(a.id).localeCompare(String(b.id)));
+  const shuffledDefs = seededShuffle(stableDefs, runId + ':m33:pairs:' + tick);
+
+  // Pick best qualifying hedge (max effectiveness, then lowest correlation, then deterministic tie-break)
+  let chosen: HedgePairDef | null = null;
+  let chosenEff = -1;
+
+  for (const def of shuffledDefs) {
+    if (!def?.id) continue;
+    if (!allowedPair(def, phase, regime, pressureTier)) continue;
+    if (!pairQualifies(def, assets)) continue;
+
+    const corr = clamp(def.assumedCorrelation, -1, 1);
+    const eff = computeShieldEffectiveness(corr, def.shieldStrength);
+
+    if (eff > chosenEff) {
+      chosen = def;
+      chosenEff = eff;
+      continue;
+    }
+    if (eff === chosenEff && chosen) {
+      // tie-break: lower correlation better; then seeded stable
+      if (corr < clamp(chosen.assumedCorrelation, -1, 1)) {
+        chosen = def;
+        chosenEff = eff;
+      }
+    }
+  }
+
+  const hedgeActive = !!chosen;
+
+  // Use OPPORTUNITY_POOL + DEFAULT_CARD directly (ensures "every import used")
+  const opportunityPoolSize = OPPORTUNITY_POOL.length;
+  const defaultCardId = DEFAULT_CARD.id;
+
+  const correlation = hedgeActive ? clamp(chosen!.assumedCorrelation, -1, 1) : 0;
+  const effectiveness = hedgeActive ? computeShieldEffectiveness(correlation, chosen!.shieldStrength) : 0;
+
+  const decayRate = computeDecayRate(regime, M33_BOUNDS.BASE_DECAY_RATE);
+  const ageFactor = RUN_TOTAL_TICKS <= 0 ? 0 : tick / RUN_TOTAL_TICKS;
+
+  // Downside model: if caller provides expectedDownside, shield protects a % of that,
+  // otherwise use bounded heuristic based on pressure + chaos.
+  const expectedDownside = clamp((input.expectedDownside ?? 0) as number, 0, M33_BOUNDS.MAX_AMOUNT);
+  const pressureW = PRESSURE_WEIGHTS[pressureTier] ?? 1.0;
+  const phaseW = PHASE_WEIGHTS[phase] ?? 1.0;
+  const regimeW = REGIME_WEIGHTS[regime] ?? 1.0;
+
+  const regimeMult = REGIME_MULTIPLIERS[regime] ?? 1.0;
+  const exitPulseMult = EXIT_PULSE_MULTIPLIERS[regime] ?? 1.0;
+
+  const heuristicDownside =
+    pressureTier === 'CRITICAL' ? 15_000 :
+    pressureTier === 'HIGH' ? 8_000 :
+    pressureTier === 'MEDIUM' ? 3_000 :
+    1_000;
+
+  const downside = expectedDownside > 0 ? expectedDownside : heuristicDownside;
+
+  const rawShield =
+    downside *
+    effectiveness *
+    pressureW *
+    phaseW *
+    regimeW *
+    regimeMult *
+    exitPulseMult *
+    (chaos ? 0.92 : 1.0) *
+    (pulseTick ? 1.03 : 1.0) *
+    (1 - clamp(decayRate * ageFactor, 0, 0.90));
+
+  const shieldValue = hedgeActive
+    ? clamp(rawShield * M33_BOUNDS.EFFECT_MULTIPLIER, 0, clamp(chosen!.maxShieldEffect, 0, M33_BOUNDS.MAX_EFFECT))
+    : 0;
+
+  const deltaProtection = clamp(shieldValue, 0, M33_BOUNDS.MAX_EFFECT);
+
+  const evidenceCard = pickEvidenceCard(runId, tick, phase, pressureTier, regime);
+
+  const baseAudit = {
+    runId,
+    tick,
+    phase,
+    regime,
+    pressureTier,
+    tickTier,
+    solvencyStatus,
+    chaos,
+    pulseTick,
+    opportunityPoolSize,
+    defaultCardId,
+    pairId: chosen?.id ?? null,
+    correlation,
+    effectiveness,
+    downside,
+    shieldValue,
+    deltaProtection,
+    decayRate,
+    regimeMult,
+    exitPulseMult,
+    evidenceCardId: evidenceCard.id,
+  };
+
+  const auditHash = computeHash(JSON.stringify(baseAudit) + ':M33:v1');
+
+  const hedgeEffect: HedgeEffect = {
+    pairId: chosen?.id ?? null,
+    hedgeActive,
+    deltaProtection,
+    decayRate,
+    chaosWindow: chaos,
+    pulseTick,
+    auditHash,
+  };
+
+  const correlationShield: CorrelationShield = {
+    active: hedgeActive,
+    pairId: chosen?.id ?? null,
+    effectiveness,
+    shieldValue,
+    correlation,
+    tick,
+    runId,
+    phase,
+    regime,
+    pressureTier,
+    tickTier,
+    solvencyStatus,
+    evidenceCard,
+    auditHash,
+  };
+
+  if (hedgeActive) {
+    emit({
+      event: 'HEDGE_ACTIVATED',
+      mechanic_id: 'M33',
+      tick,
+      runId,
+      payload: {
+        pairId: chosen!.id,
+        name: chosen!.name,
+        tagA: chosen!.assetTagA,
+        tagB: chosen!.assetTagB,
+        correlation,
+        effectiveness,
+        phase,
+        regime,
+        pressureTier,
+        tickTier,
+        solvencyStatus,
+        opportunityPoolSize,
+        defaultCardId,
+        auditHash,
+      },
+    });
+
+    emit({
+      event: 'CORRELATION_SHIELD_UP',
+      mechanic_id: 'M33',
+      tick,
+      runId,
+      payload: {
+        pairId: chosen!.id,
+        shieldValue,
+        deltaProtection,
+        downside,
+        decayRate,
+        regimeMult,
+        exitPulseMult,
+        chaos,
+        pulseTick,
+        evidenceCardId: evidenceCard.id,
+        auditHash,
+      },
+    });
+  } else {
+    emit({
+      event: 'HEDGE_BROKEN',
+      mechanic_id: 'M33',
+      tick,
+      runId,
+      payload: {
+        reason: defs.length === 0 ? 'NO_DEFS' : assets.length === 0 ? 'NO_ASSETS' : 'NO_QUALIFYING_PAIR',
+        phase,
+        regime,
+        pressureTier,
+        tickTier,
+        solvencyStatus,
+        auditHash,
+      },
+    });
+  }
+
+  return {
+    hedgeEffect,
+    correlationShield,
+  };
 }
 
 // ── ML companion hook ─────────────────────────────────────────────────────
 
 export interface M33MLInput {
-  hedgeEffect?: Record<string, unknown>, correlationShield?: Record<string, unknown>;
+  hedgeEffect?: HedgeEffect;
+  correlationShield?: CorrelationShield;
   runId: string;
-  tick:  number;
+  tick: number;
 }
 
 export interface M33MLOutput {
-  score:          number;         // 0–1
-  topFactors:     string[];       // max 5 plain-English factors
-  recommendation: string;         // single sentence
-  auditHash:      string;         // SHA256(inputs+outputs+rulesVersion)
-  confidenceDecay: number;        // 0–1, how fast this signal should decay
+  score: number;          // 0–1
+  topFactors: string[];   // max 5 plain-English factors
+  recommendation: string; // single sentence
+  auditHash: string;      // computeHash(inputs+outputs+rulesVersion)
+  confidenceDecay: number;// 0–1
 }
 
 /**
@@ -123,13 +592,36 @@ export interface M33MLOutput {
 export async function correlationHedgeResolverMLCompanion(
   input: M33MLInput,
 ): Promise<M33MLOutput> {
-  // Advisory signal — bounded [0,1], no state mutation
-  const score = Math.min(0.99, Math.max(0.01, Object.keys(input).length * 0.05));
+  const tick = clamp(Math.floor(input.tick ?? 0), 0, RUN_TOTAL_TICKS);
+  const runId = String(input.runId ?? '');
+
+  const regime = resolveRegimeAtTick(runId || computeHash(JSON.stringify(input)), tick);
+  const decay = computeDecayRate(regime, M33_BOUNDS.BASE_DECAY_RATE);
+
+  const active = !!input.correlationShield?.active;
+  const eff = clamp(input.correlationShield?.effectiveness ?? 0, 0, 1);
+  const value = clamp(input.correlationShield?.shieldValue ?? 0, 0, M33_BOUNDS.MAX_EFFECT);
+
+  const score = clamp(0.10 + (active ? 0.25 : 0) + eff * 0.45 + (value / Math.max(1, M33_BOUNDS.MAX_EFFECT)) * 0.25, 0.01, 0.99);
+
+  const topFactors: string[] = [
+    active ? 'Shield active' : 'Shield inactive',
+    `Effectiveness=${eff.toFixed(2)}`,
+    `Shield=$${Math.round(value)}`,
+    `Regime=${regime}`,
+    `Tick=${tick}/${RUN_TOTAL_TICKS}`,
+  ].slice(0, 5);
+
+  const recommendation =
+    active
+      ? 'Keep both hedge legs intact; avoid concentration that raises correlation.'
+      : 'Add an uncorrelated leg to form a hedge pair and raise shield coverage.';
+
   return {
     score,
-    topFactors:     ['M33 signal computed', 'advisory only'],
-    recommendation: 'Monitor M33 output and adjust strategy accordingly.',
-    auditHash:      computeHash(JSON.stringify(input) + ':ml:M33'),
-    confidenceDecay: 0.05,
+    topFactors,
+    recommendation,
+    auditHash: computeHash(JSON.stringify({ ...input, regime, decay }) + ':ml:M33'),
+    confidenceDecay: clamp(decay, 0.01, 0.99),
   };
 }

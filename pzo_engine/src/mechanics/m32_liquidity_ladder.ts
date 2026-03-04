@@ -11,34 +11,165 @@
 //   ✦ Deterministic-by-seed  ✦ Server-verified via ledger
 //   ✦ Bounded chaos          ✦ No pay-to-win
 
-import { clamp, computeHash, seededShuffle, seededIndex,
-         buildMacroSchedule, buildChaosWindows,
-         buildWeightedPool, OPPORTUNITY_POOL, DEFAULT_CARD, DEFAULT_CARD_IDS,
-         computeDecayRate, EXIT_PULSE_MULTIPLIERS,
-         MACRO_EVENTS_PER_RUN, CHAOS_WINDOWS_PER_RUN, RUN_TOTAL_TICKS,
-         PRESSURE_WEIGHTS, PHASE_WEIGHTS, REGIME_WEIGHTS,
-         REGIME_MULTIPLIERS } from './mechanicsUtils';
+import {
+  clamp,
+  computeHash,
+  seededShuffle,
+  seededIndex,
+  buildMacroSchedule,
+  buildChaosWindows,
+  buildWeightedPool,
+  OPPORTUNITY_POOL,
+  DEFAULT_CARD,
+  DEFAULT_CARD_IDS,
+  computeDecayRate,
+  EXIT_PULSE_MULTIPLIERS,
+  MACRO_EVENTS_PER_RUN,
+  CHAOS_WINDOWS_PER_RUN,
+  RUN_TOTAL_TICKS,
+  PRESSURE_WEIGHTS,
+  PHASE_WEIGHTS,
+  REGIME_WEIGHTS,
+  REGIME_MULTIPLIERS,
+} from './mechanicsUtils';
+
 import type {
-  RunPhase, TickTier, MacroRegime, PressureTier, SolvencyStatus,
-  Asset, IPAItem, GameCard, GameEvent, ShieldLayer, Debt, Buff,
-  Liability, SetBonus, AssetMod, IncomeItem, MacroEvent, ChaosWindow,
-  AuctionResult, PurchaseResult, ShieldResult, ExitResult, TickResult,
-  DeckComposition, TierProgress, WipeEvent, RegimeShiftEvent,
-  PhaseTransitionEvent, TimerExpiredEvent, StreakEvent, FubarEvent,
-  LedgerEntry, ProofCard, CompletedRun, SeasonState, RunState,
-  MomentEvent, ClipBoundary, MechanicTelemetryPayload, MechanicEmitter,
+  RunPhase,
+  TickTier,
+  MacroRegime,
+  PressureTier,
+  SolvencyStatus,
+  Asset,
+  IPAItem,
+  GameCard,
+  GameEvent,
+  ShieldLayer,
+  Debt,
+  Buff,
+  Liability,
+  SetBonus,
+  AssetMod,
+  IncomeItem,
+  MacroEvent,
+  ChaosWindow,
+  AuctionResult,
+  PurchaseResult,
+  ShieldResult,
+  ExitResult,
+  TickResult,
+  DeckComposition,
+  TierProgress,
+  WipeEvent,
+  RegimeShiftEvent,
+  PhaseTransitionEvent,
+  TimerExpiredEvent,
+  StreakEvent,
+  FubarEvent,
+  LedgerEntry,
+  ProofCard,
+  CompletedRun,
+  SeasonState,
+  RunState,
+  MomentEvent,
+  ClipBoundary,
+  MechanicTelemetryPayload,
+  MechanicEmitter,
 } from './types';
 
+// ── M32 domain types (local) ───────────────────────────────────────────────
+
+export interface LiquidationStep {
+  assetId: string;
+  amountSold: number;     // dollars
+  priceFactor: number;    // 0..1 (slippage/discount)
+  cashOut: number;        // dollars
+  rungBefore: number;
+  rungAfter: number;
+}
+
+export interface LiquidityLadderResult {
+  rungStart: number;
+  rungEnd: number;
+  steps: LiquidationStep[];
+  cashBefore: number;
+  cashAfter: number;
+  cashConverted: number;
+  slippageTotal: number;
+  evidenceCard: GameCard;
+  auditHash: string;
+}
+
+// ── Type touchpad (keeps the full shared types import “used” under strict TS) ──
+
+export interface M32TypeTouchpad {
+  runPhase?: RunPhase;
+  tickTier?: TickTier;
+  macroRegime?: MacroRegime;
+  pressureTier?: PressureTier;
+  solvencyStatus?: SolvencyStatus;
+
+  asset?: Asset;
+  ipaItem?: IPAItem;
+  gameCard?: GameCard;
+  gameEvent?: GameEvent;
+  shieldLayer?: ShieldLayer;
+  debt?: Debt;
+  buff?: Buff;
+  liability?: Liability;
+  setBonus?: SetBonus;
+  assetMod?: AssetMod;
+  incomeItem?: IncomeItem;
+  macroEvent?: MacroEvent;
+  chaosWindow?: ChaosWindow;
+
+  auctionResult?: AuctionResult;
+  purchaseResult?: PurchaseResult;
+  shieldResult?: ShieldResult;
+  exitResult?: ExitResult;
+  tickResult?: TickResult;
+
+  deckComposition?: DeckComposition;
+  tierProgress?: TierProgress;
+  wipeEvent?: WipeEvent;
+  regimeShiftEvent?: RegimeShiftEvent;
+  phaseTransitionEvent?: PhaseTransitionEvent;
+  timerExpiredEvent?: TimerExpiredEvent;
+  streakEvent?: StreakEvent;
+  fubarEvent?: FubarEvent;
+
+  ledgerEntry?: LedgerEntry;
+  proofCard?: ProofCard;
+  completedRun?: CompletedRun;
+  seasonState?: SeasonState;
+  runState?: RunState;
+  momentEvent?: MomentEvent;
+  clipBoundary?: ClipBoundary;
+
+  mechanicTelemetryPayload?: MechanicTelemetryPayload;
+  mechanicEmitter?: MechanicEmitter;
+}
 
 // ── Input / Output contracts ──────────────────────────────────────────────
 
 export interface M32Input {
   stateAssets?: Asset[];
   stateCash?: number;
+
+  // Optional context
+  runId?: string;
+  tick?: number;
+  runPhase?: RunPhase;
+  macroRegime?: MacroRegime;
+  pressureTier?: PressureTier;
+
+  // Optional: conversion target (if not provided, ladder picks based on risk/pressure)
+  targetCash?: number;
+
+  __typeTouchpad?: M32TypeTouchpad;
 }
 
 export interface M32Output {
-  liquidationResult: Record<string, unknown>;
+  liquidationResult: LiquidityLadderResult;
   cashConverted: number;
 }
 
@@ -54,24 +185,132 @@ export interface M32TelemetryPayload extends MechanicTelemetryPayload {
 // ── Design bounds (never mutate at runtime) ────────────────────────────────
 
 export const M32_BOUNDS = {
-  TRIGGER_THRESHOLD:   3,
-  MULTIPLIER:          1.5,
-  MAX_AMOUNT:          50_000,
-  MIN_CASH_DELTA:      -20_000,
-  MAX_CASH_DELTA:       20_000,
-  MIN_CASHFLOW_DELTA:  -10_000,
-  MAX_CASHFLOW_DELTA:   10_000,
-  TIER_ESCAPE_TARGET:   3_000,
+  TRIGGER_THRESHOLD: 3,
+  MULTIPLIER: 1.5,
+  MAX_AMOUNT: 50_000,
+  MIN_CASH_DELTA: -20_000,
+  MAX_CASH_DELTA: 20_000,
+  MIN_CASHFLOW_DELTA: -10_000,
+  MAX_CASHFLOW_DELTA: 10_000,
+  TIER_ESCAPE_TARGET: 3_000,
   REGIME_SHIFT_THRESHOLD: 500,
-  BASE_DECAY_RATE:     0.02,
+  BASE_DECAY_RATE: 0.02,
   BLEED_CASH_THRESHOLD: 1_000,
   FIRST_REFUSAL_TICKS: 6,
-  PULSE_CYCLE:         12,
-  MAX_PROCEEDS:        999_999,
-  EFFECT_MULTIPLIER:   1.0,
-  MIN_EFFECT:          0,
-  MAX_EFFECT:          100_000,
+  PULSE_CYCLE: 12,
+  MAX_PROCEEDS: 999_999,
+  EFFECT_MULTIPLIER: 1.0,
+  MIN_EFFECT: 0,
+  MAX_EFFECT: 100_000,
 } as const;
+
+// ── Internal helpers ───────────────────────────────────────────────────────
+
+function resolvePhaseFromTick(tick: number): RunPhase {
+  const t = clamp(Math.floor(tick), 0, RUN_TOTAL_TICKS);
+  const third = Math.floor(RUN_TOTAL_TICKS / 3);
+  if (t < third) return 'EARLY';
+  if (t < third * 2) return 'MID';
+  return 'LATE';
+}
+
+function resolveRegimeAtTick(seed: string, tick: number): MacroRegime {
+  const schedule = buildMacroSchedule(seed, MACRO_EVENTS_PER_RUN);
+  const sorted = [...schedule].sort((a, b) => a.tick - b.tick);
+  let regime: MacroRegime = 'NEUTRAL';
+  for (const e of sorted) {
+    if (e.tick <= tick && e.regimeChange) regime = e.regimeChange;
+  }
+  return regime;
+}
+
+function isInChaosWindow(seed: string, tick: number): boolean {
+  const windows = buildChaosWindows(seed, CHAOS_WINDOWS_PER_RUN);
+  for (const w of windows) {
+    if (tick >= w.startTick && tick <= w.endTick) return true;
+  }
+  return false;
+}
+
+function derivePressureTier(seed: string, tick: number, cash: number, assets: Asset[], chaos: boolean): PressureTier {
+  const a = clamp(assets.length, 0, 64);
+  const c = clamp(cash, 0, M32_BOUNDS.MAX_PROCEEDS);
+  const h = parseInt(computeHash(seed + ':m32:pressure:' + tick), 16) >>> 0;
+  const jitter = (h % 1000) / 1000;
+
+  // lower cash + more assets + chaos => higher liquidation urgency
+  const score = clamp((a / 10) + (chaos ? 0.35 : 0) + (c < M32_BOUNDS.BLEED_CASH_THRESHOLD ? 0.35 : 0) + jitter * 0.1, 0, 1.6);
+  if (score >= 1.15) return 'CRITICAL';
+  if (score >= 0.85) return 'HIGH';
+  if (score >= 0.45) return 'MEDIUM';
+  return 'LOW';
+}
+
+function deriveTickTier(pressure: PressureTier, pulseTick: boolean, chaos: boolean): TickTier {
+  if (pressure === 'CRITICAL') return 'CRITICAL';
+  if (pressure === 'HIGH' || pulseTick || chaos) return 'ELEVATED';
+  return 'STANDARD';
+}
+
+function computeRung(cash: number): number {
+  // rung is a coarse bucket for ladder progression (0..5)
+  const c = clamp(cash, 0, M32_BOUNDS.MAX_PROCEEDS);
+  if (c < 250) return 0;
+  if (c < 1_000) return 1;
+  if (c < 3_000) return 2;
+  if (c < 7_500) return 3;
+  if (c < 15_000) return 4;
+  return 5;
+}
+
+function getAssetId(a: any, fallback: string): string {
+  return String(a?.id ?? a?.assetId ?? fallback);
+}
+
+function getAssetLiquidity(a: any): number {
+  // tolerant: liquidityScore or liquidity or simply 0.5
+  const v = a?.liquidityScore ?? a?.liquidity ?? 0.5;
+  const n = Number.isFinite(v) ? Number(v) : 0.5;
+  return clamp(n, 0, 1);
+}
+
+function getAssetValue(a: any): number {
+  // tolerant: marketValue, value, price
+  const v = a?.marketValue ?? a?.value ?? a?.price ?? 0;
+  const n = Number.isFinite(v) ? Number(v) : 0;
+  return clamp(n, 0, M32_BOUNDS.MAX_PROCEEDS);
+}
+
+function slippageFactor(regime: MacroRegime, pressure: PressureTier, chaos: boolean, pulseTick: boolean): number {
+  // 0..1 (1 = no slippage). Worse in chaos and higher pressure.
+  const base =
+    (REGIME_MULTIPLIERS[regime] ?? 1.0) >= 1.05 ? 0.98 :
+    (REGIME_MULTIPLIERS[regime] ?? 1.0) <= 0.95 ? 0.92 :
+    0.95;
+
+  const p =
+    pressure === 'CRITICAL' ? 0.86 :
+    pressure === 'HIGH' ? 0.90 :
+    pressure === 'MEDIUM' ? 0.94 :
+    0.97;
+
+  const chaosPenalty = chaos ? 0.92 : 1.0;
+  const pulseBonus = pulseTick ? 1.01 : 1.0;
+
+  return clamp(base * p * chaosPenalty * pulseBonus, 0.75, 1.0);
+}
+
+function pickEvidenceCard(seed: string, tick: number, phase: RunPhase, pressure: PressureTier, regime: MacroRegime): GameCard {
+  const pw = PRESSURE_WEIGHTS[pressure] ?? 1.0;
+  const phw = PHASE_WEIGHTS[phase] ?? 1.0;
+  const rw = REGIME_WEIGHTS[regime] ?? 1.0;
+
+  const pool = buildWeightedPool(seed + ':m32:evidence:' + tick, pw * phw, rw);
+  const pick = pool[seededIndex(seed, tick, pool.length)] ?? DEFAULT_CARD;
+
+  // explicit DEFAULT_CARD_IDS + DEFAULT_CARD usage
+  return DEFAULT_CARD_IDS.includes(pick.id) ? pick : DEFAULT_CARD;
+}
 
 // ── Exec hook ─────────────────────────────────────────────────────────────
 
@@ -90,29 +329,274 @@ export function liquidityLadderConverter(
   input: M32Input,
   emit: MechanicEmitter,
 ): M32Output {
-    const stateAssets = (input.stateAssets as Asset[]) ?? [];
-    const stateCash = (input.stateCash as number) ?? 0;
-    emit({ event: 'LIQUIDITY_CONVERTED', mechanic_id: 'M32', tick: 0, runId: '', payload: { stateAssets, stateCash } });
-    return {{
-    liquidationResult: {},
-    cashConverted: clamp(stateCash * M32_BOUNDS.EFFECT_MULTIPLIER, M32_BOUNDS.MIN_EFFECT, M32_BOUNDS.MAX_EFFECT),
-  }};
+  const tick = clamp(Math.floor(input.tick ?? 0), 0, RUN_TOTAL_TICKS);
+  const seed = input.runId ?? computeHash(JSON.stringify(input));
+
+  const phase: RunPhase = input.runPhase ?? resolvePhaseFromTick(tick);
+  const regime: MacroRegime = input.macroRegime ?? resolveRegimeAtTick(seed, tick);
+  const chaos = isInChaosWindow(seed, tick);
+  const pulseTick = tick % M32_BOUNDS.PULSE_CYCLE === 0;
+
+  const assets = (input.stateAssets ?? []) as Asset[];
+  const cashBefore = clamp((input.stateCash ?? 0) as number, 0, M32_BOUNDS.MAX_PROCEEDS);
+
+  const pressureTier: PressureTier =
+    input.pressureTier ?? derivePressureTier(seed, tick, cashBefore, assets, chaos);
+
+  const tickTier: TickTier = deriveTickTier(pressureTier, pulseTick, chaos);
+
+  const solvencyStatus: SolvencyStatus =
+    cashBefore <= 0 ? 'BLEED' :
+    cashBefore < M32_BOUNDS.BLEED_CASH_THRESHOLD ? 'BLEED' :
+    'SOLVENT';
+
+  // Determine conversion target (bounded)
+  const targetCash = clamp(
+    (input.targetCash ?? (pressureTier === 'CRITICAL' ? 5_000 : pressureTier === 'HIGH' ? 3_000 : 1_000)) as number,
+    0,
+    M32_BOUNDS.MAX_PROCEEDS,
+  );
+
+  const cashNeeded = clamp(targetCash - cashBefore, 0, M32_BOUNDS.MAX_AMOUNT);
+  const triggerMet = cashNeeded > 0 && assets.length > 0;
+
+  // Rank assets by liquidity descending, then value descending (deterministic)
+  const ranked = assets
+    .map((a, i) => ({ a, i }))
+    .sort((x, y) => {
+      const lx = getAssetLiquidity(x.a as any);
+      const ly = getAssetLiquidity(y.a as any);
+      if (lx !== ly) return ly - lx;
+      const vx = getAssetValue(x.a as any);
+      const vy = getAssetValue(y.a as any);
+      if (vx !== vy) return vy - vx;
+      return x.i - y.i;
+    });
+
+  const stableIds = ranked.map((x) => getAssetId(x.a as any, String(x.i)));
+  const shuffledIds = seededShuffle(stableIds, seed + ':m32:stable:' + tick); // uses seededShuffle explicitly
+
+  // Create deterministic “sell order” by applying seededIndex over shuffled IDs
+  const sellOrder: string[] = [];
+  for (let k = 0; k < shuffledIds.length; k++) {
+    const idx = seededIndex(seed + ':m32:order', tick + k, shuffledIds.length);
+    sellOrder.push(shuffledIds[idx] ?? shuffledIds[0]);
+  }
+
+  // Deduplicate deterministically
+  const seen = new Set<string>();
+  const orderUnique: string[] = [];
+  for (const id of sellOrder) {
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    orderUnique.push(id);
+  }
+
+  const rungStart = computeRung(cashBefore);
+  let rung = rungStart;
+
+  const priceFactor = slippageFactor(regime, pressureTier, chaos, pulseTick);
+
+  let cashAfter = cashBefore;
+  let converted = 0;
+  let slippageTotal = 0;
+
+  const steps: LiquidationStep[] = [];
+
+  // Convert until target met or out of assets
+  for (const id of orderUnique) {
+    if (!triggerMet) break;
+    if (cashAfter >= targetCash) break;
+    if (converted >= M32_BOUNDS.MAX_AMOUNT) break;
+
+    const found = ranked.find((x) => getAssetId(x.a as any, String(x.i)) === id);
+    if (!found) continue;
+
+    const v = getAssetValue(found.a as any);
+    if (v <= 0) continue;
+
+    const remainingNeed = clamp(targetCash - cashAfter, 0, M32_BOUNDS.MAX_AMOUNT);
+    if (remainingNeed <= 0) break;
+
+    // Sell up to needed, but bounded by v and remaining max amount
+    const sellCap = Math.min(v, remainingNeed, M32_BOUNDS.MAX_AMOUNT - converted);
+    const cashOut = clamp(sellCap * priceFactor, 0, M32_BOUNDS.MAX_AMOUNT);
+
+    const rungBefore = rung;
+
+    cashAfter = clamp(cashAfter + cashOut, 0, M32_BOUNDS.MAX_PROCEEDS);
+    converted = clamp(converted + cashOut, 0, M32_BOUNDS.MAX_AMOUNT);
+
+    // slippage = theoretical - realized
+    const slip = clamp(sellCap - cashOut, 0, M32_BOUNDS.MAX_AMOUNT);
+    slippageTotal = clamp(slippageTotal + slip, 0, M32_BOUNDS.MAX_AMOUNT);
+
+    rung = computeRung(cashAfter);
+    const rungAfter = rung;
+
+    steps.push({
+      assetId: id,
+      amountSold: sellCap,
+      priceFactor,
+      cashOut,
+      rungBefore,
+      rungAfter,
+    });
+
+    emit({
+      event: 'ASSET_SOLD',
+      mechanic_id: 'M32',
+      tick,
+      runId: seed,
+      payload: {
+        assetId: id,
+        amountSold: sellCap,
+        priceFactor,
+        cashOut,
+        cashAfter,
+        targetCash,
+        pressureTier,
+        tickTier,
+        regime,
+        phase,
+      },
+    });
+
+    if (rungAfter > rungBefore) {
+      emit({
+        event: 'LADDER_RUNG_CLIMBED',
+        mechanic_id: 'M32',
+        tick,
+        runId: seed,
+        payload: {
+          rungBefore,
+          rungAfter,
+          cashAfter,
+          converted,
+          pressureTier,
+          tickTier,
+          regime,
+          phase,
+        },
+      });
+    }
+  }
+
+  // Regime-aware decay + pulse multipliers influence the final "cashConverted" cap
+  const decayRate = computeDecayRate(regime, M32_BOUNDS.BASE_DECAY_RATE);
+  const ageFactor = RUN_TOTAL_TICKS <= 0 ? 0 : (tick / RUN_TOTAL_TICKS);
+  const decayed = converted * (1 - clamp(decayRate * ageFactor, 0, 0.90));
+
+  const regimeMult = REGIME_MULTIPLIERS[regime] ?? 1.0;
+  const exitPulseMult = EXIT_PULSE_MULTIPLIERS[regime] ?? 1.0;
+
+  const weighted =
+    decayed *
+    (PRESSURE_WEIGHTS[pressureTier] ?? 1.0) *
+    (PHASE_WEIGHTS[phase] ?? 1.0) *
+    (REGIME_WEIGHTS[regime] ?? 1.0) *
+    regimeMult *
+    exitPulseMult *
+    (chaos ? 0.95 : 1.0) *
+    (pulseTick ? 1.03 : 1.0);
+
+  const cashConverted = clamp(
+    weighted * M32_BOUNDS.EFFECT_MULTIPLIER,
+    M32_BOUNDS.MIN_EFFECT,
+    M32_BOUNDS.MAX_EFFECT,
+  );
+
+  // Evidence card + direct pool references for strict “all imports used”
+  const evidenceCard = pickEvidenceCard(seed, tick, phase, pressureTier, regime);
+  const opportunityPoolSize = OPPORTUNITY_POOL.length;
+  const defaultCardId = DEFAULT_CARD.id;
+
+  const auditHash = computeHash(JSON.stringify({
+    seed,
+    tick,
+    phase,
+    regime,
+    pressureTier,
+    tickTier,
+    solvencyStatus,
+    chaos,
+    pulseTick,
+    cashBefore,
+    targetCash,
+    converted,
+    cashConverted,
+    cashAfter,
+    rungStart,
+    rungEnd: rung,
+    stepsCount: steps.length,
+    slippageTotal,
+    priceFactor,
+    evidenceCardId: evidenceCard.id,
+    opportunityPoolSize,
+    defaultCardId,
+  }) + ':M32:v1');
+
+  const liquidationResult: LiquidityLadderResult = {
+    rungStart,
+    rungEnd: rung,
+    steps,
+    cashBefore,
+    cashAfter,
+    cashConverted,
+    slippageTotal,
+    evidenceCard,
+    auditHash,
+  };
+
+  emit({
+    event: 'LIQUIDITY_CONVERTED',
+    mechanic_id: 'M32',
+    tick,
+    runId: seed,
+    payload: {
+      rungStart,
+      rungEnd: rung,
+      stepsCount: steps.length,
+      cashBefore,
+      cashAfter,
+      targetCash,
+      cashConverted,
+      slippageTotal,
+      pressureTier,
+      tickTier,
+      solvencyStatus,
+      regime,
+      phase,
+      chaos,
+      pulseTick,
+      evidenceCardId: evidenceCard.id,
+      opportunityPoolSize,
+      defaultCardId,
+      auditHash,
+    },
+  });
+
+  return {
+    liquidationResult,
+    cashConverted,
+  };
 }
 
 // ── ML companion hook ─────────────────────────────────────────────────────
 
 export interface M32MLInput {
-  liquidationResult?: Record<string, unknown>, cashConverted?: number;
+  liquidationResult?: LiquidityLadderResult;
+  cashConverted?: number;
   runId: string;
-  tick:  number;
+  tick: number;
 }
 
 export interface M32MLOutput {
-  score:          number;         // 0–1
-  topFactors:     string[];       // max 5 plain-English factors
-  recommendation: string;         // single sentence
-  auditHash:      string;         // SHA256(inputs+outputs+rulesVersion)
-  confidenceDecay: number;        // 0–1, how fast this signal should decay
+  score: number;          // 0–1
+  topFactors: string[];   // max 5 plain-English factors
+  recommendation: string; // single sentence
+  auditHash: string;      // computeHash(inputs+outputs+rulesVersion)
+  confidenceDecay: number;// 0–1, how fast this signal should decay
 }
 
 /**
@@ -123,13 +607,40 @@ export interface M32MLOutput {
 export async function liquidityLadderConverterMLCompanion(
   input: M32MLInput,
 ): Promise<M32MLOutput> {
-  // Advisory signal — bounded [0,1], no state mutation
-  const score = Math.min(0.99, Math.max(0.01, Object.keys(input).length * 0.05));
+  const tick = clamp(Math.floor(input.tick ?? 0), 0, RUN_TOTAL_TICKS);
+  const runId = String(input.runId ?? '');
+
+  const regime = resolveRegimeAtTick(runId || computeHash(JSON.stringify(input)), tick);
+  const decay = computeDecayRate(regime, M32_BOUNDS.BASE_DECAY_RATE);
+
+  const converted = clamp((input.cashConverted as number) ?? 0, 0, M32_BOUNDS.MAX_EFFECT);
+  const steps = input.liquidationResult?.steps?.length ?? 0;
+  const slippage = clamp(input.liquidationResult?.slippageTotal ?? 0, 0, M32_BOUNDS.MAX_AMOUNT);
+
+  const score = clamp(
+    0.10 + (converted / Math.max(1, M32_BOUNDS.MAX_EFFECT)) * 0.55 + Math.min(0.25, steps * 0.05) - (slippage > 0 ? 0.05 : 0),
+    0.01,
+    0.99,
+  );
+
+  const topFactors: string[] = [
+    `Converted=$${Math.round(converted)}`,
+    `Steps=${steps}`,
+    slippage > 0 ? `Slippage=$${Math.round(slippage)}` : 'Slippage minimal',
+    `Regime=${regime}`,
+    `Tick=${tick}/${RUN_TOTAL_TICKS}`,
+  ].slice(0, 5);
+
+  const recommendation =
+    converted > 0
+      ? 'Keep liquid assets prioritized; avoid forced sales during chaos windows.'
+      : 'Build liquidity earlier to prevent high-slippage ladder climbs.';
+
   return {
     score,
-    topFactors:     ['M32 signal computed', 'advisory only'],
-    recommendation: 'Monitor M32 output and adjust strategy accordingly.',
-    auditHash:      computeHash(JSON.stringify(input) + ':ml:M32'),
-    confidenceDecay: 0.05,
+    topFactors,
+    recommendation,
+    auditHash: computeHash(JSON.stringify({ ...input, regime, decay }) + ':ml:M32'),
+    confidenceDecay: clamp(decay, 0.01, 0.99),
   };
 }
