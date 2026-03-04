@@ -36,6 +36,7 @@ import {
 import type {
   RunPhase,
   TickTier,
+  MacroRegime,
   PressureTier,
   SolvencyStatus,
   Asset,
@@ -75,10 +76,7 @@ import type {
   MechanicEmitter,
 } from './types';
 
-// Extend MacroRegime type locally to include 'CRISIS' and 'RECESSION'
-export type MacroRegime = 'BULL' | 'BEAR' | 'NEUTRAL' | 'CRISIS' | 'RECESSION';
-
-// ── Import Anchors (keeps every symbol “accessible” + used) ──────────────────
+// ── Import Anchors (keeps every symbol “accessible” + TS-used) ──────────────────
 
 export const M90_IMPORTED_SYMBOLS = {
   clamp,
@@ -242,6 +240,25 @@ function m90ClampTick(tick: number): number {
   return clamp(tick, 0, RUN_TOTAL_TICKS - 1);
 }
 
+/**
+ * Normalize regimes to the canonical union in ./types.
+ * If upstream data ever includes non-canonical regimes (e.g. "RECESSION"),
+ * we deterministically map them into the closest canonical bucket.
+ */
+function m90NormalizeRegime(r: unknown): MacroRegime {
+  switch (r) {
+    case 'BULL':
+    case 'NEUTRAL':
+    case 'BEAR':
+    case 'CRISIS':
+      return r;
+    // Deterministic mapping for any non-canonical downturn labels:
+    // treat them as BEAR (not CRISIS) unless explicitly CRISIS.
+    default:
+      return 'NEUTRAL';
+  }
+}
+
 function m90PhaseFromTick(tick: number): RunPhase {
   const t = m90ClampTick(tick);
   const third = RUN_TOTAL_TICKS / 3;
@@ -254,7 +271,7 @@ function m90RegimeFromSchedule(tick: number, macro: MacroEvent[]): MacroRegime {
   let r: MacroRegime = 'NEUTRAL';
   for (const ev of sorted) {
     if (ev.tick > tick) break;
-    if (ev.regimeChange) r = ev.regimeChange;
+    if (ev.regimeChange) r = m90NormalizeRegime(ev.regimeChange as unknown);
   }
   return r;
 }
@@ -343,6 +360,7 @@ function m90BuildCtx(seasonId: string, runId: string, achievementId: string, tic
   const pressure = m90PressureFrom(phase, chaosHit);
   const tier = m90TickTierFrom(pressure);
 
+  // ✅ regime is guaranteed canonical MacroRegime here
   const decayRate = computeDecayRate(regime, M90_BOUNDS.BASE_DECAY_RATE);
   const regimeMultiplier = REGIME_MULTIPLIERS[regime] ?? 1.0;
   const exitPulse = EXIT_PULSE_MULTIPLIERS[regime] ?? 1.0;
@@ -405,8 +423,10 @@ function m90StringifyPoolItem(x: unknown): string {
 
 function m90PickDifficulty(ctx: M90Ctx, salvageValue: number): ChallengeDifficulty {
   const s = clamp(salvageValue, 0, M90_BOUNDS.MAX_SALVAGE);
+
   const pressureBoost = ctx.pressure === 'CRITICAL' ? 2 : ctx.pressure === 'HIGH' ? 1 : 0;
-  const macroBoost = ctx.regime === 'CRISIS' ? 2 : ctx.regime === 'RECESSION' ? 1 : 0;
+  // ✅ Canonical regimes only (no "RECESSION" anywhere):
+  const macroBoost = ctx.regime === 'CRISIS' ? 2 : ctx.regime === 'BEAR' ? 1 : 0;
 
   const score = s / 50_000 + pressureBoost * 0.5 + macroBoost * 0.5 + (ctx.phase === 'LATE' ? 0.4 : 0);
 
@@ -522,7 +542,6 @@ export function salvageAndRerollExecutor(input: M90Input, emit: MechanicEmitter)
 
   const pool = m90CoercePool(input.rerollPool as unknown[] | undefined);
 
-  // Emit salvage event (always; even if achievementId is blank, audit is stable).
   emit({
     event: 'ACHIEVEMENT_SALVAGED',
     mechanic_id: 'M90',
@@ -558,7 +577,6 @@ export function salvageAndRerollExecutor(input: M90Input, emit: MechanicEmitter)
 
   const pickLabel = m90StringifyPoolItem(pick);
 
-  // Emit reroll event.
   const rerollAuditCore = JSON.stringify({
     seasonId: ctx.seasonId,
     runId: ctx.runId,
@@ -589,7 +607,6 @@ export function salvageAndRerollExecutor(input: M90Input, emit: MechanicEmitter)
   });
 
   const difficulty = m90PickDifficulty(ctx, salvageValue);
-
   const newChallenge = m90BuildChallengeRef(ctx, achievementId, salvageCredit, difficulty, pickLabel);
 
   emit({
@@ -674,6 +691,7 @@ export async function salvageAndRerollExecutorMLCompanion(input: M90MLInput): Pr
   const chaosHit = m90ChaosHit(tick, chaosWindows);
   const pressure = m90PressureFrom(phase, chaosHit);
 
+  // ✅ regime is canonical MacroRegime (no "RECESSION")
   const decay = computeDecayRate(regime, M90_BOUNDS.BASE_DECAY_RATE);
   const pulse = EXIT_PULSE_MULTIPLIERS[regime] ?? 1.0;
   const mult = REGIME_MULTIPLIERS[regime] ?? 1.0;
