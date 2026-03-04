@@ -277,11 +277,11 @@ function m43ToRewindTarget(raw: unknown): RewindTarget | null {
 
   if (kind === 'TICK' || kind === 'TURN_INDEX' || kind === 'BOOKMARK' || kind === 'HASH') {
     if (typeof value === 'number' && Number.isFinite(value)) {
-      return { kind, value: Math.floor(value), expectedHash };
+      return { kind: kind as RewindTargetKind, value: Math.floor(value), expectedHash };
     }
     // HASH can accept value as NaN; we treat it invalid unless numeric provided (hash rewinds handled via expectedHash)
     if (kind === 'HASH' && expectedHash) {
-      return { kind, value: 0, expectedHash };
+      return { kind: 'HASH', value: 0, expectedHash };
     }
   }
 
@@ -301,6 +301,18 @@ function m43BoundTimeline(tl: Array<Record<string, unknown>>): Array<Record<stri
   return safe.slice(0, M43_BOUNDS.MAX_TIMELINE_LEN);
 }
 
+/**
+ * FIX: previously referenced in ML companion as `m43InChaosWindow(...)` but not defined.
+ * This helper is used both by core exec helpers and ML companion.
+ */
+function m43InChaosWindow(tick: number, chaosWindows: ChaosWindow[]): boolean {
+  const t = clamp(tick, 0, RUN_TOTAL_TICKS - 1);
+  for (const w of chaosWindows) {
+    if (t >= w.startTick && t <= w.endTick) return true;
+  }
+  return false;
+}
+
 function m43FindIndexByHash(timeline: Array<Record<string, unknown>>, expectedHash: string): number {
   // Deterministic scan: computeHash for each turn payload.
   for (let i = 0; i < timeline.length; i++) {
@@ -310,7 +322,10 @@ function m43FindIndexByHash(timeline: Array<Record<string, unknown>>, expectedHa
   return -1;
 }
 
-function m43ComputeRewindIndex(state: SandboxState, target: RewindTarget): { status: RewindStatus; index: number; tick: number } {
+function m43ComputeRewindIndex(
+  state: SandboxState,
+  target: RewindTarget,
+): { status: RewindStatus; index: number; tick: number } {
   const timeline = m43BoundTimeline(state.timeline);
 
   if (timeline.length === 0) return { status: 'OUT_OF_RANGE', index: 0, tick: 0 };
@@ -359,12 +374,7 @@ function m43DeriveMacroContext(seed: string, tick: number): {
   const macroSchedule = buildMacroSchedule(seed, MACRO_EVENTS_PER_RUN);
   const chaosWindows = buildChaosWindows(seed, CHAOS_WINDOWS_PER_RUN);
 
-  const inChaos = (() => {
-    for (const w of chaosWindows) {
-      if (t >= w.startTick && t <= w.endTick) return true;
-    }
-    return false;
-  })();
+  const inChaos = m43InChaosWindow(t, chaosWindows);
 
   const runPhase = (() => {
     const third = RUN_TOTAL_TICKS / 3;
@@ -423,15 +433,20 @@ function m43SimulateAlternateTimeline(
   const rW = REGIME_WEIGHTS[macroRegime] ?? 1.0;
 
   const intensity = clamp(pW * phW * rW, 0.5, 3.0);
-  const len = clamp(Math.round(M43_BOUNDS.MIN_ALT_LEN + intensity * 10), M43_BOUNDS.MIN_ALT_LEN, M43_BOUNDS.MAX_ALT_LEN);
+  const len = clamp(
+    Math.round(M43_BOUNDS.MIN_ALT_LEN + intensity * 10),
+    M43_BOUNDS.MIN_ALT_LEN,
+    M43_BOUNDS.MAX_ALT_LEN,
+  );
 
   // Deterministic cards as “decision injectors”
   const deckIds = seededShuffle(DEFAULT_CARD_IDS, seed + ':deck');
   const oppIdx = seededIndex(seed + ':opp', baseIndex + 17, OPPORTUNITY_POOL.length);
   const featured = OPPORTUNITY_POOL[oppIdx] ?? DEFAULT_CARD;
 
-  const pool = buildWeightedPool(seed + ':pool', (pW * phW), rW);
-  const poolPick = pool[seededIndex(seed + ':pick', baseIndex + 33, Math.max(1, pool.length))] ?? featured ?? DEFAULT_CARD;
+  const pool = buildWeightedPool(seed + ':pool', pW * phW, rW);
+  const poolPick =
+    pool[seededIndex(seed + ':pick', baseIndex + 33, Math.max(1, pool.length))] ?? featured ?? DEFAULT_CARD;
 
   // Build alt steps as generic “turn patches”
   const simulated: Array<Record<string, unknown>> = [];
@@ -453,7 +468,9 @@ function m43SimulateAlternateTimeline(
     });
   }
 
-  const altHash = computeHash(JSON.stringify({ mid: 'M43', seed, baseIndex, featured: featured.id, poolPick: poolPick.id, simulated }));
+  const altHash = computeHash(
+    JSON.stringify({ mid: 'M43', seed, baseIndex, featured: featured.id, poolPick: poolPick.id, simulated }),
+  );
 
   return {
     runId: computeHash(seed + ':altRun'),
@@ -521,7 +538,7 @@ export function sandboxRewindEngine(input: M43Input, emit: MechanicEmitter): M43
     return { rewindResult, alternateTimeline };
   }
 
-  const normalizedTarget = m43ToRewindTarget(input.rewindTarget) ?? { kind: 'TURN_INDEX', value: 0 };
+  const normalizedTarget = m43ToRewindTarget(input.rewindTarget) ?? { kind: 'TURN_INDEX' as const, value: 0 };
   const timeline = m43BoundTimeline(sandboxState.timeline);
 
   const { status, index, tick } = m43ComputeRewindIndex(sandboxState, normalizedTarget);
@@ -594,14 +611,7 @@ export function sandboxRewindEngine(input: M43Input, emit: MechanicEmitter): M43
     },
   } as M43TelemetryPayload);
 
-  const alternateTimeline = m43SimulateAlternateTimeline(
-    seed,
-    timeline,
-    index,
-    ctx.pressureTier,
-    ctx.runPhase,
-    ctx.macroRegime,
-  );
+  const alternateTimeline = m43SimulateAlternateTimeline(seed, timeline, index, ctx.pressureTier, ctx.runPhase, ctx.macroRegime);
 
   emit({
     event: 'ALTERNATE_SIMULATED',
@@ -666,10 +676,19 @@ export async function sandboxRewindEngineMLCompanion(input: M43MLInput): Promise
   const ok = input.rewindResult?.status === 'OK';
   const altLen = input.alternateTimeline?.simulated?.length ?? 0;
 
+  // FIX: use defined helper
   const chaosEarly = m43InChaosWindow(tick, chaosWindows);
   const chaosPenalty = chaosEarly ? 0.10 : 0.0;
 
-  const score = clamp(0.20 + (ok ? 0.45 : 0.05) + clamp(altLen / M43_BOUNDS.MAX_ALT_LEN, 0, 1) * 0.30 + clamp(envMult / 4, 0, 0.20) - chaosPenalty, 0.01, 0.99);
+  const score = clamp(
+    0.20 +
+      (ok ? 0.45 : 0.05) +
+      clamp(altLen / M43_BOUNDS.MAX_ALT_LEN, 0, 1) * 0.30 +
+      clamp(envMult / 4, 0, 0.20) -
+      chaosPenalty,
+    0.01,
+    0.99,
+  );
 
   return {
     score,
