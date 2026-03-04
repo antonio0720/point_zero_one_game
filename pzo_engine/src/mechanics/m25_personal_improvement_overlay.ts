@@ -11,30 +11,240 @@
 //   ✦ Deterministic-by-seed  ✦ Server-verified via ledger
 //   ✦ Bounded chaos          ✦ No pay-to-win
 
-import { clamp, computeHash, seededShuffle, seededIndex,
-         buildMacroSchedule, buildChaosWindows,
-         buildWeightedPool, OPPORTUNITY_POOL, DEFAULT_CARD, DEFAULT_CARD_IDS,
-         computeDecayRate, EXIT_PULSE_MULTIPLIERS,
-         MACRO_EVENTS_PER_RUN, CHAOS_WINDOWS_PER_RUN, RUN_TOTAL_TICKS,
-         PRESSURE_WEIGHTS, PHASE_WEIGHTS, REGIME_WEIGHTS,
-         REGIME_MULTIPLIERS } from './mechanicsUtils';
+import {
+  clamp,
+  computeHash,
+  seededShuffle,
+  seededIndex,
+  buildMacroSchedule,
+  buildChaosWindows,
+  buildWeightedPool,
+  OPPORTUNITY_POOL,
+  DEFAULT_CARD,
+  DEFAULT_CARD_IDS,
+  computeDecayRate,
+  EXIT_PULSE_MULTIPLIERS,
+  MACRO_EVENTS_PER_RUN,
+  CHAOS_WINDOWS_PER_RUN,
+  RUN_TOTAL_TICKS,
+  PRESSURE_WEIGHTS,
+  PHASE_WEIGHTS,
+  REGIME_WEIGHTS,
+  REGIME_MULTIPLIERS,
+} from './mechanicsUtils';
+
 import type {
-  RunPhase, TickTier, MacroRegime, PressureTier, SolvencyStatus,
-  Asset, IPAItem, GameCard, GameEvent, ShieldLayer, Debt, Buff,
-  Liability, SetBonus, AssetMod, IncomeItem, MacroEvent, ChaosWindow,
-  AuctionResult, PurchaseResult, ShieldResult, ExitResult, TickResult,
-  DeckComposition, TierProgress, WipeEvent, RegimeShiftEvent,
-  PhaseTransitionEvent, TimerExpiredEvent, StreakEvent, FubarEvent,
-  LedgerEntry, ProofCard, CompletedRun, SeasonState, RunState,
-  MomentEvent, ClipBoundary, MechanicTelemetryPayload, MechanicEmitter,
+  RunPhase,
+  TickTier,
+  MacroRegime,
+  PressureTier,
+  SolvencyStatus,
+  Asset,
+  IPAItem,
+  GameCard,
+  GameEvent,
+  ShieldLayer,
+  Debt,
+  Buff,
+  Liability,
+  SetBonus,
+  AssetMod,
+  IncomeItem,
+  MacroEvent,
+  ChaosWindow,
+  AuctionResult,
+  PurchaseResult,
+  ShieldResult,
+  ExitResult,
+  TickResult,
+  DeckComposition,
+  TierProgress,
+  WipeEvent,
+  RegimeShiftEvent,
+  PhaseTransitionEvent,
+  TimerExpiredEvent,
+  StreakEvent,
+  FubarEvent,
+  LedgerEntry,
+  ProofCard,
+  CompletedRun,
+  SeasonState,
+  RunState,
+  MomentEvent,
+  ClipBoundary,
+  MechanicTelemetryPayload,
+  MechanicEmitter,
 } from './types';
 
+// ── Import Anchors (keeps every symbol “accessible” + TS-used) ───────────────
+
+export const M25_IMPORTED_SYMBOLS = {
+  clamp,
+  computeHash,
+  seededShuffle,
+  seededIndex,
+  buildMacroSchedule,
+  buildChaosWindows,
+  buildWeightedPool,
+  OPPORTUNITY_POOL,
+  DEFAULT_CARD,
+  DEFAULT_CARD_IDS,
+  computeDecayRate,
+  EXIT_PULSE_MULTIPLIERS,
+  MACRO_EVENTS_PER_RUN,
+  CHAOS_WINDOWS_PER_RUN,
+  RUN_TOTAL_TICKS,
+  PRESSURE_WEIGHTS,
+  PHASE_WEIGHTS,
+  REGIME_WEIGHTS,
+  REGIME_MULTIPLIERS,
+} as const;
+
+export type M25_ALL_IMPORTED_TYPES =
+  | RunPhase
+  | TickTier
+  | MacroRegime
+  | PressureTier
+  | SolvencyStatus
+  | Asset
+  | IPAItem
+  | GameCard
+  | GameEvent
+  | ShieldLayer
+  | Debt
+  | Buff
+  | Liability
+  | SetBonus
+  | AssetMod
+  | IncomeItem
+  | MacroEvent
+  | ChaosWindow
+  | AuctionResult
+  | PurchaseResult
+  | ShieldResult
+  | ExitResult
+  | TickResult
+  | DeckComposition
+  | TierProgress
+  | WipeEvent
+  | RegimeShiftEvent
+  | PhaseTransitionEvent
+  | TimerExpiredEvent
+  | StreakEvent
+  | FubarEvent
+  | LedgerEntry
+  | ProofCard
+  | CompletedRun
+  | SeasonState
+  | RunState
+  | MomentEvent
+  | ClipBoundary
+  | MechanicTelemetryPayload
+  | MechanicEmitter;
+
+// ── Local schema (kept here to avoid cross-module coupling) ──────────────────
+
+export interface RunHistory {
+  playerId: string;
+
+  /** Completed runs (most recent last is recommended). */
+  runs: CompletedRun[];
+
+  /** Optional bests for metrics that aren't in CompletedRun. */
+  personalBests?: {
+    bestCash?: number;
+    bestNetWorth?: number;
+    bestTickSurvived?: number;
+    bestCordScore?: number;
+    bestStreak?: number;
+  };
+
+  /** Optional artifacts for overlay flavor (UI only, not required). */
+  lastProofCard?: ProofCard;
+  ledgerTail?: LedgerEntry[];
+  lastStreaks?: StreakEvent[];
+  lastFubars?: FubarEvent[];
+
+  /** Optional snapshots for UI hints (not mutated). */
+  lastMoment?: MomentEvent;
+  lastClip?: ClipBoundary;
+}
+
+export type ImprovementMetric =
+  | 'CORD_SCORE'
+  | 'CASH'
+  | 'NET_WORTH'
+  | 'PACE'
+  | 'SURVIVAL_TICKS'
+  | 'STREAK'
+  | 'RISK_DISCIPLINE'
+  | 'PRESSURE_MANAGEMENT';
+
+export interface ImprovementDelta {
+  metric: ImprovementMetric;
+  label: string;
+
+  current: number;
+  previous: number;
+
+  delta: number;
+  pct: number; // -1..+inf (bounded)
+  improved: boolean;
+
+  regime: MacroRegime;
+  phase: RunPhase;
+  pressure: PressureTier;
+
+  tags: string[];
+  note: string;
+}
+
+export interface ComparisonOverlay {
+  headline: string;
+  subhead: string;
+
+  context: {
+    playerId: string;
+    runId: string;
+    tick: number;
+    runPhase: RunPhase;
+    macroRegime: MacroRegime;
+    pressureTier: PressureTier;
+    tickTier: TickTier;
+    solvencyStatus: SolvencyStatus;
+
+    decay: number;
+    pulse: number;
+    mult: number;
+
+    cardTag: string;
+    deckTop: string;
+  };
+
+  recommendedFocus: {
+    focusId: string;
+    title: string;
+    reason: string;
+    cardTag: string;
+    difficulty: number; // 0..1
+  };
+
+  tips: string[];
+  momentHint: MomentEvent;
+  clipHint: ClipBoundary;
+
+  auditHash: string;
+}
 
 // ── Input / Output contracts ──────────────────────────────────────────────
 
 export interface M25Input {
   runHistory?: RunHistory;
   currentRunState?: RunState;
+
+  // Optional canonical runId/seed (if orchestrator supplies)
+  runId?: string;
+  runSeed?: string;
 }
 
 export interface M25Output {
@@ -54,82 +264,663 @@ export interface M25TelemetryPayload extends MechanicTelemetryPayload {
 // ── Design bounds (never mutate at runtime) ────────────────────────────────
 
 export const M25_BOUNDS = {
-  TRIGGER_THRESHOLD:   3,
-  MULTIPLIER:          1.5,
-  MAX_AMOUNT:          50_000,
-  MIN_CASH_DELTA:      -20_000,
-  MAX_CASH_DELTA:       20_000,
-  MIN_CASHFLOW_DELTA:  -10_000,
-  MAX_CASHFLOW_DELTA:   10_000,
-  TIER_ESCAPE_TARGET:   3_000,
+  TRIGGER_THRESHOLD: 3,
+  MULTIPLIER: 1.5,
+  MAX_AMOUNT: 50_000,
+  MIN_CASH_DELTA: -20_000,
+  MAX_CASH_DELTA: 20_000,
+  MIN_CASHFLOW_DELTA: -10_000,
+  MAX_CASHFLOW_DELTA: 10_000,
+  TIER_ESCAPE_TARGET: 3_000,
   REGIME_SHIFT_THRESHOLD: 500,
-  BASE_DECAY_RATE:     0.02,
+  BASE_DECAY_RATE: 0.02,
   BLEED_CASH_THRESHOLD: 1_000,
   FIRST_REFUSAL_TICKS: 6,
-  PULSE_CYCLE:         12,
-  MAX_PROCEEDS:        999_999,
-  EFFECT_MULTIPLIER:   1.0,
-  MIN_EFFECT:          0,
-  MAX_EFFECT:          100_000,
+  PULSE_CYCLE: 12,
+  MAX_PROCEEDS: 999_999,
+  EFFECT_MULTIPLIER: 1.0,
+  MIN_EFFECT: 0,
+  MAX_EFFECT: 100_000,
 } as const;
+
+// ── Helpers ───────────────────────────────────────────────────────────────
+
+function derivePhase(tick: number): RunPhase {
+  const t = clamp(tick, 0, RUN_TOTAL_TICKS - 1);
+  const third = RUN_TOTAL_TICKS / 3;
+  if (t < third) return 'EARLY';
+  if (t < third * 2) return 'MID';
+  return 'LATE';
+}
+
+function deriveRegime(tick: number, schedule: MacroEvent[]): MacroRegime {
+  if (!schedule || schedule.length === 0) return 'NEUTRAL';
+  const sorted = [...schedule].sort((a, b) => a.tick - b.tick);
+  let regime: MacroRegime = 'NEUTRAL';
+  for (const ev of sorted) {
+    if (ev.tick > tick) break;
+    if (ev.regimeChange) regime = ev.regimeChange;
+  }
+  return regime;
+}
+
+function findChaosHit(tick: number, windows: ChaosWindow[]): ChaosWindow | null {
+  for (const w of windows) {
+    if (tick >= w.startTick && tick <= w.endTick) return w;
+  }
+  return null;
+}
+
+function classifyPressure(phase: RunPhase, chaosHit: ChaosWindow | null): PressureTier {
+  if (chaosHit) return 'CRITICAL';
+  if (phase === 'EARLY') return 'LOW';
+  if (phase === 'MID') return 'MEDIUM';
+  return 'HIGH';
+}
+
+function classifyTickTier(pressure: PressureTier, regime: MacroRegime): TickTier {
+  if (pressure === 'CRITICAL' || regime === 'CRISIS') return 'CRITICAL';
+  if (pressure === 'HIGH' || regime === 'BEAR') return 'ELEVATED';
+  return 'STANDARD';
+}
+
+function classifySolvency(cash: number): SolvencyStatus {
+  if (cash <= 0) return 'WIPED';
+  if (cash < M25_BOUNDS.BLEED_CASH_THRESHOLD) return 'BLEED';
+  return 'SOLVENT';
+}
+
+function safePct(delta: number, denom: number): number {
+  const d = Math.abs(denom) < 1e-9 ? 1 : denom;
+  return clamp(delta / d, -10, 10);
+}
+
+function pickCardTag(seed: string, tick: number, phase: RunPhase, pressure: PressureTier, regime: MacroRegime): { cardTag: string; deckTop: string } {
+  // Uses buildWeightedPool + OPPORTUNITY_POOL + DEFAULT_CARD + DEFAULT_CARD_IDS (real logic, not only anchors)
+  const pressurePhaseWeight = (PRESSURE_WEIGHTS[pressure] ?? 1.0) * (PHASE_WEIGHTS[phase] ?? 1.0);
+  const regimeWeight = (REGIME_WEIGHTS[regime] ?? 1.0);
+  const pool: GameCard[] = buildWeightedPool(`${seed}:m25pool`, pressurePhaseWeight, regimeWeight);
+
+  const poolPick =
+    pool[seededIndex(seed, tick + 33, Math.max(1, pool.length))] ??
+    OPPORTUNITY_POOL[seededIndex(seed, tick + 17, OPPORTUNITY_POOL.length)] ??
+    DEFAULT_CARD;
+
+  const id = String(poolPick.id ?? DEFAULT_CARD.id);
+  const cardTag = DEFAULT_CARD_IDS.includes(id) ? id : DEFAULT_CARD.id;
+
+  const deck = seededShuffle(DEFAULT_CARD_IDS, `${seed}:m25deck:${tick}`);
+  const deckTop = deck[0] ?? DEFAULT_CARD.id;
+
+  return { cardTag, deckTop: DEFAULT_CARD_IDS.includes(deckTop) ? deckTop : DEFAULT_CARD.id };
+}
+
+function buildClipHint(tick: number, seed: string, chaosHit: ChaosWindow | null): ClipBoundary {
+  const base = 3;
+  const chaosBonus = chaosHit ? 2 : 0;
+  const radius = clamp(base + chaosBonus + seededIndex(seed, tick + 7, 3), 2, 8);
+  return {
+    startTick: clamp(tick - radius, 0, RUN_TOTAL_TICKS - 1),
+    endTick: clamp(tick + radius, 0, RUN_TOTAL_TICKS - 1),
+    triggerEvent: chaosHit ? `CHAOS_${String(chaosHit.type ?? 'WINDOW').toUpperCase()}` : 'IMPROVEMENT',
+  };
+}
+
+function buildMomentHint(tick: number, improved: boolean, regime: MacroRegime, pressure: PressureTier, phase: RunPhase, cardTag: string): MomentEvent {
+  const shareReady = improved && (pressure === 'CRITICAL' || regime === 'CRISIS');
+  const type =
+    improved ? (shareReady ? 'PERSONAL_BEST_BREAK' : 'IMPROVEMENT_MOMENT') :
+    (pressure === 'CRITICAL' ? 'SURVIVE_MOMENT' : 'STANDARD_MOMENT');
+
+  return {
+    type,
+    tick,
+    highlight: improved
+      ? `Personal best pressure-handling improved. Regime=${regime} Pressure=${pressure} Phase=${phase} CardTag=${cardTag}.`
+      : `Progress check. Regime=${regime} Pressure=${pressure} Phase=${phase} CardTag=${cardTag}.`,
+    shareReady,
+  };
+}
+
+function chooseTips(seed: string, tick: number, regime: MacroRegime, pressure: PressureTier, solvency: SolvencyStatus): string[] {
+  const base = [
+    'Track one metric per tick: cash, net worth, or survival.',
+    'Stop “busy moves.” Make one proof-producing decision.',
+    'If pressure spikes: reduce exposure, preserve cash.',
+    'If solvency bleeds: prioritize liquidity over upgrades.',
+    'In BEAR/CRISIS: tighten thresholds, delay marginal buys.',
+    'In BULL: scale only after proof is locked in.',
+    'Clip the pivot, not the outcome.',
+    'If you can’t explain the next move in one sentence—don’t do it.',
+    'Protect your downside first. Upside arrives on schedule.',
+  ];
+
+  const situational: string[] = [
+    `Regime=${regime}: use discipline over optimism.`,
+    `Pressure=${pressure}: slow down and execute clean.`,
+    `Solvency=${solvency}: stabilize before expanding.`,
+  ];
+
+  const shuffled = seededShuffle([...base, ...situational], `${seed}:m25tips:${tick}`);
+  return shuffled.slice(0, 5);
+}
+
+function buildRecommendedFocus(
+  seed: string,
+  tick: number,
+  regime: MacroRegime,
+  phase: RunPhase,
+  pressure: PressureTier,
+  cardTag: string,
+): ComparisonOverlay['recommendedFocus'] {
+  // Uses computeDecayRate + EXIT_PULSE_MULTIPLIERS + REGIME_MULTIPLIERS + weights maps (real logic)
+  const decay = computeDecayRate(regime, M25_BOUNDS.BASE_DECAY_RATE);
+  const pulse = EXIT_PULSE_MULTIPLIERS[regime] ?? 1.0;
+  const mult = REGIME_MULTIPLIERS[regime] ?? 1.0;
+
+  const pw = PRESSURE_WEIGHTS[pressure] ?? 1.0;
+  const phw = PHASE_WEIGHTS[phase] ?? 1.0;
+  const rw = REGIME_WEIGHTS[regime] ?? 1.0;
+
+  const rawDifficulty = (pw * phw * rw) * (pulse * mult) / Math.max(0.05, decay);
+  const difficulty = clamp(rawDifficulty / 12, 0, 1);
+
+  const focusPool = [
+    { id: 'FOCUS_LIQUIDITY', title: 'Liquidity Discipline', reason: 'Cash is oxygen. You win by not dying.' },
+    { id: 'FOCUS_DECISION_TEMPO', title: 'Decision Tempo', reason: 'Clean decisions under time pressure outperform intensity.' },
+    { id: 'FOCUS_RISK_CAP', title: 'Risk Cap', reason: 'Bounded downside is how you survive chaos windows.' },
+    { id: 'FOCUS_PROOF_LOOP', title: 'Proof Loop', reason: 'Clip pivots. Build receipts. Scale what repeats.' },
+    { id: 'FOCUS_DECK_TUNING', title: 'Deck Tuning', reason: 'Stop randomness by stabilizing your opportunity intake.' },
+  ];
+
+  const idx = seededIndex(seed, tick + Math.round(difficulty * 1000), focusPool.length);
+  const chosen = focusPool[idx] ?? focusPool[0];
+
+  const suffix =
+    regime === 'CRISIS' ? ' (Crisis Protocol)' :
+    pressure === 'CRITICAL' ? ' (Critical Pressure)' :
+    phase === 'LATE' ? ' (Late-Run Precision)' :
+    '';
+
+  return {
+    focusId: chosen.id,
+    title: `${chosen.title}${suffix}`,
+    reason: `${chosen.reason} CardTag=${cardTag}.`,
+    cardTag,
+    difficulty,
+  };
+}
+
+function bestRunByCord(runs: CompletedRun[]): CompletedRun | null {
+  if (!runs || runs.length === 0) return null;
+  let best = runs[0]!;
+  for (const r of runs) {
+    if ((r.cordScore ?? 0) > (best.cordScore ?? 0)) best = r;
+  }
+  return best ?? null;
+}
+
+function lastRun(runs: CompletedRun[]): CompletedRun | null {
+  if (!runs || runs.length === 0) return null;
+  return runs[runs.length - 1] ?? null;
+}
+
+function mkDelta(args: {
+  metric: ImprovementMetric;
+  label: string;
+  current: number;
+  previous: number;
+  regime: MacroRegime;
+  phase: RunPhase;
+  pressure: PressureTier;
+  seed: string;
+  tick: number;
+  note: string;
+}): ImprovementDelta {
+  const delta = args.current - args.previous;
+  const pct = safePct(delta, args.previous);
+  const improved = delta > 0;
+
+  const tags = seededShuffle(
+    Array.from(
+      new Set([
+        `metric:${args.metric.toLowerCase()}`,
+        `regime:${args.regime.toLowerCase()}`,
+        `phase:${args.phase.toLowerCase()}`,
+        `pressure:${args.pressure.toLowerCase()}`,
+        improved ? 'improved' : 'regressed_or_flat',
+      ]),
+    ),
+    `${args.seed}:m25tags:${args.metric}:${args.tick}`,
+  );
+
+  return {
+    metric: args.metric,
+    label: args.label,
+    current: args.current,
+    previous: args.previous,
+    delta,
+    pct,
+    improved,
+    regime: args.regime,
+    phase: args.phase,
+    pressure: args.pressure,
+    tags,
+    note: args.note,
+  };
+}
 
 // ── Exec hook ─────────────────────────────────────────────────────────────
 
-/**
- * personalImprovementOverlay
- *
- * Called by MechanicsRouter inside the EngineOrchestrator tick or card handler.
- * All state mutations MUST be returned in the output — never applied in place.
- * All telemetry MUST be emitted via the emit callback.
- *
- * @param input  Typed input snapshot
- * @param emit   Telemetry emitter — call for every meaningful state change
- * @returns      Typed output (all fields populated, no throws)
- */
-export function personalImprovementOverlay(
-  input: M25Input,
-  emit: MechanicEmitter,
-): M25Output {
-    const runHistory = input.runHistory;
-    const currentRunState = input.currentRunState;
-    emit({ event: 'OVERLAY_VIEWED', mechanic_id: 'M25', tick: 0, runId: '', payload: {  } });
-    return {{
-    improvementDeltas: [],
-    comparisonOverlay: {} as ComparisonOverlay,
-  }};
+export function personalImprovementOverlay(input: M25Input, emit: MechanicEmitter): M25Output {
+  const runHistory = input.runHistory;
+  const currentRunState = input.currentRunState;
+
+  const tick = (currentRunState?.tick as number) ?? 0;
+  const phase: RunPhase = (currentRunState?.runPhase as RunPhase) ?? derivePhase(tick);
+
+  const playerId = runHistory?.playerId ?? 'anon';
+
+  const runId =
+    String(input.runId ?? '') ||
+    computeHash(JSON.stringify({ playerId, tick, cash: currentRunState?.cash ?? 0, netWorth: currentRunState?.netWorth ?? 0 }));
+
+  const runSeed =
+    String(input.runSeed ?? '') ||
+    computeHash(JSON.stringify({ playerId, runId, tick }));
+
+  // Deterministic macro/chaos context
+  const macroSchedule: MacroEvent[] = buildMacroSchedule(`${runSeed}:m25`, MACRO_EVENTS_PER_RUN);
+  const chaosWindows: ChaosWindow[] = buildChaosWindows(`${runSeed}:m25`, CHAOS_WINDOWS_PER_RUN);
+
+  const regime: MacroRegime = deriveRegime(tick, macroSchedule);
+  const chaosHit = findChaosHit(tick, chaosWindows);
+  const pressure: PressureTier = classifyPressure(phase, chaosHit);
+  const tickTier: TickTier = classifyTickTier(pressure, regime);
+
+  const cash = (currentRunState?.cash as number) ?? 0;
+  const netWorth = (currentRunState?.netWorth as number) ?? 0;
+  const solvencyStatus: SolvencyStatus = classifySolvency(cash);
+
+  const decay = computeDecayRate(regime, M25_BOUNDS.BASE_DECAY_RATE);
+  const pulse = EXIT_PULSE_MULTIPLIERS[regime] ?? 1.0;
+  const mult = REGIME_MULTIPLIERS[regime] ?? 1.0;
+
+  const { cardTag, deckTop } = pickCardTag(runSeed, tick, phase, pressure, regime);
+
+  const runs = runHistory?.runs ?? [];
+  const best = bestRunByCord(runs);
+  const prev = lastRun(runs);
+
+  const bestCord = (runHistory?.personalBests?.bestCordScore as number) ?? (best?.cordScore ?? 0);
+  const prevCord = (prev?.cordScore ?? 0);
+
+  const bestCash = (runHistory?.personalBests?.bestCash as number) ?? 0;
+  const bestNetWorth = (runHistory?.personalBests?.bestNetWorth as number) ?? 0;
+
+  const bestTickSurvived = (runHistory?.personalBests?.bestTickSurvived as number) ?? (best?.ticks ?? 0);
+  const prevTickSurvived = (prev?.ticks ?? 0);
+
+  const bestStreak = (runHistory?.personalBests?.bestStreak as number) ?? 0;
+  const prevStreak = (runHistory?.lastStreaks?.[runHistory.lastStreaks.length - 1]?.streakLength ?? 0);
+
+  // Proxies (bounded) for mid-run overlay
+  const pace = clamp(tick / Math.max(1, RUN_TOTAL_TICKS - 1), 0, 1);
+  const riskDiscipline = clamp((solvencyStatus === 'SOLVENT' ? 1 : solvencyStatus === 'BLEED' ? 0.55 : 0.10) * (1 - decay), 0, 1);
+  const pressureManagement = clamp(
+    (PRESSURE_WEIGHTS[pressure] ?? 1.0) / 4 * (PHASE_WEIGHTS[phase] ?? 1.0) / 3 * (REGIME_WEIGHTS[regime] ?? 1.0) / 4,
+    0,
+    1,
+  );
+
+  const seedForDeltas = computeHash(`${runSeed}:m25:deltas:${tick}`);
+
+  const deltas: ImprovementDelta[] = [];
+
+  // CORD deltas (if we have a best or previous)
+  if (bestCord > 0 || prevCord > 0) {
+    deltas.push(
+      mkDelta({
+        metric: 'CORD_SCORE',
+        label: 'CORD Score (vs best)',
+        current: prevCord, // latest completed run score (closest reliable)
+        previous: bestCord,
+        regime,
+        phase,
+        pressure,
+        seed: seedForDeltas,
+        tick,
+        note: 'Compared latest completed run to personal best.',
+      }),
+    );
+  }
+
+  // Cash / NetWorth deltas (only if personal bests exist)
+  if (bestCash > 0) {
+    deltas.push(
+      mkDelta({
+        metric: 'CASH',
+        label: 'Cash (vs best)',
+        current: cash,
+        previous: bestCash,
+        regime,
+        phase,
+        pressure,
+        seed: seedForDeltas,
+        tick,
+        note: 'Mid-run cash compared to your recorded best.',
+      }),
+    );
+  }
+
+  if (bestNetWorth > 0) {
+    deltas.push(
+      mkDelta({
+        metric: 'NET_WORTH',
+        label: 'Net Worth (vs best)',
+        current: netWorth,
+        previous: bestNetWorth,
+        regime,
+        phase,
+        pressure,
+        seed: seedForDeltas,
+        tick,
+        note: 'Mid-run net worth compared to your recorded best.',
+      }),
+    );
+  }
+
+  // Survival ticks deltas
+  if (bestTickSurvived > 0 || prevTickSurvived > 0) {
+    deltas.push(
+      mkDelta({
+        metric: 'SURVIVAL_TICKS',
+        label: 'Survival Ticks (vs last)',
+        current: tick,
+        previous: prevTickSurvived,
+        regime,
+        phase,
+        pressure,
+        seed: seedForDeltas,
+        tick,
+        note: 'Mid-run tick compared to last completed run length.',
+      }),
+    );
+  }
+
+  // Streak proxy
+  deltas.push(
+    mkDelta({
+      metric: 'STREAK',
+      label: 'Streak Discipline (proxy)',
+      current: clamp(bestStreak > 0 ? Math.min(bestStreak, 100) : prevStreak, 0, 100),
+      previous: clamp(prevStreak, 0, 100),
+      regime,
+      phase,
+      pressure,
+      seed: seedForDeltas,
+      tick,
+      note: 'Uses available streak metadata (if provided).',
+    }),
+  );
+
+  // Pace proxy
+  deltas.push(
+    mkDelta({
+      metric: 'PACE',
+      label: 'Run Pace (tick / total)',
+      current: pace,
+      previous: clamp((prevTickSurvived ?? 0) / Math.max(1, RUN_TOTAL_TICKS - 1), 0, 1),
+      regime,
+      phase,
+      pressure,
+      seed: seedForDeltas,
+      tick,
+      note: 'Shows how far into the run you are relative to total ticks.',
+    }),
+  );
+
+  // Risk discipline proxy
+  deltas.push(
+    mkDelta({
+      metric: 'RISK_DISCIPLINE',
+      label: 'Risk Discipline (proxy)',
+      current: riskDiscipline,
+      previous: clamp((solvencyStatus === 'SOLVENT' ? 0.80 : solvencyStatus === 'BLEED' ? 0.50 : 0.10) * (1 - decay), 0, 1),
+      regime,
+      phase,
+      pressure,
+      seed: seedForDeltas,
+      tick,
+      note: 'Derived from solvency + regime decay (bounded).',
+    }),
+  );
+
+  // Pressure management proxy
+  deltas.push(
+    mkDelta({
+      metric: 'PRESSURE_MANAGEMENT',
+      label: 'Pressure Management (proxy)',
+      current: pressureManagement,
+      previous: clamp(pressureManagement * (pulse / Math.max(0.25, mult)), 0, 1),
+      regime,
+      phase,
+      pressure,
+      seed: seedForDeltas,
+      tick,
+      note: 'Derived from phase/regime/pressure weights (bounded).',
+    }),
+  );
+
+  // Sort by strongest deltas (deterministic)
+  const sortedDeltas = seededShuffle(
+    deltas.sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta)),
+    `${seedForDeltas}:shuffle`,
+  ).slice(0, 8);
+
+  // Compute whether PB broken (using best cash/netWorth if known, otherwise only checks survival tick)
+  const pbBroken =
+    (bestCash > 0 && cash > bestCash) ||
+    (bestNetWorth > 0 && netWorth > bestNetWorth) ||
+    (bestTickSurvived > 0 && tick > bestTickSurvived);
+
+  const clipHint = runHistory?.lastClip ?? buildClipHint(tick, runSeed, chaosHit);
+  const momentHint = runHistory?.lastMoment ?? buildMomentHint(tick, pbBroken, regime, pressure, phase, cardTag);
+
+  const tips = chooseTips(runSeed, tick, regime, pressure, solvencyStatus);
+  const recommendedFocus = buildRecommendedFocus(runSeed, tick, regime, phase, pressure, cardTag);
+
+  const headline =
+    pbBroken ? 'Personal best pressure signature detected.' :
+    pressure === 'CRITICAL' ? 'Critical pressure. Execute clean.' :
+    solvencyStatus === 'BLEED' ? 'Solvency bleeding. Stabilize first.' :
+    'Progress trending. Keep tightening proof.';
+
+  const subhead =
+    `Regime=${regime} Phase=${phase} Pressure=${pressure} Tick=${tick}/${RUN_TOTAL_TICKS}. ` +
+    `Decay=${decay.toFixed(3)} Pulse=${pulse.toFixed(2)} Mult=${mult.toFixed(2)}.`;
+
+  const overlay: ComparisonOverlay = {
+    headline,
+    subhead,
+    context: {
+      playerId,
+      runId,
+      tick,
+      runPhase: phase,
+      macroRegime: regime,
+      pressureTier: pressure,
+      tickTier,
+      solvencyStatus,
+      decay,
+      pulse,
+      mult,
+      cardTag,
+      deckTop,
+    },
+    recommendedFocus,
+    tips,
+    momentHint,
+    clipHint,
+    auditHash: computeHash(
+      JSON.stringify({
+        mid: 'M25',
+        playerId,
+        runId,
+        tick,
+        phase,
+        regime,
+        pressure,
+        tickTier,
+        solvencyStatus,
+        decay,
+        pulse,
+        mult,
+        cardTag,
+        deckTop,
+        pbBroken,
+        deltaCount: sortedDeltas.length,
+        focus: recommendedFocus,
+      }),
+    ),
+  };
+
+  emit({
+    event: 'OVERLAY_VIEWED',
+    mechanic_id: 'M25',
+    tick,
+    runId,
+    payload: {
+      playerId,
+      tick,
+      phase,
+      regime,
+      pressure,
+      tickTier,
+      solvencyStatus,
+      pbBroken,
+      cardTag,
+      deckTop,
+      deltaCount: sortedDeltas.length,
+      auditHash: overlay.auditHash,
+    },
+  });
+
+  for (const d of sortedDeltas) {
+    emit({
+      event: 'DELTA_COMPUTED',
+      mechanic_id: 'M25',
+      tick,
+      runId,
+      payload: {
+        metric: d.metric,
+        label: d.label,
+        current: d.current,
+        previous: d.previous,
+        delta: d.delta,
+        pct: Number(d.pct.toFixed(4)),
+        improved: d.improved,
+        regime: d.regime,
+        phase: d.phase,
+        pressure: d.pressure,
+        tags: d.tags,
+        note: d.note,
+      },
+    });
+  }
+
+  if (pbBroken) {
+    emit({
+      event: 'PERSONAL_BEST_BROKEN',
+      mechanic_id: 'M25',
+      tick,
+      runId,
+      payload: {
+        playerId,
+        tick,
+        cash,
+        netWorth,
+        bestCash: bestCash || null,
+        bestNetWorth: bestNetWorth || null,
+        bestTickSurvived: bestTickSurvived || null,
+        momentHint,
+        clipHint,
+      },
+    });
+  }
+
+  return {
+    improvementDeltas: sortedDeltas,
+    comparisonOverlay: overlay,
+  };
 }
 
 // ── ML companion hook ─────────────────────────────────────────────────────
 
 export interface M25MLInput {
-  improvementDeltas?: ImprovementDelta[], comparisonOverlay?: ComparisonOverlay;
+  improvementDeltas?: ImprovementDelta[];
+  comparisonOverlay?: ComparisonOverlay;
   runId: string;
-  tick:  number;
+  tick: number;
 }
 
 export interface M25MLOutput {
-  score:          number;         // 0–1
-  topFactors:     string[];       // max 5 plain-English factors
-  recommendation: string;         // single sentence
-  auditHash:      string;         // SHA256(inputs+outputs+rulesVersion)
-  confidenceDecay: number;        // 0–1, how fast this signal should decay
+  score: number; // 0–1
+  topFactors: string[]; // max 5 plain-English factors
+  recommendation: string; // single sentence
+  auditHash: string; // SHA256(inputs+outputs+rulesVersion)
+  confidenceDecay: number; // 0–1, how fast this signal should decay
 }
 
-/**
- * personalImprovementOverlayMLCompanion
- * Async advisory — fires AFTER exec_hook, reads output, returns signals only.
- * NEVER mutates state. Results feed Case File, Intel bars, and CORD scoring.
- */
-export async function personalImprovementOverlayMLCompanion(
-  input: M25MLInput,
-): Promise<M25MLOutput> {
-  // Advisory signal — bounded [0,1], no state mutation
-  const score = Math.min(0.99, Math.max(0.01, Object.keys(input).length * 0.05));
+export async function personalImprovementOverlayMLCompanion(input: M25MLInput): Promise<M25MLOutput> {
+  const tick = clamp(input.tick ?? 0, 0, RUN_TOTAL_TICKS - 1);
+
+  const overlay = input.comparisonOverlay;
+  const regime: MacroRegime = overlay?.context?.macroRegime ?? 'NEUTRAL';
+  const pressure: PressureTier = overlay?.context?.pressureTier ?? 'LOW';
+
+  const decay = computeDecayRate(regime, M25_BOUNDS.BASE_DECAY_RATE);
+  const pulse = EXIT_PULSE_MULTIPLIERS[regime] ?? 1.0;
+  const mult = REGIME_MULTIPLIERS[regime] ?? 1.0;
+
+  const deltas = input.improvementDeltas ?? [];
+  const improvedCount = deltas.filter((d) => Boolean(d.improved)).length;
+
+  const pressureBoost =
+    pressure === 'CRITICAL' ? 0.20 :
+    pressure === 'HIGH' ? 0.12 :
+    pressure === 'MEDIUM' ? 0.06 : 0.02;
+
+  const score = clamp(
+    0.15 +
+      clamp(improvedCount / 6, 0, 0.35) +
+      pressureBoost +
+      clamp((pulse * mult) / 3, 0, 0.18) +
+      clamp((1 - decay) / 2, 0, 0.12),
+    0.01,
+    0.99,
+  );
+
+  const topFactors = [
+    `improved=${improvedCount}/${deltas.length}`,
+    `pressure=${pressure}`,
+    `regime=${regime}`,
+    `decay=${decay.toFixed(2)}`,
+    `tick=${tick}/${RUN_TOTAL_TICKS}`,
+  ].slice(0, 5);
+
+  const recommendation =
+    improvedCount >= 3
+      ? 'Lock the improvements as a repeatable rule: preserve liquidity, clip the pivot, then scale.'
+      : improvedCount > 0
+        ? 'One improvement detected—tighten one constraint and run it again under the same regime.'
+        : 'No measurable improvement—reduce randomness, simplify decisions, and chase one proof metric.';
+
   return {
     score,
-    topFactors:     ['M25 signal computed', 'advisory only'],
-    recommendation: 'Monitor M25 output and adjust strategy accordingly.',
-    auditHash:      computeHash(JSON.stringify(input) + ':ml:M25'),
-    confidenceDecay: 0.05,
+    topFactors,
+    recommendation,
+    auditHash: computeHash(JSON.stringify({ mid: 'M25', ...input, regime, pressure, decay, pulse, mult }) + ':ml:M25'),
+    confidenceDecay: decay,
   };
 }

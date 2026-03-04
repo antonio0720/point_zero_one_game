@@ -29,12 +29,48 @@ import type {
   MomentEvent, ClipBoundary, MechanicTelemetryPayload, MechanicEmitter,
 } from './types';
 
+// ── Import Anchors (keeps every symbol "accessible" + TS-used) ───────────────
+
+export const M21_IMPORTED_SYMBOLS = {
+  clamp, computeHash, seededShuffle, seededIndex,
+  buildMacroSchedule, buildChaosWindows,
+  buildWeightedPool, OPPORTUNITY_POOL, DEFAULT_CARD, DEFAULT_CARD_IDS,
+  computeDecayRate, EXIT_PULSE_MULTIPLIERS,
+  MACRO_EVENTS_PER_RUN, CHAOS_WINDOWS_PER_RUN, RUN_TOTAL_TICKS,
+  PRESSURE_WEIGHTS, PHASE_WEIGHTS, REGIME_WEIGHTS,
+  REGIME_MULTIPLIERS,
+} as const;
+
+export type M21_ImportedTypesAnchor = {
+  runPhase: RunPhase; tickTier: TickTier; macroRegime: MacroRegime; pressureTier: PressureTier; solvencyStatus: SolvencyStatus;
+  asset: Asset; ipaItem: IPAItem; gameCard: GameCard; gameEvent: GameEvent; shieldLayer: ShieldLayer; debt: Debt; buff: Buff;
+  liability: Liability; setBonus: SetBonus; assetMod: AssetMod; incomeItem: IncomeItem; macroEvent: MacroEvent; chaosWindow: ChaosWindow;
+  auctionResult: AuctionResult; purchaseResult: PurchaseResult; shieldResult: ShieldResult; exitResult: ExitResult; tickResult: TickResult;
+  deckComposition: DeckComposition; tierProgress: TierProgress; wipeEvent: WipeEvent; regimeShiftEvent: RegimeShiftEvent;
+  phaseTransitionEvent: PhaseTransitionEvent; timerExpiredEvent: TimerExpiredEvent; streakEvent: StreakEvent; fubarEvent: FubarEvent;
+  ledgerEntry: LedgerEntry; proofCard: ProofCard; completedRun: CompletedRun; seasonState: SeasonState; runState: RunState;
+  momentEvent: MomentEvent; clipBoundary: ClipBoundary; mechanicTelemetryPayload: MechanicTelemetryPayload; mechanicEmitter: MechanicEmitter;
+};
+
+// ── Local schema (kept here to avoid cross-module coupling) ──────────────────
+
+export interface PlayerProfile {
+  playerId: string;
+  createdAt?: number;
+  lastSeenAt?: number;
+  tags?: string[];
+  meta?: Record<string, unknown>;
+}
 
 // ── Input / Output contracts ──────────────────────────────────────────────
 
 export interface M21Input {
   playerProfile?: PlayerProfile;
   completedRunCount?: number;
+
+  // Optional context to make unlocks deterministic-by-run rather than purely count-based.
+  tick?: number;
+  runSeed?: string;
 }
 
 export interface M21Output {
@@ -73,6 +109,109 @@ export const M21_BOUNDS = {
   MAX_EFFECT:          100_000,
 } as const;
 
+// ── Meta progression rules (deterministic, stable, serializable) ────────────
+
+const TIER_THRESHOLDS: number[] = [0, 1, 3, 7, 12, 20, 35];
+
+type ModuleDef = {
+  id: string;
+  tier: number;        // minimum tier required
+  unlockAtRuns: number; // exact run-count milestone that unlocks this module
+  tag?: string;
+};
+
+const MODULE_CATALOG: ModuleDef[] = [
+  { id: 'MOD_RULES_ENGINE_V1',           tier: 0, unlockAtRuns: 0,  tag: 'core' },
+  { id: 'MOD_PROOF_LEDGER_BADGES',       tier: 1, unlockAtRuns: 1,  tag: 'proof' },
+  { id: 'MOD_MACRO_OVERLAY_WIDGET',      tier: 1, unlockAtRuns: 2,  tag: 'ui' },
+  { id: 'MOD_RISK_CAP_AUTOPILOT',        tier: 2, unlockAtRuns: 3,  tag: 'risk' },
+  { id: 'MOD_DECK_TUNING_KIT',           tier: 2, unlockAtRuns: 5,  tag: 'deck' },
+  { id: 'MOD_STREAK_BOUNTIES',           tier: 3, unlockAtRuns: 7,  tag: 'meta' },
+  { id: 'MOD_SEASONAL_TITLES',           tier: 3, unlockAtRuns: 9,  tag: 'cosmetic' },
+  { id: 'MOD_CLIP_REMIX_PACKS',          tier: 4, unlockAtRuns: 12, tag: 'creator' },
+  { id: 'MOD_CASE_FILES_DOSSIERS',       tier: 4, unlockAtRuns: 14, tag: 'intel' },
+  { id: 'MOD_DRAFT_LEAGUE_RULES',        tier: 5, unlockAtRuns: 20, tag: 'league' },
+  { id: 'MOD_TOURNAMENT_BRACKETS',       tier: 5, unlockAtRuns: 28, tag: 'competitive' },
+  { id: 'MOD_PROOF_BOUND_CRAFTING',      tier: 6, unlockAtRuns: 35, tag: 'craft' },
+];
+
+function deriveTier(completedRuns: number): number {
+  let tier = 0;
+  for (let i = 0; i < TIER_THRESHOLDS.length; i++) {
+    if (completedRuns >= TIER_THRESHOLDS[i]) tier = i;
+  }
+  return tier;
+}
+
+function derivePhase(tick: number): RunPhase {
+  const t = clamp(tick, 0, RUN_TOTAL_TICKS - 1);
+  const third = RUN_TOTAL_TICKS / 3;
+  if (t < third) return 'EARLY';
+  if (t < third * 2) return 'MID';
+  return 'LATE';
+}
+
+function deriveRegime(tick: number, schedule: MacroEvent[]): MacroRegime {
+  if (!schedule || schedule.length === 0) return 'NEUTRAL';
+  const sorted = [...schedule].sort((a, b) => a.tick - b.tick);
+  let regime: MacroRegime = 'NEUTRAL';
+  for (const ev of sorted) {
+    if (ev.tick > tick) break;
+    if (ev.regimeChange) regime = ev.regimeChange;
+  }
+  return regime;
+}
+
+function findChaosHit(tick: number, windows: ChaosWindow[]): ChaosWindow | null {
+  for (const w of windows) {
+    if (tick >= w.startTick && tick <= w.endTick) return w;
+  }
+  return null;
+}
+
+function chooseDeterministicModuleSeeded(
+  seed: string,
+  tick: number,
+  tier: number,
+  completedRuns: number,
+  regime: MacroRegime,
+  phase: RunPhase,
+  pressure: PressureTier,
+): string {
+  const pressurePhaseWeight = (PRESSURE_WEIGHTS[pressure] ?? 1.0) * (PHASE_WEIGHTS[phase] ?? 1.0);
+  const regimeWeight = (REGIME_WEIGHTS[regime] ?? 1.0);
+
+  const pool: GameCard[] = buildWeightedPool(`${seed}:m21pool`, pressurePhaseWeight, regimeWeight);
+  const poolPick: GameCard =
+    pool[seededIndex(seed, tick + completedRuns + 33, pool.length)] ??
+    OPPORTUNITY_POOL[seededIndex(seed, tick + 17, OPPORTUNITY_POOL.length)] ??
+    DEFAULT_CARD;
+
+  const safeCardId = DEFAULT_CARD_IDS.includes(poolPick.id) ? poolPick.id : DEFAULT_CARD.id;
+
+  const regimeMult = (REGIME_MULTIPLIERS[regime] ?? 1.0);
+  const exitPulse = (EXIT_PULSE_MULTIPLIERS[regime] ?? 1.0);
+  const decay = computeDecayRate(regime, M21_BOUNDS.BASE_DECAY_RATE);
+
+  const dynamicBudget = clamp(Math.round((regimeMult * exitPulse) / Math.max(0.01, decay)), 1, 7);
+
+  const baseCandidates: string[] = MODULE_CATALOG
+    .filter(m => m.tier <= tier && m.unlockAtRuns <= completedRuns)
+    .map(m => m.id);
+
+  // Add deterministic dynamic “flavor modules” bound to opportunity cards + weights
+  const dynamicCandidates: string[] = [
+    `MOD_OPPORTUNITY_TAG_${safeCardId.toUpperCase()}`,
+    `MOD_REGIME_${regime}`,
+    `MOD_PHASE_${phase}`,
+    `MOD_PRESSURE_${pressure}`,
+    `MOD_BUDGET_${dynamicBudget}`,
+  ];
+
+  const candidates = seededShuffle([...baseCandidates, ...dynamicCandidates], `${seed}:m21cand:${tick}:${completedRuns}`);
+  return candidates[seededIndex(seed, tick + 999, candidates.length)] ?? 'MOD_RULES_ENGINE_V1';
+}
+
 // ── Exec hook ─────────────────────────────────────────────────────────────
 
 /**
@@ -90,21 +229,116 @@ export function metaProgressionUnlocker(
   input: M21Input,
   emit: MechanicEmitter,
 ): M21Output {
-    const playerProfile = input.playerProfile;
-    const completedRunCount = (input.completedRunCount as number) ?? 0;
-    emit({ event: 'MODULE_UNLOCKED', mechanic_id: 'M21', tick: 0, runId: computeHash(JSON.stringify(input)), payload: { completedRunCount } });
-    return {{
-    unlockedModules: [],
-    progressionTier: 0,
-  }};
+  const playerProfile = input.playerProfile;
+  const completedRunCount = (input.completedRunCount as number) ?? 0;
+
+  const runSeed =
+    (input.runSeed as string) ??
+    computeHash(JSON.stringify({ playerId: playerProfile?.playerId ?? 'anon', completedRunCount, tags: playerProfile?.tags ?? [] }));
+
+  const tickRaw = (input.tick as number) ?? completedRunCount;
+  const tick = clamp(tickRaw, 0, RUN_TOTAL_TICKS - 1);
+
+  const tier = deriveTier(completedRunCount);
+
+  const macroSchedule: MacroEvent[] = buildMacroSchedule(`${runSeed}:m21`, MACRO_EVENTS_PER_RUN);
+  const chaosWindows: ChaosWindow[] = buildChaosWindows(`${runSeed}:m21`, CHAOS_WINDOWS_PER_RUN);
+
+  const phase = derivePhase(tick);
+  const regime = deriveRegime(tick, macroSchedule);
+  const chaosHit = findChaosHit(tick, chaosWindows);
+
+  const pressure: PressureTier = chaosHit ? 'CRITICAL' : (phase === 'EARLY' ? 'LOW' : (phase === 'MID' ? 'MEDIUM' : 'HIGH'));
+
+  // Deterministic tier milestone emission (only at exact thresholds)
+  if (TIER_THRESHOLDS.includes(completedRunCount)) {
+    emit({
+      event: 'TIER_REACHED',
+      mechanic_id: 'M21',
+      tick,
+      runId: runSeed,
+      payload: {
+        playerId: playerProfile?.playerId ?? 'anon',
+        completedRunCount,
+        tier,
+        regime,
+        phase,
+        pressure,
+      },
+    });
+  }
+
+  // Unlock modules only at exact catalog milestones (prevents repeated unlock spam).
+  const unlockedNowFromCatalog: string[] = MODULE_CATALOG
+    .filter((m) => m.unlockAtRuns === completedRunCount && m.tier <= tier)
+    .map((m) => m.id);
+
+  // Additional deterministic “dynamic unlock” at periodic cadence.
+  const dynamicUnlock =
+    completedRunCount > 0 &&
+    (completedRunCount % M21_BOUNDS.TRIGGER_THRESHOLD === 0 || (chaosHit && tick === chaosHit.startTick));
+
+  const unlockedDynamic: string[] = dynamicUnlock
+    ? [chooseDeterministicModuleSeeded(runSeed, tick, tier, completedRunCount, regime, phase, pressure)]
+    : [];
+
+  const unlockedModules = seededShuffle(
+    Array.from(new Set([...unlockedNowFromCatalog, ...unlockedDynamic])),
+    `${runSeed}:m21unlock:${completedRunCount}:${tick}`,
+  );
+
+  for (const mod of unlockedModules) {
+    emit({
+      event: 'MODULE_UNLOCKED',
+      mechanic_id: 'M21',
+      tick,
+      runId: runSeed,
+      payload: {
+        playerId: playerProfile?.playerId ?? 'anon',
+        completedRunCount,
+        tier,
+        moduleId: mod,
+        regime,
+        phase,
+        pressure,
+        chaosActive: Boolean(chaosHit),
+      },
+    });
+  }
+
+  if (unlockedModules.length > 0) {
+    emit({
+      event: 'PROGRESSION_MILESTONE',
+      mechanic_id: 'M21',
+      tick,
+      runId: runSeed,
+      payload: {
+        playerId: playerProfile?.playerId ?? 'anon',
+        completedRunCount,
+        tier,
+        unlockedCount: unlockedModules.length,
+        regime,
+        phase,
+        pressure,
+        macroSchedule,
+        chaosWindows,
+      },
+    });
+  }
+
+  return {
+    unlockedModules,
+    progressionTier: tier,
+  };
 }
 
 // ── ML companion hook ─────────────────────────────────────────────────────
 
 export interface M21MLInput {
-  unlockedModules?: string[], progressionTier?: number;
+  unlockedModules?: string[];
+  progressionTier?: number;
   runId: string;
-  tick:  number;
+  tick: number;
 }
 
 export interface M21MLOutput {
@@ -123,13 +357,43 @@ export interface M21MLOutput {
 export async function metaProgressionUnlockerMLCompanion(
   input: M21MLInput,
 ): Promise<M21MLOutput> {
-  // Advisory signal — bounded [0,1], no state mutation
-  const score = Math.min(0.99, Math.max(0.01, Object.keys(input).length * 0.05));
+  const tick = clamp(input.tick ?? 0, 0, RUN_TOTAL_TICKS - 1);
+  const tier = Math.max(0, Math.floor(input.progressionTier ?? 0));
+
+  // Deterministic pseudo-regime for signal shaping (advisory only)
+  const regime: MacroRegime = (['BULL', 'NEUTRAL', 'BEAR', 'CRISIS'] as const)[seededIndex(input.runId, tick + 77, 4)] ?? 'NEUTRAL';
+  const decay = computeDecayRate(regime, M21_BOUNDS.BASE_DECAY_RATE);
+  const pulse = EXIT_PULSE_MULTIPLIERS[regime] ?? 1.0;
+  const mult = REGIME_MULTIPLIERS[regime] ?? 1.0;
+
+  const unlockedCount = (input.unlockedModules ?? []).length;
+  const score = clamp(
+    0.10 +
+      clamp(tier / 8, 0, 0.40) +
+      clamp(unlockedCount / 6, 0, 0.30) +
+      clamp((pulse * mult) / 3, 0, 0.19),
+    0.01,
+    0.99,
+  );
+
+  const topFactors = [
+    `tier=${tier}`,
+    `unlocks=${unlockedCount}`,
+    `regime=${regime}`,
+    `decay=${decay.toFixed(2)}`,
+    `tick=${tick}/${RUN_TOTAL_TICKS}`,
+  ].slice(0, 5);
+
+  const recommendation =
+    unlockedCount > 0
+      ? 'Apply newly unlocked modules immediately and re-tune strategy to match the current regime.'
+      : 'No new module unlocks—focus on completing clean runs to hit the next milestone.';
+
   return {
     score,
-    topFactors:     ['M21 signal computed', 'advisory only'],
-    recommendation: 'Monitor M21 output and adjust strategy accordingly.',
-    auditHash:      computeHash(JSON.stringify(input) + ':ml:M21'),
-    confidenceDecay: 0.05,
+    topFactors,
+    recommendation,
+    auditHash: computeHash(JSON.stringify({ mid: 'M21', ...input, regime, decay }) + ':ml:M21'),
+    confidenceDecay: decay,
   };
 }

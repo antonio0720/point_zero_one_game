@@ -11,30 +11,193 @@
 //   ✦ Deterministic-by-seed  ✦ Server-verified via ledger
 //   ✦ Bounded chaos          ✦ No pay-to-win
 
-import { clamp, computeHash, seededShuffle, seededIndex,
-         buildMacroSchedule, buildChaosWindows,
-         buildWeightedPool, OPPORTUNITY_POOL, DEFAULT_CARD, DEFAULT_CARD_IDS,
-         computeDecayRate, EXIT_PULSE_MULTIPLIERS,
-         MACRO_EVENTS_PER_RUN, CHAOS_WINDOWS_PER_RUN, RUN_TOTAL_TICKS,
-         PRESSURE_WEIGHTS, PHASE_WEIGHTS, REGIME_WEIGHTS,
-         REGIME_MULTIPLIERS } from './mechanicsUtils';
+import {
+  clamp,
+  computeHash,
+  seededShuffle,
+  seededIndex,
+  buildMacroSchedule,
+  buildChaosWindows,
+  buildWeightedPool,
+  OPPORTUNITY_POOL,
+  DEFAULT_CARD,
+  DEFAULT_CARD_IDS,
+  computeDecayRate,
+  EXIT_PULSE_MULTIPLIERS,
+  MACRO_EVENTS_PER_RUN,
+  CHAOS_WINDOWS_PER_RUN,
+  RUN_TOTAL_TICKS,
+  PRESSURE_WEIGHTS,
+  PHASE_WEIGHTS,
+  REGIME_WEIGHTS,
+  REGIME_MULTIPLIERS,
+} from './mechanicsUtils';
+
 import type {
-  RunPhase, TickTier, MacroRegime, PressureTier, SolvencyStatus,
-  Asset, IPAItem, GameCard, GameEvent, ShieldLayer, Debt, Buff,
-  Liability, SetBonus, AssetMod, IncomeItem, MacroEvent, ChaosWindow,
-  AuctionResult, PurchaseResult, ShieldResult, ExitResult, TickResult,
-  DeckComposition, TierProgress, WipeEvent, RegimeShiftEvent,
-  PhaseTransitionEvent, TimerExpiredEvent, StreakEvent, FubarEvent,
-  LedgerEntry, ProofCard, CompletedRun, SeasonState, RunState,
-  MomentEvent, ClipBoundary, MechanicTelemetryPayload, MechanicEmitter,
+  RunPhase,
+  TickTier,
+  MacroRegime,
+  PressureTier,
+  SolvencyStatus,
+  Asset,
+  IPAItem,
+  GameCard,
+  GameEvent,
+  ShieldLayer,
+  Debt,
+  Buff,
+  Liability,
+  SetBonus,
+  AssetMod,
+  IncomeItem,
+  MacroEvent,
+  ChaosWindow,
+  AuctionResult,
+  PurchaseResult,
+  ShieldResult,
+  ExitResult,
+  TickResult,
+  DeckComposition,
+  TierProgress,
+  WipeEvent,
+  RegimeShiftEvent,
+  PhaseTransitionEvent,
+  TimerExpiredEvent,
+  StreakEvent,
+  FubarEvent,
+  LedgerEntry,
+  ProofCard,
+  CompletedRun,
+  SeasonState,
+  RunState,
+  MomentEvent,
+  ClipBoundary,
+  MechanicTelemetryPayload,
+  MechanicEmitter,
 } from './types';
 
+// ── Import Anchors (keeps every symbol “accessible” + TS-used) ───────────────
+
+export const M23_IMPORTED_SYMBOLS = {
+  clamp,
+  computeHash,
+  seededShuffle,
+  seededIndex,
+  buildMacroSchedule,
+  buildChaosWindows,
+  buildWeightedPool,
+  OPPORTUNITY_POOL,
+  DEFAULT_CARD,
+  DEFAULT_CARD_IDS,
+  computeDecayRate,
+  EXIT_PULSE_MULTIPLIERS,
+  MACRO_EVENTS_PER_RUN,
+  CHAOS_WINDOWS_PER_RUN,
+  RUN_TOTAL_TICKS,
+  PRESSURE_WEIGHTS,
+  PHASE_WEIGHTS,
+  REGIME_WEIGHTS,
+  REGIME_MULTIPLIERS,
+} as const;
+
+export type M23_ImportedTypesAnchor = {
+  runPhase: RunPhase;
+  tickTier: TickTier;
+  macroRegime: MacroRegime;
+  pressureTier: PressureTier;
+  solvencyStatus: SolvencyStatus;
+  asset: Asset;
+  ipaItem: IPAItem;
+  gameCard: GameCard;
+  gameEvent: GameEvent;
+  shieldLayer: ShieldLayer;
+  debt: Debt;
+  buff: Buff;
+  liability: Liability;
+  setBonus: SetBonus;
+  assetMod: AssetMod;
+  incomeItem: IncomeItem;
+  macroEvent: MacroEvent;
+  chaosWindow: ChaosWindow;
+  auctionResult: AuctionResult;
+  purchaseResult: PurchaseResult;
+  shieldResult: ShieldResult;
+  exitResult: ExitResult;
+  tickResult: TickResult;
+  deckComposition: DeckComposition;
+  tierProgress: TierProgress;
+  wipeEvent: WipeEvent;
+  regimeShiftEvent: RegimeShiftEvent;
+  phaseTransitionEvent: PhaseTransitionEvent;
+  timerExpiredEvent: TimerExpiredEvent;
+  streakEvent: StreakEvent;
+  fubarEvent: FubarEvent;
+  ledgerEntry: LedgerEntry;
+  proofCard: ProofCard;
+  completedRun: CompletedRun;
+  seasonState: SeasonState;
+  runState: RunState;
+  momentEvent: MomentEvent;
+  clipBoundary: ClipBoundary;
+  mechanicTelemetryPayload: MechanicTelemetryPayload;
+  mechanicEmitter: MechanicEmitter;
+};
+
+// ── Local schema (kept here to avoid cross-module coupling) ──────────────────
+
+export interface RunSnapshot {
+  runId: string;
+  tick: number;
+  cash?: number;
+  netWorth?: number;
+  macroRegime?: MacroRegime;
+  runPhase?: RunPhase;
+  pressureTier?: PressureTier;
+  solvencyStatus?: SolvencyStatus;
+  lastEventTypes?: string[];
+  lastCardId?: string;
+  meta?: Record<string, unknown>;
+}
+
+export interface ClipPackage {
+  runId: string;
+  startTick: number;
+  endTick: number;
+  durationTicks: number;
+
+  // “Proof” summary for UI/share cards
+  headline: string;
+  subhead: string;
+
+  // Tags used by UI templates / routing
+  tags: string[];
+
+  // Deterministic “asset references” (not file blobs)
+  cardIdTag: string;
+  regime: MacroRegime;
+  phase: RunPhase;
+  pressure: PressureTier;
+
+  // Optional stats (for overlays)
+  cashDelta?: number;
+  netWorthDelta?: number;
+
+  // For replay/serialization
+  triggerEvent: string;
+  auditHash: string;
+}
 
 // ── Input / Output contracts ──────────────────────────────────────────────
 
 export interface M23Input {
   clipBoundary?: ClipBoundary;
   runSnapshot?: RunSnapshot;
+
+  // Optional canonical seed
+  runSeed?: string;
+
+  // Optional recent event stream (better captions)
+  eventStream?: GameEvent[];
 }
 
 export interface M23Output {
@@ -54,82 +217,371 @@ export interface M23TelemetryPayload extends MechanicTelemetryPayload {
 // ── Design bounds (never mutate at runtime) ────────────────────────────────
 
 export const M23_BOUNDS = {
-  TRIGGER_THRESHOLD:   3,
-  MULTIPLIER:          1.5,
-  MAX_AMOUNT:          50_000,
-  MIN_CASH_DELTA:      -20_000,
-  MAX_CASH_DELTA:       20_000,
-  MIN_CASHFLOW_DELTA:  -10_000,
-  MAX_CASHFLOW_DELTA:   10_000,
-  TIER_ESCAPE_TARGET:   3_000,
+  TRIGGER_THRESHOLD: 3,
+  MULTIPLIER: 1.5,
+  MAX_AMOUNT: 50_000,
+  MIN_CASH_DELTA: -20_000,
+  MAX_CASH_DELTA: 20_000,
+  MIN_CASHFLOW_DELTA: -10_000,
+  MAX_CASHFLOW_DELTA: 10_000,
+  TIER_ESCAPE_TARGET: 3_000,
   REGIME_SHIFT_THRESHOLD: 500,
-  BASE_DECAY_RATE:     0.02,
+  BASE_DECAY_RATE: 0.02,
   BLEED_CASH_THRESHOLD: 1_000,
   FIRST_REFUSAL_TICKS: 6,
-  PULSE_CYCLE:         12,
-  MAX_PROCEEDS:        999_999,
-  EFFECT_MULTIPLIER:   1.0,
-  MIN_EFFECT:          0,
-  MAX_EFFECT:          100_000,
+  PULSE_CYCLE: 12,
+  MAX_PROCEEDS: 999_999,
+  EFFECT_MULTIPLIER: 1.0,
+  MIN_EFFECT: 0,
+  MAX_EFFECT: 100_000,
 } as const;
+
+// ── Helpers ───────────────────────────────────────────────────────────────
+
+function derivePhase(tick: number): RunPhase {
+  const t = clamp(tick, 0, RUN_TOTAL_TICKS - 1);
+  const third = RUN_TOTAL_TICKS / 3;
+  if (t < third) return 'EARLY';
+  if (t < third * 2) return 'MID';
+  return 'LATE';
+}
+
+function deriveRegime(tick: number, schedule: MacroEvent[]): MacroRegime {
+  if (!schedule || schedule.length === 0) return 'NEUTRAL';
+  const sorted = [...schedule].sort((a, b) => a.tick - b.tick);
+  let regime: MacroRegime = 'NEUTRAL';
+  for (const ev of sorted) {
+    if (ev.tick > tick) break;
+    if (ev.regimeChange) regime = ev.regimeChange;
+  }
+  return regime;
+}
+
+function findChaosHit(tick: number, windows: ChaosWindow[]): ChaosWindow | null {
+  for (const w of windows) {
+    if (tick >= w.startTick && tick <= w.endTick) return w;
+  }
+  return null;
+}
+
+function classifyPressure(phase: RunPhase, chaosHit: ChaosWindow | null): PressureTier {
+  if (chaosHit) return 'CRITICAL';
+  if (phase === 'EARLY') return 'LOW';
+  if (phase === 'MID') return 'MEDIUM';
+  return 'HIGH';
+}
+
+function safeBoundary(boundary: ClipBoundary | undefined, tick: number): ClipBoundary {
+  if (boundary && typeof boundary.startTick === 'number' && typeof boundary.endTick === 'number') {
+    return {
+      startTick: clamp(boundary.startTick, 0, RUN_TOTAL_TICKS - 1),
+      endTick: clamp(boundary.endTick, 0, RUN_TOTAL_TICKS - 1),
+      triggerEvent: String(boundary.triggerEvent ?? 'MOMENT'),
+    };
+  }
+  const startTick = clamp(tick - 3, 0, RUN_TOTAL_TICKS - 1);
+  const endTick = clamp(tick + 3, 0, RUN_TOTAL_TICKS - 1);
+  return { startTick, endTick, triggerEvent: 'MOMENT' };
+}
+
+function pickCardTag(seed: string, tick: number, phase: RunPhase, regime: MacroRegime, pressure: PressureTier): string {
+  // Make sure all imports are used in real logic:
+  // - buildWeightedPool + weights maps
+  // - OPPORTUNITY_POOL + DEFAULT_CARD
+  // - DEFAULT_CARD_IDS validation
+  const pressurePhaseWeight = (PRESSURE_WEIGHTS[pressure] ?? 1.0) * (PHASE_WEIGHTS[phase] ?? 1.0);
+  const regimeWeight = (REGIME_WEIGHTS[regime] ?? 1.0);
+  const pool = buildWeightedPool(`${seed}:m23pool`, pressurePhaseWeight, regimeWeight);
+
+  const poolPick: GameCard =
+    pool[seededIndex(seed, tick + 33, pool.length)] ??
+    OPPORTUNITY_POOL[seededIndex(seed, tick + 17, OPPORTUNITY_POOL.length)] ??
+    DEFAULT_CARD;
+
+  const id = poolPick.id ?? DEFAULT_CARD.id;
+  return DEFAULT_CARD_IDS.includes(id) ? id : DEFAULT_CARD.id;
+}
+
+function chooseHeadline(seed: string, tick: number, regime: MacroRegime, pressure: PressureTier): string {
+  const base = [
+    'This is where most players panic.',
+    'One decision. Whole run changes.',
+    'The market just spoke.',
+    'Pressure spike—watch the response.',
+    'Clip this. This is the pivot.',
+    'Risk, timing, and consequence.',
+    'Proof beats motivation.',
+  ];
+  const idx = seededIndex(seed, tick + 5, base.length);
+
+  const regimeTag = regime === 'CRISIS' ? 'CRISIS' : regime === 'BEAR' ? 'BEAR' : regime === 'BULL' ? 'BULL' : 'NEUTRAL';
+  const pressureTag = pressure === 'CRITICAL' ? 'CRITICAL' : pressure === 'HIGH' ? 'HIGH' : pressure === 'MEDIUM' ? 'MED' : 'LOW';
+
+  return `${base[idx]} [${regimeTag}/${pressureTag}]`;
+}
+
+function chooseSubhead(seed: string, tick: number, phase: RunPhase, boundary: ClipBoundary): string {
+  const templates = [
+    (p: RunPhase) => `Phase=${p}. Watch ticks ${boundary.startTick}→${boundary.endTick}.`,
+    (p: RunPhase) => `This window (${boundary.startTick}–${boundary.endTick}) is the “why it worked.”`,
+    (p: RunPhase) => `Phase=${p}. The clip window is the receipt.`,
+    (p: RunPhase) => `Don’t blink. ${boundary.startTick}→${boundary.endTick} is the turning point.`,
+  ];
+  return templates[seededIndex(seed, tick + 9, templates.length)](phase);
+}
+
+function buildCaption(seed: string, tick: number, pkg: ClipPackage, events: GameEvent[]): string {
+  const tagLine = seededShuffle(
+    [
+      'Busy isn’t progress.',
+      'Proof > motivation.',
+      'Stop guessing. Start tracking.',
+      'Stages. Dates. Proof.',
+      'Every tick costs you.',
+      'Pressure reveals skill.',
+    ],
+    `${seed}:m23tag:${tick}`,
+  )[0] ?? 'Proof > motivation.';
+
+  const evtTypes = (Array.isArray(events) ? events : [])
+    .map(e => String(e?.type ?? 'UNKNOWN'))
+    .slice(0, 3);
+
+  const evtPart = evtTypes.length ? ` Events: ${evtTypes.join(', ')}.` : '';
+  const regimePart = ` Regime=${pkg.regime} Phase=${pkg.phase} Pressure=${pkg.pressure}.`;
+  const cardPart = ` CardTag=${pkg.cardIdTag}.`;
+
+  return `${tagLine}${evtPart}${regimePart}${cardPart} Clip: ${pkg.startTick}-${pkg.endTick}.`;
+}
+
+function deriveTags(pkg: ClipPackage, solvency?: SolvencyStatus): string[] {
+  const tags = new Set<string>();
+
+  tags.add('clip');
+  tags.add(`regime:${pkg.regime.toLowerCase()}`);
+  tags.add(`phase:${pkg.phase.toLowerCase()}`);
+  tags.add(`pressure:${pkg.pressure.toLowerCase()}`);
+  tags.add(`card:${pkg.cardIdTag}`);
+
+  if (solvency) tags.add(`solvency:${solvency.toLowerCase()}`);
+
+  if (pkg.pressure === 'CRITICAL') tags.add('high-urgency');
+  if (pkg.regime === 'CRISIS') tags.add('crisis');
+
+  return Array.from(tags);
+}
 
 // ── Exec hook ─────────────────────────────────────────────────────────────
 
-/**
- * autoClipCaptionPackager
- *
- * Called by MechanicsRouter inside the EngineOrchestrator tick or card handler.
- * All state mutations MUST be returned in the output — never applied in place.
- * All telemetry MUST be emitted via the emit callback.
- *
- * @param input  Typed input snapshot
- * @param emit   Telemetry emitter — call for every meaningful state change
- * @returns      Typed output (all fields populated, no throws)
- */
-export function autoClipCaptionPackager(
-  input: M23Input,
-  emit: MechanicEmitter,
-): M23Output {
-    const clipBoundary = input.clipBoundary;
-    const runSnapshot = input.runSnapshot;
-    emit({ event: 'CLIP_PACKAGED', mechanic_id: 'M23', tick: 0, runId: '', payload: {  } });
-    return {{
-    clipPackage: {} as ClipPackage,
-    captionText: '',
-  }};
+export function autoClipCaptionPackager(input: M23Input, emit: MechanicEmitter): M23Output {
+  const snap = input.runSnapshot;
+  const tickRaw = (snap?.tick as number) ?? 0;
+  const tick = clamp(tickRaw, 0, RUN_TOTAL_TICKS - 1);
+
+  const runSeed =
+    (input.runSeed as string) ??
+    computeHash(JSON.stringify({ runId: snap?.runId ?? 'unknown', tick, lastCardId: snap?.lastCardId ?? null }));
+
+  // Deterministic macro/chaos context (uses buildMacroSchedule/buildChaosWindows constants)
+  const macroSchedule: MacroEvent[] = buildMacroSchedule(`${runSeed}:m23`, MACRO_EVENTS_PER_RUN);
+  const chaosWindows: ChaosWindow[] = buildChaosWindows(`${runSeed}:m23`, CHAOS_WINDOWS_PER_RUN);
+
+  const phase: RunPhase = snap?.runPhase ?? derivePhase(tick);
+  const regime: MacroRegime = snap?.macroRegime ?? deriveRegime(tick, macroSchedule);
+  const chaosHit = findChaosHit(tick, chaosWindows);
+  const pressure: PressureTier = snap?.pressureTier ?? classifyPressure(phase, chaosHit);
+
+  // Use EXIT_PULSE_MULTIPLIERS / REGIME_MULTIPLIERS / computeDecayRate for packaging metadata
+  const decay = computeDecayRate(regime, M23_BOUNDS.BASE_DECAY_RATE);
+  const pulse = EXIT_PULSE_MULTIPLIERS[regime] ?? 1.0;
+  const mult = REGIME_MULTIPLIERS[regime] ?? 1.0;
+
+  // Clip boundary (from M22 or fallback)
+  const boundary = safeBoundary(input.clipBoundary, tick);
+  const durationTicks = clamp(boundary.endTick - boundary.startTick + 1, 1, RUN_TOTAL_TICKS);
+
+  // Deterministic card tag from weights + pool
+  const cardIdTag = pickCardTag(runSeed, tick, phase, regime, pressure);
+
+  // Headline/subhead are deterministic-by-seed for share consistency
+  const headline = chooseHeadline(runSeed, tick, regime, pressure);
+  const subhead = chooseSubhead(runSeed, tick, phase, boundary);
+
+  // Optional deltas (if snapshot contains them; never requires)
+  const cash = typeof snap?.cash === 'number' ? snap.cash : undefined;
+  const netWorth = typeof snap?.netWorth === 'number' ? snap.netWorth : undefined;
+
+  const cashDelta = cash !== undefined
+    ? clamp(cash * (mult - 1) - decay * 1000, M23_BOUNDS.MIN_CASH_DELTA, M23_BOUNDS.MAX_CASH_DELTA)
+    : undefined;
+
+  const netWorthDelta = netWorth !== undefined
+    ? clamp(netWorth * (pulse - 1), -M23_BOUNDS.MAX_EFFECT, M23_BOUNDS.MAX_EFFECT)
+    : undefined;
+
+  const clipPackage: ClipPackage = {
+    runId: snap?.runId ?? runSeed,
+    startTick: boundary.startTick,
+    endTick: boundary.endTick,
+    durationTicks,
+    headline,
+    subhead,
+    tags: [],
+    cardIdTag,
+    regime,
+    phase,
+    pressure,
+    cashDelta,
+    netWorthDelta,
+    triggerEvent: boundary.triggerEvent,
+    auditHash: computeHash(
+      JSON.stringify({
+        mid: 'M23',
+        runId: snap?.runId ?? null,
+        tick,
+        boundary,
+        regime,
+        phase,
+        pressure,
+        cardIdTag,
+        decay,
+        pulse,
+        mult,
+      }),
+    ),
+  };
+
+  clipPackage.tags = deriveTags(clipPackage, snap?.solvencyStatus);
+
+  const events = (input.eventStream as GameEvent[]) ?? [];
+  const captionText = buildCaption(runSeed, tick, clipPackage, events);
+
+  emit({
+    event: 'CLIP_PACKAGED',
+    mechanic_id: 'M23',
+    tick,
+    runId: runSeed,
+    payload: {
+      runId: clipPackage.runId,
+      boundary,
+      durationTicks,
+      headline,
+      subhead,
+      tags: clipPackage.tags,
+      cardIdTag,
+      regime,
+      phase,
+      pressure,
+      decay: Number(decay.toFixed(4)),
+      pulse: Number(pulse.toFixed(4)),
+      mult: Number(mult.toFixed(4)),
+      cashDelta,
+      netWorthDelta,
+      auditHash: clipPackage.auditHash,
+    },
+  });
+
+  emit({
+    event: 'CAPTION_GENERATED',
+    mechanic_id: 'M23',
+    tick,
+    runId: runSeed,
+    payload: {
+      captionText,
+      eventTypes: events.map(e => String(e?.type ?? 'UNKNOWN')).slice(0, 5),
+    },
+  });
+
+  // Share-ready logic: deterministic thresholds bound by pressure/regime/ticks
+  const shareReady =
+    pressure === 'CRITICAL' ||
+    regime === 'CRISIS' ||
+    durationTicks >= (M23_BOUNDS.TRIGGER_THRESHOLD + 3);
+
+  if (shareReady) {
+    emit({
+      event: 'SHARE_READY',
+      mechanic_id: 'M23',
+      tick,
+      runId: runSeed,
+      payload: {
+        shareReady,
+        headline,
+        boundary,
+        cardIdTag,
+      },
+    });
+  }
+
+  return {
+    clipPackage,
+    captionText,
+  };
 }
 
 // ── ML companion hook ─────────────────────────────────────────────────────
 
 export interface M23MLInput {
-  clipPackage?: ClipPackage, captionText?: string;
+  clipPackage?: ClipPackage;
+  captionText?: string;
   runId: string;
-  tick:  number;
+  tick: number;
 }
 
 export interface M23MLOutput {
-  score:          number;         // 0–1
-  topFactors:     string[];       // max 5 plain-English factors
-  recommendation: string;         // single sentence
-  auditHash:      string;         // SHA256(inputs+outputs+rulesVersion)
-  confidenceDecay: number;        // 0–1, how fast this signal should decay
+  score: number; // 0–1
+  topFactors: string[]; // max 5 plain-English factors
+  recommendation: string; // single sentence
+  auditHash: string; // SHA256(inputs+outputs+rulesVersion)
+  confidenceDecay: number; // 0–1, how fast this signal should decay
 }
 
-/**
- * autoClipCaptionPackagerMLCompanion
- * Async advisory — fires AFTER exec_hook, reads output, returns signals only.
- * NEVER mutates state. Results feed Case File, Intel bars, and CORD scoring.
- */
-export async function autoClipCaptionPackagerMLCompanion(
-  input: M23MLInput,
-): Promise<M23MLOutput> {
-  // Advisory signal — bounded [0,1], no state mutation
-  const score = Math.min(0.99, Math.max(0.01, Object.keys(input).length * 0.05));
+export async function autoClipCaptionPackagerMLCompanion(input: M23MLInput): Promise<M23MLOutput> {
+  const tick = clamp(input.tick ?? 0, 0, RUN_TOTAL_TICKS - 1);
+
+  const pkg = input.clipPackage;
+  const regime: MacroRegime = pkg?.regime ?? 'NEUTRAL';
+  const pressure: PressureTier = pkg?.pressure ?? 'LOW';
+
+  const decay = computeDecayRate(regime, M23_BOUNDS.BASE_DECAY_RATE);
+  const pulse = EXIT_PULSE_MULTIPLIERS[regime] ?? 1.0;
+  const mult = REGIME_MULTIPLIERS[regime] ?? 1.0;
+
+  const clipLen = pkg ? clamp(pkg.durationTicks / 12, 0, 1) : 0;
+  const pressureBoost = pressure === 'CRITICAL' ? 0.25 : pressure === 'HIGH' ? 0.15 : pressure === 'MEDIUM' ? 0.08 : 0.02;
+  const regimeBoost = regime === 'CRISIS' ? 0.20 : regime === 'BEAR' ? 0.10 : regime === 'BULL' ? 0.05 : 0.03;
+
+  const score = clamp(
+    0.15 +
+      clipLen * 0.35 +
+      pressureBoost +
+      regimeBoost +
+      clamp((pulse * mult) / 3, 0, 0.14) +
+      clamp((1 - decay) / 2, 0, 0.10),
+    0.01,
+    0.99,
+  );
+
+  const topFactors = [
+    `clipLen=${(pkg?.durationTicks ?? 0)}t`,
+    `pressure=${pressure}`,
+    `regime=${regime}`,
+    `decay=${decay.toFixed(2)}`,
+    `pulse*mult=${(pulse * mult).toFixed(2)}`,
+  ].slice(0, 5);
+
+  const recommendation =
+    score >= 0.75
+      ? 'Publish this clip as proof: hook → decision → consequence. Keep the caption short.'
+      : score >= 0.55
+        ? 'Share internally or as a story; wait for a higher-pressure window for maximum reach.'
+        : 'Not a top-tier share moment; keep collecting stronger proof clips.';
+
   return {
     score,
-    topFactors:     ['M23 signal computed', 'advisory only'],
-    recommendation: 'Monitor M23 output and adjust strategy accordingly.',
-    auditHash:      computeHash(JSON.stringify(input) + ':ml:M23'),
-    confidenceDecay: 0.05,
+    topFactors,
+    recommendation,
+    auditHash: computeHash(JSON.stringify({ mid: 'M23', ...input, regime, pressure, decay, pulse, mult }) + ':ml:M23'),
+    confidenceDecay: decay,
   };
 }

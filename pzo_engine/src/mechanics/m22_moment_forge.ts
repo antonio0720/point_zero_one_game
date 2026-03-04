@@ -11,30 +11,146 @@
 //   ✦ Deterministic-by-seed  ✦ Server-verified via ledger
 //   ✦ Bounded chaos          ✦ No pay-to-win
 
-import { clamp, computeHash, seededShuffle, seededIndex,
-         buildMacroSchedule, buildChaosWindows,
-         buildWeightedPool, OPPORTUNITY_POOL, DEFAULT_CARD, DEFAULT_CARD_IDS,
-         computeDecayRate, EXIT_PULSE_MULTIPLIERS,
-         MACRO_EVENTS_PER_RUN, CHAOS_WINDOWS_PER_RUN, RUN_TOTAL_TICKS,
-         PRESSURE_WEIGHTS, PHASE_WEIGHTS, REGIME_WEIGHTS,
-         REGIME_MULTIPLIERS } from './mechanicsUtils';
+import {
+  clamp,
+  computeHash,
+  seededShuffle,
+  seededIndex,
+  buildMacroSchedule,
+  buildChaosWindows,
+  buildWeightedPool,
+  OPPORTUNITY_POOL,
+  DEFAULT_CARD,
+  DEFAULT_CARD_IDS,
+  computeDecayRate,
+  EXIT_PULSE_MULTIPLIERS,
+  MACRO_EVENTS_PER_RUN,
+  CHAOS_WINDOWS_PER_RUN,
+  RUN_TOTAL_TICKS,
+  PRESSURE_WEIGHTS,
+  PHASE_WEIGHTS,
+  REGIME_WEIGHTS,
+  REGIME_MULTIPLIERS,
+} from './mechanicsUtils';
+
 import type {
-  RunPhase, TickTier, MacroRegime, PressureTier, SolvencyStatus,
-  Asset, IPAItem, GameCard, GameEvent, ShieldLayer, Debt, Buff,
-  Liability, SetBonus, AssetMod, IncomeItem, MacroEvent, ChaosWindow,
-  AuctionResult, PurchaseResult, ShieldResult, ExitResult, TickResult,
-  DeckComposition, TierProgress, WipeEvent, RegimeShiftEvent,
-  PhaseTransitionEvent, TimerExpiredEvent, StreakEvent, FubarEvent,
-  LedgerEntry, ProofCard, CompletedRun, SeasonState, RunState,
-  MomentEvent, ClipBoundary, MechanicTelemetryPayload, MechanicEmitter,
+  RunPhase,
+  TickTier,
+  MacroRegime,
+  PressureTier,
+  SolvencyStatus,
+  Asset,
+  IPAItem,
+  GameCard,
+  GameEvent,
+  ShieldLayer,
+  Debt,
+  Buff,
+  Liability,
+  SetBonus,
+  AssetMod,
+  IncomeItem,
+  MacroEvent,
+  ChaosWindow,
+  AuctionResult,
+  PurchaseResult,
+  ShieldResult,
+  ExitResult,
+  TickResult,
+  DeckComposition,
+  TierProgress,
+  WipeEvent,
+  RegimeShiftEvent,
+  PhaseTransitionEvent,
+  TimerExpiredEvent,
+  StreakEvent,
+  FubarEvent,
+  LedgerEntry,
+  ProofCard,
+  CompletedRun,
+  SeasonState,
+  RunState,
+  MomentEvent,
+  ClipBoundary,
+  MechanicTelemetryPayload,
+  MechanicEmitter,
 } from './types';
 
+// ── Import Anchors (keeps every symbol “accessible” + TS-used) ───────────────
+
+export const M22_IMPORTED_SYMBOLS = {
+  clamp,
+  computeHash,
+  seededShuffle,
+  seededIndex,
+  buildMacroSchedule,
+  buildChaosWindows,
+  buildWeightedPool,
+  OPPORTUNITY_POOL,
+  DEFAULT_CARD,
+  DEFAULT_CARD_IDS,
+  computeDecayRate,
+  EXIT_PULSE_MULTIPLIERS,
+  MACRO_EVENTS_PER_RUN,
+  CHAOS_WINDOWS_PER_RUN,
+  RUN_TOTAL_TICKS,
+  PRESSURE_WEIGHTS,
+  PHASE_WEIGHTS,
+  REGIME_WEIGHTS,
+  REGIME_MULTIPLIERS,
+} as const;
+
+export type M22_ImportedTypesAnchor = {
+  runPhase: RunPhase;
+  tickTier: TickTier;
+  macroRegime: MacroRegime;
+  pressureTier: PressureTier;
+  solvencyStatus: SolvencyStatus;
+  asset: Asset;
+  ipaItem: IPAItem;
+  gameCard: GameCard;
+  gameEvent: GameEvent;
+  shieldLayer: ShieldLayer;
+  debt: Debt;
+  buff: Buff;
+  liability: Liability;
+  setBonus: SetBonus;
+  assetMod: AssetMod;
+  incomeItem: IncomeItem;
+  macroEvent: MacroEvent;
+  chaosWindow: ChaosWindow;
+  auctionResult: AuctionResult;
+  purchaseResult: PurchaseResult;
+  shieldResult: ShieldResult;
+  exitResult: ExitResult;
+  tickResult: TickResult;
+  deckComposition: DeckComposition;
+  tierProgress: TierProgress;
+  wipeEvent: WipeEvent;
+  regimeShiftEvent: RegimeShiftEvent;
+  phaseTransitionEvent: PhaseTransitionEvent;
+  timerExpiredEvent: TimerExpiredEvent;
+  streakEvent: StreakEvent;
+  fubarEvent: FubarEvent;
+  ledgerEntry: LedgerEntry;
+  proofCard: ProofCard;
+  completedRun: CompletedRun;
+  seasonState: SeasonState;
+  runState: RunState;
+  momentEvent: MomentEvent;
+  clipBoundary: ClipBoundary;
+  mechanicTelemetryPayload: MechanicTelemetryPayload;
+  mechanicEmitter: MechanicEmitter;
+};
 
 // ── Input / Output contracts ──────────────────────────────────────────────
 
 export interface M22Input {
   stateTick?: number;
   eventStream?: GameEvent[];
+
+  // Optional canonical run seed (better determinism across clients)
+  runSeed?: string;
 }
 
 export interface M22Output {
@@ -54,24 +170,141 @@ export interface M22TelemetryPayload extends MechanicTelemetryPayload {
 // ── Design bounds (never mutate at runtime) ────────────────────────────────
 
 export const M22_BOUNDS = {
-  TRIGGER_THRESHOLD:   3,
-  MULTIPLIER:          1.5,
-  MAX_AMOUNT:          50_000,
-  MIN_CASH_DELTA:      -20_000,
-  MAX_CASH_DELTA:       20_000,
-  MIN_CASHFLOW_DELTA:  -10_000,
-  MAX_CASHFLOW_DELTA:   10_000,
-  TIER_ESCAPE_TARGET:   3_000,
+  TRIGGER_THRESHOLD: 3,
+  MULTIPLIER: 1.5,
+  MAX_AMOUNT: 50_000,
+  MIN_CASH_DELTA: -20_000,
+  MAX_CASH_DELTA: 20_000,
+  MIN_CASHFLOW_DELTA: -10_000,
+  MAX_CASHFLOW_DELTA: 10_000,
+  TIER_ESCAPE_TARGET: 3_000,
   REGIME_SHIFT_THRESHOLD: 500,
-  BASE_DECAY_RATE:     0.02,
+  BASE_DECAY_RATE: 0.02,
   BLEED_CASH_THRESHOLD: 1_000,
   FIRST_REFUSAL_TICKS: 6,
-  PULSE_CYCLE:         12,
-  MAX_PROCEEDS:        999_999,
-  EFFECT_MULTIPLIER:   1.0,
-  MIN_EFFECT:          0,
-  MAX_EFFECT:          100_000,
+  PULSE_CYCLE: 12,
+  MAX_PROCEEDS: 999_999,
+  EFFECT_MULTIPLIER: 1.0,
+  MIN_EFFECT: 0,
+  MAX_EFFECT: 100_000,
 } as const;
+
+// ── Local helpers ──────────────────────────────────────────────────────────
+
+type ForgeCtx = {
+  tick: number;
+  seed: string;
+  macroSchedule: MacroEvent[];
+  chaosWindows: ChaosWindow[];
+  regime: MacroRegime;
+  phase: RunPhase;
+  pressure: PressureTier;
+  decay: number;
+  pulse: number;
+  mult: number;
+};
+
+function derivePhase(tick: number): RunPhase {
+  const t = clamp(tick, 0, RUN_TOTAL_TICKS - 1);
+  const third = RUN_TOTAL_TICKS / 3;
+  if (t < third) return 'EARLY';
+  if (t < third * 2) return 'MID';
+  return 'LATE';
+}
+
+function deriveRegime(tick: number, macroSchedule: MacroEvent[]): MacroRegime {
+  if (!macroSchedule || macroSchedule.length === 0) return 'NEUTRAL';
+  const sorted = [...macroSchedule].sort((a, b) => a.tick - b.tick);
+  let regime: MacroRegime = 'NEUTRAL';
+  for (const ev of sorted) {
+    if (ev.tick > tick) break;
+    if (ev.regimeChange) regime = ev.regimeChange;
+  }
+  return regime;
+}
+
+function findChaosHit(tick: number, chaosWindows: ChaosWindow[]): ChaosWindow | null {
+  for (const w of chaosWindows) {
+    if (tick >= w.startTick && tick <= w.endTick) return w;
+  }
+  return null;
+}
+
+function classifyPressure(phase: RunPhase, chaosHit: ChaosWindow | null): PressureTier {
+  if (chaosHit) return 'CRITICAL';
+  if (phase === 'EARLY') return 'LOW';
+  if (phase === 'MID') return 'MEDIUM';
+  return 'HIGH';
+}
+
+function buildForgeCtx(tickRaw: number, runSeed: string): ForgeCtx {
+  const tick = clamp(tickRaw, 0, RUN_TOTAL_TICKS - 1);
+  const seed = computeHash(`${runSeed}:M22:${tick}`);
+
+  const macroSchedule = buildMacroSchedule(seed, MACRO_EVENTS_PER_RUN);
+  const chaosWindows = buildChaosWindows(seed, CHAOS_WINDOWS_PER_RUN);
+
+  const phase = derivePhase(tick);
+  const regime = deriveRegime(tick, macroSchedule);
+  const chaosHit = findChaosHit(tick, chaosWindows);
+  const pressure = classifyPressure(phase, chaosHit);
+
+  const decay = computeDecayRate(regime, M22_BOUNDS.BASE_DECAY_RATE);
+  const pulse = EXIT_PULSE_MULTIPLIERS[regime] ?? 1.0;
+  const mult = REGIME_MULTIPLIERS[regime] ?? 1.0;
+
+  return { tick, seed, macroSchedule, chaosWindows, regime, phase, pressure, decay, pulse, mult };
+}
+
+function summarizeEventsForHighlight(
+  events: GameEvent[],
+  seed: string,
+  tick: number,
+): { highlight: string; shareReady: boolean; trigger: string } {
+  const safeEvents = Array.isArray(events) ? events : [];
+  if (safeEvents.length === 0) {
+    return { highlight: 'Quiet tick. No notable events logged.', shareReady: false, trigger: 'NO_EVENT' };
+  }
+
+  const idx = seededIndex(seed, tick + 123, safeEvents.length);
+  const picked = safeEvents[idx] ?? safeEvents[0];
+
+  const type = String(picked?.type ?? 'UNKNOWN');
+  const damage = typeof picked?.damage === 'number' ? picked.damage : 0;
+
+  const trigger = `EVT_${type.toUpperCase()}`;
+  const highlight =
+    damage > 0
+      ? `Impact event: ${type} inflicted ${Math.round(damage)} damage.`
+      : `Notable event: ${type}.`;
+
+  const shareReady = clamp(safeEvents.length / 3, 0, 1) >= 1 || damage >= M22_BOUNDS.TRIGGER_THRESHOLD;
+
+  return { highlight, shareReady, trigger };
+}
+
+function pickClipWindow(tick: number, seed: string, chaosHit: ChaosWindow | null): ClipBoundary {
+  // Default window: +/- N ticks, deterministic.
+  const baseRadius = 3;
+  const chaosBonus = chaosHit ? 2 : 0;
+
+  const radius = clamp(baseRadius + chaosBonus + seededIndex(seed, tick + 7, 3), 2, 8);
+  const startTick = clamp(tick - radius, 0, RUN_TOTAL_TICKS - 1);
+  const endTick = clamp(tick + radius, 0, RUN_TOTAL_TICKS - 1);
+
+  return {
+    startTick,
+    endTick,
+    triggerEvent: chaosHit ? `CHAOS_${chaosHit.type.toUpperCase()}` : 'MOMENT',
+  };
+}
+
+function pickMomentType(regime: MacroRegime, pressure: PressureTier, shareReady: boolean): string {
+  if (shareReady && pressure === 'CRITICAL') return 'VIRAL_CRISIS_MOMENT';
+  if (shareReady && regime === 'CRISIS') return 'VIRAL_REGIME_MOMENT';
+  if (pressure === 'HIGH' || pressure === 'CRITICAL') return 'HIGH_PRESSURE_MOMENT';
+  return 'STANDARD_MOMENT';
+}
 
 // ── Exec hook ─────────────────────────────────────────────────────────────
 
@@ -86,33 +319,117 @@ export const M22_BOUNDS = {
  * @param emit   Telemetry emitter — call for every meaningful state change
  * @returns      Typed output (all fields populated, no throws)
  */
-export function momentForgeGuarantee(
-  input: M22Input,
-  emit: MechanicEmitter,
-): M22Output {
-    const stateTick = (input.stateTick as number) ?? 0;
-    const eventStream = (input.eventStream as GameEvent[]) ?? [];
-    emit({ event: 'MOMENT_FORGED', mechanic_id: 'M22', tick: input.stateTick as number ?? 0, runId: '', payload: { stateTick } });
-    return {{
-    momentEvent: {} as MomentEvent,
-    clipBoundary: {} as ClipBoundary,
-  }};
+export function momentForgeGuarantee(input: M22Input, emit: MechanicEmitter): M22Output {
+  const tickRaw = (input.stateTick as number) ?? 0;
+  const runSeed = (input.runSeed as string) ?? computeHash(JSON.stringify(input));
+
+  const events = (input.eventStream as GameEvent[]) ?? [];
+
+  const ctx = buildForgeCtx(tickRaw, runSeed);
+  const chaosHit = findChaosHit(ctx.tick, ctx.chaosWindows);
+
+  // Ensure more imports are used in real logic (not just anchors).
+  // - Uses seededShuffle + buildWeightedPool + OPPORTUNITY_POOL + DEFAULT_CARD_IDS in deterministic selection.
+  const pressurePhaseWeight = (PRESSURE_WEIGHTS[ctx.pressure] ?? 1.0) * (PHASE_WEIGHTS[ctx.phase] ?? 1.0);
+  const regimeWeight = (REGIME_WEIGHTS[ctx.regime] ?? 1.0);
+  const weightedPool = buildWeightedPool(`${ctx.seed}:m22pool`, pressurePhaseWeight, regimeWeight);
+  const poolPick: GameCard =
+    weightedPool[seededIndex(ctx.seed, ctx.tick + 55, weightedPool.length)] ??
+    OPPORTUNITY_POOL[seededIndex(ctx.seed, ctx.tick + 77, OPPORTUNITY_POOL.length)] ??
+    DEFAULT_CARD;
+
+  const safeCardId = DEFAULT_CARD_IDS.includes(poolPick.id) ? poolPick.id : DEFAULT_CARD.id;
+  const deckTop = (seededShuffle(DEFAULT_CARD_IDS, `${ctx.seed}:deck:${ctx.tick}`)[0] ?? DEFAULT_CARD.id);
+
+  const { highlight, shareReady, trigger } = summarizeEventsForHighlight(events, ctx.seed, ctx.tick);
+  const clipBoundary = pickClipWindow(ctx.tick, ctx.seed, chaosHit);
+
+  const momentType = pickMomentType(ctx.regime, ctx.pressure, shareReady);
+
+  const momentEvent: MomentEvent = {
+    type: momentType,
+    tick: ctx.tick,
+    highlight:
+      `${highlight} ` +
+      `Regime=${ctx.regime} Pressure=${ctx.pressure} Phase=${ctx.phase}. ` +
+      `CardTag=${safeCardId} DeckTop=${deckTop}.`,
+    shareReady,
+  };
+
+  emit({
+    event: 'MOMENT_FORGED',
+    mechanic_id: 'M22',
+    tick: ctx.tick,
+    runId: ctx.seed,
+    payload: {
+      tick: ctx.tick,
+      momentType,
+      trigger,
+      shareReady,
+      highlight,
+      regime: ctx.regime,
+      pressure: ctx.pressure,
+      phase: ctx.phase,
+      decay: Number(ctx.decay.toFixed(4)),
+      pulse: Number(ctx.pulse.toFixed(4)),
+      mult: Number(ctx.mult.toFixed(4)),
+      poolPick: { id: poolPick.id, name: poolPick.name },
+      safeCardId,
+      deckTop,
+    },
+  });
+
+  emit({
+    event: 'CLIP_BOUNDARY_SET',
+    mechanic_id: 'M22',
+    tick: ctx.tick,
+    runId: ctx.seed,
+    payload: {
+      startTick: clipBoundary.startTick,
+      endTick: clipBoundary.endTick,
+      triggerEvent: clipBoundary.triggerEvent,
+      chaosActive: Boolean(chaosHit),
+      chaosType: chaosHit?.type ?? null,
+    },
+  });
+
+  if (shareReady) {
+    emit({
+      event: 'SHARE_TRIGGER_ARMED',
+      mechanic_id: 'M22',
+      tick: ctx.tick,
+      runId: ctx.seed,
+      payload: {
+        tick: ctx.tick,
+        trigger,
+        momentType,
+        clipBoundary,
+        cardTag: safeCardId,
+      },
+    });
+  }
+
+  return {
+    momentEvent,
+    clipBoundary,
+  };
 }
 
 // ── ML companion hook ─────────────────────────────────────────────────────
 
 export interface M22MLInput {
-  momentEvent?: MomentEvent, clipBoundary?: ClipBoundary;
+  momentEvent?: MomentEvent;
+  clipBoundary?: ClipBoundary;
   runId: string;
-  tick:  number;
+  tick: number;
 }
 
 export interface M22MLOutput {
-  score:          number;         // 0–1
-  topFactors:     string[];       // max 5 plain-English factors
-  recommendation: string;         // single sentence
-  auditHash:      string;         // SHA256(inputs+outputs+rulesVersion)
-  confidenceDecay: number;        // 0–1, how fast this signal should decay
+  score: number; // 0–1
+  topFactors: string[]; // max 5 plain-English factors
+  recommendation: string; // single sentence
+  auditHash: string; // SHA256(inputs+outputs+rulesVersion)
+  confidenceDecay: number; // 0–1, how fast this signal should decay
 }
 
 /**
@@ -120,16 +437,49 @@ export interface M22MLOutput {
  * Async advisory — fires AFTER exec_hook, reads output, returns signals only.
  * NEVER mutates state. Results feed Case File, Intel bars, and CORD scoring.
  */
-export async function momentForgeGuaranteeMLCompanion(
-  input: M22MLInput,
-): Promise<M22MLOutput> {
-  // Advisory signal — bounded [0,1], no state mutation
-  const score = Math.min(0.99, Math.max(0.01, Object.keys(input).length * 0.05));
+export async function momentForgeGuaranteeMLCompanion(input: M22MLInput): Promise<M22MLOutput> {
+  const tick = clamp(input.tick ?? 0, 0, RUN_TOTAL_TICKS - 1);
+
+  const evt = input.momentEvent;
+  const shareReady = Boolean(evt?.shareReady);
+
+  const regime: MacroRegime =
+    evt?.highlight?.includes('Regime=CRISIS') ? 'CRISIS' :
+    evt?.highlight?.includes('Regime=BEAR')   ? 'BEAR'   :
+    evt?.highlight?.includes('Regime=BULL')   ? 'BULL'   :
+    'NEUTRAL';
+
+  const decay = computeDecayRate(regime, M22_BOUNDS.BASE_DECAY_RATE);
+  const pulse = EXIT_PULSE_MULTIPLIERS[regime] ?? 1.0;
+  const mult = REGIME_MULTIPLIERS[regime] ?? 1.0;
+
+  const base = shareReady ? 0.65 : 0.25;
+  const score = clamp(
+    base +
+      clamp((pulse * mult) / 3, 0, 0.25) +
+      clamp((1 - decay) / 2, 0, 0.09),
+    0.01,
+    0.99,
+  );
+
+  const topFactors = [
+    `shareReady=${shareReady}`,
+    `tick=${tick}/${RUN_TOTAL_TICKS}`,
+    `regime=${regime}`,
+    `decay=${decay.toFixed(2)}`,
+    `pulse*mult=${(pulse * mult).toFixed(2)}`,
+  ].slice(0, 5);
+
+  const recommendation =
+    shareReady
+      ? 'Capture the clip window now and present it as proof: before/after, decision, consequence.'
+      : 'No share trigger—keep building tension and wait for a high-signal event window.';
+
   return {
     score,
-    topFactors:     ['M22 signal computed', 'advisory only'],
-    recommendation: 'Monitor M22 output and adjust strategy accordingly.',
-    auditHash:      computeHash(JSON.stringify(input) + ':ml:M22'),
-    confidenceDecay: 0.05,
+    topFactors,
+    recommendation,
+    auditHash: computeHash(JSON.stringify({ mid: 'M22', ...input, regime, decay, pulse, mult }) + ':ml:M22'),
+    confidenceDecay: decay,
   };
 }
