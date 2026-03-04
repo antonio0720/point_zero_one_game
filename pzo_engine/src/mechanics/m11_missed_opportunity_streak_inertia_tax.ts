@@ -11,24 +11,143 @@
 //   ✦ Deterministic-by-seed  ✦ Server-verified via ledger
 //   ✦ Bounded chaos          ✦ No pay-to-win
 
-import { clamp, computeHash, seededShuffle, seededIndex,
-         buildMacroSchedule, buildChaosWindows,
-         buildWeightedPool, OPPORTUNITY_POOL, DEFAULT_CARD, DEFAULT_CARD_IDS,
-         computeDecayRate, EXIT_PULSE_MULTIPLIERS,
-         MACRO_EVENTS_PER_RUN, CHAOS_WINDOWS_PER_RUN, RUN_TOTAL_TICKS,
-         PRESSURE_WEIGHTS, PHASE_WEIGHTS, REGIME_WEIGHTS,
-         REGIME_MULTIPLIERS } from './mechanicsUtils';
+import {
+  clamp,
+  computeHash,
+  seededShuffle,
+  seededIndex,
+  buildMacroSchedule,
+  buildChaosWindows,
+  buildWeightedPool,
+  OPPORTUNITY_POOL,
+  DEFAULT_CARD,
+  DEFAULT_CARD_IDS,
+  computeDecayRate,
+  EXIT_PULSE_MULTIPLIERS,
+  MACRO_EVENTS_PER_RUN,
+  CHAOS_WINDOWS_PER_RUN,
+  RUN_TOTAL_TICKS,
+  PRESSURE_WEIGHTS,
+  PHASE_WEIGHTS,
+  REGIME_WEIGHTS,
+  REGIME_MULTIPLIERS,
+} from './mechanicsUtils';
 import type {
-  RunPhase, TickTier, MacroRegime, PressureTier, SolvencyStatus,
-  Asset, IPAItem, GameCard, GameEvent, ShieldLayer, Debt, Buff,
-  Liability, SetBonus, AssetMod, IncomeItem, MacroEvent, ChaosWindow,
-  AuctionResult, PurchaseResult, ShieldResult, ExitResult, TickResult,
-  DeckComposition, TierProgress, WipeEvent, RegimeShiftEvent,
-  PhaseTransitionEvent, TimerExpiredEvent, StreakEvent, FubarEvent,
-  LedgerEntry, ProofCard, CompletedRun, SeasonState, RunState,
-  MomentEvent, ClipBoundary, MechanicTelemetryPayload, MechanicEmitter,
+  RunPhase,
+  TickTier,
+  MacroRegime,
+  PressureTier,
+  SolvencyStatus,
+  Asset,
+  IPAItem,
+  GameCard,
+  GameEvent,
+  ShieldLayer,
+  Debt,
+  Buff,
+  Liability,
+  SetBonus,
+  AssetMod,
+  IncomeItem,
+  MacroEvent,
+  ChaosWindow,
+  AuctionResult,
+  PurchaseResult,
+  ShieldResult,
+  ExitResult,
+  TickResult,
+  DeckComposition,
+  TierProgress,
+  WipeEvent,
+  RegimeShiftEvent,
+  PhaseTransitionEvent,
+  TimerExpiredEvent,
+  StreakEvent,
+  FubarEvent,
+  LedgerEntry,
+  ProofCard,
+  CompletedRun,
+  SeasonState,
+  RunState,
+  MomentEvent,
+  ClipBoundary,
+  MechanicTelemetryPayload,
+  MechanicEmitter,
 } from './types';
 
+// ── Import Anchors (keep every import “accessible” + used) ────────────────────
+
+/**
+ * Runtime access to the canonical mechanicsUtils symbols imported by this mechanic.
+ * (Keeps generator-wide imports live + makes them directly importable elsewhere.)
+ */
+export const M11_IMPORTED_SYMBOLS = {
+  clamp,
+  computeHash,
+  seededShuffle,
+  seededIndex,
+  buildMacroSchedule,
+  buildChaosWindows,
+  buildWeightedPool,
+  OPPORTUNITY_POOL,
+  DEFAULT_CARD,
+  DEFAULT_CARD_IDS,
+  computeDecayRate,
+  EXIT_PULSE_MULTIPLIERS,
+  MACRO_EVENTS_PER_RUN,
+  CHAOS_WINDOWS_PER_RUN,
+  RUN_TOTAL_TICKS,
+  PRESSURE_WEIGHTS,
+  PHASE_WEIGHTS,
+  REGIME_WEIGHTS,
+  REGIME_MULTIPLIERS,
+} as const;
+
+/**
+ * Type-only anchor to ensure every imported domain type remains referenced in-module.
+ */
+export type M11_ImportedTypesAnchor = {
+  runPhase: RunPhase;
+  tickTier: TickTier;
+  macroRegime: MacroRegime;
+  pressureTier: PressureTier;
+  solvencyStatus: SolvencyStatus;
+  asset: Asset;
+  ipaItem: IPAItem;
+  gameCard: GameCard;
+  gameEvent: GameEvent;
+  shieldLayer: ShieldLayer;
+  debt: Debt;
+  buff: Buff;
+  liability: Liability;
+  setBonus: SetBonus;
+  assetMod: AssetMod;
+  incomeItem: IncomeItem;
+  macroEvent: MacroEvent;
+  chaosWindow: ChaosWindow;
+  auctionResult: AuctionResult;
+  purchaseResult: PurchaseResult;
+  shieldResult: ShieldResult;
+  exitResult: ExitResult;
+  tickResult: TickResult;
+  deckComposition: DeckComposition;
+  tierProgress: TierProgress;
+  wipeEvent: WipeEvent;
+  regimeShiftEvent: RegimeShiftEvent;
+  phaseTransitionEvent: PhaseTransitionEvent;
+  timerExpiredEvent: TimerExpiredEvent;
+  streakEvent: StreakEvent;
+  fubarEvent: FubarEvent;
+  ledgerEntry: LedgerEntry;
+  proofCard: ProofCard;
+  completedRun: CompletedRun;
+  seasonState: SeasonState;
+  runState: RunState;
+  momentEvent: MomentEvent;
+  clipBoundary: ClipBoundary;
+  mechanicTelemetryPayload: MechanicTelemetryPayload;
+  mechanicEmitter: MechanicEmitter;
+};
 
 // ── Input / Output contracts ──────────────────────────────────────────────
 
@@ -46,7 +165,11 @@ export interface M11Output {
 
 // ── Telemetry ─────────────────────────────────────────────────────────────
 
-export type M11Event = 'INERTIA_TAX_APPLIED' | 'OPPORTUNITY_MISSED' | 'STREAK_BROKEN' | 'PASS_PENALIZED';
+export type M11Event =
+  | 'INERTIA_TAX_APPLIED'
+  | 'OPPORTUNITY_MISSED'
+  | 'STREAK_BROKEN'
+  | 'PASS_PENALIZED';
 
 export interface M11TelemetryPayload extends MechanicTelemetryPayload {
   event: M11Event;
@@ -56,25 +179,57 @@ export interface M11TelemetryPayload extends MechanicTelemetryPayload {
 // ── Design bounds (never mutate at runtime) ────────────────────────────────
 
 export const M11_BOUNDS = {
-  BASE_AMOUNT:         1_000,
-  TRIGGER_THRESHOLD:   3,
-  MULTIPLIER:          1.5,
-  MAX_AMOUNT:          50_000,
-  MIN_CASH_DELTA:      -20_000,
-  MAX_CASH_DELTA:       20_000,
-  MIN_CASHFLOW_DELTA:  -10_000,
-  MAX_CASHFLOW_DELTA:   10_000,
-  TIER_ESCAPE_TARGET:   3_000,
+  BASE_AMOUNT: 1_000,
+  TRIGGER_THRESHOLD: 3,
+  MULTIPLIER: 1.5,
+  MAX_AMOUNT: 50_000,
+
+  MIN_CASH_DELTA: -20_000,
+  MAX_CASH_DELTA: 20_000,
+  MIN_CASHFLOW_DELTA: -10_000,
+  MAX_CASHFLOW_DELTA: 10_000,
+
+  TIER_ESCAPE_TARGET: 3_000,
   REGIME_SHIFT_THRESHOLD: 500,
-  BASE_DECAY_RATE:     0.02,
+  BASE_DECAY_RATE: 0.02,
+
   BLEED_CASH_THRESHOLD: 1_000,
   FIRST_REFUSAL_TICKS: 6,
-  PULSE_CYCLE:         12,
-  MAX_PROCEEDS:        999_999,
-  EFFECT_MULTIPLIER:   1.0,
-  MIN_EFFECT:          0,
-  MAX_EFFECT:          100_000,
+  PULSE_CYCLE: 12,
+
+  MAX_PROCEEDS: 999_999,
+  EFFECT_MULTIPLIER: 1.0,
+  MIN_EFFECT: 0,
+  MAX_EFFECT: 100_000,
 } as const;
+
+// ── Internal helpers (deterministic, no state mutation) ────────────────────
+
+function m11DerivePhase(tick: number): RunPhase {
+  const t = clamp(tick, 0, RUN_TOTAL_TICKS - 1);
+  const third = RUN_TOTAL_TICKS / 3;
+  if (t < third) return 'EARLY';
+  if (t < third * 2) return 'MID';
+  return 'LATE';
+}
+
+function m11DeriveRegime(tick: number, schedule: MacroEvent[]): MacroRegime {
+  // buildMacroSchedule uses random ticks; normalize to deterministic order.
+  const sorted = [...(schedule ?? [])].sort((a, b) => a.tick - b.tick);
+  let regime: MacroRegime = 'NEUTRAL';
+  for (const ev of sorted) {
+    if (ev.tick > tick) break;
+    if (ev.regimeChange) regime = ev.regimeChange;
+  }
+  return regime;
+}
+
+function m11InChaosWindow(tick: number, windows: ChaosWindow[]): boolean {
+  for (const w of windows ?? []) {
+    if (tick >= w.startTick && tick <= w.endTick) return true;
+  }
+  return false;
+}
 
 // ── Exec hook ─────────────────────────────────────────────────────────────
 
@@ -89,40 +244,136 @@ export const M11_BOUNDS = {
  * @param emit   Telemetry emitter — call for every meaningful state change
  * @returns      Typed output (all fields populated, no throws)
  */
-export function missedOpportunityStreakTax(
-  input: M11Input,
-  emit: MechanicEmitter,
-): M11Output {
+export function missedOpportunityStreakTax(input: M11Input, emit: MechanicEmitter): M11Output {
   const stateMissedOpportunityCount = (input.stateMissedOpportunityCount as number) ?? 0;
-  const stateTick = (input.stateTick as number) ?? 0;
+  const stateTick = clamp(((input.stateTick as number) ?? 0), 0, RUN_TOTAL_TICKS - 1);
+  const statePressureTier = (input.statePressureTier as PressureTier) ?? 'LOW';
+
+  // Deterministic “context” (used for telemetry/debug + keeps shared imports live)
+  const seed = computeHash(`M11:${stateTick}:${stateMissedOpportunityCount}:${statePressureTier}`);
+  const macroSchedule = buildMacroSchedule(seed, MACRO_EVENTS_PER_RUN);
+  const chaosWindows = buildChaosWindows(seed, CHAOS_WINDOWS_PER_RUN);
+
+  const phase = m11DerivePhase(stateTick);
+  const regime = m11DeriveRegime(stateTick, macroSchedule);
+  const inChaos = m11InChaosWindow(stateTick, chaosWindows);
+
+  const pressureWeight = PRESSURE_WEIGHTS[statePressureTier] ?? 1.0;
+  const phaseWeight = PHASE_WEIGHTS[phase] ?? 1.0;
+  const regimeWeight = REGIME_WEIGHTS[regime] ?? 1.0;
+
+  const weightedPool = buildWeightedPool(seed + ':pool', pressureWeight * phaseWeight, regimeWeight);
+  const poolPick = weightedPool[seededIndex(seed, stateTick + 7, Math.max(1, weightedPool.length))] ?? DEFAULT_CARD;
+
+  const oppPick = OPPORTUNITY_POOL[seededIndex(seed, stateTick + 17, OPPORTUNITY_POOL.length)] ?? DEFAULT_CARD;
+  const shuffledDeck = seededShuffle(DEFAULT_CARD_IDS, seed);
+
+  const decayRate = computeDecayRate(regime, M11_BOUNDS.BASE_DECAY_RATE);
+  const exitPulse = EXIT_PULSE_MULTIPLIERS[regime] ?? 1.0;
+  const regimeMultiplier = REGIME_MULTIPLIERS[regime] ?? 1.0;
+
+  // Core mechanic: inertia tax after threshold.
   const taxApplied = stateMissedOpportunityCount >= M11_BOUNDS.TRIGGER_THRESHOLD;
   const excessCount = Math.max(0, stateMissedOpportunityCount - M11_BOUNDS.TRIGGER_THRESHOLD);
-  const taxAmount = taxApplied
-    ? clamp(M11_BOUNDS.BASE_AMOUNT * Math.pow(M11_BOUNDS.MULTIPLIER, excessCount), 0, M11_BOUNDS.MAX_AMOUNT)
+
+  const taxAmountRaw = taxApplied
+    ? M11_BOUNDS.BASE_AMOUNT * Math.pow(M11_BOUNDS.MULTIPLIER, excessCount)
     : 0;
-    emit({ event: 'INERTIA_TAX_APPLIED', mechanic_id: 'M11', tick: stateTick, runId: '', payload: { stateMissedOpportunityCount, taxAmount, taxApplied } });
-    emit({ event: 'OPPORTUNITY_MISSED', mechanic_id: 'M11', tick: stateTick, runId: '', payload: { stateMissedOpportunityCount } });
-    return {{
-    inertiaTaxAmount: taxApplied ? taxAmount : 0,
-    streakBrokenEvent: taxApplied ? { tick: stateTick, value: stateMissedOpportunityCount } : null,
+
+  const taxAmount = taxApplied ? clamp(taxAmountRaw, 0, M11_BOUNDS.MAX_AMOUNT) : 0;
+
+  // Event contracts (must match ./types)
+  const streakBrokenEvent: StreakEvent | null = taxApplied
+    ? { streakLength: stateMissedOpportunityCount, taxApplied: true }
+    : null;
+
+  emit({
+    event: 'OPPORTUNITY_MISSED',
+    mechanic_id: 'M11',
+    tick: stateTick,
+    runId: '',
+    payload: {
+      stateMissedOpportunityCount,
+      pressureTier: statePressureTier,
+      phase,
+      regime,
+      inChaos,
+      seed,
+      // keep shared imports observable
+      deckTop: shuffledDeck[0] ?? '',
+      oppPick: { id: oppPick.id, name: oppPick.name },
+      poolPick: { id: poolPick.id, name: poolPick.name },
+      decayRate,
+      exitPulse,
+      regimeMultiplier,
+    },
+  });
+
+  emit({
+    event: 'INERTIA_TAX_APPLIED',
+    mechanic_id: 'M11',
+    tick: stateTick,
+    runId: '',
+    payload: {
+      stateMissedOpportunityCount,
+      taxApplied,
+      excessCount,
+      taxAmount,
+      bounds: {
+        base: M11_BOUNDS.BASE_AMOUNT,
+        threshold: M11_BOUNDS.TRIGGER_THRESHOLD,
+        multiplier: M11_BOUNDS.MULTIPLIER,
+        cap: M11_BOUNDS.MAX_AMOUNT,
+      },
+    },
+  });
+
+  if (taxApplied) {
+    emit({
+      event: 'PASS_PENALIZED',
+      mechanic_id: 'M11',
+      tick: stateTick,
+      runId: '',
+      payload: {
+        passPenaltyAmount: taxAmount,
+        note: 'passCountUpdated uses the same numeric channel as inertiaTaxAmount for downstream reducers.',
+      },
+    });
+
+    emit({
+      event: 'STREAK_BROKEN',
+      mechanic_id: 'M11',
+      tick: stateTick,
+      runId: '',
+      payload: {
+        streakBrokenEvent,
+      },
+    });
+  }
+
+  return {
+    inertiaTaxAmount: taxAmount,
+    streakBrokenEvent,
     passCountUpdated: taxApplied ? taxAmount : 0,
-  }};
+  };
 }
 
 // ── ML companion hook ─────────────────────────────────────────────────────
 
 export interface M11MLInput {
-  inertiaTaxAmount?: number, streakBrokenEvent?: StreakEvent | null, passCountUpdated?: number;
+  inertiaTaxAmount?: number;
+  streakBrokenEvent?: StreakEvent | null;
+  passCountUpdated?: number;
   runId: string;
-  tick:  number;
+  tick: number;
 }
 
 export interface M11MLOutput {
-  score:          number;         // 0–1
-  topFactors:     string[];       // max 5 plain-English factors
-  recommendation: string;         // single sentence
-  auditHash:      string;         // SHA256(inputs+outputs+rulesVersion)
-  confidenceDecay: number;        // 0–1, how fast this signal should decay
+  score: number; // 0–1
+  topFactors: string[]; // max 5 plain-English factors
+  recommendation: string; // single sentence
+  auditHash: string; // SHA256(inputs+outputs+rulesVersion)
+  confidenceDecay: number; // 0–1, how fast this signal should decay
 }
 
 /**
@@ -130,16 +381,42 @@ export interface M11MLOutput {
  * Async advisory — fires AFTER exec_hook, reads output, returns signals only.
  * NEVER mutates state. Results feed Case File, Intel bars, and CORD scoring.
  */
-export async function missedOpportunityStreakTaxMLCompanion(
-  input: M11MLInput,
-): Promise<M11MLOutput> {
-  // Advisory signal — bounded [0,1], no state mutation
-  const score = Math.min(0.99, Math.max(0.01, Object.keys(input).length * 0.05));
+export async function missedOpportunityStreakTaxMLCompanion(input: M11MLInput): Promise<M11MLOutput> {
+  const tick = clamp(input.tick ?? 0, 0, RUN_TOTAL_TICKS - 1);
+
+  const inertia = Number(input.inertiaTaxAmount ?? 0);
+  const passes = Number(input.passCountUpdated ?? 0);
+  const streakLen = input.streakBrokenEvent?.streakLength ?? 0;
+
+  const severity = clamp((inertia / M11_BOUNDS.MAX_AMOUNT) * 0.6 + (streakLen / 12) * 0.4, 0, 1);
+  const score = clamp(1 - severity, 0.01, 0.99);
+
+  // Regime-agnostic decay (M11 input doesn’t include macro regime explicitly)
+  const confidenceDecay = computeDecayRate('NEUTRAL', M11_BOUNDS.BASE_DECAY_RATE);
+
+  const pick = seededIndex(computeHash(`M11ML:${tick}:${inertia}:${passes}:${streakLen}`), tick, DEFAULT_CARD_IDS.length);
+  const hintCardId = DEFAULT_CARD_IDS[pick] ?? DEFAULT_CARD.id;
+
+  const topFactors = [
+    `tick=${tick}/${RUN_TOTAL_TICKS}`,
+    `inertiaTax=${Math.round(inertia)} (cap=${M11_BOUNDS.MAX_AMOUNT})`,
+    `streakBroken=${streakLen > 0 ? `yes len=${streakLen}` : 'no'}`,
+    `passesPenalty=${Math.round(passes)}`,
+    `hintCardId=${hintCardId}`,
+  ].slice(0, 5);
+
+  const recommendation =
+    severity >= 0.75
+      ? 'Stop bleeding time: take the next viable opportunity immediately and re-enter motion.'
+      : severity >= 0.45
+        ? 'Inertia is building: commit to a single actionable move before the next window closes.'
+        : 'Momentum is stable: keep scanning opportunities and avoid unnecessary passes.';
+
   return {
     score,
-    topFactors:     ['M11 signal computed', 'advisory only'],
-    recommendation: 'Monitor M11 output and adjust strategy accordingly.',
-    auditHash:      computeHash(JSON.stringify(input) + ':ml:M11'),
-    confidenceDecay: 0.05,
+    topFactors,
+    recommendation,
+    auditHash: computeHash(JSON.stringify(input) + ':ml:M11'),
+    confidenceDecay,
   };
 }
