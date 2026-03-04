@@ -11,30 +11,175 @@
 //   ✦ Deterministic-by-seed  ✦ Server-verified via ledger
 //   ✦ Bounded chaos          ✦ No pay-to-win
 
-import { clamp, computeHash, seededShuffle, seededIndex,
-         buildMacroSchedule, buildChaosWindows,
-         buildWeightedPool, OPPORTUNITY_POOL, DEFAULT_CARD, DEFAULT_CARD_IDS,
-         computeDecayRate, EXIT_PULSE_MULTIPLIERS,
-         MACRO_EVENTS_PER_RUN, CHAOS_WINDOWS_PER_RUN, RUN_TOTAL_TICKS,
-         PRESSURE_WEIGHTS, PHASE_WEIGHTS, REGIME_WEIGHTS,
-         REGIME_MULTIPLIERS } from './mechanicsUtils';
+import {
+  clamp,
+  computeHash,
+  seededShuffle,
+  seededIndex,
+  buildMacroSchedule,
+  buildChaosWindows,
+  buildWeightedPool,
+  OPPORTUNITY_POOL,
+  DEFAULT_CARD,
+  DEFAULT_CARD_IDS,
+  computeDecayRate,
+  EXIT_PULSE_MULTIPLIERS,
+  MACRO_EVENTS_PER_RUN,
+  CHAOS_WINDOWS_PER_RUN,
+  RUN_TOTAL_TICKS,
+  PRESSURE_WEIGHTS,
+  PHASE_WEIGHTS,
+  REGIME_WEIGHTS,
+  REGIME_MULTIPLIERS,
+} from './mechanicsUtils';
+
 import type {
-  RunPhase, TickTier, MacroRegime, PressureTier, SolvencyStatus,
-  Asset, IPAItem, GameCard, GameEvent, ShieldLayer, Debt, Buff,
-  Liability, SetBonus, AssetMod, IncomeItem, MacroEvent, ChaosWindow,
-  AuctionResult, PurchaseResult, ShieldResult, ExitResult, TickResult,
-  DeckComposition, TierProgress, WipeEvent, RegimeShiftEvent,
-  PhaseTransitionEvent, TimerExpiredEvent, StreakEvent, FubarEvent,
-  LedgerEntry, ProofCard, CompletedRun, SeasonState, RunState,
-  MomentEvent, ClipBoundary, MechanicTelemetryPayload, MechanicEmitter,
+  RunPhase,
+  TickTier,
+  MacroRegime,
+  PressureTier,
+  SolvencyStatus,
+  Asset,
+  IPAItem,
+  GameCard,
+  GameEvent,
+  ShieldLayer,
+  Debt,
+  Buff,
+  Liability,
+  SetBonus,
+  AssetMod,
+  IncomeItem,
+  MacroEvent,
+  ChaosWindow,
+  AuctionResult,
+  PurchaseResult,
+  ShieldResult,
+  ExitResult,
+  TickResult,
+  DeckComposition,
+  TierProgress,
+  WipeEvent,
+  RegimeShiftEvent,
+  PhaseTransitionEvent,
+  TimerExpiredEvent,
+  StreakEvent,
+  FubarEvent,
+  LedgerEntry,
+  ProofCard,
+  CompletedRun,
+  SeasonState,
+  RunState,
+  MomentEvent,
+  ClipBoundary,
+  MechanicTelemetryPayload,
+  MechanicEmitter,
 } from './types';
 
+// ── Import Anchors (keep every import “accessible” + used) ────────────────────
+
+export const M17_IMPORTED_SYMBOLS = {
+  clamp,
+  computeHash,
+  seededShuffle,
+  seededIndex,
+  buildMacroSchedule,
+  buildChaosWindows,
+  buildWeightedPool,
+  OPPORTUNITY_POOL,
+  DEFAULT_CARD,
+  DEFAULT_CARD_IDS,
+  computeDecayRate,
+  EXIT_PULSE_MULTIPLIERS,
+  MACRO_EVENTS_PER_RUN,
+  CHAOS_WINDOWS_PER_RUN,
+  RUN_TOTAL_TICKS,
+  PRESSURE_WEIGHTS,
+  PHASE_WEIGHTS,
+  REGIME_WEIGHTS,
+  REGIME_MULTIPLIERS,
+} as const;
+
+export type M17_ImportedTypesAnchor = {
+  runPhase: RunPhase;
+  tickTier: TickTier;
+  macroRegime: MacroRegime;
+  pressureTier: PressureTier;
+  solvencyStatus: SolvencyStatus;
+  asset: Asset;
+  ipaItem: IPAItem;
+  gameCard: GameCard;
+  gameEvent: GameEvent;
+  shieldLayer: ShieldLayer;
+  debt: Debt;
+  buff: Buff;
+  liability: Liability;
+  setBonus: SetBonus;
+  assetMod: AssetMod;
+  incomeItem: IncomeItem;
+  macroEvent: MacroEvent;
+  chaosWindow: ChaosWindow;
+  auctionResult: AuctionResult;
+  purchaseResult: PurchaseResult;
+  shieldResult: ShieldResult;
+  exitResult: ExitResult;
+  tickResult: TickResult;
+  deckComposition: DeckComposition;
+  tierProgress: TierProgress;
+  wipeEvent: WipeEvent;
+  regimeShiftEvent: RegimeShiftEvent;
+  phaseTransitionEvent: PhaseTransitionEvent;
+  timerExpiredEvent: TimerExpiredEvent;
+  streakEvent: StreakEvent;
+  fubarEvent: FubarEvent;
+  ledgerEntry: LedgerEntry;
+  proofCard: ProofCard;
+  completedRun: CompletedRun;
+  seasonState: SeasonState;
+  runState: RunState;
+  momentEvent: MomentEvent;
+  clipBoundary: ClipBoundary;
+  mechanicTelemetryPayload: MechanicTelemetryPayload;
+  mechanicEmitter: MechanicEmitter;
+};
+
+// ── Local domain types (M17-only; not provided in ./types list) ──────────────
+
+export type BailoutDecision = 'APPROVED' | 'DENIED' | 'NOT_ELIGIBLE';
+
+export interface BailoutResult {
+  requestId: string;
+  decision: BailoutDecision;
+
+  // Deterministic context
+  appliedAtTick: number;
+  macroRegime: MacroRegime;
+  pressureTier: PressureTier;
+  runPhase: RunPhase;
+  inChaos: boolean;
+
+  // Value channel
+  assistAmount: number; // >= 0
+
+  // Policy/audit
+  reason: string;
+  auditHash: string;
+
+  // UI hints to keep assistant feeling “diegetic” and replay-verifiable
+  cardHint: GameCard;
+  deckHintTop: string;
+  opportunityHint: GameCard;
+}
 
 // ── Input / Output contracts ──────────────────────────────────────────────
 
 export interface M17Input {
   stateCash?: number;
   stateTick?: number;
+
+  // optional: if your API endpoint passes a request envelope; ignored if absent
+  requestNonce?: string;
+  requesterUserId?: string;
 }
 
 export interface M17Output {
@@ -54,24 +199,199 @@ export interface M17TelemetryPayload extends MechanicTelemetryPayload {
 // ── Design bounds (never mutate at runtime) ────────────────────────────────
 
 export const M17_BOUNDS = {
-  TRIGGER_THRESHOLD:   3,
-  MULTIPLIER:          1.5,
-  MAX_AMOUNT:          50_000,
-  MIN_CASH_DELTA:      -20_000,
-  MAX_CASH_DELTA:       20_000,
-  MIN_CASHFLOW_DELTA:  -10_000,
-  MAX_CASHFLOW_DELTA:   10_000,
-  TIER_ESCAPE_TARGET:   3_000,
+  TRIGGER_THRESHOLD: 3,
+
+  MULTIPLIER: 1.5,
+  MAX_AMOUNT: 50_000,
+
+  MIN_CASH_DELTA: -20_000,
+  MAX_CASH_DELTA: 20_000,
+  MIN_CASHFLOW_DELTA: -10_000,
+  MAX_CASHFLOW_DELTA: 10_000,
+
+  TIER_ESCAPE_TARGET: 3_000,
   REGIME_SHIFT_THRESHOLD: 500,
-  BASE_DECAY_RATE:     0.02,
+  BASE_DECAY_RATE: 0.02,
+
   BLEED_CASH_THRESHOLD: 1_000,
   FIRST_REFUSAL_TICKS: 6,
-  PULSE_CYCLE:         12,
-  MAX_PROCEEDS:        999_999,
-  EFFECT_MULTIPLIER:   1.0,
-  MIN_EFFECT:          0,
-  MAX_EFFECT:          100_000,
+  PULSE_CYCLE: 12,
+
+  MAX_PROCEEDS: 999_999,
+  EFFECT_MULTIPLIER: 1.0,
+  MIN_EFFECT: 0,
+  MAX_EFFECT: 100_000,
 } as const;
+
+// ── Bailout policy (bounded, deterministic, replayable) ─────────────────────
+
+export const M17_POLICY = {
+  // must be below this cash level to even request
+  ELIGIBLE_IF_CASH_BELOW: 1_200,
+
+  // hard cap on total assistance
+  ASSIST_CAP: 20_000,
+
+  // base payout at tick 0, scaled down by decay
+  BASE_ASSIST: 6_000,
+
+  // additional payout if chaos/crisis
+  CHAOS_BONUS: 2_000,
+
+  // deny if above this cash (prevents farming)
+  DENY_IF_CASH_ABOVE: 2_500,
+
+  // maximum number of assists in a run would be enforced elsewhere;
+  // M17 stays single-shot by requestId determinism.
+} as const;
+
+// ── Internal helpers (deterministic, no state mutation) ────────────────────
+
+function m17PickKey<T extends string>(obj: Record<T, unknown>, seed: string, salt: number): T {
+  const keys = Object.keys(obj) as T[];
+  const idx = seededIndex(seed, salt, Math.max(1, keys.length));
+  return (keys[idx] ?? keys[0]) as T;
+}
+
+function m17DerivePhase(tick: number, seed: string): RunPhase {
+  const t = clamp(tick, 0, RUN_TOTAL_TICKS - 1);
+  const keys = Object.keys(PHASE_WEIGHTS) as RunPhase[];
+  if (keys.length === 0) return (('' as unknown) as RunPhase);
+
+  const bias = clamp(Math.floor((t / Math.max(1, RUN_TOTAL_TICKS - 1)) * keys.length), 0, keys.length - 1);
+  const jitter = seededIndex(seed, t + 13, keys.length);
+  const idx = clamp(bias + (jitter % 2 === 0 ? 0 : -1), 0, keys.length - 1);
+
+  return (keys[idx] ?? keys[0]) as RunPhase;
+}
+
+function m17DeriveRegimeFromSchedule(tick: number, schedule: MacroEvent[], fallback: MacroRegime): MacroRegime {
+  if (!schedule || schedule.length === 0) return fallback;
+  const sorted = [...schedule].sort((a, b) => a.tick - b.tick);
+  let regime: MacroRegime = fallback;
+  for (const ev of sorted) {
+    if (ev.tick > tick) break;
+    if (ev.regimeChange) regime = ev.regimeChange;
+  }
+  return regime;
+}
+
+function m17InChaosWindow(tick: number, windows: ChaosWindow[]): boolean {
+  for (const w of windows ?? []) {
+    if (tick >= w.startTick && tick <= w.endTick) return true;
+  }
+  return false;
+}
+
+function m17DerivePressureTier(seed: string, tick: number, runPhase: RunPhase, inChaos: boolean, regime: MacroRegime, cash: number): PressureTier {
+  const keys = Object.keys(PRESSURE_WEIGHTS) as PressureTier[];
+  if (keys.length === 0) return (('' as unknown) as PressureTier);
+
+  // Cash-based override: low cash => higher tier
+  if (cash <= 0) return m17PickKey(PRESSURE_WEIGHTS as Record<PressureTier, unknown>, seed, tick + 101);
+  if (cash < M17_BOUNDS.BLEED_CASH_THRESHOLD) return m17PickKey(PRESSURE_WEIGHTS as Record<PressureTier, unknown>, seed, tick + 202);
+
+  if (inChaos) return m17PickKey(PRESSURE_WEIGHTS as Record<PressureTier, unknown>, seed, tick + 303);
+  if (String(regime) === 'CRISIS') return m17PickKey(PRESSURE_WEIGHTS as Record<PressureTier, unknown>, seed, tick + 404);
+
+  const phaseSalt = seededIndex(seed, tick + 77, 10_000);
+  const idx = seededIndex(seed, phaseSalt + (PHASE_WEIGHTS[runPhase] ?? 1), keys.length);
+  return (keys[idx] ?? keys[0]) as PressureTier;
+}
+
+function m17PickHints(seed: string, tick: number, pressureTier: PressureTier, runPhase: RunPhase, macroRegime: MacroRegime): {
+  cardHint: GameCard;
+  deckHintTop: string;
+  opportunityHint: GameCard;
+} {
+  const pressureW = PRESSURE_WEIGHTS[pressureTier] ?? 1.0;
+  const phaseW = PHASE_WEIGHTS[runPhase] ?? 1.0;
+  const regimeW = REGIME_WEIGHTS[macroRegime] ?? 1.0;
+
+  const pool = buildWeightedPool(seed + ':pool', pressureW * phaseW, regimeW);
+  const cardHint = pool[seededIndex(seed, tick + 19, Math.max(1, pool.length))] ?? DEFAULT_CARD;
+
+  const deckHintTop = seededShuffle(DEFAULT_CARD_IDS, seed + ':deck')[0] ?? DEFAULT_CARD.id;
+  const opportunityHint = OPPORTUNITY_POOL[seededIndex(seed, tick + 29, OPPORTUNITY_POOL.length)] ?? DEFAULT_CARD;
+
+  return { cardHint, deckHintTop, opportunityHint };
+}
+
+function m17ComputeAssistAmount(
+  cash: number,
+  tick: number,
+  macroRegime: MacroRegime,
+  pressureTier: PressureTier,
+  runPhase: RunPhase,
+  inChaos: boolean,
+): { decision: BailoutDecision; amount: number; reason: string; breakdown: Record<string, unknown> } {
+  if (cash >= M17_POLICY.DENY_IF_CASH_ABOVE) {
+    return {
+      decision: 'DENIED',
+      amount: 0,
+      reason: 'cash_above_deny_threshold',
+      breakdown: { cash, denyIfCashAbove: M17_POLICY.DENY_IF_CASH_ABOVE },
+    };
+  }
+
+  if (cash >= M17_POLICY.ELIGIBLE_IF_CASH_BELOW) {
+    return {
+      decision: 'NOT_ELIGIBLE',
+      amount: 0,
+      reason: 'not_below_eligibility_threshold',
+      breakdown: { cash, eligibleIfCashBelow: M17_POLICY.ELIGIBLE_IF_CASH_BELOW },
+    };
+  }
+
+  const decay = computeDecayRate(macroRegime, M17_BOUNDS.BASE_DECAY_RATE);
+  const pressureW = PRESSURE_WEIGHTS[pressureTier] ?? 1.0;
+  const phaseW = PHASE_WEIGHTS[runPhase] ?? 1.0;
+  const regimeW = REGIME_WEIGHTS[macroRegime] ?? 1.0;
+
+  const exitPulse = EXIT_PULSE_MULTIPLIERS[macroRegime] ?? 1.0;
+  const regimeMult = REGIME_MULTIPLIERS[macroRegime] ?? 1.0;
+
+  // "Need factor": deeper negative or lower cash => bigger assist (bounded)
+  const need = clamp((M17_POLICY.ELIGIBLE_IF_CASH_BELOW - cash) / Math.max(1, M17_POLICY.ELIGIBLE_IF_CASH_BELOW), 0, 1);
+
+  // Macro factor: worse macro => higher assist (invert pulse & multiplier)
+  const macroRisk = clamp((1 / Math.max(0.01, exitPulse)) * (1 / Math.max(0.01, regimeMult)), 0.6, 2.2);
+
+  const chaosBonus = inChaos || String(macroRegime) === 'CRISIS' ? M17_POLICY.CHAOS_BONUS : 0;
+
+  const raw =
+    (M17_POLICY.BASE_ASSIST * (0.65 + need * 0.65) + chaosBonus) *
+    clamp(pressureW * phaseW * regimeW, 0.6, 2.4) *
+    macroRisk *
+    clamp(1 - decay, 0.25, 1.0);
+
+  const amount = clamp(Math.round(raw), 0, M17_POLICY.ASSIST_CAP);
+
+  return {
+    decision: amount > 0 ? 'APPROVED' : 'DENIED',
+    amount,
+    reason: amount > 0 ? 'approved' : 'computed_zero_amount',
+    breakdown: {
+      cash,
+      tick,
+      need,
+      macroRegime,
+      pressureTier,
+      runPhase,
+      inChaos,
+      decay,
+      pressureW,
+      phaseW,
+      regimeW,
+      exitPulse,
+      regimeMult,
+      macroRisk,
+      chaosBonus,
+      raw,
+      assistCap: M17_POLICY.ASSIST_CAP,
+    },
+  };
+}
 
 // ── Exec hook ─────────────────────────────────────────────────────────────
 
@@ -86,34 +406,145 @@ export const M17_BOUNDS = {
  * @param emit   Telemetry emitter — call for every meaningful state change
  * @returns      Typed output (all fields populated, no throws)
  */
-export function clutchAssistBailout(
-  input: M17Input,
-  emit: MechanicEmitter,
-): M17Output {
-    const stateCash = (input.stateCash as number) ?? 0;
-    const stateTick = (input.stateTick as number) ?? 0;
-  const requestId = computeHash(JSON.stringify(input));
-    emit({ event: 'BAILOUT_REQUESTED', mechanic_id: 'M17', tick: 0, runId: requestId, payload: { stateCash, stateTick } });
-    return {{
-    bailoutResult: {} as BailoutResult,
-    assistAmount: 0,
-  }};
+export function clutchAssistBailout(input: M17Input, emit: MechanicEmitter): M17Output {
+  const stateCash = (input.stateCash as number) ?? 0;
+  const stateTick = clamp(((input.stateTick as number) ?? 0), 0, RUN_TOTAL_TICKS - 1);
+
+  const requestId = computeHash(
+    JSON.stringify({
+      mid: 'M17',
+      t: stateTick,
+      cash: stateCash,
+      nonce: input.requestNonce ?? null,
+      user: input.requesterUserId ?? null,
+    }),
+  );
+
+  // Deterministic macro/chaos context
+  const seed = computeHash(`${requestId}:${stateTick}:${stateCash}`);
+  const macroSchedule = buildMacroSchedule(seed, MACRO_EVENTS_PER_RUN);
+  const chaosWindows = buildChaosWindows(seed, CHAOS_WINDOWS_PER_RUN);
+
+  const runPhase = m17DerivePhase(stateTick, seed);
+  const macroRegime = m17DeriveRegimeFromSchedule(
+    stateTick,
+    macroSchedule,
+    m17PickKey(EXIT_PULSE_MULTIPLIERS as Record<MacroRegime, unknown>, seed, stateTick + 1),
+  );
+  const inChaos = m17InChaosWindow(stateTick, chaosWindows);
+  const pressureTier = m17DerivePressureTier(seed, stateTick, runPhase, inChaos, macroRegime, stateCash);
+
+  const { cardHint, deckHintTop, opportunityHint } = m17PickHints(seed, stateTick, pressureTier, runPhase, macroRegime);
+
+  emit({
+    event: 'BAILOUT_REQUESTED',
+    mechanic_id: 'M17',
+    tick: stateTick,
+    runId: requestId,
+    payload: {
+      stateCash,
+      stateTick,
+      requestId,
+      macroRegime,
+      pressureTier,
+      runPhase,
+      inChaos,
+      cardHintId: cardHint.id,
+      deckHintTop,
+      opportunityHintId: opportunityHint.id,
+    },
+  });
+
+  const computed = m17ComputeAssistAmount(stateCash, stateTick, macroRegime, pressureTier, runPhase, inChaos);
+
+  if (computed.decision === 'APPROVED') {
+    emit({
+      event: 'BAILOUT_ACCEPTED',
+      mechanic_id: 'M17',
+      tick: stateTick,
+      runId: requestId,
+      payload: {
+        assistAmount: computed.amount,
+        reason: computed.reason,
+        breakdown: computed.breakdown,
+      },
+    });
+
+    emit({
+      event: 'BAILOUT_APPLIED',
+      mechanic_id: 'M17',
+      tick: stateTick,
+      runId: requestId,
+      payload: {
+        assistAmount: computed.amount,
+        cashBefore: stateCash,
+        cashAfter: stateCash + computed.amount,
+      },
+    });
+  } else {
+    emit({
+      event: 'BAILOUT_DENIED',
+      mechanic_id: 'M17',
+      tick: stateTick,
+      runId: requestId,
+      payload: {
+        decision: computed.decision,
+        reason: computed.reason,
+        breakdown: computed.breakdown,
+      },
+    });
+  }
+
+  const auditHash = computeHash(
+    JSON.stringify({
+      requestId,
+      stateTick,
+      stateCash,
+      decision: computed.decision,
+      assistAmount: computed.amount,
+      context: { macroRegime, pressureTier, runPhase, inChaos },
+      hints: { cardHintId: cardHint.id, deckHintTop, opportunityHintId: opportunityHint.id },
+      breakdown: computed.breakdown,
+    }) + ':M17',
+  );
+
+  const bailoutResult: BailoutResult = {
+    requestId,
+    decision: computed.decision,
+    appliedAtTick: stateTick,
+    macroRegime,
+    pressureTier,
+    runPhase,
+    inChaos,
+    assistAmount: computed.amount,
+    reason: computed.reason,
+    auditHash,
+    cardHint,
+    deckHintTop,
+    opportunityHint,
+  };
+
+  return {
+    bailoutResult,
+    assistAmount: computed.amount,
+  };
 }
 
 // ── ML companion hook ─────────────────────────────────────────────────────
 
 export interface M17MLInput {
-  bailoutResult?: BailoutResult, assistAmount?: number;
+  bailoutResult?: BailoutResult;
+  assistAmount?: number;
   runId: string;
-  tick:  number;
+  tick: number;
 }
 
 export interface M17MLOutput {
-  score:          number;         // 0–1
-  topFactors:     string[];       // max 5 plain-English factors
-  recommendation: string;         // single sentence
-  auditHash:      string;         // SHA256(inputs+outputs+rulesVersion)
-  confidenceDecay: number;        // 0–1, how fast this signal should decay
+  score: number; // 0–1
+  topFactors: string[]; // max 5 plain-English factors
+  recommendation: string; // single sentence
+  auditHash: string; // SHA256(inputs+outputs+rulesVersion)
+  confidenceDecay: number; // 0–1, how fast this signal should decay
 }
 
 /**
@@ -121,16 +552,46 @@ export interface M17MLOutput {
  * Async advisory — fires AFTER exec_hook, reads output, returns signals only.
  * NEVER mutates state. Results feed Case File, Intel bars, and CORD scoring.
  */
-export async function clutchAssistBailoutMLCompanion(
-  input: M17MLInput,
-): Promise<M17MLOutput> {
-  // Advisory signal — bounded [0,1], no state mutation
-  const score = Math.min(0.99, Math.max(0.01, Object.keys(input).length * 0.05));
+export async function clutchAssistBailoutMLCompanion(input: M17MLInput): Promise<M17MLOutput> {
+  const tick = clamp(input.tick ?? 0, 0, RUN_TOTAL_TICKS - 1);
+
+  const res = input.bailoutResult;
+  const decision = res?.decision ?? 'DENIED';
+  const amount = Number(input.assistAmount ?? res?.assistAmount ?? 0);
+
+  const amtPct = clamp(amount / Math.max(1, M17_POLICY.ASSIST_CAP), 0, 1);
+  const score = clamp(
+    (decision === 'APPROVED' ? 0.55 : decision === 'NOT_ELIGIBLE' ? 0.25 : 0.15) + amtPct * 0.40,
+    0.01,
+    0.99,
+  );
+
+  const regime: MacroRegime = res?.macroRegime ?? m17PickKey(EXIT_PULSE_MULTIPLIERS as Record<MacroRegime, unknown>, computeHash(input.runId), tick + 1);
+  const confidenceDecay = computeDecayRate(regime, M17_BOUNDS.BASE_DECAY_RATE);
+
+  const hintIdx = seededIndex(computeHash(`M17ML:${input.runId}:${tick}:${decision}:${amount}`), tick, DEFAULT_CARD_IDS.length);
+  const hintCardId = DEFAULT_CARD_IDS[hintIdx] ?? DEFAULT_CARD.id;
+
+  const topFactors = [
+    `tick=${tick}/${RUN_TOTAL_TICKS}`,
+    `decision=${decision}`,
+    `assistAmount=${Math.round(amount)} (cap=${M17_POLICY.ASSIST_CAP})`,
+    `assistPct=${amtPct.toFixed(2)}`,
+    `hintCardId=${hintCardId}`,
+  ].slice(0, 5);
+
+  const recommendation =
+    decision === 'APPROVED'
+      ? 'Bailout approved: convert the assist into a high-EV stabilization move immediately.'
+      : decision === 'NOT_ELIGIBLE'
+        ? 'No bailout: you are above the eligibility threshold—tighten execution and avoid waste.'
+        : 'Bailout denied: your cash position does not meet policy gates; seek fast liquidity or reduce burn.';
+
   return {
     score,
-    topFactors:     ['M17 signal computed', 'advisory only'],
-    recommendation: 'Monitor M17 output and adjust strategy accordingly.',
-    auditHash:      computeHash(JSON.stringify(input) + ':ml:M17'),
-    confidenceDecay: 0.05,
+    topFactors,
+    recommendation,
+    auditHash: computeHash(JSON.stringify(input) + ':ml:M17'),
+    confidenceDecay,
   };
 }
