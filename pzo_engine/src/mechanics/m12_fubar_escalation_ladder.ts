@@ -316,7 +316,11 @@ export function fubarEscalationLadder(input: M12Input, emit: MechanicEmitter): M
   const defused = triggered && !inChaos && stateCash >= M12_BOUNDS.TIER_ESCAPE_TARGET;
 
   const fubarEvent: FubarEvent | null = triggered && !defused
-    ? { level: escalationLevel, regime: regime, pressureTier: statePressureTier }
+    ? {
+        type: 'FUBAR',
+        level: escalationLevel,
+        damage: escalationLevel, // or compute damage as needed
+      }
     : null;
 
   // keep shared imports “used”
