@@ -18,7 +18,7 @@ function canonicalize(value: unknown): unknown {
 
   const t = typeof value;
 
-  if (t === 'bigint') return value.toString();
+  if (t === 'bigint') return typeof value === 'bigint' ? value.toString() : null;
   if (t === 'number') return Number.isFinite(value) ? value : null;
   if (t === 'string' || t === 'boolean') return value;
   if (t === 'undefined' || t === 'function' || t === 'symbol') return null;
