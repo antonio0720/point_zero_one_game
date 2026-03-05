@@ -163,11 +163,11 @@ export type M129_ImportedTypesAnchor = {
 
 // ── Local creator-pack domain types (M129-only; intentionally not in ./types) ─
 
-export type CreatorPackKind = 'CAPTION' | 'STINGER' | 'CAPTION_AND_STINGER';
+export type M129CreatorPackKind = 'CAPTION' | 'STINGER' | 'CAPTION_AND_STINGER';
 
-export interface CreatorPack {
+export interface M129CreatorPack {
   packId: string;
-  kind: CreatorPackKind;
+  kind: M129CreatorPackKind;
   name: string;
 
   /** Deterministic list of caption templates for this pack. */
@@ -180,14 +180,14 @@ export interface CreatorPack {
   salt?: string;
 }
 
-export interface CreatorPackSelection {
+export interface M129CreatorPackSelection {
   packId?: string;
-  kind?: CreatorPackKind;
+  kind?: M129CreatorPackKind;
   templateIndex?: number;
   stingerIndex?: number;
 }
 
-export interface CaptionTemplate {
+export interface M129CaptionTemplate {
   template: string; // supports placeholders: {{moment}}, {{tick}}, {{regime}}, {{phase}}, {{pressure}}
 }
 
@@ -259,18 +259,18 @@ function clampIndex(i: number, len: number): number {
   return clamp(i, 0, len - 1);
 }
 
-function parseSelection(v: unknown): CreatorPackSelection {
+function parseSelection(v: unknown): M129CreatorPackSelection {
   if (!v || typeof v !== 'object') return {};
   const o = v as any;
   return {
     packId: asString(o.packId) || undefined,
-    kind: (asString(o.kind) as CreatorPackKind) || undefined,
+    kind: (asString(o.kind) as M129CreatorPackKind) || undefined,
     templateIndex: Number.isFinite(Number(o.templateIndex)) ? Math.trunc(Number(o.templateIndex)) : undefined,
     stingerIndex: Number.isFinite(Number(o.stingerIndex)) ? Math.trunc(Number(o.stingerIndex)) : undefined,
   };
 }
 
-function parseCaptionTemplate(v: unknown): CaptionTemplate | undefined {
+function parseCaptionTemplate(v: unknown): M129CaptionTemplate | undefined {
   if (!v) return undefined;
   if (typeof v === 'string') {
     const t = v.trim();
@@ -352,7 +352,7 @@ function sanitizeStingers(stingers: string[]): string[] {
   return out;
 }
 
-function buildDefaultPack(seed: string): CreatorPack {
+function buildDefaultPack(seed: string): M129CreatorPack {
   // Deterministic template/stinger set. UI/audio layer maps stinger ids -> actual sound.
   const baseTemplates = [
     'No drift. Just proof. {{moment}}',
@@ -382,14 +382,18 @@ function buildDefaultPack(seed: string): CreatorPack {
   };
 }
 
-function renderTemplate(tpl: string, ctx: {
-  tick: number;
-  moment: string;
-  regime: MacroRegime;
-  phase: RunPhase;
-  pressure: PressureTier;
-}): string {
+function renderTemplate(
+  tpl: string,
+  ctx: {
+    tick: number;
+    moment: string;
+    regime: MacroRegime;
+    phase: RunPhase;
+    pressure: PressureTier;
+  },
+): string {
   const safe = tpl.slice(0, M129_BOUNDS.MAX_TEMPLATE_LEN);
+  // NOTE: replaceAll requires ES2021. If your tsconfig target is lower, swap to .split().join().
   return safe
     .replaceAll('{{tick}}', String(ctx.tick))
     .replaceAll('{{moment}}', ctx.moment)
@@ -425,6 +429,11 @@ export function creatorPackApplier(input: M129Input, emit: MechanicEmitter): M12
   const tplOverride = parseCaptionTemplate(input.captionTemplate);
   const momentEvent = input.momentEvent;
 
+  // Tick binding:
+  // - Prefer MomentEvent.tick so M129 aligns to real run time.
+  // - Fall back to 0 for manual invocations/tests.
+  const tick = clamp(typeof momentEvent?.tick === 'number' ? momentEvent.tick : 0, 0, RUN_TOTAL_TICKS - 1);
+
   // Deterministic seed for this invocation (binds to moment + selection + rules version).
   const seed = computeHash(
     JSON.stringify({
@@ -437,7 +446,6 @@ export function creatorPackApplier(input: M129Input, emit: MechanicEmitter): M12
   );
 
   // Macro fabric (keeps shared imports live; gives “season texture” to captions/stingers).
-  const tick = 0;
   const macroSchedule = buildMacroSchedule(seed + ':macro', MACRO_EVENTS_PER_RUN);
   const chaosWindows = buildChaosWindows(seed + ':chaos', CHAOS_WINDOWS_PER_RUN);
 
@@ -497,14 +505,14 @@ export function creatorPackApplier(input: M129Input, emit: MechanicEmitter): M12
   const chosenStingerId = stingers[stingerIndex] ?? stingers[0] ?? 'STINGER_TICK';
 
   // Decide whether stinger plays (based on pack kind + deterministic pressure gating).
-  const packKind: CreatorPackKind = (selection.kind ?? pack.kind) as CreatorPackKind;
+  const packKind: M129CreatorPackKind = (selection.kind ?? pack.kind) as M129CreatorPackKind;
   const stingerAllowedByKind = packKind === 'STINGER' || packKind === 'CAPTION_AND_STINGER';
   const stingerPlayed = stingerAllowedByKind && (PRESSURE_WEIGHTS[pressureTier] ?? 1.0) >= 1.0;
 
   // Pack consumed: deterministic (always true if any pack selection present; else true for default pack usage).
   const packConsumed = true;
 
-  const runId = computeHash(`M129:run:${seed}`);
+  const runId = computeHash(`M129:run:${seed}:${tick}`);
 
   const auditHash = computeHash(
     JSON.stringify({
@@ -568,7 +576,6 @@ export function creatorPackApplier(input: M129Input, emit: MechanicEmitter): M12
       macroRegime,
       runPhase,
       pressureTier,
-      // include a small moment preview for UI
       momentPreview: momentStr.slice(0, 64),
       auditHash,
     },
@@ -583,7 +590,6 @@ export function creatorPackApplier(input: M129Input, emit: MechanicEmitter): M12
       payload: {
         stingerId: chosenStingerId,
         stingerIndex,
-        // bind to macro texture to keep audio/UX coherent
         macroRegime,
         pressureTier,
         auditHash,
@@ -622,7 +628,7 @@ export interface M129MLOutput {
  * NEVER mutates state. Results feed Case File, Intel bars, and CORD scoring.
  */
 export async function creatorPackApplierMLCompanion(input: M129MLInput): Promise<M129MLOutput> {
-  const tick = clamp(typeof input.tick === 'number' ? input.tick : Number(input.tick), 0, RUN_TOTAL_TICKS);
+  const tick = clamp(typeof input.tick === 'number' ? input.tick : Number(input.tick), 0, RUN_TOTAL_TICKS - 1);
 
   const caption = asString(input.captionGenerated);
   const hasCaption = caption.length > 0;
