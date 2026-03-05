@@ -22,6 +22,8 @@
 // Density6 LLC · Point Zero One · Confidential · All Rights Reserved
 // ═══════════════════════════════════════════════════════════════════════════════
 
+import { createHash } from 'node:crypto';
+
 // ── What this adds ────────────────────────────────────────────────────────────
 /**
  * M54A — Restructure Acceptance Forecaster (Distress Term Triage)
@@ -206,28 +208,9 @@ export async function runM54aMl(
   tier:      M54ATier = 'baseline',
   modelCard: Omit<M54AModelCard, 'modelId' | 'coreMechanicPair'>,
 ): Promise<M54AOutput> {
-  // ── TODO: implement M54A — Restructure Acceptance Forecaster (Distress Term Triage) ─────────────────────────────────
-  //
-  // Implementation checklist:
-  // □ Validate input schema against featureSchemaHash
-  // □ Select inference backend based on `tier` parameter
-  // □ tier === 'baseline' → GBM + calibrated logistic (fast, low-cost, production default)
-  // □ tier === 'sequence_dl' → TCN / Transformer encoder over event streams (sequential patterns)
-  // □ tier === 'graph_dl' → GNN over contract / market / ledger graphs (relationship-aware)
-  // □ tier === 'policy_rl' → Constrained contextual bandit / offline PPO (bounded nudges)
-  // □ Apply input privacy filters (no PII, no cross-player contact graph)
-  // □ Run inference → raw score + top_factors
-  // □ Apply output caps: score = Math.min(score, M54A_ML_CONSTANTS.GUARDRAILS.scoreCap)
-  // □ Apply monotonic constraints where relevant
-  // □ Abstain if confidence < M54A_ML_CONSTANTS.GUARDRAILS.abstainThreshold
-  // □ Compute auditHash = SHA256(inputs + outputs + ruleset_version + caps)
-  // □ Write signed receipt to run ledger (NEVER skip)
-  // □ Return M54AOutput — NEVER mutate run state directly
-  //
-  // Placement: server | Budget: real_time
-  // ExecHook:  after_m54_resolve
-  // ─────────────────────────────────────────────────────────────────────────
-  throw new Error('M54A (Restructure Acceptance Forecaster (Distress Term Triage)) ML inference not yet implemented.');
+  // Day-1 operational: delegates to fallback until full ML implementation is deployed.
+  // Full implementation checklist preserved in git history.
+  return runM54aMlFallback(input);
 }
 
 // ── Degraded-mode fallback ────────────────────────────────────────────────────
@@ -239,14 +222,21 @@ export async function runM54aMl(
 export function runM54aMlFallback(
   _input: M54ATelemetryInput,
 ): M54AOutput {
-  // TODO: implement rule-based fallback for M54A
-  // Fallback must:
-  //   □ Return score = 0.5 (neutral / unknown)
-  //   □ Return topFactors = ['ML unavailable — rule-based fallback active']
-  //   □ Return recommendation = 'See rule engine output'
-  //   □ Compute deterministic auditHash from input seed + 'fallback'
-  //   □ Zero-out all M54A-specific extended outputs
-  throw new Error('M54A fallback not yet implemented.');
+  const seed = String(((_input as unknown) as Record<string, unknown>).runSeed ?? '');
+  const tick = Number(((_input as unknown) as Record<string, unknown>).tickIndex ?? 0);
+  const auditHash = createHash('sha256')
+    .update(seed + ':' + tick + ':fallback:M54A')
+    .digest('hex');
+  return {
+    score: 0.5,
+    topFactors: ['ML unavailable — rule-based fallback active'],
+    recommendation: 'See rule engine output',
+    auditHash,
+    acceptanceProbability: null,
+    distressTriage: null,
+    negotiationWindowRecommendation: null,
+    cooperativeOutcomeScore: null,
+  };
 }
 
 // ── IntelligenceState integration note ───────────────────────────────────────

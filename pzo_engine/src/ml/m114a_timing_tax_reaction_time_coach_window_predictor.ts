@@ -22,6 +22,8 @@
 // Density6 LLC · Point Zero One · Confidential · All Rights Reserved
 // ═══════════════════════════════════════════════════════════════════════════════
 
+import { createHash } from 'node:crypto';
+
 // ── What this adds ────────────────────────────────────────────────────────────
 /**
  * M114A — Timing Tax Reaction-Time Coach + Window Predictor
@@ -196,27 +198,9 @@ export async function runM114aMl(
   tier:      M114ATier = 'baseline',
   modelCard: Omit<M114AModelCard, 'modelId' | 'coreMechanicPair'>,
 ): Promise<M114AOutput> {
-  // ── TODO: implement M114A — Timing Tax Reaction-Time Coach + Window Predictor ─────────────────────────────────
-  //
-  // Implementation checklist:
-  // □ Validate input schema against featureSchemaHash
-  // □ Select inference backend based on `tier` parameter
-  // □ tier === 'baseline' → GBM + calibrated logistic (fast, low-cost, production default)
-  // □ tier === 'sequence_dl' → TCN / Transformer encoder over event streams (sequential patterns)
-  // □ tier === 'policy_rl' → Constrained contextual bandit / offline PPO (bounded nudges)
-  // □ Apply input privacy filters (no PII, no cross-player contact graph)
-  // □ Run inference → raw score + top_factors
-  // □ Apply output caps: score = Math.min(score, M114A_ML_CONSTANTS.GUARDRAILS.scoreCap)
-  // □ Apply monotonic constraints where relevant
-  // □ Abstain if confidence < M114A_ML_CONSTANTS.GUARDRAILS.abstainThreshold
-  // □ Compute auditHash = SHA256(inputs + outputs + ruleset_version + caps)
-  // □ Write signed receipt to run ledger (NEVER skip)
-  // □ Return M114AOutput — NEVER mutate run state directly
-  //
-  // Placement: client | Budget: real_time
-  // ExecHook:  after_m114_resolve
-  // ─────────────────────────────────────────────────────────────────────────
-  throw new Error('M114A (Timing Tax Reaction-Time Coach + Window Predictor) ML inference not yet implemented.');
+  // Day-1 operational: delegates to fallback until full ML implementation is deployed.
+  // Full implementation checklist preserved in git history.
+  return runM114aMlFallback(input);
 }
 
 // ── Degraded-mode fallback ────────────────────────────────────────────────────
@@ -228,14 +212,21 @@ export async function runM114aMl(
 export function runM114aMlFallback(
   _input: M114ATelemetryInput,
 ): M114AOutput {
-  // TODO: implement rule-based fallback for M114A
-  // Fallback must:
-  //   □ Return score = 0.5 (neutral / unknown)
-  //   □ Return topFactors = ['ML unavailable — rule-based fallback active']
-  //   □ Return recommendation = 'See rule engine output'
-  //   □ Compute deterministic auditHash from input seed + 'fallback'
-  //   □ Zero-out all M114A-specific extended outputs
-  throw new Error('M114A fallback not yet implemented.');
+  const seed = String(((_input as unknown) as Record<string, unknown>).runSeed ?? '');
+  const tick = Number(((_input as unknown) as Record<string, unknown>).tickIndex ?? 0);
+  const auditHash = createHash('sha256')
+    .update(seed + ':' + tick + ':fallback:M114A')
+    .digest('hex');
+  return {
+    score: 0.5,
+    topFactors: ['ML unavailable — rule-based fallback active'],
+    recommendation: 'See rule engine output',
+    auditHash,
+    reactionTimeCoaching: null,
+    windowPrediction: null,
+    deliberateVsHesitation: null,
+    timingTaxEstimate: null,
+  };
 }
 
 // ── IntelligenceState integration note ───────────────────────────────────────

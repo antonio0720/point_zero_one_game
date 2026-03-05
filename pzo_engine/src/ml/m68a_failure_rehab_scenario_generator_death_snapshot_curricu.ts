@@ -22,6 +22,8 @@
 // Density6 LLC · Point Zero One · Confidential · All Rights Reserved
 // ═══════════════════════════════════════════════════════════════════════════════
 
+import { createHash } from 'node:crypto';
+
 // ── What this adds ────────────────────────────────────────────────────────────
 /**
  * M68A — Failure Rehab Scenario Generator (Death-Snapshot Curriculum)
@@ -206,28 +208,9 @@ export async function runM68aMl(
   tier:      M68ATier = 'baseline',
   modelCard: Omit<M68AModelCard, 'modelId' | 'coreMechanicPair'>,
 ): Promise<M68AOutput> {
-  // ── TODO: implement M68A — Failure Rehab Scenario Generator (Death-Snapshot Curriculum) ─────────────────────────────────
-  //
-  // Implementation checklist:
-  // □ Validate input schema against featureSchemaHash
-  // □ Select inference backend based on `tier` parameter
-  // □ tier === 'baseline' → GBM + calibrated logistic (fast, low-cost, production default)
-  // □ tier === 'sequence_dl' → TCN / Transformer encoder over event streams (sequential patterns)
-  // □ tier === 'graph_dl' → GNN over contract / market / ledger graphs (relationship-aware)
-  // □ tier === 'causal' → Causal inference + DiD (counterfactual explanations)
-  // □ Apply input privacy filters (no PII, no cross-player contact graph)
-  // □ Run inference → raw score + top_factors
-  // □ Apply output caps: score = Math.min(score, M68A_ML_CONSTANTS.GUARDRAILS.scoreCap)
-  // □ Apply monotonic constraints where relevant
-  // □ Abstain if confidence < M68A_ML_CONSTANTS.GUARDRAILS.abstainThreshold
-  // □ Compute auditHash = SHA256(inputs + outputs + ruleset_version + caps)
-  // □ Write signed receipt to run ledger (NEVER skip)
-  // □ Return M68AOutput — NEVER mutate run state directly
-  //
-  // Placement: server | Budget: batch
-  // ExecHook:  after_m68_resolve
-  // ─────────────────────────────────────────────────────────────────────────
-  throw new Error('M68A (Failure Rehab Scenario Generator (Death-Snapshot Curriculum)) ML inference not yet implemented.');
+  // Day-1 operational: delegates to fallback until full ML implementation is deployed.
+  // Full implementation checklist preserved in git history.
+  return runM68aMlFallback(input);
 }
 
 // ── Degraded-mode fallback ────────────────────────────────────────────────────
@@ -239,14 +222,21 @@ export async function runM68aMl(
 export function runM68aMlFallback(
   _input: M68ATelemetryInput,
 ): M68AOutput {
-  // TODO: implement rule-based fallback for M68A
-  // Fallback must:
-  //   □ Return score = 0.5 (neutral / unknown)
-  //   □ Return topFactors = ['ML unavailable — rule-based fallback active']
-  //   □ Return recommendation = 'See rule engine output'
-  //   □ Compute deterministic auditHash from input seed + 'fallback'
-  //   □ Zero-out all M68A-specific extended outputs
-  throw new Error('M68A fallback not yet implemented.');
+  const seed = String(((_input as unknown) as Record<string, unknown>).runSeed ?? '');
+  const tick = Number(((_input as unknown) as Record<string, unknown>).tickIndex ?? 0);
+  const auditHash = createHash('sha256')
+    .update(seed + ':' + tick + ':fallback:M68A')
+    .digest('hex');
+  return {
+    score: 0.5,
+    topFactors: ['ML unavailable — rule-based fallback active'],
+    recommendation: 'See rule engine output',
+    auditHash,
+    rehabScenarios: null,
+    causalWeakSpotMap: null,
+    completionRateEstimate: null,
+    curriculumSequence: null,
+  };
 }
 
 // ── IntelligenceState integration note ───────────────────────────────────────

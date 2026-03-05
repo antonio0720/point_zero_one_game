@@ -19,6 +19,15 @@ import { clamp, computeHash, seededShuffle, seededIndex,
          PRESSURE_WEIGHTS, PHASE_WEIGHTS, REGIME_WEIGHTS,
          REGIME_MULTIPLIERS } from './mechanicsUtils';
 import type {
+  RunPhase, TickTier, MacroRegime, PressureTier, SolvencyStatus,
+  Asset, IPAItem, GameCard, GameEvent, ShieldLayer, Debt, Buff,
+  Liability, SetBonus, AssetMod, IncomeItem, MacroEvent, ChaosWindow,
+  AuctionResult, PurchaseResult, ShieldResult, ExitResult, TickResult,
+  DeckComposition, TierProgress, WipeEvent, RegimeShiftEvent,
+  PhaseTransitionEvent, TimerExpiredEvent, StreakEvent, FubarEvent,
+  LedgerEntry, ProofCard, CompletedRun, SeasonState, RunState,
+  MomentEvent, ClipBoundary, MechanicTelemetryPayload, MechanicEmitter,
+} from './types';
 
 export interface SplitResult {
   /** Deterministic split execution summary */
@@ -35,15 +44,6 @@ export interface SplitResult {
   /** Remaining holding cost basis after the split */
   remaining_cost_basis: number;
 }
-  RunPhase, TickTier, MacroRegime, PressureTier, SolvencyStatus,
-  Asset, IPAItem, GameCard, GameEvent, ShieldLayer, Debt, Buff,
-  Liability, SetBonus, AssetMod, IncomeItem, MacroEvent, ChaosWindow,
-  AuctionResult, PurchaseResult, ShieldResult, ExitResult, TickResult,
-  DeckComposition, TierProgress, WipeEvent, RegimeShiftEvent,
-  PhaseTransitionEvent, TimerExpiredEvent, StreakEvent, FubarEvent,
-  LedgerEntry, ProofCard, CompletedRun, SeasonState, RunState,
-  MomentEvent, ClipBoundary, MechanicTelemetryPayload, MechanicEmitter,
-} from './types';
 
 
 // ── Input / Output contracts ──────────────────────────────────────────────

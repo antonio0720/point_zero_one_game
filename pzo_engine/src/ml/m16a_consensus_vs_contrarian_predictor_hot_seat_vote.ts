@@ -22,6 +22,8 @@
 // Density6 LLC · Point Zero One · Confidential · All Rights Reserved
 // ═══════════════════════════════════════════════════════════════════════════════
 
+import { createHash } from 'node:crypto';
+
 // ── What this adds ────────────────────────────────────────────────────────────
 /**
  * M16A — Consensus vs Contrarian Predictor (Hot Seat Vote)
@@ -196,27 +198,9 @@ export async function runM16aMl(
   tier:      M16ATier = 'baseline',
   modelCard: Omit<M16AModelCard, 'modelId' | 'coreMechanicPair'>,
 ): Promise<M16AOutput> {
-  // ── TODO: implement M16A — Consensus vs Contrarian Predictor (Hot Seat Vote) ─────────────────────────────────
-  //
-  // Implementation checklist:
-  // □ Validate input schema against featureSchemaHash
-  // □ Select inference backend based on `tier` parameter
-  // □ tier === 'baseline' → GBM + calibrated logistic (fast, low-cost, production default)
-  // □ tier === 'sequence_dl' → TCN / Transformer encoder over event streams (sequential patterns)
-  // □ tier === 'policy_rl' → Constrained contextual bandit / offline PPO (bounded nudges)
-  // □ Apply input privacy filters (no PII, no cross-player contact graph)
-  // □ Run inference → raw score + top_factors
-  // □ Apply output caps: score = Math.min(score, M16A_ML_CONSTANTS.GUARDRAILS.scoreCap)
-  // □ Apply monotonic constraints where relevant
-  // □ Abstain if confidence < M16A_ML_CONSTANTS.GUARDRAILS.abstainThreshold
-  // □ Compute auditHash = SHA256(inputs + outputs + ruleset_version + caps)
-  // □ Write signed receipt to run ledger (NEVER skip)
-  // □ Return M16AOutput — NEVER mutate run state directly
-  //
-  // Placement: server | Budget: real_time
-  // ExecHook:  after_m16_resolve
-  // ─────────────────────────────────────────────────────────────────────────
-  throw new Error('M16A (Consensus vs Contrarian Predictor (Hot Seat Vote)) ML inference not yet implemented.');
+  // Day-1 operational: delegates to fallback until full ML implementation is deployed.
+  // Full implementation checklist preserved in git history.
+  return runM16aMlFallback(input);
 }
 
 // ── Degraded-mode fallback ────────────────────────────────────────────────────
@@ -228,14 +212,21 @@ export async function runM16aMl(
 export function runM16aMlFallback(
   _input: M16ATelemetryInput,
 ): M16AOutput {
-  // TODO: implement rule-based fallback for M16A
-  // Fallback must:
-  //   □ Return score = 0.5 (neutral / unknown)
-  //   □ Return topFactors = ['ML unavailable — rule-based fallback active']
-  //   □ Return recommendation = 'See rule engine output'
-  //   □ Compute deterministic auditHash from input seed + 'fallback'
-  //   □ Zero-out all M16A-specific extended outputs
-  throw new Error('M16A fallback not yet implemented.');
+  const seed = String(((_input as unknown) as Record<string, unknown>).runSeed ?? '');
+  const tick = Number(((_input as unknown) as Record<string, unknown>).tickIndex ?? 0);
+  const auditHash = createHash('sha256')
+    .update(seed + ':' + tick + ':fallback:M16A')
+    .digest('hex');
+  return {
+    score: 0.5,
+    topFactors: ['ML unavailable — rule-based fallback active'],
+    recommendation: 'See rule engine output',
+    auditHash,
+    voteDistributionPrediction: null,
+    contrarianConfidence: null,
+    groupthinkFlag: null,
+    consensusMomentFlag: null,
+  };
 }
 
 // ── IntelligenceState integration note ───────────────────────────────────────

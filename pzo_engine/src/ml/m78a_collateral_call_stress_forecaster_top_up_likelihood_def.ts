@@ -22,6 +22,8 @@
 // Density6 LLC · Point Zero One · Confidential · All Rights Reserved
 // ═══════════════════════════════════════════════════════════════════════════════
 
+import { createHash } from 'node:crypto';
+
 // ── What this adds ────────────────────────────────────────────────────────────
 /**
  * M78A — Collateral Call Stress Forecaster (Top-Up Likelihood + Default Path)
@@ -196,27 +198,9 @@ export async function runM78aMl(
   tier:      M78ATier = 'baseline',
   modelCard: Omit<M78AModelCard, 'modelId' | 'coreMechanicPair'>,
 ): Promise<M78AOutput> {
-  // ── TODO: implement M78A — Collateral Call Stress Forecaster (Top-Up Likelihood + Default Path) ─────────────────────────────────
-  //
-  // Implementation checklist:
-  // □ Validate input schema against featureSchemaHash
-  // □ Select inference backend based on `tier` parameter
-  // □ tier === 'baseline' → GBM + calibrated logistic (fast, low-cost, production default)
-  // □ tier === 'sequence_dl' → TCN / Transformer encoder over event streams (sequential patterns)
-  // □ tier === 'policy_rl' → Constrained contextual bandit / offline PPO (bounded nudges)
-  // □ Apply input privacy filters (no PII, no cross-player contact graph)
-  // □ Run inference → raw score + top_factors
-  // □ Apply output caps: score = Math.min(score, M78A_ML_CONSTANTS.GUARDRAILS.scoreCap)
-  // □ Apply monotonic constraints where relevant
-  // □ Abstain if confidence < M78A_ML_CONSTANTS.GUARDRAILS.abstainThreshold
-  // □ Compute auditHash = SHA256(inputs + outputs + ruleset_version + caps)
-  // □ Write signed receipt to run ledger (NEVER skip)
-  // □ Return M78AOutput — NEVER mutate run state directly
-  //
-  // Placement: server | Budget: real_time
-  // ExecHook:  after_m78_resolve
-  // ─────────────────────────────────────────────────────────────────────────
-  throw new Error('M78A (Collateral Call Stress Forecaster (Top-Up Likelihood + Default Path)) ML inference not yet implemented.');
+  // Day-1 operational: delegates to fallback until full ML implementation is deployed.
+  // Full implementation checklist preserved in git history.
+  return runM78aMlFallback(input);
 }
 
 // ── Degraded-mode fallback ────────────────────────────────────────────────────
@@ -228,14 +212,21 @@ export async function runM78aMl(
 export function runM78aMlFallback(
   _input: M78ATelemetryInput,
 ): M78AOutput {
-  // TODO: implement rule-based fallback for M78A
-  // Fallback must:
-  //   □ Return score = 0.5 (neutral / unknown)
-  //   □ Return topFactors = ['ML unavailable — rule-based fallback active']
-  //   □ Return recommendation = 'See rule engine output'
-  //   □ Compute deterministic auditHash from input seed + 'fallback'
-  //   □ Zero-out all M78A-specific extended outputs
-  throw new Error('M78A fallback not yet implemented.');
+  const seed = String(((_input as unknown) as Record<string, unknown>).runSeed ?? '');
+  const tick = Number(((_input as unknown) as Record<string, unknown>).tickIndex ?? 0);
+  const auditHash = createHash('sha256')
+    .update(seed + ':' + tick + ':fallback:M78A')
+    .digest('hex');
+  return {
+    score: 0.5,
+    topFactors: ['ML unavailable — rule-based fallback active'],
+    recommendation: 'See rule engine output',
+    auditHash,
+    topupProbability: null,
+    defaultPathScore: null,
+    marginCallTiming: null,
+    stressScenarioResults: null,
+  };
 }
 
 // ── IntelligenceState integration note ───────────────────────────────────────

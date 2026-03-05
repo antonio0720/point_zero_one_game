@@ -22,6 +22,8 @@
 // Density6 LLC · Point Zero One · Confidential · All Rights Reserved
 // ═══════════════════════════════════════════════════════════════════════════════
 
+import { createHash } from 'node:crypto';
+
 // ── What this adds ────────────────────────────────────────────────────────────
 /**
  * M76A — Contract Voting Dynamics Model (Deadlock + Manipulation Detection)
@@ -196,27 +198,9 @@ export async function runM76aMl(
   tier:      M76ATier = 'baseline',
   modelCard: Omit<M76AModelCard, 'modelId' | 'coreMechanicPair'>,
 ): Promise<M76AOutput> {
-  // ── TODO: implement M76A — Contract Voting Dynamics Model (Deadlock + Manipulation Detection) ─────────────────────────────────
-  //
-  // Implementation checklist:
-  // □ Validate input schema against featureSchemaHash
-  // □ Select inference backend based on `tier` parameter
-  // □ tier === 'baseline' → GBM + calibrated logistic (fast, low-cost, production default)
-  // □ tier === 'sequence_dl' → TCN / Transformer encoder over event streams (sequential patterns)
-  // □ tier === 'policy_rl' → Constrained contextual bandit / offline PPO (bounded nudges)
-  // □ Apply input privacy filters (no PII, no cross-player contact graph)
-  // □ Run inference → raw score + top_factors
-  // □ Apply output caps: score = Math.min(score, M76A_ML_CONSTANTS.GUARDRAILS.scoreCap)
-  // □ Apply monotonic constraints where relevant
-  // □ Abstain if confidence < M76A_ML_CONSTANTS.GUARDRAILS.abstainThreshold
-  // □ Compute auditHash = SHA256(inputs + outputs + ruleset_version + caps)
-  // □ Write signed receipt to run ledger (NEVER skip)
-  // □ Return M76AOutput — NEVER mutate run state directly
-  //
-  // Placement: server | Budget: real_time
-  // ExecHook:  after_m76_resolve
-  // ─────────────────────────────────────────────────────────────────────────
-  throw new Error('M76A (Contract Voting Dynamics Model (Deadlock + Manipulation Detection)) ML inference not yet implemented.');
+  // Day-1 operational: delegates to fallback until full ML implementation is deployed.
+  // Full implementation checklist preserved in git history.
+  return runM76aMlFallback(input);
 }
 
 // ── Degraded-mode fallback ────────────────────────────────────────────────────
@@ -228,14 +212,21 @@ export async function runM76aMl(
 export function runM76aMlFallback(
   _input: M76ATelemetryInput,
 ): M76AOutput {
-  // TODO: implement rule-based fallback for M76A
-  // Fallback must:
-  //   □ Return score = 0.5 (neutral / unknown)
-  //   □ Return topFactors = ['ML unavailable — rule-based fallback active']
-  //   □ Return recommendation = 'See rule engine output'
-  //   □ Compute deterministic auditHash from input seed + 'fallback'
-  //   □ Zero-out all M76A-specific extended outputs
-  throw new Error('M76A fallback not yet implemented.');
+  const seed = String(((_input as unknown) as Record<string, unknown>).runSeed ?? '');
+  const tick = Number(((_input as unknown) as Record<string, unknown>).tickIndex ?? 0);
+  const auditHash = createHash('sha256')
+    .update(seed + ':' + tick + ':fallback:M76A')
+    .digest('hex');
+  return {
+    score: 0.5,
+    topFactors: ['ML unavailable — rule-based fallback active'],
+    recommendation: 'See rule engine output',
+    auditHash,
+    deadlockProbability: null,
+    manipulationFlag: null,
+    minorityConfidence: null,
+    resolutionEta: null,
+  };
 }
 
 // ── IntelligenceState integration note ───────────────────────────────────────

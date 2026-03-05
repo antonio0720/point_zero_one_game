@@ -22,6 +22,8 @@
 // Density6 LLC · Point Zero One · Confidential · All Rights Reserved
 // ═══════════════════════════════════════════════════════════════════════════════
 
+import { createHash } from 'node:crypto';
+
 // ── What this adds ────────────────────────────────────────────────────────────
 /**
  * M79A — Shared Objective Bond Success Model (Coordination + Sabotage Resistance)
@@ -196,27 +198,9 @@ export async function runM79aMl(
   tier:      M79ATier = 'baseline',
   modelCard: Omit<M79AModelCard, 'modelId' | 'coreMechanicPair'>,
 ): Promise<M79AOutput> {
-  // ── TODO: implement M79A — Shared Objective Bond Success Model (Coordination + Sabotage Resistance) ─────────────────────────────────
-  //
-  // Implementation checklist:
-  // □ Validate input schema against featureSchemaHash
-  // □ Select inference backend based on `tier` parameter
-  // □ tier === 'baseline' → GBM + calibrated logistic (fast, low-cost, production default)
-  // □ tier === 'sequence_dl' → TCN / Transformer encoder over event streams (sequential patterns)
-  // □ tier === 'policy_rl' → Constrained contextual bandit / offline PPO (bounded nudges)
-  // □ Apply input privacy filters (no PII, no cross-player contact graph)
-  // □ Run inference → raw score + top_factors
-  // □ Apply output caps: score = Math.min(score, M79A_ML_CONSTANTS.GUARDRAILS.scoreCap)
-  // □ Apply monotonic constraints where relevant
-  // □ Abstain if confidence < M79A_ML_CONSTANTS.GUARDRAILS.abstainThreshold
-  // □ Compute auditHash = SHA256(inputs + outputs + ruleset_version + caps)
-  // □ Write signed receipt to run ledger (NEVER skip)
-  // □ Return M79AOutput — NEVER mutate run state directly
-  //
-  // Placement: server | Budget: real_time
-  // ExecHook:  after_m79_resolve
-  // ─────────────────────────────────────────────────────────────────────────
-  throw new Error('M79A (Shared Objective Bond Success Model (Coordination + Sabotage Resistance)) ML inference not yet implemented.');
+  // Day-1 operational: delegates to fallback until full ML implementation is deployed.
+  // Full implementation checklist preserved in git history.
+  return runM79aMlFallback(input);
 }
 
 // ── Degraded-mode fallback ────────────────────────────────────────────────────
@@ -228,14 +212,21 @@ export async function runM79aMl(
 export function runM79aMlFallback(
   _input: M79ATelemetryInput,
 ): M79AOutput {
-  // TODO: implement rule-based fallback for M79A
-  // Fallback must:
-  //   □ Return score = 0.5 (neutral / unknown)
-  //   □ Return topFactors = ['ML unavailable — rule-based fallback active']
-  //   □ Return recommendation = 'See rule engine output'
-  //   □ Compute deterministic auditHash from input seed + 'fallback'
-  //   □ Zero-out all M79A-specific extended outputs
-  throw new Error('M79A fallback not yet implemented.');
+  const seed = String(((_input as unknown) as Record<string, unknown>).runSeed ?? '');
+  const tick = Number(((_input as unknown) as Record<string, unknown>).tickIndex ?? 0);
+  const auditHash = createHash('sha256')
+    .update(seed + ':' + tick + ':fallback:M79A')
+    .digest('hex');
+  return {
+    score: 0.5,
+    topFactors: ['ML unavailable — rule-based fallback active'],
+    recommendation: 'See rule engine output',
+    auditHash,
+    bondSuccessProbability: null,
+    coordinationFailureFlag: null,
+    sabotageFlag: null,
+    interventionWindow: null,
+  };
 }
 
 // ── IntelligenceState integration note ───────────────────────────────────────
