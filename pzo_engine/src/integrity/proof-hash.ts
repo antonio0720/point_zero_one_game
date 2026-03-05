@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 export class ProofHash {
     private readonly seed: string;
     private readonly canonicalActionsJson: string;
@@ -10,7 +12,7 @@ export class ProofHash {
     }
 
     public getHash(): string {
-        const hash = crypto.createHash('sha256');
+        const hash = createHash('sha256');
         hash.update(this.seed);
         hash.update(this.canonicalActionsJson);
         hash.update(this.rulesetVersion);

@@ -1,3 +1,5 @@
+import type { Asset, IPAItem, ShieldLayer, SetBonus, AssetMod, Liability } from './types';
+
 // AUTO-GENERATED, NOW MANUALLY EDITED BY ANTONIO by scripts/build_mechanics.py — DO NOT EDIT MANUALLY
 // Density6 LLC · Point Zero One · Confidential
 // pzo_engine/src/mechanics/snapshotExtractor.ts

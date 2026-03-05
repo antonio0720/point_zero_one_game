@@ -19,6 +19,22 @@ import { clamp, computeHash, seededShuffle, seededIndex,
          PRESSURE_WEIGHTS, PHASE_WEIGHTS, REGIME_WEIGHTS,
          REGIME_MULTIPLIERS } from './mechanicsUtils';
 import type {
+
+export interface SplitResult {
+  /** Deterministic split execution summary */
+  sold_units: number;
+  kept_units: number;
+  /** Gross proceeds from the sold portion (before fees) */
+  proceeds_gross: number;
+  /** Total fees applied to the split operation */
+  fees_total: number;
+  /** Realized P&L for the sold portion */
+  realized_pnl: number;
+  /** Realized P&L percent for the sold portion */
+  realized_pnl_pct: number;
+  /** Remaining holding cost basis after the split */
+  remaining_cost_basis: number;
+}
   RunPhase, TickTier, MacroRegime, PressureTier, SolvencyStatus,
   Asset, IPAItem, GameCard, GameEvent, ShieldLayer, Debt, Buff,
   Liability, SetBonus, AssetMod, IncomeItem, MacroEvent, ChaosWindow,
@@ -96,11 +112,11 @@ export function precisionSplitExecutor(
     const splitAmount = (input.splitAmount as number) ?? 0;
     const sellPercentage = (input.sellPercentage as number) ?? 0;
     emit({ event: 'PRECISION_SPLIT_EXECUTED', mechanic_id: 'M112', tick: 0, runId: '', payload: { assetId, splitAmount } });
-    return {{
+    return {
     splitResult: {} as SplitResult,
     cashFromSplit: 0,
     remainingHolding: { componentId: 'M112', rendered: true },
-  }};
+  };
 }
 
 // ── ML companion hook ─────────────────────────────────────────────────────

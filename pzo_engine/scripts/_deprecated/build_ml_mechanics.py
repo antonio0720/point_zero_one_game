@@ -13,7 +13,7 @@ Writes:
   pzo-web/src/data/ml_core.json             ← mlLoader-compatible registry
   pzo_engine/src/ml/mXXa_*.ts              ← 150 standalone TypeScript ML stubs
   pzo_engine/src/ml/index.ts               ← Barrel export
-  pzo_engine/src/ml/MLMechanicsRouter.ts   ← Dispatch table
+  DEPRECATED_ROUTER_PATH   ← Dispatch table
 
 Run:
   python3 scripts/build_ml_mechanics.py [--dry-run] [--only M01a,M06a] [--force]
