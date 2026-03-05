@@ -20,6 +20,9 @@ export { getDb, closeDb, setDbPath, getDbPath, resetDbForTesting } from './db';
 // ── Schema ────────────────────────────────────────────────────────────────────
 export { applyMigrations, getSchemaVersion } from './schema';
 
+// ── ML store (models + observations + feedback) ───────────────────────────────
+export * from './ml-store';
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 export type {
   RunOutcome,
