@@ -40,6 +40,17 @@ ${KEYFRAMES}
   100% { background-position:  200% center; }
 }
 
+@keyframes replayPulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(155,125,255,0.60); }
+  50%       { opacity: 0.7; box-shadow: 0 0 0 5px rgba(155,125,255,0); }
+}
+
+@keyframes divergencePing {
+  0%   { box-shadow: 0 0 0 0 rgba(46,232,154,0.55); }
+  70%  { box-shadow: 0 0 0 6px rgba(46,232,154,0); }
+  100% { box-shadow: 0 0 0 0 rgba(46,232,154,0); }
+}
+
 .pgs-root {
   background: #06020E;
   min-height: 100dvh;
@@ -300,6 +311,56 @@ ${KEYFRAMES}
   background: rgba(201,168,76,0.06);
 }
 
+/* ── Divergence meter ── */
+.pgs-div-meter-track {
+  height: 10px;
+  border-radius: 5px;
+  background: rgba(255,255,255,0.06);
+  overflow: hidden;
+  position: relative;
+}
+
+.pgs-div-meter-player {
+  height: 100%;
+  border-radius: 5px;
+  transition: width 0.4s ease;
+  position: relative;
+  z-index: 2;
+}
+
+.pgs-div-meter-ghost {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  border-radius: 5px;
+  background: rgba(255,255,255,0.16);
+  z-index: 1;
+  transition: width 0.4s ease;
+}
+
+/* ── Ghost replay overlay ── */
+.pgs-replay-entry {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+}
+.pgs-replay-entry:last-child { border-bottom: none; }
+
+.pgs-replay-pulse {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  margin-top: 3px;
+}
+
+.pgs-replay-pulse--recent {
+  animation: replayPulse 1.4s ease-in-out infinite;
+}
+
 /* ── Proof card preview ── */
 .pgs-proof-card {
   border-radius: 10px;
@@ -476,6 +537,13 @@ export interface LegendMarker {
   tickPct: number; // 0–1
 }
 
+export interface GhostReplayEntry {
+  tick: number;
+  cardType: string;         // card type only — outcome hidden per game rules
+  zone: string;             // market zone at time of play
+  isRecent: boolean;        // true if within last 10 ticks
+}
+
 export interface GhostDelta {
   cordGap: number; // negative = behind, positive = ahead
   netWorthGap: number;
@@ -518,6 +586,9 @@ export interface PhantomGameScreenProps {
   // Ghost vision — last card type played by legend (not outcome)
   ghostVisionCardType?: string;
   ghostVisionTick?: number;
+
+  // Ghost replay feed — last N plays (newest first)
+  replayFeed?: GhostReplayEntry[];
 
   // Dynasty stack — challengers also in play
   dynastyChallengers?: Pick<LegendRecord, 'id' | 'displayName' | 'cordScore' | 'challengerRank'>[];
@@ -702,6 +773,124 @@ const LegendHeader = memo(function LegendHeader({
   );
 });
 
+const DivergenceMeter = memo(function DivergenceMeter({
+  components,
+  playerCord,
+  legendCord,
+}: {
+  components: CordComponentScore[];
+  playerCord: number;
+  legendCord: number;
+}) {
+  const player = clamp01(n0(playerCord, 0) / Math.max(0.01, n0(legendCord, 0.01)));
+  const ghost = 1.0; // legend is always the ceiling
+  const isAhead = player >= ghost;
+
+  const delta = n0(playerCord, 0) - n0(legendCord, 0);
+  const deltaColor = delta >= 0 ? C.green : Math.abs(delta) >= 0.2 ? C.red : C.orange;
+  const deltaArrow = delta > 0.02 ? '↑ GAINING' : delta < -0.02 ? '↓ WIDENING' : '→ NEUTRAL';
+  const arrowColor = delta > 0.02 ? C.green : delta < -0.02 ? C.red : C.textDim;
+
+  return (
+    <div className="pgs-panel pgs-panel--purple" aria-label="Divergence meter">
+      <div className="pgs-label">DIVERGENCE METER — CORD vs GHOST</div>
+
+      {/* Main dual-bar */}
+      <div style={{ marginBottom: 14 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6 }}>
+          <span style={{ fontFamily: C.mono, fontSize: FS.xs, color: C.textDim }}>YOUR CORD</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span style={{ fontFamily: C.mono, fontSize: FS.md, fontWeight: 700, color: deltaColor }}>
+              {fmtDelta(delta)}
+            </span>
+            <span style={{ fontFamily: C.mono, fontSize: FS.xs, fontWeight: 700, color: arrowColor }}>
+              {deltaArrow}
+            </span>
+          </div>
+        </div>
+
+        <div className="pgs-div-meter-track">
+          {/* Ghost bar (background, full-width = legend score) */}
+          <div
+            className="pgs-div-meter-ghost"
+            style={{ width: '100%' }}
+            aria-hidden="true"
+          />
+          {/* Player bar (foreground, proportional) */}
+          <div
+            className={`pgs-div-meter-player${isAhead ? ' pgs-div-meter-player--ahead' : ''}`}
+            style={{
+              width: `${clamp01(player) * 100}%`,
+              background: isAhead ? C.green : C.purple,
+            }}
+            aria-label={`Your CORD: ${fmtCord(playerCord)} of ${fmtCord(legendCord)}`}
+          />
+        </div>
+
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4 }}>
+          <span style={{ fontFamily: C.mono, fontSize: FS.xs, color: isAhead ? C.green : C.purple }}>
+            {fmtCord(playerCord)}
+          </span>
+          <span style={{ fontFamily: C.mono, fontSize: FS.xs, color: 'rgba(255,255,255,0.25)' }}>
+            Ghost: {fmtCord(legendCord)}
+          </span>
+        </div>
+      </div>
+
+      {/* Per-component breakdown */}
+      {components.map((comp) => {
+        const p = clamp01(comp.playerScore);
+        const g = clamp01(comp.ghostScore);
+        const ahead = p >= g;
+
+        return (
+          <div key={comp.label} style={{ marginBottom: 8 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
+              <span style={{ fontFamily: C.mono, fontSize: FS.xs, color: C.textSub }}>{comp.label}</span>
+              <span style={{ fontFamily: C.mono, fontSize: FS.xs, fontWeight: 700, color: ahead ? C.green : C.orange }}>
+                {(p * 100).toFixed(0)}{' '}
+                <span style={{ color: C.textDim }}>/ {(g * 100).toFixed(0)}</span>
+              </span>
+            </div>
+
+            <div className="pgs-div-meter-track" style={{ height: 6 }}>
+              {/* Ghost tick line */}
+              <div
+                style={{
+                  position: 'absolute',
+                  left: `${g * 100}%`,
+                  top: 0,
+                  bottom: 0,
+                  width: 1.5,
+                  background: 'rgba(155,125,255,0.45)',
+                  zIndex: 3,
+                }}
+                aria-hidden="true"
+              />
+              {/* Player fill */}
+              <div
+                style={{
+                  width: `${p * 100}%`,
+                  height: '100%',
+                  borderRadius: 5,
+                  background: ahead ? C.green : C.purple,
+                  transition: 'width 0.4s ease',
+                  position: 'relative',
+                  zIndex: 2,
+                }}
+              />
+            </div>
+          </div>
+        );
+      })}
+
+      <div style={{ fontFamily: C.mono, fontSize: FS.xs, color: C.textDim, marginTop: 6 }}>
+        Purple line = Ghost score per component
+      </div>
+    </div>
+  );
+});
+
 const GapIndicatorPanel = memo(function GapIndicatorPanel({ delta }: { delta: GhostDelta }) {
   const zoneCfg = GAP_ZONE_CONFIG[delta.gapZone] ?? GAP_ZONE_CONFIG.NEUTRAL;
   const panelClass = PANEL_CLASS_FOR_GAP[delta.gapZone] ?? 'pgs-panel pgs-panel--purple';
@@ -767,6 +956,38 @@ const GapIndicatorPanel = memo(function GapIndicatorPanel({ delta }: { delta: Gh
         <span style={{ fontFamily: C.mono, fontSize: FS.md, fontWeight: 700, color: windowColor }}>
           {closeableWindow > 0 ? `${closeableWindow}t` : 'CLOSED'}
         </span>
+      </div>
+
+      {/* Pressure intensity bar */}
+      <div style={{ marginTop: 12 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+          <span style={{ fontFamily: C.mono, fontSize: FS.xs, color: C.textDim, letterSpacing: '0.10em' }}>
+            PRESSURE INTENSITY
+          </span>
+          <span style={{ fontFamily: C.mono, fontSize: FS.xs, fontWeight: 700, color: C.textSub }}>
+            {clampPct(n0(delta.pressureIntensity, 0) * 100)}%
+          </span>
+        </div>
+        <div
+          style={{
+            height: 6,
+            borderRadius: 3,
+            background: 'rgba(255,255,255,0.06)',
+            overflow: 'hidden',
+            position: 'relative',
+          }}
+          aria-label={`Pressure ${clampPct(n0(delta.pressureIntensity, 0) * 100)}%`}
+        >
+          <div
+            style={{
+              height: '100%',
+              borderRadius: 3,
+              width: `${clampPct(n0(delta.pressureIntensity, 0) * 100)}%`,
+              background: `linear-gradient(90deg, ${C.purple} 0%, ${C.orange} 60%, ${C.crimson} 100%)`,
+              transition: 'width 0.4s ease',
+            }}
+          />
+        </div>
       </div>
     </div>
   );
@@ -935,50 +1156,70 @@ const LegendMarkerTimeline = memo(function LegendMarkerTimeline({
   );
 });
 
-const GhostVisionCard = memo(function GhostVisionCard({
-  cardType,
-  atTick,
+const GhostReplayOverlay = memo(function GhostReplayOverlay({
+  replayFeed,
   onExpand,
 }: {
-  cardType: string;
-  atTick: number;
+  replayFeed: GhostReplayEntry[];
   onExpand?: () => void;
 }) {
-  return (
-    <div
-      style={{
-        background: 'rgba(155,125,255,0.06)',
-        border: '1px solid rgba(155,125,255,0.22)',
-        borderRadius: 10,
-        padding: '12px 14px',
-        display: 'flex',
-        alignItems: 'center',
-        gap: 12,
-        flexWrap: 'wrap',
-      }}
-      aria-label="Ghost vision"
-    >
-      <span style={{ fontSize: FS.xl, flexShrink: 0 }} aria-hidden="true">
-        👁
-      </span>
+  const entries = Array.isArray(replayFeed) ? replayFeed.slice(0, 8) : [];
 
-      <div style={{ flex: 1 }}>
-        <div style={{ fontFamily: C.mono, fontSize: FS.xs, color: C.textDim, marginBottom: 3 }}>
-          GHOST VISION — t{Math.max(0, Math.floor(n0(atTick, 0)))}
-        </div>
-        <div style={{ fontFamily: C.mono, fontSize: FS.sm, fontWeight: 700, color: C.purple }}>
-          Legend played: <span style={{ color: C.textPrime }}>{cardType}</span>
-        </div>
-        <div style={{ fontFamily: C.mono, fontSize: FS.xs, color: C.textDim, marginTop: 2 }}>
-          Outcome hidden. Type is intelligence.
-        </div>
+  return (
+    <div className="pgs-panel pgs-panel--purple" aria-label="Ghost replay overlay">
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+        <div className="pgs-label" style={{ marginBottom: 0 }}>👁 GHOST REPLAY — LEGEND PLAYS</div>
+        {onExpand && (
+          <button
+            type="button"
+            className="pgs-btn"
+            style={{ minHeight: 32, padding: '0 10px', fontSize: FS.xs }}
+            onClick={onExpand}
+          >
+            EXPAND
+          </button>
+        )}
       </div>
 
-      {onExpand && (
-        <button type="button" className="pgs-btn" style={{ minHeight: 36, padding: '0 12px', fontSize: FS.xs }} onClick={onExpand}>
-          CONTEXT
-        </button>
+      {entries.length === 0 ? (
+        <div style={{ fontFamily: C.mono, fontSize: FS.xs, color: C.textDim, padding: '8px 0' }}>
+          No legend plays visible yet. Intelligence unlocks at t10.
+        </div>
+      ) : (
+        entries.map((entry, i) => (
+          <div key={`${entry.tick}-${i}`} className="pgs-replay-entry">
+            <div
+              className={`pgs-replay-pulse${entry.isRecent ? ' pgs-replay-pulse--recent' : ''}`}
+              style={{ background: entry.isRecent ? C.purple : C.textDim }}
+              aria-hidden="true"
+            />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'baseline' }}>
+                <span style={{ fontFamily: C.mono, fontSize: FS.xs, fontWeight: 700, color: C.purple }}>
+                  {entry.cardType}
+                </span>
+                <span style={{ fontFamily: C.mono, fontSize: FS.xs, color: C.textDim, flexShrink: 0 }}>
+                  t{Math.max(0, Math.floor(n0(entry.tick, 0)))}
+                </span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginTop: 2 }}>
+                <span style={{ fontFamily: C.mono, fontSize: FS.xs, color: C.textSub }}>
+                  Zone: {entry.zone}
+                </span>
+                {entry.isRecent && (
+                  <span style={{ fontFamily: C.mono, fontSize: '9px', color: C.purple, letterSpacing: '0.08em' }}>
+                    RECENT
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+        ))
       )}
+
+      <div style={{ marginTop: 8, fontFamily: C.mono, fontSize: FS.xs, color: C.textDim }}>
+        Outcome hidden. Card type is intelligence only.
+      </div>
     </div>
   );
 });
@@ -1132,6 +1373,7 @@ export const PhantomGameScreen = memo(function PhantomGameScreen(props: PhantomG
     cordComponents,
     ghostVisionCardType,
     ghostVisionTick,
+    replayFeed = [],
     dynastyChallengers = [],
     dynastyBeaten = [],
     playerCord,
@@ -1284,11 +1526,15 @@ export const PhantomGameScreen = memo(function PhantomGameScreen(props: PhantomG
           <div className="pgs-col-right">
             <GapIndicatorPanel delta={ghostDelta} />
 
+            <DivergenceMeter
+              components={cordComponents}
+              playerCord={playerCord}
+              legendCord={legend.cordScore}
+            />
+
             <CordComponentBreakdown components={cordComponents} playerCord={playerCord} legendCord={legend.cordScore} />
 
-            {ghostVisionCardType && ghostVisionTick != null && (
-              <GhostVisionCard cardType={ghostVisionCardType} atTick={ghostVisionTick} onExpand={handleGhostExpand} />
-            )}
+            <GhostReplayOverlay replayFeed={replayFeed} onExpand={onGhostVisionExpand} />
 
             {dynastyChallengers.length > 0 && <DynastyPanel challengers={dynastyChallengers} beaten={dynastyBeaten} playerCord={playerCord} />}
 

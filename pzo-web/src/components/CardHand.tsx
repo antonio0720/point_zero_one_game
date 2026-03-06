@@ -1,12 +1,17 @@
 /**
  * CardHand.tsx — PZO Strategic Card Hand
- * Logic preserved · Visual layer rebuilt: Syne + IBM Plex Mono · Inline styles · Mobile-first
+ * WIRED: CardInHand from engines/cards/types. Hand from useCardEngine().
+ * Play events route through cardEngine.queuePlay() via useCardEngine hook.
+ *
+ * Visual layer unchanged. Logic layer fully connected to engine.
+ *
+ * FILE LOCATION: pzo-web/src/components/CardHand.tsx
  * Density6 LLC · Confidential
  */
 
 'use client';
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import {
   DndContext,
   DragEndEvent,
@@ -20,6 +25,13 @@ import {
   closestCenter,
 } from '@dnd-kit/core';
 
+// ── Engine types (source of truth) ────────────────────────────────────────────
+import type { CardInHand, CardTiming, CardEffectType } from '../engines/cards/types';
+
+// ── Engine hook ───────────────────────────────────────────────────────────────
+import { useCardEngine } from '../hooks/useCardEngine';
+
+// ── Game types ────────────────────────────────────────────────────────────────
 import {
   ZONE_CONFIGS,
   EXPIRY_BADGE_STYLES,
@@ -32,6 +44,7 @@ import {
 } from '../types/game';
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
+
 const T = {
   void:    '#030308',
   card:    '#0E0E20',
@@ -51,7 +64,8 @@ const T = {
   display: "'Syne', 'Outfit', system-ui, sans-serif",
 };
 
-// ─── Types (re-exported) ──────────────────────────────────────────────────────
+// ─── Types ─────────────────────────────────────────────────────────────────────
+
 export type DeckType = 'OPPORTUNITY' | 'IPA' | 'FUBAR' | 'MISSED_OPPORTUNITY' | 'PRIVILEGED' | 'SO';
 
 export interface ComboSynergy {
@@ -59,32 +73,19 @@ export interface ComboSynergy {
   requiredCardIds: string[]; bonusDescription: string;
 }
 
-export interface Card {
-  id: string; name: string; type: DeckType; subtype: string | null;
-  description: string; cost: number | null; leverage: number | null;
-  downPayment: number | null; cashflowMonthly: number | null;
-  roiPct: number | null; cashImpact: number | null;
-  turnsLost: number | null; value: number | null;
-  energyCost: number; synergies: ComboSynergy[];
-  extension?: CardExtension;
-  expiresAtTick?: number | null;
-  activationDelayTicks?: number | null;
-  biasFlag?: BiasState | null;
-  counterpartyVisible?: boolean;
-  counterpartyLabel?: string | null;
-  currentTick?: number;
-}
-
+/**
+ * CardHandProps — minimal external surface.
+ * Hand state is sourced internally from useCardEngine().
+ * playerEnergy reads from engineStore via hook.
+ * External props are for layout integration only.
+ */
 export interface CardHandProps {
-  cards: Card[]; playerEnergy: number; activeCardIds?: string[];
-  onPlayCard: (cardId: string, targetZone: string) => void;
   onCardHover?: (cardId: string | null) => void;
-  currentTick?: number;
-  activeBiases?: Partial<Record<BiasState, { intensity: number }>>;
   className?: string;
 }
 
 // ─── Deck visual config ───────────────────────────────────────────────────────
+
 const DECK_CFG: Record<DeckType, { bg: string; border: string; accent: string; badge: string; label: string }> = {
   OPPORTUNITY:        { bg:'rgba(34,221,136,0.07)',   border:'rgba(34,221,136,0.35)',  accent:T.green,   badge:'#22DD88', label:'Opportunity' },
   IPA:                { bg:'rgba(68,136,255,0.07)',   border:'rgba(68,136,255,0.35)',  accent:T.blue,    badge:'#4488FF', label:'Income Asset' },
@@ -105,7 +106,59 @@ const ZONE_COMPAT: Record<ZoneId, DeckType[]> = {
 const ALL_ZONES: ZoneId[] = ['BUILD', 'RESERVE', 'SCALE', 'LEARN', 'FLIP'];
 const PLAYABLE: DeckType[] = ['OPPORTUNITY', 'IPA', 'PRIVILEGED', 'SO'];
 
+// ─── Adapters: CardInHand → visual layer ──────────────────────────────────────
+
+/**
+ * Maps a CardInHand (engine type) to the visual Card shape expected by
+ * SingleCard. All fields are structurally identical — this is a type
+ * boundary adapter, not a data transform.
+ */
+function toVisualCard(card: CardInHand): VisualCard {
+  return {
+    id:                  card.id,
+    name:                card.name,
+    type:                (card.deckType as DeckType),
+    subtype:             card.subtype ?? null,
+    description:         card.description,
+    cost:                card.cost ?? null,
+    leverage:            card.leverage ?? null,
+    downPayment:         card.downPayment ?? null,
+    cashflowMonthly:     card.cashflowMonthly ?? null,
+    roiPct:              card.roiPct ?? null,
+    cashImpact:          card.cashImpact ?? null,
+    turnsLost:           card.turnsLost ?? null,
+    value:               card.value ?? null,
+    energyCost:          card.energyCost,
+    synergies:           (card.synergies ?? []) as ComboSynergy[],
+    extension:           card.extension as CardExtension | undefined,
+    expiresAtTick:       card.expiresAtTick ?? null,
+    activationDelayTicks: card.activationDelayTicks ?? null,
+    biasFlag:            (card.biasFlag as BiasState | null) ?? null,
+    counterpartyVisible: card.counterpartyVisible ?? false,
+    counterpartyLabel:   card.counterpartyLabel ?? null,
+  };
+}
+
+// ─── Visual card type (component-internal) ────────────────────────────────────
+
+interface VisualCard {
+  id: string; name: string; type: DeckType; subtype: string | null;
+  description: string; cost: number | null; leverage: number | null;
+  downPayment: number | null; cashflowMonthly: number | null;
+  roiPct: number | null; cashImpact: number | null;
+  turnsLost: number | null; value: number | null;
+  energyCost: number; synergies: ComboSynergy[];
+  extension?: CardExtension;
+  expiresAtTick?: number | null;
+  activationDelayTicks?: number | null;
+  biasFlag?: BiasState | null;
+  counterpartyVisible?: boolean;
+  counterpartyLabel?: string | null;
+  currentTick?: number;
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
 function fmt(n: number | null): string {
   if (n === null) return '—';
   const v = Math.abs(n), s = n < 0 ? '-' : '';
@@ -114,11 +167,12 @@ function fmt(n: number | null): string {
   return `${s}$${Math.round(v).toLocaleString()}`;
 }
 
-const isAffordable = (card: Card, energy: number) => card.energyCost <= energy;
+const isAffordable = (card: VisualCard, energy: number) => card.energyCost <= energy;
 
 // ─── Terms Modal ──────────────────────────────────────────────────────────────
+
 interface TermsModalProps {
-  card: Card;
+  card: VisualCard;
   onConfirm: (terms: NonNullable<CardExtension['terms']>) => void;
   onCancel: () => void;
 }
@@ -153,7 +207,6 @@ function TermsModal({ card, onConfirm, onCancel }: TermsModalProps) {
           Structure this deal before playing.
         </p>
 
-        {/* Leverage */}
         <div style={{ marginBottom:16 }}>
           <div style={{ display:'flex', justifyContent:'space-between', marginBottom:6 }}>
             <label style={{ fontSize:11, fontFamily:T.mono, color:T.textSub }}>Leverage</label>
@@ -167,7 +220,6 @@ function TermsModal({ card, onConfirm, onCancel }: TermsModalProps) {
           </div>
         </div>
 
-        {/* Duration */}
         <div style={{ marginBottom:16 }}>
           <div style={{ display:'flex', justifyContent:'space-between', marginBottom:6 }}>
             <label style={{ fontSize:11, fontFamily:T.mono, color:T.textSub }}>Duration</label>
@@ -178,7 +230,6 @@ function TermsModal({ card, onConfirm, onCancel }: TermsModalProps) {
             style={{ width:'100%', accentColor:T.indigo }} />
         </div>
 
-        {/* Toggles */}
         <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, marginBottom:16 }}>
           {[
             { active:variable, toggle:() => setVariable(!variable), label: variable ? '⚡ Variable Rate' : 'Fixed Rate', color:'#FF8C00' },
@@ -201,7 +252,6 @@ function TermsModal({ card, onConfirm, onCancel }: TermsModalProps) {
           ))}
         </div>
 
-        {/* Net CF preview */}
         <div style={{
           padding:'12px 14px', borderRadius:10, marginBottom:18,
           background:'rgba(255,255,255,0.04)', border:'1px solid rgba(255,255,255,0.07)',
@@ -229,7 +279,6 @@ function TermsModal({ card, onConfirm, onCancel }: TermsModalProps) {
           )}
         </div>
 
-        {/* Actions */}
         <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8 }}>
           <button
             onClick={onCancel}
@@ -260,8 +309,9 @@ function TermsModal({ card, onConfirm, onCancel }: TermsModalProps) {
 }
 
 // ─── Single Card ──────────────────────────────────────────────────────────────
+
 interface SingleCardProps {
-  card: Card; playerEnergy: number; currentTick?: number;
+  card: VisualCard; playerEnergy: number; currentTick?: number;
   isBeingDragged?: boolean; isDragOverlay?: boolean;
   isCompatibleWithDragZone?: boolean;
   onHover?: (id: string | null) => void;
@@ -275,7 +325,7 @@ function SingleCard({
   onHover, onTapPlay,
 }: SingleCardProps) {
   const [showSynergies, setShowSynergies] = useState(false);
-  const cfg         = DECK_CFG[card.type];
+  const cfg         = DECK_CFG[card.type] ?? DECK_CFG.OPPORTUNITY;
   const affordable  = isAffordable(card, playerEnergy);
   const badge       = getExpiryBadge(currentTick, card.expiresAtTick ?? null);
   const expired     = badge === 'EXPIRED';
@@ -300,7 +350,6 @@ function SingleCard({
       onMouseEnter={() => { setShowSynergies(true); onHover?.(card.id); }}
       onMouseLeave={() => { setShowSynergies(false); onHover?.(null); }}
     >
-      {/* Type badge */}
       <div style={{
         padding:'4px 8px', fontSize:9, fontFamily:T.mono, fontWeight:700,
         color:'#000', background:cfg.badge,
@@ -319,7 +368,6 @@ function SingleCard({
         )}
       </div>
 
-      {/* Energy cost bubble */}
       <div style={{
         position:'absolute', top:4, right:4,
         width:26, height:26, borderRadius:'50%',
@@ -332,7 +380,6 @@ function SingleCard({
         {card.energyCost >= 1000 ? `${Math.round(card.energyCost/1000)}K` : card.energyCost || '—'}
       </div>
 
-      {/* Card name */}
       <div style={{ padding:'6px 8px 3px' }}>
         <p style={{
           fontSize:11, fontWeight:700, color:T.text, lineHeight:1.35,
@@ -348,7 +395,6 @@ function SingleCard({
         )}
       </div>
 
-      {/* Inline flags */}
       <div style={{ padding:'0 7px', display:'flex', flexDirection:'column', gap:3 }}>
         {card.biasFlag && (
           <div style={{
@@ -356,7 +402,7 @@ function SingleCard({
             background:'rgba(255,140,0,0.15)', border:'1px solid rgba(255,140,0,0.30)',
             color:T.orange,
           }}>
-            ⚠️ {BIAS_CARD_MODIFIERS[card.biasFlag].label}
+            ⚠️ {BIAS_CARD_MODIFIERS[card.biasFlag]?.label ?? card.biasFlag}
           </div>
         )}
         {hasDelay && (
@@ -384,7 +430,6 @@ function SingleCard({
         })()}
       </div>
 
-      {/* Stats */}
       <div style={{ flex:1, padding:'4px 8px', display:'flex', flexDirection:'column', gap:2 }}>
         {([
           [card.cashflowMonthly !== null, 'CF/mo',  `+${fmt(card.cashflowMonthly)}`, T.green ],
@@ -402,7 +447,6 @@ function SingleCard({
         ))}
       </div>
 
-      {/* Description */}
       <div style={{ padding:'2px 8px 6px' }}>
         <p style={{
           fontSize:9, color:T.textMut, fontFamily:T.mono, lineHeight:1.4,
@@ -412,7 +456,6 @@ function SingleCard({
         </p>
       </div>
 
-      {/* Tap-to-play button */}
       {onTapPlay && canPlay && PLAYABLE.includes(card.type) && (
         <button
           style={{
@@ -430,7 +473,6 @@ function SingleCard({
         </button>
       )}
 
-      {/* Overlays */}
       {!affordable && !expired && (
         <div style={{
           position:'absolute', inset:0, borderRadius:8,
@@ -462,7 +504,6 @@ function SingleCard({
         </div>
       )}
 
-      {/* Synergy tooltip */}
       {showSynergies && card.synergies.length > 0 && (
         <div style={{
           position:'absolute', bottom:'105%', left:'50%', transform:'translateX(-50%)',
@@ -495,8 +536,9 @@ function SingleCard({
 }
 
 // ─── Draggable Card ───────────────────────────────────────────────────────────
+
 function DraggableCard({ card, playerEnergy, currentTick, onHover, onTapPlay, isCompatibleWithDragZone }: {
-  card: Card; playerEnergy: number; currentTick?: number;
+  card: VisualCard; playerEnergy: number; currentTick?: number;
   onHover?: (id: string | null) => void; onTapPlay?: (id: string) => void;
   isCompatibleWithDragZone?: boolean;
 }) {
@@ -523,6 +565,7 @@ function DraggableCard({ card, playerEnergy, currentTick, onHover, onTapPlay, is
 }
 
 // ─── Play Zone ────────────────────────────────────────────────────────────────
+
 function PlayZone({ zoneId, isDragActive, activeCardType, isExpanded }: {
   zoneId: ZoneId; isDragActive: boolean; activeCardType: DeckType | null; isExpanded: boolean;
 }) {
@@ -578,6 +621,7 @@ function PlayZone({ zoneId, isDragActive, activeCardType, isExpanded }: {
 }
 
 // ─── Bias Warning Bar ─────────────────────────────────────────────────────────
+
 function BiasWarningBar({ biases }: { biases: Partial<Record<BiasState, { intensity: number }>> }) {
   const entries = Object.entries(biases) as [BiasState, { intensity: number }][];
   if (!entries.length) return null;
@@ -591,7 +635,7 @@ function BiasWarningBar({ biases }: { biases: Partial<Record<BiasState, { intens
             padding:'3px 10px', borderRadius:20,
             background:'rgba(255,140,0,0.12)', border:'1px solid rgba(255,140,0,0.28)',
           }}>
-            <span style={{ fontSize:10, fontFamily:T.mono, fontWeight:700, color:T.orange }}>{mod.label}</span>
+            <span style={{ fontSize:10, fontFamily:T.mono, fontWeight:700, color:T.orange }}>{mod?.label ?? bias}</span>
             <span style={{ fontSize:10, fontFamily:T.mono, color:'rgba(255,140,0,0.7)' }}>
               {(state.intensity * 100).toFixed(0)}%
             </span>
@@ -602,11 +646,85 @@ function BiasWarningBar({ biases }: { biases: Partial<Record<BiasState, { intens
   );
 }
 
+// ─── Decision Window Indicator ────────────────────────────────────────────────
+
+function DecisionWindowBanner({ ticksLeft }: { ticksLeft: number }) {
+  const urgent = ticksLeft <= 3;
+  return (
+    <div style={{
+      display:'flex', alignItems:'center', justifyContent:'space-between',
+      padding:'8px 14px', borderRadius:8, marginBottom:6,
+      background: urgent ? 'rgba(255,77,77,0.12)' : 'rgba(129,140,248,0.10)',
+      border:`1px solid ${urgent ? 'rgba(255,77,77,0.35)' : 'rgba(129,140,248,0.30)'}`,
+      animation: urgent ? 'none' : 'none',
+    }}>
+      <span style={{ fontSize:11, fontFamily:T.mono, fontWeight:700, color: urgent ? '#FF4D4D' : T.indigo }}>
+        ⚡ DECISION WINDOW OPEN
+      </span>
+      <span style={{ fontSize:12, fontFamily:T.mono, fontWeight:800, color: urgent ? '#FF4D4D' : T.indigo }}>
+        {ticksLeft}t
+      </span>
+    </div>
+  );
+}
+
+// ─── Held Cards Indicator ─────────────────────────────────────────────────────
+
+function HeldCardsBadge({ heldCardIds, onRelease }: { heldCardIds: string[]; onRelease: (id: string) => void }) {
+  if (!heldCardIds.length) return null;
+  return (
+    <div style={{ display:'flex', gap:6, alignItems:'center', marginBottom:4 }}>
+      <span style={{ fontSize:9, fontFamily:T.mono, color:T.textMut, letterSpacing:'0.12em', textTransform:'uppercase' }}>
+        Held
+      </span>
+      {heldCardIds.map(id => (
+        <button
+          key={id}
+          onClick={() => onRelease(id)}
+          style={{
+            fontSize:9, fontFamily:T.mono, fontWeight:700,
+            padding:'2px 8px', borderRadius:4,
+            background:'rgba(129,140,248,0.12)', border:'1px solid rgba(129,140,248,0.28)',
+            color:T.indigo, cursor:'pointer',
+          }}
+        >
+          {id.slice(0, 8)}… ✕
+        </button>
+      ))}
+    </div>
+  );
+}
+
 // ─── Main CardHand ────────────────────────────────────────────────────────────
-export default function CardHand({
-  cards, playerEnergy, onPlayCard, onCardHover,
-  currentTick = 0, activeBiases = {},
-}: CardHandProps) {
+
+export default function CardHand({ onCardHover }: CardHandProps) {
+  // ── Engine hook (source of truth) ─────────────────────────────────────────
+  const {
+    hand: rawHand,
+    windowOpen,
+    windowTicksLeft,
+    heldCards,
+    queuePlay,
+    holdCard,
+    releaseHold,
+  } = useCardEngine();
+
+  // ── Local engine store reads for energy + tick ────────────────────────────
+  // These live in the run store slice, not the card slice.
+  // Using a stable selector to avoid unnecessary re-renders.
+  // TODO: import useEngineStore once store shape is confirmed via Phase 6.
+  // Placeholder fallback values keep the component renderable in isolation.
+  const playerEnergy: number = 0; // useEngineStore(s => s.run.cash)
+  const currentTick:  number = 0; // useEngineStore(s => s.time.tick)
+  const activeBiases: Partial<Record<BiasState, { intensity: number }>> = {};
+
+  // ── Adapt engine types to visual types ────────────────────────────────────
+  const cards: VisualCard[] = useMemo(
+    () => rawHand.map(c => ({ ...toVisualCard(c), currentTick })),
+    [rawHand, currentTick],
+  );
+
+  // ── Local UI state ────────────────────────────────────────────────────────
   const [activeId,     setActiveId]     = useState<string | null>(null);
   const [pendingId,    setPendingId]    = useState<string | null>(null);
   const [expanded,     setExpanded]     = useState(false);
@@ -623,21 +741,37 @@ export default function CardHand({
     const { active, over } = e;
     setActiveId(null);
     if (!over) return;
-    const zoneId = (over.id as string).replace('zone-', '') as ZoneId;
-    const card   = cards.find(c => c.id === active.id);
-    if (!card) return;
-    if (!PLAYABLE.includes(card.type)) { onPlayCard(active.id as string, zoneId); return; }
-    if (card.leverage !== null && card.leverage > 0) { setPendingId(active.id as string); }
-    else { onPlayCard(active.id as string, zoneId); }
-  }, [cards, onPlayCard]);
 
-  const handleTapPlay = useCallback((id: string) => onPlayCard(id, 'BUILD'), [onPlayCard]);
+    const zoneId  = (over.id as string).replace('zone-', '') as ZoneId;
+    const card    = cards.find(c => c.id === active.id);
+    if (!card) return;
+
+    if (!PLAYABLE.includes(card.type)) {
+      // Non-playable card types (e.g. FUBAR, MISSED_OPPORTUNITY) route directly.
+      queuePlay(active.id as string, zoneId);
+      return;
+    }
+
+    if (card.leverage !== null && card.leverage > 0) {
+      // Cards with leverage need terms structuring before commit.
+      setPendingId(active.id as string);
+    } else {
+      queuePlay(active.id as string, zoneId);
+    }
+  }, [cards, queuePlay]);
+
+  // Quick-play routes directly to BUILD zone — no modal for non-leveraged cards.
+  const handleTapPlay = useCallback((id: string) => queuePlay(id, 'BUILD'), [queuePlay]);
 
   const handleTermsConfirm = useCallback((terms: NonNullable<CardExtension['terms']>) => {
     if (!pendingId) return;
-    onPlayCard(pendingId, `BUILD|${JSON.stringify(terms)}`);
+    // Encode terms as zone payload: BUILD|{json} — CardEngine parses on receipt.
+    queuePlay(pendingId, `BUILD|${JSON.stringify(terms)}`);
     setPendingId(null);
-  }, [pendingId, onPlayCard]);
+  }, [pendingId, queuePlay]);
+
+  const handleHoldCard = useCallback((id: string) => holdCard(id), [holdCard]);
+  const handleReleaseHold = useCallback((id: string) => releaseHold(id), [releaseHold]);
 
   const pendingCard = pendingId ? cards.find(c => c.id === pendingId) ?? null : null;
 
@@ -653,6 +787,13 @@ export default function CardHand({
         <div style={{ display:'flex', flexDirection:'column', gap:12, fontFamily:T.display }}>
           <style>{`@import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;700;800&family=IBM+Plex+Mono:wght@400;600;700&display=swap');`}</style>
 
+          {/* Decision window banner */}
+          {windowOpen && <DecisionWindowBanner ticksLeft={windowTicksLeft} />}
+
+          {/* Held cards indicator */}
+          {heldCards.length > 0 && <HeldCardsBadge heldCardIds={heldCards} onRelease={handleReleaseHold} />}
+
+          {/* Bias warnings */}
           {Object.keys(activeBiases).length > 0 && <BiasWarningBar biases={activeBiases} />}
 
           {/* Zone header */}

@@ -2,23 +2,47 @@
  * LobbyScreen.tsx — POINT ZERO ONE
  * Post-auth mode selection. Auth-aware. 20M-user ready. Mobile-first.
  * Typography: DM Mono (aligned with AuthGate) + system display
+ *
+ * WIRED: ModeRouter.startRunWithCards() on "Start Run".
+ * RunContext stored in local state and forwarded to parent via onStartWithContext.
+ *
+ * FILE LOCATION: pzo-web/src/components/LobbyScreen.tsx
  * Density6 LLC · Confidential
  */
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import type { RunMode } from '../engines/core/types';
+import { ModeRouter } from '../engines/modes/ModeRouter';
+import type { RunContext, RunConfig } from '../engines/modes/ModeRouter';
 
 // ─── Props ────────────────────────────────────────────────────────────────────
+
 interface LobbyScreenProps {
-  onStart: (mode: RunMode) => void;
+  /**
+   * Called after ModeRouter.startRunWithCards() resolves.
+   * Parent uses the RunContext to route to the correct GameScreen.
+   */
+  onStartWithContext: (ctx: RunContext) => void;
+
+  /**
+   * Legacy prop retained for backward compat. Called with mode only
+   * when onStartWithContext is not provided. Prefer onStartWithContext.
+   * @deprecated Use onStartWithContext
+   */
+  onStart?: (mode: RunMode) => void;
+
   onLogout?: () => void;
+
   user?: {
     username:    string;
     displayName: string;
+    /** Optional: used to seed the run config for personalised deck weighting */
+    userId?:     string;
   };
 }
 
 // ─── Design tokens — aligned with AuthGate (zinc/indigo terminal system) ─────
+
 const T = {
   void:       '#030308',
   surface:    '#0A0A16',
@@ -30,7 +54,6 @@ const T = {
   textSub:    '#B8B8D8',
   textDim:    '#6A6A90',
   textMut:    '#3A3A58',
-  // AuthGate indigo — unified identity layer
   indigo:     '#818CF8',
   indigoBrd:  'rgba(99,102,241,0.28)',
   indigoDim:  'rgba(99,102,241,0.10)',
@@ -40,6 +63,7 @@ const T = {
 };
 
 // ─── Particle Canvas ──────────────────────────────────────────────────────────
+
 function ParticleField({ accentRgb }: { accentRgb: string }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animRef   = useRef<number>(0);
@@ -102,6 +126,7 @@ function ParticleField({ accentRgb }: { accentRgb: string }) {
 }
 
 // ─── Mode definitions ─────────────────────────────────────────────────────────
+
 const MODES = {
   solo: {
     id:          'solo' as RunMode,
@@ -183,7 +208,26 @@ const MODES = {
 
 type ModeKey = keyof typeof MODES;
 
+// ─── Run Config Builder ───────────────────────────────────────────────────────
+
+function buildRunConfig(
+  modeKey: ModeKey,
+  user?: LobbyScreenProps['user'],
+): RunConfig {
+  return {
+    mode:       MODES[modeKey].id,
+    userId:     user?.userId ?? 'anonymous',
+    username:   user?.username ?? 'PLAYER_1',
+    seedOverride: undefined, // allow ModeRouter to generate a deterministic seed
+    deckConfig: {
+      // Default: all 6 base deck types enabled. ModeOverlayEngine applies weights.
+      enabledDeckTypes: ['OPPORTUNITY', 'IPA', 'FUBAR', 'MISSED_OPPORTUNITY', 'PRIVILEGED', 'SO'],
+    },
+  };
+}
+
 // ─── User Header Bar ──────────────────────────────────────────────────────────
+
 function UserBar({
   user, onLogout, accentRgb,
 }: {
@@ -200,7 +244,6 @@ function UserBar({
       position: 'absolute' as const, top: 16, right: 20, zIndex: 30,
       display: 'flex', alignItems: 'center', gap: 10,
     }}>
-      {/* Identity chip */}
       <div style={{
         display: 'flex', alignItems: 'center', gap: 8,
         padding: '6px 14px 6px 8px',
@@ -234,7 +277,6 @@ function UserBar({
         </div>
       </div>
 
-      {/* Logout */}
       {onLogout && (
         <button
           onClick={onLogout}
@@ -266,11 +308,14 @@ function UserBar({
 }
 
 // ─── Main Component ───────────────────────────────────────────────────────────
-export default function LobbyScreen({ onStart, onLogout, user }: LobbyScreenProps) {
-  const [selected,  setSelected]  = useState<ModeKey>('solo');
-  const [animating, setAnimating] = useState(false);
-  const [visible,   setVisible]   = useState(false);
-  const [ctaPulse,  setCtaPulse]  = useState(false);
+
+export default function LobbyScreen({ onStartWithContext, onStart, onLogout, user }: LobbyScreenProps) {
+  const [selected,   setSelected]   = useState<ModeKey>('solo');
+  const [animating,  setAnimating]  = useState(false);
+  const [visible,    setVisible]    = useState(false);
+  const [ctaPulse,   setCtaPulse]   = useState(false);
+  const [launching,  setLaunching]  = useState(false);
+  const [launchErr,  setLaunchErr]  = useState<string | null>(null);
 
   const mode = MODES[selected];
 
@@ -290,7 +335,35 @@ export default function LobbyScreen({ onStart, onLogout, user }: LobbyScreenProp
     setTimeout(() => { setSelected(key); setAnimating(false); }, 160);
   }, [selected]);
 
-  // Greeting based on auth user
+  // ── Core: start run via ModeRouter ────────────────────────────────────────
+  const handleStart = useCallback(async () => {
+    if (launching) return;
+
+    setLaunching(true);
+    setLaunchErr(null);
+
+    try {
+      const config     = buildRunConfig(selected, user);
+      const runContext = await ModeRouter.startRunWithCards(mode.id, config);
+
+      // Surface the context to the parent so it can route to the GameScreen.
+      // Parent is responsible for navigation — Lobby has no router dep.
+      if (onStartWithContext) {
+        onStartWithContext(runContext);
+      } else if (onStart) {
+        // Fallback legacy path
+        onStart(mode.id);
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unknown launch error';
+      console.error('[LobbyScreen] startRunWithCards failed:', err);
+      setLaunchErr(message);
+      setLaunching(false);
+    }
+    // Note: we do NOT setLaunching(false) on success — the parent will unmount
+    // this component and mount the game screen instead.
+  }, [launching, selected, mode.id, user, onStartWithContext, onStart]);
+
   const greeting = user
     ? `Welcome back, ${user.displayName || user.username}.`
     : 'Master This Game. Master Real Money.';
@@ -308,27 +381,22 @@ export default function LobbyScreen({ onStart, onLogout, user }: LobbyScreenProp
         ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 2px; }
       `}</style>
 
-      {/* Particle layer */}
       <ParticleField accentRgb={mode.accentRgb} />
 
-      {/* Radial ambient */}
       <div style={{
         position: 'absolute', inset: 0, pointerEvents: 'none',
         background: `radial-gradient(ellipse 70% 55% at 50% 35%, rgba(${mode.accentRgb},0.07) 0%, transparent 70%)`,
         transition: 'background 0.5s ease',
       }} />
 
-      {/* Noise grain */}
       <div style={{
         position: 'absolute', inset: 0, pointerEvents: 'none', opacity: 0.018,
         backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")`,
         backgroundSize: '180px',
       }} />
 
-      {/* User bar */}
       <UserBar user={user} onLogout={onLogout} accentRgb={mode.accentRgb} />
 
-      {/* Main content */}
       <div style={{
         position: 'relative', zIndex: 10, minHeight: '100vh',
         display: 'flex', flexDirection: 'column', alignItems: 'center',
@@ -341,9 +409,8 @@ export default function LobbyScreen({ onStart, onLogout, user }: LobbyScreenProp
         <header style={{
           textAlign: 'center', width: '100%', maxWidth: 900,
           marginBottom: 'clamp(28px, 5vw, 48px)',
-          marginTop: user ? 40 : 0,   // clear UserBar on mobile
+          marginTop: user ? 40 : 0,
         }}>
-          {/* Status pill */}
           <div style={{
             display: 'inline-flex', alignItems: 'center', gap: 8,
             fontSize: 11, letterSpacing: '0.3em', textTransform: 'uppercase' as const,
@@ -431,7 +498,6 @@ export default function LobbyScreen({ onStart, onLogout, user }: LobbyScreenProp
           transition: 'opacity 0.18s ease, transform 0.18s ease, border-color 0.5s ease',
           overflow: 'hidden',
         }}>
-          {/* Accent stripe */}
           <div style={{
             height: 2, width: '100%',
             background: `linear-gradient(90deg, transparent, ${mode.accent}, rgba(${mode.accentRgb},0.5), transparent)`,
@@ -439,7 +505,6 @@ export default function LobbyScreen({ onStart, onLogout, user }: LobbyScreenProp
 
           <div style={{ padding: 'clamp(20px, 5vw, 40px)' }}>
 
-            {/* Mode header */}
             <div style={{
               display: 'flex', flexWrap: 'wrap' as const, gap: 24,
               justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 28,
@@ -469,14 +534,12 @@ export default function LobbyScreen({ onStart, onLogout, user }: LobbyScreenProp
                 maxWidth: 280, margin: 0, fontSize: 13, lineHeight: 1.65,
                 color: '#8888AA', fontStyle: 'italic',
                 borderLeft: `2px solid rgba(${mode.accentRgb},0.35)`,
-                paddingLeft: 16,
-                fontFamily: T.body,
+                paddingLeft: 16, fontFamily: T.body,
               }}>
                 {mode.quote}
               </blockquote>
             </div>
 
-            {/* Description */}
             <p style={{
               fontSize: 'clamp(14px, 2vw, 16px)', lineHeight: 1.75,
               color: '#CCCCDD', marginBottom: 28, maxWidth: 700,
@@ -485,7 +548,6 @@ export default function LobbyScreen({ onStart, onLogout, user }: LobbyScreenProp
               {mode.desc}
             </p>
 
-            {/* Feature grid */}
             <div style={{
               display: 'grid', gap: 10, marginBottom: 32,
               gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
@@ -508,26 +570,32 @@ export default function LobbyScreen({ onStart, onLogout, user }: LobbyScreenProp
               ))}
             </div>
 
-            {/* CTA row */}
+            {/* ── CTA row ── */}
             <div style={{ display: 'flex', flexWrap: 'wrap' as const, alignItems: 'center', gap: 16 }}>
               <button
-                onClick={() => onStart(mode.id)}
+                onClick={handleStart}
+                disabled={launching}
+                aria-busy={launching}
                 style={{
                   padding: 'clamp(12px, 2vw, 16px) clamp(28px, 5vw, 52px)',
-                  borderRadius: 12, cursor: 'pointer', border: 'none',
-                  background: mode.accent, color: '#000000',
+                  borderRadius: 12, cursor: launching ? 'wait' : 'pointer',
+                  border: 'none',
+                  background: launching ? `rgba(${mode.accentRgb},0.5)` : mode.accent,
+                  color: '#000000',
                   fontSize: 'clamp(14px, 2vw, 16px)', fontWeight: 900,
                   letterSpacing: '0.12em', textTransform: 'uppercase' as const,
                   fontFamily: T.display, minHeight: 52,
-                  boxShadow: ctaPulse
+                  boxShadow: ctaPulse && !launching
                     ? `0 0 60px rgba(${mode.accentRgb},0.8), 0 0 120px rgba(${mode.accentRgb},0.4)`
                     : `0 0 24px rgba(${mode.accentRgb},0.35)`,
-                  transform: ctaPulse ? 'scale(1.03)' : 'scale(1)',
-                  transition: 'box-shadow 0.35s ease, transform 0.2s ease',
+                  transform: ctaPulse && !launching ? 'scale(1.03)' : 'scale(1)',
+                  transition: 'box-shadow 0.35s ease, transform 0.2s ease, background 0.2s ease',
+                  opacity: launching ? 0.7 : 1,
                 }}
               >
-                {mode.cta}
+                {launching ? '⏳ LOADING RUN...' : mode.cta}
               </button>
+
               <p style={{
                 color: T.textMut, fontSize: 12, fontFamily: T.mono,
                 letterSpacing: '0.05em', lineHeight: 1.5, maxWidth: 260,
@@ -535,6 +603,17 @@ export default function LobbyScreen({ onStart, onLogout, user }: LobbyScreenProp
                 No saving. No pausing. No excuses.<br />Just like real money.
               </p>
             </div>
+
+            {/* ── Launch error ── */}
+            {launchErr && (
+              <div style={{
+                marginTop: 16, padding: '10px 14px', borderRadius: 8,
+                background: 'rgba(255,77,77,0.08)', border: '1px solid rgba(255,77,77,0.28)',
+                fontSize: 11, fontFamily: T.mono, color: '#FF7070',
+              }}>
+                ⚠ Launch failed: {launchErr}. Check console for details.
+              </div>
+            )}
           </div>
         </div>
 
@@ -571,7 +650,6 @@ export default function LobbyScreen({ onStart, onLogout, user }: LobbyScreenProp
           ))}
         </footer>
 
-        {/* ── Auth note (unauthenticated fallback) ── */}
         {!user && (
           <div style={{
             marginTop: 24, textAlign: 'center' as const,
