@@ -116,6 +116,16 @@ import {
   type CardEngineStoreSlice,
   defaultCardSlice,
 } from './engineStore.card-slice';
+import {
+  type MechanicsRuntimeStoreSlice,
+  defaultMechanicsSlice,
+  wireMechanicsRuntimeHandlers,
+} from './engineStore.mechanics-slice';
+import {
+  runStore,
+  selectEngineStoreMirrorSnapshot,
+  type EngineStoreMirrorSnapshot,
+} from './runStore';
 
 // ── EventBus ──────────────────────────────────────────────────────────────────
 import type { EventBus } from '../engines/zero/EventBus';
@@ -259,6 +269,10 @@ export interface SovereigntyEngineStoreSlice {
   };
 }
 
+export interface RunMirrorStoreSlice {
+  runtime: EngineStoreMirrorSnapshot;
+}
+
 // =============================================================================
 // SECTION 2 — ROOT STORE SHAPE (includes card slice)
 // =============================================================================
@@ -272,10 +286,14 @@ export type EngineStoreState =
   & BattleEngineStoreSlice
   & CascadeEngineStoreSlice
   & SovereigntyEngineStoreSlice
+  & RunMirrorStoreSlice
   & { card: CardEngineStoreSlice }
+  & { mechanics: MechanicsRuntimeStoreSlice }
   & {
     // ── Card action dispatchers exposed on the store ──────────────────────────
     card_resetSlice: () => void;
+    resetAllSlices:  () => void;
+    syncRunMirror:   (snapshot: EngineStoreMirrorSnapshot) => void;
   };
 
 /** Typed immer setter — shared by ALL store handler functions. */
@@ -397,6 +415,23 @@ export const defaultCascadeSlice: CascadeEngineStoreSlice = {
   },
 };
 
+export const defaultRuntimeSlice: RunMirrorStoreSlice = {
+  runtime: {
+    isInitialized:         false,
+    netWorth:              0,
+    cashBalance:           0,
+    monthlyIncome:         0,
+    monthlyExpenses:       0,
+    cashflow:              0,
+    haterHeat:             0,
+    activeThreatCardCount: 0,
+    runId:                 null,
+    userId:                null,
+    seed:                  null,
+    lastUpdated:           null,
+  },
+};
+
 export const defaultSovereigntySlice: SovereigntyEngineStoreSlice = {
   sovereignty: {
     proofHash:         null,
@@ -412,6 +447,99 @@ export const defaultSovereigntySlice: SovereigntyEngineStoreSlice = {
   },
 };
 
+function resetAllSlicesDraft(state: EngineStoreState): void {
+  Object.assign(state.run,         defaultRunSlice.run);
+  Object.assign(state.time,        defaultTimeSlice.time);
+  Object.assign(state.pressure,    defaultPressureSlice.pressure);
+  Object.assign(state.tension,     defaultTensionSlice.tension);
+  Object.assign(state.shield,      defaultShieldSlice.shield);
+  Object.assign(state.battle,      defaultBattleSlice.battle);
+  Object.assign(state.cascade,     defaultCascadeSlice.cascade);
+  Object.assign(state.sovereignty, defaultSovereigntySlice.sovereignty);
+  state.runtime   = { ...defaultRuntimeSlice.runtime };
+  state.card      = defaultCardSlice();
+  state.mechanics = defaultMechanicsSlice();
+}
+
+function applyRunMirrorDraft(
+  state: EngineStoreState,
+  snapshot: EngineStoreMirrorSnapshot,
+): void {
+  state.runtime = { ...snapshot };
+}
+
+function applyRunStartedAtomic(
+  state: EngineStoreState,
+  payload: { runId: string; userId: string; seed: string; tickBudget: number },
+): void {
+  Object.assign(state.run, {
+    ...defaultRunSlice.run,
+    lifecycleState: 'ACTIVE' as RunLifecycleState,
+    runId:          payload.runId,
+    userId:         payload.userId,
+    seed:           payload.seed,
+    tickBudget:     payload.tickBudget,
+    outcome:        null,
+  });
+
+  Object.assign(state.time, {
+    ...defaultTimeSlice.time,
+    seasonTickBudget: payload.tickBudget,
+    ticksRemaining:   payload.tickBudget,
+  });
+
+  Object.assign(state.pressure,    { ...defaultPressureSlice.pressure });
+  Object.assign(state.tension,     { ...defaultTensionSlice.tension, isRunActive: true });
+  Object.assign(state.shield,      { ...defaultShieldSlice.shield, isRunActive: true });
+  Object.assign(state.battle,      { ...defaultBattleSlice.battle, isRunActive: true });
+  Object.assign(state.cascade,     { ...defaultCascadeSlice.cascade, isRunActive: true });
+  Object.assign(state.sovereignty, { ...defaultSovereigntySlice.sovereignty, isRunActive: true });
+
+  state.card      = defaultCardSlice();
+  state.mechanics = defaultMechanicsSlice();
+  state.runtime   = {
+    ...state.runtime,
+    isInitialized: true,
+    runId:         payload.runId,
+    userId:        payload.userId,
+    seed:          payload.seed,
+    lastUpdated:   Date.now(),
+  };
+}
+
+function applyRunEndedAtomic(
+  state: EngineStoreState,
+  payload: { runId: string; outcome: RunOutcome; finalNetWorth: number },
+): void {
+  state.run.lifecycleState = 'ENDED';
+  state.run.outcome        = payload.outcome;
+  state.time.activeDecisionWindows = [];
+  state.pressure.isCritical = false;
+  state.tension.isRunActive = false;
+  state.shield.isRunActive  = false;
+  state.battle.isRunActive  = false;
+  state.cascade.isRunActive = false;
+  state.sovereignty.isRunActive = false;
+  state.runtime.netWorth    = payload.finalNetWorth;
+  state.runtime.lastUpdated = Date.now();
+}
+
+function applyTickCompleteAtomic(
+  state: EngineStoreState,
+  payload: { tickIndex: number; tickDurationMs: number; outcome: RunOutcome | null },
+): void {
+  state.run.lastTickIndex      = payload.tickIndex;
+  state.run.lastTickDurationMs = payload.tickDurationMs;
+  if (payload.outcome) state.run.outcome = payload.outcome;
+
+  if (state.pressure.score < 0.81) state.pressure.isCritical = false;
+
+  if (!state.tension.isPulseActive) {
+    state.tension.pulseTicksActive = 0;
+    state.tension.isSustainedPulse = false;
+  }
+}
+
 // =============================================================================
 // SECTION 4 — ZUSTAND STORE (card slice merged in)
 // =============================================================================
@@ -426,15 +554,27 @@ export const useEngineStore = create<EngineStoreState>()(
       ...defaultShieldSlice,
       ...defaultBattleSlice,
       ...defaultCascadeSlice,
+      ...defaultRuntimeSlice,
       ...defaultSovereigntySlice,
 
-      // ── Card slice ─────────────────────────────────────────────────────────
-      card: defaultCardSlice(),
+      // ── Card + mechanics slices ───────────────────────────────────────────
+      card:      defaultCardSlice(),
+      mechanics: defaultMechanicsSlice(),
 
-      // ── Card action dispatchers ────────────────────────────────────────────
+      // ── Store actions ──────────────────────────────────────────────────────
       card_resetSlice: () =>
         set((state) => {
           state.card = defaultCardSlice();
+        }),
+
+      resetAllSlices: () =>
+        set((state) => {
+          resetAllSlicesDraft(state);
+        }),
+
+      syncRunMirror: (snapshot) =>
+        set((state) => {
+          applyRunMirrorDraft(state, snapshot);
         }),
     })
   )
@@ -998,36 +1138,27 @@ export function wireAllEngineHandlers(eventBus: EventBus, set: ZustandSet): void
   wireBattleEngineHandlers(eventBus, s);
   wireCascadeEngineHandlers(eventBus, s);
   wireSovereigntyEngineHandlers(eventBus, s);
+  wireMechanicsRuntimeHandlers(eventBus, s as any);
 
   // ── Engine 0: Run Lifecycle — wired LAST so all slices reset atomically ──────
   eventBus.on('RUN_STARTED', (e: any) => {
     const p = e.payload;
-    runLifecycleStoreHandlers.onRunStarted(s, p);  // also resets card slice
-    timeStoreHandlers.onRunStarted(s, p.tickBudget);
-    pressureStoreHandlers.onRunStarted(s);
-    tensionStoreHandlers.onRunStarted(s);
-    shieldStoreHandlers.onRunStarted(s);
-    battleStoreHandlers.onRunStarted(s);
-    cascadeStoreHandlers.onRunStarted(s);
-    sovereigntyStoreHandlers.onRunStarted(s);
+    s((state) => {
+      applyRunStartedAtomic(state, p);
+    });
   });
 
   eventBus.on('RUN_ENDED', (e: any) => {
     const p = e.payload;
-    runLifecycleStoreHandlers.onRunEnded(s, p);
-    timeStoreHandlers.onRunEnded(s);
-    pressureStoreHandlers.onRunEnded(s);
-    tensionStoreHandlers.onRunEnded(s);
-    shieldStoreHandlers.onRunEnded(s);
-    battleStoreHandlers.onRunEnded(s);
-    cascadeStoreHandlers.onRunEnded(s);
-    sovereigntyStoreHandlers.onRunEnded(s);
+    s((state) => {
+      applyRunEndedAtomic(state, p);
+    });
   });
 
   eventBus.on('TICK_COMPLETE', (e: any) => {
-    runLifecycleStoreHandlers.onTickComplete(s, e.payload);
-    pressureStoreHandlers.onTickComplete(s);
-    tensionStoreHandlers.onTickComplete(s);
+    s((state) => {
+      applyTickCompleteAtomic(state, e.payload);
+    });
   });
 
   // ENGINE_ERROR is IMMEDIATE — bypasses flush queue
@@ -1037,3 +1168,21 @@ export function wireAllEngineHandlers(eventBus: EventBus, set: ZustandSet): void
 // Canonical alias — prevents the historical typo where wireTimeEngineHandlers
 // was accidentally called with (s, s) instead of (eventBus, s).
 export { wireTimeEngineHandlers as wireTimeEngine };
+
+export function wireRunStoreMirror(): () => void {
+  const applyMirror = (snapshot: EngineStoreMirrorSnapshot): void => {
+    useEngineStore.getState().syncRunMirror(snapshot);
+  };
+
+  applyMirror(selectEngineStoreMirrorSnapshot(runStore.getState()));
+
+  const unsub = (runStore as any).subscribe(
+    selectEngineStoreMirrorSnapshot,
+    (snapshot: EngineStoreMirrorSnapshot) => {
+      applyMirror(snapshot);
+    },
+    { fireImmediately: false },
+  );
+
+  return typeof unsub === 'function' ? unsub : () => undefined;
+}

@@ -63,6 +63,26 @@ export interface RunStoreState {
   lastUpdated: number | null;
 }
 
+export interface CardReaderRuntimeSnapshot {
+  activeThreatCardCount: number;
+  haterHeat?: number;
+}
+
+export interface EngineStoreMirrorSnapshot {
+  isInitialized:        boolean;
+  netWorth:             number;
+  cashBalance:          number;
+  monthlyIncome:        number;
+  monthlyExpenses:      number;
+  cashflow:             number;
+  haterHeat:            number;
+  activeThreatCardCount:number;
+  runId:                string | null;
+  userId:               string | null;
+  seed:                 string | null;
+  lastUpdated:          number | null;
+}
+
 // =============================================================================
 // SECTION 2 — ACTIONS
 // =============================================================================
@@ -92,6 +112,11 @@ export interface RunStoreActions {
   setActiveThreatCount:   (v: number) => void;
   incrementThreatCount:   () => void;
   decrementThreatCount:   () => void;
+
+  // ── Integration writers — atomic bridge paths from CardEngine / Orchestrator ──
+  applyCombatRuntime:        (update: Partial<Pick<RunStoreState, 'haterHeat' | 'activeThreatCardCount'>>) => void;
+  writeCardReaderSnapshot:   (snapshot: CardReaderRuntimeSnapshot) => void;
+  writeOrchestratorSnapshot: (snapshot: Partial<EngineStoreMirrorSnapshot>) => void;
 }
 
 export type RunStoreSlice = RunStoreState & RunStoreActions;
@@ -199,6 +224,40 @@ export const runStore = create<RunStoreSlice>()(
           state.activeThreatCardCount = Math.max(0, state.activeThreatCardCount - 1);
           state.lastUpdated           = Date.now();
         }),
+
+        applyCombatRuntime: (update) => set((state) => {
+          if (update.haterHeat !== undefined) {
+            state.haterHeat = Math.max(0, Math.min(1, update.haterHeat));
+          }
+          if (update.activeThreatCardCount !== undefined) {
+            state.activeThreatCardCount = Math.max(0, update.activeThreatCardCount);
+          }
+          state.lastUpdated = Date.now();
+        }),
+
+        writeCardReaderSnapshot: (snapshot) => set((state) => {
+          state.activeThreatCardCount = Math.max(0, snapshot.activeThreatCardCount);
+          if (snapshot.haterHeat !== undefined) {
+            state.haterHeat = Math.max(0, Math.min(1, snapshot.haterHeat));
+          }
+          state.lastUpdated = Date.now();
+        }),
+
+        writeOrchestratorSnapshot: (snapshot) => set((state) => {
+          if (snapshot.isInitialized        !== undefined) state.isInitialized        = snapshot.isInitialized;
+          if (snapshot.netWorth             !== undefined) state.netWorth             = snapshot.netWorth;
+          if (snapshot.cashBalance          !== undefined) state.cashBalance          = snapshot.cashBalance;
+          if (snapshot.monthlyIncome        !== undefined) state.monthlyIncome        = snapshot.monthlyIncome;
+          if (snapshot.monthlyExpenses      !== undefined) state.monthlyExpenses      = snapshot.monthlyExpenses;
+          if (snapshot.haterHeat            !== undefined) state.haterHeat            = Math.max(0, Math.min(1, snapshot.haterHeat));
+          if (snapshot.activeThreatCardCount!== undefined) state.activeThreatCardCount = Math.max(0, snapshot.activeThreatCardCount);
+          if (snapshot.runId                !== undefined) state.runId                = snapshot.runId;
+          if (snapshot.userId               !== undefined) state.userId               = snapshot.userId;
+          if (snapshot.seed                 !== undefined) state.seed                 = snapshot.seed;
+          if (snapshot.lastUpdated          !== undefined) state.lastUpdated          = snapshot.lastUpdated;
+          state.cashflow = state.monthlyIncome - state.monthlyExpenses;
+          if (snapshot.lastUpdated === undefined) state.lastUpdated = Date.now();
+        }),
       }))
     ),
     { name: 'runStore' }
@@ -242,6 +301,41 @@ export const selectOrchestratorSnapshot = (s: RunStoreSlice) => ({
   haterHeat:            s.haterHeat,
   activeThreatCardCount: s.activeThreatCardCount,
 });
+
+export const selectEngineStoreMirrorSnapshot = (s: RunStoreSlice): EngineStoreMirrorSnapshot => ({
+  isInitialized:         s.isInitialized,
+  netWorth:              s.netWorth,
+  cashBalance:           s.cashBalance,
+  monthlyIncome:         s.monthlyIncome,
+  monthlyExpenses:       s.monthlyExpenses,
+  cashflow:              s.cashflow,
+  haterHeat:             s.haterHeat,
+  activeThreatCardCount: s.activeThreatCardCount,
+  runId:                 s.runId,
+  userId:                s.userId,
+  seed:                  s.seed,
+  lastUpdated:           s.lastUpdated,
+});
+
+export function readEngineStoreMirrorSnapshot(): EngineStoreMirrorSnapshot {
+  return selectEngineStoreMirrorSnapshot(runStore.getState());
+}
+
+export function writeRunStoreFromCardReader(
+  reader: { getActiveThreatCardCount(): number },
+  opts?: { haterHeat?: number },
+): void {
+  runStore.getState().writeCardReaderSnapshot({
+    activeThreatCardCount: reader.getActiveThreatCardCount(),
+    haterHeat:             opts?.haterHeat,
+  });
+}
+
+export function writeRunStoreFromOrchestratorSnapshot(
+  snapshot: Partial<EngineStoreMirrorSnapshot>,
+): void {
+  runStore.getState().writeOrchestratorSnapshot(snapshot);
+}
 
 // =============================================================================
 // SECTION 7 — TELEMETRY SYSTEM
