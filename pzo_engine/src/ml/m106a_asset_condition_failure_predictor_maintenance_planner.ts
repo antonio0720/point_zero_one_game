@@ -83,7 +83,7 @@ export interface M106AOutput extends M106ABaseOutput {
 }
 
 // ── Model tiers ───────────────────────────────────────────────────────────────
-export type M106ATier = 'baseline' | 'sequence_dl' | 'causal';
+export type M106ATier = 'baseline' | 'sequence_dl' | 'causal' | 'policy_rl';
 
 /** M106A — Tier: BASELINE
  *  GBM + calibrated logistic (fast, low-cost, production default)
@@ -224,7 +224,6 @@ interface M106AFeatureVector {
   exitWindowQuality: number;
   negativeOutcomeRate: number;
   macroPressure: number;
-  negativeOutcomeRate: number;
   lagLikelihood: number;
   sequenceStress: number;
   historyScoreEma: number;
@@ -439,10 +438,11 @@ function buildM106AFeatures(input: M106ASanitizedInput, session: M106ASessionPro
     solvencyMargin,
     cashVelocity,
     assetConcentration,
-    macroRegimePressure,
-    exitWindowQuality,
-    negativeOutcomeRate,
+    macroRegimePressure: typeof input.macroRegime === 'string'
+      ? (input.macroRegime === 'CRISIS' ? 1 : input.macroRegime === 'BEAR' ? 0.7 : input.macroRegime === 'BULL' ? 0.2 : 0.4)
+      : 0.4,
     macroPressure,
+    exitWindowQuality,
     negativeOutcomeRate,
     lagLikelihood,
     sequenceStress,

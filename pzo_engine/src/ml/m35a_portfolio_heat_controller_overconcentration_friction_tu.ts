@@ -232,7 +232,6 @@ interface M35AFeatureVector {
   exitWindowQuality: number;
   negativeOutcomeRate: number;
   macroPressure: number;
-  negativeOutcomeRate: number;
   lagLikelihood: number;
   sequenceStress: number;
   historyScoreEma: number;
@@ -447,10 +446,9 @@ function buildM35AFeatures(input: M35ASanitizedInput, session: M35ASessionProfil
     solvencyMargin,
     cashVelocity,
     assetConcentration,
-    macroRegimePressure,
-    exitWindowQuality,
-    negativeOutcomeRate,
+    macroRegimePressure: macroPressure, // Added property to match interface
     macroPressure,
+    exitWindowQuality,
     negativeOutcomeRate,
     lagLikelihood,
     sequenceStress,

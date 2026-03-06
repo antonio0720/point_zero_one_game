@@ -224,7 +224,6 @@ interface M12AFeatureVector {
   exitWindowQuality: number;
   negativeOutcomeRate: number;
   macroPressure: number;
-  negativeOutcomeRate: number;
   lagLikelihood: number;
   sequenceStress: number;
   historyScoreEma: number;
@@ -439,10 +438,9 @@ function buildM12AFeatures(input: M12ASanitizedInput, session: M12ASessionProfil
     solvencyMargin,
     cashVelocity,
     assetConcentration,
-    macroRegimePressure,
-    exitWindowQuality,
-    negativeOutcomeRate,
+    macroRegimePressure: macroPressure, // Added missing property
     macroPressure,
+    exitWindowQuality,
     negativeOutcomeRate,
     lagLikelihood,
     sequenceStress,

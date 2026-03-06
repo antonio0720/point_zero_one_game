@@ -83,7 +83,7 @@ export interface M139AOutput extends M139ABaseOutput {
 }
 
 // ── Model tiers ───────────────────────────────────────────────────────────────
-export type M139ATier = 'baseline' | 'sequence_dl';
+export type M139ATier = 'baseline' | 'sequence_dl' | 'policy_rl';
 
 /** M139A — Tier: BASELINE
  *  GBM + calibrated logistic (fast, low-cost, production default)
@@ -405,12 +405,12 @@ function buildM139AFeatures(input: M139ASanitizedInput, session: M139ASessionPro
 
 
     const integrityKeys = ['hash', 'signature', 'checksum', 'verify', 'valid', 'tamper', 'desync', 'anomaly'];
-    const allEvents = [...input.outcomeEvents, ...input.ledgerEvents];
-    const integrityEventCount = allEvents.filter(e => {
+    const allEventsForIntegrity = [...input.outcomeEvents, ...input.ledgerEvents];
+    const integrityEventCount = allEventsForIntegrity.filter(e => {
       const text = stableStringify(e).toLowerCase();
       return integrityKeys.some(k => text.includes(k));
     }).length;
-    const anomalyDensity = clamp(integrityEventCount / Math.max(1, allEvents.length), 0, 1);
+    const anomalyDensity = clamp(integrityEventCount / Math.max(1, allEventsForIntegrity.length), 0, 1);
     const hashFreshnessScore = clamp(1 - anomalyDensity * 0.7, 0, 1);
     const actionBudgetUsage = clamp(actions.length / Math.max(1, input.tickIndex + 1) / 3, 0, 1);
     const desyncSignalStrength = clamp(anomalyDensity * 0.6 + actionBudgetUsage * 0.3, 0, 1);

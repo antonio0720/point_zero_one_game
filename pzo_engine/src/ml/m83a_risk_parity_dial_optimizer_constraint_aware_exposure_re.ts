@@ -224,7 +224,6 @@ interface M83AFeatureVector {
   exitWindowQuality: number;
   negativeOutcomeRate: number;
   macroPressure: number;
-  negativeOutcomeRate: number;
   lagLikelihood: number;
   sequenceStress: number;
   historyScoreEma: number;
@@ -439,10 +438,9 @@ function buildM83AFeatures(input: M83ASanitizedInput, session: M83ASessionProfil
     solvencyMargin,
     cashVelocity,
     assetConcentration,
-    macroRegimePressure,
-    exitWindowQuality,
-    negativeOutcomeRate,
+    macroRegimePressure: macroPressure, // Added missing property
     macroPressure,
+    exitWindowQuality,
     negativeOutcomeRate,
     lagLikelihood,
     sequenceStress,

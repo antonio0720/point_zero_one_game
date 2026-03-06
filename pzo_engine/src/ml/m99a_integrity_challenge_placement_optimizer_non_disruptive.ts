@@ -403,29 +403,28 @@ function sanitizeM99AInput(input: M99ATelemetryInput): M99ASanitizedInput {
 function buildM99AFeatures(input: M99ASanitizedInput, session: M99ASessionProfile): M99AFeatureVector {
   const actions = extractActions(input.actionTimeline);
   const uiLatency = extractUiLatency(input.uiInteraction, input.actionTimeline);
-  const allEvents = [...input.outcomeEvents, ...input.ledgerEvents];
+  const allOutcomeEvents = [...input.outcomeEvents, ...input.ledgerEvents];
   const negOutKeys = ['loss', 'penalty', 'wipe', 'miss', 'late', 'fail', 'damage', 'default'];
-  const negativeOutcomeRate = allEvents.length > 0 ? clamp(allEvents.filter(e => negOutKeys.some(k => stableStringify(e).toLowerCase().includes(k))).length / allEvents.length, 0, 1) : 0;
+  const negativeOutcomeRate = allOutcomeEvents.length > 0 ? clamp(allOutcomeEvents.filter(e => negOutKeys.some(k => stableStringify(e).toLowerCase().includes(k))).length / allOutcomeEvents.length, 0, 1) : 0;
   const lagKeys = ['lag', 'latency', 'jitter', 'stall', 'freeze'];
   const lagLikelihood = clamp(median(uiLatency) / 900 * 0.35 + (input.actionTimeline.some(e => lagKeys.some(k => stableStringify(e).toLowerCase().includes(k))) ? 0.2 : 0), 0, 1);
   const macroPressure = deriveMacroPressure(input.macroRegime, input.tickIndex, input.runSeed);
   const sequenceStress = deriveSequenceStress(actions, input.tickIndex, input.runSeed);
 
-
-    const integrityKeys = ['hash', 'signature', 'checksum', 'verify', 'valid', 'tamper', 'desync', 'anomaly'];
-    const allEvents = [...input.outcomeEvents, ...input.ledgerEvents];
-    const integrityEventCount = allEvents.filter(e => {
-      const text = stableStringify(e).toLowerCase();
-      return integrityKeys.some(k => text.includes(k));
-    }).length;
-    const anomalyDensity = clamp(integrityEventCount / Math.max(1, allEvents.length), 0, 1);
-    const hashFreshnessScore = clamp(1 - anomalyDensity * 0.7, 0, 1);
-    const actionBudgetUsage = clamp(actions.length / Math.max(1, input.tickIndex + 1) / 3, 0, 1);
-    const desyncSignalStrength = clamp(anomalyDensity * 0.6 + actionBudgetUsage * 0.3, 0, 1);
-    const replayDivergence = clamp(desyncSignalStrength * 0.8, 0, 1);
-    const signatureValidityRate = clamp(1 - anomalyDensity, 0, 1);
-    const eventOrderingScore = clamp(1 - replayDivergence * 0.5, 0, 1);
-    const tamperLikelihood = clamp(anomalyDensity * 0.5 + desyncSignalStrength * 0.3 + (1 - signatureValidityRate) * 0.2, 0, 1);
+  const integrityKeys = ['hash', 'signature', 'checksum', 'verify', 'valid', 'tamper', 'desync', 'anomaly'];
+  const allEventsForIntegrity = [...input.outcomeEvents, ...input.ledgerEvents];
+  const integrityEventCount = allEventsForIntegrity.filter(e => {
+    const text = stableStringify(e).toLowerCase();
+    return integrityKeys.some(k => text.includes(k));
+  }).length;
+  const anomalyDensity = clamp(integrityEventCount / Math.max(1, allEventsForIntegrity.length), 0, 1);
+  const hashFreshnessScore = clamp(1 - anomalyDensity * 0.7, 0, 1);
+  const actionBudgetUsage = clamp(actions.length / Math.max(1, input.tickIndex + 1) / 3, 0, 1);
+  const desyncSignalStrength = clamp(anomalyDensity * 0.6 + actionBudgetUsage * 0.3, 0, 1);
+  const replayDivergence = clamp(desyncSignalStrength * 0.8, 0, 1);
+  const signatureValidityRate = clamp(1 - anomalyDensity, 0, 1);
+  const eventOrderingScore = clamp(1 - replayDivergence * 0.5, 0, 1);
+  const tamperLikelihood = clamp(anomalyDensity * 0.5 + desyncSignalStrength * 0.3 + (1 - signatureValidityRate) * 0.2, 0, 1);
 
   const confidenceSignal = clamp(0.25 + clamp(actions.length / 12, 0, 0.3) + clamp(uiLatency.length / 12, 0, 0.15) + clamp(1 - lagLikelihood, 0, 0.2) + 0.1, 0, 1);
   const fairnessBand = clamp(confidenceSignal * 0.5 + (1 - negativeOutcomeRate) * 0.5, 0, 1);

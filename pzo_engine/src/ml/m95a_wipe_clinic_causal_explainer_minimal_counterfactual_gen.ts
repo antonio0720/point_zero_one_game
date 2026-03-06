@@ -83,7 +83,7 @@ export interface M95AOutput extends M95ABaseOutput {
 }
 
 // ── Model tiers ───────────────────────────────────────────────────────────────
-export type M95ATier = 'baseline' | 'sequence_dl' | 'causal';
+export type M95ATier = 'baseline' | 'sequence_dl' | 'causal' | 'policy_rl';
 
 /** M95A — Tier: BASELINE
  *  GBM + calibrated logistic (fast, low-cost, production default)

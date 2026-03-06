@@ -83,7 +83,7 @@ export interface M68AOutput extends M68ABaseOutput {
 }
 
 // ── Model tiers ───────────────────────────────────────────────────────────────
-export type M68ATier = 'baseline' | 'sequence_dl' | 'graph_dl' | 'causal';
+export type M68ATier = 'baseline' | 'sequence_dl' | 'graph_dl' | 'causal' | 'policy_rl';
 
 /** M68A — Tier: BASELINE
  *  GBM + calibrated logistic (fast, low-cost, production default)

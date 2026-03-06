@@ -403,22 +403,21 @@ function sanitizeM121AInput(input: M121ATelemetryInput): M121ASanitizedInput {
 function buildM121AFeatures(input: M121ASanitizedInput, session: M121ASessionProfile): M121AFeatureVector {
   const actions = extractActions(input.actionTimeline);
   const uiLatency = extractUiLatency(input.uiInteraction, input.actionTimeline);
-  const allEvents = [...input.outcomeEvents, ...input.ledgerEvents];
+  const allEventsCombined = [...input.outcomeEvents, ...input.ledgerEvents];
   const negOutKeys = ['loss', 'penalty', 'wipe', 'miss', 'late', 'fail', 'damage', 'default'];
-  const negativeOutcomeRate = allEvents.length > 0 ? clamp(allEvents.filter(e => negOutKeys.some(k => stableStringify(e).toLowerCase().includes(k))).length / allEvents.length, 0, 1) : 0;
+  const negativeOutcomeRate = allEventsCombined.length > 0 ? clamp(allEventsCombined.filter(e => negOutKeys.some(k => stableStringify(e).toLowerCase().includes(k))).length / allEventsCombined.length, 0, 1) : 0;
   const lagKeys = ['lag', 'latency', 'jitter', 'stall', 'freeze'];
   const lagLikelihood = clamp(median(uiLatency) / 900 * 0.35 + (input.actionTimeline.some(e => lagKeys.some(k => stableStringify(e).toLowerCase().includes(k))) ? 0.2 : 0), 0, 1);
   const macroPressure = deriveMacroPressure(input.macroRegime, input.tickIndex, input.runSeed);
   const sequenceStress = deriveSequenceStress(actions, input.tickIndex, input.runSeed);
 
-
     const integrityKeys = ['hash', 'signature', 'checksum', 'verify', 'valid', 'tamper', 'desync', 'anomaly'];
-    const allEvents = [...input.outcomeEvents, ...input.ledgerEvents];
-    const integrityEventCount = allEvents.filter(e => {
+    const allEventsForIntegrity = allEventsCombined;
+    const integrityEventCount = allEventsForIntegrity.filter(e => {
       const text = stableStringify(e).toLowerCase();
       return integrityKeys.some(k => text.includes(k));
     }).length;
-    const anomalyDensity = clamp(integrityEventCount / Math.max(1, allEvents.length), 0, 1);
+    const anomalyDensity = clamp(integrityEventCount / Math.max(1, allEventsForIntegrity.length), 0, 1);
     const hashFreshnessScore = clamp(1 - anomalyDensity * 0.7, 0, 1);
     const actionBudgetUsage = clamp(actions.length / Math.max(1, input.tickIndex + 1) / 3, 0, 1);
     const desyncSignalStrength = clamp(anomalyDensity * 0.6 + actionBudgetUsage * 0.3, 0, 1);

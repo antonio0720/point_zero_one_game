@@ -413,14 +413,13 @@ function buildM110AFeatures(input: M110ASanitizedInput, session: M110ASessionPro
   const macroPressure = deriveMacroPressure(input.macroRegime, input.tickIndex, input.runSeed);
   const sequenceStress = deriveSequenceStress(actions, input.tickIndex, input.runSeed);
 
-
     const integrityKeys = ['hash', 'signature', 'checksum', 'verify', 'valid', 'tamper', 'desync', 'anomaly'];
-    const allEvents = [...input.outcomeEvents, ...input.ledgerEvents];
-    const integrityEventCount = allEvents.filter(e => {
+    const allEventsForIntegrity = [...input.outcomeEvents, ...input.ledgerEvents];
+    const integrityEventCount = allEventsForIntegrity.filter(e => {
       const text = stableStringify(e).toLowerCase();
       return integrityKeys.some(k => text.includes(k));
     }).length;
-    const anomalyDensity = clamp(integrityEventCount / Math.max(1, allEvents.length), 0, 1);
+    const anomalyDensity = clamp(integrityEventCount / Math.max(1, allEventsForIntegrity.length), 0, 1);
     const hashFreshnessScore = clamp(1 - anomalyDensity * 0.7, 0, 1);
     const actionBudgetUsage = clamp(actions.length / Math.max(1, input.tickIndex + 1) / 3, 0, 1);
     const desyncSignalStrength = clamp(anomalyDensity * 0.6 + actionBudgetUsage * 0.3, 0, 1);

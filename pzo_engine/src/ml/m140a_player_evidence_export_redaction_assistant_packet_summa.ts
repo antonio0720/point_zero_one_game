@@ -83,7 +83,7 @@ export interface M140AOutput extends M140ABaseOutput {
 }
 
 // ── Model tiers ───────────────────────────────────────────────────────────────
-export type M140ATier = 'baseline' | 'sequence_dl';
+export type M140ATier = 'baseline' | 'sequence_dl' | 'policy_rl';
 
 /** M140A — Tier: BASELINE
  *  GBM + calibrated logistic (fast, low-cost, production default)

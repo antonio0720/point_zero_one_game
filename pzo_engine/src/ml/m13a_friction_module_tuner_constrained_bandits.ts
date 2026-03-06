@@ -82,7 +82,7 @@ export interface M13AOutput extends M13ABaseOutput {
 }
 
 // ── Model tiers ───────────────────────────────────────────────────────────────
-export type M13ATier = 'baseline' | 'policy_rl';
+export type M13ATier = 'baseline' | 'policy_rl' | 'sequence_dl';
 
 /** M13A — Tier: BASELINE
  *  GBM + calibrated logistic (fast, low-cost, production default)

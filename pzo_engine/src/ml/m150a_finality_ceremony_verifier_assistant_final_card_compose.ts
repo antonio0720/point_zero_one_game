@@ -83,7 +83,7 @@ export interface M150AOutput extends M150ABaseOutput {
 }
 
 // ── Model tiers ───────────────────────────────────────────────────────────────
-export type M150ATier = 'baseline' | 'sequence_dl';
+export type M150ATier = 'baseline' | 'sequence_dl' | 'policy_rl';
 
 /** M150A — Tier: BASELINE
  *  GBM + calibrated logistic (fast, low-cost, production default)
@@ -157,7 +157,7 @@ export const M150A_ML_CONSTANTS = {
   INTEL_SIGNAL:       'rewardFit' as const,
   MODEL_CATEGORY:     'generator' as const,
   FAMILY:             'integrity' as const,
-  TIERS:              ['baseline', 'sequence_dl'] as const,
+  TIERS:              ['baseline', 'sequence_dl', 'policy_rl'] as const,
   PLACEMENT:          ['server'] as const,
   BUDGET:             'batch' as const,
   CAN_LOCK_OFF:        true,
@@ -401,21 +401,19 @@ function buildM150AFeatures(input: M150ASanitizedInput, session: M150ASessionPro
   const macroPressure = deriveMacroPressure(input.macroRegime, input.tickIndex, input.runSeed);
   const sequenceStress = deriveSequenceStress(actions, input.tickIndex, input.runSeed);
 
-
-    const integrityKeys = ['hash', 'signature', 'checksum', 'verify', 'valid', 'tamper', 'desync', 'anomaly'];
-    const allEvents = [...input.outcomeEvents, ...input.ledgerEvents];
-    const integrityEventCount = allEvents.filter(e => {
-      const text = stableStringify(e).toLowerCase();
-      return integrityKeys.some(k => text.includes(k));
-    }).length;
-    const anomalyDensity = clamp(integrityEventCount / Math.max(1, allEvents.length), 0, 1);
-    const hashFreshnessScore = clamp(1 - anomalyDensity * 0.7, 0, 1);
-    const actionBudgetUsage = clamp(actions.length / Math.max(1, input.tickIndex + 1) / 3, 0, 1);
-    const desyncSignalStrength = clamp(anomalyDensity * 0.6 + actionBudgetUsage * 0.3, 0, 1);
-    const replayDivergence = clamp(desyncSignalStrength * 0.8, 0, 1);
-    const signatureValidityRate = clamp(1 - anomalyDensity, 0, 1);
-    const eventOrderingScore = clamp(1 - replayDivergence * 0.5, 0, 1);
-    const tamperLikelihood = clamp(anomalyDensity * 0.5 + desyncSignalStrength * 0.3 + (1 - signatureValidityRate) * 0.2, 0, 1);
+  const integrityKeys = ['hash', 'signature', 'checksum', 'verify', 'valid', 'tamper', 'desync', 'anomaly'];
+  const integrityEventCount = allEvents.filter(e => {
+    const text = stableStringify(e).toLowerCase();
+    return integrityKeys.some(k => text.includes(k));
+  }).length;
+  const anomalyDensity = clamp(integrityEventCount / Math.max(1, allEvents.length), 0, 1);
+  const hashFreshnessScore = clamp(1 - anomalyDensity * 0.7, 0, 1);
+  const actionBudgetUsage = clamp(actions.length / Math.max(1, input.tickIndex + 1) / 3, 0, 1);
+  const desyncSignalStrength = clamp(anomalyDensity * 0.6 + actionBudgetUsage * 0.3, 0, 1);
+  const replayDivergence = clamp(desyncSignalStrength * 0.8, 0, 1);
+  const signatureValidityRate = clamp(1 - anomalyDensity, 0, 1);
+  const eventOrderingScore = clamp(1 - replayDivergence * 0.5, 0, 1);
+  const tamperLikelihood = clamp(anomalyDensity * 0.5 + desyncSignalStrength * 0.3 + (1 - signatureValidityRate) * 0.2, 0, 1);
 
   const confidenceSignal = clamp(0.25 + clamp(actions.length / 12, 0, 0.3) + clamp(uiLatency.length / 12, 0, 0.15) + clamp(1 - lagLikelihood, 0, 0.2) + 0.1, 0, 1);
   const fairnessBand = clamp(confidenceSignal * 0.5 + (1 - negativeOutcomeRate) * 0.5, 0, 1);

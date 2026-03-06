@@ -83,7 +83,7 @@ export interface M80AOutput extends M80ABaseOutput {
 }
 
 // ── Model tiers ───────────────────────────────────────────────────────────────
-export type M80ATier = 'baseline' | 'sequence_dl';
+export type M80ATier = 'baseline' | 'sequence_dl' | 'policy_rl';
 
 /** M80A — Tier: BASELINE
  *  GBM + calibrated logistic (fast, low-cost, production default)
@@ -157,7 +157,7 @@ export const M80A_ML_CONSTANTS = {
   INTEL_SIGNAL:       'rewardFit' as const,
   MODEL_CATEGORY:     'generator' as const,
   FAMILY:             'contract' as const,
-  TIERS:              ['baseline', 'sequence_dl'] as const,
+  TIERS:              ['baseline', 'sequence_dl', 'policy_rl'] as const,
   PLACEMENT:          ['server'] as const,
   BUDGET:             'batch' as const,
   CAN_LOCK_OFF:        true,

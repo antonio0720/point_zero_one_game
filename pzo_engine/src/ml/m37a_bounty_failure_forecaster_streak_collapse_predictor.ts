@@ -83,7 +83,7 @@ export interface M37AOutput extends M37ABaseOutput {
 }
 
 // ── Model tiers ───────────────────────────────────────────────────────────────
-export type M37ATier = 'baseline' | 'sequence_dl' | 'graph_dl' | 'causal';
+export type M37ATier = 'baseline' | 'sequence_dl' | 'graph_dl' | 'causal' | 'policy_rl';
 
 /** M37A — Tier: BASELINE
  *  GBM + calibrated logistic (fast, low-cost, production default)

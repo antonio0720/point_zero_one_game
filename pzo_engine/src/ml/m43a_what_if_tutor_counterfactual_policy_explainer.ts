@@ -83,7 +83,7 @@ export interface M43AOutput extends M43ABaseOutput {
 }
 
 // ── Model tiers ───────────────────────────────────────────────────────────────
-export type M43ATier = 'baseline' | 'sequence_dl' | 'graph_dl' | 'causal';
+export type M43ATier = 'baseline' | 'sequence_dl' | 'graph_dl' | 'causal' | 'policy_rl';
 
 /** M43A — Tier: BASELINE
  *  GBM + calibrated logistic (fast, low-cost, production default)
@@ -177,7 +177,7 @@ export const M43A_ML_CONSTANTS = {
   INTEL_SIGNAL:       'personalization' as const,
   MODEL_CATEGORY:     'predictor' as const,
   FAMILY:             'progression' as const,
-  TIERS:              ['baseline', 'sequence_dl', 'graph_dl', 'causal'] as const,
+  TIERS:              ['baseline', 'sequence_dl', 'graph_dl', 'causal', 'policy_rl'] as const,
   PLACEMENT:          ['server'] as const,
   BUDGET:             'batch' as const,
   CAN_LOCK_OFF:        true,

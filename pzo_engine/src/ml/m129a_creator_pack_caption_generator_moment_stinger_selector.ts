@@ -83,7 +83,7 @@ export interface M129AOutput extends M129ABaseOutput {
 }
 
 // ── Model tiers ───────────────────────────────────────────────────────────────
-export type M129ATier = 'baseline' | 'sequence_dl';
+export type M129ATier = 'baseline' | 'sequence_dl' | 'policy_rl';
 
 /** M129A — Tier: BASELINE
  *  GBM + calibrated logistic (fast, low-cost, production default)
@@ -159,7 +159,7 @@ export const M129A_ML_CONSTANTS = {
   INTEL_SIGNAL:       'rewardFit' as const,
   MODEL_CATEGORY:     'generator' as const,
   FAMILY:             'social' as const,
-  TIERS:              ['baseline', 'sequence_dl'] as const,
+  TIERS:              ['baseline', 'sequence_dl', 'policy_rl'] as const,
   PLACEMENT:          ['client', 'server'] as const,
   BUDGET:             'real_time' as const,
   CAN_LOCK_OFF:        true,

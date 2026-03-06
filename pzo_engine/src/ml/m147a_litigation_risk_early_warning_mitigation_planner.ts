@@ -83,7 +83,7 @@ export interface M147AOutput extends M147ABaseOutput {
 }
 
 // ── Model tiers ───────────────────────────────────────────────────────────────
-export type M147ATier = 'baseline' | 'sequence_dl' | 'causal';
+export type M147ATier = 'baseline' | 'sequence_dl' | 'causal' | 'policy_rl';
 
 /** M147A — Tier: BASELINE
  *  GBM + calibrated logistic (fast, low-cost, production default)
@@ -169,7 +169,7 @@ export const M147A_ML_CONSTANTS = {
   INTEL_SIGNAL:       'risk' as const,
   MODEL_CATEGORY:     'predictor' as const,
   FAMILY:             'contract' as const,
-  TIERS:              ['baseline', 'sequence_dl', 'causal'] as const,
+  TIERS:              ['baseline', 'sequence_dl', 'causal', 'policy_rl'] as const,
   PLACEMENT:          ['client', 'server'] as const,
   BUDGET:             'real_time' as const,
   CAN_LOCK_OFF:        true,

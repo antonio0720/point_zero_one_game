@@ -83,7 +83,7 @@ export interface M19AOutput extends M19ABaseOutput {
 }
 
 // ── Model tiers ───────────────────────────────────────────────────────────────
-export type M19ATier = 'baseline' | 'policy_rl';
+export type M19ATier = 'baseline' | 'policy_rl' | 'sequence_dl';
 
 /** M19A — Tier: BASELINE
  *  GBM + calibrated logistic (fast, low-cost, production default)

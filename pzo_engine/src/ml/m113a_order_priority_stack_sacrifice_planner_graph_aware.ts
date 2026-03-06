@@ -224,7 +224,6 @@ interface M113AFeatureVector {
   exitWindowQuality: number;
   negativeOutcomeRate: number;
   macroPressure: number;
-  negativeOutcomeRate: number;
   lagLikelihood: number;
   sequenceStress: number;
   historyScoreEma: number;
@@ -439,10 +438,9 @@ function buildM113AFeatures(input: M113ASanitizedInput, session: M113ASessionPro
     solvencyMargin,
     cashVelocity,
     assetConcentration,
-    macroRegimePressure,
-    exitWindowQuality,
-    negativeOutcomeRate,
+    macroRegimePressure: macroPressure, // Added this line
     macroPressure,
+    exitWindowQuality,
     negativeOutcomeRate,
     lagLikelihood,
     sequenceStress,
@@ -458,7 +456,7 @@ function buildM113AFeatures(input: M113ASanitizedInput, session: M113ASessionPro
 function selectInferenceM113A(tier: M113ATier, features: M113AFeatureVector, input: M113ASanitizedInput, session: M113ASessionProfile): M113AModelInference {
   switch (tier) {
     case 'sequence_dl': return runSequenceM113A(features, input, session);
-    case 'policy_rl':   return runPolicyM113A(features, input, session);
+    case 'graph_dl':    return runPolicyM113A(features, input, session);
     default:            return runBaselineM113A(features, input, session);
   }
 }
@@ -507,7 +505,7 @@ function runPolicyM113A(features: M113AFeatureVector, input: M113ASanitizedInput
     rawScore: clamp(seq.rawScore + policyBias, 0, 1),
     confidence: clamp(seq.confidence * 0.90 + 0.05, 0.05, 0.99),
     contributions: [...seq.contributions, { label: 'Offline policy prior', value: policyBias }],
-    tier: 'policy_rl',
+    tier: 'graph_dl',
   };
 }
 
