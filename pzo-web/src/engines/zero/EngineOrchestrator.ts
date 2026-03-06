@@ -31,6 +31,7 @@
 //   10    PressureEngine.recomputePostActions(snap, fx, rec)
 //   11    TimeEngine.setTierFromPressure(postActionPressure)
 //   12    SovereigntyEngine.snapshotTick(snapshot)
+//   12.5  MechanicsRouter.tickRuntime(snapshot)        ← Phase 5: new step
 //   Win/loss check (FREEDOM > BANKRUPT > TIMEOUT)
 //   13    EventBus.flush()
 //
@@ -48,6 +49,17 @@
 //     counts from the card layer rather than from runStore.
 //   ✦ cardEngineAdapter.startRun() called after initializeAll() in startRun().
 //   ✦ cardEngineAdapter.endRun() called at the start of endRun().
+//
+// PHASE 5 CHANGES:
+//   ✦ MechanicsRouter imported and instantiated in constructor.
+//   ✦ initMechanicsRouter() called in startRun() after cardEngineAdapter.startRun()
+//     so the router initialises with the correct run ID and active mechanic set.
+//   ✦ Step 12.5: mechanicsRouter.tickRuntime(snapshot) called after
+//     SovereigntyEngine.snapshotTick, before Win/Loss check.
+//     All mechanic EventBus events travel in the same flush pass as
+//     all other engine events from this tick.
+//   ✦ mechanicsRouter.reset() called in reset() alongside registry.resetAll().
+//   ✦ MechanicTickResult is returned in TickResult.mechanicsResult (optional).
 //
 // ABSOLUTE RULES:
 //   ✦ Only this file imports engine classes.
@@ -103,6 +115,18 @@ import { CardEngine }        from '../cards/CardEngine';
 import { CardEngineAdapter } from '../cards/CardEngineAdapter';
 import type { DecisionRecord } from '../cards/types';
 
+// ── Phase 5: MechanicsRouter — Step 12.5 mechanics dispatcher ────────────────
+// Instantiated in constructor, init() called in startRun(), reset() in reset(),
+// tickRuntime() called at Step 12.5 of executeTick().
+import { MechanicsRouter }  from '../mechanics/MechanicsRouter';
+import { initMechanicsRouter } from '../../data/mechanicsLoader';
+import type { MechanicTickResult } from '../mechanics/types';
+
+// ── Phase 5: NOTE — zero/types.ts TickResult must add the mechanicsResult field ──
+// Add to TickResult interface in zero/types.ts:
+//   mechanicsResult?: MechanicTickResult | null;  // Phase 5 — Step 12.5 output
+// Import MechanicTickResult from '../mechanics/types' in zero/types.ts.
+
 // ── Game store — only used to read financial state + hater_heat for snapshot ──
 // runStore (non-hook) is used here because Orchestrator runs outside React.
 import { runStore } from '../../store/runStore';
@@ -154,6 +178,11 @@ export class EngineOrchestrator {
   // Also used directly in buildRunStateSnapshot() for card-derived fields.
   private readonly cardReader: CardReader;
 
+  // ── Phase 5: MechanicsRouter ─────────────────────────────────────────────
+  // Holds reference to the MechanicsRouter instance.
+  // Initialized in constructor, init() called per-run, reset() per-reset.
+  private readonly mechanicsRouter: MechanicsRouter;
+
   // ── Phase 1: decisions from Step 1.5 ─────────────────────────────────────
   // Populated by cardEngine.tick() at Step 1.5 of each tick.
   // Stored here and projected into DecisionRecordField[] for the NEXT tick's
@@ -196,6 +225,11 @@ export class EngineOrchestrator {
     // GameMode from ModeRouter during init() to build CardEngineInitParams.
     this.cardEngine        = new CardEngine(this.eventBus);
     this.cardEngineAdapter = new CardEngineAdapter(this.cardEngine, this.eventBus);
+
+    // ── Phase 5: Instantiate MechanicsRouter ────────────────────────────────
+    // Constructed after CardEngine so the event bus is fully wired.
+    // init() is called in startRun() with the run ID after CardEngine.startRun().
+    this.mechanicsRouter = new MechanicsRouter(this.eventBus);
 
     // ── Phase 1: Build CardReader immediately after CardEngine construction ───
     // getReader() returns a stable object backed by the CardEngine instance.
@@ -315,6 +349,16 @@ export class EngineOrchestrator {
       );
     }
 
+    // ── Phase 5: Initialize MechanicsRouter for this run ─────────────────────
+    // init() must run after cardEngineAdapter.startRun() so the card engine is
+    // fully started before the mechanics layer initializes. The router builds
+    // its active mechanic set from MECHANICS_REGISTRY and registers all mechanics
+    // in mechanicsRuntimeStore.
+    initMechanicsRouter(
+      params.runId,
+      (runId) => this.mechanicsRouter.init(runId),
+    );
+
     this.lifecycleState = 'ACTIVE';
 
     // Emit RUN_STARTED — immediately flushed so store wiring fires before first tick
@@ -397,6 +441,9 @@ export class EngineOrchestrator {
   public reset(): void {
     this.registry.resetAll();
     this.eventBus.reset();
+    // Phase 5: Reset mechanics router — clears active mechanic sets and
+    // mechanicsRuntimeStore. init() must be called again on next startRun().
+    this.mechanicsRouter.reset();
     this.currentRunId     = null;
     this.currentUserId    = null;
     this.currentSeed      = null;
@@ -566,6 +613,29 @@ export class EngineOrchestrator {
     try { this.sovereigntyEngine.snapshotTick(snapshot); }
     catch (err) { this.handleStepError(12, EngineId.SOVEREIGNTY, err); }
 
+    // ── STEP 12.5: MechanicsRouter.tickRuntime ────────────────────────────────
+    // Phase 5: Fire all active tick_engine mechanics.
+    //
+    // Position in sequence (immutable contract):
+    //   After Step 12  — sovereignty proof pipeline already snapshotted this tick.
+    //   Before Win/Loss — mechanic income/cash/netWorth effects are visible to the
+    //                     condition evaluators (hasCrossedFreedomThreshold etc.)
+    //   Before flush    — all mechanic EventBus events travel in the same flush pass
+    //                     as all other engine events from this tick.
+    //
+    // Error containment: MechanicsRouter contains per-mechanic errors internally.
+    // If the entire router throws (should never happen), tick continues.
+    // mechanicsResult is null in that case — not populated in TickResult.
+    let mechanicsResult: MechanicTickResult | null = null;
+    try {
+      mechanicsResult = await this.mechanicsRouter.tickRuntime(snapshot);
+    } catch (err) {
+      const error = err instanceof Error ? err.message : String(err);
+      console.error(`[Orchestrator] Step 12.5 (MechanicsRouter) fatal error: ${error}`);
+      this.eventBus.emit('TICK_STEP_ERROR', { step: 12.5, engineId: 'mechanics', error });
+      // Non-fatal — tick continues without mechanics effects this tick.
+    }
+
     // ── WIN / LOSS CHECK ─────────────────────────────────────────────────────
     // Priority contract: FREEDOM > BANKRUPT > TIMEOUT.
     // Second snapshot call — only for win/loss state evaluation.
@@ -611,6 +681,8 @@ export class EngineOrchestrator {
       decisionsThisTick:  decisionFields,
       runOutcome:         tickOutcome,
       tickDurationMs,
+      // Phase 5: mechanics tick result (null if MechanicsRouter threw or not initialized)
+      mechanicsResult,
     };
   }
 

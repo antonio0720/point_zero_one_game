@@ -10,10 +10,67 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
+
+    // ── Phase 5: Composite project reference settings ──────────────────────
+    // composite: true enables pzo-web to reference pzo_engine via TypeScript
+    // project references (tsconfig.json references array in pzo-web).
+    // This causes tsc to build pzo_engine incrementally and emit type declarations
+    // into ./dist, making them importable from pzo-web with full type safety.
+    "composite": true,
     "declaration": true,
     "declarationMap": true,
-    "sourceMap": true
+    "sourceMap": true,
+
+    // ── Phase 5: declarationDir ───────────────────────────────────────────
+    // Emit .d.ts files to ./dist alongside compiled .js files.
+    // pzo-web's path alias @pzo_engine/* resolves here.
+    "declarationDir": "./dist",
+
+    // ── Phase 5: Module resolution ────────────────────────────────────────
+    // bundler resolution allows pzo_engine mechanics to import each other
+    // without explicit .js extensions during development compilation.
+    "moduleResolution": "node",
+
+    // ── Phase 5: paths — self-referencing imports within pzo_engine ───────
+    // Mechanics can import shared utilities via @pzo_engine/* instead of
+    // fragile relative paths. Matches the paths configured in pzo-web.
+    "paths": {
+      "@pzo_engine/*": ["./src/*"]
+    }
   },
   "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist"]
+  "exclude": ["node_modules", "dist"],
+
+  // ── Phase 5: Build scripts ────────────────────────────────────────────────
+  // Add to pzo_engine/package.json scripts:
+  //   "build":         "tsc --project tsconfig.json"
+  //   "build:watch":   "tsc --project tsconfig.json --watch"
+  //   "build:clean":   "rimraf dist && tsc --project tsconfig.json"
+  //
+  // pzo-web/package.json should add:
+  //   "build:mechanics": "tsc --build ../pzo_engine && node scripts/build_mechanics_exec.ts"
+  //
+  // pzo-web/tsconfig.json should add in compilerOptions:
+  //   "paths": {
+  //     "@pzo_engine/*": ["../pzo_engine/src/*"]
+  //   }
+  // And in the root object:
+  //   "references": [{ "path": "../pzo_engine" }]
+  //
+  // ── Alternative: exec/ copy build step (simpler, no project references) ──
+  // If TypeScript project references are too heavy for the current build setup,
+  // use the build step copy approach instead:
+  //
+  //   scripts/build_mechanics_exec.ts:
+  //     1. tsc --project pzo_engine/tsconfig.json
+  //     2. For each mechanic in mechanics_core.json:
+  //        - import dist/{stem}.js
+  //        - get default export (the exec function)
+  //        - write pzo-web/src/engines/mechanics/exec/index.ts with all entries
+  //     3. This regenerates exec/index.ts with EXEC_REGISTRY populated.
+  //
+  // The build step approach requires no tsconfig.json references changes in
+  // pzo-web and produces a clean static module with no cross-package imports.
+  // Recommended for MVP. Switch to project references in Phase 6 for live reload.
+  // ─────────────────────────────────────────────────────────────────────────
 }
