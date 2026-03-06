@@ -2,20 +2,25 @@
 // POINT ZERO ONE — ENGINE 0 ENGINE REGISTRY
 // pzo-web/src/engines/zero/EngineRegistry.ts
 //
-// Manifest of all seven engines. Tracks registration, health, and readiness.
+// Manifest of all eight engines. Tracks registration, health, and readiness.
 // EngineOrchestrator owns the single registry instance. No other system calls
 // register(), initializeAll(), or setHealth() directly.
 //
 // RULES:
-//   ✦ All 7 engines must be INITIALIZED before startRun() permits the tick loop.
+//   ✦ All 8 engines must be INITIALIZED before startRun() permits the tick loop.
 //   ✦ Duplicate registration throws immediately — fail loud, fail early.
 //   ✦ get<T>() throws if the engine is not registered — never silently returns null.
 //   ✦ initializeAll() continues on failure — health report must be COMPLETE even
 //     if some engines error, so the caller can report ALL failures at once.
 //   ✦ resetAll() returns engines to REGISTERED state (not INITIALIZED).
 //
-// REQUIRED ENGINE SET (7):
-//   TIME · PRESSURE · TENSION · SHIELD · BATTLE · CASCADE · SOVEREIGNTY
+// REQUIRED ENGINE SET (8):
+//   TIME · PRESSURE · TENSION · SHIELD · BATTLE · CASCADE · SOVEREIGNTY · CARD
+//
+// PHASE 1 CHANGE: Added CARD to REQUIRED_ENGINES and allEnginesReady().
+// CardEngineAdapter (which wraps CardEngine and implements IEngine) is registered
+// by EngineOrchestrator under EngineId.CARD. The adapter's init() reads GameMode
+// from ModeRouter and builds CardEngineInitParams before delegating to CardEngine.
 //
 // Adding an engine? Update REQUIRED_ENGINES. Missing entry = startRun() refuses
 // to proceed. No silent fallback.
@@ -33,7 +38,7 @@ import {
 import type { EventBus } from './EventBus';
 
 /**
- * Registry of all seven sovereign engines.
+ * Registry of all eight sovereign engines.
  *
  * EngineOrchestrator constructs and owns the single EngineRegistry instance.
  * No other system may call register(), initializeAll(), resetAll(), or setHealth().
@@ -43,10 +48,13 @@ export class EngineRegistry {
   private readonly eventBus: EventBus;
 
   /**
-   * All seven engines are required. The registry refuses to declare readiness
+   * All eight engines are required. The registry refuses to declare readiness
    * if even one is missing or not INITIALIZED.
    *
    * Canonical set — update here when adding a new engine.
+   *
+   * PHASE 1: CARD added as the 8th entry. CardEngineAdapter registers under
+   * this ID. allEnginesReady() and getMissingEngines() validate all 8.
    */
   private static readonly REQUIRED_ENGINES: readonly EngineId[] = [
     EngineId.TIME,
@@ -56,6 +64,7 @@ export class EngineRegistry {
     EngineId.BATTLE,
     EngineId.CASCADE,
     EngineId.SOVEREIGNTY,
+    EngineId.CARD,           // ← Phase 1: 8th required engine
   ];
 
   constructor(eventBus: EventBus) {
@@ -68,7 +77,7 @@ export class EngineRegistry {
 
   /**
    * Register an engine instance.
-   * Called by EngineOrchestrator constructor for each of the seven engines.
+   * Called by EngineOrchestrator constructor for each of the eight engines.
    *
    * @throws If the engineId is already registered.
    */
@@ -100,6 +109,11 @@ export class EngineRegistry {
    * receives a complete health report.
    *
    * Called by EngineOrchestrator.startRun() before the tick loop starts.
+   *
+   * Note on CardEngine: CardEngineAdapter.init() translates the generic
+   * EngineInitParams into CardEngineInitParams (reading GameMode from ModeRouter)
+   * before delegating to the inner CardEngine. The registry knows nothing of
+   * this — it calls init(params) on the adapter exactly as it would any engine.
    */
   public initializeAll(params: EngineInitParams): void {
     for (const [id, entry] of this.registry) {
@@ -141,7 +155,7 @@ export class EngineRegistry {
   // ═══════════════════════════════════════════════════════════════════════════
 
   /**
-   * Returns true ONLY if every required engine is health=INITIALIZED.
+   * Returns true ONLY if every required engine (all 8) is health=INITIALIZED.
    * One engine in ERROR, REGISTERED, or UNREGISTERED state returns false.
    *
    * Called by EngineOrchestrator before the tick loop starts.

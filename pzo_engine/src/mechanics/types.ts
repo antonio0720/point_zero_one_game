@@ -28,14 +28,39 @@ export type KV = Record<string, unknown>;
 // ─────────────────────────────────────────────────────────────────────────────
 
 export type RunPhase = 'EARLY' | 'MID' | 'LATE';
-
 export type TickTier = 'STANDARD' | 'ELEVATED' | 'CRITICAL';
-
 export type MacroRegime = 'BULL' | 'NEUTRAL' | 'BEAR' | 'CRISIS';
-
 export type PressureTier = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
-
 export type SolvencyStatus = 'SOLVENT' | 'BLEED' | 'WIPED';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Player Profile (portable snapshot; used by onboarding + personalization)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * PlayerProfile
+ * Shared, portable snapshot of player preferences + current run context.
+ * (Added so mechanics like M44 can accept a typed profile without introducing a new module.)
+ */
+export interface PlayerProfile {
+  userId?: ID;
+
+  // Run context (optional; mechanics can fall back safely)
+  runSeed?: ID;
+  tick?: Tick;
+  runPhase?: RunPhase;
+  macroRegime?: MacroRegime;
+  pressureTier?: PressureTier;
+
+  // Preference + style hints (optional)
+  archetype?: string;
+  riskTolerance?: Percent; // 0..1
+  preferredCardIds?: ID[];
+  preferredAssetTypes?: string[];
+
+  // Freeform notes (JSON-safe)
+  notes?: KV;
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Core Domain Objects
@@ -114,6 +139,17 @@ export interface IncomeItem {
   source: string;
   amount: Money;
 }
+
+/**
+ * Timer
+ * Generic timer payload used across mechanics (shape is intentionally permissive).
+ * - MUST include a stable id and an absolute expiry tick.
+ * - May include any additional JSON-safe fields.
+ */
+export type Timer = KV & {
+  id: ID;
+  expiresAt: Tick;
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Macro / Chaos Timelines

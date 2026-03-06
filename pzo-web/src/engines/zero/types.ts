@@ -1,5 +1,3 @@
-//Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/pzo-web/src/engines/zero/types.ts
-
 // ═══════════════════════════════════════════════════════════════════════════════
 // POINT ZERO ONE — ENGINE 0 CORE TYPES
 // pzo-web/src/engines/zero/types.ts
@@ -13,6 +11,15 @@
 //   ✦ Zero imports — this file imports nothing.
 //   ✦ All 30 EngineEventName strings must have a matching entry in EngineEventPayloadMap.
 //   ✦ All types used by other core files originate here.
+//
+// PHASE 1 CHANGES:
+//   ✦ Added CARD = 'CARD_ENGINE' to EngineId (8th engine).
+//   ✦ Added CardReader interface — minimal contract for cross-engine reads.
+//     Defined here (not in cards/types.ts) so zero/types.ts stays import-free.
+//     The CardEngine.getReader() return value satisfies this interface via
+//     structural typing. No import required in either direction.
+//   ✦ decisionsThisTick: DecisionRecordField[] already exists in
+//     RunStateSnapshotFields — populated by EngineOrchestrator after Step 1.5.
 //
 // Density6 LLC · Point Zero One · Engine 0 · Confidential
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -43,14 +50,15 @@ export type RunLifecycleState =
  */
 export interface TickResult {
   tickIndex:          number;
-  pressureScore:      number;          // from PressureEngine.computeScore()
-  postActionPressure: number;          // from PressureEngine.recomputePostActions()
-  attacksFired:       AttackEvent[];   // from BattleEngine.executeAttacks()
-  damageResults:      DamageResult[];  // from ShieldEngine.applyAttacks()
-  cascadeEffects:     CascadeEffect[]; // from CascadeEngine.executeScheduledLinks()
-  recoveryResults:    RecoveryResult[];// from CascadeEngine.checkRecoveryConditions()
+  pressureScore:      number;           // from PressureEngine.computeScore()
+  postActionPressure: number;           // from PressureEngine.recomputePostActions()
+  attacksFired:       AttackEvent[];    // from BattleEngine.executeAttacks()
+  damageResults:      DamageResult[];   // from ShieldEngine.applyAttacks()
+  cascadeEffects:     CascadeEffect[];  // from CascadeEngine.executeScheduledLinks()
+  recoveryResults:    RecoveryResult[]; // from CascadeEngine.checkRecoveryConditions()
+  decisionsThisTick:  DecisionRecordField[]; // from CardEngine.tick() at Step 1.5
   runOutcome:         RunOutcome | null; // non-null if this tick ended the run
-  tickDurationMs:     number;          // wall-clock cost of this tick (perf tracking)
+  tickDurationMs:     number;           // wall-clock cost of this tick (perf tracking)
 }
 
 // ── TICK TIERS ─────────────────────────────────────────────────────────────────
@@ -197,8 +205,11 @@ export interface RecoveryResult {
 // ── ENGINE REGISTRY ────────────────────────────────────────────────────────────
 
 /**
- * Unique string identifiers for each of the seven engines.
+ * Unique string identifiers for all eight engines.
  * Used as keys in EngineRegistry.
+ *
+ * PHASE 1: Added CARD = 'CARD_ENGINE' as the 8th engine.
+ * EngineRegistry.REQUIRED_ENGINES and allEnginesReady() validate all 8.
  */
 export enum EngineId {
   TIME        = 'TIME_ENGINE',
@@ -208,6 +219,7 @@ export enum EngineId {
   BATTLE      = 'BATTLE_ENGINE',
   CASCADE     = 'CASCADE_ENGINE',
   SOVEREIGNTY = 'SOVEREIGNTY_ENGINE',
+  CARD        = 'CARD_ENGINE',            // ← Phase 1: 8th engine
 }
 
 /**
@@ -234,7 +246,12 @@ export interface EngineEntry {
 
 /**
  * Minimal interface that every engine must satisfy to be registered.
- * All seven engines implement this interface.
+ * All eight engines implement this interface.
+ *
+ * NOTE: CardEngine does not directly implement IEngine (its init signature
+ * requires CardEngineInitParams which is a superset of EngineInitParams).
+ * CardEngineAdapter wraps CardEngine and satisfies IEngine. The adapter is
+ * what gets registered. See engines/cards/CardEngineAdapter.ts.
  */
 export interface IEngine {
   readonly engineId: EngineId;
@@ -245,15 +262,67 @@ export interface IEngine {
 /**
  * Parameters passed to every engine on init().
  * Contains run configuration that engines need at start time.
+ *
+ * PHASE 1: cardReader is optional — injected by Orchestrator into engines that
+ * need cross-engine card state reads. Engines that don't need card reads ignore it.
+ * cardReader is typed as CardReader (defined below) which is structurally
+ * compatible with the CardReader from engines/cards/types.ts.
  */
 export interface EngineInitParams {
   runId:            string;
   userId:           string;
   seed:             string;
   seasonTickBudget: number;
-  freedomThreshold: number;   // target net worth for FREEDOM win condition
+  freedomThreshold: number;    // target net worth for FREEDOM win condition
   clientVersion:    string;
   engineVersion:    string;
+  cardReader?:      CardReader; // optional — wired after CardEngine init
+}
+
+// ── CARD READER (defined here to preserve zero-import rule) ───────────────────
+
+/**
+ * Cross-engine read interface for the CardEngine.
+ *
+ * Defined in zero/types.ts (NOT in cards/types.ts) so engines can reference it
+ * through EngineInitParams without importing from the cards/ module.
+ *
+ * CardEngine.getReader() returns an object that satisfies this interface via
+ * TypeScript structural typing — no explicit relationship is required.
+ *
+ * Engines that receive CardReader through EngineInitParams.cardReader use it
+ * to read card state without holding a direct reference to CardEngine.
+ *
+ * RULE: CardReader methods are read-only. Never pass a mutable reference to
+ * card state into an engine — always expose a getter function.
+ */
+export interface CardReader {
+  /** Current number of cards in the player's hand. */
+  getHandSize(): number;
+
+  /** Number of forced (injected) cards currently in hand. */
+  getForcedCardCount(): number;
+
+  /**
+   * Count of unmitigated threat cards currently active.
+   * Replaces store.activeThreatCardCount in RunStateSnapshot after Phase 1.
+   */
+  getActiveThreatCardCount(): number;
+
+  /** Number of decision windows currently open (awaiting player choice). */
+  getDecisionWindowsActive(): number;
+
+  /** Holds remaining this tick (0 or 1 — Empire mode only). */
+  getHoldsRemaining(): number;
+
+  /** Consecutive missed optimal plays — used by tension and battle scoring. */
+  getMissedOpportunityStreak(): number;
+
+  /**
+   * The most recently played card's definition ID, or null if no card has been
+   * played this run. Returns unknown to avoid importing CardInHand here.
+   */
+  getLastPlayedCardId(): string | null;
 }
 
 // ── EVENTBUS TYPES ─────────────────────────────────────────────────────────────
@@ -371,9 +440,8 @@ export interface EngineEvent<
 }
 
 /**
- * Typed payload definitions for all 30 known events.
+ * Typed payload definitions for all known events.
  * Every entry in EngineEventName MUST have a corresponding entry here.
- * Verification: count the entries — 30 event names → 30 payload entries.
  */
 export interface EngineEventPayloadMap {
   // ── Time (8) ──────────────────────────────────────────────────────────────
@@ -538,12 +606,19 @@ export interface RunStateSnapshotFields {
   readonly cascadesBrokenThisTick:    number;
 
   // ── Decision tracking (for Sovereignty Engine)
+  // Populated by EngineOrchestrator from CardEngine.tick() output at Step 1.5.
+  // Contains decisions resolved during the PREVIOUS tick so they are available
+  // to all engines in the current tick's snapshot.
   readonly decisionsThisTick: DecisionRecordField[];
 }
 
 /**
  * A single decision record within the snapshot.
- * Populated by TimeEngine/DecisionTimer at tick resolution.
+ * Projected from cards/types.ts DecisionRecord into the fields needed by
+ * zero/types.ts consumers (SovereigntyEngine, TensionEngine, etc.).
+ *
+ * PHASE 1: Populated by EngineOrchestrator.buildRunStateSnapshot() using
+ * this.lastTickDecisions, which is set after cardEngine.tick() completes at Step 1.5.
  */
 export interface DecisionRecordField {
   cardId:            string;
