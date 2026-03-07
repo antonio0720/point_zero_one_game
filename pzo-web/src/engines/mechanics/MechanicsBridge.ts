@@ -41,22 +41,18 @@
 // Density6 LLC · Point Zero One · Mechanics Layer · Confidential
 // ═══════════════════════════════════════════════════════════════════════════════
 
-import type { EventBus } from '../zero/EventBus';
+import type { EventBus, EngineEventName } from '../zero/EventBus';
 import type { MechanicRecord } from '../../data/mechanicsLoader';
 import {
   getExecFn,
   hasCompiledExec,
   getCompiledExecCount,
 } from './exec/index';
-import {
-  mechanicsRuntimeStore,
-  getConfidenceSync,
-} from '../../store/mechanicsRuntimeStore';
+import { getConfidenceSync } from '../../store/mechanicsRuntimeStore';
 import type {
   MechanicExecContext,
   MechanicExecResult,
   MechanicExecFn,
-  MechanicOutputs,
   CardPlayExecEvent,
   MechanicSnapshotView,
   CascadeLinkSpec,
@@ -66,9 +62,6 @@ import type {
 // ─────────────────────────────────────────────────────────────────────────────
 // CONSTANTS
 // ─────────────────────────────────────────────────────────────────────────────
-
-/** Max milliseconds allowed for a synchronous mechanic exec. */
-const SYNC_EXEC_TIMEOUT_MS = 50;
 
 /** Max milliseconds allowed for an async (ML) mechanic exec. */
 const ASYNC_EXEC_TIMEOUT_MS = 200;
@@ -81,7 +74,6 @@ const DELTA_EMIT_THRESHOLD = 0.001;
 // ─────────────────────────────────────────────────────────────────────────────
 
 export class MechanicsBridge {
-
   private readonly eventBus: EventBus;
 
   /**
@@ -105,10 +97,12 @@ export class MechanicsBridge {
    */
   public logRegistryStatus(mechanicCount: number): void {
     const compiled = getCompiledExecCount() + this.overrides.size;
-    const coverage = mechanicCount > 0 ? ((compiled / mechanicCount) * 100).toFixed(1) : '0';
+    const coverage =
+      mechanicCount > 0 ? ((compiled / mechanicCount) * 100).toFixed(1) : '0';
+
     console.info(
       `[MechanicsBridge] Registry: ${compiled}/${mechanicCount} compiled (${coverage}% coverage). ` +
-      `${mechanicCount - compiled} stubs active. Run build:mechanics to compile remainder.`,
+        `${mechanicCount - compiled} stubs active. Run build:mechanics to compile remainder.`,
     );
   }
 
@@ -180,25 +174,36 @@ export class MechanicsBridge {
 
     // ── Execute with error containment ──────────────────────────────────────
     let result: MechanicExecResult;
+
     try {
       const rawResult = execFn(ctx);
+
       if (rawResult instanceof Promise) {
-        result = await this.raceWithTimeout(rawResult, ASYNC_EXEC_TIMEOUT_MS, mechanic.mechanic_id);
+        result = await this.raceWithTimeout(
+          rawResult,
+          ASYNC_EXEC_TIMEOUT_MS,
+          mechanic.mechanic_id,
+        );
       } else {
         result = rawResult as MechanicExecResult;
       }
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : String(err);
-      console.error(`[MechanicsBridge] exec error — mechanic ${mechanic.mechanic_id} (${mechanic.exec_hook}): ${errorMessage}`);
+
+      console.error(
+        `[MechanicsBridge] exec error — mechanic ${mechanic.mechanic_id} (${mechanic.exec_hook}): ${errorMessage}`,
+      );
+
       result = {
-        mechanicId:      mechanic.mechanic_id,
-        execHook:        mechanic.exec_hook,
-        fired:           false,
-        outputs:         {},
+        mechanicId: mechanic.mechanic_id,
+        execHook: mechanic.exec_hook,
+        fired: false,
+        outputs: {},
         telemetryEvents: [],
         errorMessage,
-        executionMs:     performance.now() - startMs,
+        executionMs: performance.now() - startMs,
       };
+
       return result;
     }
 
@@ -228,26 +233,54 @@ export class MechanicsBridge {
     tickIndex: number,
   ): void {
     const out = result.outputs;
-    const meta = { mechanicId: mechanic.mechanic_id, execHook: mechanic.exec_hook, tickIndex };
+    const meta = {
+      mechanicId: mechanic.mechanic_id,
+      execHook: mechanic.exec_hook,
+      tickIndex,
+    };
 
     // ── Income delta → runStore.monthlyIncome ────────────────────────────────
-    if (out.incomeDelta !== undefined && Math.abs(out.incomeDelta) >= DELTA_EMIT_THRESHOLD) {
-      this.eventBus.emit('MECHANIC_INCOME_DELTA', { ...meta, delta: out.incomeDelta });
+    if (
+      out.incomeDelta !== undefined &&
+      Math.abs(out.incomeDelta) >= DELTA_EMIT_THRESHOLD
+    ) {
+      this.eventBus.emit('MECHANIC_INCOME_DELTA', {
+        ...meta,
+        delta: out.incomeDelta,
+      });
     }
 
     // ── Expense delta → runStore.monthlyExpenses ─────────────────────────────
-    if (out.expenseDelta !== undefined && Math.abs(out.expenseDelta) >= DELTA_EMIT_THRESHOLD) {
-      this.eventBus.emit('MECHANIC_EXPENSE_DELTA', { ...meta, delta: out.expenseDelta });
+    if (
+      out.expenseDelta !== undefined &&
+      Math.abs(out.expenseDelta) >= DELTA_EMIT_THRESHOLD
+    ) {
+      this.eventBus.emit('MECHANIC_EXPENSE_DELTA', {
+        ...meta,
+        delta: out.expenseDelta,
+      });
     }
 
     // ── Cash delta → runStore.cashBalance ────────────────────────────────────
-    if (out.cashDelta !== undefined && Math.abs(out.cashDelta) >= DELTA_EMIT_THRESHOLD) {
-      this.eventBus.emit('MECHANIC_CASH_DELTA', { ...meta, delta: out.cashDelta });
+    if (
+      out.cashDelta !== undefined &&
+      Math.abs(out.cashDelta) >= DELTA_EMIT_THRESHOLD
+    ) {
+      this.eventBus.emit('MECHANIC_CASH_DELTA', {
+        ...meta,
+        delta: out.cashDelta,
+      });
     }
 
     // ── Net worth delta → runStore.netWorth ──────────────────────────────────
-    if (out.netWorthDelta !== undefined && Math.abs(out.netWorthDelta) >= DELTA_EMIT_THRESHOLD) {
-      this.eventBus.emit('MECHANIC_NET_WORTH_DELTA', { ...meta, delta: out.netWorthDelta });
+    if (
+      out.netWorthDelta !== undefined &&
+      Math.abs(out.netWorthDelta) >= DELTA_EMIT_THRESHOLD
+    ) {
+      this.eventBus.emit('MECHANIC_NET_WORTH_DELTA', {
+        ...meta,
+        delta: out.netWorthDelta,
+      });
     }
 
     // ── Shield delta → ShieldEngine integrity update per layer ───────────────
@@ -264,28 +297,55 @@ export class MechanicsBridge {
     }
 
     // ── Heat delta → runStore.haterHeat ──────────────────────────────────────
-    if (out.heatDelta !== undefined && Math.abs(out.heatDelta) >= DELTA_EMIT_THRESHOLD) {
-      this.eventBus.emit('MECHANIC_HEAT_DELTA', { ...meta, delta: out.heatDelta });
+    if (
+      out.heatDelta !== undefined &&
+      Math.abs(out.heatDelta) >= DELTA_EMIT_THRESHOLD
+    ) {
+      this.eventBus.emit('MECHANIC_HEAT_DELTA', {
+        ...meta,
+        delta: out.heatDelta,
+      });
     }
 
     // ── Pressure delta → PressureEngine supplemental adjustment ─────────────
-    if (out.pressureDelta !== undefined && Math.abs(out.pressureDelta) >= DELTA_EMIT_THRESHOLD) {
-      this.eventBus.emit('MECHANIC_PRESSURE_DELTA', { ...meta, delta: out.pressureDelta });
+    if (
+      out.pressureDelta !== undefined &&
+      Math.abs(out.pressureDelta) >= DELTA_EMIT_THRESHOLD
+    ) {
+      this.eventBus.emit('MECHANIC_PRESSURE_DELTA', {
+        ...meta,
+        delta: out.pressureDelta,
+      });
     }
 
     // ── Tension delta → TensionEngine score adjustment ───────────────────────
-    if (out.tensionDelta !== undefined && Math.abs(out.tensionDelta) >= DELTA_EMIT_THRESHOLD) {
-      this.eventBus.emit('MECHANIC_TENSION_DELTA', { ...meta, delta: out.tensionDelta });
+    if (
+      out.tensionDelta !== undefined &&
+      Math.abs(out.tensionDelta) >= DELTA_EMIT_THRESHOLD
+    ) {
+      this.eventBus.emit('MECHANIC_TENSION_DELTA', {
+        ...meta,
+        delta: out.tensionDelta,
+      });
     }
 
     // ── CORD delta → SovereigntyEngine proof input ───────────────────────────
-    if (out.cordDelta !== undefined && Math.abs(out.cordDelta) >= DELTA_EMIT_THRESHOLD) {
-      this.eventBus.emit('MECHANIC_CORD_DELTA', { ...meta, delta: out.cordDelta });
+    if (
+      out.cordDelta !== undefined &&
+      Math.abs(out.cordDelta) >= DELTA_EMIT_THRESHOLD
+    ) {
+      this.eventBus.emit('MECHANIC_CORD_DELTA', {
+        ...meta,
+        delta: out.cordDelta,
+      });
     }
 
     // ── Freeze ticks → TimeEngine ────────────────────────────────────────────
     if (out.freezeTicks !== undefined && out.freezeTicks > 0) {
-      this.eventBus.emit('MECHANIC_FREEZE_TICKS', { ...meta, ticks: Math.floor(out.freezeTicks) });
+      this.eventBus.emit('MECHANIC_FREEZE_TICKS', {
+        ...meta,
+        ticks: Math.floor(out.freezeTicks),
+      });
     }
 
     // ── Cascade links → CascadeEngine.scheduleLink ───────────────────────────
@@ -297,18 +357,21 @@ export class MechanicsBridge {
 
     // ── Custom payload → mechanic-specific handler ───────────────────────────
     if (out.customPayload && Object.keys(out.customPayload).length > 0) {
-      this.eventBus.emit('MECHANIC_CUSTOM_PAYLOAD', { ...meta, payload: out.customPayload });
+      this.eventBus.emit('MECHANIC_CUSTOM_PAYLOAD', {
+        ...meta,
+        payload: out.customPayload,
+      });
     }
 
     // ── MECHANIC_FIRED — always emitted for any fired mechanic ───────────────
     // Consumed by: SovereigntyEngine proof pipeline, DevPanel, telemetry.
     this.eventBus.emit('MECHANIC_FIRED', {
       ...meta,
-      priority:  mechanic.priority,
-      batch:     mechanic.batch,
-      layer:     mechanic.layer,
-      family:    mechanic.family,
-      kind:      mechanic.kind,
+      priority: mechanic.priority,
+      batch: mechanic.batch,
+      layer: mechanic.layer,
+      family: mechanic.family,
+      kind: mechanic.kind,
     });
   }
 
@@ -336,18 +399,21 @@ export class MechanicsBridge {
   }
 
   private buildTelemetryEmitter(mechanicId: string) {
-    return (event: string, payload: Record<string, unknown>) => {
-      this.eventBus.emit(event, { mechanicId, ...payload });
+    return (event: EngineEventName, payload: Record<string, unknown>) => {
+      this.eventBus.emit(event, { mechanicId, ...payload } as any);
     };
   }
 
-  private emitCascadeLink(link: CascadeLinkSpec, meta: Record<string, unknown>): void {
+  private emitCascadeLink(
+    link: CascadeLinkSpec,
+    meta: { mechanicId: string; execHook: string; tickIndex: number },
+  ): void {
     this.eventBus.emit('MECHANIC_CASCADE_LINK', {
       ...meta,
-      linkId:     link.linkId,
+      linkId: link.linkId,
       delayTicks: link.delayTicks,
-      magnitude:  link.magnitude,
-      chainType:  link.chainType,
+      magnitude: link.magnitude,
+      chainType: link.chainType,
     });
   }
 
@@ -364,27 +430,30 @@ export class MechanicsBridge {
       const timer = setTimeout(() => {
         resolve({
           mechanicId,
-          execHook:        '',
-          fired:           false,
-          outputs:         {},
+          execHook: '',
+          fired: false,
+          outputs: {},
           telemetryEvents: [],
-          errorMessage:    `Timeout after ${timeoutMs}ms`,
-          executionMs:     timeoutMs,
+          errorMessage: `Timeout after ${timeoutMs}ms`,
+          executionMs: timeoutMs,
         });
       }, timeoutMs);
 
       promise.then(
-        (result) => { clearTimeout(timer); resolve(result); },
+        (resolvedResult) => {
+          clearTimeout(timer);
+          resolve(resolvedResult);
+        },
         (err) => {
           clearTimeout(timer);
           resolve({
             mechanicId,
-            execHook:        '',
-            fired:           false,
-            outputs:         {},
+            execHook: '',
+            fired: false,
+            outputs: {},
             telemetryEvents: [],
-            errorMessage:    err instanceof Error ? err.message : String(err),
-            executionMs:     timeoutMs,
+            errorMessage: err instanceof Error ? err.message : String(err),
+            executionMs: timeoutMs,
           });
         },
       );

@@ -9,7 +9,7 @@
 // RULES:
 //   ✦ Zero runtime logic — pure TypeScript declarations only.
 //   ✦ Zero imports — this file imports nothing.
-//   ✦ All 30 EngineEventName strings must have a matching entry in EngineEventPayloadMap.
+//   ✦ All EngineEventName strings must have a matching entry in EngineEventPayloadMap.
 //   ✦ All types used by other core files originate here.
 //
 // PHASE 1 CHANGES:
@@ -20,6 +20,11 @@
 //     structural typing. No import required in either direction.
 //   ✦ decisionsThisTick: DecisionRecordField[] already exists in
 //     RunStateSnapshotFields — populated by EngineOrchestrator after Step 1.5.
+//
+// PHASE 5 CHANGES:
+//   ✦ Added 14 MECHANIC_* events to EngineEventName union.
+//   ✦ Added 14 matching payload definitions to EngineEventPayloadMap.
+//   ✦ Mechanics events are emitted by MechanicsBridge and MechanicsRouter.
 //
 // Density6 LLC · Point Zero One · Engine 0 · Confidential
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -330,7 +335,6 @@ export interface CardReader {
 /**
  * The master event name union — every event string that can travel on the bus.
  * Adding a new event REQUIRES adding it here AND in EngineEventPayloadMap.
- * Count: 30 event types.
  */
 export type EngineEventName =
   // ── Time events (8)
@@ -422,7 +426,22 @@ export type EngineEventName =
   | 'RUN_STARTED'
   | 'RUN_ENDED'
   | 'ENGINE_ERROR'
-  | 'TICK_STEP_ERROR';
+  | 'TICK_STEP_ERROR'
+  // ── Mechanics events (14) — emitted by MechanicsBridge and MechanicsRouter
+  | 'MECHANIC_INCOME_DELTA'
+  | 'MECHANIC_EXPENSE_DELTA'
+  | 'MECHANIC_CASH_DELTA'
+  | 'MECHANIC_NET_WORTH_DELTA'
+  | 'MECHANIC_SHIELD_DELTA'
+  | 'MECHANIC_HEAT_DELTA'
+  | 'MECHANIC_PRESSURE_DELTA'
+  | 'MECHANIC_TENSION_DELTA'
+  | 'MECHANIC_CORD_DELTA'
+  | 'MECHANIC_FREEZE_TICKS'
+  | 'MECHANIC_CUSTOM_PAYLOAD'
+  | 'MECHANIC_FIRED'
+  | 'MECHANIC_CASCADE_LINK'
+  | 'MECHANICS_TICK_COMPLETE';
 
 /**
  * Generic event envelope — every event on the bus has this shape.
@@ -541,6 +560,22 @@ export interface EngineEventPayloadMap {
   'RUN_ENDED':                { runId: string; outcome: RunOutcome; finalNetWorth: number };
   'ENGINE_ERROR':             { engineId: EngineId; error: string; step: number };
   'TICK_STEP_ERROR':          { step: number; engineId?: EngineId; error: string };
+
+  // ── Mechanics (14) ─────────────────────────────────────────────────────────
+  'MECHANIC_INCOME_DELTA':    { mechanicId: string; execHook: string; tickIndex: number; delta: number };
+  'MECHANIC_EXPENSE_DELTA':   { mechanicId: string; execHook: string; tickIndex: number; delta: number };
+  'MECHANIC_CASH_DELTA':      { mechanicId: string; execHook: string; tickIndex: number; delta: number };
+  'MECHANIC_NET_WORTH_DELTA': { mechanicId: string; execHook: string; tickIndex: number; delta: number };
+  'MECHANIC_SHIELD_DELTA':    { mechanicId: string; execHook: string; tickIndex: number; layerId: string; delta: number };
+  'MECHANIC_HEAT_DELTA':      { mechanicId: string; execHook: string; tickIndex: number; delta: number };
+  'MECHANIC_PRESSURE_DELTA':  { mechanicId: string; execHook: string; tickIndex: number; delta: number };
+  'MECHANIC_TENSION_DELTA':   { mechanicId: string; execHook: string; tickIndex: number; delta: number };
+  'MECHANIC_CORD_DELTA':      { mechanicId: string; execHook: string; tickIndex: number; delta: number };
+  'MECHANIC_FREEZE_TICKS':    { mechanicId: string; execHook: string; tickIndex: number; ticks: number };
+  'MECHANIC_CUSTOM_PAYLOAD':  { mechanicId: string; execHook: string; tickIndex: number; payload: Record<string, unknown> };
+  'MECHANIC_FIRED':           { mechanicId: string; execHook: string; tickIndex: number; priority: number; batch: number; layer: string; family: string; kind: string };
+  'MECHANIC_CASCADE_LINK':    { mechanicId: string; execHook: string; tickIndex: number; linkId: string; delayTicks: number; magnitude: number; chainType: string };
+  'MECHANICS_TICK_COMPLETE':  { tickIndex: number; mechanicsFired: number; mechanicsSkipped: number; mechanicsErrored: number; totalExecutionMs: number };
 }
 
 // ── RUNSTATESNAPSHOT FIELDS ────────────────────────────────────────────────────
