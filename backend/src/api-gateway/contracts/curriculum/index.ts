@@ -3,4 +3,4 @@ export * from './gateway_response';
 export * from './institution.dto';
 export * from './cohort.dto';
 export * from './pack.dto';
-export * from './benchmark.dto';
+export * as benchmark from './benchmark.dto';

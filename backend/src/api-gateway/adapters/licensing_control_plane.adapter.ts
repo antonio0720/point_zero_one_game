@@ -293,8 +293,11 @@ export class LicensingControlPlaneAdapter {
       return {
         items: result.rows.map((row) => this.mapInstitution(row)),
         meta: {
+          mode: 'offset',
           page,
           pageSize,
+          limit: pageSize,
+          pageCount: Math.max(1, Math.ceil(total / pageSize)),
           total,
           hasMore: offset + pageSize < total,
         },
@@ -392,8 +395,11 @@ export class LicensingControlPlaneAdapter {
       return {
         items: result.rows.map((row) => this.mapCohort(row)),
         meta: {
+          mode: 'offset',
           page,
           pageSize,
+          limit: pageSize,
+          pageCount: Math.max(1, Math.ceil(total / pageSize)),
           total,
           hasMore: offset + pageSize < total,
         },
