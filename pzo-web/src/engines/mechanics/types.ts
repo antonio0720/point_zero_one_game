@@ -15,7 +15,7 @@
 // Density6 LLC · Point Zero One · Mechanics Layer · Confidential
 // ═══════════════════════════════════════════════════════════════════════════════
 
-import type { ShieldLayerId } from '../zero/types';
+import type { ShieldLayerId, EngineEventName } from '../zero/types';
 import type { MechanicRecord, MechanicLayer } from '../../data/mechanicsLoader';
 
 // ─────────────────────────────────────────────────────────────────────────────
