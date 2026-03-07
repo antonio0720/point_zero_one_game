@@ -7,18 +7,231 @@
  * Inside handler: req.identityId — the verified player ID.
  */
 
-import { Request, Response, NextFunction } from 'express';
+import type { NextFunction, Request, Response } from 'express';
 
-type AsyncRouteHandler = (req: Request, res: Response, next?: NextFunction) => Promise<void> | void;
-
-export function AuthMiddleware(handler: AsyncRouteHandler): AsyncRouteHandler {
-  return async (req: Request, res: Response, next?: NextFunction): Promise<void> => {
-    // req.isAuthenticated and req.identityId are attached by the upstream
-    // authMiddleware in src/middleware/auth_middleware.ts
-    if (!req.isAuthenticated || !req.identityId) {
-      res.status(401).json({ ok: false, error: 'unauthorized' });
-      return;
+declare global {
+  namespace Express {
+    interface Request {
+      identityId?: string;
+      isAuthenticated?: boolean;
+      isGuest?: boolean;
+      authScopes?: readonly string[];
+      authRoles?: readonly string[];
     }
-    return handler(req, res, next);
+
+    interface Locals {
+      auth?: {
+        identityId: string;
+        isAuthenticated: true;
+        isGuest: false;
+        scopes: readonly string[];
+        roles: readonly string[];
+      };
+    }
+  }
+}
+
+export type AuthenticatedRequest = Request & {
+  identityId: string;
+  isAuthenticated: true;
+  isGuest?: false;
+  authScopes?: readonly string[];
+  authRoles?: readonly string[];
+};
+
+export type AuthenticatedRouteHandler<TReq extends AuthenticatedRequest = AuthenticatedRequest> = (
+  req: TReq,
+  res: Response,
+  next: NextFunction,
+) => Promise<unknown> | unknown;
+
+export type AuthMiddlewareOptions<TReq extends AuthenticatedRequest = AuthenticatedRequest> = {
+  requireScopes?: readonly string[];
+  requireRoles?: readonly string[];
+  authorize?: (req: TReq, res: Response) => Promise<boolean> | boolean;
+  onUnauthorized?: (req: Request, res: Response) => void;
+  onForbidden?: (req: TReq, res: Response) => void;
+  exposeAuthOnLocals?: boolean;
+};
+
+type ErrorWithStatus = Error & {
+  status?: number;
+  statusCode?: number;
+  code?: string;
+};
+
+const DEFAULT_UNAUTHORIZED_BODY = Object.freeze({
+  ok: false,
+  error: 'unauthorized',
+  code: 'AUTH_UNAUTHORIZED',
+});
+
+const DEFAULT_FORBIDDEN_BODY = Object.freeze({
+  ok: false,
+  error: 'forbidden',
+  code: 'AUTH_FORBIDDEN',
+});
+
+function getRequestId(req: Request): string | null {
+  const value = req.headers['x-request-id'];
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function respondUnauthorized(req: Request, res: Response): void {
+  if (res.headersSent) {
+    return;
+  }
+
+  const requestId = getRequestId(req);
+
+  res.status(401).json({
+    ...DEFAULT_UNAUTHORIZED_BODY,
+    ...(requestId ? { requestId } : {}),
+  });
+}
+
+function respondForbidden(req: AuthenticatedRequest, res: Response): void {
+  if (res.headersSent) {
+    return;
+  }
+
+  const requestId = getRequestId(req);
+
+  res.status(403).json({
+    ...DEFAULT_FORBIDDEN_BODY,
+    ...(requestId ? { requestId } : {}),
+  });
+}
+
+function normalizeClaims(values?: readonly string[]): readonly string[] {
+  if (!Array.isArray(values) || values.length === 0) {
+    return [];
+  }
+
+  const unique = new Set<string>();
+
+  for (const value of values) {
+    if (typeof value !== 'string') {
+      continue;
+    }
+
+    const normalized = value.trim();
+    if (normalized) {
+      unique.add(normalized);
+    }
+  }
+
+  return Object.freeze([...unique]);
+}
+
+function hasAllClaims(
+  actual: readonly string[] | undefined,
+  required: readonly string[] | undefined,
+): boolean {
+  if (!required || required.length === 0) {
+    return true;
+  }
+
+  const actualSet = new Set(normalizeClaims(actual));
+
+  for (const claim of normalizeClaims(required)) {
+    if (!actualSet.has(claim)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+export function isAuthenticatedRequest(req: Request): req is AuthenticatedRequest {
+  return req.isAuthenticated === true && typeof req.identityId === 'string' && req.identityId.trim().length > 0;
+}
+
+export function assertAuthenticated(req: Request): asserts req is AuthenticatedRequest {
+  if (!isAuthenticatedRequest(req)) {
+    const error = new Error('Request is not authenticated') as ErrorWithStatus;
+    error.name = 'AuthenticationError';
+    error.code = 'AUTH_UNAUTHORIZED';
+    error.status = 401;
+    throw error;
+  }
+}
+
+function bindAuthLocals(req: AuthenticatedRequest, res: Response): void {
+  res.locals.auth = {
+    identityId: req.identityId,
+    isAuthenticated: true,
+    isGuest: false,
+    scopes: normalizeClaims(req.authScopes),
+    roles: normalizeClaims(req.authRoles),
+  };
+}
+
+function isErrorLike(value: unknown): value is Error {
+  return value instanceof Error;
+}
+
+export function AuthMiddleware<TReq extends AuthenticatedRequest = AuthenticatedRequest>(
+  handler: AuthenticatedRouteHandler<TReq>,
+  options: AuthMiddlewareOptions<TReq> = {},
+): (req: Request, res: Response, next: NextFunction) => Promise<void> {
+  const {
+    requireScopes,
+    requireRoles,
+    authorize,
+    onUnauthorized = respondUnauthorized,
+    onForbidden = respondForbidden as (req: TReq, res: Response) => void,
+    exposeAuthOnLocals = true,
+  } = options;
+
+  return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      if (!isAuthenticatedRequest(req)) {
+        onUnauthorized(req, res);
+        return;
+      }
+
+      const authenticatedReq = req as TReq;
+
+      if (!hasAllClaims(authenticatedReq.authScopes, requireScopes)) {
+        onForbidden(authenticatedReq, res);
+        return;
+      }
+
+      if (!hasAllClaims(authenticatedReq.authRoles, requireRoles)) {
+        onForbidden(authenticatedReq, res);
+        return;
+      }
+
+      if (exposeAuthOnLocals) {
+        bindAuthLocals(authenticatedReq, res);
+      }
+
+      if (authorize) {
+        const allowed = await authorize(authenticatedReq, res);
+        if (!allowed) {
+          onForbidden(authenticatedReq, res);
+          return;
+        }
+      }
+
+      await Promise.resolve(handler(authenticatedReq, res, next));
+    } catch (error: unknown) {
+      if (res.headersSent) {
+        next(error);
+        return;
+      }
+
+      if (isErrorLike(error)) {
+        next(error);
+        return;
+      }
+
+      const wrapped = new Error('Unhandled non-error thrown from authenticated route') as ErrorWithStatus;
+      wrapped.name = 'AuthMiddlewareUnhandledThrow';
+      wrapped.code = 'AUTH_HANDLER_THROW';
+      wrapped.statusCode = 500;
+      next(wrapped);
+    }
   };
 }
