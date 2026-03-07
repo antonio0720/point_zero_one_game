@@ -1,36 +1,50 @@
-/**
- * PlayPage component for Point Zero One Digital's financial roguelike game.
- */
+'use client';
 
-import React, { useState } from 'react';
+import { useState } from 'react';
 import GoalTemplatePicker from './GoalTemplatePicker';
 import ProfileTemplatePicker from './ProfileTemplatePicker';
 
-type Props = {};
-
-const PlayPage: React.FC<Props> = () => {
+export default function PlayPage() {
   const [selectedGoalTemplate, setSelectedGoalTemplate] = useState<string | null>(null);
   const [selectedProfileTemplate, setSelectedProfileTemplate] = useState<string | null>(null);
 
+  const canStart = selectedGoalTemplate !== null && selectedProfileTemplate !== null;
+
   const handleStartRun = () => {
-    // Start the run with the selected goal and profile templates.
-    // This function should be deterministic to ensure replayability.
+    console.log('Starting run with:', {
+      goalTemplate: selectedGoalTemplate,
+      profileTemplate: selectedProfileTemplate,
+    });
   };
 
   return (
-    <div>
+    <main style={{ padding: 24 }}>
       <h1>Play</h1>
-      {selectedGoalTemplate === null && (
-        <GoalTemplatePicker onSelect={setSelectedGoalTemplate} />
-      )}
-      {selectedProfileTemplate === null && (
-        <ProfileTemplatePicker onSelect={setSelectedProfileTemplate} />
-      )}
-      {selectedGoalTemplate !== null && selectedProfileTemplate !== null && (
-        <button onClick={handleStartRun}>Start Run</button>
-      )}
-    </div>
-  );
-};
 
-export default PlayPage;
+      {selectedGoalTemplate === null ? (
+        <GoalTemplatePicker onSelect={setSelectedGoalTemplate} />
+      ) : (
+        <p>
+          Goal selected: <strong>{selectedGoalTemplate}</strong>
+        </p>
+      )}
+
+      {selectedProfileTemplate === null ? (
+        <ProfileTemplatePicker onSelect={setSelectedProfileTemplate} />
+      ) : (
+        <p>
+          Profile selected: <strong>{selectedProfileTemplate}</strong>
+        </p>
+      )}
+
+      <button
+        type="button"
+        onClick={handleStartRun}
+        disabled={!canStart}
+        style={{ marginTop: 16, padding: '10px 16px', cursor: canStart ? 'pointer' : 'not-allowed' }}
+      >
+        Start Run
+      </button>
+    </main>
+  );
+}
