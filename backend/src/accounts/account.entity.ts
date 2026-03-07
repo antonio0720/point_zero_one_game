@@ -1,4 +1,4 @@
-///Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/backend/src/accounts/account.entity.ts
+//backend/src/accounts/account.entity.ts
 
 import {
   Entity,
@@ -7,7 +7,7 @@ import {
   CreateDateColumn,
 } from 'typeorm';
 
-import { AbuseFlag } from '../security/account_transfer_friction';
+import type { AbuseFlag } from '../security/account_transfer_friction.types';
 
 @Entity('accounts')
 export class Account {
@@ -30,7 +30,11 @@ export class Account {
   @Column({ type: 'boolean', name: 'needs_re_verification', default: false })
   needsReVerification: boolean;
 
-  @Column({ type: 'timestamptz', name: 're_verification_requested_at', nullable: true })
+  @Column({
+    type: 'timestamptz',
+    name: 're_verification_requested_at',
+    nullable: true,
+  })
   reVerificationRequestedAt: Date | null;
 
   // ── Abuse tracking ────────────────────────────────────────────────────────
@@ -41,7 +45,11 @@ export class Account {
   @Column({ type: 'jsonb', name: 'abuse_flags', default: [] })
   abuseFlags: AbuseFlag[];
 
-  @Column({ type: 'timestamptz', name: 'abuse_flagged_at', nullable: true })
+  @Column({
+    type: 'timestamptz',
+    name: 'abuse_flagged_at',
+    nullable: true,
+  })
   abuseFlaggedAt: Date | null;
 
   @CreateDateColumn({ name: 'created_at' })
