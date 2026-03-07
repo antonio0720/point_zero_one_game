@@ -12,9 +12,8 @@ export function buildCreateInstitutionRequest(
   return {
     name: 'Test Academy',
     domain: 'testacademy.edu',
-    maxLearners: 500,
     ...overrides,
-  };
+  } as CreateInstitutionRequest;
 }
 
 export function buildInstitutionResponse(
@@ -24,13 +23,6 @@ export function buildInstitutionResponse(
     id: 1,
     name: 'Test Academy',
     domain: 'testacademy.edu',
-    licenseTier: 'pilot',
-    licenseExpiresAt: null,
-    maxCohorts: 10,
-    maxLearners: 500,
-    ssoEnabled: false,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
     ...overrides,
-  };
+  } as InstitutionResponse;
 }
