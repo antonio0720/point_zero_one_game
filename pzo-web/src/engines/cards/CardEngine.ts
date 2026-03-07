@@ -83,12 +83,9 @@ const perfNow = (): number =>
 // ═══════════════════════════════════════════════════════════════════════════════
 
 export class CardEngine {
-
-  // ── IEngine API surface ──────────────────────────────────────────────────────
   public readonly engineId: EngineId = EngineId.CARD;
   private _health: EngineHealth = EngineHealth.REGISTERED;
 
-  // ── Sub-components ──────────────────────────────────────────────────────────
   private handManager:     HandManager;
   private overlayEngine:   ModeOverlayEngine;
   private timingValidator: TimingValidator;
@@ -98,22 +95,18 @@ export class CardEngine {
   private scorer:          CardScorer;
   private uxBridge:        CardUXBridge;
 
-  // ── Config ──────────────────────────────────────────────────────────────────
   private params!:     CardEngineInitParams;
   private mode!:       GameMode;
   private maxHandSize: number = 5;
 
   private readonly eventBus: EventBus;
 
-  // ── Run state ───────────────────────────────────────────────────────────────
   private isRunning:   boolean = false;
   private currentTick: number  = 0;
   private lastTickMs:  number  = 0;
 
-  // ── Decision records accumulated this tick ──────────────────────────────────
   private decisionsThisTick: DecisionRecord[] = [];
 
-  // ── Timing context — updated each tick ─────────────────────────────────────
   private counterWindowOpen:     boolean       = false;
   private counterWindowAttackId: string | null = null;
   private counterWindowEndMs:    number        = 0;
@@ -125,23 +118,15 @@ export class CardEngine {
   private phaseBoundaryWindow:   PhaseBoundaryWindow | null = null;
   private sovereigntyWindowOpen: boolean = false;
 
-  // ── Predator: Battle Budget ──────────────────────────────────────────────────
   private battleBudget: number = 0;
 
-  // ── Syndicate: Defection tracking ──────────────────────────────────────────
   private defectionStepHistory: DefectionStep[] = [];
   private lastDefectionTick:    number          = -1;
 
-  // ── Last played card ref (CardReader) ────────────────────────────────────────
   private lastPlayedCard: CardInHand | null = null;
 
-  // ── Unsubscribe handles ─────────────────────────────────────────────────────
   private unsubCounterWindow: (() => void) | null = null;
   private unsubRescueWindow:  (() => void) | null = null;
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  // CONSTRUCTOR
-  // ═══════════════════════════════════════════════════════════════════════════
 
   constructor(eventBus: EventBus) {
     this.eventBus = eventBus;
@@ -156,10 +141,6 @@ export class CardEngine {
     this.uxBridge        = null as any;
   }
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // IENGINE API SURFACE
-  // ═══════════════════════════════════════════════════════════════════════════
-
   public getName(): string {
     return 'CardEngine';
   }
@@ -171,10 +152,6 @@ export class CardEngine {
   public setHealth(health: EngineHealth): void {
     this._health = health;
   }
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  // LIFECYCLE
-  // ═══════════════════════════════════════════════════════════════════════════
 
   public init(params: CardEngineInitParams): void {
     this.params      = params;
@@ -241,10 +218,6 @@ export class CardEngine {
     this.lastPlayedCard        = null;
     this._health               = EngineHealth.REGISTERED;
   }
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  // PER-TICK SEQUENCE
-  // ═══════════════════════════════════════════════════════════════════════════
 
   public tick(tickIndex: number): DecisionRecord[] {
     if (!this.isRunning) return [];
@@ -341,10 +314,6 @@ export class CardEngine {
     return [...this.decisionsThisTick];
   }
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // PLAY A CARD
-  // ═══════════════════════════════════════════════════════════════════════════
-
   public queuePlay(request: CardPlayRequest): void {
     this.handManager.queuePlay(request);
   }
@@ -354,10 +323,6 @@ export class CardEngine {
     if (!card) return false;
     return this.processPlayRequest(request, this.currentTick) !== null;
   }
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  // HOLD SYSTEM
-  // ═══════════════════════════════════════════════════════════════════════════
 
   public holdCard(instanceId: string): boolean {
     if (this.mode !== GameMode.GO_ALONE) return false;
@@ -385,10 +350,6 @@ export class CardEngine {
     return slot.card;
   }
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // CARD READER INTERFACE
-  // ═══════════════════════════════════════════════════════════════════════════
-
   public getReader(): import('../zero/types').CardReader {
     return {
       getHandSize: () => this.handManager.getHandSize(),
@@ -400,10 +361,6 @@ export class CardEngine {
       getLastPlayedCardId: () => this.lastPlayedCard?.definition.cardId ?? null,
     };
   }
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  // PRIVATE: PROCESS PLAY REQUEST
-  // ═══════════════════════════════════════════════════════════════════════════
 
   private processPlayRequest(
     request: CardPlayRequest,
@@ -462,10 +419,6 @@ export class CardEngine {
     return record;
   }
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // PRIVATE: MODE-SPECIFIC PLAY HOOKS
-  // ═══════════════════════════════════════════════════════════════════════════
-
   private handleModeSpecificPlay(
     card: CardInHand,
     request: CardPlayRequest,
@@ -507,10 +460,6 @@ export class CardEngine {
     }
   }
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // PRIVATE: DRAW + REGISTER WINDOW
-  // ═══════════════════════════════════════════════════════════════════════════
-
   private drawAndRegister(tickIndex: number): CardInHand | null {
     const result = this.handManager.draw(tickIndex);
     if (!result.drawn) return null;
@@ -532,10 +481,6 @@ export class CardEngine {
     this.uxBridge.emitCardDrawn(card, tickIndex);
     return card;
   }
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  // PRIVATE: HELPERS
-  // ═══════════════════════════════════════════════════════════════════════════
 
   private patchCardWindowId(instanceId: string, windowId: string): void {
     const card = this.handManager.getCard(instanceId);
@@ -648,10 +593,6 @@ export class CardEngine {
       );
     }
   }
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  // ACCESSORS
-  // ═══════════════════════════════════════════════════════════════════════════
 
   public getHandSnapshot(): CardInHand[] {
     return this.handManager.getHandArray();

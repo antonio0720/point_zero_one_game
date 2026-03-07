@@ -1,88 +1,132 @@
 /**
  * hooks/useCardEngine.ts — POINT ZERO ONE
  * Reactive card engine interface for React components.
- * Reads live hand state from the card store slice and surfaces
- * cardEngine imperatives as stable callbacks.
+ * Reads live hand state from the engine store card slice and routes
+ * imperative actions through the shared EngineOrchestrator singleton.
  *
  * FILE LOCATION: pzo-web/src/hooks/useCardEngine.ts
  * Density6 LLC · Confidential
  */
 
-import { useCallback } from 'react';
-import { cardEngine } from '../engines/cards/CardEngine';
+import { useCallback, useMemo } from 'react';
+import { orchestrator } from '../engines/zero/EngineOrchestrator';
 import { useEngineStore } from '../store/engineStore';
 import type { CardInHand, DecisionRecord } from '../engines/cards/types';
 
 // ── Public surface ─────────────────────────────────────────────────────────
 
 export interface CardEngineActions {
-  // ── Imperative actions ────────────────────────────────────────────────────
   /**
-   * Queue a card for play in the specified zone.
-   * Routes through CardEngine.queuePlay() which validates timing class,
-   * energy cost, and window state before committing.
-   * No-op (with console.warn) if the card is unplayable at the current tick.
+   * Queue a card for play.
+   *
+   * NOTE:
+   * The existing external API in this hook still accepts (cardId, zoneId),
+   * but the underlying CardEngine/Orchestrator contract expects:
+   *   instanceId + choiceId + timestamp
+   *
+   * Here, "cardId" is treated as the live card instanceId already present
+   * in the player hand, and "zoneId" is treated as the selected choiceId.
    */
   queuePlay: (cardId: string, zoneId: string) => void;
 
   /**
    * Place a card in the hold slot. Max 1 held card at a time.
-   * Held cards are exempt from draw-discard cycling while held.
    */
   holdCard: (cardId: string) => void;
 
   /**
-   * Release a held card back to the active hand.
+   * Release the currently held card.
+   *
+   * The CardEngine API does not require an ID for release, but this hook keeps
+   * the old signature for compatibility with existing callers.
    */
   releaseHold: (cardId: string) => void;
 
   /**
    * Return an immutable snapshot of the current hand at call-time.
-   * Useful for AI/automation layers that need a point-in-time copy.
    */
   getHandSnapshot: () => CardInHand[];
 
   // ── Reactive store reads (re-render on change) ────────────────────────────
-  /** Live hand from card store slice. Use this for rendering. */
   hand: CardInHand[];
 
-  /** True when a decision window is currently open for card play. */
+  /**
+   * True when one or more decision windows are open.
+   */
   windowOpen: boolean;
 
-  /** Ticks remaining in the current decision window. */
+  /**
+   * Lowest remaining decision window time, in milliseconds.
+   *
+   * The hook preserves the legacy property name `windowTicksLeft` to avoid
+   * downstream UI breakage, but the card slice now tracks remainingMs.
+   */
   windowTicksLeft: number;
 
-  /** IDs of cards currently in the hold slot. */
+  /**
+   * Instance IDs of cards currently being held.
+   */
   heldCards: string[];
 
-  /** Decision records resolved during the most recent tick. */
+  /**
+   * Decision records are not currently stored in the card slice.
+   * This remains an empty array until a dedicated slice field is added.
+   */
   decisionsThisTick: DecisionRecord[];
 
-  /** Whether the card engine is fully initialised and ready. */
+  /**
+   * Derived readiness flag based on Engine 0 lifecycle state.
+   */
   isReady: boolean;
 }
 
 // ── Hook ──────────────────────────────────────────────────────────────────────
 
-/**
- * useCardEngine
- *
- * Single integration point for all card interactions in game screens.
- * Imperative methods (queuePlay, holdCard, etc.) are stable across renders
- * via useCallback with no deps — they delegate directly to the CardEngine
- * singleton and are side-effect safe to call in event handlers.
- *
- * Reactive state (hand, windowOpen, etc.) is sourced from the Zustand
- * card store slice and triggers component re-renders only on change.
- */
 export function useCardEngine(): CardEngineActions {
   // ── Store reads ───────────────────────────────────────────────────────────
-  const hand               = useEngineStore(s => s.card.hand);
-  const windowOpen         = useEngineStore(s => s.card.windowOpen);
-  const windowTicksLeft    = useEngineStore(s => s.card.windowTicksLeft);
-  const heldCards          = useEngineStore(s => s.card.heldCards);
-  const decisionsThisTick  = useEngineStore(s => s.card.decisionsThisTick);
-  const isReady            = useEngineStore(s => s.card.isReady ?? false);
+  const hand = useEngineStore((s) => s.card.hand);
+  const holdSlot = useEngineStore((s) => s.card.holdSlot);
+  const openDecisionWindows = useEngineStore((s) => s.card.openDecisionWindows);
+  const lifecycleState = useEngineStore((s) => s.run.lifecycleState);
+
+  // ── Derived reactive state ────────────────────────────────────────────────
+  const windowOpen = useMemo(
+    () => Object.keys(openDecisionWindows).length > 0,
+    [openDecisionWindows],
+  );
+
+  const windowTicksLeft = useMemo(() => {
+    const windows = Object.values(openDecisionWindows);
+    if (windows.length === 0) return 0;
+
+    let minRemaining = Number.POSITIVE_INFINITY;
+    for (const window of windows) {
+      if (
+        typeof window?.remainingMs === 'number' &&
+        window.remainingMs < minRemaining
+      ) {
+        minRemaining = window.remainingMs;
+      }
+    }
+
+    return Number.isFinite(minRemaining) ? Math.max(0, Math.ceil(minRemaining)) : 0;
+  }, [openDecisionWindows]);
+
+  const heldCards = useMemo<string[]>(
+    () => (holdSlot?.card?.instanceId ? [holdSlot.card.instanceId] : []),
+    [holdSlot],
+  );
+
+  const decisionsThisTick = useMemo<DecisionRecord[]>(() => [], []);
+
+  const isReady = useMemo(
+    () =>
+      lifecycleState === 'ACTIVE' ||
+      lifecycleState === 'TICK_LOCKED' ||
+      lifecycleState === 'ENDING' ||
+      lifecycleState === 'ENDED',
+    [lifecycleState],
+  );
 
   // ── Stable imperative callbacks ───────────────────────────────────────────
 
@@ -91,8 +135,13 @@ export function useCardEngine(): CardEngineActions {
       console.warn('[useCardEngine] queuePlay: missing cardId or zoneId');
       return;
     }
+
     try {
-      cardEngine.queuePlay(cardId, zoneId);
+      orchestrator.queueCardPlay({
+        instanceId: cardId,
+        choiceId: zoneId,
+        timestamp: Date.now(),
+      });
     } catch (err) {
       console.error('[useCardEngine] queuePlay failed:', err);
     }
@@ -103,20 +152,17 @@ export function useCardEngine(): CardEngineActions {
       console.warn('[useCardEngine] holdCard: missing cardId');
       return;
     }
+
     try {
-      cardEngine.holdCard(cardId);
+      orchestrator.holdCard(cardId);
     } catch (err) {
       console.error('[useCardEngine] holdCard failed:', err);
     }
   }, []);
 
-  const releaseHold = useCallback((cardId: string): void => {
-    if (!cardId) {
-      console.warn('[useCardEngine] releaseHold: missing cardId');
-      return;
-    }
+  const releaseHold = useCallback((_cardId: string): void => {
     try {
-      cardEngine.releaseHold(cardId);
+      orchestrator.releaseHold();
     } catch (err) {
       console.error('[useCardEngine] releaseHold failed:', err);
     }
@@ -124,7 +170,7 @@ export function useCardEngine(): CardEngineActions {
 
   const getHandSnapshot = useCallback((): CardInHand[] => {
     try {
-      return cardEngine.getHandSnapshot();
+      return orchestrator.getHandSnapshot();
     } catch (err) {
       console.error('[useCardEngine] getHandSnapshot failed:', err);
       return [];
