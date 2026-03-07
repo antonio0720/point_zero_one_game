@@ -1,21 +1,26 @@
+// backend/test/curriculum_gateway/schema_validation.test.ts
+
 import { describe, expect, it } from 'vitest';
 import { CreateInstitutionSchema } from '../../src/api-gateway/contracts/curriculum/institution.dto';
 import { CreateCohortSchema } from '../../src/api-gateway/contracts/curriculum/cohort.dto';
 import { CreatePackSchema } from '../../src/api-gateway/contracts/curriculum/pack.dto';
 import { CreateBenchmarkDefinitionSchema } from '../../src/api-gateway/contracts/curriculum/benchmark.dto';
+import type { ValidationResult } from '../../src/api-gateway/middleware/validation/schema_validator';
 import { validateSchemaValue } from '../../src/api-gateway/middleware/validation/schema_validator';
+
+function expectValidationFailure(
+  result: ValidationResult,
+): void {
+  expect(result.ok).toBe(false);
+}
 
 describe('Schema Validation', () => {
   it('validates CreateInstitution schema accepts valid input', () => {
     const result = validateSchemaValue(
       'test:create-institution:valid',
-      CreateInstitutionSchema,
-      { name: 'Test', slug: 'test' },
+      CreateInstitutionSchema as any,
+      { name: 'Test Institution' },
     );
-
-    if (!result.ok) {
-      console.error('CreateInstitution valid payload failed:', JSON.stringify(result.errors, null, 2));
-    }
 
     expect(result.ok).toBe(true);
   });
@@ -23,27 +28,27 @@ describe('Schema Validation', () => {
   it('validates CreateInstitution schema rejects missing name', () => {
     const result = validateSchemaValue(
       'test:create-institution:missing-name',
-      CreateInstitutionSchema,
-      { slug: 'test' },
+      CreateInstitutionSchema as any,
+      {},
     );
 
-    expect(result.ok).toBe(false);
+    expectValidationFailure(result);
   });
 
-  it('validates CreateInstitution schema rejects invalid slug', () => {
+  it('validates CreateInstitution schema rejects invalid domain', () => {
     const result = validateSchemaValue(
-      'test:create-institution:invalid-slug',
-      CreateInstitutionSchema,
-      { name: 'Test', slug: 'INVALID SLUG!' },
+      'test:create-institution:invalid-domain',
+      CreateInstitutionSchema as any,
+      { name: 'Test Institution', domain: 'INVALID DOMAIN!' },
     );
 
-    expect(result.ok).toBe(false);
+    expectValidationFailure(result);
   });
 
   it('validates CreateCohort schema accepts valid input', () => {
     const result = validateSchemaValue(
       'test:create-cohort:valid',
-      CreateCohortSchema,
+      CreateCohortSchema as any,
       { name: 'Cohort 1', slug: 'cohort-1' },
     );
 
@@ -53,7 +58,7 @@ describe('Schema Validation', () => {
   it('validates CreatePack schema accepts valid input', () => {
     const result = validateSchemaValue(
       'test:create-pack:valid',
-      CreatePackSchema,
+      CreatePackSchema as any,
       {
         slug: 'cashflow-rescue',
         title: 'Cashflow Rescue',
@@ -67,28 +72,27 @@ describe('Schema Validation', () => {
   it('validates benchmark definition requires all comparability fields', () => {
     const result = validateSchemaValue(
       'test:create-benchmark-definition:valid',
-      CreateBenchmarkDefinitionSchema,
+      CreateBenchmarkDefinitionSchema as any,
       {
         benchmarkCode: 'BM-001',
-        packVersionId: '00000000-0000-0000-0000-000000000001',
+        packVersionId: '123e4567-e89b-42d3-a456-426614174000',
         scenarioSet: ['s1'],
         seedSet: ['seed1'],
         attemptLimit: 3,
         scoringFormulaVersion: '1.0',
+        proofRequired: true,
         comparabilityPolicy: {
           packVersionLocked: true,
           rulesetVersionLocked: true,
           engineVersionLocked: true,
+          modeOverlayVersionLocked: true,
           seedSetLocked: true,
           scoringFormulaLocked: true,
           proofRequired: true,
+          clientBuildFloor: 'web-1.0.0',
         },
       },
     );
-
-    if (!result.ok) {
-      console.error('CreateBenchmarkDefinition valid payload failed:', JSON.stringify(result.errors, null, 2));
-    }
 
     expect(result.ok).toBe(true);
   });

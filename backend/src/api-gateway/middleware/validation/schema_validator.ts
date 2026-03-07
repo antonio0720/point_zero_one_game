@@ -10,12 +10,12 @@ type ValidationTarget = 'body' | 'query' | 'params';
 type JsonSchemaPrimitiveType = 'string' | 'number' | 'integer' | 'boolean' | 'object' | 'array' | 'null';
 
 interface JsonSchemaLike {
-  type?: JsonSchemaPrimitiveType | JsonSchemaPrimitiveType[];
-  enum?: unknown[];
+  type?: JsonSchemaPrimitiveType | readonly JsonSchemaPrimitiveType[];
+  enum?: readonly unknown[];
   const?: unknown;
-  properties?: Record<string, JsonSchemaLike>;
-  required?: string[];
-  items?: JsonSchemaLike | JsonSchemaLike[];
+  properties?: Readonly<Record<string, JsonSchemaLike>>;
+  required?: readonly string[];
+  items?: JsonSchemaLike | readonly JsonSchemaLike[];
   additionalProperties?: boolean | JsonSchemaLike;
   minLength?: number;
   maxLength?: number;
@@ -32,9 +32,9 @@ interface JsonSchemaLike {
   maxProperties?: number;
   nullable?: boolean;
   default?: unknown;
-  oneOf?: JsonSchemaLike[];
-  anyOf?: JsonSchemaLike[];
-  allOf?: JsonSchemaLike[];
+  oneOf?: readonly JsonSchemaLike[];
+  anyOf?: readonly JsonSchemaLike[];
+  allOf?: readonly JsonSchemaLike[];
 }
 
 export interface ValidationIssue {
@@ -72,6 +72,13 @@ function isValidationFailure<T>(result: ValidationResult<T>): result is Validati
   return result.ok === false;
 }
 
+function getRequestId(req: Request): string {
+  return (
+    (req as Request & { tenantContext?: { requestId?: string } }).tenantContext?.requestId ||
+    'unknown'
+  );
+}
+
 function formatPath(path: Array<string | number>): string {
   if (!path.length) return '/';
   return `/${path.map(String).join('/')}`;
@@ -86,13 +93,24 @@ function formatValidationIssues(error: Joi.ValidationError): ValidationIssue[] {
   }));
 }
 
+function isJsonSchemaArray(
+  value: JsonSchemaLike | readonly JsonSchemaLike[] | undefined,
+): value is readonly JsonSchemaLike[] {
+  return Array.isArray(value);
+}
+
 function inferJsonSchemaType(schema: JsonSchemaLike): JsonSchemaPrimitiveType | undefined {
-  if (schema.type) {
-    if (Array.isArray(schema.type)) {
-      const nonNull = schema.type.find((candidate) => candidate !== 'null');
+  const schemaType = schema.type;
+
+  if (schemaType !== undefined) {
+    if (Array.isArray(schemaType)) {
+      const nonNull = schemaType.find(
+        (candidate): candidate is JsonSchemaPrimitiveType => candidate !== 'null',
+      );
       return nonNull;
     }
-    return schema.type;
+
+    return schemaType as JsonSchemaPrimitiveType;
   }
 
   if (schema.properties) return 'object';
@@ -252,7 +270,7 @@ function buildObjectSchema(schema: JsonSchemaLike): Joi.ObjectSchema {
 function buildArraySchema(schema: JsonSchemaLike): Joi.ArraySchema {
   let arraySchema = Joi.array();
 
-  if (Array.isArray(schema.items)) {
+  if (isJsonSchemaArray(schema.items)) {
     arraySchema = arraySchema.items(...schema.items.map((item) => buildJoiSchema(item)));
   } else if (schema.items) {
     arraySchema = arraySchema.items(buildJoiSchema(schema.items));
@@ -345,7 +363,7 @@ function buildValidationErrorResponse(
 
   return {
     ok: false,
-    requestId: req.tenantContext?.requestId || 'unknown',
+    requestId: getRequestId(req),
     error: {
       code: 'VALIDATION_ERROR',
       message: targetMessage,
