@@ -33,10 +33,8 @@ import { BreachCascadeResolver } from './BreachCascadeResolver';
 import { ShieldRepairQueue } from './ShieldRepairQueue';
 import { ShieldUXBridge } from './ShieldUXBridge';
 import type { EventBus } from '../core/EventBus';
-import { EngineId, type EngineInitParams } from '../zero/types';
 
 export class ShieldEngine implements ShieldReader {
-  public readonly engineId: EngineId = EngineId.SHIELD;
   private readonly layerManager:   ShieldLayerManager;
   private readonly router:          AttackRouter;
   private readonly cascadeResolver: BreachCascadeResolver;
@@ -224,11 +222,6 @@ export class ShieldEngine implements ShieldReader {
   /**
    * ✦ Self-check rule #9: reset() calls reset() on ALL four sub-components.
    */
-  public init(params: EngineInitParams): void {
-    this.reset();
-  }
-
-
   public reset(): void {
     this.layerManager.reset();
     this.repairQueue.reset();

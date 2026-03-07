@@ -21,13 +21,11 @@ import { PressureSignalCollector } from './PressureSignalCollector';
 import { PressureDecayController } from './PressureDecayController';
 import { PressureEventEmitter } from './PressureEventEmitter';
 import type { ClockSource } from '../core/ClockSource';
-import { EngineId, type EngineInitParams } from '../zero/types';
 
 /** Max ticks retained in scoreHistory. */
 const SCORE_HISTORY_MAX = 20;
 
 export class PressureEngine implements PressureReader {
-  public readonly engineId: EngineId = EngineId.PRESSURE;
 
   // ── Sub-components ────────────────────────────────────────────────────
   private readonly collector: PressureSignalCollector;
@@ -229,11 +227,6 @@ export class PressureEngine implements PressureReader {
   // ── Reset & Force ─────────────────────────────────────────────────────
 
   /** Called by EngineOrchestrator on run start. Resets all state to CALM baseline. */
-  public init(params: EngineInitParams): void {
-    this.reset();
-  }
-
-
   public reset(): void {
     this.currentTier     = PressureTier.CALM;
     this.previousTier    = null;

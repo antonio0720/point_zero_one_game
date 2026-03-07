@@ -40,7 +40,6 @@ import { ProofGenerator } from './ProofGenerator';
 import { ReplayIntegrityChecker } from './ReplayIntegrityChecker';
 import { RunGradeAssigner } from './RunGradeAssigner';
 import type {
-import { EngineId, type EngineInitParams } from '../zero/types';
   RunAccumulatorStats,
   RunIdentity,
   TickSnapshot,
@@ -50,7 +49,6 @@ import { EngineId, type EngineInitParams } from '../zero/types';
 } from './types';
 
 export class SovereigntyEngine {
-  public readonly engineId: EngineId = EngineId.SOVEREIGNTY;
   private accumulator:     RunAccumulatorStats | null = null;
   private proofGen:        ProofGenerator;
   private integrityChkr:  ReplayIntegrityChecker;
@@ -277,11 +275,6 @@ export class SovereigntyEngine {
    * Reset all state for a subsequent run.
    * Called by EngineOrchestrator on RUN_ENDED or before initRun() on replay.
    */
-  public init(params: EngineInitParams): void {
-    this.reset();
-  }
-
-
   public reset(): void {
     this.accumulator    = null;
     this.pipelineRunning = false;

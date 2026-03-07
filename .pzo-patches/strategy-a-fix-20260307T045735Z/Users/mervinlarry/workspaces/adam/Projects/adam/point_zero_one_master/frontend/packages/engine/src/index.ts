@@ -6,7 +6,6 @@
 // ── Orchestrator (singleton) ──────────────────────────────────────────────
 export { orchestrator } from './zero/EngineOrchestrator';
 export { sharedEventBus } from './zero/EventBus';
-export { bootstrapEngine } from './bootstrap';
 
 // ── Mode Router ───────────────────────────────────────────────────────────
 export { ModeRouter } from './modes/ModeRouter';

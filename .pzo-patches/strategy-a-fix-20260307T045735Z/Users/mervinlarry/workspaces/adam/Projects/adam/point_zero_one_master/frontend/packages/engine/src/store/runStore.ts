@@ -30,8 +30,6 @@ import { create }                          from 'zustand';
 import { devtools, subscribeWithSelector } from 'zustand/middleware';
 import { immer }                           from 'zustand/middleware/immer';
 
-export type RunPhase = 'IDLE' | 'RUNNING' | 'PAUSED' | 'ENDED';
-
 // =============================================================================
 // SECTION 1 — STATE SHAPE
 // =============================================================================
@@ -39,7 +37,6 @@ export type RunPhase = 'IDLE' | 'RUNNING' | 'PAUSED' | 'ENDED';
 export interface RunStoreState {
   // ── Initialization flag ────────────────────────────────────────────────────
   isInitialized: boolean;
-  runPhase: RunPhase;
 
   // ── Financial state — READ by EngineOrchestrator every tick ───────────────
   /** Current net worth in dollars. Freedom threshold check runs against this. */
@@ -94,7 +91,6 @@ export interface RunStoreActions {
   // ── Lifecycle ──────────────────────────────────────────────────────────────
   initialize: (runId: string, userId: string, seed: string) => void;
   reset:      () => void;
-  setRunPhase: (phase: RunPhase) => void;
 
   // ── Financial setters — called by server event handlers ───────────────────
   setNetWorth:         (v: number) => void;
@@ -131,7 +127,6 @@ export type RunStoreSlice = RunStoreState & RunStoreActions;
 
 const INITIAL_STATE: RunStoreState = {
   isInitialized:       false,
-  runPhase:          'IDLE',
   netWorth:            0,
   cashBalance:         0,
   monthlyIncome:       0,
@@ -166,7 +161,6 @@ export const runStore = create<RunStoreSlice>()(
         // ── Lifecycle ───────────────────────────────────────────────────────
         initialize: (runId, userId, seed) => set((state) => {
           state.isInitialized = true;
-          state.runPhase      = 'IDLE';
           state.runId         = runId;
           state.userId        = userId;
           state.seed          = seed;
@@ -174,11 +168,6 @@ export const runStore = create<RunStoreSlice>()(
         }),
 
         reset: () => set(() => ({ ...INITIAL_STATE })),
-
-        setRunPhase: (phase) => set((state) => {
-          state.runPhase    = phase;
-          state.lastUpdated = Date.now();
-        }),
 
         // ── Individual financial setters ────────────────────────────────────
         setNetWorth: (v) => set((state) => {
@@ -301,7 +290,6 @@ export const selectHaterHeat           = (s: RunStoreSlice) => s.haterHeat;
 export const selectActiveThreatCount   = (s: RunStoreSlice) => s.activeThreatCardCount;
 export const selectRunId               = (s: RunStoreSlice) => s.runId;
 export const selectIsInitialized       = (s: RunStoreSlice) => s.isInitialized;
-export const selectRunPhase          = (s: RunStoreSlice) => s.runPhase;
 
 /** Snapshot of all orchestrator-consumed fields — for optimized subscriptions. */
 export const selectOrchestratorSnapshot = (s: RunStoreSlice) => ({

@@ -40,7 +40,6 @@ import type { ShieldReader }         from '../shield/types';
 import { ShieldLayerId }             from '../shield/types';
 import type { EventBus }             from '../core/EventBus';
 import { BotId }                     from '../battle/types';
-import { EngineId, type EngineInitParams } from '../zero/types';
 
 // ── Pending Output Types ───────────────────────────────────────────────────────
 
@@ -60,7 +59,6 @@ export interface HeatDeltaPending {
 // ── CascadeEngine ─────────────────────────────────────────────────────────────
 
 export class CascadeEngine {
-  public readonly engineId: EngineId = EngineId.CASCADE;
   private readonly queueManager:     CascadeQueueManager;
   private readonly positiveTracker:  PositiveCascadeTracker;
   private readonly uxBridge:         CascadeUXBridge;
@@ -612,11 +610,6 @@ export class CascadeEngine {
       consecutiveFortifiedTicks:    0,
     };
   }
-  public init(params: EngineInitParams): void {
-    this.reset();
-  }
-
-
 
   public reset(): void {
     this.queueManager.reset();

@@ -34,7 +34,6 @@ import { BattleUXBridge } from './BattleUXBridge';
 import type { ShieldReader } from '../shield/types';
 import { ShieldLayerId } from '../shield/types';
 import type { EventBus } from '../zero/EventBus';
-import { EngineId, type EngineInitParams } from '../zero/types';
 
 // ── Attack type → Injection type map ─────────────────────────────────────────
 const ATTACK_TO_INJECTION: Partial<Record<AttackType, InjectionType>> = {
@@ -48,7 +47,6 @@ const ATTACK_TO_INJECTION: Partial<Record<AttackType, InjectionType>> = {
 // ── BattleEngine ──────────────────────────────────────────────────────────────
 
 export class BattleEngine {
-  public readonly engineId: EngineId = EngineId.BATTLE;
   private botController: HaterBotController;
   private budgetManager: BattleBudgetManager;
   private injector: AttackInjector;
@@ -256,11 +254,6 @@ export class BattleEngine {
    * Full reset — called on run start/end.
    * Clears all bot states, injected cards, pending attacks, and snapshot.
    */
-  public init(params: EngineInitParams): void {
-    this.reset();
-  }
-
-
   public reset(): void {
     this.botController.reset();
     this.injector.reset();

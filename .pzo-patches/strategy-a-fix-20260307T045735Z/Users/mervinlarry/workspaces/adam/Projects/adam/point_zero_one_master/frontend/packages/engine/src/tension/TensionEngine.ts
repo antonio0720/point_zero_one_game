@@ -25,13 +25,11 @@ import { ThreatVisibilityManager } from './ThreatVisibilityManager';
 import { TensionDecayController } from './TensionDecayController';
 import { TensionUXBridge } from './TensionUXBridge';
 import type { EventBus } from '../core/EventBus';
-import { EngineId, type EngineInitParams } from '../zero/types';
 
 const SCORE_HISTORY_DEPTH = 20;
 const TREND_WINDOW = 3;
 
 export class TensionEngine implements TensionReader {
-  public readonly engineId: EngineId = EngineId.TENSION;
 
   // ── Sub-components ─────────────────────────────────────────────────────
   private readonly queue:      AnticipationQueue;
@@ -276,11 +274,6 @@ export class TensionEngine implements TensionReader {
    * Must clear: queue, visibility, decay, score, history, pulse tracking.
    * Leaving any partial state will corrupt the next run.
    */
-  public init(params: EngineInitParams): void {
-    this.reset();
-  }
-
-
   public reset(): void {
     this.queue.reset();
     this.visibility.reset();

@@ -19,7 +19,6 @@
  */
 
 import type { PressureReader } from '../pressure/types';
-import { EngineId, type EngineInitParams } from '../zero/types';
 
 // ─── Tick Tier ────────────────────────────────────────────────────────────────
 
@@ -67,7 +66,6 @@ interface TimeEngineSnapshot {
 // ─── TimeEngine ───────────────────────────────────────────────────────────────
 
 export class TimeEngine {
-  public readonly engineId: EngineId = EngineId.TIME;
   private eventBus:        IEventBus;
   private pressureReader:  PressureReader | null = null;
 
@@ -219,12 +217,6 @@ export class TimeEngine {
   /**
    * Reset for new run.
    */
-  public init(params: EngineInitParams): void {
-    this.setSeasonBudget(params.seasonTickBudget);
-    this.reset();
-  }
-
-
   reset(): void {
     this.tickIndex = 0;
     this.currentTier = TickTier.STABLE;

@@ -1,0 +1,101 @@
+{
+  "root": "/Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master",
+  "dry_run": false,
+  "timestamp_utc": "2026-03-07T04:57:35.772306+00:00",
+  "changed": [
+    {
+      "path": "frontend/packages/engine/src/time/TimeEngine.ts",
+      "action": "patch",
+      "details": "updated in-place"
+    },
+    {
+      "path": "frontend/packages/engine/src/pressure/PressureEngine.ts",
+      "action": "patch",
+      "details": "updated in-place"
+    },
+    {
+      "path": "frontend/packages/engine/src/tension/TensionEngine.ts",
+      "action": "patch",
+      "details": "updated in-place"
+    },
+    {
+      "path": "frontend/packages/engine/src/shield/ShieldEngine.ts",
+      "action": "patch",
+      "details": "updated in-place"
+    },
+    {
+      "path": "frontend/packages/engine/src/battle/BattleEngine.ts",
+      "action": "patch",
+      "details": "updated in-place"
+    },
+    {
+      "path": "frontend/packages/engine/src/cascade/CascadeEngine.ts",
+      "action": "patch",
+      "details": "updated in-place"
+    },
+    {
+      "path": "frontend/packages/engine/src/sovereignty/SovereigntyEngine.ts",
+      "action": "patch",
+      "details": "updated in-place"
+    },
+    {
+      "path": "frontend/packages/engine/src/hooks/useGameLoop.ts",
+      "action": "replace",
+      "details": "replaced with template"
+    },
+    {
+      "path": "frontend/packages/engine/src/store/runStore.ts",
+      "action": "patch",
+      "details": "updated in-place"
+    },
+    {
+      "path": "frontend/packages/engine/src/store/engineStore.ts",
+      "action": "patch",
+      "details": "updated in-place"
+    },
+    {
+      "path": "frontend/packages/engine/src/index.ts",
+      "action": "patch",
+      "details": "updated in-place"
+    },
+    {
+      "path": "frontend/apps/web/app/(app)/game/GameShell.tsx",
+      "action": "replace",
+      "details": "replaced with template"
+    }
+  ],
+  "created": [
+    {
+      "path": "frontend/packages/engine/src/bootstrap.ts",
+      "action": "create",
+      "details": "replaced with template"
+    }
+  ],
+  "skipped": [],
+  "warnings": [],
+  "errors": [],
+  "verification": {
+    "TimeEngine.engineId": true,
+    "TimeEngine.init": true,
+    "PressureEngine.engineId": true,
+    "PressureEngine.init": true,
+    "TensionEngine.engineId": true,
+    "TensionEngine.init": true,
+    "ShieldEngine.engineId": true,
+    "ShieldEngine.init": true,
+    "BattleEngine.engineId": true,
+    "BattleEngine.init": true,
+    "CascadeEngine.engineId": true,
+    "CascadeEngine.init": true,
+    "SovereigntyEngine.engineId": true,
+    "SovereigntyEngine.init": true,
+    "runStore.runPhase": true,
+    "engineStore.runPhaseWiring": true,
+    "useGameLoop.correctImport": true,
+    "useGameLoop.realSelectors": true,
+    "bootstrap.exists": true,
+    "index.exportsBootstrap": true,
+    "gameShell.noViteRedirect": true,
+    "gameShell.usesBootstrap": true
+  }
+}

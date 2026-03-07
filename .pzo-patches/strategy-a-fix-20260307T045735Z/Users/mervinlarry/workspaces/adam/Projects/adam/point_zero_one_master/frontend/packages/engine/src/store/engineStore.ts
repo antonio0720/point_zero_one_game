@@ -1143,22 +1143,10 @@ export function wireAllEngineHandlers(eventBus: EventBus, set: ZustandSet): void
   // ── Engine 0: Run Lifecycle — wired LAST so all slices reset atomically ──────
   eventBus.on('RUN_STARTED', (e: any) => {
     const p = e.payload;
-    const rs = runStore.getState();
-    rs.initialize(p.runId, p.userId, p.seed);
-    rs.setRunPhase('RUNNING');
-  });
-
-  eventBus.on('RUN_STARTED', (e: any) => {
-    const p = e.payload;
     s((state) => {
       applyRunStartedAtomic(state, p);
     });
   });
-  eventBus.on('RUN_ENDED', () => {
-    runStore.getState().setRunPhase('ENDED');
-  });
-
-
 
   eventBus.on('RUN_ENDED', (e: any) => {
     const p = e.payload;
