@@ -41,7 +41,8 @@
 // Density6 LLC · Point Zero One · Mechanics Layer · Confidential
 // ═══════════════════════════════════════════════════════════════════════════════
 
-import type { EventBus, EngineEventName } from '../zero/EventBus';
+import type { EventBus } from '../zero/EventBus';
+import type { EngineEventName } from '../zero/types';
 import type { MechanicRecord } from '../../data/mechanicsLoader';
 import {
   getExecFn,
@@ -398,9 +399,17 @@ export class MechanicsBridge {
     return getExecFn(execHook, mechanicId);
   }
 
-  private buildTelemetryEmitter(mechanicId: string) {
+  private buildTelemetryEmitter(
+    mechanicId: string,
+  ): MechanicExecContext['eventBusEmit'] {
     return (event: EngineEventName, payload: Record<string, unknown>) => {
-      this.eventBus.emit(event, { mechanicId, ...payload } as any);
+      this.eventBus.emit(
+        event,
+        {
+          mechanicId,
+          ...payload,
+        } as never,
+      );
     };
   }
 

@@ -7,8 +7,8 @@
 // EngineOrchestrator (Step 12.5), mechanicsLoader.
 //
 // IMPORT RULES:
-// ✦ Only import from zero/types (ShieldLayerId) and the mechanicsLoader
-//   (MechanicRecord, MechanicLayer).
+// ✦ Only import from zero/types (ShieldLayerId, EngineEventName) and the
+//   mechanicsLoader (MechanicRecord, MechanicLayer).
 // ✦ RunStateSnapshot is imported by callers — not held here to avoid
 //   circular dependencies with zero/.
 //
@@ -103,6 +103,15 @@ export interface CardPlayExecEvent {
 }
 
 /**
+ * Telemetry/event emitter exposed to mechanic exec functions.
+ * Event names must already exist in EngineEventName.
+ */
+export type MechanicTelemetryEmitter = (
+  event: EngineEventName,
+  payload: Record<string, unknown>,
+) => void;
+
+/**
  * Full context passed into every mechanic exec function.
  * Mechanics must be pure: read from ctx, write only through MechanicOutputs.
  */
@@ -114,7 +123,7 @@ export interface MechanicExecContext {
   readonly mechanic: MechanicRecord;
 
   /** Used ONLY for emitting telemetry events — NOT for reading state */
-  readonly eventBusEmit: (event: string, payload: Record<string, unknown>) => void;
+  readonly eventBusEmit: MechanicTelemetryEmitter;
 
   /** Populated only when layer === 'card_handler' */
   readonly cardEvent?: CardPlayExecEvent;
