@@ -76,7 +76,7 @@
 // Density6 LLC · Point Zero One · Engine 0 · Confidential
 // ═══════════════════════════════════════════════════════════════════════════════
 
-import { EventBus, sharedEventBus } from './EventBus';
+import { EventBus, sharedEventBus } from '../core/EventBus';
 import { EngineRegistry }           from './EngineRegistry';
 import { RunStateSnapshot }         from './RunStateSnapshot';
 import {
@@ -209,32 +209,26 @@ export class EngineOrchestrator {
     this.eventBus = sharedEventBus;
     this.registry = new EngineRegistry(this.eventBus);
 
-    // ── Instantiate original 7 engines ───────────────────────────────────────
+    // ── Instantiate engines ──────────────────────────────────────────────────
     this.timeEngine        = new TimeEngine(this.eventBus);
     this.pressureEngine    = new PressureEngine(this.eventBus);
     this.tensionEngine     = new TensionEngine(this.eventBus);
     this.shieldEngine      = new ShieldEngine(this.eventBus);
-    this.battleEngine      = new BattleEngine(this.eventBus);
-    this.cascadeEngine     = new CascadeEngine(this.eventBus);
+
+    // BattleEngine and CascadeEngine now require the core compatibility EventBus
+    // plus a ShieldReader. ShieldEngine satisfies the ShieldReader contract.
+    this.battleEngine      = new BattleEngine(this.eventBus, this.shieldEngine);
+    this.cascadeEngine     = new CascadeEngine(this.eventBus, this.shieldEngine);
     this.sovereigntyEngine = new SovereigntyEngine(this.eventBus);
 
     // ── Phase 1: Instantiate CardEngine + adapter ─────────────────────────────
-    // CardEngine receives eventBus in its constructor (matching the pattern of
-    // all other engines — eventBus wired at construction, not at init time).
-    // CardEngineAdapter wraps CardEngine and implements IEngine. It reads
-    // GameMode from ModeRouter during init() to build CardEngineInitParams.
     this.cardEngine        = new CardEngine(this.eventBus);
     this.cardEngineAdapter = new CardEngineAdapter(this.cardEngine, this.eventBus);
 
     // ── Phase 5: Instantiate MechanicsRouter ────────────────────────────────
-    // Constructed after CardEngine so the event bus is fully wired.
-    // init() is called in startRun() with the run ID after CardEngine.startRun().
     this.mechanicsRouter = new MechanicsRouter(this.eventBus);
 
     // ── Phase 1: Build CardReader immediately after CardEngine construction ───
-    // getReader() returns a stable object backed by the CardEngine instance.
-    // The same reference is injected into EngineInitParams and used in the
-    // snapshot builder throughout the run's lifetime.
     this.cardReader = this.cardEngine.getReader();
 
     // ── Register all 8 engines ────────────────────────────────────────────────
@@ -249,26 +243,11 @@ export class EngineOrchestrator {
 
     // ── Inject reader interfaces (cross-engine read contracts) ────────────────
     // Stable references — wired once at construction, not per-run.
+    // BattleEngine and CascadeEngine receive their ShieldReader via constructor
+    // args (above), so no setShieldReader/setTensionReader calls needed for them.
     this.timeEngine.setPressureReader(this.pressureEngine);
     this.pressureEngine.setShieldReader(this.shieldEngine);
     this.pressureEngine.setCascadeReader(this.cascadeEngine);
-    this.battleEngine.setShieldReader(this.shieldEngine);
-    this.battleEngine.setTensionReader(this.tensionEngine);
-    this.shieldEngine.setTensionReader(this.tensionEngine);
-
-    // Phase 1: CardReader wired to engines that need card state reads.
-    // Currently: SovereigntyEngine uses decisionsThisTick from snapshot (no
-    // direct reader needed). BattleEngine reads activeThreatCardCount from the
-    // snapshot which is populated from cardReader.getActiveThreatCardCount().
-    // If additional engines require direct CardReader access in later phases,
-    // add their setCardReader() calls here.
-    //
-    // CardReader is NOT injected into the engines directly at this time because
-    // all card-derived state flows through the RunStateSnapshot. The Orchestrator
-    // reads cardReader directly in buildRunStateSnapshot() to populate:
-    //   - activeThreatCardCount (formerly from store.activeThreatCardCount)
-    //   - activeDecisionWindows  (from card layer — augments time engine count)
-    //   - holdsRemaining         (from card layer — for Empire mode)
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
