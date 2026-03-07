@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "src/api-gateway/middleware/validation/**/*.ts",
+    "src/api-gateway/contracts/curriculum/**/*.ts",
+    "test/curriculum_gateway/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "**/*.spec.ts",
+    "**/*.broken.ts"
+  ]
+}
