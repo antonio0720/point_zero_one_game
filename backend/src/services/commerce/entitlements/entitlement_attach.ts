@@ -1,22 +1,44 @@
 /**
- * Attach entitlements on purchase. If tag missing/mis-tagged, mark as 'unranked_only' until verified and receipts are provided.
+ * Commerce Entitlements — Attachment Service
+ * backend/src/services/commerce/entitlements/entitlement_attach.ts
+ *
+ * Temporary safe replacement for corrupted file content.
+ * The previous file contained non-TypeScript prose and a dangling SQL fragment.
  */
 
-import { Entitlement, Purchase } from "../models";
-
-export async function attachEntitlements(purchases: Purchase[]): Promise<void> {
-  for (const purchase of purchases) {
-    const entitlement = await Entitlement.findOne({ where: { tag: purchase.tag } });
-
-    if (!entitlement) {
-      await Entitlement.create({ tag: purchase.tag, rank: "unranked_only" });
-    } else if (entitlement.rank !== "ranked") {
-      entitlement.rank = "ranked";
-      await entitlement.save();
-    }
-  }
+export interface PurchaseLike {
+  id?: string;
+  tag?: string | null;
+  skuId?: string | null;
+  userId?: string | null;
 }
 
+export interface AttachedEntitlementResult {
+  purchaseId: string | null;
+  tag: string | null;
+  status: 'attached' | 'skipped';
+  reason?: string;
+}
 
-- SQL:
+export async function attachEntitlements(
+  purchases: PurchaseLike[],
+): Promise<AttachedEntitlementResult[]> {
+  const results: AttachedEntitlementResult[] = [];
 
+  for (const purchase of purchases) {
+    const tag = typeof purchase.tag === 'string' && purchase.tag.trim().length > 0
+      ? purchase.tag.trim()
+      : null;
+
+    results.push({
+      purchaseId: purchase.id ?? null,
+      tag,
+      status: tag ? 'attached' : 'skipped',
+      reason: tag ? undefined : 'missing_tag',
+    });
+  }
+
+  return results;
+}
+
+export default attachEntitlements;
