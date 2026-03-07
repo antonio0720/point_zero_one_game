@@ -9,7 +9,7 @@
  * Density6 LLC · Point Zero One · Confidential
  */
 
-import type { ChatMessage, ChatChannel, MessageKind, GameChatContext } from '../components/chat/chatTypes';
+import type { ChatMessage, ChatChannel, MessageKind, GameChatContext } from './chatTypes';
 import { adaptiveDialogueEngine } from './AdaptiveDialogueEngine';
 import type { IntelligenceSnapshot } from './AdaptiveDialogueEngine';
 

@@ -16,7 +16,7 @@ import type { DialogueContext, DialogueLine, DialogueCharacterId } from './Hater
 import { DIALOGUE_TREES, pickDialogue } from './HaterDialogueTrees';
 import { classifyPlayerResponse, sentimentToDialogueContext, ResponseCooldownManager } from './PlayerResponseClassifier';
 import type { ResponseSentiment } from './PlayerResponseClassifier';
-import type { GameChatContext } from '../components/chat/chatTypes';
+import type { GameChatContext } from './chatTypes';
 
 // ─── Intelligence Input (from PlayerModelEngine) ──────────────────────────────
 
