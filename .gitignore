@@ -1,4 +1,10 @@
+# =========================================================
+# POINT ZERO ONE — ROOT .gitignore
+# =========================================================
+
+# -------------------------
 # SECRETS
+# -------------------------
 *.key
 *.pem
 .env
@@ -11,29 +17,44 @@ github_pat_*
 deploy_moltbook*.sh
 *.autopublish.sh
 
-# RUNTIME
+# -------------------------
+# RUNTIME / GENERATED OUTPUT
+# -------------------------
 pzo_complete_automation/docs/pzo1/runtime/
 **/artifacts/
 **/bundles/
 logs/
 *.log
 
-# BUILD
+# -------------------------
+# BUILD / CACHE
+# -------------------------
 **/target/
 node_modules/
+.next/
 dist/
+build/
+coverage/
+.turbo/
+.vercel/
 __pycache__/
 *.pyc
 
+# -------------------------
 # DATABASE
+# -------------------------
 *.sqlite
 *.db
 
+# -------------------------
 # OS
+# -------------------------
 .DS_Store
 Thumbs.db
 
-# IDE
+# -------------------------
+# IDE / EDITOR
+# -------------------------
 .vscode/*
 !.vscode/settings.json
 .idea/
