@@ -511,17 +511,17 @@ export const EmpireGameScreen = memo(function EmpireGameScreen({
   const { tick, runPhase } = useGameLoop();
 
   // ── Financial state from run store ────────────────────────────────────────
-  const cash           = useRunStore(s => s.cash          ?? 0);
+  const cash           = useRunStore(s => s.cashBalance    ?? 0);
   const netWorth       = useRunStore(s => s.netWorth      ?? 0);
-  const income         = useRunStore(s => s.income        ?? 0);
-  const expenses       = useRunStore(s => s.expenses      ?? 0);
-  const equityHistory  = useRunStore(s => s.equityHistory ?? []);
-  const regime         = useRunStore(s => s.regime        ?? 'NEUTRAL') as MarketRegime;
-  const intelligence   = useRunStore(s => s.intelligence  ?? { level: 0 }) as IntelligenceState;
+  const income         = useRunStore(s => s.monthlyIncome  ?? 0);
+  const expenses       = useRunStore(s => s.monthlyExpenses ?? 0);
+  const equityHistory  = useMemo(() => [] as number[], []);
+  const regime         = 'NEUTRAL' as MarketRegime;
+  const intelligence   = useMemo(() => ({ level: 0 }) as IntelligenceState, []);
 
   // ── Time engine ───────────────────────────────────────────────────────────
-  const totalTicks  = useEngineStore(s => s.time.totalTicks  ?? 720);
-  const freezeTicks = useEngineStore(s => s.time.freezeTicks ?? 0);
+  const totalTicks  = useEngineStore(s => s.time.seasonTickBudget ?? 720);
+  const freezeTicks = useEngineStore(s => s.time.holdsRemaining  ?? 0);
 
   // ── Pressure engine ───────────────────────────────────────────────────────
   const pressureScore = useEngineStore(s => s.pressure.score ?? 0);
@@ -530,16 +530,16 @@ export const EmpireGameScreen = memo(function EmpireGameScreen({
   const tensionScore = useEngineStore(s => s.tension.score ?? 0);
 
   // ── Shield engine ─────────────────────────────────────────────────────────
-  const shields = useEngineStore(s => s.shield.integrity ?? 4);
+  const shields = useEngineStore(s => s.shield.overallIntegrityPct ?? 100);
 
   // ── Battle engine ─────────────────────────────────────────────────────────
   const haterHeat = useEngineStore(s => s.battle.haterHeat ?? 0);
 
   // ── Cascade engine ────────────────────────────────────────────────────────
-  const cascadeChains = useEngineStore(s => s.cascade.chains ?? 0);
+  const cascadeChains = useEngineStore(s => s.cascade.activeNegativeChains?.length ?? 0);
 
   // ── Sovereignty engine ────────────────────────────────────────────────────
-  const sovereigntyProgress = useEngineStore(s => s.sovereignty.progress ?? 0);
+  const sovereigntyProgress = useEngineStore(s => s.sovereignty.sovereigntyScore ?? 0);
   const cordScore           = useEngineStore(s => s.sovereignty.cordScore ?? 0);
 
   // ── Empire-mode state ─────────────────────────────────────────────────────
