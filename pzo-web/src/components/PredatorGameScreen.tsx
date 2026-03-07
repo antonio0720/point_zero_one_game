@@ -142,7 +142,8 @@ function deriveIntelligenceState(
 ): IntelligenceState {
   const heat = clamp01(heatPct / 100);
   const shield = clamp01(shieldIntegrityPct / 100);
-  const positiveCashflow = cashflow >= 0 ? 1 : clamp01(1 - Math.min(1, Math.abs(cashflow) / 25_000));
+  const positiveCashflow =
+    cashflow >= 0 ? 1 : clamp01(1 - Math.min(1, Math.abs(cashflow) / 25_000));
   const opposition = clamp01(activeBotsCount / 4);
 
   return {
@@ -199,7 +200,10 @@ function deriveComboCount(
   const targeting = activeBots.filter((bot) => bot.state === BotState.TARGETING).length;
   const injected = injectedCards.length;
 
-  return Math.max(0, Math.min(4, attacking + Math.floor(targeting / 2) + Math.max(0, injected - 1)));
+  return Math.max(
+    0,
+    Math.min(4, attacking + Math.floor(targeting / 2) + Math.max(0, injected - 1)),
+  );
 }
 
 function mapInjectionToSabotage(
@@ -1205,6 +1209,7 @@ export default function PredatorGameScreen({
   const income = useRunStore((s) => s.monthlyIncome ?? 0);
   const expenses = useRunStore((s) => s.monthlyExpenses ?? 0);
   const netWorth = useRunStore((s) => s.netWorth ?? 0);
+  const runId = useRunStore((s) => s.runId);
 
   // ── Time / lifecycle state — current engineStore contract ────────────────
   const totalTicks = useEngineStore((s) => {
@@ -1227,7 +1232,6 @@ export default function PredatorGameScreen({
   // ── Shield slice — current engineStore contract ───────────────────────────
   const shieldIntegrityPct = useEngineStore((s) => s.shield.overallIntegrityPct ?? 0);
   const shieldCascade = useEngineStore((s) => s.shield.isInBreachCascade ?? false);
-  const lastDamageResult = useEngineStore((s) => s.shield.lastDamageResult);
 
   // ── Cascade slice — used for extra threat read ────────────────────────────
   const cascadeCount = useEngineStore((s) => s.cascade.activeNegativeChains.length ?? 0);
@@ -1236,13 +1240,17 @@ export default function PredatorGameScreen({
   const cashflow = income - expenses;
   const heatPct = useMemo(() => normalizeHeatPct(haterHeatRaw), [haterHeatRaw]);
 
+  // IMPORTANT: overallIntegrityPct is normalized 0..1 in current shield types.
+  const shieldRatio = clamp01(shieldIntegrityPct);
+  const shieldPctForUi = shieldRatio * 100;
+
   const regime = useMemo<MarketRegime>(() => {
-    return deriveMarketRegime(heatPct, shieldIntegrityPct, cashflow, netWorth);
-  }, [heatPct, shieldIntegrityPct, cashflow, netWorth]);
+    return deriveMarketRegime(heatPct, shieldPctForUi, cashflow, netWorth);
+  }, [heatPct, shieldPctForUi, cashflow, netWorth]);
 
   const intelligence = useMemo<IntelligenceState>(() => {
-    return deriveIntelligenceState(heatPct, shieldIntegrityPct, cashflow, activeBotsCount);
-  }, [heatPct, shieldIntegrityPct, cashflow, activeBotsCount]);
+    return deriveIntelligenceState(heatPct, shieldPctForUi, cashflow, activeBotsCount);
+  }, [heatPct, shieldPctForUi, cashflow, activeBotsCount]);
 
   const [equityHistory, setEquityHistory] = useState<number[]>([]);
   useEffect(() => {
@@ -1266,19 +1274,23 @@ export default function PredatorGameScreen({
   }, [activeBots, injectedCards]);
 
   const shields = useMemo(() => {
-    return Math.max(0, Math.min(4, Math.ceil(shieldIntegrityPct / 25)));
-  }, [shieldIntegrityPct]);
+    return Math.max(0, Math.min(4, Math.ceil(shieldRatio * 4)));
+  }, [shieldRatio]);
 
-  const shieldConsuming = shieldCascade || Boolean(lastDamageResult);
+  const shieldConsuming = shieldCascade;
 
   const localScore = useMemo(() => {
-    const shieldScore = clamp01(shieldIntegrityPct / 100) * 60;
-    const cashflowScore = clamp01(cashflow >= 0 ? 1 : 1 - Math.min(1, Math.abs(cashflow) / 20_000)) * 40;
+    const shieldScore = shieldRatio * 60;
+    const cashflowScore =
+      clamp01(cashflow >= 0 ? 1 : 1 - Math.min(1, Math.abs(cashflow) / 20_000)) * 40;
     return Math.max(0, Math.round(shieldScore + cashflowScore));
-  }, [shieldIntegrityPct, cashflow]);
+  }, [shieldRatio, cashflow]);
 
   const opponentScore = useMemo(() => {
-    const threatWeight = activeBots.reduce((sum, bot) => sum + mapBotStateToThreatWeight(bot.state), 0);
+    const threatWeight = activeBots.reduce(
+      (sum, bot) => sum + mapBotStateToThreatWeight(bot.state),
+      0,
+    );
     const cardThreat = injectedCards.length * 15;
     const heatThreat = clamp01(heatPct / 100) * 50;
     return Math.max(0, Math.round(heatThreat + threatWeight * 15 + cardThreat));
@@ -1327,7 +1339,6 @@ export default function PredatorGameScreen({
 
   const derivedCounterplayTicksLeft = useMemo(() => {
     if (pendingCounterplay) return Math.max(0, pendingCounterplay.ticksToRespond);
-
     if (!primaryDecisionWindow) return 0;
 
     const estimatedTicks = Math.max(
@@ -1340,8 +1351,10 @@ export default function PredatorGameScreen({
 
   const primaryInjectedCard = injectedCards[0] ?? null;
 
-  const counterAttackLabel = pendingCounterplay?.eventLabel ?? deriveIncomingAttackLabel(primaryInjectedCard);
-  const counterAttackEmoji = pendingCounterplay?.eventEmoji ?? deriveIncomingAttackEmoji(primaryInjectedCard);
+  const counterAttackLabel =
+    pendingCounterplay?.eventLabel ?? deriveIncomingAttackLabel(primaryInjectedCard);
+  const counterAttackEmoji =
+    pendingCounterplay?.eventEmoji ?? deriveIncomingAttackEmoji(primaryInjectedCard);
   const counterDmgEstimate = deriveIncomingAttackDamage(primaryInjectedCard);
 
   const counterplayOpen =
@@ -1390,6 +1403,16 @@ export default function PredatorGameScreen({
   const previousShieldCascadeRef = useRef<boolean>(false);
   const previousRunPhaseRef = useRef<string>('');
 
+  useEffect(() => {
+    setEquityHistory([]);
+    setEvents([]);
+    setExtractionPhase('IDLE');
+    seenInjectedIdsRef.current = new Set();
+    seenAttackIdRef.current = null;
+    previousShieldCascadeRef.current = false;
+    previousRunPhaseRef.current = '';
+  }, [runId]);
+
   const appendEvent = useCallback((message: string) => {
     setEvents((prev) => {
       const tagged = `[T${tick}] ${message}`;
@@ -1411,7 +1434,7 @@ export default function PredatorGameScreen({
     const attackId = lastAttackFired?.attackEvent.attackId ?? null;
     if (attackId && attackId !== seenAttackIdRef.current) {
       seenAttackIdRef.current = attackId;
-      appendEvent(`Predator attack fired.`);
+      appendEvent('Predator attack fired.');
     }
   }, [lastAttackFired, appendEvent]);
 
