@@ -36,8 +36,8 @@ import {
   type CardPlayRequest,
   type CardEngineInitParams,
   type DecisionRecord,
-} from '../types';
-import type { CardUXBridge } from '../CardUXBridge';
+} from '../cards/types';
+import type { CardUXBridge } from '../cards/CardUXBridge';
 
 // ── COUNTER WINDOW CONFIG ──────────────────────────────────────────────────────
 

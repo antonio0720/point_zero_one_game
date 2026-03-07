@@ -1,5 +1,5 @@
 // pzo-web/src/engines/time/TickRateInterpolator.ts (partial implementation)
-import { TierChangeEvent } from '../types'; // Ensure this path is correct based on the actual file structure of PZO_E1_TIME_T062 and T019 dependencies
+import { TierChangeEvent } from '../core/types'; // Ensure this path is correct based on the actual file structure of PZO_E1_TIME_T062 and T019 dependencies
 
 export class TickRateInterpolator {
   private currentTransitionTotalTicks: number | null = null;
