@@ -29,6 +29,11 @@ const SCORE_HISTORY_MAX = 20;
 export class PressureEngine implements PressureReader {
   public readonly engineId: EngineId = EngineId.PRESSURE;
 
+  private shieldReader: any = null;
+  private cascadeReader: any = null;
+  public setShieldReader(reader: any): void { this.shieldReader = reader; }
+  public setCascadeReader(reader: any): void { this.cascadeReader = reader; }
+
   // ── Sub-components ────────────────────────────────────────────────────
   private readonly collector: PressureSignalCollector;
   private readonly decay:     PressureDecayController;

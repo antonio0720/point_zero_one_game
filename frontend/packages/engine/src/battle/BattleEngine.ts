@@ -49,6 +49,11 @@ const ATTACK_TO_INJECTION: Partial<Record<AttackType, InjectionType>> = {
 
 export class BattleEngine {
   public readonly engineId: EngineId = EngineId.BATTLE;
+
+  private shieldReader: any = null;
+  private tensionReader: any = null;
+  public setShieldReader(reader: any): void { this.shieldReader = reader; }
+  public setTensionReader(reader: any): void { this.tensionReader = reader; }
   private botController: HaterBotController;
   private budgetManager: BattleBudgetManager;
   private injector: AttackInjector;

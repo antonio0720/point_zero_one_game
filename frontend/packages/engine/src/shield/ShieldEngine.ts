@@ -37,6 +37,9 @@ import { EngineId, type EngineInitParams } from '../zero/types';
 
 export class ShieldEngine implements ShieldReader {
   public readonly engineId: EngineId = EngineId.SHIELD;
+
+  private tensionReader: any = null;
+  public setTensionReader(reader: any): void { this.tensionReader = reader; }
   private readonly layerManager:   ShieldLayerManager;
   private readonly router:          AttackRouter;
   private readonly cascadeResolver: BreachCascadeResolver;
