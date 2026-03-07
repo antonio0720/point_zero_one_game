@@ -55,7 +55,6 @@ import {
   type CardInHand,
   type CardPlayRequest,
   type CardEngineInitParams,
-  type CardReader,
   type DecisionRecord,
   type PhaseBoundaryWindow,
   type ForcedCardEntry,
@@ -63,19 +62,19 @@ import {
   RunPhase,
 } from './types';
 
-import { DeckBuilder, DrawCursor }       from './DeckBuilder';
-import { HandManager, DiscardReason }    from './HandManager';
-import { ModeOverlayEngine }             from './ModeOverlayEngine';
-import { TimingValidator }               from './TimingValidator';
-import type { TimingValidatorContext }   from './TimingValidator';
-import { CardEffectResolver }            from './CardEffectResolver';
-import { DecisionWindowManager }         from './DecisionWindowManager';
-import { ForcedCardQueue }               from './ForcedCardQueue';
-import { CardScorer }                    from './CardScorer';
-import { CardUXBridge }                  from './CardUXBridge';
-import type { EventBus }                 from '../zero/EventBus';
-import { EngineId, EngineHealth }        from '../zero/types';
-import { v4 as uuidv4 }                  from 'uuid';
+import { DeckBuilder, DrawCursor }     from './DeckBuilder';
+import { HandManager, DiscardReason }  from './HandManager';
+import { ModeOverlayEngine }           from './ModeOverlayEngine';
+import { TimingValidator }             from './TimingValidator';
+import type { TimingValidatorContext } from './TimingValidator';
+import { CardEffectResolver }          from './CardEffectResolver';
+import { DecisionWindowManager }       from './DecisionWindowManager';
+import { ForcedCardQueue }             from './ForcedCardQueue';
+import { CardScorer }                  from './CardScorer';
+import { CardUXBridge }                from './CardUXBridge';
+import type { EventBus }               from '../zero/EventBus';
+import { EngineId, EngineHealth }      from '../zero/types';
+import { v4 as uuidv4 }                from 'uuid';
 
 // ── PERFORMANCE TIMER ─────────────────────────────────────────────────────────
 const perfNow = (): number =>
@@ -115,9 +114,9 @@ export class CardEngine {
   private readonly eventBus: EventBus;
 
   // ── Run state ───────────────────────────────────────────────────────────────
-  private isRunning:       boolean = false;
-  private currentTick:     number  = 0;
-  private lastTickMs:      number  = 0;
+  private isRunning:   boolean = false;
+  private currentTick: number  = 0;
+  private lastTickMs:  number  = 0;
 
   // ── Decision records accumulated this tick ──────────────────────────────────
   private decisionsThisTick: DecisionRecord[] = [];
@@ -127,26 +126,26 @@ export class CardEngine {
   private counterWindowAttackId: string | null = null;
   private counterWindowEndMs:    number        = 0;
 
-  private rescueWindowOpen:      boolean       = false;
-  private rescueWindowTeammate:  string | null = null;
-  private rescueWindowEndMs:     number        = 0;
+  private rescueWindowOpen:     boolean       = false;
+  private rescueWindowTeammate: string | null = null;
+  private rescueWindowEndMs:    number        = 0;
 
   private phaseBoundaryWindow:   PhaseBoundaryWindow | null = null;
-  private sovereigntyWindowOpen: boolean       = false;
+  private sovereigntyWindowOpen: boolean = false;
 
   // ── Predator: Battle Budget ──────────────────────────────────────────────────
   private battleBudget: number = 0;
 
   // ── Syndicate: Defection tracking ──────────────────────────────────────────
   private defectionStepHistory: DefectionStep[] = [];
-  private lastDefectionTick:    number           = -1;
+  private lastDefectionTick:    number          = -1;
 
   // ── Last played card ref (CardReader) ────────────────────────────────────────
   private lastPlayedCard: CardInHand | null = null;
 
   // ── Unsubscribe handles ─────────────────────────────────────────────────────
-  private unsubCounterWindow:   (() => void) | null = null;
-  private unsubRescueWindow:    (() => void) | null = null;
+  private unsubCounterWindow: (() => void) | null = null;
+  private unsubRescueWindow:  (() => void) | null = null;
 
   // ═══════════════════════════════════════════════════════════════════════════
   // CONSTRUCTOR
@@ -272,19 +271,19 @@ export class CardEngine {
     this.handManager.reset();
     this.windowManager.reset();
     this.forcedCardQueue.reset();
-    this.decisionsThisTick    = [];
-    this.isRunning            = false;
-    this.currentTick          = 0;
-    this.lastTickMs           = 0;
-    this.counterWindowOpen    = false;
-    this.rescueWindowOpen     = false;
-    this.phaseBoundaryWindow  = null;
+    this.decisionsThisTick     = [];
+    this.isRunning             = false;
+    this.currentTick           = 0;
+    this.lastTickMs            = 0;
+    this.counterWindowOpen     = false;
+    this.rescueWindowOpen      = false;
+    this.phaseBoundaryWindow   = null;
     this.sovereigntyWindowOpen = false;
-    this.battleBudget         = 0;
-    this.defectionStepHistory = [];
-    this.lastDefectionTick    = -1;
-    this.lastPlayedCard       = null;
-    this._health              = EngineHealth.REGISTERED;
+    this.battleBudget          = 0;
+    this.defectionStepHistory  = [];
+    this.lastDefectionTick     = -1;
+    this.lastPlayedCard        = null;
+    this._health               = EngineHealth.REGISTERED;
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -308,7 +307,7 @@ export class CardEngine {
     this.currentTick       = tickIndex;
     this.decisionsThisTick = [];
 
-    const now      = perfNow();
+    const now       = perfNow();
     const elapsedMs = now - this.lastTickMs;
     this.lastTickMs = now;
 
@@ -474,15 +473,15 @@ export class CardEngine {
    * Called once by EngineOrchestrator at construction. The same object reference
    * is reused throughout the run lifecycle.
    */
-  public getReader(): CardReader {
+  public getReader(): import('../zero/types').CardReader {
     return {
-      getHandSize:                () => this.handManager.getHandSize(),
-      getForcedCardCount:         () => this.handManager.getForcedCards().length,
-      getActiveThreatCardCount:   () => this.forcedCardQueue.getActiveCount(),
-      getDecisionWindowsActive:   () => this.windowManager.getActiveWindowCount(),
-      getHoldsRemaining:          () => this.handManager.getHoldsRemaining(),
+      getHandSize: () => this.handManager.getHandSize(),
+      getForcedCardCount: () => this.handManager.getForcedCards().length,
+      getActiveThreatCardCount: () => this.forcedCardQueue.getActiveCount(),
+      getDecisionWindowsActive: () => this.windowManager.getActiveWindowCount(),
+      getHoldsRemaining: () => this.handManager.getHoldsRemaining(),
       getMissedOpportunityStreak: () => this.handManager.getMissedOpportunityStreak(),
-      getLastPlayedCard:          () => this.lastPlayedCard,
+      getLastPlayedCardId: () => this.lastPlayedCard?.definition.cardId ?? null,
     };
   }
 
@@ -491,7 +490,7 @@ export class CardEngine {
   // ═══════════════════════════════════════════════════════════════════════════
 
   private processPlayRequest(
-    request:   CardPlayRequest,
+    request: CardPlayRequest,
     tickIndex: number,
   ): DecisionRecord | null {
     const card = this.handManager.getCard(request.instanceId);
@@ -527,9 +526,16 @@ export class CardEngine {
     } else {
       // IMMEDIATE / LEGENDARY — synthetic resolved record
       const syntheticWindow = {
-        windowId: '', cardInstanceId: card.instanceId, cardId: card.definition.cardId,
-        choiceId: request.choiceId, openedAtMs: request.timestamp, resolvedAtMs: request.timestamp,
-        resolvedInMs: 0, durationMs: 0, speedScore: 1.0, resolvedAtTick: tickIndex,
+        windowId: '',
+        cardInstanceId: card.instanceId,
+        cardId: card.definition.cardId,
+        choiceId: request.choiceId,
+        openedAtMs: request.timestamp,
+        resolvedAtMs: request.timestamp,
+        resolvedInMs: 0,
+        durationMs: 0,
+        speedScore: 1.0,
+        resolvedAtTick: tickIndex,
       };
       record = this.scorer.scoreResolvedPlay(card, syntheticWindow, effectResult, hand, tickIndex);
     }
@@ -554,10 +560,10 @@ export class CardEngine {
   // ═══════════════════════════════════════════════════════════════════════════
 
   private handleModeSpecificPlay(
-    card:         CardInHand,
-    request:      CardPlayRequest,
+    card: CardInHand,
+    request: CardPlayRequest,
     effectResult: any,
-    tickIndex:    number,
+    tickIndex: number,
   ): void {
     // ── Syndicate: Defection arc tracking ────────────────────────────────────
     if (card.definition.timingClass === TimingClass.DEFECTION_STEP) {
@@ -584,7 +590,7 @@ export class CardEngine {
       this.uxBridge.emitBluffCardDisplayed(card, displayedAs, tickIndex);
     }
 
-    // ── Phantom: Ghost card activation ────────────────────────────────────────
+    // ── Phantom: Ghost card activation ───────────────────────────────────────
     if (card.definition.deckType === 'GHOST') {
       const markerType = this.resolveGhostMarkerType(card);
       const divDelta   = effectResult.totalCordDelta;
