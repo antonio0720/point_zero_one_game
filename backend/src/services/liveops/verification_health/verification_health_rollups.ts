@@ -42,10 +42,10 @@ export class VerificationHealthRollupRepository {
 
     // Implement the logic for calculating pendingToVerifiedLatency, quarantineRate, gatingTriggers, and queueDepthSample here.
 
-    rollup.pendingToVerifiedLatency = /* calculated value */;
-    rollup.quarantineRate = /* calculated value */;
-    rollup.gatingTriggers = /* calculated value */;
-    rollup.queueDepthSample = /* calculated value */;
+    rollup.pendingToVerifiedLatency = 0;
+    rollup.quarantineRate = 0;
+    rollup.gatingTriggers = [];
+    rollup.queueDepthSample = 0;
     rollup.timestamp = new Date();
 
     return this.verificationHealthRollupRepository.save(rollup);

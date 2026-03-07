@@ -24,7 +24,7 @@ export class VerifiedRankUpdatesImpl implements Notification {
    * @param newRank The new rank of the user.
    */
   public async publish(userId: number, newRank: number): Promise<void> {
-    const notification = new Notification('Verified ✅ — you're now #', userId, newRank);
+    const notification = new Notification(`Verified ✅ — you're now #${newRank}`, userId, newRank);
     await this.notificationRepository.save(notification);
   }
 }

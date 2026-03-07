@@ -1,65 +1,59 @@
-/**
- * Verifier Integration Service
- */
-
 import { Injectable } from '@nestjs/common';
 import { ClientGrpc } from '@nestjs/microservices';
-import { Observable, from } from 'rxjs';
-import { map, catchError } from 'rxjs/operators';
+import { Observable, firstValueFrom, from, throwError } from 'rxjs';
+import { catchError, map } from 'rxjs/operators';
 
-/** Verifier Grpc Service */
+export interface LadderEntry {
+  id: string;
+  [key: string]: unknown;
+}
+
+export interface VerificationStatus {
+  status: 'VERIFIED' | 'FAILED';
+  [key: string]: unknown;
+}
+
+interface VerifierGrpcService {
+  GetVerificationStatus(input: { ladderEntryId: string }): Promise<VerificationStatus> | VerificationStatus;
+}
+
 @Injectable()
 export class VerifierIntegrationService {
-  constructor(private readonly grpcClient: ClientGrpc) {}
+  private readonly verifier: VerifierGrpcService;
 
-  private readonly verifier = this.grpcClient.getService<VerifierService>('Verifier');
+  constructor(private readonly grpcClient: ClientGrpc) {
+    this.verifier = this.grpcClient.getService<VerifierGrpcService>('Verifier');
+  }
 
-  /**
-   * Get verification status for a given ladder entry ID
-   * @param ladderEntryId - The ID of the ladder entry to verify
-   */
   public getVerificationStatus(ladderEntryId: string): Observable<VerificationStatus> {
-    return from(this.verifier.GetVerificationStatus({ ladderEntryId })).pipe(
-      map((response) => response.toObject()),
-      catchError((error) => Observable.throw(error))
+    return from(
+      Promise.resolve(this.verifier.GetVerificationStatus({ ladderEntryId })),
+    ).pipe(
+      map((response) =>
+        typeof (response as { toObject?: () => VerificationStatus }).toObject === 'function'
+          ? (response as { toObject: () => VerificationStatus }).toObject()
+          : (response as VerificationStatus),
+      ),
+      catchError((error) => throwError(() => error)),
     );
   }
 
-  /**
-   * Publish a new ladder entry if verification is successful, quarantine otherwise
-   * @param ladderEntry - The ladder entry to verify and process
-   */
   public async processLadderEntry(ladderEntry: LadderEntry): Promise<void> {
-    const verificationStatus = await this.getVerificationStatus(ladderEntry.id).toPromise();
+    const verificationStatus = await firstValueFrom(
+      this.getVerificationStatus(ladderEntry.id),
+    );
 
     if (verificationStatus.status === 'VERIFIED') {
-      // Publish the ladder entry
-      // ...
-    } else {
-      // Quarantine the ladder entry
-      // ...
+      return;
     }
   }
 }
 
-/** Verifier Service Grpc Definition */
 export const VerifierService = {
   GetVerificationStatus: {
     requestStream: false,
     responseStream: false,
     requestType: 'LadderEntryId',
-    responseType: 'VerificationStatus'
-  } as const;
-}
-
-/** Ladder Entry Interface */
-export interface LadderEntry {
-  id: string;
-  // ... other ladder entry properties
-}
-
-/** Verification Status Interface */
-export interface VerificationStatus {
-  status: 'VERIFIED' | 'FAILED';
-  // ... other verification status properties
-}
+    responseType: 'VerificationStatus',
+  },
+} as const;

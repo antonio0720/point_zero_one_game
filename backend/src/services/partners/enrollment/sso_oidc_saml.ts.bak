@@ -39,3 +39,6 @@ export class SsoStrategy extends PassportStrategy(Strategy as PassportStrategyTy
     return user;
   }
 }
+
+
+Also, the SSO_SECRET environment variable should be securely managed in a production environment.

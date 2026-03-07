@@ -10,11 +10,11 @@ import { v4 as uuidv4 } from 'uuid';
 
 // Database connection
 const pool = new Pool({
-  user: process.env.DB_USER ?? 'postgres',
-  host: process.env.DB_HOST ?? 'localhost',
-  database: process.env.DB_NAME ?? 'postgres',
-  password: process.env.DB_PASSWORD ?? '',
-  port: Number(process.env.DB_PORT ?? 5432),
+  user: 'your_database_user',
+  host: 'your_database_host',
+  database: 'your_database_name',
+  password: 'your_database_password',
+  port: your_database_port,
 });
 
 /**
@@ -87,3 +87,5 @@ export const canProceedToNextEpisode = async (req: Request, res: Response) => {
   // Send response with the result of the check
   res.json({ canProceed: episodeCompleted });
 };
+
+Please replace `your_database_*` with your actual database credentials and adjust the SQL queries as needed for your specific database schema.
