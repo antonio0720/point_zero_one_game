@@ -415,41 +415,10 @@ const App: React.FC = () => {
   useEffect(() => {
     if (auth.user && screen === 'AUTH') {
       setScreen('LOBBY');
-    } else if (!auth.user && screen !== 'AUTH' && !externalLaunchRef.current) {
+    } else if (!auth.user && screen !== 'AUTH') {
       setScreen('AUTH');
     }
   }, [auth.user]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // ── AUTO-START FROM NEXT.JS (Strategy B bridge) ─────────────────────────
-  // When Next.js play page redirects here with ?from=nextjs&mode=solo&seed=...
-  // skip auth/lobby and start the run immediately.
-  const externalLaunchRef = useRef(false);
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('from') !== 'nextjs') return;
-    const mode = params.get('mode') as RunMode | null;
-    if (!mode) return;
-    externalLaunchRef.current = true;
-    setScreen('GAME');
-    const timer = setTimeout(() => {
-      resetAllState();
-      const runId = params.get('runId') ?? `run_${Date.now()}`;
-      const seed  = params.get('seed') ?? String(Math.floor(Math.random() * 999999));
-      setRunMeta(prev => ({ ...prev, mode: mode as RunMode }));
-      orchestrator.startRun({
-        runId,
-        userId:           'player_01',
-        seed,
-        seasonTickBudget: 720,
-        freedomThreshold: 500_000,
-        clientVersion:    '4.0.0',
-        engineVersion:    '4.0.0',
-      });
-    }, 200);
-    return () => clearTimeout(timer);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
 
   const handleAuthSuccess = useCallback(() => {
     setScreen('LOBBY');
