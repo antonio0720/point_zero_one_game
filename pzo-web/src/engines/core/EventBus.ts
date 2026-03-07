@@ -1,191 +1,126 @@
-/**
- * FILE: pzo-web/src/engines/core/EventBus.ts
- *
- * Extended to include Tension Engine channels (Engine 3 of 7).
- * Generic constraint broadened from PressureEventInterface → object
- * so both Pressure and Tension events can be emitted without casting.
- *
- * DELIVERY MODE: Synchronous. emit() calls handlers inline. flush() is a no-op.
- *
- * Density6 LLC · Point Zero One · Confidential
- */
-import { PZOEventType, PressureEventInterface } from "./event-bus";
+// ═══════════════════════════════════════════════════════════════════════════════
+// POINT ZERO ONE — CORE EVENT BUS (COMPATIBILITY BRIDGE)
+// pzo-web/src/engines/core/EventBus.ts
+//
+// Bridges zero/EventBus (Orchestrator, MechanicsRouter, MechanicsBridge) with
+// the interface shape that BattleEngine, CascadeEngine, and other engines expect.
+//
+// STRATEGY: Extend zero/EventBus. Add the missing interface members
+// (eventRegistry, handlers, registerEventChannels, register, unregister).
+// Do NOT override emit — the parent's generic signature is authoritative.
+//
+// Density6 LLC · Point Zero One · Confidential
+// ═══════════════════════════════════════════════════════════════════════════════
 
-// ── Event Channels ─────────────────────────────────────────────────────────
-// Add new channels here when a new engine is integrated.
-// Channels must be registered in registerEventChannels() below.
+import {
+  EventBus as ZeroEventBus,
+  sharedEventBus as zeroSharedEventBus,
+} from '../zero/EventBus';
 
-export enum PZOEventChannel {
-  // ── Pressure Engine (Engine 2) ─────────────────────────────────
-  PRESSURE_SCORE_UPDATED    = "PRESSURE_SCORE_UPDATED",
-  PRESSURE_TIER_CHANGED     = "PRESSURE_TIER_CHANGED",
-  PRESSURE_CRITICAL_ENTERED = "PRESSURE_CRITICAL_ENTERED",
+// ── Engine Event Name Registry ────────────────────────────────────────────────
 
-  // ── Tension Engine (Engine 3) ──────────────────────────────────
-  TENSION_SCORE_UPDATED      = "TENSION_SCORE_UPDATED",
-  TENSION_PULSE_FIRED        = "TENSION_PULSE_FIRED",
-  TENSION_VISIBILITY_CHANGED = "TENSION_VISIBILITY_CHANGED",
-  THREAT_ARRIVED             = "THREAT_ARRIVED",
-  THREAT_MITIGATED           = "THREAT_MITIGATED",
-  THREAT_EXPIRED             = "THREAT_EXPIRED",
-  ANTICIPATION_QUEUE_UPDATED = "ANTICIPATION_QUEUE_UPDATED",
+export type EngineEventName =
+  | 'RUN_STARTED' | 'RUN_ENDED' | 'TICK_START' | 'TICK_COMPLETE' | 'TICK_STEP_ERROR'
+  | 'TIME_TICK_ADVANCED' | 'TIME_TIER_CHANGED' | 'TIME_FREEZE_APPLIED'
+  | 'TIME_FREEZE_EXPIRED' | 'TIME_HOLD_USED' | 'TIME_BUDGET_WARNING'
+  | 'PRESSURE_SCORE_UPDATED' | 'PRESSURE_TIER_CHANGED' | 'PRESSURE_STAGNATION_WARNING'
+  | 'TENSION_SCORE_UPDATED' | 'TENSION_QUEUE_UPDATED'
+  | 'TENSION_THREAT_REVEALED' | 'TENSION_THREAT_HIDDEN'
+  | 'SHIELD_DAMAGE_APPLIED' | 'SHIELD_LAYER_BREACHED' | 'SHIELD_REGEN_APPLIED'
+  | 'SHIELD_INTEGRITY_UPDATED' | 'SHIELD_FORTIFIED' | 'SHIELD_CASCADE_TRIGGERED'
+  | 'BATTLE_BOT_ACTIVATED' | 'BATTLE_BOT_DEACTIVATED' | 'BATTLE_ATTACK_FIRED'
+  | 'BATTLE_ATTACK_BLOCKED' | 'BATTLE_HEAT_UPDATED' | 'BATTLE_PHASE_CHANGED'
+  | 'BATTLE_WAVE_CHANGED'
+  | 'CASCADE_CHAIN_STARTED' | 'CASCADE_LINK_EXECUTED'
+  | 'CASCADE_CHAIN_BROKEN' | 'CASCADE_RECOVERY_TRIGGERED'
+  | 'SOVEREIGNTY_SCORE_UPDATED' | 'SOVEREIGNTY_GRADE_ASSIGNED'
+  | 'SOVEREIGNTY_PROOF_GENERATED' | 'SOVEREIGNTY_INTEGRITY_CHECK'
+  | 'CARD_DRAWN' | 'CARD_PLAYED' | 'CARD_DISCARDED' | 'CARD_FORCED'
+  | 'CARD_WINDOW_OPENED' | 'CARD_WINDOW_CLOSED' | 'CARD_WINDOW_EXPIRED'
+  | 'CARD_HOLD_PLACED' | 'CARD_HOLD_RELEASED' | 'CARD_EFFECT_APPLIED'
+  | 'MECHANIC_INCOME_DELTA' | 'MECHANIC_EXPENSE_DELTA' | 'MECHANIC_CASH_DELTA'
+  | 'MECHANIC_NET_WORTH_DELTA' | 'MECHANIC_SHIELD_DELTA' | 'MECHANIC_HEAT_DELTA'
+  | 'MECHANIC_PRESSURE_DELTA' | 'MECHANIC_TENSION_DELTA' | 'MECHANIC_CORD_DELTA'
+  | 'MECHANIC_FREEZE_TICKS' | 'MECHANIC_CUSTOM_PAYLOAD' | 'MECHANIC_FIRED'
+  | 'MECHANIC_CASCADE_LINK' | 'MECHANICS_TICK_COMPLETE'
+  | (string & {});
+
+export type EngineEventHandler = (payload: Record<string, unknown>) => void;
+
+export interface EventChannelConfig {
+  name: EngineEventName;
+  description?: string;
+  maxListeners?: number;
 }
 
-// ── Base event wrapper ─────────────────────────────────────────────────────
-// T broadened to object — PressureEventInterface and TensionEvent both satisfy this.
-export interface PZOEvent<T extends object> {
-  type: PZOEventType;
-  payload: T;
-}
+// ── EventBus class ────────────────────────────────────────────────────────────
+// Extends ZeroEventBus. Does NOT override emit — parent's generic typed
+// signature is preserved, which eliminates the TS2416 incompatibility.
 
-// ── EventBus ───────────────────────────────────────────────────────────────
+export class EventBus extends ZeroEventBus {
 
-export class EventBus {
-  private eventRegistry: Set<PZOEventChannel> = new Set();
-  // Handler storage: channel → list of handlers
-  private handlers: Map<PZOEventChannel, Array<(event: object) => void>> = new Map();
+  public readonly eventRegistry: Map<string, EventChannelConfig> = new Map();
+  public readonly handlers: Map<string, EngineEventHandler[]> = new Map();
 
-  constructor() {
-    this.registerEventChannels();
-  }
-
-  private registerEventChannels(): void {
-    // ── Pressure channels ──────────────────────────────────────────
-    this.register(PZOEventChannel.PRESSURE_SCORE_UPDATED);
-    this.register(PZOEventChannel.PRESSURE_TIER_CHANGED);
-    this.register(PZOEventChannel.PRESSURE_CRITICAL_ENTERED);
-
-    // ── Tension channels ───────────────────────────────────────────
-    this.register(PZOEventChannel.TENSION_SCORE_UPDATED);
-    this.register(PZOEventChannel.TENSION_PULSE_FIRED);
-    this.register(PZOEventChannel.TENSION_VISIBILITY_CHANGED);
-    this.register(PZOEventChannel.THREAT_ARRIVED);
-    this.register(PZOEventChannel.THREAT_MITIGATED);
-    this.register(PZOEventChannel.THREAT_EXPIRED);
-    this.register(PZOEventChannel.ANTICIPATION_QUEUE_UPDATED);
-  }
-
-  private register(channel: PZOEventChannel): void {
-    this.eventRegistry.add(channel);
-    if (!this.handlers.has(channel)) {
-      this.handlers.set(channel, []);
-    }
-  }
-
-  // ── Subscribe ──────────────────────────────────────────────────────────
-
-  /**
-   * Subscribe to a channel. T is the specific event payload type.
-   * Constraint broadened to object — works for both Pressure and Tension events.
-   */
-  public on<T extends object>(
-    channel: PZOEventChannel,
-    handler: (event: T) => void
-  ): void {
-    if (!this.eventRegistry.has(channel)) {
-      throw new Error(`[EventBus] Invalid event channel: ${channel}`);
-    }
-    const list = this.handlers.get(channel)!;
-    list.push(handler as (event: object) => void);
-  }
-
-  /**
-   * Unsubscribe a specific handler from a channel.
-   */
-  public off<T extends object>(
-    channel: PZOEventChannel,
-    handler: (event: T) => void
-  ): void {
-    const list = this.handlers.get(channel);
-    if (!list) return;
-    const idx = list.indexOf(handler as (event: object) => void);
-    if (idx !== -1) list.splice(idx, 1);
-  }
-
-  // ── Emit ───────────────────────────────────────────────────────────────
-
-  /**
-   * Emit a payload to all handlers on a channel.
-   * Synchronous delivery — handlers called immediately.
-   * Constraint broadened to object — works for any engine event type.
-   */
-  public emit<T extends object>(
-    channel: PZOEventChannel,
-    payload: T
-  ): void {
-    if (!this.eventRegistry.has(channel)) {
-      throw new Error(`[EventBus] Invalid event channel: ${channel}`);
-    }
-    const list = this.handlers.get(channel);
-    if (!list || list.length === 0) return;
-    for (const handler of list) {
-      handler(payload);
-    }
-  }
-
-  /**
-   * No-op flush — delivery is synchronous, no queue to drain.
-   * Kept for API compatibility with EngineOrchestrator tick sequence.
-   */
-  public flush(): void {
-    // Synchronous bus — nothing to flush.
-  }
-
-  // ── Pressure-typed convenience overloads (backwards compat) ───────────
-
-  /**
-   * Pressure engine overload — accepts PressureEventInterface payloads.
-   * Kept so existing PressureEngine code compiles without changes.
-   * @deprecated Use the generic on<T extends object>() overload instead.
-   */
-  public onPressure<T extends PressureEventInterface>(
-    channel: PZOEventChannel,
-    handler: (event: PZOEvent<T>) => void
-  ): void {
-    this.on(channel, handler as (e: object) => void);
-  }
-}
-// ── Legacy Global Event Bus ────────────────────────────────────────────────────
-// Permissive bus used by EmpireEngine, PredatorEngine, SyndicateEngine,
-// PhantomEngine (pre-zero generation). Supports arbitrary string event names,
-// 3-argument emit, and emitImmediate.
-// ModeEventBridge translates these events onto the zero/EventBus for the store.
-// DO NOT use in new engines — use zero/EventBus exclusively.
-
-import type { PZOEvent as CorePZOEvent } from '../core/types';
-
-export class LegacyEventBus {
-  private handlers: Map<string, Array<(event: CorePZOEvent) => void>> = new Map();
-
-  public on(
-    eventName: string,
-    handler:   (event: CorePZOEvent) => void,
-  ): () => void {
-    if (!this.handlers.has(eventName)) {
-      this.handlers.set(eventName, []);
-    }
-    this.handlers.get(eventName)!.push(handler);
-    return () => {
-      const list = this.handlers.get(eventName);
-      if (list) {
-        const i = list.indexOf(handler);
-        if (i !== -1) list.splice(i, 1);
+  public registerEventChannels(channels: EventChannelConfig[]): void {
+    for (const channel of channels) {
+      if (!this.eventRegistry.has(channel.name)) {
+        this.eventRegistry.set(channel.name, channel);
       }
-    };
+    }
   }
 
-  public emit(eventName: string, tick: number, payload: object): void {
+  public register(eventName: EngineEventName, handler: EngineEventHandler): void {
+    let list = this.handlers.get(eventName);
+    if (!list) { list = []; this.handlers.set(eventName, list); }
+    list.push(handler);
+
+    // Wire into parent's subscription system so emit+flush delivers
+    try {
+      const sub = (this as unknown as Record<string, unknown>)['subscribe'] ??
+                  (this as unknown as Record<string, unknown>)['on'];
+      if (typeof sub === 'function') {
+        (sub as (name: string, fn: EngineEventHandler) => void).call(this, eventName, handler);
+      }
+    } catch { /* parent may not expose subscribe/on */ }
+  }
+
+  public unregister(eventName: EngineEventName, handler: EngineEventHandler): void {
     const list = this.handlers.get(eventName);
-    if (!list || list.length === 0) return;
-    const event: CorePZOEvent = { type: eventName as any, tick, payload };
-    for (const h of list) h(event);
+    if (!list) return;
+    const idx = list.indexOf(handler);
+    if (idx >= 0) list.splice(idx, 1);
+
+    try {
+      const unsub = (this as unknown as Record<string, unknown>)['unsubscribe'] ??
+                    (this as unknown as Record<string, unknown>)['off'];
+      if (typeof unsub === 'function') {
+        (unsub as (name: string, fn: EngineEventHandler) => void).call(this, eventName, handler);
+      }
+    } catch { /* graceful */ }
   }
 
-  /** Synchronous immediate dispatch — bypasses any deferred queue. */
-  public emitImmediate(eventName: string, tick: number, payload: object): void {
-    this.emit(eventName, tick, payload);
+  public isRegistered(eventName: string): boolean {
+    return this.eventRegistry.has(eventName);
+  }
+
+  public getRegisteredChannels(): string[] {
+    return Array.from(this.eventRegistry.keys());
   }
 }
 
-/** Shared instance for all legacy mode engines. */
-export const globalEventBus = new LegacyEventBus();
+// ── Shared instance ───────────────────────────────────────────────────────────
+
+export const sharedEventBus: EventBus =
+  zeroSharedEventBus instanceof EventBus
+    ? zeroSharedEventBus
+    : Object.setPrototypeOf(zeroSharedEventBus, EventBus.prototype) as EventBus;
+
+if (!sharedEventBus.eventRegistry) {
+  (sharedEventBus as unknown as Record<string, unknown>).eventRegistry = new Map();
+}
+if (!sharedEventBus.handlers) {
+  (sharedEventBus as unknown as Record<string, unknown>).handlers = new Map();
+}
+
+export default EventBus;
