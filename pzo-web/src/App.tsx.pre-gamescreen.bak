@@ -17,12 +17,6 @@ import { sharedEventBus } from './engines/zero/EventBus';
 import { useAuth }        from './hooks/useAuth';
 import { AuthGate }       from './components/auth/AuthGate';
 import LobbyScreen        from './components/LobbyScreen';
-
-// ── Mode-specific GameScreens (self-wiring via useEngineStore) ────────────
-import EmpireGameScreen    from './components/EmpireGameScreen';
-import PredatorGameScreen  from './components/PredatorGameScreen';
-import SyndicateGameScreen from './components/SyndicateGameScreen';
-import PhantomGameScreen   from './components/PhantomGameScreen';
 import type {
   RunLifecycleState, RunOutcome, TickTier, PressureTier, BotId,
   EngineEventPayloadMap,
@@ -891,44 +885,6 @@ const App: React.FC = () => {
         onLogout={handleLogout}
       />
     );
-  }
-
-  // ── MODE-SPECIFIC GAME SCREENS (Strategy B: Next.js external launch) ──────
-  // When launched from Next.js, render the correct mode screen instead of
-  // the monolithic dashboard. GameScreens are self-wiring via useEngineStore.
-  if (externalLaunchRef.current && runMeta.mode) {
-    const modeScreenProps = {
-      onCardCounterplay: undefined,
-      onIgnoreCard: undefined,
-    };
-    const backBtn = (
-      <button
-        onClick={() => {
-          // Signal Next.js to return to lobby via postMessage
-          if (window.opener) window.opener.postMessage({ type: 'PZO_BACK_TO_LOBBY' }, '*');
-          window.location.href = '/play';
-        }}
-        style={{
-          position: 'fixed', top: 16, left: 16, zIndex: 9999,
-          padding: '8px 16px', borderRadius: 8, cursor: 'pointer',
-          background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)',
-          color: '#B8B8D8', fontSize: 11, fontFamily: "'DM Mono', monospace",
-          letterSpacing: '0.1em', textTransform: 'uppercase' as const,
-        }}
-      >
-        ← LOBBY
-      </button>
-    );
-    switch (runMeta.mode) {
-      case 'solo':
-        return <>{backBtn}<EmpireGameScreen {...modeScreenProps} /></>;
-      case 'asymmetric-pvp':
-        return <>{backBtn}<PredatorGameScreen /></>;
-      case 'co-op':
-        return <>{backBtn}<SyndicateGameScreen /></>;
-      case 'ghost':
-        return <>{backBtn}<PhantomGameScreen /></>;
-    }
   }
 
   // ── GAME DASHBOARD ────────────────────────────────────────────────────────
