@@ -49,7 +49,6 @@
 import {
   GameMode,
   DefectionStep,
-  ForcedCardSource,
   DEFECTION_CORD_PENALTY,
   MAX_HAND_SIZE,
   type CardInHand,
@@ -66,7 +65,7 @@ import { DeckBuilder, DrawCursor }     from './DeckBuilder';
 import { HandManager, DiscardReason }  from './HandManager';
 import { ModeOverlayEngine }           from './ModeOverlayEngine';
 import { TimingValidator }             from './TimingValidator';
-import type { TimingValidatorContext } from './TimingValidator';
+import type { EngineStateSnapshot }    from './TimingValidator';
 import { CardEffectResolver }          from './CardEffectResolver';
 import { DecisionWindowManager }       from './DecisionWindowManager';
 import { ForcedCardQueue }             from './ForcedCardQueue';
@@ -74,7 +73,6 @@ import { CardScorer }                  from './CardScorer';
 import { CardUXBridge }                from './CardUXBridge';
 import type { EventBus }               from '../zero/EventBus';
 import { EngineId, EngineHealth }      from '../zero/types';
-import { v4 as uuidv4 }                from 'uuid';
 
 // ── PERFORMANCE TIMER ─────────────────────────────────────────────────────────
 const perfNow = (): number =>
@@ -87,10 +85,6 @@ const perfNow = (): number =>
 export class CardEngine {
 
   // ── IEngine API surface ──────────────────────────────────────────────────────
-  // These fields and methods satisfy the zero/types.ts IEngine interface contract.
-  // CardEngine does NOT formally implement IEngine (its init signature accepts
-  // CardEngineInitParams, not EngineInitParams). CardEngineAdapter handles the
-  // formal IEngine implementation and delegates to these.
   public readonly engineId: EngineId = EngineId.CARD;
   private _health: EngineHealth = EngineHealth.REGISTERED;
 
@@ -109,8 +103,6 @@ export class CardEngine {
   private mode!:       GameMode;
   private maxHandSize: number = 5;
 
-  // Phase 1: EventBus is now injected at construction (matching all other engines).
-  // It was previously a second argument to init() — that signature is removed.
   private readonly eventBus: EventBus;
 
   // ── Run state ───────────────────────────────────────────────────────────────
@@ -151,18 +143,9 @@ export class CardEngine {
   // CONSTRUCTOR
   // ═══════════════════════════════════════════════════════════════════════════
 
-  /**
-   * Phase 1: Constructor now accepts EventBus, matching all other engines.
-   * EventBus is wired at construction and available throughout the engine
-   * lifecycle without needing to be passed to init().
-   *
-   * Sub-components are created in init() once params are known.
-   */
   constructor(eventBus: EventBus) {
     this.eventBus = eventBus;
 
-    // Sub-components initialized in init() once params are known.
-    // Nullish assignments satisfy TypeScript until then.
     this.handManager     = null as any;
     this.overlayEngine   = null as any;
     this.timingValidator = null as any;
@@ -177,26 +160,14 @@ export class CardEngine {
   // IENGINE API SURFACE
   // ═══════════════════════════════════════════════════════════════════════════
 
-  /**
-   * Engine name for diagnostics, health reports, and logging.
-   */
   public getName(): string {
     return 'CardEngine';
   }
 
-  /**
-   * Current engine health — mirrored from the EngineRegistry via setHealth().
-   * CardEngineAdapter calls setHealth() after each registry health transition
-   * so CardEngine always reflects the same state that the registry tracks.
-   */
   public getHealth(): EngineHealth {
     return this._health;
   }
 
-  /**
-   * Called by CardEngineAdapter to synchronize health state from the registry.
-   * Not called by any other system.
-   */
   public setHealth(health: EngineHealth): void {
     this._health = health;
   }
@@ -205,15 +176,6 @@ export class CardEngine {
   // LIFECYCLE
   // ═══════════════════════════════════════════════════════════════════════════
 
-  /**
-   * Initialize the CardEngine for a new run.
-   *
-   * Phase 1: Signature now accepts only CardEngineInitParams (EventBus is
-   * injected at construction). Called by CardEngineAdapter.init() after the
-   * adapter translates EngineInitParams → CardEngineInitParams.
-   *
-   * @param params - Full card engine configuration for this run.
-   */
   public init(params: CardEngineInitParams): void {
     this.params      = params;
     this.mode        = params.gameMode;
@@ -221,10 +183,9 @@ export class CardEngine {
     this._health     = EngineHealth.INITIALIZED;
 
     if (params.battleBudgetMax !== undefined) {
-      this.battleBudget = 0; // starts at 0, earns per tick
+      this.battleBudget = 0;
     }
 
-    // ── Instantiate sub-components ──────────────────────────────────────────
     this.overlayEngine   = new ModeOverlayEngine(this.mode);
     this.handManager     = new HandManager(this.mode, this.maxHandSize, this.overlayEngine);
     this.timingValidator = new TimingValidator();
@@ -234,16 +195,12 @@ export class CardEngine {
     this.scorer          = new CardScorer();
     this.uxBridge        = new CardUXBridge(this.eventBus);
 
-    // ── Build deck and attach cursor ────────────────────────────────────────
     const deckBuilder = new DeckBuilder(params.seed);
     const deckResult  = deckBuilder.buildDeck(this.mode);
     const cursor      = new DrawCursor(deckResult);
     this.handManager.attachDeck(cursor);
 
-    // ── Initialize forced card queue (subscribes to EventBus) ───────────────
     this.forcedCardQueue.init();
-
-    // ── Mode-specific EventBus subscriptions ────────────────────────────────
     this.subscribeToModeEvents();
   }
 
@@ -252,7 +209,6 @@ export class CardEngine {
     this.currentTick = 0;
     this.lastTickMs  = perfNow();
 
-    // Initial hand fill — draw to maxHandSize
     for (let i = 0; i < this.maxHandSize; i++) {
       this.drawAndRegister(0);
     }
@@ -288,19 +244,8 @@ export class CardEngine {
 
   // ═══════════════════════════════════════════════════════════════════════════
   // PER-TICK SEQUENCE
-  // Called by CardEngineAdapter → EngineOrchestrator Step 1.5
   // ═══════════════════════════════════════════════════════════════════════════
 
-  /**
-   * Execute the full card engine tick sequence.
-   *
-   * Called by CardEngineAdapter.tick() which is called by EngineOrchestrator
-   * at Step 1.5 (after TimeEngine.advanceTick, before PressureEngine.computeScore).
-   *
-   * @param tickIndex - Current game tick (from snapshot.tickIndex)
-   * @returns         Accumulated DecisionRecords for EngineOrchestrator to thread
-   *                  into TickResult.decisionsThisTick and pendingDecisions.
-   */
   public tick(tickIndex: number): DecisionRecord[] {
     if (!this.isRunning) return [];
 
@@ -311,10 +256,8 @@ export class CardEngine {
     const elapsedMs = now - this.lastTickMs;
     this.lastTickMs = now;
 
-    // ── Step A: Advance decision window timers ───────────────────────────────
     this.windowManager.advanceTick(elapsedMs, tickIndex);
 
-    // ── Step B: Flush expired windows → auto-resolve ────────────────────────
     const expired = this.windowManager.flushExpired();
     for (const exp of expired) {
       const card = this.handManager.getCard(exp.cardInstanceId);
@@ -323,12 +266,11 @@ export class CardEngine {
       this.uxBridge.emitDecisionWindowExpired(exp, tickIndex);
       this.uxBridge.emitCardAutoResolved(card, exp.autoChoice, exp.speedScore, tickIndex);
 
-      // Build a minimal effectResult for scoring the auto-resolve
       const autoEffectResult = this.effectResolver.resolve(
         card,
         { instanceId: card.instanceId, choiceId: exp.autoChoice, timestamp: Date.now() },
         tickIndex,
-        false, // never optimal — auto-resolve = worst option
+        false,
       );
 
       const record = this.scorer.scoreAutoResolved(card, exp, autoEffectResult, tickIndex);
@@ -336,7 +278,6 @@ export class CardEngine {
 
       this.handManager.removeCard(card.instanceId, DiscardReason.AUTO_RESOLVED);
 
-      // Track forced card resolution
       if (card.isForced) {
         this.forcedCardQueue.resolveByCardId(card.definition.cardId, tickIndex);
         const entry = this.findForcedEntry(card.definition.cardId);
@@ -344,10 +285,8 @@ export class CardEngine {
       }
     }
 
-    // ── Step C: Process forced card injections ──────────────────────────────
     const injections = this.forcedCardQueue.processTick(tickIndex);
 
-    // ── Step D: Inject forced cards into hand + open windows ────────────────
     for (const { card, entry } of injections) {
       this.handManager.injectCard(card);
 
@@ -367,13 +306,11 @@ export class CardEngine {
       this.uxBridge.emitForcedCardInjected(entry, card, tickIndex);
     }
 
-    // ── Step E: Flush play queue → validate + resolve ───────────────────────
     const playRequests = this.handManager.flushPlayQueue();
     for (const request of playRequests) {
       this.processPlayRequest(request, tickIndex);
     }
 
-    // ── Step F: Flush resolved windows → score ───────────────────────────────
     const resolved = this.windowManager.flushResolved();
     for (const res of resolved) {
       const card = this.lastPlayedCard;
@@ -381,13 +318,11 @@ export class CardEngine {
       this.uxBridge.emitDecisionWindowResolved(res, true, tickIndex);
     }
 
-    // ── Step G: Replenish hand ──────────────────────────────────────────────
     while (this.handManager.hasRoomForDraw()) {
       const drawn = this.drawAndRegister(tickIndex);
-      if (!drawn) break; // deck exhausted
+      if (!drawn) break;
     }
 
-    // ── Step H: Snapshot ────────────────────────────────────────────────────
     this.uxBridge.emitHandSnapshot(
       this.handManager.getHandSize(),
       this.handManager.getForcedCards().length,
@@ -395,7 +330,6 @@ export class CardEngine {
       tickIndex,
     );
 
-    // ── Predator: Regen Battle Budget ──────────────────────────────────────
     if (this.mode === GameMode.HEAD_TO_HEAD) {
       const { BATTLE_BUDGET_CONFIG } = require('./types');
       this.battleBudget = Math.min(
@@ -408,21 +342,13 @@ export class CardEngine {
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // PLAY A CARD (external call from player input / EngineOrchestrator)
+  // PLAY A CARD
   // ═══════════════════════════════════════════════════════════════════════════
 
-  /**
-   * Queue a card play request from the player.
-   * Executed during the next tick's Step E.
-   */
   public queuePlay(request: CardPlayRequest): void {
     this.handManager.queuePlay(request);
   }
 
-  /**
-   * Immediately attempt to play a card (bypasses tick queue).
-   * Used for REACTIVE and COUNTER_WINDOW cards that need immediate processing.
-   */
   public playImmediate(request: CardPlayRequest): boolean {
     const card = this.handManager.getCard(request.instanceId);
     if (!card) return false;
@@ -430,7 +356,7 @@ export class CardEngine {
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // HOLD SYSTEM (Empire only)
+  // HOLD SYSTEM
   // ═══════════════════════════════════════════════════════════════════════════
 
   public holdCard(instanceId: string): boolean {
@@ -463,16 +389,6 @@ export class CardEngine {
   // CARD READER INTERFACE
   // ═══════════════════════════════════════════════════════════════════════════
 
-  /**
-   * Returns a stable CardReader interface backed by this engine instance.
-   *
-   * Phase 1: getLastPlayedCardId() added — returns the cardId string of the
-   * most recently played card. Zero/types.ts CardReader.getLastPlayedCardId()
-   * returns string | null to avoid importing CardInHand into zero/types.ts.
-   *
-   * Called once by EngineOrchestrator at construction. The same object reference
-   * is reused throughout the run lifecycle.
-   */
   public getReader(): import('../zero/types').CardReader {
     return {
       getHandSize: () => this.handManager.getHandSize(),
@@ -496,7 +412,6 @@ export class CardEngine {
     const card = this.handManager.getCard(request.instanceId);
     if (!card) return null;
 
-    // ── Validate timing ───────────────────────────────────────────────────────
     const ctx      = this.buildValidatorContext();
     const validity = this.timingValidator.validate(card, ctx, request);
 
@@ -505,26 +420,21 @@ export class CardEngine {
       return null;
     }
 
-    // ── Resolve window ────────────────────────────────────────────────────────
     const windowRecord = this.windowManager.resolveWindow(
       card.instanceId,
       request.choiceId,
       tickIndex,
     );
 
-    // ── Determine optimality ─────────────────────────────────────────────────
     const hand      = this.handManager.getHandArray();
     const isOptimal = this.isOptimalPlay(card, hand);
 
-    // ── Resolve effects ───────────────────────────────────────────────────────
     const effectResult = this.effectResolver.resolve(card, request, tickIndex, isOptimal);
 
-    // ── Score the decision ────────────────────────────────────────────────────
     let record: DecisionRecord;
     if (windowRecord) {
       record = this.scorer.scoreResolvedPlay(card, windowRecord, effectResult, hand, tickIndex);
     } else {
-      // IMMEDIATE / LEGENDARY — synthetic resolved record
       const syntheticWindow = {
         windowId: '',
         cardInstanceId: card.instanceId,
@@ -542,14 +452,11 @@ export class CardEngine {
 
     this.decisionsThisTick.push(record);
 
-    // ── Mode-specific post-play hooks ─────────────────────────────────────────
     this.handleModeSpecificPlay(card, request, effectResult, tickIndex);
 
-    // ── Remove from hand ──────────────────────────────────────────────────────
     this.handManager.removeCard(card.instanceId, DiscardReason.PLAYED);
     this.lastPlayedCard = card;
 
-    // ── Emit played event ─────────────────────────────────────────────────────
     this.uxBridge.emitCardPlayed(card, effectResult, record, tickIndex);
 
     return record;
@@ -565,12 +472,12 @@ export class CardEngine {
     effectResult: any,
     tickIndex: number,
   ): void {
-    // ── Syndicate: Defection arc tracking ────────────────────────────────────
     if (card.definition.timingClass === TimingClass.DEFECTION_STEP) {
       const cardId = card.definition.cardId;
       let step: DefectionStep | null = null;
-      if (cardId === 'def_break_pact_001')    step = DefectionStep.BREAK_PACT;
-      if (cardId === 'def_silent_exit_002')   step = DefectionStep.SILENT_EXIT;
+
+      if (cardId === 'def_break_pact_001') step = DefectionStep.BREAK_PACT;
+      if (cardId === 'def_silent_exit_002') step = DefectionStep.SILENT_EXIT;
       if (cardId === 'def_asset_seizure_003') step = DefectionStep.ASSET_SEIZURE;
 
       if (step) {
@@ -579,18 +486,20 @@ export class CardEngine {
         this.uxBridge.emitDefectionStepPlayed(step, this.params.userId, tickIndex);
 
         if (step === DefectionStep.ASSET_SEIZURE) {
-          this.uxBridge.emitDefectionCompleted(this.params.userId, DEFECTION_CORD_PENALTY, tickIndex);
+          this.uxBridge.emitDefectionCompleted(
+            this.params.userId,
+            DEFECTION_CORD_PENALTY,
+            tickIndex,
+          );
         }
       }
     }
 
-    // ── Predator: Bluff display routing ──────────────────────────────────────
     if (card.definition.timingClass === TimingClass.BLUFF) {
       const displayedAs = request.choiceId ?? card.definition.cardId;
       this.uxBridge.emitBluffCardDisplayed(card, displayedAs, tickIndex);
     }
 
-    // ── Phantom: Ghost card activation ───────────────────────────────────────
     if (card.definition.deckType === 'GHOST') {
       const markerType = this.resolveGhostMarkerType(card);
       const divDelta   = effectResult.totalCordDelta;
@@ -628,10 +537,6 @@ export class CardEngine {
   // PRIVATE: HELPERS
   // ═══════════════════════════════════════════════════════════════════════════
 
-  /**
-   * Patch decisionWindowId onto a CardInHand in the hand.
-   * CardInHand is readonly — we replace the entry with a new object.
-   */
   private patchCardWindowId(instanceId: string, windowId: string): void {
     const card = this.handManager.getCard(instanceId);
     if (!card) return;
@@ -639,74 +544,113 @@ export class CardEngine {
     this.handManager.injectCard(patched);
   }
 
-  private buildValidatorContext(): TimingValidatorContext {
+  private buildValidatorContext(): EngineStateSnapshot {
+    const defectionStep =
+      this.defectionStepHistory.includes(DefectionStep.SILENT_EXIT) ||
+      this.defectionStepHistory.includes(DefectionStep.ASSET_SEIZURE)
+        ? 2
+        : this.defectionStepHistory.includes(DefectionStep.BREAK_PACT)
+          ? 1
+          : 0;
+
     return {
-      mode:                  this.mode,
-      currentTick:           this.currentTick,
-      forcedCardPending:     this.handManager.hasForcedCardPending(),
-      counterWindowOpen:     this.counterWindowOpen,
-      counterWindowAttackId: this.counterWindowAttackId,
-      rescueWindowOpen:      this.rescueWindowOpen,
-      rescueWindowTeammate:  this.rescueWindowTeammate,
-      phaseBoundaryWindow:   this.phaseBoundaryWindow,
-      activeBattleBudget:    this.battleBudget,
-      defectionStepHistory:  [...this.defectionStepHistory],
-      lastDefectionTick:     this.lastDefectionTick,
+      currentTick: this.currentTick,
+      activeDecisionWindowOpen: this.windowManager.getActiveWindowCount() > 0,
+      activeDecisionWindowOpenAt:
+        this.windowManager.getActiveWindowCount() > 0 ? this.currentTick : null,
+
+      opponentExtractionEventAt: this.counterWindowOpen ? this.currentTick : null,
+      teammateInCritical: this.rescueWindowOpen,
+      phaseTransitionWindowOpen:
+        !!this.phaseBoundaryWindow &&
+        !this.phaseBoundaryWindow.isConsumed &&
+        this.currentTick <= this.phaseBoundaryWindow.closesAtTick,
       sovereigntyWindowOpen: this.sovereigntyWindowOpen,
+      sovereigntyDecisionPlayed:
+        this.lastPlayedCard?.definition.timingClass === TimingClass.SOVEREIGNTY_DECISION,
+
+      defectionArcState: {
+        step: defectionStep,
+        lastStepAt: this.lastDefectionTick >= 0 ? this.lastDefectionTick : null,
+      },
+
+      divergenceScore: 0,
+      divergenceThreshold: 0.5,
+      battleBudget: this.battleBudget,
+      currentPhase: this.resolveCurrentPhase(),
+      gameMode: this.mode,
     };
   }
 
-  /**
-   * Simple optimality check: was the played card the highest effective-cost option?
-   * A full implementation would compare CORD deltas of all playable cards.
-   */
+  private resolveCurrentPhase(): 1 | 2 | 3 | 4 {
+    if (!this.phaseBoundaryWindow) {
+      return this.sovereigntyWindowOpen ? 3 : 1;
+    }
+
+    switch (this.phaseBoundaryWindow.phase) {
+      case RunPhase.FOUNDATION:
+        return 1;
+      case RunPhase.ESCALATION:
+        return 2;
+      case RunPhase.SOVEREIGNTY:
+        return 3;
+      default:
+        return 1;
+    }
+  }
+
   private isOptimalPlay(played: CardInHand, hand: CardInHand[]): boolean {
     const playableCosts = hand
-      .filter(c => !c.isHeld)
-      .map(c => c.effectiveCost);
+      .filter((c) => !c.isHeld)
+      .map((c) => c.effectiveCost);
+
     const maxCost = Math.max(...playableCosts);
     return played.effectiveCost >= maxCost;
   }
 
   private findForcedEntry(cardId: string): ForcedCardEntry | null {
     const entries = this.forcedCardQueue.getUnresolvedEntries();
-    return entries.find(e => e.cardId === cardId) ?? null;
+    return entries.find((e) => e.cardId === cardId) ?? null;
   }
 
   private resolveGhostMarkerType(card: CardInHand): any {
     const map: Record<string, any> = {
-      'ghost_gold_read_001':   'GOLD',
+      'ghost_gold_read_001': 'GOLD',
       'ghost_red_exploit_002': 'RED',
     };
     return map[card.definition.cardId] ?? 'GOLD';
   }
 
-  // ── Mode-specific EventBus subscriptions ────────────────────────────────────
-
   private subscribeToModeEvents(): void {
     if (this.mode === GameMode.HEAD_TO_HEAD) {
-      this.unsubCounterWindow = this.eventBus.on<any>('EXTRACTION_ACTION_FIRED' as any, (event) => {
-        const payload = event.payload;
-        this.counterWindowOpen     = true;
-        this.counterWindowAttackId = payload.attackId;
-        this.counterWindowEndMs    = perfNow() + 5_000;
-        this.uxBridge.emitCounterWindowOpened(payload.attackId, 5_000, this.currentTick);
-      });
+      this.unsubCounterWindow = this.eventBus.on<any>(
+        'EXTRACTION_ACTION_FIRED' as any,
+        (event) => {
+          const payload = event.payload;
+          this.counterWindowOpen     = true;
+          this.counterWindowAttackId = payload.attackId;
+          this.counterWindowEndMs    = perfNow() + 5_000;
+          this.uxBridge.emitCounterWindowOpened(payload.attackId, 5_000, this.currentTick);
+        },
+      );
     }
 
     if (this.mode === GameMode.TEAM_UP) {
-      this.unsubRescueWindow = this.eventBus.on<any>('TEAMMATE_PRESSURE_CRITICAL' as any, (event) => {
-        const payload = event.payload;
-        this.rescueWindowOpen     = true;
-        this.rescueWindowTeammate = payload.teammateId;
-        this.rescueWindowEndMs    = perfNow() + 15_000;
-        this.uxBridge.emitRescueWindowOpened(payload.teammateId, 15_000, this.currentTick);
-      });
+      this.unsubRescueWindow = this.eventBus.on<any>(
+        'TEAMMATE_PRESSURE_CRITICAL' as any,
+        (event) => {
+          const payload = event.payload;
+          this.rescueWindowOpen     = true;
+          this.rescueWindowTeammate = payload.teammateId;
+          this.rescueWindowEndMs    = perfNow() + 15_000;
+          this.uxBridge.emitRescueWindowOpened(payload.teammateId, 15_000, this.currentTick);
+        },
+      );
     }
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // ACCESSORS (for CardEngineAdapter and testing)
+  // ACCESSORS
   // ═══════════════════════════════════════════════════════════════════════════
 
   public getHandSnapshot(): CardInHand[] {

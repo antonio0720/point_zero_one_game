@@ -11,6 +11,7 @@ import { EventBus, sharedEventBus } from '../core/EventBus';
 import { EngineRegistry } from './EngineRegistry';
 import { RunStateSnapshot } from './RunStateSnapshot';
 import {
+  BotId as ZeroBotId,
   EngineId,
   EngineHealth,
   TickTier,
@@ -77,8 +78,6 @@ export interface StartRunParams {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // LIFECYCLE ADAPTER
-// The repo's current EngineRegistry still requires IEngine, while the concrete
-// engines no longer implement that interface directly.
 // ─────────────────────────────────────────────────────────────────────────────
 
 class LifecycleAdapter implements IEngine {
@@ -139,7 +138,6 @@ export class EngineOrchestrator {
   private tickErrorCount = 0;
   private static readonly MAX_TICK_ERRORS = 5;
 
-  // rolling tick stats used by snapshot + cascade input
   private lastTickHaterAttempts = 0;
   private lastTickHaterBlocked = 0;
   private lastTickHaterDamaged = 0;
@@ -389,10 +387,7 @@ export class EngineOrchestrator {
 
   public reset(): void {
     this.registry.resetAll();
-
-    // preserve engine/internal listeners wired at construction
     this.eventBus.clearQueue();
-
     this.mechanicsRouter.reset();
 
     this.currentRunId = null;
@@ -438,7 +433,6 @@ export class EngineOrchestrator {
     let decisionsThisTick: DecisionRecord[] = [];
     let mechanicsResult: MechanicTickResult | null = null;
 
-    // STEP 1 — Time
     try {
       this.timeEngine.advanceTick({
         tick: snapshot.tickIndex,
@@ -449,7 +443,6 @@ export class EngineOrchestrator {
       this.handleStepError(1, EngineId.TIME, err);
     }
 
-    // STEP 1.5 — Cards
     try {
       decisionsThisTick = this.cardEngineAdapter.tick(this.timeEngine.getTickIndex());
       this.pendingDecisions = decisionsThisTick;
@@ -459,7 +452,6 @@ export class EngineOrchestrator {
       this.pendingDecisions = [];
     }
 
-    // STEP 2 — Pressure
     try {
       pressureScore = this.pressureEngine.computeScore(this.buildPressureReadInput());
       postActionPressure = pressureScore;
@@ -467,7 +459,6 @@ export class EngineOrchestrator {
       this.handleStepError(2, EngineId.PRESSURE, err);
     }
 
-    // STEP 3 — Tension
     try {
       const isNearDeath =
         snapshot.netWorth <= Math.max(1, this.freedomThreshold * 0.25);
@@ -482,7 +473,6 @@ export class EngineOrchestrator {
       this.handleStepError(3, EngineId.TENSION, err);
     }
 
-    // STEP 4 — Battle
     let pendingBotAttacks: BotAttackEvent[] = [];
     try {
       this.battleEngine.tickBattle(
@@ -497,7 +487,6 @@ export class EngineOrchestrator {
       this.lastTickHaterAttempts = 0;
     }
 
-    // STEP 5 — Dispatch Battle attacks into Shield
     try {
       const shieldAttacks = this.expandBotAttacksToShieldAttacks(pendingBotAttacks);
       attacksFired = this.mapBotAttacksToTickAttackEvents(pendingBotAttacks);
@@ -527,14 +516,12 @@ export class EngineOrchestrator {
       this.lastTickHaterDamaged = 0;
     }
 
-    // STEP 6 — Shield tick
     try {
       this.shieldEngine.tickShields(this.timeEngine.getTickIndex());
     } catch (err) {
       this.handleStepError(6, EngineId.SHIELD, err);
     }
 
-    // STEP 7 — Cascade
     try {
       this.cascadeEngine.tickCascade(
         this.buildCascadeRunState(snapshot),
@@ -570,7 +557,6 @@ export class EngineOrchestrator {
         })),
       ];
 
-      // synthesize shield attacks for queued cracks
       const crackDamage = shieldCracks.map((crack, index) =>
         this.shieldEngine.applyAttack({
           attackId: `cascade:${crack.sourceChainId}:${crack.tickNumber}:${index}`,
@@ -594,21 +580,18 @@ export class EngineOrchestrator {
       this.lastTickCascadesBroken = 0;
     }
 
-    // STEP 8 — Time tier update
     try {
       this.timeEngine.setTierFromPressure(postActionPressure);
     } catch (err) {
       this.handleStepError(8, EngineId.TIME, err);
     }
 
-    // STEP 9 — Sovereignty snapshot
     try {
       this.sovereigntyEngine.snapshotTick(snapshot);
     } catch (err) {
       this.handleStepError(9, EngineId.SOVEREIGNTY, err);
     }
 
-    // STEP 9.5 — Mechanics
     try {
       mechanicsResult = await this.mechanicsRouter.tickRuntime(snapshot);
       void mechanicsResult;
@@ -617,12 +600,10 @@ export class EngineOrchestrator {
       console.error(`[Orchestrator] MechanicsRouter fatal error: ${error}`);
       this.eventBus.emit('TICK_STEP_ERROR', {
         step: 9.5,
-        engineId: 'mechanics',
         error,
       });
     }
 
-    // WIN / LOSS
     const postStepSnapshot = this.buildRunStateSnapshot();
 
     this.consecutivePositiveFlowTicks =
@@ -841,7 +822,7 @@ export class EngineOrchestrator {
     for (const attack of pending) {
       out.push({
         attackId: attack.attackId,
-        botId: attack.botId as TickAttackEvent['botId'],
+        botId: this.mapBattleBotIdToTickBotId(attack.botId),
         attackType: attack.attackType as TickAttackEvent['attackType'],
         damageAmount: attack.rawPower,
         targetLayerId: this.mapAttackTypeToTickLayer(attack.attackType),
@@ -851,7 +832,7 @@ export class EngineOrchestrator {
       if (attack.secondaryAttackType && attack.secondaryRawPower > 0) {
         out.push({
           attackId: `${attack.attackId}:secondary`,
-          botId: attack.botId as TickAttackEvent['botId'],
+          botId: this.mapBattleBotIdToTickBotId(attack.botId),
           attackType: attack.secondaryAttackType as TickAttackEvent['attackType'],
           damageAmount: attack.secondaryRawPower,
           targetLayerId: this.mapAttackTypeToTickLayer(attack.secondaryAttackType),
@@ -861,6 +842,23 @@ export class EngineOrchestrator {
     }
 
     return out;
+  }
+
+  private mapBattleBotIdToTickBotId(botId: BotAttackEvent['botId']): ZeroBotId {
+    switch (String(botId)) {
+      case 'BOT_01':
+        return ZeroBotId.LIQUIDATOR;
+      case 'BOT_02':
+        return ZeroBotId.BUREAUCRAT;
+      case 'BOT_03':
+        return ZeroBotId.MANIPULATOR;
+      case 'BOT_04':
+        return ZeroBotId.CRASH_PROPHET;
+      case 'BOT_05':
+        return ZeroBotId.LEGACY_HEIR;
+      default:
+        return ZeroBotId.LIQUIDATOR;
+    }
   }
 
   private mapShieldDamageToTickDamage(
