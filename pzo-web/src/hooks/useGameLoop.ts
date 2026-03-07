@@ -16,7 +16,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef } from 'react';
-import { engineOrchestrator } from '../engines/zero/EngineOrchestrator';
+import { EngineOrchestrator } from '../engines/zero/EngineOrchestrator';
 import { useEngineStore } from '../store/engineStore';
 
 export type RunPhase = 'IDLE' | 'RUNNING' | 'PAUSED' | 'ENDED';
@@ -68,7 +68,7 @@ export function useGameLoop(): GameLoopState {
       lastTickTimeRef.current = timestamp - (elapsed % tickRateRef.current);
 
       try {
-        engineOrchestrator.executeTick();
+        EngineOrchestrator.executeTick();
       } catch (err) {
         console.error('[useGameLoop] executeTick threw:', err);
       }
