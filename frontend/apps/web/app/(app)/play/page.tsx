@@ -1,3 +1,4 @@
+'use client';
 /**
  * page.tsx — (app)/play — POINT ZERO ONE
  * Canonical lobby + run-bootstrap. LobbyScreen.tsx is now retired.
@@ -9,8 +10,6 @@
  * FILE LOCATION: frontend/apps/web/app/(app)/play/page.tsx
  * Density6 LLC · Confidential
  */
-
-'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
