@@ -118,10 +118,10 @@ export class CardEngineAdapter implements IEngine {
     // the GameMode the player selected in LobbyScreen (set before startRun()).
     // Falls back to GO_ALONE (Empire) if no mode is active — guards against
     // test contexts or mis-ordered initialization.
-    const modeRouter = ModeRouter.getInstance();
-    const resolvedMode: GameMode = modeRouter.getActiveMode() ?? GameMode.GO_ALONE;
+    
+    const resolvedMode: GameMode = ModeRouter.getActiveMode() ?? GameMode.GO_ALONE;
 
-    if (!modeRouter.getActiveMode()) {
+    if (!ModeRouter.getActiveMode()) {
       console.warn(
         `[CardEngineAdapter] ModeRouter returned null for active mode. ` +
         `Defaulting to GO_ALONE (Empire). Ensure ModeRouter.setMode() is called ` +

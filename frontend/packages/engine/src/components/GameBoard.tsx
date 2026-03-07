@@ -178,7 +178,7 @@ export default function GameBoard({
   regime, intelligence, tick, totalTicks, freezeTicks,
 }: GameBoardProps) {
   const cashflow = income - expenses;
-  const rc       = REGIME_CFG[regime];
+  const rc       = REGIME_CFG[regime] ?? { bg: '#1a1a2e', border: '#2a2a4e', color: '#B8B8D8', icon: '📊' };
   const runPct   = Math.round((tick / Math.max(1, totalTicks)) * 100);
 
   const metrics = [
