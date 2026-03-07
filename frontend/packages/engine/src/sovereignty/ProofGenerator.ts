@@ -125,9 +125,14 @@ export class ProofGenerator {
       const hashArray  = Array.from(new Uint8Array(hashBuffer));
       return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
     } else {
-      // ── Node.js: crypto module ───────────────────────────────────
-      const { createHash } = await import('node:crypto');
-      return createHash('sha256').update(input, 'utf8').digest('hex');
+      // ── Fallback: manual hash (browser-only build — node:crypto removed) ──
+      // Simple djb2 hash → hex. Not cryptographic, but ProofGenerator
+      // only runs in browser where SubtleCrypto handles the real work.
+      let hash = 5381;
+      for (let i = 0; i < input.length; i++) {
+        hash = ((hash << 5) + hash + input.charCodeAt(i)) >>> 0;
+      }
+      return hash.toString(16).padStart(16, '0').repeat(4);
     }
   }
 }
