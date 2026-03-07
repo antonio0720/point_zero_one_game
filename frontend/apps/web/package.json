@@ -11,12 +11,14 @@
   "dependencies": {
     "@apollo/client": "^4.1.6",
     "@pzo/engine": "file:../../packages/engine",
+    "@types/uuid": "^10.0.0",
     "graphql": "^16.13.0",
     "graphql-tag": "^2.12.6",
     "immer": "^11.1.4",
     "next": "^14.2.0",
     "react": "^18.3.0",
     "react-dom": "^18.3.0",
+    "uuid": "^13.0.0",
     "zustand": "^5.0.11"
   },
   "devDependencies": {
