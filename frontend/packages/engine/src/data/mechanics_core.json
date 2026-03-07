@@ -1,0 +1,4799 @@
+[
+  {
+    "task_id": "PZO-M01",
+    "mechanic_id": "M01",
+    "title": "Run Seed + Deterministic Replay",
+    "family": "run_core",
+    "kind": "core",
+    "layer": "tick_engine",
+    "priority": 1,
+    "batch": 1,
+    "inputs": [
+      "userId",
+      "rulesVersion",
+      "timestamp"
+    ],
+    "outputs": [
+      "RunSeed",
+      "DeckShuffle",
+      "MacroSchedule",
+      "ChaosWindows"
+    ],
+    "telemetry_events": [
+      "SEED_COMMITTED",
+      "SEED_REPLAYED",
+      "REPLAY_VERIFIED",
+      "REPLAY_MISMATCH"
+    ],
+    "exec_hook": "runSeedDeterministicReplay",
+    "deps": [],
+    "status": "todo",
+    "ml_pair": "m01a",
+    "module_path": "pzo_engine/src/mechanics/m01_run_seed_deterministic_replay.ts"
+  },
+  {
+    "task_id": "PZO-M02",
+    "mechanic_id": "M02",
+    "title": "12-Minute Run Clock + Turn Timer",
+    "family": "run_core",
+    "kind": "core",
+    "layer": "tick_engine",
+    "priority": 1,
+    "batch": 1,
+    "inputs": [
+      "state.tick",
+      "state.runPhase",
+      "state.tickTier"
+    ],
+    "outputs": [
+      "tickResult",
+      "phaseTransitionEvent",
+      "timerExpiredEvent"
+    ],
+    "telemetry_events": [
+      "TICK_COMPLETE",
+      "PHASE_TRANSITION",
+      "TIMER_EXPIRED",
+      "CLOCK_ESCALATION"
+    ],
+    "exec_hook": "runClockTickEngine",
+    "deps": [
+      "M01"
+    ],
+    "status": "todo",
+    "ml_pair": "m02a",
+    "module_path": "pzo_engine/src/mechanics/m02_12_minute_run_clock_turn_timer.ts"
+  },
+  {
+    "task_id": "PZO-M03",
+    "mechanic_id": "M03",
+    "title": "Solvency Wipe Conditions",
+    "family": "run_core",
+    "kind": "core",
+    "layer": "tick_engine",
+    "priority": 1,
+    "batch": 1,
+    "inputs": [
+      "state.cash",
+      "state.netWorth",
+      "state.cashflow",
+      "state.tick"
+    ],
+    "outputs": [
+      "wipeEvent",
+      "bleedModeFlag",
+      "solvencyStatus"
+    ],
+    "telemetry_events": [
+      "SOLVENCY_WARNING",
+      "BLEED_MODE_ENTERED",
+      "BANKRUPT_TRIGGERED",
+      "VOID_SCAR_RECORDED"
+    ],
+    "exec_hook": "solvencyWipeCheck",
+    "deps": [
+      "M02"
+    ],
+    "status": "todo",
+    "ml_pair": "m03a",
+    "module_path": "pzo_engine/src/mechanics/m03_solvency_wipe_conditions.ts"
+  },
+  {
+    "task_id": "PZO-M04",
+    "mechanic_id": "M04",
+    "title": "Deck Reactor",
+    "family": "run_core",
+    "kind": "core",
+    "layer": "card_handler",
+    "priority": 1,
+    "batch": 1,
+    "inputs": [
+      "state.runPhase",
+      "state.macroRegime",
+      "state.pressureTier",
+      "RunSeed"
+    ],
+    "outputs": [
+      "drawPool",
+      "drawnCard",
+      "deckComposition"
+    ],
+    "telemetry_events": [
+      "CARD_DRAWN",
+      "DECK_SHUFFLED",
+      "POOL_RECOMPOSED",
+      "FORCED_CARD_QUEUED"
+    ],
+    "exec_hook": "deckReactorDraw",
+    "deps": [
+      "M01",
+      "M02"
+    ],
+    "status": "todo",
+    "ml_pair": "m04a",
+    "module_path": "pzo_engine/src/mechanics/m04_deck_reactor.ts"
+  },
+  {
+    "task_id": "PZO-M05",
+    "mechanic_id": "M05",
+    "title": "Macro State + Cash Decay Loop",
+    "family": "run_core",
+    "kind": "core",
+    "layer": "tick_engine",
+    "priority": 1,
+    "batch": 1,
+    "inputs": [
+      "state.macroRegime",
+      "state.cash",
+      "state.cashflow",
+      "state.income",
+      "state.expenses"
+    ],
+    "outputs": [
+      "cashDelta",
+      "regimeShiftEvent",
+      "decayRate"
+    ],
+    "telemetry_events": [
+      "MACRO_REGIME_SHIFT",
+      "CASH_DECAY_APPLIED",
+      "SETTLEMENT_TICK",
+      "CASHFLOW_UPDATED"
+    ],
+    "exec_hook": "macroStateCashDecay",
+    "deps": [
+      "M02"
+    ],
+    "status": "todo",
+    "ml_pair": "m05a",
+    "module_path": "pzo_engine/src/mechanics/m05_macro_state_cash_decay_loop.ts"
+  },
+  {
+    "task_id": "PZO-M06",
+    "mechanic_id": "M06",
+    "title": "Cashflow Tick Engine",
+    "family": "run_core",
+    "kind": "core",
+    "layer": "tick_engine",
+    "priority": 1,
+    "batch": 1,
+    "inputs": [
+      "state.assets",
+      "state.ipaItems",
+      "state.tick",
+      "state.macroRegime"
+    ],
+    "outputs": [
+      "cashflowDelta",
+      "incomeItemized",
+      "tierProgressUpdate"
+    ],
+    "telemetry_events": [
+      "CASHFLOW_TICK",
+      "INCOME_ITEMIZED",
+      "ASSET_INCOME_APPLIED",
+      "TIER_ESCAPED"
+    ],
+    "exec_hook": "cashflowTickEngine",
+    "deps": [
+      "M02",
+      "M05"
+    ],
+    "status": "todo",
+    "ml_pair": "m06a",
+    "module_path": "pzo_engine/src/mechanics/m06_cashflow_tick_engine.ts"
+  },
+  {
+    "task_id": "PZO-M07",
+    "mechanic_id": "M07",
+    "title": "Leverage Purchase Resolver",
+    "family": "run_core",
+    "kind": "core",
+    "layer": "card_handler",
+    "priority": 1,
+    "batch": 1,
+    "inputs": [
+      "cardPlayed",
+      "state.cash",
+      "state.leverage",
+      "state.macroRegime"
+    ],
+    "outputs": [
+      "purchaseResult",
+      "buffStack",
+      "leverageUpdated"
+    ],
+    "telemetry_events": [
+      "LEVERAGE_PURCHASED",
+      "BUFF_APPLIED",
+      "PURCHASE_DENIED",
+      "AFFORDABILITY_CHECKED"
+    ],
+    "exec_hook": "leveragePurchaseResolver",
+    "deps": [
+      "M04",
+      "M06"
+    ],
+    "status": "todo",
+    "ml_pair": "m07a",
+    "module_path": "pzo_engine/src/mechanics/m07_leverage_purchase_resolver.ts"
+  },
+  {
+    "task_id": "PZO-M08",
+    "mechanic_id": "M08",
+    "title": "Shield / Cancel System",
+    "family": "run_core",
+    "kind": "core",
+    "layer": "card_handler",
+    "priority": 1,
+    "batch": 1,
+    "inputs": [
+      "incomingEvent",
+      "state.shieldLayers",
+      "cardPlayed"
+    ],
+    "outputs": [
+      "shieldResult",
+      "damageAbsorbed",
+      "shieldLayerUpdated"
+    ],
+    "telemetry_events": [
+      "SHIELD_ACTIVATED",
+      "SHIELD_PIERCED",
+      "SHIELD_DEPLETED",
+      "SHIELD_REGEN_APPLIED"
+    ],
+    "exec_hook": "shieldCancelSystem",
+    "deps": [
+      "M04"
+    ],
+    "status": "todo",
+    "ml_pair": "m08a",
+    "module_path": "pzo_engine/src/mechanics/m08_shield_cancel_system.ts"
+  },
+  {
+    "task_id": "PZO-M09",
+    "mechanic_id": "M09",
+    "title": "Opportunity Window + Open-Table Auction",
+    "family": "run_core",
+    "kind": "core",
+    "layer": "card_handler",
+    "priority": 1,
+    "batch": 1,
+    "inputs": [
+      "state.tick",
+      "RunSeed",
+      "state.macroRegime",
+      "auctionWindow"
+    ],
+    "outputs": [
+      "opportunityCard",
+      "auctionResult",
+      "firstRefusalExpiry"
+    ],
+    "telemetry_events": [
+      "OPPORTUNITY_OPENED",
+      "FIRST_REFUSAL_EXPIRED",
+      "OPPORTUNITY_PURCHASED",
+      "OPPORTUNITY_DISCARDED"
+    ],
+    "exec_hook": "opportunityWindowAuction",
+    "deps": [
+      "M01",
+      "M04"
+    ],
+    "status": "todo",
+    "ml_pair": "m09a",
+    "module_path": "pzo_engine/src/mechanics/m09_opportunity_window_open_table_auction.ts"
+  },
+  {
+    "task_id": "PZO-M10",
+    "mechanic_id": "M10",
+    "title": "Market Pulse Exit Engine",
+    "family": "run_core",
+    "kind": "core",
+    "layer": "card_handler",
+    "priority": 1,
+    "batch": 1,
+    "inputs": [
+      "state.assets",
+      "state.macroRegime",
+      "exitCard",
+      "state.tick"
+    ],
+    "outputs": [
+      "exitResult",
+      "saleProceeds",
+      "capitalGain"
+    ],
+    "telemetry_events": [
+      "ASSET_EXITED",
+      "EXIT_TIMING_SCORED",
+      "MARKET_PULSE_READ",
+      "CAPITAL_GAIN_REALIZED"
+    ],
+    "exec_hook": "marketPulseExit",
+    "deps": [
+      "M05",
+      "M09"
+    ],
+    "status": "todo",
+    "ml_pair": "m10a",
+    "module_path": "pzo_engine/src/mechanics/m10_market_pulse_exit_engine.ts"
+  },
+  {
+    "task_id": "PZO-M11",
+    "mechanic_id": "M11",
+    "title": "Missed Opportunity Streak & Inertia Tax",
+    "family": "chaos_engine",
+    "kind": "core",
+    "layer": "tick_engine",
+    "priority": 1,
+    "batch": 1,
+    "inputs": [
+      "state.missedOpportunityCount",
+      "state.tick",
+      "state.pressureTier"
+    ],
+    "outputs": [
+      "inertiaTaxAmount",
+      "streakBrokenEvent",
+      "passCountUpdated"
+    ],
+    "telemetry_events": [
+      "INERTIA_TAX_APPLIED",
+      "OPPORTUNITY_MISSED",
+      "STREAK_BROKEN",
+      "PASS_PENALIZED"
+    ],
+    "exec_hook": "missedOpportunityStreakTax",
+    "deps": [
+      "M09"
+    ],
+    "status": "todo",
+    "ml_pair": "m11a",
+    "module_path": "pzo_engine/src/mechanics/m11_missed_opportunity_streak_inertia_tax.ts"
+  },
+  {
+    "task_id": "PZO-M12",
+    "mechanic_id": "M12",
+    "title": "FUBAR Escalation Ladder",
+    "family": "chaos_engine",
+    "kind": "core",
+    "layer": "tick_engine",
+    "priority": 1,
+    "batch": 1,
+    "inputs": [
+      "fateTick",
+      "state.pressureTier",
+      "state.cash"
+    ],
+    "outputs": [
+      "fubarEvent",
+      "counterplayWindow",
+      "escalationLevel"
+    ],
+    "telemetry_events": [
+      "FUBAR_TRIGGERED",
+      "FUBAR_ESCALATED",
+      "COUNTERPLAY_WINDOW_OPENED",
+      "FUBAR_DEFUSED"
+    ],
+    "exec_hook": "fubarEscalationLadder",
+    "deps": [
+      "M02",
+      "M05"
+    ],
+    "status": "todo",
+    "ml_pair": "m12a",
+    "module_path": "pzo_engine/src/mechanics/m12_fubar_escalation_ladder.ts"
+  },
+  {
+    "task_id": "PZO-M13",
+    "mechanic_id": "M13",
+    "title": "Systemic Friction Module",
+    "family": "chaos_engine",
+    "kind": "core",
+    "layer": "tick_engine",
+    "priority": 1,
+    "batch": 1,
+    "inputs": [
+      "fateTick",
+      "state.cash",
+      "state.macroRegime"
+    ],
+    "outputs": [
+      "frictionExpenseEvent",
+      "cashDrained",
+      "frictionClass"
+    ],
+    "telemetry_events": [
+      "SO_FRICTION_APPLIED",
+      "CASH_DRAINED",
+      "FRICTION_CLASS_ASSIGNED",
+      "SO_DOUBLED"
+    ],
+    "exec_hook": "systemicFrictionModule",
+    "deps": [
+      "M05"
+    ],
+    "status": "todo",
+    "ml_pair": "m13a",
+    "module_path": "pzo_engine/src/mechanics/m13_systemic_friction_module.ts"
+  },
+  {
+    "task_id": "PZO-M14",
+    "mechanic_id": "M14",
+    "title": "Disadvantage Draft",
+    "family": "chaos_engine",
+    "kind": "core",
+    "layer": "card_handler",
+    "priority": 1,
+    "batch": 1,
+    "inputs": [
+      "playerSelection",
+      "handicapOptions"
+    ],
+    "outputs": [
+      "activeHandicaps",
+      "cordPremiumMultiplier"
+    ],
+    "telemetry_events": [
+      "HANDICAP_SELECTED",
+      "CORD_PREMIUM_APPLIED",
+      "DIFFICULTY_LOCKED"
+    ],
+    "exec_hook": "disadvantageDraftResolver",
+    "deps": [
+      "M01"
+    ],
+    "status": "todo",
+    "ml_pair": "m14a",
+    "module_path": "pzo_engine/src/mechanics/m14_disadvantage_draft.ts"
+  },
+  {
+    "task_id": "PZO-M15",
+    "mechanic_id": "M15",
+    "title": "Social Chaos Token Play",
+    "family": "social_engine",
+    "kind": "core",
+    "layer": "api_endpoint",
+    "priority": 1,
+    "batch": 1,
+    "inputs": [
+      "friendInvitePayload",
+      "state.tick"
+    ],
+    "outputs": [
+      "socialChaosEffect",
+      "tokenConsumed"
+    ],
+    "telemetry_events": [
+      "SOCIAL_TOKEN_PLAYED",
+      "CHAOS_EFFECT_APPLIED",
+      "TOKEN_SPENT"
+    ],
+    "exec_hook": "socialChaosTokenPlay",
+    "deps": [
+      "M01"
+    ],
+    "status": "todo",
+    "ml_pair": "m15a",
+    "module_path": "pzo_engine/src/mechanics/m15_social_chaos_token_play.ts"
+  },
+  {
+    "task_id": "PZO-M16",
+    "mechanic_id": "M16",
+    "title": "Live Table Hot Seat Vote",
+    "family": "social_engine",
+    "kind": "core",
+    "layer": "api_endpoint",
+    "priority": 1,
+    "batch": 1,
+    "inputs": [
+      "tableVoteRequest",
+      "state.tick"
+    ],
+    "outputs": [
+      "voteResult",
+      "hotSeatEffect"
+    ],
+    "telemetry_events": [
+      "HOT_SEAT_VOTE_OPENED",
+      "VOTE_CAST",
+      "VOTE_RESOLVED",
+      "HOT_SEAT_EFFECT_APPLIED"
+    ],
+    "exec_hook": "liveTableHotSeatVote",
+    "deps": [
+      "M15"
+    ],
+    "status": "todo",
+    "ml_pair": "m16a",
+    "module_path": "pzo_engine/src/mechanics/m16_live_table_hot_seat_vote.ts"
+  },
+  {
+    "task_id": "PZO-M17",
+    "mechanic_id": "M17",
+    "title": "Clutch Assist",
+    "family": "social_engine",
+    "kind": "core",
+    "layer": "api_endpoint",
+    "priority": 1,
+    "batch": 1,
+    "inputs": [
+      "state.cash",
+      "state.tick"
+    ],
+    "outputs": [
+      "bailoutResult",
+      "assistAmount"
+    ],
+    "telemetry_events": [
+      "BAILOUT_REQUESTED",
+      "BAILOUT_ACCEPTED",
+      "BAILOUT_APPLIED",
+      "BAILOUT_DENIED"
+    ],
+    "exec_hook": "clutchAssistBailout",
+    "deps": [
+      "M03",
+      "M15"
+    ],
+    "status": "todo",
+    "ml_pair": "m17a",
+    "module_path": "pzo_engine/src/mechanics/m17_clutch_assist.ts"
+  },
+  {
+    "task_id": "PZO-M18",
+    "mechanic_id": "M18",
+    "title": "Rival Sabotage",
+    "family": "social_engine",
+    "kind": "core",
+    "layer": "api_endpoint",
+    "priority": 1,
+    "batch": 1,
+    "inputs": [
+      "rivalId",
+      "sabotageCard"
+    ],
+    "outputs": [
+      "sabotageEvent",
+      "targetImpact"
+    ],
+    "telemetry_events": [
+      "SABOTAGE_LAUNCHED",
+      "SABOTAGE_RESOLVED",
+      "TARGET_IMPACTED",
+      "SABOTAGE_BLOCKED"
+    ],
+    "exec_hook": "rivalSabotageDispatch",
+    "deps": [
+      "M08",
+      "M15"
+    ],
+    "status": "todo",
+    "ml_pair": "m18a",
+    "module_path": "pzo_engine/src/mechanics/m18_rival_sabotage.ts"
+  },
+  {
+    "task_id": "PZO-M19",
+    "mechanic_id": "M19",
+    "title": "Season System",
+    "family": "meta_system",
+    "kind": "core",
+    "layer": "season_runtime",
+    "priority": 1,
+    "batch": 1,
+    "inputs": [
+      "seasonConfig",
+      "state.seasonState"
+    ],
+    "outputs": [
+      "seasonProgressUpdated",
+      "rewardUnlocked"
+    ],
+    "telemetry_events": [
+      "SEASON_STARTED",
+      "SEASON_RULE_ACTIVATED",
+      "REWARD_UNLOCKED",
+      "SEASON_ENDED"
+    ],
+    "exec_hook": "seasonSystemRuntime",
+    "deps": [],
+    "status": "todo",
+    "ml_pair": "m19a",
+    "module_path": "pzo_engine/src/mechanics/m19_season_system.ts"
+  },
+  {
+    "task_id": "PZO-M20",
+    "mechanic_id": "M20",
+    "title": "Macro Shock Scheduler",
+    "family": "meta_system",
+    "kind": "core",
+    "layer": "tick_engine",
+    "priority": 2,
+    "batch": 1,
+    "inputs": [
+      "state.tick",
+      "RunSeed"
+    ],
+    "outputs": [
+      "macroShockEvent",
+      "regimeUpdated"
+    ],
+    "telemetry_events": [
+      "MACRO_SHOCK_SCHEDULED",
+      "MACRO_SHOCK_APPLIED",
+      "REGIME_FORCED",
+      "SHOCK_DEFERRED"
+    ],
+    "exec_hook": "macroShockScheduler",
+    "deps": [
+      "M01",
+      "M05"
+    ],
+    "status": "todo",
+    "ml_pair": "m20a",
+    "module_path": "pzo_engine/src/mechanics/m20_macro_shock_scheduler.ts"
+  },
+  {
+    "task_id": "PZO-M21",
+    "mechanic_id": "M21",
+    "title": "Meta Progression Unlocker",
+    "family": "meta_system",
+    "kind": "core",
+    "layer": "season_runtime",
+    "priority": 2,
+    "batch": 1,
+    "inputs": [
+      "playerProfile",
+      "completedRunCount"
+    ],
+    "outputs": [
+      "unlockedModules",
+      "progressionTier"
+    ],
+    "telemetry_events": [
+      "MODULE_UNLOCKED",
+      "TIER_REACHED",
+      "PROGRESSION_MILESTONE"
+    ],
+    "exec_hook": "metaProgressionUnlocker",
+    "deps": [
+      "M19"
+    ],
+    "status": "todo",
+    "ml_pair": "m21a",
+    "module_path": "pzo_engine/src/mechanics/m21_meta_progression_unlocker.ts"
+  },
+  {
+    "task_id": "PZO-M22",
+    "mechanic_id": "M22",
+    "title": "Moment Forge",
+    "family": "moment_engine",
+    "kind": "core",
+    "layer": "ui_component",
+    "priority": 1,
+    "batch": 1,
+    "inputs": [
+      "state.tick",
+      "eventStream"
+    ],
+    "outputs": [
+      "momentEvent",
+      "clipBoundary"
+    ],
+    "telemetry_events": [
+      "MOMENT_FORGED",
+      "CLIP_BOUNDARY_SET",
+      "SHARE_TRIGGER_ARMED"
+    ],
+    "exec_hook": "momentForgeGuarantee",
+    "deps": [
+      "M02"
+    ],
+    "status": "todo",
+    "ml_pair": "m22a",
+    "module_path": "pzo_engine/src/mechanics/m22_moment_forge.ts"
+  },
+  {
+    "task_id": "PZO-M23",
+    "mechanic_id": "M23",
+    "title": "Auto-Clip Caption Packager",
+    "family": "moment_engine",
+    "kind": "core",
+    "layer": "ui_component",
+    "priority": 1,
+    "batch": 1,
+    "inputs": [
+      "clipBoundary",
+      "runSnapshot"
+    ],
+    "outputs": [
+      "clipPackage",
+      "captionText"
+    ],
+    "telemetry_events": [
+      "CLIP_PACKAGED",
+      "CAPTION_GENERATED",
+      "SHARE_READY"
+    ],
+    "exec_hook": "autoClipCaptionPackager",
+    "deps": [
+      "M22"
+    ],
+    "status": "todo",
+    "ml_pair": "m23a",
+    "module_path": "pzo_engine/src/mechanics/m23_auto_clip_caption_packager.ts"
+  },
+  {
+    "task_id": "PZO-M24",
+    "mechanic_id": "M24",
+    "title": "Challenge Link Generator",
+    "family": "moment_engine",
+    "kind": "core",
+    "layer": "backend_service",
+    "priority": 1,
+    "batch": 1,
+    "inputs": [
+      "runId",
+      "seed"
+    ],
+    "outputs": [
+      "challengeUrl",
+      "ghostPayload"
+    ],
+    "telemetry_events": [
+      "CHALLENGE_LINK_CREATED",
+      "GHOST_PAYLOAD_BUILT",
+      "CHALLENGE_SHARED"
+    ],
+    "exec_hook": "challengeLinkGenerator",
+    "deps": [
+      "M01",
+      "M22"
+    ],
+    "status": "todo",
+    "ml_pair": "m24a",
+    "module_path": "pzo_engine/src/mechanics/m24_challenge_link_generator.ts"
+  },
+  {
+    "task_id": "PZO-M25",
+    "mechanic_id": "M25",
+    "title": "Personal Improvement Overlay",
+    "family": "moment_engine",
+    "kind": "core",
+    "layer": "ui_component",
+    "priority": 2,
+    "batch": 1,
+    "inputs": [
+      "runHistory",
+      "currentRunState"
+    ],
+    "outputs": [
+      "improvementDeltas",
+      "comparisonOverlay"
+    ],
+    "telemetry_events": [
+      "OVERLAY_VIEWED",
+      "DELTA_COMPUTED",
+      "PERSONAL_BEST_BROKEN"
+    ],
+    "exec_hook": "personalImprovementOverlay",
+    "deps": [],
+    "status": "todo",
+    "ml_pair": "m25a",
+    "module_path": "pzo_engine/src/mechanics/m25_personal_improvement_overlay.ts"
+  },
+  {
+    "task_id": "PZO-M26",
+    "mechanic_id": "M26",
+    "title": "Co-op Contract Binder",
+    "family": "coop_contracts",
+    "kind": "core",
+    "layer": "api_endpoint",
+    "priority": 1,
+    "batch": 1,
+    "inputs": [
+      "contractDraft",
+      "participantIds"
+    ],
+    "outputs": [
+      "contractId",
+      "bindingResult"
+    ],
+    "telemetry_events": [
+      "CONTRACT_DRAFTED",
+      "CONTRACT_BOUND",
+      "PARTICIPANT_SIGNED"
+    ],
+    "exec_hook": "coopContractBinder",
+    "deps": [],
+    "status": "todo",
+    "ml_pair": "m26a",
+    "module_path": "pzo_engine/src/mechanics/m26_co_op_contract_binder.ts"
+  },
+  {
+    "task_id": "PZO-M27",
+    "mechanic_id": "M27",
+    "title": "Contract Clause Evaluator",
+    "family": "coop_contracts",
+    "kind": "core",
+    "layer": "api_endpoint",
+    "priority": 1,
+    "batch": 1,
+    "inputs": [
+      "contractId",
+      "clauseDefinitions"
+    ],
+    "outputs": [
+      "clauseEvaluated",
+      "triggerFired"
+    ],
+    "telemetry_events": [
+      "CLAUSE_TRIGGERED",
+      "CLAUSE_SATISFIED",
+      "CLAUSE_BREACHED"
+    ],
+    "exec_hook": "contractClauseEvaluator",
+    "deps": [
+      "M26"
+    ],
+    "status": "todo",
+    "ml_pair": "m27a",
+    "module_path": "pzo_engine/src/mechanics/m27_contract_clause_evaluator.ts"
+  },
+  {
+    "task_id": "PZO-M28",
+    "mechanic_id": "M28",
+    "title": "Handshake Window Negotiation",
+    "family": "coop_contracts",
+    "kind": "core",
+    "layer": "api_endpoint",
+    "priority": 1,
+    "batch": 1,
+    "inputs": [
+      "proposalPayload",
+      "windowDuration"
+    ],
+    "outputs": [
+      "handshakeResult",
+      "acceptedTerms"
+    ],
+    "telemetry_events": [
+      "HANDSHAKE_OPENED",
+      "TERMS_ACCEPTED",
+      "HANDSHAKE_EXPIRED"
+    ],
+    "exec_hook": "handshakeWindowNegotiation",
+    "deps": [
+      "M26"
+    ],
+    "status": "todo",
+    "ml_pair": "m28a",
+    "module_path": "pzo_engine/src/mechanics/m28_handshake_window_negotiation.ts"
+  },
+  {
+    "task_id": "PZO-M29",
+    "mechanic_id": "M29",
+    "title": "Shared Risk Pool",
+    "family": "coop_contracts",
+    "kind": "core",
+    "layer": "api_endpoint",
+    "priority": 2,
+    "batch": 1,
+    "inputs": [
+      "poolContributions",
+      "riskEvent"
+    ],
+    "outputs": [
+      "poolPayout",
+      "riskDistributed"
+    ],
+    "telemetry_events": [
+      "RISK_POOL_FUNDED",
+      "PAYOUT_TRIGGERED",
+      "POOL_EMPTY"
+    ],
+    "exec_hook": "sharedRiskPool",
+    "deps": [
+      "M26"
+    ],
+    "status": "todo",
+    "ml_pair": "m29a",
+    "module_path": "pzo_engine/src/mechanics/m29_shared_risk_pool.ts"
+  },
+  {
+    "task_id": "PZO-M30",
+    "mechanic_id": "M30",
+    "title": "Defection Sequence",
+    "family": "coop_contracts",
+    "kind": "core",
+    "layer": "api_endpoint",
+    "priority": 1,
+    "batch": 1,
+    "inputs": [
+      "contractId",
+      "defectionTrigger"
+    ],
+    "outputs": [
+      "defectionEvent",
+      "treasuryExtraction"
+    ],
+    "telemetry_events": [
+      "DEFECTION_INITIATED",
+      "TREASURY_DRAINED",
+      "PENALTY_APPLIED",
+      "DEFECTOR_FLAGGED"
+    ],
+    "exec_hook": "defectionSequenceEngine",
+    "deps": [
+      "M26",
+      "M27"
+    ],
+    "status": "todo",
+    "ml_pair": "m30a",
+    "module_path": "pzo_engine/src/mechanics/m30_defection_sequence.ts"
+  },
+  {
+    "task_id": "PZO-M31",
+    "mechanic_id": "M31",
+    "title": "Asset Synergy Sets",
+    "family": "portfolio_engine",
+    "kind": "core",
+    "layer": "card_handler",
+    "priority": 2,
+    "batch": 2,
+    "inputs": [
+      "state.assets",
+      "synergyDefinitions"
+    ],
+    "outputs": [
+      "activeSetBonuses",
+      "comboMultiplier"
+    ],
+    "telemetry_events": [
+      "SYNERGY_SET_ACTIVATED",
+      "COMBO_BONUS_APPLIED",
+      "SET_BROKEN"
+    ],
+    "exec_hook": "assetSynergySetResolver",
+    "deps": [
+      "M07"
+    ],
+    "status": "todo",
+    "ml_pair": "m31a",
+    "module_path": "pzo_engine/src/mechanics/m31_asset_synergy_sets.ts"
+  },
+  {
+    "task_id": "PZO-M32",
+    "mechanic_id": "M32",
+    "title": "Liquidity Ladder",
+    "family": "portfolio_engine",
+    "kind": "core",
+    "layer": "card_handler",
+    "priority": 2,
+    "batch": 2,
+    "inputs": [
+      "state.assets",
+      "state.cash"
+    ],
+    "outputs": [
+      "liquidationResult",
+      "cashConverted"
+    ],
+    "telemetry_events": [
+      "LIQUIDITY_CONVERTED",
+      "ASSET_SOLD",
+      "LADDER_RUNG_CLIMBED"
+    ],
+    "exec_hook": "liquidityLadderConverter",
+    "deps": [
+      "M07",
+      "M10"
+    ],
+    "status": "todo",
+    "ml_pair": "m32a",
+    "module_path": "pzo_engine/src/mechanics/m32_liquidity_ladder.ts"
+  },
+  {
+    "task_id": "PZO-M33",
+    "mechanic_id": "M33",
+    "title": "Correlation Shields",
+    "family": "portfolio_engine",
+    "kind": "core",
+    "layer": "card_handler",
+    "priority": 2,
+    "batch": 2,
+    "inputs": [
+      "state.assets",
+      "hedgePairDefinitions"
+    ],
+    "outputs": [
+      "hedgeEffect",
+      "correlationShield"
+    ],
+    "telemetry_events": [
+      "HEDGE_ACTIVATED",
+      "CORRELATION_SHIELD_UP",
+      "HEDGE_BROKEN"
+    ],
+    "exec_hook": "correlationHedgeResolver",
+    "deps": [
+      "M08",
+      "M31"
+    ],
+    "status": "todo",
+    "ml_pair": "m33a",
+    "module_path": "pzo_engine/src/mechanics/m33_correlation_shields.ts"
+  },
+  {
+    "task_id": "PZO-M34",
+    "mechanic_id": "M34",
+    "title": "Asset Mod Sockets",
+    "family": "portfolio_engine",
+    "kind": "core",
+    "layer": "card_handler",
+    "priority": 2,
+    "batch": 2,
+    "inputs": [
+      "assetId",
+      "modCard"
+    ],
+    "outputs": [
+      "modApplied",
+      "assetStatUpdated"
+    ],
+    "telemetry_events": [
+      "MOD_SOCKETED",
+      "STAT_BOOSTED",
+      "MOD_SLOT_FULL"
+    ],
+    "exec_hook": "assetModSocketEngine",
+    "deps": [
+      "M07"
+    ],
+    "status": "todo",
+    "ml_pair": "m34a",
+    "module_path": "pzo_engine/src/mechanics/m34_asset_mod_sockets.ts"
+  },
+  {
+    "task_id": "PZO-M35",
+    "mechanic_id": "M35",
+    "title": "Exposure Cap Enforcer",
+    "family": "portfolio_engine",
+    "kind": "core",
+    "layer": "card_handler",
+    "priority": 1,
+    "batch": 2,
+    "inputs": [
+      "state.assets",
+      "exposureThresholds"
+    ],
+    "outputs": [
+      "exposureHeat",
+      "cappedWarning"
+    ],
+    "telemetry_events": [
+      "EXPOSURE_THRESHOLD_BREACHED",
+      "EXPOSURE_CAPPED",
+      "OVEREXPOSURE_WARNING"
+    ],
+    "exec_hook": "exposureCapEnforcer",
+    "deps": [
+      "M07",
+      "M31"
+    ],
+    "status": "todo",
+    "ml_pair": "m35a",
+    "module_path": "pzo_engine/src/mechanics/m35_exposure_cap_enforcer.ts"
+  },
+  {
+    "task_id": "PZO-M36",
+    "mechanic_id": "M36",
+    "title": "Run Achievements + Proof Ledger",
+    "family": "achievement_engine",
+    "kind": "core",
+    "layer": "season_runtime",
+    "priority": 2,
+    "batch": 2,
+    "inputs": [
+      "completedRun",
+      "achievementDefinitions"
+    ],
+    "outputs": [
+      "badgeUnlocked",
+      "ledgerEntry"
+    ],
+    "telemetry_events": [
+      "ACHIEVEMENT_UNLOCKED",
+      "BADGE_MINTED",
+      "LEDGER_UPDATED"
+    ],
+    "exec_hook": "runAchievementEngine",
+    "deps": [
+      "M19",
+      "M50"
+    ],
+    "status": "todo",
+    "ml_pair": "m36a",
+    "module_path": "pzo_engine/src/mechanics/m36_run_achievements_proof_ledger.ts"
+  },
+  {
+    "task_id": "PZO-M37",
+    "mechanic_id": "M37",
+    "title": "Streak Bounties",
+    "family": "achievement_engine",
+    "kind": "core",
+    "layer": "season_runtime",
+    "priority": 2,
+    "batch": 2,
+    "inputs": [
+      "runResults",
+      "streakCount"
+    ],
+    "outputs": [
+      "bountyActivated",
+      "streakMultiplier"
+    ],
+    "telemetry_events": [
+      "STREAK_BOUNTY_ACTIVATED",
+      "STREAK_EXTENDED",
+      "STREAK_BROKEN"
+    ],
+    "exec_hook": "streakBountyEngine",
+    "deps": [
+      "M36"
+    ],
+    "status": "todo",
+    "ml_pair": "m37a",
+    "module_path": "pzo_engine/src/mechanics/m37_streak_bounties.ts"
+  },
+  {
+    "task_id": "PZO-M38",
+    "mechanic_id": "M38",
+    "title": "Moment Quests",
+    "family": "achievement_engine",
+    "kind": "core",
+    "layer": "season_runtime",
+    "priority": 2,
+    "batch": 2,
+    "inputs": [
+      "activeQuests",
+      "momentEvent"
+    ],
+    "outputs": [
+      "questProgressUpdated",
+      "questCompleted",
+      "questReward"
+    ],
+    "telemetry_events": [
+      "QUEST_PROGRESS",
+      "QUEST_COMPLETED",
+      "QUEST_REWARD_ISSUED"
+    ],
+    "exec_hook": "momentQuestEngine",
+    "deps": [
+      "M22",
+      "M36"
+    ],
+    "status": "todo",
+    "ml_pair": "m38a",
+    "module_path": "pzo_engine/src/mechanics/m38_moment_quests.ts"
+  },
+  {
+    "task_id": "PZO-M39",
+    "mechanic_id": "M39",
+    "title": "Trophy Currency",
+    "family": "achievement_engine",
+    "kind": "core",
+    "layer": "season_runtime",
+    "priority": 2,
+    "batch": 2,
+    "inputs": [
+      "completedRun",
+      "cordScore"
+    ],
+    "outputs": [
+      "trophyCurrencyEarned",
+      "trophyBalance"
+    ],
+    "telemetry_events": [
+      "TROPHY_EARNED",
+      "TROPHY_BALANCE_UPDATED",
+      "TROPHY_DECAY_APPLIED"
+    ],
+    "exec_hook": "trophyCurrencyEngine",
+    "deps": [
+      "M36",
+      "M50"
+    ],
+    "status": "todo",
+    "ml_pair": "m39a",
+    "module_path": "pzo_engine/src/mechanics/m39_trophy_currency.ts"
+  },
+  {
+    "task_id": "PZO-M40",
+    "mechanic_id": "M40",
+    "title": "Cosmetic Crafting",
+    "family": "achievement_engine",
+    "kind": "core",
+    "layer": "season_runtime",
+    "priority": 2,
+    "batch": 2,
+    "inputs": [
+      "trophyCurrency",
+      "cosmeticRecipe"
+    ],
+    "outputs": [
+      "cosmeticCrafted",
+      "currencySpent"
+    ],
+    "telemetry_events": [
+      "COSMETIC_CRAFTED",
+      "CURRENCY_SPENT",
+      "RECIPE_FAILED"
+    ],
+    "exec_hook": "cosmeticCraftingEngine",
+    "deps": [
+      "M39"
+    ],
+    "status": "todo",
+    "ml_pair": "m40a",
+    "module_path": "pzo_engine/src/mechanics/m40_cosmetic_crafting.ts"
+  },
+  {
+    "task_id": "PZO-M41",
+    "mechanic_id": "M41",
+    "title": "90-Second Boot Run",
+    "family": "onboarding",
+    "kind": "core",
+    "layer": "backend_service",
+    "priority": 1,
+    "batch": 2,
+    "inputs": [
+      "newPlayerFlag",
+      "onboardingConfig"
+    ],
+    "outputs": [
+      "onboardingRunState",
+      "guidedPrompts"
+    ],
+    "telemetry_events": [
+      "ONBOARDING_STARTED",
+      "TUTORIAL_STEP_COMPLETED",
+      "BOOT_RUN_FINISHED"
+    ],
+    "exec_hook": "bootRunOnboardingEngine",
+    "deps": [],
+    "status": "todo",
+    "ml_pair": "m41a",
+    "module_path": "pzo_engine/src/mechanics/m41_90_second_boot_run.ts"
+  },
+  {
+    "task_id": "PZO-M42",
+    "mechanic_id": "M42",
+    "title": "Contextual Prompt Engine",
+    "family": "onboarding",
+    "kind": "core",
+    "layer": "ui_component",
+    "priority": 2,
+    "batch": 2,
+    "inputs": [
+      "playerOptIn",
+      "gameState"
+    ],
+    "outputs": [
+      "promptDisplayed",
+      "promptDismissed"
+    ],
+    "telemetry_events": [
+      "PROMPT_SHOWN",
+      "PROMPT_DISMISSED",
+      "TUTORIAL_COMPLETE"
+    ],
+    "exec_hook": "contextualPromptEngine",
+    "deps": [
+      "M41"
+    ],
+    "status": "todo",
+    "ml_pair": "m42a",
+    "module_path": "pzo_engine/src/mechanics/m42_contextual_prompt_engine.ts"
+  },
+  {
+    "task_id": "PZO-M43",
+    "mechanic_id": "M43",
+    "title": "Sandbox Rewind Mode",
+    "family": "onboarding",
+    "kind": "core",
+    "layer": "backend_service",
+    "priority": 2,
+    "batch": 2,
+    "inputs": [
+      "sandboxState",
+      "rewindTarget"
+    ],
+    "outputs": [
+      "rewindResult",
+      "alternateTimeline"
+    ],
+    "telemetry_events": [
+      "SANDBOX_ENTERED",
+      "REWIND_EXECUTED",
+      "ALTERNATE_SIMULATED"
+    ],
+    "exec_hook": "sandboxRewindEngine",
+    "deps": [
+      "M01"
+    ],
+    "status": "todo",
+    "ml_pair": "m43a",
+    "module_path": "pzo_engine/src/mechanics/m43_sandbox_rewind_mode.ts"
+  },
+  {
+    "task_id": "PZO-M44",
+    "mechanic_id": "M44",
+    "title": "Archetype Starter Kit",
+    "family": "onboarding",
+    "kind": "core",
+    "layer": "backend_service",
+    "priority": 2,
+    "batch": 2,
+    "inputs": [
+      "archetypeSelection",
+      "playerProfile"
+    ],
+    "outputs": [
+      "starterDeck",
+      "suggestedStrategy"
+    ],
+    "telemetry_events": [
+      "ARCHETYPE_SELECTED",
+      "STARTER_DECK_ISSUED",
+      "STRATEGY_SUGGESTED"
+    ],
+    "exec_hook": "archetypeStarterKit",
+    "deps": [],
+    "status": "todo",
+    "ml_pair": "m44a",
+    "module_path": "pzo_engine/src/mechanics/m44_archetype_starter_kit.ts"
+  },
+  {
+    "task_id": "PZO-M45",
+    "mechanic_id": "M45",
+    "title": "New-Player Grace Period",
+    "family": "onboarding",
+    "kind": "core",
+    "layer": "backend_service",
+    "priority": 1,
+    "batch": 2,
+    "inputs": [
+      "runCount",
+      "playerSkillScore"
+    ],
+    "outputs": [
+      "gracePeriodActive",
+      "protectionApplied"
+    ],
+    "telemetry_events": [
+      "GRACE_PERIOD_ACTIVE",
+      "PROTECTION_APPLIED",
+      "GRACE_PERIOD_EXPIRED"
+    ],
+    "exec_hook": "newPlayerGracePeriod",
+    "deps": [],
+    "status": "todo",
+    "ml_pair": "m45a",
+    "module_path": "pzo_engine/src/mechanics/m45_new_player_grace_period.ts"
+  },
+  {
+    "task_id": "PZO-M46",
+    "mechanic_id": "M46",
+    "title": "Tamper-Proof Ledger",
+    "family": "integrity_core",
+    "kind": "core",
+    "layer": "backend_service",
+    "priority": 1,
+    "batch": 1,
+    "inputs": [
+      "gameAction",
+      "state.tick"
+    ],
+    "outputs": [
+      "ledgerEntry",
+      "ledgerHash"
+    ],
+    "telemetry_events": [
+      "LEDGER_APPEND",
+      "HASH_COMMITTED",
+      "LEDGER_VERIFIED"
+    ],
+    "exec_hook": "tamperProofLedger",
+    "deps": [],
+    "status": "todo",
+    "ml_pair": "m46a",
+    "module_path": "pzo_engine/src/mechanics/m46_tamper_proof_ledger.ts"
+  },
+  {
+    "task_id": "PZO-M47",
+    "mechanic_id": "M47",
+    "title": "Action Signing",
+    "family": "integrity_core",
+    "kind": "core",
+    "layer": "backend_service",
+    "priority": 1,
+    "batch": 1,
+    "inputs": [
+      "clientAction",
+      "sessionToken"
+    ],
+    "outputs": [
+      "signedAction",
+      "integrityVerified"
+    ],
+    "telemetry_events": [
+      "ACTION_SIGNED",
+      "INTEGRITY_VERIFIED",
+      "SIGNATURE_INVALID"
+    ],
+    "exec_hook": "actionSigningEngine",
+    "deps": [],
+    "status": "todo",
+    "ml_pair": "m47a",
+    "module_path": "pzo_engine/src/mechanics/m47_action_signing.ts"
+  },
+  {
+    "task_id": "PZO-M48",
+    "mechanic_id": "M48",
+    "title": "Deterministic Validator",
+    "family": "integrity_core",
+    "kind": "core",
+    "layer": "backend_service",
+    "priority": 1,
+    "batch": 1,
+    "inputs": [
+      "runId",
+      "seed"
+    ],
+    "outputs": [
+      "replayResult",
+      "verificationStatus"
+    ],
+    "telemetry_events": [
+      "REPLAY_STARTED",
+      "REPLAY_VERIFIED",
+      "REPLAY_MISMATCH",
+      "REPLAY_TAMPERED"
+    ],
+    "exec_hook": "deterministicValidator",
+    "deps": [
+      "M01",
+      "M46"
+    ],
+    "status": "todo",
+    "ml_pair": "m48a",
+    "module_path": "pzo_engine/src/mechanics/m48_deterministic_validator.ts"
+  },
+  {
+    "task_id": "PZO-M49",
+    "mechanic_id": "M49",
+    "title": "Exploit Pattern Detector",
+    "family": "integrity_core",
+    "kind": "core",
+    "layer": "backend_service",
+    "priority": 1,
+    "batch": 1,
+    "inputs": [
+      "suspiciousPattern",
+      "exploitTaxonomy"
+    ],
+    "outputs": [
+      "exploitClassified",
+      "autoResponse"
+    ],
+    "telemetry_events": [
+      "EXPLOIT_DETECTED",
+      "EXPLOIT_CLASSIFIED",
+      "AUTO_RESPONSE_APPLIED"
+    ],
+    "exec_hook": "exploitPatternDetector",
+    "deps": [
+      "M46"
+    ],
+    "status": "todo",
+    "ml_pair": "m49a",
+    "module_path": "pzo_engine/src/mechanics/m49_exploit_pattern_detector.ts"
+  },
+  {
+    "task_id": "PZO-M50",
+    "mechanic_id": "M50",
+    "title": "Sovereignty Proof Card",
+    "family": "integrity_core",
+    "kind": "core",
+    "layer": "backend_service",
+    "priority": 1,
+    "batch": 1,
+    "inputs": [
+      "completedRun",
+      "cordScore"
+    ],
+    "outputs": [
+      "proofCard",
+      "proofHash"
+    ],
+    "telemetry_events": [
+      "PROOF_CARD_ISSUED",
+      "SOVEREIGNTY_STAMP",
+      "RUN_CERTIFIED"
+    ],
+    "exec_hook": "sovereigntyProofCard",
+    "deps": [
+      "M46",
+      "M47",
+      "M48"
+    ],
+    "status": "todo",
+    "ml_pair": "m50a",
+    "module_path": "pzo_engine/src/mechanics/m50_sovereignty_proof_card.ts"
+  },
+  {
+    "task_id": "PZO-M51",
+    "mechanic_id": "M51",
+    "title": "Syndicate Deal Architecture",
+    "family": "coop_advanced",
+    "kind": "core",
+    "layer": "api_endpoint",
+    "priority": 2,
+    "batch": 2,
+    "inputs": [
+      "dealProposal",
+      "participantIds"
+    ],
+    "outputs": [
+      "syndicateDeal",
+      "splitTerms"
+    ],
+    "telemetry_events": [
+      "SYNDICATE_DEAL_PROPOSED",
+      "DEAL_RATIFIED",
+      "SPLIT_LOCKED"
+    ],
+    "exec_hook": "syndicateDealArchitecture",
+    "deps": [
+      "M26"
+    ],
+    "status": "todo",
+    "ml_pair": "m51a",
+    "module_path": "pzo_engine/src/mechanics/m51_syndicate_deal_architecture.ts"
+  },
+  {
+    "task_id": "PZO-M52",
+    "mechanic_id": "M52",
+    "title": "Milestone Escrow",
+    "family": "coop_advanced",
+    "kind": "core",
+    "layer": "api_endpoint",
+    "priority": 2,
+    "batch": 2,
+    "inputs": [
+      "escrowAmount",
+      "milestoneConditions"
+    ],
+    "outputs": [
+      "escrowCreated",
+      "milestoneResult"
+    ],
+    "telemetry_events": [
+      "ESCROW_CREATED",
+      "MILESTONE_MET",
+      "ESCROW_RELEASED"
+    ],
+    "exec_hook": "milestoneEscrowEngine",
+    "deps": [
+      "M26",
+      "M29"
+    ],
+    "status": "todo",
+    "ml_pair": "m52a",
+    "module_path": "pzo_engine/src/mechanics/m52_milestone_escrow.ts"
+  },
+  {
+    "task_id": "PZO-M53",
+    "mechanic_id": "M53",
+    "title": "Reputation Staking",
+    "family": "coop_advanced",
+    "kind": "core",
+    "layer": "api_endpoint",
+    "priority": 2,
+    "batch": 2,
+    "inputs": [
+      "reputationScore",
+      "stakeAmount"
+    ],
+    "outputs": [
+      "stakeResult",
+      "trustCollateral"
+    ],
+    "telemetry_events": [
+      "STAKE_POSTED",
+      "STAKE_SLASHED",
+      "STAKE_RETURNED"
+    ],
+    "exec_hook": "reputationStakingEngine",
+    "deps": [
+      "M26"
+    ],
+    "status": "todo",
+    "ml_pair": "m53a",
+    "module_path": "pzo_engine/src/mechanics/m53_reputation_staking.ts"
+  },
+  {
+    "task_id": "PZO-M54",
+    "mechanic_id": "M54",
+    "title": "Obligation Restructuring Window",
+    "family": "coop_advanced",
+    "kind": "core",
+    "layer": "api_endpoint",
+    "priority": 2,
+    "batch": 2,
+    "inputs": [
+      "contractId",
+      "restructureProposal"
+    ],
+    "outputs": [
+      "restructureResult",
+      "newTerms"
+    ],
+    "telemetry_events": [
+      "RESTRUCTURE_PROPOSED",
+      "TERMS_AMENDED",
+      "RESTRUCTURE_DENIED"
+    ],
+    "exec_hook": "obligationRestructuringEngine",
+    "deps": [
+      "M26",
+      "M27"
+    ],
+    "status": "todo",
+    "ml_pair": "m54a",
+    "module_path": "pzo_engine/src/mechanics/m54_obligation_restructuring_window.ts"
+  },
+  {
+    "task_id": "PZO-M55",
+    "mechanic_id": "M55",
+    "title": "On-Chain Arbitration",
+    "family": "coop_advanced",
+    "kind": "core",
+    "layer": "api_endpoint",
+    "priority": 2,
+    "batch": 2,
+    "inputs": [
+      "disputePayload",
+      "contractId"
+    ],
+    "outputs": [
+      "arbitrationResult",
+      "verdictApplied"
+    ],
+    "telemetry_events": [
+      "DISPUTE_RAISED",
+      "ARBITRATION_OPENED",
+      "VERDICT_ISSUED"
+    ],
+    "exec_hook": "onChainArbitrationEngine",
+    "deps": [
+      "M26",
+      "M27"
+    ],
+    "status": "todo",
+    "ml_pair": "m55a",
+    "module_path": "pzo_engine/src/mechanics/m55_on_chain_arbitration.ts"
+  },
+  {
+    "task_id": "PZO-M56",
+    "mechanic_id": "M56",
+    "title": "Doctrine Lock",
+    "family": "portfolio_advanced",
+    "kind": "core",
+    "layer": "card_handler",
+    "priority": 2,
+    "batch": 2,
+    "inputs": [
+      "doctrineSelection",
+      "state.assets"
+    ],
+    "outputs": [
+      "doctrineActive",
+      "playstyleConstraints"
+    ],
+    "telemetry_events": [
+      "DOCTRINE_SELECTED",
+      "CONSTRAINTS_APPLIED",
+      "DOCTRINE_VIOLATED"
+    ],
+    "exec_hook": "doctrineSelectEngine",
+    "deps": [
+      "M31"
+    ],
+    "status": "todo",
+    "ml_pair": "m56a",
+    "module_path": "pzo_engine/src/mechanics/m56_doctrine_lock.ts"
+  },
+  {
+    "task_id": "PZO-M57",
+    "mechanic_id": "M57",
+    "title": "Rebalance Pulse",
+    "family": "portfolio_advanced",
+    "kind": "core",
+    "layer": "card_handler",
+    "priority": 2,
+    "batch": 2,
+    "inputs": [
+      "state.assets",
+      "rebalanceWindow"
+    ],
+    "outputs": [
+      "swapExecuted",
+      "allocationUpdated"
+    ],
+    "telemetry_events": [
+      "REBALANCE_PULSE_STARTED",
+      "SWAP_EXECUTED",
+      "BALANCE_RESTORED"
+    ],
+    "exec_hook": "rebalancePulseEngine",
+    "deps": [
+      "M31",
+      "M35"
+    ],
+    "status": "todo",
+    "ml_pair": "m57a",
+    "module_path": "pzo_engine/src/mechanics/m57_rebalance_pulse.ts"
+  },
+  {
+    "task_id": "PZO-M58",
+    "mechanic_id": "M58",
+    "title": "Stress-Test Proof Badge",
+    "family": "portfolio_advanced",
+    "kind": "core",
+    "layer": "card_handler",
+    "priority": 2,
+    "batch": 2,
+    "inputs": [
+      "stressTestConfig",
+      "state.assets"
+    ],
+    "outputs": [
+      "stressTestResult",
+      "proofBadge"
+    ],
+    "telemetry_events": [
+      "STRESS_TEST_ENTERED",
+      "STRESS_TEST_PASSED",
+      "PROOF_BADGE_ISSUED"
+    ],
+    "exec_hook": "stressTestProofEngine",
+    "deps": [
+      "M35",
+      "M50"
+    ],
+    "status": "todo",
+    "ml_pair": "m58a",
+    "module_path": "pzo_engine/src/mechanics/m58_stress_test_proof_badge.ts"
+  },
+  {
+    "task_id": "PZO-M59",
+    "mechanic_id": "M59",
+    "title": "Complexity Heat Meter",
+    "family": "portfolio_advanced",
+    "kind": "core",
+    "layer": "card_handler",
+    "priority": 2,
+    "batch": 2,
+    "inputs": [
+      "state.activeSetBonuses",
+      "state.assetMods"
+    ],
+    "outputs": [
+      "complexityHeat",
+      "overloadWarning"
+    ],
+    "telemetry_events": [
+      "COMPLEXITY_HEAT_UPDATED",
+      "OVERLOAD_WARNING",
+      "COMPLEXITY_CAP_HIT"
+    ],
+    "exec_hook": "complexityHeatMeter",
+    "deps": [
+      "M31",
+      "M34"
+    ],
+    "status": "todo",
+    "ml_pair": "m59a",
+    "module_path": "pzo_engine/src/mechanics/m59_complexity_heat_meter.ts"
+  },
+  {
+    "task_id": "PZO-M60",
+    "mechanic_id": "M60",
+    "title": "Net Exposure + Liability Netting",
+    "family": "portfolio_advanced",
+    "kind": "core",
+    "layer": "card_handler",
+    "priority": 2,
+    "batch": 2,
+    "inputs": [
+      "state.liabilities",
+      "state.assets"
+    ],
+    "outputs": [
+      "netExposure",
+      "nettingApplied"
+    ],
+    "telemetry_events": [
+      "LIABILITY_NETTED",
+      "NET_EXPOSURE_COMPUTED",
+      "NETTING_APPLIED"
+    ],
+    "exec_hook": "liabilityNettingEngine",
+    "deps": [
+      "M35",
+      "M07"
+    ],
+    "status": "todo",
+    "ml_pair": "m60a",
+    "module_path": "pzo_engine/src/mechanics/m60_net_exposure_liability_netting.ts"
+  },
+  {
+    "task_id": "PZO-M61",
+    "mechanic_id": "M61",
+    "title": "Tiered Badges",
+    "family": "achievement_advanced",
+    "kind": "core",
+    "layer": "season_runtime",
+    "priority": 2,
+    "batch": 2,
+    "inputs": [
+      "cordScore",
+      "runCount"
+    ],
+    "outputs": [
+      "badgeTierAwarded",
+      "tierHash"
+    ],
+    "telemetry_events": [
+      "BADGE_TIER_UPGRADED",
+      "TIER_HASH_STORED",
+      "BADGE_DISPLAYED"
+    ],
+    "exec_hook": "tieredBadgeEngine",
+    "deps": [
+      "M50",
+      "M36"
+    ],
+    "status": "todo",
+    "ml_pair": "m61a",
+    "module_path": "pzo_engine/src/mechanics/m61_tiered_badges.ts"
+  },
+  {
+    "task_id": "PZO-M62",
+    "mechanic_id": "M62",
+    "title": "Co-op Team Achievements",
+    "family": "achievement_advanced",
+    "kind": "core",
+    "layer": "season_runtime",
+    "priority": 2,
+    "batch": 2,
+    "inputs": [
+      "coopRunResult",
+      "contractId"
+    ],
+    "outputs": [
+      "teamBadge",
+      "sharedProofHash"
+    ],
+    "telemetry_events": [
+      "TEAM_BADGE_ISSUED",
+      "SHARED_PROOF_STORED",
+      "TEAM_ACHIEVEMENT_UNLOCKED"
+    ],
+    "exec_hook": "coopTeamAchievementEngine",
+    "deps": [
+      "M26",
+      "M36"
+    ],
+    "status": "todo",
+    "ml_pair": "m62a",
+    "module_path": "pzo_engine/src/mechanics/m62_co_op_team_achievements.ts"
+  },
+  {
+    "task_id": "PZO-M63",
+    "mechanic_id": "M63",
+    "title": "Community Bounty Board",
+    "family": "achievement_advanced",
+    "kind": "core",
+    "layer": "season_runtime",
+    "priority": 2,
+    "batch": 2,
+    "inputs": [
+      "bountyFunding",
+      "bountyCriteria"
+    ],
+    "outputs": [
+      "bountyLive",
+      "bountyWinner"
+    ],
+    "telemetry_events": [
+      "BOUNTY_CREATED",
+      "BOUNTY_CLAIMED",
+      "BOUNTY_EXPIRED"
+    ],
+    "exec_hook": "communityBountyBoardEngine",
+    "deps": [
+      "M39"
+    ],
+    "status": "todo",
+    "ml_pair": "m63a",
+    "module_path": "pzo_engine/src/mechanics/m63_community_bounty_board.ts"
+  },
+  {
+    "task_id": "PZO-M64",
+    "mechanic_id": "M64",
+    "title": "Leaderboards",
+    "family": "achievement_advanced",
+    "kind": "core",
+    "layer": "season_runtime",
+    "priority": 1,
+    "batch": 2,
+    "inputs": [
+      "completedRun",
+      "proofHash"
+    ],
+    "outputs": [
+      "leaderboardEntry",
+      "rankPosition"
+    ],
+    "telemetry_events": [
+      "LEADERBOARD_SUBMIT",
+      "RANK_UPDATED",
+      "PERSONAL_BEST_SET"
+    ],
+    "exec_hook": "leaderboardRankingEngine",
+    "deps": [
+      "M50"
+    ],
+    "status": "todo",
+    "ml_pair": "m64a",
+    "module_path": "pzo_engine/src/mechanics/m64_leaderboards.ts"
+  },
+  {
+    "task_id": "PZO-M65",
+    "mechanic_id": "M65",
+    "title": "Diminishing Returns on Grinding",
+    "family": "achievement_advanced",
+    "kind": "core",
+    "layer": "season_runtime",
+    "priority": 1,
+    "batch": 2,
+    "inputs": [
+      "trophyEarnedCount",
+      "sessionRunCount"
+    ],
+    "outputs": [
+      "decayedTrophyAmount",
+      "grindGuardApplied"
+    ],
+    "telemetry_events": [
+      "DIMINISHING_RETURN_APPLIED",
+      "GRIND_GUARD_TRIGGERED",
+      "NORMAL_RATE_RESTORED"
+    ],
+    "exec_hook": "diminishingReturnEngine",
+    "deps": [
+      "M39"
+    ],
+    "status": "todo",
+    "ml_pair": "m65a",
+    "module_path": "pzo_engine/src/mechanics/m65_diminishing_returns_on_grinding.ts"
+  },
+  {
+    "task_id": "PZO-M66",
+    "mechanic_id": "M66",
+    "title": "Mentor Pairing System",
+    "family": "onboarding_advanced",
+    "kind": "core",
+    "layer": "backend_service",
+    "priority": 2,
+    "batch": 2,
+    "inputs": [
+      "newPlayerId",
+      "mentorId"
+    ],
+    "outputs": [
+      "mentorPaired",
+      "guidedRunStarted"
+    ],
+    "telemetry_events": [
+      "MENTOR_PAIRED",
+      "GUIDED_RUN_STARTED",
+      "MENTOR_REWARD_QUEUED"
+    ],
+    "exec_hook": "mentorPairingEngine",
+    "deps": [
+      "M41"
+    ],
+    "status": "todo",
+    "ml_pair": "m66a",
+    "module_path": "pzo_engine/src/mechanics/m66_mentor_pairing_system.ts"
+  },
+  {
+    "task_id": "PZO-M67",
+    "mechanic_id": "M67",
+    "title": "Progressive UI Layer Unlock",
+    "family": "onboarding_advanced",
+    "kind": "core",
+    "layer": "ui_component",
+    "priority": 2,
+    "batch": 2,
+    "inputs": [
+      "runCount",
+      "uiUnlockThresholds"
+    ],
+    "outputs": [
+      "uiLayerUnlocked",
+      "complexityRevealed"
+    ],
+    "telemetry_events": [
+      "UI_LAYER_UNLOCKED",
+      "COMPLEXITY_REVEALED",
+      "FULL_UI_ACTIVE"
+    ],
+    "exec_hook": "progressiveUIUnlockEngine",
+    "deps": [
+      "M41"
+    ],
+    "status": "todo",
+    "ml_pair": "m67a",
+    "module_path": "pzo_engine/src/mechanics/m67_progressive_ui_layer_unlock.ts"
+  },
+  {
+    "task_id": "PZO-M68",
+    "mechanic_id": "M68",
+    "title": "Failure Rehab Mode",
+    "family": "onboarding_advanced",
+    "kind": "core",
+    "layer": "backend_service",
+    "priority": 2,
+    "batch": 2,
+    "inputs": [
+      "wipedRunId",
+      "failureSnapshot"
+    ],
+    "outputs": [
+      "rehabRunState",
+      "targetedScenario"
+    ],
+    "telemetry_events": [
+      "FAILURE_REHAB_STARTED",
+      "SCENARIO_TARGETED",
+      "REHAB_COMPLETE"
+    ],
+    "exec_hook": "failureRehabEngine",
+    "deps": [
+      "M03",
+      "M45"
+    ],
+    "status": "todo",
+    "ml_pair": "m68a",
+    "module_path": "pzo_engine/src/mechanics/m68_failure_rehab_mode.ts"
+  },
+  {
+    "task_id": "PZO-M69",
+    "mechanic_id": "M69",
+    "title": "Skill Drills",
+    "family": "onboarding_advanced",
+    "kind": "core",
+    "layer": "backend_service",
+    "priority": 2,
+    "batch": 2,
+    "inputs": [
+      "drillScenario",
+      "playerAction"
+    ],
+    "outputs": [
+      "drillResult",
+      "skillScore"
+    ],
+    "telemetry_events": [
+      "DRILL_STARTED",
+      "DRILL_EVALUATED",
+      "SKILL_SCORE_UPDATED"
+    ],
+    "exec_hook": "skillDrillEngine",
+    "deps": [
+      "M41"
+    ],
+    "status": "todo",
+    "ml_pair": "m69a",
+    "module_path": "pzo_engine/src/mechanics/m69_skill_drills.ts"
+  },
+  {
+    "task_id": "PZO-M70",
+    "mechanic_id": "M70",
+    "title": "Coop Bootcamp: Team Onboarding Run",
+    "family": "onboarding_advanced",
+    "kind": "core",
+    "layer": "backend_service",
+    "priority": 2,
+    "batch": 2,
+    "inputs": [
+      "teamIds",
+      "bootcampConfig",
+      "RunSeed"
+    ],
+    "outputs": [
+      "bootcampRunState",
+      "teamBriefing",
+      "synergiesExplained"
+    ],
+    "telemetry_events": [
+      "BOOTCAMP_STARTED",
+      "BOOTCAMP_COMPLETED",
+      "TEAM_SYNERGY_EXPLAINED"
+    ],
+    "exec_hook": "coopBootcampRunner",
+    "deps": [
+      "M41",
+      "M26"
+    ],
+    "status": "todo",
+    "ml_pair": "m70a",
+    "module_path": "pzo_engine/src/mechanics/m70_coop_bootcamp_team_onboarding_run.ts"
+  },
+  {
+    "task_id": "PZO-M71",
+    "mechanic_id": "M71",
+    "title": "Device Attestation: Trust Tiers for Competitive + Markets",
+    "family": "integrity_advanced",
+    "kind": "core",
+    "layer": "backend_service",
+    "priority": 1,
+    "batch": 2,
+    "inputs": [
+      "deviceFingerprint",
+      "attestationChallenge",
+      "trustTierTable"
+    ],
+    "outputs": [
+      "deviceTrustTier",
+      "attestationResult",
+      "competitiveEligible"
+    ],
+    "telemetry_events": [
+      "DEVICE_ATTESTED",
+      "TRUST_TIER_ASSIGNED",
+      "ATTESTATION_FAILED"
+    ],
+    "exec_hook": "deviceAttestationVerifier",
+    "deps": [
+      "M47"
+    ],
+    "status": "todo",
+    "ml_pair": "m71a",
+    "module_path": "pzo_engine/src/mechanics/m71_device_attestation_trust_tiers_for_competitive_markets.ts"
+  },
+  {
+    "task_id": "PZO-M72",
+    "mechanic_id": "M72",
+    "title": "Action Budget: Rate-Limited Inputs Anti-Bot Pace Control",
+    "family": "integrity_advanced",
+    "kind": "core",
+    "layer": "backend_service",
+    "priority": 1,
+    "batch": 2,
+    "inputs": [
+      "playerAction",
+      "actionTimeline",
+      "actionBudgetConfig"
+    ],
+    "outputs": [
+      "actionPermitted",
+      "budgetRemaining",
+      "rateLimitEvent"
+    ],
+    "telemetry_events": [
+      "ACTION_BUDGET_CHECKED",
+      "RATE_LIMIT_HIT",
+      "BOT_PATTERN_DETECTED"
+    ],
+    "exec_hook": "actionBudgetRateLimiter",
+    "deps": [
+      "M47"
+    ],
+    "status": "todo",
+    "ml_pair": "m72a",
+    "module_path": "pzo_engine/src/mechanics/m72_action_budget_rate_limited_inputs_anti_bot_pace_control.ts"
+  },
+  {
+    "task_id": "PZO-M73",
+    "mechanic_id": "M73",
+    "title": "Market Escrow Finality: Anti-Dupe Exchange Settlement",
+    "family": "integrity_advanced",
+    "kind": "core",
+    "layer": "backend_service",
+    "priority": 1,
+    "batch": 2,
+    "inputs": [
+      "marketTransaction",
+      "escrowId",
+      "settlementConfig"
+    ],
+    "outputs": [
+      "settlementResult",
+      "dupeGuardPassed",
+      "finalityConfirmed"
+    ],
+    "telemetry_events": [
+      "MARKET_ESCROW_CREATED",
+      "SETTLEMENT_FINALIZED",
+      "DUPE_DETECTED"
+    ],
+    "exec_hook": "marketEscrowFinalitySettler",
+    "deps": [
+      "M46",
+      "M47"
+    ],
+    "status": "todo",
+    "ml_pair": "m73a",
+    "module_path": "pzo_engine/src/mechanics/m73_market_escrow_finality_anti_dupe_exchange_settlement.ts"
+  },
+  {
+    "task_id": "PZO-M74",
+    "mechanic_id": "M74",
+    "title": "Forensic Snapshot Bundles: Exportable Run Truth Packets",
+    "family": "integrity_advanced",
+    "kind": "core",
+    "layer": "backend_service",
+    "priority": 2,
+    "batch": 2,
+    "inputs": [
+      "runId",
+      "ledgerEntries",
+      "redactionRules"
+    ],
+    "outputs": [
+      "snapshotBundle",
+      "exportedPacket",
+      "redactedHash"
+    ],
+    "telemetry_events": [
+      "SNAPSHOT_BUNDLED",
+      "PACKET_EXPORTED",
+      "REDACTION_APPLIED"
+    ],
+    "exec_hook": "forensicSnapshotBundler",
+    "deps": [
+      "M46",
+      "M50"
+    ],
+    "status": "todo",
+    "ml_pair": "m74a",
+    "module_path": "pzo_engine/src/mechanics/m74_forensic_snapshot_bundles_exportable_run_truth_packets.ts"
+  },
+  {
+    "task_id": "PZO-M75",
+    "mechanic_id": "M75",
+    "title": "Integrity Digest: Seasonal Transparency Audit Trails",
+    "family": "integrity_advanced",
+    "kind": "core",
+    "layer": "backend_service",
+    "priority": 2,
+    "batch": 2,
+    "inputs": [
+      "seasonId",
+      "runLedgers",
+      "digestConfig"
+    ],
+    "outputs": [
+      "integrityDigest",
+      "auditTrail",
+      "publishedReport"
+    ],
+    "telemetry_events": [
+      "INTEGRITY_DIGEST_COMPILED",
+      "AUDIT_TRAIL_PUBLISHED",
+      "ANOMALY_FLAGGED"
+    ],
+    "exec_hook": "integrityDigestPublisher",
+    "deps": [
+      "M48",
+      "M74"
+    ],
+    "status": "todo",
+    "ml_pair": "m75a",
+    "module_path": "pzo_engine/src/mechanics/m75_integrity_digest_seasonal_transparency_audit_trails.ts"
+  },
+  {
+    "task_id": "PZO-M76",
+    "mechanic_id": "M76",
+    "title": "Contract Voting Modes: Unanimous, Majority, Weighted",
+    "family": "coop_governance",
+    "kind": "core",
+    "layer": "api_endpoint",
+    "priority": 2,
+    "batch": 2,
+    "inputs": [
+      "contractId",
+      "voteConfig",
+      "participantIds"
+    ],
+    "outputs": [
+      "voteResult",
+      "votingMode",
+      "quorumReached"
+    ],
+    "telemetry_events": [
+      "VOTE_OPENED",
+      "VOTE_CAST",
+      "VOTE_RESOLVED",
+      "QUORUM_REACHED"
+    ],
+    "exec_hook": "contractVotingResolver",
+    "deps": [
+      "M26",
+      "M28"
+    ],
+    "status": "todo",
+    "ml_pair": "m76a",
+    "module_path": "pzo_engine/src/mechanics/m76_contract_voting_modes_unanimous_majority_weighted.ts"
+  },
+  {
+    "task_id": "PZO-M77",
+    "mechanic_id": "M77",
+    "title": "Delegated Operator: Temporary Table Lead",
+    "family": "coop_governance",
+    "kind": "core",
+    "layer": "api_endpoint",
+    "priority": 2,
+    "batch": 2,
+    "inputs": [
+      "delegateId",
+      "delegationScope",
+      "delegationDuration"
+    ],
+    "outputs": [
+      "delegationActive",
+      "operatorPowers",
+      "delegationExpiry"
+    ],
+    "telemetry_events": [
+      "DELEGATION_GRANTED",
+      "DELEGATION_REVOKED",
+      "OPERATOR_ACTION_TAKEN"
+    ],
+    "exec_hook": "delegatedOperatorHandler",
+    "deps": [
+      "M76"
+    ],
+    "status": "todo",
+    "ml_pair": "m77a",
+    "module_path": "pzo_engine/src/mechanics/m77_delegated_operator_temporary_table_lead.ts"
+  },
+  {
+    "task_id": "PZO-M78",
+    "mechanic_id": "M78",
+    "title": "Collateral Calls: Margin-Style Contract Enforcement",
+    "family": "coop_governance",
+    "kind": "core",
+    "layer": "api_endpoint",
+    "priority": 2,
+    "batch": 2,
+    "inputs": [
+      "contractId",
+      "collateralRequirement",
+      "state.treasury"
+    ],
+    "outputs": [
+      "collateralCallIssued",
+      "marginMet",
+      "defaultTriggered"
+    ],
+    "telemetry_events": [
+      "COLLATERAL_CALL_ISSUED",
+      "MARGIN_MET",
+      "MARGIN_DEFAULT"
+    ],
+    "exec_hook": "collateralCallEnforcer",
+    "deps": [
+      "M26",
+      "M29"
+    ],
+    "status": "todo",
+    "ml_pair": "m78a",
+    "module_path": "pzo_engine/src/mechanics/m78_collateral_calls_margin_style_contract_enforcement.ts"
+  },
+  {
+    "task_id": "PZO-M79",
+    "mechanic_id": "M79",
+    "title": "Shared Objective Bonds: Team-Wide Incentive Locks",
+    "family": "coop_governance",
+    "kind": "core",
+    "layer": "api_endpoint",
+    "priority": 2,
+    "batch": 2,
+    "inputs": [
+      "bondObjective",
+      "participantIds",
+      "bondAmount"
+    ],
+    "outputs": [
+      "bondActive",
+      "objectiveProgress",
+      "bondPayout"
+    ],
+    "telemetry_events": [
+      "BOND_LOCKED",
+      "OBJECTIVE_PROGRESS",
+      "BOND_RESOLVED"
+    ],
+    "exec_hook": "sharedObjectiveBondManager",
+    "deps": [
+      "M26",
+      "M39"
+    ],
+    "status": "todo",
+    "ml_pair": "m79a",
+    "module_path": "pzo_engine/src/mechanics/m79_shared_objective_bonds_team_wide_incentive_locks.ts"
+  },
+  {
+    "task_id": "PZO-M80",
+    "mechanic_id": "M80",
+    "title": "Contract Receipt Cards: Portable Verifiable Coop Proofs",
+    "family": "coop_governance",
+    "kind": "core",
+    "layer": "api_endpoint",
+    "priority": 2,
+    "batch": 2,
+    "inputs": [
+      "contractId",
+      "contractOutcome",
+      "proofHash"
+    ],
+    "outputs": [
+      "receiptCard",
+      "portableProof",
+      "shareableReceiptUrl"
+    ],
+    "telemetry_events": [
+      "RECEIPT_CARD_ISSUED",
+      "RECEIPT_SHARED",
+      "RECEIPT_VERIFIED"
+    ],
+    "exec_hook": "contractReceiptCardIssuer",
+    "deps": [
+      "M50",
+      "M26"
+    ],
+    "status": "todo",
+    "ml_pair": "m80a",
+    "module_path": "pzo_engine/src/mechanics/m80_contract_receipt_cards_portable_verifiable_coop_proofs.ts"
+  },
+  {
+    "task_id": "PZO-M81",
+    "mechanic_id": "M81",
+    "title": "Synergy Tree Paths: Branching Portfolio Identity",
+    "family": "portfolio_expert",
+    "kind": "core",
+    "layer": "card_handler",
+    "priority": 2,
+    "batch": 2,
+    "inputs": [
+      "state.assets",
+      "synergyTreeDef",
+      "playerDoctrineChoice"
+    ],
+    "outputs": [
+      "activePath",
+      "branchUnlocked",
+      "identityBadge"
+    ],
+    "telemetry_events": [
+      "SYNERGY_BRANCH_UNLOCKED",
+      "IDENTITY_FORGED",
+      "PATH_LOCKED"
+    ],
+    "exec_hook": "synergyTreePathResolver",
+    "deps": [
+      "M31",
+      "M56"
+    ],
+    "status": "todo",
+    "ml_pair": "m81a",
+    "module_path": "pzo_engine/src/mechanics/m81_synergy_tree_paths_branching_portfolio_identity.ts"
+  },
+  {
+    "task_id": "PZO-M82",
+    "mechanic_id": "M82",
+    "title": "Timing Chains: Tick-Window Synergy Combos",
+    "family": "portfolio_expert",
+    "kind": "core",
+    "layer": "card_handler",
+    "priority": 2,
+    "batch": 2,
+    "inputs": [
+      "state.tick",
+      "cardSequence",
+      "timingWindowDef"
+    ],
+    "outputs": [
+      "comboActivated",
+      "timingMultiplier",
+      "windowMissed"
+    ],
+    "telemetry_events": [
+      "TIMING_CHAIN_STARTED",
+      "CHAIN_COMPLETED",
+      "CHAIN_BROKEN"
+    ],
+    "exec_hook": "timingChainComboResolver",
+    "deps": [
+      "M31",
+      "M82"
+    ],
+    "status": "todo",
+    "ml_pair": "m82a",
+    "module_path": "pzo_engine/src/mechanics/m82_timing_chains_tick_window_synergy_combos.ts"
+  },
+  {
+    "task_id": "PZO-M83",
+    "mechanic_id": "M83",
+    "title": "Risk Parity Dial: Optional Stability Lever Under Heat",
+    "family": "portfolio_expert",
+    "kind": "core",
+    "layer": "card_handler",
+    "priority": 2,
+    "batch": 2,
+    "inputs": [
+      "state.exposureHeat",
+      "riskParityTarget",
+      "state.assets"
+    ],
+    "outputs": [
+      "parityAdjusted",
+      "stabilityBonus",
+      "dialSetting"
+    ],
+    "telemetry_events": [
+      "RISK_PARITY_ADJUSTED",
+      "STABILITY_BONUS_APPLIED",
+      "DIAL_CHANGED"
+    ],
+    "exec_hook": "riskParityDialAdjuster",
+    "deps": [
+      "M35",
+      "M57"
+    ],
+    "status": "todo",
+    "ml_pair": "m83a",
+    "module_path": "pzo_engine/src/mechanics/m83_risk_parity_dial_optional_stability_lever_under_heat.ts"
+  },
+  {
+    "task_id": "PZO-M84",
+    "mechanic_id": "M84",
+    "title": "Catalyst Slots: Cross-Set Bridges Without Degeneracy",
+    "family": "portfolio_expert",
+    "kind": "core",
+    "layer": "card_handler",
+    "priority": 2,
+    "batch": 2,
+    "inputs": [
+      "catalystCard",
+      "activeSynergySets",
+      "degeneracyGuardConfig"
+    ],
+    "outputs": [
+      "catalystEffect",
+      "bridgeActivated",
+      "degeneracyGuardPassed"
+    ],
+    "telemetry_events": [
+      "CATALYST_SLOTTED",
+      "BRIDGE_ACTIVATED",
+      "DEGENERACY_BLOCKED"
+    ],
+    "exec_hook": "catalystSlotBridge",
+    "deps": [
+      "M31",
+      "M59"
+    ],
+    "status": "todo",
+    "ml_pair": "m84a",
+    "module_path": "pzo_engine/src/mechanics/m84_catalyst_slots_cross_set_bridges_without_degeneracy.ts"
+  },
+  {
+    "task_id": "PZO-M85",
+    "mechanic_id": "M85",
+    "title": "Mutation Draft: Mid-Run Portfolio Rewrite",
+    "family": "portfolio_expert",
+    "kind": "core",
+    "layer": "card_handler",
+    "priority": 2,
+    "batch": 2,
+    "inputs": [
+      "mutationOptions",
+      "state.assets",
+      "state.tick"
+    ],
+    "outputs": [
+      "mutationApplied",
+      "portfolioRewritten",
+      "cordImpact"
+    ],
+    "telemetry_events": [
+      "MUTATION_DRAFT_OPENED",
+      "MUTATION_APPLIED",
+      "PORTFOLIO_REWRITTEN"
+    ],
+    "exec_hook": "mutationDraftExecutor",
+    "deps": [
+      "M04",
+      "M31"
+    ],
+    "status": "todo",
+    "ml_pair": "m85a",
+    "module_path": "pzo_engine/src/mechanics/m85_mutation_draft_mid_run_portfolio_rewrite.ts"
+  },
+  {
+    "task_id": "PZO-M86",
+    "mechanic_id": "M86",
+    "title": "Micro Proofs: Moment-Scoped Achievement Stamps",
+    "family": "achievement_expert",
+    "kind": "core",
+    "layer": "season_runtime",
+    "priority": 2,
+    "batch": 2,
+    "inputs": [
+      "momentEvent",
+      "microProofDefs"
+    ],
+    "outputs": [
+      "microProofStamped",
+      "stampHash",
+      "momentAnnotated"
+    ],
+    "telemetry_events": [
+      "MICRO_PROOF_STAMPED",
+      "MOMENT_ANNOTATED",
+      "STAMP_VERIFIED"
+    ],
+    "exec_hook": "microProofStamper",
+    "deps": [
+      "M22",
+      "M50"
+    ],
+    "status": "todo",
+    "ml_pair": "m86a",
+    "module_path": "pzo_engine/src/mechanics/m86_micro_proofs_moment_scoped_achievement_stamps.ts"
+  },
+  {
+    "task_id": "PZO-M87",
+    "mechanic_id": "M87",
+    "title": "Season Relics: Limited Cosmetic Mints from Verified Feats",
+    "family": "achievement_expert",
+    "kind": "core",
+    "layer": "season_runtime",
+    "priority": 3,
+    "batch": 2,
+    "inputs": [
+      "seasonId",
+      "verifiedFeat",
+      "mintGovernorConfig"
+    ],
+    "outputs": [
+      "relicMinted",
+      "scarcityScore",
+      "mintHash"
+    ],
+    "telemetry_events": [
+      "RELIC_MINTED",
+      "RELIC_SCARCITY_UPDATED",
+      "MINT_GOVERNOR_DECISION"
+    ],
+    "exec_hook": "seasonRelicMintGovernor",
+    "deps": [
+      "M50",
+      "M19"
+    ],
+    "status": "todo",
+    "ml_pair": "m87a",
+    "module_path": "pzo_engine/src/mechanics/m87_season_relics_limited_cosmetic_mints_from_verified_feats.ts"
+  },
+  {
+    "task_id": "PZO-M88",
+    "mechanic_id": "M88",
+    "title": "Team Titles: Coop Identity Names with Shared Root Hash",
+    "family": "achievement_expert",
+    "kind": "core",
+    "layer": "season_runtime",
+    "priority": 3,
+    "batch": 2,
+    "inputs": [
+      "teamId",
+      "titleDefinition",
+      "sharedRootHash"
+    ],
+    "outputs": [
+      "teamTitleAssigned",
+      "rootHashVerified",
+      "displayTitle"
+    ],
+    "telemetry_events": [
+      "TEAM_TITLE_AWARDED",
+      "ROOT_HASH_BOUND",
+      "TITLE_DISPLAYED"
+    ],
+    "exec_hook": "teamTitleAwarder",
+    "deps": [
+      "M62",
+      "M88"
+    ],
+    "status": "todo",
+    "ml_pair": "m88a",
+    "module_path": "pzo_engine/src/mechanics/m88_team_titles_coop_identity_names_with_shared_root_hash.ts"
+  },
+  {
+    "task_id": "PZO-M89",
+    "mechanic_id": "M89",
+    "title": "Trust-Weighted Cosmetic Multipliers: Integrity Incentives",
+    "family": "achievement_expert",
+    "kind": "core",
+    "layer": "season_runtime",
+    "priority": 3,
+    "batch": 2,
+    "inputs": [
+      "trustScore",
+      "cosmeticBase",
+      "integrityMultiplierTable"
+    ],
+    "outputs": [
+      "cosmeticMultiplied",
+      "displayTier",
+      "integrityBonus"
+    ],
+    "telemetry_events": [
+      "INTEGRITY_BONUS_APPLIED",
+      "COSMETIC_TIER_UPGRADED",
+      "TRUST_WEIGHT_COMPUTED"
+    ],
+    "exec_hook": "trustWeightedCosmeticMultiplier",
+    "deps": [
+      "M53",
+      "M39"
+    ],
+    "status": "todo",
+    "ml_pair": "m89a",
+    "module_path": "pzo_engine/src/mechanics/m89_trust_weighted_cosmetic_multipliers_integrity_incentives.ts"
+  },
+  {
+    "task_id": "PZO-M90",
+    "mechanic_id": "M90",
+    "title": "Salvage and Reroll: Recycling Achievements into Challenges",
+    "family": "achievement_expert",
+    "kind": "core",
+    "layer": "season_runtime",
+    "priority": 3,
+    "batch": 2,
+    "inputs": [
+      "achievementId",
+      "salvageValue",
+      "rerollPool"
+    ],
+    "outputs": [
+      "salvageCredit",
+      "newChallenge",
+      "rerollResult"
+    ],
+    "telemetry_events": [
+      "ACHIEVEMENT_SALVAGED",
+      "REROLL_EXECUTED",
+      "NEW_CHALLENGE_ISSUED"
+    ],
+    "exec_hook": "salvageAndRerollExecutor",
+    "deps": [
+      "M36",
+      "M40"
+    ],
+    "status": "todo",
+    "ml_pair": "m90a",
+    "module_path": "pzo_engine/src/mechanics/m90_salvage_and_reroll_recycling_achievements_into_challenges.ts"
+  },
+  {
+    "task_id": "PZO-M91",
+    "mechanic_id": "M91",
+    "title": "First Table Invite: Safe Social Onboarding Run",
+    "family": "onboarding_expert",
+    "kind": "core",
+    "layer": "backend_service",
+    "priority": 2,
+    "batch": 2,
+    "inputs": [
+      "inviterId",
+      "newPlayerId",
+      "safeRunConfig"
+    ],
+    "outputs": [
+      "safeRunStarted",
+      "guidedSocialMoment",
+      "inviteBonus"
+    ],
+    "telemetry_events": [
+      "FIRST_TABLE_INVITE_SENT",
+      "SAFE_RUN_STARTED",
+      "SOCIAL_MOMENT_CAPTURED"
+    ],
+    "exec_hook": "firstTableInviteSafeRun",
+    "deps": [
+      "M41",
+      "M15"
+    ],
+    "status": "todo",
+    "ml_pair": "m91a",
+    "module_path": "pzo_engine/src/mechanics/m91_first_table_invite_safe_social_onboarding_run.ts"
+  },
+  {
+    "task_id": "PZO-M92",
+    "mechanic_id": "M92",
+    "title": "Ghost Mentor Theater: Watch + Copy Decision Ghosts",
+    "family": "onboarding_expert",
+    "kind": "core",
+    "layer": "backend_service",
+    "priority": 2,
+    "batch": 2,
+    "inputs": [
+      "mentorRunId",
+      "ghostPayload",
+      "watcherPlayerId"
+    ],
+    "outputs": [
+      "ghostTheaterLoaded",
+      "decisionAnnotated",
+      "replayViewed"
+    ],
+    "telemetry_events": [
+      "GHOST_THEATER_STARTED",
+      "DECISION_COPIED",
+      "GHOST_REPLAY_ENDED"
+    ],
+    "exec_hook": "ghostMentorTheaterLoader",
+    "deps": [
+      "M24",
+      "M48"
+    ],
+    "status": "todo",
+    "ml_pair": "m92a",
+    "module_path": "pzo_engine/src/mechanics/m92_ghost_mentor_theater_watch_copy_decision_ghosts.ts"
+  },
+  {
+    "task_id": "PZO-M93",
+    "mechanic_id": "M93",
+    "title": "Loadout Lab: Preset Builder + Constraint Preview",
+    "family": "onboarding_expert",
+    "kind": "core",
+    "layer": "backend_service",
+    "priority": 2,
+    "batch": 2,
+    "inputs": [
+      "presetConfig",
+      "advantageOptions",
+      "handicapOptions"
+    ],
+    "outputs": [
+      "savedPreset",
+      "constraintPreview",
+      "cordPremiumEstimate"
+    ],
+    "telemetry_events": [
+      "PRESET_SAVED",
+      "CONSTRAINT_PREVIEWED",
+      "LOADOUT_APPLIED"
+    ],
+    "exec_hook": "loadoutLabPresetBuilder",
+    "deps": [
+      "M14",
+      "M44"
+    ],
+    "status": "todo",
+    "ml_pair": "m93a",
+    "module_path": "pzo_engine/src/mechanics/m93_loadout_lab_preset_builder_constraint_preview.ts"
+  },
+  {
+    "task_id": "PZO-M94",
+    "mechanic_id": "M94",
+    "title": "Inline Glossary Pings: Micro-Explain Without Handholding",
+    "family": "onboarding_expert",
+    "kind": "core",
+    "layer": "ui_component",
+    "priority": 2,
+    "batch": 2,
+    "inputs": [
+      "termEncountered",
+      "playerOptIn",
+      "glossaryLibrary"
+    ],
+    "outputs": [
+      "glossaryPing",
+      "explanationShown",
+      "pingDismissed"
+    ],
+    "telemetry_events": [
+      "GLOSSARY_PING_SHOWN",
+      "GLOSSARY_PING_DISMISSED",
+      "TERM_EXPLAINED"
+    ],
+    "exec_hook": "inlineGlossaryPing",
+    "deps": [
+      "M42"
+    ],
+    "status": "todo",
+    "ml_pair": "m94a",
+    "module_path": "pzo_engine/src/mechanics/m94_inline_glossary_pings_micro_explain_without_handholding.ts"
+  },
+  {
+    "task_id": "PZO-M95",
+    "mechanic_id": "M95",
+    "title": "Wipe Clinic: Interactive Death-Snapshot Review",
+    "family": "onboarding_expert",
+    "kind": "core",
+    "layer": "backend_service",
+    "priority": 2,
+    "batch": 2,
+    "inputs": [
+      "wipedRunId",
+      "failureSnapshot",
+      "clinicConfig"
+    ],
+    "outputs": [
+      "deathReviewLoaded",
+      "rootCauseAnnotated",
+      "clinicLesson"
+    ],
+    "telemetry_events": [
+      "WIPE_CLINIC_STARTED",
+      "ROOT_CAUSE_REVIEWED",
+      "CLINIC_COMPLETED"
+    ],
+    "exec_hook": "wipeClinicReviewer",
+    "deps": [
+      "M03",
+      "M74"
+    ],
+    "status": "todo",
+    "ml_pair": "m95a",
+    "module_path": "pzo_engine/src/mechanics/m95_wipe_clinic_interactive_death_snapshot_review.ts"
+  },
+  {
+    "task_id": "PZO-M96",
+    "mechanic_id": "M96",
+    "title": "Server Time Authority: Anti-Time-Travel Lag Exploit Guard",
+    "family": "integrity_expert",
+    "kind": "core",
+    "layer": "tick_engine",
+    "priority": 1,
+    "batch": 2,
+    "inputs": [
+      "clientTimestamp",
+      "serverTimestamp",
+      "toleranceWindow"
+    ],
+    "outputs": [
+      "timeDelta",
+      "lagExploitDetected",
+      "authorizedTick"
+    ],
+    "telemetry_events": [
+      "TIME_DRIFT_DETECTED",
+      "LAG_EXPLOIT_BLOCKED",
+      "SERVER_TIME_ANCHORED"
+    ],
+    "exec_hook": "serverTimeAuthority",
+    "deps": [
+      "M02",
+      "M47"
+    ],
+    "status": "todo",
+    "ml_pair": "m96a",
+    "module_path": "pzo_engine/src/mechanics/m96_server_time_authority_anti_time_travel_lag_exploit_guard.ts"
+  },
+  {
+    "task_id": "PZO-M97",
+    "mechanic_id": "M97",
+    "title": "Seed Commit-Reveal: Deterministic Randomness You Can Audit",
+    "family": "integrity_expert",
+    "kind": "core",
+    "layer": "tick_engine",
+    "priority": 1,
+    "batch": 2,
+    "inputs": [
+      "playerCommitHash",
+      "serverRevealHash",
+      "runId"
+    ],
+    "outputs": [
+      "finalSeed",
+      "commitRevealProof",
+      "auditHash"
+    ],
+    "telemetry_events": [
+      "SEED_COMMITTED",
+      "SEED_REVEALED",
+      "COMMIT_REVEAL_VERIFIED"
+    ],
+    "exec_hook": "seedCommitRevealVerifier",
+    "deps": [
+      "M01",
+      "M47"
+    ],
+    "status": "todo",
+    "ml_pair": "m97a",
+    "module_path": "pzo_engine/src/mechanics/m97_seed_commit_reveal_deterministic_randomness_you_can_audit.ts"
+  },
+  {
+    "task_id": "PZO-M98",
+    "mechanic_id": "M98",
+    "title": "Quarantine Routing: Isolate Suspicious Runs Without Killing Play",
+    "family": "integrity_expert",
+    "kind": "core",
+    "layer": "backend_service",
+    "priority": 1,
+    "batch": 2,
+    "inputs": [
+      "suspiciousRunId",
+      "quarantineFlags",
+      "routingConfig"
+    ],
+    "outputs": [
+      "quarantineActive",
+      "runIsolated",
+      "playerNotified"
+    ],
+    "telemetry_events": [
+      "RUN_QUARANTINED",
+      "QUARANTINE_LIFTED",
+      "SUSPICIOUS_PATTERN_LOGGED"
+    ],
+    "exec_hook": "quarantineRoutingIsolator",
+    "deps": [
+      "M49"
+    ],
+    "status": "todo",
+    "ml_pair": "m98a",
+    "module_path": "pzo_engine/src/mechanics/m98_quarantine_routing_isolate_suspicious_runs_without_killing_p.ts"
+  },
+  {
+    "task_id": "PZO-M99",
+    "mechanic_id": "M99",
+    "title": "Integrity Challenges: Lightweight Proof-of-Play Checks",
+    "family": "integrity_expert",
+    "kind": "core",
+    "layer": "backend_service",
+    "priority": 1,
+    "batch": 2,
+    "inputs": [
+      "runId",
+      "challengePrompt",
+      "expectedResponse"
+    ],
+    "outputs": [
+      "challengePassed",
+      "challengeResult",
+      "integrityConfirmed"
+    ],
+    "telemetry_events": [
+      "INTEGRITY_CHALLENGE_ISSUED",
+      "CHALLENGE_PASSED",
+      "CHALLENGE_FAILED"
+    ],
+    "exec_hook": "integrityChallengeSolver",
+    "deps": [
+      "M47",
+      "M48"
+    ],
+    "status": "todo",
+    "ml_pair": "m99a",
+    "module_path": "pzo_engine/src/mechanics/m99_integrity_challenges_lightweight_proof_of_play_checks.ts"
+  },
+  {
+    "task_id": "PZO-M100",
+    "mechanic_id": "M100",
+    "title": "Appeal Evidence Chain: Verifiable Enforcement Pipeline",
+    "family": "integrity_expert",
+    "kind": "core",
+    "layer": "backend_service",
+    "priority": 2,
+    "batch": 2,
+    "inputs": [
+      "appealId",
+      "evidenceChain",
+      "enforcementRule"
+    ],
+    "outputs": [
+      "appealResult",
+      "verdictIssued",
+      "evidenceHashed"
+    ],
+    "telemetry_events": [
+      "APPEAL_FILED",
+      "EVIDENCE_VERIFIED",
+      "VERDICT_ISSUED",
+      "ENFORCEMENT_APPLIED"
+    ],
+    "exec_hook": "appealEvidenceChainPipeline",
+    "deps": [
+      "M48",
+      "M49"
+    ],
+    "status": "todo",
+    "ml_pair": "m100a",
+    "module_path": "pzo_engine/src/mechanics/m100_appeal_evidence_chain_verifiable_enforcement_pipeline.ts"
+  },
+  {
+    "task_id": "PZO-M101",
+    "mechanic_id": "M101",
+    "title": "Mutator Draft: Run Rules You Choose",
+    "family": "portfolio_experimental",
+    "kind": "core",
+    "layer": "card_handler",
+    "priority": 2,
+    "batch": 3,
+    "inputs": [
+      "mutatorOptions",
+      "playerChoice",
+      "rulesVersion"
+    ],
+    "outputs": [
+      "activeMutators",
+      "ruleOverrides",
+      "cordModifier"
+    ],
+    "telemetry_events": [
+      "MUTATOR_SELECTED",
+      "RULE_OVERRIDDEN",
+      "MUTATOR_EXPIRED"
+    ],
+    "exec_hook": "mutatorDraftSelector",
+    "deps": [
+      "M14",
+      "M56"
+    ],
+    "status": "todo",
+    "ml_pair": "m101a",
+    "module_path": "pzo_engine/src/mechanics/m101_mutator_draft_run_rules_you_choose.ts"
+  },
+  {
+    "task_id": "PZO-M102",
+    "mechanic_id": "M102",
+    "title": "Forked Timeline: Choice Two Branches One Final",
+    "family": "portfolio_experimental",
+    "kind": "core",
+    "layer": "card_handler",
+    "priority": 2,
+    "batch": 3,
+    "inputs": [
+      "forkDecision",
+      "branchAState",
+      "branchBState"
+    ],
+    "outputs": [
+      "forkActivated",
+      "branchSelected",
+      "mergedOutcome"
+    ],
+    "telemetry_events": [
+      "FORK_CREATED",
+      "BRANCH_SELECTED",
+      "BRANCHES_MERGED"
+    ],
+    "exec_hook": "forkedTimelineResolver",
+    "deps": [
+      "M01",
+      "M43"
+    ],
+    "status": "todo",
+    "ml_pair": "m102a",
+    "module_path": "pzo_engine/src/mechanics/m102_forked_timeline_choice_two_branches_one_final.ts"
+  },
+  {
+    "task_id": "PZO-M103",
+    "mechanic_id": "M103",
+    "title": "Emergency Liquidity Actions: Sell Fast Pay Price",
+    "family": "portfolio_experimental",
+    "kind": "core",
+    "layer": "card_handler",
+    "priority": 2,
+    "batch": 3,
+    "inputs": [
+      "emergencyTrigger",
+      "state.assets",
+      "liquidationDiscount"
+    ],
+    "outputs": [
+      "emergencySaleResult",
+      "discountApplied",
+      "cashRecovered"
+    ],
+    "telemetry_events": [
+      "EMERGENCY_SALE_EXECUTED",
+      "DISCOUNT_APPLIED",
+      "LIQUIDITY_RESTORED"
+    ],
+    "exec_hook": "emergencyLiquidityAction",
+    "deps": [
+      "M32",
+      "M03"
+    ],
+    "status": "todo",
+    "ml_pair": "m103a",
+    "module_path": "pzo_engine/src/mechanics/m103_emergency_liquidity_actions_sell_fast_pay_price.ts"
+  },
+  {
+    "task_id": "PZO-M104",
+    "mechanic_id": "M104",
+    "title": "Deal Scarcity Index: The Market Goes Thin",
+    "family": "portfolio_experimental",
+    "kind": "core",
+    "layer": "card_handler",
+    "priority": 2,
+    "batch": 3,
+    "inputs": [
+      "sharedOpportunityDeck",
+      "purchaseHistory",
+      "scarcityThresholds"
+    ],
+    "outputs": [
+      "scarcityState",
+      "scarceAlert",
+      "fubarBiasAdjusted"
+    ],
+    "telemetry_events": [
+      "SCARCITY_ENTERED",
+      "DECK_EXHAUSTED",
+      "FUBAR_BIAS_UPDATED"
+    ],
+    "exec_hook": "dealScarcityIndexMonitor",
+    "deps": [
+      "M09"
+    ],
+    "status": "todo",
+    "ml_pair": "m104a",
+    "module_path": "pzo_engine/src/mechanics/m104_deal_scarcity_index_the_market_goes_thin.ts"
+  },
+  {
+    "task_id": "PZO-M105",
+    "mechanic_id": "M105",
+    "title": "Last Look Window: One Final Chance No Debates",
+    "family": "portfolio_experimental",
+    "kind": "core",
+    "layer": "card_handler",
+    "priority": 2,
+    "batch": 3,
+    "inputs": [
+      "lastLookTrigger",
+      "state.tick",
+      "windowDuration"
+    ],
+    "outputs": [
+      "lastLookOpened",
+      "finalDecision",
+      "windowExpired"
+    ],
+    "telemetry_events": [
+      "LAST_LOOK_OPENED",
+      "FINAL_DECISION_MADE",
+      "WINDOW_EXPIRED"
+    ],
+    "exec_hook": "lastLookWindowResolver",
+    "deps": [
+      "M09"
+    ],
+    "status": "todo",
+    "ml_pair": "m105a",
+    "module_path": "pzo_engine/src/mechanics/m105_last_look_window_one_final_chance_no_debates.ts"
+  },
+  {
+    "task_id": "PZO-M106",
+    "mechanic_id": "M106",
+    "title": "Asset Condition System: Wear, Maintenance, Failure",
+    "family": "portfolio_experimental",
+    "kind": "core",
+    "layer": "card_handler",
+    "priority": 2,
+    "batch": 3,
+    "inputs": [
+      "assetId",
+      "conditionState",
+      "maintenanceCost"
+    ],
+    "outputs": [
+      "conditionUpdated",
+      "failureEvent",
+      "maintenanceRequired"
+    ],
+    "telemetry_events": [
+      "ASSET_WORN",
+      "MAINTENANCE_PAID",
+      "ASSET_FAILED"
+    ],
+    "exec_hook": "assetConditionSystem",
+    "deps": [
+      "M07",
+      "M34"
+    ],
+    "status": "todo",
+    "ml_pair": "m106a",
+    "module_path": "pzo_engine/src/mechanics/m106_asset_condition_system_wear_maintenance_failure.ts"
+  },
+  {
+    "task_id": "PZO-M107",
+    "mechanic_id": "M107",
+    "title": "Refi Ladder: Restructure Without Escaping Reality",
+    "family": "portfolio_experimental",
+    "kind": "core",
+    "layer": "card_handler",
+    "priority": 2,
+    "batch": 3,
+    "inputs": [
+      "liabilityId",
+      "refiTerms",
+      "state.cashflow"
+    ],
+    "outputs": [
+      "refiExecuted",
+      "newTerms",
+      "cashflowAdjusted"
+    ],
+    "telemetry_events": [
+      "REFI_INITIATED",
+      "REFI_APPROVED",
+      "REFI_DENIED",
+      "TERMS_UPDATED"
+    ],
+    "exec_hook": "refiLadderRestructurer",
+    "deps": [
+      "M60",
+      "M32"
+    ],
+    "status": "todo",
+    "ml_pair": "m107a",
+    "module_path": "pzo_engine/src/mechanics/m107_refi_ladder_restructure_without_escaping_reality.ts"
+  },
+  {
+    "task_id": "PZO-M108",
+    "mechanic_id": "M108",
+    "title": "Partial Fills: You Dont Get the Whole Deal",
+    "family": "portfolio_experimental",
+    "kind": "core",
+    "layer": "card_handler",
+    "priority": 2,
+    "batch": 3,
+    "inputs": [
+      "dealRequest",
+      "availableCapacity",
+      "fillRules"
+    ],
+    "outputs": [
+      "fillAmount",
+      "partialFillResult",
+      "remainingCapacity"
+    ],
+    "telemetry_events": [
+      "PARTIAL_FILL_EXECUTED",
+      "FILL_PROBABILITY_APPLIED",
+      "PARTIAL_FILL_MISSED"
+    ],
+    "exec_hook": "partialFillResolver",
+    "deps": [
+      "M09",
+      "M104"
+    ],
+    "status": "todo",
+    "ml_pair": "m108a",
+    "module_path": "pzo_engine/src/mechanics/m108_partial_fills_you_dont_get_the_whole_deal.ts"
+  },
+  {
+    "task_id": "PZO-M109",
+    "mechanic_id": "M109",
+    "title": "Macro News Bursts: Headlines That Move Ticks",
+    "family": "portfolio_experimental",
+    "kind": "core",
+    "layer": "ui_component",
+    "priority": 2,
+    "batch": 3,
+    "inputs": [
+      "macroEvent",
+      "state.macroRegime",
+      "newsBurstConfig"
+    ],
+    "outputs": [
+      "headlineDisplayed",
+      "regimeHint",
+      "playerAlerted"
+    ],
+    "telemetry_events": [
+      "NEWS_BURST_DISPLAYED",
+      "REGIME_HINT_SHOWN",
+      "HEADLINE_DISMISSED"
+    ],
+    "exec_hook": "macroNewsBurstDisplay",
+    "deps": [
+      "M20",
+      "M05"
+    ],
+    "status": "todo",
+    "ml_pair": "m109a",
+    "module_path": "pzo_engine/src/mechanics/m109_macro_news_bursts_headlines_that_move_ticks.ts"
+  },
+  {
+    "task_id": "PZO-M110",
+    "mechanic_id": "M110",
+    "title": "No Pause Menu Law: Every UI Is Timer-Safe",
+    "family": "portfolio_experimental",
+    "kind": "core",
+    "layer": "tick_engine",
+    "priority": 1,
+    "batch": 3,
+    "inputs": [
+      "uiAction",
+      "state.tick",
+      "pauseAttempt"
+    ],
+    "outputs": [
+      "pauseBlocked",
+      "timerContinues",
+      "uiSafetyConfirmed"
+    ],
+    "telemetry_events": [
+      "PAUSE_BLOCKED",
+      "TIMER_SAFE_UI_RENDERED",
+      "UI_STALL_DETECTED"
+    ],
+    "exec_hook": "noPauseMenuLawEnforcer",
+    "deps": [
+      "M02"
+    ],
+    "status": "todo",
+    "ml_pair": "m110a",
+    "module_path": "pzo_engine/src/mechanics/m110_no_pause_menu_law_every_ui_is_timer_safe.ts"
+  },
+  {
+    "task_id": "PZO-M111",
+    "mechanic_id": "M111",
+    "title": "Portfolio Rules Macros: If-Then Autopilot Hard-Capped",
+    "family": "portfolio_experimental",
+    "kind": "core",
+    "layer": "api_endpoint",
+    "priority": 2,
+    "batch": 3,
+    "inputs": [
+      "macroRuleDefinition",
+      "state",
+      "macroCapConfig"
+    ],
+    "outputs": [
+      "macroRuleActive",
+      "autoActionExecuted",
+      "capEnforced"
+    ],
+    "telemetry_events": [
+      "MACRO_RULE_ACTIVATED",
+      "AUTO_ACTION_EXECUTED",
+      "CAP_ENFORCED"
+    ],
+    "exec_hook": "portfolioRulesMacroEngine",
+    "deps": [
+      "M07",
+      "M32"
+    ],
+    "status": "todo",
+    "ml_pair": "m111a",
+    "module_path": "pzo_engine/src/mechanics/m111_portfolio_rules_macros_if_then_autopilot_hard_capped.ts"
+  },
+  {
+    "task_id": "PZO-M112",
+    "mechanic_id": "M112",
+    "title": "Precision Split: Sell Part Keep Part",
+    "family": "portfolio_experimental",
+    "kind": "core",
+    "layer": "ui_component",
+    "priority": 2,
+    "batch": 3,
+    "inputs": [
+      "assetId",
+      "splitAmount",
+      "sellPercentage"
+    ],
+    "outputs": [
+      "splitResult",
+      "cashFromSplit",
+      "remainingHolding"
+    ],
+    "telemetry_events": [
+      "PRECISION_SPLIT_EXECUTED",
+      "SPLIT_AMOUNT_CONFIRMED",
+      "HOLDING_UPDATED"
+    ],
+    "exec_hook": "precisionSplitExecutor",
+    "deps": [
+      "M10",
+      "M32"
+    ],
+    "status": "todo",
+    "ml_pair": "m112a",
+    "module_path": "pzo_engine/src/mechanics/m112_precision_split_sell_part_keep_part.ts"
+  },
+  {
+    "task_id": "PZO-M113",
+    "mechanic_id": "M113",
+    "title": "Order Priority Stack: You Choose What Dies First",
+    "family": "portfolio_experimental",
+    "kind": "core",
+    "layer": "card_handler",
+    "priority": 2,
+    "batch": 3,
+    "inputs": [
+      "sacrificeOrder",
+      "state.assets",
+      "incomingDamage"
+    ],
+    "outputs": [
+      "sacrificeExecuted",
+      "orderApplied",
+      "survivorUpdated"
+    ],
+    "telemetry_events": [
+      "SACRIFICE_ORDER_SET",
+      "ASSET_SACRIFICED",
+      "ORDER_EXHAUSTED"
+    ],
+    "exec_hook": "orderPriorityStackResolver",
+    "deps": [
+      "M08",
+      "M32"
+    ],
+    "status": "todo",
+    "ml_pair": "m113a",
+    "module_path": "pzo_engine/src/mechanics/m113_order_priority_stack_you_choose_what_dies_first.ts"
+  },
+  {
+    "task_id": "PZO-M114",
+    "mechanic_id": "M114",
+    "title": "Timing Tax: Fast Choices Get Better Terms",
+    "family": "portfolio_experimental",
+    "kind": "core",
+    "layer": "card_handler",
+    "priority": 2,
+    "batch": 3,
+    "inputs": [
+      "decisionTime",
+      "windowDuration",
+      "timingTaxTable"
+    ],
+    "outputs": [
+      "timingBonus",
+      "termImproved",
+      "taxApplied"
+    ],
+    "telemetry_events": [
+      "TIMING_TAX_APPLIED",
+      "TIMING_BONUS_AWARDED",
+      "FAST_DECISION_RECORDED"
+    ],
+    "exec_hook": "timingTaxResolver",
+    "deps": [
+      "M02",
+      "M09"
+    ],
+    "status": "todo",
+    "ml_pair": "m114a",
+    "module_path": "pzo_engine/src/mechanics/m114_timing_tax_fast_choices_get_better_terms.ts"
+  },
+  {
+    "task_id": "PZO-M115",
+    "mechanic_id": "M115",
+    "title": "Heat Swap: Move Risk Without Removing It",
+    "family": "portfolio_experimental",
+    "kind": "core",
+    "layer": "card_handler",
+    "priority": 2,
+    "batch": 3,
+    "inputs": [
+      "sourceAssetId",
+      "targetAssetId",
+      "heatAmount"
+    ],
+    "outputs": [
+      "heatSwapped",
+      "exposureRebalanced",
+      "netHeatUnchanged"
+    ],
+    "telemetry_events": [
+      "HEAT_SWAP_EXECUTED",
+      "EXPOSURE_REBALANCED",
+      "NET_HEAT_CONFIRMED"
+    ],
+    "exec_hook": "heatSwapExecutor",
+    "deps": [
+      "M35",
+      "M57"
+    ],
+    "status": "todo",
+    "ml_pair": "m115a",
+    "module_path": "pzo_engine/src/mechanics/m115_heat_swap_move_risk_without_removing_it.ts"
+  },
+  {
+    "task_id": "PZO-M116",
+    "mechanic_id": "M116",
+    "title": "Table Roles: Caller, Treasurer, Saboteur, Historian",
+    "family": "social_advanced",
+    "kind": "core",
+    "layer": "api_endpoint",
+    "priority": 2,
+    "batch": 3,
+    "inputs": [
+      "teamId",
+      "roleAssignment",
+      "roleSynergies"
+    ],
+    "outputs": [
+      "rolesAssigned",
+      "passivesActive",
+      "activeAbilityQueued"
+    ],
+    "telemetry_events": [
+      "ROLE_ASSIGNED",
+      "PASSIVE_ACTIVE",
+      "ABILITY_USED"
+    ],
+    "exec_hook": "tableRoleAssignmentEngine",
+    "deps": [
+      "M26"
+    ],
+    "status": "todo",
+    "ml_pair": "m116a",
+    "module_path": "pzo_engine/src/mechanics/m116_table_roles_caller_treasurer_saboteur_historian.ts"
+  },
+  {
+    "task_id": "PZO-M117",
+    "mechanic_id": "M117",
+    "title": "Table Feed: Run Moments as a Social Timeline",
+    "family": "social_advanced",
+    "kind": "core",
+    "layer": "ui_component",
+    "priority": 2,
+    "batch": 3,
+    "inputs": [
+      "runMoments",
+      "socialFeedConfig",
+      "teamId"
+    ],
+    "outputs": [
+      "feedRendered",
+      "momentHighlighted",
+      "sharePrompted"
+    ],
+    "telemetry_events": [
+      "FEED_UPDATED",
+      "MOMENT_HIGHLIGHTED",
+      "SHARE_PROMPTED"
+    ],
+    "exec_hook": "tableFeedRenderer",
+    "deps": [
+      "M22"
+    ],
+    "status": "todo",
+    "ml_pair": "m117a",
+    "module_path": "pzo_engine/src/mechanics/m117_table_feed_run_moments_as_a_social_timeline.ts"
+  },
+  {
+    "task_id": "PZO-M118",
+    "mechanic_id": "M118",
+    "title": "Clip Remix Chains: Duet-Stitch but Verified",
+    "family": "social_advanced",
+    "kind": "core",
+    "layer": "ui_component",
+    "priority": 3,
+    "batch": 3,
+    "inputs": [
+      "sourceClipHash",
+      "remixPayload",
+      "verifiedRunId"
+    ],
+    "outputs": [
+      "remixClip",
+      "chainHash",
+      "remixPublished"
+    ],
+    "telemetry_events": [
+      "CLIP_REMIXED",
+      "CHAIN_EXTENDED",
+      "REMIX_VERIFIED"
+    ],
+    "exec_hook": "clipRemixChainBuilder",
+    "deps": [
+      "M23",
+      "M50"
+    ],
+    "status": "todo",
+    "ml_pair": "m118a",
+    "module_path": "pzo_engine/src/mechanics/m118_clip_remix_chains_duet_stitch_but_verified.ts"
+  },
+  {
+    "task_id": "PZO-M119",
+    "mechanic_id": "M119",
+    "title": "Rivalry Ledger: Nemesis Tracking Over Seasons",
+    "family": "social_advanced",
+    "kind": "core",
+    "layer": "api_endpoint",
+    "priority": 2,
+    "batch": 3,
+    "inputs": [
+      "rivalryHistory",
+      "matchResult",
+      "rivalryThreshold"
+    ],
+    "outputs": [
+      "rivalryUpdated",
+      "nemesisBadge",
+      "rivalryConsequences"
+    ],
+    "telemetry_events": [
+      "RIVALRY_FORMED",
+      "NEMESIS_DESIGNATED",
+      "RIVALRY_CONSEQUENCE_APPLIED"
+    ],
+    "exec_hook": "rivalryLedgerTracker",
+    "deps": [
+      "M18"
+    ],
+    "status": "todo",
+    "ml_pair": "m119a",
+    "module_path": "pzo_engine/src/mechanics/m119_rivalry_ledger_nemesis_tracking_over_seasons.ts"
+  },
+  {
+    "task_id": "PZO-M120",
+    "mechanic_id": "M120",
+    "title": "Consent Gates: Social Chaos Must Be Opt-In",
+    "family": "social_advanced",
+    "kind": "core",
+    "layer": "ui_component",
+    "priority": 1,
+    "batch": 3,
+    "inputs": [
+      "socialAction",
+      "targetPlayerId",
+      "consentStatus"
+    ],
+    "outputs": [
+      "consentVerified",
+      "actionPermitted",
+      "consentDenied"
+    ],
+    "telemetry_events": [
+      "CONSENT_REQUESTED",
+      "CONSENT_GRANTED",
+      "CONSENT_DENIED"
+    ],
+    "exec_hook": "consentGateVerifier",
+    "deps": [
+      "M15"
+    ],
+    "status": "todo",
+    "ml_pair": "m120a",
+    "module_path": "pzo_engine/src/mechanics/m120_consent_gates_social_chaos_must_be_opt_in.ts"
+  },
+  {
+    "task_id": "PZO-M121",
+    "mechanic_id": "M121",
+    "title": "Daily Gauntlet: Same Seed for Everyone",
+    "family": "social_advanced",
+    "kind": "core",
+    "layer": "season_runtime",
+    "priority": 2,
+    "batch": 3,
+    "inputs": [
+      "dailySeed",
+      "gauntletConfig",
+      "playerEntry"
+    ],
+    "outputs": [
+      "gauntletRunState",
+      "dailyRanking",
+      "gauntletReward"
+    ],
+    "telemetry_events": [
+      "GAUNTLET_ENTERED",
+      "GAUNTLET_COMPLETED",
+      "DAILY_RANK_UPDATED"
+    ],
+    "exec_hook": "dailyGauntletEngine",
+    "deps": [
+      "M01",
+      "M64"
+    ],
+    "status": "todo",
+    "ml_pair": "m121a",
+    "module_path": "pzo_engine/src/mechanics/m121_daily_gauntlet_same_seed_for_everyone.ts"
+  },
+  {
+    "task_id": "PZO-M122",
+    "mechanic_id": "M122",
+    "title": "Weekly Draft League: Snake Draft Rule Modules",
+    "family": "social_advanced",
+    "kind": "core",
+    "layer": "season_runtime",
+    "priority": 2,
+    "batch": 3,
+    "inputs": [
+      "leagueId",
+      "draftPool",
+      "snakeDraftOrder"
+    ],
+    "outputs": [
+      "draftedModules",
+      "leagueRuleset",
+      "leagueRunStarted"
+    ],
+    "telemetry_events": [
+      "DRAFT_OPENED",
+      "MODULE_DRAFTED",
+      "LEAGUE_STARTED"
+    ],
+    "exec_hook": "weeklyDraftLeagueEngine",
+    "deps": [
+      "M21",
+      "M64"
+    ],
+    "status": "todo",
+    "ml_pair": "m122a",
+    "module_path": "pzo_engine/src/mechanics/m122_weekly_draft_league_snake_draft_rule_modules.ts"
+  },
+  {
+    "task_id": "PZO-M123",
+    "mechanic_id": "M123",
+    "title": "King of the Hill: Table Winner Stays Stakes Rotate",
+    "family": "social_advanced",
+    "kind": "core",
+    "layer": "season_runtime",
+    "priority": 2,
+    "batch": 3,
+    "inputs": [
+      "tableId",
+      "winnerHistory",
+      "stakeConfig"
+    ],
+    "outputs": [
+      "kingDesignated",
+      "stakesUpdated",
+      "challengerQueued"
+    ],
+    "telemetry_events": [
+      "KING_DESIGNATED",
+      "STAKES_ROTATED",
+      "CHALLENGER_JOINED"
+    ],
+    "exec_hook": "kingOfHillTableEngine",
+    "deps": [
+      "M123"
+    ],
+    "status": "todo",
+    "ml_pair": "m123a",
+    "module_path": "pzo_engine/src/mechanics/m123_king_of_the_hill_table_winner_stays_stakes_rotate.ts"
+  },
+  {
+    "task_id": "PZO-M124",
+    "mechanic_id": "M124",
+    "title": "Speedrun Mode: Timer Is Even Harsher",
+    "family": "social_advanced",
+    "kind": "core",
+    "layer": "season_runtime",
+    "priority": 2,
+    "batch": 3,
+    "inputs": [
+      "speedrunConfig",
+      "RunSeed",
+      "timerConfig"
+    ],
+    "outputs": [
+      "speedrunState",
+      "splitTimes",
+      "personalBest"
+    ],
+    "telemetry_events": [
+      "SPEEDRUN_STARTED",
+      "SPLIT_RECORDED",
+      "PERSONAL_BEST_SET"
+    ],
+    "exec_hook": "speedrunModeEngine",
+    "deps": [
+      "M02",
+      "M64"
+    ],
+    "status": "todo",
+    "ml_pair": "m124a",
+    "module_path": "pzo_engine/src/mechanics/m124_speedrun_mode_timer_is_even_harsher.ts"
+  },
+  {
+    "task_id": "PZO-M125",
+    "mechanic_id": "M125",
+    "title": "No Ghost Hardcore: You Own Every Mistake",
+    "family": "social_advanced",
+    "kind": "core",
+    "layer": "season_runtime",
+    "priority": 2,
+    "batch": 3,
+    "inputs": [
+      "hardcoreFlag",
+      "RunSeed",
+      "hardcoreConfig"
+    ],
+    "outputs": [
+      "hardcoreRunState",
+      "cordCeiling",
+      "ghostDisabled"
+    ],
+    "telemetry_events": [
+      "HARDCORE_STARTED",
+      "GHOST_DISABLED",
+      "HARDCORE_FAILED",
+      "HARDCORE_COMPLETED"
+    ],
+    "exec_hook": "noGhostHardcoreEngine",
+    "deps": [
+      "M14",
+      "M03"
+    ],
+    "status": "todo",
+    "ml_pair": "m125a",
+    "module_path": "pzo_engine/src/mechanics/m125_no_ghost_hardcore_you_own_every_mistake.ts"
+  },
+  {
+    "task_id": "PZO-M126",
+    "mechanic_id": "M126",
+    "title": "Cosmetic Loadouts: Titles, Frames, Proof Skins",
+    "family": "cosmetics",
+    "kind": "core",
+    "layer": "ui_component",
+    "priority": 3,
+    "batch": 3,
+    "inputs": [
+      "playerInventory",
+      "loadoutSelection",
+      "integrityScore"
+    ],
+    "outputs": [
+      "cosmeticApplied",
+      "displayLoadout",
+      "skinHash"
+    ],
+    "telemetry_events": [
+      "COSMETIC_APPLIED",
+      "LOADOUT_SAVED",
+      "SKIN_HASH_VERIFIED"
+    ],
+    "exec_hook": "cosmeticLoadoutApplier",
+    "deps": [
+      "M40"
+    ],
+    "status": "todo",
+    "ml_pair": "m126a",
+    "module_path": "pzo_engine/src/mechanics/m126_cosmetic_loadouts_titles_frames_proof_skins.ts"
+  },
+  {
+    "task_id": "PZO-M127",
+    "mechanic_id": "M127",
+    "title": "Proof-Bound Crafting: Craft from Verified Fragments",
+    "family": "cosmetics",
+    "kind": "core",
+    "layer": "backend_service",
+    "priority": 3,
+    "batch": 3,
+    "inputs": [
+      "verifiedFragments",
+      "craftingRecipe",
+      "fragmentHashes"
+    ],
+    "outputs": [
+      "craftedItem",
+      "craftingProof",
+      "fragmentsConsumed"
+    ],
+    "telemetry_events": [
+      "CRAFTING_INITIATED",
+      "CRAFTING_COMPLETED",
+      "FRAGMENTS_VERIFIED"
+    ],
+    "exec_hook": "proofBoundCraftingEngine",
+    "deps": [
+      "M50",
+      "M40"
+    ],
+    "status": "todo",
+    "ml_pair": "m127a",
+    "module_path": "pzo_engine/src/mechanics/m127_proof_bound_crafting_craft_from_verified_fragments.ts"
+  },
+  {
+    "task_id": "PZO-M128",
+    "mechanic_id": "M128",
+    "title": "Season Sinks: Burn to Keep Economy Clean",
+    "family": "cosmetics",
+    "kind": "core",
+    "layer": "season_runtime",
+    "priority": 3,
+    "batch": 3,
+    "inputs": [
+      "trophyCurrency",
+      "sinkConfig",
+      "burnAmount"
+    ],
+    "outputs": [
+      "currencyBurned",
+      "economyCleaned",
+      "burnReceipt"
+    ],
+    "telemetry_events": [
+      "SEASON_SINK_EXECUTED",
+      "CURRENCY_BURNED",
+      "ECONOMY_ADJUSTED"
+    ],
+    "exec_hook": "seasonSinkBurner",
+    "deps": [
+      "M39",
+      "M19"
+    ],
+    "status": "todo",
+    "ml_pair": "m128a",
+    "module_path": "pzo_engine/src/mechanics/m128_season_sinks_burn_to_keep_economy_clean.ts"
+  },
+  {
+    "task_id": "PZO-M129",
+    "mechanic_id": "M129",
+    "title": "Creator Packs: Caption Templates + Sound Stingers",
+    "family": "cosmetics",
+    "kind": "core",
+    "layer": "ui_component",
+    "priority": 3,
+    "batch": 3,
+    "inputs": [
+      "creatorPackSelection",
+      "momentEvent",
+      "captionTemplate"
+    ],
+    "outputs": [
+      "captionGenerated",
+      "stingerPlayed",
+      "packConsumed"
+    ],
+    "telemetry_events": [
+      "CREATOR_PACK_USED",
+      "CAPTION_GENERATED",
+      "STINGER_TRIGGERED"
+    ],
+    "exec_hook": "creatorPackApplier",
+    "deps": [
+      "M23",
+      "M126"
+    ],
+    "status": "todo",
+    "ml_pair": "m129a",
+    "module_path": "pzo_engine/src/mechanics/m129_creator_packs_caption_templates_sound_stingers.ts"
+  },
+  {
+    "task_id": "PZO-M130",
+    "mechanic_id": "M130",
+    "title": "Table Vault: Shared Cosmetic Stash",
+    "family": "cosmetics",
+    "kind": "core",
+    "layer": "api_endpoint",
+    "priority": 3,
+    "batch": 3,
+    "inputs": [
+      "teamId",
+      "vaultContributions",
+      "vaultConfig"
+    ],
+    "outputs": [
+      "vaultUpdated",
+      "sharedCosmeticUsable",
+      "vaultBalance"
+    ],
+    "telemetry_events": [
+      "VAULT_CONTRIBUTION",
+      "VAULT_COSMETIC_USED",
+      "VAULT_BALANCE_UPDATED"
+    ],
+    "exec_hook": "tableVaultManager",
+    "deps": [
+      "M26",
+      "M126"
+    ],
+    "status": "todo",
+    "ml_pair": "m130a",
+    "module_path": "pzo_engine/src/mechanics/m130_table_vault_shared_cosmetic_stash.ts"
+  },
+  {
+    "task_id": "PZO-M131",
+    "mechanic_id": "M131",
+    "title": "Faction Sponsorship: Season Flavor Without Power",
+    "family": "cosmetics",
+    "kind": "core",
+    "layer": "season_runtime",
+    "priority": 3,
+    "batch": 3,
+    "inputs": [
+      "factionChoice",
+      "seasonId",
+      "factionBenefits"
+    ],
+    "outputs": [
+      "factionActive",
+      "cosmeticFlavor",
+      "powerGuardPassed"
+    ],
+    "telemetry_events": [
+      "FACTION_JOINED",
+      "FACTION_BENEFIT_APPLIED",
+      "POWER_GUARD_VERIFIED"
+    ],
+    "exec_hook": "factionSponsorshipHandler",
+    "deps": [
+      "M19",
+      "M126"
+    ],
+    "status": "todo",
+    "ml_pair": "m131a",
+    "module_path": "pzo_engine/src/mechanics/m131_faction_sponsorship_season_flavor_without_power.ts"
+  },
+  {
+    "task_id": "PZO-M132",
+    "mechanic_id": "M132",
+    "title": "Case Files: Run Post-Mortems as Narrative Dossiers",
+    "family": "narrative",
+    "kind": "core",
+    "layer": "ui_component",
+    "priority": 2,
+    "batch": 3,
+    "inputs": [
+      "completedRun",
+      "m132MLOutput",
+      "ledgerEntries"
+    ],
+    "outputs": [
+      "caseFile",
+      "decisionTimeline",
+      "alternateScenariosRendered"
+    ],
+    "telemetry_events": [
+      "CASE_FILE_GENERATED",
+      "ALTERNATE_TIMELINE_COMPUTED",
+      "DOSSIER_EXPORTED"
+    ],
+    "exec_hook": "caseFileDossierGenerator",
+    "deps": [
+      "M46",
+      "M74",
+      "M50"
+    ],
+    "status": "todo",
+    "ml_pair": "m132a",
+    "module_path": "pzo_engine/src/mechanics/m132_case_files_run_post_mortems_as_narrative_dossiers.ts"
+  },
+  {
+    "task_id": "PZO-M133",
+    "mechanic_id": "M133",
+    "title": "Seasonal Story Beats: Headlines Court Dates Deadlines",
+    "family": "narrative",
+    "kind": "core",
+    "layer": "ui_component",
+    "priority": 2,
+    "batch": 3,
+    "inputs": [
+      "seasonConfig",
+      "storyBeatSchedule",
+      "state.tick"
+    ],
+    "outputs": [
+      "storyBeatDisplayed",
+      "narrativeHeadline",
+      "deadlineWarning"
+    ],
+    "telemetry_events": [
+      "STORY_BEAT_FIRED",
+      "HEADLINE_DISPLAYED",
+      "DEADLINE_APPROACHING"
+    ],
+    "exec_hook": "seasonalStoryBeatEngine",
+    "deps": [
+      "M19",
+      "M20"
+    ],
+    "status": "todo",
+    "ml_pair": "m133a",
+    "module_path": "pzo_engine/src/mechanics/m133_seasonal_story_beats_headlines_court_dates_deadlines.ts"
+  },
+  {
+    "task_id": "PZO-M134",
+    "mechanic_id": "M134",
+    "title": "NPC Counterparties: Deterministic Personalities No AI",
+    "family": "narrative",
+    "kind": "core",
+    "layer": "ui_component",
+    "priority": 2,
+    "batch": 3,
+    "inputs": [
+      "npcDefinition",
+      "RunSeed",
+      "state.tick"
+    ],
+    "outputs": [
+      "npcBehavior",
+      "counterpartyAction",
+      "npcDialogue"
+    ],
+    "telemetry_events": [
+      "NPC_ACTION_TAKEN",
+      "COUNTERPARTY_RESPONDED",
+      "NPC_PERSONALITY_RESOLVED"
+    ],
+    "exec_hook": "npcCounterpartyEngine",
+    "deps": [
+      "M01"
+    ],
+    "status": "todo",
+    "ml_pair": "m134a",
+    "module_path": "pzo_engine/src/mechanics/m134_npc_counterparties_deterministic_personalities_no_ai.ts"
+  },
+  {
+    "task_id": "PZO-M135",
+    "mechanic_id": "M135",
+    "title": "Reputation Labels: Earned Reversible Proof-Based",
+    "family": "narrative",
+    "kind": "core",
+    "layer": "ui_component",
+    "priority": 2,
+    "batch": 3,
+    "inputs": [
+      "runHistory",
+      "reputationRules",
+      "proofHashes"
+    ],
+    "outputs": [
+      "reputationLabel",
+      "labelHash",
+      "labelReversible"
+    ],
+    "telemetry_events": [
+      "REPUTATION_LABEL_EARNED",
+      "LABEL_REVERSED",
+      "REPUTATION_VERIFIED"
+    ],
+    "exec_hook": "reputationLabelAwarder",
+    "deps": [
+      "M50",
+      "M36"
+    ],
+    "status": "todo",
+    "ml_pair": "m135a",
+    "module_path": "pzo_engine/src/mechanics/m135_reputation_labels_earned_reversible_proof_based.ts"
+  },
+  {
+    "task_id": "PZO-M136",
+    "mechanic_id": "M136",
+    "title": "Ruleset Signature Banner: Players Always Know Whats Live",
+    "family": "ops",
+    "kind": "core",
+    "layer": "season_runtime",
+    "priority": 1,
+    "batch": 3,
+    "inputs": [
+      "activeRuleset",
+      "rulesVersion",
+      "state.runId"
+    ],
+    "outputs": [
+      "bannerDisplayed",
+      "rulesetSignature",
+      "playerAcknowledged"
+    ],
+    "telemetry_events": [
+      "RULESET_SIGNATURE_SHOWN",
+      "RULESET_VERSION_CONFIRMED",
+      "PLAYER_ACKNOWLEDGED"
+    ],
+    "exec_hook": "rulesetSignatureBanner",
+    "deps": [
+      "M19"
+    ],
+    "status": "todo",
+    "ml_pair": "m136a",
+    "module_path": "pzo_engine/src/mechanics/m136_ruleset_signature_banner_players_always_know_whats_live.ts"
+  },
+  {
+    "task_id": "PZO-M137",
+    "mechanic_id": "M137",
+    "title": "Mid-Run Hotfix Lock: No Surprise Changes Inside a Run",
+    "family": "ops",
+    "kind": "core",
+    "layer": "tick_engine",
+    "priority": 1,
+    "batch": 3,
+    "inputs": [
+      "activeRunId",
+      "hotfixPayload",
+      "runLockStatus"
+    ],
+    "outputs": [
+      "hotfixQueued",
+      "lockEnforced",
+      "hotfixAppliedPostRun"
+    ],
+    "telemetry_events": [
+      "HOTFIX_QUEUED",
+      "RUN_LOCK_ENFORCED",
+      "HOTFIX_APPLIED"
+    ],
+    "exec_hook": "midRunHotfixLockEnforcer",
+    "deps": [
+      "M02"
+    ],
+    "status": "todo",
+    "ml_pair": "m137a",
+    "module_path": "pzo_engine/src/mechanics/m137_mid_run_hotfix_lock_no_surprise_changes_inside_a_run.ts"
+  },
+  {
+    "task_id": "PZO-M138",
+    "mechanic_id": "M138",
+    "title": "Degraded Mode: Server Load Shedding Without Breaking Runs",
+    "family": "ops",
+    "kind": "core",
+    "layer": "tick_engine",
+    "priority": 1,
+    "batch": 3,
+    "inputs": [
+      "serverLoadMetric",
+      "degradedModeConfig",
+      "activeRuns"
+    ],
+    "outputs": [
+      "degradedModeActive",
+      "shedFeatures",
+      "runPreserved"
+    ],
+    "telemetry_events": [
+      "DEGRADED_MODE_ENTERED",
+      "FEATURES_SHED",
+      "DEGRADED_MODE_EXITED"
+    ],
+    "exec_hook": "degradedModeLoadShedder",
+    "deps": [
+      "M02",
+      "M46"
+    ],
+    "status": "todo",
+    "ml_pair": "m138a",
+    "module_path": "pzo_engine/src/mechanics/m138_degraded_mode_server_load_shedding_without_breaking_runs.ts"
+  },
+  {
+    "task_id": "PZO-M139",
+    "mechanic_id": "M139",
+    "title": "Offline Queue: Runs Play Now Verify Later",
+    "family": "ops",
+    "kind": "core",
+    "layer": "backend_service",
+    "priority": 2,
+    "batch": 3,
+    "inputs": [
+      "offlineRunPayload",
+      "verificationQueue",
+      "syncConfig"
+    ],
+    "outputs": [
+      "offlineRunQueued",
+      "syncScheduled",
+      "verificationPending"
+    ],
+    "telemetry_events": [
+      "OFFLINE_RUN_QUEUED",
+      "SYNC_SCHEDULED",
+      "VERIFICATION_PENDING"
+    ],
+    "exec_hook": "offlineQueueRunManager",
+    "deps": [
+      "M48",
+      "M46"
+    ],
+    "status": "todo",
+    "ml_pair": "m139a",
+    "module_path": "pzo_engine/src/mechanics/m139_offline_queue_runs_play_now_verify_later.ts"
+  },
+  {
+    "task_id": "PZO-M140",
+    "mechanic_id": "M140",
+    "title": "Player Evidence Export: Redacted Truth Packet",
+    "family": "ops",
+    "kind": "core",
+    "layer": "backend_service",
+    "priority": 2,
+    "batch": 3,
+    "inputs": [
+      "exportRequest",
+      "runId",
+      "redactionRules"
+    ],
+    "outputs": [
+      "exportedPacket",
+      "redactedPayload",
+      "exportHash"
+    ],
+    "telemetry_events": [
+      "EVIDENCE_EXPORT_REQUESTED",
+      "REDACTION_APPLIED",
+      "PACKET_EXPORTED"
+    ],
+    "exec_hook": "playerEvidenceExporter",
+    "deps": [
+      "M74",
+      "M50"
+    ],
+    "status": "todo",
+    "ml_pair": "m140a",
+    "module_path": "pzo_engine/src/mechanics/m140_player_evidence_export_redacted_truth_packet.ts"
+  },
+  {
+    "task_id": "PZO-M141",
+    "mechanic_id": "M141",
+    "title": "Asynchronous Table: Friends Vote Later Still Timer-Bound",
+    "family": "ops",
+    "kind": "core",
+    "layer": "api_endpoint",
+    "priority": 2,
+    "batch": 3,
+    "inputs": [
+      "asyncVoteConfig",
+      "participantIds",
+      "voteWindow"
+    ],
+    "outputs": [
+      "asyncVoteActive",
+      "voteResult",
+      "timerBoundEnforced"
+    ],
+    "telemetry_events": [
+      "ASYNC_VOTE_OPENED",
+      "ASYNC_VOTE_CAST",
+      "ASYNC_VOTE_RESOLVED"
+    ],
+    "exec_hook": "asyncTableVoteEngine",
+    "deps": [
+      "M16",
+      "M76"
+    ],
+    "status": "todo",
+    "ml_pair": "m141a",
+    "module_path": "pzo_engine/src/mechanics/m141_asynchronous_table_friends_vote_later_still_timer_bound.ts"
+  },
+  {
+    "task_id": "PZO-M142",
+    "mechanic_id": "M142",
+    "title": "House Rules: Custom Lobbies with Published Constraints",
+    "family": "ops",
+    "kind": "core",
+    "layer": "api_endpoint",
+    "priority": 2,
+    "batch": 3,
+    "inputs": [
+      "houseRuleConfig",
+      "constraintValidator",
+      "lobbyId"
+    ],
+    "outputs": [
+      "houseRulesActive",
+      "publishedConstraints",
+      "lobbySignature"
+    ],
+    "telemetry_events": [
+      "HOUSE_RULES_PUBLISHED",
+      "CONSTRAINT_VALIDATED",
+      "LOBBY_SIGNED"
+    ],
+    "exec_hook": "houseRulesCustomLobby",
+    "deps": [
+      "M19",
+      "M136"
+    ],
+    "status": "todo",
+    "ml_pair": "m142a",
+    "module_path": "pzo_engine/src/mechanics/m142_house_rules_custom_lobbies_with_published_constraints.ts"
+  },
+  {
+    "task_id": "PZO-M143",
+    "mechanic_id": "M143",
+    "title": "Table Penalties: Toxicity Without ML Pure Rule Enforcement",
+    "family": "ops",
+    "kind": "core",
+    "layer": "api_endpoint",
+    "priority": 1,
+    "batch": 3,
+    "inputs": [
+      "behaviorReport",
+      "penaltyRules",
+      "playerId"
+    ],
+    "outputs": [
+      "penaltyApplied",
+      "cordPenalty",
+      "violationLogged"
+    ],
+    "telemetry_events": [
+      "PENALTY_ISSUED",
+      "CORD_PENALIZED",
+      "VIOLATION_LOGGED"
+    ],
+    "exec_hook": "tablePenaltyEnforcer",
+    "deps": [
+      "M46"
+    ],
+    "status": "todo",
+    "ml_pair": "m143a",
+    "module_path": "pzo_engine/src/mechanics/m143_table_penalties_toxicity_without_ml_pure_rule_enforcement.ts"
+  },
+  {
+    "task_id": "PZO-M144",
+    "mechanic_id": "M144",
+    "title": "Spectator Theater: Watch Live Runs with Delay",
+    "family": "ops",
+    "kind": "core",
+    "layer": "ui_component",
+    "priority": 2,
+    "batch": 3,
+    "inputs": [
+      "spectatorConfig",
+      "runId",
+      "delayMs"
+    ],
+    "outputs": [
+      "spectatorFeedActive",
+      "spectatorView",
+      "predictionBetEnabled"
+    ],
+    "telemetry_events": [
+      "SPECTATOR_JOINED",
+      "PREDICTION_BET_PLACED",
+      "SPECTATOR_CHAT_MESSAGE"
+    ],
+    "exec_hook": "spectatorTheaterEngine",
+    "deps": [
+      "M22",
+      "M64"
+    ],
+    "status": "todo",
+    "ml_pair": "m144a",
+    "module_path": "pzo_engine/src/mechanics/m144_spectator_theater_watch_live_runs_with_delay.ts"
+  },
+  {
+    "task_id": "PZO-M145",
+    "mechanic_id": "M145",
+    "title": "Tournament Brackets: Verified Seeds Published Scoring",
+    "family": "ops",
+    "kind": "core",
+    "layer": "api_endpoint",
+    "priority": 2,
+    "batch": 3,
+    "inputs": [
+      "tournamentConfig",
+      "participantIds",
+      "bracketSeed"
+    ],
+    "outputs": [
+      "bracketGenerated",
+      "matchScheduled",
+      "scoringPublished"
+    ],
+    "telemetry_events": [
+      "TOURNAMENT_STARTED",
+      "MATCH_SCHEDULED",
+      "BRACKET_UPDATED"
+    ],
+    "exec_hook": "tournamentBracketEngine",
+    "deps": [
+      "M64",
+      "M01"
+    ],
+    "status": "todo",
+    "ml_pair": "m145a",
+    "module_path": "pzo_engine/src/mechanics/m145_tournament_brackets_verified_seeds_published_scoring.ts"
+  },
+  {
+    "task_id": "PZO-M146",
+    "mechanic_id": "M146",
+    "title": "Audit Event: Forced Documentation Under Timer",
+    "family": "ops",
+    "kind": "core",
+    "layer": "backend_service",
+    "priority": 1,
+    "batch": 3,
+    "inputs": [
+      "auditTrigger",
+      "state.tick",
+      "documentationRequired"
+    ],
+    "outputs": [
+      "auditEntry",
+      "documentationSubmitted",
+      "auditHash"
+    ],
+    "telemetry_events": [
+      "AUDIT_TRIGGERED",
+      "DOCUMENTATION_SUBMITTED",
+      "AUDIT_HASH_STORED"
+    ],
+    "exec_hook": "auditEventDocumenter",
+    "deps": [
+      "M46",
+      "M47"
+    ],
+    "status": "todo",
+    "ml_pair": "m146a",
+    "module_path": "pzo_engine/src/mechanics/m146_audit_event_forced_documentation_under_timer.ts"
+  },
+  {
+    "task_id": "PZO-M147",
+    "mechanic_id": "M147",
+    "title": "Litigation Risk: Civil Shock Deterministic Triggers",
+    "family": "ops",
+    "kind": "core",
+    "layer": "backend_service",
+    "priority": 2,
+    "batch": 3,
+    "inputs": [
+      "litigationTrigger",
+      "state.cash",
+      "RunSeed"
+    ],
+    "outputs": [
+      "litigationShock",
+      "cashDrained",
+      "legalHoldApplied"
+    ],
+    "telemetry_events": [
+      "LITIGATION_TRIGGERED",
+      "LEGAL_HOLD_APPLIED",
+      "CIVIL_SHOCK_RESOLVED"
+    ],
+    "exec_hook": "litigationRiskShockEngine",
+    "deps": [
+      "M12",
+      "M13"
+    ],
+    "status": "todo",
+    "ml_pair": "m147a",
+    "module_path": "pzo_engine/src/mechanics/m147_litigation_risk_civil_shock_deterministic_triggers.ts"
+  },
+  {
+    "task_id": "PZO-M148",
+    "mechanic_id": "M148",
+    "title": "Counterparty Freeze: Market Doesnt Always Clear",
+    "family": "ops",
+    "kind": "core",
+    "layer": "backend_service",
+    "priority": 2,
+    "batch": 3,
+    "inputs": [
+      "marketTransaction",
+      "counterpartyState",
+      "freezeTrigger"
+    ],
+    "outputs": [
+      "transactionFrozen",
+      "freezeDuration",
+      "unfreezeCondition"
+    ],
+    "telemetry_events": [
+      "COUNTERPARTY_FROZEN",
+      "TRANSACTION_HELD",
+      "FREEZE_LIFTED"
+    ],
+    "exec_hook": "counterpartyFreezeHandler",
+    "deps": [
+      "M09",
+      "M73"
+    ],
+    "status": "todo",
+    "ml_pair": "m148a",
+    "module_path": "pzo_engine/src/mechanics/m148_counterparty_freeze_market_doesnt_always_clear.ts"
+  },
+  {
+    "task_id": "PZO-M149",
+    "mechanic_id": "M149",
+    "title": "Regulatory Window: One Chance to Comply or Pay Forever",
+    "family": "ops",
+    "kind": "core",
+    "layer": "backend_service",
+    "priority": 2,
+    "batch": 3,
+    "inputs": [
+      "regulatoryTrigger",
+      "complianceWindow",
+      "state.cash"
+    ],
+    "outputs": [
+      "complianceResult",
+      "penaltyApplied",
+      "windowExpired"
+    ],
+    "telemetry_events": [
+      "REGULATORY_WINDOW_OPENED",
+      "COMPLIANCE_SUBMITTED",
+      "PENALTY_PERMANENT"
+    ],
+    "exec_hook": "regulatoryWindowEnforcer",
+    "deps": [
+      "M13",
+      "M27"
+    ],
+    "status": "todo",
+    "ml_pair": "m149a",
+    "module_path": "pzo_engine/src/mechanics/m149_regulatory_window_one_chance_to_comply_or_pay_forever.ts"
+  },
+  {
+    "task_id": "PZO-M150",
+    "mechanic_id": "M150",
+    "title": "Finality Ceremony: Run Ends with a Verifiable Stamp",
+    "family": "ops",
+    "kind": "core",
+    "layer": "season_runtime",
+    "priority": 1,
+    "batch": 3,
+    "inputs": [
+      "completedRun",
+      "cordScore",
+      "sovereigntyGrade"
+    ],
+    "outputs": [
+      "finalityStamp",
+      "ceremonyDisplayed",
+      "stampHash"
+    ],
+    "telemetry_events": [
+      "FINALITY_CEREMONY_TRIGGERED",
+      "SOVEREIGNTY_STAMP_ISSUED",
+      "RUN_FINALIZED"
+    ],
+    "exec_hook": "finalityCeremonyStamper",
+    "deps": [
+      "M50",
+      "M46"
+    ],
+    "status": "todo",
+    "ml_pair": "m150a",
+    "module_path": "pzo_engine/src/mechanics/m150_finality_ceremony_run_ends_with_a_verifiable_stamp.ts"
+  }
+]

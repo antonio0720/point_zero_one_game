@@ -324,9 +324,8 @@ export default function PlayPage() {
       // Navigate to game session. RunContext stored in sessionStorage for the
       // game page to read — avoids query-string pollution with large payloads.
       sessionStorage.setItem('pzo_run_ctx', JSON.stringify(ctx));
-      // Strategy B: direct redirect to Vite engine (no intermediate SSR hop)
-      const GAME_URL = process.env.NEXT_PUBLIC_GAME_URL || 'http://localhost:5173';
-      window.location.href = `${GAME_URL}?runId=${ctx.runId}&mode=${ctx.mode}&seed=${ctx.seed}&from=nextjs&goal=${encodeURIComponent(goalTemplate || '')}&profile=${encodeURIComponent(profileTemplate || '')}`;
+      // Strategy A: game runs inside Next.js via @pzo/engine
+      router.push(`/game?runId=${ctx.runId}`);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown launch error';
       console.error('[PlayPage] startRun failed:', err);

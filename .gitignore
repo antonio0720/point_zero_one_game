@@ -58,3 +58,5 @@ Thumbs.db
 .vscode/*
 !.vscode/settings.json
 .idea/
+frontend/packages/engine/dist/
+frontend/packages/engine/node_modules/
