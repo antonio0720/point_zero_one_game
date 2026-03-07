@@ -1,3 +1,4 @@
+import { EngineId, type EngineInitParams } from '../zero/types';
 //Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/pzo-web/src/engines/sovereignty/SovereigntyEngine.ts
 
 // ═══════════════════════════════════════════════════════════════════
@@ -40,7 +41,6 @@ import { ProofGenerator } from './ProofGenerator';
 import { ReplayIntegrityChecker } from './ReplayIntegrityChecker';
 import { RunGradeAssigner } from './RunGradeAssigner';
 import type {
-import { EngineId, type EngineInitParams } from '../zero/types';
   RunAccumulatorStats,
   RunIdentity,
   TickSnapshot,
