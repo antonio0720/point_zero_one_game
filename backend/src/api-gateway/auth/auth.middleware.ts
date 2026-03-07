@@ -3,11 +3,16 @@
  * Reads the identity set by the upstream authMiddleware (src/middleware/auth_middleware.ts)
  * and rejects the request if the user is not authenticated.
  *
- * Usage: AuthMiddleware(async (req, res) => { ... })
- * Inside handler: req.identityId — the verified player ID.
+ * Usage:
+ *   AuthMiddleware<RouteParams>(async (req, res) => { ... })
+ *
+ * Inside handler:
+ *   req.identityId — the verified player ID.
  */
 
 import type { NextFunction, Request, Response } from 'express';
+import type { ParamsDictionary } from 'express-serve-static-core';
+import type { ParsedQs } from 'qs';
 
 declare global {
   namespace Express {
@@ -31,7 +36,12 @@ declare global {
   }
 }
 
-export type AuthenticatedRequest = Request & {
+export type AuthenticatedRequest<
+  P = ParamsDictionary,
+  ResBody = unknown,
+  ReqBody = unknown,
+  ReqQuery = ParsedQs,
+> = Request<P, ResBody, ReqBody, ReqQuery> & {
   identityId: string;
   isAuthenticated: true;
   isGuest?: false;
@@ -39,18 +49,43 @@ export type AuthenticatedRequest = Request & {
   authRoles?: readonly string[];
 };
 
-export type AuthenticatedRouteHandler<TReq extends AuthenticatedRequest = AuthenticatedRequest> = (
+export type AuthenticatedRouteHandler<
+  P = ParamsDictionary,
+  ResBody = unknown,
+  ReqBody = unknown,
+  ReqQuery = ParsedQs,
+  TReq extends AuthenticatedRequest<P, ResBody, ReqBody, ReqQuery> = AuthenticatedRequest<
+    P,
+    ResBody,
+    ReqBody,
+    ReqQuery
+  >,
+> = (
   req: TReq,
-  res: Response,
+  res: Response<ResBody>,
   next: NextFunction,
 ) => Promise<unknown> | unknown;
 
-export type AuthMiddlewareOptions<TReq extends AuthenticatedRequest = AuthenticatedRequest> = {
+export type AuthMiddlewareOptions<
+  P = ParamsDictionary,
+  ResBody = unknown,
+  ReqBody = unknown,
+  ReqQuery = ParsedQs,
+  TReq extends AuthenticatedRequest<P, ResBody, ReqBody, ReqQuery> = AuthenticatedRequest<
+    P,
+    ResBody,
+    ReqBody,
+    ReqQuery
+  >,
+> = {
   requireScopes?: readonly string[];
   requireRoles?: readonly string[];
-  authorize?: (req: TReq, res: Response) => Promise<boolean> | boolean;
-  onUnauthorized?: (req: Request, res: Response) => void;
-  onForbidden?: (req: TReq, res: Response) => void;
+  authorize?: (req: TReq, res: Response<ResBody>) => Promise<boolean> | boolean;
+  onUnauthorized?: (
+    req: Request<P, ResBody, ReqBody, ReqQuery>,
+    res: Response<ResBody>,
+  ) => void;
+  onForbidden?: (req: TReq, res: Response<ResBody>) => void;
   exposeAuthOnLocals?: boolean;
 };
 
@@ -77,7 +112,10 @@ function getRequestId(req: Request): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
 
-function respondUnauthorized(req: Request, res: Response): void {
+function respondUnauthorized(
+  req: Request,
+  res: Response,
+): void {
   if (res.headersSent) {
     return;
   }
@@ -90,7 +128,10 @@ function respondUnauthorized(req: Request, res: Response): void {
   });
 }
 
-function respondForbidden(req: AuthenticatedRequest, res: Response): void {
+function respondForbidden(
+  req: AuthenticatedRequest,
+  res: Response,
+): void {
   if (res.headersSent) {
     return;
   }
@@ -143,11 +184,29 @@ function hasAllClaims(
   return true;
 }
 
-export function isAuthenticatedRequest(req: Request): req is AuthenticatedRequest {
-  return req.isAuthenticated === true && typeof req.identityId === 'string' && req.identityId.trim().length > 0;
+export function isAuthenticatedRequest<
+  P = ParamsDictionary,
+  ResBody = unknown,
+  ReqBody = unknown,
+  ReqQuery = ParsedQs,
+>(
+  req: Request<P, ResBody, ReqBody, ReqQuery>,
+): req is AuthenticatedRequest<P, ResBody, ReqBody, ReqQuery> {
+  return (
+    req.isAuthenticated === true &&
+    typeof req.identityId === 'string' &&
+    req.identityId.trim().length > 0
+  );
 }
 
-export function assertAuthenticated(req: Request): asserts req is AuthenticatedRequest {
+export function assertAuthenticated<
+  P = ParamsDictionary,
+  ResBody = unknown,
+  ReqBody = unknown,
+  ReqQuery = ParsedQs,
+>(
+  req: Request<P, ResBody, ReqBody, ReqQuery>,
+): asserts req is AuthenticatedRequest<P, ResBody, ReqBody, ReqQuery> {
   if (!isAuthenticatedRequest(req)) {
     const error = new Error('Request is not authenticated') as ErrorWithStatus;
     error.name = 'AuthenticationError';
@@ -157,7 +216,15 @@ export function assertAuthenticated(req: Request): asserts req is AuthenticatedR
   }
 }
 
-function bindAuthLocals(req: AuthenticatedRequest, res: Response): void {
+function bindAuthLocals<
+  P = ParamsDictionary,
+  ResBody = unknown,
+  ReqBody = unknown,
+  ReqQuery = ParsedQs,
+>(
+  req: AuthenticatedRequest<P, ResBody, ReqBody, ReqQuery>,
+  res: Response<ResBody>,
+): void {
   res.locals.auth = {
     identityId: req.identityId,
     isAuthenticated: true,
@@ -171,20 +238,42 @@ function isErrorLike(value: unknown): value is Error {
   return value instanceof Error;
 }
 
-export function AuthMiddleware<TReq extends AuthenticatedRequest = AuthenticatedRequest>(
-  handler: AuthenticatedRouteHandler<TReq>,
-  options: AuthMiddlewareOptions<TReq> = {},
-): (req: Request, res: Response, next: NextFunction) => Promise<void> {
+export function AuthMiddleware<
+  P = ParamsDictionary,
+  ResBody = unknown,
+  ReqBody = unknown,
+  ReqQuery = ParsedQs,
+  TReq extends AuthenticatedRequest<P, ResBody, ReqBody, ReqQuery> = AuthenticatedRequest<
+    P,
+    ResBody,
+    ReqBody,
+    ReqQuery
+  >,
+>(
+  handler: AuthenticatedRouteHandler<P, ResBody, ReqBody, ReqQuery, TReq>,
+  options: AuthMiddlewareOptions<P, ResBody, ReqBody, ReqQuery, TReq> = {},
+): (
+  req: Request<P, ResBody, ReqBody, ReqQuery>,
+  res: Response<ResBody>,
+  next: NextFunction,
+) => Promise<void> {
   const {
     requireScopes,
     requireRoles,
     authorize,
-    onUnauthorized = respondUnauthorized,
-    onForbidden = respondForbidden as (req: TReq, res: Response) => void,
+    onUnauthorized = respondUnauthorized as (
+      req: Request<P, ResBody, ReqBody, ReqQuery>,
+      res: Response<ResBody>,
+    ) => void,
+    onForbidden = respondForbidden as (req: TReq, res: Response<ResBody>) => void,
     exposeAuthOnLocals = true,
   } = options;
 
-  return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  return async (
+    req: Request<P, ResBody, ReqBody, ReqQuery>,
+    res: Response<ResBody>,
+    next: NextFunction,
+  ): Promise<void> => {
     try {
       if (!isAuthenticatedRequest(req)) {
         onUnauthorized(req, res);
@@ -227,7 +316,9 @@ export function AuthMiddleware<TReq extends AuthenticatedRequest = Authenticated
         return;
       }
 
-      const wrapped = new Error('Unhandled non-error thrown from authenticated route') as ErrorWithStatus;
+      const wrapped = new Error(
+        'Unhandled non-error thrown from authenticated route',
+      ) as ErrorWithStatus;
       wrapped.name = 'AuthMiddlewareUnhandledThrow';
       wrapped.code = 'AUTH_HANDLER_THROW';
       wrapped.statusCode = 500;
