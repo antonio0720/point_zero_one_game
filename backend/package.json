@@ -23,8 +23,6 @@
     "@nestjs/core": "^11.0.3",
     "@nestjs/platform-express": "^11.0.3",
     "@nestjs/typeorm": "^11.0.0",
-    "ajv": "^8.18.0",
-    "ajv-formats": "^3.0.1",
     "bullmq": "^5.70.4",
     "express": "^4.21.2",
     "ioredis": "^5.10.0",
