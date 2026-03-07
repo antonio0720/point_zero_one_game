@@ -1,5 +1,5 @@
 /**
- * pressureJournalEngine.ts — Empire Mode Decision Journal
+ * /Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/frontend/packages/engine/src/game/modes/empire/pressureJournalEngine.ts — Empire Mode Decision Journal
  * Point Zero One · Density6 LLC · Confidential
  *
  * Tracks and categorizes every player decision for the post-run
