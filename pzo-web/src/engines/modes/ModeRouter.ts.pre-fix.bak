@@ -29,7 +29,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import type { RunMode, IGameModeEngine, ModeInitConfig }    from '../core/types';
-import { orchestrator }                                      from '../zero/EngineOrchestrator';
+import { orchestrator }                                      from '../core/EngineOrchestrator';
 import { EmpireEngine }                                      from './EmpireEngine';
 import type { EmpireLoadout }                                from './EmpireEngine';
 import { PredatorEngine }                                    from './PredatorEngine';

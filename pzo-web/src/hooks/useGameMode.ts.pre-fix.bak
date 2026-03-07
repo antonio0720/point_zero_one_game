@@ -20,7 +20,7 @@
 
 import { useState, useCallback, useEffect, useRef } from 'react';
 import type { RunMode, RunOutcome, GameModeState, PZOEvent } from '../engines/core/types';
-import { orchestrator }                              from '../engines/zero/EngineOrchestrator';
+import { orchestrator }                              from '../engines/core/EngineOrchestrator';
 import { globalEventBus }                            from '../engines/core/EventBus';
 import { ModeRouter, createDefaultConfig }           from '../engines/modes/ModeRouter';
 import type { IGameModeEngine }                      from '../engines/core/types';

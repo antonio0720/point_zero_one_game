@@ -15,7 +15,6 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import GoalTemplatePicker from './GoalTemplatePicker';
 import ProfileTemplatePicker from './ProfileTemplatePicker';
-import LobbyChatWidget from '../../../components/chat/LobbyChatWidget';
 const GoalTemplatePickerAny = GoalTemplatePicker as any;
 const ProfileTemplatePickerAny = ProfileTemplatePicker as any;
 
@@ -746,14 +745,6 @@ export default function PlayPage() {
         </div>
 
       </div>
-
-      {/* ── Sovereign Chat — alive from the moment you log in ─────────────── */}
-      <LobbyChatWidget
-        selectedMode={selected}
-        accent={mode.accent}
-        accentRgb={mode.accentRgb}
-      />
-
     </div>
   );
 }
