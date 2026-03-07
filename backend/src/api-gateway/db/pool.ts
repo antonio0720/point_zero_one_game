@@ -1,5 +1,4 @@
 // backend/src/api-gateway/db/pool.ts
-
 import { Pool } from 'pg';
 
 const connectionString =
@@ -18,7 +17,6 @@ const pool = new Pool({
   max: Number(process.env.PG_POOL_MAX ?? 10),
   idleTimeoutMillis: Number(process.env.PG_IDLE_TIMEOUT_MS ?? 30_000),
   connectionTimeoutMillis: Number(process.env.PG_CONNECT_TIMEOUT_MS ?? 5_000),
-  allowExitOnIdle: false,
   ssl:
     process.env.PG_SSL === 'true'
       ? { rejectUnauthorized: process.env.PG_SSL_REJECT_UNAUTHORIZED !== 'false' }

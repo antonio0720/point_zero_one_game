@@ -1,74 +1,133 @@
-/**
- * Institutions Routes for API Gateway
- */
-
-import express from 'express';
-import jwt from 'jsonwebtoken';
-import { verifyToken } from '../auth/jwt-utils';
-import InstitutionsService from '../services/institutions-service';
+import express, { Request, Response } from 'express';
+import Joi from 'joi';
+import { AuthMiddleware } from '../auth/auth.middleware';
+import {
+  InstitutionRecord,
+  InstitutionUpdateInput,
+  PgInstitutionsService,
+} from '../services/institutions.service';
 
 const router = express.Router();
-const institutionsService = new InstitutionsService();
+const institutionsService = new PgInstitutionsService();
 
-// Auth required routes for institutions
-router.get('/:id', async (req, res) => {
-  try {
-    const token = req.headers.authorization?.split(' ')[1];
-    const decodedToken = jwt.verify(token as string, process.env.SECRET_KEY);
-    const userId = decodedToken.id;
+const updateInstitutionSchema = Joi.object<InstitutionUpdateInput>({
+  name: Joi.string().trim().min(1).max(255),
+  slug: Joi.string().trim().lowercase().pattern(/^[a-z0-9-]+$/).min(2).max(120),
+  status: Joi.string().valid('active', 'inactive', 'archived'),
+}).min(1);
 
-    const institutionId = parseInt(req.params.id);
-    const institution = await institutionsService.getInstitutionById(institutionId, userId);
-
-    if (!institution) {
-      return res.status(404).json({ error: 'Institution not found' });
-    }
-
-    res.json(institution);
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Internal Server Error' });
+function parseInstitutionId(value: string): number | null {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return null;
   }
-});
+  return parsed;
+}
 
-router.put('/:id', async (req, res) => {
-  try {
-    const token = req.headers.authorization?.split(' ')[1];
-    const decodedToken = jwt.verify(token as string, process.env.SECRET_KEY);
-    const userId = decodedToken.id;
+router.get(
+  '/:id',
+  AuthMiddleware(async (req: Request, res: Response) => {
+    try {
+      const institutionId = parseInstitutionId(req.params.id);
+      if (!institutionId) {
+        res.status(400).json({ ok: false, error: 'invalid_institution_id' });
+        return;
+      }
 
-    const institutionId = parseInt(req.params.id);
-    const updatedInstitution = await institutionsService.updateInstitutionById(institutionId, req.body, userId);
+      const identityId = req.identityId as string;
+      const institution = await institutionsService.getInstitutionById(
+        institutionId,
+        identityId,
+      );
 
-    if (!updatedInstitution) {
-      return res.status(404).json({ error: 'Institution not found' });
+      if (!institution) {
+        res.status(404).json({ ok: false, error: 'institution_not_found' });
+        return;
+      }
+
+      res.status(200).json({ ok: true, institution });
+    } catch (error) {
+      console.error('institutions_routes:get', error);
+      res.status(500).json({ ok: false, error: 'internal_server_error' });
     }
+  }),
+);
 
-    res.json(updatedInstitution);
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Internal Server Error' });
-  }
-});
+router.put(
+  '/:id',
+  AuthMiddleware(async (req: Request, res: Response) => {
+    try {
+      const institutionId = parseInstitutionId(req.params.id);
+      if (!institutionId) {
+        res.status(400).json({ ok: false, error: 'invalid_institution_id' });
+        return;
+      }
 
-router.delete('/:id', async (req, res) => {
-  try {
-    const token = req.headers.authorization?.split(' ')[1];
-    const decodedToken = jwt.verify(token as string, process.env.SECRET_KEY);
-    const userId = decodedToken.id;
+      const { value, error } = updateInstitutionSchema.validate(req.body ?? {}, {
+        abortEarly: false,
+        stripUnknown: true,
+      });
 
-    const institutionId = parseInt(req.params.id);
-    const deletedInstitutionCount = await institutionsService.deleteInstitutionById(institutionId, userId);
+      if (error) {
+        res.status(400).json({
+          ok: false,
+          error: 'invalid_request_body',
+          details: error.details.map((detail) => detail.message),
+        });
+        return;
+      }
 
-    if (deletedInstitutionCount === 0) {
-      return res.status(404).json({ error: 'Institution not found' });
+      const identityId = req.identityId as string;
+      const updatedInstitution = await institutionsService.updateInstitutionById(
+        institutionId,
+        value,
+        identityId,
+      );
+
+      if (!updatedInstitution) {
+        res.status(404).json({ ok: false, error: 'institution_not_found' });
+        return;
+      }
+
+      res.status(200).json({ ok: true, institution: updatedInstitution });
+    } catch (error) {
+      console.error('institutions_routes:put', error);
+      res.status(500).json({ ok: false, error: 'internal_server_error' });
     }
+  }),
+);
 
-    res.json({ message: 'Institution deleted successfully' });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Internal Server Error' });
-  }
-});
+router.delete(
+  '/:id',
+  AuthMiddleware(async (req: Request, res: Response) => {
+    try {
+      const institutionId = parseInstitutionId(req.params.id);
+      if (!institutionId) {
+        res.status(400).json({ ok: false, error: 'invalid_institution_id' });
+        return;
+      }
+
+      const identityId = req.identityId as string;
+      const deletedCount = await institutionsService.deleteInstitutionById(
+        institutionId,
+        identityId,
+      );
+
+      if (deletedCount === 0) {
+        res.status(404).json({ ok: false, error: 'institution_not_found' });
+        return;
+      }
+
+      res.status(200).json({
+        ok: true,
+        message: 'Institution deleted successfully',
+      });
+    } catch (error) {
+      console.error('institutions_routes:delete', error);
+      res.status(500).json({ ok: false, error: 'internal_server_error' });
+    }
+  }),
+);
 
 export { router as institutionsRoutes };
+export default router;
