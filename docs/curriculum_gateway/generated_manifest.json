@@ -1,0 +1,388 @@
+{
+          "generator": "pzo_curriculum_gateway_generator.py",
+          "version": "1.0",
+          "generated_at": "2026-03-07T14:32:44Z",
+          "file_count": 95,
+          "files": [
+  {
+    "path": "backend/src/api-gateway/middleware/auth/index.ts",
+    "sha256": "9a9efa594480cafb3156d02fd8261a1b0a8abe7bd050611aace4c551bdc05057"
+  },
+  {
+    "path": "backend/src/api-gateway/middleware/auth/types.ts",
+    "sha256": "ee5329b1baad89600fd805872f5e8f8fe8264efa272992cf852f9ab8ed986ee3"
+  },
+  {
+    "path": "backend/src/api-gateway/middleware/auth/require_auth.ts",
+    "sha256": "b675e1fe7ddcae82a6f9c31490bfd07d5d7c1cb8053fccdfc433785c7a2e6e91"
+  },
+  {
+    "path": "backend/src/api-gateway/middleware/auth/resolve_tenant.ts",
+    "sha256": "c80737c8ad140a0b391408f48bdc3cd3f766d0ca4fe4e251cf28f2f8d5ad6e2d"
+  },
+  {
+    "path": "backend/src/api-gateway/middleware/auth/require_scope.ts",
+    "sha256": "f2403f872bb7bfb87d8be80e530256833a1f60d591ec1fcda7077bd1487cdb93"
+  },
+  {
+    "path": "backend/src/api-gateway/middleware/auth/require_institution_access.ts",
+    "sha256": "9caf3ce4d570a4372ef5722d80d22cb4ac262601f153ae6bc4a1f64a3778792e"
+  },
+  {
+    "path": "backend/src/api-gateway/middleware/auth/require_facilitator_or_admin.ts",
+    "sha256": "4678d78ef86c5adadac37ab199b2f494ab7f7ac73c6efd10a8e78526398e0358"
+  },
+  {
+    "path": "backend/src/api-gateway/middleware/observability/correlation_id.ts",
+    "sha256": "684d3e3200774cd52a2c216b6df4702c665574d903ad0ef00a042a723e4b4b1b"
+  },
+  {
+    "path": "backend/src/api-gateway/middleware/observability/logger.ts",
+    "sha256": "62672c316ee45b5c909b688e413a70b0bf59cbcaca5a6fedb583ba4c11deb1a8"
+  },
+  {
+    "path": "backend/src/api-gateway/middleware/observability/metrics.ts",
+    "sha256": "fdd6f41b875c899cdceba77486b3d799888c3b5d12ee05f1ccff61d23564edd3"
+  },
+  {
+    "path": "backend/src/api-gateway/middleware/observability/index.ts",
+    "sha256": "322be69d0e0639456dfa3f2d1ec0ab3e1b0fecfc9dbf5c2194c896ee3996571f"
+  },
+  {
+    "path": "backend/src/api-gateway/middleware/resilience/circuit_breaker.ts",
+    "sha256": "f83813bc0c4f598407a4942e1c7c8260fd3192d6b899d6a13e40a685e4b7f593"
+  },
+  {
+    "path": "backend/src/api-gateway/middleware/resilience/timeout.ts",
+    "sha256": "28f6983cff666d379d6b9897cd42d1f746ec74b4c68c2ac5617ca8f42a425ad5"
+  },
+  {
+    "path": "backend/src/api-gateway/middleware/resilience/backpressure.ts",
+    "sha256": "11d22281a9581ba00dd4c87ae872b05bcf56cc500024456a902dc2f67d6b1461"
+  },
+  {
+    "path": "backend/src/api-gateway/middleware/resilience/index.ts",
+    "sha256": "bdb9ca03beaea18b3efd808e847b70780377131c62a07d96863c623f585952a9"
+  },
+  {
+    "path": "backend/src/api-gateway/middleware/security/cors.ts",
+    "sha256": "790fa14b5d28d4367b88b4fc9ba7f2b5b482d628e9847db4a7917b08544f5c25"
+  },
+  {
+    "path": "backend/src/api-gateway/middleware/security/security_headers.ts",
+    "sha256": "f6251d8e5aef9a8d7a24bd82c2c4fc76149e691606ee813b5882047adbe4738b"
+  },
+  {
+    "path": "backend/src/api-gateway/middleware/security/distributed_rate_limit.ts",
+    "sha256": "d22d7f21ac961e797dc4bf9f11d8d67c0510e63e35450db434c2e26f2032d809"
+  },
+  {
+    "path": "backend/src/api-gateway/middleware/security/index.ts",
+    "sha256": "14e8b5008860e7de747259f5ad7788eeb80b859cc2751abf2641a8c4e7814e47"
+  },
+  {
+    "path": "backend/src/api-gateway/middleware/errors/error_handler.ts",
+    "sha256": "b204adad6146526879e61c9c9a50264b1801bde06612a047ca55d225de80fd6a"
+  },
+  {
+    "path": "backend/src/api-gateway/middleware/errors/index.ts",
+    "sha256": "f1b1d3b18dfbbf671e7f34d851d7a81ee51aa9f7de8a8478bc80fde64d138785"
+  },
+  {
+    "path": "backend/src/api-gateway/middleware/idempotency/idempotency.ts",
+    "sha256": "0f403bf4212d3c7cc3a29e5c322591ea846058d1cfee1f3cd65b02f9b4edc20e"
+  },
+  {
+    "path": "backend/src/api-gateway/middleware/idempotency/index.ts",
+    "sha256": "9c62b6153e805fa8382cd5f3e3c73f36639f8532483dbd6606ea2bfb5412fddf"
+  },
+  {
+    "path": "backend/src/api-gateway/middleware/feature_flags/feature_flags.ts",
+    "sha256": "6cf2bf1dc1743e44148e820186c9c5ccc3c6b442d4f7f6d845d4600d5101073b"
+  },
+  {
+    "path": "backend/src/api-gateway/middleware/feature_flags/index.ts",
+    "sha256": "d3c9ac87c29cf107de2bd9f65c9d042f1bec33ef96a1f38eccb700e8b4a0dea0"
+  },
+  {
+    "path": "backend/src/api-gateway/middleware/audit/audit_events.ts",
+    "sha256": "ce4c91dd29fd82b5297e229962519e9949a649a302f04dbc3c337b178568ae42"
+  },
+  {
+    "path": "backend/src/api-gateway/middleware/audit/audit_emitter.ts",
+    "sha256": "39587546345ae07984a629b0786ce225bfffb06353d967759e3211ffbf2c2149"
+  },
+  {
+    "path": "backend/src/api-gateway/middleware/audit/index.ts",
+    "sha256": "d0b94e1647f2f20a21f3b5a57a37003624e9e29e4b955ce4730162d7c79c9a1c"
+  },
+  {
+    "path": "backend/src/api-gateway/middleware/validation/schema_validator.ts",
+    "sha256": "47be92f4e131be82e7c6638600278e44108c74fb3ebe27be182f9293e5cbc08b"
+  },
+  {
+    "path": "backend/src/api-gateway/middleware/validation/index.ts",
+    "sha256": "d4352d9af2c42750c5dc2ea09870aca779029860a43db644dee06d6aaad0ea07"
+  },
+  {
+    "path": "backend/src/api-gateway/middleware/privacy/privacy_guard.ts",
+    "sha256": "d29455646caf26e0f028d1aa35bfcee559740acb7403f126edd5a8e30dc18604"
+  },
+  {
+    "path": "backend/src/api-gateway/middleware/privacy/index.ts",
+    "sha256": "059b20ee2816cb08911388df434faf169df459e12cf8f1a2bf1245683ab438ad"
+  },
+  {
+    "path": "backend/src/api-gateway/contracts/curriculum/gateway_response.ts",
+    "sha256": "6182145c0b5d2cd2aaf1c1bd409dee9f4b4ca998455069e4fab00a83ce205ff5"
+  },
+  {
+    "path": "backend/src/api-gateway/contracts/curriculum/institution.dto.ts",
+    "sha256": "007431a3537286a518329af1f7543f2771722f40c2fb74e253316dc27d81bee8"
+  },
+  {
+    "path": "backend/src/api-gateway/contracts/curriculum/cohort.dto.ts",
+    "sha256": "2613fb9e7fdc90607e77d7a4f97236ac4ea580bee5dc3ca873cccd526cbcbcf2"
+  },
+  {
+    "path": "backend/src/api-gateway/contracts/curriculum/pack.dto.ts",
+    "sha256": "bf4a714d4efd10269d47933ad0de050dd9e8617f141f0b7215f5f1597ac9ab11"
+  },
+  {
+    "path": "backend/src/api-gateway/contracts/curriculum/benchmark.dto.ts",
+    "sha256": "760ed024bc2ec60d48889599b576c7c3e907c9adc9133f6d5d64f3241273b840"
+  },
+  {
+    "path": "backend/src/api-gateway/contracts/curriculum/index.ts",
+    "sha256": "9fa0d4ca433c16cff85d4538c8a4377be8e88f91120c6e03f5a7f37c0bedf697"
+  },
+  {
+    "path": "backend/src/api-gateway/adapters/licensing_control_plane.adapter.ts",
+    "sha256": "8a477fec0d0ad67b444edc454f30b8d192e614e3179eba00e232ce45e965f0ed"
+  },
+  {
+    "path": "backend/src/api-gateway/adapters/stripe_billing.adapter.ts",
+    "sha256": "29fa6fe64d5937240d7f8919820dc8b45603f62049756d448cbe6dea6b3a12c0"
+  },
+  {
+    "path": "backend/src/api-gateway/adapters/index.ts",
+    "sha256": "c9a500ee73081200efec6251101c98a4f9944cb3abe41ac4a0466c12d8daeb54"
+  },
+  {
+    "path": "backend/src/api-gateway/routes/curriculum/index.ts",
+    "sha256": "53341683e20cae000c211ec6fc134b18cf7eb72e3e99142377b5b3d7f41991f9"
+  },
+  {
+    "path": "backend/src/api-gateway/routes/curriculum/institutions.routes.ts",
+    "sha256": "6cb5bd8addd9c5a14e652274549d83d17ac19f68fbccc8426736279879225f6e"
+  },
+  {
+    "path": "backend/src/api-gateway/routes/curriculum/cohorts.routes.ts",
+    "sha256": "e2a78fe5a8f07e8e211ec45acbcfb3358c454fde747f1d4f9a335ce58e76c37a"
+  },
+  {
+    "path": "backend/src/api-gateway/routes/curriculum/facilitators.routes.ts",
+    "sha256": "b3ce738dd8df58247b505ca27aae53427f89e720c19a37ed0910ba934e48b8bb"
+  },
+  {
+    "path": "backend/src/api-gateway/routes/curriculum/rosters.routes.ts",
+    "sha256": "8eb3a5e8b3849a3817f72388cebc05cc99177cd093286a814565e2e15c7b05af"
+  },
+  {
+    "path": "backend/src/api-gateway/routes/curriculum/packs.routes.ts",
+    "sha256": "d9c963341edaafaf5de04c7666763e7a1db5b70af92ef5ad050899fdbbbd4f9a"
+  },
+  {
+    "path": "backend/src/api-gateway/routes/curriculum/assignments.routes.ts",
+    "sha256": "8280de665c60c9f41c2b5806dd4cf13ecb7325a3de7de8107fab751e908f60d8"
+  },
+  {
+    "path": "backend/src/api-gateway/routes/curriculum/benchmarks.routes.ts",
+    "sha256": "d2cd140b215ac82a315b563a45c8229010f5eb81b3e3f643df66c9c04aa54bd4"
+  },
+  {
+    "path": "backend/src/api-gateway/routes/curriculum/guides.routes.ts",
+    "sha256": "8900bffb72dad6f0097e300ae26ed283880daad4910d929df68a1e8e6c1d8685"
+  },
+  {
+    "path": "backend/src/api-gateway/routes/curriculum/reports.routes.ts",
+    "sha256": "3c77e94f220ddc7b3df7865cd1ff7f7b4b54b115ef82e5f0e696bd6a3197d903"
+  },
+  {
+    "path": "backend/src/api-gateway/routes/curriculum/exports.routes.ts",
+    "sha256": "d3b86211d64cb500a7fd41f5f486e4d85db698eecad9061d4a9b78724d38df71"
+  },
+  {
+    "path": "backend/src/api-gateway/routes/curriculum/public.routes.ts",
+    "sha256": "0f1e4f853765bbd738be6429ef310779915d59accd972eda3cc0f2654d7ca3bf"
+  },
+  {
+    "path": "backend/src/api-gateway/routes/curriculum/webhooks.routes.ts",
+    "sha256": "5b10eb4c5f2c4cfb949757117f46c8257c46ed883aaea21c90a08c79484fb6f6"
+  },
+  {
+    "path": "backend/src/api-gateway/routes/curriculum/branding.routes.ts",
+    "sha256": "fb4f08e9df4a35414ce761b2d31d946aec7955c58ecef157f4423077dcc97b38"
+  },
+  {
+    "path": "backend/src/api-gateway/routes/health.routes.ts",
+    "sha256": "062a20ff079f330d42e5d818b13d75a1de934fccb153fea42713f4538d822972"
+  },
+  {
+    "path": "backend/src/queues/curriculum/index.ts",
+    "sha256": "3383a598d28acba30d3f580a76f7603ed4b1353f651d05e0bde044d55974fba9"
+  },
+  {
+    "path": "backend/src/queues/curriculum/roster_import.worker.ts",
+    "sha256": "cbfb7cd74f85bca2242ca3df15b89aab6508c29b0c01db39224572e40f0f8c78"
+  },
+  {
+    "path": "backend/src/queues/curriculum/report_generation.worker.ts",
+    "sha256": "c1333f617e0e3d5eb5f98dbbe717409351bea60b1eae28e451354ed5440f03e5"
+  },
+  {
+    "path": "backend/src/queues/curriculum/export_generation.worker.ts",
+    "sha256": "f308b352f9217d1e640e919949a18e096251adfe13957e0ccdf519df6e50cda8"
+  },
+  {
+    "path": "backend/src/queues/curriculum/benchmark_scoring.worker.ts",
+    "sha256": "40021bd90d43af36762c406ba5e4b8f5395801aaff354984b5ba3782f7185069"
+  },
+  {
+    "path": "backend/src/queues/curriculum/webhook_delivery.worker.ts",
+    "sha256": "0dd5db66a977b24cc2a721b79229d20bcde1b81af32660ddbc81b931a6adf8a8"
+  },
+  {
+    "path": "backend/src/queues/curriculum/measurement_rollup.worker.ts",
+    "sha256": "e00b6492d4e4c62438fbddec885e81cd53c681570f45abed7a578356c6b465ba"
+  },
+  {
+    "path": "backend/src/queues/curriculum/audit_events.worker.ts",
+    "sha256": "99c62f4a66d64181e9a08d1ec845a5030171336116f14f4c5e8c8c9ff9575957"
+  },
+  {
+    "path": "migrations/curriculum/001_create_institutions.sql",
+    "sha256": "bd6b938900fee45099b6f9b8876ee63f7f55a0f2623668a09cff60fec593b1a9"
+  },
+  {
+    "path": "migrations/curriculum/002_create_institution_branding.sql",
+    "sha256": "bd0c16db012d71428d2cdaef708fda9de80795c57217da903cde2d0ada2e968a"
+  },
+  {
+    "path": "migrations/curriculum/003_create_org_admins.sql",
+    "sha256": "5a49a0c7b97e807c7cda69aa7edbc80a3b5bb4006b3c4b40342a1fe8e3535829"
+  },
+  {
+    "path": "migrations/curriculum/004_create_facilitators.sql",
+    "sha256": "753c3840fc1a4682acc2f0d2f8f331ef190fd4d697f620f0ac9729f26f488a30"
+  },
+  {
+    "path": "migrations/curriculum/005_create_cohorts.sql",
+    "sha256": "2bde908ec792ecb57e33a4a11177a4cb6bb90db789f7819afe33490caf1dadeb"
+  },
+  {
+    "path": "migrations/curriculum/006_create_learners.sql",
+    "sha256": "481d7fda97476c37c4e054d35e9aa9d9d1bec6451ff6218d703f7db933b2090d"
+  },
+  {
+    "path": "migrations/curriculum/007_create_roster_imports.sql",
+    "sha256": "874b11cb7dfea3e31b3c600af00c3c672b479729cc9a19602f6773bf1693d13e"
+  },
+  {
+    "path": "migrations/curriculum/008_create_curriculum_packs.sql",
+    "sha256": "973bb40f7064b31c291d14a676fee3ac7232a2c70d69567a42d2a95112009bb5"
+  },
+  {
+    "path": "migrations/curriculum/009_create_pack_versions.sql",
+    "sha256": "c9852b8e3aafbd6730a2fe50c4f5eebd5a7d4f981c72a37b47e271ec2f6654b5"
+  },
+  {
+    "path": "migrations/curriculum/010_create_scenario_bindings.sql",
+    "sha256": "c7a303e69fdd3f4609a6e9f9bccb4e87be5dee447e3b36a63638737d36be496e"
+  },
+  {
+    "path": "migrations/curriculum/011_create_skill_rubrics.sql",
+    "sha256": "f3670e9e4c15f1d2e977493e2d09a9637532a120199f10ef8d5bd0b804449dba"
+  },
+  {
+    "path": "migrations/curriculum/012_create_benchmark_definitions.sql",
+    "sha256": "06dc0107662e66209b8164f6b00c0185027b0db4eb8ad83fd6638271bf73e301"
+  },
+  {
+    "path": "migrations/curriculum/013_create_benchmark_windows.sql",
+    "sha256": "4942ffaefa778a2c4154f642deccdf9451ec8630f87d38c65fe3b9a95ef0ad1b"
+  },
+  {
+    "path": "migrations/curriculum/014_create_benchmark_attempts.sql",
+    "sha256": "712e45de058fae98adccad3884b37e3da66716a6d5f7fc5eaa2d44d7abebb959"
+  },
+  {
+    "path": "migrations/curriculum/015_create_cohort_assignments.sql",
+    "sha256": "bb30dec683e309006dd06e9de089657ba59bd7034128665b4d430b8fe0670d49"
+  },
+  {
+    "path": "migrations/curriculum/016_create_facilitator_guides.sql",
+    "sha256": "70a047cb225b92adae20dcfd5873157c6a86be02496dc4e76f60df235c27c318"
+  },
+  {
+    "path": "migrations/curriculum/017_create_debrief_prompt_bank.sql",
+    "sha256": "97e1a28dc7b10d6edb0dbd9188036381ce5fa411e8833d487da087e9cc6e85cb"
+  },
+  {
+    "path": "migrations/curriculum/018_create_measurement_snapshots.sql",
+    "sha256": "024bd0e264d6749b6f703290e8da55dbc32a305d596219fada37f15f6d45b997"
+  },
+  {
+    "path": "migrations/curriculum/019_create_report_jobs.sql",
+    "sha256": "70bd138d67cf0afc45cbffa424e2deb9d9b2dd28f095eb62e5e019a61a335a43"
+  },
+  {
+    "path": "migrations/curriculum/020_create_export_jobs.sql",
+    "sha256": "7b4c8c7dc29f95bd194ed635586a16938264ae07ec7a5820ee1301798a915359"
+  },
+  {
+    "path": "migrations/curriculum/021_create_webhook_subscriptions.sql",
+    "sha256": "b642ef2696fc6a2646044fb893101475a6c6da8945743b4a2eca55d30037e4be"
+  },
+  {
+    "path": "migrations/curriculum/022_create_audit_log.sql",
+    "sha256": "07fc915ffbac31609f1e5cb9823df86a4d3cb1a34c8a31a9f796a13614320b73"
+  },
+  {
+    "path": "migrations/curriculum/023_create_org_entitlements.sql",
+    "sha256": "e70602152c479ee61a27daae03f497ba32dfc0b59549410c148e45e0b95b7177"
+  },
+  {
+    "path": "migrations/curriculum/024_create_entitlement_receipts.sql",
+    "sha256": "43b8476847550f173aa1f31ff5564d21e7df93d4cb1c9fc29ca1acb3d76f5ca9"
+  },
+  {
+    "path": "migrations/curriculum/025_create_partners.sql",
+    "sha256": "411ce0e051e9adcad4b9f444f8e7b52f8b79f16a414686eb67b93bf0b6ae8319"
+  },
+  {
+    "path": "openapi/curriculum.v1.yaml",
+    "sha256": "c551c6010958c5b82d15006e051b04ce37714a034a5a1c5fe1f20592e3e466d6"
+  },
+  {
+    "path": "backend/test/curriculum_gateway/fixtures/institution.fixture.ts",
+    "sha256": "93f51c11853c92efde631b26316157f9329fe23ed874eeb193f84ebcc209c71b"
+  },
+  {
+    "path": "backend/test/curriculum_gateway/auth.test.ts",
+    "sha256": "026ee851759d43d70ac9696202f248ef8bddc1b41a7b1469c9decb912979f9b9"
+  },
+  {
+    "path": "backend/test/curriculum_gateway/schema_validation.test.ts",
+    "sha256": "a2b11298a2082662175297479656373a6e70a56ce4e9da115c085acce80b1f41"
+  },
+  {
+    "path": "docs/curriculum_gateway/architecture.md",
+    "sha256": "7688da10628391a4fb17b444221a936e7259c4a485ca025b18e1aecc09456cb0"
+  },
+  {
+    "path": "backend/src/api-gateway/routes/curriculum_routes.ts",
+    "sha256": "380c987875a54535ad39cf4eecd46ed669c40960df7b0f9fc796f93f472c2117"
+  }
+]
+        }

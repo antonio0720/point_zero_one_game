@@ -67,7 +67,6 @@ import { DeckBuilder, DrawCursor }       from './DeckBuilder';
 import { HandManager, DiscardReason }    from './HandManager';
 import { ModeOverlayEngine }             from './ModeOverlayEngine';
 import { TimingValidator }               from './TimingValidator';
-import type { TimingValidatorContext }   from './TimingValidator';
 import { CardEffectResolver }            from './CardEffectResolver';
 import { DecisionWindowManager }         from './DecisionWindowManager';
 import { ForcedCardQueue }               from './ForcedCardQueue';
@@ -261,30 +260,62 @@ export class CardEngine {
 
   public endRun(): void {
     this.isRunning = false;
-    this.forcedCardQueue.destroy();
-    this.unsubCounterWindow?.();
-    this.unsubRescueWindow?.();
-    this.windowManager.reset();
+
+    try { this.forcedCardQueue?.destroy?.(); } catch {}
+    try { this.unsubCounterWindow?.(); } catch {}
+    try { this.unsubRescueWindow?.(); } catch {}
+    try { this.windowManager?.reset?.(); } catch {}
+
+    this.unsubCounterWindow = null;
+    this.unsubRescueWindow = null;
+
+    this.counterWindowOpen = false;
+    this.counterWindowAttackId = null;
+    this.counterWindowEndMs = 0;
+
+    this.rescueWindowOpen = false;
+    this.rescueWindowTeammate = null;
+    this.rescueWindowEndMs = 0;
+
+    this.phaseBoundaryWindow = null;
+    this.sovereigntyWindowOpen = false;
+
     this._health = EngineHealth.REGISTERED;
   }
 
   public reset(): void {
-    this.handManager.reset();
-    this.windowManager.reset();
-    this.forcedCardQueue.reset();
-    this.decisionsThisTick    = [];
-    this.isRunning            = false;
-    this.currentTick          = 0;
-    this.lastTickMs           = 0;
-    this.counterWindowOpen    = false;
-    this.rescueWindowOpen     = false;
-    this.phaseBoundaryWindow  = null;
+    try { this.handManager?.reset?.(); } catch {}
+    try { this.windowManager?.reset?.(); } catch {}
+    try { this.forcedCardQueue?.reset?.(); } catch {}
+
+    try { this.unsubCounterWindow?.(); } catch {}
+    try { this.unsubRescueWindow?.(); } catch {}
+
+    this.unsubCounterWindow = null;
+    this.unsubRescueWindow = null;
+
+    this.decisionsThisTick = [];
+    this.isRunning = false;
+    this.currentTick = 0;
+    this.lastTickMs = 0;
+
+    this.counterWindowOpen = false;
+    this.counterWindowAttackId = null;
+    this.counterWindowEndMs = 0;
+
+    this.rescueWindowOpen = false;
+    this.rescueWindowTeammate = null;
+    this.rescueWindowEndMs = 0;
+
+    this.phaseBoundaryWindow = null;
     this.sovereigntyWindowOpen = false;
-    this.battleBudget         = 0;
+
+    this.battleBudget = 0;
     this.defectionStepHistory = [];
-    this.lastDefectionTick    = -1;
-    this.lastPlayedCard       = null;
-    this._health              = EngineHealth.REGISTERED;
+    this.lastDefectionTick = -1;
+    this.lastPlayedCard = null;
+
+    this._health = EngineHealth.REGISTERED;
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -633,7 +664,7 @@ export class CardEngine {
     this.handManager.injectCard(patched);
   }
 
-  private buildValidatorContext(): TimingValidatorContext {
+  private buildValidatorContext(): any {
     return {
       mode:                  this.mode,
       currentTick:           this.currentTick,

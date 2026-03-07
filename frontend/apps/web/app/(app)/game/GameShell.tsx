@@ -1,3 +1,5 @@
+///Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/frontend/apps/web/app/(app)/game/GameShell.tsx
+
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
@@ -68,29 +70,41 @@ function useTickLoop(): void {
     };
 
     rafRef.current = requestAnimationFrame(loop);
-    return () => cancelAnimationFrame(rafRef.current);
+
+    return () => {
+      cancelAnimationFrame(rafRef.current);
+    };
   }, [runPhase]);
 }
 
 function renderMode(mode: RunMode) {
   switch (mode) {
-    case 'solo':
-      return <EmpireGameScreen />;
-    case 'asymmetric-pvp':
-      return <PredatorGameScreen />;
-    case 'co-op':
-      return <SyndicateGameScreen />;
-    case 'ghost':
-      return <PhantomGameScreen />;
-    default:
-      return <EmpireGameScreen />;
+    case 'solo': {
+      const C = EmpireGameScreen as any;
+      return <C />;
+    }
+    case 'asymmetric-pvp': {
+      const C = PredatorGameScreen as any;
+      return <C />;
+    }
+    case 'co-op': {
+      const C = SyndicateGameScreen as any;
+      return <C />;
+    }
+    case 'ghost': {
+      const C = PhantomGameScreen as any;
+      return <C />;
+    }
+    default: {
+      const C = EmpireGameScreen as any;
+      return <C />;
+    }
   }
 }
 
 export default function GameShell({ runContext, onRunEnd, onBackToLobby }: GameShellProps) {
   const [ready, setReady] = useState(false);
   const [bootError, setBootError] = useState<string | null>(null);
-  const initRef = useRef(false);
   const notifiedEndRef = useRef(false);
 
   const runPhase = useRunStore((s) => s.runPhase);
@@ -99,13 +113,34 @@ export default function GameShell({ runContext, onRunEnd, onBackToLobby }: GameS
   useTickLoop();
 
   useEffect(() => {
-    if (initRef.current) return;
-    initRef.current = true;
+    let disposed = false;
+
+    notifiedEndRef.current = false;
+    setReady(false);
+    setBootError(null);
 
     try {
+      /**
+       * Fix 3:
+       * Bootstrap wiring first so the module is initialized for this mount/HMR cycle.
+       * If we reset the orchestrator, it clears EventBus subscribers.
+       * Therefore, always bootstrap again immediately after reset.
+       */
+      bootstrapEngine({ force: true });
+
       useEngineStore.getState().resetAllSlices();
       useRunStore.getState().reset();
-      orchestrator.reset();
+
+      try {
+        orchestrator.reset();
+      } catch (resetError) {
+        console.warn('[GameShell] orchestrator.reset() failed during boot reset:', resetError);
+      }
+
+      /**
+       * Re-bootstrap AFTER reset because reset() wipes EventBus subscribers.
+       * This is the critical ordering fix.
+       */
       bootstrapEngine({ force: true });
 
       orchestrator.startRun({
@@ -118,18 +153,23 @@ export default function GameShell({ runContext, onRunEnd, onBackToLobby }: GameS
         engineVersion: '4.0.0',
       } as any);
 
-      setReady(true);
+      if (!disposed) {
+        setReady(true);
+      }
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       console.error('[GameShell] startRun failed:', e);
-      setBootError(message);
+      if (!disposed) {
+        setBootError(message);
+        setReady(false);
+      }
     }
 
     return () => {
+      disposed = true;
+
       try {
-        useEngineStore.getState().resetAllSlices();
-        useRunStore.getState().reset();
-        orchestrator.reset();
+        void orchestrator.endRun('ABANDONED' as any);
       } catch {
         // ignore teardown errors during route transitions / HMR
       }
@@ -144,13 +184,37 @@ export default function GameShell({ runContext, onRunEnd, onBackToLobby }: GameS
 
   if (bootError) {
     return (
-      <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', background: '#030308', color: '#F5C842', fontFamily: 'monospace' }}>
+      <div
+        style={{
+          minHeight: '100vh',
+          display: 'grid',
+          placeItems: 'center',
+          background: '#030308',
+          color: '#F5C842',
+          fontFamily: 'monospace',
+        }}
+      >
         <div style={{ maxWidth: 760, padding: 24, textAlign: 'center' }}>
-          <div style={{ fontSize: 12, letterSpacing: '0.3em', marginBottom: 16 }}>ENGINE BOOT FAILED</div>
-          <div style={{ fontSize: 13, lineHeight: 1.6, color: '#F0F0FF', opacity: 0.9 }}>{bootError}</div>
+          <div style={{ fontSize: 12, letterSpacing: '0.3em', marginBottom: 16 }}>
+            ENGINE BOOT FAILED
+          </div>
+          <div style={{ fontSize: 13, lineHeight: 1.6, color: '#F0F0FF', opacity: 0.9 }}>
+            {bootError}
+          </div>
           <button
             onClick={onBackToLobby}
-            style={{ marginTop: 24, padding: '10px 18px', borderRadius: 10, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.10)', color: '#F5C842', fontSize: 11, cursor: 'pointer', letterSpacing: '0.15em', textTransform: 'uppercase' }}
+            style={{
+              marginTop: 24,
+              padding: '10px 18px',
+              borderRadius: 10,
+              background: 'rgba(255,255,255,0.06)',
+              border: '1px solid rgba(255,255,255,0.10)',
+              color: '#F5C842',
+              fontSize: 11,
+              cursor: 'pointer',
+              letterSpacing: '0.15em',
+              textTransform: 'uppercase',
+            }}
           >
             Back To Lobby
           </button>
@@ -161,7 +225,16 @@ export default function GameShell({ runContext, onRunEnd, onBackToLobby }: GameS
 
   if (!ready) {
     return (
-      <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', background: '#030308', color: '#F5C842', fontFamily: 'monospace' }}>
+      <div
+        style={{
+          minHeight: '100vh',
+          display: 'grid',
+          placeItems: 'center',
+          background: '#030308',
+          color: '#F5C842',
+          fontFamily: 'monospace',
+        }}
+      >
         <div style={{ fontSize: 11, letterSpacing: '0.3em' }}>STARTING ENGINE...</div>
       </div>
     );

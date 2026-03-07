@@ -1,0 +1,136 @@
+openapi: 3.1.0
+info:
+  title: Point Zero One — Curriculum Gateway API
+  version: 1.0.0
+  description: |
+    B2B curriculum gateway for institutional delivery of Point Zero One financial
+    literacy simulation. Supports cohort management, benchmark administration,
+    measurement/reporting, and facilitator tooling.
+  contact:
+    name: Density6 LLC
+    url: https://pointzeroonegame.com
+servers:
+  - url: https://pointzeroonegame.com/api/v1/curriculum
+    description: Production
+  - url: http://localhost:3000/api/v1/curriculum
+    description: Local development
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    GatewayResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        requestId:
+          type: string
+          format: uuid
+        data:
+          type: object
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+        meta:
+          type: object
+          properties:
+            page:
+              type: integer
+            pageSize:
+              type: integer
+            total:
+              type: integer
+            hasMore:
+              type: boolean
+
+security:
+  - bearerAuth: []
+
+paths:
+  /institutions:
+    post:
+      summary: Create institution
+      tags: [Institutions]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, slug]
+              properties:
+                name:
+                  type: string
+                slug:
+                  type: string
+      responses:
+        '201':
+          description: Institution created
+        '400':
+          description: Validation error
+        '401':
+          description: Unauthorized
+    get:
+      summary: List institutions
+      tags: [Institutions]
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+        - name: pageSize
+          in: query
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: List of institutions
+  /cohorts:
+    post:
+      summary: Create cohort
+      tags: [Cohorts]
+      responses:
+        '201':
+          description: Cohort created
+    get:
+      summary: List cohorts
+      tags: [Cohorts]
+      responses:
+        '200':
+          description: List of cohorts
+  /packs:
+    get:
+      summary: List curriculum packs
+      tags: [Packs]
+      responses:
+        '200':
+          description: List of packs
+  /benchmarks:
+    post:
+      summary: Create benchmark definition
+      tags: [Benchmarks]
+      responses:
+        '201':
+          description: Benchmark created
+  /reports:
+    post:
+      summary: Request report generation
+      tags: [Reports]
+      responses:
+        '202':
+          description: Report generation started
+  /exports:
+    post:
+      summary: Request data export
+      tags: [Exports]
+      responses:
+        '202':
+          description: Export generation started

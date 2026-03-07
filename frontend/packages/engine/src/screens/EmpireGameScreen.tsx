@@ -461,7 +461,31 @@ const IsolationTaxWidget = memo(function IsolationTaxWidget({
 
 // ── Journal feed ──────────────────────────────────────────────────────────────
 
-interface JournalEntry { id: string; decisionTag: string; cardTitle: string; incomeDelta: number; tick: number; }
+interface JournalEntry {
+  id: string;
+  decisionTag: string;
+  cardTitle: string;
+  incomeDelta: number;
+  tick: number;
+}
+
+const EMPTY_JOURNAL_ENTRIES = Object.freeze([]) as readonly JournalEntry[];
+
+const EMPTY_INJECTED_CARDS = Object.freeze([]) as readonly {
+  id: string;
+  cardName: string;
+  ticksLeft: number;
+  isPersistent: boolean;
+}[];
+
+const DEFAULT_EMPIRE_BLEED = Object.freeze({ active: false });
+
+const selectEmpireBleed = (s: any) => s.empire?.bleed ?? DEFAULT_EMPIRE_BLEED;
+const selectJournalEntries = (s: any) => s.empire?.journal?.entries ?? EMPTY_JOURNAL_ENTRIES;
+const selectInjectedCards = (s: any) => s.empire?.injectedCards ?? EMPTY_INJECTED_CARDS;
+const selectJournalQuality = (s: any) => s.empire?.journal?.aggregateQuality ?? 0;
+const selectIsolationTaxPaid = (s: any) => s.empire?.totalIsolationTaxPaid ?? 0;
+const selectTotalSpend = (s: any) => s.empire?.totalSpend ?? 0;
 
 const JournalFeed = memo(function JournalFeed({ entries }: { entries: JournalEntry[] }) {
   const recent = useMemo(() => {
@@ -483,12 +507,18 @@ const JournalFeed = memo(function JournalFeed({ entries }: { entries: JournalEnt
         const label = tag ?? 'UNKNOWN';
         return (
           <div key={e.id} className="egs-journal-row">
-            <span className="egs-decision-tag"
-              style={{ background: `${color}20`, color, border: `1px solid ${color}50` }}>
+            <span
+              className="egs-decision-tag"
+              style={{ background: `${color}20`, color, border: `1px solid ${color}50` }}
+            >
               {icon} {label}
             </span>
-            <span style={{ color: C.textSub, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-              title={e.cardTitle}>{e.cardTitle}</span>
+            <span
+              style={{ color: C.textSub, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+              title={e.cardTitle}
+            >
+              {e.cardTitle}
+            </span>
             <span style={{ color: e.incomeDelta >= 0 ? C.green : C.red, flexShrink: 0 }}>
               {e.incomeDelta >= 0 ? '+' : ''}{fmt(e.incomeDelta)}
             </span>
@@ -506,73 +536,84 @@ export const EmpireGameScreen = memo(function EmpireGameScreen({
   onCardCounterplay,
   onIgnoreCard,
 }: EmpireGameScreenProps) {
-
   // ── Game loop (starts/stops automatically with runPhase) ──────────────────
   const { tick, runPhase } = useGameLoop();
 
   // ── Financial state from run store ────────────────────────────────────────
-  const cash           = useRunStore(s => s.cashBalance    ?? 0);
-  const netWorth       = useRunStore(s => s.netWorth      ?? 0);
-  const income         = useRunStore(s => s.monthlyIncome  ?? 0);
-  const expenses       = useRunStore(s => s.monthlyExpenses ?? 0);
-  const equityHistory  = useMemo(() => [] as number[], []);
-  const regime         = 'NEUTRAL' as MarketRegime;
-  const intelligence   = useMemo(() => ({ level: 0 }) as IntelligenceState, []);
+  const cash          = useRunStore((s) => s.cashBalance ?? 0);
+  const netWorth      = useRunStore((s) => s.netWorth ?? 0);
+  const income        = useRunStore((s) => s.monthlyIncome ?? 0);
+  const expenses      = useRunStore((s) => s.monthlyExpenses ?? 0);
+  const equityHistory = useMemo(() => [] as number[], []);
+  const regime        = 'NEUTRAL' as MarketRegime;
+  const intelligence  = useMemo(() => ({ level: 0 } as unknown as IntelligenceState), []);
 
   // ── Time engine ───────────────────────────────────────────────────────────
-  const totalTicks  = useEngineStore(s => s.time.seasonTickBudget ?? 720);
-  const freezeTicks = useEngineStore(s => s.time.holdsRemaining  ?? 0);
+  const totalTicks  = useEngineStore((s) => s.time.seasonTickBudget ?? 720);
+  const freezeTicks = useEngineStore((s) => s.time.holdsRemaining ?? 0);
 
   // ── Pressure engine ───────────────────────────────────────────────────────
-  const pressureScore = useEngineStore(s => s.pressure.score ?? 0);
+  const pressureScore = useEngineStore((s) => s.pressure.score ?? 0);
 
   // ── Tension engine ────────────────────────────────────────────────────────
-  const tensionScore = useEngineStore(s => s.tension.score ?? 0);
+  const tensionScore = useEngineStore((s) => s.tension.score ?? 0);
 
   // ── Shield engine ─────────────────────────────────────────────────────────
-  const shields = useEngineStore(s => s.shield.overallIntegrityPct ?? 100);
+  const shields = useEngineStore((s) => s.shield.overallIntegrityPct ?? 100);
 
   // ── Battle engine ─────────────────────────────────────────────────────────
-  const haterHeat = useEngineStore(s => s.battle.haterHeat ?? 0);
+  const haterHeat = useEngineStore((s) => s.battle.haterHeat ?? 0);
 
   // ── Cascade engine ────────────────────────────────────────────────────────
-  const cascadeChains = useEngineStore(s => s.cascade.activeNegativeChains?.length ?? 0);
+  const cascadeChains = useEngineStore((s) => s.cascade.activeNegativeChains?.length ?? 0);
 
   // ── Sovereignty engine ────────────────────────────────────────────────────
-  const sovereigntyProgress = useEngineStore(s => s.sovereignty.sovereigntyScore ?? 0);
-  const cordScore           = useEngineStore(s => s.sovereignty.cordScore ?? 0);
+  const sovereigntyProgress = useEngineStore((s) => s.sovereignty.sovereigntyScore ?? 0);
+  const cordScore           = useEngineStore((s) => (s.sovereignty as any).cordScore ?? s.sovereignty.sovereigntyScore ?? 0);
 
   // ── Empire-mode state ─────────────────────────────────────────────────────
-  const empireBleed           = useEngineStore(s => s.empire?.bleed           ?? { active: false });
-  const totalIsolationTaxPaid = useEngineStore(s => s.empire?.totalIsolationTaxPaid ?? 0);
-  const totalSpend            = useEngineStore(s => s.empire?.totalSpend      ?? 0);
-  const journalEntries        = useEngineStore(s => s.empire?.journal?.entries ?? []) as JournalEntry[];
-  const journalQuality        = useEngineStore(s => s.empire?.journal?.aggregateQuality ?? 0);
-  const injectedCards         = useEngineStore(s => s.empire?.injectedCards   ?? []) as Array<{
-    id: string; cardName: string; ticksLeft: number; isPersistent: boolean;
+  const empireBleed = useEngineStore(selectEmpireBleed);
+  const journalEntries = useEngineStore(selectJournalEntries) as JournalEntry[];
+  const injectedCards = useEngineStore(selectInjectedCards) as Array<{
+    id: string;
+    cardName: string;
+    ticksLeft: number;
+    isPersistent: boolean;
   }>;
+  const journalQuality = useEngineStore(selectJournalQuality);
+  const totalIsolationTaxPaid = useEngineStore(selectIsolationTaxPaid);
+  const totalSpend = useEngineStore(selectTotalSpend);
 
   // ── Derived ───────────────────────────────────────────────────────────────
-  const cashflow    = income - expenses;
-  const wave        = useMemo(() => getEmpireWave(tick), [tick]) as unknown as WaveLike & { wave: number };
-  const survivalTicks = useMemo(() => estimatedSurvivalTicks(cash, cashflow), [cash, cashflow]);
-  const taxDisplay  = useMemo(() => {
+  const cashflow      = income - expenses;
+  const wave          = useMemo(() => getEmpireWave(tick), [tick]) as unknown as WaveLike & { wave: number };
+  const survivalTicks = useMemo(() => {
+    const drainPerTick = cashflow < 0 ? -cashflow : 0;
+    return estimatedSurvivalTicks(cash, netWorth, drainPerTick);
+  }, [cash, netWorth, cashflow]);
+  const taxDisplay    = useMemo(() => {
     const currentRate = totalSpend > 0 ? totalIsolationTaxPaid / totalSpend : 0;
     return { totalPaid: totalIsolationTaxPaid, totalSpend, currentRate };
   }, [totalIsolationTaxPaid, totalSpend]);
 
-  const cordColor   = cordScore >= 0.75 ? C.green : cordScore >= 0.5 ? C.gold : C.orange;
+  const cordColor    = cordScore >= 0.75 ? C.green : cordScore >= 0.5 ? C.gold : C.orange;
   const journalColor = journalQuality >= 0.75 ? C.green : journalQuality >= 0.5 ? C.gold : C.orange;
-  const hasInjected = injectedCards.length > 0;
+  const hasInjected  = injectedCards.length > 0;
 
-  const handleCounterplay = useCallback((cardId: string) => onCardCounterplay?.(cardId, 'COUNTER_SABOTAGE'), [onCardCounterplay]);
-  const handleIgnore      = useCallback((cardId: string) => onIgnoreCard?.(cardId), [onIgnoreCard]);
+  const handleCounterplay = useCallback(
+    (cardId: string) => onCardCounterplay?.(cardId, 'COUNTER_SABOTAGE'),
+    [onCardCounterplay],
+  );
+
+  const handleIgnore = useCallback(
+    (cardId: string) => onIgnoreCard?.(cardId),
+    [onIgnoreCard],
+  );
 
   return (
     <>
       <style>{STYLES}</style>
       <div className="egs-root">
-
         {/* ── Top bar ── */}
         <div className="egs-top-bar" role="banner">
           <EmpirePhaseBadge wave={wave} tick={tick} totalTicks={totalTicks} />
@@ -588,26 +629,42 @@ export const EmpireGameScreen = memo(function EmpireGameScreen({
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
               <span style={{ fontFamily: C.mono, fontSize: FS.xs, color: C.textDim, letterSpacing: '0.1em' }}>TICK</span>
               <span style={{ fontFamily: C.mono, fontSize: FS.lg, fontWeight: 700, color: C.textPrime }}>
-                {tick}<span style={{ color: C.textDim, fontSize: FS.xs }}>/{totalTicks}</span>
+                {tick}
+                <span style={{ color: C.textDim, fontSize: FS.xs }}>/{totalTicks}</span>
               </span>
             </div>
 
             {runPhase === 'PAUSED' && (
               <div style={{
-                fontFamily: C.mono, fontSize: FS.sm, fontWeight: 700, color: C.gold,
-                background: 'rgba(201,168,76,0.12)', border: `1px solid ${C.goldBrd}`,
-                padding: '4px 10px', borderRadius: 6,
+                fontFamily: C.mono,
+                fontSize: FS.sm,
+                fontWeight: 700,
+                color: C.gold,
+                background: 'rgba(201,168,76,0.12)',
+                border: `1px solid ${C.goldBrd}`,
+                padding: '4px 10px',
+                borderRadius: 6,
               }}>
                 ⏸ PAUSED
               </div>
             )}
 
             {freezeTicks > 0 && (
-              <div role="status" aria-live="polite" style={{
-                fontFamily: C.mono, fontSize: FS.sm, fontWeight: 700, color: C.blue,
-                background: 'rgba(74,158,255,0.12)', border: '1px solid rgba(74,158,255,0.25)',
-                padding: '4px 10px', borderRadius: 6, animation: 'pulseBadge 1.5s infinite',
-              }}>
+              <div
+                role="status"
+                aria-live="polite"
+                style={{
+                  fontFamily: C.mono,
+                  fontSize: FS.sm,
+                  fontWeight: 700,
+                  color: C.blue,
+                  background: 'rgba(74,158,255,0.12)',
+                  border: '1px solid rgba(74,158,255,0.25)',
+                  padding: '4px 10px',
+                  borderRadius: 6,
+                  animation: 'pulseBadge 1.5s infinite',
+                }}
+              >
                 🧊 FROZEN {freezeTicks}t
               </div>
             )}
@@ -635,17 +692,20 @@ export const EmpireGameScreen = memo(function EmpireGameScreen({
 
         {/* ── Main grid ── */}
         <div className="egs-grid" role="main">
-
           {/* Left column */}
           <div className="egs-main" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             <div className="egs-panel egs-panel--gold">
               <div className="egs-label">EQUITY CURVE</div>
               <GameBoard
                 equityHistory={equityHistory}
-                cash={cash} netWorth={netWorth}
-                income={income} expenses={expenses}
-                regime={regime} intelligence={intelligence}
-                tick={tick} totalTicks={totalTicks}
+                cash={cash}
+                netWorth={netWorth}
+                income={income}
+                expenses={expenses}
+                regime={regime}
+                intelligence={intelligence}
+                tick={tick}
+                totalTicks={totalTicks}
                 freezeTicks={freezeTicks}
               />
             </div>
@@ -688,12 +748,12 @@ export const EmpireGameScreen = memo(function EmpireGameScreen({
 
           {/* Right column */}
           <div className="egs-right" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-
             {/* Hostile cards */}
             <div className={`egs-panel ${hasInjected ? 'egs-panel--urgent' : ''}`} aria-label="Hostile cards">
               <div className="egs-label" style={{ color: hasInjected ? C.red : C.textDim }}>
                 HOSTILE CARDS {hasInjected ? `(${injectedCards.length})` : ''}
               </div>
+
               {!hasInjected ? (
                 <div style={{ color: C.green, fontFamily: C.mono, fontSize: FS.xs, padding: '8px 0' }}>
                   ✓ No active hostile cards
@@ -701,26 +761,42 @@ export const EmpireGameScreen = memo(function EmpireGameScreen({
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                   {injectedCards.map((card) => (
-                    <div key={card.id} style={{
-                      background: 'rgba(255,77,77,0.06)', border: '1px solid rgba(255,77,77,0.22)',
-                      borderRadius: 8, padding: 10,
-                      display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
-                    }}>
-                      <span style={{ fontFamily: C.mono, fontSize: FS.sm, color: C.textPrime, flex: 1 }}>{card.cardName}</span>
+                    <div
+                      key={card.id}
+                      style={{
+                        background: 'rgba(255,77,77,0.06)',
+                        border: '1px solid rgba(255,77,77,0.22)',
+                        borderRadius: 8,
+                        padding: 10,
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 10,
+                        flexWrap: 'wrap',
+                      }}
+                    >
+                      <span style={{ fontFamily: C.mono, fontSize: FS.sm, color: C.textPrime, flex: 1 }}>
+                        {card.cardName}
+                      </span>
                       <span style={{ fontFamily: C.mono, fontSize: FS.xs, color: card.isPersistent ? C.red : C.orange }}>
                         {card.isPersistent ? '∞ PERSISTENT' : `${Math.max(0, card.ticksLeft)}t left`}
                       </span>
                       {onCardCounterplay && (
-                        <button type="button" className="egs-btn"
+                        <button
+                          type="button"
+                          className="egs-btn"
                           style={{ minHeight: 36, padding: '0 12px', fontSize: FS.xs }}
-                          onClick={() => handleCounterplay(card.id)}>
+                          onClick={() => handleCounterplay(card.id)}
+                        >
                           COUNTER
                         </button>
                       )}
                       {onIgnoreCard && !card.isPersistent && (
-                        <button type="button" className="egs-btn egs-btn--danger"
+                        <button
+                          type="button"
+                          className="egs-btn egs-btn--danger"
                           style={{ minHeight: 36, padding: '0 12px', fontSize: FS.xs }}
-                          onClick={() => handleIgnore(card.id)}>
+                          onClick={() => handleIgnore(card.id)}
+                        >
                           IGNORE
                         </button>
                       )}
@@ -750,7 +826,6 @@ export const EmpireGameScreen = memo(function EmpireGameScreen({
               </div>
               <JournalFeed entries={journalEntries} />
             </div>
-
           </div>
         </div>
       </div>
