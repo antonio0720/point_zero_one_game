@@ -23,6 +23,7 @@ import { ensureHostEmailSchema } from './db/host-email-events';
 import { ensureHostInviteSchema } from './db/host-invites';
 import { ensureHostMomentSchema } from './db/host-moments';
 import { ensureHostPrintableSchema } from './db/host-printables';
+import analyticsRouter from './routes/analytics';
 
 const DEFAULT_PORT = 4317;
 
@@ -57,7 +58,7 @@ export async function createHostOsApp(): Promise<Express> {
   app.use('/host/stats', statsRouter);
   app.use('/host/moments', momentsRouter);
   app.use('/host/printables', printablesRouter);
-
+  app.use('/host/analytics', analyticsRouter);
   app.use((req: Request, res: Response) => {
     res.status(404).json({
       ok: false,
