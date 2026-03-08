@@ -12,8 +12,6 @@
 !.env.example
 **/secrets/
 github_pat_*
-*secret*
-*api*key*
 deploy_moltbook*.sh
 *.autopublish.sh
 

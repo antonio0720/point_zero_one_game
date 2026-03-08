@@ -1,3 +1,5 @@
+// /Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/backend/host-os/routes/email-dispatch.ts
+
 import { Router, type Request, type Response } from 'express';
 import joi from 'joi';
 import { requireAdminApiKey } from '../auth/admin';
@@ -26,21 +28,19 @@ router.post(
       });
     }
 
-    const startedAt = Date.now();
-
     try {
       const result = await processDueHostEmails(value.limit);
 
       return res.status(200).json({
         ok: true,
-        scanned: result.scanned,
-        attempted: result.attempted,
-        limit: value.limit,
+        ...result,
         processedAt: new Date().toISOString(),
-        durationMs: Date.now() - startedAt,
       });
     } catch (routeError) {
-      console.error('[host-os][email-dispatch] process-due failed', routeError);
+      console.error(
+        '[host-os][email-dispatch] failed to process due emails',
+        routeError,
+      );
 
       return res.status(500).json({
         ok: false,
