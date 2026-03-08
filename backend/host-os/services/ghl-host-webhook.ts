@@ -1,49 +1,125 @@
-/**
- * GHL Host Webhook Handlers
- */
-
-import { Request, Response } from 'express';
-
-// Define interfaces for request payloads
-interface HostKitDownloadedPayload {
-  host_id: number;
-  kit_version: 'v1';
-}
-
-interface HostNightLoggedPayload {
-  host_id: number;
-}
-
-interface HostV2WaitlistPayload {
-  host_id: number;
-}
+// /Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/backend/host-os/services/ghl-host-webhook.ts
 
 /**
- * Handle GHL host_kit_downloaded event
+ * Host OS → GoHighLevel webhook adapter.
+ * Sends event payloads to configured endpoints without blocking core flows.
  */
-export function handleHostKitDownloaded(req: Request<HostKitDownloadedPayload>, res: Response) {
-  // Add the host to the nurture program
-  // ... (implementation details omitted for brevity)
 
-  res.status(204).send();
+export type HostWebhookEventType =
+  | 'host_kit_downloaded'
+  | 'host_night_logged'
+  | 'host_kit_v2_waitlist';
+
+export interface HostKitDownloadedWebhookPayload {
+  hostId: number;
+  email: string;
+  name: string;
+  kitVersion: string;
+  downloadCount: number;
 }
 
-/**
- * Handle GHL host_night_logged event
- */
-export function handleHostNightLogged(req: Request<HostNightLoggedPayload>, res: Response) {
-  // Mark the host as active
-  // ... (implementation details omitted for brevity)
-
-  res.status(204).send();
+export interface HostNightLoggedWebhookPayload {
+  hostId: number;
+  email: string;
+  hostedNightCount: number;
 }
 
-/**
- * Handle GHL host_kit_v2_waitlist event
- */
-export function handleHostKitV2Waitlist(req: Request<HostV2WaitlistPayload>, res: Response) {
-  // Add the host to the v2 waitlist
-  // ... (implementation details omitted for brevity)
+export interface HostKitV2WaitlistWebhookPayload {
+  hostId: number;
+  email: string;
+  name: string;
+}
 
-  res.status(204).send();
+export interface HostWebhookResult {
+  delivered: boolean;
+  statusCode: number | null;
+  body: string | null;
+}
+
+function getWebhookUrl(eventType: HostWebhookEventType): string | null {
+  const perEventMap: Record<HostWebhookEventType, string | undefined> = {
+    host_kit_downloaded: process.env.HOST_OS_GHL_WEBHOOK_HOST_KIT_DOWNLOADED_URL,
+    host_night_logged: process.env.HOST_OS_GHL_WEBHOOK_HOST_NIGHT_LOGGED_URL,
+    host_kit_v2_waitlist: process.env.HOST_OS_GHL_WEBHOOK_HOST_KIT_V2_WAITLIST_URL,
+  };
+
+  return (
+    perEventMap[eventType] ||
+    process.env.HOST_OS_GHL_WEBHOOK_URL ||
+    null
+  );
+}
+
+async function postJson(
+  url: string,
+  body: Record<string, unknown>,
+): Promise<HostWebhookResult> {
+  const headers: Record<string, string> = {
+    'content-type': 'application/json',
+  };
+
+  const apiKey = process.env.HOST_OS_GHL_WEBHOOK_API_KEY;
+  if (apiKey) {
+    headers.authorization = `Bearer ${apiKey}`;
+  }
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(body),
+  });
+
+  const text = await response.text();
+
+  return {
+    delivered: response.ok,
+    statusCode: response.status,
+    body: text,
+  };
+}
+
+export async function emitHostWebhook(
+  eventType: HostWebhookEventType,
+  payload: Record<string, unknown>,
+): Promise<HostWebhookResult> {
+  const url = getWebhookUrl(eventType);
+
+  if (!url) {
+    console.warn(`[host-os] no GHL webhook URL configured for ${eventType}`);
+    return {
+      delivered: false,
+      statusCode: null,
+      body: null,
+    };
+  }
+
+  return await postJson(url, {
+    eventType,
+    tags: {
+      host_kit_downloaded: ['Host Kit v1', 'Host Nurture'],
+      host_night_logged: ['Active Host'],
+      host_kit_v2_waitlist: ['Host OS v2 Waitlist'],
+    }[eventType],
+    occurredAt: new Date().toISOString(),
+    source: 'pzo-host-os',
+    payload,
+  });
+}
+
+export async function sendHostKitDownloadedWebhook(
+  payload: HostKitDownloadedWebhookPayload,
+): Promise<HostWebhookResult> {
+  return await emitHostWebhook('host_kit_downloaded', payload);
+}
+
+export async function sendHostNightLoggedWebhook(
+  payload: HostNightLoggedWebhookPayload,
+): Promise<HostWebhookResult> {
+  return await emitHostWebhook('host_night_logged', payload);
+}
+
+export async function sendHostKitV2WaitlistWebhook(
+  payload: HostKitV2WaitlistWebhookPayload,
+): Promise<HostWebhookResult> {
+  return await emitHostWebhook('host_kit_v2_waitlist', payload);
 }

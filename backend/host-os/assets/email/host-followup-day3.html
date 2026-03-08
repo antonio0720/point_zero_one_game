@@ -1,60 +1,197 @@
-/**
- * Day-3 follow-up email template
- */
-
+<!-- /Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/backend/host-os/assets/email/host-followup-day3.html -->
 <!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Day 3 Follow-up: Point Zero One Digital</title>
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="x-ua-compatible" content="ie=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Day 3 Follow-up: Have you run your first night?</title>
+    <meta name="description" content="Day 3 host follow-up for Point Zero One Host OS." />
     <style>
-        body {
-            font-family: Arial, sans-serif;
-            line-height: 1.6;
-        }
-        .container {
-            max-width: 600px;
-            margin: auto;
-            padding: 2rem;
-            background-color: #f5f5f5;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-        }
+      body, table, td, a { -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; }
+      table, td { mso-table-lspace: 0pt; mso-table-rspace: 0pt; }
+      img { -ms-interpolation-mode: bicubic; border: 0; outline: none; text-decoration: none; }
+      table { border-collapse: collapse !important; }
+      body { width: 100% !important; height: 100% !important; margin: 0 !important; padding: 0 !important; background-color: #09111f; }
+      a[x-apple-data-detectors] { color: inherit !important; text-decoration: none !important; }
+      .preheader { display: none !important; visibility: hidden; opacity: 0; color: transparent; height: 0; width: 0; overflow: hidden; mso-hide: all; }
+      .container { width: 100%; max-width: 640px; background-color: #10192f; }
+      .px-40 { padding-left: 40px; padding-right: 40px; }
+      .headline { color: #ffffff; font-family: Arial, Helvetica, sans-serif; font-size: 32px; line-height: 40px; font-weight: 700; margin: 0; }
+      .body-copy { color: #d7e0f4; font-family: Arial, Helvetica, sans-serif; font-size: 16px; line-height: 27px; margin: 0; }
+      .small { color: #90a2ca; font-family: Arial, Helvetica, sans-serif; font-size: 12px; line-height: 20px; }
+      .eyebrow { color: #7dd3fc; font-family: Arial, Helvetica, sans-serif; font-size: 12px; line-height: 18px; letter-spacing: 1.4px; text-transform: uppercase; font-weight: 700; }
+      .section-title { color: #ffffff; font-family: Arial, Helvetica, sans-serif; font-size: 22px; line-height: 30px; font-weight: 700; margin: 0; }
+      .card { background-color: #151f39; border: 1px solid #23345b; border-radius: 16px; }
+      .button { display: inline-block; padding: 15px 26px; font-family: Arial, Helvetica, sans-serif; font-size: 15px; line-height: 15px; font-weight: 700; color: #09111f !important; background-color: #7dd3fc; border-radius: 999px; text-decoration: none; }
+      .button-secondary { display: inline-block; padding: 13px 22px; font-family: Arial, Helvetica, sans-serif; font-size: 14px; line-height: 14px; font-weight: 700; color: #e9efff !important; background-color: #202d4e; border: 1px solid #2b3d66; border-radius: 999px; text-decoration: none; }
+      .mono { font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; font-size: 13px; line-height: 22px; color: #d7e0f4; }
+      .rule { border-top: 1px solid #23345b; }
+      @media screen and (max-width: 640px) {
+        .px-40 { padding-left: 24px !important; padding-right: 24px !important; }
+        .headline { font-size: 27px !important; line-height: 35px !important; }
+      }
     </style>
-</head>
-<body>
-    <div class="container">
-        <h1>Have you run your first night with Point Zero One Digital?</h1>
-        <p>
-            It's day 3 and we hope everything is going smoothly. If you have any questions or issues, please don't hesitate to reach out.
-        </p>
-        <p>
-            As a reminder, your game server is deployed at: <a href="https://pointzeroonegame.com/host">pointzeroonegame.com/host</a>
-        </p>
-        <h2>Debrief Prompt Sample:</h2>
-        <pre>
-            &lt;?php
-                $data = [
-                    'server_id' => 12345,
-                    'game_session_id' => 'abcdefghijklmnop',
-                    'player_name' => 'John Doe',
-                    'replay_file' => 'replay_2022-09-12_23-59-59.json'
-                ];
-
-                // Replace the placeholders with your actual data
-                $serverUrl = 'https://api.pointzeroonegame.com/servers/' . $data['server_id'] . '/replays/' . $data['replay_file'];
-
-                // Fetch the replay file and save it to disk for analysis
-                $ch = curl_init($serverUrl);
-                curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-                $response = curl_exec($ch);
-                curl_close($ch);
-
-                // Analyze the replay file and generate a report
-                // ...
-            ?&gt;
-        </pre>
+  </head>
+  <body>
+    <div class="preheader">
+      Day 3 check-in: run your first host night, capture the right moments, and use the debrief to create your next-night hook.
     </div>
-</body>
+
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color: #09111f;">
+      <tr>
+        <td align="center" style="padding: 24px 12px 40px 12px;">
+          <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" class="container">
+            <tr>
+              <td class="px-40" style="padding-top: 20px; padding-bottom: 12px;" align="left">
+                <a href="{{HOST_DASHBOARD_URL}}" style="font-family: Arial, Helvetica, sans-serif; font-size: 14px; line-height: 20px; color: #90a2ca; text-decoration: none;">
+                  Point Zero One Host OS
+                </a>
+              </td>
+            </tr>
+
+            <tr>
+              <td class="px-40" style="padding-top: 26px; padding-bottom: 30px; background: linear-gradient(180deg, #162342 0%, #10192f 100%);">
+                <div class="eyebrow" style="margin-bottom: 14px;">Day 3 follow-up</div>
+                <h1 class="headline" style="margin-bottom: 16px;">Have you run your first night yet?</h1>
+                <p class="body-copy" style="margin-bottom: 20px;">
+                  By day 3, the move is simple: don’t overthink the perfect event. Run the first night, keep the structure tight, and leave with a reason to run it again.
+                </p>
+                <p class="body-copy" style="margin-bottom: 28px;">
+                  If you haven’t hosted yet, use the shortest version: one warm start, one full run, one three-question debrief, and one next-night booking before people walk out.
+                </p>
+                <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                  <tr>
+                    <td style="padding-right: 12px; padding-bottom: 12px;">
+                      <a href="{{HOST_DASHBOARD_URL}}" class="button" target="_blank" rel="noopener noreferrer">
+                        Open Host Dashboard
+                      </a>
+                    </td>
+                    <td style="padding-bottom: 12px;">
+                      <a href="{{DOWNLOAD_URL}}" class="button-secondary" target="_blank" rel="noopener noreferrer">
+                        Re-download Kit
+                      </a>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+
+            <tr>
+              <td class="px-40" style="padding-top: 28px; padding-bottom: 10px;">
+                <h2 class="section-title">Moment code reminder</h2>
+              </td>
+            </tr>
+
+            <tr>
+              <td class="px-40" style="padding-bottom: 28px;">
+                <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%">
+                  <tr>
+                    <td class="card" style="padding: 20px; display: block;">
+                      <p class="mono" style="margin: 0 0 8px 0;"><strong>HOS-A01 — Opportunity Flip</strong></p>
+                      <p class="body-copy">Use this when someone turns a risky decision into a momentum swing and the whole table feels it.</p>
+                    </td>
+                  </tr>
+                  <tr><td style="height: 12px; line-height: 12px; font-size: 12px;">&nbsp;</td></tr>
+                  <tr>
+                    <td class="card" style="padding: 20px; display: block;">
+                      <p class="mono" style="margin: 0 0 8px 0;"><strong>HOS-B01 — FUBAR Killed Me</strong></p>
+                      <p class="body-copy">Use this when chaos lands hard, the room erupts, and one card instantly changes the emotional temperature.</p>
+                    </td>
+                  </tr>
+                  <tr><td style="height: 12px; line-height: 12px; font-size: 12px;">&nbsp;</td></tr>
+                  <tr>
+                    <td class="card" style="padding: 20px; display: block;">
+                      <p class="mono" style="margin: 0 0 8px 0;"><strong>HOS-C01 — Missed the Bag</strong></p>
+                      <p class="body-copy">Use this when someone realizes the smarter move too late and the table immediately starts rewriting history.</p>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+
+            <tr>
+              <td class="px-40" style="padding-bottom: 10px;">
+                <h2 class="section-title">Debrief prompt sample</h2>
+              </td>
+            </tr>
+
+            <tr>
+              <td class="px-40" style="padding-bottom: 28px;">
+                <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" class="card">
+                  <tr>
+                    <td style="padding: 22px;">
+                      <p class="body-copy" style="margin-bottom: 14px;">
+                        Keep the debrief short. Three prompts. Then stop while people still want one more run.
+                      </p>
+                      <div class="mono" style="background-color: #0f172b; border: 1px solid #24365d; border-radius: 12px; padding: 16px; white-space: pre-line;">
+1) What was your best decision tonight?
+2) What was your worst decision tonight?
+3) If you got one do-over, where would you use it?
+
+Optional reveal prompt:
+What did this game show you about your risk tolerance?
+
+Close with:
+Same time next week. Pick the theme now. Each person brings one person.
+                      </div>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+
+            <tr>
+              <td class="px-40" style="padding-bottom: 28px;">
+                <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" class="card">
+                  <tr>
+                    <td style="padding: 22px;">
+                      <p class="eyebrow" style="margin: 0 0 10px 0;">Fast win</p>
+                      <p class="body-copy">
+                        Your first night does not need perfect attendance, perfect lighting, or perfect footage. It needs structure, one memorable swing, one clean debrief, and the next date locked before dopamine fades.
+                      </p>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+
+            <tr>
+              <td class="px-40" style="padding-bottom: 32px;">
+                <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                  <tr>
+                    <td style="padding-right: 12px; padding-bottom: 12px;">
+                      <a href="{{HOST_DASHBOARD_URL}}" class="button" target="_blank" rel="noopener noreferrer">
+                        Back to Host OS
+                      </a>
+                    </td>
+                    <td style="padding-bottom: 12px;">
+                      <a href="{{WAITLIST_URL}}" class="button-secondary" target="_blank" rel="noopener noreferrer">
+                        Join Host OS v2 Waitlist
+                      </a>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+
+            <tr>
+              <td class="px-40 rule" style="padding-top: 22px; padding-bottom: 24px;">
+                <p class="small" style="margin: 0 0 8px 0;">
+                  Need a hand? Reply to this email or reach us at
+                  <a href="mailto:hosts@pointzeroonegame.com" style="color: #b9c8e9; text-decoration: underline;">hosts@pointzeroonegame.com</a>.
+                </p>
+                <p class="small" style="margin: 0;">
+                  You’re receiving this because you requested the Point Zero One Host OS Kit.
+                  <a href="{{UNSUBSCRIBE_URL}}" style="color: #90a2ca; text-decoration: underline;">Unsubscribe</a>
+                </p>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+
+    {{TRACKING_PIXEL}}
+  </body>
 </html>

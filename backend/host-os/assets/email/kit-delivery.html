@@ -1,29 +1,227 @@
-/**
- * Kit Delivery Email Template
- */
-
+<!-- /Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/backend/host-os/assets/email/kit-delivery.html -->
 <!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="x-ua-compatible" content="ie=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Your Host OS Kit is ready</title>
-</head>
-<body>
-    <h1>Your Host OS Kit is ready</h1>
-    <p>Congratulations! Your Host Operating System (Host OS) kit is now available for download.</p>
+    <meta
+      name="description"
+      content="Download your Point Zero One Host OS Kit v1 and run your first host night."
+    />
+    <style>
+      body, table, td, a { -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; }
+      table, td { mso-table-lspace: 0pt; mso-table-rspace: 0pt; }
+      img { -ms-interpolation-mode: bicubic; border: 0; outline: none; text-decoration: none; }
+      table { border-collapse: collapse !important; }
+      body { width: 100% !important; height: 100% !important; margin: 0 !important; padding: 0 !important; background-color: #0b1020; }
+      a[x-apple-data-detectors] { color: inherit !important; text-decoration: none !important; font-size: inherit !important; font-family: inherit !important; font-weight: inherit !important; line-height: inherit !important; }
+      .preheader { display: none !important; visibility: hidden; opacity: 0; color: transparent; height: 0; width: 0; overflow: hidden; mso-hide: all; }
+      .wrapper { width: 100%; background-color: #0b1020; }
+      .container { width: 100%; max-width: 640px; margin: 0 auto; background-color: #11182d; }
+      .px-40 { padding-left: 40px; padding-right: 40px; }
+      .py-32 { padding-top: 32px; padding-bottom: 32px; }
+      .headline { color: #ffffff; font-family: Arial, Helvetica, sans-serif; font-size: 34px; line-height: 42px; font-weight: 700; margin: 0; }
+      .subhead { color: #d7e0f4; font-family: Arial, Helvetica, sans-serif; font-size: 17px; line-height: 28px; margin: 0; }
+      .h2 { color: #ffffff; font-family: Arial, Helvetica, sans-serif; font-size: 22px; line-height: 30px; font-weight: 700; margin: 0 0 12px 0; }
+      .body-copy { color: #d7e0f4; font-family: Arial, Helvetica, sans-serif; font-size: 16px; line-height: 27px; margin: 0; }
+      .eyebrow { color: #6ee7b7; font-family: Arial, Helvetica, sans-serif; font-size: 12px; line-height: 18px; letter-spacing: 1.5px; text-transform: uppercase; font-weight: 700; }
+      .card { background-color: #161f38; border: 1px solid #223055; border-radius: 16px; }
+      .button { display: inline-block; padding: 15px 26px; font-family: Arial, Helvetica, sans-serif; font-size: 15px; line-height: 15px; font-weight: 700; color: #0b1020 !important; background-color: #6ee7b7; border-radius: 999px; text-decoration: none; }
+      .button-secondary { display: inline-block; padding: 13px 22px; font-family: Arial, Helvetica, sans-serif; font-size: 14px; line-height: 14px; font-weight: 700; color: #e9efff !important; background-color: #202b4b; border: 1px solid #2b3a63; border-radius: 999px; text-decoration: none; }
+      .list { margin: 0; padding: 0 0 0 18px; }
+      .list li { color: #d7e0f4; font-family: Arial, Helvetica, sans-serif; font-size: 15px; line-height: 25px; margin-bottom: 8px; }
+      .small { color: #8ea0c7; font-family: Arial, Helvetica, sans-serif; font-size: 12px; line-height: 20px; }
+      .rule { border-top: 1px solid #223055; }
+      @media screen and (max-width: 640px) {
+        .px-40 { padding-left: 24px !important; padding-right: 24px !important; }
+        .headline { font-size: 28px !important; line-height: 35px !important; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="preheader">
+      Your free Host OS Kit v1 is ready. Download it now, run your first night this week, and turn one game night into repeatable content and return play.
+    </div>
 
-    <h2>Kit Highlights</h2>
-    <!-- Place the highlights of the Host OS kit here -->
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" class="wrapper">
+      <tr>
+        <td align="center" style="padding: 24px 12px 40px 12px;">
+          <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" class="container">
+            <tr>
+              <td class="px-40" style="padding-top: 20px; padding-bottom: 12px;" align="left">
+                <a href="{{HOST_DASHBOARD_URL}}" style="font-family: Arial, Helvetica, sans-serif; font-size: 14px; line-height: 20px; color: #8ea0c7; text-decoration: none;">
+                  Point Zero One Host OS
+                </a>
+              </td>
+            </tr>
 
-    <h2>3 Tips to Run on Your First Night</h2>
-    <!-- Include three tips for running the Host OS for the first time -->
+            <tr>
+              <td class="px-40 py-32" style="background: linear-gradient(180deg, #182445 0%, #11182d 100%);" align="left">
+                <div class="eyebrow" style="margin-bottom: 16px;">Host Kit v1</div>
+                <h1 class="headline" style="margin-bottom: 18px;">Your Host OS Kit is ready.</h1>
+                <p class="subhead" style="margin-bottom: 28px;">
+                  You now have the operating system for running Point Zero One nights that feel easier to host, easier to join, more capture-worthy, and more repeatable.
+                </p>
+                <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                  <tr>
+                    <td align="left" style="padding-right: 12px; padding-bottom: 12px;">
+                      <a href="{{DOWNLOAD_URL}}" class="button" target="_blank" rel="noopener noreferrer">
+                        Download Host OS Kit
+                      </a>
+                    </td>
+                    <td align="left" style="padding-bottom: 12px;">
+                      <a href="{{HOST_DASHBOARD_URL}}" class="button-secondary" target="_blank" rel="noopener noreferrer">
+                        Open Host Dashboard
+                      </a>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
 
-    <h2>Download Your Kit</h2>
-    <a href="[DOWNLOAD_LINK]">Download Now</a>
+            <tr>
+              <td class="px-40" style="padding-top: 28px; padding-bottom: 8px;" align="left">
+                <h2 class="h2">What’s inside the kit</h2>
+                <p class="body-copy" style="margin-bottom: 18px;">
+                  We wrote this kit to turn the night into a machine, not a hangout. It gives you structure without killing the fun.
+                </p>
+              </td>
+            </tr>
 
-    <h2>Book v2 Waitlist</h2>
-    <p>Don't forget to book your spot on the v2 waitlist to stay updated on future releases and improvements.</p>
-    <a href="[WAITLIST_LINK]">Book Now</a>
-</body>
+            <tr>
+              <td class="px-40" style="padding-bottom: 28px;">
+                <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" class="card">
+                  <tr>
+                    <td style="padding: 24px 24px 10px 24px;">
+                      <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%">
+                        <tr>
+                          <td valign="top" width="50%" style="padding-right: 12px;">
+                            <ol class="list" style="padding-left: 18px;">
+                              <li><strong>Start Here</strong> — one-page quick-start for your first host night.</li>
+                              <li><strong>Run of Show</strong> — warm start, run, debrief, run, close.</li>
+                              <li><strong>Host Script</strong> — what to say at the start, mid-point, and close.</li>
+                              <li><strong>Moment Code Guide</strong> — the language that makes highlights repeatable.</li>
+                              <li><strong>Debrief Prompt Sheet</strong> — get laughter, regret, pride, and insight without rambling.</li>
+                            </ol>
+                          </td>
+                          <td valign="top" width="50%" style="padding-left: 12px;">
+                            <ol class="list" start="6" style="padding-left: 18px;">
+                              <li><strong>Role Cards</strong> — Timer, Dealer, Clipper, Scorekeeper.</li>
+                              <li><strong>Capture Workflow</strong> — how to film just enough without becoming a production burden.</li>
+                              <li><strong>Posting Plan</strong> — turn one night into 7–14 days of content.</li>
+                              <li><strong>Night Tracker</strong> — log what happened and what to repeat next time.</li>
+                              <li><strong>Next-Night Planner</strong> — leave the table with the next date already booked.</li>
+                            </ol>
+                          </td>
+                        </tr>
+                      </table>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+
+            <tr>
+              <td class="px-40" style="padding-bottom: 8px;" align="left">
+                <h2 class="h2">3 tips for your first night</h2>
+              </td>
+            </tr>
+
+            <tr>
+              <td class="px-40" style="padding-bottom: 28px;">
+                <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%">
+                  <tr>
+                    <td class="card" style="padding: 20px 20px 18px 20px; margin-bottom: 12px; display: block;">
+                      <p class="body-copy" style="font-weight: 700; color: #ffffff; margin-bottom: 8px;">1) Pick one format before people arrive.</p>
+                      <p class="body-copy">
+                        Run the night as a Casual Table, Community Night, or Competitive Night. The format answers “what kind of night is this?” before confusion starts.
+                      </p>
+                    </td>
+                  </tr>
+                  <tr><td style="height: 12px; line-height: 12px; font-size: 12px;">&nbsp;</td></tr>
+                  <tr>
+                    <td class="card" style="padding: 20px 20px 18px 20px; margin-bottom: 12px; display: block;">
+                      <p class="body-copy" style="font-weight: 700; color: #ffffff; margin-bottom: 8px;">2) Assign roles in under 60 seconds.</p>
+                      <p class="body-copy">
+                        Give someone Timer, someone Dealer, someone Clipper, and someone Scorekeeper. Shared roles reduce host fatigue and increase buy-in fast.
+                      </p>
+                    </td>
+                  </tr>
+                  <tr><td style="height: 12px; line-height: 12px; font-size: 12px;">&nbsp;</td></tr>
+                  <tr>
+                    <td class="card" style="padding: 20px 20px 18px 20px; display: block;">
+                      <p class="body-copy" style="font-weight: 700; color: #ffffff; margin-bottom: 8px;">3) End with the next-night contract.</p>
+                      <p class="body-copy">
+                        Before people leave, lock the next date, pick the next theme, and challenge each player to bring one person. That one habit is what turns “fun night” into “weekly ritual.”
+                      </p>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+
+            <tr>
+              <td class="px-40" style="padding-bottom: 28px;">
+                <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" class="card">
+                  <tr>
+                    <td style="padding: 24px;">
+                      <p class="eyebrow" style="margin: 0 0 10px 0;">Host reminder</p>
+                      <p class="body-copy" style="margin-bottom: 14px;">
+                        Your goal is not to capture everything. Your goal is to capture the few moments people will quote tomorrow.
+                      </p>
+                      <p class="body-copy">
+                        Aim for <strong>3 moment clips</strong>, <strong>1 reaction clip</strong>, and <strong>1 insight line</strong>. Stop there. The best host nights are sustainable.
+                      </p>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+
+            <tr>
+              <td class="px-40" style="padding-bottom: 32px;" align="left">
+                <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                  <tr>
+                    <td align="left" style="padding-right: 12px; padding-bottom: 12px;">
+                      <a href="{{DOWNLOAD_URL}}" class="button" target="_blank" rel="noopener noreferrer">
+                        Download the Kit
+                      </a>
+                    </td>
+                    <td align="left" style="padding-bottom: 12px;">
+                      <a href="{{WAITLIST_URL}}" class="button-secondary" target="_blank" rel="noopener noreferrer">
+                        Join Host OS v2 Waitlist
+                      </a>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+
+            <tr>
+              <td class="px-40 rule" style="padding-top: 22px; padding-bottom: 24px;" align="left">
+                <p class="small" style="margin: 0 0 8px 0;">
+                  Need help before your first night? Reply to this email or contact
+                  <a href="mailto:hosts@pointzeroonegame.com" style="color: #b9c8e9; text-decoration: underline;">hosts@pointzeroonegame.com</a>.
+                </p>
+                <p class="small" style="margin: 0 0 8px 0;">
+                  Host Dashboard:
+                  <a href="{{HOST_DASHBOARD_URL}}" style="color: #b9c8e9; text-decoration: underline;" target="_blank" rel="noopener noreferrer">
+                    pointzeroonegame.com/host
+                  </a>
+                </p>
+                <p class="small" style="margin: 0;">
+                  You’re receiving this because you requested the Point Zero One Host OS Kit.
+                  <a href="{{UNSUBSCRIBE_URL}}" style="color: #8ea0c7; text-decoration: underline;">Unsubscribe</a>
+                </p>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+
+    {{TRACKING_PIXEL}}
+  </body>
 </html>
