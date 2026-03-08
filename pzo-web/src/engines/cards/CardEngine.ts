@@ -67,6 +67,7 @@ import { ModeOverlayEngine }           from './ModeOverlayEngine';
 import { TimingValidator }             from './TimingValidator';
 import type { EngineStateSnapshot }    from './TimingValidator';
 import { CardEffectResolver }          from './CardEffectResolver';
+import { CardEffectsExecutor }         from './CardEffectsExecutor';
 import { DecisionWindowManager }       from './DecisionWindowManager';
 import { ForcedCardQueue }             from './ForcedCardQueue';
 import { CardScorer }                  from './CardScorer';
@@ -90,6 +91,7 @@ export class CardEngine {
   private overlayEngine:   ModeOverlayEngine;
   private timingValidator: TimingValidator;
   private effectResolver:  CardEffectResolver;
+  private effectsExecutor: CardEffectsExecutor;
   private windowManager:   DecisionWindowManager;
   private forcedCardQueue: ForcedCardQueue;
   private scorer:          CardScorer;
@@ -135,6 +137,7 @@ export class CardEngine {
     this.overlayEngine   = null as any;
     this.timingValidator = null as any;
     this.effectResolver  = null as any;
+    this.effectsExecutor = null as any;
     this.windowManager   = null as any;
     this.forcedCardQueue = null as any;
     this.scorer          = null as any;
@@ -166,7 +169,10 @@ export class CardEngine {
     this.overlayEngine   = new ModeOverlayEngine(this.mode);
     this.handManager     = new HandManager(this.mode, this.maxHandSize, this.overlayEngine);
     this.timingValidator = new TimingValidator();
+
     this.effectResolver  = new CardEffectResolver(this.eventBus);
+    this.effectsExecutor = new CardEffectsExecutor(this.effectResolver);
+
     this.windowManager   = new DecisionWindowManager(params.decisionWindowMs);
     this.forcedCardQueue = new ForcedCardQueue(this.eventBus, this.overlayEngine);
     this.scorer          = new CardScorer();
@@ -175,8 +181,8 @@ export class CardEngine {
     const deckBuilder = new DeckBuilder(params.seed);
     const deckResult  = deckBuilder.buildDeck(this.mode);
     const cursor      = new DrawCursor(deckResult);
-    this.handManager.attachDeck(cursor);
 
+    this.handManager.attachDeck(cursor);
     this.forcedCardQueue.init();
     this.subscribeToModeEvents();
   }
@@ -239,12 +245,16 @@ export class CardEngine {
       this.uxBridge.emitDecisionWindowExpired(exp, tickIndex);
       this.uxBridge.emitCardAutoResolved(card, exp.autoChoice, exp.speedScore, tickIndex);
 
-      const autoEffectResult = this.effectResolver.resolve(
+      const autoEffectResult = this.effectsExecutor.executeOne({
         card,
-        { instanceId: card.instanceId, choiceId: exp.autoChoice, timestamp: Date.now() },
+        request: {
+          instanceId: card.instanceId,
+          choiceId: exp.autoChoice,
+          timestamp: Date.now(),
+        },
         tickIndex,
-        false,
-      );
+        isOptimalChoice: false,
+      });
 
       const record = this.scorer.scoreAutoResolved(card, exp, autoEffectResult, tickIndex);
       this.decisionsThisTick.push(record);
@@ -386,11 +396,23 @@ export class CardEngine {
     const hand      = this.handManager.getHandArray();
     const isOptimal = this.isOptimalPlay(card, hand);
 
-    const effectResult = this.effectResolver.resolve(card, request, tickIndex, isOptimal);
+    const effectResult = this.effectsExecutor.executeOne({
+      card,
+      request,
+      tickIndex,
+      isOptimalChoice: isOptimal,
+    });
 
     let record: DecisionRecord;
+
     if (windowRecord) {
-      record = this.scorer.scoreResolvedPlay(card, windowRecord, effectResult, hand, tickIndex);
+      record = this.scorer.scoreResolvedPlay(
+        card,
+        windowRecord,
+        effectResult,
+        hand,
+        tickIndex,
+      );
     } else {
       const syntheticWindow = {
         windowId: '',
@@ -404,16 +426,20 @@ export class CardEngine {
         speedScore: 1.0,
         resolvedAtTick: tickIndex,
       };
-      record = this.scorer.scoreResolvedPlay(card, syntheticWindow, effectResult, hand, tickIndex);
+
+      record = this.scorer.scoreResolvedPlay(
+        card,
+        syntheticWindow,
+        effectResult,
+        hand,
+        tickIndex,
+      );
     }
 
     this.decisionsThisTick.push(record);
-
     this.handleModeSpecificPlay(card, request, effectResult, tickIndex);
-
     this.handManager.removeCard(card.instanceId, DiscardReason.PLAYED);
     this.lastPlayedCard = card;
-
     this.uxBridge.emitCardPlayed(card, effectResult, record, tickIndex);
 
     return record;

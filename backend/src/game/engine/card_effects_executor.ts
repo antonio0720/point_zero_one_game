@@ -3,12 +3,8 @@
  * pzo-web/src/engines/cards/CardEffectsExecutor.ts
  *
  * Thin execution adapter over the repo-native CardEffectResolver.
- * This preserves the "execute a batch" ergonomics from your snippet
- * without introducing a second parallel effect system.
- *
- * RULE:
- * - Do not invent a generic RunState reducer here.
- * - The authoritative effect path remains CardEffectResolver -> EventBus -> engines/store.
+ * This preserves "execute one / execute many" ergonomics without
+ * introducing a second card-effect architecture.
  */
 
 import { CardEffectResolver } from './CardEffectResolver';
@@ -45,7 +41,7 @@ export class CardEffectsExecutor {
   }
 
   /**
-   * Execute a single card play through the repo-native resolver.
+   * Execute one repo-native card resolution.
    */
   public executeOne(item: CardEffectExecutionItem): CardEffectResult {
     return this.resolver.resolve(
@@ -57,7 +53,7 @@ export class CardEffectsExecutor {
   }
 
   /**
-   * Execute multiple card plays in order, preserving deterministic sequencing.
+   * Execute multiple card plays in deterministic order.
    */
   public executeMany(
     items: readonly CardEffectExecutionItem[],
