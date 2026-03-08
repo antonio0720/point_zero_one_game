@@ -1,5 +1,6 @@
 /**
  * Analytics routes for the host OS
+ * /Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/backend/host-os/routes/analytics.ts
  */
 
 import express from 'express';
