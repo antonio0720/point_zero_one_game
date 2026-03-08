@@ -1,42 +1,53 @@
-// /Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/backend/host-os/routes/email-dispatch.ts
-
 import { Router, type Request, type Response } from 'express';
+import joi from 'joi';
+import { requireAdminApiKey } from '../auth/admin';
 import { processDueHostEmails } from '../services/host-email-sequence';
 
 const router = Router();
 
-function isAuthorized(req: Request): boolean {
-  const expected = process.env.HOST_OS_ADMIN_API_KEY;
-  if (!expected) {
-    return false;
-  }
-
-  const provided =
-    req.get('x-admin-api-key') ||
-    req.get('authorization')?.replace(/^Bearer\s+/i, '') ||
-    '';
-
-  return provided === expected;
-}
-
-router.post('/process-due', async (req: Request, res: Response) => {
-  if (!isAuthorized(req)) {
-    return res.status(401).json({
-      ok: false,
-      error: 'Unauthorized',
-    });
-  }
-
-  const limitRaw = Number(req.body?.limit ?? 50);
-  const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(limitRaw, 250)) : 50;
-
-  const result = await processDueHostEmails(limit);
-
-  return res.status(200).json({
-    ok: true,
-    ...result,
-    processedAt: new Date().toISOString(),
-  });
+const processDueSchema = joi.object({
+  limit: joi.number().integer().min(1).max(250).default(50),
 });
+
+router.post(
+  '/process-due',
+  requireAdminApiKey,
+  async (req: Request, res: Response) => {
+    const { error, value } = processDueSchema.validate(req.body ?? {}, {
+      abortEarly: false,
+      stripUnknown: true,
+      convert: true,
+    });
+
+    if (error) {
+      return res.status(400).json({
+        ok: false,
+        error: error.message,
+      });
+    }
+
+    const startedAt = Date.now();
+
+    try {
+      const result = await processDueHostEmails(value.limit);
+
+      return res.status(200).json({
+        ok: true,
+        scanned: result.scanned,
+        attempted: result.attempted,
+        limit: value.limit,
+        processedAt: new Date().toISOString(),
+        durationMs: Date.now() - startedAt,
+      });
+    } catch (routeError) {
+      console.error('[host-os][email-dispatch] process-due failed', routeError);
+
+      return res.status(500).json({
+        ok: false,
+        error: 'Internal server error',
+      });
+    }
+  },
+);
 
 export default router;

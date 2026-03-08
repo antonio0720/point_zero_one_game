@@ -6,17 +6,18 @@
  * nurture dispatch, and Host OS operational flows.
  */
 
-import express, { type Express, type Request, type Response } from 'express';
+import express, {
+  type Express,
+  type Request,
+  type Response,
+} from 'express';
+import analyticsRouter from './routes/analytics';
 import kitDownloadRouter from './routes/kit-download';
 import emailTrackingRouter from './routes/email-tracking';
 import emailDispatchRouter from './routes/email-dispatch';
 import { closeDb, pingDb } from './db/connection';
-import {
-  ensureHostRegistrationSchema,
-} from './db/host-registrations';
-import {
-  ensureHostEmailSchema,
-} from './db/host-email-events';
+import { ensureHostRegistrationSchema } from './db/host-registrations';
+import { ensureHostEmailSchema } from './db/host-email-events';
 
 const DEFAULT_PORT = 4317;
 
@@ -28,12 +29,12 @@ export async function createHostOsApp(): Promise<Express> {
 
   app.disable('x-powered-by');
   app.set('trust proxy', true);
-
   app.use(express.json({ limit: '1mb' }));
   app.use(express.urlencoded({ extended: false }));
 
   app.get('/healthz', async (_req: Request, res: Response) => {
     const dbOk = await pingDb();
+
     res.status(dbOk ? 200 : 503).json({
       ok: dbOk,
       service: 'pzo-host-os',
@@ -44,6 +45,7 @@ export async function createHostOsApp(): Promise<Express> {
   app.use('/host/download', kitDownloadRouter);
   app.use('/host/email', emailTrackingRouter);
   app.use('/host/internal/email', emailDispatchRouter);
+  app.use('/host/internal/analytics', analyticsRouter);
 
   app.use((req: Request, res: Response) => {
     res.status(404).json({
@@ -60,6 +62,7 @@ export async function createHostOsApp(): Promise<Express> {
       _next: (error?: unknown) => void,
     ) => {
       console.error('[host-os] unhandled error', error);
+
       res.status(500).json({
         ok: false,
         error: 'Internal server error',
@@ -80,14 +83,20 @@ async function start(): Promise<void> {
 
   const shutdown = async (signal: string): Promise<void> => {
     console.log(`[host-os] received ${signal}, shutting down`);
+
     server.close(async () => {
       await closeDb();
       process.exit(0);
     });
   };
 
-  process.on('SIGINT', () => void shutdown('SIGINT'));
-  process.on('SIGTERM', () => void shutdown('SIGTERM'));
+  process.on('SIGINT', () => {
+    void shutdown('SIGINT');
+  });
+
+  process.on('SIGTERM', () => {
+    void shutdown('SIGTERM');
+  });
 }
 
 if (require.main === module) {
