@@ -1,4 +1,4 @@
-///Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/backend/host-os/db/connection.ts
+// backend/host-os/db/connection.ts
 
 import { URL } from 'node:url';
 import {
@@ -56,6 +56,19 @@ interface TopologyRow extends QueryResultRow {
   observed_at_utc: string;
 }
 
+type ConnectionStringEnvName =
+  | 'HOST_OS_DATABASE_URL'
+  | 'DATABASE_URL'
+  | 'POSTGRES_URL'
+  | 'PG_URL';
+
+const CONNECTION_STRING_ENV_ORDER: readonly ConnectionStringEnvName[] = [
+  'HOST_OS_DATABASE_URL',
+  'DATABASE_URL',
+  'POSTGRES_URL',
+  'PG_URL',
+] as const;
+
 const DEFAULT_APPLICATION_NAME = 'pzo-host-os';
 const DEFAULT_POOL_MAX = 20;
 const DEFAULT_IDLE_TIMEOUT_MS = 30_000;
@@ -63,6 +76,23 @@ const DEFAULT_CONNECTION_TIMEOUT_MS = 10_000;
 const DEFAULT_QUERY_TIMEOUT_MS = 15_000;
 const DEFAULT_STATEMENT_TIMEOUT_MS = 20_000;
 const DEFAULT_MAX_USES = 10_000;
+
+const READINESS_PROBE_SQL = 'SELECT 1';
+const PING_SQL = 'SELECT 1 AS ok';
+const TOPOLOGY_SQL = `
+  SELECT
+    current_database() AS database_name,
+    current_user AS current_user_name,
+    current_setting('application_name', true) AS application_name,
+    current_setting('transaction_read_only') AS transaction_read_only,
+    pg_is_in_recovery() AS in_recovery,
+    inet_server_addr()::text AS server_address,
+    inet_server_port() AS server_port,
+    to_char(
+      NOW() AT TIME ZONE 'UTC',
+      'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'
+    ) AS observed_at_utc
+`;
 
 let configCache: HostOsDbConfig | null = null;
 let pool: Pool | null = null;
@@ -73,17 +103,7 @@ export function getDbConfig(): HostOsDbConfig {
     return configCache;
   }
 
-  const connectionString =
-    process.env.HOST_OS_DATABASE_URL?.trim() ||
-    process.env.DATABASE_URL?.trim() ||
-    process.env.POSTGRES_URL?.trim() ||
-    process.env.PG_URL?.trim();
-
-  if (!connectionString) {
-    throw new Error(
-      'Missing HOST_OS_DATABASE_URL, DATABASE_URL, POSTGRES_URL, or PG_URL for Host OS service.',
-    );
-  }
+  const connectionString = resolveConnectionString();
 
   configCache = {
     connectionString,
@@ -146,6 +166,7 @@ export function getDb(): Pool {
   const config = getDbConfig();
 
   pool = new Pool(buildPoolConfig(config));
+
   pool.on('error', (error: Error) => {
     console.error('[host-os][db] unexpected pool error', error);
   });
@@ -153,28 +174,28 @@ export function getDb(): Pool {
   return pool;
 }
 
-export async function query<Row extends QueryResultRow = QueryResultRow>(
+export async function query<TRow extends QueryResultRow = QueryResultRow>(
   text: string,
   values: readonly unknown[] = [],
-): Promise<QueryResult<Row>> {
+): Promise<QueryResult<TRow>> {
   await ensureDbReady();
-  return await getDb().query<Row>(text, [...values]);
+  return await getDb().query<TRow>(text, [...values]);
 }
 
-export async function queryOneOrNull<Row extends QueryResultRow = QueryResultRow>(
+export async function queryOneOrNull<TRow extends QueryResultRow = QueryResultRow>(
   text: string,
   values: readonly unknown[] = [],
-): Promise<Row | null> {
-  const result = await query<Row>(text, values);
+): Promise<TRow | null> {
+  const result = await query<TRow>(text, values);
   return result.rows[0] ?? null;
 }
 
-export async function queryOneOrThrow<Row extends QueryResultRow = QueryResultRow>(
+export async function queryOneOrThrow<TRow extends QueryResultRow = QueryResultRow>(
   text: string,
   values: readonly unknown[] = [],
   errorMessage = 'Expected at least one row but query returned none.',
-): Promise<Row> {
-  const row = await queryOneOrNull<Row>(text, values);
+): Promise<TRow> {
+  const row = await queryOneOrNull<TRow>(text, values);
   if (!row) {
     throw new Error(errorMessage);
   }
@@ -196,6 +217,7 @@ export async function withClient<T>(
   await ensureDbReady();
 
   const client = await getDb().connect();
+
   try {
     return await work(client);
   } finally {
@@ -212,8 +234,11 @@ export async function withTransaction<T>(
 
     try {
       await client.query(beginSql);
+
       const result = await work(client);
+
       await client.query('COMMIT');
+
       return result;
     } catch (error) {
       try {
@@ -221,6 +246,7 @@ export async function withTransaction<T>(
       } catch (rollbackError) {
         console.error('[host-os][db] rollback failed', rollbackError);
       }
+
       throw error;
     }
   });
@@ -229,7 +255,9 @@ export async function withTransaction<T>(
 export async function pingDb(): Promise<boolean> {
   try {
     await ensureDbReady();
-    const result = await getDb().query<{ ok: number }>('SELECT 1 AS ok');
+
+    const result = await getDb().query<{ ok: number }>(PING_SQL);
+
     return result.rows[0]?.ok === 1;
   } catch (error) {
     console.error('[host-os][db] ping failed', error);
@@ -282,7 +310,7 @@ async function ensureDbReady(): Promise<void> {
     const client = await getDb().connect();
 
     try {
-      await client.query('SELECT 1');
+      await client.query(READINESS_PROBE_SQL);
 
       if (getDbConfig().requireWritablePrimary) {
         await assertWritablePrimaryWithClient(client);
@@ -325,22 +353,9 @@ async function assertWritablePrimaryWithClient(
 }
 
 async function fetchTopology(client: PoolClient): Promise<DbTopology> {
-  const result = await client.query<TopologyRow>(`
-    SELECT
-      current_database() AS database_name,
-      current_user AS current_user_name,
-      current_setting('application_name', true) AS application_name,
-      current_setting('transaction_read_only') AS transaction_read_only,
-      pg_is_in_recovery() AS in_recovery,
-      inet_server_addr()::text AS server_address,
-      inet_server_port() AS server_port,
-      to_char(
-        NOW() AT TIME ZONE 'UTC',
-        'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'
-      ) AS observed_at_utc
-  `);
-
+  const result = await client.query<TopologyRow>(TOPOLOGY_SQL);
   const row = result.rows[0];
+
   if (!row) {
     throw new Error('Failed to read database topology.');
   }
@@ -412,6 +427,56 @@ function buildWritablePrimaryError(
   ].join(' ');
 }
 
+function resolveConnectionString(): string {
+  for (const envName of CONNECTION_STRING_ENV_ORDER) {
+    const value = normalizeOptionalString(process.env[envName]);
+    if (!value) {
+      continue;
+    }
+
+    assertValidPostgresConnectionString(value, envName);
+    return value;
+  }
+
+  throw new Error(
+    `Missing ${CONNECTION_STRING_ENV_ORDER.join(
+      ', ',
+    )} for Host OS service.`,
+  );
+}
+
+function assertValidPostgresConnectionString(
+  connectionString: string,
+  fieldName: ConnectionStringEnvName,
+): void {
+  try {
+    const parsed = new URL(connectionString);
+
+    if (
+      parsed.protocol !== 'postgres:' &&
+      parsed.protocol !== 'postgresql:'
+    ) {
+      throw new Error(
+        `${fieldName} must use postgres:// or postgresql:// protocol.`,
+      );
+    }
+
+    if (!parsed.hostname) {
+      throw new Error(`${fieldName} must include a hostname.`);
+    }
+
+    if (!parsed.pathname || parsed.pathname === '/') {
+      throw new Error(`${fieldName} must include a database name.`);
+    }
+  } catch (error) {
+    if (error instanceof Error) {
+      throw error;
+    }
+
+    throw new Error(`${fieldName} must be a valid postgres connection string.`);
+  }
+}
+
 function resolveSslConfig(
   connectionString: string,
 ): PoolConfig['ssl'] | undefined {
@@ -422,7 +487,7 @@ function resolveSslConfig(
   );
 
   const enabled =
-    explicitSsl !== undefined
+    explicitSsl !== undefined && explicitSsl.trim().length > 0
       ? normalizeBooleanEnv(explicitSsl, false)
       : inferSslFromConnectionString(connectionString);
 
@@ -453,11 +518,18 @@ function inferSslFromConnectionString(connectionString: string): boolean {
   }
 }
 
+function normalizeOptionalString(
+  rawValue: string | undefined | null,
+): string | null {
+  const value = rawValue?.trim() ?? '';
+  return value.length > 0 ? value : null;
+}
+
 function normalizeBooleanEnv(
   rawValue: string | undefined,
   defaultValue: boolean,
 ): boolean {
-  if (rawValue === undefined) {
+  if (rawValue === undefined || rawValue.trim().length === 0) {
     return defaultValue;
   }
 
