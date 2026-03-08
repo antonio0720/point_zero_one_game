@@ -1,82 +1,161 @@
 /**
- * Deck Manager class for managing game decks.
+ * POINT ZERO ONE — BACKEND DECK MANAGER
+ * backend/src/game/engine/deck_manager.ts
+ *
+ * Deterministic weighted draw pool manager.
+ *
+ * Fixes:
+ * - removes invalid Math.seedrandom usage
+ * - uses local seeded RNG
+ * - preserves weighted draw behavior without external dependencies
  */
-export class DeckManager {
-  private _drawPools: Record<string, DrawPool>;
 
-  /**
-   * Initializes the draw pools with their respective cards and weights.
-   * @param cardWeights - An object mapping card types to an array of weights for each type.
-   */
-  constructor(private readonly cardWeights: Record<string, number[]>) {
-    this._drawPools = {
-      FUBAR: new DrawPool('Fubar', cardWeights['FUBAR']),
-      OPPORTUNITY: new DrawPool('Opportunity', cardWeights['OPPORTUNITY']),
-      MISSED_OPPORTUNITY: new DrawPool('Missed Opportunity', cardWeights['MISSED_OPPORTUNITY']),
-      PRIVILEGED: new DrawPool('Privileged', cardWeights['PRIVILEGED']),
-      SO: new DrawPool('SO', cardWeights['SO'])
+export type DrawPoolName =
+  | 'FUBAR'
+  | 'OPPORTUNITY'
+  | 'MISSED_OPPORTUNITY'
+  | 'PRIVILEGED'
+  | 'SO';
+
+export interface Card {
+  readonly index: number;
+  readonly weight: number;
+}
+
+type CardWeightsByPool = Partial<Record<DrawPoolName, readonly number[]>>;
+
+function normalizeSeed(seed: number): number {
+  if (!Number.isFinite(seed)) {
+    return 0x9e3779b9;
+  }
+
+  const normalized = Math.abs(Math.trunc(seed)) >>> 0;
+  return normalized === 0 ? 0x9e3779b9 : normalized;
+}
+
+function createMulberry32(seed: number): () => number {
+  let state = normalizeSeed(seed);
+
+  return () => {
+    state += 0x6d2b79f5;
+    let t = state;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function sanitizeWeights(weights: readonly number[] | undefined): number[] {
+  if (!weights || weights.length === 0) {
+    return [];
+  }
+
+  return weights.map((weight) => {
+    if (!Number.isFinite(weight) || weight <= 0) {
+      return 1;
+    }
+
+    return weight;
+  });
+}
+
+class DrawPool {
+  private readonly cards: Card[];
+  private readonly weights: number[];
+  private orderedCards: Card[];
+  private cursor: number;
+
+  public constructor(cardWeights: readonly number[]) {
+    this.weights = sanitizeWeights(cardWeights);
+    this.cards = this.weights.map((weight, index) => ({
+      index,
+      weight,
+    }));
+    this.orderedCards = [...this.cards];
+    this.cursor = 0;
+  }
+
+  public shuffle(seed: number): void {
+    const rng = createMulberry32(seed);
+    const remainingCards = [...this.cards];
+    const remainingWeights = [...this.weights];
+    const ordered: Card[] = [];
+
+    while (remainingCards.length > 0) {
+      const totalWeight = remainingWeights.reduce((sum, weight) => sum + weight, 0);
+
+      let threshold = rng() * totalWeight;
+      let selectedIndex = 0;
+
+      for (let i = 0; i < remainingWeights.length; i += 1) {
+        threshold -= remainingWeights[i];
+        if (threshold <= 0) {
+          selectedIndex = i;
+          break;
+        }
+      }
+
+      ordered.push(remainingCards[selectedIndex]);
+      remainingCards.splice(selectedIndex, 1);
+      remainingWeights.splice(selectedIndex, 1);
+    }
+
+    this.orderedCards = ordered;
+    this.cursor = 0;
+  }
+
+  public draw(): Card | null {
+    if (this.cursor >= this.orderedCards.length) {
+      return null;
+    }
+
+    const card = this.orderedCards[this.cursor];
+    this.cursor += 1;
+    return card;
+  }
+
+  public remaining(): number {
+    return this.orderedCards.length - this.cursor;
+  }
+
+  public reset(): void {
+    this.orderedCards = [...this.cards];
+    this.cursor = 0;
+  }
+}
+
+export class DeckManager {
+  private readonly drawPools: Record<DrawPoolName, DrawPool>;
+
+  public constructor(cardWeights: CardWeightsByPool) {
+    this.drawPools = {
+      FUBAR: new DrawPool(cardWeights.FUBAR ?? []),
+      OPPORTUNITY: new DrawPool(cardWeights.OPPORTUNITY ?? []),
+      MISSED_OPPORTUNITY: new DrawPool(cardWeights.MISSED_OPPORTUNITY ?? []),
+      PRIVILEGED: new DrawPool(cardWeights.PRIVILEGED ?? []),
+      SO: new DrawPool(cardWeights.SO ?? []),
     };
   }
 
-  /**
-   * Seeds the draw pools and shuffles them.
-   * @param seed - The seed value for the random number generator.
-   */
   public seed(seed: number): void {
-    Object.values(this._drawPools).forEach((pool) => pool.shuffle(seed));
+    const baseSeed = normalizeSeed(seed);
+
+    (Object.keys(this.drawPools) as DrawPoolName[]).forEach((poolName, index) => {
+      this.drawPools[poolName].shuffle(baseSeed + index * 9973);
+    });
   }
 
-  /**
-   * Draws a card from the specified draw pool.
-   * @param poolName - The name of the draw pool to draw from.
-   * @returns The drawn card or null if the pool is empty.
-   */
-  public drawCard(poolName: string): Card | null {
-    const pool = this._drawPools[poolName];
-    return pool.draw();
-  }
-}
-
-/**
- * Represents a draw pool with a set of cards and their respective weights.
- */
-class DrawPool {
-  private _cards: Card[];
-  private _weights: number[];
-  private _shuffledCards: Card[] = [];
-  private _index: number;
-
-  constructor(name: string, cardWeights: number[]) {
-    this._cards = cardWeights.map((weight, index) => new Card(index, weight));
-    this._weights = cardWeights;
-    this._index = this._cards.length - 1;
+  public drawCard(poolName: DrawPoolName): Card | null {
+    return this.drawPools[poolName].draw();
   }
 
-  /**
-   * Shuffles the draw pool using the given seed value.
-   * @param seed - The seed value for the random number generator.
-   */
-  public shuffle(seed: number): void {
-    const rng = new Math.seedrandom(seed);
-    this._shuffledCards = this._cards.sort((a, b) => rng() * (b.weight - a.weight));
-    this._index = this._shuffledCards.length - 1;
+  public remaining(poolName: DrawPoolName): number {
+    return this.drawPools[poolName].remaining();
   }
 
-  /**
-   * Draws a card from the draw pool.
-   * @returns The drawn card or null if the pool is empty.
-   */
-  public draw(): Card | null {
-    if (this._index === -1) return null;
-
-    const card = this._shuffledCards[this._index--];
-    return card;
+  public reset(): void {
+    (Object.keys(this.drawPools) as DrawPoolName[]).forEach((poolName) => {
+      this.drawPools[poolName].reset();
+    });
   }
-}
-
-/**
- * Represents a single card in the game with an index and weight.
- */
-class Card {
-  constructor(public readonly index: number, public readonly weight: number) {}
 }
