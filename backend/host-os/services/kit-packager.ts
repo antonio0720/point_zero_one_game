@@ -1,55 +1,214 @@
-Here is the TypeScript file `backend/host-os/services/kit-packager.ts` as per your specifications:
+// /Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/backend/host-os/services/kit-packager.ts
 
-```typescript
-/**
- * KitPackager - Assembles pzo_host_os_kit_v1.zip on demand from /host-os/assets/, injects personalization (host name into 00_START_HERE.md), returns buffer
- */
+import { execFile } from 'node:child_process';
+import {
+  existsSync,
+  readdirSync,
+  readFileSync,
+  statSync,
+} from 'node:fs';
+import { promises as fs } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { promisify } from 'node:util';
 
-import * as fs from 'fs';
-import * as path from 'path';
-import * as zlib from 'zlib';
-import { exec } from 'child_process';
+const execFileAsync = promisify(execFile);
 
 export interface Asset {
-  src: string;
+  src?: string;
   dest: string;
+  content?: Buffer | string;
 }
 
-export function getAssets(): Asset[] {
-  return [
-    { src: path.join(__dirname, '..', 'assets', '00_START_HERE.md'), dest: '00_START_HERE.md' },
-    // Add more assets as needed
-  ].map((asset) => Object.freeze(asset));
+export interface KitPackagerOptions {
+  hostName: string;
+  assetsRoot?: string;
+  archiveName?: string;
 }
 
-export function personalizeStartHereFile(hostName: string, startHereContent: Buffer): Buffer {
-  const personalizedContent = startHereContent.toString().replace(/HOST_NAME/g, hostName);
-  return Buffer.from(personalizedContent);
+const DEFAULT_ARCHIVE_NAME = 'pzo_host_os_kit_v1.zip';
+const START_HERE_FILE = '00_START_HERE.md';
+
+function toPosixPath(value: string): string {
+  return value.split(path.sep).join('/');
 }
 
-export async function packKit(assets: Asset[]): Promise<Buffer> {
-  const tempDir = path.join(os.tmpdir(), 'pzo_host_os_kit');
-  await fs.promises.mkdir(tempDir, { recursive: true });
+function sanitizeArchivePath(dest: string): string {
+  const normalized = dest.replace(/\\/g, '/').replace(/^\/+/, '');
 
-  for (const asset of assets) {
-    const srcPath = asset.src;
-    const destPath = path.join(tempDir, asset.dest);
-    await fs.promises.copyFile(srcPath, destPath);
+  if (!normalized || normalized.includes('..')) {
+    throw new Error(`Invalid archive path: ${dest}`);
   }
 
-  const tempZipPath = path.join(tempDir, 'pzo_host_os_kit_v1.zip');
-  await exec(`cd ${tempDir} && zip -r ${tempZipPath} .`);
-
-  const zipBuffer = await fs.promises.readFile(tempZipPath);
-  await fs.promises.rmdir(tempDir, { recursive: true });
-  await fs.promises.unlink(tempZipPath);
-
-  return zipBuffer;
+  return normalized;
 }
 
-export function kitPackager(hostName: string): Promise<Buffer> {
-  const assets = getAssets();
-  const startHereContent = fs.readFileSync(assets[0].src);
-  const personalizedStartHereContent = personalizeStartHereFile(hostName, startHereContent);
-  return packKit([...assets, { src: personalizedStartHereContent, dest: '00_START_HERE.md' }]);
+function walkFiles(rootDir: string): string[] {
+  if (!existsSync(rootDir)) {
+    return [];
+  }
+
+  const entries = readdirSync(rootDir, { withFileTypes: true });
+  const files: string[] = [];
+
+  for (const entry of entries) {
+    const absolutePath = path.join(rootDir, entry.name);
+
+    if (entry.isDirectory()) {
+      files.push(...walkFiles(absolutePath));
+      continue;
+    }
+
+    if (entry.isFile()) {
+      files.push(absolutePath);
+    }
+  }
+
+  return files;
 }
+
+export function getAssets(
+  assetsRoot: string = path.join(__dirname, '..', 'assets'),
+): Asset[] {
+  const files = walkFiles(assetsRoot);
+
+  return files.map((absolutePath) => ({
+    src: absolutePath,
+    dest: toPosixPath(path.relative(assetsRoot, absolutePath)),
+  }));
+}
+
+export function personalizeStartHereFile(
+  hostName: string,
+  startHereContent: Buffer,
+): Buffer {
+  const resolvedHostName = hostName.trim() || 'Host';
+
+  const text = startHereContent.toString('utf8').replace(
+    /\{\{\s*HOST_NAME\s*\}\}|__HOST_NAME__|\bHOST_NAME\b/g,
+    resolvedHostName,
+  );
+
+  return Buffer.from(text, 'utf8');
+}
+
+async function materializeAssets(
+  stagingDir: string,
+  assets: readonly Asset[],
+): Promise<void> {
+  for (const asset of assets) {
+    const archivePath = sanitizeArchivePath(asset.dest);
+    const destinationPath = path.join(stagingDir, archivePath);
+
+    await fs.mkdir(path.dirname(destinationPath), { recursive: true });
+
+    if (asset.content !== undefined) {
+      await fs.writeFile(destinationPath, asset.content);
+      continue;
+    }
+
+    if (!asset.src) {
+      throw new Error(`Asset is missing both src and content: ${asset.dest}`);
+    }
+
+    await fs.copyFile(asset.src, destinationPath);
+  }
+}
+
+async function zipDirectory(
+  sourceDir: string,
+  archivePath: string,
+): Promise<void> {
+  try {
+    await execFileAsync('zip', ['-rq', archivePath, '.'], {
+      cwd: sourceDir,
+    });
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : 'Unknown zip failure';
+
+    throw new Error(
+      `Failed to build host kit archive with system zip command: ${message}`,
+    );
+  }
+}
+
+function buildDefaultStartHere(hostName: string): Buffer {
+  const content = [
+    '# Point Zero One — Host OS Kit',
+    '',
+    `Welcome, ${hostName.trim() || 'Host'}.`,
+    '',
+    'This kit was generated for Host OS distribution.',
+    '',
+    'Contents:',
+    '- Printable assets',
+    '- Starter instructions',
+    '- Operational references',
+    '',
+    'Keep this package synchronized with your current Host OS flow.',
+    '',
+  ].join('\n');
+
+  return Buffer.from(content, 'utf8');
+}
+
+export async function packKit(
+  assets: readonly Asset[],
+  archiveName: string = DEFAULT_ARCHIVE_NAME,
+): Promise<Buffer> {
+  const workspaceDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), 'pzo-host-os-kit-'),
+  );
+  const stagingDir = path.join(workspaceDir, 'payload');
+  const archivePath = path.join(workspaceDir, archiveName);
+
+  try {
+    await fs.mkdir(stagingDir, { recursive: true });
+    await materializeAssets(stagingDir, assets);
+    await zipDirectory(stagingDir, archivePath);
+    return await fs.readFile(archivePath);
+  } finally {
+    await fs.rm(workspaceDir, {
+      recursive: true,
+      force: true,
+    });
+  }
+}
+
+export async function kitPackager(
+  hostName: string,
+  options: Partial<Omit<KitPackagerOptions, 'hostName'>> = {},
+): Promise<Buffer> {
+  const assetsRoot = options.assetsRoot || path.join(__dirname, '..', 'assets');
+  const discoveredAssets = getAssets(assetsRoot);
+  const assets = [...discoveredAssets];
+
+  const startHereIndex = assets.findIndex(
+    (asset) => path.posix.basename(asset.dest) === START_HERE_FILE,
+  );
+
+  if (startHereIndex >= 0) {
+    const sourcePath = assets[startHereIndex].src;
+    const sourceBuffer = sourcePath
+      ? readFileSync(sourcePath)
+      : buildDefaultStartHere(hostName);
+
+    assets[startHereIndex] = {
+      dest: assets[startHereIndex].dest,
+      content: personalizeStartHereFile(hostName, sourceBuffer),
+    };
+  } else {
+    assets.unshift({
+      dest: START_HERE_FILE,
+      content: buildDefaultStartHere(hostName),
+    });
+  }
+
+  return await packKit(
+    assets,
+    options.archiveName || DEFAULT_ARCHIVE_NAME,
+  );
+}
+
+export default kitPackager;
