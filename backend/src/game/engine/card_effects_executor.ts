@@ -1,51 +1,80 @@
 /**
- * CardEffectsExecutor class for executing card effects on a given RunState.
+ * POINT ZERO ONE — CARD EFFECTS EXECUTOR
+ * pzo-web/src/engines/cards/CardEffectsExecutor.ts
+ *
+ * Thin execution adapter over the repo-native CardEffectResolver.
+ * This preserves the "execute a batch" ergonomics from your snippet
+ * without introducing a second parallel effect system.
+ *
+ * RULE:
+ * - Do not invent a generic RunState reducer here.
+ * - The authoritative effect path remains CardEffectResolver -> EventBus -> engines/store.
  */
+
+import { CardEffectResolver } from './CardEffectResolver';
+import type {
+  CardEffectResult,
+  CardInHand,
+  CardPlayRequest,
+} from './types';
+
+/**
+ * One executable play item.
+ */
+export interface CardEffectExecutionItem {
+  readonly card: CardInHand;
+  readonly request: CardPlayRequest;
+  readonly tickIndex: number;
+  readonly isOptimalChoice?: boolean;
+}
+
+/**
+ * Batch execution summary.
+ */
+export interface CardEffectExecutionBatchResult {
+  readonly results: readonly CardEffectResult[];
+  readonly totalCordDelta: number;
+  readonly playCount: number;
+}
+
 export class CardEffectsExecutor {
-  /**
-   * Executes a list of card effects against a given run state, returning the updated run state.
-   * @param runState - The current game state.
-   * @param cardEffects - An array of card effects to be executed.
-   */
-  public execute(runState: RunState, cardEffects: CardEffect[]): RunState {
-    return cardEffects.reduce((accumulator, current) => {
-      return accumulator.applyCardEffect(current);
-    }, runState);
+  private readonly resolver: CardEffectResolver;
+
+  public constructor(resolver: CardEffectResolver) {
+    this.resolver = resolver;
   }
 
   /**
-   * Applies a single card effect to the given run state and returns the updated run state.
-   * @param cardEffect - The card effect to be applied.
+   * Execute a single card play through the repo-native resolver.
    */
-  public applyCardEffect(cardEffect: CardEffect): RunState {
-    // Implement pure function for each card effect here.
-    throw new Error('Not implemented');
+  public executeOne(item: CardEffectExecutionItem): CardEffectResult {
+    return this.resolver.resolve(
+      item.card,
+      item.request,
+      item.tickIndex,
+      item.isOptimalChoice ?? false,
+    );
   }
-}
-
-/**
- * Represents a card effect in the game.
- */
-export interface CardEffect {
-  /**
-   * The unique identifier of the card effect.
-   */
-  id: string;
 
   /**
-   * The name of the card effect for display purposes.
+   * Execute multiple card plays in order, preserving deterministic sequencing.
    */
-  name: string;
+  public executeMany(
+    items: readonly CardEffectExecutionItem[],
+  ): CardEffectExecutionBatchResult {
+    const results: CardEffectResult[] = [];
+    let totalCordDelta = 0;
 
-  /**
-   * The function to execute the card effect against a given run state.
-   */
-  execute(runState: RunState): RunState;
-}
+    for (const item of items) {
+      const result = this.executeOne(item);
+      results.push(result);
+      totalCordDelta += result.totalCordDelta;
+    }
 
-/**
- * Represents the current game state.
- */
-export interface RunState {
-  // Define properties for each game state variable here.
+    return {
+      results,
+      totalCordDelta,
+      playCount: results.length,
+    };
+  }
 }
