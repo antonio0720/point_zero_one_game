@@ -1,6 +1,6 @@
 // /Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/backend/host-os/db/connection.ts
 
-import { Pool, type PoolClient, type QueryResult } from 'pg';
+import { Pool, type PoolClient, type QueryResult, type QueryResultRow } from 'pg';
 
 let pool: Pool | null = null;
 
@@ -41,7 +41,7 @@ export function getDb(): Pool {
   return pool;
 }
 
-export async function query<T = Record<string, unknown>>(
+export async function query<T extends QueryResultRow = QueryResultRow>(
   text: string,
   values: unknown[] = [],
 ): Promise<QueryResult<T>> {

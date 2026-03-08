@@ -224,7 +224,7 @@ export async function markHostEmailSending(
     [messageId],
   );
 
-  return result.rowCount > 0;
+  return (result.rowCount ?? 0) > 0;
 }
 
 export async function markHostEmailSent(
