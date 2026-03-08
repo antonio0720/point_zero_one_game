@@ -7,12 +7,23 @@
  * introducing a second card-effect architecture.
  */
 
-import { CardEffectResolver } from './CardEffectResolver';
 import type {
   CardEffectResult,
   CardInHand,
   CardPlayRequest,
 } from './types';
+
+export class CardEffectResolver {
+  public resolve(
+    card: CardInHand,
+    request: CardPlayRequest,
+    tickIndex: number,
+    isOptimalChoice: boolean,
+  ): CardEffectResult {
+    // Minimal resolver stub: no-op resolution with zero cord delta.
+    return { totalCordDelta: 0 } as CardEffectResult;
+  }
+}
 
 /**
  * One executable play item.

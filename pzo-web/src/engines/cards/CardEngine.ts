@@ -67,7 +67,22 @@ import { ModeOverlayEngine }           from './ModeOverlayEngine';
 import { TimingValidator }             from './TimingValidator';
 import type { EngineStateSnapshot }    from './TimingValidator';
 import { CardEffectResolver }          from './CardEffectResolver';
-import { CardEffectsExecutor }         from './CardEffectsExecutor';
+
+class CardEffectsExecutor {
+  private resolver: CardEffectResolver;
+  constructor(resolver: CardEffectResolver) {
+    this.resolver = resolver;
+  }
+
+  public executeOne(params: any): any {
+    const r: any = this.resolver as any;
+    if (typeof r.executeOne === 'function') return r.executeOne(params);
+    if (typeof r.execute === 'function') return r.execute(params);
+    if (typeof r.resolve === 'function') return r.resolve(params);
+    throw new Error('CardEffectResolver does not expose an execute method');
+  }
+}
+
 import { DecisionWindowManager }       from './DecisionWindowManager';
 import { ForcedCardQueue }             from './ForcedCardQueue';
 import { CardScorer }                  from './CardScorer';
