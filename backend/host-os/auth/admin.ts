@@ -1,55 +1,81 @@
-//backend/host-os/auth/admin.ts
+// backend/host-os/auth/admin.ts
 
-import { timingSafeEqual } from 'node:crypto';
+import { createHash, timingSafeEqual } from 'node:crypto';
 import type { Request, RequestHandler } from 'express';
 
-function getConfiguredAdminApiKey(): string {
-  return (process.env.HOST_OS_ADMIN_API_KEY ?? '').trim();
+const ADMIN_API_KEY_HEADERS = [
+  'x-admin-api-key',
+  'x-host-os-admin-api-key',
+] as const;
+
+const ADMIN_BEARER_REALM = 'pzo-host-os-admin';
+
+function normalizeSecret(value: string | undefined | null): string {
+  return (value ?? '').trim();
+}
+
+function getConfiguredAdminApiKeys(): string[] {
+  const keys = [
+    normalizeSecret(process.env.HOST_OS_ADMIN_API_KEY),
+    normalizeSecret(process.env.HOST_OS_ADMIN_API_KEY_PREVIOUS),
+  ].filter((value): value is string => value.length > 0);
+
+  return Array.from(new Set(keys));
+}
+
+function extractBearerToken(rawAuthorization: string | undefined): string {
+  const authorization = normalizeSecret(rawAuthorization);
+  if (!authorization) {
+    return '';
+  }
+
+  const match = authorization.match(/^Bearer\s+(.+)$/i);
+  return normalizeSecret(match?.[1]);
 }
 
 function extractPresentedApiKey(req: Request): string {
-  const directKey = req.get('x-admin-api-key');
-  if (directKey && directKey.trim().length > 0) {
-    return directKey.trim();
+  for (const headerName of ADMIN_API_KEY_HEADERS) {
+    const headerValue = normalizeSecret(req.get(headerName));
+    if (headerValue) {
+      return headerValue;
+    }
   }
 
-  const authHeader = req.get('authorization');
-  if (authHeader) {
-    const match = authHeader.match(/^Bearer\s+(.+)$/i);
-    if (match?.[1]) {
-      return match[1].trim();
-    }
+  const bearerToken = extractBearerToken(req.get('authorization'));
+  if (bearerToken) {
+    return bearerToken;
   }
 
   return '';
 }
 
+function digestSecret(value: string): Buffer {
+  return createHash('sha256').update(value, 'utf8').digest();
+}
+
 function secureEquals(left: string, right: string): boolean {
-  const leftBuffer = Buffer.from(left);
-  const rightBuffer = Buffer.from(right);
-
-  if (leftBuffer.length !== rightBuffer.length) {
-    return false;
-  }
-
-  return timingSafeEqual(leftBuffer, rightBuffer);
+  const leftDigest = digestSecret(left);
+  const rightDigest = digestSecret(right);
+  return timingSafeEqual(leftDigest, rightDigest);
 }
 
 export function isAdminRequestAuthorized(req: Request): boolean {
-  const expected = getConfiguredAdminApiKey();
+  const configuredKeys = getConfiguredAdminApiKeys();
   const provided = extractPresentedApiKey(req);
 
-  if (!expected || !provided) {
+  if (configuredKeys.length === 0 || !provided) {
     return false;
   }
 
-  return secureEquals(provided, expected);
+  return configuredKeys.some((expected) => secureEquals(provided, expected));
 }
 
 export const requireAdminApiKey: RequestHandler = (req, res, next) => {
-  const expected = getConfiguredAdminApiKey();
+  const configuredKeys = getConfiguredAdminApiKeys();
 
-  if (!expected) {
+  res.setHeader('Cache-Control', 'no-store');
+
+  if (configuredKeys.length === 0) {
     return res.status(503).json({
       ok: false,
       error: 'HOST_OS_ADMIN_API_KEY is not configured.',
@@ -57,6 +83,11 @@ export const requireAdminApiKey: RequestHandler = (req, res, next) => {
   }
 
   if (!isAdminRequestAuthorized(req)) {
+    res.setHeader(
+      'WWW-Authenticate',
+      `Bearer realm="${ADMIN_BEARER_REALM}"`,
+    );
+
     return res.status(401).json({
       ok: false,
       error: 'Unauthorized',
