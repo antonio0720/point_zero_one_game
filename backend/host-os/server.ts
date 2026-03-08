@@ -1,9 +1,8 @@
-// /Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/backend/host-os/server.ts
-
 /**
  * Point Zero One — Host OS Service
  * Standalone Express service for host kit delivery, email tracking,
- * nurture dispatch, and Host OS operational flows.
+ * nurture dispatch, invite resolution, printable delivery, moment logging,
+ * and Host OS operational flows.
  */
 
 import express, {
@@ -11,19 +10,28 @@ import express, {
   type Request,
   type Response,
 } from 'express';
-import analyticsRouter from './routes/analytics';
 import kitDownloadRouter from './routes/kit-download';
 import emailTrackingRouter from './routes/email-tracking';
 import emailDispatchRouter from './routes/email-dispatch';
+import invitesRouter from './routes/invites';
+import statsRouter from './routes/stats';
+import momentsRouter from './routes/moments';
+import printablesRouter from './routes/printables';
 import { closeDb, pingDb } from './db/connection';
 import { ensureHostRegistrationSchema } from './db/host-registrations';
 import { ensureHostEmailSchema } from './db/host-email-events';
+import { ensureHostInviteSchema } from './db/host-invites';
+import { ensureHostMomentSchema } from './db/host-moments';
+import { ensureHostPrintableSchema } from './db/host-printables';
 
 const DEFAULT_PORT = 4317;
 
 export async function createHostOsApp(): Promise<Express> {
   await ensureHostRegistrationSchema();
   await ensureHostEmailSchema();
+  await ensureHostInviteSchema();
+  await ensureHostMomentSchema();
+  await ensureHostPrintableSchema();
 
   const app = express();
 
@@ -45,7 +53,10 @@ export async function createHostOsApp(): Promise<Express> {
   app.use('/host/download', kitDownloadRouter);
   app.use('/host/email', emailTrackingRouter);
   app.use('/host/internal/email', emailDispatchRouter);
-  app.use('/host/internal/analytics', analyticsRouter);
+  app.use('/host/invite', invitesRouter);
+  app.use('/host/stats', statsRouter);
+  app.use('/host/moments', momentsRouter);
+  app.use('/host/printables', printablesRouter);
 
   app.use((req: Request, res: Response) => {
     res.status(404).json({

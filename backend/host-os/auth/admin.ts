@@ -3,19 +3,19 @@
 import { timingSafeEqual } from 'node:crypto';
 import type { Request, RequestHandler } from 'express';
 
-function getExpectedAdminApiKey(): string {
+function getConfiguredAdminApiKey(): string {
   return (process.env.HOST_OS_ADMIN_API_KEY ?? '').trim();
 }
 
-function getPresentedAdminApiKey(req: Request): string {
-  const headerApiKey = req.get('x-admin-api-key');
-  if (headerApiKey && headerApiKey.trim().length > 0) {
-    return headerApiKey.trim();
+function extractPresentedApiKey(req: Request): string {
+  const directKey = req.get('x-admin-api-key');
+  if (directKey && directKey.trim().length > 0) {
+    return directKey.trim();
   }
 
-  const authorization = req.get('authorization');
-  if (authorization) {
-    const match = authorization.match(/^Bearer\s+(.+)$/i);
+  const authHeader = req.get('authorization');
+  if (authHeader) {
+    const match = authHeader.match(/^Bearer\s+(.+)$/i);
     if (match?.[1]) {
       return match[1].trim();
     }
@@ -36,23 +36,23 @@ function secureEquals(left: string, right: string): boolean {
 }
 
 export function isAdminRequestAuthorized(req: Request): boolean {
-  const expected = getExpectedAdminApiKey();
-  const presented = getPresentedAdminApiKey(req);
+  const expected = getConfiguredAdminApiKey();
+  const provided = extractPresentedApiKey(req);
 
-  if (!expected || !presented) {
+  if (!expected || !provided) {
     return false;
   }
 
-  return secureEquals(presented, expected);
+  return secureEquals(provided, expected);
 }
 
 export const requireAdminApiKey: RequestHandler = (req, res, next) => {
-  const expected = getExpectedAdminApiKey();
+  const expected = getConfiguredAdminApiKey();
 
   if (!expected) {
     return res.status(503).json({
       ok: false,
-      error: 'Admin API key is not configured.',
+      error: 'HOST_OS_ADMIN_API_KEY is not configured.',
     });
   }
 

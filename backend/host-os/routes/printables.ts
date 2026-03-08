@@ -1,50 +1,155 @@
-///Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/backend/host-os/routes/printables.ts
+//backend/host-os/routes/printables.ts
 
-```typescript
-import express from 'express';
-import { PDFDocument } from 'pdf-lib';
-import { Cache } from './cache';
-import { Database } from './database';
+import { Router, type Request, type Response } from 'express';
+import Joi from 'joi';
+import Redis from 'ioredis';
+import {
+  getHostPrintableByType,
+  normalizePrintableType,
+  type HostPrintable,
+} from '../db/host-printables';
+import { sendGhlHostEvent } from '../services/ghl-host-webhook';
 
-const router = express.Router();
-const cache = new Cache();
-const db = new Database();
+const router = Router();
 
-interface PrintableType {
-  type: string;
-}
+const redisUrl = process.env.HOST_OS_REDIS_URL?.trim();
+const redis = redisUrl
+  ? new Redis(redisUrl, {
+      maxRetriesPerRequest: 1,
+      enableReadyCheck: false,
+      lazyConnect: true,
+    })
+  : null;
 
-router.get('/host/printables/:type', async (req, res) => {
-  const { type } = req.params;
+const inMemoryCache = new Map<
+  string,
+  { printable: HostPrintable; expiresAtMs: number }
+>();
 
-  // Check if the printable is in cache
-  const cachedPrintable = await cache.get(type);
-  if (cachedPrintable) {
-    res.set('Content-Type', 'application/pdf');
-    res.send(cachedPrintable);
-    return;
-  }
-
-  // Fetch the printable from the database
-  const printable = await db.getPrintable(type);
-
-  // Generate PDF on demand
-  const pdfDoc = await PDFDocument.create();
-  // ... (Add your logic to populate the PDFDoc with the printable data)
-
-  // Save the generated PDF in cache for 24 hours
-  await cache.set(type, pdfDoc.save());
-
-  // Send the generated PDF as response
-  res.set('Content-Type', 'application/pdf');
-  res.send(pdfDoc.save());
+const paramsSchema = Joi.object({
+  type: Joi.string().trim().max(64).required(),
 });
 
-export { router };
-```
+const querySchema = Joi.object({
+  meta: Joi.boolean().truthy('1').truthy('true').falsy('0').falsy('false').default(false),
+});
 
-Please note that this is a simplified example and you'll need to implement the logic for populating the `PDFDocument` with the printable data based on the type provided in the request. Also, the database abstraction layer (`Database`) and cache implementation (`Cache`) are not provided here.
+router.get('/:type', async (req: Request, res: Response) => {
+  const paramsValidation = paramsSchema.validate(req.params, {
+    abortEarly: false,
+    stripUnknown: true,
+  });
 
-Regarding the SQL schema, I won't be able to provide it as it requires knowledge about your specific database structure and naming conventions. However, you should create a table for printables with an id column as primary key, a type column to store the printable type, and a content column to store the binary data of the PDF. Don't forget to include indexes on the type and content columns.
+  if (paramsValidation.error) {
+    return res.status(400).json({
+      ok: false,
+      error: paramsValidation.error.message,
+    });
+  }
 
-For Bash scripts, YAML/JSON files, or Terraform configurations, I won't be able to provide examples as they are not part of the given spec.
+  const queryValidation = querySchema.validate(req.query, {
+    abortEarly: false,
+    stripUnknown: true,
+    convert: true,
+  });
+
+  if (queryValidation.error) {
+    return res.status(400).json({
+      ok: false,
+      error: queryValidation.error.message,
+    });
+  }
+
+  try {
+    const printableType = normalizePrintableType(paramsValidation.value.type);
+    const printable = await getCachedPrintable(printableType);
+
+    if (!printable || !printable.enabled) {
+      return res.status(404).json({
+        ok: false,
+        error: 'Printable not found.',
+      });
+    }
+
+    void sendGhlHostEvent('host_printable_opened', {
+      printableId: printable.id,
+      printableType: printable.type,
+      assetUrl: printable.assetUrl,
+    });
+
+    if (queryValidation.value.meta) {
+      return res.status(200).json({
+        ok: true,
+        printable: {
+          id: printable.id,
+          type: printable.type,
+          title: printable.title,
+          description: printable.description,
+          assetUrl: printable.assetUrl,
+          cacheTtlSeconds: printable.cacheTtlSeconds,
+        },
+      });
+    }
+
+    return res.redirect(302, printable.assetUrl);
+  } catch (routeError) {
+    console.error('[host-os][printables] failed to resolve printable', routeError);
+
+    return res.status(500).json({
+      ok: false,
+      error: 'Internal server error',
+    });
+  }
+});
+
+async function getCachedPrintable(type: string): Promise<HostPrintable | null> {
+  const localEntry = inMemoryCache.get(type);
+  if (localEntry && localEntry.expiresAtMs > Date.now()) {
+    return localEntry.printable;
+  }
+
+  const redisKey = `host-os:printables:${type}`;
+
+  if (redis) {
+    try {
+      const cached = await redis.get(redisKey);
+      if (cached) {
+        const printable = JSON.parse(cached) as HostPrintable;
+        inMemoryCache.set(type, {
+          printable,
+          expiresAtMs: Date.now() + printable.cacheTtlSeconds * 1000,
+        });
+        return printable;
+      }
+    } catch (redisError) {
+      console.error('[host-os][printables] redis read failed', redisError);
+    }
+  }
+
+  const printable = await getHostPrintableByType(type);
+  if (!printable) {
+    return null;
+  }
+
+  inMemoryCache.set(type, {
+    printable,
+    expiresAtMs: Date.now() + printable.cacheTtlSeconds * 1000,
+  });
+
+  if (redis) {
+    try {
+      await redis.set(
+        redisKey,
+        JSON.stringify(printable),
+        'EX',
+        printable.cacheTtlSeconds,
+      );
+    } catch (redisError) {
+      console.error('[host-os][printables] redis write failed', redisError);
+    }
+  }
+
+  return printable;
+}
+
+export default router;

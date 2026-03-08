@@ -1,122 +1,117 @@
 /**
  * Moments routes for the Point Zero One Digital backend.
+ * backend/host-os/routes/moments.ts
  */
 
-import express from 'express';
-import { Moment, MomentDocument } from '../models/moment';
-import { verifyEmail } from '../../auth/email-verification';
+import { Router, type Request, type Response } from 'express';
+import joi from 'joi';
+import { createHostMoment, listHostMomentsBySessionId } from '../db/host-moments';
+import { sendGhlHostEvent } from '../services/ghl-host-webhook';
 
-const router = express.Router();
+const router = Router();
 
-// POST /host/moments - Log a moment to the database
-router.post('/host/moments', async (req, res) => {
-  const { momentCode, gameSeed, tick, hostEmail } = req.body;
+const createMomentSchema = joi.object({
+  sessionId: joi.string().trim().max(128).required(),
+  hostEmail: joi.string().email({ tlds: { allow: false } }).required(),
+  momentCode: joi.string().trim().max(128).required(),
+  gameSeed: joi.string().trim().max(128).required(),
+  tick: joi.number().integer().min(0).required(),
+  metadataJson: joi.object().unknown(true).default({}),
+});
 
-  // Verify the host email is valid before logging the moment
-  await verifyEmail(hostEmail);
+const listParamsSchema = joi.object({
+  sessionId: joi.string().trim().max(128).required(),
+});
 
-  const newMoment: Moment = new Moment({
-    momentCode,
-    gameSeed,
-    tick,
-    hostEmail,
+const listQuerySchema = joi.object({
+  limit: joi.number().integer().min(1).max(1000).default(250),
+});
+
+router.post('/', async (req: Request, res: Response) => {
+  const { error, value } = createMomentSchema.validate(req.body ?? {}, {
+    abortEarly: false,
+    stripUnknown: true,
+    convert: true,
   });
 
+  if (error) {
+    return res.status(400).json({
+      ok: false,
+      error: error.message,
+    });
+  }
+
   try {
-    const savedMoment: MomentDocument = await newMoment.save();
-    res.status(201).json(savedMoment);
-  } catch (error) {
-    console.error('Error logging moment:', error);
-    res.status(500).send('Error logging moment');
+    const moment = await createHostMoment(value);
+
+    void sendGhlHostEvent('host_moment_logged', {
+      momentId: moment.id,
+      sessionId: moment.sessionId,
+      hostEmail: moment.hostEmail,
+      momentCode: moment.momentCode,
+      tick: moment.tick,
+      createdAt: moment.createdAt,
+    });
+
+    return res.status(201).json({
+      ok: true,
+      moment,
+    });
+  } catch (routeError) {
+    console.error('[host-os][moments] failed to create moment', routeError);
+
+    return res.status(500).json({
+      ok: false,
+      error: 'Internal server error',
+    });
   }
 });
 
-// GET /host/moments/:session_id - Retrieve all moments for a session with timestamps
-router.get('/host/moments/:sessionId', async (req, res) => {
-  const { sessionId } = req.params;
+router.get('/:sessionId', async (req: Request, res: Response) => {
+  const paramsValidation = listParamsSchema.validate(req.params, {
+    abortEarly: false,
+    stripUnknown: true,
+  });
+
+  if (paramsValidation.error) {
+    return res.status(400).json({
+      ok: false,
+      error: paramsValidation.error.message,
+    });
+  }
+
+  const queryValidation = listQuerySchema.validate(req.query, {
+    abortEarly: false,
+    stripUnknown: true,
+    convert: true,
+  });
+
+  if (queryValidation.error) {
+    return res.status(400).json({
+      ok: false,
+      error: queryValidation.error.message,
+    });
+  }
 
   try {
-    const moments: MomentDocument[] = await Moment.find({ sessionId })
-      .sort('-createdAt')
-      .exec();
+    const moments = await listHostMomentsBySessionId(
+      paramsValidation.value.sessionId,
+      queryValidation.value.limit,
+    );
 
-    const formattedMoments: Moment[] = moments.map((moment) => ({
-      ...moment.toJSON(),
-      createdAt: moment.createdAt.toISOString(),
-    }));
+    return res.status(200).json({
+      ok: true,
+      count: moments.length,
+      moments,
+    });
+  } catch (routeError) {
+    console.error('[host-os][moments] failed to list moments', routeError);
 
-    res.json(formattedMoments);
-  } catch (error) {
-    console.error('Error retrieving moments:', error);
-    res.status(500).send('Error retrieving moments');
+    return res.status(500).json({
+      ok: false,
+      error: 'Internal server error',
+    });
   }
 });
 
 export default router;
-```
-
-```sql
--- Moment model for Point Zero One Digital backend
-CREATE TABLE IF NOT EXISTS moments (
-  _id MongoID PRIMARY KEY,
-  momentCode VARCHAR(255) NOT NULL,
-  gameSeed VARCHAR(255) NOT NULL,
-  tick INTEGER NOT NULL,
-  hostEmail VARCHAR(255) NOT NULL,
-  sessionId VARCHAR(255),
-  createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  UNIQUE (momentCode, gameSeed, tick, hostEmail)
-);
-
--- Indexes for the Moment model
-CREATE INDEX IF NOT EXISTS moment_sessionId_idx ON moments (sessionId);
-```
-
-```bash
-#!/bin/sh
-set -euo pipefail
-
-echo "Logging action: Creating or updating a moment"
-
-# Your script to log the moment goes here
-```
-
-```yaml
-data "aws_caller_identity" "current" {}
-
-resource "aws_dynamodb_table" "moments" {
-  name           = "pz1-moments"
-  read_capacity  = 5
-  write_capacity = 5
-  hash_key       = "momentCode"
-
-  attribute {
-    name = "momentCode"
-    type = "S"
-  }
-
-  attribute {
-    name = "gameSeed"
-    type = "S"
-  }
-
-  attribute {
-    name = "tick"
-    type = "N"
-  }
-
-  attribute {
-    name = "hostEmail"
-    type = "S"
-  }
-
-  attribute {
-    name = "sessionId"
-    type = "S"
-  }
-
-  tags = {
-    Name        = "pz1-moments"
-    Environment = "${var.environment}"
-  }
-}

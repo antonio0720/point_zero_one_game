@@ -2,82 +2,151 @@
  * Routes for handling host invites
  */
 
-import express from 'express';
-import { Request, Response } from 'express';
-import db from '../database';
-import WebhookClient from '@google-cloud/webhook';
+import { Router, type Request, type Response } from 'express';
+import joi from 'joi';
+import {
+  getHostInviteByToken,
+  isHostInviteExpired,
+  markHostInviteOpened,
+  markHostInviteRsvp,
+} from '../db/host-invites';
+import { getHostOsPublicBaseUrl } from '../services/host-email-links';
+import { sendGhlHostEvent } from '../services/ghl-host-webhook';
 
-const router = express.Router();
+const router = Router();
 
-// Define the schema for the HostInvite table
-const hostInviteTable = `
-  CREATE TABLE IF NOT EXISTS host_invites (
-    id SERIAL PRIMARY KEY,
-    token VARCHAR(255) UNIQUE NOT NULL,
-    session_id VARCHAR(255),
-    host_name TEXT,
-    created_at TIMESTAMP DEFAULT NOW(),
-    expires_at TIMESTAMP
-  );
-`;
+const paramsSchema = joi.object({
+  token: joi.string().pattern(/^[A-Za-z0-9_-]{16,128}$/).required(),
+});
 
-// Define the schema for the Sessions table
-const sessionsTable = `
-  CREATE TABLE IF NOT EXISTS sessions (
-    id SERIAL PRIMARY KEY,
-    date DATE NOT NULL,
-    format VARCHAR(255) NOT NULL,
-    host_id INTEGER REFERENCES hosts(id),
-    FOREIGN KEY (host_id) REFERENCES hosts(id) ON DELETE CASCADE
-  );
-`;
-
-// Define the schema for the Hosts table
-const hostsTable = `
-  CREATE TABLE IF NOT EXISTS hosts (
-    id SERIAL PRIMARY KEY,
-    name TEXT UNIQUE NOT NULL
-  );
-`;
-
-router.get('/host/invite/:token', async (req: Request, res: Response) => {
-  // Check if the invite token exists in the database
-  const result = await db.query('SELECT * FROM host_invites WHERE token = $1', [req.params.token]);
-
-  if (result.rowCount === 0) {
-    return res.status(404).json({ error: 'Invite not found' });
-  }
-
-  const invite = result.rows[0];
-  const session = await db.query('SELECT * FROM sessions WHERE id = $1', [invite.session_id]);
-
-  if (session.rowCount === 0) {
-    return res.status(500).json({ error: 'Session not found' });
-  }
-
-  // RSVP the invite and update the database
-  await db.query('UPDATE host_invites SET session_id = $1 WHERE token = $2', [invite.session_id, req.params.token]);
-
-  // Log the RSVP to the database
-  await db.query('INSERT INTO rsvps (host_id, session_id, rsvp_time) VALUES ($1, $2, NOW())', [invite.host_id, invite.session_id]);
-
-  // Send a webhook to Google Hangouts Link Sharing (GHL) to notify the player of the invitation
-  const client = new WebhookClient({ url: process.env.GHL_WEBHOOK_URL });
-  await client.send({
-    text: `You have been invited to a financial roguelike game on ${session.rows[0].date} at ${session.rows[0].format}. RSVP now!`,
-    recipient: {
-      id: invite.host_id,
-    },
+router.get('/:token', async (req: Request, res: Response) => {
+  const { error, value } = paramsSchema.validate(req.params, {
+    abortEarly: false,
+    stripUnknown: true,
   });
 
-  res.json({
-    session: {
-      date: session.rows[0].date,
-      format: session.rows[0].format,
-      hostName: invite.host_name,
-    },
-    rsvpUrl: `/rsvp/${req.params.token}`,
+  if (error) {
+    return res.status(400).json({
+      ok: false,
+      error: error.message,
+    });
+  }
+
+  try {
+    const invite = await getHostInviteByToken(value.token);
+
+    if (!invite) {
+      return res.status(404).json({
+        ok: false,
+        error: 'Invite not found.',
+      });
+    }
+
+    if (isHostInviteExpired(invite)) {
+      return res.status(410).json({
+        ok: false,
+        error: 'Invite expired.',
+      });
+    }
+
+    const openedInvite = (await markHostInviteOpened(value.token)) ?? invite;
+
+    void sendGhlHostEvent('host_invite_opened', {
+      inviteId: openedInvite.id,
+      token: openedInvite.token,
+      sessionId: openedInvite.sessionId,
+      hostEmail: openedInvite.hostEmail,
+      hostName: openedInvite.hostName,
+      openedAt: openedInvite.openedAt,
+    });
+
+    return res.status(200).json({
+      ok: true,
+      invite: {
+        token: openedInvite.token,
+        sessionId: openedInvite.sessionId,
+        hostEmail: openedInvite.hostEmail,
+        hostName: openedInvite.hostName,
+        sessionAt: openedInvite.sessionAt,
+        sessionFormat: openedInvite.sessionFormat,
+        expiresAt: openedInvite.expiresAt,
+      },
+      rsvpUrl: `${getHostOsPublicBaseUrl()}/host/invite/${encodeURIComponent(
+        openedInvite.token,
+      )}/rsvp`,
+    });
+  } catch (routeError) {
+    console.error('[host-os][invites] failed to load invite', routeError);
+
+    return res.status(500).json({
+      ok: false,
+      error: 'Internal server error',
+    });
+  }
+});
+
+router.post('/:token/rsvp', async (req: Request, res: Response) => {
+  const { error, value } = paramsSchema.validate(req.params, {
+    abortEarly: false,
+    stripUnknown: true,
   });
+
+  if (error) {
+    return res.status(400).json({
+      ok: false,
+      error: error.message,
+    });
+  }
+
+  try {
+    const invite = await getHostInviteByToken(value.token);
+
+    if (!invite) {
+      return res.status(404).json({
+        ok: false,
+        error: 'Invite not found.',
+      });
+    }
+
+    if (isHostInviteExpired(invite)) {
+      return res.status(410).json({
+        ok: false,
+        error: 'Invite expired.',
+      });
+    }
+
+    const rsvpedInvite = (await markHostInviteRsvp(value.token)) ?? invite;
+
+    void sendGhlHostEvent('host_invite_rsvp', {
+      inviteId: rsvpedInvite.id,
+      token: rsvpedInvite.token,
+      sessionId: rsvpedInvite.sessionId,
+      hostEmail: rsvpedInvite.hostEmail,
+      hostName: rsvpedInvite.hostName,
+      rsvpAt: rsvpedInvite.rsvpAt,
+    });
+
+    return res.status(200).json({
+      ok: true,
+      invite: {
+        token: rsvpedInvite.token,
+        sessionId: rsvpedInvite.sessionId,
+        hostEmail: rsvpedInvite.hostEmail,
+        hostName: rsvpedInvite.hostName,
+        sessionAt: rsvpedInvite.sessionAt,
+        sessionFormat: rsvpedInvite.sessionFormat,
+        rsvpAt: rsvpedInvite.rsvpAt,
+      },
+      message: 'RSVP recorded.',
+    });
+  } catch (routeError) {
+    console.error('[host-os][invites] failed to RSVP invite', routeError);
+
+    return res.status(500).json({
+      ok: false,
+      error: 'Internal server error',
+    });
+  }
 });
 
 export default router;
