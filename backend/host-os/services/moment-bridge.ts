@@ -1,40 +1,103 @@
 /**
- * MomentBridge service for mapping GameEngine moment events to HOS moment codes and emitting host_moment_fired event.
+ * /Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/backend/host-os/services/moment-bridge.ts
+ *
+ * MomentBridge
+ * Maps engine-facing moment events to Host OS moment codes and emits
+ * a normalized `host_moment_fired` payload for downstream consumers.
  */
 
-import { EventEmitter } from 'events';
-import { GameEngineEvent, HostMomentFiredEvent } from './interfaces';
+import { EventEmitter } from 'node:events';
 
-interface MomentMap {
-  [GameEngineEvent: string]: string;
+export type GameEngineEvent =
+  | 'FUBAR_KILLED_ME'
+  | 'OPPORTUNITY_FLIP'
+  | 'MISSED_THE_BAG'
+  | (string & {});
+
+export interface HostMomentFiredEvent {
+  code: string;
+  tick: number;
+  player: string;
+  sourceEvent: GameEngineEvent;
+  occurredAt: string;
 }
 
-const momentMap: MomentMap = {
+export interface MomentBridgeOptions {
+  momentMap?: Readonly<Record<string, string>>;
+  emitUnknownEvents?: boolean;
+  unknownCode?: string;
+}
+
+const DEFAULT_MOMENT_MAP: Readonly<Record<string, string>> = Object.freeze({
   FUBAR_KILLED_ME: 'B01',
   OPPORTUNITY_FLIP: 'A01',
   MISSED_THE_BAG: 'C01',
-};
+});
 
-class MomentBridge extends EventEmitter {
-  private gameEngineEvents: GameEngineEvent[];
+function normalizeEventName(event: string): string {
+  return event.trim().toUpperCase().replace(/\s+/g, '_');
+}
 
-  constructor() {
+export class MomentBridge extends EventEmitter {
+  private readonly momentMap: Readonly<Record<string, string>>;
+  private readonly emitUnknownEvents: boolean;
+  private readonly unknownCode: string;
+
+  public constructor(options: MomentBridgeOptions = {}) {
     super();
-    this.gameEngineEvents = Object.keys(momentMap);
+
+    this.momentMap = Object.freeze({
+      ...DEFAULT_MOMENT_MAP,
+      ...(options.momentMap ?? {}),
+    });
+
+    this.emitUnknownEvents = options.emitUnknownEvents ?? false;
+    this.unknownCode = options.unknownCode?.trim() || 'UNK';
+  }
+
+  public getSupportedGameEngineEvents(): GameEngineEvent[] {
+    return Object.keys(this.momentMap);
+  }
+
+  public resolveMomentCode(event: GameEngineEvent): string | null {
+    const normalizedEvent = normalizeEventName(String(event));
+    return this.momentMap[normalizedEvent] ?? null;
   }
 
   /**
-   * Listens to the specified game engine event and emits a host_moment_fired event with the corresponding HOS moment code, tick, and player.
-   * @param event - The game engine event to listen to.
-   * @param tick - The current game tick.
-   * @param player - The player associated with the event.
+   * Emits `host_moment_fired` if a mapped moment code is found.
+   * Returns the emitted payload, or null if the event is unmapped and
+   * unknown-event emission is disabled.
    */
-  public listenToGameEngineEvent(event: GameEngineEvent, tick: number, player: string) {
-    this.emit('host_moment_fired', {
-      code: momentMap[event],
-      tick,
-      player,
-    });
+  public listenToGameEngineEvent(
+    event: GameEngineEvent,
+    tick: number,
+    player: string,
+  ): HostMomentFiredEvent | null {
+    const normalizedEvent = normalizeEventName(String(event));
+    const mappedCode = this.momentMap[normalizedEvent];
+
+    if (!mappedCode && !this.emitUnknownEvents) {
+      return null;
+    }
+
+    const payload: HostMomentFiredEvent = {
+      code: mappedCode ?? this.unknownCode,
+      tick: Number.isFinite(tick) ? Math.max(0, Math.trunc(tick)) : 0,
+      player: player.trim(),
+      sourceEvent: normalizedEvent,
+      occurredAt: new Date().toISOString(),
+    };
+
+    this.emit('host_moment_fired', payload);
+    return payload;
+  }
+
+  public onHostMomentFired(
+    listener: (payload: HostMomentFiredEvent) => void,
+  ): this {
+    this.on('host_moment_fired', listener);
+    return this;
   }
 }
 
