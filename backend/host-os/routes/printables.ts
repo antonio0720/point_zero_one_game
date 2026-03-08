@@ -1,4 +1,4 @@
-Here is the TypeScript code for the `printables` route as per your specifications:
+///Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/backend/host-os/routes/printables.ts
 
 ```typescript
 import express from 'express';
