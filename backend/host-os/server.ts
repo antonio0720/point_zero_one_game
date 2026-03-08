@@ -13,7 +13,7 @@ import express, {
 import kitDownloadRouter from './routes/kit-download';
 import emailTrackingRouter from './routes/email-tracking';
 import emailDispatchRouter from './routes/email-dispatch';
-import invitesRouter from './routes/invites';
+import inviteRouter from './routes/invite';
 import statsRouter from './routes/stats';
 import momentsRouter from './routes/moments';
 import printablesRouter from './routes/printables';
@@ -53,7 +53,7 @@ export async function createHostOsApp(): Promise<Express> {
   app.use('/host/download', kitDownloadRouter);
   app.use('/host/email', emailTrackingRouter);
   app.use('/host/internal/email', emailDispatchRouter);
-  app.use('/host/invite', invitesRouter);
+  app.use('/host/invite', inviteRouter);
   app.use('/host/stats', statsRouter);
   app.use('/host/moments', momentsRouter);
   app.use('/host/printables', printablesRouter);
