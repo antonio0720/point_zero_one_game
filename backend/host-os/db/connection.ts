@@ -1,4 +1,19 @@
-// backend/host-os/db/connection.ts
+/**
+ * Point Zero One — Host OS Database Connection Spine
+ * File: backend/host-os/db/connection.ts
+ *
+ * Purpose:
+ * - Centralized PostgreSQL pool creation and lifecycle management
+ * - Typed query helpers
+ * - Writable-primary enforcement for write-capable Host OS flows
+ * - Transaction wrapper with strict transaction option validation
+ * - Topology inspection for health and operational diagnostics
+ *
+ * Notes:
+ * - Keeps the public API already used by Host OS sibling modules
+ * - Adds safer connection-string validation and SSL inference
+ * - Remains dependency-neutral: no new packages required
+ */
 
 import { URL } from 'node:url';
 import {
@@ -8,6 +23,10 @@ import {
   type QueryResult,
   type QueryResultRow,
 } from 'pg';
+
+// -----------------------------------------------------------------------------
+// Types
+// -----------------------------------------------------------------------------
 
 export type IsolationLevel =
   | 'READ COMMITTED'
@@ -56,13 +75,11 @@ interface TopologyRow extends QueryResultRow {
   observed_at_utc: string;
 }
 
-type ConnectionStringEnvName =
-  | 'HOST_OS_DATABASE_URL'
-  | 'DATABASE_URL'
-  | 'POSTGRES_URL'
-  | 'PG_URL';
+// -----------------------------------------------------------------------------
+// Constants
+// -----------------------------------------------------------------------------
 
-const CONNECTION_STRING_ENV_ORDER: readonly ConnectionStringEnvName[] = [
+const CONNECTION_STRING_ENV_ORDER = [
   'HOST_OS_DATABASE_URL',
   'DATABASE_URL',
   'POSTGRES_URL',
@@ -79,6 +96,7 @@ const DEFAULT_MAX_USES = 10_000;
 
 const READINESS_PROBE_SQL = 'SELECT 1';
 const PING_SQL = 'SELECT 1 AS ok';
+
 const TOPOLOGY_SQL = `
   SELECT
     current_database() AS database_name,
@@ -97,6 +115,10 @@ const TOPOLOGY_SQL = `
 let configCache: HostOsDbConfig | null = null;
 let pool: Pool | null = null;
 let startupGate: Promise<void> | null = null;
+
+// -----------------------------------------------------------------------------
+// Public API
+// -----------------------------------------------------------------------------
 
 export function getDbConfig(): HostOsDbConfig {
   if (configCache) {
@@ -174,7 +196,9 @@ export function getDb(): Pool {
   return pool;
 }
 
-export async function query<TRow extends QueryResultRow = QueryResultRow>(
+export async function query<
+  TRow extends QueryResultRow = QueryResultRow,
+>(
   text: string,
   values: readonly unknown[] = [],
 ): Promise<QueryResult<TRow>> {
@@ -182,7 +206,9 @@ export async function query<TRow extends QueryResultRow = QueryResultRow>(
   return await getDb().query<TRow>(text, [...values]);
 }
 
-export async function queryOneOrNull<TRow extends QueryResultRow = QueryResultRow>(
+export async function queryOneOrNull<
+  TRow extends QueryResultRow = QueryResultRow,
+>(
   text: string,
   values: readonly unknown[] = [],
 ): Promise<TRow | null> {
@@ -190,12 +216,15 @@ export async function queryOneOrNull<TRow extends QueryResultRow = QueryResultRo
   return result.rows[0] ?? null;
 }
 
-export async function queryOneOrThrow<TRow extends QueryResultRow = QueryResultRow>(
+export async function queryOneOrThrow<
+  TRow extends QueryResultRow = QueryResultRow,
+>(
   text: string,
   values: readonly unknown[] = [],
   errorMessage = 'Expected at least one row but query returned none.',
 ): Promise<TRow> {
   const row = await queryOneOrNull<TRow>(text, values);
+
   if (!row) {
     throw new Error(errorMessage);
   }
@@ -229,16 +258,15 @@ export async function withTransaction<T>(
   work: (client: PoolClient) => Promise<T>,
   options: TransactionOptions = {},
 ): Promise<T> {
+  validateTransactionOptions(options);
+
   return await withClient(async (client) => {
     const beginSql = buildBeginSql(options);
 
     try {
       await client.query(beginSql);
-
       const result = await work(client);
-
       await client.query('COMMIT');
-
       return result;
     } catch (error) {
       try {
@@ -255,9 +283,7 @@ export async function withTransaction<T>(
 export async function pingDb(): Promise<boolean> {
   try {
     await ensureDbReady();
-
     const result = await getDb().query<{ ok: number }>(PING_SQL);
-
     return result.rows[0]?.ok === 1;
   } catch (error) {
     console.error('[host-os][db] ping failed', error);
@@ -300,6 +326,10 @@ export async function resetDbForTests(): Promise<void> {
   await closeDb();
   configCache = null;
 }
+
+// -----------------------------------------------------------------------------
+// Readiness + Topology
+// -----------------------------------------------------------------------------
 
 async function ensureDbReady(): Promise<void> {
   if (startupGate) {
@@ -372,6 +402,10 @@ async function fetchTopology(client: PoolClient): Promise<DbTopology> {
   };
 }
 
+// -----------------------------------------------------------------------------
+// Pool / Transaction Builders
+// -----------------------------------------------------------------------------
+
 function buildPoolConfig(config: HostOsDbConfig): PoolConfig {
   return {
     connectionString: config.connectionString,
@@ -385,6 +419,18 @@ function buildPoolConfig(config: HostOsDbConfig): PoolConfig {
     maxUses: config.maxUses,
     ssl: config.ssl,
   };
+}
+
+function validateTransactionOptions(options: TransactionOptions): void {
+  if (options.deferrable === undefined) {
+    return;
+  }
+
+  if (options.readOnly !== true || options.isolationLevel !== 'SERIALIZABLE') {
+    throw new Error(
+      'Transaction option "deferrable" requires readOnly=true and isolationLevel="SERIALIZABLE".',
+    );
+  }
 }
 
 function buildBeginSql(options: TransactionOptions): string {
@@ -404,6 +450,10 @@ function buildBeginSql(options: TransactionOptions): string {
 
   return parts.length > 0 ? `BEGIN ${parts.join(' ')}` : 'BEGIN';
 }
+
+// -----------------------------------------------------------------------------
+// Error Builders
+// -----------------------------------------------------------------------------
 
 function buildWritablePrimaryError(
   reason: string,
@@ -427,9 +477,14 @@ function buildWritablePrimaryError(
   ].join(' ');
 }
 
+// -----------------------------------------------------------------------------
+// Connection String + SSL Resolution
+// -----------------------------------------------------------------------------
+
 function resolveConnectionString(): string {
   for (const envName of CONNECTION_STRING_ENV_ORDER) {
     const value = normalizeOptionalString(process.env[envName]);
+
     if (!value) {
       continue;
     }
@@ -439,15 +494,13 @@ function resolveConnectionString(): string {
   }
 
   throw new Error(
-    `Missing ${CONNECTION_STRING_ENV_ORDER.join(
-      ', ',
-    )} for Host OS service.`,
+    `Missing ${CONNECTION_STRING_ENV_ORDER.join(', ')} for Host OS service.`,
   );
 }
 
 function assertValidPostgresConnectionString(
   connectionString: string,
-  fieldName: ConnectionStringEnvName,
+  fieldName: string,
 ): void {
   try {
     const parsed = new URL(connectionString);
@@ -480,47 +533,57 @@ function assertValidPostgresConnectionString(
 function resolveSslConfig(
   connectionString: string,
 ): PoolConfig['ssl'] | undefined {
-  const explicitSsl = process.env.HOST_OS_DB_SSL;
-  const rejectUnauthorized = normalizeBooleanEnv(
-    process.env.HOST_OS_DB_SSL_REJECT_UNAUTHORIZED,
-    false,
-  );
+  const explicitSsl = normalizeOptionalString(process.env.HOST_OS_DB_SSL);
+  const sslMode = resolveSslMode(connectionString);
 
   const enabled =
-    explicitSsl !== undefined && explicitSsl.trim().length > 0
+    explicitSsl !== null
       ? normalizeBooleanEnv(explicitSsl, false)
-      : inferSslFromConnectionString(connectionString);
+      : inferSslEnabledFromMode(sslMode);
 
   if (!enabled) {
     return undefined;
   }
 
+  const defaultRejectUnauthorized =
+    sslMode === 'verify-ca' || sslMode === 'verify-full';
+
+  const rejectUnauthorized = normalizeBooleanEnv(
+    process.env.HOST_OS_DB_SSL_REJECT_UNAUTHORIZED,
+    defaultRejectUnauthorized,
+  );
+
   return { rejectUnauthorized };
 }
 
-function inferSslFromConnectionString(connectionString: string): boolean {
+function resolveSslMode(connectionString: string): string | null {
   try {
     const url = new URL(connectionString);
-    const sslmode = url.searchParams.get('sslmode')?.toLowerCase() ?? null;
-
-    if (!sslmode) {
-      return false;
-    }
-
-    return (
-      sslmode === 'require' ||
-      sslmode === 'prefer' ||
-      sslmode === 'verify-ca' ||
-      sslmode === 'verify-full'
-    );
+    return url.searchParams.get('sslmode')?.trim().toLowerCase() ?? null;
   } catch {
-    return false;
+    return null;
   }
 }
 
-function normalizeOptionalString(
-  rawValue: string | undefined | null,
-): string | null {
+function inferSslEnabledFromMode(sslMode: string | null): boolean {
+  if (!sslMode) {
+    return false;
+  }
+
+  return (
+    sslMode === 'allow' ||
+    sslMode === 'prefer' ||
+    sslMode === 'require' ||
+    sslMode === 'verify-ca' ||
+    sslMode === 'verify-full'
+  );
+}
+
+// -----------------------------------------------------------------------------
+// Normalizers
+// -----------------------------------------------------------------------------
+
+function normalizeOptionalString(rawValue: string | undefined): string | null {
   const value = rawValue?.trim() ?? '';
   return value.length > 0 ? value : null;
 }
