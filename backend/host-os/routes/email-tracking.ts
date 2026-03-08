@@ -33,7 +33,8 @@ function getClientIp(req: Request): string | null {
 }
 
 router.get('/o/:messageId.gif', async (req: Request, res: Response) => {
-  const messageId = req.params.messageId;
+  const rawMessageId = req.params.messageId;
+  const messageId = Array.isArray(rawMessageId) ? rawMessageId[0] : (rawMessageId ?? '');
   const token = String(req.query.token || '');
 
   res.setHeader('content-type', 'image/gif');
@@ -63,8 +64,10 @@ router.get('/o/:messageId.gif', async (req: Request, res: Response) => {
 });
 
 router.get('/c/:messageId/:linkKey', async (req: Request, res: Response) => {
-  const messageId = req.params.messageId;
-  const linkKey = req.params.linkKey;
+  const rawMessageId = req.params.messageId;
+  const messageId = Array.isArray(rawMessageId) ? rawMessageId[0] : (rawMessageId ?? '');
+  const rawLinkKey = req.params.linkKey;
+  const linkKey = Array.isArray(rawLinkKey) ? rawLinkKey[0] : (rawLinkKey ?? '');
   const encodedUrl = String(req.query.u || '');
   const token = String(req.query.token || '');
 
@@ -99,7 +102,8 @@ router.get('/c/:messageId/:linkKey', async (req: Request, res: Response) => {
 });
 
 router.get('/unsubscribe/:registrationId', async (req: Request, res: Response) => {
-  const registrationId = Number(req.params.registrationId);
+  const rawRegistrationId = req.params.registrationId;
+  const registrationId = Number(Array.isArray(rawRegistrationId) ? rawRegistrationId[0] : rawRegistrationId);
   const token = String(req.query.token || '');
 
   if (

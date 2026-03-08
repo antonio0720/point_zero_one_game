@@ -127,6 +127,13 @@ export async function createHostEmailMessage(
 ): Promise<HostEmailMessage> {
   const id = randomUUID();
 
+  if (input.dedupeKey) {
+    const existing = await getHostEmailMessageByDedupeKey(input.dedupeKey);
+    if (existing) {
+      return existing;
+    }
+  }
+
   const result = await query<HostEmailMessage>(
     `
       INSERT INTO host_email_messages (
@@ -146,9 +153,6 @@ export async function createHostEmailMessage(
       VALUES (
         $1, $2, $3, $4, $5, $6, $7, 'queued', $8, $9::jsonb, NOW(), NOW()
       )
-      ON CONFLICT (dedupe_key)
-      WHERE $3 IS NOT NULL
-      DO NOTHING
       RETURNING *;
     `,
     [
@@ -164,20 +168,7 @@ export async function createHostEmailMessage(
     ],
   );
 
-  if (result.rows[0]) {
-    return result.rows[0];
-  }
-
-  if (!input.dedupeKey) {
-    throw new Error('Failed to create queued host email message.');
-  }
-
-  const existing = await getHostEmailMessageByDedupeKey(input.dedupeKey);
-  if (!existing) {
-    throw new Error(`Host email message was not created for dedupe key ${input.dedupeKey}.`);
-  }
-
-  return existing;
+  return result.rows[0];
 }
 
 export async function getHostEmailMessageById(

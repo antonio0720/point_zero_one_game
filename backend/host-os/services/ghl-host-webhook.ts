@@ -80,7 +80,7 @@ async function postJson(
 
 export async function emitHostWebhook(
   eventType: HostWebhookEventType,
-  payload: Record<string, unknown>,
+  payload: unknown,
 ): Promise<HostWebhookResult> {
   const url = getWebhookUrl(eventType);
 
@@ -93,17 +93,20 @@ export async function emitHostWebhook(
     };
   }
 
-  return await postJson(url, {
-    eventType,
-    tags: {
-      host_kit_downloaded: ['Host Kit v1', 'Host Nurture'],
-      host_night_logged: ['Active Host'],
-      host_kit_v2_waitlist: ['Host OS v2 Waitlist'],
-    }[eventType],
-    occurredAt: new Date().toISOString(),
-    source: 'pzo-host-os',
-    payload,
-  });
+  return await postJson(
+    url,
+    {
+      eventType,
+      tags: {
+        host_kit_downloaded: ['Host Kit v1', 'Host Nurture'],
+        host_night_logged: ['Active Host'],
+        host_kit_v2_waitlist: ['Host OS v2 Waitlist'],
+      }[eventType],
+      occurredAt: new Date().toISOString(),
+      source: 'pzo-host-os',
+      payload,
+    } as Record<string, unknown>,
+  );
 }
 
 export async function sendHostKitDownloadedWebhook(

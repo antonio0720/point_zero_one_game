@@ -69,7 +69,7 @@ function getBaseUrl(): string {
 
 function buildTemplateContext(
   registration: HostRegistration,
-): HostEmailTemplateContext {
+): Record<string, unknown> {
   return {
     hostName: registration.name,
     downloadUrl: buildSignedKitDownloadRedirectUrl(registration.id),
@@ -171,7 +171,7 @@ async function deliverHostEmailMessage(
   }
 
   try {
-    const context = (message.context_json ?? {}) as HostEmailTemplateContext;
+    const context = (message.context_json ?? {}) as unknown as HostEmailTemplateContext;
     const rendered = await renderHostEmailTemplate(
       message.template_name as HostEmailTemplateName,
       message.id,

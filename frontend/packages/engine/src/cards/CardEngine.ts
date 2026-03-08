@@ -664,7 +664,7 @@ export class CardEngine {
     this.handManager.injectCard(patched);
   }
 
-  private buildValidatorContext(): any {
+  private buildValidatorContext(): TimingValidatorContext {
     return {
       mode:                  this.mode,
       currentTick:           this.currentTick,
