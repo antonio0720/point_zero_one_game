@@ -1,10 +1,14 @@
-// frontend/packages/analytics/events/season0.ts
+// backend/src/analytics/events_season0.ts
 
 /**
- * Point Zero One — Season 0 Analytics
+ * Point Zero One — Season 0 Analytics (Backend)
  *
- * Strongly typed Season 0 analytics contracts, factories, and emit helpers.
- * Safe for browser use, SSR-safe, and easy to mock in tests.
+ * Server-side Season 0 analytics contracts, factories, serializers, and emitters.
+ * This file is intentionally backend-safe:
+ * - no window usage
+ * - no DOM globals
+ * - safe for Node/Nest/worker execution
+ * - easy to connect to logs, queues, telemetry, or event buses
  */
 
 export const SEASON0_ANALYTICS_EVENTS = {
@@ -28,6 +32,8 @@ export type AnalyticsSource =
   | 'ios'
   | 'android'
   | 'backend'
+  | 'worker'
+  | 'cron'
   | 'unknown';
 
 export type AnalyticsMetadataValue = string | number | boolean | null;
@@ -94,24 +100,6 @@ export type Season0AnalyticsEvent =
   | ReferralCompletedEvent
   | StreakUpdatedEvent;
 
-export interface Season0AnalyticsSink {
-  emit(
-    eventName: Season0AnalyticsEventName,
-    payload: Record<string, unknown>,
-  ): void;
-}
-
-interface BrowserAnalyticsSurface {
-  track?: (eventName: string, payload?: Record<string, unknown>) => void;
-  emit?: (eventName: string, payload?: Record<string, unknown>) => void;
-}
-
-declare global {
-  interface Window {
-    analytics?: BrowserAnalyticsSurface;
-  }
-}
-
 export interface Season0CommonInput {
   timestamp?: number;
   playerId?: AnalyticsIdentifier;
@@ -147,6 +135,10 @@ export interface ReferralCompletedInput extends Season0CommonInput {
 
 export interface StreakUpdatedInput extends Season0CommonInput {
   newStreakLength: number;
+}
+
+export interface Season0AnalyticsEmitter {
+  emit(event: Season0AnalyticsEvent): void;
 }
 
 function normalizeTimestamp(value?: number): number {
@@ -266,7 +258,7 @@ function buildBase<TEvent extends Season0AnalyticsEventName>(
   return base;
 }
 
-function serializeSeason0AnalyticsEvent(
+export function serializeSeason0AnalyticsEvent(
   event: Season0AnalyticsEvent,
 ): Record<string, unknown> {
   return compactRecord({
@@ -283,54 +275,90 @@ export function createSeason0JoinedEvent(
 export function createArtifactGrantedEvent(
   input: ArtifactGrantedInput,
 ): ArtifactGrantedEvent {
+  const artifactId = normalizeIdentifier(input.artifactId);
+
+  if (artifactId === undefined) {
+    throw new Error('artifactId is required.');
+  }
+
   return {
     ...buildBase(SEASON0_ANALYTICS_EVENTS.ARTIFACT_GRANTED, input),
-    artifactId: normalizeIdentifier(input.artifactId)!,
+    artifactId,
   };
 }
 
 export function createMembershipSharedEvent(
   input: MembershipSharedInput,
 ): MembershipSharedEvent {
+  const recipientPlayerId = normalizeIdentifier(input.recipientPlayerId);
+
+  if (recipientPlayerId === undefined) {
+    throw new Error('recipientPlayerId is required.');
+  }
+
   return {
     ...buildBase(SEASON0_ANALYTICS_EVENTS.MEMBERSHIP_SHARED, input),
-    recipientPlayerId: normalizeIdentifier(input.recipientPlayerId)!,
+    recipientPlayerId,
   };
 }
 
 export function createProofStampedEvent(
   input: ProofStampedInput,
 ): ProofStampedEvent {
+  const proofId = normalizeIdentifier(input.proofId);
+
+  if (proofId === undefined) {
+    throw new Error('proofId is required.');
+  }
+
   return {
     ...buildBase(SEASON0_ANALYTICS_EVENTS.PROOF_STAMPED, input),
-    proofId: normalizeIdentifier(input.proofId)!,
+    proofId,
   };
 }
 
 export function createInviteSentEvent(
   input: InviteSentInput,
 ): InviteSentEvent {
+  const recipientPlayerId = normalizeIdentifier(input.recipientPlayerId);
+
+  if (recipientPlayerId === undefined) {
+    throw new Error('recipientPlayerId is required.');
+  }
+
   return {
     ...buildBase(SEASON0_ANALYTICS_EVENTS.INVITE_SENT, input),
-    recipientPlayerId: normalizeIdentifier(input.recipientPlayerId)!,
+    recipientPlayerId,
   };
 }
 
 export function createInviteAcceptedEvent(
   input: InviteAcceptedInput,
 ): InviteAcceptedEvent {
+  const inviterPlayerId = normalizeIdentifier(input.inviterPlayerId);
+
+  if (inviterPlayerId === undefined) {
+    throw new Error('inviterPlayerId is required.');
+  }
+
   return {
     ...buildBase(SEASON0_ANALYTICS_EVENTS.INVITE_ACCEPTED, input),
-    inviterPlayerId: normalizeIdentifier(input.inviterPlayerId)!,
+    inviterPlayerId,
   };
 }
 
 export function createReferralCompletedEvent(
   input: ReferralCompletedInput,
 ): ReferralCompletedEvent {
+  const referredPlayerId = normalizeIdentifier(input.referredPlayerId);
+
+  if (referredPlayerId === undefined) {
+    throw new Error('referredPlayerId is required.');
+  }
+
   return {
     ...buildBase(SEASON0_ANALYTICS_EVENTS.REFERRAL_COMPLETED, input),
-    referredPlayerId: normalizeIdentifier(input.referredPlayerId)!,
+    referredPlayerId,
   };
 }
 
@@ -349,118 +377,97 @@ export function createStreakUpdatedEvent(
   };
 }
 
-export class BrowserSeason0AnalyticsSink implements Season0AnalyticsSink {
-  emit(
-    eventName: Season0AnalyticsEventName,
-    payload: Record<string, unknown>,
-  ): void {
-    if (typeof window === 'undefined') {
-      return;
-    }
-
-    const analytics = window.analytics;
-    if (!analytics) {
-      return;
-    }
-
-    if (typeof analytics.track === 'function') {
-      analytics.track(eventName, payload);
-      return;
-    }
-
-    if (typeof analytics.emit === 'function') {
-      analytics.emit(eventName, payload);
-    }
-  }
+export class NoopSeason0AnalyticsEmitter
+  implements Season0AnalyticsEmitter
+{
+  emit(_event: Season0AnalyticsEvent): void {}
 }
 
-export class MemorySeason0AnalyticsSink implements Season0AnalyticsSink {
-  private readonly entries: Array<{
-    eventName: Season0AnalyticsEventName;
-    payload: Record<string, unknown>;
-  }> = [];
+export class MemorySeason0AnalyticsEmitter
+  implements Season0AnalyticsEmitter
+{
+  private readonly events: Season0AnalyticsEvent[] = [];
 
-  emit(
-    eventName: Season0AnalyticsEventName,
-    payload: Record<string, unknown>,
-  ): void {
-    this.entries.push({
-      eventName,
-      payload: { ...payload },
-    });
+  emit(event: Season0AnalyticsEvent): void {
+    this.events.push({ ...event });
   }
 
-  snapshot(): ReadonlyArray<{
-    eventName: Season0AnalyticsEventName;
-    payload: Record<string, unknown>;
-  }> {
-    return this.entries.map((entry) => ({
-      eventName: entry.eventName,
-      payload: { ...entry.payload },
-    }));
+  snapshot(): ReadonlyArray<Season0AnalyticsEvent> {
+    return this.events.map((event) => ({ ...event }));
   }
 
   clear(): void {
-    this.entries.length = 0;
+    this.events.length = 0;
   }
 }
 
-const DEFAULT_SEASON0_ANALYTICS_SINK = new BrowserSeason0AnalyticsSink();
+export class ConsoleSeason0AnalyticsEmitter
+  implements Season0AnalyticsEmitter
+{
+  constructor(
+    private readonly logger: Pick<Console, 'info'> = console,
+    private readonly prefix: string = '[Season0Analytics]',
+  ) {}
+
+  emit(event: Season0AnalyticsEvent): void {
+    this.logger.info(this.prefix, serializeSeason0AnalyticsEvent(event));
+  }
+}
 
 export function emitSeason0AnalyticsEvent(
+  emitter: Season0AnalyticsEmitter,
   event: Season0AnalyticsEvent,
-  sink: Season0AnalyticsSink = DEFAULT_SEASON0_ANALYTICS_SINK,
 ): Season0AnalyticsEvent {
-  sink.emit(event.event, serializeSeason0AnalyticsEvent(event));
+  emitter.emit(event);
   return event;
 }
 
-export class Season0AnalyticsClient {
+export class Season0AnalyticsService {
   constructor(
-    private readonly sink: Season0AnalyticsSink = DEFAULT_SEASON0_ANALYTICS_SINK,
+    private readonly emitter: Season0AnalyticsEmitter = new NoopSeason0AnalyticsEmitter(),
   ) {}
 
   emit(event: Season0AnalyticsEvent): Season0AnalyticsEvent {
-    return emitSeason0AnalyticsEvent(event, this.sink);
+    return emitSeason0AnalyticsEvent(this.emitter, event);
   }
 
-  trackSeason0Joined(input: Season0CommonInput = {}): Season0JoinedEvent {
+  season0Joined(input: Season0CommonInput = {}): Season0JoinedEvent {
     const event = createSeason0JoinedEvent(input);
     this.emit(event);
     return event;
   }
 
-  trackArtifactGranted(input: ArtifactGrantedInput): ArtifactGrantedEvent {
+  artifactGranted(input: ArtifactGrantedInput): ArtifactGrantedEvent {
     const event = createArtifactGrantedEvent(input);
     this.emit(event);
     return event;
   }
 
-  trackMembershipShared(input: MembershipSharedInput): MembershipSharedEvent {
+  membershipShared(input: MembershipSharedInput): MembershipSharedEvent {
     const event = createMembershipSharedEvent(input);
     this.emit(event);
     return event;
   }
 
-  trackProofStamped(input: ProofStampedInput): ProofStampedEvent {
+  proofStamped(input: ProofStampedInput): ProofStampedEvent {
     const event = createProofStampedEvent(input);
     this.emit(event);
     return event;
   }
 
-  trackInviteSent(input: InviteSentInput): InviteSentEvent {
+  inviteSent(input: InviteSentInput): InviteSentEvent {
     const event = createInviteSentEvent(input);
     this.emit(event);
     return event;
   }
 
-  trackInviteAccepted(input: InviteAcceptedInput): InviteAcceptedEvent {
+  inviteAccepted(input: InviteAcceptedInput): InviteAcceptedEvent {
     const event = createInviteAcceptedEvent(input);
     this.emit(event);
     return event;
   }
 
-  trackReferralCompleted(
+  referralCompleted(
     input: ReferralCompletedInput,
   ): ReferralCompletedEvent {
     const event = createReferralCompletedEvent(input);
@@ -468,7 +475,7 @@ export class Season0AnalyticsClient {
     return event;
   }
 
-  trackStreakUpdated(input: StreakUpdatedInput): StreakUpdatedEvent {
+  streakUpdated(input: StreakUpdatedInput): StreakUpdatedEvent {
     const event = createStreakUpdatedEvent(input);
     this.emit(event);
     return event;
