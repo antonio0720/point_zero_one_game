@@ -1,3 +1,4 @@
+///Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/backend/src/security/explorer_hardening.test.ts
 import { describe, it, expect, beforeEach } from 'vitest';
 
 /**
