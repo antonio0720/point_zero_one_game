@@ -1,50 +1,67 @@
-// pzo-web/src/telemetry/schemas/timeEngineTelemetry.ts
-import { TelemetryEnvelopeV2 } from '../../engines/time/types';
+import {
+  createEmptyDecisionWindowLifecycleMetrics,
+  createEmptyRunTimeoutFlags,
+  createZeroTierHistogram,
+  type DecisionWindowLifecycleMetrics,
+  type RunTimeoutFlags,
+  type TelemetryEnvelopeV2,
+  type TierHistogram,
+  type TierTransitionRecord,
+} from '../../engines/time/types';
 
-export interface TimeTierDwell extends Record<string, unknown> {
-  startTime: string;
-  endTime: string;
-}
-
-export interface TierTransition extends Record<string, unknown> {
-  fromTierId: string;
-  toTierId: string;
-  transitionTime: string;
-}
-
-export interface DecisionWindowLifecycleMetrics extends Record<string, unknown> {
-  openTimestamp: string;
-  closeTimestamp: string;
-  decisionsMade: number;
-}
-
-export interface HoldUsage extends Record<string, unknown> {
-  holdStartTime?: string;
-  releaseTime?: string;
-}
-
-export interface RunTimeoutFlags extends Record<string, boolean | string | undefined> {
-  timeoutOccurred: boolean;
-  runEndedTimestamp?: string;
-}
+export type TimeTierDwell = TierHistogram;
+export type TierTransition = TierTransitionRecord;
 
 export class TimeEngineTelemetry implements TelemetryEnvelopeV2 {
-  private static readonly eventName = 'time_engine_telemetry';
+  public static readonly eventName = 'time_engine_telemetry';
 
-  public tickTierDwell: TimeTierDwell;
-  public tierTransitions: TierTransition[];
-  public decisionWindowLifecycleMetrics: DecisionWindowLifecycleMetrics;
-  public holdUsage?: HoldUsage;
-  public runTimeoutFlags: RunTimeoutFlags;
+  public readonly tickTierDwell: TimeTierDwell;
+  public readonly tierTransitions: TierTransition[];
+  public readonly decisionWindowLifecycleMetrics: DecisionWindowLifecycleMetrics;
+  public readonly runTimeoutFlags: RunTimeoutFlags;
 
-  constructor(data: TelemetryEnvelopeV2) {
-    this.tickTierDwell = (data.tickTierDwell as TimeTierDwell)
-      ?? { startTime: '', endTime: '' };
-    this.tierTransitions = (data.tierTransitions as TierTransition[]) ?? [];
-    this.decisionWindowLifecycleMetrics =
-      (data.decisionWindowLifecycleMetrics as DecisionWindowLifecycleMetrics)
-      ?? { openTimestamp: '', closeTimestamp: '', decisionsMade: 0 };
-    this.runTimeoutFlags = (data.runTimeoutFlags as RunTimeoutFlags)
-      ?? { timeoutOccurred: false };
+  public constructor(data?: Partial<TelemetryEnvelopeV2>) {
+    this.tickTierDwell = {
+      ...createZeroTierHistogram(),
+      ...(data?.tickTierDwell ?? {}),
+    };
+
+    this.tierTransitions = [...(data?.tierTransitions ?? [])];
+
+    this.decisionWindowLifecycleMetrics = {
+      ...createEmptyDecisionWindowLifecycleMetrics(),
+      ...(data?.decisionWindowLifecycleMetrics ?? {}),
+      tierAtOpenCounts: {
+        ...createZeroTierHistogram(),
+        ...(data?.decisionWindowLifecycleMetrics?.tierAtOpenCounts ?? {}),
+      },
+      tierAtResolveCounts: {
+        ...createZeroTierHistogram(),
+        ...(data?.decisionWindowLifecycleMetrics?.tierAtResolveCounts ?? {}),
+      },
+      tierAtExpiryCounts: {
+        ...createZeroTierHistogram(),
+        ...(data?.decisionWindowLifecycleMetrics?.tierAtExpiryCounts ?? {}),
+      },
+    };
+
+    this.runTimeoutFlags = {
+      ...createEmptyRunTimeoutFlags(),
+      ...(data?.runTimeoutFlags ?? {}),
+    };
+  }
+
+  public toJSON(): TelemetryEnvelopeV2 {
+    return {
+      tickTierDwell: { ...this.tickTierDwell },
+      tierTransitions: this.tierTransitions.map((transition) => ({ ...transition })),
+      decisionWindowLifecycleMetrics: {
+        ...this.decisionWindowLifecycleMetrics,
+        tierAtOpenCounts: { ...this.decisionWindowLifecycleMetrics.tierAtOpenCounts },
+        tierAtResolveCounts: { ...this.decisionWindowLifecycleMetrics.tierAtResolveCounts },
+        tierAtExpiryCounts: { ...this.decisionWindowLifecycleMetrics.tierAtExpiryCounts },
+      },
+      runTimeoutFlags: { ...this.runTimeoutFlags },
+    };
   }
 }

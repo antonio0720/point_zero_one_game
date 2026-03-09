@@ -1,43 +1,117 @@
 // pzo-web/src/telemetry/runTimeTelemetry.ts
-import { RunTimeSnapshot } from "./RunTimeSnapshot.stub"; // Assuming this is the correct import path for your snapshot class or interface
-import { TickBudget, TierAtEnd } from "../engines/time/types";
+import type { RunTimeSnapshot } from './RunTimeSnapshot.stub';
+import {
+  TICK_DURATION_MS_BY_TIER,
+  coerceTickTierId,
+  type TelemetryEnvelopeV2,
+  type TickBudget,
+  type TickTierId,
+  type TimeEngineStateSnapshot,
+  toTierAtEnd,
+} from '../engines/time/types';
+import { TimeEngineTelemetry } from './schemas/timeEngineTelemetry';
 
-export const captureRunTimeSnapshot = async (runId: string, engine: any): Promise<RunTimeSnapshot> => {
-  try {
-    console.log(`Capturing snapshot for run ${runId}`); // Replace with actual analytics endpoint logging if required and ANALYTICS_ENDPOINT is set in the environment variables.
-    
-    const start = Date.now();
-    let ticksElapsed: number;
-    let tickBudget: TickBudget;
-    let tierAtEnd: TierAtEnd | null = null; // Assuming this can be `null` if not determined at end of run yet, or a specific value/enum type as per your game logic.
-    
-    const snapshot = await engine.tick(async () => {}); // Replace with actual ticking mechanism that returns the number of ticks elapsed and budget remaining for this particular snapshots's duration (12 minutes).
-    ticksElapsed = snapshot.ticksElapsed;
-    tickBudget = snapshot.tickBudget;
-    
-    // Assuming we can determine tierAtEnd after the run, or it remains constant throughout:
-    if (!tierAtEnd) {
-      await engine.waitUntilTiersDetermined(); // This is a hypothetical function to wait for tiers determination at end of game (if needed).
-      tierAtEnd = snapshot.determineFinalTier(runId); // Replace with actual logic or method call that returns the final TierAtEnd based on run data and decisions made during runtime.
-    } else {
-      console.log(`The player ended in Tier ${tierAtEnd}`);
-    }
-    
-    const avgTickDurationMs = (Date.now() - start) / ticksElapsed; // Average tick duration calculation, assuming we have at least one elapsed tick for a non-zero division result.
-    
-    return {
-      runId: runId,
-      ticksElapsed,
-      tickBudget,
-      tierAtEnd,
-      avgTickDurationMs, // Average duration in milliseconds of each game 'tick' (assuming a constant or predictable number of decisions per tick).
-      decisionsExpiredTotal: snapshot.decisionsExpiredCount || 0, // Replace with actual count if available from the engine/game state; default to zero otherwise.
-      decisionsResolvedTotal: snapshot.decisionsResolvedCount || 0, // Same as above for resolved counts.
-      holdUsed: snapshot.holdUsedTicks || 0, // Assuming this is a property on your tick snapshots that tracks the use of holds during runtime; default to zero if not available or applicable in game logic.
-    };
-    
-  } catch (error) {
-    console.error(`Failed to capture run time telemetry snapshot: ${error}`);
-    throw error; // Rethrowing errors ensures that calling code can handle them appropriately, e.g., logging or retry mechanisms if needed in a production environment.
-  }
+export interface TimeEngineReadable {
+  getTickIndex(): number;
+  getSeasonBudget(): number;
+  getTicksRemaining(): number;
+  getCurrentTier(): unknown;
+  getTickDurationMs(): number;
+  isTimeoutImminent(): boolean;
+  getState(): Record<string, unknown>;
+  getTelemetry(): Partial<TelemetryEnvelopeV2> & Record<string, unknown>;
+}
+
+function buildTickBudget(engine: TimeEngineReadable): TickBudget {
+  const allocated = engine.getSeasonBudget();
+  const consumed = engine.getTickIndex();
+  const remaining = engine.getTicksRemaining();
+
+  return {
+    allocated,
+    consumed,
+    remaining,
+  };
+}
+
+function normalizeState(engine: TimeEngineReadable): TimeEngineStateSnapshot {
+  const state = engine.getState();
+  const tickTier = coerceTickTierId(state.tickTier, coerceTickTierId(engine.getCurrentTier()));
+
+  return {
+    tickIndex: typeof state.tickIndex === 'number' ? state.tickIndex : engine.getTickIndex(),
+    tickTier,
+    tickDurationMs: typeof state.tickDurationMs === 'number'
+      ? state.tickDurationMs
+      : engine.getTickDurationMs(),
+    seasonBudget: typeof state.seasonBudget === 'number'
+      ? state.seasonBudget
+      : engine.getSeasonBudget(),
+    ticksRemaining: typeof state.ticksRemaining === 'number'
+      ? state.ticksRemaining
+      : engine.getTicksRemaining(),
+    timeoutImminent: typeof state.timeoutImminent === 'boolean'
+      ? state.timeoutImminent
+      : engine.isTimeoutImminent(),
+    decisionWindows: typeof state.decisionWindows === 'number' ? state.decisionWindows : 0,
+  };
+}
+
+function computeAverageTickDurationMs(
+  dwell: Record<TickTierId, number>,
+  fallbackDurationMs: number,
+): number {
+  const weightedDurationMs =
+    dwell.T0 * TICK_DURATION_MS_BY_TIER.T0 +
+    dwell.T1 * TICK_DURATION_MS_BY_TIER.T1 +
+    dwell.T2 * TICK_DURATION_MS_BY_TIER.T2 +
+    dwell.T3 * TICK_DURATION_MS_BY_TIER.T3 +
+    dwell.T4 * TICK_DURATION_MS_BY_TIER.T4;
+
+  const totalTicks = dwell.T0 + dwell.T1 + dwell.T2 + dwell.T3 + dwell.T4;
+
+  return totalTicks > 0 ? weightedDurationMs / totalTicks : fallbackDurationMs;
+}
+
+export async function captureRunTimeSnapshot(
+  runId: string,
+  engine: TimeEngineReadable,
+  telemetryOverrides?: Partial<TelemetryEnvelopeV2>,
+): Promise<RunTimeSnapshot> {
+  const telemetry = new TimeEngineTelemetry({
+    ...engine.getTelemetry(),
+    ...telemetryOverrides,
+  }).toJSON();
+
+  const lastKnownState = normalizeState(engine);
+  const tickBudget = buildTickBudget(engine);
+  const avgTickDurationMs = computeAverageTickDurationMs(
+    telemetry.tickTierDwell,
+    lastKnownState.tickDurationMs,
+  );
+
+  return {
+    runId,
+    capturedAtMs: Date.now(),
+    ticksElapsed: engine.getTickIndex(),
+    tickBudget,
+    tierAtEnd: toTierAtEnd(engine.getCurrentTier()),
+    avgTickDurationMs,
+    decisionsOpenedTotal: telemetry.decisionWindowLifecycleMetrics.openedTotal,
+    decisionsExpiredTotal: telemetry.decisionWindowLifecycleMetrics.expiredTotal,
+    decisionsResolvedTotal: telemetry.decisionWindowLifecycleMetrics.resolvedTotal,
+    autoResolvedTotal: telemetry.decisionWindowLifecycleMetrics.autoResolvedTotal,
+    holdUsedTotal: telemetry.decisionWindowLifecycleMetrics.holdUsedTotal,
+    tierTransitionsTotal: telemetry.tierTransitions.length,
+    timeoutOccurred: telemetry.runTimeoutFlags.timeoutOccurred,
+    timeoutImminent: telemetry.runTimeoutFlags.timeoutImminent,
+    tickTierDwell: { ...telemetry.tickTierDwell },
+    decisionWindowLifecycleMetrics: {
+      ...telemetry.decisionWindowLifecycleMetrics,
+      tierAtOpenCounts: { ...telemetry.decisionWindowLifecycleMetrics.tierAtOpenCounts },
+      tierAtResolveCounts: { ...telemetry.decisionWindowLifecycleMetrics.tierAtResolveCounts },
+      tierAtExpiryCounts: { ...telemetry.decisionWindowLifecycleMetrics.tierAtExpiryCounts },
+    },
+    lastKnownState,
+  };
 }
