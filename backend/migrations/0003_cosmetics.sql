@@ -1,4 +1,4 @@
--- Point Zero One Digital - 0003_cosmetics.sql
+-- Point Zero One Digital - 0003_cosmetics.sql - /Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/backend/migrations/0003_cosmetics.sql
 -- Strict TypeScript, no 'any', export all public symbols
 -- SQL includes indexes, foreign keys, comments; idempotent (CREATE IF NOT EXISTS)
 -- Bash: set -euo pipefail, log all actions

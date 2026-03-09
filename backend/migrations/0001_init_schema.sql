@@ -1,4 +1,4 @@
--- Point Zero One Digital - Backend Migrations - 0001_init_schema.sql
+-- Point Zero One Digital - Backend Migrations - 0001_init_schema.sql - /Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/backend/migrations/0001_init_schema.sql
 
 CREATE TYPE IF NOT EXISTS uuid AS ENUM ('uuid', 'uuidv4');
 

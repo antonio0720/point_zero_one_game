@@ -1,4 +1,4 @@
--- Point Zero One Digital - Backend Migrations - 0002_seasons.sql
+-- Point Zero One Digital - Backend Migrations - 0002_seasons.sql - /Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/backend/migrations/0002_seasons.sql
 
 CREATE TYPE season_membership_type AS ENUM ('BRONZE', 'SILVER', 'GOLD');
 
