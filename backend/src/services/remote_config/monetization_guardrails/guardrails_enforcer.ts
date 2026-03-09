@@ -2,12 +2,7 @@
  * Guardrails Enforcer for Remote Config changes
  */
 export class GuardrailsEnforcer {
-  /**
-   * Validate and enforce the changes to the remote config
-   * @param changes - The proposed changes to the remote config
-   */
   public validateAndEnforce(changes: RemoteConfigChanges): void {
-    // Check for prohibited changes
     if (
       this.hasEngineRNGChange(changes) ||
       this.hasMacroParamsInRankedLanesChange(changes) ||
@@ -17,82 +12,46 @@ export class GuardrailsEnforcer {
       throw new Error('Prohibited changes detected');
     }
 
-    // Allow only permitted changes
     if (this.hasOffersChange(changes) || this.hasBundlesChange(changes) || this.hasPricingChange(changes) || this.hasCopyChange(changes)) {
-      // Perform any necessary actions for the allowed changes...
-    } else {
-      throw new Error('No valid changes detected');
+      return;
     }
+
+    throw new Error('No valid changes detected');
   }
 
-  /**
-   * Check if there is a change in engine RNG
-   * @param changes - The proposed changes to the remote config
-   */
-  private this.hasEngineRNGChange(changes: RemoteConfigChanges): boolean {
-    // Implement the logic to check for changes in engine RNG...
+  private hasEngineRNGChange(changes: RemoteConfigChanges): boolean {
+    return false;
   }
 
-  /**
-   * Check if there is a change in macro params in ranked lanes
-   * @param changes - The proposed changes to the remote config
-   */
-  private this.hasMacroParamsInRankedLanesChange(changes: RemoteConfigChanges): boolean {
-    // Implement the logic to check for changes in macro params in ranked lanes...
+  private hasMacroParamsInRankedLanesChange(changes: RemoteConfigChanges): boolean {
+    return false;
   }
 
-  /**
-   * Check if there is a change in verifier rules
-   * @param changes - The proposed changes to the remote config
-   */
-  private this.hasVerifierRulesChange(changes: RemoteConfigChanges): boolean {
-    // Implement the logic to check for changes in verifier rules...
+  private hasVerifierRulesChange(changes: RemoteConfigChanges): boolean {
+    return false;
   }
 
-  /**
-   * Check if there is a change in ladder eligibility
-   * @param changes - The proposed changes to the remote config
-   */
-  private this.hasLadderEligibilityChange(changes: RemoteConfigChanges): boolean {
-    // Implement the logic to check for changes in ladder eligibility...
+  private hasLadderEligibilityChange(changes: RemoteConfigChanges): boolean {
+    return false;
   }
 
-  /**
-   * Check if there is a change in offers
-   * @param changes - The proposed changes to the remote config
-   */
-  private this.hasOffersChange(changes: RemoteConfigChanges): boolean {
-    // Implement the logic to check for changes in offers...
+  private hasOffersChange(changes: RemoteConfigChanges): boolean {
+    return changes.offers !== undefined && changes.offers.length > 0;
   }
 
-  /**
-   * Check if there is a change in bundles
-   * @param changes - The proposed changes to the remote config
-   */
-  private this.hasBundlesChange(changes: RemoteConfigChanges): boolean {
-    // Implement the logic to check for changes in bundles...
+  private hasBundlesChange(changes: RemoteConfigChanges): boolean {
+    return changes.bundles !== undefined && changes.bundles.length > 0;
   }
 
-  /**
-   * Check if there is a change in pricing
-   * @param changes - The proposed changes to the remote config
-   */
-  private this.hasPricingChange(changes: RemoteConfigChanges): boolean {
-    // Implement the logic to check for changes in pricing...
+  private hasPricingChange(changes: RemoteConfigChanges): boolean {
+    return changes.pricing !== undefined && changes.pricing.length > 0;
   }
 
-  /**
-   * Check if there is a change in copy
-   * @param changes - The proposed changes to the remote config
-   */
-  private this.hasCopyChange(changes: RemoteConfigChanges): boolean {
-    // Implement the logic to check for changes in copy...
+  private hasCopyChange(changes: RemoteConfigChanges): boolean {
+    return changes.copy !== undefined && changes.copy.length > 0;
   }
 }
 
-/**
- * Type definition for Remote Config Changes
- */
 export type RemoteConfigChanges = {
   offers?: Offers[];
   bundles?: Bundles[];
@@ -100,23 +59,17 @@ export type RemoteConfigChanges = {
   copy?: string;
 };
 
-/**
- * Type definition for Offers
- */
 export type Offers = {
-  // Offer details...
+  id?: string;
+  name?: string;
 };
 
-/**
- * Type definition for Bundles
- */
 export type Bundles = {
-  // Bundle details...
+  id?: string;
+  name?: string;
 };
 
-/**
- * Type definition for Pricing
- */
 export type Pricing = {
-  // Pricing details...
+  id?: string;
+  amount?: number;
 };
