@@ -52,7 +52,7 @@ const RootNavigator = () => {
   const { isAuthenticated } = useAuth();
 
   const linking = {
-    prefixes: ['pointzeroonedigital://'],
+    prefixes: ['pointzeroonegame://'],
     config: {
       Screens: {
         ProofExplorer: 'proof-explorer/:id',

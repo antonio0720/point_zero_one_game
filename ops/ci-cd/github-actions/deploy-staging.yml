@@ -39,7 +39,7 @@ jobs:
       run: |
         helm upgrade --atomic my-app-staging ./charts/my-app \
           --set image.tag=$(git rev-parse HEAD) \
-          --set image.repository=pointzeroonedigital/my-app
+          --set image.repository=pointzeroonegame/my-app
 
     - name: Smoke Test Suite
       run: |

@@ -1,4 +1,4 @@
-FROM pointzeroonedigital/pzo_base:latest
+FROM pointzeroonegame/pzo_base:latest
 
 # Set working directory to /app
 WORKDIR /app

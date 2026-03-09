@@ -10,8 +10,8 @@ const http = require('k6/http');
 const vus = 10000; // Number of virtual users (concurrent users)
 const duration = '30s'; // Duration of the load test
 const apiUrls = [
-  'https://game-api.pointzeroonedigital.com/verification',
-  'https://game-api.pointzeroonedigital.com/leaderboard',
+  'https://game-api.pointzeroonegame.com/verification',
+  'https://game-api.pointzeroonegame.com/leaderboard',
   // Add more game APIs here as needed
 ];
 

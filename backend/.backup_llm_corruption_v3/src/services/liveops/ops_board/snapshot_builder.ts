@@ -66,7 +66,7 @@ CREATE TABLE IF NOT EXISTS daily_snapshots (
 set -euo pipefail
 
 echo "Creating daily_snapshots table"
-psql -f create_daily_snapshots.sql pointzeroonedigital
+psql -f create_daily_snapshots.sql pointzeroonegame
 
 echo "Building and saving a new snapshot"
 node backend/src/services/liveops/ops_board/snapshot_builder.js --data '{"date": "2023-01-01", "notes": "Initial snapshot", "drilldownLinks": ["https://example.com"]}'
@@ -94,7 +94,7 @@ spec:
     spec:
       containers:
       - name: snapshot-builder
-        image: pointzeroonedigital/snapshot-builder:latest
+        image: pointzeroonegame/snapshot-builder:latest
         ports:
         - containerPort: 8080
         envFrom:

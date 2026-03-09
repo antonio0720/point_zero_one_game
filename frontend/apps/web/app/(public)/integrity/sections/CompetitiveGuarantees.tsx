@@ -3,7 +3,7 @@
  */
 
 import React from 'react';
-import { Text, List } from '@pointzeroonedigital/ui-kit';
+import { Text, List } from '@pointzeroonegame/ui-kit';
 
 type Guarantee = {
   id: string;

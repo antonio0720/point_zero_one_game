@@ -38,7 +38,7 @@ export class ShowcaseService {
     const explorerLinks: ExplorerLink[] = topVerifiedRuns.map((verifiedRun) => ({
       gameId: verifiedRun.gameRun.id,
       runId: verifiedRun.id,
-      explorerUrl: `https://explorer.pointzeroonedigital.com/run/${verifiedRun.id}`,
+      explorerUrl: `https://explorer.pointzeroonegame.com/run/${verifiedRun.id}`,
     }));
 
     // Calculate pivots for the top 10 runs (e.g., average score, longest game time)

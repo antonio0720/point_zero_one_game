@@ -17,7 +17,7 @@ This guide provides a concise and efficient setup process for Point Zero One Dig
 ### 5-Minute Setup Guide
 
 1. Install Node.js (version 14 or later) from [official website](https://nodejs.org/).
-2. Clone the PZOD repository: `git clone https://github.com/PointZeroOneDigital/pzo_host_os_kit_v1.git`
+2. Clone the PZOD repository: `git clone https://github.com/pointzeroonegame/pzo_host_os_kit_v1.git`
 3. Navigate to the cloned directory: `cd pzo_host_os_kit_v1`
 4. Install dependencies: `npm install`
 5. Start the game server: `npm start`
@@ -49,5 +49,5 @@ Host OS 4 offers four essential operations to manage game sessions:
 
 ## Edge Cases
 
-- If you encounter issues during setup, consult the [PZOD troubleshooting guide](https://github.com/PointZeroOneDigital/pzo_host_os_kit_v1/blob/main/TROUBLESHOOTING.md).
-- For advanced customization options, refer to the [PZOD configuration guide](https://github.com/PointZeroOneDigital/pzo_host_os_kit_v1/blob/main/CONFIGURATION.md).
+- If you encounter issues during setup, consult the [PZOD troubleshooting guide](https://github.com/pointzeroonegame/pzo_host_os_kit_v1/blob/main/TROUBLESHOOTING.md).
+- For advanced customization options, refer to the [PZOD configuration guide](https://github.com/pointzeroonegame/pzo_host_os_kit_v1/blob/main/CONFIGURATION.md).

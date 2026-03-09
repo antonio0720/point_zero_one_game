@@ -6,28 +6,28 @@ version: v1
 
 alerts:
   - name: Verification Lookup Errors Spike
-    expr: sum(rate(pointzeroonedigital_verification_lookup_errors{status="error"}[5m])) > 10
+    expr: sum(rate(pointzeroonegame_verification_lookup_errors{status="error"}[5m])) > 10
     for: 5m
     annotations:
       description: "Spikes in verification lookup errors indicate potential issues with the integrity page."
       severity: Critical
 
   - name: Appeal Abuse Spike
-    expr: sum(rate(pointzeroonedigital_appeal_abuse{status="abuse"}[5m])) > 10
+    expr: sum(rate(pointzeroonegame_appeal_abuse{status="abuse"}[5m])) > 10
     for: 5m
     annotations:
       description: "Spike in appeal abuse indicates potential fraudulent activity on the integrity page."
       severity: High
 
   - name: Transparency Job Failure
-    expr: pointzeroonedigital_transparency_job_status{status="failed"} > 0
+    expr: pointzeroonegame_transparency_job_status{status="failed"} > 0
     for: 1h
     annotations:
       description: "Failure in transparency job may affect the integrity of data displayed on the page."
       severity: High
 
   - name: Abnormal Quarantines Trend Spike
-    expr: rate(pointzeroonedigital_quarantine{status="abnormal"}[5m]) > 0.1
+    expr: rate(pointzeroonegame_quarantine{status="abnormal"}[5m]) > 0.1
     for: 5m
     annotations:
       description: "Spike in abnormal quarantines may indicate potential issues with the integrity page."

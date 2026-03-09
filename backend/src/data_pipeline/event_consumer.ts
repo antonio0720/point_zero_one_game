@@ -10,7 +10,7 @@
  *
  * Repo-aligned rewrite:
  * - removes direct dependency on KafkaJS, which is not currently declared
- * - removes direct dependency on @pointzeroonedigital/metrics, which is not currently declared
+ * - removes direct dependency on @pointzeroonegame/metrics, which is not currently declared
  * - keeps transport pluggable so this can be wired to Kafka, BullMQ, Redis streams,
  *   or another broker without rewriting business logic
  */

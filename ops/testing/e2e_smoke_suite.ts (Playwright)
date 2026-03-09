@@ -12,7 +12,7 @@ async function runTest(browserType) {
   const page = await context.newPage();
 
   // Navigate to the staging URL
-  await page.goto('https://staging.pointzeroonedigital.com');
+  await page.goto('https://staging.pointzeroonegame.com');
 
   // Register a new user
   await page.click('#register-link');

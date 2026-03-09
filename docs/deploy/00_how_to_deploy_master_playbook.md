@@ -29,39 +29,39 @@ Each component has its specific dependencies, gating flags, and rollback plan.
 Dependency: None
 Gating Flag: `integrity_page_deployed`
 Rollback Plan: Revert to previous version or fallback page.
-Source Zip: [verified_bragging_rights](https://github.com/PointZeroOneDigital/verified_bragging_rights/archive/refs/heads/main.zip)
+Source Zip: [verified_bragging_rights](https://github.com/pointzeroonegame/verified_bragging_rights/archive/refs/heads/main.zip)
 
 ### Trust/Run Explorer
 
 Dependency: Integrity Page
 Gating Flag: `trust_run_explorer_deployed`
 Rollback Plan: Revert to previous version or default landing page.
-Source Zip: [two_tier_ladder](https://github.com/PointZeroOneDigital/two_tier_ladder/archive/refs/heads/main.zip) (Trust Explorer section)
+Source Zip: [two_tier_ladder](https://github.com/pointzeroonegame/two_tier_ladder/archive/refs/heads/main.zip) (Trust Explorer section)
 
 ### Two-Tier Ladder
 
 Dependency: Trust/Run Explorer
 Gating Flag: `two_tier_ladder_deployed`
 Rollback Plan: Revert to previous version or default landing page.
-Source Zip: [two_tier_ladder](https://github.com/PointZeroOneDigital/two_tier_ladder/archive/refs/heads/main.zip) (Two-Tier Ladder section)
+Source Zip: [two_tier_ladder](https://github.com/pointzeroonegame/two_tier_ladder/archive/refs/heads/main.zip) (Two-Tier Ladder section)
 
 ### Season 0 Waitlist
 
 Dependency: Two-Tier Ladder
 Gating Flag: `season0_waitlist_deployed`
 Rollback Plan: Revert to previous version or default landing page.
-Source Zip: [season0_waitlist_engine](https://github.com/PointZeroOneDigital/season0_waitlist_engine/archive/refs/heads/main.zip)
+Source Zip: [season0_waitlist_engine](https://github.com/pointzeroonegame/season0_waitlist_engine/archive/refs/heads/main.zip)
 
 ### Host OS
 
 Dependency: Season 0 Waitlist
 Gating Flag: `host_os_deployed`
 Rollback Plan: Revert to previous version or default operating system.
-Source Zip: [host_os_kit](https://github.com/PointZeroOneDigital/host_os_kit/archive/refs/heads/main.zip)
+Source Zip: [host_os_kit](https://github.com/pointzeroonegame/host_os_kit/archive/refs/heads/main.zip)
 
 ### Creator Economy
 
 Dependency: Host OS
 Gating Flag: `creator_economy_deployed`
 Rollback Plan: Revert to previous version or disable Creator Economy features.
-Source Zip: [creator_economy_pipeline](https://github.com/PointZeroOneDigital/creator_economy_pipeline/archive/refs/heads/main.zip)
+Source Zip: [creator_economy_pipeline](https://github.com/pointzeroonegame/creator_economy_pipeline/archive/refs/heads/main.zip)

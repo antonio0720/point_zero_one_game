@@ -11,7 +11,7 @@ import axios from 'axios';
 export const apiClient = createApiClient();
 
 function createApiClient(): ApiClient {
-  const baseURL = 'https://api.pointzeroonedigital.com/v1';
+  const baseURL = 'https://api.pointzeroonegame.com/v1';
 
   return {
     getSnippetJobStatus: async (jobId: string): Promise<SnippetJobStatus> => {

@@ -46,7 +46,7 @@ export interface ReferralCreditResult {
 const MAX_DAILY_INVITES        = 10;
 const BASE_COOLDOWN_MS         = 5 * 60 * 1000;   // 5 minutes
 const COOLDOWN_ESCALATION      = 1.5;             // doubles geometrically
-const BASE_URL                 = process.env.APP_BASE_URL ?? 'https://app.pointzeroonedigital.com';
+const BASE_URL                 = process.env.APP_BASE_URL ?? 'https://app.pointzeroonegame.com';
 
 // Tier thresholds: Bronze 1–5, Silver 6–10, Gold 11+
 function computeRewardTier(successfulInvites: number): RewardTier {

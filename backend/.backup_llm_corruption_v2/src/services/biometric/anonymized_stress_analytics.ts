@@ -125,9 +125,9 @@ resource "aws_rds_instance" "point_zero_one_digital_db" {
   engine                 = "postgres"
   engine_version         = "13.4"
   instance_class         = "db.t2.micro"
-  username               = "pointzeroonedigital"
+  username               = "pointzeroonegame"
   password               = "secure-password"
-  db_name                = "pointzeroonedigital"
+  db_name                = "pointzeroonegame"
   skip_final_snapshot    = true
 }
 
@@ -141,14 +141,14 @@ resource "aws_security_group_rule" "point_zero_one_digital_db_ingress" {
 }
 
 resource "aws_db_instance" "point_zero_one_digital_db" {
-  identifier             = "pointzeroonedigital"
+  identifier             = "pointzeroonegame"
   allocated_storage      = 20
   engine                 = "postgres"
   engine_version         = "13.4"
   instance_class         = "db.t2.micro"
-  username               = "pointzeroonedigital"
+  username               = "pointzeroonegame"
   password               = "secure-password"
-  db_name                = "pointzeroonedigital"
+  db_name                = "pointzeroonegame"
   skip_final_snapshot    = true
   vpc_security_group_ids = [aws_security_group.point_zero_one_digital.id]
 }

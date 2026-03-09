@@ -24,7 +24,7 @@ The Open Graph image fields should include:
 2. `og:image:alt`: Alternative text for the OG image, describing its content for screen readers and search engines.
 
 ### Canonical URL
-The canonical URL is the primary URL of a webpage, indicating to search engines which version of the page is the original and authoritative one. For Point Zero One Digital, the canonical URL should be: `https://pointzeroonedigital.com`
+The canonical URL is the primary URL of a webpage, indicating to search engines which version of the page is the original and authoritative one. For Point Zero One Digital, the canonical URL should be: `https://pointzeroonegame.com`
 
 ### Share-Card 'Learn More' Link
 The share-card 'learn more' link should direct users to the main integrity page (`/integrity`) for detailed information about the game and company.

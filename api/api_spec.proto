@@ -4,14 +4,14 @@ Here is the requested Protobuf file `api/api_spec.proto` in TypeScript format, a
 syntax = "proto3";
 
 option java_multiple_files = true;
-option java_package = "com.pointzeroonedigital.api";
+option java_package = "com.pointzeroonegame.api";
 option java_outer_classname = "ApiSpec";
 option typescript_out = "./api/api_pb.d.ts";
 option typescript_opt = {
   longs: String,
   enums: Number,
   defaults: true,
-  javascript_namespace: "com.pointzeroonedigital.api",
+  javascript_namespace: "com.pointzeroonegame.api",
   maxJsonLength: 9000000,
 }
 

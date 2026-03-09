@@ -6,7 +6,7 @@ import React, { useEffect, useState } from 'react';
 import { Button, Modal } from '@material-ui/core';
 import PDFExport from 'pdf-export-component';
 import CSVExport from 'csv-export';
-import { ShareIcon } from '@pointzeroonedigital/icons';
+import { ShareIcon } from '@pointzeroonegame/icons';
 import { useParams } from 'react-router-dom';
 
 // Type declarations for the report data and errors.

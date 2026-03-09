@@ -4,7 +4,7 @@
  */
 
 import React from 'react';
-import { Button } from '@pointzeroonedigital/ui-kit';
+import { Button } from '@pointzeroonegame/ui-kit';
 
 type Props = {
   /** Callback function when the claim identity button is clicked */

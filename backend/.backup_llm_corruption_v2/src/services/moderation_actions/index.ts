@@ -98,7 +98,7 @@ spec:
     spec:
       containers:
       - name: moderation-actions
-        image: pointzeroonedigital/moderation-actions:latest
+        image: pointzeroonegame/moderation-actions:latest
         ports:
         - containerPort: 3000
         envFrom:

@@ -2,7 +2,7 @@
  * OutcomePack Contract
  */
 
-declare module '@pointzeroonedigital/shared' {
+declare module '@pointzeroonegame/shared' {
   namespace contracts.curriculum {
     export interface IOutcomePack {
       pack_id: string;

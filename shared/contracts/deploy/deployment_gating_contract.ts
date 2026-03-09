@@ -2,7 +2,7 @@
  * Deployment Gating Contract
  */
 
-declare module "@pointzeroonedigital/contracts" {
+declare module "@pointzeroonegame/contracts" {
   namespace deploy {
     interface FeatureGate {
       id: string;

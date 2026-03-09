@@ -106,6 +106,6 @@ spec:
     spec:
       containers:
         - name: curriculum-entitlements
-          image: pointzeroonedigital/curriculum-entitlements:latest
+          image: pointzeroonegame/curriculum-entitlements:latest
           ports:
             - containerPort: 3000

@@ -69,7 +69,7 @@ resource "aws_rds_instance" "appeals_db" {
   allocated_storage = 20
   engine            = "postgres"
   instance_class    = "db.t2.micro"
-  name              = "pointzeroonedigital-appeals-db"
+  name              = "pointzeroonegame-appeals-db"
   username          = "myuser"
   password          = "mypassword"
   skip_final_snapshot = true

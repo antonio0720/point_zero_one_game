@@ -12,7 +12,7 @@ import { Linking } from 'react-native';
  * Constants
  */
 const APP_ID = 'your-app-id';
-const DEEPLINK_SCHEME = 'pointzeroonedigital://';
+const DEEPLINK_SCHEME = 'pointzeroonegame://';
 
 /**
  * Types

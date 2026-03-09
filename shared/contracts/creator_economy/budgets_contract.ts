@@ -2,7 +2,7 @@
  * Budgets Contract Interface
  */
 
-declare module '@pointzeroonedigital/contracts' {
+declare module '@pointzeroonegame/contracts' {
   export interface BudgetsContract {
     complexity: number;
     volatility: number;

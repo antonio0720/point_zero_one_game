@@ -51,7 +51,7 @@ Bash:
 set -euo pipefail
 
 echo "Creating curriculum entitlement"
-curl -X POST -H "Content-Type: application/json" -d '{"org_id": "exampleOrg", "cohort_id": "exampleCohort", "packAccess": ["pack1", "pack2"], "dashboardAccess": true, "facilitatorAccess": false}' http://api.pointzeroonedigital.com/entitlements
+curl -X POST -H "Content-Type: application/json" -d '{"org_id": "exampleOrg", "cohort_id": "exampleCohort", "packAccess": ["pack1", "pack2"], "dashboardAccess": true, "facilitatorAccess": false}' http://api.pointzeroonegame.com/entitlements
 ```
 
 Terraform:

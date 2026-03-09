@@ -21,7 +21,7 @@ services:
     command: ["redis-server", "--appendonly no"]
 
   mock_apis:
-    image: pointzeroonedigital/mock-apis:latest
+    image: pointzeroonegame/mock-apis:latest
     ports:
       - "8081:80"
       - "8082:443"

@@ -3,7 +3,7 @@
  * Supports partial backfill per partition and emits progress telemetry.
  */
 
-import { Job, JobContext } from '@pointzeroonedigital/job-framework';
+import { Job, JobContext } from '@pointzeroonegame/job-framework';
 import { EventLogRepository } from '../repositories/event-log-repository';
 import { RunExplorerPublicRepository } from '../repositories/run-explorer-public-repository';
 import { LadderRankingsRepository } from '../repositories/ladder-rankings-repository';

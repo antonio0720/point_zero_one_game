@@ -2,7 +2,7 @@
  * OG Renderer Route for generating signed URLs for membership/proof artifacts, caching by tier+variant.
  */
 
-import { Cache } from '@pointzeroonedigital/cache';
+import { Cache } from '@pointzeroonegame/cache';
 import { ArtifactService } from './artifact.service';
 import { SignedUrlService } from './signed-url.service';
 

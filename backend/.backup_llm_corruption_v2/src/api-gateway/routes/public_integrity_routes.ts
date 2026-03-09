@@ -52,7 +52,7 @@ psql -c "\copy (SELECT * FROM old_exploit_reports) TO stdout WITH (FORMAT csv, H
 ```yaml
 api_gateway:
   version: '3'
-  name: PointZeroOneDigitalApiGateway
+  name: pointzeroonegameApiGateway
 
 resources:
   outputs:

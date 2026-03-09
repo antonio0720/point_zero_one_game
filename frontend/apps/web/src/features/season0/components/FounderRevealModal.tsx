@@ -3,7 +3,7 @@
  */
 
 import React, { FunctionComponent } from 'react';
-import { Modal, Button, Text, Box } from '@pointzeroonedigital/uikit';
+import { Modal, Button, Text, Box } from '@pointzeroonegame/uikit';
 import { Founder } from '../../types';
 
 type Props = {

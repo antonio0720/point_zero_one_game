@@ -4,7 +4,7 @@
 
 import { Injectable } from '@nestjs/common';
 import * as jwt from 'jsonwebtoken';
-import { RedisService } from '@pointzeroonedigital/nestjs-redis';
+import { RedisService } from '@pointzeroonegame/nestjs-redis';
 import { JWT_SECRET, REFRESH_TOKEN_TTL, ACCESS_TOKEN_TTL } from '../constants';
 
 /**

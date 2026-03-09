@@ -7,14 +7,14 @@ version: v1
 metadata:
   name: Licensing Alerts
   description: Alerts for licensing-related issues in the Point Zero One Digital game.
-  namespace: pointzeroonedigital
+  namespace: pointzeroonegame
 
 alerts:
   - name: Licensing Roster Import Failures
     annotations:
       description: Notifies when there are failures during the import of the licensing roster.
       severity: Critical
-    expr: kube_state_metrics_pod_container_status_phase{namespace="pointzeroonedigital", container="licensing-roster-importer", phase!="Running"} > 0
+    expr: kube_state_metrics_pod_container_status_phase{namespace="pointzeroonegame", container="licensing-roster-importer", phase!="Running"} > 0
     for: 5m
     labels:
       alertname: Licensing Roster Import Failures
@@ -24,7 +24,7 @@ alerts:
     annotations:
       description: Notifies when the report job backlog exceeds a certain threshold.
       severity: High
-    expr: kube_state_metrics_job_completed{namespace="pointzeroonedigital", job="report-generator"} < kube_state_metrics_cronjob_last_successful_run{namespace="pointzeroonedigital", name="report-generator"} - (time() - 24h)
+    expr: kube_state_metrics_job_completed{namespace="pointzeroonegame", job="report-generator"} < kube_state_metrics_cronjob_last_successful_run{namespace="pointzeroonegame", name="report-generator"} - (time() - 24h)
     for: 5m
     labels:
       alertname: Report Job Backlog
@@ -34,7 +34,7 @@ alerts:
     annotations:
       description: Notifies when there are failures during the export of game data.
       severity: High
-    expr: kube_state_metrics_pod_container_status_phase{namespace="pointzeroonedigital", container="data-exporter", phase!="Running"} > 0
+    expr: kube_state_metrics_pod_container_status_phase{namespace="pointzeroonegame", container="data-exporter", phase!="Running"} > 0
     for: 5m
     labels:
       alertname: Export Failures
@@ -44,7 +44,7 @@ alerts:
     annotations:
       description: Notifies when there are violations of the comparability guard rules.
       severity: Medium
-    expr: kube_state_metrics_pod_container_status_phase{namespace="pointzeroonedigital", container="comparability-guard", phase!="Running"} > 0
+    expr: kube_state_metrics_pod_container_status_phase{namespace="pointzeroonegame", container="comparability-guard", phase!="Running"} > 0
     for: 5m
     labels:
       alertname: Comparability Guard Violations

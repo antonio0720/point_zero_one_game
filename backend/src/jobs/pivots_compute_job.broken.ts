@@ -2,7 +2,7 @@
  * Compute pivots job for Point Zero One Digital's financial roguelike game
  */
 
-import { Job, JobContext } from '@pointzeroonedigital/common';
+import { Job, JobContext } from '@pointzeroonegame/common';
 import axios from 'axios';
 
 export interface PivotsComputeJobInput {

@@ -93,7 +93,7 @@ spec:
     spec:
       containers:
         - name: creator-profiles
-          image: pointzeroonedigital/creator-profiles:latest
+          image: pointzeroonegame/creator-profiles:latest
           ports:
             - containerPort: 3000
           envFrom:

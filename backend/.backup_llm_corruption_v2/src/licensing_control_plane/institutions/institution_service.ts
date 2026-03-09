@@ -87,10 +87,10 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 set -euo pipefail
 
 echo "Creating institution: $1"
-mysql -u user -p password pointzeroonedigital < create_institutions.sql
+mysql -u user -p password pointzeroonegame < create_institutions.sql
 
 echo "Creating roles for institution: $1"
-mysql -u user -p password pointzeroonedigital < create_roles.sql
+mysql -u user -p password pointzeroonegame < create_roles.sql
 
 # ... (Repeat the above block for entitlements and audit logs)
 ```
@@ -129,6 +129,6 @@ spec:
     spec:
       containers:
       - name: institution-service
-        image: pointzeroonedigital/institution-service:latest
+        image: pointzeroonegame/institution-service:latest
         ports:
         - containerPort: 8080

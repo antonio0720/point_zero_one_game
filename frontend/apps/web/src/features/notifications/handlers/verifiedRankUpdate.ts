@@ -2,7 +2,7 @@
  * Handles deep-linking into Verified leaderboard entry.
  */
 
-import { NotificationHandler, NotificationPayload } from '@pointzeroonedigital/notifications';
+import { NotificationHandler, NotificationPayload } from '@pointzeroonegame/notifications';
 import { VerifiedRank } from '../../models/VerifiedRank';
 import { db } from '../../database';
 

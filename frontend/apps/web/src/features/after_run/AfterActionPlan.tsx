@@ -6,7 +6,7 @@ import React, { useState } from 'react';
 import styled from 'styled-components';
 import AnimatedReveal from './AnimatedReveal';
 import RealityLayerToggle from './RealityLayerToggle';
-import { Button } from '@pointzeroonedigital/ui-kit';
+import { Button } from '@pointzeroonegame/ui-kit';
 
 const Wrapper = styled.div`
   display: flex;

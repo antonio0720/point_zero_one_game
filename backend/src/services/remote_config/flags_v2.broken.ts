@@ -52,7 +52,7 @@ export async function init(projectId: string, location: string): Promise<void> {
 export async function setFlag(flag: Flag): Promise<void> {
   const { name, type, defaultValue } = flag;
   await remoteConfigClient.setConfigurationSync({
-    appId: 'PointZeroOneDigital',
+    appId: 'pointzeroonegame',
     projectId,
     clientOptions: { location },
     resource: {
@@ -69,7 +69,7 @@ export async function setFlag(flag: Flag): Promise<void> {
  */
 export async function getFlag(flagName: FlagName): Promise<any> {
   const response = await remoteConfigClient.getLatestRemoteConfig({
-    appId: 'PointZeroOneDigital',
+    appId: 'pointzeroonegame',
     projectId,
     clientOptions: { location },
   });

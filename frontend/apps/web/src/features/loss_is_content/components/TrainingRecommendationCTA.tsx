@@ -5,7 +5,7 @@
  */
 
 import React from 'react';
-import { Button, Text } from '@pointzeroonedigital/ui-kit';
+import { Button, Text } from '@pointzeroonegame/ui-kit';
 import { useGameState } from '../../contexts/GameStateContext';
 
 /**

@@ -63,7 +63,7 @@ export class AlertsService {
         verificationLatency: null,
         quarantineCount: null,
       },
-      runbookLink: 'https://runbook.pointzeroonedigital.com/financial-roguelike-game-health-issues',
+      runbookLink: 'https://runbook.pointzeroonegame.com/financial-roguelike-game-health-issues',
     });
 
     newAlert.save();
@@ -80,5 +80,5 @@ export const AlertSchema = new Mongoose.Schema({
     verificationLatency: Number,
     quarantineCount: Number,
   },
-  runbookLink: { type: String, default: 'https://runbook.pointzeroonedigital.com/financial-roguelike-game-health-issues' },
+  runbookLink: { type: String, default: 'https://runbook.pointzeroonegame.com/financial-roguelike-game-health-issues' },
 });

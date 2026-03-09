@@ -587,7 +587,7 @@ def main() -> int:
             for s in d.missing_external_imports:
                 pkg = package_root(s)
                 all_missing_ext.add(pkg)
-                if pkg.startswith("@pointzeroonedigital") or pkg.startswith("@pzo") or pkg.startswith("@tko"):
+                if pkg.startswith("@pointzeroonegame") or pkg.startswith("@pzo") or pkg.startswith("@tko"):
                     proprietary_missing.add(pkg)
                 else:
                     installable_missing.add(pkg)

@@ -103,7 +103,7 @@ spec:
     spec:
       containers:
       - name: commerce-audit
-        image: pointzeroonedigital/commerce-audit:latest
+        image: pointzeroonegame/commerce-audit:latest
         ports:
         - containerPort: 8080
 ---

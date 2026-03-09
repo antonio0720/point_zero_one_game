@@ -3,7 +3,7 @@
  */
 
 import React, { FunctionComponent } from 'react';
-import { Modal, Button, TextArea } from '@pointzeroonedigital/ui-kit';
+import { Modal, Button, TextArea } from '@pointzeroonegame/ui-kit';
 import { useOrgContext } from '../../contexts/OrgContext';
 
 /**

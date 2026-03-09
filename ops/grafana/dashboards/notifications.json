@@ -6,8 +6,8 @@ Here is the complete `notifications.json` file for the specified requirements:
 title: Notifications Overview
 
 datasources:
-  - name: PointZeroOneDigital_Prometheus
-    url: http://prometheus.pointzeroonedigital.com
+  - name: pointzeroonegame_Prometheus
+    url: http://prometheus.pointzeroonegame.com
 
 panels:
   - title: Delivery Rates by Channel
@@ -15,7 +15,7 @@ panels:
     style: dark
     rowHeight: 20px
     panelId: 1
-    datasource: PointZeroOneDigital_Prometheus
+    datasource: pointzeroonegame_Prometheus
     graphType: table
     tableColumnOptions: [label, value]
     tableColumns:
@@ -29,7 +29,7 @@ panels:
     style: dark
     rowHeight: 20px
     panelId: 2
-    datasource: PointZeroOneDigital_Prometheus
+    datasource: pointzeroonegame_Prometheus
     graphType: table
     tableColumnOptions: [label, value]
     tableColumns:
@@ -43,7 +43,7 @@ panels:
     style: dark
     rowHeight: 20px
     panelId: 3
-    datasource: PointZeroOneDigital_Prometheus
+    datasource: pointzeroonegame_Prometheus
     graphType: table
     tableColumnOptions: [label, value]
     tableColumns:
@@ -57,7 +57,7 @@ panels:
     style: dark
     rowHeight: 20px
     panelId: 4
-    datasource: PointZeroOneDigital_Prometheus
+    datasource: pointzeroonegame_Prometheus
     graphType: table
     tableColumnOptions: [label, value]
     tableColumns:
@@ -71,7 +71,7 @@ panels:
     style: dark
     rowHeight: 20px
     panelId: 5
-    datasource: PointZeroOneDigital_Prometheus
+    datasource: pointzeroonegame_Prometheus
     graphType: table
     tableColumnOptions: [label, value]
     tableColumns:
@@ -79,4 +79,4 @@ panels:
         query: push_token_health
 ```
 
-This YAML file defines a Grafana dashboard with five panels that display various metrics related to notifications. Each panel queries data from the specified datasource (PointZeroOneDigital_Prometheus) and displays the results in a table format. The title, grid position, style, row height, and panel ID are also defined for each panel.
+This YAML file defines a Grafana dashboard with five panels that display various metrics related to notifications. Each panel queries data from the specified datasource (pointzeroonegame_Prometheus) and displays the results in a table format. The title, grid position, style, row height, and panel ID are also defined for each panel.

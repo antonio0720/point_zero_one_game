@@ -2,7 +2,7 @@
  * LossIsContent Telemetry Contract
  */
 
-declare module '@pointzeroonedigital/loss-is-content' {
+declare module '@pointzeroonegame/loss-is-content' {
   export interface TelemetryEvent {
     death_package_shown?: boolean;
     share_clicked?: boolean;
