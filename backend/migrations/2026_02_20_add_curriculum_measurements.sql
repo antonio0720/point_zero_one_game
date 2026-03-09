@@ -1,4 +1,4 @@
--- Point Zero One Digital - Backend Migrations - 2026_02_20_add_curriculum_measurements.sql
+-- Point Zero One Digital - Backend Migrations - 2026_02_20_add_curriculum_measurements.sql-/Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/backend/migrations/2026_02_20_add_curriculum_measurements.sql
 
 CREATE TABLE IF NOT EXISTS scenario_attempt_aggregates (
     id SERIAL PRIMARY KEY,

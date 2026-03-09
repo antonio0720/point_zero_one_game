@@ -1,4 +1,4 @@
--- Point Zero One Digital - Backend Migration Script - 2026-02-20 - Add Curriculum Entitlements
+-- Point Zero One Digital - Backend Migration Script - 2026-02-20 - Add Curriculum Entitlements-/Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/backend/migrations/2026_02_20_add_curriculum_entitlements.sql
 
 SET SQL_MODE = 'STRICT_ALL_TABLES';
 

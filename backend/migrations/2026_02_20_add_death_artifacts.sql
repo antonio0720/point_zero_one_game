@@ -1,4 +1,4 @@
--- Point Zero One Digital - Backend Migrations - 2026_02_20_add_death_artifacts.sql
+-- Point Zero One Digital - Backend Migrations - 2026_02_20_add_death_artifacts.sql-/Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/backend/migrations/2026_02_20_add_death_artifacts.sql
 
 SET FOREIGN_KEY_CHECKS = 0;
 
