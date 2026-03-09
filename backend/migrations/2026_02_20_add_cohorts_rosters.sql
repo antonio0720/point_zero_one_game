@@ -1,4 +1,4 @@
--- Point Zero One Digital - Backend Migrations - 2026-02-20 - Add Cohorts, Rosters, Import Jobs, Assignments, Schedules
+-- Point Zero One Digital - Backend Migrations - 2026-02-20 - Add Cohorts, Rosters, Import Jobs, Assignments, Schedules-/Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/backend/migrations/2026_02_20_add_cohorts_and_calendars.sql
 
 CREATE TABLE IF NOT EXISTS cohorts (
     id SERIAL PRIMARY KEY,
