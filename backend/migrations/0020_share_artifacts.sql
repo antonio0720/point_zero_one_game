@@ -1,33 +1,268 @@
 -- File: backend/migrations/0020_share_artifacts.sql
 
+BEGIN;
+
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
+CREATE OR REPLACE FUNCTION set_row_updated_at()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    NEW.updated_at = CURRENT_TIMESTAMP;
+    RETURN NEW;
+END;
+$$;
+
+DO $$
+BEGIN
+    CREATE TYPE share_artifact_kind AS ENUM (
+        'PROOF_CARD',
+        'CASE_FILE',
+        'SPECTATOR_LINK',
+        'TEAM_PROOF_SHARE',
+        'RUN_EXPLORER_EXPORT',
+        'OG_IMAGE',
+        'MATCH_CLIP'
+    );
+EXCEPTION
+    WHEN duplicate_object THEN NULL;
+END
+$$;
+
+DO $$
+BEGIN
+    CREATE TYPE share_artifact_status AS ENUM (
+        'PENDING',
+        'READY',
+        'FAILED',
+        'REDACTED',
+        'EXPIRED'
+    );
+EXCEPTION
+    WHEN duplicate_object THEN NULL;
+END
+$$;
+
+DO $$
+BEGIN
+    CREATE TYPE share_audience AS ENUM (
+        'PRIVATE',
+        'TEAM',
+        'UNLISTED',
+        'PUBLIC'
+    );
+EXCEPTION
+    WHEN duplicate_object THEN NULL;
+END
+$$;
+
+DO $$
+BEGIN
+    CREATE TYPE render_job_kind AS ENUM (
+        'PROOF_CARD_RENDER',
+        'CASE_FILE_RENDER',
+        'OG_IMAGE_RENDER',
+        'MATCH_CLIP_RENDER'
+    );
+EXCEPTION
+    WHEN duplicate_object THEN NULL;
+END
+$$;
+
+DO $$
+BEGIN
+    CREATE TYPE render_job_status AS ENUM (
+        'QUEUED',
+        'RUNNING',
+        'SUCCEEDED',
+        'FAILED',
+        'CANCELLED'
+    );
+EXCEPTION
+    WHEN duplicate_object THEN NULL;
+END
+$$;
+
 CREATE TABLE IF NOT EXISTS share_artifacts (
-    id INT PRIMARY KEY AUTO_INCREMENT,
-    run_id INT NOT NULL,
-    artifact_type ENUM('share', 'card_rendered') NOT NULL,
-    status ENUM('pending', 'success', 'error') NOT NULL,
-    cdn_url VARCHAR(255) NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    FOREIGN KEY (run_id) REFERENCES runs(id)
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    run_id TEXT NOT NULL,
+    artifact_kind share_artifact_kind NOT NULL,
+    audience share_audience NOT NULL DEFAULT 'PRIVATE',
+    status share_artifact_status NOT NULL DEFAULT 'PENDING',
+    mode_code VARCHAR(32) NOT NULL,
+    proof_hash VARCHAR(64),
+    cache_key VARCHAR(255),
+    storage_key VARCHAR(512),
+    cdn_url TEXT,
+    mime_type VARCHAR(128),
+    checksum VARCHAR(64),
+    payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    error_json JSONB,
+    expires_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT share_artifacts_run_id_not_blank
+        CHECK (char_length(btrim(run_id)) > 0),
+    CONSTRAINT share_artifacts_mode_code_valid
+        CHECK (
+            mode_code IN (
+                'GO_ALONE',
+                'HEAD_TO_HEAD',
+                'TEAM_UP',
+                'CHASE_A_LEGEND'
+            )
+        ),
+    CONSTRAINT share_artifacts_proof_hash_format
+        CHECK (
+            proof_hash IS NULL
+            OR char_length(btrim(proof_hash)) = 64
+        ),
+    CONSTRAINT share_artifacts_checksum_format
+        CHECK (
+            checksum IS NULL
+            OR char_length(btrim(checksum)) = 64
+        ),
+    CONSTRAINT share_artifacts_payload_json_object
+        CHECK (jsonb_typeof(payload_json) = 'object'),
+    CONSTRAINT share_artifacts_metadata_json_object
+        CHECK (jsonb_typeof(metadata_json) = 'object'),
+    CONSTRAINT share_artifacts_error_json_object
+        CHECK (
+            error_json IS NULL
+            OR jsonb_typeof(error_json) = 'object'
+        ),
+    CONSTRAINT share_artifacts_ready_has_location
+        CHECK (
+            status <> 'READY'
+            OR cdn_url IS NOT NULL
+            OR storage_key IS NOT NULL
+        )
 );
 
-CREATE TABLE IF NOT EXISTS clip_jobs (
-    id INT PRIMARY KEY AUTO_INCREMENT,
-    run_id INT NOT NULL,
-    status ENUM('pending', 'success', 'error') NOT NULL,
-    cdn_url VARCHAR(255) NOT NULL,
-    moment_type ENUM('share', 'card_rendered') NOT NULL,
-    FOREIGN KEY (run_id) REFERENCES runs(id),
-    INDEX (status),
-    INDEX (moment_type)
+CREATE TABLE IF NOT EXISTS share_access_tokens (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    artifact_id UUID NOT NULL REFERENCES share_artifacts(id) ON DELETE CASCADE,
+    access_token VARCHAR(128) NOT NULL,
+    access_scope share_audience NOT NULL DEFAULT 'UNLISTED',
+    redeemed_count INTEGER NOT NULL DEFAULT 0,
+    max_redemptions INTEGER,
+    expires_at TIMESTAMPTZ,
+    revoked_at TIMESTAMPTZ,
+    last_accessed_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT share_access_tokens_access_token_not_blank
+        CHECK (char_length(btrim(access_token)) > 0),
+    CONSTRAINT share_access_tokens_redeemed_count_nonnegative
+        CHECK (redeemed_count >= 0),
+    CONSTRAINT share_access_tokens_max_redemptions_positive
+        CHECK (
+            max_redemptions IS NULL
+            OR max_redemptions > 0
+        )
 );
 
-CREATE TABLE IF NOT EXISTS og_cache (
-    id INT PRIMARY KEY AUTO_INCREMENT,
-    run_id INT NOT NULL,
-    rendered_at TIMESTAMP NOT NULL,
-    image_url VARCHAR(255) NOT NULL,
-    FOREIGN KEY (run_id) REFERENCES runs(id),
-    INDEX (rendered_at),
-    UNIQUE (image_url)
+CREATE TABLE IF NOT EXISTS artifact_render_jobs (
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    artifact_id UUID NOT NULL REFERENCES share_artifacts(id) ON DELETE CASCADE,
+    job_kind render_job_kind NOT NULL,
+    status render_job_status NOT NULL DEFAULT 'QUEUED',
+    provider VARCHAR(64),
+    requested_by VARCHAR(255),
+    attempt_count INTEGER NOT NULL DEFAULT 0,
+    parameters_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    result_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    output_url TEXT,
+    error_text TEXT,
+    requested_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    started_at TIMESTAMPTZ,
+    completed_at TIMESTAMPTZ,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT artifact_render_jobs_attempt_count_nonnegative
+        CHECK (attempt_count >= 0),
+    CONSTRAINT artifact_render_jobs_parameters_json_object
+        CHECK (jsonb_typeof(parameters_json) = 'object'),
+    CONSTRAINT artifact_render_jobs_result_json_object
+        CHECK (jsonb_typeof(result_json) = 'object'),
+    CONSTRAINT artifact_render_jobs_completed_after_started
+        CHECK (
+            completed_at IS NULL
+            OR started_at IS NULL
+            OR completed_at >= started_at
+        )
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS share_artifacts_cache_key_uidx
+    ON share_artifacts (cache_key)
+    WHERE cache_key IS NOT NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS share_artifacts_cdn_url_uidx
+    ON share_artifacts (cdn_url)
+    WHERE cdn_url IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS share_artifacts_run_id_idx
+    ON share_artifacts (run_id);
+
+CREATE INDEX IF NOT EXISTS share_artifacts_artifact_kind_idx
+    ON share_artifacts (artifact_kind);
+
+CREATE INDEX IF NOT EXISTS share_artifacts_status_idx
+    ON share_artifacts (status);
+
+CREATE INDEX IF NOT EXISTS share_artifacts_mode_code_idx
+    ON share_artifacts (mode_code);
+
+CREATE INDEX IF NOT EXISTS share_artifacts_audience_idx
+    ON share_artifacts (audience);
+
+CREATE INDEX IF NOT EXISTS share_artifacts_proof_hash_idx
+    ON share_artifacts (proof_hash);
+
+CREATE INDEX IF NOT EXISTS share_artifacts_created_at_idx
+    ON share_artifacts (created_at DESC);
+
+CREATE UNIQUE INDEX IF NOT EXISTS share_access_tokens_access_token_uidx
+    ON share_access_tokens (access_token);
+
+CREATE INDEX IF NOT EXISTS share_access_tokens_artifact_id_idx
+    ON share_access_tokens (artifact_id);
+
+CREATE INDEX IF NOT EXISTS share_access_tokens_expires_at_idx
+    ON share_access_tokens (expires_at);
+
+CREATE INDEX IF NOT EXISTS share_access_tokens_revoked_at_idx
+    ON share_access_tokens (revoked_at);
+
+CREATE INDEX IF NOT EXISTS artifact_render_jobs_artifact_id_idx
+    ON artifact_render_jobs (artifact_id);
+
+CREATE INDEX IF NOT EXISTS artifact_render_jobs_status_idx
+    ON artifact_render_jobs (status);
+
+CREATE INDEX IF NOT EXISTS artifact_render_jobs_job_kind_idx
+    ON artifact_render_jobs (job_kind);
+
+CREATE INDEX IF NOT EXISTS artifact_render_jobs_requested_at_idx
+    ON artifact_render_jobs (requested_at DESC);
+
+DROP TRIGGER IF EXISTS share_artifacts_set_updated_at ON share_artifacts;
+CREATE TRIGGER share_artifacts_set_updated_at
+BEFORE UPDATE ON share_artifacts
+FOR EACH ROW
+EXECUTE FUNCTION set_row_updated_at();
+
+DROP TRIGGER IF EXISTS share_access_tokens_set_updated_at ON share_access_tokens;
+CREATE TRIGGER share_access_tokens_set_updated_at
+BEFORE UPDATE ON share_access_tokens
+FOR EACH ROW
+EXECUTE FUNCTION set_row_updated_at();
+
+DROP TRIGGER IF EXISTS artifact_render_jobs_set_updated_at ON artifact_render_jobs;
+CREATE TRIGGER artifact_render_jobs_set_updated_at
+BEFORE UPDATE ON artifact_render_jobs
+FOR EACH ROW
+EXECUTE FUNCTION set_row_updated_at();
+
+COMMIT;
