@@ -1,4 +1,4 @@
--- Point Zero One Digital - Backend Migrations - 2026_02_20_add_competency_packs.sql
+-- Point Zero One Digital - Backend Migrations - 2026_02_20_add_competency_packs.sql-/Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/backend/migrations/2026_02_20_add_competency_packs.sql
 
 CREATE TABLE IF NOT EXISTS competency_packs (
     id SERIAL PRIMARY KEY,

@@ -1,4 +1,4 @@
--- Point Zero One Digital - Creator Profiles Migration (v2026_02_20)
+-- Point Zero One Digital - Creator Profiles Migration (v2026_02_20)-/Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/backend/migrations/2026_02_20_add_creator_profiles.sql
 
 CREATE TABLE IF NOT EXISTS creators (
     id INT PRIMARY KEY AUTO_INCREMENT,

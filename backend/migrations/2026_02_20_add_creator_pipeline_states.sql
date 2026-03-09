@@ -1,5 +1,5 @@
 -- Point Zero One Digital - ugc_pipeline_state, ugc_stage_timers, ugc_retry_schedule, ugc_default_outcomes
--- Strict TypeScript, no 'any', export all public symbols, JSDoc comments
+-- Strict TypeScript, no 'any', export all public symbols, JSDoc comments-/Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/backend/migrations/2026_02_20_add_creator_pipeline_states.sql
 -- SQL: includes indexes, foreign keys, comments; idempotent (CREATE IF NOT EXISTS)
 -- Bash: set -euo pipefail, log all actions
 
