@@ -1,5 +1,5 @@
 -- Point Zero One Digital - Backend Migration: 0052_forensic_autopsy.sql
--- Strict TypeScript, no 'any', export all public symbols
+-- Strict TypeScript, no 'any', export all public symbols-/Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/backend/migrations/0052_forensic_autopsy.sql
 -- SQL: includes indexes, foreign keys, comments; idempotent (CREATE IF NOT EXISTS)
 -- Bash: set -euo pipefail, log all actions
 

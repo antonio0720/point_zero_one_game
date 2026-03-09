@@ -1,4 +1,4 @@
--- Point Zero One Digital - Backend Migration Script - 2026-02-20 - Add Visibility Columns
+-- Point Zero One Digital - Backend Migration Script - 2026-02-20 - Add Visibility Columns -/Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/backend/migrations/0052_forensic_autopsy.sql
 
 CREATE TABLE IF NOT EXISTS membership_artifacts (
     id SERIAL PRIMARY KEY,
