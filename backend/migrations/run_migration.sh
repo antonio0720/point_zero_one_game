@@ -26,7 +26,6 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-MIGRATION_FILE="${SCRIPT_DIR}/0001_pzo_sovereign_schema.sql"
 LOG_FILE="${SCRIPT_DIR}/migration_$(date +%Y%m%d_%H%M%S).log"
 
 # ── Colors ──────────────────────────────────────────────────────────────────
@@ -153,25 +152,35 @@ NUKE_SQL
 
 # ── Apply ───────────────────────────────────────────────────────────────────
 apply_migration() {
-    if [[ ! -f "$MIGRATION_FILE" ]]; then
-        fail "Migration file not found: ${MIGRATION_FILE}"
+    local files
+    files=($(find "$SCRIPT_DIR" -maxdepth 1 -name '*.sql' -type f | sort))
+
+    if [[ ${#files[@]} -eq 0 ]]; then
+        fail "No .sql migration files found in ${SCRIPT_DIR}"
     fi
 
-    local lines
-    lines="$(wc -l < "$MIGRATION_FILE")"
-    log "Applying migration: $(basename "$MIGRATION_FILE") (${lines} lines)"
+    local total_lines=0
+    for f in "${files[@]}"; do
+        total_lines=$((total_lines + $(wc -l < "$f")))
+    done
+    log "Applying ${#files[@]} migration files (${total_lines} total lines)"
 
     local start_time
     start_time="$(date +%s)"
 
-    if run_psql -f "$MIGRATION_FILE" >> "$LOG_FILE" 2>&1; then
-        local end_time
-        end_time="$(date +%s)"
-        local elapsed=$((end_time - start_time))
-        ok "Migration applied successfully in ${elapsed}s"
-    else
-        fail "Migration FAILED. Check log: ${LOG_FILE}"
-    fi
+    for f in "${files[@]}"; do
+        local fname
+        fname="$(basename "$f")"
+        log "  → ${fname}"
+        if ! run_psql -f "$f" >> "$LOG_FILE" 2>&1; then
+            fail "Migration FAILED on ${fname}. Check log: ${LOG_FILE}"
+        fi
+    done
+
+    local end_time
+    end_time="$(date +%s)"
+    local elapsed=$((end_time - start_time))
+    ok "All ${#files[@]} migrations applied successfully in ${elapsed}s"
 }
 
 # ── Verify ──────────────────────────────────────────────────────────────────
@@ -224,6 +233,11 @@ verify_schema() {
         "game.run_events"
         "game.card_definitions"
         "game.ruleset_versions"
+        "game.card_mode_overlays"
+        "game.run_cord_breakdowns"
+        "game.run_proof_artifacts"
+        "game.bot_profiles"
+        "game.contract_game_modes"
         "social.matches"
         "social.rivalries"
         "social.legend_runs"
@@ -231,6 +245,7 @@ verify_schema() {
         "economy.purchases"
         "analytics.run_scorecards"
         "analytics.ladders"
+        "analytics.verified_run_explorer"
     )
 
     local missing=0
@@ -265,7 +280,7 @@ verify_schema() {
         JOIN pg_enum e ON t.oid = e.enumtypid
         WHERE t.typname = 'game_mode' AND n.nspname = 'public'
     ")"
-    if [[ "$modes" == "EMPIRE,PREDATOR,SYNDICATE,PHANTOM" ]]; then
+    if [[ "$modes" == "GO_ALONE,HEAD_TO_HEAD,TEAM_UP,CHASE_A_LEGEND" ]]; then
         ok "Game modes: ${modes}"
     else
         warn "Unexpected game modes: ${modes}"
@@ -334,11 +349,23 @@ count_objects() {
 
 # ── Dry Run ─────────────────────────────────────────────────────────────────
 dry_run() {
-    log "Dry run: parsing migration SQL..."
-    if run_psql -c "BEGIN; $(cat "$MIGRATION_FILE"); ROLLBACK;" >> "$LOG_FILE" 2>&1; then
-        ok "Migration parses successfully (no changes applied)"
+    local files
+    files=($(find "$SCRIPT_DIR" -maxdepth 1 -name '*.sql' -type f | sort))
+    log "Dry run: parsing ${#files[@]} migration files..."
+    local all_ok=true
+    for f in "${files[@]}"; do
+        local fname="$(basename "$f")"
+        if run_psql -c "BEGIN; $(cat "$f"); ROLLBACK;" >> "$LOG_FILE" 2>&1; then
+            ok "  ${fname} — parses OK"
+        else
+            warn "  ${fname} — has errors"
+            all_ok=false
+        fi
+    done
+    if $all_ok; then
+        ok "All migrations parse successfully (no changes applied)"
     else
-        fail "Migration has syntax errors. Check log: ${LOG_FILE}"
+        fail "One or more migrations have errors. Check log: ${LOG_FILE}"
     fi
 }
 
