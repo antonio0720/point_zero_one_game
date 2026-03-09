@@ -9,7 +9,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { CasualControl } from '../../entities/casual_control.entity';
+import { CasualControl } from '../../../entities/casual_control.entity';
 
 @Injectable()
 export class CasualControlsService {
