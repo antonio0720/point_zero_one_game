@@ -340,7 +340,10 @@ function normalizeFounderSealEvolvedPayload(
   input: FounderSealEvolvedPayload,
 ): FounderSealEvolvedPayload {
   return {
-    newSealLevel: normalizeNonNegativeInteger(input.newSealLevel, 'newSealLevel'),
+    newSealLevel: normalizeNonNegativeInteger(
+      input.newSealLevel,
+      'newSealLevel',
+    ),
     previousSealLevel: normalizeOptionalNonNegativeInteger(
       input.previousSealLevel,
       'previousSealLevel',
@@ -535,13 +538,13 @@ export class Season0AnalyticsService {
     envelope: Season0Envelope<TEventName>,
     context: AnalyticsEmitContext = {},
   ): Promise<AnalyticsEmitReceipt> {
-    return this.emitter.emit(envelope, context);
+    return this.emitter.emit(envelope as unknown as any, context);
   }
 
   buildSeason0Joined(
     payload: Season0JoinedPayload = {},
     context: Season0EventContext = {},
-  ) {
+  ): ReturnType<typeof createSeason0JoinedEvent> {
     return createSeason0JoinedEvent(payload, {
       ...this.defaultContext,
       ...context,
@@ -551,7 +554,7 @@ export class Season0AnalyticsService {
   buildFounderTierAssigned(
     payload: FounderTierAssignedPayload,
     context: Season0EventContext = {},
-  ) {
+  ): ReturnType<typeof createFounderTierAssignedEvent> {
     return createFounderTierAssignedEvent(payload, {
       ...this.defaultContext,
       ...context,
@@ -559,12 +562,9 @@ export class Season0AnalyticsService {
   }
 
   buildArtifactGranted(
- }
-
-  buildArtifactGranted(
     payload: ArtifactGrantedPayload,
     context: Season0EventContext = {},
-  ) {
+  ): ReturnType<typeof createArtifactGrantedEvent> {
     return createArtifactGrantedEvent(payload, {
       ...this.defaultContext,
       ...context,
@@ -574,7 +574,7 @@ export class Season0AnalyticsService {
   buildMembershipShared(
     payload: MembershipSharedPayload = {},
     context: Season0EventContext = {},
-  ) {
+  ): ReturnType<typeof createMembershipSharedEvent> {
     return createMembershipSharedEvent(payload, {
       ...this.defaultContext,
       ...context,
@@ -584,7 +584,7 @@ export class Season0AnalyticsService {
   buildMembershipCardViewed(
     payload: MembershipCardViewedPayload = {},
     context: Season0EventContext = {},
-  ) {
+  ): ReturnType<typeof createMembershipCardViewedEvent> {
     return createMembershipCardViewedEvent(payload, {
       ...this.defaultContext,
       ...context,
@@ -594,7 +594,7 @@ export class Season0AnalyticsService {
   buildProofCardMinted(
     payload: ProofCardMintedPayload,
     context: Season0EventContext = {},
-  ) {
+  ): ReturnType<typeof createProofCardMintedEvent> {
     return createProofCardMintedEvent(payload, {
       ...this.defaultContext,
       ...context,
@@ -604,7 +604,7 @@ export class Season0AnalyticsService {
   buildProofStamped(
     payload: ProofStampedPayload,
     context: Season0EventContext = {},
-  ) {
+  ): ReturnType<typeof createProofStampedEvent> {
     return createProofStampedEvent(payload, {
       ...this.defaultContext,
       ...context,
@@ -614,7 +614,7 @@ export class Season0AnalyticsService {
   buildInviteSent(
     payload: InviteSentPayload = {},
     context: Season0EventContext = {},
-  ) {
+  ): ReturnType<typeof createInviteSentEvent> {
     return createInviteSentEvent(payload, {
       ...this.defaultContext,
       ...context,
@@ -624,7 +624,7 @@ export class Season0AnalyticsService {
   buildInviteAccepted(
     payload: InviteAcceptedPayload = {},
     context: Season0EventContext = {},
-  ) {
+  ): ReturnType<typeof createInviteAcceptedEvent> {
     return createInviteAcceptedEvent(payload, {
       ...this.defaultContext,
       ...context,
@@ -634,7 +634,7 @@ export class Season0AnalyticsService {
   buildReferralCompleted(
     payload: ReferralCompletedPayload = {},
     context: Season0EventContext = {},
-  ) {
+  ): ReturnType<typeof createReferralCompletedEvent> {
     return createReferralCompletedEvent(payload, {
       ...this.defaultContext,
       ...context,
@@ -644,7 +644,7 @@ export class Season0AnalyticsService {
   buildReferralRewardUnlocked(
     payload: ReferralRewardUnlockedPayload,
     context: Season0EventContext = {},
-  ) {
+  ): ReturnType<typeof createReferralRewardUnlockedEvent> {
     return createReferralRewardUnlockedEvent(payload, {
       ...this.defaultContext,
       ...context,
@@ -654,7 +654,7 @@ export class Season0AnalyticsService {
   buildStreakUpdated(
     payload: StreakUpdatedPayload,
     context: Season0EventContext = {},
-  ) {
+  ): ReturnType<typeof createStreakUpdatedEvent> {
     return createStreakUpdatedEvent(payload, {
       ...this.defaultContext,
       ...context,
@@ -664,7 +664,7 @@ export class Season0AnalyticsService {
   buildStreakGraceApplied(
     payload: StreakGraceAppliedPayload,
     context: Season0EventContext = {},
-  ) {
+  ): ReturnType<typeof createStreakGraceAppliedEvent> {
     return createStreakGraceAppliedEvent(payload, {
       ...this.defaultContext,
       ...context,
@@ -674,7 +674,7 @@ export class Season0AnalyticsService {
   buildArtifactReceiptIssued(
     payload: ArtifactReceiptIssuedPayload,
     context: Season0EventContext = {},
-  ) {
+  ): ReturnType<typeof createArtifactReceiptIssuedEvent> {
     return createArtifactReceiptIssuedEvent(payload, {
       ...this.defaultContext,
       ...context,
@@ -684,7 +684,7 @@ export class Season0AnalyticsService {
   buildFounderSealEvolved(
     payload: FounderSealEvolvedPayload,
     context: Season0EventContext = {},
-  ) {
+  ): ReturnType<typeof createFounderSealEvolvedEvent> {
     return createFounderSealEvolvedEvent(payload, {
       ...this.defaultContext,
       ...context,

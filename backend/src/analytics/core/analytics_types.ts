@@ -3,7 +3,7 @@
 /**
  * ═══════════════════════════════════════════════════════════════════════════════
  * POINT ZERO ONE — ANALYTICS CORE / SHARED TYPES
- * backend/src/analytics.ts
+ * backend/src/analytics/core/analytics_types.ts
  *
  * Shared contracts for analytics emission, persistence, batching, and transport.
  *
@@ -19,6 +19,7 @@ import type {
   AnalyticsEnvelope,
   AnalyticsPayload,
 } from './analytics_envelope';
+
 import type { AnalyticsEventName } from './analytics_names';
 
 export type Awaitable<T> = T | Promise<T>;
@@ -82,7 +83,7 @@ export interface AnalyticsEmitContext {
   /**
    * Freeform scalar-safe tags for observability / routing.
    */
-  tags?: Readonly<Record<string, string | number | boolean>>;
+  tags?: Readonly<Record<string, string | number | boolean | null>>;
 }
 
 export interface AnalyticsEmitReceipt {
@@ -120,14 +121,14 @@ export interface AnalyticsEventSerializer {
 }
 
 export interface AnalyticsSqlQueryResult<
-  TRow extends Record<string, unknown> = Record<string, unknown>,
+  TRow extends object = Record<string, unknown>,
 > {
   rows: TRow[];
   rowCount?: number | null;
 }
 
 export interface AnalyticsSqlRunner {
-  query<TRow extends Record<string, unknown> = Record<string, unknown>>(
+  query<TRow extends object = Record<string, unknown>>(
     text: string,
     params?: readonly unknown[],
   ): Promise<AnalyticsSqlQueryResult<TRow>>;
@@ -135,7 +136,8 @@ export interface AnalyticsSqlRunner {
 
 export interface AnalyticsOutboxInsertOptions {
   /**
-   * SQL target table. Must be schema-qualified when not in public schema.
+   * SQL target table.
+   * Must be schema-qualified when not in public schema.
    */
   tableName?: string;
 

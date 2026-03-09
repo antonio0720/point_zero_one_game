@@ -9,25 +9,76 @@
  *
  * This file gives the rest of the backend a single stable import surface while
  * preserving bounded contexts internally.
+ *
+ * Important:
+ * - core modules remain flat exports
+ * - domain modules are namespaced to prevent symbol collisions
+ * - explicit top-level exports are kept only for subsystem construction
  * ═══════════════════════════════════════════════════════════════════════════════
  */
 
 export * from './core/analytics_envelope';
 export * from './core/analytics_names';
-export * from './core/analytics_validation';
+export * as AnalyticsValidation from './core/analytics_validation';
 export * from './core/analytics_emitters';
 export * from './core/analytics_outbox_emitter';
 export * from './core/analytics_types';
 
-export * from './season0';
-export * from './trust';
-export * from './verification/events_verification';
+export * as Season0Analytics from './season0';
+export * as TrustAnalytics from './trust';
+export * as VerificationAnalytics from './verification/events_verification';
+export * as Season0DomainAnalytics from './mappers/season0_domain_mapper';
+export * as TrustDomainAnalytics from './mappers/trust_domain_mapper';
 
-export * from './mappers/season0_domain_mapper';
-export * from './mappers/trust_domain_mapper';
+export {
+  createSeason0AnalyticsService,
+  Season0AnalyticsService,
+} from './season0';
 
-import { AnalyticsOutboxEmitter, createPgAnalyticsOutboxWriter } from './core/analytics_outbox_emitter';
-import { CompositeAnalyticsEmitter, ConsoleAnalyticsEmitter, NoopAnalyticsEmitter } from './core/analytics_emitters';
+export type { Season0EventContext } from './season0';
+
+export {
+  createTrustAnalyticsService,
+  TrustAnalyticsService,
+} from './trust';
+
+export type { TrustEventContext } from './trust';
+
+export {
+  createVerificationAnalyticsService,
+  VerificationAnalyticsService,
+} from './verification/events_verification';
+
+export type { VerificationEventContext } from './verification/events_verification';
+
+export {
+  createSeason0DomainAnalyticsMapper,
+} from './mappers/season0_domain_mapper';
+
+export type {
+  Season0DomainAnalyticsMapper,
+  Season0DomainMapperOptions,
+} from './mappers/season0_domain_mapper';
+
+export {
+  createTrustDomainAnalyticsMapper,
+} from './mappers/trust_domain_mapper';
+
+export type {
+  TrustDomainAnalyticsMapper,
+  TrustDomainMapperOptions,
+} from './mappers/trust_domain_mapper';
+
+import {
+  AnalyticsOutboxEmitter,
+  createPgAnalyticsOutboxWriter,
+} from './core/analytics_outbox_emitter';
+
+import {
+  CompositeAnalyticsEmitter,
+  ConsoleAnalyticsEmitter,
+  NoopAnalyticsEmitter,
+} from './core/analytics_emitters';
 
 import type {
   AnalyticsEmitter,

@@ -44,15 +44,13 @@
  *     retry_count        integer not null default 0,
  *     available_at       timestamptz not null default now(),
  *     last_error         text null,
- *     created_at         timestamptz not null default now()
+ *     created_at         timestamptz not null default now(),
+ *     envelope           jsonb not null
  *   )
  * ═══════════════════════════════════════════════════════════════════════════════
  */
 
-import {
-  serializeAnalyticsEnvelope,
-  type AnalyticsEnvelopeAny,
-} from './analytics_envelope';
+import { serializeAnalyticsEnvelope } from './analytics_envelope';
 
 import type {
   AnalyticsBatchEmitReceipt,
@@ -60,6 +58,7 @@ import type {
   AnalyticsEmitContext,
   AnalyticsEmitReceipt,
   AnalyticsEmitter,
+  AnalyticsEnvelopeAny,
   AnalyticsOutboxInsertOptions,
   AnalyticsOutboxInsertResult,
   AnalyticsOutboxWriter,
@@ -67,7 +66,8 @@ import type {
 } from './analytics_types';
 
 const DEFAULT_OUTBOX_TABLE = 'analytics.event_outbox';
-const SAFE_TABLE_NAME_REGEX = /^(?:[A-Za-z_][A-Za-z0-9_]*\.)?[A-Za-z_][A-Za-z0-9_]*$/;
+const SAFE_TABLE_NAME_REGEX =
+  /^(?:[A-Za-z_][A-Za-z0-9_]*\.)?[A-Za-z_][A-Za-z0-9_]*$/;
 
 interface InsertedRow {
   event_id: string;
@@ -75,6 +75,7 @@ interface InsertedRow {
 
 function assertSafeTableName(tableName: string): string {
   const normalized = tableName.trim();
+
   if (!SAFE_TABLE_NAME_REGEX.test(normalized)) {
     throw new Error(
       `Unsafe outbox table name "${tableName}". Expected schema.table or table.`,
@@ -284,11 +285,7 @@ export class PgAnalyticsOutboxWriter implements AnalyticsOutboxWriter {
       )
       VALUES
       ${rowSql.join(',\n')}
-      ${
-        onConflictDoNothing
-          ? 'ON CONFLICT (event_id) DO NOTHING'
-          : ''
-      }
+      ${onConflictDoNothing ? 'ON CONFLICT (event_id) DO NOTHING' : ''}
       RETURNING event_id
     `;
 
@@ -301,13 +298,7 @@ export class PgAnalyticsOutboxWriter implements AnalyticsOutboxWriter {
 
     const receipts = envelopes.map((envelope) =>
       insertedIds.has(envelope.eventId)
-        ? buildReceipt(
-            envelope,
-            'ENQUEUED',
-            'outbox',
-            persistedAt,
-            false,
-          )
+        ? buildReceipt(envelope, 'ENQUEUED', 'outbox', persistedAt, false)
         : buildReceipt(
             envelope,
             onConflictDoNothing ? 'SKIPPED' : 'FAILED',
@@ -347,6 +338,7 @@ export class AnalyticsOutboxEmitter implements AnalyticsEmitter {
     _context: AnalyticsEmitContext = {},
   ): Promise<AnalyticsEmitReceipt> {
     const result = await this.writer.insert(envelope, this.options);
+
     return (
       result.receipts[0] ??
       buildReceipt(

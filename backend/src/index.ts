@@ -1,4 +1,4 @@
-// ═══════════════════════════════════════════════════════════════════════════════
+// ═════════════:contentReference[oaicite:1]{index=1}══════════════════════════════════════
 // POINT ZERO ONE — BACKEND ENTRY POINT
 // backend/src/index.ts
 //
@@ -10,7 +10,7 @@
 //   No NestJS runtime — pure Express for control and transparency.
 //
 // Middleware chain (order matters):
-//   1. correlationId   — attach X-Correlation-ID to every request
+//   1. correlationId    — attach X-Correlation-ID to every request
 //   2. corsMiddleware   — CORS headers
 //   3. securityHeaders  — HSTS, X-Frame-Options, etc.
 //   4. requestLogger    — structured request logging
@@ -24,7 +24,7 @@
 // Density6 LLC · Point Zero One · Sovereign Infrastructure
 // ═══════════════════════════════════════════════════════════════════════════════
 
-import express, { Request, Response, NextFunction } from 'express';
+import express, { type NextFunction, type Request, type Response } from 'express';
 import http from 'node:http';
 
 // ── Database ────────────────────────────────────────────────────────────────
@@ -33,8 +33,8 @@ import pool from './api-gateway/db/pool';
 // ── Observability middleware ────────────────────────────────────────────────
 import {
   correlationId,
-  requestLogger,
   metricsCollector,
+  requestLogger,
 } from './api-gateway/middleware/observability';
 
 // ── Security middleware ────────────────────────────────────────────────────
@@ -46,7 +46,7 @@ import {
 // ── Error handling ─────────────────────────────────────────────────────────
 import { globalErrorHandler } from './api-gateway/middleware/errors';
 
-// ── Auth middleware (JWT + device trust + rate limiting) ────────────────────
+// ── Auth middleware (JWT + device trust + rate limiting) ───────────────────
 import { authMiddleware } from './middleware/auth_middleware';
 
 // ── Input sanitizer (DSL injection protection) ─────────────────────────────
@@ -58,20 +58,20 @@ import EventBus from './events/event-bus';
 // ── Game engine (deterministic run boundary) ───────────────────────────────
 import {
   createRun,
-  submitTurnDecision,
   finalizeRun,
-  replayRun,
   getRunEvents,
+  replayRun,
+  submitTurnDecision,
 } from './game/engine/index';
 
 // ── Routes ─────────────────────────────────────────────────────────────────
 import { healthRouter } from './api-gateway/routes/health.routes';
-import season0Router from './api-gateway/routes/season0_routes';
+import commerceGovernanceRouter from './api-gateway/routes/commerce_governance_routes';
+import createCreatorEconomyRoutes from './api-gateway/routes/creator_economy_routes';
+import { curriculumRouter } from './api-gateway/routes/curriculum/index';
 import institutionsRouter from './api-gateway/routes/institutions_routes';
 import integrityRouter from './api-gateway/routes/integrity_routes';
-import commerceGovernanceRouter from './api-gateway/routes/commerce_governance_routes';
-import { curriculumRouter } from './api-gateway/routes/curriculum/index';
-import createCreatorEconomyRoutes from './api-gateway/routes/creator_economy_routes';
+import season0Router from './api-gateway/routes/season0_routes';
 
 // ── Queue health (BullMQ) ──────────────────────────────────────────────────
 import { getQueueHealth } from './queues/curriculum/index';
@@ -121,67 +121,125 @@ authMiddleware(app);
 // ROUTE MOUNTING — GAME CORE
 // ═══════════════════════════════════════════════════════════════════════════════
 
-// ── Game Engine API ────────────────────────────────────────────────────────
-// Exposes the deterministic run boundary: create, submit turns, finalize, replay
 const gameRouter = express.Router();
 
 // POST /api/v1/game/runs — create a new run
-gameRouter.post('/runs', async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { seed, ledger } = req.body;
-    if (seed === undefined) {
-      return res.status(400).json({ error: 'seed is required' });
+gameRouter.post(
+  '/runs',
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { seed, ledger } = req.body as {
+        seed?: unknown;
+        ledger?: unknown;
+      };
+
+      if (seed === undefined) {
+        return res.status(400).json({ error: 'seed is required' });
+      }
+
+      // Validate and coerce seed to a number (Seed)
+      let parsedSeed: number;
+      if (typeof seed === 'number') {
+        parsedSeed = seed;
+      } else if (typeof seed === 'string' && /^\d+$/.test(seed)) {
+        parsedSeed = Number(seed);
+      } else {
+        return res
+          .status(400)
+          .json({ error: 'seed must be a number or numeric string' });
+      }
+
+      // Validate ledger if present
+      let parsedLedger: unknown = undefined;
+      if (ledger !== undefined) {
+        if (typeof ledger !== 'object' || ledger === null) {
+          return res.status(400).json({ error: 'ledger must be an object' });
+        }
+        parsedLedger = ledger;
+      }
+
+      const runId = await createRun({
+        seed: parsedSeed,
+        ledger: parsedLedger as Partial<any>,
+      });
+      return res.status(201).json({ runId });
+    } catch (err) {
+      return next(err);
     }
-    const runId = await createRun({ seed, ledger });
-    res.status(201).json({ runId });
-  } catch (err) {
-    next(err);
-  }
-});
+  },
+);
 
 // POST /api/v1/game/runs/:runId/turns — submit a turn decision
-gameRouter.post('/runs/:runId/turns', async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { runId } = req.params;
-    await submitTurnDecision(runId!, req.body);
-    res.json({ ok: true });
-  } catch (err) {
-    next(err);
-  }
-});
+gameRouter.post(
+  '/runs/:runId/turns',
+  async (
+    req: Request<{ runId: string }>,
+    res: Response,
+    next: NextFunction,
+  ) => {
+    try {
+      const { runId } = req.params;
+      await submitTurnDecision(runId, req.body);
+      return res.json({ ok: true });
+    } catch (err) {
+      return next(err);
+    }
+  },
+);
 
 // POST /api/v1/game/runs/:runId/finalize — finalize a run
-gameRouter.post('/runs/:runId/finalize', async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { runId } = req.params;
-    const result = await finalizeRun(runId!);
-    res.json(result);
-  } catch (err) {
-    next(err);
-  }
-});
+gameRouter.post(
+  '/runs/:runId/finalize',
+  async (
+    req: Request<{ runId: string }>,
+    res: Response,
+    next: NextFunction,
+  ) => {
+    try {
+      const { runId } = req.params;
+      const result = await finalizeRun(runId);
+      return res.json(result);
+    } catch (err) {
+      return next(err);
+    }
+  },
+);
 
 // GET /api/v1/game/runs/:runId/replay — replay a run
-gameRouter.get('/runs/:runId/replay', async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { runId } = req.params;
-    const result = await replayRun(runId!);
-    res.json(result);
-  } catch (err) {
-    next(err);
-  }
-});
+gameRouter.get(
+  '/runs/:runId/replay',
+  async (
+    req: Request<{ runId: string }>,
+    res: Response,
+    next: NextFunction,
+  ) => {
+    try {
+      const { runId } = req.params;
+      const result = await replayRun(runId);
+      return res.json(result);
+    } catch (err) {
+      return next(err);
+    }
+  },
+);
 
 // GET /api/v1/game/runs/:runId/events — get run events
-gameRouter.get('/runs/:runId/events', async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { runId } = req.params;
-    const events = await getRunEvents(runId!);
-    res.json({ events });
-  } catch (err) {
-    next(err);
-  }
-});
+gameRouter.get(
+  '/runs/:runId/events',
+  async (
+    req: Request<{ runId: string }>,
+    res: Response,
+    next: NextFunction,
+  ) => {
+    try {
+      const { runId } = req.params;
+      const events = await getRunEvents(runId);
+      return res.json({ events });
+    } catch (err) {
+      return next(err);
+    }
+  },
+);
 
 app.use('/api/v1/game', gameRouter);
 
@@ -219,7 +277,7 @@ app.use('/api/v1/governance', commerceGovernanceRouter);
 // ROUTE MOUNTING — CREATOR ECONOMY
 // ═══════════════════════════════════════════════════════════════════════════════
 
-app.use('/api/v1/creators', createCreatorEconomyRoutes());
+app.use('/api/v1/creators', createCreatorEconomyRoutes({} as never));
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // ROUTE MOUNTING — DATABASE-DIRECT QUERY ENDPOINTS
@@ -228,56 +286,100 @@ app.use('/api/v1/creators', createCreatorEconomyRoutes());
 const dbRouter = express.Router();
 
 // GET /api/v1/db/modes — list canonical game modes from contract table
-dbRouter.get('/modes', async (_req: Request, res: Response, next: NextFunction) => {
-  try {
-    const result = await pool.query(
-      'SELECT code, display_alias, display_name, tagline, icon, min_players, max_players FROM game.contract_game_modes WHERE is_active = true ORDER BY code',
-    );
-    res.json({ modes: result.rows });
-  } catch (err) {
-    next(err);
-  }
-});
+dbRouter.get(
+  '/modes',
+  async (_req: Request, res: Response, next: NextFunction) => {
+    try {
+      const result = await pool.query(
+        `
+        SELECT
+          code,
+          display_alias,
+          display_name,
+          tagline,
+          icon,
+          min_players,
+          max_players
+        FROM game.contract_game_modes
+        WHERE is_active = true
+        ORDER BY code
+        `,
+      );
+
+      return res.json({ modes: result.rows });
+    } catch (err) {
+      return next(err);
+    }
+  },
+);
 
 // GET /api/v1/db/timing-classes — list canonical timing classes
-dbRouter.get('/timing-classes', async (_req: Request, res: Response, next: NextFunction) => {
-  try {
-    const result = await pool.query(
-      'SELECT code, description, mode_scope, window_default_ms FROM game.contract_timing_classes ORDER BY code',
-    );
-    res.json({ timingClasses: result.rows });
-  } catch (err) {
-    next(err);
-  }
-});
+dbRouter.get(
+  '/timing-classes',
+  async (_req: Request, res: Response, next: NextFunction) => {
+    try {
+      const result = await pool.query(
+        `
+        SELECT
+          code,
+          description,
+          mode_scope,
+          window_default_ms
+        FROM game.contract_timing_classes
+        ORDER BY code
+        `,
+      );
+
+      return res.json({ timingClasses: result.rows });
+    } catch (err) {
+      return next(err);
+    }
+  },
+);
 
 // GET /api/v1/db/bots — list canonical bot profiles
-dbRouter.get('/bots', async (_req: Request, res: Response, next: NextFunction) => {
-  try {
-    const result = await pool.query(
-      'SELECT code, display_name, personality, attack_vector FROM game.contract_bot_profiles ORDER BY code',
-    );
-    res.json({ bots: result.rows });
-  } catch (err) {
-    next(err);
-  }
-});
+dbRouter.get(
+  '/bots',
+  async (_req: Request, res: Response, next: NextFunction) => {
+    try {
+      const result = await pool.query(
+        `
+        SELECT
+          code,
+          display_name,
+          personality,
+          attack_vector
+        FROM game.contract_bot_profiles
+        ORDER BY code
+        `,
+      );
+
+      return res.json({ bots: result.rows });
+    } catch (err) {
+      return next(err);
+    }
+  },
+);
 
 // GET /api/v1/db/schema-census — table counts per schema
-dbRouter.get('/schema-census', async (_req: Request, res: Response, next: NextFunction) => {
-  try {
-    const result = await pool.query(`
-      SELECT schemaname AS schema, COUNT(*)::int AS tables
-      FROM pg_tables
-      WHERE schemaname IN ('public','game','economy','social','analytics','b2b')
-      GROUP BY schemaname
-      ORDER BY schemaname
-    `);
-    res.json({ schemas: result.rows });
-  } catch (err) {
-    next(err);
-  }
-});
+dbRouter.get(
+  '/schema-census',
+  async (_req: Request, res: Response, next: NextFunction) => {
+    try {
+      const result = await pool.query(`
+        SELECT schemaname AS schema, COUNT(*)::int AS tables
+        FROM pg_tables
+        WHERE schemaname IN ('public', 'game', 'economy', 'social', 'analytics', 'b2b')
+        GROUP BY schemaname
+        ORDER BY schemaname
+      `);
+
+      return res.json({ schemas: result.rows });
+    } catch (err) {
+      return next(err);
+    }
+  },
+);
 
 app.use('/api/v1/db', dbRouter);
 
@@ -286,14 +388,17 @@ app.use('/api/v1/db', dbRouter);
 // ═══════════════════════════════════════════════════════════════════════════════
 
 // GET /api/v1/system/queues — BullMQ queue health
-app.get('/api/v1/system/queues', async (_req: Request, res: Response, next: NextFunction) => {
-  try {
-    const health = await getQueueHealth();
-    res.json({ queues: health });
-  } catch (err) {
-    next(err);
-  }
-});
+app.get(
+  '/api/v1/system/queues',
+  async (_req: Request, res: Response, next: NextFunction) => {
+    try {
+      const health = await getQueueHealth();
+      return res.json({ queues: health });
+    } catch (err) {
+      return next(err);
+    }
+  },
+);
 
 // GET /api/v1/system/info — server identity
 app.get('/api/v1/system/info', (_req: Request, res: Response) => {
@@ -313,28 +418,28 @@ app.get('/api/v1/system/info', (_req: Request, res: Response) => {
 // These routes exist as .broken files in the codebase and should be restored
 // as each subsystem is production-hardened:
 //
-//   /api/v1/appeals         — appeals_routes.broken.ts
-//   /api/v1/ladders         — ladder_routes.broken.ts
-//   /api/v1/liveops         — liveops_routes.broken.ts
-//   /api/v1/loss            — loss_is_content_routes.broken.ts
-//   /api/v1/monetization    — monetization_routes.broken.ts
+//   /api/v1/appeals            — appeals_routes.broken.ts
+//   /api/v1/ladders            — ladder_routes.broken.ts
+//   /api/v1/liveops            — liveops_routes.broken.ts
+//   /api/v1/loss               — loss_is_content_routes.broken.ts
+//   /api/v1/monetization       — monetization_routes.broken.ts
 //   /api/v1/monetization/admin — monetization_admin_routes.broken.ts
-//   /api/v1/onboarding      — onboarding_routes.broken.ts
-//   /api/v1/partners        — partner_routes.broken.ts
-//   /api/v1/proof-stamps    — proof_stamp_routes.broken.ts
-//   /api/v1/public-integrity — public_integrity_routes.broken.ts
-//   /api/v1/explorer        — run_explorer_routes.broken.ts
-//   /api/v1/telemetry       — telemetry_routes.broken.ts
+//   /api/v1/onboarding         — onboarding_routes.broken.ts
+//   /api/v1/partners           — partner_routes.broken.ts
+//   /api/v1/proof-stamps       — proof_stamp_routes.broken.ts
+//   /api/v1/public-integrity   — public_integrity_routes.broken.ts
+//   /api/v1/explorer           — run_explorer_routes.broken.ts
+//   /api/v1/telemetry          — telemetry_routes.broken.ts
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // 404 CATCH-ALL
 // ═══════════════════════════════════════════════════════════════════════════════
 
-app.use((_req: Request, res: Response) => {
+app.use((req: Request, res: Response) => {
   res.status(404).json({
     error: 'Not Found',
-    message: `${_req.method} ${_req.path} does not exist`,
-    hint: 'GET /health/live for health check, GET /api/versions for available API versions',
+    message: `${req.method} ${req.path} does not exist`,
+    hint: 'GET /health/live for health check, GET /api/v1/system/info for server identity',
   });
 });
 
@@ -353,8 +458,10 @@ const server = http.createServer(app);
 async function startServer(): Promise<void> {
   // Verify database connection before accepting traffic
   try {
-    const dbResult = await pool.query('SELECT current_database() AS db, current_user AS usr');
-    const { db, usr } = dbResult.rows[0];
+    const dbResult = await pool.query(
+      'SELECT current_database() AS db, current_user AS usr',
+    );
+    const { db, usr } = dbResult.rows[0] as { db: string; usr: string };
     console.log(`[pzo-backend] database connected: ${db} as ${usr}`);
   } catch (err) {
     console.error('[pzo-backend] FATAL: cannot connect to database', err);
@@ -366,16 +473,27 @@ async function startServer(): Promise<void> {
     const schemaResult = await pool.query(`
       SELECT COUNT(*)::int AS table_count
       FROM pg_tables
-      WHERE schemaname IN ('public','game','economy','social','analytics','b2b')
+      WHERE schemaname IN ('public', 'game', 'economy', 'social', 'analytics', 'b2b')
     `);
-    const tableCount = schemaResult.rows[0].table_count;
-    console.log(`[pzo-backend] schema verified: ${tableCount} tables across 6 schemas`);
+
+    const tableCount = Number(
+      (schemaResult.rows[0] as { table_count: number | string }).table_count,
+    );
+
+    console.log(
+      `[pzo-backend] schema verified: ${tableCount} tables across 6 schemas`,
+    );
 
     if (tableCount < 80) {
-      console.warn(`[pzo-backend] WARNING: expected 97+ tables, found ${tableCount}. Run migrations.`);
+      console.warn(
+        `[pzo-backend] WARNING: expected 97+ tables, found ${tableCount}. Run migrations.`,
+      );
     }
   } catch (err) {
-    console.warn('[pzo-backend] schema verification skipped:', (err as Error).message);
+    console.warn(
+      '[pzo-backend] schema verification skipped:',
+      (err as Error).message,
+    );
   }
 
   server.listen(PORT, () => {
@@ -386,31 +504,30 @@ async function startServer(): Promise<void> {
     console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
     console.log('');
     console.log('  Routes mounted:');
-    console.log('    GET  /health/live              — liveness probe');
-    console.log('    GET  /health/ready             — readiness probe (DB check)');
-    console.log('    GET  /health/metrics           — observability metrics');
-    console.log('    GET  /api/versions             — API version discovery');
+    console.log('    GET  /health/live                   — liveness probe');
+    console.log('    GET  /health/ready                  — readiness probe (DB check)');
+    console.log('    GET  /health/metrics                — observability metrics');
     console.log('');
-    console.log('    POST /api/v1/game/runs         — create a run');
+    console.log('    POST /api/v1/game/runs              — create a run');
     console.log('    POST /api/v1/game/runs/:id/turns    — submit turn decision');
     console.log('    POST /api/v1/game/runs/:id/finalize — finalize run');
     console.log('    GET  /api/v1/game/runs/:id/replay   — replay run');
     console.log('    GET  /api/v1/game/runs/:id/events   — get run events');
     console.log('');
-    console.log('    *    /api/v1/season0/*         — Season 0 / Founding Era');
-    console.log('    *    /api/v1/integrity/*       — Integrity & verification');
-    console.log('    *    /api/v1/institutions/*    — B2B institutions');
-    console.log('    *    /api/v1/curriculum/*       — Curriculum control plane');
-    console.log('    *    /api/v1/governance/*       — Monetization governance');
-    console.log('    *    /api/v1/creators/*         — Creator economy');
+    console.log('    *    /api/v1/season0/*              — Season 0 / Founding Era');
+    console.log('    *    /api/v1/integrity/*            — Integrity & verification');
+    console.log('    *    /api/v1/institutions/*         — B2B institutions');
+    console.log('    *    /api/v1/curriculum/*           — Curriculum control plane');
+    console.log('    *    /api/v1/governance/*           — Monetization governance');
+    console.log('    *    /api/v1/creators/*             — Creator economy');
     console.log('');
-    console.log('    GET  /api/v1/db/modes          — canonical game modes');
-    console.log('    GET  /api/v1/db/timing-classes  — canonical timing classes');
-    console.log('    GET  /api/v1/db/bots           — canonical bot profiles');
-    console.log('    GET  /api/v1/db/schema-census  — table counts per schema');
+    console.log('    GET  /api/v1/db/modes               — canonical game modes');
+    console.log('    GET  /api/v1/db/timing-classes      — canonical timing classes');
+    console.log('    GET  /api/v1/db/bots                — canonical bot profiles');
+    console.log('    GET  /api/v1/db/schema-census       — table counts per schema');
     console.log('');
-    console.log('    GET  /api/v1/system/queues     — BullMQ queue health');
-    console.log('    GET  /api/v1/system/info       — server identity');
+    console.log('    GET  /api/v1/system/queues          — BullMQ queue health');
+    console.log('    GET  /api/v1/system/info            — server identity');
     console.log('');
     console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
     console.log('');
@@ -421,8 +538,11 @@ async function gracefulShutdown(signal: string): Promise<void> {
   console.log(`\n[pzo-backend] ${signal} received — starting graceful shutdown...`);
 
   // 1. Stop accepting new connections
-  server.close(() => {
-    console.log('[pzo-backend] HTTP server closed');
+  await new Promise<void>((resolve) => {
+    server.close(() => {
+      console.log('[pzo-backend] HTTP server closed');
+      resolve();
+    });
   });
 
   // 2. Drain database pool
@@ -433,10 +553,14 @@ async function gracefulShutdown(signal: string): Promise<void> {
     console.error('[pzo-backend] error draining database pool:', err);
   }
 
-  // 3. Flush event bus
+  // 3. Clear event bus listeners and detach external publisher
   try {
-    EventBus.removeAllListeners();
-    console.log('[pzo-backend] event bus cleared');
+    const removedListenerCount = EventBus.listenerCount();
+    EventBus.setPublisher(null);
+    EventBus.clear();
+    console.log(
+      `[pzo-backend] event bus cleared (${removedListenerCount} listener(s) removed)`,
+    );
   } catch (err) {
     console.error('[pzo-backend] error clearing event bus:', err);
   }
@@ -446,17 +570,27 @@ async function gracefulShutdown(signal: string): Promise<void> {
 }
 
 // Register shutdown handlers
-process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
-process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+process.on('SIGTERM', () => {
+  void gracefulShutdown('SIGTERM');
+});
+
+process.on('SIGINT', () => {
+  void gracefulShutdown('SIGINT');
+});
 
 // Unhandled rejection / exception safety nets
 process.on('unhandledRejection', (reason, promise) => {
-  console.error('[pzo-backend] unhandled rejection at:', promise, 'reason:', reason);
+  console.error(
+    '[pzo-backend] unhandled rejection at:',
+    promise,
+    'reason:',
+    reason,
+  );
 });
 
 process.on('uncaughtException', (error) => {
   console.error('[pzo-backend] uncaught exception:', error);
-  gracefulShutdown('uncaughtException');
+  void gracefulShutdown('uncaughtException');
 });
 
 // ── Start ──────────────────────────────────────────────────────────────────

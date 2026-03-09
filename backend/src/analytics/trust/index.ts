@@ -433,7 +433,7 @@ export class TrustAnalyticsService {
     envelope: TrustEnvelope<TEventName>,
     context: AnalyticsEmitContext = {},
   ): Promise<AnalyticsEmitReceipt> {
-    return this.emitter.emit(envelope, context);
+    return this.emitter.emit(envelope as unknown as any, context);
   }
 
   buildProofMinted(

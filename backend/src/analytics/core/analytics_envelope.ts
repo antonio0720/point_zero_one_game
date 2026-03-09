@@ -56,8 +56,21 @@ import {
 } from './analytics_validation';
 
 export type AnalyticsIdentifier = string | number;
+
 export type AnalyticsMetadataValue = string | number | boolean | null;
-export type AnalyticsMetadata = Readonly<Record<string, AnalyticsMetadataValue>>;
+
+export type AnalyticsMetadata = Readonly<
+  Record<string, AnalyticsMetadataValue>
+>;
+
+/**
+ * Default payload shape for generic or untyped callers.
+ *
+ * Important:
+ * - keep this as a record for serialization friendliness
+ * - do NOT force all domain payload interfaces to declare an index signature
+ * - generic envelope builders below accept any object payload subtype
+ */
 export type AnalyticsPayload = Readonly<Record<string, unknown>>;
 
 export const EMPTY_ANALYTICS_PAYLOAD: AnalyticsPayload = Object.freeze({});
@@ -135,7 +148,7 @@ export interface AnalyticsEnvelopeContext {
 
 export interface AnalyticsEnvelope<
   TEventName extends AnalyticsEventName = AnalyticsEventName,
-  TPayload extends AnalyticsPayload = AnalyticsPayload,
+  TPayload extends object = AnalyticsPayload,
 > {
   eventId: string;
   eventName: TEventName;
@@ -143,16 +156,13 @@ export interface AnalyticsEnvelope<
   occurredAt: number;
   emittedAt: number;
   source: AnalyticsSource;
-
   correlationId?: string;
   causationId?: string;
-
   playerId?: AnalyticsIdentifier;
   gameInstanceId?: AnalyticsIdentifier;
   runId?: AnalyticsIdentifier;
   sessionId?: string;
   seasonId?: string;
-
   mode?: GameMode;
   runPhase?: RunPhase;
   runOutcome?: RunOutcome;
@@ -160,18 +170,16 @@ export interface AnalyticsEnvelope<
   grade?: VerifiedGrade;
   integrityStatus?: IntegrityStatus;
   proofHash?: string;
-
   rulesetVersion?: string;
   contentVersion?: string;
   visibilityScope?: VisibilityScope;
-
   metadata?: AnalyticsMetadata;
   payload: TPayload;
 }
 
 export interface CreateAnalyticsEnvelopeInput<
   TEventName extends AnalyticsEventName = AnalyticsEventName,
-  TPayload extends AnalyticsPayload = AnalyticsPayload,
+  TPayload extends object = AnalyticsPayload,
 > extends AnalyticsEnvelopeContext {
   eventName: TEventName;
   payload?: TPayload;
@@ -183,7 +191,7 @@ function normalizeEventId(value?: string): string {
 
 export function createAnalyticsEnvelope<
   TEventName extends AnalyticsEventName,
-  TPayload extends AnalyticsPayload = AnalyticsPayload,
+  TPayload extends object = AnalyticsPayload,
 >(
   input: CreateAnalyticsEnvelopeInput<TEventName, TPayload>,
 ): AnalyticsEnvelope<TEventName, TPayload> {
@@ -322,7 +330,7 @@ export function createAnalyticsEnvelope<
 
 export function serializeAnalyticsEnvelope<
   TEventName extends AnalyticsEventName,
-  TPayload extends AnalyticsPayload,
+  TPayload extends object,
 >(
   envelope: AnalyticsEnvelope<TEventName, TPayload>,
 ): Record<string, unknown> {
@@ -352,18 +360,20 @@ export function serializeAnalyticsEnvelope<
     visibilityScope: envelope.visibilityScope,
     metadata: envelope.metadata,
     payload: envelope.payload,
-  });
+  }) as Record<string, unknown>;
 }
 
-export function withAnalyticsContext(
-  defaults: AnalyticsEnvelopeContext,
-) {
+export function withAnalyticsContext(defaults: AnalyticsEnvelopeContext) {
   return function buildWithContext<
     TEventName extends AnalyticsEventName,
-    TPayload extends AnalyticsPayload = AnalyticsPayload,
+    TPayload extends object = AnalyticsPayload,
   >(
-    input: Omit<CreateAnalyticsEnvelopeInput<TEventName, TPayload>, keyof AnalyticsEnvelopeContext> &
-      Partial<AnalyticsEnvelopeContext>,
+    input:
+      & Omit<
+        CreateAnalyticsEnvelopeInput<TEventName, TPayload>,
+        keyof AnalyticsEnvelopeContext
+      >
+      & Partial<AnalyticsEnvelopeContext>,
   ): AnalyticsEnvelope<TEventName, TPayload> {
     return createAnalyticsEnvelope<TEventName, TPayload>({
       ...defaults,
@@ -374,7 +384,7 @@ export function withAnalyticsContext(
 
 export function createAnalyticsEnvelopeFactory<
   TEventName extends AnalyticsEventName,
-  TPayload extends AnalyticsPayload = AnalyticsPayload,
+  TPayload extends object = AnalyticsPayload,
 >(
   eventName: TEventName,
   defaults: AnalyticsEnvelopeContext = {},
@@ -394,7 +404,7 @@ export function createAnalyticsEnvelopeFactory<
 
 export function cloneAnalyticsEnvelope<
   TEventName extends AnalyticsEventName,
-  TPayload extends AnalyticsPayload,
+  TPayload extends object,
 >(
   envelope: AnalyticsEnvelope<TEventName, TPayload>,
   overrides: Partial<CreateAnalyticsEnvelopeInput<TEventName, TPayload>> = {},
