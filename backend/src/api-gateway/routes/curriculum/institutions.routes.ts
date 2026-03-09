@@ -19,7 +19,7 @@ router.post('/',
     try {
       const ctx = req.tenantContext!;
       const institution = await licensingControlPlaneAdapter.createInstitution(ctx, req.body);
-      await emitAudit(req, CurriculumAuditEvent.INSTITUTION_CREATED, 'institution', institution.id, { name: institution.name });
+      await emitAudit(req, CurriculumAuditEvent.INSTITUTION_CREATED, 'institution', String(institution.id), { name: institution.name });
       res.status(201).json(created(req, institution));
     } catch (err) {
       next(err);
@@ -34,7 +34,7 @@ router.get('/:institutionId',
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const ctx = req.tenantContext!;
-      const institution = await licensingControlPlaneAdapter.getInstitution(ctx, req.params.institutionId);
+      const institution = await licensingControlPlaneAdapter.getInstitution(ctx, req.params.institutionId as string);
       if (!institution) {
         res.status(404).json(fail(req, 'NOT_FOUND', 'Institution not found'));
         return;
@@ -55,12 +55,12 @@ router.patch('/:institutionId',
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const ctx = req.tenantContext!;
-      const institution = await licensingControlPlaneAdapter.updateInstitution(ctx, req.params.institutionId, req.body);
+      const institution = await licensingControlPlaneAdapter.updateInstitution(ctx, req.params.institutionId as string, req.body);
       if (!institution) {
         res.status(404).json(fail(req, 'NOT_FOUND', 'Institution not found'));
         return;
       }
-      await emitAudit(req, CurriculumAuditEvent.INSTITUTION_UPDATED, 'institution', institution.id);
+      await emitAudit(req, CurriculumAuditEvent.INSTITUTION_UPDATED, 'institution', String(institution.id));
       res.json(ok(req, institution));
     } catch (err) {
       next(err);

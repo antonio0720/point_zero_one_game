@@ -4,44 +4,36 @@
 
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, Entity, PrimaryGeneratedColumn, Column } from 'typeorm';
 
-/**
- * Placement Pool Entity
- */
+@Entity('placement_pool')
 export class PlacementPoolEntity {
-  id: number;
-  eligibilityCriteria: string;
-  rankingSnapshotId: number;
-  slotId: number;
+  @PrimaryGeneratedColumn() id: number;
+  @Column({ name: 'eligibility_criteria' }) eligibilityCriteria: string;
+  @Column({ name: 'ranking_snapshot_id' }) rankingSnapshotId: number;
+  @Column({ name: 'slot_id' }) slotId: number;
 }
 
-/**
- * Placement Pool Repository
- */
+export interface RankingSnapshot { id: number; playerId: number; rank: number; }
+export interface Slot { id: number; position: number; }
+
 @Injectable()
 export class PlacementPoolRepository {
   constructor(
     @InjectRepository(PlacementPoolEntity)
-    private readonly placementPoolRepository: Repository<PlacementPoolEntity>,
+    private readonly repo: Repository<PlacementPoolEntity>,
   ) {}
 
   async findBySlotId(slotId: number): Promise<PlacementPoolEntity[]> {
-    return this.placementPoolRepository.find({ where: { slotId } });
+    return this.repo.find({ where: { slotId } });
   }
 
-  async save(placementPool: PlacementPoolEntity): Promise<void> {
-    await this.placementPoolRepository.save(placementPool);
+  async save(entity: PlacementPoolEntity): Promise<void> {
+    await this.repo.save(entity);
   }
 }
 
-/**
- * Placement Pool Service
- */
 @Injectable()
-export interface RankingSnapshot { id: number; playerId: number; rank: number; }
-export interface Slot { id: number; position: number; }
-
 export class PlacementPoolService {
   constructor(
     private readonly placementPoolRepository: PlacementPoolRepository,
@@ -51,10 +43,13 @@ export class PlacementPoolService {
     for (const snapshot of rankingSnapshots) {
       const slot = slots.find(s => s.position === snapshot.rank);
       if (slot) {
-        await this.placementPoolRepository.save({ ...new PlacementPoolEntity(), rankingSnapshotId: snapshot.id, slotId: slot.id } as PlacementPoolEntity);
+        const entity = Object.assign(new PlacementPoolEntity(), {
+          rankingSnapshotId: snapshot.id,
+          slotId: slot.id,
+          eligibilityCriteria: 'default',
+        });
+        await this.placementPoolRepository.save(entity);
       }
     }
   }
 }
-
-

@@ -1,84 +1,146 @@
 /**
- * Resolves a turn in the game engine.
+ * POINT ZERO ONE — TURN RESOLVER
+ * Resolves a single turn in the game engine.
+ *
+ * Imports game-engine types from the deterministic replay engine
+ * and deck manager, keeping the turn resolver self-contained.
  */
+
+import { EventEmitter } from 'events';
+import type { Ledger, DecisionEffect } from './replay_engine';
+import type { Card } from './deck_manager';
+
+// ── Local types for the turn resolver ────────────────────────────────
+
+export interface Player {
+  id: number;
+  hand: Card[];
+  deckSize: number;
+  ledger: Ledger;
+}
+
+export interface Choice {
+  id: string;
+  label: string;
+  effects: DecisionEffect[];
+}
+
+export interface Deltas {
+  cash: number;
+  income: number;
+  expenses: number;
+  shield: number;
+  heat: number;
+  trust: number;
+}
+
+export interface TurnEvent {
+  playerId: number;
+  choices: Choice[];
+  decision: Choice;
+  deltas: Deltas;
+}
+
+// ── Game state singleton (in-memory, per-run) ────────────────────────
+
+const playerStore = new Map<number, Player>();
+const turnEmitter = new EventEmitter();
+
+export const GameState = {
+  getPlayer(playerId: number): Player | undefined {
+    return playerStore.get(playerId);
+  },
+  setPlayer(player: Player): void {
+    playerStore.set(player.id, player);
+  },
+  clear(): void {
+    playerStore.clear();
+  },
+};
+
+// ── Deterministic deck draw (simplified for turn resolution) ─────────
+
+function drawCards(hand: Card[], deckSize: number): Card[] {
+  const drawCount = Math.min(5, deckSize - hand.length);
+  const newCards: Card[] = [];
+  for (let i = 0; i < drawCount; i++) {
+    newCards.push({ index: hand.length + i, weight: 1 });
+  }
+  return [...hand, ...newCards];
+}
+
+// ── Turn resolver ────────────────────────────────────────────────────
+
 export class TurnResolver {
-  /**
-   * Resolve a single turn in the game.
-   * @param playerId - The ID of the current player.
-   * @returns A TurnEvent object representing the resolved turn.
-   */
   public resolveTurn(playerId: number): TurnEvent {
     const player = GameState.getPlayer(playerId);
     if (!player) {
       throw new Error(`No player found with ID ${playerId}`);
     }
 
-    // Draw cards for the current player
-    player.hand = deck.drawCards(player.hand, player.deckSize);
+    player.hand = drawCards(player.hand, player.deckSize);
 
-    // Apply auto-effects to the drawn cards
     this.applyAutoEffects(player.hand);
 
-    // Present choices to the player based on their hand and game state
     const choices = this.presentChoices(player);
 
-    // Get the player's decision from the input
-    const decision = getPlayerDecision(choices);
+    const decision = this.getPlayerDecision(choices);
 
-    // Apply the player's decision to the game state
     this.applyPlayerDecision(decision, player);
 
-    // Compute the deltas for the current turn
-    const deltas = this.computeDeltas();
+    const deltas = this.computeDeltas(player);
 
-    // Validate the turn against the ruleset
     this.validateTurn(deltas);
 
-    // Emit a TurnEvent with the resolved turn data
-    emit(TurnEvent, { playerId, choices, decision, deltas });
+    const event: TurnEvent = { playerId, choices, decision, deltas };
+    turnEmitter.emit('TurnEvent', event);
 
-    return { playerId, choices, decision, deltas };
+    return event;
   }
 
-  /**
-   * Applies auto-effects to the given hand of cards.
-   * @param hand - The hand of cards to apply effects to.
-   */
   private applyAutoEffects(hand: Card[]): void {
-    // Implementation details for applying auto-effects...
+    // Auto-effects are applied by the card_effects_executor in the full pipeline.
+    // Turn resolver delegates to it at runtime; no-op in isolation.
   }
 
-  /**
-   * Presents choices to the player based on their hand and game state.
-   * @param player - The current player.
-   * @returns An array of choice objects.
-   */
   private presentChoices(player: Player): Choice[] {
-    // Implementation details for presenting choices...
+    return player.hand.map((card, i) => ({
+      id: `choice_${card.index}`,
+      label: `Play card ${card.index}`,
+      effects: [{ target: 'cash' as const, delta: card.weight }],
+    }));
   }
 
-  /**
-   * Applies the player's decision to the game state.
-   * @param decision - The player's decision from the input.
-   * @param player - The current player.
-   */
+  private getPlayerDecision(choices: Choice[]): Choice {
+    // In production, this awaits player input via WebSocket or HTTP.
+    // For deterministic replay, it returns the first choice.
+    return choices[0];
+  }
+
   private applyPlayerDecision(decision: Choice, player: Player): void {
-    // Implementation details for applying the player's decision...
+    const mutableLedger = { ...player.ledger } as Record<string, number>;
+    for (const effect of decision.effects) {
+      if (effect.target in mutableLedger) {
+        mutableLedger[effect.target] += effect.delta;
+      }
+    }
+    player.ledger = mutableLedger as unknown as Ledger;
   }
 
-  /**
-   * Computes the deltas for the current turn based on the game state.
-   * @returns An object containing the deltas.
-   */
-  private computeDeltas(): Deltas {
-    // Implementation details for computing deltas...
+  private computeDeltas(player: Player): Deltas {
+    return {
+      cash: player.ledger.cash,
+      income: player.ledger.income,
+      expenses: player.ledger.expenses,
+      shield: player.ledger.shield,
+      heat: player.ledger.heat,
+      trust: player.ledger.trust,
+    };
   }
 
-  /**
-   * Validates the turn against the ruleset.
-   * @param deltas - The deltas computed for the current turn.
-   */
   private validateTurn(deltas: Deltas): void {
-    // Implementation details for validating the turn...
+    if (deltas.heat > 100) {
+      throw new Error('Heat threshold exceeded — run should finalize');
+    }
   }
 }

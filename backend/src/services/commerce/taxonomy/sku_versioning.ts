@@ -4,114 +4,70 @@
 
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Entity, PrimaryGeneratedColumn, Column, OneToMany } from 'typeorm';
+import { Repository, Entity, PrimaryGeneratedColumn, Column, OneToMany, ManyToOne, JoinColumn } from 'typeorm';
 
-/**
- * SKU Version entity.
- */
 @Entity('sku_versions')
 export class SkuVersion {
-  /**
-   * Unique identifier for the SKU version.
-   */
   @PrimaryGeneratedColumn()
   id: number;
 
-  /**
-   * The unique identifier of the associated SKU.
-   */
-  @Column({ type: 'uuid' })
+  @Column({ type: 'uuid', name: 'sku_id' })
   skuId: string;
 
-  /**
-   * The version number for this SKU.
-   */
   @Column()
   version: number;
 
-  /**
-   * The timestamp when the version was created.
-   */
-  @Column({ type: 'timestamp' })
+  @Column({ type: 'timestamp', name: 'created_at' })
   createdAt: Date;
 
-  /**
-   * The timestamp when the version was last updated.
-   */
-  @Column({ type: 'timestamp' })
+  @Column({ type: 'timestamp', name: 'updated_at' })
   updatedAt: Date;
 
-  /**
-   * An array of audit receipts for tag changes in this SKU version.
-   */
-  @OneToMany(() => AuditReceipt, (auditReceipt) => auditReceipt.skuVersion)
+  @OneToMany(() => AuditReceipt, (receipt) => receipt.skuVersion)
   auditReceipts: AuditReceipt[];
 }
 
-/**
- * Audit receipt entity for tag changes in SKU versions.
- */
 @Entity('audit_receipts')
 export class AuditReceipt {
-  /**
-   * Unique identifier for the audit receipt.
-   */
   @PrimaryGeneratedColumn()
   id: number;
 
-  /**
-   * The unique identifier of the associated SKU version.
-   */
   @Column({ name: 'sku_version_id' })
   skuVersionId: number;
 
-  /**
-   * The name of the tag that was changed.
-   */
-  @Column()
+  @ManyToOne(() => SkuVersion, (sv) => sv.auditReceipts, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'sku_version_id' })
+  skuVersion: SkuVersion;
+
+  @Column({ name: 'tag_name' })
   tagName: string;
 
-  /**
-   * The old value of the tag before the change.
-   */
-  @Column()
+  @Column({ name: 'old_value' })
   oldValue: string;
 
-  /**
-   * The new value of the tag after the change.
-   */
-  @Column()
+  @Column({ name: 'new_value' })
   newValue: string;
 
-  /**
-   * The timestamp when the tag change occurred.
-   */
-  @Column({ type: 'timestamp' })
+  @Column({ type: 'timestamp', name: 'changed_at' })
   changedAt: Date;
 }
 
-/**
- * SKU Versioning Service.
- */
 @Injectable()
 export class SkuVersioningService {
   constructor(
-    @InjectRepository(SkuVersion) private skuVersionRepository: Repository<SkuVersion>,
-    @InjectRepository(AuditReceipt) private auditReceiptRepository: Repository<AuditReceipt>
+    @InjectRepository(SkuVersion) private readonly skuVersionRepo: Repository<SkuVersion>,
+    @InjectRepository(AuditReceipt) private readonly auditReceiptRepo: Repository<AuditReceipt>,
   ) {}
 
-  /**
-   * Create a new version of an SKU and attach an audit receipt for any tag changes.
-   * @param skuId - The unique identifier of the SKU to version.
-   * @param tags - An object mapping tag names to their new values.
-   */
   async createVersion(skuId: string, tags: Record<string, string>): Promise<SkuVersion> {
-    const skuVersion = await this.skuVersionRepository.create({ skuId, version: 1, createdAt: new Date() });
-    await this.skuVersionRepository.save(skuVersion);
+    const skuVersion = this.skuVersionRepo.create({ skuId, version: 1, createdAt: new Date(), updatedAt: new Date() });
+    await this.skuVersionRepo.save(skuVersion);
 
     for (const [tagName, tagValue] of Object.entries(tags)) {
-      const auditReceipt = await this.auditReceiptRepository.create({ skuVersionId: skuVersion.id, tagName, oldValue: '', newValue: tagValue, changedAt: new Date() });
-      await this.auditReceiptRepository.save(auditReceipt);
+      const receipt = this.auditReceiptRepo.create({
+        skuVersionId: skuVersion.id, tagName, oldValue: '', newValue: tagValue, changedAt: new Date(),
+      });
+      await this.auditReceiptRepo.save(receipt);
     }
 
     return skuVersion;

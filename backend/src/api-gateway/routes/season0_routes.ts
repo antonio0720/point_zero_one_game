@@ -22,7 +22,7 @@ import { AbuseGuard } from '../../services/abuse-guard.service';
 import { EventBus } from '../../events/event-bus';
 import { SeasonPhase } from '../../types/season.types';
 
-type RouteHandler = (req: Request, res: Response) => Promise<void> | void;
+type RouteHandler = (req: Request, res: Response, next?: import('express').NextFunction) => Promise<void> | void;
 
 export interface Season0Routes {
   status: RouteHandler;

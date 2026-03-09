@@ -1,12 +1,13 @@
-import { Injectable } from '@nestjs/common';
-
+/**
+ * Rate Limit Service — in-memory sliding window rate limiter.
+ * Production: replace with Redis-backed limiter.
+ */
 export interface RateLimitResult {
   success: boolean;
   remaining: number;
   resetAt: Date;
 }
 
-@Injectable()
 export class RateLimitService {
   private readonly limits = new Map<string, { count: number; resetAt: number }>();
   private readonly maxRequests = 100;

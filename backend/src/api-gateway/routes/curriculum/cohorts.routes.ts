@@ -49,7 +49,7 @@ router.get('/:cohortId',
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const ctx = req.tenantContext!;
-      const cohort = await licensingControlPlaneAdapter.getCohort(ctx, req.params.cohortId);
+      const cohort = await licensingControlPlaneAdapter.getCohort(ctx, req.params.cohortId as string);
       if (!cohort) {
         res.status(404).json(fail(req, 'NOT_FOUND', 'Cohort not found'));
         return;
