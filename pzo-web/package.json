@@ -3,21 +3,22 @@
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
+  "type": "module",
   "scripts": {
-    "test:pressure": "tsc --noEmit && vitest test/unit/**/*.spec.tsx",
-    "verify:pressure": "node -r tsconfig-paths/register ./node_modules/.bin/tsc --noEmit && vitest test/unit/**/*.spec.tsx"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test:pressure": "tsc --noEmit -p tsconfig.json && vitest test/unit/**/*.spec.tsx",
+    "verify:pressure": "tsc --noEmit -p tsconfig.json && vitest test/unit/**/*.spec.tsx"
   },
   "dependencies": {},
   "devDependencies": {
     "@testing-library/jest-dom": "^5.16.1",
     "ts-jest": "^27.0.5",
-    "tsconfig-paths": "^3.10.0",
-    "tsc": "^4.0.3"
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.8"
   },
   "peerDependencies": {
     "@babel/runtime": "^7.15.0"
   },
   "author": "",
-  "license": "",
-  "type": "module"
+  "license": ""
 }
