@@ -12,11 +12,15 @@
   "scripts": {
     "clean": "rimraf dist .tsbuildinfo",
     "build": "npm run clean && tsc -p tsconfig.json",
+    "build:watch": "tsc -p tsconfig.json --watch --preserveWatchOutput",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "dev": "npm run dev:index",
     "dev:index": "tsx watch --clear-screen=false src/index.ts",
-    "dev:main": "tsx watch --clear-screen=false src/main.ts",
-    "start:index": "node dist/src/index.js",
-    "start:main": "node dist/src/main.js"
+    "start": "npm run start:index",
+    "start:index": "node --enable-source-maps dist/src/index.js",
+    "test": "vitest run --passWithNoTests",
+    "test:watch": "vitest --passWithNoTests",
+    "verify": "npm run typecheck && npm run test"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.3",

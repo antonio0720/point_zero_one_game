@@ -19,6 +19,7 @@
     "strictPropertyInitialization": false,
     "noImplicitOverride": false,
     "noFallthroughCasesInSwitch": true,
+    "noEmitOnError": true,
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
     "resolveJsonModule": true,
@@ -32,14 +33,13 @@
   },
   "include": [
     "src/**/*.ts",
-    "migrations/**/*.ts",
-    "tests/**/*.ts"
+    "migrations/**/*.ts"
   ],
   "exclude": [
     "node_modules",
     "dist",
-    "**/*.spec.ts",
-    "**/*.test.ts",
+    "test/**/*.ts",
+    "tests/**/*.ts",
     "**/*.broken.ts",
     "**/*.broken.js"
   ]
