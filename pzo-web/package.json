@@ -1,24 +1,38 @@
 {
   "name": "@pzo/point-zero-one",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "private": true,
+  "description": "Point Zero One web client",
   "type": "module",
   "scripts": {
+    "dev": "vite",
+    "build": "tsc -p tsconfig.json && vite build",
+    "preview": "vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test:pressure": "tsc --noEmit -p tsconfig.json && vitest test/unit/**/*.spec.tsx",
-    "verify:pressure": "tsc --noEmit -p tsconfig.json && vitest test/unit/**/*.spec.tsx"
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:pressure": "vitest run test/unit/**/*.spec.tsx",
+    "verify:pressure": "npm run typecheck && vitest run test/unit/**/*.spec.tsx"
   },
-  "dependencies": {},
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
   "devDependencies": {
-    "@testing-library/jest-dom": "^5.16.1",
-    "ts-jest": "^27.0.5",
+    "@testing-library/jest-dom": "^6.6.3",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.16",
     "typescript": "^5.6.3",
+    "vite": "^5.4.10",
     "vitest": "^2.1.8"
   },
   "peerDependencies": {
     "@babel/runtime": "^7.15.0"
   },
   "author": "",
-  "license": ""
+  "license": "UNLICENSED"
 }
