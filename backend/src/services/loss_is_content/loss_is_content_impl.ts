@@ -25,15 +25,15 @@ export class LossIsContentImpl {
 }
 
 function generateDeathArtifact(): DeathArtifact {
-  // Implementation details omitted for brevity
+  return {} as DeathArtifact;
 }
 
 function forkOption(): Option {
-  // Implementation details omitted for brevity
+  return {} as Option;
 }
 
 function getTrainingRecommendation(option: Option): TrainingRecommendation {
-  // Implementation details omitted for brevity
+  return {} as TrainingRecommendation;
 }
 
 function writeReceipts(

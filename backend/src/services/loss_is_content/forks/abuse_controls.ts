@@ -46,6 +46,7 @@ export class AbuseControlService {
     // Implement server-side validation here.
 
     const fork: Fork = {
+      id: crypto.randomUUID(),
       playerId,
       deathId,
       createdAt: new Date(),

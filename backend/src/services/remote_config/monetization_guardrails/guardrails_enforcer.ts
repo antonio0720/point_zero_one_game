@@ -9,16 +9,16 @@ export class GuardrailsEnforcer {
   public validateAndEnforce(changes: RemoteConfigChanges): void {
     // Check for prohibited changes
     if (
-      hasEngineRNGChange(changes) ||
-      hasMacroParamsInRankedLanesChange(changes) ||
-      hasVerifierRulesChange(changes) ||
-      hasLadderEligibilityChange(changes)
+      this.hasEngineRNGChange(changes) ||
+      this.hasMacroParamsInRankedLanesChange(changes) ||
+      this.hasVerifierRulesChange(changes) ||
+      this.hasLadderEligibilityChange(changes)
     ) {
       throw new Error('Prohibited changes detected');
     }
 
     // Allow only permitted changes
-    if (hasOffersChange(changes) || hasBundlesChange(changes) || hasPricingChange(changes) || hasCopyChange(changes)) {
+    if (this.hasOffersChange(changes) || this.hasBundlesChange(changes) || this.hasPricingChange(changes) || this.hasCopyChange(changes)) {
       // Perform any necessary actions for the allowed changes...
     } else {
       throw new Error('No valid changes detected');
@@ -29,7 +29,7 @@ export class GuardrailsEnforcer {
    * Check if there is a change in engine RNG
    * @param changes - The proposed changes to the remote config
    */
-  private hasEngineRNGChange(changes: RemoteConfigChanges): boolean {
+  private this.hasEngineRNGChange(changes: RemoteConfigChanges): boolean {
     // Implement the logic to check for changes in engine RNG...
   }
 
@@ -37,7 +37,7 @@ export class GuardrailsEnforcer {
    * Check if there is a change in macro params in ranked lanes
    * @param changes - The proposed changes to the remote config
    */
-  private hasMacroParamsInRankedLanesChange(changes: RemoteConfigChanges): boolean {
+  private this.hasMacroParamsInRankedLanesChange(changes: RemoteConfigChanges): boolean {
     // Implement the logic to check for changes in macro params in ranked lanes...
   }
 
@@ -45,7 +45,7 @@ export class GuardrailsEnforcer {
    * Check if there is a change in verifier rules
    * @param changes - The proposed changes to the remote config
    */
-  private hasVerifierRulesChange(changes: RemoteConfigChanges): boolean {
+  private this.hasVerifierRulesChange(changes: RemoteConfigChanges): boolean {
     // Implement the logic to check for changes in verifier rules...
   }
 
@@ -53,7 +53,7 @@ export class GuardrailsEnforcer {
    * Check if there is a change in ladder eligibility
    * @param changes - The proposed changes to the remote config
    */
-  private hasLadderEligibilityChange(changes: RemoteConfigChanges): boolean {
+  private this.hasLadderEligibilityChange(changes: RemoteConfigChanges): boolean {
     // Implement the logic to check for changes in ladder eligibility...
   }
 
@@ -61,7 +61,7 @@ export class GuardrailsEnforcer {
    * Check if there is a change in offers
    * @param changes - The proposed changes to the remote config
    */
-  private hasOffersChange(changes: RemoteConfigChanges): boolean {
+  private this.hasOffersChange(changes: RemoteConfigChanges): boolean {
     // Implement the logic to check for changes in offers...
   }
 
@@ -69,7 +69,7 @@ export class GuardrailsEnforcer {
    * Check if there is a change in bundles
    * @param changes - The proposed changes to the remote config
    */
-  private hasBundlesChange(changes: RemoteConfigChanges): boolean {
+  private this.hasBundlesChange(changes: RemoteConfigChanges): boolean {
     // Implement the logic to check for changes in bundles...
   }
 
@@ -77,7 +77,7 @@ export class GuardrailsEnforcer {
    * Check if there is a change in pricing
    * @param changes - The proposed changes to the remote config
    */
-  private hasPricingChange(changes: RemoteConfigChanges): boolean {
+  private this.hasPricingChange(changes: RemoteConfigChanges): boolean {
     // Implement the logic to check for changes in pricing...
   }
 
@@ -85,7 +85,7 @@ export class GuardrailsEnforcer {
    * Check if there is a change in copy
    * @param changes - The proposed changes to the remote config
    */
-  private hasCopyChange(changes: RemoteConfigChanges): boolean {
+  private this.hasCopyChange(changes: RemoteConfigChanges): boolean {
     // Implement the logic to check for changes in copy...
   }
 }

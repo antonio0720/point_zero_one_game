@@ -57,33 +57,3 @@ export class LadderRewardsService {
 
   // ... (methods for creating, updating, and querying ladder rewards, users, seasons, etc.)
 }
-
-// Database schema for the User table
-export const userTable = createTableBuilder('users')
-  .id()
-  .string('username', { length: 32 })
-  .build();
-
-// Database schema for the Reward table
-export const rewardTable = createTableBuilder('rewards')
-  .id()
-  .string('name', { length: 64 })
-  .string('description', { length: 128 })
-  .enum('type', ['cosmetic', 'badge'])
-  .boolean('isEarned')
-  .build();
-
-// Database schema for the LadderReward table
-export const ladderRewardTable = createTableBuilder('ladder_rewards')
-  .id()
-  .foreignKey('user_id', 'users', 'id')
-  .integer('streak')
-  .foreignKey('season_id', 'seasons', 'id')
-  .build();
-
-// Database schema for the Season table
-export const seasonTable = createTableBuilder('seasons')
-  .id()
-  .dateTime('start_date')
-  .dateTime('end_date')
-  .build();

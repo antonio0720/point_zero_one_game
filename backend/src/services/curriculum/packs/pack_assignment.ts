@@ -46,5 +46,5 @@ export interface Entitlement {
  * @returns {Assignment} The created assignment object.
  */
 export function assignPack(org: Org, cohort: Cohort, pack: Pack, windowStart: Date, windowEnd: Date): Assignment {
-  // Implementation details omitted for brevity.
+  return { id: 0, orgId: org.id, cohortId: cohort.id, packId: pack.id, windowStart, windowEnd };
 }

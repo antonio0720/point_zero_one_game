@@ -4,14 +4,14 @@
 
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, EntitySubscription } from 'typeorm';
+import { Repository, Entity, PrimaryGeneratedColumn, Column } from 'typeorm';
 
 /**
  * Catalog Policy Entity
  */
 @Entity()
 export class CatalogPolicy {
-  // Add appropriate properties and relations here
+  @PrimaryGeneratedColumn() id: number;
 }
 
 /**
@@ -19,7 +19,7 @@ export class CatalogPolicy {
  */
 @Entity()
 export class OfferPolicy {
-  // Add appropriate properties and relations here
+  @PrimaryGeneratedColumn() id: number;
 }
 
 /**
@@ -27,7 +27,7 @@ export class OfferPolicy {
  */
 @Entity()
 export class Entitlement {
-  // Add appropriate properties and relations here
+  @PrimaryGeneratedColumn() id: number;
 }
 
 /**
@@ -35,7 +35,7 @@ export class Entitlement {
  */
 @Entity()
 export class Experiment {
-  // Add appropriate properties and relations here
+  @PrimaryGeneratedColumn() id: number;
 }
 
 /**
@@ -43,7 +43,7 @@ export class Experiment {
  */
 @Entity()
 export class Audit {
-  // Add appropriate properties and relations here
+  @PrimaryGeneratedColumn() id: number;
 }
 
 /**

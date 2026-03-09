@@ -23,7 +23,7 @@ export const authMiddleware = (app: express.Express) => {
 
     try {
       const token = authHeader.split(' ')[1];
-      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      const decoded = jwt.verify(token, process.env.JWT_SECRET!) as { identityId: string };
       req.identityId = decoded.identityId;
 
       // Check if the user is a guest or authenticated and update device trust

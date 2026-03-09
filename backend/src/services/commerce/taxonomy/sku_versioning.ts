@@ -4,7 +4,7 @@
 
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, EntitySubscription } from 'typeorm';
+import { Repository, Entity, PrimaryGeneratedColumn, Column, OneToMany } from 'typeorm';
 
 /**
  * SKU Version entity.
@@ -38,7 +38,7 @@ export class SkuVersion {
   /**
    * The timestamp when the version was last updated.
    */
-  @Column({ type: 'timestamp', onUpdate: true })
+  @Column({ type: 'timestamp' })
   updatedAt: Date;
 
   /**
@@ -62,8 +62,8 @@ export class AuditReceipt {
   /**
    * The unique identifier of the associated SKU version.
    */
-  @Column({ type: 'uuid', onDelete: 'CASCADE' })
-  skuVersionId: string;
+  @Column({ name: 'sku_version_id' })
+  skuVersionId: number;
 
   /**
    * The name of the tag that was changed.

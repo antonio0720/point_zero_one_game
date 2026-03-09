@@ -13,7 +13,7 @@ export class SurvivalHintBuilder {
   public build(): string | null {
     const thresholdKeys = Object.keys(this._thresholds);
     const hasRequiredItems = thresholdKeys.every((item) => this._thresholds[item] <= this.getPlayerInventory().get(item));
-    const missedActionExists = this._missedActions.some((action) => !this.getMissedActions().includes(action));
+    const missedActionExists = this._missedActions.some((action) => !this.getMissedActions().has(action));
 
     if (hasRequiredItems && !missedActionExists) {
       return null;
@@ -27,7 +27,7 @@ export class SurvivalHintBuilder {
     });
 
     this._missedActions.forEach((action) => {
-      if (!hint && !this.getMissedActions().includes(action)) {
+      if (!hint && !this.getMissedActions().has(action)) {
         hint = action;
       }
     });

@@ -42,7 +42,7 @@ export class MonetizationGuardrailsService {
    * @param isEnabled - Whether to enable or disable the guardrail
    */
   async updateUserGuardrail(userId: number, ruleId: number, isEnabled: boolean): Promise<void> {
-    const monetizationGuardrail = await this.findByUserAndRule(userId, ruleId);
+    let monetizationGuardrail = await this.findByUserAndRule(userId, ruleId);
 
     if (!monetizationGuardrail) {
       monetizationGuardrail = new MonetizationGuardrail();

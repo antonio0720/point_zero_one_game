@@ -1,86 +1,53 @@
-/**
- * Killswitch Controller for Experiments Management
- */
-
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, Entity, PrimaryGeneratedColumn, Column, OneToMany, ManyToOne, JoinColumn } from 'typeorm';
 
-/**
- * Experiment Threshold Breach Entity
- */
+@Entity('experiment_threshold_breaches')
 export class ExperimentThresholdBreach {
-  id: number;
-  experimentId: number;
-  thresholdType: string;
-  breachedAt: Date;
+  @PrimaryGeneratedColumn() id: number;
+  @Column({ name: 'experiment_id' }) experimentId: number;
+  @Column({ name: 'threshold_type' }) thresholdType: string;
+  @Column({ type: 'timestamptz', name: 'breached_at', default: () => 'NOW()' }) breachedAt: Date;
+  @ManyToOne(() => Experiment, (exp) => exp.thresholdBreaches)
+  @JoinColumn({ name: 'experiment_id' }) experiment: Experiment;
 }
 
-/**
- * Experiment Entity with associated Threshold Breaches
- */
 @Entity('experiments')
 export class Experiment {
-  @PrimaryGeneratedColumn()
-  id: number;
-
-  @Column({ unique: true })
-  name: string;
-
+  @PrimaryGeneratedColumn() id: number;
+  @Column({ unique: true }) name: string;
   @OneToMany(() => ExperimentThresholdBreach, (breach) => breach.experiment)
   thresholdBreaches: ExperimentThresholdBreach[];
 }
 
-/**
- * Threshold Type Enum
- */
 export enum ThresholdType {
   RAGE_QUIT = 'rage_quit',
   UNINSTALL = 'uninstall',
   PAY_TO_WIN = 'pay_to_win',
-  LADDER_PARTICIPATION = 'ladder_participation'
+  LADDER_PARTICIPATION = 'ladder_participation',
 }
 
-/**
- * Killswitch Controller
- */
 @Injectable()
 export class KillswitchController {
   constructor(
     @InjectRepository(Experiment)
-    private readonly experimentRepository: Repository<Experiment>,
+    private readonly experimentRepo: Repository<Experiment>,
+    @InjectRepository(ExperimentThresholdBreach)
+    private readonly breachRepo: Repository<ExperimentThresholdBreach>,
   ) {}
 
-  /**
-   * Auto-disable an experiment when a threshold is breached
-   * @param experimentId - The ID of the experiment to check
-   * @param thresholdType - The type of threshold that was breached
-   */
   async autoDisableExperiment(experimentId: number, thresholdType: ThresholdType): Promise<void> {
-    const experiment = await this.experimentRepository.findOne({ where: { id: experimentId } });
+    const experiment = await this.experimentRepo.findOne({
+      where: { id: experimentId },
+      relations: ['thresholdBreaches'],
+    });
+    if (!experiment) throw new Error(`Experiment ${experimentId} not found`);
 
-    if (!experiment) {
-      throw new Error(`Experiment with ID ${experimentId} not found`);
-    }
-
-    // Check if the breached threshold already exists for the experiment
-    const breach = await this.experimentRepository
-      .createQueryBuilder('experiment')
-      .leftJoinAndSelect('experiment.thresholdBreaches', 'breach')
-      .where('breach.experimentId = :experimentId', { experimentId })
-      .andWhere('breach.thresholdType = :thresholdType', { thresholdType })
-      .setOptions({ nbRows: 1 })
-      .getOne();
-
-    if (!breach) {
-      // If not, create a new breach record for the experiment
-      await this.experimentRepository.save(
-        this.experimentRepository.createQueryBuilder('experiment')
-          .update()
-          .set({ thresholdBreaches: [...experiment.thresholdBreaches, new ExperimentThresholdBreach({ experimentId, thresholdType, breachedAt: new Date() })] })
-          .where('id = :experimentId', { experimentId })
-          .execute(),
-      );
+    const existingBreach = experiment.thresholdBreaches.find(b => b.thresholdType === thresholdType);
+    if (!existingBreach) {
+      await this.breachRepo.save(this.breachRepo.create({
+        experimentId, thresholdType, breachedAt: new Date(),
+      }));
     }
   }
 }

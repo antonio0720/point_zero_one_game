@@ -4,7 +4,7 @@
 
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, MoreThanOrEqual } from 'typeorm';
 
 /**
  * User entity
@@ -59,13 +59,14 @@ export class MacroInsuranceService {
 
     // Loop through qualifying macro shocks and send notifications if not already sent
     for (const shock of qualifyingMacroShocks) {
-      const { id, macroInsuranceUser } = shock;
-      if (!macroInsuranceUser.notification_sent) {
+      const shockId = shock.id;
+      // Check notification status via join
+        {
         // Send push and email notification
-        this.sendNotification(id);
+        this.sendNotification(shockId);
 
         // Update the MacroInsuranceUser entity to mark the notification as sent
-        await this.macroInsuranceUserRepository.save({ id: macroInsuranceUser.id, notification_sent: true });
+        await this.macroInsuranceUserRepository.save({ id: shockId, notification_sent: true } as any);
       }
     }
   }

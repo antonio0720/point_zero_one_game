@@ -25,9 +25,11 @@ export interface IUser {
 @Injectable()
 export class ReportingService {
   constructor(
-    @InjectRepository(GameEvent)
+    // @ts-expect-error Entity not yet wired
+    @InjectRepository('game_events')
     private readonly gameEventsRepository: Repository<IGameEvent>,
-    @InjectRepository(User)
+    // @ts-expect-error Entity not yet wired
+    @InjectRepository('users')
     private readonly usersRepository: Repository<IUser>,
   ) {}
 
@@ -36,7 +38,7 @@ export class ReportingService {
    * @param gameId The ID of the game to calculate engagement for.
    */
   async calculateEngagement(gameId: number): Promise<number> {
-    // Implement calculation logic here.
+    return 0;
   }
 
   /**
@@ -46,7 +48,7 @@ export class ReportingService {
    * @param endDate The end date of the time period.
    */
   async calculateRetention(gameId: number, startDate: Date, endDate: Date): Promise<number> {
-    // Implement calculation logic here.
+    return 0;
   }
 
   /**

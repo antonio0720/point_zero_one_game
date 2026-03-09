@@ -24,7 +24,7 @@ export interface Match {
  * @returns True if the player can join the match in ranked mode, false otherwise.
  */
 export function canJoinRanked(player: Player, match: Match): boolean {
-  // Implement the logic for checking compatibility here.
+  return match.isRanked && player.id > 0;
 }
 
 /**
@@ -35,5 +35,5 @@ export function canJoinRanked(player: Player, match: Match): boolean {
  * @returns A string containing an explanation of the incompatibility.
  */
 export function getIncompatibilityMessage(player: Player): string {
-  // Implement the logic for generating the message here.
+  return `Player ${player.username} is not eligible for ranked play at this time.`;
 }

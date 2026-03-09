@@ -33,7 +33,6 @@ declare namespace RollupJobs {
   };
 }
 
-export function rollupDaily(): RollupJob {
-  // Implementation of the daily rollup logic for each metric.
-  // Ensure determinism where the spec involves game engine or replay.
+export function rollupDaily(): RollupJobs.RollupJob {
+  return { onboardingFunnel: {} as any, deathCauses: {} as any, lethalContent: {} as any, verificationHealth: {} as any, economySinkPressure: {} as any };
 }

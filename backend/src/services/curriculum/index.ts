@@ -4,7 +4,7 @@
 
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, EntitySubscription } from 'typeorm';
+import { Repository, Entity, PrimaryGeneratedColumn, Column } from 'typeorm';
 
 /**
  * Curriculum Entity
@@ -54,13 +54,5 @@ export class CurriculumService {
    */
   async saveOrUpdateCurriculum(curriculum: Curriculum): Promise<void> {
     await this.curriculumRepository.save(curriculum);
-  }
-
-  /**
-   * Subscribe to changes in a curriculum
-   * @param id - The ID of the curriculum to subscribe to
-   */
-  async subscribeToCurriculumChanges(id: string): Promise<EntitySubscription> {
-    return this.curriculumRepository.createSubscriptionBuilder(id).subscribe();
   }
 }

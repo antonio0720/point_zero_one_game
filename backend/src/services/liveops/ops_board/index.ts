@@ -1,45 +1,25 @@
-/**
- * OpsBoard service for Point Zero One Digital's financial roguelike game.
- */
-
-declare namespace opsBoard {
-  interface GameEvent {
-    /** Unique identifier for the event */
+export namespace opsBoard {
+  export interface GameEvent {
     id: string;
-
-    /** Timestamp when the event occurred */
     timestamp: Date;
-
-    /** Type of the event */
     type: string;
-
-    /** Payload specific to the event type */
-    payload: any;
+    payload: unknown;
   }
 
-  interface GameState {
-    /** Current game session ID */
+  export interface GameState {
     sessionId: string;
-
-    /** Current game state data */
-    stateData: any;
+    stateData: unknown;
   }
 
-  interface OpsBoardResponse {
+  export interface OpsBoardResponse {
     success: boolean;
     message?: string;
-    data?: any;
+    data?: unknown;
   }
 
-  type OpsBoardHandler = (event: GameEvent, state: GameState) => Promise<OpsBoardResponse>;
-}
+  export type OpsBoardHandler = (event: GameEvent, state: GameState) => Promise<OpsBoardResponse>;
 
-export namespace opsBoard {
-  /**
-   * Handles incoming game events and updates the game state accordingly.
-   */
-  export const handleEvent: OpsBoardHandler = async (event, state) => {
-    // Implement event handling logic here
+  export const handleEvent: OpsBoardHandler = async (_event, _state) => {
     return { success: true };
   };
 }

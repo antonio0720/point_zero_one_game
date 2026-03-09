@@ -30,11 +30,14 @@ type Assessment = {
 /**
  * Check if the provided assessment has a valid content version for both episode and ruleset.
  */
+const episodes: Episode[] = [];
+const ruleSets: Ruleset[] = [];
+
 function isValidAssessment(assessment: Assessment): boolean {
   const { episodeId, rulesetId, contentVersion } = assessment;
   return (
     !!episodeWithVersion(episodes, episodeId, contentVersion.version) &&
-    !!rulesetWithVersion(ruleSets, rulesetId, contentVersion.version)
+    !!ruleSetWithVersion(ruleSets, rulesetId, contentVersion.version)
   );
 }
 

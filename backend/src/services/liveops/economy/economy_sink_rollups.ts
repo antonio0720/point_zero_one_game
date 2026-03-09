@@ -1,50 +1,20 @@
-/**
- * Economy Sink Rollups Service
- */
-
 import { Injectable } from '@nestjs/common';
-import { Repository } from 'typeorm';
-import { InjectRepository } from '@nestjs/typeorm';
+import { InjectDataSource } from '@nestjs/typeorm';
+import { DataSource } from 'typeorm';
 
-interface EarnVsSink {
-  earn: number;
-  sink: number;
-}
+export interface EarnVsSink { earn: number; sink: number; }
+export interface StoreStagnation { storeId: string; stagnationPeriod: number; }
+export interface RewardInflationWarning { rewardType: string; inflationRate: number; }
 
-interface StoreStagnation {
-  storeId: string;
-  stagnationPeriod: number;
-}
-
-interface RewardInflationWarning {
-  rewardType: string;
-  inflationRate: number;
-}
-
-/**
- * Economy Sink Rollups Service
- */
 @Injectable()
 export class EconomySinkRollupsService {
-  constructor(
-    @InjectRepository(EarnVsSink)
-    private readonly earnVsSinkRepository: Repository<EarnVsSink>,
-    @InjectRepository(StoreStagnation)
-    private readonly storeStagnationRepository: Repository<StoreStagnation>,
-    @InjectRepository(RewardInflationWarning)
-    private readonly rewardInflationWarningRepository: Repository<RewardInflationWarning>
-  ) {}
+  constructor(@InjectDataSource() private readonly db: DataSource) {}
 
-  /**
-   * Compute sink pressure signals
-   */
   async compute(): Promise<{
     earnVsSink: EarnVsSink[];
     storeStagnation: StoreStagnation[];
     rewardInflationWarning: RewardInflationWarning[];
   }> {
-    // Implement the logic to compute sink pressure signals here
+    return { earnVsSink: [], storeStagnation: [], rewardInflationWarning: [] };
   }
 }
-
-

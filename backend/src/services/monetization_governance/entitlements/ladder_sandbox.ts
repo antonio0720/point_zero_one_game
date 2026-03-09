@@ -4,7 +4,7 @@
 
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, Entity, PrimaryGeneratedColumn, Column } from 'typeorm';
 
 /** Entitlement Type Enum */
 enum EntitlementType {

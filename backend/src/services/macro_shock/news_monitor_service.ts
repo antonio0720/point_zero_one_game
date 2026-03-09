@@ -3,6 +3,20 @@
  * Fetches news from configured macro sources, parses event type and severity, deduplicates, and emits MACRO_EVENT_DETECTED above threshold.
  */
 
+import { EventEmitter } from 'events';
+
+const eventEmitter = new EventEmitter();
+const MACRO_EVENT_DETECTED = 'MACRO_EVENT_DETECTED';
+
+async function fetchNews(apiUrl: string): Promise<unknown[]> {
+  // Production: replace with actual HTTP client (axios, fetch, etc.)
+  return [];
+}
+
+function emit(eventName: string, data: unknown): void {
+  eventEmitter.emit(eventName, data);
+}
+
 type MacroSource = {
   name: string;
   apiUrl: string;

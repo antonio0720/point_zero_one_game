@@ -3,7 +3,7 @@
  * Ensures entitlement-gated features do not affect run outcome probability.
  */
 
-import { EventEmitter, Subscribable } from 'events';
+import { EventEmitter } from 'events';
 
 interface NEVER_WIN_ADVANTAGE_VIOLATION {
   timestamp: Date;
@@ -14,7 +14,7 @@ class NeverWinAdvantageGuard {
   private readonly events: EventEmitter = new EventEmitter();
   private readonly violations: NEVER_WIN_ADVANTAGE_VIOLATION[] = [];
 
-  public on(eventName: 'NEVER_WIN_ADVANTAGE_VIOLATION', listener: (violation: NEVER_WIN_ADVANTAGE_VIOLATION) => void): Subscribable {
+  public on(eventName: 'NEVER_WIN_ADVANTAGE_VIOLATION', listener: (violation: NEVER_WIN_ADVANTAGE_VIOLATION) => void): EventEmitter {
     return this.events.on(eventName, listener);
   }
 

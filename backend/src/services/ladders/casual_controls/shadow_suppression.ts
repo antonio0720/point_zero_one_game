@@ -3,11 +3,6 @@
  * Maintains internal receipts and ensures silent suppression of extreme anomalies without public callouts.
  */
 
-declare module '*.*' {
-  const value: any;
-  export default value;
-}
-
 export interface AnomalyReceipt {
   anomalyId: string;
   timestamp: Date;

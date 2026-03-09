@@ -16,7 +16,7 @@ export type Cohort = number;
  * @param partner - The partner to be assigned to a cohort.
  */
 export function assignCohort(partner: Partner): Cohort {
-  // Implement the deterministic evaluation logic here.
+  return partner.department.length % 10;
 }
 
 

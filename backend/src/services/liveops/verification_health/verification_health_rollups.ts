@@ -37,7 +37,7 @@ export class VerificationHealthRollupRepository {
     const rollup = await this.verificationHealthRollupRepository.findOne({ where: { gameId } });
 
     if (!rollup) {
-      return this.verificationHealthRollupRepository.save(new VerificationHealthRollup({ gameId }));
+      return this.verificationHealthRollupRepository.save(Object.assign(new VerificationHealthRollup(), { gameId }));
     }
 
     // Implement the logic for calculating pendingToVerifiedLatency, quarantineRate, gatingTriggers, and queueDepthSample here.

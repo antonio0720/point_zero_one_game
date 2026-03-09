@@ -45,8 +45,8 @@ export class DeltaHighlightsService {
    * @param playerRun2Id The ID of the second player's run.
    */
   async calculateDeltaHighlight(playerRun1Id: number, playerRun2Id: number): Promise<Run2DeltaHighlight> {
-    const playerRun1 = await this.playerRunRepository.findOne(playerRun1Id, { relations: ['run'] });
-    const playerRun2 = await this.playerRunRepository.findOne(playerRun2Id, { relations: ['run'] });
+    const playerRun1 = await this.playerRunRepository.findOne({ where: { id: playerRun1Id }, relations: ['run'] });
+    const playerRun2 = await this.playerRunRepository.findOne({ where: { id: playerRun2Id }, relations: ['run'] });
 
     // Calculate the delta between the two runs' scores.
     const scoreDelta = playerRun1.score - playerRun2.score;
@@ -60,17 +60,12 @@ export class DeltaHighlightsService {
     const existingDeltaHighlight = await this.run2DeltaHighlightRepository.findOne({
       where: { playerRun1Id, playerRun2Id },
     });
-
-    // If it doesn't exist, create a new one with the calculated improvement signal.
-    if (!existingDeltaHighlight) {
-      const newDeltaHighlight = new Run2DeltaHighlight();
-      newDeltaHighlight.playerRun1Id = playerRun1Id;
-      newDeltaHighlight.playerRun2Id = playerRun2Id;
-      newDeltaHighlight.improvementSignal = improvementSignal;
-      await this.run2DeltaHighlightRepository.save(newDeltaHighlight);
-    }
-
     // Return the existing delta highlight if it already exists, or create a new one and return that.
-    return existingDeltaHighlight || newDeltaHighlight;
+    if (existingDeltaHighlight) return existingDeltaHighlight;
+    const created = new Run2DeltaHighlight();
+    created.playerRun1Id = playerRun1Id;
+    created.playerRun2Id = playerRun2Id;
+    created.improvementSignal = improvementSignal;
+    return this.run2DeltaHighlightRepository.save(created);
   }
 }

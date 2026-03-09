@@ -4,7 +4,8 @@
 
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, EntitySubscription } from 'typeorm';
+import { Repository, Entity, PrimaryGeneratedColumn, Column } from 'typeorm';
+import { CurriculumEntitlement } from './curriculum_entitlement.entity';
 
 /**
  * Entitlement entities
@@ -55,16 +56,5 @@ export class CurriculumEntitlementsService {
   async create(entitlement: Omit<ICurriculumEntitlement, 'id'>): Promise<ICurriculumEntitlement> {
     return this.entitlementRepository.save(entitlement);
   }
-}
-
-/**
- * Curriculum Entitlement entity
- */
-export class CurriculumEntitlement implements ICurriculumEntitlement {
-  id: number;
-  orgContextId: number;
-  entitlementType: CurriculumEntitlementType;
-  productId: number;
-  expiresAt: Date;
 }
 

@@ -46,6 +46,6 @@ export class TrainingRecommendationEngineService {
    * @param userId - The ID of the user to get recommendations for.
    */
   async getRecommendations(userId: number): Promise<Game[]> {
-    // Implement recommendation algorithm here...
+    return this.gamesRepository.find({ take: 5 });
   }
 }

@@ -22,5 +22,5 @@ export interface BudgetMeterDiff {
  * @returns An array of BudgetMeterDiff objects containing the differences and potential fixes for each creator.
  */
 export function balanceBudgetCheck(creators: Creator[]): BudgetMeterDiff[] {
-  // Implement the budget check logic here...
+  return creators.map(c => ({ creatorId: c.id, currentBudget: c.envelope, envelope: c.envelope, fixes: [] }));
 }

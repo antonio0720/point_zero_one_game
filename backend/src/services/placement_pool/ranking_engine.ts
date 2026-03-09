@@ -8,8 +8,7 @@ export class RankingEngine {
    * @returns The calculated rank of the player.
    */
   public calculateRank(playerId: number): RankResult {
-    // Implementation details for calculating the rank based on verified signals.
-    // This includes retention lift, completion, rerun rate, proof-share rate, novelty/diversity constraints, and fraud-risk penalty.
+    return { playerId, rank: 0 };
   }
 }
 

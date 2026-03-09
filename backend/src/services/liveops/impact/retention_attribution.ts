@@ -36,7 +36,7 @@ type RetentionData = {
  */
 const queryCohorts = (callback: (err: Error, result: Cohort[]) => void) => {
   pool.query('SELECT cohort_id, array_agg(patch_id) AS patch_ids FROM cohorts GROUP BY cohort_id', (err, res) => {
-    if (err) return callback(err);
+    if (err) return callback(err, []);
     const cohorts: Cohort[] = res.rows.map((row) => ({ cohortId: row.cohort_id, patchIds: row.patch_ids }));
     callback(null, cohorts);
   });
@@ -44,7 +44,7 @@ const queryCohorts = (callback: (err: Error, result: Cohort[]) => void) => {
 
 const queryHoldbacks = (callback: (err: Error, result: Holdback[]) => void) => {
   pool.query('SELECT holdback_id, cohort_id, patch_id FROM holdbacks', (err, res) => {
-    if (err) return callback(err);
+    if (err) return callback(err, []);
     const holdbacks: Holdback[] = res.rows.map((row) => ({ holdbackId: row.holdback_id, cohortId: row.cohort_id, patchId: row.patch_id }));
     callback(null, holdbacks);
   });
@@ -52,7 +52,7 @@ const queryHoldbacks = (callback: (err: Error, result: Holdback[]) => void) => {
 
 const queryRetentionData = (callback: (err: Error, result: RetentionData[]) => void) => {
   pool.query('SELECT cohort_id, (COUNT(*) FILTER (WHERE days_played > 7)::float / COUNT(*)) AS retention_rate FROM users GROUP BY cohort_id', (err, res) => {
-    if (err) return callback(err);
+    if (err) return callback(err, []);
     const retentionData: RetentionData[] = res.rows.map((row) => ({ cohortId: row.cohort_id, retentionRate: row.retention_rate }));
     callback(null, retentionData);
   });

@@ -4,7 +4,7 @@
 
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Entity, PrimaryGeneratedColumn, Column, ManyToOne, JoinColumn } from 'typeorm';
+import { Repository, Entity, PrimaryGeneratedColumn, Column, ManyToOne, JoinColumn, OneToMany } from 'typeorm';
 
 /** Entitlement entity. */
 @Entity()
@@ -82,7 +82,7 @@ export class EntitlementsService {
       throw new Error('User not found');
     }
 
-    const entitlement = await this.entitlementRepository.findOne(entitlementId);
+    const entitlement = await this.entitlementRepository.findOne({ where: { id: entitlementId } });
     if (!entitlement) {
       throw new Error('Entitlement not found');
     }

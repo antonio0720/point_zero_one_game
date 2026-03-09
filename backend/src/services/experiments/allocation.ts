@@ -17,11 +17,7 @@ declare namespace Services {
        * Class representing the Allocation Service.
        */
       export class AllocationService {
-        private config: IConfig;
-
-        constructor(config: IConfig) {
-          this.config = config;
-        }
+        constructor(config: IConfig);
 
         // Methods for deterministic allocation, sticky bucketing, kill-switch support, and rollout controls go here...
       }
