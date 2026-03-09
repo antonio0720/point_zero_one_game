@@ -2,12 +2,6 @@
  * Empathy Mode Service for Point Zero One Digital's financial roguelike game.
  * Enhanced calibration range, smoother escalation curves, sentiment history window (3 turns), entitlement-gated, $2.99/mo.
  */
-
-declare module '*.vue' {
-  import Vue from 'vue';
-  export default Vue;
-}
-
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';

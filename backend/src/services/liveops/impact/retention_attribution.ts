@@ -2,8 +2,6 @@
  * Retention Attribution Service for Point Zero One Digital's financial roguelike game.
  * This service attributes retention and quality of life improvements to micro-patches using cohorts and holdbacks in a privacy-safe manner.
  */
-
-declare module '*.json';
 import { Request, Response } from 'express';
 import { Pool } from 'pg';
 

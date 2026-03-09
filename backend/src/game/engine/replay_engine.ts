@@ -24,6 +24,14 @@ export interface Ledger {
   readonly turn: number;
 }
 
+/**
+ * Internal mutable form of Ledger.
+ * Public API stays readonly; GameState can still evolve deterministically.
+ */
+type MutableLedger = {
+  -readonly [K in keyof Ledger]: Ledger[K];
+};
+
 export type EffectTarget =
   | 'cash'
   | 'income'
@@ -95,6 +103,34 @@ export function createDefaultLedger(
   };
 }
 
+function toMutableLedger(ledger: Ledger): MutableLedger {
+  return {
+    cash: ledger.cash,
+    income: ledger.income,
+    expenses: ledger.expenses,
+    shield: ledger.shield,
+    heat: ledger.heat,
+    trust: ledger.trust,
+    divergence: ledger.divergence,
+    cords: ledger.cords,
+    turn: ledger.turn,
+  };
+}
+
+function toReadonlyLedger(ledger: MutableLedger): Ledger {
+  return {
+    cash: ledger.cash,
+    income: ledger.income,
+    expenses: ledger.expenses,
+    shield: ledger.shield,
+    heat: ledger.heat,
+    trust: ledger.trust,
+    divergence: ledger.divergence,
+    cords: ledger.cords,
+    turn: ledger.turn,
+  };
+}
+
 function roundTo6(value: number): number {
   return Math.round(value * 1_000_000) / 1_000_000;
 }
@@ -130,14 +166,14 @@ export class GameState {
   private readonly seed: Seed;
   private runId: string | null;
   private finalized: boolean;
-  private ledger: Ledger;
+  private ledger: MutableLedger;
   private eventsApplied: number;
 
   public constructor(seed: Seed) {
     this.seed = seed;
     this.runId = null;
     this.finalized = false;
-    this.ledger = createDefaultLedger();
+    this.ledger = toMutableLedger(createDefaultLedger());
     this.eventsApplied = 0;
   }
 
@@ -145,7 +181,7 @@ export class GameState {
     switch (event.type) {
       case 'RUN_CREATED': {
         this.runId = event.runId;
-        this.ledger = { ...event.ledger };
+        this.ledger = toMutableLedger(event.ledger);
         this.finalized = false;
         this.eventsApplied += 1;
         return;
@@ -154,7 +190,7 @@ export class GameState {
       case 'TURN_SUBMITTED': {
         this.assertRunInitialized();
 
-        const updated: Ledger = { ...this.ledger };
+        const updated = toMutableLedger(toReadonlyLedger(this.ledger));
 
         for (const effect of event.effects) {
           switch (effect.target) {
@@ -224,7 +260,7 @@ export class GameState {
       runId: this.runId as string,
       seed: this.seed,
       finalized: this.finalized,
-      ledger: { ...this.ledger },
+      ledger: toReadonlyLedger(this.ledger),
       eventsApplied: this.eventsApplied,
       turnCount: this.ledger.turn,
     };

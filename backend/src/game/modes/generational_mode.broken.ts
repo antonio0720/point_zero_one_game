@@ -1,8 +1,6 @@
 /**
  * Generational Mode for Point Zero One Digital's financial roguelike game
  */
-
-declare module '*.json';
 import { GameMode, Asset, UserProfile } from '../interfaces';
 
 interface GenerationalMode extends GameMode {

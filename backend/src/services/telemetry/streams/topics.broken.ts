@@ -1,8 +1,6 @@
 /**
  * Topics service for handling telemetry streams in Point Zero One Digital's financial roguelike game.
  */
-
-declare module '*.json';
 import { Request, Response } from 'express';
 import { Router } from 'express-router';
 import { validate } from 'jsonschema';

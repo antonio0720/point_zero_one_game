@@ -32,7 +32,7 @@ export class ShowcaseService {
       .where('game_run.createdAt >= :startOfWeek', { startOfWeek: new Date(Date.now() - 604800000) }) // Start of the week (Sunday at midnight)
       .andWhere('verified_game_run.isVerified = true')
       .orderBy('game_run.createdAt', 'DESC')
-      .setOptions({ take: 10 }) // Limit to top 10 runs
+      .take(10) // Limit to top 10 runs
       .getMany();
 
     const explorerLinks: ExplorerLink[] = topVerifiedRuns.map((verifiedRun) => ({

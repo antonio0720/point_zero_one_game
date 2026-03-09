@@ -2,8 +2,6 @@
  * OnboardingArc service for Point Zero One Digital's financial roguelike game.
  * This service handles stage assignment, episode selection, and constraints.
  */
-
-declare module '*.json';
 import { Request, Response } from 'express';
 import { Pool } from 'pg';
 import { v4 as uuidv4 } from 'uuid';

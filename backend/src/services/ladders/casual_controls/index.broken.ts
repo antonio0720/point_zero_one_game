@@ -2,8 +2,6 @@
  * CasualControls service for Point Zero One Digital's financial roguelike game.
  * This service handles deduplication, rate limiting, plausibility caps, and shadow suppression.
  */
-
-declare module '*.json';
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';

@@ -4,12 +4,6 @@
  * Consumes SentimentClassified and computes adjustment to next draw weights within allowed range (±20%)
  * The adjustment is ephemeral (per turn, not persistent) and logs the adjustment for balance analytics.
  */
-
-declare module '*.json' {
-  const value: any;
-  export default value;
-}
-
 import { Injectable } from '@nestjs/common';
 import { SentimentClassified } from '../sentiments/sentiment-classified.interface';
 import { DeckAdjustment } from './deck-adjustment.interface';
