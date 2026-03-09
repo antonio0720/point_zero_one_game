@@ -1,5 +1,5 @@
 -- Point Zero One Digital - Backend Migrations - 2026_02_20_add_death_autopsy_snippets.sql
-
+-- /Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/backend/migrations/2026_02_20_add_death_autopsy_snippets.sql
 CREATE TABLE IF NOT EXISTS autopsy_snippets (
     id INT PRIMARY KEY AUTO_INCREMENT,
     game_id INT NOT NULL,
