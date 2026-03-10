@@ -1,23 +1,41 @@
 /*
- * POINT ZERO ONE — BACKEND ENGINE 15X GENERATOR
- * Generated at: 2026-03-10T01:00:08.825776+00:00
+ * POINT ZERO ONE — BACKEND ENGINE MODE REGISTRY
+ * /backend/src/game/engine/modes/ModeRegistry.ts
  *
  * Doctrine:
- * - backend becomes the authoritative simulation surface
- * - seven engines remain distinct
- * - mode-native rules are enforced at runtime
- * - cards are backend-validated, not UI-trusted
- * - proof / integrity / CORD remain backend-owned
+ * - mode lookup must be deterministic
+ * - default registry should be easy to construct
+ * - adapters remain isolated and swappable
  */
 
 import type { ModeCode } from '../core/GamePrimitives';
 import type { ModeAdapter } from './ModeContracts';
+import { EmpireModeAdapter } from './EmpireModeAdapter';
+import { PredatorModeAdapter } from './PredatorModeAdapter';
+import { SyndicateModeAdapter } from './SyndicateModeAdapter';
+import { PhantomModeAdapter } from './PhantomModeAdapter';
 
 export class ModeRegistry {
   private readonly adapters = new Map<ModeCode, ModeAdapter>();
 
-  public register(adapter: ModeAdapter): void {
+  public register(adapter: ModeAdapter): this {
     this.adapters.set(adapter.modeCode, adapter);
+    return this;
+  }
+
+  public registerMany(adapters: readonly ModeAdapter[]): this {
+    for (const adapter of adapters) {
+      this.register(adapter);
+    }
+    return this;
+  }
+
+  public has(modeCode: ModeCode): boolean {
+    return this.adapters.has(modeCode);
+  }
+
+  public list(): readonly ModeAdapter[] {
+    return [...this.adapters.values()];
   }
 
   public mustGet(modeCode: ModeCode): ModeAdapter {
@@ -27,4 +45,15 @@ export class ModeRegistry {
     }
     return adapter;
   }
+
+  public static createDefault(): ModeRegistry {
+    return new ModeRegistry().registerMany([
+      new EmpireModeAdapter(),
+      new PredatorModeAdapter(),
+      new SyndicateModeAdapter(),
+      new PhantomModeAdapter(),
+    ]);
+  }
 }
+
+export const DEFAULT_MODE_REGISTRY = ModeRegistry.createDefault();
