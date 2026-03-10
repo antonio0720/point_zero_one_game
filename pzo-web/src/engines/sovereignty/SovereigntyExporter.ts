@@ -1,368 +1,678 @@
-//Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/pzo-web/src/engines/sovereignty/SovereigntyExporter.ts
-
 // ═══════════════════════════════════════════════════════════════════
 // POINT ZERO ONE — SOVEREIGNTY ENGINE — SOVEREIGNTY EXPORTER
 // Density6 LLC · Confidential · Do not distribute
-//
-// Responsibilities:
-//   · Generate the proof artifact (PDF or PNG) on explicit player purchase
-//   · Render a fully self-contained HTML template (inline CSS, no external deps)
-//   · Stub htmlToPDF and htmlToPNG — inject via environment adapter
-//   · Upload rendered blob to CDN — stub: inject CDN client
-//   · Emit PROOF_ARTIFACT_READY with download URL on success
-//
-// CRITICAL: This class is NOT called automatically on run completion.
-//           It is called only when the player explicitly requests export
-//           through the purchase flow. Automatic generation for all runs
-//           would be a performance violation and a product mistake.
-//
-// Import rules: may import from types.ts and EventBus ONLY.
 // ═══════════════════════════════════════════════════════════════════
 
 import type { EventBus } from '../core/EventBus';
 import type {
-  ProofArtifact,
-  RunIdentity,
   ArtifactFormat,
   BadgeTier,
+  ProofArtifact,
+  ProofArtifactReadyPayload,
   RunGrade,
+  RunIdentity,
   RunOutcome,
   SovereigntyScoreComponents,
-  ProofArtifactReadyPayload,
 } from './types';
 
-export class SovereigntyExporter {
-  private eventBus: EventBus;
+interface SovereigntyExportStorageAdapter {
+  upload(params: {
+    key: string;
+    blob: Blob;
+    format: ArtifactFormat;
+    metadata: Record<string, string>;
+  }): Promise<string>;
+}
 
-  constructor(eventBus: EventBus) {
+interface SovereigntyExporterOptions {
+  storageAdapter?: SovereigntyExportStorageAdapter;
+  renderScale?: number;
+  objectUrlFallback?: boolean;
+}
+
+export class SovereigntyExporter {
+  private static readonly ARTIFACT_WIDTH = 600;
+  private static readonly ARTIFACT_HEIGHT = 900;
+
+  private readonly eventBus: EventBus;
+  private readonly storageAdapter?: SovereigntyExportStorageAdapter;
+  private readonly renderScale: number;
+  private readonly objectUrlFallback: boolean;
+
+  constructor(eventBus: EventBus, options: SovereigntyExporterOptions = {}) {
     this.eventBus = eventBus;
+    this.storageAdapter = options.storageAdapter;
+    this.renderScale = Number.isFinite(options.renderScale) && (options.renderScale ?? 0) > 0
+      ? Number(options.renderScale)
+      : 2;
+    this.objectUrlFallback = options.objectUrlFallback ?? true;
   }
 
-  // ── PUBLIC: EXPORT ────────────────────────────────────────────────
-  /**
-   * Generate and upload the proof artifact for a completed run.
-   *
-   * Flow:
-   *   1. Build ProofArtifact metadata object
-   *   2. Render self-contained HTML template
-   *   3. Convert HTML → PDF or PNG (environment-injected impl)
-   *   4. Upload blob to CDN — returns public URL
-   *   5. Emit PROOF_ARTIFACT_READY
-   *   6. Return ProofArtifact with exportUrl populated
-   *
-   * @param params.identity     — RunIdentity from the completed sovereignty pipeline
-   * @param params.playerHandle — Display name or user ID for artifact footer
-   * @param params.format       — 'PDF' or 'PNG'
-   */
   public async export(params: {
-    identity:     RunIdentity;
+    identity: RunIdentity;
     playerHandle: string;
-    format:       ArtifactFormat;
+    format: ArtifactFormat;
   }): Promise<ProofArtifact> {
-    const { identity, playerHandle, format } = params;
-    const sig   = identity.signature;
+    const { identity, format } = params;
+    const playerHandle = this.normalizePlayerHandle(params.playerHandle, identity.signature.userId);
+    const sig = identity.signature;
     const score = identity.score;
 
     const artifact: ProofArtifact = {
-      runId:            sig.runId,
-      proofHash:        sig.proofHash,
-      grade:            score.grade,
+      runId: sig.runId,
+      proofHash: sig.proofHash,
+      grade: score.grade,
       sovereigntyScore: score.finalScore,
-      badgeTier:        this.gradeToBadgeTier(score.grade),
+      badgeTier: this.gradeToBadgeTier(score.grade),
       playerHandle,
-      outcome:          sig.outcome,
-      ticksSurvived:    sig.ticksSurvived,
-      finalNetWorth:    sig.finalNetWorth,
-      generatedAt:      Date.now(),
+      outcome: sig.outcome,
+      ticksSurvived: sig.ticksSurvived,
+      finalNetWorth: sig.finalNetWorth,
+      generatedAt: Date.now(),
       format,
     };
 
-    const html      = this.renderArtifactHTML(artifact, score.components);
-    const blob      = format === 'PDF'
+    const html = this.renderArtifactHTML({
+      artifact,
+      identity,
+      playerHandle,
+    });
+
+    const blob = format === 'PDF'
       ? await this.htmlToPDF(html)
       : await this.htmlToPNG(html);
 
-    const exportUrl = await this.uploadToCDN(blob, artifact.runId, format);
+    const exportUrl = await this.uploadToCDN(blob, artifact.runId, format, {
+      proofHash: artifact.proofHash,
+      grade: artifact.grade,
+      outcome: artifact.outcome,
+      integrityStatus: identity.integrityStatus,
+      engineVersion: identity.signature.engineVersion,
+    });
+
     artifact.exportUrl = exportUrl;
 
     const payload: ProofArtifactReadyPayload = {
-      runId: sig.runId,
+      runId: artifact.runId,
       exportUrl,
       format,
     };
-    this.eventBus.emit('PROOF_ARTIFACT_READY', payload);
 
+    this.eventBus.emit('PROOF_ARTIFACT_READY', payload as unknown as Record<string, unknown>);
     return artifact;
   }
 
-  // ── PRIVATE: HTML TEMPLATE RENDERER ──────────────────────────────
-  /**
-   * Render the full HTML proof artifact template.
-   * All CSS is inline — no external stylesheets, fonts, or images.
-   * Badge is an inline SVG — no external asset requests.
-   * This HTML is passed directly to htmlToPDF() or htmlToPNG().
-   *
-   * Layout (top to bottom):
-   *   ① Title bar: "POINT ZERO ONE — SOVEREIGNTY PROOF"
-   *   ② Header: badge SVG | grade letter | sovereignty score | player handle
-   *   ③ Run Identity: outcome, ticks survived, final net worth, run date
-   *   ④ Sovereignty Breakdown: five component bars
-   *   ⑤ Proof Hash: full 64-char SHA-256 in monospace
-   *   ⑥ Footer: Density6 LLC watermark | engine verification mark
-   */
-  private renderArtifactHTML(
-    artifact: ProofArtifact,
-    components: SovereigntyScoreComponents,
-  ): string {
-    const gradeColor    = this.gradeColor(artifact.grade);
-    const badgeSVG      = this.badgeSVG(artifact.badgeTier);
-    const outcomeLabel  = this.outcomeLabel(artifact.outcome);
-    const outcomeClr    = this.outcomeColor(artifact.outcome);
-    const netWorthStr   = '$' + artifact.finalNetWorth.toLocaleString('en-US', { maximumFractionDigits: 0 });
-    const dateStr       = new Date(artifact.generatedAt).toLocaleDateString('en-US', {
-      year: 'numeric', month: 'long', day: 'numeric',
+  // ── HTML TEMPLATE ──────────────────────────────────────────────
+
+  private renderArtifactHTML(params: {
+    artifact: ProofArtifact;
+    identity: RunIdentity;
+    playerHandle: string;
+  }): string {
+    const { artifact, identity, playerHandle } = params;
+    const gradeColor = this.gradeColor(artifact.grade);
+    const badgeSVG = this.badgeSVG(artifact.badgeTier);
+    const outcomeColor = this.outcomeColor(artifact.outcome);
+    const outcomeLabel = this.outcomeLabel(artifact.outcome);
+    const netWorthStr = this.formatCurrency(artifact.finalNetWorth);
+    const dateStr = new Date(artifact.generatedAt).toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
     });
 
+    const proofHashVisible = `${artifact.proofHash.slice(0, 16)}...${artifact.proofHash.slice(-8)}`;
+    const fullHashEscaped = this.escapeHtml(artifact.proofHash);
+    const integrityBanner = this.renderIntegrityBanner(identity.integrityStatus);
+    const componentBars = this.renderComponentBars(identity.score.components);
+    const escapedHandle = this.escapeHtml(playerHandle);
+    const escapedEngineVersion = this.escapeHtml(identity.signature.engineVersion);
+
     return `<!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-<meta charset="utf-8">
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<meta name="proof-hash" content="${fullHashEscaped}" />
+<meta name="engine-version" content="${escapedEngineVersion}" />
+<title>Point Zero One — Sovereignty Proof</title>
 <style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    padding: 0;
+    width: ${SovereigntyExporter.ARTIFACT_WIDTH}px;
+    height: ${SovereigntyExporter.ARTIFACT_HEIGHT}px;
+  }
   body {
-    font-family: Arial, sans-serif;
-    background: #1A1A2E;
+    font-family: Arial, Helvetica, sans-serif;
+    background:
+      radial-gradient(circle at top left, rgba(74, 144, 217, 0.16), transparent 32%),
+      linear-gradient(180deg, #15172B 0%, #111322 100%);
     color: #F4F6F8;
-    width: 600px;
-    height: 900px;
-    padding: 40px;
     position: relative;
+    overflow: hidden;
   }
-  .title {
-    font-size: 14px;
-    color: #888;
-    letter-spacing: 3px;
+  .frame {
+    position: absolute;
+    inset: 0;
+    padding: 34px 34px 28px 34px;
+    border: 1px solid rgba(255,255,255,0.08);
+    background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01));
+  }
+  .topline {
+    font-size: 12px;
+    color: #9AA3B2;
+    letter-spacing: 2.8px;
     text-transform: uppercase;
+    margin-bottom: 14px;
   }
-  .header {
-    display: flex;
+  .headline {
+    display: grid;
+    grid-template-columns: 94px 1fr;
+    gap: 18px;
     align-items: center;
-    gap: 24px;
-    margin-top: 16px;
-    margin-bottom: 32px;
+    margin-bottom: 22px;
+  }
+  .grade-wrap {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
   }
   .grade {
-    font-size: 96px;
+    font-size: 104px;
+    line-height: 0.92;
     font-weight: 900;
     color: ${gradeColor};
-    line-height: 1;
   }
   .score {
     font-size: 24px;
-    color: #B8860B;
-    font-weight: bold;
+    line-height: 1;
+    font-weight: 700;
+    color: #F8D477;
   }
-  .player-handle {
-    font-size: 13px;
-    color: #888;
-    margin-top: 4px;
+  .handle {
+    margin-top: 8px;
+    font-size: 14px;
+    color: #B7C0CE;
+    font-weight: 600;
+  }
+  .subgrid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+  .card {
+    border: 1px solid rgba(255,255,255,0.08);
+    background: rgba(8, 10, 20, 0.54);
+    border-radius: 14px;
+    padding: 14px 16px;
+    backdrop-filter: blur(6px);
   }
   .section-title {
-    font-size: 11px;
-    color: #B8860B;
-    letter-spacing: 2px;
+    color: #D7B967;
     text-transform: uppercase;
-    margin: 20px 0 10px;
+    letter-spacing: 2px;
+    font-size: 11px;
+    margin-bottom: 10px;
+    font-weight: 700;
   }
-  .data-row {
+  .identity-grid {
+    display: grid;
+    gap: 8px;
+  }
+  .row {
     display: flex;
+    align-items: center;
     justify-content: space-between;
-    padding: 8px 0;
-    border-bottom: 1px solid #2A2F3B;
+    gap: 14px;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+    padding-bottom: 8px;
   }
-  .data-label { color: #888; font-size: 13px; }
-  .data-value { color: #F4F6F8; font-size: 13px; font-weight: bold; }
+  .row:last-child {
+    border-bottom: none;
+    padding-bottom: 0;
+  }
+  .label {
+    color: #97A0AF;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+  .value {
+    color: #F4F6F8;
+    font-size: 13px;
+    font-weight: 700;
+    text-align: right;
+  }
   .outcome-badge {
     display: inline-block;
-    padding: 4px 12px;
-    border-radius: 12px;
-    font-size: 13px;
-    font-weight: bold;
-    background: ${outcomeClr}22;
-    color: ${outcomeClr};
-  }
-  .bar-row { margin: 6px 0; }
-  .bar-label {
+    border-radius: 999px;
+    padding: 4px 10px;
+    color: ${outcomeColor};
+    background: ${outcomeColor}22;
     font-size: 12px;
-    color: #888;
+    font-weight: 800;
+    letter-spacing: 0.4px;
+  }
+  .bars {
+    display: grid;
+    gap: 10px;
+  }
+  .bar-row {
+    display: grid;
+    gap: 4px;
+  }
+  .bar-label {
     display: flex;
     justify-content: space-between;
-    margin-bottom: 3px;
+    align-items: center;
+    color: #A7B0BE;
+    font-size: 12px;
   }
   .bar-track {
-    background: #2A2F3B;
-    height: 6px;
-    border-radius: 3px;
+    width: 100%;
+    height: 8px;
+    border-radius: 999px;
+    background: rgba(255,255,255,0.08);
+    overflow: hidden;
   }
   .bar-fill {
     height: 100%;
-    border-radius: 3px;
-    background: #4A90D9;
+    border-radius: 999px;
+    background: linear-gradient(90deg, #4A90D9, #79D1F4);
   }
-  .hash {
-    font-family: monospace;
+  .hashbox {
+    border-radius: 12px;
+    background: #0C1020;
+    border: 1px solid rgba(74, 144, 217, 0.24);
+    padding: 12px;
+    font-family: "Courier New", Courier, monospace;
+    color: #6BB8FF;
+  }
+  .hash-label {
+    color: #8E99AA;
     font-size: 11px;
-    color: #4A90D9;
-    background: #0F0F1A;
-    padding: 8px 12px;
-    border-radius: 4px;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    margin-bottom: 6px;
+  }
+  .hash-visible {
+    font-size: 12px;
+    line-height: 1.5;
     word-break: break-all;
-    line-height: 1.6;
+  }
+  .hash-full {
+    font-size: 1px;
+    color: transparent;
+    line-height: 1;
+    user-select: none;
   }
   .footer {
     position: absolute;
-    bottom: 32px;
-    left: 40px;
-    right: 40px;
-    font-size: 10px;
-    color: #555;
+    left: 34px;
+    right: 34px;
+    bottom: 24px;
     display: flex;
     justify-content: space-between;
+    align-items: center;
+    color: #667185;
+    font-size: 10px;
+    letter-spacing: 1.2px;
+    text-transform: uppercase;
+  }
+  .watermark {
+    font-weight: 700;
+  }
+  .verify {
+    text-align: right;
+  }
+  .integrity-banner {
+    margin-bottom: 14px;
+    padding: 10px 12px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: 0.3px;
+  }
+  .integrity-banner.tampered {
+    color: #FFD0D0;
+    background: rgba(244, 67, 54, 0.16);
+    border: 1px solid rgba(244, 67, 54, 0.34);
+  }
+  .integrity-banner.unverified {
+    color: #FFE5B8;
+    background: rgba(255, 152, 0, 0.16);
+    border: 1px solid rgba(255, 152, 0, 0.34);
   }
 </style>
 </head>
 <body>
-  <div class="title">POINT ZERO ONE — SOVEREIGNTY PROOF</div>
+  <div class="frame">
+    <div class="topline">Point Zero One — Sovereignty Proof</div>
+    ${integrityBanner}
+    <div class="headline">
+      <div>${badgeSVG}</div>
+      <div class="grade-wrap">
+        <div class="grade">${artifact.grade}</div>
+        <div class="score">${artifact.sovereigntyScore.toFixed(3)}</div>
+        <div class="handle">${escapedHandle}</div>
+      </div>
+    </div>
 
-  <div class="header">
-    ${badgeSVG}
-    <div>
-      <div class="grade">${artifact.grade}</div>
-      <div class="score">${artifact.sovereigntyScore.toFixed(3)}</div>
-      <div class="player-handle">${artifact.playerHandle}</div>
+    <div class="subgrid">
+      <div class="card">
+        <div class="section-title">Run Identity</div>
+        <div class="identity-grid">
+          <div class="row">
+            <div class="label">Outcome</div>
+            <div class="value"><span class="outcome-badge">${outcomeLabel}</span></div>
+          </div>
+          <div class="row">
+            <div class="label">Ticks Survived</div>
+            <div class="value">${artifact.ticksSurvived}</div>
+          </div>
+          <div class="row">
+            <div class="label">Final Net Worth</div>
+            <div class="value">${netWorthStr}</div>
+          </div>
+          <div class="row">
+            <div class="label">Run Date</div>
+            <div class="value">${dateStr}</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="section-title">Sovereignty Breakdown</div>
+        <div class="bars">${componentBars}</div>
+      </div>
+
+      <div class="card">
+        <div class="section-title">Proof Hash</div>
+        <div class="hashbox" data-full-hash="${fullHashEscaped}">
+          <div class="hash-label">Visible</div>
+          <div class="hash-visible">${this.escapeHtml(proofHashVisible)}</div>
+          <div class="hash-full">${fullHashEscaped}</div>
+        </div>
+      </div>
     </div>
   </div>
 
-  <div class="section-title">Run Identity</div>
-  <div class="data-row">
-    <span class="data-label">Outcome</span>
-    <span class="outcome-badge">${outcomeLabel}</span>
-  </div>
-  <div class="data-row">
-    <span class="data-label">Ticks Survived</span>
-    <span class="data-value">${artifact.ticksSurvived}</span>
-  </div>
-  <div class="data-row">
-    <span class="data-label">Final Net Worth</span>
-    <span class="data-value">${netWorthStr}</span>
-  </div>
-  <div class="data-row">
-    <span class="data-label">Run Date</span>
-    <span class="data-value">${dateStr}</span>
-  </div>
-
-  <div class="section-title">Sovereignty Breakdown</div>
-  ${this.renderComponentBars(components)}
-
-  <div class="section-title">Proof Hash</div>
-  <div class="hash">${artifact.proofHash}</div>
-
   <div class="footer">
-    <div>DENSITY6 LLC · POINT ZERO ONE</div>
-    <div>VERIFIED BY SOVEREIGNTY ENGINE</div>
+    <div class="watermark">Density6 LLC · Point Zero One</div>
+    <div class="verify">Verified by Sovereignty Engine · ${escapedEngineVersion}</div>
   </div>
 </body>
 </html>`;
   }
 
-  // ── PRIVATE: COMPONENT BARS ───────────────────────────────────────
-  /**
-   * Render five horizontal progress bars representing each score component.
-   * Values are multiplied by 100 for percentage display.
-   */
+  private renderIntegrityBanner(integrityStatus: RunIdentity['integrityStatus']): string {
+    if (integrityStatus === 'TAMPERED') {
+      return `<div class="integrity-banner tampered">⚠ TAMPERED RUN — proof retained, integrity flagged</div>`;
+    }
+
+    if (integrityStatus === 'UNVERIFIED') {
+      return `<div class="integrity-banner unverified">⚠ UNVERIFIED RUN — proof retained, integrity incomplete</div>`;
+    }
+
+    return '';
+  }
+
   private renderComponentBars(components: SovereigntyScoreComponents): string {
     const items: Array<{ label: string; value: number }> = [
-      { label: 'Ticks Survived',     value: components.ticksSurvivedPct },
+      { label: 'Ticks Survived', value: components.ticksSurvivedPct },
       { label: 'Shields Maintained', value: components.shieldsMaintainedPct },
-      { label: 'Hater Resistance',   value: components.haterBlockRate },
-      { label: 'Decision Speed',     value: components.decisionSpeedScore },
-      { label: 'Cascade Control',    value: components.cascadeBreakRate },
+      { label: 'Hater Resistance', value: components.haterBlockRate },
+      { label: 'Decision Speed', value: components.decisionSpeedScore },
+      { label: 'Cascade Control', value: components.cascadeBreakRate },
     ];
 
-    return items.map(item => {
-      const pct = (item.value * 100).toFixed(1);
+    return items.map((item) => {
+      const pct = this.clamp(item.value, 0, 1) * 100;
+      const pctText = pct.toFixed(1);
+
       return `
-      <div class="bar-row">
-        <div class="bar-label">
-          <span>${item.label}</span>
-          <span>${pct}%</span>
-        </div>
-        <div class="bar-track">
-          <div class="bar-fill" style="width:${pct}%"></div>
-        </div>
-      </div>`;
+<div class="bar-row">
+  <div class="bar-label">
+    <span>${this.escapeHtml(item.label)}</span>
+    <span>${pctText}%</span>
+  </div>
+  <div class="bar-track">
+    <div class="bar-fill" style="width:${pctText}%"></div>
+  </div>
+</div>`;
     }).join('');
   }
 
-  // ── PRIVATE: CONVERSION STUBS ─────────────────────────────────────
-  /**
-   * Convert HTML string → PDF Blob.
-   *
-   * Injection required — environment determines implementation:
-   *   · Server-side:  puppeteer (headless Chromium)
-   *   · Client-side:  html2canvas + jsPDF
-   *
-   * To inject: extend SovereigntyExporter and override this method,
-   * or pass an htmlConverter adapter via constructor option.
-   */
-  private async htmlToPDF(_html: string): Promise<Blob> {
-    throw new Error(
-      '[SovereigntyExporter] htmlToPDF not implemented. ' +
-      'Inject via puppeteer (server) or jsPDF (client).',
-    );
+  // ── RENDERING ──────────────────────────────────────────────────
+
+  private async htmlToPNG(html: string): Promise<Blob> {
+    const canvas = await this.renderHtmlToCanvas(html);
+    return await this.canvasToBlob(canvas, 'image/png');
+  }
+
+  private async htmlToPDF(html: string): Promise<Blob> {
+    const canvas = await this.renderHtmlToCanvas(html);
+    const imageData = canvas.getContext('2d')?.getImageData(0, 0, canvas.width, canvas.height);
+
+    if (!imageData) {
+      throw new Error('[SovereigntyExporter] Unable to read canvas image data for PDF export');
+    }
+
+    const pdf = this.buildPdfFromImageData(imageData, canvas.width, canvas.height);
+    return new Blob([pdf], { type: 'application/pdf' });
+  }
+
+  private async renderHtmlToCanvas(html: string): Promise<HTMLCanvasElement> {
+    if (typeof document === 'undefined' || typeof window === 'undefined') {
+      throw new Error(
+        '[SovereigntyExporter] Browser DOM unavailable. ' +
+        'Use a storage/render adapter in non-browser environments.',
+      );
+    }
+
+    const width = SovereigntyExporter.ARTIFACT_WIDTH;
+    const height = SovereigntyExporter.ARTIFACT_HEIGHT;
+    const scale = this.renderScale;
+
+    const styleContent = this.extractTagContent(html, 'style');
+    const bodyContent = this.extractTagContent(html, 'body');
+
+    const svgMarkup = `
+<svg xmlns="http://www.w3.org/2000/svg" width="${width * scale}" height="${height * scale}" viewBox="0 0 ${width} ${height}">
+  <foreignObject width="${width}" height="${height}">
+    <div xmlns="http://www.w3.org/1999/xhtml" style="width:${width}px;height:${height}px;">
+      <style>${styleContent}</style>
+      ${bodyContent}
+    </div>
+  </foreignObject>
+</svg>`.trim();
+
+    const svgBlob = new Blob([svgMarkup], { type: 'image/svg+xml;charset=utf-8' });
+    const objectUrl = URL.createObjectURL(svgBlob);
+
+    try {
+      const image = await this.loadImage(objectUrl);
+      const canvas = document.createElement('canvas');
+      canvas.width = width * scale;
+      canvas.height = height * scale;
+
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        throw new Error('[SovereigntyExporter] Unable to acquire 2D canvas context');
+      }
+
+      ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+      return canvas;
+    } finally {
+      URL.revokeObjectURL(objectUrl);
+    }
+  }
+
+  private loadImage(src: string): Promise<HTMLImageElement> {
+    return new Promise((resolve, reject) => {
+      const image = new Image();
+      image.onload = () => resolve(image);
+      image.onerror = () => reject(new Error('[SovereigntyExporter] Failed to load SVG render image'));
+      image.src = src;
+    });
+  }
+
+  private canvasToBlob(canvas: HTMLCanvasElement, mimeType: string): Promise<Blob> {
+    return new Promise((resolve, reject) => {
+      canvas.toBlob((blob) => {
+        if (!blob) {
+          reject(new Error(`[SovereigntyExporter] Canvas toBlob failed for ${mimeType}`));
+          return;
+        }
+        resolve(blob);
+      }, mimeType);
+    });
   }
 
   /**
-   * Convert HTML string → PNG Blob.
-   *
-   * Injection required:
-   *   · Server-side:  puppeteer screenshot
-   *   · Client-side:  html2canvas
+   * Minimal single-page PDF generator using an ASCIIHex-encoded RGB image stream.
+   * This keeps the exporter dependency-free while still producing a real PDF blob.
    */
-  private async htmlToPNG(_html: string): Promise<Blob> {
-    throw new Error(
-      '[SovereigntyExporter] htmlToPNG not implemented. ' +
-      'Inject via html2canvas or puppeteer screenshot.',
+  private buildPdfFromImageData(imageData: ImageData, width: number, height: number): Uint8Array {
+    const rgbHex = this.imageDataToAsciiHexRgb(imageData.data);
+
+    const objects: string[] = [];
+
+    objects.push('1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n');
+    objects.push('2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n');
+    objects.push(
+      `3 0 obj
+<<
+/Type /Page
+/Parent 2 0 R
+/MediaBox [0 0 ${width} ${height}]
+/Resources << /XObject << /Im0 4 0 R >> >>
+/Contents 5 0 R
+>>
+endobj
+`,
+    );
+    objects.push(
+      `4 0 obj
+<<
+/Type /XObject
+/Subtype /Image
+/Width ${width}
+/Height ${height}
+/ColorSpace /DeviceRGB
+/BitsPerComponent 8
+/Filter /ASCIIHexDecode
+/Length ${rgbHex.length + 1}
+>>
+stream
+${rgbHex}>
+endstream
+endobj
+`,
+    );
+
+    const contentStream = `q\n${width} 0 0 -${height} 0 ${height} cm\n/Im0 Do\nQ\n`;
+    objects.push(
+      `5 0 obj
+<< /Length ${contentStream.length} >>
+stream
+${contentStream}endstream
+endobj
+`,
+    );
+
+    let pdf = '%PDF-1.4\n';
+    const offsets: number[] = [0];
+
+    for (const object of objects) {
+      offsets.push(pdf.length);
+      pdf += object;
+    }
+
+    const xrefOffset = pdf.length;
+    pdf += `xref
+0 ${objects.length + 1}
+0000000000 65535 f 
+`;
+
+    for (let i = 1; i < offsets.length; i += 1) {
+      pdf += `${offsets[i].toString().padStart(10, '0')} 00000 n \n`;
+    }
+
+    pdf += `trailer
+<< /Size ${objects.length + 1} /Root 1 0 R >>
+startxref
+${xrefOffset}
+%%EOF`;
+
+    return new TextEncoder().encode(pdf);
+  }
+
+  private imageDataToAsciiHexRgb(rgba: Uint8ClampedArray): string {
+    let hex = '';
+
+    for (let i = 0; i < rgba.length; i += 4) {
+      const alpha = rgba[i + 3] / 255;
+      const r = this.compositeChannel(rgba[i], alpha, 255);
+      const g = this.compositeChannel(rgba[i + 1], alpha, 255);
+      const b = this.compositeChannel(rgba[i + 2], alpha, 255);
+
+      hex += r.toString(16).padStart(2, '0');
+      hex += g.toString(16).padStart(2, '0');
+      hex += b.toString(16).padStart(2, '0');
+    }
+
+    return hex.toUpperCase();
+  }
+
+  private compositeChannel(channel: number, alpha: number, background: number): number {
+    return Math.max(
+      0,
+      Math.min(255, Math.round(channel * alpha + background * (1 - alpha))),
     );
   }
 
-  /**
-   * Upload rendered blob to CDN and return the public download URL.
-   *
-   * Key format: proof-artifacts/{runId}.{format.toLowerCase()}
-   * Target CDN: S3 or Cloudflare R2 — inject your CDN client.
-   */
+  // ── STORAGE ────────────────────────────────────────────────────
+
   private async uploadToCDN(
-    _blob: Blob,
-    _runId: string,
-    _format: ArtifactFormat,
+    blob: Blob,
+    runId: string,
+    format: ArtifactFormat,
+    metadata: Record<string, string>,
   ): Promise<string> {
+    const key = `proof-artifacts/${runId}.${format.toLowerCase()}`;
+
+    if (this.storageAdapter) {
+      return this.storageAdapter.upload({
+        key,
+        blob,
+        format,
+        metadata,
+      });
+    }
+
+    if (this.objectUrlFallback && typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function') {
+      return URL.createObjectURL(blob);
+    }
+
     throw new Error(
-      '[SovereigntyExporter] uploadToCDN not implemented. ' +
-      'Inject your S3 or Cloudflare R2 client.',
+      '[SovereigntyExporter] No storage adapter configured and object URL fallback unavailable',
     );
   }
 
-  // ── PRIVATE: VISUAL HELPERS ───────────────────────────────────────
+  // ── VISUAL HELPERS ─────────────────────────────────────────────
 
   private gradeColor(grade: RunGrade): string {
     const colors: Record<RunGrade, string> = {
-      A: '#B8860B',  // dark gold
-      B: '#C0C0C0',  // silver
-      C: '#CD7F32',  // bronze
-      D: '#888888',  // gray
-      F: '#555555',  // charcoal
+      A: '#D4AF37',
+      B: '#C0C0C0',
+      C: '#CD7F32',
+      D: '#888888',
+      F: '#555555',
     };
+
     return colors[grade];
   }
 
@@ -375,45 +685,91 @@ export class SovereigntyExporter {
 
   private outcomeColor(outcome: RunOutcome): string {
     const colors: Record<RunOutcome, string> = {
-      FREEDOM:   '#4CAF50',
-      TIMEOUT:   '#FF9800',
-      BANKRUPT:  '#F44336',
+      FREEDOM: '#4CAF50',
+      TIMEOUT: '#FF9800',
+      BANKRUPT: '#F44336',
       ABANDONED: '#666666',
     };
+
     return colors[outcome];
   }
 
   private outcomeLabel(outcome: RunOutcome): string {
     const labels: Record<RunOutcome, string> = {
-      FREEDOM:   '🏆 FINANCIAL FREEDOM',
-      TIMEOUT:   '⏰ TIME EXPIRED',
-      BANKRUPT:  '💀 BANKRUPT',
-      ABANDONED: '🚪 ABANDONED',
+      FREEDOM: 'FINANCIAL FREEDOM',
+      TIMEOUT: 'TIME EXPIRED',
+      BANKRUPT: 'BANKRUPT',
+      ABANDONED: 'ABANDONED',
     };
+
     return labels[outcome];
   }
 
-  /**
-   * Generate an inline SVG hexagon badge.
-   * Grade A → GOLD. B → SILVER. C → BRONZE. D/F → IRON. (PLATINUM reserved)
-   * Two nested hexagons: outer filled, inner outlined at 50% opacity.
-   */
   private badgeSVG(tier: BadgeTier): string {
     const colors: Record<BadgeTier, string> = {
       PLATINUM: '#E5E4E2',
-      GOLD:     '#B8860B',
-      SILVER:   '#C0C0C0',
-      BRONZE:   '#CD7F32',
-      IRON:     '#555555',
+      GOLD: '#D4AF37',
+      SILVER: '#C0C0C0',
+      BRONZE: '#CD7F32',
+      IRON: '#555555',
     };
+
     const color = colors[tier];
-    return `<svg width="80" height="80" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+
+    return `<svg width="92" height="92" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="${tier} sovereignty badge">
+  <defs>
+    <linearGradient id="badge-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="${color}" stop-opacity="1" />
+      <stop offset="100%" stop-color="${color}" stop-opacity="0.65" />
+    </linearGradient>
+  </defs>
   <polygon
-    points="50,5 90,27.5 90,72.5 50,95 10,72.5 10,27.5"
-    fill="${color}" opacity="0.9"/>
+    points="50,4 88,26 88,74 50,96 12,74 12,26"
+    fill="url(#badge-grad)"
+    stroke="${color}"
+    stroke-width="2"
+    opacity="0.96"
+  />
   <polygon
-    points="50,15 80,31 80,68 50,85 20,68 20,31"
-    fill="none" stroke="${color}" stroke-width="2" opacity="0.5"/>
+    points="50,15 78,31 78,69 50,85 22,69 22,31"
+    fill="none"
+    stroke="rgba(255,255,255,0.45)"
+    stroke-width="1.8"
+  />
+  <circle cx="50" cy="50" r="11" fill="rgba(255,255,255,0.14)" stroke="rgba(255,255,255,0.4)" stroke-width="1.2" />
 </svg>`;
+  }
+
+  // ── STRING / HTML HELPERS ─────────────────────────────────────
+
+  private extractTagContent(html: string, tagName: 'style' | 'body'): string {
+    const match = html.match(new RegExp(`<${tagName}[^>]*>([\\s\\S]*?)<\\/${tagName}>`, 'i'));
+    return match?.[1] ?? '';
+  }
+
+  private normalizePlayerHandle(playerHandle: string, fallback: string): string {
+    const trimmed = typeof playerHandle === 'string' ? playerHandle.trim() : '';
+    return trimmed.length > 0 ? trimmed : fallback;
+  }
+
+  private formatCurrency(value: number): string {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD',
+      maximumFractionDigits: 0,
+    }).format(value);
+  }
+
+  private escapeHtml(value: string): string {
+    return value
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+      .replaceAll("'", '&#39;');
+  }
+
+  private clamp(value: number, min: number, max: number): number {
+    return Math.min(max, Math.max(min, value));
   }
 }

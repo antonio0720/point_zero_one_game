@@ -1,37 +1,6 @@
-//Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/pzo-web/src/engines/sovereignty/SovereigntyEngine.ts
-
 // ═══════════════════════════════════════════════════════════════════
 // POINT ZERO ONE — SOVEREIGNTY ENGINE — ORCHESTRATOR
 // Density6 LLC · Confidential · Do not distribute
-//
-// Responsibilities:
-//   · Maintain RunAccumulatorStats in memory across the entire run
-//   · initRun()     — called by EngineOrchestrator before tick 0
-//   · snapshotTick() — called synchronously at Step 12 of every tick
-//   · completeRun() — async 3-step pipeline on run end:
-//       Step 1: ReplayIntegrityChecker.verify()
-//       Step 2: ProofGenerator.generate() + buildSignature()
-//       Step 3: RunGradeAssigner.computeScore() + dispatchReward()
-//   · Emits RUN_COMPLETED on pipeline success
-//   · Emits PROOF_VERIFICATION_FAILED on any pipeline step failure
-//   · reset() — clears all state for a fresh run
-//
-// Design contract:
-//   ✦ The ONLY engine that writes the final record to the DB writer.
-//     All other engines read from state.
-//   ✦ snapshotTick() is SYNCHRONOUS. Zero async calls inside.
-//   ✦ completeRun() is ASYNC. Must be awaited before any DB write.
-//   ✦ pipelineRunning flag prevents duplicate completeRun() execution.
-//   ✦ TAMPERED runs continue through Steps 2 and 3 — do not abort.
-//   ✦ Exceptions inside completeRun() are caught; null is returned;
-//     PROOF_VERIFICATION_FAILED is emitted. Never let exceptions escape.
-//   ✦ SovereigntyEngine never imports from any other engine module.
-//     Cross-engine state flows in via RunStateSnapshot only.
-//
-// Import rules: may import ProofGenerator, ReplayIntegrityChecker,
-//   RunGradeAssigner, SovereigntyExporter, types.ts, and EventBus.
-//   NEVER import TimeEngine, PressureEngine, TensionEngine,
-//   ShieldEngine, BattleEngine, or CascadeEngine.
 // ═══════════════════════════════════════════════════════════════════
 
 import type { EventBus } from '../core/EventBus';
@@ -40,275 +9,563 @@ import { ProofGenerator } from './ProofGenerator';
 import { ReplayIntegrityChecker } from './ReplayIntegrityChecker';
 import { RunGradeAssigner } from './RunGradeAssigner';
 import type {
-  RunAccumulatorStats,
-  RunIdentity,
-  TickSnapshot,
-  RunOutcome,
-  RunCompletedPayload,
+  DecisionRecord,
+  GradeReward,
+  IntegrityStatus,
   ProofVerificationFailedPayload,
+  RunAccumulatorStats,
+  RunCompletedPayload,
+  RunIdentity,
+  RunOutcome,
+  RunSignature,
+  SovereigntyScore,
+  TickSnapshot,
 } from './types';
 
+type SnapshotRecord = Record<string, unknown>;
+
 export class SovereigntyEngine {
-  private accumulator:     RunAccumulatorStats | null = null;
-  private proofGen:        ProofGenerator;
-  private integrityChkr:  ReplayIntegrityChecker;
-  private gradeAssigner:   RunGradeAssigner;
-  private eventBus:        EventBus;
-  private pipelineRunning: boolean = false;
+  private accumulator: RunAccumulatorStats | null = null;
+  private readonly proofGen: ProofGenerator;
+  private readonly integrityChkr: ReplayIntegrityChecker;
+  private readonly gradeAssigner: RunGradeAssigner;
+  private readonly eventBus: EventBus;
+
+  private pipelineRunning = false;
+  private completionPromise: Promise<RunIdentity | null> | null = null;
+  private completedIdentity: RunIdentity | null = null;
+
+  /**
+   * These caches guarantee the proof_hash and downstream artifacts are computed
+   * exactly once per run, even if completeRun() is re-entered after a partial failure.
+   */
+  private cachedIntegrityStatus: IntegrityStatus | null = null;
+  private cachedSignature: RunSignature | null = null;
+  private cachedScore: SovereigntyScore | null = null;
+  private cachedReward: GradeReward | null = null;
 
   constructor(eventBus: EventBus) {
-    this.eventBus       = eventBus;
-    this.proofGen       = new ProofGenerator();
-    this.integrityChkr  = new ReplayIntegrityChecker();
-    this.gradeAssigner  = new RunGradeAssigner(eventBus);
+    this.eventBus = eventBus;
+    this.proofGen = new ProofGenerator();
+    this.integrityChkr = new ReplayIntegrityChecker();
+    this.gradeAssigner = new RunGradeAssigner(eventBus);
   }
 
-  // ══════════════════════════════════════════════════════════════════
-  // SECTION 1 — RUN LIFECYCLE
-  // ══════════════════════════════════════════════════════════════════
+  // ── CALLED AT RUN START ────────────────────────────────────────
 
-  // ── CALLED AT RUN START ───────────────────────────────────────────
-  /**
-   * Initialize a fresh accumulator for a new run.
-   * Called by EngineOrchestrator before the first tick, after RUN_STARTED emits.
-   * Sets outcome to ABANDONED by default — overwritten in completeRun().
-   */
   public initRun(params: {
-    runId:            string;
-    userId:           string;
-    seed:             string;
+    runId: string;
+    userId: string;
+    seed: string;
     seasonTickBudget: number;
-    clientVersion:    string;
-    engineVersion:    string;
+    clientVersion: string;
+    engineVersion: string;
   }): void {
+    this.reset();
+
+    const seasonTickBudget = Number.isFinite(params.seasonTickBudget) && params.seasonTickBudget > 0
+      ? Math.trunc(params.seasonTickBudget)
+      : 1;
+
     this.accumulator = {
-      runId:                 params.runId,
-      userId:                params.userId,
-      seed:                  params.seed,
-      startedAt:             Date.now(),
-      completedAt:           0,
-      outcome:               'ABANDONED', // overwritten in completeRun()
-      finalNetWorth:         0,
-      seasonTickBudget:      params.seasonTickBudget,
-      ticksSurvived:         0,
-      clientVersion:         params.clientVersion,
-      engineVersion:         params.engineVersion,
-      shieldIntegralSum:     0,
-      shieldSampleCount:     0,
-      totalHaterAttempts:    0,
+      runId: params.runId,
+      userId: params.userId,
+      seed: params.seed,
+      startedAt: Date.now(),
+      completedAt: 0,
+      outcome: 'ABANDONED',
+      finalNetWorth: 0,
+      seasonTickBudget,
+      ticksSurvived: 0,
+      clientVersion: params.clientVersion,
+      engineVersion: params.engineVersion,
+      shieldIntegralSum: 0,
+      shieldSampleCount: 0,
+      totalHaterAttempts: 0,
       haterSabotagesBlocked: 0,
-      haterSabotagesCount:   0,
-      totalCascadeChains:    0,
-      cascadeChainsBreak:    0,
-      decisionRecords:       [],
-      tickSnapshots:         [],
+      haterSabotagesCount: 0,
+      totalCascadeChains: 0,
+      cascadeChainsBreak: 0,
+      decisionRecords: [],
+      tickSnapshots: [],
     };
   }
 
-  // ── CALLED AT TICK STEP 12 ────────────────────────────────────────
-  /**
-   * Record a tick snapshot into the in-memory accumulator.
-   *
-   * CONTRACT: This method is SYNCHRONOUS. No async calls permitted here.
-   *           It runs inside the tick loop — latency matters.
-   *
-   * tickHash uses CRC32 (sync) for speed during the run.
-   * The full SHA-256 pass happens post-run in ProofGenerator.computeTickStreamChecksum().
-   *
-   * Called by EngineOrchestrator at Step 12 of every tick:
-   *   this.sovereigntyEngine.snapshotTick(this.runStateSnapshot);
-   */
+  // ── CALLED AT TICK STEP 12 ─────────────────────────────────────
+
   public snapshotTick(snapshot: RunStateSnapshot): void {
-    if (!this.accumulator) return;
+    if (!this.accumulator) {
+      return;
+    }
+
+    const tickIndex = this.extractTickIndex(snapshot);
+    const pressureScore = this.extractPressureScore(snapshot);
+    const shieldAvgIntegrityPct = this.extractShieldAvgIntegrityPct(snapshot);
+    const netWorth = this.extractNetWorth(snapshot);
+    const haterHeat = this.extractHaterHeat(snapshot);
+    const activeCascadeChains = this.extractActiveCascadeChains(snapshot);
+    const decisionsThisTick = this.extractDecisionRecords(snapshot);
 
     const tickSnap: TickSnapshot = {
-      tickIndex:           snapshot.tickIndex,
-      tickHash:            this.computeTickHash(snapshot),
-      pressureScore:       snapshot.pressureScore,
-      shieldAvgIntegrity:  snapshot.shieldAvgIntegrityPct,
-      netWorth:            snapshot.netWorth,
-      haterHeat:           snapshot.haterHeat,
-      cascadeChainsActive: snapshot.activeCascadeChains,
-      decisionsThisTick:   snapshot.decisionsThisTick ?? [],
+      tickIndex,
+      tickHash: this.computeTickHash({
+        tickIndex,
+        pressureScore,
+        shieldAvgIntegrityPct,
+        netWorth,
+        haterHeat,
+      }),
+      pressureScore,
+      shieldAvgIntegrity: shieldAvgIntegrityPct,
+      netWorth,
+      haterHeat,
+      cascadeChainsActive: activeCascadeChains,
+      decisionsThisTick,
     };
 
     this.accumulator.tickSnapshots.push(tickSnap);
-    this.accumulator.ticksSurvived          += 1;
-    this.accumulator.shieldIntegralSum      += snapshot.shieldAvgIntegrityPct;
-    this.accumulator.shieldSampleCount      += 1;
-    this.accumulator.totalHaterAttempts     += snapshot.haterAttemptsThisTick;
-    this.accumulator.haterSabotagesBlocked  += snapshot.haterBlockedThisTick;
-    this.accumulator.haterSabotagesCount    += snapshot.haterDamagedThisTick;
-    this.accumulator.totalCascadeChains     += snapshot.cascadesTriggeredThisTick;
-    this.accumulator.cascadeChainsBreak     += snapshot.cascadesBrokenThisTick;
+    this.accumulator.ticksSurvived += 1;
+    this.accumulator.shieldIntegralSum += shieldAvgIntegrityPct;
+    this.accumulator.shieldSampleCount += 1;
+    this.accumulator.totalHaterAttempts += this.extractHaterAttemptsThisTick(snapshot);
+    this.accumulator.haterSabotagesBlocked += this.extractHaterBlockedThisTick(snapshot);
+    this.accumulator.haterSabotagesCount += this.extractHaterDamagedThisTick(snapshot);
+    this.accumulator.totalCascadeChains += this.extractCascadesTriggeredThisTick(snapshot);
+    this.accumulator.cascadeChainsBreak += this.extractCascadesBrokenThisTick(snapshot);
 
-    if (snapshot.decisionsThisTick) {
-      this.accumulator.decisionRecords.push(...snapshot.decisionsThisTick);
+    if (decisionsThisTick.length > 0) {
+      this.accumulator.decisionRecords.push(...decisionsThisTick);
     }
   }
 
-  // ── CALLED WHEN RUN ENDS ──────────────────────────────────────────
-  /**
-   * Execute the 3-step sovereignty pipeline on run completion.
-   *
-   * Step 1 — INTEGRITY CHECK (ReplayIntegrityChecker)
-   *   · Structural check: sequence continuity, budget ceiling, count match
-   *   · Continuity check: statistical anomaly detection
-   *   · TAMPERED does NOT abort the pipeline — run is flagged but continues.
-   *     This prevents players from being stuck in an unresolvable state.
-   *
-   * Step 2 — PROOF HASH GENERATION (ProofGenerator)
-   *   · Computes proof_hash from seed|checksum|outcome|netWorth|userId
-   *   · Builds RunSignature with full identity fields
-   *
-   * Step 3 — GRADE ASSIGNMENT + REWARD DISPATCH (RunGradeAssigner)
-   *   · Computes sovereignty_score via weighted formula
-   *   · Assigns letter grade via GRADE_THRESHOLDS
-   *   · Dispatches RUN_REWARD_DISPATCHED via EventBus
-   *
-   * Emits RUN_COMPLETED on success.
-   * Returns null + emits PROOF_VERIFICATION_FAILED if any unhandled exception occurs.
-   * pipelineRunning flag prevents duplicate execution on concurrent calls.
-   *
-   * @param params.outcome       — FREEDOM | TIMEOUT | BANKRUPT | ABANDONED
-   * @param params.finalNetWorth — Raw net worth at run end (may be negative for BANKRUPT)
-   * @returns RunIdentity on success, null on unrecoverable failure
-   */
+  // ── CALLED WHEN RUN ENDS ───────────────────────────────────────
+
   public async completeRun(params: {
-    outcome:       RunOutcome;
+    outcome: RunOutcome;
     finalNetWorth: number;
   }): Promise<RunIdentity | null> {
     if (!this.accumulator) {
       console.error('[SovereigntyEngine] completeRun called with no active accumulator');
       return null;
     }
+
+    if (this.completedIdentity) {
+      return this.completedIdentity;
+    }
+
+    if (this.completionPromise) {
+      return this.completionPromise;
+    }
+
+    this.completionPromise = this.completeRunInternal(params);
+
+    try {
+      return await this.completionPromise;
+    } finally {
+      this.completionPromise = null;
+    }
+  }
+
+  public getCurrentRunStats(): Readonly<RunAccumulatorStats> | null {
+    return this.accumulator;
+  }
+
+  public reset(): void {
+    this.accumulator = null;
+    this.pipelineRunning = false;
+    this.completionPromise = null;
+    this.completedIdentity = null;
+    this.cachedIntegrityStatus = null;
+    this.cachedSignature = null;
+    this.cachedScore = null;
+    this.cachedReward = null;
+  }
+
+  // ── INTERNAL PIPELINE ──────────────────────────────────────────
+
+  private async completeRunInternal(params: {
+    outcome: RunOutcome;
+    finalNetWorth: number;
+  }): Promise<RunIdentity | null> {
+    if (!this.accumulator) {
+      return null;
+    }
+
     if (this.pipelineRunning) {
       console.error('[SovereigntyEngine] Pipeline already running — duplicate completeRun call ignored');
       return null;
     }
 
-    this.pipelineRunning                = true;
-    this.accumulator.completedAt        = Date.now();
-    this.accumulator.outcome            = params.outcome;
-    this.accumulator.finalNetWorth      = params.finalNetWorth;
+    this.pipelineRunning = true;
 
-    const runId = this.accumulator.runId;
+    const acc = this.accumulator;
+    acc.completedAt = Date.now();
+    acc.outcome = params.outcome;
+    acc.finalNetWorth = this.normalizeFiniteNumber(params.finalNetWorth, 0);
+    const runId = acc.runId;
+
+    let currentStep: 1 | 2 | 3 = 1;
 
     try {
-      // ─── STEP 1: INTEGRITY CHECK ─────────────────────────────────
-      const integrityResult = await this.integrityChkr.verify(this.accumulator);
+      let integrityStatus = this.cachedIntegrityStatus;
 
-      if (integrityResult.status === 'TAMPERED') {
-        // Emit a failure notification but do NOT abort.
-        // TAMPERED runs still get a proof_hash and a grade record.
-        // Aborting would trap the player in an unresolvable UI state.
-        this.emitFailure(runId, 1, `Tick stream tampered: ${integrityResult.reason ?? 'unknown'}`);
+      if (!integrityStatus) {
+        const integrityResult = await this.integrityChkr.verify(acc);
+        integrityStatus = integrityResult.status;
+        this.cachedIntegrityStatus = integrityStatus;
+
+        if (integrityStatus === 'TAMPERED') {
+          this.emitFailure(
+            runId,
+            1,
+            `Tick stream tampered: ${integrityResult.reason ?? 'unknown reason'}`,
+          );
+        }
       }
 
-      // ─── STEP 2: PROOF HASH GENERATION ───────────────────────────
-      const proofHash = await this.proofGen.generate({
-        seed:               this.accumulator.seed,
-        tickStreamChecksum: integrityResult.tickStreamChecksum,
-        outcome:            params.outcome,
-        finalNetWorth:      params.finalNetWorth,
-        userId:             this.accumulator.userId,
-      });
+      currentStep = 2;
 
-      const signature = this.proofGen.buildSignature({
-        proofHash,
-        accumulator:     this.accumulator,
-        integrityStatus: integrityResult.status,
-      });
+      if (!this.cachedSignature) {
+        const integrityResult = await this.integrityChkr.verify(acc);
+        const proofHash = await this.proofGen.generate({
+          seed: acc.seed,
+          tickStreamChecksum: integrityResult.tickStreamChecksum,
+          outcome: params.outcome,
+          finalNetWorth: acc.finalNetWorth,
+          userId: acc.userId,
+        });
 
-      // ─── STEP 3: GRADE ASSIGNMENT + REWARD DISPATCH ───────────────
-      const score  = this.gradeAssigner.computeScore(this.accumulator);
-      const reward = await this.gradeAssigner.dispatchReward({
-        runId,
-        userId: this.accumulator.userId,
-        score,
-      });
+        this.cachedSignature = this.proofGen.buildSignature({
+          proofHash,
+          accumulator: acc,
+          integrityStatus,
+        });
+      }
+
+      currentStep = 3;
+
+      if (!this.cachedScore) {
+        this.cachedScore = this.gradeAssigner.computeScore(acc);
+      }
+
+      if (!this.cachedReward) {
+        this.cachedReward = await this.gradeAssigner.dispatchReward({
+          runId,
+          userId: acc.userId,
+          score: this.cachedScore,
+        });
+      }
 
       const identity: RunIdentity = {
-        signature,
-        score,
-        integrityStatus: integrityResult.status,
+        signature: this.cachedSignature,
+        score: this.cachedScore,
+        integrityStatus,
       };
 
-      // ─── EMIT RUN_COMPLETED ───────────────────────────────────────
       const payload: RunCompletedPayload = {
         runId,
-        proofHash,
-        grade:            score.grade,
-        sovereigntyScore: score.finalScore,
-        integrityStatus:  integrityResult.status,
-        reward,
+        proofHash: identity.signature.proofHash,
+        grade: identity.score.grade,
+        sovereigntyScore: identity.score.finalScore,
+        integrityStatus: identity.integrityStatus,
+        reward: this.cachedReward,
       };
-      this.eventBus.emit('RUN_COMPLETED', payload);
+
+      this.emit('RUN_COMPLETED', payload);
+      this.completedIdentity = identity;
 
       return identity;
-
-    } catch (err) {
-      const reason = err instanceof Error ? err.message : String(err);
-      this.emitFailure(runId, 2, `Pipeline exception: ${reason}`);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      this.emitFailure(runId, currentStep, `Pipeline exception: ${reason}`);
       return null;
-
     } finally {
-      // Always release the lock — even if we returned null above.
       this.pipelineRunning = false;
     }
   }
 
-  // ══════════════════════════════════════════════════════════════════
-  // SECTION 2 — PUBLIC ACCESSORS
-  // ══════════════════════════════════════════════════════════════════
+  // ── HASHING ────────────────────────────────────────────────────
 
-  /**
-   * Read-only view of the current accumulator.
-   * Consumed by EngineOrchestrator to populate RunStateSnapshot if needed.
-   * Returns null if no run is active.
-   */
-  public getCurrentRunStats(): Readonly<RunAccumulatorStats> | null {
-    return this.accumulator;
-  }
-
-  /**
-   * Reset all state for a subsequent run.
-   * Called by EngineOrchestrator on RUN_ENDED or before initRun() on replay.
-   */
-  public reset(): void {
-    this.accumulator    = null;
-    this.pipelineRunning = false;
-  }
-
-  // ══════════════════════════════════════════════════════════════════
-  // SECTION 3 — PRIVATE HELPERS
-  // ══════════════════════════════════════════════════════════════════
-
-  /**
-   * Compute a deterministic tick hash from snapshot fields.
-   * SYNCHRONOUS — CRC32 only. SHA-256 is handled post-run.
-   *
-   * Input format: tickIndex|pressureScore(4dp)|shieldAvg(2dp)|netWorth(2dp)|haterHeat
-   * All fields pipe-separated, numeric precision fixed to prevent float drift.
-   */
-  private computeTickHash(snap: RunStateSnapshot): string {
+  private computeTickHash(params: {
+    tickIndex: number;
+    pressureScore: number;
+    shieldAvgIntegrityPct: number;
+    netWorth: number;
+    haterHeat: number;
+  }): string {
     const input = [
-      snap.tickIndex,
-      snap.pressureScore.toFixed(4),
-      snap.shieldAvgIntegrityPct.toFixed(2),
-      snap.netWorth.toFixed(2),
-      snap.haterHeat,
+      params.tickIndex,
+      params.pressureScore.toFixed(4),
+      params.shieldAvgIntegrityPct.toFixed(2),
+      params.netWorth.toFixed(2),
+      Math.trunc(params.haterHeat),
     ].join('|');
+
     return ProofGenerator.crc32hex(input);
   }
 
-  /**
-   * Emit PROOF_VERIFICATION_FAILED with step number and reason.
-   * Does NOT throw — pipeline decides whether to continue or return null.
-   */
+  // ── SNAPSHOT EXTRACTION ────────────────────────────────────────
+
+  private extractTickIndex(snapshot: RunStateSnapshot): number {
+    return Math.max(
+      0,
+      Math.trunc(
+        this.firstNumber(snapshot, [
+          ['tickIndex'],
+          ['tick'],
+        ], this.accumulator?.tickSnapshots.length ?? 0),
+      ),
+    );
+  }
+
+  private extractPressureScore(snapshot: RunStateSnapshot): number {
+    return this.normalizeFiniteNumber(
+      this.firstNumber(snapshot, [
+        ['pressureScore'],
+        ['pressure', 'score'],
+      ], 0),
+      0,
+    );
+  }
+
+  private extractShieldAvgIntegrityPct(snapshot: RunStateSnapshot): number {
+    const value = this.firstNumber(snapshot, [
+      ['shieldAvgIntegrityPct'],
+      ['shieldAvgIntegrity'],
+      ['shields', 'overallIntegrityPct'],
+      ['shield', 'overallIntegrityPct'],
+    ], 0);
+
+    return this.clamp(this.normalizeFiniteNumber(value, 0), 0, 100);
+  }
+
+  private extractNetWorth(snapshot: RunStateSnapshot): number {
+    return this.normalizeFiniteNumber(
+      this.firstNumber(snapshot, [
+        ['netWorth'],
+        ['economy', 'netWorth'],
+      ], 0),
+      0,
+    );
+  }
+
+  private extractHaterHeat(snapshot: RunStateSnapshot): number {
+    return Math.trunc(
+      this.normalizeFiniteNumber(
+        this.firstNumber(snapshot, [
+          ['haterHeat'],
+          ['battle', 'haterHeat'],
+        ], 0),
+        0,
+      ),
+    );
+  }
+
+  private extractActiveCascadeChains(snapshot: RunStateSnapshot): number {
+    const direct = this.firstNumber(snapshot, [
+      ['activeCascadeChains'],
+      ['cascade', 'activeCascadeChains'],
+    ], Number.NaN);
+
+    if (Number.isFinite(direct)) {
+      return Math.max(0, Math.trunc(direct));
+    }
+
+    const arrayCount = this.firstArrayLength(snapshot, [
+      ['activeCascades'],
+      ['cascade', 'activeCascades'],
+      ['cascade', 'activeChains'],
+    ]);
+
+    return arrayCount;
+  }
+
+  private extractHaterAttemptsThisTick(snapshot: RunStateSnapshot): number {
+    return Math.max(0, Math.trunc(this.firstNumber(snapshot, [
+      ['haterAttemptsThisTick'],
+      ['battle', 'haterAttemptsThisTick'],
+      ['telemetry', 'haterAttemptsThisTick'],
+    ], 0)));
+  }
+
+  private extractHaterBlockedThisTick(snapshot: RunStateSnapshot): number {
+    return Math.max(0, Math.trunc(this.firstNumber(snapshot, [
+      ['haterBlockedThisTick'],
+      ['battle', 'haterBlockedThisTick'],
+      ['telemetry', 'haterBlockedThisTick'],
+    ], 0)));
+  }
+
+  private extractHaterDamagedThisTick(snapshot: RunStateSnapshot): number {
+    return Math.max(0, Math.trunc(this.firstNumber(snapshot, [
+      ['haterDamagedThisTick'],
+      ['battle', 'haterDamagedThisTick'],
+      ['telemetry', 'haterDamagedThisTick'],
+    ], 0)));
+  }
+
+  private extractCascadesTriggeredThisTick(snapshot: RunStateSnapshot): number {
+    return Math.max(0, Math.trunc(this.firstNumber(snapshot, [
+      ['cascadesTriggeredThisTick'],
+      ['cascade', 'cascadesTriggeredThisTick'],
+      ['telemetry', 'cascadesTriggeredThisTick'],
+    ], 0)));
+  }
+
+  private extractCascadesBrokenThisTick(snapshot: RunStateSnapshot): number {
+    return Math.max(0, Math.trunc(this.firstNumber(snapshot, [
+      ['cascadesBrokenThisTick'],
+      ['cascade', 'cascadesBrokenThisTick'],
+      ['telemetry', 'cascadesBrokenThisTick'],
+    ], 0)));
+  }
+
+  private extractDecisionRecords(snapshot: RunStateSnapshot): DecisionRecord[] {
+    const raw = this.firstArray(snapshot, [
+      ['decisionsThisTick'],
+      ['telemetry', 'decisionsThisTick'],
+      ['decisions'],
+    ]) ?? [];
+
+    const decisions: DecisionRecord[] = [];
+
+    for (const entry of raw) {
+      const normalized = this.normalizeDecisionRecord(entry);
+      if (normalized) {
+        decisions.push(normalized);
+      }
+    }
+
+    return decisions;
+  }
+
+  private normalizeDecisionRecord(entry: unknown): DecisionRecord | null {
+    const value = this.toRecord(entry);
+    if (!value) {
+      return null;
+    }
+
+    const cardId = typeof value.cardId === 'string' && value.cardId.length > 0
+      ? value.cardId
+      : 'unknown_card';
+
+    const decisionWindowMs = this.positiveFiniteNumber(value.decisionWindowMs, 1_000);
+    const resolvedInMs = this.clamp(
+      this.normalizeFiniteNumber(this.asNumber(value.resolvedInMs), decisionWindowMs),
+      0,
+      decisionWindowMs,
+    );
+
+    const wasAutoResolved = Boolean(value.wasAutoResolved);
+    const wasOptimalChoice = Boolean(value.wasOptimalChoice);
+
+    let speedScore = this.asNumber(value.speedScore);
+    if (!Number.isFinite(speedScore) || speedScore < 0 || speedScore > 1) {
+      if (wasAutoResolved) {
+        speedScore = 0;
+      } else {
+        const timeUsedPct = resolvedInMs / decisionWindowMs;
+        speedScore = wasOptimalChoice
+          ? Math.max(0.3, 1.0 - timeUsedPct * 0.7)
+          : Math.max(0.0, 0.5 - timeUsedPct * 0.3);
+      }
+    }
+
+    return {
+      cardId,
+      decisionWindowMs,
+      resolvedInMs,
+      wasAutoResolved,
+      wasOptimalChoice,
+      speedScore: this.clamp(speedScore, 0, 1),
+    };
+  }
+
+  // ── EVENT EMISSION ─────────────────────────────────────────────
+
   private emitFailure(runId: string, step: 1 | 2 | 3, reason: string): void {
     const payload: ProofVerificationFailedPayload = { runId, step, reason };
-    this.eventBus.emit('PROOF_VERIFICATION_FAILED', payload);
+    this.emit('PROOF_VERIFICATION_FAILED', payload);
     console.error(`[SovereigntyEngine] Step ${step} failure — ${reason}`);
+  }
+
+  private emit(eventName: string, payload: Record<string, unknown>): void {
+    this.eventBus.emit(eventName, payload);
+  }
+
+  // ── GENERIC HELPERS ────────────────────────────────────────────
+
+  private firstNumber(
+    source: unknown,
+    paths: ReadonlyArray<ReadonlyArray<string>>,
+    fallback: number,
+  ): number {
+    for (const path of paths) {
+      const value = this.readPath(source, path);
+      const asNumber = this.asNumber(value);
+      if (Number.isFinite(asNumber)) {
+        return asNumber;
+      }
+    }
+    return fallback;
+  }
+
+  private firstArray(
+    source: unknown,
+    paths: ReadonlyArray<ReadonlyArray<string>>,
+  ): unknown[] | null {
+    for (const path of paths) {
+      const value = this.readPath(source, path);
+      if (Array.isArray(value)) {
+        return value;
+      }
+    }
+    return null;
+  }
+
+  private firstArrayLength(
+    source: unknown,
+    paths: ReadonlyArray<ReadonlyArray<string>>,
+  ): number {
+    const array = this.firstArray(source, paths);
+    return array ? array.length : 0;
+  }
+
+  private readPath(source: unknown, path: ReadonlyArray<string>): unknown {
+    let cursor: unknown = source;
+
+    for (const segment of path) {
+      const record = this.toRecord(cursor);
+      if (!record || !(segment in record)) {
+        return undefined;
+      }
+      cursor = record[segment];
+    }
+
+    return cursor;
+  }
+
+  private toRecord(value: unknown): SnapshotRecord | null {
+    if (typeof value !== 'object' || value === null) {
+      return null;
+    }
+    return value as SnapshotRecord;
+  }
+
+  private asNumber(value: unknown): number {
+    return typeof value === 'number' ? value : Number.NaN;
+  }
+
+  private normalizeFiniteNumber(value: number, fallback: number): number {
+    return Number.isFinite(value) ? value : fallback;
+  }
+
+  private positiveFiniteNumber(value: unknown, fallback: number): number {
+    const num = this.asNumber(value);
+    return Number.isFinite(num) && num > 0 ? num : fallback;
+  }
+
+  private clamp(value: number, min: number, max: number): number {
+    return Math.min(max, Math.max(min, value));
   }
 }
