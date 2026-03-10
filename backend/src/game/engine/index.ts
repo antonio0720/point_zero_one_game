@@ -20,6 +20,9 @@ export * from './deterministic_rng';
 export * from './replay_engine';
 export * from './run_runtime';
 export * from './seed_generator';
+export * from './core/ProofSealer';
+export * from './core/ThreatRoutingService';
+export * from './core/ModeRuleCompiler';
 export * as TurnResolver from './turn_resolver';
 
 export * as CardEffectsExecutor from './card_effects_executor';
