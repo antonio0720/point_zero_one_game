@@ -3,10 +3,11 @@
  * /backend/src/game/engine/shield/AttackRouter.ts
  *
  * Doctrine:
- * - routing belongs here, not in battle, card, or shield runtime branches
- * - HATER-INJECTION-style targeting is modeled through weakest-layer routing
- * - targetLayer on AttackEvent is treated as a hint, not the full doctrine
- * - fallback selection is deterministic and replay-safe
+ * - routing belongs here and nowhere else
+ * - current backend primitives are category-based, so richer frontend doctrine
+ *   is reconstructed from category + targetLayer hint + note tags
+ * - weakest-layer attacks are computed fresh at resolution time
+ * - fallback selection is deterministic and does not mutate state
  */
 
 import type {
@@ -16,20 +17,22 @@ import type {
 } from '../core/GamePrimitives';
 import type { ShieldLayerState } from '../core/RunStateSnapshot';
 import {
-  inferCriticalTags,
-  isShieldLayerId,
+  layerOrderIndex,
+  normalizeShieldNoteTags,
+  resolveShieldAlias,
   SHIELD_LAYER_ORDER,
   type RoutedAttack,
+  type ShieldDoctrineAttackType,
 } from './types';
 
 export class AttackRouter {
   public order(attacks: readonly AttackEvent[]): AttackEvent[] {
     return [...attacks].sort((left, right) => {
-      const categoryDelta =
+      const priorityDelta =
         this.priority(right.category) - this.priority(left.category);
 
-      if (categoryDelta !== 0) {
-        return categoryDelta;
+      if (priorityDelta !== 0) {
+        return priorityDelta;
       }
 
       const criticalDelta =
@@ -38,6 +41,11 @@ export class AttackRouter {
 
       if (criticalDelta !== 0) {
         return criticalDelta;
+      }
+
+      const createdAtDelta = left.createdAtTick - right.createdAtTick;
+      if (createdAtDelta !== 0) {
+        return createdAtDelta;
       }
 
       const magnitudeDelta = right.magnitude - left.magnitude;
@@ -53,27 +61,27 @@ export class AttackRouter {
     attack: AttackEvent,
     currentLayers: readonly ShieldLayerState[],
   ): RoutedAttack {
-    const noteTags = inferCriticalTags(attack.notes);
-    const weakest = this.weakestTwo(currentLayers);
+    const noteTags = normalizeShieldNoteTags(attack.notes);
+    const doctrineType = this.resolveDoctrineType(attack, noteTags);
 
     const hintedPrimary =
       attack.targetLayer !== 'DIRECT' ? attack.targetLayer : null;
 
-    const routed =
-      noteTags.includes('weakest-layer') ||
-      noteTags.includes('hater-injection') ||
-      attack.category === 'HEAT'
-        ? weakest
-        : this.routeByCategory(attack.category, hintedPrimary);
+    const route =
+      doctrineType === 'HATER_INJECTION'
+        ? this.weakestTwo(currentLayers)
+        : this.routeByDoctrineType(doctrineType, hintedPrimary);
 
     return {
       attackId: attack.attackId,
       source: attack.source,
       category: attack.category,
+      doctrineType,
       requestedLayer: attack.targetLayer,
-      targetLayer: routed.primary,
-      fallbackLayer: routed.fallback,
+      targetLayer: route.primary,
+      fallbackLayer: route.fallback,
       magnitude: Math.max(0, Math.round(attack.magnitude)),
+      createdAtTick: attack.createdAtTick,
       noteTags,
       bypassDeflection: this.hasCriticalSemantics(attack.notes),
     };
@@ -98,42 +106,101 @@ export class AttackRouter {
     }
 
     for (let index = SHIELD_LAYER_ORDER.length - 1; index >= 0; index -= 1) {
-      const layerId = SHIELD_LAYER_ORDER[index];
-      const candidate = stateById.get(layerId);
+      const candidate = stateById.get(SHIELD_LAYER_ORDER[index]);
       if (candidate !== undefined && !candidate.breached) {
-        return layerId;
+        return candidate.layerId;
       }
     }
 
     return 'L4';
   }
 
-  private routeByCategory(
-    category: AttackCategory,
-    hintedPrimary: ShieldLayerId | null,
-  ): { primary: ShieldLayerId; fallback: ShieldLayerId | null } {
-    if (hintedPrimary !== null) {
-      return {
-        primary: hintedPrimary,
-        fallback: this.defaultFallback(hintedPrimary, category),
-      };
+  private resolveDoctrineType(
+    attack: AttackEvent,
+    noteTags: readonly string[],
+  ): ShieldDoctrineAttackType {
+    const aliased = resolveShieldAlias(noteTags);
+    if (aliased !== null) {
+      return aliased;
     }
 
-    switch (category) {
+    switch (attack.category) {
       case 'EXTRACTION':
+        return 'FINANCIAL_SABOTAGE';
+
       case 'DRAIN':
-        return { primary: 'L1', fallback: 'L2' };
+        return noteTags.includes('expense')
+          ? 'EXPENSE_INJECTION'
+          : 'FINANCIAL_SABOTAGE';
 
       case 'DEBT':
-        return { primary: 'L2', fallback: 'L3' };
+        return 'DEBT_ATTACK';
 
       case 'LOCK':
-        return { primary: 'L3', fallback: 'L4' };
+        return noteTags.includes('opportunity')
+          ? 'OPPORTUNITY_KILL'
+          : 'ASSET_STRIP';
 
       case 'BREACH':
-        return { primary: 'L4', fallback: 'L3' };
+        return noteTags.includes('regulatory') ||
+          noteTags.includes('audit') ||
+          noteTags.includes('compliance')
+          ? 'REGULATORY_ATTACK'
+          : 'REPUTATION_ATTACK';
 
       case 'HEAT':
+        return attack.targetLayer === 'DIRECT'
+          ? 'HATER_INJECTION'
+          : 'REPUTATION_ATTACK';
+
+      default:
+        return 'FINANCIAL_SABOTAGE';
+    }
+  }
+
+  private routeByDoctrineType(
+    doctrineType: ShieldDoctrineAttackType,
+    hintedPrimary: ShieldLayerId | null,
+  ): { primary: ShieldLayerId; fallback: ShieldLayerId | null } {
+    const canonical = this.canonicalRoute(doctrineType);
+
+    if (hintedPrimary === null) {
+      return canonical;
+    }
+
+    return {
+      primary: hintedPrimary,
+      fallback:
+        hintedPrimary === canonical.primary
+          ? canonical.fallback
+          : this.defaultFallback(hintedPrimary),
+    };
+  }
+
+  private canonicalRoute(
+    doctrineType: ShieldDoctrineAttackType,
+  ): { primary: ShieldLayerId; fallback: ShieldLayerId | null } {
+    switch (doctrineType) {
+      case 'FINANCIAL_SABOTAGE':
+      case 'EXPENSE_INJECTION':
+        return { primary: 'L1', fallback: 'L2' };
+
+      case 'DEBT_ATTACK':
+        return { primary: 'L2', fallback: 'L3' };
+
+      case 'ASSET_STRIP':
+        return { primary: 'L3', fallback: 'L4' };
+
+      case 'REPUTATION_ATTACK':
+        return { primary: 'L4', fallback: 'L1' };
+
+      case 'REGULATORY_ATTACK':
+        return { primary: 'L4', fallback: 'L3' };
+
+      case 'OPPORTUNITY_KILL':
+        return { primary: 'L3', fallback: 'L2' };
+
+      case 'HATER_INJECTION':
         return { primary: 'L4', fallback: 'L3' };
 
       default:
@@ -149,10 +216,7 @@ export class AttackRouter {
         return left.integrityRatio - right.integrityRatio;
       }
 
-      return (
-        SHIELD_LAYER_ORDER.indexOf(right.layerId) -
-        SHIELD_LAYER_ORDER.indexOf(left.layerId)
-      );
+      return layerOrderIndex(right.layerId) - layerOrderIndex(left.layerId);
     });
 
     return {
@@ -161,10 +225,7 @@ export class AttackRouter {
     };
   }
 
-  private defaultFallback(
-    primary: ShieldLayerId,
-    category: AttackCategory,
-  ): ShieldLayerId | null {
+  private defaultFallback(primary: ShieldLayerId): ShieldLayerId | null {
     switch (primary) {
       case 'L1':
         return 'L2';
@@ -173,14 +234,14 @@ export class AttackRouter {
       case 'L3':
         return 'L4';
       case 'L4':
-        return category === 'BREACH' ? 'L3' : 'L1';
+        return 'L3';
       default:
         return null;
     }
   }
 
   private hasCriticalSemantics(notes: readonly string[]): boolean {
-    return inferCriticalTags(notes).some(
+    return normalizeShieldNoteTags(notes).some(
       (tag) =>
         tag === 'critical' ||
         tag === 'critical-hit' ||

@@ -4,9 +4,9 @@
  *
  * Doctrine:
  * - layer state updates are pure and deterministic
- * - no overflow damage bleeds into the next layer
- * - regen is post-damage and skips the same tick a layer breaches
- * - L4 breach never directly calls cascade; it only prepares state for the resolver
+ * - damage never overflows across shield layers
+ * - regen happens after the tick's attacks and skips the same tick a layer breaches
+ * - all calculations are replay-safe and snapshot-driven
  */
 
 import type { ShieldLayerId } from '../core/GamePrimitives';
@@ -14,9 +14,11 @@ import type { ShieldLayerState } from '../core/RunStateSnapshot';
 import {
   buildShieldLayerState,
   getLayerConfig,
+  layerOrderIndex,
   SHIELD_CONSTANTS,
   SHIELD_LAYER_ORDER,
   type DamageResolution,
+  type RepairLayerId,
 } from './types';
 
 export class ShieldLayerManager {
@@ -65,7 +67,7 @@ export class ShieldLayerManager {
 
   public applyRepair(
     layers: readonly ShieldLayerState[],
-    layerId: ShieldLayerId | 'ALL',
+    layerId: RepairLayerId,
     amount: number,
     tick: number,
   ): {
@@ -73,13 +75,17 @@ export class ShieldLayerManager {
     readonly applied: number;
   } {
     if (amount <= 0) {
-      return { layers, applied: 0 };
+      return {
+        layers,
+        applied: 0,
+      };
     }
 
     let applied = 0;
 
     const nextLayers = layers.map((layer) => {
-      if (layerId !== 'ALL' && layer.layerId !== layerId) {
+      const shouldApply = layerId === 'ALL' || layer.layerId === layerId;
+      if (!shouldApply) {
         return layer;
       }
 
@@ -130,7 +136,7 @@ export class ShieldLayerManager {
     const postHitIntegrity = Math.max(0, preHitIntegrity - effectiveDamage);
     const breached = preHitIntegrity > 0 && postHitIntegrity === 0;
     const wasAlreadyBreached = preHitIntegrity === 0;
-    const blocked = !breached;
+    const blocked = postHitIntegrity > 0;
 
     const nextLayers = layers.map((layer) => {
       if (layer.layerId !== targetLayer) {
@@ -189,25 +195,23 @@ export class ShieldLayerManager {
     });
   }
 
-  public weakestLayerId(layers: readonly ShieldLayerState[]): ShieldLayerId {
+  public weakestLayerId(
+    layers: readonly ShieldLayerState[],
+  ): ShieldLayerId {
     return [...layers].sort((left, right) => {
       if (left.integrityRatio !== right.integrityRatio) {
         return left.integrityRatio - right.integrityRatio;
       }
 
-      return (
-        SHIELD_LAYER_ORDER.indexOf(right.layerId) -
-        SHIELD_LAYER_ORDER.indexOf(left.layerId)
-      );
+      return layerOrderIndex(right.layerId) - layerOrderIndex(left.layerId);
     })[0]?.layerId ?? 'L4';
   }
 
-  public weakestLayerRatio(layers: readonly ShieldLayerState[]): number {
-    const weakest = layers.find(
-      (layer) => layer.layerId === this.weakestLayerId(layers),
-    );
-
-    return weakest?.integrityRatio ?? 0;
+  public weakestLayerRatio(
+    layers: readonly ShieldLayerState[],
+  ): number {
+    const weakestId = this.weakestLayerId(layers);
+    return layers.find((layer) => layer.layerId === weakestId)?.integrityRatio ?? 0;
   }
 
   public overallIntegrityRatio(
@@ -221,10 +225,30 @@ export class ShieldLayerManager {
     return total / layers.length;
   }
 
-  public isFortified(layers: readonly ShieldLayerState[]): boolean {
+  public isFortified(
+    layers: readonly ShieldLayerState[],
+  ): boolean {
     return layers.every(
       (layer) =>
         layer.integrityRatio >= SHIELD_CONSTANTS.FORTIFIED_THRESHOLD,
+    );
+  }
+
+  public getLayer(
+    layers: readonly ShieldLayerState[],
+    layerId: ShieldLayerId,
+  ): ShieldLayerState {
+    const layer = layers.find((candidate) => candidate.layerId === layerId);
+    if (layer === undefined) {
+      throw new Error(`Unknown shield layer: ${layerId}`);
+    }
+
+    return layer;
+  }
+
+  public createInitialLayers(): readonly ShieldLayerState[] {
+    return SHIELD_LAYER_ORDER.map((layerId) =>
+      buildShieldLayerState(layerId, getLayerConfig(layerId).max, null, null),
     );
   }
 
@@ -236,7 +260,7 @@ export class ShieldLayerManager {
       integrityRatio >= 1
         ? SHIELD_CONSTANTS.DEFLECTION_FULL_INTEGRITY
         : integrityRatio >= 0.5
-          ? (integrityRatio - 0.5) * 0.2
+          ? (integrityRatio - 0.5) * 0.20
           : 0;
 
     const bonus = fortified

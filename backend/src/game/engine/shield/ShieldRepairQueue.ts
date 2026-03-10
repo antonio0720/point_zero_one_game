@@ -3,10 +3,10 @@
  * /backend/src/game/engine/shield/ShieldRepairQueue.ts
  *
  * Doctrine:
- * - repair is queued, not instant
- * - jobs survive incoming attacks
- * - per-layer queue depth is capped
- * - replay determinism matters more than convenience
+ * - active repair is queued, not instant
+ * - repair jobs survive incoming damage
+ * - queue limits are enforced per target layer
+ * - delivery is deterministic tick by tick
  */
 
 import { randomUUID } from 'node:crypto';
@@ -39,18 +39,18 @@ export class ShieldRepairQueue {
       return null;
     }
 
-    const targetLayers =
+    const blockedLayers =
       input.layerId === 'ALL'
         ? SHIELD_LAYER_ORDER
         : [input.layerId];
 
-    const queueBlocked = targetLayers.some(
+    const wouldOverflow = blockedLayers.some(
       (layerId) =>
         this.activeCount(layerId) >=
         SHIELD_CONSTANTS.MAX_ACTIVE_REPAIR_JOBS_PER_LAYER,
     );
 
-    if (queueBlocked) {
+    if (wouldOverflow) {
       return null;
     }
 

@@ -3,16 +3,13 @@
  * /backend/src/game/engine/shield/BreachCascadeResolver.ts
  *
  * Doctrine:
- * - shield never imports or calls CascadeEngine directly
  * - L4 breach is the cascade gate
- * - breach consequences are emitted for downstream engines to consume
+ * - shield emits downstream cascade creation; it never imports CascadeEngine
+ * - cascade crack only reduces outer layer integrity, never increases it
  */
 
 import type { EventBus } from '../core/EventBus';
-import type {
-  EngineEventMap,
-  ShieldLayerId,
-} from '../core/GamePrimitives';
+import type { EngineEventMap, ShieldLayerId } from '../core/GamePrimitives';
 import type { RunStateSnapshot, ShieldLayerState } from '../core/RunStateSnapshot';
 import { ShieldLayerManager } from './ShieldLayerManager';
 import type { CascadeResolution } from './types';
@@ -26,7 +23,7 @@ export class BreachCascadeResolver {
     layers: readonly ShieldLayerState[],
     breachedLayerId: ShieldLayerId,
     tick: number,
-    bus: EventBus<EngineEventMap>,
+    bus: EventBus<EngineEventMap & Record<string, unknown>>,
   ): CascadeResolution {
     if (breachedLayerId !== 'L4') {
       return {

@@ -3,16 +3,19 @@
  * /backend/src/game/engine/shield/ShieldEngine.ts
  *
  * Doctrine:
- * - backend is authoritative
- * - attacks are routed here through AttackRouter
- * - shield damage stays in shield state
- * - direct economy mutation does not happen here
- * - L4 breach emits downstream cascade creation rather than hard-calling cascade logic
+ * - backend shield simulation is authoritative
+ * - shield consumes attacks, applies routed damage, manages repairs, and emits
+ *   downstream breach/cascade surfaces without calling other engines directly
+ * - economy consequences remain outside shield; cascade and card systems react later
+ * - this engine returns EngineTickResult so orchestration gets diagnostics, not just state
  */
 
 import {
   createEngineHealth,
+  createEngineSignal,
   type EngineHealth,
+  type EngineSignal,
+  type EngineTickResult,
   type SimulationEngine,
   type TickContext,
 } from '../core/EngineContracts';
@@ -26,6 +29,12 @@ import { BreachCascadeResolver } from './BreachCascadeResolver';
 import { ShieldLayerManager } from './ShieldLayerManager';
 import { ShieldRepairQueue } from './ShieldRepairQueue';
 import { ShieldUXBridge } from './ShieldUXBridge';
+import {
+  SHIELD_CONSTANTS,
+  type QueueRejection,
+  type RepairJob,
+  type RepairLayerId,
+} from './types';
 
 export class ShieldEngine implements SimulationEngine {
   public readonly engineId = 'shield' as const;
@@ -35,6 +44,10 @@ export class ShieldEngine implements SimulationEngine {
   private readonly repairs = new ShieldRepairQueue();
   private readonly breachResolver = new BreachCascadeResolver();
   private readonly ux = new ShieldUXBridge();
+
+  private readonly breachHistory: string[] = [];
+  private readonly cascadeHistory: string[] = [];
+  private pendingQueueRejections: QueueRejection[] = [];
 
   private health: EngineHealth = createEngineHealth(
     this.engineId,
@@ -46,6 +59,9 @@ export class ShieldEngine implements SimulationEngine {
   public reset(): void {
     this.repairs.reset();
     this.breachResolver.reset();
+    this.breachHistory.length = 0;
+    this.cascadeHistory.length = 0;
+    this.pendingQueueRejections = [];
     this.health = createEngineHealth(
       this.engineId,
       'HEALTHY',
@@ -54,124 +70,271 @@ export class ShieldEngine implements SimulationEngine {
     );
   }
 
-  public canRun(snapshot: RunStateSnapshot): boolean {
+  public canRun(snapshot: RunStateSnapshot, _context?: TickContext): boolean {
     return snapshot.outcome === null && snapshot.shield.layers.length > 0;
   }
 
-  public tick(snapshot: RunStateSnapshot, context: TickContext): RunStateSnapshot {
-    if (!this.canRun(snapshot)) {
-      return snapshot;
+  public tick(snapshot: RunStateSnapshot, context: TickContext): EngineTickResult {
+    if (!this.canRun(snapshot, context)) {
+      return {
+        snapshot,
+        signals: Object.freeze([
+          createEngineSignal(
+            this.engineId,
+            'INFO',
+            'SHIELD_SKIPPED_TERMINAL_OUTCOME',
+            'Shield engine skipped because run outcome is terminal.',
+            snapshot.tick,
+            [`outcome:${String(snapshot.outcome)}`],
+          ),
+        ]),
+      };
     }
 
-    let nextLayers: readonly ShieldLayerState[] = snapshot.shield.layers;
-    let blocked = snapshot.shield.blockedThisRun;
-    let damaged = snapshot.shield.damagedThisRun;
-    let breaches = snapshot.shield.breachesThisRun;
+    try {
+      const signals: EngineSignal[] = [];
+      const previousLayers = snapshot.shield.layers;
+      const wasFortified = this.layers.isFortified(previousLayers);
 
-    const orderedAttacks = this.router.order(snapshot.battle.pendingAttacks);
+      let nextLayers: readonly ShieldLayerState[] = previousLayers;
+      let blocked = snapshot.shield.blockedThisRun;
+      let damaged = snapshot.shield.damagedThisRun;
+      let breaches = snapshot.shield.breachesThisRun;
 
-    for (const attack of orderedAttacks) {
-      const routed = this.router.resolve(attack, nextLayers);
-      const effectiveTarget = this.router.resolveEffectiveTarget(routed, nextLayers);
-      const fortifiedBeforeHit = this.layers.isFortified(nextLayers);
+      const orderedAttacks = this.router.order(snapshot.battle.pendingAttacks);
 
-      const damage = this.layers.applyDamage(
-        nextLayers,
-        effectiveTarget,
-        routed.magnitude,
-        snapshot.tick,
-        {
-          fortified: fortifiedBeforeHit,
-          bypassDeflection: routed.bypassDeflection,
-        },
-      );
+      for (const attack of orderedAttacks) {
+        const routed = this.router.resolve(attack, nextLayers);
 
-      nextLayers = damage.layers;
-      damaged += 1;
+        if (routed.requestedLayer === 'DIRECT') {
+          signals.push(
+            createEngineSignal(
+              this.engineId,
+              'INFO',
+              'SHIELD_DIRECT_ATTACK_REINTERPRETED',
+              `Direct attack ${attack.attackId} was reinterpreted through shield routing doctrine.`,
+              snapshot.tick,
+              [`category:${routed.category}`, `doctrine:${routed.doctrineType}`],
+            ),
+          );
+        }
 
-      if (damage.blocked) {
-        blocked += 1;
-      }
+        const effectiveTarget = this.router.resolveEffectiveTarget(routed, nextLayers);
+        const fortifiedBeforeHit = this.layers.isFortified(nextLayers);
 
-      if (damage.breached) {
-        breaches += 1;
-
-        const cascade = this.breachResolver.resolve(
-          snapshot,
+        const damage = this.layers.applyDamage(
           nextLayers,
-          damage.actualLayerId,
+          effectiveTarget,
+          routed.magnitude,
           snapshot.tick,
-          context.bus,
+          {
+            fortified: fortifiedBeforeHit,
+            bypassDeflection: routed.bypassDeflection,
+          },
         );
 
-        nextLayers = cascade.layers;
+        nextLayers = damage.layers;
 
-        this.ux.emitLayerBreached(context.bus, {
-          attackId: attack.attackId,
-          layerId: damage.actualLayerId,
-          tick: snapshot.tick,
-          cascadesTriggered: cascade.triggered ? 1 : 0,
-        });
+        if (damage.effectiveDamage > 0) {
+          damaged += 1;
+        }
+
+        if (damage.blocked) {
+          blocked += 1;
+        }
+
+        if (damage.breached) {
+          breaches += 1;
+          this.pushBounded(
+            this.breachHistory,
+            `${snapshot.tick}:${damage.actualLayerId}:${attack.attackId}`,
+          );
+
+          let cascadesTriggered = 0;
+          let cascadeTemplateId: string | null = null;
+          let cascadeChainId: string | null = null;
+
+          if (damage.actualLayerId === 'L4') {
+            const cascade = this.breachResolver.resolve(
+              snapshot,
+              nextLayers,
+              damage.actualLayerId,
+              snapshot.tick,
+              context.bus,
+            );
+
+            nextLayers = cascade.layers;
+            cascadesTriggered = cascade.triggered ? 1 : 0;
+            cascadeTemplateId = cascade.templateId;
+            cascadeChainId = cascade.chainId;
+
+            if (cascade.triggered && cascadeTemplateId !== null && cascadeChainId !== null) {
+              this.pushBounded(
+                this.cascadeHistory,
+                `${snapshot.tick}:${cascadeTemplateId}:${cascadeChainId}`,
+              );
+              signals.push(
+                this.ux.buildCascadeSignal(
+                  cascadeTemplateId,
+                  cascadeChainId,
+                  snapshot.tick,
+                ),
+              );
+            }
+          }
+
+          this.ux.emitLayerBreached(context.bus, {
+            attackId: attack.attackId,
+            layerId: damage.actualLayerId,
+            tick: snapshot.tick,
+            cascadesTriggered,
+          });
+
+          signals.push(
+            createEngineSignal(
+              this.engineId,
+              damage.actualLayerId === 'L4' ? 'ERROR' : 'WARN',
+              'SHIELD_LAYER_BREACHED',
+              `${damage.actualLayerId} breached after ${routed.doctrineType}.`,
+              snapshot.tick,
+              [
+                `attack:${attack.attackId}`,
+                `layer:${damage.actualLayerId}`,
+                `pre:${String(damage.preHitIntegrity)}`,
+                `post:${String(damage.postHitIntegrity)}`,
+                `doctrine:${routed.doctrineType}`,
+              ],
+            ),
+          );
+        }
       }
-    }
 
-    const dueRepairs = this.repairs.due(snapshot.tick);
-    for (const repair of dueRepairs) {
-      const applied = this.layers.applyRepair(
-        nextLayers,
-        repair.layerId,
-        repair.amount,
-        snapshot.tick,
+      const dueRepairs = this.repairs.due(snapshot.tick);
+      for (const repair of dueRepairs) {
+        const applied = this.layers.applyRepair(
+          nextLayers,
+          repair.layerId,
+          repair.amount,
+          snapshot.tick,
+        );
+
+        nextLayers = applied.layers;
+      }
+
+      nextLayers = this.layers.regenerate(nextLayers, snapshot.tick);
+
+      const weakestLayerId = this.layers.weakestLayerId(nextLayers);
+      const weakestLayerRatio = this.layers.weakestLayerRatio(nextLayers);
+      const isFortified = this.layers.isFortified(nextLayers);
+
+      const nextSnapshot: RunStateSnapshot = {
+        ...snapshot,
+        battle: {
+          ...snapshot.battle,
+          pendingAttacks: [],
+        },
+        shield: {
+          layers: nextLayers,
+          weakestLayerId,
+          weakestLayerRatio,
+          blockedThisRun: blocked,
+          damagedThisRun: damaged,
+          breachesThisRun: breaches,
+          repairQueueDepth: this.repairs.size(),
+        },
+      };
+
+      signals.push(
+        ...this.ux.buildTransitionSignals(previousLayers, nextLayers, snapshot.tick),
+      );
+      signals.push(
+        ...this.ux.buildFortifiedSignals(wasFortified, isFortified, snapshot.tick),
       );
 
-      nextLayers = applied.layers;
+      if (this.pendingQueueRejections.length > 0) {
+        signals.push(
+          ...this.ux.buildQueueRejectionSignals(this.pendingQueueRejections),
+        );
+        this.pendingQueueRejections = [];
+      }
+
+      if (
+        orderedAttacks.length === 0 &&
+        dueRepairs.length === 0 &&
+        this.repairs.size() === 0
+      ) {
+        signals.push(
+          createEngineSignal(
+            this.engineId,
+            'INFO',
+            'SHIELD_IDLE_TICK',
+            'Shield tick completed with no attacks and no active repairs.',
+            snapshot.tick,
+          ),
+        );
+      }
+
+      this.health = createEngineHealth(
+        this.engineId,
+        this.resolveHealthStatus(nextLayers, breaches),
+        context.nowMs,
+        this.buildHealthNotes(nextLayers, weakestLayerId),
+      );
+
+      return {
+        snapshot: nextSnapshot,
+        signals: Object.freeze(signals),
+      };
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : 'Unknown shield engine failure.';
+
+      this.health = createEngineHealth(
+        this.engineId,
+        'FAILED',
+        context.nowMs,
+        [message],
+      );
+
+      throw error;
     }
-
-    nextLayers = this.layers.regenerate(nextLayers, snapshot.tick);
-
-    const weakestLayerId = this.layers.weakestLayerId(nextLayers);
-    const weakestLayerRatio = this.layers.weakestLayerRatio(nextLayers);
-
-    this.health = createEngineHealth(
-      this.engineId,
-      this.resolveHealthStatus(nextLayers, breaches),
-      context.nowMs,
-      this.buildHealthNotes(nextLayers, weakestLayerId),
-    );
-
-    return {
-      ...snapshot,
-      battle: {
-        ...snapshot.battle,
-        pendingAttacks: [],
-      },
-      shield: {
-        layers: nextLayers,
-        weakestLayerId,
-        weakestLayerRatio,
-        blockedThisRun: blocked,
-        damagedThisRun: damaged,
-        breachesThisRun: breaches,
-        repairQueueDepth: this.repairs.size(),
-      },
-    };
   }
 
   public queueRepair(
     tick: number,
-    layerId: ShieldLayerId | 'ALL',
+    layerId: RepairLayerId,
     amount: number,
     durationTicks = 1,
+    source: RepairJob['source'] = 'CARD',
+    tags: readonly string[] = [],
   ): boolean {
-    return (
-      this.repairs.enqueue({
+    const queued = this.repairs.enqueue({
+      tick,
+      layerId,
+      amount,
+      durationTicks,
+      source,
+      tags,
+    });
+
+    if (queued !== null) {
+      return true;
+    }
+
+    this.pendingQueueRejections = [
+      ...this.pendingQueueRejections,
+      {
         tick,
         layerId,
-        amount,
-        durationTicks,
-        source: 'CARD',
-      }) !== null
-    );
+        amount: Math.max(0, Math.round(amount)),
+        durationTicks: Math.max(1, Math.round(durationTicks)),
+        source,
+      },
+    ];
+
+    return false;
   }
 
   public getHealth(): EngineHealth {
@@ -186,6 +349,22 @@ export class ShieldEngine implements SimulationEngine {
     return this.layers.weakestLayerId(snapshot.shield.layers);
   }
 
+  public getCascadeCount(): number {
+    return this.breachResolver.getCascadeCount();
+  }
+
+  public getActiveRepairJobs(): readonly RepairJob[] {
+    return this.repairs.getActiveJobs();
+  }
+
+  public getBreachHistory(): readonly string[] {
+    return Object.freeze([...this.breachHistory]);
+  }
+
+  public getCascadeHistory(): readonly string[] {
+    return Object.freeze([...this.cascadeHistory]);
+  }
+
   private resolveHealthStatus(
     layers: readonly ShieldLayerState[],
     totalBreaches: number,
@@ -197,7 +376,11 @@ export class ShieldEngine implements SimulationEngine {
       return 'FAILED';
     }
 
-    if (weakestRatio < 0.15 || totalBreaches > 0) {
+    if (
+      weakestRatio < SHIELD_CONSTANTS.LOW_WARNING_THRESHOLD ||
+      totalBreaches > 0 ||
+      this.pendingQueueRejections.length > 0
+    ) {
       return 'DEGRADED';
     }
 
@@ -216,6 +399,15 @@ export class ShieldEngine implements SimulationEngine {
       `overallIntegrity=${this.layers.overallIntegrityRatio(layers).toFixed(3)}`,
       `repairQueueDepth=${this.repairs.size()}`,
       `cascadeCount=${this.breachResolver.getCascadeCount()}`,
+      `breachHistory=${this.breachHistory.length}`,
+      `cascadeHistory=${this.cascadeHistory.length}`,
     ];
+  }
+
+  private pushBounded(buffer: string[], value: string): void {
+    buffer.push(value);
+    if (buffer.length > SHIELD_CONSTANTS.MAX_HISTORY_DEPTH) {
+      buffer.shift();
+    }
   }
 }
