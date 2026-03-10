@@ -1,6 +1,6 @@
 /*
  * POINT ZERO ONE — BACKEND ENGINE 15X GENERATOR
- * Generated at: 2026-03-10T01:00:08.825776+00:00
+ * /Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/backend/src/game/engine/battle/BattleEngine.ts
  *
  * Doctrine:
  * - backend becomes the authoritative simulation surface
