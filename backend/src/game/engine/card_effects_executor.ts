@@ -1,5 +1,3 @@
-// backend/src/game/engine/card_effects_executor.ts
-
 import { createHash } from 'node:crypto';
 
 /**
@@ -10,6 +8,7 @@ import { createHash } from 'node:crypto';
  * - Bring backend card execution closer to the frontend/doctrine model without importing frontend code.
  * - Support 4 modes, 12 timing classes, mode overlays, deterministic IDs/hashes, and backend-safe execution.
  * - Remain self-contained so it can be used by replay, tests, orchestration, and projections.
+ * - Preserve immutable public result contracts while allowing safe internal mutation during execution.
  */
 
 export enum GameMode {
@@ -243,6 +242,12 @@ export interface CardEffectExecutionBatchResult {
   readonly playCount: number;
 }
 
+type MutableResourceDelta = {
+  -readonly [K in keyof ResourceDelta]: ResourceDelta[K];
+};
+
+type ResourceDeltaKey = keyof ResourceDelta;
+
 const DEFAULT_MODE_OVERLAY: ModeOverlay = {
   costModifier: 1,
   effectModifier: 1,
@@ -350,12 +355,17 @@ function uniq<T>(values: readonly T[]): T[] {
   return [...new Set(values)];
 }
 
-function stableHash(parts: readonly Array<string | number | boolean | undefined>): string {
-  const payload = parts.filter((part) => part !== undefined).join('|');
+function stableHash(
+  parts: ReadonlyArray<string | number | boolean | undefined>,
+): string {
+  const payload = parts
+    .filter((part): part is string | number | boolean => part !== undefined)
+    .join('|');
+
   return createHash('sha256').update(payload).digest('hex');
 }
 
-function emptyResourceDelta(): ResourceDelta {
+function emptyResourceDelta(): MutableResourceDelta {
   return {
     cash: 0,
     income: 0,
@@ -367,6 +377,40 @@ function emptyResourceDelta(): ResourceDelta {
     battleBudget: 0,
     treasury: 0,
   };
+}
+
+function addResourceDelta(
+  resourceDelta: MutableResourceDelta,
+  key: ResourceDeltaKey,
+  amount: number,
+): void {
+  resourceDelta[key] = round6(resourceDelta[key] + amount);
+}
+
+function freezeResourceDelta(resourceDelta: MutableResourceDelta): ResourceDelta {
+  return Object.freeze({
+    cash: round6(resourceDelta.cash),
+    income: round6(resourceDelta.income),
+    expense: round6(resourceDelta.expense),
+    shield: round6(resourceDelta.shield),
+    heat: round6(resourceDelta.heat),
+    trust: round6(resourceDelta.trust),
+    divergence: round6(resourceDelta.divergence),
+    battleBudget: round6(resourceDelta.battleBudget),
+    treasury: round6(resourceDelta.treasury),
+  });
+}
+
+function freezeStringArray(values: readonly string[]): readonly string[] {
+  return Object.freeze([...values]);
+}
+
+function freezeUniqueStringArray(values: readonly string[]): readonly string[] {
+  return Object.freeze(uniq(values));
+}
+
+function freezeAppliedEffects(values: readonly AppliedEffect[]): readonly AppliedEffect[] {
+  return Object.freeze(values.map((value) => Object.freeze({ ...value })));
 }
 
 export class CardEffectResolver {
@@ -404,7 +448,13 @@ export class CardEffectResolver {
     let drawCount = 0;
 
     const effects: AppliedEffect[] = card.definition.effects.map((effect) => {
-      const finalMagnitude = this.resolveEffectMagnitude(effect, overlay, context, card.definition.tags);
+      const finalMagnitude = this.resolveEffectMagnitude(
+        effect,
+        overlay,
+        context,
+        card.definition.tags,
+      );
+
       const applied: AppliedEffect = {
         op: effect.op,
         baseMagnitude: effect.magnitude,
@@ -415,16 +465,32 @@ export class CardEffectResolver {
         metadata: effect.metadata,
       };
 
-      this.applyEffectSideEffects(applied, resourceDelta, statusesAdded, statusesRemoved, injectedCardIds, (count) => {
-        drawCount += count;
-      });
+      this.applyEffectSideEffects(
+        applied,
+        resourceDelta,
+        statusesAdded,
+        statusesRemoved,
+        injectedCardIds,
+        (count) => {
+          drawCount += count;
+        },
+      );
 
       return applied;
     });
 
     const totalCordDelta = round6(
-      effects.reduce((sum, effect) => sum + this.computeCordContribution(effect, card.definition.tags, context.mode, overlay), 0) *
-        (isOptimalChoice ? 1.03 : 1),
+      effects.reduce(
+        (sum, effect) =>
+          sum +
+          this.computeCordContribution(
+            effect,
+            card.definition.tags,
+            context.mode,
+            overlay,
+          ),
+        0,
+      ) * (isOptimalChoice ? 1.03 : 1),
     );
 
     const playId = stableHash([
@@ -451,13 +517,13 @@ export class CardEffectResolver {
       effectiveCost,
       currencyUsed,
       targeting: resolvedTargeting,
-      effects,
+      effects: freezeAppliedEffects(effects),
       totalCordDelta,
-      resourceDelta,
+      resourceDelta: freezeResourceDelta(resourceDelta),
       drawCount,
-      injectedCardIds,
-      statusesAdded,
-      statusesRemoved,
+      injectedCardIds: freezeUniqueStringArray(injectedCardIds),
+      statusesAdded: freezeUniqueStringArray(statusesAdded),
+      statusesRemoved: freezeUniqueStringArray(statusesRemoved),
       isOptimalChoice,
       educationalTag: card.definition.educationalTag,
     };
@@ -466,21 +532,39 @@ export class CardEffectResolver {
   private resolveOverlay(card: CardInHand, mode: GameMode): ModeOverlay {
     const modeOverlay = card.definition.modeOverlays?.[mode] ?? {};
     const runtimeOverlay = card.overlay ?? {};
+    const definitionLegal = card.definition.modeLegal?.includes(mode) ?? true;
+    const overlayLegal =
+      runtimeOverlay.legal ??
+      modeOverlay.legal ??
+      DEFAULT_MODE_OVERLAY.legal;
 
     return {
-      costModifier: runtimeOverlay.costModifier ?? modeOverlay.costModifier ?? DEFAULT_MODE_OVERLAY.costModifier,
+      costModifier:
+        runtimeOverlay.costModifier ??
+        modeOverlay.costModifier ??
+        DEFAULT_MODE_OVERLAY.costModifier,
       effectModifier:
-        runtimeOverlay.effectModifier ?? modeOverlay.effectModifier ?? DEFAULT_MODE_OVERLAY.effectModifier,
+        runtimeOverlay.effectModifier ??
+        modeOverlay.effectModifier ??
+        DEFAULT_MODE_OVERLAY.effectModifier,
       tagWeights: {
         ...DEFAULT_MODE_OVERLAY.tagWeights,
         ...(modeOverlay.tagWeights ?? {}),
         ...(runtimeOverlay.tagWeights ?? {}),
       },
-      timingLock: runtimeOverlay.timingLock ?? modeOverlay.timingLock ?? DEFAULT_MODE_OVERLAY.timingLock,
-      legal: runtimeOverlay.legal ?? modeOverlay.legal ?? DEFAULT_MODE_OVERLAY.legal,
+      timingLock:
+        runtimeOverlay.timingLock ??
+        modeOverlay.timingLock ??
+        DEFAULT_MODE_OVERLAY.timingLock,
+      legal: Boolean(definitionLegal && overlayLegal),
       targetingOverride:
-        runtimeOverlay.targetingOverride ?? modeOverlay.targetingOverride ?? DEFAULT_MODE_OVERLAY.targetingOverride,
-      cordWeight: runtimeOverlay.cordWeight ?? modeOverlay.cordWeight ?? DEFAULT_MODE_OVERLAY.cordWeight,
+        runtimeOverlay.targetingOverride ??
+        modeOverlay.targetingOverride ??
+        DEFAULT_MODE_OVERLAY.targetingOverride,
+      cordWeight:
+        runtimeOverlay.cordWeight ??
+        modeOverlay.cordWeight ??
+        DEFAULT_MODE_OVERLAY.cordWeight,
     };
   }
 
@@ -491,17 +575,24 @@ export class CardEffectResolver {
     overlay: ModeOverlay,
   ): TimingValidationResult {
     const requested = request.timingClass ?? context.currentWindow ?? TimingClass.ANY;
-    const effectiveTiming = overlay.timingLock.length > 0 ? [...overlay.timingLock] : [...card.definition.timingClasses];
+    const effectiveTiming =
+      overlay.timingLock.length > 0
+        ? [...overlay.timingLock]
+        : [...card.definition.timingClasses];
 
     if (effectiveTiming.includes(TimingClass.ANY)) {
-      return { ok: true, requested, effective: effectiveTiming };
+      return {
+        ok: true,
+        requested,
+        effective: freezeStringArray(effectiveTiming) as readonly TimingClass[],
+      };
     }
 
     if (!effectiveTiming.includes(requested)) {
       return {
         ok: false,
         requested,
-        effective: effectiveTiming,
+        effective: freezeStringArray(effectiveTiming) as readonly TimingClass[],
         reason: `requested timing ${requested} is not legal for this card`,
       };
     }
@@ -511,7 +602,7 @@ export class CardEffectResolver {
         return {
           ok: Boolean(context.activeFateWindow),
           requested,
-          effective: effectiveTiming,
+          effective: freezeStringArray(effectiveTiming) as readonly TimingClass[],
           reason: context.activeFateWindow ? undefined : 'fate window is not open',
         };
 
@@ -519,7 +610,7 @@ export class CardEffectResolver {
         return {
           ok: context.mode === GameMode.HEAD_TO_HEAD && Boolean(context.activeCounterWindow),
           requested,
-          effective: effectiveTiming,
+          effective: freezeStringArray(effectiveTiming) as readonly TimingClass[],
           reason:
             context.mode !== GameMode.HEAD_TO_HEAD
               ? 'counter timing only exists in HEAD_TO_HEAD'
@@ -530,7 +621,7 @@ export class CardEffectResolver {
         return {
           ok: context.mode === GameMode.TEAM_UP && Boolean(context.activeRescueWindow),
           requested,
-          effective: effectiveTiming,
+          effective: freezeStringArray(effectiveTiming) as readonly TimingClass[],
           reason:
             context.mode !== GameMode.TEAM_UP
               ? 'rescue timing only exists in TEAM_UP'
@@ -541,7 +632,7 @@ export class CardEffectResolver {
         return {
           ok: context.mode === GameMode.TEAM_UP && Boolean(context.activeAidWindow),
           requested,
-          effective: effectiveTiming,
+          effective: freezeStringArray(effectiveTiming) as readonly TimingClass[],
           reason:
             context.mode !== GameMode.TEAM_UP
               ? 'aid timing only exists in TEAM_UP'
@@ -552,7 +643,7 @@ export class CardEffectResolver {
         return {
           ok: context.mode === GameMode.CHASE_A_LEGEND && Boolean(context.activeGhostBenchmarkWindow),
           requested,
-          effective: effectiveTiming,
+          effective: freezeStringArray(effectiveTiming) as readonly TimingClass[],
           reason:
             context.mode !== GameMode.CHASE_A_LEGEND
               ? 'ghost benchmark timing only exists in CHASE_A_LEGEND'
@@ -563,7 +654,7 @@ export class CardEffectResolver {
         return {
           ok: Boolean(context.activeCascadeInterceptWindow),
           requested,
-          effective: effectiveTiming,
+          effective: freezeStringArray(effectiveTiming) as readonly TimingClass[],
           reason: context.activeCascadeInterceptWindow ? undefined : 'cascade intercept window is not open',
         };
 
@@ -571,7 +662,7 @@ export class CardEffectResolver {
         return {
           ok: context.mode === GameMode.GO_ALONE && Boolean(context.activePhaseBoundaryWindow),
           requested,
-          effective: effectiveTiming,
+          effective: freezeStringArray(effectiveTiming) as readonly TimingClass[],
           reason:
             context.mode !== GameMode.GO_ALONE
               ? 'phase boundary timing only exists in GO_ALONE'
@@ -582,7 +673,7 @@ export class CardEffectResolver {
         return {
           ok: Boolean(context.activePressureSpikeWindow),
           requested,
-          effective: effectiveTiming,
+          effective: freezeStringArray(effectiveTiming) as readonly TimingClass[],
           reason: context.activePressureSpikeWindow ? undefined : 'pressure spike window is not open',
         };
 
@@ -590,7 +681,7 @@ export class CardEffectResolver {
         return {
           ok: Boolean(context.isFinalTick),
           requested,
-          effective: effectiveTiming,
+          effective: freezeStringArray(effectiveTiming) as readonly TimingClass[],
           reason: context.isFinalTick ? undefined : 'end timing requires final tick',
         };
 
@@ -601,7 +692,7 @@ export class CardEffectResolver {
         return {
           ok: true,
           requested,
-          effective: effectiveTiming,
+          effective: freezeStringArray(effectiveTiming) as readonly TimingClass[],
         };
     }
   }
@@ -609,46 +700,74 @@ export class CardEffectResolver {
   private resolveCurrency(deckType: DeckType, mode: GameMode): CurrencyType {
     if (
       mode === GameMode.HEAD_TO_HEAD &&
-      (deckType === DeckType.SABOTAGE || deckType === DeckType.COUNTER || deckType === DeckType.BLUFF)
+      (deckType === DeckType.SABOTAGE ||
+        deckType === DeckType.COUNTER ||
+        deckType === DeckType.BLUFF)
     ) {
       return 'battle_budget';
     }
 
     if (
       mode === GameMode.TEAM_UP &&
-      (deckType === DeckType.AID || deckType === DeckType.RESCUE || deckType === DeckType.TRUST)
+      (deckType === DeckType.AID ||
+        deckType === DeckType.RESCUE ||
+        deckType === DeckType.TRUST)
     ) {
       return 'treasury';
     }
 
-    if (deckType === DeckType.GHOST || deckType === DeckType.DISCIPLINE || deckType === DeckType.OPPORTUNITY || deckType === DeckType.IPA || deckType === DeckType.PRIVILEGED || deckType === DeckType.SO || deckType === DeckType.MISSED_OPPORTUNITY || deckType === DeckType.FUBAR) {
+    if (
+      deckType === DeckType.GHOST ||
+      deckType === DeckType.DISCIPLINE ||
+      deckType === DeckType.OPPORTUNITY ||
+      deckType === DeckType.IPA ||
+      deckType === DeckType.PRIVILEGED ||
+      deckType === DeckType.SO ||
+      deckType === DeckType.MISSED_OPPORTUNITY ||
+      deckType === DeckType.FUBAR
+    ) {
       return 'cash';
     }
 
     return mode === GameMode.TEAM_UP ? 'treasury' : 'cash';
   }
 
-  private assertSufficientCurrency(currency: CurrencyType, effectiveCost: number, context: ExecutionContext): void {
+  private assertSufficientCurrency(
+    currency: CurrencyType,
+    effectiveCost: number,
+    context: ExecutionContext,
+  ): void {
     if (currency === 'battle_budget' && (context.battleBudget ?? 0) < effectiveCost) {
-      throw new Error(`Insufficient battle budget: required=${effectiveCost}, available=${context.battleBudget ?? 0}`);
+      throw new Error(
+        `Insufficient battle budget: required=${effectiveCost}, available=${context.battleBudget ?? 0}`,
+      );
     }
 
     if (currency === 'treasury' && (context.treasury ?? 0) < effectiveCost) {
-      throw new Error(`Insufficient treasury: required=${effectiveCost}, available=${context.treasury ?? 0}`);
+      throw new Error(
+        `Insufficient treasury: required=${effectiveCost}, available=${context.treasury ?? 0}`,
+      );
     }
   }
 
-  private applyCost(currency: CurrencyType, effectiveCost: number, resourceDelta: ResourceDelta): void {
+  private applyCost(
+    currency: CurrencyType,
+    effectiveCost: number,
+    resourceDelta: MutableResourceDelta,
+  ): void {
     switch (currency) {
       case 'battle_budget':
-        resourceDelta.battleBudget -= effectiveCost;
+        addResourceDelta(resourceDelta, 'battleBudget', -effectiveCost);
         break;
+
       case 'treasury':
-        resourceDelta.treasury -= effectiveCost;
+        addResourceDelta(resourceDelta, 'treasury', -effectiveCost);
         break;
+
       case 'cash':
-        resourceDelta.cash -= effectiveCost;
+        addResourceDelta(resourceDelta, 'cash', -effectiveCost);
         break;
+
       case 'none':
       default:
         break;
@@ -688,7 +807,10 @@ export class CardEffectResolver {
 
     let multiplier = overlay.effectModifier;
 
-    if (context.mode === GameMode.TEAM_UP && (tags.includes(CardTag.TRUST) || tags.includes(CardTag.AID))) {
+    if (
+      context.mode === GameMode.TEAM_UP &&
+      (tags.includes(CardTag.TRUST) || tags.includes(CardTag.AID))
+    ) {
       const trustScale = clamp((context.trustScore ?? 50) / 100, 0.4, 1.6);
       multiplier *= trustScale;
     }
@@ -701,7 +823,11 @@ export class CardEffectResolver {
       multiplier *= divergenceBonus;
     }
 
-    if (context.mode === GameMode.HEAD_TO_HEAD && tags.includes(CardTag.TEMPO) && context.activeCounterWindow) {
+    if (
+      context.mode === GameMode.HEAD_TO_HEAD &&
+      tags.includes(CardTag.TEMPO) &&
+      context.activeCounterWindow
+    ) {
       multiplier *= 1.1;
     }
 
@@ -710,7 +836,7 @@ export class CardEffectResolver {
 
   private applyEffectSideEffects(
     effect: AppliedEffect,
-    resourceDelta: ResourceDelta,
+    resourceDelta: MutableResourceDelta,
     statusesAdded: string[],
     statusesRemoved: string[],
     injectedCardIds: string[],
@@ -718,39 +844,39 @@ export class CardEffectResolver {
   ): void {
     switch (effect.op) {
       case CardEffectOp.CASH_DELTA:
-        resourceDelta.cash += effect.finalMagnitude;
+        addResourceDelta(resourceDelta, 'cash', effect.finalMagnitude);
         break;
 
       case CardEffectOp.INCOME_DELTA:
-        resourceDelta.income += effect.finalMagnitude;
+        addResourceDelta(resourceDelta, 'income', effect.finalMagnitude);
         break;
 
       case CardEffectOp.EXPENSE_DELTA:
-        resourceDelta.expense += effect.finalMagnitude;
+        addResourceDelta(resourceDelta, 'expense', effect.finalMagnitude);
         break;
 
       case CardEffectOp.SHIELD_DELTA:
-        resourceDelta.shield += effect.finalMagnitude;
+        addResourceDelta(resourceDelta, 'shield', effect.finalMagnitude);
         break;
 
       case CardEffectOp.HEAT_DELTA:
-        resourceDelta.heat += effect.finalMagnitude;
+        addResourceDelta(resourceDelta, 'heat', effect.finalMagnitude);
         break;
 
       case CardEffectOp.TRUST_DELTA:
-        resourceDelta.trust += effect.finalMagnitude;
+        addResourceDelta(resourceDelta, 'trust', effect.finalMagnitude);
         break;
 
       case CardEffectOp.DIVERGENCE_DELTA:
-        resourceDelta.divergence += effect.finalMagnitude;
+        addResourceDelta(resourceDelta, 'divergence', effect.finalMagnitude);
         break;
 
       case CardEffectOp.BATTLE_BUDGET_DELTA:
-        resourceDelta.battleBudget += effect.finalMagnitude;
+        addResourceDelta(resourceDelta, 'battleBudget', effect.finalMagnitude);
         break;
 
       case CardEffectOp.TREASURY_DELTA:
-        resourceDelta.treasury += effect.finalMagnitude;
+        addResourceDelta(resourceDelta, 'treasury', effect.finalMagnitude);
         break;
 
       case CardEffectOp.DRAW_CARDS:
@@ -812,7 +938,10 @@ export class CardEffectResolver {
       tags.length === 0
         ? 1
         : tags.reduce((sum, tag) => {
-            const modeWeight = overlay.tagWeights[tag] ?? MODE_TAG_WEIGHT_DEFAULTS[mode][tag] ?? 1;
+            const modeWeight =
+              overlay.tagWeights[tag] ??
+              MODE_TAG_WEIGHT_DEFAULTS[mode][tag] ??
+              1;
             return sum + modeWeight;
           }, 0) / tags.length;
 
@@ -836,7 +965,9 @@ export class CardEffectsExecutor {
     );
   }
 
-  public executeMany(items: readonly CardEffectExecutionItem[]): CardEffectExecutionBatchResult {
+  public executeMany(
+    items: readonly CardEffectExecutionItem[],
+  ): CardEffectExecutionBatchResult {
     const results: CardEffectResult[] = [];
     let totalCordDelta = 0;
 
@@ -847,7 +978,7 @@ export class CardEffectsExecutor {
     }
 
     return {
-      results,
+      results: Object.freeze([...results]),
       totalCordDelta,
       playCount: results.length,
     };

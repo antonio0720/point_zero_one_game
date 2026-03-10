@@ -91,7 +91,7 @@ function hashToUnitFloat(input: string): number {
   return value / 0xffffffffffff;
 }
 
-function deterministicSortKey(...parts: readonly Array<string | number>): string {
+function deterministicSortKey(...parts: readonly (string | number)[]): string {
   return stableHash(parts.join('|'));
 }
 
