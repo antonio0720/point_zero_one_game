@@ -2,7 +2,7 @@
 
 import { createHash } from 'node:crypto';
 import { CardRegistry } from '../engine/card_registry';
-import { GameMode, type PressureTier } from '../engine/card_types';
+import { GameMode, PressureTier } from '../engine/card_types';
 
 /**
  * POINT ZERO ONE — TEAM UP MODE ENGINE
@@ -271,7 +271,7 @@ function round2(value: number): number {
   return Math.round(value * 100) / 100;
 }
 
-function stableId(prefix: string, ...parts: readonly Array<string | number>): string {
+function stableId(prefix: string, ...parts: ReadonlyArray<string | number>): string {
   return `${prefix}_${createHash('sha256')
     .update(parts.join('|'))
     .digest('hex')
@@ -280,18 +280,18 @@ function stableId(prefix: string, ...parts: readonly Array<string | number>): st
 
 function pressureTierFromPressure(pressure: number): PressureTier {
   if (pressure >= 90) {
-    return 'T4_COLLAPSE_IMMINENT';
+    return PressureTier.T4_COLLAPSE_IMMINENT;
   }
   if (pressure >= 70) {
-    return 'T3_ELEVATED';
+    return PressureTier.T3_ELEVATED;
   }
   if (pressure >= 45) {
-    return 'T2_STRESSED';
+    return PressureTier.T2_STRESSED;
   }
   if (pressure >= 20) {
-    return 'T1_STABLE';
+    return PressureTier.T1_STABLE;
   }
-  return 'T0_SOVEREIGN';
+  return PressureTier.T0_SOVEREIGN;
 }
 
 function byPlayerId(
@@ -1460,7 +1460,7 @@ export function createInitialTeamUpModeState(input: {
         liabilities: Math.max(0, player.liabilities),
         netWorth: 0,
         pressure: 0,
-        pressureTier: 'T0_SOVEREIGN',
+        pressureTier: PressureTier.T0_SOVEREIGN,
         shields: clamp(
           (player.shields ?? 100) *
             (roleSynergyActive ? ROLE_SYNERGY_SHIELD_MULTIPLIER : 1),
