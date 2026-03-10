@@ -1,24 +1,89 @@
 /*
- * POINT ZERO ONE — BACKEND ENGINE 15X GENERATOR
- * Generated at: 2026-03-10T01:00:08.825776+00:00
+ * POINT ZERO ONE — BACKEND ENGINE CORE
+ * /backend/src/game/engine/cards/CardRegistry.ts
  *
  * Doctrine:
- * - backend becomes the authoritative simulation surface
- * - seven engines remain distinct
- * - mode-native rules are enforced at runtime
- * - cards are backend-validated, not UI-trusted
- * - proof / integrity / CORD remain backend-owned
+ * - registry is a backend-owned canonical card catalog
+ * - card definitions must be immutable after boot
+ * - lookup paths should be O(1) or close to it under load
+ * - validation happens once during construction, not on every read
  */
 
-import type { CardDefinition } from '../core/GamePrimitives';
+import { deepFrozenClone } from '../core/Deterministic';
+import type {
+  CardDefinition,
+  DeckType,
+  EffectPayload,
+  ModeCode,
+  TimingClass,
+} from '../core/GamePrimitives';
+
+const NUMERIC_EFFECT_KEYS: readonly (keyof EffectPayload)[] = [
+  'cashDelta',
+  'debtDelta',
+  'incomeDelta',
+  'expenseDelta',
+  'shieldDelta',
+  'heatDelta',
+  'trustDelta',
+  'treasuryDelta',
+  'battleBudgetDelta',
+  'holdChargeDelta',
+  'counterIntelDelta',
+  'timeDeltaMs',
+  'divergenceDelta',
+] as const;
+
+function uniqueStrings(values: readonly string[]): string[] {
+  const seen = new Set<string>();
+  const output: string[] = [];
+
+  for (const value of values) {
+    if (seen.has(value)) {
+      continue;
+    }
+
+    seen.add(value);
+    output.push(value);
+  }
+
+  return output;
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+function freezeArray<T>(values: readonly T[]): readonly T[] {
+  return Object.freeze([...values]);
+}
 
 export class CardRegistry {
   private readonly cards = new Map<string, CardDefinition>();
 
+  private readonly orderedCards: readonly CardDefinition[];
+
+  private readonly modeIndex = new Map<ModeCode, readonly CardDefinition[]>();
+
+  private readonly deckIndex = new Map<DeckType, readonly CardDefinition[]>();
+
+  private readonly timingIndex = new Map<TimingClass, readonly CardDefinition[]>();
+
   public constructor() {
-    for (const card of this.seed()) {
+    const seeded = this.seed().map((card) => this.finalizeCard(card));
+
+    for (const card of seeded) {
+      this.assertValid(card);
+
+      if (this.cards.has(card.id)) {
+        throw new Error(`Duplicate card definition id: ${card.id}`);
+      }
+
       this.cards.set(card.id, card);
     }
+
+    this.orderedCards = freezeArray(seeded);
+    this.buildIndexes(seeded);
   }
 
   public get(id: string): CardDefinition | undefined {
@@ -27,14 +92,174 @@ export class CardRegistry {
 
   public require(id: string): CardDefinition {
     const card = this.cards.get(id);
+
     if (!card) {
       throw new Error(`Unknown card definition: ${id}`);
     }
+
     return card;
   }
 
-  public all(): CardDefinition[] {
-    return [...this.cards.values()];
+  public all(): readonly CardDefinition[] {
+    return this.orderedCards;
+  }
+
+  public listByMode(mode: ModeCode): readonly CardDefinition[] {
+    return this.modeIndex.get(mode) ?? Object.freeze([]);
+  }
+
+  public listByDeckType(deckType: DeckType): readonly CardDefinition[] {
+    return this.deckIndex.get(deckType) ?? Object.freeze([]);
+  }
+
+  public listByTimingClass(timing: TimingClass): readonly CardDefinition[] {
+    return this.timingIndex.get(timing) ?? Object.freeze([]);
+  }
+
+  private buildIndexes(cards: readonly CardDefinition[]): void {
+    const modeBuckets = new Map<ModeCode, CardDefinition[]>();
+    const deckBuckets = new Map<DeckType, CardDefinition[]>();
+    const timingBuckets = new Map<TimingClass, CardDefinition[]>();
+
+    for (const card of cards) {
+      for (const mode of card.modeLegal) {
+        const bucket = modeBuckets.get(mode) ?? [];
+        bucket.push(card);
+        modeBuckets.set(mode, bucket);
+      }
+
+      {
+        const bucket = deckBuckets.get(card.deckType) ?? [];
+        bucket.push(card);
+        deckBuckets.set(card.deckType, bucket);
+      }
+
+      for (const timing of card.timingClass) {
+        const bucket = timingBuckets.get(timing) ?? [];
+        bucket.push(card);
+        timingBuckets.set(timing, bucket);
+      }
+    }
+
+    for (const [mode, bucket] of modeBuckets.entries()) {
+      this.modeIndex.set(mode, freezeArray(bucket));
+    }
+
+    for (const [deck, bucket] of deckBuckets.entries()) {
+      this.deckIndex.set(deck, freezeArray(bucket));
+    }
+
+    for (const [timing, bucket] of timingBuckets.entries()) {
+      this.timingIndex.set(timing, freezeArray(bucket));
+    }
+  }
+
+  private finalizeCard(card: CardDefinition): CardDefinition {
+    const normalized: CardDefinition = {
+      ...card,
+      tags: uniqueStrings(card.tags),
+      timingClass: [...new Set(card.timingClass)],
+      modeLegal: [...new Set(card.modeLegal)],
+      modeOverlay: card.modeOverlay
+        ? {
+            ...card.modeOverlay,
+          }
+        : undefined,
+    };
+
+    return deepFrozenClone(normalized);
+  }
+
+  private assertValid(card: CardDefinition): void {
+    if (card.id.trim().length === 0) {
+      throw new Error('Card id cannot be empty.');
+    }
+
+    if (card.name.trim().length === 0) {
+      throw new Error(`Card ${card.id} has an empty name.`);
+    }
+
+    if (!isFiniteNumber(card.baseCost) || card.baseCost < 0) {
+      throw new Error(`Card ${card.id} has invalid baseCost.`);
+    }
+
+    if (card.tags.length === 0) {
+      throw new Error(`Card ${card.id} must have at least one tag.`);
+    }
+
+    if (card.timingClass.length === 0) {
+      throw new Error(`Card ${card.id} must have at least one timing class.`);
+    }
+
+    if (card.modeLegal.length === 0) {
+      throw new Error(`Card ${card.id} must be legal in at least one mode.`);
+    }
+
+    for (const key of NUMERIC_EFFECT_KEYS) {
+      const value = card.baseEffect[key];
+      if (value !== undefined && !isFiniteNumber(value)) {
+        throw new Error(
+          `Card ${card.id} has non-finite numeric effect value for ${String(key)}.`,
+        );
+      }
+    }
+
+    if (
+      card.baseEffect.injectCards &&
+      !Array.isArray(card.baseEffect.injectCards)
+    ) {
+      throw new Error(`Card ${card.id} has invalid injectCards.`);
+    }
+
+    if (
+      card.baseEffect.exhaustCards &&
+      !Array.isArray(card.baseEffect.exhaustCards)
+    ) {
+      throw new Error(`Card ${card.id} has invalid exhaustCards.`);
+    }
+
+    if (
+      card.baseEffect.grantBadges &&
+      !Array.isArray(card.baseEffect.grantBadges)
+    ) {
+      throw new Error(`Card ${card.id} has invalid grantBadges.`);
+    }
+
+    if (card.modeOverlay) {
+      for (const [mode, overlay] of Object.entries(card.modeOverlay)) {
+        if (!overlay) {
+          continue;
+        }
+
+        if (
+          overlay.costModifier !== undefined &&
+          (!isFiniteNumber(overlay.costModifier) || overlay.costModifier < 0)
+        ) {
+          throw new Error(
+            `Card ${card.id} has invalid costModifier for mode ${mode}.`,
+          );
+        }
+
+        if (
+          overlay.effectModifier !== undefined &&
+          (!isFiniteNumber(overlay.effectModifier) || overlay.effectModifier < 0)
+        ) {
+          throw new Error(
+            `Card ${card.id} has invalid effectModifier for mode ${mode}.`,
+          );
+        }
+
+        if (overlay.tagWeights) {
+          for (const [tag, weight] of Object.entries(overlay.tagWeights)) {
+            if (!isFiniteNumber(weight) || weight < 0) {
+              throw new Error(
+                `Card ${card.id} has invalid tag weight for tag ${tag} in mode ${mode}.`,
+              );
+            }
+          }
+        }
+      }
+    }
   }
 
   private seed(): CardDefinition[] {

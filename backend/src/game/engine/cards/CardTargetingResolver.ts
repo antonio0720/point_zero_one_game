@@ -1,29 +1,57 @@
 /*
- * POINT ZERO ONE — BACKEND ENGINE 15X GENERATOR
- * Generated at: 2026-03-10T01:00:08.825776+00:00
+ * POINT ZERO ONE — BACKEND ENGINE CORE
+ * /backend/src/game/engine/cards/CardTargetingResolver.ts
  *
  * Doctrine:
- * - backend becomes the authoritative simulation surface
- * - seven engines remain distinct
- * - mode-native rules are enforced at runtime
- * - cards are backend-validated, not UI-trusted
- * - proof / integrity / CORD remain backend-owned
+ * - targeting is backend-authoritative
+ * - target legality is mode-native, not UI-trusted
+ * - simple enum targeting must still be explicit and deterministic
+ * - this resolver validates target class, not player identity selection
  */
 
-import type { CardInstance, Targeting } from '../core/GamePrimitives';
+import type { CardInstance, ModeCode, Targeting } from '../core/GamePrimitives';
 import type { RunStateSnapshot } from '../core/RunStateSnapshot';
 
+const TARGET_MATRIX: Readonly<
+  Record<ModeCode, Readonly<Record<Targeting, readonly Targeting[]>>>
+> = Object.freeze({
+  solo: Object.freeze({
+    SELF: Object.freeze(['SELF'] as readonly Targeting[]),
+    OPPONENT: Object.freeze([] as readonly Targeting[]),
+    TEAMMATE: Object.freeze([] as readonly Targeting[]),
+    TEAM: Object.freeze([] as readonly Targeting[]),
+    GLOBAL: Object.freeze(['GLOBAL'] as readonly Targeting[]),
+  }),
+  pvp: Object.freeze({
+    SELF: Object.freeze(['SELF'] as readonly Targeting[]),
+    OPPONENT: Object.freeze(['OPPONENT'] as readonly Targeting[]),
+    TEAMMATE: Object.freeze([] as readonly Targeting[]),
+    TEAM: Object.freeze([] as readonly Targeting[]),
+    GLOBAL: Object.freeze(['GLOBAL'] as readonly Targeting[]),
+  }),
+  coop: Object.freeze({
+    SELF: Object.freeze(['SELF'] as readonly Targeting[]),
+    OPPONENT: Object.freeze([] as readonly Targeting[]),
+    TEAMMATE: Object.freeze(['TEAMMATE', 'TEAM'] as readonly Targeting[]),
+    TEAM: Object.freeze(['TEAM'] as readonly Targeting[]),
+    GLOBAL: Object.freeze(['GLOBAL'] as readonly Targeting[]),
+  }),
+  ghost: Object.freeze({
+    SELF: Object.freeze(['SELF'] as readonly Targeting[]),
+    OPPONENT: Object.freeze([] as readonly Targeting[]),
+    TEAMMATE: Object.freeze([] as readonly Targeting[]),
+    TEAM: Object.freeze([] as readonly Targeting[]),
+    GLOBAL: Object.freeze(['GLOBAL'] as readonly Targeting[]),
+  }),
+});
+
 export class CardTargetingResolver {
-  public isAllowed(snapshot: RunStateSnapshot, card: CardInstance, targeting: Targeting): boolean {
-    if (card.targeting === targeting) {
-      return true;
-    }
-    if (snapshot.mode === 'coop' && card.targeting === 'TEAMMATE' && targeting === 'TEAM') {
-      return true;
-    }
-    if (snapshot.mode === 'pvp' && card.targeting === 'OPPONENT' && targeting === 'SELF') {
-      return false;
-    }
-    return false;
+  public isAllowed(
+    snapshot: RunStateSnapshot,
+    card: CardInstance,
+    targeting: Targeting,
+  ): boolean {
+    const allowed = TARGET_MATRIX[snapshot.mode][card.targeting];
+    return allowed.includes(targeting);
   }
 }
