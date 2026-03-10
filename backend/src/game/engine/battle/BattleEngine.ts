@@ -15,11 +15,11 @@ import type {
   SimulationEngine,
   TickContext,
 } from '../core/EngineContracts';
+import type { AttackEvent, HaterBotId } from '../core/GamePrimitives';
 import type {
-  AttackEvent,
-  HaterBotId,
-} from '../core/GamePrimitives';
-import type { BotRuntimeState, RunStateSnapshot } from '../core/RunStateSnapshot';
+  BotRuntimeState,
+  RunStateSnapshot,
+} from '../core/RunStateSnapshot';
 import {
   createEngineHealth,
   createEngineSignal,
@@ -208,7 +208,7 @@ export class BattleEngine implements SimulationEngine {
               this.engineId,
               'INFO',
               'COUNTERPLAY_BUDGET_UPDATED',
-              `Battle counterplay budget adjusted by hostile injections.`,
+              'Battle counterplay budget adjusted by hostile injections.',
               snapshot.tick,
               budgetResolution.notes,
             ),
@@ -254,7 +254,8 @@ export class BattleEngine implements SimulationEngine {
 
     return this.profiles.all().map((profile) => {
       const existing = existingById.get(profile.botId);
-      const isNeutralized = disabled.has(profile.botId) || neutralized.has(profile.botId);
+      const isNeutralized =
+        disabled.has(profile.botId) || neutralized.has(profile.botId);
 
       if (!existing) {
         return {

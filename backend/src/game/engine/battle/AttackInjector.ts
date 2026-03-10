@@ -8,7 +8,11 @@
  * - attack IDs must remain stable under replay for the same run/tick/order
  */
 
-import type { AttackEvent, AttackTargetEntity, ModeCode } from '../core/GamePrimitives';
+import type {
+  AttackEvent,
+  AttackTargetEntity,
+  ModeCode,
+} from '../core/GamePrimitives';
 import type { AttackBuildInput, BotProfile } from './types';
 
 function clamp(value: number, min: number, max: number): number {
