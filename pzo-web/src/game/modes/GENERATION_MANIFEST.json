@@ -1,0 +1,21 @@
+{
+  "generated_at_utc": "2026-03-10T01:52:37.662137+00:00",
+  "target_default": "/Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/pzo-web/src/game/modes",
+  "file_count": 14,
+  "files": [
+    "pzo-web/src/game/modes/contracts.ts",
+    "pzo-web/src/game/modes/shared/constants.ts",
+    "pzo-web/src/game/modes/shared/helpers.ts",
+    "pzo-web/src/game/modes/shared/cord.ts",
+    "pzo-web/src/game/modes/shared/cardOverlay.ts",
+    "pzo-web/src/game/modes/ModeCatalog.ts",
+    "pzo-web/src/game/modes/empire/EmpireModeModel.ts",
+    "pzo-web/src/game/modes/predator/PredatorModeModel.ts",
+    "pzo-web/src/game/modes/syndicate/SyndicateModeModel.ts",
+    "pzo-web/src/game/modes/phantom/PhantomModeModel.ts",
+    "pzo-web/src/game/modes/ModeRegistry.ts",
+    "pzo-web/src/game/modes/FrontendModeDirector.ts",
+    "pzo-web/src/game/modes/useFrontendModeDirector.ts",
+    "pzo-web/src/game/modes/index.ts"
+  ]
+}
