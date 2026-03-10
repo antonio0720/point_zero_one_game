@@ -1,33 +1,73 @@
 /**
- * Generates a seed commitment for a given run ID.
+ * POINT ZERO ONE — DETERMINISTIC SEED GENERATOR
+ * backend/src/game/engine/seed_generator.ts
+ *
+ * Replaces nondeterministic Date.now / Math.random seed creation with
+ * reproducible seed derivation and seed commitments.
+ */
+
+import { createHash } from 'node:crypto';
+import { combineSeed, hashStringToSeed, normalizeSeed } from './deterministic_rng';
+
+export interface SeedMaterial {
+  readonly runId: string | number;
+  readonly namespace?: string;
+  readonly mode?: string;
+  readonly salt?: string | number;
+}
+
+export interface SeedCommitment {
+  readonly seed: number;
+  readonly seedHex: string;
+  readonly commitment: string;
+  readonly canonicalMaterial: string;
+}
+
+function toCanonicalMaterial(material: SeedMaterial): string {
+  const namespace = material.namespace ?? 'pzo';
+  const mode = material.mode ?? 'default';
+  const salt = material.salt === undefined ? 'none' : String(material.salt);
+
+  return [
+    `namespace=${namespace}`,
+    `mode=${mode}`,
+    `runId=${String(material.runId)}`,
+    `salt=${salt}`,
+  ].join('|');
+}
+
+export function deriveNumericSeed(material: SeedMaterial): number {
+  const canonicalMaterial = toCanonicalMaterial(material);
+  const baseSeed = hashStringToSeed(canonicalMaterial);
+
+  if (material.salt === undefined) {
+    return normalizeSeed(baseSeed);
+  }
+
+  return combineSeed(baseSeed, material.salt);
+}
+
+/**
+ * Backward-compatible surface.
+ * Returns a deterministic seed commitment string for the provided run ID.
  */
 export function generateSeed(runId: number): string {
-  // Combine player_id, timestamp, and nonce to create a reproducible PRNG sequence
-  const prngSequence = createPRNGSequence(runId);
-
-  // Hash the PRNG sequence to get the seed commitment
-  const seedCommitment = sha256(prngSequence);
-
-  return seedCommitment;
+  return generateSeedCommitment({ runId }).commitment;
 }
 
-/**
- * Creates a pseudo-random number generator (PRNG) sequence using the given run ID.
- */
-function createPRNGSequence(runId: number): Uint8Array {
-  // Implement your PRNG algorithm here
-  // For simplicity, this example uses a simple XOR operation as a PRNG
-  const playerId = 123; // Replace with actual player ID
-  const timestamp = Date.now(); // Replace with actual timestamp
-  const nonce = Math.floor(Math.random() * 1000000); // Replace with actual nonce
+export function generateSeedCommitment(material: SeedMaterial): SeedCommitment {
+  const canonicalMaterial = toCanonicalMaterial(material);
+  const seed = deriveNumericSeed(material);
+  const seedHex = seed.toString(16).padStart(8, '0');
 
-  return Buffer.from([playerId, timestamp, nonce]).map((byte) => byte ^ runId);
-}
+  const commitment = createHash('sha256')
+    .update(`${canonicalMaterial}|seedHex=${seedHex}`, 'utf8')
+    .digest('hex');
 
-/**
- * Hashes the given data using SHA-256 algorithm.
- */
-function sha256(data: Uint8Array): string {
-  const crypto = require('crypto');
-  return crypto.createHash('sha256').update(data).digest('hex');
+  return {
+    seed,
+    seedHex,
+    commitment,
+    canonicalMaterial,
+  };
 }
