@@ -7,6 +7,8 @@
  * - engines tick in deterministic order
  * - cards are backend-validated against open timing windows
  * - run state, tick checksums, and proof hashes are backend-owned
+ * - snapshots are immutable at the runtime boundary
+ * - mutations happen only against an internal writable draft
  */
 
 import type {
@@ -92,8 +94,47 @@ const PRESSURE_TICK_DURATION_MS = {
   T4: 12_000,
 } as const;
 
+type Primitive =
+  | string
+  | number
+  | boolean
+  | bigint
+  | symbol
+  | null
+  | undefined;
+
+type MutableDeep<T> = T extends Primitive
+  ? T
+  : T extends (...args: never[]) => unknown
+    ? T
+    : T extends ReadonlyArray<infer U>
+      ? MutableDeep<U>[]
+      : T extends object
+        ? { -readonly [K in keyof T]: MutableDeep<T[K]> }
+        : T;
+
+type MutableRunStateSnapshot = MutableDeep<RunStateSnapshot>;
+
+function toMutableSnapshot(snapshot: RunStateSnapshot): MutableRunStateSnapshot {
+  return cloneJson(snapshot) as MutableRunStateSnapshot;
+}
+
+function toFrozenSnapshot(
+  snapshot: MutableRunStateSnapshot | RunStateSnapshot,
+): RunStateSnapshot {
+  return deepFreeze(snapshot as RunStateSnapshot) as RunStateSnapshot;
+}
+
 function latestThree(values: readonly string[]): string[] {
   return values.slice(Math.max(0, values.length - 3));
+}
+
+function roundMoney(value: number): number {
+  return Math.round(value * 100) / 100;
+}
+
+function roundThousandths(value: number): number {
+  return Math.round(value * 1000) / 1000;
 }
 
 function recomputeNetWorth(snapshot: RunStateSnapshot): number {
@@ -107,9 +148,9 @@ function recomputeNetWorth(snapshot: RunStateSnapshot): number {
     (snapshot.economy.incomePerTick - snapshot.economy.expensesPerTick) * 12,
   );
 
-  return Math.round(
-    (snapshot.economy.cash - snapshot.economy.debt + recurring + shieldValue) * 100,
-  ) / 100;
+  return roundMoney(
+    snapshot.economy.cash - snapshot.economy.debt + recurring + shieldValue,
+  );
 }
 
 function weakestLayerId(
@@ -339,7 +380,7 @@ function estimateSovereigntyScore(snapshot: RunStateSnapshot): number {
     score += 0.8;
   }
 
-  return Math.round(score * 1000) / 1000;
+  return roundThousandths(score);
 }
 
 export class EngineRuntime {
@@ -392,7 +433,7 @@ export class EngineRuntime {
       nextTier: snapshot.pressure.tier,
     });
 
-    this.snapshot = snapshot;
+    this.snapshot = toFrozenSnapshot(snapshot);
     this.emitRunStartedIfNeeded();
     return this.requireSnapshot();
   }
@@ -420,11 +461,12 @@ export class EngineRuntime {
       };
     }
 
-    const next = cloneJson(snapshot);
-    next.cards.hand.push(instance);
-    next.cards.drawHistory.push(instance.instanceId);
+    const next = toMutableSnapshot(snapshot);
+    const mutableInstance = cloneJson(instance) as MutableDeep<CardInstance>;
+    next.cards.hand.push(mutableInstance);
+    next.cards.drawHistory.push(mutableInstance.instanceId);
 
-    this.snapshot = deepFreeze(next);
+    this.snapshot = toFrozenSnapshot(next);
 
     return {
       accepted: true,
@@ -474,7 +516,7 @@ export class EngineRuntime {
       };
     }
 
-    const next = cloneJson(snapshot);
+    const next = toMutableSnapshot(snapshot);
     const handIndex = next.cards.hand.findIndex(
       (card) => card.instanceId === request.cardInstanceId,
     );
@@ -541,7 +583,7 @@ export class EngineRuntime {
       mode: next.mode,
     });
 
-    this.snapshot = deepFreeze(next);
+    this.snapshot = toFrozenSnapshot(next);
 
     if (
       validation.chosenTimingClass !== 'ANY' &&
@@ -567,7 +609,7 @@ export class EngineRuntime {
 
   public tick(): RuntimeTickResult {
     const base = this.requireSnapshot();
-    let next = cloneJson(base);
+    let next = toMutableSnapshot(base);
 
     this.emitRunStartedIfNeeded();
 
@@ -587,8 +629,8 @@ export class EngineRuntime {
       phase: next.phase,
     });
 
-    next = cloneJson(
-      this.windows.reconcile(deepFreeze(next), {
+    next = toMutableSnapshot(
+      this.windows.reconcile(toFrozenSnapshot(next), {
         step: 'STEP_01_PREPARE',
         nowMs,
         previousPhase,
@@ -647,8 +689,8 @@ export class EngineRuntime {
     next.timers.currentTickDurationMs =
       PRESSURE_TICK_DURATION_MS[pressureTierAfterTick];
 
-    next = cloneJson(
-      this.windows.reconcile(deepFreeze(next), {
+    next = toMutableSnapshot(
+      this.windows.reconcile(toFrozenSnapshot(next), {
         step: 'STEP_08_MODE_POST',
         nowMs,
         previousPhase,
@@ -688,7 +730,7 @@ export class EngineRuntime {
       });
     }
 
-    this.snapshot = deepFreeze(next);
+    this.snapshot = toFrozenSnapshot(next);
 
     return {
       snapshot: this.requireSnapshot(),
@@ -729,8 +771,10 @@ export class EngineRuntime {
     );
   }
 
-  private prepareForTick(snapshot: RunStateSnapshot): RunStateSnapshot {
-    const next = cloneJson(snapshot);
+  private prepareForTick(
+    snapshot: MutableRunStateSnapshot,
+  ): MutableRunStateSnapshot {
+    const next = toMutableSnapshot(snapshot);
 
     if (next.modeState.phaseBoundaryWindowsRemaining > 0) {
       next.modeState.phaseBoundaryWindowsRemaining -= 1;
@@ -781,8 +825,10 @@ export class EngineRuntime {
     return next;
   }
 
-  private applyModePostProcessing(snapshot: RunStateSnapshot): RunStateSnapshot {
-    const next = cloneJson(snapshot);
+  private applyModePostProcessing(
+    snapshot: MutableRunStateSnapshot,
+  ): MutableRunStateSnapshot {
+    const next = toMutableSnapshot(snapshot);
     const newPhase = currentPhase(next);
 
     if (newPhase !== next.phase) {
@@ -817,9 +863,9 @@ export class EngineRuntime {
   }
 
   private applyTelemetryPostProcessing(
-    snapshot: RunStateSnapshot,
-  ): RunStateSnapshot {
-    const next = cloneJson(snapshot);
+    snapshot: MutableRunStateSnapshot,
+  ): MutableRunStateSnapshot {
+    const next = toMutableSnapshot(snapshot);
 
     if (next.pressure.tier === 'T3' || next.pressure.tier === 'T4') {
       next.pressure.survivedHighPressureTicks += 1;
@@ -829,16 +875,18 @@ export class EngineRuntime {
   }
 
   private applySovereigntySnapshot(
-    snapshot: RunStateSnapshot,
-  ): RunStateSnapshot {
-    const next = cloneJson(snapshot);
+    snapshot: MutableRunStateSnapshot,
+  ): MutableRunStateSnapshot {
+    const next = toMutableSnapshot(snapshot);
     next.sovereignty.integrityStatus =
       next.outcome === null ? 'PENDING' : 'VERIFIED';
     return next;
   }
 
-  private applyOutcomeGate(snapshot: RunStateSnapshot): RunStateSnapshot {
-    const next = cloneJson(snapshot);
+  private applyOutcomeGate(
+    snapshot: MutableRunStateSnapshot,
+  ): MutableRunStateSnapshot {
+    const next = toMutableSnapshot(snapshot);
     next.outcome = determineOutcome(next);
 
     if (next.outcome === 'BANKRUPT') {
@@ -891,10 +939,10 @@ export class EngineRuntime {
   }
 
   private executeEngineStep(
-    snapshot: RunStateSnapshot,
+    snapshot: MutableRunStateSnapshot,
     step: TickStep,
     nowMs: number,
-  ): RunStateSnapshot {
+  ): MutableRunStateSnapshot {
     const engineId = STEP_TO_ENGINE[step];
     if (!engineId) {
       return snapshot;
@@ -905,18 +953,20 @@ export class EngineRuntime {
       return snapshot;
     }
 
+    const frozenInput = toFrozenSnapshot(snapshot);
+
     const context: TickContext = {
       step,
       nowMs,
       clock: this.clock,
       bus: this.bus as TickContext['bus'],
-      trace: this.createTickTrace(snapshot, step, nowMs),
+      trace: this.createTickTrace(frozenInput, step, nowMs),
     };
 
-    const output = engine.tick(snapshot, context);
+    const output = engine.tick(frozenInput, context);
     const normalizedSnapshot = this.normalizeEngineOutput(output);
 
-    return cloneJson(normalizedSnapshot);
+    return toMutableSnapshot(normalizedSnapshot);
   }
 
   private tryGetEngine(engineId: EngineId) {
@@ -952,7 +1002,7 @@ export class EngineRuntime {
   }
 
   private debitResource(
-    snapshot: RunStateSnapshot,
+    snapshot: MutableRunStateSnapshot,
     resourceType: ResourceType,
     amount: number,
   ): boolean {
@@ -965,8 +1015,7 @@ export class EngineRuntime {
         return false;
       }
 
-      snapshot.economy.cash =
-        Math.round((snapshot.economy.cash - amount) * 100) / 100;
+      snapshot.economy.cash = roundMoney(snapshot.economy.cash - amount);
       return true;
     }
 
@@ -975,9 +1024,9 @@ export class EngineRuntime {
         return false;
       }
 
-      snapshot.battle.battleBudget =
-        Math.round((snapshot.battle.battleBudget - amount) * 100) / 100;
-
+      snapshot.battle.battleBudget = roundMoney(
+        snapshot.battle.battleBudget - amount,
+      );
       return true;
     }
 
@@ -986,9 +1035,9 @@ export class EngineRuntime {
         return false;
       }
 
-      snapshot.modeState.sharedTreasuryBalance =
-        Math.round((snapshot.modeState.sharedTreasuryBalance - amount) * 100) / 100;
-
+      snapshot.modeState.sharedTreasuryBalance = roundMoney(
+        snapshot.modeState.sharedTreasuryBalance - amount,
+      );
       return true;
     }
 
@@ -996,25 +1045,26 @@ export class EngineRuntime {
   }
 
   private applyEffectPayload(
-    snapshot: RunStateSnapshot,
+    snapshot: MutableRunStateSnapshot,
     effect: EffectPayload,
     targeting: Targeting,
   ): void {
     if (typeof effect.cashDelta === 'number') {
       if (targeting === 'TEAM' && snapshot.mode === 'coop') {
-        snapshot.modeState.sharedTreasuryBalance =
-          Math.round((snapshot.modeState.sharedTreasuryBalance + effect.cashDelta) * 100) /
-          100;
+        snapshot.modeState.sharedTreasuryBalance = roundMoney(
+          snapshot.modeState.sharedTreasuryBalance + effect.cashDelta,
+        );
       } else {
-        snapshot.economy.cash =
-          Math.round((snapshot.economy.cash + effect.cashDelta) * 100) / 100;
+        snapshot.economy.cash = roundMoney(
+          snapshot.economy.cash + effect.cashDelta,
+        );
       }
     }
 
     if (typeof effect.incomeDelta === 'number') {
-      snapshot.economy.incomePerTick =
-        Math.round((snapshot.economy.incomePerTick + effect.incomeDelta) * 100) /
-        100;
+      snapshot.economy.incomePerTick = roundMoney(
+        snapshot.economy.incomePerTick + effect.incomeDelta,
+      );
     }
 
     if (typeof effect.shieldDelta === 'number') {
@@ -1030,8 +1080,9 @@ export class EngineRuntime {
     }
 
     if (typeof effect.heatDelta === 'number') {
-      snapshot.economy.haterHeat =
-        Math.round((snapshot.economy.haterHeat + effect.heatDelta) * 100) / 100;
+      snapshot.economy.haterHeat = roundMoney(
+        snapshot.economy.haterHeat + effect.heatDelta,
+      );
     }
 
     if (typeof effect.trustDelta === 'number' && snapshot.mode === 'coop') {
@@ -1049,9 +1100,9 @@ export class EngineRuntime {
     }
 
     if (typeof effect.divergenceDelta === 'number') {
-      snapshot.sovereignty.gapVsLegend =
-        Math.round((snapshot.sovereignty.gapVsLegend + effect.divergenceDelta) * 1000) /
-        1000;
+      snapshot.sovereignty.gapVsLegend = roundThousandths(
+        snapshot.sovereignty.gapVsLegend + effect.divergenceDelta,
+      );
     }
 
     if (effect.cascadeTag) {
