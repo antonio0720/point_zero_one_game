@@ -1,22 +1,28 @@
 /*
- * POINT ZERO ONE — BACKEND ENGINE 15X GENERATOR
- * Generated at: 2026-03-10T01:00:08.825776+00:00
+ * POINT ZERO ONE — BACKEND PRESSURE EVENT EMITTER
+ * /backend/src/game/engine/pressure/PressureEventEmitter.ts
  *
  * Doctrine:
- * - backend becomes the authoritative simulation surface
- * - seven engines remain distinct
- * - mode-native rules are enforced at runtime
- * - cards are backend-validated, not UI-trusted
- * - proof / integrity / CORD remain backend-owned
+ * - pressure events should only emit on meaningful state transitions
+ * - event payloads stay backward-compatible with EngineEventMap
  */
 
 import type { EventBus } from '../core/EventBus';
-import type { EngineEventMap, PressureTier } from '../core/GamePrimitives';
+import type { EngineEventMap } from '../core/GamePrimitives';
+import type { PressureState } from '../core/RunStateSnapshot';
 
 export class PressureEventEmitter {
-  public emit(bus: EventBus<EngineEventMap>, previousTier: PressureTier, nextTier: PressureTier, score: number): void {
-    if (previousTier !== nextTier) {
-      bus.emit('pressure.changed', { from: previousTier, to: nextTier, score });
+  public emit(
+    bus: EventBus<EngineEventMap>,
+    previous: PressureState,
+    next: PressureState,
+  ): void {
+    if (previous.tier !== next.tier) {
+      bus.emit('pressure.changed', {
+        from: previous.tier,
+        to: next.tier,
+        score: next.score,
+      });
     }
   }
 }
