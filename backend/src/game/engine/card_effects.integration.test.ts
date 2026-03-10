@@ -7,6 +7,8 @@ import { CardEffectsExecutor } from './card_effects_executor';
 import {
   GameMode,
   TimingClass,
+  RunPhase,
+  PressureTier,
   type ExecutionContext,
   type CardPlayRequest,
 } from './card_types';
@@ -16,15 +18,21 @@ import {
   type LegendBaseline,
 } from '../modes/chase_a_legend_mode';
 
-function asExecutorContext(context: ExecutionContext): import('./card_effects_executor').ExecutionContext {
+function asExecutorContext(
+  context: ExecutionContext,
+): import('./card_effects_executor').ExecutionContext {
   return context as unknown as import('./card_effects_executor').ExecutionContext;
 }
 
-function asExecutorRequest(request: CardPlayRequest): import('./card_effects_executor').CardPlayRequest {
+function asExecutorRequest(
+  request: CardPlayRequest,
+): import('./card_effects_executor').CardPlayRequest {
   return request as unknown as import('./card_effects_executor').CardPlayRequest;
 }
 
-function asExecutorCard(card: import('./card_types').CardInHand): import('./card_effects_executor').CardInHand {
+function asExecutorCard(
+  card: import('./card_types').CardInHand,
+): import('./card_effects_executor').CardInHand {
   return card as unknown as import('./card_effects_executor').CardInHand;
 }
 
@@ -39,8 +47,8 @@ describe('backend card effects integration', () => {
       runSeed: 'seed_go_alone_alpha',
       tickIndex: 4,
       currentWindow: TimingClass.PRE,
-      currentPhase: 'FOUNDATION',
-      currentPressureTier: 'T1_STABLE',
+      currentPhase: RunPhase.FOUNDATION,
+      currentPressureTier: PressureTier.T1_STABLE,
       battleBudget: 0,
       treasury: 0,
       trustScore: 50,
@@ -281,8 +289,14 @@ describe('backend card effects integration', () => {
     expect(state.player.superiorDecisionNotations).toBe(1);
     expect(state.player.replayAudit).toHaveLength(1);
     expect(state.player.replayAudit[0].matchedMarkerColor).toBe('RED');
-    expect(state.player.replayAudit[0].gapArrow === '↑' || state.player.replayAudit[0].gapArrow === '↑↑').toBe(true);
-    expect(state.player.finalTier === 'CHALLENGER' || state.player.finalTier === 'NEW_LEGEND').toBe(true);
+    expect(
+      state.player.replayAudit[0].gapArrow === '↑' ||
+        state.player.replayAudit[0].gapArrow === '↑↑',
+    ).toBe(true);
+    expect(
+      state.player.finalTier === 'CHALLENGER' ||
+        state.player.finalTier === 'NEW_LEGEND',
+    ).toBe(true);
     expect(state.macro.activeGhostWindows.length).toBeGreaterThan(0);
   });
 });

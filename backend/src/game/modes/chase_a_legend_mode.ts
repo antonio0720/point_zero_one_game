@@ -247,7 +247,7 @@ function round6(value: number): number {
   return Math.round(value * 1_000_000) / 1_000_000;
 }
 
-function stableId(prefix: string, ...parts: readonly Array<string | number>): string {
+function stableId(prefix: string, ...parts: readonly (string | number)[]): string {
   const hash = createHash('sha256').update(parts.join('|')).digest('hex').slice(0, 16);
   return `${prefix}_${hash}`;
 }
