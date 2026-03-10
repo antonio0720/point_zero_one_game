@@ -1,0 +1,68 @@
+{
+  "generated_at": "2026-03-10T01:32:32.788153+00:00",
+  "repo_root": "/Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master",
+  "modes_root": "/Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/backend/src/game/modes",
+  "written": [
+    {
+      "path": "/Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/backend/src/game/modes/ModeRegistry.ts",
+      "sha256": "32bd6bacd67764408dce3ab1efbbfa151545a4d704fa98fa595b3983ec690519",
+      "bytes": 1157
+    },
+    {
+      "path": "/Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/backend/src/game/modes/ModeRuntimeDirector.ts",
+      "sha256": "902d83a97ef206e29b954f74fe0167f7be6afbfce9a090e8ba4af2ecaaa1fdc4",
+      "bytes": 4997
+    },
+    {
+      "path": "/Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/backend/src/game/modes/adapters/EmpireModeAdapter.ts",
+      "sha256": "824b50db67778c0971fd336813e7cc943f5aa66820a1dbc1c2f55280f479b5d9",
+      "bytes": 14452
+    },
+    {
+      "path": "/Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/backend/src/game/modes/adapters/PhantomModeAdapter.ts",
+      "sha256": "0f3588aefc6784c51fa99e59130bcdc798e49732bf1e7a1347a427d7e5aa48a9",
+      "bytes": 7254
+    },
+    {
+      "path": "/Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/backend/src/game/modes/adapters/PredatorModeAdapter.ts",
+      "sha256": "a638f5a22ed8f1cf7fc840383cb3b6ec4e718d3aebcedfde4438889042b70614",
+      "bytes": 12228
+    },
+    {
+      "path": "/Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/backend/src/game/modes/adapters/SyndicateModeAdapter.ts",
+      "sha256": "3d888d404f270ceeac2d23275a85e72a8507edb76a9ff5ac9efe69f5a1721a32",
+      "bytes": 13863
+    },
+    {
+      "path": "/Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/backend/src/game/modes/contracts.ts",
+      "sha256": "6ef217537a1d7ca81d826946b55991d4895f9d035bf7c6c69aefc388fca54e9a",
+      "bytes": 5176
+    },
+    {
+      "path": "/Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/backend/src/game/modes/index.ts",
+      "sha256": "c4c1a41d4993903733ab7ba9ec4eb776f17a1da8480af218b2b53198e5e9c501",
+      "bytes": 842
+    },
+    {
+      "path": "/Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/backend/src/game/modes/shared/card_overlay.ts",
+      "sha256": "f548b32cc34e85e43d0508129a63714d2afbda6f4ef0a79b8d4a8681d9ab0459",
+      "bytes": 6111
+    },
+    {
+      "path": "/Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/backend/src/game/modes/shared/constants.ts",
+      "sha256": "ca0ea2dae20f32f24b54708277c71cb60822dcd32fec88205fc7be27ca4f1507",
+      "bytes": 5367
+    },
+    {
+      "path": "/Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/backend/src/game/modes/shared/cord.ts",
+      "sha256": "e58ef582517c7fd35bea0dc2b0aff3527f25c61ba7821132af8610dda6790466",
+      "bytes": 6463
+    },
+    {
+      "path": "/Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/backend/src/game/modes/shared/helpers.ts",
+      "sha256": "726797f7b6c8e9670f408fa7574a59379b48b1aa0eee2495140664f8a3858ff3",
+      "bytes": 9405
+    }
+  ],
+  "skipped": []
+}
