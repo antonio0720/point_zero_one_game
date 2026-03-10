@@ -5,8 +5,7 @@ import { CardRegistry } from '../engine/card_registry';
 import {
   DeckType,
   GameMode,
-  type PressureTier,
-  type TimingClass,
+  PressureTier,
 } from '../engine/card_types';
 
 /**
@@ -316,7 +315,7 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
 }
 
-function stableId(prefix: string, ...parts: readonly Array<string | number>): string {
+function stableId(prefix: string, ...parts: ReadonlyArray<string | number>): string {
   return `${prefix}_${createHash('sha256')
     .update(parts.join('|'))
     .digest('hex')
@@ -325,18 +324,18 @@ function stableId(prefix: string, ...parts: readonly Array<string | number>): st
 
 function pressureTierFromPressure(pressure: number): PressureTier {
   if (pressure >= 90) {
-    return 'T4_COLLAPSE_IMMINENT';
+    return PressureTier.T4_COLLAPSE_IMMINENT;
   }
   if (pressure >= 70) {
-    return 'T3_ELEVATED';
+    return PressureTier.T3_ELEVATED;
   }
   if (pressure >= 45) {
-    return 'T2_STRESSED';
+    return PressureTier.T2_STRESSED;
   }
   if (pressure >= 20) {
-    return 'T1_STABLE';
+    return PressureTier.T1_STABLE;
   }
-  return 'T0_SOVEREIGN';
+  return PressureTier.T0_SOVEREIGN;
 }
 
 function psycheFromPressure(pressure: number): PsycheState {
@@ -466,7 +465,7 @@ function counterMatches(
 function awardBattleBudgetForPressureTier(
   tier: PressureTier,
 ): number {
-  return tier === 'T3_ELEVATED' || tier === 'T4_COLLAPSE_IMMINENT' ? 4 : 2;
+  return tier === PressureTier.T3_ELEVATED || tier === PressureTier.T4_COLLAPSE_IMMINENT ? 4 : 2;
 }
 
 function computeCordTieBreakerScore(player: HeadToHeadPlayerState): number {
@@ -546,13 +545,19 @@ function applyExtraction(
 
   switch (extractionType) {
     case 'MARKET_DUMP': {
-      const basePenalty = target.psycheState === 'CRACKING' || target.psycheState === 'BROKEN' ? 0.3 : spec.baseMagnitude;
+      const basePenalty =
+        target.psycheState === 'CRACKING' || target.psycheState === 'BROKEN'
+          ? 0.3
+          : spec.baseMagnitude;
+
       next = mutatePlayer(next, targetId, (player) =>
         recalcPlayer(
           {
             ...player,
             temporaryIncomePenaltyPct: clamp(basePenalty * bleedMultiplier, 0, 0.9),
-            temporaryIncomePenaltyUntilTick: next.macro.tick + (player.psycheState === 'CRACKING' || player.psycheState === 'BROKEN' ? 3 : 2),
+            temporaryIncomePenaltyUntilTick:
+              next.macro.tick +
+              (player.psycheState === 'CRACKING' || player.psycheState === 'BROKEN' ? 3 : 2),
             activeStatuses: setOrRemoveStatus(player.activeStatuses, 'market_dumped', true),
             pressure: clamp(player.pressure + 8, 0, 100),
           },
@@ -671,9 +676,7 @@ function applyExtraction(
         extractionHits: player.extractionHits + 1,
         rivalryHeat: clamp(player.rivalryHeat + 6, 0, 100),
         battleBudget: clamp(
-          player.battleBudget +
-            8 +
-            (next.macro.firstBloodAttackerId === null ? 5 : 0),
+          player.battleBudget + 8 + (next.macro.firstBloodAttackerId === null ? 5 : 0),
           0,
           MAX_BATTLE_BUDGET,
         ),
@@ -712,8 +715,7 @@ function applyExtraction(
     ...next,
     macro: {
       ...next.macro,
-      firstBloodAttackerId:
-        next.macro.firstBloodAttackerId ?? attackerId,
+      firstBloodAttackerId: next.macro.firstBloodAttackerId ?? attackerId,
       threatQueue: normalizeThreatQueue([
         ...next.macro.threatQueue,
         {
@@ -810,8 +812,7 @@ function applyTick(
     macro: {
       ...state.macro,
       tick: state.macro.tick + 1,
-      sharedClockMs:
-        state.macro.sharedClockMs + (action.sharedClockAdvanceMs ?? 1_000),
+      sharedClockMs: state.macro.sharedClockMs + (action.sharedClockAdvanceMs ?? 1_000),
     },
   };
 
@@ -855,42 +856,35 @@ function applyTick(
 
   for (const player of nextState.players) {
     const pressureDelta = action.pressureDeltaByPlayerId?.[player.playerId] ?? 0;
+
     nextState = mutatePlayer(nextState, player.playerId, (entry) => {
       const flowed = applyIncomeFlow(entry, nextState.macro.tick);
+      const forcedFubarNow = flowed.forcedFubarAtTick === nextState.macro.tick;
+
+      const nextCash = forcedFubarNow
+        ? Math.max(0, flowed.cash - 6000)
+        : flowed.cash;
+
+      const nextPressure = forcedFubarNow
+        ? clamp(flowed.pressure + pressureDelta + 10, 0, 100)
+        : clamp(flowed.pressure + pressureDelta, 0, 100);
+
+      const nextStatuses = forcedFubarNow
+        ? setOrRemoveStatus(flowed.activeStatuses, 'forced_fubar_next_tick', false)
+        : flowed.activeStatuses;
+
       return recalcPlayer(
         {
           ...flowed,
-          pressure: clamp(flowed.pressure + pressureDelta, 0, 100),
           battleBudget: clamp(
-            flowed.battleBudget +
-              awardBattleBudgetForPressureTier(flowed.pressureTier),
+            flowed.battleBudget + awardBattleBudgetForPressureTier(flowed.pressureTier),
             0,
             MAX_BATTLE_BUDGET,
           ),
-          activeStatuses:
-            flowed.forcedFubarAtTick === nextState.macro.tick
-              ? setOrRemoveStatus(
-                  setOrRemoveStatus(
-                    flowed.activeStatuses,
-                    'forced_fubar_next_tick',
-                    false,
-                  ),
-                  'debt_injected',
-                  flowed.activeStatuses.includes('debt_injected'),
-                )
-              : flowed.activeStatuses,
-          cash:
-            flowed.forcedFubarAtTick === nextState.macro.tick
-              ? Math.max(0, flowed.cash - 6000)
-              : flowed.cash,
-          pressure:
-            flowed.forcedFubarAtTick === nextState.macro.tick
-              ? clamp(flowed.pressure + 10, 0, 100)
-              : flowed.pressure,
-          forcedFubarAtTick:
-            flowed.forcedFubarAtTick === nextState.macro.tick
-              ? null
-              : flowed.forcedFubarAtTick,
+          activeStatuses: nextStatuses,
+          cash: nextCash,
+          pressure: nextPressure,
+          forcedFubarAtTick: forcedFubarNow ? null : flowed.forcedFubarAtTick,
         },
         nextState.macro.tick,
       );
@@ -918,6 +912,7 @@ function drawSharedOpportunity(
   const remaining = state.macro.sharedOpportunityDeck.filter(
     (cardId) => !state.macro.removedSharedOpportunityCardIds.includes(cardId),
   );
+
   if (remaining.length === 0) {
     return {
       ...appendEvent(
@@ -1092,7 +1087,6 @@ function fireExtraction(
   }
 
   const attacker = byPlayerId(state.players, action.attackerId);
-  const target = byPlayerId(state.players, action.targetId);
   const extraction = EXTRACTION_CATALOG[action.extractionType];
 
   if (
@@ -1122,7 +1116,7 @@ function fireExtraction(
     ),
   );
 
-  next = mutatePlayer(next, target.playerId, (player) =>
+  next = mutatePlayer(next, action.targetId, (player) =>
     recalcPlayer(
       {
         ...player,
@@ -1456,7 +1450,7 @@ export function createInitialHeadToHeadModeState(input: {
         expenses: Math.max(0, player.expenses),
         netWorth: 0,
         pressure: 0,
-        pressureTier: 'T0_SOVEREIGN',
+        pressureTier: PressureTier.T0_SOVEREIGN,
         shields: clamp(player.shields ?? 100, 0, 100),
         battleBudget: clamp(player.battleBudget ?? 0, 0, MAX_BATTLE_BUDGET),
         creditLineScore: clamp(player.creditLineScore ?? 100, 0, 100),
