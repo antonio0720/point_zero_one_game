@@ -161,7 +161,7 @@ function snapshotWithWindowStore(
 
   // Cast timers to any/unknown to satisfy type system while preserving runtime shape
   (next.timers as unknown as any).activeDecisionWindows = store;
-  next.timers.frozenWindowIds = Object.values(store)
+  (next.timers as unknown as any).frozenWindowIds = Object.values(store)
     .filter((window) => window.frozen)
     .map((window) => window.id);
 
