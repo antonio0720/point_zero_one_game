@@ -49,7 +49,7 @@ function buildAttack(
     category,
     magnitude,
     createdAtTick: 1,
-    notes: Object.freeze([]),
+    notes: [] as string[],
   };
 }
 

@@ -1,49 +1,39 @@
-/**
- * FILE: backend/src/game/engine/tension/__tests__/TensionUXBridge.spec.ts
- *
- * 15/10 contract tests for the upgraded backend TensionUXBridge.
- * These tests guarantee that Engine 3 emits the correct typed events,
- * in deterministic order, with no hidden game-state mutation behavior.
- */
+// FILE: backend/src/game/engine/tension/__tests__/TensionUXBridge.spec.ts
 
 import { describe, expect, it } from 'vitest';
-import { EventBus } from '../../core/EventBus';
+
+import { EventBus, type EventEnvelope } from '../../core/EventBus';
 import { TensionUXBridge } from '../TensionUXBridge';
+import type {
+  AnticipationEntry,
+  AnticipationQueueUpdatedEvent,
+  ThreatArrivedEvent,
+  ThreatExpiredEvent,
+  ThreatMitigatedEvent,
+  TensionPulseFiredEvent,
+  TensionRuntimeSnapshot,
+  TensionScoreUpdatedEvent,
+  TensionVisibilityChangedEvent,
+} from '../types';
 import {
-  type AnticipationEntry,
-  type AnticipationQueueUpdatedEvent,
-  type TensionPulseFiredEvent,
-  type TensionScoreUpdatedEvent,
-  type TensionSnapshot,
-  type TensionVisibilityChangedEvent,
-  type ThreatArrivedEvent,
-  type ThreatExpiredEvent,
-  type ThreatMitigatedEvent,
-  EntryState,
-  PressureTier,
-  ThreatSeverity,
-  ThreatType,
+  ENTRY_STATE,
+  THREAT_SEVERITY,
+  THREAT_SEVERITY_WEIGHTS,
+  THREAT_TYPE,
   TENSION_CONSTANTS,
-  VisibilityState,
+  TENSION_EVENT_NAMES,
+  TENSION_VISIBILITY_STATE,
 } from '../types';
 
-type TensionEventMap = {
-  TENSION_SCORE_UPDATED: TensionScoreUpdatedEvent;
-  TENSION_VISIBILITY_CHANGED: TensionVisibilityChangedEvent;
-  TENSION_PULSE_FIRED: TensionPulseFiredEvent;
-  THREAT_ARRIVED: ThreatArrivedEvent;
-  THREAT_MITIGATED: ThreatMitigatedEvent;
-  THREAT_EXPIRED: ThreatExpiredEvent;
-  ANTICIPATION_QUEUE_UPDATED: AnticipationQueueUpdatedEvent;
-};
+type LooseEventMap = Record<string, unknown>;
 
 let entrySequence = 0;
 
-function createBus(): EventBus<TensionEventMap> {
-  return new EventBus<TensionEventMap>();
+function createBus(): EventBus<LooseEventMap> {
+  return new EventBus<LooseEventMap>();
 }
 
-function createBridge(bus: EventBus<TensionEventMap>): TensionUXBridge {
+function createBridge(bus: EventBus<LooseEventMap>): TensionUXBridge {
   return new TensionUXBridge(bus);
 }
 
@@ -52,11 +42,16 @@ function createEntry(
 ): AnticipationEntry {
   entrySequence += 1;
 
+  const threatSeverity = overrides.threatSeverity ?? THREAT_SEVERITY.SEVERE;
+
   return {
     entryId: overrides.entryId ?? `entry-${entrySequence}`,
+    runId: overrides.runId ?? 'run-tension-ux-bridge',
+    sourceKey: overrides.sourceKey ?? `source-${entrySequence}`,
     threatId: overrides.threatId ?? `threat-${entrySequence}`,
-    threatType: overrides.threatType ?? ThreatType.SABOTAGE,
-    threatSeverity: overrides.threatSeverity ?? ThreatSeverity.SEVERE,
+    source: overrides.source ?? 'TEST_HARNESS',
+    threatType: overrides.threatType ?? THREAT_TYPE.SABOTAGE,
+    threatSeverity,
     enqueuedAtTick: overrides.enqueuedAtTick ?? 4,
     arrivalTick: overrides.arrivalTick ?? 7,
     isCascadeTriggered: overrides.isCascadeTriggered ?? false,
@@ -69,7 +64,11 @@ function createEntry(
     baseTensionPerTick:
       overrides.baseTensionPerTick ??
       TENSION_CONSTANTS.ARRIVED_TENSION_PER_TICK,
-    state: overrides.state ?? EntryState.ARRIVED,
+    severityWeight:
+      overrides.severityWeight ?? THREAT_SEVERITY_WEIGHTS[threatSeverity],
+    summary:
+      overrides.summary ?? 'Sabotage window projected to arrive.',
+    state: overrides.state ?? ENTRY_STATE.ARRIVED,
     isArrived: overrides.isArrived ?? true,
     isMitigated: overrides.isMitigated ?? false,
     isExpired: overrides.isExpired ?? false,
@@ -82,63 +81,98 @@ function createEntry(
 }
 
 function createSnapshot(
-  overrides: Partial<TensionSnapshot> = {},
-): TensionSnapshot {
+  overrides: Partial<TensionRuntimeSnapshot> = {},
+): TensionRuntimeSnapshot {
   return {
     score: overrides.score ?? 0.91,
-    rawScore: overrides.rawScore ?? 0.88,
-    amplifiedScore: overrides.amplifiedScore ?? 0.91,
-    visibilityState: overrides.visibilityState ?? VisibilityState.TELEGRAPHED,
+    previousScore: overrides.previousScore ?? 0.88,
+    rawDelta: overrides.rawDelta ?? 0.03,
+    amplifiedDelta: overrides.amplifiedDelta ?? 0.03,
+    visibilityState:
+      overrides.visibilityState ?? TENSION_VISIBILITY_STATE.TELEGRAPHED,
     queueLength: overrides.queueLength ?? 3,
     arrivedCount: overrides.arrivedCount ?? 1,
     queuedCount: overrides.queuedCount ?? 2,
     expiredCount: overrides.expiredCount ?? 1,
+    relievedCount: overrides.relievedCount ?? 0,
+    visibleThreats: overrides.visibleThreats ?? Object.freeze([]),
     isPulseActive: overrides.isPulseActive ?? true,
     pulseTicksActive: overrides.pulseTicksActive ?? 2,
-    scoreHistory:
-      overrides.scoreHistory ?? Object.freeze([0.51, 0.73, 0.91]),
     isEscalating: overrides.isEscalating ?? true,
     dominantEntryId: overrides.dominantEntryId ?? 'entry-dominant',
-    pressureTierAtCompute:
-      overrides.pressureTierAtCompute ?? PressureTier.CRITICAL,
+    lastSpikeTick: overrides.lastSpikeTick ?? 11,
     tickNumber: overrides.tickNumber ?? 12,
     timestamp: overrides.timestamp ?? 1_717_171_717_000,
+    contributionBreakdown:
+      overrides.contributionBreakdown ??
+      Object.freeze({
+        queuedThreats: 0.24,
+        arrivedThreats: 0.2,
+        expiredGhosts: 0.08,
+        mitigationDecay: 0,
+        nullifyDecay: 0,
+        emptyQueueBonus: 0,
+        visibilityBonus: 0.05,
+        sovereigntyBonus: 0,
+      }),
   };
 }
 
-function getLastEnvelope<K extends keyof TensionEventMap>(
-  bus: EventBus<TensionEventMap>,
-  event: K,
-) {
+function getLastEnvelope(
+  bus: EventBus<LooseEventMap>,
+  event: string,
+): EventEnvelope<string, unknown> {
   const envelope = bus.last(event);
   expect(envelope).not.toBeNull();
-  return envelope!;
+  return envelope as EventEnvelope<string, unknown>;
 }
 
 describe('TensionUXBridge', () => {
-  it('emitScoreUpdated emits TENSION_SCORE_UPDATED with snapshot fields', () => {
+  it('emitScoreUpdated emits the typed score event and the legacy update event', () => {
     const bus = createBus();
     const bridge = createBridge(bus);
     const snapshot = createSnapshot({
       score: 0.64,
-      visibilityState: VisibilityState.SIGNALED,
+      previousScore: 0.51,
+      rawDelta: 0.08,
+      amplifiedDelta: 0.13,
+      visibilityState: TENSION_VISIBILITY_STATE.SIGNALED,
+      queueLength: 4,
+      arrivedCount: 1,
+      queuedCount: 3,
+      expiredCount: 0,
+      dominantEntryId: 'entry-9',
       tickNumber: 9,
       timestamp: 1_700_000_000_009,
     });
 
     bridge.emitScoreUpdated(snapshot);
 
-    const envelope = getLastEnvelope(bus, 'TENSION_SCORE_UPDATED');
+    const scoreEnvelope = getLastEnvelope(bus, TENSION_EVENT_NAMES.SCORE_UPDATED);
+    const legacyEnvelope = getLastEnvelope(bus, TENSION_EVENT_NAMES.UPDATED_LEGACY);
 
-    expect(envelope.payload).toEqual({
+    const scorePayload =
+      scoreEnvelope.payload as TensionScoreUpdatedEvent;
+
+    expect(scorePayload).toEqual({
       eventType: 'TENSION_SCORE_UPDATED',
       score: 0.64,
-      visibilityState: VisibilityState.SIGNALED,
+      previousScore: 0.51,
+      rawDelta: 0.08,
+      amplifiedDelta: 0.13,
+      visibilityState: TENSION_VISIBILITY_STATE.SIGNALED,
+      queueLength: 4,
+      arrivedCount: 1,
+      queuedCount: 3,
+      expiredCount: 0,
+      dominantEntryId: 'entry-9',
       tickNumber: 9,
       timestamp: 1_700_000_000_009,
     });
-    expect(bus.historyCount()).toBe(1);
-    expect(bus.queuedCount()).toBe(1);
+
+    expect(legacyEnvelope.payload).toEqual(snapshot);
+    expect(bus.historyCount()).toBe(2);
+    expect(bus.queuedCount()).toBe(2);
   });
 
   it('emitVisibilityChanged emits the exact from/to transition', () => {
@@ -146,21 +180,26 @@ describe('TensionUXBridge', () => {
     const bridge = createBridge(bus);
 
     bridge.emitVisibilityChanged(
-      VisibilityState.SHADOWED,
-      VisibilityState.TELEGRAPHED,
+      TENSION_VISIBILITY_STATE.SHADOWED,
+      TENSION_VISIBILITY_STATE.TELEGRAPHED,
       22,
+      1_700_000_000_022,
     );
 
-    const envelope = getLastEnvelope(bus, 'TENSION_VISIBILITY_CHANGED');
+    const envelope = getLastEnvelope(bus, TENSION_EVENT_NAMES.VISIBILITY_CHANGED);
+    const payload =
+      envelope.payload as TensionVisibilityChangedEvent;
 
-    expect(envelope.payload.eventType).toBe('TENSION_VISIBILITY_CHANGED');
-    expect(envelope.payload.from).toBe(VisibilityState.SHADOWED);
-    expect(envelope.payload.to).toBe(VisibilityState.TELEGRAPHED);
-    expect(envelope.payload.tickNumber).toBe(22);
-    expect(typeof envelope.payload.timestamp).toBe('number');
+    expect(payload).toEqual({
+      eventType: 'TENSION_VISIBILITY_CHANGED',
+      from: TENSION_VISIBILITY_STATE.SHADOWED,
+      to: TENSION_VISIBILITY_STATE.TELEGRAPHED,
+      tickNumber: 22,
+      timestamp: 1_700_000_000_022,
+    });
   });
 
-  it('emitPulseFired emits TENSION_PULSE_FIRED with pulse metadata', () => {
+  it('emitPulseFired emits pulse metadata from the runtime snapshot', () => {
     const bus = createBus();
     const bridge = createBridge(bus);
     const snapshot = createSnapshot({
@@ -168,19 +207,21 @@ describe('TensionUXBridge', () => {
       queueLength: 5,
       pulseTicksActive: 3,
       tickNumber: 18,
+      timestamp: 1_700_000_000_018,
     });
 
     bridge.emitPulseFired(snapshot);
 
-    const envelope = getLastEnvelope(bus, 'TENSION_PULSE_FIRED');
+    const envelope = getLastEnvelope(bus, TENSION_EVENT_NAMES.PULSE_FIRED);
+    const payload = envelope.payload as TensionPulseFiredEvent;
 
-    expect(envelope.payload).toEqual({
+    expect(payload).toEqual({
       eventType: 'TENSION_PULSE_FIRED',
       score: 0.95,
       queueLength: 5,
       pulseTicksActive: 3,
       tickNumber: 18,
-      timestamp: snapshot.timestamp,
+      timestamp: 1_700_000_000_018,
     });
   });
 
@@ -188,8 +229,9 @@ describe('TensionUXBridge', () => {
     const bus = createBus();
     const bridge = createBridge(bus);
     const entry = createEntry({
-      threatType: ThreatType.SOVEREIGNTY,
-      threatSeverity: ThreatSeverity.EXISTENTIAL,
+      threatType: THREAT_TYPE.SOVEREIGNTY,
+      threatSeverity: THREAT_SEVERITY.EXISTENTIAL,
+      source: 'SOVEREIGN_WATCH',
       worstCaseOutcome: 'Freedom target wiped and proof chain fractured',
       mitigationCardTypes: Object.freeze([
         'LITIGATION_BASTION',
@@ -199,82 +241,89 @@ describe('TensionUXBridge', () => {
 
     bridge.emitThreatArrived(entry, 31);
 
-    const envelope = getLastEnvelope(bus, 'THREAT_ARRIVED');
+    const envelope = getLastEnvelope(bus, TENSION_EVENT_NAMES.THREAT_ARRIVED);
+    const payload = envelope.payload as ThreatArrivedEvent;
 
-    expect(envelope.payload.eventType).toBe('THREAT_ARRIVED');
-    expect(envelope.payload.entryId).toBe(entry.entryId);
-    expect(envelope.payload.threatType).toBe(ThreatType.SOVEREIGNTY);
-    expect(envelope.payload.threatSeverity).toBe(ThreatSeverity.EXISTENTIAL);
-    expect(envelope.payload.worstCaseOutcome).toBe(
+    expect(payload.eventType).toBe('THREAT_ARRIVED');
+    expect(payload.entryId).toBe(entry.entryId);
+    expect(payload.threatType).toBe(THREAT_TYPE.SOVEREIGNTY);
+    expect(payload.threatSeverity).toBe(THREAT_SEVERITY.EXISTENTIAL);
+    expect(payload.source).toBe('SOVEREIGN_WATCH');
+    expect(payload.worstCaseOutcome).toBe(
       'Freedom target wiped and proof chain fractured',
     );
-    expect(envelope.payload.mitigationCardTypes).toEqual([
+    expect(payload.mitigationCardTypes).toEqual([
       'LITIGATION_BASTION',
       'TRUST_FORTIFICATION',
     ]);
-    expect(envelope.payload.tickNumber).toBe(31);
-    expect(typeof envelope.payload.timestamp).toBe('number');
+    expect(payload.tickNumber).toBe(31);
+    expect(typeof payload.timestamp).toBe('number');
   });
 
   it('emitThreatMitigated emits THREAT_MITIGATED without extra mutation', () => {
     const bus = createBus();
     const bridge = createBridge(bus);
-
-    bridge.emitThreatMitigated('entry-99', ThreatType.CASCADE, 44);
-
-    const envelope = getLastEnvelope(bus, 'THREAT_MITIGATED');
-
-    expect(envelope.payload).toEqual({
-      eventType: 'THREAT_MITIGATED',
+    const entry = createEntry({
       entryId: 'entry-99',
-      threatType: ThreatType.CASCADE,
-      tickNumber: 44,
-      timestamp: envelope.payload.timestamp,
+      threatType: THREAT_TYPE.CASCADE,
     });
-    expect(typeof envelope.payload.timestamp).toBe('number');
+
+    bridge.emitThreatMitigated(entry, 44);
+
+    const envelope = getLastEnvelope(bus, TENSION_EVENT_NAMES.THREAT_MITIGATED);
+    const payload = envelope.payload as ThreatMitigatedEvent;
+
+    expect(payload.eventType).toBe('THREAT_MITIGATED');
+    expect(payload.entryId).toBe('entry-99');
+    expect(payload.threatType).toBe(THREAT_TYPE.CASCADE);
+    expect(payload.tickNumber).toBe(44);
+    expect(typeof payload.timestamp).toBe('number');
   });
 
   it('emitThreatExpired emits overdue metadata for post-window failure', () => {
     const bus = createBus();
     const bridge = createBridge(bus);
     const entry = createEntry({
-      state: EntryState.EXPIRED,
+      state: ENTRY_STATE.EXPIRED,
       isArrived: true,
       isExpired: true,
       expiredAtTick: 27,
       ticksOverdue: 2,
-      threatType: ThreatType.DEBT_SPIRAL,
-      threatSeverity: ThreatSeverity.CRITICAL,
+      threatType: THREAT_TYPE.DEBT_SPIRAL,
+      threatSeverity: THREAT_SEVERITY.CRITICAL,
     });
 
     bridge.emitThreatExpired(entry, 27);
 
-    const envelope = getLastEnvelope(bus, 'THREAT_EXPIRED');
+    const envelope = getLastEnvelope(bus, TENSION_EVENT_NAMES.THREAT_EXPIRED);
+    const payload = envelope.payload as ThreatExpiredEvent;
 
-    expect(envelope.payload.eventType).toBe('THREAT_EXPIRED');
-    expect(envelope.payload.entryId).toBe(entry.entryId);
-    expect(envelope.payload.threatType).toBe(ThreatType.DEBT_SPIRAL);
-    expect(envelope.payload.threatSeverity).toBe(ThreatSeverity.CRITICAL);
-    expect(envelope.payload.ticksOverdue).toBe(2);
-    expect(envelope.payload.tickNumber).toBe(27);
+    expect(payload.eventType).toBe('THREAT_EXPIRED');
+    expect(payload.entryId).toBe(entry.entryId);
+    expect(payload.threatType).toBe(THREAT_TYPE.DEBT_SPIRAL);
+    expect(payload.threatSeverity).toBe(THREAT_SEVERITY.CRITICAL);
+    expect(payload.ticksOverdue).toBe(2);
+    expect(payload.tickNumber).toBe(27);
+    expect(typeof payload.timestamp).toBe('number');
   });
 
   it('emitQueueUpdated emits queue counters for store synchronization', () => {
     const bus = createBus();
     const bridge = createBridge(bus);
 
-    bridge.emitQueueUpdated(7, 3, 52);
+    bridge.emitQueueUpdated(7, 3, 4, 1, 52);
 
-    const envelope = getLastEnvelope(bus, 'ANTICIPATION_QUEUE_UPDATED');
+    const envelope = getLastEnvelope(bus, TENSION_EVENT_NAMES.QUEUE_UPDATED);
+    const payload =
+      envelope.payload as AnticipationQueueUpdatedEvent;
 
-    expect(envelope.payload).toEqual({
-      eventType: 'ANTICIPATION_QUEUE_UPDATED',
-      queueLength: 7,
-      arrivedCount: 3,
-      tickNumber: 52,
-      timestamp: envelope.payload.timestamp,
-    });
-    expect(typeof envelope.payload.timestamp).toBe('number');
+    expect(payload.eventType).toBe('ANTICIPATION_QUEUE_UPDATED');
+    expect(payload.queueLength).toBe(7);
+    expect(payload.arrivedCount).toBe(3);
+    expect(payload.queuedCount).toBe(4);
+    expect(payload.expiredCount).toBe(1);
+    expect(payload.tickNumber).toBe(52);
+    expect(typeof payload.timestamp).toBe('number');
   });
 
   it('preserves deterministic event order across multiple bridge calls', () => {
@@ -290,15 +339,17 @@ describe('TensionUXBridge', () => {
 
     bridge.emitScoreUpdated(snapshot);
     bridge.emitPulseFired(snapshot);
-    bridge.emitQueueUpdated(4, 2, 61);
+    bridge.emitQueueUpdated(4, 2, 2, 0, 61);
 
     const history = bus.getHistory();
 
-    expect(history).toHaveLength(3);
-    expect(history[0].event).toBe('TENSION_SCORE_UPDATED');
-    expect(history[1].event).toBe('TENSION_PULSE_FIRED');
-    expect(history[2].event).toBe('ANTICIPATION_QUEUE_UPDATED');
+    expect(history).toHaveLength(4);
+    expect(history[0].event).toBe(TENSION_EVENT_NAMES.SCORE_UPDATED);
+    expect(history[1].event).toBe(TENSION_EVENT_NAMES.UPDATED_LEGACY);
+    expect(history[2].event).toBe(TENSION_EVENT_NAMES.PULSE_FIRED);
+    expect(history[3].event).toBe(TENSION_EVENT_NAMES.QUEUE_UPDATED);
     expect(history[0].sequence).toBeLessThan(history[1].sequence);
     expect(history[1].sequence).toBeLessThan(history[2].sequence);
+    expect(history[2].sequence).toBeLessThan(history[3].sequence);
   });
 });

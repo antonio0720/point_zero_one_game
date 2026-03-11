@@ -1,3 +1,5 @@
+// FILE: backend/src/game/engine/tension/__tests__/fixtures.ts
+
 /**
  * ============================================================================
  * POINT ZERO ONE — BACKEND TENSION TEST FIXTURES
@@ -29,24 +31,27 @@ import {
   type AnticipationEntry,
   type DecayComputeInput,
   type DecayContributionBreakdown,
-  type EntryState,
   type QueueUpsertInput,
-  type ThreatSeverity,
-  type ThreatType,
   type TensionRuntimeSnapshot,
-  type TensionVisibilityState,
 } from '../types';
 
-type DeepPartial<T> = {
-  [K in keyof T]?: T[K] extends readonly (infer U)[]
-    ? readonly U[]
-    : T[K] extends object
-      ? DeepPartial<T[K]>
-      : T[K];
-};
-
 export interface RunStateFixtureOverrides
-  extends Partial<Omit<RunStateSnapshot, 'economy' | 'pressure' | 'tension' | 'shield' | 'battle' | 'cascade' | 'sovereignty' | 'cards' | 'modeState' | 'timers' | 'telemetry'>> {
+  extends Partial<
+    Omit<
+      RunStateSnapshot,
+      | 'economy'
+      | 'pressure'
+      | 'tension'
+      | 'shield'
+      | 'battle'
+      | 'cascade'
+      | 'sovereignty'
+      | 'cards'
+      | 'modeState'
+      | 'timers'
+      | 'telemetry'
+    >
+  > {
   readonly economy?: Partial<RunStateSnapshot['economy']>;
   readonly pressure?: Partial<RunStateSnapshot['pressure']>;
   readonly tension?: Partial<RunStateSnapshot['tension']>;
@@ -60,18 +65,12 @@ export interface RunStateFixtureOverrides
   readonly telemetry?: Partial<RunStateSnapshot['telemetry']>;
 }
 
-export interface ThreatEnvelopeFixtureOverrides
-  extends Partial<ThreatEnvelope> {}
-
-export interface QueueInputFixtureOverrides
-  extends Partial<QueueUpsertInput> {}
-
+export interface ThreatEnvelopeFixtureOverrides extends Partial<ThreatEnvelope> {}
+export interface QueueInputFixtureOverrides extends Partial<QueueUpsertInput> {}
 export interface AnticipationEntryFixtureOverrides
   extends Partial<AnticipationEntry> {}
-
 export interface RuntimeSnapshotFixtureOverrides
   extends Partial<TensionRuntimeSnapshot> {}
-
 export interface DecayInputFixtureOverrides
   extends Partial<DecayComputeInput> {}
 
@@ -261,8 +260,7 @@ export function createRunStateSnapshotFixture(
 export function createQueueUpsertInputFixture(
   overrides: QueueInputFixtureOverrides = {},
 ): QueueUpsertInput {
-  const threatSeverity =
-    overrides.threatSeverity ?? THREAT_SEVERITY.MODERATE;
+  const threatSeverity = overrides.threatSeverity ?? THREAT_SEVERITY.MODERATE;
 
   return Object.freeze({
     runId: overrides.runId ?? DEFAULT_RUN_ID,
@@ -279,8 +277,7 @@ export function createQueueUpsertInputFixture(
       overrides.worstCaseOutcome ??
       'Recurring cashflow destruction overwhelms the player economy.',
     mitigationCardTypes: freezeArray(
-      overrides.mitigationCardTypes ??
-        Object.freeze(['REFINANCE', 'INCOME_SHIELD']),
+      overrides.mitigationCardTypes ?? ['REFINANCE', 'INCOME_SHIELD'],
     ),
     summary:
       overrides.summary ??
@@ -312,12 +309,14 @@ export function createAnticipationEntryFixture(
 
   const state = overrides.state ?? ENTRY_STATE.QUEUED;
   const isArrived =
-    overrides.isArrived ?? state === ENTRY_STATE.ARRIVED || state === ENTRY_STATE.EXPIRED;
-  const isMitigated = overrides.isMitigated ?? state === ENTRY_STATE.MITIGATED;
+    overrides.isArrived ??
+    (state === ENTRY_STATE.ARRIVED || state === ENTRY_STATE.EXPIRED);
+  const isMitigated =
+    overrides.isMitigated ?? state === ENTRY_STATE.MITIGATED;
   const isExpired = overrides.isExpired ?? state === ENTRY_STATE.EXPIRED;
   const isNullified = overrides.isNullified ?? state === ENTRY_STATE.NULLIFIED;
 
-  const entry: AnticipationEntry = {
+  return {
     entryId: overrides.entryId ?? nextFixtureId('tension_entry'),
     runId: overrides.runId ?? baseInput.runId,
     sourceKey: overrides.sourceKey ?? baseInput.sourceKey,
@@ -338,7 +337,7 @@ export function createAnticipationEntryFixture(
     ),
     baseTensionPerTick:
       overrides.baseTensionPerTick ??
-      (state === ENTRY_STATE.ARRIVED
+      (state === ENTRY_STATE.ARRIVED || state === ENTRY_STATE.EXPIRED
         ? TENSION_CONSTANTS.ARRIVED_TENSION_PER_TICK
         : TENSION_CONSTANTS.QUEUED_TENSION_PER_TICK),
     severityWeight:
@@ -352,11 +351,10 @@ export function createAnticipationEntryFixture(
     isExpired,
     isNullified,
     mitigatedAtTick:
-      overrides.mitigatedAtTick ?? (isMitigated ? (overrides.arrivalTick ?? 4) : null),
+      overrides.mitigatedAtTick ?? (isMitigated ? baseInput.arrivalTick : null),
     expiredAtTick:
-      overrides.expiredAtTick ?? (isExpired ? (overrides.arrivalTick ?? 4) + 1 : null),
-    ticksOverdue:
-      overrides.ticksOverdue ?? (isExpired || state === ENTRY_STATE.ARRIVED ? 0 : 0),
+      overrides.expiredAtTick ?? (isExpired ? baseInput.arrivalTick + 1 : null),
+    ticksOverdue: overrides.ticksOverdue ?? 0,
     decayTicksRemaining:
       overrides.decayTicksRemaining ??
       (state === ENTRY_STATE.MITIGATED
@@ -365,8 +363,6 @@ export function createAnticipationEntryFixture(
           ? TENSION_CONSTANTS.NULLIFY_DECAY_TICKS
           : 0),
   };
-
-  return entry;
 }
 
 export function createQueuedEntryFixture(
@@ -430,7 +426,8 @@ export function createMitigatedEntryFixture(
     baseTensionPerTick: TENSION_CONSTANTS.ARRIVED_TENSION_PER_TICK,
     mitigatedAtTick: overrides.mitigatedAtTick ?? 3,
     decayTicksRemaining:
-      overrides.decayTicksRemaining ?? TENSION_CONSTANTS.MITIGATION_DECAY_TICKS,
+      overrides.decayTicksRemaining ??
+      TENSION_CONSTANTS.MITIGATION_DECAY_TICKS,
     ...overrides,
   });
 }
@@ -453,9 +450,7 @@ export function createNullifiedEntryFixture(
 export function createTensionRuntimeSnapshotFixture(
   overrides: RuntimeSnapshotFixtureOverrides = {},
 ): TensionRuntimeSnapshot {
-  const visibleThreats = freezeArray(
-    overrides.visibleThreats ?? Object.freeze([]),
-  );
+  const visibleThreats = freezeArray(overrides.visibleThreats ?? []);
   const queueLength = overrides.queueLength ?? visibleThreats.length;
   const arrivedCount = overrides.arrivedCount ?? 0;
   const queuedCount =
@@ -491,9 +486,9 @@ export function createDecayInputFixture(
   overrides: DecayInputFixtureOverrides = {},
 ): DecayComputeInput {
   return Object.freeze({
-    activeEntries: freezeArray(overrides.activeEntries ?? Object.freeze([])),
-    expiredEntries: freezeArray(overrides.expiredEntries ?? Object.freeze([])),
-    relievedEntries: freezeArray(overrides.relievedEntries ?? Object.freeze([])),
+    activeEntries: freezeArray(overrides.activeEntries ?? []),
+    expiredEntries: freezeArray(overrides.expiredEntries ?? []),
+    relievedEntries: freezeArray(overrides.relievedEntries ?? []),
     pressureTier: overrides.pressureTier ?? 'T0',
     visibilityAwarenessBonus: overrides.visibilityAwarenessBonus ?? 0,
     queueIsEmpty: overrides.queueIsEmpty ?? true,

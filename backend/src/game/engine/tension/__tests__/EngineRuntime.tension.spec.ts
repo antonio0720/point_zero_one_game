@@ -1,51 +1,44 @@
-// FILE: backend/src/game/engine/core/__tests__/EngineRuntime.tension.spec.ts
+// FILE: backend/src/game/engine/tension/__tests__/EngineRuntime.tension.spec.ts
 
 import { describe, expect, it } from 'vitest';
 
-import { EngineRuntime } from '../EngineRuntime';
-import { TensionEngine } from '../../tension/TensionEngine';
+import type { ModeCode } from '../../core/GamePrimitives';
+import { EngineRuntime } from '../../core/EngineRuntime';
+import { TensionEngine } from '../TensionEngine';
+import type { QueueUpsertInput } from '../types';
 import {
   THREAT_SEVERITY,
   THREAT_TYPE,
   TENSION_EVENT_NAMES,
-} from '../../tension/types';
+} from '../types';
 
 let threatSequence = 0;
 
-function createHarness(mode: 'solo' | 'pvp' | 'coop' | 'ghost' = 'solo') {
+type ThreatInputOverrides = Partial<
+  Omit<QueueUpsertInput, 'runId' | 'currentTick'>
+>;
+
+function createHarness(mode: ModeCode = 'solo') {
   const tensionEngine = new TensionEngine();
   const runtime = new EngineRuntime();
 
   runtime.registerEngine(tensionEngine);
 
-  const started = runtime.startRun({
+  runtime.startRun({
     runId: `run-${mode}-tension`,
     userId: `user-${mode}`,
     seed: `seed-${mode}-tension`,
     mode,
   });
 
-  return { runtime, tensionEngine, started };
+  return { runtime, tensionEngine };
 }
 
 function buildThreatInput(
   runId: string,
   currentTick: number,
-  overrides: Partial<{
-    sourceKey: string;
-    threatId: string;
-    source: string;
-    threatType: string;
-    threatSeverity: string;
-    arrivalTick: number;
-    isCascadeTriggered: boolean;
-    cascadeTriggerEventId: string | null;
-    worstCaseOutcome: string;
-    mitigationCardTypes: readonly string[];
-    summary: string;
-    severityWeight: number;
-  }> = {},
-) {
+  overrides: ThreatInputOverrides = {},
+): QueueUpsertInput {
   threatSequence += 1;
 
   return {
@@ -53,10 +46,8 @@ function buildThreatInput(
     sourceKey: overrides.sourceKey ?? `manual-threat-source-${threatSequence}`,
     threatId: overrides.threatId ?? `manual-threat-${threatSequence}`,
     source: overrides.source ?? 'TEST_HARNESS',
-    threatType: (overrides.threatType ??
-      THREAT_TYPE.DEBT_SPIRAL) as typeof THREAT_TYPE[keyof typeof THREAT_TYPE],
-    threatSeverity: (overrides.threatSeverity ??
-      THREAT_SEVERITY.SEVERE) as typeof THREAT_SEVERITY[keyof typeof THREAT_SEVERITY],
+    threatType: overrides.threatType ?? THREAT_TYPE.DEBT_SPIRAL,
+    threatSeverity: overrides.threatSeverity ?? THREAT_SEVERITY.SEVERE,
     currentTick,
     arrivalTick: overrides.arrivalTick ?? currentTick + 1,
     isCascadeTriggered: overrides.isCascadeTriggered ?? false,
@@ -121,7 +112,8 @@ describe('EngineRuntime × TensionEngine', () => {
         threatSeverity: THREAT_SEVERITY.CRITICAL,
         arrivalTick: warmup.snapshot.tick + 1,
         summary: 'Sabotage window opens next tick.',
-        worstCaseOutcome: 'Liquidity channel is wiped if the action window is missed.',
+        worstCaseOutcome:
+          'Liquidity channel is wiped if the action window is missed.',
         mitigationCardTypes: Object.freeze(['COUNTER_PLAY', 'LEGAL_DEFENSE']),
       }),
     );
@@ -132,7 +124,10 @@ describe('EngineRuntime × TensionEngine', () => {
     expect(scoreAtArrival).toBeGreaterThan(0);
     expect(arrivedTick.snapshot.tension.visibleThreats).toHaveLength(1);
 
-    const mitigated = tensionEngine.mitigateThreat(entryId, arrivedTick.snapshot.tick);
+    const mitigated = tensionEngine.mitigateThreat(
+      entryId,
+      arrivedTick.snapshot.tick,
+    );
     expect(mitigated).toBe(true);
 
     const relievedTick = runtime.tick();
@@ -163,5 +158,33 @@ describe('EngineRuntime × TensionEngine', () => {
     expect(result.snapshot.tension.visibleThreats).toHaveLength(1);
     expect(result.snapshot.battle.pendingAttacks).toEqual([]);
     expect(result.snapshot.battle.pendingAttacks).toHaveLength(0);
+  });
+
+  it('supports queued nullification before arrival without leaking battle-side mutations', () => {
+    const { runtime, tensionEngine } = createHarness('solo');
+
+    const warmup = runtime.tick();
+
+    const entryId = tensionEngine.enqueueThreat(
+      buildThreatInput(warmup.snapshot.runId, warmup.snapshot.tick, {
+        threatType: THREAT_TYPE.OPPORTUNITY_KILL,
+        threatSeverity: THREAT_SEVERITY.SEVERE,
+        arrivalTick: warmup.snapshot.tick + 2,
+        summary: 'Opportunity collapse is telegraphed two ticks out.',
+        mitigationCardTypes: Object.freeze(['RECOVER_OPPORTUNITY']),
+      }),
+    );
+
+    const nullified = tensionEngine.nullifyThreat(
+      entryId,
+      warmup.snapshot.tick,
+    );
+    expect(nullified).toBe(true);
+
+    const result = runtime.tick();
+
+    expect(result.snapshot.tick).toBe(2);
+    expect(result.snapshot.tension.visibleThreats).toHaveLength(0);
+    expect(result.snapshot.battle.pendingAttacks).toEqual([]);
   });
 });

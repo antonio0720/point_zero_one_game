@@ -1,50 +1,45 @@
-/**
- * FILE: backend/src/game/engine/tension/__tests__/TensionDecayController.spec.ts
- *
- * 15/10 contract tests for the upgraded backend TensionDecayController.
- * These tests intentionally target the richer Engine 3 doctrine:
- * - queued dread
- * - arrived urgency
- * - expired ghost penalties
- * - positive-only pressure amplification
- * - empty-board recovery
- * - sovereignty milestone relief (once per run)
- */
+// FILE: backend/src/game/engine/tension/__tests__/TensionDecayController.spec.ts
 
 import { describe, expect, it } from 'vitest';
+
 import { TensionDecayController } from '../TensionDecayController';
+import type { AnticipationEntry, DecayComputeInput } from '../types';
 import {
-  type AnticipationEntry,
-  EntryState,
-  PressureTier,
-  ThreatSeverity,
-  ThreatType,
+  ENTRY_STATE,
+  THREAT_SEVERITY,
+  THREAT_SEVERITY_WEIGHTS,
+  THREAT_TYPE,
   TENSION_CONSTANTS,
 } from '../types';
 
 let entrySequence = 0;
 
 function createEntry(
-  state: EntryState,
+  state: AnticipationEntry['state'],
   overrides: Partial<AnticipationEntry> = {},
 ): AnticipationEntry {
   entrySequence += 1;
 
-  const defaultThreatType =
-    state === EntryState.NULLIFIED
-      ? ThreatType.OPPORTUNITY_KILL
-      : ThreatType.DEBT_SPIRAL;
+  const threatType =
+    overrides.threatType ??
+    (state === ENTRY_STATE.NULLIFIED
+      ? THREAT_TYPE.OPPORTUNITY_KILL
+      : THREAT_TYPE.DEBT_SPIRAL);
 
-  const isArrived = state === EntryState.ARRIVED;
-  const isMitigated = state === EntryState.MITIGATED;
-  const isExpired = state === EntryState.EXPIRED;
-  const isNullified = state === EntryState.NULLIFIED;
+  const threatSeverity = overrides.threatSeverity ?? THREAT_SEVERITY.MODERATE;
+  const isArrived = state === ENTRY_STATE.ARRIVED || state === ENTRY_STATE.EXPIRED;
+  const isMitigated = state === ENTRY_STATE.MITIGATED;
+  const isExpired = state === ENTRY_STATE.EXPIRED;
+  const isNullified = state === ENTRY_STATE.NULLIFIED;
 
   return {
     entryId: overrides.entryId ?? `entry-${entrySequence}`,
+    runId: overrides.runId ?? 'run-decay-spec',
+    sourceKey: overrides.sourceKey ?? `source-${entrySequence}`,
     threatId: overrides.threatId ?? `threat-${entrySequence}`,
-    threatType: overrides.threatType ?? defaultThreatType,
-    threatSeverity: overrides.threatSeverity ?? ThreatSeverity.MODERATE,
+    source: overrides.source ?? 'TEST_HARNESS',
+    threatType,
+    threatSeverity,
     enqueuedAtTick: overrides.enqueuedAtTick ?? 1,
     arrivalTick: overrides.arrivalTick ?? 4,
     isCascadeTriggered: overrides.isCascadeTriggered ?? false,
@@ -56,10 +51,14 @@ function createEntry(
       Object.freeze(['INCOME_SHIELD', 'LEGAL_COUNTERMEASURE']),
     baseTensionPerTick:
       overrides.baseTensionPerTick ??
-      (state === EntryState.ARRIVED
+      (state === ENTRY_STATE.ARRIVED || state === ENTRY_STATE.EXPIRED
         ? TENSION_CONSTANTS.ARRIVED_TENSION_PER_TICK
         : TENSION_CONSTANTS.QUEUED_TENSION_PER_TICK),
-
+    severityWeight:
+      overrides.severityWeight ??
+      THREAT_SEVERITY_WEIGHTS[threatSeverity],
+    summary:
+      overrides.summary ?? 'Deterministic tension test entry',
     state: overrides.state ?? state,
     isArrived: overrides.isArrived ?? isArrived,
     isMitigated: overrides.isMitigated ?? isMitigated,
@@ -72,54 +71,56 @@ function createEntry(
     ticksOverdue: overrides.ticksOverdue ?? (isExpired ? 2 : 0),
     decayTicksRemaining:
       overrides.decayTicksRemaining ??
-      (isMitigated || isNullified
+      (isMitigated
         ? TENSION_CONSTANTS.MITIGATION_DECAY_TICKS
-        : 0),
+        : isNullified
+          ? TENSION_CONSTANTS.NULLIFY_DECAY_TICKS
+          : 0),
   };
 }
 
 function queuedEntry(
   overrides: Partial<AnticipationEntry> = {},
 ): AnticipationEntry {
-  return createEntry(EntryState.QUEUED, overrides);
+  return createEntry(ENTRY_STATE.QUEUED, overrides);
 }
 
 function arrivedEntry(
   overrides: Partial<AnticipationEntry> = {},
 ): AnticipationEntry {
-  return createEntry(EntryState.ARRIVED, overrides);
+  return createEntry(ENTRY_STATE.ARRIVED, overrides);
 }
 
 function expiredEntry(
   overrides: Partial<AnticipationEntry> = {},
 ): AnticipationEntry {
-  return createEntry(EntryState.EXPIRED, overrides);
+  return createEntry(ENTRY_STATE.EXPIRED, overrides);
 }
 
 function mitigatedEntry(
   overrides: Partial<AnticipationEntry> = {},
 ): AnticipationEntry {
-  return createEntry(EntryState.MITIGATED, overrides);
+  return createEntry(ENTRY_STATE.MITIGATED, overrides);
 }
 
 function nullifiedEntry(
   overrides: Partial<AnticipationEntry> = {},
 ): AnticipationEntry {
-  return createEntry(EntryState.NULLIFIED, overrides);
+  return createEntry(ENTRY_STATE.NULLIFIED, overrides);
 }
 
 function createInput(
-  overrides: Partial<any> = {},
-): any {
+  overrides: Partial<DecayComputeInput> = {},
+): DecayComputeInput {
   return {
-    activeEntries: [],
-    expiredEntries: [],
-    mitigatingEntries: [],
-    pressureTier: PressureTier.CALM,
-    visibilityAwarenessBonus: 0,
-    queueIsEmpty: true,
-    sovereigntyMilestoneReached: false,
-    ...overrides,
+    activeEntries: overrides.activeEntries ?? [],
+    expiredEntries: overrides.expiredEntries ?? [],
+    relievedEntries: overrides.relievedEntries ?? [],
+    pressureTier: overrides.pressureTier ?? 'T0',
+    visibilityAwarenessBonus: overrides.visibilityAwarenessBonus ?? 0,
+    queueIsEmpty: overrides.queueIsEmpty ?? true,
+    sovereigntyMilestoneReached:
+      overrides.sovereigntyMilestoneReached ?? false,
   };
 }
 
@@ -176,8 +177,8 @@ describe('TensionDecayController', () => {
     const result = controller.computeDelta(
       createInput({
         activeEntries: [queuedEntry()],
-        mitigatingEntries: [mitigatedEntry()],
-        pressureTier: PressureTier.CRITICAL,
+        relievedEntries: [mitigatedEntry()],
+        pressureTier: 'T4',
         queueIsEmpty: false,
       }),
     );
@@ -292,14 +293,14 @@ describe('TensionDecayController', () => {
 
     const nullifiedResult = controller.computeDelta(
       createInput({
-        mitigatingEntries: [nullifiedEntry(), nullifiedEntry()],
+        relievedEntries: [nullifiedEntry(), nullifiedEntry()],
         queueIsEmpty: false,
       }),
     );
 
     const mitigatedResult = controller.computeDelta(
       createInput({
-        mitigatingEntries: [mitigatedEntry(), mitigatedEntry()],
+        relievedEntries: [mitigatedEntry(), mitigatedEntry()],
         queueIsEmpty: false,
       }),
     );
@@ -322,7 +323,7 @@ describe('TensionDecayController', () => {
 
     const result = controller.computeDelta(
       createInput({
-        mitigatingEntries: [mitigatedEntry()],
+        relievedEntries: [mitigatedEntry()],
         queueIsEmpty: true,
       }),
     );
@@ -332,44 +333,53 @@ describe('TensionDecayController', () => {
     expect(result.amplifiedDelta).toBeCloseTo(-0.13, 6);
   });
 
-  it('honors the pressure amplifier table across tiers', () => {
+  it('honors the pressure amplifier table across all repo tiers', () => {
     const controller = new TensionDecayController();
 
-    const calm = controller.computeDelta(
+    const t0 = controller.computeDelta(
       createInput({
         activeEntries: [queuedEntry()],
-        pressureTier: PressureTier.CALM,
+        pressureTier: 'T0',
         queueIsEmpty: false,
       }),
     );
 
-    const elevated = controller.computeDelta(
+    const t1 = controller.computeDelta(
       createInput({
         activeEntries: [queuedEntry()],
-        pressureTier: PressureTier.ELEVATED,
+        pressureTier: 'T1',
         queueIsEmpty: false,
       }),
     );
 
-    const high = controller.computeDelta(
+    const t2 = controller.computeDelta(
       createInput({
         activeEntries: [queuedEntry()],
-        pressureTier: PressureTier.HIGH,
+        pressureTier: 'T2',
         queueIsEmpty: false,
       }),
     );
 
-    const critical = controller.computeDelta(
+    const t3 = controller.computeDelta(
       createInput({
         activeEntries: [queuedEntry()],
-        pressureTier: PressureTier.CRITICAL,
+        pressureTier: 'T3',
         queueIsEmpty: false,
       }),
     );
 
-    expect(calm.amplifiedDelta).toBeCloseTo(0.12, 6);
-    expect(elevated.amplifiedDelta).toBeCloseTo(0.144, 6);
-    expect(high.amplifiedDelta).toBeCloseTo(0.162, 6);
-    expect(critical.amplifiedDelta).toBeCloseTo(0.18, 6);
+    const t4 = controller.computeDelta(
+      createInput({
+        activeEntries: [queuedEntry()],
+        pressureTier: 'T4',
+        queueIsEmpty: false,
+      }),
+    );
+
+    expect(t0.amplifiedDelta).toBeCloseTo(0.12, 6);
+    expect(t1.amplifiedDelta).toBeCloseTo(0.132, 6);
+    expect(t2.amplifiedDelta).toBeCloseTo(0.144, 6);
+    expect(t3.amplifiedDelta).toBeCloseTo(0.162, 6);
+    expect(t4.amplifiedDelta).toBeCloseTo(0.18, 6);
   });
 });
