@@ -3,94 +3,84 @@
  * /backend/src/game/engine/tension/ThreatVisibilityManager.ts
  * ====================================================================== */
 
-import type { PressureTier } from '../core/GamePrimitives';
 import {
-  INTERNAL_VISIBILITY_TO_ENVELOPE,
   TENSION_VISIBILITY_STATE,
   VISIBILITY_CONFIGS,
   VISIBILITY_ORDER,
+  type PressureTier,
   type TensionVisibilityState,
 } from './types';
 
-export interface VisibilityUpdateResult {
-  readonly state: TensionVisibilityState;
-  readonly changed: boolean;
-  readonly previousState: TensionVisibilityState | null;
-}
-
 export class ThreatVisibilityManager {
-  private currentState: TensionVisibilityState = TENSION_VISIBILITY_STATE.SHADOWED;
+  private currentState: TensionVisibilityState =
+    TENSION_VISIBILITY_STATE.SHADOWED;
+
   private previousState: TensionVisibilityState | null = null;
+
   private pendingDowngrade: TensionVisibilityState | null = null;
+
   private downgradeCountdownTicks = 0;
+
   private exposedStickyTicksRemaining = 0;
 
   public update(
     pressureTier: PressureTier,
     isNearDeath: boolean,
-    counterIntelTier: number = 0,
-  ): VisibilityUpdateResult {
-    const targetState = this.computeTargetState(
+    counterIntelTier = 0,
+  ): { state: TensionVisibilityState; changed: boolean } {
+    const target = this.computeTargetState(
       pressureTier,
       isNearDeath,
       counterIntelTier,
     );
 
-    if (
-      this.currentState === TENSION_VISIBILITY_STATE.EXPOSED &&
-      targetState !== TENSION_VISIBILITY_STATE.EXPOSED &&
-      this.exposedStickyTicksRemaining > 0
-    ) {
-      this.exposedStickyTicksRemaining -= 1;
-      return {
-        state: this.currentState,
-        changed: false,
-        previousState: this.previousState,
-      };
+    if (this.isUpgrade(this.currentState, target)) {
+      this.pendingDowngrade = null;
+      this.downgradeCountdownTicks = 0;
+      return this.applyTransition(target);
     }
 
-    if (targetState === this.currentState) {
+    if (target === this.currentState) {
       this.pendingDowngrade = null;
       this.downgradeCountdownTicks = 0;
       return {
         state: this.currentState,
         changed: false,
-        previousState: this.previousState,
       };
     }
 
-    if (this.isUpgrade(this.currentState, targetState)) {
-      this.pendingDowngrade = null;
-      this.downgradeCountdownTicks = 0;
-      if (targetState === TENSION_VISIBILITY_STATE.EXPOSED) {
-        this.exposedStickyTicksRemaining = 1;
-      }
-      return this.applyTransition(targetState);
+    const adjacentDowngrade = this.getAdjacentLowerState(this.currentState);
+
+    if (adjacentDowngrade === null) {
+      return {
+        state: this.currentState,
+        changed: false,
+      };
     }
 
-    const nextLowerStep = this.oneStepDown(this.currentState);
-    if (this.pendingDowngrade !== nextLowerStep) {
-      this.pendingDowngrade = nextLowerStep;
+    if (this.pendingDowngrade !== adjacentDowngrade) {
+      this.pendingDowngrade = adjacentDowngrade;
       this.downgradeCountdownTicks =
         VISIBILITY_CONFIGS[this.currentState].visibilityDowngradeDelayTicks;
+
       return {
         state: this.currentState,
         changed: false,
-        previousState: this.previousState,
       };
     }
 
-    if (this.downgradeCountdownTicks > 0) {
-      this.downgradeCountdownTicks -= 1;
-      return {
-        state: this.currentState,
-        changed: false,
-        previousState: this.previousState,
-      };
+    this.downgradeCountdownTicks = Math.max(0, this.downgradeCountdownTicks - 1);
+
+    if (this.downgradeCountdownTicks === 0 && this.pendingDowngrade !== null) {
+      const nextState = this.pendingDowngrade;
+      this.pendingDowngrade = null;
+      return this.applyTransition(nextState);
     }
 
-    this.pendingDowngrade = null;
-    return this.applyTransition(nextLowerStep);
+    return {
+      state: this.currentState,
+      changed: false,
+    };
   }
 
   public getCurrentState(): TensionVisibilityState {
@@ -109,10 +99,6 @@ export class ThreatVisibilityManager {
     return this.downgradeCountdownTicks;
   }
 
-  public getEnvelopeVisibilityLevel() {
-    return INTERNAL_VISIBILITY_TO_ENVELOPE[this.currentState];
-  }
-
   public reset(): void {
     this.currentState = TENSION_VISIBILITY_STATE.SHADOWED;
     this.previousState = null;
@@ -127,61 +113,87 @@ export class ThreatVisibilityManager {
     counterIntelTier: number,
   ): TensionVisibilityState {
     if (pressureTier === 'T4' && isNearDeath) {
+      this.exposedStickyTicksRemaining = 1;
       return TENSION_VISIBILITY_STATE.EXPOSED;
     }
 
-    let baseState: TensionVisibilityState;
+    if (
+      this.currentState === TENSION_VISIBILITY_STATE.EXPOSED &&
+      !isNearDeath &&
+      this.exposedStickyTicksRemaining > 0
+    ) {
+      this.exposedStickyTicksRemaining -= 1;
+      return TENSION_VISIBILITY_STATE.EXPOSED;
+    }
+
+    this.exposedStickyTicksRemaining = 0;
+
+    const baseState = this.baseStateFromPressure(pressureTier);
+    return this.applyCounterIntelPromotion(baseState, counterIntelTier);
+  }
+
+  private baseStateFromPressure(pressureTier: PressureTier): TensionVisibilityState {
     switch (pressureTier) {
       case 'T4':
       case 'T3':
       case 'T2':
-        baseState = TENSION_VISIBILITY_STATE.TELEGRAPHED;
-        break;
+        return TENSION_VISIBILITY_STATE.TELEGRAPHED;
       case 'T1':
-        baseState = TENSION_VISIBILITY_STATE.SIGNALED;
-        break;
+        return TENSION_VISIBILITY_STATE.SIGNALED;
       case 'T0':
       default:
-        baseState = TENSION_VISIBILITY_STATE.SHADOWED;
-        break;
+        return TENSION_VISIBILITY_STATE.SHADOWED;
     }
-
-    const promotionSteps =
-      counterIntelTier >= 3 ? 2 : counterIntelTier >= 2 ? 1 : 0;
-    const baseIndex = VISIBILITY_ORDER.indexOf(baseState);
-    const cappedIndex = Math.min(
-      VISIBILITY_ORDER.indexOf(TENSION_VISIBILITY_STATE.TELEGRAPHED),
-      baseIndex + promotionSteps,
-    );
-
-    return VISIBILITY_ORDER[cappedIndex] ?? baseState;
   }
 
-  private isUpgrade(
-    from: TensionVisibilityState,
-    to: TensionVisibilityState,
-  ): boolean {
-    return VISIBILITY_ORDER.indexOf(to) > VISIBILITY_ORDER.indexOf(from);
-  }
-
-  private oneStepDown(
-    state: TensionVisibilityState,
+  private applyCounterIntelPromotion(
+    baseState: TensionVisibilityState,
+    counterIntelTier: number,
   ): TensionVisibilityState {
-    const currentIndex = VISIBILITY_ORDER.indexOf(state);
-    const nextIndex = Math.max(0, currentIndex - 1);
-    return VISIBILITY_ORDER[nextIndex] ?? TENSION_VISIBILITY_STATE.SHADOWED;
+    const bonusLevels = Math.max(0, Math.floor(counterIntelTier));
+    const baseIndex = this.rank(baseState);
+    const telegraphedIndex = this.rank(TENSION_VISIBILITY_STATE.TELEGRAPHED);
+    const nextIndex = Math.min(baseIndex + bonusLevels, telegraphedIndex);
+    return VISIBILITY_ORDER[nextIndex] ?? TENSION_VISIBILITY_STATE.TELEGRAPHED;
   }
 
   private applyTransition(
     nextState: TensionVisibilityState,
-  ): VisibilityUpdateResult {
+  ): { state: TensionVisibilityState; changed: boolean } {
+    if (nextState === this.currentState) {
+      return {
+        state: this.currentState,
+        changed: false,
+      };
+    }
+
     this.previousState = this.currentState;
     this.currentState = nextState;
 
     return {
       state: this.currentState,
       changed: true,
-      previousState: this.previousState,
     };
+  }
+
+  private getAdjacentLowerState(
+    state: TensionVisibilityState,
+  ): TensionVisibilityState | null {
+    const index = this.rank(state);
+    if (index <= 0) {
+      return null;
+    }
+    return VISIBILITY_ORDER[index - 1] ?? null;
+  }
+
+  private isUpgrade(
+    from: TensionVisibilityState,
+    to: TensionVisibilityState,
+  ): boolean {
+    return this.rank(to) > this.rank(from);
+  }
+
+  private rank(state: TensionVisibilityState): number {
+    return VISIBILITY_ORDER.indexOf(state);
   }
 }

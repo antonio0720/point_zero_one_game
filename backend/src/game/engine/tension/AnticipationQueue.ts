@@ -3,14 +3,15 @@
  * /backend/src/game/engine/tension/AnticipationQueue.ts
  * ====================================================================== */
 
-import { createDeterministicId } from '../core/Deterministic';
+import { createHash } from 'node:crypto';
+
 import {
   ENTRY_STATE,
   THREAT_SEVERITY,
+  THREAT_SEVERITY_WEIGHTS,
   THREAT_TYPE,
   TENSION_CONSTANTS,
   type AnticipationEntry,
-  type EntryState,
   type QueueProcessResult,
   type QueueUpsertInput,
   type ThreatSeverity,
@@ -21,20 +22,31 @@ function freezeArray<T>(items: readonly T[]): readonly T[] {
   return Object.freeze([...items]);
 }
 
+function createDeterministicId(namespace: string, ...parts: readonly string[]): string {
+  return createHash('sha256')
+    .update([namespace, ...parts].join('::'))
+    .digest('hex')
+    .slice(0, 32);
+}
+
 export class AnticipationQueue {
   private readonly entries = new Map<string, AnticipationEntry>();
+
   private readonly sourceIndex = new Map<string, string>();
 
   public upsert(input: QueueUpsertInput): AnticipationEntry {
     const existingId = this.sourceIndex.get(input.sourceKey);
+
     if (existingId !== undefined) {
       const existing = this.entries.get(existingId);
+
       if (existing !== undefined) {
         if (existing.state === ENTRY_STATE.QUEUED) {
-          const updated = this.mergeQueuedEntry(existing, input);
-          this.entries.set(updated.entryId, updated);
-          return updated;
+          const merged = this.mergeQueuedEntry(existing, input);
+          this.entries.set(merged.entryId, merged);
+          return merged;
         }
+
         return existing;
       }
     }
@@ -42,14 +54,17 @@ export class AnticipationQueue {
     const entry = this.createEntry(input);
     this.entries.set(entry.entryId, entry);
     this.sourceIndex.set(entry.sourceKey, entry.entryId);
+
     return entry;
   }
 
   public upsertMany(inputs: readonly QueueUpsertInput[]): readonly AnticipationEntry[] {
     const created: AnticipationEntry[] = [];
+
     for (const input of inputs) {
       created.push(this.upsert(input));
     }
+
     return freezeArray(created);
   }
 
@@ -59,17 +74,24 @@ export class AnticipationQueue {
     const relievedEntries: AnticipationEntry[] = [];
 
     for (const entryId of this.entries.keys()) {
-      let entry = this.entries.get(entryId)!;
+      const entry = this.entries.get(entryId);
+
+      if (entry === undefined) {
+        continue;
+      }
 
       if (entry.state === ENTRY_STATE.MITIGATED || entry.state === ENTRY_STATE.NULLIFIED) {
         if (entry.decayTicksRemaining > 0) {
           relievedEntries.push(entry);
-          const updated = {
+
+          const updated: AnticipationEntry = {
             ...entry,
             decayTicksRemaining: Math.max(0, entry.decayTicksRemaining - 1),
           };
+
           this.entries.set(updated.entryId, updated);
         }
+
         continue;
       }
 
@@ -77,37 +99,42 @@ export class AnticipationQueue {
         continue;
       }
 
-      if (entry.state === ENTRY_STATE.QUEUED && currentTick >= entry.arrivalTick) {
-        const updated = {
-          ...entry,
+      let workingEntry = entry;
+
+      if (workingEntry.state === ENTRY_STATE.QUEUED && currentTick >= workingEntry.arrivalTick) {
+        const arrived: AnticipationEntry = {
+          ...workingEntry,
           state: ENTRY_STATE.ARRIVED,
           isArrived: true,
           baseTensionPerTick: TENSION_CONSTANTS.ARRIVED_TENSION_PER_TICK,
         };
-        this.entries.set(updated.entryId, updated);
-        newArrivals.push(updated);
-        entry = updated;
+
+        this.entries.set(arrived.entryId, arrived);
+        newArrivals.push(arrived);
+        workingEntry = arrived;
       }
 
-      if (entry.state === ENTRY_STATE.ARRIVED) {
-        const ticksOverdue = Math.max(0, currentTick - entry.arrivalTick);
-        const actionWindow = this.getActionWindow(entry.threatType);
+      if (workingEntry.state === ENTRY_STATE.ARRIVED) {
+        const ticksOverdue = Math.max(0, currentTick - workingEntry.arrivalTick);
+        const actionWindow = this.getActionWindow(workingEntry.threatType);
 
         if (ticksOverdue > actionWindow) {
-          const expiredUpdated = {
-            ...entry,
+          const expired: AnticipationEntry = {
+            ...workingEntry,
             state: ENTRY_STATE.EXPIRED,
             isExpired: true,
             expiredAtTick: currentTick,
             ticksOverdue,
           };
-          this.entries.set(expiredUpdated.entryId, expiredUpdated);
-          newExpirations.push(expiredUpdated);
+
+          this.entries.set(expired.entryId, expired);
+          newExpirations.push(expired);
         } else {
-          const updated = {
-            ...entry,
+          const updated: AnticipationEntry = {
+            ...workingEntry,
             ticksOverdue,
           };
+
           this.entries.set(updated.entryId, updated);
         }
       }
@@ -123,19 +150,26 @@ export class AnticipationQueue {
 
   public mitigateEntry(entryId: string, currentTick: number): AnticipationEntry | null {
     const entry = this.entries.get(entryId);
+
     if (entry === undefined || entry.state !== ENTRY_STATE.ARRIVED) {
       return null;
     }
 
-    entry.state = ENTRY_STATE.MITIGATED;
-    entry.isMitigated = true;
-    entry.mitigatedAtTick = currentTick;
-    entry.decayTicksRemaining = TENSION_CONSTANTS.MITIGATION_DECAY_TICKS;
-    return entry;
+    const updated: AnticipationEntry = {
+      ...entry,
+      state: ENTRY_STATE.MITIGATED,
+      isMitigated: true,
+      mitigatedAtTick: currentTick,
+      decayTicksRemaining: TENSION_CONSTANTS.MITIGATION_DECAY_TICKS,
+    };
+
+    this.entries.set(updated.entryId, updated);
+    return updated;
   }
 
   public nullifyEntry(entryId: string): AnticipationEntry | null {
     const entry = this.entries.get(entryId);
+
     if (
       entry === undefined ||
       (entry.state !== ENTRY_STATE.QUEUED && entry.state !== ENTRY_STATE.ARRIVED)
@@ -143,10 +177,15 @@ export class AnticipationQueue {
       return null;
     }
 
-    entry.state = ENTRY_STATE.NULLIFIED;
-    entry.isNullified = true;
-    entry.decayTicksRemaining = TENSION_CONSTANTS.NULLIFY_DECAY_TICKS;
-    return entry;
+    const updated: AnticipationEntry = {
+      ...entry,
+      state: ENTRY_STATE.NULLIFIED,
+      isNullified: true,
+      decayTicksRemaining: TENSION_CONSTANTS.NULLIFY_DECAY_TICKS,
+    };
+
+    this.entries.set(updated.entryId, updated);
+    return updated;
   }
 
   public getEntry(entryId: string): AnticipationEntry | null {
@@ -189,10 +228,13 @@ export class AnticipationQueue {
 
         if (left.state === ENTRY_STATE.ARRIVED) {
           const severityGap =
-            this.severityRank(right.threatSeverity) - this.severityRank(left.threatSeverity);
+            this.severityRank(right.threatSeverity) -
+            this.severityRank(left.threatSeverity);
+
           if (severityGap !== 0) {
             return severityGap;
           }
+
           return left.arrivalTick - right.arrivalTick;
         }
 
@@ -201,7 +243,8 @@ export class AnticipationQueue {
         }
 
         return (
-          this.severityRank(right.threatSeverity) - this.severityRank(left.threatSeverity)
+          this.severityRank(right.threatSeverity) -
+          this.severityRank(left.threatSeverity)
         );
       }),
     );
@@ -240,7 +283,8 @@ export class AnticipationQueue {
       worstCaseOutcome: input.worstCaseOutcome,
       mitigationCardTypes: freezeArray(input.mitigationCardTypes),
       baseTensionPerTick: TENSION_CONSTANTS.QUEUED_TENSION_PER_TICK,
-      severityWeight: input.severityWeight ?? this.defaultSeverityWeight(input.threatSeverity),
+      severityWeight:
+        input.severityWeight ?? this.defaultSeverityWeight(input.threatSeverity),
       summary: input.summary,
       state: ENTRY_STATE.QUEUED,
       isArrived: false,
@@ -273,10 +317,16 @@ export class AnticipationQueue {
         input.mitigationCardTypes.length > existing.mitigationCardTypes.length
           ? freezeArray(input.mitigationCardTypes)
           : existing.mitigationCardTypes,
-      summary: input.summary.length > existing.summary.length ? input.summary : existing.summary,
-      severityWeight: Math.max(existing.severityWeight, input.severityWeight ?? 0),
+      summary: input.summary.length > existing.summary.length
+        ? input.summary
+        : existing.summary,
+      severityWeight: Math.max(
+        existing.severityWeight,
+        input.severityWeight ?? this.defaultSeverityWeight(input.threatSeverity),
+      ),
       threatSeverity:
-        this.severityRank(input.threatSeverity) > this.severityRank(existing.threatSeverity)
+        this.severityRank(input.threatSeverity) >
+        this.severityRank(existing.threatSeverity)
           ? input.threatSeverity
           : existing.threatSeverity,
     };
@@ -318,18 +368,6 @@ export class AnticipationQueue {
   }
 
   private defaultSeverityWeight(severity: ThreatSeverity): number {
-    switch (severity) {
-      case THREAT_SEVERITY.EXISTENTIAL:
-        return 1;
-      case THREAT_SEVERITY.CRITICAL:
-        return 0.85;
-      case THREAT_SEVERITY.SEVERE:
-        return 0.65;
-      case THREAT_SEVERITY.MODERATE:
-        return 0.4;
-      case THREAT_SEVERITY.MINOR:
-      default:
-        return 0.2;
-    }
+    return THREAT_SEVERITY_WEIGHTS[severity];
   }
 }

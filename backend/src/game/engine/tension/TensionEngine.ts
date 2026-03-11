@@ -9,7 +9,9 @@ import {
   type SimulationEngine,
   type TickContext,
 } from '../core/EngineContracts';
+import type { EventBus } from '../core/EventBus';
 import type { RunStateSnapshot } from '../core/RunStateSnapshot';
+
 import { AnticipationQueue } from './AnticipationQueue';
 import { TensionDecayController } from './TensionDecayController';
 import { TensionThreatProjector } from './TensionThreatProjector';
@@ -20,6 +22,7 @@ import {
   TENSION_CONSTANTS,
   TENSION_VISIBILITY_STATE,
   VISIBILITY_CONFIGS,
+  type AnticipationEntry,
   type QueueUpsertInput,
   type TensionRuntimeSnapshot,
   type TensionVisibilityState,
@@ -28,20 +31,31 @@ import {
 const SCORE_HISTORY_DEPTH = 20;
 const TREND_WINDOW = 3;
 
+type LooseEventBus = EventBus<Record<string, unknown>>;
+
 export class TensionEngine implements SimulationEngine {
   public readonly engineId = 'tension' as const;
 
   private readonly queue = new AnticipationQueue();
+
   private readonly visibility = new ThreatVisibilityManager();
+
   private readonly decay = new TensionDecayController();
+
   private readonly projector = new TensionThreatProjector();
+
   private readonly sourceAdapter = new TensionThreatSourceAdapter();
 
   private currentRunId: string | null = null;
+
   private currentScore = 0;
+
   private scoreHistory: number[] = [];
+
   private pulseTicksActive = 0;
+
   private lastRuntimeSnapshot: TensionRuntimeSnapshot | null = null;
+
   private health: EngineHealth = createEngineHealth(
     'tension',
     'HEALTHY',
@@ -73,18 +87,39 @@ export class TensionEngine implements SimulationEngine {
 
     this.hydrateRun(snapshot);
 
-    const bridge = new TensionUXBridge(context.bus as unknown as any);
     const currentTick = snapshot.tick;
+    const bridge = new TensionUXBridge(this.asLooseBus(context.bus));
 
     this.queue.upsertMany(this.sourceAdapter.discover(snapshot));
 
     const queueResult = this.queue.processTick(currentTick);
+
+    for (const arrived of queueResult.newArrivals) {
+      bridge.emitThreatArrived(arrived, currentTick);
+    }
+
+    for (const expired of queueResult.newExpirations) {
+      bridge.emitThreatExpired(expired, currentTick);
+    }
+
     const nearDeath = this.computeNearDeath(snapshot);
+
     const visibilityUpdate = this.visibility.update(
       snapshot.pressure.tier,
       nearDeath,
       snapshot.modeState.counterIntelTier,
     );
+
+    const previousVisibility = this.visibility.getPreviousState();
+
+    if (visibilityUpdate.changed && previousVisibility !== null) {
+      bridge.emitVisibilityChanged(
+        previousVisibility,
+        visibilityUpdate.state,
+        currentTick,
+        context.nowMs,
+      );
+    }
 
     const sortedActiveEntries = this.queue.getSortedActiveQueue();
     const visibleThreats = this.projector.toThreatEnvelopes(
@@ -92,26 +127,6 @@ export class TensionEngine implements SimulationEngine {
       visibilityUpdate.state,
       currentTick,
     );
-
-    for (const entry of queueResult.newArrivals) {
-      bridge.emitThreatArrived(entry, currentTick);
-    }
-
-    for (const entry of queueResult.newExpirations) {
-      bridge.emitThreatExpired(entry, currentTick);
-    }
-
-    if (
-      visibilityUpdate.changed &&
-      visibilityUpdate.previousState !== null &&
-      visibilityUpdate.previousState !== visibilityUpdate.state
-    ) {
-      bridge.emitVisibilityChanged(
-        visibilityUpdate.previousState,
-        visibilityUpdate.state,
-        currentTick,
-      );
-    }
 
     const breakdown = this.decay.computeDelta({
       activeEntries: queueResult.activeEntries,
@@ -127,15 +142,20 @@ export class TensionEngine implements SimulationEngine {
     });
 
     const previousScore = this.currentScore;
+
     this.currentScore = this.clampScore(
       this.currentScore + breakdown.amplifiedDelta,
     );
+
     this.scoreHistory.push(this.currentScore);
+
     if (this.scoreHistory.length > SCORE_HISTORY_DEPTH) {
       this.scoreHistory.shift();
     }
 
-    const isPulseActive = this.currentScore >= TENSION_CONSTANTS.PULSE_THRESHOLD;
+    const isPulseActive =
+      this.currentScore >= TENSION_CONSTANTS.PULSE_THRESHOLD;
+
     this.pulseTicksActive = isPulseActive ? this.pulseTicksActive + 1 : 0;
 
     const runtimeSnapshot: TensionRuntimeSnapshot = {
@@ -173,6 +193,7 @@ export class TensionEngine implements SimulationEngine {
       runtimeSnapshot.expiredCount,
       currentTick,
     );
+
     bridge.emitScoreUpdated(runtimeSnapshot);
 
     if (runtimeSnapshot.isPulseActive) {
@@ -195,10 +216,12 @@ export class TensionEngine implements SimulationEngine {
     input: Omit<QueueUpsertInput, 'runId'> & { readonly runId?: string },
   ): string {
     const runId = input.runId ?? this.currentRunId ?? 'adhoc-run';
+
     const entry = this.queue.upsert({
       ...input,
       runId,
     });
+
     return entry.entryId;
   }
 
@@ -206,9 +229,11 @@ export class TensionEngine implements SimulationEngine {
     inputs: ReadonlyArray<Omit<QueueUpsertInput, 'runId'> & { readonly runId?: string }>,
   ): readonly string[] {
     const entryIds: string[] = [];
+
     for (const input of inputs) {
       entryIds.push(this.enqueueThreat(input));
     }
+
     return Object.freeze(entryIds);
   }
 
@@ -218,12 +243,13 @@ export class TensionEngine implements SimulationEngine {
     bus?: TickContext['bus'],
   ): boolean {
     const entry = this.queue.mitigateEntry(entryId, currentTick);
+
     if (entry === null) {
       return false;
     }
 
     if (bus !== undefined) {
-      const bridge = new TensionUXBridge(bus as unknown as any);
+      const bridge = new TensionUXBridge(this.asLooseBus(bus));
       bridge.emitThreatMitigated(entry, currentTick);
       bridge.emitQueueUpdated(
         this.queue.getQueueLength(),
@@ -243,12 +269,13 @@ export class TensionEngine implements SimulationEngine {
     bus?: TickContext['bus'],
   ): boolean {
     const entry = this.queue.nullifyEntry(entryId);
+
     if (entry === null) {
       return false;
     }
 
     if (bus !== undefined) {
-      const bridge = new TensionUXBridge(bus as unknown as any);
+      const bridge = new TensionUXBridge(this.asLooseBus(bus));
       bridge.emitQueueUpdated(
         this.queue.getQueueLength(),
         this.queue.getArrivedEntries().length,
@@ -281,12 +308,16 @@ export class TensionEngine implements SimulationEngine {
     return this.pulseTicksActive > 0;
   }
 
-  public getSortedQueue() {
+  public getSortedQueue(): readonly AnticipationEntry[] {
     return this.queue.getSortedActiveQueue();
   }
 
   public getHealth(): EngineHealth {
     return this.health;
+  }
+
+  private asLooseBus(bus: TickContext['bus']): LooseEventBus {
+    return bus as unknown as LooseEventBus;
   }
 
   private hydrateRun(snapshot: RunStateSnapshot): void {
@@ -297,6 +328,7 @@ export class TensionEngine implements SimulationEngine {
     this.reset();
     this.currentRunId = snapshot.runId;
     this.currentScore = this.clampScore(snapshot.tension.score);
+
     if (this.currentScore > 0) {
       this.scoreHistory.push(this.currentScore);
     }
@@ -307,19 +339,19 @@ export class TensionEngine implements SimulationEngine {
       1,
       Math.abs(snapshot.economy.expensesPerTick) * 4,
     );
+
     if (snapshot.economy.netWorth <= 0) {
       return true;
     }
+
     return snapshot.economy.netWorth / bankruptcyProxy <= 0.25;
   }
 
   private computeDominantEntryId(
-    entries: readonly {
-      readonly entryId: string;
-      readonly state: string;
-      readonly severityWeight: number;
-      readonly arrivalTick: number;
-    }[],
+    entries: readonly Pick<
+      AnticipationEntry,
+      'entryId' | 'state' | 'severityWeight' | 'arrivalTick'
+    >[],
   ): string | null {
     if (entries.length === 0) {
       return null;
@@ -329,9 +361,11 @@ export class TensionEngine implements SimulationEngine {
       if (left.state !== right.state) {
         return left.state === 'ARRIVED' ? -1 : 1;
       }
+
       if (left.severityWeight !== right.severityWeight) {
         return right.severityWeight - left.severityWeight;
       }
+
       return left.arrivalTick - right.arrivalTick;
     });
 
@@ -344,18 +378,20 @@ export class TensionEngine implements SimulationEngine {
     }
 
     const recent = this.scoreHistory.slice(-TREND_WINDOW);
+
     for (let index = 1; index < recent.length; index += 1) {
       if (recent[index] <= recent[index - 1]) {
         return false;
       }
     }
+
     return true;
   }
 
-  private clampScore(score: number): number {
+  private clampScore(value: number): number {
     return Math.max(
       TENSION_CONSTANTS.MIN_SCORE,
-      Math.min(TENSION_CONSTANTS.MAX_SCORE, score),
+      Math.min(TENSION_CONSTANTS.MAX_SCORE, value),
     );
   }
 
@@ -367,7 +403,7 @@ export class TensionEngine implements SimulationEngine {
       this.health = createEngineHealth(
         'tension',
         'DEGRADED',
-        Date.now(),
+        runtimeSnapshot.timestamp,
         Object.freeze([
           `queue=${runtimeSnapshot.queueLength}`,
           `pulseTicks=${runtimeSnapshot.pulseTicksActive}`,
@@ -379,7 +415,7 @@ export class TensionEngine implements SimulationEngine {
     this.health = createEngineHealth(
       'tension',
       'HEALTHY',
-      Date.now(),
+      runtimeSnapshot.timestamp,
       Object.freeze([`score=${runtimeSnapshot.score.toFixed(3)}`]),
     );
   }
@@ -396,7 +432,9 @@ export class TensionEngine implements SimulationEngine {
       queuedCount: 0,
       expiredCount: 0,
       relievedCount: 0,
-      visibleThreats: Object.freeze([]),
+      visibleThreats: Object.freeze([]) as readonly ReturnType<
+        TensionThreatProjector['toThreatEnvelopes']
+      >[number][],
       isPulseActive: false,
       pulseTicksActive: 0,
       isEscalating: false,

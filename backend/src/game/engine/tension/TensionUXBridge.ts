@@ -4,31 +4,28 @@
  * ====================================================================== */
 
 import type { EventBus } from '../core/EventBus';
+
 import {
   TENSION_EVENT_NAMES,
   type AnticipationEntry,
   type AnticipationQueueUpdatedEvent,
+  type ThreatArrivedEvent,
+  type ThreatExpiredEvent,
+  type ThreatMitigatedEvent,
   type TensionPulseFiredEvent,
   type TensionRuntimeSnapshot,
   type TensionScoreUpdatedEvent,
   type TensionVisibilityChangedEvent,
-  type ThreatArrivedEvent,
-  type ThreatExpiredEvent,
-  type ThreatMitigatedEvent,
   type TensionVisibilityState,
 } from './types';
 
-type UnsafeEventBus = EventBus<Record<string, unknown>>;
+type LooseEventBus = EventBus<Record<string, unknown>>;
 
 export class TensionUXBridge {
-  private readonly bus: UnsafeEventBus;
-
-  public constructor(bus: EventBus<Record<string, unknown>>) {
-    this.bus = bus;
-  }
+  public constructor(private readonly eventBus: LooseEventBus) {}
 
   public emitScoreUpdated(snapshot: TensionRuntimeSnapshot): void {
-    const detailed: TensionScoreUpdatedEvent = {
+    const event: TensionScoreUpdatedEvent = {
       eventType: 'TENSION_SCORE_UPDATED',
       score: snapshot.score,
       previousScore: snapshot.previousScore,
@@ -44,17 +41,12 @@ export class TensionUXBridge {
       timestamp: snapshot.timestamp,
     };
 
-    this.bus.emit(TENSION_EVENT_NAMES.UPDATED_LEGACY, {
-      score: snapshot.score,
-      visibleThreats: snapshot.visibleThreats.length,
-      visibilityState: snapshot.visibilityState,
-      pulseActive: snapshot.isPulseActive,
-      dominantEntryId: snapshot.dominantEntryId,
+    this.eventBus.emit(TENSION_EVENT_NAMES.SCORE_UPDATED, event, {
+      emittedAtTick: snapshot.tickNumber,
     });
 
-    this.bus.emit(TENSION_EVENT_NAMES.SCORE_UPDATED, detailed, {
+    this.eventBus.emit(TENSION_EVENT_NAMES.UPDATED_LEGACY, snapshot, {
       emittedAtTick: snapshot.tickNumber,
-      tags: ['tension', 'score'],
     });
   }
 
@@ -62,23 +54,23 @@ export class TensionUXBridge {
     from: TensionVisibilityState,
     to: TensionVisibilityState,
     tickNumber: number,
+    timestamp = Date.now(),
   ): void {
-    const payload: TensionVisibilityChangedEvent = {
+    const event: TensionVisibilityChangedEvent = {
       eventType: 'TENSION_VISIBILITY_CHANGED',
       from,
       to,
       tickNumber,
-      timestamp: Date.now(),
+      timestamp,
     };
 
-    this.bus.emit(TENSION_EVENT_NAMES.VISIBILITY_CHANGED, payload, {
+    this.eventBus.emit(TENSION_EVENT_NAMES.VISIBILITY_CHANGED, event, {
       emittedAtTick: tickNumber,
-      tags: ['tension', 'visibility'],
     });
   }
 
   public emitPulseFired(snapshot: TensionRuntimeSnapshot): void {
-    const payload: TensionPulseFiredEvent = {
+    const event: TensionPulseFiredEvent = {
       eventType: 'TENSION_PULSE_FIRED',
       score: snapshot.score,
       queueLength: snapshot.queueLength,
@@ -87,14 +79,13 @@ export class TensionUXBridge {
       timestamp: snapshot.timestamp,
     };
 
-    this.bus.emit(TENSION_EVENT_NAMES.PULSE_FIRED, payload, {
+    this.eventBus.emit(TENSION_EVENT_NAMES.PULSE_FIRED, event, {
       emittedAtTick: snapshot.tickNumber,
-      tags: ['tension', 'pulse'],
     });
   }
 
   public emitThreatArrived(entry: AnticipationEntry, tickNumber: number): void {
-    const payload: ThreatArrivedEvent = {
+    const event: ThreatArrivedEvent = {
       eventType: 'THREAT_ARRIVED',
       entryId: entry.entryId,
       threatType: entry.threatType,
@@ -106,14 +97,13 @@ export class TensionUXBridge {
       timestamp: Date.now(),
     };
 
-    this.bus.emit(TENSION_EVENT_NAMES.THREAT_ARRIVED, payload, {
+    this.eventBus.emit(TENSION_EVENT_NAMES.THREAT_ARRIVED, event, {
       emittedAtTick: tickNumber,
-      tags: ['tension', 'arrival'],
     });
   }
 
   public emitThreatMitigated(entry: AnticipationEntry, tickNumber: number): void {
-    const payload: ThreatMitigatedEvent = {
+    const event: ThreatMitigatedEvent = {
       eventType: 'THREAT_MITIGATED',
       entryId: entry.entryId,
       threatType: entry.threatType,
@@ -121,14 +111,13 @@ export class TensionUXBridge {
       timestamp: Date.now(),
     };
 
-    this.bus.emit(TENSION_EVENT_NAMES.THREAT_MITIGATED, payload, {
+    this.eventBus.emit(TENSION_EVENT_NAMES.THREAT_MITIGATED, event, {
       emittedAtTick: tickNumber,
-      tags: ['tension', 'mitigation'],
     });
   }
 
   public emitThreatExpired(entry: AnticipationEntry, tickNumber: number): void {
-    const payload: ThreatExpiredEvent = {
+    const event: ThreatExpiredEvent = {
       eventType: 'THREAT_EXPIRED',
       entryId: entry.entryId,
       threatType: entry.threatType,
@@ -138,9 +127,8 @@ export class TensionUXBridge {
       timestamp: Date.now(),
     };
 
-    this.bus.emit(TENSION_EVENT_NAMES.THREAT_EXPIRED, payload, {
+    this.eventBus.emit(TENSION_EVENT_NAMES.THREAT_EXPIRED, event, {
       emittedAtTick: tickNumber,
-      tags: ['tension', 'expiry'],
     });
   }
 
@@ -151,7 +139,7 @@ export class TensionUXBridge {
     expiredCount: number,
     tickNumber: number,
   ): void {
-    const payload: AnticipationQueueUpdatedEvent = {
+    const event: AnticipationQueueUpdatedEvent = {
       eventType: 'ANTICIPATION_QUEUE_UPDATED',
       queueLength,
       arrivedCount,
@@ -161,9 +149,8 @@ export class TensionUXBridge {
       timestamp: Date.now(),
     };
 
-    this.bus.emit(TENSION_EVENT_NAMES.QUEUE_UPDATED, payload, {
+    this.eventBus.emit(TENSION_EVENT_NAMES.QUEUE_UPDATED, event, {
       emittedAtTick: tickNumber,
-      tags: ['tension', 'queue'],
     });
   }
 }

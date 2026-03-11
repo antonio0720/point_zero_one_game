@@ -9,6 +9,8 @@ import type {
   VisibilityLevel,
 } from '../core/GamePrimitives';
 
+export type { PressureTier, ThreatEnvelope, VisibilityLevel } from '../core/GamePrimitives';
+
 export const TENSION_VISIBILITY_STATE = {
   SHADOWED: 'SHADOWED',
   SIGNALED: 'SIGNALED',
@@ -55,6 +57,7 @@ export type EntryState = (typeof ENTRY_STATE)[keyof typeof ENTRY_STATE];
 
 export interface VisibilityConfig {
   readonly state: TensionVisibilityState;
+  readonly pressureThreshold: PressureTier;
   readonly showsThreatCount: boolean;
   readonly showsThreatType: boolean;
   readonly showsArrivalTick: boolean;
@@ -69,6 +72,7 @@ export const VISIBILITY_CONFIGS: Readonly<
 > = {
   [TENSION_VISIBILITY_STATE.SHADOWED]: {
     state: TENSION_VISIBILITY_STATE.SHADOWED,
+    pressureThreshold: 'T0',
     showsThreatCount: true,
     showsThreatType: false,
     showsArrivalTick: false,
@@ -79,6 +83,7 @@ export const VISIBILITY_CONFIGS: Readonly<
   },
   [TENSION_VISIBILITY_STATE.SIGNALED]: {
     state: TENSION_VISIBILITY_STATE.SIGNALED,
+    pressureThreshold: 'T1',
     showsThreatCount: true,
     showsThreatType: true,
     showsArrivalTick: false,
@@ -89,6 +94,7 @@ export const VISIBILITY_CONFIGS: Readonly<
   },
   [TENSION_VISIBILITY_STATE.TELEGRAPHED]: {
     state: TENSION_VISIBILITY_STATE.TELEGRAPHED,
+    pressureThreshold: 'T2',
     showsThreatCount: true,
     showsThreatType: true,
     showsArrivalTick: true,
@@ -99,6 +105,7 @@ export const VISIBILITY_CONFIGS: Readonly<
   },
   [TENSION_VISIBILITY_STATE.EXPOSED]: {
     state: TENSION_VISIBILITY_STATE.EXPOSED,
+    pressureThreshold: 'T4',
     showsThreatCount: true,
     showsThreatType: true,
     showsArrivalTick: true,
@@ -107,7 +114,7 @@ export const VISIBILITY_CONFIGS: Readonly<
     tensionAwarenessBonus: 0.05,
     visibilityDowngradeDelayTicks: 2,
   },
-};
+} as const;
 
 export const PRESSURE_TENSION_AMPLIFIERS: Readonly<Record<PressureTier, number>> = {
   T0: 1.0,
@@ -115,7 +122,7 @@ export const PRESSURE_TENSION_AMPLIFIERS: Readonly<Record<PressureTier, number>>
   T2: 1.2,
   T3: 1.35,
   T4: 1.5,
-};
+} as const;
 
 export const TENSION_CONSTANTS = {
   QUEUED_TENSION_PER_TICK: 0.12,
@@ -138,21 +145,51 @@ export const THREAT_SEVERITY_WEIGHTS: Readonly<Record<ThreatSeverity, number>> =
   [THREAT_SEVERITY.MODERATE]: 0.4,
   [THREAT_SEVERITY.SEVERE]: 0.65,
   [THREAT_SEVERITY.CRITICAL]: 0.85,
-  [THREAT_SEVERITY.EXISTENTIAL]: 1,
-};
+  [THREAT_SEVERITY.EXISTENTIAL]: 1.0,
+} as const;
 
 export const THREAT_TYPE_DEFAULT_MITIGATIONS: Readonly<
   Record<ThreatType, readonly string[]>
 > = {
-  [THREAT_TYPE.DEBT_SPIRAL]: Object.freeze(['REFINANCE', 'INCOME_SHIELD', 'CASH_BUFFER']),
-  [THREAT_TYPE.SABOTAGE]: Object.freeze(['COUNTER_PLAY', 'PR_SHIELD', 'LEGAL_DEFENSE']),
-  [THREAT_TYPE.HATER_INJECTION]: Object.freeze(['BLOCK', 'PURGE', 'COUNTER_INTEL']),
-  [THREAT_TYPE.CASCADE]: Object.freeze(['STABILIZE', 'PATCH', 'CONTAIN']),
-  [THREAT_TYPE.SOVEREIGNTY]: Object.freeze(['TRUST_LOCK', 'LEGAL_SHIELD', 'SOVEREIGN_RESET']),
-  [THREAT_TYPE.OPPORTUNITY_KILL]: Object.freeze(['RECOVER_OPPORTUNITY', 'INSURE_UPSIDE']),
-  [THREAT_TYPE.REPUTATION_BURN]: Object.freeze(['PR_SHIELD', 'REPUTATION_WASH']),
-  [THREAT_TYPE.SHIELD_PIERCE]: Object.freeze(['HARDEN', 'REPAIR', 'ABSORB']),
-};
+  [THREAT_TYPE.DEBT_SPIRAL]: Object.freeze([
+    'REFINANCE',
+    'INCOME_SHIELD',
+    'CASH_BUFFER',
+  ]),
+  [THREAT_TYPE.SABOTAGE]: Object.freeze([
+    'COUNTER_PLAY',
+    'PR_SHIELD',
+    'LEGAL_DEFENSE',
+  ]),
+  [THREAT_TYPE.HATER_INJECTION]: Object.freeze([
+    'BLOCK',
+    'PURGE',
+    'COUNTER_INTEL',
+  ]),
+  [THREAT_TYPE.CASCADE]: Object.freeze([
+    'STABILIZE',
+    'PATCH',
+    'CONTAIN',
+  ]),
+  [THREAT_TYPE.SOVEREIGNTY]: Object.freeze([
+    'TRUST_LOCK',
+    'LEGAL_SHIELD',
+    'SOVEREIGN_RESET',
+  ]),
+  [THREAT_TYPE.OPPORTUNITY_KILL]: Object.freeze([
+    'RECOVER_OPPORTUNITY',
+    'INSURE_UPSIDE',
+  ]),
+  [THREAT_TYPE.REPUTATION_BURN]: Object.freeze([
+    'PR_SHIELD',
+    'REPUTATION_WASH',
+  ]),
+  [THREAT_TYPE.SHIELD_PIERCE]: Object.freeze([
+    'HARDEN',
+    'REPAIR',
+    'ABSORB',
+  ]),
+} as const;
 
 export const INTERNAL_VISIBILITY_TO_ENVELOPE: Readonly<
   Record<TensionVisibilityState, VisibilityLevel>
@@ -161,7 +198,7 @@ export const INTERNAL_VISIBILITY_TO_ENVELOPE: Readonly<
   [TENSION_VISIBILITY_STATE.SIGNALED]: 'SILHOUETTE',
   [TENSION_VISIBILITY_STATE.TELEGRAPHED]: 'PARTIAL',
   [TENSION_VISIBILITY_STATE.EXPOSED]: 'EXPOSED',
-};
+} as const;
 
 export const VISIBILITY_ORDER: readonly TensionVisibilityState[] = Object.freeze([
   TENSION_VISIBILITY_STATE.SHADOWED,
@@ -354,3 +391,14 @@ export interface AnticipationQueueUpdatedEvent {
   readonly tickNumber: number;
   readonly timestamp: number;
 }
+
+export type TensionEventMap = {
+  [TENSION_EVENT_NAMES.UPDATED_LEGACY]: TensionRuntimeSnapshot;
+  [TENSION_EVENT_NAMES.SCORE_UPDATED]: TensionScoreUpdatedEvent;
+  [TENSION_EVENT_NAMES.VISIBILITY_CHANGED]: TensionVisibilityChangedEvent;
+  [TENSION_EVENT_NAMES.QUEUE_UPDATED]: AnticipationQueueUpdatedEvent;
+  [TENSION_EVENT_NAMES.PULSE_FIRED]: TensionPulseFiredEvent;
+  [TENSION_EVENT_NAMES.THREAT_ARRIVED]: ThreatArrivedEvent;
+  [TENSION_EVENT_NAMES.THREAT_MITIGATED]: ThreatMitigatedEvent;
+  [TENSION_EVENT_NAMES.THREAT_EXPIRED]: ThreatExpiredEvent;
+};

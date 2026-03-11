@@ -12,10 +12,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import {
-  TensionDecayController,
-  type DecayComputeInput,
-} from '../TensionDecayController';
+import { TensionDecayController } from '../TensionDecayController';
 import {
   type AnticipationEntry,
   EntryState,
@@ -112,8 +109,8 @@ function nullifiedEntry(
 }
 
 function createInput(
-  overrides: Partial<DecayComputeInput> = {},
-): DecayComputeInput {
+  overrides: Partial<any> = {},
+): any {
   return {
     activeEntries: [],
     expiredEntries: [],

@@ -1,6 +1,7 @@
-// /backend/src/game/engine/tension/__tests__/ThreatVisibilityManager.spec.ts
+//backend/src/game/engine/tension/__tests__/ThreatVisibilityManager.spec.ts
 
 import { beforeEach, describe, expect, it } from 'vitest';
+
 import { ThreatVisibilityManager } from '../ThreatVisibilityManager';
 import {
   TENSION_VISIBILITY_STATE,

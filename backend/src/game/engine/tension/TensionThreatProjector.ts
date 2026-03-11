@@ -3,7 +3,8 @@
  * /backend/src/game/engine/tension/TensionThreatProjector.ts
  * ====================================================================== */
 
-import type { ThreatEnvelope, VisibilityLevel } from '../core/GamePrimitives';
+import type { ThreatEnvelope } from '../core/GamePrimitives';
+
 import {
   INTERNAL_VISIBILITY_TO_ENVELOPE,
   TENSION_VISIBILITY_STATE,
@@ -11,18 +12,8 @@ import {
   type TensionVisibilityState,
 } from './types';
 
-function visibilityRank(level: VisibilityLevel): number {
-  switch (level) {
-    case 'EXPOSED':
-      return 4;
-    case 'PARTIAL':
-      return 3;
-    case 'SILHOUETTE':
-      return 2;
-    case 'HIDDEN':
-    default:
-      return 1;
-  }
+function freezeArray<T>(items: readonly T[]): readonly T[] {
+  return Object.freeze([...items]);
 }
 
 export class TensionThreatProjector {
@@ -31,28 +22,28 @@ export class TensionThreatProjector {
     visibilityState: TensionVisibilityState,
     currentTick: number,
   ): readonly ThreatEnvelope[] {
-    const mapped = entries.map((entry) => {
-      const etaTicks = entry.isArrived
-        ? 0
-        : Math.max(0, entry.arrivalTick - currentTick);
+    return freezeArray(
+      entries.map((entry) => this.projectEntry(entry, visibilityState, currentTick)),
+    );
+  }
 
-      let visibleAs = INTERNAL_VISIBILITY_TO_ENVELOPE[visibilityState];
-      if (entry.isCascadeTriggered && !entry.isArrived) {
-        visibleAs =
-          visibilityRank(visibleAs) >= visibilityRank('PARTIAL') ? visibleAs : 'PARTIAL';
-      }
+  private projectEntry(
+    entry: AnticipationEntry,
+    visibilityState: TensionVisibilityState,
+    currentTick: number,
+  ): ThreatEnvelope {
+    const etaTicks = entry.isArrived
+      ? 0
+      : Math.max(0, entry.arrivalTick - currentTick);
 
-      return {
-        threatId: entry.threatId,
-        source: entry.source,
-        etaTicks,
-        severity: entry.severityWeight,
-        visibleAs,
-        summary: this.buildSummary(entry, visibilityState, etaTicks),
-      };
-    });
-
-    return Object.freeze(mapped);
+    return {
+      threatId: entry.threatId,
+      source: entry.source,
+      etaTicks,
+      severity: entry.severityWeight,
+      visibleAs: INTERNAL_VISIBILITY_TO_ENVELOPE[visibilityState],
+      summary: this.buildSummary(entry, visibilityState, etaTicks),
+    };
   }
 
   private buildSummary(
@@ -62,18 +53,23 @@ export class TensionThreatProjector {
   ): string {
     switch (visibilityState) {
       case TENSION_VISIBILITY_STATE.SHADOWED:
-        return 'Unknown threat signature detected.';
+        return entry.isArrived
+          ? 'Active threat signature detected'
+          : 'Threat signature detected';
       case TENSION_VISIBILITY_STATE.SIGNALED:
-        return `${entry.threatType} incoming.`;
+        return entry.isArrived
+          ? `${entry.threatType} active`
+          : `${entry.threatType} incoming`;
       case TENSION_VISIBILITY_STATE.TELEGRAPHED:
         return entry.isArrived
-          ? `${entry.threatType} is active now.`
-          : `${entry.threatType} arrives in ${etaTicks} tick(s).`;
+          ? `${entry.threatType} active +${entry.ticksOverdue}t`
+          : `${entry.threatType} in ${etaTicks} ticks`;
       case TENSION_VISIBILITY_STATE.EXPOSED:
-      default:
         return entry.isArrived
-          ? `${entry.worstCaseOutcome} | Mitigate with ${entry.mitigationCardTypes.join(', ')}`
-          : `${entry.threatType} in ${etaTicks} tick(s) | ${entry.worstCaseOutcome}`;
+          ? `${entry.threatType} active • ${entry.worstCaseOutcome} • use ${entry.mitigationCardTypes.join(' / ')}`
+          : `${entry.threatType} in ${etaTicks} ticks • ${entry.worstCaseOutcome} • use ${entry.mitigationCardTypes.join(' / ')}`;
+      default:
+        return entry.summary;
     }
   }
 }

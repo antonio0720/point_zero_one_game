@@ -3,13 +3,20 @@
  * /backend/src/game/engine/tension/TensionDecayController.ts
  * ====================================================================== */
 
-import { ENTRY_STATE, PRESSURE_TENSION_AMPLIFIERS, TENSION_CONSTANTS, type DecayComputeInput, type DecayComputeResult } from './types';
+import {
+  ENTRY_STATE,
+  PRESSURE_TENSION_AMPLIFIERS,
+  TENSION_CONSTANTS,
+  type DecayComputeInput,
+  type DecayComputeResult,
+  type DecayContributionBreakdown,
+} from './types';
 
 export class TensionDecayController {
   private sovereigntyBonusConsumed = false;
 
   public computeDelta(input: DecayComputeInput): DecayComputeResult {
-    const contributionBreakdown = {
+    const contributionBreakdown: DecayContributionBreakdown = {
       queuedThreats: 0,
       arrivedThreats: 0,
       expiredGhosts: 0,
@@ -23,25 +30,27 @@ export class TensionDecayController {
     for (const entry of input.activeEntries) {
       if (entry.state === ENTRY_STATE.QUEUED) {
         contributionBreakdown.queuedThreats +=
-          TENSION_CONSTANTS.QUEUED_TENSION_PER_TICK * entry.severityWeight;
+          TENSION_CONSTANTS.QUEUED_TENSION_PER_TICK;
       } else if (entry.state === ENTRY_STATE.ARRIVED) {
         contributionBreakdown.arrivedThreats +=
-          TENSION_CONSTANTS.ARRIVED_TENSION_PER_TICK * entry.severityWeight;
+          TENSION_CONSTANTS.ARRIVED_TENSION_PER_TICK;
       }
     }
 
     for (const entry of input.expiredEntries) {
-      contributionBreakdown.expiredGhosts +=
-        TENSION_CONSTANTS.EXPIRED_GHOST_PER_TICK * entry.severityWeight;
+      if (entry.state === ENTRY_STATE.EXPIRED) {
+        contributionBreakdown.expiredGhosts +=
+          TENSION_CONSTANTS.EXPIRED_GHOST_PER_TICK;
+      }
     }
 
     for (const entry of input.relievedEntries) {
       if (entry.state === ENTRY_STATE.MITIGATED) {
         contributionBreakdown.mitigationDecay -=
-          TENSION_CONSTANTS.MITIGATION_DECAY_PER_TICK * entry.severityWeight;
+          TENSION_CONSTANTS.MITIGATION_DECAY_PER_TICK;
       } else if (entry.state === ENTRY_STATE.NULLIFIED) {
         contributionBreakdown.nullifyDecay -=
-          TENSION_CONSTANTS.NULLIFY_DECAY_PER_TICK * entry.severityWeight;
+          TENSION_CONSTANTS.NULLIFY_DECAY_PER_TICK;
       }
     }
 
@@ -90,6 +99,10 @@ export class TensionDecayController {
   }
 
   public reset(): void {
+    this.sovereigntyBonusConsumed = false;
+  }
+
+  public resetSovereigntyBonus(): void {
     this.sovereigntyBonusConsumed = false;
   }
 }
