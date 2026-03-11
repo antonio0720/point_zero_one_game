@@ -1,436 +1,879 @@
 /**
- * FILE: //Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/pzo-web/src/styles/tension-engine.css
- * All Tension Engine visual classes and animations.
- * Purple palette distinguishes tension from the gold/red Pressure gauge.
+ * ============================================================================
+ * FILE: pzo-web/src/styles/tension-engine.css
+ * ============================================================================
  *
- * DO NOT override these classes outside this file.
- * All tension-related UI must reference these classes exclusively.
+ * Purpose:
+ * - canonical visual layer for Engine 3 surfaces
+ * - styles both the tension gauge family and the anticipation queue panel
+ * - black-glass / amber / magenta / crimson aesthetic aligned to the live HUD
  *
- * Color palette:
- *   Base purple:   #7B5EA7
- *   Mid purple:    #9B4EA7
- *   Deep magenta:  #B92B7A
- *   Crisis red:    #FF0066
- *   Gold accent:   #C9A84C  (visibility badge — borrowed from sovereign palette)
- *   Teal:          #4EC9B0  (mitigation path text)
- *
- * Density6 LLC · Point Zero One · Engine 3 of 7 · Confidential
+ * Doctrine:
+ * - no inline style injection
+ * - no engine logic in CSS
+ * - external classes only
+ * ============================================================================
  */
 
-/* ─────────────────────────────────────────────────────────────────────────
-   TENSION GAUGE
-   ──────────────────────────────────────────────────────────────────────── */
-
-.tension-gauge {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  position: relative;
-  user-select: none;
+:root {
+  --pzo-tension-bg: #080a0d;
+  --pzo-tension-panel: rgba(12, 15, 20, 0.94);
+  --pzo-tension-panel-2: rgba(15, 20, 28, 0.92);
+  --pzo-tension-border: #1a2030;
+  --pzo-tension-border-soft: rgba(58, 74, 96, 0.45);
+  --pzo-tension-text: #8fa0b8;
+  --pzo-tension-text-bright: #d7e3f7;
+  --pzo-tension-amber: #c9a84c;
+  --pzo-tension-purple: #7b5ea7;
+  --pzo-tension-purple-bright: #b978ff;
+  --pzo-tension-magenta: #d946ef;
+  --pzo-tension-red: #ff4d6d;
+  --pzo-tension-crimson: #c0392b;
+  --pzo-tension-teal: #1de9b6;
+  --pzo-tension-blue: #38bdf8;
+  --pzo-tension-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
+  --pzo-tension-shadow-hot: 0 0 18px rgba(255, 77, 109, 0.18);
+  --pzo-tension-font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    "Liberation Mono", "Courier New", monospace;
+  --pzo-tension-font-ui: Inter, system-ui, -apple-system, BlinkMacSystemFont,
+    "Segoe UI", sans-serif;
 }
 
-/* ── Vertical track ──────────────────────────────────────────────────────── */
-.tension-gauge--vertical .tension-gauge__track {
-  width: 12px;
-  height: 120px;
-  background: rgba(123, 94, 167, 0.15);
-  border: 1px solid rgba(123, 94, 167, 0.25);
-  border-radius: 6px;
+/* ==========================================================================
+   Engine 3 Gauge
+   ========================================================================== */
+
+.tension-gauge {
+  display: grid;
+  gap: 8px;
+  align-items: center;
+  justify-items: center;
+  color: var(--pzo-tension-text-bright);
+  font-family: var(--pzo-tension-font-ui);
+}
+
+.tension-gauge--vertical {
+  grid-auto-flow: row;
+}
+
+.tension-gauge--horizontal {
+  grid-auto-flow: row;
+  width: 100%;
+}
+
+.tension-gauge__track {
+  position: relative;
   overflow: hidden;
+  border: 1px solid var(--pzo-tension-border);
+  background:
+    linear-gradient(180deg, rgba(123, 94, 167, 0.1), rgba(8, 10, 13, 0.9)),
+    var(--pzo-tension-panel);
+  box-shadow: inset 0 0 18px rgba(0, 0, 0, 0.3);
+}
+
+.tension-gauge--vertical .tension-gauge__track {
+  width: 16px;
+  height: 128px;
+  border-radius: 8px;
   display: flex;
   align-items: flex-end;
 }
 
-/* ── Horizontal track ────────────────────────────────────────────────────── */
 .tension-gauge--horizontal .tension-gauge__track {
-  height: 8px;
-  width: 180px;
-  background: rgba(123, 94, 167, 0.15);
-  border: 1px solid rgba(123, 94, 167, 0.25);
-  border-radius: 4px;
-  overflow: hidden;
+  width: 100%;
+  min-width: 200px;
+  height: 12px;
+  border-radius: 999px;
 }
 
 .tension-gauge__fill {
-  height: 100%;
-  transition: all 1s linear;
+  position: relative;
+  border-radius: inherit;
+  box-shadow:
+    0 0 16px rgba(185, 120, 255, 0.25),
+    inset 0 0 12px rgba(255, 255, 255, 0.08);
+  transition:
+    width 320ms ease,
+    height 320ms ease,
+    background 320ms ease,
+    box-shadow 320ms ease;
 }
 
-/* ── Label row ───────────────────────────────────────────────────────────── */
-.tension-gauge__label {
-  display: flex;
+.tension-gauge__fill::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.18),
+      rgba(255, 255, 255, 0.02)
+    );
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.tension-gauge__label,
+.tension-gauge__meta {
+  display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 8px;
+  font-family: var(--pzo-tension-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
 }
 
 .tension-label {
-  font-size: 8px;
-  font-weight: 700;
-  letter-spacing: 1.5px;
-  color: rgba(123, 94, 167, 0.9);
-  font-family: 'Courier New', Courier, monospace;
+  color: var(--pzo-tension-amber);
+}
+
+.tension-visibility-badge,
+.tension-arrived-badge,
+.tension-queue-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 20px;
+  padding: 0 8px;
+  border-radius: 999px;
+  border: 1px solid var(--pzo-tension-border-soft);
+  font-family: var(--pzo-tension-font-mono);
+  font-size: 9px;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
+  background: rgba(17, 24, 32, 0.82);
 }
-
-/* ─────────────────────────────────────────────────────────────────────────
-   PULSE STATES
-   ──────────────────────────────────────────────────────────────────────── */
-
-/* Active pulse (score >= 0.90) — fill breathes */
-.tension-pulse-active .tension-gauge__fill {
-  animation: tension-pulse 0.6s ease-in-out infinite;
-}
-
-@keyframes tension-pulse {
-  0%, 100% { opacity: 1.0; }
-  50%       { opacity: 0.4; }
-}
-
-/* Sustained pulse (3+ consecutive ticks at >= 0.90) — whole gauge glows */
-.tension-pulse-sustained {
-  animation: tension-crisis-pulse 0.4s ease-in-out infinite;
-}
-
-@keyframes tension-crisis-pulse {
-  0%, 100% { filter: none; }
-  50%       { filter: drop-shadow(0 0 8px rgba(185, 43, 122, 0.8)); }
-}
-
-/* Urgent state — arrived threats present */
-.tension-gauge--urgent .tension-gauge__track {
-  border-color: rgba(255, 0, 102, 0.5);
-}
-
-/* ─────────────────────────────────────────────────────────────────────────
-   GAUGE BADGES
-   ──────────────────────────────────────────────────────────────────────── */
 
 .tension-visibility-badge {
-  font-size: 9px;
-  letter-spacing: 1px;
-  color: rgba(123, 94, 167, 0.8);
-  font-family: 'Courier New', Courier, monospace;
-  text-transform: uppercase;
+  color: var(--pzo-tension-purple-bright);
 }
 
 .tension-arrived-badge {
-  font-size: 10px;
-  font-weight: 700;
-  color: #FF0066;
-  font-family: 'Courier New', Courier, monospace;
-  text-transform: uppercase;
-  animation: arrived-blink 0.8s step-end infinite;
-}
-
-@keyframes arrived-blink {
-  0%, 100% { opacity: 1; }
-  50%       { opacity: 0; }
+  color: var(--pzo-tension-red);
+  border-color: rgba(255, 77, 109, 0.45);
 }
 
 .tension-queue-badge {
-  font-size: 9px;
-  color: rgba(255, 255, 255, 0.4);
-  font-family: 'Courier New', Courier, monospace;
-}
-
-.tension-queue-badge--clear {
-  color: rgba(123, 94, 167, 0.4);
+  color: var(--pzo-tension-text);
 }
 
 .tension-escalating {
-  color: #FF4466;
-  font-size: 10px;
-  font-weight: 700;
-  line-height: 1;
+  color: var(--pzo-tension-red);
+  animation: pzoTensionBlink 900ms ease-in-out infinite;
 }
 
-/* ─────────────────────────────────────────────────────────────────────────
-   ANTICIPATION QUEUE PANEL
-   ──────────────────────────────────────────────────────────────────────── */
-
-.queue-panel {
-  background: #1A1A2E;
-  border: 1px solid rgba(123, 94, 167, 0.3);
-  border-radius: 6px;
-  padding: 10px 12px;
-  min-width: 240px;
-  max-width: 320px;
-  font-family: 'Courier New', Courier, monospace;
+.tension-pulse-active .tension-gauge__fill {
+  animation: pzoTensionPulse 700ms ease-in-out infinite;
 }
 
-.queue-panel--empty {
-  opacity: 0.4;
-  text-align: center;
-  padding: 16px 12px;
+.tension-pulse-sustained {
+  animation: pzoTensionShellPulse 550ms ease-in-out infinite;
 }
 
-.queue-empty-label {
-  font-size: 10px;
-  color: rgba(123, 94, 167, 0.6);
-  letter-spacing: 1px;
-  text-transform: uppercase;
+@keyframes pzoTensionPulse {
+  0%, 100% {
+    opacity: 1;
+    box-shadow:
+      0 0 18px rgba(217, 70, 239, 0.28),
+      inset 0 0 12px rgba(255, 255, 255, 0.08);
+  }
+  50% {
+    opacity: 0.65;
+    box-shadow:
+      0 0 24px rgba(255, 77, 109, 0.4),
+      inset 0 0 16px rgba(255, 255, 255, 0.15);
+  }
 }
 
-/* ── Panel Header ────────────────────────────────────────────────────────── */
-.queue-panel__header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 8px;
+@keyframes pzoTensionShellPulse {
+  0%, 100% {
+    filter: drop-shadow(0 0 0 rgba(255, 77, 109, 0));
+  }
+  50% {
+    filter: drop-shadow(0 0 10px rgba(255, 77, 109, 0.35));
+  }
 }
 
-.queue-panel__title {
-  display: flex;
-  align-items: center;
+@keyframes pzoTensionBlink {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.38;
+  }
+}
+
+/* ==========================================================================
+   Anticipation Queue Panel
+   ========================================================================== */
+
+.pzo-tension-queue {
+  position: relative;
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--pzo-tension-border);
+  border-radius: 14px;
+  background:
+    linear-gradient(180deg, rgba(15, 20, 28, 0.96), rgba(8, 10, 13, 0.92)),
+    var(--pzo-tension-panel);
+  box-shadow: var(--pzo-tension-shadow);
+  color: var(--pzo-tension-text-bright);
+  font-family: var(--pzo-tension-font-ui);
+  overflow: hidden;
+  isolation: isolate;
+}
+
+.pzo-tension-queue::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at top right, rgba(185, 120, 255, 0.12), transparent 30%),
+    repeating-linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.018) 0,
+      rgba(255, 255, 255, 0.018) 1px,
+      transparent 1px,
+      transparent 4px
+    );
+  pointer-events: none;
+  opacity: 0.7;
+  z-index: -1;
+}
+
+.pzo-tension-queue--empty {
+  min-height: 140px;
+  place-items: center;
+}
+
+.pzo-tension-queue--pulse {
+  border-color: rgba(217, 70, 239, 0.55);
+  box-shadow:
+    var(--pzo-tension-shadow),
+    0 0 24px rgba(217, 70, 239, 0.14);
+}
+
+.pzo-tension-queue--pulse-sustained {
+  animation: pzoTensionQueueCrisis 700ms ease-in-out infinite;
+}
+
+.pzo-tension-queue--shadowed {
+  border-color: rgba(123, 94, 167, 0.35);
+}
+
+.pzo-tension-queue--signaled {
+  border-color: rgba(201, 168, 76, 0.38);
+}
+
+.pzo-tension-queue--telegraphed {
+  border-color: rgba(56, 189, 248, 0.4);
+}
+
+.pzo-tension-queue--exposed {
+  border-color: rgba(255, 77, 109, 0.48);
+  box-shadow:
+    var(--pzo-tension-shadow),
+    0 0 22px rgba(255, 77, 109, 0.12);
+}
+
+@keyframes pzoTensionQueueCrisis {
+  0%, 100% {
+    transform: translateY(0);
+    box-shadow:
+      var(--pzo-tension-shadow),
+      0 0 16px rgba(255, 77, 109, 0.12);
+  }
+  50% {
+    transform: translateY(-1px);
+    box-shadow:
+      var(--pzo-tension-shadow),
+      0 0 28px rgba(255, 77, 109, 0.22);
+  }
+}
+
+.pzo-tension-queue__header {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px;
+  align-items: start;
+}
+
+.pzo-tension-queue__header-left,
+.pzo-tension-queue__header-right {
+  display: grid;
   gap: 6px;
+}
+
+.pzo-tension-queue__header-right {
+  justify-items: end;
+}
+
+.pzo-tension-queue__title {
+  font-family: var(--pzo-tension-font-mono);
   font-size: 10px;
-  font-weight: 700;
-  color: #7B5EA7;
-  letter-spacing: 1px;
+  letter-spacing: 0.22em;
   text-transform: uppercase;
+  color: var(--pzo-tension-amber);
 }
 
-.queue-arrived-count {
-  font-size: 9px;
-  color: #FF0066;
-  font-weight: 700;
-  padding: 1px 5px;
-  background: rgba(255, 0, 102, 0.12);
-  border-radius: 3px;
-  animation: arrived-blink 0.8s step-end infinite;
-}
-
-.visibility-badge {
-  font-size: 9px;
-  color: #C9A84C;
-  padding: 2px 6px;
-  border: 1px solid rgba(201, 168, 76, 0.3);
-  border-radius: 3px;
-  letter-spacing: 0.5px;
+.pzo-tension-queue__subtitle {
+  font-family: var(--pzo-tension-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
+  color: var(--pzo-tension-text);
 }
 
-/* ── SHADOWED mode summary ───────────────────────────────────────────────── */
-.queue-shadowed-summary {
-  display: flex;
+.pzo-tension-queue__score-block {
+  display: inline-flex;
   align-items: baseline;
-  gap: 6px;
-  padding: 8px 4px;
+  gap: 8px;
 }
 
-.shadowed-count {
-  font-size: 28px;
-  font-weight: 700;
-  color: rgba(123, 94, 167, 0.6);
-  line-height: 1;
-}
-
-.shadowed-label {
-  font-size: 10px;
-  color: rgba(255, 255, 255, 0.3);
+.pzo-tension-queue__score-label {
+  font-family: var(--pzo-tension-font-mono);
+  font-size: 9px;
+  letter-spacing: 0.18em;
   text-transform: uppercase;
-  letter-spacing: 1px;
+  color: var(--pzo-tension-text);
 }
 
-/* ── Entries Container ───────────────────────────────────────────────────── */
-.queue-panel__entries {
+.pzo-tension-queue__score-value {
+  font-family: var(--pzo-tension-font-mono);
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  color: var(--pzo-tension-purple-bright);
+}
+
+.pzo-tension-queue__badges {
   display: flex;
-  flex-direction: column;
-  gap: 3px;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
 }
 
-/* ── Single Queue Entry ──────────────────────────────────────────────────── */
-.queue-entry {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  padding: 6px 8px;
-  border-radius: 4px;
-  background: rgba(255, 255, 255, 0.03);
-  border-left: 3px solid transparent;
-  transition: background 0.2s ease;
+.pzo-tension-queue__badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  border: 1px solid var(--pzo-tension-border-soft);
+  background: rgba(17, 24, 32, 0.84);
+  font-family: var(--pzo-tension-font-mono);
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--pzo-tension-text);
+  white-space: nowrap;
 }
 
-/* ARRIVED — action window open, player can mitigate */
-.queue-entry--arrived {
-  border-left-color: #FF0066;
-  background: rgba(255, 0, 102, 0.08);
-  animation: arrived-entry-pulse 1s ease-in-out infinite;
+.pzo-tension-queue__badge--shadowed {
+  color: var(--pzo-tension-purple-bright);
+  border-color: rgba(123, 94, 167, 0.35);
 }
 
-@keyframes arrived-entry-pulse {
-  0%, 100% { background: rgba(255, 0, 102, 0.08); }
-  50%       { background: rgba(255, 0, 102, 0.18); }
+.pzo-tension-queue__badge--signaled {
+  color: var(--pzo-tension-amber);
+  border-color: rgba(201, 168, 76, 0.35);
 }
 
-/* QUEUED — scheduled, not yet arrived */
-.queue-entry--queued {
-  border-left-color: #7B5EA7;
+.pzo-tension-queue__badge--telegraphed {
+  color: var(--pzo-tension-blue);
+  border-color: rgba(56, 189, 248, 0.35);
 }
 
-/* OVERDUE — arrived but past action window (about to expire) */
-.queue-entry--overdue {
-  border-left-color: #FF4400;
-  background: rgba(255, 68, 0, 0.08);
+.pzo-tension-queue__badge--exposed {
+  color: var(--pzo-tension-red);
+  border-color: rgba(255, 77, 109, 0.45);
 }
 
-/* CASCADE — entry was triggered by a cascade event */
-.queue-entry--cascade {
-  background: rgba(185, 43, 122, 0.06);
+.pzo-tension-queue__badge--clear {
+  color: var(--pzo-tension-teal);
+  border-color: rgba(29, 233, 182, 0.3);
 }
 
-/* ── Entry Header Row ────────────────────────────────────────────────────── */
-.entry-header {
+.pzo-tension-queue__badge--building {
+  color: var(--pzo-tension-amber);
+  border-color: rgba(201, 168, 76, 0.35);
+}
+
+.pzo-tension-queue__badge--urgent {
+  color: #fb7185;
+  border-color: rgba(251, 113, 133, 0.4);
+}
+
+.pzo-tension-queue__badge--collapse {
+  color: var(--pzo-tension-red);
+  border-color: rgba(255, 77, 109, 0.48);
+  animation: pzoTensionBlink 700ms ease-in-out infinite;
+}
+
+.pzo-tension-queue__badge--band,
+.pzo-tension-queue__badge--trend {
+  color: var(--pzo-tension-text-bright);
+}
+
+.pzo-tension-queue__metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.pzo-tension-queue__metric {
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+  border: 1px solid rgba(26, 32, 48, 0.95);
+  border-radius: 10px;
+  background: rgba(17, 24, 32, 0.68);
+}
+
+.pzo-tension-queue__metric-key {
+  font-family: var(--pzo-tension-font-mono);
+  font-size: 8px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--pzo-tension-text);
+}
+
+.pzo-tension-queue__metric-value {
+  font-family: var(--pzo-tension-font-mono);
+  font-size: 18px;
+  font-weight: 800;
+  color: var(--pzo-tension-text-bright);
+}
+
+.pzo-tension-queue__shadowed {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid rgba(26, 32, 48, 0.95);
+  border-radius: 12px;
+  background: rgba(17, 24, 32, 0.72);
+}
+
+.pzo-tension-queue__shadowed-main {
   display: flex;
   align-items: center;
+  gap: 14px;
+}
+
+.pzo-tension-queue__shadowed-count {
+  font-family: var(--pzo-tension-font-mono);
+  font-size: 34px;
+  line-height: 1;
+  font-weight: 900;
+  color: var(--pzo-tension-purple-bright);
+}
+
+.pzo-tension-queue__shadowed-copy {
+  display: grid;
   gap: 6px;
 }
 
-.entry-type {
+.pzo-tension-queue__shadowed-label {
+  font-family: var(--pzo-tension-font-mono);
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.85);
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--pzo-tension-text-bright);
+}
+
+.pzo-tension-queue__shadowed-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-family: var(--pzo-tension-font-mono);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--pzo-tension-text);
+}
+
+.pzo-tension-queue__shadow-pips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.pzo-tension-queue__shadow-pip {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  border: 1px solid rgba(123, 94, 167, 0.4);
+  background: rgba(123, 94, 167, 0.18);
+  box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.2);
+}
+
+.pzo-tension-queue__shadow-pip--hot {
+  border-color: rgba(255, 77, 109, 0.6);
+  background: rgba(255, 77, 109, 0.24);
+  box-shadow: 0 0 8px rgba(255, 77, 109, 0.2);
+}
+
+.pzo-tension-queue__list {
+  display: grid;
+  gap: 10px;
+}
+
+.pzo-tension-queue__entry {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid rgba(26, 32, 48, 0.95);
+  border-radius: 12px;
+  background:
+    linear-gradient(180deg, rgba(17, 24, 32, 0.78), rgba(11, 15, 22, 0.88));
+  transition:
+    transform 180ms ease,
+    border-color 180ms ease,
+    box-shadow 180ms ease;
+}
+
+.pzo-tension-queue__entry:hover {
+  transform: translateY(-1px);
+}
+
+.pzo-tension-queue__entry--arrived {
+  box-shadow: 0 0 0 1px rgba(255, 77, 109, 0.08), var(--pzo-tension-shadow-hot);
+}
+
+.pzo-tension-queue__entry--overdue {
+  border-color: rgba(255, 77, 109, 0.62);
+  box-shadow:
+    0 0 0 1px rgba(255, 77, 109, 0.12),
+    0 0 20px rgba(255, 77, 109, 0.18);
+}
+
+.pzo-tension-queue__entry--cascade {
+  border-left: 3px solid rgba(255, 77, 109, 0.8);
+}
+
+.pzo-tension-queue__entry--low {
+  border-color: rgba(123, 94, 167, 0.28);
+}
+
+.pzo-tension-queue__entry--medium {
+  border-color: rgba(201, 168, 76, 0.36);
+}
+
+.pzo-tension-queue__entry--high {
+  border-color: rgba(249, 115, 22, 0.42);
+}
+
+.pzo-tension-queue__entry--critical {
+  border-color: rgba(255, 77, 109, 0.5);
+}
+
+.pzo-tension-queue__entry-top {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px;
+  align-items: start;
+}
+
+.pzo-tension-queue__entry-title-group {
+  display: flex;
+  gap: 10px;
+  min-width: 0;
+}
+
+.pzo-tension-queue__entry-marker {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  min-width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  border: 1px solid rgba(123, 94, 167, 0.38);
+  background: rgba(123, 94, 167, 0.12);
+  font-family: var(--pzo-tension-font-mono);
+  font-size: 11px;
+  color: var(--pzo-tension-purple-bright);
+}
+
+.pzo-tension-queue__entry-marker--active {
+  border-color: rgba(255, 77, 109, 0.48);
+  background: rgba(255, 77, 109, 0.12);
+  color: var(--pzo-tension-red);
+}
+
+.pzo-tension-queue__entry-heading {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.pzo-tension-queue__entry-title {
+  font-family: var(--pzo-tension-font-mono);
+  font-size: 11px;
   font-weight: 700;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
-  flex: 1;
+  color: var(--pzo-tension-text-bright);
+  word-break: break-word;
 }
 
-.entry-type--hidden {
-  color: rgba(255, 255, 255, 0.25);
+.pzo-tension-queue__entry-title--masked {
+  color: rgba(143, 160, 184, 0.78);
   font-style: italic;
-  font-weight: 400;
 }
 
-/* ── Severity Badge ──────────────────────────────────────────────────────── */
-.entry-severity {
+.pzo-tension-queue__entry-subline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.pzo-tension-queue__severity-pill,
+.pzo-tension-queue__chip,
+.pzo-tension-queue__status-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 20px;
+  padding: 0 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(26, 32, 48, 0.95);
+  background: rgba(11, 15, 22, 0.8);
+  font-family: var(--pzo-tension-font-mono);
   font-size: 8px;
-  font-weight: 700;
-  padding: 1px 4px;
-  border-radius: 2px;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
 }
 
-.entry-severity--minor       { color: #7B5EA7; background: rgba(123, 94, 167, 0.15); }
-.entry-severity--moderate    { color: #C9A84C; background: rgba(201, 168, 76, 0.15); }
-.entry-severity--severe      { color: #E07840; background: rgba(224, 120, 64, 0.15); }
-.entry-severity--critical    { color: #FF4466; background: rgba(255, 68, 102, 0.15); }
-.entry-severity--existential { color: #FF0066; background: rgba(255, 0, 102, 0.2); animation: arrived-blink 1.2s step-end infinite; }
+.pzo-tension-queue__severity-pill {
+  color: var(--pzo-tension-amber);
+  border-color: rgba(201, 168, 76, 0.38);
+}
 
-.entry-cascade-badge {
+.pzo-tension-queue__chip {
+  color: var(--pzo-tension-text);
+}
+
+.pzo-tension-queue__chip--cascade {
+  color: #fb7185;
+  border-color: rgba(251, 113, 133, 0.4);
+}
+
+.pzo-tension-queue__chip--overdue {
+  color: var(--pzo-tension-red);
+  border-color: rgba(255, 77, 109, 0.46);
+}
+
+.pzo-tension-queue__entry-status-group {
+  display: grid;
+  gap: 6px;
+  justify-items: end;
+}
+
+.pzo-tension-queue__status-pill {
+  color: var(--pzo-tension-text);
+}
+
+.pzo-tension-queue__eta {
+  font-family: var(--pzo-tension-font-mono);
   font-size: 10px;
-  color: #B92B7A;
-  flex-shrink: 0;
-}
-
-/* ── Countdown ───────────────────────────────────────────────────────────── */
-.entry-countdown {
-  font-size: 10px;
-  color: #C9A84C;
-  font-family: 'Courier New', Courier, monospace;
-  letter-spacing: 0.5px;
-}
-
-/* ── Worst Case ──────────────────────────────────────────────────────────── */
-.entry-worst-case {
-  font-size: 9px;
-  color: rgba(255, 68, 102, 0.8);
-  font-style: italic;
-  padding-top: 2px;
-  border-top: 1px solid rgba(255, 0, 102, 0.1);
-  margin-top: 1px;
-}
-
-/* ── Mitigation Path ─────────────────────────────────────────────────────── */
-.entry-mitigation {
-  font-size: 9px;
-  color: #4EC9B0;
-  font-weight: 600;
-  letter-spacing: 0.5px;
-  padding-top: 2px;
-}
-
-/* ── Section Divider ─────────────────────────────────────────────────────── */
-.queue-section-divider {
-  font-size: 8px;
-  color: rgba(255, 255, 255, 0.2);
-  letter-spacing: 1px;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
-  padding: 4px 0 2px;
-  border-top: 1px solid rgba(123, 94, 167, 0.15);
-  margin-top: 2px;
+  color: var(--pzo-tension-amber);
+  white-space: nowrap;
 }
 
-/* ── Overflow indicator ──────────────────────────────────────────────────── */
-.queue-overflow-indicator {
+.pzo-tension-queue__entry-body {
+  display: grid;
+  gap: 8px;
+}
+
+.pzo-tension-queue__row,
+.pzo-tension-queue__alert,
+.pzo-tension-queue__mitigation {
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid rgba(26, 32, 48, 0.85);
+  border-radius: 10px;
+  background: rgba(8, 10, 13, 0.34);
+}
+
+.pzo-tension-queue__row-label,
+.pzo-tension-queue__alert-label,
+.pzo-tension-queue__mitigation-label {
+  font-family: var(--pzo-tension-font-mono);
+  font-size: 8px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--pzo-tension-text);
+}
+
+.pzo-tension-queue__row-value,
+.pzo-tension-queue__alert-value {
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--pzo-tension-text-bright);
+}
+
+.pzo-tension-queue__alert {
+  border-color: rgba(255, 77, 109, 0.32);
+  background: rgba(255, 77, 109, 0.06);
+}
+
+.pzo-tension-queue__alert-value {
+  color: #ffd5de;
+}
+
+.pzo-tension-queue__mitigation {
+  border-color: rgba(29, 233, 182, 0.26);
+  background: rgba(29, 233, 182, 0.04);
+}
+
+.pzo-tension-queue__mitigation-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.pzo-tension-queue__mitigation-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(29, 233, 182, 0.32);
+  background: rgba(29, 233, 182, 0.08);
+  font-family: var(--pzo-tension-font-mono);
   font-size: 9px;
-  color: rgba(255, 255, 255, 0.25);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--pzo-tension-teal);
+}
+
+.pzo-tension-queue__overflow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 42px;
+  border: 1px dashed rgba(58, 74, 96, 0.52);
+  border-radius: 10px;
+  background: rgba(17, 24, 32, 0.42);
+  font-family: var(--pzo-tension-font-mono);
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--pzo-tension-text);
+}
+
+.pzo-tension-queue__footer {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  padding-top: 2px;
+}
+
+.pzo-tension-queue__footer-line {
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+  border: 1px solid rgba(26, 32, 48, 0.85);
+  border-radius: 10px;
+  background: rgba(11, 15, 22, 0.7);
+  font-family: var(--pzo-tension-font-mono);
+  font-size: 8px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--pzo-tension-text);
+}
+
+.pzo-tension-queue__footer-line strong {
+  font-size: 11px;
+  color: var(--pzo-tension-text-bright);
+  letter-spacing: 0.08em;
+}
+
+.pzo-tension-queue__empty {
+  display: grid;
+  gap: 8px;
   text-align: center;
-  padding: 4px 0;
-  letter-spacing: 1px;
 }
 
-/* ─────────────────────────────────────────────────────────────────────────
-   VISIBILITY STATE MODIFIERS ON QUEUE PANEL
-   ──────────────────────────────────────────────────────────────────────── */
-
-/* SHADOWED — muted, mysterious */
-.queue-panel--shadowed .queue-panel__title {
-  color: rgba(123, 94, 167, 0.5);
+.pzo-tension-queue__empty-title {
+  font-family: var(--pzo-tension-font-mono);
+  font-size: 12px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--pzo-tension-teal);
 }
 
-.queue-panel--shadowed .entry-type {
-  color: rgba(255, 255, 255, 0.25);
+.pzo-tension-queue__empty-subtitle {
+  font-family: var(--pzo-tension-font-mono);
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--pzo-tension-text);
 }
 
-/* SIGNALED — awareness increases */
-.queue-panel--signaled {
-  border-color: rgba(123, 94, 167, 0.5);
+/* ==========================================================================
+   Responsive
+   ========================================================================== */
+
+@media (max-width: 900px) {
+  .pzo-tension-queue__header,
+  .pzo-tension-queue__entry-top {
+    grid-template-columns: 1fr;
+  }
+
+  .pzo-tension-queue__header-right,
+  .pzo-tension-queue__entry-status-group {
+    justify-items: start;
+  }
+
+  .pzo-tension-queue__badges {
+    justify-content: flex-start;
+  }
+
+  .pzo-tension-queue__metrics,
+  .pzo-tension-queue__footer {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
-/* TELEGRAPHED — countdown urgency */
-.queue-panel--telegraphed {
-  border-color: rgba(201, 168, 76, 0.4);
+@media (max-width: 640px) {
+  .pzo-tension-queue {
+    padding: 12px;
+  }
+
+  .pzo-tension-queue__metrics,
+  .pzo-tension-queue__footer {
+    grid-template-columns: 1fr;
+  }
+
+  .pzo-tension-queue__shadowed-main {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .pzo-tension-queue__score-value {
+    font-size: 18px;
+  }
 }
 
-.queue-panel--telegraphed .entry-countdown {
-  color: #B92B27;
-  font-weight: 700;
-}
+@media (prefers-reduced-motion: reduce) {
+  .tension-pulse-active .tension-gauge__fill,
+  .tension-pulse-sustained,
+  .pzo-tension-queue--pulse-sustained,
+  .pzo-tension-queue__badge--collapse,
+  .tension-escalating {
+    animation: none !important;
+  }
 
-/* EXPOSED — crisis mode, full information, near-death */
-.queue-panel--exposed {
-  border-color: rgba(255, 0, 102, 0.5);
-  background: #1F1020;
-  box-shadow: 0 0 16px rgba(255, 0, 102, 0.08);
-}
-
-.queue-panel--exposed .queue-panel__title {
-  color: #FF0066;
-}
-
-.queue-panel--exposed .entry-type {
-  color: rgba(255, 255, 255, 1);
-}
-
-.queue-panel--exposed .entry-countdown {
-  color: #FF4466;
-  font-weight: 700;
-}
-
-/* ─────────────────────────────────────────────────────────────────────────
-   CRISIS MODE — full-screen effects triggered at sustained pulse (3+ ticks)
-   Applied at the document level by the frontend layout when isSustainedPulse = true.
-   ──────────────────────────────────────────────────────────────────────── */
-
-.tension-crisis-mode {
-  /* Screen border shift — borrowed from TimeEngine T4 COLLAPSE_IMMINENT class */
-  box-shadow: inset 0 0 0 3px rgba(255, 0, 102, 0.6);
-  animation: crisis-border-pulse 0.4s ease-in-out infinite;
-}
-
-@keyframes crisis-border-pulse {
-  0%, 100% { box-shadow: inset 0 0 0 3px rgba(255, 0, 102, 0.6); }
-  50%       { box-shadow: inset 0 0 0 3px rgba(255, 0, 102, 1.0); }
+  .tension-gauge__fill,
+  .pzo-tension-queue__entry {
+    transition: none !important;
+  }
 }
