@@ -1,4 +1,4 @@
-// FILE: backend/src/game/engine/core/__tests__/TickSequence.tension.spec.ts
+// FILE: backend/src/game/engine/tension/__tests__/TickSequence.tension.spec.ts
 
 import { describe, expect, it } from 'vitest';
 
@@ -11,7 +11,7 @@ import {
   getTickStepIndex,
   isEngineExecutionStep,
   TICK_SEQUENCE,
-} from '../TickSequence';
+} from '../../core/TickSequence';
 
 describe('TickSequence — tension placement', () => {
   it('pins STEP_04_TENSION directly after pressure and directly before battle', () => {
@@ -74,5 +74,18 @@ describe('TickSequence — tension placement', () => {
     expect(() => assertValidTickSequence(invalid)).toThrowError(
       /Tick sequence mismatch/,
     );
+  });
+
+  it('fails loudly if the sequence is shortened or duplicated', () => {
+    expect(() =>
+      assertValidTickSequence(TICK_SEQUENCE.slice(0, -1)),
+    ).toThrowError(/Invalid tick sequence length/);
+
+    expect(() =>
+      assertValidTickSequence([
+        ...TICK_SEQUENCE.slice(0, 12),
+        'STEP_12_EVENT_SEAL',
+      ]),
+    ).toThrowError(/Tick sequence mismatch|Duplicate tick step detected/);
   });
 });
