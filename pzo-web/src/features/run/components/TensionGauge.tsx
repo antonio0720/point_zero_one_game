@@ -1,11 +1,18 @@
 /**
- * FILE: /Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/pzo-web/src/features/run/components/TensionGauge.tsx
- * Density6 LLC · Point Zero One · Confidential
+ * ============================================================================
+ * FILE: pzo-web/src/features/run/components/TensionGauge.tsx
+ * ============================================================================
  *
- * TensionGauge — compact gauge aligned with GameHUD terminal aesthetic.
- * - Reads from useTensionEngine only (cast-safe to avoid hook type drift).
- * - Injects its own CSS (no external stylesheet dependency).
- * - Uses HUD CSS variables when present; falls back to sane defaults.
+ * Purpose:
+ * - high-fidelity HUD display for Engine 3 — Tension Engine
+ * - renders score, pulse state, visibility tier, queue pressure, and short history
+ * - visually distinct from PressureGauge while still fitting the repo’s cockpit UI
+ *
+ * Doctrine:
+ * - presentational only
+ * - store reads happen via useTensionEngine()
+ * - style sheet is injected once at runtime to keep file self-contained
+ * ============================================================================
  */
 
 'use client';
@@ -13,374 +20,652 @@
 import React, { useEffect, useMemo } from 'react';
 import { useTensionEngine } from '../hooks/useTensionEngine';
 
+const TENSION_GAUGE_STYLES = `
+@import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;500;600;700&display=swap');
+
+.pzo-tension-gauge {
+  --bg: #08090f;
+  --panel: #0d0f17;
+  --border: #21253a;
+  --border-hi: #343a57;
+  --text: #97a4c0;
+  --text-hi: #d9e3ff;
+  --mono: 'Share Tech Mono', monospace;
+  --ui: 'Rajdhani', sans-serif;
+  --violet: #7b5ea7;
+  --violet-hi: #ad7cff;
+  --magenta: #d946ef;
+  --danger: #ff2f7d;
+  --critical: #ff0055;
+  --teal: #6ee7f9;
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  background:
+    linear-gradient(180deg, rgba(123,94,167,.10), transparent 35%),
+    linear-gradient(180deg, rgba(255,0,85,.05), transparent 100%),
+    var(--panel);
+  border-radius: 4px;
+  clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 10px 100%, 0 calc(100% - 10px));
+  box-shadow:
+    inset 0 0 0 1px rgba(255,255,255,.02),
+    0 0 0 1px rgba(0,0,0,.15);
+  user-select: none;
+}
+
+.pzo-tension-gauge--pulse {
+  border-color: rgba(255,47,125,.55);
+  box-shadow:
+    0 0 18px rgba(255,47,125,.14),
+    inset 0 0 0 1px rgba(255,255,255,.02);
+}
+
+.pzo-tension-gauge--sustained {
+  animation: pzoTensionShellPulse 450ms ease-in-out infinite alternate;
+}
+
+@keyframes pzoTensionShellPulse {
+  from { box-shadow: 0 0 14px rgba(255,47,125,.14), inset 0 0 0 1px rgba(255,255,255,.02); }
+  to   { box-shadow: 0 0 28px rgba(255,47,125,.26), inset 0 0 0 1px rgba(255,255,255,.05); }
+}
+
+.pzo-tension-gauge__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.pzo-tension-gauge__label {
+  font-family: var(--mono);
+  font-size: 9px;
+  line-height: 1;
+  letter-spacing: .22em;
+  color: var(--violet-hi);
+  text-transform: uppercase;
+}
+
+.pzo-tension-gauge__meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.pzo-tension-gauge__chip {
+  font-family: var(--mono);
+  font-size: 9px;
+  line-height: 1;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--text);
+  border: 1px solid rgba(255,255,255,.08);
+  padding: 4px 6px;
+  border-radius: 2px;
+  background: rgba(255,255,255,.03);
+}
+
+.pzo-tension-gauge__chip--visibility {
+  color: var(--violet-hi);
+  border-color: rgba(173,124,255,.22);
+  background: rgba(173,124,255,.08);
+}
+
+.pzo-tension-gauge__chip--urgent {
+  color: #ffe0ef;
+  border-color: rgba(255,47,125,.3);
+  background: rgba(255,47,125,.12);
+}
+
+.pzo-tension-gauge__chip--trend-up {
+  color: #ffd7f7;
+  border-color: rgba(217,70,239,.28);
+  background: rgba(217,70,239,.12);
+}
+
+.pzo-tension-gauge__chip--trend-down {
+  color: #c7fff8;
+  border-color: rgba(110,231,249,.22);
+  background: rgba(110,231,249,.08);
+}
+
+.pzo-tension-gauge__body {
+  display: grid;
+  gap: 10px;
+}
+
+.pzo-tension-gauge__layout--vertical {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  gap: 10px;
+  align-items: stretch;
+}
+
+.pzo-tension-gauge__layout--horizontal {
+  display: grid;
+  gap: 8px;
+}
+
+.pzo-tension-gauge__track {
+  position: relative;
+  border: 1px solid var(--border);
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.035), transparent),
+    #0f1320;
+  overflow: hidden;
+  border-radius: 2px;
+}
+
+.pzo-tension-gauge__track--vertical {
+  width: 16px;
+  min-height: 112px;
+}
+
+.pzo-tension-gauge__track--horizontal {
+  width: 100%;
+  height: 14px;
+}
+
+.pzo-tension-gauge__fill {
+  position: absolute;
+  inset: auto 0 0 0;
+  transition: all 800ms linear;
+  border-radius: 1px;
+}
+
+.pzo-tension-gauge__fill--horizontal {
+  inset: 0 auto 0 0;
+}
+
+.pzo-tension-gauge__fill--pulse {
+  animation: pzoTensionFillPulse 650ms ease-in-out infinite alternate;
+}
+
+@keyframes pzoTensionFillPulse {
+  from { opacity: .76; filter: saturate(100%); }
+  to   { opacity: 1; filter: saturate(150%); }
+}
+
+.pzo-tension-gauge__cap {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 2px;
+  background: rgba(255,255,255,.72);
+  mix-blend-mode: screen;
+}
+
+.pzo-tension-gauge__cap--vertical {
+  inset: auto 0 0 0;
+  width: 100%;
+  height: 2px;
+}
+
+.pzo-tension-gauge__stats {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.pzo-tension-gauge__score-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.pzo-tension-gauge__score {
+  font-family: var(--ui);
+  font-size: 22px;
+  line-height: .95;
+  font-weight: 700;
+  color: var(--text-hi);
+}
+
+.pzo-tension-gauge__score small {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text);
+  margin-left: 6px;
+  letter-spacing: .12em;
+}
+
+.pzo-tension-gauge__band {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: .14em;
+  color: var(--text);
+  text-transform: uppercase;
+}
+
+.pzo-tension-gauge__subgrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.pzo-tension-gauge__stat {
+  padding: 6px 7px;
+  border: 1px solid rgba(255,255,255,.06);
+  background: rgba(255,255,255,.025);
+  border-radius: 2px;
+}
+
+.pzo-tension-gauge__stat-label {
+  display: block;
+  font-family: var(--mono);
+  font-size: 8px;
+  line-height: 1;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--text);
+  margin-bottom: 5px;
+}
+
+.pzo-tension-gauge__stat-value {
+  display: block;
+  font-family: var(--ui);
+  font-size: 13px;
+  line-height: 1;
+  font-weight: 600;
+  color: var(--text-hi);
+}
+
+.pzo-tension-gauge__history {
+  border: 1px solid rgba(255,255,255,.06);
+  background: rgba(255,255,255,.02);
+  border-radius: 2px;
+  padding: 5px 6px 4px;
+}
+
+.pzo-tension-gauge__history-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.pzo-tension-gauge__history-label {
+  font-family: var(--mono);
+  font-size: 8px;
+  line-height: 1;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--text);
+}
+
+.pzo-tension-gauge__history-meta {
+  font-family: var(--mono);
+  font-size: 8px;
+  line-height: 1;
+  letter-spacing: .12em;
+  color: var(--text);
+}
+
+.pzo-tension-gauge__sparkline {
+  display: block;
+  width: 100%;
+  height: 34px;
+}
+
+.pzo-tension-gauge__sparkline-grid {
+  stroke: rgba(255,255,255,.08);
+  stroke-width: 1;
+  shape-rendering: crispEdges;
+}
+
+.pzo-tension-gauge__sparkline-path {
+  fill: none;
+  stroke: var(--violet-hi);
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+  filter: drop-shadow(0 0 6px rgba(173,124,255,.20));
+}
+
+.pzo-tension-gauge__sparkline-path--pulse {
+  stroke: var(--danger);
+  filter: drop-shadow(0 0 7px rgba(255,47,125,.26));
+}
+
+.pzo-tension-gauge__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.pzo-tension-gauge__footer-text {
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: .12em;
+  color: var(--text);
+  text-transform: uppercase;
+}
+
+.pzo-tension-gauge__footer-text strong {
+  color: var(--text-hi);
+  font-weight: 700;
+}
+
+@media (max-width: 640px) {
+  .pzo-tension-gauge__subgrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+`;
+
+function injectTensionGaugeStyles(): void {
+  if (typeof document === 'undefined') return;
+
+  const id = 'pzo-tension-gauge-styles';
+  if (document.getElementById(id) !== null) return;
+
+  const styleTag = document.createElement('style');
+  styleTag.id = id;
+  styleTag.textContent = TENSION_GAUGE_STYLES;
+  document.head.appendChild(styleTag);
+}
+
+function clamp01(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(1, value));
+}
+
+function resolveGaugeColor(score: number): string {
+  if (score >= 0.9) return '#ff0055';
+  if (score >= 0.75) return '#ff2f7d';
+  if (score >= 0.55) return '#d946ef';
+  if (score >= 0.3) return '#ad7cff';
+  return '#7b5ea7';
+}
+
+function buildSparklinePoints(history: readonly number[]): string {
+  const points = history.length > 1 ? history : [0, ...(history.length === 1 ? history : [0])];
+  const width = 160;
+  const height = 34;
+  const step = points.length <= 1 ? width : width / (points.length - 1);
+
+  return points
+    .map((value, index) => {
+      const x = index * step;
+      const y = height - clamp01(value) * height;
+      return `${x},${y}`;
+    })
+    .join(' ');
+}
+
 export type TensionGaugeOrientation = 'vertical' | 'horizontal';
 
 export interface TensionGaugeProps {
   readonly orientation?: TensionGaugeOrientation;
-  readonly showLabel?: boolean;
-  readonly showBadges?: boolean;
+  readonly label?: string;
+  readonly showHistory?: boolean;
+  readonly showQueueStats?: boolean;
   readonly className?: string;
   readonly style?: React.CSSProperties;
 }
 
-type ThreatUrgency = 'CALM' | 'BUILDING' | 'URGENT' | string;
-
-type TensionEngineLike = {
-  score?: number; // 0..1
-  scorePct?: number; // 0..100
-  visibilityState?: string;
-
-  queueLength?: number;
-  arrivedCount?: number;
-  queuedCount?: number;
-
-  isPulseActive?: boolean;
-  isSustainedPulse?: boolean;
-  isEscalating?: boolean;
-
-  threatUrgency?: ThreatUrgency;
-
-  // optional extras that may exist in your engine
-  pulseTicksActive?: number;
-  expiredCount?: number;
-  currentTick?: number;
-};
-
-const STYLES = `
-  @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;500;600;700&display=swap');
-
-  .pzo-tension-gauge {
-    --hud-panel:        var(--hud-panel, #0c0f14);
-    --hud-border:       var(--hud-border, #1a2030);
-    --hud-amber:        var(--hud-amber, #c9a84c);
-    --hud-crimson:      var(--hud-crimson, #c0392b);
-    --hud-teal:         var(--hud-teal, #1de9b6);
-    --hud-text:         var(--hud-text, #8fa0b8);
-    --hud-text-bright:  var(--hud-text-bright, #c8d8f0);
-    --hud-muted:        var(--hud-muted, #3a4a60);
-    --font-mono:        var(--font-mono, 'Share Tech Mono', monospace);
-    --font-ui:          var(--font-ui, 'Rajdhani', sans-serif);
-
-    display: grid;
-    gap: 8px;
-    padding: 8px;
-    background: var(--hud-panel);
-    border: 1px solid var(--hud-border);
-    border-radius: 3px;
-    clip-path: polygon(0 0,calc(100% - 8px) 0,100% 8px,100% 100%,8px 100%,0 calc(100% - 8px));
-    user-select: none;
-    position: relative;
-    overflow: hidden;
-  }
-
-  .pzo-tension-gauge::before {
-    content:'';
-    position:absolute;
-    inset:0;
-    background: repeating-linear-gradient(
-      0deg,
-      transparent, transparent 2px,
-      rgba(0,0,0,0.07) 2px, rgba(0,0,0,0.07) 4px
-    );
-    pointer-events:none;
-    opacity:.55;
-  }
-
-  .pzo-tension-gauge__top {
-    position: relative;
-    z-index: 1;
-    display:flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: 10px;
-  }
-
-  .pzo-tension-gauge__label {
-    font-family: var(--font-mono);
-    font-size: 9px;
-    letter-spacing: .2em;
-    color: var(--hud-amber);
-    text-transform: uppercase;
-    display:flex;
-    align-items:center;
-    gap:8px;
-  }
-  .pzo-tension-gauge__label::after{
-    content:'';
-    width: 44px;
-    height: 1px;
-    background: linear-gradient(to right, rgba(201,168,76,.55), transparent);
-  }
-
-  .pzo-tension-gauge__score {
-    font-family: var(--font-mono);
-    font-size: 14px;
-    font-weight: 700;
-    letter-spacing: .06em;
-    color: var(--hud-text-bright);
-  }
-
-  .pzo-tension-gauge__meta {
-    position: relative;
-    z-index: 1;
-    display:flex;
-    gap: 6px;
-    flex-wrap: wrap;
-    align-items: center;
-  }
-
-  .pzo-tension-chip {
-    font-family: var(--font-mono);
-    font-size: 8px;
-    letter-spacing: .15em;
-    padding: 2px 6px;
-    border-radius: 2px;
-    text-transform: uppercase;
-    border: 1px solid var(--hud-border);
-    background: rgba(255,255,255,0.02);
-    color: var(--hud-text);
-  }
-
-  .pzo-tension-chip--urgent {
-    border-color: var(--hud-crimson);
-    color: var(--hud-crimson);
-    background: rgba(192,57,43,.12);
-    animation: pzoTensionPulse .65s ease-in-out infinite alternate;
-  }
-
-  .pzo-tension-chip--building {
-    border-color: var(--hud-amber);
-    color: var(--hud-amber);
-    background: rgba(201,168,76,.10);
-  }
-
-  .pzo-tension-chip--calm {
-    border-color: rgba(29,233,182,.35);
-    color: var(--hud-teal);
-    background: rgba(29,233,182,.06);
-  }
-
-  .pzo-tension-chip--pulse {
-    border-color: var(--hud-crimson);
-    color: var(--hud-crimson);
-    background: rgba(192,57,43,.08);
-    animation: pzoTensionPulse .55s ease-in-out infinite alternate;
-  }
-
-  .pzo-tension-chip--rise {
-    border-color: rgba(255,255,255,.15);
-    color: var(--hud-text-bright);
-  }
-
-  .pzo-tension-track {
-    position: relative;
-    z-index: 1;
-    border: 1px solid var(--hud-border);
-    background: #111820;
-    border-radius: 2px;
-    overflow: hidden;
-  }
-
-  .pzo-tension-track--vertical { width: 14px; height: 86px; justify-self: start; }
-  .pzo-tension-track--horizontal { width: 100%; height: 12px; }
-
-  .pzo-tension-fill {
-    position:absolute;
-    inset:auto 0 0 0;
-    border-radius: 1px;
-    transition: all 900ms linear;
-  }
-  .pzo-tension-fill--horizontal { inset: 0 auto 0 0; }
-
-  .pzo-tension-fill::after {
-    content:'';
-    position:absolute;
-    top:0;
-    right:0;
-    width:2px;
-    height:100%;
-    background: rgba(255,255,255,.65);
-  }
-
-  .pzo-tension-fill--urgent {
-    filter: drop-shadow(0 0 10px rgba(192,57,43,.45));
-    animation: pzoTensionPulse .65s ease-in-out infinite alternate;
-  }
-
-  .pzo-tension-foot {
-    position: relative;
-    z-index: 1;
-    display:flex;
-    align-items:center;
-    justify-content: space-between;
-    gap: 10px;
-    padding-top: 6px;
-    border-top: 1px solid var(--hud-border);
-    font-family: var(--font-mono);
-    font-size: 9px;
-    letter-spacing: .10em;
-    color: var(--hud-text);
-  }
-
-  @keyframes pzoTensionPulse { from { opacity:.75 } to { opacity: 1 } }
-`;
-
-function injectStyles() {
-  if (typeof document === 'undefined') return;
-  const id = 'pzo-tension-gauge-styles';
-  if (document.getElementById(id)) return;
-  const el = document.createElement('style');
-  el.id = id;
-  el.textContent = STYLES;
-  document.head.appendChild(el);
-}
-
-const clamp01 = (n: number) => Math.max(0, Math.min(1, Number.isFinite(n) ? n : 0));
-const clampInt = (n: unknown, d = 0) => {
-  const v = Number(n);
-  return Number.isFinite(v) ? Math.trunc(v) : d;
-};
-
-const tensionFillColor = (score01: number, urgency: ThreatUrgency) => {
-  const s = clamp01(score01);
-  if (String(urgency).toUpperCase() === 'URGENT') return 'linear-gradient(90deg, rgba(127,29,29,.65), rgba(192,57,43,1))';
-  if (s >= 0.85) return 'linear-gradient(90deg, rgba(236,72,153,.65), rgba(236,72,153,1))'; // hot magenta
-  if (s >= 0.55) return 'linear-gradient(90deg, rgba(168,85,247,.55), rgba(168,85,247,1))'; // violet
-  return 'linear-gradient(90deg, rgba(124,58,237,.50), rgba(124,58,237,1))'; // deep violet
-};
-
 export function TensionGauge({
   orientation = 'vertical',
-  showLabel = true,
-  showBadges = true,
+  label = 'TENSION',
+  showHistory = true,
+  showQueueStats = true,
   className,
   style,
 }: TensionGaugeProps): React.ReactElement {
-  const t = useTensionEngine() as unknown as TensionEngineLike;
+  const engine = useTensionEngine();
 
   useEffect(() => {
-    injectStyles();
+    injectTensionGaugeStyles();
   }, []);
 
-  const urgency: ThreatUrgency = t.threatUrgency ?? 'CALM';
-  const score01 = clamp01(t.score ?? 0);
-  const pct = useMemo(() => {
-    if (typeof t.scorePct === 'number' && Number.isFinite(t.scorePct)) return Math.round(Math.max(0, Math.min(100, t.scorePct)));
-    return Math.round(score01 * 100);
-  }, [t.scorePct, score01]);
+  const score01 = clamp01(engine.score);
+  const pct = Math.round(score01 * 100);
+  const color = resolveGaugeColor(score01);
 
-  const queueLength = clampInt(t.queueLength, 0);
-  const arrivedCount = clampInt(t.arrivedCount, 0);
-  const queuedCount = clampInt(t.queuedCount, queueLength);
+  const fillStyle = useMemo<React.CSSProperties>(() => {
+    if (orientation === 'horizontal') {
+      return {
+        width: `${pct}%`,
+        height: '100%',
+        background: color,
+        boxShadow: `0 0 10px ${color}44`,
+      };
+    }
 
-  const isPulseActive = Boolean(t.isPulseActive);
-  const isSustainedPulse = Boolean(t.isSustainedPulse);
-  const isEscalating = Boolean(t.isEscalating);
+    return {
+      height: `${pct}%`,
+      width: '100%',
+      background: color,
+      boxShadow: `0 0 10px ${color}44`,
+    };
+  }, [orientation, pct, color]);
 
-  const isUrgent = String(urgency).toUpperCase() === 'URGENT';
-  const isBuilding = String(urgency).toUpperCase() === 'BUILDING';
+  const sparklinePoints = useMemo<string>(
+    () => buildSparklinePoints(engine.scoreHistory),
+    [engine.scoreHistory],
+  );
 
-  const trackClass = `pzo-tension-track pzo-tension-track--${orientation}`;
-  const fillClass = [
-    'pzo-tension-fill',
-    orientation === 'horizontal' ? 'pzo-tension-fill--horizontal' : '',
-    isUrgent ? 'pzo-tension-fill--urgent' : '',
-  ]
-    .filter(Boolean)
-    .join(' ');
+  const metaTrendClass =
+    engine.trend === 'RISING'
+      ? 'pzo-tension-gauge__chip--trend-up'
+      : engine.trend === 'FALLING'
+        ? 'pzo-tension-gauge__chip--trend-down'
+        : '';
 
-  const fillStyle: React.CSSProperties =
-    orientation === 'vertical'
-      ? { height: `${pct}%`, width: '100%', background: tensionFillColor(score01, urgency) }
-      : { width: `${pct}%`, height: '100%', background: tensionFillColor(score01, urgency) };
+  const nextThreatLabel =
+    engine.nextThreatEta === null ? 'NONE' : `${engine.nextThreatEta}T`;
 
-  const rootClass = [
-    'pzo-tension-gauge',
-    className ?? '',
-  ]
-    .filter(Boolean)
-    .join(' ')
-    .trim();
-
-  const visibility = t.visibilityState ? String(t.visibilityState).toUpperCase() : null;
+  const dominantThreatLabel =
+    engine.dominantEntry === null
+      ? 'NONE'
+      : engine.canSeeThreatTypes
+        ? engine.dominantEntry.threatType.replace(/_/g, ' ')
+        : 'HIDDEN';
 
   return (
     <div
-      className={rootClass}
+      className={[
+        'pzo-tension-gauge',
+        engine.isPulseActive ? 'pzo-tension-gauge--pulse' : '',
+        engine.isSustainedPulse ? 'pzo-tension-gauge--sustained' : '',
+        className ?? '',
+      ]
+        .filter(Boolean)
+        .join(' ')}
       style={style}
-      role="meter"
-      aria-label="Tension"
-      aria-valuenow={pct}
-      aria-valuemin={0}
-      aria-valuemax={100}
-      data-urgency={urgency}
-      data-pulse={isPulseActive ? '1' : '0'}
+      aria-label={`${label} gauge`}
+      aria-live='polite'
     >
-      <div className="pzo-tension-gauge__top">
-        {showLabel ? (
-          <div className="pzo-tension-gauge__label">
-            TENSION
-          </div>
-        ) : (
-          <div />
-        )}
-        <div className="pzo-tension-gauge__score" style={{ color: isUrgent ? 'var(--hud-crimson)' : 'var(--hud-text-bright)' }}>
-          {pct}
+      <div className='pzo-tension-gauge__row'>
+        <span className='pzo-tension-gauge__label'>{label}</span>
+
+        <div className='pzo-tension-gauge__meta'>
+          <span className='pzo-tension-gauge__chip pzo-tension-gauge__chip--visibility'>
+            {engine.visibilityState}
+          </span>
+
+          <span
+            className={[
+              'pzo-tension-gauge__chip',
+              engine.threatUrgency === 'URGENT' ||
+              engine.threatUrgency === 'COLLAPSE_IMMINENT'
+                ? 'pzo-tension-gauge__chip--urgent'
+                : '',
+            ]
+              .filter(Boolean)
+              .join(' ')}
+          >
+            {engine.threatUrgency}
+          </span>
+
+          <span
+            className={[
+              'pzo-tension-gauge__chip',
+              metaTrendClass,
+            ]
+              .filter(Boolean)
+              .join(' ')}
+          >
+            {engine.trend}
+          </span>
         </div>
       </div>
 
-      <div className="pzo-tension-gauge__meta" aria-hidden={!showBadges}>
-        {showBadges && (
-          <span
+      <div className='pzo-tension-gauge__body'>
+        <div
+          className={
+            orientation === 'horizontal'
+              ? 'pzo-tension-gauge__layout--horizontal'
+              : 'pzo-tension-gauge__layout--vertical'
+          }
+        >
+          <div
             className={[
-              'pzo-tension-chip',
-              isUrgent ? 'pzo-tension-chip--urgent' : isBuilding ? 'pzo-tension-chip--building' : 'pzo-tension-chip--calm',
+              'pzo-tension-gauge__track',
+              orientation === 'horizontal'
+                ? 'pzo-tension-gauge__track--horizontal'
+                : 'pzo-tension-gauge__track--vertical',
             ].join(' ')}
-            title="Threat urgency"
           >
-            {String(urgency).toUpperCase()}
+            <div
+              className={[
+                'pzo-tension-gauge__fill',
+                orientation === 'horizontal'
+                  ? 'pzo-tension-gauge__fill--horizontal'
+                  : '',
+                engine.isPulseActive ? 'pzo-tension-gauge__fill--pulse' : '',
+              ]
+                .filter(Boolean)
+                .join(' ')}
+              style={fillStyle}
+            >
+              <div
+                className={[
+                  'pzo-tension-gauge__cap',
+                  orientation === 'vertical'
+                    ? 'pzo-tension-gauge__cap--vertical'
+                    : '',
+                ]
+                  .filter(Boolean)
+                  .join(' ')}
+              />
+            </div>
+          </div>
+
+          <div className='pzo-tension-gauge__stats'>
+            <div className='pzo-tension-gauge__score-row'>
+              <div className='pzo-tension-gauge__score'>
+                {pct}
+                <small>%</small>
+              </div>
+
+              <div className='pzo-tension-gauge__band'>
+                {engine.tensionBand}
+              </div>
+            </div>
+
+            {showQueueStats && (
+              <div className='pzo-tension-gauge__subgrid'>
+                <div className='pzo-tension-gauge__stat'>
+                  <span className='pzo-tension-gauge__stat-label'>Queue</span>
+                  <span className='pzo-tension-gauge__stat-value'>
+                    {engine.queueLength}
+                  </span>
+                </div>
+
+                <div className='pzo-tension-gauge__stat'>
+                  <span className='pzo-tension-gauge__stat-label'>Active</span>
+                  <span className='pzo-tension-gauge__stat-value'>
+                    {engine.arrivedCount}
+                  </span>
+                </div>
+
+                <div className='pzo-tension-gauge__stat'>
+                  <span className='pzo-tension-gauge__stat-label'>Expired</span>
+                  <span className='pzo-tension-gauge__stat-value'>
+                    {engine.expiredCount}
+                  </span>
+                </div>
+
+                <div className='pzo-tension-gauge__stat'>
+                  <span className='pzo-tension-gauge__stat-label'>Next ETA</span>
+                  <span className='pzo-tension-gauge__stat-value'>
+                    {nextThreatLabel}
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {showHistory && (
+              <div className='pzo-tension-gauge__history'>
+                <div className='pzo-tension-gauge__history-head'>
+                  <span className='pzo-tension-gauge__history-label'>
+                    Last {engine.scoreHistory.length} ticks
+                  </span>
+                  <span className='pzo-tension-gauge__history-meta'>
+                    Tick {engine.currentTick}
+                  </span>
+                </div>
+
+                <svg
+                  className='pzo-tension-gauge__sparkline'
+                  viewBox='0 0 160 34'
+                  preserveAspectRatio='none'
+                  aria-hidden='true'
+                >
+                  <line
+                    className='pzo-tension-gauge__sparkline-grid'
+                    x1='0'
+                    y1='17'
+                    x2='160'
+                    y2='17'
+                  />
+                  <line
+                    className='pzo-tension-gauge__sparkline-grid'
+                    x1='0'
+                    y1='1'
+                    x2='160'
+                    y2='1'
+                  />
+                  <line
+                    className='pzo-tension-gauge__sparkline-grid'
+                    x1='0'
+                    y1='33'
+                    x2='160'
+                    y2='33'
+                  />
+                  <polyline
+                    className={[
+                      'pzo-tension-gauge__sparkline-path',
+                      engine.isPulseActive
+                        ? 'pzo-tension-gauge__sparkline-path--pulse'
+                        : '',
+                    ]
+                      .filter(Boolean)
+                      .join(' ')}
+                    points={sparklinePoints}
+                  />
+                </svg>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className='pzo-tension-gauge__footer'>
+          <span className='pzo-tension-gauge__footer-text'>
+            Dominant <strong>{dominantThreatLabel}</strong>
           </span>
-        )}
 
-        {showBadges && visibility && (
-          <span className="pzo-tension-chip" title="Visibility state">
-            VIS {visibility}
+          <span className='pzo-tension-gauge__footer-text'>
+            Pulse <strong>{engine.isPulseActive ? 'ON' : 'OFF'}</strong>
+            {' · '}
+            {engine.pulseTicksActive}T
           </span>
-        )}
-
-        {showBadges && isPulseActive && (
-          <span className="pzo-tension-chip pzo-tension-chip--pulse" title="Pulse active">
-            PULSE{typeof t.pulseTicksActive === 'number' ? `×${Math.max(0, Math.trunc(t.pulseTicksActive))}` : ''}
-          </span>
-        )}
-
-        {showBadges && isSustainedPulse && (
-          <span className="pzo-tension-chip pzo-tension-chip--pulse" title="Sustained pulse">
-            SUSTAINED
-          </span>
-        )}
-
-        {showBadges && isEscalating && (
-          <span className="pzo-tension-chip pzo-tension-chip--rise" title="Tension rising">
-            ▲ RISING
-          </span>
-        )}
-      </div>
-
-      <div className={trackClass}>
-        <div className={fillClass} style={fillStyle} />
-      </div>
-
-      <div className="pzo-tension-foot">
-        <span title="Arrived / queued / total">
-          {arrivedCount}↓ {queuedCount}⏳ {queueLength}Σ
-        </span>
-        <span title="Score (0..1)">
-          {(score01 * 100).toFixed(1)}%
-        </span>
+        </div>
       </div>
     </div>
   );
 }
-
-export default TensionGauge;
