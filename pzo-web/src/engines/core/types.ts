@@ -208,9 +208,26 @@ export interface CascadeChainInstance {
 // ── RUN STATE SNAPSHOT ────────────────────────────────────────────────────────
 
 /**
+ * Card/decision telemetry authored into the snapshot at source.
+ * Structural shape matches sovereignty/DecisionRecord without creating a
+ * core → sovereignty import dependency.
+ */
+export interface DecisionTelemetryRecord {
+  readonly cardId: string;
+  readonly decisionWindowMs: number;
+  readonly resolvedInMs: number;
+  readonly wasAutoResolved: boolean;
+  readonly wasOptimalChoice: boolean;
+  readonly speedScore: number;
+}
+
+/**
  * Complete read-only snapshot of run state at the START of each tick.
  * Assembled by Orchestrator at Step 0. All engines read from this — never from live state.
  * Guarantees determinism: same snapshot + same seed = same output.
+ *
+ * Sovereignty-facing aliases/counters are authored here at the source boundary
+ * so proof systems never need to guess or reconstruct them later.
  */
 export interface RunStateSnapshot {
   readonly tick:             number;
@@ -228,6 +245,17 @@ export interface RunStateSnapshot {
   readonly runMode:          RunMode;
   readonly seed:             number;
   readonly lifecycleState:   RunLifecycleState;
+
+  // ── sovereignty-authored aliases / counters ───────────────────────────────
+  readonly tickIndex:                number; // alias of tick
+  readonly shieldAvgIntegrityPct:    number; // 0–100
+  readonly activeCascadeChains:      number; // activeCascades.length
+  readonly haterAttemptsThisTick:    number;
+  readonly haterBlockedThisTick:     number;
+  readonly haterDamagedThisTick:     number;
+  readonly cascadesTriggeredThisTick:number;
+  readonly cascadesBrokenThisTick:   number;
+  readonly decisionsThisTick:        readonly DecisionTelemetryRecord[];
 }
 
 // ── EVENT BUS CONTRACT ────────────────────────────────────────────────────────

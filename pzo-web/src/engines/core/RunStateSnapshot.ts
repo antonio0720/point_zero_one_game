@@ -9,7 +9,7 @@
 // No engine writes to this object. TypeScript enforces this via readonly.
 
 import type {
-  RunStateSnapshot,
+  RunStateSnapshot as CoreRunStateSnapshot,
   ShieldState,
   ShieldLayer,
   ShieldLayerId,
@@ -20,10 +20,22 @@ import type {
   RunLifecycleState,
   PressureTier,
   TickTier,
+  DecisionTelemetryRecord,
 } from './types';
 import { SHIELD_MAX_INTEGRITY, PRESSURE_TIER_THRESHOLDS } from './types';
 
+export type { RunStateSnapshot } from './types';
+
 // ── Mutable live state (written by engines, read at snapshot time) ────────────
+
+export interface TickMetrics {
+  haterAttemptsThisTick: number;
+  haterBlockedThisTick: number;
+  haterDamagedThisTick: number;
+  cascadesTriggeredThisTick: number;
+  cascadesBrokenThisTick: number;
+  decisionsThisTick: DecisionTelemetryRecord[];
+}
 
 export interface LiveRunState {
   tick:           number;
@@ -40,11 +52,12 @@ export interface LiveRunState {
   runMode:        RunMode;
   seed:           number;
   lifecycle:      RunLifecycleState;
+  tickMetrics?:   TickMetrics;
 }
 
 export interface MutableShieldState {
-  layers:              Record<ShieldLayerId, MutableShieldLayer>;
-  l4BreachCount:       number;
+  layers:        Record<ShieldLayerId, MutableShieldLayer>;
+  l4BreachCount: number;
 }
 
 export interface MutableShieldLayer {
@@ -62,12 +75,16 @@ export interface MutableShieldLayer {
 /**
  * Builds a frozen RunStateSnapshot from the current live state.
  * Called exclusively by EngineOrchestrator at the START of each tick.
- * The returned object is deeply frozen — TypeScript + runtime both enforce this.
+ * The returned object is deeply frozen where it matters for engine safety.
  */
-export function buildSnapshot(live: LiveRunState): RunStateSnapshot {
+export function buildSnapshot(live: LiveRunState): CoreRunStateSnapshot {
   const pressureTier = computePressureTier(live.pressureScore);
+  const shields = buildFrozenShieldState(live.shields);
+  const botStates = buildFrozenBotStates(live.botStates);
+  const activeCascades = buildFrozenCascades(live.activeCascades);
+  const tickMetrics = normalizeTickMetrics(live.tickMetrics);
 
-  const snapshot: RunStateSnapshot = {
+  const snapshot: CoreRunStateSnapshot = {
     tick:           live.tick,
     cash:           live.cash,
     income:         live.income,
@@ -77,12 +94,25 @@ export function buildSnapshot(live: LiveRunState): RunStateSnapshot {
     pressureScore:  live.pressureScore,
     pressureTier,
     tickTier:       live.tickTier,
-    shields:        buildFrozenShieldState(live.shields),
-    botStates:      Object.freeze({ ...live.botStates }),
-    activeCascades: [...live.activeCascades] as CascadeChainInstance[],
+    shields,
+    botStates,
+    activeCascades: activeCascades as CascadeChainInstance[],
     runMode:        live.runMode,
     seed:           live.seed,
     lifecycleState: live.lifecycle,
+
+    // sovereignty-authored fields
+    tickIndex:                 live.tick,
+    shieldAvgIntegrityPct:     shields.overallIntegrityPct * 100,
+    activeCascadeChains:       activeCascades.length,
+    haterAttemptsThisTick:     tickMetrics.haterAttemptsThisTick,
+    haterBlockedThisTick:      tickMetrics.haterBlockedThisTick,
+    haterDamagedThisTick:      tickMetrics.haterDamagedThisTick,
+    cascadesTriggeredThisTick: tickMetrics.cascadesTriggeredThisTick,
+    cascadesBrokenThisTick:    tickMetrics.cascadesBrokenThisTick,
+    decisionsThisTick: Object.freeze(
+      tickMetrics.decisionsThisTick.map((decision) => Object.freeze(cloneDecisionRecord(decision))),
+    ),
   };
 
   return Object.freeze(snapshot);
@@ -90,36 +120,116 @@ export function buildSnapshot(live: LiveRunState): RunStateSnapshot {
 
 function buildFrozenShieldState(mutable: MutableShieldState): ShieldState {
   const frozenLayers = {} as Record<ShieldLayerId, ShieldLayer>;
+
   for (const [id, layer] of Object.entries(mutable.layers)) {
-    frozenLayers[id as ShieldLayerId] = Object.freeze({ ...layer });
+    frozenLayers[id as ShieldLayerId] = Object.freeze({
+      ...layer,
+      current: clamp(layer.current, 0, layer.max),
+      max: Math.max(0, layer.max),
+      breached: Boolean(layer.breached || layer.current <= 0),
+      regenActive: Boolean(layer.regenActive),
+    });
   }
 
   const overallIntegrityPct = computeOverallIntegrity(frozenLayers);
 
   return Object.freeze({
-    layers:              frozenLayers,
+    layers: frozenLayers,
     overallIntegrityPct,
-    l4BreachCount:       mutable.l4BreachCount,
+    l4BreachCount: Math.max(0, Math.trunc(mutable.l4BreachCount)),
   });
 }
 
+function buildFrozenBotStates(
+  botStates: Record<BotId, BotRuntimeState>,
+): Readonly<Record<BotId, BotRuntimeState>> {
+  const frozen = {} as Record<BotId, BotRuntimeState>;
+
+  for (const [botId, state] of Object.entries(botStates) as Array<[BotId, BotRuntimeState]>) {
+    frozen[botId] = Object.freeze({ ...state });
+  }
+
+  return Object.freeze(frozen);
+}
+
+function buildFrozenCascades(
+  activeCascades: CascadeChainInstance[],
+): ReadonlyArray<CascadeChainInstance> {
+  return Object.freeze(
+    activeCascades.map((cascade) => Object.freeze({
+      ...cascade,
+      links: cascade.links.map((link) => Object.freeze({ ...link })),
+    })),
+  );
+}
+
+function normalizeTickMetrics(metrics?: TickMetrics): TickMetrics {
+  if (!metrics) {
+    return createEmptyTickMetrics();
+  }
+
+  return {
+    haterAttemptsThisTick: Math.max(0, Math.trunc(metrics.haterAttemptsThisTick)),
+    haterBlockedThisTick: Math.max(0, Math.trunc(metrics.haterBlockedThisTick)),
+    haterDamagedThisTick: Math.max(0, Math.trunc(metrics.haterDamagedThisTick)),
+    cascadesTriggeredThisTick: Math.max(0, Math.trunc(metrics.cascadesTriggeredThisTick)),
+    cascadesBrokenThisTick: Math.max(0, Math.trunc(metrics.cascadesBrokenThisTick)),
+    decisionsThisTick: metrics.decisionsThisTick.map(cloneDecisionRecord),
+  };
+}
+
+function createEmptyTickMetrics(): TickMetrics {
+  return {
+    haterAttemptsThisTick: 0,
+    haterBlockedThisTick: 0,
+    haterDamagedThisTick: 0,
+    cascadesTriggeredThisTick: 0,
+    cascadesBrokenThisTick: 0,
+    decisionsThisTick: [],
+  };
+}
+
+function cloneDecisionRecord(decision: DecisionTelemetryRecord): DecisionTelemetryRecord {
+  return {
+    cardId: decision.cardId,
+    decisionWindowMs: decision.decisionWindowMs,
+    resolvedInMs: decision.resolvedInMs,
+    wasAutoResolved: decision.wasAutoResolved,
+    wasOptimalChoice: decision.wasOptimalChoice,
+    speedScore: clamp(decision.speedScore, 0, 1),
+  };
+}
+
 function computeOverallIntegrity(layers: Record<ShieldLayerId, ShieldLayer>): number {
-  let totalMax     = 0;
+  let totalMax = 0;
   let totalCurrent = 0;
+
   for (const layer of Object.values(layers)) {
-    totalMax     += layer.max;
+    totalMax += layer.max;
     totalCurrent += layer.current;
   }
-  if (totalMax === 0) return 0;
+
+  if (totalMax === 0) {
+    return 0;
+  }
+
   return totalCurrent / totalMax;
 }
 
 function computePressureTier(score: number): PressureTier {
-  if (score >= PRESSURE_TIER_THRESHOLDS.CRITICAL)  return 'CRITICAL';
-  if (score >= PRESSURE_TIER_THRESHOLDS.HIGH)       return 'HIGH';
-  if (score >= PRESSURE_TIER_THRESHOLDS.ELEVATED)   return 'ELEVATED';
-  if (score >= PRESSURE_TIER_THRESHOLDS.BUILDING)   return 'BUILDING';
+  if (score >= PRESSURE_TIER_THRESHOLDS.CRITICAL) return 'CRITICAL';
+  if (score >= PRESSURE_TIER_THRESHOLDS.HIGH) return 'HIGH';
+  if (score >= PRESSURE_TIER_THRESHOLDS.ELEVATED) return 'ELEVATED';
+  if (score >= PRESSURE_TIER_THRESHOLDS.BUILDING) return 'BUILDING';
   return 'CALM';
+}
+
+function clamp(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) {
+    return min;
+  }
+
+  return Math.min(max, Math.max(min, value));
 }
 
 // ── Live state factory ────────────────────────────────────────────────────────
@@ -133,50 +243,64 @@ export function createInitialLiveState(params: {
   runMode:          RunMode;
 }): LiveRunState {
   return {
-    tick:          0,
-    cash:          params.startingCash,
-    income:        params.startingIncome,
-    expenses:      params.startingExpenses,
-    netWorth:      params.startingCash,
-    haterHeat:     0,
-    pressureScore: 0.0,
-    tickTier:      'T1',
-    runMode:       params.runMode,
-    seed:          params.seed,
-    lifecycle:     'IDLE',
-    shields:       createInitialShields(),
-    botStates:     createInitialBotStates(),
+    tick:           0,
+    cash:           params.startingCash,
+    income:         params.startingIncome,
+    expenses:       params.startingExpenses,
+    netWorth:       params.startingCash,
+    haterHeat:      0,
+    pressureScore:  0.0,
+    tickTier:       'T1',
+    runMode:        params.runMode,
+    seed:           params.seed,
+    lifecycle:      'IDLE',
+    shields:        createInitialShields(),
+    botStates:      createInitialBotStates(),
     activeCascades: [],
+    tickMetrics:    createEmptyTickMetrics(),
   };
 }
 
 function createInitialShields(): MutableShieldState {
   const layers: Record<ShieldLayerId, MutableShieldLayer> = {
     L1_LIQUIDITY_BUFFER: {
-      id: 'L1_LIQUIDITY_BUFFER', label: 'Liquidity Buffer',
+      id: 'L1_LIQUIDITY_BUFFER',
+      label: 'Liquidity Buffer',
       current: SHIELD_MAX_INTEGRITY.L1_LIQUIDITY_BUFFER,
-      max:     SHIELD_MAX_INTEGRITY.L1_LIQUIDITY_BUFFER,
-      breached: false, lastBreach: null, regenActive: true,
+      max: SHIELD_MAX_INTEGRITY.L1_LIQUIDITY_BUFFER,
+      breached: false,
+      lastBreach: null,
+      regenActive: true,
     },
     L2_CREDIT_LINE: {
-      id: 'L2_CREDIT_LINE', label: 'Credit Line',
+      id: 'L2_CREDIT_LINE',
+      label: 'Credit Line',
       current: SHIELD_MAX_INTEGRITY.L2_CREDIT_LINE,
-      max:     SHIELD_MAX_INTEGRITY.L2_CREDIT_LINE,
-      breached: false, lastBreach: null, regenActive: true,
+      max: SHIELD_MAX_INTEGRITY.L2_CREDIT_LINE,
+      breached: false,
+      lastBreach: null,
+      regenActive: true,
     },
     L3_ASSET_FLOOR: {
-      id: 'L3_ASSET_FLOOR', label: 'Asset Floor',
+      id: 'L3_ASSET_FLOOR',
+      label: 'Asset Floor',
       current: SHIELD_MAX_INTEGRITY.L3_ASSET_FLOOR,
-      max:     SHIELD_MAX_INTEGRITY.L3_ASSET_FLOOR,
-      breached: false, lastBreach: null, regenActive: true,
+      max: SHIELD_MAX_INTEGRITY.L3_ASSET_FLOOR,
+      breached: false,
+      lastBreach: null,
+      regenActive: true,
     },
     L4_NETWORK_CORE: {
-      id: 'L4_NETWORK_CORE', label: 'Network Core',
+      id: 'L4_NETWORK_CORE',
+      label: 'Network Core',
       current: SHIELD_MAX_INTEGRITY.L4_NETWORK_CORE,
-      max:     SHIELD_MAX_INTEGRITY.L4_NETWORK_CORE,
-      breached: false, lastBreach: null, regenActive: true,
+      max: SHIELD_MAX_INTEGRITY.L4_NETWORK_CORE,
+      breached: false,
+      lastBreach: null,
+      regenActive: true,
     },
   };
+
   return { layers, l4BreachCount: 0 };
 }
 
@@ -188,16 +312,19 @@ function createInitialBotStates(): Record<BotId, BotRuntimeState> {
     'BOT_04_CRASH_PROPHET',
     'BOT_05_LEGACY_HEIR',
   ];
+
   const states = {} as Record<BotId, BotRuntimeState>;
+
   for (const id of bots) {
     states[id] = {
       id,
-      state:            'DORMANT',
-      ticksInState:     0,
+      state: 'DORMANT',
+      ticksInState: 0,
       preloadedArrival: null,
-      isCritical:       false,
-      lastAttackTick:   null,
+      isCritical: false,
+      lastAttackTick: null,
     };
   }
+
   return states;
 }

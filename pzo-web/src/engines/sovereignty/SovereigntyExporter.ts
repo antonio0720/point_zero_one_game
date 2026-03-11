@@ -1,6 +1,7 @@
 // ═══════════════════════════════════════════════════════════════════
 // POINT ZERO ONE — SOVEREIGNTY ENGINE — SOVEREIGNTY EXPORTER
 // Density6 LLC · Confidential · Do not distribute
+// /Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/pzo-web/src/engines/sovereignty/SovereigntyExporter.ts
 // ═══════════════════════════════════════════════════════════════════
 
 import type { EventBus } from '../core/EventBus';
@@ -42,9 +43,10 @@ export class SovereigntyExporter {
   constructor(eventBus: EventBus, options: SovereigntyExporterOptions = {}) {
     this.eventBus = eventBus;
     this.storageAdapter = options.storageAdapter;
-    this.renderScale = Number.isFinite(options.renderScale) && (options.renderScale ?? 0) > 0
-      ? Number(options.renderScale)
-      : 2;
+    this.renderScale =
+      Number.isFinite(options.renderScale) && (options.renderScale ?? 0) > 0
+        ? Number(options.renderScale)
+        : 2;
     this.objectUrlFallback = options.objectUrlFallback ?? true;
   }
 
@@ -54,7 +56,10 @@ export class SovereigntyExporter {
     format: ArtifactFormat;
   }): Promise<ProofArtifact> {
     const { identity, format } = params;
-    const playerHandle = this.normalizePlayerHandle(params.playerHandle, identity.signature.userId);
+    const playerHandle = this.normalizePlayerHandle(
+      params.playerHandle,
+      identity.signature.userId,
+    );
     const sig = identity.signature;
     const score = identity.score;
 
@@ -98,7 +103,8 @@ export class SovereigntyExporter {
       format,
     };
 
-    this.eventBus.emit('PROOF_ARTIFACT_READY', payload as unknown as Record<string, unknown>);
+    this.emitProofArtifactReady(payload);
+
     return artifact;
   }
 
@@ -121,7 +127,8 @@ export class SovereigntyExporter {
       day: 'numeric',
     });
 
-    const proofHashVisible = `${artifact.proofHash.slice(0, 16)}...${artifact.proofHash.slice(-8)}`;
+    const proofHashVisible =
+      `${artifact.proofHash.slice(0, 16)}...${artifact.proofHash.slice(-8)}`;
     const fullHashEscaped = this.escapeHtml(artifact.proofHash);
     const integrityBanner = this.renderIntegrityBanner(identity.integrityStatus);
     const componentBars = this.renderComponentBars(identity.score.components);
@@ -449,7 +456,7 @@ export class SovereigntyExporter {
 
   private async htmlToPNG(html: string): Promise<Blob> {
     const canvas = await this.renderHtmlToCanvas(html);
-    return await this.canvasToBlob(canvas, 'image/png');
+    return this.canvasToBlob(canvas, 'image/png');
   }
 
   private async htmlToPDF(html: string): Promise<Blob> {
@@ -460,8 +467,8 @@ export class SovereigntyExporter {
       throw new Error('[SovereigntyExporter] Unable to read canvas image data for PDF export');
     }
 
-    const pdf = this.buildPdfFromImageData(imageData, canvas.width, canvas.height);
-    return new Blob([pdf], { type: 'application/pdf' });
+    const pdfBytes = this.buildPdfFromImageData(imageData, canvas.width, canvas.height);
+    return new Blob([this.uint8ArrayToArrayBuffer(pdfBytes)], { type: 'application/pdf' });
   }
 
   private async renderHtmlToCanvas(html: string): Promise<HTMLCanvasElement> {
@@ -514,7 +521,8 @@ export class SovereigntyExporter {
     return new Promise((resolve, reject) => {
       const image = new Image();
       image.onload = () => resolve(image);
-      image.onerror = () => reject(new Error('[SovereigntyExporter] Failed to load SVG render image'));
+      image.onerror = () =>
+        reject(new Error('[SovereigntyExporter] Failed to load SVG render image'));
       image.src = src;
     });
   }
@@ -535,7 +543,11 @@ export class SovereigntyExporter {
    * Minimal single-page PDF generator using an ASCIIHex-encoded RGB image stream.
    * This keeps the exporter dependency-free while still producing a real PDF blob.
    */
-  private buildPdfFromImageData(imageData: ImageData, width: number, height: number): Uint8Array {
+  private buildPdfFromImageData(
+    imageData: ImageData,
+    width: number,
+    height: number,
+  ): Uint8Array {
     const rgbHex = this.imageDataToAsciiHexRgb(imageData.data);
 
     const objects: string[] = [];
@@ -634,6 +646,12 @@ ${xrefOffset}
     );
   }
 
+  private uint8ArrayToArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+    const buffer = new ArrayBuffer(bytes.byteLength);
+    new Uint8Array(buffer).set(bytes);
+    return buffer;
+  }
+
   // ── STORAGE ────────────────────────────────────────────────────
 
   private async uploadToCDN(
@@ -653,7 +671,11 @@ ${xrefOffset}
       });
     }
 
-    if (this.objectUrlFallback && typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function') {
+    if (
+      this.objectUrlFallback &&
+      typeof URL !== 'undefined' &&
+      typeof URL.createObjectURL === 'function'
+    ) {
       return URL.createObjectURL(blob);
     }
 
@@ -680,6 +702,7 @@ ${xrefOffset}
     if (grade === 'A') return 'GOLD';
     if (grade === 'B') return 'SILVER';
     if (grade === 'C') return 'BRONZE';
+    if (grade === 'D') return 'IRON';
     return 'IRON';
   }
 
@@ -742,8 +765,18 @@ ${xrefOffset}
 
   // ── STRING / HTML HELPERS ─────────────────────────────────────
 
+  private emitProofArtifactReady(payload: ProofArtifactReadyPayload): void {
+    this.eventBus.emit('PROOF_ARTIFACT_READY', {
+      runId: payload.runId,
+      exportUrl: payload.exportUrl,
+      format: payload.format,
+    });
+  }
+
   private extractTagContent(html: string, tagName: 'style' | 'body'): string {
-    const match = html.match(new RegExp(`<${tagName}[^>]*>([\\s\\S]*?)<\\/${tagName}>`, 'i'));
+    const match = html.match(
+      new RegExp(`<${tagName}[^>]*>([\\s\\S]*?)<\\/${tagName}>`, 'i'),
+    );
     return match?.[1] ?? '';
   }
 
@@ -762,11 +795,11 @@ ${xrefOffset}
 
   private escapeHtml(value: string): string {
     return value
-      .replaceAll('&', '&amp;')
-      .replaceAll('<', '&lt;')
-      .replaceAll('>', '&gt;')
-      .replaceAll('"', '&quot;')
-      .replaceAll("'", '&#39;');
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
   }
 
   private clamp(value: number, min: number, max: number): number {
