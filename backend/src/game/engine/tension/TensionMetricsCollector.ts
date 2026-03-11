@@ -18,12 +18,9 @@
  * ============================================================================
  */
 
-import type { VisibilityLevel } from '../core/GamePrimitives';
 import type { RunStateSnapshot } from '../core/RunStateSnapshot';
 import {
   ENTRY_STATE,
-  THREAT_SEVERITY,
-  THREAT_TYPE,
   type AnticipationEntry,
   type DecayContributionBreakdown,
   type TensionRuntimeSnapshot,
@@ -113,6 +110,32 @@ export interface TensionMetricsSnapshot {
   readonly contributionBreakdown: DecayContributionBreakdown;
 }
 
+type MutableTensionTypeDistribution = {
+  DEBT_SPIRAL: number;
+  SABOTAGE: number;
+  HATER_INJECTION: number;
+  CASCADE: number;
+  SOVEREIGNTY: number;
+  OPPORTUNITY_KILL: number;
+  REPUTATION_BURN: number;
+  SHIELD_PIERCE: number;
+};
+
+type MutableTensionSeverityDistribution = {
+  MINOR: number;
+  MODERATE: number;
+  SEVERE: number;
+  CRITICAL: number;
+  EXISTENTIAL: number;
+};
+
+type MutableTensionVisibilityDistribution = {
+  HIDDEN: number;
+  SILHOUETTE: number;
+  PARTIAL: number;
+  EXPOSED: number;
+};
+
 const DEFAULT_HISTORY_LIMIT = 64;
 const EPSILON = 0.000001;
 
@@ -128,20 +151,25 @@ export class TensionMetricsCollector {
     const queueEntries = Object.freeze([...(input.queueEntries ?? [])]);
     const runtime = input.runtimeSnapshot;
     const visibleThreats = runtime.visibleThreats;
+
     const activeEntries = queueEntries.filter(
       (entry) =>
         entry.state === ENTRY_STATE.QUEUED ||
         entry.state === ENTRY_STATE.ARRIVED,
     );
+
     const queuedEntries = activeEntries.filter(
       (entry) => entry.state === ENTRY_STATE.QUEUED,
     );
+
     const arrivedEntries = activeEntries.filter(
       (entry) => entry.state === ENTRY_STATE.ARRIVED,
     );
+
     const expiredEntries = queueEntries.filter(
       (entry) => entry.state === ENTRY_STATE.EXPIRED,
     );
+
     const relievedEntries = queueEntries.filter(
       (entry) =>
         entry.state === ENTRY_STATE.MITIGATED ||
@@ -156,9 +184,9 @@ export class TensionMetricsCollector {
       this.safeNumber(entry.severityWeight),
     );
 
-    const threatTypes = this.createEmptyTypeDistribution();
-    const severities = this.createEmptySeverityDistribution();
-    const visibilityLevels = this.createEmptyVisibilityDistribution();
+    const threatTypes = this.createMutableTypeDistribution();
+    const severities = this.createMutableSeverityDistribution();
+    const visibilityLevels = this.createMutableVisibilityDistribution();
 
     for (const entry of queueEntries) {
       threatTypes[entry.threatType] += 1;
@@ -166,32 +194,55 @@ export class TensionMetricsCollector {
     }
 
     for (const visibleThreat of visibleThreats) {
-      visibilityLevels[visibleThreat.visibleAs] += 1;
+      switch (visibleThreat.visibleAs) {
+        case 'HIDDEN':
+          visibilityLevels.HIDDEN += 1;
+          break;
+        case 'SILHOUETTE':
+          visibilityLevels.SILHOUETTE += 1;
+          break;
+        case 'PARTIAL':
+          visibilityLevels.PARTIAL += 1;
+          break;
+        case 'EXPOSED':
+          visibilityLevels.EXPOSED += 1;
+          break;
+        default:
+          break;
+      }
     }
 
-    const totalSeverityWeight = severityWeights.reduce((sum, value) => sum + value, 0);
+    const totalSeverityWeight = severityWeights.reduce(
+      (sum, value) => sum + value,
+      0,
+    );
+
     const dominantSeverityWeight =
       severityWeights.length > 0 ? Math.max(...severityWeights) : 0;
 
     const mitigationCoverageRatio =
       activeEntries.length === 0
         ? 1
-        : activeEntries.filter((entry) => entry.mitigationCardTypes.length > 0).length /
-          activeEntries.length;
+        : activeEntries.filter((entry) => entry.mitigationCardTypes.length > 0)
+            .length / activeEntries.length;
 
     const avgEtaTicks =
       etaValues.length === 0
         ? 0
         : etaValues.reduce((sum, value) => sum + value, 0) / etaValues.length;
 
-    const nearestEtaTicks = etaValues.length > 0 ? etaValues[0] ?? null : null;
+    const nearestEtaTicks = etaValues.length > 0 ? (etaValues[0] ?? null) : null;
     const furthestEtaTicks =
-      etaValues.length > 0 ? etaValues[etaValues.length - 1] ?? null : null;
+      etaValues.length > 0 ? (etaValues[etaValues.length - 1] ?? null) : null;
 
-    const threatEntropy = this.computeThreatEntropy(threatTypes, queueEntries.length);
+    const threatEntropy = this.computeThreatEntropy(
+      threatTypes,
+      queueEntries.length,
+    );
+
     const awarenessLoad =
       runtime.contributionBreakdown.visibilityBonus +
-      (visibleThreats.length / Math.max(1, runtime.queueLength));
+      visibleThreats.length / Math.max(1, runtime.queueLength);
 
     const queuePressureRatio = this.clamp01(
       (runtime.queuedCount * 0.4 +
@@ -200,7 +251,10 @@ export class TensionMetricsCollector {
         Math.max(1, runtime.queueLength + runtime.expiredCount),
     );
 
-    const ghostBurden = this.safeNumber(runtime.contributionBreakdown.expiredGhosts);
+    const ghostBurden = this.safeNumber(
+      runtime.contributionBreakdown.expiredGhosts,
+    );
+
     const reliefStrength = Math.abs(
       this.safeNumber(runtime.contributionBreakdown.mitigationDecay) +
         this.safeNumber(runtime.contributionBreakdown.nullifyDecay) +
@@ -224,6 +278,7 @@ export class TensionMetricsCollector {
     );
 
     const escalationSlope = this.computeEscalationSlope(runtime.score);
+
     const metrics: TensionMetricsSnapshot = Object.freeze({
       runId: input.runState.runId,
       tick: input.runState.tick,
@@ -244,12 +299,19 @@ export class TensionMetricsCollector {
       visibleThreatCount: visibleThreats.length,
       hiddenThreatCount: Math.max(0, runtime.queueLength - visibleThreats.length),
       arrivedThreatRatio:
-        runtime.queueLength === 0 ? 0 : runtime.arrivedCount / runtime.queueLength,
+        runtime.queueLength === 0
+          ? 0
+          : runtime.arrivedCount / runtime.queueLength,
       unresolvedThreatRatio:
         runtime.queueLength === 0
           ? 0
           : (runtime.queueLength + runtime.expiredCount) /
-            Math.max(1, runtime.queueLength + runtime.expiredCount + runtime.relievedCount),
+            Math.max(
+              1,
+              runtime.queueLength +
+                runtime.expiredCount +
+                runtime.relievedCount,
+            ),
 
       avgEtaTicks,
       nearestEtaTicks,
@@ -258,9 +320,14 @@ export class TensionMetricsCollector {
 
       totalSeverityWeight,
       averageSeverityWeight:
-        severityWeights.length === 0 ? 0 : totalSeverityWeight / severityWeights.length,
+        severityWeights.length === 0
+          ? 0
+          : totalSeverityWeight / severityWeights.length,
       dominantSeverityWeight,
-      severityDensity: runtime.queueLength === 0 ? 0 : totalSeverityWeight / runtime.queueLength,
+      severityDensity:
+        runtime.queueLength === 0
+          ? 0
+          : totalSeverityWeight / runtime.queueLength,
 
       mitigationCoverageRatio,
       threatEntropy,
@@ -276,9 +343,15 @@ export class TensionMetricsCollector {
       escalationSlope,
       escalationMomentum: this.resolveMomentum(escalationSlope),
 
-      threatTypes: Object.freeze({ ...threatTypes }),
-      severities: Object.freeze({ ...severities }),
-      visibilityLevels: Object.freeze({ ...visibilityLevels }),
+      threatTypes: Object.freeze({
+        ...threatTypes,
+      }),
+      severities: Object.freeze({
+        ...severities,
+      }),
+      visibilityLevels: Object.freeze({
+        ...visibilityLevels,
+      }),
       contributionBreakdown: Object.freeze({
         ...runtime.contributionBreakdown,
       }),
@@ -293,7 +366,9 @@ export class TensionMetricsCollector {
   }
 
   public getLastSnapshot(): TensionMetricsSnapshot | null {
-    return this.history.length > 0 ? this.history[this.history.length - 1] ?? null : null;
+    return this.history.length > 0
+      ? (this.history[this.history.length - 1] ?? null)
+      : null;
   }
 
   public getHistory(): readonly TensionMetricsSnapshot[] {
@@ -329,7 +404,7 @@ export class TensionMetricsCollector {
   }
 
   private computeThreatEntropy(
-    distribution: TensionTypeDistribution,
+    distribution: Readonly<MutableTensionTypeDistribution>,
     total: number,
   ): number {
     if (total <= 0) {
@@ -347,7 +422,7 @@ export class TensionMetricsCollector {
     return entropy;
   }
 
-  private createEmptyTypeDistribution(): TensionTypeDistribution {
+  private createMutableTypeDistribution(): MutableTensionTypeDistribution {
     return {
       DEBT_SPIRAL: 0,
       SABOTAGE: 0,
@@ -360,7 +435,7 @@ export class TensionMetricsCollector {
     };
   }
 
-  private createEmptySeverityDistribution(): TensionSeverityDistribution {
+  private createMutableSeverityDistribution(): MutableTensionSeverityDistribution {
     return {
       MINOR: 0,
       MODERATE: 0,
@@ -370,7 +445,7 @@ export class TensionMetricsCollector {
     };
   }
 
-  private createEmptyVisibilityDistribution(): TensionVisibilityDistribution {
+  private createMutableVisibilityDistribution(): MutableTensionVisibilityDistribution {
     return {
       HIDDEN: 0,
       SILHOUETTE: 0,
@@ -383,6 +458,7 @@ export class TensionMetricsCollector {
     if (Number.isNaN(value) || !Number.isFinite(value)) {
       return 0;
     }
+
     return Math.max(0, Math.min(1, value));
   }
 
@@ -390,9 +466,11 @@ export class TensionMetricsCollector {
     if (Number.isNaN(value) || !Number.isFinite(value)) {
       return 0;
     }
+
     if (Math.abs(value) < EPSILON) {
       return 0;
     }
+
     return value;
   }
 }
