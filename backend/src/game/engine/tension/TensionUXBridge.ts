@@ -23,8 +23,8 @@ type UnsafeEventBus = EventBus<Record<string, unknown>>;
 export class TensionUXBridge {
   private readonly bus: UnsafeEventBus;
 
-  public constructor(bus: EventBus<unknown>) {
-    this.bus = bus as unknown as UnsafeEventBus;
+  public constructor(bus: EventBus<Record<string, unknown>>) {
+    this.bus = bus;
   }
 
   public emitScoreUpdated(snapshot: TensionRuntimeSnapshot): void {

@@ -58,11 +58,17 @@ export class AnticipationQueue {
     const newExpirations: AnticipationEntry[] = [];
     const relievedEntries: AnticipationEntry[] = [];
 
-    for (const entry of this.entries.values()) {
+    for (const entryId of this.entries.keys()) {
+      let entry = this.entries.get(entryId)!;
+
       if (entry.state === ENTRY_STATE.MITIGATED || entry.state === ENTRY_STATE.NULLIFIED) {
         if (entry.decayTicksRemaining > 0) {
           relievedEntries.push(entry);
-          entry.decayTicksRemaining = Math.max(0, entry.decayTicksRemaining - 1);
+          const updated = {
+            ...entry,
+            decayTicksRemaining: Math.max(0, entry.decayTicksRemaining - 1),
+          };
+          this.entries.set(updated.entryId, updated);
         }
         continue;
       }
@@ -72,20 +78,37 @@ export class AnticipationQueue {
       }
 
       if (entry.state === ENTRY_STATE.QUEUED && currentTick >= entry.arrivalTick) {
-        entry.state = ENTRY_STATE.ARRIVED;
-        entry.isArrived = true;
-        entry.baseTensionPerTick = TENSION_CONSTANTS.ARRIVED_TENSION_PER_TICK;
-        newArrivals.push(entry);
+        const updated = {
+          ...entry,
+          state: ENTRY_STATE.ARRIVED,
+          isArrived: true,
+          baseTensionPerTick: TENSION_CONSTANTS.ARRIVED_TENSION_PER_TICK,
+        };
+        this.entries.set(updated.entryId, updated);
+        newArrivals.push(updated);
+        entry = updated;
       }
 
       if (entry.state === ENTRY_STATE.ARRIVED) {
-        entry.ticksOverdue = Math.max(0, currentTick - entry.arrivalTick);
+        const ticksOverdue = Math.max(0, currentTick - entry.arrivalTick);
         const actionWindow = this.getActionWindow(entry.threatType);
-        if (entry.ticksOverdue > actionWindow) {
-          entry.state = ENTRY_STATE.EXPIRED;
-          entry.isExpired = true;
-          entry.expiredAtTick = currentTick;
-          newExpirations.push(entry);
+
+        if (ticksOverdue > actionWindow) {
+          const expiredUpdated = {
+            ...entry,
+            state: ENTRY_STATE.EXPIRED,
+            isExpired: true,
+            expiredAtTick: currentTick,
+            ticksOverdue,
+          };
+          this.entries.set(expiredUpdated.entryId, expiredUpdated);
+          newExpirations.push(expiredUpdated);
+        } else {
+          const updated = {
+            ...entry,
+            ticksOverdue,
+          };
+          this.entries.set(updated.entryId, updated);
         }
       }
     }

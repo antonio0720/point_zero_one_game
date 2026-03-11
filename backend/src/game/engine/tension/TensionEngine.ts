@@ -73,7 +73,7 @@ export class TensionEngine implements SimulationEngine {
 
     this.hydrateRun(snapshot);
 
-    const bridge = new TensionUXBridge(context.bus);
+    const bridge = new TensionUXBridge(context.bus as unknown as any);
     const currentTick = snapshot.tick;
 
     this.queue.upsertMany(this.sourceAdapter.discover(snapshot));
@@ -223,7 +223,7 @@ export class TensionEngine implements SimulationEngine {
     }
 
     if (bus !== undefined) {
-      const bridge = new TensionUXBridge(bus);
+      const bridge = new TensionUXBridge(bus as unknown as any);
       bridge.emitThreatMitigated(entry, currentTick);
       bridge.emitQueueUpdated(
         this.queue.getQueueLength(),
@@ -248,7 +248,7 @@ export class TensionEngine implements SimulationEngine {
     }
 
     if (bus !== undefined) {
-      const bridge = new TensionUXBridge(bus);
+      const bridge = new TensionUXBridge(bus as unknown as any);
       bridge.emitQueueUpdated(
         this.queue.getQueueLength(),
         this.queue.getArrivedEntries().length,
