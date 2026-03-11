@@ -1,6 +1,6 @@
 /**
  * ============================================================================
- * FILE: pzo-web/src/features/run/components/__tests__/AnticipationQueuePanel.spec.tsx
+ * FILE: pzo-web/src/features/run/components/AnticipationQueuePanel.spec.tsx
  * ============================================================================
  *
  * Purpose:
@@ -18,21 +18,26 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('../../hooks/useAnticipationQueue', () => ({
+vi.mock('../hooks/useAnticipationQueue', () => ({
   useAnticipationQueue: vi.fn(),
 }));
 
-vi.mock('../../hooks/useTensionEngine', () => ({
+vi.mock('../hooks/useTensionEngine', () => ({
   useTensionEngine: vi.fn(),
 }));
 
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 
-import { VisibilityState, EntryState, ThreatSeverity, ThreatType } from '../../../../engines/tension/types';
-import { useAnticipationQueue } from '../../hooks/useAnticipationQueue';
-import { useTensionEngine } from '../../hooks/useTensionEngine';
-import { AnticipationQueuePanel } from '../AnticipationQueuePanel';
+import {
+  VisibilityState,
+  EntryState,
+  ThreatSeverity,
+  ThreatType,
+} from '../../../engines/tension/types';
+import { useAnticipationQueue } from '../hooks/useAnticipationQueue';
+import { useTensionEngine } from '../hooks/useTensionEngine';
+import { AnticipationQueuePanel } from './AnticipationQueuePanel';
 
 type UseAnticipationQueueMock = {
   mockReturnValue: (value: MockQueueHookResult) => unknown;
@@ -44,8 +49,10 @@ type UseTensionEngineMock = {
   mockReset: () => unknown;
 };
 
-const useAnticipationQueueMock = useAnticipationQueue as unknown as UseAnticipationQueueMock;
-const useTensionEngineMock = useTensionEngine as unknown as UseTensionEngineMock;
+const useAnticipationQueueMock =
+  useAnticipationQueue as unknown as UseAnticipationQueueMock;
+const useTensionEngineMock =
+  useTensionEngine as unknown as UseTensionEngineMock;
 
 type QueueEntryEmphasis = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
 
@@ -111,7 +118,9 @@ interface MockTensionHookResult {
   readonly dominantEntry: MockDominantEntry | null;
 }
 
-function buildEntry(overrides: Partial<MockQueueDisplayEntry> = {}): MockQueueDisplayEntry {
+function buildEntry(
+  overrides: Partial<MockQueueDisplayEntry> = {},
+): MockQueueDisplayEntry {
   return {
     entryId: 'entry-1',
     state: EntryState.QUEUED,
@@ -133,7 +142,9 @@ function buildEntry(overrides: Partial<MockQueueDisplayEntry> = {}): MockQueueDi
   };
 }
 
-function buildQueueHookResult(overrides: Partial<MockQueueHookResult> = {}): MockQueueHookResult {
+function buildQueueHookResult(
+  overrides: Partial<MockQueueHookResult> = {},
+): MockQueueHookResult {
   return {
     entries: Object.freeze([]),
     rawEntries: Object.freeze([]),
@@ -159,7 +170,9 @@ function buildQueueHookResult(overrides: Partial<MockQueueHookResult> = {}): Moc
   };
 }
 
-function buildTensionHookResult(overrides: Partial<MockTensionHookResult> = {}): MockTensionHookResult {
+function buildTensionHookResult(
+  overrides: Partial<MockTensionHookResult> = {},
+): MockTensionHookResult {
   return {
     scorePct: 0,
     isPulseActive: false,
@@ -178,8 +191,12 @@ function buildTensionHookResult(overrides: Partial<MockTensionHookResult> = {}):
   };
 }
 
-function renderPanel(props: React.ComponentProps<typeof AnticipationQueuePanel> = {}): string {
-  return renderToStaticMarkup(React.createElement(AnticipationQueuePanel, props));
+function renderPanel(
+  props: React.ComponentProps<typeof AnticipationQueuePanel> = {},
+): string {
+  return renderToStaticMarkup(
+    React.createElement(AnticipationQueuePanel, props),
+  );
 }
 
 describe('AnticipationQueuePanel', () => {
@@ -212,9 +229,21 @@ describe('AnticipationQueuePanel', () => {
         isEmpty: false,
         visibilityState: VisibilityState.SHADOWED,
         entries: Object.freeze([
-          buildEntry({ entryId: 'entry-a', threatType: null, threatLabel: 'UNKNOWN THREAT' }),
-          buildEntry({ entryId: 'entry-b', threatType: null, threatLabel: 'UNKNOWN THREAT' }),
-          buildEntry({ entryId: 'entry-c', threatType: null, threatLabel: 'UNKNOWN THREAT' }),
+          buildEntry({
+            entryId: 'entry-a',
+            threatType: null,
+            threatLabel: 'UNKNOWN THREAT',
+          }),
+          buildEntry({
+            entryId: 'entry-b',
+            threatType: null,
+            threatLabel: 'UNKNOWN THREAT',
+          }),
+          buildEntry({
+            entryId: 'entry-c',
+            threatType: null,
+            threatLabel: 'UNKNOWN THREAT',
+          }),
         ]),
         hiddenThreatCount: 2,
         showsThreatType: false,

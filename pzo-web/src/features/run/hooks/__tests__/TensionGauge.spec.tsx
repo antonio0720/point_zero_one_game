@@ -1,6 +1,6 @@
 /**
  * ============================================================================
- * FILE: pzo-web/src/features/run/components/__tests__/TensionGauge.spec.tsx
+ * FILE: pzo-web/src/features/run/hooks/__tests__/TensionGauge.spec.tsx
  * ============================================================================
  *
  * Purpose:
@@ -18,7 +18,7 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('../../hooks/useTensionEngine', () => ({
+vi.mock('../useTensionEngine', () => ({
   useTensionEngine: vi.fn(),
 }));
 
@@ -31,15 +31,16 @@ import {
   ThreatType,
   VisibilityState,
 } from '../../../../engines/tension/types';
-import { useTensionEngine } from '../../hooks/useTensionEngine';
-import { TensionGauge } from '../TensionGauge';
+import { useTensionEngine } from '../useTensionEngine';
+import { TensionGauge } from '../../components/TensionGauge';
 
 type UseTensionEngineMock = {
   mockReturnValue: (value: MockTensionHookResult) => unknown;
   mockReset: () => unknown;
 };
 
-const useTensionEngineMock = useTensionEngine as unknown as UseTensionEngineMock;
+const useTensionEngineMock =
+  useTensionEngine as unknown as UseTensionEngineMock;
 
 interface MockTensionHookResult {
   readonly score: number;
@@ -91,9 +92,9 @@ function makeEntry(
   return {
     ...buildBaseEntry(),
     ...overrides,
-    mitigationCardTypes: Object.freeze(
-      [...(overrides.mitigationCardTypes ?? ['INCOME_SHIELD'])],
-    ),
+    mitigationCardTypes: Object.freeze([
+      ...(overrides.mitigationCardTypes ?? ['INCOME_SHIELD']),
+    ]),
   };
 }
 
@@ -187,7 +188,9 @@ function buildHookResult(
   };
 }
 
-function renderGauge(props: React.ComponentProps<typeof TensionGauge> = {}): string {
+function renderGauge(
+  props: React.ComponentProps<typeof TensionGauge> = {},
+): string {
   return renderToStaticMarkup(React.createElement(TensionGauge, props));
 }
 
