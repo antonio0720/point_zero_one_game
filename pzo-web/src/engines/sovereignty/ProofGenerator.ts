@@ -281,19 +281,16 @@ export class ProofGenerator {
   }
 
   private bytesToHex(bytes: Uint8Array): string {
-    let hex = '';
+    let out = '';
     for (let i = 0; i < bytes.length; i += 1) {
-      hex += bytes[i].toString(16).padStart(2, '0');
+      out += bytes[i].toString(16).padStart(2, '0');
     }
-    return hex;
+    return out;
   }
 
-  /**
-   * Pure TypeScript SHA-256 fallback.
-   * Deterministic, dependency-free, frontend-safe.
-   */
-  private sha256PureTs(messageBytes: Uint8Array): string {
-    const k = new Uint32Array([
+  /** Pure TypeScript SHA-256 fallback. */
+  private sha256PureTs(bytes: Uint8Array): string {
+    const K = [
       0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5,
       0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
       0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3,
@@ -310,77 +307,53 @@ export class ProofGenerator {
       0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
       0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208,
       0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
-    ]);
+    ];
 
-    const h = new Uint32Array([
-      0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
-      0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
-    ]);
+    const H = [
+      0x6a09e667,
+      0xbb67ae85,
+      0x3c6ef372,
+      0xa54ff53a,
+      0x510e527f,
+      0x9b05688c,
+      0x1f83d9ab,
+      0x5be0cd19,
+    ];
 
-    const bitLength = messageBytes.length * 8;
-    const withOne = messageBytes.length + 1;
-    const paddedLength = (((withOne + 8 + 63) >> 6) << 6);
-    const padded = new Uint8Array(paddedLength);
-
-    padded.set(messageBytes, 0);
-    padded[messageBytes.length] = 0x80;
-
-    const high = Math.floor(bitLength / 0x100000000);
-    const low = bitLength >>> 0;
-
-    padded[padded.length - 8] = (high >>> 24) & 0xff;
-    padded[padded.length - 7] = (high >>> 16) & 0xff;
-    padded[padded.length - 6] = (high >>> 8) & 0xff;
-    padded[padded.length - 5] = high & 0xff;
-    padded[padded.length - 4] = (low >>> 24) & 0xff;
-    padded[padded.length - 3] = (low >>> 16) & 0xff;
-    padded[padded.length - 2] = (low >>> 8) & 0xff;
-    padded[padded.length - 1] = low & 0xff;
-
+    const padded = this.sha256Pad(bytes);
     const w = new Uint32Array(64);
 
     for (let offset = 0; offset < padded.length; offset += 64) {
       for (let i = 0; i < 16; i += 1) {
         const j = offset + i * 4;
         w[i] =
-          (padded[j] << 24) |
-          (padded[j + 1] << 16) |
-          (padded[j + 2] << 8) |
-          padded[j + 3];
+          ((padded[j] << 24) | (padded[j + 1] << 16) | (padded[j + 2] << 8) | padded[j + 3]) >>> 0;
       }
 
       for (let i = 16; i < 64; i += 1) {
-        const s0 =
-          this.rotr(w[i - 15], 7) ^
-          this.rotr(w[i - 15], 18) ^
-          (w[i - 15] >>> 3);
-
-        const s1 =
-          this.rotr(w[i - 2], 17) ^
-          this.rotr(w[i - 2], 19) ^
-          (w[i - 2] >>> 10);
-
+        const s0 = this.rotr(w[i - 15], 7) ^ this.rotr(w[i - 15], 18) ^ (w[i - 15] >>> 3);
+        const s1 = this.rotr(w[i - 2], 17) ^ this.rotr(w[i - 2], 19) ^ (w[i - 2] >>> 10);
         w[i] = (((w[i - 16] + s0) >>> 0) + ((w[i - 7] + s1) >>> 0)) >>> 0;
       }
 
-      let a = h[0];
-      let b = h[1];
-      let c = h[2];
-      let d = h[3];
-      let e = h[4];
-      let f = h[5];
-      let g = h[6];
-      let hh = h[7];
+      let a = H[0];
+      let b = H[1];
+      let c = H[2];
+      let d = H[3];
+      let e = H[4];
+      let f = H[5];
+      let g = H[6];
+      let h = H[7];
 
       for (let i = 0; i < 64; i += 1) {
-        const s1 = this.rotr(e, 6) ^ this.rotr(e, 11) ^ this.rotr(e, 25);
+        const S1 = this.rotr(e, 6) ^ this.rotr(e, 11) ^ this.rotr(e, 25);
         const ch = (e & f) ^ (~e & g);
-        const temp1 = (((((hh + s1) >>> 0) + ch) >>> 0) + k[i] + w[i]) >>> 0;
-        const s0 = this.rotr(a, 2) ^ this.rotr(a, 13) ^ this.rotr(a, 22);
+        const temp1 = (((((h + S1) >>> 0) + ch) >>> 0) + ((K[i] + w[i]) >>> 0)) >>> 0;
+        const S0 = this.rotr(a, 2) ^ this.rotr(a, 13) ^ this.rotr(a, 22);
         const maj = (a & b) ^ (a & c) ^ (b & c);
-        const temp2 = (s0 + maj) >>> 0;
+        const temp2 = (S0 + maj) >>> 0;
 
-        hh = g;
+        h = g;
         g = f;
         f = e;
         e = (d + temp1) >>> 0;
@@ -390,25 +363,46 @@ export class ProofGenerator {
         a = (temp1 + temp2) >>> 0;
       }
 
-      h[0] = (h[0] + a) >>> 0;
-      h[1] = (h[1] + b) >>> 0;
-      h[2] = (h[2] + c) >>> 0;
-      h[3] = (h[3] + d) >>> 0;
-      h[4] = (h[4] + e) >>> 0;
-      h[5] = (h[5] + f) >>> 0;
-      h[6] = (h[6] + g) >>> 0;
-      h[7] = (h[7] + hh) >>> 0;
+      H[0] = (H[0] + a) >>> 0;
+      H[1] = (H[1] + b) >>> 0;
+      H[2] = (H[2] + c) >>> 0;
+      H[3] = (H[3] + d) >>> 0;
+      H[4] = (H[4] + e) >>> 0;
+      H[5] = (H[5] + f) >>> 0;
+      H[6] = (H[6] + g) >>> 0;
+      H[7] = (H[7] + h) >>> 0;
     }
 
-    let hex = '';
-    for (let i = 0; i < h.length; i += 1) {
-      hex += h[i].toString(16).padStart(8, '0');
-    }
+    return H.map((value) => value.toString(16).padStart(8, '0')).join('');
+  }
 
-    return hex;
+  private sha256Pad(bytes: Uint8Array): Uint8Array {
+    const bitLength = bytes.length * 8;
+    const withOne = bytes.length + 1;
+    const remainder = withOne % 64;
+    const zeroPadBytes = remainder <= 56 ? 56 - remainder : 56 + (64 - remainder);
+    const totalLength = withOne + zeroPadBytes + 8;
+    const out = new Uint8Array(totalLength);
+
+    out.set(bytes, 0);
+    out[bytes.length] = 0x80;
+
+    const high = Math.floor(bitLength / 0x100000000);
+    const low = bitLength >>> 0;
+
+    out[totalLength - 8] = (high >>> 24) & 0xff;
+    out[totalLength - 7] = (high >>> 16) & 0xff;
+    out[totalLength - 6] = (high >>> 8) & 0xff;
+    out[totalLength - 5] = high & 0xff;
+    out[totalLength - 4] = (low >>> 24) & 0xff;
+    out[totalLength - 3] = (low >>> 16) & 0xff;
+    out[totalLength - 2] = (low >>> 8) & 0xff;
+    out[totalLength - 1] = low & 0xff;
+
+    return out;
   }
 
   private rotr(value: number, bits: number): number {
-    return (value >>> bits) | (value << (32 - bits));
+    return ((value >>> bits) | (value << (32 - bits))) >>> 0;
   }
 }

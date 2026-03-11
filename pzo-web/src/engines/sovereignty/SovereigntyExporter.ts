@@ -606,7 +606,7 @@ endobj
     const xrefOffset = pdf.length;
     pdf += `xref
 0 ${objects.length + 1}
-0000000000 65535 f 
+0000000000 65535 f
 `;
 
     for (let i = 1; i < offsets.length; i += 1) {

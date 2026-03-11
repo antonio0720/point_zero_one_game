@@ -258,7 +258,7 @@ export class ReplayIntegrityChecker {
     if (anomalyScore >= ReplayIntegrityChecker.ANOMALY_THRESHOLD) {
       return {
         status: 'TAMPERED',
-        reason: `Anomaly score ${anomalyScore.toFixed(3)} exceeds threshold ${ReplayIntegrityChecker.ANOMALY_THRESHOLD}. Checks: ${anomalies.join('; ')}`,
+        reason: `Anomaly score ${anomalyScore.toFixed(3)} exceeds threshold. Checks: ${anomalies.join('; ')}`,
         anomalyScore,
       };
     }
@@ -266,7 +266,7 @@ export class ReplayIntegrityChecker {
     if (anomalyScore >= ReplayIntegrityChecker.SUSPICIOUS_THRESHOLD) {
       return {
         status: 'UNVERIFIED',
-        reason: `Moderate anomaly score ${anomalyScore.toFixed(3)} — flagged for review. Checks: ${anomalies.join('; ')}`,
+        reason: `Moderate anomaly score ${anomalyScore.toFixed(3)} — flagged for review${anomalies.length > 0 ? ` (${anomalies.join('; ')})` : ''}`,
         anomalyScore,
       };
     }
@@ -278,14 +278,16 @@ export class ReplayIntegrityChecker {
   }
 
   private isFiniteSnapshotValue(value: number): boolean {
-    return Number.isFinite(value);
+    return typeof value === 'number' && Number.isFinite(value);
   }
 
   private isValidTickHash(value: string): boolean {
-    const normalized = typeof value === 'string' ? value.trim().toLowerCase() : '';
-    return (
-      ReplayIntegrityChecker.CRC32_HEX.test(normalized) ||
-      ReplayIntegrityChecker.SHA256_HEX.test(normalized)
-    );
+    if (typeof value !== 'string') {
+      return false;
+    }
+
+    const normalized = value.trim().toLowerCase();
+    return ReplayIntegrityChecker.CRC32_HEX.test(normalized)
+      || ReplayIntegrityChecker.SHA256_HEX.test(normalized);
   }
 }

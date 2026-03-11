@@ -1,4 +1,4 @@
-// RunGradeAssigner.ts
+// /Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/pzo-web/src/engines/sovereignty/RunGradeAssigner.ts
 
 import type { EventBus } from '../core/EventBus';
 import {
@@ -34,44 +34,6 @@ import type {
  * ═══════════════════════════════════════════════════════════════════════════════
  */
 export class RunGradeAssigner {
-  private static readonly REWARDS: Readonly<Record<RunGrade, GradeReward>> = Object.freeze({
-    A: Object.freeze({
-      grade: 'A',
-      xpAwarded: 500,
-      cosmeticsUnlocked: ['badge_sovereignty_gold'],
-      badgeTierEarned: 'GOLD',
-      canExportProof: true,
-    }),
-    B: Object.freeze({
-      grade: 'B',
-      xpAwarded: 300,
-      cosmeticsUnlocked: ['badge_sovereignty_silver'],
-      badgeTierEarned: 'SILVER',
-      canExportProof: true,
-    }),
-    C: Object.freeze({
-      grade: 'C',
-      xpAwarded: 150,
-      cosmeticsUnlocked: [],
-      badgeTierEarned: 'BRONZE',
-      canExportProof: true,
-    }),
-    D: Object.freeze({
-      grade: 'D',
-      xpAwarded: 50,
-      cosmeticsUnlocked: [],
-      badgeTierEarned: 'IRON',
-      canExportProof: true,
-    }),
-    F: Object.freeze({
-      grade: 'F',
-      xpAwarded: 10,
-      cosmeticsUnlocked: [],
-      badgeTierEarned: 'IRON',
-      canExportProof: true,
-    }),
-  });
-
   private readonly eventBus: EventBus;
 
   constructor(eventBus: EventBus) {
@@ -81,23 +43,22 @@ export class RunGradeAssigner {
   public computeScore(acc: RunAccumulatorStats): SovereigntyScore {
     const components = this.computeComponents(acc);
 
-    const rawScoreUnclamped =
-      components.ticksSurvivedPct * SOVEREIGNTY_WEIGHTS.TICKS_SURVIVED +
-      components.shieldsMaintainedPct * SOVEREIGNTY_WEIGHTS.SHIELDS_MAINTAINED +
-      components.haterBlockRate * SOVEREIGNTY_WEIGHTS.HATER_BLOCKS +
-      components.decisionSpeedScore * SOVEREIGNTY_WEIGHTS.DECISION_SPEED +
-      components.cascadeBreakRate * SOVEREIGNTY_WEIGHTS.CASCADE_BREAKS;
+    const rawScore =
+      (components.ticksSurvivedPct * SOVEREIGNTY_WEIGHTS.TICKS_SURVIVED) +
+      (components.shieldsMaintainedPct * SOVEREIGNTY_WEIGHTS.SHIELDS_MAINTAINED) +
+      (components.haterBlockRate * SOVEREIGNTY_WEIGHTS.HATER_BLOCKS) +
+      (components.decisionSpeedScore * SOVEREIGNTY_WEIGHTS.DECISION_SPEED) +
+      (components.cascadeBreakRate * SOVEREIGNTY_WEIGHTS.CASCADE_BREAKS);
 
-    const rawScore = this.roundScore(this.clamp(rawScoreUnclamped, 0, 1));
     const outcomeMultiplier = OUTCOME_MULTIPLIERS[acc.outcome];
-    const finalScore = this.roundScore(this.clamp(rawScore * outcomeMultiplier, 0, 1.5));
+    const finalScore = Math.min(1.5, rawScore * outcomeMultiplier);
     const grade = this.assignGrade(finalScore);
 
     return {
       components,
-      rawScore,
+      rawScore: this.roundTo(rawScore, 6),
       outcomeMultiplier,
-      finalScore,
+      finalScore: this.roundTo(finalScore, 6),
       grade,
       computedAt: Date.now(),
     };
@@ -119,13 +80,14 @@ export class RunGradeAssigner {
     };
 
     this.eventBus.emit('RUN_REWARD_DISPATCHED', payload);
+
     return reward;
   }
 
   private computeComponents(acc: RunAccumulatorStats): SovereigntyScoreComponents {
-    const ticksSurvivedPct = acc.seasonTickBudget > 0
-      ? this.clamp(acc.ticksSurvived / acc.seasonTickBudget, 0, 1)
-      : 0;
+    const safeSeasonBudget = acc.seasonTickBudget > 0 ? acc.seasonTickBudget : 1;
+
+    const ticksSurvivedPct = this.clamp(acc.ticksSurvived / safeSeasonBudget, 0, 1);
 
     const shieldsMaintainedPct = acc.shieldSampleCount > 0
       ? this.clamp((acc.shieldIntegralSum / acc.shieldSampleCount) / 100, 0, 1)
@@ -142,11 +104,11 @@ export class RunGradeAssigner {
       : 1;
 
     return {
-      ticksSurvivedPct: this.roundComponent(ticksSurvivedPct),
-      shieldsMaintainedPct: this.roundComponent(shieldsMaintainedPct),
-      haterBlockRate: this.roundComponent(haterBlockRate),
-      decisionSpeedScore: this.roundComponent(decisionSpeedScore),
-      cascadeBreakRate: this.roundComponent(cascadeBreakRate),
+      ticksSurvivedPct,
+      shieldsMaintainedPct,
+      haterBlockRate,
+      decisionSpeedScore,
+      cascadeBreakRate,
     };
   }
 
@@ -155,40 +117,14 @@ export class RunGradeAssigner {
       return 0.5;
     }
 
-    let total = 0;
-    for (const record of records) {
-      total += this.resolveDecisionSpeedScore(record);
-    }
+    const total = records.reduce((sum, record) => {
+      const normalized = Number.isFinite(record.speedScore)
+        ? this.clamp(record.speedScore, 0, 1)
+        : 0;
+      return sum + normalized;
+    }, 0);
 
     return this.clamp(total / records.length, 0, 1);
-  }
-
-  private resolveDecisionSpeedScore(
-    record: RunAccumulatorStats['decisionRecords'][number],
-  ): number {
-    if (Number.isFinite(record.speedScore) && record.speedScore >= 0 && record.speedScore <= 1) {
-      return record.speedScore;
-    }
-
-    if (record.wasAutoResolved) {
-      return 0;
-    }
-
-    if (!Number.isFinite(record.decisionWindowMs) || record.decisionWindowMs <= 0) {
-      return 0;
-    }
-
-    const resolvedInMs = Number.isFinite(record.resolvedInMs)
-      ? this.clamp(record.resolvedInMs, 0, record.decisionWindowMs)
-      : record.decisionWindowMs;
-
-    const timeUsedPct = this.clamp(resolvedInMs / record.decisionWindowMs, 0, 1);
-
-    if (record.wasOptimalChoice) {
-      return this.clamp(Math.max(0.3, 1 - timeUsedPct * 0.7), 0, 1);
-    }
-
-    return this.clamp(Math.max(0, 0.5 - timeUsedPct * 0.3), 0, 1);
   }
 
   private assignGrade(finalScore: number): RunGrade {
@@ -200,7 +136,46 @@ export class RunGradeAssigner {
   }
 
   private buildReward(grade: RunGrade): GradeReward {
-    const reward = RunGradeAssigner.REWARDS[grade];
+    const rewards: Record<RunGrade, GradeReward> = {
+      A: {
+        grade: 'A',
+        xpAwarded: 500,
+        cosmeticsUnlocked: ['badge_sovereignty_gold'],
+        badgeTierEarned: 'GOLD',
+        canExportProof: true,
+      },
+      B: {
+        grade: 'B',
+        xpAwarded: 300,
+        cosmeticsUnlocked: ['badge_sovereignty_silver'],
+        badgeTierEarned: 'SILVER',
+        canExportProof: true,
+      },
+      C: {
+        grade: 'C',
+        xpAwarded: 150,
+        cosmeticsUnlocked: [],
+        badgeTierEarned: 'BRONZE',
+        canExportProof: true,
+      },
+      D: {
+        grade: 'D',
+        xpAwarded: 50,
+        cosmeticsUnlocked: [],
+        badgeTierEarned: 'IRON',
+        canExportProof: true,
+      },
+      F: {
+        grade: 'F',
+        xpAwarded: 10,
+        cosmeticsUnlocked: [],
+        badgeTierEarned: 'IRON',
+        canExportProof: true,
+      },
+    };
+
+    const reward = rewards[grade];
+
     return {
       grade: reward.grade,
       xpAwarded: reward.xpAwarded,
@@ -210,18 +185,16 @@ export class RunGradeAssigner {
     };
   }
 
+  private roundTo(value: number, digits: number): number {
+    const scalar = 10 ** digits;
+    return Math.round(value * scalar) / scalar;
+  }
+
   private clamp(value: number, min: number, max: number): number {
     if (!Number.isFinite(value)) {
       return min;
     }
+
     return Math.min(max, Math.max(min, value));
-  }
-
-  private roundComponent(value: number): number {
-    return Number(value.toFixed(6));
-  }
-
-  private roundScore(value: number): number {
-    return Number(value.toFixed(6));
   }
 }
