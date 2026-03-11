@@ -1,7 +1,0 @@
-def dword_to_hex(dword):
-    return '{:08X}'.format(dword)  # Ensures the hexadecimal is zero-padded to at least 4 digits (2 bytes * uppercase format).
-
-# Convert DWORD address with shift and addition operations.
-address = 0x4567 + (0x3B << 8) + 0x2A
-hex_result = dword_to_hex(address)
-print(f"The hexadecimal representation of the result is: {hex_result}")

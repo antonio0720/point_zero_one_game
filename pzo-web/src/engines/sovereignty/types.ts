@@ -1,5 +1,6 @@
 // ═══════════════════════════════════════════════════════════════════
 // POINT ZERO ONE — SOVEREIGNTY ENGINE — TYPES
+///Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/pzo-web/src/engines/sovereignty/types.ts
 // Density6 LLC · Confidential · Do not distribute
 // ═══════════════════════════════════════════════════════════════════
 
