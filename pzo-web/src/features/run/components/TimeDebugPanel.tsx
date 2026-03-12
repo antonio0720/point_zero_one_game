@@ -1,3 +1,5 @@
+// /Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/pzo-web/src/features/run/components/TimeDebugPanel.tsx
+
 /**
  * FILE: pzo-web/src/features/run/components/TimeDebugPanel.tsx
  * Density6 LLC · Point Zero One · Engine 1 — Time Engine · Confidential
@@ -6,11 +8,13 @@
  * - dev-only inspector for adaptive tick timing, decision windows, and season clock state
  * - reads from useTimeEngine() and useSeasonClock()
  * - avoids engine imports and tolerates partial store hydration
+ * - derives missing transition/window details locally from the live hook surface
  */
 
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { coerceTickTierId, type TickTierId } from '../../../engines/time/types';
 import { useTimeEngine } from '../hooks/useTimeEngine';
 import { useSeasonClock } from '../hooks/useSeasonClock';
 
@@ -191,6 +195,10 @@ function injectTimeDebugStyles(): void {
   document.head.appendChild(el);
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
 function formatMs(ms: number): string {
   if (!Number.isFinite(ms)) return '—';
   if (ms < 1000) return `${Math.max(0, Math.round(ms))}ms`;
@@ -207,6 +215,91 @@ function clamp01(value: number): number {
   if (value <= 0) return 0;
   if (value >= 1) return 1;
   return value;
+}
+
+interface NormalizedDecisionWindowDebug {
+  windowId: string;
+  cardId: string;
+  durationMs: number | null;
+  remainingMs: number | null;
+  openedAtMs: number | null;
+  expiresAtMs: number | null;
+  isOnHold: boolean;
+  isExpired: boolean;
+  isResolved: boolean;
+}
+
+function normalizeActiveWindows(rawWindows: readonly unknown[]): NormalizedDecisionWindowDebug[] {
+  return rawWindows
+    .map((rawWindow, index) => {
+      if (!isRecord(rawWindow)) return null;
+
+      const cardId = typeof rawWindow.cardId === 'string' ? rawWindow.cardId : null;
+      if (!cardId) return null;
+
+      const windowId =
+        typeof rawWindow.windowId === 'string' && rawWindow.windowId.length > 0
+          ? rawWindow.windowId
+          : `${cardId}::${index}`;
+
+      const durationMs =
+        typeof rawWindow.durationMs === 'number' && Number.isFinite(rawWindow.durationMs)
+          ? rawWindow.durationMs
+          : null;
+
+      const remainingMs =
+        typeof rawWindow.remainingMs === 'number' && Number.isFinite(rawWindow.remainingMs)
+          ? rawWindow.remainingMs
+          : null;
+
+      const openedAtMs =
+        typeof rawWindow.openedAtMs === 'number' && Number.isFinite(rawWindow.openedAtMs)
+          ? rawWindow.openedAtMs
+          : null;
+
+      const expiresAtMs =
+        typeof rawWindow.expiresAtMs === 'number' && Number.isFinite(rawWindow.expiresAtMs)
+          ? rawWindow.expiresAtMs
+          : null;
+
+      return {
+        windowId,
+        cardId,
+        durationMs,
+        remainingMs,
+        openedAtMs,
+        expiresAtMs,
+        isOnHold: Boolean(rawWindow.isOnHold),
+        isExpired: Boolean(rawWindow.isExpired),
+        isResolved: Boolean(rawWindow.isResolved),
+      };
+    })
+    .filter((window): window is NormalizedDecisionWindowDebug => window !== null)
+    .sort((a, b) => {
+      const aRemaining = a.remainingMs ?? Number.POSITIVE_INFINITY;
+      const bRemaining = b.remainingMs ?? Number.POSITIVE_INFINITY;
+      if (aRemaining !== bRemaining) return aRemaining - bRemaining;
+
+      const aOpened = a.openedAtMs ?? Number.POSITIVE_INFINITY;
+      const bOpened = b.openedAtMs ?? Number.POSITIVE_INFINITY;
+      if (aOpened !== bOpened) return aOpened - bOpened;
+
+      return a.windowId.localeCompare(b.windowId);
+    });
+}
+
+function pickRepresentativeDecisionWindowMs(
+  windows: readonly NormalizedDecisionWindowDebug[],
+): number | null {
+  const durations = windows
+    .map((window) => window.durationMs)
+    .filter((value): value is number => typeof value === 'number' && Number.isFinite(value) && value > 0);
+
+  if (durations.length === 0) {
+    return null;
+  }
+
+  return Math.min(...durations);
 }
 
 export interface TimeDebugPanelProps {
@@ -228,29 +321,48 @@ export default function TimeDebugPanel({
   const [open, setOpen] = useState(defaultOpen);
   const [copied, setCopied] = useState(false);
 
+  const currentTier = coerceTickTierId(time.currentTier, 'T1');
+  const previousTierRef = useRef<TickTierId | null>(null);
+  const [previousTier, setPreviousTier] = useState<TickTierId | null>(null);
+
+  useEffect(() => {
+    const lastTier = previousTierRef.current;
+    if (lastTier !== null && lastTier !== currentTier) {
+      setPreviousTier(lastTier);
+    }
+    previousTierRef.current = currentTier;
+  }, [currentTier]);
+
   const tickProgressPct = clamp01(time.tickProgressPct);
   const seasonProgressPct = clamp01(season.seasonProgressPct);
+  const normalizedActiveWindows = useMemo(
+    () => normalizeActiveWindows(Array.isArray(time.activeWindows) ? time.activeWindows : []),
+    [time.activeWindows],
+  );
+  const decisionWindowMs = useMemo(
+    () => pickRepresentativeDecisionWindowMs(normalizedActiveWindows),
+    [normalizedActiveWindows],
+  );
 
   const snapshot = useMemo(() => {
     return {
       time: {
-        currentTier: time.currentTier,
-        previousTier: time.previousTier,
-        tierChangedThisTick: time.tierChangedThisTick,
+        currentTier,
+        previousTier,
+        isTierTransitioning: time.isTierTransitioning,
         tickDurationMs: time.tickDurationMs,
         secondsPerTick: time.secondsPerTick,
-        decisionWindowMs: time.decisionWindowMs,
+        decisionWindowMs,
         ticksElapsed: time.ticksElapsed,
         ticksRemaining: time.ticksRemaining,
-        seasonTickBudget: time.seasonTickBudget,
+        tickBudget: time.tickBudget,
         tickProgressPct,
-        activeWindowCount: time.activeWindowCount,
+        activeDecisionCount: time.activeDecisionCount,
         holdsLeft: time.holdsLeft,
-        hasHoldAvailable: time.hasHoldAvailable,
-        audioSignal: time.audioSignal,
-        visualBorderClass: time.visualBorderClass,
-        screenShake: time.screenShake,
-        isRunActive: time.isRunActive,
+        hasActiveDecision: time.hasActiveDecision,
+        seasonTimeoutImminent: time.seasonTimeoutImminent,
+        ticksUntilTimeout: time.ticksUntilTimeout,
+        activeWindows: normalizedActiveWindows,
       },
       season: {
         seasonId: season.seasonId,
@@ -272,6 +384,10 @@ export default function TimeDebugPanel({
       },
     };
   }, [
+    currentTier,
+    decisionWindowMs,
+    normalizedActiveWindows,
+    previousTier,
     season.activeWindows,
     season.hasArchiveCloseWindow,
     season.hasFinaleWindow,
@@ -289,23 +405,17 @@ export default function TimeDebugPanel({
     season.seasonStartMs,
     seasonProgressPct,
     tickProgressPct,
-    time.activeWindowCount,
-    time.audioSignal,
-    time.currentTier,
-    time.decisionWindowMs,
-    time.hasHoldAvailable,
+    time.activeDecisionCount,
+    time.hasActiveDecision,
     time.holdsLeft,
-    time.isRunActive,
-    time.previousTier,
-    time.screenShake,
+    time.isTierTransitioning,
     time.secondsPerTick,
-    time.seasonTickBudget,
+    time.seasonTimeoutImminent,
+    time.tickBudget,
     time.tickDurationMs,
-    time.tickProgressPct,
     time.ticksElapsed,
     time.ticksRemaining,
-    time.tierChangedThisTick,
-    time.visualBorderClass,
+    time.ticksUntilTimeout,
   ]);
 
   const snapshotJSON = useMemo(() => {
@@ -332,13 +442,15 @@ export default function TimeDebugPanel({
     <div className="pzo-time-debug" aria-label="Time debug panel">
       <div className="pzo-time-debug__hdr">
         <div className="pzo-time-debug__title">Time Engine Debug</div>
+
         <button
           type="button"
           className="pzo-time-debug__btn"
-          onClick={() => setOpen((v) => !v)}
+          onClick={() => setOpen((value) => !value)}
         >
           {open ? 'HIDE' : 'SHOW'}
         </button>
+
         {showRawJSON && open ? (
           <button type="button" className="pzo-time-debug__btn" onClick={() => void copyJSON()}>
             {copied ? 'COPIED' : 'COPY JSON'}
@@ -354,20 +466,24 @@ export default function TimeDebugPanel({
             <div className="pzo-time-debug__pill-row">
               <span className="pzo-time-debug__pill">
                 TIER
-                <span className={`pzo-time-debug__accent--${time.currentTier}`}>{String(time.currentTier)}</span>
+                <span className={`pzo-time-debug__accent--${currentTier}`}>{String(currentTier)}</span>
               </span>
 
-              {time.previousTier ? (
-                <span className="pzo-time-debug__pill">PREV {String(time.previousTier)}</span>
+              {previousTier ? (
+                <span className="pzo-time-debug__pill">PREV {String(previousTier)}</span>
               ) : null}
 
               <span className="pzo-time-debug__pill">
-                RUN {time.isRunActive ? 'ACTIVE' : 'IDLE'}
+                TRANSITION {time.isTierTransitioning ? 'YES' : 'NO'}
               </span>
 
               <span className="pzo-time-debug__pill">
                 HOLD {time.holdsLeft}
               </span>
+
+              {time.seasonTimeoutImminent ? (
+                <span className="pzo-time-debug__pill">TIMEOUT NEAR</span>
+              ) : null}
             </div>
 
             <div className="pzo-time-debug__grid">
@@ -378,13 +494,15 @@ export default function TimeDebugPanel({
 
               <div className="pzo-time-debug__kv">
                 <div className="pzo-time-debug__label">Decision Window</div>
-                <div className="pzo-time-debug__value">{formatMs(time.decisionWindowMs)}</div>
+                <div className="pzo-time-debug__value">
+                  {decisionWindowMs !== null ? formatMs(decisionWindowMs) : '—'}
+                </div>
               </div>
 
               <div className="pzo-time-debug__kv">
                 <div className="pzo-time-debug__label">Tick Budget</div>
                 <div className="pzo-time-debug__value">
-                  {time.ticksElapsed}/{time.seasonTickBudget}
+                  {time.ticksElapsed}/{time.tickBudget}
                 </div>
               </div>
 
@@ -400,29 +518,47 @@ export default function TimeDebugPanel({
 
               <div className="pzo-time-debug__kv">
                 <div className="pzo-time-debug__label">Open Windows</div>
-                <div className="pzo-time-debug__value">{time.activeWindowCount}</div>
+                <div className="pzo-time-debug__value">{time.activeDecisionCount}</div>
               </div>
 
               <div className="pzo-time-debug__kv">
-                <div className="pzo-time-debug__label">Tier Changed</div>
-                <div className="pzo-time-debug__value">{time.tierChangedThisTick ? 'YES' : 'NO'}</div>
+                <div className="pzo-time-debug__label">Seconds / Tick</div>
+                <div className="pzo-time-debug__value">{time.secondsPerTick}</div>
               </div>
 
               <div className="pzo-time-debug__kv">
-                <div className="pzo-time-debug__label">Screen Shake</div>
-                <div className="pzo-time-debug__value">{time.screenShake ? 'ON' : 'OFF'}</div>
+                <div className="pzo-time-debug__label">Timeout Horizon</div>
+                <div className="pzo-time-debug__value">
+                  {Number.isFinite(time.ticksUntilTimeout) ? `${time.ticksUntilTimeout} ticks` : '—'}
+                </div>
               </div>
 
               <div className="pzo-time-debug__kv">
-                <div className="pzo-time-debug__label">Audio Signal</div>
-                <div className="pzo-time-debug__value">{time.audioSignal ?? '—'}</div>
+                <div className="pzo-time-debug__label">Has Active Decision</div>
+                <div className="pzo-time-debug__value">{time.hasActiveDecision ? 'YES' : 'NO'}</div>
               </div>
 
               <div className="pzo-time-debug__kv">
-                <div className="pzo-time-debug__label">Border Class</div>
-                <div className="pzo-time-debug__value">{time.visualBorderClass}</div>
+                <div className="pzo-time-debug__label">Timeout Imminent</div>
+                <div className="pzo-time-debug__value">
+                  {time.seasonTimeoutImminent ? 'YES' : 'NO'}
+                </div>
               </div>
             </div>
+          </section>
+
+          <section className="pzo-time-debug__section">
+            <div className="pzo-time-debug__section-title">Active Decision Windows</div>
+
+            <div className="pzo-time-debug__pill-row">
+              <span className="pzo-time-debug__pill">{normalizedActiveWindows.length} WINDOWS</span>
+            </div>
+
+            <pre className="pzo-time-debug__json">
+              {normalizedActiveWindows.length > 0
+                ? JSON.stringify(normalizedActiveWindows, null, 2)
+                : '[]'}
+            </pre>
           </section>
 
           <section className="pzo-time-debug__section">

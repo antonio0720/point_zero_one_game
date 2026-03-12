@@ -1,3 +1,5 @@
+// /Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/pzo-web/src/features/run/components/TickTierTransitionToast.tsx
+
 /**
  * FILE: pzo-web/src/features/run/components/TickTierTransitionToast.tsx
  * Density6 LLC · Point Zero One · Engine 1 — Time Engine · Confidential
@@ -5,14 +7,19 @@
  * TickTierTransitionToast
  * - surfaces Time Engine tier changes as an ephemeral top-center toast
  * - reads only from the existing useTimeEngine() hook
- * - avoids direct engine imports
+ * - uses the repo's real TickTierId / TICK_DURATION_MS_BY_TIER contract
+ * - derives previous-tier and decision-window context locally
  * - auto-hides after a short dwell
  */
 
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { TICK_TIER_CONFIGS, TickTier } from '../../../engines/time/types';
+import {
+  TICK_DURATION_MS_BY_TIER,
+  coerceTickTierId,
+  type TickTierId,
+} from '../../../engines/time/types';
 import { useTimeEngine } from '../hooks/useTimeEngine';
 
 const TIER_TOAST_STYLES = `
@@ -223,26 +230,51 @@ function injectTickTierTransitionToastStyles(): void {
   document.head.appendChild(styleEl);
 }
 
-const FRIENDLY_TIER_NAMES: Record<TickTier, string> = {
-  [TickTier.SOVEREIGN]: 'Sovereign',
-  [TickTier.STABLE]: 'Stable',
-  [TickTier.COMPRESSED]: 'Compressed',
-  [TickTier.CRISIS]: 'Crisis',
-  [TickTier.COLLAPSE_IMMINENT]: 'Collapse Imminent',
-};
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
 
-const FRIENDLY_TIER_MESSAGES: Record<TickTier, string> = {
-  [TickTier.SOVEREIGN]: 'Breathing room restored. The run is granting wider strategic windows.',
-  [TickTier.STABLE]: 'The run is operating at baseline tempo. Pressure is controlled for now.',
-  [TickTier.COMPRESSED]: 'Time is tightening. Decision windows and tick cadence are beginning to compress.',
-  [TickTier.CRISIS]: 'Financial pressure is now actively accelerating the run against the player.',
-  [TickTier.COLLAPSE_IMMINENT]: 'Collapse state reached. The clock is now hostile, fast, and unstable.',
-};
+function extractRepresentativeDecisionWindowMs(
+  activeWindows: readonly unknown[],
+  fallbackMs: number,
+): number {
+  const durations = activeWindows
+    .map((window) => {
+      if (!isRecord(window)) return null;
+      const durationMs = window.durationMs;
+      return typeof durationMs === 'number' && Number.isFinite(durationMs) && durationMs > 0
+        ? durationMs
+        : null;
+    })
+    .filter((value): value is number => value !== null);
+
+  if (durations.length === 0) {
+    return fallbackMs;
+  }
+
+  return Math.min(...durations);
+}
 
 function formatMsAsSeconds(ms: number): string {
   if (!Number.isFinite(ms) || ms <= 0) return '0.0s';
   return `${(ms / 1000).toFixed(ms >= 10000 ? 0 : 1)}s`;
 }
+
+const FRIENDLY_TIER_NAMES: Record<TickTierId, string> = {
+  T0: 'Sovereign',
+  T1: 'Stable',
+  T2: 'Compressed',
+  T3: 'Crisis',
+  T4: 'Collapse Imminent',
+};
+
+const FRIENDLY_TIER_MESSAGES: Record<TickTierId, string> = {
+  T0: 'Breathing room restored. The run is granting wider strategic windows.',
+  T1: 'The run is operating at baseline tempo. Pressure is controlled for now.',
+  T2: 'Time is tightening. Decision windows and cadence are beginning to compress.',
+  T3: 'Financial pressure is actively accelerating the run against the player.',
+  T4: 'Collapse state reached. The clock is now hostile, fast, and unstable.',
+};
 
 export interface TickTierTransitionToastProps {
   readonly autoHideMs?: number;
@@ -252,8 +284,8 @@ export interface TickTierTransitionToastProps {
 }
 
 interface ToastSnapshot {
-  readonly previousTier: TickTier | null;
-  readonly currentTier: TickTier;
+  readonly previousTier: TickTierId | null;
+  readonly currentTier: TickTierId;
   readonly shownAt: number;
 }
 
@@ -265,16 +297,28 @@ export default function TickTierTransitionToast({
 }: TickTierTransitionToastProps) {
   const {
     currentTier,
-    previousTier,
-    tierChangedThisTick,
     tickDurationMs,
-    decisionWindowMs,
-    audioSignal,
+    activeWindows,
+    activeDecisionCount,
+    isTierTransitioning,
+    seasonTimeoutImminent,
+    ticksUntilTimeout,
   } = useTimeEngine();
+
+  const safeCurrentTier = coerceTickTierId(currentTier, 'T1');
+  const safeTickDurationMs =
+    typeof tickDurationMs === 'number' && Number.isFinite(tickDurationMs) && tickDurationMs > 0
+      ? tickDurationMs
+      : TICK_DURATION_MS_BY_TIER[safeCurrentTier];
+
+  const observedDecisionWindowMs = extractRepresentativeDecisionWindowMs(
+    activeWindows,
+    safeTickDurationMs,
+  );
 
   const [snapshot, setSnapshot] = useState<ToastSnapshot | null>(null);
   const [visible, setVisible] = useState(false);
-  const lastSeenTierRef = useRef<TickTier | null>(null);
+  const lastSeenTierRef = useRef<TickTierId | null>(null);
   const hideTimerRef = useRef<number | null>(null);
   const firstRenderRef = useRef(true);
 
@@ -287,12 +331,12 @@ export default function TickTierTransitionToast({
 
     if (firstRenderRef.current) {
       firstRenderRef.current = false;
-      lastSeenTierRef.current = currentTier;
+      lastSeenTierRef.current = safeCurrentTier;
 
       if (!suppressInitialTier) {
         setSnapshot({
           previousTier: null,
-          currentTier,
+          currentTier: safeCurrentTier,
           shownAt: Date.now(),
         });
         setVisible(true);
@@ -301,20 +345,20 @@ export default function TickTierTransitionToast({
       return;
     }
 
-    const actualPreviousTier = previousTier ?? lastSeenTier;
-    const tierActuallyChanged = actualPreviousTier !== null && actualPreviousTier !== currentTier;
+    const tierActuallyChanged =
+      lastSeenTier !== null && coerceTickTierId(lastSeenTier, 'T1') !== safeCurrentTier;
 
-    if (tierChangedThisTick || tierActuallyChanged) {
+    if (tierActuallyChanged) {
       setSnapshot({
-        previousTier: actualPreviousTier,
-        currentTier,
+        previousTier: lastSeenTier,
+        currentTier: safeCurrentTier,
         shownAt: Date.now(),
       });
       setVisible(true);
     }
 
-    lastSeenTierRef.current = currentTier;
-  }, [currentTier, previousTier, tierChangedThisTick, suppressInitialTier]);
+    lastSeenTierRef.current = safeCurrentTier;
+  }, [safeCurrentTier, suppressInitialTier]);
 
   useEffect(() => {
     if (!snapshot) return;
@@ -338,20 +382,21 @@ export default function TickTierTransitionToast({
   const derived = useMemo(() => {
     if (!snapshot) return null;
 
-    const currentConfig = TICK_TIER_CONFIGS[snapshot.currentTier];
-    const previousConfig = snapshot.previousTier ? TICK_TIER_CONFIGS[snapshot.previousTier] : null;
+    const previousDurationMs =
+      snapshot.previousTier !== null ? TICK_DURATION_MS_BY_TIER[snapshot.previousTier] : null;
+    const currentDurationMs = safeTickDurationMs;
 
     return {
       headline: `${FRIENDLY_TIER_NAMES[snapshot.currentTier]} Tempo`,
       subline: FRIENDLY_TIER_MESSAGES[snapshot.currentTier],
-      currentDurationLabel: formatMsAsSeconds(currentConfig.defaultDurationMs),
-      currentDecisionLabel: formatMsAsSeconds(currentConfig.decisionWindowMs),
+      currentDurationLabel: formatMsAsSeconds(currentDurationMs),
+      currentDecisionLabel: formatMsAsSeconds(observedDecisionWindowMs),
       deltaLabel:
-        previousConfig === null
+        previousDurationMs === null
           ? '—'
-          : `${formatMsAsSeconds(previousConfig.defaultDurationMs)} → ${formatMsAsSeconds(currentConfig.defaultDurationMs)}`,
+          : `${formatMsAsSeconds(previousDurationMs)} → ${formatMsAsSeconds(currentDurationMs)}`,
     };
-  }, [snapshot]);
+  }, [snapshot, safeTickDurationMs, observedDecisionWindowMs]);
 
   if (!snapshot || !derived) {
     return null;
@@ -372,6 +417,7 @@ export default function TickTierTransitionToast({
     >
       <div className={`pzo-time-toast__card pzo-time-toast__card--${snapshot.currentTier}`}>
         <div className="pzo-time-toast__bar" />
+
         <div className="pzo-time-toast__body">
           <div className="pzo-time-toast__top">
             <div>
@@ -381,8 +427,11 @@ export default function TickTierTransitionToast({
             </div>
 
             <div className="pzo-time-toast__chips">
-              {audioSignal ? (
-                <span className="pzo-time-toast__chip">{audioSignal}</span>
+              {isTierTransitioning ? (
+                <span className="pzo-time-toast__chip">Interpolating</span>
+              ) : null}
+              {seasonTimeoutImminent ? (
+                <span className="pzo-time-toast__chip">Timeout Near</span>
               ) : null}
               <span className="pzo-time-toast__chip">{snapshot.currentTier}</span>
             </div>
@@ -391,11 +440,16 @@ export default function TickTierTransitionToast({
           <div className="pzo-time-toast__fromto">
             {snapshot.previousTier ? (
               <>
-                <span className="pzo-time-toast__tier">{FRIENDLY_TIER_NAMES[snapshot.previousTier]}</span>
+                <span className="pzo-time-toast__tier">
+                  {FRIENDLY_TIER_NAMES[snapshot.previousTier]}
+                </span>
                 <span className="pzo-time-toast__arrow">→</span>
               </>
             ) : null}
-            <span className="pzo-time-toast__tier">{FRIENDLY_TIER_NAMES[snapshot.currentTier]}</span>
+
+            <span className="pzo-time-toast__tier">
+              {FRIENDLY_TIER_NAMES[snapshot.currentTier]}
+            </span>
           </div>
 
           {showMeta ? (
@@ -413,7 +467,14 @@ export default function TickTierTransitionToast({
               <div className="pzo-time-toast__meta-card">
                 <div className="pzo-time-toast__meta-label">Delta</div>
                 <div className="pzo-time-toast__meta-value">
-                  {snapshot.previousTier ? derived.deltaLabel : formatMsAsSeconds(tickDurationMs || decisionWindowMs)}
+                  {snapshot.previousTier ? derived.deltaLabel : `${activeDecisionCount} open`}
+                </div>
+              </div>
+
+              <div className="pzo-time-toast__meta-card">
+                <div className="pzo-time-toast__meta-label">Timeout Horizon</div>
+                <div className="pzo-time-toast__meta-value">
+                  {Number.isFinite(ticksUntilTimeout) ? `${ticksUntilTimeout} ticks` : '—'}
                 </div>
               </div>
             </div>
