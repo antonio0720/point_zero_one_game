@@ -14,18 +14,41 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { DecisionWindow } from '../../../../engines/time/types';
+type TestDecisionCardType = 'FORCED_FATE' | 'HATER_INJECTION' | 'CRISIS_EVENT';
+
+interface DecisionWindow {
+  windowId: string;
+  cardId: string;
+  cardType: TestDecisionCardType;
+  durationMs: number;
+  remainingMs: number;
+  openedAtMs: number;
+  expiresAtMs: number;
+  isOnHold: boolean;
+  holdExpiresAtMs: number | null;
+  worstOptionIndex: number;
+  isExpired: boolean;
+  isResolved: boolean;
+}
+
+interface TimeEngineMockState {
+  activeWindows?: DecisionWindow[];
+  holdsLeft?: number;
+  currentTier?: string;
+  activeWindowCount?: number;
+  hasActiveDecision?: boolean;
+}
 
 const useTimeEngineMock = vi.fn();
 const formatCountdownMock = vi.fn((ms: number) => `${Math.ceil(ms / 1000)}s`);
 
-vi.mock('../hooks/useTimeEngine', () => {
+vi.mock('../../hooks/useTimeEngine', () => {
   return {
     useTimeEngine: () => useTimeEngineMock(),
   };
 });
 
-vi.mock('../hooks/useDecisionWindow', () => {
+vi.mock('../../hooks/useDecisionWindow', () => {
   return {
     formatCountdown: (ms: number) => formatCountdownMock(ms),
   };
@@ -48,7 +71,7 @@ function makeWindow(overrides: Partial<DecisionWindow> = {}): DecisionWindow {
     cardType: overrides.cardType ?? 'FORCED_FATE',
     durationMs: overrides.durationMs ?? 8_000,
     remainingMs: overrides.remainingMs ?? 8_000,
-    openedAtMs: overrides.openedAtMs ?? 1000,
+    openedAtMs: overrides.openedAtMs ?? 1_000,
     expiresAtMs: overrides.expiresAtMs ?? 9_000,
     isOnHold: overrides.isOnHold ?? false,
     holdExpiresAtMs: overrides.holdExpiresAtMs ?? null,
@@ -58,14 +81,15 @@ function makeWindow(overrides: Partial<DecisionWindow> = {}): DecisionWindow {
   };
 }
 
-function setTimeEngineState(overrides: Record<string, unknown> = {}): void {
-  const activeWindows = (overrides.activeWindows as DecisionWindow[] | undefined) ?? [];
+function setTimeEngineState(overrides: TimeEngineMockState = {}): void {
+  const activeWindows = overrides.activeWindows ?? [];
 
   useTimeEngineMock.mockReturnValue({
     activeWindows,
     holdsLeft: overrides.holdsLeft ?? 1,
     currentTier: overrides.currentTier ?? 'T3',
     activeWindowCount: overrides.activeWindowCount ?? activeWindows.length,
+    activeDecisionCount: overrides.activeWindowCount ?? activeWindows.length,
     hasActiveDecision: overrides.hasActiveDecision ?? activeWindows.length > 0,
   });
 }
