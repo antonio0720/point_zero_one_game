@@ -1,10 +1,10 @@
-// FILE: pzo-web/src/features/run/stories/TimeEngineHUD.stories.tsx
+// /Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/pzo-web/src/features/run/stories/TimeEngineHUD.stories.tsx
 
 import React from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
 
 import TickCountdownDisplay from '../components/TickCountdownDisplay';
-import { TickTier } from '../../../engines/time/types';
+import { TickTier } from '../../../engines/zero/types';
 
 import * as SeasonClockBannerModule from '../components/SeasonClockBanner';
 import * as RunTimeoutWarningModule from '../components/RunTimeoutWarning';
@@ -101,13 +101,14 @@ function TimeEngineHUDStory({
     hasReengageWindow: reengage,
   };
 
+  const totalTicks = ticksElapsed + ticksRemaining;
+
   const timeSnapshot = {
     isRunActive: true,
     currentTier: tier,
     ticksElapsed,
     ticksRemaining,
-    tickProgressPct:
-      ticksElapsed + ticksRemaining > 0 ? ticksElapsed / (ticksElapsed + ticksRemaining) : 0,
+    tickProgressPct: totalTicks > 0 ? ticksElapsed / totalTicks : 0,
     secondsPerTick: tickSeconds,
   };
 

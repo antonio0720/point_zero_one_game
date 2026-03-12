@@ -245,12 +245,7 @@ export function useDecisionWindow(cardId: string): UseDecisionWindowResult {
       setDerivedRemainingMs(estimatedRemainingMs);
       setProgressPct(clamp01(estimatedRemainingMs / minimalWindow.durationMs));
     }
-  }, [
-    currentTickDurationMs,
-    lastTickIndex,
-    minimalWindow,
-    richWindow,
-  ]);
+  }, [currentTickDurationMs, lastTickIndex, minimalWindow, richWindow]);
 
   useEffect(() => {
     if (!minimalWindow || richWindow) {
