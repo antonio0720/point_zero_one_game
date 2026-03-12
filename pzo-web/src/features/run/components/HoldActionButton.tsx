@@ -1,3 +1,5 @@
+// /Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/pzo-web/src/features/run/components/HoldActionButton.tsx
+
 /**
  * FILE: pzo-web/src/features/run/components/HoldActionButton.tsx
  * Engine 1 — Time Engine
@@ -13,14 +15,28 @@
  *
  * Notes:
  * - no direct TimeEngine imports
- * - no Redux dependency
- * - safe when no decision windows are open
+ * - safe across the repo's current mixed minimal/rich decision-window shapes
  */
 
 import React, { memo, useMemo, useState } from 'react';
-import type { DecisionWindow } from '../../../engines/time/types';
 import { useTimeEngine } from '../hooks/useTimeEngine';
-import { formatCountdown } from '../hooks/useDecisionWindow';
+
+type DecisionCardType = 'FORCED_FATE' | 'HATER_INJECTION' | 'CRISIS_EVENT';
+
+export interface HoldActionWindow {
+  windowId: string;
+  cardId: string;
+  cardType: DecisionCardType;
+  durationMs: number;
+  remainingMs: number;
+  openedAtMs: number;
+  expiresAtMs: number;
+  isOnHold: boolean;
+  holdExpiresAtMs: number | null;
+  worstOptionIndex: number;
+  isExpired: boolean;
+  isResolved: boolean;
+}
 
 export interface HoldActionButtonProps {
   windowId?: string | null;
@@ -30,15 +46,85 @@ export interface HoldActionButtonProps {
   size?: 'sm' | 'md' | 'lg';
   showHint?: boolean;
   preferAutoSelect?: boolean;
-  onApplyHold?: (windowId: string, window: DecisionWindow) => void | Promise<void>;
+  onApplyHold?: (windowId: string, window: HoldActionWindow) => void | Promise<void>;
 }
 
 type ButtonTone = 'ready' | 'used' | 'locked' | 'active' | 'busy';
 
-function pickMostUrgentWindow(windows: readonly DecisionWindow[]): DecisionWindow | null {
-  const eligible = windows.filter(
-    (window) => !window.isExpired && !window.isResolved,
-  );
+type CompatibleTimeSnapshot = ReturnType<typeof useTimeEngine> & {
+  hasHoldAvailable?: boolean;
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function coerceDecisionCardType(value: unknown): DecisionCardType {
+  if (
+    value === 'FORCED_FATE' ||
+    value === 'HATER_INJECTION' ||
+    value === 'CRISIS_EVENT'
+  ) {
+    return value;
+  }
+
+  return 'FORCED_FATE';
+}
+
+function toDecisionWindow(value: unknown, index: number): HoldActionWindow | null {
+  if (!isRecord(value) || typeof value.cardId !== 'string') {
+    return null;
+  }
+
+  const durationMs =
+    typeof value.durationMs === 'number' && Number.isFinite(value.durationMs) && value.durationMs > 0
+      ? Math.trunc(value.durationMs)
+      : 1;
+
+  const openedAtMs =
+    typeof value.openedAtMs === 'number' && Number.isFinite(value.openedAtMs)
+      ? Math.trunc(value.openedAtMs)
+      : 0;
+
+  const remainingMs =
+    typeof value.remainingMs === 'number' && Number.isFinite(value.remainingMs)
+      ? Math.max(0, Math.trunc(value.remainingMs))
+      : durationMs;
+
+  const expiresAtMs =
+    typeof value.expiresAtMs === 'number' && Number.isFinite(value.expiresAtMs)
+      ? Math.trunc(value.expiresAtMs)
+      : openedAtMs + durationMs;
+
+  const windowId =
+    typeof value.windowId === 'string' && value.windowId.length > 0
+      ? value.windowId
+      : `${value.cardId}::${openedAtMs || index}`;
+
+  return {
+    windowId,
+    cardId: value.cardId,
+    cardType: coerceDecisionCardType(value.cardType),
+    durationMs,
+    remainingMs,
+    openedAtMs,
+    expiresAtMs,
+    isOnHold: Boolean(value.isOnHold),
+    holdExpiresAtMs:
+      typeof value.holdExpiresAtMs === 'number' && Number.isFinite(value.holdExpiresAtMs)
+        ? Math.trunc(value.holdExpiresAtMs)
+        : null,
+    worstOptionIndex:
+      typeof value.worstOptionIndex === 'number' && Number.isFinite(value.worstOptionIndex)
+        ? Math.trunc(value.worstOptionIndex)
+        : 0,
+    isExpired: Boolean(value.isExpired) || remainingMs <= 0,
+    isResolved: Boolean(value.isResolved),
+  };
+}
+
+function pickMostUrgentWindow(windows: readonly HoldActionWindow[]): HoldActionWindow | null {
+  const eligible = windows.filter((window) => !window.isExpired && !window.isResolved);
 
   if (eligible.length === 0) {
     return null;
@@ -56,6 +142,14 @@ function pickMostUrgentWindow(windows: readonly DecisionWindow[]): DecisionWindo
     }
     return a.windowId.localeCompare(b.windowId);
   })[0] ?? null;
+}
+
+function formatCountdown(ms: number): string {
+  if (!Number.isFinite(ms) || ms <= 0) {
+    return '0s';
+  }
+
+  return `${Math.max(1, Math.ceil(ms / 1000))}s`;
 }
 
 function getPadding(size: NonNullable<HoldActionButtonProps['size']>): string {
@@ -138,13 +232,24 @@ export const HoldActionButton = memo(function HoldActionButton({
   preferAutoSelect = true,
   onApplyHold,
 }: HoldActionButtonProps) {
-  const { holdsLeft, activeWindows, hasHoldAvailable } = useTimeEngine();
+  const time = useTimeEngine() as CompatibleTimeSnapshot;
+  const holdsLeft = Number.isFinite(time.holdsLeft) ? time.holdsLeft : 0;
+  const hasHoldAvailable =
+    typeof time.hasHoldAvailable === 'boolean' ? time.hasHoldAvailable : holdsLeft > 0;
+  const rawActiveWindows = Array.isArray(time.activeWindows) ? time.activeWindows : [];
   const [isBusy, setIsBusy] = useState<boolean>(false);
+
+  const activeWindows = useMemo(() => {
+    return rawActiveWindows
+      .map((window, index) => toDecisionWindow(window, index))
+      .filter((window): window is HoldActionWindow => window !== null);
+  }, [rawActiveWindows]);
 
   const explicitWindow = useMemo(() => {
     if (!windowId) {
       return null;
     }
+
     return activeWindows.find((window) => window.windowId === windowId) ?? null;
   }, [activeWindows, windowId]);
 
@@ -152,6 +257,7 @@ export const HoldActionButton = memo(function HoldActionButton({
     if (!preferAutoSelect) {
       return null;
     }
+
     return pickMostUrgentWindow(activeWindows);
   }, [activeWindows, preferAutoSelect]);
 
