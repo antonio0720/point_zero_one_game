@@ -10,17 +10,91 @@
  * - no wall-clock polling; expiry is evaluated only during authoritative time steps
  * ========================================================================== */
 
+import type { ModeCode, TimingClass } from '../core/GamePrimitives';
+import type { RuntimeDecisionWindowSnapshot } from '../core/RunStateSnapshot';
 import { DEFAULT_HOLD_DURATION_MS } from './types';
 
 interface DecisionTimerSyncResult {
-  openedWindowIds: string[];
-  removedWindowIds: string[];
+  readonly openedWindowIds: readonly string[];
+  readonly removedWindowIds: readonly string[];
+}
+
+interface DecisionWindowSeedOptions {
+  readonly timingClass?: TimingClass;
+  readonly label?: string;
+  readonly source?: string;
+  readonly mode?: ModeCode;
+  readonly openedAtTick?: number;
+  readonly openedAtMs?: number;
+  readonly closesAtTick?: number | null;
+  readonly exclusive?: boolean;
+  readonly actorId?: string | null;
+  readonly targetActorId?: string | null;
+  readonly cardInstanceId?: string | null;
+  readonly metadata?: Readonly<Record<string, string | number | boolean | null>>;
 }
 
 interface MutableDecisionWindowState {
   readonly windowId: string;
-  deadlineMs: number;
+  snapshot: RuntimeDecisionWindowSnapshot;
   frozenUntilMs: number | null;
+}
+
+function normalizeMs(value: number | null | undefined): number | null {
+  if (value === null || value === undefined || !Number.isFinite(value)) {
+    return null;
+  }
+
+  return Math.max(0, Math.trunc(value));
+}
+
+function cloneMetadata(
+  metadata: Readonly<Record<string, string | number | boolean | null>> | undefined,
+): Readonly<Record<string, string | number | boolean | null>> {
+  return Object.freeze({ ...(metadata ?? {}) });
+}
+
+function toFrozenSnapshot(
+  windowId: string,
+  snapshot: RuntimeDecisionWindowSnapshot,
+  frozen: boolean,
+  closesAtMs?: number | null,
+): RuntimeDecisionWindowSnapshot {
+  return Object.freeze({
+    ...snapshot,
+    id: snapshot.id || windowId,
+    closesAtMs: closesAtMs === undefined ? snapshot.closesAtMs : normalizeMs(closesAtMs),
+    frozen,
+    metadata: cloneMetadata(snapshot.metadata),
+  });
+}
+
+function createSyntheticWindowSnapshot(
+  windowId: string,
+  closesAtMs: number,
+  options: DecisionWindowSeedOptions = {},
+): RuntimeDecisionWindowSnapshot {
+  const normalizedCloseAtMs = Math.max(0, Math.trunc(closesAtMs));
+  const openedAtMs = normalizeMs(options.openedAtMs) ?? Math.max(0, normalizedCloseAtMs - 1);
+
+  return Object.freeze({
+    id: windowId,
+    timingClass: options.timingClass ?? 'FATE',
+    label: options.label ?? windowId,
+    source: options.source ?? 'time-engine',
+    mode: options.mode ?? 'solo',
+    openedAtTick: Math.max(0, Math.trunc(options.openedAtTick ?? 0)),
+    openedAtMs,
+    closesAtTick: options.closesAtTick ?? null,
+    closesAtMs: normalizedCloseAtMs,
+    exclusive: options.exclusive ?? false,
+    frozen: false,
+    consumed: false,
+    actorId: options.actorId ?? null,
+    targetActorId: options.targetActorId ?? null,
+    cardInstanceId: options.cardInstanceId ?? null,
+    metadata: cloneMetadata(options.metadata),
+  });
 }
 
 export class DecisionTimer {
@@ -40,44 +114,93 @@ export class DecisionTimer {
    *   thaw timing, we reconstruct a bounded best-effort local freeze window
    */
   public syncFromSnapshot(
-    activeDecisionWindows: Readonly<Record<string, number>>,
+    activeDecisionWindows: Readonly<Record<string, RuntimeDecisionWindowSnapshot>>,
     frozenWindowIds: readonly string[],
     nowMs: number,
   ): DecisionTimerSyncResult {
     const openedWindowIds: string[] = [];
     const removedWindowIds: string[] = [];
 
+    const authoritativeNowMs = Math.max(0, Math.trunc(nowMs));
     const frozenSet = new Set<string>(frozenWindowIds);
     const snapshotIds = new Set<string>(Object.keys(activeDecisionWindows));
 
-    for (const [windowId, rawDeadlineMs] of Object.entries(activeDecisionWindows)) {
-      const deadlineMs = Math.trunc(rawDeadlineMs);
+    for (const [windowId, incomingSnapshot] of Object.entries(activeDecisionWindows)) {
       const existing = this.windows.get(windowId);
+      const incomingFrozen = incomingSnapshot.frozen || frozenSet.has(windowId);
+      const localFreezeStillActive =
+        existing?.frozenUntilMs !== null &&
+        existing.frozenUntilMs !== undefined &&
+        existing.frozenUntilMs > authoritativeNowMs;
 
       if (existing === undefined) {
+        const inferredFrozenUntilMs = incomingFrozen
+          ? (
+              incomingSnapshot.closesAtMs === null
+                ? authoritativeNowMs + DEFAULT_HOLD_DURATION_MS
+                : Math.min(
+                    Math.max(0, Math.trunc(incomingSnapshot.closesAtMs)),
+                    authoritativeNowMs + DEFAULT_HOLD_DURATION_MS,
+                  )
+            )
+          : null;
+
         this.windows.set(windowId, {
           windowId,
-          deadlineMs,
-          frozenUntilMs: frozenSet.has(windowId)
-            ? Math.min(deadlineMs, nowMs + DEFAULT_HOLD_DURATION_MS)
-            : null,
+          snapshot: toFrozenSnapshot(
+            windowId,
+            incomingSnapshot,
+            inferredFrozenUntilMs !== null && inferredFrozenUntilMs > authoritativeNowMs,
+          ),
+          frozenUntilMs:
+            inferredFrozenUntilMs !== null && inferredFrozenUntilMs > authoritativeNowMs
+              ? inferredFrozenUntilMs
+              : null,
         });
         openedWindowIds.push(windowId);
         continue;
       }
 
-      existing.deadlineMs = deadlineMs;
+      if (localFreezeStillActive) {
+        const mergedClosesAtMs =
+          existing.snapshot.closesAtMs === null
+            ? incomingSnapshot.closesAtMs
+            : incomingSnapshot.closesAtMs === null
+              ? existing.snapshot.closesAtMs
+              : Math.max(
+                  Math.trunc(existing.snapshot.closesAtMs),
+                  Math.trunc(incomingSnapshot.closesAtMs),
+                );
 
-      if (frozenSet.has(windowId)) {
-        if (existing.frozenUntilMs === null || existing.frozenUntilMs <= nowMs) {
-          existing.frozenUntilMs = Math.min(
-            deadlineMs,
-            nowMs + DEFAULT_HOLD_DURATION_MS,
-          );
-        }
-      } else if (existing.frozenUntilMs !== null && existing.frozenUntilMs <= nowMs) {
-        existing.frozenUntilMs = null;
+        existing.snapshot = toFrozenSnapshot(
+          windowId,
+          incomingSnapshot,
+          true,
+          mergedClosesAtMs,
+        );
+        continue;
       }
+
+      const inferredFrozenUntilMs = incomingFrozen
+        ? (
+            incomingSnapshot.closesAtMs === null
+              ? authoritativeNowMs + DEFAULT_HOLD_DURATION_MS
+              : Math.min(
+                  Math.max(0, Math.trunc(incomingSnapshot.closesAtMs)),
+                  authoritativeNowMs + DEFAULT_HOLD_DURATION_MS,
+                )
+          )
+        : null;
+
+      existing.snapshot = toFrozenSnapshot(
+        windowId,
+        incomingSnapshot,
+        inferredFrozenUntilMs !== null && inferredFrozenUntilMs > authoritativeNowMs,
+      );
+      existing.frozenUntilMs =
+        inferredFrozenUntilMs !== null && inferredFrozenUntilMs > authoritativeNowMs
+          ? inferredFrozenUntilMs
+          : null;
     }
 
     for (const windowId of [...this.windows.keys()]) {
@@ -93,10 +216,14 @@ export class DecisionTimer {
     };
   }
 
-  public open(windowId: string, deadlineMs: number): void {
+  public open(
+    windowId: string,
+    closesAtMs: number,
+    options: DecisionWindowSeedOptions = {},
+  ): void {
     this.windows.set(windowId, {
       windowId,
-      deadlineMs: Math.trunc(deadlineMs),
+      snapshot: createSyntheticWindowSnapshot(windowId, closesAtMs, options),
       frozenUntilMs: null,
     });
   }
@@ -110,7 +237,7 @@ export class DecisionTimer {
   }
 
   /**
-   * Freezing is implemented by immediately extending the deadline and
+   * Freezing is implemented by immediately extending closesAtMs and
    * recording a temporary frozen-until marker.
    *
    * This keeps post-freeze expiry math deterministic and avoids
@@ -122,21 +249,36 @@ export class DecisionTimer {
     holdDurationMs = DEFAULT_HOLD_DURATION_MS,
   ): boolean {
     const window = this.windows.get(windowId);
+    const normalizedNowMs = Math.max(0, Math.trunc(nowMs));
+    const normalizedHoldDurationMs = Math.max(0, Math.trunc(holdDurationMs));
 
-    if (window === undefined || holdDurationMs <= 0) {
+    if (window === undefined || normalizedHoldDurationMs <= 0) {
       return false;
     }
 
-    if (window.deadlineMs <= nowMs) {
+    if (
+      window.snapshot.closesAtMs !== null &&
+      Math.trunc(window.snapshot.closesAtMs) <= normalizedNowMs
+    ) {
       return false;
     }
 
-    if (window.frozenUntilMs !== null && window.frozenUntilMs > nowMs) {
+    if (window.frozenUntilMs !== null && window.frozenUntilMs > normalizedNowMs) {
       return false;
     }
 
-    window.deadlineMs += Math.trunc(holdDurationMs);
-    window.frozenUntilMs = nowMs + Math.trunc(holdDurationMs);
+    const nextClosesAtMs =
+      window.snapshot.closesAtMs === null
+        ? null
+        : Math.trunc(window.snapshot.closesAtMs) + normalizedHoldDurationMs;
+
+    window.snapshot = toFrozenSnapshot(
+      windowId,
+      window.snapshot,
+      true,
+      nextClosesAtMs,
+    );
+    window.frozenUntilMs = normalizedNowMs + normalizedHoldDurationMs;
 
     return true;
   }
@@ -148,6 +290,7 @@ export class DecisionTimer {
       return false;
     }
 
+    window.snapshot = toFrozenSnapshot(windowId, window.snapshot, false);
     window.frozenUntilMs = null;
     return true;
   }
@@ -157,18 +300,23 @@ export class DecisionTimer {
    * `nowMs` should be the effective end-of-step time, not the pre-step time.
    */
   public closeExpired(nowMs: number): string[] {
+    const authoritativeNowMs = Math.max(0, Math.trunc(nowMs));
     const expired: string[] = [];
 
     for (const [windowId, window] of this.windows.entries()) {
       if (window.frozenUntilMs !== null) {
-        if (window.frozenUntilMs > nowMs) {
+        if (window.frozenUntilMs > authoritativeNowMs) {
           continue;
         }
 
         window.frozenUntilMs = null;
+        window.snapshot = toFrozenSnapshot(windowId, window.snapshot, false);
       }
 
-      if (window.deadlineMs <= nowMs) {
+      if (
+        window.snapshot.closesAtMs !== null &&
+        Math.trunc(window.snapshot.closesAtMs) <= authoritativeNowMs
+      ) {
         expired.push(windowId);
         this.windows.delete(windowId);
       }
@@ -177,22 +325,24 @@ export class DecisionTimer {
     return expired;
   }
 
-  public snapshot(): Readonly<Record<string, number>> {
+  public snapshot(): Readonly<Record<string, RuntimeDecisionWindowSnapshot>> {
     return Object.freeze(
       Object.fromEntries(
         [...this.windows.entries()].map(([windowId, window]) => [
           windowId,
-          Math.trunc(window.deadlineMs),
+          window.snapshot,
         ]),
       ),
     );
   }
 
   public frozenIds(nowMs: number): readonly string[] {
+    const authoritativeNowMs = Math.max(0, Math.trunc(nowMs));
+
     return [...this.windows.values()]
       .filter(
         (window) =>
-          window.frozenUntilMs !== null && window.frozenUntilMs > nowMs,
+          window.frozenUntilMs !== null && window.frozenUntilMs > authoritativeNowMs,
       )
       .map((window) => window.windowId);
   }

@@ -19,20 +19,75 @@ import {
   type SimulationEngine,
   type TickContext,
 } from '../core/EngineContracts';
-import type { PressureTier } from '../core/GamePrimitives';
-import type { RunStateSnapshot } from '../core/RunStateSnapshot';
+import type { ModeCode, PressureTier, TimingClass } from '../core/GamePrimitives';
+import type {
+  RunStateSnapshot,
+  RuntimeDecisionWindowSnapshot,
+} from '../core/RunStateSnapshot';
 import { DecisionTimer } from './DecisionTimer';
 import { TickRateInterpolator } from './TickRateInterpolator';
 import {
   DEFAULT_HOLD_DURATION_MS,
   DEFAULT_PHASE_TRANSITION_WINDOWS,
-  dedupeTags,
   resolvePhaseFromElapsedMs,
 } from './types';
 
 interface ForcedTierOverride {
   readonly tier: PressureTier;
   ticksRemaining: number;
+}
+
+interface OpenDecisionWindowOptions {
+  readonly timingClass?: TimingClass;
+  readonly label?: string;
+  readonly source?: string;
+  readonly mode?: ModeCode;
+  readonly openedAtTick?: number;
+  readonly openedAtMs?: number;
+  readonly closesAtTick?: number | null;
+  readonly exclusive?: boolean;
+  readonly actorId?: string | null;
+  readonly targetActorId?: string | null;
+  readonly cardInstanceId?: string | null;
+  readonly metadata?: Readonly<Record<string, string | number | boolean | null>>;
+}
+
+function dedupeTags(
+  ...parts: ReadonlyArray<readonly string[] | string | null | undefined>
+): readonly string[] {
+  const tags = new Set<string>();
+
+  for (const part of parts) {
+    if (part === null || part === undefined) {
+      continue;
+    }
+
+    if (typeof part === 'string') {
+      if (part.length > 0) {
+        tags.add(part);
+      }
+      continue;
+    }
+
+    for (const tag of part) {
+      if (tag.length > 0) {
+        tags.add(tag);
+      }
+    }
+  }
+
+  return Object.freeze([...tags]);
+}
+
+function getWindowDurationMs(
+  window: RuntimeDecisionWindowSnapshot,
+  nowMs: number,
+): number {
+  if (window.closesAtMs === null) {
+    return 0;
+  }
+
+  return Math.max(0, Math.trunc(window.closesAtMs) - Math.trunc(nowMs));
 }
 
 export class TimeEngine implements SimulationEngine {
@@ -68,15 +123,16 @@ export class TimeEngine implements SimulationEngine {
     );
 
     for (const windowId of syncResult.openedWindowIds) {
-      const deadlineMs = snapshot.timers.activeDecisionWindows[windowId];
+      const windowSnapshot = snapshot.timers.activeDecisionWindows[windowId];
 
-      if (deadlineMs !== undefined) {
+      if (windowSnapshot !== undefined) {
         context.bus.emit(
           'decision.window.opened',
           {
             windowId,
             tick: nextTick,
-            durationMs: Math.max(0, Math.trunc(deadlineMs) - nowMs),
+            durationMs: getWindowDurationMs(windowSnapshot, nowMs),
+            actorId: windowSnapshot.actorId ?? undefined,
           },
           {
             emittedAtTick: nextTick,
@@ -87,6 +143,8 @@ export class TimeEngine implements SimulationEngine {
     }
 
     const effectiveTier = this.resolveCadenceTier(snapshot);
+    const priorTier = this.interpolator.getCurrentTier() ?? this.lastResolvedTier;
+
     this.lastResolvedTier = effectiveTier;
 
     const durationMs = this.interpolator.resolveDurationMs(effectiveTier);
@@ -95,6 +153,7 @@ export class TimeEngine implements SimulationEngine {
 
     const phase = resolvePhaseFromElapsedMs(elapsedMs);
     const phaseChanged = phase !== snapshot.phase;
+    const tierChangedThisTick = priorTier !== effectiveTier;
 
     const phaseBoundaryWindowsRemaining = phaseChanged
       ? DEFAULT_PHASE_TRANSITION_WINDOWS
@@ -103,12 +162,15 @@ export class TimeEngine implements SimulationEngine {
     const expiredWindowIds = this.decisionTimer.closeExpired(effectiveNowMs);
 
     for (const windowId of expiredWindowIds) {
+      const expiredSnapshot = snapshot.timers.activeDecisionWindows[windowId];
+
       context.bus.emit(
         'decision.window.closed',
         {
           windowId,
           tick: nextTick,
           accepted: false,
+          actorId: expiredSnapshot?.actorId ?? undefined,
         },
         {
           emittedAtTick: nextTick,
@@ -152,6 +214,12 @@ export class TimeEngine implements SimulationEngine {
           : 0,
         activeDecisionWindows: this.decisionTimer.snapshot(),
         frozenWindowIds: this.decisionTimer.frozenIds(effectiveNowMs),
+        lastTierChangeTick: tierChangedThisTick
+          ? nextTick
+          : snapshot.timers.lastTierChangeTick,
+        tierInterpolationRemainingTicks:
+          this.interpolator.getRemainingTransitionTicks(),
+        forcedTierOverride: this.forcedTierOverride?.tier ?? null,
       },
       telemetry: {
         ...snapshot.telemetry,
@@ -258,8 +326,25 @@ export class TimeEngine implements SimulationEngine {
    * These do not change orchestration ownership; they only mutate
    * this engine's local runtime ledger.
    */
-  public openDecisionWindow(windowId: string, deadlineMs: number): void {
-    this.decisionTimer.open(windowId, deadlineMs);
+  public openDecisionWindow(
+    windowId: string,
+    closesAtMs: number,
+    options: OpenDecisionWindowOptions = {},
+  ): void {
+    this.decisionTimer.open(windowId, closesAtMs, {
+      timingClass: options.timingClass ?? 'FATE',
+      label: options.label ?? windowId,
+      source: options.source ?? 'time-engine',
+      mode: options.mode ?? 'solo',
+      openedAtTick: options.openedAtTick ?? 0,
+      openedAtMs: options.openedAtMs,
+      closesAtTick: options.closesAtTick ?? null,
+      exclusive: options.exclusive ?? false,
+      actorId: options.actorId ?? null,
+      targetActorId: options.targetActorId ?? null,
+      cardInstanceId: options.cardInstanceId ?? null,
+      metadata: options.metadata,
+    });
   }
 
   public resolveDecisionWindow(windowId: string): boolean {
@@ -323,7 +408,10 @@ export class TimeEngine implements SimulationEngine {
   }
 
   private resolveCadenceTier(snapshot: RunStateSnapshot): PressureTier {
-    if (this.forcedTierOverride !== null && this.forcedTierOverride.ticksRemaining > 0) {
+    if (
+      this.forcedTierOverride !== null &&
+      this.forcedTierOverride.ticksRemaining > 0
+    ) {
       return this.forcedTierOverride.tier;
     }
 

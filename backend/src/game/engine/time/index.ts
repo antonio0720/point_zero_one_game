@@ -5,13 +5,24 @@
  * Doctrine:
  * - single public export surface for the backend time lane
  * - concrete modules remain split by responsibility; consumers import from here
- * - barrel exports should include contracts first, then implementations
+ * - barrel exports must avoid duplicate symbol collisions across split modules
  */
 
 export * from './contracts';
 
 export * from './types';
-export * from './SeasonClock';
+
+export {
+  SeasonClock,
+} from './SeasonClock';
+
+export type {
+  SeasonLifecycleState,
+  SeasonTimelineManifest,
+  SeasonPressureContext,
+  SeasonClockSnapshot,
+} from './SeasonClock';
+
 export * from './TickScheduler';
 export * from './TickTierPolicy';
 export * from './TickRateInterpolator';
@@ -19,9 +30,20 @@ export * from './DecisionTimer';
 export * from './TimeEngine';
 
 export * from './TimeEventEmitter';
-export * from './DecisionExpiryResolver';
-export * from './HoldActionLedger';
 
+export {
+  DecisionExpiryResolver,
+} from './DecisionExpiryResolver';
+
+export type {
+  DecisionWindowRegistration,
+  DecisionOptionDescriptor,
+  RegisteredDecisionWindow,
+  ExpiredDecisionOutcome,
+  DecisionExpiryBatchResult,
+} from './DecisionExpiryResolver';
+
+export * from './HoldActionLedger';
 export * from './RunTimeoutGuard';
 export * from './TimeBudgetService';
 export * from './TimeSnapshotProjector';

@@ -235,7 +235,12 @@ export class TickScheduler {
   }
 
   private async executeCurrentSchedule(): Promise<void> {
-    if (!this.isRunning || this.isPaused || this.isTickInFlight || this.nextFireAtMs === null) {
+    if (
+      !this.isRunning ||
+      this.isPaused ||
+      this.isTickInFlight ||
+      this.nextFireAtMs === null
+    ) {
       return;
     }
 
@@ -263,7 +268,7 @@ export class TickScheduler {
         reason: this.lastReason,
       });
 
-      const nextRequest = this.onTickCallback
+      const callbackResult: TickScheduleRequest | null | void = this.onTickCallback
         ? await this.onTickCallback(event)
         : undefined;
 
@@ -271,12 +276,12 @@ export class TickScheduler {
         return;
       }
 
-      if (nextRequest === null) {
+      if (callbackResult === null) {
         this.stop(false);
         return;
       }
 
-      if (nextRequest === undefined) {
+      if (callbackResult === undefined) {
         this.arm({
           durationMs: plannedDurationMs,
           tier: this.currentTier,
@@ -285,7 +290,11 @@ export class TickScheduler {
         return;
       }
 
-      this.arm(nextRequest);
+      this.arm({
+        durationMs: callbackResult.durationMs,
+        tier: callbackResult.tier,
+        reason: callbackResult.reason,
+      });
     } finally {
       this.isTickInFlight = false;
     }

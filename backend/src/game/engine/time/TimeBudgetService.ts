@@ -30,7 +30,7 @@ export interface TimeAdvanceRequest {
   readonly nowMs: number;
   readonly stopScheduling?: boolean;
   readonly overrideHoldCharges?: number;
-  readonly activeDecisionWindows?: Readonly<Record<string, number>>;
+  readonly activeDecisionWindows?: TimerState['activeDecisionWindows'];
   readonly frozenWindowIds?: readonly string[];
 }
 
@@ -38,6 +38,7 @@ function normalizeMs(value: number): number {
   if (!Number.isFinite(value)) {
     return 0;
   }
+
   return Math.max(0, Math.trunc(value));
 }
 
@@ -45,6 +46,7 @@ function clamp01(value: number): number {
   if (!Number.isFinite(value)) {
     return 0;
   }
+
   return Math.max(0, Math.min(1, value));
 }
 
@@ -75,6 +77,7 @@ export class TimeBudgetService {
 
   public getUtilizationPct(snapshot: RunStateSnapshot): number {
     const totalBudgetMs = this.getTotalBudgetMs(snapshot);
+
     if (totalBudgetMs <= 0) {
       return 1;
     }
@@ -98,9 +101,9 @@ export class TimeBudgetService {
       totalBudgetMs <= 0 ? 1 : clamp01(consumedBudgetMs / totalBudgetMs);
 
     const canScheduleNextTick =
-      !request.stopScheduling
-      && snapshot.outcome === null
-      && remainingBudgetMs > 0;
+      !request.stopScheduling &&
+      snapshot.outcome === null &&
+      remainingBudgetMs > 0;
 
     return Object.freeze({
       seasonBudgetMs: this.getSeasonBudgetMs(snapshot),
@@ -134,6 +137,10 @@ export class TimeBudgetService {
         request.activeDecisionWindows ?? snapshot.timers.activeDecisionWindows,
       frozenWindowIds:
         request.frozenWindowIds ?? snapshot.timers.frozenWindowIds,
+      lastTierChangeTick: snapshot.timers.lastTierChangeTick,
+      tierInterpolationRemainingTicks:
+        snapshot.timers.tierInterpolationRemainingTicks,
+      forcedTierOverride: snapshot.timers.forcedTierOverride,
     });
   }
 
@@ -142,11 +149,15 @@ export class TimeBudgetService {
 
     return Object.freeze({
       ...snapshot.timers,
-      extensionBudgetMs: normalizeMs(snapshot.timers.extensionBudgetMs) + normalizedExtensionMs,
+      extensionBudgetMs:
+        normalizeMs(snapshot.timers.extensionBudgetMs) + normalizedExtensionMs,
     });
   }
 
-  public replaceSeasonBudget(snapshot: RunStateSnapshot, seasonBudgetMs: number): TimerState {
+  public replaceSeasonBudget(
+    snapshot: RunStateSnapshot,
+    seasonBudgetMs: number,
+  ): TimerState {
     return Object.freeze({
       ...snapshot.timers,
       seasonBudgetMs: normalizeMs(seasonBudgetMs),
