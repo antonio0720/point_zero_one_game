@@ -419,10 +419,10 @@ export class EngineOrchestrator {
 
     return {
       snapshot: this.requireSnapshot(),
-      policy: this.timePolicyResolver.resolveSnapshot(
-        this.requireSnapshot(),
-        this.clock.now(),
-      ),
+      policy: this.timePolicyResolver.resolveSnapshot({
+        snapshot: this.requireSnapshot(),
+        nowMs: this.clock.now(),
+      }),
       events: freezeArray(this.bus.flush() as RuntimeEventEnvelope[]),
       checkpoints: freezeArray([checkpoint]),
     };
@@ -563,16 +563,18 @@ export class EngineOrchestrator {
 
     return {
       snapshot: this.requireSnapshot(),
-      checksum: this.requireSnapshot().telemetry.lastTickChecksum ?? stableTickChecksum(this.requireSnapshot()),
+      checksum:
+        this.requireSnapshot().telemetry.lastTickChecksum ??
+        stableTickChecksum(this.requireSnapshot()),
       outcome,
       events,
       signals: freezeArray(signals),
       traces: freezeArray(traces),
       checkpoints: freezeArray(checkpoints),
-      appliedPolicy: this.timePolicyResolver.resolveSnapshot(
-        this.requireSnapshot(),
+      appliedPolicy: this.timePolicyResolver.resolveSnapshot({
+        snapshot: this.requireSnapshot(),
         nowMs,
-      ),
+      }),
     };
   }
 
@@ -728,7 +730,7 @@ export class EngineOrchestrator {
       actorId: request.actorId,
       cardId: instance.definitionId,
       latencyMs: 0,
-      timingClass: freezeArray([chosenTimingClass]),
+      timingClass: [chosenTimingClass],
       accepted: true,
     });
 
@@ -816,7 +818,10 @@ export class EngineOrchestrator {
     }
 
     return toMutableSnapshot(
-      hooks.beforeStep(toFrozenSnapshot(snapshot), this.createContext(toFrozenSnapshot(snapshot), step, nowMs)),
+      hooks.beforeStep(
+        toFrozenSnapshot(snapshot),
+        this.createContext(toFrozenSnapshot(snapshot), step, nowMs),
+      ),
     );
   }
 
@@ -831,7 +836,10 @@ export class EngineOrchestrator {
     }
 
     return toMutableSnapshot(
-      hooks.afterStep(toFrozenSnapshot(snapshot), this.createContext(toFrozenSnapshot(snapshot), step, nowMs)),
+      hooks.afterStep(
+        toFrozenSnapshot(snapshot),
+        this.createContext(toFrozenSnapshot(snapshot), step, nowMs),
+      ),
     );
   }
 
@@ -858,10 +866,10 @@ export class EngineOrchestrator {
     const next = toMutableSnapshot(snapshot);
     next.telemetry.emittedEventCount = this.bus.historyCount();
 
-    const policy = this.timePolicyResolver.resolveSnapshot(
-      toFrozenSnapshot(next),
-      this.clock.now(),
-    );
+    const policy = this.timePolicyResolver.resolveSnapshot({
+      snapshot: toFrozenSnapshot(next),
+      nowMs: this.clock.now(),
+    });
     if (
       next.timers.currentTickDurationMs < policy.tierConfig.minDurationMs ||
       next.timers.currentTickDurationMs > policy.tierConfig.maxDurationMs

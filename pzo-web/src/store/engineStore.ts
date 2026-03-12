@@ -50,18 +50,6 @@ import type {
   PressureTier,
 } from '../engines/zero/types';
 
-// ── Engine 1 — Time Engine types ──────────────────────────────────────────────
-import type {
-  DecisionWindow as TimeDecisionWindow,
-  DecisionWindowOpenedEvent,
-  DecisionWindowExpiredEvent,
-  DecisionWindowResolvedEvent,
-  HoldActionUsedEvent,
-  RunTimeoutEvent,
-  TickEvent,
-  TierChangeEvent,
-} from '../engines/time/types';
-
 // ── Engine 3 — Tension Engine types ───────────────────────────────────────────
 import type {
   VisibilityState,
@@ -141,6 +129,83 @@ import {
 
 // ── EventBus ──────────────────────────────────────────────────────────────────
 import type { EventBus } from '../engines/zero/EventBus';
+
+// ── Engine 1 — Time Engine store-facing compatibility contracts ───────────────
+type TimeDecisionCardType =
+  | 'FORCED_FATE'
+  | 'HATER_INJECTION'
+  | 'CRISIS_EVENT';
+
+interface TimeDecisionWindow {
+  windowId: string;
+  cardId: string;
+  cardType: TimeDecisionCardType;
+  durationMs: number;
+  remainingMs: number;
+  openedAtMs: number;
+  expiresAtMs: number;
+  isOnHold: boolean;
+  holdExpiresAtMs: number | null;
+  worstOptionIndex: number;
+  isExpired: boolean;
+  isResolved: boolean;
+}
+
+interface TickEvent {
+  eventType: 'TICK_COMPLETE';
+  tickNumber: number;
+  tickDurationMs: number;
+  tier: TickTier;
+  tierChangedThisTick: boolean;
+  previousTier: TickTier | null;
+  timestamp: number;
+  decisionsExpiredThisTick: string[];
+  decisionsResolvedThisTick: string[];
+  holdActionUsedThisTick: boolean;
+}
+
+interface TierChangeEvent {
+  eventType: 'TICK_TIER_CHANGED';
+  from: TickTier;
+  to: TickTier;
+  interpolationTicks: number;
+  timestamp: number;
+}
+
+interface DecisionWindowOpenedEvent {
+  eventType: 'DECISION_WINDOW_OPENED';
+  window: TimeDecisionWindow;
+}
+
+interface DecisionWindowExpiredEvent {
+  eventType: 'DECISION_WINDOW_EXPIRED';
+  windowId: string;
+  cardId: string;
+  autoResolvedToOptionIndex: number;
+  holdWasActive: boolean;
+}
+
+interface DecisionWindowResolvedEvent {
+  eventType: 'DECISION_WINDOW_RESOLVED';
+  windowId: string;
+  cardId: string;
+  chosenOptionIndex: number;
+  msRemainingAtResolution: number;
+}
+
+interface HoldActionUsedEvent {
+  eventType: 'HOLD_ACTION_USED';
+  windowId: string;
+  holdDurationMs: number;
+  holdExpiresAtMs: number;
+  holdsRemainingInRun: number;
+}
+
+interface RunTimeoutEvent {
+  eventType: 'RUN_TIMEOUT';
+  ticksElapsed: number;
+  outcome: 'TIMEOUT';
+}
 
 // ── Engine 1 store-facing decision window shape ───────────────────────────────
 interface DecisionWindowEntry extends TimeDecisionWindow {
@@ -582,7 +647,6 @@ function applyTickCompleteAtomic(
     state.tension.pulseTicksActive = 0;
     state.tension.isSustainedPulse = false;
   }
-
 }
 
 function normalizeTickCompletePayload(
@@ -617,7 +681,7 @@ function createLegacyDecisionWindowEntry(
   return {
     windowId: `${cardId}:${openedAtTick}:${now}`,
     cardId,
-    cardType: 'FORCED_FATE' as any,
+    cardType: 'FORCED_FATE',
     durationMs,
     remainingMs: durationMs,
     openedAtMs: now,
@@ -751,7 +815,6 @@ export const runLifecycleStoreHandlers = {
         tickBudget:     payload.tickBudget,
         outcome:        null,
       });
-      // Reset card slice on every new run
       state.card = defaultCardSlice();
     });
   },
@@ -1306,8 +1369,8 @@ export function wireTimeEngineHandlers(eventBus: EventBus, set: ZustandSet): voi
   eventBus.on('DECISION_WINDOW_OPENED',   (e: any) => timeStoreHandlers.onDecisionWindowOpened(set, e.payload ?? e));
   eventBus.on('DECISION_WINDOW_EXPIRED',  (e: any) => timeStoreHandlers.onDecisionWindowClosed(set, e.payload ?? e));
   eventBus.on('DECISION_WINDOW_RESOLVED', (e: any) => timeStoreHandlers.onDecisionWindowClosed(set, e.payload ?? e));
-  eventBus.on('HOLD_ACTION_USED',         (e: any) => timeStoreHandlers.onHoldUsed(set, e.payload ?? e));
-  eventBus.on('RUN_TIMEOUT',              (e: any) => timeStoreHandlers.onRunTimeout(set, e.payload ?? e));
+  eventBus.on('HOLD_ACTION_USED'         as any, (e: any) => timeStoreHandlers.onHoldUsed(set, e.payload ?? e));
+  eventBus.on('RUN_TIMEOUT'              as any, (e: any) => timeStoreHandlers.onRunTimeout(set, e.payload ?? e));
   eventBus.on('SEASON_TIMEOUT_IMMINENT',  (e: any) => timeStoreHandlers.onSeasonTimeoutImminent(set, e.payload ?? e));
 }
 
@@ -1382,7 +1445,6 @@ export function wireAllEngineHandlers(eventBus: EventBus, set: ZustandSet): void
   wireSovereigntyEngineHandlers(eventBus, s);
   wireMechanicsRuntimeHandlers(eventBus, s as any);
 
-  // ── Engine 0: Run Lifecycle — wired LAST so all slices reset atomically ──────
   eventBus.on('RUN_STARTED', (e: any) => {
     const p = e.payload;
     s((state) => {
@@ -1403,12 +1465,9 @@ export function wireAllEngineHandlers(eventBus: EventBus, set: ZustandSet): void
     });
   });
 
-  // ENGINE_ERROR is IMMEDIATE — bypasses flush queue
   eventBus.on('ENGINE_ERROR', (e: any) => runLifecycleStoreHandlers.onEngineError(s, e.payload));
 }
 
-// Canonical alias — prevents the historical typo where wireTimeEngineHandlers
-// was accidentally called with (s, s) instead of (eventBus, s).
 export { wireTimeEngineHandlers as wireTimeEngine };
 
 export function wireRunStoreMirror(): () => void {
