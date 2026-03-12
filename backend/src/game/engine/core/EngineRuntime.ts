@@ -25,7 +25,6 @@ import type { TickStep } from './TickSequence';
 import type {
   TickContext,
   EngineId,
-  EngineTickResult,
   EngineSignal,
   SimulationEngine,
 } from './EngineContracts';
@@ -38,9 +37,7 @@ import {
   deepFreeze,
   checksumSnapshot,
 } from './Deterministic';
-import {
-  normalizeEngineTickResult,
-} from './EngineContracts';
+import { normalizeEngineTickResult } from './EngineContracts';
 import { EngineRegistry } from './EngineRegistry';
 import { EventBus } from './EventBus';
 import { createInitialRunState } from './RunStateFactory';
@@ -150,7 +147,13 @@ function resolveSafeTickDurationMs(snapshot: RunStateSnapshot): number {
     return Math.trunc(configured);
   }
 
-  return TIER_DURATIONS_MS[snapshot.pressure.tier];
+  const fallback = TIER_DURATIONS_MS[snapshot.pressure.tier];
+
+  if (Number.isFinite(fallback) && fallback > 0) {
+    return Math.trunc(fallback);
+  }
+
+  return 8_000;
 }
 
 function recomputeNetWorth(snapshot: RunStateSnapshot): number {

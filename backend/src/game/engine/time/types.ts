@@ -1,7 +1,18 @@
-/**
- * FILE: pzo-web/src/engines/time/types.ts
- * All types for the Time Engine. No runtime logic.
+/*
+ * POINT ZERO ONE — BACKEND ENGINE TIME
+ * /backend/src/game/engine/time/types.ts
+ *
+ * Doctrine:
+ * - preserve the rich Time Engine surface already being used across Engine 1
+ * - align backend time contracts to canonical backend primitives, not frontend-only mirrors
+ * - keep pure timing / phase helpers import-safe for core runtime use
+ * - expose backend cadence constants needed by EngineRuntime and STEP_02_TIME
  */
+
+import type {
+  PressureTier as BackendPressureTier,
+  RunPhase,
+} from '../core/GamePrimitives';
 
 /** Five adaptive tick rate tiers. T0 = winning, T4 = collapsing. */
 export enum TickTier {
@@ -11,6 +22,12 @@ export enum TickTier {
   CRISIS = 'T3', // negative cashflow OR hater_heat > 60
   COLLAPSE_IMMINENT = 'T4', // negative cash balance OR shield fully broken
 }
+
+/**
+ * Backend canonical pressure tier.
+ * This is intentionally an alias to backend GamePrimitives, not a duplicate enum.
+ */
+export type PressureTier = BackendPressureTier;
 
 /** Per-tier timing + presentation configuration. */
 export interface TickTierConfig {
@@ -25,84 +42,160 @@ export interface TickTierConfig {
 }
 
 /** Ground-truth timing config for all five tiers. */
-export const TICK_TIER_CONFIGS: Record<TickTier, TickTierConfig> = {
-  [TickTier.SOVEREIGN]: {
-    tier: TickTier.SOVEREIGN,
-    minDurationMs: 18_000,
-    maxDurationMs: 22_000,
-    defaultDurationMs: 20_000,
-    decisionWindowMs: 12_000,
-    visualBorderClass: 'border-sovereign',
-    audioSignal: 'tick_sovereign',
-    screenShake: false,
-  },
-  [TickTier.STABLE]: {
-    tier: TickTier.STABLE,
-    minDurationMs: 12_000,
-    maxDurationMs: 14_000,
-    defaultDurationMs: 13_000,
-    decisionWindowMs: 8_000,
-    visualBorderClass: 'border-stable',
-    audioSignal: 'tick_standard',
-    screenShake: false,
-  },
-  [TickTier.COMPRESSED]: {
-    tier: TickTier.COMPRESSED,
-    minDurationMs: 7_000,
-    maxDurationMs: 9_000,
-    defaultDurationMs: 8_000,
-    decisionWindowMs: 5_000,
-    visualBorderClass: 'border-compressed',
-    audioSignal: 'tick_compressed',
-    screenShake: false,
-  },
-  [TickTier.CRISIS]: {
-    tier: TickTier.CRISIS,
-    minDurationMs: 3_000,
-    maxDurationMs: 5_000,
-    defaultDurationMs: 4_000,
-    decisionWindowMs: 3_000,
-    visualBorderClass: 'border-crisis',
-    audioSignal: 'tick_crisis',
-    screenShake: false,
-  },
-  [TickTier.COLLAPSE_IMMINENT]: {
-    tier: TickTier.COLLAPSE_IMMINENT,
-    minDurationMs: 1_000,
-    maxDurationMs: 2_000,
-    defaultDurationMs: 1_500,
-    decisionWindowMs: 1_500,
-    visualBorderClass: 'border-collapse',
-    audioSignal: 'tick_collapse',
-    screenShake: true,
-  },
-} as const;
+export const TICK_TIER_CONFIGS: Readonly<Record<TickTier, TickTierConfig>> =
+  Object.freeze({
+    [TickTier.SOVEREIGN]: Object.freeze({
+      tier: TickTier.SOVEREIGN,
+      minDurationMs: 18_000,
+      maxDurationMs: 22_000,
+      defaultDurationMs: 20_000,
+      decisionWindowMs: 12_000,
+      visualBorderClass: 'border-sovereign',
+      audioSignal: 'tick_sovereign',
+      screenShake: false,
+    }),
+    [TickTier.STABLE]: Object.freeze({
+      tier: TickTier.STABLE,
+      minDurationMs: 12_000,
+      maxDurationMs: 14_000,
+      defaultDurationMs: 13_000,
+      decisionWindowMs: 8_000,
+      visualBorderClass: 'border-stable',
+      audioSignal: 'tick_standard',
+      screenShake: false,
+    }),
+    [TickTier.COMPRESSED]: Object.freeze({
+      tier: TickTier.COMPRESSED,
+      minDurationMs: 7_000,
+      maxDurationMs: 9_000,
+      defaultDurationMs: 8_000,
+      decisionWindowMs: 5_000,
+      visualBorderClass: 'border-compressed',
+      audioSignal: 'tick_compressed',
+      screenShake: false,
+    }),
+    [TickTier.CRISIS]: Object.freeze({
+      tier: TickTier.CRISIS,
+      minDurationMs: 3_000,
+      maxDurationMs: 5_000,
+      defaultDurationMs: 4_000,
+      decisionWindowMs: 3_000,
+      visualBorderClass: 'border-crisis',
+      audioSignal: 'tick_crisis',
+      screenShake: false,
+    }),
+    [TickTier.COLLAPSE_IMMINENT]: Object.freeze({
+      tier: TickTier.COLLAPSE_IMMINENT,
+      minDurationMs: 1_000,
+      maxDurationMs: 2_000,
+      defaultDurationMs: 1_500,
+      decisionWindowMs: 1_500,
+      visualBorderClass: 'border-collapse',
+      audioSignal: 'tick_collapse',
+      screenShake: true,
+    }),
+  });
 
-/** Mirror of PressureEngine PressureTier. Keep in sync with pressure/types.ts. */
-export enum PressureTier {
-  CALM = 'CALM', // pressure 0.00–0.20
-  BUILDING = 'BUILDING', // 0.21–0.40
-  ELEVATED = 'ELEVATED', // 0.41–0.60
-  HIGH = 'HIGH', // 0.61–0.80
-  CRITICAL = 'CRITICAL', // 0.81–1.00
-}
+/**
+ * Canonical backend mapping:
+ * backend PressureTier already uses T0..T4, so this bridge stays lossless.
+ */
+export const TICK_TIER_BY_PRESSURE_TIER: Readonly<
+  Record<PressureTier, TickTier>
+> = Object.freeze({
+  T0: TickTier.SOVEREIGN,
+  T1: TickTier.STABLE,
+  T2: TickTier.COMPRESSED,
+  T3: TickTier.CRISIS,
+  T4: TickTier.COLLAPSE_IMMINENT,
+});
+
+/**
+ * Reverse map for backend runtime callers that key durations by canonical backend pressure tier.
+ */
+export const PRESSURE_TIER_BY_TICK_TIER: Readonly<
+  Record<TickTier, PressureTier>
+> = Object.freeze({
+  [TickTier.SOVEREIGN]: 'T0',
+  [TickTier.STABLE]: 'T1',
+  [TickTier.COMPRESSED]: 'T2',
+  [TickTier.CRISIS]: 'T3',
+  [TickTier.COLLAPSE_IMMINENT]: 'T4',
+});
 
 /** Read-only bridge used by TimeEngine instead of importing PressureEngine directly. */
 export interface PressureReader {
   readonly score: number; // 0.0–1.0
-  readonly tier: PressureTier;
+  readonly tier: PressureTier; // canonical backend pressure tier
 }
 
-/** Maps PressureTier to corresponding TickTier. */
+/** Maps backend PressureTier to corresponding TickTier. */
 export function pressureTierToTickTier(p: PressureTier): TickTier {
-  const map: Record<PressureTier, TickTier> = {
-    [PressureTier.CALM]: TickTier.SOVEREIGN,
-    [PressureTier.BUILDING]: TickTier.STABLE,
-    [PressureTier.ELEVATED]: TickTier.COMPRESSED,
-    [PressureTier.HIGH]: TickTier.CRISIS,
-    [PressureTier.CRITICAL]: TickTier.COLLAPSE_IMMINENT,
-  };
-  return map[p];
+  return TICK_TIER_BY_PRESSURE_TIER[p];
+}
+
+/** Maps TickTier back to canonical backend PressureTier. */
+export function tickTierToPressureTier(tier: TickTier): PressureTier {
+  return PRESSURE_TIER_BY_TICK_TIER[tier];
+}
+
+/**
+ * Backend-oriented timing lookup keyed by canonical backend PressureTier.
+ * EngineRuntime uses this directly.
+ */
+export const TIER_DURATIONS_MS: Readonly<Record<PressureTier, number>> =
+  Object.freeze({
+    T0: TICK_TIER_CONFIGS[TickTier.SOVEREIGN].defaultDurationMs,
+    T1: TICK_TIER_CONFIGS[TickTier.STABLE].defaultDurationMs,
+    T2: TICK_TIER_CONFIGS[TickTier.COMPRESSED].defaultDurationMs,
+    T3: TICK_TIER_CONFIGS[TickTier.CRISIS].defaultDurationMs,
+    T4: TICK_TIER_CONFIGS[TickTier.COLLAPSE_IMMINENT].defaultDurationMs,
+  });
+
+/**
+ * Backend-oriented decision-window lookup keyed by canonical backend PressureTier.
+ */
+export const DECISION_WINDOW_DURATIONS_MS: Readonly<
+  Record<PressureTier, number>
+> = Object.freeze({
+  T0: TICK_TIER_CONFIGS[TickTier.SOVEREIGN].decisionWindowMs,
+  T1: TICK_TIER_CONFIGS[TickTier.STABLE].decisionWindowMs,
+  T2: TICK_TIER_CONFIGS[TickTier.COMPRESSED].decisionWindowMs,
+  T3: TICK_TIER_CONFIGS[TickTier.CRISIS].decisionWindowMs,
+  T4: TICK_TIER_CONFIGS[TickTier.COLLAPSE_IMMINENT].decisionWindowMs,
+});
+
+export const DEFAULT_HOLD_DURATION_MS = 5_000;
+
+export const DEFAULT_PHASE_TRANSITION_WINDOWS = 5;
+
+export interface PhaseBoundary {
+  readonly phase: RunPhase;
+  readonly startsAtMs: number;
+}
+
+export const PHASE_BOUNDARIES_MS: ReadonlyArray<PhaseBoundary> = Object.freeze([
+  Object.freeze({
+    phase: 'FOUNDATION',
+    startsAtMs: 0,
+  }),
+  Object.freeze({
+    phase: 'ESCALATION',
+    startsAtMs: 4 * 60 * 1_000,
+  }),
+  Object.freeze({
+    phase: 'SOVEREIGNTY',
+    startsAtMs: 8 * 60 * 1_000,
+  }),
+]);
+
+export interface TickInterpolationPlan {
+  readonly fromTier: TickTier;
+  readonly toTier: TickTier;
+  readonly fromDurationMs: number;
+  readonly toDurationMs: number;
+  readonly totalTicks: number;
+  readonly ticksRemaining: number;
 }
 
 /** Time-sensitive forced-decision card categories. */
@@ -249,4 +342,118 @@ export interface TimeEngineEventMap {
   HOLD_ACTION_USED: HoldActionUsedEvent;
   RUN_TIMEOUT: RunTimeoutEvent;
   TICK_TIER_FORCED: TickTierForcedEvent;
+}
+
+/** Backend-safe lookup by backend PressureTier. */
+export function getTickTierConfigByPressureTier(
+  tier: PressureTier,
+): TickTierConfig {
+  return TICK_TIER_CONFIGS[pressureTierToTickTier(tier)];
+}
+
+/** Backend-safe lookup by frontend-style TickTier. */
+export function getTickTierConfig(tier: TickTier): TickTierConfig {
+  return TICK_TIER_CONFIGS[tier];
+}
+
+export function getDefaultTickDurationMs(tier: PressureTier): number {
+  return TIER_DURATIONS_MS[tier];
+}
+
+export function getDecisionWindowDurationMs(tier: PressureTier): number {
+  return DECISION_WINDOW_DURATIONS_MS[tier];
+}
+
+export function clampNonNegativeInteger(value: number): number {
+  if (!Number.isFinite(value)) {
+    return 0;
+  }
+
+  return Math.max(0, Math.trunc(value));
+}
+
+export function clampTickDurationMs(
+  tier: PressureTier,
+  durationMs: number,
+): number {
+  const config = getTickTierConfigByPressureTier(tier);
+
+  if (!Number.isFinite(durationMs)) {
+    return config.defaultDurationMs;
+  }
+
+  const normalized = Math.trunc(durationMs);
+
+  if (normalized < config.minDurationMs) {
+    return config.minDurationMs;
+  }
+
+  if (normalized > config.maxDurationMs) {
+    return config.maxDurationMs;
+  }
+
+  return normalized;
+}
+
+export function normalizeTickDurationMs(
+  tier: PressureTier,
+  durationMs: number | null | undefined,
+): number {
+  if (typeof durationMs !== 'number' || !Number.isFinite(durationMs)) {
+    return getDefaultTickDurationMs(tier);
+  }
+
+  return clampTickDurationMs(tier, durationMs);
+}
+
+export function computeInterpolationTickCount(deltaMs: number): number {
+  if (deltaMs > 8_000) {
+    return 4;
+  }
+
+  if (deltaMs > 4_000) {
+    return 3;
+  }
+
+  return 2;
+}
+
+export function createInterpolationPlan(
+  fromTier: TickTier,
+  toTier: TickTier,
+  fromDurationMs: number,
+  toDurationMs: number,
+): TickInterpolationPlan {
+  const deltaMs = Math.abs(toDurationMs - fromDurationMs);
+
+  return {
+    fromTier,
+    toTier,
+    fromDurationMs,
+    toDurationMs,
+    totalTicks: computeInterpolationTickCount(deltaMs),
+    ticksRemaining: computeInterpolationTickCount(deltaMs),
+  };
+}
+
+export function resolvePhaseFromElapsedMs(elapsedMs: number): RunPhase {
+  let phase: RunPhase = 'FOUNDATION';
+
+  for (const boundary of PHASE_BOUNDARIES_MS) {
+    if (elapsedMs >= boundary.startsAtMs) {
+      phase = boundary.phase;
+    }
+  }
+
+  return phase;
+}
+
+export function isPhaseBoundaryTransition(
+  previousElapsedMs: number,
+  nextElapsedMs: number,
+): boolean {
+  return (
+    resolvePhaseFromElapsedMs(previousElapsedMs) !==
+    resolvePhaseFromElapsedMs(nextElapsedMs)
+  );
 }
