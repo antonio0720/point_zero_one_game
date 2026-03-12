@@ -1,20 +1,97 @@
 // backend/src/game/engine/time/__tests__/TickTierPolicy.test.ts
+
 import { describe, expect, it } from 'vitest';
 
 import { DeterministicClock } from '../../core/ClockSource';
+import type {
+  AttackEvent,
+  ThreatEnvelope,
+} from '../../core/GamePrimitives';
 import type { RunStateSnapshot } from '../../core/RunStateSnapshot';
 import { SeasonClock, SeasonWindowType } from '../SeasonClock';
 import { TickTierPolicy } from '../TickTierPolicy';
 
-type DeepPartial<T> = {
-  [K in keyof T]?: T[K] extends readonly (infer U)[]
-    ? readonly U[]
-    : T[K] extends Record<string, unknown>
-      ? DeepPartial<T[K]>
-      : T[K];
-};
+type DeepPartial<T> =
+  T extends readonly (infer U)[]
+    ? readonly DeepPartial<U>[]
+    : T extends object
+      ? { [K in keyof T]?: DeepPartial<T[K]> }
+      : T;
 
-function createSnapshot(overrides: DeepPartial<RunStateSnapshot> = {}): RunStateSnapshot {
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function deepMerge<T>(base: T, overrides?: DeepPartial<T>): T {
+  if (overrides === undefined) {
+    return base;
+  }
+
+  if (Array.isArray(base)) {
+    return overrides as T;
+  }
+
+  if (isPlainObject(base) && isPlainObject(overrides)) {
+    const result: Record<string, unknown> = {
+      ...(base as Record<string, unknown>),
+    };
+
+    for (const key of Object.keys(overrides)) {
+      const overrideValue = overrides[key];
+
+      if (overrideValue === undefined) {
+        continue;
+      }
+
+      const baseValue = (base as Record<string, unknown>)[key];
+
+      result[key] =
+        isPlainObject(baseValue) && isPlainObject(overrideValue)
+          ? deepMerge(baseValue, overrideValue as never)
+          : overrideValue;
+    }
+
+    return result as T;
+  }
+
+  return overrides as T;
+}
+
+function createThreat(
+  threatId: string,
+  severity: number,
+  etaTicks = 1,
+): ThreatEnvelope {
+  return {
+    threatId,
+    source: `bot:${threatId}`,
+    etaTicks,
+    severity,
+    visibleAs: 'EXPOSED',
+    summary: `${threatId} visible threat`,
+  };
+}
+
+function createAttack(
+  attackId: string,
+  source: AttackEvent['source'],
+  magnitude: number,
+): AttackEvent {
+  return {
+    attackId,
+    source,
+    targetEntity: 'SELF',
+    targetLayer: 'L1',
+    category: 'DRAIN',
+    magnitude,
+    createdAtTick: 1,
+    notes: [],
+  };
+}
+
+function createSnapshot(
+  overrides: DeepPartial<RunStateSnapshot> = {},
+): RunStateSnapshot {
   const base: RunStateSnapshot = {
     schemaVersion: 'engine-run-state.v2',
     runId: 'run_test_001',
@@ -58,7 +135,7 @@ function createSnapshot(overrides: DeepPartial<RunStateSnapshot> = {}): RunState
       layers: [
         {
           layerId: 'L1',
-          label: 'CASH_BUFFER',
+          label: 'CASH_RESERVE',
           current: 100,
           max: 100,
           regenPerTick: 0,
@@ -162,21 +239,7 @@ function createSnapshot(overrides: DeepPartial<RunStateSnapshot> = {}): RunState
     },
   };
 
-  return {
-    ...base,
-    ...overrides,
-    economy: { ...base.economy, ...(overrides.economy ?? {}) },
-    pressure: { ...base.pressure, ...(overrides.pressure ?? {}) },
-    tension: { ...base.tension, ...(overrides.tension ?? {}) },
-    shield: { ...base.shield, ...(overrides.shield ?? {}) },
-    battle: { ...base.battle, ...(overrides.battle ?? {}) },
-    cascade: { ...base.cascade, ...(overrides.cascade ?? {}) },
-    sovereignty: { ...base.sovereignty, ...(overrides.sovereignty ?? {}) },
-    cards: { ...base.cards, ...(overrides.cards ?? {}) },
-    modeState: { ...base.modeState, ...(overrides.modeState ?? {}) },
-    timers: { ...base.timers, ...(overrides.timers ?? {}) },
-    telemetry: { ...base.telemetry, ...(overrides.telemetry ?? {}) },
-  };
+  return deepMerge(base, overrides);
 }
 
 describe('backend time/TickTierPolicy', () => {
@@ -211,48 +274,24 @@ describe('backend time/TickTierPolicy', () => {
       },
       tension: {
         visibleThreats: [
-          { sourceBotId: 'envy', score: 0.8, visibility: 'VISIBLE', tags: ['a'] },
-          { sourceBotId: 'spite', score: 0.7, visibility: 'VISIBLE', tags: ['b'] },
-          { sourceBotId: 'doubt', score: 0.7, visibility: 'VISIBLE', tags: ['c'] },
-          { sourceBotId: 'panic', score: 0.7, visibility: 'VISIBLE', tags: ['d'] },
+          createThreat('threat_envy', 0.8),
+          createThreat('threat_spite', 0.7),
+          createThreat('threat_doubt', 0.7),
+          createThreat('threat_panic', 0.7),
         ],
-      } as DeepPartial<RunStateSnapshot['tension']>,
+      },
       battle: {
         pendingAttacks: [
-          {
-            attackId: 'atk_1',
-            botId: 'envy',
-            attackType: 'LIQUIDITY_DRAIN',
-            scheduledTick: 1,
-            pressureDelta: 0.1,
-            damageBudget: 5,
-            tags: [],
-          },
-          {
-            attackId: 'atk_2',
-            botId: 'spite',
-            attackType: 'LIQUIDITY_DRAIN',
-            scheduledTick: 1,
-            pressureDelta: 0.1,
-            damageBudget: 5,
-            tags: [],
-          },
-          {
-            attackId: 'atk_3',
-            botId: 'panic',
-            attackType: 'LIQUIDITY_DRAIN',
-            scheduledTick: 1,
-            pressureDelta: 0.1,
-            damageBudget: 5,
-            tags: [],
-          },
+          createAttack('atk_1', 'BOT_01', 5),
+          createAttack('atk_2', 'BOT_02', 5),
+          createAttack('atk_3', 'BOT_03', 5),
         ],
-      } as DeepPartial<RunStateSnapshot['battle']>,
+      },
       shield: {
         layers: [
           {
             layerId: 'L1',
-            label: 'CASH_BUFFER',
+            label: 'CASH_RESERVE',
             current: 5,
             max: 100,
             regenPerTick: 0,
