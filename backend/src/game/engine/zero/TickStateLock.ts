@@ -1,118 +1,215 @@
-// /Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/backend/src/game/engine/zero/TickStateLock.ts
+// backend/src/game/engine/zero/TickStateLock.ts
 
 /*
  * POINT ZERO ONE — BACKEND ENGINE ZERO
  * /backend/src/game/engine/zero/TickStateLock.ts
  *
  * Doctrine:
- * - lifecycle transition control must be explicit and queryable
- * - the lock protects against overlapping ticks and illegal run transitions
- * - zero owns lifecycle guarding; simulation engines do not
+ * - Engine 0 owns authoritative lifecycle lock state for backend execution
+ * - overlapping ticks are forbidden
+ * - transitions are explicit, validated, and lease-based
+ * - callers receive a lock token and must release the same token
+ * - this is orchestration law, not UI state
  */
 
-import type {
-  RunLifecycleCheckpoint,
-  RunLifecycleState,
-} from './zero.types';
+export type TickRuntimeState =
+  | 'IDLE'
+  | 'STARTING'
+  | 'ACTIVE'
+  | 'TICK_LOCKED'
+  | 'ENDING'
+  | 'ENDED';
 
-function freezeArray<T>(items: readonly T[]): readonly T[] {
-  return Object.freeze([...items]);
+export interface TickLockLease {
+  readonly token: string;
+  readonly state: 'TICK_LOCKED';
+  readonly acquiredAtMs: number;
+  readonly runId: string | null;
+  readonly tick: number | null;
 }
 
-function checkpoint(
-  lifecycleState: RunLifecycleState,
-  tick: number | null,
-  note: string | null,
-): RunLifecycleCheckpoint {
-  return Object.freeze({
-    lifecycleState,
-    changedAtMs: Date.now(),
-    tick,
-    note,
-  });
+export interface TickStateSnapshot {
+  readonly state: TickRuntimeState;
+  readonly runId: string | null;
+  readonly tick: number | null;
+  readonly activeToken: string | null;
+  readonly lockedAtMs: number | null;
+  readonly updatedAtMs: number;
+}
+
+function createToken(nowMs: number, runId: string | null, tick: number | null): string {
+  return `${nowMs}:${runId ?? 'none'}:${tick ?? -1}:${Math.random()
+    .toString(36)
+    .slice(2, 10)}`;
 }
 
 export class TickStateLock {
-  private state: RunLifecycleState = 'IDLE';
-  private readonly history: RunLifecycleCheckpoint[] = [
-    checkpoint('IDLE', null, 'Lock initialized.'),
-  ];
+  private state: TickRuntimeState = 'IDLE';
 
-  public getState(): RunLifecycleState {
+  private runId: string | null = null;
+
+  private tick: number | null = null;
+
+  private activeToken: string | null = null;
+
+  private lockedAtMs: number | null = null;
+
+  private updatedAtMs = Date.now();
+
+  private readonly now: () => number;
+
+  public constructor(options: { readonly now?: () => number } = {}) {
+    this.now = options.now ?? (() => Date.now());
+  }
+
+  public snapshot(): TickStateSnapshot {
+    return Object.freeze({
+      state: this.state,
+      runId: this.runId,
+      tick: this.tick,
+      activeToken: this.activeToken,
+      lockedAtMs: this.lockedAtMs,
+      updatedAtMs: this.updatedAtMs,
+    });
+  }
+
+  public getState(): TickRuntimeState {
     return this.state;
   }
 
-  public historySnapshot(): readonly RunLifecycleCheckpoint[] {
-    return freezeArray(this.history);
+  public isActive(): boolean {
+    return this.state === 'ACTIVE' || this.state === 'TICK_LOCKED';
   }
 
   public isTickLocked(): boolean {
     return this.state === 'TICK_LOCKED';
   }
 
-  public isRunActive(): boolean {
-    return this.state === 'ACTIVE';
+  public startRun(runId: string): void {
+    if (this.state !== 'IDLE' && this.state !== 'ENDED') {
+      throw new Error(`Cannot start run from state ${this.state}.`);
+    }
+
+    this.state = 'STARTING';
+    this.runId = runId;
+    this.tick = 0;
+    this.activeToken = null;
+    this.lockedAtMs = null;
+    this.touch();
   }
 
-  public canStartRun(): boolean {
-    return this.state === 'IDLE' || this.state === 'ENDED';
-  }
+  public activate(runId?: string): void {
+    if (this.state !== 'STARTING' && this.state !== 'ACTIVE') {
+      throw new Error(`Cannot activate from state ${this.state}.`);
+    }
 
-  public canExecuteTick(): boolean {
-    return this.state === 'ACTIVE';
-  }
-
-  public enterStarting(note: string | null = null): void {
-    this.transition('STARTING', null, note ?? 'Run bootstrapping started.');
-  }
-
-  public enterActive(tick: number | null = null, note: string | null = null): void {
-    this.transition('ACTIVE', tick, note ?? 'Run is active.');
-  }
-
-  public enterTickLocked(tick: number, note: string | null = null): void {
-    this.transition('TICK_LOCKED', tick, note ?? 'Tick execution locked.');
-  }
-
-  public enterEnding(tick: number | null = null, note: string | null = null): void {
-    this.transition('ENDING', tick, note ?? 'Run shutdown started.');
-  }
-
-  public enterEnded(tick: number | null = null, note: string | null = null): void {
-    this.transition('ENDED', tick, note ?? 'Run ended.');
-  }
-
-  public reset(note: string | null = null): void {
-    this.transition('IDLE', null, note ?? 'Lock reset.');
-  }
-
-  private transition(
-    next: RunLifecycleState,
-    tick: number | null,
-    note: string | null,
-  ): void {
-    this.assertTransitionAllowed(this.state, next);
-    this.state = next;
-    this.history.push(checkpoint(next, tick, note));
-  }
-
-  private assertTransitionAllowed(
-    current: RunLifecycleState,
-    next: RunLifecycleState,
-  ): void {
-    const allowed: Readonly<Record<RunLifecycleState, readonly RunLifecycleState[]>> = Object.freeze({
-      IDLE: ['STARTING', 'IDLE'] as readonly RunLifecycleState[],
-      STARTING: ['ACTIVE', 'ENDING', 'IDLE'] as readonly RunLifecycleState[],
-      ACTIVE: ['TICK_LOCKED', 'ENDING', 'ACTIVE'] as readonly RunLifecycleState[],
-      TICK_LOCKED: ['ACTIVE', 'ENDING'] as readonly RunLifecycleState[],
-      ENDING: ['ENDED', 'IDLE'] as readonly RunLifecycleState[],
-      ENDED: ['IDLE', 'STARTING', 'ENDED'] as readonly RunLifecycleState[],
-    });
-
-    if (!allowed[current].includes(next)) {
+    if (runId !== undefined && this.runId !== null && this.runId !== runId) {
       throw new Error(
-        `[TickStateLock] Illegal lifecycle transition ${current} -> ${next}.`,
+        `TickStateLock activate runId mismatch. Expected ${this.runId}, received ${runId}.`,
       );
     }
+
+    this.state = 'ACTIVE';
+    this.touch();
+  }
+
+  public acquire(runId: string | null, tick: number | null): TickLockLease {
+    if (this.state !== 'ACTIVE') {
+      throw new Error(`Cannot acquire tick lock from state ${this.state}.`);
+    }
+
+    if (this.activeToken !== null) {
+      throw new Error('Tick lock is already held.');
+    }
+
+    const nowMs = this.now();
+    const token = createToken(nowMs, runId, tick);
+
+    this.state = 'TICK_LOCKED';
+    this.runId = runId ?? this.runId;
+    this.tick = tick;
+    this.activeToken = token;
+    this.lockedAtMs = nowMs;
+    this.touch(nowMs);
+
+    return Object.freeze({
+      token,
+      state: 'TICK_LOCKED',
+      acquiredAtMs: nowMs,
+      runId: this.runId,
+      tick: this.tick,
+    });
+  }
+
+  public release(
+    leaseOrToken: TickLockLease | string,
+    nextState: 'ACTIVE' | 'ENDING' | 'ENDED' = 'ACTIVE',
+    nextTick?: number | null,
+  ): void {
+    const token =
+      typeof leaseOrToken === 'string' ? leaseOrToken : leaseOrToken.token;
+
+    if (this.state !== 'TICK_LOCKED') {
+      throw new Error(`Cannot release tick lock from state ${this.state}.`);
+    }
+
+    if (this.activeToken === null || this.activeToken !== token) {
+      throw new Error('Tick lock release token mismatch.');
+    }
+
+    this.activeToken = null;
+    this.lockedAtMs = null;
+    this.state = nextState;
+
+    if (nextTick !== undefined) {
+      this.tick = nextTick;
+    }
+
+    this.touch();
+  }
+
+  public beginEnding(): void {
+    if (
+      this.state !== 'ACTIVE' &&
+      this.state !== 'TICK_LOCKED' &&
+      this.state !== 'STARTING'
+    ) {
+      throw new Error(`Cannot begin ending from state ${this.state}.`);
+    }
+
+    this.state = 'ENDING';
+    this.activeToken = null;
+    this.lockedAtMs = null;
+    this.touch();
+  }
+
+  public markEnded(): void {
+    if (this.state !== 'ENDING' && this.state !== 'ACTIVE') {
+      throw new Error(`Cannot mark ended from state ${this.state}.`);
+    }
+
+    this.state = 'ENDED';
+    this.activeToken = null;
+    this.lockedAtMs = null;
+    this.touch();
+  }
+
+  public reset(): void {
+    this.state = 'IDLE';
+    this.runId = null;
+    this.tick = null;
+    this.activeToken = null;
+    this.lockedAtMs = null;
+    this.touch();
+  }
+
+  public assertState(expected: TickRuntimeState): void {
+    if (this.state !== expected) {
+      throw new Error(`Expected state ${expected} but current state is ${this.state}.`);
+    }
+  }
+
+  private touch(nowMs = this.now()): void {
+    this.updatedAtMs = nowMs;
   }
 }
