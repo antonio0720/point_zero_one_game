@@ -1,123 +1,185 @@
-// /Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/backend/src/game/engine/zero/EventFlushCoordinator.ts
+// backend/src/game/engine/zero/EventFlushCoordinator.ts
 
 /*
  * POINT ZERO ONE — BACKEND ENGINE ZERO
  * /backend/src/game/engine/zero/EventFlushCoordinator.ts
  *
  * Doctrine:
- * - zero owns tick-boundary event finalization policy
- * - sealing must be deterministic and replay-stable
- * - backend/core EventBus remains the primitive queue; zero adds tick-facing summaries
+ * - backend core EventBus already owns emission + queue/history mechanics
+ * - Engine 0 owns the tick boundary where queued envelopes are drained,
+ *   canonically hashed, and reflected back into snapshot telemetry
+ * - flush coordination must never invent a second bus or mutate envelope order
+ * - the checksum projection must stay stable with the existing backend 15X
+ *   event-seal doctrine so proof surfaces do not drift
  */
 
-import { createHash } from 'node:crypto';
-
+import {
+  checksumParts,
+  checksumSnapshot,
+  cloneJson,
+  computeTickSeal,
+  deepFreeze,
+} from '../core/Deterministic';
 import type { EventBus, EventEnvelope } from '../core/EventBus';
 import type { EngineEventMap } from '../core/GamePrimitives';
-import type {
-  EngineEventEnvelope,
-  EngineEventSealSnapshot,
-  EventSealResult,
-} from './zero.types';
+import type { RunStateSnapshot } from '../core/RunStateSnapshot';
+import type { TickStep } from '../core/TickSequence';
+
+type Mutable<T> =
+  T extends readonly (infer U)[]
+    ? Mutable<U>[]
+    : T extends object
+      ? { -readonly [K in keyof T]: Mutable<T[K]> }
+      : T;
+
+export interface EventFlushCoordinatorOptions {
+  readonly appendStateChecksumToSovereignty?: boolean;
+  readonly incrementTelemetryEventCount?: boolean;
+}
+
+export interface FlushedEventDigest {
+  readonly sequence: number;
+  readonly event: keyof EngineEventMap;
+  readonly emittedAtTick?: number;
+  readonly tags?: readonly string[];
+  readonly checksum: string;
+}
+
+export interface EventFlushResult {
+  readonly snapshot: RunStateSnapshot;
+  readonly drained: readonly EventEnvelope<
+    keyof EngineEventMap,
+    EngineEventMap[keyof EngineEventMap]
+  >[];
+  readonly digests: readonly FlushedEventDigest[];
+  readonly drainedCount: number;
+  readonly stateChecksum: string;
+  readonly tickSeal: string;
+}
+
+const DEFAULT_OPTIONS: Required<EventFlushCoordinatorOptions> = {
+  appendStateChecksumToSovereignty: true,
+  incrementTelemetryEventCount: true,
+};
 
 function freezeArray<T>(items: readonly T[]): readonly T[] {
   return Object.freeze([...items]);
 }
 
-function stableStringify(value: unknown): string {
-  if (value === null || typeof value !== 'object') {
-    return JSON.stringify(value);
-  }
-
-  if (Array.isArray(value)) {
-    return `[${value.map((entry) => stableStringify(entry)).join(',')}]`;
-  }
-
-  const record = value as Record<string, unknown>;
-  const keys = Object.keys(record).sort();
-
-  return `{${keys
-    .map((key) => `${JSON.stringify(key)}:${stableStringify(record[key])}`)
-    .join(',')}}`;
-}
-
-function normalizeEnvelope<K extends keyof EngineEventMap>(
-  envelope: EventEnvelope<K, EngineEventMap[K]>,
-): EngineEventEnvelope<K> {
-  return Object.freeze({
-    sequence: envelope.sequence,
-    event: envelope.event,
-    payload: envelope.payload,
-    emittedAtTick: envelope.emittedAtTick,
-    tags: envelope.tags === undefined ? undefined : freezeArray(envelope.tags),
-  });
-}
-
 export class EventFlushCoordinator {
-  private readonly seals: EventSealResult[] = [];
+  private readonly options: Required<EventFlushCoordinatorOptions>;
 
-  public constructor(private readonly retainLastSeals = 64) {}
+  public constructor(options: EventFlushCoordinatorOptions = {}) {
+    this.options = {
+      ...DEFAULT_OPTIONS,
+      ...options,
+    };
+  }
 
-  public flushAndSeal(
+  public flush(
+    snapshot: RunStateSnapshot,
     bus: EventBus<EngineEventMap>,
-  ): {
-    readonly drained: readonly EngineEventEnvelope[];
-    readonly seal: EventSealResult;
-  } {
-    const drained = freezeArray(
-      bus.flush().map((entry) => normalizeEnvelope(entry)),
-    );
-    const seal = this.seal(drained);
+    step: TickStep = 'STEP_13_FLUSH',
+  ): EventFlushResult {
+    const drained = bus.flush() as Array<
+      EventEnvelope<keyof EngineEventMap, EngineEventMap[keyof EngineEventMap]>
+    >;
 
-    this.seals.push(seal);
+    const digests = freezeArray(drained.map((entry) => this.digestEnvelope(entry)));
+    const stateChecksum = this.computeStateChecksum(snapshot);
+    const tickSeal = computeTickSeal({
+      runId: snapshot.runId,
+      tick: snapshot.tick,
+      step,
+      stateChecksum,
+      eventChecksums: digests.map((entry) => entry.checksum),
+    });
 
-    if (this.seals.length > this.retainLastSeals) {
-      this.seals.splice(0, this.seals.length - this.retainLastSeals);
+    const next = this.decorateSnapshot(snapshot, stateChecksum, drained.length);
+
+    return {
+      snapshot: next,
+      drained: freezeArray(drained),
+      digests,
+      drainedCount: drained.length,
+      stateChecksum,
+      tickSeal,
+    };
+  }
+
+  public computeStateChecksum(snapshot: RunStateSnapshot): string {
+    return checksumSnapshot({
+      tick: snapshot.tick,
+      phase: snapshot.phase,
+      economy: snapshot.economy,
+      pressure: snapshot.pressure,
+      tension: snapshot.tension,
+      shield: snapshot.shield,
+      battle: {
+        ...snapshot.battle,
+        pendingAttacks: snapshot.battle.pendingAttacks.map((attack) => attack.attackId),
+      },
+      cascade: snapshot.cascade.activeChains.map((chain) => ({
+        chainId: chain.chainId,
+        status: chain.status,
+        links: chain.links.map((link) => link.linkId),
+      })),
+    });
+  }
+
+  private digestEnvelope(
+    entry: EventEnvelope<keyof EngineEventMap, EngineEventMap[keyof EngineEventMap]>,
+  ): FlushedEventDigest {
+    return {
+      sequence: entry.sequence,
+      event: entry.event,
+      emittedAtTick: entry.emittedAtTick,
+      tags: entry.tags === undefined ? undefined : freezeArray(entry.tags),
+      checksum: checksumParts(
+        entry.sequence,
+        entry.event,
+        entry.emittedAtTick ?? null,
+        entry.tags ?? [],
+        entry.payload,
+      ),
+    };
+  }
+
+  private decorateSnapshot(
+    snapshot: RunStateSnapshot,
+    stateChecksum: string,
+    drainedCount: number,
+  ): RunStateSnapshot {
+    if (
+      this.options.appendStateChecksumToSovereignty !== true &&
+      this.options.incrementTelemetryEventCount !== true &&
+      snapshot.telemetry.lastTickChecksum === stateChecksum
+    ) {
+      return snapshot;
     }
 
-    return Object.freeze({
-      drained,
-      seal,
-    });
-  }
+    const next = cloneJson(snapshot) as Mutable<RunStateSnapshot>;
 
-  public seal(
-    envelopes: readonly EngineEventEnvelope[],
-  ): EventSealResult {
-    const payload = stableStringify(
-      envelopes.map((entry) => ({
-        sequence: entry.sequence,
-        event: entry.event,
-        payload: entry.payload,
-        emittedAtTick: entry.emittedAtTick ?? null,
-        tags: entry.tags ?? [],
-      })),
-    );
+    next.telemetry.lastTickChecksum = stateChecksum;
 
-    const checksum = createHash('sha256').update(payload).digest('hex');
+    if (this.options.incrementTelemetryEventCount === true) {
+      next.telemetry.emittedEventCount =
+        next.telemetry.emittedEventCount + drainedCount;
+    }
 
-    return Object.freeze({
-      checksum,
-      emittedEventCount: envelopes.length,
-      emittedSequences: freezeArray(envelopes.map((entry) => entry.sequence)),
-    });
-  }
+    if (this.options.appendStateChecksumToSovereignty === true) {
+      const existing = next.sovereignty.tickChecksums;
+      const alreadyPresent =
+        existing.length > 0 && existing[existing.length - 1] === stateChecksum;
 
-  public snapshot(
-    envelopes: readonly EngineEventEnvelope[],
-  ): EngineEventSealSnapshot {
-    return Object.freeze({
-      events: freezeArray(envelopes),
-      count: envelopes.length,
-      sequences: freezeArray(envelopes.map((entry) => entry.sequence)),
-    });
-  }
+      if (!alreadyPresent) {
+        next.sovereignty.tickChecksums = freezeArray([
+          ...existing,
+          stateChecksum,
+        ]);
+      }
+    }
 
-  public getRecentSeals(): readonly EventSealResult[] {
-    return freezeArray(this.seals);
-  }
-
-  public clear(): void {
-    this.seals.length = 0;
+    return deepFreeze(next) as RunStateSnapshot;
   }
 }
