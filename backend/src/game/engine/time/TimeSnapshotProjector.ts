@@ -7,6 +7,7 @@
  * - this file does not decide cadence policy; it applies already-resolved time results
  * - tags, warnings, and telemetry updates must be deduplicated and serialization-safe
  * - outcome mutation from timeout is delegated to RunTimeoutGuard, not re-derived here
+ * - projection must preserve prior snapshot history unless an explicit override is supplied
  */
 
 import type { RunOutcome, RunPhase } from '../core/GamePrimitives';
@@ -30,6 +31,10 @@ export interface TimeSnapshotProjectionRequest {
   readonly decisionWindowExpired?: boolean;
 }
 
+function freezeArray<T>(items: readonly T[]): readonly T[] {
+  return Object.freeze([...items]);
+}
+
 function dedupeStrings(...groups: ReadonlyArray<readonly string[]>): readonly string[] {
   const merged = new Set<string>();
 
@@ -41,7 +46,15 @@ function dedupeStrings(...groups: ReadonlyArray<readonly string[]>): readonly st
     }
   }
 
-  return Object.freeze([...merged]);
+  return freezeArray([...merged]);
+}
+
+function normalizeTick(value: number): number {
+  if (!Number.isFinite(value)) {
+    return 0;
+  }
+
+  return Math.max(0, Math.trunc(value));
 }
 
 function resolveTelemetry(
@@ -50,6 +63,7 @@ function resolveTelemetry(
   request: TimeSnapshotProjectionRequest,
 ): TelemetryState {
   const warnings = dedupeStrings(
+    previous.warnings,
     timeout.warnings,
     request.warnings ?? [],
   );
@@ -57,15 +71,48 @@ function resolveTelemetry(
   return Object.freeze({
     ...previous,
     outcomeReason:
-      request.outcomeReason
-      ?? timeout.outcomeReason
-      ?? previous.outcomeReason,
+      request.outcomeReason !== undefined
+        ? request.outcomeReason
+        : timeout.outcomeReason !== null
+          ? timeout.outcomeReason
+          : previous.outcomeReason,
     outcomeReasonCode:
-      request.outcomeReasonCode
-      ?? timeout.outcomeReasonCode
-      ?? previous.outcomeReasonCode,
+      request.outcomeReasonCode !== undefined
+        ? request.outcomeReasonCode
+        : timeout.outcomeReasonCode !== null
+          ? timeout.outcomeReasonCode
+          : previous.outcomeReasonCode,
     warnings,
   });
+}
+
+function resolveTags(
+  snapshot: RunStateSnapshot,
+  timeout: RunTimeoutResolution,
+  request: TimeSnapshotProjectionRequest,
+): readonly string[] {
+  return dedupeStrings(
+    snapshot.tags,
+    timeout.tags,
+    request.tags ?? [],
+    request.decisionWindowExpired === true ? ['decision_window:expired'] : [],
+  );
+}
+
+function resolveOutcome(
+  snapshot: RunStateSnapshot,
+  timeout: RunTimeoutResolution,
+  request: TimeSnapshotProjectionRequest,
+): RunOutcome | null {
+  if (request.outcome !== undefined) {
+    return request.outcome;
+  }
+
+  if (timeout.nextOutcome !== null) {
+    return timeout.nextOutcome;
+  }
+
+  return snapshot.outcome;
 }
 
 export class TimeSnapshotProjector {
@@ -78,23 +125,14 @@ export class TimeSnapshotProjector {
     request: TimeSnapshotProjectionRequest,
   ): RunStateSnapshot {
     const timeout = this.timeoutGuard.resolve(snapshot, request.timers.elapsedMs);
-
-    const tags = dedupeStrings(
-      timeout.tags,
-      request.tags ?? [],
-      request.decisionWindowExpired === true ? ['decision_window:expired'] : [],
-    );
-
+    const tags = resolveTags(snapshot, timeout, request);
     const telemetry = resolveTelemetry(snapshot.telemetry, timeout, request);
 
     return Object.freeze({
       ...snapshot,
-      tick: request.tick,
+      tick: normalizeTick(request.tick),
       phase: request.phase,
-      outcome:
-        request.outcome
-        ?? timeout.nextOutcome
-        ?? snapshot.outcome,
+      outcome: resolveOutcome(snapshot, timeout, request),
       timers: request.timers,
       telemetry,
       tags,

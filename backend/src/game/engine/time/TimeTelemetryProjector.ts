@@ -7,6 +7,7 @@
  * - time-side telemetry projection must remain deterministic, immutable, and hash-safe
  * - warning / fork-hint / decision streams are append-only, deduped where appropriate
  * - outcome reason state may be refined here, but terminal truth remains owned by runtime
+ * - additive normalization is allowed so long as it does not erase prior audit facts
  */
 
 import type {
@@ -69,15 +70,50 @@ function normalizeEventDelta(value: number | undefined): number {
   return Math.max(0, Math.trunc(value));
 }
 
+function normalizeTick(value: number): number {
+  if (!Number.isFinite(value)) {
+    return 0;
+  }
+
+  return Math.max(0, Math.trunc(value));
+}
+
+function normalizeChecksum(value: string | null | undefined): string | null | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (value === null) {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function normalizeTimingClass(values: readonly string[]): readonly string[] {
+  return freezeArray(values.filter((value) => value.length > 0));
+}
+
 function normalizeDecision(input: TimeDecisionTelemetryInput): DecisionRecord {
   return Object.freeze({
-    tick: Math.max(0, Math.trunc(input.tick)),
+    tick: normalizeTick(input.tick),
     actorId: input.actorId,
     cardId: input.cardId,
     latencyMs: normalizeLatencyMs(input.latencyMs),
-    timingClass: freezeArray(input.timingClass),
+    timingClass: normalizeTimingClass(input.timingClass),
     accepted: input.accepted,
   });
+}
+
+function incrementSafe(previous: number, delta: number): number {
+  const next = previous + delta;
+
+  if (!Number.isFinite(next)) {
+    return previous;
+  }
+
+  return Math.min(Number.MAX_SAFE_INTEGER, Math.max(0, Math.trunc(next)));
 }
 
 export class TimeTelemetryProjector {
@@ -85,23 +121,30 @@ export class TimeTelemetryProjector {
     previous: TelemetryState,
     request: TimeTelemetryProjectionRequest = {},
   ): TelemetryState {
-    const nextDecisions = request.decisions === undefined
-      ? previous.decisions
-      : freezeArray([
-          ...previous.decisions,
-          ...request.decisions.map((decision) => normalizeDecision(decision)),
-        ]);
+    const nextDecisions =
+      request.decisions === undefined
+        ? previous.decisions
+        : freezeArray([
+            ...previous.decisions,
+            ...request.decisions.map((decision) => normalizeDecision(decision)),
+          ]);
 
-    const nextWarnings = request.warnings === undefined
-      ? previous.warnings
-      : dedupeStrings(previous.warnings, request.warnings);
+    const nextWarnings =
+      request.warnings === undefined
+        ? previous.warnings
+        : dedupeStrings(previous.warnings, request.warnings);
 
-    const nextForkHints = request.forkHints === undefined
-      ? previous.forkHints
-      : dedupeStrings(previous.forkHints, request.forkHints);
+    const nextForkHints =
+      request.forkHints === undefined
+        ? previous.forkHints
+        : dedupeStrings(previous.forkHints, request.forkHints);
 
-    const nextEmittedEventCount =
-      previous.emittedEventCount + normalizeEventDelta(request.emittedEventCountDelta);
+    const nextEmittedEventCount = incrementSafe(
+      previous.emittedEventCount,
+      normalizeEventDelta(request.emittedEventCountDelta),
+    );
+
+    const nextChecksum = normalizeChecksum(request.lastTickChecksum);
 
     return Object.freeze({
       decisions: nextDecisions,
@@ -114,8 +157,8 @@ export class TimeTelemetryProjector {
           ? request.outcomeReasonCode
           : previous.outcomeReasonCode,
       lastTickChecksum:
-        request.lastTickChecksum !== undefined
-          ? request.lastTickChecksum
+        nextChecksum !== undefined
+          ? nextChecksum
           : previous.lastTickChecksum,
       forkHints: nextForkHints,
       emittedEventCount: nextEmittedEventCount,

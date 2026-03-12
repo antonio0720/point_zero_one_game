@@ -7,6 +7,7 @@
  * - season budget and extension budget are distinct inputs but one run ceiling
  * - elapsed time is authoritative; next-fire planning is projected from it
  * - this service owns arithmetic, not event emission or outcome mutation
+ * - additive diagnostics are allowed so long as they do not change timer truth
  */
 
 import type { RunStateSnapshot, TimerState } from '../core/RunStateSnapshot';
@@ -23,6 +24,15 @@ export interface TimeBudgetProjection {
   readonly currentTickDurationMs: number;
   readonly nextTickAtMs: number | null;
   readonly canScheduleNextTick: boolean;
+
+  /**
+   * Additive diagnostics:
+   * - budgetExhausted answers the simple boolean question
+   * - overflowBudgetMs preserves how far past ceiling the advance went
+   * These do not alter authoritative timer math.
+   */
+  readonly budgetExhausted: boolean;
+  readonly overflowBudgetMs: number;
 }
 
 export interface TimeAdvanceRequest {
@@ -42,12 +52,38 @@ function normalizeMs(value: number): number {
   return Math.max(0, Math.trunc(value));
 }
 
+function normalizeNullableMs(value: number | null | undefined): number | null {
+  if (value === null || value === undefined || !Number.isFinite(value)) {
+    return null;
+  }
+
+  return Math.max(0, Math.trunc(value));
+}
+
+function normalizeCount(value: number): number {
+  if (!Number.isFinite(value)) {
+    return 0;
+  }
+
+  return Math.max(0, Math.trunc(value));
+}
+
 function clamp01(value: number): number {
   if (!Number.isFinite(value)) {
     return 0;
   }
 
   return Math.max(0, Math.min(1, value));
+}
+
+function freezeArray<T>(items: readonly T[]): readonly T[] {
+  return Object.freeze([...items]);
+}
+
+function freezeDecisionWindows(
+  windows: TimerState['activeDecisionWindows'],
+): TimerState['activeDecisionWindows'] {
+  return Object.freeze({ ...windows });
 }
 
 export class TimeBudgetService {
@@ -75,6 +111,14 @@ export class TimeBudgetService {
     return this.getElapsedMs(snapshot);
   }
 
+  public getBudgetOverflowMs(snapshot: RunStateSnapshot): number {
+    return Math.max(0, this.getElapsedMs(snapshot) - this.getTotalBudgetMs(snapshot));
+  }
+
+  public isBudgetExhausted(snapshot: RunStateSnapshot): boolean {
+    return this.getRemainingBudgetMs(snapshot) <= 0;
+  }
+
   public getUtilizationPct(snapshot: RunStateSnapshot): number {
     const totalBudgetMs = this.getTotalBudgetMs(snapshot);
 
@@ -83,6 +127,14 @@ export class TimeBudgetService {
     }
 
     return clamp01(this.getElapsedMs(snapshot) / totalBudgetMs);
+  }
+
+  public willExhaustBudget(
+    snapshot: RunStateSnapshot,
+    durationMs: number,
+  ): boolean {
+    const projectedElapsedMs = this.getElapsedMs(snapshot) + normalizeMs(durationMs);
+    return projectedElapsedMs >= this.getTotalBudgetMs(snapshot);
   }
 
   public projectAdvance(
@@ -97,13 +149,16 @@ export class TimeBudgetService {
     const nextElapsedMs = previousElapsedMs + durationMs;
     const consumedBudgetMs = nextElapsedMs;
     const remainingBudgetMs = Math.max(0, totalBudgetMs - consumedBudgetMs);
+    const overflowBudgetMs = Math.max(0, consumedBudgetMs - totalBudgetMs);
+    const budgetExhausted = remainingBudgetMs <= 0;
+
     const utilizationPct =
       totalBudgetMs <= 0 ? 1 : clamp01(consumedBudgetMs / totalBudgetMs);
 
     const canScheduleNextTick =
-      !request.stopScheduling &&
+      request.stopScheduling !== true &&
       snapshot.outcome === null &&
-      remainingBudgetMs > 0;
+      !budgetExhausted;
 
     return Object.freeze({
       seasonBudgetMs: this.getSeasonBudgetMs(snapshot),
@@ -117,6 +172,8 @@ export class TimeBudgetService {
       currentTickDurationMs: durationMs,
       nextTickAtMs: canScheduleNextTick ? nowMs + durationMs : null,
       canScheduleNextTick,
+      budgetExhausted,
+      overflowBudgetMs,
     });
   }
 
@@ -126,21 +183,42 @@ export class TimeBudgetService {
   ): TimerState {
     const projection = this.projectAdvance(snapshot, request);
 
+    const holdCharges =
+      request.overrideHoldCharges === undefined
+        ? normalizeCount(snapshot.timers.holdCharges)
+        : normalizeCount(request.overrideHoldCharges);
+
+    const activeDecisionWindows =
+      request.activeDecisionWindows === undefined
+        ? freezeDecisionWindows(snapshot.timers.activeDecisionWindows)
+        : freezeDecisionWindows(request.activeDecisionWindows);
+
+    const frozenWindowIds =
+      request.frozenWindowIds === undefined
+        ? freezeArray(snapshot.timers.frozenWindowIds)
+        : freezeArray(request.frozenWindowIds);
+
     return Object.freeze({
       seasonBudgetMs: projection.seasonBudgetMs,
       extensionBudgetMs: projection.extensionBudgetMs,
       elapsedMs: projection.nextElapsedMs,
       currentTickDurationMs: projection.currentTickDurationMs,
       nextTickAtMs: projection.nextTickAtMs,
-      holdCharges: request.overrideHoldCharges ?? snapshot.timers.holdCharges,
-      activeDecisionWindows:
-        request.activeDecisionWindows ?? snapshot.timers.activeDecisionWindows,
-      frozenWindowIds:
-        request.frozenWindowIds ?? snapshot.timers.frozenWindowIds,
-      lastTierChangeTick: snapshot.timers.lastTierChangeTick,
+      holdCharges,
+      activeDecisionWindows,
+      frozenWindowIds,
+      lastTierChangeTick:
+        snapshot.timers.lastTierChangeTick === undefined
+          ? undefined
+          : normalizeNullableMs(snapshot.timers.lastTierChangeTick),
       tierInterpolationRemainingTicks:
-        snapshot.timers.tierInterpolationRemainingTicks,
-      forcedTierOverride: snapshot.timers.forcedTierOverride,
+        snapshot.timers.tierInterpolationRemainingTicks === undefined
+          ? undefined
+          : normalizeCount(snapshot.timers.tierInterpolationRemainingTicks),
+      forcedTierOverride:
+        snapshot.timers.forcedTierOverride === undefined
+          ? undefined
+          : snapshot.timers.forcedTierOverride,
     });
   }
 
@@ -151,6 +229,8 @@ export class TimeBudgetService {
       ...snapshot.timers,
       extensionBudgetMs:
         normalizeMs(snapshot.timers.extensionBudgetMs) + normalizedExtensionMs,
+      activeDecisionWindows: freezeDecisionWindows(snapshot.timers.activeDecisionWindows),
+      frozenWindowIds: freezeArray(snapshot.timers.frozenWindowIds),
     });
   }
 
@@ -161,6 +241,17 @@ export class TimeBudgetService {
     return Object.freeze({
       ...snapshot.timers,
       seasonBudgetMs: normalizeMs(seasonBudgetMs),
+      activeDecisionWindows: freezeDecisionWindows(snapshot.timers.activeDecisionWindows),
+      frozenWindowIds: freezeArray(snapshot.timers.frozenWindowIds),
+    });
+  }
+
+  public clearNextTickSchedule(snapshot: RunStateSnapshot): TimerState {
+    return Object.freeze({
+      ...snapshot.timers,
+      nextTickAtMs: null,
+      activeDecisionWindows: freezeDecisionWindows(snapshot.timers.activeDecisionWindows),
+      frozenWindowIds: freezeArray(snapshot.timers.frozenWindowIds),
     });
   }
 }
