@@ -3,18 +3,18 @@
  * /backend/src/game/engine/core/EngineContracts.ts
  *
  * Doctrine:
- * - backend becomes the authoritative simulation surface
- * - seven engines remain distinct
- * - mode-native rules are enforced at runtime
- * - cards are backend-validated, not UI-trusted
- * - proof / integrity / CORD remain backend-owned
+ * - backend is the authoritative simulation surface
+ * - engines remain sovereign, step-scoped, and immutable at the boundary
+ * - time ownership is delegated to Engine 1 during STEP_02_TIME
+ * - all cross-engine coordination flows through the EventBus + TickContext
+ * - runtime helpers here must stay deterministic and side-effect free
  */
 
+import type { ClockSource } from './ClockSource';
+import type { EventBus } from './EventBus';
 import type { EngineEventMap, ModeCode } from './GamePrimitives';
 import type { RunStateSnapshot } from './RunStateSnapshot';
-import type { ClockSource } from './ClockSource';
 import type { TickStep } from './TickSequence';
-import type { EventBus } from './EventBus';
 
 export type EngineId =
   | 'time'
@@ -77,7 +77,10 @@ export interface ModeLifecycleHooks {
    * - coop treasury / role assignment / trust scaffolding
    * - ghost marker hydration / legend gap state
    */
-  initialize(snapshot: RunStateSnapshot, context: TickContext): RunStateSnapshot;
+  initialize(
+    snapshot: RunStateSnapshot,
+    context: TickContext,
+  ): RunStateSnapshot;
 
   /**
    * Optional pre-step hook. Lets a mode mutate runtime state before an engine step.
@@ -111,7 +114,7 @@ export interface SimulationEngine {
   readonly engineId: EngineId;
 
   /**
-   * Clears volatile runtime state for test harnesses, replay, or hot reset.
+   * Clears volatile runtime state for replay, test harnesses, or hot reset.
    */
   reset(): void;
 
@@ -126,7 +129,8 @@ export interface SimulationEngine {
 
   /**
    * Executes one engine slice for one step.
-   * The engine must treat the snapshot as immutable input and return a new snapshot.
+   * The engine must treat the snapshot as immutable input and return
+   * a fresh snapshot or a normalized EngineTickResult payload.
    */
   tick(
     snapshot: RunStateSnapshot,
@@ -171,13 +175,38 @@ export function createEngineSignal(
   };
 }
 
+function isEngineTickResult(
+  value: RunStateSnapshot | EngineTickResult,
+): value is EngineTickResult {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'snapshot' in value &&
+    typeof (value as EngineTickResult).snapshot === 'object'
+  );
+}
+
 export function normalizeEngineTickResult(
   engineId: EngineId,
   tick: number,
   result: RunStateSnapshot | EngineTickResult,
 ): EngineTickResult {
-  if ('snapshot' in result) {
-    return result;
+  if (isEngineTickResult(result)) {
+    return {
+      snapshot: result.snapshot,
+      signals:
+        result.signals && result.signals.length > 0
+          ? result.signals
+          : [
+              createEngineSignal(
+                engineId,
+                'INFO',
+                'ENGINE_TICK_OK',
+                `${engineId} tick completed`,
+                tick,
+              ),
+            ],
+    };
   }
 
   return {

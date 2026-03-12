@@ -50,6 +50,18 @@ import type {
   PressureTier,
 } from '../engines/zero/types';
 
+// ── Engine 1 — Time Engine types ──────────────────────────────────────────────
+import type {
+  DecisionWindow as TimeDecisionWindow,
+  DecisionWindowOpenedEvent,
+  DecisionWindowExpiredEvent,
+  DecisionWindowResolvedEvent,
+  HoldActionUsedEvent,
+  RunTimeoutEvent,
+  TickEvent,
+  TierChangeEvent,
+} from '../engines/time/types';
+
 // ── Engine 3 — Tension Engine types ───────────────────────────────────────────
 import type {
   VisibilityState,
@@ -130,12 +142,19 @@ import {
 // ── EventBus ──────────────────────────────────────────────────────────────────
 import type { EventBus } from '../engines/zero/EventBus';
 
-// ── Inline minimal type: DecisionWindowEntry ──────────────────────────────────
-interface DecisionWindowEntry {
-  cardId:       string;
-  durationMs:   number;
-  openedAtTick: number;
-  autoResolve:  string;
+// ── Engine 1 store-facing decision window shape ───────────────────────────────
+interface DecisionWindowEntry extends TimeDecisionWindow {
+  /**
+   * Legacy compatibility field used by older card/UI consumers that expect a
+   * string-based auto-resolve descriptor instead of worstOptionIndex.
+   */
+  autoResolve: string;
+
+  /**
+   * Alias retained for legacy payload producers that still emit
+   * `autoResolveChoice` instead of a computed worst-option index.
+   */
+  autoResolveChoice?: string;
 }
 
 // =============================================================================
@@ -169,6 +188,9 @@ export interface TimeEngineStoreSlice {
     isTierTransitioning:   boolean;
     seasonTimeoutImminent: boolean;
     ticksUntilTimeout:     number;
+    lastTickTimestamp:     number | null;
+    tierChangedThisTick:   boolean;
+    isRunActive:           boolean;
   };
 }
 
@@ -330,6 +352,9 @@ export const defaultTimeSlice: TimeEngineStoreSlice = {
     isTierTransitioning:   false,
     seasonTimeoutImminent: false,
     ticksUntilTimeout:     0,
+    lastTickTimestamp:     null,
+    tierChangedThisTick:   false,
+    isRunActive:           false,
   },
 };
 
@@ -486,6 +511,8 @@ function applyRunStartedAtomic(
     ...defaultTimeSlice.time,
     seasonTickBudget: payload.tickBudget,
     ticksRemaining:   payload.tickBudget,
+    ticksUntilTimeout: payload.tickBudget,
+    isRunActive:      true,
   });
 
   Object.assign(state.pressure,    { ...defaultPressureSlice.pressure });
@@ -514,6 +541,10 @@ function applyRunEndedAtomic(
   state.run.lifecycleState = 'ENDED';
   state.run.outcome        = payload.outcome;
   state.time.activeDecisionWindows = [];
+  state.time.isRunActive = false;
+  state.time.isTierTransitioning = false;
+  state.time.seasonTimeoutImminent = payload.outcome === 'TIMEOUT';
+  state.time.ticksUntilTimeout = 0;
   state.pressure.isCritical = false;
   state.tension.isRunActive = false;
   state.shield.isRunActive  = false;
@@ -526,11 +557,24 @@ function applyRunEndedAtomic(
 
 function applyTickCompleteAtomic(
   state: EngineStoreState,
-  payload: { tickIndex: number; tickDurationMs: number; outcome: RunOutcome | null },
+  payload: {
+    tickIndex: number;
+    tickDurationMs: number;
+    outcome: RunOutcome | null;
+    timestamp?: number;
+  },
 ): void {
   state.run.lastTickIndex      = payload.tickIndex;
   state.run.lastTickDurationMs = payload.tickDurationMs;
   if (payload.outcome) state.run.outcome = payload.outcome;
+
+  state.time.ticksElapsed = payload.tickIndex;
+  state.time.currentTickDurationMs = payload.tickDurationMs;
+  state.time.lastTickTimestamp = payload.timestamp ?? Date.now();
+  state.time.ticksRemaining = Math.max(0, state.time.seasonTickBudget - payload.tickIndex);
+  state.time.ticksUntilTimeout = state.time.ticksRemaining;
+  state.time.seasonTimeoutImminent = state.time.ticksRemaining <= 5;
+  state.time.tierChangedThisTick = false;
 
   if (state.pressure.score < 0.81) state.pressure.isCritical = false;
 
@@ -538,6 +582,113 @@ function applyTickCompleteAtomic(
     state.tension.pulseTicksActive = 0;
     state.tension.isSustainedPulse = false;
   }
+
+}
+
+function normalizeTickCompletePayload(
+  payload: Partial<TickEvent> & { tickIndex?: number; outcome?: RunOutcome | null },
+): { tickIndex: number; tickDurationMs: number; outcome: RunOutcome | null; timestamp?: number } {
+  return {
+    tickIndex: payload.tickIndex ?? payload.tickNumber ?? 0,
+    tickDurationMs: payload.tickDurationMs ?? 0,
+    outcome: payload.outcome ?? null,
+    timestamp: payload.timestamp,
+  };
+}
+
+function normalizeTierChangePayload(
+  payload: Partial<TierChangeEvent> & { transitionTicks?: number },
+): { from: TickTier; to: TickTier; transitionTicks: number } {
+  return {
+    from: payload.from as TickTier,
+    to: payload.to as TickTier,
+    transitionTicks: payload.transitionTicks ?? payload.interpolationTicks ?? 0,
+  };
+}
+
+function createLegacyDecisionWindowEntry(
+  cardId: string,
+  durationMs: number,
+  openedAtTick: number,
+  autoResolveChoice: string,
+): DecisionWindowEntry {
+  const now = Date.now();
+
+  return {
+    windowId: `${cardId}:${openedAtTick}:${now}`,
+    cardId,
+    cardType: 'FORCED_FATE' as any,
+    durationMs,
+    remainingMs: durationMs,
+    openedAtMs: now,
+    expiresAtMs: now + durationMs,
+    isOnHold: false,
+    holdExpiresAtMs: null,
+    worstOptionIndex: Number.isFinite(Number(autoResolveChoice))
+      ? Number(autoResolveChoice)
+      : -1,
+    isExpired: false,
+    isResolved: false,
+    autoResolve: autoResolveChoice,
+    autoResolveChoice,
+  };
+}
+
+function normalizeDecisionWindowOpenedPayload(
+  payload:
+    | DecisionWindowOpenedEvent
+    | {
+        window?: TimeDecisionWindow;
+        cardId?: string;
+        durationMs?: number;
+        autoResolveChoice?: string;
+      },
+  openedAtTick: number,
+): DecisionWindowEntry {
+  if ('window' in payload && payload.window) {
+    return {
+      ...payload.window,
+      autoResolve: String(payload.window.worstOptionIndex),
+    };
+  }
+
+  return createLegacyDecisionWindowEntry(
+    payload.cardId ?? 'unknown-card',
+    payload.durationMs ?? 0,
+    openedAtTick,
+    payload.autoResolveChoice ?? '-1',
+  );
+}
+
+function normalizeDecisionWindowClosePayload(
+  payload:
+    | DecisionWindowExpiredEvent
+    | DecisionWindowResolvedEvent
+    | { windowId?: string; cardId?: string },
+): { windowId?: string; cardId?: string } {
+  return {
+    windowId: 'windowId' in payload ? payload.windowId : undefined,
+    cardId: 'cardId' in payload ? payload.cardId : undefined,
+  };
+}
+
+function normalizeHoldUsedPayload(
+  payload: HoldActionUsedEvent | { windowId?: string; holdsRemaining?: number; holdsRemainingInRun?: number; holdExpiresAtMs?: number },
+): { windowId: string | null; holdsRemaining: number; holdExpiresAtMs: number | null } {
+  return {
+    windowId: payload.windowId ?? null,
+    holdsRemaining: payload.holdsRemainingInRun ?? payload.holdsRemaining ?? 0,
+    holdExpiresAtMs: payload.holdExpiresAtMs ?? null,
+  };
+}
+
+function normalizeRunTimeoutPayload(
+  payload: RunTimeoutEvent | { ticksElapsed?: number; outcome?: 'TIMEOUT' },
+): { ticksElapsed: number; outcome: 'TIMEOUT' } {
+  return {
+    ticksElapsed: payload.ticksElapsed ?? 0,
+    outcome: 'TIMEOUT',
+  };
 }
 
 // =============================================================================
@@ -617,12 +768,14 @@ export const runLifecycleStoreHandlers = {
 
   onTickComplete(
     set: ZustandSet,
-    payload: { tickIndex: number; tickDurationMs: number; outcome: RunOutcome | null }
+    payload: { tickIndex?: number; tickNumber?: number; tickDurationMs: number; outcome: RunOutcome | null; timestamp?: number }
   ): void {
+    const normalized = normalizeTickCompletePayload(payload);
+
     set(state => {
-      state.run.lastTickIndex      = payload.tickIndex;
-      state.run.lastTickDurationMs = payload.tickDurationMs;
-      if (payload.outcome) state.run.outcome = payload.outcome;
+      state.run.lastTickIndex      = normalized.tickIndex;
+      state.run.lastTickDurationMs = normalized.tickDurationMs;
+      if (normalized.outcome) state.run.outcome = normalized.outcome;
     });
   },
 
@@ -646,12 +799,15 @@ export const timeStoreHandlers = {
 
   onTickTierChanged(
     set: ZustandSet,
-    payload: { from: TickTier; to: TickTier; transitionTicks: number }
+    payload: Partial<TierChangeEvent> & { transitionTicks?: number }
   ): void {
+    const normalized = normalizeTierChangePayload(payload);
+
     set(state => {
-      state.time.previousTier        = payload.from;
-      state.time.currentTier         = payload.to;
-      state.time.isTierTransitioning = payload.transitionTicks > 0;
+      state.time.previousTier        = normalized.from;
+      state.time.currentTier         = normalized.to;
+      state.time.isTierTransitioning = normalized.transitionTicks > 0;
+      state.time.tierChangedThisTick = true;
     });
   },
 
@@ -660,31 +816,91 @@ export const timeStoreHandlers = {
     payload: { tier: TickTier; durationTicks: number }
   ): void {
     set(state => {
-      state.time.previousTier = state.time.currentTier;
-      state.time.currentTier  = payload.tier;
+      state.time.previousTier        = state.time.currentTier;
+      state.time.currentTier         = payload.tier;
+      state.time.isTierTransitioning = false;
+      state.time.tierChangedThisTick = true;
+    });
+  },
+
+  onTickComplete(
+    set: ZustandSet,
+    payload: Partial<TickEvent> & { tickIndex?: number; outcome?: RunOutcome | null }
+  ): void {
+    const normalized = normalizeTickCompletePayload(payload);
+
+    set(state => {
+      state.time.ticksElapsed          = normalized.tickIndex;
+      state.time.currentTickDurationMs = normalized.tickDurationMs;
+      state.time.lastTickTimestamp     = normalized.timestamp ?? Date.now();
+      state.time.ticksRemaining        = Math.max(0, state.time.seasonTickBudget - normalized.tickIndex);
+      state.time.ticksUntilTimeout     = state.time.ticksRemaining;
+      state.time.seasonTimeoutImminent = state.time.ticksRemaining <= 5;
+      state.time.isTierTransitioning   = false;
+      if (normalized.outcome === 'TIMEOUT') {
+        state.time.isRunActive = false;
+      }
     });
   },
 
   onDecisionWindowOpened(
     set: ZustandSet,
-    payload: { cardId: string; durationMs: number; autoResolveChoice: string }
+    payload: DecisionWindowOpenedEvent | { window?: TimeDecisionWindow; cardId?: string; durationMs?: number; autoResolveChoice?: string }
   ): void {
     set(state => {
-      const entry: DecisionWindowEntry = {
-        cardId:       payload.cardId,
-        durationMs:   payload.durationMs,
-        openedAtTick: state.run.lastTickIndex,
-        autoResolve:  payload.autoResolveChoice,
-      };
-      state.time.activeDecisionWindows = [...state.time.activeDecisionWindows, entry];
+      const entry = normalizeDecisionWindowOpenedPayload(payload, state.run.lastTickIndex);
+
+      const existingIndex = state.time.activeDecisionWindows.findIndex(
+        w => w.windowId === entry.windowId || w.cardId === entry.cardId
+      );
+
+      if (existingIndex >= 0) {
+        state.time.activeDecisionWindows[existingIndex] = entry;
+      } else {
+        state.time.activeDecisionWindows = [...state.time.activeDecisionWindows, entry];
+      }
     });
   },
 
-  onDecisionWindowClosed(set: ZustandSet, cardId: string): void {
+  onDecisionWindowClosed(
+    set: ZustandSet,
+    payload: DecisionWindowExpiredEvent | DecisionWindowResolvedEvent | { windowId?: string; cardId?: string }
+  ): void {
+    const normalized = normalizeDecisionWindowClosePayload(payload);
+
     set(state => {
       state.time.activeDecisionWindows = state.time.activeDecisionWindows.filter(
-        w => w.cardId !== cardId
+        w => (normalized.windowId ? w.windowId !== normalized.windowId : true) &&
+             (normalized.cardId ? w.cardId !== normalized.cardId : true)
       );
+    });
+  },
+
+  onDecisionWindowTick(set: ZustandSet, windowId: string, remainingMs: number): void {
+    set(state => {
+      const window = state.time.activeDecisionWindows.find(w => w.windowId === windowId);
+      if (window) {
+        window.remainingMs = Math.max(0, remainingMs);
+        window.expiresAtMs = Date.now() + Math.max(0, remainingMs);
+      }
+    });
+  },
+
+  onHoldUsed(
+    set: ZustandSet,
+    payload: HoldActionUsedEvent | { windowId?: string; holdsRemaining?: number; holdsRemainingInRun?: number; holdExpiresAtMs?: number }
+  ): void {
+    const normalized = normalizeHoldUsedPayload(payload);
+
+    set(state => {
+      state.time.holdsRemaining = normalized.holdsRemaining;
+      if (normalized.windowId) {
+        const window = state.time.activeDecisionWindows.find(w => w.windowId === normalized.windowId);
+        if (window) {
+          window.isOnHold = true;
+          window.holdExpiresAtMs = normalized.holdExpiresAtMs;
+        }
+      }
     });
   },
 
@@ -695,6 +911,23 @@ export const timeStoreHandlers = {
     set(state => {
       state.time.seasonTimeoutImminent = true;
       state.time.ticksUntilTimeout     = payload.ticksRemaining;
+      state.time.ticksRemaining        = Math.min(state.time.ticksRemaining, payload.ticksRemaining);
+    });
+  },
+
+  onRunTimeout(
+    set: ZustandSet,
+    payload: RunTimeoutEvent | { ticksElapsed?: number; outcome?: 'TIMEOUT' }
+  ): void {
+    const normalized = normalizeRunTimeoutPayload(payload);
+
+    set(state => {
+      state.time.ticksElapsed          = normalized.ticksElapsed;
+      state.time.ticksRemaining        = 0;
+      state.time.ticksUntilTimeout     = 0;
+      state.time.seasonTimeoutImminent = true;
+      state.time.isRunActive           = false;
+      state.time.activeDecisionWindows = [];
     });
   },
 
@@ -704,12 +937,18 @@ export const timeStoreHandlers = {
         ...defaultTimeSlice.time,
         seasonTickBudget: tickBudget,
         ticksRemaining:   tickBudget,
+        ticksUntilTimeout: tickBudget,
+        isRunActive:      true,
       });
     });
   },
 
   onRunEnded(set: ZustandSet): void {
-    set(state => { state.time.activeDecisionWindows = []; });
+    set(state => {
+      state.time.activeDecisionWindows = [];
+      state.time.isRunActive           = false;
+      state.time.isTierTransitioning   = false;
+    });
   },
 };
 
@@ -1061,12 +1300,15 @@ export const sovereigntyStoreHandlers = {
 // =============================================================================
 
 export function wireTimeEngineHandlers(eventBus: EventBus, set: ZustandSet): void {
-  eventBus.on('TICK_TIER_CHANGED',        (e: any) => timeStoreHandlers.onTickTierChanged(set, e.payload));
-  eventBus.on('TICK_TIER_FORCED',         (e: any) => timeStoreHandlers.onTickTierForced(set, e.payload));
-  eventBus.on('DECISION_WINDOW_OPENED',   (e: any) => timeStoreHandlers.onDecisionWindowOpened(set, e.payload));
-  eventBus.on('DECISION_WINDOW_EXPIRED',  (e: any) => timeStoreHandlers.onDecisionWindowClosed(set, e.payload.cardId));
-  eventBus.on('DECISION_WINDOW_RESOLVED', (e: any) => timeStoreHandlers.onDecisionWindowClosed(set, e.payload.cardId));
-  eventBus.on('SEASON_TIMEOUT_IMMINENT',  (e: any) => timeStoreHandlers.onSeasonTimeoutImminent(set, e.payload));
+  eventBus.on('TICK_TIER_CHANGED',        (e: any) => timeStoreHandlers.onTickTierChanged(set, e.payload ?? e));
+  eventBus.on('TICK_TIER_FORCED',         (e: any) => timeStoreHandlers.onTickTierForced(set, e.payload ?? e));
+  eventBus.on('TICK_COMPLETE',            (e: any) => timeStoreHandlers.onTickComplete(set, e.payload ?? e));
+  eventBus.on('DECISION_WINDOW_OPENED',   (e: any) => timeStoreHandlers.onDecisionWindowOpened(set, e.payload ?? e));
+  eventBus.on('DECISION_WINDOW_EXPIRED',  (e: any) => timeStoreHandlers.onDecisionWindowClosed(set, e.payload ?? e));
+  eventBus.on('DECISION_WINDOW_RESOLVED', (e: any) => timeStoreHandlers.onDecisionWindowClosed(set, e.payload ?? e));
+  eventBus.on('HOLD_ACTION_USED',         (e: any) => timeStoreHandlers.onHoldUsed(set, e.payload ?? e));
+  eventBus.on('RUN_TIMEOUT',              (e: any) => timeStoreHandlers.onRunTimeout(set, e.payload ?? e));
+  eventBus.on('SEASON_TIMEOUT_IMMINENT',  (e: any) => timeStoreHandlers.onSeasonTimeoutImminent(set, e.payload ?? e));
 }
 
 export function wirePressureEngineHandlers(eventBus: EventBus, set: ZustandSet): void {
