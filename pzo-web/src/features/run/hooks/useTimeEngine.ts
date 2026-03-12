@@ -1,59 +1,106 @@
 /**
  * FILE: pzo-web/src/features/run/hooks/useTimeEngine.ts
- * React hook — read-only access to Time Engine state from engineStore.
- * Components import from here. Never import TimeEngine class directly.
+ * POINT ZERO ONE — ENGINE 1 TIME HOOK
  *
- * Reads from engineStore.time slice — populated by timeStoreHandlers
- * which are wired to EventBus in EngineOrchestrator.
+ * Read-only React hook for Time Engine state.
+ * This hook stays faithful to the live engineStore contract:
+ * - time.currentTier
+ * - time.ticksElapsed
+ * - time.seasonTickBudget
+ * - time.ticksRemaining
+ * - time.holdsRemaining
+ * - time.activeDecisionWindows
+ * - time.currentTickDurationMs
+ * - time.isTierTransitioning
+ * - time.seasonTimeoutImminent
+ * - time.ticksUntilTimeout
  *
- * Density6 LLC · Point Zero One · Engine 1 of 7 · Confidential
+ * It does NOT import the TimeEngine class directly.
+ * It reads from Zustand only.
  */
-import { useEngineStore, type EngineStoreState } from '../../../store/engineStore';
-import { TICK_TIER_CONFIGS } from '../../../engines/time/types';
 
-export function useTimeEngine() {
-  const currentTier    = useEngineStore((s: EngineStoreState) => s.time.currentTier);
-  const previousTier   = useEngineStore((s: EngineStoreState) => s.time.previousTier);
-  const ticksElapsed   = useEngineStore((s: EngineStoreState) => s.time.ticksElapsed);
-  const tickBudget     = useEngineStore((s: EngineStoreState) => s.time.seasonTickBudget);
-  const tickDurationMs = useEngineStore((s: EngineStoreState) => s.time.currentTickDurationMs);
-  const holdsLeft      = useEngineStore((s: EngineStoreState) => s.time.holdsRemaining);
-  const activeWindows  = useEngineStore((s: EngineStoreState) => s.time.activeDecisionWindows);
-  const isRunActive    = useEngineStore((s: EngineStoreState) => s.time.isRunActive);
-  const tierChangedThisTick = useEngineStore((s: EngineStoreState) => s.time.tierChangedThisTick);
+import { useMemo } from 'react';
+import { useEngineStore } from '../../../store/engineStore';
+import type { TickTier } from '../../../engines/zero/types';
 
-  const config = TICK_TIER_CONFIGS[currentTier];
+export interface UseTimeEngineResult {
+  currentTier: TickTier;
+  ticksElapsed: number;
+  tickBudget: number;
+  ticksRemaining: number;
+  tickProgressPct: number;
+  holdsLeft: number;
+  activeWindows: unknown[];
+  activeDecisionWindows: unknown[];
+  hasActiveDecision: boolean;
+  activeDecisionCount: number;
+  tickDurationMs: number;
+  secondsPerTick: number;
+  isTierTransitioning: boolean;
+  seasonTimeoutImminent: boolean;
+  ticksUntilTimeout: number;
+}
 
-  return {
-    // ── Tier ──────────────────────────────────────────────────────
-    currentTier,                                  // TickTier enum value e.g. "T0"–"T4"
-    previousTier,                                 // TickTier | null — last tier before change
-    tierChangedThisTick,                          // true if tier changed during latest tick
-    visualBorderClass: config.visualBorderClass,  // CSS class for TickPressureBorder
-    screenShake: config.screenShake,              // true only at T4 COLLAPSE_IMMINENT
-    audioSignal: config.audioSignal,              // audio cue key or null
+/**
+ * Master read-only hook for Engine 1 state.
+ * Components should use this instead of reading the store ad hoc.
+ */
+export function useTimeEngine(): UseTimeEngineResult {
+  const currentTier = useEngineStore((s) => s.time.currentTier);
+  const ticksElapsed = useEngineStore((s) => s.time.ticksElapsed);
+  const tickBudget = useEngineStore((s) => s.time.seasonTickBudget);
+  const ticksRemainingFromStore = useEngineStore((s) => s.time.ticksRemaining);
+  const holdsLeft = useEngineStore((s) => s.time.holdsRemaining);
+  const activeWindows = useEngineStore((s) => s.time.activeDecisionWindows);
+  const tickDurationMs = useEngineStore((s) => s.time.currentTickDurationMs);
+  const isTierTransitioning = useEngineStore((s) => s.time.isTierTransitioning);
+  const seasonTimeoutImminent = useEngineStore((s) => s.time.seasonTimeoutImminent);
+  const ticksUntilTimeout = useEngineStore((s) => s.time.ticksUntilTimeout);
 
-    // ── Tick progress ──────────────────────────────────────────────
-    ticksElapsed,                                           // ticks completed this run
-    ticksRemaining: Math.max(0, tickBudget - ticksElapsed), // ticks left before TIMEOUT
-    seasonTickBudget: tickBudget,                           // total tick budget for run
-    tickProgressPct: Math.min(1, ticksElapsed / tickBudget),// 0.0 → 1.0
+  return useMemo<UseTimeEngineResult>(() => {
+    const safeTier = (currentTier ?? 'T1') as TickTier;
+    const safeTickBudget = Number.isFinite(tickBudget) && tickBudget > 0 ? tickBudget : 0;
+    const derivedTicksRemaining =
+      safeTickBudget > 0 ? Math.max(0, safeTickBudget - ticksElapsed) : 0;
 
-    // ── Timing ────────────────────────────────────────────────────
-    tickDurationMs,                                   // current ms between ticks
-    secondsPerTick: Math.round(tickDurationMs / 1000),// for countdown display
-    decisionWindowMs: config.decisionWindowMs,        // window duration at current tier
+    const safeTicksRemaining =
+      Number.isFinite(ticksRemainingFromStore) && ticksRemainingFromStore >= 0
+        ? ticksRemainingFromStore
+        : derivedTicksRemaining;
 
-    // ── Decision windows ──────────────────────────────────────────
-    activeWindows,                           // DecisionWindow[] — all open windows
-    hasActiveDecision: activeWindows.length > 0,
-    activeWindowCount: activeWindows.length,
+    const safeTickDurationMs =
+      Number.isFinite(tickDurationMs) && tickDurationMs > 0 ? tickDurationMs : 3000;
 
-    // ── Hold action ───────────────────────────────────────────────
-    holdsLeft,          // 0 or 1 — one per run, never restored
-    hasHoldAvailable: holdsLeft > 0,
+    const progress =
+      safeTickBudget > 0 ? Math.min(1, Math.max(0, ticksElapsed / safeTickBudget)) : 0;
 
-    // ── Run state ─────────────────────────────────────────────────
-    isRunActive,
-  } as const;
+    return {
+      currentTier: safeTier,
+      ticksElapsed,
+      tickBudget: safeTickBudget,
+      ticksRemaining: safeTicksRemaining,
+      tickProgressPct: progress,
+      holdsLeft,
+      activeWindows,
+      activeDecisionWindows: activeWindows,
+      hasActiveDecision: activeWindows.length > 0,
+      activeDecisionCount: activeWindows.length,
+      tickDurationMs: safeTickDurationMs,
+      secondsPerTick: Math.max(1, Math.round(safeTickDurationMs / 1000)),
+      isTierTransitioning,
+      seasonTimeoutImminent,
+      ticksUntilTimeout,
+    };
+  }, [
+    activeWindows,
+    currentTier,
+    holdsLeft,
+    isTierTransitioning,
+    seasonTimeoutImminent,
+    tickBudget,
+    tickDurationMs,
+    ticksElapsed,
+    ticksRemainingFromStore,
+    ticksUntilTimeout,
+  ]);
 }
