@@ -1,4 +1,4 @@
-//backend/src/game/engine/core/__tests__/EventBus.spec.ts
+// backend/src/game/engine/core/__tests__/EventBus.spec.ts
 
 import { describe, expect, it, vi } from 'vitest';
 
@@ -49,20 +49,39 @@ describe('EventBus', () => {
     });
 
     expect(startedListener).toHaveBeenCalledTimes(1);
-    expect(startedListener).toHaveBeenCalledWith({
-      runId: 'run_001',
-      seed: 'seed_001',
-    });
+    expect(startedListener).toHaveBeenCalledWith({ runId: 'run_001', seed: 'seed_001' });
 
     expect(tickListener).toHaveBeenCalledTimes(1);
     expect(tickListener).toHaveBeenCalledWith({ tick: 1 });
 
     expect(bus.peek('run.started')).toEqual([{ runId: 'run_001', seed: 'seed_001' }]);
     expect(bus.peek('tick.started')).toEqual([{ tick: 1 }]);
+    expect(bus.peekEntries('run.started')).toEqual([runEnvelope]);
+    expect(bus.peekEntries('tick.started')).toEqual([tickEnvelope]);
+
     expect(bus.queuedCount()).toBe(2);
     expect(bus.historyCount()).toBe(2);
-
     expect(bus.getHistory()).toEqual([runEnvelope, tickEnvelope]);
+  });
+
+  it('freezes copied tags in emitted envelopes so external mutation cannot corrupt history', () => {
+    const bus = new EventBus<TestEventMap>();
+    const tags = ['phase:bootstrap', 'scope:run'];
+
+    const envelope = bus.emit(
+      'run.started',
+      { runId: 'run_immutable_tags', seed: 'seed_immutable_tags' },
+      { emittedAtTick: 0, tags },
+    );
+
+    tags.push('mutated-outside');
+
+    expect(envelope.tags).toEqual(['phase:bootstrap', 'scope:run']);
+    expect(Object.isFrozen(envelope.tags)).toBe(true);
+
+    const historyEntry = bus.getHistory()[0]!;
+    expect(historyEntry.tags).toEqual(['phase:bootstrap', 'scope:run']);
+    expect(Object.isFrozen(historyEntry.tags)).toBe(true);
   });
 
   it('supports once() listeners that unsubscribe after the first matching event', () => {
@@ -106,9 +125,11 @@ describe('EventBus', () => {
       'tick.started',
       'tick.completed',
     ]);
+
     expect(bus.queuedCount()).toBe(0);
     expect(bus.historyCount()).toBe(2);
     expect(bus.getHistory()).toHaveLength(2);
+    expect(bus.flush()).toEqual([]);
   });
 
   it('returns the last matching event through last()', () => {
