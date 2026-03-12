@@ -1,19 +1,20 @@
-/*
+/* ============================================================================
+ * FILE: backend/src/game/engine/time/DecisionTimer.ts
  * POINT ZERO ONE — BACKEND ENGINE TIME
- * /backend/src/game/engine/time/DecisionTimer.ts
  *
  * Doctrine:
  * - backend owns active decision-window expiry truth
  * - snapshot remains the persisted surface, but this class hardens runtime behavior
  * - hold freezes extend deadlines immediately so timeout math stays deterministic
  * - local runtime state must be fully resettable for replay and hot test isolation
- */
+ * - no wall-clock polling; expiry is evaluated only during authoritative time steps
+ * ========================================================================== */
 
 import type { DecisionTimerSyncResult } from './types';
 import { DEFAULT_HOLD_DURATION_MS } from './types';
 
 interface MutableDecisionWindowState {
-  windowId: string;
+  readonly windowId: string;
   deadlineMs: number;
   frozenUntilMs: number | null;
 }
@@ -26,9 +27,13 @@ export class DecisionTimer {
   }
 
   /**
-   * Rehydrates runtime window state from the snapshot surface at the start
-   * of each time step. This lets the engine remain deterministic while still
-   * supporting external mutation paths that write into snapshot timers.
+   * Rehydrates runtime window state from the persisted snapshot surface
+   * at the start of the backend time step.
+   *
+   * Important:
+   * - if a window already exists locally, its freeze timing is preserved
+   * - if a window arrives from snapshot already frozen but without exact
+   *   thaw timing, we reconstruct a bounded best-effort local freeze window
    */
   public syncFromSnapshot(
     activeDecisionWindows: Readonly<Record<string, number>>,
@@ -37,17 +42,21 @@ export class DecisionTimer {
   ): DecisionTimerSyncResult {
     const openedWindowIds: string[] = [];
     const removedWindowIds: string[] = [];
-    const frozenSet = new Set(frozenWindowIds);
-    const snapshotIds = new Set(Object.keys(activeDecisionWindows));
 
-    for (const [windowId, deadlineMs] of Object.entries(activeDecisionWindows)) {
+    const frozenSet = new Set<string>(frozenWindowIds);
+    const snapshotIds = new Set<string>(Object.keys(activeDecisionWindows));
+
+    for (const [windowId, rawDeadlineMs] of Object.entries(activeDecisionWindows)) {
+      const deadlineMs = Math.trunc(rawDeadlineMs);
       const existing = this.windows.get(windowId);
 
       if (existing === undefined) {
         this.windows.set(windowId, {
           windowId,
           deadlineMs,
-          frozenUntilMs: frozenSet.has(windowId) ? nowMs : null,
+          frozenUntilMs: frozenSet.has(windowId)
+            ? Math.min(deadlineMs, nowMs + DEFAULT_HOLD_DURATION_MS)
+            : null,
         });
         openedWindowIds.push(windowId);
         continue;
@@ -56,7 +65,12 @@ export class DecisionTimer {
       existing.deadlineMs = deadlineMs;
 
       if (frozenSet.has(windowId)) {
-        existing.frozenUntilMs ??= nowMs;
+        if (existing.frozenUntilMs === null || existing.frozenUntilMs <= nowMs) {
+          existing.frozenUntilMs = Math.min(
+            deadlineMs,
+            nowMs + DEFAULT_HOLD_DURATION_MS,
+          );
+        }
       } else if (existing.frozenUntilMs !== null && existing.frozenUntilMs <= nowMs) {
         existing.frozenUntilMs = null;
       }
@@ -78,7 +92,7 @@ export class DecisionTimer {
   public open(windowId: string, deadlineMs: number): void {
     this.windows.set(windowId, {
       windowId,
-      deadlineMs,
+      deadlineMs: Math.trunc(deadlineMs),
       frozenUntilMs: null,
     });
   }
@@ -95,8 +109,8 @@ export class DecisionTimer {
    * Freezing is implemented by immediately extending the deadline and
    * recording a temporary frozen-until marker.
    *
-   * This keeps post-freeze expiry math deterministic and avoids "expire
-   * instantly on thaw" behavior.
+   * This keeps post-freeze expiry math deterministic and avoids
+   * "expire instantly on thaw" behavior.
    */
   public freeze(
     windowId: string,
@@ -109,12 +123,17 @@ export class DecisionTimer {
       return false;
     }
 
+    if (window.deadlineMs <= nowMs) {
+      return false;
+    }
+
     if (window.frozenUntilMs !== null && window.frozenUntilMs > nowMs) {
       return false;
     }
 
-    window.deadlineMs += holdDurationMs;
-    window.frozenUntilMs = nowMs + holdDurationMs;
+    window.deadlineMs += Math.trunc(holdDurationMs);
+    window.frozenUntilMs = nowMs + Math.trunc(holdDurationMs);
+
     return true;
   }
 
@@ -129,6 +148,10 @@ export class DecisionTimer {
     return true;
   }
 
+  /**
+   * Closes all windows that have expired by the provided authoritative time.
+   * `nowMs` should be the effective end-of-step time, not the pre-step time.
+   */
   public closeExpired(nowMs: number): string[] {
     const expired: string[] = [];
 
@@ -137,6 +160,7 @@ export class DecisionTimer {
         if (window.frozenUntilMs > nowMs) {
           continue;
         }
+
         window.frozenUntilMs = null;
       }
 
@@ -162,11 +186,24 @@ export class DecisionTimer {
 
   public frozenIds(nowMs: number): readonly string[] {
     return [...this.windows.values()]
-      .filter((window) => window.frozenUntilMs !== null && window.frozenUntilMs > nowMs)
+      .filter(
+        (window) =>
+          window.frozenUntilMs !== null && window.frozenUntilMs > nowMs,
+      )
       .map((window) => window.windowId);
   }
 
   public activeCount(): number {
     return this.windows.size;
+  }
+
+  public has(windowId: string): boolean {
+    return this.windows.has(windowId);
+  }
+
+  public getWindow(
+    windowId: string,
+  ): Readonly<MutableDecisionWindowState> | null {
+    return this.windows.get(windowId) ?? null;
   }
 }
