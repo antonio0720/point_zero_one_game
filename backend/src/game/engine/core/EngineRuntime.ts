@@ -9,6 +9,7 @@
  * - run state, tick checksums, and proof hashes are backend-owned
  * - snapshots are immutable at the runtime boundary
  * - mutations happen only against an internal writable draft
+ * - STEP_02_TIME owns authoritative time advancement; core only orchestrates
  */
 
 import type {
@@ -25,6 +26,8 @@ import type {
   TickContext,
   EngineId,
   EngineTickResult,
+  EngineSignal,
+  SimulationEngine,
 } from './EngineContracts';
 import type { RunFactoryInput } from './RunStateFactory';
 
@@ -35,12 +38,23 @@ import {
   deepFreeze,
   checksumSnapshot,
 } from './Deterministic';
+import {
+  normalizeEngineTickResult,
+} from './EngineContracts';
 import { EngineRegistry } from './EngineRegistry';
 import { EventBus } from './EventBus';
 import { createInitialRunState } from './RunStateFactory';
 import { TICK_SEQUENCE } from './TickSequence';
 import { DecisionWindowService } from './DecisionWindowService';
-import { CardOverlayResolver, type ResourceType } from './CardOverlayResolver';
+import {
+  CardOverlayResolver,
+  type ResourceType,
+} from './CardOverlayResolver';
+import {
+  DEFAULT_PHASE_TRANSITION_WINDOWS,
+  TIER_DURATIONS_MS,
+  resolvePhaseFromElapsedMs,
+} from '../time/types';
 
 export interface RuntimeEventEnvelope<
   K extends keyof EngineEventMap = keyof EngineEventMap,
@@ -86,14 +100,6 @@ const STEP_TO_ENGINE: Partial<Record<TickStep, EngineId>> = {
   STEP_10_SOVEREIGNTY_SNAPSHOT: 'sovereignty',
 };
 
-const PRESSURE_TICK_DURATION_MS = {
-  T0: 2_000,
-  T1: 4_000,
-  T2: 6_000,
-  T3: 8_500,
-  T4: 12_000,
-} as const;
-
 type Primitive =
   | string
   | number
@@ -137,6 +143,16 @@ function roundThousandths(value: number): number {
   return Math.round(value * 1000) / 1000;
 }
 
+function resolveSafeTickDurationMs(snapshot: RunStateSnapshot): number {
+  const configured = Number(snapshot.timers.currentTickDurationMs);
+
+  if (Number.isFinite(configured) && configured > 0) {
+    return Math.trunc(configured);
+  }
+
+  return TIER_DURATIONS_MS[snapshot.pressure.tier];
+}
+
 function recomputeNetWorth(snapshot: RunStateSnapshot): number {
   const shieldValue = snapshot.shield.layers.reduce(
     (sum, layer) => sum + layer.current,
@@ -161,23 +177,19 @@ function weakestLayerId(
     .sort((a, b) => a.current - b.current)[0]?.layerId ?? 'L1';
 }
 
-function currentPhase(snapshot: RunStateSnapshot): RunStateSnapshot['phase'] {
-  const totalBudgetMs =
-    snapshot.timers.seasonBudgetMs + snapshot.timers.extensionBudgetMs;
-  const third = totalBudgetMs / 3;
-
-  if (snapshot.timers.elapsedMs < third) {
-    return 'FOUNDATION';
-  }
-
-  if (snapshot.timers.elapsedMs < third * 2) {
-    return 'ESCALATION';
-  }
-
-  return 'SOVEREIGNTY';
-}
-
 function computeTickChecksum(snapshot: RunStateSnapshot): string {
+  const windows = Object.values(snapshot.timers.activeDecisionWindows ?? {})
+    .slice()
+    .sort((a, b) => a.id.localeCompare(b.id))
+    .map((window) => ({
+      id: window.id,
+      timingClass: window.timingClass,
+      closesAtTick: window.closesAtTick,
+      closesAtMs: window.closesAtMs,
+      consumed: window.consumed,
+      frozen: window.frozen,
+    }));
+
   return checksumSnapshot({
     runId: snapshot.runId,
     tick: snapshot.tick,
@@ -228,7 +240,7 @@ function computeTickChecksum(snapshot: RunStateSnapshot): string {
       elapsedMs: snapshot.timers.elapsedMs,
       currentTickDurationMs: snapshot.timers.currentTickDurationMs,
       holdCharges: snapshot.timers.holdCharges,
-      windows: Object.keys(snapshot.timers.activeDecisionWindows ?? {}).sort(),
+      windows,
     },
   });
 }
@@ -312,13 +324,13 @@ function estimateSovereigntyScore(snapshot: RunStateSnapshot): number {
   const acceptedDecisions = decisions.filter((decision) => decision.accepted);
   const avgDecisionLatency =
     acceptedDecisions.length === 0
-      ? snapshot.timers.currentTickDurationMs
+      ? resolveSafeTickDurationMs(snapshot)
       : acceptedDecisions.reduce((sum, decision) => sum + decision.latencyMs, 0) /
         acceptedDecisions.length;
 
   const decisionSpeedScore = Math.max(
     0,
-    1 - avgDecisionLatency / Math.max(1, snapshot.timers.currentTickDurationMs),
+    1 - avgDecisionLatency / Math.max(1, resolveSafeTickDurationMs(snapshot)),
   );
 
   const blocked = snapshot.shield.blockedThisRun;
@@ -381,6 +393,27 @@ function estimateSovereigntyScore(snapshot: RunStateSnapshot): number {
   }
 
   return roundThousandths(score);
+}
+
+function mergeEngineSignals(
+  snapshot: MutableRunStateSnapshot,
+  signals: readonly EngineSignal[] | undefined,
+): void {
+  if (!signals || signals.length === 0) {
+    return;
+  }
+
+  const warnings = new Set<string>(snapshot.telemetry.warnings);
+
+  for (const signal of signals) {
+    if (signal.severity === 'WARN' || signal.severity === 'ERROR') {
+      warnings.add(
+        `[${signal.engineId}] ${signal.code}: ${signal.message}`,
+      );
+    }
+  }
+
+  snapshot.telemetry.warnings = [...warnings];
 }
 
 export class EngineRuntime {
@@ -463,6 +496,7 @@ export class EngineRuntime {
 
     const next = toMutableSnapshot(snapshot);
     const mutableInstance = cloneJson(instance) as MutableDeep<CardInstance>;
+
     next.cards.hand.push(mutableInstance);
     next.cards.drawHistory.push(mutableInstance.instanceId);
 
@@ -609,30 +643,27 @@ export class EngineRuntime {
 
   public tick(): RuntimeTickResult {
     const base = this.requireSnapshot();
-    let next = toMutableSnapshot(base);
+
+    if (base.outcome !== null) {
+      return {
+        snapshot: base,
+        checksum: base.telemetry.lastTickChecksum ?? computeTickChecksum(base),
+        events: [],
+      };
+    }
 
     this.emitRunStartedIfNeeded();
 
+    let next = toMutableSnapshot(base);
     const previousPhase = next.phase;
     const previousTier = next.pressure.tier;
-    const previousTickDuration = next.timers.currentTickDurationMs;
 
-    next.tick += 1;
-    next.timers.elapsedMs += previousTickDuration;
-    this.clock.advance(previousTickDuration);
-
-    const nowMs = this.clock.now();
-
-    this.bus.emit('tick.started', {
-      runId: next.runId,
-      tick: next.tick,
-      phase: next.phase,
-    });
+    const prepareNowMs = this.clock.now();
 
     next = toMutableSnapshot(
       this.windows.reconcile(toFrozenSnapshot(next), {
         step: 'STEP_01_PREPARE',
-        nowMs,
+        nowMs: prepareNowMs,
         previousPhase,
         nextPhase: next.phase,
         previousTier,
@@ -662,6 +693,7 @@ export class EngineRuntime {
 
       if (step === 'STEP_10_SOVEREIGNTY_SNAPSHOT') {
         next = this.applySovereigntySnapshot(next);
+        continue;
       }
 
       if (step === 'STEP_11_OUTCOME_GATE') {
@@ -669,30 +701,56 @@ export class EngineRuntime {
         continue;
       }
 
-      if (step === 'STEP_12_EVENT_SEAL') {
+      if (step === 'STEP_12_EVENT_SEAL' || step === 'STEP_13_FLUSH') {
         continue;
       }
 
-      if (step === 'STEP_13_FLUSH') {
+      const stepNowMs = this.clock.now();
+
+      if (step === 'STEP_02_TIME') {
+        const previousTick = next.tick;
+        const previousElapsedMs = next.timers.elapsedMs;
+        const fallbackDurationMs = resolveSafeTickDurationMs(next);
+
+        next = this.executeEngineStep(next, step, stepNowMs);
+        next = this.ensureTimeStepAdvanced(
+          next,
+          previousTick,
+          previousElapsedMs,
+          fallbackDurationMs,
+        );
+
+        const advancedMs = Math.max(
+          0,
+          next.timers.elapsedMs - previousElapsedMs,
+        );
+
+        if (advancedMs > 0) {
+          this.clock.advance(advancedMs);
+        }
+
         continue;
       }
 
-      next = this.executeEngineStep(next, step, nowMs);
+      next = this.executeEngineStep(next, step, stepNowMs);
     }
 
-    const phaseAfterTick = currentPhase(next);
-    if (phaseAfterTick !== next.phase) {
-      next.phase = phaseAfterTick;
+    const normalizedPhase = resolvePhaseFromElapsedMs(next.timers.elapsedMs);
+
+    if (normalizedPhase !== next.phase) {
+      next.phase = normalizedPhase;
     }
 
-    const pressureTierAfterTick = next.pressure.tier;
-    next.timers.currentTickDurationMs =
-      PRESSURE_TICK_DURATION_MS[pressureTierAfterTick];
+    next.timers.currentTickDurationMs = resolveSafeTickDurationMs(next);
+    next.timers.nextTickAtMs =
+      next.outcome === null
+        ? this.clock.now() + next.timers.currentTickDurationMs
+        : null;
 
     next = toMutableSnapshot(
       this.windows.reconcile(toFrozenSnapshot(next), {
         step: 'STEP_08_MODE_POST',
-        nowMs,
+        nowMs: this.clock.now(),
         previousPhase,
         nextPhase: next.phase,
         previousTier,
@@ -700,11 +758,13 @@ export class EngineRuntime {
       }),
     );
 
-    const checksum = computeTickChecksum(next);
-    next.sovereignty.tickChecksums.push(checksum);
-    next.telemetry.lastTickChecksum = checksum;
     next.economy.netWorth = recomputeNetWorth(next);
     next.shield.weakestLayerId = weakestLayerId(next);
+
+    const checksum = computeTickChecksum(next);
+
+    next.sovereignty.tickChecksums.push(checksum);
+    next.telemetry.lastTickChecksum = checksum;
 
     this.bus.emit('tick.completed', {
       runId: next.runId,
@@ -730,12 +790,19 @@ export class EngineRuntime {
       });
     }
 
-    this.snapshot = toFrozenSnapshot(next);
+    let sealedSnapshot = toFrozenSnapshot(next);
+    const events = this.flushEvents();
+
+    const sealedMutable = toMutableSnapshot(sealedSnapshot);
+    sealedMutable.telemetry.emittedEventCount = events.length;
+    sealedSnapshot = toFrozenSnapshot(sealedMutable);
+
+    this.snapshot = sealedSnapshot;
 
     return {
-      snapshot: this.requireSnapshot(),
+      snapshot: sealedSnapshot,
       checksum,
-      events: this.flushEvents(),
+      events,
     };
   }
 
@@ -786,6 +853,7 @@ export class EngineRuntime {
       }
 
       const updatedDecay = card.decayTicksRemaining - 1;
+
       if (updatedDecay < 0) {
         next.cards.discard.push(card.instanceId);
         return [];
@@ -829,13 +897,14 @@ export class EngineRuntime {
     snapshot: MutableRunStateSnapshot,
   ): MutableRunStateSnapshot {
     const next = toMutableSnapshot(snapshot);
-    const newPhase = currentPhase(next);
+    const newPhase = resolvePhaseFromElapsedMs(next.timers.elapsedMs);
 
     if (newPhase !== next.phase) {
       next.phase = newPhase;
 
       if (next.mode === 'solo') {
-        next.modeState.phaseBoundaryWindowsRemaining = 5;
+        next.modeState.phaseBoundaryWindowsRemaining =
+          DEFAULT_PHASE_TRANSITION_WINDOWS;
       }
     }
 
@@ -887,34 +956,102 @@ export class EngineRuntime {
     snapshot: MutableRunStateSnapshot,
   ): MutableRunStateSnapshot {
     const next = toMutableSnapshot(snapshot);
-    next.outcome = determineOutcome(next);
+    const outcome = determineOutcome(next);
 
-    if (next.outcome === 'BANKRUPT') {
+    next.outcome = outcome;
+
+    if (outcome === 'BANKRUPT') {
       next.telemetry.outcomeReason = 'economy.cash_below_zero';
-    } else if (next.outcome === 'TIMEOUT') {
+      next.telemetry.outcomeReasonCode = 'NET_WORTH_COLLAPSE';
+    } else if (outcome === 'TIMEOUT') {
       next.telemetry.outcomeReason = 'timer.expired';
-    } else if (next.outcome === 'FREEDOM') {
+      next.telemetry.outcomeReasonCode = 'SEASON_BUDGET_EXHAUSTED';
+    } else if (outcome === 'FREEDOM') {
       next.telemetry.outcomeReason = 'economy.freedom_target_reached';
+      next.telemetry.outcomeReasonCode = 'TARGET_REACHED';
+    } else {
+      next.telemetry.outcomeReason = null;
+      next.telemetry.outcomeReasonCode = null;
     }
 
     return next;
   }
 
-  private isEngineTickResult(
-    value: RunStateSnapshot | EngineTickResult,
-  ): value is EngineTickResult {
-    return (
-      value !== null &&
-      typeof value === 'object' &&
-      'snapshot' in value &&
-      value.snapshot !== undefined
-    );
+  private ensureTimeStepAdvanced(
+    snapshot: MutableRunStateSnapshot,
+    previousTick: number,
+    previousElapsedMs: number,
+    fallbackDurationMs: number,
+  ): MutableRunStateSnapshot {
+    const next = toMutableSnapshot(snapshot);
+
+    if (next.tick <= previousTick) {
+      next.tick = previousTick + 1;
+    }
+
+    if (next.timers.elapsedMs <= previousElapsedMs) {
+      next.timers.elapsedMs = previousElapsedMs + fallbackDurationMs;
+    }
+
+    if (
+      !Number.isFinite(next.timers.currentTickDurationMs) ||
+      next.timers.currentTickDurationMs <= 0
+    ) {
+      next.timers.currentTickDurationMs = fallbackDurationMs;
+    }
+
+    return next;
   }
 
-  private normalizeEngineOutput(
-    value: RunStateSnapshot | EngineTickResult,
-  ): RunStateSnapshot {
-    return this.isEngineTickResult(value) ? value.snapshot : value;
+  private executeEngineStep(
+    snapshot: MutableRunStateSnapshot,
+    step: TickStep,
+    nowMs: number,
+  ): MutableRunStateSnapshot {
+    const engineId = STEP_TO_ENGINE[step];
+
+    if (!engineId) {
+      return snapshot;
+    }
+
+    const engine = this.tryGetEngine(engineId);
+
+    if (!engine) {
+      return snapshot;
+    }
+
+    const frozenInput = toFrozenSnapshot(snapshot);
+
+    const context: TickContext = {
+      step,
+      nowMs,
+      clock: this.clock,
+      bus: this.bus as TickContext['bus'],
+      trace: this.createTickTrace(frozenInput, step, nowMs),
+    };
+
+    if (engine.canRun && engine.canRun(frozenInput, context) === false) {
+      return snapshot;
+    }
+
+    const result = normalizeEngineTickResult(
+      engine.engineId,
+      frozenInput.tick,
+      engine.tick(frozenInput, context),
+    );
+
+    const next = toMutableSnapshot(result.snapshot);
+    mergeEngineSignals(next, result.signals);
+
+    return next;
+  }
+
+  private tryGetEngine(engineId: EngineId): SimulationEngine | null {
+    try {
+      return this.registry.get(engineId);
+    } catch {
+      return null;
+    }
   }
 
   private createTickTrace(
@@ -936,45 +1073,6 @@ export class EngineRuntime {
         nowMs,
       ),
     };
-  }
-
-  private executeEngineStep(
-    snapshot: MutableRunStateSnapshot,
-    step: TickStep,
-    nowMs: number,
-  ): MutableRunStateSnapshot {
-    const engineId = STEP_TO_ENGINE[step];
-    if (!engineId) {
-      return snapshot;
-    }
-
-    const engine = this.tryGetEngine(engineId);
-    if (!engine) {
-      return snapshot;
-    }
-
-    const frozenInput = toFrozenSnapshot(snapshot);
-
-    const context: TickContext = {
-      step,
-      nowMs,
-      clock: this.clock,
-      bus: this.bus as TickContext['bus'],
-      trace: this.createTickTrace(frozenInput, step, nowMs),
-    };
-
-    const output = engine.tick(frozenInput, context);
-    const normalizedSnapshot = this.normalizeEngineOutput(output);
-
-    return toMutableSnapshot(normalizedSnapshot);
-  }
-
-  private tryGetEngine(engineId: EngineId) {
-    try {
-      return this.registry.get(engineId);
-    } catch {
-      return null;
-    }
   }
 
   private emitRunStartedIfNeeded(): void {

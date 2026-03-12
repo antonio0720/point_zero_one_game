@@ -5,9 +5,10 @@
  * Doctrine:
  * - backend snapshots are immutable read models, not writable live state
  * - semantic pressure and tick cadence must both be preserved
- * - mode truth remains backend-owned, but snapshots should still carry
- *   enough shape to align with frontend engine doctrine
+ * - mode truth remains backend-owned, but snapshots still carry enough
+ *   shape to align with frontend engine doctrine
  * - every field here is serialization-safe and deterministic-hash friendly
+ * - additive expansion is preferred over breaking renames
  */
 
 import type {
@@ -25,6 +26,7 @@ import type {
   ShieldLayerId,
   ShieldLayerLabel,
   ThreatEnvelope,
+  TimingClass,
 } from './GamePrimitives';
 
 export type ModePresentationCode =
@@ -48,6 +50,31 @@ export type OutcomeReasonCode =
   | 'ENGINE_ABORT'
   | 'INTEGRITY_QUARANTINE'
   | 'UNKNOWN';
+
+export type DecisionWindowMetadataValue =
+  | string
+  | number
+  | boolean
+  | null;
+
+export interface RuntimeDecisionWindowSnapshot {
+  readonly id: string;
+  readonly timingClass: TimingClass;
+  readonly label: string;
+  readonly source: string;
+  readonly mode: ModeCode;
+  readonly openedAtTick: number;
+  readonly openedAtMs: number;
+  readonly closesAtTick: number | null;
+  readonly closesAtMs: number | null;
+  readonly exclusive: boolean;
+  readonly frozen: boolean;
+  readonly consumed: boolean;
+  readonly actorId: string | null;
+  readonly targetActorId: string | null;
+  readonly cardInstanceId: string | null;
+  readonly metadata: Readonly<Record<string, DecisionWindowMetadataValue>>;
+}
 
 export interface ShieldLayerState {
   readonly layerId: ShieldLayerId;
@@ -81,13 +108,13 @@ export interface PressureState {
   readonly score: number;
 
   /**
-   * Cadence tier retained for backward compatibility with current
-   * backend GamePrimitives.ts (`T0`..`T4`).
+   * Backend cadence tier retained for engine/runtime compatibility.
+   * Canonical values remain T0..T4.
    */
   readonly tier: PressureTier;
 
   /**
-   * Semantic pressure band aligned with the richer frontend doctrine.
+   * Rich semantic pressure band aligned with the frontend doctrine.
    */
   readonly band: PressureBand;
 
@@ -206,9 +233,32 @@ export interface TimerState {
   readonly currentTickDurationMs: number;
   readonly nextTickAtMs: number | null;
   readonly holdCharges: number;
-  readonly activeDecisionWindows: Readonly<Record<string, number>>;
+
+  /**
+   * Canonical runtime-owned timing windows.
+   * This is intentionally the structured decision-window store, not a
+   * numeric deadline map.
+   */
+  readonly activeDecisionWindows: Readonly<
+    Record<string, RuntimeDecisionWindowSnapshot>
+  >;
+
+  /**
+   * Convenience projection used by runtime/UI/debug consumers that need
+   * frozen-window IDs without re-scanning the full store.
+   */
   readonly frozenWindowIds: readonly string[];
+
+  /**
+   * Optional additive fields for richer cadence diagnostics. These are
+   * intentionally optional so older factories remain source-compatible.
+   */
+  readonly lastTierChangeTick?: number | null;
+  readonly tierInterpolationRemainingTicks?: number;
+  readonly forcedTierOverride?: PressureTier | null;
 }
+
+export type TimersState = TimerState;
 
 export interface DecisionRecord {
   readonly tick: number;
