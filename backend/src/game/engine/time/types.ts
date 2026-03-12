@@ -1,238 +1,252 @@
-/*
- * POINT ZERO ONE — BACKEND ENGINE TIME
- * /backend/src/game/engine/time/types.ts
- *
- * Doctrine:
- * - backend time is authoritative for cadence, elapsed budget, and decision expiry
- * - cadence tiers preserve frontend semantic intent while remaining backend-safe
- * - timing math must be deterministic, serializable, and STEP_02_TIME-owned
- * - helpers here are pure, side-effect free, and safe for runtime + tests
- * - additive growth is preferred over breaking renames
+/**
+ * FILE: pzo-web/src/engines/time/types.ts
+ * All types for the Time Engine. No runtime logic.
  */
 
-import type { PressureTier, RunPhase } from '../core/GamePrimitives';
-
-export type TickTier = PressureTier;
-
-export interface TickTierTiming {
-  readonly tier: TickTier;
-  readonly minDurationMs: number;
-  readonly maxDurationMs: number;
-  readonly defaultDurationMs: number;
-  readonly decisionWindowMs: number;
-  readonly visualBorderClass: string;
-  readonly audioSignal: string | null;
-  readonly screenShake: boolean;
+/** Five adaptive tick rate tiers. T0 = winning, T4 = collapsing. */
+export enum TickTier {
+  SOVEREIGN = 'T0', // net worth > 3× freedom threshold, zero active threats
+  STABLE = 'T1', // default: positive cashflow, no active threats
+  COMPRESSED = 'T2', // cashflow neutral OR mild threat active
+  CRISIS = 'T3', // negative cashflow OR hater_heat > 60
+  COLLAPSE_IMMINENT = 'T4', // negative cash balance OR shield fully broken
 }
 
-export interface PhaseBoundary {
-  readonly phase: RunPhase;
-  readonly startsAtMs: number;
+/** Per-tier timing + presentation configuration. */
+export interface TickTierConfig {
+  tier: TickTier;
+  minDurationMs: number; // fastest this tier ever fires
+  maxDurationMs: number; // slowest this tier ever fires
+  defaultDurationMs: number; // target duration used in interpolation
+  decisionWindowMs: number; // how long player has to respond to a forced card
+  visualBorderClass: string; // CSS class name applied to TickPressureBorder component
+  audioSignal: string | null; // audio cue key. null if no sound at this tier
+  screenShake: boolean; // true only at T4 COLLAPSE_IMMINENT
 }
 
-export interface InterpolationState {
-  readonly fromTier: TickTier;
-  readonly toTier: TickTier;
-  readonly fromDurationMs: number;
-  readonly toDurationMs: number;
-  readonly totalTicks: number;
-  readonly ticksRemaining: number;
+/** Ground-truth timing config for all five tiers. */
+export const TICK_TIER_CONFIGS: Record<TickTier, TickTierConfig> = {
+  [TickTier.SOVEREIGN]: {
+    tier: TickTier.SOVEREIGN,
+    minDurationMs: 18_000,
+    maxDurationMs: 22_000,
+    defaultDurationMs: 20_000,
+    decisionWindowMs: 12_000,
+    visualBorderClass: 'border-sovereign',
+    audioSignal: 'tick_sovereign',
+    screenShake: false,
+  },
+  [TickTier.STABLE]: {
+    tier: TickTier.STABLE,
+    minDurationMs: 12_000,
+    maxDurationMs: 14_000,
+    defaultDurationMs: 13_000,
+    decisionWindowMs: 8_000,
+    visualBorderClass: 'border-stable',
+    audioSignal: 'tick_standard',
+    screenShake: false,
+  },
+  [TickTier.COMPRESSED]: {
+    tier: TickTier.COMPRESSED,
+    minDurationMs: 7_000,
+    maxDurationMs: 9_000,
+    defaultDurationMs: 8_000,
+    decisionWindowMs: 5_000,
+    visualBorderClass: 'border-compressed',
+    audioSignal: 'tick_compressed',
+    screenShake: false,
+  },
+  [TickTier.CRISIS]: {
+    tier: TickTier.CRISIS,
+    minDurationMs: 3_000,
+    maxDurationMs: 5_000,
+    defaultDurationMs: 4_000,
+    decisionWindowMs: 3_000,
+    visualBorderClass: 'border-crisis',
+    audioSignal: 'tick_crisis',
+    screenShake: false,
+  },
+  [TickTier.COLLAPSE_IMMINENT]: {
+    tier: TickTier.COLLAPSE_IMMINENT,
+    minDurationMs: 1_000,
+    maxDurationMs: 2_000,
+    defaultDurationMs: 1_500,
+    decisionWindowMs: 1_500,
+    visualBorderClass: 'border-collapse',
+    audioSignal: 'tick_collapse',
+    screenShake: true,
+  },
+} as const;
+
+/** Mirror of PressureEngine PressureTier. Keep in sync with pressure/types.ts. */
+export enum PressureTier {
+  CALM = 'CALM', // pressure 0.00–0.20
+  BUILDING = 'BUILDING', // 0.21–0.40
+  ELEVATED = 'ELEVATED', // 0.41–0.60
+  HIGH = 'HIGH', // 0.61–0.80
+  CRITICAL = 'CRITICAL', // 0.81–1.00
 }
 
-export interface DecisionWindowState {
-  readonly windowId: string;
-  readonly deadlineMs: number;
-  readonly frozenUntilMs: number | null;
+/** Read-only bridge used by TimeEngine instead of importing PressureEngine directly. */
+export interface PressureReader {
+  readonly score: number; // 0.0–1.0
+  readonly tier: PressureTier;
 }
 
-export interface DecisionWindowClosed {
-  readonly windowId: string;
-  readonly accepted: boolean;
-  readonly reason: 'EXPIRED' | 'RESOLVED' | 'NULLIFIED';
+/** Maps PressureTier to corresponding TickTier. */
+export function pressureTierToTickTier(p: PressureTier): TickTier {
+  const map: Record<PressureTier, TickTier> = {
+    [PressureTier.CALM]: TickTier.SOVEREIGN,
+    [PressureTier.BUILDING]: TickTier.STABLE,
+    [PressureTier.ELEVATED]: TickTier.COMPRESSED,
+    [PressureTier.HIGH]: TickTier.CRISIS,
+    [PressureTier.CRITICAL]: TickTier.COLLAPSE_IMMINENT,
+  };
+  return map[p];
 }
 
-export interface DecisionTimerSyncResult {
-  readonly openedWindowIds: readonly string[];
-  readonly removedWindowIds: readonly string[];
+/** Time-sensitive forced-decision card categories. */
+export enum DecisionCardType {
+  FORCED_FATE = 'FORCED_FATE', // scenario / historical fate card
+  HATER_INJECTION = 'HATER_INJECTION', // injected by an active hater bot
+  CRISIS_EVENT = 'CRISIS_EVENT', // macro economic shock or policy change
 }
 
-export const BACKEND_TIME_SCHEMA_VERSION = 'backend-time.v2' as const;
-export const DEFAULT_HOLD_DURATION_MS = 5_000;
-export const DEFAULT_PHASE_TRANSITION_WINDOWS = 5;
-export const MAX_DECISION_WINDOWS_PER_RUN = 256;
-
-export const TICK_TIER_CONFIGS: Readonly<Record<TickTier, TickTierTiming>> =
-  Object.freeze({
-    T0: Object.freeze({
-      tier: 'T0',
-      minDurationMs: 18_000,
-      maxDurationMs: 22_000,
-      defaultDurationMs: 20_000,
-      decisionWindowMs: 12_000,
-      visualBorderClass: 'border-sovereign',
-      audioSignal: 'tick_sovereign',
-      screenShake: false,
-    }),
-    T1: Object.freeze({
-      tier: 'T1',
-      minDurationMs: 12_000,
-      maxDurationMs: 14_000,
-      defaultDurationMs: 13_000,
-      decisionWindowMs: 8_000,
-      visualBorderClass: 'border-stable',
-      audioSignal: 'tick_standard',
-      screenShake: false,
-    }),
-    T2: Object.freeze({
-      tier: 'T2',
-      minDurationMs: 7_000,
-      maxDurationMs: 9_000,
-      defaultDurationMs: 8_000,
-      decisionWindowMs: 5_000,
-      visualBorderClass: 'border-compressed',
-      audioSignal: 'tick_compressed',
-      screenShake: false,
-    }),
-    T3: Object.freeze({
-      tier: 'T3',
-      minDurationMs: 3_000,
-      maxDurationMs: 5_000,
-      defaultDurationMs: 4_000,
-      decisionWindowMs: 3_000,
-      visualBorderClass: 'border-crisis',
-      audioSignal: 'tick_crisis',
-      screenShake: false,
-    }),
-    T4: Object.freeze({
-      tier: 'T4',
-      minDurationMs: 1_000,
-      maxDurationMs: 2_000,
-      defaultDurationMs: 1_500,
-      decisionWindowMs: 1_500,
-      visualBorderClass: 'border-collapse',
-      audioSignal: 'tick_collapse',
-      screenShake: true,
-    }),
-  });
-
-export const TIER_DURATIONS_MS: Readonly<Record<TickTier, number>> =
-  Object.freeze({
-    T0: TICK_TIER_CONFIGS.T0.defaultDurationMs,
-    T1: TICK_TIER_CONFIGS.T1.defaultDurationMs,
-    T2: TICK_TIER_CONFIGS.T2.defaultDurationMs,
-    T3: TICK_TIER_CONFIGS.T3.defaultDurationMs,
-    T4: TICK_TIER_CONFIGS.T4.defaultDurationMs,
-  });
-
-export const DECISION_WINDOW_DURATIONS_MS: Readonly<Record<TickTier, number>> =
-  Object.freeze({
-    T0: TICK_TIER_CONFIGS.T0.decisionWindowMs,
-    T1: TICK_TIER_CONFIGS.T1.decisionWindowMs,
-    T2: TICK_TIER_CONFIGS.T2.decisionWindowMs,
-    T3: TICK_TIER_CONFIGS.T3.decisionWindowMs,
-    T4: TICK_TIER_CONFIGS.T4.decisionWindowMs,
-  });
-
-export const PHASE_BOUNDARIES_MS: readonly PhaseBoundary[] = Object.freeze([
-  Object.freeze({ phase: 'FOUNDATION', startsAtMs: 0 }),
-  Object.freeze({ phase: 'ESCALATION', startsAtMs: 4 * 60 * 1_000 }),
-  Object.freeze({ phase: 'SOVEREIGNTY', startsAtMs: 8 * 60 * 1_000 }),
-]);
-
-export function isTickTier(value: string): value is TickTier {
-  return (
-    value === 'T0' ||
-    value === 'T1' ||
-    value === 'T2' ||
-    value === 'T3' ||
-    value === 'T4'
-  );
+/** Per-card countdown state. */
+export interface DecisionWindow {
+  windowId: string; // uuid — unique per window instance, not per card
+  cardId: string; // the card this window is attached to
+  cardType: DecisionCardType; // FORCED_FATE | HATER_INJECTION | CRISIS_EVENT
+  durationMs: number; // total window duration set at open time
+  remainingMs: number; // countdown — decremented every 100ms by DecisionTimer
+  openedAtMs: number; // Date.now() when window was created
+  expiresAtMs: number; // Date.now() + durationMs at creation time
+  isOnHold: boolean; // true while hold action is active on this window
+  holdExpiresAtMs: number | null; // epoch ms when hold freeze ends. null if not on hold
+  worstOptionIndex: number; // option index used on auto-resolve
+  isExpired: boolean; // true after auto-resolve fires
+  isResolved: boolean; // true if player chose an option before expiry
 }
 
-export function clampNonNegativeInteger(value: number): number {
-  if (!Number.isFinite(value)) {
-    return 0;
-  }
-
-  return Math.max(0, Math.trunc(value));
+/** Generic helper payload for stores / UI that need countdown deltas. */
+export interface DecisionWindowTickEvent {
+  eventType: 'DECISION_WINDOW_TICK';
+  windowId: string;
+  remainingMs: number;
+  timestamp: number;
 }
 
-export function clampTickDurationMs(
-  tier: TickTier,
-  durationMs: number,
-): number {
-  const config = TICK_TIER_CONFIGS[tier];
-  const normalized = clampNonNegativeInteger(durationMs);
-
-  if (normalized <= 0) {
-    return config.defaultDurationMs;
-  }
-
-  return Math.min(
-    config.maxDurationMs,
-    Math.max(config.minDurationMs, normalized),
-  );
+/** Emitted at end of every tick cycle. */
+export interface TickEvent {
+  eventType: 'TICK_COMPLETE';
+  tickNumber: number; // 1-indexed immutable run counter
+  tickDurationMs: number; // actual ms of the tick that just completed
+  tier: TickTier; // tier active during this tick
+  tierChangedThisTick: boolean; // true if setTierFromPressure() changed tier this tick
+  previousTier: TickTier | null; // null if no change or first tick
+  timestamp: number; // Date.now() at emission
+  decisionsExpiredThisTick: string[]; // windowIds that expired this tick
+  decisionsResolvedThisTick: string[]; // windowIds player manually resolved
+  holdActionUsedThisTick: boolean;
 }
 
-export function computeInterpolationTickCount(deltaMs: number): number {
-  if (deltaMs > 8_000) {
-    return 4;
-  }
-
-  if (deltaMs > 4_000) {
-    return 3;
-  }
-
-  return 2;
+/** Emitted when time tier changes. */
+export interface TierChangeEvent {
+  eventType: 'TICK_TIER_CHANGED';
+  from: TickTier;
+  to: TickTier;
+  interpolationTicks: number;
+  timestamp: number;
 }
 
-export function resolveTickDurationMs(
-  tier: TickTier,
-  durationMs?: number,
-): number {
-  if (typeof durationMs !== 'number' || !Number.isFinite(durationMs)) {
-    return TICK_TIER_CONFIGS[tier].defaultDurationMs;
-  }
-
-  return clampTickDurationMs(tier, durationMs);
+/** Emitted when a decision window opens. */
+export interface DecisionWindowOpenedEvent {
+  eventType: 'DECISION_WINDOW_OPENED';
+  window: DecisionWindow;
 }
 
-export function resolveDecisionWindowDurationMs(
-  tier: TickTier,
-  durationMs?: number,
-): number {
-  const fallback = TICK_TIER_CONFIGS[tier].decisionWindowMs;
-
-  if (typeof durationMs !== 'number' || !Number.isFinite(durationMs)) {
-    return fallback;
-  }
-
-  return Math.max(100, Math.trunc(durationMs));
+/** Emitted when a decision window expires and auto-resolves. */
+export interface DecisionWindowExpiredEvent {
+  eventType: 'DECISION_WINDOW_EXPIRED';
+  windowId: string;
+  cardId: string;
+  autoResolvedToOptionIndex: number;
+  holdWasActive: boolean;
 }
 
-export function resolvePhaseFromElapsedMs(elapsedMs: number): RunPhase {
-  let current: RunPhase = PHASE_BOUNDARIES_MS[0]?.phase ?? 'FOUNDATION';
-
-  for (const boundary of PHASE_BOUNDARIES_MS) {
-    if (elapsedMs >= boundary.startsAtMs) {
-      current = boundary.phase;
-    }
-  }
-
-  return current;
+/** Emitted when a decision window resolves manually or is nullified. */
+export interface DecisionWindowResolvedEvent {
+  eventType: 'DECISION_WINDOW_RESOLVED';
+  windowId: string;
+  cardId: string;
+  chosenOptionIndex: number; // -1 allowed for nullified resolution
+  msRemainingAtResolution: number;
 }
 
-export function dedupeTags(
-  tags: readonly string[],
-  ...nextTags: Array<string | null | undefined | false>
-): readonly string[] {
-  const merged = new Set<string>(tags);
+/** Emitted when the run’s single hold is consumed. */
+export interface HoldActionUsedEvent {
+  eventType: 'HOLD_ACTION_USED';
+  windowId: string;
+  holdDurationMs: number;
+  holdExpiresAtMs: number;
+  holdsRemainingInRun: number;
+}
 
-  for (const tag of nextTags) {
-    if (typeof tag === 'string' && tag.length > 0) {
-      merged.add(tag);
-    }
-  }
+/** Emitted when the season tick budget is exhausted. */
+export interface RunTimeoutEvent {
+  eventType: 'RUN_TIMEOUT';
+  ticksElapsed: number;
+  outcome: 'TIMEOUT';
+}
 
-  return [...merged];
+/** Emitted when a tier is forcibly overridden by tutorial/admin logic. */
+export interface TickTierForcedEvent {
+  eventType: 'TICK_TIER_FORCED';
+  tier: TickTier;
+  durationTicks: number;
+  timestamp: number;
+}
+
+/** Real-world season window categories. */
+export enum SeasonWindowType {
+  KICKOFF = 'KICKOFF',
+  LIVEOPS_EVENT = 'LIVEOPS_EVENT',
+  SEASON_FINALE = 'SEASON_FINALE', // last 72 hours of season
+  ARCHIVE_CLOSE = 'ARCHIVE_CLOSE', // when past season closes for purchase
+  REENGAGE_WINDOW = 'REENGAGE_WINDOW', // triggered after 14+ day lapse
+}
+
+/** Real-world season window definition. */
+export interface SeasonTimeWindow {
+  windowId: string;
+  type: SeasonWindowType;
+  startsAtMs: number; // epoch ms
+  endsAtMs: number; // epoch ms
+  isActive: boolean;
+  pressureMultiplier: number; // 1.0 = no effect. 1.3 = 30% pressure boost during finale
+}
+
+/** Shared union of all Time Engine events for strongly typed consumers. */
+export type TimeEngineEvent =
+  | TickEvent
+  | TierChangeEvent
+  | DecisionWindowOpenedEvent
+  | DecisionWindowExpiredEvent
+  | DecisionWindowResolvedEvent
+  | DecisionWindowTickEvent
+  | HoldActionUsedEvent
+  | RunTimeoutEvent
+  | TickTierForcedEvent;
+
+/** Event-name → payload map for adapters that want keyed typing. */
+export interface TimeEngineEventMap {
+  TICK_COMPLETE: TickEvent;
+  TICK_TIER_CHANGED: TierChangeEvent;
+  DECISION_WINDOW_OPENED: DecisionWindowOpenedEvent;
+  DECISION_WINDOW_EXPIRED: DecisionWindowExpiredEvent;
+  DECISION_WINDOW_RESOLVED: DecisionWindowResolvedEvent;
+  DECISION_WINDOW_TICK: DecisionWindowTickEvent;
+  HOLD_ACTION_USED: HoldActionUsedEvent;
+  RUN_TIMEOUT: RunTimeoutEvent;
+  TICK_TIER_FORCED: TickTierForcedEvent;
 }
