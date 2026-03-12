@@ -38,7 +38,7 @@
  */
 
 import { create } from 'zustand';
-import { immer }  from 'zustand/middleware/immer';
+import { immer } from 'zustand/middleware/immer';
 
 // ── Engine 0 core types ────────────────────────────────────────────────────────
 import type {
@@ -207,6 +207,20 @@ interface RunTimeoutEvent {
   outcome: 'TIMEOUT';
 }
 
+type LegacyDecisionWindowOpenedPayload = {
+  window?: TimeDecisionWindow;
+  cardId?: string;
+  durationMs?: number;
+  autoResolveChoice?: string;
+};
+
+type LegacyHoldUsedPayload = {
+  windowId?: string;
+  holdsRemaining?: number;
+  holdsRemainingInRun?: number;
+  holdExpiresAtMs?: number;
+};
+
 // ── Engine 1 store-facing decision window shape ───────────────────────────────
 interface DecisionWindowEntry extends TimeDecisionWindow {
   /**
@@ -228,131 +242,131 @@ interface DecisionWindowEntry extends TimeDecisionWindow {
 
 export interface RunLifecycleStoreSlice {
   run: {
-    lifecycleState:     RunLifecycleState;
-    runId:              string | null;
-    userId:             string | null;
-    seed:               string | null;
-    tickBudget:         number;
-    outcome:            RunOutcome | null;
-    healthReport:       Partial<Record<EngineId, EngineHealth>> | null;
-    lastTickIndex:      number;
+    lifecycleState: RunLifecycleState;
+    runId: string | null;
+    userId: string | null;
+    seed: string | null;
+    tickBudget: number;
+    outcome: RunOutcome | null;
+    healthReport: Partial<Record<EngineId, EngineHealth>> | null;
+    lastTickIndex: number;
     lastTickDurationMs: number;
   };
 }
 
 export interface TimeEngineStoreSlice {
   time: {
-    currentTier:           TickTier | null;
-    previousTier:          TickTier | null;
-    ticksElapsed:          number;
-    seasonTickBudget:      number;
-    ticksRemaining:        number;
-    holdsRemaining:        number;
+    currentTier: TickTier | null;
+    previousTier: TickTier | null;
+    ticksElapsed: number;
+    seasonTickBudget: number;
+    ticksRemaining: number;
+    holdsRemaining: number;
     activeDecisionWindows: DecisionWindowEntry[];
     currentTickDurationMs: number;
-    isTierTransitioning:   boolean;
+    isTierTransitioning: boolean;
     seasonTimeoutImminent: boolean;
-    ticksUntilTimeout:     number;
-    lastTickTimestamp:     number | null;
-    tierChangedThisTick:   boolean;
-    isRunActive:           boolean;
+    ticksUntilTimeout: number;
+    lastTickTimestamp: number | null;
+    tierChangedThisTick: boolean;
+    isRunActive: boolean;
   };
 }
 
 export interface PressureEngineStoreSlice {
   pressure: {
-    score:           number;
-    tier:            PressureTier | null;
-    previousTier:    PressureTier | null;
-    isCritical:      boolean;
-    triggerSignals:  string[];
+    score: number;
+    tier: PressureTier | null;
+    previousTier: PressureTier | null;
+    isCritical: boolean;
+    triggerSignals: string[];
     postActionScore: number;
     stagnationCount: number;
-    tickIndex:       number;
+    tickIndex: number;
   };
 }
 
 export interface TensionEngineStoreSlice {
   tension: {
-    score:                   number;
-    scoreHistory:            readonly number[];
-    visibilityState:         VisibilityState;
+    score: number;
+    scoreHistory: readonly number[];
+    visibilityState: VisibilityState;
     previousVisibilityState: VisibilityState | null;
-    queueLength:             number;
-    arrivedCount:            number;
-    queuedCount:             number;
-    expiredCount:            number;
-    isPulseActive:           boolean;
-    pulseTicksActive:        number;
-    isSustainedPulse:        boolean;
-    isEscalating:            boolean;
-    sortedQueue:             AnticipationEntry[];
-    lastArrivedEntry:        AnticipationEntry | null;
-    lastExpiredEntry:        AnticipationEntry | null;
-    currentTick:             number;
-    isRunActive:             boolean;
+    queueLength: number;
+    arrivedCount: number;
+    queuedCount: number;
+    expiredCount: number;
+    isPulseActive: boolean;
+    pulseTicksActive: number;
+    isSustainedPulse: boolean;
+    isEscalating: boolean;
+    sortedQueue: AnticipationEntry[];
+    lastArrivedEntry: AnticipationEntry | null;
+    lastExpiredEntry: AnticipationEntry | null;
+    currentTick: number;
+    isRunActive: boolean;
   };
 }
 
 export interface ShieldEngineStoreSlice {
   shield: {
-    snapshot:            ShieldSnapshot | null;
+    snapshot: ShieldSnapshot | null;
     overallIntegrityPct: number;
-    weakestLayerId:      ShieldLayerId | null;
-    isFortified:         boolean;
-    cascadeCount:        number;
-    isInBreachCascade:   boolean;
-    isRunActive:         boolean;
-    lastDamageResult:    DamageResult | null;
+    weakestLayerId: ShieldLayerId | null;
+    isFortified: boolean;
+    cascadeCount: number;
+    isInBreachCascade: boolean;
+    isRunActive: boolean;
+    lastDamageResult: DamageResult | null;
     lastBreachedLayerId: ShieldLayerId | null;
   };
 }
 
 export interface BattleEngineStoreSlice {
   battle: {
-    snapshot:        BattleSnapshot | null;
-    budget:          BattleBudgetState | null;
-    haterHeat:       number;
-    injectedCards:   InjectedCard[];
-    activeBots:      HaterBotRuntimeState[];
+    snapshot: BattleSnapshot | null;
+    budget: BattleBudgetState | null;
+    haterHeat: number;
+    injectedCards: InjectedCard[];
+    activeBots: HaterBotRuntimeState[];
     activeBotsCount: number;
     lastStateChange: BotStateChangedEvent | null;
     lastAttackFired: BotAttackFiredEvent | null;
-    isRunActive:     boolean;
-    tickNumber:      number;
+    isRunActive: boolean;
+    tickNumber: number;
   };
 }
 
 export interface CascadeEngineStoreSlice {
   cascade: {
-    snapshot:                CascadeSnapshot | null;
-    activeNegativeChains:    CascadeChainInstance[];
-    activePositiveCascades:  ActivePositiveCascade[];
-    totalLinksDefeated:      number;
-    latestChainStarted:      CascadeChainStartedEvent | null;
-    latestLinkFired:         CascadeLinkFiredEvent | null;
-    latestChainBroken:       CascadeChainBrokenEvent | null;
-    latestChainCompleted:    CascadeChainCompletedEvent | null;
+    snapshot: CascadeSnapshot | null;
+    activeNegativeChains: CascadeChainInstance[];
+    activePositiveCascades: ActivePositiveCascade[];
+    totalLinksDefeated: number;
+    latestChainStarted: CascadeChainStartedEvent | null;
+    latestLinkFired: CascadeLinkFiredEvent | null;
+    latestChainBroken: CascadeChainBrokenEvent | null;
+    latestChainCompleted: CascadeChainCompletedEvent | null;
     latestPositiveActivated: CascadePositiveActivatedEvent | null;
     latestPositiveDissolved: CascadePositiveDissolvedEvent | null;
-    nemesisBrokenEvents:     NemesisBrokenEvent[];
-    isRunActive:             boolean;
-    tickNumber:              number;
+    nemesisBrokenEvents: NemesisBrokenEvent[];
+    isRunActive: boolean;
+    tickNumber: number;
   };
 }
 
 export interface SovereigntyEngineStoreSlice {
   sovereignty: {
-    proofHash:         string | null;
-    grade:             RunGrade | null;
-    sovereigntyScore:  number | null;
-    integrityStatus:   IntegrityStatus | null;
-    pipelineStatus:    'IDLE' | 'RUNNING' | 'COMPLETE' | 'FAILED';
-    reward:            GradeReward | null;
-    components:        SovereigntyScoreComponents | null;
+    proofHash: string | null;
+    grade: RunGrade | null;
+    sovereigntyScore: number | null;
+    integrityStatus: IntegrityStatus | null;
+    pipelineStatus: 'IDLE' | 'RUNNING' | 'COMPLETE' | 'FAILED';
+    reward: GradeReward | null;
+    components: SovereigntyScoreComponents | null;
     lastFailureReason: string | null;
-    lastFailureStep:   1 | 2 | 3 | null;
-    isRunActive:       boolean;
+    lastFailureStep: 1 | 2 | 3 | null;
+    isRunActive: boolean;
   };
 }
 
@@ -377,10 +391,9 @@ export type EngineStoreState =
   & { card: CardEngineStoreSlice }
   & { mechanics: MechanicsRuntimeStoreSlice }
   & {
-    // ── Card action dispatchers exposed on the store ──────────────────────────
     card_resetSlice: () => void;
-    resetAllSlices:  () => void;
-    syncRunMirror:   (snapshot: EngineStoreMirrorSnapshot) => void;
+    resetAllSlices: () => void;
+    syncRunMirror: (snapshot: EngineStoreMirrorSnapshot) => void;
   };
 
 /** Typed immer setter — shared by ALL store handler functions. */
@@ -392,162 +405,162 @@ export type ZustandSet = (updater: (state: EngineStoreState) => void) => void;
 
 export const defaultRunSlice: RunLifecycleStoreSlice = {
   run: {
-    lifecycleState:     'IDLE',
-    runId:              null,
-    userId:             null,
-    seed:               null,
-    tickBudget:         0,
-    outcome:            null,
-    healthReport:       null,
-    lastTickIndex:      0,
+    lifecycleState: 'IDLE',
+    runId: null,
+    userId: null,
+    seed: null,
+    tickBudget: 0,
+    outcome: null,
+    healthReport: null,
+    lastTickIndex: 0,
     lastTickDurationMs: 0,
   },
 };
 
 export const defaultTimeSlice: TimeEngineStoreSlice = {
   time: {
-    currentTier:           null,
-    previousTier:          null,
-    ticksElapsed:          0,
-    seasonTickBudget:      0,
-    ticksRemaining:        0,
-    holdsRemaining:        1,
+    currentTier: null,
+    previousTier: null,
+    ticksElapsed: 0,
+    seasonTickBudget: 0,
+    ticksRemaining: 0,
+    holdsRemaining: 1,
     activeDecisionWindows: [],
     currentTickDurationMs: 3_000,
-    isTierTransitioning:   false,
+    isTierTransitioning: false,
     seasonTimeoutImminent: false,
-    ticksUntilTimeout:     0,
-    lastTickTimestamp:     null,
-    tierChangedThisTick:   false,
-    isRunActive:           false,
+    ticksUntilTimeout: 0,
+    lastTickTimestamp: null,
+    tierChangedThisTick: false,
+    isRunActive: false,
   },
 };
 
 export const defaultPressureSlice: PressureEngineStoreSlice = {
   pressure: {
-    score:           0.0,
-    tier:            null,
-    previousTier:    null,
-    isCritical:      false,
-    triggerSignals:  [],
+    score: 0.0,
+    tier: null,
+    previousTier: null,
+    isCritical: false,
+    triggerSignals: [],
     postActionScore: 0.0,
     stagnationCount: 0,
-    tickIndex:       0,
+    tickIndex: 0,
   },
 };
 
 export const defaultTensionSlice: TensionEngineStoreSlice = {
   tension: {
-    score:                   0.0,
-    scoreHistory:            [],
-    visibilityState:         'SHADOWED' as VisibilityState,
+    score: 0.0,
+    scoreHistory: [],
+    visibilityState: 'SHADOWED' as VisibilityState,
     previousVisibilityState: null,
-    queueLength:             0,
-    arrivedCount:            0,
-    queuedCount:             0,
-    expiredCount:            0,
-    isPulseActive:           false,
-    pulseTicksActive:        0,
-    isSustainedPulse:        false,
-    isEscalating:            false,
-    sortedQueue:             [],
-    lastArrivedEntry:        null,
-    lastExpiredEntry:        null,
-    currentTick:             0,
-    isRunActive:             false,
+    queueLength: 0,
+    arrivedCount: 0,
+    queuedCount: 0,
+    expiredCount: 0,
+    isPulseActive: false,
+    pulseTicksActive: 0,
+    isSustainedPulse: false,
+    isEscalating: false,
+    sortedQueue: [],
+    lastArrivedEntry: null,
+    lastExpiredEntry: null,
+    currentTick: 0,
+    isRunActive: false,
   },
 };
 
 export const defaultShieldSlice: ShieldEngineStoreSlice = {
   shield: {
-    snapshot:            null,
+    snapshot: null,
     overallIntegrityPct: 1.0,
-    weakestLayerId:      null,
-    isFortified:         false,
-    cascadeCount:        0,
-    isInBreachCascade:   false,
-    isRunActive:         false,
-    lastDamageResult:    null,
+    weakestLayerId: null,
+    isFortified: false,
+    cascadeCount: 0,
+    isInBreachCascade: false,
+    isRunActive: false,
+    lastDamageResult: null,
     lastBreachedLayerId: null,
   },
 };
 
 export const defaultBattleSlice: BattleEngineStoreSlice = {
   battle: {
-    snapshot:        null,
-    budget:          null,
-    haterHeat:       0,
-    injectedCards:   [],
-    activeBots:      [],
+    snapshot: null,
+    budget: null,
+    haterHeat: 0,
+    injectedCards: [],
+    activeBots: [],
     activeBotsCount: 0,
     lastStateChange: null,
     lastAttackFired: null,
-    isRunActive:     false,
-    tickNumber:      0,
+    isRunActive: false,
+    tickNumber: 0,
   },
 };
 
 export const defaultCascadeSlice: CascadeEngineStoreSlice = {
   cascade: {
-    snapshot:                null,
-    activeNegativeChains:    [],
-    activePositiveCascades:  [],
-    totalLinksDefeated:      0,
-    latestChainStarted:      null,
-    latestLinkFired:         null,
-    latestChainBroken:       null,
-    latestChainCompleted:    null,
+    snapshot: null,
+    activeNegativeChains: [],
+    activePositiveCascades: [],
+    totalLinksDefeated: 0,
+    latestChainStarted: null,
+    latestLinkFired: null,
+    latestChainBroken: null,
+    latestChainCompleted: null,
     latestPositiveActivated: null,
     latestPositiveDissolved: null,
-    nemesisBrokenEvents:     [],
-    isRunActive:             false,
-    tickNumber:              0,
+    nemesisBrokenEvents: [],
+    isRunActive: false,
+    tickNumber: 0,
   },
 };
 
 export const defaultRuntimeSlice: RunMirrorStoreSlice = {
   runtime: {
-    isInitialized:         false,
-    netWorth:              0,
-    cashBalance:           0,
-    monthlyIncome:         0,
-    monthlyExpenses:       0,
-    cashflow:              0,
-    haterHeat:             0,
+    isInitialized: false,
+    netWorth: 0,
+    cashBalance: 0,
+    monthlyIncome: 0,
+    monthlyExpenses: 0,
+    cashflow: 0,
+    haterHeat: 0,
     activeThreatCardCount: 0,
-    runId:                 null,
-    userId:                null,
-    seed:                  null,
-    lastUpdated:           null,
+    runId: null,
+    userId: null,
+    seed: null,
+    lastUpdated: null,
   },
 };
 
 export const defaultSovereigntySlice: SovereigntyEngineStoreSlice = {
   sovereignty: {
-    proofHash:         null,
-    grade:             null,
-    sovereigntyScore:  null,
-    integrityStatus:   null,
-    pipelineStatus:    'IDLE',
-    reward:            null,
-    components:        null,
+    proofHash: null,
+    grade: null,
+    sovereigntyScore: null,
+    integrityStatus: null,
+    pipelineStatus: 'IDLE',
+    reward: null,
+    components: null,
     lastFailureReason: null,
-    lastFailureStep:   null,
-    isRunActive:       false,
+    lastFailureStep: null,
+    isRunActive: false,
   },
 };
 
 function resetAllSlicesDraft(state: EngineStoreState): void {
-  Object.assign(state.run,         defaultRunSlice.run);
-  Object.assign(state.time,        defaultTimeSlice.time);
-  Object.assign(state.pressure,    defaultPressureSlice.pressure);
-  Object.assign(state.tension,     defaultTensionSlice.tension);
-  Object.assign(state.shield,      defaultShieldSlice.shield);
-  Object.assign(state.battle,      defaultBattleSlice.battle);
-  Object.assign(state.cascade,     defaultCascadeSlice.cascade);
+  Object.assign(state.run, defaultRunSlice.run);
+  Object.assign(state.time, defaultTimeSlice.time);
+  Object.assign(state.pressure, defaultPressureSlice.pressure);
+  Object.assign(state.tension, defaultTensionSlice.tension);
+  Object.assign(state.shield, defaultShieldSlice.shield);
+  Object.assign(state.battle, defaultBattleSlice.battle);
+  Object.assign(state.cascade, defaultCascadeSlice.cascade);
   Object.assign(state.sovereignty, defaultSovereigntySlice.sovereignty);
-  state.runtime   = { ...defaultRuntimeSlice.runtime };
-  state.card      = defaultCardSlice();
+  state.runtime = { ...defaultRuntimeSlice.runtime };
+  state.card = defaultCardSlice();
   state.mechanics = defaultMechanicsSlice();
 }
 
@@ -565,37 +578,37 @@ function applyRunStartedAtomic(
   Object.assign(state.run, {
     ...defaultRunSlice.run,
     lifecycleState: 'ACTIVE' as RunLifecycleState,
-    runId:          payload.runId,
-    userId:         payload.userId,
-    seed:           payload.seed,
-    tickBudget:     payload.tickBudget,
-    outcome:        null,
+    runId: payload.runId,
+    userId: payload.userId,
+    seed: payload.seed,
+    tickBudget: payload.tickBudget,
+    outcome: null,
   });
 
   Object.assign(state.time, {
     ...defaultTimeSlice.time,
     seasonTickBudget: payload.tickBudget,
-    ticksRemaining:   payload.tickBudget,
+    ticksRemaining: payload.tickBudget,
     ticksUntilTimeout: payload.tickBudget,
-    isRunActive:      true,
+    isRunActive: true,
   });
 
-  Object.assign(state.pressure,    { ...defaultPressureSlice.pressure });
-  Object.assign(state.tension,     { ...defaultTensionSlice.tension, isRunActive: true });
-  Object.assign(state.shield,      { ...defaultShieldSlice.shield, isRunActive: true });
-  Object.assign(state.battle,      { ...defaultBattleSlice.battle, isRunActive: true });
-  Object.assign(state.cascade,     { ...defaultCascadeSlice.cascade, isRunActive: true });
+  Object.assign(state.pressure, { ...defaultPressureSlice.pressure });
+  Object.assign(state.tension, { ...defaultTensionSlice.tension, isRunActive: true });
+  Object.assign(state.shield, { ...defaultShieldSlice.shield, isRunActive: true });
+  Object.assign(state.battle, { ...defaultBattleSlice.battle, isRunActive: true });
+  Object.assign(state.cascade, { ...defaultCascadeSlice.cascade, isRunActive: true });
   Object.assign(state.sovereignty, { ...defaultSovereigntySlice.sovereignty, isRunActive: true });
 
-  state.card      = defaultCardSlice();
+  state.card = defaultCardSlice();
   state.mechanics = defaultMechanicsSlice();
-  state.runtime   = {
+  state.runtime = {
     ...state.runtime,
     isInitialized: true,
-    runId:         payload.runId,
-    userId:        payload.userId,
-    seed:          payload.seed,
-    lastUpdated:   Date.now(),
+    runId: payload.runId,
+    userId: payload.userId,
+    seed: payload.seed,
+    lastUpdated: Date.now(),
   };
 }
 
@@ -604,7 +617,7 @@ function applyRunEndedAtomic(
   payload: { runId: string; outcome: RunOutcome; finalNetWorth: number },
 ): void {
   state.run.lifecycleState = 'ENDED';
-  state.run.outcome        = payload.outcome;
+  state.run.outcome = payload.outcome;
   state.time.activeDecisionWindows = [];
   state.time.isRunActive = false;
   state.time.isTierTransitioning = false;
@@ -612,11 +625,11 @@ function applyRunEndedAtomic(
   state.time.ticksUntilTimeout = 0;
   state.pressure.isCritical = false;
   state.tension.isRunActive = false;
-  state.shield.isRunActive  = false;
-  state.battle.isRunActive  = false;
+  state.shield.isRunActive = false;
+  state.battle.isRunActive = false;
   state.cascade.isRunActive = false;
   state.sovereignty.isRunActive = false;
-  state.runtime.netWorth    = payload.finalNetWorth;
+  state.runtime.netWorth = payload.finalNetWorth;
   state.runtime.lastUpdated = Date.now();
 }
 
@@ -629,7 +642,7 @@ function applyTickCompleteAtomic(
     timestamp?: number;
   },
 ): void {
-  state.run.lastTickIndex      = payload.tickIndex;
+  state.run.lastTickIndex = payload.tickIndex;
   state.run.lastTickDurationMs = payload.tickDurationMs;
   if (payload.outcome) state.run.outcome = payload.outcome;
 
@@ -699,28 +712,27 @@ function createLegacyDecisionWindowEntry(
 }
 
 function normalizeDecisionWindowOpenedPayload(
-  payload:
-    | DecisionWindowOpenedEvent
-    | {
-        window?: TimeDecisionWindow;
-        cardId?: string;
-        durationMs?: number;
-        autoResolveChoice?: string;
-      },
+  payload: DecisionWindowOpenedEvent | LegacyDecisionWindowOpenedPayload,
   openedAtTick: number,
 ): DecisionWindowEntry {
-  if ('window' in payload && payload.window) {
+  if (
+    'eventType' in payload &&
+    payload.eventType === 'DECISION_WINDOW_OPENED' &&
+    payload.window
+  ) {
     return {
       ...payload.window,
       autoResolve: String(payload.window.worstOptionIndex),
     };
   }
 
+  const legacy = payload as LegacyDecisionWindowOpenedPayload;
+
   return createLegacyDecisionWindowEntry(
-    payload.cardId ?? 'unknown-card',
-    payload.durationMs ?? 0,
+    legacy.cardId ?? 'unknown-card',
+    legacy.durationMs ?? 0,
     openedAtTick,
-    payload.autoResolveChoice ?? '-1',
+    legacy.autoResolveChoice ?? '-1',
   );
 }
 
@@ -737,12 +749,17 @@ function normalizeDecisionWindowClosePayload(
 }
 
 function normalizeHoldUsedPayload(
-  payload: HoldActionUsedEvent | { windowId?: string; holdsRemaining?: number; holdsRemainingInRun?: number; holdExpiresAtMs?: number },
+  payload: HoldActionUsedEvent | LegacyHoldUsedPayload,
 ): { windowId: string | null; holdsRemaining: number; holdExpiresAtMs: number | null } {
+  const legacy = payload as LegacyHoldUsedPayload;
+
   return {
     windowId: payload.windowId ?? null,
-    holdsRemaining: payload.holdsRemainingInRun ?? payload.holdsRemaining ?? 0,
-    holdExpiresAtMs: payload.holdExpiresAtMs ?? null,
+    holdsRemaining:
+      legacy.holdsRemainingInRun ??
+      legacy.holdsRemaining ??
+      0,
+    holdExpiresAtMs: legacy.holdExpiresAtMs ?? null,
   };
 }
 
@@ -772,11 +789,9 @@ export const useEngineStore = create<EngineStoreState>()(
       ...defaultRuntimeSlice,
       ...defaultSovereigntySlice,
 
-      // ── Card + mechanics slices ───────────────────────────────────────────
-      card:      defaultCardSlice(),
+      card: defaultCardSlice(),
       mechanics: defaultMechanicsSlice(),
 
-      // ── Store actions ──────────────────────────────────────────────────────
       card_resetSlice: () =>
         set((state) => {
           state.card = defaultCardSlice();
@@ -791,8 +806,8 @@ export const useEngineStore = create<EngineStoreState>()(
         set((state) => {
           applyRunMirrorDraft(state, snapshot);
         }),
-    })
-  )
+    }),
+  ),
 );
 
 // =============================================================================
@@ -800,20 +815,19 @@ export const useEngineStore = create<EngineStoreState>()(
 // =============================================================================
 
 export const runLifecycleStoreHandlers = {
-
   onRunStarted(
     set: ZustandSet,
-    payload: { runId: string; userId: string; seed: string; tickBudget: number }
+    payload: { runId: string; userId: string; seed: string; tickBudget: number },
   ): void {
-    set(state => {
+    set((state) => {
       Object.assign(state.run, {
         ...defaultRunSlice.run,
         lifecycleState: 'ACTIVE' as RunLifecycleState,
-        runId:          payload.runId,
-        userId:         payload.userId,
-        seed:           payload.seed,
-        tickBudget:     payload.tickBudget,
-        outcome:        null,
+        runId: payload.runId,
+        userId: payload.userId,
+        seed: payload.seed,
+        tickBudget: payload.tickBudget,
+        outcome: null,
       });
       state.card = defaultCardSlice();
     });
@@ -821,22 +835,28 @@ export const runLifecycleStoreHandlers = {
 
   onRunEnded(
     set: ZustandSet,
-    payload: { runId: string; outcome: RunOutcome; finalNetWorth: number }
+    payload: { runId: string; outcome: RunOutcome; finalNetWorth: number },
   ): void {
-    set(state => {
+    set((state) => {
       state.run.lifecycleState = 'ENDED';
-      state.run.outcome        = payload.outcome;
+      state.run.outcome = payload.outcome;
     });
   },
 
   onTickComplete(
     set: ZustandSet,
-    payload: { tickIndex?: number; tickNumber?: number; tickDurationMs: number; outcome: RunOutcome | null; timestamp?: number }
+    payload: {
+      tickIndex?: number;
+      tickNumber?: number;
+      tickDurationMs: number;
+      outcome: RunOutcome | null;
+      timestamp?: number;
+    },
   ): void {
     const normalized = normalizeTickCompletePayload(payload);
 
-    set(state => {
-      state.run.lastTickIndex      = normalized.tickIndex;
+    set((state) => {
+      state.run.lastTickIndex = normalized.tickIndex;
       state.run.lastTickDurationMs = normalized.tickDurationMs;
       if (normalized.outcome) state.run.outcome = normalized.outcome;
     });
@@ -844,9 +864,9 @@ export const runLifecycleStoreHandlers = {
 
   onEngineError(
     set: ZustandSet,
-    payload: { engineId: EngineId; error: string; step: number }
+    payload: { engineId: EngineId; error: string; step: number },
   ): void {
-    set(state => {
+    set((state) => {
       if (state.run.healthReport) {
         (state.run.healthReport as any)[payload.engineId] = 'ERROR';
       }
@@ -859,16 +879,15 @@ export const runLifecycleStoreHandlers = {
 // =============================================================================
 
 export const timeStoreHandlers = {
-
   onTickTierChanged(
     set: ZustandSet,
-    payload: Partial<TierChangeEvent> & { transitionTicks?: number }
+    payload: Partial<TierChangeEvent> & { transitionTicks?: number },
   ): void {
     const normalized = normalizeTierChangePayload(payload);
 
-    set(state => {
-      state.time.previousTier        = normalized.from;
-      state.time.currentTier         = normalized.to;
+    set((state) => {
+      state.time.previousTier = normalized.from;
+      state.time.currentTier = normalized.to;
       state.time.isTierTransitioning = normalized.transitionTicks > 0;
       state.time.tierChangedThisTick = true;
     });
@@ -876,11 +895,11 @@ export const timeStoreHandlers = {
 
   onTickTierForced(
     set: ZustandSet,
-    payload: { tier: TickTier; durationTicks: number }
+    payload: { tier: TickTier; durationTicks: number },
   ): void {
-    set(state => {
-      state.time.previousTier        = state.time.currentTier;
-      state.time.currentTier         = payload.tier;
+    set((state) => {
+      state.time.previousTier = state.time.currentTier;
+      state.time.currentTier = payload.tier;
       state.time.isTierTransitioning = false;
       state.time.tierChangedThisTick = true;
     });
@@ -888,18 +907,18 @@ export const timeStoreHandlers = {
 
   onTickComplete(
     set: ZustandSet,
-    payload: Partial<TickEvent> & { tickIndex?: number; outcome?: RunOutcome | null }
+    payload: Partial<TickEvent> & { tickIndex?: number; outcome?: RunOutcome | null },
   ): void {
     const normalized = normalizeTickCompletePayload(payload);
 
-    set(state => {
-      state.time.ticksElapsed          = normalized.tickIndex;
+    set((state) => {
+      state.time.ticksElapsed = normalized.tickIndex;
       state.time.currentTickDurationMs = normalized.tickDurationMs;
-      state.time.lastTickTimestamp     = normalized.timestamp ?? Date.now();
-      state.time.ticksRemaining        = Math.max(0, state.time.seasonTickBudget - normalized.tickIndex);
-      state.time.ticksUntilTimeout     = state.time.ticksRemaining;
+      state.time.lastTickTimestamp = normalized.timestamp ?? Date.now();
+      state.time.ticksRemaining = Math.max(0, state.time.seasonTickBudget - normalized.tickIndex);
+      state.time.ticksUntilTimeout = state.time.ticksRemaining;
       state.time.seasonTimeoutImminent = state.time.ticksRemaining <= 5;
-      state.time.isTierTransitioning   = false;
+      state.time.isTierTransitioning = false;
       if (normalized.outcome === 'TIMEOUT') {
         state.time.isRunActive = false;
       }
@@ -908,13 +927,13 @@ export const timeStoreHandlers = {
 
   onDecisionWindowOpened(
     set: ZustandSet,
-    payload: DecisionWindowOpenedEvent | { window?: TimeDecisionWindow; cardId?: string; durationMs?: number; autoResolveChoice?: string }
+    payload: DecisionWindowOpenedEvent | LegacyDecisionWindowOpenedPayload,
   ): void {
-    set(state => {
+    set((state) => {
       const entry = normalizeDecisionWindowOpenedPayload(payload, state.run.lastTickIndex);
 
       const existingIndex = state.time.activeDecisionWindows.findIndex(
-        w => w.windowId === entry.windowId || w.cardId === entry.cardId
+        (w) => w.windowId === entry.windowId || w.cardId === entry.cardId,
       );
 
       if (existingIndex >= 0) {
@@ -927,21 +946,22 @@ export const timeStoreHandlers = {
 
   onDecisionWindowClosed(
     set: ZustandSet,
-    payload: DecisionWindowExpiredEvent | DecisionWindowResolvedEvent | { windowId?: string; cardId?: string }
+    payload: DecisionWindowExpiredEvent | DecisionWindowResolvedEvent | { windowId?: string; cardId?: string },
   ): void {
     const normalized = normalizeDecisionWindowClosePayload(payload);
 
-    set(state => {
+    set((state) => {
       state.time.activeDecisionWindows = state.time.activeDecisionWindows.filter(
-        w => (normalized.windowId ? w.windowId !== normalized.windowId : true) &&
-             (normalized.cardId ? w.cardId !== normalized.cardId : true)
+        (w) =>
+          (normalized.windowId ? w.windowId !== normalized.windowId : true) &&
+          (normalized.cardId ? w.cardId !== normalized.cardId : true),
       );
     });
   },
 
   onDecisionWindowTick(set: ZustandSet, windowId: string, remainingMs: number): void {
-    set(state => {
-      const window = state.time.activeDecisionWindows.find(w => w.windowId === windowId);
+    set((state) => {
+      const window = state.time.activeDecisionWindows.find((w) => w.windowId === windowId);
       if (window) {
         window.remainingMs = Math.max(0, remainingMs);
         window.expiresAtMs = Date.now() + Math.max(0, remainingMs);
@@ -951,14 +971,14 @@ export const timeStoreHandlers = {
 
   onHoldUsed(
     set: ZustandSet,
-    payload: HoldActionUsedEvent | { windowId?: string; holdsRemaining?: number; holdsRemainingInRun?: number; holdExpiresAtMs?: number }
+    payload: HoldActionUsedEvent | LegacyHoldUsedPayload,
   ): void {
     const normalized = normalizeHoldUsedPayload(payload);
 
-    set(state => {
+    set((state) => {
       state.time.holdsRemaining = normalized.holdsRemaining;
       if (normalized.windowId) {
-        const window = state.time.activeDecisionWindows.find(w => w.windowId === normalized.windowId);
+        const window = state.time.activeDecisionWindows.find((w) => w.windowId === normalized.windowId);
         if (window) {
           window.isOnHold = true;
           window.holdExpiresAtMs = normalized.holdExpiresAtMs;
@@ -969,48 +989,48 @@ export const timeStoreHandlers = {
 
   onSeasonTimeoutImminent(
     set: ZustandSet,
-    payload: { ticksRemaining: number }
+    payload: { ticksRemaining: number },
   ): void {
-    set(state => {
+    set((state) => {
       state.time.seasonTimeoutImminent = true;
-      state.time.ticksUntilTimeout     = payload.ticksRemaining;
-      state.time.ticksRemaining        = Math.min(state.time.ticksRemaining, payload.ticksRemaining);
+      state.time.ticksUntilTimeout = payload.ticksRemaining;
+      state.time.ticksRemaining = Math.min(state.time.ticksRemaining, payload.ticksRemaining);
     });
   },
 
   onRunTimeout(
     set: ZustandSet,
-    payload: RunTimeoutEvent | { ticksElapsed?: number; outcome?: 'TIMEOUT' }
+    payload: RunTimeoutEvent | { ticksElapsed?: number; outcome?: 'TIMEOUT' },
   ): void {
     const normalized = normalizeRunTimeoutPayload(payload);
 
-    set(state => {
-      state.time.ticksElapsed          = normalized.ticksElapsed;
-      state.time.ticksRemaining        = 0;
-      state.time.ticksUntilTimeout     = 0;
+    set((state) => {
+      state.time.ticksElapsed = normalized.ticksElapsed;
+      state.time.ticksRemaining = 0;
+      state.time.ticksUntilTimeout = 0;
       state.time.seasonTimeoutImminent = true;
-      state.time.isRunActive           = false;
+      state.time.isRunActive = false;
       state.time.activeDecisionWindows = [];
     });
   },
 
   onRunStarted(set: ZustandSet, tickBudget: number): void {
-    set(state => {
+    set((state) => {
       Object.assign(state.time, {
         ...defaultTimeSlice.time,
         seasonTickBudget: tickBudget,
-        ticksRemaining:   tickBudget,
+        ticksRemaining: tickBudget,
         ticksUntilTimeout: tickBudget,
-        isRunActive:      true,
+        isRunActive: true,
       });
     });
   },
 
   onRunEnded(set: ZustandSet): void {
-    set(state => {
+    set((state) => {
       state.time.activeDecisionWindows = [];
-      state.time.isRunActive           = false;
-      state.time.isTierTransitioning   = false;
+      state.time.isRunActive = false;
+      state.time.isTierTransitioning = false;
     });
   },
 };
@@ -1020,50 +1040,53 @@ export const timeStoreHandlers = {
 // =============================================================================
 
 export const pressureStoreHandlers = {
-
   onScoreUpdated(
     set: ZustandSet,
-    payload: { score: number; tier: PressureTier; tickIndex: number }
+    payload: { score: number; tier: PressureTier; tickIndex: number },
   ): void {
-    set(state => {
-      state.pressure.score     = payload.score;
-      state.pressure.tier      = payload.tier;
+    set((state) => {
+      state.pressure.score = payload.score;
+      state.pressure.tier = payload.tier;
       state.pressure.tickIndex = payload.tickIndex;
     });
   },
 
   onTierChanged(
     set: ZustandSet,
-    payload: { from: PressureTier; to: PressureTier; score: number }
+    payload: { from: PressureTier; to: PressureTier; score: number },
   ): void {
-    set(state => {
+    set((state) => {
       state.pressure.previousTier = payload.from;
-      state.pressure.tier         = payload.to;
-      state.pressure.score        = payload.score;
+      state.pressure.tier = payload.to;
+      state.pressure.score = payload.score;
     });
   },
 
   onCritical(
     set: ZustandSet,
-    payload: { score: number; triggerSignals: string[] }
+    payload: { score: number; triggerSignals: string[] },
   ): void {
-    set(state => {
-      state.pressure.isCritical     = true;
+    set((state) => {
+      state.pressure.isCritical = true;
       state.pressure.triggerSignals = payload.triggerSignals;
-      state.pressure.score          = payload.score;
+      state.pressure.score = payload.score;
     });
   },
 
   onRunStarted(set: ZustandSet): void {
-    set(state => { Object.assign(state.pressure, { ...defaultPressureSlice.pressure }); });
+    set((state) => {
+      Object.assign(state.pressure, { ...defaultPressureSlice.pressure });
+    });
   },
 
   onRunEnded(set: ZustandSet): void {
-    set(state => { state.pressure.isCritical = false; });
+    set((state) => {
+      state.pressure.isCritical = false;
+    });
   },
 
   onTickComplete(set: ZustandSet): void {
-    set(state => {
+    set((state) => {
       if (state.pressure.score < 0.81) state.pressure.isCritical = false;
     });
   },
@@ -1074,35 +1097,38 @@ export const pressureStoreHandlers = {
 // =============================================================================
 
 export const tensionStoreHandlers = {
-
   onScoreUpdated(set: ZustandSet, event: TensionScoreUpdatedEvent): void {
-    set(state => {
-      state.tension.score           = event.score;
+    set((state) => {
+      state.tension.score = event.score;
       state.tension.visibilityState = event.visibilityState;
     });
   },
 
   onVisibilityChanged(set: ZustandSet, event: TensionVisibilityChangedEvent): void {
-    set(state => {
+    set((state) => {
       state.tension.previousVisibilityState = event.from;
-      state.tension.visibilityState         = event.to;
+      state.tension.visibilityState = event.to;
     });
   },
 
   onPulseFired(set: ZustandSet, event: TensionPulseFiredEvent): void {
-    set(state => {
-      state.tension.isPulseActive    = true;
+    set((state) => {
+      state.tension.isPulseActive = true;
       state.tension.pulseTicksActive = event.pulseTicksActive;
       state.tension.isSustainedPulse = event.pulseTicksActive >= 3;
     });
   },
 
   onThreatArrived(set: ZustandSet, _event: ThreatArrivedEvent): void {
-    set(state => { state.tension.arrivedCount += 1; });
+    set((state) => {
+      state.tension.arrivedCount += 1;
+    });
   },
 
   onThreatExpired(set: ZustandSet, _event: ThreatExpiredEvent): void {
-    set(state => { state.tension.expiredCount += 1; });
+    set((state) => {
+      state.tension.expiredCount += 1;
+    });
   },
 
   onSnapshotAvailable(
@@ -1110,38 +1136,40 @@ export const tensionStoreHandlers = {
     snapshot: TensionSnapshot,
     sortedQueue: AnticipationEntry[],
   ): void {
-    set(state => {
-      state.tension.score            = snapshot.score;
-      state.tension.visibilityState  = snapshot.visibilityState;
-      state.tension.queueLength      = snapshot.queueLength;
-      state.tension.arrivedCount     = snapshot.arrivedCount;
-      state.tension.queuedCount      = snapshot.queuedCount;
-      state.tension.expiredCount     = snapshot.expiredCount;
-      state.tension.isPulseActive    = snapshot.isPulseActive;
+    set((state) => {
+      state.tension.score = snapshot.score;
+      state.tension.visibilityState = snapshot.visibilityState;
+      state.tension.queueLength = snapshot.queueLength;
+      state.tension.arrivedCount = snapshot.arrivedCount;
+      state.tension.queuedCount = snapshot.queuedCount;
+      state.tension.expiredCount = snapshot.expiredCount;
+      state.tension.isPulseActive = snapshot.isPulseActive;
       state.tension.pulseTicksActive = snapshot.pulseTicksActive;
       state.tension.isSustainedPulse = snapshot.pulseTicksActive >= 3;
-      state.tension.isEscalating     = snapshot.isEscalating;
-      state.tension.scoreHistory     = [...snapshot.scoreHistory];
-      state.tension.sortedQueue      = [...sortedQueue];
-      state.tension.currentTick      = snapshot.tickNumber;
+      state.tension.isEscalating = snapshot.isEscalating;
+      state.tension.scoreHistory = [...snapshot.scoreHistory];
+      state.tension.sortedQueue = [...sortedQueue];
+      state.tension.currentTick = snapshot.tickNumber;
 
-      const firstArrived = sortedQueue.find(e => e.isArrived) ?? null;
+      const firstArrived = sortedQueue.find((e) => e.isArrived) ?? null;
       if (firstArrived !== null) state.tension.lastArrivedEntry = firstArrived;
     });
   },
 
   onRunStarted(set: ZustandSet): void {
-    set(state => {
+    set((state) => {
       Object.assign(state.tension, { ...defaultTensionSlice.tension, isRunActive: true });
     });
   },
 
   onRunEnded(set: ZustandSet): void {
-    set(state => { state.tension.isRunActive = false; });
+    set((state) => {
+      state.tension.isRunActive = false;
+    });
   },
 
   onTickComplete(set: ZustandSet): void {
-    set(state => {
+    set((state) => {
       if (!state.tension.isPulseActive) {
         state.tension.pulseTicksActive = 0;
         state.tension.isSustainedPulse = false;
@@ -1155,40 +1183,43 @@ export const tensionStoreHandlers = {
 // =============================================================================
 
 export const shieldStoreHandlers = {
-
   onSnapshotUpdated(set: ZustandSet, snapshot: ShieldSnapshot): void {
-    set(state => {
-      state.shield.snapshot            = snapshot;
+    set((state) => {
+      state.shield.snapshot = snapshot;
       state.shield.overallIntegrityPct = snapshot.overallIntegrityPct;
-      state.shield.weakestLayerId      = snapshot.weakestLayerId;
-      state.shield.isFortified         = snapshot.isFortified;
-      state.shield.cascadeCount        = snapshot.cascadeCount;
-      state.shield.isInBreachCascade   = snapshot.isInBreachCascade;
+      state.shield.weakestLayerId = snapshot.weakestLayerId;
+      state.shield.isFortified = snapshot.isFortified;
+      state.shield.cascadeCount = snapshot.cascadeCount;
+      state.shield.isInBreachCascade = snapshot.isInBreachCascade;
     });
   },
 
   onShieldHit(set: ZustandSet, e: ShieldHitEvent): void {
-    set(state => { state.shield.lastDamageResult = e.damageResult; });
+    set((state) => {
+      state.shield.lastDamageResult = e.damageResult;
+    });
   },
 
   onLayerBreached(set: ZustandSet, e: ShieldLayerBreachedEvent): void {
-    set(state => {
+    set((state) => {
       state.shield.lastBreachedLayerId = e.layerId;
       if (e.cascadeTriggered) {
         state.shield.isInBreachCascade = true;
-        state.shield.cascadeCount     += 1;
+        state.shield.cascadeCount += 1;
       }
     });
   },
 
   onRunStarted(set: ZustandSet): void {
-    set(state => {
+    set((state) => {
       Object.assign(state.shield, { ...defaultShieldSlice.shield, isRunActive: true });
     });
   },
 
   onRunEnded(set: ZustandSet): void {
-    set(state => { state.shield.isRunActive = false; });
+    set((state) => {
+      state.shield.isRunActive = false;
+    });
   },
 };
 
@@ -1197,38 +1228,42 @@ export const shieldStoreHandlers = {
 // =============================================================================
 
 export const battleStoreHandlers = {
-
   onSnapshotUpdated(set: ZustandSet, e: BattleSnapshotUpdatedEvent): void {
-    set(state => {
-      const snap                   = e.snapshot;
-      state.battle.snapshot        = snap;
-      state.battle.budget          = snap.budget;
-      state.battle.haterHeat       = snap.haterHeat;
-      state.battle.injectedCards   = snap.injectedCards;
+    set((state) => {
+      const snap = e.snapshot;
+      state.battle.snapshot = snap;
+      state.battle.budget = snap.budget;
+      state.battle.haterHeat = snap.haterHeat;
+      state.battle.injectedCards = snap.injectedCards;
       state.battle.activeBotsCount = snap.activeBotsCount;
-      state.battle.tickNumber      = snap.tickNumber;
+      state.battle.tickNumber = snap.tickNumber;
 
       state.battle.activeBots = (Object.values(snap.bots) as HaterBotRuntimeState[])
-        .filter(b =>
-          b.state === BotState.TARGETING ||
-          b.state === BotState.ATTACKING  ||
-          b.state === BotState.WATCHING
+        .filter(
+          (b) =>
+            b.state === BotState.TARGETING ||
+            b.state === BotState.ATTACKING ||
+            b.state === BotState.WATCHING,
         );
     });
   },
 
   onBotStateChanged(set: ZustandSet, e: BotStateChangedEvent): void {
-    set(state => { state.battle.lastStateChange = e; });
+    set((state) => {
+      state.battle.lastStateChange = e;
+    });
   },
 
   onBotAttackFired(set: ZustandSet, e: BotAttackFiredEvent): void {
-    set(state => { state.battle.lastAttackFired = e; });
+    set((state) => {
+      state.battle.lastAttackFired = e;
+    });
   },
 
   onCardInjected(set: ZustandSet, e: CardInjectedEvent): void {
-    set(state => {
+    set((state) => {
       const exists = state.battle.injectedCards.some(
-        c => c.injectionId === e.injectedCard.injectionId
+        (c) => c.injectionId === e.injectedCard.injectionId,
       );
       if (!exists) {
         state.battle.injectedCards = [...state.battle.injectedCards, e.injectedCard];
@@ -1237,21 +1272,23 @@ export const battleStoreHandlers = {
   },
 
   onCardExpired(set: ZustandSet, e: InjectedCardExpiredEvent): void {
-    set(state => {
+    set((state) => {
       state.battle.injectedCards = state.battle.injectedCards.filter(
-        c => c.injectionId !== e.injectionId
+        (c) => c.injectionId !== e.injectionId,
       );
     });
   },
 
   onRunStarted(set: ZustandSet): void {
-    set(state => {
+    set((state) => {
       Object.assign(state.battle, { ...defaultBattleSlice.battle, isRunActive: true });
     });
   },
 
   onRunEnded(set: ZustandSet): void {
-    set(state => { state.battle.isRunActive = false; });
+    set((state) => {
+      state.battle.isRunActive = false;
+    });
   },
 };
 
@@ -1260,56 +1297,69 @@ export const battleStoreHandlers = {
 // =============================================================================
 
 export const cascadeStoreHandlers = {
-
   onSnapshotUpdated(set: ZustandSet, e: CascadeSnapshotUpdatedEvent): void {
-    set(state => {
-      const snap                           = e.snapshot;
-      state.cascade.snapshot               = snap;
-      state.cascade.activeNegativeChains   = snap.activeNegativeChains;
+    set((state) => {
+      const snap = e.snapshot;
+      state.cascade.snapshot = snap;
+      state.cascade.activeNegativeChains = snap.activeNegativeChains;
       state.cascade.activePositiveCascades = snap.activePositiveCascades;
-      state.cascade.totalLinksDefeated     = snap.totalLinksDefeated;
-      state.cascade.tickNumber             = snap.tickNumber;
+      state.cascade.totalLinksDefeated = snap.totalLinksDefeated;
+      state.cascade.tickNumber = snap.tickNumber;
     });
   },
 
   onChainStarted(set: ZustandSet, e: CascadeChainStartedEvent): void {
-    set(state => { state.cascade.latestChainStarted = e; });
+    set((state) => {
+      state.cascade.latestChainStarted = e;
+    });
   },
 
   onLinkFired(set: ZustandSet, e: CascadeLinkFiredEvent): void {
-    set(state => { state.cascade.latestLinkFired = e; });
+    set((state) => {
+      state.cascade.latestLinkFired = e;
+    });
   },
 
   onChainBroken(set: ZustandSet, e: CascadeChainBrokenEvent): void {
-    set(state => { state.cascade.latestChainBroken = e; });
+    set((state) => {
+      state.cascade.latestChainBroken = e;
+    });
   },
 
   onChainCompleted(set: ZustandSet, e: CascadeChainCompletedEvent): void {
-    set(state => { state.cascade.latestChainCompleted = e; });
+    set((state) => {
+      state.cascade.latestChainCompleted = e;
+    });
   },
 
   onPositiveActivated(set: ZustandSet, e: CascadePositiveActivatedEvent): void {
-    set(state => { state.cascade.latestPositiveActivated = e; });
+    set((state) => {
+      state.cascade.latestPositiveActivated = e;
+    });
   },
 
   onPositiveDissolved(set: ZustandSet, e: CascadePositiveDissolvedEvent): void {
-    set(state => { state.cascade.latestPositiveDissolved = e; });
+    set((state) => {
+      state.cascade.latestPositiveDissolved = e;
+    });
   },
 
   onNemesisBroken(set: ZustandSet, e: NemesisBrokenEvent): void {
-    set(state => {
+    set((state) => {
       state.cascade.nemesisBrokenEvents = [...state.cascade.nemesisBrokenEvents, e];
     });
   },
 
   onRunStarted(set: ZustandSet): void {
-    set(state => {
+    set((state) => {
       Object.assign(state.cascade, { ...defaultCascadeSlice.cascade, isRunActive: true });
     });
   },
 
   onRunEnded(set: ZustandSet): void {
-    set(state => { state.cascade.isRunActive = false; });
+    set((state) => {
+      state.cascade.isRunActive = false;
+    });
   },
 };
 
@@ -1318,22 +1368,21 @@ export const cascadeStoreHandlers = {
 // =============================================================================
 
 export const sovereigntyStoreHandlers = {
-
   onRunCompleted(set: ZustandSet, e: RunCompletedPayload): void {
-    set(state => {
-      state.sovereignty.proofHash        = e.proofHash;
-      state.sovereignty.grade            = e.grade;
+    set((state) => {
+      state.sovereignty.proofHash = e.proofHash;
+      state.sovereignty.grade = e.grade;
       state.sovereignty.sovereigntyScore = e.sovereigntyScore;
-      state.sovereignty.integrityStatus  = e.integrityStatus;
-      state.sovereignty.reward           = e.reward;
-      state.sovereignty.pipelineStatus   = 'COMPLETE';
+      state.sovereignty.integrityStatus = e.integrityStatus;
+      state.sovereignty.reward = e.reward;
+      state.sovereignty.pipelineStatus = 'COMPLETE';
     });
   },
 
   onVerificationFailed(set: ZustandSet, e: ProofVerificationFailedPayload): void {
-    set(state => {
+    set((state) => {
       state.sovereignty.lastFailureReason = e.reason;
-      state.sovereignty.lastFailureStep   = e.step;
+      state.sovereignty.lastFailureStep = e.step;
       if (e.step === 2 || e.step === 3) {
         state.sovereignty.pipelineStatus = 'FAILED';
       }
@@ -1341,11 +1390,13 @@ export const sovereigntyStoreHandlers = {
   },
 
   onPipelineStarted(set: ZustandSet): void {
-    set(state => { state.sovereignty.pipelineStatus = 'RUNNING'; });
+    set((state) => {
+      state.sovereignty.pipelineStatus = 'RUNNING';
+    });
   },
 
   onRunStarted(set: ZustandSet): void {
-    set(state => {
+    set((state) => {
       Object.assign(state.sovereignty, {
         ...defaultSovereigntySlice.sovereignty,
         isRunActive: true,
@@ -1354,7 +1405,9 @@ export const sovereigntyStoreHandlers = {
   },
 
   onRunEnded(set: ZustandSet): void {
-    set(state => { state.sovereignty.isRunActive = false; });
+    set((state) => {
+      state.sovereignty.isRunActive = false;
+    });
   },
 };
 
@@ -1363,35 +1416,35 @@ export const sovereigntyStoreHandlers = {
 // =============================================================================
 
 export function wireTimeEngineHandlers(eventBus: EventBus, set: ZustandSet): void {
-  eventBus.on('TICK_TIER_CHANGED',        (e: any) => timeStoreHandlers.onTickTierChanged(set, e.payload ?? e));
-  eventBus.on('TICK_TIER_FORCED',         (e: any) => timeStoreHandlers.onTickTierForced(set, e.payload ?? e));
-  eventBus.on('TICK_COMPLETE',            (e: any) => timeStoreHandlers.onTickComplete(set, e.payload ?? e));
-  eventBus.on('DECISION_WINDOW_OPENED',   (e: any) => timeStoreHandlers.onDecisionWindowOpened(set, e.payload ?? e));
-  eventBus.on('DECISION_WINDOW_EXPIRED',  (e: any) => timeStoreHandlers.onDecisionWindowClosed(set, e.payload ?? e));
+  eventBus.on('TICK_TIER_CHANGED', (e: any) => timeStoreHandlers.onTickTierChanged(set, e.payload ?? e));
+  eventBus.on('TICK_TIER_FORCED', (e: any) => timeStoreHandlers.onTickTierForced(set, e.payload ?? e));
+  eventBus.on('TICK_COMPLETE', (e: any) => timeStoreHandlers.onTickComplete(set, e.payload ?? e));
+  eventBus.on('DECISION_WINDOW_OPENED', (e: any) => timeStoreHandlers.onDecisionWindowOpened(set, e.payload ?? e));
+  eventBus.on('DECISION_WINDOW_EXPIRED', (e: any) => timeStoreHandlers.onDecisionWindowClosed(set, e.payload ?? e));
   eventBus.on('DECISION_WINDOW_RESOLVED', (e: any) => timeStoreHandlers.onDecisionWindowClosed(set, e.payload ?? e));
-  eventBus.on('HOLD_ACTION_USED'         as any, (e: any) => timeStoreHandlers.onHoldUsed(set, e.payload ?? e));
-  eventBus.on('RUN_TIMEOUT'              as any, (e: any) => timeStoreHandlers.onRunTimeout(set, e.payload ?? e));
-  eventBus.on('SEASON_TIMEOUT_IMMINENT',  (e: any) => timeStoreHandlers.onSeasonTimeoutImminent(set, e.payload ?? e));
+  eventBus.on('HOLD_ACTION_USED' as any, (e: any) => timeStoreHandlers.onHoldUsed(set, e.payload ?? e));
+  eventBus.on('RUN_TIMEOUT' as any, (e: any) => timeStoreHandlers.onRunTimeout(set, e.payload ?? e));
+  eventBus.on('SEASON_TIMEOUT_IMMINENT', (e: any) => timeStoreHandlers.onSeasonTimeoutImminent(set, e.payload ?? e));
 }
 
 export function wirePressureEngineHandlers(eventBus: EventBus, set: ZustandSet): void {
   eventBus.on('PRESSURE_SCORE_UPDATED', (e: any) => pressureStoreHandlers.onScoreUpdated(set, e.payload));
-  eventBus.on('PRESSURE_TIER_CHANGED',  (e: any) => pressureStoreHandlers.onTierChanged(set, e.payload));
-  eventBus.on('PRESSURE_CRITICAL',      (e: any) => pressureStoreHandlers.onCritical(set, e.payload));
+  eventBus.on('PRESSURE_TIER_CHANGED', (e: any) => pressureStoreHandlers.onTierChanged(set, e.payload));
+  eventBus.on('PRESSURE_CRITICAL', (e: any) => pressureStoreHandlers.onCritical(set, e.payload));
 }
 
 export function wireTensionEngineHandlers(eventBus: EventBus, set: ZustandSet): void {
-  eventBus.on('TENSION_SCORE_UPDATED'       as any, (e: any) => tensionStoreHandlers.onScoreUpdated(set, e.payload ?? e));
-  eventBus.on('TENSION_VISIBILITY_CHANGED'  as any, (e: any) => tensionStoreHandlers.onVisibilityChanged(set, e.payload ?? e));
-  eventBus.on('TENSION_PULSE_FIRED'         as any, (e: any) => tensionStoreHandlers.onPulseFired(set, e.payload ?? e));
-  eventBus.on('THREAT_ARRIVED'              as any, (e: any) => tensionStoreHandlers.onThreatArrived(set, e.payload ?? e));
-  eventBus.on('THREAT_EXPIRED'              as any, (e: any) => tensionStoreHandlers.onThreatExpired(set, e.payload ?? e));
+  eventBus.on('TENSION_SCORE_UPDATED' as any, (e: any) => tensionStoreHandlers.onScoreUpdated(set, e.payload ?? e));
+  eventBus.on('TENSION_VISIBILITY_CHANGED' as any, (e: any) => tensionStoreHandlers.onVisibilityChanged(set, e.payload ?? e));
+  eventBus.on('TENSION_PULSE_FIRED' as any, (e: any) => tensionStoreHandlers.onPulseFired(set, e.payload ?? e));
+  eventBus.on('THREAT_ARRIVED' as any, (e: any) => tensionStoreHandlers.onThreatArrived(set, e.payload ?? e));
+  eventBus.on('THREAT_EXPIRED' as any, (e: any) => tensionStoreHandlers.onThreatExpired(set, e.payload ?? e));
 }
 
 export function wireShieldEngineHandlers(eventBus: EventBus, set: ZustandSet): void {
-  eventBus.on('SHIELD_HIT'               as any, (e: any) => shieldStoreHandlers.onShieldHit(set, e.payload ?? e));
-  eventBus.on('SHIELD_LAYER_BREACHED'    as any, (e: any) => shieldStoreHandlers.onLayerBreached(set, e.payload ?? e));
-  eventBus.on('SHIELD_SNAPSHOT_UPDATED'  as any, (e: any) => {
+  eventBus.on('SHIELD_HIT' as any, (e: any) => shieldStoreHandlers.onShieldHit(set, e.payload ?? e));
+  eventBus.on('SHIELD_LAYER_BREACHED' as any, (e: any) => shieldStoreHandlers.onLayerBreached(set, e.payload ?? e));
+  eventBus.on('SHIELD_SNAPSHOT_UPDATED' as any, (e: any) => {
     const snap: ShieldSnapshot = (e.payload ?? e).snapshot ?? (e.payload ?? e);
     shieldStoreHandlers.onSnapshotUpdated(set, snap);
   });
@@ -1399,26 +1452,26 @@ export function wireShieldEngineHandlers(eventBus: EventBus, set: ZustandSet): v
 
 export function wireBattleEngineHandlers(eventBus: EventBus, set: ZustandSet): void {
   eventBus.on('BATTLE_SNAPSHOT_UPDATED' as any, (e: any) => battleStoreHandlers.onSnapshotUpdated(set, e.payload ?? e));
-  eventBus.on('BOT_STATE_CHANGED'       as any, (e: any) => battleStoreHandlers.onBotStateChanged(set, e.payload ?? e));
-  eventBus.on('BOT_ATTACK_FIRED'        as any, (e: any) => battleStoreHandlers.onBotAttackFired(set, e.payload ?? e));
-  eventBus.on('CARD_INJECTED'           as any, (e: any) => battleStoreHandlers.onCardInjected(set, e.payload ?? e));
-  eventBus.on('INJECTED_CARD_EXPIRED'   as any, (e: any) => battleStoreHandlers.onCardExpired(set, e.payload ?? e));
+  eventBus.on('BOT_STATE_CHANGED' as any, (e: any) => battleStoreHandlers.onBotStateChanged(set, e.payload ?? e));
+  eventBus.on('BOT_ATTACK_FIRED' as any, (e: any) => battleStoreHandlers.onBotAttackFired(set, e.payload ?? e));
+  eventBus.on('CARD_INJECTED' as any, (e: any) => battleStoreHandlers.onCardInjected(set, e.payload ?? e));
+  eventBus.on('INJECTED_CARD_EXPIRED' as any, (e: any) => battleStoreHandlers.onCardExpired(set, e.payload ?? e));
 }
 
 export function wireCascadeEngineHandlers(eventBus: EventBus, set: ZustandSet): void {
-  eventBus.on('CASCADE_CHAIN_STARTED'       as any, (e: any) => cascadeStoreHandlers.onChainStarted(set, e.payload ?? e));
-  eventBus.on('CASCADE_LINK_FIRED'          as any, (e: any) => cascadeStoreHandlers.onLinkFired(set, e.payload ?? e));
-  eventBus.on('CASCADE_CHAIN_BROKEN'        as any, (e: any) => cascadeStoreHandlers.onChainBroken(set, e.payload ?? e));
-  eventBus.on('CASCADE_CHAIN_COMPLETED'     as any, (e: any) => cascadeStoreHandlers.onChainCompleted(set, e.payload ?? e));
-  eventBus.on('CASCADE_POSITIVE_ACTIVATED'  as any, (e: any) => cascadeStoreHandlers.onPositiveActivated(set, e.payload ?? e));
-  eventBus.on('CASCADE_POSITIVE_DISSOLVED'  as any, (e: any) => cascadeStoreHandlers.onPositiveDissolved(set, e.payload ?? e));
-  eventBus.on('NEMESIS_BROKEN'              as any, (e: any) => cascadeStoreHandlers.onNemesisBroken(set, e.payload ?? e));
-  eventBus.on('CASCADE_SNAPSHOT_UPDATED'    as any, (e: any) => cascadeStoreHandlers.onSnapshotUpdated(set, e.payload ?? e));
+  eventBus.on('CASCADE_CHAIN_STARTED' as any, (e: any) => cascadeStoreHandlers.onChainStarted(set, e.payload ?? e));
+  eventBus.on('CASCADE_LINK_FIRED' as any, (e: any) => cascadeStoreHandlers.onLinkFired(set, e.payload ?? e));
+  eventBus.on('CASCADE_CHAIN_BROKEN' as any, (e: any) => cascadeStoreHandlers.onChainBroken(set, e.payload ?? e));
+  eventBus.on('CASCADE_CHAIN_COMPLETED' as any, (e: any) => cascadeStoreHandlers.onChainCompleted(set, e.payload ?? e));
+  eventBus.on('CASCADE_POSITIVE_ACTIVATED' as any, (e: any) => cascadeStoreHandlers.onPositiveActivated(set, e.payload ?? e));
+  eventBus.on('CASCADE_POSITIVE_DISSOLVED' as any, (e: any) => cascadeStoreHandlers.onPositiveDissolved(set, e.payload ?? e));
+  eventBus.on('NEMESIS_BROKEN' as any, (e: any) => cascadeStoreHandlers.onNemesisBroken(set, e.payload ?? e));
+  eventBus.on('CASCADE_SNAPSHOT_UPDATED' as any, (e: any) => cascadeStoreHandlers.onSnapshotUpdated(set, e.payload ?? e));
 }
 
 export function wireSovereigntyEngineHandlers(eventBus: EventBus, set: ZustandSet): void {
-  eventBus.on('RUN_COMPLETED'              as any, (e: any) => sovereigntyStoreHandlers.onRunCompleted(set, e.payload));
-  eventBus.on('PROOF_VERIFICATION_FAILED'  as any, (e: any) => sovereigntyStoreHandlers.onVerificationFailed(set, e.payload));
+  eventBus.on('RUN_COMPLETED' as any, (e: any) => sovereigntyStoreHandlers.onRunCompleted(set, e.payload));
+  eventBus.on('PROOF_VERIFICATION_FAILED' as any, (e: any) => sovereigntyStoreHandlers.onVerificationFailed(set, e.payload));
 }
 
 // =============================================================================
