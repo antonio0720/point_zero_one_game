@@ -1,3 +1,5 @@
+// /Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/pzo-web/src/features/run/hooks/useTickTierEffects.ts
+
 /**
  * FILE: pzo-web/src/features/run/hooks/useTickTierEffects.ts
  * Engine 1 — Tick tier side-effect hook
@@ -12,10 +14,15 @@
  * - optionally toggles a screen-shake class on a target element when collapse tier fires
  * - emits a CustomEvent for audio / analytics systems to consume
  * - safe on SSR / test environments
+ *
+ * Important:
+ * - this hook is wired to the live useTimeEngine() contract
+ * - it derives previous-tier and effect metadata locally instead of assuming
+ *   a richer TICK_TIER_CONFIGS export exists in the current repo
  */
 
 import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
-import { TICK_TIER_CONFIGS, TickTier } from '../../../engines/time/types';
+import { TickTier } from '../../../engines/zero/types';
 import { useTimeEngine } from './useTimeEngine';
 
 export interface UseTickTierEffectsOptions {
@@ -63,6 +70,37 @@ const DEFAULT_OPTIONS: Required<
   enableScreenShake: true,
 };
 
+const TIER_EFFECTS: Record<
+  TickTier,
+  { visualBorderClass: string; audioSignal: string | null; screenShake: boolean }
+> = {
+  [TickTier.SOVEREIGN]: {
+    visualBorderClass: 'border-sovereign',
+    audioSignal: 'tick_sovereign',
+    screenShake: false,
+  },
+  [TickTier.STABLE]: {
+    visualBorderClass: 'border-stable',
+    audioSignal: 'tick_standard',
+    screenShake: false,
+  },
+  [TickTier.COMPRESSED]: {
+    visualBorderClass: 'border-compressed',
+    audioSignal: 'tick_compressed',
+    screenShake: false,
+  },
+  [TickTier.CRISIS]: {
+    visualBorderClass: 'border-crisis',
+    audioSignal: 'tick_crisis',
+    screenShake: false,
+  },
+  [TickTier.COLLAPSE_IMMINENT]: {
+    visualBorderClass: 'border-collapse',
+    audioSignal: 'tick_collapse',
+    screenShake: true,
+  },
+};
+
 function isBrowser(): boolean {
   return typeof window !== 'undefined' && typeof document !== 'undefined';
 }
@@ -72,23 +110,42 @@ function getTargetElement(targetRef?: RefObject<HTMLElement | null>): HTMLElemen
   return targetRef?.current ?? document.documentElement;
 }
 
-export function useTickTierEffects(options: UseTickTierEffectsOptions = {}): UseTickTierEffectsResult {
+export function useTickTierEffects(
+  options: UseTickTierEffectsOptions = {},
+): UseTickTierEffectsResult {
   const {
     currentTier,
-    previousTier,
-    tierChangedThisTick,
-    visualBorderClass,
-    screenShake,
-    audioSignal,
+    tickDurationMs,
+    isTierTransitioning,
+    seasonTimeoutImminent,
+    ticksUntilTimeout,
   } = useTimeEngine();
 
   const resolvedOptions = { ...DEFAULT_OPTIONS, ...options };
-  const shakeTimeoutRef = useRef<number | null>(null);
-  const lastEmittedTierRef = useRef<TickTier | null>(null);
+  const config = useMemo(() => TIER_EFFECTS[currentTier], [currentTier]);
+
+  const [previousTier, setPreviousTier] = useState<TickTier | null>(null);
   const [screenShakeActive, setScreenShakeActive] = useState<boolean>(false);
 
-  const config = useMemo(() => TICK_TIER_CONFIGS[currentTier], [currentTier]);
-  const isCollapseTier = currentTier === TickTier.COLLAPSE_IMMINENT;
+  const lastSeenTierRef = useRef<TickTier | null>(null);
+  const shakeTimeoutRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    const lastSeenTier = lastSeenTierRef.current;
+
+    if (lastSeenTier === null) {
+      lastSeenTierRef.current = currentTier;
+      return;
+    }
+
+    if (lastSeenTier !== currentTier) {
+      setPreviousTier(lastSeenTier);
+      lastSeenTierRef.current = currentTier;
+      return;
+    }
+
+    lastSeenTierRef.current = currentTier;
+  }, [currentTier]);
 
   useEffect(() => {
     if (!isBrowser() || !resolvedOptions.enableDomAttributes) return;
@@ -97,31 +154,49 @@ export function useTickTierEffects(options: UseTickTierEffectsOptions = {}): Use
     const prefix = resolvedOptions.rootDataAttributePrefix;
 
     root.dataset[`${prefix}Tier`] = currentTier;
-    root.dataset[`${prefix}TierChanged`] = String(Boolean(tierChangedThisTick));
-    root.dataset[`${prefix}Audio`] = audioSignal ?? '';
-    root.dataset[`${prefix}Shake`] = String(Boolean(screenShake));
+    root.dataset[`${prefix}TierTransitioning`] = String(Boolean(isTierTransitioning));
+    root.dataset[`${prefix}BorderClass`] = config.visualBorderClass;
+    root.dataset[`${prefix}Audio`] = config.audioSignal ?? '';
+    root.dataset[`${prefix}Shake`] = String(Boolean(config.screenShake));
+    root.dataset[`${prefix}TimeoutImminent`] = String(Boolean(seasonTimeoutImminent));
+    root.dataset[`${prefix}TicksUntilTimeout`] = String(
+      Number.isFinite(ticksUntilTimeout) ? ticksUntilTimeout : '',
+    );
+    root.dataset[`${prefix}TickDurationMs`] = String(
+      Number.isFinite(tickDurationMs) ? tickDurationMs : '',
+    );
 
     return () => {
-      if (!document.documentElement) return;
-      delete document.documentElement.dataset[`${prefix}TierChanged`];
+      delete root.dataset[`${prefix}TierTransitioning`];
+      delete root.dataset[`${prefix}TimeoutImminent`];
+      delete root.dataset[`${prefix}TicksUntilTimeout`];
+      delete root.dataset[`${prefix}TickDurationMs`];
     };
   }, [
+    config.audioSignal,
+    config.screenShake,
+    config.visualBorderClass,
     currentTier,
-    tierChangedThisTick,
-    audioSignal,
-    screenShake,
+    isTierTransitioning,
     resolvedOptions.enableDomAttributes,
     resolvedOptions.rootDataAttributePrefix,
+    seasonTimeoutImminent,
+    tickDurationMs,
+    ticksUntilTimeout,
   ]);
 
   useEffect(() => {
     if (!isBrowser()) return;
-    if (!tierChangedThisTick && lastEmittedTierRef.current === currentTier) return;
 
-    lastEmittedTierRef.current = currentTier;
+    const previous = lastSeenTierRef.current;
+    const tierActuallyChanged = previous !== null && previous !== currentTier;
+
+    if (!tierActuallyChanged) {
+      return;
+    }
 
     const payload = {
-      previousTier,
+      previousTier: previous,
       currentTier,
       audioSignal: config.audioSignal,
       screenShake: config.screenShake,
@@ -144,31 +219,40 @@ export function useTickTierEffects(options: UseTickTierEffectsOptions = {}): Use
     window.dispatchEvent(
       new CustomEvent('pzo:time:tier-changed', {
         detail: {
-          previousTier,
+          previousTier: previous,
           currentTier,
           borderClassName: config.visualBorderClass,
           audioSignal: config.audioSignal,
           screenShake: config.screenShake,
+          isTierTransitioning,
+          seasonTimeoutImminent,
+          ticksUntilTimeout,
+          tickDurationMs,
           timestamp: Date.now(),
         },
       }),
     );
   }, [
-    currentTier,
-    previousTier,
-    tierChangedThisTick,
     config.audioSignal,
     config.screenShake,
     config.visualBorderClass,
+    currentTier,
+    isTierTransitioning,
     options,
     resolvedOptions.enableAudioEvent,
+    seasonTimeoutImminent,
+    tickDurationMs,
+    ticksUntilTimeout,
   ]);
 
   useEffect(() => {
     if (!isBrowser()) return;
     if (!resolvedOptions.enableScreenShake) return;
+
+    const lastSeenTier = lastSeenTierRef.current;
+    const tierActuallyChanged = lastSeenTier !== null && lastSeenTier !== currentTier;
+    if (!tierActuallyChanged) return;
     if (!config.screenShake) return;
-    if (!tierChangedThisTick) return;
 
     const target = getTargetElement(options.targetRef);
     if (!target) return;
@@ -196,9 +280,8 @@ export function useTickTierEffects(options: UseTickTierEffectsOptions = {}): Use
       setScreenShakeActive(false);
     };
   }, [
-    currentTier,
-    tierChangedThisTick,
     config.screenShake,
+    currentTier,
     options.targetRef,
     resolvedOptions.enableScreenShake,
     resolvedOptions.screenShakeClassName,
@@ -208,10 +291,12 @@ export function useTickTierEffects(options: UseTickTierEffectsOptions = {}): Use
   return {
     currentTier,
     previousTier,
-    audioSignal,
-    borderClassName: visualBorderClass,
+    audioSignal: config.audioSignal,
+    borderClassName: config.visualBorderClass,
     screenShakeActive,
-    isCollapseTier,
-    isTransitioning: Boolean(tierChangedThisTick),
+    isCollapseTier: currentTier === TickTier.COLLAPSE_IMMINENT,
+    isTransitioning: Boolean(isTierTransitioning),
   };
 }
+
+export default useTickTierEffects;

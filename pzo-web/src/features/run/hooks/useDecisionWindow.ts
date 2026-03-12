@@ -1,10 +1,12 @@
+// /Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/pzo-web/src/features/run/hooks/useDecisionWindow.ts
+
 /**
  * FILE: pzo-web/src/features/run/hooks/useDecisionWindow.ts
  * POINT ZERO ONE — ENGINE 1 DECISION WINDOW HOOK
  *
  * This hook supports BOTH of the store shapes that have existed in the Time lane:
  *
- * 1) Minimal store entry shape currently present in engineStore:
+ * 1) Minimal store entry shape currently present in older engineStore paths:
  *    {
  *      cardId: string;
  *      durationMs: number;
@@ -12,7 +14,7 @@
  *      autoResolve: string;
  *    }
  *
- * 2) Rich countdown window shape expected by the Time Engine spec:
+ * 2) Rich countdown window shape expected by newer Time Engine handlers:
  *    {
  *      windowId: string;
  *      cardId: string;
@@ -31,8 +33,9 @@
  * - Never mutate the store from this hook.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useEngineStore } from '../../../store/engineStore';
+import { formatTickCountdown } from './useTickCountdown';
 
 type UnknownStoreWindow = Record<string, unknown>;
 
@@ -41,6 +44,20 @@ interface MinimalDecisionWindowEntry {
   durationMs: number;
   openedAtTick: number;
   autoResolve: string;
+}
+
+interface RichDecisionWindowEntry {
+  windowId?: string | null;
+  cardId: string;
+  durationMs: number;
+  remainingMs: number;
+  openedAtTick?: number | null;
+  openedAtMs?: number | null;
+  expiresAtMs?: number | null;
+  autoResolve?: string | null;
+  isOnHold?: boolean;
+  isExpired?: boolean;
+  isResolved?: boolean;
 }
 
 export interface DecisionWindowView {
@@ -69,15 +86,11 @@ export interface UseDecisionWindowResult {
   isResolved: boolean;
 }
 
-function isRichWindowShape(value: UnknownStoreWindow | null): boolean {
-  return !!value && typeof value.remainingMs === 'number';
-}
-
-function isMinimalWindowShape(value: UnknownStoreWindow | null): value is UnknownStoreWindow & MinimalDecisionWindowEntry {
-  return !!value
-    && typeof value.cardId === 'string'
-    && typeof value.durationMs === 'number'
-    && typeof value.openedAtTick === 'number';
+function clamp01(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  if (value <= 0) return 0;
+  if (value >= 1) return 1;
+  return value;
 }
 
 function coerceNumber(value: unknown, fallback: number): number {
@@ -88,79 +101,123 @@ function coerceString(value: unknown, fallback: string | null = null): string | 
   return typeof value === 'string' ? value : fallback;
 }
 
+function isRichWindowShape(
+  value: UnknownStoreWindow | null,
+): value is UnknownStoreWindow & RichDecisionWindowEntry {
+  return (
+    !!value &&
+    typeof value.cardId === 'string' &&
+    typeof value.durationMs === 'number' &&
+    Number.isFinite(value.durationMs) &&
+    typeof value.remainingMs === 'number' &&
+    Number.isFinite(value.remainingMs)
+  );
+}
+
+function isMinimalWindowShape(
+  value: UnknownStoreWindow | null,
+): value is UnknownStoreWindow & MinimalDecisionWindowEntry {
+  return (
+    !!value &&
+    typeof value.cardId === 'string' &&
+    typeof value.durationMs === 'number' &&
+    Number.isFinite(value.durationMs) &&
+    typeof value.openedAtTick === 'number' &&
+    Number.isFinite(value.openedAtTick)
+  );
+}
+
+export function formatCountdown(remainingMs: number): string {
+  return formatTickCountdown(remainingMs);
+}
+
 export function useDecisionWindow(cardId: string): UseDecisionWindowResult {
   const storeWindow = useEngineStore(
-    (s) =>
-      ((s.time.activeDecisionWindows as unknown[]).find((w) => {
-        const candidate = w as UnknownStoreWindow;
-        return candidate?.cardId === cardId;
+    (state) =>
+      ((state.time.activeDecisionWindows as unknown[]).find((value) => {
+        if (!value || typeof value !== 'object') return false;
+        const candidate = value as UnknownStoreWindow;
+        return candidate.cardId === cardId;
       }) as UnknownStoreWindow | undefined) ?? null,
   );
 
-  const lastTickIndex = useEngineStore((s) => s.run.lastTickIndex);
-  const currentTickDurationMs = useEngineStore((s) => s.time.currentTickDurationMs);
+  const lastTickIndex = useEngineStore((state) => state.run.lastTickIndex);
+  const currentTickDurationMs = useEngineStore((state) => state.time.currentTickDurationMs);
 
   const [progressPct, setProgressPct] = useState<number>(1);
   const [derivedRemainingMs, setDerivedRemainingMs] = useState<number>(0);
 
   const rafRef = useRef<number | null>(null);
   const derivedAnchorStartedAtMsRef = useRef<number | null>(null);
-  const derivedInitialRemainingMsRef = useRef<number>(0);
   const lastWindowIdentityRef = useRef<string | null>(null);
 
   const richWindow = useMemo<DecisionWindowView | null>(() => {
     if (!isRichWindowShape(storeWindow)) return null;
 
-    const durationMs = Math.max(1, coerceNumber(storeWindow.durationMs, 1));
-    const remainingMs = Math.max(0, coerceNumber(storeWindow.remainingMs, durationMs));
-    const isOnHold = Boolean(storeWindow.isOnHold);
-    const isExpired = Boolean(storeWindow.isExpired) || remainingMs <= 0;
-    const isResolved = Boolean(storeWindow.isResolved);
+    const rich = storeWindow;
+    const durationMs = Math.max(1, coerceNumber(rich.durationMs, 1));
+    const remainingMs = Math.max(0, coerceNumber(rich.remainingMs, durationMs));
+    const isResolved = Boolean(rich.isResolved);
+    const isExpired = Boolean(rich.isExpired) || (!isResolved && remainingMs <= 0);
 
     return {
-      windowId: coerceString(storeWindow.windowId),
-      cardId: coerceString(storeWindow.cardId, cardId) ?? cardId,
+      windowId: coerceString(rich.windowId),
+      cardId: coerceString(rich.cardId, cardId) ?? cardId,
       durationMs,
       remainingMs,
       openedAtTick:
-        typeof storeWindow.openedAtTick === 'number' ? storeWindow.openedAtTick : null,
+        typeof rich.openedAtTick === 'number' && Number.isFinite(rich.openedAtTick)
+          ? rich.openedAtTick
+          : null,
       openedAtMs:
-        typeof storeWindow.openedAtMs === 'number' ? storeWindow.openedAtMs : null,
+        typeof rich.openedAtMs === 'number' && Number.isFinite(rich.openedAtMs)
+          ? rich.openedAtMs
+          : null,
       expiresAtMs:
-        typeof storeWindow.expiresAtMs === 'number' ? storeWindow.expiresAtMs : null,
-      autoResolve: coerceString(storeWindow.autoResolve),
-      isOnHold,
+        typeof rich.expiresAtMs === 'number' && Number.isFinite(rich.expiresAtMs)
+          ? rich.expiresAtMs
+          : null,
+      autoResolve: coerceString(rich.autoResolve),
+      isOnHold: Boolean(rich.isOnHold),
       isExpired,
       isResolved,
     };
   }, [cardId, storeWindow]);
 
   const minimalWindow = useMemo<MinimalDecisionWindowEntry | null>(() => {
+    if (richWindow) return null;
     if (!isMinimalWindowShape(storeWindow)) return null;
+
     return {
       cardId: storeWindow.cardId,
       durationMs: Math.max(1, storeWindow.durationMs),
       openedAtTick: storeWindow.openedAtTick,
-      autoResolve: storeWindow.autoResolve,
+      autoResolve:
+        typeof storeWindow.autoResolve === 'string' ? storeWindow.autoResolve : '-1',
     };
-  }, [storeWindow]);
+  }, [richWindow, storeWindow]);
 
-  /**
-   * Re-anchor the client-side countdown whenever a new minimal window instance appears.
-   * Since the minimal store entry does not carry remainingMs/openedAtMs, we estimate
-   * elapsed time from tick distance first, then animate locally from there.
-   */
   useEffect(() => {
+    if (rafRef.current !== null) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+    }
+
     if (richWindow) {
+      const nextProgressPct =
+        richWindow.durationMs > 0
+          ? clamp01(richWindow.remainingMs / richWindow.durationMs)
+          : 0;
+
       derivedAnchorStartedAtMsRef.current = null;
-      derivedInitialRemainingMsRef.current = 0;
       lastWindowIdentityRef.current = richWindow.windowId ?? `rich:${richWindow.cardId}`;
+      setDerivedRemainingMs(richWindow.remainingMs);
+      setProgressPct(nextProgressPct);
       return;
     }
 
     if (!minimalWindow) {
       derivedAnchorStartedAtMsRef.current = null;
-      derivedInitialRemainingMsRef.current = 0;
       lastWindowIdentityRef.current = null;
       setDerivedRemainingMs(0);
       setProgressPct(0);
@@ -168,109 +225,95 @@ export function useDecisionWindow(cardId: string): UseDecisionWindowResult {
     }
 
     const identity = `${minimalWindow.cardId}:${minimalWindow.openedAtTick}:${minimalWindow.durationMs}`;
-    if (lastWindowIdentityRef.current === identity) return;
 
-    lastWindowIdentityRef.current = identity;
+    if (lastWindowIdentityRef.current !== identity) {
+      const safeTickDurationMs =
+        Number.isFinite(currentTickDurationMs) && currentTickDurationMs > 0
+          ? currentTickDurationMs
+          : 3_000;
 
-    const safeTickDurationMs =
-      Number.isFinite(currentTickDurationMs) && currentTickDurationMs > 0
-        ? currentTickDurationMs
-        : 3000;
+      const elapsedTicks = Math.max(0, lastTickIndex - minimalWindow.openedAtTick);
+      const estimatedElapsedMs = elapsedTicks * safeTickDurationMs;
+      const estimatedStartedAtMs = Date.now() - estimatedElapsedMs;
+      const estimatedRemainingMs = Math.max(
+        0,
+        minimalWindow.durationMs - estimatedElapsedMs,
+      );
 
-    const elapsedTicks = Math.max(0, lastTickIndex - minimalWindow.openedAtTick);
-    const elapsedByTickEstimateMs = elapsedTicks * safeTickDurationMs;
-    const initialRemainingMs = Math.max(
-      0,
-      minimalWindow.durationMs - elapsedByTickEstimateMs,
-    );
-
-    derivedAnchorStartedAtMsRef.current = Date.now();
-    derivedInitialRemainingMsRef.current = initialRemainingMs;
-    setDerivedRemainingMs(initialRemainingMs);
-    setProgressPct(initialRemainingMs / minimalWindow.durationMs);
-  }, [currentTickDurationMs, lastTickIndex, minimalWindow, richWindow]);
-
-  const animate = useCallback((): void => {
-    if (richWindow) {
-      const pct = richWindow.durationMs > 0
-        ? Math.max(0, Math.min(1, richWindow.remainingMs / richWindow.durationMs))
-        : 0;
-
-      setDerivedRemainingMs(richWindow.remainingMs);
-      setProgressPct(pct);
-
-      if (!richWindow.isExpired && !richWindow.isResolved && !richWindow.isOnHold && pct > 0) {
-        rafRef.current = requestAnimationFrame(animate);
-      }
-      return;
+      derivedAnchorStartedAtMsRef.current = estimatedStartedAtMs;
+      lastWindowIdentityRef.current = identity;
+      setDerivedRemainingMs(estimatedRemainingMs);
+      setProgressPct(clamp01(estimatedRemainingMs / minimalWindow.durationMs));
     }
-
-    if (!minimalWindow) {
-      setDerivedRemainingMs(0);
-      setProgressPct(0);
-      return;
-    }
-
-    const startedAtMs = derivedAnchorStartedAtMsRef.current;
-    const initialRemainingMs = derivedInitialRemainingMsRef.current;
-
-    if (startedAtMs === null) {
-      const fallbackRemaining = minimalWindow.durationMs;
-      setDerivedRemainingMs(fallbackRemaining);
-      setProgressPct(1);
-      rafRef.current = requestAnimationFrame(animate);
-      return;
-    }
-
-    const elapsedMs = Math.max(0, Date.now() - startedAtMs);
-    const remainingMs = Math.max(0, initialRemainingMs - elapsedMs);
-    const pct = minimalWindow.durationMs > 0
-      ? Math.max(0, Math.min(1, remainingMs / minimalWindow.durationMs))
-      : 0;
-
-    setDerivedRemainingMs(remainingMs);
-    setProgressPct(pct);
-
-    if (remainingMs > 0) {
-      rafRef.current = requestAnimationFrame(animate);
-    }
-  }, [minimalWindow, richWindow]);
+  }, [
+    currentTickDurationMs,
+    lastTickIndex,
+    minimalWindow,
+    richWindow,
+  ]);
 
   useEffect(() => {
-    if (!storeWindow) return undefined;
+    if (!minimalWindow || richWindow) {
+      return undefined;
+    }
 
-    rafRef.current = requestAnimationFrame(animate);
+    let cancelled = false;
+
+    const tick = (): void => {
+      if (cancelled) return;
+
+      const startedAtMs = derivedAnchorStartedAtMsRef.current;
+      if (startedAtMs === null) {
+        setDerivedRemainingMs(minimalWindow.durationMs);
+        setProgressPct(1);
+        rafRef.current = requestAnimationFrame(tick);
+        return;
+      }
+
+      const elapsedMs = Math.max(0, Date.now() - startedAtMs);
+      const remainingMs = Math.max(0, minimalWindow.durationMs - elapsedMs);
+      const nextProgressPct = clamp01(remainingMs / minimalWindow.durationMs);
+
+      setDerivedRemainingMs(remainingMs);
+      setProgressPct(nextProgressPct);
+
+      if (remainingMs > 0) {
+        rafRef.current = requestAnimationFrame(tick);
+      }
+    };
+
+    rafRef.current = requestAnimationFrame(tick);
+
     return () => {
+      cancelled = true;
       if (rafRef.current !== null) {
         cancelAnimationFrame(rafRef.current);
         rafRef.current = null;
       }
     };
-  }, [animate, storeWindow]);
+  }, [minimalWindow, richWindow]);
 
   const windowView = useMemo<DecisionWindowView | null>(() => {
     if (richWindow) {
-      return {
-        ...richWindow,
-        remainingMs: derivedRemainingMs || richWindow.remainingMs,
-        isExpired: richWindow.isExpired || (derivedRemainingMs <= 0 && !richWindow.isResolved),
-      };
+      return richWindow;
     }
 
-    if (!minimalWindow) return null;
+    if (!minimalWindow) {
+      return null;
+    }
 
+    const startedAtMs = derivedAnchorStartedAtMsRef.current;
     const remainingMs = Math.max(0, derivedRemainingMs);
+
     return {
       windowId: null,
       cardId: minimalWindow.cardId,
       durationMs: minimalWindow.durationMs,
       remainingMs,
       openedAtTick: minimalWindow.openedAtTick,
-      openedAtMs: derivedAnchorStartedAtMsRef.current,
+      openedAtMs: startedAtMs,
       expiresAtMs:
-        derivedAnchorStartedAtMsRef.current !== null
-          ? derivedAnchorStartedAtMsRef.current + derivedInitialRemainingMsRef.current
-          : null,
+        startedAtMs !== null ? startedAtMs + minimalWindow.durationMs : null,
       autoResolve: minimalWindow.autoResolve,
       isOnHold: false,
       isExpired: remainingMs <= 0,
@@ -278,17 +321,17 @@ export function useDecisionWindow(cardId: string): UseDecisionWindowResult {
     };
   }, [derivedRemainingMs, minimalWindow, richWindow]);
 
-  const safeRemainingMs = windowView?.remainingMs ?? 0;
-  const safeProgressPct = Math.max(0, Math.min(1, progressPct));
+  const safeProgressPct = clamp01(progressPct);
+  const safeRemainingMs = Math.max(0, windowView?.remainingMs ?? 0);
 
   return {
-    hasWindow: !!windowView,
+    hasWindow: windowView !== null,
     window: windowView,
     progressPct: safeProgressPct,
     remainingMs: safeRemainingMs,
     isOnHold: windowView?.isOnHold ?? false,
     isUrgent: safeProgressPct < 0.25,
-    isCritical: safeProgressPct < 0.10,
+    isCritical: safeProgressPct < 0.1,
     isExpired: windowView?.isExpired ?? true,
     isResolved: windowView?.isResolved ?? false,
   };
