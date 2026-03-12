@@ -1,4 +1,4 @@
-///Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/backend/src/game/modes/__tests__/solo_mode.time.test.ts
+// /Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/backend/src/game/modes/__tests__/solo_mode.time.test.ts
 
 import { describe, expect, it } from 'vitest';
 
@@ -16,6 +16,9 @@ interface SnapshotOverrides {
   readonly timers?: Partial<RunStateSnapshot['timers']>;
   readonly telemetry?: Partial<RunStateSnapshot['telemetry']>;
 }
+
+const EMPTY_ACTIVE_DECISION_WINDOWS: RunStateSnapshot['timers']['activeDecisionWindows'] =
+  Object.freeze({});
 
 const SHIELD_LAYERS: RunStateSnapshot['shield']['layers'] = [
   {
@@ -256,7 +259,7 @@ function buildSnapshot(
       currentTickDurationMs: 13_000,
       nextTickAtMs: null,
       holdCharges: 1,
-      activeDecisionWindows: [],
+      activeDecisionWindows: EMPTY_ACTIVE_DECISION_WINDOWS,
       frozenWindowIds: [],
     },
     telemetry: {

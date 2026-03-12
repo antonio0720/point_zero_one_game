@@ -1,4 +1,4 @@
-///Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/backend/src/game/modes/__tests__/chase_a_legend_mode.time.test.ts
+// /Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/backend/src/game/modes/__tests__/chase_a_legend_mode.time.test.ts
 
 import { describe, expect, it } from 'vitest';
 
@@ -16,6 +16,9 @@ interface SnapshotOverrides {
   readonly timers?: Partial<RunStateSnapshot['timers']>;
   readonly telemetry?: Partial<RunStateSnapshot['telemetry']>;
 }
+
+const EMPTY_ACTIVE_DECISION_WINDOWS: RunStateSnapshot['timers']['activeDecisionWindows'] =
+  Object.freeze({});
 
 const SHIELD_LAYERS: RunStateSnapshot['shield']['layers'] = [
   { layerId: 'L1', label: 'CASH_RESERVE', current: 100, max: 100, regenPerTick: 5, breached: false, integrityRatio: 1, lastDamagedTick: null, lastRecoveredTick: null },
@@ -167,7 +170,7 @@ function buildSnapshot(mode: ModeCode, tier: PressureTier, overrides: SnapshotOv
       currentTickDurationMs: 3_800,
       nextTickAtMs: null,
       holdCharges: 1,
-      activeDecisionWindows: [],
+      activeDecisionWindows: EMPTY_ACTIVE_DECISION_WINDOWS,
       frozenWindowIds: [],
     },
     telemetry: {
