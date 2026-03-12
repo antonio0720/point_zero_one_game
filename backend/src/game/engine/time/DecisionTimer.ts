@@ -10,8 +10,12 @@
  * - no wall-clock polling; expiry is evaluated only during authoritative time steps
  * ========================================================================== */
 
-import type { DecisionTimerSyncResult } from './types';
 import { DEFAULT_HOLD_DURATION_MS } from './types';
+
+interface DecisionTimerSyncResult {
+  openedWindowIds: string[];
+  removedWindowIds: string[];
+}
 
 interface MutableDecisionWindowState {
   readonly windowId: string;

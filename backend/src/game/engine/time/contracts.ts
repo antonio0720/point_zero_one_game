@@ -19,7 +19,6 @@ import type {
   RunPhase,
 } from '../core/GamePrimitives';
 import type {
-  DecisionRecord,
   OutcomeReasonCode,
   RunStateSnapshot,
   TelemetryState,
@@ -28,7 +27,6 @@ import type {
 
 import type {
   DecisionWindowRegistration,
-  DecisionWindowState,
   ExpiredDecisionOutcome,
   RegisteredDecisionWindow,
 } from './DecisionExpiryResolver';
@@ -38,9 +36,7 @@ import type {
   HoldSpendRequest,
   HoldSpendResult,
 } from './HoldActionLedger';
-import type {
-  RunTimeoutResolution,
-} from './RunTimeoutGuard';
+import type { RunTimeoutResolution } from './RunTimeoutGuard';
 import type {
   SeasonClockSnapshot,
   SeasonLifecycleState,
@@ -64,7 +60,9 @@ import type {
   TimeTelemetryProjectionRequest,
 } from './TimeTelemetryProjector';
 
-export interface TimeDecisionWindowState extends DecisionWindowState {}
+export type TimeEngineEventBusMap = EngineEventMap & Record<string, unknown>;
+
+export interface TimeDecisionWindowState extends RegisteredDecisionWindow {}
 export interface TimeRegisteredDecisionWindow extends RegisteredDecisionWindow {}
 export interface TimeExpiredDecisionOutcome extends ExpiredDecisionOutcome {}
 export interface TimeActiveHoldRecord extends ActiveHoldRecord {}
@@ -87,7 +85,7 @@ export interface TimeContractsVersion {
 
 export interface TimeRuntimeContext {
   readonly clock: ClockSource;
-  readonly bus: EventBus<EngineEventMap>;
+  readonly bus: EventBus<TimeEngineEventBusMap>;
   readonly snapshot: RunStateSnapshot;
   readonly nowMs: number;
 }
@@ -178,7 +176,10 @@ export interface TimeBudgetManager {
     request: TimeAdvanceRequest,
   ): TimerState;
   grantExtension(snapshot: RunStateSnapshot, extensionMs: number): TimerState;
-  replaceSeasonBudget(snapshot: RunStateSnapshot, seasonBudgetMs: number): TimerState;
+  replaceSeasonBudget(
+    snapshot: RunStateSnapshot,
+    seasonBudgetMs: number,
+  ): TimerState;
 }
 
 export interface TimeTimeoutGuard {
