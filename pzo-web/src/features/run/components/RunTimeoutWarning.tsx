@@ -1,3 +1,5 @@
+// /Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/pzo-web/src/features/run/components/RunTimeoutWarning.tsx
+
 /**
  * FILE: pzo-web/src/features/run/components/RunTimeoutWarning.tsx
  * Engine 1 — Time Engine timeout surface
@@ -5,11 +7,12 @@
  * Purpose:
  * - warn the player as the season tick budget approaches TIMEOUT
  * - surface run urgency before the terminal RUN_TIMEOUT event fires
- * - align with the adaptive tick-rate model already exposed by useTimeEngine()
+ * - align with the current useTimeEngine() hook contract without mutating the hook
  *
  * Notes:
  * - no engine imports
  * - pure UI component driven by store-derived time state
+ * - tolerant of optional legacy fields injected by tests or adapter surfaces
  */
 
 import React, { memo, useMemo } from 'react';
@@ -25,6 +28,12 @@ export interface RunTimeoutWarningProps {
 }
 
 type TimeoutSeverity = 'safe' | 'warning' | 'critical' | 'collapse';
+
+type CompatibleTimeSnapshot = ReturnType<typeof useTimeEngine> & {
+  isRunActive?: boolean;
+  activeWindowCount?: number;
+  seasonTickBudget?: number;
+};
 
 function formatEta(totalSeconds: number): string {
   if (!Number.isFinite(totalSeconds) || totalSeconds <= 0) {
@@ -44,6 +53,7 @@ function formatEta(totalSeconds: number): string {
 
   const hours = Math.floor(minutes / 60);
   const remMinutes = minutes % 60;
+
   return `${hours}h ${remMinutes}m`;
 }
 
@@ -65,6 +75,7 @@ function getSeverityStyles(severity: TimeoutSeverity): {
   color: string;
   pillBg: string;
   pillBorder: string;
+  progressBar: string;
 } {
   switch (severity) {
     case 'collapse':
@@ -74,6 +85,7 @@ function getSeverityStyles(severity: TimeoutSeverity): {
         color: '#FFE1DF',
         pillBg: 'rgba(185, 43, 39, 0.18)',
         pillBorder: '1px solid rgba(185, 43, 39, 0.42)',
+        progressBar: '#B92B27',
       };
     case 'critical':
       return {
@@ -82,6 +94,7 @@ function getSeverityStyles(severity: TimeoutSeverity): {
         color: '#FFE6C4',
         pillBg: 'rgba(201, 125, 39, 0.16)',
         pillBorder: '1px solid rgba(201, 125, 39, 0.36)',
+        progressBar: '#C97D27',
       };
     case 'warning':
       return {
@@ -90,6 +103,7 @@ function getSeverityStyles(severity: TimeoutSeverity): {
         color: '#F6E9B3',
         pillBg: 'rgba(201, 168, 76, 0.14)',
         pillBorder: '1px solid rgba(201, 168, 76, 0.30)',
+        progressBar: '#C9A84C',
       };
     case 'safe':
     default:
@@ -99,6 +113,7 @@ function getSeverityStyles(severity: TimeoutSeverity): {
         color: '#C6CDD6',
         pillBg: 'rgba(96, 104, 116, 0.10)',
         pillBorder: '1px solid rgba(96, 104, 116, 0.22)',
+        progressBar: '#606874',
       };
   }
 }
@@ -125,17 +140,30 @@ export const RunTimeoutWarning = memo(function RunTimeoutWarning({
   collapseAtTicksRemaining = 5,
   showProgressBar = true,
 }: RunTimeoutWarningProps) {
-  const {
-    isRunActive,
-    currentTier,
-    ticksElapsed,
-    ticksRemaining,
-    seasonTickBudget,
-    tickProgressPct,
-    secondsPerTick,
-    activeWindowCount,
-    hasActiveDecision,
-  } = useTimeEngine();
+  const time = useTimeEngine() as CompatibleTimeSnapshot;
+
+  const isRunActive = time.isRunActive ?? true;
+  const currentTier = time.currentTier ?? 'T1';
+  const ticksElapsed = Number.isFinite(time.ticksElapsed) ? time.ticksElapsed : 0;
+  const ticksRemaining = Number.isFinite(time.ticksRemaining) ? Math.max(0, time.ticksRemaining) : 0;
+  const tickBudget = Number.isFinite(time.tickBudget)
+    ? time.tickBudget
+    : Number.isFinite(time.seasonTickBudget)
+      ? (time.seasonTickBudget as number)
+      : 0;
+  const tickProgressPct = Number.isFinite(time.tickProgressPct)
+    ? Math.max(0, Math.min(1, time.tickProgressPct))
+    : 0;
+  const secondsPerTick = Number.isFinite(time.secondsPerTick) ? Math.max(1, time.secondsPerTick) : 1;
+  const activeDecisionCount = Number.isFinite(time.activeDecisionCount)
+    ? time.activeDecisionCount
+    : Number.isFinite(time.activeWindowCount)
+      ? (time.activeWindowCount as number)
+      : 0;
+  const hasActiveDecision =
+    typeof time.hasActiveDecision === 'boolean'
+      ? time.hasActiveDecision
+      : activeDecisionCount > 0;
 
   const severity = getSeverity(
     ticksRemaining,
@@ -154,15 +182,12 @@ export const RunTimeoutWarning = memo(function RunTimeoutWarning({
     if (severity === 'collapse') {
       return `Run will timeout in about ${formatEta(approxSecondsRemaining)} if you do not close immediately.`;
     }
-
     if (severity === 'critical') {
       return `You are inside the critical time lane with ${ticksRemaining} ticks left.`;
     }
-
     if (severity === 'warning') {
       return `Season budget is tightening. Approximate time left: ${formatEta(approxSecondsRemaining)}.`;
     }
-
     return `Budget remaining: ${ticksRemaining} ticks.`;
   }, [approxSecondsRemaining, severity, ticksRemaining]);
 
@@ -175,113 +200,97 @@ export const RunTimeoutWarning = memo(function RunTimeoutWarning({
   }
 
   return (
-    <aside
+    <section
       className={className}
-      role="status"
-      aria-live={severity === 'collapse' || severity === 'critical' ? 'assertive' : 'polite'}
-      aria-label="Run timeout warning"
+      data-testid="run-timeout-warning"
+      role="alert"
+      aria-live="polite"
       style={{
         display: 'flex',
         flexDirection: 'column',
-        gap: 12,
-        width: '100%',
-        padding: '14px 16px',
-        borderRadius: 16,
+        gap: 10,
+        padding: 12,
+        borderRadius: 14,
         border: styles.border,
         background: styles.background,
         color: styles.color,
-        boxShadow:
-          severity === 'collapse'
-            ? '0 14px 36px rgba(185, 43, 39, 0.18)'
-            : severity === 'critical'
-              ? '0 14px 36px rgba(201, 125, 39, 0.16)'
-              : '0 12px 28px rgba(0, 0, 0, 0.14)',
+        boxShadow: '0 10px 24px rgba(0, 0, 0, 0.18)',
       }}
     >
       <div
         style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'flex-start',
-          gap: 12,
-          flexWrap: 'wrap',
+          fontSize: 13,
+          fontWeight: 800,
+          letterSpacing: 0.55,
         }}
       >
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          <div
-            style={{
-              fontSize: 13,
-              lineHeight: 1,
-              fontWeight: 900,
-              letterSpacing: 0.8,
-            }}
-          >
-            {getTitle(severity)}
-          </div>
+        {getTitle(severity)}
+      </div>
 
-          <div
-            style={{
-              fontSize: 13,
-              lineHeight: 1.4,
-              color: 'rgba(255,255,255,0.82)',
-            }}
-          >
-            {detailText}
-          </div>
-        </div>
+      <div
+        style={{
+          fontSize: 12,
+          lineHeight: 1.45,
+          opacity: 0.96,
+        }}
+      >
+        {detailText}
+      </div>
 
-        <div
+      <div
+        style={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          gap: 8,
+          alignItems: 'center',
+        }}
+      >
+        <span
           style={{
-            display: 'flex',
-            gap: 8,
-            flexWrap: 'wrap',
-            justifyContent: 'flex-end',
+            display: 'inline-flex',
+            alignItems: 'center',
+            padding: '4px 8px',
+            borderRadius: 999,
+            background: styles.pillBg,
+            border: styles.pillBorder,
+            fontSize: 11,
+            fontWeight: 700,
           }}
         >
+          {ticksRemaining} ticks left
+        </span>
+
+        <span
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            padding: '4px 8px',
+            borderRadius: 999,
+            background: 'rgba(255,255,255,0.04)',
+            border: '1px solid rgba(255,255,255,0.10)',
+            fontSize: 11,
+            fontWeight: 700,
+          }}
+        >
+          Tier {currentTier}
+        </span>
+
+        {hasActiveDecision ? (
           <span
             style={{
+              display: 'inline-flex',
+              alignItems: 'center',
               padding: '4px 8px',
               borderRadius: 999,
-              background: styles.pillBg,
-              border: styles.pillBorder,
+              background: 'rgba(255,255,255,0.04)',
+              border: '1px solid rgba(255,255,255,0.10)',
               fontSize: 11,
-              fontWeight: 800,
-              letterSpacing: 0.35,
+              fontWeight: 700,
             }}
           >
-            {ticksRemaining} ticks left
+            {activeDecisionCount} open decisions
           </span>
-
-          <span
-            style={{
-              padding: '4px 8px',
-              borderRadius: 999,
-              background: styles.pillBg,
-              border: styles.pillBorder,
-              fontSize: 11,
-              fontWeight: 800,
-              letterSpacing: 0.35,
-            }}
-          >
-            Tier {currentTier}
-          </span>
-
-          {hasActiveDecision ? (
-            <span
-              style={{
-                padding: '4px 8px',
-                borderRadius: 999,
-                background: styles.pillBg,
-                border: styles.pillBorder,
-                fontSize: 11,
-                fontWeight: 800,
-                letterSpacing: 0.35,
-              }}
-            >
-              {activeWindowCount} open decisions
-            </span>
-          ) : null}
-        </div>
+        ) : null}
       </div>
 
       {showProgressBar ? (
@@ -294,25 +303,20 @@ export const RunTimeoutWarning = memo(function RunTimeoutWarning({
         >
           <div
             style={{
+              height: 5,
               width: '100%',
-              height: 6,
               borderRadius: 999,
+              background: 'rgba(255,255,255,0.08)',
               overflow: 'hidden',
-              background: 'rgba(255,255,255,0.10)',
             }}
           >
             <div
               style={{
-                width: `${Math.max(0, Math.min(100, tickProgressPct * 100))}%`,
                 height: '100%',
+                width: `${Math.max(0, Math.min(100, tickProgressPct * 100))}%`,
                 borderRadius: 999,
-                background:
-                  severity === 'collapse'
-                    ? 'linear-gradient(90deg, rgba(255,118,118,0.92), rgba(185,43,39,1))'
-                    : severity === 'critical'
-                      ? 'linear-gradient(90deg, rgba(255,188,110,0.92), rgba(201,125,39,1))'
-                      : 'linear-gradient(90deg, rgba(201,168,76,0.92), rgba(245,197,66,1))',
-                transition: 'width 300ms ease',
+                background: styles.progressBar,
+                transition: 'width 180ms ease',
               }}
             />
           </div>
@@ -322,19 +326,19 @@ export const RunTimeoutWarning = memo(function RunTimeoutWarning({
               display: 'flex',
               justifyContent: 'space-between',
               gap: 12,
-              flexWrap: 'wrap',
               fontSize: 11,
-              color: 'rgba(255,255,255,0.72)',
+              color: styles.color,
+              opacity: 0.9,
             }}
           >
             <span>
-              {ticksElapsed}/{seasonTickBudget} ticks used
+              {ticksElapsed}/{tickBudget} ticks used
             </span>
             <span>≈ {formatEta(approxSecondsRemaining)} remaining</span>
           </div>
         </div>
       ) : null}
-    </aside>
+    </section>
   );
 });
 

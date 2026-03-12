@@ -1,106 +1,132 @@
-// FILE: pzo-web/src/features/run/components/__tests__/RunTimeoutWarning.test.tsx
+// /Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/pzo-web/src/features/run/components/__tests__/RunTimeoutWarning.test.tsx
+
+/**
+ * FILE: pzo-web/src/features/run/components/__tests__/RunTimeoutWarning.test.tsx
+ * Engine 1 — Time Engine timeout surface
+ *
+ * Contract coverage:
+ * - safe state hidden by default
+ * - warning state near timeout
+ * - collapse state near terminal timeout
+ * - inactive run suppression
+ */
 
 import React from 'react';
 import { render, screen } from '@testing-library/react';
-import '@testing-library/jest-dom';
+import '@testing-library/jest-dom/vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+const useTimeEngineMock = vi.fn();
+
+vi.mock('../../hooks/useTimeEngine', () => {
+  return {
+    useTimeEngine: () => useTimeEngineMock(),
+  };
+});
 
 import * as RunTimeoutWarningModule from '../RunTimeoutWarning';
-import { TickTier } from '../../../../engines/time/types';
 
 const RunTimeoutWarning =
   ((RunTimeoutWarningModule as unknown as Record<string, unknown>).default ??
-    (RunTimeoutWarningModule as unknown as Record<string, unknown>).RunTimeoutWarning) as React.ComponentType<any>;
+    (RunTimeoutWarningModule as unknown as Record<string, unknown>).RunTimeoutWarning) as React.ComponentType<{
+    showWhenSafe?: boolean;
+    warnAtTicksRemaining?: number;
+    criticalAtTicksRemaining?: number;
+    collapseAtTicksRemaining?: number;
+  }>;
 
-function pickRoot(container: HTMLElement): HTMLElement {
-  const el = container.firstElementChild as HTMLElement | null;
-  if (!el) {
-    throw new Error('RunTimeoutWarning rendered nothing (container.firstElementChild is null).');
-  }
-  return el;
+interface TimeStateOverrides {
+  isRunActive?: boolean;
+  currentTier?: 'T0' | 'T1' | 'T2' | 'T3' | 'T4';
+  ticksRemaining?: number;
+  ticksElapsed?: number;
+  tickProgressPct?: number;
+  secondsPerTick?: number;
+  tickBudget?: number;
+  activeDecisionCount?: number;
+  hasActiveDecision?: boolean;
 }
 
-function getWarningEl(container: HTMLElement): HTMLElement | null {
-  return (
-    (screen.queryByTestId('run-timeout-warning') as HTMLElement | null) ||
-    (screen.queryByRole('alert') as HTMLElement | null) ||
-    (container.firstElementChild as HTMLElement | null)
-  );
-}
-
-function renderWarning(overrides: Record<string, unknown> = {}) {
-  const timeSnapshot = {
-    isRunActive: true,
-    currentTier: TickTier.STABLE,
-    ticksRemaining: 48,
-    ticksElapsed: 252,
-    tickProgressPct: 0.84,
-    secondsPerTick: 13,
-    ...overrides,
-  };
-
-  return render(
-    <RunTimeoutWarning
-      timeSnapshot={timeSnapshot}
-      warningThresholdTicks={25}
-      criticalThresholdTicks={10}
-    />,
-  );
+function setTimeEngineState(overrides: TimeStateOverrides = {}): void {
+  useTimeEngineMock.mockReturnValue({
+    isRunActive: overrides.isRunActive ?? true,
+    currentTier: overrides.currentTier ?? 'T1',
+    ticksRemaining: overrides.ticksRemaining ?? 48,
+    ticksElapsed: overrides.ticksElapsed ?? 252,
+    tickProgressPct: overrides.tickProgressPct ?? 0.84,
+    secondsPerTick: overrides.secondsPerTick ?? 13,
+    tickBudget: overrides.tickBudget ?? 300,
+    activeDecisionCount: overrides.activeDecisionCount ?? 0,
+    hasActiveDecision: overrides.hasActiveDecision ?? false,
+  });
 }
 
 describe('RunTimeoutWarning', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    setTimeEngineState();
+  });
+
   it('does not render an alert when the run is comfortably inside the budget', () => {
-    const { container } = renderWarning({
+    setTimeEngineState({
       ticksRemaining: 60,
       tickProgressPct: 0.6,
-      currentTier: TickTier.STABLE,
+      currentTier: 'T1',
     });
 
-    const el = getWarningEl(container as unknown as HTMLElement);
-    expect(el).toBeNull();
+    render(<RunTimeoutWarning />);
+
+    expect(screen.queryByTestId('run-timeout-warning')).not.toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
   it('renders a warning state when the run approaches timeout', () => {
-    const { container } = renderWarning({
+    setTimeEngineState({
       ticksRemaining: 18,
       tickProgressPct: 0.94,
-      currentTier: TickTier.COMPRESSED,
+      currentTier: 'T2',
       secondsPerTick: 8,
     });
 
-    const el = getWarningEl(container as unknown as HTMLElement);
+    render(<RunTimeoutWarning />);
 
+    const el = screen.getByTestId('run-timeout-warning');
     expect(el).toBeInTheDocument();
 
-    const text = (el?.textContent ?? '').toLowerCase();
+    const text = (el.textContent ?? '').toLowerCase();
     expect(text).toContain('18');
     expect(text).toContain('tick');
   });
 
-  it('renders a critical state near timeout collapse', () => {
-    const { container } = renderWarning({
+  it('renders a critical collapse state near timeout', () => {
+    setTimeEngineState({
       ticksRemaining: 4,
       tickProgressPct: 0.986,
-      currentTier: TickTier.COLLAPSE_IMMINENT,
+      currentTier: 'T4',
       secondsPerTick: 2,
     });
 
-    const el = getWarningEl(container as unknown as HTMLElement);
+    render(<RunTimeoutWarning />);
 
+    const el = screen.getByTestId('run-timeout-warning');
     expect(el).toBeInTheDocument();
 
-    const text = (el?.textContent ?? '').toLowerCase();
+    const text = (el.textContent ?? '').toLowerCase();
     expect(text).toContain('4');
     expect(text).toContain('tick');
+    expect(text).toContain('timeout');
   });
 
   it('does not render when the run is not active', () => {
-    const { container } = renderWarning({
+    setTimeEngineState({
       isRunActive: false,
       ticksRemaining: 3,
       tickProgressPct: 0.99,
     });
 
-    const el = getWarningEl(container as unknown as HTMLElement);
-    expect(el).toBeNull();
+    render(<RunTimeoutWarning />);
+
+    expect(screen.queryByTestId('run-timeout-warning')).not.toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 });

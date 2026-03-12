@@ -1,3 +1,5 @@
+// /Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/pzo-web/src/features/run/components/DecisionWindowStack.tsx
+
 /**
  * FILE: pzo-web/src/features/run/components/DecisionWindowStack.tsx
  * Engine 1 — multi-window stack surface
@@ -10,25 +12,121 @@
  * Design:
  * - read-only from useTimeEngine
  * - action wiring is callback-based so this component remains store-agnostic
- * - safe if no windows are open
+ * - safe across the repo's current mixed minimal/rich decision-window shapes
  */
 
 import React, { memo, useMemo } from 'react';
-import type { DecisionWindow } from '../../../engines/time/types';
 import { useTimeEngine } from '../hooks/useTimeEngine';
-import { formatCountdown } from '../hooks/useDecisionWindow';
 import { DecisionTimerRing } from './DecisionTimerRing';
+
+type DecisionCardType = 'FORCED_FATE' | 'HATER_INJECTION' | 'CRISIS_EVENT';
+
+export interface DecisionWindowStackWindow {
+  windowId: string;
+  cardId: string;
+  cardType: DecisionCardType;
+  durationMs: number;
+  remainingMs: number;
+  openedAtMs: number;
+  expiresAtMs: number;
+  isOnHold: boolean;
+  holdExpiresAtMs: number | null;
+  worstOptionIndex: number;
+  isExpired: boolean;
+  isResolved: boolean;
+}
 
 export interface DecisionWindowStackProps {
   className?: string;
   title?: string;
   maxVisible?: number;
   emptyState?: React.ReactNode;
-  onApplyHold?: (window: DecisionWindow) => void | Promise<void>;
-  renderWindowActions?: (window: DecisionWindow) => React.ReactNode;
+  onApplyHold?: (window: DecisionWindowStackWindow) => void | Promise<void>;
+  renderWindowActions?: (window: DecisionWindowStackWindow) => React.ReactNode;
 }
 
-function urgencyLabel(window: DecisionWindow): string {
+type CompatibleTimeSnapshot = ReturnType<typeof useTimeEngine> & {
+  activeWindowCount?: number;
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function coerceDecisionCardType(value: unknown): DecisionCardType {
+  if (
+    value === 'FORCED_FATE' ||
+    value === 'HATER_INJECTION' ||
+    value === 'CRISIS_EVENT'
+  ) {
+    return value;
+  }
+
+  return 'FORCED_FATE';
+}
+
+function toDecisionWindow(value: unknown, index: number): DecisionWindowStackWindow | null {
+  if (!isRecord(value) || typeof value.cardId !== 'string') {
+    return null;
+  }
+
+  const durationMs =
+    typeof value.durationMs === 'number' && Number.isFinite(value.durationMs) && value.durationMs > 0
+      ? Math.trunc(value.durationMs)
+      : 1;
+
+  const openedAtMs =
+    typeof value.openedAtMs === 'number' && Number.isFinite(value.openedAtMs)
+      ? Math.trunc(value.openedAtMs)
+      : 0;
+
+  const remainingMs =
+    typeof value.remainingMs === 'number' && Number.isFinite(value.remainingMs)
+      ? Math.max(0, Math.trunc(value.remainingMs))
+      : durationMs;
+
+  const expiresAtMs =
+    typeof value.expiresAtMs === 'number' && Number.isFinite(value.expiresAtMs)
+      ? Math.trunc(value.expiresAtMs)
+      : openedAtMs + durationMs;
+
+  const windowId =
+    typeof value.windowId === 'string' && value.windowId.length > 0
+      ? value.windowId
+      : `${value.cardId}::${openedAtMs || index}`;
+
+  return {
+    windowId,
+    cardId: value.cardId,
+    cardType: coerceDecisionCardType(value.cardType),
+    durationMs,
+    remainingMs,
+    openedAtMs,
+    expiresAtMs,
+    isOnHold: Boolean(value.isOnHold),
+    holdExpiresAtMs:
+      typeof value.holdExpiresAtMs === 'number' && Number.isFinite(value.holdExpiresAtMs)
+        ? Math.trunc(value.holdExpiresAtMs)
+        : null,
+    worstOptionIndex:
+      typeof value.worstOptionIndex === 'number' && Number.isFinite(value.worstOptionIndex)
+        ? Math.trunc(value.worstOptionIndex)
+        : 0,
+    isExpired: Boolean(value.isExpired) || remainingMs <= 0,
+    isResolved: Boolean(value.isResolved),
+  };
+}
+
+function formatCountdown(ms: number): string {
+  if (!Number.isFinite(ms) || ms <= 0) {
+    return '0s';
+  }
+
+  const seconds = Math.max(1, Math.ceil(ms / 1000));
+  return `${seconds}s`;
+}
+
+function urgencyLabel(window: DecisionWindowStackWindow): string {
   const ratio = window.durationMs <= 0 ? 0 : window.remainingMs / window.durationMs;
 
   if (window.isExpired) return 'EXPIRED';
@@ -40,7 +138,7 @@ function urgencyLabel(window: DecisionWindow): string {
   return 'OPEN';
 }
 
-function urgencyColor(window: DecisionWindow): string {
+function urgencyColor(window: DecisionWindowStackWindow): string {
   const ratio = window.durationMs <= 0 ? 0 : window.remainingMs / window.durationMs;
 
   if (window.isOnHold) return '#4EC9B0';
@@ -50,7 +148,7 @@ function urgencyColor(window: DecisionWindow): string {
   return '#8A8F98';
 }
 
-function cardTypeLabel(cardType: DecisionWindow['cardType']): string {
+function cardTypeLabel(cardType: DecisionWindowStackWindow['cardType']): string {
   switch (cardType) {
     case 'FORCED_FATE':
       return 'Forced Fate';
@@ -64,10 +162,10 @@ function cardTypeLabel(cardType: DecisionWindow['cardType']): string {
 }
 
 interface DecisionWindowRowProps {
-  window: DecisionWindow;
+  window: DecisionWindowStackWindow;
   holdsLeft: number;
-  onApplyHold?: (window: DecisionWindow) => void | Promise<void>;
-  renderWindowActions?: (window: DecisionWindow) => React.ReactNode;
+  onApplyHold?: (window: DecisionWindowStackWindow) => void | Promise<void>;
+  renderWindowActions?: (window: DecisionWindowStackWindow) => React.ReactNode;
 }
 
 const DecisionWindowRow = memo(function DecisionWindowRow({
@@ -104,7 +202,9 @@ const DecisionWindowRow = memo(function DecisionWindowRow({
         className="decision-window-stack__ring"
         style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}
       >
-        <DecisionTimerRing cardId={window.cardId} size={44} />
+        <DecisionTimerRing cardInstanceId={window.cardId}>
+          <span aria-hidden="true" />
+        </DecisionTimerRing>
       </div>
 
       <div
@@ -246,10 +346,28 @@ export const DecisionWindowStack = memo(function DecisionWindowStack({
   onApplyHold,
   renderWindowActions,
 }: DecisionWindowStackProps) {
-  const { activeWindows, holdsLeft, currentTier, activeWindowCount, hasActiveDecision } = useTimeEngine();
+  const time = useTimeEngine() as CompatibleTimeSnapshot;
+  const holdsLeft = Number.isFinite(time.holdsLeft) ? time.holdsLeft : 0;
+  const currentTier = time.currentTier ?? 'T1';
+  const rawActiveWindows = Array.isArray(time.activeWindows) ? time.activeWindows : [];
+  const activeDecisionCount = Number.isFinite(time.activeDecisionCount)
+    ? time.activeDecisionCount
+    : Number.isFinite(time.activeWindowCount)
+      ? (time.activeWindowCount as number)
+      : rawActiveWindows.length;
+  const hasActiveDecision =
+    typeof time.hasActiveDecision === 'boolean'
+      ? time.hasActiveDecision
+      : activeDecisionCount > 0;
+
+  const typedWindows = useMemo(() => {
+    return rawActiveWindows
+      .map((window, index) => toDecisionWindow(window, index))
+      .filter((window): window is DecisionWindowStackWindow => window !== null);
+  }, [rawActiveWindows]);
 
   const windows = useMemo(() => {
-    return [...activeWindows]
+    return [...typedWindows]
       .filter((window) => !window.isResolved && !window.isExpired)
       .sort((a, b) => {
         if (a.remainingMs !== b.remainingMs) return a.remainingMs - b.remainingMs;
@@ -257,7 +375,7 @@ export const DecisionWindowStack = memo(function DecisionWindowStack({
         return a.windowId.localeCompare(b.windowId);
       })
       .slice(0, Math.max(1, maxVisible));
-  }, [activeWindows, maxVisible]);
+  }, [typedWindows, maxVisible]);
 
   if (!hasActiveDecision || windows.length === 0) {
     return emptyState ? <>{emptyState}</> : null;
@@ -293,6 +411,7 @@ export const DecisionWindowStack = memo(function DecisionWindowStack({
           >
             {title}
           </h3>
+
           <div
             style={{
               display: 'flex',
@@ -302,7 +421,7 @@ export const DecisionWindowStack = memo(function DecisionWindowStack({
               color: '#A7AFBA',
             }}
           >
-            <span>{activeWindowCount} active</span>
+            <span>{activeDecisionCount} active</span>
             <span>{holdsLeft} hold left</span>
             <span>Tier {currentTier}</span>
           </div>
