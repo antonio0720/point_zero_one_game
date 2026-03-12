@@ -1,4 +1,3 @@
-// backend/src/game/engine/time/__tests__/TimeEngine.test.ts
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import { DeterministicClock } from '../../core/ClockSource';
@@ -9,15 +8,35 @@ import type { RunStateSnapshot } from '../../core/RunStateSnapshot';
 import { TimeEngine } from '../TimeEngine';
 import { DEFAULT_PHASE_TRANSITION_WINDOWS } from '../types';
 
+type EngineBusEventMap = EngineEventMap & Record<string, unknown>;
+
 type DeepPartial<T> = {
   [K in keyof T]?: T[K] extends readonly (infer U)[]
-    ? readonly U[]
-    : T[K] extends Record<string, unknown>
+    ? readonly DeepPartial<U>[]
+    : T[K] extends object
       ? DeepPartial<T[K]>
       : T[K];
 };
 
-function createSnapshot(overrides: DeepPartial<RunStateSnapshot> = {}): RunStateSnapshot {
+type ActiveDecisionWindows = RunStateSnapshot['timers']['activeDecisionWindows'];
+type ActiveDecisionWindowValue = ActiveDecisionWindows[string];
+
+function createActiveDecisionWindowValue(
+  deadlineMs: number,
+): ActiveDecisionWindowValue {
+  return deadlineMs as unknown as ActiveDecisionWindowValue;
+}
+
+function mergeExact<T extends object>(base: T, override?: DeepPartial<T>): T {
+  return {
+    ...base,
+    ...(override ?? {}),
+  } as T;
+}
+
+function createSnapshot(
+  overrides: DeepPartial<RunStateSnapshot> = {},
+): RunStateSnapshot {
   const base: RunStateSnapshot = {
     schemaVersion: 'engine-run-state.v2',
     runId: 'run_test_001',
@@ -139,7 +158,7 @@ function createSnapshot(overrides: DeepPartial<RunStateSnapshot> = {}): RunState
       currentTickDurationMs: 13_000,
       nextTickAtMs: null,
       holdCharges: 1,
-      activeDecisionWindows: {},
+      activeDecisionWindows: {} as ActiveDecisionWindows,
       frozenWindowIds: [],
     },
     telemetry: {
@@ -156,22 +175,22 @@ function createSnapshot(overrides: DeepPartial<RunStateSnapshot> = {}): RunState
   return {
     ...base,
     ...overrides,
-    economy: { ...base.economy, ...(overrides.economy ?? {}) },
-    pressure: { ...base.pressure, ...(overrides.pressure ?? {}) },
-    tension: { ...base.tension, ...(overrides.tension ?? {}) },
-    shield: { ...base.shield, ...(overrides.shield ?? {}) },
-    battle: { ...base.battle, ...(overrides.battle ?? {}) },
-    cascade: { ...base.cascade, ...(overrides.cascade ?? {}) },
-    sovereignty: { ...base.sovereignty, ...(overrides.sovereignty ?? {}) },
-    cards: { ...base.cards, ...(overrides.cards ?? {}) },
-    modeState: { ...base.modeState, ...(overrides.modeState ?? {}) },
-    timers: { ...base.timers, ...(overrides.timers ?? {}) },
-    telemetry: { ...base.telemetry, ...(overrides.telemetry ?? {}) },
+    economy: mergeExact(base.economy, overrides.economy),
+    pressure: mergeExact(base.pressure, overrides.pressure),
+    tension: mergeExact(base.tension, overrides.tension),
+    shield: mergeExact(base.shield, overrides.shield),
+    battle: mergeExact(base.battle, overrides.battle),
+    cascade: mergeExact(base.cascade, overrides.cascade),
+    sovereignty: mergeExact(base.sovereignty, overrides.sovereignty),
+    cards: mergeExact(base.cards, overrides.cards),
+    modeState: mergeExact(base.modeState, overrides.modeState),
+    timers: mergeExact(base.timers, overrides.timers),
+    telemetry: mergeExact(base.telemetry, overrides.telemetry),
   };
 }
 
 function createContext(
-  bus: EventBus<EngineEventMap & Record<string, unknown>>,
+  bus: EventBus<EngineBusEventMap>,
   nowMs = 1_000,
   step: TickContext['step'] = 'STEP_02_TIME',
 ): TickContext {
@@ -195,11 +214,11 @@ function createContext(
 
 describe('backend time/TimeEngine', () => {
   let engine: TimeEngine;
-  let bus: EventBus<EngineEventMap & Record<string, unknown>>;
+  let bus: EventBus<EngineBusEventMap>;
 
   beforeEach(() => {
     engine = new TimeEngine();
-    bus = new EventBus<EngineEventMap & Record<string, unknown>>();
+    bus = new EventBus<EngineBusEventMap>();
   });
 
   it('runs only on STEP_02_TIME while the run is non-terminal', () => {
@@ -209,7 +228,9 @@ describe('backend time/TimeEngine', () => {
 
     expect(engine.canRun(snapshot, timeContext)).toBe(true);
     expect(engine.canRun(snapshot, pressureContext)).toBe(false);
-    expect(engine.canRun(createSnapshot({ outcome: 'TIMEOUT' }), timeContext)).toBe(false);
+    expect(
+      engine.canRun(createSnapshot({ outcome: 'TIMEOUT' }), timeContext),
+    ).toBe(false);
   });
 
   it('advances tick, elapsed budget, next fire time, and cadence duration', () => {
@@ -221,7 +242,7 @@ describe('backend time/TimeEngine', () => {
         currentTickDurationMs: 13_000,
         nextTickAtMs: null,
         holdCharges: 1,
-        activeDecisionWindows: {},
+        activeDecisionWindows: {} as ActiveDecisionWindows,
         frozenWindowIds: [],
       },
       pressure: {
@@ -230,7 +251,7 @@ describe('backend time/TimeEngine', () => {
     });
 
     const result = engine.tick(snapshot, createContext(bus, 2_500));
-    const nextSnapshot = 'snapshot' in result ? result.snapshot : result;
+    const nextSnapshot = result.snapshot;
 
     expect(nextSnapshot.tick).toBe(1);
     expect(nextSnapshot.timers.elapsedMs).toBe(18_000);
@@ -249,8 +270,8 @@ describe('backend time/TimeEngine', () => {
         nextTickAtMs: null,
         holdCharges: 1,
         activeDecisionWindows: {
-          window_alpha: 7_500,
-        },
+          window_alpha: createActiveDecisionWindowValue(7_500),
+        } as ActiveDecisionWindows,
         frozenWindowIds: [],
       },
     });
@@ -277,15 +298,15 @@ describe('backend time/TimeEngine', () => {
         nextTickAtMs: null,
         holdCharges: 1,
         activeDecisionWindows: {
-          window_expired: 900,
-        },
+          window_expired: createActiveDecisionWindowValue(900),
+        } as ActiveDecisionWindows,
         frozenWindowIds: [],
       },
     });
 
     const result = engine.tick(snapshot, createContext(bus, 1_000));
-    const nextSnapshot = 'snapshot' in result ? result.snapshot : result;
-    const signals = 'signals' in result && result.signals !== undefined ? result.signals : [];
+    const nextSnapshot = result.snapshot;
+    const signals = result.signals ?? [];
 
     expect(nextSnapshot.timers.activeDecisionWindows).toEqual({});
     expect(nextSnapshot.tags).toContain('decision_window:expired');
@@ -296,7 +317,9 @@ describe('backend time/TimeEngine', () => {
         accepted: false,
       },
     ]);
-    expect(signals.map((signal) => signal.code)).toContain('TIME_DECISION_WINDOW_EXPIRED');
+    expect(signals.map((signal) => signal.code)).toContain(
+      'TIME_DECISION_WINDOW_EXPIRED',
+    );
   });
 
   it('advances phase and resets phase boundary windows when a boundary is crossed', () => {
@@ -308,17 +331,17 @@ describe('backend time/TimeEngine', () => {
       timers: {
         seasonBudgetMs: 600_000,
         extensionBudgetMs: 0,
-        elapsedMs: (4 * 60 * 1_000) - 1_000,
+        elapsedMs: 4 * 60 * 1_000 - 1_000,
         currentTickDurationMs: 13_000,
         nextTickAtMs: null,
         holdCharges: 1,
-        activeDecisionWindows: {},
+        activeDecisionWindows: {} as ActiveDecisionWindows,
         frozenWindowIds: [],
       },
     });
 
     const result = engine.tick(snapshot, createContext(bus, 3_000));
-    const nextSnapshot = 'snapshot' in result ? result.snapshot : result;
+    const nextSnapshot = result.snapshot;
 
     expect(nextSnapshot.phase).toBe('ESCALATION');
     expect(nextSnapshot.modeState.phaseBoundaryWindowsRemaining).toBe(
@@ -336,22 +359,30 @@ describe('backend time/TimeEngine', () => {
         currentTickDurationMs: 13_000,
         nextTickAtMs: null,
         holdCharges: 1,
-        activeDecisionWindows: {},
+        activeDecisionWindows: {} as ActiveDecisionWindows,
         frozenWindowIds: [],
       },
     });
 
     const result = engine.tick(snapshot, createContext(bus, 4_000));
-    const nextSnapshot = 'snapshot' in result ? result.snapshot : result;
-    const signals = 'signals' in result && result.signals !== undefined ? result.signals : [];
+    const nextSnapshot = result.snapshot;
+    const signals = result.signals ?? [];
 
     expect(nextSnapshot.outcome).toBe('TIMEOUT');
     expect(nextSnapshot.timers.nextTickAtMs).toBeNull();
-    expect(nextSnapshot.telemetry.outcomeReasonCode).toBe('SEASON_BUDGET_EXHAUSTED');
-    expect(nextSnapshot.telemetry.outcomeReason).toMatch(/season budget exhausted/i);
-    expect(nextSnapshot.telemetry.warnings).toContain('Season budget exhausted.');
+    expect(nextSnapshot.telemetry.outcomeReasonCode).toBe(
+      'SEASON_BUDGET_EXHAUSTED',
+    );
+    expect(nextSnapshot.telemetry.outcomeReason).toMatch(
+      /season budget exhausted/i,
+    );
+    expect(nextSnapshot.telemetry.warnings).toContain(
+      'Season budget exhausted.',
+    );
     expect(nextSnapshot.tags).toContain('run:timeout');
-    expect(signals.map((signal) => signal.code)).toContain('TIME_SEASON_BUDGET_EXHAUSTED');
+    expect(signals.map((signal) => signal.code)).toContain(
+      'TIME_SEASON_BUDGET_EXHAUSTED',
+    );
   });
 
   it('reports healthy runtime notes that reflect active local window state', () => {
@@ -361,6 +392,8 @@ describe('backend time/TimeEngine', () => {
 
     expect(health.engineId).toBe('time');
     expect(health.status).toBe('HEALTHY');
-    expect(health.notes?.some((note) => note.includes('activeDecisionWindows=1'))).toBe(true);
+    expect(
+      health.notes?.some((note) => note.includes('activeDecisionWindows=1')),
+    ).toBe(true);
   });
 });
