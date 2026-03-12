@@ -1,16 +1,20 @@
+// /Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/pzo-web/src/features/run/hooks/useSeasonClock.ts
+
 /**
  * FILE: pzo-web/src/features/run/hooks/useSeasonClock.ts
- * Engine 1 — SeasonClock React hook
+ * POINT ZERO ONE — ENGINE 1 SEASON CLOCK HOOK
  *
  * Purpose:
  * - expose real-world season timing state to React without importing TimeEngine
- * - tolerate the current repo state shape while being ready for richer season payloads
- * - return neutral defaults when the season manifest has not yet been hydrated
+ * - stay faithful to the live engineStore contract while tolerating partial season hydration
+ * - return stable, neutral defaults when season manifest fields are not yet present
+ * - preserve compatibility with richer future season payloads
  *
  * Notes:
  * - SeasonClock is wall-clock driven, not tick driven
  * - this hook reads from engineStore only
- * - when richer fields are absent from the store, it safely falls back
+ * - it never mutates store state
+ * - it is SSR-safe
  */
 
 import { useEffect, useMemo, useState } from 'react';
@@ -57,34 +61,56 @@ function asFiniteNumber(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
+function asPositiveFiniteNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null;
+}
+
 function asString(value: unknown): string | null {
-  return typeof value === 'string' && value.trim().length > 0 ? value : null;
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null;
 }
 
 function clamp01(value: number): number {
+  if (!Number.isFinite(value)) return 0;
   if (value <= 0) return 0;
   if (value >= 1) return 1;
   return value;
+}
+
+function normalizeWindowType(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+
+  const normalized = value.trim().toUpperCase();
+  return normalized.length > 0 ? normalized : null;
 }
 
 function normalizeWindows(
   rawWindows: readonly SeasonWindowView[] | null | undefined,
   nowMs: number,
 ): SeasonWindowView[] {
-  if (!rawWindows || rawWindows.length === 0) return [];
+  if (!Array.isArray(rawWindows) || rawWindows.length === 0) {
+    return [];
+  }
 
   return rawWindows
-    .map((window) => ({
-      windowId: String(window.windowId),
-      type: String(window.type),
-      startsAtMs: Number(window.startsAtMs),
-      endsAtMs: Number(window.endsAtMs),
-      pressureMultiplier:
-        typeof window.pressureMultiplier === 'number' && Number.isFinite(window.pressureMultiplier)
-          ? window.pressureMultiplier
-          : 1.0,
-      isActive: nowMs >= Number(window.startsAtMs) && nowMs <= Number(window.endsAtMs),
-    }))
+    .map((window) => {
+      const startsAtMs = Number(window.startsAtMs);
+      const endsAtMs = Number(window.endsAtMs);
+      const type = normalizeWindowType(window.type) ?? 'UNKNOWN';
+
+      return {
+        windowId: String(window.windowId),
+        type,
+        startsAtMs,
+        endsAtMs,
+        pressureMultiplier:
+          typeof window.pressureMultiplier === 'number' && Number.isFinite(window.pressureMultiplier)
+            ? Math.max(0, window.pressureMultiplier)
+            : 1.0,
+        isActive: Number.isFinite(startsAtMs) && Number.isFinite(endsAtMs)
+          ? nowMs >= startsAtMs && nowMs <= endsAtMs
+          : false,
+      } satisfies SeasonWindowView;
+    })
     .filter(
       (window) =>
         Number.isFinite(window.startsAtMs) &&
@@ -98,22 +124,70 @@ function product(values: readonly number[]): number {
   return values.reduce((acc, value) => acc * value, 1.0);
 }
 
+function buildActiveTypeSet(
+  activeWindows: readonly SeasonWindowView[],
+  fallbackTypes: readonly string[] | null | undefined,
+): Set<string> {
+  const activeTypes = new Set<string>();
+
+  for (const window of activeWindows) {
+    const normalized = normalizeWindowType(window.type);
+
+    if (normalized !== null) {
+      activeTypes.add(normalized);
+    }
+  }
+
+  if (Array.isArray(fallbackTypes)) {
+    for (const value of fallbackTypes) {
+      const normalized = normalizeWindowType(value);
+
+      if (normalized !== null) {
+        activeTypes.add(normalized);
+      }
+    }
+  }
+
+  return activeTypes;
+}
+
 export function useSeasonClock(): UseSeasonClockResult {
-  const timeSlice = useEngineStore((state: EngineStoreState) => state.time) as EngineStoreState['time'] &
-    ExtendedTimeSeasonState;
+  const timeSlice = useEngineStore(
+    (state: EngineStoreState) => state.time,
+  ) as EngineStoreState['time'] & ExtendedTimeSeasonState;
 
   const [nowMs, setNowMs] = useState<number>(() => Date.now());
 
+  const seasonId = asString(timeSlice.seasonId);
   const seasonStartMs = asFiniteNumber(timeSlice.seasonStartMs);
   const seasonEndMs = asFiniteNumber(timeSlice.seasonEndMs);
 
-  useEffect(() => {
-    const shouldTick =
-      seasonStartMs !== null ||
-      seasonEndMs !== null ||
-      (Array.isArray(timeSlice.activeSeasonWindows) && timeSlice.activeSeasonWindows.length > 0);
+  const normalizedWindows = useMemo(
+    () => normalizeWindows(timeSlice.activeSeasonWindows, nowMs),
+    [timeSlice.activeSeasonWindows, nowMs],
+  );
 
-    if (!shouldTick) return;
+  const activeWindows = useMemo(
+    () => normalizedWindows.filter((window) => window.isActive),
+    [normalizedWindows],
+  );
+
+  const activeTypes = useMemo(
+    () => buildActiveTypeSet(activeWindows, timeSlice.activeSeasonWindowTypes),
+    [activeWindows, timeSlice.activeSeasonWindowTypes],
+  );
+
+  const isManifestLoaded =
+    seasonId !== null ||
+    seasonStartMs !== null ||
+    seasonEndMs !== null ||
+    normalizedWindows.length > 0 ||
+    activeTypes.size > 0;
+
+  useEffect(() => {
+    if (!isManifestLoaded || typeof window === 'undefined') {
+      return;
+    }
 
     const intervalId = window.setInterval(() => {
       setNowMs(Date.now());
@@ -122,16 +196,12 @@ export function useSeasonClock(): UseSeasonClockResult {
     return () => {
       window.clearInterval(intervalId);
     };
-  }, [seasonStartMs, seasonEndMs, timeSlice.activeSeasonWindows]);
+  }, [isManifestLoaded]);
 
-  const activeWindows = useMemo(
-    () => normalizeWindows(timeSlice.activeSeasonWindows, nowMs).filter((window) => window.isActive),
-    [timeSlice.activeSeasonWindows, nowMs],
-  );
-
-  const isManifestLoaded = seasonStartMs !== null || seasonEndMs !== null || activeWindows.length > 0;
   const isSeasonActive =
-    seasonStartMs !== null && seasonEndMs !== null ? nowMs >= seasonStartMs && nowMs <= seasonEndMs : false;
+    seasonStartMs !== null && seasonEndMs !== null
+      ? nowMs >= seasonStartMs && nowMs <= seasonEndMs
+      : activeWindows.length > 0 || activeTypes.size > 0;
 
   const msUntilSeasonStart =
     seasonStartMs === null ? Number.POSITIVE_INFINITY : Math.max(0, seasonStartMs - nowMs);
@@ -144,20 +214,17 @@ export function useSeasonClock(): UseSeasonClockResult {
       ? clamp01((nowMs - seasonStartMs) / (seasonEndMs - seasonStartMs))
       : 0;
 
-  const derivedPressureMultiplier = product(activeWindows.map((window) => window.pressureMultiplier));
-  const pressureMultiplier =
-    asFiniteNumber(timeSlice.seasonPressureMultiplier) ?? derivedPressureMultiplier ?? 1.0;
-
-  const activeTypes = new Set(
-    activeWindows.map((window) => window.type).concat(
-      Array.isArray(timeSlice.activeSeasonWindowTypes)
-        ? timeSlice.activeSeasonWindowTypes.filter((value): value is string => typeof value === 'string')
-        : [],
-    ),
+  const derivedPressureMultiplier = product(
+    activeWindows.map((window) => window.pressureMultiplier),
   );
 
+  const pressureMultiplier =
+    asPositiveFiniteNumber(timeSlice.seasonPressureMultiplier) ??
+    derivedPressureMultiplier ??
+    1.0;
+
   return {
-    seasonId: asString(timeSlice.seasonId),
+    seasonId,
     seasonStartMs,
     seasonEndMs,
     nowMs,
@@ -175,3 +242,5 @@ export function useSeasonClock(): UseSeasonClockResult {
     hasReengageWindow: activeTypes.has('REENGAGE_WINDOW'),
   };
 }
+
+export default useSeasonClock;
