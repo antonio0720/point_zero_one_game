@@ -31,11 +31,11 @@
  * - If only the minimal shape exists, synthesize a live countdown client-side.
  * - Keep animation smooth with requestAnimationFrame.
  * - Never mutate the store from this hook.
+ * - Do NOT depend on any new helper file for core formatting; keep this file self-sufficient.
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useEngineStore } from '../../../store/engineStore';
-import { formatTickCountdown } from './useTickCountdown';
 
 type UnknownStoreWindow = Record<string, unknown>;
 
@@ -101,6 +101,27 @@ function coerceString(value: unknown, fallback: string | null = null): string | 
   return typeof value === 'string' ? value : fallback;
 }
 
+function formatTickCountdownInline(remainingMs: number): string {
+  const safeRemainingMs =
+    typeof remainingMs === 'number' && Number.isFinite(remainingMs)
+      ? Math.max(0, remainingMs)
+      : 0;
+
+  const totalSeconds = safeRemainingMs / 1000;
+
+  if (totalSeconds >= 60) {
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = Math.floor(totalSeconds % 60);
+    return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+  }
+
+  if (totalSeconds >= 10) {
+    return `${Math.ceil(totalSeconds)}`;
+  }
+
+  return totalSeconds.toFixed(1);
+}
+
 function isRichWindowShape(
   value: UnknownStoreWindow | null,
 ): value is UnknownStoreWindow & RichDecisionWindowEntry {
@@ -128,7 +149,7 @@ function isMinimalWindowShape(
 }
 
 export function formatCountdown(remainingMs: number): string {
-  return formatTickCountdown(remainingMs);
+  return formatTickCountdownInline(remainingMs);
 }
 
 export function useDecisionWindow(cardId: string): UseDecisionWindowResult {
@@ -166,15 +187,15 @@ export function useDecisionWindow(cardId: string): UseDecisionWindowResult {
       durationMs,
       remainingMs,
       openedAtTick:
-        typeof rich.openedAtTick === 'number' && Number.isFinite(rich.openedAtTick)
+        typeof rich.openedAtTick === "number" && Number.isFinite(rich.openedAtTick)
           ? rich.openedAtTick
           : null,
       openedAtMs:
-        typeof rich.openedAtMs === 'number' && Number.isFinite(rich.openedAtMs)
+        typeof rich.openedAtMs === "number" && Number.isFinite(rich.openedAtMs)
           ? rich.openedAtMs
           : null,
       expiresAtMs:
-        typeof rich.expiresAtMs === 'number' && Number.isFinite(rich.expiresAtMs)
+        typeof rich.expiresAtMs === "number" && Number.isFinite(rich.expiresAtMs)
           ? rich.expiresAtMs
           : null,
       autoResolve: coerceString(rich.autoResolve),
