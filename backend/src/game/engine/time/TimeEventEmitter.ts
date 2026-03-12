@@ -10,52 +10,24 @@
  */
 
 import type { EventBus } from '../core/EventBus';
-import type { EngineEventMap, ModeCode, PressureTier, RunPhase, TimingClass } from '../core/GamePrimitives';
+import type { EngineEventMap } from '../core/GamePrimitives';
 import type { RunStateSnapshot } from '../core/RunStateSnapshot';
+
+type TimeEventBusMap = {
+  [K in keyof EngineEventMap]: EngineEventMap[K];
+};
 
 export interface TimeEventEmitterOptions {
   readonly defaultTags?: readonly string[];
 }
 
-export interface TickStartedPayload {
-  readonly runId: string;
-  readonly tick: number;
-  readonly phase: RunPhase;
-}
-
-export interface TickCompletedPayload {
-  readonly runId: string;
-  readonly tick: number;
-  readonly phase: RunPhase;
-  readonly checksum: string;
-}
-
-export interface DecisionWindowOpenedPayload {
-  readonly windowId: string;
-  readonly tick: number;
-  readonly durationMs: number;
-  readonly actorId?: string;
-}
-
-export interface DecisionWindowClosedPayload {
-  readonly windowId: string;
-  readonly tick: number;
-  readonly accepted: boolean;
-  readonly actorId?: string;
-}
-
-export interface PhaseWindowOpenedPayload {
-  readonly mode: ModeCode;
-  readonly tick: number;
-  readonly timing: TimingClass;
-  readonly remaining: number;
-}
-
-export interface PressureChangedPayload {
-  readonly from: PressureTier;
-  readonly to: PressureTier;
-  readonly score: number;
-}
+export type TickStartedPayload = EngineEventMap['tick.started'];
+export type TickCompletedPayload = EngineEventMap['tick.completed'];
+export type DecisionWindowOpenedPayload = EngineEventMap['decision.window.opened'];
+export type DecisionWindowClosedPayload = EngineEventMap['decision.window.closed'];
+export type PhaseWindowOpenedPayload = EngineEventMap['mode.phase_window.opened'];
+export type PressureChangedPayload = EngineEventMap['pressure.changed'];
+export type RunStartedPayload = EngineEventMap['run.started'];
 
 export interface TimeEmitOptions {
   readonly emittedAtTick?: number;
@@ -91,7 +63,7 @@ export class TimeEventEmitter {
   private readonly defaultTags: readonly string[];
 
   public constructor(
-    private readonly bus: EventBus<EngineEventMap>,
+    private readonly bus: EventBus<TimeEventBusMap>,
     options: TimeEventEmitterOptions = {},
   ) {
     this.defaultTags = freezeArray(options.defaultTags ?? ['engine:time']);
@@ -100,7 +72,7 @@ export class TimeEventEmitter {
   public emitTickStarted(
     snapshot: RunStateSnapshot,
     tick = snapshot.tick + 1,
-    phase: RunPhase = snapshot.phase,
+    phase = snapshot.phase,
     options: TimeEmitOptions = {},
   ): void {
     const payload: TickStartedPayload = {
@@ -119,7 +91,7 @@ export class TimeEventEmitter {
     snapshot: RunStateSnapshot,
     checksum: string,
     tick = snapshot.tick,
-    phase: RunPhase = snapshot.phase,
+    phase = snapshot.phase,
     options: TimeEmitOptions = {},
   ): void {
     const payload: TickCompletedPayload = {
@@ -139,23 +111,21 @@ export class TimeEventEmitter {
     snapshot: RunStateSnapshot,
     options: TimeEmitOptions = {},
   ): void {
-    this.bus.emit(
-      'run.started',
-      {
-        runId: snapshot.runId,
-        mode: snapshot.mode,
-        seed: snapshot.seed,
-      },
-      {
-        emittedAtTick: options.emittedAtTick ?? snapshot.tick,
-        tags: dedupeTags(this.defaultTags, options.tags),
-      },
-    );
+    const payload: RunStartedPayload = {
+      runId: snapshot.runId,
+      mode: snapshot.mode,
+      seed: snapshot.seed,
+    };
+
+    this.bus.emit('run.started', payload, {
+      emittedAtTick: options.emittedAtTick ?? snapshot.tick,
+      tags: dedupeTags(this.defaultTags, options.tags),
+    });
   }
 
   public emitPressureChanged(
-    from: PressureTier,
-    to: PressureTier,
+    from: PressureChangedPayload['from'],
+    to: PressureChangedPayload['to'],
     score: number,
     tick: number,
     options: TimeEmitOptions = {},

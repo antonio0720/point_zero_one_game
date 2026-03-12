@@ -1,8 +1,37 @@
 // backend/src/game/engine/time/__tests__/DecisionTimer.test.ts
 import { beforeEach, describe, expect, it } from 'vitest';
 
+import type { RuntimeDecisionWindowSnapshot } from '../../core/RunStateSnapshot';
 import { DecisionTimer } from '../DecisionTimer';
 import { DEFAULT_HOLD_DURATION_MS } from '../types';
+
+function makeRuntimeDecisionWindowSnapshot(
+  windowId: string,
+  closesAtMs: number,
+  overrides: Partial<RuntimeDecisionWindowSnapshot> = {},
+): RuntimeDecisionWindowSnapshot {
+  const openedAtMs = Math.max(0, closesAtMs - 1_000);
+
+  return Object.freeze({
+    id: windowId,
+    timingClass: 'FATE',
+    label: `Decision ${windowId}`,
+    source: 'unit-test',
+    mode: 'solo',
+    openedAtTick: 1,
+    openedAtMs,
+    closesAtTick: null,
+    closesAtMs,
+    exclusive: false,
+    frozen: false,
+    consumed: false,
+    actorId: null,
+    targetActorId: null,
+    cardInstanceId: null,
+    metadata: Object.freeze({}),
+    ...overrides,
+  });
+}
 
 describe('backend time/DecisionTimer', () => {
   let timer: DecisionTimer;
@@ -14,8 +43,8 @@ describe('backend time/DecisionTimer', () => {
   it('hydrates runtime windows from the snapshot surface and reports opened ids', () => {
     const result = timer.syncFromSnapshot(
       {
-        window_a: 5_000,
-        window_b: 8_000,
+        window_a: makeRuntimeDecisionWindowSnapshot('window_a', 5_000),
+        window_b: makeRuntimeDecisionWindowSnapshot('window_b', 8_000),
       },
       [],
       1_000,
@@ -38,7 +67,7 @@ describe('backend time/DecisionTimer', () => {
 
     const result = timer.syncFromSnapshot(
       {
-        window_live: 7_500,
+        window_live: makeRuntimeDecisionWindowSnapshot('window_live', 7_500),
       },
       [],
       1_000,
@@ -49,6 +78,30 @@ describe('backend time/DecisionTimer', () => {
     expect(timer.snapshot()).toEqual({
       window_live: 7_500,
     });
+  });
+
+  it('hydrates frozen runtime windows from snapshot flags and preserves the bounded hold window', () => {
+    const nowMs = 1_000;
+
+    const result = timer.syncFromSnapshot(
+      {
+        window_frozen: makeRuntimeDecisionWindowSnapshot('window_frozen', 9_000, {
+          frozen: true,
+        }),
+      },
+      ['window_frozen'],
+      nowMs,
+    );
+
+    expect(result).toEqual({
+      openedWindowIds: ['window_frozen'],
+      removedWindowIds: [],
+    });
+    expect(timer.snapshot()).toEqual({
+      window_frozen: 9_000,
+    });
+    expect(timer.frozenIds(nowMs)).toEqual(['window_frozen']);
+    expect(timer.frozenIds(nowMs + DEFAULT_HOLD_DURATION_MS + 1)).toEqual([]);
   });
 
   it('freezes a window by extending its deadline and exposing a frozen runtime id', () => {

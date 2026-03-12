@@ -44,9 +44,9 @@ export interface TickSchedulerState {
   readonly lastFiredAtMs: number | null;
 }
 
-export type TickSchedulerCallback =
-  | ((event: ScheduledTickEvent) => TickScheduleRequest | null | void)
-  | ((event: ScheduledTickEvent) => Promise<TickScheduleRequest | null | void>);
+export type TickSchedulerCallback = (
+  event: ScheduledTickEvent,
+) => TickScheduleRequest | null | void | Promise<TickScheduleRequest | null | void>;
 
 function normalizeDurationMs(value: number): number {
   if (!Number.isFinite(value)) {
@@ -54,6 +54,12 @@ function normalizeDurationMs(value: number): number {
   }
 
   return Math.max(1, Math.trunc(value));
+}
+
+function isTickScheduleRequest(
+  value: TickScheduleRequest | null | void,
+): value is TickScheduleRequest {
+  return value !== null && value !== undefined;
 }
 
 export class TickScheduler {
@@ -268,9 +274,10 @@ export class TickScheduler {
         reason: this.lastReason,
       });
 
-      const callbackResult: TickScheduleRequest | null | void = this.onTickCallback
-        ? await this.onTickCallback(event)
-        : undefined;
+      const callbackResult: TickScheduleRequest | null | void =
+        this.onTickCallback !== null
+          ? await this.onTickCallback(event)
+          : undefined;
 
       if (!this.isRunning || this.isPaused) {
         return;
@@ -282,6 +289,15 @@ export class TickScheduler {
       }
 
       if (callbackResult === undefined) {
+        this.arm({
+          durationMs: plannedDurationMs,
+          tier: this.currentTier,
+          reason: this.lastReason ?? 'repeat',
+        });
+        return;
+      }
+
+      if (!isTickScheduleRequest(callbackResult)) {
         this.arm({
           durationMs: plannedDurationMs,
           tier: this.currentTier,
