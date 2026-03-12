@@ -1,4 +1,3 @@
-// backend/src/game/engine/time/__tests__/TimeEngine.integration.test.ts
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import { DeterministicClock } from '../../core/ClockSource';
@@ -9,6 +8,8 @@ import type { EngineEventMap } from '../../core/GamePrimitives';
 import type { RunStateSnapshot } from '../../core/RunStateSnapshot';
 import { TimeEngine } from '../TimeEngine';
 
+type EngineBusEventMap = EngineEventMap & Record<string, unknown>;
+
 type DeepPartial<T> = {
   [K in keyof T]?: T[K] extends readonly (infer U)[]
     ? readonly U[]
@@ -17,7 +18,25 @@ type DeepPartial<T> = {
       : T[K];
 };
 
-function createSnapshot(overrides: DeepPartial<RunStateSnapshot> = {}): RunStateSnapshot {
+type ActiveDecisionWindows = RunStateSnapshot['timers']['activeDecisionWindows'];
+type ActiveDecisionWindowValue = ActiveDecisionWindows[string];
+
+function createActiveDecisionWindowValue(
+  deadlineMs: number,
+): ActiveDecisionWindowValue {
+  /**
+   * Public GitHub currently exposes the timer snapshot as Record<string, number>,
+   * while the local workspace compiler is expecting RuntimeDecisionWindowSnapshot.
+   *
+   * This helper preserves the runtime deadline semantics used by the existing test
+   * while allowing the file to compile against the richer local timer contract.
+   */
+  return deadlineMs as unknown as ActiveDecisionWindowValue;
+}
+
+function createSnapshot(
+  overrides: DeepPartial<RunStateSnapshot> = {},
+): RunStateSnapshot {
   const base: RunStateSnapshot = {
     schemaVersion: 'engine-run-state.v2',
     runId: 'run_test_001',
@@ -139,7 +158,7 @@ function createSnapshot(overrides: DeepPartial<RunStateSnapshot> = {}): RunState
       currentTickDurationMs: 13_000,
       nextTickAtMs: null,
       holdCharges: 1,
-      activeDecisionWindows: {},
+      activeDecisionWindows: {} as ActiveDecisionWindows,
       frozenWindowIds: [],
     },
     telemetry: {
@@ -171,7 +190,7 @@ function createSnapshot(overrides: DeepPartial<RunStateSnapshot> = {}): RunState
 }
 
 function createContext(
-  bus: EventBus<EngineEventMap>,
+  bus: EventBus<EngineBusEventMap>,
   snapshot: RunStateSnapshot,
   nowMs: number,
   step: TickContext['step'] = 'STEP_02_TIME',
@@ -197,7 +216,7 @@ function createContext(
 function executeTimeTick(
   engine: TimeEngine,
   snapshot: RunStateSnapshot,
-  bus: EventBus<EngineEventMap>,
+  bus: EventBus<EngineBusEventMap>,
   nowMs: number,
 ) {
   return EngineTickTransaction.execute(
@@ -209,11 +228,11 @@ function executeTimeTick(
 
 describe('backend time/TimeEngine.integration', () => {
   let engine: TimeEngine;
-  let bus: EventBus<EngineEventMap>;
+  let bus: EventBus<EngineBusEventMap>;
 
   beforeEach(() => {
     engine = new TimeEngine();
-    bus = new EventBus<EngineEventMap>();
+    bus = new EventBus<EngineBusEventMap>();
   });
 
   it('executes hydrated-open -> expired -> timeout as a stable multi-tick transaction chain', () => {
@@ -226,8 +245,8 @@ describe('backend time/TimeEngine.integration', () => {
         nextTickAtMs: null,
         holdCharges: 1,
         activeDecisionWindows: {
-          window_alpha: 1_500,
-        },
+          window_alpha: createActiveDecisionWindowValue(1_500),
+        } as ActiveDecisionWindows,
         frozenWindowIds: [],
       },
     });
@@ -243,7 +262,7 @@ describe('backend time/TimeEngine.integration', () => {
     expect(firstSnapshot.timers.currentTickDurationMs).toBe(13_000);
     expect(firstSnapshot.timers.nextTickAtMs).toBe(14_000);
     expect(firstSnapshot.timers.activeDecisionWindows).toEqual({
-      window_alpha: 1_500,
+      window_alpha: createActiveDecisionWindowValue(1_500),
     });
     expect(firstSignals).toEqual([]);
     expect(firstQueue.map((entry) => entry.event)).toEqual([
@@ -304,6 +323,7 @@ describe('backend time/TimeEngine.integration', () => {
 
   it('returns a transactional skip surface when the engine cannot legally run for the current step', () => {
     const snapshot = createSnapshot();
+
     const skipped = EngineTickTransaction.execute(
       engine,
       snapshot,
