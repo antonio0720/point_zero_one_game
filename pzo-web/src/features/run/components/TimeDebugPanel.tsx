@@ -1,0 +1,500 @@
+/**
+ * FILE: pzo-web/src/features/run/components/TimeDebugPanel.tsx
+ * Density6 LLC · Point Zero One · Engine 1 — Time Engine · Confidential
+ *
+ * TimeDebugPanel
+ * - dev-only inspector for adaptive tick timing, decision windows, and season clock state
+ * - reads from useTimeEngine() and useSeasonClock()
+ * - avoids engine imports and tolerates partial store hydration
+ */
+
+'use client';
+
+import React, { useEffect, useMemo, useState } from 'react';
+import { useTimeEngine } from '../hooks/useTimeEngine';
+import { useSeasonClock } from '../hooks/useSeasonClock';
+
+const TIME_DEBUG_STYLES = `
+  .pzo-time-debug {
+    --bg: #080a0d;
+    --panel: #0c0f14;
+    --panel-2: #111821;
+    --border: #1a2030;
+    --gold: #c9a84c;
+    --amber: #b97d27;
+    --crimson: #b92b27;
+    --teal: #1de9b6;
+    --text: #8fa0b8;
+    --textHi: #d5e1f1;
+    --mono: 'Share Tech Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    position: fixed;
+    left: 10px;
+    bottom: 10px;
+    z-index: 9999;
+    width: 392px;
+    max-width: calc(100vw - 20px);
+    border: 1px solid var(--border);
+    background: linear-gradient(180deg, rgba(12,15,20,.97), rgba(8,10,13,.97));
+    border-radius: 8px;
+    box-shadow: 0 14px 40px rgba(0,0,0,.55);
+    overflow: hidden;
+    user-select: none;
+  }
+
+  .pzo-time-debug__hdr {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 10px 8px 10px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .pzo-time-debug__title {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: .18em;
+    color: var(--gold);
+    text-transform: uppercase;
+    flex: 1;
+  }
+
+  .pzo-time-debug__btn {
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: .12em;
+    color: var(--textHi);
+    background: #111820;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 6px 8px;
+    cursor: pointer;
+  }
+
+  .pzo-time-debug__btn:hover {
+    border-color: var(--gold);
+  }
+
+  .pzo-time-debug__body {
+    padding: 10px;
+    display: grid;
+    gap: 10px;
+  }
+
+  .pzo-time-debug__section {
+    display: grid;
+    gap: 8px;
+    padding: 9px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: rgba(17,24,32,.48);
+  }
+
+  .pzo-time-debug__section-title {
+    font-family: var(--mono);
+    font-size: 9px;
+    line-height: 1;
+    letter-spacing: .16em;
+    text-transform: uppercase;
+    color: var(--gold);
+  }
+
+  .pzo-time-debug__grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .pzo-time-debug__kv {
+    display: grid;
+    gap: 3px;
+    padding: 7px 8px;
+    border: 1px solid rgba(255,255,255,.05);
+    border-radius: 6px;
+    background: rgba(255,255,255,.025);
+    min-width: 0;
+  }
+
+  .pzo-time-debug__label {
+    font-family: var(--mono);
+    font-size: 8px;
+    line-height: 1;
+    letter-spacing: .14em;
+    color: var(--text);
+    text-transform: uppercase;
+  }
+
+  .pzo-time-debug__value {
+    color: var(--textHi);
+    font-size: 13px;
+    line-height: 1.15;
+    font-weight: 800;
+    overflow-wrap: anywhere;
+  }
+
+  .pzo-time-debug__pill-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .pzo-time-debug__pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 8px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: rgba(17,24,32,.82);
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: .12em;
+    color: var(--textHi);
+    width: fit-content;
+  }
+
+  .pzo-time-debug__json {
+    border: 1px solid var(--border);
+    background: rgba(17,24,32,.78);
+    border-radius: 6px;
+    padding: 8px;
+    color: var(--textHi);
+    font-family: var(--mono);
+    font-size: 9px;
+    line-height: 1.35;
+    max-height: 240px;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  .pzo-time-debug__accent--T0 { color: #c9a84c; }
+  .pzo-time-debug__accent--T1 { color: #d0d7e2; }
+  .pzo-time-debug__accent--T2 { color: #d99838; }
+  .pzo-time-debug__accent--T3 { color: #ff7a64; }
+  .pzo-time-debug__accent--T4 { color: #ff4b4b; }
+
+  @media (max-width: 640px) {
+    .pzo-time-debug__grid {
+      grid-template-columns: 1fr;
+    }
+  }
+`;
+
+function injectTimeDebugStyles(): void {
+  if (typeof document === 'undefined') return;
+  const id = 'pzo-time-debug-styles';
+  if (document.getElementById(id)) return;
+
+  const el = document.createElement('style');
+  el.id = id;
+  el.textContent = TIME_DEBUG_STYLES;
+  document.head.appendChild(el);
+}
+
+function formatMs(ms: number): string {
+  if (!Number.isFinite(ms)) return '—';
+  if (ms < 1000) return `${Math.max(0, Math.round(ms))}ms`;
+  if (ms < 60000) return `${(ms / 1000).toFixed(ms >= 10000 ? 0 : 1)}s`;
+
+  const totalSeconds = Math.floor(ms / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}m ${String(seconds).padStart(2, '0')}s`;
+}
+
+function clamp01(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  if (value <= 0) return 0;
+  if (value >= 1) return 1;
+  return value;
+}
+
+export interface TimeDebugPanelProps {
+  readonly defaultOpen?: boolean;
+  readonly showRawJSON?: boolean;
+}
+
+export default function TimeDebugPanel({
+  defaultOpen = false,
+  showRawJSON = true,
+}: TimeDebugPanelProps) {
+  const time = useTimeEngine();
+  const season = useSeasonClock();
+
+  useEffect(() => {
+    injectTimeDebugStyles();
+  }, []);
+
+  const [open, setOpen] = useState(defaultOpen);
+  const [copied, setCopied] = useState(false);
+
+  const tickProgressPct = clamp01(time.tickProgressPct);
+  const seasonProgressPct = clamp01(season.seasonProgressPct);
+
+  const snapshot = useMemo(() => {
+    return {
+      time: {
+        currentTier: time.currentTier,
+        previousTier: time.previousTier,
+        tierChangedThisTick: time.tierChangedThisTick,
+        tickDurationMs: time.tickDurationMs,
+        secondsPerTick: time.secondsPerTick,
+        decisionWindowMs: time.decisionWindowMs,
+        ticksElapsed: time.ticksElapsed,
+        ticksRemaining: time.ticksRemaining,
+        seasonTickBudget: time.seasonTickBudget,
+        tickProgressPct,
+        activeWindowCount: time.activeWindowCount,
+        holdsLeft: time.holdsLeft,
+        hasHoldAvailable: time.hasHoldAvailable,
+        audioSignal: time.audioSignal,
+        visualBorderClass: time.visualBorderClass,
+        screenShake: time.screenShake,
+        isRunActive: time.isRunActive,
+      },
+      season: {
+        seasonId: season.seasonId,
+        seasonStartMs: season.seasonStartMs,
+        seasonEndMs: season.seasonEndMs,
+        nowMs: season.nowMs,
+        isManifestLoaded: season.isManifestLoaded,
+        isSeasonActive: season.isSeasonActive,
+        msUntilSeasonStart: season.msUntilSeasonStart,
+        msUntilSeasonEnd: season.msUntilSeasonEnd,
+        seasonProgressPct,
+        pressureMultiplier: season.pressureMultiplier,
+        activeWindows: season.activeWindows,
+        hasKickoffWindow: season.hasKickoffWindow,
+        hasLiveopsWindow: season.hasLiveopsWindow,
+        hasFinaleWindow: season.hasFinaleWindow,
+        hasArchiveCloseWindow: season.hasArchiveCloseWindow,
+        hasReengageWindow: season.hasReengageWindow,
+      },
+    };
+  }, [
+    season.activeWindows,
+    season.hasArchiveCloseWindow,
+    season.hasFinaleWindow,
+    season.hasKickoffWindow,
+    season.hasLiveopsWindow,
+    season.hasReengageWindow,
+    season.isManifestLoaded,
+    season.isSeasonActive,
+    season.msUntilSeasonEnd,
+    season.msUntilSeasonStart,
+    season.nowMs,
+    season.pressureMultiplier,
+    season.seasonEndMs,
+    season.seasonId,
+    season.seasonStartMs,
+    seasonProgressPct,
+    tickProgressPct,
+    time.activeWindowCount,
+    time.audioSignal,
+    time.currentTier,
+    time.decisionWindowMs,
+    time.hasHoldAvailable,
+    time.holdsLeft,
+    time.isRunActive,
+    time.previousTier,
+    time.screenShake,
+    time.secondsPerTick,
+    time.seasonTickBudget,
+    time.tickDurationMs,
+    time.tickProgressPct,
+    time.ticksElapsed,
+    time.ticksRemaining,
+    time.tierChangedThisTick,
+    time.visualBorderClass,
+  ]);
+
+  const snapshotJSON = useMemo(() => {
+    try {
+      return JSON.stringify(snapshot, null, 2);
+    } catch {
+      return '{"error":"time snapshot not serializable"}';
+    }
+  }, [snapshot]);
+
+  const copyJSON = async (): Promise<void> => {
+    try {
+      if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(snapshotJSON);
+        setCopied(true);
+        window.setTimeout(() => setCopied(false), 900);
+      }
+    } catch {
+      // silent
+    }
+  };
+
+  return (
+    <div className="pzo-time-debug" aria-label="Time debug panel">
+      <div className="pzo-time-debug__hdr">
+        <div className="pzo-time-debug__title">Time Engine Debug</div>
+        <button
+          type="button"
+          className="pzo-time-debug__btn"
+          onClick={() => setOpen((v) => !v)}
+        >
+          {open ? 'HIDE' : 'SHOW'}
+        </button>
+        {showRawJSON && open ? (
+          <button type="button" className="pzo-time-debug__btn" onClick={() => void copyJSON()}>
+            {copied ? 'COPIED' : 'COPY JSON'}
+          </button>
+        ) : null}
+      </div>
+
+      {open ? (
+        <div className="pzo-time-debug__body">
+          <section className="pzo-time-debug__section">
+            <div className="pzo-time-debug__section-title">Adaptive Tick State</div>
+
+            <div className="pzo-time-debug__pill-row">
+              <span className="pzo-time-debug__pill">
+                TIER
+                <span className={`pzo-time-debug__accent--${time.currentTier}`}>{String(time.currentTier)}</span>
+              </span>
+
+              {time.previousTier ? (
+                <span className="pzo-time-debug__pill">PREV {String(time.previousTier)}</span>
+              ) : null}
+
+              <span className="pzo-time-debug__pill">
+                RUN {time.isRunActive ? 'ACTIVE' : 'IDLE'}
+              </span>
+
+              <span className="pzo-time-debug__pill">
+                HOLD {time.holdsLeft}
+              </span>
+            </div>
+
+            <div className="pzo-time-debug__grid">
+              <div className="pzo-time-debug__kv">
+                <div className="pzo-time-debug__label">Tick Duration</div>
+                <div className="pzo-time-debug__value">{formatMs(time.tickDurationMs)}</div>
+              </div>
+
+              <div className="pzo-time-debug__kv">
+                <div className="pzo-time-debug__label">Decision Window</div>
+                <div className="pzo-time-debug__value">{formatMs(time.decisionWindowMs)}</div>
+              </div>
+
+              <div className="pzo-time-debug__kv">
+                <div className="pzo-time-debug__label">Tick Budget</div>
+                <div className="pzo-time-debug__value">
+                  {time.ticksElapsed}/{time.seasonTickBudget}
+                </div>
+              </div>
+
+              <div className="pzo-time-debug__kv">
+                <div className="pzo-time-debug__label">Ticks Remaining</div>
+                <div className="pzo-time-debug__value">{time.ticksRemaining}</div>
+              </div>
+
+              <div className="pzo-time-debug__kv">
+                <div className="pzo-time-debug__label">Tick Progress</div>
+                <div className="pzo-time-debug__value">{Math.round(tickProgressPct * 100)}%</div>
+              </div>
+
+              <div className="pzo-time-debug__kv">
+                <div className="pzo-time-debug__label">Open Windows</div>
+                <div className="pzo-time-debug__value">{time.activeWindowCount}</div>
+              </div>
+
+              <div className="pzo-time-debug__kv">
+                <div className="pzo-time-debug__label">Tier Changed</div>
+                <div className="pzo-time-debug__value">{time.tierChangedThisTick ? 'YES' : 'NO'}</div>
+              </div>
+
+              <div className="pzo-time-debug__kv">
+                <div className="pzo-time-debug__label">Screen Shake</div>
+                <div className="pzo-time-debug__value">{time.screenShake ? 'ON' : 'OFF'}</div>
+              </div>
+
+              <div className="pzo-time-debug__kv">
+                <div className="pzo-time-debug__label">Audio Signal</div>
+                <div className="pzo-time-debug__value">{time.audioSignal ?? '—'}</div>
+              </div>
+
+              <div className="pzo-time-debug__kv">
+                <div className="pzo-time-debug__label">Border Class</div>
+                <div className="pzo-time-debug__value">{time.visualBorderClass}</div>
+              </div>
+            </div>
+          </section>
+
+          <section className="pzo-time-debug__section">
+            <div className="pzo-time-debug__section-title">Season Clock</div>
+
+            <div className="pzo-time-debug__pill-row">
+              <span className="pzo-time-debug__pill">
+                MANIFEST {season.isManifestLoaded ? 'LOADED' : 'NONE'}
+              </span>
+              <span className="pzo-time-debug__pill">
+                SEASON {season.isSeasonActive ? 'ACTIVE' : 'INACTIVE'}
+              </span>
+              <span className="pzo-time-debug__pill">
+                PRESSURE ×{season.pressureMultiplier.toFixed(2)}
+              </span>
+            </div>
+
+            <div className="pzo-time-debug__grid">
+              <div className="pzo-time-debug__kv">
+                <div className="pzo-time-debug__label">Season ID</div>
+                <div className="pzo-time-debug__value">{season.seasonId ?? '—'}</div>
+              </div>
+
+              <div className="pzo-time-debug__kv">
+                <div className="pzo-time-debug__label">Season Progress</div>
+                <div className="pzo-time-debug__value">{Math.round(seasonProgressPct * 100)}%</div>
+              </div>
+
+              <div className="pzo-time-debug__kv">
+                <div className="pzo-time-debug__label">Until Start</div>
+                <div className="pzo-time-debug__value">
+                  {Number.isFinite(season.msUntilSeasonStart) ? formatMs(season.msUntilSeasonStart) : '∞'}
+                </div>
+              </div>
+
+              <div className="pzo-time-debug__kv">
+                <div className="pzo-time-debug__label">Until End</div>
+                <div className="pzo-time-debug__value">
+                  {Number.isFinite(season.msUntilSeasonEnd) ? formatMs(season.msUntilSeasonEnd) : '∞'}
+                </div>
+              </div>
+
+              <div className="pzo-time-debug__kv">
+                <div className="pzo-time-debug__label">Active Windows</div>
+                <div className="pzo-time-debug__value">{season.activeWindows.length}</div>
+              </div>
+
+              <div className="pzo-time-debug__kv">
+                <div className="pzo-time-debug__label">Window Flags</div>
+                <div className="pzo-time-debug__value">
+                  {[
+                    season.hasKickoffWindow ? 'KICKOFF' : null,
+                    season.hasLiveopsWindow ? 'LIVEOPS' : null,
+                    season.hasFinaleWindow ? 'FINALE' : null,
+                    season.hasArchiveCloseWindow ? 'ARCHIVE' : null,
+                    season.hasReengageWindow ? 'REENGAGE' : null,
+                  ]
+                    .filter(Boolean)
+                    .join(' · ') || '—'}
+                </div>
+              </div>
+            </div>
+          </section>
+
+          {showRawJSON ? (
+            <section className="pzo-time-debug__section">
+              <div className="pzo-time-debug__section-title">Snapshot JSON</div>
+              <pre className="pzo-time-debug__json">{snapshotJSON}</pre>
+            </section>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
