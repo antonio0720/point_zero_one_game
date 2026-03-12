@@ -5,8 +5,9 @@
  * Doctrine:
  * - backend owns active decision-window expiry truth
  * - snapshot remains the persisted surface, but this class hardens runtime behavior
+ * - local runtime mutations must survive until the next authoritative snapshot commit
+ * - local removals must suppress stale snapshot rehydration until persistence catches up
  * - hold freezes extend deadlines immediately so timeout math stays deterministic
- * - local runtime state must be fully resettable for replay and hot test isolation
  * - no wall-clock polling; expiry is evaluated only during authoritative time steps
  * ========================================================================== */
 
@@ -34,10 +35,13 @@ interface DecisionWindowSeedOptions {
   readonly metadata?: Readonly<Record<string, string | number | boolean | null>>;
 }
 
+type SuppressedWindowReason = 'RESOLVED' | 'NULLIFIED' | 'EXPIRED';
+
 interface MutableDecisionWindowState {
   readonly windowId: string;
   snapshot: RuntimeDecisionWindowSnapshot;
   frozenUntilMs: number | null;
+  persistedInSnapshot: boolean;
 }
 
 function normalizeMs(value: number | null | undefined): number | null {
@@ -99,9 +103,11 @@ function createSyntheticWindowSnapshot(
 
 export class DecisionTimer {
   private readonly windows = new Map<string, MutableDecisionWindowState>();
+  private readonly suppressedWindowIds = new Map<string, SuppressedWindowReason>();
 
   public reset(): void {
     this.windows.clear();
+    this.suppressedWindowIds.clear();
   }
 
   /**
@@ -109,7 +115,10 @@ export class DecisionTimer {
    * at the start of the backend time step.
    *
    * Important:
-   * - if a window already exists locally, its freeze timing is preserved
+   * - runtime-opened windows survive until they are persisted into snapshot
+   * - runtime-removed windows suppress stale snapshot reappearance until
+   *   the authoritative snapshot reflects the removal
+   * - if a window already exists locally, active freeze timing is preserved
    * - if a window arrives from snapshot already frozen but without exact
    *   thaw timing, we reconstruct a bounded best-effort local freeze window
    */
@@ -125,7 +134,17 @@ export class DecisionTimer {
     const frozenSet = new Set<string>(frozenWindowIds);
     const snapshotIds = new Set<string>(Object.keys(activeDecisionWindows));
 
+    for (const [windowId] of this.suppressedWindowIds) {
+      if (!snapshotIds.has(windowId)) {
+        this.suppressedWindowIds.delete(windowId);
+      }
+    }
+
     for (const [windowId, incomingSnapshot] of Object.entries(activeDecisionWindows)) {
+      if (this.suppressedWindowIds.has(windowId)) {
+        continue;
+      }
+
       const existing = this.windows.get(windowId);
       const incomingFrozen = incomingSnapshot.frozen || frozenSet.has(windowId);
       const localFreezeStillActive =
@@ -156,6 +175,7 @@ export class DecisionTimer {
             inferredFrozenUntilMs !== null && inferredFrozenUntilMs > authoritativeNowMs
               ? inferredFrozenUntilMs
               : null,
+          persistedInSnapshot: true,
         });
         openedWindowIds.push(windowId);
         continue;
@@ -178,6 +198,7 @@ export class DecisionTimer {
           true,
           mergedClosesAtMs,
         );
+        existing.persistedInSnapshot = true;
         continue;
       }
 
@@ -201,13 +222,20 @@ export class DecisionTimer {
         inferredFrozenUntilMs !== null && inferredFrozenUntilMs > authoritativeNowMs
           ? inferredFrozenUntilMs
           : null;
+      existing.persistedInSnapshot = true;
     }
 
-    for (const windowId of [...this.windows.keys()]) {
-      if (!snapshotIds.has(windowId)) {
-        this.windows.delete(windowId);
-        removedWindowIds.push(windowId);
+    for (const [windowId, window] of [...this.windows.entries()]) {
+      if (snapshotIds.has(windowId)) {
+        continue;
       }
+
+      if (!window.persistedInSnapshot) {
+        continue;
+      }
+
+      this.windows.delete(windowId);
+      removedWindowIds.push(windowId);
     }
 
     return {
@@ -221,19 +249,22 @@ export class DecisionTimer {
     closesAtMs: number,
     options: DecisionWindowSeedOptions = {},
   ): void {
+    this.suppressedWindowIds.delete(windowId);
+
     this.windows.set(windowId, {
       windowId,
       snapshot: createSyntheticWindowSnapshot(windowId, closesAtMs, options),
       frozenUntilMs: null,
+      persistedInSnapshot: false,
     });
   }
 
   public resolve(windowId: string): boolean {
-    return this.windows.delete(windowId);
+    return this.removeLocally(windowId, 'RESOLVED');
   }
 
   public nullify(windowId: string): boolean {
-    return this.windows.delete(windowId);
+    return this.removeLocally(windowId, 'NULLIFIED');
   }
 
   /**
@@ -319,6 +350,7 @@ export class DecisionTimer {
       ) {
         expired.push(windowId);
         this.windows.delete(windowId);
+        this.suppressedWindowIds.set(windowId, 'EXPIRED');
       }
     }
 
@@ -359,5 +391,18 @@ export class DecisionTimer {
     windowId: string,
   ): Readonly<MutableDecisionWindowState> | null {
     return this.windows.get(windowId) ?? null;
+  }
+
+  private removeLocally(
+    windowId: string,
+    reason: SuppressedWindowReason,
+  ): boolean {
+    const removed = this.windows.delete(windowId);
+
+    if (removed) {
+      this.suppressedWindowIds.set(windowId, reason);
+    }
+
+    return removed;
   }
 }

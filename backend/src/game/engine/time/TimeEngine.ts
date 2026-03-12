@@ -9,6 +9,8 @@
  * - this engine must stay compatible with the current snapshot contract
  *   while pushing the backend closer to the frontend time doctrine
  * - forced/tutorial cadence overrides are runtime-local and fully resettable
+ * - runtime-opened / runtime-closed windows must survive until snapshot commit
+ * - hold usage must become durable snapshot truth, not just transient local state
  * ========================================================================== */
 
 import {
@@ -99,6 +101,8 @@ export class TimeEngine implements SimulationEngine {
   private forcedTierOverride: ForcedTierOverride | null = null;
   private holdConsumedThisRun = false;
   private lastResolvedTier: PressureTier = 'T1';
+  private runtimeHoldCharges: number | null = null;
+  private runtimeHoldEnabled = true;
 
   public reset(): void {
     this.interpolator.reset('T1');
@@ -106,6 +110,8 @@ export class TimeEngine implements SimulationEngine {
     this.forcedTierOverride = null;
     this.holdConsumedThisRun = false;
     this.lastResolvedTier = 'T1';
+    this.runtimeHoldCharges = null;
+    this.runtimeHoldEnabled = true;
   }
 
   public canRun(snapshot: RunStateSnapshot, context: TickContext): boolean {
@@ -115,6 +121,8 @@ export class TimeEngine implements SimulationEngine {
   public tick(snapshot: RunStateSnapshot, context: TickContext): EngineTickResult {
     const nowMs = Math.trunc(context.nowMs);
     const nextTick = snapshot.tick + 1;
+
+    this.syncRuntimeHoldLedger(snapshot);
 
     const syncResult = this.decisionTimer.syncFromSnapshot(
       snapshot.timers.activeDecisionWindows,
@@ -195,6 +203,12 @@ export class TimeEngine implements SimulationEngine {
         ]
       : snapshot.telemetry.warnings;
 
+    const nextHoldCharges = snapshot.modeState.holdEnabled
+      ? this.resolveRuntimeHoldCharges(snapshot)
+      : 0;
+
+    const holdConsumedThisTick = nextHoldCharges < snapshot.timers.holdCharges;
+
     const nextSnapshot: RunStateSnapshot = {
       ...snapshot,
       tick: nextTick,
@@ -209,9 +223,7 @@ export class TimeEngine implements SimulationEngine {
         elapsedMs,
         currentTickDurationMs: durationMs,
         nextTickAtMs: timeoutReached ? null : effectiveNowMs,
-        holdCharges: snapshot.modeState.holdEnabled
-          ? snapshot.timers.holdCharges
-          : 0,
+        holdCharges: nextHoldCharges,
         activeDecisionWindows: this.decisionTimer.snapshot(),
         frozenWindowIds: this.decisionTimer.frozenIds(effectiveNowMs),
         lastTierChangeTick: tierChangedThisTick
@@ -234,12 +246,17 @@ export class TimeEngine implements SimulationEngine {
       tags: dedupeTags(
         snapshot.tags,
         phaseChanged ? `phase:${phase.toLowerCase()}:entered` : null,
+        tierChangedThisTick ? `time:tier:${effectiveTier.toLowerCase()}` : null,
         expiredWindowIds.length > 0 ? 'decision_window:expired' : null,
+        holdConsumedThisTick ? 'time:hold-consumed' : null,
         timeoutReached ? 'run:timeout' : null,
         this.interpolator.isTransitioning() ? 'time:interpolating' : null,
         this.forcedTierOverride !== null ? 'time:forced-tier' : null,
       ),
     };
+
+    this.runtimeHoldCharges = nextHoldCharges;
+    this.runtimeHoldEnabled = snapshot.modeState.holdEnabled;
 
     const signals = [
       ...(
@@ -256,6 +273,20 @@ export class TimeEngine implements SimulationEngine {
             ]
           : []
       ),
+      ...(
+        tierChangedThisTick
+          ? [
+              createEngineSignal(
+                this.engineId,
+                'INFO',
+                'TIME_TIER_CHANGED',
+                `Cadence tier changed from ${priorTier} to ${effectiveTier}.`,
+                nextTick,
+                ['tier-change', `from:${priorTier}`, `to:${effectiveTier}`],
+              ),
+            ]
+          : []
+      ),
       ...expiredWindowIds.map((windowId) =>
         createEngineSignal(
           this.engineId,
@@ -265,6 +296,20 @@ export class TimeEngine implements SimulationEngine {
           nextTick,
           ['decision-window', 'expired'],
         ),
+      ),
+      ...(
+        holdConsumedThisTick
+          ? [
+              createEngineSignal(
+                this.engineId,
+                'INFO',
+                'TIME_HOLD_CONSUMED',
+                'A hold charge was consumed and persisted into timer state.',
+                nextTick,
+                ['hold', `remaining:${nextHoldCharges}`],
+              ),
+            ]
+          : []
       ),
       ...(
         timeoutReached
@@ -317,6 +362,8 @@ export class TimeEngine implements SimulationEngine {
         `forcedTier=${this.forcedTierOverride?.tier ?? 'none'}`,
         `forcedTicksRemaining=${this.forcedTierOverride?.ticksRemaining ?? 0}`,
         `holdConsumedThisRun=${this.holdConsumedThisRun}`,
+        `runtimeHoldEnabled=${this.runtimeHoldEnabled}`,
+        `runtimeHoldCharges=${this.runtimeHoldCharges ?? 'unknown'}`,
       ],
     );
   }
@@ -357,15 +404,21 @@ export class TimeEngine implements SimulationEngine {
 
   /**
    * Exactly one hold is available per run from this engine's runtime perspective.
-   * The persisted snapshot may also carry hold charges, but this runtime guard
-   * ensures replay/test determinism even before snapshot mutation is committed.
+   * The persisted snapshot also carries hold charges, and this method now updates
+   * the runtime ledger so the next tick persists the consumed charge durably.
    */
   public applyHold(
     windowId: string,
     nowMs: number,
     holdDurationMs = DEFAULT_HOLD_DURATION_MS,
   ): boolean {
-    if (this.holdConsumedThisRun) {
+    if (!this.runtimeHoldEnabled || this.holdConsumedThisRun) {
+      return false;
+    }
+
+    const availableHoldCharges = this.runtimeHoldCharges ?? 1;
+
+    if (availableHoldCharges <= 0) {
       return false;
     }
 
@@ -377,6 +430,7 @@ export class TimeEngine implements SimulationEngine {
 
     if (applied) {
       this.holdConsumedThisRun = true;
+      this.runtimeHoldCharges = Math.max(0, availableHoldCharges - 1);
     }
 
     return applied;
@@ -428,5 +482,36 @@ export class TimeEngine implements SimulationEngine {
     if (this.forcedTierOverride.ticksRemaining <= 0) {
       this.forcedTierOverride = null;
     }
+  }
+
+  private syncRuntimeHoldLedger(snapshot: RunStateSnapshot): void {
+    if (!snapshot.modeState.holdEnabled) {
+      this.runtimeHoldEnabled = false;
+      this.runtimeHoldCharges = 0;
+      return;
+    }
+
+    this.runtimeHoldEnabled = true;
+
+    const snapshotHoldCharges = Math.max(0, Math.trunc(snapshot.timers.holdCharges));
+
+    if (this.runtimeHoldCharges === null) {
+      this.runtimeHoldCharges = snapshotHoldCharges;
+      return;
+    }
+
+    this.runtimeHoldCharges = Math.min(this.runtimeHoldCharges, snapshotHoldCharges);
+  }
+
+  private resolveRuntimeHoldCharges(snapshot: RunStateSnapshot): number {
+    if (!snapshot.modeState.holdEnabled) {
+      return 0;
+    }
+
+    if (this.runtimeHoldCharges === null) {
+      return Math.max(0, Math.trunc(snapshot.timers.holdCharges));
+    }
+
+    return Math.max(0, Math.trunc(this.runtimeHoldCharges));
   }
 }
