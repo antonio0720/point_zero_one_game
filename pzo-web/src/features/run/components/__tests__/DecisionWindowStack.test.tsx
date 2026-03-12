@@ -1,3 +1,5 @@
+// /Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/pzo-web/src/features/run/components/__tests__/DecisionWindowStack.test.tsx
+
 /**
  * FILE: pzo-web/src/features/run/components/__tests__/DecisionWindowStack.test.tsx
  * Engine 1 — Time Engine
@@ -35,12 +37,11 @@ interface TimeEngineMockState {
   activeWindows?: DecisionWindow[];
   holdsLeft?: number;
   currentTier?: string;
-  activeWindowCount?: number;
+  activeDecisionCount?: number;
   hasActiveDecision?: boolean;
 }
 
 const useTimeEngineMock = vi.fn();
-const formatCountdownMock = vi.fn((ms: number) => `${Math.ceil(ms / 1000)}s`);
 
 vi.mock('../../hooks/useTimeEngine', () => {
   return {
@@ -48,16 +49,19 @@ vi.mock('../../hooks/useTimeEngine', () => {
   };
 });
 
-vi.mock('../../hooks/useDecisionWindow', () => {
-  return {
-    formatCountdown: (ms: number) => formatCountdownMock(ms),
-  };
-});
-
 vi.mock('../DecisionTimerRing', () => {
   return {
-    DecisionTimerRing: ({ cardId }: { cardId: string }) => (
-      <div data-testid={`decision-timer-ring-${cardId}`}>{cardId}</div>
+    DecisionTimerRing: ({
+      cardInstanceId,
+      children,
+    }: {
+      cardInstanceId: string;
+      children?: React.ReactNode;
+    }) => (
+      <div data-testid={`decision-timer-ring-${cardInstanceId}`}>
+        {cardInstanceId}
+        {children}
+      </div>
     ),
   };
 });
@@ -88,8 +92,7 @@ function setTimeEngineState(overrides: TimeEngineMockState = {}): void {
     activeWindows,
     holdsLeft: overrides.holdsLeft ?? 1,
     currentTier: overrides.currentTier ?? 'T3',
-    activeWindowCount: overrides.activeWindowCount ?? activeWindows.length,
-    activeDecisionCount: overrides.activeWindowCount ?? activeWindows.length,
+    activeDecisionCount: overrides.activeDecisionCount ?? activeWindows.length,
     hasActiveDecision: overrides.hasActiveDecision ?? activeWindows.length > 0,
   });
 }
@@ -103,7 +106,7 @@ describe('DecisionWindowStack', () => {
   it('renders custom empty state when no active decision windows exist', () => {
     setTimeEngineState({
       activeWindows: [],
-      activeWindowCount: 0,
+      activeDecisionCount: 0,
       hasActiveDecision: false,
     });
 
@@ -147,7 +150,7 @@ describe('DecisionWindowStack', () => {
 
     setTimeEngineState({
       activeWindows: windows,
-      activeWindowCount: windows.length,
+      activeDecisionCount: windows.length,
       hasActiveDecision: true,
     });
 
@@ -170,7 +173,7 @@ describe('DecisionWindowStack', () => {
 
     setTimeEngineState({
       activeWindows: windows,
-      activeWindowCount: windows.length,
+      activeDecisionCount: windows.length,
       hasActiveDecision: true,
     });
 
@@ -194,7 +197,7 @@ describe('DecisionWindowStack', () => {
     setTimeEngineState({
       activeWindows: [target],
       holdsLeft: 1,
-      activeWindowCount: 1,
+      activeDecisionCount: 1,
       hasActiveDecision: true,
     });
 
@@ -228,7 +231,7 @@ describe('DecisionWindowStack', () => {
     setTimeEngineState({
       activeWindows: [heldWindow, closedWindow],
       holdsLeft: 0,
-      activeWindowCount: 2,
+      activeDecisionCount: 2,
       hasActiveDecision: true,
     });
 
