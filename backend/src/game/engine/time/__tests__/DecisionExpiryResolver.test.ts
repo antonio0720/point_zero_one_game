@@ -232,9 +232,9 @@ describe('backend time/DecisionExpiryResolver', () => {
     const snapshot = createSnapshot({
       timers: {
         activeDecisionWindows: {
-          window_live: 9_000,
+          window_live: { expiresAtMs: 9_000 } as unknown as any,
         },
-      },
+      } as unknown as any,
     });
 
     resolver.register(

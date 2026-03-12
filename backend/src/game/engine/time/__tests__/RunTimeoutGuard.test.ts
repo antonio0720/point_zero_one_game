@@ -173,6 +173,11 @@ describe('backend time/RunTimeoutGuard', () => {
         seasonBudgetMs: 60_000,
         extensionBudgetMs: 15_000,
         elapsedMs: 10_000,
+        currentTickDurationMs: 13_000,
+        nextTickAtMs: null,
+        holdCharges: 1,
+        activeDecisionWindows: {},
+        frozenWindowIds: [],
       },
     });
 
@@ -187,9 +192,13 @@ describe('backend time/RunTimeoutGuard', () => {
     const snapshot = createSnapshot({
       tags: ['baseline'],
       telemetry: {
-        warnings: ['existing-warning'],
+        decisions: [],
         outcomeReason: null,
         outcomeReasonCode: null,
+        lastTickChecksum: null,
+        forkHints: [],
+        emittedEventCount: 0,
+        warnings: ['existing-warning'],
       },
     });
 
@@ -212,14 +221,23 @@ describe('backend time/RunTimeoutGuard', () => {
     const snapshot = createSnapshot({
       tags: ['baseline', 'run:timeout'],
       telemetry: {
-        warnings: ['existing-warning', 'Season budget exhausted.'],
+        decisions: [],
         outcomeReason: null,
         outcomeReasonCode: null,
+        lastTickChecksum: null,
+        forkHints: [],
+        emittedEventCount: 0,
+        warnings: ['existing-warning', 'Season budget exhausted.'],
       },
       timers: {
         seasonBudgetMs: 30_000,
         extensionBudgetMs: 5_000,
         elapsedMs: 0,
+        currentTickDurationMs: 13_000,
+        nextTickAtMs: null,
+        holdCharges: 1,
+        activeDecisionWindows: {},
+        frozenWindowIds: [],
       },
     });
 
@@ -247,8 +265,12 @@ describe('backend time/RunTimeoutGuard', () => {
     const snapshot = createSnapshot({
       outcome: 'TIMEOUT',
       telemetry: {
+        decisions: [],
         outcomeReason: 'Already terminal.',
         outcomeReasonCode: 'SEASON_BUDGET_EXHAUSTED',
+        lastTickChecksum: null,
+        forkHints: [],
+        emittedEventCount: 0,
         warnings: ['Already terminal.'],
       },
     });
