@@ -3,19 +3,24 @@ import { describe, expect, it } from 'vitest';
 
 import { DeterministicClock } from '../../core/ClockSource';
 import { EngineTickTransaction } from '../../core/EngineTickTransaction';
-import type { TickContext } from '../../core/EngineContracts';
+import type {
+  EngineSignal,
+  TickContext,
+} from '../../core/EngineContracts';
 import { EventBus, type EventEnvelope } from '../../core/EventBus';
 import type { EngineEventMap } from '../../core/GamePrimitives';
 import type { RunStateSnapshot } from '../../core/RunStateSnapshot';
+import { createInitialRunState } from '../../core/RunStateFactory';
 import { TimeEngine } from '../TimeEngine';
 
-type DeepPartial<T> = {
-  [K in keyof T]?: T[K] extends readonly (infer U)[]
-    ? readonly U[]
-    : T[K] extends Record<string, unknown>
-      ? DeepPartial<T[K]>
-      : T[K];
-};
+type EngineBusEventMap = EngineEventMap & Record<string, unknown>;
+
+type DeepPartial<T> =
+  T extends readonly (infer U)[]
+    ? readonly DeepPartial<U>[]
+    : T extends object
+      ? { [K in keyof T]?: DeepPartial<T[K]> }
+      : T;
 
 interface TickRunRecord {
   readonly snapshot: RunStateSnapshot;
@@ -29,170 +34,135 @@ interface TickRunRecord {
   }[];
   readonly events: readonly {
     readonly sequence: number;
-    readonly event: keyof EngineEventMap;
-    readonly payload: EngineEventMap[keyof EngineEventMap];
+    readonly event: string;
+    readonly payload: unknown;
     readonly emittedAtTick?: number;
     readonly tags?: readonly string[];
   }[];
 }
 
-function createSnapshot(overrides: DeepPartial<RunStateSnapshot> = {}): RunStateSnapshot {
-  const base: RunStateSnapshot = {
-    schemaVersion: 'engine-run-state.v2',
+const PRESSURE_BAND_BY_TIER: Readonly<
+  Record<RunStateSnapshot['pressure']['tier'], RunStateSnapshot['pressure']['band']>
+> = Object.freeze({
+  T0: 'CALM',
+  T1: 'BUILDING',
+  T2: 'ELEVATED',
+  T3: 'HIGH',
+  T4: 'CRITICAL',
+});
+
+const PRESSURE_SCORE_BY_TIER: Readonly<
+  Record<RunStateSnapshot['pressure']['tier'], number>
+> = Object.freeze({
+  T0: 0.1,
+  T1: 0.25,
+  T2: 0.5,
+  T3: 0.75,
+  T4: 0.95,
+});
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function deepMerge<T>(base: T, overrides?: DeepPartial<T>): T {
+  if (overrides === undefined) {
+    return base;
+  }
+
+  if (Array.isArray(base)) {
+    return overrides as T;
+  }
+
+  if (isPlainObject(base) && isPlainObject(overrides)) {
+    const result: Record<string, unknown> = {
+      ...(base as Record<string, unknown>),
+    };
+
+    for (const key of Object.keys(overrides)) {
+      const overrideValue = overrides[key];
+
+      if (overrideValue === undefined) {
+        continue;
+      }
+
+      const baseValue = (base as Record<string, unknown>)[key];
+
+      result[key] =
+        isPlainObject(baseValue) && isPlainObject(overrideValue)
+          ? deepMerge(baseValue, overrideValue as never)
+          : overrideValue;
+    }
+
+    return result as T;
+  }
+
+  return overrides as T;
+}
+
+type ActiveDecisionWindows = RunStateSnapshot['timers']['activeDecisionWindows'];
+type ActiveDecisionWindowValue = ActiveDecisionWindows[string];
+
+function createDecisionWindowValue(
+  deadlineMs: number,
+  windowId = 'window_alpha',
+): ActiveDecisionWindowValue {
+  /**
+   * Public GitHub currently shows the timer snapshot as Record<string, number>,
+   * while your local compiler error shows RuntimeDecisionWindowSnapshot.
+   * This helper keeps the test aligned to the local timer-value contract without
+   * forcing the rest of the file to drift with every timer-surface change.
+   */
+  const candidate = {
+    id: windowId,
+    timingClass: 'FATE',
+    closesAtTick: 1,
+    closesAtMs: deadlineMs,
+    consumed: false,
+    frozen: false,
+  };
+
+  return candidate as unknown as ActiveDecisionWindowValue;
+}
+
+function createSnapshot(
+  overrides: DeepPartial<RunStateSnapshot> = {},
+): RunStateSnapshot {
+  const base = createInitialRunState({
     runId: 'run_test_001',
     userId: 'user_test_001',
     seed: 'seed_alpha',
     mode: 'solo',
-    tick: 0,
-    phase: 'FOUNDATION',
-    outcome: null,
+    initialCash: 1_000,
+    initialDebt: 100,
+    initialIncomePerTick: 200,
+    initialExpensesPerTick: 75,
+    initialHeat: 10,
+    initialPressureScore: 0.25,
+    freedomTarget: 100_000,
+    seasonBudgetMs: 30_000,
+    currentTickDurationMs: 13_000,
+    holdCharges: 1,
     tags: [],
-    economy: {
-      cash: 1_000,
-      debt: 100,
-      incomePerTick: 200,
-      expensesPerTick: 75,
-      netWorth: 900,
-      freedomTarget: 100_000,
-      haterHeat: 10,
-      opportunitiesPurchased: 0,
-      privilegePlays: 0,
-    },
-    pressure: {
-      score: 0.25,
-      tier: 'T1',
-      band: 'BUILDING',
-      previousTier: 'T1',
-      previousBand: 'BUILDING',
-      upwardCrossings: 0,
-      survivedHighPressureTicks: 0,
-      lastEscalationTick: null,
-      maxScoreSeen: 0.25,
-    },
-    tension: {
-      score: 0.1,
-      anticipation: 0.1,
-      visibleThreats: [],
-      maxPulseTriggered: false,
-      lastSpikeTick: null,
-    },
-    shield: {
-      layers: [],
-      weakestLayerId: 'L1',
-      weakestLayerRatio: 1,
-      blockedThisRun: 0,
-      damagedThisRun: 0,
-      breachesThisRun: 0,
-      repairQueueDepth: 0,
-    },
-    battle: {
-      bots: [],
-      battleBudget: 10,
-      battleBudgetCap: 100,
-      extractionCooldownTicks: 0,
-      firstBloodClaimed: false,
-      pendingAttacks: [],
-      sharedOpportunityDeckCursor: 0,
-      rivalryHeatCarry: 0,
-      neutralizedBotIds: [],
-    },
-    cascade: {
-      activeChains: [],
-      positiveTrackers: [],
-      brokenChains: 0,
-      completedChains: 0,
-      repeatedTriggerCounts: {},
-      lastResolvedTick: null,
-    },
-    sovereignty: {
-      integrityStatus: 'PENDING',
-      tickChecksums: [],
-      proofHash: null,
-      sovereigntyScore: 0,
-      verifiedGrade: null,
-      proofBadges: [],
-      gapVsLegend: 0,
-      gapClosingRate: 0,
-      cordScore: 0,
-      auditFlags: [],
-      lastVerifiedTick: null,
-    },
-    cards: {
-      hand: [],
-      discard: [],
-      exhaust: [],
-      drawHistory: [],
-      lastPlayed: [],
-      ghostMarkers: [],
-      drawPileSize: 0,
-      deckEntropy: 0,
-    },
-    modeState: {
-      holdEnabled: true,
-      loadoutEnabled: true,
-      sharedTreasury: false,
-      sharedTreasuryBalance: 0,
-      trustScores: {},
-      roleAssignments: {},
-      defectionStepByPlayer: {},
-      legendMarkersEnabled: false,
-      communityHeatModifier: 0,
-      sharedOpportunityDeck: false,
-      counterIntelTier: 0,
-      spectatorLimit: 0,
-      phaseBoundaryWindowsRemaining: 0,
-      bleedMode: false,
-      handicapIds: [],
-      advantageId: null,
-      disabledBots: [],
-      modePresentation: 'empire',
-      roleLockEnabled: false,
-      extractionActionsRemaining: 0,
-      ghostBaselineRunId: null,
-      legendOwnerUserId: null,
-    },
+  });
+
+  const seeded: RunStateSnapshot = {
+    ...base,
     timers: {
-      seasonBudgetMs: 90_000,
-      extensionBudgetMs: 0,
-      elapsedMs: 0,
-      currentTickDurationMs: 13_000,
-      nextTickAtMs: null,
-      holdCharges: 1,
+      ...base.timers,
       activeDecisionWindows: {
-        window_alpha: 1_500,
-      },
+        ...(base.timers.activeDecisionWindows as ActiveDecisionWindows),
+        window_alpha: createDecisionWindowValue(1_500, 'window_alpha'),
+      } as ActiveDecisionWindows,
       frozenWindowIds: [],
-    },
-    telemetry: {
-      decisions: [],
-      outcomeReason: null,
-      outcomeReasonCode: null,
-      lastTickChecksum: null,
-      forkHints: [],
-      emittedEventCount: 0,
-      warnings: [],
     },
   };
 
-  return {
-    ...base,
-    ...overrides,
-    economy: { ...base.economy, ...(overrides.economy ?? {}) },
-    pressure: { ...base.pressure, ...(overrides.pressure ?? {}) },
-    tension: { ...base.tension, ...(overrides.tension ?? {}) },
-    shield: { ...base.shield, ...(overrides.shield ?? {}) },
-    battle: { ...base.battle, ...(overrides.battle ?? {}) },
-    cascade: { ...base.cascade, ...(overrides.cascade ?? {}) },
-    sovereignty: { ...base.sovereignty, ...(overrides.sovereignty ?? {}) },
-    cards: { ...base.cards, ...(overrides.cards ?? {}) },
-    modeState: { ...base.modeState, ...(overrides.modeState ?? {}) },
-    timers: { ...base.timers, ...(overrides.timers ?? {}) },
-    telemetry: { ...base.telemetry, ...(overrides.telemetry ?? {}) },
-  };
+  return deepMerge(seeded, overrides);
 }
 
 function createContext(
-  bus: EventBus<EngineEventMap>,
+  bus: EventBus<EngineBusEventMap>,
   snapshot: RunStateSnapshot,
   nowMs: number,
   step: TickContext['step'] = 'STEP_02_TIME',
@@ -215,7 +185,7 @@ function createContext(
   };
 }
 
-function cloneSignals(signals: readonly any[] | undefined) {
+function cloneSignals(signals: readonly EngineSignal[] | undefined) {
   return (signals ?? []).map((signal) => ({
     engineId: signal.engineId,
     severity: signal.severity,
@@ -227,11 +197,14 @@ function cloneSignals(signals: readonly any[] | undefined) {
 }
 
 function cloneEvents(
-  events: readonly EventEnvelope<keyof EngineEventMap, EngineEventMap[keyof EngineEventMap]>[],
+  events: readonly EventEnvelope<
+    keyof EngineBusEventMap,
+    EngineBusEventMap[keyof EngineBusEventMap]
+  >[],
 ): TickRunRecord['events'] {
   return events.map((event) => ({
     sequence: event.sequence,
-    event: event.event,
+    event: String(event.event),
     payload: event.payload,
     emittedAtTick: event.emittedAtTick,
     tags: event.tags === undefined ? undefined : [...event.tags],
@@ -247,13 +220,17 @@ function withPressure(
     pressure: {
       ...snapshot.pressure,
       previousTier: snapshot.pressure.tier,
+      previousBand: snapshot.pressure.band,
       tier,
+      band: PRESSURE_BAND_BY_TIER[tier],
+      score: PRESSURE_SCORE_BY_TIER[tier],
+      maxScoreSeen: Math.max(snapshot.pressure.maxScoreSeen, PRESSURE_SCORE_BY_TIER[tier]),
     },
   };
 }
 
 function runScenario(engine: TimeEngine): readonly TickRunRecord[] {
-  const bus = new EventBus<EngineEventMap>();
+  const bus = new EventBus<EngineBusEventMap>();
   const records: TickRunRecord[] = [];
   const inputs = [
     { nowMs: 1_000, tier: 'T1' as const },
@@ -319,6 +296,7 @@ describe('backend time/TimeEngine.determinism', () => {
     expect(tickTwo.events.map((event) => event.event)).toEqual([
       'decision.window.closed',
     ]);
+
     expect(tickTwo.snapshot.tags).toContain('decision_window:expired');
     expect(tickFour.snapshot.outcome).toBe('TIMEOUT');
     expect(tickFour.snapshot.tags).toContain('run:timeout');
