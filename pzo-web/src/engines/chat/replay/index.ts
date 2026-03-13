@@ -10,25 +10,27 @@
  * -------
  * Stable public surface for the frontend chat replay lane.
  *
- * This barrel intentionally exports the replay-working-set authority now and
- * leaves the serializer lane as an explicit next export so migration order stays
- * deterministic:
- * - `ChatReplayBuffer.ts` lands first as the canonical replay session / slice /
- *   recap owner.
- * - `ChatReplaySerializer.ts` can land next without forcing UI or engine code to
- *   import serializer concerns early.
+ * This barrel now exports both replay orchestration and deterministic
+ * serialization. That matches the intended lane split in the unified chat
+ * architecture:
+ * - `ChatReplayBuffer.ts` owns session / slice / recap orchestration.
+ * - `ChatReplaySerializer.ts` owns deterministic export, hashing, file payloads,
+ *   serializer-ready normalization, and replay download artifacts.
  *
  * Design laws
  * -----------
  * - Replays remain a first-class engine lane, not a UI helper.
  * - Transcript truth stays in `../ChatTranscriptBuffer.ts`.
- * - Replay orchestration stays in this folder.
+ * - Replay orchestration and replay serialization both stay in this folder.
+ * - This barrel exposes the full lane without pushing serializer internals into
+ *   unrelated engine modules unless they opt in.
  *
  * Density6 LLC · Point Zero One · Sovereign Chat Runtime · Confidential
  * ============================================================================
  */
 
 export * from './ChatReplayBuffer';
+export * from './ChatReplaySerializer';
 
 export const CHAT_REPLAY_MODULE_NAME = 'PZO_CHAT_REPLAY' as const;
 
@@ -37,9 +39,24 @@ export const CHAT_REPLAY_PUBLIC_MANIFEST = Object.freeze({
   providedNow: Object.freeze([
     'index.ts',
     'ChatReplayBuffer.ts',
-  ] as const),
-  expectedNext: Object.freeze([
     'ChatReplaySerializer.ts',
   ] as const),
   root: '/pzo-web/src/engines/chat/replay',
+  authorities: Object.freeze({
+    replayWorkingSet: '/pzo-web/src/engines/chat/replay/ChatReplayBuffer.ts',
+    replaySerialization: '/pzo-web/src/engines/chat/replay/ChatReplaySerializer.ts',
+    transcriptTruth: '/pzo-web/src/engines/chat/ChatTranscriptBuffer.ts',
+    contractSurface: '/pzo-web/src/engines/chat/types.ts',
+  } as const),
+  owns: Object.freeze([
+    'replay session state',
+    'slice assembly',
+    'proof extraction',
+    'legend extraction',
+    'moment anchors',
+    'post-run recap shaping',
+    'deterministic serialization',
+    'download artifact generation',
+    'serializer-ready replay export',
+  ] as const),
 } as const);
