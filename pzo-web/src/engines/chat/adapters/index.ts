@@ -1,25 +1,8 @@
 /**
- * ============================================================================
+ * ==========================================================================
  * POINT ZERO ONE — FRONTEND CHAT ENGINE ADAPTERS INDEX
  * FILE: pzo-web/src/engines/chat/adapters/index.ts
- * ============================================================================
- *
- * Purpose
- * -------
- * Single canonical export surface for chat-engine adapters.
- *
- * Current phase
- * -------------
- * This index now exports three core-now adapters that exist in this session:
- *   - BattleEngineAdapter
- *   - RunStoreAdapter
- *   - MechanicsBridgeAdapter
- *
- * Remaining locked adapters are still intentionally absent from exports until
- * they actually exist in the canonical lane.
- *
- * Density6 LLC · Point Zero One · Production-first architecture
- * ============================================================================
+ * ==========================================================================
  */
 
 export {
@@ -93,7 +76,48 @@ export {
   type MechanicsSeasonSnapshot,
 } from './MechanicsBridgeAdapter';
 
-export type ChatAdapterKind = 'battle' | 'run-store' | 'mechanics-bridge';
+export {
+  ModeAdapter,
+  createModeAdapter,
+  type BaseCardLike,
+  type CORDProjection,
+  type EngineSnapshotLike,
+  type EventFeedItem,
+  type FrontendModeCatalogEntry,
+  type FrontendModeCode,
+  type FrontendModeDirectorLike,
+  type FrontendModeState,
+  type FrontendRunMode,
+  type GapDirection,
+  type LegendMarker,
+  type MetricBar,
+  type ModeAdapterCallbacks,
+  type ModeAdapterConfig,
+  type ModeAdapterContext,
+  type ModeAdapterHistoryEntry,
+  type ModeAdapterModeDescriptor,
+  type ModeAdapterNarrativeBand,
+  type ModeAdapterOptions,
+  type ModeAdapterRecommendation,
+  type ModeAdapterRecommendationIntent,
+  type ModeAdapterScreenFamily,
+  type ModeAdapterSnapshot,
+  type ModeAdapterSurfaceId,
+  type ModeAdapterTransitionReason,
+  type ModeOutcome,
+  type ModeRouterLike,
+  type PhantomProjection,
+  type PredatorProjection,
+  type PressureTier,
+  type PsycheState,
+  type SoloPhase,
+  type SoloProjection,
+  type SyndicateProjection,
+  type TeamPlayerState,
+  type TrustBand,
+} from './ModeAdapter';
+
+export type ChatAdapterKind = 'battle' | 'run-store' | 'mechanics-bridge' | 'mode';
 
 export interface ChatAdapterDescriptor {
   readonly kind: ChatAdapterKind;
@@ -123,6 +147,13 @@ export const CHAT_ADAPTER_DESCRIPTORS: readonly ChatAdapterDescriptor[] = Object
     file: 'MechanicsBridgeAdapter.ts',
     path: 'pzo-web/src/engines/chat/adapters/MechanicsBridgeAdapter.ts',
     description: 'Canonical bridge from mechanics runtime + bridge snapshot lanes into chat timing, social witness, and intelligence-side orchestration.',
+    phase: 'core-now',
+  },
+  {
+    kind: 'mode',
+    file: 'ModeAdapter.ts',
+    path: 'pzo-web/src/engines/chat/adapters/ModeAdapter.ts',
+    description: 'Canonical bridge from frontend mode director / mode router / mode surfaces into the unified chat engine spine.',
     phase: 'core-now',
   },
 ]);
