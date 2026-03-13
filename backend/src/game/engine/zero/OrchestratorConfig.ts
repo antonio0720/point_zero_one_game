@@ -337,13 +337,13 @@ export const ZERO_STEP_OWNER_MAP: Readonly<Record<TickStep, StepRuntimeOwner>> =
 });
 
 export const ZERO_ENGINE_STEP_OWNERSHIP: Readonly<Record<EngineId, readonly TickStep[]>> = Object.freeze({
-  time: Object.freeze(['STEP_02_TIME']),
-  pressure: Object.freeze(['STEP_03_PRESSURE']),
-  tension: Object.freeze(['STEP_04_TENSION']),
-  shield: Object.freeze(['STEP_06_SHIELD']),
-  battle: Object.freeze(['STEP_05_BATTLE']),
-  cascade: Object.freeze(['STEP_07_CASCADE']),
-  sovereignty: Object.freeze(['STEP_10_SOVEREIGNTY_SNAPSHOT']),
+  time: Object.freeze(['STEP_02_TIME'] as readonly TickStep[]),
+  pressure: Object.freeze(['STEP_03_PRESSURE'] as readonly TickStep[]),
+  tension: Object.freeze(['STEP_04_TENSION'] as readonly TickStep[]),
+  shield: Object.freeze(['STEP_06_SHIELD'] as readonly TickStep[]),
+  battle: Object.freeze(['STEP_05_BATTLE'] as readonly TickStep[]),
+  cascade: Object.freeze(['STEP_07_CASCADE'] as readonly TickStep[]),
+  sovereignty: Object.freeze(['STEP_10_SOVEREIGNTY_SNAPSHOT'] as readonly TickStep[]),
 });
 
 export const ZERO_TERMINAL_OUTCOME_PRIORITY: readonly RunOutcome[] = Object.freeze([

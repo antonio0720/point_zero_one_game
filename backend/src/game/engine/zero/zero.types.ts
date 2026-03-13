@@ -134,12 +134,12 @@ export interface RunLifecycleInvariant {
 export const ZERO_LEGAL_LIFECYCLE_TRANSITIONS: Readonly<
   Record<RunLifecycleState, readonly RunLifecycleState[]>
 > = Object.freeze({
-  IDLE: Object.freeze(['STARTING']),
-  STARTING: Object.freeze(['ACTIVE', 'IDLE']),
-  ACTIVE: Object.freeze(['TICK_LOCKED', 'ENDING']),
-  TICK_LOCKED: Object.freeze(['ACTIVE', 'ENDING']),
-  ENDING: Object.freeze(['ENDED']),
-  ENDED: Object.freeze(['IDLE']),
+  IDLE: Object.freeze(['STARTING'] as readonly RunLifecycleState[]),
+  STARTING: Object.freeze(['ACTIVE', 'IDLE'] as readonly RunLifecycleState[]),
+  ACTIVE: Object.freeze(['TICK_LOCKED', 'ENDING'] as readonly RunLifecycleState[]),
+  TICK_LOCKED: Object.freeze(['ACTIVE', 'ENDING'] as readonly RunLifecycleState[]),
+  ENDING: Object.freeze(['ENDED'] as readonly RunLifecycleState[]),
+  ENDED: Object.freeze(['IDLE'] as readonly RunLifecycleState[]),
 });
 
 // ────────────────────────────────────────────────────────────────────────────────
@@ -2114,9 +2114,18 @@ export function summarizeEffectPayload(
     timeDeltaMs: payload.timeDeltaMs,
     divergenceDelta: payload.divergenceDelta,
     cascadeTag: payload.cascadeTag,
-    injectCards: payload.injectCards === undefined ? undefined : Object.freeze([...payload.injectCards]),
-    exhaustCards: payload.exhaustCards === undefined ? undefined : Object.freeze([...payload.exhaustCards]),
-    grantBadges: payload.grantBadges === undefined ? undefined : Object.freeze([...payload.grantBadges]),
+    injectCards:
+      payload.injectCards === undefined
+        ? undefined
+        : (Object.freeze([...payload.injectCards]) as unknown as string[]),
+    exhaustCards:
+      payload.exhaustCards === undefined
+        ? undefined
+        : (Object.freeze([...payload.exhaustCards]) as unknown as string[]),
+    grantBadges:
+      payload.grantBadges === undefined
+        ? undefined
+        : (Object.freeze([...payload.grantBadges]) as unknown as string[]),
     namedActionId: payload.namedActionId,
   });
 }
