@@ -6,16 +6,18 @@
  * FILE: pzo-web/src/engines/chat/npc/index.ts
  * ============================================================================
  *
- * Stable public export surface for the chat NPC lane.
+ * Stable export surface for the chat NPC lane.
  *
- * This barrel stays intentionally compile-safe for the current batch and only
- * exports modules that now exist inside /pzo-web/src/engines/chat/npc.
- * Future files such as HelperDialogueRegistry.ts, AmbientNpcRegistry.ts,
- * HaterResponsePlanner.ts, HelperResponsePlanner.ts, and NpcCadencePolicy.ts
- * can be added here without changing downstream import paths.
+ * This barrel now exposes:
+ * - hater registry
+ * - helper registry
+ * - ambient/world registry
  *
- * Density6 LLC · Point Zero One · Sovereign Chat Runtime · Confidential
+ * Future planner/cadence files can be added here without changing downstream
+ * import paths.
  * ============================================================================
  */
 
 export * from './HaterDialogueRegistry';
+export * from './HelperDialogueRegistry';
+export * from './AmbientNpcRegistry';
