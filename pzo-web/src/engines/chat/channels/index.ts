@@ -74,3 +74,73 @@ export type {
   GlobalTickTier,
   GlobalVisibilityBand,
 } from './GlobalChannelPolicy';
+
+export {
+  SyndicateChannelPolicy,
+  globalChannelPolicy as syndicateChannelPolicy,
+  buildSyndicateChannelSnapshot,
+  createSyndicatePlayerMessage,
+  createSyndicateSystemMessage,
+  createSyndicateHaterMessage,
+  createSyndicateHelperMessage,
+  evaluateSyndicateInjectResult,
+  evaluateSyndicateComposerCapability,
+  evaluateSyndicateLayout,
+  surfaceProfile as syndicateSurfaceProfile,
+  modeProfile as syndicateModeProfile,
+} from './SyndicateChannelPolicy';
+
+export type {
+  SyndicateActorRef,
+  SyndicateAudienceState,
+  SyndicateChannelId,
+  SyndicateChannelSnapshot,
+  SyndicateComposerCapability,
+  SyndicateFeatureLayout,
+  SyndicateInjectDecision,
+  SyndicateInjectResult,
+  SyndicateMessageEnvelope,
+  SyndicateMessageKind,
+  SyndicateModeProfile,
+  SyndicateNotificationHint,
+  SyndicatePolicyInput,
+  SyndicateRatePolicy,
+  SyndicateRecommendation,
+  SyndicateSpeakerClass,
+  SyndicateSurfaceProfile,
+} from './SyndicateChannelPolicy';
+
+export {
+  DealRoomChannelPolicy,
+  globalChannelPolicy as dealRoomChannelPolicy,
+  buildDealRoomChannelSnapshot,
+  createDealRoomPlayerMessage,
+  createDealRoomSystemMessage,
+  createDealRoomHaterMessage,
+  createDealRoomHelperMessage,
+  evaluateDealRoomInjectResult,
+  evaluateDealRoomComposerCapability,
+  evaluateDealRoomLayout,
+  surfaceProfile as dealRoomSurfaceProfile,
+  modeProfile as dealRoomModeProfile,
+} from './DealRoomChannelPolicy';
+
+export type {
+  DealRoomActorRef,
+  DealRoomAudienceState,
+  DealRoomChannelId,
+  DealRoomChannelSnapshot,
+  DealRoomComposerCapability,
+  DealRoomFeatureLayout,
+  DealRoomInjectDecision,
+  DealRoomInjectResult,
+  DealRoomMessageEnvelope,
+  DealRoomMessageKind,
+  DealRoomModeProfile,
+  DealRoomNotificationHint,
+  DealRoomPolicyInput,
+  DealRoomRatePolicy,
+  DealRoomRecommendation,
+  DealRoomSpeakerClass,
+  DealRoomSurfaceProfile,
+} from './DealRoomChannelPolicy';
