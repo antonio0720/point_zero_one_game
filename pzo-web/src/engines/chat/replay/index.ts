@@ -31,6 +31,7 @@
 
 export * from './ChatReplayBuffer';
 export * from './ChatReplaySerializer';
+export * from './ChatReplayIndex';
 
 export const CHAT_REPLAY_MODULE_NAME = 'PZO_CHAT_REPLAY' as const;
 
