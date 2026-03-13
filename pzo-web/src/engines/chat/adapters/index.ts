@@ -10,12 +10,13 @@
  *
  * Current phase
  * -------------
- * This index intentionally exports the first real adapter only:
+ * This index now exports three core-now adapters that exist in this session:
  *   - BattleEngineAdapter
+ *   - RunStoreAdapter
+ *   - MechanicsBridgeAdapter
  *
- * Future adapters named in the locked plan are not exported yet because they do
- * not exist yet in this session and this file is kept compile-clean rather than
- * pretending a wider surface is already shipping.
+ * Remaining locked adapters are still intentionally absent from exports until
+ * they actually exist in the canonical lane.
  *
  * Density6 LLC · Point Zero One · Production-first architecture
  * ============================================================================
@@ -51,7 +52,48 @@ export {
   type BattleThreatBand,
 } from './BattleEngineAdapter';
 
-export type ChatAdapterKind = 'battle';
+export {
+  RunStoreAdapter,
+  createRunStoreAdapter,
+  type RunDeltaEventName,
+  type RunHealthBand,
+  type RunRecommendation,
+  type RunRecommendationIntent,
+  type RunStoreAdapterCallbacks,
+  type RunStoreAdapterConfig,
+  type RunStoreAdapterHistoryEntry,
+  type RunStoreAdapterOptions,
+  type RunStoreAdapterSnapshot,
+  type RunStoreLike,
+  type RunStoreMirrorSnapshot,
+  type RunStoreThresholds,
+} from './RunStoreAdapter';
+
+export {
+  MechanicsBridgeAdapter,
+  createMechanicsBridgeAdapter,
+  type MechanicFamily,
+  type MechanicRuntimeEntry,
+  type MechanicTriggerPayload,
+  type MechanicsBridgeAPI,
+  type MechanicsBridgeAdapterCallbacks,
+  type MechanicsBridgeAdapterConfig,
+  type MechanicsBridgeAdapterHistoryEntry,
+  type MechanicsBridgeAdapterOptions,
+  type MechanicsBridgeAdapterSnapshot,
+  type MechanicsBridgeRuntimeSnapshot,
+  type MechanicsBridgeThresholds,
+  type MechanicsDeltaEventName,
+  type MechanicsFamilyNarrativeBand,
+  type MechanicsIntelligenceSnapshot,
+  type MechanicsRecommendation,
+  type MechanicsRecommendationIntent,
+  type MechanicsRuntimeStoreLike,
+  type MechanicsRuntimeStoreSlice,
+  type MechanicsSeasonSnapshot,
+} from './MechanicsBridgeAdapter';
+
+export type ChatAdapterKind = 'battle' | 'run-store' | 'mechanics-bridge';
 
 export interface ChatAdapterDescriptor {
   readonly kind: ChatAdapterKind;
@@ -67,6 +109,20 @@ export const CHAT_ADAPTER_DESCRIPTORS: readonly ChatAdapterDescriptor[] = Object
     file: 'BattleEngineAdapter.ts',
     path: 'pzo-web/src/engines/chat/adapters/BattleEngineAdapter.ts',
     description: 'Canonical bridge from the frontend battle donor lane into the unified chat engine spine.',
+    phase: 'core-now',
+  },
+  {
+    kind: 'run-store',
+    file: 'RunStoreAdapter.ts',
+    path: 'pzo-web/src/engines/chat/adapters/RunStoreAdapter.ts',
+    description: 'Canonical bridge from the frontend run-store mirror into chat pressure, helper, witness, and invasion logic.',
+    phase: 'core-now',
+  },
+  {
+    kind: 'mechanics-bridge',
+    file: 'MechanicsBridgeAdapter.ts',
+    path: 'pzo-web/src/engines/chat/adapters/MechanicsBridgeAdapter.ts',
+    description: 'Canonical bridge from mechanics runtime + bridge snapshot lanes into chat timing, social witness, and intelligence-side orchestration.',
     phase: 'core-now',
   },
 ]);
