@@ -12,3 +12,8 @@ export * from './FeatureExtractor';
 export * from './EngagementScorer';
 export * from './ColdStartPolicy';
 export * from './HaterPersonaPolicy';
+
+export * from './HelperInterventionPolicy';
+export * from './ChannelRecommendationPolicy';
+export * from './ToxicityRiskScorer';
+export * from './DropOffRiskScorer';
