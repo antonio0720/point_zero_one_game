@@ -10,3 +10,5 @@
 
 export * from './FeatureExtractor';
 export * from './EngagementScorer';
+export * from './ColdStartPolicy';
+export * from './HaterPersonaPolicy';
