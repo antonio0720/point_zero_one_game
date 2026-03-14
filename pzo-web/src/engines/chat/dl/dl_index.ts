@@ -1,3 +1,4 @@
+
 // /Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/pzo-web/src/engines/chat/intelligence/dl/index.ts
 
 /**
@@ -11,6 +12,7 @@ export * from './MessageEmbeddingClient';
 export * from './DialogueIntentEncoder';
 export * from './ConversationStateEncoder';
 export * from './ResponseRankerClient';
+export * from './SequenceMemoryClient';
 
 import {
   CHAT_MESSAGE_EMBEDDING_CLIENT_MANIFEST,
@@ -36,6 +38,12 @@ import {
   createResponseRankerClient,
 } from './ResponseRankerClient';
 
+import {
+  CHAT_SEQUENCE_MEMORY_CLIENT_MANIFEST,
+  SequenceMemoryClient,
+  createSequenceMemoryClient,
+} from './SequenceMemoryClient';
+
 export const CHAT_DL_MODULE_NAME =
   'PZO_FRONTEND_CHAT_DL' as const;
 
@@ -45,6 +53,7 @@ export const CHAT_DL_PUBLIC_MANIFEST = Object.freeze({
   intent: CHAT_DIALOGUE_INTENT_ENCODER_MANIFEST,
   conversationState: CHAT_CONVERSATION_STATE_ENCODER_MANIFEST,
   responseRanker: CHAT_RESPONSE_RANKER_CLIENT_MANIFEST,
+  sequenceMemory: CHAT_SEQUENCE_MEMORY_CLIENT_MANIFEST,
 } as const);
 
 export const ChatDL = Object.freeze({
@@ -56,5 +65,7 @@ export const ChatDL = Object.freeze({
   createConversationStateEncoder,
   ResponseRankerClient,
   createResponseRankerClient,
+  SequenceMemoryClient,
+  createSequenceMemoryClient,
   manifest: CHAT_DL_PUBLIC_MANIFEST,
 } as const);
