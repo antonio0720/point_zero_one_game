@@ -60,11 +60,9 @@ import {
   type ChatMountTargetId,
 } from '../../engines/chat';
 
-import type { ChatMessage, GameChatContext } from './chatTypes';
-import { useChatEngine } from './useChatEngine';
-import type { SabotageEvent } from './useChatEngine';
+import type { ChatMessage, GameChatContext, SabotageEvent } from './chatTypes';
+import { useUnifiedChat } from './useUnifiedChat';
 
-export type { SabotageEvent };
 
 type VisibleChannelId = 'GLOBAL' | 'SYNDICATE' | 'DEAL_ROOM';
 type UnifiedMessageKind =
@@ -1699,46 +1697,44 @@ export const UnifiedChatDock = memo(function UnifiedChatDock({
   const bootstrapPreset = resolveChatMountPreset(mountTarget, mountPreset);
   const bootstrapTarget = resolveChatMountTarget(mountTarget);
 
-  const engine = (useChatEngine(gameCtx, accessToken, onSabotage) as unknown as {
-    messages?: ChatMessage[];
-    activeTab?: VisibleChannelId;
-    switchTab?: (tab: VisibleChannelId) => void;
-    chatOpen?: boolean;
-    toggleChat?: () => void;
-    sendMessage?: (body: string) => void;
-    unread?: Record<string, number>;
-    totalUnread?: number;
-    connected?: boolean;
-  }) ?? {};
-
-  const [collapsedOverride, setCollapsedOverride] = useState(startCollapsed);
-  const [draft, setDraft] = useState('');
-  const [transcriptOpen, setTranscriptOpen] = useState(false);
-  const [transcriptQuery, setTranscriptQuery] = useState('');
-  const [activeTabOverride, setActiveTabOverride] = useState<VisibleChannelId | null>(null);
+  const ui = useUnifiedChat({
+    ctx: gameCtx,
+    accessToken,
+    onSabotage,
+    shellMode: 'DOCK',
+    initialChannel: defaultTab,
+    initialOpen: true,
+    initialCollapsed: startCollapsed,
+    initialTranscriptOpen: false,
+    initialTranscriptSearch: '',
+    persistUiState: true,
+    persistDrafts: true,
+    storageNamespace: `dock:${mountTarget}`,
+  });
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const styleRef = useRef<HTMLStyleElement | null>(null);
 
   const normalizedMessages = useMemo(
-    () => normalizeMessages((engine.messages ?? []) as ChatMessage[]),
-    [engine.messages],
+    () => normalizeMessages((ui.allMessages ?? []) as ChatMessage[]),
+    [ui.allMessages],
   );
 
-  const activeTab = activeTabOverride ?? asVisibleChannel(engine.activeTab, defaultTab);
+  const activeTab = asVisibleChannel(ui.activeChannel, defaultTab);
+
   const visibleMessages = useMemo(
-    () => filterMessagesByChannel(normalizedMessages, activeTab),
-    [normalizedMessages, activeTab],
+    () => normalizeMessages((ui.visibleMessages ?? []) as ChatMessage[]),
+    [ui.visibleMessages],
   );
 
   const transcriptMessages = useMemo(
-    () => searchMessages(visibleMessages, transcriptQuery),
-    [visibleMessages, transcriptQuery],
+    () => searchMessages(visibleMessages, ui.transcript.searchQuery),
+    [visibleMessages, ui.transcript.searchQuery],
   );
 
   const transcriptRows = useMemo(
-    () => createTranscriptRows(visibleMessages),
-    [visibleMessages],
+    () => createTranscriptRows(transcriptMessages),
+    [transcriptMessages],
   );
 
   const threat = useMemo(
@@ -1746,20 +1742,36 @@ export const UnifiedChatDock = memo(function UnifiedChatDock({
     [visibleMessages],
   );
 
-  const helperPrompt = useMemo(
-    () => createHelperPromptModel(activeTab, threat, visibleMessages),
-    [activeTab, threat, visibleMessages],
-  );
+  const helperPrompt = useMemo(() => {
+    if (ui.helperPrompt) {
+      return {
+        visible: true,
+        title: ui.helperPrompt.title,
+        body: ui.helperPrompt.body,
+        tone:
+          ui.helperPrompt.tone === 'urgent'
+            ? 'urgent'
+            : ui.helperPrompt.tone === 'strategic'
+              ? 'strategic'
+              : ui.helperPrompt.tone === 'blunt'
+                ? 'blunt'
+                : 'calm',
+        ctaLabel: ui.helperPrompt.ctaLabel ?? 'assist',
+      } satisfies UnifiedHelperPromptModel;
+    }
+
+    return createHelperPromptModel(activeTab, threat, visibleMessages);
+  }, [ui.helperPrompt, activeTab, threat, visibleMessages]);
 
   const presence = useMemo(
     () => createPresenceModel(normalizedMessages, activeTab),
     [normalizedMessages, activeTab],
   );
 
-  const unread = engine.unread ?? {};
-  const totalUnread = engine.totalUnread ?? 0;
-  const connected = engine.connected ?? false;
-  const chatOpen = engine.chatOpen ?? !collapsedOverride;
+  const unread = ui.unread ?? {};
+  const totalUnread = ui.totalUnread ?? 0;
+  const connected = ui.connected ?? false;
+  const shellOpen = ui.chatOpen && !ui.collapsed;
 
   const effectiveUnread =
     Number(unread[activeTab] ?? unread[activeTab.toLowerCase()] ?? 0) || 0;
@@ -1790,32 +1802,38 @@ export const UnifiedChatDock = memo(function UnifiedChatDock({
   }, []);
 
   useEffect(() => {
-    if (!chatOpen) return;
+    if (!shellOpen) return;
     scrollRef.current?.scrollTo({
       top: scrollRef.current.scrollHeight,
       behavior: 'smooth',
     });
-  }, [chatOpen, visibleMessages.length, activeTab]);
+  }, [shellOpen, visibleMessages.length, activeTab]);
 
   const handleSwitchTab = useCallback(
     (tab: VisibleChannelId) => {
-      setActiveTabOverride(tab);
-      engine.switchTab?.(tab);
+      ui.setActiveChannel(tab);
     },
-    [engine],
+    [ui],
   );
 
   const handleToggleOpen = useCallback(() => {
-    setCollapsedOverride((value) => !value);
-    engine.toggleChat?.();
-  }, [engine]);
+    if (!ui.chatOpen) {
+      ui.openChat();
+      ui.expand();
+      return;
+    }
+
+    if (ui.collapsed) {
+      ui.expand();
+      return;
+    }
+
+    ui.collapse();
+  }, [ui]);
 
   const handleSend = useCallback(() => {
-    const trimmed = draft.trim();
-    if (!trimmed) return;
-    engine.sendMessage?.(trimmed);
-    setDraft('');
-  }, [draft, engine]);
+    ui.sendDraft();
+  }, [ui]);
 
   const handleComposerKeyDown = useCallback(
     (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
@@ -1833,16 +1851,23 @@ export const UnifiedChatDock = memo(function UnifiedChatDock({
         ? 'Need one-line rescue now.'
         : helperPrompt.tone === 'strategic'
           ? 'Give me the best tactical reply.'
-          : 'What is the safest next message?';
-    setDraft((previous) => (previous ? previous : prompt));
-  }, [helperPrompt]);
+          : helperPrompt.tone === 'blunt'
+            ? 'What is the sharpest next move?' 
+            : 'What is the safest next message?';
+
+    if (ui.composer.activeDraft.trim()) {
+      return;
+    }
+
+    ui.quickReply(prompt);
+  }, [helperPrompt.tone, ui]);
 
   const shellTitle = enableRoomMeta ? title : CHANNEL_META[activeTab].label;
   const shellSubtitle = enableRoomMeta
     ? subtitle
     : CHANNEL_META[activeTab].description;
 
-  if (!chatOpen) {
+  if (!shellOpen) {
     return (
       <CollapsedPill
         unread={totalUnread}
@@ -1874,11 +1899,11 @@ export const UnifiedChatDock = memo(function UnifiedChatDock({
       }}
     >
       <TranscriptDrawer
-        open={enableTranscriptDrawer && transcriptOpen}
-        query={transcriptQuery}
-        onQueryChange={setTranscriptQuery}
+        open={enableTranscriptDrawer && ui.transcript.open}
+        query={ui.transcript.searchQuery}
+        onQueryChange={ui.setTranscriptSearchQuery}
         messages={transcriptMessages}
-        onClose={() => setTranscriptOpen(false)}
+        onClose={ui.closeTranscript}
       />
 
       <RoomHeader
@@ -1917,7 +1942,7 @@ export const UnifiedChatDock = memo(function UnifiedChatDock({
         <ThreatMeter threat={threat} />
       )}
 
-      {enableHelperPrompt && bootstrapPreset.enableHelperPrompts && (
+      {enableHelperPrompt && bootstrapPreset.enableHelperPrompts && helperPrompt.visible && (
         <HelperPrompt model={helperPrompt} onAction={handleHelperAction} />
       )}
 
@@ -1937,11 +1962,12 @@ export const UnifiedChatDock = memo(function UnifiedChatDock({
 
       <Composer
         channel={activeTab}
-        draft={draft}
-        onDraftChange={setDraft}
+        draft={ui.composer.activeDraft}
+        onDraftChange={ui.setDraft}
         onSend={handleSend}
-        disabled={!draft.trim()}
+        disabled={!ui.composer.canSend}
         rows={Math.max(2, bootstrapPreset.composerRows)}
+        onKeyDown={handleComposerKeyDown}
       />
 
       <div
@@ -1969,13 +1995,18 @@ export const UnifiedChatDock = memo(function UnifiedChatDock({
             color={totalUnread > 0 ? TOKENS.indigo : TOKENS.textMuted}
             bg={totalUnread > 0 ? 'rgba(139,147,255,0.10)' : 'rgba(255,255,255,0.04)'}
           />
+          <Badge
+            label={`shell ${ui.shellMode.toLowerCase()}`}
+            color={TOKENS.cyan}
+            bg='rgba(56,221,248,0.10)'
+          />
         </div>
 
         <div style={{ display: 'flex', gap: 8 }}>
           {enableTranscriptDrawer && bootstrapPreset.showTranscriptDrawer && (
             <button
               type="button"
-              onClick={() => setTranscriptOpen(true)}
+              onClick={ui.toggleTranscript}
               style={{
                 appearance: 'none',
                 border: `1px solid ${TOKENS.borderMedium}`,
@@ -1990,7 +2021,7 @@ export const UnifiedChatDock = memo(function UnifiedChatDock({
                 textTransform: 'uppercase',
               }}
             >
-              transcript
+              {ui.transcript.open ? 'hide transcript' : 'transcript'}
             </button>
           )}
 
@@ -2011,7 +2042,7 @@ export const UnifiedChatDock = memo(function UnifiedChatDock({
               textTransform: 'uppercase',
             }}
           >
-            collapse
+            {ui.collapsed ? 'expand' : 'collapse'}
           </button>
         </div>
       </div>
@@ -2024,7 +2055,12 @@ export const UnifiedChatDock = memo(function UnifiedChatDock({
             paddingTop: 2,
           }}
         >
-          {buildLawFooterLines().map((line) => (
+          {Array.from(new Set([
+            ...buildLawFooterLines(),
+            ...ui.runtimeBundle.laws,
+            `mount ${ui.mountState.mountTarget.toLowerCase()}`,
+            `scope ${ui.mountState.modeScope.toLowerCase()}`,
+          ])).map((line) => (
             <div
               key={line}
               style={{
