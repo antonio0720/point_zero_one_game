@@ -1,8 +1,10 @@
-
 /**
  * ============================================================================
  * POINT ZERO ONE — COMPONENT CHAT UI CONTRACTS
  * FILE: pzo-web/src/components/chat/uiTypes.ts
+ * VERSION: 2.1.0
+ * AUTHOR: OpenAI
+ * LICENSE: Internal / Project Use Only
  * ============================================================================
  *
  * Purpose
@@ -875,6 +877,35 @@ export interface ChatUiThreatMeterViewModel {
   confidenceLabel?: UIString;
 }
 
+export interface ChatUiHelperPromptActor {
+  id: ChatUiId;
+  displayName: UIString;
+  roleLabel?: UIString;
+  initials?: UIString;
+}
+
+export interface ChatUiHelperPromptChannel {
+  id: ChatUiChannelId;
+  label: UIString;
+  openable?: UIBoolean;
+}
+
+export interface ChatUiHelperPromptPresentation {
+  severity: ChatUiTone;
+  density: ChatUiDensity;
+  intentLabel?: UIString;
+  toneLabel?: UIString;
+  accentHex?: UIString;
+}
+
+export interface ChatUiHelperPromptEvidence {
+  id: ChatUiId;
+  label: UIString;
+  value: UIString;
+  caption?: UIString;
+  tone?: ChatUiTone;
+}
+
 export interface ChatUiHelperPromptAction {
   id: ChatUiId;
   label: UIString;
@@ -882,6 +913,10 @@ export interface ChatUiHelperPromptAction {
   accent?: ChatUiAccent;
   primary?: UIBoolean;
   destructive?: UIBoolean;
+  description?: UIString;
+  hotkeyHint?: UIString;
+  disabled?: UIBoolean;
+  blockedReason?: UIString;
 }
 
 export interface ChatUiHelperPromptViewModel {
@@ -897,6 +932,18 @@ export interface ChatUiHelperPromptViewModel {
   actions?: ChatUiHelperPromptAction[];
   chips?: ChatUiChip[];
   urgency?: ChatUiUrgency;
+  dismissible?: UIBoolean;
+  actor?: ChatUiHelperPromptActor;
+  channel?: ChatUiHelperPromptChannel;
+  presentation?: ChatUiHelperPromptPresentation;
+  metrics?: ChatUiMetric[];
+  evidence?: ChatUiHelperPromptEvidence[];
+  rescueCritical?: UIBoolean;
+  escalated?: UIBoolean;
+  sticky?: UIBoolean;
+  unreadCountHint?: UINumber;
+  footerNote?: UIString;
+  provenanceNote?: UIString;
 }
 
 /* ========================================================================== *
@@ -1117,6 +1164,7 @@ export const CHAT_UI_EMPTY_STATUS: Readonly<ChatUiShellStatus> = Object.freeze({
   syncing: false,
   degraded: false,
   stale: false,
+  errorLabel: '',
 });
 
 export const CHAT_UI_EMPTY_FEED: Readonly<ChatUiFeedViewModel> = Object.freeze({
@@ -1125,6 +1173,8 @@ export const CHAT_UI_EMPTY_FEED: Readonly<ChatUiFeedViewModel> = Object.freeze({
   hasOlder: false,
   hasNewer: false,
   unreadCount: 0,
+  newestMessageId: undefined,
+  oldestMessageId: undefined,
 });
 
 export const CHAT_UI_EMPTY_PRESENCE: Readonly<ChatUiPresenceStripViewModel> = Object.freeze({
@@ -1199,7 +1249,7 @@ export function asBoolean(value: unknown, fallback = false): UIBoolean {
 }
 
 export function asArray<T = unknown>(value: unknown): T[] {
-  return Array.isArray(value) ? [...value] as T[] : [];
+  return Array.isArray(value) ? ([...value] as T[]) : [];
 }
 
 export function toId(prefix: UIString, value: unknown, fallbackSuffix = 'unknown'): ChatUiId {
@@ -1218,6 +1268,20 @@ export function uniqueById<T extends { id: ChatUiId }>(items: readonly T[]): T[]
     result.push(item);
   }
   return result;
+}
+
+export function maybeText(value: unknown): UIString | undefined {
+  const next = asNonEmptyString(value, '');
+  return next.length > 0 ? next : undefined;
+}
+
+export function maybeNumber(value: unknown): UINumber | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string') {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return undefined;
 }
 
 /* ========================================================================== *
@@ -1449,73 +1513,6 @@ export function normalizeMessageKind(value: unknown): ChatUiMessageKind {
   }
 }
 
-/* ========================================================================== *
- * Section 19 — Common builders
- * ========================================================================== */
-
-export function createTimestampMeta(
-  raw: unknown,
-  fallbackLabel = 'Now',
-): ChatUiTimestampMeta {
-  if (typeof raw === 'number' && Number.isFinite(raw)) {
-    const date = new Date(raw);
-    return {
-      unixMs: raw,
-      iso: date.toISOString(),
-      absoluteLabel: date.toLocaleString(),
-      relativeLabel: '',
-      displayLabel: date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }),
-      bucketKey: `${date.getFullYear()}-${date.getMonth() + 1}-${date.getDate()}`,
-    };
-  }
-
-  if (typeof raw === 'string' && raw.trim().length > 0) {
-    const parsed = Date.parse(raw);
-    if (Number.isFinite(parsed)) {
-      return createTimestampMeta(parsed, fallbackLabel);
-    }
-    return {
-      iso: raw,
-      displayLabel: raw,
-      bucketKey: raw,
-    };
-  }
-
-  return {
-    displayLabel: fallbackLabel,
-    bucketKey: 'unknown',
-  };
-}
-
-export function createAuthorModel(raw: unknown, fallbackName = 'Unknown'): ChatUiAuthorModel {
-  const source = asRecord(raw);
-  const displayName = asNonEmptyString(
-    source.displayName ?? source.name ?? source.label ?? source.author,
-    fallbackName,
-  );
-  const sourceKind = normalizeSourceKind(source.sourceKind ?? source.source ?? source.kind);
-  const disposition = normalizeAuthorDisposition(source.disposition ?? source.role ?? source.kind);
-
-  return {
-    id: asNonEmptyString(source.id ?? source.playerId ?? source.personaId, toId('author', displayName)),
-    displayName,
-    shortName: asNonEmptyString(source.shortName ?? source.initials, ''),
-    sourceKind,
-    disposition,
-    subtitle: asNonEmptyString(source.subtitle ?? source.roleLabel, ''),
-    roleLabel: asNonEmptyString(source.roleLabel ?? source.role, ''),
-    factionLabel: asNonEmptyString(source.factionLabel ?? source.faction, ''),
-    avatar: createAvatarModel(source.avatar ?? source),
-    signature: createPersonaSignature(source.signature ?? source),
-    presence: normalizePresenceState(source.presence),
-    typingState: normalizeTypingState(source.typingState),
-    isSelf: asBoolean(source.isSelf),
-    isTrusted: asBoolean(source.isTrusted),
-    isMuted: asBoolean(source.isMuted),
-    isHidden: asBoolean(source.isHidden),
-  };
-}
-
 export function normalizeAuthorDisposition(value: unknown): ChatUiAuthorDisposition {
   const next = asNonEmptyString(value).toLowerCase();
   switch (next) {
@@ -1539,12 +1536,222 @@ export function normalizeAuthorDisposition(value: unknown): ChatUiAuthorDisposit
   }
 }
 
+export function normalizeImportance(value: unknown): ChatUiImportance {
+  const next = asNonEmptyString(value).toLowerCase();
+  switch (next) {
+    case 'low':
+    case 'normal':
+    case 'elevated':
+    case 'high':
+    case 'critical':
+      return next as ChatUiImportance;
+    default:
+      return 'normal';
+  }
+}
+
+export function normalizeEmphasis(value: unknown): ChatUiEmphasis {
+  const next = asNonEmptyString(value).toLowerCase();
+  switch (next) {
+    case 'subtle':
+    case 'standard':
+    case 'strong':
+    case 'hero':
+    case 'suppressed':
+      return next as ChatUiEmphasis;
+    default:
+      return 'standard';
+  }
+}
+
+export function normalizeDensity(value: unknown): ChatUiDensity {
+  const next = asNonEmptyString(value).toLowerCase();
+  switch (next) {
+    case 'compact':
+      return 'compact';
+    case 'expanded':
+      return 'expanded';
+    case 'cinematic':
+      return 'cinematic';
+    default:
+      return 'comfortable';
+  }
+}
+
+export function normalizeUrgency(value: unknown): ChatUiUrgency {
+  const next = asNonEmptyString(value).toLowerCase();
+  switch (next) {
+    case 'low':
+    case 'medium':
+    case 'high':
+    case 'immediate':
+      return next as ChatUiUrgency;
+    default:
+      return 'idle';
+  }
+}
+
+export function normalizeDisplayIntent(value: unknown): ChatUiDisplayIntent {
+  const next = asNonEmptyString(value).toLowerCase();
+  switch (next) {
+    case 'default':
+    case 'alert':
+    case 'proof':
+    case 'instruction':
+    case 'helper':
+    case 'threat':
+    case 'system':
+    case 'celebration':
+    case 'deal':
+    case 'spectator':
+      return next as ChatUiDisplayIntent;
+    default:
+      return 'default';
+  }
+}
+
+export function normalizeInlineEntityKind(value: unknown): ChatUiInlineEntity['kind'] {
+  const next = asNonEmptyString(value).toLowerCase();
+  switch (next) {
+    case 'player':
+    case 'npc':
+    case 'channel':
+    case 'proof':
+    case 'event':
+    case 'card':
+    case 'run':
+      return next as ChatUiInlineEntity['kind'];
+    default:
+      return 'unknown';
+  }
+}
+
+export function normalizeAttachmentKind(value: unknown): ChatUiAttachment['kind'] {
+  const next = asNonEmptyString(value).toLowerCase();
+  switch (next) {
+    case 'proof':
+    case 'image':
+    case 'system_card':
+    case 'deal_offer':
+    case 'legend':
+    case 'reward':
+      return next as ChatUiAttachment['kind'];
+    default:
+      return 'unknown';
+  }
+}
+
+export function normalizeBadgeKind(value: unknown): ChatUiBadge['kind'] {
+  const next = asNonEmptyString(value).toLowerCase();
+  switch (next) {
+    case 'proof':
+    case 'threat':
+    case 'integrity':
+    case 'helper':
+    case 'hater':
+    case 'system':
+    case 'presence':
+    case 'legend':
+    case 'reward':
+    case 'channel':
+      return next as ChatUiBadge['kind'];
+    default:
+      return 'custom';
+  }
+}
+
+export function normalizeHelperMode(value: unknown): ChatUiHelperMode {
+  const next = asNonEmptyString(value).toLowerCase();
+  switch (next) {
+    case 'soft':
+    case 'standard':
+    case 'blunt':
+    case 'rescue':
+    case 'mentor':
+    case 'strategic':
+      return next as ChatUiHelperMode;
+    default:
+      return 'standard';
+  }
+}
+
+export function normalizeEmptyStateKind(value: unknown): ChatUiEmptyStateKind {
+  const next = asNonEmptyString(value).toLowerCase();
+  switch (next) {
+    case 'cold_start':
+    case 'quiet_room':
+    case 'loading':
+    case 'filtered_empty':
+    case 'channel_locked':
+    case 'shadow_only':
+    case 'connection_lost':
+    case 'post_run_reset':
+    case 'error':
+      return next as ChatUiEmptyStateKind;
+    default:
+      return 'quiet_room';
+  }
+}
+
+export function normalizeSearchScope(value: unknown): ChatUiSearchScope {
+  const next = asNonEmptyString(value).toLowerCase();
+  switch (next) {
+    case 'current_channel':
+    case 'current_room':
+    case 'all_visible':
+    case 'proof_only':
+    case 'legend_only':
+    case 'helper_only':
+    case 'threat_only':
+      return next as ChatUiSearchScope;
+    default:
+      return 'current_channel';
+  }
+}
+
+/* ========================================================================== *
+ * Section 19 — Common builders
+ * ========================================================================== */
+
+export function createTimestampMeta(raw: unknown, fallbackLabel = 'Now'): ChatUiTimestampMeta {
+  if (typeof raw === 'number' && Number.isFinite(raw)) {
+    const date = new Date(raw);
+    return {
+      unixMs: raw,
+      iso: date.toISOString(),
+      absoluteLabel: date.toLocaleString(),
+      relativeLabel: '',
+      displayLabel: date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }),
+      bucketKey: `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(
+        date.getDate(),
+      ).padStart(2, '0')}`,
+    };
+  }
+
+  if (typeof raw === 'string' && raw.trim().length > 0) {
+    const parsed = Date.parse(raw);
+    if (Number.isFinite(parsed)) {
+      return createTimestampMeta(parsed, fallbackLabel);
+    }
+    return {
+      iso: raw,
+      displayLabel: raw,
+      bucketKey: raw,
+    };
+  }
+
+  return {
+    displayLabel: fallbackLabel,
+    bucketKey: 'unknown',
+  };
+}
+
 export function createAvatarModel(raw: unknown): ChatUiAvatarModel {
   const source = asRecord(raw);
   return {
-    imageUrl: asNonEmptyString(source.imageUrl ?? source.avatarUrl ?? source.image, ''),
-    initials: asNonEmptyString(source.initials, ''),
-    emoji: asNonEmptyString(source.emoji, ''),
+    imageUrl: maybeText(source.imageUrl ?? source.avatarUrl ?? source.image),
+    initials: maybeText(source.initials),
+    emoji: maybeText(source.emoji),
     accent: normalizeAccent(source.accent),
     ringTone: normalizeTone(source.ringTone ?? source.tone),
     outlined: asBoolean(source.outlined),
@@ -1554,12 +1761,12 @@ export function createAvatarModel(raw: unknown): ChatUiAvatarModel {
 
 export function createPersonaSignature(raw: unknown): ChatUiPersonaSignature | undefined {
   const source = asRecord(raw);
-  const personaId = asNonEmptyString(source.personaId ?? source.id, '');
-  const voiceprintLabel = asNonEmptyString(source.voiceprintLabel ?? source.voiceprint, '');
-  const cadenceLabel = asNonEmptyString(source.cadenceLabel ?? source.cadence, '');
-  const attackStyleLabel = asNonEmptyString(source.attackStyleLabel ?? source.attackStyle, '');
-  const helperModeLabel = asNonEmptyString(source.helperModeLabel ?? source.helperMode, '');
-  const signatureOpener = asNonEmptyString(source.signatureOpener ?? source.opener, '');
+  const personaId = maybeText(source.personaId ?? source.id);
+  const voiceprintLabel = maybeText(source.voiceprintLabel ?? source.voiceprint);
+  const cadenceLabel = maybeText(source.cadenceLabel ?? source.cadence);
+  const attackStyleLabel = maybeText(source.attackStyleLabel ?? source.attackStyle);
+  const helperModeLabel = maybeText(source.helperModeLabel ?? source.helperMode);
+  const signatureOpener = maybeText(source.signatureOpener ?? source.opener);
 
   if (
     !personaId &&
@@ -1582,18 +1789,52 @@ export function createPersonaSignature(raw: unknown): ChatUiPersonaSignature | u
   };
 }
 
+export function createAuthorModel(raw: unknown, fallbackName = 'Unknown'): ChatUiAuthorModel {
+  const source = asRecord(raw);
+  const displayName = asNonEmptyString(
+    source.displayName ?? source.name ?? source.label ?? source.author,
+    fallbackName,
+  );
+  const sourceKind = normalizeSourceKind(source.sourceKind ?? source.source ?? source.kind);
+  const disposition = normalizeAuthorDisposition(source.disposition ?? source.role ?? source.kind);
+
+  return {
+    id: asNonEmptyString(source.id ?? source.playerId ?? source.personaId, toId('author', displayName)),
+    displayName,
+    shortName: maybeText(source.shortName ?? source.initials),
+    sourceKind,
+    disposition,
+    subtitle: maybeText(source.subtitle ?? source.roleLabel),
+    roleLabel: maybeText(source.roleLabel ?? source.role),
+    factionLabel: maybeText(source.factionLabel ?? source.faction),
+    avatar: createAvatarModel(source.avatar ?? source),
+    signature: createPersonaSignature(source.signature ?? source),
+    presence: normalizePresenceState(source.presence),
+    typingState: normalizeTypingState(source.typingState),
+    isSelf: asBoolean(source.isSelf),
+    isTrusted: asBoolean(source.isTrusted),
+    isMuted: asBoolean(source.isMuted),
+    isHidden: asBoolean(source.isHidden),
+  };
+}
+
 export function createProofMeta(raw: unknown): ChatUiProofMeta | undefined {
   const source = asRecord(raw);
   if (Object.keys(source).length === 0) return undefined;
 
+  const proofBand = normalizeProofBand(source.proofBand ?? source.band);
+  const causalParents = asArray<string>(source.causalParents ?? source.parents)
+    .map((value) => asString(value).trim())
+    .filter(Boolean);
+
   return {
-    proofId: asNonEmptyString(source.proofId ?? source.id, ''),
-    proofBand: normalizeProofBand(source.proofBand ?? source.band),
-    proofHashLabel: asNonEmptyString(source.proofHashLabel ?? source.hash ?? source.proofHash, ''),
-    proofChainDepth: asNumber(source.proofChainDepth ?? source.depth, 0),
-    proofSummary: asNonEmptyString(source.proofSummary ?? source.summary, ''),
-    causalParents: asArray<string>(source.causalParents ?? source.parents).map((v) => asString(v)).filter(Boolean),
-    verified: asBoolean(source.verified, normalizeProofBand(source.proofBand ?? source.band) === 'verified'),
+    proofId: maybeText(source.proofId ?? source.id),
+    proofBand,
+    proofHashLabel: maybeText(source.proofHashLabel ?? source.hash ?? source.proofHash),
+    proofChainDepth: maybeNumber(source.proofChainDepth ?? source.depth),
+    proofSummary: maybeText(source.proofSummary ?? source.summary),
+    causalParents: causalParents.length > 0 ? causalParents : undefined,
+    verified: asBoolean(source.verified, proofBand === 'verified' || proofBand === 'sealed'),
   };
 }
 
@@ -1603,11 +1844,11 @@ export function createThreatMeta(raw: unknown): ChatUiThreatMeta | undefined {
 
   return {
     band: normalizeThreatBand(source.band ?? source.threatBand),
-    score: asNumber(source.score ?? source.threatScore, 0),
-    pressureTier: asNonEmptyString(source.pressureTier, ''),
-    tickTier: asNonEmptyString(source.tickTier, ''),
-    attackTypeLabel: asNonEmptyString(source.attackTypeLabel ?? source.attackType, ''),
-    dangerSummary: asNonEmptyString(source.dangerSummary ?? source.summary, ''),
+    score: maybeNumber(source.score ?? source.threatScore),
+    pressureTier: maybeText(source.pressureTier),
+    tickTier: maybeText(source.tickTier),
+    attackTypeLabel: maybeText(source.attackTypeLabel ?? source.attackType),
+    dangerSummary: maybeText(source.dangerSummary ?? source.summary),
     imminent: asBoolean(source.imminent),
   };
 }
@@ -1618,9 +1859,9 @@ export function createIntegrityMeta(raw: unknown): ChatUiIntegrityMeta | undefin
 
   return {
     band: normalizeIntegrityBand(source.band ?? source.integrityBand),
-    visibilityLabel: asNonEmptyString(source.visibilityLabel ?? source.visibility, ''),
-    moderationLabel: asNonEmptyString(source.moderationLabel ?? source.moderation, ''),
-    roomLockLabel: asNonEmptyString(source.roomLockLabel ?? source.roomLock, ''),
+    visibilityLabel: maybeText(source.visibilityLabel ?? source.visibility),
+    moderationLabel: maybeText(source.moderationLabel ?? source.moderation),
+    roomLockLabel: maybeText(source.roomLockLabel ?? source.roomLock),
     shadowed: asBoolean(source.shadowed),
     redacted: asBoolean(source.redacted),
     edited: asBoolean(source.edited),
@@ -1638,11 +1879,11 @@ export function createChannelMeta(raw: unknown): ChatUiChannelMeta | undefined {
     channelId: channelId || toId('channel', channelLabel || 'unknown'),
     channelKind: normalizeChannelKind(source.channelKind ?? source.kind),
     channelLabel: channelLabel || 'Unknown Channel',
-    roomId: asNonEmptyString(source.roomId, ''),
-    roomLabel: asNonEmptyString(source.roomLabel, ''),
-    mountLabel: asNonEmptyString(source.mountLabel, ''),
-    reputationLabel: asNonEmptyString(source.reputationLabel, ''),
-    audienceHeatLabel: asNonEmptyString(source.audienceHeatLabel, ''),
+    roomId: maybeText(source.roomId),
+    roomLabel: maybeText(source.roomLabel),
+    mountLabel: maybeText(source.mountLabel),
+    reputationLabel: maybeText(source.reputationLabel),
+    audienceHeatLabel: maybeText(source.audienceHeatLabel),
   };
 }
 
@@ -1653,16 +1894,19 @@ export function createLearningMeta(raw: unknown): ChatUiLearningMeta | undefined
   return {
     coldStart: asBoolean(source.coldStart),
     helperBoost: asBoolean(source.helperBoost),
-    engagementLabel: asNonEmptyString(source.engagementLabel, ''),
-    dropOffRiskLabel: asNonEmptyString(source.dropOffRiskLabel, ''),
-    recommendationLabel: asNonEmptyString(source.recommendationLabel, ''),
+    engagementLabel: maybeText(source.engagementLabel),
+    dropOffRiskLabel: maybeText(source.dropOffRiskLabel),
+    recommendationLabel: maybeText(source.recommendationLabel),
     memoryHit: asBoolean(source.memoryHit),
-    memoryAnchorLabel: asNonEmptyString(source.memoryAnchorLabel, ''),
+    memoryAnchorLabel: maybeText(source.memoryAnchorLabel),
   };
 }
 
 export function createMessageMetaRail(raw: unknown): ChatUiMessageMetaRail {
   const source = asRecord(raw);
+  const chips = createChips(asArray(source.chips));
+  const badges = createBadges(asArray(source.badges));
+
   return {
     timestamp: createTimestampMeta(source.timestamp ?? source.createdAt ?? source.time),
     proof: createProofMeta(source.proof),
@@ -1670,8 +1914,37 @@ export function createMessageMetaRail(raw: unknown): ChatUiMessageMetaRail {
     integrity: createIntegrityMeta(source.integrity),
     channel: createChannelMeta(source.channel),
     learning: createLearningMeta(source.learning),
-    chips: createChips(asArray(source.chips)),
-    badges: createBadges(asArray(source.badges)),
+    chips: chips.length > 0 ? chips : undefined,
+    badges: badges.length > 0 ? badges : undefined,
+  };
+}
+
+export function createInlineEntity(raw: unknown): ChatUiInlineEntity | undefined {
+  const source = asRecord(raw);
+  const label = asNonEmptyString(source.label, '');
+  if (!label) return undefined;
+
+  return {
+    id: asNonEmptyString(source.id, toId('entity', label)),
+    kind: normalizeInlineEntityKind(source.kind),
+    label,
+    value: maybeText(source.value),
+  };
+}
+
+export function createTextSpan(raw: unknown): ChatUiTextSpan {
+  const source = asRecord(raw);
+  const text = asNonEmptyString(source.text, '');
+  return {
+    id: asNonEmptyString(source.id, toId('span', text || 'segment')),
+    text,
+    bold: asBoolean(source.bold),
+    italic: asBoolean(source.italic),
+    mono: asBoolean(source.mono),
+    strike: asBoolean(source.strike),
+    tone: normalizeTone(source.tone),
+    accent: normalizeAccent(source.accent),
+    entity: createInlineEntity(source.entity),
   };
 }
 
@@ -1699,69 +1972,7 @@ export function createTextBlock(
     kind,
     spans,
     truncated: asBoolean(source.truncated),
-    lineClamp: asNumber(source.lineClamp, 0) || undefined,
-  };
-}
-
-export function createTextSpan(raw: unknown): ChatUiTextSpan {
-  const source = asRecord(raw);
-  const text = asNonEmptyString(source.text, '');
-  return {
-    id: asNonEmptyString(source.id, toId('span', text || 'segment')),
-    text,
-    bold: asBoolean(source.bold),
-    italic: asBoolean(source.italic),
-    mono: asBoolean(source.mono),
-    strike: asBoolean(source.strike),
-    tone: normalizeTone(source.tone),
-    accent: normalizeAccent(source.accent),
-    entity: createInlineEntity(source.entity),
-  };
-}
-
-export function createInlineEntity(raw: unknown): ChatUiInlineEntity | undefined {
-  const source = asRecord(raw);
-  const label = asNonEmptyString(source.label, '');
-  if (!label) return undefined;
-  return {
-    id: asNonEmptyString(source.id, toId('entity', label)),
-    kind: normalizeInlineEntityKind(source.kind),
-    label,
-    value: asNonEmptyString(source.value, ''),
-  };
-}
-
-export function normalizeInlineEntityKind(value: unknown): ChatUiInlineEntity['kind'] {
-  const next = asNonEmptyString(value).toLowerCase();
-  switch (next) {
-    case 'player':
-    case 'npc':
-    case 'channel':
-    case 'proof':
-    case 'event':
-    case 'card':
-    case 'run':
-      return next as ChatUiInlineEntity['kind'];
-    default:
-      return 'unknown';
-  }
-}
-
-export function createBodyModel(raw: unknown): ChatUiMessageBodyModel {
-  const source = asRecord(raw);
-  const primary = createTextBlock(
-    source.primary ?? source.body ?? source.text,
-    asNonEmptyString(source.text, ''),
-    'body',
-  );
-
-  return {
-    primary,
-    secondary: asArray(source.secondary).map((item) => createTextBlock(item, '', 'caption')),
-    quote: createQuotePreview(source.quote),
-    attachments: asArray(source.attachments).map(createAttachment),
-    reactions: asArray(source.reactions).map(createReaction),
-    commandHints: asArray(source.commandHints).map(createCommandHint),
+    lineClamp: maybeNumber(source.lineClamp),
   };
 }
 
@@ -1769,10 +1980,11 @@ export function createQuotePreview(raw: unknown): ChatUiQuotePreview | undefined
   const source = asRecord(raw);
   const text = asNonEmptyString(source.text ?? source.preview, '');
   if (!text) return undefined;
+
   return {
-    messageId: asNonEmptyString(source.messageId, ''),
-    authorLabel: asNonEmptyString(source.authorLabel, ''),
-    channelLabel: asNonEmptyString(source.channelLabel, ''),
+    messageId: maybeText(source.messageId),
+    authorLabel: maybeText(source.authorLabel),
+    channelLabel: maybeText(source.channelLabel),
     text,
     tone: normalizeTone(source.tone),
     accent: normalizeAccent(source.accent),
@@ -1785,34 +1997,19 @@ export function createAttachment(raw: unknown): ChatUiAttachment {
     id: asNonEmptyString(source.id, toId('attachment', source.label ?? source.kind ?? 'unknown')),
     kind: normalizeAttachmentKind(source.kind),
     label: asNonEmptyString(source.label, 'Attachment'),
-    subtitle: asNonEmptyString(source.subtitle, ''),
-    description: asNonEmptyString(source.description, ''),
+    subtitle: maybeText(source.subtitle),
+    description: maybeText(source.description),
     accent: normalizeAccent(source.accent),
     tone: normalizeTone(source.tone),
     actionable: asBoolean(source.actionable, true),
   };
 }
 
-export function normalizeAttachmentKind(value: unknown): ChatUiAttachment['kind'] {
-  const next = asNonEmptyString(value).toLowerCase();
-  switch (next) {
-    case 'proof':
-    case 'image':
-    case 'system_card':
-    case 'deal_offer':
-    case 'legend':
-    case 'reward':
-      return next as ChatUiAttachment['kind'];
-    default:
-      return 'unknown';
-  }
-}
-
 export function createReaction(raw: unknown): ChatUiReaction {
   const source = asRecord(raw);
   return {
     id: asNonEmptyString(source.id, toId('reaction', source.label ?? source.emoji ?? 'reaction')),
-    emoji: asNonEmptyString(source.emoji, ''),
+    emoji: maybeText(source.emoji),
     label: asNonEmptyString(source.label, ''),
     count: asNumber(source.count, 0),
     selected: asBoolean(source.selected),
@@ -1825,61 +2022,29 @@ export function createCommandHint(raw: unknown): ChatUiCommandHint {
     id: asNonEmptyString(source.id, toId('command', source.command ?? source.label ?? 'command')),
     command: asNonEmptyString(source.command, ''),
     label: asNonEmptyString(source.label, ''),
-    description: asNonEmptyString(source.description, ''),
+    description: maybeText(source.description),
     tone: normalizeTone(source.tone),
   };
 }
 
-export function createMessageCard(raw: unknown): ChatUiMessageCardViewModel {
+export function createBodyModel(raw: unknown): ChatUiMessageBodyModel {
   const source = asRecord(raw);
-  const id = asNonEmptyString(source.id ?? source.messageId, toId('message', source.text ?? source.body ?? 'message'));
-  const sourceKind = normalizeSourceKind(source.sourceKind ?? source.source ?? source.authorType);
-  const threatSource = asRecord(source.threat);
-  const channelSource = asRecord(source.channel);
-  const tone = inferMessageTone(sourceKind, normalizeThreatBand(source.threatBand ?? threatSource.band));
-  const accent = inferMessageAccent(sourceKind, normalizeChannelKind(source.channelKind ?? channelSource.kind));
-  const proof = createProofMeta(source.proof ?? source);
-  const threat = createThreatMeta(source.threat ?? source);
-  const integrity = createIntegrityMeta(source.integrity ?? source);
-  const channel = createChannelMeta(source.channel ?? source);
+  const secondary = asArray(source.secondary).map((item) => createTextBlock(item, '', 'caption'));
+  const attachments = asArray(source.attachments).map(createAttachment);
+  const reactions = asArray(source.reactions).map(createReaction);
+  const commandHints = asArray(source.commandHints).map(createCommandHint);
 
   return {
-    id,
-    sceneId: asNonEmptyString(source.sceneId, ''),
-    runId: asNonEmptyString(source.runId, ''),
-    kind: normalizeMessageKind(source.kind),
-    author: createAuthorModel(source.author ?? source, inferAuthorFallbackName(sourceKind)),
-    body: createBodyModel(source.body ?? source),
-    meta: {
-      timestamp: createTimestampMeta(source.timestamp ?? source.createdAt ?? source.time),
-      proof,
-      threat,
-      integrity,
-      channel,
-      learning: createLearningMeta(source.learning),
-      chips: createChips(asArray(source.chips)),
-      badges: createBadges(asArray(source.badges)),
-    },
-    tone,
-    accent,
-    emphasis: inferMessageEmphasis(source),
-    displayIntent: inferDisplayIntent(sourceKind, threat?.band),
-    displayHints: {
-      ...CHAT_UI_DEFAULT_DISPLAY_HINTS,
-      highlighted: asBoolean(source.highlighted),
-      selectable: asBoolean(source.selectable),
-      truncateBody: asBoolean(source.truncateBody),
-      showLearningBadges: asBoolean(source.showLearningBadges),
-    },
-    selected: asBoolean(source.selected),
-    pinned: asBoolean(source.pinned),
-    unread: asBoolean(source.unread),
-    canReply: asBoolean(source.canReply, sourceKind !== 'system'),
-    canCopy: asBoolean(source.canCopy, true),
-    canInspectProof: asBoolean(source.canInspectProof, Boolean(proof)),
-    canJumpToCause: asBoolean(source.canJumpToCause, Boolean(proof?.causalParents && proof.causalParents.length > 0)),
-    canMutePersona: asBoolean(source.canMutePersona, sourceKind === 'helper' || sourceKind === 'hater' || sourceKind === 'ambient_npc'),
-    canEscalateModeration: asBoolean(source.canEscalateModeration, sourceKind === 'hater'),
+    primary: createTextBlock(
+      source.primary ?? source.body ?? source.text,
+      asNonEmptyString(source.text, ''),
+      'body',
+    ),
+    secondary: secondary.length > 0 ? secondary : undefined,
+    quote: createQuotePreview(source.quote),
+    attachments: attachments.length > 0 ? attachments : undefined,
+    reactions: reactions.length > 0 ? reactions : undefined,
+    commandHints: commandHints.length > 0 ? commandHints : undefined,
   };
 }
 
@@ -1911,7 +2076,9 @@ export function inferMessageTone(
   threatBand: ChatUiThreatBand,
 ): ChatUiTone {
   if (sourceKind === 'helper') return 'supportive';
-  if (sourceKind === 'hater') return threatBand === 'critical' || threatBand === 'catastrophic' ? 'danger' : 'hostile';
+  if (sourceKind === 'hater') {
+    return threatBand === 'critical' || threatBand === 'catastrophic' ? 'danger' : 'hostile';
+  }
   if (sourceKind === 'system') return 'premium';
   if (sourceKind === 'liveops') return 'dramatic';
   if (sourceKind === 'deal_room') return 'warning';
@@ -1955,22 +2122,120 @@ export function inferDisplayIntent(
   return 'default';
 }
 
+export function createMessageCard(raw: unknown): ChatUiMessageCardViewModel {
+  const source = asRecord(raw);
+  const id = asNonEmptyString(
+    source.id ?? source.messageId,
+    toId('message', source.text ?? source.body ?? 'message'),
+  );
+  const sourceKind = normalizeSourceKind(
+    source.sourceKind ?? source.source ?? source.authorType ?? asRecord(source.author).sourceKind,
+  );
+  const threatSource = asRecord(source.threat);
+  const channelSource = asRecord(source.channel);
+  const threatBand = normalizeThreatBand(source.threatBand ?? threatSource.band);
+  const channelKind = normalizeChannelKind(source.channelKind ?? channelSource.kind);
+  const tone = inferMessageTone(sourceKind, threatBand);
+  const accent = inferMessageAccent(sourceKind, channelKind);
+  const proof = createProofMeta(source.proof ?? source);
+  const threat = createThreatMeta(source.threat ?? source);
+  const integrity = createIntegrityMeta(source.integrity ?? source);
+  const channel = createChannelMeta(source.channel ?? source);
+  const chips = createChips(asArray(source.chips));
+  const badges = createBadges(asArray(source.badges));
+
+  return {
+    id,
+    sceneId: maybeText(source.sceneId),
+    runId: maybeText(source.runId),
+    kind: normalizeMessageKind(source.kind),
+    author: createAuthorModel(source.author ?? source, inferAuthorFallbackName(sourceKind)),
+    body: createBodyModel(source.body ?? source),
+    meta: {
+      timestamp: createTimestampMeta(source.timestamp ?? source.createdAt ?? source.time),
+      proof,
+      threat,
+      integrity,
+      channel,
+      learning: createLearningMeta(source.learning),
+      chips: chips.length > 0 ? chips : undefined,
+      badges: badges.length > 0 ? badges : undefined,
+    },
+    tone,
+    accent,
+    emphasis: inferMessageEmphasis(source),
+    displayIntent: inferDisplayIntent(sourceKind, threat?.band),
+    displayHints: {
+      ...CHAT_UI_DEFAULT_DISPLAY_HINTS,
+      highlighted: asBoolean(source.highlighted),
+      selectable: asBoolean(source.selectable),
+      truncateBody: asBoolean(source.truncateBody),
+      showLearningBadges: asBoolean(source.showLearningBadges),
+    },
+    selected: asBoolean(source.selected),
+    pinned: asBoolean(source.pinned),
+    unread: asBoolean(source.unread),
+    canReply: asBoolean(source.canReply, sourceKind !== 'system'),
+    canCopy: asBoolean(source.canCopy, true),
+    canInspectProof: asBoolean(source.canInspectProof, Boolean(proof)),
+    canJumpToCause: asBoolean(
+      source.canJumpToCause,
+      Boolean(proof?.causalParents && proof.causalParents.length > 0),
+    ),
+    canMutePersona: asBoolean(
+      source.canMutePersona,
+      sourceKind === 'helper' || sourceKind === 'hater' || sourceKind === 'ambient_npc',
+    ),
+    canEscalateModeration: asBoolean(source.canEscalateModeration, sourceKind === 'hater'),
+  };
+}
+
+export function createMetricDelta(raw: unknown): ChatUiMetricDelta | undefined {
+  const source = asRecord(raw);
+  const direction = asNonEmptyString(source.direction, '');
+  if (!direction) return undefined;
+
+  const normalizedDirection =
+    direction === 'up' || direction === 'down' || direction === 'flat' ? direction : 'flat';
+
+  return {
+    direction: normalizedDirection,
+    amount: maybeNumber(source.amount),
+    label: maybeText(source.label),
+  };
+}
+
+export function createMetric(raw: unknown, index = 0): ChatUiMetric {
+  const source = asRecord(raw);
+  return {
+    id: asNonEmptyString(source.id, `metric:${index}`),
+    label: asNonEmptyString(source.label, 'Metric'),
+    value: asNonEmptyString(source.value, '0'),
+    rawValue: maybeNumber(source.rawValue),
+    tone: normalizeTone(source.tone),
+    accent: normalizeAccent(source.accent),
+    importance: normalizeImportance(source.importance),
+    delta: createMetricDelta(source.delta),
+    tooltip: maybeText(source.tooltip),
+  };
+}
+
 export function createChips(values: readonly unknown[]): ChatUiChip[] {
   return values.map((raw, index) => {
     const source = asRecord(raw);
     return {
       id: asNonEmptyString(source.id, `chip:${index}`),
       label: asNonEmptyString(source.label, 'Chip'),
-      shortLabel: asNonEmptyString(source.shortLabel, ''),
-      icon: asNonEmptyString(source.icon, ''),
+      shortLabel: maybeText(source.shortLabel),
+      icon: maybeText(source.icon),
       tone: normalizeTone(source.tone),
       accent: normalizeAccent(source.accent),
-      emphasis: asNonEmptyString(source.emphasis, 'standard') as ChatUiEmphasis,
-      importance: asNonEmptyString(source.importance, 'normal') as ChatUiImportance,
+      emphasis: normalizeEmphasis(source.emphasis),
+      importance: normalizeImportance(source.importance),
       active: asBoolean(source.active),
       disabled: asBoolean(source.disabled),
-      tooltip: asNonEmptyString(source.tooltip, ''),
-      count: asNumber(source.count, 0) || undefined,
+      tooltip: maybeText(source.tooltip),
+      count: maybeNumber(source.count),
     };
   });
 }
@@ -1982,34 +2247,15 @@ export function createBadges(values: readonly unknown[]): ChatUiBadge[] {
       id: asNonEmptyString(source.id, `badge:${index}`),
       kind: normalizeBadgeKind(source.kind),
       label: asNonEmptyString(source.label, 'Badge'),
-      shortLabel: asNonEmptyString(source.shortLabel, ''),
-      icon: asNonEmptyString(source.icon, ''),
+      shortLabel: maybeText(source.shortLabel),
+      icon: maybeText(source.icon),
       tone: normalizeTone(source.tone),
       accent: normalizeAccent(source.accent),
-      importance: asNonEmptyString(source.importance, 'normal') as ChatUiImportance,
-      tooltip: asNonEmptyString(source.tooltip, ''),
-      emphasis: asNonEmptyString(source.emphasis, 'standard') as ChatUiEmphasis,
+      importance: normalizeImportance(source.importance),
+      tooltip: maybeText(source.tooltip),
+      emphasis: normalizeEmphasis(source.emphasis),
     };
   });
-}
-
-export function normalizeBadgeKind(value: unknown): ChatUiBadge['kind'] {
-  const next = asNonEmptyString(value).toLowerCase();
-  switch (next) {
-    case 'proof':
-    case 'threat':
-    case 'integrity':
-    case 'helper':
-    case 'hater':
-    case 'system':
-    case 'presence':
-    case 'legend':
-    case 'reward':
-    case 'channel':
-      return next as ChatUiBadge['kind'];
-    default:
-      return 'custom';
-  }
 }
 
 /* ========================================================================== *
@@ -2026,13 +2272,21 @@ export interface BuildFeedOptions {
   typingEntities?: ChatUiTypingEntity[];
 }
 
+export function buildTypingLabel(entities: readonly ChatUiTypingEntity[]): UIString {
+  const names = entities.map((entity) => entity.label).filter(Boolean);
+  if (names.length === 0) return '';
+  if (names.length === 1) return `${names[0]} is typing…`;
+  if (names.length === 2) return `${names[0]} and ${names[1]} are typing…`;
+  return `${names[0]}, ${names[1]}, and ${names.length - 2} more are typing…`;
+}
+
 export function buildFeedViewModel(
   rawMessages: readonly unknown[],
   options: BuildFeedOptions = {},
 ): ChatUiFeedViewModel {
-  const messages = rawMessages.map(createMessageCard).filter((msg) => {
+  const messages = rawMessages.map(createMessageCard).filter((message) => {
     if (!options.channelId) return true;
-    return msg.meta.channel?.channelId === options.channelId;
+    return message.meta.channel?.channelId === options.channelId;
   });
 
   const sorted = [...messages].sort((a, b) => {
@@ -2043,6 +2297,7 @@ export function buildFeedViewModel(
 
   const rows: ChatUiFeedRow[] = [];
   let lastBucketKey = '';
+  const unreadCount = sorted.filter((entry) => entry.unread).length;
 
   sorted.forEach((message) => {
     const bucketKey = message.meta.timestamp.bucketKey ?? 'unknown';
@@ -2065,7 +2320,7 @@ export function buildFeedViewModel(
         id: `unread-break:${message.id}`,
         kind: 'unread_break',
         label: 'Unread',
-        unreadCount: sorted.filter((entry) => entry.unread).length,
+        unreadCount,
       });
     }
 
@@ -2082,12 +2337,12 @@ export function buildFeedViewModel(
       kind: 'typing_cluster',
       entities: [...options.typingEntities],
       label: buildTypingLabel(options.typingEntities),
-      tone: 'neutral',
+      tone: options.typingEntities.some((entry) => entry.sourceKind === 'hater') ? 'danger' : 'neutral',
     });
   }
 
-  return {
-    groups: [{
+  const groups: ChatUiFeedGroup[] = [
+    {
       id: `group:${options.channelId ?? 'all'}`,
       label: options.channelId ?? 'All',
       channelId: options.channelId,
@@ -2095,22 +2350,18 @@ export function buildFeedViewModel(
       rows,
       firstTimestamp: sorted[0]?.meta.timestamp.unixMs,
       lastTimestamp: sorted[sorted.length - 1]?.meta.timestamp.unixMs,
-    }],
+    },
+  ];
+
+  return {
+    groups,
     flatRows: rows,
     hasOlder: false,
     hasNewer: false,
-    unreadCount: sorted.filter((entry) => entry.unread).length,
+    unreadCount,
     newestMessageId: sorted[sorted.length - 1]?.id,
     oldestMessageId: sorted[0]?.id,
   };
-}
-
-export function buildTypingLabel(entities: readonly ChatUiTypingEntity[]): UIString {
-  const names = entities.map((entity) => entity.label).filter(Boolean);
-  if (names.length === 0) return '';
-  if (names.length === 1) return `${names[0]} is typing…`;
-  if (names.length === 2) return `${names[0]} and ${names[1]} are typing…`;
-  return `${names[0]}, ${names[1]}, and ${names.length - 2} more are typing…`;
 }
 
 /* ========================================================================== *
@@ -2124,60 +2375,27 @@ export interface BuildChannelTabsOptions {
   availableChannelIds?: readonly ChatUiChannelId[];
 }
 
-export function buildChannelTabsViewModel(
-  rawChannels: readonly unknown[],
-  options: BuildChannelTabsOptions = {},
-): ChatUiChannelTabsViewModel {
-  const lockedSet = new Set(options.lockedChannelIds ?? []);
-  const availableSet = new Set(options.availableChannelIds ?? []);
-
-  const tabs = rawChannels.map((raw, index) => {
-    const source = asRecord(raw);
-    const id = asNonEmptyString(source.channelId ?? source.id, `channel:${index}`);
-    const kind = normalizeChannelKind(source.channelKind ?? source.kind);
-    const label = asNonEmptyString(source.label ?? source.channelLabel, labelForChannelKind(kind));
-
-    return {
-      id,
-      kind,
-      label,
-      shortLabel: asNonEmptyString(source.shortLabel, ''),
-      subtitle: asNonEmptyString(source.subtitle, ''),
-      icon: asNonEmptyString(source.icon, ''),
-      tone: inferChannelTone(kind),
-      accent: inferChannelAccent(kind),
-      active: id === options.activeChannelId,
-      available: availableSet.size === 0 ? true : availableSet.has(id),
-      locked: lockedSet.has(id),
-      recommended: id === options.recommendedChannelId,
-      counts: {
-        unread: asNumber(source.unread, 0) || undefined,
-        unseenMentions: asNumber(source.unseenMentions, 0) || undefined,
-        participantCount: asNumber(source.participantCount, 0) || undefined,
-        threatCount: asNumber(source.threatCount, 0) || undefined,
-      },
-      heat: createChannelTabHeat(source.heat ?? source),
-      tooltip: asNonEmptyString(source.tooltip, ''),
-    } satisfies ChatUiChannelTabViewModel;
-  });
-
-  return {
-    tabs,
-    activeChannelId: options.activeChannelId ?? tabs.find((tab) => tab.active)?.id,
-  };
-}
-
-export function createChannelTabHeat(raw: unknown): ChatUiChannelTabHeat | undefined {
-  const source = asRecord(raw);
-  const label = asNonEmptyString(source.label ?? source.heatLabel, '');
-  const score = asNumber(source.score ?? source.heatScore, 0);
-  if (!label && score <= 0) return undefined;
-  return {
-    label,
-    score: score || undefined,
-    tone: normalizeTone(source.tone),
-    accent: normalizeAccent(source.accent),
-  };
+export function labelForChannelKind(kind: ChatUiChannelKind): UIString {
+  switch (kind) {
+    case 'global':
+      return 'Global';
+    case 'syndicate':
+      return 'Syndicate';
+    case 'deal_room':
+      return 'Deal Room';
+    case 'lobby':
+      return 'Lobby';
+    case 'system':
+      return 'System';
+    case 'shadow':
+      return 'Shadow';
+    case 'direct':
+      return 'Direct';
+    case 'spectator':
+      return 'Spectator';
+    default:
+      return 'Unknown';
+  }
 }
 
 export function inferChannelTone(kind: ChatUiChannelKind): ChatUiTone {
@@ -2220,32 +2438,90 @@ export function inferChannelAccent(kind: ChatUiChannelKind): ChatUiAccent {
   }
 }
 
-export function labelForChannelKind(kind: ChatUiChannelKind): UIString {
-  switch (kind) {
-    case 'global':
-      return 'Global';
-    case 'syndicate':
-      return 'Syndicate';
-    case 'deal_room':
-      return 'Deal Room';
-    case 'lobby':
-      return 'Lobby';
-    case 'system':
-      return 'System';
-    case 'shadow':
-      return 'Shadow';
-    case 'direct':
-      return 'Direct';
-    case 'spectator':
-      return 'Spectator';
-    default:
-      return 'Unknown';
-  }
+export function createChannelTabHeat(raw: unknown): ChatUiChannelTabHeat | undefined {
+  const source = asRecord(raw);
+  const label = asNonEmptyString(source.label ?? source.heatLabel, '');
+  const score = maybeNumber(source.score ?? source.heatScore);
+  if (!label && score === undefined) return undefined;
+
+  return {
+    label: label || undefined,
+    score,
+    tone: normalizeTone(source.tone),
+    accent: normalizeAccent(source.accent),
+  };
+}
+
+export function buildChannelTabsViewModel(
+  rawChannels: readonly unknown[],
+  options: BuildChannelTabsOptions = {},
+): ChatUiChannelTabsViewModel {
+  const lockedSet = new Set(options.lockedChannelIds ?? []);
+  const availableSet = new Set(options.availableChannelIds ?? []);
+
+  const tabs = rawChannels.map((raw, index) => {
+    const source = asRecord(raw);
+    const id = asNonEmptyString(source.channelId ?? source.id, `channel:${index}`);
+    const kind = normalizeChannelKind(source.channelKind ?? source.kind);
+    const label = asNonEmptyString(source.label ?? source.channelLabel, labelForChannelKind(kind));
+    const unread = maybeNumber(source.unread);
+    const unseenMentions = maybeNumber(source.unseenMentions);
+    const participantCount = maybeNumber(source.participantCount);
+    const threatCount = maybeNumber(source.threatCount);
+
+    return {
+      id,
+      kind,
+      label,
+      shortLabel: maybeText(source.shortLabel),
+      subtitle: maybeText(source.subtitle),
+      icon: maybeText(source.icon),
+      tone: inferChannelTone(kind),
+      accent: inferChannelAccent(kind),
+      active: id === options.activeChannelId,
+      available: availableSet.size === 0 ? true : availableSet.has(id),
+      locked: lockedSet.has(id),
+      recommended: id === options.recommendedChannelId,
+      counts:
+        unread !== undefined ||
+        unseenMentions !== undefined ||
+        participantCount !== undefined ||
+        threatCount !== undefined
+          ? {
+              unread,
+              unseenMentions,
+              participantCount,
+              threatCount,
+            }
+          : undefined,
+      heat: createChannelTabHeat(source.heat ?? source),
+      tooltip: maybeText(source.tooltip),
+    } satisfies ChatUiChannelTabViewModel;
+  });
+
+  return {
+    tabs,
+    activeChannelId: options.activeChannelId ?? tabs.find((tab) => tab.active)?.id,
+  };
 }
 
 /* ========================================================================== *
  * Section 22 — Presence, typing, invasion, threat builders
  * ========================================================================== */
+
+export function inferPresenceTone(actor: ChatUiAuthorModel): ChatUiTone {
+  if (actor.sourceKind === 'helper') return 'supportive';
+  if (actor.sourceKind === 'hater') return 'hostile';
+  if (actor.sourceKind === 'system') return 'premium';
+  return 'neutral';
+}
+
+export function inferPresenceAccent(actor: ChatUiAuthorModel): ChatUiAccent {
+  if (actor.sourceKind === 'helper') return 'emerald';
+  if (actor.sourceKind === 'hater') return 'red';
+  if (actor.sourceKind === 'spectator') return 'violet';
+  return 'slate';
+}
 
 export function buildPresenceStripViewModel(rawActors: readonly unknown[]): ChatUiPresenceStripViewModel {
   const chips = rawActors.map((raw, index) => {
@@ -2272,32 +2548,20 @@ export function buildPresenceStripViewModel(rawActors: readonly unknown[]): Chat
   };
 }
 
-export function inferPresenceTone(actor: ChatUiAuthorModel): ChatUiTone {
-  if (actor.sourceKind === 'helper') return 'supportive';
-  if (actor.sourceKind === 'hater') return 'hostile';
-  if (actor.sourceKind === 'system') return 'premium';
-  return 'neutral';
-}
-
-export function inferPresenceAccent(actor: ChatUiAuthorModel): ChatUiAccent {
-  if (actor.sourceKind === 'helper') return 'emerald';
-  if (actor.sourceKind === 'hater') return 'red';
-  if (actor.sourceKind === 'spectator') return 'violet';
-  return 'slate';
-}
-
 export function buildTypingIndicatorViewModel(rawActors: readonly unknown[]): ChatUiTypingIndicatorViewModel {
-  const entities = rawActors.map((raw, index) => {
-    const source = asRecord(raw);
-    return {
-      id: asNonEmptyString(source.id, `typing:${index}`),
-      label: asNonEmptyString(source.label ?? source.displayName ?? source.name, `Actor ${index + 1}`),
-      sourceKind: normalizeSourceKind(source.sourceKind ?? source.kind),
-      typingState: normalizeTypingState(source.typingState ?? source.state),
-      accent: normalizeAccent(source.accent),
-      roleLabel: asNonEmptyString(source.roleLabel, ''),
-    } satisfies ChatUiTypingEntity;
-  }).filter((entry) => entry.typingState !== 'not_typing');
+  const entities = rawActors
+    .map((raw, index) => {
+      const source = asRecord(raw);
+      return {
+        id: asNonEmptyString(source.id, `typing:${index}`),
+        label: asNonEmptyString(source.label ?? source.displayName ?? source.name, `Actor ${index + 1}`),
+        sourceKind: normalizeSourceKind(source.sourceKind ?? source.kind),
+        typingState: normalizeTypingState(source.typingState ?? source.state),
+        accent: normalizeAccent(source.accent),
+        roleLabel: maybeText(source.roleLabel),
+      } satisfies ChatUiTypingEntity;
+    })
+    .filter((entry) => entry.typingState !== 'not_typing');
 
   return {
     entities,
@@ -2309,33 +2573,12 @@ export function buildTypingIndicatorViewModel(rawActors: readonly unknown[]): Ch
   };
 }
 
-export function buildInvasionBannerViewModel(raw: unknown): ChatUiInvasionBannerViewModel | undefined {
-  const source = asRecord(raw);
-  if (Object.keys(source).length === 0) return undefined;
-
-  return {
-    id: asNonEmptyString(source.id, 'invasion:active'),
-    active: asBoolean(source.active, true),
-    title: asNonEmptyString(source.title, 'Invasion'),
-    subtitle: asNonEmptyString(source.subtitle, ''),
-    summary: asNonEmptyString(source.summary, ''),
-    band: normalizeThreatBand(source.band ?? source.threatBand),
-    tone: normalizeTone(source.tone || 'dramatic'),
-    accent: normalizeAccent(source.accent || 'red'),
-    countdownLabel: asNonEmptyString(source.countdownLabel, ''),
-    sourceLabel: asNonEmptyString(source.sourceLabel, ''),
-    targetLabel: asNonEmptyString(source.targetLabel, ''),
-    actions: asArray(source.actions).map(createInvasionAction),
-    chips: createChips(asArray(source.chips)),
-  };
-}
-
 export function createInvasionAction(raw: unknown): ChatUiInvasionAction {
   const source = asRecord(raw);
   return {
     id: asNonEmptyString(source.id, toId('invasion-action', source.label ?? 'action')),
     label: asNonEmptyString(source.label, 'Action'),
-    icon: asNonEmptyString(source.icon, ''),
+    icon: maybeText(source.icon),
     tone: normalizeTone(source.tone),
     accent: normalizeAccent(source.accent),
     available: asBoolean(source.available, true),
@@ -2343,18 +2586,26 @@ export function createInvasionAction(raw: unknown): ChatUiInvasionAction {
   };
 }
 
-export function buildThreatMeterViewModel(raw: unknown): ChatUiThreatMeterViewModel {
+export function buildInvasionBannerViewModel(raw: unknown): ChatUiInvasionBannerViewModel | undefined {
   const source = asRecord(raw);
-  const cards = asArray(source.cards).map(createThreatCard);
+  if (Object.keys(source).length === 0) return undefined;
+  const actions = asArray(source.actions).map(createInvasionAction);
+  const chips = createChips(asArray(source.chips));
 
   return {
+    id: asNonEmptyString(source.id, 'invasion:active'),
+    active: asBoolean(source.active, true),
+    title: asNonEmptyString(source.title, 'Invasion'),
+    subtitle: maybeText(source.subtitle),
+    summary: maybeText(source.summary),
     band: normalizeThreatBand(source.band ?? source.threatBand),
-    label: asNonEmptyString(source.label, threatLabelForBand(normalizeThreatBand(source.band ?? source.threatBand))),
-    summary: asNonEmptyString(source.summary, ''),
-    cards,
-    dominantThreatLabel: asNonEmptyString(source.dominantThreatLabel, ''),
-    recommendationLabel: asNonEmptyString(source.recommendationLabel, ''),
-    confidenceLabel: asNonEmptyString(source.confidenceLabel, ''),
+    tone: normalizeTone(source.tone || 'dramatic'),
+    accent: normalizeAccent(source.accent || 'red'),
+    countdownLabel: maybeText(source.countdownLabel),
+    sourceLabel: maybeText(source.sourceLabel),
+    targetLabel: maybeText(source.targetLabel),
+    actions: actions.length > 0 ? actions : undefined,
+    chips: chips.length > 0 ? chips : undefined,
   };
 }
 
@@ -2367,7 +2618,7 @@ export function createThreatCard(raw: unknown, index = 0): ChatUiThreatCardViewM
     band: normalizeThreatBand(source.band),
     tone: normalizeTone(source.tone),
     accent: normalizeAccent(source.accent),
-    subtitle: asNonEmptyString(source.subtitle, ''),
+    subtitle: maybeText(source.subtitle),
     trend: createMetricDelta(source.trend),
   };
 }
@@ -2391,45 +2642,25 @@ export function threatLabelForBand(band: ChatUiThreatBand): UIString {
   }
 }
 
-export function createMetricDelta(raw: unknown): ChatUiMetricDelta | undefined {
+export function buildThreatMeterViewModel(raw: unknown): ChatUiThreatMeterViewModel {
   const source = asRecord(raw);
-  const direction = asNonEmptyString(source.direction, '');
-  if (!direction) return undefined;
-  const normalizedDirection =
-    direction === 'up' || direction === 'down' || direction === 'flat'
-      ? direction
-      : 'flat';
+  const cards = asArray(source.cards).map(createThreatCard);
+  const band = normalizeThreatBand(source.band ?? source.threatBand);
 
   return {
-    direction: normalizedDirection,
-    amount: asNumber(source.amount, 0) || undefined,
-    label: asNonEmptyString(source.label, ''),
+    band,
+    label: asNonEmptyString(source.label, threatLabelForBand(band)),
+    summary: maybeText(source.summary),
+    cards,
+    dominantThreatLabel: maybeText(source.dominantThreatLabel),
+    recommendationLabel: maybeText(source.recommendationLabel),
+    confidenceLabel: maybeText(source.confidenceLabel),
   };
 }
 
 /* ========================================================================== *
  * Section 23 — Helper prompt, collapsed pill, room header, empty state
  * ========================================================================== */
-
-export function buildHelperPromptViewModel(raw: unknown): ChatUiHelperPromptViewModel | undefined {
-  const source = asRecord(raw);
-  if (Object.keys(source).length === 0) return undefined;
-
-  return {
-    id: asNonEmptyString(source.id, 'helper-prompt'),
-    visible: asBoolean(source.visible, true),
-    mode: normalizeHelperMode(source.mode),
-    helperLabel: asNonEmptyString(source.helperLabel, 'Helper'),
-    title: asNonEmptyString(source.title, 'Suggested move'),
-    body: asNonEmptyString(source.body, ''),
-    summary: asNonEmptyString(source.summary, ''),
-    tone: normalizeTone(source.tone || 'supportive'),
-    accent: normalizeAccent(source.accent || 'emerald'),
-    actions: asArray(source.actions).map(createHelperPromptAction),
-    chips: createChips(asArray(source.chips)),
-    urgency: normalizeUrgency(source.urgency),
-  };
-}
 
 export function createHelperPromptAction(raw: unknown): ChatUiHelperPromptAction {
   const source = asRecord(raw);
@@ -2440,52 +2671,114 @@ export function createHelperPromptAction(raw: unknown): ChatUiHelperPromptAction
     accent: normalizeAccent(source.accent),
     primary: asBoolean(source.primary),
     destructive: asBoolean(source.destructive),
+    description: maybeText(source.description),
+    hotkeyHint: maybeText(source.hotkeyHint),
+    disabled: asBoolean(source.disabled),
+    blockedReason: maybeText(source.blockedReason),
   };
 }
 
-export function normalizeHelperMode(value: unknown): ChatUiHelperMode {
-  const next = asNonEmptyString(value).toLowerCase();
-  switch (next) {
-    case 'soft':
-    case 'standard':
-    case 'blunt':
-    case 'rescue':
-    case 'mentor':
-    case 'strategic':
-      return next as ChatUiHelperMode;
-    default:
-      return 'standard';
-  }
+export function createHelperPromptActor(raw: unknown): ChatUiHelperPromptActor | undefined {
+  const source = asRecord(raw);
+  const displayName = asNonEmptyString(source.displayName ?? source.name, '');
+  if (!displayName) return undefined;
+
+  return {
+    id: asNonEmptyString(source.id, toId('helper-actor', displayName)),
+    displayName,
+    roleLabel: maybeText(source.roleLabel),
+    initials: maybeText(source.initials),
+  };
 }
 
-export function normalizeUrgency(value: unknown): ChatUiUrgency {
-  const next = asNonEmptyString(value).toLowerCase();
-  switch (next) {
-    case 'low':
-    case 'medium':
-    case 'high':
-    case 'immediate':
-      return next as ChatUiUrgency;
-    default:
-      return 'idle';
-  }
+export function createHelperPromptChannel(raw: unknown): ChatUiHelperPromptChannel | undefined {
+  const source = asRecord(raw);
+  const id = asNonEmptyString(source.id ?? source.channelId, '');
+  const label = asNonEmptyString(source.label ?? source.channelLabel, '');
+  if (!id && !label) return undefined;
+
+  return {
+    id: id || toId('channel', label || 'helper'),
+    label: label || 'Channel',
+    openable: asBoolean(source.openable, true),
+  };
 }
 
-export function buildCollapsedPillViewModel(raw: unknown): ChatUiCollapsedPillViewModel {
+export function createHelperPromptPresentation(raw: unknown): ChatUiHelperPromptPresentation | undefined {
+  const source = asRecord(raw);
+  if (Object.keys(source).length === 0) return undefined;
+
+  return {
+    severity: normalizeTone(source.severity ?? source.tone),
+    density: normalizeDensity(source.density),
+    intentLabel: maybeText(source.intentLabel),
+    toneLabel: maybeText(source.toneLabel),
+    accentHex: maybeText(source.accentHex),
+  };
+}
+
+export function createHelperPromptEvidence(raw: unknown, index = 0): ChatUiHelperPromptEvidence {
   const source = asRecord(raw);
   return {
-    id: asNonEmptyString(source.id, 'chat-collapsed-pill'),
-    label: asNonEmptyString(source.label, 'Chat'),
-    shortLabel: asNonEmptyString(source.shortLabel, ''),
-    unreadCount: asNumber(source.unreadCount, 0) || undefined,
-    threatBand: normalizeThreatBand(source.threatBand),
-    typingCount: asNumber(source.typingCount, 0) || undefined,
-    helperVisible: asBoolean(source.helperVisible),
-    invasionActive: asBoolean(source.invasionActive),
-    accent: normalizeAccent(source.accent || inferCollapsedAccent(source)),
-    tone: normalizeTone(source.tone || inferCollapsedTone(source)),
-    expanded: asBoolean(source.expanded),
-    tooltip: asNonEmptyString(source.tooltip, ''),
+    id: asNonEmptyString(source.id, `helper-evidence:${index}`),
+    label: asNonEmptyString(source.label, 'Evidence'),
+    value: asNonEmptyString(source.value, 'N/A'),
+    caption: maybeText(source.caption),
+    tone: normalizeTone(source.tone),
+  };
+}
+
+export function buildHelperPromptViewModel(raw: unknown): ChatUiHelperPromptViewModel | undefined {
+  const source = asRecord(raw);
+  if (Object.keys(source).length === 0) return undefined;
+
+  const presentationSource = asRecord(source.presentation);
+  const actorSource = asRecord(source.actor);
+  const channelSource = asRecord(source.channel);
+  const stateSource = asRecord(source.state);
+
+  const actions = asArray(source.actions).map(createHelperPromptAction);
+  const chips = createChips(asArray(source.chips ?? source.badges));
+  const metrics = asArray(source.metrics).map(createMetric);
+  const evidence = asArray(source.evidence).map(createHelperPromptEvidence);
+
+  const title = asNonEmptyString(source.title ?? asRecord(source.copy).title, 'Suggested move');
+  const body = asNonEmptyString(
+    source.body ?? asRecord(source.copy).body,
+    'A helper assist is available, but the shell has not received final copy yet.',
+  );
+
+  return {
+    id: asNonEmptyString(source.id, 'helper-prompt'),
+    visible: asBoolean(source.visible, Boolean(title || body)),
+    mode: normalizeHelperMode(source.mode),
+    helperLabel: asNonEmptyString(source.helperLabel ?? actorSource.displayName, 'Helper'),
+    title,
+    body,
+    summary: maybeText(source.summary ?? asRecord(source.copy).tacticalSummary),
+    tone: normalizeTone(source.tone || presentationSource.severity || 'supportive'),
+    accent: normalizeAccent(source.accent || 'emerald'),
+    actions: actions.length > 0 ? actions : undefined,
+    chips: chips.length > 0 ? chips : undefined,
+    urgency: normalizeUrgency(source.urgency),
+    dismissible: asBoolean(source.dismissible, true),
+    actor: createHelperPromptActor(actorSource),
+    channel: createHelperPromptChannel(channelSource),
+    presentation: createHelperPromptPresentation({
+      severity: presentationSource.severity ?? source.tone,
+      density: presentationSource.density,
+      intentLabel: presentationSource.intentLabel ?? source.intentLabel,
+      toneLabel: presentationSource.toneLabel,
+      accentHex: presentationSource.accentHex,
+    }),
+    metrics: metrics.length > 0 ? metrics : undefined,
+    evidence: evidence.length > 0 ? evidence : undefined,
+    rescueCritical: asBoolean(stateSource.rescueCritical ?? source.rescueCritical),
+    escalated: asBoolean(stateSource.escalated ?? source.escalated),
+    sticky: asBoolean(stateSource.sticky ?? source.sticky),
+    unreadCountHint: maybeNumber(stateSource.unreadCountHint ?? source.unreadCountHint),
+    footerNote: maybeText(asRecord(source.copy).footerNote ?? source.footerNote),
+    provenanceNote: maybeText(asRecord(source.copy).provenanceNote ?? source.provenanceNote),
   };
 }
 
@@ -2502,38 +2795,21 @@ export function inferCollapsedTone(source: UnknownRecord): ChatUiTone {
   return 'neutral';
 }
 
-export function buildRoomHeaderViewModel(raw: unknown): ChatUiRoomHeaderViewModel {
-  const source = asRecord(raw);
-  const kind = normalizeChannelKind(source.channelKind ?? source.kind);
-  return {
-    roomId: asNonEmptyString(source.roomId, ''),
-    roomLabel: asNonEmptyString(source.roomLabel ?? source.label, 'Chat Room'),
-    roomSubtitle: asNonEmptyString(source.roomSubtitle ?? source.subtitle, ''),
-    channelLabel: asNonEmptyString(source.channelLabel, labelForChannelKind(kind)),
-    channelKind: kind,
-    roomTone: normalizeTone(source.roomTone),
-    roomAccent: normalizeAccent(source.roomAccent || inferChannelAccent(kind)),
-    chips: createChips(asArray(source.chips)),
-    metrics: asArray(source.metrics).map(createMetric),
-    actions: asArray(source.actions).map(createHeaderAction),
-    audienceHeatLabel: asNonEmptyString(source.audienceHeatLabel, ''),
-    reputationLabel: asNonEmptyString(source.reputationLabel, ''),
-    integrityLabel: asNonEmptyString(source.integrityLabel, ''),
-  };
-}
-
-export function createMetric(raw: unknown, index = 0): ChatUiMetric {
+export function buildCollapsedPillViewModel(raw: unknown): ChatUiCollapsedPillViewModel {
   const source = asRecord(raw);
   return {
-    id: asNonEmptyString(source.id, `metric:${index}`),
-    label: asNonEmptyString(source.label, 'Metric'),
-    value: asNonEmptyString(source.value, '0'),
-    rawValue: asNumber(source.rawValue, 0) || undefined,
-    tone: normalizeTone(source.tone),
-    accent: normalizeAccent(source.accent),
-    importance: asNonEmptyString(source.importance, 'normal') as ChatUiImportance,
-    delta: createMetricDelta(source.delta),
-    tooltip: asNonEmptyString(source.tooltip, ''),
+    id: asNonEmptyString(source.id, 'chat-collapsed-pill'),
+    label: asNonEmptyString(source.label, 'Chat'),
+    shortLabel: maybeText(source.shortLabel),
+    unreadCount: maybeNumber(source.unreadCount),
+    threatBand: normalizeThreatBand(source.threatBand),
+    typingCount: maybeNumber(source.typingCount),
+    helperVisible: asBoolean(source.helperVisible),
+    invasionActive: asBoolean(source.invasionActive),
+    accent: normalizeAccent(source.accent || inferCollapsedAccent(source)),
+    tone: normalizeTone(source.tone || inferCollapsedTone(source)),
+    expanded: asBoolean(source.expanded),
+    tooltip: maybeText(source.tooltip),
   };
 }
 
@@ -2542,7 +2818,7 @@ export function createHeaderAction(raw: unknown): ChatUiRoomHeaderAction {
   return {
     id: asNonEmptyString(source.id, toId('header-action', source.label ?? 'action')),
     label: asNonEmptyString(source.label, 'Action'),
-    icon: asNonEmptyString(source.icon, ''),
+    icon: maybeText(source.icon),
     tone: normalizeTone(source.tone),
     accent: normalizeAccent(source.accent),
     primary: asBoolean(source.primary),
@@ -2550,38 +2826,28 @@ export function createHeaderAction(raw: unknown): ChatUiRoomHeaderAction {
   };
 }
 
-export function buildEmptyStateViewModel(raw: unknown): ChatUiEmptyStateViewModel {
+export function buildRoomHeaderViewModel(raw: unknown): ChatUiRoomHeaderViewModel {
   const source = asRecord(raw);
-  const kind = normalizeEmptyStateKind(source.kind);
-  return {
-    id: asNonEmptyString(source.id, `empty:${kind}`),
-    kind,
-    title: asNonEmptyString(source.title, emptyStateTitle(kind)),
-    body: asNonEmptyString(source.body, emptyStateBody(kind)),
-    hint: asNonEmptyString(source.hint, ''),
-    tone: normalizeTone(source.tone || emptyStateTone(kind)),
-    accent: normalizeAccent(source.accent || emptyStateAccent(kind)),
-    actions: asArray(source.actions).map(createHeaderAction),
-    chips: createChips(asArray(source.chips)),
-  };
-}
+  const kind = normalizeChannelKind(source.channelKind ?? source.kind);
+  const chips = createChips(asArray(source.chips));
+  const metrics = asArray(source.metrics).map(createMetric);
+  const actions = asArray(source.actions).map(createHeaderAction);
 
-export function normalizeEmptyStateKind(value: unknown): ChatUiEmptyStateKind {
-  const next = asNonEmptyString(value).toLowerCase();
-  switch (next) {
-    case 'cold_start':
-    case 'quiet_room':
-    case 'loading':
-    case 'filtered_empty':
-    case 'channel_locked':
-    case 'shadow_only':
-    case 'connection_lost':
-    case 'post_run_reset':
-    case 'error':
-      return next as ChatUiEmptyStateKind;
-    default:
-      return 'quiet_room';
-  }
+  return {
+    roomId: maybeText(source.roomId),
+    roomLabel: asNonEmptyString(source.roomLabel ?? source.label, 'Chat Room'),
+    roomSubtitle: maybeText(source.roomSubtitle ?? source.subtitle),
+    channelLabel: asNonEmptyString(source.channelLabel, labelForChannelKind(kind)),
+    channelKind: kind,
+    roomTone: normalizeTone(source.roomTone),
+    roomAccent: normalizeAccent(source.roomAccent || inferChannelAccent(kind)),
+    chips: chips.length > 0 ? chips : undefined,
+    metrics: metrics.length > 0 ? metrics : undefined,
+    actions: actions.length > 0 ? actions : undefined,
+    audienceHeatLabel: maybeText(source.audienceHeatLabel),
+    reputationLabel: maybeText(source.reputationLabel),
+    integrityLabel: maybeText(source.integrityLabel),
+  };
 }
 
 export function emptyStateTitle(kind: ChatUiEmptyStateKind): UIString {
@@ -2665,44 +2931,28 @@ export function emptyStateAccent(kind: ChatUiEmptyStateKind): ChatUiAccent {
   }
 }
 
-/* ========================================================================== *
- * Section 24 — Transcript drawer builders
- * ========================================================================== */
-
-export function buildTranscriptDrawerViewModel(raw: unknown): ChatUiTranscriptDrawerViewModel {
+export function buildEmptyStateViewModel(raw: unknown): ChatUiEmptyStateViewModel {
   const source = asRecord(raw);
+  const kind = normalizeEmptyStateKind(source.kind);
+  const actions = asArray(source.actions).map(createHeaderAction);
+  const chips = createChips(asArray(source.chips));
+
   return {
-    open: asBoolean(source.open),
-    title: asNonEmptyString(source.title, 'Transcript'),
-    subtitle: asNonEmptyString(source.subtitle, ''),
-    scope: normalizeSearchScope(source.scope),
-    query: asNonEmptyString(source.query, ''),
-    filters: asArray(source.filters).map(createDrawerFilter),
-    results: asArray(source.results).map(createTranscriptSearchResult),
-    selected: createDrawerSelection(source.selected),
-    summaryMetrics: asArray(source.summaryMetrics).map(createMetric),
-    exportReady: asBoolean(source.exportReady),
-    canSearch: asBoolean(source.canSearch, true),
-    canExport: asBoolean(source.canExport),
-    emptyState: source.emptyState ? buildEmptyStateViewModel(source.emptyState) : undefined,
+    id: asNonEmptyString(source.id, `empty:${kind}`),
+    kind,
+    title: asNonEmptyString(source.title, emptyStateTitle(kind)),
+    body: asNonEmptyString(source.body, emptyStateBody(kind)),
+    hint: maybeText(source.hint),
+    tone: normalizeTone(source.tone || emptyStateTone(kind)),
+    accent: normalizeAccent(source.accent || emptyStateAccent(kind)),
+    actions: actions.length > 0 ? actions : undefined,
+    chips: chips.length > 0 ? chips : undefined,
   };
 }
 
-export function normalizeSearchScope(value: unknown): ChatUiSearchScope {
-  const next = asNonEmptyString(value).toLowerCase();
-  switch (next) {
-    case 'current_channel':
-    case 'current_room':
-    case 'all_visible':
-    case 'proof_only':
-    case 'legend_only':
-    case 'helper_only':
-    case 'threat_only':
-      return next as ChatUiSearchScope;
-    default:
-      return 'current_channel';
-  }
-}
+/* ========================================================================== *
+ * Section 24 — Transcript drawer builders
+ * ========================================================================== */
 
 export function createDrawerFilter(raw: unknown, index = 0): ChatUiDrawerFilter {
   const source = asRecord(raw);
@@ -2710,25 +2960,9 @@ export function createDrawerFilter(raw: unknown, index = 0): ChatUiDrawerFilter 
     id: asNonEmptyString(source.id, `drawer-filter:${index}`),
     label: asNonEmptyString(source.label, 'Filter'),
     active: asBoolean(source.active),
-    count: asNumber(source.count, 0) || undefined,
+    count: maybeNumber(source.count),
     tone: normalizeTone(source.tone),
     accent: normalizeAccent(source.accent),
-  };
-}
-
-export function createTranscriptSearchResult(raw: unknown, index = 0): ChatUiTranscriptSearchResultViewModel {
-  const source = asRecord(raw);
-  return {
-    id: asNonEmptyString(source.id, `search-result:${index}`),
-    messageId: asNonEmptyString(source.messageId, ''),
-    channelId: asNonEmptyString(source.channelId, ''),
-    channelLabel: asNonEmptyString(source.channelLabel, ''),
-    authorLabel: asNonEmptyString(source.authorLabel, ''),
-    preview: asNonEmptyString(source.preview, ''),
-    timestampLabel: asNonEmptyString(source.timestampLabel, ''),
-    matches: asArray(source.matches).map(createSearchMatchRange),
-    proofLabel: asNonEmptyString(source.proofLabel, ''),
-    threatLabel: asNonEmptyString(source.threatLabel, ''),
   };
 }
 
@@ -2740,38 +2974,67 @@ export function createSearchMatchRange(raw: unknown): ChatUiSearchMatchRange {
   };
 }
 
+export function createTranscriptSearchResult(
+  raw: unknown,
+  index = 0,
+): ChatUiTranscriptSearchResultViewModel {
+  const source = asRecord(raw);
+  const matches = asArray(source.matches).map(createSearchMatchRange);
+
+  return {
+    id: asNonEmptyString(source.id, `search-result:${index}`),
+    messageId: asNonEmptyString(source.messageId, ''),
+    channelId: maybeText(source.channelId),
+    channelLabel: maybeText(source.channelLabel),
+    authorLabel: maybeText(source.authorLabel),
+    preview: asNonEmptyString(source.preview, ''),
+    timestampLabel: maybeText(source.timestampLabel),
+    matches: matches.length > 0 ? matches : undefined,
+    proofLabel: maybeText(source.proofLabel),
+    threatLabel: maybeText(source.threatLabel),
+  };
+}
+
 export function createDrawerSelection(raw: unknown): ChatUiTranscriptDrawerSelection | undefined {
   const source = asRecord(raw);
   if (Object.keys(source).length === 0) return undefined;
   return {
-    messageId: asNonEmptyString(source.messageId, ''),
-    authorLabel: asNonEmptyString(source.authorLabel, ''),
-    text: asNonEmptyString(source.text, ''),
-    timestampLabel: asNonEmptyString(source.timestampLabel, ''),
-    proofSummary: asNonEmptyString(source.proofSummary, ''),
-    threatSummary: asNonEmptyString(source.threatSummary, ''),
-    integritySummary: asNonEmptyString(source.integritySummary, ''),
+    messageId: maybeText(source.messageId),
+    authorLabel: maybeText(source.authorLabel),
+    text: maybeText(source.text),
+    timestampLabel: maybeText(source.timestampLabel),
+    proofSummary: maybeText(source.proofSummary),
+    threatSummary: maybeText(source.threatSummary),
+    integritySummary: maybeText(source.integritySummary),
+  };
+}
+
+export function buildTranscriptDrawerViewModel(raw: unknown): ChatUiTranscriptDrawerViewModel {
+  const source = asRecord(raw);
+  const filters = asArray(source.filters).map(createDrawerFilter);
+  const results = asArray(source.results).map(createTranscriptSearchResult);
+  const summaryMetrics = asArray(source.summaryMetrics).map(createMetric);
+
+  return {
+    open: asBoolean(source.open),
+    title: asNonEmptyString(source.title, 'Transcript'),
+    subtitle: maybeText(source.subtitle),
+    scope: normalizeSearchScope(source.scope),
+    query: asNonEmptyString(source.query, ''),
+    filters,
+    results,
+    selected: createDrawerSelection(source.selected),
+    summaryMetrics: summaryMetrics.length > 0 ? summaryMetrics : undefined,
+    exportReady: asBoolean(source.exportReady),
+    canSearch: asBoolean(source.canSearch, true),
+    canExport: asBoolean(source.canExport),
+    emptyState: source.emptyState ? buildEmptyStateViewModel(source.emptyState) : undefined,
   };
 }
 
 /* ========================================================================== *
  * Section 25 — Composer and unified shell builders
  * ========================================================================== */
-
-export function buildComposerViewModel(raw: unknown): ChatUiComposerViewModel {
-  const source = asRecord(raw);
-  return {
-    draft: asNonEmptyString(source.draft, ''),
-    placeholder: asNonEmptyString(source.placeholder, 'Write a message…'),
-    disabled: asBoolean(source.disabled),
-    sending: asBoolean(source.sending),
-    cooldownLabel: asNonEmptyString(source.cooldownLabel, ''),
-    selectedChannelId: asNonEmptyString(source.selectedChannelId, ''),
-    quickInserts: asArray(source.quickInserts).map(createQuickInsert),
-    replyTarget: createReplyTarget(source.replyTarget),
-    hints: asArray(source.hints).map(createCommandHint),
-  };
-}
 
 export function createQuickInsert(raw: unknown, index = 0): ChatUiComposerQuickInsert {
   const source = asRecord(raw);
@@ -2790,39 +3053,26 @@ export function createReplyTarget(raw: unknown): ChatUiComposerReplyTarget | und
   if (!preview) return undefined;
   return {
     messageId: asNonEmptyString(source.messageId, ''),
-    authorLabel: asNonEmptyString(source.authorLabel, ''),
+    authorLabel: maybeText(source.authorLabel),
     preview,
   };
 }
 
-export function buildUnifiedShellViewModel(raw: unknown): ChatUiUnifiedShellViewModel {
+export function buildComposerViewModel(raw: unknown): ChatUiComposerViewModel {
   const source = asRecord(raw);
-  const channelTabsSource = asRecord(source.channelTabs);
-  const feedSource = asRecord(source.feed);
-  const typingSource = asRecord(source.typing);
-  const presenceSource = asRecord(source.presence);
+  const quickInserts = asArray(source.quickInserts).map(createQuickInsert);
+  const hints = asArray(source.hints).map(createCommandHint);
 
   return {
-    mountId: asNonEmptyString(source.mountId, ''),
-    roomHeader: buildRoomHeaderViewModel(source.roomHeader),
-    channelTabs: buildChannelTabsViewModel(asArray(channelTabsSource.tabs ?? source.channelTabs), {
-      activeChannelId: asNonEmptyString(channelTabsSource.activeChannelId ?? source.activeChannelId, ''),
-    }),
-    feed: buildFeedViewModel(asArray(feedSource.messages ?? feedSource.flatRows ?? source.messages), {
-      channelId: asNonEmptyString(source.activeChannelId, ''),
-      unreadMessageId: asNonEmptyString(source.unreadMessageId, ''),
-      typingEntities: buildTypingIndicatorViewModel(asArray(typingSource.entities ?? source.typingActors)).entities,
-    }),
-    composer: buildComposerViewModel(source.composer),
-    presence: buildPresenceStripViewModel(asArray(presenceSource.chips ?? source.presenceActors)),
-    typing: buildTypingIndicatorViewModel(asArray(typingSource.entities ?? source.typingActors)),
-    invasion: buildInvasionBannerViewModel(source.invasion),
-    threat: buildThreatMeterViewModel(source.threat),
-    helperPrompt: buildHelperPromptViewModel(source.helperPrompt),
-    collapsedPill: buildCollapsedPillViewModel(source.collapsedPill),
-    transcriptDrawer: buildTranscriptDrawerViewModel(source.transcriptDrawer),
-    emptyState: source.emptyState ? buildEmptyStateViewModel(source.emptyState) : undefined,
-    status: buildShellStatus(source.status),
+    draft: asNonEmptyString(source.draft, ''),
+    placeholder: asNonEmptyString(source.placeholder, 'Write a message…'),
+    disabled: asBoolean(source.disabled),
+    sending: asBoolean(source.sending),
+    cooldownLabel: maybeText(source.cooldownLabel),
+    selectedChannelId: maybeText(source.selectedChannelId),
+    quickInserts: quickInserts.length > 0 ? quickInserts : undefined,
+    replyTarget: createReplyTarget(source.replyTarget),
+    hints: hints.length > 0 ? hints : undefined,
   };
 }
 
@@ -2834,7 +3084,44 @@ export function buildShellStatus(raw: unknown): ChatUiShellStatus {
     syncing: asBoolean(source.syncing),
     degraded: asBoolean(source.degraded),
     stale: asBoolean(source.stale),
-    errorLabel: asNonEmptyString(source.errorLabel, ''),
+    errorLabel: maybeText(source.errorLabel),
+  };
+}
+
+export function buildUnifiedShellViewModel(raw: unknown): ChatUiUnifiedShellViewModel {
+  const source = asRecord(raw);
+  const channelTabsSource = asRecord(source.channelTabs);
+  const feedSource = asRecord(source.feed);
+  const typingSource = asRecord(source.typing);
+  const presenceSource = asRecord(source.presence);
+
+  const activeChannelId = asNonEmptyString(
+    channelTabsSource.activeChannelId ?? source.activeChannelId,
+    '',
+  );
+  const typing = buildTypingIndicatorViewModel(asArray(typingSource.entities ?? source.typingActors));
+
+  return {
+    mountId: maybeText(source.mountId),
+    roomHeader: buildRoomHeaderViewModel(source.roomHeader),
+    channelTabs: buildChannelTabsViewModel(asArray(channelTabsSource.tabs ?? source.channelTabs), {
+      activeChannelId: activeChannelId || undefined,
+    }),
+    feed: buildFeedViewModel(asArray(feedSource.messages ?? feedSource.flatRows ?? source.messages), {
+      channelId: activeChannelId || undefined,
+      unreadMessageId: maybeText(source.unreadMessageId),
+      typingEntities: typing.entities,
+    }),
+    composer: buildComposerViewModel(source.composer),
+    presence: buildPresenceStripViewModel(asArray(presenceSource.chips ?? source.presenceActors)),
+    typing,
+    invasion: buildInvasionBannerViewModel(source.invasion),
+    threat: buildThreatMeterViewModel(source.threat),
+    helperPrompt: buildHelperPromptViewModel(source.helperPrompt),
+    collapsedPill: buildCollapsedPillViewModel(source.collapsedPill),
+    transcriptDrawer: buildTranscriptDrawerViewModel(source.transcriptDrawer),
+    emptyState: source.emptyState ? buildEmptyStateViewModel(source.emptyState) : undefined,
+    status: buildShellStatus(source.status),
   };
 }
 
@@ -2868,6 +3155,23 @@ export function isFeedRow(value: unknown): value is ChatUiFeedRow {
 export function isChannelTabViewModel(value: unknown): value is ChatUiChannelTabViewModel {
   if (!isRecord(value)) return false;
   return typeof value.id === 'string' && typeof value.label === 'string';
+}
+
+export function isHelperPromptActionViewModel(
+  value: unknown,
+): value is ChatUiHelperPromptAction {
+  if (!isRecord(value)) return false;
+  return typeof value.id === 'string' && typeof value.label === 'string';
+}
+
+export function isHelperPromptViewModel(value: unknown): value is ChatUiHelperPromptViewModel {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.id === 'string' &&
+    typeof value.visible === 'boolean' &&
+    typeof value.title === 'string' &&
+    typeof value.body === 'string'
+  );
 }
 
 export function isUnifiedShellViewModel(value: unknown): value is ChatUiUnifiedShellViewModel {
@@ -2929,7 +3233,9 @@ export function filterMessageCards(
         message.author.displayName,
         ...message.body.primary.spans.map((span) => span.text),
         message.body.quote?.text ?? '',
-      ].join(' ').toLowerCase();
+      ]
+        .join(' ')
+        .toLowerCase();
 
       if (!haystack.includes(query)) return false;
     }
@@ -2994,14 +3300,18 @@ export function deriveUnreadCount(messages: readonly ChatUiMessageCardViewModel[
   return messages.filter((message) => message.unread).length;
 }
 
-export function deriveDominantThreatBand(messages: readonly ChatUiMessageCardViewModel[]): ChatUiThreatBand {
+export function deriveDominantThreatBand(
+  messages: readonly ChatUiMessageCardViewModel[],
+): ChatUiThreatBand {
   const order: ChatUiThreatBand[] = ['quiet', 'elevated', 'pressured', 'hostile', 'critical', 'catastrophic'];
   let bestIndex = 0;
+
   messages.forEach((message) => {
     const band = message.meta.threat?.band ?? 'quiet';
     const index = order.indexOf(band);
     if (index > bestIndex) bestIndex = index;
   });
+
   return order[bestIndex];
 }
 
@@ -3013,8 +3323,60 @@ export function deriveTypingCount(typing?: Maybe<ChatUiTypingIndicatorViewModel>
   return typing?.entities.length ?? 0;
 }
 
+export function deriveCollapsedPillFromShell(
+  shell: Partial<ChatUiUnifiedShellViewModel>,
+): ChatUiCollapsedPillViewModel {
+  return buildCollapsedPillViewModel({
+    id: shell.collapsedPill?.id,
+    label: shell.collapsedPill?.label ?? 'Chat',
+    shortLabel: shell.collapsedPill?.shortLabel,
+    unreadCount: shell.feed?.unreadCount ?? shell.collapsedPill?.unreadCount,
+    threatBand: shell.threat?.band ?? shell.collapsedPill?.threatBand,
+    typingCount: shell.typing?.entities.length ?? shell.collapsedPill?.typingCount,
+    helperVisible: shell.helperPrompt?.visible ?? shell.collapsedPill?.helperVisible,
+    invasionActive: shell.invasion?.active ?? shell.collapsedPill?.invasionActive,
+    accent: shell.collapsedPill?.accent,
+    tone: shell.collapsedPill?.tone,
+    expanded: shell.collapsedPill?.expanded,
+    tooltip: shell.collapsedPill?.tooltip,
+  });
+}
+
 /* ========================================================================== *
- * Section 30 — Export group
+ * Section 30 — Optional convenience adapters
+ * ========================================================================== */
+
+export interface HelperPromptBuildOptions {
+  readonly visibleDefault?: UIBoolean;
+  readonly dismissibleDefault?: UIBoolean;
+  readonly toneDefault?: ChatUiTone;
+  readonly densityDefault?: ChatUiDensity;
+}
+
+export function buildHelperPromptViewModelWithDefaults(
+  raw: unknown,
+  options: HelperPromptBuildOptions = {},
+): ChatUiHelperPromptViewModel | undefined {
+  const prompt = buildHelperPromptViewModel(raw);
+  if (!prompt) return undefined;
+
+  return {
+    ...prompt,
+    visible: prompt.visible ?? options.visibleDefault ?? false,
+    dismissible: prompt.dismissible ?? options.dismissibleDefault ?? true,
+    tone: prompt.tone ?? options.toneDefault ?? 'neutral',
+    presentation: {
+      severity: prompt.presentation?.severity ?? prompt.tone ?? options.toneDefault ?? 'neutral',
+      density: prompt.presentation?.density ?? options.densityDefault ?? 'comfortable',
+      intentLabel: prompt.presentation?.intentLabel,
+      toneLabel: prompt.presentation?.toneLabel,
+      accentHex: prompt.presentation?.accentHex,
+    },
+  };
+}
+
+/* ========================================================================== *
+ * Section 31 — Export group
  * ========================================================================== */
 
 export interface ChatUiModuleManifest {
@@ -3026,7 +3388,7 @@ export interface ChatUiModuleManifest {
 }
 
 export const CHAT_UI_TYPES_MANIFEST: Readonly<ChatUiModuleManifest> = Object.freeze({
-  version: '1.0.0',
+  version: '2.1.0',
   owner: 'pzo-web/src/components/chat/uiTypes.ts',
   contractLayer: 'presentation',
   presentationOnly: true,
@@ -3035,5 +3397,6 @@ export const CHAT_UI_TYPES_MANIFEST: Readonly<ChatUiModuleManifest> = Object.fre
     'Engine truth must remain in the engine lane.',
     'Shared chat contracts remain canonical for runtime truth.',
     'This file is the sole home for render-shell models during migration.',
+    'Helper prompt compatibility was expanded to accept both compact shell inputs and richer prompt payloads.',
   ],
 });

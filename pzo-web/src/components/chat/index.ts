@@ -45,6 +45,8 @@
  * - low-risk direct re-exports are allowed
  * - module namespace exports are always available for tools, codegen, and
  *   large-scale refactors that need stable module-level access
+ * - helper prompt adapter aliases may exist here, but the canonical helper UI
+ *   view-model truth still lives in ./uiTypes
  * ============================================================================
  */
 
@@ -88,16 +90,153 @@ export * from './ChatPresenceStrip';
 export * from './ChatTypingIndicator';
 export * from './ChatInvasionBanner';
 export * from './ChatThreatMeter';
-export * from './ChatHelperPrompt';
 export * from './ChatCollapsedPill';
 export * from './ChatTranscriptDrawer';
 export * from './ChatRoomHeader';
 export * from './ChatEmptyState';
 export * from './useUnifiedChat';
 
+/**
+ * ChatHelperPrompt is handled explicitly instead of through `export *` so the
+ * barrel can surface the default component under the canonical `ChatHelperPrompt`
+ * name without colliding with the module's internal named export.
+ */
+export { default as ChatHelperPrompt } from './ChatHelperPrompt';
+export type {
+  ChatHelperActionDescriptor,
+  ChatHelperEvidenceLine,
+  ChatHelperPromptDensity,
+  ChatHelperPromptIntent,
+  ChatHelperPromptModel,
+  ChatHelperPromptProps,
+  ChatHelperPromptTone,
+} from './ChatHelperPrompt';
+
 // Compatibility exports stay live during migration.
 export * from './ChatPanel';
 export * from './useChatEngine';
+
+// ============================================================================
+// MARK: Helper-prompt compatibility aliases
+// ============================================================================
+
+/**
+ * These aliases preserve a stable public vocabulary for helper-prompt builders
+ * during migration. The canonical source of truth remains ./uiTypes.
+ */
+export type HelperPromptActionViewModel = UiTypesModule.ChatUiHelperPromptAction;
+export type HelperPromptBadgeViewModel = UiTypesModule.ChatUiChip;
+export type HelperPromptChannelViewModel = UiTypesModule.ChatUiHelperPromptChannel;
+export type HelperPromptEvidenceViewModel = UiTypesModule.ChatUiHelperPromptEvidence;
+export type HelperPromptMetricViewModel = UiTypesModule.ChatUiMetric;
+export type HelperPromptPresentationViewModel = UiTypesModule.ChatUiHelperPromptPresentation;
+export type HelperPromptViewModel = UiTypesModule.ChatUiHelperPromptViewModel;
+
+export interface HelperPromptCopyViewModel {
+  readonly title: UiTypesModule.UIString;
+  readonly body: UiTypesModule.UIString;
+  readonly summary?: UiTypesModule.UIString;
+  readonly footerNote?: UiTypesModule.UIString;
+  readonly provenanceNote?: UiTypesModule.UIString;
+}
+
+export interface HelperPromptStateViewModel {
+  readonly visible: UiTypesModule.UIBoolean;
+  readonly dismissible: UiTypesModule.UIBoolean;
+  readonly mode: UiTypesModule.ChatUiHelperMode;
+  readonly urgency: UiTypesModule.ChatUiUrgency;
+  readonly rescueCritical: UiTypesModule.UIBoolean;
+  readonly escalated: UiTypesModule.UIBoolean;
+  readonly sticky: UiTypesModule.UIBoolean;
+  readonly unreadCountHint?: UiTypesModule.UINumber;
+}
+
+export function buildHelperPromptActionViewModel(
+  raw: unknown,
+): HelperPromptActionViewModel {
+  return UiTypesModule.createHelperPromptAction(raw);
+}
+
+export function buildHelperPromptBadgeViewModel(
+  raw: unknown,
+): HelperPromptBadgeViewModel {
+  return (
+    UiTypesModule.createChips([raw])[0] ?? {
+      id: 'helper-badge:unknown',
+      label: 'Helper',
+      tone: 'neutral',
+      accent: 'slate',
+      emphasis: 'standard',
+      importance: 'normal',
+      active: false,
+      disabled: false,
+    }
+  );
+}
+
+export function buildHelperPromptChannelViewModel(
+  raw: unknown,
+): HelperPromptChannelViewModel | undefined {
+  return UiTypesModule.createHelperPromptChannel(raw);
+}
+
+export function buildHelperPromptCopyViewModel(
+  raw: unknown,
+): HelperPromptCopyViewModel {
+  const source = UiTypesModule.asRecord(raw);
+  return {
+    title: UiTypesModule.asNonEmptyString(source.title, 'Suggested move'),
+    body: UiTypesModule.asNonEmptyString(
+      source.body,
+      'A helper assist is available, but the shell has not received final copy yet.',
+    ),
+    summary: UiTypesModule.maybeText(source.summary),
+    footerNote: UiTypesModule.maybeText(source.footerNote),
+    provenanceNote: UiTypesModule.maybeText(source.provenanceNote),
+  };
+}
+
+export function buildHelperPromptEvidenceViewModel(
+  raw: unknown,
+  index = 0,
+): HelperPromptEvidenceViewModel {
+  return UiTypesModule.createHelperPromptEvidence(raw, index);
+}
+
+export function buildHelperPromptMetricViewModel(
+  raw: unknown,
+  index = 0,
+): HelperPromptMetricViewModel {
+  return UiTypesModule.createMetric(raw, index);
+}
+
+export function buildHelperPromptPresentationViewModel(
+  raw: unknown,
+): HelperPromptPresentationViewModel | undefined {
+  return UiTypesModule.createHelperPromptPresentation(raw);
+}
+
+export function buildHelperPromptStateViewModel(
+  raw: unknown,
+): HelperPromptStateViewModel {
+  const source = UiTypesModule.asRecord(raw);
+  return {
+    visible: UiTypesModule.asBoolean(source.visible),
+    dismissible: UiTypesModule.asBoolean(source.dismissible, true),
+    mode: UiTypesModule.normalizeHelperMode(source.mode),
+    urgency: UiTypesModule.normalizeUrgency(source.urgency),
+    rescueCritical: UiTypesModule.asBoolean(source.rescueCritical),
+    escalated: UiTypesModule.asBoolean(source.escalated),
+    sticky: UiTypesModule.asBoolean(source.sticky),
+    unreadCountHint: UiTypesModule.maybeNumber(source.unreadCountHint),
+  };
+}
+
+// buildHelperPromptViewModel
+// buildHelperPromptViewModelWithDefaults
+// isHelperPromptActionViewModel
+// isHelperPromptViewModel
+// are already re-exported from ./uiTypes via `export * from './uiTypes'`.
 
 // ============================================================================
 // MARK: Stable namespace exports
@@ -141,7 +280,7 @@ export const CHAT_COMPONENT_NAMESPACE =
 export const CHAT_COMPONENT_VERSION = '2026.03.15' as const;
 
 export const CHAT_COMPONENT_REVISION =
-  'pzo.components.chat.barrel.v1' as const;
+  'pzo.components.chat.barrel.v2.registry-safe' as const;
 
 export const CHAT_COMPONENT_MODULE_KEYS = [
   'UnifiedChatDock',
@@ -246,7 +385,7 @@ export interface ChatComponentModuleDescriptor {
   readonly stability: ChatComponentStability;
   readonly renderLayer: ChatComponentRenderLayer;
   readonly description: string;
-  readonly usedByMounts: readonly SharedChat.ChatChannelsModule.ChatMountTarget[];
+  readonly usedByMounts: readonly SharedChat.ChatMountTarget[];
   readonly dependsOnEngine: boolean;
   readonly dependsOnSharedContracts: boolean;
   readonly directExportRisk: 'LOW' | 'MEDIUM' | 'HIGH';
@@ -274,30 +413,28 @@ export type ChatComponentModuleNamespace =
   | typeof UseChatEngineModule
   | typeof ChatTypesModule;
 
-const ALL_MOUNTS = SharedChat.ChatChannelsModule.CHAT_MOUNT_TARGETS;
+const ALL_MOUNTS = SharedChat.CHAT_MOUNT_TARGETS;
 
-const COMMON_UI_MOUNTS = [
-  'BattleHUD',
-  'ClubUI',
-  'EmpireGameScreen',
-  'GameBoard',
-  'LeagueUI',
-  'LobbyScreen',
-  'PhantomGameScreen',
-  'PredatorGameScreen',
-  'SyndicateGameScreen',
-] as const satisfies readonly SharedChat.ChatChannelsModule.ChatMountTarget[];
+const CORE_GAME_MOUNTS = [
+  'BATTLE_HUD',
+  'CLUB_UI',
+  'EMPIRE_GAME_SCREEN',
+  'GAME_BOARD',
+  'LEAGUE_UI',
+  'LOBBY_SCREEN',
+  'PHANTOM_GAME_SCREEN',
+  'PREDATOR_GAME_SCREEN',
+  'SYNDICATE_GAME_SCREEN',
+] as const satisfies readonly SharedChat.ChatMountTarget[];
 
-const AUXILIARY_MOUNTS = [
-  'CounterplayModal',
-  'EmpireBleedBanner',
-  'MomentFlash',
-  'ProofCard',
-  'ProofCardV2',
-  'RescueWindowBanner',
-  'SabotageImpactPanel',
-  'ThreatRadarPanel',
-] as const satisfies readonly SharedChat.ChatChannelsModule.ChatMountTarget[];
+const SUMMARY_MOUNTS = [
+  'POST_RUN_SUMMARY',
+] as const satisfies readonly SharedChat.ChatMountTarget[];
+
+const TRANSCRIPT_CAPABLE_MOUNTS = [
+  ...CORE_GAME_MOUNTS,
+  ...SUMMARY_MOUNTS,
+] as const satisfies readonly SharedChat.ChatMountTarget[];
 
 export const CHAT_COMPONENT_IMPORT_PATHS = Object.freeze({
   UnifiedChatDock: './UnifiedChatDock',
@@ -346,7 +483,7 @@ export const CHAT_COMPONENT_MODULE_DESCRIPTORS = Object.freeze({
     renderLayer: 'composer',
     description:
       'Render-only composer shell for draft text, channel-aware placeholders, and send affordances.',
-    usedByMounts: COMMON_UI_MOUNTS,
+    usedByMounts: CORE_GAME_MOUNTS,
     dependsOnEngine: false,
     dependsOnSharedContracts: true,
     directExportRisk: 'LOW',
@@ -361,7 +498,7 @@ export const CHAT_COMPONENT_MODULE_DESCRIPTORS = Object.freeze({
     renderLayer: 'feed',
     description:
       'Grouped message feed surface for transcript rows, chronology, empty states, and feed virtualization decisions.',
-    usedByMounts: COMMON_UI_MOUNTS,
+    usedByMounts: TRANSCRIPT_CAPABLE_MOUNTS,
     dependsOnEngine: false,
     dependsOnSharedContracts: true,
     directExportRisk: 'LOW',
@@ -376,7 +513,7 @@ export const CHAT_COMPONENT_MODULE_DESCRIPTORS = Object.freeze({
     renderLayer: 'feed',
     description:
       'Single message presentation unit for sender chrome, proof badges, metadata chips, and narrative surface styling.',
-    usedByMounts: COMMON_UI_MOUNTS,
+    usedByMounts: TRANSCRIPT_CAPABLE_MOUNTS,
     dependsOnEngine: false,
     dependsOnSharedContracts: true,
     directExportRisk: 'LOW',
@@ -391,7 +528,7 @@ export const CHAT_COMPONENT_MODULE_DESCRIPTORS = Object.freeze({
     renderLayer: 'dock',
     description:
       'Visible channel selector for Global, Syndicate, Deal Room, and future mount-eligible lanes.',
-    usedByMounts: COMMON_UI_MOUNTS,
+    usedByMounts: CORE_GAME_MOUNTS,
     dependsOnEngine: false,
     dependsOnSharedContracts: true,
     directExportRisk: 'LOW',
@@ -406,7 +543,7 @@ export const CHAT_COMPONENT_MODULE_DESCRIPTORS = Object.freeze({
     renderLayer: 'presence',
     description:
       'Room presence strip for player, helper, hater, ambient, and system audience indicators.',
-    usedByMounts: COMMON_UI_MOUNTS,
+    usedByMounts: CORE_GAME_MOUNTS,
     dependsOnEngine: false,
     dependsOnSharedContracts: true,
     directExportRisk: 'LOW',
@@ -421,7 +558,7 @@ export const CHAT_COMPONENT_MODULE_DESCRIPTORS = Object.freeze({
     renderLayer: 'presence',
     description:
       'Typing theater component that visualizes present-tense chat pressure without owning typing truth.',
-    usedByMounts: COMMON_UI_MOUNTS,
+    usedByMounts: CORE_GAME_MOUNTS,
     dependsOnEngine: false,
     dependsOnSharedContracts: true,
     directExportRisk: 'LOW',
@@ -436,7 +573,7 @@ export const CHAT_COMPONENT_MODULE_DESCRIPTORS = Object.freeze({
     renderLayer: 'banner',
     description:
       'Top-level invasion / raid / pressure banner surface for visible escalation moments.',
-    usedByMounts: [...COMMON_UI_MOUNTS, ...AUXILIARY_MOUNTS],
+    usedByMounts: ALL_MOUNTS,
     dependsOnEngine: false,
     dependsOnSharedContracts: true,
     directExportRisk: 'LOW',
@@ -451,7 +588,7 @@ export const CHAT_COMPONENT_MODULE_DESCRIPTORS = Object.freeze({
     renderLayer: 'banner',
     description:
       'Threat posture meter for taunt load, attack pressure, rescue urgency, and active aggression windows.',
-    usedByMounts: [...COMMON_UI_MOUNTS, ...AUXILIARY_MOUNTS],
+    usedByMounts: ALL_MOUNTS,
     dependsOnEngine: false,
     dependsOnSharedContracts: true,
     directExportRisk: 'LOW',
@@ -466,7 +603,7 @@ export const CHAT_COMPONENT_MODULE_DESCRIPTORS = Object.freeze({
     renderLayer: 'banner',
     description:
       'Helper prompt shell for rescue / guidance calls-to-action derived from engine and learning hints.',
-    usedByMounts: [...COMMON_UI_MOUNTS, 'RescueWindowBanner'],
+    usedByMounts: ALL_MOUNTS,
     dependsOnEngine: false,
     dependsOnSharedContracts: true,
     directExportRisk: 'LOW',
@@ -496,7 +633,7 @@ export const CHAT_COMPONENT_MODULE_DESCRIPTORS = Object.freeze({
     renderLayer: 'drawer',
     description:
       'Drawer surface for transcript search, grouped history inspection, and replay-adjacent message review.',
-    usedByMounts: [...COMMON_UI_MOUNTS, 'ProofCard', 'ProofCardV2'],
+    usedByMounts: TRANSCRIPT_CAPABLE_MOUNTS,
     dependsOnEngine: false,
     dependsOnSharedContracts: true,
     directExportRisk: 'LOW',
@@ -526,7 +663,7 @@ export const CHAT_COMPONENT_MODULE_DESCRIPTORS = Object.freeze({
     renderLayer: 'feed',
     description:
       'Empty feed shell for quiet channels, no-history states, and low-noise transition moments.',
-    usedByMounts: COMMON_UI_MOUNTS,
+    usedByMounts: TRANSCRIPT_CAPABLE_MOUNTS,
     dependsOnEngine: false,
     dependsOnSharedContracts: true,
     directExportRisk: 'LOW',
@@ -760,7 +897,7 @@ export function moduleOwnsLongTermAuthority(
 }
 
 export function getModulesForMount(
-  mountTarget: SharedChat.ChatChannelsModule.ChatMountTarget,
+  mountTarget: SharedChat.ChatMountTarget,
 ): readonly ChatComponentModuleKey[] {
   return CHAT_COMPONENT_MODULE_KEYS.filter((key) =>
     CHAT_COMPONENT_MODULE_DESCRIPTORS[key].usedByMounts.includes(mountTarget),
@@ -768,13 +905,13 @@ export function getModulesForMount(
 }
 
 export function getPrimaryModulesForMount(
-  mountTarget: SharedChat.ChatChannelsModule.ChatMountTarget,
+  mountTarget: SharedChat.ChatMountTarget,
 ): readonly ChatComponentModuleKey[] {
   return getModulesForMount(mountTarget).filter(moduleIsPrimary);
 }
 
 export function getCompatibilityModulesForMount(
-  mountTarget: SharedChat.ChatChannelsModule.ChatMountTarget,
+  mountTarget: SharedChat.ChatMountTarget,
 ): readonly ChatComponentModuleKey[] {
   return getModulesForMount(mountTarget).filter(moduleIsCompatibilityOnly);
 }
@@ -871,7 +1008,20 @@ export const CHAT_COMPONENT_PACKAGES = Object.freeze({
   ChatHelperPrompt: Object.freeze<ChatComponentPackage>({
     descriptor: CHAT_COMPONENT_MODULE_DESCRIPTORS.ChatHelperPrompt,
     namespace: ChatHelperPromptModule,
-    namedExportHints: [],
+    namedExportHints: [
+      'ChatHelperPrompt',
+      'ChatHelperPromptProps',
+      'buildHelperPromptViewModel',
+      'buildHelperPromptViewModelWithDefaults',
+      'buildHelperPromptActionViewModel',
+      'buildHelperPromptBadgeViewModel',
+      'buildHelperPromptChannelViewModel',
+      'buildHelperPromptCopyViewModel',
+      'buildHelperPromptEvidenceViewModel',
+      'buildHelperPromptMetricViewModel',
+      'buildHelperPromptPresentationViewModel',
+      'buildHelperPromptStateViewModel',
+    ],
     defaultExportPresent: Boolean(
       readNamedExport(ChatHelperPromptModule as Record<string, unknown>, 'default'),
     ),
@@ -919,7 +1069,15 @@ export const CHAT_COMPONENT_PACKAGES = Object.freeze({
   uiTypes: Object.freeze<ChatComponentPackage>({
     descriptor: CHAT_COMPONENT_MODULE_DESCRIPTORS.uiTypes,
     namespace: UiTypesModule,
-    namedExportHints: [],
+    namedExportHints: [
+      'ChatUiUnifiedShellViewModel',
+      'ChatUiHelperPromptViewModel',
+      'buildUnifiedShellViewModel',
+      'buildHelperPromptViewModel',
+      'buildHelperPromptViewModelWithDefaults',
+      'isUnifiedShellViewModel',
+      'isHelperPromptViewModel',
+    ],
     defaultExportPresent: false,
   }),
   ChatPanel: Object.freeze<ChatComponentPackage>({
@@ -1002,6 +1160,8 @@ export const CHAT_COMPONENT_RUNTIME_LAWS = Object.freeze([
   'All canonical contracts flow inward from shared/contracts/chat.',
   'All engine authority flows inward from pzo-web/src/engines/chat.',
   'Barrel exports must remain migration-safe for multi-screen chat mounts.',
+  'Mount registration must use shared contract mount constants, never ad-hoc strings.',
+  'Helper prompt convenience aliases in this barrel must defer to uiTypes builders.',
 ] as const);
 
 export const CHAT_COMPONENT_MIGRATION_STATUS = Object.freeze({
@@ -1016,6 +1176,8 @@ export const CHAT_COMPONENT_MIGRATION_STATUS = Object.freeze({
   chatTypesIsCompatibilityShim: true,
   useChatEngineIsCompatibilityBridge: true,
   ChatPanelIsCompatibilityBridge: true,
+  helperPromptAliasSurfacePresent: true,
+  mountRegistryNormalizedToSharedContracts: true,
 } as const);
 
 export const CHAT_COMPONENT_REGISTRY = Object.freeze({
@@ -1049,5 +1211,13 @@ export const CHAT_COMPONENT_REGISTRY = Object.freeze({
     getModulesForMount,
     getPrimaryModulesForMount,
     getCompatibilityModulesForMount,
+    buildHelperPromptActionViewModel,
+    buildHelperPromptBadgeViewModel,
+    buildHelperPromptChannelViewModel,
+    buildHelperPromptCopyViewModel,
+    buildHelperPromptEvidenceViewModel,
+    buildHelperPromptMetricViewModel,
+    buildHelperPromptPresentationViewModel,
+    buildHelperPromptStateViewModel,
   }),
 });

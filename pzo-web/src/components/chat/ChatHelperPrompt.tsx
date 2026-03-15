@@ -1,436 +1,340 @@
-import React, { memo, useId, useMemo } from 'react';
-import type {
-  ChatChannelId,
-  ChatInterruptPriority,
-  ChatMomentType,
-  ChatScenePlan,
-  ChatVisibleChannel,
-} from './types';
-import { CHAT_ENGINE_AUTHORITIES } from './types';
-
 /**
  * ============================================================================
- * POINT ZERO ONE — UNIFIED CHAT ENGINE
- * FILE: pzo-web/src/engines/chat/ChatHelperPrompt.tsx
+ * POINT ZERO ONE — UNIFIED CHAT RENDER SHELL
+ * FILE: pzo-web/src/components/chat/ChatHelperPrompt.tsx
+ * VERSION: 2.0.0
+ * AUTHOR: OpenAI
+ * LICENSE: Internal / Project Use Only
  * ============================================================================
  *
  * Purpose
  * -------
- * Thin, presentation-only helper intervention surface for the unified chat lane.
+ * Presentation-only helper prompt surface for the unified chat dock.
  *
- * This file is intentionally UI-only:
+ * This component is intentionally thin:
+ * - no engine imports
+ * - no store imports
+ * - no policy imports
  * - no socket ownership
- * - no moderation ownership
- * - no transcript writes
- * - no event bridge decisions
- * - no ML/DL inference authority
- * - no direct store mutation
+ * - no helper decision logic
+ * - no moment planning
+ * - no priority computation
+ * - no runtime authority
  *
- * It renders a helper prompt that can be mounted by UnifiedChatDock.tsx or any
- * future shell that reads authoritative state from ChatEngine.ts / selectors.
+ * It accepts a fully materialized HelperPromptViewModel from uiTypes and renders
+ * it without mutating game truth.
  *
- * Why this file exists in the engine lane right now
- * -----------------------------------------------
- * The long-term target is a thin render shell under /pzo-web/src/components/chat,
- * but the current repo already contains an active canonical lane in
- * /pzo-web/src/engines/chat, including UnifiedChatDock.tsx. This component is
- * written to match that current repo reality while still honoring the rule that
- * the render surface must not become the brain.
- *
- * Design laws
- * -----------
- * - Render truth; do not invent gameplay authority.
- * - Helper prompts must feel timely, not spammy.
- * - Rescue prompts must preserve tension without becoming manipulative noise.
- * - A helper prompt is allowed to stage urgency, but never to hide provenance.
- * - The component must be compilable before deeper engine/runtime files land.
- * - No business logic here that belongs in ChatHelperResponsePlanner.ts,
- *   ChatLearningBridge.ts, or backend intervention policy modules.
- *
- * Repo grounding
- * --------------
- * - Current legacy chat UI lives in pzo-web/src/components/chat/ChatPanel.tsx.
- * - Current canonical frontend chat lane already exists at pzo-web/src/engines/chat.
- * - Mount policy and channel doctrine are defined in ./types.
- * - Long-term authorities remain:
- *   /shared/contracts/chat
- *   /pzo-web/src/engines/chat
- *   /pzo-web/src/components/chat
- *   /backend/src/game/engine/chat
- *   /pzo-server/src/chat
- *
- * Density6 LLC · Point Zero One · Sovereign Chat Runtime · Confidential
+ * Long-term authorities remain:
+ * - /shared/contracts/chat
+ * - /pzo-web/src/engines/chat
+ * - /pzo-web/src/components/chat
+ * - /backend/src/game/engine/chat
+ * - /pzo-server/src/chat
  * ============================================================================
  */
 
+import React, { memo, useId } from 'react';
+
+import type { ChatVisibleChannel } from '../../../../shared/contracts/chat/ChatChannels';
+import type {
+  HelperPromptActionViewModel,
+  HelperPromptBadgeViewModel,
+  HelperPromptEvidenceViewModel,
+  HelperPromptMetricViewModel,
+  HelperPromptViewModel,
+} from './uiTypes';
+
 // ============================================================================
-// MARK: Local design tokens
+// MARK: Design tokens
 // ============================================================================
 
-const TOKENS = {
-  void: '#030308',
-  card: '#0C0C1E',
-  cardHi: '#131328',
-  cardEl: '#191934',
+const TOKENS = Object.freeze({
+  void: '#04050A',
+  panel: '#0B1020',
+  panelElevated: '#11182B',
+  panelRaised: '#18233A',
   border: 'rgba(255,255,255,0.08)',
-  borderM: 'rgba(255,255,255,0.16)',
-  borderH: 'rgba(255,255,255,0.24)',
-  text: '#F2F2FF',
-  textSub: '#9090B4',
-  textMut: '#505074',
-  green: '#22DD88',
-  red: '#FF4D4D',
-  orange: '#FF8C00',
-  yellow: '#FFD700',
-  indigo: '#818CF8',
-  teal: '#22D3EE',
-  purple: '#A855F7',
-  cyan: '#7DD3FC',
+  borderStrong: 'rgba(255,255,255,0.14)',
+  borderActive: 'rgba(129,140,248,0.34)',
+  text: '#EEF2FF',
+  textSoft: '#B7C0DB',
+  textMuted: '#7F8AA8',
+  textFaint: '#58627C',
   white: '#FFFFFF',
-  mono: "'IBM Plex Mono', 'JetBrains Mono', monospace",
-  display: "'Syne', 'Outfit', system-ui, sans-serif",
-} as const;
+  black: '#000000',
+  indigo: '#818CF8',
+  cyan: '#22D3EE',
+  violet: '#A78BFA',
+  emerald: '#34D399',
+  amber: '#FBBF24',
+  orange: '#FB923C',
+  red: '#F87171',
+  rose: '#FB7185',
+  blue: '#60A5FA',
+  slate: '#94A3B8',
+  shadowLg: '0 28px 64px rgba(0,0,0,0.40)',
+  shadowMd: '0 14px 30px rgba(0,0,0,0.28)',
+  shadowSm: '0 8px 18px rgba(0,0,0,0.16)',
+  radiusXl: 22,
+  radiusLg: 18,
+  radiusMd: 14,
+  radiusSm: 12,
+  fontBody: "Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+  fontMono: "'IBM Plex Mono', 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace",
+}) as const;
 
-const FONT_IMPORT = `@import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap');`;
+const SURFACE_GRADIENT =
+  'linear-gradient(180deg, rgba(255,255,255,0.045) 0%, rgba(255,255,255,0.015) 100%)';
 
 // ============================================================================
-// MARK: Public local prop contracts
+// MARK: Public props
 // ============================================================================
-
-export type ChatHelperPromptTone =
-  | 'CALM'
-  | 'DIRECT'
-  | 'URGENT'
-  | 'SURGICAL'
-  | 'REASSURING'
-  | 'CEREMONIAL';
-
-export type ChatHelperPromptIntent =
-  | 'RESCUE'
-  | 'COUNTERPLAY'
-  | 'RECOVER_COMPOSURE'
-  | 'NEGOTIATE'
-  | 'ESCAPE_PRESSURE'
-  | 'HOLD_POSITION'
-  | 'REFOCUS'
-  | 'POST_RUN_DEBRIEF';
-
-export type ChatHelperPromptDensity = 'COMPACT' | 'STANDARD' | 'EXPANDED';
-
-export interface ChatHelperActionDescriptor {
-  readonly actionId: string;
-  readonly label: string;
-  readonly shortLabel?: string;
-  readonly description?: string;
-  readonly emphasis?: 'PRIMARY' | 'SECONDARY' | 'GHOST' | 'DANGER';
-  readonly hotkeyHint?: string;
-  readonly disabled?: boolean;
-  readonly blockedReason?: string;
-  readonly channelGuard?: ChatVisibleChannel[];
-  readonly optimisticPreview?: string;
-}
-
-export interface ChatHelperEvidenceLine {
-  readonly id: string;
-  readonly label: string;
-  readonly value: string;
-  readonly polarity?: 'NEUTRAL' | 'POSITIVE' | 'NEGATIVE' | 'WARNING';
-}
-
-export interface ChatHelperPromptModel {
-  readonly promptId: string;
-  readonly helperId: string;
-  readonly helperName: string;
-  readonly helperRole?: string;
-  readonly helperAvatarText?: string;
-  readonly helperColor?: string;
-  readonly helperAccent?: string;
-  readonly visibleChannel: ChatVisibleChannel;
-  readonly sourceChannel?: ChatChannelId;
-  readonly scenePlan?: Pick<ChatScenePlan, 'sceneId' | 'momentId' | 'momentType'>;
-  readonly momentType?: ChatMomentType;
-  readonly interruptPriority?: ChatInterruptPriority;
-  readonly tone: ChatHelperPromptTone;
-  readonly intent: ChatHelperPromptIntent;
-  readonly density?: ChatHelperPromptDensity;
-  readonly title: string;
-  readonly body: string;
-  readonly tacticalSummary?: string;
-  readonly confidenceLabel?: string;
-  readonly confidenceScore?: number;
-  readonly urgencyScore?: number;
-  readonly trustScore?: number;
-  readonly intimidationScore?: number;
-  readonly reliefPotential?: number;
-  readonly expectedStabilization?: number;
-  readonly responseWindowLabel?: string;
-  readonly responseWindowMs?: number;
-  readonly cooldownLabel?: string;
-  readonly queuePosition?: number;
-  readonly isSticky?: boolean;
-  readonly isDismissible?: boolean;
-  readonly isEscalated?: boolean;
-  readonly isRescueCritical?: boolean;
-  readonly showTrustMeter?: boolean;
-  readonly showEvidence?: boolean;
-  readonly evidence?: readonly ChatHelperEvidenceLine[];
-  readonly actions: readonly ChatHelperActionDescriptor[];
-  readonly footerNote?: string;
-  readonly provenanceNote?: string;
-  readonly authorityNote?: string;
-}
 
 export interface ChatHelperPromptProps {
-  readonly prompt: ChatHelperPromptModel | null | undefined;
-  readonly activeChannel: ChatVisibleChannel;
-  readonly mountChannel?: ChatVisibleChannel;
-  readonly unreadCount?: number;
-  readonly isCollapsed?: boolean;
-  readonly compactMode?: boolean;
-  readonly showChannelBadge?: boolean;
-  readonly showAuthorityLine?: boolean;
-  readonly showSceneLine?: boolean;
+  readonly prompt: HelperPromptViewModel | null | undefined;
+  readonly activeChannel?: ChatVisibleChannel;
   readonly className?: string;
   readonly style?: React.CSSProperties;
-  readonly onDismiss?: (promptId: string) => void;
-  readonly onSelectAction?: (promptId: string, actionId: string) => void;
-  readonly onOpenChannel?: (channel: ChatVisibleChannel) => void;
+  readonly onDismiss?: (prompt: HelperPromptViewModel) => void;
+  readonly onAction?: (actionId: string, prompt: HelperPromptViewModel) => void;
+  readonly onOpenChannel?: (
+    channel: ChatVisibleChannel,
+    prompt: HelperPromptViewModel,
+  ) => void;
 }
 
 // ============================================================================
-// MARK: Derived labels / visual policy
+// MARK: Pure display helpers
 // ============================================================================
 
-const TONE_LABEL: Record<ChatHelperPromptTone, string> = {
-  CALM: 'Calm assist',
-  DIRECT: 'Direct assist',
-  URGENT: 'Urgent assist',
-  SURGICAL: 'Surgical assist',
-  REASSURING: 'Reassuring assist',
-  CEREMONIAL: 'Ceremonial assist',
-};
-
-const INTENT_LABEL: Record<ChatHelperPromptIntent, string> = {
-  RESCUE: 'Rescue line',
-  COUNTERPLAY: 'Counterplay line',
-  RECOVER_COMPOSURE: 'Composure recovery',
-  NEGOTIATE: 'Negotiation support',
-  ESCAPE_PRESSURE: 'Pressure escape',
-  HOLD_POSITION: 'Hold position',
-  REFOCUS: 'Refocus line',
-  POST_RUN_DEBRIEF: 'Post-run read',
-};
-
-function clamp01(value: number | undefined): number {
-  if (!Number.isFinite(value)) return 0;
-  if ((value as number) <= 0) return 0;
-  if ((value as number) >= 1) return 1;
-  return value as number;
+function notBlank(value: string | undefined | null): value is string {
+  return typeof value === 'string' && value.trim().length > 0;
 }
 
-function percentageLabel(value: number | undefined): string {
-  return `${Math.round(clamp01(value) * 100)}%`;
-}
-
-function meterTone(
-  value: number | undefined,
-): { bar: string; glow: string; text: string } {
-  const v = clamp01(value);
-  if (v >= 0.8) {
-    return {
-      bar: TOKENS.green,
-      glow: 'rgba(34,221,136,0.28)',
-      text: TOKENS.green,
-    };
-  }
-  if (v >= 0.55) {
-    return {
-      bar: TOKENS.yellow,
-      glow: 'rgba(255,215,0,0.22)',
-      text: TOKENS.yellow,
-    };
-  }
-  if (v >= 0.3) {
-    return {
-      bar: TOKENS.orange,
-      glow: 'rgba(255,140,0,0.22)',
-      text: TOKENS.orange,
-    };
-  }
-  return {
-    bar: TOKENS.red,
-    glow: 'rgba(255,77,77,0.25)',
-    text: TOKENS.red,
-  };
-}
-
-function priorityTone(
-  priority: ChatInterruptPriority | undefined,
-): { badge: string; border: string; text: string } {
-  switch (priority) {
-    case 'ABSOLUTE':
-      return {
-        badge: 'rgba(255,77,77,0.16)',
-        border: 'rgba(255,77,77,0.34)',
-        text: TOKENS.red,
-      };
-    case 'CRITICAL':
-      return {
-        badge: 'rgba(255,140,0,0.16)',
-        border: 'rgba(255,140,0,0.32)',
-        text: TOKENS.orange,
-      };
-    case 'HIGH':
-      return {
-        badge: 'rgba(255,215,0,0.13)',
-        border: 'rgba(255,215,0,0.28)',
-        text: TOKENS.yellow,
-      };
-    case 'NORMAL':
-      return {
-        badge: 'rgba(129,140,248,0.12)',
-        border: 'rgba(129,140,248,0.24)',
-        text: TOKENS.indigo,
-      };
-    case 'LOW':
-    default:
-      return {
-        badge: 'rgba(144,144,180,0.10)',
-        border: 'rgba(144,144,180,0.18)',
-        text: TOKENS.textSub,
-      };
-  }
-}
-
-function channelTone(channel: ChatVisibleChannel): {
-  label: string;
-  border: string;
-  accent: string;
-  bg: string;
-} {
-  switch (channel) {
-    case 'DEAL_ROOM':
-      return {
-        label: 'Deal Room',
-        border: 'rgba(255,140,0,0.30)',
-        accent: TOKENS.orange,
-        bg: 'rgba(255,140,0,0.08)',
-      };
-    case 'SYNDICATE':
-      return {
-        label: 'Syndicate',
-        border: 'rgba(34,211,238,0.24)',
-        accent: TOKENS.teal,
-        bg: 'rgba(34,211,238,0.08)',
-      };
-    case 'LOBBY':
-      return {
-        label: 'Lobby',
-        border: 'rgba(168,85,247,0.24)',
-        accent: TOKENS.purple,
-        bg: 'rgba(168,85,247,0.08)',
-      };
-    case 'GLOBAL':
-    default:
-      return {
-        label: 'Global',
-        border: 'rgba(129,140,248,0.26)',
-        accent: TOKENS.indigo,
-        bg: 'rgba(129,140,248,0.09)',
-      };
-  }
-}
-
-function intentAccent(intent: ChatHelperPromptIntent): string {
-  switch (intent) {
-    case 'RESCUE':
-      return TOKENS.green;
-    case 'COUNTERPLAY':
-      return TOKENS.indigo;
-    case 'NEGOTIATE':
-      return TOKENS.orange;
-    case 'ESCAPE_PRESSURE':
-      return TOKENS.red;
-    case 'HOLD_POSITION':
-      return TOKENS.teal;
-    case 'REFOCUS':
-      return TOKENS.cyan;
-    case 'POST_RUN_DEBRIEF':
-      return TOKENS.purple;
-    case 'RECOVER_COMPOSURE':
-    default:
-      return TOKENS.yellow;
-  }
-}
-
-function makeAvatarText(name: string, fallback = 'HP'): string {
-  const parts = name
+function initialsFromName(value: string | undefined, fallback = 'HP'): string {
+  if (!notBlank(value)) return fallback;
+  const tokens = value
     .split(/\s+/)
     .map((part) => part.trim())
     .filter(Boolean)
     .slice(0, 2);
 
-  if (parts.length === 0) return fallback;
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-  return `${parts[0][0] ?? ''}${parts[1][0] ?? ''}`.toUpperCase();
+  if (tokens.length === 0) return fallback;
+  if (tokens.length === 1) return tokens[0].slice(0, 2).toUpperCase();
+  return `${tokens[0][0] ?? ''}${tokens[1][0] ?? ''}`.toUpperCase();
 }
 
-function formatWindowLabel(label: string | undefined, ms: number | undefined): string | null {
-  if (label && label.trim()) return label.trim();
-  if (!Number.isFinite(ms)) return null;
-  const seconds = Math.max(0, Math.round((ms as number) / 1000));
-  if (seconds < 60) return `${seconds}s response window`;
-  const minutes = Math.round(seconds / 60);
-  return `${minutes}m response window`;
+function resolveAccent(prompt: HelperPromptViewModel): string {
+  if (notBlank(prompt.presentation.accentHex)) return prompt.presentation.accentHex.trim();
+
+  switch (prompt.presentation.severity) {
+    case 'positive':
+      return TOKENS.emerald;
+    case 'warning':
+      return TOKENS.amber;
+    case 'danger':
+      return TOKENS.red;
+    case 'dramatic':
+      return TOKENS.violet;
+    case 'neutral':
+    default:
+      return TOKENS.indigo;
+  }
 }
 
-function actionEmphasisStyle(
-  emphasis: ChatHelperActionDescriptor['emphasis'],
+function resolveDensity(prompt: HelperPromptViewModel): 'compact' | 'standard' | 'expanded' {
+  return prompt.presentation.density ?? 'standard';
+}
+
+function toneColor(tone: HelperPromptBadgeViewModel['tone']): string {
+  switch (tone) {
+    case 'positive':
+      return TOKENS.emerald;
+    case 'warning':
+      return TOKENS.amber;
+    case 'danger':
+      return TOKENS.red;
+    case 'dramatic':
+      return TOKENS.violet;
+    case 'neutral':
+    default:
+      return TOKENS.slate;
+  }
+}
+
+function toneBackground(tone: HelperPromptBadgeViewModel['tone']): string {
+  switch (tone) {
+    case 'positive':
+      return 'rgba(52,211,153,0.12)';
+    case 'warning':
+      return 'rgba(251,191,36,0.12)';
+    case 'danger':
+      return 'rgba(248,113,113,0.12)';
+    case 'dramatic':
+      return 'rgba(167,139,250,0.12)';
+    case 'neutral':
+    default:
+      return 'rgba(148,163,184,0.12)';
+  }
+}
+
+function toneBorder(tone: HelperPromptBadgeViewModel['tone']): string {
+  switch (tone) {
+    case 'positive':
+      return 'rgba(52,211,153,0.25)';
+    case 'warning':
+      return 'rgba(251,191,36,0.25)';
+    case 'danger':
+      return 'rgba(248,113,113,0.25)';
+    case 'dramatic':
+      return 'rgba(167,139,250,0.25)';
+    case 'neutral':
+    default:
+      return 'rgba(148,163,184,0.18)';
+  }
+}
+
+function actionStyles(
+  action: HelperPromptActionViewModel,
+  accent: string,
 ): React.CSSProperties {
-  switch (emphasis) {
-    case 'PRIMARY':
+  const variant = action.variant ?? 'secondary';
+
+  switch (variant) {
+    case 'primary':
       return {
-        background: `linear-gradient(135deg, ${TOKENS.indigo}, ${TOKENS.purple})`,
+        background: `linear-gradient(135deg, ${accent}, rgba(255,255,255,0.16))`,
         color: TOKENS.white,
-        border: '1px solid rgba(255,255,255,0.12)',
-        boxShadow: '0 10px 24px rgba(129,140,248,0.22)',
+        border: '1px solid rgba(255,255,255,0.10)',
+        boxShadow: `0 10px 26px color-mix(in srgb, ${accent} 28%, transparent)`,
       };
-    case 'DANGER':
+    case 'danger':
       return {
-        background: 'rgba(255,77,77,0.12)',
+        background: 'rgba(248,113,113,0.12)',
         color: TOKENS.red,
-        border: '1px solid rgba(255,77,77,0.24)',
-        boxShadow: '0 10px 22px rgba(255,77,77,0.10)',
+        border: '1px solid rgba(248,113,113,0.22)',
       };
-    case 'GHOST':
+    case 'ghost':
       return {
         background: 'transparent',
-        color: TOKENS.textSub,
+        color: TOKENS.textSoft,
         border: `1px solid ${TOKENS.border}`,
       };
-    case 'SECONDARY':
+    case 'secondary':
     default:
       return {
         background: 'rgba(255,255,255,0.04)',
         color: TOKENS.text,
-        border: `1px solid ${TOKENS.borderM}`,
+        border: `1px solid ${TOKENS.borderStrong}`,
       };
   }
 }
 
-// ============================================================================
-// MARK: Small render helpers
-// ============================================================================
-
-interface MeterRowProps {
-  readonly label: string;
-  readonly value: number | undefined;
-  readonly valueLabel?: string;
+function clampPercent(value: number | undefined): number {
+  if (!Number.isFinite(value)) return 0;
+  if ((value as number) < 0) return 0;
+  if ((value as number) > 100) return 100;
+  return value as number;
 }
 
-const MeterRow = memo(function MeterRow({ label, value, valueLabel }: MeterRowProps) {
-  const v = clamp01(value);
-  const tone = meterTone(value);
+function resolveMetricFill(metric: HelperPromptMetricViewModel): string {
+  if (notBlank(metric.colorHex)) return metric.colorHex.trim();
+  switch (metric.tone) {
+    case 'positive':
+      return TOKENS.emerald;
+    case 'warning':
+      return TOKENS.amber;
+    case 'danger':
+      return TOKENS.red;
+    case 'dramatic':
+      return TOKENS.violet;
+    case 'neutral':
+    default:
+      return TOKENS.indigo;
+  }
+}
+
+function resolveEvidenceColor(evidence: HelperPromptEvidenceViewModel): string {
+  switch (evidence.tone) {
+    case 'positive':
+      return TOKENS.emerald;
+    case 'warning':
+      return TOKENS.amber;
+    case 'danger':
+      return TOKENS.red;
+    case 'dramatic':
+      return TOKENS.violet;
+    case 'neutral':
+    default:
+      return TOKENS.text;
+  }
+}
+
+function channelMismatchLabel(
+  promptChannel: ChatVisibleChannel | undefined,
+  activeChannel: ChatVisibleChannel | undefined,
+): string | null {
+  if (!promptChannel || !activeChannel) return null;
+  if (promptChannel === activeChannel) return null;
+  return `Viewing ${activeChannel.replaceAll('_', ' ')} while assist targets ${promptChannel.replaceAll('_', ' ')}.`;
+}
+
+// ============================================================================
+// MARK: Presentational subcomponents
+// ============================================================================
+
+interface BadgeProps {
+  readonly badge: HelperPromptBadgeViewModel;
+  readonly accentOverride?: string;
+}
+
+const Badge = memo(function Badge({ badge, accentOverride }: BadgeProps): React.JSX.Element {
+  const color = accentOverride ?? toneColor(badge.tone);
+
+  return (
+    <span
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 8,
+        borderRadius: 999,
+        padding: '6px 10px',
+        border: `1px solid ${toneBorder(badge.tone)}`,
+        background: toneBackground(badge.tone),
+        color,
+        fontSize: 11,
+        fontWeight: 700,
+        letterSpacing: '0.06em',
+        textTransform: 'uppercase',
+        lineHeight: 1,
+        whiteSpace: 'nowrap',
+      }}
+      title={badge.description}
+    >
+      {notBlank(badge.leadingDotColorHex) ? (
+        <span
+          aria-hidden="true"
+          style={{
+            width: 8,
+            height: 8,
+            borderRadius: 999,
+            background: badge.leadingDotColorHex,
+            boxShadow: `0 0 0 4px color-mix(in srgb, ${badge.leadingDotColorHex} 16%, transparent)`,
+          }}
+        />
+      ) : null}
+      <span>{badge.label}</span>
+    </span>
+  );
+});
+
+interface MetricRowProps {
+  readonly metric: HelperPromptMetricViewModel;
+}
+
+const MetricRow = memo(function MetricRow({ metric }: MetricRowProps): React.JSX.Element {
+  const percent = clampPercent(metric.percentValue);
+  const fill = resolveMetricFill(metric);
 
   return (
     <div style={{ display: 'grid', gap: 8 }}>
@@ -439,106 +343,207 @@ const MeterRow = memo(function MeterRow({ label, value, valueLabel }: MeterRowPr
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          gap: 8,
+          gap: 12,
         }}
       >
         <span
           style={{
-            color: TOKENS.textSub,
-            fontSize: 11,
-            fontWeight: 700,
-            letterSpacing: '0.08em',
-            textTransform: 'uppercase',
-            fontFamily: TOKENS.mono,
+            fontSize: 12,
+            fontWeight: 600,
+            color: TOKENS.textSoft,
           }}
         >
-          {label}
+          {metric.label}
         </span>
         <span
           style={{
-            color: tone.text,
-            fontSize: 11,
+            fontSize: 12,
             fontWeight: 700,
-            fontFamily: TOKENS.mono,
+            color: fill,
+            fontFamily: TOKENS.fontMono,
           }}
         >
-          {valueLabel ?? percentageLabel(v)}
+          {notBlank(metric.displayValue) ? metric.displayValue : `${Math.round(percent)}%`}
         </span>
       </div>
       <div
         aria-hidden="true"
         style={{
           position: 'relative',
-          height: 8,
-          borderRadius: 999,
           overflow: 'hidden',
-          background: 'rgba(255,255,255,0.05)',
+          height: 9,
+          borderRadius: 999,
+          background: 'rgba(255,255,255,0.06)',
           border: `1px solid ${TOKENS.border}`,
         }}
       >
         <div
           style={{
-            position: 'absolute',
-            inset: 0,
-            width: `${Math.max(4, v * 100)}%`,
+            width: `${percent}%`,
+            height: '100%',
             borderRadius: 999,
-            background: `linear-gradient(90deg, ${tone.bar}, ${tone.bar})`,
-            boxShadow: `0 0 14px ${tone.glow}`,
-            transition: 'width 180ms ease',
+            background: fill,
+            boxShadow: `0 0 18px color-mix(in srgb, ${fill} 30%, transparent)`,
           }}
         />
       </div>
+      {notBlank(metric.caption) ? (
+        <p
+          style={{
+            margin: 0,
+            fontSize: 12,
+            lineHeight: 1.55,
+            color: TOKENS.textMuted,
+          }}
+        >
+          {metric.caption}
+        </p>
+      ) : null}
     </div>
   );
 });
 
 interface EvidenceRowProps {
-  readonly item: ChatHelperEvidenceLine;
+  readonly evidence: HelperPromptEvidenceViewModel;
 }
 
-const EvidenceRow = memo(function EvidenceRow({ item }: EvidenceRowProps) {
-  const polarityColor =
-    item.polarity === 'POSITIVE'
-      ? TOKENS.green
-      : item.polarity === 'NEGATIVE'
-        ? TOKENS.red
-        : item.polarity === 'WARNING'
-          ? TOKENS.orange
-          : TOKENS.text;
+const EvidenceRow = memo(function EvidenceRow({ evidence }: EvidenceRowProps): React.JSX.Element {
+  const valueColor = resolveEvidenceColor(evidence);
 
   return (
     <div
       style={{
         display: 'grid',
         gridTemplateColumns: 'minmax(0, 1fr) auto',
-        gap: 10,
-        padding: '10px 12px',
-        borderRadius: 12,
-        background: 'rgba(255,255,255,0.03)',
+        gap: 12,
+        alignItems: 'start',
+        padding: '12px 14px',
+        borderRadius: TOKENS.radiusSm,
         border: `1px solid ${TOKENS.border}`,
+        background: 'rgba(255,255,255,0.03)',
       }}
     >
+      <div style={{ display: 'grid', gap: 4 }}>
+        <span
+          style={{
+            fontSize: 12,
+            fontWeight: 700,
+            color: TOKENS.textSoft,
+            letterSpacing: '0.01em',
+          }}
+        >
+          {evidence.label}
+        </span>
+        {notBlank(evidence.caption) ? (
+          <span
+            style={{
+              fontSize: 12,
+              lineHeight: 1.55,
+              color: TOKENS.textMuted,
+            }}
+          >
+            {evidence.caption}
+          </span>
+        ) : null}
+      </div>
       <span
         style={{
-          color: TOKENS.textSub,
           fontSize: 12,
-          fontWeight: 600,
-        }}
-      >
-        {item.label}
-      </span>
-      <span
-        style={{
-          color: polarityColor,
-          fontSize: 12,
-          fontWeight: 700,
-          fontFamily: TOKENS.mono,
+          fontWeight: 800,
+          color: valueColor,
+          fontFamily: TOKENS.fontMono,
           whiteSpace: 'nowrap',
         }}
       >
-        {item.value}
+        {evidence.value}
       </span>
     </div>
+  );
+});
+
+interface ActionButtonProps {
+  readonly action: HelperPromptActionViewModel;
+  readonly accent: string;
+  readonly onPress?: (actionId: string) => void;
+}
+
+const ActionButton = memo(function ActionButton({
+  action,
+  accent,
+  onPress,
+}: ActionButtonProps): React.JSX.Element {
+  const disabled = Boolean(action.disabled);
+
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={() => {
+        if (!disabled) onPress?.(action.id);
+      }}
+      title={action.blockedReason || action.description}
+      style={{
+        appearance: 'none',
+        display: 'grid',
+        gap: 6,
+        width: '100%',
+        textAlign: 'left',
+        padding: '14px 14px 13px',
+        borderRadius: TOKENS.radiusMd,
+        cursor: disabled ? 'not-allowed' : 'pointer',
+        opacity: disabled ? 0.56 : 1,
+        transition: 'transform 120ms ease, box-shadow 120ms ease, border-color 120ms ease',
+        ...actionStyles(action, accent),
+      }}
+    >
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 10,
+        }}
+      >
+        <span style={{ fontSize: 13, fontWeight: 800, lineHeight: 1.25 }}>{action.label}</span>
+        {notBlank(action.hotkeyHint) ? (
+          <span
+            style={{
+              fontSize: 11,
+              fontWeight: 700,
+              color: action.variant === 'primary' ? 'rgba(255,255,255,0.88)' : TOKENS.textMuted,
+              fontFamily: TOKENS.fontMono,
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {action.hotkeyHint}
+          </span>
+        ) : null}
+      </div>
+
+      {notBlank(action.description) ? (
+        <span
+          style={{
+            fontSize: 12,
+            lineHeight: 1.5,
+            color: action.variant === 'primary' ? 'rgba(255,255,255,0.86)' : TOKENS.textSoft,
+          }}
+        >
+          {action.description}
+        </span>
+      ) : null}
+
+      {disabled && notBlank(action.blockedReason) ? (
+        <span
+          style={{
+            fontSize: 11,
+            lineHeight: 1.45,
+            color: TOKENS.textMuted,
+          }}
+        >
+          {action.blockedReason}
+        </span>
+      ) : null}
+    </button>
   );
 });
 
@@ -549,107 +554,54 @@ const EvidenceRow = memo(function EvidenceRow({ item }: EvidenceRowProps) {
 function ChatHelperPromptComponent({
   prompt,
   activeChannel,
-  mountChannel,
-  unreadCount = 0,
-  isCollapsed = false,
-  compactMode = false,
-  showChannelBadge = true,
-  showAuthorityLine = true,
-  showSceneLine = true,
   className,
   style,
   onDismiss,
-  onSelectAction,
+  onAction,
   onOpenChannel,
 }: ChatHelperPromptProps): React.JSX.Element | null {
-  const panelId = useId();
+  const titleId = useId();
+  const bodyId = useId();
 
-  const derived = useMemo(() => {
-    if (!prompt) return null;
+  if (!prompt || !prompt.visible) return null;
 
-    const channelVisual = channelTone(prompt.visibleChannel);
-    const priorityVisual = priorityTone(prompt.interruptPriority);
-    const confidenceValue = prompt.confidenceScore;
-    const urgencyValue = prompt.urgencyScore;
-    const trustValue = prompt.trustScore;
-    const avatarText = prompt.helperAvatarText || makeAvatarText(prompt.helperName);
-    const intentColor = prompt.helperAccent || prompt.helperColor || intentAccent(prompt.intent);
-    const responseWindow = formatWindowLabel(prompt.responseWindowLabel, prompt.responseWindowMs);
-    const density = prompt.density ?? (compactMode ? 'COMPACT' : 'STANDARD');
-    const visibleActions = prompt.actions.filter((action) => {
-      if (!action.channelGuard || action.channelGuard.length === 0) return true;
-      return action.channelGuard.includes(prompt.visibleChannel);
-    });
-
-    return {
-      channelVisual,
-      priorityVisual,
-      confidenceValue,
-      urgencyValue,
-      trustValue,
-      avatarText,
-      intentColor,
-      responseWindow,
-      density,
-      visibleActions,
-    };
-  }, [prompt, compactMode]);
-
-  if (!prompt || !derived) return null;
-  if (isCollapsed) return null;
-
-  const channelMismatch = activeChannel !== prompt.visibleChannel;
-  const mountMismatch = mountChannel && mountChannel !== prompt.visibleChannel;
-  const densityIsCompact = derived.density === 'COMPACT';
-  const densityIsExpanded = derived.density === 'EXPANDED';
-  const canDismiss = prompt.isDismissible !== false;
+  const density = resolveDensity(prompt);
+  const accent = resolveAccent(prompt);
+  const isCompact = density === 'compact';
+  const isExpanded = density === 'expanded';
+  const channelNote = channelMismatchLabel(prompt.channel?.id, activeChannel);
+  const actorInitials = notBlank(prompt.actor.initials)
+    ? prompt.actor.initials.trim().slice(0, 3).toUpperCase()
+    : initialsFromName(prompt.actor.displayName);
 
   return (
-    <section
-      aria-labelledby={`${panelId}-title`}
-      aria-describedby={`${panelId}-body`}
+    <aside
+      aria-labelledby={titleId}
+      aria-describedby={bodyId}
       className={className}
       style={{
         position: 'relative',
-        display: 'grid',
-        gap: densityIsCompact ? 12 : 14,
-        padding: densityIsCompact ? 12 : 14,
-        borderRadius: 18,
-        background: `linear-gradient(180deg, ${TOKENS.cardHi}, ${TOKENS.card})`,
-        border: `1px solid ${prompt.isRescueCritical ? 'rgba(255,77,77,0.25)' : TOKENS.borderM}`,
-        boxShadow: prompt.isRescueCritical
-          ? '0 18px 38px rgba(255,77,77,0.12), 0 0 0 1px rgba(255,77,77,0.08) inset'
-          : '0 18px 38px rgba(0,0,0,0.34), 0 0 0 1px rgba(255,255,255,0.03) inset',
         overflow: 'hidden',
+        display: 'grid',
+        gap: isCompact ? 14 : 18,
+        padding: isCompact ? 16 : isExpanded ? 22 : 18,
+        borderRadius: TOKENS.radiusXl,
+        border: `1px solid ${TOKENS.borderStrong}`,
+        background: `${SURFACE_GRADIENT}, ${TOKENS.panel}`,
+        boxShadow: TOKENS.shadowLg,
+        color: TOKENS.text,
+        fontFamily: TOKENS.fontBody,
         ...style,
       }}
-      data-authority-root={CHAT_ENGINE_AUTHORITIES.frontendEngineRoot}
-      data-visible-channel={prompt.visibleChannel}
-      data-helper-prompt-id={prompt.promptId}
     >
-      <style>{FONT_IMPORT}</style>
-      <style>{`
-        @keyframes pzo-helper-glow {
-          0%, 100% { box-shadow: 0 0 0 0 rgba(129,140,248,0.00); }
-          50% { box-shadow: 0 0 0 8px rgba(129,140,248,0.08); }
-        }
-
-        @keyframes pzo-helper-scan {
-          0% { transform: translateX(-120%); opacity: 0; }
-          30% { opacity: 0.8; }
-          100% { transform: translateX(120%); opacity: 0; }
-        }
-      `}</style>
-
       <div
         aria-hidden="true"
         style={{
           position: 'absolute',
-          insetInline: 0,
-          top: 0,
-          height: 3,
-          background: `linear-gradient(90deg, ${derived.intentColor}, ${derived.channelVisual.accent}, ${TOKENS.white})`,
-          opacity: 0.92,
+          inset: 0,
+          pointerEvents: 'none',
+          background: `radial-gradient(circle at top right, color-mix(in srgb, ${accent} 26%, transparent) 0%, transparent 42%)`,
+          opacity: 0.95,
         }}
       />
 
@@ -657,225 +609,149 @@ function ChatHelperPromptComponent({
         aria-hidden="true"
         style={{
           position: 'absolute',
-          top: -10,
-          left: -40,
-          width: 140,
-          height: 140,
-          borderRadius: '50%',
-          background: `${derived.intentColor}10`,
-          filter: 'blur(20px)',
-          pointerEvents: 'none',
+          inset: '0 auto 0 0',
+          width: 4,
+          background: accent,
+          boxShadow: `0 0 24px color-mix(in srgb, ${accent} 45%, transparent)`,
         }}
       />
-
-      <div
-        aria-hidden="true"
-        style={{
-          position: 'absolute',
-          insetInline: 0,
-          top: 0,
-          bottom: 0,
-          overflow: 'hidden',
-          pointerEvents: 'none',
-        }}
-      >
-        <div
-          style={{
-            position: 'absolute',
-            top: 0,
-            bottom: 0,
-            width: 56,
-            background:
-              'linear-gradient(90deg, rgba(255,255,255,0.00), rgba(255,255,255,0.05), rgba(255,255,255,0.00))',
-            transform: 'translateX(-120%)',
-            animation: prompt.isEscalated ? 'pzo-helper-scan 2.8s linear infinite' : 'none',
-          }}
-        />
-      </div>
 
       <header
         style={{
-          display: 'grid',
-          gap: 12,
           position: 'relative',
-          zIndex: 1,
+          display: 'grid',
+          gap: 14,
         }}
       >
         <div
           style={{
-            display: 'grid',
-            gridTemplateColumns: 'auto minmax(0, 1fr) auto',
+            display: 'flex',
+            alignItems: 'flex-start',
+            justifyContent: 'space-between',
             gap: 12,
-            alignItems: 'start',
           }}
         >
-          <div
-            aria-hidden="true"
-            style={{
-              width: densityIsCompact ? 38 : 44,
-              height: densityIsCompact ? 38 : 44,
-              borderRadius: 14,
-              display: 'grid',
-              placeItems: 'center',
-              fontFamily: TOKENS.display,
-              fontWeight: 800,
-              fontSize: densityIsCompact ? 12 : 13,
-              color: TOKENS.white,
-              background: `linear-gradient(135deg, ${derived.intentColor}, ${derived.channelVisual.accent})`,
-              boxShadow: '0 12px 26px rgba(0,0,0,0.28)',
-              animation: prompt.isEscalated ? 'pzo-helper-glow 1.8s ease-in-out infinite' : 'none',
-            }}
-          >
-            {derived.avatarText}
-          </div>
-
-          <div style={{ display: 'grid', gap: 7, minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
             <div
+              aria-hidden="true"
               style={{
-                display: 'flex',
-                flexWrap: 'wrap',
-                alignItems: 'center',
-                gap: 8,
+                width: isCompact ? 42 : 48,
+                height: isCompact ? 42 : 48,
+                borderRadius: 999,
+                display: 'grid',
+                placeItems: 'center',
+                background: `linear-gradient(135deg, ${accent}, rgba(255,255,255,0.14))`,
+                color: TOKENS.white,
+                boxShadow: TOKENS.shadowMd,
+                fontSize: 13,
+                fontWeight: 900,
+                letterSpacing: '0.08em',
               }}
             >
-              <span
-                style={{
-                  color: TOKENS.text,
-                  fontFamily: TOKENS.display,
-                  fontSize: densityIsCompact ? 15 : 16,
-                  fontWeight: 800,
-                  letterSpacing: '-0.02em',
-                  minWidth: 0,
-                }}
-              >
-                {prompt.helperName}
-              </span>
-
-              {prompt.helperRole ? (
-                <span
-                  style={{
-                    color: TOKENS.textSub,
-                    fontSize: 11,
-                    fontWeight: 700,
-                    letterSpacing: '0.08em',
-                    textTransform: 'uppercase',
-                    fontFamily: TOKENS.mono,
-                  }}
-                >
-                  {prompt.helperRole}
-                </span>
-              ) : null}
-
-              <span
-                style={{
-                  color: derived.priorityVisual.text,
-                  background: derived.priorityVisual.badge,
-                  border: `1px solid ${derived.priorityVisual.border}`,
-                  borderRadius: 999,
-                  padding: '4px 8px',
-                  fontSize: 10,
-                  fontWeight: 800,
-                  fontFamily: TOKENS.mono,
-                  letterSpacing: '0.08em',
-                  textTransform: 'uppercase',
-                }}
-              >
-                {prompt.interruptPriority ?? 'NORMAL'}
-              </span>
-
-              <span
-                style={{
-                  color: derived.intentColor,
-                  background: `${derived.intentColor}14`,
-                  border: `1px solid ${derived.intentColor}2A`,
-                  borderRadius: 999,
-                  padding: '4px 8px',
-                  fontSize: 10,
-                  fontWeight: 800,
-                  fontFamily: TOKENS.mono,
-                  letterSpacing: '0.08em',
-                  textTransform: 'uppercase',
-                }}
-              >
-                {INTENT_LABEL[prompt.intent]}
-              </span>
+              {actorInitials}
             </div>
 
-            <div
-              style={{
-                display: 'flex',
-                flexWrap: 'wrap',
-                alignItems: 'center',
-                gap: 8,
-              }}
-            >
-              <span
-                style={{
-                  color: TOKENS.textSub,
-                  fontSize: 11,
-                  fontWeight: 700,
-                  letterSpacing: '0.08em',
-                  textTransform: 'uppercase',
-                  fontFamily: TOKENS.mono,
-                }}
-              >
-                {TONE_LABEL[prompt.tone]}
-              </span>
-
-              {showChannelBadge ? (
-                <button
-                  type="button"
-                  onClick={() => onOpenChannel?.(prompt.visibleChannel)}
+            <div style={{ display: 'grid', gap: 3, minWidth: 0 }}>
+              {notBlank(prompt.copy.eyebrow) ? (
+                <span
                   style={{
-                    appearance: 'none',
-                    border: `1px solid ${derived.channelVisual.border}`,
-                    background: derived.channelVisual.bg,
-                    color: derived.channelVisual.accent,
-                    borderRadius: 999,
-                    padding: '4px 8px',
-                    cursor: onOpenChannel ? 'pointer' : 'default',
-                    fontSize: 10,
+                    fontSize: 11,
+                    lineHeight: 1,
+                    letterSpacing: '0.09em',
+                    textTransform: 'uppercase',
                     fontWeight: 800,
-                    fontFamily: TOKENS.mono,
-                    letterSpacing: '0.08em',
-                    textTransform: 'uppercase',
+                    color: TOKENS.textMuted,
                   }}
                 >
-                  {derived.channelVisual.label}
-                </button>
-              ) : null}
-
-              {derived.responseWindow ? (
-                <span
-                  style={{
-                    color: TOKENS.orange,
-                    fontSize: 11,
-                    fontWeight: 700,
-                    fontFamily: TOKENS.mono,
-                  }}
-                >
-                  {derived.responseWindow}
+                  {prompt.copy.eyebrow}
                 </span>
               ) : null}
+
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  flexWrap: 'wrap',
+                }}
+              >
+                <span
+                  style={{
+                    fontSize: isCompact ? 14 : 15,
+                    fontWeight: 900,
+                    lineHeight: 1.15,
+                    color: TOKENS.text,
+                  }}
+                >
+                  {prompt.actor.displayName}
+                </span>
+
+                {notBlank(prompt.actor.roleLabel) ? (
+                  <span
+                    style={{
+                      fontSize: 12,
+                      color: TOKENS.textMuted,
+                      lineHeight: 1.2,
+                    }}
+                  >
+                    {prompt.actor.roleLabel}
+                  </span>
+                ) : null}
+              </div>
+
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  flexWrap: 'wrap',
+                }}
+              >
+                {notBlank(prompt.presentation.intentLabel) ? (
+                  <span
+                    style={{
+                      fontSize: 12,
+                      fontWeight: 700,
+                      color: accent,
+                    }}
+                  >
+                    {prompt.presentation.intentLabel}
+                  </span>
+                ) : null}
+
+                {notBlank(prompt.presentation.toneLabel) ? (
+                  <span
+                    style={{
+                      fontSize: 12,
+                      color: TOKENS.textMuted,
+                    }}
+                  >
+                    {prompt.presentation.toneLabel}
+                  </span>
+                ) : null}
+              </div>
             </div>
           </div>
 
-          {canDismiss ? (
+          {prompt.dismissible ? (
             <button
               type="button"
               aria-label="Dismiss helper prompt"
-              onClick={() => onDismiss?.(prompt.promptId)}
+              onClick={() => onDismiss?.(prompt)}
               style={{
                 appearance: 'none',
-                width: 30,
-                height: 30,
-                borderRadius: 10,
+                width: 34,
+                height: 34,
+                borderRadius: 999,
                 border: `1px solid ${TOKENS.border}`,
                 background: 'rgba(255,255,255,0.03)',
-                color: TOKENS.textSub,
+                color: TOKENS.textSoft,
                 cursor: 'pointer',
+                display: 'grid',
+                placeItems: 'center',
                 fontSize: 16,
                 lineHeight: 1,
+                flexShrink: 0,
               }}
             >
               ×
@@ -883,176 +759,243 @@ function ChatHelperPromptComponent({
           ) : null}
         </div>
 
-        <div style={{ display: 'grid', gap: 8 }}>
-          <h3
-            id={`${panelId}-title`}
+        {(prompt.channel || prompt.badges.length > 0 || prompt.state.rescueCritical || prompt.state.escalated) ? (
+          <div
             style={{
-              margin: 0,
-              color: TOKENS.text,
-              fontFamily: TOKENS.display,
-              fontSize: densityIsCompact ? 17 : densityIsExpanded ? 21 : 19,
-              lineHeight: 1.1,
-              fontWeight: 800,
-              letterSpacing: '-0.025em',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              flexWrap: 'wrap',
             }}
           >
-            {prompt.title}
-          </h3>
-          <p
-            id={`${panelId}-body`}
-            style={{
-              margin: 0,
-              color: TOKENS.textSub,
-              fontSize: densityIsCompact ? 12.5 : 13.5,
-              lineHeight: 1.55,
-              fontWeight: 500,
-            }}
-          >
-            {prompt.body}
-          </p>
-          {prompt.tacticalSummary ? (
-            <div
-              style={{
-                display: 'grid',
-                gap: 4,
-                padding: '11px 12px',
-                borderRadius: 12,
-                background: 'rgba(255,255,255,0.03)',
-                border: `1px solid ${TOKENS.border}`,
-              }}
-            >
-              <span
+            {prompt.channel ? (
+              <button
+                type="button"
+                onClick={() => {
+                  if (prompt.channel?.openable) onOpenChannel?.(prompt.channel.id, prompt);
+                }}
+                disabled={!prompt.channel.openable}
                 style={{
-                  color: TOKENS.textMut,
-                  fontSize: 10,
+                  appearance: 'none',
+                  borderRadius: 999,
+                  padding: '6px 10px',
+                  border: `1px solid color-mix(in srgb, ${accent} 32%, rgba(255,255,255,0.10))`,
+                  background: `color-mix(in srgb, ${accent} 12%, transparent)`,
+                  color: accent,
+                  cursor: prompt.channel.openable ? 'pointer' : 'default',
+                  fontSize: 11,
                   fontWeight: 800,
-                  letterSpacing: '0.08em',
+                  letterSpacing: '0.07em',
                   textTransform: 'uppercase',
-                  fontFamily: TOKENS.mono,
                 }}
               >
-                Tactical summary
-              </span>
-              <span
-                style={{
-                  color: TOKENS.text,
-                  fontSize: 12.5,
-                  lineHeight: 1.45,
-                  fontWeight: 600,
-                }}
-              >
-                {prompt.tacticalSummary}
-              </span>
-            </div>
-          ) : null}
-        </div>
+                {prompt.channel.label}
+              </button>
+            ) : null}
+
+            {prompt.state.rescueCritical ? (
+              <Badge badge={{ label: 'Critical rescue', tone: 'danger' }} accentOverride={TOKENS.red} />
+            ) : null}
+
+            {prompt.state.escalated ? (
+              <Badge badge={{ label: 'Escalated', tone: 'warning' }} accentOverride={TOKENS.amber} />
+            ) : null}
+
+            {prompt.badges.map((badge) => (
+              <Badge key={badge.id} badge={badge} />
+            ))}
+          </div>
+        ) : null}
       </header>
 
-      <div style={{ display: 'grid', gap: 12, position: 'relative', zIndex: 1 }}>
-        <MeterRow
-          label={prompt.confidenceLabel ?? 'Confidence'}
-          value={derived.confidenceValue}
-          valueLabel={percentageLabel(derived.confidenceValue)}
-        />
+      <section
+        style={{
+          position: 'relative',
+          display: 'grid',
+          gap: isCompact ? 10 : 12,
+        }}
+      >
+        <div style={{ display: 'grid', gap: 8 }}>
+          <h3
+            id={titleId}
+            style={{
+              margin: 0,
+              fontSize: isCompact ? 18 : isExpanded ? 22 : 20,
+              fontWeight: 900,
+              lineHeight: 1.1,
+              letterSpacing: '-0.02em',
+              color: TOKENS.text,
+            }}
+          >
+            {prompt.copy.title}
+          </h3>
 
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: densityIsCompact ? '1fr' : 'repeat(2, minmax(0, 1fr))',
-            gap: 12,
-          }}
-        >
-          <MeterRow label="Urgency" value={derived.urgencyValue} />
-          {prompt.showTrustMeter !== false ? (
-            <MeterRow label="Trust window" value={derived.trustValue} />
-          ) : null}
+          <p
+            id={bodyId}
+            style={{
+              margin: 0,
+              fontSize: isCompact ? 13 : 14,
+              lineHeight: 1.68,
+              color: TOKENS.textSoft,
+            }}
+          >
+            {prompt.copy.body}
+          </p>
         </div>
 
-        {(Number.isFinite(prompt.reliefPotential) || Number.isFinite(prompt.expectedStabilization)) && (
+        {notBlank(prompt.copy.tacticalSummary) ? (
+          <div
+            style={{
+              padding: isCompact ? '12px 13px' : '13px 14px',
+              borderRadius: TOKENS.radiusMd,
+              border: `1px solid ${TOKENS.border}`,
+              background: 'rgba(255,255,255,0.03)',
+              display: 'grid',
+              gap: 6,
+            }}
+          >
+            <span
+              style={{
+                fontSize: 11,
+                fontWeight: 800,
+                letterSpacing: '0.08em',
+                textTransform: 'uppercase',
+                color: TOKENS.textMuted,
+              }}
+            >
+              Tactical summary
+            </span>
+            <p
+              style={{
+                margin: 0,
+                fontSize: 13,
+                lineHeight: 1.62,
+                color: TOKENS.text,
+              }}
+            >
+              {prompt.copy.tacticalSummary}
+            </p>
+          </div>
+        ) : null}
+
+        {(notBlank(prompt.copy.responseWindowLabel) ||
+          notBlank(prompt.copy.cooldownLabel) ||
+          notBlank(prompt.copy.sceneLabel) ||
+          notBlank(prompt.copy.authorityLabel) ||
+          channelNote) ? (
           <div
             style={{
               display: 'grid',
-              gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
-              gap: 10,
+              gap: 8,
             }}
           >
-            {Number.isFinite(prompt.reliefPotential) ? (
+            {notBlank(prompt.copy.sceneLabel) ? (
               <div
                 style={{
-                  display: 'grid',
-                  gap: 4,
-                  padding: '10px 12px',
-                  borderRadius: 12,
-                  background: 'rgba(34,221,136,0.06)',
-                  border: '1px solid rgba(34,221,136,0.14)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 10,
+                  flexWrap: 'wrap',
                 }}
               >
                 <span
                   style={{
-                    color: TOKENS.textMut,
-                    fontSize: 10,
+                    fontSize: 11,
                     fontWeight: 800,
-                    letterSpacing: '0.08em',
                     textTransform: 'uppercase',
-                    fontFamily: TOKENS.mono,
+                    letterSpacing: '0.08em',
+                    color: TOKENS.textMuted,
                   }}
                 >
-                  Relief potential
+                  Scene
                 </span>
-                <span
-                  style={{
-                    color: TOKENS.green,
-                    fontSize: 15,
-                    fontWeight: 800,
-                    fontFamily: TOKENS.display,
-                  }}
-                >
-                  {percentageLabel(prompt.reliefPotential)}
-                </span>
+                <span style={{ fontSize: 12, color: TOKENS.textSoft }}>{prompt.copy.sceneLabel}</span>
               </div>
             ) : null}
 
-            {Number.isFinite(prompt.expectedStabilization) ? (
+            {notBlank(prompt.copy.authorityLabel) ? (
               <div
                 style={{
-                  display: 'grid',
-                  gap: 4,
-                  padding: '10px 12px',
-                  borderRadius: 12,
-                  background: 'rgba(129,140,248,0.06)',
-                  border: '1px solid rgba(129,140,248,0.14)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 10,
+                  flexWrap: 'wrap',
                 }}
               >
                 <span
                   style={{
-                    color: TOKENS.textMut,
-                    fontSize: 10,
+                    fontSize: 11,
                     fontWeight: 800,
-                    letterSpacing: '0.08em',
                     textTransform: 'uppercase',
-                    fontFamily: TOKENS.mono,
+                    letterSpacing: '0.08em',
+                    color: TOKENS.textMuted,
                   }}
                 >
-                  Stabilization
+                  Authority
                 </span>
-                <span
-                  style={{
-                    color: TOKENS.indigo,
-                    fontSize: 15,
-                    fontWeight: 800,
-                    fontFamily: TOKENS.display,
-                  }}
-                >
-                  {percentageLabel(prompt.expectedStabilization)}
-                </span>
+                <span style={{ fontSize: 12, color: TOKENS.textSoft }}>{prompt.copy.authorityLabel}</span>
               </div>
+            ) : null}
+
+            {(notBlank(prompt.copy.responseWindowLabel) || notBlank(prompt.copy.cooldownLabel)) ? (
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  flexWrap: 'wrap',
+                }}
+              >
+                {notBlank(prompt.copy.responseWindowLabel) ? (
+                  <Badge
+                    badge={{
+                      id: `${prompt.id}:response-window`,
+                      label: prompt.copy.responseWindowLabel,
+                      tone: 'neutral',
+                    }}
+                    accentOverride={accent}
+                  />
+                ) : null}
+                {notBlank(prompt.copy.cooldownLabel) ? (
+                  <Badge
+                    badge={{
+                      id: `${prompt.id}:cooldown`,
+                      label: prompt.copy.cooldownLabel,
+                      tone: 'neutral',
+                    }}
+                  />
+                ) : null}
+              </div>
+            ) : null}
+
+            {channelNote ? (
+              <p
+                style={{
+                  margin: 0,
+                  fontSize: 12,
+                  lineHeight: 1.55,
+                  color: TOKENS.textMuted,
+                }}
+              >
+                {channelNote}
+              </p>
             ) : null}
           </div>
-        )}
-      </div>
+        ) : null}
+      </section>
 
-      {prompt.showEvidence !== false && prompt.evidence && prompt.evidence.length > 0 ? (
-        <div style={{ display: 'grid', gap: 8, position: 'relative', zIndex: 1 }}>
+      {prompt.metrics.length > 0 ? (
+        <section
+          style={{
+            position: 'relative',
+            display: 'grid',
+            gap: 12,
+            padding: isCompact ? '14px 14px 13px' : '16px',
+            borderRadius: TOKENS.radiusLg,
+            border: `1px solid ${TOKENS.border}`,
+            background: `${SURFACE_GRADIENT}, ${TOKENS.panelElevated}`,
+          }}
+        >
           <div
             style={{
               display: 'flex',
@@ -1063,261 +1006,150 @@ function ChatHelperPromptComponent({
           >
             <span
               style={{
-                color: TOKENS.textMut,
-                fontSize: 10,
+                fontSize: 11,
                 fontWeight: 800,
                 letterSpacing: '0.08em',
                 textTransform: 'uppercase',
-                fontFamily: TOKENS.mono,
+                color: TOKENS.textMuted,
               }}
             >
-              Why this prompt fired
+              Stabilization read
             </span>
-            {typeof prompt.queuePosition === 'number' ? (
+            {typeof prompt.state.unreadCountHint === 'number' && prompt.state.unreadCountHint > 0 ? (
               <span
                 style={{
-                  color: TOKENS.textSub,
-                  fontSize: 10,
-                  fontWeight: 700,
-                  fontFamily: TOKENS.mono,
+                  fontSize: 11,
+                  color: TOKENS.textMuted,
+                  fontFamily: TOKENS.fontMono,
                 }}
               >
-                Queue #{prompt.queuePosition}
+                +{prompt.state.unreadCountHint} unread
               </span>
             ) : null}
           </div>
-          <div style={{ display: 'grid', gap: 8 }}>
-            {prompt.evidence.map((item) => (
-              <EvidenceRow key={item.id} item={item} />
+
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: isCompact ? '1fr' : 'repeat(auto-fit, minmax(180px, 1fr))',
+              gap: 12,
+            }}
+          >
+            {prompt.metrics.map((metric) => (
+              <MetricRow key={metric.id} metric={metric} />
             ))}
           </div>
-        </div>
+        </section>
       ) : null}
 
-      <div style={{ display: 'grid', gap: 10, position: 'relative', zIndex: 1 }}>
-        <div
+      {prompt.evidence.length > 0 ? (
+        <section
           style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: 12,
-            flexWrap: 'wrap',
+            position: 'relative',
+            display: 'grid',
+            gap: 10,
           }}
         >
           <span
             style={{
-              color: TOKENS.textMut,
-              fontSize: 10,
+              fontSize: 11,
               fontWeight: 800,
               letterSpacing: '0.08em',
               textTransform: 'uppercase',
-              fontFamily: TOKENS.mono,
+              color: TOKENS.textMuted,
             }}
           >
-            Recommended actions
+            Evidence
           </span>
-          {prompt.cooldownLabel ? (
-            <span
-              style={{
-                color: TOKENS.textSub,
-                fontSize: 10,
-                fontWeight: 700,
-                fontFamily: TOKENS.mono,
-              }}
-            >
-              {prompt.cooldownLabel}
-            </span>
-          ) : null}
-        </div>
 
-        <div
+          <div style={{ display: 'grid', gap: 10 }}>
+            {prompt.evidence.map((item) => (
+              <EvidenceRow key={item.id} evidence={item} />
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      {prompt.actions.length > 0 ? (
+        <section
           style={{
+            position: 'relative',
             display: 'grid',
-            gridTemplateColumns: densityIsCompact ? '1fr' : 'repeat(auto-fit, minmax(144px, 1fr))',
             gap: 10,
           }}
         >
-          {derived.visibleActions.map((action) => {
-            const disabled = Boolean(action.disabled);
-            const mismatch = channelMismatch || Boolean(mountMismatch);
-            const clickDisabled = disabled || mismatch;
-
-            return (
-              <button
-                key={action.actionId}
-                type="button"
-                disabled={clickDisabled}
-                onClick={() => {
-                  if (clickDisabled) return;
-                  onSelectAction?.(prompt.promptId, action.actionId);
-                }}
-                title={action.blockedReason || action.description || action.label}
-                style={{
-                  appearance: 'none',
-                  width: '100%',
-                  minHeight: densityIsCompact ? 50 : 58,
-                  borderRadius: 14,
-                  padding: densityIsCompact ? '10px 12px' : '12px 13px',
-                  cursor: clickDisabled ? 'not-allowed' : 'pointer',
-                  opacity: clickDisabled ? 0.48 : 1,
-                  display: 'grid',
-                  gap: 5,
-                  textAlign: 'left',
-                  transition: 'transform 120ms ease, box-shadow 160ms ease',
-                  ...actionEmphasisStyle(action.emphasis),
-                }}
-              >
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    gap: 10,
-                  }}
-                >
-                  <span
-                    style={{
-                      fontSize: densityIsCompact ? 12.5 : 13,
-                      fontWeight: 800,
-                      fontFamily: TOKENS.display,
-                      letterSpacing: '-0.01em',
-                    }}
-                  >
-                    {action.shortLabel || action.label}
-                  </span>
-                  {action.hotkeyHint ? (
-                    <span
-                      style={{
-                        fontSize: 10,
-                        fontWeight: 700,
-                        fontFamily: TOKENS.mono,
-                        opacity: 0.88,
-                        whiteSpace: 'nowrap',
-                      }}
-                    >
-                      {action.hotkeyHint}
-                    </span>
-                  ) : null}
-                </div>
-                {action.description ? (
-                  <span
-                    style={{
-                      fontSize: 11.5,
-                      lineHeight: 1.35,
-                      opacity: 0.92,
-                    }}
-                  >
-                    {action.description}
-                  </span>
-                ) : null}
-                {action.optimisticPreview ? (
-                  <span
-                    style={{
-                      fontSize: 10,
-                      lineHeight: 1.35,
-                      fontFamily: TOKENS.mono,
-                      opacity: 0.82,
-                    }}
-                  >
-                    {action.optimisticPreview}
-                  </span>
-                ) : null}
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      <footer
-        style={{
-          display: 'grid',
-          gap: 6,
-          position: 'relative',
-          zIndex: 1,
-          paddingTop: 4,
-        }}
-      >
-        {channelMismatch ? (
-          <div
+          <span
             style={{
-              padding: '9px 11px',
-              borderRadius: 12,
-              background: 'rgba(255,140,0,0.08)',
-              border: '1px solid rgba(255,140,0,0.18)',
-              color: TOKENS.orange,
-              fontSize: 11.5,
-              lineHeight: 1.45,
-              fontWeight: 700,
+              fontSize: 11,
+              fontWeight: 800,
+              letterSpacing: '0.08em',
+              textTransform: 'uppercase',
+              color: TOKENS.textMuted,
             }}
           >
-            Helper prompt is staged for {derived.channelVisual.label}. Open that lane to act without cross-channel drift.
-          </div>
-        ) : null}
+            Available actions
+          </span>
 
-        {showSceneLine && prompt.scenePlan ? (
           <div
             style={{
-              display: 'flex',
-              flexWrap: 'wrap',
-              alignItems: 'center',
-              gap: 8,
-              color: TOKENS.textMut,
-              fontSize: 10,
-              fontWeight: 700,
-              fontFamily: TOKENS.mono,
-              letterSpacing: '0.04em',
+              display: 'grid',
+              gridTemplateColumns: isCompact ? '1fr' : 'repeat(auto-fit, minmax(220px, 1fr))',
+              gap: 10,
             }}
           >
-            <span>Scene {prompt.scenePlan.sceneId}</span>
-            <span>•</span>
-            <span>{prompt.scenePlan.momentType ?? prompt.momentType ?? 'HELPER_RESCUE'}</span>
-            <span>•</span>
-            <span>{prompt.scenePlan.momentId}</span>
+            {prompt.actions.map((action) => (
+              <ActionButton
+                key={action.id}
+                action={action}
+                accent={accent}
+                onPress={(actionId) => onAction?.(actionId, prompt)}
+              />
+            ))}
           </div>
-        ) : null}
+        </section>
+      ) : null}
 
-        {prompt.footerNote ? (
-          <div
-            style={{
-              color: TOKENS.textSub,
-              fontSize: 11.5,
-              lineHeight: 1.45,
-              fontWeight: 600,
-            }}
-          >
-            {prompt.footerNote}
-          </div>
-        ) : null}
+      {(notBlank(prompt.copy.footerNote) || notBlank(prompt.copy.provenanceNote)) ? (
+        <footer
+          style={{
+            position: 'relative',
+            display: 'grid',
+            gap: 8,
+            paddingTop: 2,
+          }}
+        >
+          {notBlank(prompt.copy.footerNote) ? (
+            <p
+              style={{
+                margin: 0,
+                fontSize: 12,
+                lineHeight: 1.55,
+                color: TOKENS.textSoft,
+              }}
+            >
+              {prompt.copy.footerNote}
+            </p>
+          ) : null}
 
-        {(showAuthorityLine || prompt.provenanceNote || prompt.authorityNote) && (
-          <div
-            style={{
-              display: 'flex',
-              flexWrap: 'wrap',
-              alignItems: 'center',
-              gap: 8,
-              color: TOKENS.textMut,
-              fontSize: 10,
-              fontWeight: 700,
-              fontFamily: TOKENS.mono,
-              letterSpacing: '0.04em',
-            }}
-          >
-            {showAuthorityLine ? <span>Render shell only</span> : null}
-            {showAuthorityLine ? <span>•</span> : null}
-            {showAuthorityLine ? <span>{CHAT_ENGINE_AUTHORITIES.frontendEngineRoot}</span> : null}
-            {prompt.authorityNote ? <span>•</span> : null}
-            {prompt.authorityNote ? <span>{prompt.authorityNote}</span> : null}
-            {prompt.provenanceNote ? <span>•</span> : null}
-            {prompt.provenanceNote ? <span>{prompt.provenanceNote}</span> : null}
-            {unreadCount > 0 ? <span>•</span> : null}
-            {unreadCount > 0 ? <span>{unreadCount} unread in room</span> : null}
-          </div>
-        )}
-      </footer>
-    </section>
+          {notBlank(prompt.copy.provenanceNote) ? (
+            <p
+              style={{
+                margin: 0,
+                fontSize: 11,
+                lineHeight: 1.55,
+                color: TOKENS.textMuted,
+                fontFamily: TOKENS.fontMono,
+              }}
+            >
+              {prompt.copy.provenanceNote}
+            </p>
+          ) : null}
+        </footer>
+      ) : null}
+    </aside>
   );
 }
 
-export const ChatHelperPrompt = memo(ChatHelperPromptComponent);
+const ChatHelperPrompt = memo(ChatHelperPromptComponent);
+
 export default ChatHelperPrompt;
