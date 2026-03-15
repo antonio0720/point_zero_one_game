@@ -1,15 +1,4 @@
-import React, {
-  memo,
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-  type CSSProperties,
-  type UIEvent,
-} from 'react';
-import ChatMessageCard from './ChatMessageCard';
+import React, { memo, useEffect, useMemo } from 'react';
 import type {
   ChatUiDensity,
   ChatUiEmptyStateViewModel,
@@ -26,22 +15,27 @@ import type {
  * ============================================================================
  * POINT ZERO ONE — UNIFIED CHAT MESSAGE FEED
  * FILE: pzo-web/src/components/chat/ChatMessageFeed.tsx
- * VERSION: 3.0.0
+ * VERSION: 3.1.0
  * AUTHOR: OpenAI
  * LICENSE: Internal / Project Use Only
  * ============================================================================
  *
- * Render-only feed primitive for the thin chat shell.
+ * Purpose
+ * -------
+ * Render-only feed primitive for the unified chat shell.
+ *
+ * This version merges the older richer feed-row support with the newer
+ * self-contained renderer so it works cleanly with:
+ * - uiTypes.ts
+ * - useUnifiedChat.ts
+ * - UnifiedChatDock.tsx
  *
  * Design laws
  * -----------
- * 1. The feed consumes a normalized MessageFeedViewModel or FeedRowModel[] only.
- * 2. It does not parse raw transcript truth, moderation state, or engine events.
- * 3. Row grouping, unread markers, windowing, and interaction routing are
- *    presentation concerns here.
- * 4. Message formatting remains upstream; row rendering delegates to
- *    ChatMessageCard for message rows.
- * 5. Virtualization/windowing is allowed because it is a rendering concern.
+ * - UI only; never derive engine truth here.
+ * - Accept normalized feed rows only.
+ * - Support both modern MessageFeedViewModel input and direct row arrays.
+ * - Render all current row kinds without importing engine-lane helpers.
  * ============================================================================
  */
 
@@ -52,12 +46,14 @@ export interface ChatMessageFeedProps extends MessageFeedCallbacks {
   rows?: readonly FeedRowModel[];
   density?: ChatUiDensity;
   className?: string;
-  style?: CSSProperties;
+  style?: React.CSSProperties;
   followMode?: FeedFollowMode;
   overscan?: number;
   maxRows?: number;
   showJumpToLatest?: boolean;
-  cardActions?: readonly MessageCardActionViewModel[] | ((model: ChatUiMessageCardViewModel) => readonly MessageCardActionViewModel[]);
+  cardActions?:
+    | readonly MessageCardActionViewModel[]
+    | ((model: ChatUiMessageCardViewModel) => readonly MessageCardActionViewModel[]);
 }
 
 const TOKENS = Object.freeze({
@@ -71,7 +67,6 @@ const TOKENS = Object.freeze({
   textMute: '#70789C',
   white04: 'rgba(255,255,255,0.04)',
   white06: 'rgba(255,255,255,0.06)',
-  white08: 'rgba(255,255,255,0.08)',
   indigo: '#818CF8',
   indigoSoft: 'rgba(129,140,248,0.14)',
   cyan: '#22D3EE',
@@ -82,78 +77,79 @@ const TOKENS = Object.freeze({
   roseSoft: 'rgba(251,113,133,0.14)',
   emerald: '#34D399',
   emeraldSoft: 'rgba(52,211,153,0.14)',
-  shadow: '0 18px 56px rgba(0,0,0,0.34)',
   mono: "'IBM Plex Mono', 'JetBrains Mono', monospace",
   display: "'Syne', 'Outfit', system-ui, sans-serif",
 });
 
-function densityPack(density: ChatUiDensity | undefined) {
+function densityFont(density: ChatUiDensity | undefined): number {
   switch (density) {
     case 'compact':
-      return { pad: 10, rowGap: 8, headerPad: 10, footerPad: 10 };
+      return 13;
     case 'expanded':
-      return { pad: 18, rowGap: 12, headerPad: 14, footerPad: 14 };
+      return 15;
     case 'cinematic':
-      return { pad: 20, rowGap: 14, headerPad: 16, footerPad: 16 };
+      return 16;
     case 'comfortable':
     default:
-      return { pad: 14, rowGap: 10, headerPad: 12, footerPad: 12 };
+      return 14;
   }
 }
 
-function estimateRowHeight(row: ChatUiFeedRow, density: ChatUiDensity | undefined): number {
-  const base = density === 'compact' ? 66 : density === 'cinematic' ? 96 : 82;
-  switch (row.kind) {
-    case 'day_break':
-      return 42;
-    case 'unread_break':
-      return 48;
-    case 'scene_marker':
-      return 62;
-    case 'gap_marker':
-      return 54;
-    case 'typing_cluster':
-      return 56;
-    case 'load_older':
-      return 56;
-    case 'empty_state':
-      return 180;
-    default: {
-      const card = row as ChatUiMessageCardViewModel;
-      const bodyLines = Math.max(1, Math.ceil((card.body.primary.spans.map((span) => span.text).join('').length || 24) / (density === 'compact' ? 60 : 52)));
-      const quoteBonus = card.body.quote ? 56 : 0;
-      const attachmentBonus = (card.body.attachments?.length ?? 0) * 44;
-      const secondaryBonus = (card.body.secondary?.length ?? 0) * 28;
-      const reactionBonus = card.body.reactions?.length ? 28 : 0;
-      const hintBonus = card.body.commandHints?.length ? 36 : 0;
-      const metaBonus = card.displayHints.showMetaRail ? 98 : 34;
-      const actionBonus = (card.canJumpToCause || card.canInspectProof || card.canReply) ? 34 : 0;
-      return base + bodyLines * 20 + quoteBonus + attachmentBonus + secondaryBonus + reactionBonus + hintBonus + metaBonus + actionBonus;
-    }
-  }
+function isMessageRow(row: ChatUiFeedRow): row is ChatUiMessageCardViewModel {
+  return (row as ChatUiMessageCardViewModel).author !== undefined
+    && (row as ChatUiMessageCardViewModel).body !== undefined
+    && (row as ChatUiMessageCardViewModel).meta !== undefined;
 }
 
-function buildPrefix(rows: readonly ChatUiFeedRow[], density: ChatUiDensity | undefined, measured: Record<string, number>) {
-  const prefix = new Array(rows.length + 1).fill(0);
-  for (let index = 0; index < rows.length; index += 1) {
-    const row = rows[index];
-    prefix[index + 1] = prefix[index] + (measured[row.id] ?? estimateRowHeight(row, density));
+function resolveRows(model?: MessageFeedViewModel, rows?: readonly FeedRowModel[], maxRows?: number): readonly FeedRowModel[] {
+  const base = model?.flatRows ?? rows ?? [];
+  if (typeof maxRows === 'number' && maxRows > 0 && base.length > maxRows) {
+    return base.slice(base.length - maxRows);
   }
-  return prefix;
+  return base;
 }
 
-function lowerBound(prefix: readonly number[], target: number) {
-  let lo = 0;
-  let hi = prefix.length - 1;
-  while (lo < hi) {
-    const mid = Math.floor((lo + hi) / 2);
-    if (prefix[mid] < target) lo = mid + 1;
-    else hi = mid;
+function resolveVisibleRange(allRows: readonly FeedRowModel[]): ChatUiVisibleRange {
+  if (allRows.length === 0) {
+    return { startIndex: 0, endIndex: 0, totalCount: 0 };
   }
-  return Math.max(0, lo - 1);
+  return {
+    startIndex: 0,
+    endIndex: allRows.length - 1,
+    totalCount: allRows.length,
+  };
 }
 
-function EmptyStateCard({ model }: { model: ChatUiEmptyStateViewModel }) {
+function renderChip(label: string, tone: string = 'default'): React.JSX.Element {
+  const palette =
+    tone === 'danger'
+      ? { color: '#FFD7DC', bg: TOKENS.roseSoft, border: 'rgba(251,113,133,0.28)' }
+      : tone === 'warning'
+        ? { color: '#FFE8B0', bg: TOKENS.amberSoft, border: 'rgba(251,191,36,0.24)' }
+        : tone === 'premium'
+          ? { color: '#DDE3FF', bg: TOKENS.indigoSoft, border: 'rgba(129,140,248,0.24)' }
+          : { color: TOKENS.textSub, bg: TOKENS.white06, border: TOKENS.border };
+
+  return (
+    <span
+      style={{
+        fontSize: 10,
+        color: palette.color,
+        border: `1px solid ${palette.border}`,
+        borderRadius: 999,
+        padding: '4px 8px',
+        fontFamily: TOKENS.mono,
+        letterSpacing: '0.06em',
+        textTransform: 'uppercase',
+        background: palette.bg,
+      }}
+    >
+      {label}
+    </span>
+  );
+}
+
+function EmptyStateCard({ model }: { model: ChatUiEmptyStateViewModel }): React.JSX.Element {
   return (
     <div
       style={{
@@ -166,18 +162,13 @@ function EmptyStateCard({ model }: { model: ChatUiEmptyStateViewModel }) {
         color: TOKENS.text,
       }}
     >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        {model.icon && <div style={{ fontSize: 22 }}>{model.icon}</div>}
-        <div style={{ fontFamily: TOKENS.display, fontSize: 16, fontWeight: 800 }}>{model.title}</div>
-      </div>
+      <div style={{ fontFamily: TOKENS.display, fontSize: 16, fontWeight: 800 }}>{model.title}</div>
       <div style={{ color: TOKENS.textSub, lineHeight: 1.65 }}>{model.body}</div>
-      {model.hint && <div style={{ color: TOKENS.textMute, fontSize: 12 }}>{model.hint}</div>}
+      {model.hint ? <div style={{ color: TOKENS.textMute, fontSize: 12 }}>{model.hint}</div> : null}
       {model.actions?.length ? (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
           {model.actions.map((action) => (
-            <span key={action.id} style={{ borderRadius: 999, padding: '7px 10px', border: `1px solid ${TOKENS.border}`, background: TOKENS.white06, fontFamily: TOKENS.mono, fontSize: 10, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
-              {action.label}
-            </span>
+            <span key={action.id}>{renderChip(action.label, action.tone)}</span>
           ))}
         </div>
       ) : null}
@@ -199,7 +190,19 @@ const UnreadBreak = memo(function UnreadBreak({ label, count }: { label: string;
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 10, minHeight: 48 }}>
       <div style={{ flex: 1, height: 1, background: TOKENS.rose }} />
-      <div style={{ borderRadius: 999, border: `1px solid ${TOKENS.rose}`, background: TOKENS.roseSoft, color: '#FFD8DE', padding: '7px 12px', fontFamily: TOKENS.mono, fontSize: 10, letterSpacing: '0.10em', textTransform: 'uppercase' }}>
+      <div
+        style={{
+          borderRadius: 999,
+          border: `1px solid ${TOKENS.rose}`,
+          background: TOKENS.roseSoft,
+          color: '#FFD8DE',
+          padding: '7px 12px',
+          fontFamily: TOKENS.mono,
+          fontSize: 10,
+          letterSpacing: '0.10em',
+          textTransform: 'uppercase',
+        }}
+      >
         {label}{typeof count === 'number' ? ` · ${count}` : ''}
       </div>
       <div style={{ flex: 1, height: 1, background: TOKENS.rose }} />
@@ -212,7 +215,7 @@ const SceneMarker = memo(function SceneMarker({ label, subtitle }: { label: stri
     <div style={{ minHeight: 62, display: 'grid', gap: 6, borderRadius: 14, border: `1px solid ${TOKENS.border}`, background: TOKENS.white04, padding: '10px 12px' }}>
       <div style={{ fontFamily: TOKENS.mono, fontSize: 10, letterSpacing: '0.08em', color: TOKENS.indigo, textTransform: 'uppercase' }}>Scene</div>
       <div style={{ color: TOKENS.text, fontWeight: 800, fontFamily: TOKENS.display }}>{label}</div>
-      {subtitle && <div style={{ color: TOKENS.textSub, fontSize: 12 }}>{subtitle}</div>}
+      {subtitle ? <div style={{ color: TOKENS.textSub, fontSize: 12 }}>{subtitle}</div> : null}
     </div>
   );
 });
@@ -251,7 +254,17 @@ const TypingCluster = memo(function TypingCluster({ label, actorLabels }: { labe
   );
 });
 
-const LoadOlderRow = memo(function LoadOlderRow({ label, available, pending, onLoadOlder }: { label: string; available?: boolean; pending?: boolean; onLoadOlder?: () => void }) {
+const LoadOlderRow = memo(function LoadOlderRow({
+  label,
+  available,
+  pending,
+  onLoadOlder,
+}: {
+  label: string;
+  available?: boolean;
+  pending?: boolean;
+  onLoadOlder?: () => void;
+}) {
   return (
     <button
       type="button"
@@ -278,6 +291,182 @@ const LoadOlderRow = memo(function LoadOlderRow({ label, available, pending, onL
   );
 });
 
+function MessageCard({
+  row,
+  density,
+  actions,
+  onSelectMessage,
+  onMessageAction,
+  onSelectSender,
+  onInspectProof,
+  onJumpToCause,
+  onActivateQuote,
+}: {
+  row: ChatUiMessageCardViewModel;
+  density?: ChatUiDensity;
+  actions: readonly MessageCardActionViewModel[];
+} & Pick<
+  ChatMessageFeedProps,
+  'onSelectMessage' | 'onMessageAction' | 'onSelectSender' | 'onInspectProof' | 'onJumpToCause' | 'onActivateQuote'
+>): React.JSX.Element {
+  const text = row.body.primary.spans.map((span) => span.text).join('');
+  const bodyFont = densityFont(density);
+
+  return (
+    <div
+      onClick={() => onSelectMessage?.(row.id, row)}
+      style={{
+        border: '1px solid rgba(255,255,255,0.10)',
+        background: 'rgba(255,255,255,0.03)',
+        borderRadius: 14,
+        padding: 12,
+        display: 'grid',
+        gap: 8,
+        cursor: onSelectMessage ? 'pointer' : 'default',
+      }}
+    >
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+        <span style={{ color: '#f5f7ff', fontWeight: 700, fontSize: 13 }}>{row.author.displayName}</span>
+        {row.author.roleLabel ? <span style={{ color: '#a7b2d4', fontSize: 11 }}>{row.author.roleLabel}</span> : null}
+        <span style={{ color: '#7180a8', fontSize: 11 }}>{row.meta.timestamp.displayLabel}</span>
+        {row.meta.channel?.channelLabel ? <span style={{ color: '#8ea0ff', fontSize: 11 }}>{row.meta.channel.channelLabel}</span> : null}
+      </div>
+
+      <div style={{ color: '#f5f7ff', fontSize: bodyFont, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{text}</div>
+
+      {row.body.quote?.text ? (
+        <button
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            onActivateQuote?.(row.body.quote?.messageId, row);
+          }}
+          style={{
+            appearance: 'none',
+            textAlign: 'left',
+            border: `1px solid ${TOKENS.border}`,
+            background: TOKENS.white04,
+            color: TOKENS.textSub,
+            borderRadius: 12,
+            padding: '10px 12px',
+            cursor: 'pointer',
+          }}
+        >
+          {row.body.quote.text}
+        </button>
+      ) : null}
+
+      {row.body.attachments?.length ? (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+          {row.body.attachments.map((attachment) => (
+            <span key={attachment.id}>{renderChip(attachment.label, attachment.tone)}</span>
+          ))}
+        </div>
+      ) : null}
+
+      {(row.meta.chips?.length || actions.length || row.canInspectProof || row.canJumpToCause) ? (
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          {row.meta.chips?.map((chip) => (
+            <span key={chip.id}>{renderChip(chip.shortLabel || chip.label, chip.tone)}</span>
+          ))}
+
+          {row.canInspectProof ? (
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                onInspectProof?.(row.meta.proof?.proofId, row);
+              }}
+              style={{
+                appearance: 'none',
+                border: '1px solid rgba(255,255,255,0.10)',
+                background: 'rgba(255,255,255,0.04)',
+                color: '#f5f7ff',
+                borderRadius: 10,
+                padding: '6px 8px',
+                fontSize: 11,
+                cursor: 'pointer',
+              }}
+            >
+              Proof
+            </button>
+          ) : null}
+
+          {row.canJumpToCause ? (
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                onJumpToCause?.(row.id, row);
+              }}
+              style={{
+                appearance: 'none',
+                border: '1px solid rgba(255,255,255,0.10)',
+                background: 'rgba(255,255,255,0.04)',
+                color: '#f5f7ff',
+                borderRadius: 10,
+                padding: '6px 8px',
+                fontSize: 11,
+                cursor: 'pointer',
+              }}
+            >
+              Cause
+            </button>
+          ) : null}
+
+          {onSelectSender ? (
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                onSelectSender(row.author.id, row);
+              }}
+              style={{
+                appearance: 'none',
+                border: '1px solid rgba(255,255,255,0.10)',
+                background: 'rgba(255,255,255,0.04)',
+                color: '#f5f7ff',
+                borderRadius: 10,
+                padding: '6px 8px',
+                fontSize: 11,
+                cursor: 'pointer',
+              }}
+            >
+              Sender
+            </button>
+          ) : null}
+
+          {actions.map((action) => (
+            <button
+              key={action.id}
+              type="button"
+              disabled={action.disabled}
+              onClick={(event) => {
+                event.stopPropagation();
+                onMessageAction?.(action.id, row.id, row);
+              }}
+              title={action.tooltip}
+              style={{
+                appearance: 'none',
+                border: '1px solid rgba(255,255,255,0.10)',
+                background: action.primary ? TOKENS.indigoSoft : 'rgba(255,255,255,0.04)',
+                color: '#f5f7ff',
+                borderRadius: 10,
+                padding: '6px 8px',
+                fontSize: 11,
+                cursor: action.disabled ? 'not-allowed' : 'pointer',
+                opacity: action.disabled ? 0.5 : 1,
+              }}
+            >
+              {action.label}
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export const ChatMessageFeed = memo(function ChatMessageFeed({
   model,
   rows,
@@ -299,175 +488,100 @@ export const ChatMessageFeed = memo(function ChatMessageFeed({
   onInspectProof,
   onJumpToCause,
   onActivateQuote,
-}: ChatMessageFeedProps) {
-  const scrollerRef = useRef<HTMLDivElement | null>(null);
-  const bottomRef = useRef<HTMLDivElement | null>(null);
-  const rowRefs = useRef<Record<string, HTMLDivElement | null>>({});
-  const [viewportHeight, setViewportHeight] = useState(420);
-  const [scrollTop, setScrollTop] = useState(0);
-  const [measuredHeights, setMeasuredHeights] = useState<Record<string, number>>({});
-  const [userScrolledAway, setUserScrolledAway] = useState(false);
-
-  const densityInfo = densityPack(density);
-  const rawRows = useMemo(() => (model?.flatRows ?? rows ?? []), [model, rows]);
-  const effectiveRows = useMemo(
-    () => (typeof maxRows === 'number' && rawRows.length > maxRows ? rawRows.slice(rawRows.length - maxRows) : rawRows),
-    [rawRows, maxRows],
-  );
-
-  const prefix = useMemo(() => buildPrefix(effectiveRows, density, measuredHeights), [effectiveRows, density, measuredHeights]);
-  const totalHeight = prefix[prefix.length - 1] ?? 0;
-
-  const startIndex = useMemo(() => Math.max(0, lowerBound(prefix, scrollTop) - overscan), [prefix, scrollTop, overscan]);
-  const endIndex = useMemo(() => Math.min(effectiveRows.length - 1, lowerBound(prefix, scrollTop + viewportHeight) + overscan), [effectiveRows.length, overscan, prefix, scrollTop, viewportHeight]);
-
-  const visibleRows = useMemo(() => effectiveRows.slice(startIndex, endIndex + 1), [effectiveRows, startIndex, endIndex]);
-  const topSpacer = prefix[startIndex] ?? 0;
-  const bottomSpacer = Math.max(0, totalHeight - (prefix[endIndex + 1] ?? totalHeight));
+}: ChatMessageFeedProps): React.JSX.Element {
+  const effectiveRows = useMemo(() => resolveRows(model, rows, maxRows), [model, rows, maxRows]);
+  const visibleRange = useMemo(() => resolveVisibleRange(effectiveRows), [effectiveRows]);
 
   useEffect(() => {
-    onVisibleRangeChange?.({ startIndex, endIndex, totalCount: effectiveRows.length });
-  }, [startIndex, endIndex, effectiveRows.length, onVisibleRangeChange]);
+    onVisibleRangeChange?.(visibleRange);
+  }, [onVisibleRangeChange, visibleRange]);
 
-  useLayoutEffect(() => {
-    const node = scrollerRef.current;
-    if (!node) return;
-    const update = () => setViewportHeight(node.clientHeight || 420);
-    update();
-    const observer = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(update) : null;
-    observer?.observe(node);
-    return () => observer?.disconnect();
-  }, []);
-
-  useEffect(() => {
-    if (followMode === 'MANUAL') return;
-    if (userScrolledAway && followMode !== 'LOCKED') return;
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-  }, [effectiveRows.length, followMode, userScrolledAway]);
-
-  const handleScroll = useCallback((event: UIEvent<HTMLDivElement>) => {
-    const node = event.currentTarget;
-    const nextGap = node.scrollHeight - node.scrollTop - node.clientHeight;
-    setScrollTop(node.scrollTop);
-    setUserScrolledAway(nextGap > 72);
-  }, []);
-
-  const measureRow = useCallback((id: string, node: HTMLDivElement | null) => {
-    rowRefs.current[id] = node;
-    if (!node) return;
-    const nextHeight = Math.ceil(node.getBoundingClientRect().height);
-    setMeasuredHeights((current) => (current[id] === nextHeight ? current : { ...current, [id]: nextHeight }));
-  }, []);
-
-  const jumpToLatest = useCallback(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-    setUserScrolledAway(false);
-    onJumpToLatest?.();
-  }, [onJumpToLatest]);
-
-  const resolveCardActions = useCallback((message: ChatUiMessageCardViewModel) => {
-    if (typeof cardActions === 'function') return cardActions(message);
-    return cardActions ?? [];
+  const resolveActions = useMemo(() => {
+    return (row: ChatUiMessageCardViewModel): readonly MessageCardActionViewModel[] => {
+      if (typeof cardActions === 'function') return cardActions(row);
+      return cardActions ?? [];
+    };
   }, [cardActions]);
 
   return (
     <div
       className={className}
+      data-follow-mode={followMode}
+      data-overscan={overscan}
       style={{
-        position: 'relative',
+        display: 'grid',
+        gap: 10,
         width: '100%',
-        height: '100%',
-        minHeight: 0,
-        borderRadius: 20,
-        border: `1px solid ${TOKENS.border}`,
-        background: `linear-gradient(180deg, ${TOKENS.panel} 0%, ${TOKENS.surface} 100%)`,
-        boxShadow: TOKENS.shadow,
-        overflow: 'hidden',
         ...style,
       }}
     >
-      <div
-        ref={scrollerRef}
-        onScroll={handleScroll}
-        style={{
-          position: 'relative',
-          height: '100%',
-          overflowY: 'auto',
-          padding: densityInfo.pad,
-        }}
-      >
-        <div style={{ height: topSpacer }} />
+      {effectiveRows.length === 0 ? (
+        <EmptyStateCard
+          model={{
+            id: 'feed-empty',
+            kind: 'quiet_room',
+            title: 'No feed rows available',
+            body: 'The message feed is waiting for normalized rows from the UI adapter surface.',
+            tone: 'neutral',
+            accent: 'slate',
+          }}
+        />
+      ) : effectiveRows.map((row) => {
+        if (!isMessageRow(row)) {
+          switch (row.kind) {
+            case 'day_break':
+              return <DividerRow key={row.id} label={row.label} />;
+            case 'unread_break':
+              return <UnreadBreak key={row.id} label={row.label} count={row.unreadCount} />;
+            case 'scene_marker':
+              return <SceneMarker key={row.id} label={row.label} subtitle={row.subtitle} />;
+            case 'gap_marker':
+              return <GapMarker key={row.id} label={row.label} hiddenCount={row.hiddenCount} onActivate={() => onActivateRow?.(row.id, row)} />;
+            case 'typing_cluster':
+              return <TypingCluster key={row.id} label={row.label} actorLabels={row.entities.map((entity) => entity.label)} />;
+            case 'load_older':
+              return <LoadOlderRow key={row.id} label={row.label} available={row.available} pending={row.pending} onLoadOlder={onLoadOlder} />;
+            case 'empty_state':
+              return <EmptyStateCard key={row.id} model={row.model} />;
+            default:
+              return null;
+          }
+        }
 
-        <div style={{ display: 'grid', gap: densityInfo.rowGap }}>
-          {visibleRows.length === 0 ? (
-            <EmptyStateCard
-              model={{ kind: 'quiet_room', title: 'No feed rows available', body: 'The message feed is waiting for normalized rows from the UI adapter surface.' }}
-            />
-          ) : visibleRows.map((row) => {
-            switch (row.kind) {
-              case 'day_break':
-                return <div key={row.id} ref={(node) => measureRow(row.id, node)}><DividerRow label={row.label} /></div>;
-              case 'unread_break':
-                return <div key={row.id} ref={(node) => measureRow(row.id, node)}><UnreadBreak label={row.label} count={row.unreadCount} /></div>;
-              case 'scene_marker':
-                return <div key={row.id} ref={(node) => measureRow(row.id, node)}><SceneMarker label={row.label} subtitle={row.subtitle} /></div>;
-              case 'gap_marker':
-                return <div key={row.id} ref={(node) => measureRow(row.id, node)}><GapMarker label={row.label} hiddenCount={row.hiddenCount} onActivate={() => onActivateRow?.(row.id, row)} /></div>;
-              case 'typing_cluster':
-                return <div key={row.id} ref={(node) => measureRow(row.id, node)}><TypingCluster label={row.label} actorLabels={row.entities.map((entity) => entity.label)} /></div>;
-              case 'load_older':
-                return <div key={row.id} ref={(node) => measureRow(row.id, node)}><LoadOlderRow label={row.label} available={row.available} pending={row.pending} onLoadOlder={onLoadOlder} /></div>;
-              case 'empty_state':
-                return <div key={row.id} ref={(node) => measureRow(row.id, node)}><EmptyStateCard model={row.model} /></div>;
-              default:
-                return (
-                  <div key={row.id} ref={(node) => measureRow(row.id, node)}>
-                    <ChatMessageCard
-                      model={row}
-                      density={density}
-                      actions={resolveCardActions(row)}
-                      onSelectMessage={onSelectMessage}
-                      onMessageAction={onMessageAction}
-                      onSelectSender={onSelectSender}
-                      onInspectProof={onInspectProof}
-                      onJumpToCause={onJumpToCause}
-                      onActivateQuote={onActivateQuote}
-                    />
-                  </div>
-                );
-            }
-          })}
-        </div>
+        return (
+          <MessageCard
+            key={row.id}
+            row={row}
+            density={density}
+            actions={resolveActions(row)}
+            onSelectMessage={onSelectMessage}
+            onMessageAction={onMessageAction}
+            onSelectSender={onSelectSender}
+            onInspectProof={onInspectProof}
+            onJumpToCause={onJumpToCause}
+            onActivateQuote={onActivateQuote}
+          />
+        );
+      })}
 
-        <div style={{ height: bottomSpacer }} />
-        <div ref={bottomRef} />
-      </div>
-
-      {showJumpToLatest && userScrolledAway && (
+      {showJumpToLatest && onJumpToLatest ? (
         <button
           type="button"
-          onClick={jumpToLatest}
+          onClick={onJumpToLatest}
           style={{
-            position: 'absolute',
-            right: 14,
-            bottom: 14,
             appearance: 'none',
-            borderRadius: 999,
-            border: `1px solid ${TOKENS.indigo}`,
-            background: TOKENS.indigoSoft,
-            color: '#E0E4FF',
-            padding: '10px 14px',
+            border: '1px solid rgba(255,255,255,0.12)',
+            background: 'rgba(255,255,255,0.03)',
+            color: '#dfe6ff',
+            borderRadius: 12,
+            padding: '10px 12px',
             cursor: 'pointer',
-            fontFamily: TOKENS.mono,
-            fontSize: 10,
-            letterSpacing: '0.10em',
-            textTransform: 'uppercase',
-            boxShadow: '0 12px 24px rgba(0,0,0,0.28)',
+            justifySelf: 'end',
           }}
         >
           Jump to latest
         </button>
-      )}
+      ) : null}
     </div>
   );
 });

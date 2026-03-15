@@ -15,6 +15,21 @@ import type {
 import { buildEmptyStateViewModel } from './uiTypes';
 import type { ChatChannel, ChatMessage, GameChatContext } from './chatTypes';
 
+/**
+ * ============================================================================
+ * POINT ZERO ONE — TRANSCRIPT DRAWER ADAPTER
+ * FILE: pzo-web/src/components/chat/transcriptDrawerAdapter.ts
+ * VERSION: 1.1.0
+ * AUTHOR: OpenAI
+ * LICENSE: Internal / Project Use Only
+ * ============================================================================
+ *
+ * Thin transcript drawer surface adapter. This merges the older richer drawer
+ * row/filter/header shaping with the current shell contract exposed by
+ * uiTypes.ts and useUnifiedChat.ts.
+ * ============================================================================
+ */
+
 export type TranscriptDrawerKindScope = 'ALL' | string;
 export type TranscriptDrawerChannelScope = ChatChannel | 'ALL';
 
@@ -89,7 +104,7 @@ function channelLabel(channel: string): string {
 function toneForMessage(kind: string): ChatUiTone {
   if (kind === 'BOT_ATTACK' || kind === 'CASCADE_ALERT') return 'danger';
   if (kind === 'BOT_TAUNT') return 'hostile';
-  if (kind === 'MARKET_ALERT' || kind === 'DEAL') return 'warning';
+  if (kind === 'MARKET_ALERT' || kind === 'DEAL' || kind === 'DEAL_RECAP') return 'warning';
   if (kind === 'SYSTEM' || kind === 'SYSTEM_NOTICE') return 'premium';
   return 'neutral';
 }
@@ -175,12 +190,12 @@ function createChips(message: ChatMessage): ChatUiChip[] | undefined {
 
 function createRow(message: ChatMessage, selectedMessageId?: string | null): ChatUiTranscriptRowViewModel {
   const r = asRecord(message as unknown);
-  const senderName = asString((message as unknown as { senderName?: string }).senderName ?? r.senderName, 'Unknown');
-  const senderId = asString((message as unknown as { senderId?: string }).senderId ?? r.senderId, 'unknown');
-  const body = asString((message as unknown as { body?: string }).body ?? r.body, '');
-  const channel = asString((message as unknown as { channel?: string }).channel ?? r.channel, 'GLOBAL');
-  const kind = asString((message as unknown as { kind?: string }).kind ?? r.kind, 'SYSTEM');
-  const timestamp = asNumber((message as unknown as { ts?: number }).ts ?? r.ts, 0);
+  const senderName = asString(r.senderName, 'Unknown');
+  const senderId = asString(r.senderId, 'unknown');
+  const body = asString(r.body, '');
+  const channel = asString(r.channel, 'GLOBAL');
+  const kind = asString(r.kind, 'SYSTEM');
+  const timestamp = asNumber(r.ts, 0);
   const role: 'player' | 'system' = kind === 'PLAYER' ? 'player' : 'system';
 
   return {
@@ -223,23 +238,13 @@ function filterRows(
   const query = (params.searchQuery ?? '').trim().toLowerCase();
 
   return rows.filter((row) => {
-    if ((params.channelScope ?? 'ALL') !== 'ALL' && row.channelId !== params.channelScope) {
-      return false;
-    }
-    if ((params.kindScope ?? 'ALL') !== 'ALL' && row.kindId !== params.kindScope) {
-      return false;
-    }
-    if (params.proofOnly && !row.proofHashLabel) {
-      return false;
-    }
-    if (params.lockedOnly && !row.locked) {
-      return false;
-    }
+    if ((params.channelScope ?? 'ALL') !== 'ALL' && row.channelId !== params.channelScope) return false;
+    if ((params.kindScope ?? 'ALL') !== 'ALL' && row.kindId !== params.kindScope) return false;
+    if (params.proofOnly && !row.proofHashLabel) return false;
+    if (params.lockedOnly && !row.locked) return false;
     if (query.length > 0) {
       const haystack = `${row.actorLabel ?? ''} ${row.body} ${row.searchBlob ?? ''}`.toLowerCase();
-      if (!haystack.includes(query)) {
-        return false;
-      }
+      if (!haystack.includes(query)) return false;
     }
     return true;
   });
@@ -330,9 +335,7 @@ function buildDrawer(
   rows: readonly ChatUiTranscriptRowViewModel[],
   params: BuildTranscriptDrawerSurfaceParams,
 ): ChatUiTranscriptDrawerViewModel {
-  const selected = params.selectedMessageId
-    ? rows.find((row) => row.messageId === params.selectedMessageId)
-    : undefined;
+  const selected = params.selectedMessageId ? rows.find((row) => row.messageId === params.selectedMessageId) : undefined;
 
   const emptyState = rows.length === 0
     ? buildEmptyStateViewModel({

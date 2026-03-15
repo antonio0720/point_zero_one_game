@@ -704,10 +704,44 @@ export function useUnifiedChat({
   );
 
   const visibleMessages = useMemo(
+    () => sortedMessages.filter((msg) => msg.channel === activeTab),
+    [sortedMessages, activeTab],
+  );
+  const transcriptFilteredMessages = useMemo(
     () => transcriptSearchResult.messages,
     [transcriptSearchResult.messages],
   );
   const recentMessages = useMemo(() => visibleMessages.slice(-24), [visibleMessages]);
+
+  const {
+    feed: messageFeedModel,
+    actionsByMessageId: messageFeedActionsByMessageId,
+  } = useMemo(
+    () =>
+      buildMessageFeedSurfaceModel({
+        activeChannel: activeTab,
+        messages: visibleMessages,
+        unreadCount: unread[activeTab] ?? 0,
+        currentUserId: String((normalizedCtx as unknown as { playerId?: string }).playerId ?? 'player-local'),
+        newestFirst: false,
+        density: shellMode === 'DRAWER' ? 'expanded' : 'comfortable',
+        transcriptLocked,
+        hasOlder: allMessages.length > visibleMessages.length,
+        hasNewer: false,
+        ctx: normalizedCtx,
+        threatSnapshot: canonicalThreat,
+      }),
+    [
+      activeTab,
+      allMessages.length,
+      canonicalThreat,
+      normalizedCtx,
+      shellMode,
+      transcriptLocked,
+      unread,
+      visibleMessages,
+    ],
+  );
 
   const emptyStateMode = useMemo(
     () =>
@@ -715,12 +749,12 @@ export function useUnifiedChat({
         collapsed,
         connected,
         activeChannel: activeTab,
-        visibleMessages,
+        visibleMessages: transcriptOpen && transcriptSearch.trim().length > 0 ? transcriptFilteredMessages : visibleMessages,
         transcriptOpen,
         transcriptSearch,
         threat,
       }),
-    [collapsed, connected, activeTab, visibleMessages, transcriptOpen, transcriptSearch, threat],
+    [collapsed, connected, activeTab, visibleMessages, transcriptFilteredMessages, transcriptOpen, transcriptSearch, threat],
   );
 
   const setActiveChannel = useCallback(
@@ -926,6 +960,8 @@ export function useUnifiedChat({
     },
     transcriptDrawerModel,
     transcriptDrawerCallbacks,
+    messageFeedModel,
+    messageFeedActionsByMessageId,
     composer,
     latestMessage,
     latestPlayerMessage,
