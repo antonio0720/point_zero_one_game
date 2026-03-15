@@ -6,40 +6,41 @@
  *
  * Purpose
  * -------
- * Canonical shared contract surface for chat channels, room scopes, mounts,
- * presence theater permissions, and transport policy hints.
+ * Canonical channel, mount, scope, role, and runtime placement law for the
+ * unified chat system.
  *
- * This file is intentionally dense because it becomes the long-term authority
- * for every lane that touches chat:
- *   - /shared/contracts/chat
- *   - /pzo-web/src/engines/chat
- *   - /pzo-web/src/components/chat
- *   - /backend/src/game/engine/chat
- *   - /pzo-server/src/chat
+ * This merged version intentionally takes the strongest parts from both prior
+ * drafts:
+ *   1. the richer room/audit/presence-theater semantics,
+ *   2. the cleaner runtime-facing exports used by ChatEvents.ts,
+ *   3. explicit mount presets for the cross-screen pzo-web runtime,
+ *   4. deterministic helper utilities for frontend, backend, and transport.
  *
- * Design laws
- * -----------
- * 1. Shared contracts must not import runtime engine implementations.
- * 2. Channel vocabulary must preserve the current repo’s visible/shadow split.
- * 3. Mount surfaces must preserve the actual game surfaces already being used.
- * 4. Transport helpers must stay servant-side, never owning simulation truth.
- * 5. Shadow channels must remain first-class, not “debug-only” leftovers.
- * 6. The file must be safe for frontend, backend, and server transport import.
+ * Design doctrine
+ * ---------------
+ * 1. Shared contracts own identifiers and law, never runtime side effects.
+ * 2. Visible and shadow channels are both first-class, never debug leftovers.
+ * 3. Channel capability is explicit. No implicit behavior by string name.
+ * 4. Mount targets choose presentation defaults, not final backend authority.
+ * 5. Role and scope permissions must converge across frontend, backend, and
+ *    transport before any transcript mutation occurs.
+ * 6. Legacy aliases are normalized here so donor lanes can be frozen without
+ *    breaking migration shims.
  *
- * Repo-aligned doctrine
- * ---------------------
- * The live frontend donor contract already establishes the core vocabulary:
- * GLOBAL, SYNDICATE, DEAL_ROOM, LOBBY, plus SYSTEM_SHADOW, NPC_SHADOW,
- * RIVALRY_SHADOW, RESCUE_SHADOW, and LIVEOPS_SHADOW, along with the mount
- * surfaces used across BattleHUD, ClubUI, EmpireGameScreen, GameBoard,
- * LeagueUI, LobbyScreen, PhantomGameScreen, PredatorGameScreen, and
- * SyndicateGameScreen. This file folds that forward into the shared lane so the
- * frontend stops acting as the long-term authority. citeturn388142view0turn592088view0
+ * Canonical authority roots
+ * -------------------------
+ * - /shared/contracts/chat
+ * - /pzo-web/src/engines/chat
+ * - /pzo-web/src/components/chat
+ * - /backend/src/game/engine/chat
+ * - /pzo-server/src/chat
+ *
+ * Density6 LLC · Point Zero One · Sovereign Chat Runtime · Confidential
  * ============================================================================
  */
 
 // ============================================================================
-// MARK: Foundational utility types
+// MARK: Generic utility types
 // ============================================================================
 
 export type Brand<TValue, TBrand extends string> = TValue & {
@@ -51,7 +52,30 @@ export type TickNumber = Brand<number, 'TickNumber'>;
 export type Percentage = Brand<number, 'Percentage'>;
 export type Score01 = Brand<number, 'Score01'>;
 export type Score100 = Brand<number, 'Score100'>;
+
+export type ChatMessageId = Brand<string, 'ChatMessageId'>;
 export type ChatRoomId = Brand<string, 'ChatRoomId'>;
+export type ChatSessionId = Brand<string, 'ChatSessionId'>;
+export type ChatUserId = Brand<string, 'ChatUserId'>;
+export type ChatNpcId = Brand<string, 'ChatNpcId'>;
+export type ChatSceneId = Brand<string, 'ChatSceneId'>;
+export type ChatMomentId = Brand<string, 'ChatMomentId'>;
+export type ChatLegendId = Brand<string, 'ChatLegendId'>;
+export type ChatProofHash = Brand<string, 'ChatProofHash'>;
+export type ChatQuoteId = Brand<string, 'ChatQuoteId'>;
+export type ChatMemoryAnchorId = Brand<string, 'ChatMemoryAnchorId'>;
+export type ChatTelemetryId = Brand<string, 'ChatTelemetryId'>;
+export type ChatRequestId = Brand<string, 'ChatRequestId'>;
+export type ChatReplayId = Brand<string, 'ChatReplayId'>;
+export type ChatWorldEventId = Brand<string, 'ChatWorldEventId'>;
+export type ChatRelationshipId = Brand<string, 'ChatRelationshipId'>;
+export type ChatOfferId = Brand<string, 'ChatOfferId'>;
+export type ChatInterventionId = Brand<string, 'ChatInterventionId'>;
+export type ChatTypingToken = Brand<string, 'ChatTypingToken'>;
+export type ChatCursorId = Brand<string, 'ChatCursorId'>;
+export type ChatEnvelopeId = Brand<string, 'ChatEnvelopeId'>;
+export type ChatSequenceNumber = Brand<number, 'ChatSequenceNumber'>;
+export type ChatCausalEdgeId = Brand<string, 'ChatCausalEdgeId'>;
 export type ChatTopicName = Brand<string, 'ChatTopicName'>;
 export type ChatNamespace = Brand<string, 'ChatNamespace'>;
 export type ChatModeScopeId = Brand<string, 'ChatModeScopeId'>;
@@ -63,15 +87,33 @@ export type Nullable<T> = T | null;
 export type Optional<T> = T | undefined;
 
 export type JsonPrimitive = string | number | boolean | null;
+export type JsonValue = JsonPrimitive | JsonObject | JsonArray;
 export interface JsonObject {
   readonly [key: string]: JsonValue;
 }
 export type JsonArray = readonly JsonValue[];
-export type JsonValue = JsonPrimitive | JsonObject | JsonArray;
+
+export interface ChatRange {
+  readonly start: number;
+  readonly end: number;
+}
+
+export interface ChatVector3 {
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+}
+
+export type ChatDensity = 'COMPACT' | 'STANDARD' | 'EXPANDED';
+export type ChatUiTreatment = 'PRIMARY' | 'SECONDARY' | 'SHADOW' | 'CEREMONIAL';
 
 // ============================================================================
-// MARK: Public authority roots
+// MARK: Versions and canonical authority roots
 // ============================================================================
+
+export const CHAT_CONTRACT_VERSION = '2026.03.15' as const;
+export const CHAT_CHANNELS_PUBLIC_API_VERSION = '1.1.0' as const;
+export const CHAT_CONTRACT_REVISION = 'shared.chat.channels.v2.merged' as const;
 
 export const CHAT_CONTRACT_AUTHORITIES = Object.freeze({
   sharedContractsRoot: '/shared/contracts/chat',
@@ -82,15 +124,17 @@ export const CHAT_CONTRACT_AUTHORITIES = Object.freeze({
   serverTransportRoot: '/pzo-server/src/chat',
   frontendLearningRoot: '/pzo-web/src/engines/chat/intelligence',
   backendLearningRoot: '/backend/src/game/engine/chat/intelligence',
+  donorFrontendRoot: '/frontend/apps/web/components/chat',
+  legacyClientRoot: '/pzo_client/src/components/chat',
+  frontendStoreRoot: '/pzo-web/src/store',
+  frontendContextRoot: '/pzo-web/src/context',
+  frontendGameRoot: '/pzo-web/src/game',
 } as const);
 
 export type ChatAuthorityKey = keyof typeof CHAT_CONTRACT_AUTHORITIES;
 
-export const CHAT_CONTRACT_VERSION = '2026.03.15' as const;
-export const CHAT_CHANNELS_PUBLIC_API_VERSION = '1.0.0-alpha' as const;
-
 // ============================================================================
-// MARK: Channel identifiers
+// MARK: Channel identifiers and families
 // ============================================================================
 
 export const CHAT_VISIBLE_CHANNELS = [
@@ -118,11 +162,19 @@ export type ChatShadowChannel = (typeof CHAT_SHADOW_CHANNELS)[number];
 export type ChatChannelId = (typeof CHAT_ALL_CHANNELS)[number];
 
 /**
- * Migration compatibility alias.
- * Existing frontend chat components historically imported `ChatChannel` to mean
- * “visible tabs only.” Preserve that until the thin UI lane fully migrates.
+ * Compatibility alias for older pzo-web lanes that still type ChatChannel as a
+ * visible-only tab vocabulary.
  */
 export type ChatChannel = ChatVisibleChannel;
+
+export const CHAT_LEGACY_CHANNEL_ALIASES = Object.freeze({
+  DM: 'SYNDICATE',
+  SPECTATOR: 'GLOBAL',
+  DEALS: 'DEAL_ROOM',
+  WAR_ROOM: 'SYNDICATE',
+} as const);
+
+export type ChatLegacyChannelAlias = keyof typeof CHAT_LEGACY_CHANNEL_ALIASES;
 
 export const CHAT_CHANNEL_FAMILIES = [
   'PUBLIC',
@@ -140,8 +192,35 @@ export const CHAT_PERSISTENCE_CLASSES = [
   'ACCOUNT_SCOPED',
 ] as const;
 
-export type ChatPersistenceClass =
-  (typeof CHAT_PERSISTENCE_CLASSES)[number];
+export type ChatPersistenceClass = (typeof CHAT_PERSISTENCE_CLASSES)[number];
+
+export const CHAT_CHANNEL_TRANSCRIPT_CLASSES = [
+  'CANONICAL_TRANSCRIPT',
+  'AUXILIARY_TRANSCRIPT',
+  'SHADOW_LEDGER',
+] as const;
+
+export type ChatChannelTranscriptClass =
+  (typeof CHAT_CHANNEL_TRANSCRIPT_CLASSES)[number];
+
+export const CHAT_CHANNEL_REPLAY_CLASSES = [
+  'FULL_REPLAY',
+  'SUMMARY_REPLAY',
+  'HIDDEN_REPLAY',
+] as const;
+
+export type ChatChannelReplayClass = (typeof CHAT_CHANNEL_REPLAY_CLASSES)[number];
+
+export const CHAT_MODERATION_PROFILES = [
+  'PUBLIC_STRICT',
+  'TRUST_GATED',
+  'NEGOTIATION_STRICT',
+  'PRE_RUN_STANDARD',
+  'SYSTEM_INTERNAL',
+] as const;
+
+export type ChatChannelModerationProfile =
+  (typeof CHAT_MODERATION_PROFILES)[number];
 
 export const CHAT_AUDIT_VISIBILITY_CLASSES = [
   'PLAYER_VISIBLE',
@@ -164,6 +243,16 @@ export const CHAT_FANOUT_CLASSES = [
 
 export type ChatFanoutClass = (typeof CHAT_FANOUT_CLASSES)[number];
 
+export const CHAT_CHANNEL_FANOUT_SCOPES = [
+  'ROOM_BROADCAST',
+  'ROLE_SCOPED',
+  'SESSION_TARGETED',
+  'SYSTEM_INTERNAL',
+] as const;
+
+export type ChatChannelFanoutScope =
+  (typeof CHAT_CHANNEL_FANOUT_SCOPES)[number];
+
 export const CHAT_DELIVERY_PRIORITIES = [
   'IMMEDIATE',
   'HIGH',
@@ -172,8 +261,7 @@ export const CHAT_DELIVERY_PRIORITIES = [
   'DEFERRED',
 ] as const;
 
-export type ChatDeliveryPriority =
-  (typeof CHAT_DELIVERY_PRIORITIES)[number];
+export type ChatDeliveryPriority = (typeof CHAT_DELIVERY_PRIORITIES)[number];
 
 export const CHAT_STAGE_MOODS = [
   'CALM',
@@ -186,6 +274,20 @@ export const CHAT_STAGE_MOODS = [
 ] as const;
 
 export type ChatStageMood = (typeof CHAT_STAGE_MOODS)[number];
+
+export const CHAT_AUDIENCE_PROFILES = [
+  'PUBLIC_ARENA',
+  'TRUST_CIRCLE',
+  'PREDATORY_TABLE',
+  'PRE_RUN_STAGING',
+  'INTERNAL_MEMORY',
+] as const;
+
+export type ChatChannelAudienceProfile =
+  (typeof CHAT_AUDIENCE_PROFILES)[number];
+
+export const CHAT_COMPOSER_CLASSES = ['FULL', 'LIMITED', 'DISABLED'] as const;
+export type ChatComposerClass = (typeof CHAT_COMPOSER_CLASSES)[number];
 
 export const CHAT_PRESENCE_THEATER_PROFILES = [
   'NONE',
@@ -249,11 +351,10 @@ export const CHAT_ROOM_KEY_STRATEGIES = [
   'SERVER_INTERNAL',
 ] as const;
 
-export type ChatRoomKeyStrategy =
-  (typeof CHAT_ROOM_KEY_STRATEGIES)[number];
+export type ChatRoomKeyStrategy = (typeof CHAT_ROOM_KEY_STRATEGIES)[number];
 
 // ============================================================================
-// MARK: Channel capability descriptors
+// MARK: Rich channel descriptors
 // ============================================================================
 
 export interface ChatChannelDescriptor {
@@ -261,7 +362,11 @@ export interface ChatChannelDescriptor {
   readonly family: ChatChannelFamily;
   readonly displayName: string;
   readonly shortLabel: string;
+  readonly audienceProfile: ChatChannelAudienceProfile;
   readonly visibleToPlayer: boolean;
+  readonly visibleInTabs: boolean;
+  readonly writableByPlayer: boolean;
+  readonly composerClass: ChatComposerClass;
   readonly supportsComposer: boolean;
   readonly supportsPresence: boolean;
   readonly supportsTyping: boolean;
@@ -277,19 +382,44 @@ export interface ChatChannelDescriptor {
   readonly supportsLegendMoments: boolean;
   readonly supportsShadowWrites: boolean;
   readonly supportsProofHashExposure: boolean;
-  readonly persistenceClass: ChatPersistenceClass;
+  readonly transcriptClass: ChatChannelTranscriptClass;
+  readonly replayClass: ChatChannelReplayClass;
+  readonly moderationProfile: ChatChannelModerationProfile;
   readonly auditVisibility: ChatAuditVisibilityClass;
   readonly fanoutClass: ChatFanoutClass;
+  readonly fanoutScope: ChatChannelFanoutScope;
   readonly deliveryPriority: ChatDeliveryPriority;
+  readonly persistenceClass: ChatPersistenceClass;
   readonly defaultStageMood: ChatStageMood;
   readonly roomPurpose: ChatRoomPurpose;
   readonly roomScope: ChatRoomScope;
   readonly roomKeyStrategy: ChatRoomKeyStrategy;
   readonly presenceTheaterProfile: ChatPresenceTheaterProfile;
   readonly readReceiptPolicy: ChatReadReceiptPolicy;
-  readonly policyTags: readonly string[];
+  readonly retentionDays: number;
+  readonly maxBodyLength: number;
+  readonly maxTagCount: number;
+  readonly policyTags: readonly ChatPolicyTag[];
   readonly defaultShadowCompanions: readonly ChatShadowChannel[];
 }
+
+export const CHAT_POLICY_TAGS = Object.freeze({
+  crowdHeat: 'crowd-heat' as ChatPolicyTag,
+  negotiation: 'negotiation' as ChatPolicyTag,
+  rescue: 'rescue' as ChatPolicyTag,
+  worldEvent: 'world-event' as ChatPolicyTag,
+  relationship: 'relationship' as ChatPolicyTag,
+  proofVisible: 'proof-visible' as ChatPolicyTag,
+  shadowCompanion: 'shadow-companion' as ChatPolicyTag,
+  presenceTheater: 'presence-theater' as ChatPolicyTag,
+  replay: 'replay' as ChatPolicyTag,
+  trustSensitive: 'trust-sensitive' as ChatPolicyTag,
+  theatrical: 'theatrical' as ChatPolicyTag,
+  liveops: 'liveops' as ChatPolicyTag,
+  privateStrategy: 'private-strategy' as ChatPolicyTag,
+  predatoryQuiet: 'predatory-quiet' as ChatPolicyTag,
+  ambient: 'ambient' as ChatPolicyTag,
+} as const);
 
 export const CHAT_CHANNEL_DESCRIPTORS: Readonly<
   Record<ChatChannelId, ChatChannelDescriptor>
@@ -299,7 +429,11 @@ export const CHAT_CHANNEL_DESCRIPTORS: Readonly<
     family: 'PUBLIC',
     displayName: 'Global',
     shortLabel: 'Global',
+    audienceProfile: 'PUBLIC_ARENA',
     visibleToPlayer: true,
+    visibleInTabs: true,
+    writableByPlayer: true,
+    composerClass: 'FULL',
     supportsComposer: true,
     supportsPresence: true,
     supportsTyping: true,
@@ -315,22 +449,31 @@ export const CHAT_CHANNEL_DESCRIPTORS: Readonly<
     supportsLegendMoments: true,
     supportsShadowWrites: true,
     supportsProofHashExposure: true,
-    persistenceClass: 'RUN_SCOPED',
+    transcriptClass: 'CANONICAL_TRANSCRIPT',
+    replayClass: 'FULL_REPLAY',
+    moderationProfile: 'PUBLIC_STRICT',
     auditVisibility: 'PLAYER_VISIBLE',
     fanoutClass: 'CHANNEL_BROADCAST',
+    fanoutScope: 'ROOM_BROADCAST',
     deliveryPriority: 'HIGH',
+    persistenceClass: 'RUN_SCOPED',
     defaultStageMood: 'HOSTILE',
     roomPurpose: 'PUBLIC_STAGE',
     roomScope: 'RUN',
     roomKeyStrategy: 'RUN_SCOPED',
     presenceTheaterProfile: 'CROWD_VISIBLE',
     readReceiptPolicy: 'IMMEDIATE',
+    retentionDays: 30,
+    maxBodyLength: 8_000,
+    maxTagCount: 32,
     policyTags: [
-      'crowd-heat',
-      'witness-channel',
-      'theatrical-default',
-      'legend-eligible',
-      'world-event-visible',
+      CHAT_POLICY_TAGS.crowdHeat,
+      CHAT_POLICY_TAGS.relationship,
+      CHAT_POLICY_TAGS.worldEvent,
+      CHAT_POLICY_TAGS.theatrical,
+      CHAT_POLICY_TAGS.proofVisible,
+      CHAT_POLICY_TAGS.shadowCompanion,
+      CHAT_POLICY_TAGS.replay,
     ],
     defaultShadowCompanions: [
       'SYSTEM_SHADOW',
@@ -343,7 +486,11 @@ export const CHAT_CHANNEL_DESCRIPTORS: Readonly<
     family: 'PRIVATE',
     displayName: 'Syndicate',
     shortLabel: 'Syndicate',
+    audienceProfile: 'TRUST_CIRCLE',
     visibleToPlayer: true,
+    visibleInTabs: true,
+    writableByPlayer: true,
+    composerClass: 'FULL',
     supportsComposer: true,
     supportsPresence: true,
     supportsTyping: true,
@@ -359,22 +506,30 @@ export const CHAT_CHANNEL_DESCRIPTORS: Readonly<
     supportsLegendMoments: true,
     supportsShadowWrites: true,
     supportsProofHashExposure: true,
-    persistenceClass: 'ACCOUNT_SCOPED',
+    transcriptClass: 'CANONICAL_TRANSCRIPT',
+    replayClass: 'FULL_REPLAY',
+    moderationProfile: 'TRUST_GATED',
     auditVisibility: 'PLAYER_VISIBLE',
     fanoutClass: 'ROOM_BROADCAST',
+    fanoutScope: 'ROLE_SCOPED',
     deliveryPriority: 'HIGH',
+    persistenceClass: 'ACCOUNT_SCOPED',
     defaultStageMood: 'CONSPIRATORIAL',
     roomPurpose: 'PRIVATE_COORDINATION',
     roomScope: 'ACCOUNT',
     roomKeyStrategy: 'SYNDICATE_SCOPED',
     presenceTheaterProfile: 'FAST_VISIBLE',
     readReceiptPolicy: 'IMMEDIATE',
+    retentionDays: 90,
+    maxBodyLength: 8_000,
+    maxTagCount: 32,
     policyTags: [
-      'coordination',
-      'trust-sensitive',
-      'relationship-forward',
-      'private-strategy',
-      'helper-friendly',
+      CHAT_POLICY_TAGS.relationship,
+      CHAT_POLICY_TAGS.trustSensitive,
+      CHAT_POLICY_TAGS.privateStrategy,
+      CHAT_POLICY_TAGS.replay,
+      CHAT_POLICY_TAGS.proofVisible,
+      CHAT_POLICY_TAGS.shadowCompanion,
     ],
     defaultShadowCompanions: [
       'SYSTEM_SHADOW',
@@ -387,7 +542,11 @@ export const CHAT_CHANNEL_DESCRIPTORS: Readonly<
     family: 'NEGOTIATION',
     displayName: 'Deal Room',
     shortLabel: 'Deals',
+    audienceProfile: 'PREDATORY_TABLE',
     visibleToPlayer: true,
+    visibleInTabs: true,
+    writableByPlayer: true,
+    composerClass: 'FULL',
     supportsComposer: true,
     supportsPresence: true,
     supportsTyping: true,
@@ -403,22 +562,29 @@ export const CHAT_CHANNEL_DESCRIPTORS: Readonly<
     supportsLegendMoments: true,
     supportsShadowWrites: true,
     supportsProofHashExposure: true,
-    persistenceClass: 'RUN_SCOPED',
+    transcriptClass: 'CANONICAL_TRANSCRIPT',
+    replayClass: 'FULL_REPLAY',
+    moderationProfile: 'NEGOTIATION_STRICT',
     auditVisibility: 'PLAYER_VISIBLE',
     fanoutClass: 'ROOM_BROADCAST',
+    fanoutScope: 'ROLE_SCOPED',
     deliveryPriority: 'HIGH',
+    persistenceClass: 'RUN_SCOPED',
     defaultStageMood: 'PREDATORY',
     roomPurpose: 'NEGOTIATION_CHAMBER',
     roomScope: 'RUN',
     roomKeyStrategy: 'RUN_SCOPED',
     presenceTheaterProfile: 'NEGOTIATION_DELAYED',
     readReceiptPolicy: 'PRESSURE_DELAYED',
+    retentionDays: 30,
+    maxBodyLength: 8_000,
+    maxTagCount: 32,
     policyTags: [
-      'offer-pressure',
-      'read-delay',
-      'counterplay-window',
-      'bluff-sensitive',
-      'predatory-quiet',
+      CHAT_POLICY_TAGS.negotiation,
+      CHAT_POLICY_TAGS.relationship,
+      CHAT_POLICY_TAGS.rescue,
+      CHAT_POLICY_TAGS.shadowCompanion,
+      CHAT_POLICY_TAGS.replay,
     ],
     defaultShadowCompanions: [
       'SYSTEM_SHADOW',
@@ -431,7 +597,11 @@ export const CHAT_CHANNEL_DESCRIPTORS: Readonly<
     family: 'PRE_RUN',
     displayName: 'Lobby',
     shortLabel: 'Lobby',
+    audienceProfile: 'PRE_RUN_STAGING',
     visibleToPlayer: true,
+    visibleInTabs: true,
+    writableByPlayer: true,
+    composerClass: 'FULL',
     supportsComposer: true,
     supportsPresence: true,
     supportsTyping: true,
@@ -447,22 +617,29 @@ export const CHAT_CHANNEL_DESCRIPTORS: Readonly<
     supportsLegendMoments: false,
     supportsShadowWrites: true,
     supportsProofHashExposure: true,
-    persistenceClass: 'RUN_SCOPED',
+    transcriptClass: 'CANONICAL_TRANSCRIPT',
+    replayClass: 'SUMMARY_REPLAY',
+    moderationProfile: 'PRE_RUN_STANDARD',
     auditVisibility: 'PLAYER_VISIBLE',
     fanoutClass: 'ROOM_BROADCAST',
+    fanoutScope: 'ROOM_BROADCAST',
     deliveryPriority: 'NORMAL',
+    persistenceClass: 'RUN_SCOPED',
     defaultStageMood: 'CALM',
     roomPurpose: 'PRE_RUN_SOCIAL',
     roomScope: 'LOBBY',
     roomKeyStrategy: 'MATCH_SCOPED',
     presenceTheaterProfile: 'CROWD_VISIBLE',
     readReceiptPolicy: 'IMMEDIATE',
+    retentionDays: 14,
+    maxBodyLength: 8_000,
+    maxTagCount: 32,
     policyTags: [
-      'social-staging',
-      'pre-run',
-      'ambient-friendly',
-      'crowd-visible',
-      'world-event-visible',
+      CHAT_POLICY_TAGS.ambient,
+      CHAT_POLICY_TAGS.crowdHeat,
+      CHAT_POLICY_TAGS.worldEvent,
+      CHAT_POLICY_TAGS.shadowCompanion,
+      CHAT_POLICY_TAGS.replay,
     ],
     defaultShadowCompanions: [
       'SYSTEM_SHADOW',
@@ -475,7 +652,11 @@ export const CHAT_CHANNEL_DESCRIPTORS: Readonly<
     family: 'SHADOW',
     displayName: 'System Shadow',
     shortLabel: 'Sys Shadow',
+    audienceProfile: 'INTERNAL_MEMORY',
     visibleToPlayer: false,
+    visibleInTabs: false,
+    writableByPlayer: false,
+    composerClass: 'DISABLED',
     supportsComposer: false,
     supportsPresence: false,
     supportsTyping: false,
@@ -491,22 +672,28 @@ export const CHAT_CHANNEL_DESCRIPTORS: Readonly<
     supportsLegendMoments: false,
     supportsShadowWrites: true,
     supportsProofHashExposure: false,
-    persistenceClass: 'RUN_SCOPED',
+    transcriptClass: 'SHADOW_LEDGER',
+    replayClass: 'HIDDEN_REPLAY',
+    moderationProfile: 'SYSTEM_INTERNAL',
     auditVisibility: 'BACKEND_VISIBLE',
     fanoutClass: 'BACKEND_INTERNAL',
+    fanoutScope: 'SYSTEM_INTERNAL',
     deliveryPriority: 'HIGH',
+    persistenceClass: 'RUN_SCOPED',
     defaultStageMood: 'WATCHFUL',
     roomPurpose: 'SYSTEM_LEDGER',
     roomScope: 'RUN',
     roomKeyStrategy: 'SERVER_INTERNAL',
     presenceTheaterProfile: 'SHADOW_ONLY',
     readReceiptPolicy: 'SERVER_ONLY',
+    retentionDays: 30,
+    maxBodyLength: 16_000,
+    maxTagCount: 64,
     policyTags: [
-      'policy',
-      'moderation',
-      'proof-chain',
-      'ledger-authority',
-      'system-causality',
+      CHAT_POLICY_TAGS.rescue,
+      CHAT_POLICY_TAGS.presenceTheater,
+      CHAT_POLICY_TAGS.shadowCompanion,
+      CHAT_POLICY_TAGS.replay,
     ],
     defaultShadowCompanions: [],
   },
@@ -515,7 +702,11 @@ export const CHAT_CHANNEL_DESCRIPTORS: Readonly<
     family: 'SHADOW',
     displayName: 'NPC Shadow',
     shortLabel: 'NPC Shadow',
+    audienceProfile: 'INTERNAL_MEMORY',
     visibleToPlayer: false,
+    visibleInTabs: false,
+    writableByPlayer: false,
+    composerClass: 'DISABLED',
     supportsComposer: false,
     supportsPresence: false,
     supportsTyping: false,
@@ -531,22 +722,27 @@ export const CHAT_CHANNEL_DESCRIPTORS: Readonly<
     supportsLegendMoments: false,
     supportsShadowWrites: true,
     supportsProofHashExposure: false,
-    persistenceClass: 'RUN_SCOPED',
+    transcriptClass: 'SHADOW_LEDGER',
+    replayClass: 'HIDDEN_REPLAY',
+    moderationProfile: 'SYSTEM_INTERNAL',
     auditVisibility: 'BACKEND_VISIBLE',
     fanoutClass: 'BACKEND_INTERNAL',
-    deliveryPriority: 'NORMAL',
+    fanoutScope: 'SYSTEM_INTERNAL',
+    deliveryPriority: 'LOW',
+    persistenceClass: 'RUN_SCOPED',
     defaultStageMood: 'WATCHFUL',
     roomPurpose: 'NPC_CONTROL',
     roomScope: 'RUN',
     roomKeyStrategy: 'SERVER_INTERNAL',
     presenceTheaterProfile: 'NPC_LATENT',
     readReceiptPolicy: 'SERVER_ONLY',
+    retentionDays: 30,
+    maxBodyLength: 16_000,
+    maxTagCount: 64,
     policyTags: [
-      'npc-planning',
-      'scene-staging',
-      'delay-theater',
-      'response-ranking',
-      'suppression-aware',
+      CHAT_POLICY_TAGS.relationship,
+      CHAT_POLICY_TAGS.presenceTheater,
+      CHAT_POLICY_TAGS.shadowCompanion,
     ],
     defaultShadowCompanions: [],
   },
@@ -554,8 +750,12 @@ export const CHAT_CHANNEL_DESCRIPTORS: Readonly<
     id: 'RIVALRY_SHADOW',
     family: 'SHADOW',
     displayName: 'Rivalry Shadow',
-    shortLabel: 'Rival Shadow',
+    shortLabel: 'Rivalry Shadow',
+    audienceProfile: 'INTERNAL_MEMORY',
     visibleToPlayer: false,
+    visibleInTabs: false,
+    writableByPlayer: false,
+    composerClass: 'DISABLED',
     supportsComposer: false,
     supportsPresence: false,
     supportsTyping: false,
@@ -568,25 +768,31 @@ export const CHAT_CHANNEL_DESCRIPTORS: Readonly<
     supportsNegotiationLogic: false,
     supportsRescueLogic: false,
     supportsWorldEvents: false,
-    supportsLegendMoments: true,
+    supportsLegendMoments: false,
     supportsShadowWrites: true,
     supportsProofHashExposure: false,
-    persistenceClass: 'ACCOUNT_SCOPED',
+    transcriptClass: 'SHADOW_LEDGER',
+    replayClass: 'HIDDEN_REPLAY',
+    moderationProfile: 'SYSTEM_INTERNAL',
     auditVisibility: 'BACKEND_VISIBLE',
     fanoutClass: 'BACKEND_INTERNAL',
-    deliveryPriority: 'LOW',
+    fanoutScope: 'SYSTEM_INTERNAL',
+    deliveryPriority: 'HIGH',
+    persistenceClass: 'ACCOUNT_SCOPED',
     defaultStageMood: 'HOSTILE',
     roomPurpose: 'RIVALRY_MEMORY',
     roomScope: 'ACCOUNT',
     roomKeyStrategy: 'PLAYER_SCOPED',
     presenceTheaterProfile: 'PREDATOR_LURK',
     readReceiptPolicy: 'SERVER_ONLY',
+    retentionDays: 180,
+    maxBodyLength: 16_000,
+    maxTagCount: 64,
     policyTags: [
-      'memory-anchor',
-      'callback-source',
-      'obsession-risk',
-      'crowd-leakable',
-      'legend-backstory',
+      CHAT_POLICY_TAGS.crowdHeat,
+      CHAT_POLICY_TAGS.relationship,
+      CHAT_POLICY_TAGS.presenceTheater,
+      CHAT_POLICY_TAGS.shadowCompanion,
     ],
     defaultShadowCompanions: [],
   },
@@ -595,7 +801,11 @@ export const CHAT_CHANNEL_DESCRIPTORS: Readonly<
     family: 'SHADOW',
     displayName: 'Rescue Shadow',
     shortLabel: 'Rescue Shadow',
+    audienceProfile: 'INTERNAL_MEMORY',
     visibleToPlayer: false,
+    visibleInTabs: false,
+    writableByPlayer: false,
+    composerClass: 'DISABLED',
     supportsComposer: false,
     supportsPresence: false,
     supportsTyping: false,
@@ -611,22 +821,27 @@ export const CHAT_CHANNEL_DESCRIPTORS: Readonly<
     supportsLegendMoments: false,
     supportsShadowWrites: true,
     supportsProofHashExposure: false,
-    persistenceClass: 'RUN_SCOPED',
+    transcriptClass: 'SHADOW_LEDGER',
+    replayClass: 'HIDDEN_REPLAY',
+    moderationProfile: 'SYSTEM_INTERNAL',
     auditVisibility: 'BACKEND_VISIBLE',
     fanoutClass: 'BACKEND_INTERNAL',
+    fanoutScope: 'SYSTEM_INTERNAL',
     deliveryPriority: 'HIGH',
+    persistenceClass: 'RUN_SCOPED',
     defaultStageMood: 'WATCHFUL',
     roomPurpose: 'RESCUE_PIPELINE',
     roomScope: 'RUN',
     roomKeyStrategy: 'SERVER_INTERNAL',
     presenceTheaterProfile: 'HELPER_WAIT',
     readReceiptPolicy: 'SERVER_ONLY',
+    retentionDays: 30,
+    maxBodyLength: 16_000,
+    maxTagCount: 64,
     policyTags: [
-      'drop-off-detection',
-      'helper-timing',
-      'frustration-recovery',
-      'quiet-rescue',
-      'suppressed-to-player',
+      CHAT_POLICY_TAGS.rescue,
+      CHAT_POLICY_TAGS.presenceTheater,
+      CHAT_POLICY_TAGS.shadowCompanion,
     ],
     defaultShadowCompanions: [],
   },
@@ -635,7 +850,11 @@ export const CHAT_CHANNEL_DESCRIPTORS: Readonly<
     family: 'SHADOW',
     displayName: 'LiveOps Shadow',
     shortLabel: 'LiveOps Shadow',
+    audienceProfile: 'INTERNAL_MEMORY',
     visibleToPlayer: false,
+    visibleInTabs: false,
+    writableByPlayer: false,
+    composerClass: 'DISABLED',
     supportsComposer: false,
     supportsPresence: false,
     supportsTyping: false,
@@ -651,26 +870,84 @@ export const CHAT_CHANNEL_DESCRIPTORS: Readonly<
     supportsLegendMoments: false,
     supportsShadowWrites: true,
     supportsProofHashExposure: false,
-    persistenceClass: 'RUN_SCOPED',
+    transcriptClass: 'SHADOW_LEDGER',
+    replayClass: 'HIDDEN_REPLAY',
+    moderationProfile: 'SYSTEM_INTERNAL',
     auditVisibility: 'SERVER_VISIBLE',
     fanoutClass: 'SERVER_INTERNAL',
+    fanoutScope: 'SYSTEM_INTERNAL',
     deliveryPriority: 'DEFERRED',
+    persistenceClass: 'RUN_SCOPED',
     defaultStageMood: 'WATCHFUL',
     roomPurpose: 'LIVEOPS_CONTROL',
     roomScope: 'SEASON',
     roomKeyStrategy: 'SEASON_SCOPED',
     presenceTheaterProfile: 'SHADOW_ONLY',
     readReceiptPolicy: 'SERVER_ONLY',
+    retentionDays: 30,
+    maxBodyLength: 16_000,
+    maxTagCount: 64,
     policyTags: [
-      'world-events',
-      'seasonal-control',
-      'heat-boost',
-      'faction-surge',
-      'silent-overrides',
+      CHAT_POLICY_TAGS.liveops,
+      CHAT_POLICY_TAGS.crowdHeat,
+      CHAT_POLICY_TAGS.shadowCompanion,
     ],
     defaultShadowCompanions: [],
   },
 });
+
+// ============================================================================
+// MARK: Recipient roles, actor kinds, presence, and typing kinds
+// ============================================================================
+
+export const CHAT_RECIPIENT_ROLES = [
+  'PLAYER',
+  'SPECTATOR',
+  'MODERATOR',
+  'HELPER',
+  'HATER',
+  'NPC',
+  'SYSTEM',
+] as const;
+
+export type ChatRecipientRole = (typeof CHAT_RECIPIENT_ROLES)[number];
+
+export const CHAT_ACTOR_KINDS = [
+  'PLAYER',
+  'SYSTEM',
+  'HATER',
+  'HELPER',
+  'AMBIENT_NPC',
+  'CROWD',
+  'DEAL_AGENT',
+  'LIVEOPS',
+] as const;
+
+export type ChatActorKind = (typeof CHAT_ACTOR_KINDS)[number];
+
+export const CHAT_PRESENCE_KINDS = [
+  'ONLINE',
+  'AWAY',
+  'HIDDEN',
+  'DISCONNECTED',
+  'RECONNECTING',
+  'SPECTATING',
+  'HELPER_PRESENT',
+  'HATER_PRESENT',
+  'NPC_PRESENT',
+] as const;
+
+export type ChatPresenceKind = (typeof CHAT_PRESENCE_KINDS)[number];
+
+export const CHAT_TYPING_KINDS = [
+  'NOT_TYPING',
+  'STARTED',
+  'PAUSED',
+  'STOPPED',
+  'SIMULATED',
+] as const;
+
+export type ChatTypingKind = (typeof CHAT_TYPING_KINDS)[number];
 
 // ============================================================================
 // MARK: Mode scopes and mount surfaces
@@ -703,7 +980,7 @@ export interface ChatModeScopeDescriptor {
   readonly enablesRescue: boolean;
   readonly enablesLegendMoments: boolean;
   readonly enablesWorldEvents: boolean;
-  readonly policyTags: readonly string[];
+  readonly policyTags: readonly ChatPolicyTag[];
 }
 
 export const CHAT_MOUNT_TARGETS = [
@@ -724,6 +1001,7 @@ export type ChatMountTarget = (typeof CHAT_MOUNT_TARGETS)[number];
 export interface ChatMountPreset {
   readonly mountTarget: ChatMountTarget;
   readonly mountKey: ChatMountKey;
+  readonly modeScope: ChatModeScope;
   readonly defaultVisibleChannel: ChatVisibleChannel;
   readonly allowedVisibleChannels: readonly ChatVisibleChannel[];
   readonly allowCollapse: boolean;
@@ -736,194 +1014,10 @@ export interface ChatMountPreset {
   readonly showWorldEventBanner: boolean;
   readonly maxVisibleMessages: number;
   readonly composerPlaceholder: string;
-  readonly density: 'COMPACT' | 'STANDARD' | 'EXPANDED';
+  readonly density: ChatDensity;
+  readonly uiTreatment: ChatUiTreatment;
   readonly stageMood: ChatStageMood;
 }
-
-export const CHAT_MOUNT_PRESETS: Readonly<
-  Record<ChatMountTarget, ChatMountPreset>
-> = Object.freeze({
-  BATTLE_HUD: {
-    mountTarget: 'BATTLE_HUD',
-    mountKey: 'battle-hud' as ChatMountKey,
-    defaultVisibleChannel: 'GLOBAL',
-    allowedVisibleChannels: ['GLOBAL', 'SYNDICATE', 'DEAL_ROOM'],
-    allowCollapse: true,
-    defaultCollapsed: false,
-    showPresenceStrip: true,
-    showThreatMeter: true,
-    showTranscriptDrawer: true,
-    showReplayJump: true,
-    showLegendTreatment: true,
-    showWorldEventBanner: true,
-    maxVisibleMessages: 60,
-    composerPlaceholder: 'Signal the room or answer the attack…',
-    density: 'STANDARD',
-    stageMood: 'HOSTILE',
-  },
-  CLUB_UI: {
-    mountTarget: 'CLUB_UI',
-    mountKey: 'club-ui' as ChatMountKey,
-    defaultVisibleChannel: 'GLOBAL',
-    allowedVisibleChannels: ['GLOBAL', 'SYNDICATE'],
-    allowCollapse: true,
-    defaultCollapsed: true,
-    showPresenceStrip: true,
-    showThreatMeter: false,
-    showTranscriptDrawer: true,
-    showReplayJump: false,
-    showLegendTreatment: false,
-    showWorldEventBanner: true,
-    maxVisibleMessages: 40,
-    composerPlaceholder: 'Join the room…',
-    density: 'COMPACT',
-    stageMood: 'CALM',
-  },
-  EMPIRE_GAME_SCREEN: {
-    mountTarget: 'EMPIRE_GAME_SCREEN',
-    mountKey: 'empire-game-screen' as ChatMountKey,
-    defaultVisibleChannel: 'SYNDICATE',
-    allowedVisibleChannels: ['GLOBAL', 'SYNDICATE', 'DEAL_ROOM'],
-    allowCollapse: true,
-    defaultCollapsed: false,
-    showPresenceStrip: true,
-    showThreatMeter: true,
-    showTranscriptDrawer: true,
-    showReplayJump: true,
-    showLegendTreatment: true,
-    showWorldEventBanner: true,
-    maxVisibleMessages: 70,
-    composerPlaceholder: 'Coordinate your position…',
-    density: 'STANDARD',
-    stageMood: 'TENSE',
-  },
-  GAME_BOARD: {
-    mountTarget: 'GAME_BOARD',
-    mountKey: 'game-board' as ChatMountKey,
-    defaultVisibleChannel: 'GLOBAL',
-    allowedVisibleChannels: ['GLOBAL', 'SYNDICATE', 'DEAL_ROOM'],
-    allowCollapse: true,
-    defaultCollapsed: false,
-    showPresenceStrip: true,
-    showThreatMeter: true,
-    showTranscriptDrawer: true,
-    showReplayJump: true,
-    showLegendTreatment: true,
-    showWorldEventBanner: true,
-    maxVisibleMessages: 80,
-    composerPlaceholder: 'Play the room as hard as the board…',
-    density: 'STANDARD',
-    stageMood: 'HOSTILE',
-  },
-  LEAGUE_UI: {
-    mountTarget: 'LEAGUE_UI',
-    mountKey: 'league-ui' as ChatMountKey,
-    defaultVisibleChannel: 'GLOBAL',
-    allowedVisibleChannels: ['GLOBAL', 'SYNDICATE'],
-    allowCollapse: true,
-    defaultCollapsed: true,
-    showPresenceStrip: true,
-    showThreatMeter: false,
-    showTranscriptDrawer: true,
-    showReplayJump: false,
-    showLegendTreatment: true,
-    showWorldEventBanner: true,
-    maxVisibleMessages: 50,
-    composerPlaceholder: 'Say it to the league…',
-    density: 'COMPACT',
-    stageMood: 'WATCHFUL',
-  },
-  LOBBY_SCREEN: {
-    mountTarget: 'LOBBY_SCREEN',
-    mountKey: 'lobby-screen' as ChatMountKey,
-    defaultVisibleChannel: 'LOBBY',
-    allowedVisibleChannels: ['LOBBY', 'GLOBAL'],
-    allowCollapse: true,
-    defaultCollapsed: false,
-    showPresenceStrip: true,
-    showThreatMeter: false,
-    showTranscriptDrawer: true,
-    showReplayJump: false,
-    showLegendTreatment: false,
-    showWorldEventBanner: true,
-    maxVisibleMessages: 45,
-    composerPlaceholder: 'Warm up the room…',
-    density: 'COMPACT',
-    stageMood: 'CALM',
-  },
-  PHANTOM_GAME_SCREEN: {
-    mountTarget: 'PHANTOM_GAME_SCREEN',
-    mountKey: 'phantom-game-screen' as ChatMountKey,
-    defaultVisibleChannel: 'GLOBAL',
-    allowedVisibleChannels: ['GLOBAL', 'SYNDICATE'],
-    allowCollapse: true,
-    defaultCollapsed: false,
-    showPresenceStrip: true,
-    showThreatMeter: true,
-    showTranscriptDrawer: true,
-    showReplayJump: true,
-    showLegendTreatment: true,
-    showWorldEventBanner: true,
-    maxVisibleMessages: 65,
-    composerPlaceholder: 'Move quiet. Speak sharper…',
-    density: 'STANDARD',
-    stageMood: 'WATCHFUL',
-  },
-  PREDATOR_GAME_SCREEN: {
-    mountTarget: 'PREDATOR_GAME_SCREEN',
-    mountKey: 'predator-game-screen' as ChatMountKey,
-    defaultVisibleChannel: 'GLOBAL',
-    allowedVisibleChannels: ['GLOBAL', 'DEAL_ROOM'],
-    allowCollapse: true,
-    defaultCollapsed: false,
-    showPresenceStrip: true,
-    showThreatMeter: true,
-    showTranscriptDrawer: true,
-    showReplayJump: true,
-    showLegendTreatment: true,
-    showWorldEventBanner: true,
-    maxVisibleMessages: 65,
-    composerPlaceholder: 'Pressure them before they pressure you…',
-    density: 'STANDARD',
-    stageMood: 'PREDATORY',
-  },
-  SYNDICATE_GAME_SCREEN: {
-    mountTarget: 'SYNDICATE_GAME_SCREEN',
-    mountKey: 'syndicate-game-screen' as ChatMountKey,
-    defaultVisibleChannel: 'SYNDICATE',
-    allowedVisibleChannels: ['GLOBAL', 'SYNDICATE', 'DEAL_ROOM'],
-    allowCollapse: true,
-    defaultCollapsed: false,
-    showPresenceStrip: true,
-    showThreatMeter: true,
-    showTranscriptDrawer: true,
-    showReplayJump: true,
-    showLegendTreatment: true,
-    showWorldEventBanner: true,
-    maxVisibleMessages: 70,
-    composerPlaceholder: 'Coordinate, threaten, or close the deal…',
-    density: 'STANDARD',
-    stageMood: 'CONSPIRATORIAL',
-  },
-  POST_RUN_SUMMARY: {
-    mountTarget: 'POST_RUN_SUMMARY',
-    mountKey: 'post-run-summary' as ChatMountKey,
-    defaultVisibleChannel: 'GLOBAL',
-    allowedVisibleChannels: ['GLOBAL', 'SYNDICATE'],
-    allowCollapse: false,
-    defaultCollapsed: false,
-    showPresenceStrip: false,
-    showThreatMeter: false,
-    showTranscriptDrawer: true,
-    showReplayJump: true,
-    showLegendTreatment: true,
-    showWorldEventBanner: false,
-    maxVisibleMessages: 100,
-    composerPlaceholder: 'The run is over. The room still remembers…',
-    density: 'EXPANDED',
-    stageMood: 'CEREMONIAL',
-  },
-});
 
 export const CHAT_MODE_SCOPE_DESCRIPTORS: Readonly<
   Record<ChatModeScope, ChatModeScopeDescriptor>
@@ -933,28 +1027,28 @@ export const CHAT_MODE_SCOPE_DESCRIPTORS: Readonly<
     modeScopeId: 'lobby' as ChatModeScopeId,
     displayName: 'Lobby',
     defaultMountTarget: 'LOBBY_SCREEN',
-    allowedVisibleChannels: ['LOBBY', 'GLOBAL'],
+    allowedVisibleChannels: ['GLOBAL', 'LOBBY'],
     stageMood: 'CALM',
     enablesNegotiation: false,
     enablesCrowdHeat: true,
     enablesRescue: false,
     enablesLegendMoments: false,
     enablesWorldEvents: true,
-    policyTags: ['pre-run', 'ambient', 'warmup'],
+    policyTags: [CHAT_POLICY_TAGS.ambient, CHAT_POLICY_TAGS.crowdHeat],
   },
   RUN: {
     id: 'RUN',
     modeScopeId: 'run' as ChatModeScopeId,
     displayName: 'Run',
-    defaultMountTarget: 'GAME_BOARD',
+    defaultMountTarget: 'BATTLE_HUD',
     allowedVisibleChannels: ['GLOBAL', 'SYNDICATE', 'DEAL_ROOM'],
-    stageMood: 'HOSTILE',
+    stageMood: 'TENSE',
     enablesNegotiation: true,
     enablesCrowdHeat: true,
     enablesRescue: true,
     enablesLegendMoments: true,
     enablesWorldEvents: true,
-    policyTags: ['core-loop', 'social-pressure', 'replay-critical'],
+    policyTags: [CHAT_POLICY_TAGS.crowdHeat, CHAT_POLICY_TAGS.rescue],
   },
   BATTLE: {
     id: 'BATTLE',
@@ -968,35 +1062,35 @@ export const CHAT_MODE_SCOPE_DESCRIPTORS: Readonly<
     enablesRescue: true,
     enablesLegendMoments: true,
     enablesWorldEvents: true,
-    policyTags: ['combat', 'telegraphs', 'counterplay'],
+    policyTags: [CHAT_POLICY_TAGS.crowdHeat, CHAT_POLICY_TAGS.negotiation],
   },
   EMPIRE: {
     id: 'EMPIRE',
     modeScopeId: 'empire' as ChatModeScopeId,
     displayName: 'Empire',
     defaultMountTarget: 'EMPIRE_GAME_SCREEN',
-    allowedVisibleChannels: ['GLOBAL', 'SYNDICATE', 'DEAL_ROOM'],
-    stageMood: 'TENSE',
-    enablesNegotiation: true,
+    allowedVisibleChannels: ['GLOBAL', 'SYNDICATE'],
+    stageMood: 'WATCHFUL',
+    enablesNegotiation: false,
     enablesCrowdHeat: true,
     enablesRescue: true,
     enablesLegendMoments: true,
     enablesWorldEvents: true,
-    policyTags: ['empire', 'macro-pressure', 'coordination'],
+    policyTags: [CHAT_POLICY_TAGS.crowdHeat, CHAT_POLICY_TAGS.worldEvent],
   },
   CLUB: {
     id: 'CLUB',
     modeScopeId: 'club' as ChatModeScopeId,
     displayName: 'Club',
     defaultMountTarget: 'CLUB_UI',
-    allowedVisibleChannels: ['GLOBAL', 'SYNDICATE'],
+    allowedVisibleChannels: ['GLOBAL', 'LOBBY'],
     stageMood: 'CALM',
     enablesNegotiation: false,
     enablesCrowdHeat: true,
     enablesRescue: false,
     enablesLegendMoments: false,
     enablesWorldEvents: true,
-    policyTags: ['social-hub', 'ambient'],
+    policyTags: [CHAT_POLICY_TAGS.ambient, CHAT_POLICY_TAGS.worldEvent],
   },
   LEAGUE: {
     id: 'LEAGUE',
@@ -1004,13 +1098,13 @@ export const CHAT_MODE_SCOPE_DESCRIPTORS: Readonly<
     displayName: 'League',
     defaultMountTarget: 'LEAGUE_UI',
     allowedVisibleChannels: ['GLOBAL', 'SYNDICATE'],
-    stageMood: 'WATCHFUL',
+    stageMood: 'CEREMONIAL',
     enablesNegotiation: false,
     enablesCrowdHeat: true,
-    enablesRescue: false,
+    enablesRescue: true,
     enablesLegendMoments: true,
     enablesWorldEvents: true,
-    policyTags: ['league', 'public-rank', 'spectators'],
+    policyTags: [CHAT_POLICY_TAGS.crowdHeat, CHAT_POLICY_TAGS.relationship],
   },
   SYNDICATE: {
     id: 'SYNDICATE',
@@ -1024,7 +1118,7 @@ export const CHAT_MODE_SCOPE_DESCRIPTORS: Readonly<
     enablesRescue: true,
     enablesLegendMoments: true,
     enablesWorldEvents: false,
-    policyTags: ['private-strategy', 'trust-network'],
+    policyTags: [CHAT_POLICY_TAGS.privateStrategy, CHAT_POLICY_TAGS.relationship],
   },
   PREDATOR: {
     id: 'PREDATOR',
@@ -1038,7 +1132,7 @@ export const CHAT_MODE_SCOPE_DESCRIPTORS: Readonly<
     enablesRescue: true,
     enablesLegendMoments: true,
     enablesWorldEvents: true,
-    policyTags: ['aggressive', 'lurk-theater', 'deal-pressure'],
+    policyTags: [CHAT_POLICY_TAGS.negotiation, CHAT_POLICY_TAGS.presenceTheater],
   },
   PHANTOM: {
     id: 'PHANTOM',
@@ -1052,7 +1146,7 @@ export const CHAT_MODE_SCOPE_DESCRIPTORS: Readonly<
     enablesRescue: true,
     enablesLegendMoments: true,
     enablesWorldEvents: true,
-    policyTags: ['stealth', 'presence-theater', 'delayed-reveal'],
+    policyTags: [CHAT_POLICY_TAGS.presenceTheater, CHAT_POLICY_TAGS.relationship],
   },
   POST_RUN: {
     id: 'POST_RUN',
@@ -1066,12 +1160,216 @@ export const CHAT_MODE_SCOPE_DESCRIPTORS: Readonly<
     enablesRescue: false,
     enablesLegendMoments: true,
     enablesWorldEvents: false,
-    policyTags: ['ritual', 'debrief', 'memory-anchor'],
+    policyTags: [CHAT_POLICY_TAGS.relationship, CHAT_POLICY_TAGS.replay],
   },
 });
 
+export const CHAT_MOUNT_PRESETS: Readonly<Record<ChatMountTarget, ChatMountPreset>> =
+  Object.freeze({
+    BATTLE_HUD: {
+      mountTarget: 'BATTLE_HUD',
+      mountKey: 'battle-hud' as ChatMountKey,
+      modeScope: 'RUN',
+      defaultVisibleChannel: 'GLOBAL',
+      allowedVisibleChannels: ['GLOBAL', 'SYNDICATE', 'DEAL_ROOM'],
+      allowCollapse: true,
+      defaultCollapsed: false,
+      showPresenceStrip: true,
+      showThreatMeter: true,
+      showTranscriptDrawer: true,
+      showReplayJump: true,
+      showLegendTreatment: true,
+      showWorldEventBanner: true,
+      maxVisibleMessages: 18,
+      composerPlaceholder: 'Broadcast, coordinate, or bait a rival…',
+      density: 'COMPACT',
+      uiTreatment: 'PRIMARY',
+      stageMood: 'HOSTILE',
+    },
+    CLUB_UI: {
+      mountTarget: 'CLUB_UI',
+      mountKey: 'club-ui' as ChatMountKey,
+      modeScope: 'CLUB',
+      defaultVisibleChannel: 'LOBBY',
+      allowedVisibleChannels: ['GLOBAL', 'LOBBY'],
+      allowCollapse: true,
+      defaultCollapsed: true,
+      showPresenceStrip: true,
+      showThreatMeter: false,
+      showTranscriptDrawer: true,
+      showReplayJump: false,
+      showLegendTreatment: false,
+      showWorldEventBanner: true,
+      maxVisibleMessages: 16,
+      composerPlaceholder: 'Warm up the room…',
+      density: 'STANDARD',
+      uiTreatment: 'SECONDARY',
+      stageMood: 'CALM',
+    },
+    EMPIRE_GAME_SCREEN: {
+      mountTarget: 'EMPIRE_GAME_SCREEN',
+      mountKey: 'empire-game-screen' as ChatMountKey,
+      modeScope: 'EMPIRE',
+      defaultVisibleChannel: 'GLOBAL',
+      allowedVisibleChannels: ['GLOBAL', 'SYNDICATE'],
+      allowCollapse: true,
+      defaultCollapsed: false,
+      showPresenceStrip: true,
+      showThreatMeter: true,
+      showTranscriptDrawer: true,
+      showReplayJump: true,
+      showLegendTreatment: true,
+      showWorldEventBanner: true,
+      maxVisibleMessages: 20,
+      composerPlaceholder: 'Signal intent across the board…',
+      density: 'STANDARD',
+      uiTreatment: 'PRIMARY',
+      stageMood: 'WATCHFUL',
+    },
+    GAME_BOARD: {
+      mountTarget: 'GAME_BOARD',
+      mountKey: 'game-board' as ChatMountKey,
+      modeScope: 'RUN',
+      defaultVisibleChannel: 'GLOBAL',
+      allowedVisibleChannels: ['GLOBAL', 'SYNDICATE', 'DEAL_ROOM'],
+      allowCollapse: true,
+      defaultCollapsed: false,
+      showPresenceStrip: true,
+      showThreatMeter: true,
+      showTranscriptDrawer: true,
+      showReplayJump: true,
+      showLegendTreatment: true,
+      showWorldEventBanner: true,
+      maxVisibleMessages: 18,
+      composerPlaceholder: 'The board is watching…',
+      density: 'COMPACT',
+      uiTreatment: 'PRIMARY',
+      stageMood: 'TENSE',
+    },
+    LEAGUE_UI: {
+      mountTarget: 'LEAGUE_UI',
+      mountKey: 'league-ui' as ChatMountKey,
+      modeScope: 'LEAGUE',
+      defaultVisibleChannel: 'GLOBAL',
+      allowedVisibleChannels: ['GLOBAL', 'SYNDICATE'],
+      allowCollapse: true,
+      defaultCollapsed: false,
+      showPresenceStrip: true,
+      showThreatMeter: false,
+      showTranscriptDrawer: true,
+      showReplayJump: true,
+      showLegendTreatment: true,
+      showWorldEventBanner: true,
+      maxVisibleMessages: 20,
+      composerPlaceholder: 'Address the league…',
+      density: 'STANDARD',
+      uiTreatment: 'CEREMONIAL',
+      stageMood: 'CEREMONIAL',
+    },
+    LOBBY_SCREEN: {
+      mountTarget: 'LOBBY_SCREEN',
+      mountKey: 'lobby-screen' as ChatMountKey,
+      modeScope: 'LOBBY',
+      defaultVisibleChannel: 'LOBBY',
+      allowedVisibleChannels: ['GLOBAL', 'LOBBY'],
+      allowCollapse: true,
+      defaultCollapsed: false,
+      showPresenceStrip: true,
+      showThreatMeter: false,
+      showTranscriptDrawer: true,
+      showReplayJump: false,
+      showLegendTreatment: false,
+      showWorldEventBanner: true,
+      maxVisibleMessages: 14,
+      composerPlaceholder: 'Queue up, signal readiness, or test the room…',
+      density: 'STANDARD',
+      uiTreatment: 'SECONDARY',
+      stageMood: 'CALM',
+    },
+    PHANTOM_GAME_SCREEN: {
+      mountTarget: 'PHANTOM_GAME_SCREEN',
+      mountKey: 'phantom-game-screen' as ChatMountKey,
+      modeScope: 'PHANTOM',
+      defaultVisibleChannel: 'GLOBAL',
+      allowedVisibleChannels: ['GLOBAL', 'SYNDICATE'],
+      allowCollapse: true,
+      defaultCollapsed: false,
+      showPresenceStrip: true,
+      showThreatMeter: true,
+      showTranscriptDrawer: true,
+      showReplayJump: true,
+      showLegendTreatment: true,
+      showWorldEventBanner: true,
+      maxVisibleMessages: 18,
+      composerPlaceholder: 'Move softly. The echoes keep score…',
+      density: 'COMPACT',
+      uiTreatment: 'PRIMARY',
+      stageMood: 'WATCHFUL',
+    },
+    PREDATOR_GAME_SCREEN: {
+      mountTarget: 'PREDATOR_GAME_SCREEN',
+      mountKey: 'predator-game-screen' as ChatMountKey,
+      modeScope: 'PREDATOR',
+      defaultVisibleChannel: 'DEAL_ROOM',
+      allowedVisibleChannels: ['GLOBAL', 'DEAL_ROOM'],
+      allowCollapse: true,
+      defaultCollapsed: false,
+      showPresenceStrip: true,
+      showThreatMeter: true,
+      showTranscriptDrawer: true,
+      showReplayJump: true,
+      showLegendTreatment: true,
+      showWorldEventBanner: true,
+      maxVisibleMessages: 18,
+      composerPlaceholder: 'Apply pressure or bait a counter…',
+      density: 'COMPACT',
+      uiTreatment: 'PRIMARY',
+      stageMood: 'PREDATORY',
+    },
+    SYNDICATE_GAME_SCREEN: {
+      mountTarget: 'SYNDICATE_GAME_SCREEN',
+      mountKey: 'syndicate-game-screen' as ChatMountKey,
+      modeScope: 'SYNDICATE',
+      defaultVisibleChannel: 'SYNDICATE',
+      allowedVisibleChannels: ['GLOBAL', 'SYNDICATE', 'DEAL_ROOM'],
+      allowCollapse: true,
+      defaultCollapsed: false,
+      showPresenceStrip: true,
+      showThreatMeter: true,
+      showTranscriptDrawer: true,
+      showReplayJump: true,
+      showLegendTreatment: true,
+      showWorldEventBanner: false,
+      maxVisibleMessages: 18,
+      composerPlaceholder: 'Coordinate privately. Every word costs…',
+      density: 'STANDARD',
+      uiTreatment: 'PRIMARY',
+      stageMood: 'CONSPIRATORIAL',
+    },
+    POST_RUN_SUMMARY: {
+      mountTarget: 'POST_RUN_SUMMARY',
+      mountKey: 'post-run-summary' as ChatMountKey,
+      modeScope: 'POST_RUN',
+      defaultVisibleChannel: 'GLOBAL',
+      allowedVisibleChannels: ['GLOBAL', 'SYNDICATE'],
+      allowCollapse: false,
+      defaultCollapsed: false,
+      showPresenceStrip: false,
+      showThreatMeter: false,
+      showTranscriptDrawer: true,
+      showReplayJump: true,
+      showLegendTreatment: true,
+      showWorldEventBanner: false,
+      maxVisibleMessages: 24,
+      composerPlaceholder: 'Debrief the turning point…',
+      density: 'EXPANDED',
+      uiTreatment: 'CEREMONIAL',
+      stageMood: 'CEREMONIAL',
+    },
+  });
+
 // ============================================================================
-// MARK: Room descriptors and topic routes
+// MARK: Room descriptors and namespaces
 // ============================================================================
 
 export interface ChatRoomDescriptor {
@@ -1097,64 +1395,121 @@ export const CHAT_NAMESPACES = Object.freeze({
   telemetry: 'chat.telemetry' as ChatNamespace,
 } as const);
 
-export const CHAT_ROUTE_KEYS = Object.freeze({
-  globalRoom: 'global-room' as ChatRouteKey,
-  syndicateRoom: 'syndicate-room' as ChatRouteKey,
-  dealRoom: 'deal-room' as ChatRouteKey,
-  lobbyRoom: 'lobby-room' as ChatRouteKey,
-  systemShadow: 'system-shadow' as ChatRouteKey,
-  npcShadow: 'npc-shadow' as ChatRouteKey,
-  rivalryShadow: 'rivalry-shadow' as ChatRouteKey,
-  rescueShadow: 'rescue-shadow' as ChatRouteKey,
-  liveopsShadow: 'liveops-shadow' as ChatRouteKey,
+export const CHAT_TOPIC_ROUTES = Object.freeze({
+  GLOBAL: 'room.global' as ChatTopicName,
+  SYNDICATE: 'room.syndicate' as ChatTopicName,
+  DEAL_ROOM: 'room.deal' as ChatTopicName,
+  LOBBY: 'room.lobby' as ChatTopicName,
+  SYSTEM_SHADOW: 'shadow.system' as ChatTopicName,
+  NPC_SHADOW: 'shadow.npc' as ChatTopicName,
+  RIVALRY_SHADOW: 'shadow.rivalry' as ChatTopicName,
+  RESCUE_SHADOW: 'shadow.rescue' as ChatTopicName,
+  LIVEOPS_SHADOW: 'shadow.liveops' as ChatTopicName,
 } as const);
 
-export function buildChatTopicName(
-  channelId: ChatChannelId,
-  scope: ChatRoomScope,
-  scopeKey: string,
-): ChatTopicName {
-  return `${channelId.toLowerCase()}.${scope.toLowerCase()}.${scopeKey}` as ChatTopicName;
-}
-
-export function buildDefaultRoomId(
-  channelId: ChatChannelId,
-  scope: ChatRoomScope,
-  scopeKey: string,
-): ChatRoomId {
-  return `room:${channelId}:${scope}:${scopeKey}` as ChatRoomId;
-}
-
-export function buildChannelRoomDescriptor(
-  channelId: ChatChannelId,
-  scopeKey: string,
-): ChatRoomDescriptor {
-  const descriptor = getChatChannelDescriptor(channelId);
-  return {
-    id: buildDefaultRoomId(channelId, descriptor.roomScope, scopeKey),
-    channelId,
-    purpose: descriptor.roomPurpose,
-    scope: descriptor.roomScope,
-    keyStrategy: descriptor.roomKeyStrategy,
-    topicName: buildChatTopicName(channelId, descriptor.roomScope, scopeKey),
-    namespace: descriptor.family === 'PUBLIC'
-      ? CHAT_NAMESPACES.public
-      : descriptor.family === 'PRIVATE'
-        ? CHAT_NAMESPACES.private
-        : descriptor.family === 'NEGOTIATION'
-          ? CHAT_NAMESPACES.negotiation
-          : descriptor.family === 'PRE_RUN'
-            ? CHAT_NAMESPACES.lobby
-            : CHAT_NAMESPACES.shadow,
-    replayEnabled: descriptor.supportsReplay,
-    proofLedgerEnabled: descriptor.supportsReplay,
-    shadowCompanionIds: descriptor.defaultShadowCompanions,
-  };
-}
-
 // ============================================================================
-// MARK: Channel policy hint matrices
+// MARK: Channel relationship and permission matrices
 // ============================================================================
+
+export type ChatRolePermission = 'NONE' | 'READ' | 'WRITE' | 'MODERATE' | 'SYSTEM';
+
+export type ChatRolePermissionMatrix = Readonly<
+  Record<ChatRecipientRole, Readonly<Record<ChatChannelId, ChatRolePermission>>>
+>;
+
+const PLAYER_VISIBLE_PERMISSION_ROW: Readonly<Record<ChatChannelId, ChatRolePermission>> = {
+  GLOBAL: 'WRITE',
+  SYNDICATE: 'WRITE',
+  DEAL_ROOM: 'WRITE',
+  LOBBY: 'WRITE',
+  SYSTEM_SHADOW: 'NONE',
+  NPC_SHADOW: 'NONE',
+  RIVALRY_SHADOW: 'NONE',
+  RESCUE_SHADOW: 'NONE',
+  LIVEOPS_SHADOW: 'NONE',
+};
+
+const SPECTATOR_PERMISSION_ROW: Readonly<Record<ChatChannelId, ChatRolePermission>> = {
+  GLOBAL: 'READ',
+  SYNDICATE: 'NONE',
+  DEAL_ROOM: 'NONE',
+  LOBBY: 'READ',
+  SYSTEM_SHADOW: 'NONE',
+  NPC_SHADOW: 'NONE',
+  RIVALRY_SHADOW: 'NONE',
+  RESCUE_SHADOW: 'NONE',
+  LIVEOPS_SHADOW: 'NONE',
+};
+
+const MODERATOR_PERMISSION_ROW: Readonly<Record<ChatChannelId, ChatRolePermission>> = {
+  GLOBAL: 'MODERATE',
+  SYNDICATE: 'MODERATE',
+  DEAL_ROOM: 'MODERATE',
+  LOBBY: 'MODERATE',
+  SYSTEM_SHADOW: 'SYSTEM',
+  NPC_SHADOW: 'SYSTEM',
+  RIVALRY_SHADOW: 'SYSTEM',
+  RESCUE_SHADOW: 'SYSTEM',
+  LIVEOPS_SHADOW: 'SYSTEM',
+};
+
+const HELPER_PERMISSION_ROW: Readonly<Record<ChatChannelId, ChatRolePermission>> = {
+  GLOBAL: 'WRITE',
+  SYNDICATE: 'WRITE',
+  DEAL_ROOM: 'READ',
+  LOBBY: 'WRITE',
+  SYSTEM_SHADOW: 'READ',
+  NPC_SHADOW: 'READ',
+  RIVALRY_SHADOW: 'READ',
+  RESCUE_SHADOW: 'SYSTEM',
+  LIVEOPS_SHADOW: 'NONE',
+};
+
+const HATER_PERMISSION_ROW: Readonly<Record<ChatChannelId, ChatRolePermission>> = {
+  GLOBAL: 'WRITE',
+  SYNDICATE: 'NONE',
+  DEAL_ROOM: 'WRITE',
+  LOBBY: 'WRITE',
+  SYSTEM_SHADOW: 'READ',
+  NPC_SHADOW: 'READ',
+  RIVALRY_SHADOW: 'SYSTEM',
+  RESCUE_SHADOW: 'NONE',
+  LIVEOPS_SHADOW: 'NONE',
+};
+
+const NPC_PERMISSION_ROW: Readonly<Record<ChatChannelId, ChatRolePermission>> = {
+  GLOBAL: 'WRITE',
+  SYNDICATE: 'READ',
+  DEAL_ROOM: 'READ',
+  LOBBY: 'WRITE',
+  SYSTEM_SHADOW: 'READ',
+  NPC_SHADOW: 'SYSTEM',
+  RIVALRY_SHADOW: 'READ',
+  RESCUE_SHADOW: 'READ',
+  LIVEOPS_SHADOW: 'READ',
+};
+
+const SYSTEM_PERMISSION_ROW: Readonly<Record<ChatChannelId, ChatRolePermission>> = {
+  GLOBAL: 'SYSTEM',
+  SYNDICATE: 'SYSTEM',
+  DEAL_ROOM: 'SYSTEM',
+  LOBBY: 'SYSTEM',
+  SYSTEM_SHADOW: 'SYSTEM',
+  NPC_SHADOW: 'SYSTEM',
+  RIVALRY_SHADOW: 'SYSTEM',
+  RESCUE_SHADOW: 'SYSTEM',
+  LIVEOPS_SHADOW: 'SYSTEM',
+};
+
+export const CHAT_ROLE_PERMISSION_MATRIX: ChatRolePermissionMatrix = Object.freeze({
+  PLAYER: PLAYER_VISIBLE_PERMISSION_ROW,
+  SPECTATOR: SPECTATOR_PERMISSION_ROW,
+  MODERATOR: MODERATOR_PERMISSION_ROW,
+  HELPER: HELPER_PERMISSION_ROW,
+  HATER: HATER_PERMISSION_ROW,
+  NPC: NPC_PERMISSION_ROW,
+  SYSTEM: SYSTEM_PERMISSION_ROW,
+});
 
 export const CHAT_SHADOW_COMPANION_MATRIX: Readonly<
   Record<ChatVisibleChannel, readonly ChatShadowChannel[]>
@@ -1165,41 +1520,6 @@ export const CHAT_SHADOW_COMPANION_MATRIX: Readonly<
   LOBBY: ['SYSTEM_SHADOW', 'NPC_SHADOW', 'LIVEOPS_SHADOW'],
 });
 
-export const CHAT_HELPER_FALLBACK_CHANNELS: Readonly<
-  Record<ChatVisibleChannel, readonly ChatVisibleChannel[]>
-> = Object.freeze({
-  GLOBAL: ['SYNDICATE', 'LOBBY'],
-  SYNDICATE: ['GLOBAL'],
-  DEAL_ROOM: ['SYNDICATE', 'GLOBAL'],
-  LOBBY: ['GLOBAL'],
-});
-
-export const CHAT_ESCALATION_ORDER: readonly ChatVisibleChannel[] = Object.freeze([
-  'LOBBY',
-  'GLOBAL',
-  'SYNDICATE',
-  'DEAL_ROOM',
-]);
-
-export const CHAT_DEESCALATION_ORDER: readonly ChatVisibleChannel[] = Object.freeze([
-  'DEAL_ROOM',
-  'SYNDICATE',
-  'GLOBAL',
-  'LOBBY',
-]);
-
-export const CHAT_POLICY_TAGS = Object.freeze({
-  crowdHeat: 'crowd-heat' as ChatPolicyTag,
-  negotiation: 'negotiation' as ChatPolicyTag,
-  rescue: 'rescue' as ChatPolicyTag,
-  worldEvent: 'world-event' as ChatPolicyTag,
-  relationship: 'relationship' as ChatPolicyTag,
-  proofVisible: 'proof-visible' as ChatPolicyTag,
-  shadowCompanion: 'shadow-companion' as ChatPolicyTag,
-  presenceTheater: 'presence-theater' as ChatPolicyTag,
-  replay: 'replay' as ChatPolicyTag,
-} as const);
-
 // ============================================================================
 // MARK: Runtime-safe readers and predicates
 // ============================================================================
@@ -1207,8 +1527,13 @@ export const CHAT_POLICY_TAGS = Object.freeze({
 const VISIBLE_CHANNEL_SET = new Set<string>(CHAT_VISIBLE_CHANNELS);
 const SHADOW_CHANNEL_SET = new Set<string>(CHAT_SHADOW_CHANNELS);
 const ALL_CHANNEL_SET = new Set<string>(CHAT_ALL_CHANNELS);
-const MOUNT_TARGET_SET = new Set<string>(CHAT_MOUNT_TARGETS);
+const RECIPIENT_ROLE_SET = new Set<string>(CHAT_RECIPIENT_ROLES);
+const ACTOR_KIND_SET = new Set<string>(CHAT_ACTOR_KINDS);
+const PRESENCE_KIND_SET = new Set<string>(CHAT_PRESENCE_KINDS);
+const TYPING_KIND_SET = new Set<string>(CHAT_TYPING_KINDS);
 const MODE_SCOPE_SET = new Set<string>(CHAT_MODE_SCOPES);
+const MOUNT_TARGET_SET = new Set<string>(CHAT_MOUNT_TARGETS);
+const LEGACY_ALIAS_SET = new Set<string>(Object.keys(CHAT_LEGACY_CHANNEL_ALIASES));
 
 export function isChatVisibleChannel(value: string): value is ChatVisibleChannel {
   return VISIBLE_CHANNEL_SET.has(value);
@@ -1222,30 +1547,56 @@ export function isChatChannelId(value: string): value is ChatChannelId {
   return ALL_CHANNEL_SET.has(value);
 }
 
-export function isChatMountTarget(value: string): value is ChatMountTarget {
-  return MOUNT_TARGET_SET.has(value);
+export function isChatRecipientRole(value: string): value is ChatRecipientRole {
+  return RECIPIENT_ROLE_SET.has(value);
+}
+
+export function isChatActorKind(value: string): value is ChatActorKind {
+  return ACTOR_KIND_SET.has(value);
+}
+
+export function isChatPresenceKind(value: string): value is ChatPresenceKind {
+  return PRESENCE_KIND_SET.has(value);
+}
+
+export function isChatTypingKind(value: string): value is ChatTypingKind {
+  return TYPING_KIND_SET.has(value);
 }
 
 export function isChatModeScope(value: string): value is ChatModeScope {
   return MODE_SCOPE_SET.has(value);
 }
 
-export function getChatChannelDescriptor(
-  channelId: ChatChannelId,
-): ChatChannelDescriptor {
+export function isChatMountTarget(value: string): value is ChatMountTarget {
+  return MOUNT_TARGET_SET.has(value);
+}
+
+export function isChatLegacyChannelAlias(value: string): value is ChatLegacyChannelAlias {
+  return LEGACY_ALIAS_SET.has(value);
+}
+
+export function normalizeLegacyChatChannel(
+  value: ChatChannelId | ChatLegacyChannelAlias | string,
+): ChatChannelId | null {
+  if (isChatChannelId(value)) {
+    return value;
+  }
+  if (isChatLegacyChannelAlias(value)) {
+    return CHAT_LEGACY_CHANNEL_ALIASES[value];
+  }
+  return null;
+}
+
+export function getChatChannelDescriptor(channelId: ChatChannelId): ChatChannelDescriptor {
   return CHAT_CHANNEL_DESCRIPTORS[channelId];
 }
 
-export function getChatMountPreset(
-  mountTarget: ChatMountTarget,
-): ChatMountPreset {
-  return CHAT_MOUNT_PRESETS[mountTarget];
+export function getChatModeScopeDescriptor(modeScope: ChatModeScope): ChatModeScopeDescriptor {
+  return CHAT_MODE_SCOPE_DESCRIPTORS[modeScope];
 }
 
-export function getChatModeScopeDescriptor(
-  modeScope: ChatModeScope,
-): ChatModeScopeDescriptor {
-  return CHAT_MODE_SCOPE_DESCRIPTORS[modeScope];
+export function getChatMountPreset(mountTarget: ChatMountTarget): ChatMountPreset {
+  return CHAT_MOUNT_PRESETS[mountTarget];
 }
 
 export function getAllowedVisibleChannelsForMount(
@@ -1264,6 +1615,13 @@ export function getShadowCompanionsForVisibleChannel(
   channelId: ChatVisibleChannel,
 ): readonly ChatShadowChannel[] {
   return CHAT_SHADOW_COMPANION_MATRIX[channelId];
+}
+
+export function getChannelRolePermission(
+  role: ChatRecipientRole,
+  channelId: ChatChannelId,
+): ChatRolePermission {
+  return CHAT_ROLE_PERMISSION_MATRIX[role][channelId];
 }
 
 export function channelSupportsComposer(channelId: ChatChannelId): boolean {
@@ -1290,6 +1648,10 @@ export function channelSupportsCrowdHeat(channelId: ChatChannelId): boolean {
   return CHAT_CHANNEL_DESCRIPTORS[channelId].supportsCrowdHeat;
 }
 
+export function channelSupportsRelationshipState(channelId: ChatChannelId): boolean {
+  return CHAT_CHANNEL_DESCRIPTORS[channelId].supportsRelationshipState;
+}
+
 export function channelSupportsNegotiation(channelId: ChatChannelId): boolean {
   return CHAT_CHANNEL_DESCRIPTORS[channelId].supportsNegotiationLogic;
 }
@@ -1302,138 +1664,113 @@ export function channelSupportsWorldEvents(channelId: ChatChannelId): boolean {
   return CHAT_CHANNEL_DESCRIPTORS[channelId].supportsWorldEvents;
 }
 
-export function channelSupportsLegendMoments(
-  channelId: ChatChannelId,
-): boolean {
+export function channelSupportsLegendMoments(channelId: ChatChannelId): boolean {
   return CHAT_CHANNEL_DESCRIPTORS[channelId].supportsLegendMoments;
 }
 
-export function channelSupportsShadowWrites(
-  channelId: ChatChannelId,
-): boolean {
+export function channelSupportsShadowWrites(channelId: ChatChannelId): boolean {
   return CHAT_CHANNEL_DESCRIPTORS[channelId].supportsShadowWrites;
 }
 
-export function channelExposesProofHashes(channelId: ChatChannelId): boolean {
-  return CHAT_CHANNEL_DESCRIPTORS[channelId].supportsProofHashExposure;
+export function channelIsVisibleSurface(channelId: ChatChannelId): channelId is ChatVisibleChannel {
+  return isChatVisibleChannel(channelId);
 }
 
-export function resolveMountTargetForModeScope(
+export function channelIsShadowSurface(channelId: ChatChannelId): channelId is ChatShadowChannel {
+  return isChatShadowChannel(channelId);
+}
+
+export function mountAllowsVisibleChannel(
+  mountTarget: ChatMountTarget,
+  channelId: ChatVisibleChannel,
+): boolean {
+  return CHAT_MOUNT_PRESETS[mountTarget].allowedVisibleChannels.includes(channelId);
+}
+
+export function modeScopeAllowsVisibleChannel(
   modeScope: ChatModeScope,
-): ChatMountTarget {
+  channelId: ChatVisibleChannel,
+): boolean {
+  return CHAT_MODE_SCOPE_DESCRIPTORS[modeScope].allowedVisibleChannels.includes(channelId);
+}
+
+export function roleCanReadChannel(
+  role: ChatRecipientRole,
+  channelId: ChatChannelId,
+): boolean {
+  const permission = getChannelRolePermission(role, channelId);
+  return permission !== 'NONE';
+}
+
+export function roleCanWriteChannel(
+  role: ChatRecipientRole,
+  channelId: ChatChannelId,
+): boolean {
+  const permission = getChannelRolePermission(role, channelId);
+  return permission === 'WRITE' || permission === 'MODERATE' || permission === 'SYSTEM';
+}
+
+export function roleCanModerateChannel(
+  role: ChatRecipientRole,
+  channelId: ChatChannelId,
+): boolean {
+  const permission = getChannelRolePermission(role, channelId);
+  return permission === 'MODERATE' || permission === 'SYSTEM';
+}
+
+export function roleCanSeeShadowChannels(role: ChatRecipientRole): boolean {
+  return role === 'MODERATOR' || role === 'SYSTEM';
+}
+
+export function getMountTargetForModeScope(modeScope: ChatModeScope): ChatMountTarget {
   return CHAT_MODE_SCOPE_DESCRIPTORS[modeScope].defaultMountTarget;
 }
 
-export function resolveStageMoodForChannel(
-  channelId: ChatChannelId,
-): ChatStageMood {
-  return CHAT_CHANNEL_DESCRIPTORS[channelId].defaultStageMood;
+export function getModeScopeForMountTarget(mountTarget: ChatMountTarget): ChatModeScope {
+  return CHAT_MOUNT_PRESETS[mountTarget].modeScope;
 }
 
-export function resolveStageMoodForMount(
-  mountTarget: ChatMountTarget,
-): ChatStageMood {
-  return CHAT_MOUNT_PRESETS[mountTarget].stageMood;
-}
-
-export function resolvePrimaryNamespaceForChannel(
-  channelId: ChatChannelId,
-): ChatNamespace {
-  const descriptor = CHAT_CHANNEL_DESCRIPTORS[channelId];
-  switch (descriptor.family) {
-    case 'PUBLIC':
-      return CHAT_NAMESPACES.public;
-    case 'PRIVATE':
-      return CHAT_NAMESPACES.private;
-    case 'NEGOTIATION':
-      return CHAT_NAMESPACES.negotiation;
-    case 'PRE_RUN':
-      return CHAT_NAMESPACES.lobby;
-    case 'SHADOW':
-      return CHAT_NAMESPACES.shadow;
-    default: {
-      const exhaustiveCheck: never = descriptor.family;
-      return exhaustiveCheck;
-    }
-  }
-}
-
-export function modeScopeAllowsChannel(
-  modeScope: ChatModeScope,
+export function visibleChannelToPrimaryShadow(
   channelId: ChatVisibleChannel,
-): boolean {
-  return CHAT_MODE_SCOPE_DESCRIPTORS[modeScope].allowedVisibleChannels.includes(
-    channelId,
-  );
-}
-
-export function mountAllowsChannel(
-  mountTarget: ChatMountTarget,
-  channelId: ChatVisibleChannel,
-): boolean {
-  return CHAT_MOUNT_PRESETS[mountTarget].allowedVisibleChannels.includes(
-    channelId,
-  );
-}
-
-export function resolveCompanionShadowsForMount(
-  mountTarget: ChatMountTarget,
-): readonly ChatShadowChannel[] {
-  const preset = CHAT_MOUNT_PRESETS[mountTarget];
-  const merged = new Set<ChatShadowChannel>();
-  for (const visible of preset.allowedVisibleChannels) {
-    for (const shadow of CHAT_SHADOW_COMPANION_MATRIX[visible]) {
-      merged.add(shadow);
-    }
-  }
-  return Array.from(merged);
-}
-
-export function resolveEscalatedVisibleChannel(
-  current: ChatVisibleChannel,
-): ChatVisibleChannel {
-  const index = CHAT_ESCALATION_ORDER.indexOf(current);
-  if (index === -1 || index === CHAT_ESCALATION_ORDER.length - 1) {
-    return current;
-  }
-  return CHAT_ESCALATION_ORDER[index + 1];
-}
-
-export function resolveDeEscalatedVisibleChannel(
-  current: ChatVisibleChannel,
-): ChatVisibleChannel {
-  const index = CHAT_DEESCALATION_ORDER.indexOf(current);
-  if (index === -1 || index === CHAT_DEESCALATION_ORDER.length - 1) {
-    return current;
-  }
-  return CHAT_DEESCALATION_ORDER[index + 1];
+): ChatShadowChannel {
+  return CHAT_SHADOW_COMPANION_MATRIX[channelId][0];
 }
 
 // ============================================================================
-// MARK: Stable exported readonly package
+// MARK: Stable readonly contract package
 // ============================================================================
 
-export const CHAT_CHANNEL_CONTRACT = Object.freeze({
+export const CHAT_CHANNEL_CONSTANTS = Object.freeze({
   version: CHAT_CONTRACT_VERSION,
   apiVersion: CHAT_CHANNELS_PUBLIC_API_VERSION,
+  revision: CHAT_CONTRACT_REVISION,
+  maxVisibleComposerLength: 8_000,
+  maxShadowComposerLength: 16_000,
   authorities: CHAT_CONTRACT_AUTHORITIES,
+} as const);
+
+export const CHAT_CHANNEL_CONTRACT = Object.freeze({
+  version: CHAT_CHANNEL_CONSTANTS.version,
+  apiVersion: CHAT_CHANNEL_CONSTANTS.apiVersion,
+  revision: CHAT_CHANNEL_CONSTANTS.revision,
+  authorities: CHAT_CHANNEL_CONSTANTS.authorities,
   visibleChannels: CHAT_VISIBLE_CHANNELS,
   shadowChannels: CHAT_SHADOW_CHANNELS,
   allChannels: CHAT_ALL_CHANNELS,
-  channelDescriptors: CHAT_CHANNEL_DESCRIPTORS,
-  mountTargets: CHAT_MOUNT_TARGETS,
-  mountPresets: CHAT_MOUNT_PRESETS,
+  recipientRoles: CHAT_RECIPIENT_ROLES,
+  actorKinds: CHAT_ACTOR_KINDS,
+  presenceKinds: CHAT_PRESENCE_KINDS,
+  typingKinds: CHAT_TYPING_KINDS,
   modeScopes: CHAT_MODE_SCOPES,
+  mountTargets: CHAT_MOUNT_TARGETS,
+  policyTags: CHAT_POLICY_TAGS,
+  descriptors: CHAT_CHANNEL_DESCRIPTORS,
+  mountPresets: CHAT_MOUNT_PRESETS,
   modeScopeDescriptors: CHAT_MODE_SCOPE_DESCRIPTORS,
-  roomScopes: CHAT_ROOM_SCOPES,
-  roomPurposes: CHAT_ROOM_PURPOSES,
-  roomKeyStrategies: CHAT_ROOM_KEY_STRATEGIES,
-  routeKeys: CHAT_ROUTE_KEYS,
-  namespaces: CHAT_NAMESPACES,
-  helperFallbackChannels: CHAT_HELPER_FALLBACK_CHANNELS,
+  rolePermissionMatrix: CHAT_ROLE_PERMISSION_MATRIX,
   shadowCompanionMatrix: CHAT_SHADOW_COMPANION_MATRIX,
-  escalationOrder: CHAT_ESCALATION_ORDER,
-  deEscalationOrder: CHAT_DEESCALATION_ORDER,
+  topicRoutes: CHAT_TOPIC_ROUTES,
+  namespaces: CHAT_NAMESPACES,
 } as const);
 
 export default CHAT_CHANNEL_CONTRACT;
