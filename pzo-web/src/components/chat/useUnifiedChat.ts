@@ -15,69 +15,22 @@ import {
   type SabotageEvent,
 } from './chatTypes';
 import { useChatEngine } from './useChatEngine';
+import { buildTranscriptDrawerSurfaceModel, createTranscriptDrawerCallbacks } from './transcriptDrawerAdapter';
+import type {
+  ChatUiTranscriptDrawerCallbacks,
+  ChatUiTranscriptDrawerSurfaceModel,
+} from './uiTypes';
 
 /**
  * ============================================================================
  * POINT ZERO ONE — UNIFIED CHAT UI HOOK
  * FILE: pzo-web/src/components/chat/useUnifiedChat.ts
  * ============================================================================
- *
- * Purpose
- * -------
- * Thin presentation-lane composition hook for the unified chat shell.
- *
- * This hook intentionally does NOT become a second engine.
- * It composes the current live hook (`useChatEngine`) and adds only UI-shell
- * responsibilities that belong in the component lane:
- *
- * - shell open / close / collapsed state
- * - draft state per channel
- * - transcript drawer state
- * - search state
- * - selection state
- * - UI-facing derived stats / labels / quick actions
- * - presentation-safe helper prompt derivation
- * - cheap channel summaries and threat posture
- *
- * It does NOT own:
- * - transport / sockets
- * - transcript truth
- * - bot cadence
- * - learning updates
- * - policy enforcement
- * - battle authority
- *
- * Architectural role
- * ------------------
- * Current repo reality still has `pzo-web/src/components/chat/useChatEngine.ts`
- * as the mounted live chat hook. This file is a controlled shell adapter that
- * makes the presentation split viable now without flattening the current logic.
- *
- * In the later canonical split:
- * - engines/chat remains the frontend authority lane
- * - components/chat remains the render lane
- * - this hook either becomes a presentation-only wrapper over engines/chat or
- *   shrinks into a minimal view-model adapter
- *
- * Design laws
- * -----------
- * - UI state only; never smuggle authority back into the component lane.
- * - Everything returned should be directly renderable or interaction-ready.
- * - Derive aggressively, mutate sparingly.
- * - Preserve the current chatTypes surface.
- * - Keep compile-safe against the repo’s current hook signature.
- * ============================================================================
  */
 
-
-export const USE_UNIFIED_CHAT_FILE_PATH =
-  'pzo-web/src/components/chat/useUnifiedChat.ts' as const;
-
+export const USE_UNIFIED_CHAT_FILE_PATH = 'pzo-web/src/components/chat/useUnifiedChat.ts' as const;
 export const USE_UNIFIED_CHAT_VERSION = '2026.03.15' as const;
-
-export const USE_UNIFIED_CHAT_REVISION =
-  'pzo.components.chat.useUnifiedChat.v2' as const;
-
+export const USE_UNIFIED_CHAT_REVISION = 'pzo.components.chat.useUnifiedChat.v2' as const;
 export const USE_UNIFIED_CHAT_RUNTIME_LAWS = Object.freeze([
   'This hook owns UI-shell state only; chat truth remains outside the component lane.',
   'This hook may compose the legacy compatibility hook during migration, but it must never become a second engine.',
@@ -86,7 +39,6 @@ export const USE_UNIFIED_CHAT_RUNTIME_LAWS = Object.freeze([
   'Shared contract law comes from shared/contracts/chat and is exposed through chatTypes.ts.',
   'The hook must stay backward-compatible with the current mounted chat surfaces while progressively shrinking legacy dependencies.',
 ] as const);
-
 export const USE_UNIFIED_CHAT_RUNTIME_BUNDLE = Object.freeze({
   filePath: USE_UNIFIED_CHAT_FILE_PATH,
   version: USE_UNIFIED_CHAT_VERSION,
@@ -115,12 +67,7 @@ const MAX_THREAT_SCAN = 48;
 const MAX_RECENT_PEERS = 24;
 const MAX_DRAFT_CHARS = 1200;
 
-export type UnifiedChatConnectionState =
-  | 'CONNECTED'
-  | 'CONNECTING'
-  | 'DEGRADED'
-  | 'DISCONNECTED';
-
+export type UnifiedChatConnectionState = 'CONNECTED' | 'CONNECTING' | 'DEGRADED' | 'DISCONNECTED';
 export type UnifiedChatShellMode = 'DOCK' | 'DRAWER';
 
 export interface UnifiedChatChannelSummary {
@@ -215,6 +162,8 @@ export interface UseUnifiedChatResult {
   helperPrompt: UnifiedChatHelperPrompt | null;
   presence: UnifiedChatPresencePreview;
   transcript: UnifiedChatTranscriptState;
+  transcriptDrawerModel: ChatUiTranscriptDrawerSurfaceModel;
+  transcriptDrawerCallbacks: ChatUiTranscriptDrawerCallbacks;
   composer: UnifiedChatComposerState;
   latestMessage: ChatMessage | null;
   latestPlayerMessage: ChatMessage | null;
@@ -261,33 +210,10 @@ type PersistedUiSnapshot = {
 
 type PersistedDraftSnapshot = Record<ChatChannel, string>;
 
-const CHANNEL_META: Record<
-  ChatChannel,
-  {
-    label: string;
-    emoji: string;
-    canCompose: boolean;
-    placeholder: string;
-  }
-> = {
-  GLOBAL: {
-    label: 'Global',
-    emoji: '🌐',
-    canCompose: true,
-    placeholder: 'Broadcast into the public lane…',
-  },
-  SYNDICATE: {
-    label: 'Syndicate',
-    emoji: '🏛️',
-    canCompose: true,
-    placeholder: 'Coordinate with your alliance…',
-  },
-  DEAL_ROOM: {
-    label: 'Deal Room',
-    emoji: '⚡',
-    canCompose: true,
-    placeholder: 'State your offer, counter, or recap…',
-  },
+const CHANNEL_META: Record<ChatChannel, { label: string; emoji: string; canCompose: boolean; placeholder: string }> = {
+  GLOBAL: { label: 'Global', emoji: '🌐', canCompose: true, placeholder: 'Broadcast into the public lane…' },
+  SYNDICATE: { label: 'Syndicate', emoji: '🏛️', canCompose: true, placeholder: 'Coordinate with your alliance…' },
+  DEAL_ROOM: { label: 'Deal Room', emoji: '⚡', canCompose: true, placeholder: 'State your offer, counter, or recap…' },
 };
 
 function safeWindow(): Window | null {
@@ -312,7 +238,7 @@ function safeWriteStorage<T>(key: string, value: T): void {
     if (!win) return;
     win.localStorage.setItem(key, JSON.stringify(value));
   } catch {
-    // storage is optional; fail closed with no UI crash
+    // optional persistence only
   }
 }
 
@@ -390,49 +316,16 @@ function scoreThreat(messages: readonly ChatMessage[], ctx: GameChatContext): Un
     if (msg.kind === 'BOT_ATTACK') score += 16;
     if (msg.kind === 'BOT_TAUNT') score += 8;
     if (msg.kind === 'CASCADE_ALERT') score += 10;
-    if (msg.kind === 'SHIELD_EVENT' && msg.shieldMeta?.isBreached) score += 12;
-    if (msg.kind === 'MARKET_ALERT' && msg.pressureTier === 'CRITICAL') score += 12;
+    if (msg.kind === 'SHIELD_EVENT' && (msg as unknown as { shieldMeta?: { isBreached?: boolean } }).shieldMeta?.isBreached) score += 12;
+    if (msg.kind === 'MARKET_ALERT' && (msg as unknown as { pressureTier?: string }).pressureTier === 'CRITICAL') score += 12;
   }
 
   score = clamp(score, 0, 100);
 
-  if (score >= 85) {
-    return {
-      score,
-      tier: 'CRITICAL',
-      label: 'Critical threat posture',
-      reasons,
-      latestThreatMessageId,
-    };
-  }
-
-  if (score >= 60) {
-    return {
-      score,
-      tier: 'HIGH',
-      label: 'High threat posture',
-      reasons,
-      latestThreatMessageId,
-    };
-  }
-
-  if (score >= 35) {
-    return {
-      score,
-      tier: 'WATCH',
-      label: 'Watch posture',
-      reasons,
-      latestThreatMessageId,
-    };
-  }
-
-  return {
-    score,
-    tier: 'CALM',
-    label: 'Stable posture',
-    reasons,
-    latestThreatMessageId,
-  };
+  if (score >= 85) return { score, tier: 'CRITICAL', label: 'Critical threat posture', reasons, latestThreatMessageId };
+  if (score >= 60) return { score, tier: 'HIGH', label: 'High threat posture', reasons, latestThreatMessageId };
+  if (score >= 35) return { score, tier: 'WATCH', label: 'Watch posture', reasons, latestThreatMessageId };
+  return { score, tier: 'CALM', label: 'Stable posture', reasons, latestThreatMessageId };
 }
 
 function buildHelperPrompt(
@@ -441,17 +334,22 @@ function buildHelperPrompt(
   threat: UnifiedChatThreatSummary,
 ): UnifiedChatHelperPrompt | null {
   const recent = messages.slice(-MAX_HELPER_SCAN);
-  const latestBotAttack = latestBy(recent, msg => msg.kind === 'BOT_ATTACK');
-  const latestShieldBreach = latestBy(recent, msg => msg.kind === 'SHIELD_EVENT' && Boolean(msg.shieldMeta?.isBreached));
-  const latestCascade = latestBy(recent, msg => msg.kind === 'CASCADE_ALERT');
-  const latestPressure = latestBy(recent, msg => msg.kind === 'MARKET_ALERT' && Boolean(msg.pressureTier));
+  const latestBotAttack = latestBy(recent, (msg) => msg.kind === 'BOT_ATTACK');
+  const latestShieldBreach = latestBy(
+    recent,
+    (msg) => msg.kind === 'SHIELD_EVENT' && (msg as unknown as { shieldMeta?: { isBreached?: boolean } }).shieldMeta?.isBreached === true,
+  );
+  const latestCascade = latestBy(recent, (msg) => msg.kind === 'CASCADE_ALERT');
+  const latestPressure = latestBy(
+    recent,
+    (msg) => msg.kind === 'MARKET_ALERT' && Boolean((msg as unknown as { pressureTier?: string }).pressureTier),
+  );
 
   if (latestShieldBreach) {
     return {
       id: `helper-shield-${latestShieldBreach.id}`,
       title: 'Shield integrity broke in the active window',
-      body:
-        'The last visible shield event shows a breach. The safest next move is to stabilize income and prevent a second chained hit before broadening risk.',
+      body: 'The last visible shield event shows a breach. Stabilize income and prevent a second chained hit before broadening risk.',
       severity: 'CRITICAL',
       sourceMessageId: latestShieldBreach.id,
       ctaLabel: 'Jump to breach',
@@ -463,8 +361,7 @@ function buildHelperPrompt(
     return {
       id: `helper-cascade-${latestCascade.id}`,
       title: 'Cascade pressure is visible in transcript',
-      body:
-        'A cascade lane was just triggered or acknowledged. Treat this as a compounding system event rather than a single isolated message.',
+      body: 'A cascade lane was just triggered or acknowledged. Treat this as a compounding system event rather than a single isolated message.',
       severity: threat.tier === 'CRITICAL' ? 'CRITICAL' : 'WARNING',
       sourceMessageId: latestCascade.id,
       ctaLabel: 'Inspect cascade',
@@ -476,8 +373,7 @@ function buildHelperPrompt(
     return {
       id: `helper-bot-${latestBotAttack.id}`,
       title: 'A hater attack is now the dominant visible signal',
-      body:
-        'The latest hostile event in the active transcript is a bot-backed attack. The next best UI move is usually either a defensive reply or a channel shift to coordination.',
+      body: 'The latest hostile event in the active transcript is a bot-backed attack. The next best UI move is usually either a defensive reply or a channel shift to coordination.',
       severity: threat.tier === 'CRITICAL' ? 'CRITICAL' : 'WARNING',
       sourceMessageId: latestBotAttack.id,
       ctaLabel: 'Inspect attack',
@@ -489,8 +385,7 @@ function buildHelperPrompt(
     return {
       id: `helper-pressure-${latestPressure.id}`,
       title: 'Pressure tier is escalating',
-      body:
-        'Pressure has moved into a visible risk band. The shell should bias toward clarity, quick composition, and reduced navigation friction until the posture improves.',
+      body: 'Pressure has moved into a visible risk band. The shell should bias toward clarity, quick composition, and reduced navigation friction until the posture improves.',
       severity: ctx.pressureTier === 'CRITICAL' ? 'CRITICAL' : 'WARNING',
       sourceMessageId: latestPressure.id,
       ctaLabel: 'Open latest alert',
@@ -502,8 +397,7 @@ function buildHelperPrompt(
     return {
       id: 'helper-watch-posture',
       title: 'Threat posture is rising',
-      body:
-        'Nothing catastrophic is visible yet, but the signal stack is shifting. This is the window to tighten decision quality before the lane gets noisy.',
+      body: 'Nothing catastrophic is visible yet, but the signal stack is shifting. This is the window to tighten decision quality before the lane gets noisy.',
       severity: 'GUIDE',
       ctaLabel: 'Stay focused',
       suggestedReply: 'What should I guard against next?',
@@ -522,11 +416,11 @@ function buildPresencePreview(messages: readonly ChatMessage[], activeChannel: C
   const recent = messages.slice(-MAX_RECENT_PEERS);
   for (const msg of recent) {
     if (msg.channel !== activeChannel) continue;
-    if (msg.senderId === 'SYSTEM') continue;
+    if ((msg as unknown as { senderId?: string }).senderId === 'SYSTEM') continue;
 
     activeMembers += 1;
-    if (msg.senderId !== 'player-local') {
-      const nextName = msg.senderName.trim();
+    if ((msg as unknown as { senderId?: string }).senderId !== 'player-local') {
+      const nextName = ((msg as unknown as { senderName?: string }).senderName ?? '').trim();
       if (nextName) {
         const dedupedNames = uniquePush(recentPeerNames, nextName, 6);
         recentPeerNames.length = 0;
@@ -534,13 +428,14 @@ function buildPresencePreview(messages: readonly ChatMessage[], activeChannel: C
       }
     }
 
-    if (msg.senderRank) {
-      const dedupedRanks = uniquePush(recentRanks, msg.senderRank, 6);
+    const senderRank = (msg as unknown as { senderRank?: string }).senderRank;
+    if (senderRank) {
+      const dedupedRanks = uniquePush(recentRanks, senderRank, 6);
       recentRanks.length = 0;
       recentRanks.push(...dedupedRanks);
     }
 
-    if (Date.now() - msg.ts < 18_000 && msg.channel === activeChannel) {
+    if (Date.now() - ((msg as unknown as { ts?: number }).ts ?? 0) < 18_000 && msg.channel === activeChannel) {
       typingCount += msg.kind === 'PLAYER' ? 1 : 0;
     }
   }
@@ -566,13 +461,13 @@ function summaryForChannel(
   messages: readonly ChatMessage[],
   unread: Record<ChatChannel, number>,
 ): UnifiedChatChannelSummary {
-  const scoped = messages.filter(msg => msg.channel === channel);
+  const scoped = messages.filter((msg) => msg.channel === channel);
   const latest = scoped.length > 0 ? scoped[scoped.length - 1] : null;
-  const hasThreatActivity = scoped.some(msg =>
+  const hasThreatActivity = scoped.some((msg) =>
     msg.kind === 'BOT_ATTACK' ||
     msg.kind === 'BOT_TAUNT' ||
     msg.kind === 'CASCADE_ALERT' ||
-    (msg.kind === 'SHIELD_EVENT' && Boolean(msg.shieldMeta?.isBreached)),
+    (msg.kind === 'SHIELD_EVENT' && (msg as unknown as { shieldMeta?: { isBreached?: boolean } }).shieldMeta?.isBreached),
   );
 
   return {
@@ -585,8 +480,8 @@ function summaryForChannel(
     latestTs: latest?.ts ?? null,
     latestPreview: latest ? compactPreview(latest.body, 74) : 'No visible messages yet.',
     latestSenderName: latest?.senderName ?? null,
-    hasPlayerActivity: scoped.some(msg => msg.kind === 'PLAYER'),
-    hasProofBearingMessage: scoped.some(msg => Boolean(msg.proofHash)),
+    hasPlayerActivity: scoped.some((msg) => msg.kind === 'PLAYER'),
+    hasProofBearingMessage: scoped.some((msg) => Boolean((msg as unknown as { proofHash?: string }).proofHash)),
     hasThreatActivity,
     canCompose: CHANNEL_META[channel].canCompose,
   };
@@ -594,7 +489,7 @@ function summaryForChannel(
 
 function transcriptLockedForChannel(channel: ChatChannel, messages: readonly ChatMessage[]): boolean {
   if (channel !== 'DEAL_ROOM') return false;
-  return messages.some(msg => msg.channel === 'DEAL_ROOM' && Boolean(msg.immutable || msg.proofHash));
+  return messages.some((msg) => msg.channel === 'DEAL_ROOM' && Boolean((msg as unknown as { immutable?: boolean; proofHash?: string }).immutable || (msg as unknown as { proofHash?: string }).proofHash));
 }
 
 function emptyStateModeFromState(args: {
@@ -679,10 +574,8 @@ export function useUnifiedChat({
   const lastJumpTargetRef = useRef<string | null>(null);
 
   const { messages, activeTab, switchTab, chatOpen, toggleChat, sendMessage, unread, totalUnread, connected } = engine;
-
   const sortedMessages = useMemo(() => sortMessagesForRender(messages), [messages]);
 
-  // Align current live hook tab with persisted / requested initial tab once.
   useEffect(() => {
     if (hasMountedRef.current) return;
     hasMountedRef.current = true;
@@ -715,23 +608,17 @@ export function useUnifiedChat({
 
   const activeDraft = drafts[activeTab];
   const allMessages = sortedMessages;
-  const visibleMessages = useMemo(
-    () => sortedMessages.filter(msg => msg.channel === activeTab),
-    [sortedMessages, activeTab],
-  );
-  const recentMessages = useMemo(() => visibleMessages.slice(-24), [visibleMessages]);
-
   const latestMessage = useMemo(() => latestBy(messages), [messages]);
-  const latestPlayerMessage = useMemo(() => latestBy(messages, msg => msg.kind === 'PLAYER'), [messages]);
-  const latestSystemMessage = useMemo(() => latestBy(messages, msg => msg.kind !== 'PLAYER'), [messages]);
+  const latestPlayerMessage = useMemo(() => latestBy(messages, (msg) => msg.kind === 'PLAYER'), [messages]);
+  const latestSystemMessage = useMemo(() => latestBy(messages, (msg) => msg.kind !== 'PLAYER'), [messages]);
   const latestThreatMessage = useMemo(
-    () => latestBy(messages, msg => msg.kind === 'BOT_ATTACK' || msg.kind === 'BOT_TAUNT' || msg.kind === 'CASCADE_ALERT'),
+    () => latestBy(messages, (msg) => msg.kind === 'BOT_ATTACK' || msg.kind === 'BOT_TAUNT' || msg.kind === 'CASCADE_ALERT'),
     [messages],
   );
 
   const connectionState = useMemo(
     () => connectionStateFromFlags(connected, messages, normalizedCtx),
-    [connected, messages, ctx],
+    [connected, messages, normalizedCtx],
   );
 
   const canonicalThreat = useMemo(() => extractThreatSnapshot(allMessages), [allMessages]);
@@ -749,16 +636,23 @@ export function useUnifiedChat({
               ? 'WATCH'
               : localThreat.tier,
       label: localThreat.label,
-      reasons: Array.from(new Set([
-        ...localThreat.reasons,
-        canonicalThreat.activePressureTier ? `Shared pressure tier ${canonicalThreat.activePressureTier}` : '',
-        canonicalThreat.activeTickTier ? `Shared tick tier ${canonicalThreat.activeTickTier}` : '',
-      ].filter(Boolean))),
+      reasons: Array.from(
+        new Set(
+          [
+            ...localThreat.reasons,
+            canonicalThreat.activePressureTier ? `Shared pressure tier ${canonicalThreat.activePressureTier}` : '',
+            canonicalThreat.activeTickTier ? `Shared tick tier ${canonicalThreat.activeTickTier}` : '',
+          ].filter(Boolean),
+        ),
+      ),
       latestThreatMessageId: localThreat.latestThreatMessageId,
     } satisfies UnifiedChatThreatSummary;
   }, [allMessages, normalizedCtx, canonicalThreat]);
 
-  const rawHelperPrompt = useMemo(() => buildHelperPrompt(allMessages, normalizedCtx, threat), [allMessages, normalizedCtx, threat]);
+  const rawHelperPrompt = useMemo(
+    () => buildHelperPrompt(allMessages, normalizedCtx, threat),
+    [allMessages, normalizedCtx, threat],
+  );
   const helperPrompt = helperDismissed ? null : rawHelperPrompt;
 
   useEffect(() => {
@@ -788,14 +682,14 @@ export function useUnifiedChat({
       ),
       latestSenderName: summary.lastSenderName ?? null,
       hasPlayerActivity: allMessages.some((message) => message.channel === summary.channel && message.kind === 'PLAYER'),
-      hasProofBearingMessage: allMessages.some((message) => message.channel === summary.channel && Boolean(message.proofHash)),
+      hasProofBearingMessage: allMessages.some((message) => message.channel === summary.channel && Boolean((message as unknown as { proofHash?: string }).proofHash)),
       hasThreatActivity: summary.threatBand === 'HIGH' || summary.threatBand === 'SEVERE' || summary.helperNeeded,
       canCompose: CHANNEL_META[summary.channel].canCompose,
     }));
   }, [canonicalChannelSummaries, unread, allMessages]);
 
   const activeSummary = useMemo(
-    () => channels.find(summary => summary.channel === activeTab) ?? summaryForChannel(activeTab, messages, unread),
+    () => channels.find((summary) => summary.channel === activeTab) ?? summaryForChannel(activeTab, messages, unread),
     [channels, activeTab, messages, unread],
   );
 
@@ -809,18 +703,24 @@ export function useUnifiedChat({
     [allMessages, transcriptSearch, activeTab],
   );
 
+  const visibleMessages = useMemo(
+    () => transcriptSearchResult.messages,
+    [transcriptSearchResult.messages],
+  );
+  const recentMessages = useMemo(() => visibleMessages.slice(-24), [visibleMessages]);
+
   const emptyStateMode = useMemo(
     () =>
       emptyStateModeFromState({
         collapsed,
         connected,
         activeChannel: activeTab,
-        visibleMessages: transcriptSearchResult.messages,
+        visibleMessages,
         transcriptOpen,
         transcriptSearch,
         threat,
       }),
-    [collapsed, connected, activeTab, transcriptSearchResult.messages, transcriptOpen, transcriptSearch, threat],
+    [collapsed, connected, activeTab, visibleMessages, transcriptOpen, transcriptSearch, threat],
   );
 
   const setActiveChannel = useCallback(
@@ -835,12 +735,9 @@ export function useUnifiedChat({
   const setDraft = useCallback(
     (next: string) => {
       const clipped = next.slice(0, MAX_DRAFT_CHARS);
-      setDrafts(prev => {
+      setDrafts((prev) => {
         if (prev[activeTab] === clipped) return prev;
-        return {
-          ...prev,
-          [activeTab]: clipped,
-        };
+        return { ...prev, [activeTab]: clipped };
       });
     },
     [activeTab],
@@ -848,69 +745,49 @@ export function useUnifiedChat({
 
   const appendDraft = useCallback(
     (suffix: string) => {
-      setDrafts(prev => {
+      setDrafts((prev) => {
         const current = prev[activeTab] ?? '';
         const base = current.trim().length > 0 ? `${current.trimEnd()} ${suffix.trim()}` : suffix.trim();
-        return {
-          ...prev,
-          [activeTab]: base.slice(0, MAX_DRAFT_CHARS),
-        };
+        return { ...prev, [activeTab]: base.slice(0, MAX_DRAFT_CHARS) };
       });
     },
     [activeTab],
   );
 
   const clearDraft = useCallback(() => {
-    setDrafts(prev => ({
-      ...prev,
-      [activeTab]: '',
-    }));
+    setDrafts((prev) => ({ ...prev, [activeTab]: '' }));
   }, [activeTab]);
 
   const openChat = useCallback(() => {
-    if (!chatOpen) {
-      toggleChat();
-    }
+    if (!chatOpen) toggleChat();
     setExplicitOpen(true);
     setCollapsed(false);
   }, [chatOpen, toggleChat]);
 
   const closeChat = useCallback(() => {
-    if (chatOpen) {
-      toggleChat();
-    }
+    if (chatOpen) toggleChat();
     setExplicitOpen(false);
   }, [chatOpen, toggleChat]);
 
   const stableToggleChat = useCallback(() => {
     toggleChat();
-    setExplicitOpen(prev => !prev);
+    setExplicitOpen((prev) => !prev);
   }, [toggleChat]);
 
   const collapse = useCallback(() => setCollapsed(true), []);
   const expand = useCallback(() => setCollapsed(false), []);
-  const toggleCollapsed = useCallback(() => setCollapsed(prev => !prev), []);
-
+  const toggleCollapsed = useCallback(() => setCollapsed((prev) => !prev), []);
   const pin = useCallback(() => setIsPinned(true), []);
   const unpin = useCallback(() => setIsPinned(false), []);
-  const togglePinned = useCallback(() => setIsPinned(prev => !prev), []);
-
-  const openTranscript = useCallback(() => {
-    setTranscriptOpen(true);
-    setCollapsed(false);
-  }, []);
-
+  const togglePinned = useCallback(() => setIsPinned((prev) => !prev), []);
+  const openTranscript = useCallback(() => { setTranscriptOpen(true); setCollapsed(false); }, []);
   const closeTranscript = useCallback(() => setTranscriptOpen(false), []);
-  const toggleTranscript = useCallback(() => setTranscriptOpen(prev => !prev), []);
+  const toggleTranscript = useCallback(() => setTranscriptOpen((prev) => !prev), []);
   const setTranscriptSearchQuery = useCallback((query: string) => setTranscriptSearch(query), []);
-
-  const selectTranscriptMessage = useCallback((messageId: string | null) => {
-    setSelectedMessageId(messageId);
-    lastJumpTargetRef.current = messageId;
-  }, []);
+  const selectTranscriptMessage = useCallback((messageId: string | null) => { setSelectedMessageId(messageId); lastJumpTargetRef.current = messageId; }, []);
 
   const jumpToLatest = useCallback(() => {
-    const target = latestBy(messages.filter(msg => msg.channel === activeTab));
+    const target = latestBy(messages.filter((msg) => msg.channel === activeTab));
     if (!target) return;
     setSelectedMessageId(target.id);
     lastJumpTargetRef.current = target.id;
@@ -920,10 +797,7 @@ export function useUnifiedChat({
     const trimmed = activeDraft.trim();
     if (!trimmed) return;
     sendMessage(trimmed);
-    setDrafts(prev => ({
-      ...prev,
-      [activeTab]: '',
-    }));
+    setDrafts((prev) => ({ ...prev, [activeTab]: '' }));
     setHelperDismissed(false);
     setSelectedMessageId(null);
   }, [activeDraft, sendMessage, activeTab]);
@@ -933,10 +807,7 @@ export function useUnifiedChat({
       const trimmed = reply.trim();
       if (!trimmed) return;
       sendMessage(trimmed);
-      setDrafts(prev => ({
-        ...prev,
-        [activeTab]: '',
-      }));
+      setDrafts((prev) => ({ ...prev, [activeTab]: '' }));
       setHelperDismissed(true);
     },
     [sendMessage, activeTab],
@@ -953,17 +824,8 @@ export function useUnifiedChat({
     setSelectedMessageId(null);
     setHelperDismissed(false);
     setDrafts({ GLOBAL: '', SYNDICATE: '', DEAL_ROOM: '' });
-    if (activeTab !== initialChannel) {
-      switchTab(initialChannel);
-    }
-  }, [
-    initialCollapsed,
-    initialTranscriptOpen,
-    initialTranscriptSearch,
-    initialChannel,
-    activeTab,
-    switchTab,
-  ]);
+    if (activeTab !== initialChannel) switchTab(initialChannel);
+  }, [initialCollapsed, initialTranscriptOpen, initialTranscriptSearch, initialChannel, activeTab, switchTab]);
 
   const composer = useMemo<UnifiedChatComposerState>(() => {
     const trimmed = activeDraft.trim();
@@ -978,11 +840,71 @@ export function useUnifiedChat({
     };
   }, [activeDraft, activeTab]);
 
+  const transcriptDrawerModel = useMemo(
+    () => buildTranscriptDrawerSurfaceModel({
+      open: transcriptOpen,
+      messages: allMessages,
+      activeChannel: activeTab,
+      roomTitle: activeSummary.label,
+      roomSubtitle: activeSummary.latestPreview || activeSummary.label,
+      modeName: shellMode,
+      context: normalizedCtx,
+      connected,
+      connectionState,
+      onlineCount: presence.onlineCount,
+      activeMembers: presence.activeMembers,
+      typingCount: presence.typingCount,
+      totalUnread,
+      selectedMessageId,
+      transcriptLocked,
+      searchQuery: transcriptSearch,
+      newestFirst: false,
+      proofOnly: false,
+      lockedOnly: false,
+      channelScope: activeTab,
+      kindScope: 'ALL',
+    }),
+    [
+      transcriptOpen,
+      allMessages,
+      activeTab,
+      activeSummary.label,
+      activeSummary.latestPreview,
+      shellMode,
+      normalizedCtx,
+      connected,
+      connectionState,
+      presence.onlineCount,
+      presence.activeMembers,
+      presence.typingCount,
+      totalUnread,
+      selectedMessageId,
+      transcriptLocked,
+      transcriptSearch,
+    ],
+  );
+
+  const transcriptDrawerCallbacks = useMemo(
+    () => createTranscriptDrawerCallbacks({
+      onClose: closeTranscript,
+      onSearchQueryChange: setTranscriptSearchQuery,
+      onSelectChannelScope: (scopeId) => {
+        if (scopeId === 'GLOBAL' || scopeId === 'SYNDICATE' || scopeId === 'DEAL_ROOM') {
+          setActiveChannel(scopeId);
+        }
+      },
+      onJumpToMessage: selectTranscriptMessage,
+      onRequestExport: undefined,
+      onJumpLatest: jumpToLatest,
+    }),
+    [closeTranscript, setTranscriptSearchQuery, setActiveChannel, selectTranscriptMessage, jumpToLatest],
+  );
+
   return {
     shellMode,
     connected,
     connectionState,
-    chatOpen,
+    chatOpen: explicitOpen || chatOpen,
     collapsed,
     isPinned,
     activeChannel: activeTab,
@@ -1002,6 +924,8 @@ export function useUnifiedChat({
       selectedMessageId,
       newestFirst: false,
     },
+    transcriptDrawerModel,
+    transcriptDrawerCallbacks,
     composer,
     latestMessage,
     latestPlayerMessage,
@@ -1041,9 +965,9 @@ export function useUnifiedChat({
       transcriptSearchResult,
     },
     mountState: {
-      mountTarget: String(normalizedCtx.mountTarget ?? normalizedCtx.run?.mountTarget ?? 'UNKNOWN'),
-      modeScope: String(normalizedCtx.modeScope ?? normalizedCtx.run?.modeScope ?? 'UNKNOWN'),
-      storageNamespace: namespace,
+      mountTarget: String((normalizedCtx as unknown as { mountTarget?: string; run?: { mountTarget?: string } }).mountTarget ?? (normalizedCtx as unknown as { run?: { mountTarget?: string } }).run?.mountTarget ?? 'UNKNOWN'),
+      modeScope: String((normalizedCtx as unknown as { modeScope?: string; run?: { modeScope?: string } }).modeScope ?? (normalizedCtx as unknown as { run?: { modeScope?: string } }).run?.modeScope ?? 'UNKNOWN'),
+      storageNamespace,
     },
     runtimeBundle: USE_UNIFIED_CHAT_RUNTIME_BUNDLE,
   };

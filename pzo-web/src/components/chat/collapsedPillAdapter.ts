@@ -2,7 +2,7 @@
  * ============================================================================
  * POINT ZERO ONE — COLLAPSED PILL UI ADAPTER
  * FILE: pzo-web/src/components/chat/collapsedPillAdapter.ts
- * VERSION: 1.0.0
+ * VERSION: 1.1.0
  * AUTHOR: OpenAI
  * LICENSE: Internal / Project Use Only
  * ============================================================================
@@ -23,21 +23,19 @@
  * - presence preview
  * - active / available channels
  *
- * This adapter creates the exact seam you asked for:
- * `UnifiedChatDock.tsx` or `useUnifiedChat.ts` hands the component already-
- * derived unread, typing, presence, threat, helper, and channel summaries.
- * The component itself then renders that surface and nothing more.
+ * This adapter creates the seam between the hook and the presentation model.
+ * It computes a rich collapsed-pill payload but still defers final shape
+ * normalization to `buildCollapsedPillViewModel()` in `uiTypes.ts`.
  * ============================================================================
  */
 
 import type {
   ChatUiAccent,
+  ChatUiChip,
   ChatUiCollapsedPillAction,
-  ChatUiCollapsedPillChannelSummary,
   ChatUiCollapsedPillPresenceSummary,
   ChatUiCollapsedPillThreatSummary,
   ChatUiCollapsedPillViewModel,
-  ChatUiChip,
   ChatUiMetric,
   ChatUiPill,
   ChatUiThreatBand,
@@ -54,7 +52,6 @@ import type {
   UnifiedChatChannelSummary,
   UnifiedChatConnectionState,
   UnifiedChatHelperPrompt,
-  UnifiedChatPresencePreview,
   UnifiedChatThreatSummary,
   UseUnifiedChatResult,
 } from './useUnifiedChat';
@@ -112,6 +109,11 @@ function cap<T>(items: readonly T[] | undefined, limit: number | undefined): rea
   if (!items || items.length === 0) return undefined;
   if (!Number.isFinite(limit) || (limit as number) <= 0) return items;
   return items.slice(0, limit as number);
+}
+
+function clamp01(value: number | undefined): number | undefined {
+  if (!Number.isFinite(value)) return undefined;
+  return Math.max(0, Math.min(1, value as number));
 }
 
 function mapConnectionTone(connection: UnifiedChatConnectionState): ChatUiTone {
@@ -191,8 +193,8 @@ function buildThreatSummary(
   const band = normalizeThreatBand(override?.band ?? mapThreatBand(result.threat));
   const score01 =
     typeof override?.score01 === 'number'
-      ? Math.max(0, Math.min(1, override.score01))
-      : Math.max(0, Math.min(1, result.threat.score / 100));
+      ? clamp01(override.score01)
+      : clamp01(Math.max(0, Math.min(1, result.threat.score / 100)));
 
   return {
     band,
@@ -209,10 +211,14 @@ function buildThreatSummary(
   };
 }
 
-function buildPresenceSummary(result: UseUnifiedChatResult, options: CollapsedPillAdapterOptions): ChatUiCollapsedPillPresenceSummary {
+function buildPresenceSummary(
+  result: UseUnifiedChatResult,
+  options: CollapsedPillAdapterOptions,
+): ChatUiCollapsedPillPresenceSummary {
   const preview = result.presence;
   const visible = Math.max(0, preview.onlineCount ?? 0);
   const typing = Math.max(0, preview.typingCount ?? 0);
+  const recentNames = preview.recentPeerNames.slice(0, options.presenceNamesLimit ?? 4);
 
   let mood: ChatUiCollapsedPillPresenceSummary['mood'] = 'quiet';
   if (visible >= 8 || typing >= 3) mood = 'swarming';
@@ -223,16 +229,11 @@ function buildPresenceSummary(result: UseUnifiedChatResult, options: CollapsedPi
     count: visible,
     activeCount: Math.max(0, preview.activeMembers ?? 0),
     mood,
-    moodLabel: mood === 'swarming' ? 'Swarming' : mood === 'active' ? 'Active' : mood === 'watched' ? 'Watched' : 'Quiet',
-    label:
-      visible > 0
-        ? `${visible} visible • ${Math.max(0, preview.activeMembers ?? 0)} active`
-        : 'Quiet room',
-    observerLabels: preview.recentPeerNames.slice(0, options.presenceNamesLimit ?? 4),
-    tooltip:
-      preview.recentPeerNames.length > 0
-        ? `Recent peers: ${preview.recentPeerNames.slice(0, options.presenceNamesLimit ?? 4).join(', ')}`
-        : 'No visible peer activity',
+    moodLabel:
+      mood === 'swarming' ? 'Swarming' : mood === 'active' ? 'Active' : mood === 'watched' ? 'Watched' : 'Quiet',
+    label: visible > 0 ? `${visible} visible • ${Math.max(0, preview.activeMembers ?? 0)} active` : 'Quiet room',
+    observerLabels: recentNames.length > 0 ? recentNames : undefined,
+    tooltip: recentNames.length > 0 ? `Recent peers: ${recentNames.join(', ')}` : 'No visible peer activity',
   };
 }
 
@@ -247,14 +248,13 @@ function buildTypingSummary(result: UseUnifiedChatResult) {
     };
   }
 
+  const actors = result.presence.recentPeerNames.slice(0, 3);
+
   return {
     count,
     label: count === 1 ? '1 typing' : `${count} typing`,
-    actorLabels: result.presence.recentPeerNames.slice(0, 3),
-    tooltip:
-      result.presence.recentPeerNames.length > 0
-        ? `Likely active: ${result.presence.recentPeerNames.slice(0, 3).join(', ')}`
-        : `${count} active typing signal${count === 1 ? '' : 's'}`,
+    actorLabels: actors.length > 0 ? actors : undefined,
+    tooltip: actors.length > 0 ? `Likely active: ${actors.join(', ')}` : `${count} active typing signal${count === 1 ? '' : 's'}`,
   };
 }
 
@@ -275,10 +275,10 @@ function buildHelperSummary(helper: UnifiedChatHelperPrompt | null | undefined) 
     helper.severity === 'CRITICAL'
       ? 'immediate'
       : helper.severity === 'WARNING'
-      ? 'high'
-      : helper.severity === 'GUIDE'
-      ? 'medium'
-      : 'low';
+        ? 'high'
+        : helper.severity === 'GUIDE'
+          ? 'medium'
+          : 'low';
 
   return {
     visible: true,
@@ -356,7 +356,7 @@ function channelIcon(channel: UnifiedChatChannelSummary['channel']): string {
 function buildChannelSummary(
   summary: UnifiedChatChannelSummary,
   result: UseUnifiedChatResult,
-): ChatUiCollapsedPillChannelSummary {
+) {
   return {
     id: toId('collapsed-channel', summary.channel),
     channelId: summary.channel,
@@ -373,9 +373,7 @@ function buildChannelSummary(
     accent: channelAccent(summary.channel),
     tone: summary.hasThreatActivity ? 'warning' : 'neutral',
     tooltip:
-      summary.latestPreview && summary.latestPreview.length > 0
-        ? `${summary.label}: ${summary.latestPreview}`
-        : summary.label,
+      summary.latestPreview && summary.latestPreview.length > 0 ? `${summary.label}: ${summary.latestPreview}` : summary.label,
     disabled: false,
   };
 }
@@ -424,7 +422,7 @@ function buildStatusPills(
     });
   }
 
-  return cap(pills, options.statusPillLimit) ?? pills;
+  return cap(options.statusPills ?? pills, options.statusPillLimit) ?? (options.statusPills ?? pills);
 }
 
 function buildDefaultChips(result: UseUnifiedChatResult): readonly ChatUiChip[] {
@@ -545,7 +543,7 @@ function buildDefaultActions(
     });
   }
 
-  return cap(actions, options.actionLimit) ?? actions;
+  return cap(options.actions ?? actions, options.actionLimit) ?? (options.actions ?? actions);
 }
 
 export function buildCollapsedPillViewModelFromUnifiedChat(
@@ -557,9 +555,11 @@ export function buildCollapsedPillViewModelFromUnifiedChat(
   const presenceSummary = buildPresenceSummary(result, options);
   const typingSummary = buildTypingSummary(result);
   const invasionSummary = buildInvasionSummary(options);
-  const accent = deriveAccent(result, options, threatSummary.band);
-  const tone = deriveTone(result, options, threatSummary.band);
+  const accent = deriveAccent(result, options, threatSummary.band ?? 'quiet');
+  const tone = deriveTone(result, options, threatSummary.band ?? 'quiet');
   const connectionLabel = options.connectionLabel ?? result.connectionState;
+
+  const channelSummaries = result.channels.map((summary) => buildChannelSummary(summary, result));
 
   return buildCollapsedPillViewModel({
     id: options.id ?? 'chat-collapsed-pill',
@@ -590,22 +590,28 @@ export function buildCollapsedPillViewModelFromUnifiedChat(
     ]
       .filter(Boolean)
       .join(' • '),
-    pinned: Boolean(options.pinned),
+    pinned: Boolean(options.pinned ?? result.isPinned),
     muted: Boolean(options.muted),
     disabled: false,
-    attention: options.attention ?? (invasionSummary.active ? 'critical' : result.threat.tier === 'CRITICAL' ? 'critical' : result.helperPrompt ? 'high' : 'normal'),
+    attention:
+      options.attention ??
+      (invasionSummary.active
+        ? 'critical'
+        : result.threat.tier === 'CRITICAL'
+          ? 'critical'
+          : result.helperPrompt
+            ? 'high'
+            : 'normal'),
     presenceSummary,
     typingSummary,
     threatSummary,
     helperSummary,
     invasionSummary,
-    channelSummaries:
-      cap(result.channels.map((summary) => buildChannelSummary(summary, result)), options.channelLimit) ??
-      result.channels.map((summary) => buildChannelSummary(summary, result)),
+    channelSummaries: cap(channelSummaries, options.channelLimit) ?? channelSummaries,
     chips: cap(options.chips ?? buildDefaultChips(result), options.chipLimit),
     metrics: cap(options.metrics ?? buildDefaultMetrics(result), options.metricLimit),
     statusPills: buildStatusPills(result, options),
-    actions: cap(options.actions ?? buildDefaultActions(result, options), options.actionLimit),
+    actions: buildDefaultActions(result, options),
   });
 }
 

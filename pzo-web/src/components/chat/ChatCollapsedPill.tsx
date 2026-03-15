@@ -2,7 +2,7 @@
  * ============================================================================
  * POINT ZERO ONE — THIN CHAT RENDER SHELL
  * FILE: pzo-web/src/components/chat/ChatCollapsedPill.tsx
- * VERSION: 3.0.0
+ * VERSION: 3.1.0
  * AUTHOR: OpenAI
  * LICENSE: Internal / Project Use Only
  * ============================================================================
@@ -11,10 +11,10 @@
  * -------
  * Presentation-only collapsed launcher for the unified chat shell.
  *
- * This rewrite intentionally fixes the dependency direction problem in the live
- * repo by making the component consume only normalized UI contracts from
- * `./uiTypes`. The component no longer imports engine-lane `./types`, no longer
- * reads `CHAT_ENGINE_AUTHORITIES`, and no longer reads mount presets directly.
+ * This component consumes only normalized UI contracts from `./uiTypes`.
+ * It does not read engine contracts, transport state, mount presets, or repo
+ * authority bundles directly. Everything rendered here must already be mapped
+ * upstream into `ChatUiCollapsedPillViewModel`.
  *
  * Design law
  * ----------
@@ -22,20 +22,21 @@
  * - no engine ownership
  * - no policy ownership
  * - no mount preset authority
- * - no threat / helper / invasion derivation
+ * - no threat / helper / invasion derivation beyond safe display formatting
  * - no transcript truth inference
  *
- * Everything shown here must already be computed upstream by:
- * - UnifiedChatDock.tsx
- * - useUnifiedChat.ts
- * - or a dedicated adapter that maps authoritative shell state into the
- *   `ChatUiCollapsedPillViewModel` surface.
+ * Upstream ownership
+ * ------------------
+ * The authoritative derivation path should be:
+ * - `useUnifiedChat.ts`
+ * - `collapsedPillAdapter.ts`
+ * - or a presentation-safe adapter over the canonical engine lane
  *
- * The job of this component is simple:
- * - stay compact
- * - feel alive
- * - remain accessible under pressure
- * - keep the minimized state informative without becoming a second engine
+ * This component should remain:
+ * - compact
+ * - readable under pressure
+ * - keyboard accessible
+ * - visually informative while minimized
  * ============================================================================
  */
 
@@ -102,7 +103,7 @@ const MAX_CHANNEL_BUTTONS = 3;
 const MAX_STATUS_PILLS = 4;
 const MAX_CHIPS = 4;
 const MAX_METRICS = 3;
-const MAX_ACTIONS = 2;
+const MAX_ACTIONS = 3;
 
 export interface ChatCollapsedPillProps {
   readonly model: ChatUiCollapsedPillViewModel;
@@ -159,28 +160,58 @@ function compactNumber(value: number | undefined): string {
 function toneVisual(tone: ChatUiTone | undefined): ToneVisual {
   switch (tone) {
     case 'danger':
-      return { label: 'danger', glow: '0 0 0 1px rgba(255,77,77,0.08) inset, 0 12px 28px rgba(255,77,77,0.12)' };
+      return {
+        label: 'danger',
+        glow: '0 0 0 1px rgba(255,77,77,0.08) inset, 0 12px 28px rgba(255,77,77,0.12)',
+      };
     case 'hostile':
-      return { label: 'hostile', glow: '0 0 0 1px rgba(255,140,0,0.08) inset, 0 12px 28px rgba(255,140,0,0.12)' };
+      return {
+        label: 'hostile',
+        glow: '0 0 0 1px rgba(255,140,0,0.08) inset, 0 12px 28px rgba(255,140,0,0.12)',
+      };
     case 'supportive':
-      return { label: 'supportive', glow: '0 0 0 1px rgba(34,221,136,0.08) inset, 0 12px 28px rgba(34,221,136,0.12)' };
+      return {
+        label: 'supportive',
+        glow: '0 0 0 1px rgba(34,221,136,0.08) inset, 0 12px 28px rgba(34,221,136,0.12)',
+      };
     case 'warning':
-      return { label: 'warning', glow: '0 0 0 1px rgba(246,196,83,0.08) inset, 0 12px 28px rgba(246,196,83,0.12)' };
+      return {
+        label: 'warning',
+        glow: '0 0 0 1px rgba(246,196,83,0.08) inset, 0 12px 28px rgba(246,196,83,0.12)',
+      };
     case 'premium':
-      return { label: 'premium', glow: '0 0 0 1px rgba(231,193,90,0.08) inset, 0 12px 28px rgba(231,193,90,0.12)' };
+      return {
+        label: 'premium',
+        glow: '0 0 0 1px rgba(231,193,90,0.08) inset, 0 12px 28px rgba(231,193,90,0.12)',
+      };
     case 'celebratory':
-      return { label: 'celebratory', glow: '0 0 0 1px rgba(168,85,247,0.08) inset, 0 12px 28px rgba(168,85,247,0.12)' };
+      return {
+        label: 'celebratory',
+        glow: '0 0 0 1px rgba(168,85,247,0.08) inset, 0 12px 28px rgba(168,85,247,0.12)',
+      };
     case 'dramatic':
-      return { label: 'dramatic', glow: '0 0 0 1px rgba(129,140,248,0.08) inset, 0 12px 28px rgba(129,140,248,0.12)' };
+      return {
+        label: 'dramatic',
+        glow: '0 0 0 1px rgba(129,140,248,0.08) inset, 0 12px 28px rgba(129,140,248,0.12)',
+      };
     case 'calm':
     case 'positive':
-      return { label: 'calm', glow: '0 0 0 1px rgba(34,221,136,0.08) inset, 0 12px 28px rgba(34,221,136,0.08)' };
+      return {
+        label: 'calm',
+        glow: '0 0 0 1px rgba(34,221,136,0.08) inset, 0 12px 28px rgba(34,221,136,0.08)',
+      };
     case 'ghost':
     case 'stealth':
-      return { label: 'stealth', glow: '0 0 0 1px rgba(116,128,150,0.08) inset, 0 12px 28px rgba(0,0,0,0.24)' };
+      return {
+        label: 'stealth',
+        glow: '0 0 0 1px rgba(115,128,150,0.08) inset, 0 12px 28px rgba(0,0,0,0.24)',
+      };
     case 'neutral':
     default:
-      return { label: 'neutral', glow: '0 0 0 1px rgba(255,255,255,0.04) inset, 0 12px 28px rgba(0,0,0,0.30)' };
+      return {
+        label: 'neutral',
+        glow: '0 0 0 1px rgba(255,255,255,0.04) inset, 0 12px 28px rgba(0,0,0,0.30)',
+      };
   }
 }
 
@@ -287,6 +318,7 @@ function anchorStyle(
   anchor: ChatCollapsedPillProps['anchor'],
 ): React.CSSProperties {
   if (!fixedPosition) return {};
+
   switch (anchor) {
     case 'bottom-left':
       return {
@@ -311,6 +343,7 @@ function anchorStyle(
 function readableUnread(model: ChatUiCollapsedPillViewModel): string {
   const mentions = Math.max(0, Math.floor(model.mentionCount ?? 0));
   const unread = Math.max(0, Math.floor(model.unreadCount ?? 0));
+
   if (mentions > 0) return mentions > 99 ? '99+ mentions' : `${mentions} mention${mentions === 1 ? '' : 's'}`;
   if (unread <= 0) return 'No unread';
   return unread > 99 ? '99+ unread' : `${unread} unread`;
@@ -319,6 +352,7 @@ function readableUnread(model: ChatUiCollapsedPillViewModel): string {
 function readableTyping(summary: ChatUiCollapsedPillTypingSummary | undefined): string | undefined {
   if (!summary) return undefined;
   if (summary.label?.trim()) return summary.label;
+
   const count = Math.max(0, Math.floor(summary.count ?? 0));
   if (count <= 0) return undefined;
   return countLabel(count, 'typing');
@@ -327,6 +361,7 @@ function readableTyping(summary: ChatUiCollapsedPillTypingSummary | undefined): 
 function readablePresence(summary: ChatUiCollapsedPillPresenceSummary | undefined): string | undefined {
   if (!summary) return undefined;
   if (summary.label?.trim()) return summary.label;
+
   const count = Math.max(0, Math.floor(summary.count ?? 0));
   if (count <= 0) return undefined;
   return `${presenceMoodLabel(summary)} • ${countLabel(count, 'visible')}`;
@@ -343,7 +378,10 @@ function readableInvasion(summary: ChatUiCollapsedPillInvasionSummary | undefine
   return summary.label?.trim() || 'Invasion active';
 }
 
-function readableThreat(summary: ChatUiCollapsedPillThreatSummary | undefined, fallbackBand: ChatUiThreatBand | undefined): string {
+function readableThreat(
+  summary: ChatUiCollapsedPillThreatSummary | undefined,
+  fallbackBand: ChatUiThreatBand | undefined,
+): string {
   if (summary?.label?.trim()) return summary.label;
   return threatVisual(summary?.band ?? fallbackBand).text;
 }
@@ -357,6 +395,7 @@ function rootAriaLabel(model: ChatUiCollapsedPillViewModel): string {
     readableHelper(model.helperSummary),
     readableInvasion(model.invasionSummary),
   ].filter(Boolean);
+
   return parts.join(' ');
 }
 
@@ -572,14 +611,17 @@ function renderAction(
       onClick={(event) => {
         event.stopPropagation();
         if (!clickable) return;
+
         if (action.kind === 'dismiss') {
           onDismiss?.(model);
           return;
         }
+
         if (action.kind === 'toggle') {
           onToggleExpanded?.(!Boolean(model.expanded), model);
           return;
         }
+
         onAction?.(action, model);
       }}
       style={{
@@ -621,6 +663,7 @@ function ChatCollapsedPillComponent({
   onAction,
 }: ChatCollapsedPillProps): React.JSX.Element {
   const pillId = useId();
+  const componentDisabled = disabled || Boolean(model.disabled);
 
   const derived = useMemo(() => {
     const accent = accentVisual(model.accent);
@@ -640,18 +683,14 @@ function ChatCollapsedPillComponent({
     const headline = model.roomLabel || model.label;
     const subline =
       model.statusLine ||
-      [
-        model.channelLabel || model.shortLabel,
-        readableUnread(model),
-        presenceText,
-      ]
-        .filter(Boolean)
-        .join(' • ');
+      [model.channelLabel || model.shortLabel, readableUnread(model), presenceText].filter(Boolean).join(' • ');
+
     const attentionFlash =
       model.attention === 'critical' ||
       model.invasionActive ||
       (model.helperSummary?.visible && model.helperSummary.urgency === 'immediate') ||
       mentions > 0;
+
     const pressureRatio = clamp(model.threatSummary?.score01 ?? undefined, 0, 1);
 
     return {
@@ -707,9 +746,9 @@ function ChatCollapsedPillComponent({
     outline: 'none',
     background: 'transparent',
     color: TOKENS.text,
-    cursor: disabled ? 'not-allowed' : 'pointer',
+    cursor: componentDisabled ? 'not-allowed' : 'pointer',
     textAlign: 'left',
-    opacity: disabled ? 0.56 : 1,
+    opacity: componentDisabled ? 0.56 : 1,
   };
 
   return (
@@ -739,7 +778,7 @@ function ChatCollapsedPillComponent({
       <div style={shellStyle}>
         <button
           type="button"
-          disabled={disabled}
+          disabled={componentDisabled}
           onClick={() => onOpen?.(model)}
           aria-label={rootAriaLabel(model)}
           title={model.tooltip}
@@ -783,7 +822,8 @@ function ChatCollapsedPillComponent({
                   top: 0,
                   bottom: 0,
                   width: 56,
-                  background: 'linear-gradient(90deg, rgba(255,255,255,0), rgba(255,255,255,0.10), rgba(255,255,255,0))',
+                  background:
+                    'linear-gradient(90deg, rgba(255,255,255,0), rgba(255,255,255,0.10), rgba(255,255,255,0))',
                   animation: derived.attentionFlash ? 'pzo-collapsed-pill-scan 2.8s linear infinite' : 'none',
                 }}
               />
@@ -886,8 +926,15 @@ function ChatCollapsedPillComponent({
                     height: 28,
                     padding: '0 8px',
                     borderRadius: 999,
-                    border: `1px solid ${derived.mentions > 0 ? 'rgba(255,77,77,0.24)' : derived.unread > 0 ? derived.accent.border : TOKENS.border}`,
-                    background: derived.mentions > 0 ? TOKENS.dangerBg : derived.unread > 0 ? derived.accent.bg : TOKENS.cardRaised,
+                    border: `1px solid ${
+                      derived.mentions > 0
+                        ? 'rgba(255,77,77,0.24)'
+                        : derived.unread > 0
+                          ? derived.accent.border
+                          : TOKENS.border
+                    }`,
+                    background:
+                      derived.mentions > 0 ? TOKENS.dangerBg : derived.unread > 0 ? derived.accent.bg : TOKENS.cardRaised,
                     color: derived.mentions > 0 ? TOKENS.red : derived.unread > 0 ? derived.accent.text : TOKENS.textSubtle,
                     fontFamily: TOKENS.mono,
                     fontSize: 11,
@@ -924,12 +971,7 @@ function ChatCollapsedPillComponent({
               </div>
             </div>
 
-            <div
-              style={{
-                display: 'grid',
-                gap: 6,
-              }}
-            >
+            <div style={{ display: 'grid', gap: 6 }}>
               <div
                 style={{
                   display: 'grid',
@@ -1021,16 +1063,36 @@ function ChatCollapsedPillComponent({
               </div>
 
               {(derived.typingText || derived.helperText || derived.invasionText) ? (
-                <div
-                  style={{
-                    display: 'flex',
-                    flexWrap: 'wrap',
-                    gap: 6,
-                  }}
-                >
-                  {derived.typingText ? renderPill({ id: `${model.id}:typing`, label: derived.typingText, icon: '…', accent: 'cyan', tone: 'neutral' }) : null}
-                  {derived.helperText ? renderPill({ id: `${model.id}:helper`, label: derived.helperText, icon: '✦', accent: 'emerald', tone: 'supportive', selected: true }) : null}
-                  {derived.invasionText ? renderPill({ id: `${model.id}:invasion`, label: derived.invasionText, icon: '⚠', accent: 'red', tone: 'danger', selected: true }) : null}
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                  {derived.typingText
+                    ? renderPill({
+                        id: `${model.id}:typing`,
+                        label: derived.typingText,
+                        icon: '…',
+                        accent: 'cyan',
+                        tone: 'neutral',
+                      })
+                    : null}
+                  {derived.helperText
+                    ? renderPill({
+                        id: `${model.id}:helper`,
+                        label: derived.helperText,
+                        icon: '✦',
+                        accent: 'emerald',
+                        tone: 'supportive',
+                        selected: true,
+                      })
+                    : null}
+                  {derived.invasionText
+                    ? renderPill({
+                        id: `${model.id}:invasion`,
+                        label: derived.invasionText,
+                        icon: '⚠',
+                        accent: 'red',
+                        tone: 'danger',
+                        selected: true,
+                      })
+                    : null}
                 </div>
               ) : null}
             </div>
@@ -1038,13 +1100,7 @@ function ChatCollapsedPillComponent({
         </button>
 
         {derived.channels.length > 0 ? (
-          <div
-            style={{
-              display: 'flex',
-              flexWrap: 'wrap',
-              gap: 6,
-            }}
-          >
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
             {derived.channels.map((summary) => renderChannelButton(summary, model, onSelectChannel))}
           </div>
         ) : null}
@@ -1056,9 +1112,7 @@ function ChatCollapsedPillComponent({
         ) : null}
 
         {derived.chips.length > 0 ? (
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-            {derived.chips.map(renderChip)}
-          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>{derived.chips.map(renderChip)}</div>
         ) : null}
 
         {derived.metrics.length > 0 ? (

@@ -1,7 +1,6 @@
-
 /**
  * ============================================================================
- * POINT ZERO ONE — CHAT TRANSCRIPT DRAWER
+ * POINT ZERO ONE — UNIFIED CHAT TRANSCRIPT DRAWER
  * FILE: pzo-web/src/components/chat/ChatTranscriptDrawer.tsx
  * ============================================================================
  *
@@ -9,41 +8,55 @@
  * -------
  * Render-only transcript drawer for the unified chat shell.
  *
- * This file intentionally stays out of authority lanes:
- * - it does not own sockets
- * - it does not own transcript truth
- * - it does not mutate learning state
- * - it does not mount battle logic
+ * This rewrite intentionally severs the drawer from the legacy compatibility
+ * lane (`./chatTypes`) and makes the component consume only normalized UI-shell
+ * models from `./uiTypes`.
  *
- * It renders the transcript window the engine gives it and adds dense UX for:
- * - search
- * - channel scoping
- * - message-kind filtering
- * - proof / lock filtering
- * - transcript summary metrics
- * - rich engine metadata rendering
- * - message jump callbacks back into the parent shell
+ * The drawer remains responsible for presentation-layer behavior only:
+ * - dense transcript rendering
+ * - viewport virtualization
+ * - search input UX
+ * - local filter interaction state seeded from a normalized shell model
+ * - jump callbacks back into the parent shell
+ * - rich, legible rendering of proof / lock / pressure / tick / shield /
+ *   cascade metadata already prepared by the upstream adapter
+ *
+ * The drawer does NOT own:
+ * - transcript truth
+ * - socket state
+ * - moderation law
+ * - learning updates
+ * - NPC cadence
+ * - battle, pressure, shield, or zero-engine authority
+ *
+ * Architectural posture
+ * ---------------------
+ * End-state shell contract:
+ * - `uiTypes.ts` defines the drawer surface model and callback bundle
+ * - `useUnifiedChat.ts` or a dedicated adapter hands the drawer already-
+ *   normalized rows, filter seeds, metrics, and result previews
+ * - this component stays render-first and interaction-light
  *
  * Performance posture
  * -------------------
- * Even though the current live hook keeps a 500-message client window, the drawer
- * is written with a lightweight virtualized viewport so it remains cheap during:
- * - aggressive event flushes
- * - high presence churn
- * - rapid hater bot intrusions
- * - transcript search / sort toggling
+ * - variable-height virtual window driven by estimated row heights
+ * - binary-search visible start index lookup
+ * - overscan for aggressive chat flushes
+ * - controlled body-scroll locking while open
+ * - keyboard affordances for search, home/end navigation, and close
  *
  * Design doctrine
  * ---------------
- * - inline style system matching ChatPanel.tsx
+ * - inline style system matching the current chat shell
  * - no Tailwind
  * - mobile-first and drawer-safe
  * - strong metadata legibility for proof, pressure, tick, shield, cascade, bot
- * - future-safe for extraction into the pzo-web/src/components/chat shell
+ * - future-safe for extraction into the canonical `components/chat` shell
  * ============================================================================
  */
 
 import React, {
+  Fragment,
   memo,
   useCallback,
   useEffect,
@@ -52,55 +65,19 @@ import React, {
   useRef,
   useState,
 } from 'react';
-import type { CSSProperties } from 'react';
-import type { ChatChannel, ChatMessage, GameChatContext } from './chatTypes';
-import {
-  ChatRoomHeader,
-  type ChatRoomConnectionState,
-} from './ChatRoomHeader';
-
-type ChannelScope = 'ALL' | ChatChannel;
-type KindScope = 'ALL' | ChatMessage['kind'];
-
-export interface ChatTranscriptDrawerProps {
-  open: boolean;
-  messages: readonly ChatMessage[];
-  activeChannel?: ChatChannel;
-  roomTitle?: string;
-  roomSubtitle?: string;
-  modeName?: string;
-  context?: Partial<GameChatContext>;
-  connected?: boolean;
-  connectionState?: ChatRoomConnectionState;
-  onlineCount?: number;
-  activeMembers?: number;
-  typingCount?: number;
-  totalUnread?: number;
-  selectedMessageId?: string | null;
-  transcriptLocked?: boolean;
-  initialSearchQuery?: string;
-  searchQuery?: string;
-  onSearchQueryChange?: (value: string) => void;
-  onClose: () => void;
-  onJumpToMessage?: (messageId: string) => void;
-  onRequestExport?: () => void;
-}
-
-type IndexedTranscriptMessage = {
-  message: ChatMessage;
-  searchBlob: string;
-  derivedLabel: string;
-  channelOrdinal: number;
-};
-
-type TranscriptMetrics = {
-  total: number;
-  proofBearing: number;
-  immutable: number;
-  botBacked: number;
-  playerMessages: number;
-  systemMessages: number;
-};
+import type { CSSProperties, ReactNode } from 'react';
+import { ChatRoomHeader, type ChatRoomConnectionState } from './ChatRoomHeader';
+import type {
+  ChatUiAccent,
+  ChatUiChip,
+  ChatUiDrawerFilter,
+  ChatUiMetric,
+  ChatUiTone,
+  ChatUiTranscriptDetailCard,
+  ChatUiTranscriptDrawerCallbacks,
+  ChatUiTranscriptDrawerSurfaceModel,
+  ChatUiTranscriptRowViewModel,
+} from './uiTypes';
 
 const T = {
   void: '#030308',
@@ -109,6 +86,7 @@ const T = {
   cardEl: '#191934',
   border: 'rgba(255,255,255,0.08)',
   borderM: 'rgba(255,255,255,0.16)',
+  borderS: 'rgba(255,255,255,0.05)',
   text: '#F2F2FF',
   textSub: '#9090B4',
   textMut: '#505074',
@@ -119,163 +97,136 @@ const T = {
   indigo: '#818CF8',
   teal: '#22D3EE',
   purple: '#A855F7',
+  rose: '#FB7185',
+  silver: '#C6CAD6',
+  obsidian: '#0B0B14',
   mono: "'IBM Plex Mono', 'JetBrains Mono', monospace",
   display: "'Syne', 'Outfit', system-ui, sans-serif",
+  shadow: '0 14px 34px rgba(0,0,0,0.34)',
+} as const;
+
+const DEFAULT_ITEM_ESTIMATE = 118;
+const OVERSCAN_ROWS = 10;
+const QUICK_RESULT_LIMIT = 6;
+const PLAYER_CHANNELS = ['GLOBAL', 'SYNDICATE', 'DEAL_ROOM'] as const;
+
+type CanonicalChannelId = (typeof PLAYER_CHANNELS)[number];
+type TranscriptScope = string;
+
+type NormalizedFilterToggle = {
+  id: string;
+  label: string;
+  active: boolean;
+  accent?: ChatUiAccent;
+  tone?: ChatUiTone;
 };
 
-const ITEM_ESTIMATE = 112;
-const OVERSCAN_ROWS = 8;
-
-const CHANNEL_META: Record<
-  ChannelScope,
-  { label: string; emoji: string; accent: string }
-> = {
-  ALL: { label: 'ALL CHANNELS', emoji: '🧾', accent: T.textSub },
-  GLOBAL: { label: 'GLOBAL', emoji: '🌐', accent: T.indigo },
-  SYNDICATE: { label: 'SYNDICATE', emoji: '🏛️', accent: T.teal },
-  DEAL_ROOM: { label: 'DEAL ROOM', emoji: '⚡', accent: T.yellow },
+type IndexedTranscriptRow = {
+  row: ChatUiTranscriptRowViewModel;
+  searchBlob: string;
+  channelScope: string;
+  kindScope: string;
+  estimatedHeight: number;
 };
 
-const KIND_META: Record<
-  KindScope,
-  { label: string; accent: string; emoji: string }
-> = {
-  ALL: { label: 'ALL KINDS', accent: T.textSub, emoji: '🧠' },
-  PLAYER: { label: 'PLAYER', accent: T.green, emoji: '💬' },
-  SYSTEM: { label: 'SYSTEM', accent: T.indigo, emoji: '🛰️' },
-  MARKET_ALERT: { label: 'MARKET', accent: T.orange, emoji: '📉' },
-  ACHIEVEMENT: { label: 'ACHIEVE', accent: T.green, emoji: '🏆' },
-  BOT_TAUNT: { label: 'TAUNT', accent: T.red, emoji: '😈' },
-  BOT_ATTACK: { label: 'ATTACK', accent: T.red, emoji: '🧨' },
-  SHIELD_EVENT: { label: 'SHIELD', accent: T.teal, emoji: '🛡️' },
-  CASCADE_ALERT: { label: 'CASCADE', accent: T.purple, emoji: '🌀' },
-  DEAL_RECAP: { label: 'RECAP', accent: T.yellow, emoji: '📜' },
+type DrawerMetricPack = {
+  visible: number;
+  total: number;
+  proof: number;
+  locked: number;
+  player: number;
+  system: number;
+  detailed: number;
 };
 
-const CHANNEL_ORDER: Record<ChatChannel, number> = {
-  GLOBAL: 0,
-  SYNDICATE: 1,
-  DEAL_ROOM: 2,
-};
-
-const RANK_COLOR: Record<string, string> = {
-  'Managing Partner': T.yellow,
-  'Senior Partner': '#F6A623',
-  'Partner': T.indigo,
-  'Junior Partner': T.textSub,
-  'Associate': T.textMut,
-  You: T.green,
-};
-
-function normalizeText(value: string | undefined | null): string {
+function normalizeText(value: string | null | undefined): string {
   return (value ?? '').trim().toLowerCase();
 }
 
-function fmtCompactCount(value: number): string {
-  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
-  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}K`;
-  return `${value}`;
+function asString(value: unknown, fallback = ''): string {
+  return typeof value === 'string' ? value : fallback;
 }
 
-function timeStampLabel(ts: number): string {
-  return new Intl.DateTimeFormat([], {
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    month: 'short',
-    day: '2-digit',
-  }).format(new Date(ts));
+function asBoolean(value: unknown, fallback = false): boolean {
+  return typeof value === 'boolean' ? value : fallback;
 }
 
-function relativeTime(ts: number): string {
-  const delta = Date.now() - ts;
-  const abs = Math.abs(delta);
-  if (abs < 60_000) return `${Math.round(delta / 1_000)}s`;
-  if (abs < 3_600_000) return `${Math.round(delta / 60_000)}m`;
-  if (abs < 86_400_000) return `${Math.round(delta / 3_600_000)}h`;
-  return `${Math.round(delta / 86_400_000)}d`;
+function fmtCompactCount(value: number | undefined): string {
+  const safe = Number.isFinite(value) ? Math.max(0, Number(value)) : 0;
+  if (safe >= 1_000_000) return `${(safe / 1_000_000).toFixed(1)}M`;
+  if (safe >= 1_000) return `${(safe / 1_000).toFixed(1)}K`;
+  return `${Math.floor(safe)}`;
 }
 
-function initials(name: string): string {
-  return name
+function accentHex(accent: ChatUiAccent | undefined, fallback = T.textSub): string {
+  switch (accent) {
+    case 'emerald':
+      return T.green;
+    case 'amber':
+    case 'gold':
+      return T.yellow;
+    case 'red':
+    case 'rose':
+      return accent === 'rose' ? T.rose : T.red;
+    case 'violet':
+      return T.purple;
+    case 'cyan':
+      return T.teal;
+    case 'indigo':
+      return T.indigo;
+    case 'silver':
+      return T.silver;
+    case 'obsidian':
+      return T.obsidian;
+    case 'slate':
+      return T.textSub;
+    default:
+      return fallback;
+  }
+}
+
+function toneAccent(tone: ChatUiTone | undefined, fallback = T.textSub): string {
+  switch (tone) {
+    case 'positive':
+      return T.green;
+    case 'supportive':
+      return T.teal;
+    case 'warning':
+      return T.orange;
+    case 'danger':
+    case 'hostile':
+      return T.red;
+    case 'cinematic':
+      return T.purple;
+    case 'ghost':
+      return T.textMut;
+    case 'calm':
+      return T.indigo;
+    default:
+      return fallback;
+  }
+}
+
+function initials(label: string | undefined): string {
+  return (label ?? '')
     .split(/\s+/)
     .filter(Boolean)
     .slice(0, 2)
-    .map((part) => part[0]?.toUpperCase() ?? '')
+    .map(part => part[0]?.toUpperCase() ?? '')
     .join('');
 }
 
-function kindAccent(kind: ChatMessage['kind']): string {
-  return KIND_META[kind].accent;
+function canonicalChannel(value: string | undefined): CanonicalChannelId {
+  if (value === 'SYNDICATE' || value === 'DEAL_ROOM') return value;
+  return 'GLOBAL';
 }
 
-function channelAccent(channel: ChatChannel): string {
-  return CHANNEL_META[channel].accent;
-}
-
-function searchBlobForMessage(msg: ChatMessage): string {
-  const botBlob = msg.botSource
-    ? [
-        msg.botSource.botId,
-        msg.botSource.botName,
-        msg.botSource.botState,
-        msg.botSource.attackType,
-        msg.botSource.targetLayer,
-        msg.botSource.dialogue,
-      ].join(' ')
-    : '';
-
-  const shieldBlob = msg.shieldMeta
-    ? [
-        msg.shieldMeta.layerId,
-        `${msg.shieldMeta.integrity}`,
-        `${msg.shieldMeta.maxIntegrity}`,
-        `${msg.shieldMeta.isBreached}`,
-        msg.shieldMeta.attackId,
-      ].join(' ')
-    : '';
-
-  const cascadeBlob = msg.cascadeMeta
-    ? [
-        msg.cascadeMeta.chainId,
-        msg.cascadeMeta.severity,
-        msg.cascadeMeta.direction,
-      ].join(' ')
-    : '';
-
-  return normalizeText(
-    [
-      msg.id,
-      msg.channel,
-      msg.kind,
-      msg.senderId,
-      msg.senderName,
-      msg.senderRank,
-      msg.body,
-      msg.emoji,
-      msg.proofHash,
-      msg.pressureTier,
-      msg.tickTier,
-      msg.runOutcome,
-      botBlob,
-      shieldBlob,
-      cascadeBlob,
-    ]
-      .filter(Boolean)
-      .join(' '),
-  );
-}
-
-function derivedLabel(msg: ChatMessage): string {
-  if (msg.kind === 'DEAL_RECAP') return 'Settlement proof';
-  if (msg.kind === 'BOT_ATTACK') return 'Attack event';
-  if (msg.kind === 'BOT_TAUNT') return 'Bot taunt';
-  if (msg.kind === 'SHIELD_EVENT') return 'Shield movement';
-  if (msg.kind === 'CASCADE_ALERT') return 'Cascade warning';
-  if (msg.kind === 'MARKET_ALERT') return 'Market alert';
-  if (msg.kind === 'ACHIEVEMENT') return 'Achievement';
-  if (msg.kind === 'SYSTEM') return 'System notice';
-  return 'Player message';
+function buildScopeLabelMap(filters: readonly ChatUiDrawerFilter[] | undefined): Record<string, ChatUiDrawerFilter> {
+  const map: Record<string, ChatUiDrawerFilter> = {};
+  for (const filter of filters ?? []) {
+    map[filter.id] = filter;
+  }
+  return map;
 }
 
 function metricChipStyle(accent: string): CSSProperties {
@@ -292,13 +243,13 @@ function metricChipStyle(accent: string): CSSProperties {
   };
 }
 
-function filterButtonStyle(active: boolean, accent: string): CSSProperties {
+function interactiveButtonStyle(active: boolean, accent: string): CSSProperties {
   return {
     minHeight: 32,
     padding: '0 10px',
     borderRadius: 10,
     border: `1px solid ${active ? `${accent}35` : 'rgba(255,255,255,0.08)'}`,
-    background: active ? `${accent}14` : 'rgba(255,255,255,0.02)',
+    background: active ? `${accent}16` : 'rgba(255,255,255,0.02)',
     color: active ? accent : T.textSub,
     cursor: 'pointer',
     fontFamily: T.mono,
@@ -316,21 +267,404 @@ function filterButtonStyle(active: boolean, accent: string): CSSProperties {
   };
 }
 
+function chipStyle(accent: string, subtle = false): CSSProperties {
+  return {
+    fontFamily: T.mono,
+    fontSize: 8,
+    letterSpacing: '0.08em',
+    color: subtle ? T.textSub : accent,
+    textTransform: 'uppercase',
+    background: subtle ? 'rgba(255,255,255,0.04)' : `${accent}10`,
+    border: `1px solid ${subtle ? 'rgba(255,255,255,0.09)' : `${accent}24`}`,
+    borderRadius: 999,
+    padding: '3px 7px',
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 4,
+  };
+}
+
+function detailCardAccent(card: ChatUiTranscriptDetailCard | undefined): string {
+  return accentHex(card?.accent, toneAccent(card?.tone, T.textSub));
+}
+
+function rowAccent(row: ChatUiTranscriptRowViewModel): string {
+  return accentHex(row.accent, row.role === 'player' ? T.indigo : toneAccent(row.tone, T.textSub));
+}
+
+function rowChannelScope(row: ChatUiTranscriptRowViewModel): string {
+  return asString(row.channelId, 'GLOBAL').toUpperCase();
+}
+
+function rowKindScope(row: ChatUiTranscriptRowViewModel): string {
+  return normalizeText(row.kindId || row.kindLabel || 'unknown').toUpperCase() || 'UNKNOWN';
+}
+
+function rowSearchBlob(row: ChatUiTranscriptRowViewModel): string {
+  const chips = (row.chips ?? []).map(chip => [chip.label, chip.shortLabel, chip.icon].filter(Boolean).join(' ')).join(' ');
+  const cards = (row.detailCards ?? [])
+    .map(card => [card.label, card.title, card.subtitle].filter(Boolean).join(' '))
+    .join(' ');
+
+  return normalizeText(
+    [
+      row.id,
+      row.messageId,
+      row.channelId,
+      row.channelLabel,
+      row.kindId,
+      row.kindLabel,
+      row.actorLabel,
+      row.actorRankLabel,
+      row.actorOriginLabel,
+      row.body,
+      row.emoji,
+      row.proofHashLabel,
+      row.proofSummary,
+      row.pressureTierLabel,
+      row.tickTierLabel,
+      row.runOutcomeLabel,
+      row.searchBlob,
+      chips,
+      cards,
+    ]
+      .filter(Boolean)
+      .join(' '),
+  );
+}
+
+function estimateRowHeight(row: ChatUiTranscriptRowViewModel): number {
+  const base = row.role === 'player' ? 104 : 132;
+  const bodyExtra = Math.ceil(Math.max(0, (row.body?.length ?? 0) - 90) / 60) * 16;
+  const chipsExtra = Math.ceil((row.chips?.length ?? 0) / 3) * 24;
+  const cardsExtra = (row.detailCards?.length ?? 0) * 72;
+  const proofExtra = row.proofHashLabel || row.proofSummary ? 12 : 0;
+  const selectedExtra = row.selected ? 8 : 0;
+  return Math.max(88, Math.min(440, base + bodyExtra + chipsExtra + cardsExtra + proofExtra + selectedExtra));
+}
+
+function buildPrefixSums(values: readonly number[]): number[] {
+  const prefix = new Array(values.length + 1).fill(0);
+  for (let index = 0; index < values.length; index += 1) {
+    prefix[index + 1] = prefix[index] + values[index];
+  }
+  return prefix;
+}
+
+function lowerBound(prefix: readonly number[], target: number): number {
+  let left = 0;
+  let right = prefix.length - 1;
+
+  while (left < right) {
+    const mid = Math.floor((left + right) / 2);
+    if (prefix[mid] <= target) left = mid + 1;
+    else right = mid;
+  }
+
+  return Math.max(0, left - 1);
+}
+
+function computeDrawerMetricPack(rows: readonly ChatUiTranscriptRowViewModel[], visibleRows: readonly ChatUiTranscriptRowViewModel[]): DrawerMetricPack {
+  const total = rows.length;
+  const visible = visibleRows.length;
+  const proof = rows.filter(row => Boolean(row.proofHashLabel || row.proofSummary)).length;
+  const locked = rows.filter(row => row.locked).length;
+  const player = rows.filter(row => row.role === 'player').length;
+  const system = rows.filter(row => row.role !== 'player').length;
+  const detailed = rows.filter(row => (row.detailCards?.length ?? 0) > 0).length;
+  return { visible, total, proof, locked, player, system, detailed };
+}
+
+function filterAccent(filter: ChatUiDrawerFilter): string {
+  return accentHex(filter.accent, toneAccent(filter.tone, T.indigo));
+}
+
+function highlightQuery(text: string | undefined, query: string): ReactNode {
+  const content = text ?? '';
+  const normalizedQuery = query.trim();
+  if (!normalizedQuery) return content;
+
+  const safeNeedle = normalizedQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const matcher = new RegExp(`(${safeNeedle})`, 'ig');
+  const parts = content.split(matcher);
+
+  if (parts.length <= 1) return content;
+
+  return parts.map((part, index) => {
+    if (part.toLowerCase() === normalizedQuery.toLowerCase()) {
+      return (
+        <mark
+          key={`${part}-${index}`}
+          style={{
+            background: 'rgba(255,215,0,0.18)',
+            color: T.text,
+            borderRadius: 4,
+            padding: '0 2px',
+          }}
+        >
+          {part}
+        </mark>
+      );
+    }
+
+    return <Fragment key={`${part}-${index}`}>{part}</Fragment>;
+  });
+}
+
+function buildFilterToggles(model: ChatUiTranscriptDrawerSurfaceModel): NormalizedFilterToggle[] {
+  return [
+    {
+      id: 'proof_only',
+      label: 'Proof only',
+      active: asBoolean(model.filterState.proofOnly),
+      accent: 'gold',
+      tone: 'warning',
+    },
+    {
+      id: 'locked_only',
+      label: 'Locked only',
+      active: asBoolean(model.filterState.lockedOnly),
+      accent: 'gold',
+      tone: 'warning',
+    },
+    {
+      id: 'newest_first',
+      label: asBoolean(model.filterState.newestFirst) ? 'Newest' : 'Chrono',
+      active: asBoolean(model.filterState.newestFirst),
+      accent: 'indigo',
+      tone: 'calm',
+    },
+  ];
+}
+
+function selectedMessageId(model: ChatUiTranscriptDrawerSurfaceModel): string | null {
+  return asString(
+    model.drawer.selected?.messageId
+      ?? model.rows.find(row => row.selected)?.messageId
+      ?? model.rows.find(row => row.selected)?.id,
+    '',
+  ) || null;
+}
+
+function channelFilterFallback(model: ChatUiTranscriptDrawerSurfaceModel): ChatUiDrawerFilter[] {
+  if ((model.filterState.channelFilters?.length ?? 0) > 0) return model.filterState.channelFilters;
+
+  const present = new Set(model.rows.map(row => rowChannelScope(row)));
+  const ordered = ['ALL', ...PLAYER_CHANNELS];
+
+  return ordered
+    .filter(scope => scope === 'ALL' || present.has(scope))
+    .map(scope => ({
+      id: scope,
+      label: scope === 'ALL' ? 'All channels' : scope.replace('_', ' '),
+      active: scope === asString(model.filterState.channelScope, model.header.activeChannelId ?? 'GLOBAL'),
+      count: scope === 'ALL' ? model.rows.length : model.rows.filter(row => rowChannelScope(row) === scope).length,
+      accent: scope === 'GLOBAL' ? 'indigo' : scope === 'SYNDICATE' ? 'cyan' : scope === 'DEAL_ROOM' ? 'gold' : 'silver',
+      tone: scope === 'ALL' ? 'neutral' : 'calm',
+    }));
+}
+
+function kindFilterFallback(model: ChatUiTranscriptDrawerSurfaceModel): ChatUiDrawerFilter[] {
+  if ((model.filterState.kindFilters?.length ?? 0) > 0) return model.filterState.kindFilters;
+
+  const counts = new Map<string, number>();
+  for (const row of model.rows) {
+    const scope = rowKindScope(row);
+    counts.set(scope, (counts.get(scope) ?? 0) + 1);
+  }
+
+  const keys = ['ALL', ...Array.from(counts.keys()).sort((a, b) => a.localeCompare(b))];
+
+  return keys.map(scope => ({
+    id: scope,
+    label: scope === 'ALL' ? 'All kinds' : scope.replaceAll('_', ' '),
+    active: scope === asString(model.filterState.kindScope, 'ALL'),
+    count: scope === 'ALL' ? model.rows.length : counts.get(scope) ?? 0,
+    accent:
+      scope === 'PLAYER'
+        ? 'emerald'
+        : scope === 'BOT_ATTACK' || scope === 'BOT_TAUNT'
+          ? 'red'
+          : scope === 'SHIELD_EVENT'
+            ? 'cyan'
+            : scope === 'DEAL_RECAP'
+              ? 'gold'
+              : scope === 'CASCADE_ALERT'
+                ? 'violet'
+                : 'silver',
+    tone:
+      scope === 'BOT_ATTACK'
+        ? 'hostile'
+        : scope === 'BOT_TAUNT'
+          ? 'danger'
+          : scope === 'PLAYER'
+            ? 'positive'
+            : scope === 'DEAL_RECAP'
+              ? 'warning'
+              : 'neutral',
+  }));
+}
+
+function renderSummaryMetric(metric: ChatUiMetric): ReactNode {
+  const accent = accentHex(metric.accent, toneAccent(metric.tone, T.textSub));
+
+  return (
+    <div key={metric.id} style={metricChipStyle(accent)}>
+      <span
+        style={{
+          fontFamily: T.mono,
+          fontSize: 8,
+          letterSpacing: '0.10em',
+          color: accent,
+          textTransform: 'uppercase',
+          fontWeight: 800,
+        }}
+      >
+        {metric.label}
+      </span>
+      <span
+        style={{
+          fontFamily: T.mono,
+          fontSize: 10,
+          color: T.text,
+          fontWeight: 700,
+        }}
+      >
+        {metric.value}
+      </span>
+    </div>
+  );
+}
+
+const TranscriptDetailCards = memo(function TranscriptDetailCards({
+  cards,
+}: {
+  cards: readonly ChatUiTranscriptDetailCard[];
+}) {
+  if (cards.length === 0) return null;
+
+  return (
+    <div
+      style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
+        gap: 6,
+        marginTop: 8,
+      }}
+    >
+      {cards.map(card => {
+        const accent = detailCardAccent(card);
+
+        return (
+          <div
+            key={card.id}
+            style={{
+              borderRadius: 10,
+              border: `1px solid ${T.border}`,
+              background: 'rgba(255,255,255,0.03)',
+              padding: '8px 9px',
+            }}
+          >
+            <div
+              style={{
+                fontFamily: T.mono,
+                fontSize: 8,
+                letterSpacing: '0.10em',
+                color: accent,
+                textTransform: 'uppercase',
+                fontWeight: 800,
+                marginBottom: 5,
+              }}
+            >
+              {card.label}
+            </div>
+            <div style={{ fontFamily: T.display, fontSize: 11, color: T.text }}>
+              {card.title}
+            </div>
+            {card.subtitle ? (
+              <div style={{ fontFamily: T.mono, fontSize: 8, color: T.textMut, marginTop: 3 }}>
+                {card.subtitle}
+              </div>
+            ) : null}
+          </div>
+        );
+      })}
+    </div>
+  );
+});
+
+const TranscriptChips = memo(function TranscriptChips({
+  row,
+}: {
+  row: ChatUiTranscriptRowViewModel;
+}) {
+  const accent = rowAccent(row);
+  const chips: ChatUiChip[] = [...(row.chips ?? [])];
+
+  return (
+    <div
+      style={{
+        display: 'flex',
+        gap: 6,
+        flexWrap: 'wrap',
+        alignItems: 'center',
+      }}
+    >
+      {row.kindLabel || row.kindId ? (
+        <span style={chipStyle(accent)}>{row.kindLabel ?? row.kindId}</span>
+      ) : null}
+
+      {row.pressureTierLabel ? (
+        <span style={chipStyle(T.orange)}>{row.pressureTierLabel}</span>
+      ) : null}
+
+      {row.tickTierLabel ? (
+        <span style={chipStyle(T.indigo)}>{row.tickTierLabel}</span>
+      ) : null}
+
+      {row.runOutcomeLabel ? (
+        <span style={chipStyle(T.teal)}>{row.runOutcomeLabel}</span>
+      ) : null}
+
+      {row.locked ? (
+        <span style={chipStyle(T.yellow)}>🔒 Locked</span>
+      ) : null}
+
+      {row.proofHashLabel ? (
+        <span style={chipStyle(T.yellow)}>{row.proofHashLabel}</span>
+      ) : null}
+
+      {chips.map(chip => {
+        const chipAccent = accentHex(chip.accent, toneAccent(chip.tone, T.textSub));
+        return (
+          <span key={chip.id} style={chipStyle(chipAccent, !chip.accent && !chip.tone)}>
+            {chip.icon ? <span>{chip.icon}</span> : null}
+            <span>{chip.shortLabel ?? chip.label}</span>
+          </span>
+        );
+      })}
+    </div>
+  );
+});
+
 const TranscriptSystemCard = memo(function TranscriptSystemCard({
-  message,
+  row,
   selected,
   onJump,
+  query,
 }: {
-  message: ChatMessage;
+  row: ChatUiTranscriptRowViewModel;
   selected: boolean;
   onJump?: (messageId: string) => void;
+  query: string;
 }) {
-  const accent = kindAccent(message.kind);
+  const accent = rowAccent(row);
+  const messageId = row.messageId || row.id;
 
   return (
     <button
       type="button"
-      onClick={() => onJump?.(message.id)}
+      onClick={() => onJump?.(messageId)}
       style={{
         width: '100%',
         textAlign: 'left',
@@ -361,7 +695,7 @@ const TranscriptSystemCard = memo(function TranscriptSystemCard({
           paddingTop: 1,
         }}
       >
-        {message.emoji ?? KIND_META[message.kind].emoji}
+        {row.emoji ?? '🛰️'}
       </div>
 
       <div style={{ minWidth: 0, flex: 1 }}>
@@ -384,7 +718,7 @@ const TranscriptSystemCard = memo(function TranscriptSystemCard({
               fontWeight: 800,
             }}
           >
-            {message.channel}
+            {row.channelLabel ?? row.channelId ?? 'CHANNEL'}
           </span>
 
           <span
@@ -397,18 +731,20 @@ const TranscriptSystemCard = memo(function TranscriptSystemCard({
               fontWeight: 700,
             }}
           >
-            {derivedLabel(message)}
+            {row.kindLabel ?? row.kindId ?? 'SYSTEM EVENT'}
           </span>
 
-          <span
-            style={{
-              fontFamily: T.mono,
-              fontSize: 8,
-              color: T.textMut,
-            }}
-          >
-            {timeStampLabel(message.ts)} • {relativeTime(message.ts)}
-          </span>
+          {(row.timestampLabel || row.relativeTimestampLabel) ? (
+            <span
+              style={{
+                fontFamily: T.mono,
+                fontSize: 8,
+                color: T.textMut,
+              }}
+            >
+              {[row.timestampLabel, row.relativeTimestampLabel].filter(Boolean).join(' • ')}
+            </span>
+          ) : null}
         </div>
 
         <div
@@ -422,232 +758,36 @@ const TranscriptSystemCard = memo(function TranscriptSystemCard({
             wordBreak: 'break-word',
           }}
         >
-          {message.body}
+          {highlightQuery(row.body, query)}
         </div>
 
-        <div
-          style={{
-            display: 'flex',
-            gap: 6,
-            flexWrap: 'wrap',
-            alignItems: 'center',
-          }}
-        >
-          <span
-            style={{
-              fontFamily: T.mono,
-              fontSize: 8,
-              letterSpacing: '0.08em',
-              color: accent,
-              textTransform: 'uppercase',
-              background: `${accent}14`,
-              border: `1px solid ${accent}24`,
-              borderRadius: 999,
-              padding: '3px 7px',
-            }}
-          >
-            {message.kind}
-          </span>
-
-          {message.pressureTier ? (
-            <span
-              style={{
-                fontFamily: T.mono,
-                fontSize: 8,
-                letterSpacing: '0.08em',
-                color: T.orange,
-                textTransform: 'uppercase',
-                background: 'rgba(255,140,0,0.12)',
-                border: '1px solid rgba(255,140,0,0.22)',
-                borderRadius: 999,
-                padding: '3px 7px',
-              }}
-            >
-              {message.pressureTier}
-            </span>
-          ) : null}
-
-          {message.tickTier ? (
-            <span
-              style={{
-                fontFamily: T.mono,
-                fontSize: 8,
-                letterSpacing: '0.08em',
-                color: T.indigo,
-                textTransform: 'uppercase',
-                background: 'rgba(129,140,248,0.12)',
-                border: '1px solid rgba(129,140,248,0.22)',
-                borderRadius: 999,
-                padding: '3px 7px',
-              }}
-            >
-              {message.tickTier}
-            </span>
-          ) : null}
-
-          {message.immutable ? (
-            <span
-              style={{
-                fontFamily: T.mono,
-                fontSize: 8,
-                letterSpacing: '0.08em',
-                color: T.yellow,
-                textTransform: 'uppercase',
-                background: 'rgba(255,215,0,0.10)',
-                border: '1px solid rgba(255,215,0,0.20)',
-                borderRadius: 999,
-                padding: '3px 7px',
-              }}
-            >
-              🔒 Locked
-            </span>
-          ) : null}
-
-          {message.proofHash ? (
-            <span
-              style={{
-                fontFamily: T.mono,
-                fontSize: 8,
-                color: T.yellow,
-                background: 'rgba(255,215,0,0.10)',
-                border: '1px solid rgba(255,215,0,0.20)',
-                borderRadius: 999,
-                padding: '3px 7px',
-              }}
-            >
-              HASH {message.proofHash.slice(0, 12)}…
-            </span>
-          ) : null}
-        </div>
-
-        {message.botSource || message.shieldMeta || message.cascadeMeta ? (
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))',
-              gap: 6,
-              marginTop: 8,
-            }}
-          >
-            {message.botSource ? (
-              <div
-                style={{
-                  borderRadius: 10,
-                  border: `1px solid ${T.border}`,
-                  background: 'rgba(255,255,255,0.03)',
-                  padding: '8px 9px',
-                }}
-              >
-                <div
-                  style={{
-                    fontFamily: T.mono,
-                    fontSize: 8,
-                    letterSpacing: '0.10em',
-                    color: T.red,
-                    textTransform: 'uppercase',
-                    fontWeight: 800,
-                    marginBottom: 5,
-                  }}
-                >
-                  Bot Source
-                </div>
-                <div style={{ fontFamily: T.display, fontSize: 11, color: T.text }}>
-                  {message.botSource.botName}
-                </div>
-                <div style={{ fontFamily: T.mono, fontSize: 8, color: T.textMut, marginTop: 3 }}>
-                  {message.botSource.botState} • {message.botSource.attackType}
-                </div>
-              </div>
-            ) : null}
-
-            {message.shieldMeta ? (
-              <div
-                style={{
-                  borderRadius: 10,
-                  border: `1px solid ${T.border}`,
-                  background: 'rgba(255,255,255,0.03)',
-                  padding: '8px 9px',
-                }}
-              >
-                <div
-                  style={{
-                    fontFamily: T.mono,
-                    fontSize: 8,
-                    letterSpacing: '0.10em',
-                    color: T.teal,
-                    textTransform: 'uppercase',
-                    fontWeight: 800,
-                    marginBottom: 5,
-                  }}
-                >
-                  Shield Meta
-                </div>
-                <div style={{ fontFamily: T.display, fontSize: 11, color: T.text }}>
-                  {message.shieldMeta.layerId}
-                </div>
-                <div style={{ fontFamily: T.mono, fontSize: 8, color: T.textMut, marginTop: 3 }}>
-                  {message.shieldMeta.integrity}/{message.shieldMeta.maxIntegrity}
-                  {message.shieldMeta.isBreached ? ' • BREACHED' : ' • STABLE'}
-                </div>
-              </div>
-            ) : null}
-
-            {message.cascadeMeta ? (
-              <div
-                style={{
-                  borderRadius: 10,
-                  border: `1px solid ${T.border}`,
-                  background: 'rgba(255,255,255,0.03)',
-                  padding: '8px 9px',
-                }}
-              >
-                <div
-                  style={{
-                    fontFamily: T.mono,
-                    fontSize: 8,
-                    letterSpacing: '0.10em',
-                    color: T.purple,
-                    textTransform: 'uppercase',
-                    fontWeight: 800,
-                    marginBottom: 5,
-                  }}
-                >
-                  Cascade Meta
-                </div>
-                <div style={{ fontFamily: T.display, fontSize: 11, color: T.text }}>
-                  {message.cascadeMeta.chainId}
-                </div>
-                <div style={{ fontFamily: T.mono, fontSize: 8, color: T.textMut, marginTop: 3 }}>
-                  {message.cascadeMeta.severity} • {message.cascadeMeta.direction}
-                </div>
-              </div>
-            ) : null}
-          </div>
-        ) : null}
+        <TranscriptChips row={row} />
+        <TranscriptDetailCards cards={row.detailCards ?? []} />
       </div>
     </button>
   );
 });
 
 const TranscriptPlayerCard = memo(function TranscriptPlayerCard({
-  message,
+  row,
   selected,
   onJump,
+  query,
 }: {
-  message: ChatMessage;
+  row: ChatUiTranscriptRowViewModel;
   selected: boolean;
   onJump?: (messageId: string) => void;
+  query: string;
 }) {
-  const isLocal = message.senderId === 'player-local';
-  const rankColor = message.senderRank
-    ? RANK_COLOR[message.senderRank] ?? T.textSub
-    : T.textSub;
-  const accent = isLocal ? T.indigo : channelAccent(message.channel);
+  const messageId = row.messageId || row.id;
+  const isLocal = normalizeText(row.actorOriginLabel).includes('local');
+  const accent = rowAccent(row);
+  const rankColor = accentHex(row.accent, row.actorRankLabel ? T.yellow : T.textSub);
 
   return (
     <button
       type="button"
-      onClick={() => onJump?.(message.id)}
+      onClick={() => onJump?.(messageId)}
       style={{
         width: '100%',
         display: 'flex',
@@ -684,7 +824,7 @@ const TranscriptPlayerCard = memo(function TranscriptPlayerCard({
           marginTop: 2,
         }}
       >
-        {initials(message.senderName)}
+        {row.actorInitials || initials(row.actorLabel)}
       </div>
 
       <div style={{ minWidth: 0, flex: 1 }}>
@@ -705,10 +845,10 @@ const TranscriptPlayerCard = memo(function TranscriptPlayerCard({
               color: isLocal ? T.green : T.text,
             }}
           >
-            {message.senderName}
+            {row.actorLabel ?? 'Player'}
           </span>
 
-          {message.senderRank ? (
+          {row.actorRankLabel ? (
             <span
               style={{
                 fontFamily: T.mono,
@@ -717,29 +857,21 @@ const TranscriptPlayerCard = memo(function TranscriptPlayerCard({
                 fontWeight: 700,
               }}
             >
-              {message.senderRank}
+              {row.actorRankLabel}
             </span>
           ) : null}
 
-          <span
-            style={{
-              fontFamily: T.mono,
-              fontSize: 8,
-              color: T.textMut,
-            }}
-          >
-            {message.channel}
-          </span>
+          {row.channelLabel || row.channelId ? (
+            <span style={{ fontFamily: T.mono, fontSize: 8, color: T.textMut }}>
+              {row.channelLabel ?? row.channelId}
+            </span>
+          ) : null}
 
-          <span
-            style={{
-              fontFamily: T.mono,
-              fontSize: 8,
-              color: T.textMut,
-            }}
-          >
-            {timeStampLabel(message.ts)} • {relativeTime(message.ts)}
-          </span>
+          {(row.timestampLabel || row.relativeTimestampLabel) ? (
+            <span style={{ fontFamily: T.mono, fontSize: 8, color: T.textMut }}>
+              {[row.timestampLabel, row.relativeTimestampLabel].filter(Boolean).join(' • ')}
+            </span>
+          ) : null}
         </div>
 
         <div
@@ -752,122 +884,258 @@ const TranscriptPlayerCard = memo(function TranscriptPlayerCard({
             marginBottom: 8,
           }}
         >
-          {message.body}
+          {highlightQuery(row.body, query)}
         </div>
 
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-            flexWrap: 'wrap',
-          }}
-        >
-          <span
-            style={{
-              fontFamily: T.mono,
-              fontSize: 8,
-              letterSpacing: '0.08em',
-              color: isLocal ? T.green : accent,
-              textTransform: 'uppercase',
-              background: `${isLocal ? T.green : accent}10`,
-              border: `1px solid ${(isLocal ? T.green : accent)}24`,
-              borderRadius: 999,
-              padding: '3px 7px',
-            }}
-          >
-            {isLocal ? 'LOCAL' : 'REMOTE'}
-          </span>
-
-          {message.immutable ? (
-            <span
-              style={{
-                fontFamily: T.mono,
-                fontSize: 8,
-                letterSpacing: '0.08em',
-                color: T.yellow,
-                textTransform: 'uppercase',
-                background: 'rgba(255,215,0,0.10)',
-                border: '1px solid rgba(255,215,0,0.20)',
-                borderRadius: 999,
-                padding: '3px 7px',
-              }}
-            >
-              🔒 Locked
-            </span>
-          ) : null}
-        </div>
+        <TranscriptChips row={row} />
+        <TranscriptDetailCards cards={row.detailCards ?? []} />
       </div>
     </button>
   );
 });
 
 const TranscriptRow = memo(function TranscriptRow({
-  message,
+  row,
   selected,
   onJump,
+  query,
 }: {
-  message: ChatMessage;
+  row: ChatUiTranscriptRowViewModel;
   selected: boolean;
   onJump?: (messageId: string) => void;
+  query: string;
 }) {
-  if (message.kind === 'PLAYER') {
-    return <TranscriptPlayerCard message={message} selected={selected} onJump={onJump} />;
+  if (row.role === 'player') {
+    return <TranscriptPlayerCard row={row} selected={selected} onJump={onJump} query={query} />;
   }
 
-  return <TranscriptSystemCard message={message} selected={selected} onJump={onJump} />;
+  return <TranscriptSystemCard row={row} selected={selected} onJump={onJump} query={query} />;
+});
+
+const TranscriptQuickResults = memo(function TranscriptQuickResults({
+  query,
+  results,
+  onJump,
+}: {
+  query: string;
+  results: readonly ChatUiTranscriptDrawerSurfaceModel['drawer']['results'];
+  onJump?: (messageId: string) => void;
+}) {
+  if (!query.trim() || results.length === 0) return null;
+
+  return (
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 6,
+        padding: '10px 12px',
+        borderRadius: 12,
+        border: `1px solid ${T.border}`,
+        background: 'rgba(255,255,255,0.02)',
+      }}
+    >
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 8,
+        }}
+      >
+        <span
+          style={{
+            fontFamily: T.mono,
+            fontSize: 9,
+            fontWeight: 800,
+            letterSpacing: '0.10em',
+            textTransform: 'uppercase',
+            color: T.indigo,
+          }}
+        >
+          Quick jump results
+        </span>
+        <span style={{ fontFamily: T.mono, fontSize: 9, color: T.textMut }}>
+          {fmtCompactCount(results.length)} matches
+        </span>
+      </div>
+
+      <div style={{ display: 'grid', gap: 6 }}>
+        {results.slice(0, QUICK_RESULT_LIMIT).map(result => (
+          <button
+            key={result.id}
+            type="button"
+            onClick={() => onJump?.(result.messageId)}
+            style={{
+              width: '100%',
+              textAlign: 'left',
+              borderRadius: 10,
+              border: `1px solid ${T.border}`,
+              background: 'rgba(255,255,255,0.025)',
+              padding: '8px 9px',
+              cursor: 'pointer',
+              display: 'grid',
+              gap: 4,
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+              {result.channelLabel ? (
+                <span style={{ fontFamily: T.mono, fontSize: 8, color: T.indigo }}>
+                  {result.channelLabel}
+                </span>
+              ) : null}
+              {result.authorLabel ? (
+                <span style={{ fontFamily: T.mono, fontSize: 8, color: T.textSub }}>
+                  {result.authorLabel}
+                </span>
+              ) : null}
+              {result.timestampLabel ? (
+                <span style={{ fontFamily: T.mono, fontSize: 8, color: T.textMut }}>
+                  {result.timestampLabel}
+                </span>
+              ) : null}
+            </div>
+            <div style={{ fontFamily: T.display, fontSize: 11, lineHeight: 1.45, color: T.text }}>
+              {highlightQuery(result.preview, query)}
+            </div>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+});
+
+const TranscriptSelectionInspector = memo(function TranscriptSelectionInspector({
+  model,
+}: {
+  model: ChatUiTranscriptDrawerSurfaceModel;
+}) {
+  const selected = model.drawer.selected;
+  if (!selected) return null;
+
+  return (
+    <div
+      style={{
+        display: 'grid',
+        gap: 6,
+        padding: '10px 12px',
+        borderRadius: 12,
+        border: `1px solid ${T.border}`,
+        background: 'rgba(255,255,255,0.02)',
+      }}
+    >
+      <div
+        style={{
+          fontFamily: T.mono,
+          fontSize: 9,
+          fontWeight: 800,
+          letterSpacing: '0.10em',
+          textTransform: 'uppercase',
+          color: T.teal,
+        }}
+      >
+        Selected moment
+      </div>
+
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+        {selected.authorLabel ? (
+          <span style={{ fontFamily: T.mono, fontSize: 8, color: T.textSub }}>
+            {selected.authorLabel}
+          </span>
+        ) : null}
+        {selected.timestampLabel ? (
+          <span style={{ fontFamily: T.mono, fontSize: 8, color: T.textMut }}>
+            {selected.timestampLabel}
+          </span>
+        ) : null}
+      </div>
+
+      {selected.text ? (
+        <div style={{ fontFamily: T.display, fontSize: 11, lineHeight: 1.5, color: T.text }}>
+          {selected.text}
+        </div>
+      ) : null}
+
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+        {selected.proofSummary ? <span style={chipStyle(T.yellow)}>{selected.proofSummary}</span> : null}
+        {selected.threatSummary ? <span style={chipStyle(T.red)}>{selected.threatSummary}</span> : null}
+        {selected.integritySummary ? <span style={chipStyle(T.teal)}>{selected.integritySummary}</span> : null}
+      </div>
+    </div>
+  );
 });
 
 export const ChatTranscriptDrawer = memo(function ChatTranscriptDrawer({
-  open,
-  messages,
-  activeChannel = 'GLOBAL',
-  roomTitle,
-  roomSubtitle,
-  modeName,
-  context,
-  connected,
-  connectionState,
-  onlineCount,
-  activeMembers,
-  typingCount,
-  totalUnread,
-  selectedMessageId,
-  transcriptLocked,
-  initialSearchQuery = '',
-  searchQuery,
-  onSearchQueryChange,
-  onClose,
-  onJumpToMessage,
-  onRequestExport,
-}: ChatTranscriptDrawerProps) {
+  model,
+  callbacks,
+}: {
+  model: ChatUiTranscriptDrawerSurfaceModel;
+  callbacks: ChatUiTranscriptDrawerCallbacks;
+}) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const searchRef = useRef<HTMLInputElement | null>(null);
 
-  const [internalSearch, setInternalSearch] = useState(initialSearchQuery);
-  const [channelScope, setChannelScope] = useState<ChannelScope>(activeChannel);
-  const [kindScope, setKindScope] = useState<KindScope>('ALL');
-  const [proofOnly, setProofOnly] = useState(false);
-  const [lockedOnly, setLockedOnly] = useState(false);
-  const [newestFirst, setNewestFirst] = useState(false);
+  const [internalSearch, setInternalSearch] = useState(model.filterState.query ?? model.drawer.query ?? '');
+  const [channelScope, setChannelScope] = useState<TranscriptScope>(
+    model.filterState.channelScope ?? model.header.activeChannelId ?? 'GLOBAL',
+  );
+  const [kindScope, setKindScope] = useState<TranscriptScope>(model.filterState.kindScope ?? 'ALL');
+  const [proofOnly, setProofOnly] = useState<boolean>(asBoolean(model.filterState.proofOnly));
+  const [lockedOnly, setLockedOnly] = useState<boolean>(asBoolean(model.filterState.lockedOnly));
+  const [newestFirst, setNewestFirst] = useState<boolean>(asBoolean(model.filterState.newestFirst));
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportHeight, setViewportHeight] = useState(640);
 
-  const effectiveSearch = searchQuery ?? internalSearch;
+  const open = asBoolean(model.drawer.open);
+  const effectiveSearch = model.filterState.query ?? model.drawer.query ?? internalSearch;
+  const activeSelectedMessageId = selectedMessageId(model);
+
+  const onClose = callbacks.onClose;
+  const onJump = callbacks.onJumpToMessage;
+  const onExport = callbacks.onRequestExport;
+  const onJumpLatest = callbacks.onJumpLatest;
+
+  const channelFilters = useMemo(() => channelFilterFallback(model), [model]);
+  const kindFilters = useMemo(() => kindFilterFallback(model), [model]);
+  const channelFilterMap = useMemo(() => buildScopeLabelMap(channelFilters), [channelFilters]);
+  const kindFilterMap = useMemo(() => buildScopeLabelMap(kindFilters), [kindFilters]);
+  const toggleFilters = useMemo(() => buildFilterToggles(model), [model]);
 
   const setSearch = useCallback(
     (value: string) => {
-      if (searchQuery === undefined) {
+      if (model.filterState.query === undefined) {
         setInternalSearch(value);
       }
-      onSearchQueryChange?.(value);
+      callbacks.onSearchQueryChange?.(value);
     },
-    [searchQuery, onSearchQueryChange],
+    [callbacks, model.filterState.query],
   );
 
   useEffect(() => {
-    setChannelScope(activeChannel);
-  }, [activeChannel]);
+    setChannelScope(model.filterState.channelScope ?? model.header.activeChannelId ?? 'GLOBAL');
+  }, [model.filterState.channelScope, model.header.activeChannelId]);
+
+  useEffect(() => {
+    setKindScope(model.filterState.kindScope ?? 'ALL');
+  }, [model.filterState.kindScope]);
+
+  useEffect(() => {
+    setProofOnly(asBoolean(model.filterState.proofOnly));
+  }, [model.filterState.proofOnly]);
+
+  useEffect(() => {
+    setLockedOnly(asBoolean(model.filterState.lockedOnly));
+  }, [model.filterState.lockedOnly]);
+
+  useEffect(() => {
+    setNewestFirst(asBoolean(model.filterState.newestFirst));
+  }, [model.filterState.newestFirst]);
+
+  useEffect(() => {
+    if (model.filterState.query !== undefined || model.drawer.query !== undefined) {
+      setInternalSearch(model.filterState.query ?? model.drawer.query ?? '');
+    }
+  }, [model.filterState.query, model.drawer.query]);
 
   useEffect(() => {
     if (!open) return;
@@ -892,14 +1160,16 @@ export const ChatTranscriptDrawer = memo(function ChatTranscriptDrawer({
       if (event.key === 'End') {
         event.preventDefault();
         const node = containerRef.current;
-        if (node) node.scrollTop = node.scrollHeight;
+        if (!node) return;
+        node.scrollTo({ top: node.scrollHeight, behavior: 'smooth' });
         return;
       }
 
       if (event.key === 'Home') {
         event.preventDefault();
         const node = containerRef.current;
-        if (node) node.scrollTop = 0;
+        if (!node) return;
+        node.scrollTo({ top: 0, behavior: 'smooth' });
       }
     };
 
@@ -944,66 +1214,45 @@ export const ChatTranscriptDrawer = memo(function ChatTranscriptDrawer({
     return () => window.clearTimeout(timer);
   }, [open]);
 
-  const indexedMessages = useMemo<IndexedTranscriptMessage[]>(() => {
-    return [...messages]
-      .sort((a, b) => a.ts - b.ts)
-      .map((message) => ({
-        message,
-        searchBlob: searchBlobForMessage(message),
-        derivedLabel: derivedLabel(message),
-        channelOrdinal: CHANNEL_ORDER[message.channel],
-      }));
-  }, [messages]);
+  const indexedRows = useMemo<IndexedTranscriptRow[]>(() => {
+    return [...model.rows].map(row => ({
+      row,
+      searchBlob: rowSearchBlob(row),
+      channelScope: rowChannelScope(row),
+      kindScope: rowKindScope(row),
+      estimatedHeight: estimateRowHeight(row),
+    }));
+  }, [model.rows]);
 
-  const metrics = useMemo<TranscriptMetrics>(() => {
-    let proofBearing = 0;
-    let immutable = 0;
-    let botBacked = 0;
-    let playerMessages = 0;
-    let systemMessages = 0;
-
-    for (const { message } of indexedMessages) {
-      if (message.proofHash) proofBearing += 1;
-      if (message.immutable) immutable += 1;
-      if (message.botSource) botBacked += 1;
-      if (message.kind === 'PLAYER') playerMessages += 1;
-      else systemMessages += 1;
-    }
-
-    return {
-      total: indexedMessages.length,
-      proofBearing,
-      immutable,
-      botBacked,
-      playerMessages,
-      systemMessages,
-    };
-  }, [indexedMessages]);
-
-  const filteredMessages = useMemo(() => {
+  const filteredRows = useMemo(() => {
     const search = normalizeText(effectiveSearch);
 
-    const next = indexedMessages.filter(({ message, searchBlob }) => {
-      if (channelScope !== 'ALL' && message.channel !== channelScope) return false;
-      if (kindScope !== 'ALL' && message.kind !== kindScope) return false;
-      if (proofOnly && !message.proofHash) return false;
-      if (lockedOnly && !message.immutable) return false;
+    const next = indexedRows.filter(({ row, searchBlob, channelScope: rowChannel, kindScope: rowKind }) => {
+      if (channelScope !== 'ALL' && rowChannel !== channelScope) return false;
+      if (kindScope !== 'ALL' && rowKind !== kindScope) return false;
+      if (proofOnly && !row.proofHashLabel && !row.proofSummary) return false;
+      if (lockedOnly && !row.locked) return false;
       if (search && !searchBlob.includes(search)) return false;
       return true;
     });
 
     next.sort((a, b) => {
-      if (newestFirst) return b.message.ts - a.message.ts;
-      return a.message.ts - b.message.ts;
+      const left = a.row.timestamp ?? 0;
+      const right = b.row.timestamp ?? 0;
+      return newestFirst ? right - left : left - right;
     });
 
     return next;
-  }, [indexedMessages, effectiveSearch, channelScope, kindScope, proofOnly, lockedOnly, newestFirst]);
+  }, [indexedRows, effectiveSearch, channelScope, kindScope, proofOnly, lockedOnly, newestFirst]);
 
   const selectedIndex = useMemo(() => {
-    if (!selectedMessageId) return -1;
-    return filteredMessages.findIndex((entry) => entry.message.id === selectedMessageId);
-  }, [filteredMessages, selectedMessageId]);
+    if (!activeSelectedMessageId) return -1;
+    return filteredRows.findIndex(entry => (entry.row.messageId || entry.row.id) === activeSelectedMessageId);
+  }, [filteredRows, activeSelectedMessageId]);
+
+  const heights = useMemo(() => filteredRows.map(entry => entry.estimatedHeight), [filteredRows]);
+  const prefixSums = useMemo(() => buildPrefixSums(heights), [heights]);
+  const totalVirtualHeight = prefixSums[prefixSums.length - 1] ?? 0;
 
   useEffect(() => {
     if (!open) return;
@@ -1011,18 +1260,91 @@ export const ChatTranscriptDrawer = memo(function ChatTranscriptDrawer({
     const node = containerRef.current;
     if (!node) return;
 
-    const desired = Math.max(0, selectedIndex * ITEM_ESTIMATE - node.clientHeight * 0.35);
+    const targetTop = prefixSums[selectedIndex] ?? 0;
+    const desired = Math.max(0, targetTop - node.clientHeight * 0.35);
     node.scrollTo({ top: desired, behavior: 'smooth' });
-  }, [open, selectedIndex]);
+  }, [open, selectedIndex, prefixSums]);
 
-  const totalRows = filteredMessages.length;
-  const visibleStart = Math.max(0, Math.floor(scrollTop / ITEM_ESTIMATE) - OVERSCAN_ROWS);
-  const visibleCount = Math.ceil(viewportHeight / ITEM_ESTIMATE) + OVERSCAN_ROWS * 2;
-  const visibleEnd = Math.min(totalRows, visibleStart + visibleCount);
+  const visibleStart = Math.max(0, lowerBound(prefixSums, scrollTop) - OVERSCAN_ROWS);
+  const cutoffBottom = scrollTop + viewportHeight;
+  const visibleEnd = Math.min(
+    filteredRows.length,
+    lowerBound(prefixSums, cutoffBottom) + OVERSCAN_ROWS + 1,
+  );
 
-  const topSpacer = visibleStart * ITEM_ESTIMATE;
-  const bottomSpacer = Math.max(0, (totalRows - visibleEnd) * ITEM_ESTIMATE);
-  const visibleSlice = filteredMessages.slice(visibleStart, visibleEnd);
+  const topSpacer = prefixSums[visibleStart] ?? 0;
+  const bottomSpacer = Math.max(0, totalVirtualHeight - (prefixSums[visibleEnd] ?? totalVirtualHeight));
+  const visibleSlice = filteredRows.slice(visibleStart, visibleEnd);
+
+  const fallbackMetrics = useMemo(() => {
+    const pack = computeDrawerMetricPack(
+      model.rows,
+      filteredRows.map(entry => entry.row),
+    );
+
+    const selectedChannelLabel = channelFilterMap[channelScope]?.label ?? channelScope;
+    return [
+      {
+        id: 'visible',
+        label: `Visible ${selectedChannelLabel !== 'All channels' ? selectedChannelLabel : ''}`.trim(),
+        value: fmtCompactCount(pack.visible),
+        rawValue: pack.visible,
+        tone: 'calm' as const,
+        accent: 'indigo' as const,
+      },
+      {
+        id: 'proof',
+        label: 'Proof',
+        value: fmtCompactCount(pack.proof),
+        rawValue: pack.proof,
+        tone: 'warning' as const,
+        accent: 'gold' as const,
+      },
+      {
+        id: 'player',
+        label: 'Player',
+        value: fmtCompactCount(pack.player),
+        rawValue: pack.player,
+        tone: 'positive' as const,
+        accent: 'emerald' as const,
+      },
+      {
+        id: 'locked',
+        label: 'Locked',
+        value: fmtCompactCount(pack.locked),
+        rawValue: pack.locked,
+        tone: 'warning' as const,
+        accent: 'gold' as const,
+      },
+      {
+        id: 'detailed',
+        label: 'Meta-rich',
+        value: fmtCompactCount(pack.detailed),
+        rawValue: pack.detailed,
+        tone: 'supportive' as const,
+        accent: 'cyan' as const,
+      },
+      {
+        id: 'total',
+        label: 'Total buffer',
+        value: fmtCompactCount(pack.total),
+        rawValue: pack.total,
+        tone: 'neutral' as const,
+        accent: 'silver' as const,
+      },
+    ] satisfies ChatUiMetric[];
+  }, [model.rows, filteredRows, channelFilterMap, channelScope]);
+
+  const summaryMetrics = model.drawer.summaryMetrics && model.drawer.summaryMetrics.length > 0
+    ? model.drawer.summaryMetrics
+    : fallbackMetrics;
+
+  const quickResults = useMemo(() => {
+    if (!effectiveSearch.trim()) return [];
+    return model.drawer.results.filter(result =>
+      filteredRows.some(entry => (entry.row.messageId || entry.row.id) === result.messageId),
+    );
+  }, [effectiveSearch, model.drawer.results, filteredRows]);
 
   if (!open) return null;
 
@@ -1045,49 +1367,54 @@ export const ChatTranscriptDrawer = memo(function ChatTranscriptDrawer({
       <div
         style={{
           position: 'relative',
-          width: 'min(100vw, 560px)',
+          width: 'min(100vw, 580px)',
           height: '100dvh',
           display: 'flex',
           flexDirection: 'column',
-          background: `linear-gradient(180deg, rgba(3,3,8,0.995) 0%, rgba(12,12,30,0.99) 100%)`,
+          background: 'linear-gradient(180deg, rgba(3,3,8,0.995) 0%, rgba(12,12,30,0.99) 100%)',
           borderLeft: `1px solid ${T.borderM}`,
           boxShadow: '-20px 0 60px rgba(0,0,0,0.62)',
           overflow: 'hidden',
         }}
-        onClick={(event) => event.stopPropagation()}
+        onClick={event => event.stopPropagation()}
       >
         <ChatRoomHeader
-          channel={channelScope === 'ALL' ? activeChannel : channelScope}
+          channel={canonicalChannel(channelScope === 'ALL' ? asString(model.header.activeChannelId, 'GLOBAL') : channelScope)}
           variant="drawer"
-          connected={connected}
-          connectionState={connectionState}
-          roomTitle={roomTitle ?? 'TRANSCRIPT DRAWER'}
+          connected={model.header.connected}
+          connectionState={model.header.connectionState as ChatRoomConnectionState | undefined}
+          roomTitle={model.header.roomTitle ?? model.drawer.title}
           roomSubtitle={
-            roomSubtitle ??
-            'Searchable, proof-aware, filterable replay lane for the current frontend transcript window.'
+            model.header.roomSubtitle
+            ?? model.drawer.subtitle
+            ?? 'Searchable, proof-aware, filterable replay lane for the current frontend transcript window.'
           }
-          modeName={modeName}
-          context={context}
-          onlineCount={onlineCount}
-          activeMembers={activeMembers}
-          typingCount={typingCount}
-          totalUnread={totalUnread}
-          transcriptLocked={transcriptLocked || channelScope === 'DEAL_ROOM'}
+          modeName={model.header.modeName}
+          onlineCount={model.header.onlineCount}
+          activeMembers={model.header.activeMembers}
+          typingCount={model.header.typingCount}
+          totalUnread={model.header.totalUnread}
+          transcriptLocked={asBoolean(model.header.transcriptLocked) || channelScope === 'DEAL_ROOM'}
           showTranscriptAction={false}
           showPinAction={false}
           showJumpLatestAction={true}
           showMinimizeAction={true}
           onJumpLatest={() => {
+            if (onJumpLatest) {
+              onJumpLatest();
+              return;
+            }
+
             const node = containerRef.current;
             if (!node) return;
             node.scrollTo({ top: newestFirst ? 0 : node.scrollHeight, behavior: 'smooth' });
           }}
           onMinimize={onClose}
           rightSlot={
-            onRequestExport ? (
+            (model.drawer.canExport || model.drawer.exportReady || onExport) ? (
               <button
                 type="button"
-                onClick={onRequestExport}
+                onClick={() => onExport?.()}
                 style={{
                   minHeight: 34,
                   padding: '0 11px',
@@ -1099,7 +1426,7 @@ export const ChatTranscriptDrawer = memo(function ChatTranscriptDrawer({
                   border: `1px solid rgba(255,255,255,0.08)`,
                   background: 'rgba(255,255,255,0.03)',
                   color: T.textSub,
-                  cursor: 'pointer',
+                  cursor: onExport ? 'pointer' : 'not-allowed',
                   fontFamily: T.mono,
                   fontSize: 10,
                   fontWeight: 800,
@@ -1107,8 +1434,10 @@ export const ChatTranscriptDrawer = memo(function ChatTranscriptDrawer({
                   textTransform: 'uppercase',
                   whiteSpace: 'nowrap',
                   flexShrink: 0,
+                  opacity: onExport ? 1 : 0.6,
                 }}
                 title="Request transcript export"
+                disabled={!onExport}
               >
                 ⤴︎ Export
               </button>
@@ -1135,18 +1464,14 @@ export const ChatTranscriptDrawer = memo(function ChatTranscriptDrawer({
               alignItems: 'center',
             }}
           >
-            <div
-              style={{
-                position: 'relative',
-                minWidth: 0,
-              }}
-            >
+            <div style={{ position: 'relative', minWidth: 0 }}>
               <input
                 ref={searchRef}
                 value={effectiveSearch}
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder="Search body, sender, proof hash, bot state, shield layer, cascade id..."
+                onChange={event => setSearch(event.target.value)}
+                placeholder={model.drawer.canSearch === false ? 'Transcript search disabled' : 'Search body, sender, proof hash, shield layer, cascade id, rescue markers...'}
                 spellCheck={false}
+                disabled={model.drawer.canSearch === false}
                 style={{
                   width: '100%',
                   minHeight: 42,
@@ -1158,6 +1483,7 @@ export const ChatTranscriptDrawer = memo(function ChatTranscriptDrawer({
                   outline: 'none',
                   fontFamily: T.display,
                   fontSize: 12,
+                  opacity: model.drawer.canSearch === false ? 0.65 : 1,
                 }}
               />
               <span
@@ -1176,207 +1502,97 @@ export const ChatTranscriptDrawer = memo(function ChatTranscriptDrawer({
 
             <button
               type="button"
-              onClick={() => setNewestFirst((current) => !current)}
-              style={filterButtonStyle(newestFirst, T.indigo)}
+              onClick={() => setNewestFirst(current => !current)}
+              style={interactiveButtonStyle(newestFirst, T.indigo)}
               title="Toggle newest-first ordering"
             >
               {newestFirst ? '↓' : '↑'} {newestFirst ? 'Newest' : 'Chrono'}
             </button>
           </div>
 
-          <div
-            style={{
-              display: 'flex',
-              flexWrap: 'wrap',
-              gap: 8,
-              alignItems: 'center',
-            }}
-          >
-            {(['ALL', 'GLOBAL', 'SYNDICATE', 'DEAL_ROOM'] as ChannelScope[]).map((scope) => (
-              <button
-                key={scope}
-                type="button"
-                onClick={() => setChannelScope(scope)}
-                style={filterButtonStyle(channelScope === scope, CHANNEL_META[scope].accent)}
-              >
-                <span>{CHANNEL_META[scope].emoji}</span>
-                <span>{CHANNEL_META[scope].label}</span>
-              </button>
-            ))}
-          </div>
-
-          <div
-            style={{
-              display: 'flex',
-              flexWrap: 'wrap',
-              gap: 8,
-              alignItems: 'center',
-            }}
-          >
-            {(['ALL', 'PLAYER', 'SYSTEM', 'MARKET_ALERT', 'ACHIEVEMENT', 'BOT_TAUNT', 'BOT_ATTACK', 'SHIELD_EVENT', 'CASCADE_ALERT', 'DEAL_RECAP'] as KindScope[]).map(
-              (scope) => (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+            {channelFilters.map(filter => {
+              const active = channelScope === filter.id;
+              const accent = filterAccent(filter);
+              return (
                 <button
-                  key={scope}
+                  key={filter.id}
                   type="button"
-                  onClick={() => setKindScope(scope)}
-                  style={filterButtonStyle(kindScope === scope, KIND_META[scope].accent)}
+                  onClick={() => {
+                    setChannelScope(filter.id);
+                    callbacks.onSelectChannelScope?.(filter.id);
+                  }}
+                  style={interactiveButtonStyle(active, accent)}
                 >
-                  <span>{KIND_META[scope].emoji}</span>
-                  <span>{KIND_META[scope].label}</span>
+                  <span>{filter.label}</span>
+                  {typeof filter.count === 'number' ? <span>{fmtCompactCount(filter.count)}</span> : null}
                 </button>
-              ),
-            )}
-
-            <button
-              type="button"
-              onClick={() => setProofOnly((current) => !current)}
-              style={filterButtonStyle(proofOnly, T.yellow)}
-            >
-              🔒 Proof only
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setLockedOnly((current) => !current)}
-              style={filterButtonStyle(lockedOnly, T.yellow)}
-            >
-              📜 Locked only
-            </button>
+              );
+            })}
           </div>
 
-          <div
-            style={{
-              display: 'flex',
-              gap: 8,
-              flexWrap: 'wrap',
-              alignItems: 'center',
-            }}
-          >
-            <div style={metricChipStyle(T.indigo)}>
-              <span
-                style={{
-                  fontFamily: T.mono,
-                  fontSize: 8,
-                  letterSpacing: '0.10em',
-                  color: T.indigo,
-                  textTransform: 'uppercase',
-                  fontWeight: 800,
-                }}
-              >
-                Visible
-              </span>
-              <span
-                style={{
-                  fontFamily: T.mono,
-                  fontSize: 10,
-                  color: T.text,
-                  fontWeight: 700,
-                }}
-              >
-                {fmtCompactCount(filteredMessages.length)}
-              </span>
-            </div>
-
-            <div style={metricChipStyle(T.yellow)}>
-              <span
-                style={{
-                  fontFamily: T.mono,
-                  fontSize: 8,
-                  letterSpacing: '0.10em',
-                  color: T.yellow,
-                  textTransform: 'uppercase',
-                  fontWeight: 800,
-                }}
-              >
-                Proof
-              </span>
-              <span
-                style={{
-                  fontFamily: T.mono,
-                  fontSize: 10,
-                  color: T.text,
-                  fontWeight: 700,
-                }}
-              >
-                {fmtCompactCount(metrics.proofBearing)}
-              </span>
-            </div>
-
-            <div style={metricChipStyle(T.teal)}>
-              <span
-                style={{
-                  fontFamily: T.mono,
-                  fontSize: 8,
-                  letterSpacing: '0.10em',
-                  color: T.teal,
-                  textTransform: 'uppercase',
-                  fontWeight: 800,
-                }}
-              >
-                Player
-              </span>
-              <span
-                style={{
-                  fontFamily: T.mono,
-                  fontSize: 10,
-                  color: T.text,
-                  fontWeight: 700,
-                }}
-              >
-                {fmtCompactCount(metrics.playerMessages)}
-              </span>
-            </div>
-
-            <div style={metricChipStyle(T.red)}>
-              <span
-                style={{
-                  fontFamily: T.mono,
-                  fontSize: 8,
-                  letterSpacing: '0.10em',
-                  color: T.red,
-                  textTransform: 'uppercase',
-                  fontWeight: 800,
-                }}
-              >
-                Bot-backed
-              </span>
-              <span
-                style={{
-                  fontFamily: T.mono,
-                  fontSize: 10,
-                  color: T.text,
-                  fontWeight: 700,
-                }}
-              >
-                {fmtCompactCount(metrics.botBacked)}
-              </span>
-            </div>
-
-            <div style={metricChipStyle(T.textSub)}>
-              <span
-                style={{
-                  fontFamily: T.mono,
-                  fontSize: 8,
-                  letterSpacing: '0.10em',
-                  color: T.textSub,
-                  textTransform: 'uppercase',
-                  fontWeight: 800,
-                }}
-              >
-                Total buffer
-              </span>
-              <span
-                style={{
-                  fontFamily: T.mono,
-                  fontSize: 10,
-                  color: T.text,
-                  fontWeight: 700,
-                }}
-              >
-                {fmtCompactCount(metrics.total)}
-              </span>
-            </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+            {kindFilters.map(filter => {
+              const active = kindScope === filter.id;
+              const accent = filterAccent(filter);
+              return (
+                <button
+                  key={filter.id}
+                  type="button"
+                  onClick={() => {
+                    setKindScope(filter.id);
+                    callbacks.onSelectKindScope?.(filter.id);
+                  }}
+                  style={interactiveButtonStyle(active, accent)}
+                >
+                  <span>{filter.label}</span>
+                  {typeof filter.count === 'number' ? <span>{fmtCompactCount(filter.count)}</span> : null}
+                </button>
+              );
+            })}
           </div>
+
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+            {toggleFilters.map(toggle => {
+              const accent = accentHex(toggle.accent, toneAccent(toggle.tone, T.indigo));
+              return (
+                <button
+                  key={toggle.id}
+                  type="button"
+                  onClick={() => {
+                    if (toggle.id === 'proof_only') {
+                      const next = !proofOnly;
+                      setProofOnly(next);
+                      callbacks.onToggleProofOnly?.(next);
+                      return;
+                    }
+
+                    if (toggle.id === 'locked_only') {
+                      const next = !lockedOnly;
+                      setLockedOnly(next);
+                      callbacks.onToggleLockedOnly?.(next);
+                      return;
+                    }
+
+                    const next = !newestFirst;
+                    setNewestFirst(next);
+                    callbacks.onToggleNewestFirst?.(next);
+                  }}
+                  style={interactiveButtonStyle(toggle.active, accent)}
+                >
+                  <span>{toggle.id === 'proof_only' ? '🔒' : toggle.id === 'locked_only' ? '📜' : toggle.active ? '↓' : '↑'}</span>
+                  <span>{toggle.label}</span>
+                </button>
+              );
+            })}
+          </div>
+
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+            {summaryMetrics.map(renderSummaryMetric)}
+          </div>
+
+          <TranscriptQuickResults query={effectiveSearch} results={quickResults} onJump={onJump} />
+          <TranscriptSelectionInspector model={model} />
         </div>
 
         <div
@@ -1390,7 +1606,7 @@ export const ChatTranscriptDrawer = memo(function ChatTranscriptDrawer({
             scrollbarColor: 'rgba(255,255,255,0.10) transparent',
           }}
         >
-          {filteredMessages.length === 0 ? (
+          {filteredRows.length === 0 ? (
             <div
               style={{
                 minHeight: '100%',
@@ -1413,40 +1629,36 @@ export const ChatTranscriptDrawer = memo(function ChatTranscriptDrawer({
                   textTransform: 'uppercase',
                 }}
               >
-                No transcript entries match this filter stack
+                {model.drawer.emptyState?.title ?? 'No transcript entries match this filter stack'}
               </div>
               <div
                 style={{
                   fontFamily: T.display,
                   fontSize: 12,
                   lineHeight: 1.5,
-                  maxWidth: 320,
+                  maxWidth: 340,
                   color: T.textSub,
                 }}
               >
-                Clear search terms, widen the channel scope, or remove proof / lock gating to bring
-                transcript entries back into view.
+                {model.drawer.emptyState?.description
+                  ?? 'Clear search terms, widen the channel scope, or remove proof / lock gating to bring transcript entries back into view.'}
               </div>
             </div>
           ) : (
-            <div style={{ minHeight: '100%', position: 'relative' }}>
+            <div style={{ minHeight: '100%', position: 'relative', height: totalVirtualHeight || '100%' }}>
               {topSpacer > 0 ? <div style={{ height: topSpacer }} /> : null}
 
-              <div
-                style={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: 10,
-                }}
-              >
-                {visibleSlice.map(({ message }, localIndex) => {
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {visibleSlice.map(({ row }, localIndex) => {
                   const absoluteIndex = visibleStart + localIndex;
+                  const messageId = row.messageId || row.id;
                   return (
                     <TranscriptRow
-                      key={message.id}
-                      message={message}
-                      selected={absoluteIndex === selectedIndex}
-                      onJump={onJumpToMessage}
+                      key={messageId}
+                      row={row}
+                      selected={absoluteIndex === selectedIndex || row.selected === true}
+                      onJump={onJump}
+                      query={effectiveSearch}
                     />
                   );
                 })}
@@ -1459,9 +1671,9 @@ export const ChatTranscriptDrawer = memo(function ChatTranscriptDrawer({
 
         <div
           style={{
-            display: 'flex',
+            display: 'grid',
+            gridTemplateColumns: 'minmax(0, 1fr) auto',
             alignItems: 'center',
-            justifyContent: 'space-between',
             gap: 10,
             padding: '10px 14px',
             borderTop: `1px solid ${T.border}`,
@@ -1469,17 +1681,31 @@ export const ChatTranscriptDrawer = memo(function ChatTranscriptDrawer({
             flexShrink: 0,
           }}
         >
-          <div
-            style={{
-              fontFamily: T.display,
-              fontSize: 11,
-              lineHeight: 1.45,
-              color: T.textSub,
-              minWidth: 0,
-            }}
-          >
-            Transcript drawer stays render-only. Message truth, replay permanence, moderation, and
-            learning updates remain outside this file.
+          <div style={{ display: 'grid', gap: 4, minWidth: 0 }}>
+            <div
+              style={{
+                fontFamily: T.display,
+                fontSize: 11,
+                lineHeight: 1.45,
+                color: T.textSub,
+                minWidth: 0,
+              }}
+            >
+              Transcript drawer stays render-only. Message truth, replay permanence, moderation, and learning updates remain outside this file.
+            </div>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+              <span style={{ fontFamily: T.mono, fontSize: 8, color: T.textMut }}>
+                visible slice {fmtCompactCount(visibleSlice.length)} / {fmtCompactCount(filteredRows.length)}
+              </span>
+              <span style={{ fontFamily: T.mono, fontSize: 8, color: T.textMut }}>
+                virtual height {fmtCompactCount(totalVirtualHeight)}px
+              </span>
+              {activeSelectedMessageId ? (
+                <span style={{ fontFamily: T.mono, fontSize: 8, color: T.textMut }}>
+                  selected {activeSelectedMessageId}
+                </span>
+              ) : null}
+            </div>
           </div>
 
           <button
