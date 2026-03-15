@@ -2,6 +2,7 @@
  * ============================================================================
  * POINT ZERO ONE — UNIFIED CHAT DOCK
  * FILE: pzo-web/src/components/chat/UnifiedChatDock.tsx
+ * VERSION: 2026.03.15-patched
  * ============================================================================
  */
 
@@ -30,7 +31,6 @@ import { useUnifiedChat } from './useUnifiedChat';
 import ChatMessageFeed from './ChatMessageFeed';
 import ChatChannelTabs from './ChatChannelTabs';
 
-
 type VisibleChannelId = 'GLOBAL' | 'SYNDICATE' | 'DEAL_ROOM';
 type UnifiedMessageKind =
   | 'PLAYER'
@@ -43,7 +43,7 @@ type UnifiedMessageKind =
   | 'CASCADE_ALERT'
   | 'DEAL_RECAP';
 
-interface UnifiedChatMessage extends ChatMessage {
+type UnifiedChatMessage = Partial<ChatMessage> & {
   id?: string;
   channel?: VisibleChannelId | string;
   kind?: UnifiedMessageKind | string;
@@ -63,7 +63,7 @@ interface UnifiedChatMessage extends ChatMessage {
     confidence?: number;
   };
   metadata?: Record<string, unknown>;
-}
+};
 
 interface UnifiedPresenceMember {
   id: string;
@@ -190,7 +190,7 @@ function createPresenceModel(messages: readonly UnifiedChatMessage[], channel: V
     map.set(senderId, {
       id: senderId,
       name: message.senderName ?? 'Unknown',
-      role: kind === 'SYSTEM' ? 'SYSTEM' : kind.startsWith('BOT_') ? 'HATER' : message.senderId === 'player-local' ? 'PLAYER' : 'NPC',
+      role: kind === 'SYSTEM' ? 'SYSTEM' : String(kind).startsWith('BOT_') ? 'HATER' : message.senderId === 'player-local' ? 'PLAYER' : 'NPC',
       online: true,
       typing: false,
       mood: kind === 'BOT_ATTACK' ? 'predatory' : kind === 'BOT_TAUNT' ? 'heated' : kind === 'SHIELD_EVENT' ? 'alert' : 'calm',
@@ -266,42 +266,6 @@ const Badge = memo(function Badge({ label, color, bg }: { label: string; color: 
   return <span style={badgeStyle(color, bg)}>{label}</span>;
 });
 
-const ChannelTabButton = memo(function ChannelTabButton({ channel, active, unread, onClick }: { channel: VisibleChannelId; active: boolean; unread: number; onClick: () => void }) {
-  const meta = CHANNEL_META[channel];
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      style={{
-        appearance: 'none',
-        border: `1px solid ${active ? meta.accent : TOKENS.border}`,
-        background: active ? `${meta.accent}18` : 'rgba(255,255,255,0.02)',
-        color: active ? TOKENS.text : TOKENS.textSubtle,
-        padding: '10px 12px',
-        borderRadius: TOKENS.radiusSm,
-        display: 'flex',
-        alignItems: 'center',
-        gap: 8,
-        cursor: 'pointer',
-        minHeight: 42,
-        fontFamily: TOKENS.mono,
-        fontSize: 12,
-        letterSpacing: 0.4,
-        textTransform: 'uppercase',
-      }}
-      aria-pressed={active}
-    >
-      <span style={{ color: meta.accent, fontSize: 16 }}>{meta.icon}</span>
-      <span>{meta.label}</span>
-      {unread > 0 ? (
-        <span style={{ marginLeft: 'auto', minWidth: 18, height: 18, borderRadius: 999, background: active ? meta.accent : TOKENS.panel, color: active ? TOKENS.panel : TOKENS.text, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 700, padding: '0 5px' }}>
-          {unread > 99 ? '99+' : unread}
-        </span>
-      ) : null}
-    </button>
-  );
-});
-
 const ThreatMeter = memo(function ThreatMeter({ threat }: { threat: UnifiedDockThreatModel }) {
   const bandColor = THREAT_BANDS.find((entry) => entry.label === threat.band)?.color ?? TOKENS.textSubtle;
   return (
@@ -334,7 +298,7 @@ const PresenceStrip = memo(function PresenceStrip({ members }: { members: readon
           <div key={member.id} style={{ minWidth: 104, padding: '10px 11px', display: 'grid', gap: 6, border: `1px solid ${TOKENS.border}`, borderRadius: TOKENS.radiusMd, background: 'rgba(255,255,255,0.03)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <div style={{ width: 28, height: 28, borderRadius: 999, background: `${color}18`, border: `1px solid ${color}35`, color, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontFamily: TOKENS.mono, fontWeight: 700, fontSize: 11 }}>
-                {(member.name || '??').split(/\s+/).filter(Boolean).slice(0,2).map((p) => p[0]?.toUpperCase() ?? '').join('')}
+                {(member.name || '??').split(/\s+/).filter(Boolean).slice(0, 2).map((p) => p[0]?.toUpperCase() ?? '').join('')}
               </div>
               <div style={{ minWidth: 0 }}>
                 <div style={{ color: TOKENS.text, fontFamily: TOKENS.sans, fontSize: 12, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{member.name}</div>
@@ -349,7 +313,6 @@ const PresenceStrip = memo(function PresenceStrip({ members }: { members: readon
   );
 });
 
-
 const TypingIndicator = memo(function TypingIndicator({
   model,
 }: {
@@ -357,12 +320,7 @@ const TypingIndicator = memo(function TypingIndicator({
 }) {
   if (!model.visible || model.actors.length === 0) return null;
   const lead = model.actors[0];
-  const toneColor =
-    lead?.isThreat
-      ? TOKENS.red
-      : lead?.role === 'helper'
-        ? TOKENS.teal
-        : TOKENS.textSubtle;
+  const toneColor = lead?.isThreat ? TOKENS.red : lead?.role === 'helper' ? TOKENS.teal : TOKENS.textSubtle;
 
   return (
     <div
@@ -563,7 +521,6 @@ export const UnifiedChatDock = memo(function UnifiedChatDock({
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
   }, [shellOpen, ui.messageFeedModel.flatRows.length, activeTab, ui.messageFeedModel.flatRows]);
 
-  const handleSwitchTab = useCallback((tab: VisibleChannelId) => { ui.setActiveChannel(tab); }, [ui]);
   const handleToggleOpen = useCallback(() => {
     if (!ui.chatOpen) {
       ui.openChat();
@@ -620,10 +577,7 @@ export const UnifiedChatDock = memo(function UnifiedChatDock({
         </div>
       </div>
 
-      <ChatChannelTabs
-        {...ui.channelTabs}
-        className="pzo-chat-dock__channel-tabs"
-      />
+      <ChatChannelTabs {...ui.channelTabs} className="pzo-chat-dock__channel-tabs" />
 
       {bootstrapPreset.showPresenceStrip ? <PresenceStrip members={presence} /> : null}
       <TypingIndicator model={ui.typingIndicatorModel} />

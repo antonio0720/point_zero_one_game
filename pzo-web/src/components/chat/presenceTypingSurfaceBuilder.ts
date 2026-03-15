@@ -10,7 +10,7 @@ import type {
  * ============================================================================
  * POINT ZERO ONE — PRESENCE / TYPING SURFACE BUILDER
  * FILE: pzo-web/src/components/chat/presenceTypingSurfaceBuilder.ts
- * VERSION: 2.0.0
+ * VERSION: 2.0.1
  * AUTHOR: OpenAI
  * LICENSE: Internal / Project Use Only
  * ============================================================================
@@ -170,7 +170,7 @@ export function buildPresenceStripViewModel(args: BuildPresenceTypingArgs): Pres
       shortName: normalizeWhitespace(message.senderName || 'Unknown'),
       status: now - nextTs < ONLINE_WINDOW_MS ? 'online' : 'idle',
       role,
-      entityKind: role === 'player' ? 'human' : role === 'helper' || role === 'hater' ? 'bot' : 'service',
+      entityKind: role === 'player' ? 'human' : role === 'helper' || role === 'hater' ? 'bot' : role === 'system' ? 'system' : 'npc',
       intent: inferPresenceIntent(message),
       isSelf: message.senderId === args.playerId || message.senderId === 'player-local',
       isThreat: isThreatSignal(message),

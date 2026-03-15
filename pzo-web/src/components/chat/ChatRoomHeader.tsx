@@ -1,805 +1,160 @@
+import React, { memo, useMemo } from 'react';
+
+import type {
+  ChatRoomHeaderProps,
+  RoomHeaderActionViewModel,
+  RoomHeaderBadgeViewModel,
+} from './uiTypes';
 
 /**
  * ============================================================================
- * POINT ZERO ONE — CHAT ROOM HEADER
+ * POINT ZERO ONE — UNIFIED CHAT ROOM HEADER
  * FILE: pzo-web/src/components/chat/ChatRoomHeader.tsx
  * ============================================================================
  *
- * Purpose
- * -------
- * Render-only room header for the unified chat surface.
+ * Presentation-first command/header surface for the unified dock.
  *
- * This component is intentionally presentation-first:
+ * This file intentionally owns no engine truth.
  * - no socket ownership
- * - no store mutation
- * - no engine authority
- * - no learning policy
+ * - no store writes
+ * - no channel eligibility calculation
+ * - no runtime policy mutation
+ * - no learning logic
  *
- * It accepts already-derived state from the chat engine lane and translates that
- * state into a dense, highly legible command/header surface that works across:
- * - GLOBAL
- * - SYNDICATE
- * - DEAL_ROOM
- * - transcript drawer overlays
- * - collapsed / pinned / expanded chat shells
- *
- * Design doctrine
- * ---------------
- * - inline styles only, matching the current chat lane and LeagueUI-adjacent
- *   token style already present in ChatPanel.tsx
- * - mobile-first
- * - hater-heat / tick / pressure aware
- * - transcript integrity aware for Deal Room
- * - future-safe for the split between components/chat and engines/chat
- *
- * Scale posture
- * -------------
- * This file is designed to remain render-cheap even under aggressive polling,
- * telemetry updates, presence churn, and high message cadence. Expensive derived
- * display work is memoized and the component is side-effect free except for
- * optional click callbacks provided by the parent shell.
+ * It renders already-normalized room/header state supplied by useUnifiedChat.
  * ============================================================================
  */
 
-import React, { memo, useMemo } from 'react';
-import type { CSSProperties, ReactNode } from 'react';
-import type { ChatChannel, GameChatContext } from './chatTypes';
+const TONE_CLASS = {
+  neutral: 'border-white/10 bg-white/6 text-white/82',
+  accent: 'border-sky-400/22 bg-sky-500/10 text-sky-100',
+  positive: 'border-emerald-400/22 bg-emerald-500/10 text-emerald-100',
+  warning: 'border-amber-400/22 bg-amber-500/10 text-amber-100',
+  danger: 'border-rose-400/22 bg-rose-500/10 text-rose-100',
+  muted: 'border-white/8 bg-black/18 text-white/60',
+} as const;
 
-export type ChatRoomConnectionState =
-  | 'CONNECTED'
-  | 'CONNECTING'
-  | 'DEGRADED'
-  | 'DISCONNECTED';
-
-export interface ChatRoomHeaderProps {
-  channel: ChatChannel;
-  variant?: 'dock' | 'drawer';
-  connected?: boolean;
-  connectionState?: ChatRoomConnectionState;
-  roomTitle?: string;
-  roomSubtitle?: string;
-  roomCode?: string;
-  modeName?: string;
-  accentEmoji?: string;
-  transcriptLocked?: boolean;
-  isPinned?: boolean;
-  context?: Partial<GameChatContext>;
-  onlineCount?: number;
-  activeMembers?: number;
-  typingCount?: number;
-  totalUnread?: number;
-  showTranscriptAction?: boolean;
-  showJumpLatestAction?: boolean;
-  showPinAction?: boolean;
-  showMinimizeAction?: boolean;
-  onOpenTranscript?: () => void;
-  onJumpLatest?: () => void;
-  onTogglePinned?: () => void;
-  onMinimize?: () => void;
-  rightSlot?: ReactNode;
-}
-
-type HeaderPalette = {
-  accent: string;
-  accentSoft: string;
-  accentBorder: string;
-  badgeBg: string;
-  badgeBorder: string;
-  policyBg: string;
-  policyBorder: string;
-  glow: string;
-};
-
-const T = {
-  void: '#030308',
-  card: '#0C0C1E',
-  cardHi: '#131328',
-  cardEl: '#191934',
-  border: 'rgba(255,255,255,0.08)',
-  borderM: 'rgba(255,255,255,0.16)',
-  text: '#F2F2FF',
-  textSub: '#9090B4',
-  textMut: '#505074',
-  green: '#22DD88',
-  red: '#FF4D4D',
-  orange: '#FF8C00',
-  yellow: '#FFD700',
-  indigo: '#818CF8',
-  teal: '#22D3EE',
-  purple: '#A855F7',
-  mono: "'IBM Plex Mono', 'JetBrains Mono', monospace",
-  display: "'Syne', 'Outfit', system-ui, sans-serif",
-};
-
-const CHANNEL_LABELS: Record<
-  ChatChannel,
-  {
-    title: string;
-    subtitle: string;
-    emoji: string;
-    policyLabel: string;
-    palette: HeaderPalette;
-  }
-> = {
-  GLOBAL: {
-    title: 'GLOBAL FEED',
-    subtitle: 'Theatrical, public, crowd-reactive, wide-spectrum signaling',
-    emoji: '🌐',
-    policyLabel: 'PUBLIC VISIBILITY',
-    palette: {
-      accent: T.indigo,
-      accentSoft: 'rgba(129,140,248,0.14)',
-      accentBorder: 'rgba(129,140,248,0.28)',
-      badgeBg: 'rgba(129,140,248,0.08)',
-      badgeBorder: 'rgba(129,140,248,0.18)',
-      policyBg: 'rgba(129,140,248,0.08)',
-      policyBorder: 'rgba(129,140,248,0.22)',
-      glow: 'rgba(129,140,248,0.28)',
-    },
-  },
-  SYNDICATE: {
-    title: 'SYNDICATE CHANNEL',
-    subtitle: 'Tactical, private, reputation-sensitive alliance traffic',
-    emoji: '🏛️',
-    policyLabel: 'TRUST-CIRCUIT ROUTING',
-    palette: {
-      accent: T.teal,
-      accentSoft: 'rgba(34,211,238,0.14)',
-      accentBorder: 'rgba(34,211,238,0.28)',
-      badgeBg: 'rgba(34,211,238,0.08)',
-      badgeBorder: 'rgba(34,211,238,0.18)',
-      policyBg: 'rgba(34,211,238,0.08)',
-      policyBorder: 'rgba(34,211,238,0.22)',
-      glow: 'rgba(34,211,238,0.28)',
-    },
-  },
-  DEAL_ROOM: {
-    title: 'DEAL ROOM',
-    subtitle: 'Transcript-bound, predatory, proof-bearing negotiation lane',
-    emoji: '⚡',
-    policyLabel: 'TRANSCRIPT INTEGRITY ENFORCED',
-    palette: {
-      accent: T.yellow,
-      accentSoft: 'rgba(255,215,0,0.14)',
-      accentBorder: 'rgba(255,215,0,0.28)',
-      badgeBg: 'rgba(255,215,0,0.08)',
-      badgeBorder: 'rgba(255,215,0,0.18)',
-      policyBg: 'rgba(255,215,0,0.08)',
-      policyBorder: 'rgba(255,215,0,0.22)',
-      glow: 'rgba(255,215,0,0.24)',
-    },
-  },
-};
-
-function clampPercent(value: number | undefined): number | undefined {
-  if (typeof value !== 'number' || Number.isNaN(value)) return undefined;
-  return Math.max(0, Math.min(100, Math.round(value)));
-}
-
-function deriveConnectionState(
-  explicit: ChatRoomConnectionState | undefined,
-  connected: boolean | undefined,
-): ChatRoomConnectionState {
-  if (explicit) return explicit;
-  return connected ? 'CONNECTED' : 'DISCONNECTED';
-}
-
-function connectionColor(state: ChatRoomConnectionState): string {
-  switch (state) {
-    case 'CONNECTED':
-      return T.green;
-    case 'CONNECTING':
-      return T.indigo;
-    case 'DEGRADED':
-      return T.orange;
-    case 'DISCONNECTED':
-    default:
-      return T.red;
-  }
-}
-
-function connectionLabel(state: ChatRoomConnectionState): string {
-  switch (state) {
-    case 'CONNECTED':
-      return 'LIVE';
-    case 'CONNECTING':
-      return 'NEGOTIATING';
-    case 'DEGRADED':
-      return 'DEGRADED';
-    case 'DISCONNECTED':
-    default:
-      return 'OFFLINE';
-  }
-}
-
-function fmtCompactCount(value: number | undefined): string {
-  if (typeof value !== 'number' || Number.isNaN(value)) return '—';
-  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
-  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}K`;
-  return `${Math.max(0, Math.floor(value))}`;
-}
-
-function fallbackRoomTitle(channel: ChatChannel): string {
-  return CHANNEL_LABELS[channel].title;
-}
-
-function fallbackRoomSubtitle(channel: ChatChannel): string {
-  return CHANNEL_LABELS[channel].subtitle;
-}
-
-function metricValue(value: string | undefined, fallback = '—'): string {
-  return value && value.trim().length > 0 ? value : fallback;
-}
-
-function actionButtonStyle(
-  disabled: boolean,
-  accent: string,
-  variant: 'ghost' | 'accent' = 'ghost',
-): CSSProperties {
-  const accentSoft =
-    variant === 'accent' ? `${accent}20` : 'rgba(255,255,255,0.03)';
-  const accentBorder =
-    variant === 'accent' ? `${accent}40` : 'rgba(255,255,255,0.08)';
-  const accentColor = variant === 'accent' ? accent : T.textSub;
-
-  return {
-    minHeight: 34,
-    minWidth: 34,
-    padding: '0 11px',
-    borderRadius: 10,
-    display: 'inline-flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    border: `1px solid ${accentBorder}`,
-    background: accentSoft,
-    color: accentColor,
-    cursor: disabled ? 'not-allowed' : 'pointer',
-    fontFamily: T.mono,
-    fontSize: 10,
-    fontWeight: 800,
-    letterSpacing: '0.08em',
-    textTransform: 'uppercase',
-    opacity: disabled ? 0.45 : 1,
-    transition:
-      'transform 120ms ease, border-color 120ms ease, background 120ms ease, color 120ms ease',
-    whiteSpace: 'nowrap',
-    flexShrink: 0,
-  };
-}
-
-const StatPill = memo(function StatPill({
-  label,
-  value,
-  accent,
-  subtle,
-}: {
-  label: string;
-  value: string;
-  accent: string;
-  subtle?: boolean;
-}) {
+function Badge({ badge }: { badge: RoomHeaderBadgeViewModel }): JSX.Element {
   return (
-    <div
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 7,
-        minHeight: 28,
-        padding: '0 10px',
-        borderRadius: 999,
-        border: `1px solid ${subtle ? 'rgba(255,255,255,0.08)' : `${accent}28`}`,
-        background: subtle ? 'rgba(255,255,255,0.025)' : `${accent}10`,
-        whiteSpace: 'nowrap',
-      }}
+    <span
+      className={[
+        'inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em]',
+        TONE_CLASS[badge.tone ?? 'neutral'],
+      ].join(' ')}
+      title={badge.hint || badge.label}
     >
-      <span
-        style={{
-          fontFamily: T.mono,
-          fontSize: 8,
-          letterSpacing: '0.10em',
-          color: subtle ? T.textMut : accent,
-          fontWeight: 800,
-          textTransform: 'uppercase',
-        }}
-      >
-        {label}
-      </span>
-      <span
-        style={{
-          fontFamily: T.mono,
-          fontSize: 10,
-          letterSpacing: '0.04em',
-          color: T.text,
-          fontWeight: 700,
-        }}
-      >
-        {value}
-      </span>
-    </div>
+      {badge.icon ? <span aria-hidden="true">{badge.icon}</span> : null}
+      {badge.label}
+    </span>
   );
-});
+}
 
-export const ChatRoomHeader = memo(function ChatRoomHeader({
-  channel,
-  variant = 'dock',
-  connected,
-  connectionState,
-  roomTitle,
-  roomSubtitle,
-  roomCode,
-  modeName,
-  accentEmoji,
-  transcriptLocked,
-  isPinned,
-  context,
-  onlineCount,
-  activeMembers,
-  typingCount,
-  totalUnread,
-  showTranscriptAction = true,
-  showJumpLatestAction = true,
-  showPinAction = true,
-  showMinimizeAction = true,
-  onOpenTranscript,
-  onJumpLatest,
-  onTogglePinned,
-  onMinimize,
-  rightSlot,
-}: ChatRoomHeaderProps) {
-  const channelMeta = CHANNEL_LABELS[channel];
-  const state = deriveConnectionState(connectionState, connected);
-  const pressureTier = context?.pressureTier;
-  const tickTier = context?.tickTier;
-  const haterHeat = clampPercent(context?.haterHeat);
+function ActionButton({ action }: { action: RoomHeaderActionViewModel }): JSX.Element {
+  return (
+    <button
+      type="button"
+      onClick={action.onPress}
+      disabled={action.disabled}
+      className={[
+        'inline-flex min-h-[36px] items-center justify-center rounded-xl border px-3 py-1.5 text-[12px] font-semibold tracking-[0.02em] transition-colors',
+        TONE_CLASS[action.tone ?? 'neutral'],
+        action.disabled ? 'cursor-not-allowed opacity-45' : 'cursor-pointer hover:bg-white/10',
+      ].join(' ')}
+      title={action.hint || action.label}
+      aria-label={action.ariaLabel || action.label}
+    >
+      {action.icon ? <span className="mr-1.5">{action.icon}</span> : null}
+      {action.label}
+      {typeof action.count === 'number' && action.count > 0 ? (
+        <span className="ml-1.5 rounded-full bg-black/20 px-1.5 py-0.5 text-[10px]">{action.count}</span>
+      ) : null}
+    </button>
+  );
+}
 
-  const resolvedTitle = roomTitle ?? fallbackRoomTitle(channel);
-  const resolvedSubtitle =
-    roomSubtitle ??
-    fallbackRoomSubtitle(channel) ??
-    (modeName ? `${modeName} routing surface` : '');
-
-  const connectionAccent = connectionColor(state);
-
-  const computedRoomCode = useMemo(() => {
-    if (roomCode && roomCode.trim().length > 0) return roomCode.trim().toUpperCase();
-    const modeSlice = metricValue(modeName, channel).replace(/\s+/g, '-').slice(0, 10);
-    return `${channel}-${modeSlice}`.toUpperCase();
-  }, [roomCode, modeName, channel]);
-
-  const rootStyle: CSSProperties = {
-    position: 'relative',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 10,
-    padding: variant === 'drawer' ? '14px 14px 12px' : '12px 14px 10px',
-    background:
-      variant === 'drawer'
-        ? `linear-gradient(180deg, rgba(12,12,30,0.98) 0%, rgba(3,3,8,0.98) 100%)`
-        : `linear-gradient(180deg, rgba(12,12,30,0.96) 0%, rgba(12,12,30,0.84) 100%)`,
-    borderBottom: `1px solid ${T.border}`,
-    overflow: 'hidden',
-    flexShrink: 0,
-  };
-
-  const accentRailStyle: CSSProperties = {
-    position: 'absolute',
-    inset: '0 auto 0 0',
-    width: 3,
-    background: `linear-gradient(180deg, ${channelMeta.palette.accent} 0%, transparent 100%)`,
-    opacity: 0.9,
-  };
+function BaseChatRoomHeader({
+  model,
+  className,
+  style,
+  activeChannelKey,
+}: ChatRoomHeaderProps): JSX.Element {
+  const leftBadges = useMemo(() => model.badges.filter((badge) => badge.placement !== 'right'), [model.badges]);
+  const rightBadges = useMemo(() => model.badges.filter((badge) => badge.placement === 'right'), [model.badges]);
+  const primaryActions = useMemo(() => model.actions.filter((action) => action.priority !== 'secondary'), [model.actions]);
+  const secondaryActions = useMemo(() => model.actions.filter((action) => action.priority === 'secondary'), [model.actions]);
 
   return (
-    <div style={rootStyle}>
-      <div style={accentRailStyle} />
-
-      <div
-        style={{
-          position: 'absolute',
-          top: -40,
-          right: -40,
-          width: 140,
-          height: 140,
-          borderRadius: '50%',
-          background: `radial-gradient(circle, ${channelMeta.palette.glow} 0%, rgba(0,0,0,0) 68%)`,
-          pointerEvents: 'none',
-        }}
-      />
-
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'flex-start',
-          gap: 10,
-          minWidth: 0,
-        }}
-      >
-        <div
-          style={{
-            width: variant === 'drawer' ? 42 : 38,
-            height: variant === 'drawer' ? 42 : 38,
-            borderRadius: 12,
-            border: `1px solid ${channelMeta.palette.accentBorder}`,
-            background: channelMeta.palette.accentSoft,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            fontSize: variant === 'drawer' ? 20 : 18,
-            boxShadow: `0 0 0 1px rgba(255,255,255,0.03), 0 8px 26px ${channelMeta.palette.glow}`,
-            flexShrink: 0,
-          }}
-        >
-          {accentEmoji ?? channelMeta.emoji}
-        </div>
-
-        <div style={{ minWidth: 0, flex: 1 }}>
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-              flexWrap: 'wrap',
-              marginBottom: 4,
-            }}
-          >
-            <span
-              style={{
-                fontFamily: T.display,
-                fontSize: variant === 'drawer' ? 15 : 13,
-                fontWeight: 800,
-                color: T.text,
-                letterSpacing: '0.04em',
-                minWidth: 0,
-              }}
-            >
-              {resolvedTitle}
-            </span>
-
-            <span
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 6,
-                minHeight: 24,
-                padding: '0 8px',
-                borderRadius: 999,
-                background: channelMeta.palette.badgeBg,
-                border: `1px solid ${channelMeta.palette.badgeBorder}`,
-                whiteSpace: 'nowrap',
-              }}
-            >
-              <span
-                style={{
-                  width: 7,
-                  height: 7,
-                  borderRadius: '50%',
-                  background: connectionAccent,
-                  boxShadow: `0 0 10px ${connectionAccent}90`,
-                }}
-              />
-              <span
-                style={{
-                  fontFamily: T.mono,
-                  fontSize: 8,
-                  fontWeight: 800,
-                  letterSpacing: '0.10em',
-                  color: connectionAccent,
-                  textTransform: 'uppercase',
-                }}
-              >
-                {connectionLabel(state)}
-              </span>
-            </span>
-
-            {totalUnread ? (
-              <span
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  minHeight: 20,
-                  minWidth: 20,
-                  padding: '0 6px',
-                  borderRadius: 999,
-                  background: 'rgba(255,77,77,0.12)',
-                  border: '1px solid rgba(255,77,77,0.22)',
-                  color: T.red,
-                  fontFamily: T.mono,
-                  fontSize: 8,
-                  fontWeight: 800,
-                  letterSpacing: '0.10em',
-                  textTransform: 'uppercase',
-                }}
-              >
-                {totalUnread > 99 ? '99+' : totalUnread}
-              </span>
-            ) : null}
-
-            {transcriptLocked ? (
-              <span
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 6,
-                  minHeight: 22,
-                  padding: '0 8px',
-                  borderRadius: 999,
-                  background: 'rgba(255,215,0,0.08)',
-                  border: '1px solid rgba(255,215,0,0.20)',
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                <span style={{ fontSize: 10 }}>🔒</span>
-                <span
-                  style={{
-                    fontFamily: T.mono,
-                    fontSize: 8,
-                    fontWeight: 800,
-                    letterSpacing: '0.10em',
-                    color: T.yellow,
-                    textTransform: 'uppercase',
-                  }}
-                >
-                  Locked
-                </span>
-              </span>
-            ) : null}
+    <header
+      data-channel={activeChannelKey ?? model.channelKey ?? 'GLOBAL'}
+      className={[
+        'overflow-hidden rounded-[24px] border border-white/8 bg-[rgba(8,12,24,0.92)] px-4 py-3 text-white shadow-[0_18px_54px_rgba(0,0,0,0.28)] backdrop-blur-xl',
+        className ?? '',
+      ].join(' ')}
+      style={style}
+    >
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            {model.icon ? <span className="text-[14px] leading-none">{model.icon}</span> : null}
+            <h2 className="truncate text-[15px] font-black tracking-[0.01em] text-white">{model.title}</h2>
+            {leftBadges.map((badge) => (
+              <Badge key={badge.id} badge={badge} />
+            ))}
           </div>
 
-          <div
-            style={{
-              fontFamily: T.display,
-              fontSize: 11,
-              lineHeight: 1.45,
-              color: T.textSub,
-              maxWidth: '100%',
-            }}
-          >
-            {resolvedSubtitle}
-          </div>
+          {model.subtitle ? (
+            <p className="mt-1 max-w-[72ch] text-[12px] leading-relaxed text-white/66">{model.subtitle}</p>
+          ) : null}
 
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 7,
-              flexWrap: 'wrap',
-              marginTop: 8,
-            }}
-          >
-            <span
-              style={{
-                fontFamily: T.mono,
-                fontSize: 8,
-                letterSpacing: '0.10em',
-                color: channelMeta.palette.accent,
-                textTransform: 'uppercase',
-                fontWeight: 800,
-              }}
-            >
-              {channel}
-            </span>
-
-            <span
-              style={{
-                fontFamily: T.mono,
-                fontSize: 8,
-                letterSpacing: '0.08em',
-                color: T.textMut,
-                textTransform: 'uppercase',
-                fontWeight: 700,
-              }}
-            >
-              {computedRoomCode}
-            </span>
-
-            {modeName ? (
-              <span
-                style={{
-                  fontFamily: T.mono,
-                  fontSize: 8,
-                  letterSpacing: '0.08em',
-                  color: T.textMut,
-                  textTransform: 'uppercase',
-                  fontWeight: 700,
-                }}
-              >
-                MODE {modeName}
-              </span>
-            ) : null}
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-white/54">
+            {model.memberCountLabel ? <span>{model.memberCountLabel}</span> : null}
+            {model.modeLabel ? <span>• {model.modeLabel}</span> : null}
+            {model.integrityLabel ? <span>• {model.integrityLabel}</span> : null}
+            {model.postureLabel ? <span>• {model.postureLabel}</span> : null}
+            {model.presenceLabel ? <span>• {model.presenceLabel}</span> : null}
           </div>
         </div>
 
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'flex-start',
-            gap: 8,
-            flexShrink: 0,
-          }}
-        >
-          {showTranscriptAction ? (
-            <button
-              type="button"
-              onClick={onOpenTranscript}
-              disabled={!onOpenTranscript}
-              style={actionButtonStyle(!onOpenTranscript, channelMeta.palette.accent)}
-              title="Open transcript drawer"
-            >
-              📜
-              {variant === 'drawer' ? 'Transcript' : ''}
-            </button>
-          ) : null}
-
-          {showJumpLatestAction ? (
-            <button
-              type="button"
-              onClick={onJumpLatest}
-              disabled={!onJumpLatest}
-              style={actionButtonStyle(!onJumpLatest, channelMeta.palette.accent)}
-              title="Jump to latest message"
-            >
-              ⤓
-              {variant === 'drawer' ? 'Latest' : ''}
-            </button>
-          ) : null}
-
-          {showPinAction ? (
-            <button
-              type="button"
-              onClick={onTogglePinned}
-              disabled={!onTogglePinned}
-              style={actionButtonStyle(!onTogglePinned, channelMeta.palette.accent, isPinned ? 'accent' : 'ghost')}
-              title={isPinned ? 'Unpin chat shell' : 'Pin chat shell'}
-            >
-              {isPinned ? '📌' : '📍'}
-              {variant === 'drawer' ? (isPinned ? 'Pinned' : 'Pin') : ''}
-            </button>
-          ) : null}
-
-          {showMinimizeAction ? (
-            <button
-              type="button"
-              onClick={onMinimize}
-              disabled={!onMinimize}
-              style={actionButtonStyle(!onMinimize, T.textSub)}
-              title="Minimize chat"
-            >
-              ╲╱
-            </button>
-          ) : null}
-
-          {rightSlot}
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {rightBadges.map((badge) => (
+            <Badge key={badge.id} badge={badge} />
+          ))}
         </div>
       </div>
 
-      <div
-        style={{
-          display: 'flex',
-          flexWrap: 'wrap',
-          gap: 8,
-          alignItems: 'center',
-        }}
-      >
-        <StatPill
-          label="Online"
-          value={fmtCompactCount(onlineCount)}
-          accent={channelMeta.palette.accent}
-        />
-        <StatPill
-          label="Present"
-          value={fmtCompactCount(activeMembers)}
-          accent={channelMeta.palette.accent}
-          subtle
-        />
-        <StatPill
-          label="Typing"
-          value={fmtCompactCount(typingCount)}
-          accent={channelMeta.palette.accent}
-          subtle
-        />
-
-        {pressureTier ? (
-          <StatPill
-            label="Pressure"
-            value={pressureTier}
-            accent={T.orange}
-          />
-        ) : null}
-
-        {tickTier ? (
-          <StatPill
-            label="Tick"
-            value={tickTier}
-            accent={T.indigo}
-          />
-        ) : null}
-
-        {typeof haterHeat === 'number' ? (
-          <StatPill
-            label="Heat"
-            value={`${haterHeat}%`}
-            accent={haterHeat >= 70 ? T.red : haterHeat >= 40 ? T.orange : T.teal}
-          />
-        ) : null}
-      </div>
-
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-          flexWrap: 'wrap',
-        }}
-      >
-        <div
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 8,
-            minHeight: 28,
-            padding: '0 10px',
-            borderRadius: 999,
-            background: channelMeta.palette.policyBg,
-            border: `1px solid ${channelMeta.palette.policyBorder}`,
-          }}
-        >
-          <span style={{ fontSize: 11 }}>{channelMeta.emoji}</span>
-          <span
-            style={{
-              fontFamily: T.mono,
-              fontSize: 8,
-              fontWeight: 800,
-              letterSpacing: '0.10em',
-              color: channelMeta.palette.accent,
-              textTransform: 'uppercase',
-            }}
-          >
-            {channelMeta.policyLabel}
-          </span>
+      {model.summaryMetrics.length > 0 ? (
+        <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+          {model.summaryMetrics.map((metric) => (
+            <div
+              key={metric.id}
+              className="rounded-2xl border border-white/8 bg-black/18 px-3 py-2.5"
+              title={metric.hint || metric.label}
+            >
+              <div className="text-[10px] uppercase tracking-[0.16em] text-white/46">{metric.label}</div>
+              <div className="mt-1 text-[14px] font-bold text-white">{metric.value}</div>
+              {metric.subvalue ? <div className="mt-0.5 text-[11px] text-white/56">{metric.subvalue}</div> : null}
+            </div>
+          ))}
         </div>
+      ) : null}
 
-        {channel === 'DEAL_ROOM' ? (
-          <span
-            style={{
-              fontFamily: T.display,
-              fontSize: 10,
-              lineHeight: 1.4,
-              color: T.textSub,
-            }}
-          >
-            Proof-bearing recap cards, lock-state receipts, and transcript permanence are surfaced
-            here so negotiation pressure remains visible without giving the UI lane authority.
-          </span>
-        ) : channel === 'SYNDICATE' ? (
-          <span
-            style={{
-              fontFamily: T.display,
-              fontSize: 10,
-              lineHeight: 1.4,
-              color: T.textSub,
-            }}
-          >
-            Alliance trust, coordination cadence, and group reaction windows should feel intimate,
-            tactical, and fast without leaking policy into the render shell.
-          </span>
-        ) : (
-          <span
-            style={{
-              fontFamily: T.display,
-              fontSize: 10,
-              lineHeight: 1.4,
-              color: T.textSub,
-            }}
-          >
-            Global traffic should read as public theater: visible witnesses, social pressure, broad
-            reaction velocity, and fast perception shifts.
-          </span>
-        )}
-      </div>
-    </div>
+      {(primaryActions.length > 0 || secondaryActions.length > 0) && (
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          {primaryActions.map((action) => (
+            <ActionButton key={action.id} action={action} />
+          ))}
+          {secondaryActions.length > 0 ? <div className="mx-1 h-6 w-px bg-white/8" aria-hidden="true" /> : null}
+          {secondaryActions.map((action) => (
+            <ActionButton key={action.id} action={action} />
+          ))}
+        </div>
+      )}
+    </header>
   );
-});
+}
+
+const ChatRoomHeader = memo(BaseChatRoomHeader);
+
+ChatRoomHeader.displayName = 'ChatRoomHeader';
 
 export default ChatRoomHeader;

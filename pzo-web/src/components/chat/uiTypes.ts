@@ -2,13 +2,13 @@
  * ============================================================================
  * POINT ZERO ONE — COMPONENT CHAT UI CONTRACTS
  * FILE: pzo-web/src/components/chat/uiTypes.ts
- * VERSION: 2.3.0
+ * VERSION: 2.3.1
  * AUTHOR: OpenAI
  * LICENSE: Internal / Project Use Only
  * ============================================================================
  */
 
-import type { ReactNode } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 
 export type UIString = string;
 export type UINumber = number;
@@ -520,6 +520,16 @@ export interface ChatUiLoadOlderRow {
   pending?: UIBoolean;
 }
 
+export interface ChatUiRoomHeaderAction {
+  id: ChatUiId;
+  label: UIString;
+  icon?: UIString;
+  tone?: ChatUiTone;
+  accent?: ChatUiAccent;
+  primary?: UIBoolean;
+  disabled?: UIBoolean;
+}
+
 export interface ChatUiEmptyStateViewModel {
   id: ChatUiId;
   kind: ChatUiEmptyStateKind;
@@ -879,16 +889,6 @@ export interface ChatUiCollapsedPillViewModel {
   actions?: ChatUiCollapsedPillAction[];
 }
 
-export interface ChatUiRoomHeaderAction {
-  id: ChatUiId;
-  label: UIString;
-  icon?: UIString;
-  tone?: ChatUiTone;
-  accent?: ChatUiAccent;
-  primary?: UIBoolean;
-  disabled?: UIBoolean;
-}
-
 export interface ChatUiRoomHeaderViewModel {
   roomId?: ChatUiRoomId;
   roomLabel: UIString;
@@ -1162,24 +1162,6 @@ export interface ChannelTabsViewModel {
   onOpenIntegrityPanel?: (channel: string) => void;
 }
 
-export interface ChatUiUnifiedShellViewModel {
-  mountId?: ChatUiMountId;
-  roomHeader: ChatUiRoomHeaderViewModel;
-  channelTabs: ChatUiChannelTabsViewModel;
-  feed: ChatUiFeedViewModel;
-  composer: ChatUiComposerViewModel;
-  presence: ChatUiPresenceStripViewModel;
-  typing: ChatUiTypingIndicatorViewModel;
-  invasion?: ChatUiInvasionBannerViewModel;
-  threat: ChatUiThreatMeterViewModel;
-  helperPrompt?: ChatUiHelperPromptViewModel;
-  collapsedPill: ChatUiCollapsedPillViewModel;
-  transcriptDrawer: ChatUiTranscriptDrawerViewModel;
-  transcriptDrawerSurface?: ChatUiTranscriptDrawerSurfaceModel;
-  emptyState?: ChatUiEmptyStateViewModel;
-  status: ChatUiShellStatus;
-}
-
 /* -------------------------------------------------------------------------- */
 /* Feed component support aliases                                             */
 /* -------------------------------------------------------------------------- */
@@ -1209,6 +1191,24 @@ export interface MessageFeedCallbacks {
 
 export type FeedRowModel = ChatUiFeedRow;
 export type MessageFeedViewModel = ChatUiFeedViewModel;
+
+export interface ChatUiUnifiedShellViewModel {
+  mountId?: ChatUiMountId;
+  roomHeader: ChatUiRoomHeaderViewModel;
+  channelTabs: ChatUiChannelTabsViewModel;
+  feed: ChatUiFeedViewModel;
+  composer: ChatUiComposerViewModel;
+  presence: ChatUiPresenceStripViewModel;
+  typing: ChatUiTypingIndicatorViewModel;
+  invasion?: ChatUiInvasionBannerViewModel;
+  threat: ChatUiThreatMeterViewModel;
+  helperPrompt?: ChatUiHelperPromptViewModel;
+  collapsedPill: ChatUiCollapsedPillViewModel;
+  transcriptDrawer: ChatUiTranscriptDrawerViewModel;
+  transcriptDrawerSurface?: ChatUiTranscriptDrawerSurfaceModel;
+  emptyState?: ChatUiEmptyStateViewModel;
+  status: ChatUiShellStatus;
+}
 
 export const CHAT_UI_DEFAULT_TOKEN_PACK: Readonly<ChatUiTokenPack> = Object.freeze({
   themeMode: 'system',
@@ -1440,63 +1440,20 @@ export function normalizeProofBand(value: unknown): ChatUiProofBand {
 
 export function normalizeTone(value: unknown): ChatUiTone {
   const next = asNonEmptyString(value).toLowerCase();
-  return ([
-    'neutral',
-    'calm',
-    'positive',
-    'supportive',
-    'warning',
-    'danger',
-    'hostile',
-    'ghost',
-    'premium',
-    'stealth',
-    'celebratory',
-    'dramatic',
-  ] as const).includes(next as ChatUiTone)
-    ? (next as ChatUiTone)
-    : 'neutral';
+  const allowed: readonly string[] = ['neutral','calm','positive','supportive','warning','danger','hostile','ghost','premium','stealth','celebratory','dramatic'];
+  return allowed.includes(next) ? (next as ChatUiTone) : 'neutral';
 }
 
 export function normalizeAccent(value: unknown): ChatUiAccent {
   const next = asNonEmptyString(value).toLowerCase();
-  return ([
-    'slate',
-    'silver',
-    'emerald',
-    'amber',
-    'rose',
-    'red',
-    'violet',
-    'cyan',
-    'indigo',
-    'gold',
-    'obsidian',
-  ] as const).includes(next as ChatUiAccent)
-    ? (next as ChatUiAccent)
-    : 'slate';
+  const allowed: readonly string[] = ['slate','silver','emerald','amber','rose','red','violet','cyan','indigo','gold','obsidian'];
+  return allowed.includes(next) ? (next as ChatUiAccent) : 'slate';
 }
 
 export function normalizeMessageKind(value: unknown): ChatUiMessageKind {
   const next = asNonEmptyString(value).toLowerCase();
-  return ([
-    'text',
-    'system_notice',
-    'scene_marker',
-    'divider',
-    'proof_event',
-    'threat_event',
-    'helper_event',
-    'invasion_event',
-    'deal_event',
-    'presence_event',
-    'typing_event',
-    'legend_event',
-    'reward_event',
-    'empty_hint',
-  ] as const).includes(next as ChatUiMessageKind)
-    ? (next as ChatUiMessageKind)
-    : 'unknown';
+  const allowed: readonly string[] = ['text','system_notice','scene_marker','divider','proof_event','threat_event','helper_event','invasion_event','deal_event','presence_event','typing_event','legend_event','reward_event','empty_hint'];
+  return allowed.includes(next) ? (next as ChatUiMessageKind) : 'unknown';
 }
 
 export function normalizeAuthorDisposition(value: unknown): ChatUiAuthorDisposition {
@@ -1504,134 +1461,74 @@ export function normalizeAuthorDisposition(value: unknown): ChatUiAuthorDisposit
   if (next === 'helper' || next === 'mentor') return 'guiding';
   if (next === 'hater') return 'hostile';
   if (next === 'system') return 'systemic';
-  return ([
-    'friendly',
-    'neutral',
-    'hostile',
-    'predatory',
-    'guiding',
-    'spectator',
-    'systemic',
-  ] as const).includes(next as ChatUiAuthorDisposition)
-    ? (next as ChatUiAuthorDisposition)
-    : 'unknown';
+  const allowed: readonly string[] = ['friendly','neutral','hostile','predatory','guiding','spectator','systemic'];
+  return allowed.includes(next) ? (next as ChatUiAuthorDisposition) : 'unknown';
 }
 
 export function normalizeImportance(value: unknown): ChatUiImportance {
   const next = asNonEmptyString(value).toLowerCase();
-  return (['low', 'normal', 'elevated', 'high', 'critical'] as const).includes(next as ChatUiImportance)
-    ? (next as ChatUiImportance)
-    : 'normal';
+  const allowed: readonly string[] = ['low','normal','elevated','high','critical'];
+  return allowed.includes(next) ? (next as ChatUiImportance) : 'normal';
 }
 
 export function normalizeEmphasis(value: unknown): ChatUiEmphasis {
   const next = asNonEmptyString(value).toLowerCase();
-  return (['subtle', 'standard', 'strong', 'hero', 'suppressed'] as const).includes(next as ChatUiEmphasis)
-    ? (next as ChatUiEmphasis)
-    : 'standard';
+  const allowed: readonly string[] = ['subtle','standard','strong','hero','suppressed'];
+  return allowed.includes(next) ? (next as ChatUiEmphasis) : 'standard';
 }
 
 export function normalizeDensity(value: unknown): ChatUiDensity {
   const next = asNonEmptyString(value).toLowerCase();
-  return (['compact', 'comfortable', 'expanded', 'cinematic'] as const).includes(next as ChatUiDensity)
-    ? (next as ChatUiDensity)
-    : 'comfortable';
+  const allowed: readonly string[] = ['compact','comfortable','expanded','cinematic'];
+  return allowed.includes(next) ? (next as ChatUiDensity) : 'comfortable';
 }
 
 export function normalizeUrgency(value: unknown): ChatUiUrgency {
   const next = asNonEmptyString(value).toLowerCase();
-  return (['idle', 'low', 'medium', 'high', 'immediate'] as const).includes(next as ChatUiUrgency)
-    ? (next as ChatUiUrgency)
-    : 'idle';
+  const allowed: readonly string[] = ['idle','low','medium','high','immediate'];
+  return allowed.includes(next) ? (next as ChatUiUrgency) : 'idle';
 }
 
 export function normalizeDisplayIntent(value: unknown): ChatUiDisplayIntent {
   const next = asNonEmptyString(value).toLowerCase();
-  return ([
-    'default',
-    'alert',
-    'proof',
-    'instruction',
-    'helper',
-    'threat',
-    'system',
-    'celebration',
-    'deal',
-    'spectator',
-  ] as const).includes(next as ChatUiDisplayIntent)
-    ? (next as ChatUiDisplayIntent)
-    : 'default';
+  const allowed: readonly string[] = ['default','alert','proof','instruction','helper','threat','system','celebration','deal','spectator'];
+  return allowed.includes(next) ? (next as ChatUiDisplayIntent) : 'default';
 }
 
 export function normalizeHelperMode(value: unknown): ChatUiHelperMode {
   const next = asNonEmptyString(value).toLowerCase();
-  return (['soft', 'standard', 'blunt', 'rescue', 'mentor', 'strategic'] as const).includes(next as ChatUiHelperMode)
-    ? (next as ChatUiHelperMode)
-    : 'standard';
+  const allowed: readonly string[] = ['soft','standard','blunt','rescue','mentor','strategic'];
+  return allowed.includes(next) ? (next as ChatUiHelperMode) : 'standard';
 }
 
 export function normalizeEmptyStateKind(value: unknown): ChatUiEmptyStateKind {
   const next = asNonEmptyString(value).toLowerCase();
-  return ([
-    'cold_start',
-    'quiet_room',
-    'loading',
-    'filtered_empty',
-    'channel_locked',
-    'shadow_only',
-    'connection_lost',
-    'post_run_reset',
-    'error',
-  ] as const).includes(next as ChatUiEmptyStateKind)
-    ? (next as ChatUiEmptyStateKind)
-    : 'quiet_room';
+  const allowed: readonly string[] = ['cold_start','quiet_room','loading','filtered_empty','channel_locked','shadow_only','connection_lost','post_run_reset','error'];
+  return allowed.includes(next) ? (next as ChatUiEmptyStateKind) : 'quiet_room';
 }
 
 export function normalizeSearchScope(value: unknown): ChatUiSearchScope {
   const next = asNonEmptyString(value).toLowerCase();
-  return ([
-    'current_channel',
-    'current_room',
-    'all_visible',
-    'proof_only',
-    'legend_only',
-    'helper_only',
-    'threat_only',
-  ] as const).includes(next as ChatUiSearchScope)
-    ? (next as ChatUiSearchScope)
-    : 'current_channel';
+  const allowed: readonly string[] = ['current_channel','current_room','all_visible','proof_only','legend_only','helper_only','threat_only'];
+  return allowed.includes(next) ? (next as ChatUiSearchScope) : 'current_channel';
 }
 
 export function normalizeCollapsedPresenceMood(value: unknown): ChatUiCollapsedPillPresenceMood {
   const next = asNonEmptyString(value).toLowerCase();
-  return (['quiet', 'watched', 'active', 'swarming'] as const).includes(next as ChatUiCollapsedPillPresenceMood)
-    ? (next as ChatUiCollapsedPillPresenceMood)
-    : 'quiet';
+  const allowed: readonly string[] = ['quiet','watched','active','swarming'];
+  return allowed.includes(next) ? (next as ChatUiCollapsedPillPresenceMood) : 'quiet';
 }
 
 export function normalizeCollapsedActionKind(value: unknown): ChatUiCollapsedPillActionKind {
   const next = asNonEmptyString(value).toLowerCase();
-  return (['open', 'toggle', 'dismiss', 'channel', 'cta', 'secondary'] as const).includes(next as ChatUiCollapsedPillActionKind)
-    ? (next as ChatUiCollapsedPillActionKind)
-    : 'open';
+  const allowed: readonly string[] = ['open','toggle','dismiss','channel','cta','secondary'];
+  return allowed.includes(next) ? (next as ChatUiCollapsedPillActionKind) : 'open';
 }
 
 function normalizeBadgeKind(value: unknown): ChatUiBadge['kind'] {
   const next = asNonEmptyString(value).toLowerCase();
-  return ([
-    'proof',
-    'threat',
-    'integrity',
-    'helper',
-    'hater',
-    'system',
-    'presence',
-    'legend',
-    'reward',
-    'channel',
-  ] as const).includes(next as ChatUiBadge['kind'])
-    ? (next as ChatUiBadge['kind'])
-    : 'custom';
+  const allowed: readonly string[] = ['proof','threat','integrity','helper','hater','system','presence','legend','reward','channel'];
+  return allowed.includes(next) ? (next as ChatUiBadge['kind']) : 'custom';
 }
 
 export function createMetric(raw: unknown, index = 0): ChatUiMetric {
@@ -1755,9 +1652,11 @@ export function buildEmptyStateViewModel(raw: unknown): ChatUiEmptyStateViewMode
     post_run_reset: 'The last run has ended. Review the transcript or start again.',
     error: 'The shell is up, but the chat surface cannot be rendered cleanly.',
   };
+  const normalizedTone = normalizeTone(s.tone);
+  const normalizedAccent = normalizeAccent(s.accent);
   const tone =
-    normalizeTone(s.tone) !== 'neutral'
-      ? normalizeTone(s.tone)
+    normalizedTone !== 'neutral'
+      ? normalizedTone
       : kind === 'error' || kind === 'connection_lost'
         ? 'danger'
         : kind === 'post_run_reset'
@@ -1766,8 +1665,8 @@ export function buildEmptyStateViewModel(raw: unknown): ChatUiEmptyStateViewMode
             ? 'warning'
             : 'neutral';
   const accent =
-    normalizeAccent(s.accent) !== 'slate'
-      ? normalizeAccent(s.accent)
+    normalizedAccent !== 'slate'
+      ? normalizedAccent
       : kind === 'error' || kind === 'connection_lost'
         ? 'red'
         : kind === 'post_run_reset'
@@ -2174,86 +2073,231 @@ export function isUnifiedShellViewModel(value: unknown): value is ChatUiUnifiedS
     && isRecord(v.status);
 }
 
+/* -------------------------------------------------------------------------- */
+/* Status surface addendum                                                    */
+/* -------------------------------------------------------------------------- */
 
+export type InvasionBannerSeverity = 'quiet' | 'low' | 'elevated' | 'high' | 'severe';
+export type InvasionBannerPhase = 'arming' | 'inbound' | 'breach' | 'active' | 'suppression' | 'resolution' | 'cooldown';
+export type InvasionBannerDensity = 'compact' | 'comfortable' | 'cinematic';
+
+export interface InvasionBannerMetricViewModel {
+  id: string;
+  label: string;
+  value: string;
+  subvalue?: string | null;
+  hint?: string | null;
+}
+
+export interface InvasionWitnessViewModel {
+  id: string;
+  label: string;
+  role: 'helper' | 'hater' | 'crowd' | 'system' | 'leader' | 'other';
+  icon?: string | null;
+  count?: number;
+  hint?: string | null;
+}
+
+export interface InvasionBannerActionViewModel {
+  id: string;
+  label: string;
+  tone?: 'primary' | 'muted' | 'warning' | 'danger' | 'success';
+  icon?: string | null;
+  hint?: string | null;
+  ariaLabel?: string | null;
+  disabled?: boolean;
+  hidden?: boolean;
+  onPress?: () => void;
+}
+
+export interface InvasionBannerViewModel {
+  visible: boolean;
+  severity: InvasionBannerSeverity;
+  phase: InvasionBannerPhase;
+  title: string;
+  body?: string | null;
+  recommendation?: string | null;
+  phaseLabel?: string | null;
+  channelKey?: string | null;
+  channelLabel?: string | null;
+  ruleLabel?: string | null;
+  countdownLabel?: string | null;
+  secondsRemaining?: number | null;
+  progress01: number;
+  density?: InvasionBannerDensity;
+  autoFocus?: boolean;
+  footerNote?: string | null;
+  metrics: InvasionBannerMetricViewModel[];
+  witnesses: InvasionWitnessViewModel[];
+  actions: InvasionBannerActionViewModel[];
+}
+
+export interface ChatInvasionBannerProps {
+  model: InvasionBannerViewModel;
+  activeChannelKey?: string | null;
+  className?: string;
+  style?: CSSProperties;
+  onDismiss?: () => void;
+  onFocusThread?: () => void;
+  onOpenTranscript?: () => void;
+}
+
+export type ThreatMeterSeverity = 'quiet' | 'low' | 'elevated' | 'high' | 'severe';
+export type ThreatMeterDensity = 'compact' | 'comfortable' | 'cinematic';
+
+export interface ThreatMeterDimensionViewModel {
+  id: string;
+  label: string;
+  value01: number;
+  valueLabel?: string | null;
+  subvalue?: string | null;
+  hint?: string | null;
+  sparkline?: number[];
+}
+
+export interface ThreatMeterRecommendationViewModel {
+  id: string;
+  label: string;
+  body: string;
+  tone?: 'neutral' | 'positive' | 'warning' | 'danger';
+  scoreLabel?: string | null;
+  hint?: string | null;
+}
+
+export interface ThreatMeterViewModel {
+  visible: boolean;
+  aggregateScore01: number;
+  aggregateScoreLabel?: string | null;
+  severity: ThreatMeterSeverity;
+  severityLabel?: string | null;
+  summary: string;
+  bandNarrative?: string | null;
+  deltaLabel?: string | null;
+  channelKey?: string | null;
+  channelLabel?: string | null;
+  density?: ThreatMeterDensity;
+  dimensions: ThreatMeterDimensionViewModel[];
+  recommendations: ThreatMeterRecommendationViewModel[];
+}
+
+export interface ChatThreatMeterProps {
+  model: ThreatMeterViewModel;
+  activeChannelKey?: string | null;
+  className?: string;
+  style?: CSSProperties;
+}
+
+export interface RoomHeaderBadgeViewModel {
+  id: string;
+  label: string;
+  tone?: 'neutral' | 'accent' | 'positive' | 'warning' | 'danger' | 'muted';
+  icon?: string | null;
+  hint?: string | null;
+  placement?: 'left' | 'right';
+}
+
+export interface RoomHeaderActionViewModel {
+  id: string;
+  label: string;
+  tone?: 'neutral' | 'accent' | 'positive' | 'warning' | 'danger' | 'muted';
+  icon?: string | null;
+  hint?: string | null;
+  ariaLabel?: string | null;
+  priority?: 'primary' | 'secondary';
+  disabled?: boolean;
+  count?: number;
+  onPress?: () => void;
+}
+
+export interface RoomHeaderMetricViewModel {
+  id: string;
+  label: string;
+  value: string;
+  subvalue?: string | null;
+  hint?: string | null;
+}
+
+export interface RoomHeaderViewModel {
+  title: string;
+  subtitle?: string | null;
+  icon?: string | null;
+  channelKey?: string | null;
+  modeLabel?: string | null;
+  postureLabel?: string | null;
+  integrityLabel?: string | null;
+  presenceLabel?: string | null;
+  memberCountLabel?: string | null;
+  badges: RoomHeaderBadgeViewModel[];
+  actions: RoomHeaderActionViewModel[];
+  summaryMetrics: RoomHeaderMetricViewModel[];
+}
+
+export interface ChatRoomHeaderProps {
+  model: RoomHeaderViewModel;
+  activeChannelKey?: string | null;
+  className?: string;
+  style?: CSSProperties;
+}
+
+export type EmptyStateScenario = 'coldOpen' | 'disconnected' | 'channelQuiet' | 'searchZero' | 'transcriptPending' | 'pressurePrompt' | 'collapsed';
+
+export interface EmptyStateActionViewModel {
+  id: string;
+  label: string;
+  tone?: 'primary' | 'muted' | 'warning' | 'danger' | 'positive';
+  icon?: string | null;
+  hint?: string | null;
+  hidden?: boolean;
+  disabled?: boolean;
+  onPress?: () => void;
+}
+
+export interface EmptyStateHintViewModel {
+  id: string;
+  label: string;
+  body: string;
+}
+
+export interface EmptyStateHeroMetricViewModel {
+  label: string;
+  value: string;
+  subvalue?: string | null;
+}
+
+export interface EmptyStateViewModel {
+  visible: boolean;
+  scenario: EmptyStateScenario;
+  title: string;
+  body: string;
+  channelKey?: string | null;
+  channelLabel?: string | null;
+  postureLabel?: string | null;
+  heroMetric?: EmptyStateHeroMetricViewModel | null;
+  hints: EmptyStateHintViewModel[];
+  actions: EmptyStateActionViewModel[];
+  footerNote?: string | null;
+}
+
+export interface ChatEmptyStateProps {
+  model: EmptyStateViewModel;
+  activeChannelKey?: string | null;
+  className?: string;
+  style?: CSSProperties;
+}
 
 /* -------------------------------------------------------------------------- */
 /* Presence / typing shell addendum                                           */
 /* -------------------------------------------------------------------------- */
 
-export type PresenceActorStatus =
-  | 'online'
-  | 'idle'
-  | 'busy'
-  | 'dnd'
-  | 'offline'
-  | 'hidden'
-  | 'spectating'
-  | 'queueing'
-  | 'matching'
-  | 'disconnected';
-
-export type PresenceActorRole =
-  | 'player'
-  | 'helper'
-  | 'hater'
-  | 'npc'
-  | 'moderator'
-  | 'host'
-  | 'spectator'
-  | 'system';
-
-export type PresenceActorEntityKind =
-  | 'human'
-  | 'bot'
-  | 'npc'
-  | 'system'
-  | 'hybrid';
-
-export type PresenceActorDevice =
-  | 'desktop'
-  | 'mobile'
-  | 'tablet'
-  | 'console'
-  | 'server'
-  | 'unknown';
-
-export type PresenceActorIntent =
-  | 'reading'
-  | 'typing'
-  | 'lurking'
-  | 'watching'
-  | 'negotiating'
-  | 'attacking'
-  | 'supporting'
-  | 'queued'
-  | 'idle'
-  | 'none';
-
+export type PresenceActorStatus = 'online' | 'idle' | 'busy' | 'dnd' | 'offline' | 'hidden' | 'spectating' | 'queueing' | 'matching' | 'disconnected';
+export type PresenceActorRole = 'player' | 'helper' | 'hater' | 'npc' | 'moderator' | 'host' | 'spectator' | 'system';
+export type PresenceActorEntityKind = 'human' | 'bot' | 'npc' | 'system' | 'hybrid' | 'service';
+export type PresenceActorDevice = 'desktop' | 'mobile' | 'tablet' | 'console' | 'server' | 'unknown';
+export type PresenceActorIntent = 'reading' | 'typing' | 'lurking' | 'watching' | 'negotiating' | 'attacking' | 'supporting' | 'queued' | 'idle' | 'none';
 export type PresenceStripDensity = 'compact' | 'comfortable' | 'expanded';
-
-export type PresenceStripSortMode =
-  | 'priority'
-  | 'status'
-  | 'name'
-  | 'recent'
-  | 'role'
-  | 'channel';
-
-export type PresenceStripGroupMode =
-  | 'none'
-  | 'role'
-  | 'status'
-  | 'channel'
-  | 'team';
-
-export type PresenceStripMode =
-  | 'lobby'
-  | 'battle'
-  | 'dealRoom'
-  | 'global'
-  | 'syndicate'
-  | 'compactDock'
-  | 'overlay';
+export type PresenceStripSortMode = 'priority' | 'status' | 'name' | 'recent' | 'role' | 'channel';
+export type PresenceStripGroupMode = 'none' | 'role' | 'status' | 'channel' | 'team';
+export type PresenceStripMode = 'lobby' | 'battle' | 'dealRoom' | 'global' | 'syndicate' | 'compactDock' | 'overlay';
 
 export interface PresenceActorBadgeViewModel {
   id: string;
@@ -2409,36 +2453,11 @@ export interface ChatPresenceStripProps extends PresenceStripCallbacks {
   renderTrailingSlot?: ReactNode;
 }
 
-export type TypingActorRole =
-  | 'player'
-  | 'helper'
-  | 'hater'
-  | 'npc'
-  | 'spectator'
-  | 'system'
-  | 'moderator'
-  | 'host';
-
-export type TypingActorIntent =
-  | 'replying'
-  | 'lurking'
-  | 'threatening'
-  | 'supporting'
-  | 'negotiating'
-  | 'narrating'
-  | 'thinking'
-  | 'reacting'
-  | 'none';
-
+export type TypingActorRole = 'player' | 'helper' | 'hater' | 'npc' | 'spectator' | 'system' | 'moderator' | 'host';
+export type TypingActorIntent = 'replying' | 'lurking' | 'threatening' | 'supporting' | 'negotiating' | 'narrating' | 'thinking' | 'reacting' | 'none';
 export type TypingIndicatorDensity = 'compact' | 'comfortable' | 'expanded';
 export type TypingIndicatorLayout = 'inline' | 'stacked' | 'pill' | 'ticker';
-
-export type TypingIndicatorSummaryMode =
-  | 'full'
-  | 'first-two'
-  | 'first-one'
-  | 'aggregate'
-  | 'channel-first';
+export type TypingIndicatorSummaryMode = 'full' | 'first-two' | 'first-one' | 'aggregate' | 'channel-first';
 
 export interface TypingActorBadgeViewModel {
   id: string;
@@ -2530,7 +2549,7 @@ export interface ChatTypingIndicatorProps {
 }
 
 export const CHAT_UI_TYPES_MANIFEST = Object.freeze({
-  version: '2.3.0',
+  version: '2.3.1',
   owner: 'pzo-web/src/components/chat/uiTypes.ts',
   contractLayer: 'presentation',
   presentationOnly: true,
@@ -2542,5 +2561,7 @@ export const CHAT_UI_TYPES_MANIFEST = Object.freeze({
     'Collapsed pill contracts support rich status summaries, channel rollups, status pills, and shell-derived fallback state.',
     'Transcript drawer shell surface models include row detail cards, header state, filter state, and callback contracts.',
     'Channel tabs view models and feed callback aliases are included for dock-level rendering support.',
+    'Status-surface models are included for room header, invasion banner, threat meter, and empty-state rendering.',
+    'Presence and typing shell contracts are included for support-surface builders.',
   ],
 });

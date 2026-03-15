@@ -33,11 +33,12 @@ import type {
  * ============================================================================
  * POINT ZERO ONE — UNIFIED CHAT UI HOOK
  * FILE: pzo-web/src/components/chat/useUnifiedChat.ts
+ * VERSION: 2026.03.15-patched
  * ============================================================================
  */
 
 export const USE_UNIFIED_CHAT_FILE_PATH = 'pzo-web/src/components/chat/useUnifiedChat.ts' as const;
-export const USE_UNIFIED_CHAT_VERSION = '2026.03.15' as const;
+export const USE_UNIFIED_CHAT_VERSION = '2026.03.15-patched' as const;
 export const USE_UNIFIED_CHAT_REVISION = 'pzo.components.chat.useUnifiedChat.v2' as const;
 export const USE_UNIFIED_CHAT_RUNTIME_LAWS = Object.freeze([
   'This hook owns UI-shell state only; chat truth remains outside the component lane.',
@@ -290,7 +291,6 @@ function connectionStateFromFlags(
   if (messages.length > 0) return 'DEGRADED';
   return 'DISCONNECTED';
 }
-
 
 function toChannelTabsConnectionState(
   state: UnifiedChatConnectionState,
@@ -695,42 +695,6 @@ export function useUnifiedChat({
   const currentPlayerName = String((normalizedCtx as unknown as { playerName?: string }).playerName ?? 'You');
   const currentPlayerId = String((normalizedCtx as unknown as { playerId?: string }).playerId ?? 'player-local');
 
-  const presenceStripModel = useMemo(
-    () =>
-      buildPresenceStripViewModel({
-        messages: allMessages,
-        activeChannel: activeTab,
-        playerName: currentPlayerName,
-        playerId: currentPlayerId,
-        onlineCount: presence.onlineCount,
-        activeMembers: presence.activeMembers,
-        typingCount: presence.typingCount,
-        recentPeerNames: presence.recentPeerNames,
-      }),
-    [
-      allMessages,
-      activeTab,
-      currentPlayerId,
-      currentPlayerName,
-      presence.activeMembers,
-      presence.onlineCount,
-      presence.recentPeerNames,
-      presence.typingCount,
-    ],
-  );
-
-  const typingIndicatorModel = useMemo(
-    () =>
-      buildTypingClusterViewModel({
-        messages: visibleMessages,
-        activeChannel: activeTab,
-        playerName: currentPlayerName,
-        playerId: currentPlayerId,
-        typingCount: presence.typingCount,
-      }),
-    [activeTab, currentPlayerId, currentPlayerName, presence.typingCount, visibleMessages],
-  );
-
   const canonicalChannelSummaries = useMemo(
     () => buildChannelSummaries(allMessages, activeTab),
     [allMessages, activeTab],
@@ -781,6 +745,42 @@ export function useUnifiedChat({
   );
   const recentMessages = useMemo(() => visibleMessages.slice(-24), [visibleMessages]);
 
+  const presenceStripModel = useMemo(
+    () =>
+      buildPresenceStripViewModel({
+        messages: allMessages,
+        activeChannel: activeTab,
+        playerName: currentPlayerName,
+        playerId: currentPlayerId,
+        onlineCount: presence.onlineCount,
+        activeMembers: presence.activeMembers,
+        typingCount: presence.typingCount,
+        recentPeerNames: presence.recentPeerNames,
+      }),
+    [
+      allMessages,
+      activeTab,
+      currentPlayerId,
+      currentPlayerName,
+      presence.activeMembers,
+      presence.onlineCount,
+      presence.recentPeerNames,
+      presence.typingCount,
+    ],
+  );
+
+  const typingIndicatorModel = useMemo(
+    () =>
+      buildTypingClusterViewModel({
+        messages: visibleMessages,
+        activeChannel: activeTab,
+        playerName: currentPlayerName,
+        playerId: currentPlayerId,
+        typingCount: presence.typingCount,
+      }),
+    [activeTab, currentPlayerId, currentPlayerName, presence.typingCount, visibleMessages],
+  );
+
   const {
     feed: messageFeedModel,
     actionsByMessageId: messageFeedActionsByMessageId,
@@ -803,6 +803,7 @@ export function useUnifiedChat({
       activeTab,
       allMessages.length,
       canonicalThreat,
+      currentPlayerId,
       normalizedCtx,
       shellMode,
       transcriptLocked,
