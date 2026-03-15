@@ -8,27 +8,26 @@
  * -------
  * Canonical public import surface for the thin chat render shell.
  *
- * This file does more than a normal barrel because the repo is still in an
- * active migration between:
- * - legacy component-owned chat authority (`ChatPanel.tsx`, `useChatEngine.ts`,
- *   `chatTypes.ts`),
- * - the newer component shell (`UnifiedChatDock.tsx`, `useUnifiedChat.ts`,
- *   `uiTypes.ts`, thin render components),
- * - the canonical frontend engine lane (`pzo-web/src/engines/chat`),
- * - and the canonical shared contract lane (`shared/contracts/chat`).
+ * This barrel is intentionally deeper than a normal `index.ts` because the
+ * component lane is still carrying three jobs at once:
+ * - publish the thin render shell safely,
+ * - preserve migration bridges without re-promoting legacy authority,
+ * - expose shell-normalization builders/adapters so callers stop reaching into
+ *   component internals ad hoc.
  *
  * Design laws
  * -----------
  * 1. This file is the public barrel for the presentation lane only.
- * 2. The barrel may expose compatibility wrappers, but it must make their
- *    status explicit so future work does not accidentally re-promote them into
+ * 2. The barrel may expose compatibility wrappers, but their status must stay
+ *    explicit so future work does not accidentally re-promote them into
  *    primary authority.
  * 3. UI imports should be able to discover the component surface, registry,
- *    manifest, descriptors, and helper lookups from one place.
+ *    manifest, descriptors, helper lookups, builders, and adapters from one
+ *    place.
  * 4. This file must remain compile-safe even while individual component files
  *    keep evolving during migration.
  * 5. The component lane must not become a second engine. It may describe,
- *    register, and export UI modules, but not own chat truth.
+ *    register, normalize, and export UI modules, but not own chat truth.
  *
  * Long-term authority doctrine
  * ----------------------------
@@ -43,9 +42,11 @@
  * - primary UI shell exports stay first-class
  * - compatibility wrappers stay available but are explicitly tagged legacy
  * - low-risk direct re-exports are allowed
+ * - shell normalization builders and adapters are first-class because they are
+ *   now part of the presentation contract, not hidden implementation detail
  * - module namespace exports are always available for tools, codegen, and
  *   large-scale refactors that need stable module-level access
- * - helper prompt adapter aliases may exist here, but the canonical helper UI
+ * - helper prompt compatibility aliases may exist here, but canonical helper
  *   view-model truth still lives in ./uiTypes
  * ============================================================================
  */
@@ -70,7 +71,13 @@ import * as ChatRoomHeaderModule from './ChatRoomHeader';
 import * as ChatEmptyStateModule from './ChatEmptyState';
 import * as UseUnifiedChatModule from './useUnifiedChat';
 import * as UiTypesModule from './uiTypes';
-
+import * as ChannelTabsSurfaceBuilderModule from './channelTabsSurfaceBuilder';
+import * as ComposerSurfaceBuilderModule from './composerSurfaceBuilder';
+import * as MessageFeedSurfaceBuilderModule from './messageFeedSurfaceBuilder';
+import * as PresenceTypingSurfaceBuilderModule from './presenceTypingSurfaceBuilder';
+import * as StatusSurfaceBuilderModule from './statusSurfaceBuilder';
+import * as TranscriptDrawerAdapterModule from './transcriptDrawerAdapter';
+import * as CollapsedPillAdapterModule from './collapsedPillAdapter';
 import * as ChatPanelModule from './ChatPanel';
 import * as UseChatEngineModule from './useChatEngine';
 import * as ChatTypesModule from './chatTypes';
@@ -95,11 +102,21 @@ export * from './ChatTranscriptDrawer';
 export * from './ChatRoomHeader';
 export * from './ChatEmptyState';
 export * from './useUnifiedChat';
+export * from './channelTabsSurfaceBuilder';
+export * from './composerSurfaceBuilder';
+export * from './messageFeedSurfaceBuilder';
+export * from './presenceTypingSurfaceBuilder';
+export * from './statusSurfaceBuilder';
+export * from './transcriptDrawerAdapter';
+export * from './collapsedPillAdapter';
+export * from './ChatPanel';
+export * from './useChatEngine';
 
 /**
  * ChatHelperPrompt is handled explicitly instead of through `export *` so the
- * barrel can surface the default component under the canonical `ChatHelperPrompt`
- * name without colliding with the module's internal named export.
+ * barrel can surface the default component under the canonical
+ * `ChatHelperPrompt` name without colliding with the module's internal named
+ * export surface.
  */
 export { default as ChatHelperPrompt } from './ChatHelperPrompt';
 export type {
@@ -112,9 +129,12 @@ export type {
   ChatHelperPromptTone,
 } from './ChatHelperPrompt';
 
-// Compatibility exports stay live during migration.
-export * from './ChatPanel';
-export * from './useChatEngine';
+/**
+ * Collapsed-pill adapter ships a default export. Surface it here under a
+ * stable barrel alias so callers never need to reach for the file directly
+ * just to get the canonical builder entry point.
+ */
+export { default as buildCollapsedPillSurfaceModel } from './collapsedPillAdapter';
 
 // ============================================================================
 // MARK: Helper-prompt compatibility aliases
@@ -232,11 +252,78 @@ export function buildHelperPromptStateViewModel(
   };
 }
 
-// buildHelperPromptViewModel
-// buildHelperPromptViewModelWithDefaults
-// isHelperPromptActionViewModel
-// isHelperPromptViewModel
-// are already re-exported from ./uiTypes via `export * from './uiTypes'`.
+// ============================================================================
+// MARK: Normalized shell surface aliases
+// ============================================================================
+
+export type UnifiedShellSurfaceViewModel = UiTypesModule.ChatUiUnifiedShellViewModel;
+export type ChannelTabsSurfaceViewModel = UiTypesModule.ChannelTabsViewModel;
+export type ComposerSurfaceViewModel = UiTypesModule.ChatComposerViewModel;
+export type MessageFeedSurfaceViewModel = UiTypesModule.MessageFeedViewModel;
+export type FeedRowSurfaceViewModel = UiTypesModule.FeedRowModel;
+export type MessageCardSurfaceViewModel = UiTypesModule.ChatUiMessageCardViewModel;
+export type PresenceSurfaceViewModel = UiTypesModule.PresenceStripViewModel;
+export type TypingSurfaceViewModel = UiTypesModule.TypingClusterViewModel;
+export type InvasionSurfaceViewModel = UiTypesModule.InvasionBannerViewModel;
+export type ThreatSurfaceViewModel = UiTypesModule.ThreatMeterViewModel;
+export type RoomHeaderSurfaceViewModel = UiTypesModule.RoomHeaderViewModel;
+export type EmptySurfaceViewModel = UiTypesModule.EmptyStateViewModel;
+export type TranscriptDrawerSurfaceViewModel = UiTypesModule.ChatUiTranscriptDrawerSurfaceModel;
+export type CollapsedPillSurfaceViewModel = UiTypesModule.ChatUiCollapsedPillViewModel;
+
+export type ChannelTabsSurfaceBuilderOptions =
+  ChannelTabsSurfaceBuilderModule.BuildChannelTabViewModelsOptions;
+export type ChannelTabsSurfaceRecord =
+  ChannelTabsSurfaceBuilderModule.ChannelTabRecord;
+export type ComposerSurfaceBuilderInput =
+  ComposerSurfaceBuilderModule.ComposerSurfaceBuilderInput;
+export type ComposerSurfaceChannelMeta =
+  ComposerSurfaceBuilderModule.ComposerChannelMeta;
+export type MessageFeedSurfaceBuilderOptions =
+  MessageFeedSurfaceBuilderModule.BuildMessageFeedSurfaceOptions;
+export type MessageFeedSurfaceBuilderResult =
+  MessageFeedSurfaceBuilderModule.BuildMessageFeedSurfaceResult;
+export type PresenceTypingSurfaceBuilderArgs =
+  PresenceTypingSurfaceBuilderModule.BuildPresenceTypingArgs;
+export type StatusSurfaceBuilderArgs =
+  StatusSurfaceBuilderModule.BuildStatusSurfaceArgs;
+export type TranscriptDrawerSurfaceBuilderParams =
+  TranscriptDrawerAdapterModule.BuildTranscriptDrawerSurfaceParams;
+export type TranscriptDrawerCallbackFactoryParams =
+  TranscriptDrawerAdapterModule.CreateTranscriptDrawerCallbacksParams;
+export type CollapsedPillSurfaceBuilderOptions =
+  CollapsedPillAdapterModule.CollapsedPillAdapterOptions;
+export type CollapsedPillThreatOverride =
+  CollapsedPillAdapterModule.CollapsedPillAdapterThreatOverride;
+export type CollapsedPillInvasionOverride =
+  CollapsedPillAdapterModule.CollapsedPillAdapterInvasionOverride;
+
+export const buildChannelTabsSurfaceModel =
+  ChannelTabsSurfaceBuilderModule.buildChannelTabViewModels;
+export const buildComposerSurfaceModel =
+  ComposerSurfaceBuilderModule.buildChatComposerSurfaceModel;
+export const buildMessageCardSurfaceModel =
+  MessageFeedSurfaceBuilderModule.buildMessageCardViewModelFromLegacy;
+export const buildMessageFeedShellSurfaceModel =
+  MessageFeedSurfaceBuilderModule.buildMessageFeedSurfaceModel;
+export const buildPresenceSurfaceModel =
+  PresenceTypingSurfaceBuilderModule.buildPresenceStripViewModel;
+export const buildTypingSurfaceModel =
+  PresenceTypingSurfaceBuilderModule.buildTypingClusterViewModel;
+export const buildStatusThreatSurfaceModel =
+  StatusSurfaceBuilderModule.buildThreatMeterViewModel;
+export const buildStatusInvasionSurfaceModel =
+  StatusSurfaceBuilderModule.buildInvasionBannerViewModel;
+export const buildStatusRoomHeaderSurfaceModel =
+  StatusSurfaceBuilderModule.buildRoomHeaderViewModel;
+export const buildStatusEmptySurfaceModel =
+  StatusSurfaceBuilderModule.buildEmptyStateViewModel;
+export const buildTranscriptDrawerShellSurfaceModel =
+  TranscriptDrawerAdapterModule.buildTranscriptDrawerSurfaceModel;
+export const createTranscriptDrawerShellCallbacks =
+  TranscriptDrawerAdapterModule.createTranscriptDrawerCallbacks;
+export const buildCollapsedPillShellSurfaceModel =
+  CollapsedPillAdapterModule.buildCollapsedPillViewModelFromUnifiedChat;
 
 // ============================================================================
 // MARK: Stable namespace exports
@@ -262,6 +349,13 @@ export {
   ChatEmptyStateModule,
   UseUnifiedChatModule,
   UiTypesModule,
+  ChannelTabsSurfaceBuilderModule,
+  ComposerSurfaceBuilderModule,
+  MessageFeedSurfaceBuilderModule,
+  PresenceTypingSurfaceBuilderModule,
+  StatusSurfaceBuilderModule,
+  TranscriptDrawerAdapterModule,
+  CollapsedPillAdapterModule,
   ChatPanelModule,
   UseChatEngineModule,
   ChatTypesModule,
@@ -277,10 +371,10 @@ export const CHAT_COMPONENT_BARREL_PATH =
 export const CHAT_COMPONENT_NAMESPACE =
   'pzo-web/src/components/chat' as const;
 
-export const CHAT_COMPONENT_VERSION = '2026.03.15' as const;
+export const CHAT_COMPONENT_VERSION = '2026.03.15-patched' as const;
 
 export const CHAT_COMPONENT_REVISION =
-  'pzo.components.chat.barrel.v2.registry-safe' as const;
+  'pzo.components.chat.barrel.v3.shell-builders-and-adapters' as const;
 
 export const CHAT_COMPONENT_MODULE_KEYS = [
   'UnifiedChatDock',
@@ -299,9 +393,16 @@ export const CHAT_COMPONENT_MODULE_KEYS = [
   'ChatEmptyState',
   'useUnifiedChat',
   'uiTypes',
+  'ChannelTabsSurfaceBuilder',
+  'ComposerSurfaceBuilder',
+  'MessageFeedSurfaceBuilder',
+  'PresenceTypingSurfaceBuilder',
+  'StatusSurfaceBuilder',
+  'TranscriptDrawerAdapter',
+  'CollapsedPillAdapter',
   'ChatPanel',
   'useChatEngine',
-  'chatTypes',
+  'chatTypes'
 ] as const;
 
 export type ChatComponentModuleKey =
@@ -324,9 +425,16 @@ export const CHAT_COMPONENT_FILE_NAMES = [
   'ChatEmptyState.tsx',
   'useUnifiedChat.ts',
   'uiTypes.ts',
+  'channelTabsSurfaceBuilder.ts',
+  'composerSurfaceBuilder.ts',
+  'messageFeedSurfaceBuilder.ts',
+  'presenceTypingSurfaceBuilder.ts',
+  'statusSurfaceBuilder.ts',
+  'transcriptDrawerAdapter.ts',
+  'collapsedPillAdapter.ts',
   'ChatPanel.tsx',
   'useChatEngine.ts',
-  'chatTypes.ts',
+  'chatTypes.ts'
 ] as const;
 
 export type ChatComponentFileName =
@@ -334,19 +442,18 @@ export type ChatComponentFileName =
 
 export const CHAT_COMPONENT_CATEGORIES = [
   'SHELL',
-  'FEED',
   'COMPOSER',
+  'FEED',
   'CHANNELS',
   'PRESENCE',
-  'INVASION',
-  'THREAT',
+  'STATUS',
   'HELPER',
   'TRANSCRIPT',
-  'HEADER',
-  'EMPTY',
   'HOOK',
   'TYPES',
-  'COMPATIBILITY',
+  'BUILDER',
+  'ADAPTER',
+  'COMPATIBILITY'
 ] as const;
 
 export type ChatComponentCategory =
@@ -355,7 +462,7 @@ export type ChatComponentCategory =
 export const CHAT_COMPONENT_STABILITY = [
   'PRIMARY',
   'MIGRATION_BRIDGE',
-  'LEGACY_COMPAT',
+  'LEGACY_COMPAT'
 ] as const;
 
 export type ChatComponentStability =
@@ -367,11 +474,14 @@ export const CHAT_COMPONENT_RENDER_LAYERS = [
   'feed',
   'presence',
   'banner',
+  'status',
   'drawer',
   'header',
   'hook',
   'types',
-  'compat',
+  'builder',
+  'adapter',
+  'compat'
 ] as const;
 
 export type ChatComponentRenderLayer =
@@ -393,25 +503,45 @@ export interface ChatComponentModuleDescriptor {
 }
 
 export type ChatComponentModuleNamespace =
-  | typeof UnifiedChatDockModule
-  | typeof ChatComposerModule
-  | typeof ChatMessageFeedModule
-  | typeof ChatMessageCardModule
-  | typeof ChatChannelTabsModule
-  | typeof ChatPresenceStripModule
-  | typeof ChatTypingIndicatorModule
-  | typeof ChatInvasionBannerModule
-  | typeof ChatThreatMeterModule
-  | typeof ChatHelperPromptModule
-  | typeof ChatCollapsedPillModule
-  | typeof ChatTranscriptDrawerModule
-  | typeof ChatRoomHeaderModule
-  | typeof ChatEmptyStateModule
-  | typeof UseUnifiedChatModule
-  | typeof UiTypesModule
-  | typeof ChatPanelModule
-  | typeof UseChatEngineModule
-  | typeof ChatTypesModule;
+ | typeof UnifiedChatDockModule
+ | typeof ChatComposerModule
+ | typeof ChatMessageFeedModule
+ | typeof ChatMessageCardModule
+ | typeof ChatChannelTabsModule
+ | typeof ChatPresenceStripModule
+ | typeof ChatTypingIndicatorModule
+ | typeof ChatInvasionBannerModule
+ | typeof ChatThreatMeterModule
+ | typeof ChatHelperPromptModule
+ | typeof ChatCollapsedPillModule
+ | typeof ChatTranscriptDrawerModule
+ | typeof ChatRoomHeaderModule
+ | typeof ChatEmptyStateModule
+ | typeof UseUnifiedChatModule
+ | typeof UiTypesModule
+ | typeof ChannelTabsSurfaceBuilderModule
+ | typeof ComposerSurfaceBuilderModule
+ | typeof MessageFeedSurfaceBuilderModule
+ | typeof PresenceTypingSurfaceBuilderModule
+ | typeof StatusSurfaceBuilderModule
+ | typeof TranscriptDrawerAdapterModule
+ | typeof CollapsedPillAdapterModule
+ | typeof ChatPanelModule
+ | typeof UseChatEngineModule
+ | typeof ChatTypesModule;
+
+interface ChatComponentModuleDefinition extends ChatComponentModuleDescriptor {
+  readonly namespace: ChatComponentModuleNamespace;
+  readonly namedExportHints: readonly string[];
+  readonly defaultExportPresent: boolean;
+}
+
+export interface ChatComponentPackage {
+  readonly descriptor: ChatComponentModuleDescriptor;
+  readonly namespace: ChatComponentModuleNamespace;
+  readonly namedExportHints: readonly string[];
+  readonly defaultExportPresent: boolean;
+}
 
 const ALL_MOUNTS = SharedChat.CHAT_MOUNT_TARGETS;
 
@@ -436,366 +566,581 @@ const TRANSCRIPT_CAPABLE_MOUNTS = [
   ...SUMMARY_MOUNTS,
 ] as const satisfies readonly SharedChat.ChatMountTarget[];
 
-export const CHAT_COMPONENT_IMPORT_PATHS = Object.freeze({
-  UnifiedChatDock: './UnifiedChatDock',
-  ChatComposer: './ChatComposer',
-  ChatMessageFeed: './ChatMessageFeed',
-  ChatMessageCard: './ChatMessageCard',
-  ChatChannelTabs: './ChatChannelTabs',
-  ChatPresenceStrip: './ChatPresenceStrip',
-  ChatTypingIndicator: './ChatTypingIndicator',
-  ChatInvasionBanner: './ChatInvasionBanner',
-  ChatThreatMeter: './ChatThreatMeter',
-  ChatHelperPrompt: './ChatHelperPrompt',
-  ChatCollapsedPill: './ChatCollapsedPill',
-  ChatTranscriptDrawer: './ChatTranscriptDrawer',
-  ChatRoomHeader: './ChatRoomHeader',
-  ChatEmptyState: './ChatEmptyState',
-  useUnifiedChat: './useUnifiedChat',
-  uiTypes: './uiTypes',
-  ChatPanel: './ChatPanel',
-  useChatEngine: './useChatEngine',
-  chatTypes: './chatTypes',
-} as const satisfies Record<ChatComponentModuleKey, string>);
+function readNamedExport(
+  namespace: Record<string, unknown>,
+  key: string,
+): unknown {
+  return Object.prototype.hasOwnProperty.call(namespace, key)
+    ? namespace[key]
+    : undefined;
+}
 
-export const CHAT_COMPONENT_MODULE_DESCRIPTORS = Object.freeze({
-  UnifiedChatDock: Object.freeze<ChatComponentModuleDescriptor>({
-    key: 'UnifiedChatDock',
-    fileName: 'UnifiedChatDock.tsx',
-    importPath: './UnifiedChatDock',
-    category: 'SHELL',
-    stability: 'PRIMARY',
-    renderLayer: 'dock',
-    description:
-      'Primary dock shell that mounts one chat surface across many screens without reclaiming engine authority.',
-    usedByMounts: ALL_MOUNTS,
-    dependsOnEngine: true,
-    dependsOnSharedContracts: true,
-    directExportRisk: 'LOW',
-    longTermAuthority: true,
-  }),
-  ChatComposer: Object.freeze<ChatComponentModuleDescriptor>({
-    key: 'ChatComposer',
-    fileName: 'ChatComposer.tsx',
-    importPath: './ChatComposer',
-    category: 'COMPOSER',
-    stability: 'PRIMARY',
-    renderLayer: 'composer',
-    description:
-      'Render-only composer shell for draft text, channel-aware placeholders, and send affordances.',
-    usedByMounts: CORE_GAME_MOUNTS,
-    dependsOnEngine: false,
-    dependsOnSharedContracts: true,
-    directExportRisk: 'LOW',
-    longTermAuthority: true,
-  }),
-  ChatMessageFeed: Object.freeze<ChatComponentModuleDescriptor>({
-    key: 'ChatMessageFeed',
-    fileName: 'ChatMessageFeed.tsx',
-    importPath: './ChatMessageFeed',
-    category: 'FEED',
-    stability: 'PRIMARY',
-    renderLayer: 'feed',
-    description:
-      'Grouped message feed surface for transcript rows, chronology, empty states, and feed virtualization decisions.',
-    usedByMounts: TRANSCRIPT_CAPABLE_MOUNTS,
-    dependsOnEngine: false,
-    dependsOnSharedContracts: true,
-    directExportRisk: 'LOW',
-    longTermAuthority: true,
-  }),
-  ChatMessageCard: Object.freeze<ChatComponentModuleDescriptor>({
-    key: 'ChatMessageCard',
-    fileName: 'ChatMessageCard.tsx',
-    importPath: './ChatMessageCard',
-    category: 'FEED',
-    stability: 'PRIMARY',
-    renderLayer: 'feed',
-    description:
-      'Single message presentation unit for sender chrome, proof badges, metadata chips, and narrative surface styling.',
-    usedByMounts: TRANSCRIPT_CAPABLE_MOUNTS,
-    dependsOnEngine: false,
-    dependsOnSharedContracts: true,
-    directExportRisk: 'LOW',
-    longTermAuthority: true,
-  }),
-  ChatChannelTabs: Object.freeze<ChatComponentModuleDescriptor>({
-    key: 'ChatChannelTabs',
-    fileName: 'ChatChannelTabs.tsx',
-    importPath: './ChatChannelTabs',
-    category: 'CHANNELS',
-    stability: 'PRIMARY',
-    renderLayer: 'dock',
-    description:
-      'Visible channel selector for Global, Syndicate, Deal Room, and future mount-eligible lanes.',
-    usedByMounts: CORE_GAME_MOUNTS,
-    dependsOnEngine: false,
-    dependsOnSharedContracts: true,
-    directExportRisk: 'LOW',
-    longTermAuthority: true,
-  }),
-  ChatPresenceStrip: Object.freeze<ChatComponentModuleDescriptor>({
-    key: 'ChatPresenceStrip',
-    fileName: 'ChatPresenceStrip.tsx',
-    importPath: './ChatPresenceStrip',
-    category: 'PRESENCE',
-    stability: 'PRIMARY',
-    renderLayer: 'presence',
-    description:
-      'Room presence strip for player, helper, hater, ambient, and system audience indicators.',
-    usedByMounts: CORE_GAME_MOUNTS,
-    dependsOnEngine: false,
-    dependsOnSharedContracts: true,
-    directExportRisk: 'LOW',
-    longTermAuthority: true,
-  }),
-  ChatTypingIndicator: Object.freeze<ChatComponentModuleDescriptor>({
-    key: 'ChatTypingIndicator',
-    fileName: 'ChatTypingIndicator.tsx',
-    importPath: './ChatTypingIndicator',
-    category: 'PRESENCE',
-    stability: 'PRIMARY',
-    renderLayer: 'presence',
-    description:
-      'Typing theater component that visualizes present-tense chat pressure without owning typing truth.',
-    usedByMounts: CORE_GAME_MOUNTS,
-    dependsOnEngine: false,
-    dependsOnSharedContracts: true,
-    directExportRisk: 'LOW',
-    longTermAuthority: true,
-  }),
-  ChatInvasionBanner: Object.freeze<ChatComponentModuleDescriptor>({
-    key: 'ChatInvasionBanner',
-    fileName: 'ChatInvasionBanner.tsx',
-    importPath: './ChatInvasionBanner',
-    category: 'INVASION',
-    stability: 'PRIMARY',
-    renderLayer: 'banner',
-    description:
-      'Top-level invasion / raid / pressure banner surface for visible escalation moments.',
-    usedByMounts: ALL_MOUNTS,
-    dependsOnEngine: false,
-    dependsOnSharedContracts: true,
-    directExportRisk: 'LOW',
-    longTermAuthority: true,
-  }),
-  ChatThreatMeter: Object.freeze<ChatComponentModuleDescriptor>({
-    key: 'ChatThreatMeter',
-    fileName: 'ChatThreatMeter.tsx',
-    importPath: './ChatThreatMeter',
-    category: 'THREAT',
-    stability: 'PRIMARY',
-    renderLayer: 'banner',
-    description:
-      'Threat posture meter for taunt load, attack pressure, rescue urgency, and active aggression windows.',
-    usedByMounts: ALL_MOUNTS,
-    dependsOnEngine: false,
-    dependsOnSharedContracts: true,
-    directExportRisk: 'LOW',
-    longTermAuthority: true,
-  }),
-  ChatHelperPrompt: Object.freeze<ChatComponentModuleDescriptor>({
-    key: 'ChatHelperPrompt',
-    fileName: 'ChatHelperPrompt.tsx',
-    importPath: './ChatHelperPrompt',
-    category: 'HELPER',
-    stability: 'PRIMARY',
-    renderLayer: 'banner',
-    description:
-      'Helper prompt shell for rescue / guidance calls-to-action derived from engine and learning hints.',
-    usedByMounts: ALL_MOUNTS,
-    dependsOnEngine: false,
-    dependsOnSharedContracts: true,
-    directExportRisk: 'LOW',
-    longTermAuthority: true,
-  }),
-  ChatCollapsedPill: Object.freeze<ChatComponentModuleDescriptor>({
-    key: 'ChatCollapsedPill',
-    fileName: 'ChatCollapsedPill.tsx',
-    importPath: './ChatCollapsedPill',
-    category: 'SHELL',
-    stability: 'PRIMARY',
-    renderLayer: 'dock',
-    description:
-      'Collapsed shell for unread counts, quick reopen, and mount-safe minimal chat presence.',
-    usedByMounts: ALL_MOUNTS,
-    dependsOnEngine: false,
-    dependsOnSharedContracts: true,
-    directExportRisk: 'LOW',
-    longTermAuthority: true,
-  }),
-  ChatTranscriptDrawer: Object.freeze<ChatComponentModuleDescriptor>({
-    key: 'ChatTranscriptDrawer',
-    fileName: 'ChatTranscriptDrawer.tsx',
-    importPath: './ChatTranscriptDrawer',
-    category: 'TRANSCRIPT',
-    stability: 'PRIMARY',
-    renderLayer: 'drawer',
-    description:
-      'Drawer surface for transcript search, grouped history inspection, and replay-adjacent message review.',
-    usedByMounts: TRANSCRIPT_CAPABLE_MOUNTS,
-    dependsOnEngine: false,
-    dependsOnSharedContracts: true,
-    directExportRisk: 'LOW',
-    longTermAuthority: true,
-  }),
-  ChatRoomHeader: Object.freeze<ChatComponentModuleDescriptor>({
-    key: 'ChatRoomHeader',
-    fileName: 'ChatRoomHeader.tsx',
-    importPath: './ChatRoomHeader',
-    category: 'HEADER',
-    stability: 'PRIMARY',
-    renderLayer: 'header',
-    description:
-      'Header shell for room titles, subtitles, connection state, mount labels, and contextual channel metadata.',
-    usedByMounts: ALL_MOUNTS,
-    dependsOnEngine: false,
-    dependsOnSharedContracts: true,
-    directExportRisk: 'LOW',
-    longTermAuthority: true,
-  }),
-  ChatEmptyState: Object.freeze<ChatComponentModuleDescriptor>({
-    key: 'ChatEmptyState',
-    fileName: 'ChatEmptyState.tsx',
-    importPath: './ChatEmptyState',
-    category: 'EMPTY',
-    stability: 'PRIMARY',
-    renderLayer: 'feed',
-    description:
-      'Empty feed shell for quiet channels, no-history states, and low-noise transition moments.',
-    usedByMounts: TRANSCRIPT_CAPABLE_MOUNTS,
-    dependsOnEngine: false,
-    dependsOnSharedContracts: true,
-    directExportRisk: 'LOW',
-    longTermAuthority: true,
-  }),
-  useUnifiedChat: Object.freeze<ChatComponentModuleDescriptor>({
-    key: 'useUnifiedChat',
-    fileName: 'useUnifiedChat.ts',
-    importPath: './useUnifiedChat',
-    category: 'HOOK',
-    stability: 'PRIMARY',
-    renderLayer: 'hook',
-    description:
-      'Primary presentation hook for shell open state, drafts, transcript drawer state, and render-safe derivations.',
-    usedByMounts: ALL_MOUNTS,
-    dependsOnEngine: true,
-    dependsOnSharedContracts: true,
-    directExportRisk: 'MEDIUM',
-    longTermAuthority: true,
-  }),
-  uiTypes: Object.freeze<ChatComponentModuleDescriptor>({
-    key: 'uiTypes',
-    fileName: 'uiTypes.ts',
-    importPath: './uiTypes',
-    category: 'TYPES',
-    stability: 'PRIMARY',
-    renderLayer: 'types',
-    description:
-      'Canonical presentation-only type surface for the component chat shell.',
-    usedByMounts: ALL_MOUNTS,
-    dependsOnEngine: true,
-    dependsOnSharedContracts: true,
-    directExportRisk: 'LOW',
-    longTermAuthority: true,
-  }),
-  ChatPanel: Object.freeze<ChatComponentModuleDescriptor>({
-    key: 'ChatPanel',
-    fileName: 'ChatPanel.tsx',
-    importPath: './ChatPanel',
-    category: 'COMPATIBILITY',
-    stability: 'LEGACY_COMPAT',
-    renderLayer: 'compat',
-    description:
-      'Legacy panel wrapper retained for import stability while UnifiedChatDock takes over as the primary shell.',
-    usedByMounts: ALL_MOUNTS,
-    dependsOnEngine: true,
-    dependsOnSharedContracts: true,
-    directExportRisk: 'HIGH',
-    longTermAuthority: false,
-  }),
-  useChatEngine: Object.freeze<ChatComponentModuleDescriptor>({
-    key: 'useChatEngine',
-    fileName: 'useChatEngine.ts',
-    importPath: './useChatEngine',
-    category: 'COMPATIBILITY',
-    stability: 'LEGACY_COMPAT',
-    renderLayer: 'compat',
-    description:
-      'Legacy hook bridge preserved for callers that have not yet moved to useUnifiedChat or the engine public lane.',
-    usedByMounts: ALL_MOUNTS,
-    dependsOnEngine: true,
-    dependsOnSharedContracts: true,
-    directExportRisk: 'HIGH',
-    longTermAuthority: false,
-  }),
-  chatTypes: Object.freeze<ChatComponentModuleDescriptor>({
-    key: 'chatTypes',
-    fileName: 'chatTypes.ts',
-    importPath: './chatTypes',
-    category: 'COMPATIBILITY',
-    stability: 'MIGRATION_BRIDGE',
-    renderLayer: 'types',
-    description:
-      'Compatibility contract shim that keeps old imports alive while moving canonical truth into shared/contracts/chat.',
-    usedByMounts: ALL_MOUNTS,
-    dependsOnEngine: true,
-    dependsOnSharedContracts: true,
-    directExportRisk: 'HIGH',
-    longTermAuthority: false,
-  }),
-} as const satisfies Record<ChatComponentModuleKey, ChatComponentModuleDescriptor>);
+function mapByKey<V>(
+  build: (definition: ChatComponentModuleDefinition) => V,
+): Record<ChatComponentModuleKey, V> {
+  return Object.freeze(
+    Object.fromEntries(
+      CHAT_COMPONENT_MODULE_SPEC.map((definition) => [definition.key, build(definition)]),
+    ),
+  ) as Record<ChatComponentModuleKey, V>;
+}
 
-export const CHAT_COMPONENT_MODULE_NAMESPACES = Object.freeze({
-  UnifiedChatDock: UnifiedChatDockModule,
-  ChatComposer: ChatComposerModule,
-  ChatMessageFeed: ChatMessageFeedModule,
-  ChatMessageCard: ChatMessageCardModule,
-  ChatChannelTabs: ChatChannelTabsModule,
-  ChatPresenceStrip: ChatPresenceStripModule,
-  ChatTypingIndicator: ChatTypingIndicatorModule,
-  ChatInvasionBanner: ChatInvasionBannerModule,
-  ChatThreatMeter: ChatThreatMeterModule,
-  ChatHelperPrompt: ChatHelperPromptModule,
-  ChatCollapsedPill: ChatCollapsedPillModule,
-  ChatTranscriptDrawer: ChatTranscriptDrawerModule,
-  ChatRoomHeader: ChatRoomHeaderModule,
-  ChatEmptyState: ChatEmptyStateModule,
-  useUnifiedChat: UseUnifiedChatModule,
-  uiTypes: UiTypesModule,
-  ChatPanel: ChatPanelModule,
-  useChatEngine: UseChatEngineModule,
-  chatTypes: ChatTypesModule,
-} as const satisfies Record<ChatComponentModuleKey, ChatComponentModuleNamespace>);
+function listModuleKeysByFilter(
+  predicate: (definition: ChatComponentModuleDefinition) => boolean,
+): readonly ChatComponentModuleKey[] {
+  return CHAT_COMPONENT_MODULE_SPEC.filter(predicate).map((definition) => definition.key);
+}
+
+// ============================================================================
+// MARK: Module spec
+// ============================================================================
+
+export const CHAT_COMPONENT_MODULE_SPEC = [
+{
+  key: 'UnifiedChatDock',
+  fileName: 'UnifiedChatDock.tsx',
+  importPath: './UnifiedChatDock',
+  category: 'SHELL',
+  stability: 'PRIMARY',
+  renderLayer: 'dock',
+  description: 'Primary dock shell that mounts one chat surface across every supported screen without reclaiming engine authority.',
+  usedByMounts: ALL_MOUNTS,
+  dependsOnEngine: true,
+  dependsOnSharedContracts: true,
+  directExportRisk: 'LOW',
+  longTermAuthority: true,
+  namespace: UnifiedChatDockModule,
+  namedExportHints: ['UnifiedChatDock'] as const,
+  defaultExportPresent: Boolean(
+    readNamedExport(UnifiedChatDockModule as Record<string, unknown>, 'default'),
+  ),
+},
+{
+  key: 'ChatComposer',
+  fileName: 'ChatComposer.tsx',
+  importPath: './ChatComposer',
+  category: 'COMPOSER',
+  stability: 'PRIMARY',
+  renderLayer: 'composer',
+  description: 'Render-only composer shell for drafts, quick inserts, reply previews, diagnostics, proof notices, and send affordances.',
+  usedByMounts: CORE_GAME_MOUNTS,
+  dependsOnEngine: false,
+  dependsOnSharedContracts: true,
+  directExportRisk: 'LOW',
+  longTermAuthority: true,
+  namespace: ChatComposerModule,
+  namedExportHints: ['ChatComposer'] as const,
+  defaultExportPresent: Boolean(
+    readNamedExport(ChatComposerModule as Record<string, unknown>, 'default'),
+  ),
+},
+{
+  key: 'ChatMessageFeed',
+  fileName: 'ChatMessageFeed.tsx',
+  importPath: './ChatMessageFeed',
+  category: 'FEED',
+  stability: 'PRIMARY',
+  renderLayer: 'feed',
+  description: 'Grouped feed surface for transcript rows, unread markers, virtualization windows, and feed callbacks.',
+  usedByMounts: TRANSCRIPT_CAPABLE_MOUNTS,
+  dependsOnEngine: false,
+  dependsOnSharedContracts: true,
+  directExportRisk: 'LOW',
+  longTermAuthority: true,
+  namespace: ChatMessageFeedModule,
+  namedExportHints: ['ChatMessageFeed'] as const,
+  defaultExportPresent: Boolean(
+    readNamedExport(ChatMessageFeedModule as Record<string, unknown>, 'default'),
+  ),
+},
+{
+  key: 'ChatMessageCard',
+  fileName: 'ChatMessageCard.tsx',
+  importPath: './ChatMessageCard',
+  category: 'FEED',
+  stability: 'PRIMARY',
+  renderLayer: 'feed',
+  description: 'Leaf message-card renderer for author chrome, proof badges, threat rails, attachments, and row actions.',
+  usedByMounts: TRANSCRIPT_CAPABLE_MOUNTS,
+  dependsOnEngine: false,
+  dependsOnSharedContracts: true,
+  directExportRisk: 'LOW',
+  longTermAuthority: true,
+  namespace: ChatMessageCardModule,
+  namedExportHints: ['ChatMessageCard'] as const,
+  defaultExportPresent: Boolean(
+    readNamedExport(ChatMessageCardModule as Record<string, unknown>, 'default'),
+  ),
+},
+{
+  key: 'ChatChannelTabs',
+  fileName: 'ChatChannelTabs.tsx',
+  importPath: './ChatChannelTabs',
+  category: 'CHANNELS',
+  stability: 'PRIMARY',
+  renderLayer: 'dock',
+  description: 'Visible channel selector for Global, Syndicate, Deal Room, and future shell-eligible lanes.',
+  usedByMounts: CORE_GAME_MOUNTS,
+  dependsOnEngine: false,
+  dependsOnSharedContracts: true,
+  directExportRisk: 'LOW',
+  longTermAuthority: true,
+  namespace: ChatChannelTabsModule,
+  namedExportHints: ['ChatChannelTabs'] as const,
+  defaultExportPresent: Boolean(
+    readNamedExport(ChatChannelTabsModule as Record<string, unknown>, 'default'),
+  ),
+},
+{
+  key: 'ChatPresenceStrip',
+  fileName: 'ChatPresenceStrip.tsx',
+  importPath: './ChatPresenceStrip',
+  category: 'PRESENCE',
+  stability: 'PRIMARY',
+  renderLayer: 'presence',
+  description: 'Presence strip renderer for player, helper, hater, ambient, system, and spectator visibility.',
+  usedByMounts: CORE_GAME_MOUNTS,
+  dependsOnEngine: false,
+  dependsOnSharedContracts: true,
+  directExportRisk: 'LOW',
+  longTermAuthority: true,
+  namespace: ChatPresenceStripModule,
+  namedExportHints: ['ChatPresenceStrip'] as const,
+  defaultExportPresent: Boolean(
+    readNamedExport(ChatPresenceStripModule as Record<string, unknown>, 'default'),
+  ),
+},
+{
+  key: 'ChatTypingIndicator',
+  fileName: 'ChatTypingIndicator.tsx',
+  importPath: './ChatTypingIndicator',
+  category: 'PRESENCE',
+  stability: 'PRIMARY',
+  renderLayer: 'presence',
+  description: 'Typing-theater renderer for live clusters, lurk states, read-waits, and weaponized delays.',
+  usedByMounts: CORE_GAME_MOUNTS,
+  dependsOnEngine: false,
+  dependsOnSharedContracts: true,
+  directExportRisk: 'LOW',
+  longTermAuthority: true,
+  namespace: ChatTypingIndicatorModule,
+  namedExportHints: ['ChatTypingIndicator'] as const,
+  defaultExportPresent: Boolean(
+    readNamedExport(ChatTypingIndicatorModule as Record<string, unknown>, 'default'),
+  ),
+},
+{
+  key: 'ChatInvasionBanner',
+  fileName: 'ChatInvasionBanner.tsx',
+  importPath: './ChatInvasionBanner',
+  category: 'STATUS',
+  stability: 'PRIMARY',
+  renderLayer: 'status',
+  description: 'Top-level invasion, breach, raid, or suppression banner surface driven by precomputed shell models.',
+  usedByMounts: ALL_MOUNTS,
+  dependsOnEngine: false,
+  dependsOnSharedContracts: true,
+  directExportRisk: 'LOW',
+  longTermAuthority: true,
+  namespace: ChatInvasionBannerModule,
+  namedExportHints: ['ChatInvasionBanner'] as const,
+  defaultExportPresent: Boolean(
+    readNamedExport(ChatInvasionBannerModule as Record<string, unknown>, 'default'),
+  ),
+},
+{
+  key: 'ChatThreatMeter',
+  fileName: 'ChatThreatMeter.tsx',
+  importPath: './ChatThreatMeter',
+  category: 'STATUS',
+  stability: 'PRIMARY',
+  renderLayer: 'status',
+  description: 'Threat posture meter for aggregate pressure, dimension rails, and recommendation output.',
+  usedByMounts: ALL_MOUNTS,
+  dependsOnEngine: false,
+  dependsOnSharedContracts: true,
+  directExportRisk: 'LOW',
+  longTermAuthority: true,
+  namespace: ChatThreatMeterModule,
+  namedExportHints: ['ChatThreatMeter'] as const,
+  defaultExportPresent: Boolean(
+    readNamedExport(ChatThreatMeterModule as Record<string, unknown>, 'default'),
+  ),
+},
+{
+  key: 'ChatHelperPrompt',
+  fileName: 'ChatHelperPrompt.tsx',
+  importPath: './ChatHelperPrompt',
+  category: 'HELPER',
+  stability: 'PRIMARY',
+  renderLayer: 'banner',
+  description: 'Helper prompt shell for rescue, guidance, and mentorship affordances derived upstream.',
+  usedByMounts: ALL_MOUNTS,
+  dependsOnEngine: false,
+  dependsOnSharedContracts: true,
+  directExportRisk: 'LOW',
+  longTermAuthority: true,
+  namespace: ChatHelperPromptModule,
+  namedExportHints: ['ChatHelperPrompt', 'ChatHelperPromptProps'] as const,
+  defaultExportPresent: Boolean(
+    readNamedExport(ChatHelperPromptModule as Record<string, unknown>, 'default'),
+  ),
+},
+{
+  key: 'ChatCollapsedPill',
+  fileName: 'ChatCollapsedPill.tsx',
+  importPath: './ChatCollapsedPill',
+  category: 'SHELL',
+  stability: 'PRIMARY',
+  renderLayer: 'dock',
+  description: 'Collapsed shell surface for unread counts, reopen state, threat pulse, and minimized-but-alive chat presence.',
+  usedByMounts: ALL_MOUNTS,
+  dependsOnEngine: false,
+  dependsOnSharedContracts: true,
+  directExportRisk: 'LOW',
+  longTermAuthority: true,
+  namespace: ChatCollapsedPillModule,
+  namedExportHints: ['ChatCollapsedPill'] as const,
+  defaultExportPresent: Boolean(
+    readNamedExport(ChatCollapsedPillModule as Record<string, unknown>, 'default'),
+  ),
+},
+{
+  key: 'ChatTranscriptDrawer',
+  fileName: 'ChatTranscriptDrawer.tsx',
+  importPath: './ChatTranscriptDrawer',
+  category: 'TRANSCRIPT',
+  stability: 'PRIMARY',
+  renderLayer: 'drawer',
+  description: 'Transcript drawer renderer for grouped history, search, filters, jump callbacks, and replay-adjacent inspection.',
+  usedByMounts: TRANSCRIPT_CAPABLE_MOUNTS,
+  dependsOnEngine: false,
+  dependsOnSharedContracts: true,
+  directExportRisk: 'LOW',
+  longTermAuthority: true,
+  namespace: ChatTranscriptDrawerModule,
+  namedExportHints: ['ChatTranscriptDrawer'] as const,
+  defaultExportPresent: Boolean(
+    readNamedExport(ChatTranscriptDrawerModule as Record<string, unknown>, 'default'),
+  ),
+},
+{
+  key: 'ChatRoomHeader',
+  fileName: 'ChatRoomHeader.tsx',
+  importPath: './ChatRoomHeader',
+  category: 'STATUS',
+  stability: 'PRIMARY',
+  renderLayer: 'header',
+  description: 'Header shell for room title, subtitles, metrics, badges, actions, and contextual posture metadata.',
+  usedByMounts: ALL_MOUNTS,
+  dependsOnEngine: false,
+  dependsOnSharedContracts: true,
+  directExportRisk: 'LOW',
+  longTermAuthority: true,
+  namespace: ChatRoomHeaderModule,
+  namedExportHints: ['ChatRoomHeader'] as const,
+  defaultExportPresent: Boolean(
+    readNamedExport(ChatRoomHeaderModule as Record<string, unknown>, 'default'),
+  ),
+},
+{
+  key: 'ChatEmptyState',
+  fileName: 'ChatEmptyState.tsx',
+  importPath: './ChatEmptyState',
+  category: 'STATUS',
+  stability: 'PRIMARY',
+  renderLayer: 'status',
+  description: 'Intentional empty-state renderer for cold open, disconnected, quiet-lane, search-zero, pending transcript, and collapsed scenarios.',
+  usedByMounts: TRANSCRIPT_CAPABLE_MOUNTS,
+  dependsOnEngine: false,
+  dependsOnSharedContracts: true,
+  directExportRisk: 'LOW',
+  longTermAuthority: true,
+  namespace: ChatEmptyStateModule,
+  namedExportHints: ['ChatEmptyState'] as const,
+  defaultExportPresent: Boolean(
+    readNamedExport(ChatEmptyStateModule as Record<string, unknown>, 'default'),
+  ),
+},
+{
+  key: 'useUnifiedChat',
+  fileName: 'useUnifiedChat.ts',
+  importPath: './useUnifiedChat',
+  category: 'HOOK',
+  stability: 'PRIMARY',
+  renderLayer: 'hook',
+  description: 'Primary presentation hook that converts engine/runtime state into render-safe shell models and callbacks.',
+  usedByMounts: ALL_MOUNTS,
+  dependsOnEngine: true,
+  dependsOnSharedContracts: true,
+  directExportRisk: 'MEDIUM',
+  longTermAuthority: true,
+  namespace: UseUnifiedChatModule,
+  namedExportHints: ['useUnifiedChat'] as const,
+  defaultExportPresent: Boolean(
+    readNamedExport(UseUnifiedChatModule as Record<string, unknown>, 'default'),
+  ),
+},
+{
+  key: 'uiTypes',
+  fileName: 'uiTypes.ts',
+  importPath: './uiTypes',
+  category: 'TYPES',
+  stability: 'PRIMARY',
+  renderLayer: 'types',
+  description: 'Canonical presentation-only type surface for the component chat shell.',
+  usedByMounts: ALL_MOUNTS,
+  dependsOnEngine: true,
+  dependsOnSharedContracts: true,
+  directExportRisk: 'LOW',
+  longTermAuthority: true,
+  namespace: UiTypesModule,
+  namedExportHints: ['ChatUiUnifiedShellViewModel', 'buildUnifiedShellViewModel', 'buildCollapsedPillViewModel', 'buildThreatMeterViewModel', 'buildRoomHeaderViewModel', 'buildEmptyStateViewModel'] as const,
+  defaultExportPresent: Boolean(
+    readNamedExport(UiTypesModule as Record<string, unknown>, 'default'),
+  ),
+},
+{
+  key: 'ChannelTabsSurfaceBuilder',
+  fileName: 'channelTabsSurfaceBuilder.ts',
+  importPath: './channelTabsSurfaceBuilder',
+  category: 'BUILDER',
+  stability: 'PRIMARY',
+  renderLayer: 'builder',
+  description: 'Shell normalization builder for channel-tab records into canonical tab view models.',
+  usedByMounts: CORE_GAME_MOUNTS,
+  dependsOnEngine: false,
+  dependsOnSharedContracts: true,
+  directExportRisk: 'LOW',
+  longTermAuthority: true,
+  namespace: ChannelTabsSurfaceBuilderModule,
+  namedExportHints: ['buildChannelTabViewModels', 'BuildChannelTabViewModelsOptions', 'ChannelTabRecord'] as const,
+  defaultExportPresent: Boolean(
+    readNamedExport(ChannelTabsSurfaceBuilderModule as Record<string, unknown>, 'default'),
+  ),
+},
+{
+  key: 'ComposerSurfaceBuilder',
+  fileName: 'composerSurfaceBuilder.ts',
+  importPath: './composerSurfaceBuilder',
+  category: 'BUILDER',
+  stability: 'PRIMARY',
+  renderLayer: 'builder',
+  description: 'Shell normalization builder for composer runtime state into the canonical composer surface model.',
+  usedByMounts: CORE_GAME_MOUNTS,
+  dependsOnEngine: false,
+  dependsOnSharedContracts: true,
+  directExportRisk: 'LOW',
+  longTermAuthority: true,
+  namespace: ComposerSurfaceBuilderModule,
+  namedExportHints: ['buildChatComposerSurfaceModel', 'ComposerSurfaceBuilderInput'] as const,
+  defaultExportPresent: Boolean(
+    readNamedExport(ComposerSurfaceBuilderModule as Record<string, unknown>, 'default'),
+  ),
+},
+{
+  key: 'MessageFeedSurfaceBuilder',
+  fileName: 'messageFeedSurfaceBuilder.ts',
+  importPath: './messageFeedSurfaceBuilder',
+  category: 'BUILDER',
+  stability: 'PRIMARY',
+  renderLayer: 'builder',
+  description: 'Shell normalization builder for legacy transcript/runtime rows into canonical feed and card view models.',
+  usedByMounts: TRANSCRIPT_CAPABLE_MOUNTS,
+  dependsOnEngine: false,
+  dependsOnSharedContracts: true,
+  directExportRisk: 'LOW',
+  longTermAuthority: true,
+  namespace: MessageFeedSurfaceBuilderModule,
+  namedExportHints: ['buildMessageCardViewModelFromLegacy', 'buildMessageFeedSurfaceModel', 'BuildMessageFeedSurfaceOptions', 'BuildMessageFeedSurfaceResult'] as const,
+  defaultExportPresent: Boolean(
+    readNamedExport(MessageFeedSurfaceBuilderModule as Record<string, unknown>, 'default'),
+  ),
+},
+{
+  key: 'PresenceTypingSurfaceBuilder',
+  fileName: 'presenceTypingSurfaceBuilder.ts',
+  importPath: './presenceTypingSurfaceBuilder',
+  category: 'BUILDER',
+  stability: 'PRIMARY',
+  renderLayer: 'builder',
+  description: 'Shell normalization builder for derived presence actors and typing clusters.',
+  usedByMounts: CORE_GAME_MOUNTS,
+  dependsOnEngine: false,
+  dependsOnSharedContracts: true,
+  directExportRisk: 'LOW',
+  longTermAuthority: true,
+  namespace: PresenceTypingSurfaceBuilderModule,
+  namedExportHints: ['buildPresenceStripViewModel', 'buildTypingClusterViewModel', 'BuildPresenceTypingArgs'] as const,
+  defaultExportPresent: Boolean(
+    readNamedExport(PresenceTypingSurfaceBuilderModule as Record<string, unknown>, 'default'),
+  ),
+},
+{
+  key: 'StatusSurfaceBuilder',
+  fileName: 'statusSurfaceBuilder.ts',
+  importPath: './statusSurfaceBuilder',
+  category: 'BUILDER',
+  stability: 'PRIMARY',
+  renderLayer: 'builder',
+  description: 'Shell normalization builder for invasion banners, threat meters, room headers, and empty states.',
+  usedByMounts: ALL_MOUNTS,
+  dependsOnEngine: false,
+  dependsOnSharedContracts: true,
+  directExportRisk: 'LOW',
+  longTermAuthority: true,
+  namespace: StatusSurfaceBuilderModule,
+  namedExportHints: ['buildThreatMeterViewModel', 'buildInvasionBannerViewModel', 'buildRoomHeaderViewModel', 'buildEmptyStateViewModel', 'BuildStatusSurfaceArgs'] as const,
+  defaultExportPresent: Boolean(
+    readNamedExport(StatusSurfaceBuilderModule as Record<string, unknown>, 'default'),
+  ),
+},
+{
+  key: 'TranscriptDrawerAdapter',
+  fileName: 'transcriptDrawerAdapter.ts',
+  importPath: './transcriptDrawerAdapter',
+  category: 'ADAPTER',
+  stability: 'PRIMARY',
+  renderLayer: 'adapter',
+  description: 'Transcript-drawer adapter for search/filter surface models and callback factories.',
+  usedByMounts: TRANSCRIPT_CAPABLE_MOUNTS,
+  dependsOnEngine: false,
+  dependsOnSharedContracts: true,
+  directExportRisk: 'LOW',
+  longTermAuthority: true,
+  namespace: TranscriptDrawerAdapterModule,
+  namedExportHints: ['buildTranscriptDrawerSurfaceModel', 'createTranscriptDrawerCallbacks', 'BuildTranscriptDrawerSurfaceParams', 'CreateTranscriptDrawerCallbacksParams'] as const,
+  defaultExportPresent: Boolean(
+    readNamedExport(TranscriptDrawerAdapterModule as Record<string, unknown>, 'default'),
+  ),
+},
+{
+  key: 'CollapsedPillAdapter',
+  fileName: 'collapsedPillAdapter.ts',
+  importPath: './collapsedPillAdapter',
+  category: 'ADAPTER',
+  stability: 'PRIMARY',
+  renderLayer: 'adapter',
+  description: 'Collapsed-pill adapter that converts unified shell state into the minimized pill model.',
+  usedByMounts: ALL_MOUNTS,
+  dependsOnEngine: false,
+  dependsOnSharedContracts: true,
+  directExportRisk: 'LOW',
+  longTermAuthority: true,
+  namespace: CollapsedPillAdapterModule,
+  namedExportHints: ['buildCollapsedPillViewModelFromUnifiedChat', 'CollapsedPillAdapterOptions'] as const,
+  defaultExportPresent: Boolean(
+    readNamedExport(CollapsedPillAdapterModule as Record<string, unknown>, 'default'),
+  ),
+},
+{
+  key: 'ChatPanel',
+  fileName: 'ChatPanel.tsx',
+  importPath: './ChatPanel',
+  category: 'COMPATIBILITY',
+  stability: 'LEGACY_COMPAT',
+  renderLayer: 'compat',
+  description: 'Legacy panel wrapper retained for import stability while UnifiedChatDock remains the primary shell.',
+  usedByMounts: ALL_MOUNTS,
+  dependsOnEngine: true,
+  dependsOnSharedContracts: true,
+  directExportRisk: 'HIGH',
+  longTermAuthority: false,
+  namespace: ChatPanelModule,
+  namedExportHints: ['ChatPanel'] as const,
+  defaultExportPresent: Boolean(
+    readNamedExport(ChatPanelModule as Record<string, unknown>, 'default'),
+  ),
+},
+{
+  key: 'useChatEngine',
+  fileName: 'useChatEngine.ts',
+  importPath: './useChatEngine',
+  category: 'COMPATIBILITY',
+  stability: 'LEGACY_COMPAT',
+  renderLayer: 'compat',
+  description: 'Legacy hook bridge preserved for callers not yet migrated to useUnifiedChat or the engine public lane.',
+  usedByMounts: ALL_MOUNTS,
+  dependsOnEngine: true,
+  dependsOnSharedContracts: true,
+  directExportRisk: 'HIGH',
+  longTermAuthority: false,
+  namespace: UseChatEngineModule,
+  namedExportHints: ['useChatEngine'] as const,
+  defaultExportPresent: Boolean(
+    readNamedExport(UseChatEngineModule as Record<string, unknown>, 'default'),
+  ),
+},
+{
+  key: 'chatTypes',
+  fileName: 'chatTypes.ts',
+  importPath: './chatTypes',
+  category: 'COMPATIBILITY',
+  stability: 'MIGRATION_BRIDGE',
+  renderLayer: 'types',
+  description: 'Compatibility contract shim that keeps legacy imports alive while canonical truth continues moving into shared/contracts/chat.',
+  usedByMounts: ALL_MOUNTS,
+  dependsOnEngine: true,
+  dependsOnSharedContracts: true,
+  directExportRisk: 'HIGH',
+  longTermAuthority: false,
+  namespace: ChatTypesModule,
+  namedExportHints: ['ChatMessage', 'GameChatContext', 'SabotageEvent'] as const,
+  defaultExportPresent: Boolean(
+    readNamedExport(ChatTypesModule as Record<string, unknown>, 'default'),
+  ),
+},
+] as const satisfies readonly ChatComponentModuleDefinition[];
+
+export const CHAT_COMPONENT_IMPORT_PATHS = mapByKey(
+  (definition) => definition.importPath,
+);
+
+export const CHAT_COMPONENT_MODULE_DESCRIPTORS = mapByKey<ChatComponentModuleDescriptor>(
+  (definition) => ({
+    key: definition.key,
+    fileName: definition.fileName,
+    importPath: definition.importPath,
+    category: definition.category,
+    stability: definition.stability,
+    renderLayer: definition.renderLayer,
+    description: definition.description,
+    usedByMounts: definition.usedByMounts,
+    dependsOnEngine: definition.dependsOnEngine,
+    dependsOnSharedContracts: definition.dependsOnSharedContracts,
+    directExportRisk: definition.directExportRisk,
+    longTermAuthority: definition.longTermAuthority,
+  }),
+);
+
+export const CHAT_COMPONENT_MODULE_NAMESPACES = mapByKey(
+  (definition) => definition.namespace,
+);
+
+export const CHAT_COMPONENT_PACKAGES = mapByKey<ChatComponentPackage>(
+  (definition) => ({
+    descriptor: CHAT_COMPONENT_MODULE_DESCRIPTORS[definition.key],
+    namespace: definition.namespace,
+    namedExportHints: definition.namedExportHints,
+    defaultExportPresent: definition.defaultExportPresent,
+  }),
+);
 
 // ============================================================================
 // MARK: Export groups and lookup helpers
 // ============================================================================
 
-export const CHAT_COMPONENT_PRIMARY_MODULES = [
-  'UnifiedChatDock',
-  'ChatComposer',
-  'ChatMessageFeed',
-  'ChatMessageCard',
-  'ChatChannelTabs',
-  'ChatPresenceStrip',
-  'ChatTypingIndicator',
-  'ChatInvasionBanner',
-  'ChatThreatMeter',
-  'ChatHelperPrompt',
-  'ChatCollapsedPill',
-  'ChatTranscriptDrawer',
-  'ChatRoomHeader',
-  'ChatEmptyState',
-  'useUnifiedChat',
-  'uiTypes',
-] as const satisfies readonly ChatComponentModuleKey[];
+export const CHAT_COMPONENT_PRIMARY_MODULES =
+  listModuleKeysByFilter((definition) => definition.stability === 'PRIMARY');
 
-export const CHAT_COMPONENT_COMPATIBILITY_MODULES = [
-  'ChatPanel',
-  'useChatEngine',
-  'chatTypes',
-] as const satisfies readonly ChatComponentModuleKey[];
+export const CHAT_COMPONENT_COMPATIBILITY_MODULES =
+  listModuleKeysByFilter((definition) => definition.stability !== 'PRIMARY');
+
+export const CHAT_COMPONENT_BUILDER_MODULES =
+  listModuleKeysByFilter((definition) => definition.category === 'BUILDER');
+
+export const CHAT_COMPONENT_ADAPTER_MODULES =
+  listModuleKeysByFilter((definition) => definition.category === 'ADAPTER');
 
 export const CHAT_COMPONENT_FEED_SURFACE = [
   'UnifiedChatDock',
@@ -803,6 +1148,8 @@ export const CHAT_COMPONENT_FEED_SURFACE = [
   'ChatMessageCard',
   'ChatTranscriptDrawer',
   'ChatEmptyState',
+  'MessageFeedSurfaceBuilder',
+  'TranscriptDrawerAdapter',
   'uiTypes',
   'chatTypes',
 ] as const satisfies readonly ChatComponentModuleKey[];
@@ -815,13 +1162,33 @@ export const CHAT_COMPONENT_INTERACTION_SURFACE = [
   'ChatHelperPrompt',
   'useUnifiedChat',
   'useChatEngine',
+  'ComposerSurfaceBuilder',
+  'ChannelTabsSurfaceBuilder',
+  'PresenceTypingSurfaceBuilder',
 ] as const satisfies readonly ChatComponentModuleKey[];
 
 export const CHAT_COMPONENT_STATUS_SURFACE = [
   'ChatInvasionBanner',
   'ChatThreatMeter',
   'ChatRoomHeader',
+  'ChatEmptyState',
+  'StatusSurfaceBuilder',
+] as const satisfies readonly ChatComponentModuleKey[];
+
+export const CHAT_COMPONENT_COLLAPSED_SURFACE = [
   'ChatCollapsedPill',
+  'CollapsedPillAdapter',
+  'uiTypes',
+] as const satisfies readonly ChatComponentModuleKey[];
+
+export const CHAT_COMPONENT_NORMALIZATION_SURFACE = [
+  'ChannelTabsSurfaceBuilder',
+  'ComposerSurfaceBuilder',
+  'MessageFeedSurfaceBuilder',
+  'PresenceTypingSurfaceBuilder',
+  'StatusSurfaceBuilder',
+  'TranscriptDrawerAdapter',
+  'CollapsedPillAdapter',
 ] as const satisfies readonly ChatComponentModuleKey[];
 
 export function isChatComponentModuleKey(
@@ -862,20 +1229,24 @@ export function listCompatibilityChatComponentModules(): readonly ChatComponentM
   return CHAT_COMPONENT_COMPATIBILITY_MODULES;
 }
 
+export function listBuilderChatComponentModules(): readonly ChatComponentModuleKey[] {
+  return CHAT_COMPONENT_BUILDER_MODULES;
+}
+
+export function listAdapterChatComponentModules(): readonly ChatComponentModuleKey[] {
+  return CHAT_COMPONENT_ADAPTER_MODULES;
+}
+
 export function listChatComponentModulesByCategory(
   category: ChatComponentCategory,
 ): readonly ChatComponentModuleKey[] {
-  return CHAT_COMPONENT_MODULE_KEYS.filter(
-    (key) => CHAT_COMPONENT_MODULE_DESCRIPTORS[key].category === category,
-  );
+  return listModuleKeysByFilter((definition) => definition.category === category);
 }
 
 export function listChatComponentModulesByStability(
   stability: ChatComponentStability,
 ): readonly ChatComponentModuleKey[] {
-  return CHAT_COMPONENT_MODULE_KEYS.filter(
-    (key) => CHAT_COMPONENT_MODULE_DESCRIPTORS[key].stability === stability,
-  );
+  return listModuleKeysByFilter((definition) => definition.stability === stability);
 }
 
 export function moduleIsPrimary(
@@ -896,11 +1267,17 @@ export function moduleOwnsLongTermAuthority(
   return CHAT_COMPONENT_MODULE_DESCRIPTORS[key].longTermAuthority;
 }
 
+export function moduleProvidesDefaultExport(
+  key: ChatComponentModuleKey,
+): boolean {
+  return CHAT_COMPONENT_PACKAGES[key].defaultExportPresent;
+}
+
 export function getModulesForMount(
   mountTarget: SharedChat.ChatMountTarget,
 ): readonly ChatComponentModuleKey[] {
-  return CHAT_COMPONENT_MODULE_KEYS.filter((key) =>
-    CHAT_COMPONENT_MODULE_DESCRIPTORS[key].usedByMounts.includes(mountTarget),
+  return listModuleKeysByFilter((definition) =>
+    definition.usedByMounts.includes(mountTarget),
   );
 }
 
@@ -916,194 +1293,6 @@ export function getCompatibilityModulesForMount(
   return getModulesForMount(mountTarget).filter(moduleIsCompatibilityOnly);
 }
 
-function readNamedExport(
-  namespace: Record<string, unknown>,
-  key: string,
-): unknown {
-  return Object.prototype.hasOwnProperty.call(namespace, key)
-    ? namespace[key]
-    : undefined;
-}
-
-export interface ChatComponentPackage {
-  readonly descriptor: ChatComponentModuleDescriptor;
-  readonly namespace: ChatComponentModuleNamespace;
-  readonly namedExportHints: readonly string[];
-  readonly defaultExportPresent: boolean;
-}
-
-export const CHAT_COMPONENT_PACKAGES = Object.freeze({
-  UnifiedChatDock: Object.freeze<ChatComponentPackage>({
-    descriptor: CHAT_COMPONENT_MODULE_DESCRIPTORS.UnifiedChatDock,
-    namespace: UnifiedChatDockModule,
-    namedExportHints: ['UnifiedChatDock'],
-    defaultExportPresent: Boolean(
-      readNamedExport(UnifiedChatDockModule as Record<string, unknown>, 'default'),
-    ),
-  }),
-  ChatComposer: Object.freeze<ChatComponentPackage>({
-    descriptor: CHAT_COMPONENT_MODULE_DESCRIPTORS.ChatComposer,
-    namespace: ChatComposerModule,
-    namedExportHints: [],
-    defaultExportPresent: Boolean(
-      readNamedExport(ChatComposerModule as Record<string, unknown>, 'default'),
-    ),
-  }),
-  ChatMessageFeed: Object.freeze<ChatComponentPackage>({
-    descriptor: CHAT_COMPONENT_MODULE_DESCRIPTORS.ChatMessageFeed,
-    namespace: ChatMessageFeedModule,
-    namedExportHints: [],
-    defaultExportPresent: Boolean(
-      readNamedExport(ChatMessageFeedModule as Record<string, unknown>, 'default'),
-    ),
-  }),
-  ChatMessageCard: Object.freeze<ChatComponentPackage>({
-    descriptor: CHAT_COMPONENT_MODULE_DESCRIPTORS.ChatMessageCard,
-    namespace: ChatMessageCardModule,
-    namedExportHints: [],
-    defaultExportPresent: Boolean(
-      readNamedExport(ChatMessageCardModule as Record<string, unknown>, 'default'),
-    ),
-  }),
-  ChatChannelTabs: Object.freeze<ChatComponentPackage>({
-    descriptor: CHAT_COMPONENT_MODULE_DESCRIPTORS.ChatChannelTabs,
-    namespace: ChatChannelTabsModule,
-    namedExportHints: [],
-    defaultExportPresent: Boolean(
-      readNamedExport(ChatChannelTabsModule as Record<string, unknown>, 'default'),
-    ),
-  }),
-  ChatPresenceStrip: Object.freeze<ChatComponentPackage>({
-    descriptor: CHAT_COMPONENT_MODULE_DESCRIPTORS.ChatPresenceStrip,
-    namespace: ChatPresenceStripModule,
-    namedExportHints: [],
-    defaultExportPresent: Boolean(
-      readNamedExport(ChatPresenceStripModule as Record<string, unknown>, 'default'),
-    ),
-  }),
-  ChatTypingIndicator: Object.freeze<ChatComponentPackage>({
-    descriptor: CHAT_COMPONENT_MODULE_DESCRIPTORS.ChatTypingIndicator,
-    namespace: ChatTypingIndicatorModule,
-    namedExportHints: [],
-    defaultExportPresent: Boolean(
-      readNamedExport(ChatTypingIndicatorModule as Record<string, unknown>, 'default'),
-    ),
-  }),
-  ChatInvasionBanner: Object.freeze<ChatComponentPackage>({
-    descriptor: CHAT_COMPONENT_MODULE_DESCRIPTORS.ChatInvasionBanner,
-    namespace: ChatInvasionBannerModule,
-    namedExportHints: [],
-    defaultExportPresent: Boolean(
-      readNamedExport(ChatInvasionBannerModule as Record<string, unknown>, 'default'),
-    ),
-  }),
-  ChatThreatMeter: Object.freeze<ChatComponentPackage>({
-    descriptor: CHAT_COMPONENT_MODULE_DESCRIPTORS.ChatThreatMeter,
-    namespace: ChatThreatMeterModule,
-    namedExportHints: [],
-    defaultExportPresent: Boolean(
-      readNamedExport(ChatThreatMeterModule as Record<string, unknown>, 'default'),
-    ),
-  }),
-  ChatHelperPrompt: Object.freeze<ChatComponentPackage>({
-    descriptor: CHAT_COMPONENT_MODULE_DESCRIPTORS.ChatHelperPrompt,
-    namespace: ChatHelperPromptModule,
-    namedExportHints: [
-      'ChatHelperPrompt',
-      'ChatHelperPromptProps',
-      'buildHelperPromptViewModel',
-      'buildHelperPromptViewModelWithDefaults',
-      'buildHelperPromptActionViewModel',
-      'buildHelperPromptBadgeViewModel',
-      'buildHelperPromptChannelViewModel',
-      'buildHelperPromptCopyViewModel',
-      'buildHelperPromptEvidenceViewModel',
-      'buildHelperPromptMetricViewModel',
-      'buildHelperPromptPresentationViewModel',
-      'buildHelperPromptStateViewModel',
-    ],
-    defaultExportPresent: Boolean(
-      readNamedExport(ChatHelperPromptModule as Record<string, unknown>, 'default'),
-    ),
-  }),
-  ChatCollapsedPill: Object.freeze<ChatComponentPackage>({
-    descriptor: CHAT_COMPONENT_MODULE_DESCRIPTORS.ChatCollapsedPill,
-    namespace: ChatCollapsedPillModule,
-    namedExportHints: [],
-    defaultExportPresent: Boolean(
-      readNamedExport(ChatCollapsedPillModule as Record<string, unknown>, 'default'),
-    ),
-  }),
-  ChatTranscriptDrawer: Object.freeze<ChatComponentPackage>({
-    descriptor: CHAT_COMPONENT_MODULE_DESCRIPTORS.ChatTranscriptDrawer,
-    namespace: ChatTranscriptDrawerModule,
-    namedExportHints: [],
-    defaultExportPresent: Boolean(
-      readNamedExport(ChatTranscriptDrawerModule as Record<string, unknown>, 'default'),
-    ),
-  }),
-  ChatRoomHeader: Object.freeze<ChatComponentPackage>({
-    descriptor: CHAT_COMPONENT_MODULE_DESCRIPTORS.ChatRoomHeader,
-    namespace: ChatRoomHeaderModule,
-    namedExportHints: [],
-    defaultExportPresent: Boolean(
-      readNamedExport(ChatRoomHeaderModule as Record<string, unknown>, 'default'),
-    ),
-  }),
-  ChatEmptyState: Object.freeze<ChatComponentPackage>({
-    descriptor: CHAT_COMPONENT_MODULE_DESCRIPTORS.ChatEmptyState,
-    namespace: ChatEmptyStateModule,
-    namedExportHints: [],
-    defaultExportPresent: Boolean(
-      readNamedExport(ChatEmptyStateModule as Record<string, unknown>, 'default'),
-    ),
-  }),
-  useUnifiedChat: Object.freeze<ChatComponentPackage>({
-    descriptor: CHAT_COMPONENT_MODULE_DESCRIPTORS.useUnifiedChat,
-    namespace: UseUnifiedChatModule,
-    namedExportHints: ['useUnifiedChat'],
-    defaultExportPresent: Boolean(
-      readNamedExport(UseUnifiedChatModule as Record<string, unknown>, 'default'),
-    ),
-  }),
-  uiTypes: Object.freeze<ChatComponentPackage>({
-    descriptor: CHAT_COMPONENT_MODULE_DESCRIPTORS.uiTypes,
-    namespace: UiTypesModule,
-    namedExportHints: [
-      'ChatUiUnifiedShellViewModel',
-      'ChatUiHelperPromptViewModel',
-      'buildUnifiedShellViewModel',
-      'buildHelperPromptViewModel',
-      'buildHelperPromptViewModelWithDefaults',
-      'isUnifiedShellViewModel',
-      'isHelperPromptViewModel',
-    ],
-    defaultExportPresent: false,
-  }),
-  ChatPanel: Object.freeze<ChatComponentPackage>({
-    descriptor: CHAT_COMPONENT_MODULE_DESCRIPTORS.ChatPanel,
-    namespace: ChatPanelModule,
-    namedExportHints: ['ChatPanel'],
-    defaultExportPresent: Boolean(
-      readNamedExport(ChatPanelModule as Record<string, unknown>, 'default'),
-    ),
-  }),
-  useChatEngine: Object.freeze<ChatComponentPackage>({
-    descriptor: CHAT_COMPONENT_MODULE_DESCRIPTORS.useChatEngine,
-    namespace: UseChatEngineModule,
-    namedExportHints: ['useChatEngine'],
-    defaultExportPresent: Boolean(
-      readNamedExport(UseChatEngineModule as Record<string, unknown>, 'default'),
-    ),
-  }),
-  chatTypes: Object.freeze<ChatComponentPackage>({
-    descriptor: CHAT_COMPONENT_MODULE_DESCRIPTORS.chatTypes,
-    namespace: ChatTypesModule,
-    namedExportHints: ['ChatMessage', 'GameChatContext', 'SabotageEvent'],
-    defaultExportPresent: false,
-  }),
-} as const satisfies Record<ChatComponentModuleKey, ChatComponentPackage>);
-
 // ============================================================================
 // MARK: Manifest and runtime surface
 // ============================================================================
@@ -1118,13 +1307,13 @@ export interface ChatComponentManifestEntry {
 }
 
 export const CHAT_COMPONENT_MANIFEST = Object.freeze(
-  CHAT_COMPONENT_MODULE_KEYS.map<ChatComponentManifestEntry>((key) => ({
-    key,
-    fileName: CHAT_COMPONENT_MODULE_DESCRIPTORS[key].fileName,
-    importPath: CHAT_COMPONENT_MODULE_DESCRIPTORS[key].importPath,
-    category: CHAT_COMPONENT_MODULE_DESCRIPTORS[key].category,
-    stability: CHAT_COMPONENT_MODULE_DESCRIPTORS[key].stability,
-    longTermAuthority: CHAT_COMPONENT_MODULE_DESCRIPTORS[key].longTermAuthority,
+  CHAT_COMPONENT_MODULE_SPEC.map<ChatComponentManifestEntry>((definition) => ({
+    key: definition.key,
+    fileName: definition.fileName,
+    importPath: definition.importPath,
+    category: definition.category,
+    stability: definition.stability,
+    longTermAuthority: definition.longTermAuthority,
   })),
 );
 
@@ -1160,6 +1349,7 @@ export const CHAT_COMPONENT_RUNTIME_LAWS = Object.freeze([
   'All canonical contracts flow inward from shared/contracts/chat.',
   'All engine authority flows inward from pzo-web/src/engines/chat.',
   'Barrel exports must remain migration-safe for multi-screen chat mounts.',
+  'Shell normalization builders and adapters stay in the component lane because they shape presentation contracts, not engine truth.',
   'Mount registration must use shared contract mount constants, never ad-hoc strings.',
   'Helper prompt convenience aliases in this barrel must defer to uiTypes builders.',
 ] as const);
@@ -1173,6 +1363,9 @@ export const CHAT_COMPONENT_MIGRATION_STATUS = Object.freeze({
   serverTransportLaneExpected: true,
   shellOwnsTruth: false,
   shellOwnsPresentation: true,
+  shellNormalizationBuildersPresent: true,
+  transcriptDrawerAdapterPresent: true,
+  collapsedPillAdapterPresent: true,
   chatTypesIsCompatibilityShim: true,
   useChatEngineIsCompatibilityBridge: true,
   ChatPanelIsCompatibilityBridge: true,
@@ -1189,9 +1382,13 @@ export const CHAT_COMPONENT_REGISTRY = Object.freeze({
   groups: Object.freeze({
     primary: CHAT_COMPONENT_PRIMARY_MODULES,
     compatibility: CHAT_COMPONENT_COMPATIBILITY_MODULES,
+    builders: CHAT_COMPONENT_BUILDER_MODULES,
+    adapters: CHAT_COMPONENT_ADAPTER_MODULES,
+    normalization: CHAT_COMPONENT_NORMALIZATION_SURFACE,
     feed: CHAT_COMPONENT_FEED_SURFACE,
     interaction: CHAT_COMPONENT_INTERACTION_SURFACE,
     status: CHAT_COMPONENT_STATUS_SURFACE,
+    collapsed: CHAT_COMPONENT_COLLAPSED_SURFACE,
   }),
   laws: CHAT_COMPONENT_RUNTIME_LAWS,
   migration: CHAT_COMPONENT_MIGRATION_STATUS,
@@ -1203,11 +1400,14 @@ export const CHAT_COMPONENT_REGISTRY = Object.freeze({
     getChatComponentFileName,
     listPrimaryChatComponentModules,
     listCompatibilityChatComponentModules,
+    listBuilderChatComponentModules,
+    listAdapterChatComponentModules,
     listChatComponentModulesByCategory,
     listChatComponentModulesByStability,
     moduleIsPrimary,
     moduleIsCompatibilityOnly,
     moduleOwnsLongTermAuthority,
+    moduleProvidesDefaultExport,
     getModulesForMount,
     getPrimaryModulesForMount,
     getCompatibilityModulesForMount,
@@ -1219,5 +1419,18 @@ export const CHAT_COMPONENT_REGISTRY = Object.freeze({
     buildHelperPromptMetricViewModel,
     buildHelperPromptPresentationViewModel,
     buildHelperPromptStateViewModel,
+    buildChannelTabsSurfaceModel,
+    buildComposerSurfaceModel,
+    buildMessageCardSurfaceModel,
+    buildMessageFeedShellSurfaceModel,
+    buildPresenceSurfaceModel,
+    buildTypingSurfaceModel,
+    buildStatusThreatSurfaceModel,
+    buildStatusInvasionSurfaceModel,
+    buildStatusRoomHeaderSurfaceModel,
+    buildStatusEmptySurfaceModel,
+    buildTranscriptDrawerShellSurfaceModel,
+    createTranscriptDrawerShellCallbacks,
+    buildCollapsedPillShellSurfaceModel,
   }),
 });
