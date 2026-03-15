@@ -38,116 +38,38 @@ import React, {
   type MouseEvent as ReactMouseEvent,
 } from 'react';
 
-import type { ChatChannel } from './chatTypes';
+import * as SharedChat from '../../../../shared/contracts/chat';
+import type {
+  ChatComposerProps,
+  ChatComposerSubmitPayload,
+  ComposerDiagnosticLine,
+  ComposerHintLine,
+  ComposerModePreset,
+  ComposerNetworkState,
+  ComposerQuickAccent,
+  ComposerQuickInsert,
+  ComposerReplyPreview,
+  ComposerSubmitState,
+  ComposerThreatBand,
+  ComposerTone,
+} from './uiTypes';
 
-export type ComposerThreatBand = 'QUIET' | 'LOW' | 'ELEVATED' | 'HIGH' | 'SEVERE';
-export type ComposerNetworkState = 'ONLINE' | 'CONNECTING' | 'DEGRADED' | 'OFFLINE';
-export type ComposerSubmitState = 'IDLE' | 'READY' | 'BLOCKED' | 'SENDING' | 'COOLDOWN';
-export type ComposerTone = 'neutral' | 'info' | 'success' | 'warning' | 'danger';
-export type ComposerQuickAccent = 'default' | 'info' | 'success' | 'warning' | 'danger';
+type ChatChannel = SharedChat.ChatChannelsModule.ChatVisibleChannel;
 
-export interface ComposerQuickInsert {
-  id: string;
-  label: string;
-  value: string;
-  emoji?: string;
-  accent?: ComposerQuickAccent;
-  visibleIn?: ChatChannel[];
-  destructive?: boolean;
-  helper?: boolean;
-  disabled?: boolean;
-  reason?: string;
-}
-
-export interface ComposerHintLine {
-  id: string;
-  tone: ComposerTone;
-  text: string;
-  visible?: boolean;
-}
-
-export interface ComposerReplyPreview {
-  id: string;
-  senderName: string;
-  body: string;
-  channel?: ChatChannel;
-  immutable?: boolean;
-}
-
-export interface ComposerModePreset {
-  id: string;
-  label: string;
-  accent: string;
-  description: string;
-}
-
-export interface ComposerDiagnosticLine {
-  id: string;
-  label: string;
-  value: string;
-  tone?: ComposerTone;
-  visible?: boolean;
-}
-
-export interface ChatComposerSubmitPayload {
-  body: string;
-  channel: ChatChannel;
-  usedQuickInsertIds: string[];
-  replyToId?: string;
-}
-
-export interface ChatComposerProps {
-  channel: ChatChannel;
-  value: string;
-  onChange: (nextValue: string) => void;
-  onSubmit: (payload: ChatComposerSubmitPayload) => void;
-  onTypingStateChange?: (typing: boolean) => void;
-  onFocus?: () => void;
-  onBlur?: () => void;
-  onCycleChannel?: () => void;
-  onRequestHelper?: () => void;
-  onCancelReply?: () => void;
-  onToggleExpandedTools?: (nextOpen: boolean) => void;
-  onEscalateThreatPanel?: () => void;
-  onOpenCommands?: () => void;
-  onOpenTranscriptPolicy?: () => void;
-  onInsertQuickText?: (insert: ComposerQuickInsert) => void;
-  placeholder?: string;
-  disabled?: boolean;
-  locked?: boolean;
-  connected?: boolean;
-  networkState?: ComposerNetworkState;
-  submitState?: ComposerSubmitState;
-  sendCooldownMs?: number;
-  threatBand?: ComposerThreatBand;
-  helperAvailable?: boolean;
-  helperLabel?: string;
-  transcriptImmutable?: boolean;
-  maxLength?: number;
-  minRows?: number;
-  maxRows?: number;
-  dangerCopy?: string;
-  showDangerCopy?: boolean;
-  modePreset?: ComposerModePreset | null;
-  quickInserts?: ComposerQuickInsert[];
-  hintLines?: ComposerHintLine[];
-  diagnosticLines?: ComposerDiagnosticLine[];
-  replyPreview?: ComposerReplyPreview | null;
-  autoFocus?: boolean;
-  allowShiftEnter?: boolean;
-  allowQuickInsertBar?: boolean;
-  allowHelperShortcut?: boolean;
-  showCharacterMeter?: boolean;
-  showProofNotice?: boolean;
-  showDiagnostics?: boolean;
-  showToolsByDefault?: boolean;
-  forceCompact?: boolean;
-  footerLeftSlot?: React.ReactNode;
-  footerRightSlot?: React.ReactNode;
-  statusRightSlot?: React.ReactNode;
-  className?: string;
-  style?: CSSProperties;
-}
+export type {
+  ChatComposerProps,
+  ChatComposerSubmitPayload,
+  ComposerDiagnosticLine,
+  ComposerHintLine,
+  ComposerModePreset,
+  ComposerNetworkState,
+  ComposerQuickAccent,
+  ComposerQuickInsert,
+  ComposerReplyPreview,
+  ComposerSubmitState,
+  ComposerThreatBand,
+  ComposerTone,
+} from './uiTypes';
 
 type ChannelPresentation = {
   label: string;
