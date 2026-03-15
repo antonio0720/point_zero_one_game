@@ -2,7 +2,7 @@
  * ============================================================================
  * POINT ZERO ONE — COMPONENT CHAT UI CONTRACTS
  * FILE: pzo-web/src/components/chat/uiTypes.ts
- * VERSION: 2.1.0
+ * VERSION: 2.2.0
  * AUTHOR: OpenAI
  * LICENSE: Internal / Project Use Only
  * ============================================================================
@@ -950,19 +950,135 @@ export interface ChatUiHelperPromptViewModel {
  * Section 12 — Collapsed pill, room header, empty state
  * ========================================================================== */
 
+export type ChatUiCollapsedPillPresenceMood = 'quiet' | 'watched' | 'active' | 'swarming';
+
+export type ChatUiCollapsedPillActionKind =
+  | 'open'
+  | 'toggle'
+  | 'dismiss'
+  | 'channel'
+  | 'cta'
+  | 'secondary';
+
+export interface ChatUiCollapsedPillPresenceSummary {
+  count?: UINumber;
+  activeCount?: UINumber;
+  mood?: ChatUiCollapsedPillPresenceMood;
+  moodLabel?: UIString;
+  label?: UIString;
+  observerLabels?: UIString[];
+  tooltip?: UIString;
+}
+
+export interface ChatUiCollapsedPillTypingSummary {
+  count?: UINumber;
+  label?: UIString;
+  actorLabels?: UIString[];
+  strongestState?: ChatUiTypingState;
+  tooltip?: UIString;
+}
+
+export interface ChatUiCollapsedPillThreatSummary {
+  band?: ChatUiThreatBand;
+  score01?: UINumber;
+  label?: UIString;
+  helperPressure?: UINumber;
+  haterPressure?: UINumber;
+  crowdHeat?: UINumber;
+  tooltip?: UIString;
+}
+
+export interface ChatUiCollapsedPillHelperSummary {
+  visible: UIBoolean;
+  label?: UIString;
+  body?: UIString;
+  urgency?: ChatUiUrgency;
+  trustWindowPct?: UINumber;
+  ctaLabel?: UIString;
+  tooltip?: UIString;
+}
+
+export interface ChatUiCollapsedPillInvasionSummary {
+  active: UIBoolean;
+  label?: UIString;
+  stageLabel?: UIString;
+  aggressorLabel?: UIString;
+  priorityLabel?: UIString;
+  tooltip?: UIString;
+}
+
+export interface ChatUiCollapsedPillChannelSummary {
+  id: ChatUiId;
+  channelId: ChatUiChannelId;
+  label: UIString;
+  shortLabel?: UIString;
+  kind?: ChatUiChannelKind;
+  icon?: UIString;
+  unreadCount?: UINumber;
+  mentionCount?: UINumber;
+  typingCount?: UINumber;
+  active?: UIBoolean;
+  helperPending?: UIBoolean;
+  haterPending?: UIBoolean;
+  accent?: ChatUiAccent;
+  tone?: ChatUiTone;
+  tooltip?: UIString;
+  disabled?: UIBoolean;
+}
+
+export interface ChatUiCollapsedPillAction {
+  id: ChatUiId;
+  label: UIString;
+  icon?: UIString;
+  kind?: ChatUiCollapsedPillActionKind;
+  primary?: UIBoolean;
+  channelId?: ChatUiChannelId;
+  tone?: ChatUiTone;
+  accent?: ChatUiAccent;
+  tooltip?: UIString;
+  disabled?: UIBoolean;
+}
+
 export interface ChatUiCollapsedPillViewModel {
   id: ChatUiId;
   label: UIString;
   shortLabel?: UIString;
+  icon?: UIString;
   unreadCount?: UINumber;
+  mentionCount?: UINumber;
   threatBand?: ChatUiThreatBand;
   typingCount?: UINumber;
+  presenceCount?: UINumber;
   helperVisible?: UIBoolean;
   invasionActive?: UIBoolean;
   accent: ChatUiAccent;
   tone: ChatUiTone;
   expanded?: UIBoolean;
   tooltip?: UIString;
+
+  roomLabel?: UIString;
+  roomSubtitle?: UIString;
+  channelLabel?: UIString;
+  mountLabel?: UIString;
+  liveLabel?: UIString;
+  connectionLabel?: UIString;
+  statusLine?: UIString;
+  pinned?: UIBoolean;
+  muted?: UIBoolean;
+  disabled?: UIBoolean;
+  attention?: ChatUiImportance;
+
+  presenceSummary?: ChatUiCollapsedPillPresenceSummary;
+  typingSummary?: ChatUiCollapsedPillTypingSummary;
+  threatSummary?: ChatUiCollapsedPillThreatSummary;
+  helperSummary?: ChatUiCollapsedPillHelperSummary;
+  invasionSummary?: ChatUiCollapsedPillInvasionSummary;
+
+  channelSummaries?: ChatUiCollapsedPillChannelSummary[];
+  chips?: ChatUiChip[];
+  metrics?: ChatUiMetric[];
+  statusPills?: ChatUiPill[];
+  actions?: ChatUiCollapsedPillAction[];
 }
 
 export interface ChatUiRoomHeaderAction {
@@ -2220,6 +2336,22 @@ export function createMetric(raw: unknown, index = 0): ChatUiMetric {
   };
 }
 
+
+export function createPill(raw: unknown, index = 0): ChatUiPill {
+  const source = asRecord(raw);
+  return {
+    id: asNonEmptyString(source.id, `pill:${index}`),
+    label: asNonEmptyString(source.label, 'Pill'),
+    value: maybeText(source.value),
+    icon: maybeText(source.icon),
+    tone: normalizeTone(source.tone),
+    accent: normalizeAccent(source.accent),
+    clickable: asBoolean(source.clickable),
+    selected: asBoolean(source.selected),
+    tooltip: maybeText(source.tooltip),
+  };
+}
+
 export function createChips(values: readonly unknown[]): ChatUiChip[] {
   return values.map((raw, index) => {
     const source = asRecord(raw);
@@ -2782,9 +2914,182 @@ export function buildHelperPromptViewModel(raw: unknown): ChatUiHelperPromptView
   };
 }
 
+
+export function normalizeCollapsedPresenceMood(value: unknown): ChatUiCollapsedPillPresenceMood {
+  const next = asNonEmptyString(value).toLowerCase();
+  switch (next) {
+    case 'watched':
+      return 'watched';
+    case 'active':
+      return 'active';
+    case 'swarming':
+      return 'swarming';
+    case 'quiet':
+    default:
+      return 'quiet';
+  }
+}
+
+export function normalizeCollapsedActionKind(value: unknown): ChatUiCollapsedPillActionKind {
+  const next = asNonEmptyString(value).toLowerCase();
+  switch (next) {
+    case 'toggle':
+      return 'toggle';
+    case 'dismiss':
+      return 'dismiss';
+    case 'channel':
+      return 'channel';
+    case 'cta':
+      return 'cta';
+    case 'secondary':
+      return 'secondary';
+    case 'open':
+    default:
+      return 'open';
+  }
+}
+
+export function createCollapsedPillPresenceSummary(
+  raw: unknown,
+): ChatUiCollapsedPillPresenceSummary | undefined {
+  const source = asRecord(raw);
+  if (Object.keys(source).length === 0) return undefined;
+
+  const observerLabels = asArray(source.observerLabels)
+    .map((value) => asNonEmptyString(value))
+    .filter(Boolean);
+
+  return {
+    count: maybeNumber(source.count),
+    activeCount: maybeNumber(source.activeCount),
+    mood: normalizeCollapsedPresenceMood(source.mood),
+    moodLabel: maybeText(source.moodLabel),
+    label: maybeText(source.label),
+    observerLabels: observerLabels.length > 0 ? observerLabels : undefined,
+    tooltip: maybeText(source.tooltip),
+  };
+}
+
+export function createCollapsedPillTypingSummary(
+  raw: unknown,
+): ChatUiCollapsedPillTypingSummary | undefined {
+  const source = asRecord(raw);
+  if (Object.keys(source).length === 0) return undefined;
+
+  const actorLabels = asArray(source.actorLabels)
+    .map((value) => asNonEmptyString(value))
+    .filter(Boolean);
+
+  return {
+    count: maybeNumber(source.count),
+    label: maybeText(source.label),
+    actorLabels: actorLabels.length > 0 ? actorLabels : undefined,
+    strongestState: normalizeTypingState(source.strongestState),
+    tooltip: maybeText(source.tooltip),
+  };
+}
+
+export function createCollapsedPillThreatSummary(
+  raw: unknown,
+): ChatUiCollapsedPillThreatSummary | undefined {
+  const source = asRecord(raw);
+  if (Object.keys(source).length === 0) return undefined;
+
+  return {
+    band: normalizeThreatBand(source.band),
+    score01: maybeNumber(source.score01),
+    label: maybeText(source.label),
+    helperPressure: maybeNumber(source.helperPressure),
+    haterPressure: maybeNumber(source.haterPressure),
+    crowdHeat: maybeNumber(source.crowdHeat),
+    tooltip: maybeText(source.tooltip),
+  };
+}
+
+export function createCollapsedPillHelperSummary(
+  raw: unknown,
+): ChatUiCollapsedPillHelperSummary | undefined {
+  const source = asRecord(raw);
+  if (Object.keys(source).length === 0) return undefined;
+
+  return {
+    visible: asBoolean(source.visible),
+    label: maybeText(source.label),
+    body: maybeText(source.body),
+    urgency: normalizeUrgency(source.urgency),
+    trustWindowPct: maybeNumber(source.trustWindowPct),
+    ctaLabel: maybeText(source.ctaLabel),
+    tooltip: maybeText(source.tooltip),
+  };
+}
+
+export function createCollapsedPillInvasionSummary(
+  raw: unknown,
+): ChatUiCollapsedPillInvasionSummary | undefined {
+  const source = asRecord(raw);
+  if (Object.keys(source).length === 0) return undefined;
+
+  return {
+    active: asBoolean(source.active),
+    label: maybeText(source.label),
+    stageLabel: maybeText(source.stageLabel),
+    aggressorLabel: maybeText(source.aggressorLabel),
+    priorityLabel: maybeText(source.priorityLabel),
+    tooltip: maybeText(source.tooltip),
+  };
+}
+
+export function createCollapsedPillChannelSummary(
+  raw: unknown,
+  index = 0,
+): ChatUiCollapsedPillChannelSummary {
+  const source = asRecord(raw);
+  return {
+    id: asNonEmptyString(source.id, `collapsed-channel:${index}`),
+    channelId: asNonEmptyString(source.channelId ?? source.id, `channel:${index}`),
+    label: asNonEmptyString(source.label, 'Channel'),
+    shortLabel: maybeText(source.shortLabel),
+    kind: normalizeChannelKind(source.kind),
+    icon: maybeText(source.icon),
+    unreadCount: maybeNumber(source.unreadCount),
+    mentionCount: maybeNumber(source.mentionCount),
+    typingCount: maybeNumber(source.typingCount),
+    active: asBoolean(source.active),
+    helperPending: asBoolean(source.helperPending),
+    haterPending: asBoolean(source.haterPending),
+    accent: normalizeAccent(source.accent),
+    tone: normalizeTone(source.tone),
+    tooltip: maybeText(source.tooltip),
+    disabled: asBoolean(source.disabled),
+  };
+}
+
+export function createCollapsedPillAction(
+  raw: unknown,
+  index = 0,
+): ChatUiCollapsedPillAction {
+  const source = asRecord(raw);
+  return {
+    id: asNonEmptyString(source.id, `collapsed-action:${index}`),
+    label: asNonEmptyString(source.label, 'Action'),
+    icon: maybeText(source.icon),
+    kind: normalizeCollapsedActionKind(source.kind),
+    primary: asBoolean(source.primary),
+    channelId: maybeText(source.channelId),
+    tone: normalizeTone(source.tone),
+    accent: normalizeAccent(source.accent),
+    tooltip: maybeText(source.tooltip),
+    disabled: asBoolean(source.disabled),
+  };
+}
+
 export function inferCollapsedAccent(source: UnknownRecord): ChatUiAccent {
   if (asBoolean(source.invasionActive)) return 'red';
   if (asBoolean(source.helperVisible)) return 'emerald';
+
+  const band = normalizeThreatBand(source.threatBand ?? asRecord(source.threatSummary).band);
+  if (band === 'critical' || band === 'catastrophic') return 'red';
+  if (band === 'hostile' || band === 'pressured') return 'amber';
   if (asNumber(source.unreadCount, 0) > 0) return 'silver';
   return 'slate';
 }
@@ -2792,28 +3097,72 @@ export function inferCollapsedAccent(source: UnknownRecord): ChatUiAccent {
 export function inferCollapsedTone(source: UnknownRecord): ChatUiTone {
   if (asBoolean(source.invasionActive)) return 'danger';
   if (asBoolean(source.helperVisible)) return 'supportive';
+
+  const band = normalizeThreatBand(source.threatBand ?? asRecord(source.threatSummary).band);
+  if (band === 'critical' || band === 'catastrophic') return 'danger';
+  if (band === 'hostile' || band === 'pressured') return 'warning';
   return 'neutral';
 }
 
 export function buildCollapsedPillViewModel(raw: unknown): ChatUiCollapsedPillViewModel {
   const source = asRecord(raw);
+  const chips = createChips(asArray(source.chips));
+  const metrics = asArray(source.metrics).map(createMetric);
+  const statusPills = asArray(source.statusPills).map(createPill);
+  const actions = asArray(source.actions).map(createCollapsedPillAction);
+  const channels = asArray(source.channelSummaries).map(createCollapsedPillChannelSummary);
+
+  const threatSummary = createCollapsedPillThreatSummary(source.threatSummary);
+  const presenceSummary = createCollapsedPillPresenceSummary(source.presenceSummary);
+  const typingSummary = createCollapsedPillTypingSummary(source.typingSummary);
+  const helperSummary = createCollapsedPillHelperSummary(source.helperSummary);
+  const invasionSummary = createCollapsedPillInvasionSummary(source.invasionSummary);
+
   return {
     id: asNonEmptyString(source.id, 'chat-collapsed-pill'),
     label: asNonEmptyString(source.label, 'Chat'),
     shortLabel: maybeText(source.shortLabel),
+    icon: maybeText(source.icon),
     unreadCount: maybeNumber(source.unreadCount),
-    threatBand: normalizeThreatBand(source.threatBand),
-    typingCount: maybeNumber(source.typingCount),
-    helperVisible: asBoolean(source.helperVisible),
-    invasionActive: asBoolean(source.invasionActive),
+    mentionCount: maybeNumber(source.mentionCount),
+    threatBand: normalizeThreatBand(source.threatBand ?? threatSummary?.band),
+    typingCount: maybeNumber(source.typingCount ?? typingSummary?.count),
+    presenceCount: maybeNumber(source.presenceCount ?? presenceSummary?.count),
+    helperVisible: asBoolean(source.helperVisible ?? helperSummary?.visible),
+    invasionActive: asBoolean(source.invasionActive ?? invasionSummary?.active),
     accent: normalizeAccent(source.accent || inferCollapsedAccent(source)),
     tone: normalizeTone(source.tone || inferCollapsedTone(source)),
     expanded: asBoolean(source.expanded),
     tooltip: maybeText(source.tooltip),
+
+    roomLabel: maybeText(source.roomLabel),
+    roomSubtitle: maybeText(source.roomSubtitle),
+    channelLabel: maybeText(source.channelLabel),
+    mountLabel: maybeText(source.mountLabel),
+    liveLabel: maybeText(source.liveLabel),
+    connectionLabel: maybeText(source.connectionLabel),
+    statusLine: maybeText(source.statusLine),
+    pinned: asBoolean(source.pinned),
+    muted: asBoolean(source.muted),
+    disabled: asBoolean(source.disabled),
+    attention: normalizeImportance(source.attention),
+
+    presenceSummary,
+    typingSummary,
+    threatSummary,
+    helperSummary,
+    invasionSummary,
+
+    channelSummaries: channels.length > 0 ? channels : undefined,
+    chips: chips.length > 0 ? chips : undefined,
+    metrics: metrics.length > 0 ? metrics : undefined,
+    statusPills: statusPills.length > 0 ? statusPills : undefined,
+    actions: actions.length > 0 ? actions : undefined,
   };
 }
 
 export function createHeaderAction(raw: unknown): ChatUiRoomHeaderAction {
+
   const source = asRecord(raw);
   return {
     id: asNonEmptyString(source.id, toId('header-action', source.label ?? 'action')),
@@ -3099,29 +3448,57 @@ export function buildUnifiedShellViewModel(raw: unknown): ChatUiUnifiedShellView
     channelTabsSource.activeChannelId ?? source.activeChannelId,
     '',
   );
+  const roomHeader = buildRoomHeaderViewModel(source.roomHeader);
+  const channelTabs = buildChannelTabsViewModel(asArray(channelTabsSource.tabs ?? source.channelTabs), {
+    activeChannelId: activeChannelId || undefined,
+  });
   const typing = buildTypingIndicatorViewModel(asArray(typingSource.entities ?? source.typingActors));
+  const feed = buildFeedViewModel(asArray(feedSource.messages ?? feedSource.flatRows ?? source.messages), {
+    channelId: activeChannelId || undefined,
+    unreadMessageId: maybeText(source.unreadMessageId),
+    typingEntities: typing.entities,
+  });
+  const composer = buildComposerViewModel(source.composer);
+  const presence = buildPresenceStripViewModel(asArray(presenceSource.chips ?? source.presenceActors));
+  const invasion = buildInvasionBannerViewModel(source.invasion);
+  const threat = buildThreatMeterViewModel(source.threat);
+  const helperPrompt = buildHelperPromptViewModel(source.helperPrompt);
+  const transcriptDrawer = buildTranscriptDrawerViewModel(source.transcriptDrawer);
+  const emptyState = source.emptyState ? buildEmptyStateViewModel(source.emptyState) : undefined;
+  const status = buildShellStatus(source.status);
+  const collapsedPillSeed = buildCollapsedPillViewModel(source.collapsedPill);
+  const collapsedPill = deriveCollapsedPillFromShell({
+    mountId: maybeText(source.mountId),
+    roomHeader,
+    channelTabs,
+    feed,
+    composer,
+    presence,
+    typing,
+    invasion,
+    threat,
+    helperPrompt,
+    collapsedPill: collapsedPillSeed,
+    transcriptDrawer,
+    emptyState,
+    status,
+  });
 
   return {
     mountId: maybeText(source.mountId),
-    roomHeader: buildRoomHeaderViewModel(source.roomHeader),
-    channelTabs: buildChannelTabsViewModel(asArray(channelTabsSource.tabs ?? source.channelTabs), {
-      activeChannelId: activeChannelId || undefined,
-    }),
-    feed: buildFeedViewModel(asArray(feedSource.messages ?? feedSource.flatRows ?? source.messages), {
-      channelId: activeChannelId || undefined,
-      unreadMessageId: maybeText(source.unreadMessageId),
-      typingEntities: typing.entities,
-    }),
-    composer: buildComposerViewModel(source.composer),
-    presence: buildPresenceStripViewModel(asArray(presenceSource.chips ?? source.presenceActors)),
+    roomHeader,
+    channelTabs,
+    feed,
+    composer,
+    presence,
     typing,
-    invasion: buildInvasionBannerViewModel(source.invasion),
-    threat: buildThreatMeterViewModel(source.threat),
-    helperPrompt: buildHelperPromptViewModel(source.helperPrompt),
-    collapsedPill: buildCollapsedPillViewModel(source.collapsedPill),
-    transcriptDrawer: buildTranscriptDrawerViewModel(source.transcriptDrawer),
-    emptyState: source.emptyState ? buildEmptyStateViewModel(source.emptyState) : undefined,
-    status: buildShellStatus(source.status),
+    invasion,
+    threat,
+    helperPrompt,
+    collapsedPill,
+    transcriptDrawer,
+    emptyState,
+    status,
   };
 }
 
@@ -3326,19 +3703,113 @@ export function deriveTypingCount(typing?: Maybe<ChatUiTypingIndicatorViewModel>
 export function deriveCollapsedPillFromShell(
   shell: Partial<ChatUiUnifiedShellViewModel>,
 ): ChatUiCollapsedPillViewModel {
+  const channelSummaries = shell.channelTabs?.tabs?.map((tab, index) => ({
+    id: `collapsed-channel:${index}`,
+    channelId: tab.id,
+    label: tab.label,
+    shortLabel: tab.shortLabel,
+    kind: tab.kind,
+    icon: tab.icon,
+    unreadCount: tab.counts?.unread,
+    mentionCount: tab.counts?.unseenMentions,
+    typingCount: undefined,
+    active: tab.active,
+    helperPending: false,
+    haterPending: (tab.counts?.threatCount ?? 0) > 0,
+    accent: tab.accent,
+    tone: tab.tone,
+    tooltip: tab.tooltip,
+    disabled: tab.available === false || tab.locked === true,
+  }));
+
+  const typingActorLabels = shell.typing?.entities.map((entity) => entity.label).filter(Boolean);
+  const presenceObserverLabels = shell.presence?.chips
+    .map((chip) => chip.label)
+    .filter(Boolean)
+    .slice(0, 6);
+
   return buildCollapsedPillViewModel({
     id: shell.collapsedPill?.id,
-    label: shell.collapsedPill?.label ?? 'Chat',
-    shortLabel: shell.collapsedPill?.shortLabel,
+    icon: shell.collapsedPill?.icon,
+    label: shell.collapsedPill?.label ?? shell.roomHeader?.roomLabel ?? 'Chat',
+    shortLabel: shell.collapsedPill?.shortLabel ?? shell.roomHeader?.channelLabel,
     unreadCount: shell.feed?.unreadCount ?? shell.collapsedPill?.unreadCount,
+    mentionCount: shell.collapsedPill?.mentionCount,
     threatBand: shell.threat?.band ?? shell.collapsedPill?.threatBand,
     typingCount: shell.typing?.entities.length ?? shell.collapsedPill?.typingCount,
+    presenceCount: shell.presence?.chips.length ?? shell.collapsedPill?.presenceCount,
     helperVisible: shell.helperPrompt?.visible ?? shell.collapsedPill?.helperVisible,
     invasionActive: shell.invasion?.active ?? shell.collapsedPill?.invasionActive,
     accent: shell.collapsedPill?.accent,
     tone: shell.collapsedPill?.tone,
     expanded: shell.collapsedPill?.expanded,
     tooltip: shell.collapsedPill?.tooltip,
+    roomLabel: shell.collapsedPill?.roomLabel ?? shell.roomHeader?.roomLabel,
+    roomSubtitle: shell.collapsedPill?.roomSubtitle ?? shell.roomHeader?.roomSubtitle,
+    channelLabel: shell.collapsedPill?.channelLabel ?? shell.roomHeader?.channelLabel,
+    mountLabel: shell.collapsedPill?.mountLabel ?? shell.mountId,
+    connectionLabel: shell.status?.connected ? 'Connected' : 'Disconnected',
+    statusLine: shell.collapsedPill?.statusLine,
+    threatSummary:
+      shell.collapsedPill?.threatSummary ??
+      (shell.threat
+        ? {
+            band: shell.threat.band,
+            label: shell.threat.label,
+            tooltip: shell.threat.summary,
+          }
+        : undefined),
+    helperSummary:
+      shell.collapsedPill?.helperSummary ??
+      (shell.helperPrompt
+        ? {
+            visible: shell.helperPrompt.visible,
+            label: shell.helperPrompt.helperLabel,
+            body: shell.helperPrompt.summary ?? shell.helperPrompt.body,
+            urgency: shell.helperPrompt.urgency,
+            ctaLabel: shell.helperPrompt.actions?.find((action) => action.primary)?.label,
+          }
+        : undefined),
+    invasionSummary:
+      shell.collapsedPill?.invasionSummary ??
+      (shell.invasion
+        ? {
+            active: shell.invasion.active,
+            label: shell.invasion.title,
+            stageLabel: shell.invasion.subtitle,
+            priorityLabel: shell.invasion.countdownLabel,
+            tooltip: shell.invasion.summary,
+          }
+        : undefined),
+    presenceSummary:
+      shell.collapsedPill?.presenceSummary ??
+      (shell.presence
+        ? {
+            count: shell.presence.chips.length,
+            activeCount: shell.presence.totalOnline,
+            label: shell.presence.totalOnline ? `${shell.presence.totalOnline} online` : undefined,
+            observerLabels: presenceObserverLabels,
+          }
+        : undefined),
+    typingSummary:
+      shell.collapsedPill?.typingSummary ??
+      (shell.typing
+        ? {
+            count: shell.typing.entities.length,
+            label: shell.typing.compactLabel ?? shell.typing.label,
+            actorLabels: typingActorLabels,
+            strongestState: shell.typing.entities.some((entity) => entity.typingState === 'weaponized_delay')
+              ? 'weaponized_delay'
+              : shell.typing.entities.some((entity) => entity.typingState === 'typing')
+                ? 'typing'
+                : shell.typing.entities[0]?.typingState,
+          }
+        : undefined),
+    channelSummaries: shell.collapsedPill?.channelSummaries ?? channelSummaries,
+    chips: shell.collapsedPill?.chips,
+    metrics: shell.collapsedPill?.metrics,
+    statusPills: shell.collapsedPill?.statusPills,
+    actions: shell.collapsedPill?.actions,
   });
 }
 
@@ -3388,7 +3859,7 @@ export interface ChatUiModuleManifest {
 }
 
 export const CHAT_UI_TYPES_MANIFEST: Readonly<ChatUiModuleManifest> = Object.freeze({
-  version: '2.1.0',
+  version: '2.2.0',
   owner: 'pzo-web/src/components/chat/uiTypes.ts',
   contractLayer: 'presentation',
   presentationOnly: true,
@@ -3398,5 +3869,6 @@ export const CHAT_UI_TYPES_MANIFEST: Readonly<ChatUiModuleManifest> = Object.fre
     'Shared chat contracts remain canonical for runtime truth.',
     'This file is the sole home for render-shell models during migration.',
     'Helper prompt compatibility was expanded to accept both compact shell inputs and richer prompt payloads.',
+    'Collapsed pill contracts now support rich status summaries, channel rollups, status pills, and shell-derived fallback state.',
   ],
 });

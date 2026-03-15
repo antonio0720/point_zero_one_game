@@ -1,78 +1,96 @@
-import React, { memo, useId, useMemo } from 'react';
-import type {
-  ChatChannelId,
-  ChatInterruptPriority,
-  ChatMountTarget,
-  ChatPresenceSnapshot,
-  ChatTypingSnapshot,
-  ChatVisibleChannel,
-} from './types';
-import { CHAT_ENGINE_AUTHORITIES, CHAT_MOUNT_PRESETS } from './types';
-
 /**
  * ============================================================================
- * POINT ZERO ONE — UNIFIED CHAT ENGINE
- * FILE: pzo-web/src/engines/chat/ChatCollapsedPill.tsx
+ * POINT ZERO ONE — THIN CHAT RENDER SHELL
+ * FILE: pzo-web/src/components/chat/ChatCollapsedPill.tsx
+ * VERSION: 3.0.0
+ * AUTHOR: OpenAI
+ * LICENSE: Internal / Project Use Only
  * ============================================================================
  *
  * Purpose
  * -------
- * Presentation-only collapsed launcher / status pill for the unified chat lane.
+ * Presentation-only collapsed launcher for the unified chat shell.
  *
- * This component is for the "chat is alive even when the dock is minimized"
- * state. It is not a store owner, not a room owner, and not an inference lane.
- * It renders surfaced authority that the engine already computed:
- * - unread pressure
- * - active typing theater
- * - visible presence count
- * - invasion status
- * - threat pressure
- * - helper pending urgency
- * - mount-aware mood + density summary
+ * This rewrite intentionally fixes the dependency direction problem in the live
+ * repo by making the component consume only normalized UI contracts from
+ * `./uiTypes`. The component no longer imports engine-lane `./types`, no longer
+ * reads `CHAT_ENGINE_AUTHORITIES`, and no longer reads mount presets directly.
  *
- * Design laws
- * -----------
- * - Collapsed state must still feel authoritative, not decorative.
- * - The first glance should answer: is the room safe, loud, urgent, or calling?
- * - The pill must remain compact enough for BattleHUD / Empire / League mounts.
- * - The pill must not invent transcript truth or notification policy.
- * - It may summarize, but it must not reinterpret backend truth into fiction.
- * - It must preserve accessibility and click targets under high-pressure play.
+ * Design law
+ * ----------
+ * - render only
+ * - no engine ownership
+ * - no policy ownership
+ * - no mount preset authority
+ * - no threat / helper / invasion derivation
+ * - no transcript truth inference
  *
- * Repo grounding
- * --------------
- * - Legacy collapsed bubble exists inside pzo-web/src/components/chat/ChatPanel.tsx.
- * - Current active frontend canonical lane already includes UnifiedChatDock.tsx
- *   under pzo-web/src/engines/chat, so this file matches the live repo lane.
- * - Mount presets and channel doctrine are already defined in ./types.
+ * Everything shown here must already be computed upstream by:
+ * - UnifiedChatDock.tsx
+ * - useUnifiedChat.ts
+ * - or a dedicated adapter that maps authoritative shell state into the
+ *   `ChatUiCollapsedPillViewModel` surface.
  *
- * Density6 LLC · Point Zero One · Sovereign Chat Runtime · Confidential
+ * The job of this component is simple:
+ * - stay compact
+ * - feel alive
+ * - remain accessible under pressure
+ * - keep the minimized state informative without becoming a second engine
  * ============================================================================
  */
 
-// ============================================================================
-// MARK: Design tokens
-// ============================================================================
+import React, { memo, useId, useMemo } from 'react';
+import type {
+  ChatUiAccent,
+  ChatUiChip,
+  ChatUiCollapsedPillAction,
+  ChatUiCollapsedPillChannelSummary,
+  ChatUiCollapsedPillHelperSummary,
+  ChatUiCollapsedPillInvasionSummary,
+  ChatUiCollapsedPillPresenceSummary,
+  ChatUiCollapsedPillThreatSummary,
+  ChatUiCollapsedPillTypingSummary,
+  ChatUiCollapsedPillViewModel,
+  ChatUiMetric,
+  ChatUiPill,
+  ChatUiThreatBand,
+  ChatUiTone,
+} from './uiTypes';
 
 const TOKENS = {
   void: '#030308',
   card: '#0C0C1E',
   cardHi: '#131328',
-  cardEl: '#191934',
+  cardRaised: '#181833',
+  cardSoft: '#101024',
   border: 'rgba(255,255,255,0.08)',
-  borderM: 'rgba(255,255,255,0.16)',
-  borderH: 'rgba(255,255,255,0.24)',
+  borderMedium: 'rgba(255,255,255,0.16)',
+  borderStrong: 'rgba(255,255,255,0.24)',
   text: '#F2F2FF',
-  textSub: '#9090B4',
-  textMut: '#505074',
-  green: '#22DD88',
-  red: '#FF4D4D',
+  textSoft: '#C8C8E6',
+  textSubtle: '#9090B4',
+  textMuted: '#5C5C82',
+  emerald: '#22DD88',
+  amber: '#F6C453',
   orange: '#FF8C00',
-  yellow: '#FFD700',
+  red: '#FF4D4D',
+  rose: '#FF6B81',
+  violet: '#A855F7',
+  cyan: '#22D3EE',
   indigo: '#818CF8',
-  teal: '#22D3EE',
-  purple: '#A855F7',
-  cyan: '#7DD3FC',
+  gold: '#E7C15A',
+  silver: '#B6C0D4',
+  slate: '#738096',
+  obsidian: '#1C1C2B',
+  successBg: 'rgba(34,221,136,0.12)',
+  warningBg: 'rgba(246,196,83,0.12)',
+  dangerBg: 'rgba(255,77,77,0.12)',
+  hostileBg: 'rgba(255,140,0,0.12)',
+  indigoBg: 'rgba(129,140,248,0.12)',
+  cyanBg: 'rgba(34,211,238,0.12)',
+  violetBg: 'rgba(168,85,247,0.12)',
+  chipBg: 'rgba(255,255,255,0.05)',
+  chipBgStrong: 'rgba(255,255,255,0.08)',
   white: '#FFFFFF',
   mono: "'IBM Plex Mono', 'JetBrains Mono', monospace",
   display: "'Syne', 'Outfit', system-ui, sans-serif",
@@ -80,236 +98,188 @@ const TOKENS = {
 
 const FONT_IMPORT = `@import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap');`;
 
-// ============================================================================
-// MARK: Public props
-// ============================================================================
-
-export type ChatCollapsedPillThreatBand = 'CALM' | 'ELEVATED' | 'HOSTILE' | 'CRITICAL';
-export type ChatCollapsedPillPresenceMood = 'QUIET' | 'WATCHED' | 'ACTIVE' | 'SWARMING';
-
-export interface ChatCollapsedChannelSummary {
-  readonly channel: ChatVisibleChannel;
-  readonly unreadCount: number;
-  readonly mentionCount?: number;
-  readonly helperPending?: boolean;
-  readonly haterPending?: boolean;
-  readonly typingCount?: number;
-}
-
-export interface ChatCollapsedInvasionSummary {
-  readonly active: boolean;
-  readonly invasionId?: string;
-  readonly label?: string;
-  readonly aggressorName?: string;
-  readonly stage?: 'STAGING' | 'LIVE' | 'PUNISH_WINDOW' | 'FADING';
-  readonly interruptPriority?: ChatInterruptPriority;
-}
-
-export interface ChatCollapsedThreatSummary {
-  readonly score01: number;
-  readonly band: ChatCollapsedPillThreatBand;
-  readonly helperPressure?: number;
-  readonly haterPressure?: number;
-  readonly crowdHeat?: number;
-}
-
-export interface ChatCollapsedHelperSummary {
-  readonly promptPending: boolean;
-  readonly helperName?: string;
-  readonly promptLabel?: string;
-  readonly urgencyScore?: number;
-  readonly trustWindow?: number;
-}
+const MAX_CHANNEL_BUTTONS = 3;
+const MAX_STATUS_PILLS = 4;
+const MAX_CHIPS = 4;
+const MAX_METRICS = 3;
+const MAX_ACTIONS = 2;
 
 export interface ChatCollapsedPillProps {
-  readonly mountTarget: ChatMountTarget;
-  readonly activeChannel: ChatVisibleChannel;
-  readonly defaultChannel?: ChatVisibleChannel;
-  readonly unreadTotal: number;
-  readonly mentionTotal?: number;
-  readonly visiblePresence?: readonly ChatPresenceSnapshot[];
-  readonly visibleTyping?: readonly ChatTypingSnapshot[];
-  readonly channelSummaries?: readonly ChatCollapsedChannelSummary[];
-  readonly invasion?: ChatCollapsedInvasionSummary | null;
-  readonly threat?: ChatCollapsedThreatSummary | null;
-  readonly helper?: ChatCollapsedHelperSummary | null;
-  readonly roomLabel?: string;
-  readonly worldEventLabel?: string;
-  readonly isAttentionFlashing?: boolean;
-  readonly isMuted?: boolean;
-  readonly isDisabled?: boolean;
-  readonly fixedPosition?: boolean;
-  readonly anchor?: 'BOTTOM_RIGHT' | 'BOTTOM_LEFT' | 'INLINE';
-  readonly style?: React.CSSProperties;
+  readonly model: ChatUiCollapsedPillViewModel;
   readonly className?: string;
-  readonly onOpen?: () => void;
-  readonly onCycleChannel?: (channel: ChatVisibleChannel) => void;
+  readonly style?: React.CSSProperties;
+  readonly disabled?: boolean;
+  readonly fixedPosition?: boolean;
+  readonly anchor?: 'bottom-right' | 'bottom-left' | 'inline';
+  readonly onOpen?: (model: ChatUiCollapsedPillViewModel) => void;
+  readonly onToggleExpanded?: (nextExpanded: boolean, model: ChatUiCollapsedPillViewModel) => void;
+  readonly onDismiss?: (model: ChatUiCollapsedPillViewModel) => void;
+  readonly onSelectChannel?: (
+    channel: ChatUiCollapsedPillChannelSummary,
+    model: ChatUiCollapsedPillViewModel,
+  ) => void;
+  readonly onAction?: (action: ChatUiCollapsedPillAction, model: ChatUiCollapsedPillViewModel) => void;
 }
 
-// ============================================================================
-// MARK: Local helpers
-// ============================================================================
-
-function clamp01(value: number | undefined): number {
-  if (!Number.isFinite(value)) return 0;
-  if ((value as number) <= 0) return 0;
-  if ((value as number) >= 1) return 1;
-  return value as number;
+interface AccentVisual {
+  readonly text: string;
+  readonly border: string;
+  readonly bg: string;
 }
 
-function channelVisual(channel: ChatVisibleChannel): {
-  label: string;
-  accent: string;
-  bg: string;
-  border: string;
-  glyph: string;
-} {
-  switch (channel) {
-    case 'SYNDICATE':
-      return {
-        label: 'Syndicate',
-        accent: TOKENS.teal,
-        bg: 'rgba(34,211,238,0.08)',
-        border: 'rgba(34,211,238,0.22)',
-        glyph: '◎',
-      };
-    case 'DEAL_ROOM':
-      return {
-        label: 'Deal Room',
-        accent: TOKENS.orange,
-        bg: 'rgba(255,140,0,0.08)',
-        border: 'rgba(255,140,0,0.24)',
-        glyph: '¤',
-      };
-    case 'LOBBY':
-      return {
-        label: 'Lobby',
-        accent: TOKENS.purple,
-        bg: 'rgba(168,85,247,0.08)',
-        border: 'rgba(168,85,247,0.22)',
-        glyph: '◌',
-      };
-    case 'GLOBAL':
+interface ToneVisual {
+  readonly label: string;
+  readonly glow: string;
+}
+
+interface ThreatVisual {
+  readonly accent: string;
+  readonly bg: string;
+  readonly border: string;
+  readonly text: string;
+  readonly icon: string;
+}
+
+function clamp(value: number | undefined, min = 0, max = 1): number {
+  if (!Number.isFinite(value)) return min;
+  return Math.max(min, Math.min(max, value as number));
+}
+
+function countLabel(count: number | undefined, singular: string, plural = `${singular}s`): string {
+  const safe = Math.max(0, Math.floor(count ?? 0));
+  return `${safe} ${safe === 1 ? singular : plural}`;
+}
+
+function compactNumber(value: number | undefined): string {
+  const safe = Math.max(0, Math.floor(value ?? 0));
+  if (safe > 99) return '99+';
+  return String(safe);
+}
+
+function toneVisual(tone: ChatUiTone | undefined): ToneVisual {
+  switch (tone) {
+    case 'danger':
+      return { label: 'danger', glow: '0 0 0 1px rgba(255,77,77,0.08) inset, 0 12px 28px rgba(255,77,77,0.12)' };
+    case 'hostile':
+      return { label: 'hostile', glow: '0 0 0 1px rgba(255,140,0,0.08) inset, 0 12px 28px rgba(255,140,0,0.12)' };
+    case 'supportive':
+      return { label: 'supportive', glow: '0 0 0 1px rgba(34,221,136,0.08) inset, 0 12px 28px rgba(34,221,136,0.12)' };
+    case 'warning':
+      return { label: 'warning', glow: '0 0 0 1px rgba(246,196,83,0.08) inset, 0 12px 28px rgba(246,196,83,0.12)' };
+    case 'premium':
+      return { label: 'premium', glow: '0 0 0 1px rgba(231,193,90,0.08) inset, 0 12px 28px rgba(231,193,90,0.12)' };
+    case 'celebratory':
+      return { label: 'celebratory', glow: '0 0 0 1px rgba(168,85,247,0.08) inset, 0 12px 28px rgba(168,85,247,0.12)' };
+    case 'dramatic':
+      return { label: 'dramatic', glow: '0 0 0 1px rgba(129,140,248,0.08) inset, 0 12px 28px rgba(129,140,248,0.12)' };
+    case 'calm':
+    case 'positive':
+      return { label: 'calm', glow: '0 0 0 1px rgba(34,221,136,0.08) inset, 0 12px 28px rgba(34,221,136,0.08)' };
+    case 'ghost':
+    case 'stealth':
+      return { label: 'stealth', glow: '0 0 0 1px rgba(116,128,150,0.08) inset, 0 12px 28px rgba(0,0,0,0.24)' };
+    case 'neutral':
     default:
-      return {
-        label: 'Global',
-        accent: TOKENS.indigo,
-        bg: 'rgba(129,140,248,0.08)',
-        border: 'rgba(129,140,248,0.24)',
-        glyph: '◉',
-      };
+      return { label: 'neutral', glow: '0 0 0 1px rgba(255,255,255,0.04) inset, 0 12px 28px rgba(0,0,0,0.30)' };
   }
 }
 
-function threatTone(
-  band: ChatCollapsedPillThreatBand | undefined,
-): {
-  accent: string;
-  bg: string;
-  border: string;
-  label: string;
-} {
+function accentVisual(accent: ChatUiAccent | undefined): AccentVisual {
+  switch (accent) {
+    case 'emerald':
+      return { text: TOKENS.emerald, border: 'rgba(34,221,136,0.26)', bg: TOKENS.successBg };
+    case 'amber':
+      return { text: TOKENS.amber, border: 'rgba(246,196,83,0.26)', bg: TOKENS.warningBg };
+    case 'red':
+      return { text: TOKENS.red, border: 'rgba(255,77,77,0.26)', bg: TOKENS.dangerBg };
+    case 'rose':
+      return { text: TOKENS.rose, border: 'rgba(255,107,129,0.26)', bg: 'rgba(255,107,129,0.12)' };
+    case 'violet':
+      return { text: TOKENS.violet, border: 'rgba(168,85,247,0.26)', bg: TOKENS.violetBg };
+    case 'cyan':
+      return { text: TOKENS.cyan, border: 'rgba(34,211,238,0.26)', bg: TOKENS.cyanBg };
+    case 'indigo':
+      return { text: TOKENS.indigo, border: 'rgba(129,140,248,0.26)', bg: TOKENS.indigoBg };
+    case 'gold':
+      return { text: TOKENS.gold, border: 'rgba(231,193,90,0.26)', bg: 'rgba(231,193,90,0.12)' };
+    case 'silver':
+      return { text: TOKENS.silver, border: 'rgba(182,192,212,0.22)', bg: 'rgba(182,192,212,0.10)' };
+    case 'obsidian':
+      return { text: TOKENS.textSoft, border: 'rgba(28,28,43,0.56)', bg: 'rgba(28,28,43,0.56)' };
+    case 'slate':
+    default:
+      return { text: TOKENS.slate, border: 'rgba(115,128,150,0.22)', bg: 'rgba(115,128,150,0.10)' };
+  }
+}
+
+function threatVisual(band: ChatUiThreatBand | undefined): ThreatVisual {
   switch (band) {
-    case 'CRITICAL':
+    case 'catastrophic':
       return {
         accent: TOKENS.red,
-        bg: 'rgba(255,77,77,0.12)',
-        border: 'rgba(255,77,77,0.26)',
-        label: 'Critical threat',
+        bg: 'rgba(255,77,77,0.18)',
+        border: 'rgba(255,77,77,0.34)',
+        text: 'Catastrophic threat',
+        icon: '⛧',
       };
-    case 'HOSTILE':
+    case 'critical':
+      return {
+        accent: TOKENS.red,
+        bg: TOKENS.dangerBg,
+        border: 'rgba(255,77,77,0.28)',
+        text: 'Critical threat',
+        icon: '▲',
+      };
+    case 'hostile':
       return {
         accent: TOKENS.orange,
-        bg: 'rgba(255,140,0,0.12)',
-        border: 'rgba(255,140,0,0.24)',
-        label: 'Hostile room',
+        bg: TOKENS.hostileBg,
+        border: 'rgba(255,140,0,0.28)',
+        text: 'Hostile pressure',
+        icon: '◈',
       };
-    case 'ELEVATED':
+    case 'pressured':
       return {
-        accent: TOKENS.yellow,
-        bg: 'rgba(255,215,0,0.10)',
-        border: 'rgba(255,215,0,0.22)',
-        label: 'Elevated pressure',
+        accent: TOKENS.amber,
+        bg: TOKENS.warningBg,
+        border: 'rgba(246,196,83,0.24)',
+        text: 'Pressured room',
+        icon: '◆',
       };
-    case 'CALM':
+    case 'elevated':
+      return {
+        accent: TOKENS.gold,
+        bg: 'rgba(231,193,90,0.10)',
+        border: 'rgba(231,193,90,0.22)',
+        text: 'Elevated signal',
+        icon: '△',
+      };
+    case 'quiet':
     default:
       return {
-        accent: TOKENS.green,
-        bg: 'rgba(34,221,136,0.10)',
+        accent: TOKENS.emerald,
+        bg: TOKENS.successBg,
         border: 'rgba(34,221,136,0.22)',
-        label: 'Calm room',
+        text: 'Quiet posture',
+        icon: '•',
       };
   }
 }
 
-function typingLabel(typing: readonly ChatTypingSnapshot[] | undefined): string | null {
-  if (!typing || typing.length === 0) return null;
-  if (typing.length === 1) return '1 typing';
-  return `${typing.length} typing`;
-}
-
-function presenceMood(
-  visiblePresence: readonly ChatPresenceSnapshot[] | undefined,
-  visibleTyping: readonly ChatTypingSnapshot[] | undefined,
-): ChatCollapsedPillPresenceMood {
-  const presenceCount = visiblePresence?.length ?? 0;
-  const typingCount = visibleTyping?.length ?? 0;
-
-  if (presenceCount >= 8 || typingCount >= 3) return 'SWARMING';
-  if (presenceCount >= 4 || typingCount >= 2) return 'ACTIVE';
-  if (presenceCount >= 1 || typingCount >= 1) return 'WATCHED';
-  return 'QUIET';
-}
-
-function presenceAccent(mood: ChatCollapsedPillPresenceMood): string {
-  switch (mood) {
-    case 'SWARMING':
-      return TOKENS.orange;
-    case 'ACTIVE':
-      return TOKENS.indigo;
-    case 'WATCHED':
-      return TOKENS.teal;
-    case 'QUIET':
+function presenceMoodLabel(summary: ChatUiCollapsedPillPresenceSummary | undefined): string {
+  const label = summary?.moodLabel?.trim();
+  if (label) return label;
+  switch (summary?.mood) {
+    case 'swarming':
+      return 'Swarming';
+    case 'active':
+      return 'Active';
+    case 'watched':
+      return 'Watched';
+    case 'quiet':
     default:
-      return TOKENS.textMut;
+      return 'Quiet';
   }
-}
-
-function formatUnreadLabel(unread: number, mentions: number | undefined): string {
-  if (mentions && mentions > 0) {
-    return mentions > 99 ? '99+ mentions' : `${mentions} mention${mentions === 1 ? '' : 's'}`;
-  }
-  if (unread <= 0) return 'No unread';
-  if (unread > 99) return '99+ unread';
-  return `${unread} unread`;
-}
-
-function sortedChannels(
-  summaries: readonly ChatCollapsedChannelSummary[] | undefined,
-  active: ChatVisibleChannel,
-  fallback: ChatVisibleChannel,
-): readonly ChatCollapsedChannelSummary[] {
-  if (!summaries || summaries.length === 0) {
-    return [
-      {
-        channel: active || fallback,
-        unreadCount: 0,
-      },
-    ];
-  }
-
-  return [...summaries].sort((a, b) => {
-    if (a.channel === active && b.channel !== active) return -1;
-    if (b.channel === active && a.channel !== active) return 1;
-    const pressureA = (a.unreadCount ?? 0) + (a.mentionCount ?? 0) * 2 + (a.helperPending ? 3 : 0);
-    const pressureB = (b.unreadCount ?? 0) + (b.mentionCount ?? 0) * 2 + (b.helperPending ? 3 : 0);
-    return pressureB - pressureA;
-  });
-}
-
-function mountMoodLabel(mountTarget: ChatMountTarget): string {
-  const preset = CHAT_MOUNT_PRESETS[mountTarget];
-  return preset?.stageMood ?? 'TENSE';
 }
 
 function anchorStyle(
@@ -318,16 +288,16 @@ function anchorStyle(
 ): React.CSSProperties {
   if (!fixedPosition) return {};
   switch (anchor) {
-    case 'BOTTOM_LEFT':
+    case 'bottom-left':
       return {
         position: 'fixed',
         left: 16,
         bottom: 16,
         zIndex: 60,
       };
-    case 'INLINE':
+    case 'inline':
       return {};
-    case 'BOTTOM_RIGHT':
+    case 'bottom-right':
     default:
       return {
         position: 'fixed',
@@ -338,649 +308,780 @@ function anchorStyle(
   }
 }
 
-// ============================================================================
-// MARK: Component
-// ============================================================================
+function readableUnread(model: ChatUiCollapsedPillViewModel): string {
+  const mentions = Math.max(0, Math.floor(model.mentionCount ?? 0));
+  const unread = Math.max(0, Math.floor(model.unreadCount ?? 0));
+  if (mentions > 0) return mentions > 99 ? '99+ mentions' : `${mentions} mention${mentions === 1 ? '' : 's'}`;
+  if (unread <= 0) return 'No unread';
+  return unread > 99 ? '99+ unread' : `${unread} unread`;
+}
+
+function readableTyping(summary: ChatUiCollapsedPillTypingSummary | undefined): string | undefined {
+  if (!summary) return undefined;
+  if (summary.label?.trim()) return summary.label;
+  const count = Math.max(0, Math.floor(summary.count ?? 0));
+  if (count <= 0) return undefined;
+  return countLabel(count, 'typing');
+}
+
+function readablePresence(summary: ChatUiCollapsedPillPresenceSummary | undefined): string | undefined {
+  if (!summary) return undefined;
+  if (summary.label?.trim()) return summary.label;
+  const count = Math.max(0, Math.floor(summary.count ?? 0));
+  if (count <= 0) return undefined;
+  return `${presenceMoodLabel(summary)} • ${countLabel(count, 'visible')}`;
+}
+
+function readableHelper(summary: ChatUiCollapsedPillHelperSummary | undefined): string | undefined {
+  if (!summary || !summary.visible) return undefined;
+  if (summary.label?.trim()) return summary.label;
+  return 'Helper pending';
+}
+
+function readableInvasion(summary: ChatUiCollapsedPillInvasionSummary | undefined): string | undefined {
+  if (!summary || !summary.active) return undefined;
+  return summary.label?.trim() || 'Invasion active';
+}
+
+function readableThreat(summary: ChatUiCollapsedPillThreatSummary | undefined, fallbackBand: ChatUiThreatBand | undefined): string {
+  if (summary?.label?.trim()) return summary.label;
+  return threatVisual(summary?.band ?? fallbackBand).text;
+}
+
+function rootAriaLabel(model: ChatUiCollapsedPillViewModel): string {
+  const parts = [
+    `Open chat. ${readableUnread(model)}.`,
+    readableThreat(model.threatSummary, model.threatBand),
+    readableTyping(model.typingSummary),
+    readablePresence(model.presenceSummary),
+    readableHelper(model.helperSummary),
+    readableInvasion(model.invasionSummary),
+  ].filter(Boolean);
+  return parts.join(' ');
+}
+
+function capArray<T>(items: readonly T[] | undefined, max: number): readonly T[] {
+  if (!items || items.length === 0) return [];
+  return items.slice(0, max);
+}
+
+function actionable(action: ChatUiCollapsedPillAction | undefined): boolean {
+  return Boolean(action && !action.disabled);
+}
+
+function renderChip(chip: ChatUiChip): React.JSX.Element {
+  const accent = accentVisual(chip.accent);
+  const isActive = Boolean(chip.active);
+
+  return (
+    <span
+      key={chip.id}
+      title={chip.tooltip}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 6,
+        minHeight: 24,
+        padding: '0 8px',
+        borderRadius: 999,
+        border: `1px solid ${isActive ? accent.border : TOKENS.border}`,
+        background: isActive ? accent.bg : TOKENS.chipBg,
+        color: isActive ? accent.text : TOKENS.textSubtle,
+        fontFamily: TOKENS.mono,
+        fontSize: 10,
+        fontWeight: 700,
+        letterSpacing: '0.05em',
+        whiteSpace: 'nowrap',
+      }}
+    >
+      {chip.icon ? <span aria-hidden="true">{chip.icon}</span> : null}
+      <span>{chip.shortLabel || chip.label}</span>
+      {typeof chip.count === 'number' && chip.count > 0 ? <span>{compactNumber(chip.count)}</span> : null}
+    </span>
+  );
+}
+
+function renderMetric(metric: ChatUiMetric): React.JSX.Element {
+  const accent = accentVisual(metric.accent);
+
+  return (
+    <div
+      key={metric.id}
+      title={metric.tooltip}
+      style={{
+        display: 'grid',
+        gap: 3,
+        minWidth: 0,
+        padding: '8px 9px',
+        borderRadius: 12,
+        border: `1px solid ${metric.importance === 'critical' ? accent.border : TOKENS.border}`,
+        background: metric.importance === 'critical' ? accent.bg : TOKENS.chipBg,
+      }}
+    >
+      <span
+        style={{
+          color: TOKENS.textMuted,
+          fontFamily: TOKENS.mono,
+          fontSize: 10,
+          fontWeight: 700,
+          letterSpacing: '0.06em',
+          textTransform: 'uppercase',
+        }}
+      >
+        {metric.label}
+      </span>
+      <span
+        style={{
+          color: accent.text,
+          fontFamily: TOKENS.display,
+          fontSize: 13,
+          fontWeight: 800,
+          lineHeight: 1,
+        }}
+      >
+        {metric.value}
+      </span>
+    </div>
+  );
+}
+
+function renderPill(pill: ChatUiPill): React.JSX.Element {
+  const accent = accentVisual(pill.accent);
+
+  return (
+    <span
+      key={pill.id}
+      title={pill.tooltip}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 6,
+        minHeight: 26,
+        padding: '0 9px',
+        borderRadius: 999,
+        border: `1px solid ${pill.selected ? accent.border : TOKENS.border}`,
+        background: pill.selected ? accent.bg : TOKENS.chipBg,
+        color: pill.selected ? accent.text : TOKENS.textSubtle,
+        fontFamily: TOKENS.mono,
+        fontSize: 10,
+        fontWeight: 800,
+        letterSpacing: '0.06em',
+      }}
+    >
+      {pill.icon ? <span aria-hidden="true">{pill.icon}</span> : null}
+      <span>{pill.label}</span>
+      {pill.value ? <span>{pill.value}</span> : null}
+    </span>
+  );
+}
+
+function renderChannelButton(
+  summary: ChatUiCollapsedPillChannelSummary,
+  model: ChatUiCollapsedPillViewModel,
+  onSelectChannel: ChatCollapsedPillProps['onSelectChannel'],
+): React.JSX.Element {
+  const accent = accentVisual(summary.accent ?? model.accent);
+  const unread = Math.max(0, Math.floor(summary.unreadCount ?? 0));
+  const mentionCount = Math.max(0, Math.floor(summary.mentionCount ?? 0));
+  const badgeValue = mentionCount > 0 ? compactNumber(mentionCount) : unread > 0 ? compactNumber(unread) : undefined;
+
+  return (
+    <button
+      key={summary.id}
+      type="button"
+      disabled={summary.disabled}
+      title={summary.tooltip}
+      onClick={(event) => {
+        event.stopPropagation();
+        if (!onSelectChannel || summary.disabled) return;
+        onSelectChannel(summary, model);
+      }}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 7,
+        minHeight: 28,
+        minWidth: 0,
+        padding: '0 10px',
+        borderRadius: 999,
+        border: `1px solid ${summary.active ? accent.border : TOKENS.border}`,
+        background: summary.active ? accent.bg : TOKENS.chipBg,
+        color: summary.active ? accent.text : TOKENS.textSubtle,
+        cursor: summary.disabled ? 'not-allowed' : onSelectChannel ? 'pointer' : 'default',
+        opacity: summary.disabled ? 0.48 : 1,
+      }}
+      aria-pressed={summary.active}
+    >
+      {summary.icon ? <span aria-hidden="true">{summary.icon}</span> : null}
+      <span
+        style={{
+          minWidth: 0,
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+          fontFamily: TOKENS.mono,
+          fontSize: 10,
+          fontWeight: 800,
+          letterSpacing: '0.05em',
+        }}
+      >
+        {summary.shortLabel || summary.label}
+      </span>
+      {badgeValue ? (
+        <span
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            minWidth: 18,
+            height: 18,
+            padding: '0 5px',
+            borderRadius: 999,
+            background: mentionCount > 0 ? TOKENS.dangerBg : TOKENS.cardRaised,
+            border: `1px solid ${mentionCount > 0 ? 'rgba(255,77,77,0.22)' : TOKENS.border}`,
+            color: mentionCount > 0 ? TOKENS.red : TOKENS.textSoft,
+            fontFamily: TOKENS.mono,
+            fontSize: 10,
+            fontWeight: 800,
+            letterSpacing: '0.03em',
+          }}
+        >
+          {badgeValue}
+        </span>
+      ) : null}
+    </button>
+  );
+}
+
+function renderAction(
+  action: ChatUiCollapsedPillAction,
+  model: ChatUiCollapsedPillViewModel,
+  onAction: ChatCollapsedPillProps['onAction'],
+  onDismiss: ChatCollapsedPillProps['onDismiss'],
+  onToggleExpanded: ChatCollapsedPillProps['onToggleExpanded'],
+): React.JSX.Element {
+  const accent = accentVisual(action.accent ?? model.accent);
+  const clickable = actionable(action);
+
+  return (
+    <button
+      key={action.id}
+      type="button"
+      disabled={!clickable}
+      title={action.tooltip}
+      onClick={(event) => {
+        event.stopPropagation();
+        if (!clickable) return;
+        if (action.kind === 'dismiss') {
+          onDismiss?.(model);
+          return;
+        }
+        if (action.kind === 'toggle') {
+          onToggleExpanded?.(!Boolean(model.expanded), model);
+          return;
+        }
+        onAction?.(action, model);
+      }}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 8,
+        minHeight: 30,
+        padding: '0 11px',
+        borderRadius: 10,
+        border: `1px solid ${action.primary ? accent.border : TOKENS.border}`,
+        background: action.primary ? accent.bg : TOKENS.cardSoft,
+        color: action.primary ? accent.text : TOKENS.textSoft,
+        fontFamily: TOKENS.mono,
+        fontSize: 10,
+        fontWeight: 800,
+        letterSpacing: '0.05em',
+        cursor: clickable ? 'pointer' : 'not-allowed',
+        opacity: clickable ? 1 : 0.48,
+      }}
+    >
+      {action.icon ? <span aria-hidden="true">{action.icon}</span> : null}
+      <span>{action.label}</span>
+    </button>
+  );
+}
 
 function ChatCollapsedPillComponent({
-  mountTarget,
-  activeChannel,
-  defaultChannel = 'GLOBAL',
-  unreadTotal,
-  mentionTotal,
-  visiblePresence,
-  visibleTyping,
-  channelSummaries,
-  invasion,
-  threat,
-  helper,
-  roomLabel,
-  worldEventLabel,
-  isAttentionFlashing = false,
-  isMuted = false,
-  isDisabled = false,
-  fixedPosition = false,
-  anchor = 'BOTTOM_RIGHT',
-  style,
+  model,
   className,
+  style,
+  disabled = false,
+  fixedPosition = false,
+  anchor = 'bottom-right',
   onOpen,
-  onCycleChannel,
+  onToggleExpanded,
+  onDismiss,
+  onSelectChannel,
+  onAction,
 }: ChatCollapsedPillProps): React.JSX.Element {
   const pillId = useId();
 
   const derived = useMemo(() => {
-    const mountPreset = CHAT_MOUNT_PRESETS[mountTarget];
-    const mountMood = mountMoodLabel(mountTarget);
-    const currentVisual = channelVisual(activeChannel);
-    const effectiveThreatTone = threatTone(threat?.band);
-    const mood = presenceMood(visiblePresence, visibleTyping);
-    const moodAccent = presenceAccent(mood);
-    const typingText = typingLabel(visibleTyping);
-    const sorted = sortedChannels(channelSummaries, activeChannel, defaultChannel);
-    const miniChannels = sorted.slice(0, 3);
-    const helperUrgency = clamp01(helper?.urgencyScore);
-    const helperTrust = clamp01(helper?.trustWindow);
+    const accent = accentVisual(model.accent);
+    const tone = toneVisual(model.tone);
+    const threat = threatVisual(model.threatSummary?.band ?? model.threatBand);
+    const unread = Math.max(0, Math.floor(model.unreadCount ?? 0));
+    const mentions = Math.max(0, Math.floor(model.mentionCount ?? 0));
+    const typingText = readableTyping(model.typingSummary);
+    const presenceText = readablePresence(model.presenceSummary);
+    const helperText = readableHelper(model.helperSummary);
+    const invasionText = readableInvasion(model.invasionSummary);
+    const statusPills = capArray(model.statusPills, MAX_STATUS_PILLS);
+    const chips = capArray(model.chips, MAX_CHIPS);
+    const metrics = capArray(model.metrics, MAX_METRICS);
+    const actions = capArray(model.actions, MAX_ACTIONS);
+    const channels = capArray(model.channelSummaries, MAX_CHANNEL_BUTTONS);
+    const headline = model.roomLabel || model.label;
+    const subline =
+      model.statusLine ||
+      [
+        model.channelLabel || model.shortLabel,
+        readableUnread(model),
+        presenceText,
+      ]
+        .filter(Boolean)
+        .join(' • ');
+    const attentionFlash =
+      model.attention === 'critical' ||
+      model.invasionActive ||
+      (model.helperSummary?.visible && model.helperSummary.urgency === 'immediate') ||
+      mentions > 0;
+    const pressureRatio = clamp(model.threatSummary?.score01 ?? undefined, 0, 1);
 
     return {
-      mountPreset,
-      mountMood,
-      currentVisual,
-      effectiveThreatTone,
-      mood,
-      moodAccent,
+      accent,
+      tone,
+      threat,
+      unread,
+      mentions,
       typingText,
-      sorted,
-      miniChannels,
-      helperUrgency,
-      helperTrust,
+      presenceText,
+      helperText,
+      invasionText,
+      statusPills,
+      chips,
+      metrics,
+      actions,
+      channels,
+      headline,
+      subline,
+      attentionFlash,
+      pressureRatio,
     };
-  }, [
-    mountTarget,
-    activeChannel,
-    defaultChannel,
-    visiblePresence,
-    visibleTyping,
-    channelSummaries,
-    threat,
-    helper,
-  ]);
+  }, [model]);
 
-  const rootStyle: React.CSSProperties = {
+  const sectionStyle: React.CSSProperties = {
     display: 'grid',
-    gap: 10,
-    minWidth: 246,
-    maxWidth: 318,
-    padding: '10px 10px 10px 12px',
-    borderRadius: 18,
-    background: `linear-gradient(180deg, ${TOKENS.cardHi}, ${TOKENS.card})`,
-    border: `1px solid ${invasion?.active ? 'rgba(255,77,77,0.22)' : TOKENS.borderM}`,
-    boxShadow: invasion?.active
-      ? '0 18px 38px rgba(255,77,77,0.12), 0 0 0 1px rgba(255,77,77,0.06) inset'
-      : '0 18px 38px rgba(0,0,0,0.34), 0 0 0 1px rgba(255,255,255,0.03) inset',
-    backdropFilter: 'blur(10px)',
-    overflow: 'hidden',
-    cursor: isDisabled ? 'not-allowed' : 'pointer',
-    opacity: isDisabled ? 0.55 : 1,
+    gap: 8,
+    minWidth: 252,
+    maxWidth: 340,
+    padding: 0,
     ...anchorStyle(fixedPosition, anchor),
     ...style,
   };
 
+  const shellStyle: React.CSSProperties = {
+    display: 'grid',
+    gap: 8,
+    padding: 10,
+    borderRadius: 18,
+    border: `1px solid ${derived.threat.border}`,
+    background: `linear-gradient(180deg, ${TOKENS.cardHi}, ${TOKENS.card})`,
+    boxShadow: derived.tone.glow,
+    overflow: 'hidden',
+    backdropFilter: 'blur(10px)',
+  };
+
+  const openButtonStyle: React.CSSProperties = {
+    display: 'grid',
+    gap: 8,
+    padding: 0,
+    margin: 0,
+    border: 'none',
+    outline: 'none',
+    background: 'transparent',
+    color: TOKENS.text,
+    cursor: disabled ? 'not-allowed' : 'pointer',
+    textAlign: 'left',
+    opacity: disabled ? 0.56 : 1,
+  };
+
   return (
-    <button
-      id={pillId}
-      type="button"
+    <section
+      aria-labelledby={`${pillId}-title`}
       className={className}
-      disabled={isDisabled}
-      onClick={() => {
-        if (isDisabled) return;
-        onOpen?.();
-      }}
-      style={rootStyle}
-      aria-label={`Open chat. ${formatUnreadLabel(unreadTotal, mentionTotal)}.`}
-      data-authority-root={CHAT_ENGINE_AUTHORITIES.frontendEngineRoot}
-      data-mount-target={mountTarget}
-      data-active-channel={activeChannel}
+      data-component="chat-collapsed-pill"
+      data-accent={model.accent}
+      data-tone={model.tone}
+      data-threat-band={model.threatSummary?.band ?? model.threatBand ?? 'quiet'}
+      data-expanded={model.expanded ? 'true' : 'false'}
+      style={sectionStyle}
     >
       <style>{FONT_IMPORT}</style>
       <style>{`
-        @keyframes pzo-pill-flash {
-          0%, 100% { box-shadow: 0 0 0 0 rgba(129,140,248,0.00); }
-          50% { box-shadow: 0 0 0 7px rgba(129,140,248,0.12); }
+        @keyframes pzo-collapsed-pill-pulse {
+          0%, 100% { box-shadow: 0 0 0 0 rgba(255,77,77,0.00); }
+          50% { box-shadow: 0 0 0 8px rgba(255,77,77,0.08); }
         }
-
-        @keyframes pzo-pill-online {
-          0%, 100% { opacity: 1; transform: scale(1); }
-          50% { opacity: 0.55; transform: scale(0.92); }
-        }
-
-        @keyframes pzo-pill-danger {
-          0%, 100% { opacity: 0.85; }
-          50% { opacity: 1; }
+        @keyframes pzo-collapsed-pill-scan {
+          0% { transform: translateX(-120%); opacity: 0.0; }
+          45% { opacity: 0.55; }
+          100% { transform: translateX(160%); opacity: 0.0; }
         }
       `}</style>
 
-      <div
-        aria-hidden="true"
-        style={{
-          position: 'absolute',
-          insetInline: 0,
-          top: 0,
-          height: 3,
-          background: invasion?.active
-            ? `linear-gradient(90deg, ${TOKENS.red}, ${TOKENS.orange}, ${TOKENS.yellow})`
-            : `linear-gradient(90deg, ${derived.currentVisual.accent}, ${derived.effectiveThreatTone.accent})`,
-        }}
-      />
-
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'auto minmax(0, 1fr) auto',
-          gap: 10,
-          alignItems: 'center',
-        }}
-      >
-        <div
-          aria-hidden="true"
-          style={{
-            position: 'relative',
-            width: 42,
-            height: 42,
-            borderRadius: 14,
-            display: 'grid',
-            placeItems: 'center',
-            fontFamily: TOKENS.display,
-            fontWeight: 800,
-            fontSize: 17,
-            color: TOKENS.white,
-            background: `linear-gradient(135deg, ${derived.currentVisual.accent}, ${invasion?.active ? TOKENS.red : TOKENS.purple})`,
-            boxShadow: '0 12px 26px rgba(0,0,0,0.28)',
-            animation: isAttentionFlashing ? 'pzo-pill-flash 1.5s ease-in-out infinite' : 'none',
-          }}
+      <div style={shellStyle}>
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() => onOpen?.(model)}
+          aria-label={rootAriaLabel(model)}
+          title={model.tooltip}
+          style={openButtonStyle}
         >
-          {derived.currentVisual.glyph}
-          <span
-            style={{
-              position: 'absolute',
-              width: 10,
-              height: 10,
-              borderRadius: '50%',
-              right: -2,
-              bottom: -2,
-              background: invasion?.active ? TOKENS.red : derived.moodAccent,
-              border: `2px solid ${TOKENS.card}`,
-              animation:
-                invasion?.active || derived.mood !== 'QUIET' ? 'pzo-pill-online 1.4s ease-in-out infinite' : 'none',
-            }}
-          />
-        </div>
-
-        <div style={{ display: 'grid', gap: 4, minWidth: 0, textAlign: 'left' }}>
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-              flexWrap: 'wrap',
-            }}
-          >
-            <span
-              style={{
-                color: TOKENS.text,
-                fontFamily: TOKENS.display,
-                fontSize: 15,
-                fontWeight: 800,
-                letterSpacing: '-0.02em',
-                minWidth: 0,
-              }}
-            >
-              {roomLabel || derived.currentVisual.label}
-            </span>
-            <span
-              style={{
-                color: derived.currentVisual.accent,
-                background: derived.currentVisual.bg,
-                border: `1px solid ${derived.currentVisual.border}`,
-                borderRadius: 999,
-                padding: '3px 7px',
-                fontSize: 10,
-                fontWeight: 800,
-                fontFamily: TOKENS.mono,
-                letterSpacing: '0.08em',
-                textTransform: 'uppercase',
-              }}
-            >
-              {derived.currentVisual.label}
-            </span>
-            {isMuted ? (
-              <span
-                style={{
-                  color: TOKENS.textSub,
-                  fontSize: 10,
-                  fontWeight: 800,
-                  fontFamily: TOKENS.mono,
-                  letterSpacing: '0.08em',
-                  textTransform: 'uppercase',
-                }}
-              >
-                Muted
-              </span>
-            ) : null}
-          </div>
-
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-              flexWrap: 'wrap',
-            }}
-          >
-            <span
-              style={{
-                color: TOKENS.textSub,
-                fontSize: 11,
-                fontWeight: 700,
-                fontFamily: TOKENS.mono,
-              }}
-            >
-              {formatUnreadLabel(unreadTotal, mentionTotal)}
-            </span>
-            <span
-              style={{
-                color: TOKENS.textMut,
-                fontSize: 11,
-                fontWeight: 700,
-                fontFamily: TOKENS.mono,
-              }}
-            >
-              • {derived.mountMood}
-            </span>
-            <span
-              style={{
-                color: derived.moodAccent,
-                fontSize: 11,
-                fontWeight: 700,
-                fontFamily: TOKENS.mono,
-              }}
-            >
-              • {derived.mood.toLowerCase()}
-            </span>
-          </div>
-        </div>
-
-        <div
-          style={{
-            display: 'grid',
-            gap: 6,
-            justifyItems: 'end',
-            minWidth: 54,
-          }}
-        >
-          <span
-            style={{
-              minWidth: 28,
-              height: 22,
-              padding: '0 8px',
-              borderRadius: 999,
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              background: unreadTotal > 0 ? 'rgba(255,77,77,0.12)' : 'rgba(255,255,255,0.05)',
-              border: unreadTotal > 0 ? '1px solid rgba(255,77,77,0.22)' : `1px solid ${TOKENS.border}`,
-              color: unreadTotal > 0 ? TOKENS.red : TOKENS.textSub,
-              fontSize: 10,
-              fontWeight: 800,
-              fontFamily: TOKENS.mono,
-              letterSpacing: '0.06em',
-              animation: unreadTotal > 0 ? 'pzo-pill-danger 1.6s ease-in-out infinite' : 'none',
-            }}
-          >
-            {unreadTotal > 99 ? '99+' : unreadTotal}
-          </span>
-
-          {derived.typingText ? (
-            <span
-              style={{
-                color: TOKENS.teal,
-                fontSize: 10,
-                fontWeight: 700,
-                fontFamily: TOKENS.mono,
-              }}
-            >
-              {derived.typingText}
-            </span>
-          ) : null}
-        </div>
-      </div>
-
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'minmax(0, 1fr) auto',
-          gap: 10,
-          alignItems: 'center',
-        }}
-      >
-        <div style={{ display: 'grid', gap: 8, minWidth: 0 }}>
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              gap: 10,
-            }}
-          >
-            <span
-              style={{
-                color: TOKENS.textMut,
-                fontSize: 10,
-                fontWeight: 800,
-                letterSpacing: '0.08em',
-                textTransform: 'uppercase',
-                fontFamily: TOKENS.mono,
-              }}
-            >
-              Threat pressure
-            </span>
-            <span
-              style={{
-                color: derived.effectiveThreatTone.accent,
-                fontSize: 10,
-                fontWeight: 800,
-                letterSpacing: '0.08em',
-                textTransform: 'uppercase',
-                fontFamily: TOKENS.mono,
-              }}
-            >
-              {derived.effectiveThreatTone.label}
-            </span>
-          </div>
-
           <div
             style={{
               position: 'relative',
-              height: 8,
-              borderRadius: 999,
-              background: 'rgba(255,255,255,0.05)',
-              border: `1px solid ${TOKENS.border}`,
-              overflow: 'hidden',
+              display: 'grid',
+              gap: 8,
+              minWidth: 0,
+              padding: 0,
             }}
           >
+            {derived.attentionFlash ? (
+              <span
+                aria-hidden="true"
+                style={{
+                  position: 'absolute',
+                  inset: -10,
+                  borderRadius: 24,
+                  animation: 'pzo-collapsed-pill-pulse 1.9s ease-in-out infinite',
+                  pointerEvents: 'none',
+                }}
+              />
+            ) : null}
+
             <div
               aria-hidden="true"
               style={{
                 position: 'absolute',
                 inset: 0,
-                width: `${Math.max(4, clamp01(threat?.score01) * 100)}%`,
-                borderRadius: 999,
-                background: `linear-gradient(90deg, ${derived.effectiveThreatTone.accent}, ${TOKENS.white})`,
-                boxShadow: `0 0 18px ${derived.effectiveThreatTone.bg}`,
-              }}
-            />
-          </div>
-        </div>
-
-        {helper?.promptPending ? (
-          <div
-            style={{
-              display: 'grid',
-              gap: 4,
-              padding: '8px 10px',
-              minWidth: 88,
-              borderRadius: 12,
-              background: 'rgba(34,221,136,0.08)',
-              border: '1px solid rgba(34,221,136,0.18)',
-              textAlign: 'left',
-            }}
-          >
-            <span
-              style={{
-                color: TOKENS.green,
-                fontSize: 10,
-                fontWeight: 800,
-                letterSpacing: '0.08em',
-                textTransform: 'uppercase',
-                fontFamily: TOKENS.mono,
-              }}
-            >
-              Helper waiting
-            </span>
-            <span
-              style={{
-                color: TOKENS.text,
-                fontSize: 11,
-                fontWeight: 700,
-              }}
-            >
-              {helper.helperName || 'Rescue line'}
-            </span>
-          </div>
-        ) : null}
-      </div>
-
-      {(invasion?.active || worldEventLabel || helper?.promptPending) && (
-        <div
-          style={{
-            display: 'grid',
-            gap: 8,
-            padding: '10px 11px',
-            borderRadius: 14,
-            background: invasion?.active ? 'rgba(255,77,77,0.08)' : 'rgba(255,255,255,0.03)',
-            border: invasion?.active ? '1px solid rgba(255,77,77,0.18)' : `1px solid ${TOKENS.border}`,
-          }}
-        >
-          {invasion?.active ? (
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-                flexWrap: 'wrap',
+                overflow: 'hidden',
+                borderRadius: 14,
+                pointerEvents: 'none',
               }}
             >
               <span
                 style={{
-                  color: TOKENS.red,
-                  fontSize: 10,
-                  fontWeight: 800,
-                  letterSpacing: '0.08em',
-                  textTransform: 'uppercase',
-                  fontFamily: TOKENS.mono,
+                  position: 'absolute',
+                  top: 0,
+                  bottom: 0,
+                  width: 56,
+                  background: 'linear-gradient(90deg, rgba(255,255,255,0), rgba(255,255,255,0.10), rgba(255,255,255,0))',
+                  animation: derived.attentionFlash ? 'pzo-collapsed-pill-scan 2.8s linear infinite' : 'none',
                 }}
-              >
-                Invasion live
-              </span>
-              <span
-                style={{
-                  color: TOKENS.text,
-                  fontSize: 11.5,
-                  fontWeight: 700,
-                }}
-              >
-                {invasion.label || invasion.aggressorName || 'Pressure spike detected'}
-              </span>
-              {invasion.stage ? (
-                <span
-                  style={{
-                    color: TOKENS.orange,
-                    fontSize: 10,
-                    fontWeight: 700,
-                    fontFamily: TOKENS.mono,
-                  }}
-                >
-                  {invasion.stage}
-                </span>
-              ) : null}
+              />
             </div>
-          ) : null}
 
-          {helper?.promptPending ? (
             <div
               style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
+                display: 'grid',
+                gridTemplateColumns: '1fr auto',
                 gap: 10,
-                flexWrap: 'wrap',
+                alignItems: 'start',
+                minWidth: 0,
               }}
             >
-              <span
-                style={{
-                  color: TOKENS.textSub,
-                  fontSize: 11.5,
-                  fontWeight: 600,
-                }}
-              >
-                {helper.promptLabel || 'Helper prompt is staged and ready.'}
-              </span>
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 8,
-                  color: TOKENS.green,
-                  fontSize: 10,
-                  fontWeight: 700,
-                  fontFamily: TOKENS.mono,
-                }}
-              >
-                <span>U {Math.round(helperTrust * 100)}%</span>
-                <span>•</span>
-                <span>R {Math.round(helperUrgency * 100)}%</span>
+              <div style={{ display: 'grid', gap: 6, minWidth: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                  <span
+                    aria-hidden="true"
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      width: 30,
+                      height: 30,
+                      borderRadius: 10,
+                      border: `1px solid ${derived.accent.border}`,
+                      background: derived.accent.bg,
+                      color: derived.accent.text,
+                      fontFamily: TOKENS.display,
+                      fontSize: 15,
+                      fontWeight: 800,
+                      flex: '0 0 auto',
+                    }}
+                  >
+                    {model.icon || '◉'}
+                  </span>
+
+                  <div style={{ display: 'grid', gap: 2, minWidth: 0 }}>
+                    <span
+                      id={`${pillId}-title`}
+                      style={{
+                        minWidth: 0,
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                        color: TOKENS.text,
+                        fontFamily: TOKENS.display,
+                        fontSize: 15,
+                        fontWeight: 800,
+                        letterSpacing: '-0.01em',
+                      }}
+                    >
+                      {derived.headline}
+                    </span>
+                    <span
+                      style={{
+                        minWidth: 0,
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                        color: TOKENS.textSubtle,
+                        fontFamily: TOKENS.mono,
+                        fontSize: 10,
+                        fontWeight: 700,
+                        letterSpacing: '0.06em',
+                        textTransform: 'uppercase',
+                      }}
+                    >
+                      {derived.subline}
+                    </span>
+                  </div>
+                </div>
+
+                {model.roomSubtitle ? (
+                  <div
+                    style={{
+                      minWidth: 0,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                      color: TOKENS.textMuted,
+                      fontFamily: TOKENS.display,
+                      fontSize: 12,
+                      fontWeight: 600,
+                    }}
+                  >
+                    {model.roomSubtitle}
+                  </div>
+                ) : null}
               </div>
-            </div>
-          ) : null}
 
-          {worldEventLabel ? (
-            <div
-              style={{
-                color: TOKENS.cyan,
-                fontSize: 11.5,
-                fontWeight: 700,
-              }}
-            >
-              {worldEventLabel}
-            </div>
-          ) : null}
-        </div>
-      )}
-
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-          flexWrap: 'wrap',
-        }}
-      >
-        {derived.miniChannels.map((item) => {
-          const visual = channelVisual(item.channel);
-          const isActive = item.channel === activeChannel;
-          const count = Math.max(item.unreadCount ?? 0, item.mentionCount ?? 0);
-
-          return (
-            <button
-              key={item.channel}
-              type="button"
-              onClick={(event) => {
-                event.stopPropagation();
-                if (!onCycleChannel || isDisabled) return;
-                onCycleChannel(item.channel);
-              }}
-              disabled={!onCycleChannel || isDisabled}
-              style={{
-                appearance: 'none',
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 7,
-                height: 28,
-                padding: '0 10px',
-                borderRadius: 999,
-                border: `1px solid ${isActive ? visual.border : TOKENS.border}`,
-                background: isActive ? visual.bg : 'rgba(255,255,255,0.03)',
-                color: isActive ? visual.accent : TOKENS.textSub,
-                cursor: !onCycleChannel || isDisabled ? 'default' : 'pointer',
-              }}
-              title={`Switch to ${visual.label}`}
-            >
-              <span
-                style={{
-                  fontSize: 10,
-                  fontWeight: 800,
-                  fontFamily: TOKENS.mono,
-                  letterSpacing: '0.08em',
-                  textTransform: 'uppercase',
-                }}
-              >
-                {visual.label}
-              </span>
-              {count > 0 ? (
+              <div style={{ display: 'grid', gap: 6, justifyItems: 'end' }}>
                 <span
+                  title={readableUnread(model)}
                   style={{
-                    minWidth: 16,
-                    height: 16,
-                    borderRadius: 99,
-                    padding: '0 4px',
                     display: 'inline-flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    background: 'rgba(255,77,77,0.12)',
-                    color: TOKENS.red,
-                    fontSize: 9,
-                    fontWeight: 800,
+                    minWidth: 28,
+                    height: 28,
+                    padding: '0 8px',
+                    borderRadius: 999,
+                    border: `1px solid ${derived.mentions > 0 ? 'rgba(255,77,77,0.24)' : derived.unread > 0 ? derived.accent.border : TOKENS.border}`,
+                    background: derived.mentions > 0 ? TOKENS.dangerBg : derived.unread > 0 ? derived.accent.bg : TOKENS.cardRaised,
+                    color: derived.mentions > 0 ? TOKENS.red : derived.unread > 0 ? derived.accent.text : TOKENS.textSubtle,
                     fontFamily: TOKENS.mono,
+                    fontSize: 11,
+                    fontWeight: 800,
+                    letterSpacing: '0.03em',
                   }}
                 >
-                  {count > 99 ? '99+' : count}
+                  {compactNumber(derived.mentions > 0 ? derived.mentions : derived.unread)}
                 </span>
-              ) : null}
-              {item.helperPending ? (
-                <span
-                  style={{
-                    width: 8,
-                    height: 8,
-                    borderRadius: '50%',
-                    background: TOKENS.green,
-                    boxShadow: '0 0 10px rgba(34,221,136,0.28)',
-                  }}
-                />
-              ) : null}
-            </button>
-          );
-        })}
-      </div>
 
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: 10,
-          flexWrap: 'wrap',
-          color: TOKENS.textMut,
-          fontSize: 10,
-          fontWeight: 700,
-          fontFamily: TOKENS.mono,
-        }}
-      >
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-            flexWrap: 'wrap',
-          }}
-        >
-          <span>{CHAT_ENGINE_AUTHORITIES.frontendEngineRoot}</span>
-          <span>•</span>
-          <span>{derived.mountPreset?.density ?? 'STANDARD'}</span>
-          <span>•</span>
-          <span>{visiblePresence?.length ?? 0} visible</span>
-        </div>
-        <span>{mountTarget}</span>
+                {(model.liveLabel || model.connectionLabel || model.muted) ? (
+                  <span
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      minHeight: 22,
+                      padding: '0 8px',
+                      borderRadius: 999,
+                      border: `1px solid ${TOKENS.border}`,
+                      background: TOKENS.chipBg,
+                      color: TOKENS.textMuted,
+                      fontFamily: TOKENS.mono,
+                      fontSize: 10,
+                      fontWeight: 700,
+                      letterSpacing: '0.05em',
+                    }}
+                  >
+                    {model.liveLabel ? <span>{model.liveLabel}</span> : null}
+                    {model.connectionLabel ? <span>{model.connectionLabel}</span> : null}
+                    {model.muted ? <span>Muted</span> : null}
+                  </span>
+                ) : null}
+              </div>
+            </div>
+
+            <div
+              style={{
+                display: 'grid',
+                gap: 6,
+              }}
+            >
+              <div
+                style={{
+                  display: 'grid',
+                  gap: 6,
+                  gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+                }}
+              >
+                <div
+                  title={model.threatSummary?.tooltip}
+                  style={{
+                    display: 'grid',
+                    gap: 3,
+                    minWidth: 0,
+                    padding: '8px 9px',
+                    borderRadius: 12,
+                    border: `1px solid ${derived.threat.border}`,
+                    background: derived.threat.bg,
+                  }}
+                >
+                  <span
+                    style={{
+                      color: derived.threat.accent,
+                      fontFamily: TOKENS.mono,
+                      fontSize: 10,
+                      fontWeight: 800,
+                      letterSpacing: '0.06em',
+                      textTransform: 'uppercase',
+                    }}
+                  >
+                    {derived.threat.icon} {readableThreat(model.threatSummary, model.threatBand)}
+                  </span>
+                  <div
+                    aria-hidden="true"
+                    style={{
+                      position: 'relative',
+                      height: 6,
+                      borderRadius: 999,
+                      background: 'rgba(255,255,255,0.08)',
+                      overflow: 'hidden',
+                    }}
+                  >
+                    <span
+                      style={{
+                        position: 'absolute',
+                        inset: 0,
+                        width: `${Math.round(derived.pressureRatio * 100)}%`,
+                        background: `linear-gradient(90deg, ${derived.threat.accent}, ${derived.threat.accent})`,
+                        borderRadius: 999,
+                      }}
+                    />
+                  </div>
+                </div>
+
+                <div
+                  title={model.presenceSummary?.tooltip}
+                  style={{
+                    display: 'grid',
+                    gap: 3,
+                    minWidth: 0,
+                    padding: '8px 9px',
+                    borderRadius: 12,
+                    border: `1px solid ${TOKENS.border}`,
+                    background: TOKENS.chipBg,
+                  }}
+                >
+                  <span
+                    style={{
+                      color: derived.accent.text,
+                      fontFamily: TOKENS.mono,
+                      fontSize: 10,
+                      fontWeight: 800,
+                      letterSpacing: '0.06em',
+                      textTransform: 'uppercase',
+                    }}
+                  >
+                    {derived.presenceText || 'Presence quiet'}
+                  </span>
+                  <span
+                    style={{
+                      color: TOKENS.textSubtle,
+                      fontFamily: TOKENS.display,
+                      fontSize: 12,
+                      fontWeight: 700,
+                    }}
+                  >
+                    {presenceMoodLabel(model.presenceSummary)}
+                  </span>
+                </div>
+              </div>
+
+              {(derived.typingText || derived.helperText || derived.invasionText) ? (
+                <div
+                  style={{
+                    display: 'flex',
+                    flexWrap: 'wrap',
+                    gap: 6,
+                  }}
+                >
+                  {derived.typingText ? renderPill({ id: `${model.id}:typing`, label: derived.typingText, icon: '…', accent: 'cyan', tone: 'neutral' }) : null}
+                  {derived.helperText ? renderPill({ id: `${model.id}:helper`, label: derived.helperText, icon: '✦', accent: 'emerald', tone: 'supportive', selected: true }) : null}
+                  {derived.invasionText ? renderPill({ id: `${model.id}:invasion`, label: derived.invasionText, icon: '⚠', accent: 'red', tone: 'danger', selected: true }) : null}
+                </div>
+              ) : null}
+            </div>
+          </div>
+        </button>
+
+        {derived.channels.length > 0 ? (
+          <div
+            style={{
+              display: 'flex',
+              flexWrap: 'wrap',
+              gap: 6,
+            }}
+          >
+            {derived.channels.map((summary) => renderChannelButton(summary, model, onSelectChannel))}
+          </div>
+        ) : null}
+
+        {derived.statusPills.length > 0 ? (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {derived.statusPills.map(renderPill)}
+          </div>
+        ) : null}
+
+        {derived.chips.length > 0 ? (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {derived.chips.map(renderChip)}
+          </div>
+        ) : null}
+
+        {derived.metrics.length > 0 ? (
+          <div
+            style={{
+              display: 'grid',
+              gap: 6,
+              gridTemplateColumns: `repeat(${Math.min(derived.metrics.length, 3)}, minmax(0, 1fr))`,
+            }}
+          >
+            {derived.metrics.map(renderMetric)}
+          </div>
+        ) : null}
+
+        {derived.actions.length > 0 ? (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {derived.actions.map((action) =>
+              renderAction(action, model, onAction, onDismiss, onToggleExpanded),
+            )}
+          </div>
+        ) : null}
       </div>
-    </button>
+    </section>
   );
 }
 
