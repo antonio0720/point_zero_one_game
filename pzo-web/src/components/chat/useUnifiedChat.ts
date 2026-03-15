@@ -16,9 +16,14 @@ import {
 } from './chatTypes';
 import { useChatEngine } from './useChatEngine';
 import { buildTranscriptDrawerSurfaceModel, createTranscriptDrawerCallbacks } from './transcriptDrawerAdapter';
+import { buildMessageFeedSurfaceModel } from './messageFeedSurfaceBuilder';
+import { buildChannelTabViewModels } from './channelTabsSurfaceBuilder';
 import type {
+  ChannelTabsViewModel,
   ChatUiTranscriptDrawerCallbacks,
   ChatUiTranscriptDrawerSurfaceModel,
+  MessageCardActionViewModel,
+  MessageFeedViewModel,
 } from './uiTypes';
 
 /**
@@ -164,6 +169,9 @@ export interface UseUnifiedChatResult {
   transcript: UnifiedChatTranscriptState;
   transcriptDrawerModel: ChatUiTranscriptDrawerSurfaceModel;
   transcriptDrawerCallbacks: ChatUiTranscriptDrawerCallbacks;
+  channelTabs: ChannelTabsViewModel;
+  messageFeedModel: MessageFeedViewModel;
+  messageFeedActionsByMessageId: Record<string, readonly MessageCardActionViewModel[]>;
   composer: UnifiedChatComposerState;
   latestMessage: ChatMessage | null;
   latestPlayerMessage: ChatMessage | null;
@@ -276,6 +284,23 @@ function connectionStateFromFlags(
   if (ctx.tick <= 3 && messages.length === 0) return 'CONNECTING';
   if (messages.length > 0) return 'DEGRADED';
   return 'DISCONNECTED';
+}
+
+
+function toChannelTabsConnectionState(
+  state: UnifiedChatConnectionState,
+): 'ONLINE' | 'CONNECTING' | 'DEGRADED' | 'OFFLINE' {
+  switch (state) {
+    case 'CONNECTED':
+      return 'ONLINE';
+    case 'CONNECTING':
+      return 'CONNECTING';
+    case 'DEGRADED':
+      return 'DEGRADED';
+    case 'DISCONNECTED':
+    default:
+      return 'OFFLINE';
+  }
 }
 
 function scoreThreat(messages: readonly ChatMessage[], ctx: GameChatContext): UnifiedChatThreatSummary {
@@ -743,6 +768,137 @@ export function useUnifiedChat({
     ],
   );
 
+  const recommendationChannel = useMemo<ChatChannel>(() => {
+    const dealUnread = unread.DEAL_ROOM ?? 0;
+    const syndicateUnread = unread.SYNDICATE ?? 0;
+    const globalUnread = unread.GLOBAL ?? 0;
+    if (transcriptLocked || dealUnread >= Math.max(globalUnread, syndicateUnread)) return 'DEAL_ROOM';
+    if (threat.tier === 'HIGH' || threat.tier === 'CRITICAL') return 'SYNDICATE';
+    if (globalUnread >= Math.max(syndicateUnread, dealUnread)) return 'GLOBAL';
+    return activeTab;
+  }, [activeTab, threat.tier, transcriptLocked, unread.DEAL_ROOM, unread.GLOBAL, unread.SYNDICATE]);
+
+  const channelTabs = useMemo<ChannelTabsViewModel>(() => {
+    const scopedMessages = (channel: ChatChannel) => allMessages.filter((message) => message.channel === channel);
+    const unreadByChannel = unread;
+    const makePresence = (channel: ChatChannel) => {
+      const scoped = scopedMessages(channel).slice(-18);
+      return {
+        online: new Set(
+          scoped
+            .map((message) => (message as unknown as { senderId?: string }).senderId ?? '')
+            .filter(Boolean),
+        ).size,
+        typing: scoped.filter((message) => message.kind === 'PLAYER' && Date.now() - ((message as unknown as { ts?: number }).ts ?? 0) < 18_000).length,
+        watching: Math.max(0, scoped.length - 1),
+        helperVisible: channel === 'SYNDICATE' && helperPrompt !== null,
+        haterVisible: scoped.some((message) => message.kind === 'BOT_ATTACK' || message.kind === 'BOT_TAUNT'),
+      };
+    };
+    const makeHeat = (channel: ChatChannel) => {
+      const scoped = scopedMessages(channel);
+      const attackCount = scoped.filter((message) => message.kind === 'BOT_ATTACK').length;
+      const tauntCount = scoped.filter((message) => message.kind === 'BOT_TAUNT').length;
+      const cascadeCount = scoped.filter((message) => message.kind === 'CASCADE_ALERT').length;
+      const score01 = Math.max(0, Math.min(1, (attackCount * 0.32) + (tauntCount * 0.18) + (cascadeCount * 0.24) + ((unreadByChannel[channel] ?? 0) / 16)));
+      const band = score01 >= 0.8 ? 'SEVERE' : score01 >= 0.6 ? 'HIGH' : score01 >= 0.35 ? 'ELEVATED' : score01 >= 0.1 ? 'LOW' : 'QUIET';
+      return { score01, band, label: band.toLowerCase() } as const;
+    };
+    const makeIntegrity = (channel: ChatChannel) => ({
+      locked: channel === 'DEAL_ROOM' ? transcriptLocked : false,
+      label: channel === 'DEAL_ROOM' && transcriptLocked ? 'sealed' : 'open',
+      proofState: channel === 'DEAL_ROOM' && transcriptLocked ? 'sealed' : 'clean',
+    } as const);
+    const makeMetaLines = (channel: ChatChannel) => {
+      const scoped = scopedMessages(channel);
+      const latest = scoped[scoped.length - 1];
+      return [
+        {
+          id: `${channel}:messages`,
+          label: 'msgs',
+          value: String(scoped.length),
+          visible: true,
+        },
+        {
+          id: `${channel}:latest`,
+          label: 'latest',
+          value: latest ? new Date(((latest as unknown as { ts?: number }).ts ?? 0)).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--:--',
+          visible: true,
+        },
+      ];
+    };
+
+    return {
+      activeChannel: activeTab,
+      onSelectChannel: (channel) => {
+        const nextChannel = channel as ChatChannel;
+        if (nextChannel === activeTab) return;
+        switchTab(nextChannel);
+        setHelperDismissed(false);
+      },
+      density: collapsed ? 'compact' : 'comfortable',
+      layout: 'inline',
+      collapsed,
+      connectionState: toChannelTabsConnectionState(connectionState),
+      totalUnread,
+      showDescriptions: !collapsed,
+      showMetaRail: !collapsed,
+      showHeatMeters: !collapsed,
+      showPresence: !collapsed,
+      showHotkeys: true,
+      showUnreadTotalSeal: true,
+      showConnectionPill: true,
+      showKeyboardHintsInLegend: true,
+      keyboardLegendLabel: 'switch',
+      onOpenPresencePanel: undefined,
+      onOpenIntegrityPanel: undefined,
+      tabs: buildChannelTabViewModels({
+        activeChannel: activeTab,
+        records: {
+          GLOBAL: {
+            unread: unreadByChannel.GLOBAL ?? 0,
+            heat: makeHeat('GLOBAL'),
+            presence: makePresence('GLOBAL'),
+            integrity: makeIntegrity('GLOBAL'),
+            metaLines: makeMetaLines('GLOBAL'),
+            recommended: recommendationChannel === 'GLOBAL',
+            recommendationLabel: recommendationChannel === 'GLOBAL' ? 'best next lane' : undefined,
+          },
+          SYNDICATE: {
+            unread: unreadByChannel.SYNDICATE ?? 0,
+            heat: makeHeat('SYNDICATE'),
+            presence: makePresence('SYNDICATE'),
+            integrity: makeIntegrity('SYNDICATE'),
+            metaLines: makeMetaLines('SYNDICATE'),
+            recommended: recommendationChannel === 'SYNDICATE',
+            recommendationLabel: recommendationChannel === 'SYNDICATE' ? 'best next lane' : undefined,
+          },
+          DEAL_ROOM: {
+            unread: unreadByChannel.DEAL_ROOM ?? 0,
+            heat: makeHeat('DEAL_ROOM'),
+            presence: makePresence('DEAL_ROOM'),
+            integrity: makeIntegrity('DEAL_ROOM'),
+            metaLines: makeMetaLines('DEAL_ROOM'),
+            seriousness: transcriptLocked ? 'high' : 'elevated',
+            recommended: recommendationChannel === 'DEAL_ROOM',
+            recommendationLabel: recommendationChannel === 'DEAL_ROOM' ? 'best next lane' : undefined,
+          },
+        },
+      }),
+    };
+  }, [
+    activeTab,
+    allMessages,
+    collapsed,
+    connectionState,
+    helperPrompt,
+    recommendationChannel,
+    switchTab,
+    totalUnread,
+    transcriptLocked,
+    unread,
+  ]);
+
   const emptyStateMode = useMemo(
     () =>
       emptyStateModeFromState({
@@ -960,6 +1116,7 @@ export function useUnifiedChat({
     },
     transcriptDrawerModel,
     transcriptDrawerCallbacks,
+    channelTabs,
     messageFeedModel,
     messageFeedActionsByMessageId,
     composer,

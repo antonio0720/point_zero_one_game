@@ -1,5 +1,4 @@
 import type {
-  ChatUiAccent,
   ChatUiChip,
   ChatUiDrawerFilter,
   ChatUiMetric,
@@ -14,21 +13,6 @@ import type {
 } from './uiTypes';
 import { buildEmptyStateViewModel } from './uiTypes';
 import type { ChatChannel, ChatMessage, GameChatContext } from './chatTypes';
-
-/**
- * ============================================================================
- * POINT ZERO ONE — TRANSCRIPT DRAWER ADAPTER
- * FILE: pzo-web/src/components/chat/transcriptDrawerAdapter.ts
- * VERSION: 1.1.0
- * AUTHOR: OpenAI
- * LICENSE: Internal / Project Use Only
- * ============================================================================
- *
- * Thin transcript drawer surface adapter. This merges the older richer drawer
- * row/filter/header shaping with the current shell contract exposed by
- * uiTypes.ts and useUnifiedChat.ts.
- * ============================================================================
- */
 
 export type TranscriptDrawerKindScope = 'ALL' | string;
 export type TranscriptDrawerChannelScope = ChatChannel | 'ALL';
@@ -104,25 +88,22 @@ function channelLabel(channel: string): string {
 function toneForMessage(kind: string): ChatUiTone {
   if (kind === 'BOT_ATTACK' || kind === 'CASCADE_ALERT') return 'danger';
   if (kind === 'BOT_TAUNT') return 'hostile';
-  if (kind === 'MARKET_ALERT' || kind === 'DEAL' || kind === 'DEAL_RECAP') return 'warning';
+  if (kind === 'MARKET_ALERT' || kind === 'DEAL') return 'warning';
   if (kind === 'SYSTEM' || kind === 'SYSTEM_NOTICE') return 'premium';
   return 'neutral';
 }
 
-function accentForMessage(kind: string, channel: string): ChatUiAccent {
-  if (kind === 'BOT_ATTACK' || kind === 'CASCADE_ALERT') return 'red';
-  if (kind === 'BOT_TAUNT') return 'amber';
-  if (channel === 'DEAL_ROOM') return 'amber';
-  if (channel === 'SYNDICATE') return 'cyan';
-  if (channel === 'GLOBAL') return 'silver';
-  return 'slate';
+function accentForMessage(kind: string, channel: string) {
+  if (kind === 'BOT_ATTACK' || kind === 'CASCADE_ALERT') return 'red' as const;
+  if (kind === 'BOT_TAUNT') return 'amber' as const;
+  if (channel === 'DEAL_ROOM') return 'amber' as const;
+  if (channel === 'SYNDICATE') return 'cyan' as const;
+  if (channel === 'GLOBAL') return 'silver' as const;
+  return 'slate' as const;
 }
 
 function kindLabel(kind: string): string {
-  return kind
-    .toLowerCase()
-    .replace(/_/g, ' ')
-    .replace(/\b\w/g, (c) => c.toUpperCase());
+  return kind.toLowerCase().replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 function initialsOf(name: string): string | undefined {
@@ -137,37 +118,17 @@ function createDetailCards(message: ChatMessage): ChatUiTranscriptDetailCard[] |
 
   const proofHash = maybeString(r.proofHash);
   if (proofHash) {
-    cards.push({
-      id: `${message.id}:proof`,
-      label: 'Proof',
-      title: proofHash,
-      subtitle: maybeString(r.proofSummary),
-      accent: 'indigo',
-      tone: 'premium',
-    });
+    cards.push({ id: `${message.id}:proof`, label: 'Proof', title: proofHash, subtitle: maybeString(r.proofSummary), accent: 'indigo', tone: 'premium' });
   }
 
   const pressureTier = maybeString(r.pressureTier);
   if (pressureTier) {
-    cards.push({
-      id: `${message.id}:pressure`,
-      label: 'Pressure',
-      title: pressureTier,
-      subtitle: maybeString(r.tickTier),
-      accent: 'amber',
-      tone: 'warning',
-    });
+    cards.push({ id: `${message.id}:pressure`, label: 'Pressure', title: pressureTier, subtitle: maybeString(r.tickTier), accent: 'amber', tone: 'warning' });
   }
 
   const runOutcome = maybeString(r.runOutcomeLabel ?? r.runOutcome);
   if (runOutcome) {
-    cards.push({
-      id: `${message.id}:outcome`,
-      label: 'Outcome',
-      title: runOutcome,
-      accent: 'violet',
-      tone: 'dramatic',
-    });
+    cards.push({ id: `${message.id}:outcome`, label: 'Outcome', title: runOutcome, accent: 'violet', tone: 'dramatic' });
   }
 
   return cards.length > 0 ? cards : undefined;
@@ -176,26 +137,20 @@ function createDetailCards(message: ChatMessage): ChatUiTranscriptDetailCard[] |
 function createChips(message: ChatMessage): ChatUiChip[] | undefined {
   const r = asRecord(message as unknown);
   const chips: ChatUiChip[] = [];
-  if (maybeString(r.proofHash)) {
-    chips.push({ id: `${message.id}:chip:proof`, label: 'Proof', shortLabel: 'Proof', accent: 'indigo', tone: 'premium', active: true });
-  }
-  if (r.immutable === true) {
-    chips.push({ id: `${message.id}:chip:locked`, label: 'Locked', shortLabel: 'Locked', accent: 'obsidian', tone: 'ghost', active: true });
-  }
-  if (maybeString(r.pressureTier)) {
-    chips.push({ id: `${message.id}:chip:pressure`, label: asString(r.pressureTier), shortLabel: asString(r.pressureTier), accent: 'amber', tone: 'warning', active: true });
-  }
+  if (maybeString(r.proofHash)) chips.push({ id: `${message.id}:chip:proof`, label: 'Proof', shortLabel: 'Proof', accent: 'indigo', tone: 'premium', active: true });
+  if (r.immutable === true) chips.push({ id: `${message.id}:chip:locked`, label: 'Locked', shortLabel: 'Locked', accent: 'obsidian', tone: 'ghost', active: true });
+  if (maybeString(r.pressureTier)) chips.push({ id: `${message.id}:chip:pressure`, label: asString(r.pressureTier), shortLabel: asString(r.pressureTier), accent: 'amber', tone: 'warning', active: true });
   return chips.length > 0 ? chips : undefined;
 }
 
 function createRow(message: ChatMessage, selectedMessageId?: string | null): ChatUiTranscriptRowViewModel {
   const r = asRecord(message as unknown);
-  const senderName = asString(r.senderName, 'Unknown');
-  const senderId = asString(r.senderId, 'unknown');
-  const body = asString(r.body, '');
-  const channel = asString(r.channel, 'GLOBAL');
-  const kind = asString(r.kind, 'SYSTEM');
-  const timestamp = asNumber(r.ts, 0);
+  const senderName = asString((message as unknown as { senderName?: string }).senderName ?? r.senderName, 'Unknown');
+  const senderId = asString((message as unknown as { senderId?: string }).senderId ?? r.senderId, 'unknown');
+  const body = asString((message as unknown as { body?: string }).body ?? r.body, '');
+  const channel = asString((message as unknown as { channel?: string }).channel ?? r.channel, 'GLOBAL');
+  const kind = asString((message as unknown as { kind?: string }).kind ?? r.kind, 'SYSTEM');
+  const timestamp = asNumber((message as unknown as { ts?: number }).ts ?? r.ts, 0);
   const role: 'player' | 'system' = kind === 'PLAYER' ? 'player' : 'system';
 
   return {
@@ -231,12 +186,8 @@ function createRow(message: ChatMessage, selectedMessageId?: string | null): Cha
   };
 }
 
-function filterRows(
-  rows: readonly ChatUiTranscriptRowViewModel[],
-  params: BuildTranscriptDrawerSurfaceParams,
-): ChatUiTranscriptRowViewModel[] {
+function filterRows(rows: readonly ChatUiTranscriptRowViewModel[], params: BuildTranscriptDrawerSurfaceParams): ChatUiTranscriptRowViewModel[] {
   const query = (params.searchQuery ?? '').trim().toLowerCase();
-
   return rows.filter((row) => {
     if ((params.channelScope ?? 'ALL') !== 'ALL' && row.channelId !== params.channelScope) return false;
     if ((params.kindScope ?? 'ALL') !== 'ALL' && row.kindId !== params.kindScope) return false;
@@ -257,10 +208,7 @@ function sortRows(rows: readonly ChatUiTranscriptRowViewModel[], newestFirst: bo
   });
 }
 
-function buildChannelFilters(
-  rows: readonly ChatUiTranscriptRowViewModel[],
-  scope: TranscriptDrawerChannelScope,
-): ChatUiDrawerFilter[] {
+function buildChannelFilters(rows: readonly ChatUiTranscriptRowViewModel[], scope: TranscriptDrawerChannelScope): ChatUiDrawerFilter[] {
   const ids = ['ALL', 'GLOBAL', 'SYNDICATE', 'DEAL_ROOM'] as const;
   return ids.map((id) => ({
     id,
@@ -272,10 +220,7 @@ function buildChannelFilters(
   }));
 }
 
-function buildKindFilters(
-  rows: readonly ChatUiTranscriptRowViewModel[],
-  scope: TranscriptDrawerKindScope,
-): ChatUiDrawerFilter[] {
+function buildKindFilters(rows: readonly ChatUiTranscriptRowViewModel[], scope: TranscriptDrawerKindScope): ChatUiDrawerFilter[] {
   const kinds = ['ALL', ...Array.from(new Set(rows.map((row) => row.kindId).filter(Boolean) as string[]))];
   return kinds.map((kind) => ({
     id: kind,
@@ -315,10 +260,7 @@ function buildHeader(params: BuildTranscriptDrawerSurfaceParams): ChatUiTranscri
   };
 }
 
-function buildFilterState(
-  rows: readonly ChatUiTranscriptRowViewModel[],
-  params: BuildTranscriptDrawerSurfaceParams,
-): ChatUiTranscriptDrawerFilterStateViewModel {
+function buildFilterState(rows: readonly ChatUiTranscriptRowViewModel[], params: BuildTranscriptDrawerSurfaceParams): ChatUiTranscriptDrawerFilterStateViewModel {
   return {
     query: params.searchQuery ?? '',
     channelScope: params.channelScope ?? params.activeChannel,
@@ -331,19 +273,14 @@ function buildFilterState(
   };
 }
 
-function buildDrawer(
-  rows: readonly ChatUiTranscriptRowViewModel[],
-  params: BuildTranscriptDrawerSurfaceParams,
-): ChatUiTranscriptDrawerViewModel {
+function buildDrawer(rows: readonly ChatUiTranscriptRowViewModel[], params: BuildTranscriptDrawerSurfaceParams): ChatUiTranscriptDrawerViewModel {
   const selected = params.selectedMessageId ? rows.find((row) => row.messageId === params.selectedMessageId) : undefined;
-
+  const query = (params.searchQuery ?? '').trim();
   const emptyState = rows.length === 0
     ? buildEmptyStateViewModel({
-        kind: (params.searchQuery ?? '').trim().length > 0 ? 'filtered_empty' : 'quiet_room',
-        title: (params.searchQuery ?? '').trim().length > 0 ? 'No transcript matches' : 'No transcript rows',
-        body: (params.searchQuery ?? '').trim().length > 0
-          ? 'Try widening your search or scope.'
-          : 'There are no visible transcript rows for the current scope.',
+        kind: query.length > 0 ? 'filtered_empty' : 'quiet_room',
+        title: query.length > 0 ? 'No transcript matches' : 'No transcript rows',
+        body: query.length > 0 ? 'Try widening your search or scope.' : 'There are no visible transcript rows for the current scope.',
       })
     : undefined;
 
@@ -370,17 +307,15 @@ function buildDrawer(
       proofLabel: row.proofSummary,
       threatLabel: row.pressureTierLabel,
     })),
-    selected: selected
-      ? {
-          messageId: selected.messageId,
-          authorLabel: selected.actorLabel,
-          text: selected.body,
-          timestampLabel: selected.timestampLabel,
-          proofSummary: selected.proofSummary,
-          threatSummary: selected.pressureTierLabel,
-          integritySummary: selected.locked ? 'Locked transcript row' : undefined,
-        }
-      : undefined,
+    selected: selected ? {
+      messageId: selected.messageId,
+      authorLabel: selected.actorLabel,
+      text: selected.body,
+      timestampLabel: selected.timestampLabel,
+      proofSummary: selected.proofSummary,
+      threatSummary: selected.pressureTierLabel,
+      integritySummary: selected.locked ? 'Locked transcript row' : undefined,
+    } : undefined,
     summaryMetrics: buildSummaryMetrics(rows),
     exportReady: rows.length > 0,
     canSearch: true,
@@ -389,12 +324,9 @@ function buildDrawer(
   };
 }
 
-export function buildTranscriptDrawerSurfaceModel(
-  params: BuildTranscriptDrawerSurfaceParams,
-): ChatUiTranscriptDrawerSurfaceModel {
+export function buildTranscriptDrawerSurfaceModel(params: BuildTranscriptDrawerSurfaceParams): ChatUiTranscriptDrawerSurfaceModel {
   const baseRows = params.messages.map((message) => createRow(message, params.selectedMessageId));
   const filteredRows = sortRows(filterRows(baseRows, params), params.newestFirst ?? false);
-
   return {
     drawer: buildDrawer(filteredRows, params),
     header: buildHeader(params),
@@ -403,9 +335,7 @@ export function buildTranscriptDrawerSurfaceModel(
   };
 }
 
-export function createTranscriptDrawerCallbacks(
-  params: CreateTranscriptDrawerCallbacksParams,
-): ChatUiTranscriptDrawerCallbacks {
+export function createTranscriptDrawerCallbacks(params: CreateTranscriptDrawerCallbacksParams): ChatUiTranscriptDrawerCallbacks {
   return {
     onClose: params.onClose,
     onSearchQueryChange: params.onSearchQueryChange,

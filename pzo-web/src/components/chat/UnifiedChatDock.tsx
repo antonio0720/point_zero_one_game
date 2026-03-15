@@ -28,6 +28,7 @@ import {
 import type { ChatMessage, GameChatContext, SabotageEvent } from './chatTypes';
 import { useUnifiedChat } from './useUnifiedChat';
 import ChatMessageFeed from './ChatMessageFeed';
+import ChatChannelTabs from './ChatChannelTabs';
 
 
 type VisibleChannelId = 'GLOBAL' | 'SYNDICATE' | 'DEAL_ROOM';
@@ -552,11 +553,10 @@ export const UnifiedChatDock = memo(function UnifiedChatDock({
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 8 }}>
-        {(['GLOBAL', 'SYNDICATE', 'DEAL_ROOM'] as const).map((channel) => (
-          <ChannelTabButton key={channel} channel={channel} active={activeTab === channel} unread={Number(unread[channel] ?? 0)} onClick={() => handleSwitchTab(channel)} />
-        ))}
-      </div>
+      <ChatChannelTabs
+        {...ui.channelTabs}
+        className="pzo-chat-dock__channel-tabs"
+      />
 
       {bootstrapPreset.showPresenceStrip ? <PresenceStrip members={presence} /> : null}
       {bootstrapPreset.showThreatMeter && enableThreatMeter ? <ThreatMeter threat={threat} /> : null}
