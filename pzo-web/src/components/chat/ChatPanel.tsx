@@ -1,622 +1,850 @@
 /**
- * ChatPanel.tsx — PZO Sovereign Chat · Engine-Integrated
- * Engine: battle/types · zero/types · pressure/types
- * Scale: 20M concurrent · Mobile-first · Syne + IBM Plex Mono
- * No Tailwind — inline styles + design token system (matches LeagueUI)
- * Density6 LLC · Point Zero One · Confidential
+ * ============================================================================
+ * POINT ZERO ONE — LEGACY CHAT PANEL (UNIFIED DOCK COMPATIBILITY WRAPPER)
+ * FILE: pzo-web/src/components/chat/ChatPanel.tsx
+ * ============================================================================
+ *
+ * Purpose
+ * -------
+ * Preserve the historical `ChatPanel` import path used across the current PZO
+ * component estate, while relocating real UI ownership to UnifiedChatDock.
+ *
+ * This file is intentionally a compatibility wrapper. It is not the new chat
+ * brain, and it is not a second panel implementation. It exists so current
+ * mount surfaces can keep importing:
+ *
+ *   pzo-web/src/components/chat/ChatPanel.tsx
+ *
+ * while the canonical render shell becomes:
+ *
+ *   pzo-web/src/components/chat/UnifiedChatDock.tsx
+ *
+ * and the canonical frontend runtime remains:
+ *
+ *   pzo-web/src/engines/chat
+ *
+ * Architectural doctrine
+ * ----------------------
+ * - shared/contracts/chat            => canonical shared contract truth
+ * - pzo-web/src/engines/chat         => frontend authority / responsiveness
+ * - pzo-web/src/components/chat      => render shell + compatibility shims
+ * - backend/src/game/engine/chat     => authoritative durable truth
+ * - pzo-server/src/chat              => wire / room / fanout / gateway
+ *
+ * This file therefore does the following jobs only:
+ * - preserve the old ChatPanel public prop shape
+ * - infer mount targets / presets from current game context when not provided
+ * - provide migration-safe defaults for the unified dock
+ * - keep current screens from needing immediate import churn
+ * - expose manifest / descriptor / helper metadata for tooling and audits
+ *
+ * This file explicitly does NOT:
+ * - render a second competing chat UI implementation
+ * - own transport or socket state
+ * - own transcript truth
+ * - own engine policy or learning logic
+ * - import battle / pressure / zero engine contracts directly
+ *
+ * Compatibility note
+ * ------------------
+ * The current repo still contains legacy imports into ChatPanel from screens and
+ * mounts. Replacing those imports everywhere right now would create needless
+ * churn. This wrapper absorbs that compatibility burden while the rest of the
+ * chat lane is consolidated.
+ *
+ * Density6 LLC · Point Zero One · Sovereign Chat Runtime · Confidential
+ * ============================================================================
  */
 
-import React, { useRef, useEffect, useState, useCallback, memo } from 'react';
-import type { ChatMessage } from './chatTypes';
-import { useChatEngine } from './useChatEngine';
-import type { SabotageEvent } from './useChatEngine';
+import React, {
+  memo,
+  useMemo,
+  type CSSProperties,
+  type ReactElement,
+} from 'react';
+
+import * as ChatEnginePublic from '../../engines/chat';
+import {
+  CHAT_TYPES_RUNTIME_BUNDLE,
+  SharedChat,
+  type ChatChannel,
+  type ChatPanelProps as LegacyChatPanelProps,
+  type GameChatContext,
+  type SabotageEvent,
+} from './chatTypes';
+import * as UnifiedChatDockModule from './UnifiedChatDock';
 
 export type { SabotageEvent };
 
-// ─── Design Tokens ─────────────────────────────────────────────────────────────
-const T = {
-  void:    '#030308',
-  card:    '#0C0C1E',
-  cardHi:  '#131328',
-  cardEl:  '#191934',
-  border:  'rgba(255,255,255,0.08)',
-  borderM: 'rgba(255,255,255,0.16)',
-  text:    '#F2F2FF',
-  textSub: '#9090B4',
-  textMut: '#505074',
-  green:   '#22DD88',
-  red:     '#FF4D4D',
-  orange:  '#FF8C00',
-  yellow:  '#FFD700',
-  indigo:  '#818CF8',
-  teal:    '#22D3EE',
-  purple:  '#A855F7',
-  mono:    "'IBM Plex Mono', 'JetBrains Mono', monospace",
-  display: "'Syne', 'Outfit', system-ui, sans-serif",
-};
+// ============================================================================
+// MARK: Stable dock component resolution
+// ============================================================================
 
-const FONT_IMPORT = `@import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap');`;
+const UnifiedChatDockComponent = ((UnifiedChatDockModule as Record<string, unknown>)
+  .default ??
+  (UnifiedChatDockModule as Record<string, unknown>).UnifiedChatDock) as React.ComponentType<Record<string, unknown>>;
 
-// ─── Message kind visual configs ───────────────────────────────────────────────
-interface KindConfig {
-  barColor:  string;
-  bg:        string;
-  border:    string;
-  nameColor: string;
-  accent:    string;
+// ============================================================================
+// MARK: Public compatibility surface
+// ============================================================================
+
+export const CHAT_PANEL_FILE_PATH =
+  'pzo-web/src/components/chat/ChatPanel.tsx' as const;
+
+export const CHAT_PANEL_VERSION = '2026.03.15' as const;
+
+export const CHAT_PANEL_REVISION =
+  'pzo.components.chat.ChatPanel.compat-wrapper.v1' as const;
+
+export const CHAT_PANEL_MIGRATION_FLAGS = Object.freeze({
+  isCompatibilityWrapper: true,
+  preservesLegacyImportPath: true,
+  preservesLegacyPropShape: true,
+  ownsRuntimeLogic: false,
+  rendersUnifiedDock: true,
+  safeForCurrentMounts: true,
+  requiresScreenImportChurnNow: false,
+});
+
+export const CHAT_PANEL_RUNTIME_LAWS = Object.freeze([
+  'ChatPanel is a wrapper over UnifiedChatDock, not a second authoritative panel.',
+  'Legacy props remain stable so current screens do not need immediate import churn.',
+  'Mount inference may happen here because current screens still pass minimal game context only.',
+  'Runtime truth, sockets, moderation, replay, and persistent learning do not belong here.',
+  'No direct battle, pressure, zero, or other engine-domain imports are permitted in this file.',
+  'All structural chat law remains anchored on shared/contracts/chat and the frontend engine barrel.',
+] as const);
+
+export const CHAT_PANEL_RUNTIME_BUNDLE = Object.freeze({
+  filePath: CHAT_PANEL_FILE_PATH,
+  version: CHAT_PANEL_VERSION,
+  revision: CHAT_PANEL_REVISION,
+  migration: CHAT_PANEL_MIGRATION_FLAGS,
+  laws: CHAT_PANEL_RUNTIME_LAWS,
+  inheritedChatTypesBundle: CHAT_TYPES_RUNTIME_BUNDLE,
+  engineSurface: ChatEnginePublic,
+});
+
+// ============================================================================
+// MARK: Optional compatibility extensions
+// ============================================================================
+
+export interface ChatPanelCompatibilityOverrides {
+  readonly mountTarget?: string;
+  readonly mountPreset?: string;
+  readonly title?: string;
+  readonly subtitle?: string;
+  readonly defaultTab?: ChatChannel;
+  readonly startCollapsed?: boolean;
+  readonly enableThreatMeter?: boolean;
+  readonly enableTranscriptDrawer?: boolean;
+  readonly enableHelperPrompt?: boolean;
+  readonly enableRoomMeta?: boolean;
+  readonly enableLawFooter?: boolean;
+  readonly className?: string;
+  readonly style?: CSSProperties;
 }
 
-const KIND_CFG: Record<ChatMessage['kind'], KindConfig> = {
-  PLAYER: {
-    barColor:  'transparent',
-    bg:        'transparent',
-    border:    'transparent',
-    nameColor: T.textSub,
-    accent:    T.textSub,
-  },
-  SYSTEM: {
-    barColor:  T.indigo,
-    bg:        'rgba(129,140,248,0.07)',
-    border:    'rgba(129,140,248,0.18)',
-    nameColor: T.indigo,
-    accent:    T.indigo,
-  },
-  MARKET_ALERT: {
-    barColor:  T.orange,
-    bg:        'rgba(255,140,0,0.07)',
-    border:    'rgba(255,140,0,0.22)',
-    nameColor: T.orange,
-    accent:    T.orange,
-  },
-  ACHIEVEMENT: {
-    barColor:  T.green,
-    bg:        'rgba(34,221,136,0.07)',
-    border:    'rgba(34,221,136,0.20)',
-    nameColor: T.green,
-    accent:    T.green,
-  },
-  BOT_TAUNT: {
-    barColor:  T.red,
-    bg:        'rgba(255,77,77,0.07)',
-    border:    'rgba(255,77,77,0.22)',
-    nameColor: T.red,
-    accent:    T.red,
-  },
-  BOT_ATTACK: {
-    barColor:  '#FF4D4D',
-    bg:        'rgba(255,77,77,0.10)',
-    border:    'rgba(255,77,77,0.32)',
-    nameColor: '#FF4D4D',
-    accent:    '#FF4D4D',
-  },
-  SHIELD_EVENT: {
-    barColor:  T.teal,
-    bg:        'rgba(34,211,238,0.07)',
-    border:    'rgba(34,211,238,0.20)',
-    nameColor: T.teal,
-    accent:    T.teal,
-  },
-  CASCADE_ALERT: {
-    barColor:  T.purple,
-    bg:        'rgba(168,85,247,0.07)',
-    border:    'rgba(168,85,247,0.22)',
-    nameColor: T.purple,
-    accent:    T.purple,
-  },
-  DEAL_RECAP: {
-    barColor:  T.yellow,
-    bg:        'rgba(255,215,0,0.07)',
-    border:    'rgba(255,215,0,0.22)',
-    nameColor: T.yellow,
-    accent:    T.yellow,
-  },
-};
-
-const RANK_COLOR: Record<string, string> = {
-  'Managing Partner': T.yellow,
-  'Senior Partner':   '#F6A623',
-  'Partner':          T.indigo,
-  'Junior Partner':   T.textSub,
-  'Associate':        T.textMut,
-  'You':              T.green,
-};
-
-// ─── Helpers ───────────────────────────────────────────────────────────────────
-function timeStr(ts: number): string {
-  return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+export interface ChatPanelProps extends LegacyChatPanelProps {
+  readonly mountTarget?: string;
+  readonly mountPreset?: string;
+  readonly title?: string;
+  readonly subtitle?: string;
+  readonly defaultTab?: ChatChannel;
+  readonly startCollapsed?: boolean;
+  readonly enableThreatMeter?: boolean;
+  readonly enableTranscriptDrawer?: boolean;
+  readonly enableHelperPrompt?: boolean;
+  readonly enableRoomMeta?: boolean;
+  readonly enableLawFooter?: boolean;
+  readonly className?: string;
+  readonly style?: CSSProperties;
 }
 
-function initials(name: string): string {
-  return name.slice(0, 2).toUpperCase();
+// ============================================================================
+// MARK: Local compatibility descriptors
+// ============================================================================
+
+const DEFAULT_TITLES = Object.freeze({
+  GLOBAL: 'PZO CHAT',
+  SYNDICATE: 'SYNDICATE CHAT',
+  DEAL_ROOM: 'DEAL ROOM',
+});
+
+const MODE_SCOPE_TO_MOUNT = Object.freeze<Record<string, string>>({
+  LOBBY: 'LOBBY_SCREEN',
+  GLOBAL: 'GAME_BOARD',
+  CLUB: 'CLUB_UI',
+  LEAGUE: 'LEAGUE_UI',
+  EMPIRE: 'EMPIRE_GAME_SCREEN',
+  PHANTOM: 'PHANTOM_GAME_SCREEN',
+  PREDATOR: 'PREDATOR_GAME_SCREEN',
+  SYNDICATE: 'SYNDICATE_GAME_SCREEN',
+  DEAL_ROOM: 'COUNTERPLAY_MODAL',
+  WAR_ROOM: 'COUNTERPLAY_MODAL',
+  BATTLE: 'BATTLE_HUD',
+});
+
+const TARGET_TO_PRESET = Object.freeze<Record<string, string>>({
+  BATTLE_HUD: 'BATTLE_HUD',
+  CLUB_UI: 'CLUB_UI',
+  EMPIRE_GAME_SCREEN: 'EMPIRE_GAME_SCREEN',
+  GAME_BOARD: 'GAME_BOARD',
+  LEAGUE_UI: 'LEAGUE_UI',
+  LOBBY_SCREEN: 'LOBBY_SCREEN',
+  PHANTOM_GAME_SCREEN: 'PHANTOM_GAME_SCREEN',
+  PREDATOR_GAME_SCREEN: 'PREDATOR_GAME_SCREEN',
+  SYNDICATE_GAME_SCREEN: 'SYNDICATE_GAME_SCREEN',
+  COUNTERPLAY_MODAL: 'COUNTERPLAY_MODAL',
+  EMPIRE_BLEED_BANNER: 'EMPIRE_BLEED_BANNER',
+  MOMENT_FLASH: 'MOMENT_FLASH',
+  PROOF_CARD: 'PROOF_CARD',
+  PROOF_CARD_V2: 'PROOF_CARD_V2',
+  RESCUE_WINDOW_BANNER: 'RESCUE_WINDOW_BANNER',
+  SABOTAGE_IMPACT_PANEL: 'SABOTAGE_IMPACT_PANEL',
+  THREAT_RADAR_PANEL: 'THREAT_RADAR_PANEL',
+});
+
+const MOUNT_TITLES = Object.freeze<Record<string, string>>({
+  BATTLE_HUD: 'Battle Chat',
+  CLUB_UI: 'Club Chat',
+  EMPIRE_GAME_SCREEN: 'Empire Chat',
+  GAME_BOARD: 'PZO CHAT',
+  LEAGUE_UI: 'League Chat',
+  LOBBY_SCREEN: 'Lobby Chat',
+  PHANTOM_GAME_SCREEN: 'Phantom Chat',
+  PREDATOR_GAME_SCREEN: 'Predator Chat',
+  SYNDICATE_GAME_SCREEN: 'Syndicate Chat',
+  COUNTERPLAY_MODAL: 'Deal Room',
+  EMPIRE_BLEED_BANNER: 'Bleed Feed',
+  MOMENT_FLASH: 'Moment Feed',
+  PROOF_CARD: 'Proof Feed',
+  PROOF_CARD_V2: 'Proof Feed',
+  RESCUE_WINDOW_BANNER: 'Rescue Feed',
+  SABOTAGE_IMPACT_PANEL: 'Sabotage Feed',
+  THREAT_RADAR_PANEL: 'Threat Radar',
+});
+
+const PRESET_DEFAULT_TAB = Object.freeze<Record<string, ChatChannel>>({
+  BATTLE_HUD: 'GLOBAL',
+  CLUB_UI: 'GLOBAL',
+  EMPIRE_GAME_SCREEN: 'SYNDICATE',
+  GAME_BOARD: 'GLOBAL',
+  LEAGUE_UI: 'GLOBAL',
+  LOBBY_SCREEN: 'GLOBAL',
+  PHANTOM_GAME_SCREEN: 'GLOBAL',
+  PREDATOR_GAME_SCREEN: 'GLOBAL',
+  SYNDICATE_GAME_SCREEN: 'SYNDICATE',
+  COUNTERPLAY_MODAL: 'DEAL_ROOM',
+  EMPIRE_BLEED_BANNER: 'GLOBAL',
+  MOMENT_FLASH: 'GLOBAL',
+  PROOF_CARD: 'GLOBAL',
+  PROOF_CARD_V2: 'GLOBAL',
+  RESCUE_WINDOW_BANNER: 'GLOBAL',
+  SABOTAGE_IMPACT_PANEL: 'GLOBAL',
+  THREAT_RADAR_PANEL: 'GLOBAL',
+});
+
+const PRESET_FEATURE_DEFAULTS = Object.freeze({
+  threatMeterByPreset: Object.freeze<Record<string, boolean>>({
+    BATTLE_HUD: true,
+    CLUB_UI: false,
+    EMPIRE_GAME_SCREEN: true,
+    GAME_BOARD: true,
+    LEAGUE_UI: false,
+    LOBBY_SCREEN: false,
+    PHANTOM_GAME_SCREEN: true,
+    PREDATOR_GAME_SCREEN: true,
+    SYNDICATE_GAME_SCREEN: true,
+    COUNTERPLAY_MODAL: true,
+    EMPIRE_BLEED_BANNER: true,
+    MOMENT_FLASH: false,
+    PROOF_CARD: false,
+    PROOF_CARD_V2: false,
+    RESCUE_WINDOW_BANNER: false,
+    SABOTAGE_IMPACT_PANEL: true,
+    THREAT_RADAR_PANEL: true,
+  }),
+  transcriptByPreset: Object.freeze<Record<string, boolean>>({
+    BATTLE_HUD: true,
+    CLUB_UI: true,
+    EMPIRE_GAME_SCREEN: true,
+    GAME_BOARD: true,
+    LEAGUE_UI: true,
+    LOBBY_SCREEN: true,
+    PHANTOM_GAME_SCREEN: true,
+    PREDATOR_GAME_SCREEN: true,
+    SYNDICATE_GAME_SCREEN: true,
+    COUNTERPLAY_MODAL: false,
+    EMPIRE_BLEED_BANNER: false,
+    MOMENT_FLASH: false,
+    PROOF_CARD: true,
+    PROOF_CARD_V2: true,
+    RESCUE_WINDOW_BANNER: false,
+    SABOTAGE_IMPACT_PANEL: true,
+    THREAT_RADAR_PANEL: false,
+  }),
+  helperByPreset: Object.freeze<Record<string, boolean>>({
+    BATTLE_HUD: true,
+    CLUB_UI: true,
+    EMPIRE_GAME_SCREEN: true,
+    GAME_BOARD: true,
+    LEAGUE_UI: true,
+    LOBBY_SCREEN: true,
+    PHANTOM_GAME_SCREEN: true,
+    PREDATOR_GAME_SCREEN: true,
+    SYNDICATE_GAME_SCREEN: true,
+    COUNTERPLAY_MODAL: true,
+    EMPIRE_BLEED_BANNER: true,
+    MOMENT_FLASH: false,
+    PROOF_CARD: false,
+    PROOF_CARD_V2: false,
+    RESCUE_WINDOW_BANNER: true,
+    SABOTAGE_IMPACT_PANEL: true,
+    THREAT_RADAR_PANEL: false,
+  }),
+  roomMetaByPreset: Object.freeze<Record<string, boolean>>({
+    BATTLE_HUD: true,
+    CLUB_UI: true,
+    EMPIRE_GAME_SCREEN: true,
+    GAME_BOARD: true,
+    LEAGUE_UI: true,
+    LOBBY_SCREEN: true,
+    PHANTOM_GAME_SCREEN: true,
+    PREDATOR_GAME_SCREEN: true,
+    SYNDICATE_GAME_SCREEN: true,
+    COUNTERPLAY_MODAL: true,
+    EMPIRE_BLEED_BANNER: false,
+    MOMENT_FLASH: false,
+    PROOF_CARD: false,
+    PROOF_CARD_V2: false,
+    RESCUE_WINDOW_BANNER: false,
+    SABOTAGE_IMPACT_PANEL: false,
+    THREAT_RADAR_PANEL: false,
+  }),
+  lawFooterByPreset: Object.freeze<Record<string, boolean>>({
+    BATTLE_HUD: false,
+    CLUB_UI: false,
+    EMPIRE_GAME_SCREEN: false,
+    GAME_BOARD: false,
+    LEAGUE_UI: false,
+    LOBBY_SCREEN: false,
+    PHANTOM_GAME_SCREEN: false,
+    PREDATOR_GAME_SCREEN: false,
+    SYNDICATE_GAME_SCREEN: false,
+    COUNTERPLAY_MODAL: false,
+    EMPIRE_BLEED_BANNER: false,
+    MOMENT_FLASH: false,
+    PROOF_CARD: false,
+    PROOF_CARD_V2: false,
+    RESCUE_WINDOW_BANNER: false,
+    SABOTAGE_IMPACT_PANEL: false,
+    THREAT_RADAR_PANEL: false,
+  }),
+});
+
+// ============================================================================
+// MARK: Engine barrel bridge helpers
+// ============================================================================
+
+function readNamedExport(
+  namespace: Record<string, unknown>,
+  key: string,
+): unknown {
+  return Object.prototype.hasOwnProperty.call(namespace, key)
+    ? namespace[key]
+    : undefined;
 }
 
-// ─── System / Engine card message ──────────────────────────────────────────────
-const SystemCard = memo(function SystemCard({ msg }: { msg: ChatMessage }) {
-  const cfg = KIND_CFG[msg.kind];
+const maybeResolveChatMountTarget = readNamedExport(
+  ChatEnginePublic as unknown as Record<string, unknown>,
+  'resolveChatMountTarget',
+) as ((value: unknown) => string | undefined) | undefined;
 
-  return (
-    <div style={{
-      display: 'flex', gap: 10, margin: '4px 8px',
-      background: cfg.bg, border: `1px solid ${cfg.border}`,
-      borderLeft: `3px solid ${cfg.barColor}`,
-      borderRadius: 8, padding: '9px 11px',
-    }}>
-      {msg.emoji && (
-        <span style={{ fontSize: 16, lineHeight: 1.4, flexShrink: 0 }}>{msg.emoji}</span>
-      )}
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{
-          fontFamily: T.display, fontSize: 12, color: cfg.nameColor,
-          fontWeight: 700, lineHeight: 1.45,
-        }}>
-          {msg.body}
-        </div>
+const maybeResolveChatMountPreset = readNamedExport(
+  ChatEnginePublic as unknown as Record<string, unknown>,
+  'resolveChatMountPreset',
+) as ((value: unknown) => string | undefined) | undefined;
 
-        {/* Bot source metadata */}
-        {msg.botSource && (
-          <div style={{
-            marginTop: 5, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap',
-          }}>
-            <span style={{
-              fontFamily: T.mono, fontSize: 8, color: cfg.accent,
-              background: `${cfg.accent}14`, border: `1px solid ${cfg.accent}28`,
-              padding: '2px 6px', borderRadius: 4, textTransform: 'uppercase', letterSpacing: '0.09em',
-            }}>
-              {msg.botSource.botState}
-            </span>
-            <span style={{
-              fontFamily: T.mono, fontSize: 8, color: T.textMut, letterSpacing: '0.06em',
-            }}>
-              {msg.botSource.attackType.replace(/_/g, ' ')}
-            </span>
-          </div>
-        )}
+const maybeEngineManifest = readNamedExport(
+  ChatEnginePublic as unknown as Record<string, unknown>,
+  'CHAT_ENGINE_PUBLIC_MANIFEST',
+);
 
-        {/* Proof hash */}
-        {msg.proofHash && (
-          <div style={{
-            fontFamily: T.mono, fontSize: 9, color: T.yellow,
-            marginTop: 5, wordBreak: 'break-all',
-          }}>
-            HASH: {msg.proofHash}
-          </div>
-        )}
+const maybeEngineRuntimeLaws = readNamedExport(
+  ChatEnginePublic as unknown as Record<string, unknown>,
+  'CHAT_ENGINE_RUNTIME_LAWS',
+);
 
-        {/* Pressure / tick tier badges */}
-        {(msg.pressureTier || msg.tickTier) && (
-          <div style={{ display: 'flex', gap: 5, marginTop: 5 }}>
-            {msg.pressureTier && (
-              <span style={{
-                fontFamily: T.mono, fontSize: 8, color: cfg.accent,
-                background: `${cfg.accent}14`, padding: '2px 5px', borderRadius: 4,
-                textTransform: 'uppercase', letterSpacing: '0.08em',
-              }}>
-                {msg.pressureTier}
-              </span>
-            )}
-            {msg.tickTier && (
-              <span style={{
-                fontFamily: T.mono, fontSize: 8, color: T.textMut,
-                background: 'rgba(255,255,255,0.05)', padding: '2px 5px', borderRadius: 4,
-                textTransform: 'uppercase', letterSpacing: '0.08em',
-              }}>
-                {msg.tickTier}
-              </span>
-            )}
-          </div>
-        )}
-      </div>
-    </div>
+// ============================================================================
+// MARK: Derivation helpers
+// ============================================================================
+
+function safeUpper(value: string | null | undefined): string {
+  return String(value ?? '').trim().toUpperCase().replace(/[\s-]+/g, '_');
+}
+
+function inferModeScopeKey(ctx: GameChatContext): string | undefined {
+  return safeUpper(
+    typeof ctx.modeScope === 'string'
+      ? ctx.modeScope
+      : ctx.run?.modeScope ?? ctx.run?.currentMode ?? ctx.regime,
   );
-});
+}
 
-// ─── Player / NPC bubble message ───────────────────────────────────────────────
-const PlayerBubble = memo(function PlayerBubble({ msg }: { msg: ChatMessage }) {
-  const isMe      = msg.senderId === 'player-local';
-  const rankColor = msg.senderRank ? (RANK_COLOR[msg.senderRank] ?? T.textSub) : T.textSub;
+function inferTargetFromContext(ctx: GameChatContext): string {
+  const explicitMountTarget =
+    typeof ctx.mountTarget === 'string' && ctx.mountTarget.trim().length > 0
+      ? safeUpper(ctx.mountTarget)
+      : undefined;
 
-  return (
-    <div style={{
-      display: 'flex', gap: 8, padding: '4px 8px',
-      flexDirection: isMe ? 'row-reverse' : 'row',
-      alignItems: 'flex-start',
-    }}>
-      {/* Avatar — FIX: removed duplicate flexShrink */}
-      <div style={{
-        flexShrink: 0, width: 28, height: 28, borderRadius: '50%',
-        background: isMe ? 'rgba(129,140,248,0.20)' : T.cardEl,
-        border: `1px solid ${isMe ? 'rgba(129,140,248,0.35)' : T.border}`,
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        fontFamily: T.mono, fontSize: 9, fontWeight: 700,
-        color: isMe ? T.indigo : T.textSub, marginTop: 2,
-      }}>
-        {initials(msg.senderName)}
-      </div>
+  if (explicitMountTarget) {
+    return explicitMountTarget;
+  }
 
-      {/* Content */}
-      <div style={{
-        maxWidth: '78%', display: 'flex', flexDirection: 'column',
-        alignItems: isMe ? 'flex-end' : 'flex-start',
-      }}>
-        {/* Name + rank + time */}
-        <div style={{
-          display: 'flex', alignItems: 'center', gap: 5, marginBottom: 4,
-          flexDirection: isMe ? 'row-reverse' : 'row', flexWrap: 'wrap',
-        }}>
-          <span style={{
-            fontFamily: T.mono, fontSize: 10, fontWeight: 700,
-            color: isMe ? T.green : T.text,
-          }}>
-            {msg.senderName}
-          </span>
-          {msg.senderRank && (
-            <span style={{
-              fontFamily: T.mono, fontSize: 8, color: rankColor, fontWeight: 600,
-            }}>
-              {msg.senderRank}
-            </span>
-          )}
-          <span style={{ fontFamily: T.mono, fontSize: 8, color: T.textMut }}>
-            {timeStr(msg.ts)}
-          </span>
-        </div>
+  const scopeKey = inferModeScopeKey(ctx);
+  if (scopeKey && MODE_SCOPE_TO_MOUNT[scopeKey]) {
+    return MODE_SCOPE_TO_MOUNT[scopeKey];
+  }
 
-        {/* Bubble */}
-        <div style={{
-          fontFamily: T.display, fontSize: 12, lineHeight: 1.55,
-          padding: '9px 13px', borderRadius: isMe ? '12px 2px 12px 12px' : '2px 12px 12px 12px',
-          background: isMe
-            ? 'linear-gradient(135deg, rgba(79,70,229,0.85) 0%, rgba(109,40,217,0.80) 100%)'
-            : T.cardEl,
-          border: isMe ? '1px solid rgba(129,140,248,0.30)' : `1px solid ${T.border}`,
-          color: isMe ? T.text : '#D8D8F4',
-          wordBreak: 'break-word',
-        }}>
-          {msg.body}
-        </div>
+  if (safeUpper(ctx.runOutcome) === 'SOVEREIGNTY') {
+    return 'COUNTERPLAY_MODAL';
+  }
 
-        {msg.immutable && (
-          <span style={{
-            fontFamily: T.mono, fontSize: 8, color: T.textMut, marginTop: 3,
-          }}>
-            🔒 transcript locked
-          </span>
-        )}
-      </div>
-    </div>
+  if ((ctx.haterHeat ?? 0) >= 0.78) {
+    return 'BATTLE_HUD';
+  }
+
+  return 'GAME_BOARD';
+}
+
+function resolveMountTargetCompat(
+  requestedTarget: string | undefined,
+  ctx: GameChatContext,
+): string {
+  const preferred = requestedTarget?.trim()
+    ? safeUpper(requestedTarget)
+    : inferTargetFromContext(ctx);
+
+  const resolvedFromEngine = maybeResolveChatMountTarget?.(preferred);
+  if (typeof resolvedFromEngine === 'string' && resolvedFromEngine.trim()) {
+    return resolvedFromEngine;
+  }
+
+  return TARGET_TO_PRESET[preferred] ? preferred : 'GAME_BOARD';
+}
+
+function resolveMountPresetCompat(
+  requestedPreset: string | undefined,
+  target: string,
+): string {
+  const preferred = requestedPreset?.trim()
+    ? safeUpper(requestedPreset)
+    : TARGET_TO_PRESET[target] ?? 'GAME_BOARD';
+
+  const resolvedFromEngine = maybeResolveChatMountPreset?.(preferred);
+  if (typeof resolvedFromEngine === 'string' && resolvedFromEngine.trim()) {
+    return resolvedFromEngine;
+  }
+
+  return TARGET_TO_PRESET[preferred] ? preferred : TARGET_TO_PRESET[target] ?? 'GAME_BOARD';
+}
+
+function inferDefaultTab(
+  ctx: GameChatContext,
+  preset: string,
+  requestedDefaultTab?: ChatChannel,
+): ChatChannel {
+  if (requestedDefaultTab) {
+    return requestedDefaultTab;
+  }
+
+  if (ctx.activeChannel) {
+    return ['GLOBAL', 'SYNDICATE', 'DEAL_ROOM'].includes(safeUpper(ctx.activeChannel))
+      ? (safeUpper(ctx.activeChannel) as ChatChannel)
+      : PRESET_DEFAULT_TAB[preset] ?? 'GLOBAL';
+  }
+
+  if (safeUpper(ctx.runOutcome) === 'SOVEREIGNTY') {
+    return 'DEAL_ROOM';
+  }
+
+  if ((ctx.haterHeat ?? 0) >= 0.68) {
+    return 'SYNDICATE';
+  }
+
+  return PRESET_DEFAULT_TAB[preset] ?? 'GLOBAL';
+}
+
+function inferTitle(
+  ctx: GameChatContext,
+  preset: string,
+  defaultTab: ChatChannel,
+  requestedTitle?: string,
+): string {
+  if (requestedTitle?.trim()) {
+    return requestedTitle.trim();
+  }
+
+  if (preset === 'COUNTERPLAY_MODAL') {
+    return 'Deal Room';
+  }
+
+  if (preset === 'BATTLE_HUD' && (ctx.haterHeat ?? 0) >= 0.7) {
+    return 'Threat Channel';
+  }
+
+  return MOUNT_TITLES[preset] ?? DEFAULT_TITLES[defaultTab];
+}
+
+function inferSubtitle(
+  ctx: GameChatContext,
+  preset: string,
+  defaultTab: ChatChannel,
+  requestedSubtitle?: string,
+): string {
+  if (requestedSubtitle?.trim()) {
+    return requestedSubtitle.trim();
+  }
+
+  const roomId = ctx.roomId ? `room ${ctx.roomId}` : undefined;
+  const regime = ctx.regime ? `regime ${ctx.regime}` : undefined;
+  const pressure = ctx.pressureTier ? `pressure ${ctx.pressureTier}` : undefined;
+  const tick = typeof ctx.tick === 'number' ? `tick ${ctx.tick}` : undefined;
+  const fragments = [roomId, regime, pressure, tick].filter(Boolean);
+
+  if (preset === 'COUNTERPLAY_MODAL') {
+    return 'Negotiation lane with transcript integrity preserved.';
+  }
+
+  if (preset === 'BATTLE_HUD') {
+    return fragments.length > 0
+      ? fragments.join(' · ')
+      : 'Combat-adjacent social pressure and helper rescue lane.';
+  }
+
+  if (defaultTab === 'SYNDICATE') {
+    return fragments.length > 0
+      ? fragments.join(' · ')
+      : 'Trust-weighted tactical lane.';
+  }
+
+  if (defaultTab === 'DEAL_ROOM') {
+    return fragments.length > 0
+      ? fragments.join(' · ')
+      : 'Predatory negotiation lane.';
+  }
+
+  return fragments.length > 0
+    ? fragments.join(' · ')
+    : 'Unified chat shell mounted through the compatibility lane.';
+}
+
+function inferFeatureFlag(
+  requested: boolean | undefined,
+  defaults: Record<string, boolean>,
+  preset: string,
+): boolean {
+  if (typeof requested === 'boolean') {
+    return requested;
+  }
+
+  return defaults[preset] ?? false;
+}
+
+function inferCollapsedStart(
+  requested: boolean | undefined,
+  preset: string,
+): boolean {
+  if (typeof requested === 'boolean') {
+    return requested;
+  }
+
+  return preset === 'MOMENT_FLASH' || preset === 'EMPIRE_BLEED_BANNER';
+}
+
+function normalizeClassName(value?: string): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : undefined;
+}
+
+function normalizeStyle(style?: CSSProperties): CSSProperties | undefined {
+  if (!style) return undefined;
+  return { ...style };
+}
+
+// ============================================================================
+// MARK: Public derived shape
+// ============================================================================
+
+export interface ChatPanelForwardedProps extends ChatPanelProps {
+  readonly resolvedMountTarget: string;
+  readonly resolvedMountPreset: string;
+  readonly resolvedTitle: string;
+  readonly resolvedSubtitle: string;
+  readonly resolvedDefaultTab: ChatChannel;
+  readonly resolvedStartCollapsed: boolean;
+  readonly resolvedThreatMeter: boolean;
+  readonly resolvedTranscriptDrawer: boolean;
+  readonly resolvedHelperPrompt: boolean;
+  readonly resolvedRoomMeta: boolean;
+  readonly resolvedLawFooter: boolean;
+  readonly normalizedClassName?: string;
+  readonly normalizedStyle?: CSSProperties;
+}
+
+export function deriveChatPanelForwardProps(
+  props: ChatPanelProps,
+): ChatPanelForwardedProps {
+  const ctx = props.gameCtx;
+  const resolvedMountTarget = resolveMountTargetCompat(props.mountTarget, ctx);
+  const resolvedMountPreset = resolveMountPresetCompat(
+    props.mountPreset,
+    resolvedMountTarget,
   );
-});
+  const resolvedDefaultTab = inferDefaultTab(
+    ctx,
+    resolvedMountPreset,
+    props.defaultTab,
+  );
+  const resolvedTitle = inferTitle(
+    ctx,
+    resolvedMountPreset,
+    resolvedDefaultTab,
+    props.title,
+  );
+  const resolvedSubtitle = inferSubtitle(
+    ctx,
+    resolvedMountPreset,
+    resolvedDefaultTab,
+    props.subtitle,
+  );
 
-// ─── Message Router ────────────────────────────────────────────────────────────
-const MessageRow = memo(function MessageRow({ msg }: { msg: ChatMessage }) {
-  if (msg.kind === 'PLAYER') return <PlayerBubble msg={msg} />;
-  return <SystemCard msg={msg} />;
-});
+  return {
+    ...props,
+    resolvedMountTarget,
+    resolvedMountPreset,
+    resolvedTitle,
+    resolvedSubtitle,
+    resolvedDefaultTab,
+    resolvedStartCollapsed: inferCollapsedStart(
+      props.startCollapsed,
+      resolvedMountPreset,
+    ),
+    resolvedThreatMeter: inferFeatureFlag(
+      props.enableThreatMeter,
+      PRESET_FEATURE_DEFAULTS.threatMeterByPreset,
+      resolvedMountPreset,
+    ),
+    resolvedTranscriptDrawer: inferFeatureFlag(
+      props.enableTranscriptDrawer,
+      PRESET_FEATURE_DEFAULTS.transcriptByPreset,
+      resolvedMountPreset,
+    ),
+    resolvedHelperPrompt: inferFeatureFlag(
+      props.enableHelperPrompt,
+      PRESET_FEATURE_DEFAULTS.helperByPreset,
+      resolvedMountPreset,
+    ),
+    resolvedRoomMeta: inferFeatureFlag(
+      props.enableRoomMeta,
+      PRESET_FEATURE_DEFAULTS.roomMetaByPreset,
+      resolvedMountPreset,
+    ),
+    resolvedLawFooter: inferFeatureFlag(
+      props.enableLawFooter,
+      PRESET_FEATURE_DEFAULTS.lawFooterByPreset,
+      resolvedMountPreset,
+    ),
+    normalizedClassName: normalizeClassName(props.className),
+    normalizedStyle: normalizeStyle(props.style),
+  };
+}
 
-// ─── Tab Button ────────────────────────────────────────────────────────────────
-const TabBtn = memo(function TabBtn({
-  label, icon, isActive, unread, onClick,
+// ============================================================================
+// MARK: Fallback shell
+// ============================================================================
+
+const FALLBACK_STYLE: CSSProperties = Object.freeze({
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 10,
+  padding: 16,
+  borderRadius: 16,
+  background: 'rgba(12,16,28,0.92)',
+  border: '1px solid rgba(255,255,255,0.12)',
+  color: '#F5F7FF',
+  fontFamily: 'Inter, system-ui, sans-serif',
+  boxShadow: '0 18px 48px rgba(0,0,0,0.35)',
+  maxWidth: 420,
+} as const);
+
+function FallbackPanel({
+  title,
+  subtitle,
 }: {
-  label: string; icon: string; isActive: boolean; unread: number; onClick: () => void;
-}) {
+  title: string;
+  subtitle: string;
+}): ReactElement {
   return (
-    <button
-      onClick={onClick}
-      style={{
-        position: 'relative', display: 'flex', alignItems: 'center', gap: 5,
-        padding: '10px 12px', background: 'transparent', border: 'none', cursor: 'pointer',
-        fontFamily: T.mono, fontSize: 9, fontWeight: 800, letterSpacing: '0.10em',
-        textTransform: 'uppercase',
-        color: isActive ? T.text : T.textMut,
-        borderBottom: `2px solid ${isActive ? T.indigo : 'transparent'}`,
-        transition: 'color 0.15s, border-color 0.15s',
-        minHeight: 40, flexShrink: 0,
-      }}
-    >
-      <span style={{ fontSize: 12 }}>{icon}</span>
-      <span>{label}</span>
-      {unread > 0 && (
-        <span style={{
-          position: 'absolute', top: 6, right: 4,
-          minWidth: 15, height: 15, borderRadius: 99,
-          background: T.red, color: '#fff',
-          fontFamily: T.mono, fontSize: 8, fontWeight: 800,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          padding: '0 2px',
-          animation: 'pzo-badge-pulse 1.4s ease-in-out infinite',
-        }}>
-          {unread > 99 ? '99+' : unread}
-        </span>
-      )}
-    </button>
+    <div style={FALLBACK_STYLE}>
+      <div style={{ fontWeight: 800, fontSize: 16 }}>{title}</div>
+      <div style={{ color: 'rgba(255,255,255,0.72)', fontSize: 13 }}>
+        {subtitle}
+      </div>
+      <div
+        style={{
+          color: 'rgba(255,255,255,0.60)',
+          fontSize: 12,
+          lineHeight: 1.5,
+        }}
+      >
+        UnifiedChatDock is unavailable at runtime. The compatibility wrapper is
+        still preserving the legacy ChatPanel import path.
+      </div>
+    </div>
   );
-});
-
-// ─── Online count (pseudo) ─────────────────────────────────────────────────────
-function onlineCount(tick: number): number {
-  return 12400 + (tick % 113) * 7;
-}
-function fmtOnline(n: number): string {
-  if (n >= 1000) return `${(n / 1000).toFixed(1)}K`;
-  return String(n);
 }
 
-// ─── ChatPanel Props ───────────────────────────────────────────────────────────
-interface ChatPanelProps {
-  gameCtx:      import('./chatTypes').GameChatContext;
-  onSabotage?:  (event: SabotageEvent) => void;
-  accessToken?: string | null;
-}
+// ============================================================================
+// MARK: Panel component
+// ============================================================================
 
-// ─── ChatPanel ─────────────────────────────────────────────────────────────────
-export const ChatPanel = memo(function ChatPanel({
-  gameCtx, onSabotage, accessToken,
-}: ChatPanelProps) {
-  const {
-    messages, activeTab, switchTab,
-    chatOpen, toggleChat, sendMessage,
-    unread, totalUnread, connected,
-  } = useChatEngine(gameCtx, accessToken, onSabotage);
+export const ChatPanel = memo(function ChatPanel(
+  props: ChatPanelProps,
+): ReactElement {
+  const forwarded = useMemo(() => deriveChatPanelForwardProps(props), [props]);
 
-  const [draft,    setDraft]    = useState('');
-  const [flashNew, setFlashNew] = useState(false);
-  const bottomRef              = useRef<HTMLDivElement>(null);
-  const prevMsgLen             = useRef(0);
-  const inputRef               = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    if (chatOpen) bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages.length, chatOpen]);
-
-  useEffect(() => {
-    if (!chatOpen && messages.length > prevMsgLen.current) {
-      setFlashNew(true);
-      const t = setTimeout(() => setFlashNew(false), 1200);
-      prevMsgLen.current = messages.length;
-      return () => clearTimeout(t);
-    }
-    prevMsgLen.current = messages.length;
-  }, [messages.length, chatOpen]);
-
-  const handleSend = useCallback(() => {
-    const trimmed = draft.trim();
-    if (!trimmed) return;
-    sendMessage(trimmed);
-    setDraft('');
-    inputRef.current?.focus();
-  }, [draft, sendMessage]);
-
-  const visibleMsgs = messages.filter(m => m.channel === activeTab);
-
-  const tabInputPlaceholder =
-    activeTab === 'DEAL_ROOM'   ? 'Deal Room — transcript recorded...'
-    : activeTab === 'SYNDICATE' ? 'Message your syndicate...'
-    :                              'Message global...';
-
-  return (
-    <>
-      <style>{FONT_IMPORT}</style>
-      <style>{`
-        @keyframes pzo-badge-pulse {
-          0%, 100% { opacity: 1; transform: scale(1); }
-          50%       { opacity: 0.7; transform: scale(0.92); }
-        }
-        @keyframes pzo-bubble-flash {
-          0%, 100% { box-shadow: 0 0 0 0 rgba(129,140,248,0.4); }
-          50%       { box-shadow: 0 0 0 8px rgba(129,140,248,0); }
-        }
-        @keyframes pzo-panel-in {
-          from { opacity: 0; transform: translateY(20px) scale(0.96); }
-          to   { opacity: 1; transform: translateY(0) scale(1); }
-        }
-        @keyframes pzo-online-dot {
-          0%, 100% { opacity: 1; }
-          50%       { opacity: 0.3; }
-        }
-        .pzo-chat-scroll::-webkit-scrollbar { width: 3px; }
-        .pzo-chat-scroll::-webkit-scrollbar-track { background: transparent; }
-        .pzo-chat-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.10); border-radius: 99px; }
-      `}</style>
-
-      {/* ── Collapsed bubble ─────────────────────────────────────────────── */}
-      {!chatOpen && (
-        <button
-          onClick={toggleChat}
-          title="Open Chat"
-          style={{
-            position: 'fixed', bottom: 20, right: 16, zIndex: 50,
-            width: 52, height: 52, borderRadius: '50%',
-            background: T.card,
-            border: `1.5px solid ${totalUnread > 0 ? T.indigo : T.border}`,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            cursor: 'pointer', fontSize: 22,
-            boxShadow: `0 4px 20px rgba(0,0,0,0.6), ${flashNew ? '0 0 0 4px rgba(129,140,248,0.30)' : 'none'}`,
-            transition: 'all 0.2s',
-            animation: flashNew ? 'pzo-bubble-flash 0.6s ease-out' : 'none',
-          }}
-        >
-          💬
-          {totalUnread > 0 && (
-            <span style={{
-              position: 'absolute', top: -4, right: -4,
-              minWidth: 18, height: 18, borderRadius: 99,
-              background: T.red, color: '#fff',
-              fontFamily: T.mono, fontSize: 9, fontWeight: 800,
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              padding: '0 3px',
-              boxShadow: '0 2px 8px rgba(255,77,77,0.50)',
-              animation: 'pzo-badge-pulse 1.4s ease-in-out infinite',
-            }}>
-              {totalUnread > 99 ? '99' : totalUnread}
-            </span>
-          )}
-        </button>
-      )}
-
-      {/* ── Expanded panel ───────────────────────────────────────────────── */}
-      {chatOpen && (
-        <div style={{
-          position: 'fixed', bottom: 0, right: 0, zIndex: 50,
-          width: 'min(100vw, 368px)',
-          height: 'min(100dvh, 500px)',
-          display: 'flex', flexDirection: 'column',
-          background: `${T.void}FA`,
-          backdropFilter: 'blur(12px)',
-          border: `1px solid ${T.border}`,
-          borderBottom: 'none', borderRight: 'none',
-          borderTopLeftRadius: 16,
-          boxShadow: '0 -4px 40px rgba(0,0,0,0.70), 0 0 0 1px rgba(255,255,255,0.04)',
-          overflow: 'hidden',
-          animation: 'pzo-panel-in 0.22s cubic-bezier(0.34,1.56,0.64,1) both',
-          fontFamily: T.display,
-        }}>
-
-          {/* Header */}
-          <div style={{
-            display: 'flex', alignItems: 'center', gap: 8, padding: '11px 14px',
-            background: `${T.card}CC`,
-            borderBottom: `1px solid ${T.border}`,
-            flexShrink: 0,
-          }}>
-            <span style={{ fontSize: 16 }}>💬</span>
-            <span style={{
-              fontFamily: T.display, fontSize: 12, fontWeight: 800,
-              color: T.text, flex: 1, letterSpacing: '0.04em',
-            }}>
-              PZO CHAT
-            </span>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-              <div style={{
-                width: 6, height: 6, borderRadius: '50%',
-                background: connected ? T.green : T.orange,
-                animation: 'pzo-online-dot 2s ease-in-out infinite',
-              }} />
-              <span style={{ fontFamily: T.mono, fontSize: 9, color: T.textSub }}>
-                {fmtOnline(onlineCount(gameCtx.tick))} online
-              </span>
-            </div>
-            <button
-              onClick={toggleChat}
-              style={{
-                background: 'transparent', border: 'none', cursor: 'pointer',
-                fontFamily: T.mono, fontSize: 13, color: T.textMut, padding: '4px',
-                lineHeight: 1, borderRadius: 4,
-                minWidth: 28, minHeight: 28,
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-              }}
-              title="Minimize"
-            >
-              ╲╱
-            </button>
-          </div>
-
-          {/* Tabs */}
-          <div style={{
-            display: 'flex', borderBottom: `1px solid ${T.border}`,
-            background: `${T.cardHi}80`, flexShrink: 0, overflowX: 'auto',
-          }}>
-            <TabBtn label="GLOBAL"    icon="🌐" isActive={activeTab === 'GLOBAL'}    unread={unread.GLOBAL}    onClick={() => switchTab('GLOBAL')}    />
-            <TabBtn label="SYNDICATE" icon="🏛️" isActive={activeTab === 'SYNDICATE'} unread={unread.SYNDICATE} onClick={() => switchTab('SYNDICATE')} />
-            <TabBtn label="DEAL ROOM" icon="⚡" isActive={activeTab === 'DEAL_ROOM'} unread={unread.DEAL_ROOM} onClick={() => switchTab('DEAL_ROOM')} />
-          </div>
-
-          {/* Deal Room notice */}
-          {activeTab === 'DEAL_ROOM' && (
-            <div style={{
-              flexShrink: 0, padding: '5px 14px',
-              background: 'rgba(255,215,0,0.05)',
-              borderBottom: '1px solid rgba(255,215,0,0.14)',
-            }}>
-              <span style={{
-                fontFamily: T.mono, fontSize: 8, color: T.yellow,
-                fontWeight: 700, letterSpacing: '0.10em',
-              }}>
-                🔒 TRANSCRIPT INTEGRITY ENFORCED — Logs are the official rivalry record
-              </span>
-            </div>
-          )}
-
-          {/* Messages */}
-          <div
-            className="pzo-chat-scroll"
-            style={{
-              flex: 1, overflowY: 'auto', padding: '4px 0',
-              scrollbarWidth: 'thin',
-              scrollbarColor: 'rgba(255,255,255,0.08) transparent',
-            }}
-          >
-            {visibleMsgs.length === 0 && (
-              <div style={{
-                display: 'flex', flexDirection: 'column', alignItems: 'center',
-                justifyContent: 'center', height: '100%', gap: 10,
-                color: T.textMut,
-              }}>
-                <span style={{ fontSize: 28 }}>
-                  {activeTab === 'DEAL_ROOM' ? '⚡' : activeTab === 'SYNDICATE' ? '🏛️' : '🌐'}
-                </span>
-                <span style={{ fontFamily: T.mono, fontSize: 10, letterSpacing: '0.10em' }}>
-                  NO MESSAGES YET
-                </span>
-              </div>
-            )}
-            {visibleMsgs.map(msg => (
-              <MessageRow key={msg.id} msg={msg} />
-            ))}
-            <div ref={bottomRef} />
-          </div>
-
-          {/* Input */}
-          <div style={{
-            flexShrink: 0, padding: '8px 10px',
-            borderTop: `1px solid ${T.border}`,
-            background: `${T.card}CC`,
-          }}>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <input
-                ref={inputRef}
-                value={draft}
-                onChange={e => setDraft(e.target.value)}
-                onKeyDown={e => {
-                  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
-                }}
-                placeholder={tabInputPlaceholder}
-                maxLength={280}
-                style={{
-                  flex: 1, fontFamily: T.display, fontSize: 12,
-                  background: T.cardEl, border: `1px solid ${T.border}`,
-                  borderRadius: 10, padding: '10px 12px',
-                  color: T.text, outline: 'none',
-                  transition: 'border-color 0.15s',
-                  minHeight: 42,
-                }}
-                onFocus={e => { (e.target as HTMLInputElement).style.borderColor = 'rgba(129,140,248,0.50)'; }}
-                onBlur={e  => { (e.target as HTMLInputElement).style.borderColor = T.border; }}
-              />
-              <button
-                onClick={handleSend}
-                disabled={!draft.trim()}
-                style={{
-                  padding: '10px 14px', borderRadius: 10,
-                  cursor: draft.trim() ? 'pointer' : 'not-allowed',
-                  fontFamily: T.mono, fontSize: 13, fontWeight: 800,
-                  background: draft.trim()
-                    ? 'linear-gradient(135deg, #4F46E5 0%, #7C3AED 100%)'
-                    : T.cardEl,
-                  border: `1px solid ${draft.trim() ? 'rgba(129,140,248,0.40)' : T.border}`,
-                  color: draft.trim() ? T.text : T.textMut,
-                  opacity: draft.trim() ? 1 : 0.5,
-                  transition: 'all 0.15s',
-                  minHeight: 42, minWidth: 42,
-                }}
-              >
-                ↑
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </>
+  const dockProps = useMemo(
+    () => ({
+      gameCtx: forwarded.gameCtx,
+      onSabotage: forwarded.onSabotage,
+      accessToken: forwarded.accessToken,
+      mountTarget: forwarded.resolvedMountTarget,
+      mountPreset: forwarded.resolvedMountPreset,
+      title: forwarded.resolvedTitle,
+      subtitle: forwarded.resolvedSubtitle,
+      defaultTab: forwarded.resolvedDefaultTab,
+      startCollapsed: forwarded.resolvedStartCollapsed,
+      enableThreatMeter: forwarded.resolvedThreatMeter,
+      enableTranscriptDrawer: forwarded.resolvedTranscriptDrawer,
+      enableHelperPrompt: forwarded.resolvedHelperPrompt,
+      enableRoomMeta: forwarded.resolvedRoomMeta,
+      enableLawFooter: forwarded.resolvedLawFooter,
+      className: forwarded.normalizedClassName,
+      style: forwarded.normalizedStyle,
+    }),
+    [forwarded],
   );
+
+  if (!UnifiedChatDockComponent) {
+    return (
+      <FallbackPanel
+        title={forwarded.resolvedTitle}
+        subtitle={forwarded.resolvedSubtitle}
+      />
+    );
+  }
+
+  return <UnifiedChatDockComponent {...dockProps} />;
 });
 
 export default ChatPanel;
+
+// ============================================================================
+// MARK: Public manifests, descriptors, and tooling helpers
+// ============================================================================
+
+export const CHAT_PANEL_AUTHORITIES = Object.freeze({
+  sharedContractsRoot:
+    SharedChat.ChatChannelsModule.CHAT_CHANNEL_CONTRACT?.authorities
+      ?.sharedContractsRoot ?? '/shared/contracts/chat',
+  frontendEngineRoot:
+    SharedChat.ChatChannelsModule.CHAT_CHANNEL_CONTRACT?.authorities
+      ?.frontendEngineRoot ?? '/pzo-web/src/engines/chat',
+  frontendUiRoot: '/pzo-web/src/components/chat',
+  backendEngineRoot:
+    SharedChat.ChatChannelsModule.CHAT_CHANNEL_CONTRACT?.authorities
+      ?.backendEngineRoot ?? '/backend/src/game/engine/chat',
+  serverTransportRoot:
+    SharedChat.ChatChannelsModule.CHAT_CHANNEL_CONTRACT?.authorities
+      ?.serverTransportRoot ?? '/pzo-server/src/chat',
+});
+
+export const CHAT_PANEL_COMPONENT_DESCRIPTOR = Object.freeze({
+  name: 'ChatPanel',
+  filePath: CHAT_PANEL_FILE_PATH,
+  version: CHAT_PANEL_VERSION,
+  revision: CHAT_PANEL_REVISION,
+  migration: CHAT_PANEL_MIGRATION_FLAGS,
+  authorities: CHAT_PANEL_AUTHORITIES,
+  inheritedChatTypesBundle: CHAT_TYPES_RUNTIME_BUNDLE,
+  engineManifest: maybeEngineManifest,
+  engineRuntimeLaws: maybeEngineRuntimeLaws,
+  wrapperTarget: 'UnifiedChatDock',
+  wrapperKind: 'legacy-import-compatibility',
+  preservesProps: [
+    'gameCtx',
+    'onSabotage',
+    'accessToken',
+  ] as const,
+  optionalCompatibilityOverrides: [
+    'mountTarget',
+    'mountPreset',
+    'title',
+    'subtitle',
+    'defaultTab',
+    'startCollapsed',
+    'enableThreatMeter',
+    'enableTranscriptDrawer',
+    'enableHelperPrompt',
+    'enableRoomMeta',
+    'enableLawFooter',
+    'className',
+    'style',
+  ] as const,
+});
+
+export const CHAT_PANEL_PUBLIC_MANIFEST = Object.freeze({
+  filePath: CHAT_PANEL_FILE_PATH,
+  version: CHAT_PANEL_VERSION,
+  revision: CHAT_PANEL_REVISION,
+  migration: CHAT_PANEL_MIGRATION_FLAGS,
+  laws: CHAT_PANEL_RUNTIME_LAWS,
+  descriptor: CHAT_PANEL_COMPONENT_DESCRIPTOR,
+  runtimeBundle: CHAT_PANEL_RUNTIME_BUNDLE,
+  mountTitles: MOUNT_TITLES,
+  presetDefaults: {
+    tabs: PRESET_DEFAULT_TAB,
+    features: PRESET_FEATURE_DEFAULTS,
+  },
+});
+
+export function getChatPanelMountTitle(mountTarget: string): string {
+  const normalized = safeUpper(mountTarget);
+  return MOUNT_TITLES[normalized] ?? 'PZO CHAT';
+}
+
+export function getChatPanelMountPreset(target: string): string {
+  const normalized = safeUpper(target);
+  return TARGET_TO_PRESET[normalized] ?? 'GAME_BOARD';
+}
+
+export function getChatPanelFeatureDefaults(preset: string): {
+  readonly threatMeter: boolean;
+  readonly transcriptDrawer: boolean;
+  readonly helperPrompt: boolean;
+  readonly roomMeta: boolean;
+  readonly lawFooter: boolean;
+} {
+  const normalized = safeUpper(preset);
+  return {
+    threatMeter:
+      PRESET_FEATURE_DEFAULTS.threatMeterByPreset[normalized] ?? false,
+    transcriptDrawer:
+      PRESET_FEATURE_DEFAULTS.transcriptByPreset[normalized] ?? false,
+    helperPrompt: PRESET_FEATURE_DEFAULTS.helperByPreset[normalized] ?? false,
+    roomMeta: PRESET_FEATURE_DEFAULTS.roomMetaByPreset[normalized] ?? false,
+    lawFooter: PRESET_FEATURE_DEFAULTS.lawFooterByPreset[normalized] ?? false,
+  };
+}
