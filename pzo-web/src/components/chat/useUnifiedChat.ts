@@ -18,12 +18,15 @@ import { useChatEngine } from './useChatEngine';
 import { buildTranscriptDrawerSurfaceModel, createTranscriptDrawerCallbacks } from './transcriptDrawerAdapter';
 import { buildMessageFeedSurfaceModel } from './messageFeedSurfaceBuilder';
 import { buildChannelTabViewModels } from './channelTabsSurfaceBuilder';
+import { buildPresenceStripViewModel, buildTypingClusterViewModel } from './presenceTypingSurfaceBuilder';
 import type {
   ChannelTabsViewModel,
   ChatUiTranscriptDrawerCallbacks,
   ChatUiTranscriptDrawerSurfaceModel,
   MessageCardActionViewModel,
   MessageFeedViewModel,
+  PresenceStripViewModel,
+  TypingClusterViewModel,
 } from './uiTypes';
 
 /**
@@ -169,6 +172,8 @@ export interface UseUnifiedChatResult {
   transcript: UnifiedChatTranscriptState;
   transcriptDrawerModel: ChatUiTranscriptDrawerSurfaceModel;
   transcriptDrawerCallbacks: ChatUiTranscriptDrawerCallbacks;
+  presenceStripModel: PresenceStripViewModel;
+  typingIndicatorModel: TypingClusterViewModel;
   channelTabs: ChannelTabsViewModel;
   messageFeedModel: MessageFeedViewModel;
   messageFeedActionsByMessageId: Record<string, readonly MessageCardActionViewModel[]>;
@@ -687,6 +692,44 @@ export function useUnifiedChat({
   }, [rawHelperPrompt?.id]);
 
   const presence = useMemo(() => buildPresencePreview(allMessages, activeTab), [allMessages, activeTab]);
+  const currentPlayerName = String((normalizedCtx as unknown as { playerName?: string }).playerName ?? 'You');
+  const currentPlayerId = String((normalizedCtx as unknown as { playerId?: string }).playerId ?? 'player-local');
+
+  const presenceStripModel = useMemo(
+    () =>
+      buildPresenceStripViewModel({
+        messages: allMessages,
+        activeChannel: activeTab,
+        playerName: currentPlayerName,
+        playerId: currentPlayerId,
+        onlineCount: presence.onlineCount,
+        activeMembers: presence.activeMembers,
+        typingCount: presence.typingCount,
+        recentPeerNames: presence.recentPeerNames,
+      }),
+    [
+      allMessages,
+      activeTab,
+      currentPlayerId,
+      currentPlayerName,
+      presence.activeMembers,
+      presence.onlineCount,
+      presence.recentPeerNames,
+      presence.typingCount,
+    ],
+  );
+
+  const typingIndicatorModel = useMemo(
+    () =>
+      buildTypingClusterViewModel({
+        messages: visibleMessages,
+        activeChannel: activeTab,
+        playerName: currentPlayerName,
+        playerId: currentPlayerId,
+        typingCount: presence.typingCount,
+      }),
+    [activeTab, currentPlayerId, currentPlayerName, presence.typingCount, visibleMessages],
+  );
 
   const canonicalChannelSummaries = useMemo(
     () => buildChannelSummaries(allMessages, activeTab),
@@ -747,7 +790,7 @@ export function useUnifiedChat({
         activeChannel: activeTab,
         messages: visibleMessages,
         unreadCount: unread[activeTab] ?? 0,
-        currentUserId: String((normalizedCtx as unknown as { playerId?: string }).playerId ?? 'player-local'),
+        currentUserId: currentPlayerId,
         newestFirst: false,
         density: shellMode === 'DRAWER' ? 'expanded' : 'comfortable',
         transcriptLocked,
@@ -1116,6 +1159,8 @@ export function useUnifiedChat({
     },
     transcriptDrawerModel,
     transcriptDrawerCallbacks,
+    presenceStripModel,
+    typingIndicatorModel,
     channelTabs,
     messageFeedModel,
     messageFeedActionsByMessageId,

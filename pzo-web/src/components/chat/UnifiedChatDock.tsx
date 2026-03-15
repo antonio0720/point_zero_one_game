@@ -349,6 +349,44 @@ const PresenceStrip = memo(function PresenceStrip({ members }: { members: readon
   );
 });
 
+
+const TypingIndicator = memo(function TypingIndicator({
+  model,
+}: {
+  model: { actors: Array<{ id: string; name: string; role?: string; isThreat?: boolean }>; visible?: boolean; label?: string; compactLabel?: string };
+}) {
+  if (!model.visible || model.actors.length === 0) return null;
+  const lead = model.actors[0];
+  const toneColor =
+    lead?.isThreat
+      ? TOKENS.red
+      : lead?.role === 'helper'
+        ? TOKENS.teal
+        : TOKENS.textSubtle;
+
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 9,
+        color: TOKENS.textMuted,
+        fontFamily: TOKENS.mono,
+        fontSize: 11,
+        letterSpacing: 0.35,
+        textTransform: 'uppercase',
+      }}
+    >
+      <span style={{ color: toneColor }}>{model.compactLabel ?? model.label ?? 'typing'}</span>
+      <span style={{ display: 'inline-flex', gap: 5 }}>
+        <span style={{ width: 5, height: 5, borderRadius: 999, background: toneColor }} />
+        <span style={{ width: 5, height: 5, borderRadius: 999, background: TOKENS.textSubtle }} />
+        <span style={{ width: 5, height: 5, borderRadius: 999, background: TOKENS.textMuted }} />
+      </span>
+    </div>
+  );
+});
+
 const HelperPrompt = memo(function HelperPrompt({ model, onAction }: { model: UnifiedHelperPromptModel; onAction: () => void }) {
   if (!model.visible) return null;
   const color = model.tone === 'urgent' ? TOKENS.red : model.tone === 'blunt' ? TOKENS.orange : model.tone === 'strategic' ? TOKENS.indigo : TOKENS.teal;
@@ -458,7 +496,36 @@ export const UnifiedChatDock = memo(function UnifiedChatDock({
   const normalizedMessages = useMemo(() => normalizeMessages((ui.allMessages ?? []) as ChatMessage[]), [ui.allMessages]);
   const transcriptMessages = useMemo(() => normalizeMessages((ui.visibleMessages ?? []) as ChatMessage[]), [ui.visibleMessages]);
   const threat = useMemo(() => computeThreatModel(transcriptMessages), [transcriptMessages]);
-  const presence = useMemo(() => createPresenceModel(normalizedMessages, activeTab), [normalizedMessages, activeTab]);
+  const presence = useMemo(() => {
+    const actors = ui.presenceStripModel?.actors ?? [];
+    if (actors.length > 0) {
+      return actors.map((actor) => ({
+        id: actor.id,
+        name: actor.name,
+        role:
+          actor.role === 'helper'
+            ? 'HELPER'
+            : actor.role === 'hater'
+              ? 'HATER'
+              : actor.role === 'system'
+                ? 'SYSTEM'
+                : actor.role === 'npc'
+                  ? 'NPC'
+                  : 'PLAYER',
+        online: actor.status === 'online' || actor.status === 'busy',
+        typing: Boolean(actor.isTyping),
+        mood:
+          actor.isThreat
+            ? 'predatory'
+            : actor.role === 'helper'
+              ? 'rescue'
+              : actor.intent === 'watching'
+                ? 'alert'
+                : 'calm',
+      }));
+    }
+    return createPresenceModel(normalizedMessages, activeTab);
+  }, [activeTab, normalizedMessages, ui.presenceStripModel]);
   const helperPrompt = useMemo(() => {
     if (ui.helperPrompt) {
       return {
@@ -559,6 +626,7 @@ export const UnifiedChatDock = memo(function UnifiedChatDock({
       />
 
       {bootstrapPreset.showPresenceStrip ? <PresenceStrip members={presence} /> : null}
+      <TypingIndicator model={ui.typingIndicatorModel} />
       {bootstrapPreset.showThreatMeter && enableThreatMeter ? <ThreatMeter threat={threat} /> : null}
       {enableHelperPrompt && bootstrapPreset.enableHelperPrompts && helperPrompt.visible ? <HelperPrompt model={helperPrompt} onAction={handleHelperAction} /> : null}
 

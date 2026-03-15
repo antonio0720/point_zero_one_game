@@ -8,6 +8,8 @@
  * ============================================================================
  */
 
+import type { ReactNode } from 'react';
+
 export type UIString = string;
 export type UINumber = number;
 export type UIBoolean = boolean;
@@ -2170,6 +2172,361 @@ export function isUnifiedShellViewModel(value: unknown): value is ChatUiUnifiedS
     && isRecord(v.collapsedPill)
     && isRecord(v.transcriptDrawer)
     && isRecord(v.status);
+}
+
+
+
+/* -------------------------------------------------------------------------- */
+/* Presence / typing shell addendum                                           */
+/* -------------------------------------------------------------------------- */
+
+export type PresenceActorStatus =
+  | 'online'
+  | 'idle'
+  | 'busy'
+  | 'dnd'
+  | 'offline'
+  | 'hidden'
+  | 'spectating'
+  | 'queueing'
+  | 'matching'
+  | 'disconnected';
+
+export type PresenceActorRole =
+  | 'player'
+  | 'helper'
+  | 'hater'
+  | 'npc'
+  | 'moderator'
+  | 'host'
+  | 'spectator'
+  | 'system';
+
+export type PresenceActorEntityKind =
+  | 'human'
+  | 'bot'
+  | 'npc'
+  | 'system'
+  | 'hybrid';
+
+export type PresenceActorDevice =
+  | 'desktop'
+  | 'mobile'
+  | 'tablet'
+  | 'console'
+  | 'server'
+  | 'unknown';
+
+export type PresenceActorIntent =
+  | 'reading'
+  | 'typing'
+  | 'lurking'
+  | 'watching'
+  | 'negotiating'
+  | 'attacking'
+  | 'supporting'
+  | 'queued'
+  | 'idle'
+  | 'none';
+
+export type PresenceStripDensity = 'compact' | 'comfortable' | 'expanded';
+
+export type PresenceStripSortMode =
+  | 'priority'
+  | 'status'
+  | 'name'
+  | 'recent'
+  | 'role'
+  | 'channel';
+
+export type PresenceStripGroupMode =
+  | 'none'
+  | 'role'
+  | 'status'
+  | 'channel'
+  | 'team';
+
+export type PresenceStripMode =
+  | 'lobby'
+  | 'battle'
+  | 'dealRoom'
+  | 'global'
+  | 'syndicate'
+  | 'compactDock'
+  | 'overlay';
+
+export interface PresenceActorBadgeViewModel {
+  id: string;
+  label: string;
+  tone?: 'default' | 'positive' | 'warning' | 'danger' | 'accent' | 'muted';
+  shortLabel?: string;
+}
+
+export interface PresenceActorMetaViewModel {
+  teamId?: string | null;
+  teamName?: string | null;
+  teamShortName?: string | null;
+  factionId?: string | null;
+  factionName?: string | null;
+  factionColorToken?: string | null;
+  roomId?: string | null;
+  roomName?: string | null;
+  channelId?: string | null;
+  channelKey?: string | null;
+  channelLabel?: string | null;
+  modeId?: string | null;
+  modeLabel?: string | null;
+  proofTier?: string | null;
+  proofHash?: string | null;
+  tickLabel?: string | null;
+  pressureLabel?: string | null;
+  reputationLabel?: string | null;
+  relationshipLabel?: string | null;
+  hoverSummary?: string | null;
+  signature?: string | null;
+  note?: string | null;
+}
+
+export interface PresenceActorViewModel {
+  id: string;
+  name: string;
+  shortName?: string | null;
+  avatarUrl?: string | null;
+  accentColor?: string | null;
+  status: PresenceActorStatus;
+  role: PresenceActorRole;
+  entityKind?: PresenceActorEntityKind;
+  device?: PresenceActorDevice;
+  intent?: PresenceActorIntent;
+  isSelf?: boolean;
+  isPinned?: boolean;
+  isMuted?: boolean;
+  isSelected?: boolean;
+  isTyping?: boolean;
+  isHighlighted?: boolean;
+  isThreat?: boolean;
+  isHelperRecommended?: boolean;
+  isShadow?: boolean;
+  unreadCount?: number;
+  priority?: number;
+  presenceScore?: number;
+  activityScore?: number;
+  relationshipScore?: number;
+  joinedAtMs?: number | null;
+  lastSeenAtMs?: number | null;
+  lastActiveAtMs?: number | null;
+  typingStartedAtMs?: number | null;
+  badges?: PresenceActorBadgeViewModel[];
+  meta?: PresenceActorMetaViewModel;
+}
+
+export interface PresenceGroupViewModel {
+  id: string;
+  label: string;
+  shortLabel?: string;
+  items: PresenceActorViewModel[];
+  tone?: 'default' | 'positive' | 'warning' | 'danger' | 'accent' | 'muted';
+}
+
+export interface PresenceStripSummaryViewModel {
+  online: number;
+  typing: number;
+  helpers: number;
+  haters: number;
+  spectators: number;
+  offline: number;
+}
+
+export interface PresenceStripLabels {
+  title: string;
+  selfLabel: string;
+  helperLabel: string;
+  haterLabel: string;
+  spectatorLabel: string;
+  offlineLabel: string;
+  emptyLabel: string;
+  hiddenCountLabel: (count: number) => string;
+  unreadLabel: (count: number) => string;
+  typingLabel: string;
+  activeNowLabel: string;
+  recentlySeenLabel: string;
+  riskLabel: string;
+  supportLabel: string;
+  showMoreLabel: string;
+  showLessLabel: string;
+}
+
+export interface PresenceStripViewModel {
+  actors: PresenceActorViewModel[];
+  groups?: PresenceGroupViewModel[];
+  summary?: PresenceStripSummaryViewModel;
+  title?: string;
+  filterPlaceholder?: string;
+}
+
+export interface PresenceStripCallbacks {
+  onSelect?: (item: PresenceActorViewModel) => void;
+  onHover?: (item: PresenceActorViewModel | null) => void;
+  onFocusItem?: (item: PresenceActorViewModel) => void;
+  onOpenProfile?: (item: PresenceActorViewModel) => void;
+  onOpenWhisper?: (item: PresenceActorViewModel) => void;
+  onOpenContextMenu?: (item: PresenceActorViewModel, anchor: HTMLElement | null) => void;
+  onClearSelection?: () => void;
+}
+
+export interface ChatPresenceStripProps extends PresenceStripCallbacks {
+  model: PresenceStripViewModel;
+  density?: PresenceStripDensity;
+  mode?: PresenceStripMode;
+  sortMode?: PresenceStripSortMode;
+  groupMode?: PresenceStripGroupMode;
+  maxVisible?: number;
+  maxBadgesPerItem?: number;
+  selectedId?: string | null;
+  activeChannelKey?: string | null;
+  stickySelf?: boolean;
+  showOffline?: boolean;
+  showHidden?: boolean;
+  showSearch?: boolean;
+  showCounters?: boolean;
+  showGroupHeaders?: boolean;
+  showRolePills?: boolean;
+  showBadges?: boolean;
+  showAvatarRing?: boolean;
+  showIntentText?: boolean;
+  showMetaLine?: boolean;
+  showTimestamp?: boolean;
+  compactOverflow?: boolean;
+  keyboardNavigation?: boolean;
+  animated?: boolean;
+  className?: string;
+  emptyStateTitle?: string;
+  emptyStateDescription?: string;
+  labels?: Partial<PresenceStripLabels>;
+  filterText?: string;
+  onFilterTextChange?: (value: string) => void;
+  renderLeadingSlot?: ReactNode;
+  renderTrailingSlot?: ReactNode;
+}
+
+export type TypingActorRole =
+  | 'player'
+  | 'helper'
+  | 'hater'
+  | 'npc'
+  | 'spectator'
+  | 'system'
+  | 'moderator'
+  | 'host';
+
+export type TypingActorIntent =
+  | 'replying'
+  | 'lurking'
+  | 'threatening'
+  | 'supporting'
+  | 'negotiating'
+  | 'narrating'
+  | 'thinking'
+  | 'reacting'
+  | 'none';
+
+export type TypingIndicatorDensity = 'compact' | 'comfortable' | 'expanded';
+export type TypingIndicatorLayout = 'inline' | 'stacked' | 'pill' | 'ticker';
+
+export type TypingIndicatorSummaryMode =
+  | 'full'
+  | 'first-two'
+  | 'first-one'
+  | 'aggregate'
+  | 'channel-first';
+
+export interface TypingActorBadgeViewModel {
+  id: string;
+  label: string;
+  shortLabel?: string;
+  tone?: 'default' | 'positive' | 'warning' | 'danger' | 'accent' | 'muted';
+}
+
+export interface TypingActorMetaViewModel {
+  channelKey?: string | null;
+  channelLabel?: string | null;
+  roomId?: string | null;
+  roomLabel?: string | null;
+  modeLabel?: string | null;
+  proofTier?: string | null;
+  pressureLabel?: string | null;
+  tickLabel?: string | null;
+  note?: string | null;
+  hoverSummary?: string | null;
+  voiceprint?: string | null;
+  relationshipLabel?: string | null;
+  urgencyLabel?: string | null;
+}
+
+export interface TypingActorViewModel {
+  id: string;
+  name: string;
+  shortName?: string | null;
+  avatarUrl?: string | null;
+  accentColor?: string | null;
+  role: TypingActorRole;
+  intent?: TypingActorIntent;
+  isSelf?: boolean;
+  isPriority?: boolean;
+  isThreat?: boolean;
+  isRecommended?: boolean;
+  startedAtMs?: number | null;
+  expectedStopAtMs?: number | null;
+  confidence?: number | null;
+  urgency?: number | null;
+  badges?: TypingActorBadgeViewModel[];
+  meta?: TypingActorMetaViewModel;
+}
+
+export interface TypingIndicatorLabels {
+  nobodyTyping: string;
+  typing: string;
+  andMore: (count: number) => string;
+  helperTyping: string;
+  threatTyping: string;
+  youTyping: string;
+  aggregateRoomTyping: (count: number) => string;
+  aggregateChannelTyping: (channel: string, count: number) => string;
+  uncertainty: string;
+  lurking: string;
+  thinking: string;
+}
+
+export interface TypingClusterViewModel {
+  actors: TypingActorViewModel[];
+  label?: string;
+  compactLabel?: string;
+  visible?: boolean;
+}
+
+export interface ChatTypingIndicatorProps {
+  model: TypingClusterViewModel;
+  density?: TypingIndicatorDensity;
+  layout?: TypingIndicatorLayout;
+  summaryMode?: TypingIndicatorSummaryMode;
+  activeChannelKey?: string | null;
+  maxVisibleActors?: number;
+  maxBadgesPerActor?: number;
+  showAvatars?: boolean;
+  showBadges?: boolean;
+  showIntentText?: boolean;
+  showMetaText?: boolean;
+  showConfidenceBar?: boolean;
+  showAggregateFallback?: boolean;
+  animated?: boolean;
+  className?: string;
+  ariaLive?: 'off' | 'polite' | 'assertive';
+  labels?: Partial<TypingIndicatorLabels>;
+  onActorClick?: (actor: TypingActorViewModel) => void;
+  onActorHover?: (actor: TypingActorViewModel | null) => void;
+  onOpenProfile?: (actor: TypingActorViewModel) => void;
+  renderLeadingSlot?: ReactNode;
+  renderTrailingSlot?: ReactNode;
 }
 
 export const CHAT_UI_TYPES_MANIFEST = Object.freeze({

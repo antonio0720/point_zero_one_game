@@ -10,6 +10,16 @@ import React, {
   useState,
 } from 'react';
 
+import type {
+  ChatPresenceStripProps,
+  PresenceActorBadgeViewModel,
+  PresenceActorRole,
+  PresenceActorStatus,
+  PresenceGroupViewModel,
+  PresenceStripDensity,
+  PresenceStripLabels,
+} from './uiTypes';
+
 /**
  * ==========================================================================
  * POINT ZERO ONE — UNIFIED CHAT PRESENCE STRIP
@@ -28,216 +38,7 @@ import React, {
  * ==========================================================================
  */
 
-export type ChatPresenceStatus =
-  | 'online'
-  | 'idle'
-  | 'busy'
-  | 'dnd'
-  | 'offline'
-  | 'hidden'
-  | 'spectating'
-  | 'queueing'
-  | 'matching'
-  | 'disconnected';
-
-export type ChatPresenceRole =
-  | 'player'
-  | 'helper'
-  | 'hater'
-  | 'npc'
-  | 'moderator'
-  | 'host'
-  | 'spectator'
-  | 'system';
-
-export type ChatPresenceEntityKind =
-  | 'human'
-  | 'bot'
-  | 'npc'
-  | 'system'
-  | 'hybrid';
-
-export type ChatPresenceDevice =
-  | 'desktop'
-  | 'mobile'
-  | 'tablet'
-  | 'console'
-  | 'server'
-  | 'unknown';
-
-export type ChatPresenceIntent =
-  | 'reading'
-  | 'typing'
-  | 'lurking'
-  | 'watching'
-  | 'negotiating'
-  | 'attacking'
-  | 'supporting'
-  | 'queued'
-  | 'idle'
-  | 'none';
-
-export type ChatPresenceDensity = 'compact' | 'comfortable' | 'expanded';
-
-export type ChatPresenceSortMode =
-  | 'priority'
-  | 'status'
-  | 'name'
-  | 'recent'
-  | 'role'
-  | 'channel';
-
-export type ChatPresenceGroupMode =
-  | 'none'
-  | 'role'
-  | 'status'
-  | 'channel'
-  | 'team';
-
-export type ChatPresenceStripMode =
-  | 'lobby'
-  | 'battle'
-  | 'dealRoom'
-  | 'global'
-  | 'syndicate'
-  | 'compactDock'
-  | 'overlay';
-
-export interface ChatPresenceBadge {
-  id: string;
-  label: string;
-  tone?: 'default' | 'positive' | 'warning' | 'danger' | 'accent' | 'muted';
-  shortLabel?: string;
-}
-
-export interface ChatPresenceMeta {
-  teamId?: string | null;
-  teamName?: string | null;
-  teamShortName?: string | null;
-  factionId?: string | null;
-  factionName?: string | null;
-  factionColorToken?: string | null;
-  roomId?: string | null;
-  roomName?: string | null;
-  channelId?: string | null;
-  channelKey?: string | null;
-  channelLabel?: string | null;
-  modeId?: string | null;
-  modeLabel?: string | null;
-  proofTier?: string | null;
-  proofHash?: string | null;
-  tickLabel?: string | null;
-  pressureLabel?: string | null;
-  reputationLabel?: string | null;
-  relationshipLabel?: string | null;
-  hoverSummary?: string | null;
-  signature?: string | null;
-  note?: string | null;
-}
-
-export interface ChatPresenceRecord {
-  id: string;
-  name: string;
-  shortName?: string | null;
-  avatarUrl?: string | null;
-  accentColor?: string | null;
-  status: ChatPresenceStatus;
-  role: ChatPresenceRole;
-  entityKind?: ChatPresenceEntityKind;
-  device?: ChatPresenceDevice;
-  intent?: ChatPresenceIntent;
-  isSelf?: boolean;
-  isPinned?: boolean;
-  isMuted?: boolean;
-  isSelected?: boolean;
-  isTyping?: boolean;
-  isHighlighted?: boolean;
-  isThreat?: boolean;
-  isHelperRecommended?: boolean;
-  isShadow?: boolean;
-  unreadCount?: number;
-  priority?: number;
-  presenceScore?: number;
-  activityScore?: number;
-  relationshipScore?: number;
-  joinedAtMs?: number | null;
-  lastSeenAtMs?: number | null;
-  lastActiveAtMs?: number | null;
-  typingStartedAtMs?: number | null;
-  badges?: ChatPresenceBadge[];
-  meta?: ChatPresenceMeta;
-}
-
-export interface ChatPresenceGroup {
-  id: string;
-  label: string;
-  shortLabel?: string;
-  items: ChatPresenceRecord[];
-  tone?: 'default' | 'positive' | 'warning' | 'danger' | 'accent' | 'muted';
-}
-
-export interface ChatPresenceStripLabels {
-  title: string;
-  selfLabel: string;
-  helperLabel: string;
-  haterLabel: string;
-  spectatorLabel: string;
-  offlineLabel: string;
-  emptyLabel: string;
-  hiddenCountLabel: (count: number) => string;
-  unreadLabel: (count: number) => string;
-  typingLabel: string;
-  activeNowLabel: string;
-  recentlySeenLabel: string;
-  riskLabel: string;
-  supportLabel: string;
-  showMoreLabel: string;
-  showLessLabel: string;
-}
-
-export interface ChatPresenceStripProps {
-  items: ChatPresenceRecord[];
-  density?: ChatPresenceDensity;
-  mode?: ChatPresenceStripMode;
-  sortMode?: ChatPresenceSortMode;
-  groupMode?: ChatPresenceGroupMode;
-  maxVisible?: number;
-  maxBadgesPerItem?: number;
-  selectedId?: string | null;
-  activeChannelKey?: string | null;
-  stickySelf?: boolean;
-  showOffline?: boolean;
-  showHidden?: boolean;
-  showSearch?: boolean;
-  showCounters?: boolean;
-  showGroupHeaders?: boolean;
-  showRolePills?: boolean;
-  showBadges?: boolean;
-  showAvatarRing?: boolean;
-  showIntentText?: boolean;
-  showMetaLine?: boolean;
-  showTimestamp?: boolean;
-  compactOverflow?: boolean;
-  keyboardNavigation?: boolean;
-  animated?: boolean;
-  className?: string;
-  emptyStateTitle?: string;
-  emptyStateDescription?: string;
-  labels?: Partial<ChatPresenceStripLabels>;
-  filterText?: string;
-  onFilterTextChange?: (value: string) => void;
-  onSelect?: (item: ChatPresenceRecord) => void;
-  onHover?: (item: ChatPresenceRecord | null) => void;
-  onFocusItem?: (item: ChatPresenceRecord) => void;
-  onOpenProfile?: (item: ChatPresenceRecord) => void;
-  onOpenWhisper?: (item: ChatPresenceRecord) => void;
-  onOpenContextMenu?: (item: ChatPresenceRecord, anchor: HTMLElement | null) => void;
-  onClearSelection?: () => void;
-  renderLeadingSlot?: React.ReactNode;
-  renderTrailingSlot?: React.ReactNode;
-}
-
-const DEFAULT_LABELS: ChatPresenceStripLabels = {
+const DEFAULT_LABELS: PresenceStripLabels = {
   title: 'Presence',
   selfLabel: 'You',
   helperLabel: 'Helper',
@@ -256,7 +57,7 @@ const DEFAULT_LABELS: ChatPresenceStripLabels = {
   showLessLabel: 'Show less',
 };
 
-const ROLE_PRIORITY: Record<ChatPresenceRole, number> = {
+const ROLE_PRIORITY: Record<PresenceActorRole, number> = {
   system: 0,
   host: 1,
   moderator: 2,
@@ -267,10 +68,9 @@ const ROLE_PRIORITY: Record<ChatPresenceRole, number> = {
   spectator: 7,
 };
 
-const STATUS_PRIORITY: Record<ChatPresenceStatus, number> = {
+const STATUS_PRIORITY: Record<PresenceActorStatus, number> = {
   online: 0,
   busy: 1,
-  typing: 1 as never,
   queueing: 2,
   matching: 3,
   spectating: 4,
@@ -281,7 +81,7 @@ const STATUS_PRIORITY: Record<ChatPresenceStatus, number> = {
   offline: 9,
 };
 
-const STATUS_RING_CLASS: Record<ChatPresenceStatus, string> = {
+const STATUS_RING_CLASS: Record<PresenceActorStatus, string> = {
   online: 'ring-emerald-400/70',
   idle: 'ring-amber-300/70',
   busy: 'ring-orange-400/70',
@@ -294,7 +94,7 @@ const STATUS_RING_CLASS: Record<ChatPresenceStatus, string> = {
   disconnected: 'ring-zinc-500/60',
 };
 
-const STATUS_DOT_CLASS: Record<ChatPresenceStatus, string> = {
+const STATUS_DOT_CLASS: Record<PresenceActorStatus, string> = {
   online: 'bg-emerald-400',
   idle: 'bg-amber-300',
   busy: 'bg-orange-400',
@@ -307,7 +107,7 @@ const STATUS_DOT_CLASS: Record<ChatPresenceStatus, string> = {
   disconnected: 'bg-zinc-500',
 };
 
-const ROLE_PILL_CLASS: Record<ChatPresenceRole, string> = {
+const ROLE_PILL_CLASS: Record<PresenceActorRole, string> = {
   player: 'bg-white/10 text-white/85 border-white/10',
   helper: 'bg-emerald-500/15 text-emerald-200 border-emerald-400/20',
   hater: 'bg-rose-500/15 text-rose-200 border-rose-400/20',
@@ -353,20 +153,12 @@ function coerceFinite(value: unknown, fallback = 0): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
 }
 
-function compareNumbersDescending(a: number, b: number): number {
-  return b - a;
-}
-
-function compareNumbersAscending(a: number, b: number): number {
-  return a - b;
-}
-
 function compareNullableNumbersDescending(a?: number | null, b?: number | null): number {
-  return compareNumbersDescending(coerceFinite(a, -Infinity), coerceFinite(b, -Infinity));
+  return coerceFinite(b, -Infinity) - coerceFinite(a, -Infinity);
 }
 
 function compareNullableNumbersAscending(a?: number | null, b?: number | null): number {
-  return compareNumbersAscending(coerceFinite(a, Infinity), coerceFinite(b, Infinity));
+  return coerceFinite(a, Infinity) - coerceFinite(b, Infinity);
 }
 
 function normalizeWhitespace(value: string | null | undefined): string {
@@ -383,121 +175,70 @@ function initialsForName(name: string): string {
     .filter(Boolean)
     .slice(0, 2);
 
-  if (words.length === 0) {
-    return '?';
-  }
-
+  if (words.length === 0) return '?';
   const joined = words.map((word) => word[0]?.toUpperCase() ?? '').join('');
   return joined || '?';
 }
 
-function statusLabel(status: ChatPresenceStatus): string {
+function statusLabel(status: PresenceActorStatus): string {
   switch (status) {
-    case 'online':
-      return 'Online';
-    case 'idle':
-      return 'Idle';
-    case 'busy':
-      return 'Busy';
-    case 'dnd':
-      return 'Do not disturb';
-    case 'offline':
-      return 'Offline';
-    case 'hidden':
-      return 'Hidden';
-    case 'spectating':
-      return 'Spectating';
-    case 'queueing':
-      return 'Queueing';
-    case 'matching':
-      return 'Matching';
-    case 'disconnected':
-      return 'Disconnected';
-    default:
-      return 'Unknown';
+    case 'online': return 'Online';
+    case 'idle': return 'Idle';
+    case 'busy': return 'Busy';
+    case 'dnd': return 'Do not disturb';
+    case 'offline': return 'Offline';
+    case 'hidden': return 'Hidden';
+    case 'spectating': return 'Spectating';
+    case 'queueing': return 'Queueing';
+    case 'matching': return 'Matching';
+    case 'disconnected': return 'Disconnected';
+    default: return 'Unknown';
   }
 }
 
-function roleLabel(role: ChatPresenceRole, labels: ChatPresenceStripLabels): string {
+function roleLabel(role: PresenceActorRole, labels: PresenceStripLabels): string {
   switch (role) {
-    case 'helper':
-      return labels.helperLabel;
-    case 'hater':
-      return labels.haterLabel;
-    case 'spectator':
-      return labels.spectatorLabel;
-    case 'player':
-      return 'Player';
-    case 'npc':
-      return 'NPC';
-    case 'moderator':
-      return 'Moderator';
-    case 'host':
-      return 'Host';
-    case 'system':
-      return 'System';
-    default:
-      return 'Member';
+    case 'helper': return labels.helperLabel;
+    case 'hater': return labels.haterLabel;
+    case 'spectator': return labels.spectatorLabel;
+    case 'player': return 'Player';
+    case 'npc': return 'NPC';
+    case 'moderator': return 'Moderator';
+    case 'host': return 'Host';
+    case 'system': return 'System';
+    default: return 'Member';
   }
 }
 
 function relativeTime(nowMs: number, timestampMs?: number | null): string | null {
-  if (!timestampMs || !Number.isFinite(timestampMs)) {
-    return null;
-  }
-
+  if (!timestampMs || !Number.isFinite(timestampMs)) return null;
   const deltaMs = nowMs - timestampMs;
-  if (deltaMs < 0) {
-    return 'just now';
-  }
-
+  if (deltaMs < 0) return 'just now';
   const deltaSec = Math.floor(deltaMs / 1000);
-  if (deltaSec < 5) {
-    return 'just now';
-  }
-  if (deltaSec < 60) {
-    return `${deltaSec}s ago`;
-  }
-
+  if (deltaSec < 5) return 'just now';
+  if (deltaSec < 60) return `${deltaSec}s ago`;
   const deltaMin = Math.floor(deltaSec / 60);
-  if (deltaMin < 60) {
-    return `${deltaMin}m ago`;
-  }
-
+  if (deltaMin < 60) return `${deltaMin}m ago`;
   const deltaHr = Math.floor(deltaMin / 60);
-  if (deltaHr < 24) {
-    return `${deltaHr}h ago`;
-  }
-
-  const deltaDay = Math.floor(deltaHr / 24);
-  return `${deltaDay}d ago`;
+  if (deltaHr < 24) return `${deltaHr}h ago`;
+  return `${Math.floor(deltaHr / 24)}d ago`;
 }
 
-function safeArray<T>(value: T[] | null | undefined): T[] {
-  return Array.isArray(value) ? value : [];
-}
-
-function hasUnread(item: ChatPresenceRecord): boolean {
+function hasUnread(item: ChatPresenceStripProps['model']['actors'][number]): boolean {
   return coerceFinite(item.unreadCount, 0) > 0;
 }
 
-function isActiveStatus(status: ChatPresenceStatus): boolean {
+function isActiveStatus(status: PresenceActorStatus): boolean {
   return status === 'online' || status === 'busy' || status === 'queueing' || status === 'matching';
 }
 
-function isVisibleStatus(status: ChatPresenceStatus, showOffline: boolean, showHidden: boolean): boolean {
-  if (status === 'offline') {
-    return showOffline;
-  }
-
-  if (status === 'hidden') {
-    return showHidden;
-  }
-
+function isVisibleStatus(status: PresenceActorStatus, showOffline: boolean, showHidden: boolean): boolean {
+  if (status === 'offline') return showOffline;
+  if (status === 'hidden') return showHidden;
   return true;
 }
 
-function presencePriority(item: ChatPresenceRecord): number {
+function presencePriority(item: ChatPresenceStripProps['model']['actors'][number]): number {
   const base = coerceFinite(item.priority, 0);
   const selfBoost = item.isSelf ? 1200 : 0;
   const selectedBoost = item.isSelected ? 600 : 0;
@@ -509,7 +250,7 @@ function presencePriority(item: ChatPresenceRecord): number {
   return base + selfBoost + selectedBoost + typingBoost + helperBoost + threatBoost + unreadBoost + activityBoost;
 }
 
-function searchHaystack(item: ChatPresenceRecord): string {
+function searchHaystack(item: ChatPresenceStripProps['model']['actors'][number]): string {
   const meta = item.meta;
   return [
     item.id,
@@ -523,208 +264,204 @@ function searchHaystack(item: ChatPresenceRecord): string {
     meta?.factionName,
     meta?.roomName,
     meta?.channelLabel,
-    meta?.channelKey,
     meta?.modeLabel,
     meta?.proofTier,
-    meta?.pressureLabel,
+    meta?.proofHash,
     meta?.tickLabel,
+    meta?.pressureLabel,
     meta?.reputationLabel,
     meta?.relationshipLabel,
     meta?.hoverSummary,
+    meta?.signature,
     meta?.note,
   ]
-    .map((segment) => normalizeSearch(segment ?? ''))
     .filter(Boolean)
-    .join(' ');
+    .join(' ')
+    .toLowerCase();
 }
 
-function sortPresenceItems(items: ChatPresenceRecord[], sortMode: ChatPresenceSortMode): ChatPresenceRecord[] {
-  const next = [...items];
+function filterPresenceItems(
+  items: ChatPresenceStripProps['model']['actors'],
+  filterText: string,
+  activeChannelKey: string | null,
+  showOffline: boolean,
+  showHidden: boolean,
+): ChatPresenceStripProps['model']['actors'] {
+  const normalizedFilter = normalizeSearch(filterText);
+  const channelFilter = normalizeSearch(activeChannelKey);
 
-  next.sort((left, right) => {
-    if (left.isPinned !== right.isPinned) {
-      return left.isPinned ? -1 : 1;
+  return items.filter((item) => {
+    if (!isVisibleStatus(item.status, showOffline, showHidden)) return false;
+    if (channelFilter) {
+      const itemChannel = normalizeSearch(item.meta?.channelKey || item.meta?.channelLabel || '');
+      if (itemChannel && itemChannel !== channelFilter) return false;
     }
+    if (!normalizedFilter) return true;
+    return searchHaystack(item).includes(normalizedFilter);
+  });
+}
 
-    if (left.isSelf !== right.isSelf) {
-      return left.isSelf ? -1 : 1;
-    }
-
+function sortPresenceItems(
+  items: ChatPresenceStripProps['model']['actors'],
+  sortMode: NonNullable<ChatPresenceStripProps['sortMode']>,
+): ChatPresenceStripProps['model']['actors'] {
+  const copy = [...items];
+  copy.sort((left, right) => {
     switch (sortMode) {
-      case 'name': {
+      case 'name':
+        return normalizeWhitespace(left.name).localeCompare(normalizeWhitespace(right.name));
+      case 'status': {
+        const statusOrder = (STATUS_PRIORITY[left.status] ?? 999) - (STATUS_PRIORITY[right.status] ?? 999);
+        if (statusOrder !== 0) return statusOrder;
+        return compareNullableNumbersDescending(left.lastActiveAtMs, right.lastActiveAtMs);
+      }
+      case 'recent':
+        return compareNullableNumbersDescending(left.lastActiveAtMs, right.lastActiveAtMs);
+      case 'role': {
+        const roleOrder = (ROLE_PRIORITY[left.role] ?? 999) - (ROLE_PRIORITY[right.role] ?? 999);
+        if (roleOrder !== 0) return roleOrder;
         return normalizeWhitespace(left.name).localeCompare(normalizeWhitespace(right.name));
       }
-      case 'status': {
-        const statusOrder = compareNumbersAscending(
-          STATUS_PRIORITY[left.status] ?? 999,
-          STATUS_PRIORITY[right.status] ?? 999,
+      case 'channel':
+        return normalizeWhitespace(left.meta?.channelLabel || left.meta?.channelKey || '').localeCompare(
+          normalizeWhitespace(right.meta?.channelLabel || right.meta?.channelKey || ''),
         );
-        if (statusOrder !== 0) {
-          return statusOrder;
-        }
-        break;
-      }
-      case 'role': {
-        const roleOrder = compareNumbersAscending(
-          ROLE_PRIORITY[left.role] ?? 999,
-          ROLE_PRIORITY[right.role] ?? 999,
-        );
-        if (roleOrder !== 0) {
-          return roleOrder;
-        }
-        break;
-      }
-      case 'recent': {
-        const recencyOrder = compareNullableNumbersDescending(left.lastActiveAtMs, right.lastActiveAtMs);
-        if (recencyOrder !== 0) {
-          return recencyOrder;
-        }
-        break;
-      }
-      case 'channel': {
-        const leftChannel = normalizeWhitespace(left.meta?.channelLabel || left.meta?.channelKey || '');
-        const rightChannel = normalizeWhitespace(right.meta?.channelLabel || right.meta?.channelKey || '');
-        const channelOrder = leftChannel.localeCompare(rightChannel);
-        if (channelOrder !== 0) {
-          return channelOrder;
-        }
-        break;
-      }
       case 'priority':
       default: {
-        const priorityOrder = compareNumbersDescending(presencePriority(left), presencePriority(right));
-        if (priorityOrder !== 0) {
-          return priorityOrder;
-        }
+        const priorityOrder = presencePriority(right) - presencePriority(left);
+        if (priorityOrder !== 0) return priorityOrder;
+        const activeOrder = compareNullableNumbersDescending(left.lastActiveAtMs, right.lastActiveAtMs);
+        if (activeOrder !== 0) return activeOrder;
+        return normalizeWhitespace(left.name).localeCompare(normalizeWhitespace(right.name));
       }
     }
-
-    const statusFallback = compareNumbersAscending(
-      STATUS_PRIORITY[left.status] ?? 999,
-      STATUS_PRIORITY[right.status] ?? 999,
-    );
-    if (statusFallback !== 0) {
-      return statusFallback;
-    }
-
-    const roleFallback = compareNumbersAscending(ROLE_PRIORITY[left.role] ?? 999, ROLE_PRIORITY[right.role] ?? 999);
-    if (roleFallback !== 0) {
-      return roleFallback;
-    }
-
-    const scoreFallback = compareNumbersDescending(coerceFinite(left.presenceScore), coerceFinite(right.presenceScore));
-    if (scoreFallback !== 0) {
-      return scoreFallback;
-    }
-
-    return normalizeWhitespace(left.name).localeCompare(normalizeWhitespace(right.name));
   });
-
-  return next;
+  return copy;
 }
 
-function groupPresenceItems(items: ChatPresenceRecord[], groupMode: ChatPresenceGroupMode): ChatPresenceGroup[] {
+function buildSummary(items: ChatPresenceStripProps['model']['actors']) {
+  return {
+    online: items.filter((item) => isActiveStatus(item.status)).length,
+    typing: items.filter((item) => item.isTyping).length,
+    helpers: items.filter((item) => item.role === 'helper').length,
+    haters: items.filter((item) => item.role === 'hater').length,
+    spectators: items.filter((item) => item.role === 'spectator').length,
+    offline: items.filter((item) => item.status === 'offline').length,
+  };
+}
+
+function groupPresenceItems(
+  items: ChatPresenceStripProps['model']['actors'],
+  groupMode: NonNullable<ChatPresenceStripProps['groupMode']>,
+): PresenceGroupViewModel[] {
   if (groupMode === 'none') {
-    return [
-      {
-        id: 'all',
-        label: 'All',
-        items,
-      },
-    ];
+    return [{ id: 'all', label: 'All', items }];
   }
 
-  const buckets = new Map<string, ChatPresenceGroup>();
-
+  const buckets = new Map<string, PresenceGroupViewModel>();
   for (const item of items) {
-    let key = 'ungrouped';
-    let label = 'Ungrouped';
-    let shortLabel = 'Other';
+    const key =
+      groupMode === 'role'
+        ? item.role
+        : groupMode === 'status'
+          ? item.status
+          : groupMode === 'channel'
+            ? item.meta?.channelKey || item.meta?.channelLabel || 'unknown'
+            : item.meta?.teamId || item.meta?.teamName || 'ungrouped';
 
-    if (groupMode === 'role') {
-      key = item.role;
-      label = item.role.charAt(0).toUpperCase() + item.role.slice(1);
-      shortLabel = label;
-    } else if (groupMode === 'status') {
-      key = item.status;
-      label = statusLabel(item.status);
-      shortLabel = label;
-    } else if (groupMode === 'channel') {
-      key = normalizeWhitespace(item.meta?.channelKey || item.meta?.channelLabel || 'ungrouped') || 'ungrouped';
-      label = normalizeWhitespace(item.meta?.channelLabel || item.meta?.channelKey || 'Unrouted');
-      shortLabel = label;
-    } else if (groupMode === 'team') {
-      key = normalizeWhitespace(item.meta?.teamId || item.meta?.teamName || 'ungrouped') || 'ungrouped';
-      label = normalizeWhitespace(item.meta?.teamName || item.meta?.teamShortName || 'No Team');
-      shortLabel = normalizeWhitespace(item.meta?.teamShortName || item.meta?.teamName || 'No Team');
-    }
+    const label =
+      groupMode === 'role'
+        ? item.role
+        : groupMode === 'status'
+          ? statusLabel(item.status)
+          : groupMode === 'channel'
+            ? item.meta?.channelLabel || item.meta?.channelKey || 'Unknown'
+            : item.meta?.teamName || item.meta?.teamShortName || 'Ungrouped';
 
     const existing = buckets.get(key);
     if (existing) {
       existing.items.push(item);
     } else {
-      buckets.set(key, {
-        id: key,
-        label,
-        shortLabel,
-        items: [item],
-      });
+      buckets.set(key, { id: key, label, items: [item] });
     }
   }
 
-  return [...buckets.values()].sort((left, right) => left.label.localeCompare(right.label));
+  const groups = [...buckets.values()];
+  groups.sort((left, right) => normalizeWhitespace(left.label).localeCompare(normalizeWhitespace(right.label)));
+  return groups;
 }
 
 function buildDefaultFilterText(props: ChatPresenceStripProps): string {
-  return normalizeWhitespace(props.filterText ?? '');
+  return props.filterText ?? '';
 }
 
 function useControllableFilter(props: ChatPresenceStripProps): [string, (value: string) => void] {
   const [internal, setInternal] = useState<string>(() => buildDefaultFilterText(props));
-  const controlled = props.filterText;
-  const value = typeof controlled === 'string' ? controlled : internal;
-
-  useEffect(() => {
-    if (typeof controlled === 'string') {
-      return;
-    }
-    setInternal(buildDefaultFilterText(props));
-  }, [props.filterText]);
-
+  const controlled = typeof props.filterText === 'string';
+  const value = controlled ? props.filterText! : internal;
   const setValue = useCallback(
-    (nextValue: string) => {
-      if (typeof controlled !== 'string') {
-        setInternal(nextValue);
-      }
-      props.onFilterTextChange?.(nextValue);
+    (next: string) => {
+      if (!controlled) setInternal(next);
+      props.onFilterTextChange?.(next);
     },
     [controlled, props],
   );
 
+  useEffect(() => {
+    if (controlled) setInternal(props.filterText ?? '');
+  }, [controlled, props.filterText]);
+
   return [value, setValue];
 }
 
-function useNowTick(showTimestamp: boolean): number {
+function useNowTick(enabled: boolean): number {
   const [nowMs, setNowMs] = useState<number>(() => Date.now());
 
   useEffect(() => {
-    if (!showTimestamp) {
-      return;
-    }
-    const handle = window.setInterval(() => {
-      setNowMs(Date.now());
-    }, 15_000);
-
+    if (!enabled) return;
+    const handle = window.setInterval(() => setNowMs(Date.now()), 30_000);
     return () => window.clearInterval(handle);
-  }, [showTimestamp]);
+  }, [enabled]);
 
   return nowMs;
 }
 
+function useRovingFocus(
+  enabled: boolean,
+  items: ChatPresenceStripProps['model']['actors'],
+  selectedId: string | null,
+) {
+  const [focusedId, setFocusedId] = useState<string | null>(selectedId);
+
+  useEffect(() => {
+    if (selectedId) setFocusedId(selectedId);
+  }, [selectedId]);
+
+  useEffect(() => {
+    if (!enabled) return;
+    if (!focusedId && items.length > 0) setFocusedId(items[0].id);
+    if (focusedId && !items.some((item) => item.id === focusedId)) {
+      setFocusedId(items[0]?.id ?? null);
+    }
+  }, [enabled, focusedId, items]);
+
+  const move = useCallback(
+    (step: number) => {
+      if (!enabled || items.length === 0) return;
+      const currentIndex = Math.max(0, items.findIndex((item) => item.id === focusedId));
+      const nextIndex = clamp(currentIndex + step, 0, items.length - 1);
+      setFocusedId(items[nextIndex]?.id ?? null);
+    },
+    [enabled, focusedId, items],
+  );
+
+  return { focusedId, setFocusedId, move };
+}
+
 interface PresenceChipVisualProps {
-  item: ChatPresenceRecord;
-  density: ChatPresenceDensity;
-  labels: ChatPresenceStripLabels;
+  item: ChatPresenceStripProps['model']['actors'][number];
+  labels: PresenceStripLabels;
+  density: PresenceStripDensity;
   maxBadgesPerItem: number;
   showBadges: boolean;
   showRolePills: boolean;
@@ -735,10 +472,21 @@ interface PresenceChipVisualProps {
   nowMs: number;
 }
 
+function badgeToneClass(badge: PresenceActorBadgeViewModel | undefined): string {
+  switch (badge?.tone) {
+    case 'positive': return 'border-emerald-400/20 bg-emerald-500/10 text-emerald-200';
+    case 'warning': return 'border-amber-400/20 bg-amber-500/10 text-amber-200';
+    case 'danger': return 'border-rose-400/20 bg-rose-500/10 text-rose-200';
+    case 'accent': return 'border-cyan-400/20 bg-cyan-500/10 text-cyan-200';
+    case 'muted': return 'border-white/10 bg-white/5 text-white/55';
+    default: return 'border-white/10 bg-white/5 text-white/70';
+  }
+}
+
 const PresenceChipVisual = memo(function PresenceChipVisual({
   item,
-  density,
   labels,
+  density,
   maxBadgesPerItem,
   showBadges,
   showRolePills,
@@ -749,23 +497,31 @@ const PresenceChipVisual = memo(function PresenceChipVisual({
   nowMs,
 }: PresenceChipVisualProps) {
   const densityTokens = DENSITY_MAP[density];
-  const isMuted = item.isMuted;
-  const intentText = normalizeWhitespace(item.intent || '') || 'none';
-  const relativeSeen = relativeTime(nowMs, item.lastActiveAtMs ?? item.lastSeenAtMs ?? null);
-  const visibleBadges = safeArray(item.badges).slice(0, maxBadgesPerItem);
-  const remainingBadgeCount = Math.max(0, safeArray(item.badges).length - visibleBadges.length);
-  const unread = coerceFinite(item.unreadCount, 0);
-  const metaText = [
-    item.meta?.channelLabel || item.meta?.channelKey || '',
-    item.meta?.pressureLabel || '',
-    item.meta?.tickLabel || '',
-  ]
-    .map((segment) => normalizeWhitespace(segment))
-    .filter(Boolean)
-    .join(' • ');
+  const metaLine = useMemo(() => {
+    const parts = [
+      item.meta?.channelLabel,
+      item.meta?.proofTier,
+      item.meta?.pressureLabel,
+      item.meta?.tickLabel,
+      item.meta?.reputationLabel,
+    ]
+      .map((part) => normalizeWhitespace(part))
+      .filter(Boolean);
+
+    if (showIntentText && item.intent && item.intent !== 'none') {
+      parts.unshift(item.intent);
+    }
+
+    if (showTimestamp) {
+      const ts = relativeTime(nowMs, item.lastActiveAtMs ?? item.lastSeenAtMs);
+      if (ts) parts.push(ts);
+    }
+
+    return parts.join(' • ');
+  }, [item, nowMs, showIntentText, showTimestamp]);
 
   return (
-    <div className="flex min-w-0 items-center gap-3">
+    <div className="flex min-w-0 flex-1 items-center gap-3">
       <div className="relative shrink-0">
         {item.avatarUrl ? (
           <img
@@ -775,7 +531,6 @@ const PresenceChipVisual = memo(function PresenceChipVisual({
               'rounded-full object-cover',
               densityTokens.avatar,
               showAvatarRing ? `ring-2 ${STATUS_RING_CLASS[item.status]}` : '',
-              isMuted ? 'opacity-60 grayscale' : '',
             ]
               .filter(Boolean)
               .join(' ')}
@@ -783,69 +538,66 @@ const PresenceChipVisual = memo(function PresenceChipVisual({
         ) : (
           <div
             className={[
-              'flex items-center justify-center rounded-full font-semibold text-white shadow-inner',
+              'flex items-center justify-center rounded-full font-semibold text-white',
               densityTokens.avatar,
               showAvatarRing ? `ring-2 ${STATUS_RING_CLASS[item.status]}` : '',
-              isMuted ? 'opacity-60' : '',
             ]
               .filter(Boolean)
               .join(' ')}
-            style={{ background: item.accentColor ?? 'linear-gradient(135deg, rgba(34,197,94,0.55), rgba(59,130,246,0.55))' }}
+            style={{ background: item.accentColor ?? 'linear-gradient(135deg, rgba(59,130,246,0.65), rgba(16,185,129,0.55))' }}
           >
             {initialsForName(item.shortName || item.name)}
           </div>
         )}
-        <span
-          aria-hidden="true"
-          className={[
-            'absolute -bottom-0.5 -right-0.5 block h-3 w-3 rounded-full border border-black/80 shadow',
-            STATUS_DOT_CLASS[item.status],
-          ].join(' ')}
-        />
+        <span className={['absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border border-black/70', STATUS_DOT_CLASS[item.status]].join(' ')} />
       </div>
 
       <div className="min-w-0 flex-1">
-        <div className="flex min-w-0 items-center gap-2">
-          <span className={['truncate font-semibold text-white', densityTokens.title].join(' ')}>{item.isSelf ? labels.selfLabel : item.name}</span>
-          {item.isTyping ? (
-            <span className="shrink-0 rounded-full bg-cyan-500/15 px-1.5 py-0.5 text-[10px] font-medium text-cyan-200">{labels.typingLabel}</span>
-          ) : null}
+        <div className="flex flex-wrap items-center gap-1.5">
+          <div className={['truncate font-semibold text-white', densityTokens.title].join(' ')}>
+            {item.isSelf ? labels.selfLabel : item.name}
+          </div>
+
           {showRolePills ? (
-            <span className={['shrink-0 rounded-full border px-1.5 py-0.5 text-[10px] font-medium', ROLE_PILL_CLASS[item.role]].join(' ')}>
+            <span className={['inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium', ROLE_PILL_CLASS[item.role]].join(' ')}>
               {roleLabel(item.role, labels)}
             </span>
           ) : null}
-          {unread > 0 ? (
-            <span className="shrink-0 rounded-full bg-white px-1.5 py-0.5 text-[10px] font-semibold text-black">{unread}</span>
+
+          {item.isTyping ? (
+            <span className="inline-flex items-center rounded-full border border-cyan-400/15 bg-cyan-500/10 px-2 py-0.5 text-[10px] font-medium text-cyan-200">
+              {labels.typingLabel}
+            </span>
+          ) : null}
+
+          {hasUnread(item) ? (
+            <span className="inline-flex items-center rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] font-medium text-white/70">
+              {labels.unreadLabel(coerceFinite(item.unreadCount, 0))}
+            </span>
           ) : null}
         </div>
 
-        <div className={['mt-0.5 flex min-w-0 items-center gap-1.5 text-white/55', densityTokens.meta].join(' ')}>
-          <span className="truncate">{statusLabel(item.status)}</span>
-          {showIntentText && item.intent && intentText !== 'none' ? <span className="truncate">• {intentText}</span> : null}
-          {showTimestamp && relativeSeen ? <span className="truncate">• {relativeSeen}</span> : null}
-        </div>
+        {showMetaLine && metaLine ? (
+          <div className={['mt-0.5 truncate text-white/50', densityTokens.meta].join(' ')}>
+            {metaLine}
+          </div>
+        ) : null}
 
-        {showMetaLine && metaText ? <div className={['mt-0.5 truncate text-white/40', densityTokens.meta].join(' ')}>{metaText}</div> : null}
-
-        {showBadges && (visibleBadges.length > 0 || remainingBadgeCount > 0) ? (
-          <div className="mt-1 flex flex-wrap gap-1">
-            {visibleBadges.map((badge) => (
+        {showBadges && item.badges && item.badges.length > 0 ? (
+          <div className="mt-1.5 flex flex-wrap gap-1">
+            {item.badges.slice(0, maxBadgesPerItem).map((badge) => (
               <span
                 key={badge.id}
                 className={[
-                  'rounded-full border border-white/10 bg-white/5 font-medium text-white/75',
+                  'inline-flex items-center rounded-full border font-medium',
                   densityTokens.badge,
+                  badgeToneClass(badge),
                 ].join(' ')}
+                title={badge.label}
               >
                 {badge.shortLabel || badge.label}
               </span>
             ))}
-            {remainingBadgeCount > 0 ? (
-              <span className={['rounded-full border border-white/10 bg-white/5 font-medium text-white/60', densityTokens.badge].join(' ')}>
-                +{remainingBadgeCount}
-              </span>
-            ) : null}
           </div>
         ) : null}
       </div>
@@ -854,316 +606,121 @@ const PresenceChipVisual = memo(function PresenceChipVisual({
 });
 
 interface PresenceChipProps extends PresenceChipVisualProps {
-  isFocused: boolean;
-  onSelect?: (item: ChatPresenceRecord) => void;
-  onHover?: (item: ChatPresenceRecord | null) => void;
-  onFocusItem?: (item: ChatPresenceRecord) => void;
-  onOpenProfile?: (item: ChatPresenceRecord) => void;
-  onOpenWhisper?: (item: ChatPresenceRecord) => void;
-  onOpenContextMenu?: (item: ChatPresenceRecord, anchor: HTMLElement | null) => void;
+  focused: boolean;
+  onSelect?: (item: ChatPresenceStripProps['model']['actors'][number]) => void;
+  onHover?: (item: ChatPresenceStripProps['model']['actors'][number] | null) => void;
+  onFocusItem?: (item: ChatPresenceStripProps['model']['actors'][number]) => void;
+  onOpenProfile?: (item: ChatPresenceStripProps['model']['actors'][number]) => void;
+  onOpenWhisper?: (item: ChatPresenceStripProps['model']['actors'][number]) => void;
+  onOpenContextMenu?: (item: ChatPresenceStripProps['model']['actors'][number], anchor: HTMLElement | null) => void;
 }
 
 const PresenceChip = memo(function PresenceChip({
   item,
-  density,
-  labels,
-  maxBadgesPerItem,
-  showBadges,
-  showRolePills,
-  showAvatarRing,
-  showIntentText,
-  showMetaLine,
-  showTimestamp,
-  nowMs,
-  isFocused,
+  focused,
   onSelect,
   onHover,
   onFocusItem,
   onOpenProfile,
   onOpenWhisper,
   onOpenContextMenu,
+  ...visualProps
 }: PresenceChipProps) {
-  const densityTokens = DENSITY_MAP[density];
   const buttonRef = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
-    if (isFocused) {
-      buttonRef.current?.focus();
+    if (focused) {
+      buttonRef.current?.focus({ preventScroll: true });
     }
-  }, [isFocused]);
-
-  const handleKeyDown = useCallback(
-    (event: React.KeyboardEvent<HTMLButtonElement>) => {
-      if (event.key === 'Enter' || event.key === ' ') {
-        event.preventDefault();
-        onSelect?.(item);
-      }
-
-      if (event.key.toLowerCase() === 'p') {
-        event.preventDefault();
-        onOpenProfile?.(item);
-      }
-
-      if (event.key.toLowerCase() === 'w') {
-        event.preventDefault();
-        onOpenWhisper?.(item);
-      }
-    },
-    [item, onOpenProfile, onOpenWhisper, onSelect],
-  );
-
-  const ariaDescription = [
-    item.isSelf ? labels.selfLabel : item.name,
-    statusLabel(item.status),
-    roleLabel(item.role, labels),
-    item.intent && item.intent !== 'none' ? item.intent : '',
-    hasUnread(item) ? labels.unreadLabel(coerceFinite(item.unreadCount, 0)) : '',
-  ]
-    .map((segment) => normalizeWhitespace(segment))
-    .filter(Boolean)
-    .join(', ');
+  }, [focused]);
 
   return (
     <button
       ref={buttonRef}
       type="button"
-      aria-label={ariaDescription}
-      title={normalizeWhitespace(item.meta?.hoverSummary || item.meta?.note || '') || undefined}
       className={[
-        'group relative flex shrink-0 items-center rounded-2xl border text-left transition',
-        densityTokens.chip,
+        'group flex w-full items-center rounded-2xl border text-left transition',
+        DENSITY_MAP[visualProps.density].chip,
         item.isSelected
-          ? 'border-cyan-400/35 bg-cyan-500/10 shadow-[0_0_0_1px_rgba(34,211,238,0.18)]'
-          : 'border-white/10 bg-white/[0.045] hover:border-white/15 hover:bg-white/[0.07]',
-        item.isThreat ? 'shadow-[inset_0_0_0_1px_rgba(244,63,94,0.12)]' : '',
-        item.isHelperRecommended ? 'shadow-[inset_0_0_0_1px_rgba(16,185,129,0.12)]' : '',
-        isFocused ? 'outline-none ring-2 ring-cyan-400/45 ring-offset-0' : '',
-      ]
-        .filter(Boolean)
-        .join(' ')}
+          ? 'border-cyan-400/25 bg-cyan-500/[0.08]'
+          : item.isThreat
+            ? 'border-rose-400/12 bg-rose-500/[0.04] hover:bg-rose-500/[0.07]'
+            : item.role === 'helper'
+              ? 'border-emerald-400/12 bg-emerald-500/[0.04] hover:bg-emerald-500/[0.07]'
+              : 'border-white/10 bg-white/[0.04] hover:bg-white/[0.07]',
+        focused ? 'outline outline-2 outline-cyan-400/30' : '',
+      ].join(' ')}
       onClick={() => onSelect?.(item)}
-      onFocus={() => onFocusItem?.(item)}
       onMouseEnter={() => onHover?.(item)}
       onMouseLeave={() => onHover?.(null)}
+      onFocus={() => onFocusItem?.(item)}
+      onDoubleClick={() => onOpenProfile?.(item)}
       onContextMenu={(event) => {
         event.preventDefault();
         onOpenContextMenu?.(item, event.currentTarget);
       }}
-      onKeyDown={handleKeyDown}
     >
-      <PresenceChipVisual
-        item={item}
-        density={density}
-        labels={labels}
-        maxBadgesPerItem={maxBadgesPerItem}
-        showBadges={showBadges}
-        showRolePills={showRolePills}
-        showAvatarRing={showAvatarRing}
-        showIntentText={showIntentText}
-        showMetaLine={showMetaLine}
-        showTimestamp={showTimestamp}
-        nowMs={nowMs}
-      />
+      <PresenceChipVisual item={item} {...visualProps} />
+      <div className="ml-2 flex shrink-0 items-center gap-1.5">
+        {onOpenWhisper ? (
+          <span
+            className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] font-medium text-white/55 transition group-hover:text-white/80"
+            onClick={(event) => {
+              event.stopPropagation();
+              onOpenWhisper(item);
+            }}
+          >
+            DM
+          </span>
+        ) : null}
+      </div>
     </button>
   );
 });
 
-interface PresenceGroupSectionProps {
-  group: ChatPresenceGroup;
-  density: ChatPresenceDensity;
-  labels: ChatPresenceStripLabels;
-  maxBadgesPerItem: number;
-  showBadges: boolean;
-  showRolePills: boolean;
-  showAvatarRing: boolean;
-  showIntentText: boolean;
-  showMetaLine: boolean;
-  showTimestamp: boolean;
-  showGroupHeaders: boolean;
-  nowMs: number;
+interface PresenceGroupSectionProps extends Omit<PresenceChipVisualProps, 'item'> {
+  group: PresenceGroupViewModel;
   focusedId: string | null;
-  onSelect?: (item: ChatPresenceRecord) => void;
-  onHover?: (item: ChatPresenceRecord | null) => void;
-  onFocusItem?: (item: ChatPresenceRecord) => void;
-  onOpenProfile?: (item: ChatPresenceRecord) => void;
-  onOpenWhisper?: (item: ChatPresenceRecord) => void;
-  onOpenContextMenu?: (item: ChatPresenceRecord, anchor: HTMLElement | null) => void;
+  showGroupHeaders: boolean;
+  onSelect?: (item: ChatPresenceStripProps['model']['actors'][number]) => void;
+  onHover?: (item: ChatPresenceStripProps['model']['actors'][number] | null) => void;
+  onFocusItem?: (item: ChatPresenceStripProps['model']['actors'][number]) => void;
+  onOpenProfile?: (item: ChatPresenceStripProps['model']['actors'][number]) => void;
+  onOpenWhisper?: (item: ChatPresenceStripProps['model']['actors'][number]) => void;
+  onOpenContextMenu?: (item: ChatPresenceStripProps['model']['actors'][number], anchor: HTMLElement | null) => void;
 }
 
 const PresenceGroupSection = memo(function PresenceGroupSection({
   group,
-  density,
-  labels,
-  maxBadgesPerItem,
-  showBadges,
-  showRolePills,
-  showAvatarRing,
-  showIntentText,
-  showMetaLine,
-  showTimestamp,
-  showGroupHeaders,
-  nowMs,
   focusedId,
-  onSelect,
-  onHover,
-  onFocusItem,
-  onOpenProfile,
-  onOpenWhisper,
-  onOpenContextMenu,
+  showGroupHeaders,
+  ...chipProps
 }: PresenceGroupSectionProps) {
   return (
-    <div className="min-w-0">
+    <section className="space-y-2">
       {showGroupHeaders ? (
-        <div className="mb-2 flex items-center justify-between gap-3 px-1">
-          <div className="min-w-0 truncate text-[11px] font-semibold uppercase tracking-[0.14em] text-white/45">{group.label}</div>
-          <div className="shrink-0 rounded-full border border-white/10 bg-white/5 px-1.5 py-0.5 text-[10px] font-medium text-white/55">
-            {group.items.length}
-          </div>
+        <div className="flex items-center gap-2">
+          <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-white/35">{group.label}</div>
+          <div className="h-px flex-1 bg-white/8" />
         </div>
       ) : null}
-
-      <div className="flex flex-wrap gap-2">
+      <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
         {group.items.map((item) => (
           <PresenceChip
             key={item.id}
             item={item}
-            density={density}
-            labels={labels}
-            maxBadgesPerItem={maxBadgesPerItem}
-            showBadges={showBadges}
-            showRolePills={showRolePills}
-            showAvatarRing={showAvatarRing}
-            showIntentText={showIntentText}
-            showMetaLine={showMetaLine}
-            showTimestamp={showTimestamp}
-            nowMs={nowMs}
-            isFocused={focusedId === item.id}
-            onSelect={onSelect}
-            onHover={onHover}
-            onFocusItem={onFocusItem}
-            onOpenProfile={onOpenProfile}
-            onOpenWhisper={onOpenWhisper}
-            onOpenContextMenu={onOpenContextMenu}
+            focused={focusedId === item.id}
+            {...chipProps}
           />
         ))}
       </div>
-    </div>
+    </section>
   );
 });
 
-function filterPresenceItems(
-  items: ChatPresenceRecord[],
-  filterText: string,
-  activeChannelKey: string | null | undefined,
-  showOffline: boolean,
-  showHidden: boolean,
-): ChatPresenceRecord[] {
-  const normalizedFilter = normalizeSearch(filterText);
-  const normalizedChannel = normalizeSearch(activeChannelKey ?? '');
-
-  return items.filter((item) => {
-    if (!isVisibleStatus(item.status, showOffline, showHidden)) {
-      return false;
-    }
-
-    if (normalizedChannel) {
-      const itemChannel = normalizeSearch(item.meta?.channelKey || item.meta?.channelLabel || '');
-      if (item.role !== 'system' && item.role !== 'moderator' && itemChannel && itemChannel !== normalizedChannel) {
-        return false;
-      }
-    }
-
-    if (!normalizedFilter) {
-      return true;
-    }
-
-    return searchHaystack(item).includes(normalizedFilter);
-  });
-}
-
-function buildSummary(items: ChatPresenceRecord[]): {
-  total: number;
-  online: number;
-  typing: number;
-  helpers: number;
-  haters: number;
-  unread: number;
-} {
-  let online = 0;
-  let typing = 0;
-  let helpers = 0;
-  let haters = 0;
-  let unread = 0;
-
-  for (const item of items) {
-    if (isActiveStatus(item.status) || item.status === 'spectating') {
-      online += 1;
-    }
-    if (item.isTyping) {
-      typing += 1;
-    }
-    if (item.role === 'helper') {
-      helpers += 1;
-    }
-    if (item.role === 'hater') {
-      haters += 1;
-    }
-    unread += clamp(coerceFinite(item.unreadCount, 0), 0, 999);
-  }
-
-  return {
-    total: items.length,
-    online,
-    typing,
-    helpers,
-    haters,
-    unread,
-  };
-}
-
-function useRovingFocus(enabled: boolean, visibleItems: ChatPresenceRecord[], selectedId?: string | null) {
-  const [focusedId, setFocusedId] = useState<string | null>(selectedId ?? visibleItems[0]?.id ?? null);
-
-  useEffect(() => {
-    if (!enabled) {
-      return;
-    }
-
-    if (selectedId && visibleItems.some((item) => item.id === selectedId)) {
-      setFocusedId(selectedId);
-      return;
-    }
-
-    if (focusedId && visibleItems.some((item) => item.id === focusedId)) {
-      return;
-    }
-
-    setFocusedId(visibleItems[0]?.id ?? null);
-  }, [enabled, focusedId, selectedId, visibleItems]);
-
-  const move = useCallback(
-    (delta: number) => {
-      if (!enabled || visibleItems.length === 0) {
-        return;
-      }
-      const index = visibleItems.findIndex((item) => item.id === focusedId);
-      const startIndex = index === -1 ? 0 : index;
-      const nextIndex = (startIndex + delta + visibleItems.length) % visibleItems.length;
-      setFocusedId(visibleItems[nextIndex]?.id ?? null);
-    },
-    [enabled, focusedId, visibleItems],
-  );
-
-  return {
-    focusedId,
-    setFocusedId,
-    move,
-  };
-}
-
 export const ChatPresenceStrip = memo(function ChatPresenceStrip(props: ChatPresenceStripProps) {
   const {
-    items,
+    model,
     density = 'comfortable',
     mode = 'overlay',
     sortMode = 'priority',
@@ -1201,7 +758,8 @@ export const ChatPresenceStrip = memo(function ChatPresenceStrip(props: ChatPres
     renderTrailingSlot,
   } = props;
 
-  const labels = useMemo<ChatPresenceStripLabels>(() => ({ ...DEFAULT_LABELS, ...props.labels }), [props.labels]);
+  const items = model.actors ?? [];
+  const labels = useMemo<PresenceStripLabels>(() => ({ ...DEFAULT_LABELS, ...props.labels, title: props.labels?.title ?? model.title ?? DEFAULT_LABELS.title }), [props.labels, model.title]);
   const [filterText, setFilterText] = useControllableFilter(props);
   const nowMs = useNowTick(showTimestamp);
   const densityTokens = DENSITY_MAP[density];
@@ -1212,37 +770,25 @@ export const ChatPresenceStrip = memo(function ChatPresenceStrip(props: ChatPres
   const filtered = useMemo(() => {
     const visible = filterPresenceItems(items, filterText, activeChannelKey, showOffline, showHidden);
     const sorted = sortPresenceItems(visible, sortMode);
-
-    if (!stickySelf) {
-      return sorted;
-    }
-
+    if (!stickySelf) return sorted;
     const self = sorted.find((item) => item.isSelf);
-    if (!self) {
-      return sorted;
-    }
-
+    if (!self) return sorted;
     return [self, ...sorted.filter((item) => item.id !== self.id)];
   }, [activeChannelKey, filterText, items, showHidden, showOffline, sortMode, stickySelf]);
 
   const displayed = useMemo(() => {
-    if (expanded || !compactOverflow || filtered.length <= maxVisible) {
-      return filtered;
-    }
+    if (expanded || !compactOverflow || filtered.length <= maxVisible) return filtered;
     return filtered.slice(0, maxVisible);
   }, [compactOverflow, expanded, filtered, maxVisible]);
 
   const hiddenCount = Math.max(0, filtered.length - displayed.length);
-  const summary = useMemo(() => buildSummary(filtered), [filtered]);
-  const groups = useMemo(() => groupPresenceItems(displayed, groupMode), [displayed, groupMode]);
+  const summary = useMemo(() => model.summary ?? buildSummary(filtered), [filtered, model.summary]);
+  const groups = useMemo(() => model.groups?.length ? model.groups : groupPresenceItems(displayed, groupMode), [displayed, groupMode, model.groups]);
   const focusModel = useRovingFocus(keyboardNavigation, displayed, selectedId);
 
   const handleKeyDown = useCallback(
     (event: React.KeyboardEvent<HTMLDivElement>) => {
-      if (!keyboardNavigation) {
-        return;
-      }
-
+      if (!keyboardNavigation) return;
       switch (event.key) {
         case 'ArrowRight':
         case 'ArrowDown':
@@ -1257,17 +803,13 @@ export const ChatPresenceStrip = memo(function ChatPresenceStrip(props: ChatPres
         case 'Escape':
           onClearSelection?.();
           break;
-        default:
-          break;
       }
     },
     [focusModel, keyboardNavigation, onClearSelection],
   );
 
   useLayoutEffect(() => {
-    if (!rootRef.current || !animated) {
-      return;
-    }
+    if (!rootRef.current || !animated) return;
     rootRef.current.style.setProperty('--presence-strip-transition-ms', '180ms');
   }, [animated]);
 
@@ -1280,9 +822,7 @@ export const ChatPresenceStrip = memo(function ChatPresenceStrip(props: ChatPres
         className || '',
         mode === 'battle' ? 'shadow-[0_0_0_1px_rgba(244,63,94,0.08),0_16px_42px_rgba(0,0,0,0.32)]' : '',
         mode === 'dealRoom' ? 'shadow-[0_0_0_1px_rgba(34,211,238,0.08),0_16px_42px_rgba(0,0,0,0.28)]' : '',
-      ]
-        .filter(Boolean)
-        .join(' ')}
+      ].filter(Boolean).join(' ')}
       onKeyDown={handleKeyDown}
     >
       <div className="flex items-start justify-between gap-3">
@@ -1315,15 +855,13 @@ export const ChatPresenceStrip = memo(function ChatPresenceStrip(props: ChatPres
 
           {showSearch ? (
             <div className="mt-3 max-w-sm">
-              <label htmlFor={searchId} className="sr-only">
-                Search presence
-              </label>
+              <label htmlFor={searchId} className="sr-only">Search presence</label>
               <input
                 id={searchId}
                 type="text"
                 value={filterText}
                 onChange={(event) => setFilterText(event.target.value)}
-                placeholder="Search names, channels, proof, pressure..."
+                placeholder={model.filterPlaceholder || 'Search names, channels, proof, pressure...'}
                 className="h-10 w-full rounded-xl border border-white/10 bg-white/5 px-3 text-sm text-white outline-none placeholder:text-white/35 focus:border-cyan-400/25 focus:bg-white/[0.08]"
               />
             </div>
