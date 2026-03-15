@@ -1,43 +1,50 @@
 /**
  * ============================================================================
- * POINT ZERO ONE — SHARED CHAT CONTRACT REGISTRY
+ * POINT ZERO ONE — SHARED CHAT CONTRACT BARREL + REGISTRY
  * FILE: shared/contracts/chat/index.ts
  * ============================================================================
  *
  * Purpose
  * -------
- * Canonical shared registry and namespace surface for the unified chat
- * contracts lane. This file intentionally does more than a normal barrel: it
- * provides stable namespace exports, module descriptors, lookup helpers,
- * contract package accessors, category manifests, import-path truth, and
- * runtime-safe registry objects for every shared chat contract file.
+ * Canonical import root for the unified shared chat contract lane.
  *
- * Design laws
- * -----------
- * 1. This registry must not become a source of flat export ambiguity. Many of
- *    the chat modules intentionally reuse foundational type names such as
- *    Brand, UnixMs, ChatRoomId, and ChatChannelId. The registry therefore
- *    exports stable namespaces instead of flattening everything into one
- *    collision-prone global surface.
- * 2. Import paths and file descriptors must reflect the actual repo split:
- *    frontend chat engine under /pzo-web/src/engines/chat, frontend render
- *    shell under /pzo-web/src/components/chat, transport under /pzo-server,
- *    and authoritative simulation beside backend battle lanes.
- * 3. Every module in /shared/contracts/chat should be discoverable here by
- *    key, file name, category, concern, and long-term authority path.
+ * This file is intentionally more than a flat barrel. The chat contract estate
+ * is wide, and many sibling modules reuse foundational names such as Brand,
+ * UnixMs, ChatRoomId, and ChatChannelId. A naive `export *` surface would turn
+ * the shared lane into a collision factory. This registry therefore does four
+ * jobs at once:
  *
- * Repo-aligned doctrine
- * ---------------------
- * The repo currently exposes the frontend chat engine tree with adapters,
- * channels, intelligence, NPC, replay, telemetry, and runtime files under
- * /pzo-web/src/engines/chat; a thin but still donor-heavy UI tree under
- * /pzo-web/src/components/chat; transport primitives in /pzo-server/src/ws and
- * /pzo-server/src/haters; and battle authority in
- * /backend/src/game/engine/battle. This registry exists so every one of those
- * lanes can anchor on one shared contract root instead of drifting into local
- * donor vocabularies. citeturn409074view0turn218451view0turn399251view0turn399251view1turn399251view2turn399251view3
+ * 1. Exposes stable module namespaces for every shared chat contract file.
+ * 2. Re-exports only the low-risk root primitives that are expected to be
+ *    imported directly across frontend, backend, and server lanes.
+ * 3. Publishes a runtime-safe manifest, dependency graph, and package registry
+ *    for introspection, tooling, boot checks, and migration safety.
+ * 4. Preserves repo truth by aligning with the actual shared/contracts/chat
+ *    tree plus the nested learning/ barrel.
+ *
+ * Barrel law
+ * ----------
+ * - Import module-specific symbols through namespaces when there is any chance
+ *   of name collision.
+ * - Import foundational types and constants directly from ChatChannels and
+ *   ChatEvents only.
+ * - Treat learning as a grouped namespace rooted at ./learning.
+ * - Do not put gameplay policy here. This file owns discovery and export
+ *   topology, not runtime law.
  * ============================================================================
  */
+
+import {
+  CHAT_CONTRACT_AUTHORITIES,
+  CHAT_CONTRACT_REVISION,
+  CHAT_CONTRACT_VERSION,
+  CHAT_CHANNEL_CONTRACT,
+} from './ChatChannels';
+import {
+  CHAT_EVENT_CONTRACT,
+  CHAT_EVENTS_PUBLIC_API_VERSION,
+  CHAT_SOCKET_PROTOCOL_VERSION,
+} from './ChatEvents';
 
 import * as ChatChannelsModule from './ChatChannels';
 import * as ChatEventsModule from './ChatEvents';
@@ -52,60 +59,58 @@ import * as ChatModerationModule from './ChatModeration';
 import * as ChatInvasionModule from './ChatInvasion';
 import * as ChatTelemetryModule from './ChatTelemetry';
 import * as ChatProofModule from './ChatProof';
-
-export { ChatChannelsModule, ChatEventsModule, ChatMessageModule, ChatPresenceModule, ChatTypingModule, ChatCursorModule, ChatTranscriptModule, ChatNpcModule, ChatCommandModule, ChatModerationModule, ChatInvasionModule, ChatTelemetryModule, ChatProofModule };
+import * as LearningModule from './learning';
 
 // ============================================================================
-// MARK: Foundational registry types
+// MARK: Stable low-risk direct re-exports
 // ============================================================================
 
-export type ChatContractModuleKey =
-  | 'ChatChannels'
-  | 'ChatEvents'
-  | 'ChatMessage'
-  | 'ChatPresence'
-  | 'ChatTyping'
-  | 'ChatCursor'
-  | 'ChatTranscript'
-  | 'ChatNpc'
-  | 'ChatCommand'
-  | 'ChatModeration'
-  | 'ChatInvasion'
-  | 'ChatTelemetry'
-  | 'ChatProof'
-  ;
+export * from './ChatChannels';
+export * from './ChatEvents';
 
-export type ChatContractFileName =
-  | 'ChatChannels.ts'
-  | 'ChatEvents.ts'
-  | 'ChatMessage.ts'
-  | 'ChatPresence.ts'
-  | 'ChatTyping.ts'
-  | 'ChatCursor.ts'
-  | 'ChatTranscript.ts'
-  | 'ChatNpc.ts'
-  | 'ChatCommand.ts'
-  | 'ChatModeration.ts'
-  | 'ChatInvasion.ts'
-  | 'ChatTelemetry.ts'
-  | 'ChatProof.ts'
-  ;
+export {
+  CHAT_CHANNEL_CONTRACT,
+  CHAT_EVENT_CONTRACT,
+  CHAT_CONTRACT_AUTHORITIES,
+  CHAT_CONTRACT_REVISION,
+  CHAT_CONTRACT_VERSION,
+  CHAT_EVENTS_PUBLIC_API_VERSION,
+  CHAT_SOCKET_PROTOCOL_VERSION,
+};
 
-export type ChatContractCategory = 'FOUNDATION' | 'MESSAGE' | 'PRESENCE' | 'TRANSCRIPT' | 'NPC' | 'COMMAND' | 'MODERATION' | 'INVASION' | 'TELEMETRY' | 'PROOF';
+// ============================================================================
+// MARK: Stable namespace exports
+// ============================================================================
 
-export type ChatRuntimeLane = 'frontend-engine' | 'frontend-ui' | 'backend-engine' | 'server-transport' | 'shared-contracts';
+export {
+  ChatChannelsModule as ChatChannels,
+  ChatEventsModule as ChatEvents,
+  ChatMessageModule as ChatMessage,
+  ChatPresenceModule as ChatPresence,
+  ChatTypingModule as ChatTyping,
+  ChatCursorModule as ChatCursor,
+  ChatTranscriptModule as ChatTranscript,
+  ChatNpcModule as ChatNpc,
+  ChatCommandModule as ChatCommand,
+  ChatModerationModule as ChatModeration,
+  ChatInvasionModule as ChatInvasion,
+  ChatTelemetryModule as ChatTelemetry,
+  ChatProofModule as ChatProof,
+  LearningModule as Learning,
+};
 
-export interface ChatContractModuleDescriptor {
-  readonly key: ChatContractModuleKey;
-  readonly fileName: ChatContractFileName;
-  readonly importPath: string;
-  readonly category: ChatContractCategory;
-  readonly description: string;
-  readonly sharedRootPath: string;
-  readonly usedBy: readonly ChatRuntimeLane[];
-  readonly dependsOn: readonly ChatContractModuleKey[];
-  readonly defaultContractExportName: string;
-}
+// ============================================================================
+// MARK: Registry keys and categories
+// ============================================================================
+
+export const CHAT_SHARED_CONTRACT_BARREL_PATH =
+  'shared/contracts/chat/index.ts' as const;
+
+export const CHAT_SHARED_CONTRACT_BARREL_VERSION =
+  CHAT_CONTRACT_VERSION;
+
+export const CHAT_SHARED_CONTRACT_NAMESPACE =
+  'shared/contracts/chat' as const;
 
 export const CHAT_CONTRACT_MODULE_KEYS = [
   'ChatChannels',
@@ -121,682 +126,707 @@ export const CHAT_CONTRACT_MODULE_KEYS = [
   'ChatInvasion',
   'ChatTelemetry',
   'ChatProof',
+  'Learning',
 ] as const;
 
-export const CHAT_CONTRACT_FILE_NAMES = [
-  'ChatChannels.ts',
-  'ChatEvents.ts',
-  'ChatMessage.ts',
-  'ChatPresence.ts',
-  'ChatTyping.ts',
-  'ChatCursor.ts',
-  'ChatTranscript.ts',
-  'ChatNpc.ts',
-  'ChatCommand.ts',
-  'ChatModeration.ts',
-  'ChatInvasion.ts',
-  'ChatTelemetry.ts',
-  'ChatProof.ts',
+export type ChatContractModuleKey =
+  (typeof CHAT_CONTRACT_MODULE_KEYS)[number];
+
+export const CHAT_CONTRACT_CATEGORIES = [
+  'FOUNDATION',
+  'MESSAGE',
+  'PRESENCE',
+  'TRANSCRIPT',
+  'NPC',
+  'COMMAND',
+  'MODERATION',
+  'INVASION',
+  'TELEMETRY',
+  'PROOF',
+  'LEARNING',
 ] as const;
 
-export const CHAT_CONTRACT_MODULE_DESCRIPTORS: Readonly<Record<ChatContractModuleKey, ChatContractModuleDescriptor>> = Object.freeze({
-  ChatChannels: Object.freeze({
+export type ChatContractCategory =
+  (typeof CHAT_CONTRACT_CATEGORIES)[number];
+
+export const CHAT_RUNTIME_LANES = [
+  'frontend-engine',
+  'frontend-ui',
+  'backend-engine',
+  'server-transport',
+  'shared-contracts',
+] as const;
+
+export type ChatRuntimeLane = (typeof CHAT_RUNTIME_LANES)[number];
+
+export const CHAT_CONTRACT_RELATIVE_PATHS = {
+  ChatChannels: './ChatChannels',
+  ChatEvents: './ChatEvents',
+  ChatMessage: './ChatMessage',
+  ChatPresence: './ChatPresence',
+  ChatTyping: './ChatTyping',
+  ChatCursor: './ChatCursor',
+  ChatTranscript: './ChatTranscript',
+  ChatNpc: './ChatNpc',
+  ChatCommand: './ChatCommand',
+  ChatModeration: './ChatModeration',
+  ChatInvasion: './ChatInvasion',
+  ChatTelemetry: './ChatTelemetry',
+  ChatProof: './ChatProof',
+  Learning: './learning',
+} as const satisfies Record<ChatContractModuleKey, string>;
+
+export type ChatContractRelativePath =
+  (typeof CHAT_CONTRACT_RELATIVE_PATHS)[ChatContractModuleKey];
+
+export const CHAT_CONTRACT_FILE_NAMES = {
+  ChatChannels: 'ChatChannels.ts',
+  ChatEvents: 'ChatEvents.ts',
+  ChatMessage: 'ChatMessage.ts',
+  ChatPresence: 'ChatPresence.ts',
+  ChatTyping: 'ChatTyping.ts',
+  ChatCursor: 'ChatCursor.ts',
+  ChatTranscript: 'ChatTranscript.ts',
+  ChatNpc: 'ChatNpc.ts',
+  ChatCommand: 'ChatCommand.ts',
+  ChatModeration: 'ChatModeration.ts',
+  ChatInvasion: 'ChatInvasion.ts',
+  ChatTelemetry: 'ChatTelemetry.ts',
+  ChatProof: 'ChatProof.ts',
+  Learning: 'learning/index.ts',
+} as const satisfies Record<ChatContractModuleKey, string>;
+
+export type ChatContractFileName =
+  (typeof CHAT_CONTRACT_FILE_NAMES)[ChatContractModuleKey];
+
+export interface ChatContractModuleDescriptor {
+  readonly key: ChatContractModuleKey;
+  readonly fileName: ChatContractFileName;
+  readonly importPath: ChatContractRelativePath;
+  readonly category: ChatContractCategory;
+  readonly description: string;
+  readonly sharedRootPath: string;
+  readonly usedBy: readonly ChatRuntimeLane[];
+  readonly dependsOn: readonly ChatContractModuleKey[];
+  readonly defaultExportName: string | null;
+  readonly contractExportName: string | null;
+  readonly manifestExportName: string | null;
+}
+
+export type ChatContractModuleNamespace =
+  | typeof ChatChannelsModule
+  | typeof ChatEventsModule
+  | typeof ChatMessageModule
+  | typeof ChatPresenceModule
+  | typeof ChatTypingModule
+  | typeof ChatCursorModule
+  | typeof ChatTranscriptModule
+  | typeof ChatNpcModule
+  | typeof ChatCommandModule
+  | typeof ChatModerationModule
+  | typeof ChatInvasionModule
+  | typeof ChatTelemetryModule
+  | typeof ChatProofModule
+  | typeof LearningModule;
+
+const ALL_RUNTIME_LANES = [
+  'shared-contracts',
+  'frontend-engine',
+  'frontend-ui',
+  'backend-engine',
+  'server-transport',
+] as const satisfies readonly ChatRuntimeLane[];
+
+export const CHAT_CONTRACT_MODULE_DESCRIPTORS = Object.freeze({
+  ChatChannels: Object.freeze<ChatContractModuleDescriptor>({
     key: 'ChatChannels',
     fileName: 'ChatChannels.ts',
     importPath: './ChatChannels',
     category: 'FOUNDATION',
-    description: 'channel authority, mount presets, room scopes, and mode/channel descriptors',
-    sharedRootPath: `${ChatChannelsModule.CHAT_CONTRACT_AUTHORITIES.sharedContractsRoot}/{file}`.replace('{file}', 'ChatChannels.ts'),
-    usedBy: ['shared-contracts', 'frontend-engine', 'frontend-ui', 'backend-engine', 'server-transport'] as const,
+    description:
+      'Foundational channel law, room and mount scope descriptors, brands, helpers, and primary shared contract authorities.',
+    sharedRootPath: `${CHAT_CONTRACT_AUTHORITIES.sharedContractsRoot}/ChatChannels.ts`,
+    usedBy: ALL_RUNTIME_LANES,
     dependsOn: [] as const,
-    defaultContractExportName: 'CHAT_CHANNEL_CONTRACT',
+    defaultExportName: null,
+    contractExportName: 'CHAT_CHANNEL_CONTRACT',
+    manifestExportName: null,
   }),
-  ChatEvents: Object.freeze({
+  ChatEvents: Object.freeze<ChatContractModuleDescriptor>({
     key: 'ChatEvents',
     fileName: 'ChatEvents.ts',
     importPath: './ChatEvents',
     category: 'FOUNDATION',
-    description: 'canonical event names, transport envelopes, authority frames, and upstream signals',
-    sharedRootPath: `${ChatChannelsModule.CHAT_CONTRACT_AUTHORITIES.sharedContractsRoot}/{file}`.replace('{file}', 'ChatEvents.ts'),
-    usedBy: ['shared-contracts', 'frontend-engine', 'frontend-ui', 'backend-engine', 'server-transport'] as const,
+    description:
+      'Canonical event grammar for transport, intent, authority, replay, proof, rescue, legend, telemetry, and learning hooks.',
+    sharedRootPath: `${CHAT_CONTRACT_AUTHORITIES.sharedContractsRoot}/ChatEvents.ts`,
+    usedBy: ALL_RUNTIME_LANES,
     dependsOn: ['ChatChannels'] as const,
-    defaultContractExportName: 'CHAT_EVENT_CONTRACT',
+    defaultExportName: null,
+    contractExportName: 'CHAT_EVENT_CONTRACT',
+    manifestExportName: null,
   }),
-  ChatMessage: Object.freeze({
+  ChatMessage: Object.freeze<ChatContractModuleDescriptor>({
     key: 'ChatMessage',
     fileName: 'ChatMessage.ts',
     importPath: './ChatMessage',
     category: 'MESSAGE',
-    description: 'canonical message shape, delivery state, proof envelopes, and rich metadata blocks',
-    sharedRootPath: `${ChatChannelsModule.CHAT_CONTRACT_AUTHORITIES.sharedContractsRoot}/{file}`.replace('{file}', 'ChatMessage.ts'),
-    usedBy: ['shared-contracts', 'frontend-engine', 'frontend-ui', 'backend-engine', 'server-transport'] as const,
+    description:
+      'Canonical message payloads, bodies, delivery metadata, and transcript-adjacent message semantics.',
+    sharedRootPath: `${CHAT_CONTRACT_AUTHORITIES.sharedContractsRoot}/ChatMessage.ts`,
+    usedBy: ALL_RUNTIME_LANES,
     dependsOn: ['ChatChannels', 'ChatEvents'] as const,
-    defaultContractExportName: 'CHAT_MESSAGE_CONTRACT',
+    defaultExportName: null,
+    contractExportName: null,
+    manifestExportName: null,
   }),
-  ChatPresence: Object.freeze({
+  ChatPresence: Object.freeze<ChatContractModuleDescriptor>({
     key: 'ChatPresence',
     fileName: 'ChatPresence.ts',
     importPath: './ChatPresence',
     category: 'PRESENCE',
-    description: 'presence roster, read-receipt visibility, and occupancy state',
-    sharedRootPath: `${ChatChannelsModule.CHAT_CONTRACT_AUTHORITIES.sharedContractsRoot}/{file}`.replace('{file}', 'ChatPresence.ts'),
-    usedBy: ['shared-contracts', 'frontend-engine', 'frontend-ui', 'backend-engine', 'server-transport'] as const,
+    description:
+      'Presence roster, occupancy snapshots, role visibility, and room-side presence semantics.',
+    sharedRootPath: `${CHAT_CONTRACT_AUTHORITIES.sharedContractsRoot}/ChatPresence.ts`,
+    usedBy: ALL_RUNTIME_LANES,
     dependsOn: ['ChatChannels', 'ChatEvents'] as const,
-    defaultContractExportName: 'CHAT_PRESENCE_CONTRACT',
+    defaultExportName: null,
+    contractExportName: null,
+    manifestExportName: null,
   }),
-  ChatTyping: Object.freeze({
+  ChatTyping: Object.freeze<ChatContractModuleDescriptor>({
     key: 'ChatTyping',
     fileName: 'ChatTyping.ts',
     importPath: './ChatTyping',
     category: 'PRESENCE',
-    description: 'typing cadence, theater simulation, and timeout planning',
-    sharedRootPath: `${ChatChannelsModule.CHAT_CONTRACT_AUTHORITIES.sharedContractsRoot}/{file}`.replace('{file}', 'ChatTyping.ts'),
-    usedBy: ['shared-contracts', 'frontend-engine', 'frontend-ui', 'backend-engine', 'server-transport'] as const,
-    dependsOn: ['ChatChannels', 'ChatEvents'] as const,
-    defaultContractExportName: 'CHAT_TYPING_CONTRACT',
+    description:
+      'Typing theater, cadence, timeout windows, and typing-state wire contracts.',
+    sharedRootPath: `${CHAT_CONTRACT_AUTHORITIES.sharedContractsRoot}/ChatTyping.ts`,
+    usedBy: ALL_RUNTIME_LANES,
+    dependsOn: ['ChatChannels', 'ChatEvents', 'ChatPresence'] as const,
+    defaultExportName: null,
+    contractExportName: 'CHAT_TYPING_CONTRACT_DESCRIPTOR',
+    manifestExportName: null,
   }),
-  ChatCursor: Object.freeze({
+  ChatCursor: Object.freeze<ChatContractModuleDescriptor>({
     key: 'ChatCursor',
     fileName: 'ChatCursor.ts',
     importPath: './ChatCursor',
     category: 'PRESENCE',
-    description: 'cursor anchors, windows, transcript pointer semantics, and hover state',
-    sharedRootPath: `${ChatChannelsModule.CHAT_CONTRACT_AUTHORITIES.sharedContractsRoot}/{file}`.replace('{file}', 'ChatCursor.ts'),
-    usedBy: ['shared-contracts', 'frontend-engine', 'frontend-ui', 'backend-engine', 'server-transport'] as const,
-    dependsOn: ['ChatChannels', 'ChatEvents'] as const,
-    defaultContractExportName: 'CHAT_CURSOR_CONTRACT',
+    description:
+      'Cursor anchors, transcript focus windows, reveal ranges, and cursor-wire envelopes.',
+    sharedRootPath: `${CHAT_CONTRACT_AUTHORITIES.sharedContractsRoot}/ChatCursor.ts`,
+    usedBy: ALL_RUNTIME_LANES,
+    dependsOn: ['ChatChannels', 'ChatEvents', 'ChatPresence', 'ChatMessage'] as const,
+    defaultExportName: null,
+    contractExportName: 'CHAT_CURSOR_CONTRACT_DESCRIPTOR',
+    manifestExportName: null,
   }),
-  ChatTranscript: Object.freeze({
+  ChatTranscript: Object.freeze<ChatContractModuleDescriptor>({
     key: 'ChatTranscript',
     fileName: 'ChatTranscript.ts',
     importPath: './ChatTranscript',
     category: 'TRANSCRIPT',
-    description: 'ledger slices, diffs, query results, and export-grade transcript truth',
-    sharedRootPath: `${ChatChannelsModule.CHAT_CONTRACT_AUTHORITIES.sharedContractsRoot}/{file}`.replace('{file}', 'ChatTranscript.ts'),
-    usedBy: ['shared-contracts', 'frontend-engine', 'frontend-ui', 'backend-engine', 'server-transport'] as const,
-    dependsOn: ['ChatChannels', 'ChatEvents', 'ChatMessage'] as const,
-    defaultContractExportName: 'CHAT_TRANSCRIPT_CONTRACT',
+    description:
+      'Transcript segments, indexes, replay-facing ranges, and transcript contract namespace helpers.',
+    sharedRootPath: `${CHAT_CONTRACT_AUTHORITIES.sharedContractsRoot}/ChatTranscript.ts`,
+    usedBy: ALL_RUNTIME_LANES,
+    dependsOn: ['ChatChannels', 'ChatEvents', 'ChatMessage', 'ChatPresence'] as const,
+    defaultExportName: null,
+    contractExportName: 'CHAT_TRANSCRIPT_CONTRACT_NAMESPACE',
+    manifestExportName: null,
   }),
-  ChatNpc: Object.freeze({
+  ChatNpc: Object.freeze<ChatContractModuleDescriptor>({
     key: 'ChatNpc',
     fileName: 'ChatNpc.ts',
     importPath: './ChatNpc',
     category: 'NPC',
-    description: 'NPC descriptors, candidate lines, registry snapshots, and reaction planning inputs',
-    sharedRootPath: `${ChatChannelsModule.CHAT_CONTRACT_AUTHORITIES.sharedContractsRoot}/{file}`.replace('{file}', 'ChatNpc.ts'),
-    usedBy: ['shared-contracts', 'frontend-engine', 'frontend-ui', 'backend-engine', 'server-transport'] as const,
-    dependsOn: ['ChatChannels', 'ChatEvents'] as const,
-    defaultContractExportName: 'CHAT_NPC_CONTRACT',
+    description:
+      'Canonical NPC descriptors, helper/hater/ambient registries, and NPC contract namespace exports.',
+    sharedRootPath: `${CHAT_CONTRACT_AUTHORITIES.sharedContractsRoot}/ChatNpc.ts`,
+    usedBy: ALL_RUNTIME_LANES,
+    dependsOn: ['ChatChannels', 'ChatEvents', 'ChatMessage', 'ChatPresence'] as const,
+    defaultExportName: null,
+    contractExportName: 'CHAT_NPC_CONTRACT_NAMESPACE',
+    manifestExportName: null,
   }),
-  ChatCommand: Object.freeze({
+  ChatCommand: Object.freeze<ChatContractModuleDescriptor>({
     key: 'ChatCommand',
     fileName: 'ChatCommand.ts',
     importPath: './ChatCommand',
     category: 'COMMAND',
-    description: 'command descriptors, parsing, validation, routing, envelopes, and receipts',
-    sharedRootPath: `${ChatChannelsModule.CHAT_CONTRACT_AUTHORITIES.sharedContractsRoot}/{file}`.replace('{file}', 'ChatCommand.ts'),
-    usedBy: ['shared-contracts', 'frontend-engine', 'frontend-ui', 'backend-engine', 'server-transport'] as const,
-    dependsOn: ['ChatChannels', 'ChatEvents', 'ChatMessage', 'ChatPresence', 'ChatTyping', 'ChatCursor', 'ChatTranscript', 'ChatNpc'] as const,
-    defaultContractExportName: 'CHAT_COMMAND_CONTRACT',
+    description:
+      'Slash-command descriptors, invocation payloads, parsing contracts, and command contract descriptor.',
+    sharedRootPath: `${CHAT_CONTRACT_AUTHORITIES.sharedContractsRoot}/ChatCommand.ts`,
+    usedBy: ALL_RUNTIME_LANES,
+    dependsOn: [
+      'ChatChannels',
+      'ChatEvents',
+      'ChatMessage',
+      'ChatPresence',
+      'ChatTyping',
+      'ChatCursor',
+      'ChatTranscript',
+      'ChatNpc',
+    ] as const,
+    defaultExportName: null,
+    contractExportName: 'CHAT_COMMAND_CONTRACT_DESCRIPTOR',
+    manifestExportName: null,
   }),
-  ChatModeration: Object.freeze({
+  ChatModeration: Object.freeze<ChatContractModuleDescriptor>({
     key: 'ChatModeration',
     fileName: 'ChatModeration.ts',
     importPath: './ChatModeration',
     category: 'MODERATION',
-    description: 'moderation profiles, rules, decision envelopes, and audit records',
-    sharedRootPath: `${ChatChannelsModule.CHAT_CONTRACT_AUTHORITIES.sharedContractsRoot}/{file}`.replace('{file}', 'ChatModeration.ts'),
-    usedBy: ['shared-contracts', 'frontend-engine', 'frontend-ui', 'backend-engine', 'server-transport'] as const,
-    dependsOn: ['ChatChannels', 'ChatEvents', 'ChatMessage', 'ChatPresence', 'ChatTyping', 'ChatTranscript', 'ChatNpc'] as const,
-    defaultContractExportName: 'CHAT_MODERATION_CONTRACT',
+    description:
+      'Moderation queue contracts, decision surfaces, audit semantics, and moderation descriptor exports.',
+    sharedRootPath: `${CHAT_CONTRACT_AUTHORITIES.sharedContractsRoot}/ChatModeration.ts`,
+    usedBy: ALL_RUNTIME_LANES,
+    dependsOn: [
+      'ChatChannels',
+      'ChatEvents',
+      'ChatMessage',
+      'ChatPresence',
+      'ChatTyping',
+      'ChatTranscript',
+      'ChatNpc',
+    ] as const,
+    defaultExportName: null,
+    contractExportName: 'CHAT_MODERATION_CONTRACT_DESCRIPTOR',
+    manifestExportName: null,
   }),
-  ChatInvasion: Object.freeze({
+  ChatInvasion: Object.freeze<ChatContractModuleDescriptor>({
     key: 'ChatInvasion',
     fileName: 'ChatInvasion.ts',
     importPath: './ChatInvasion',
     category: 'INVASION',
-    description: 'invasion scenes, beats, runtime state, replay anchors, and outcomes',
-    sharedRootPath: `${ChatChannelsModule.CHAT_CONTRACT_AUTHORITIES.sharedContractsRoot}/{file}`.replace('{file}', 'ChatInvasion.ts'),
-    usedBy: ['shared-contracts', 'frontend-engine', 'frontend-ui', 'backend-engine', 'server-transport'] as const,
-    dependsOn: ['ChatChannels', 'ChatEvents', 'ChatMessage', 'ChatTranscript', 'ChatNpc'] as const,
-    defaultContractExportName: 'CHAT_INVASION_CONTRACT',
+    description:
+      'Invasion scenes, beats, escalation envelopes, runtime state, and invasion descriptor exports.',
+    sharedRootPath: `${CHAT_CONTRACT_AUTHORITIES.sharedContractsRoot}/ChatInvasion.ts`,
+    usedBy: ALL_RUNTIME_LANES,
+    dependsOn: [
+      'ChatChannels',
+      'ChatEvents',
+      'ChatMessage',
+      'ChatPresence',
+      'ChatTyping',
+      'ChatTranscript',
+      'ChatNpc',
+      'ChatModeration',
+    ] as const,
+    defaultExportName: null,
+    contractExportName: 'CHAT_INVASION_CONTRACT_DESCRIPTOR',
+    manifestExportName: null,
   }),
-  ChatTelemetry: Object.freeze({
+  ChatTelemetry: Object.freeze<ChatContractModuleDescriptor>({
     key: 'ChatTelemetry',
     fileName: 'ChatTelemetry.ts',
     importPath: './ChatTelemetry',
     category: 'TELEMETRY',
-    description: 'facts, streams, sinks, batch state, summaries, and export manifests',
-    sharedRootPath: `${ChatChannelsModule.CHAT_CONTRACT_AUTHORITIES.sharedContractsRoot}/{file}`.replace('{file}', 'ChatTelemetry.ts'),
-    usedBy: ['shared-contracts', 'frontend-engine', 'frontend-ui', 'backend-engine', 'server-transport'] as const,
-    dependsOn: ['ChatChannels', 'ChatEvents', 'ChatMessage', 'ChatPresence', 'ChatTyping', 'ChatCursor', 'ChatTranscript', 'ChatNpc', 'ChatCommand', 'ChatModeration', 'ChatInvasion'] as const,
-    defaultContractExportName: 'CHAT_TELEMETRY_CONTRACT',
+    description:
+      'Telemetry envelopes, metric semantics, stream-write contracts, and telemetry descriptor exports.',
+    sharedRootPath: `${CHAT_CONTRACT_AUTHORITIES.sharedContractsRoot}/ChatTelemetry.ts`,
+    usedBy: ALL_RUNTIME_LANES,
+    dependsOn: [
+      'ChatChannels',
+      'ChatEvents',
+      'ChatMessage',
+      'ChatPresence',
+      'ChatTyping',
+      'ChatCursor',
+      'ChatTranscript',
+      'ChatNpc',
+      'ChatInvasion',
+    ] as const,
+    defaultExportName: null,
+    contractExportName: 'CHAT_TELEMETRY_CONTRACT_DESCRIPTOR',
+    manifestExportName: null,
   }),
-  ChatProof: Object.freeze({
+  ChatProof: Object.freeze<ChatContractModuleDescriptor>({
     key: 'ChatProof',
     fileName: 'ChatProof.ts',
     importPath: './ChatProof',
     category: 'PROOF',
-    description: 'causal lineage, verification state, conflict records, bundle exports, and proof ledger state',
-    sharedRootPath: `${ChatChannelsModule.CHAT_CONTRACT_AUTHORITIES.sharedContractsRoot}/{file}`.replace('{file}', 'ChatProof.ts'),
-    usedBy: ['shared-contracts', 'frontend-engine', 'frontend-ui', 'backend-engine', 'server-transport'] as const,
-    dependsOn: ['ChatChannels', 'ChatEvents', 'ChatMessage', 'ChatTranscript', 'ChatNpc', 'ChatCommand', 'ChatModeration', 'ChatInvasion', 'ChatTelemetry'] as const,
-    defaultContractExportName: 'CHAT_PROOF_CONTRACT',
+    description:
+      'Proof-chain edges, causal integrity surfaces, audit links, and proof contract exports.',
+    sharedRootPath: `${CHAT_CONTRACT_AUTHORITIES.sharedContractsRoot}/ChatProof.ts`,
+    usedBy: ALL_RUNTIME_LANES,
+    dependsOn: [
+      'ChatChannels',
+      'ChatEvents',
+      'ChatMessage',
+      'ChatTranscript',
+      'ChatTelemetry',
+    ] as const,
+    defaultExportName: null,
+    contractExportName: 'CHAT_PROOF_CONTRACT',
+    manifestExportName: null,
   }),
-});
+  Learning: Object.freeze<ChatContractModuleDescriptor>({
+    key: 'Learning',
+    fileName: 'learning/index.ts',
+    importPath: './learning',
+    category: 'LEARNING',
+    description:
+      'Grouped learning barrel for learning events, profile, features, labels, cold-start doctrine, and response ranking.',
+    sharedRootPath: `${CHAT_CONTRACT_AUTHORITIES.sharedLearningRoot}/index.ts`,
+    usedBy: ALL_RUNTIME_LANES,
+    dependsOn: ['ChatChannels', 'ChatEvents'] as const,
+    defaultExportName: null,
+    contractExportName: 'LEARNING_CONTRACT_RUNTIME_BUNDLE',
+    manifestExportName: 'LEARNING_CONTRACT_MANIFEST',
+  }),
+} as const satisfies Record<ChatContractModuleKey, ChatContractModuleDescriptor>);
+
+export type ChatContractModuleDescriptorMap =
+  typeof CHAT_CONTRACT_MODULE_DESCRIPTORS;
+
+export const CHAT_CONTRACT_DEPENDENCY_GRAPH = Object.freeze({
+  ChatChannels: [] as const,
+  ChatEvents: ['ChatChannels'] as const,
+  ChatMessage: ['ChatChannels', 'ChatEvents'] as const,
+  ChatPresence: ['ChatChannels', 'ChatEvents'] as const,
+  ChatTyping: ['ChatChannels', 'ChatEvents', 'ChatPresence'] as const,
+  ChatCursor: ['ChatChannels', 'ChatEvents', 'ChatPresence', 'ChatMessage'] as const,
+  ChatTranscript: ['ChatChannels', 'ChatEvents', 'ChatMessage', 'ChatPresence'] as const,
+  ChatNpc: ['ChatChannels', 'ChatEvents', 'ChatMessage', 'ChatPresence'] as const,
+  ChatCommand: [
+    'ChatChannels',
+    'ChatEvents',
+    'ChatMessage',
+    'ChatPresence',
+    'ChatTyping',
+    'ChatCursor',
+    'ChatTranscript',
+    'ChatNpc',
+  ] as const,
+  ChatModeration: [
+    'ChatChannels',
+    'ChatEvents',
+    'ChatMessage',
+    'ChatPresence',
+    'ChatTyping',
+    'ChatTranscript',
+    'ChatNpc',
+  ] as const,
+  ChatInvasion: [
+    'ChatChannels',
+    'ChatEvents',
+    'ChatMessage',
+    'ChatPresence',
+    'ChatTyping',
+    'ChatTranscript',
+    'ChatNpc',
+    'ChatModeration',
+  ] as const,
+  ChatTelemetry: [
+    'ChatChannels',
+    'ChatEvents',
+    'ChatMessage',
+    'ChatPresence',
+    'ChatTyping',
+    'ChatCursor',
+    'ChatTranscript',
+    'ChatNpc',
+    'ChatInvasion',
+  ] as const,
+  ChatProof: [
+    'ChatChannels',
+    'ChatEvents',
+    'ChatMessage',
+    'ChatTranscript',
+    'ChatTelemetry',
+  ] as const,
+  Learning: ['ChatChannels', 'ChatEvents'] as const,
+} as const satisfies Record<ChatContractModuleKey, readonly ChatContractModuleKey[]>);
 
 // ============================================================================
-// MARK: Stable namespaces
+// MARK: Runtime namespaces and package bundle
 // ============================================================================
 
-export const ChatChannels = Object.freeze(ChatChannelsModule);
+export const CHAT_CONTRACT_MODULE_NAMESPACES = Object.freeze({
+  ChatChannels: ChatChannelsModule,
+  ChatEvents: ChatEventsModule,
+  ChatMessage: ChatMessageModule,
+  ChatPresence: ChatPresenceModule,
+  ChatTyping: ChatTypingModule,
+  ChatCursor: ChatCursorModule,
+  ChatTranscript: ChatTranscriptModule,
+  ChatNpc: ChatNpcModule,
+  ChatCommand: ChatCommandModule,
+  ChatModeration: ChatModerationModule,
+  ChatInvasion: ChatInvasionModule,
+  ChatTelemetry: ChatTelemetryModule,
+  ChatProof: ChatProofModule,
+  Learning: LearningModule,
+} as const satisfies Record<ChatContractModuleKey, ChatContractModuleNamespace>);
 
-export const ChatEvents = Object.freeze(ChatEventsModule);
+function readNamedExport(
+  namespace: Record<string, unknown>,
+  key: string,
+): unknown {
+  return Object.prototype.hasOwnProperty.call(namespace, key)
+    ? namespace[key]
+    : undefined;
+}
 
-export const ChatMessage = Object.freeze(ChatMessageModule);
+export interface ChatSharedContractPackage {
+  readonly descriptor: ChatContractModuleDescriptor;
+  readonly namespace: ChatContractModuleNamespace;
+  readonly defaultContract: unknown;
+  readonly manifest: unknown;
+}
 
-export const ChatPresence = Object.freeze(ChatPresenceModule);
+export const CHAT_SHARED_CONTRACT_PACKAGES = Object.freeze({
+  ChatChannels: Object.freeze<ChatSharedContractPackage>({
+    descriptor: CHAT_CONTRACT_MODULE_DESCRIPTORS.ChatChannels,
+    namespace: ChatChannelsModule,
+    defaultContract: readNamedExport(ChatChannelsModule, 'CHAT_CHANNEL_CONTRACT'),
+    manifest: readNamedExport(ChatChannelsModule, 'CHAT_CHANNEL_CONTRACT'),
+  }),
+  ChatEvents: Object.freeze<ChatSharedContractPackage>({
+    descriptor: CHAT_CONTRACT_MODULE_DESCRIPTORS.ChatEvents,
+    namespace: ChatEventsModule,
+    defaultContract: readNamedExport(ChatEventsModule, 'CHAT_EVENT_CONTRACT'),
+    manifest: readNamedExport(ChatEventsModule, 'CHAT_EVENT_CONTRACT'),
+  }),
+  ChatMessage: Object.freeze<ChatSharedContractPackage>({
+    descriptor: CHAT_CONTRACT_MODULE_DESCRIPTORS.ChatMessage,
+    namespace: ChatMessageModule,
+    defaultContract: undefined,
+    manifest: undefined,
+  }),
+  ChatPresence: Object.freeze<ChatSharedContractPackage>({
+    descriptor: CHAT_CONTRACT_MODULE_DESCRIPTORS.ChatPresence,
+    namespace: ChatPresenceModule,
+    defaultContract: undefined,
+    manifest: undefined,
+  }),
+  ChatTyping: Object.freeze<ChatSharedContractPackage>({
+    descriptor: CHAT_CONTRACT_MODULE_DESCRIPTORS.ChatTyping,
+    namespace: ChatTypingModule,
+    defaultContract: readNamedExport(ChatTypingModule, 'CHAT_TYPING_CONTRACT_DESCRIPTOR'),
+    manifest: readNamedExport(ChatTypingModule, 'CHAT_TYPING_CONTRACT_DESCRIPTOR'),
+  }),
+  ChatCursor: Object.freeze<ChatSharedContractPackage>({
+    descriptor: CHAT_CONTRACT_MODULE_DESCRIPTORS.ChatCursor,
+    namespace: ChatCursorModule,
+    defaultContract: readNamedExport(ChatCursorModule, 'CHAT_CURSOR_CONTRACT_DESCRIPTOR'),
+    manifest: readNamedExport(ChatCursorModule, 'CHAT_CURSOR_CONTRACT_DESCRIPTOR'),
+  }),
+  ChatTranscript: Object.freeze<ChatSharedContractPackage>({
+    descriptor: CHAT_CONTRACT_MODULE_DESCRIPTORS.ChatTranscript,
+    namespace: ChatTranscriptModule,
+    defaultContract: readNamedExport(ChatTranscriptModule, 'CHAT_TRANSCRIPT_CONTRACT_NAMESPACE'),
+    manifest: readNamedExport(ChatTranscriptModule, 'CHAT_TRANSCRIPT_CONTRACT_NAMESPACE'),
+  }),
+  ChatNpc: Object.freeze<ChatSharedContractPackage>({
+    descriptor: CHAT_CONTRACT_MODULE_DESCRIPTORS.ChatNpc,
+    namespace: ChatNpcModule,
+    defaultContract: readNamedExport(ChatNpcModule, 'CHAT_NPC_CONTRACT_NAMESPACE'),
+    manifest: readNamedExport(ChatNpcModule, 'CHAT_NPC_CONTRACT_NAMESPACE'),
+  }),
+  ChatCommand: Object.freeze<ChatSharedContractPackage>({
+    descriptor: CHAT_CONTRACT_MODULE_DESCRIPTORS.ChatCommand,
+    namespace: ChatCommandModule,
+    defaultContract: readNamedExport(ChatCommandModule, 'CHAT_COMMAND_CONTRACT_DESCRIPTOR'),
+    manifest: readNamedExport(ChatCommandModule, 'CHAT_COMMAND_CONTRACT_DESCRIPTOR'),
+  }),
+  ChatModeration: Object.freeze<ChatSharedContractPackage>({
+    descriptor: CHAT_CONTRACT_MODULE_DESCRIPTORS.ChatModeration,
+    namespace: ChatModerationModule,
+    defaultContract: readNamedExport(ChatModerationModule, 'CHAT_MODERATION_CONTRACT_DESCRIPTOR'),
+    manifest: readNamedExport(ChatModerationModule, 'CHAT_MODERATION_CONTRACT_DESCRIPTOR'),
+  }),
+  ChatInvasion: Object.freeze<ChatSharedContractPackage>({
+    descriptor: CHAT_CONTRACT_MODULE_DESCRIPTORS.ChatInvasion,
+    namespace: ChatInvasionModule,
+    defaultContract: readNamedExport(ChatInvasionModule, 'CHAT_INVASION_CONTRACT_DESCRIPTOR'),
+    manifest: readNamedExport(ChatInvasionModule, 'CHAT_INVASION_CONTRACT_DESCRIPTOR'),
+  }),
+  ChatTelemetry: Object.freeze<ChatSharedContractPackage>({
+    descriptor: CHAT_CONTRACT_MODULE_DESCRIPTORS.ChatTelemetry,
+    namespace: ChatTelemetryModule,
+    defaultContract: readNamedExport(ChatTelemetryModule, 'CHAT_TELEMETRY_CONTRACT_DESCRIPTOR'),
+    manifest: readNamedExport(ChatTelemetryModule, 'CHAT_TELEMETRY_CONTRACT_DESCRIPTOR'),
+  }),
+  ChatProof: Object.freeze<ChatSharedContractPackage>({
+    descriptor: CHAT_CONTRACT_MODULE_DESCRIPTORS.ChatProof,
+    namespace: ChatProofModule,
+    defaultContract: readNamedExport(ChatProofModule, 'CHAT_PROOF_CONTRACT'),
+    manifest: readNamedExport(ChatProofModule, 'CHAT_PROOF_CONTRACT'),
+  }),
+  Learning: Object.freeze<ChatSharedContractPackage>({
+    descriptor: CHAT_CONTRACT_MODULE_DESCRIPTORS.Learning,
+    namespace: LearningModule,
+    defaultContract: readNamedExport(LearningModule as unknown as Record<string, unknown>, 'LEARNING_CONTRACT_RUNTIME_BUNDLE'),
+    manifest: readNamedExport(LearningModule as unknown as Record<string, unknown>, 'LEARNING_CONTRACT_MANIFEST'),
+  }),
+} as const satisfies Record<ChatContractModuleKey, ChatSharedContractPackage>);
 
-export const ChatTyping = Object.freeze(ChatTypingModule);
-
-export const ChatCursor = Object.freeze(ChatCursorModule);
-
-export const ChatTranscript = Object.freeze(ChatTranscriptModule);
-
-export const ChatNpc = Object.freeze(ChatNpcModule);
-
-export const ChatCommand = Object.freeze(ChatCommandModule);
-
-export const ChatModeration = Object.freeze(ChatModerationModule);
-
-export const ChatInvasion = Object.freeze(ChatInvasionModule);
-
-export const ChatTelemetry = Object.freeze(ChatTelemetryModule);
-
-export const ChatProof = Object.freeze(ChatProofModule);
-
-export const CHAT_SHARED_CHAT_NAMESPACES = Object.freeze({
-  ChatChannels,
-  ChatEvents,
-  ChatMessage,
-  ChatPresence,
-  ChatTyping,
-  ChatCursor,
-  ChatTranscript,
-  ChatNpc,
-  ChatCommand,
-  ChatModeration,
-  ChatInvasion,
-  ChatTelemetry,
-  ChatProof,
-} as const);
+export type ChatSharedContractPackages = typeof CHAT_SHARED_CONTRACT_PACKAGES;
 
 // ============================================================================
-// MARK: Contract package accessors
+// MARK: Category indexes and helpers
 // ============================================================================
 
-export function getChatChannelsContract() {
-  return (ChatChannelsModule as Record<string, unknown>)['CHAT_CHANNEL_CONTRACT'];
-}
+export const CHAT_CONTRACT_KEYS_BY_CATEGORY = Object.freeze({
+  FOUNDATION: ['ChatChannels', 'ChatEvents'] as const,
+  MESSAGE: ['ChatMessage'] as const,
+  PRESENCE: ['ChatPresence', 'ChatTyping', 'ChatCursor'] as const,
+  TRANSCRIPT: ['ChatTranscript'] as const,
+  NPC: ['ChatNpc'] as const,
+  COMMAND: ['ChatCommand'] as const,
+  MODERATION: ['ChatModeration'] as const,
+  INVASION: ['ChatInvasion'] as const,
+  TELEMETRY: ['ChatTelemetry'] as const,
+  PROOF: ['ChatProof'] as const,
+  LEARNING: ['Learning'] as const,
+} as const satisfies Record<ChatContractCategory, readonly ChatContractModuleKey[]>);
 
-export function getChatEventsContract() {
-  return (ChatEventsModule as Record<string, unknown>)['CHAT_EVENT_CONTRACT'];
-}
-
-export function getChatMessageContract() {
-  return (ChatMessageModule as Record<string, unknown>)['CHAT_MESSAGE_CONTRACT'];
-}
-
-export function getChatPresenceContract() {
-  return (ChatPresenceModule as Record<string, unknown>)['CHAT_PRESENCE_CONTRACT'];
-}
-
-export function getChatTypingContract() {
-  return (ChatTypingModule as Record<string, unknown>)['CHAT_TYPING_CONTRACT'];
-}
-
-export function getChatCursorContract() {
-  return (ChatCursorModule as Record<string, unknown>)['CHAT_CURSOR_CONTRACT'];
-}
-
-export function getChatTranscriptContract() {
-  return (ChatTranscriptModule as Record<string, unknown>)['CHAT_TRANSCRIPT_CONTRACT'];
-}
-
-export function getChatNpcContract() {
-  return (ChatNpcModule as Record<string, unknown>)['CHAT_NPC_CONTRACT'];
-}
-
-export function getChatCommandContract() {
-  return (ChatCommandModule as Record<string, unknown>)['CHAT_COMMAND_CONTRACT'];
-}
-
-export function getChatModerationContract() {
-  return (ChatModerationModule as Record<string, unknown>)['CHAT_MODERATION_CONTRACT'];
-}
-
-export function getChatInvasionContract() {
-  return (ChatInvasionModule as Record<string, unknown>)['CHAT_INVASION_CONTRACT'];
-}
-
-export function getChatTelemetryContract() {
-  return (ChatTelemetryModule as Record<string, unknown>)['CHAT_TELEMETRY_CONTRACT'];
-}
-
-export function getChatProofContract() {
-  return (ChatProofModule as Record<string, unknown>)['CHAT_PROOF_CONTRACT'];
-}
-
-export const CHAT_SHARED_CHAT_CONTRACT_PACKAGES = Object.freeze({
-  ChatChannels: getChatChannelsContract(),
-  ChatEvents: getChatEventsContract(),
-  ChatMessage: getChatMessageContract(),
-  ChatPresence: getChatPresenceContract(),
-  ChatTyping: getChatTypingContract(),
-  ChatCursor: getChatCursorContract(),
-  ChatTranscript: getChatTranscriptContract(),
-  ChatNpc: getChatNpcContract(),
-  ChatCommand: getChatCommandContract(),
-  ChatModeration: getChatModerationContract(),
-  ChatInvasion: getChatInvasionContract(),
-  ChatTelemetry: getChatTelemetryContract(),
-  ChatProof: getChatProofContract(),
-} as const);
-
-// ============================================================================
-// MARK: Concern-grouped file lists
-// ============================================================================
-
-export const CHAT_FOUNDATION_MODULES = [
-  'ChatChannels',
-  'ChatEvents',
-] as const;
-
-export const CHAT_MESSAGE_MODULES = [
-  'ChatMessage',
-  'ChatTranscript',
-  'ChatProof',
-] as const;
-
-export const CHAT_PRESENCE_MODULES = [
-  'ChatPresence',
-  'ChatTyping',
-  'ChatCursor',
-] as const;
-
-export const CHAT_ACTOR_MODULES = [
-  'ChatNpc',
-  'ChatCommand',
-  'ChatModeration',
-  'ChatInvasion',
-] as const;
-
-export const CHAT_OBSERVABILITY_MODULES = [
-  'ChatTelemetry',
-  'ChatProof',
-] as const;
-
-export const CHAT_FULL_CONTRACT_ORDER = [
-  'ChatChannels',
-  'ChatEvents',
-  'ChatMessage',
-  'ChatPresence',
-  'ChatTyping',
-  'ChatCursor',
-  'ChatTranscript',
-  'ChatNpc',
-  'ChatCommand',
-  'ChatModeration',
-  'ChatInvasion',
-  'ChatTelemetry',
-  'ChatProof',
-] as const;
-
-// ============================================================================
-// MARK: Guard and lookup helpers
-// ============================================================================
-
-export function isChatContractModuleKey(value: string): value is ChatContractModuleKey {
+export function isChatContractModuleKey(
+  value: string,
+): value is ChatContractModuleKey {
   return (CHAT_CONTRACT_MODULE_KEYS as readonly string[]).includes(value);
 }
 
-export function isChatContractFileName(value: string): value is ChatContractFileName {
-  return (CHAT_CONTRACT_FILE_NAMES as readonly string[]).includes(value);
-}
-
-export function getChatContractModuleDescriptor(key: ChatContractModuleKey): ChatContractModuleDescriptor {
+export function getChatContractDescriptor(
+  key: ChatContractModuleKey,
+): ChatContractModuleDescriptor {
   return CHAT_CONTRACT_MODULE_DESCRIPTORS[key];
 }
 
-export function getChatContractImportPath(key: ChatContractModuleKey): string {
-  return CHAT_CONTRACT_MODULE_DESCRIPTORS[key].importPath;
+export function getChatContractNamespace(
+  key: ChatContractModuleKey,
+): ChatContractModuleNamespace {
+  return CHAT_CONTRACT_MODULE_NAMESPACES[key];
 }
 
-export function getChatContractFileName(key: ChatContractModuleKey): ChatContractFileName {
-  return CHAT_CONTRACT_MODULE_DESCRIPTORS[key].fileName;
+export function getChatContractPackage(
+  key: ChatContractModuleKey,
+): ChatSharedContractPackage {
+  return CHAT_SHARED_CONTRACT_PACKAGES[key];
 }
 
-export function getChatContractCategory(key: ChatContractModuleKey): ChatContractCategory {
-  return CHAT_CONTRACT_MODULE_DESCRIPTORS[key].category;
+export function listChatContractKeysByCategory(
+  category: ChatContractCategory,
+): readonly ChatContractModuleKey[] {
+  return CHAT_CONTRACT_KEYS_BY_CATEGORY[category];
 }
 
-export function getChatContractDependencies(key: ChatContractModuleKey): readonly ChatContractModuleKey[] {
-  return CHAT_CONTRACT_MODULE_DESCRIPTORS[key].dependsOn;
+export function listChatContractImportPaths(): readonly ChatContractRelativePath[] {
+  return CHAT_CONTRACT_MODULE_KEYS.map(
+    (key) => CHAT_CONTRACT_RELATIVE_PATHS[key],
+  );
 }
 
-export function moduleDependsOn(key: ChatContractModuleKey, dependency: ChatContractModuleKey): boolean {
-  return CHAT_CONTRACT_MODULE_DESCRIPTORS[key].dependsOn.includes(dependency);
+export function getChatContractImportPath(
+  key: ChatContractModuleKey,
+): ChatContractRelativePath {
+  return CHAT_CONTRACT_RELATIVE_PATHS[key];
 }
 
-export function findChatContractDescriptorByFileName(fileName: ChatContractFileName): ChatContractModuleDescriptor | undefined {
-  return Object.values(CHAT_CONTRACT_MODULE_DESCRIPTORS).find((descriptor) => descriptor.fileName === fileName);
+export function getChatContractFileName(
+  key: ChatContractModuleKey,
+): ChatContractFileName {
+  return CHAT_CONTRACT_FILE_NAMES[key];
 }
 
-export function listChatContractsByCategory(category: ChatContractCategory): readonly ChatContractModuleDescriptor[] {
-  return Object.values(CHAT_CONTRACT_MODULE_DESCRIPTORS).filter((descriptor) => descriptor.category === category);
+export function hasChatContract(
+  key: ChatContractModuleKey,
+): boolean {
+  return Boolean(CHAT_SHARED_CONTRACT_PACKAGES[key].defaultContract);
 }
 
-export function listChatContractsUsedBy(lane: ChatRuntimeLane): readonly ChatContractModuleDescriptor[] {
-  return Object.values(CHAT_CONTRACT_MODULE_DESCRIPTORS).filter((descriptor) => descriptor.usedBy.includes(lane));
-}
-
-export function isChatChannelsModuleKey(value: ChatContractModuleKey): value is "ChatChannels" {
-  return value === 'ChatChannels';
-}
-
-export function getChatChannelsDescriptor(): ChatContractModuleDescriptor {
-  return CHAT_CONTRACT_MODULE_DESCRIPTORS['ChatChannels'];
-}
-
-export function isChatEventsModuleKey(value: ChatContractModuleKey): value is "ChatEvents" {
-  return value === 'ChatEvents';
-}
-
-export function getChatEventsDescriptor(): ChatContractModuleDescriptor {
-  return CHAT_CONTRACT_MODULE_DESCRIPTORS['ChatEvents'];
-}
-
-export function isChatMessageModuleKey(value: ChatContractModuleKey): value is "ChatMessage" {
-  return value === 'ChatMessage';
-}
-
-export function getChatMessageDescriptor(): ChatContractModuleDescriptor {
-  return CHAT_CONTRACT_MODULE_DESCRIPTORS['ChatMessage'];
-}
-
-export function isChatPresenceModuleKey(value: ChatContractModuleKey): value is "ChatPresence" {
-  return value === 'ChatPresence';
-}
-
-export function getChatPresenceDescriptor(): ChatContractModuleDescriptor {
-  return CHAT_CONTRACT_MODULE_DESCRIPTORS['ChatPresence'];
-}
-
-export function isChatTypingModuleKey(value: ChatContractModuleKey): value is "ChatTyping" {
-  return value === 'ChatTyping';
-}
-
-export function getChatTypingDescriptor(): ChatContractModuleDescriptor {
-  return CHAT_CONTRACT_MODULE_DESCRIPTORS['ChatTyping'];
-}
-
-export function isChatCursorModuleKey(value: ChatContractModuleKey): value is "ChatCursor" {
-  return value === 'ChatCursor';
-}
-
-export function getChatCursorDescriptor(): ChatContractModuleDescriptor {
-  return CHAT_CONTRACT_MODULE_DESCRIPTORS['ChatCursor'];
-}
-
-export function isChatTranscriptModuleKey(value: ChatContractModuleKey): value is "ChatTranscript" {
-  return value === 'ChatTranscript';
-}
-
-export function getChatTranscriptDescriptor(): ChatContractModuleDescriptor {
-  return CHAT_CONTRACT_MODULE_DESCRIPTORS['ChatTranscript'];
-}
-
-export function isChatNpcModuleKey(value: ChatContractModuleKey): value is "ChatNpc" {
-  return value === 'ChatNpc';
-}
-
-export function getChatNpcDescriptor(): ChatContractModuleDescriptor {
-  return CHAT_CONTRACT_MODULE_DESCRIPTORS['ChatNpc'];
-}
-
-export function isChatCommandModuleKey(value: ChatContractModuleKey): value is "ChatCommand" {
-  return value === 'ChatCommand';
-}
-
-export function getChatCommandDescriptor(): ChatContractModuleDescriptor {
-  return CHAT_CONTRACT_MODULE_DESCRIPTORS['ChatCommand'];
-}
-
-export function isChatModerationModuleKey(value: ChatContractModuleKey): value is "ChatModeration" {
-  return value === 'ChatModeration';
-}
-
-export function getChatModerationDescriptor(): ChatContractModuleDescriptor {
-  return CHAT_CONTRACT_MODULE_DESCRIPTORS['ChatModeration'];
-}
-
-export function isChatInvasionModuleKey(value: ChatContractModuleKey): value is "ChatInvasion" {
-  return value === 'ChatInvasion';
-}
-
-export function getChatInvasionDescriptor(): ChatContractModuleDescriptor {
-  return CHAT_CONTRACT_MODULE_DESCRIPTORS['ChatInvasion'];
-}
-
-export function isChatTelemetryModuleKey(value: ChatContractModuleKey): value is "ChatTelemetry" {
-  return value === 'ChatTelemetry';
-}
-
-export function getChatTelemetryDescriptor(): ChatContractModuleDescriptor {
-  return CHAT_CONTRACT_MODULE_DESCRIPTORS['ChatTelemetry'];
-}
-
-export function isChatProofModuleKey(value: ChatContractModuleKey): value is "ChatProof" {
-  return value === 'ChatProof';
-}
-
-export function getChatProofDescriptor(): ChatContractModuleDescriptor {
-  return CHAT_CONTRACT_MODULE_DESCRIPTORS['ChatProof'];
+export function hasChatContractManifest(
+  key: ChatContractModuleKey,
+): boolean {
+  return Boolean(CHAT_SHARED_CONTRACT_PACKAGES[key].manifest);
 }
 
 // ============================================================================
-// MARK: Manifest, surface, and default package bundle
+// MARK: Topology, integrity, and runtime bundle
 // ============================================================================
 
-export interface ChatSharedContractManifestEntry {
-  readonly key: ChatContractModuleKey;
-  readonly fileName: ChatContractFileName;
-  readonly importPath: string;
-  readonly category: ChatContractCategory;
-  readonly descriptor: ChatContractModuleDescriptor;
-  readonly namespace: unknown;
-  readonly defaultContract: unknown;
-}
+export const CHAT_SHARED_CONTRACT_ORDER = [
+  'ChatChannels',
+  'ChatEvents',
+  'ChatMessage',
+  'ChatPresence',
+  'ChatTyping',
+  'ChatCursor',
+  'ChatTranscript',
+  'ChatNpc',
+  'ChatCommand',
+  'ChatModeration',
+  'ChatInvasion',
+  'ChatTelemetry',
+  'ChatProof',
+  'Learning',
+] as const satisfies readonly ChatContractModuleKey[];
 
-export const CHAT_SHARED_CONTRACT_MANIFEST = Object.freeze([
-  Object.freeze({
-    key: 'ChatChannels',
-    fileName: 'ChatChannels.ts',
-    importPath: './ChatChannels',
-    category: 'FOUNDATION',
-    descriptor: CHAT_CONTRACT_MODULE_DESCRIPTORS.ChatChannels,
-    namespace: ChatChannels,
-    defaultContract: getChatChannelsContract(),
-  }),
-  Object.freeze({
-    key: 'ChatEvents',
-    fileName: 'ChatEvents.ts',
-    importPath: './ChatEvents',
-    category: 'FOUNDATION',
-    descriptor: CHAT_CONTRACT_MODULE_DESCRIPTORS.ChatEvents,
-    namespace: ChatEvents,
-    defaultContract: getChatEventsContract(),
-  }),
-  Object.freeze({
-    key: 'ChatMessage',
-    fileName: 'ChatMessage.ts',
-    importPath: './ChatMessage',
-    category: 'MESSAGE',
-    descriptor: CHAT_CONTRACT_MODULE_DESCRIPTORS.ChatMessage,
-    namespace: ChatMessage,
-    defaultContract: getChatMessageContract(),
-  }),
-  Object.freeze({
-    key: 'ChatPresence',
-    fileName: 'ChatPresence.ts',
-    importPath: './ChatPresence',
-    category: 'PRESENCE',
-    descriptor: CHAT_CONTRACT_MODULE_DESCRIPTORS.ChatPresence,
-    namespace: ChatPresence,
-    defaultContract: getChatPresenceContract(),
-  }),
-  Object.freeze({
-    key: 'ChatTyping',
-    fileName: 'ChatTyping.ts',
-    importPath: './ChatTyping',
-    category: 'PRESENCE',
-    descriptor: CHAT_CONTRACT_MODULE_DESCRIPTORS.ChatTyping,
-    namespace: ChatTyping,
-    defaultContract: getChatTypingContract(),
-  }),
-  Object.freeze({
-    key: 'ChatCursor',
-    fileName: 'ChatCursor.ts',
-    importPath: './ChatCursor',
-    category: 'PRESENCE',
-    descriptor: CHAT_CONTRACT_MODULE_DESCRIPTORS.ChatCursor,
-    namespace: ChatCursor,
-    defaultContract: getChatCursorContract(),
-  }),
-  Object.freeze({
-    key: 'ChatTranscript',
-    fileName: 'ChatTranscript.ts',
-    importPath: './ChatTranscript',
-    category: 'TRANSCRIPT',
-    descriptor: CHAT_CONTRACT_MODULE_DESCRIPTORS.ChatTranscript,
-    namespace: ChatTranscript,
-    defaultContract: getChatTranscriptContract(),
-  }),
-  Object.freeze({
-    key: 'ChatNpc',
-    fileName: 'ChatNpc.ts',
-    importPath: './ChatNpc',
-    category: 'NPC',
-    descriptor: CHAT_CONTRACT_MODULE_DESCRIPTORS.ChatNpc,
-    namespace: ChatNpc,
-    defaultContract: getChatNpcContract(),
-  }),
-  Object.freeze({
-    key: 'ChatCommand',
-    fileName: 'ChatCommand.ts',
-    importPath: './ChatCommand',
-    category: 'COMMAND',
-    descriptor: CHAT_CONTRACT_MODULE_DESCRIPTORS.ChatCommand,
-    namespace: ChatCommand,
-    defaultContract: getChatCommandContract(),
-  }),
-  Object.freeze({
-    key: 'ChatModeration',
-    fileName: 'ChatModeration.ts',
-    importPath: './ChatModeration',
-    category: 'MODERATION',
-    descriptor: CHAT_CONTRACT_MODULE_DESCRIPTORS.ChatModeration,
-    namespace: ChatModeration,
-    defaultContract: getChatModerationContract(),
-  }),
-  Object.freeze({
-    key: 'ChatInvasion',
-    fileName: 'ChatInvasion.ts',
-    importPath: './ChatInvasion',
-    category: 'INVASION',
-    descriptor: CHAT_CONTRACT_MODULE_DESCRIPTORS.ChatInvasion,
-    namespace: ChatInvasion,
-    defaultContract: getChatInvasionContract(),
-  }),
-  Object.freeze({
-    key: 'ChatTelemetry',
-    fileName: 'ChatTelemetry.ts',
-    importPath: './ChatTelemetry',
-    category: 'TELEMETRY',
-    descriptor: CHAT_CONTRACT_MODULE_DESCRIPTORS.ChatTelemetry,
-    namespace: ChatTelemetry,
-    defaultContract: getChatTelemetryContract(),
-  }),
-  Object.freeze({
-    key: 'ChatProof',
-    fileName: 'ChatProof.ts',
-    importPath: './ChatProof',
-    category: 'PROOF',
-    descriptor: CHAT_CONTRACT_MODULE_DESCRIPTORS.ChatProof,
-    namespace: ChatProof,
-    defaultContract: getChatProofContract(),
-  }),
-] as const);
-
-export function resolveChatSharedContractManifestEntry(key: ChatContractModuleKey) {
-  return CHAT_SHARED_CONTRACT_MANIFEST.find((entry) => entry.key === key);
-}
-
-export interface ChatSharedContractSurface {
-  readonly version: typeof ChatChannelsModule.CHAT_CONTRACT_VERSION;
-  readonly authorities: typeof ChatChannelsModule.CHAT_CONTRACT_AUTHORITIES;
-  readonly moduleKeys: typeof CHAT_CONTRACT_MODULE_KEYS;
-  readonly fileNames: typeof CHAT_CONTRACT_FILE_NAMES;
-  readonly descriptors: typeof CHAT_CONTRACT_MODULE_DESCRIPTORS;
-  readonly namespaces: typeof CHAT_SHARED_CHAT_NAMESPACES;
-  readonly contracts: typeof CHAT_SHARED_CHAT_CONTRACT_PACKAGES;
-  readonly manifest: typeof CHAT_SHARED_CONTRACT_MANIFEST;
-}
-
-export const CHAT_SHARED_CONTRACT_SURFACE: ChatSharedContractSurface = Object.freeze({
-  version: ChatChannelsModule.CHAT_CONTRACT_VERSION,
-  authorities: ChatChannelsModule.CHAT_CONTRACT_AUTHORITIES,
-  moduleKeys: CHAT_CONTRACT_MODULE_KEYS,
+export const CHAT_SHARED_CONTRACT_MANIFEST = Object.freeze({
+  path: CHAT_SHARED_CONTRACT_BARREL_PATH,
+  namespace: CHAT_SHARED_CONTRACT_NAMESPACE,
+  version: CHAT_SHARED_CONTRACT_BARREL_VERSION,
+  revision: CHAT_CONTRACT_REVISION,
+  authorities: CHAT_CONTRACT_AUTHORITIES,
+  order: CHAT_SHARED_CONTRACT_ORDER,
+  categories: CHAT_CONTRACT_CATEGORIES,
+  runtimeLanes: CHAT_RUNTIME_LANES,
+  modules: CHAT_CONTRACT_MODULE_DESCRIPTORS,
+  dependencies: CHAT_CONTRACT_DEPENDENCY_GRAPH,
+  importPaths: CHAT_CONTRACT_RELATIVE_PATHS,
   fileNames: CHAT_CONTRACT_FILE_NAMES,
-  descriptors: CHAT_CONTRACT_MODULE_DESCRIPTORS,
-  namespaces: CHAT_SHARED_CHAT_NAMESPACES,
-  contracts: CHAT_SHARED_CHAT_CONTRACT_PACKAGES,
-  manifest: CHAT_SHARED_CONTRACT_MANIFEST,
-});
-
-// ============================================================================
-// MARK: Stable top-level package
-// ============================================================================
-
-export const CHAT_SHARED_CONTRACT_REGISTRY = Object.freeze({
-  version: ChatChannelsModule.CHAT_CONTRACT_VERSION,
-  apiVersion: '1.0.0-alpha',
-  authorities: ChatChannelsModule.CHAT_CONTRACT_AUTHORITIES,
-  descriptors: CHAT_CONTRACT_MODULE_DESCRIPTORS,
-  manifest: CHAT_SHARED_CONTRACT_MANIFEST,
-  namespaces: CHAT_SHARED_CHAT_NAMESPACES,
-  contracts: CHAT_SHARED_CHAT_CONTRACT_PACKAGES,
-  groups: Object.freeze({
-    foundation: CHAT_FOUNDATION_MODULES,
-    message: CHAT_MESSAGE_MODULES,
-    presence: CHAT_PRESENCE_MODULES,
-    actor: CHAT_ACTOR_MODULES,
-    observability: CHAT_OBSERVABILITY_MODULES,
-    full: CHAT_FULL_CONTRACT_ORDER,
-  }),
-  ChatChannels,
-  ChatEvents,
-  ChatMessage,
-  ChatPresence,
-  ChatTyping,
-  ChatCursor,
-  ChatTranscript,
-  ChatNpc,
-  ChatCommand,
-  ChatModeration,
-  ChatInvasion,
-  ChatTelemetry,
-  ChatProof,
 } as const);
 
-export default CHAT_SHARED_CONTRACT_REGISTRY;
+export type ChatSharedContractManifest =
+  typeof CHAT_SHARED_CONTRACT_MANIFEST;
+
+export interface ChatSharedContractSurface {
+  readonly version: typeof CHAT_SHARED_CONTRACT_BARREL_VERSION;
+  readonly revision: typeof CHAT_CONTRACT_REVISION;
+  readonly barrelPath: typeof CHAT_SHARED_CONTRACT_BARREL_PATH;
+  readonly authorities: typeof CHAT_CONTRACT_AUTHORITIES;
+  readonly manifest: ChatSharedContractManifest;
+  readonly modules: typeof CHAT_CONTRACT_MODULE_NAMESPACES;
+  readonly packages: ChatSharedContractPackages;
+  readonly channels: typeof CHAT_CHANNEL_CONTRACT;
+  readonly events: typeof CHAT_EVENT_CONTRACT;
+  readonly learning: typeof LearningModule;
+}
+
+export const CHAT_SHARED_CONTRACT_SURFACE: ChatSharedContractSurface =
+  Object.freeze({
+    version: CHAT_SHARED_CONTRACT_BARREL_VERSION,
+    revision: CHAT_CONTRACT_REVISION,
+    barrelPath: CHAT_SHARED_CONTRACT_BARREL_PATH,
+    authorities: CHAT_CONTRACT_AUTHORITIES,
+    manifest: CHAT_SHARED_CONTRACT_MANIFEST,
+    modules: CHAT_CONTRACT_MODULE_NAMESPACES,
+    packages: CHAT_SHARED_CONTRACT_PACKAGES,
+    channels: CHAT_CHANNEL_CONTRACT,
+    events: CHAT_EVENT_CONTRACT,
+    learning: LearningModule,
+  });
+
+export const CHAT_SHARED_CONTRACT_REGISTRY = Object.freeze({
+  manifest: CHAT_SHARED_CONTRACT_MANIFEST,
+  surface: CHAT_SHARED_CONTRACT_SURFACE,
+  descriptors: CHAT_CONTRACT_MODULE_DESCRIPTORS,
+  namespaces: CHAT_CONTRACT_MODULE_NAMESPACES,
+  packages: CHAT_SHARED_CONTRACT_PACKAGES,
+  byCategory: CHAT_CONTRACT_KEYS_BY_CATEGORY,
+  helpers: Object.freeze({
+    isChatContractModuleKey,
+    getChatContractDescriptor,
+    getChatContractNamespace,
+    getChatContractPackage,
+    listChatContractKeysByCategory,
+    listChatContractImportPaths,
+    getChatContractImportPath,
+    getChatContractFileName,
+    hasChatContract,
+    hasChatContractManifest,
+  }),
+});
