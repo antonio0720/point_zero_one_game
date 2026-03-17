@@ -86,7 +86,7 @@ import * as ChatTypesModule from './chatTypes';
 // MARK: Low-risk direct re-exports
 // ============================================================================
 
-export * from './chatTypes';
+export * as chatTypes from './chatTypes';
 export * from './uiTypes';
 export * from './UnifiedChatDock';
 export * from './ChatComposer';
@@ -106,10 +106,11 @@ export * from './channelTabsSurfaceBuilder';
 export * from './composerSurfaceBuilder';
 export * from './messageFeedSurfaceBuilder';
 export * from './presenceTypingSurfaceBuilder';
-export * from './statusSurfaceBuilder';
+export { buildInvasionBannerViewModel } from './statusSurfaceBuilder';
+export type { BuildStatusSurfaceArgs } from './statusSurfaceBuilder';
 export * from './transcriptDrawerAdapter';
 export * from './collapsedPillAdapter';
-export * from './ChatPanel';
+export { default as ChatPanel } from './ChatPanel';
 export * from './useChatEngine';
 
 /**
