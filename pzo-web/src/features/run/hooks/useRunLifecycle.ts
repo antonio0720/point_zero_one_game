@@ -24,23 +24,20 @@
  */
 
 import { useCallback, useMemo, useState } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 
 import {
   useEngineStore,
   type EngineStoreState,
 } from '../../../store/engineStore';
-
 import {
-  useRunStore,
   readEngineStoreMirrorSnapshot,
   selectEngineStoreMirrorSnapshot,
+  useRunStore,
 } from '../../../store/runStore';
-
-import {
-  EngineOrchestrator,
-  type StartRunParams,
-} from '../../../engines/zero/EngineOrchestrator';
-
+import type { FrontendRunMode } from '../../../game/modes/contracts';
+import { zeroFacade, ZeroFacade, type ZeroStartRunOptions } from '../../../engines/zero/ZeroFacade';
+import { EngineOrchestrator, type StartRunParams } from '../../../engines/zero/EngineOrchestrator';
 import type {
   EngineHealth,
   EngineId,
@@ -49,37 +46,40 @@ import type {
   TickResult,
 } from '../../../engines/zero/types';
 
-/* ============================================================================
- * TYPES
- * ============================================================================
- */
-
 type MaybePromise<T> = T | Promise<T>;
 
 export interface RunLifecycleController {
-  startRun(params: StartRunParams): MaybePromise<void>;
+  startRun(
+    params: StartRunParams,
+    options?: Partial<ZeroStartRunOptions>,
+  ): MaybePromise<void>;
   executeTick(): MaybePromise<TickResult | null>;
-  reset(): MaybePromise<void>;
+  reset(options?: { resetEngineStoreSlices?: boolean }): MaybePromise<void>;
   endRun?(outcome: RunOutcome): MaybePromise<void>;
-  pause?(): MaybePromise<void>;
+  abandonRun?(reason?: string): MaybePromise<void>;
+  pause?(reason?: string): MaybePromise<void>;
   resume?(): MaybePromise<void>;
-  getLifecycleState?(): RunLifecycleState;
+  getLifecycleState?(): RunLifecycleState | 'UNKNOWN';
   isRunActive?(): boolean;
-  getHealthReport?(): Partial<Record<EngineId, EngineHealth>>;
+  isPaused?(): boolean;
+  getHealthReport?(): Partial<Record<EngineId, EngineHealth>> | null;
+  getCurrentMode?(): FrontendRunMode | null;
 }
 
-export interface UseRunLifecycleStartRequest
-  extends Partial<StartRunParams> {
+export interface UseRunLifecycleStartRequest extends Partial<StartRunParams> {
   userId: string;
-  /**
-   * When true or omitted, the hook clears stale runStore financial/runtime state
-   * before initializing the next run.
-   */
   resetRunStore?: boolean;
+  mode?: FrontendRunMode;
+  modeSeed?: string | number;
+  modeOverrides?: Record<string, unknown>;
+  wireStoreHandlers?: boolean;
+  wireRunMirror?: boolean;
+  registerDefaultChannels?: boolean;
+  startOptions?: Partial<ZeroStartRunOptions>;
 }
 
 export interface UseRunLifecycleResult {
-  lifecycleState: RunLifecycleState;
+  lifecycleState: RunLifecycleState | 'UNKNOWN';
   runId: string | null;
   userId: string | null;
   seed: string | null;
@@ -92,8 +92,10 @@ export interface UseRunLifecycleResult {
   activeDecisionWindowCount: number;
   seasonTimeoutImminent: boolean;
   ticksUntilTimeout: number;
+  currentMode: FrontendRunMode | null;
   isInitialized: boolean;
   isRunActive: boolean;
+  isPaused: boolean;
   isIdle: boolean;
   isStarting: boolean;
   isActive: boolean;
@@ -127,22 +129,85 @@ export interface UseRunLifecycleResult {
   executeTick: () => Promise<TickResult | null>;
   abandonRun: () => Promise<void>;
   resetRun: () => Promise<void>;
-  pauseRun: () => Promise<void>;
+  pauseRun: (reason?: string) => Promise<void>;
   resumeRun: () => Promise<void>;
   clearLastCommandError: () => void;
 }
 
-/* ============================================================================
- * GLOBAL ORCHESTRATOR SINGLETON LANE
- * ============================================================================
- */
+function toError(error: unknown): Error {
+  return error instanceof Error ? error : new Error(String(error));
+}
 
-type GlobalEngineZeroScope = typeof globalThis & {
+function coerceNonEmptyString(value: unknown, fallback: string): string {
+  return typeof value === 'string' && value.trim().length > 0
+    ? value.trim()
+    : fallback;
+}
+
+function coercePositiveInt(value: unknown, fallback: number): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return fallback;
+  const normalized = Math.floor(value);
+  return normalized > 0 ? normalized : fallback;
+}
+
+function coerceNonNegativeNumber(value: unknown, fallback: number): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return fallback;
+  return value >= 0 ? value : fallback;
+}
+
+function createRunId(): string {
+  return `run_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function createSeed(): string {
+  return `${Date.now()}_${Math.random().toString(36).slice(2, 12)}`;
+}
+
+function isZeroFacade(value: unknown): value is ZeroFacade {
+  return Boolean(
+    value &&
+      typeof value === 'object' &&
+      typeof (value as ZeroFacade).startRun === 'function' &&
+      typeof (value as ZeroFacade).executeTick === 'function' &&
+      typeof (value as ZeroFacade).reset === 'function',
+  );
+}
+
+function createControllerFromFacade(facade: ZeroFacade): RunLifecycleController {
+  return {
+    startRun(params, options) {
+      return facade.startRun(params, options);
+    },
+    executeTick() {
+      return facade.executeTick();
+    },
+    reset() {
+      facade.reset();
+    },
+    endRun(outcome) {
+      return facade.endRun(outcome);
+    },
+    getLifecycleState() {
+      return facade.getLifecycleState();
+    },
+    isRunActive() {
+      return facade.isRunActive();
+    },
+    getHealthReport() {
+      return facade.getHealthReport();
+    },
+    getCurrentMode() {
+      return facade.getCurrentMode();
+    },
+  };
+}
+
+function getGlobalEngineZeroScope(): typeof globalThis & {
   __PZO_ENGINE_ZERO_ORCHESTRATOR__?: EngineOrchestrator;
-};
-
-function getGlobalEngineZeroScope(): GlobalEngineZeroScope {
-  return globalThis as GlobalEngineZeroScope;
+} {
+  return globalThis as typeof globalThis & {
+    __PZO_ENGINE_ZERO_ORCHESTRATOR__?: EngineOrchestrator;
+  };
 }
 
 function getSharedEngineZeroOrchestrator(): EngineOrchestrator {
@@ -156,149 +221,87 @@ function getSharedEngineZeroOrchestrator(): EngineOrchestrator {
 }
 
 function createDefaultLifecycleController(): RunLifecycleController {
-  const orchestrator = getSharedEngineZeroOrchestrator();
+  const facade = isZeroFacade(zeroFacade)
+    ? zeroFacade
+    : new ZeroFacade(getSharedEngineZeroOrchestrator());
 
+  return createControllerFromFacade(facade);
+}
+
+function normalizeStartRequest(request: UseRunLifecycleStartRequest): {
+  params: StartRunParams;
+  startOptions: Partial<ZeroStartRunOptions>;
+} {
   return {
-    startRun(params) {
-      orchestrator.startRun(params);
+    params: {
+      runId: coerceNonEmptyString(request.runId, createRunId()),
+      userId: coerceNonEmptyString(request.userId, 'anonymous-user'),
+      seed: coerceNonEmptyString(request.seed, createSeed()),
+      seasonTickBudget: coercePositiveInt(request.seasonTickBudget, 60),
+      freedomThreshold: coerceNonNegativeNumber(request.freedomThreshold, 1_000_000),
+      clientVersion: coerceNonEmptyString(request.clientVersion, 'pzo-web'),
+      engineVersion: coerceNonEmptyString(request.engineVersion, 'engine-zero'),
     },
-
-    executeTick() {
-      return orchestrator.executeTick();
-    },
-
-    reset() {
-      orchestrator.reset();
-    },
-
-    endRun(outcome) {
-      const candidate = orchestrator as EngineOrchestrator & {
-        endRun?: (nextOutcome: RunOutcome) => Promise<void>;
-      };
-
-      if (!candidate.endRun) {
-        throw new Error(
-          '[useRunLifecycle] Default controller does not expose endRun().',
-        );
-      }
-
-      return candidate.endRun(outcome);
-    },
-
-    getLifecycleState() {
-      const candidate = orchestrator as EngineOrchestrator & {
-        getLifecycleState?: () => RunLifecycleState;
-      };
-
-      return candidate.getLifecycleState?.() ?? 'IDLE';
-    },
-
-    isRunActive() {
-      const candidate = orchestrator as EngineOrchestrator & {
-        isRunActive?: () => boolean;
-      };
-
-      return candidate.isRunActive?.() ?? false;
-    },
-
-    getHealthReport() {
-      const candidate = orchestrator as EngineOrchestrator & {
-        getHealthReport?: () => Partial<Record<EngineId, EngineHealth>>;
-      };
-
-      return candidate.getHealthReport?.() ?? {};
+    startOptions: {
+      ...(request.startOptions ?? {}),
+      mode: request.mode ?? request.startOptions?.mode,
+      modeSeed: request.modeSeed ?? request.startOptions?.modeSeed,
+      modeOverrides: request.modeOverrides ?? request.startOptions?.modeOverrides,
+      wireStoreHandlers:
+        request.wireStoreHandlers ?? request.startOptions?.wireStoreHandlers,
+      wireRunMirror: request.wireRunMirror ?? request.startOptions?.wireRunMirror,
+      registerDefaultChannels:
+        request.registerDefaultChannels ??
+        request.startOptions?.registerDefaultChannels,
     },
   };
 }
-
-/* ============================================================================
- * HELPERS
- * ============================================================================
- */
-
-function toError(error: unknown): Error {
-  return error instanceof Error ? error : new Error(String(error));
-}
-
-function coerceNonEmptyString(
-  value: unknown,
-  fallback: string,
-): string {
-  return typeof value === 'string' && value.trim().length > 0
-    ? value.trim()
-    : fallback;
-}
-
-function coercePositiveInt(value: unknown, fallback: number): number {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return fallback;
-  const normalized = Math.floor(value);
-  return normalized > 0 ? normalized : fallback;
-}
-
-function coerceNonNegativeNumber(
-  value: unknown,
-  fallback: number,
-): number {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return fallback;
-  return value >= 0 ? value : fallback;
-}
-
-function createRunId(): string {
-  return `run_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
-}
-
-function createSeed(): string {
-  return `${Date.now()}_${Math.random().toString(36).slice(2, 12)}`;
-}
-
-function normalizeStartRequest(
-  request: UseRunLifecycleStartRequest,
-): StartRunParams {
-  return {
-    runId: coerceNonEmptyString(request.runId, createRunId()),
-    userId: coerceNonEmptyString(request.userId, 'anonymous-user'),
-    seed: coerceNonEmptyString(request.seed, createSeed()),
-    seasonTickBudget: coercePositiveInt(request.seasonTickBudget, 60),
-    freedomThreshold: coerceNonNegativeNumber(
-      request.freedomThreshold,
-      1_000_000,
-    ),
-    clientVersion: coerceNonEmptyString(request.clientVersion, 'pzo-web'),
-    engineVersion: coerceNonEmptyString(request.engineVersion, 'engine-zero'),
-  };
-}
-
-/* ============================================================================
- * HOOK
- * ============================================================================
- */
 
 export function useRunLifecycle(
-  controller?: RunLifecycleController,
+  controllerOrFacade?: RunLifecycleController | ZeroFacade,
 ): UseRunLifecycleResult {
-  const resolvedController = useMemo<RunLifecycleController>(
-    () => controller ?? createDefaultLifecycleController(),
-    [controller],
+  const resolvedController = useMemo<RunLifecycleController>(() => {
+    if (isZeroFacade(controllerOrFacade)) {
+      return createControllerFromFacade(controllerOrFacade);
+    }
+
+    return controllerOrFacade ?? createDefaultLifecycleController();
+  }, [controllerOrFacade]);
+
+  const run = useEngineStore(
+    useShallow((state: EngineStoreState) => ({
+      lifecycleState: state.run.lifecycleState,
+      runId: state.run.runId,
+      userId: state.run.userId,
+      seed: state.run.seed,
+      tickBudget: state.run.tickBudget,
+      outcome: state.run.outcome,
+      lastTickIndex: state.run.lastTickIndex,
+      lastTickDurationMs: state.run.lastTickDurationMs,
+      healthReport: state.run.healthReport,
+    })),
   );
 
-  const run = useEngineStore((state: EngineStoreState) => state.run);
-  const time = useEngineStore((state: EngineStoreState) => state.time);
-  const resetAllSlices = useEngineStore(
-    (state: EngineStoreState) => state.resetAllSlices,
+  const time = useEngineStore(
+    useShallow((state: EngineStoreState) => ({
+      ticksRemaining: state.time.ticksRemaining,
+      holdsRemaining: state.time.holdsRemaining,
+      activeDecisionWindowCount: state.time.activeDecisionWindows.length,
+      seasonTimeoutImminent: state.time.seasonTimeoutImminent,
+      ticksUntilTimeout: state.time.ticksUntilTimeout,
+      isRunActive: state.time.isRunActive,
+    })),
   );
-  const syncRunMirror = useEngineStore(
-    (state: EngineStoreState) => state.syncRunMirror,
-  );
+
+  const resetAllSlices = useEngineStore((state: EngineStoreState) => state.resetAllSlices);
+  const syncRunMirror = useEngineStore((state: EngineStoreState) => state.syncRunMirror);
 
   const isInitialized = useRunStore((state) => state.isInitialized);
   const initializeRunStore = useRunStore((state) => state.initialize);
   const resetRunStore = useRunStore((state) => state.reset);
   const mirror = useRunStore(selectEngineStoreMirrorSnapshot);
 
-  const [pendingCommand, setPendingCommand] = useState<
-    UseRunLifecycleResult['pendingCommand']
-  >('IDLE');
-
+  const [pendingCommand, setPendingCommand] = useState<UseRunLifecycleResult['pendingCommand']>('IDLE');
   const [lastCommandError, setLastCommandError] = useState<Error | null>(null);
 
   const refreshMirror = useCallback(() => {
@@ -317,9 +320,7 @@ export function useRunLifecycle(
   const degradedEngineIds = useMemo(() => {
     if (!healthReport) return [];
 
-    return (Object.entries(healthReport) as Array<
-      [EngineId, EngineHealth | undefined]
-    >)
+    return (Object.entries(healthReport) as Array<[EngineId, EngineHealth | undefined]>)
       .filter(([, health]) => health === 'ERROR')
       .map(([engineId]) => engineId);
   }, [healthReport]);
@@ -327,17 +328,15 @@ export function useRunLifecycle(
   const healthyEngineCount = useMemo(() => {
     if (!healthReport) return 0;
 
-    return Object.values(healthReport).filter(
-      (health) => health === 'INITIALIZED',
-    ).length;
+    return Object.values(healthReport).filter((health) => health === 'INITIALIZED').length;
   }, [healthReport]);
 
   const erroredEngineCount = degradedEngineIds.length;
 
   const lifecycleState =
-    run.lifecycleState ??
-    resolvedController.getLifecycleState?.() ??
-    'IDLE';
+    run.lifecycleState ?? resolvedController.getLifecycleState?.() ?? 'IDLE';
+  const isPaused = resolvedController.isPaused?.() === true;
+  const currentMode = resolvedController.getCurrentMode?.() ?? null;
 
   const isIdle = lifecycleState === 'IDLE';
   const isStarting = lifecycleState === 'STARTING';
@@ -347,24 +346,21 @@ export function useRunLifecycle(
   const isEnded = lifecycleState === 'ENDED';
 
   const isRunActive =
-    run.lifecycleState === 'ACTIVE' ||
-    time.isRunActive ||
+    isActive ||
+    isStarting ||
+    isTickLocked ||
+    Boolean(time.isRunActive) ||
     resolvedController.isRunActive?.() === true;
 
   const supportsPause = typeof resolvedController.pause === 'function';
   const supportsResume = typeof resolvedController.resume === 'function';
 
   const canStart = isIdle && pendingCommand === 'IDLE';
-  const canExecuteTick = isActive && pendingCommand === 'IDLE';
-  const canAbandon =
-    (isStarting || isActive || isTickLocked) && pendingCommand === 'IDLE';
-  const canReset =
-    (isIdle || isEnded || isEnding) && pendingCommand === 'IDLE';
-  const canPause = supportsPause && isActive && pendingCommand === 'IDLE';
-  const canResume =
-    supportsResume &&
-    (isTickLocked || isStarting || isEnding === false) &&
-    pendingCommand === 'IDLE';
+  const canExecuteTick = isActive && !isPaused && pendingCommand === 'IDLE';
+  const canAbandon = isRunActive && pendingCommand === 'IDLE';
+  const canReset = (isIdle || isEnded || isEnding) && pendingCommand === 'IDLE';
+  const canPause = supportsPause && isRunActive && !isPaused && pendingCommand === 'IDLE';
+  const canResume = supportsResume && isPaused && pendingCommand === 'IDLE';
 
   const runCommand = useCallback(
     async <T,>(
@@ -375,8 +371,7 @@ export function useRunLifecycle(
       setLastCommandError(null);
 
       try {
-        const result = await work();
-        return result;
+        return await work();
       } catch (error) {
         const normalized = toError(error);
         setLastCommandError(normalized);
@@ -399,25 +394,20 @@ export function useRunLifecycle(
 
         resetAllSlices();
         initializeRunStore(
-          normalized.runId,
-          normalized.userId,
-          normalized.seed,
+          normalized.params.runId,
+          normalized.params.userId,
+          normalized.params.seed,
         );
         refreshMirror();
 
-        await Promise.resolve(resolvedController.startRun(normalized));
+        await Promise.resolve(
+          resolvedController.startRun(normalized.params, normalized.startOptions),
+        );
 
         refreshMirror();
       });
     },
-    [
-      initializeRunStore,
-      refreshMirror,
-      resetAllSlices,
-      resetRunStore,
-      resolvedController,
-      runCommand,
-    ],
+    [initializeRunStore, refreshMirror, resetAllSlices, resetRunStore, resolvedController, runCommand],
   );
 
   const executeTick = useCallback(async (): Promise<TickResult | null> => {
@@ -430,35 +420,32 @@ export function useRunLifecycle(
 
   const abandonRun = useCallback(async (): Promise<void> => {
     await runCommand('ABANDONING', async () => {
-      if (!resolvedController.endRun) {
-        throw new Error(
-          '[useRunLifecycle] abandonRun() requires controller.endRun().',
-        );
+      if (resolvedController.abandonRun) {
+        await Promise.resolve(resolvedController.abandonRun('USER_ABANDONED'));
+      } else if (resolvedController.endRun) {
+        await Promise.resolve(resolvedController.endRun('ABANDONED'));
+      } else {
+        throw new Error('[useRunLifecycle] abandonRun() requires abandonRun() or endRun().');
       }
-
-      await Promise.resolve(resolvedController.endRun('ABANDONED'));
       refreshMirror();
     });
   }, [refreshMirror, resolvedController, runCommand]);
 
   const resetRun = useCallback(async (): Promise<void> => {
     await runCommand('RESETTING', async () => {
-      await Promise.resolve(resolvedController.reset());
+      await Promise.resolve(resolvedController.reset({ resetEngineStoreSlices: true }));
       resetAllSlices();
       resetRunStore();
       refreshMirror();
     });
   }, [refreshMirror, resetAllSlices, resetRunStore, resolvedController, runCommand]);
 
-  const pauseRun = useCallback(async (): Promise<void> => {
+  const pauseRun = useCallback(async (reason = 'MANUAL_PAUSE'): Promise<void> => {
     await runCommand('PAUSING', async () => {
       if (!resolvedController.pause) {
-        throw new Error(
-          '[useRunLifecycle] pauseRun() requires controller.pause().',
-        );
+        throw new Error('[useRunLifecycle] pauseRun() requires controller.pause().');
       }
-
-      await Promise.resolve(resolvedController.pause());
+      await Promise.resolve(resolvedController.pause(reason));
       refreshMirror();
     });
   }, [refreshMirror, resolvedController, runCommand]);
@@ -466,11 +453,8 @@ export function useRunLifecycle(
   const resumeRun = useCallback(async (): Promise<void> => {
     await runCommand('RESUMING', async () => {
       if (!resolvedController.resume) {
-        throw new Error(
-          '[useRunLifecycle] resumeRun() requires controller.resume().',
-        );
+        throw new Error('[useRunLifecycle] resumeRun() requires controller.resume().');
       }
-
       await Promise.resolve(resolvedController.resume());
       refreshMirror();
     });
@@ -491,11 +475,13 @@ export function useRunLifecycle(
     lastTickDurationMs: run.lastTickDurationMs,
     ticksRemaining: time.ticksRemaining,
     holdsRemaining: time.holdsRemaining,
-    activeDecisionWindowCount: time.activeDecisionWindows.length,
+    activeDecisionWindowCount: time.activeDecisionWindowCount,
     seasonTimeoutImminent: time.seasonTimeoutImminent,
     ticksUntilTimeout: time.ticksUntilTimeout,
+    currentMode,
     isInitialized,
     isRunActive,
+    isPaused,
     isIdle,
     isStarting,
     isActive,
@@ -527,3 +513,5 @@ export function useRunLifecycle(
     clearLastCommandError,
   };
 }
+
+export default useRunLifecycle;
