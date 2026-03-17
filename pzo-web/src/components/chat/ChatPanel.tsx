@@ -788,17 +788,17 @@ export default ChatPanel;
 
 export const CHAT_PANEL_AUTHORITIES = Object.freeze({
   sharedContractsRoot:
-    SharedChat.ChatChannelsModule.CHAT_CHANNEL_CONTRACT?.authorities
+    SharedChat.ChatChannels.CHAT_CHANNEL_CONTRACT?.authorities
       ?.sharedContractsRoot ?? '/shared/contracts/chat',
   frontendEngineRoot:
-    SharedChat.ChatChannelsModule.CHAT_CHANNEL_CONTRACT?.authorities
+    SharedChat.ChatChannels.CHAT_CHANNEL_CONTRACT?.authorities
       ?.frontendEngineRoot ?? '/pzo-web/src/engines/chat',
   frontendUiRoot: '/pzo-web/src/components/chat',
   backendEngineRoot:
-    SharedChat.ChatChannelsModule.CHAT_CHANNEL_CONTRACT?.authorities
+    SharedChat.ChatChannels.CHAT_CHANNEL_CONTRACT?.authorities
       ?.backendEngineRoot ?? '/backend/src/game/engine/chat',
   serverTransportRoot:
-    SharedChat.ChatChannelsModule.CHAT_CHANNEL_CONTRACT?.authorities
+    SharedChat.ChatChannels.CHAT_CHANNEL_CONTRACT?.authorities
       ?.serverTransportRoot ?? '/pzo-server/src/chat',
 });
 

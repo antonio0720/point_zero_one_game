@@ -1373,49 +1373,53 @@ export function buildTranscriptSearchResult(
 export function toLegacyChatMessageFromWire(
   wire: SharedChat.ChatEvents.ChatMessageWire,
 ): ChatMessage {
-  const proofRecord = (wire as unknown as Record<string, unknown>).proof as
-    | Record<string, unknown>
-    | undefined;
-  const rawProofValue =
-    proofRecord?.['messageHash'] ??
-    proofRecord?.['message_hash'] ??
-    proofRecord?.['hash'];
+  const rawWire = wire as unknown as Record<string, unknown>;
+  const rawSender = wire.sender as unknown as Record<string, unknown>;
+  const rawMeta = (wire.meta ?? {}) as Record<string, unknown>;
+  const rawProof = (wire.proof ?? {}) as Record<string, unknown>;
+
+  const rawProofHash =
+    rawProof['messageHash'] ??
+    rawProof['message_hash'] ??
+    rawProof['proofHash'] ??
+    rawProof['hash'];
+
   const proofHash =
-    typeof rawProofValue === 'string'
-      ? rawProofValue
-      : rawProofValue != null
-        ? String(rawProofValue)
+    typeof rawProofHash === 'string'
+      ? rawProofHash
+      : rawProofHash != null
+        ? String(rawProofHash)
         : undefined;
 
   return coerceChatMessage({
-    id: ensureMessageId(
-      (wire as unknown as Record<string, unknown>).id as string | undefined,
-      0,
-    ),
+    id: ensureMessageId(rawWire['id'] as string | undefined, 0),
     channel: normalizeChatChannel(wire.channelId),
     kind: coerceMessageKind(wire.kind),
     senderId:
-      ((wire.sender as unknown as Record<string, unknown>).id as string | undefined)
-      ?? ((wire.sender as unknown as Record<string, unknown>).playerId as string | undefined)
-      ?? ((wire.sender as unknown as Record<string, unknown>).memberId as string | undefined)
-      ?? String(((wire.sender as unknown as Record<string, unknown>).name ?? 'system')),
-    senderName: (wire.sender as unknown as Record<string, unknown>).name as string | undefined,
-    senderRank: (wire.sender as unknown as Record<string, unknown>).title as string | undefined,
-    senderRole: (wire.sender as unknown as Record<string, unknown>).role as ChatSenderRole | string | undefined,
+      (rawSender['id'] as string | undefined) ??
+      (rawSender['playerId'] as string | undefined) ??
+      (rawSender['memberId'] as string | undefined) ??
+      String(rawSender['name'] ?? 'system'),
+    senderName:
+      (rawSender['name'] as string | undefined) ??
+      (rawSender['displayName'] as string | undefined) ??
+      'System',
+    senderRank: rawSender['title'] as string | undefined,
+    senderRole: rawSender['role'] as ChatSenderRole | string | undefined,
     senderWire: wire.sender,
     body: wire.body,
-    emoji: (wire as unknown as Record<string, unknown>).emoji as string | undefined,
+    emoji: rawWire['emoji'] as string | undefined,
     ts: coerceMessageTimestamp(
-      ((wire as unknown as Record<string, unknown>).ts as number | string | undefined)
-      ?? ((wire as unknown as Record<string, unknown>).timestamp as number | string | undefined),
+      (rawWire['ts'] as number | string | undefined) ??
+        (rawWire['timestamp'] as number | string | undefined),
       Date.now(),
     ),
-    immutable: (wire as unknown as Record<string, unknown>).immutable as boolean | undefined,
+    immutable: rawWire['immutable'] as boolean | undefined,
     proofHash,
     deliveryState: wire.deliveryState,
     moderationState: wire.moderation?.state,
     meta: wire.meta,
-    metadata: wire.meta as unknown as Record<string, unknown> | undefined,
+    metadata: rawMeta,
     proofMeta: wire.proof as unknown as ChatProofMeta | undefined,
     legendMeta: wire.legend as unknown as ChatLegendMeta | undefined,
     replayMeta: undefined,
@@ -1423,24 +1427,60 @@ export function toLegacyChatMessageFromWire(
     pressureTier: wire.meta?.pressureTier as PressureTier | undefined,
     tickTier: wire.meta?.tickTier as TickTier | undefined,
     runOutcome: wire.meta?.runOutcome as RunOutcome | undefined,
-    botSource: wire.meta?.botSource,
-    shieldMeta: wire.meta?.shieldMeta,
-    cascadeMeta: wire.meta?.cascadeMeta,
-    relationshipState: wire.relationshipState,
-    memoryAnchors: wire.memoryAnchors,
-    negotiationState: wire.negotiationState,
-    affect: wire.affect,
-    learningProfile: wire.learningProfile,
-    featureSnapshot: wire.featureSnapshot,
-    rescueDecision: wire.rescueDecision,
-    liveOpsState: wire.liveOpsState,
-    audienceHeat: wire.audienceHeat,
-    channelMood: wire.channelMood,
-    reputationState: wire.reputationState,
-    momentType: wire.momentType,
-    scenePlan: wire.scenePlan,
-    revealSchedule: wire.revealSchedule,
-    silenceDecision: wire.silenceDecision,
+    botSource:
+      (rawMeta['botSource'] as BotTauntSource | undefined) ??
+      (rawWire['botSource'] as BotTauntSource | undefined),
+    shieldMeta:
+      (rawMeta['shieldMeta'] as ShieldEventMeta | undefined) ??
+      (rawWire['shieldMeta'] as ShieldEventMeta | undefined),
+    cascadeMeta:
+      (rawMeta['cascadeMeta'] as CascadeAlertMeta | undefined) ??
+      (rawWire['cascadeMeta'] as CascadeAlertMeta | undefined),
+    relationshipState:
+      (rawWire['relationshipState'] as ChatRelationshipState | undefined) ??
+      (rawMeta['relationshipState'] as ChatRelationshipState | undefined),
+    memoryAnchors:
+      (rawWire['memoryAnchors'] as readonly ChatMemoryAnchor[] | undefined) ??
+      (rawMeta['memoryAnchors'] as readonly ChatMemoryAnchor[] | undefined),
+    negotiationState:
+      (rawWire['negotiationState'] as ChatNegotiationState | undefined) ??
+      (rawMeta['negotiationState'] as ChatNegotiationState | undefined),
+    affect:
+      (rawWire['affect'] as ChatAffectSnapshot | undefined) ??
+      (rawMeta['affect'] as ChatAffectSnapshot | undefined),
+    learningProfile:
+      (rawWire['learningProfile'] as ChatLearningProfile | undefined) ??
+      (rawMeta['learningProfile'] as ChatLearningProfile | undefined),
+    featureSnapshot:
+      (rawWire['featureSnapshot'] as ChatFeatureSnapshot | undefined) ??
+      (rawMeta['featureSnapshot'] as ChatFeatureSnapshot | undefined),
+    rescueDecision:
+      (rawWire['rescueDecision'] as ChatRescueDecision | undefined) ??
+      (rawMeta['rescueDecision'] as ChatRescueDecision | undefined),
+    liveOpsState:
+      (rawWire['liveOpsState'] as ChatLiveOpsState | undefined) ??
+      (rawMeta['liveOpsState'] as ChatLiveOpsState | undefined),
+    audienceHeat:
+      (rawWire['audienceHeat'] as ChatAudienceHeat | undefined) ??
+      (rawMeta['audienceHeat'] as ChatAudienceHeat | undefined),
+    channelMood:
+      (rawWire['channelMood'] as ChatChannelMood | undefined) ??
+      (rawMeta['channelMood'] as ChatChannelMood | undefined),
+    reputationState:
+      (rawWire['reputationState'] as ChatReputationState | undefined) ??
+      (rawMeta['reputationState'] as ChatReputationState | undefined),
+    momentType:
+      (rawWire['momentType'] as ChatMomentType | undefined) ??
+      (rawMeta['momentType'] as ChatMomentType | undefined),
+    scenePlan:
+      (rawWire['scenePlan'] as ChatScenePlan | undefined) ??
+      (rawMeta['scenePlan'] as ChatScenePlan | undefined),
+    revealSchedule:
+      (rawWire['revealSchedule'] as ChatRevealSchedule | undefined) ??
+      (rawMeta['revealSchedule'] as ChatRevealSchedule | undefined),
+    silenceDecision:
+      (rawWire['silenceDecision'] as ChatSilenceDecision | undefined) ??
+      (rawMeta['silenceDecision'] as ChatSilenceDecision | undefined),
     compatibility: {
       compatibilityLevel: 'SHARED_BACKED',
       derivesFromSharedContracts: true,
@@ -1454,44 +1494,102 @@ export function toLegacyChatMessageFromWire(
 export function toLegacyChatMessagesFromReplay(
   snapshot: ChatReplayWindowSnapshot,
 ): ChatMessage[] {
-  return snapshot.messages.map((excerpt, index) =>
-    coerceChatMessage(
+  return snapshot.messages.map((entry, index) => {
+    const rawEntry = entry as unknown as Record<string, unknown>;
+    const rawMessage =
+      ((rawEntry['message'] as Record<string, unknown> | undefined) ?? rawEntry);
+
+    const rawSender =
+      (rawMessage['sender'] as Record<string, unknown> | undefined) ?? {};
+
+    const rawProof =
+      (rawMessage['proof'] as Record<string, unknown> | undefined) ?? {};
+
+    const rawMeta =
+      (rawMessage['meta'] as Record<string, unknown> | undefined) ?? {};
+
+    const rawProofHash =
+      rawProof['messageHash'] ??
+      rawProof['message_hash'] ??
+      rawProof['proofHash'] ??
+      rawProof['hash'] ??
+      rawMessage['proofHash'];
+
+    const proofHash =
+      typeof rawProofHash === 'string'
+        ? rawProofHash
+        : rawProofHash != null
+          ? String(rawProofHash)
+          : undefined;
+
+    return coerceChatMessage(
       {
-        id: excerpt.message.id,
-        channel: normalizeChatChannel(excerpt.message.channel),
-        kind: coerceMessageKind(excerpt.message.kind),
-        senderId: excerpt.message.sender.id,
-        senderName: excerpt.message.sender.name,
-        senderRank: excerpt.message.sender.title,
-        senderRole: excerpt.message.sender.role,
-        body: excerpt.message.body,
-        emoji: excerpt.message.emoji,
-        ts: excerpt.message.ts,
-        immutable: excerpt.message.immutable,
-        proofHash: excerpt.message.proof?.messageHash,
-        senderWire: excerpt.message.sender,
-        meta: excerpt.message.meta,
-        metadata: excerpt.message.meta as unknown as Record<string, unknown> | undefined,
-        proofMeta: excerpt.message.proof,
-        legendMeta: excerpt.message.legend,
-        replayMeta: excerpt.message.replay,
-        auditMeta: excerpt.message.audit,
+        id: ensureMessageId(
+          (rawMessage['id'] as string | undefined) ??
+            (rawMessage['messageId'] as string | undefined),
+          index,
+        ),
+        channel: normalizeChatChannel(
+          (rawMessage['channel'] as string | undefined) ??
+            (rawMessage['channelId'] as string | undefined),
+        ),
+        kind: coerceMessageKind(rawMessage['kind'] as string | undefined),
+        senderId:
+          (rawSender['id'] as string | undefined) ??
+          (rawSender['playerId'] as string | undefined) ??
+          (rawSender['memberId'] as string | undefined) ??
+          String(rawSender['name'] ?? 'system'),
+        senderName:
+          (rawSender['name'] as string | undefined) ??
+          (rawSender['displayName'] as string | undefined) ??
+          'System',
+        senderRank: rawSender['title'] as string | undefined,
+        senderRole:
+          rawSender['role'] as ChatSenderRole | string | undefined,
+        body: (rawMessage['body'] as string | undefined) ?? '',
+        emoji: rawMessage['emoji'] as string | undefined,
+        ts: coerceMessageTimestamp(
+          (rawMessage['ts'] as number | string | undefined) ??
+            (rawMessage['timestamp'] as number | string | undefined),
+          Date.now(),
+        ),
+        immutable: rawMessage['immutable'] as boolean | undefined,
+        proofHash,
+        senderWire: rawMessage['sender'] as ChatSenderWire | undefined,
+        meta: rawMessage['meta'] as ChatMessageMeta | undefined,
+        metadata: rawMeta,
+        proofMeta: rawMessage['proof'] as ChatProofMeta | undefined,
+        legendMeta: rawMessage['legend'] as ChatLegendMeta | undefined,
+        replayMeta:
+          (rawMessage['replay'] as ChatReplayMeta | undefined) ??
+          (rawEntry['replay'] as ChatReplayMeta | undefined),
+        auditMeta:
+          (rawMessage['audit'] as ChatAuditMeta | undefined) ??
+          (rawEntry['audit'] as ChatAuditMeta | undefined),
         render: {
-          groupKey: excerpt.groupKey,
-          compactPreview: excerpt.preview,
+          groupKey: rawEntry['groupKey'] as string | undefined,
+          compactPreview:
+            (rawEntry['preview'] as string | undefined) ??
+            (rawMessage['preview'] as string | undefined),
           queryMatched: false,
         },
         compatibility: {
           compatibilityLevel: 'SHARED_BACKED',
           derivesFromSharedContracts: true,
           derivesFromEnginePublicLane: false,
-          derivedFromFrameKind: 'ChatReplayWindowSnapshot',
+          derivedFromFrameKind: rawEntry['message']
+            ? 'ChatReplayWindowSnapshot'
+            : 'ChatReplayMessageList',
           authoritative: true,
         },
       },
       index,
-    ),
-  );
+    );
+  });
+}
+
+function getLastItem<T>(items: readonly T[]): T | null {
+  return items.length > 0 ? items[items.length - 1] ?? null : null;
 }
 
 export function createDefaultUseChatEngineResult(
@@ -1500,28 +1598,47 @@ export function createDefaultUseChatEngineResult(
   const messages = coerceChatMessages(
     (overrides.messages ?? []) as readonly (Partial<ChatMessage> & Record<string, unknown>)[],
   );
+
   const activeTab = normalizeChatChannel(
     overrides.activeChannel ?? overrides.activeTab ?? 'GLOBAL',
   );
+
   const grouped = groupMessagesByChannel(messages);
+
   const visibleMessages = overrides.visibleMessages
     ? coerceChatMessages(
         overrides.visibleMessages as readonly (Partial<ChatMessage> & Record<string, unknown>)[],
       )
     : grouped[activeTab];
+
   const allMessages = overrides.allMessages
     ? coerceChatMessages(
         overrides.allMessages as readonly (Partial<ChatMessage> & Record<string, unknown>)[],
       )
     : messages;
+
   const threat = overrides.threat ?? extractThreatSnapshot(visibleMessages);
-  const summaries = overrides.summaries ?? buildChannelSummaries(messages, activeTab);
-  const unread: Partial<Record<UnifiedVisibleChatChannel | Lowercase<UnifiedVisibleChatChannel>, number>> =
-    overrides.unread
-    ?? (deriveUnreadCounts(messages, activeTab) as unknown as Partial<Record<UnifiedVisibleChatChannel | Lowercase<UnifiedVisibleChatChannel>, number>>);
+
+  const summaries =
+    overrides.summaries ?? buildChannelSummaries(messages, activeTab);
+
+  const unread: Partial<
+    Record<
+      UnifiedVisibleChatChannel | Lowercase<UnifiedVisibleChatChannel>,
+      number
+    >
+  > =
+    overrides.unread ??
+    (deriveUnreadCounts(messages, activeTab) as unknown as Partial<
+      Record<
+        UnifiedVisibleChatChannel | Lowercase<UnifiedVisibleChatChannel>,
+        number
+      >
+    >);
+
   const totalUnread =
-    overrides.totalUnread
-    ?? Object.values(unread).reduce((sum, value) => sum + Number(value ?? 0), 0);
+    overrides.totalUnread ??
+    Object.values(unread).reduce((sum, value) => sum + Number(value ?? 0), 0);
 
   const sendText = overrides.sendText ?? overrides.sendMessage ?? (() => undefined);
   const switchTab = overrides.switchTab ?? (() => undefined);
@@ -1536,13 +1653,17 @@ export function createDefaultUseChatEngineResult(
     activeTab,
     activeChannel: overrides.activeChannel ?? activeTab,
     activeSummary:
-      overrides.activeSummary
-      ?? summaries.find((summary) => normalizeChatChannel(summary.channel) === activeTab),
+      overrides.activeSummary ??
+      summaries.find(
+        (summary) => normalizeChatChannel(summary.channel) === activeTab,
+      ),
     chatOpen: overrides.chatOpen ?? true,
     collapsed: overrides.collapsed ?? false,
     isPinned: overrides.isPinned ?? false,
     connected: overrides.connected ?? false,
-    connectionState: overrides.connectionState ?? (overrides.connected ? 'CONNECTED' : 'DISCONNECTED'),
+    connectionState:
+      overrides.connectionState ??
+      (overrides.connected ? 'CONNECTED' : 'DISCONNECTED'),
     unread,
     totalUnread,
     switchTab,
@@ -1566,10 +1687,15 @@ export function createDefaultUseChatEngineResult(
     threatModel: overrides.threatModel ?? threat,
     threatSummary: overrides.threatSummary,
     helperPrompt:
-      overrides.helperPrompt
-      ?? {
+      overrides.helperPrompt ??
+      {
         visible: threat.rescueNeeded,
-        tone: threat.band === 'SEVERE' ? 'urgent' : threat.band === 'HIGH' ? 'strategic' : 'calm',
+        tone:
+          threat.band === 'SEVERE'
+            ? 'urgent'
+            : threat.band === 'HIGH'
+              ? 'strategic'
+              : 'calm',
         title:
           threat.band === 'SEVERE'
             ? 'Pressure spike detected'
@@ -1615,24 +1741,30 @@ export function createDefaultUseChatEngineResult(
     shellMode: overrides.shellMode ?? 'DOCK',
     transcriptLocked: overrides.transcriptLocked ?? false,
     emptyStateMode: overrides.emptyStateMode ?? 'IDLE',
-    latestMessage: overrides.latestMessage ?? (visibleMessages.at(-1) ?? null),
+    latestMessage: overrides.latestMessage ?? getLastItem(visibleMessages),
     latestPlayerMessage:
-      overrides.latestPlayerMessage
-      ?? [...visibleMessages].reverse().find((message) => message.kind === 'PLAYER')
-      ?? null,
+      overrides.latestPlayerMessage ??
+      [...visibleMessages]
+        .reverse()
+        .find((message) => message.kind === 'PLAYER') ??
+      null,
     latestSystemMessage:
-      overrides.latestSystemMessage
-      ?? [...visibleMessages].reverse().find((message) => message.kind === 'SYSTEM')
-      ?? null,
+      overrides.latestSystemMessage ??
+      [...visibleMessages]
+        .reverse()
+        .find((message) => message.kind === 'SYSTEM') ??
+      null,
     latestThreatMessage:
-      overrides.latestThreatMessage
-      ?? [...visibleMessages].reverse().find(
-        (message) =>
-          message.kind === 'BOT_ATTACK'
-          || message.kind === 'BOT_TAUNT'
-          || message.kind === 'CASCADE_ALERT',
-      )
-      ?? null,
+      overrides.latestThreatMessage ??
+      [...visibleMessages]
+        .reverse()
+        .find(
+          (message) =>
+            message.kind === 'BOT_ATTACK' ||
+            message.kind === 'BOT_TAUNT' ||
+            message.kind === 'CASCADE_ALERT',
+        ) ??
+      null,
     diagnostics: overrides.diagnostics,
     mountState: overrides.mountState ?? {
       mountTarget: 'GAME_BOARD',
