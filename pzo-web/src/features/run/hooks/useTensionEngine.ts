@@ -14,8 +14,9 @@
  * - exposes derived signals for gauges, queue panels, HUD badges, and UX state
  * ============================================================================
  */
-
 import { useMemo } from 'react';
+import { useShallow } from 'zustand/react/shallow';
+
 import {
   useEngineStore,
   type EngineStoreState,
@@ -62,6 +63,8 @@ export interface UseTensionEngineResult {
 
   readonly activeThreatCount: number;
   readonly unresolvedThreatCount: number;
+  readonly totalObservedThreatCount: number;
+  readonly queuePressurePct: number;
   readonly hasThreats: boolean;
   readonly hasQueuedThreats: boolean;
   readonly hasArrivedThreats: boolean;
@@ -81,6 +84,7 @@ export interface UseTensionEngineResult {
   readonly dominantEntry: AnticipationEntry | null;
   readonly nextQueuedEntry: AnticipationEntry | null;
   readonly nextThreatEta: number | null;
+  readonly soonestArrivalTick: number | null;
 
   readonly lastArrivedEntry: AnticipationEntry | null;
   readonly lastExpiredEntry: AnticipationEntry | null;
@@ -94,6 +98,11 @@ export interface UseTensionEngineResult {
 function clamp01(value: number): number {
   if (!Number.isFinite(value)) return 0;
   return Math.max(0, Math.min(1, value));
+}
+
+function safeInt(value: number, fallback = 0): number {
+  if (!Number.isFinite(value)) return fallback;
+  return Math.max(0, Math.floor(value));
 }
 
 function resolveTensionBand(score: number): TensionBand {
@@ -137,65 +146,45 @@ function resolveNextQueuedEntry(
   return null;
 }
 
+function resolveVisibilityConfig(visibilityState: VisibilityState): VisibilityConfig {
+  return VISIBILITY_CONFIGS[visibilityState] ?? VISIBILITY_CONFIGS.SHADOWED;
+}
+
 export function useTensionEngine(): UseTensionEngineResult {
-  const score = useEngineStore((s: EngineStoreState) => s.tension.score);
-  const scoreHistory = useEngineStore(
-    (s: EngineStoreState) => s.tension.scoreHistory,
-  );
-
-  const visibilityState = useEngineStore(
-    (s: EngineStoreState) => s.tension.visibilityState,
-  );
-  const previousVisibilityState = useEngineStore(
-    (s: EngineStoreState) => s.tension.previousVisibilityState,
-  );
-
-  const queueLength = useEngineStore(
-    (s: EngineStoreState) => s.tension.queueLength,
-  );
-  const arrivedCount = useEngineStore(
-    (s: EngineStoreState) => s.tension.arrivedCount,
-  );
-  const queuedCount = useEngineStore(
-    (s: EngineStoreState) => s.tension.queuedCount,
-  );
-  const expiredCount = useEngineStore(
-    (s: EngineStoreState) => s.tension.expiredCount,
-  );
-
-  const isPulseActive = useEngineStore(
-    (s: EngineStoreState) => s.tension.isPulseActive,
-  );
-  const pulseTicksActive = useEngineStore(
-    (s: EngineStoreState) => s.tension.pulseTicksActive,
-  );
-  const isSustainedPulse = useEngineStore(
-    (s: EngineStoreState) => s.tension.isSustainedPulse,
-  );
-  const isEscalating = useEngineStore(
-    (s: EngineStoreState) => s.tension.isEscalating,
-  );
-
-  const sortedQueue = useEngineStore(
-    (s: EngineStoreState) => s.tension.sortedQueue,
-  );
-  const lastArrivedEntry = useEngineStore(
-    (s: EngineStoreState) => s.tension.lastArrivedEntry,
-  );
-  const lastExpiredEntry = useEngineStore(
-    (s: EngineStoreState) => s.tension.lastExpiredEntry,
-  );
-  const currentTick = useEngineStore(
-    (s: EngineStoreState) => s.tension.currentTick,
-  );
-  const isRunActive = useEngineStore(
-    (s: EngineStoreState) => s.tension.isRunActive,
-  );
+ const tension = useEngineStore(
+  useShallow((state: EngineStoreState) => ({
+    score: state.tension.score,
+    scoreHistory: state.tension.scoreHistory,
+    visibilityState: state.tension.visibilityState,
+    previousVisibilityState: state.tension.previousVisibilityState,
+    queueLength: state.tension.queueLength,
+    arrivedCount: state.tension.arrivedCount,
+    queuedCount: state.tension.queuedCount,
+    expiredCount: state.tension.expiredCount,
+    isPulseActive: state.tension.isPulseActive,
+    pulseTicksActive: state.tension.pulseTicksActive,
+    isSustainedPulse: state.tension.isSustainedPulse,
+    isEscalating: state.tension.isEscalating,
+    sortedQueue: state.tension.sortedQueue,
+    lastArrivedEntry: state.tension.lastArrivedEntry,
+    lastExpiredEntry: state.tension.lastExpiredEntry,
+    currentTick: state.tension.currentTick,
+    isRunActive: state.tension.isRunActive,
+  })),
+);
 
   return useMemo<UseTensionEngineResult>(() => {
-    const safeScore = clamp01(score);
-    const scorePct = safeScore * 100;
-    const visibilityConfig = VISIBILITY_CONFIGS[visibilityState];
+    const score = clamp01(tension.score);
+    const scoreHistory = Object.freeze([...tension.scoreHistory]);
+    const visibilityState = tension.visibilityState;
+    const visibilityConfig = resolveVisibilityConfig(visibilityState);
+    const queueLength = safeInt(tension.queueLength, 0);
+    const arrivedCount = safeInt(tension.arrivedCount, 0);
+    const queuedCount = safeInt(tension.queuedCount, 0);
+    const expiredCount = safeInt(tension.expiredCount, 0);
+    const currentTick = safeInt(tension.currentTick, 0);
+
+    const sortedQueue = Object.freeze([...tension.sortedQueue]);
     const dominantEntry = sortedQueue[0] ?? null;
     const nextQueuedEntry = resolveNextQueuedEntry(sortedQueue);
     const nextThreatEta =
@@ -205,17 +194,20 @@ export function useTensionEngine(): UseTensionEngineResult {
 
     const activeThreatCount = queueLength;
     const unresolvedThreatCount = queueLength + expiredCount;
+    const totalObservedThreatCount = arrivedCount + queuedCount + expiredCount;
+    const queuePressurePct = clamp01(Math.min(1, queueLength / 12));
+    const soonestArrivalTick = nextQueuedEntry?.arrivalTick ?? null;
 
     return {
-      score: safeScore,
-      scorePct,
-      scoreHistory: Object.freeze([...scoreHistory]),
+      score,
+      scorePct: score * 100,
+      scoreHistory,
 
-      tensionBand: resolveTensionBand(safeScore),
+      tensionBand: resolveTensionBand(score),
       trend: resolveTrend(scoreHistory),
 
       visibilityState,
-      previousVisibilityState,
+      previousVisibilityState: tension.previousVisibilityState ?? null,
       visibilityConfig,
 
       queueLength,
@@ -225,58 +217,45 @@ export function useTensionEngine(): UseTensionEngineResult {
 
       activeThreatCount,
       unresolvedThreatCount,
+      totalObservedThreatCount,
+      queuePressurePct,
       hasThreats: queueLength > 0,
       hasQueuedThreats: queuedCount > 0,
       hasArrivedThreats: arrivedCount > 0,
       hasExpiredThreats: expiredCount > 0,
 
-      isPulseActive,
-      pulseTicksActive,
-      isSustainedPulse,
+      isPulseActive: Boolean(tension.isPulseActive),
+      pulseTicksActive: safeInt(tension.pulseTicksActive, 0),
+      isSustainedPulse: Boolean(tension.isSustainedPulse),
       isNearPulse:
-        safeScore >= TENSION_CONSTANTS.PULSE_THRESHOLD - 0.1 &&
-        safeScore < TENSION_CONSTANTS.PULSE_THRESHOLD,
-      isEscalating,
-      isRunActive,
+        score >= TENSION_CONSTANTS.PULSE_THRESHOLD - 0.1 &&
+        score < TENSION_CONSTANTS.PULSE_THRESHOLD,
+      isEscalating: Boolean(tension.isEscalating),
+      isRunActive: Boolean(tension.isRunActive),
 
       currentTick,
       threatUrgency: resolveThreatUrgency(
-        safeScore,
+        score,
         queueLength,
         arrivedCount,
-        isPulseActive,
+        Boolean(tension.isPulseActive),
       ),
 
-      sortedQueue: Object.freeze([...sortedQueue]),
+      sortedQueue,
       dominantEntry,
       nextQueuedEntry,
       nextThreatEta,
+      soonestArrivalTick,
 
-      lastArrivedEntry,
-      lastExpiredEntry,
+      lastArrivedEntry: tension.lastArrivedEntry ?? null,
+      lastExpiredEntry: tension.lastExpiredEntry ?? null,
 
-      canSeeThreatTypes: visibilityConfig.showsThreatType,
-      canSeeArrivalTicks: visibilityConfig.showsArrivalTick,
-      canSeeMitigationPaths: visibilityConfig.showsMitigationPath,
-      canSeeWorstCase: visibilityConfig.showsWorstCase,
+      canSeeThreatTypes: Boolean(visibilityConfig.showsThreatType),
+      canSeeArrivalTicks: Boolean(visibilityConfig.showsArrivalTick),
+      canSeeMitigationPaths: Boolean(visibilityConfig.showsMitigationPath),
+      canSeeWorstCase: Boolean(visibilityConfig.showsWorstCase),
     };
-  }, [
-    score,
-    scoreHistory,
-    visibilityState,
-    previousVisibilityState,
-    queueLength,
-    arrivedCount,
-    queuedCount,
-    expiredCount,
-    isPulseActive,
-    pulseTicksActive,
-    isSustainedPulse,
-    isEscalating,
-    sortedQueue,
-    lastArrivedEntry,
-    lastExpiredEntry,
-    currentTick,
-    isRunActive,
-  ]);
+  }, [tension]);
 }
+
+export default useTensionEngine;
