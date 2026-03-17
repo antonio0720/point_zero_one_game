@@ -1,1502 +1,1158 @@
-// ═══════════════════════════════════════════════════════════════════════════════
-// POINT ZERO ONE — ROOT APPLICATION
-// pzo-web/src/App.tsx — Sprint 4: Auth Integration + Screen Router
-//
-// SCREEN FLOW:
-//   AUTH  →  LOBBY  →  GAME
-//   AuthGate gates all access. LobbyScreen handles mode selection.
-//   Game dashboard activates on run start.
-//
-// ENGINE COVERAGE: All 7 sovereign engines wired via sharedEventBus.
-// Density6 LLC · Point Zero One · Confidential
-// ═══════════════════════════════════════════════════════════════════════════════
+/**
+ * ============================================================================
+ * POINT ZERO ONE — ROOT APPLICATION
+ * FILE: pzo-web/src/App.tsx
+ * SPRINT: Engine 0 runtime shell · auth gate · lobby router · HUD + chat mount
+ * ============================================================================
+ *
+ * Intent
+ * - Keep AUTH → LOBBY → GAME flow intact.
+ * - Stop App.tsx from acting like the local debug dashboard.
+ * - Use the real Engine 0 runtime surfaces already in-repo:
+ *   - ZeroFacade / EngineOrchestrator
+ *   - Zustand engineStore / runStore
+ *   - RunHUD / GameHUD
+ *   - UnifiedChatDock
+ *   - existing mode-specific game screens
+ *
+ * Notes
+ * - ZeroFacade.bind() already performs authoritative one-time store wiring via
+ *   ZeroBindings. We intentionally do NOT call wireAllEngineHandlers() here to
+ *   avoid duplicate EventBus subscriptions.
+ * - LobbyScreen already launches the run through ModeRouter.startRunWithCards().
+ *   App only receives the launched context, binds the runtime shell, and routes.
+ * - External Next.js bridge (?from=nextjs&mode=...) remains supported.
+ *
+ * Density6 LLC · Point Zero One · Confidential
+ * ============================================================================
+ */
 
-import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { orchestrator }   from './engines/zero/EngineOrchestrator';
-import { sharedEventBus } from './engines/zero/EventBus';
-import { useAuth }        from './hooks/useAuth';
-import { AuthGate }       from './components/auth/AuthGate';
-import LobbyScreen        from './components/LobbyScreen';
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 
-// ── Mode-specific GameScreens (self-wiring via useEngineStore) ────────────
-import EmpireGameScreen    from './components/EmpireGameScreen';
-import PredatorGameScreen  from './components/PredatorGameScreen';
-import SyndicateGameScreen from './components/SyndicateGameScreen';
-import PhantomGameScreen   from './components/PhantomGameScreen';
-import type {
-  RunLifecycleState, RunOutcome, TickTier, PressureTier, BotId,
-  EngineEventPayloadMap,
-} from './engines/zero/types';
-import type { RunMode } from './engines/core/types';
+import { useAuth } from './hooks/useAuth';
+import { AuthGate } from './components/auth/AuthGate';
+import LobbyScreen from './components/LobbyScreen';
+
+import RunHUD from './features/run/components/RunHUD';
+import { UnifiedChatDock } from './components/chat/UnifiedChatDock';
 import {
-  fmtMoney, fmtHash, fmtRunId, fmtGrade, fmtBotName,
-  fmtChainId, fmtTickTier, fmtSovereigntyScore,
-  TICK_TIER_LABELS,
-} from './game/core/format';
+  createEmptyGameChatContext,
+  type GameChatContext,
+} from './components/chat/chatTypes';
+
+import EmpireGameScreen from './components/EmpireGameScreen';
+import PredatorGameScreen from './components/PredatorGameScreen';
+import SyndicateGameScreen from './components/SyndicateGameScreen';
+import PhantomGameScreen from './components/PhantomGameScreen';
+
+import { useEngineStore } from './store/engineStore';
+import { useRunStore } from './store/runStore';
+
+import { ZeroFacade } from './engines/zero/ZeroFacade';
+import { orchestrator } from './engines/zero/EngineOrchestrator';
+import { createDefaultConfig, ModeRouter } from './engines/modes/ModeRouter';
+
+import type { RunMode } from './engines/core/types';
+import type { RunOutcome } from './engines/zero/types';
+import { fmtRunId } from './game/core/format';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SCREEN STATES
+// Screen state
 // ─────────────────────────────────────────────────────────────────────────────
 
 type AppScreen = 'AUTH' | 'LOBBY' | 'GAME';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// DESIGN TOKENS — Single source of truth for all visual values
+// Theme tokens
 // ─────────────────────────────────────────────────────────────────────────────
 
 const C = {
-  // Foundations
-  void:     '#020208',
-  deep:     '#06060F',
-  surface:  '#0A0A18',
-  panel:    '#0D0D1E',
-  panelHi:  '#111128',
-
-  // Text — all WCAG AA+ on panel backgrounds
-  textPrime: '#F0F0FF',
-  textBold:  '#FFFFFF',
-  textSub:   '#B8B8D8',
-  textDim:   '#6A6A90',
-  textMut:   '#3A3A58',
-
-  // Brand — aligned with AuthGate indigo system
-  gold:     '#C9A84C',
-  goldDim:  'rgba(201,168,76,0.10)',
-  goldBrd:  'rgba(201,168,76,0.28)',
-  indigo:   '#818CF8',          // AuthGate primary accent
-  indigoDim:'rgba(99,102,241,0.12)',
-  indigoBrd:'rgba(99,102,241,0.28)',
-
-  // Engine accent palette
-  green:    '#2EE89A',
-  blue:     '#4A9EFF',
-  purple:   '#9B7DFF',
-  orange:   '#FF9B2F',
-  red:      '#FF4D4D',
-  crimson:  '#FF1744',
-  cyan:     '#2DDBF5',
-  teal:     '#00C9A7',
-  magenta:  '#E040FB',
-
-  // Semantic
-  success:  '#2EE89A',
-  warn:     '#FF9B2F',
-  danger:   '#FF4D4D',
-  info:     '#4A9EFF',
-
-  // Borders
-  brdLow:   'rgba(255,255,255,0.06)',
-  brdMed:   'rgba(255,255,255,0.12)',
-  brdHi:    'rgba(255,255,255,0.22)',
-
-  // Fonts — unified with AuthGate
-  display:  "'Barlow Condensed', 'Oswald', 'Impact', system-ui, sans-serif",
-  mono:     "'DM Mono', 'JetBrains Mono', 'Fira Code', monospace",
-  body:     "'DM Sans', 'Nunito', system-ui, sans-serif",
+  void: '#05050A',
+  surface: 'rgba(7, 9, 16, 0.84)',
+  surfaceStrong: 'rgba(8, 10, 18, 0.94)',
+  panel: 'rgba(12, 15, 24, 0.92)',
+  border: 'rgba(255,255,255,0.10)',
+  borderStrong: 'rgba(255,255,255,0.18)',
+  text: '#F4F7FF',
+  textSub: '#A7B3CF',
+  textDim: '#697692',
+  gold: '#C9A84C',
+  green: '#2EE89A',
+  orange: '#FF9B2F',
+  red: '#FF4D4D',
+  indigo: '#818CF8',
+  teal: '#2DDBF5',
+  mono: "'DM Mono', 'JetBrains Mono', 'Fira Code', monospace",
+  display: "'Barlow Condensed', 'Oswald', system-ui, sans-serif",
+  body: "'DM Sans', 'Nunito', system-ui, sans-serif",
 } as const;
 
-const PRESSURE_COLOR: Record<string, string> = {
-  CALM: C.green, BUILDING: C.gold, ELEVATED: C.orange, HIGH: C.red, CRITICAL: C.crimson,
-};
-const TICK_COLOR: Record<string, string> = {
-  T0: C.gold, T1: C.green, T2: C.orange, T3: C.red, T4: C.crimson,
-};
-const LOG_COLOR: Record<string, string> = {
-  info: C.textSub, warn: C.orange, danger: C.red, success: C.green,
-};
-const SHIELD_META: Record<string, { label: string; max: number; color: string }> = {
-  L1: { label: 'Liquidity Buffer', max: 100, color: C.green  },
-  L2: { label: 'Credit Line',      max: 80,  color: C.blue   },
-  L3: { label: 'Asset Floor',      max: 60,  color: C.orange },
-  L4: { label: 'Network Core',     max: 40,  color: C.red    },
-};
-const BOT_NAMES: Record<string, string> = {
-  BOT_01: 'The Liquidator', BOT_02: 'The Bureaucrat',
-  BOT_03: 'The Manipulator', BOT_04: 'The Crash Prophet', BOT_05: 'The Legacy Heir',
-  BOT_01_LIQUIDATOR: 'The Liquidator', BOT_02_BUREAUCRAT: 'The Bureaucrat',
-  BOT_03_MANIPULATOR: 'The Manipulator', BOT_04_CRASH_PROPHET: 'The Crash Prophet',
-  BOT_05_LEGACY_HEIR: 'The Legacy Heir',
-};
-const MAX_LOG = 60;
+const BASE_DECK_TYPES = [
+  'OPPORTUNITY',
+  'IPA',
+  'FUBAR',
+  'MISSED_OPPORTUNITY',
+  'PRIVILEGED',
+  'SO',
+] as const;
 
 // ─────────────────────────────────────────────────────────────────────────────
-// STATE SHAPES
+// Helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-interface TimeState {
-  tickIndex: number; tickTier: string; tickDurationMs: number;
-  seasonBudget: number; ticksRemaining: number;
-  decisionWindows: number; timeoutImminent: boolean;
-}
-interface PressureState {
-  score: number; tier: string; isEscalating: boolean;
-  isCritical: boolean; dominantSignal: string | null;
-}
-interface TensionState {
-  score: number; queueDepth: number; visibility: string; pulseActive: boolean;
-}
-interface ShieldLayerState { id: string; integrity: number; max: number; breached: boolean; }
-interface ShieldState { layers: Record<string, ShieldLayerState>; fortified: boolean; }
-interface BattleState {
-  activeBotCount: number; lastAttack: string | null; neutralized: string | null;
-  recentBotEvents: Array<{ botId: string; from: string; to: string }>;
-  counterIntelBot: string | null;
-}
-interface CascadeState {
-  activeChains: number; positiveActive: string | null; nemesisBroken: string | null;
-  lastChainId: string | null; lastSeverity: string | null;
-}
-interface SovereigntyState {
-  grade: string | null; sovereigntyScore: number | null; proofHash: string | null;
-}
-interface RunMeta {
-  lifecycle: RunLifecycleState; outcome: RunOutcome | null;
-  runId: string | null; finalNetWorth: number | null;
-  mode: RunMode | null;
-}
-interface LogEntry {
-  id: number; tick: number; message: string;
-  kind: 'info' | 'warn' | 'danger' | 'success';
-}
-interface EngineError { step: number; engineId: string; error: string; }
-
-let logSeq = 0;
-
-// ─────────────────────────────────────────────────────────────────────────────
-// SUB-COMPONENTS (unchanged)
-// ─────────────────────────────────────────────────────────────────────────────
-
-function clamp(n: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, n));
-}
-
-function BarMeter({ value, max, color, label, showValues = true }: {
-  value: number; max: number; color: string; label: string; showValues?: boolean;
-}) {
-  const ratio = Math.max(0, Math.min(1, value / max));
+function isRunMode(value: unknown): value is RunMode {
   return (
-    <div style={{ marginBottom: 8 }}>
-      {showValues && (
-        <div style={{
-          display: 'flex', justifyContent: 'space-between',
-          marginBottom: 4, fontSize: 11, fontFamily: C.mono,
-        }}>
-          <span style={{ color: C.textSub, fontWeight: 500 }}>{label}</span>
-          <span style={{ color, fontWeight: 700 }}>
-            {Math.round(value)} / {max}
-          </span>
+    value === 'solo' ||
+    value === 'asymmetric-pvp' ||
+    value === 'co-op' ||
+    value === 'ghost'
+  );
+}
+
+function coerceRunMode(value: unknown): RunMode | null {
+  return isRunMode(value) ? value : null;
+}
+
+function deriveRunModeFromContext(ctx: any): RunMode {
+  const ctorName = String(ctx?.modeEngine?.constructor?.name ?? '');
+  if (ctorName.includes('Predator')) return 'asymmetric-pvp';
+  if (ctorName.includes('Syndicate')) return 'co-op';
+  if (ctorName.includes('Phantom')) return 'ghost';
+  if (ctorName.includes('Empire')) return 'solo';
+
+  const cardMode = String(ctx?.cardEngine?.getMode?.() ?? '');
+  if (cardMode === 'HEAD_TO_HEAD') return 'asymmetric-pvp';
+  if (cardMode === 'TEAM_UP') return 'co-op';
+  if (cardMode === 'CHASE_A_LEGEND') return 'ghost';
+  return 'solo';
+}
+
+function buildExternalRunConfig(
+  mode: RunMode,
+  user?: { id?: string; username?: string | null },
+  seedOverride?: string | null,
+) {
+  const base = createDefaultConfig(mode);
+
+  return {
+    ...base,
+    mode,
+    userId: user?.id ?? 'player_01',
+    username: user?.username ?? 'PLAYER_1',
+    seedOverride: seedOverride ?? undefined,
+    deckConfig: {
+      enabledDeckTypes: [...BASE_DECK_TYPES],
+    },
+  } as any;
+}
+
+function deriveRegime(params: {
+  pressureTier?: string | null;
+  tensionScore?: number;
+  haterHeat?: number;
+  shieldPct?: number;
+  cashflow?: number;
+}): string {
+  const pressureTier = String(params.pressureTier ?? 'CALM');
+  const tensionScore = Number(params.tensionScore ?? 0);
+  const haterHeat = Number(params.haterHeat ?? 0);
+  const shieldPct = Number(params.shieldPct ?? 100);
+  const cashflow = Number(params.cashflow ?? 0);
+
+  if (
+    pressureTier === 'CRITICAL' ||
+    tensionScore >= 0.82 ||
+    haterHeat >= 0.78 ||
+    shieldPct <= 25
+  ) {
+    return 'PANIC';
+  }
+
+  if (
+    pressureTier === 'HIGH' ||
+    tensionScore >= 0.6 ||
+    haterHeat >= 0.55 ||
+    cashflow < 0
+  ) {
+    return 'COMPRESSION';
+  }
+
+  if (cashflow > 0 && shieldPct >= 60) {
+    return 'EXPANSION';
+  }
+
+  return 'STABLE';
+}
+
+function buildRuntimeEvents(params: {
+  lifecycleState: string;
+  pressureTier?: string | null;
+  tickTier?: string | null;
+  timeoutImminent?: boolean;
+  activeBotsCount?: number;
+  activeNegativeChains?: number;
+  decisionWindows?: number;
+  isBreachCascade?: boolean;
+  grade?: string | null;
+}): string[] {
+  const events: string[] = [];
+
+  events.push(`Lifecycle:${params.lifecycleState}`);
+  if (params.pressureTier) events.push(`Pressure:${params.pressureTier}`);
+  if (params.tickTier) events.push(`Tick:${params.tickTier}`);
+  if (params.timeoutImminent) events.push('Timeout imminent');
+  if ((params.activeBotsCount ?? 0) > 0) events.push(`Bots:${params.activeBotsCount}`);
+  if ((params.activeNegativeChains ?? 0) > 0) {
+    events.push(`Cascade chains:${params.activeNegativeChains}`);
+  }
+  if ((params.decisionWindows ?? 0) > 0) {
+    events.push(`Decision windows:${params.decisionWindows}`);
+  }
+  if (params.isBreachCascade) events.push('Shield breach cascade');
+  if (params.grade) events.push(`Grade:${params.grade}`);
+
+  return events;
+}
+
+function modeLabel(mode: RunMode | null): string {
+  switch (mode) {
+    case 'solo':
+      return 'EMPIRE';
+    case 'asymmetric-pvp':
+      return 'PREDATOR';
+    case 'co-op':
+      return 'SYNDICATE';
+    case 'ghost':
+      return 'PHANTOM';
+    default:
+      return 'UNBOUND';
+  }
+}
+
+function LaunchOverlay({ label }: { label: string }) {
+  return (
+    <div
+      style={{
+        minHeight: '100dvh',
+        display: 'grid',
+        placeItems: 'center',
+        background:
+          'radial-gradient(circle at 20% 20%, rgba(129,140,248,0.10), transparent 28%), radial-gradient(circle at 80% 80%, rgba(201,168,76,0.08), transparent 28%), #05050A',
+        color: C.text,
+        fontFamily: C.body,
+      }}
+    >
+      <div
+        style={{
+          width: 'min(560px, calc(100vw - 32px))',
+          borderRadius: 18,
+          border: `1px solid ${C.border}`,
+          background: C.surfaceStrong,
+          padding: '26px 24px',
+          boxShadow: '0 24px 80px rgba(0,0,0,0.45)',
+        }}
+      >
+        <div
+          style={{
+            fontFamily: C.display,
+            fontSize: 30,
+            fontWeight: 800,
+            letterSpacing: '0.08em',
+            color: C.gold,
+          }}
+        >
+          POINT ZERO ONE
         </div>
-      )}
-      <div style={{
-        height: 7, borderRadius: 4, background: 'rgba(255,255,255,0.05)',
-        overflow: 'hidden', position: 'relative' as const,
-      }}>
-        <div style={{
-          height: '100%',
-          width: `${ratio * 100}%`,
-          background: ratio < 0.3
-            ? `linear-gradient(90deg, ${C.crimson}, ${C.red})`
-            : ratio < 0.6
-            ? `linear-gradient(90deg, ${C.orange}, ${color})`
-            : `linear-gradient(90deg, ${color}, ${color}CC)`,
-          borderRadius: 4,
-          transition: 'width 0.35s ease',
-          boxShadow: ratio > 0.5 ? `0 0 8px ${color}50` : 'none',
-        }} />
+        <div
+          style={{
+            marginTop: 8,
+            fontFamily: C.mono,
+            fontSize: 12,
+            color: C.textSub,
+            letterSpacing: '0.10em',
+            textTransform: 'uppercase',
+          }}
+        >
+          Launching runtime
+        </div>
+        <div
+          style={{
+            marginTop: 18,
+            padding: '12px 14px',
+            borderRadius: 12,
+            background: 'rgba(255,255,255,0.04)',
+            border: `1px solid ${C.border}`,
+            fontFamily: C.mono,
+            fontSize: 12,
+            color: C.textSub,
+          }}
+        >
+          {label}
+        </div>
       </div>
     </div>
   );
 }
 
-function ScoreRing({ value, label, color, size = 64 }: {
-  value: number; label: string; color: string; size?: number;
+function StatusPill({
+  label,
+  color,
+}: {
+  label: string;
+  color: string;
 }) {
-  const radius       = (size - 8) / 2;
-  const circumference = 2 * Math.PI * radius;
-  const strokeDash   = circumference * clamp(value, 0, 1);
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
-      <div style={{ position: 'relative' as const, width: size, height: size }}>
-        <svg width={size} height={size} style={{ transform: 'rotate(-90deg)' }}>
-          <circle cx={size/2} cy={size/2} r={radius}
-            fill="none" stroke="rgba(255,255,255,0.07)" strokeWidth={4} />
-          <circle cx={size/2} cy={size/2} r={radius}
-            fill="none" stroke={color} strokeWidth={4}
-            strokeDasharray={`${strokeDash} ${circumference}`}
-            strokeLinecap="round"
-            style={{ transition: 'stroke-dasharray 0.4s ease' }}
-          />
-        </svg>
-        <div style={{
-          position: 'absolute' as const, inset: 0,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontSize: 13, fontFamily: C.mono, fontWeight: 800, color,
-        }}>
-          {Math.round(value * 100)}%
-        </div>
-      </div>
-      <span style={{
-        fontSize: 9, fontFamily: C.mono, color: C.textDim,
-        letterSpacing: '0.1em', textTransform: 'uppercase' as const,
-      }}>
-        {label}
-      </span>
-    </div>
-  );
-}
-
-function TierBadge({ label, color, pulse = false }: { label: string; color: string; pulse?: boolean }) {
-  return (
-    <span style={{
-      display: 'inline-flex', alignItems: 'center', gap: 5,
-      padding: '3px 9px', borderRadius: 4,
-      background: `${color}15`, border: `1.5px solid ${color}45`,
-      fontSize: 10, fontFamily: C.mono, fontWeight: 800,
-      color, letterSpacing: '0.1em',
-      textTransform: 'uppercase' as const,
-      animation: pulse ? 'pulseBadge 1s ease-in-out infinite' : 'none',
-    }}>
-      <span style={{
-        width: 6, height: 6, borderRadius: '50%', background: color,
-        boxShadow: pulse ? `0 0 8px ${color}` : 'none',
-        flexShrink: 0,
-      }} />
+    <span
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 6,
+        padding: '6px 10px',
+        borderRadius: 999,
+        background: `${color}14`,
+        border: `1px solid ${color}3A`,
+        color,
+        fontFamily: C.mono,
+        fontSize: 10,
+        fontWeight: 700,
+        letterSpacing: '0.08em',
+        textTransform: 'uppercase',
+      }}
+    >
+      <span
+        style={{
+          width: 6,
+          height: 6,
+          borderRadius: '50%',
+          background: color,
+          boxShadow: `0 0 12px ${color}`,
+        }}
+      />
       {label}
     </span>
   );
 }
 
-function EnginePanel({ title, number, accent = C.gold, children, compact = false }: {
-  title: string; number: string; accent?: string;
-  children: React.ReactNode; compact?: boolean;
+function CommandButton({
+  label,
+  onClick,
+  tone = 'default',
+}: {
+  label: string;
+  onClick: () => void;
+  tone?: 'default' | 'danger' | 'success';
 }) {
+  const color =
+    tone === 'danger' ? C.red : tone === 'success' ? C.green : C.textSub;
+
   return (
-    <div style={{
-      background: C.panel,
-      border: `1px solid ${accent}25`,
-      borderRadius: 10,
-      borderTop: `2px solid ${accent}60`,
-      padding: compact ? '10px 12px' : '12px 14px',
-      display: 'flex', flexDirection: 'column', gap: 8,
-    }}>
-      <div style={{
-        display: 'flex', alignItems: 'center', gap: 8,
-        paddingBottom: 8, borderBottom: `1px solid ${accent}18`,
-      }}>
-        <span style={{
-          fontSize: 9, fontFamily: C.mono, fontWeight: 800,
-          color: accent, opacity: 0.7,
-          background: `${accent}18`, padding: '1px 6px', borderRadius: 3,
-          letterSpacing: '0.1em',
-        }}>
-          E{number}
-        </span>
-        <span style={{
-          fontSize: 11, fontFamily: C.display, fontWeight: 700,
-          color: C.textSub, letterSpacing: '0.08em',
-          textTransform: 'uppercase' as const,
-        }}>
-          {title}
-        </span>
-      </div>
-      {children}
-    </div>
+    <button
+      onClick={onClick}
+      style={{
+        padding: '9px 12px',
+        borderRadius: 10,
+        background: `${color}12`,
+        border: `1px solid ${color}30`,
+        color,
+        cursor: 'pointer',
+        fontFamily: C.mono,
+        fontSize: 11,
+        fontWeight: 700,
+        letterSpacing: '0.08em',
+        textTransform: 'uppercase',
+        backdropFilter: 'blur(12px)',
+      }}
+    >
+      {label}
+    </button>
   );
 }
-
-function StatChip({ label, value, color = C.textSub }: {
-  label: string; value: string | number; color?: string;
-}) {
-  return (
-    <div style={{
-      padding: '6px 10px', borderRadius: 7,
-      background: 'rgba(255,255,255,0.03)',
-      border: `1px solid rgba(255,255,255,0.08)`,
-    }}>
-      <div style={{ fontSize: 9, fontFamily: C.mono, color: C.textDim, marginBottom: 3 }}>
-        {label}
-      </div>
-      <div style={{ fontSize: 15, fontFamily: C.mono, fontWeight: 800, color }}>
-        {value}
-      </div>
-    </div>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// USER BADGE — top-right auth status + logout
-// ─────────────────────────────────────────────────────────────────────────────
 
 function UserBadge({
-  displayName, username, onLogout, onLobby,
+  username,
+  displayName,
 }: {
-  displayName: string; username: string;
-  onLogout: () => void; onLobby: () => void;
+  username: string;
+  displayName: string;
 }) {
-  const [open, setOpen] = useState(false);
+  const initial = (displayName || username).charAt(0).toUpperCase();
+
   return (
-    <div style={{ position: 'relative' as const }}>
-      <button
-        onClick={() => setOpen(o => !o)}
+    <div
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 10,
+        padding: '7px 12px 7px 8px',
+        borderRadius: 999,
+        border: `1px solid ${C.border}`,
+        background: C.surface,
+        backdropFilter: 'blur(14px)',
+      }}
+    >
+      <div
         style={{
-          display: 'flex', alignItems: 'center', gap: 8,
-          padding: '6px 12px', borderRadius: 8,
-          background: C.indigoDim, border: `1px solid ${C.indigoBrd}`,
-          cursor: 'pointer', color: C.indigo,
-          fontFamily: C.mono, fontSize: 11, fontWeight: 700,
-          letterSpacing: '0.05em',
+          width: 26,
+          height: 26,
+          borderRadius: '50%',
+          display: 'grid',
+          placeItems: 'center',
+          background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+          color: '#FFFFFF',
+          fontFamily: C.mono,
+          fontSize: 11,
+          fontWeight: 800,
         }}
       >
-        <span style={{
-          width: 22, height: 22, borderRadius: '50%',
-          background: `linear-gradient(135deg, #6366f1, #8b5cf6)`,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontSize: 10, fontWeight: 800, color: '#fff', flexShrink: 0,
-        }}>
-          {(displayName || username).charAt(0).toUpperCase()}
-        </span>
-        {displayName || username}
-        <span style={{ fontSize: 9, opacity: 0.6 }}>▼</span>
-      </button>
-      {open && (
-        <div style={{
-          position: 'absolute' as const, top: 'calc(100% + 6px)', right: 0,
-          minWidth: 180, borderRadius: 10,
-          background: '#0f0f1e', border: `1px solid ${C.indigoBrd}`,
-          boxShadow: '0 12px 40px rgba(0,0,0,0.6)',
-          overflow: 'hidden', zIndex: 100,
-        }}>
-          <div style={{
-            padding: '10px 14px',
-            borderBottom: `1px solid rgba(255,255,255,0.07)`,
-          }}>
-            <div style={{ fontSize: 12, fontFamily: C.mono, color: C.textPrime, fontWeight: 700 }}>
-              {displayName || username}
-            </div>
-            <div style={{ fontSize: 10, fontFamily: C.mono, color: C.textDim, marginTop: 2 }}>
-              @{username}
-            </div>
-          </div>
-          <button
-            onClick={() => { setOpen(false); onLobby(); }}
-            style={{
-              width: '100%', padding: '10px 14px', border: 'none', cursor: 'pointer',
-              background: 'none', textAlign: 'left' as const,
-              fontFamily: C.mono, fontSize: 11, color: C.textSub,
-              fontWeight: 600, letterSpacing: '0.05em',
-            }}
-          >
-            ← LOBBY
-          </button>
-          <button
-            onClick={() => { setOpen(false); onLogout(); }}
-            style={{
-              width: '100%', padding: '10px 14px', border: 'none', cursor: 'pointer',
-              background: 'none', textAlign: 'left' as const,
-              fontFamily: C.mono, fontSize: 11, color: C.red,
-              fontWeight: 600, letterSpacing: '0.05em',
-              borderTop: `1px solid rgba(255,255,255,0.05)`,
-            }}
-          >
-            ⏏ SIGN OUT
-          </button>
+        {initial}
+      </div>
+      <div>
+        <div
+          style={{
+            color: C.text,
+            fontFamily: C.mono,
+            fontSize: 11,
+            fontWeight: 700,
+            lineHeight: 1,
+          }}
+        >
+          {displayName}
         </div>
-      )}
+        <div
+          style={{
+            color: C.textDim,
+            fontFamily: C.mono,
+            fontSize: 9,
+            marginTop: 2,
+            lineHeight: 1,
+          }}
+        >
+          @{username}
+        </div>
+      </div>
     </div>
   );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// MAIN APPLICATION
+// Runtime shell
+// ─────────────────────────────────────────────────────────────────────────────
+
+function GameRuntimeShell({
+  mode,
+  zero,
+  user,
+  isExternalLaunch,
+  onBackToLobby,
+  onLogout,
+  onEndRun,
+}: {
+  mode: RunMode;
+  zero: ZeroFacade;
+  user?: {
+    id?: string;
+    username: string;
+    displayName?: string | null;
+  } | null;
+  isExternalLaunch: boolean;
+  onBackToLobby: () => void;
+  onLogout: () => void;
+  onEndRun: (outcome: RunOutcome) => void;
+}) {
+  const run = useEngineStore((state) => state.run);
+  const time = useEngineStore((state) => state.time);
+  const pressure = useEngineStore((state) => state.pressure);
+  const tension = useEngineStore((state) => state.tension);
+  const shield = useEngineStore((state) => state.shield);
+  const battle = useEngineStore((state) => state.battle);
+  const cascade = useEngineStore((state) => state.cascade);
+  const sovereignty = useEngineStore((state) => state.sovereignty);
+
+  const netWorth = useRunStore((state) => state.netWorth);
+  const cashBalance = useRunStore((state) => state.cashBalance);
+  const monthlyIncome = useRunStore((state) => state.monthlyIncome);
+  const monthlyExpenses = useRunStore((state) => state.monthlyExpenses);
+  const cashflow = useRunStore((state) => state.cashflow);
+  const haterHeat = useRunStore((state) => state.haterHeat);
+
+  const lifecycleState = run.lifecycleState ?? 'IDLE';
+  const isRunActive =
+    lifecycleState === 'ACTIVE' ||
+    lifecycleState === 'STARTING' ||
+    lifecycleState === 'TICK_LOCKED';
+
+  const runtimeStatus = useMemo(() => zero.getRuntimeStatus(), [
+    zero,
+    lifecycleState,
+    run.lastTickIndex,
+    pressure.tier,
+    tension.score,
+    shield.overallIntegrityPct,
+    sovereignty.grade,
+  ]);
+
+  const regime = useMemo(
+    () =>
+      deriveRegime({
+        pressureTier: pressure.tier,
+        tensionScore: tension.score,
+        haterHeat,
+        shieldPct: shield.overallIntegrityPct,
+        cashflow,
+      }),
+    [pressure.tier, tension.score, haterHeat, shield.overallIntegrityPct, cashflow],
+  );
+
+  const gameCtx: GameChatContext = useMemo(
+    () =>
+      createEmptyGameChatContext({
+        tick: run.lastTickIndex ?? time.ticksElapsed ?? 0,
+        cash: cashBalance,
+        netWorth,
+        income: monthlyIncome,
+        expenses: monthlyExpenses,
+        regime,
+        events: buildRuntimeEvents({
+          lifecycleState,
+          pressureTier: pressure.tier,
+          tickTier: time.currentTier,
+          timeoutImminent: time.seasonTimeoutImminent,
+          activeBotsCount: battle.activeBotsCount,
+          activeNegativeChains: cascade.activeNegativeChains.length,
+          decisionWindows: time.activeDecisionWindows.length,
+          isBreachCascade: shield.isInBreachCascade,
+          grade: sovereignty.grade,
+        }),
+        pressureTier: pressure.tier ?? undefined,
+        tickTier: time.currentTier ?? undefined,
+        haterHeat,
+        runOutcome: run.outcome ?? undefined,
+        roomId: run.runId ?? undefined,
+        sessionId: run.seed ?? undefined,
+        playerId: user?.id ?? run.userId ?? undefined,
+        playerName: user?.displayName ?? user?.username ?? run.userId ?? 'PLAYER',
+        activeChannel: mode === 'co-op' ? 'SYNDICATE' : 'GLOBAL',
+        connectionState: isRunActive ? 'CONNECTED' : 'DEGRADED',
+      }),
+    [
+      battle.activeBotsCount,
+      cashBalance,
+      cascade.activeNegativeChains.length,
+      haterHeat,
+      isRunActive,
+      lifecycleState,
+      mode,
+      monthlyExpenses,
+      monthlyIncome,
+      netWorth,
+      pressure.tier,
+      regime,
+      run.lastTickIndex,
+      run.outcome,
+      run.runId,
+      run.seed,
+      run.userId,
+      shield.isInBreachCascade,
+      sovereignty.grade,
+      time.activeDecisionWindows.length,
+      time.currentTier,
+      time.seasonTimeoutImminent,
+      time.ticksElapsed,
+      user?.displayName,
+      user?.id,
+      user?.username,
+    ],
+  );
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+
+    const root = document.documentElement;
+    root.style.setProperty('--pzo-engine-pressure', `${Math.max(0, Math.min(1, pressure.score))}`);
+    root.style.setProperty('--pzo-engine-tension', `${Math.max(0, Math.min(1, tension.score))}`);
+    root.style.setProperty('--pzo-engine-shield', `${Math.max(0, Math.min(1, shield.overallIntegrityPct / 100))}`);
+    root.style.setProperty('--pzo-engine-heat', `${Math.max(0, Math.min(1, haterHeat))}`);
+    root.style.setProperty('--pzo-engine-cascade', `${Math.max(0, Math.min(1, cascade.activeNegativeChains.length / 5))}`);
+    root.style.setProperty('--pzo-engine-time', `${Math.max(0, Math.min(1, time.ticksRemaining / Math.max(1, time.seasonTickBudget || 1)))}`);
+  }, [
+    pressure.score,
+    tension.score,
+    shield.overallIntegrityPct,
+    haterHeat,
+    cascade.activeNegativeChains.length,
+    time.ticksRemaining,
+    time.seasonTickBudget,
+  ]);
+
+  const modeScreen = useMemo(() => {
+    switch (mode) {
+      case 'solo':
+        return <EmpireGameScreen onCardCounterplay={undefined} onIgnoreCard={undefined} />;
+      case 'asymmetric-pvp':
+        return <PredatorGameScreen {...({} as any)} />;
+      case 'co-op':
+        return <SyndicateGameScreen {...({} as any)} />;
+      case 'ghost':
+        return <PhantomGameScreen {...({} as any)} />;
+      default:
+        return <EmpireGameScreen onCardCounterplay={undefined} onIgnoreCard={undefined} />;
+    }
+  }, [mode]);
+
+  return (
+    <div
+      style={{
+        minHeight: '100dvh',
+        position: 'relative',
+        overflow: 'hidden',
+        background:
+          'radial-gradient(circle at 16% 18%, rgba(201,168,76,0.08), transparent 22%), radial-gradient(circle at 82% 18%, rgba(129,140,248,0.10), transparent 20%), radial-gradient(circle at 80% 84%, rgba(45,219,245,0.08), transparent 24%), #05050A',
+        fontFamily: C.body,
+      }}
+    >
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800;900&family=DM+Mono:wght@400;500;700&family=DM+Sans:wght@400;500;700&display=swap');
+
+        :root {
+          --pzo-engine-pressure: 0;
+          --pzo-engine-tension: 0;
+          --pzo-engine-shield: 1;
+          --pzo-engine-heat: 0;
+          --pzo-engine-cascade: 0;
+          --pzo-engine-time: 1;
+        }
+
+        * { box-sizing: border-box; }
+
+        .pzo-shell-overlay {
+          position: fixed;
+          inset: 0;
+          pointer-events: none;
+          z-index: 20;
+        }
+
+        .pzo-shell-vignette {
+          position: absolute;
+          inset: 0;
+          background:
+            radial-gradient(circle at center, transparent 38%, rgba(0,0,0, calc(var(--pzo-engine-pressure) * 0.26)) 100%),
+            radial-gradient(circle at center, transparent 50%, rgba(255, 77, 77, calc(var(--pzo-engine-heat) * 0.10)) 100%);
+          pointer-events: none;
+        }
+
+        .pzo-command-rail,
+        .pzo-chat-wrap,
+        .pzo-hud-wrap {
+          pointer-events: auto;
+        }
+
+        .pzo-command-rail {
+          position: fixed;
+          top: 14px;
+          left: 14px;
+          right: 14px;
+          z-index: 30;
+          display: flex;
+          align-items: flex-start;
+          justify-content: space-between;
+          gap: 12px;
+          flex-wrap: wrap;
+        }
+
+        .pzo-hud-wrap {
+          position: fixed;
+          top: 78px;
+          left: 14px;
+          right: min(344px, 28vw);
+          z-index: 28;
+        }
+
+        .pzo-chat-wrap {
+          position: fixed;
+          top: 78px;
+          right: 14px;
+          bottom: 14px;
+          width: min(340px, calc(100vw - 28px));
+          z-index: 29;
+        }
+
+        .pzo-runtime-header {
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+          padding: 12px 14px;
+          border-radius: 16px;
+          border: 1px solid ${C.border};
+          background: ${C.surfaceStrong};
+          backdrop-filter: blur(16px);
+          box-shadow: 0 18px 50px rgba(0,0,0,0.35);
+        }
+
+        .pzo-runtime-actions {
+          display: flex;
+          align-items: center;
+          justify-content: flex-end;
+          gap: 8px;
+          flex-wrap: wrap;
+        }
+
+        .pzo-runtime-title {
+          margin: 0;
+          font-family: ${C.display};
+          font-size: clamp(24px, 4vw, 34px);
+          font-weight: 900;
+          line-height: 0.95;
+          color: ${C.gold};
+          letter-spacing: 0.08em;
+          text-transform: uppercase;
+        }
+
+        .pzo-runtime-subtitle {
+          margin: 0;
+          color: ${C.textDim};
+          font-family: ${C.mono};
+          font-size: 10px;
+          letter-spacing: 0.14em;
+          text-transform: uppercase;
+        }
+
+        .pzo-runtime-meta {
+          display: flex;
+          gap: 8px;
+          flex-wrap: wrap;
+        }
+
+        @media (max-width: 1100px) {
+          .pzo-chat-wrap {
+            width: min(320px, calc(100vw - 28px));
+          }
+
+          .pzo-hud-wrap {
+            right: min(320px, 34vw);
+          }
+        }
+
+        @media (max-width: 860px) {
+          .pzo-command-rail {
+            position: sticky;
+            top: 0;
+            z-index: 30;
+            padding-top: 14px;
+          }
+
+          .pzo-hud-wrap {
+            position: relative;
+            top: auto;
+            left: auto;
+            right: auto;
+            margin: 14px;
+          }
+
+          .pzo-chat-wrap {
+            position: relative;
+            top: auto;
+            right: auto;
+            bottom: auto;
+            width: auto;
+            margin: 0 14px 14px;
+          }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+          * {
+            animation: none !important;
+            transition: none !important;
+            scroll-behavior: auto !important;
+          }
+        }
+      `}</style>
+
+      <div>{modeScreen}</div>
+
+      <div className="pzo-shell-overlay">
+        <div className="pzo-shell-vignette" />
+      </div>
+
+      <div className="pzo-command-rail">
+        <div className="pzo-runtime-header">
+          <h1 className="pzo-runtime-title">POINT ZERO ONE</h1>
+          <p className="pzo-runtime-subtitle">
+            Density6 · Engine 0 runtime shell · {modeLabel(mode)}
+          </p>
+          <div className="pzo-runtime-meta">
+            <StatusPill
+              label={lifecycleState}
+              color={
+                lifecycleState === 'ACTIVE'
+                  ? C.green
+                  : lifecycleState === 'ENDED'
+                    ? C.orange
+                    : C.textSub
+              }
+            />
+            {pressure.tier ? (
+              <StatusPill
+                label={`Pressure ${pressure.tier}`}
+                color={pressure.isCritical ? C.red : C.gold}
+              />
+            ) : null}
+            {time.seasonTimeoutImminent ? (
+              <StatusPill label="Timeout imminent" color={C.orange} />
+            ) : null}
+            {(cascade.activeNegativeChains?.length ?? 0) > 0 ? (
+              <StatusPill
+                label={`Cascade ${(cascade.activeNegativeChains?.length ?? 0)}`}
+                color={C.red}
+              />
+            ) : null}
+            {sovereignty.grade ? (
+              <StatusPill
+                label={`Grade ${sovereignty.grade}`}
+                color={['S', 'A'].includes(String(sovereignty.grade)) ? C.gold : C.textSub}
+              />
+            ) : null}
+          </div>
+          <div
+            style={{
+              color: C.textSub,
+              fontFamily: C.mono,
+              fontSize: 10,
+              letterSpacing: '0.08em',
+            }}
+          >
+            RUN {run.runId ? fmtRunId(run.runId) : 'UNINITIALIZED'} · HEALTH {runtimeStatus.lifecycleState}
+          </div>
+        </div>
+
+        <div className="pzo-runtime-actions">
+          {user ? (
+            <UserBadge
+              username={user.username}
+              displayName={user.displayName ?? user.username}
+            />
+          ) : null}
+          {!isExternalLaunch ? (
+            <CommandButton label="Lobby" onClick={onBackToLobby} />
+          ) : (
+            <CommandButton
+              label="Return"
+              onClick={onBackToLobby}
+            />
+          )}
+          <CommandButton label="Freedom" tone="success" onClick={() => onEndRun('FREEDOM')} />
+          <CommandButton label="Bankrupt" tone="danger" onClick={() => onEndRun('BANKRUPT')} />
+          <CommandButton label="Abandon" tone="danger" onClick={() => onEndRun('ABANDONED')} />
+          {user ? <CommandButton label="Sign out" onClick={onLogout} /> : null}
+        </div>
+      </div>
+
+      <div className="pzo-hud-wrap">
+        <RunHUD
+          isActiveRun={lifecycleState !== 'IDLE'}
+          showIntel={true}
+          style={{
+            borderRadius: 16,
+            overflow: 'hidden',
+            boxShadow: '0 18px 50px rgba(0,0,0,0.32)',
+          }}
+        />
+      </div>
+
+      <aside className="pzo-chat-wrap">
+        <UnifiedChatDock
+          gameCtx={gameCtx}
+          title="COMMAND COMMS"
+          subtitle={`${modeLabel(mode)} · ${regime}`}
+          startCollapsed={false}
+          enableThreatMeter={true}
+          enableTranscriptDrawer={true}
+          enableHelperPrompt={true}
+          enableRoomMeta={true}
+          enableLawFooter={true}
+          defaultTab={mode === 'co-op' ? 'SYNDICATE' : 'GLOBAL'}
+          style={{
+            height: '100%',
+            maxHeight: '100%',
+          }}
+        />
+      </aside>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// App
 // ─────────────────────────────────────────────────────────────────────────────
 
 const App: React.FC = () => {
-  // ── Auth ─────────────────────────────────────────────────────────────────
   const auth = useAuth();
 
-  // ── Screen Router ─────────────────────────────────────────────────────────
-  const [screen, setScreen] = useState<AppScreen>('AUTH');
+  const externalLaunchRef = useRef<boolean>(
+    typeof window !== 'undefined' &&
+      new URLSearchParams(window.location.search).get('from') === 'nextjs',
+  );
 
-  // After auth confirms session, route to LOBBY
+  const zeroRef = useRef<ZeroFacade | null>(null);
+  if (!zeroRef.current) {
+    zeroRef.current = new ZeroFacade(orchestrator);
+  }
+
+  const zero = zeroRef.current;
+
+  const [screen, setScreen] = useState<AppScreen>(
+    externalLaunchRef.current ? 'GAME' : 'AUTH',
+  );
+  const [runMode, setRunMode] = useState<RunMode | null>(null);
+  const [externalBootError, setExternalBootError] = useState<string | null>(null);
+
+  const activeRunContextRef = useRef<any | null>(null);
+
+  const destroyRunContext = useCallback(() => {
+    try {
+      activeRunContextRef.current?.teardown?.();
+    } catch (error) {
+      console.warn('[App] teardown() failed:', error);
+    } finally {
+      activeRunContextRef.current = null;
+    }
+  }, []);
+
+  const resetRuntime = useCallback(
+    (clearMode = true) => {
+      destroyRunContext();
+
+      try {
+        zero.reset({ rebindAfterReset: true });
+      } catch (error) {
+        console.warn('[App] zero.reset() failed:', error);
+      }
+
+      try {
+        useEngineStore.getState().resetAllSlices?.();
+      } catch (error) {
+        console.warn('[App] engineStore resetAllSlices() failed:', error);
+      }
+
+      try {
+        useRunStore.getState().reset?.();
+      } catch (error) {
+        console.warn('[App] runStore reset() failed:', error);
+      }
+
+      if (clearMode) {
+        setRunMode(null);
+      }
+    },
+    [destroyRunContext, zero],
+  );
+
   useEffect(() => {
+    if (runMode) {
+      zero.bind({
+        mode: runMode,
+        wireStoreHandlers: true,
+        wireRunMirror: true,
+        registerDefaultChannels: true,
+      });
+    } else {
+      zero.bind({
+        wireStoreHandlers: true,
+        wireRunMirror: true,
+        registerDefaultChannels: true,
+      });
+    }
+  }, [runMode, zero]);
+
+  useEffect(() => {
+    if (externalLaunchRef.current) return;
+
     if (auth.user && screen === 'AUTH') {
       setScreen('LOBBY');
-    } else if (!auth.user && screen !== 'AUTH' && !externalLaunchRef.current) {
+      return;
+    }
+
+    if (!auth.user && !auth.loading && screen !== 'AUTH') {
       setScreen('AUTH');
     }
-  }, [auth.user]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // ── AUTO-START FROM NEXT.JS (Strategy B bridge) ─────────────────────────
-  // When Next.js play page redirects here with ?from=nextjs&mode=solo&seed=...
-  // skip auth/lobby and start the run immediately.
-  const externalLaunchRef = useRef(false);
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('from') !== 'nextjs') return;
-    const mode = params.get('mode') as RunMode | null;
-    if (!mode) return;
-    externalLaunchRef.current = true;
-    setScreen('GAME');
-    const timer = setTimeout(() => {
-      resetAllState();
-      const runId = params.get('runId') ?? `run_${Date.now()}`;
-      const seed  = params.get('seed') ?? String(Math.floor(Math.random() * 999999));
-      setRunMeta(prev => ({ ...prev, mode: mode as RunMode }));
-      orchestrator.startRun({
-        runId,
-        userId:           'player_01',
-        seed,
-        seasonTickBudget: 720,
-        freedomThreshold: 500_000,
-        clientVersion:    '4.0.0',
-        engineVersion:    '4.0.0',
-      });
-    }, 200);
-    return () => clearTimeout(timer);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
+  }, [auth.loading, auth.user, screen]);
 
   const handleAuthSuccess = useCallback(() => {
     setScreen('LOBBY');
   }, []);
 
-  const handleLogout = useCallback(async () => {
-    await auth.logout();
-    setScreen('AUTH');
-  }, [auth]);
-
-  const handleLobbyBack = useCallback(() => {
-    setScreen('LOBBY');
-  }, []);
-
-  // ── Game State ────────────────────────────────────────────────────────────
-  const [runMeta, setRunMeta] = useState<RunMeta>({
-    lifecycle: 'IDLE', outcome: null, runId: null, finalNetWorth: null, mode: null,
-  });
-
-  const [timeState, setTimeState] = useState<TimeState>({
-    tickIndex: 0, tickTier: 'T1', tickDurationMs: 1200,
-    seasonBudget: 720, ticksRemaining: 720,
-    decisionWindows: 0, timeoutImminent: false,
-  });
-
-  const [pressure, setPressure] = useState<PressureState>({
-    score: 0, tier: 'CALM', isEscalating: false,
-    isCritical: false, dominantSignal: null,
-  });
-
-  const [tension, setTension] = useState<TensionState>({
-    score: 0, queueDepth: 0, visibility: 'SHADOWED', pulseActive: false,
-  });
-
-  const [shields, setShields] = useState<ShieldState>({
-    fortified: false,
-    layers: {
-      L1: { id: 'L1', integrity: 100, max: 100, breached: false },
-      L2: { id: 'L2', integrity: 80,  max: 80,  breached: false },
-      L3: { id: 'L3', integrity: 60,  max: 60,  breached: false },
-      L4: { id: 'L4', integrity: 40,  max: 40,  breached: false },
+  const handleLobbyLaunch = useCallback(
+    (ctx: any) => {
+      const mode = deriveRunModeFromContext(ctx);
+      destroyRunContext();
+      activeRunContextRef.current = ctx;
+      setRunMode(mode);
+      setScreen('GAME');
+      setExternalBootError(null);
     },
-  });
+    [destroyRunContext],
+  );
 
-  const [battle, setBattle] = useState<BattleState>({
-    activeBotCount: 0, lastAttack: null, neutralized: null,
-    recentBotEvents: [], counterIntelBot: null,
-  });
-
-  const [cascade, setCascade] = useState<CascadeState>({
-    activeChains: 0, positiveActive: null, nemesisBroken: null,
-    lastChainId: null, lastSeverity: null,
-  });
-
-  const [sovereignty, setSovereignty] = useState<SovereigntyState>({
-    grade: null, sovereigntyScore: null, proofHash: null,
-  });
-
-  const [engineErrors, setEngineErrors] = useState<EngineError[]>([]);
-  const [log, setLog]                   = useState<LogEntry[]>([]);
-  const [logVisible, setLogVisible]     = useState(true);
-
-  const tickIndexRef = useRef(0);
-  const logRef       = useRef<HTMLDivElement>(null);
-
-  const pushLog = useCallback((message: string, kind: LogEntry['kind'] = 'info') => {
-    setLog(prev => {
-      const entry: LogEntry = { id: logSeq++, tick: tickIndexRef.current, message, kind };
-      const next = [entry, ...prev];
-      return next.length > MAX_LOG ? next.slice(0, MAX_LOG) : next;
-    });
-  }, []);
-
-  // ── Derived ──────────────────────────────────────────────────────────────
-  const pressureColor = PRESSURE_COLOR[pressure.tier] ?? C.gold;
-  const tickColor     = TICK_COLOR[timeState.tickTier] ?? C.gold;
-  const isActive      = runMeta.lifecycle === 'ACTIVE';
-  const isIdle        = runMeta.lifecycle === 'IDLE' || runMeta.lifecycle === 'ENDED';
-
-  const shieldPctTotal = useMemo(() => {
-    const layers = Object.values(shields.layers);
-    const total  = layers.reduce((a, l) => a + l.max, 0);
-    const curr   = layers.reduce((a, l) => a + l.integrity, 0);
-    return total > 0 ? curr / total : 0;
-  }, [shields]);
-
-  // ── Event Bus ────────────────────────────────────────────────────────────
-  useEffect(() => {
-    const unsubs: Array<() => void> = [];
-
-    unsubs.push(sharedEventBus.on('RUN_STARTED', (e) => {
-      setRunMeta(prev => ({ ...prev, lifecycle: 'ACTIVE', outcome: null, runId: e.payload.runId, finalNetWorth: null }));
-      pushLog(`▶ Run started · seed ${e.payload.seed} · ${e.payload.tickBudget} ticks`, 'success');
-    }));
-
-    unsubs.push(sharedEventBus.on('RUN_ENDED', (e) => {
-      const p = e.payload as any;
-      setRunMeta(prev => ({ ...prev, lifecycle: 'ENDED', outcome: p.outcome, finalNetWorth: p.finalNetWorth }));
-      const kind: Record<string, LogEntry['kind']> = { FREEDOM: 'success', TIMEOUT: 'warn', BANKRUPT: 'danger', ABANDONED: 'warn' };
-      pushLog(`■ ${p.outcome} · ${fmtMoney(p.finalNetWorth)}`, kind[p.outcome] ?? 'info');
-    }));
-
-    unsubs.push(sharedEventBus.on('TICK_START', (e) => {
-      const p = e.payload as any;
-      tickIndexRef.current = p.tickIndex;
-      setTimeState(prev => ({ ...prev, tickIndex: p.tickIndex, tickDurationMs: p.tickDurationMs ?? prev.tickDurationMs }));
-    }));
-
-    unsubs.push(sharedEventBus.on('TICK_COMPLETE', (e) => {
-      const p = e.payload as any;
-      setTimeState(prev => ({ ...prev, tickIndex: p.tickIndex }));
-    }));
-
-    unsubs.push(sharedEventBus.on('TICK_TIER_CHANGED', (e) => {
-      const p = e.payload as any;
-      setTimeState(prev => ({ ...prev, tickTier: p.to }));
-      pushLog(`⏱ Tier: ${TICK_TIER_LABELS[p.from] ?? p.from} → ${TICK_TIER_LABELS[p.to] ?? p.to}`,
-        p.to === 'T3' || p.to === 'T4' ? 'danger' : p.to === 'T0' ? 'success' : 'warn');
-    }));
-
-    unsubs.push(sharedEventBus.on('SEASON_TIMEOUT_IMMINENT', (e) => {
-      const p = e.payload as any;
-      setTimeState(prev => ({ ...prev, ticksRemaining: p.ticksRemaining, timeoutImminent: true }));
-      pushLog(`⚠ Timeout imminent — ${p.ticksRemaining} ticks left`, 'warn');
-    }));
-
-    unsubs.push(sharedEventBus.on('DECISION_WINDOW_OPENED', () => {
-      setTimeState(prev => ({ ...prev, decisionWindows: prev.decisionWindows + 1 }));
-    }));
-
-    unsubs.push(sharedEventBus.on('DECISION_WINDOW_RESOLVED', (e) => {
-      const p = e.payload as any;
-      setTimeState(prev => ({ ...prev, decisionWindows: Math.max(0, prev.decisionWindows - 1) }));
-      if (!p.wasOptimal) pushLog(`⚡ Suboptimal — card ${p.cardId}`, 'warn');
-    }));
-
-    unsubs.push(sharedEventBus.on('DECISION_WINDOW_EXPIRED', (e) => {
-      const p = e.payload as any;
-      setTimeState(prev => ({ ...prev, decisionWindows: Math.max(0, prev.decisionWindows - 1) }));
-      pushLog(`⌛ Window expired — card ${p.cardId} auto-resolved`, 'warn');
-    }));
-
-    unsubs.push(sharedEventBus.on('PRESSURE_SCORE_UPDATED', (e) => {
-      const p = e.payload as any;
-      setPressure(prev => ({ ...prev, score: p.score, tier: p.tier }));
-    }));
-
-    unsubs.push(sharedEventBus.on('PRESSURE_TIER_CHANGED', (e) => {
-      const p = e.payload as any;
-      setPressure(prev => ({ ...prev, tier: p.to, isEscalating: ['ELEVATED','HIGH','CRITICAL'].includes(p.to) }));
-      pushLog(`📊 Pressure: ${p.from} → ${p.to}`,
-        p.to === 'CRITICAL' || p.to === 'HIGH' ? 'danger' : p.to === 'CALM' ? 'success' : 'warn');
-    }));
-
-    unsubs.push(sharedEventBus.on('PRESSURE_CRITICAL', () => {
-      setPressure(prev => ({ ...prev, isCritical: true }));
-      pushLog(`🚨 CRITICAL PRESSURE`, 'danger');
-    }));
-
-    unsubs.push(sharedEventBus.on('TENSION_SCORE_UPDATED', (e) => {
-      const p = e.payload as any;
-      setTension(prev => ({ ...prev, score: p.score }));
-    }));
-
-    unsubs.push(sharedEventBus.on('ANTICIPATION_PULSE', (e) => {
-      const p = e.payload as any;
-      setTension(prev => ({ ...prev, pulseActive: true, queueDepth: p.queueDepth }));
-      setTimeout(() => setTension(prev => ({ ...prev, pulseActive: false })), 800);
-    }));
-
-    unsubs.push(sharedEventBus.on('THREAT_VISIBILITY_CHANGED', (e) => {
-      const p = e.payload as any;
-      setTension(prev => ({ ...prev, visibility: p.to }));
-    }));
-
-    unsubs.push(sharedEventBus.on('THREAT_QUEUED', (e) => {
-      const p = e.payload as any;
-      setTension(prev => ({ ...prev, queueDepth: prev.queueDepth + 1 }));
-      pushLog(`👁 Threat queued: ${p.threatType} → tick ${p.arrivalTick}`, 'warn');
-    }));
-
-    unsubs.push(sharedEventBus.on('THREAT_ARRIVED', (e) => {
-      const p = e.payload as any;
-      pushLog(`⚠ Threat arrived: ${p.threatType}`, 'danger');
-    }));
-
-    unsubs.push(sharedEventBus.on('THREAT_MITIGATED', (e) => {
-      const p = e.payload as any;
-      setTension(prev => ({ ...prev, queueDepth: Math.max(0, prev.queueDepth - 1) }));
-      pushLog(`✓ Threat mitigated: ${p.cardUsed}`, 'success');
-    }));
-
-    unsubs.push(sharedEventBus.on('THREAT_EXPIRED', (e) => {
-      const p = e.payload as any;
-      setTension(prev => ({ ...prev, queueDepth: Math.max(0, prev.queueDepth - 1) }));
-      if (p.unmitigated) pushLog(`✗ Threat expired — hit taken`, 'danger');
-    }));
-
-    unsubs.push(sharedEventBus.on('SHIELD_LAYER_DAMAGED', (e) => {
-      const p = e.payload as any;
-      const id = String(p.layer);
-      setShields(prev => ({
-        ...prev, layers: {
-          ...prev.layers,
-          [id]: { ...prev.layers[id], integrity: Math.max(0, p.integrity) },
-        },
-      }));
-      pushLog(`🛡 ${SHIELD_META[id]?.label ?? id} hit — ${Math.round(p.damage)} dmg`, 'warn');
-    }));
-
-    unsubs.push(sharedEventBus.on('SHIELD_LAYER_BREACHED', (e) => {
-      const p = e.payload as any;
-      const id = String(p.layer);
-      setShields(prev => ({
-        ...prev, layers: {
-          ...prev.layers,
-          [id]: { ...prev.layers[id], integrity: 0, breached: true },
-        },
-      }));
-      pushLog(`💥 BREACH — ${SHIELD_META[id]?.label ?? id}`, 'danger');
-    }));
-
-    unsubs.push(sharedEventBus.on('SHIELD_PASSIVE_REGEN', (e) => {
-      const p = e.payload as any;
-      const id = String(p.layer);
-      setShields(prev => ({
-        ...prev, layers: {
-          ...prev.layers,
-          [id]: { ...prev.layers[id], integrity: p.newIntegrity, breached: p.newIntegrity === 0 },
-        },
-      }));
-    }));
-
-    unsubs.push(sharedEventBus.on('SHIELD_REPAIRED', (e) => {
-      const p = e.payload as any;
-      const id = String(p.layer);
-      setShields(prev => ({
-        ...prev, layers: {
-          ...prev.layers,
-          [id]: { ...prev.layers[id], integrity: p.newIntegrity, breached: p.newIntegrity === 0 },
-        },
-      }));
-      pushLog(`🔧 ${SHIELD_META[id]?.label ?? id} repaired +${p.amount}`, 'success');
-    }));
-
-    unsubs.push(sharedEventBus.on('SHIELD_FORTIFIED', () => {
-      setShields(prev => ({ ...prev, fortified: true }));
-      pushLog('🏰 ALL SHIELDS FORTIFIED', 'success');
-    }));
-
-    unsubs.push(sharedEventBus.on('SHIELD_SNAPSHOT_UPDATED', (e) => {
-      const snap = (e.payload as any).snapshot;
-      if (snap?.layers) {
-        setShields(prev => {
-          const updated = { ...prev.layers };
-          for (const [id, layer] of Object.entries(snap.layers as Record<string, any>)) {
-            if (updated[id]) {
-              updated[id] = { ...updated[id], integrity: layer.integrity ?? updated[id].integrity, breached: layer.breached ?? updated[id].breached };
-            }
-          }
-          return { ...prev, layers: updated, fortified: snap.fortified ?? prev.fortified };
-        });
-      }
-    }));
-
-    unsubs.push(sharedEventBus.on('BOT_STATE_CHANGED', (e) => {
-      const p = e.payload as any;
-      const name = BOT_NAMES[p.botId as string] ?? p.botId;
-      setBattle(prev => ({
-        ...prev,
-        recentBotEvents: [{ botId: p.botId, from: p.from, to: p.to }, ...prev.recentBotEvents].slice(0, 5),
-      }));
-      if (['TARGETING','ATTACKING'].includes(p.to)) {
-        pushLog(`🤖 ${name}: ${p.from} → ${p.to}`, p.to === 'ATTACKING' ? 'danger' : 'warn');
-      }
-    }));
-
-    unsubs.push(sharedEventBus.on('BOT_ATTACK_FIRED', (e) => {
-      const p = e.payload as any;
-      const name = BOT_NAMES[p.botId] ?? p.botId;
-      setBattle(prev => ({ ...prev, lastAttack: `${name} · ${p.attackType} → ${p.targetLayer}` }));
-      pushLog(`⚔ ATTACK: ${name} · ${p.attackType}`, 'danger');
-    }));
-
-    unsubs.push(sharedEventBus.on('BOT_NEUTRALIZED', (e) => {
-      const p = e.payload as any;
-      const name = BOT_NAMES[p.botId] ?? p.botId;
-      setBattle(prev => ({ ...prev, neutralized: name }));
-      pushLog(`✓ ${name} NEUTRALIZED · ${p.immunityTicks} ticks immunity`, 'success');
-      setTimeout(() => setBattle(prev => ({ ...prev, neutralized: null })), 3000);
-    }));
-
-    unsubs.push(sharedEventBus.on('COUNTER_INTEL_AVAILABLE', (e) => {
-      const p = e.payload as any;
-      const name = BOT_NAMES[p.botId] ?? p.botId;
-      setBattle(prev => ({ ...prev, counterIntelBot: name }));
-      pushLog(`🔍 Intel: ${name} · tier ${p.tier}`, 'info');
-    }));
-
-    unsubs.push(sharedEventBus.on('BATTLE_SNAPSHOT_UPDATED', (e) => {
-      const snap = (e.payload as any).snapshot;
-      if (snap?.activeBotCount !== undefined) {
-        setBattle(prev => ({ ...prev, activeBotCount: snap.activeBotCount }));
-      }
-    }));
-
-    unsubs.push(sharedEventBus.on('CASCADE_CHAIN_TRIGGERED', (e) => {
-      const p = e.payload as any;
-      setCascade(prev => ({ ...prev, activeChains: prev.activeChains + 1, lastChainId: p.chainId, lastSeverity: p.severity }));
-      pushLog(`🌊 Cascade: ${p.chainId} · ${p.severity}`,
-        p.severity === 'CATASTROPHIC' || p.severity === 'HIGH' ? 'danger' : 'warn');
-    }));
-
-    unsubs.push(sharedEventBus.on('CASCADE_CHAIN_BROKEN', (e) => {
-      const p = e.payload as any;
-      setCascade(prev => ({ ...prev, activeChains: Math.max(0, prev.activeChains - 1) }));
-      pushLog(`⛓ Cascade broken — ${p.linksSkipped} links skipped`, 'success');
-    }));
-
-    unsubs.push(sharedEventBus.on('CASCADE_CHAIN_COMPLETED', () => {
-      setCascade(prev => ({ ...prev, activeChains: Math.max(0, prev.activeChains - 1) }));
-    }));
-
-    unsubs.push(sharedEventBus.on('CASCADE_POSITIVE_ACTIVATED', (e) => {
-      const p = e.payload as any;
-      setCascade(prev => ({ ...prev, positiveActive: p.chainName }));
-      pushLog(`✨ Positive cascade: ${p.chainName}`, 'success');
-    }));
-
-    unsubs.push(sharedEventBus.on('CASCADE_POSITIVE_DISSOLVED', () => {
-      setCascade(prev => ({ ...prev, positiveActive: null }));
-    }));
-
-    unsubs.push(sharedEventBus.on('NEMESIS_BROKEN', (e) => {
-      const p = e.payload as any;
-      const name = BOT_NAMES[p.botId] ?? p.botId;
-      setCascade(prev => ({ ...prev, nemesisBroken: name }));
-      pushLog(`💀 NEMESIS BROKEN: ${name}`, 'success');
-      setTimeout(() => setCascade(prev => ({ ...prev, nemesisBroken: null })), 4000);
-    }));
-
-    unsubs.push(sharedEventBus.on('CASCADE_SNAPSHOT_UPDATED', (e) => {
-      const snap = (e.payload as any).snapshot;
-      if (snap?.activeChainCount !== undefined) {
-        setCascade(prev => ({ ...prev, activeChains: snap.activeChainCount }));
-      }
-    }));
-
-    unsubs.push(sharedEventBus.on('RUN_COMPLETED', (e) => {
-      const p = e.payload as any;
-      setSovereignty({ grade: p.grade, sovereigntyScore: p.sovereigntyScore, proofHash: p.proofHash });
-      pushLog(`🏆 Grade: ${p.grade} · ${p.sovereigntyScore} pts`, p.grade === 'S' || p.grade === 'A' ? 'success' : 'info');
-    }));
-
-    unsubs.push(sharedEventBus.on('TICK_STEP_ERROR', (e) => {
-      const p = e.payload as any;
-      setEngineErrors(prev => [{ step: p.step, engineId: p.engineId ?? '?', error: p.error }, ...prev].slice(0, 10));
-      pushLog(`⛔ Engine error step ${p.step} [${p.engineId ?? '?'}]: ${p.error}`, 'danger');
-    }));
-
-    unsubs.push(sharedEventBus.on('ENGINE_ERROR', (e) => {
-      const p = e.payload as any;
-      pushLog(`⛔ ENGINE ERROR (${p.engineId}): ${p.error}`, 'danger');
-    }));
-
-    return () => unsubs.forEach(fn => fn());
-  }, [pushLog]);
-
-  // ── Run Controls ─────────────────────────────────────────────────────────
-  const resetAllState = useCallback(() => {
-    setPressure({ score: 0, tier: 'CALM', isEscalating: false, isCritical: false, dominantSignal: null });
-    setTension({ score: 0, queueDepth: 0, visibility: 'SHADOWED', pulseActive: false });
-    setBattle({ activeBotCount: 0, lastAttack: null, neutralized: null, recentBotEvents: [], counterIntelBot: null });
-    setCascade({ activeChains: 0, positiveActive: null, nemesisBroken: null, lastChainId: null, lastSeverity: null });
-    setSovereignty({ grade: null, sovereigntyScore: null, proofHash: null });
-    setEngineErrors([]);
-    setShields({
-      fortified: false,
-      layers: {
-        L1: { id: 'L1', integrity: 100, max: 100, breached: false },
-        L2: { id: 'L2', integrity: 80,  max: 80,  breached: false },
-        L3: { id: 'L3', integrity: 60,  max: 60,  breached: false },
-        L4: { id: 'L4', integrity: 40,  max: 40,  breached: false },
-      },
-    });
-  }, []);
-
-  const handleStartRun = useCallback((mode: RunMode) => {
-    if (!isIdle) return;
-    resetAllState();
-    if (runMeta.lifecycle === 'ENDED') {
-      orchestrator.reset();
-      setRunMeta({ lifecycle: 'IDLE', outcome: null, runId: null, finalNetWorth: null, mode: null });
-    }
-    const runId = `run_${Date.now()}`;
-    setRunMeta(prev => ({ ...prev, mode }));
+  const handleLegacyStart = useCallback((mode: RunMode) => {
+    setRunMode(mode);
     setScreen('GAME');
-    orchestrator.startRun({
-      runId,
-      userId:           auth.user?.id ?? 'player_01',
-      seed:             String(Math.floor(Math.random() * 999999)),
-      seasonTickBudget: 720,
-      freedomThreshold: 500_000,
-      clientVersion:    '4.0.0',
-      engineVersion:    '4.0.0',
-    });
-  }, [isIdle, runMeta.lifecycle, resetAllState, auth.user]);
+    setExternalBootError(null);
+  }, []);
 
-  const handleEndRun = useCallback(async (outcome: RunOutcome) => {
-    if (!isActive) return;
-    await orchestrator.endRun(outcome);
-    setRunMeta(prev => ({ ...prev, lifecycle: 'ENDED' }));
-  }, [isActive]);
+  const handleBackToLobby = useCallback(() => {
+    if (externalLaunchRef.current) {
+      try {
+        if (window.opener) {
+          window.opener.postMessage({ type: 'PZO_BACK_TO_LOBBY' }, '*');
+        }
+      } catch {
+        // no-op
+      }
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // SCREEN ROUTING
-  // ─────────────────────────────────────────────────────────────────────────
+      resetRuntime();
+      window.location.href = '/play';
+      return;
+    }
 
-  // AUTH screen
-  if (screen === 'AUTH' || (!auth.user && !auth.loading)) {
+    resetRuntime();
+    setScreen(auth.user ? 'LOBBY' : 'AUTH');
+  }, [auth.user, resetRuntime]);
+
+  const handleLogout = useCallback(async () => {
+    resetRuntime();
+    try {
+      await auth.logout();
+    } finally {
+      setScreen('AUTH');
+    }
+  }, [auth, resetRuntime]);
+
+  const handleEndRun = useCallback(
+    async (outcome: RunOutcome) => {
+      try {
+        await zero.endRun(outcome);
+      } catch (error) {
+        console.error('[App] endRun failed:', error);
+      } finally {
+        destroyRunContext();
+      }
+    },
+    [destroyRunContext, zero],
+  );
+
+  useEffect(() => {
+    if (!externalLaunchRef.current) return;
+
+    const params = new URLSearchParams(window.location.search);
+    const mode = coerceRunMode(params.get('mode'));
+
+    if (!mode) {
+      setExternalBootError('External launch requested without a valid mode.');
+      return;
+    }
+
+    let cancelled = false;
+
+    const boot = async () => {
+      try {
+        setExternalBootError(null);
+        resetRuntime(false);
+
+        const ctx = await ModeRouter.startRunWithCards(
+          mode,
+          buildExternalRunConfig(mode, auth.user ?? undefined, params.get('seed')),
+          auth.user?.id ?? 'player_01',
+        );
+
+        if (cancelled) {
+          try {
+            ctx?.teardown?.();
+          } catch {
+            // no-op
+          }
+          return;
+        }
+
+        activeRunContextRef.current = ctx;
+        setRunMode(mode);
+        setScreen('GAME');
+      } catch (error) {
+        console.error('[App] external launch failed:', error);
+        setExternalBootError(
+          error instanceof Error
+            ? error.message
+            : 'External launch failed.',
+        );
+      }
+    };
+
+    void boot();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [auth.user, resetRuntime]);
+
+  useEffect(() => {
+    return () => {
+      destroyRunContext();
+    };
+  }, [destroyRunContext]);
+
+  if (auth.loading && !externalLaunchRef.current && screen !== 'GAME') {
+    return <LaunchOverlay label="Checking session and preparing auth gate…" />;
+  }
+
+  if (screen === 'AUTH' || (!auth.user && !auth.loading && !externalLaunchRef.current)) {
     return <AuthGate onAuth={handleAuthSuccess} auth={auth} />;
   }
 
-  // LOBBY screen
   if (screen === 'LOBBY') {
     return (
       <LobbyScreen
-        onStart={handleStartRun}
+        onStartWithContext={handleLobbyLaunch}
+        onStart={handleLegacyStart}
+        onLogout={handleLogout}
         user={auth.user ? {
-          username:    auth.user.username,
+          userId: auth.user.id,
+          username: auth.user.username,
           displayName: auth.user.displayName ?? auth.user.username,
         } : undefined}
-        onLogout={handleLogout}
       />
     );
   }
 
-  // ── MODE-SPECIFIC GAME SCREENS (Strategy B: Next.js external launch) ──────
-  // When launched from Next.js, render the correct mode screen instead of
-  // the monolithic dashboard. GameScreens are self-wiring via useEngineStore.
-  if (externalLaunchRef.current && runMeta.mode) {
-    const modeScreenProps = {
-      onCardCounterplay: undefined,
-      onIgnoreCard: undefined,
-    };
-    const backBtn = (
-      <button
-        onClick={() => {
-          // Signal Next.js to return to lobby via postMessage
-          if (window.opener) window.opener.postMessage({ type: 'PZO_BACK_TO_LOBBY' }, '*');
-          window.location.href = '/play';
-        }}
-        style={{
-          position: 'fixed', top: 16, left: 16, zIndex: 9999,
-          padding: '8px 16px', borderRadius: 8, cursor: 'pointer',
-          background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)',
-          color: '#B8B8D8', fontSize: 11, fontFamily: "'DM Mono', monospace",
-          letterSpacing: '0.1em', textTransform: 'uppercase' as const,
-        }}
-      >
-        ← LOBBY
-      </button>
+  if (!runMode) {
+    return (
+      <LaunchOverlay
+        label={
+          externalBootError
+            ? `Runtime boot error: ${externalBootError}`
+            : 'Preparing mode runtime, binding Engine 0, and mounting HUD + chat…'
+        }
+      />
     );
-    switch (runMeta.mode) {
-      case 'solo':
-        return <>{backBtn}<EmpireGameScreen {...modeScreenProps} /></>;
-      case 'asymmetric-pvp':
-        return <>{backBtn}<PredatorGameScreen /></>;
-      case 'co-op':
-        return <>{backBtn}<SyndicateGameScreen /></>;
-      case 'ghost':
-        return <>{backBtn}<PhantomGameScreen /></>;
-    }
   }
 
-  // ── GAME DASHBOARD ────────────────────────────────────────────────────────
   return (
-    <div style={{
-      minHeight: '100dvh',
-      background: `radial-gradient(ellipse at 20% 20%, rgba(201,168,76,0.04) 0%, transparent 50%),
-                   radial-gradient(ellipse at 80% 80%, rgba(74,158,255,0.04) 0%, transparent 50%),
-                   ${C.void}`,
-      color: C.textPrime,
-      fontFamily: C.body,
-      padding: 'clamp(10px,2vw,20px)',
-      boxSizing: 'border-box' as const,
-      overflowX: 'hidden',
-    }}>
-
-      {/* ── Global Styles ───────────────────────────────────────────────── */}
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800;900&family=DM+Mono:wght@400;500;600&family=DM+Sans:wght@400;500;600&display=swap');
-        * { box-sizing: border-box; }
-        @keyframes pulseBadge {
-          0%,100% { opacity: 1; }
-          50%      { opacity: 0.65; }
-        }
-        @keyframes pulseRed {
-          0%,100% { box-shadow: 0 0 0 0 rgba(255,23,68,0); }
-          50%      { box-shadow: 0 0 0 6px rgba(255,23,68,0.3); }
-        }
-        @keyframes fadeSlide {
-          from { opacity:0; transform: translateY(-6px); }
-          to   { opacity:1; transform: translateY(0); }
-        }
-        button:focus-visible { outline: 2px solid ${C.gold}; outline-offset: 2px; }
-        ::-webkit-scrollbar { width: 4px; }
-        ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { background: ${C.brdMed}; border-radius: 4px; }
-        @media (prefers-reduced-motion: reduce) {
-          * { animation: none !important; transition: none !important; }
-        }
-      `}</style>
-
-      {/* ── Header ──────────────────────────────────────────────────────── */}
-      <header style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        flexWrap: 'wrap' as const, gap: 10,
-        marginBottom: 'clamp(12px,2.5vw,20px)',
-        paddingBottom: 'clamp(10px,2vw,16px)',
-        borderBottom: `1px solid ${C.goldBrd}`,
-      }}>
-        <div>
-          <h1 style={{
-            margin: 0, fontSize: 'clamp(22px,5vw,34px)',
-            fontFamily: C.display, fontWeight: 900,
-            color: C.gold, letterSpacing: '0.06em',
-            lineHeight: 1, textTransform: 'uppercase' as const,
-          }}>
-            POINT ZERO ONE
-            {runMeta.mode && (
-              <span style={{
-                marginLeft: 12, fontSize: 12, fontFamily: C.mono, fontWeight: 700,
-                color: C.indigo, opacity: 0.8, letterSpacing: '0.15em',
-                verticalAlign: 'middle',
-              }}>
-                {runMeta.mode.toUpperCase()}
-              </span>
-            )}
-          </h1>
-          <p style={{
-            margin: '3px 0 0', fontSize: 'clamp(9px,1.5vw,10px)',
-            fontFamily: C.mono, color: C.textDim,
-            letterSpacing: '0.15em', textTransform: 'uppercase' as const,
-          }}>
-            DENSITY6 · 7-ENGINE SOVEREIGN SIMULATION
-          </p>
-        </div>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' as const }}>
-          {timeState.timeoutImminent && <TierBadge label="TIMEOUT IMMINENT" color={C.orange} pulse />}
-          {pressure.isCritical && isActive && <TierBadge label="CRITICAL PRESSURE" color={C.crimson} pulse />}
-          {cascade.nemesisBroken && <TierBadge label="NEMESIS BROKEN" color={C.gold} />}
-          {cascade.positiveActive && <TierBadge label="POSITIVE CASCADE" color={C.teal} />}
-
-          {/* Lifecycle pill */}
-          <div style={{
-            padding: '6px 14px', borderRadius: 6,
-            background: isActive ? `${C.green}12` : 'rgba(255,255,255,0.04)',
-            border: `1.5px solid ${isActive ? C.green : C.brdLow}`,
-            fontSize: 11, fontFamily: C.mono, fontWeight: 800,
-            color: isActive ? C.green : C.textDim,
-            letterSpacing: '0.1em',
-          }}>
-            {runMeta.lifecycle}
-          </div>
-
-          {/* User badge */}
-          {auth.user && (
-            <UserBadge
-              displayName={auth.user.displayName ?? auth.user.username}
-              username={auth.user.username}
-              onLogout={handleLogout}
-              onLobby={handleLobbyBack}
-            />
-          )}
-        </div>
-      </header>
-
-      {/* ── Main Grid ───────────────────────────────────────────────────── */}
-      <div style={{
-        display: 'grid',
-        gridTemplateColumns: 'clamp(220px,22vw,280px) 1fr',
-        gap: 'clamp(8px,1.5vw,14px)',
-        alignItems: 'start',
-      }}>
-
-        {/* ── LEFT COLUMN ─────────────────────────────────────────────── */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-
-          {/* ── Run Control ─────────────────────────────────────────── */}
-          <EnginePanel title="Run Control" number="0" accent={C.gold}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-
-              {/* Back to lobby */}
-              <button
-                onClick={handleLobbyBack}
-                style={{
-                  padding: '7px 12px', borderRadius: 7, cursor: 'pointer',
-                  background: C.indigoDim, border: `1px solid ${C.indigoBrd}`,
-                  fontFamily: C.mono, fontWeight: 700,
-                  fontSize: 10, letterSpacing: '0.08em',
-                  color: C.indigo, textTransform: 'uppercase' as const,
-                }}
-              >
-                ← LOBBY
-              </button>
-
-              <button
-                onClick={() => handleStartRun(runMeta.mode ?? 'solo')}
-                disabled={!isIdle}
-                aria-label={runMeta.lifecycle === 'ENDED' ? 'Start new run' : 'Start run'}
-                style={{
-                  padding: '12px 16px', borderRadius: 8,
-                  cursor: isIdle ? 'pointer' : 'not-allowed',
-                  background: isIdle
-                    ? `linear-gradient(135deg, ${C.gold}, #E8C560)`
-                    : 'rgba(255,255,255,0.04)',
-                  color: isIdle ? '#000' : C.textDim,
-                  border: 'none',
-                  fontFamily: C.display, fontWeight: 800,
-                  fontSize: 15, letterSpacing: '0.06em',
-                  textTransform: 'uppercase' as const,
-                  transition: 'all 0.15s ease',
-                  boxShadow: isIdle ? `0 4px 20px ${C.gold}30` : 'none',
-                }}
-              >
-                {runMeta.lifecycle === 'ENDED' ? '↺ NEW RUN' : '▶ START RUN'}
-              </button>
-
-              {isActive && (
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6 }}>
-                  {([
-                    { label: 'FREEDOM',  outcome: 'FREEDOM'   as RunOutcome, color: C.green  },
-                    { label: 'BANKRUPT', outcome: 'BANKRUPT'  as RunOutcome, color: C.red    },
-                    { label: 'ABANDON',  outcome: 'ABANDONED' as RunOutcome, color: C.textDim},
-                  ] as const).map(({ label, outcome, color }) => (
-                    <button
-                      key={outcome}
-                      onClick={() => handleEndRun(outcome)}
-                      aria-label={`End run: ${label}`}
-                      style={{
-                        padding: '8px 4px', borderRadius: 7, cursor: 'pointer',
-                        background: `${color}10`,
-                        border: `1.5px solid ${color}35`,
-                        fontFamily: C.mono, fontWeight: 700,
-                        fontSize: 9, letterSpacing: '0.06em',
-                        color, textTransform: 'uppercase' as const,
-                        transition: 'all 0.15s ease',
-                        minHeight: 36,
-                      }}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-              )}
-
-              {runMeta.outcome && (
-                <div style={{
-                  padding: '10px 12px', borderRadius: 8, textAlign: 'center' as const,
-                  background: runMeta.outcome === 'FREEDOM' ? `${C.green}10` : `${C.red}10`,
-                  border: `1.5px solid ${runMeta.outcome === 'FREEDOM' ? C.green : C.red}35`,
-                }}>
-                  <div style={{
-                    fontSize: 14, fontFamily: C.display, fontWeight: 800,
-                    letterSpacing: '0.06em',
-                    color: runMeta.outcome === 'FREEDOM' ? C.green : C.red,
-                  }}>
-                    {runMeta.outcome}
-                  </div>
-                  {runMeta.finalNetWorth !== null && (
-                    <div style={{ fontSize: 18, fontFamily: C.mono, fontWeight: 800, color: C.textPrime, marginTop: 3 }}>
-                      {fmtMoney(runMeta.finalNetWorth)}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {runMeta.runId && (
-                <div style={{ fontSize: 9, fontFamily: C.mono, color: C.textMut, textAlign: 'center' as const }}>
-                  RUN: {fmtRunId(runMeta.runId)}
-                </div>
-              )}
-            </div>
-          </EnginePanel>
-
-          {/* ── Engine 1: Time ──────────────────────────────────────── */}
-          <EnginePanel title="Time Engine" number="1" accent={tickColor}>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6, marginBottom: 4 }}>
-              <StatChip label="TICK" value={timeState.tickIndex} color={tickColor} />
-              <StatChip label="TIER" value={timeState.tickTier} color={tickColor} />
-              <StatChip label="MS"   value={timeState.tickDurationMs} color={C.textSub} />
-            </div>
-            <BarMeter
-              value={timeState.seasonBudget - timeState.ticksRemaining}
-              max={timeState.seasonBudget}
-              color={tickColor}
-              label="Season Progress"
-            />
-            <TierBadge label={TICK_TIER_LABELS[timeState.tickTier] ?? timeState.tickTier} color={tickColor} />
-            {timeState.decisionWindows > 0 && (
-              <div style={{
-                padding: '6px 10px', borderRadius: 6, marginTop: 4,
-                background: `${C.orange}12`, border: `1px solid ${C.orange}40`,
-                fontSize: 11, fontFamily: C.mono, fontWeight: 600, color: C.orange,
-              }}>
-                ⚡ {timeState.decisionWindows} decision window{timeState.decisionWindows > 1 ? 's' : ''} open
-              </div>
-            )}
-          </EnginePanel>
-
-          {/* ── Engine 2: Pressure ──────────────────────────────────── */}
-          <EnginePanel title="Pressure Engine" number="2" accent={pressureColor}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
-              <ScoreRing value={pressure.score} label="pressure" color={pressureColor} size={68} />
-              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 6 }}>
-                <TierBadge label={pressure.tier} color={pressureColor} pulse={pressure.isCritical} />
-                {pressure.isEscalating && (
-                  <span style={{ fontSize: 10, fontFamily: C.mono, color: pressureColor }}>▲ ESCALATING</span>
-                )}
-              </div>
-            </div>
-            <BarMeter value={pressure.score} max={1} color={pressureColor} label="Score" />
-          </EnginePanel>
-
-          {/* ── Engine 3: Tension ───────────────────────────────────── */}
-          <EnginePanel title="Tension Engine" number="3" accent={tension.pulseActive ? C.orange : C.purple}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
-              <ScoreRing
-                value={tension.score}
-                label="tension"
-                color={tension.pulseActive ? C.orange : C.purple}
-                size={68}
-              />
-              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 6 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span style={{ fontSize: 11, fontFamily: C.mono, color: C.textDim }}>Queue</span>
-                  <span style={{
-                    fontSize: 14, fontFamily: C.mono, fontWeight: 800,
-                    color: tension.queueDepth > 3 ? C.red : C.orange,
-                  }}>
-                    {tension.queueDepth}
-                  </span>
-                </div>
-                <span style={{ fontSize: 9, fontFamily: C.mono, color: C.textDim }}>
-                  {tension.visibility}
-                </span>
-                {tension.pulseActive && (
-                  <span style={{ fontSize: 10, fontFamily: C.mono, color: C.orange, fontWeight: 700 }}>
-                    ◉ PULSE ACTIVE
-                  </span>
-                )}
-              </div>
-            </div>
-            <BarMeter value={tension.score} max={1} color={tension.pulseActive ? C.orange : C.purple} label="Score" />
-          </EnginePanel>
-        </div>
-
-        {/* ── RIGHT COLUMN ────────────────────────────────────────────── */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-
-          {/* ── Engine 4 + 5 ── */}
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-            gap: 10,
-          }}>
-            {/* Engine 4: Shield */}
-            <EnginePanel title="Shield Engine" number="4" accent={shields.fortified ? C.gold : C.cyan}>
-              {shields.fortified && (
-                <div style={{
-                  padding: '5px 10px', borderRadius: 6, textAlign: 'center' as const, marginBottom: 4,
-                  background: `${C.gold}12`, border: `1px solid ${C.gold}40`,
-                  fontSize: 10, fontFamily: C.mono, fontWeight: 700, color: C.gold,
-                }}>
-                  🏰 FORTIFIED
-                </div>
-              )}
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                <span style={{ fontSize: 11, fontFamily: C.mono, color: C.textDim }}>Overall</span>
-                <span style={{
-                  fontSize: 15, fontFamily: C.mono, fontWeight: 800,
-                  color: shieldPctTotal > 0.6 ? C.green : shieldPctTotal > 0.3 ? C.orange : C.red,
-                }}>
-                  {Math.round(shieldPctTotal * 100)}%
-                </span>
-              </div>
-              {Object.values(shields.layers).map(layer => {
-                const meta     = SHIELD_META[layer.id];
-                const ratio    = meta.max > 0 ? layer.integrity / meta.max : 0;
-                const barColor = layer.breached ? C.textMut : ratio > 0.5 ? meta.color : ratio > 0.25 ? C.orange : C.red;
-                return (
-                  <BarMeter key={layer.id} value={layer.integrity} max={meta.max} color={barColor} label={meta.label} />
-                );
-              })}
-            </EnginePanel>
-
-            {/* Engine 5: Battle */}
-            <EnginePanel title="Battle Engine" number="5" accent={battle.activeBotCount > 0 ? C.red : C.textDim}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginBottom: 8 }}>
-                <StatChip
-                  label="ACTIVE BOTS"
-                  value={battle.activeBotCount}
-                  color={battle.activeBotCount > 0 ? C.red : C.green}
-                />
-                <StatChip
-                  label="INTEL"
-                  value={battle.counterIntelBot ? '🔍 LIVE' : '—'}
-                  color={battle.counterIntelBot ? C.blue : C.textDim}
-                />
-              </div>
-              {battle.lastAttack && (
-                <div style={{
-                  padding: '7px 10px', borderRadius: 7, marginBottom: 6,
-                  background: `${C.red}10`, border: `1px solid ${C.red}35`,
-                  fontSize: 10, fontFamily: C.mono, color: C.red, wordBreak: 'break-word' as const,
-                }}>
-                  ⚔ {battle.lastAttack}
-                </div>
-              )}
-              {battle.neutralized && (
-                <div style={{
-                  padding: '7px 10px', borderRadius: 7, marginBottom: 6,
-                  background: `${C.green}10`, border: `1px solid ${C.green}35`,
-                  fontSize: 10, fontFamily: C.mono, color: C.green,
-                }}>
-                  ✓ NEUTRALIZED: {battle.neutralized}
-                </div>
-              )}
-              <div style={{ fontSize: 9, fontFamily: C.mono, color: C.textMut, marginBottom: 4 }}>
-                RECENT BOT ACTIVITY
-              </div>
-              {battle.recentBotEvents.length === 0 ? (
-                <div style={{ fontSize: 10, fontFamily: C.mono, color: C.textDim }}>No activity</div>
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-                  {battle.recentBotEvents.map((ev, i) => (
-                    <div key={i} style={{ fontSize: 10, fontFamily: C.mono, color: C.textDim }}>
-                      <span style={{ color: C.gold }}>{BOT_NAMES[ev.botId] ?? ev.botId}:</span>{' '}
-                      {ev.from} → {ev.to}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </EnginePanel>
-          </div>
-
-          {/* ── Engine 6 + 7 ── */}
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-            gap: 10,
-          }}>
-            {/* Engine 6: Cascade */}
-            <EnginePanel title="Cascade Engine" number="6" accent={cascade.activeChains > 0 ? C.orange : C.textDim}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginBottom: 8 }}>
-                <StatChip
-                  label="ACTIVE CHAINS"
-                  value={cascade.activeChains}
-                  color={cascade.activeChains > 0 ? C.orange : C.green}
-                />
-                <div style={{
-                  padding: '6px 10px', borderRadius: 7,
-                  background: 'rgba(255,255,255,0.03)',
-                  border: '1px solid rgba(255,255,255,0.08)',
-                }}>
-                  <div style={{ fontSize: 9, fontFamily: C.mono, color: C.textDim, marginBottom: 3 }}>SEVERITY</div>
-                  {cascade.lastSeverity ? (
-                    <TierBadge
-                      label={cascade.lastSeverity}
-                      color={
-                        cascade.lastSeverity === 'CATASTROPHIC' ? C.crimson :
-                        cascade.lastSeverity === 'HIGH'         ? C.red     :
-                        cascade.lastSeverity === 'MODERATE'     ? C.orange  : C.textSub
-                      }
-                    />
-                  ) : (
-                    <span style={{ fontSize: 13, fontFamily: C.mono, fontWeight: 800, color: C.textDim }}>—</span>
-                  )}
-                </div>
-              </div>
-              {cascade.positiveActive && (
-                <div style={{
-                  padding: '7px 10px', borderRadius: 7, marginBottom: 6,
-                  background: `${C.teal}10`, border: `1px solid ${C.teal}35`,
-                  fontSize: 10, fontFamily: C.mono, color: C.teal,
-                }}>
-                  ✨ {cascade.positiveActive}
-                </div>
-              )}
-              {cascade.lastChainId && (
-                <div style={{ fontSize: 9, fontFamily: C.mono, color: C.textDim }}>
-                  Last: {cascade.lastChainId}
-                </div>
-              )}
-            </EnginePanel>
-
-            {/* Engine 7: Sovereignty */}
-            <EnginePanel title="Sovereignty Engine" number="7" accent={C.magenta}>
-              {sovereignty.grade ? (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'center' }}>
-                  <div style={{
-                    fontSize: 'clamp(48px,8vw,64px)',
-                    fontFamily: C.display, fontWeight: 900,
-                    color: ['S','A'].includes(sovereignty.grade) ? C.gold : C.textSub,
-                    lineHeight: 1,
-                    textShadow: ['S','A'].includes(sovereignty.grade) ? `0 0 32px ${C.gold}60` : 'none',
-                  }}>
-                    {sovereignty.grade}
-                  </div>
-                  <div style={{ fontSize: 10, fontFamily: C.mono, color: C.textDim }}>RUN GRADE</div>
-                  {sovereignty.sovereigntyScore !== null && (
-                    <div style={{ fontSize: 18, fontFamily: C.mono, fontWeight: 800, color: C.gold }}>
-                      {sovereignty.sovereigntyScore.toLocaleString()} pts
-                    </div>
-                  )}
-                  {sovereignty.proofHash && (
-                    <div style={{
-                      fontSize: 9, fontFamily: C.mono, color: C.textMut,
-                      background: 'rgba(255,255,255,0.03)',
-                      padding: '4px 8px', borderRadius: 4,
-                      border: `1px solid ${C.brdLow}`,
-                    }}>
-                      PROOF: {fmtHash(sovereignty.proofHash, 12)}
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <div style={{
-                  textAlign: 'center' as const, padding: '20px 0',
-                  color: C.textDim, fontSize: 11, fontFamily: C.mono,
-                }}>
-                  Awaiting run completion
-                </div>
-              )}
-            </EnginePanel>
-          </div>
-
-          {/* ── Engine Errors ──────────────────────────────────────────── */}
-          {engineErrors.length > 0 && (
-            <EnginePanel title="Engine Errors" number="!" accent={C.crimson}>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                {engineErrors.slice(0, 5).map((err, i) => (
-                  <div key={i} style={{
-                    padding: '6px 10px', borderRadius: 6,
-                    background: `${C.red}10`, border: `1px solid ${C.red}30`,
-                    fontSize: 10, fontFamily: C.mono, color: C.red,
-                    wordBreak: 'break-word' as const,
-                  }}>
-                    Step {err.step} [{err.engineId}]: {err.error}
-                  </div>
-                ))}
-              </div>
-            </EnginePanel>
-          )}
-
-          {/* ── Event Log ──────────────────────────────────────────────── */}
-          <div style={{
-            background: C.panel,
-            border: `1px solid ${C.brdLow}`,
-            borderRadius: 10, overflow: 'hidden',
-          }}>
-            <div style={{
-              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-              padding: '10px 14px',
-              borderBottom: `1px solid ${C.brdLow}`,
-            }}>
-              <span style={{
-                fontSize: 10, fontFamily: C.mono, fontWeight: 800,
-                color: C.textDim, letterSpacing: '0.12em',
-                textTransform: 'uppercase' as const,
-              }}>
-                EVENT LOG · {log.length}
-              </span>
-              <button
-                onClick={() => setLogVisible(v => !v)}
-                style={{
-                  background: 'none', border: 'none', cursor: 'pointer',
-                  fontSize: 11, fontFamily: C.mono, color: C.textDim,
-                  padding: '2px 6px',
-                }}
-                aria-label={logVisible ? 'Collapse log' : 'Expand log'}
-              >
-                {logVisible ? '▲ collapse' : '▼ expand'}
-              </button>
-            </div>
-            {logVisible && (
-              <div ref={logRef} style={{
-                height: 'clamp(180px,25vh,280px)',
-                overflowY: 'auto',
-                padding: '8px 14px',
-                display: 'flex', flexDirection: 'column', gap: 3,
-              }}>
-                {log.length === 0 ? (
-                  <div style={{
-                    textAlign: 'center' as const, paddingTop: 24,
-                    fontSize: 11, fontFamily: C.mono, color: C.textDim,
-                  }}>
-                    Start a run to see engine events
-                  </div>
-                ) : (
-                  log.map(entry => (
-                    <div key={entry.id} style={{
-                      display: 'flex', gap: 8, alignItems: 'baseline',
-                      fontSize: 11, fontFamily: C.mono, lineHeight: 1.4,
-                      animation: 'fadeSlide 0.15s ease',
-                    }}>
-                      <span style={{ color: C.textMut, flexShrink: 0, fontSize: 9 }}>
-                        T{entry.tick}
-                      </span>
-                      <span style={{ color: LOG_COLOR[entry.kind], wordBreak: 'break-word' as const }}>
-                        {entry.message}
-                      </span>
-                    </div>
-                  ))
-                )}
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* ── Footer ────────────────────────────────────────────────────── */}
-      <footer style={{
-        marginTop: 'clamp(12px,2.5vw,20px)',
-        paddingTop: 12,
-        borderTop: `1px solid ${C.brdLow}`,
-        display: 'flex', justifyContent: 'space-between',
-        alignItems: 'center', flexWrap: 'wrap' as const, gap: 8,
-        fontSize: 9, fontFamily: C.mono, color: C.textDim,
-        letterSpacing: '0.08em',
-      }}>
-        <span>DENSITY6 LLC · POINT ZERO ONE · ENGINES 0–7 WIRED · SPRINT 4</span>
-        <span>
-          {runMeta.runId ? `RUN: ${fmtRunId(runMeta.runId)}` : 'NO ACTIVE RUN'}
-          {' · '}HEALTH: {orchestrator.getLifecycleState()}
-          {auth.user ? ` · ${auth.user.username}` : ''}
-        </span>
-      </footer>
-    </div>
+    <GameRuntimeShell
+      mode={runMode}
+      zero={zero}
+      user={auth.user ? {
+        id: auth.user.id,
+        username: auth.user.username,
+        displayName: auth.user.displayName ?? auth.user.username,
+      } : null}
+      isExternalLaunch={externalLaunchRef.current}
+      onBackToLobby={handleBackToLobby}
+      onLogout={handleLogout}
+      onEndRun={handleEndRun}
+    />
   );
 };
 
