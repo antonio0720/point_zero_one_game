@@ -1,4 +1,3 @@
-
 /**
  * ============================================================================
  * POINT ZERO ONE — UNIFIED CHAT DOCK
@@ -1445,6 +1444,43 @@ function buildLawFooterLines(): string[] {
   ];
 }
 
+// ─── New helpers (patch 2026.03.17) ──────────────────────────────────────────
+
+function getLastItem<T>(items: readonly T[]): T | null {
+  return items.length > 0 ? items[items.length - 1] ?? null : null;
+}
+
+function getHelperPromptTone(
+  prompt: Record<string, unknown>,
+): UnifiedHelperPromptModel['tone'] {
+  const rawTone = prompt['tone'];
+  if (
+    rawTone === 'calm' ||
+    rawTone === 'blunt' ||
+    rawTone === 'urgent' ||
+    rawTone === 'strategic'
+  ) {
+    return rawTone;
+  }
+
+  const severity = prompt['severity'];
+  if (severity === 'CRITICAL') return 'urgent';
+  if (severity === 'WARNING') return 'blunt';
+  return 'strategic';
+}
+
+function getHelperPromptCta(prompt: Record<string, unknown>): string {
+  return typeof prompt['ctaLabel'] === 'string' && prompt['ctaLabel'].trim().length > 0
+    ? prompt['ctaLabel']
+    : 'assist';
+}
+
+const NOOP = () => undefined;
+const NOOP_STRING = (_value: string) => undefined;
+const NOOP_NULLABLE_STRING = (_value: string | null) => undefined;
+
+// ─── UnifiedChatDock ─────────────────────────────────────────────────────────
+
 export const UnifiedChatDock = memo(function UnifiedChatDock({
   gameCtx,
   onSabotage,
@@ -1481,6 +1517,76 @@ export const UnifiedChatDock = memo(function UnifiedChatDock({
 
   const ui = useUnifiedChat(gameCtx, accessToken, onSabotage);
 
+  const openChat = ui.openChat ?? NOOP;
+  const closeChat = ui.closeChat ?? NOOP;
+  const collapseChat = ui.collapse ?? NOOP;
+  const expandChat = ui.expand ?? NOOP;
+  const sendDraft = ui.sendDraft ?? NOOP;
+  const setDraft = ui.setDraft ?? NOOP_STRING;
+  const quickReply = ui.quickReply ?? NOOP_STRING;
+  const openTranscript = ui.openTranscript ?? NOOP;
+  const closeTranscript = ui.closeTranscript ?? NOOP;
+  const toggleTranscript = ui.toggleTranscript ?? NOOP;
+  const setTranscriptSearchQuery = ui.setTranscriptSearchQuery ?? NOOP_STRING;
+  const selectTranscriptMessage = ui.selectTranscriptMessage ?? NOOP_NULLABLE_STRING;
+  const jumpToLatest = ui.jumpToLatest ?? NOOP;
+  const setActiveChannel = ui.setActiveChannel ?? ui.switchTab;
+
+  const transcriptState = ui.transcript ?? {
+    open: false,
+    searchQuery: '',
+    selectedMessageId: null,
+    newestFirst: false,
+  };
+
+  const composerState = ui.composer ?? {
+    activeDraft: '',
+    charCount: 0,
+    maxChars: 1200,
+    canSend: false,
+    isNearLimit: false,
+    placeholder: 'Type a message…',
+  };
+
+  const typingIndicatorModel = ui.typingIndicatorModel ?? {
+    actors: [],
+    visible: false,
+    label: '',
+    compactLabel: '',
+  };
+
+  const messageFeedActionsByMessageId = ui.messageFeedActionsByMessageId ?? {};
+
+  const shellMode =
+    typeof ui.shellMode === 'string' && ui.shellMode.trim().length > 0
+      ? ui.shellMode
+      : 'DOCK';
+
+  const mountState = ui.mountState ?? {
+    mountTarget: bootstrapTarget.id,
+    modeScope: String(gameCtx.modeScope ?? 'GLOBAL'),
+    storageNamespace: 'pzo_chat',
+  };
+
+  const runtimeBundleRecord = readRecord(ui.runtimeBundle);
+  const runtimeLaws = Array.isArray(runtimeBundleRecord['laws'])
+    ? runtimeBundleRecord['laws'].filter(
+        (value): value is string => typeof value === 'string',
+      )
+    : [];
+
+  const visibleChannels = useMemo(() => {
+    const normalized = bootstrapPreset.allowedVisibleChannels
+      .map((channel) => asVisibleChannel(channel, 'GLOBAL'))
+      .filter(
+        (channel, index, array) => array.indexOf(channel) === index,
+      ) as VisibleChannelId[];
+
+    return normalized.length > 0
+      ? normalized
+      : (['GLOBAL', 'SYNDICATE', 'DEAL_ROOM'] as VisibleChannelId[]);
+  }, [bootstrapPreset.allowedVisibleChannels]);
+
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const styleRef = useRef<HTMLStyleElement | null>(null);
   const stickToBottomRef = useRef(true);
@@ -1508,8 +1614,8 @@ export const UnifiedChatDock = memo(function UnifiedChatDock({
   );
 
   const filteredTranscriptRows = useMemo(
-    () => filterTranscriptRows(ui.transcript.searchQuery, transcriptMessages),
-    [ui.transcript.searchQuery, transcriptMessages],
+    () => filterTranscriptRows(transcriptState.searchQuery, transcriptMessages),
+    [transcriptState.searchQuery, transcriptMessages],
   );
 
   const presence = useMemo(() => {
@@ -1539,31 +1645,30 @@ export const UnifiedChatDock = memo(function UnifiedChatDock({
               : 'calm',
       })) as UnifiedPresenceMember[];
     }
+
     return createPresenceModel(normalizedMessages, activeTab);
   }, [activeTab, normalizedMessages, ui.presenceStripModel]);
 
   const helperPrompt = useMemo(() => {
     if (ui.helperPrompt) {
+      const promptRecord = ui.helperPrompt as unknown as Record<string, unknown>;
+
       return {
         visible: true,
         title: ui.helperPrompt.title,
         body: ui.helperPrompt.body,
-        tone:
-          ui.helperPrompt.severity === 'CRITICAL'
-            ? 'urgent'
-            : ui.helperPrompt.severity === 'WARNING'
-              ? 'blunt'
-              : 'strategic',
-        ctaLabel: ui.helperPrompt.ctaLabel ?? 'assist',
+        tone: getHelperPromptTone(promptRecord),
+        ctaLabel: getHelperPromptCta(promptRecord),
       } satisfies UnifiedHelperPromptModel;
     }
+
     return createHelperPromptModel(activeTab, threat);
   }, [ui.helperPrompt, activeTab, threat]);
 
   const unread = ui.unread ?? {};
   const totalUnread = ui.totalUnread ?? 0;
   const connected = ui.connected ?? false;
-  const shellOpen = ui.chatOpen && !ui.collapsed;
+  const shellOpen = ui.chatOpen && !(ui.collapsed ?? false);
   const effectiveUnread = Number(unread[activeTab] ?? 0) || 0;
 
   useEffect(() => {
@@ -1583,6 +1688,7 @@ export const UnifiedChatDock = memo(function UnifiedChatDock({
 
   useEffect(() => {
     if (!shellOpen) return;
+
     const scroller = scrollRef.current;
     if (!scroller || !stickToBottomRef.current) return;
 
@@ -1590,47 +1696,73 @@ export const UnifiedChatDock = memo(function UnifiedChatDock({
       top: scroller.scrollHeight,
       behavior: 'smooth',
     });
-  }, [shellOpen, activeTab, ui.messageFeedModel.flatRows.length]);
+  }, [
+    shellOpen,
+    activeTab,
+    ui.messageFeedModel?.flatRows.length ?? transcriptMessages.length,
+  ]);
 
   useEffect(() => {
     if (!shellOpen) return;
 
     const handler = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        if (ui.transcript.open) {
-          ui.closeTranscript();
-          return;
-        }
-        if (bootstrapPreset.allowCollapse) {
-          ui.collapse();
-        }
+      if (event.key !== 'Escape') return;
+
+      if (transcriptState.open) {
+        closeTranscript();
+        return;
+      }
+
+      if (bootstrapPreset.allowCollapse) {
+        collapseChat();
       }
     };
 
     document.addEventListener('keydown', handler);
     return () => document.removeEventListener('keydown', handler);
-  }, [shellOpen, ui, bootstrapPreset.allowCollapse]);
+  }, [
+    shellOpen,
+    transcriptState.open,
+    closeTranscript,
+    collapseChat,
+    bootstrapPreset.allowCollapse,
+  ]);
 
   const handleToggleOpen = useCallback(() => {
     if (!ui.chatOpen) {
-      ui.openChat();
-      ui.expand();
+      openChat();
+      expandChat();
       return;
     }
 
     if (ui.collapsed) {
-      ui.expand();
+      expandChat();
       return;
     }
 
     if (bootstrapPreset.allowCollapse) {
-      ui.collapse();
+      collapseChat();
     }
-  }, [bootstrapPreset.allowCollapse, ui]);
+  }, [
+    ui.chatOpen,
+    ui.collapsed,
+    openChat,
+    expandChat,
+    collapseChat,
+    bootstrapPreset.allowCollapse,
+  ]);
 
   const handleSend = useCallback(() => {
-    ui.sendDraft();
-  }, [ui]);
+    if (ui.sendDraft) {
+      sendDraft();
+      return;
+    }
+
+    const draft = composerState.activeDraft.trim();
+    if (!draft) return;
+
+    ui.sendMessage(draft);
+  }, [ui.sendDraft, ui.sendMessage, sendDraft, composerState.activeDraft]);
 
   const handleComposerKeyDown = useCallback(
     (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
@@ -1643,7 +1775,7 @@ export const UnifiedChatDock = memo(function UnifiedChatDock({
   );
 
   const handleHelperAction = useCallback(() => {
-    if (ui.composer.activeDraft.trim()) return;
+    if (composerState.activeDraft.trim()) return;
 
     const prompt =
       helperPrompt.tone === 'urgent'
@@ -1654,8 +1786,8 @@ export const UnifiedChatDock = memo(function UnifiedChatDock({
             ? 'What is the sharpest next move?'
             : 'What is the safest next message?';
 
-    ui.quickReply(prompt);
-  }, [helperPrompt.tone, ui]);
+    quickReply(prompt);
+  }, [composerState.activeDraft, helperPrompt.tone, quickReply]);
 
   const handleScroll = useCallback(() => {
     const node = scrollRef.current;
@@ -1708,11 +1840,15 @@ export const UnifiedChatDock = memo(function UnifiedChatDock({
       }}
     >
       <TranscriptDrawer
-        open={enableTranscriptDrawer && bootstrapPreset.showTranscriptDrawer && ui.transcript.open}
-        query={ui.transcript.searchQuery}
-        onQueryChange={ui.setTranscriptSearchQuery}
+        open={
+          enableTranscriptDrawer &&
+          bootstrapPreset.showTranscriptDrawer &&
+          transcriptState.open
+        }
+        query={transcriptState.searchQuery}
+        onQueryChange={setTranscriptSearchQuery}
         rows={filteredTranscriptRows}
-        onClose={ui.closeTranscript}
+        onClose={closeTranscript}
       />
 
       <div style={{ display: 'grid', gap: 10 }}>
@@ -1801,16 +1937,79 @@ export const UnifiedChatDock = memo(function UnifiedChatDock({
         </div>
       </div>
 
-      <ChatChannelTabs
-        {...ui.channelTabs}
-        className="pzo-chat-dock__channel-tabs"
-      />
+      {ui.channelTabs ? (
+        <ChatChannelTabs
+          {...ui.channelTabs}
+          className="pzo-chat-dock__channel-tabs"
+        />
+      ) : (
+        <div
+          className="pzo-chat-dock__channel-tabs"
+          style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}
+        >
+          {visibleChannels.map((channel) => {
+            const active = channel === activeTab;
+            const count = Number(unread[channel] ?? 0) || 0;
+            const meta = CHANNEL_META[channel];
+
+            return (
+              <button
+                key={channel}
+                type="button"
+                onClick={() => setActiveChannel(channel)}
+                style={{
+                  appearance: 'none',
+                  border: `1px solid ${
+                    active ? `${meta.accent}55` : TOKENS.borderMedium
+                  }`,
+                  background: active
+                    ? `${meta.accent}18`
+                    : 'rgba(255,255,255,0.04)',
+                  color: TOKENS.text,
+                  borderRadius: TOKENS.radiusSm,
+                  padding: '10px 12px',
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  fontFamily: TOKENS.mono,
+                  fontSize: 11,
+                  letterSpacing: 0.35,
+                  textTransform: 'uppercase',
+                }}
+              >
+                <span style={{ color: meta.accent }}>{meta.icon}</span>
+                <span>{meta.label}</span>
+                {count > 0 ? (
+                  <span
+                    style={{
+                      minWidth: 18,
+                      height: 18,
+                      borderRadius: 999,
+                      background: meta.accent,
+                      color: TOKENS.panel,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      padding: '0 5px',
+                      fontSize: 10,
+                      fontWeight: 700,
+                    }}
+                  >
+                    {count > 99 ? '99+' : count}
+                  </span>
+                ) : null}
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {bootstrapPreset.showPresenceStrip ? (
         <PresenceStrip members={presence} />
       ) : null}
 
-      <TypingIndicator model={ui.typingIndicatorModel} />
+      <TypingIndicator model={typingIndicatorModel} />
 
       {bootstrapPreset.showThreatMeter && enableThreatMeter ? (
         <ThreatMeter threat={threat} />
@@ -1836,49 +2035,100 @@ export const UnifiedChatDock = memo(function UnifiedChatDock({
           background: 'rgba(255,255,255,0.02)',
         }}
       >
-        <ChatMessageFeed
-          model={ui.messageFeedModel}
-          density={bootstrapPreset.compact ? 'compact' : 'comfortable'}
-          onJumpToLatest={ui.jumpToLatest}
-          onLoadOlder={() => {
-            ui.openTranscript();
-          }}
-          onVisibleRangeChange={() => {
-            // reserved telemetry lane
-          }}
-          onSelectMessage={(messageId) => {
-            ui.selectTranscriptMessage(messageId);
-          }}
-          onMessageAction={(actionId, messageId) => {
-            if (actionId === 'reply') {
-              ui.selectTranscriptMessage(messageId);
-              return;
-            }
+        {ui.messageFeedModel ? (
+          <ChatMessageFeed
+            model={ui.messageFeedModel}
+            density={bootstrapPreset.compact ? 'compact' : 'comfortable'}
+            onJumpToLatest={jumpToLatest}
+            onLoadOlder={() => {
+              openTranscript();
+            }}
+            onVisibleRangeChange={() => {
+              // reserved telemetry lane
+            }}
+            onSelectMessage={(messageId) => {
+              selectTranscriptMessage(messageId);
+            }}
+            onMessageAction={(actionId, messageId) => {
+              if (actionId === 'reply') {
+                selectTranscriptMessage(messageId);
+                return;
+              }
 
-            if (actionId === 'counter') {
-              ui.setDraft('/counter ');
-              ui.selectTranscriptMessage(messageId);
-              return;
-            }
+              if (actionId === 'counter') {
+                setDraft('/counter ');
+                selectTranscriptMessage(messageId);
+                return;
+              }
 
-            if (actionId === 'inspect_proof') {
-              ui.openTranscript();
-              ui.selectTranscriptMessage(messageId);
+              if (actionId === 'inspect_proof') {
+                openTranscript();
+                selectTranscriptMessage(messageId);
+              }
+            }}
+            cardActions={(message) =>
+              messageFeedActionsByMessageId[message.id] ?? []
             }
-          }}
-          cardActions={(message) =>
-            ui.messageFeedActionsByMessageId[message.id] ?? []
-          }
-        />
+          />
+        ) : (
+          <div style={{ display: 'grid', gap: 10 }}>
+            {filteredTranscriptRows.map((message) => (
+              <div
+                key={message.id}
+                style={{
+                  border: `1px solid ${TOKENS.border}`,
+                  borderRadius: TOKENS.radiusMd,
+                  padding: 12,
+                  background: 'rgba(255,255,255,0.03)',
+                  display: 'grid',
+                  gap: 6,
+                }}
+              >
+                <div
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    gap: 10,
+                    alignItems: 'center',
+                  }}
+                >
+                  <div style={{ color: TOKENS.text, fontWeight: 700 }}>
+                    {message.senderName}
+                  </div>
+                  <div
+                    style={{
+                      color: TOKENS.textMuted,
+                      fontFamily: TOKENS.mono,
+                      fontSize: 10,
+                      letterSpacing: 0.3,
+                      textTransform: 'uppercase',
+                    }}
+                  >
+                    {message.kind ?? 'PLAYER'}
+                  </div>
+                </div>
+
+                <div
+                  style={{
+                    color: TOKENS.textSubtle,
+                    whiteSpace: 'pre-wrap',
+                  }}
+                >
+                  {message.body}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <Composer
         channel={activeTab}
-        draft={ui.composer.activeDraft}
-        onDraftChange={ui.setDraft}
+        draft={composerState.activeDraft}
+        onDraftChange={setDraft}
         onSend={handleSend}
         onKeyDown={handleComposerKeyDown}
-        disabled={!ui.composer.canSend}
+        disabled={!composerState.canSend}
         rows={Math.max(2, bootstrapPreset.composerRows)}
       />
 
@@ -1912,7 +2162,7 @@ export const UnifiedChatDock = memo(function UnifiedChatDock({
             }
           />
           <Badge
-            label={`shell ${ui.shellMode.toLowerCase()}`}
+            label={`shell ${shellMode.toLowerCase()}`}
             color={TOKENS.cyan}
             bg="rgba(56,221,248,0.10)"
           />
@@ -1929,7 +2179,7 @@ export const UnifiedChatDock = memo(function UnifiedChatDock({
           {enableTranscriptDrawer && bootstrapPreset.showTranscriptDrawer ? (
             <button
               type="button"
-              onClick={ui.toggleTranscript}
+              onClick={toggleTranscript}
               style={{
                 appearance: 'none',
                 border: `1px solid ${TOKENS.borderMedium}`,
@@ -1944,7 +2194,7 @@ export const UnifiedChatDock = memo(function UnifiedChatDock({
                 textTransform: 'uppercase',
               }}
             >
-              {ui.transcript.open ? 'hide transcript' : 'transcript'}
+              {transcriptState.open ? 'hide transcript' : 'transcript'}
             </button>
           ) : null}
 
@@ -1977,9 +2227,9 @@ export const UnifiedChatDock = memo(function UnifiedChatDock({
           {Array.from(
             new Set([
               ...buildLawFooterLines(),
-              ...ui.runtimeBundle.laws,
-              `mount ${String(ui.mountState.mountTarget).toLowerCase()}`,
-              `scope ${String(ui.mountState.modeScope).toLowerCase()}`,
+              ...runtimeLaws,
+              `mount ${String(mountState.mountTarget).toLowerCase()}`,
+              `scope ${String(mountState.modeScope).toLowerCase()}`,
             ]),
           ).map((line) => (
             <div
