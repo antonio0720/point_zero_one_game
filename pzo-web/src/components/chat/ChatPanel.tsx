@@ -91,10 +91,10 @@ const UnifiedChatDockComponent = ((UnifiedChatDockModule as Record<string, unkno
 export const CHAT_PANEL_FILE_PATH =
   'pzo-web/src/components/chat/ChatPanel.tsx' as const;
 
-export const CHAT_PANEL_VERSION = '2026.03.15' as const;
+export const CHAT_PANEL_VERSION = '2026.03.17' as const;
 
 export const CHAT_PANEL_REVISION =
-  'pzo.components.chat.ChatPanel.compat-wrapper.v1' as const;
+  'pzo.components.chat.ChatPanel.compat-wrapper.v2' as const;
 
 export const CHAT_PANEL_MIGRATION_FLAGS = Object.freeze({
   isCompatibilityWrapper: true,
@@ -104,6 +104,7 @@ export const CHAT_PANEL_MIGRATION_FLAGS = Object.freeze({
   rendersUnifiedDock: true,
   safeForCurrentMounts: true,
   requiresScreenImportChurnNow: false,
+  preservesComponentLaneOnly: true,
 });
 
 export const CHAT_PANEL_RUNTIME_LAWS = Object.freeze([
@@ -113,6 +114,7 @@ export const CHAT_PANEL_RUNTIME_LAWS = Object.freeze([
   'Runtime truth, sockets, moderation, replay, and persistent learning do not belong here.',
   'No direct battle, pressure, zero, or other engine-domain imports are permitted in this file.',
   'All structural chat law remains anchored on shared/contracts/chat and the frontend engine barrel.',
+  'This file may absorb prop-shape drift, but it may not become a second chat brain.',
 ] as const);
 
 export const CHAT_PANEL_RUNTIME_BUNDLE = Object.freeze({
@@ -384,6 +386,27 @@ function safeUpper(value: string | null | undefined): string {
   return String(value ?? '').trim().toUpperCase().replace(/[\s-]+/g, '_');
 }
 
+function normalizeVisibleTab(
+  value: string | null | undefined,
+  fallback: ChatChannel,
+): ChatChannel {
+  const normalized = safeUpper(value);
+
+  if (
+    normalized === 'GLOBAL'
+    || normalized === 'SYNDICATE'
+    || normalized === 'DEAL_ROOM'
+  ) {
+    return normalized as ChatChannel;
+  }
+
+  if (normalized === 'DEALROOM') {
+    return 'DEAL_ROOM';
+  }
+
+  return fallback;
+}
+
 function inferModeScopeKey(ctx: GameChatContext): string | undefined {
   return safeUpper(
     typeof ctx.modeScope === 'string'
@@ -400,6 +423,15 @@ function inferTargetFromContext(ctx: GameChatContext): string {
 
   if (explicitMountTarget) {
     return explicitMountTarget;
+  }
+
+  const runMountTarget =
+    typeof ctx.run?.mountTarget === 'string' && ctx.run.mountTarget.trim().length > 0
+      ? safeUpper(ctx.run.mountTarget)
+      : undefined;
+
+  if (runMountTarget) {
+    return runMountTarget;
   }
 
   const scopeKey = inferModeScopeKey(ctx);
@@ -456,13 +488,11 @@ function inferDefaultTab(
   requestedDefaultTab?: ChatChannel,
 ): ChatChannel {
   if (requestedDefaultTab) {
-    return requestedDefaultTab;
+    return normalizeVisibleTab(requestedDefaultTab, PRESET_DEFAULT_TAB[preset] ?? 'GLOBAL');
   }
 
   if (ctx.activeChannel) {
-    return ['GLOBAL', 'SYNDICATE', 'DEAL_ROOM'].includes(safeUpper(ctx.activeChannel))
-      ? (safeUpper(ctx.activeChannel) as ChatChannel)
-      : PRESET_DEFAULT_TAB[preset] ?? 'GLOBAL';
+    return normalizeVisibleTab(ctx.activeChannel, PRESET_DEFAULT_TAB[preset] ?? 'GLOBAL');
   }
 
   if (safeUpper(ctx.runOutcome) === 'SOVEREIGNTY') {
@@ -511,7 +541,8 @@ function inferSubtitle(
   const regime = ctx.regime ? `regime ${ctx.regime}` : undefined;
   const pressure = ctx.pressureTier ? `pressure ${ctx.pressureTier}` : undefined;
   const tick = typeof ctx.tick === 'number' ? `tick ${ctx.tick}` : undefined;
-  const fragments = [roomId, regime, pressure, tick].filter(Boolean);
+  const connection = ctx.connectionState ? `conn ${ctx.connectionState}` : undefined;
+  const fragments = [roomId, regime, pressure, tick, connection].filter(Boolean);
 
   if (preset === 'COUNTERPLAY_MODAL') {
     return 'Negotiation lane with transcript integrity preserved.';

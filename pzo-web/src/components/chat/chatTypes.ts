@@ -62,22 +62,22 @@ export const CHAT_TYPES_FILE_PATH =
 export const CHAT_TYPES_NAMESPACE =
   'pzo-web/src/components/chat/chatTypes' as const;
 
-export const CHAT_TYPES_VERSION = '2026.03.15' as const;
+export const CHAT_TYPES_VERSION = '2026.03.17' as const;
 
 export const CHAT_TYPES_REVISION =
-  'pzo.components.chat.types.compat.v1' as const;
+  'pzo.components.chat.types.compat.v2' as const;
 
 export const LEGACY_CHAT_CHANNELS = [
   'GLOBAL',
   'SYNDICATE',
   'DEAL_ROOM',
-] as const satisfies readonly SharedChat.ChatChannelsModule.ChatVisibleChannel[];
+] as const satisfies readonly SharedChat.ChatChannels.ChatVisibleChannel[];
 
 export const UNIFIED_VISIBLE_CHAT_CHANNELS =
-  SharedChat.ChatChannelsModule.CHAT_VISIBLE_CHANNELS;
+  SharedChat.ChatChannels.CHAT_VISIBLE_CHANNELS;
 
 export const ALL_KNOWN_CHAT_CHANNELS =
-  SharedChat.ChatChannelsModule.CHAT_ALL_CHANNELS;
+  SharedChat.ChatChannels.CHAT_ALL_CHANNELS;
 
 export const CHAT_CHANNEL_LABELS = Object.freeze({
   GLOBAL: 'Global',
@@ -89,7 +89,7 @@ export const CHAT_CHANNEL_LABELS = Object.freeze({
   RIVALRY_SHADOW: 'Rivalry Shadow',
   RESCUE_SHADOW: 'Rescue Shadow',
   LIVEOPS_SHADOW: 'LiveOps Shadow',
-} as const satisfies Record<SharedChat.ChatChannelsModule.ChatChannelId, string>);
+} as const satisfies Record<SharedChat.ChatChannels.ChatChannelId, string>);
 
 export const CHAT_CHANNEL_DESCRIPTIONS = Object.freeze({
   GLOBAL:
@@ -110,7 +110,7 @@ export const CHAT_CHANNEL_DESCRIPTIONS = Object.freeze({
     'Invisible rescue lane for churn interception, helper readiness, and soft-response planning.',
   LIVEOPS_SHADOW:
     'Invisible world-event lane for scheduled pressure, seasonal overlays, and global reveal choreography.',
-} as const satisfies Record<SharedChat.ChatChannelsModule.ChatChannelId, string>);
+} as const satisfies Record<SharedChat.ChatChannels.ChatChannelId, string>);
 
 export const LEGACY_MESSAGE_KINDS = [
   'PLAYER',
@@ -183,11 +183,11 @@ export const CHAT_COMPATIBILITY_LEVELS = [
 
 export type ChatChannel = (typeof LEGACY_CHAT_CHANNELS)[number];
 
-export type UnifiedVisibleChatChannel = SharedChat.ChatChannelsModule.ChatVisibleChannel;
+export type UnifiedVisibleChatChannel = SharedChat.ChatChannels.ChatVisibleChannel;
 
-export type AnyChatChannelId = SharedChat.ChatChannelsModule.ChatChannelId;
+export type AnyChatChannelId = SharedChat.ChatChannels.ChatChannelId;
 
-export type ChatShadowChannel = SharedChat.ChatChannelsModule.ChatShadowChannel;
+export type ChatShadowChannel = SharedChat.ChatChannels.ChatShadowChannel;
 
 export type MessageKind = (typeof LEGACY_MESSAGE_KINDS)[number];
 
@@ -204,105 +204,105 @@ export type ChatConnectionState = (typeof CHAT_CONNECTION_STATES)[number];
 export type ChatCompatibilityLevel =
   (typeof CHAT_COMPATIBILITY_LEVELS)[number];
 
-export type PressureTier = SharedChat.ChatEventsModule.ChatPressureTier;
+export type PressureTier = SharedChat.ChatEvents.ChatPressureTier;
 
-export type TickTier = SharedChat.ChatEventsModule.ChatTickTier;
+export type TickTier = SharedChat.ChatEvents.ChatTickTier;
 
-export type RunOutcome = SharedChat.ChatEventsModule.ChatRunOutcome;
+export type RunOutcome = SharedChat.ChatEvents.ChatRunOutcome;
 
-export type AttackType = SharedChat.ChatEventsModule.ChatAttackType;
+export type AttackType = SharedChat.ChatEvents.ChatAttackType;
 
-export type CascadeSeverity = SharedChat.ChatEventsModule.ChatCascadeSeverity;
+export type CascadeSeverity = SharedChat.ChatEvents.ChatCascadeSeverity;
 
-export type ShieldLayerId = SharedChat.ChatEventsModule.ChatShieldLayerId;
+export type ShieldLayerId = SharedChat.ChatEvents.ChatShieldLayerId;
 
-export type BotTauntSource = SharedChat.ChatEventsModule.BotTauntSource;
+export type BotTauntSource = SharedChat.ChatEvents.BotTauntSource;
 
-export type ShieldEventMeta = SharedChat.ChatEventsModule.ShieldEventMeta;
+export type ShieldEventMeta = SharedChat.ChatEvents.ShieldEventMeta;
 
-export type CascadeAlertMeta = SharedChat.ChatEventsModule.CascadeAlertMeta;
+export type CascadeAlertMeta = SharedChat.ChatEvents.CascadeAlertMeta;
 
-export type ChatSenderWire = SharedChat.ChatEventsModule.ChatSenderWire;
+export type ChatSenderWire = SharedChat.ChatEvents.ChatSenderWire;
 
-export type ChatSenderIdentity = SharedChat.ChatEventsModule.ChatSenderIdentity;
+export type ChatSenderIdentity = SharedChat.ChatEvents.ChatSenderIdentity;
 
-export type ChatSenderRole = SharedChat.ChatEventsModule.ChatSenderRole;
+export type ChatSenderRole = SharedChat.ChatEvents.ChatSenderRole;
 
-export type ChatMessageMeta = SharedChat.ChatEventsModule.ChatMessageMeta;
+export type ChatMessageMeta = SharedChat.ChatEvents.ChatMessageMeta;
 
-export type ChatProofMeta = SharedChat.ChatEventsModule.ChatProofMeta;
+export type ChatProofMeta = SharedChat.ChatEvents.ChatProofMeta;
 
-export type ChatLegendMeta = SharedChat.ChatEventsModule.ChatLegendMeta;
+export type ChatLegendMeta = SharedChat.ChatEvents.ChatLegendMeta;
 
-export type ChatReplayMeta = SharedChat.ChatEventsModule.ChatReplayMeta;
+export type ChatReplayMeta = SharedChat.ChatEvents.ChatReplayMeta;
 
-export type ChatAuditMeta = SharedChat.ChatEventsModule.ChatAuditMeta;
+export type ChatAuditMeta = SharedChat.ChatEvents.ChatAuditMeta;
 
 export type ChatModerationDecision =
-  SharedChat.ChatEventsModule.ChatModerationDecision;
+  SharedChat.ChatEvents.ChatModerationDecision;
 
-export type ChatDeliveryState = SharedChat.ChatEventsModule.ChatDeliveryState;
+export type ChatDeliveryState = SharedChat.ChatEvents.ChatDeliveryState;
 
-export type ChatModerationState = SharedChat.ChatEventsModule.ChatModerationState;
+export type ChatModerationState = SharedChat.ChatEvents.ChatModerationState;
 
-export type ChatPresenceState = SharedChat.ChatEventsModule.ChatPresenceState;
+export type ChatPresenceState = SharedChat.ChatEvents.ChatPresenceState;
 
-export type ChatTypingState = SharedChat.ChatEventsModule.ChatTypingState;
+export type ChatTypingState = SharedChat.ChatEvents.ChatTypingState;
 
-export type ChatPresenceSnapshot = SharedChat.ChatEventsModule.ChatPresenceSnapshot;
+export type ChatPresenceSnapshot = SharedChat.ChatEvents.ChatPresenceSnapshot;
 
-export type ChatTypingSnapshot = SharedChat.ChatEventsModule.ChatTypingSnapshot;
+export type ChatTypingSnapshot = SharedChat.ChatEvents.ChatTypingSnapshot;
 
-export type ChatCursorSnapshot = SharedChat.ChatEventsModule.ChatCursorSnapshot;
+export type ChatCursorSnapshot = SharedChat.ChatEvents.ChatCursorSnapshot;
 
-export type ChatReadReceipt = SharedChat.ChatEventsModule.ChatReadReceipt;
+export type ChatReadReceipt = SharedChat.ChatEvents.ChatReadReceipt;
 
 export type ChatRelationshipState =
-  SharedChat.ChatEventsModule.ChatRelationshipState;
+  SharedChat.ChatEvents.ChatRelationshipState;
 
-export type ChatMemoryAnchor = SharedChat.ChatEventsModule.ChatMemoryAnchor;
+export type ChatMemoryAnchor = SharedChat.ChatEvents.ChatMemoryAnchor;
 
-export type ChatOfferState = SharedChat.ChatEventsModule.ChatOfferState;
+export type ChatOfferState = SharedChat.ChatEvents.ChatOfferState;
 
 export type ChatNegotiationState =
-  SharedChat.ChatEventsModule.ChatNegotiationState;
+  SharedChat.ChatEvents.ChatNegotiationState;
 
 export type ChatContinuityState =
-  SharedChat.ChatEventsModule.ChatContinuityState;
+  SharedChat.ChatEvents.ChatContinuityState;
 
-export type ChatAudienceHeat = SharedChat.ChatEventsModule.ChatAudienceHeat;
+export type ChatAudienceHeat = SharedChat.ChatEvents.ChatAudienceHeat;
 
-export type ChatChannelMood = SharedChat.ChatEventsModule.ChatChannelMood;
+export type ChatChannelMood = SharedChat.ChatEvents.ChatChannelMood;
 
-export type ChatReputationState = SharedChat.ChatEventsModule.ChatReputationState;
+export type ChatReputationState = SharedChat.ChatEvents.ChatReputationState;
 
-export type ChatAffectSnapshot = SharedChat.ChatEventsModule.ChatAffectSnapshot;
+export type ChatAffectSnapshot = SharedChat.ChatEvents.ChatAffectSnapshot;
 
-export type ChatLearningProfile = SharedChat.ChatEventsModule.ChatLearningProfile;
+export type ChatLearningProfile = SharedChat.ChatEvents.ChatLearningProfile;
 
-export type ChatFeatureSnapshot = SharedChat.ChatEventsModule.ChatFeatureSnapshot;
+export type ChatFeatureSnapshot = SharedChat.ChatEvents.ChatFeatureSnapshot;
 
-export type ChatRescueDecision = SharedChat.ChatEventsModule.ChatRescueDecision;
+export type ChatRescueDecision = SharedChat.ChatEvents.ChatRescueDecision;
 
-export type ChatLiveOpsState = SharedChat.ChatEventsModule.ChatLiveOpsState;
+export type ChatLiveOpsState = SharedChat.ChatEvents.ChatLiveOpsState;
 
-export type ChatMomentType = SharedChat.ChatEventsModule.ChatMomentType;
+export type ChatMomentType = SharedChat.ChatEvents.ChatMomentType;
 
-export type ChatScenePlan = SharedChat.ChatEventsModule.ChatScenePlan;
+export type ChatScenePlan = SharedChat.ChatEvents.ChatScenePlan;
 
-export type ChatRevealSchedule = SharedChat.ChatEventsModule.ChatRevealSchedule;
+export type ChatRevealSchedule = SharedChat.ChatEvents.ChatRevealSchedule;
 
 export type ChatSilenceDecision =
-  SharedChat.ChatEventsModule.ChatSilenceDecision;
+  SharedChat.ChatEvents.ChatSilenceDecision;
 
 export type ChatAuthoritativeFrame =
-  SharedChat.ChatEventsModule.ChatAuthoritativeFrame;
+  SharedChat.ChatEvents.ChatAuthoritativeFrame;
 
 export type ChatReplayWindowSnapshot =
-  SharedChat.ChatEventsModule.ChatReplayWindowSnapshot;
+  SharedChat.ChatEvents.ChatReplayWindowSnapshot;
 
 export type ChatReplayExcerptWire =
-  SharedChat.ChatEventsModule.ChatReplayExcerptWire;
+  SharedChat.ChatEvents.ChatReplayExcerptWire;
 
 // ============================================================================
 // MARK: Legacy-compatible component message surface
@@ -364,6 +364,7 @@ export interface ChatMessage {
   readonly auditMeta?: ChatAuditMeta;
   readonly senderWire?: ChatSenderWire;
   readonly meta?: ChatMessageMeta;
+  readonly metadata?: Record<string, unknown>;
   readonly botSource?: BotTauntSource;
   readonly shieldMeta?: ShieldEventMeta;
   readonly cascadeMeta?: CascadeAlertMeta;
@@ -417,8 +418,8 @@ export interface GameChatContextRunSnapshot {
   readonly haterHeat?: number;
   readonly shieldIntegrity01?: number;
   readonly currentMode?: string;
-  readonly modeScope?: SharedChat.ChatChannelsModule.ChatModeScope;
-  readonly mountTarget?: SharedChat.ChatChannelsModule.ChatMountTarget;
+  readonly modeScope?: SharedChat.ChatChannels.ChatModeScope;
+  readonly mountTarget?: SharedChat.ChatChannels.ChatMountTarget;
 }
 
 export interface GameChatContextEventsSnapshot {
@@ -444,8 +445,8 @@ export interface GameChatContext {
   readonly sessionId?: string;
   readonly playerId?: string;
   readonly playerName?: string;
-  readonly modeScope?: SharedChat.ChatChannelsModule.ChatModeScope;
-  readonly mountTarget?: SharedChat.ChatChannelsModule.ChatMountTarget;
+  readonly modeScope?: SharedChat.ChatChannels.ChatModeScope;
+  readonly mountTarget?: SharedChat.ChatChannels.ChatMountTarget;
   readonly activeChannel?: UnifiedVisibleChatChannel;
   readonly score?: GameChatContextScoreSnapshot;
   readonly economy?: GameChatContextEconomySnapshot;
@@ -527,21 +528,123 @@ export interface ChatTranscriptSearchResult {
   readonly messages: readonly ChatMessage[];
 }
 
+export interface ChatTranscriptStateCompat {
+  readonly open: boolean;
+  readonly searchQuery: string;
+  readonly selectedMessageId: string | null;
+  readonly newestFirst: boolean;
+}
+
+export interface ChatComposerStateCompat {
+  readonly activeDraft: string;
+  readonly charCount: number;
+  readonly maxChars: number;
+  readonly canSend: boolean;
+  readonly isNearLimit: boolean;
+  readonly placeholder: string;
+}
+
+export interface ChatPresencePreviewCompat {
+  readonly onlineCount: number;
+  readonly activeMembers: number;
+  readonly typingCount: number;
+  readonly recentPeerNames: string[];
+  readonly recentRanks: string[];
+}
+
+export interface ChatThreatSummaryCompat {
+  readonly score: number;
+  readonly tier: 'CALM' | 'WATCH' | 'HIGH' | 'CRITICAL';
+  readonly label: string;
+  readonly reasons: string[];
+  readonly latestThreatMessageId: string | null;
+}
+
+export interface ChatHelperPromptCompat {
+  readonly id?: string;
+  readonly title: string;
+  readonly body: string;
+  readonly severity: 'INFO' | 'GUIDE' | 'WARNING' | 'CRITICAL';
+  readonly sourceMessageId?: string;
+  readonly ctaLabel?: string;
+  readonly suggestedReply?: string;
+}
+
+export interface ChatMountStateCompat {
+  readonly mountTarget: string;
+  readonly modeScope: string;
+  readonly storageNamespace?: string;
+}
+
 export interface UseChatEngineResult {
   readonly messages: readonly ChatMessage[];
+  readonly allMessages?: readonly ChatMessage[];
+  readonly visibleMessages?: readonly ChatMessage[];
+  readonly recentMessages?: readonly ChatMessage[];
   readonly activeTab: ChatChannel;
+  readonly activeChannel?: ChatChannel;
+  readonly activeSummary?: ChatChannelSummary;
   readonly chatOpen: boolean;
+  readonly collapsed?: boolean;
+  readonly isPinned?: boolean;
   readonly connected: boolean;
+  readonly connectionState?: ChatConnectionState;
   readonly unread: Partial<Record<UnifiedVisibleChatChannel | Lowercase<UnifiedVisibleChatChannel>, number>>;
   readonly totalUnread: number;
   readonly switchTab: (tab: ChatChannel) => void;
+  readonly setActiveChannel?: (channel: ChatChannel) => void;
   readonly toggleChat: () => void;
+  readonly openChat?: () => void;
+  readonly closeChat?: () => void;
+  readonly collapse?: () => void;
+  readonly expand?: () => void;
   readonly sendMessage: (body: string) => void;
+  readonly sendText?: (body: string) => void;
+  readonly sendDraft?: () => void;
+  readonly setDraft?: (body: string) => void;
+  readonly appendDraft?: (suffix: string) => void;
+  readonly clearDraft?: () => void;
+  readonly quickReply?: (reply: string) => void;
   readonly clearUnread?: (channel?: ChatChannel) => void;
   readonly summaries?: readonly ChatChannelSummary[];
+  readonly channels?: readonly ChatChannelSummary[];
   readonly threat?: ChatThreatSnapshot;
-  readonly helperPrompt?: ChatHelperPromptSnapshot;
-  readonly connectionState?: ChatConnectionState;
+  readonly threatModel?: ChatThreatSnapshot;
+  readonly threatSummary?: ChatThreatSummaryCompat;
+  readonly helperPrompt?: ChatHelperPromptSnapshot | ChatHelperPromptCompat;
+  readonly presence?: ChatPresencePreviewCompat;
+  readonly transcript?: ChatTranscriptStateCompat;
+  readonly composer?: ChatComposerStateCompat;
+  readonly transcriptDrawerModel?: UiTypes.ChatUiTranscriptDrawerSurfaceModel;
+  readonly transcriptDrawerCallbacks?: UiTypes.ChatUiTranscriptDrawerCallbacks;
+  readonly presenceStripModel?: UiTypes.PresenceStripViewModel;
+  readonly typingIndicatorModel?: UiTypes.TypingClusterViewModel;
+  readonly channelTabs?: UiTypes.ChannelTabsViewModel;
+  readonly messageFeedModel?: UiTypes.MessageFeedViewModel;
+  readonly messageFeedActionsByMessageId?: Record<string, readonly UiTypes.MessageCardActionViewModel[]>;
+  readonly shellMode?: 'DOCK' | 'DRAWER' | string;
+  readonly transcriptLocked?: boolean;
+  readonly emptyStateMode?:
+    | 'IDLE'
+    | 'DISCONNECTED'
+    | 'FILTERED'
+    | 'DEAL_WAITING'
+    | 'THREAT'
+    | 'COLLAPSED'
+    | string;
+  readonly latestMessage?: ChatMessage | null;
+  readonly latestPlayerMessage?: ChatMessage | null;
+  readonly latestSystemMessage?: ChatMessage | null;
+  readonly latestThreatMessage?: ChatMessage | null;
+  readonly diagnostics?: unknown;
+  readonly mountState?: ChatMountStateCompat;
+  readonly runtimeBundle?: unknown;
+  readonly toggleTranscript?: () => void;
+  readonly openTranscript?: () => void;
+  readonly closeTranscript?: () => void;
+  readonly setTranscriptSearchQuery?: (query: string) => void;
+  readonly selectTranscriptMessage?: (messageId: string | null) => void;
+  readonly jumpToLatest?: () => void;
 }
 
 export interface ChatPanelProps {
@@ -575,12 +678,12 @@ const maybeEngineRuntimeLaws = readNamedExport(
 
 export const CHAT_TYPES_AUTHORITIES = Object.freeze({
   filePath: CHAT_TYPES_FILE_PATH,
-  sharedContractsRoot: SharedChat.ChatChannelsModule.CHAT_CHANNEL_CONTRACT?.authorities?.sharedContractsRoot
+  sharedContractsRoot: SharedChat.ChatChannels.CHAT_CHANNEL_CONTRACT?.authorities?.sharedContractsRoot
     ?? '/shared/contracts/chat',
-  frontendEngineRoot: SharedChat.ChatChannelsModule.CHAT_CHANNEL_CONTRACT?.authorities?.frontendEngineRoot
+  frontendEngineRoot: SharedChat.ChatChannels.CHAT_CHANNEL_CONTRACT?.authorities?.frontendEngineRoot
     ?? '/pzo-web/src/engines/chat',
   frontendUiRoot: '/pzo-web/src/components/chat',
-  sharedLearningRoot: SharedChat.ChatChannelsModule.CHAT_CHANNEL_CONTRACT?.authorities?.sharedLearningRoot
+  sharedLearningRoot: SharedChat.ChatChannels.CHAT_CHANNEL_CONTRACT?.authorities?.sharedLearningRoot
     ?? '/shared/contracts/chat/learning',
 });
 
@@ -590,6 +693,7 @@ export const CHAT_TYPES_RUNTIME_LAWS = Object.freeze([
   'Canonical frontend runtime law comes from pzo-web/src/engines/chat.',
   'Legacy names remain stable while authority moves out of the component lane.',
   'No battle, zero, pressure, shield, or cascade engine imports are allowed here.',
+  'Compatibility aliases may mirror richer UI shell return shapes so existing docks keep compiling during migration.',
 ] as const);
 
 export const CHAT_TYPES_MIGRATION_FLAGS = Object.freeze({
@@ -600,6 +704,7 @@ export const CHAT_TYPES_MIGRATION_FLAGS = Object.freeze({
   enginePublicAware: true,
   uiOnlyExtensionsAllowed: true,
   directEngineImportsAllowed: false,
+  unifiedChatReturnAliasesPresent: true,
 });
 
 export const CHAT_TYPES_RUNTIME_BUNDLE = Object.freeze({
@@ -631,11 +736,11 @@ export function isLegacyChatChannel(value: string): value is ChatChannel {
 export function isUnifiedVisibleChatChannel(
   value: string,
 ): value is UnifiedVisibleChatChannel {
-  return SharedChat.ChatChannelsModule.isChatVisibleChannel(value);
+  return SharedChat.ChatChannels.isChatVisibleChannel(value);
 }
 
 export function isAnyChatChannelId(value: string): value is AnyChatChannelId {
-  return SharedChat.ChatChannelsModule.isChatChannelId(value);
+  return SharedChat.ChatChannels.isChatChannelId(value);
 }
 
 export function isLegacyMessageKind(value: string): value is MessageKind {
@@ -674,7 +779,7 @@ export function normalizeChatChannel(
     return normalized;
   }
 
-  const legacyAlias = SharedChat.ChatChannelsModule.normalizeLegacyChatChannel(normalized);
+  const legacyAlias = SharedChat.ChatChannels.normalizeLegacyChatChannel(normalized);
   if (legacyAlias && isLegacyChatChannel(legacyAlias)) {
     return legacyAlias;
   }
@@ -694,12 +799,12 @@ export function toUnifiedVisibleChatChannel(
 
   const normalized = String(value).trim().toUpperCase().replace(/[-\s]+/g, '_');
 
-  if (SharedChat.ChatChannelsModule.isChatVisibleChannel(normalized)) {
+  if (SharedChat.ChatChannels.isChatVisibleChannel(normalized)) {
     return normalized;
   }
 
-  const legacyAlias = SharedChat.ChatChannelsModule.normalizeLegacyChatChannel(normalized);
-  if (legacyAlias && SharedChat.ChatChannelsModule.isChatVisibleChannel(legacyAlias)) {
+  const legacyAlias = SharedChat.ChatChannels.normalizeLegacyChatChannel(normalized);
+  if (legacyAlias && SharedChat.ChatChannels.isChatVisibleChannel(legacyAlias)) {
     return legacyAlias;
   }
 
@@ -709,7 +814,7 @@ export function toUnifiedVisibleChatChannel(
 export function toPrimaryShadowChannel(
   value: string | ChatChannel | UnifiedVisibleChatChannel,
 ): ChatShadowChannel {
-  return SharedChat.ChatChannelsModule.visibleChannelToPrimaryShadow(
+  return SharedChat.ChatChannels.visibleChannelToPrimaryShadow(
     toUnifiedVisibleChatChannel(value),
   );
 }
@@ -717,9 +822,9 @@ export function toPrimaryShadowChannel(
 export function getChatChannelLabel(
   channel: string | AnyChatChannelId,
 ): string {
-  const normalized = SharedChat.ChatChannelsModule.isChatChannelId(channel)
+  const normalized = SharedChat.ChatChannels.isChatChannelId(channel)
     ? channel
-    : SharedChat.ChatChannelsModule.normalizeLegacyChatChannel(String(channel).toUpperCase())
+    : SharedChat.ChatChannels.normalizeLegacyChatChannel(String(channel).toUpperCase())
       ?? toUnifiedVisibleChatChannel(String(channel));
 
   return CHAT_CHANNEL_LABELS[normalized];
@@ -728,9 +833,9 @@ export function getChatChannelLabel(
 export function getChatChannelDescription(
   channel: string | AnyChatChannelId,
 ): string {
-  const normalized = SharedChat.ChatChannelsModule.isChatChannelId(channel)
+  const normalized = SharedChat.ChatChannels.isChatChannelId(channel)
     ? channel
-    : SharedChat.ChatChannelsModule.normalizeLegacyChatChannel(String(channel).toUpperCase())
+    : SharedChat.ChatChannels.normalizeLegacyChatChannel(String(channel).toUpperCase())
       ?? toUnifiedVisibleChatChannel(String(channel));
 
   return CHAT_CHANNEL_DESCRIPTIONS[normalized];
@@ -805,18 +910,15 @@ export function coerceMessageTimestamp(
 export function buildLegacyBotTauntSource(
   partial: Partial<BotTauntSource> | null | undefined,
 ): BotTauntSource | undefined {
-  if (!partial?.botId || !partial.botName || !partial.botState || !partial.attackType || !partial.dialogue) {
+  if (!partial?.botId || !partial.attackType) {
     return undefined;
   }
 
   return {
     botId: partial.botId,
-    botName: partial.botName,
-    botState: partial.botState,
     attackType: partial.attackType,
-    targetLayer: partial.targetLayer,
-    dialogue: partial.dialogue,
-    isRetreat: Boolean(partial.isRetreat),
+    personaId: partial.personaId,
+    escalationTier: partial.escalationTier,
   };
 }
 
@@ -829,26 +931,23 @@ export function buildShieldEventMeta(
 
   return {
     layerId: partial.layerId,
-    integrity:
-      typeof partial.integrity === 'number' ? partial.integrity : 0,
-    maxIntegrity:
-      typeof partial.maxIntegrity === 'number' ? partial.maxIntegrity : 0,
-    isBreached: Boolean(partial.isBreached),
-    attackId: partial.attackId,
+    integrityAfter: partial.integrityAfter,
+    shieldDelta: partial.shieldDelta,
+    shieldLabel: partial.shieldLabel,
   };
 }
 
 export function buildCascadeAlertMeta(
   partial: Partial<CascadeAlertMeta> | null | undefined,
 ): CascadeAlertMeta | undefined {
-  if (!partial?.chainId || !partial?.severity || !partial?.direction) {
+  if (!partial?.chainId || !partial?.severity) {
     return undefined;
   }
 
   return {
     chainId: partial.chainId,
     severity: partial.severity,
-    direction: partial.direction,
+    recovered: partial.recovered,
   };
 }
 
@@ -1015,6 +1114,7 @@ export function coerceChatMessage(
     auditMeta: value.auditMeta as ChatAuditMeta | undefined,
     senderWire: value.senderWire as ChatSenderWire | undefined,
     meta: value.meta as ChatMessageMeta | undefined,
+    metadata: (value.metadata ?? value.meta) as Record<string, unknown> | undefined,
     botSource: buildLegacyBotTauntSource(
       value.botSource as Partial<BotTauntSource> | undefined,
     ),
@@ -1070,7 +1170,7 @@ export function coerceChatMessages(
 
 export function toSharedVisibleChannel(
   value: ChatChannel | UnifiedVisibleChatChannel,
-): SharedChat.ChatChannelsModule.ChatVisibleChannel {
+): SharedChat.ChatChannels.ChatVisibleChannel {
   return toUnifiedVisibleChatChannel(value);
 }
 
@@ -1113,8 +1213,8 @@ export function collectProofHashes(
       proofs.add(message.proofHash);
     }
 
-    if (message.proofMeta?.messageHash) {
-      proofs.add(message.proofMeta.messageHash);
+    if (message.proofMeta?.proofHash) {
+      proofs.add(message.proofMeta.proofHash);
     }
   }
 
@@ -1161,9 +1261,9 @@ export function extractThreatSnapshot(
     if (message.pressureTier === 'CRITICAL') {
       pressureCritical = true;
       activePressureTier = 'CRITICAL';
-    } else if (message.pressureTier === 'HIGH' && !pressureCritical) {
+    } else if (message.pressureTier === 'PRESSURED' && !pressureCritical) {
       pressureHigh = true;
-      activePressureTier = 'HIGH';
+      activePressureTier = 'PRESSURED';
     }
 
     if (message.tickTier) {
@@ -1216,7 +1316,7 @@ export function buildChannelSummaries(
 
   return LEGACY_CHAT_CHANNELS.map((channel) => {
     const sorted = sortMessagesForRender(grouped[channel]);
-    const latest = sorted.at(-1);
+    const latest = sorted[sorted.length - 1];
     const threat = extractThreatSnapshot(sorted);
 
     return {
@@ -1252,8 +1352,8 @@ export function buildTranscriptSearchResult(
           message.senderName,
           message.senderRank,
           message.proofHash,
-          message.botSource?.botName,
-          message.meta?.statusText,
+          message.botSource?.botId,
+          message.botSource?.personaId,
         ].filter(Boolean);
 
         return haystacks.some((value) =>
@@ -1273,30 +1373,56 @@ export function buildTranscriptSearchResult(
 export function toLegacyChatMessageFromWire(
   wire: SharedChat.ChatEvents.ChatMessageWire,
 ): ChatMessage {
+  const proofRecord = (wire as unknown as Record<string, unknown>).proof as
+    | Record<string, unknown>
+    | undefined;
+  const rawProofValue =
+    proofRecord?.['messageHash'] ??
+    proofRecord?.['message_hash'] ??
+    proofRecord?.['hash'];
+  const proofHash =
+    typeof rawProofValue === 'string'
+      ? rawProofValue
+      : rawProofValue != null
+        ? String(rawProofValue)
+        : undefined;
+
   return coerceChatMessage({
-    id: wire.id,
-    channel: normalizeChatChannel(wire.channel),
+    id: ensureMessageId(
+      (wire as unknown as Record<string, unknown>).id as string | undefined,
+      0,
+    ),
+    channel: normalizeChatChannel(wire.channelId),
     kind: coerceMessageKind(wire.kind),
-    senderId: wire.sender.id,
-    senderName: wire.sender.name,
-    senderRank: wire.sender.title,
-    senderRole: wire.sender.role,
+    senderId:
+      ((wire.sender as unknown as Record<string, unknown>).id as string | undefined)
+      ?? ((wire.sender as unknown as Record<string, unknown>).playerId as string | undefined)
+      ?? ((wire.sender as unknown as Record<string, unknown>).memberId as string | undefined)
+      ?? String(((wire.sender as unknown as Record<string, unknown>).name ?? 'system')),
+    senderName: (wire.sender as unknown as Record<string, unknown>).name as string | undefined,
+    senderRank: (wire.sender as unknown as Record<string, unknown>).title as string | undefined,
+    senderRole: (wire.sender as unknown as Record<string, unknown>).role as ChatSenderRole | string | undefined,
     senderWire: wire.sender,
     body: wire.body,
-    emoji: wire.emoji,
-    ts: wire.ts,
-    immutable: wire.immutable,
-    proofHash: wire.proof?.messageHash,
+    emoji: (wire as unknown as Record<string, unknown>).emoji as string | undefined,
+    ts: coerceMessageTimestamp(
+      ((wire as unknown as Record<string, unknown>).ts as number | string | undefined)
+      ?? ((wire as unknown as Record<string, unknown>).timestamp as number | string | undefined),
+      Date.now(),
+    ),
+    immutable: (wire as unknown as Record<string, unknown>).immutable as boolean | undefined,
+    proofHash,
     deliveryState: wire.deliveryState,
     moderationState: wire.moderation?.state,
     meta: wire.meta,
-    proofMeta: wire.proof,
-    legendMeta: wire.legend,
-    replayMeta: wire.replay,
-    auditMeta: wire.audit,
-    pressureTier: wire.meta?.pressureTier,
-    tickTier: wire.meta?.tickTier,
-    runOutcome: wire.meta?.runOutcome,
+    metadata: wire.meta as unknown as Record<string, unknown> | undefined,
+    proofMeta: wire.proof as unknown as ChatProofMeta | undefined,
+    legendMeta: wire.legend as unknown as ChatLegendMeta | undefined,
+    replayMeta: undefined,
+    auditMeta: undefined,
+    pressureTier: wire.meta?.pressureTier as PressureTier | undefined,
+    tickTier: wire.meta?.tickTier as TickTier | undefined,
+    runOutcome: wire.meta?.runOutcome as RunOutcome | undefined,
     botSource: wire.meta?.botSource,
     shieldMeta: wire.meta?.shieldMeta,
     cascadeMeta: wire.meta?.cascadeMeta,
@@ -1345,6 +1471,7 @@ export function toLegacyChatMessagesFromReplay(
         proofHash: excerpt.message.proof?.messageHash,
         senderWire: excerpt.message.sender,
         meta: excerpt.message.meta,
+        metadata: excerpt.message.meta as unknown as Record<string, unknown> | undefined,
         proofMeta: excerpt.message.proof,
         legendMeta: excerpt.message.legend,
         replayMeta: excerpt.message.replay,
@@ -1370,29 +1497,74 @@ export function toLegacyChatMessagesFromReplay(
 export function createDefaultUseChatEngineResult(
   overrides: Partial<UseChatEngineResult> = {},
 ): UseChatEngineResult {
-  const messages = coerceChatMessages(overrides.messages ?? []);
-  const activeTab = normalizeChatChannel(overrides.activeTab ?? 'GLOBAL');
-  const threat = overrides.threat ?? extractThreatSnapshot(messages);
+  const messages = coerceChatMessages(
+    (overrides.messages ?? []) as readonly (Partial<ChatMessage> & Record<string, unknown>)[],
+  );
+  const activeTab = normalizeChatChannel(
+    overrides.activeChannel ?? overrides.activeTab ?? 'GLOBAL',
+  );
+  const grouped = groupMessagesByChannel(messages);
+  const visibleMessages = overrides.visibleMessages
+    ? coerceChatMessages(
+        overrides.visibleMessages as readonly (Partial<ChatMessage> & Record<string, unknown>)[],
+      )
+    : grouped[activeTab];
+  const allMessages = overrides.allMessages
+    ? coerceChatMessages(
+        overrides.allMessages as readonly (Partial<ChatMessage> & Record<string, unknown>)[],
+      )
+    : messages;
+  const threat = overrides.threat ?? extractThreatSnapshot(visibleMessages);
   const summaries = overrides.summaries ?? buildChannelSummaries(messages, activeTab);
+  const unread: Partial<Record<UnifiedVisibleChatChannel | Lowercase<UnifiedVisibleChatChannel>, number>> =
+    overrides.unread
+    ?? (deriveUnreadCounts(messages, activeTab) as unknown as Partial<Record<UnifiedVisibleChatChannel | Lowercase<UnifiedVisibleChatChannel>, number>>);
+  const totalUnread =
+    overrides.totalUnread
+    ?? Object.values(unread).reduce((sum, value) => sum + Number(value ?? 0), 0);
+
+  const sendText = overrides.sendText ?? overrides.sendMessage ?? (() => undefined);
+  const switchTab = overrides.switchTab ?? (() => undefined);
+  const toggleChat = overrides.toggleChat ?? (() => undefined);
+  const noop = () => undefined;
 
   return {
     messages,
+    allMessages,
+    visibleMessages,
+    recentMessages: overrides.recentMessages ?? visibleMessages.slice(-24),
     activeTab,
+    activeChannel: overrides.activeChannel ?? activeTab,
+    activeSummary:
+      overrides.activeSummary
+      ?? summaries.find((summary) => normalizeChatChannel(summary.channel) === activeTab),
     chatOpen: overrides.chatOpen ?? true,
+    collapsed: overrides.collapsed ?? false,
+    isPinned: overrides.isPinned ?? false,
     connected: overrides.connected ?? false,
-    unread: overrides.unread ?? deriveUnreadCounts(messages, activeTab),
-    totalUnread:
-      overrides.totalUnread
-      ?? Object.values(deriveUnreadCounts(messages, activeTab)).reduce(
-        (sum, value) => sum + value,
-        0,
-      ),
-    switchTab: overrides.switchTab ?? (() => undefined),
-    toggleChat: overrides.toggleChat ?? (() => undefined),
-    sendMessage: overrides.sendMessage ?? (() => undefined),
+    connectionState: overrides.connectionState ?? (overrides.connected ? 'CONNECTED' : 'DISCONNECTED'),
+    unread,
+    totalUnread,
+    switchTab,
+    setActiveChannel: overrides.setActiveChannel ?? switchTab,
+    toggleChat,
+    openChat: overrides.openChat ?? noop,
+    closeChat: overrides.closeChat ?? noop,
+    collapse: overrides.collapse ?? noop,
+    expand: overrides.expand ?? noop,
+    sendMessage: overrides.sendMessage ?? sendText,
+    sendText,
+    sendDraft: overrides.sendDraft ?? noop,
+    setDraft: overrides.setDraft ?? noop,
+    appendDraft: overrides.appendDraft ?? noop,
+    clearDraft: overrides.clearDraft ?? noop,
+    quickReply: overrides.quickReply ?? noop,
     clearUnread: overrides.clearUnread,
     summaries,
+    channels: overrides.channels ?? summaries,
     threat,
+    threatModel: overrides.threatModel ?? threat,
+    threatSummary: overrides.threatSummary,
     helperPrompt:
       overrides.helperPrompt
       ?? {
@@ -1412,7 +1584,68 @@ export function createDefaultUseChatEngineResult(
               : 'You still have room to respond cleanly.',
         ctaLabel: 'Assist',
       },
-    connectionState: overrides.connectionState ?? (overrides.connected ? 'CONNECTED' : 'DISCONNECTED'),
+    presence: overrides.presence ?? {
+      onlineCount: 0,
+      activeMembers: 0,
+      typingCount: 0,
+      recentPeerNames: [],
+      recentRanks: [],
+    },
+    transcript: overrides.transcript ?? {
+      open: false,
+      searchQuery: '',
+      selectedMessageId: null,
+      newestFirst: false,
+    },
+    composer: overrides.composer ?? {
+      activeDraft: '',
+      charCount: 0,
+      maxChars: 1200,
+      canSend: false,
+      isNearLimit: false,
+      placeholder: 'Type a message…',
+    },
+    transcriptDrawerModel: overrides.transcriptDrawerModel,
+    transcriptDrawerCallbacks: overrides.transcriptDrawerCallbacks,
+    presenceStripModel: overrides.presenceStripModel,
+    typingIndicatorModel: overrides.typingIndicatorModel,
+    channelTabs: overrides.channelTabs,
+    messageFeedModel: overrides.messageFeedModel,
+    messageFeedActionsByMessageId: overrides.messageFeedActionsByMessageId,
+    shellMode: overrides.shellMode ?? 'DOCK',
+    transcriptLocked: overrides.transcriptLocked ?? false,
+    emptyStateMode: overrides.emptyStateMode ?? 'IDLE',
+    latestMessage: overrides.latestMessage ?? (visibleMessages.at(-1) ?? null),
+    latestPlayerMessage:
+      overrides.latestPlayerMessage
+      ?? [...visibleMessages].reverse().find((message) => message.kind === 'PLAYER')
+      ?? null,
+    latestSystemMessage:
+      overrides.latestSystemMessage
+      ?? [...visibleMessages].reverse().find((message) => message.kind === 'SYSTEM')
+      ?? null,
+    latestThreatMessage:
+      overrides.latestThreatMessage
+      ?? [...visibleMessages].reverse().find(
+        (message) =>
+          message.kind === 'BOT_ATTACK'
+          || message.kind === 'BOT_TAUNT'
+          || message.kind === 'CASCADE_ALERT',
+      )
+      ?? null,
+    diagnostics: overrides.diagnostics,
+    mountState: overrides.mountState ?? {
+      mountTarget: 'GAME_BOARD',
+      modeScope: 'GLOBAL',
+      storageNamespace: 'pzo_chat',
+    },
+    runtimeBundle: overrides.runtimeBundle,
+    toggleTranscript: overrides.toggleTranscript ?? noop,
+    openTranscript: overrides.openTranscript ?? noop,
+    closeTranscript: overrides.closeTranscript ?? noop,
+    setTranscriptSearchQuery: overrides.setTranscriptSearchQuery ?? noop,
+    selectTranscriptMessage: overrides.selectTranscriptMessage ?? noop,
+    jumpToLatest: overrides.jumpToLatest ?? noop,
   };
 }
 
@@ -1504,7 +1737,7 @@ export const CHAT_TYPES_DESCRIPTORS = Object.freeze({
     sharedBacked: true,
     engineAware: true,
     description:
-      'Compatibility return shape for the legacy hook while migration moves callers to useUnifiedChat and engine public selectors.',
+      'Compatibility return shape for the legacy hook while migration moves callers to useUnifiedChat and engine public selectors, including unified shell aliases such as activeChannel and allMessages.',
   }),
   ChatPanelProps: Object.freeze<ChatTypesDescriptor>({
     key: 'ChatPanelProps',
