@@ -358,6 +358,14 @@ interface FingerprintEntry {
   readonly messageId: string;
 }
 
+// ─── Utility helpers ─────────────────────────────────────────────────────────
+
+function readRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object'
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
 function clamp01(value: number): number {
   if (!Number.isFinite(value)) return 0;
   return Math.max(0, Math.min(1, value));
@@ -582,6 +590,8 @@ function pickPersonaByContext(
   return HATER_PERSONAS[1];
 }
 
+// ─── buildMessageMeta (patched) ──────────────────────────────────────────────
+
 function buildMessageMeta(
   ctx: GameChatContext,
   options: {
@@ -592,23 +602,59 @@ function buildMessageMeta(
     botSource?: BotTauntSource;
   } = {},
 ): ChatMessageMeta {
+  const debug: Record<
+    string,
+    string | number | boolean | Record<string, string | number | boolean>
+  > = {};
+
+  if (options.statusText) {
+    debug.statusText = options.statusText;
+  }
+
+  if (options.pressureTier) {
+    debug.pressureTier = options.pressureTier;
+  }
+
+  if (options.tickTier) {
+    debug.tickTier = options.tickTier;
+  }
+
+  if (options.runOutcome) {
+    debug.runOutcome = options.runOutcome;
+  }
+
+  if (options.botSource) {
+    const botSourceDebug: Record<string, string | number | boolean> = {};
+
+    if (options.botSource.botId) {
+      botSourceDebug.botId = options.botSource.botId;
+    }
+
+    if (options.botSource.attackType) {
+      botSourceDebug.attackType = options.botSource.attackType;
+    }
+
+    if (options.botSource.personaId) {
+      botSourceDebug.personaId = options.botSource.personaId;
+    }
+
+    if (typeof options.botSource.escalationTier === 'number') {
+      botSourceDebug.escalationTier = options.botSource.escalationTier;
+    }
+
+    if (Object.keys(botSourceDebug).length > 0) {
+      debug.botSource = botSourceDebug;
+    }
+  }
+
   return {
     requestId: undefined,
     roomId: ctx.roomId as never,
     channelId: undefined,
-    debug: {
-      statusText: options.statusText,
-      pressureTier: options.pressureTier ?? ctx.pressureTier,
-      tickTier: options.tickTier ?? ctx.tickTier,
-      runOutcome: options.runOutcome ?? ctx.runOutcome,
-      botSource: options.botSource
-        ? {
-            botId: options.botSource.botId,
-            attackType: options.botSource.attackType,
-            targetLayer: options.botSource.targetLayer,
-          }
+    debug:
+      Object.keys(debug).length > 0
+        ? (debug as ChatMessageMeta['debug'])
         : undefined,
-    },
   };
 }
 
@@ -746,6 +792,8 @@ function buildHelperMessage(
   );
 }
 
+// ─── buildHaterMessage (patched) ─────────────────────────────────────────────
+
 function buildHaterMessage(
   ctx: GameChatContext,
   channel: ChatChannel,
@@ -755,12 +803,12 @@ function buildHaterMessage(
 ): ChatMessage {
   const botSource: BotTauntSource = {
     botId: profile.id,
-    botName: profile.name,
-    botState: 'ATTACKING',
     attackType: profile.attackType,
-    dialogue: body,
-    targetLayer: 'L2',
-    isRetreat: false,
+    personaId: profile.id,
+    escalationTier: Math.max(
+      1,
+      Math.min(5, Math.round(clamp01(ctx.haterHeat ?? 0.5) * 5)),
+    ),
   };
 
   return buildSystemMessage(
@@ -885,6 +933,8 @@ function deriveContextDelta(
     scoreShock: nextThreat > previousThreat + 0.14,
   };
 }
+
+// ─── buildContextDigestMessages (patched event loop + sabotage block) ─────────
 
 function buildContextDigestMessages(
   previous: GameChatContext | null,
@@ -1025,6 +1075,11 @@ function buildContextDigestMessages(
     const tauntDialogue =
       persona.taunts[(fallbackSeed + next.tick) % persona.taunts.length] ?? eventText;
 
+    const escalationTier = Math.max(
+      1,
+      Math.min(5, Math.round(clamp01(next.haterHeat ?? 0.5) * 5)),
+    );
+
     const message = buildSystemMessage(
       next,
       {
@@ -1066,41 +1121,47 @@ function buildContextDigestMessages(
                       : kind === 'MARKET_ALERT'
                         ? '📉'
                         : '◎',
-        body: kind === 'BOT_ATTACK' ? attackDialogue : kind === 'BOT_TAUNT' ? tauntDialogue : eventText,
+        body:
+          kind === 'BOT_ATTACK'
+            ? attackDialogue
+            : kind === 'BOT_TAUNT'
+              ? tauntDialogue
+              : eventText,
         immutable: true,
         botSource:
           kind === 'BOT_ATTACK' || kind === 'BOT_TAUNT'
             ? {
                 botId: persona.id,
-                botName: persona.name,
-                botState: kind === 'BOT_ATTACK' ? 'ATTACKING' : 'TAUNTING',
                 attackType: persona.attackType,
-                targetLayer: inferShieldLayer(eventText),
-                dialogue: kind === 'BOT_ATTACK' ? attackDialogue : tauntDialogue,
-                isRetreat: false,
+                personaId: persona.id,
+                escalationTier,
               }
             : undefined,
         shieldMeta:
           kind === 'SHIELD_EVENT'
             ? {
                 layerId: inferShieldLayer(eventText) ?? 'L2',
-                integrity: 0.31,
-                maxIntegrity: 1,
-                isBreached: safeUpper(eventText).includes('BREACH'),
-                attackId: `shield-${toStableKey(eventText)}`,
+                integrityAfter: safeUpper(eventText).includes('BREACH')
+                  ? 0.18
+                  : 0.31,
+                shieldDelta: safeUpper(eventText).includes('BREACH')
+                  ? -0.42
+                  : -0.19,
+                shieldLabel: inferShieldLayer(eventText) ?? 'L2',
               }
             : undefined,
         cascadeMeta:
           kind === 'CASCADE_ALERT'
             ? {
-                cascadeId: `cascade-${toStableKey(eventText)}`,
-                severity: safeUpper(eventText).includes('SEVERE')
-                  ? ('SEVERE' as CascadeSeverity)
+                chainId: `cascade-${toStableKey(eventText)}`,
+                severity: safeUpper(eventText).includes('CRITICAL')
+                  ? ('CRITICAL' as CascadeSeverity)
                   : safeUpper(eventText).includes('HIGH')
                     ? ('HIGH' as CascadeSeverity)
-                    : ('MEDIUM' as CascadeSeverity),
-                stepCount: 3,
-                trigger: eventText,
+                    : safeUpper(eventText).includes('LOW')
+                      ? ('LOW' as CascadeSeverity)
+                      : ('MEDIUM' as CascadeSeverity),
+                recovered: safeUpper(eventText).includes('RECOVER'),
               }
             : undefined,
       },
@@ -1126,9 +1187,9 @@ function buildContextDigestMessages(
           sourceChannel: channel,
           sourceMessageId: message.id,
           recoveryHint:
-            persona.helperCounters[(fallbackSeed + next.tick) % persona.helperCounters.length] ??
-            'Reduce exposure and preserve cash before responding publicly.',
-          relationshipState: next.learningProfile?.relationships?.[persona.id],
+            persona.helperCounters[
+              (fallbackSeed + next.tick) % persona.helperCounters.length
+            ] ?? 'Reduce exposure and preserve cash before responding publicly.',
           affect: next.affect,
         }),
       );
@@ -1250,7 +1311,8 @@ function buildHookResult(
   const visibleMessages = state.messages.filter(
     (message) => normalizeChatChannel(message.channel) === state.activeTab,
   );
-  const latestMessage = state.messages.length > 0 ? state.messages[state.messages.length - 1] : null;
+  const latestMessage =
+    state.messages.length > 0 ? state.messages[state.messages.length - 1] : null;
 
   const helperPrompt: ChatHelperPromptSnapshot = threat.rescueNeeded
     ? {
@@ -1313,6 +1375,8 @@ function buildHookResult(
     connectionState: state.connectionState,
   };
 }
+
+// ─── useChatEngine ────────────────────────────────────────────────────────────
 
 export function useChatEngine(
   gameCtx: GameChatContext,
@@ -1430,10 +1494,17 @@ export function useChatEngine(
       }
     }
 
+    // ─── liveOps block (patched) ────────────────────────────────────────────
     if (
-      (normalizedContext.liveOpsState?.activeWorldEvents?.length ?? 0) > 0 &&
+      normalizedContext.liveOpsState?.active &&
       now - lastSystemAtRef.current >= USE_CHAT_ENGINE_LIMITS.systemRepeatCooldownMs
     ) {
+      const liveOpsLabel =
+        normalizedContext.liveOpsState.title?.trim() ||
+        normalizedContext.liveOpsState.summary?.trim() ||
+        normalizedContext.liveOpsState.worldEventId ||
+        'world-event-pressure';
+
       generated.push(
         buildSystemMessage(
           normalizedContext,
@@ -1442,7 +1513,7 @@ export function useChatEngine(
             kind: 'WORLD_EVENT',
             senderName: 'LiveOps',
             senderRank: 'World Event Director',
-            body: `World event pressure active: ${normalizedContext.liveOpsState?.activeWorldEvents?.join(', ')}`,
+            body: `World event pressure active: ${liveOpsLabel}`,
             immutable: true,
           },
           messageSeedRef.current++,
@@ -1468,7 +1539,9 @@ export function useChatEngine(
     });
 
     for (const sabotage of digest.generatedSabotageEvents) {
-      const dispatchKey = sabotage.sourceMessageId ?? `${sabotage.haterId}|${sabotage.cardType}|${sabotage.ts}`;
+      const dispatchKey =
+        sabotage.sourceMessageId ??
+        `${sabotage.haterId}|${sabotage.cardType}|${sabotage.ts}`;
       if (!sabotageDispatchRef.current.has(dispatchKey)) {
         sabotageDispatchRef.current.add(dispatchKey);
         onSabotage?.(sabotage);
@@ -1535,106 +1608,111 @@ export function useChatEngine(
     });
   }, []);
 
-  const sendMessage = useCallback((body: string) => {
-    const trimmed = body.trim();
-    if (!trimmed) return;
+  const sendMessage = useCallback(
+    (body: string) => {
+      const trimmed = body.trim();
+      if (!trimmed) return;
 
-    const now = nowMs();
-    if (now - lastSendAtRef.current < USE_CHAT_ENGINE_LIMITS.localSendCooldownMs) {
-      return;
-    }
-    lastSendAtRef.current = now;
-
-    setState((current) => {
-      const playerMessage = buildPlayerMessage(
-        normalizedContext,
-        current.activeTab,
-        trimmed,
-        messageSeedRef.current++,
-      );
-
-      let generated: ChatMessage[] = [playerMessage];
-      const upper = safeUpper(trimmed);
-      const persona = pickPersonaByContext(normalizedContext, current.activeTab);
-
-      if (
-        current.activeTab === 'DEAL_ROOM' &&
-        (upper.includes('BUY') || upper.includes('SELL') || upper.includes('OFFER') || upper.includes('TERMS'))
-      ) {
-        generated = generated.concat([
-          buildSystemMessage(
-            normalizedContext,
-            {
-              channel: 'DEAL_ROOM',
-              kind: 'DEAL_RECAP',
-              senderName: 'Deal Wire',
-              senderRank: 'Negotiation Ledger',
-              body: 'Offer logged. Deal-room transcript integrity remains active while authority migrates outward.',
-              immutable: true,
-            },
-            messageSeedRef.current++,
-          ),
-        ]);
+      const now = nowMs();
+      if (now - lastSendAtRef.current < USE_CHAT_ENGINE_LIMITS.localSendCooldownMs) {
+        return;
       }
+      lastSendAtRef.current = now;
 
-      if (
-        upper.includes('HELP') ||
-        upper.includes('RESCUE') ||
-        upper.includes('WHAT NOW') ||
-        upper.includes('STUCK')
-      ) {
-        generated = generated.concat([
-          buildHelperMessage(
-            normalizedContext,
-            current.activeTab,
-            'strategic',
-            HELPER_LINES.strategic[(generated.length + normalizedContext.tick) % HELPER_LINES.strategic.length] ?? HELPER_LINES.strategic[0],
-            messageSeedRef.current++,
-          ),
-        ]);
-      } else if (
-        upper.includes('COME GET ME') ||
-        upper.includes('TRY ME') ||
-        upper.includes('WEAK') ||
-        upper.includes('TOO EASY')
-      ) {
-        generated = generated.concat([
-          buildHaterMessage(
-            normalizedContext,
-            current.activeTab,
-            persona,
-            persona.taunts[(generated.length + normalizedContext.tick) % persona.taunts.length] ?? persona.taunts[0],
-            messageSeedRef.current++,
-          ),
-        ]);
-      }
+      setState((current) => {
+        const playerMessage = buildPlayerMessage(
+          normalizedContext,
+          current.activeTab,
+          trimmed,
+          messageSeedRef.current++,
+        );
 
-      const nextMessages = appendBounded(current.messages, generated, dedupeRef.current);
-      const nextUnread = recalculateUnread(nextMessages, {
-        ...current,
-        messages: nextMessages,
+        let generated: ChatMessage[] = [playerMessage];
+        const upper = safeUpper(trimmed);
+        const persona = pickPersonaByContext(normalizedContext, current.activeTab);
+
+        if (
+          current.activeTab === 'DEAL_ROOM' &&
+          (upper.includes('BUY') ||
+            upper.includes('SELL') ||
+            upper.includes('OFFER') ||
+            upper.includes('TERMS'))
+        ) {
+          generated = generated.concat([
+            buildSystemMessage(
+              normalizedContext,
+              {
+                channel: 'DEAL_ROOM',
+                kind: 'DEAL_RECAP',
+                senderName: 'Deal Wire',
+                senderRank: 'Negotiation Ledger',
+                body: 'Offer logged. Deal-room transcript integrity remains active while authority migrates outward.',
+                immutable: true,
+              },
+              messageSeedRef.current++,
+            ),
+          ]);
+        }
+
+        if (
+          upper.includes('HELP') ||
+          upper.includes('RESCUE') ||
+          upper.includes('WHAT NOW') ||
+          upper.includes('STUCK')
+        ) {
+          generated = generated.concat([
+            buildHelperMessage(
+              normalizedContext,
+              current.activeTab,
+              'strategic',
+              HELPER_LINES.strategic[
+                (generated.length + normalizedContext.tick) % HELPER_LINES.strategic.length
+              ] ?? HELPER_LINES.strategic[0],
+              messageSeedRef.current++,
+            ),
+          ]);
+        } else if (
+          upper.includes('COME GET ME') ||
+          upper.includes('TRY ME') ||
+          upper.includes('WEAK') ||
+          upper.includes('TOO EASY')
+        ) {
+          generated = generated.concat([
+            buildHaterMessage(
+              normalizedContext,
+              current.activeTab,
+              persona,
+              persona.taunts[
+                (generated.length + normalizedContext.tick) % persona.taunts.length
+              ] ?? persona.taunts[0],
+              messageSeedRef.current++,
+            ),
+          ]);
+        }
+
+        const nextMessages = appendBounded(current.messages, generated, dedupeRef.current);
+        const nextUnread = recalculateUnread(nextMessages, {
+          ...current,
+          messages: nextMessages,
+        });
+
+        return {
+          ...current,
+          messages: nextMessages,
+          unread: nextUnread,
+        };
       });
-
-      return {
-        ...current,
-        messages: nextMessages,
-        unread: nextUnread,
-      };
-    });
-  }, [normalizedContext]);
+    },
+    [normalizedContext],
+  );
 
   return useMemo(
-    () =>
-      buildHookResult(
-        state,
-        switchTab,
-        toggleChat,
-        sendMessage,
-        clearUnread,
-      ),
+    () => buildHookResult(state, switchTab, toggleChat, sendMessage, clearUnread),
     [state, switchTab, toggleChat, sendMessage, clearUnread],
   );
 }
+
+// ─── Exported utility functions ───────────────────────────────────────────────
 
 export function deriveChatSummariesForContext(
   ctx: GameChatContext,
@@ -1686,6 +1764,8 @@ export function deriveHelperPromptForContext(
   return inferHelperPrompt(normalizeGameChatContext(ctx), threat);
 }
 
+// ─── buildTranscriptSearchResult (patched) ───────────────────────────────────
+
 export function buildTranscriptSearchResult(
   messages: readonly ChatMessage[],
   query: string,
@@ -1693,20 +1773,28 @@ export function buildTranscriptSearchResult(
 ): ChatTranscriptSearchResult {
   const normalizedQuery = query.trim().toLowerCase();
   const filtered = sortMessagesForRender(messages).filter(
-    (message) => normalizeChatChannel(message.channel) === normalizeChatChannel(channel),
+    (message) =>
+      normalizeChatChannel(message.channel) === normalizeChatChannel(channel),
   );
 
   const matched = !normalizedQuery
     ? filtered
     : filtered.filter((message) => {
-        const metaStatus = readRecord(message.meta).statusText;
+        const metaRecord = readRecord(message.meta);
+        const metaStatus =
+          typeof metaRecord.statusText === 'string'
+            ? metaRecord.statusText
+            : undefined;
+
         const haystacks = [
           message.body,
           message.senderName,
           message.senderRank,
           message.proofHash,
-          message.botSource?.botName,
-          typeof metaStatus === 'string' ? metaStatus : undefined,
+          message.botSource?.botId,
+          message.botSource?.personaId,
+          message.botSource?.attackType,
+          metaStatus,
           getChatChannelLabel(message.channel),
           getChatChannelDescription(message.channel),
         ].filter(Boolean);
