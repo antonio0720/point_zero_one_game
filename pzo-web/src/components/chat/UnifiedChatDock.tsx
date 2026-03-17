@@ -39,7 +39,7 @@ import {
 } from '../../engines/chat';
 
 import type { ChatMessage, GameChatContext, SabotageEvent } from './chatTypes';
-import { useUnifiedChat } from './useUnifiedChat';
+import useUnifiedChat from './useUnifiedChat';
 import ChatMessageFeed from './ChatMessageFeed';
 import ChatChannelTabs from './ChatChannelTabs';
 
@@ -1479,20 +1479,7 @@ export const UnifiedChatDock = memo(function UnifiedChatDock({
   const cascade = useCascadeEngine();
   const time = useTimeEngine();
 
-  const ui = useUnifiedChat({
-    ctx: gameCtx,
-    accessToken,
-    onSabotage,
-    shellMode: 'DOCK',
-    initialChannel: defaultTab,
-    initialOpen: true,
-    initialCollapsed: startCollapsed || bootstrapPreset.defaultCollapsed,
-    initialTranscriptOpen: false,
-    initialTranscriptSearch: '',
-    persistUiState: true,
-    persistDrafts: true,
-    storageNamespace: `dock:${bootstrapTarget.id.toLowerCase()}`,
-  });
+  const ui = useUnifiedChat(gameCtx, accessToken, onSabotage);
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const styleRef = useRef<HTMLStyleElement | null>(null);

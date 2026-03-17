@@ -2,7 +2,6 @@
  * ============================================================================
  * POINT ZERO ONE — LEGACY COMPONENT CHAT HOOK (ENGINE-BACKED COMPATIBILITY)
  * FILE: pzo-web/src/components/chat/useChatEngine.ts
- * VERSION: 2026.03.17-roadmap-safe
  * ============================================================================
  *
  * Purpose
@@ -36,20 +35,6 @@
  * - own moderation or persistent learning truth
  * - import battle / pressure / shield / zero engine modules directly
  * - redefine contracts already owned by shared/contracts/chat
- *
- * Design constraints
- * ------------------
- * 1. Preserve the old return shape exactly enough for current callers.
- * 2. Source all structural truth from chatTypes.ts and shared/contracts/chat.
- * 3. Keep fast local responsiveness for UI mounts.
- * 4. Make message derivation deterministic and dedupe-safe.
- * 5. Allow a later migration to replace this body with a thinner adapter over
- *    pzo-web/src/engines/chat without breaking imports.
- *
- * Scale note
- * ----------
- * The legacy hook keeps only a bounded render window. Durable truth, paging,
- * policy, replay, and multi-session authority belong outside this file.
  *
  * Density6 LLC · Point Zero One · Sovereign Chat Runtime · Confidential
  * ============================================================================
@@ -101,15 +86,17 @@ import {
 
 export type { SabotageEvent };
 
-// ============================================================================
-// MARK: Compatibility surface manifest
-// ============================================================================
+export interface UseChatEngineCompatibilityResult extends UseChatEngineResult {
+  readonly activeChannel: ChatChannel;
+  readonly allMessages: readonly ChatMessage[];
+  readonly visibleMessages: readonly ChatMessage[];
+  readonly latestMessage: ChatMessage | null;
+}
 
 export const USE_CHAT_ENGINE_FILE_PATH =
   'pzo-web/src/components/chat/useChatEngine.ts' as const;
 
 export const USE_CHAT_ENGINE_VERSION = '2026.03.17' as const;
-
 export const USE_CHAT_ENGINE_REVISION =
   'pzo.components.chat.useChatEngine.compat.v2' as const;
 
@@ -122,7 +109,6 @@ export const USE_CHAT_ENGINE_MIGRATION_MODE = Object.freeze({
   directEngineImportsAllowed: false,
   persistentTruthOwnedHere: false,
   finalSocketAuthorityOwnedHere: false,
-  acceptsFutureEngineObjectInput: true,
 });
 
 export const USE_CHAT_ENGINE_RUNTIME_LAWS = Object.freeze([
@@ -160,10 +146,6 @@ export const USE_CHAT_ENGINE_RUNTIME_BUNDLE = Object.freeze({
   limits: USE_CHAT_ENGINE_LIMITS,
   inheritedChatTypesBundle: CHAT_TYPES_RUNTIME_BUNDLE,
 });
-
-// ============================================================================
-// MARK: Internal constants
-// ============================================================================
 
 const VISIBLE_CHANNELS: readonly ChatChannel[] = [
   'GLOBAL',
@@ -339,10 +321,6 @@ const SYSTEM_EVENT_PATTERNS = Object.freeze([
   { needle: 'COLLAPSE', kind: 'MARKET_ALERT' as const, channel: 'GLOBAL' as const },
 ] as const);
 
-// ============================================================================
-// MARK: Internal types
-// ============================================================================
-
 interface HookMessageAccumulator {
   readonly nextMessages: readonly ChatMessage[];
   readonly generatedSabotageEvents: readonly SabotageEvent[];
@@ -380,18 +358,6 @@ interface FingerprintEntry {
   readonly messageId: string;
 }
 
-export interface UseChatEngineOptions {
-  readonly ctx?: GameChatContext;
-  readonly gameCtx?: GameChatContext;
-  readonly accessToken?: string | null;
-  readonly onSabotage?: (event: SabotageEvent) => void;
-  readonly engine?: unknown;
-}
-
-// ============================================================================
-// MARK: Pure helpers
-// ============================================================================
-
 function clamp01(value: number): number {
   if (!Number.isFinite(value)) return 0;
   return Math.max(0, Math.min(1, value));
@@ -412,46 +378,6 @@ function toStableKey(input: string): string {
     hash = Math.imul(hash, 16777619);
   }
   return `k-${Math.abs(hash >>> 0).toString(36)}`;
-}
-
-function isUseChatEngineOptions(
-  value: GameChatContext | UseChatEngineOptions,
-): value is UseChatEngineOptions {
-  return Boolean(
-    value &&
-      typeof value === 'object' &&
-      (
-        'ctx' in value ||
-        'gameCtx' in value ||
-        'accessToken' in value ||
-        'onSabotage' in value ||
-        'engine' in value
-      ),
-  );
-}
-
-function resolveUseChatEngineArgs(
-  input: GameChatContext | UseChatEngineOptions,
-  positionalAccessToken?: string | null,
-  positionalOnSabotage?: (event: SabotageEvent) => void,
-): {
-  readonly gameCtx: GameChatContext;
-  readonly accessToken?: string | null;
-  readonly onSabotage?: (event: SabotageEvent) => void;
-} {
-  if (isUseChatEngineOptions(input)) {
-    return {
-      gameCtx: input.ctx ?? input.gameCtx ?? createEmptyGameChatContext(),
-      accessToken: input.accessToken,
-      onSabotage: input.onSabotage,
-    };
-  }
-
-  return {
-    gameCtx: input,
-    accessToken: positionalAccessToken,
-    onSabotage: positionalOnSabotage,
-  };
 }
 
 function inferConnectionSnapshot(
@@ -533,7 +459,7 @@ function inferThreatBandFromContext(ctx: GameChatContext): ChatThreatSnapshot {
               triggerAt: nowMs() as never,
               style: 'DIRECTIVE',
               reason: 'FAILED_ACTION_CHAIN',
-              suggestedAction: 'Protect cash and reduce exposed lines.'
+              suggestedAction: 'Protect cash and reduce exposed lines.',
             }
           : undefined,
     },
@@ -544,7 +470,11 @@ function inferThreatBandFromContext(ctx: GameChatContext): ChatThreatSnapshot {
     Math.max(
       base.score01,
       (ctx.haterHeat ?? 0) * 0.65 +
-        (safeUpper(ctx.pressureTier) === 'BREAKPOINT' || safeUpper(ctx.pressureTier) === 'CRITICAL' ? 0.22 : safeUpper(ctx.pressureTier) === 'PRESSURED' ? 0.12 : 0) +
+        (safeUpper(ctx.pressureTier) === 'BREAKPOINT' || safeUpper(ctx.pressureTier) === 'CRITICAL'
+          ? 0.22
+          : safeUpper(ctx.pressureTier) === 'PRESSURED'
+            ? 0.12
+            : 0) +
         (safeUpper(ctx.tickTier) === 'SUDDEN_DEATH' ? 0.11 : 0),
     ),
   );
@@ -597,7 +527,12 @@ function inferHelperPrompt(
     };
   }
 
-  if (safeUpper(ctx.pressureTier) === 'PRESSURED' || safeUpper(ctx.pressureTier) === 'CRITICAL' || safeUpper(ctx.pressureTier) === 'BREAKPOINT' || threat.band === 'HIGH') {
+  if (
+    safeUpper(ctx.pressureTier) === 'PRESSURED' ||
+    safeUpper(ctx.pressureTier) === 'CRITICAL' ||
+    safeUpper(ctx.pressureTier) === 'BREAKPOINT' ||
+    threat.band === 'HIGH'
+  ) {
     return {
       visible: true,
       tone: 'strategic',
@@ -666,11 +601,13 @@ function buildMessageMeta(
       pressureTier: options.pressureTier ?? ctx.pressureTier,
       tickTier: options.tickTier ?? ctx.tickTier,
       runOutcome: options.runOutcome ?? ctx.runOutcome,
-      botSource: options.botSource ? {
-        botId: options.botSource.botId,
-        attackType: options.botSource.attackType,
-        targetLayer: options.botSource.targetLayer,
-      } : undefined,
+      botSource: options.botSource
+        ? {
+            botId: options.botSource.botId,
+            attackType: options.botSource.attackType,
+            targetLayer: options.botSource.targetLayer,
+          }
+        : undefined,
     },
   };
 }
@@ -706,7 +643,7 @@ function buildSystemMessage(
       meta:
         partial.meta ??
         buildMessageMeta(ctx, {
-          statusText: partial.kind ?? 'SYSTEM',
+          statusText: String(partial.kind ?? 'SYSTEM'),
           botSource: partial.botSource,
         }),
       rescueDecision: partial.rescueDecision,
@@ -802,7 +739,7 @@ function buildHelperMessage(
               ? 'Tighten sequencing and reduce public leakage.'
               : tone === 'strategic'
                 ? 'Hold structure and preserve optionality.'
-                : 'Take the next clean move.' ,
+                : 'Take the next clean move.',
       },
     },
     fallbackSeed,
@@ -984,7 +921,10 @@ function buildContextDigestMessages(
         next,
         {
           channel: 'SYNDICATE',
-          kind: safeUpper(next.pressureTier) === 'CRITICAL' || safeUpper(next.pressureTier) === 'BREAKPOINT' ? 'MARKET_ALERT' : 'SYSTEM',
+          kind:
+            safeUpper(next.pressureTier) === 'CRITICAL' || safeUpper(next.pressureTier) === 'BREAKPOINT'
+              ? 'MARKET_ALERT'
+              : 'SYSTEM',
           senderName: 'Pressure Feed',
           senderRank: 'Signal Runtime',
           body: `Pressure tier shifted to ${next.pressureTier}. The room will now price hesitation differently.`,
@@ -1080,6 +1020,11 @@ function buildContextDigestMessages(
     const channel = classified.channel;
 
     const persona = pickPersonaByContext(next, channel);
+    const attackDialogue =
+      persona.attacks[(fallbackSeed + next.tick) % persona.attacks.length] ?? eventText;
+    const tauntDialogue =
+      persona.taunts[(fallbackSeed + next.tick) % persona.taunts.length] ?? eventText;
+
     const message = buildSystemMessage(
       next,
       {
@@ -1121,12 +1066,7 @@ function buildContextDigestMessages(
                       : kind === 'MARKET_ALERT'
                         ? '📉'
                         : '◎',
-        body:
-          kind === 'BOT_ATTACK'
-            ? persona.attacks[(fallbackSeed + next.tick) % persona.attacks.length] ?? eventText
-            : kind === 'BOT_TAUNT'
-              ? persona.taunts[(fallbackSeed + next.tick) % persona.taunts.length] ?? eventText
-              : eventText,
+        body: kind === 'BOT_ATTACK' ? attackDialogue : kind === 'BOT_TAUNT' ? tauntDialogue : eventText,
         immutable: true,
         botSource:
           kind === 'BOT_ATTACK' || kind === 'BOT_TAUNT'
@@ -1136,10 +1076,7 @@ function buildContextDigestMessages(
                 botState: kind === 'BOT_ATTACK' ? 'ATTACKING' : 'TAUNTING',
                 attackType: persona.attackType,
                 targetLayer: inferShieldLayer(eventText),
-                dialogue:
-                  kind === 'BOT_ATTACK'
-                    ? persona.attacks[(fallbackSeed + next.tick) % persona.attacks.length] ?? eventText
-                    : persona.taunts[(fallbackSeed + next.tick) % persona.taunts.length] ?? eventText,
+                dialogue: kind === 'BOT_ATTACK' ? attackDialogue : tauntDialogue,
                 isRetreat: false,
               }
             : undefined,
@@ -1307,9 +1244,13 @@ function buildHookResult(
   toggleChat: () => void,
   sendMessage: (body: string) => void,
   clearUnread: (channel?: ChatChannel) => void,
-): UseChatEngineResult {
+): UseChatEngineCompatibilityResult {
   const summaries = buildChannelSummaries(state.messages, state.activeTab);
   const threat = extractThreatSnapshot(state.messages);
+  const visibleMessages = state.messages.filter(
+    (message) => normalizeChatChannel(message.channel) === state.activeTab,
+  );
+  const latestMessage = state.messages.length > 0 ? state.messages[state.messages.length - 1] : null;
 
   const helperPrompt: ChatHelperPromptSnapshot = threat.rescueNeeded
     ? {
@@ -1345,6 +1286,10 @@ function buildHookResult(
   return {
     messages: state.messages,
     activeTab: state.activeTab,
+    activeChannel: state.activeTab,
+    allMessages: state.messages,
+    visibleMessages,
+    latestMessage,
     chatOpen: state.chatOpen,
     connected:
       state.connectionState === 'CONNECTED' || state.connectionState === 'DEGRADED',
@@ -1369,36 +1314,19 @@ function buildHookResult(
   };
 }
 
-// ============================================================================
-// MARK: Hook
-// ============================================================================
-
-export function useChatEngine(
-  options: UseChatEngineOptions,
-): UseChatEngineResult;
 export function useChatEngine(
   gameCtx: GameChatContext,
   accessToken?: string | null,
   onSabotage?: (event: SabotageEvent) => void,
-): UseChatEngineResult;
-export function useChatEngine(
-  gameCtxOrOptions: GameChatContext | UseChatEngineOptions,
-  accessToken?: string | null,
-  onSabotage?: (event: SabotageEvent) => void,
-): UseChatEngineResult {
-  const resolvedArgs = useMemo(
-    () => resolveUseChatEngineArgs(gameCtxOrOptions, accessToken, onSabotage),
-    [gameCtxOrOptions, accessToken, onSabotage],
-  );
-
+): UseChatEngineCompatibilityResult {
   const normalizedContext = useMemo(
-    () => normalizeGameChatContext(resolvedArgs.gameCtx ?? createEmptyGameChatContext()),
-    [resolvedArgs.gameCtx],
+    () => normalizeGameChatContext(gameCtx ?? createEmptyGameChatContext()),
+    [gameCtx],
   );
 
   const connection = useMemo(
-    () => inferConnectionSnapshot(normalizedContext, resolvedArgs.accessToken),
-    [normalizedContext, resolvedArgs.accessToken],
+    () => inferConnectionSnapshot(normalizedContext, accessToken),
+    [normalizedContext, accessToken],
   );
 
   const messageSeedRef = useRef(1);
@@ -1412,7 +1340,7 @@ export function useChatEngine(
   const sabotageDispatchRef = useRef<Set<string>>(new Set());
 
   const [state, setState] = useState<HookState>(() => {
-    const bootstrapContext = normalizeGameChatContext(resolvedArgs.gameCtx);
+    const bootstrapContext = normalizeGameChatContext(gameCtx ?? createEmptyGameChatContext());
     const bootstrapMessages = sortMessagesForRender([
       buildSystemMessage(
         bootstrapContext,
@@ -1439,7 +1367,7 @@ export function useChatEngine(
         SYNDICATE: 0,
         DEAL_ROOM: 0,
       },
-      connectionState: inferConnectionSnapshot(bootstrapContext, resolvedArgs.accessToken).state,
+      connectionState: inferConnectionSnapshot(bootstrapContext, accessToken).state,
     };
   });
 
@@ -1540,18 +1468,16 @@ export function useChatEngine(
     });
 
     for (const sabotage of digest.generatedSabotageEvents) {
-      const dispatchKey =
-        sabotage.sourceMessageId ??
-        `${sabotage.haterId}|${sabotage.cardType}|${sabotage.ts}`;
+      const dispatchKey = sabotage.sourceMessageId ?? `${sabotage.haterId}|${sabotage.cardType}|${sabotage.ts}`;
       if (!sabotageDispatchRef.current.has(dispatchKey)) {
         sabotageDispatchRef.current.add(dispatchKey);
-        resolvedArgs.onSabotage?.(sabotage);
+        onSabotage?.(sabotage);
       }
     }
 
     prevContextRef.current = normalizedContext;
     lastConnectionStateRef.current = connection.state;
-  }, [normalizedContext, connection, resolvedArgs.onSabotage]);
+  }, [normalizedContext, connection, onSabotage]);
 
   const switchTab = useCallback((tab: ChatChannel) => {
     setState((current) => {
@@ -1611,9 +1537,7 @@ export function useChatEngine(
 
   const sendMessage = useCallback((body: string) => {
     const trimmed = body.trim();
-    if (!trimmed) {
-      return;
-    }
+    if (!trimmed) return;
 
     const now = nowMs();
     if (now - lastSendAtRef.current < USE_CHAT_ENGINE_LIMITS.localSendCooldownMs) {
@@ -1712,10 +1636,6 @@ export function useChatEngine(
   );
 }
 
-// ============================================================================
-// MARK: Public helpers for tests, tooling, and later engine-lane replacement
-// ============================================================================
-
 export function deriveChatSummariesForContext(
   ctx: GameChatContext,
   messages: readonly ChatMessage[],
@@ -1779,13 +1699,14 @@ export function buildTranscriptSearchResult(
   const matched = !normalizedQuery
     ? filtered
     : filtered.filter((message) => {
+        const metaStatus = readRecord(message.meta).statusText;
         const haystacks = [
           message.body,
           message.senderName,
           message.senderRank,
           message.proofHash,
           message.botSource?.botName,
-          message.meta?.statusText,
+          typeof metaStatus === 'string' ? metaStatus : undefined,
           getChatChannelLabel(message.channel),
           getChatChannelDescription(message.channel),
         ].filter(Boolean);
