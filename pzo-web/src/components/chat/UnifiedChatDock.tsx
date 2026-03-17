@@ -1,16 +1,22 @@
+
 /**
  * ============================================================================
  * POINT ZERO ONE — UNIFIED CHAT DOCK
  * FILE: pzo-web/src/components/chat/UnifiedChatDock.tsx
- * VERSION: 2026.03.17-roadmap-safe
+ * VERSION: 2026.03.17-aligned
  * ============================================================================
  *
- * Roadmap alignment
- * -----------------
- * - stays in the presentation lane
- * - consumes useUnifiedChat instead of becoming a second chat engine
- * - may reflect engine-state telemetry through existing run hooks
- * - does not import or modify canonical chat runtime files
+ * Purpose
+ * -------
+ * Presentation-lane unified chat dock aligned to the actual public exports of
+ * pzo-web/src/engines/chat and to the current useUnifiedChat surface.
+ *
+ * Architecture
+ * ------------
+ * - consumes useUnifiedChat for UI shell state
+ * - may reflect run-hook telemetry for threat framing
+ * - does not become a second engine
+ * - does not import private engine internals
  * ============================================================================
  */
 
@@ -28,6 +34,8 @@ import {
   CHAT_ENGINE_PUBLIC_MANIFEST,
   CHAT_ENGINE_RUNTIME_LAWS,
   ChatMounts,
+  type ChatMountPreset,
+  type ChatMountTarget,
 } from '../../engines/chat';
 
 import type { ChatMessage, GameChatContext, SabotageEvent } from './chatTypes';
@@ -42,8 +50,6 @@ import { useBattleEngine } from '../../features/run/hooks/useBattleEngine';
 import { useCascadeEngine } from '../../features/run/hooks/useCascadeEngine';
 
 type VisibleChannelId = 'GLOBAL' | 'SYNDICATE' | 'DEAL_ROOM';
-type ChatMountTargetId = string;
-type ChatMountPresetId = string;
 
 type UnifiedMessageKind =
   | 'PLAYER'
@@ -121,29 +127,32 @@ interface EngineTelemetryModel {
   summary: string;
 }
 
-interface ResolvedChatMountTarget {
-  id: string;
+interface ResolvedMountTarget {
+  id: ChatMountTarget;
   label: string;
 }
 
-interface ResolvedChatMountPreset {
-  id: string;
+interface ResolvedMountPresetModel {
+  id: ChatMountTarget;
   label: string;
-  zIndex: number;
   compact: boolean;
   composerRows: number;
+  zIndex: number;
   showPresenceStrip: boolean;
   showThreatMeter: boolean;
-  enableHelperPrompts: boolean;
   showTranscriptDrawer: boolean;
+  enableHelperPrompts: boolean;
+  allowCollapse: boolean;
+  defaultCollapsed: boolean;
+  allowedVisibleChannels: readonly string[];
 }
 
 export interface UnifiedChatDockProps {
   gameCtx: GameChatContext;
   onSabotage?: (event: SabotageEvent) => void;
   accessToken?: string | null;
-  mountTarget?: ChatMountTargetId;
-  mountPreset?: ChatMountPresetId;
+  mountTarget?: ChatMountTarget | string;
+  mountPreset?: ChatMountPreset | ChatMountTarget | string | null;
   title?: string;
   subtitle?: string;
   startCollapsed?: boolean;
@@ -158,20 +167,20 @@ export interface UnifiedChatDockProps {
 }
 
 const TOKENS = Object.freeze({
-  panelGlass: 'rgba(13, 13, 13, 0.95)',
-  panel: '#0D0D0D',
+  panelGlass: 'rgba(10, 14, 28, 0.88)',
+  panel: '#0B0D18',
   border: 'rgba(255,255,255,0.08)',
   borderMedium: 'rgba(255,255,255,0.14)',
   text: '#F5F7FF',
   textSubtle: '#A7B2D4',
   textMuted: '#7180A8',
   green: '#20D98E',
-  red: '#DC2626',
+  red: '#FF5353',
   orange: '#FF9A3D',
   yellow: '#FFD75E',
-  cyan: '#22D3EE',
+  cyan: '#38DDF8',
   indigo: '#8B93FF',
-  purple: '#A78BFA',
+  purple: '#C183FF',
   teal: '#3EE6CC',
   shadowHeavy: '0 24px 80px rgba(0,0,0,0.48)',
   radiusSm: 12,
@@ -183,13 +192,6 @@ const TOKENS = Object.freeze({
 } as const);
 
 const FONT_IMPORT = `@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Syne:wght@400;600;700;800&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap');`;
-
-const CHAT_DOCK_FEATURE_LAWS = Object.freeze([
-  'Chat dock stays in the render shell, not the engine lane.',
-  'Threat meter mirrors live board pressure and battle intensity.',
-  'Collapsed state preserves a minimal 60px presence on the board edge.',
-  'Transcript search stays local and compile-safe during migration.',
-] as const);
 
 const CHANNEL_META = Object.freeze({
   GLOBAL: Object.freeze({
@@ -212,6 +214,42 @@ const CHANNEL_META = Object.freeze({
   }),
 } as const);
 
+const MOUNT_TARGET_LABELS: Record<ChatMountTarget, string> = {
+  BATTLE_HUD: 'Battle HUD',
+  CLUB_UI: 'Club UI',
+  EMPIRE_GAME_SCREEN: 'Empire Screen',
+  GAME_BOARD: 'Game Board',
+  LEAGUE_UI: 'League UI',
+  LOBBY_SCREEN: 'Lobby Screen',
+  PHANTOM_GAME_SCREEN: 'Phantom Screen',
+  PREDATOR_GAME_SCREEN: 'Predator Screen',
+  SYNDICATE_GAME_SCREEN: 'Syndicate Screen',
+  POST_RUN_SUMMARY: 'Post-Run Summary',
+};
+
+const LEGACY_TARGET_ALIASES: Record<string, ChatMountTarget> = {
+  BATTLEHUD: 'BATTLE_HUD',
+  BATTLE_HUD: 'BATTLE_HUD',
+  CLUBUI: 'CLUB_UI',
+  CLUB_UI: 'CLUB_UI',
+  EMPIREGAMESCREEN: 'EMPIRE_GAME_SCREEN',
+  EMPIRE_GAME_SCREEN: 'EMPIRE_GAME_SCREEN',
+  GAMEBOARD: 'GAME_BOARD',
+  GAME_BOARD: 'GAME_BOARD',
+  LEAGUEUI: 'LEAGUE_UI',
+  LEAGUE_UI: 'LEAGUE_UI',
+  LOBBYSCREEN: 'LOBBY_SCREEN',
+  LOBBY_SCREEN: 'LOBBY_SCREEN',
+  PHANTOMGAMESCREEN: 'PHANTOM_GAME_SCREEN',
+  PHANTOM_GAME_SCREEN: 'PHANTOM_GAME_SCREEN',
+  PREDATORGAMESCREEN: 'PREDATOR_GAME_SCREEN',
+  PREDATOR_GAME_SCREEN: 'PREDATOR_GAME_SCREEN',
+  SYNDICATEGAMESCREEN: 'SYNDICATE_GAME_SCREEN',
+  SYNDICATE_GAME_SCREEN: 'SYNDICATE_GAME_SCREEN',
+  POSTRUNSUMMARY: 'POST_RUN_SUMMARY',
+  POST_RUN_SUMMARY: 'POST_RUN_SUMMARY',
+};
+
 const THREAT_BANDS = Object.freeze([
   Object.freeze({ max: 0.18, label: 'QUIET' as const, color: TOKENS.textMuted }),
   Object.freeze({ max: 0.35, label: 'LOW' as const, color: TOKENS.teal }),
@@ -219,19 +257,6 @@ const THREAT_BANDS = Object.freeze([
   Object.freeze({ max: 0.78, label: 'HIGH' as const, color: TOKENS.orange }),
   Object.freeze({ max: 1.01, label: 'SEVERE' as const, color: TOKENS.red }),
 ]);
-
-const DEFAULT_MOUNT_TARGET = 'BattleHUD';
-const DEFAULT_PRESET: ResolvedChatMountPreset = Object.freeze({
-  id: 'board-dock',
-  label: 'Board Dock',
-  zIndex: 120,
-  compact: false,
-  composerRows: 3,
-  showPresenceStrip: true,
-  showThreatMeter: true,
-  enableHelperPrompts: true,
-  showTranscriptDrawer: true,
-});
 
 function clamp01(value: number): number {
   if (!Number.isFinite(value)) return 0;
@@ -247,99 +272,6 @@ function asVisibleChannel(
   return value === 'GLOBAL' || value === 'SYNDICATE' || value === 'DEAL_ROOM'
     ? value
     : fallback;
-}
-
-function toRecordValues(input: unknown): Array<Record<string, unknown>> {
-  if (!input || typeof input !== 'object') return [];
-  if (Array.isArray(input)) {
-    return input.filter(
-      (entry): entry is Record<string, unknown> =>
-        Boolean(entry) && typeof entry === 'object',
-    );
-  }
-
-  return Object.values(input as Record<string, unknown>).filter(
-    (entry): entry is Record<string, unknown> =>
-      Boolean(entry) && typeof entry === 'object',
-  );
-}
-
-function resolveChatMountTargetLocal(
-  mountTarget?: ChatMountTargetId,
-): ResolvedChatMountTarget {
-  const requested = String(mountTarget ?? DEFAULT_MOUNT_TARGET);
-  const candidates = toRecordValues((ChatMounts as { targets?: unknown }).targets);
-
-  const exact = candidates.find((candidate) => candidate.id === requested);
-  if (exact) {
-    return {
-      id: String(exact.id ?? requested),
-      label: String(exact.label ?? exact.name ?? exact.id ?? requested),
-    };
-  }
-
-  return {
-    id: requested,
-    label:
-      requested === 'BattleHUD'
-        ? 'Battle HUD'
-        : requested === 'RunScreen'
-          ? 'Run Screen'
-          : requested === 'Lobby'
-            ? 'Lobby'
-            : requested,
-  };
-}
-
-function resolveChatMountPresetLocal(
-  mountTarget?: ChatMountTargetId,
-  mountPreset?: ChatMountPresetId,
-): ResolvedChatMountPreset {
-  const targetId = String(mountTarget ?? DEFAULT_MOUNT_TARGET);
-  const presetId = mountPreset ? String(mountPreset) : null;
-  const candidates = toRecordValues((ChatMounts as { presets?: unknown }).presets);
-
-  const matched = candidates.find((candidate) => {
-    const candidateId = String(candidate.id ?? '');
-    const candidateTarget = String(
-      candidate.mountTarget ?? candidate.targetId ?? candidate.target ?? '',
-    );
-    return (presetId && candidateId === presetId) || candidateTarget === targetId;
-  });
-
-  if (!matched) {
-    return DEFAULT_PRESET;
-  }
-
-  return {
-    id: String(matched.id ?? DEFAULT_PRESET.id),
-    label: String(matched.label ?? matched.name ?? DEFAULT_PRESET.label),
-    zIndex:
-      typeof matched.zIndex === 'number'
-        ? matched.zIndex
-        : DEFAULT_PRESET.zIndex,
-    compact: Boolean(matched.compact ?? DEFAULT_PRESET.compact),
-    composerRows:
-      typeof matched.composerRows === 'number'
-        ? matched.composerRows
-        : DEFAULT_PRESET.composerRows,
-    showPresenceStrip:
-      matched.showPresenceStrip !== undefined
-        ? Boolean(matched.showPresenceStrip)
-        : DEFAULT_PRESET.showPresenceStrip,
-    showThreatMeter:
-      matched.showThreatMeter !== undefined
-        ? Boolean(matched.showThreatMeter)
-        : DEFAULT_PRESET.showThreatMeter,
-    enableHelperPrompts:
-      matched.enableHelperPrompts !== undefined
-        ? Boolean(matched.enableHelperPrompts)
-        : DEFAULT_PRESET.enableHelperPrompts,
-    showTranscriptDrawer:
-      matched.showTranscriptDrawer !== undefined
-        ? Boolean(matched.showTranscriptDrawer)
-        : DEFAULT_PRESET.showTranscriptDrawer,
-  };
 }
 
 function normalizeMessages(messages: readonly ChatMessage[]): UnifiedChatMessage[] {
@@ -449,54 +381,188 @@ function createPresenceModel(
   return values;
 }
 
+function readRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
+}
+
+function readNumber(source: unknown, ...keys: string[]): number {
+  const record = readRecord(source);
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+  }
+  return 0;
+}
+
+function readBoolean(source: unknown, ...keys: string[]): boolean {
+  const record = readRecord(source);
+  for (const key of keys) {
+    if (typeof record[key] === 'boolean') return Boolean(record[key]);
+  }
+  return false;
+}
+
+function readString(source: unknown, ...keys: string[]): string {
+  const record = readRecord(source);
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === 'string' && value.trim().length > 0) return value;
+  }
+  return '';
+}
+
+function readArrayLength(source: unknown, ...keys: string[]): number {
+  const record = readRecord(source);
+  for (const key of keys) {
+    const value = record[key];
+    if (Array.isArray(value)) return value.length;
+  }
+  return 0;
+}
+
+function normalizeMountTarget(
+  value: unknown,
+  fallback: ChatMountTarget = 'BATTLE_HUD',
+): ChatMountTarget {
+  if (typeof value !== 'string' || value.trim().length === 0) return fallback;
+
+  const normalized = value.trim().replace(/[\s-]+/g, '_').toUpperCase();
+  const direct = LEGACY_TARGET_ALIASES[normalized];
+  if (direct) return direct;
+
+  const targets = ChatMounts.targets as readonly ChatMountTarget[];
+  return targets.includes(normalized as ChatMountTarget)
+    ? (normalized as ChatMountTarget)
+    : fallback;
+}
+
+function resolveMountTarget(value: unknown): ResolvedMountTarget {
+  const id = normalizeMountTarget(value);
+  return {
+    id,
+    label: MOUNT_TARGET_LABELS[id] ?? id,
+  };
+}
+
+function lookupMountPreset(target: ChatMountTarget): ChatMountPreset | null {
+  const presets = ChatMounts.presets as Readonly<Record<ChatMountTarget, ChatMountPreset>>;
+  return presets[target] ?? null;
+}
+
+function resolveMountPresetModel(
+  target: ChatMountTarget,
+  presetInput?: ChatMountPreset | ChatMountTarget | string | null,
+): ResolvedMountPresetModel {
+  const explicitPreset =
+    typeof presetInput === 'object' && presetInput && 'mountTarget' in presetInput
+      ? (presetInput as ChatMountPreset)
+      : null;
+
+  const presetTarget =
+    explicitPreset?.mountTarget ??
+    (typeof presetInput === 'string' ? normalizeMountTarget(presetInput, target) : target);
+
+  const preset = explicitPreset ?? lookupMountPreset(presetTarget) ?? lookupMountPreset(target);
+
+  const density = preset?.density ?? 'STANDARD';
+  const compact = density === 'COMPACT';
+  const composerRows = compact ? 2 : density === 'EXPANDED' ? 4 : 3;
+
+  return {
+    id: preset?.mountTarget ?? target,
+    label: MOUNT_TARGET_LABELS[preset?.mountTarget ?? target] ?? (preset?.mountTarget ?? target),
+    compact,
+    composerRows,
+    zIndex:
+      target === 'BATTLE_HUD' || target === 'GAME_BOARD'
+        ? 80
+        : target === 'POST_RUN_SUMMARY'
+          ? 60
+          : 70,
+    showPresenceStrip: preset?.showPresenceStrip ?? true,
+    showThreatMeter: preset?.showThreatMeter ?? true,
+    showTranscriptDrawer: preset?.showTranscriptDrawer ?? true,
+    enableHelperPrompts: true,
+    allowCollapse: preset?.allowCollapse ?? true,
+    defaultCollapsed: preset?.defaultCollapsed ?? false,
+    allowedVisibleChannels: preset?.allowedVisibleChannels ?? ['GLOBAL', 'SYNDICATE', 'DEAL_ROOM'],
+  };
+}
+
 function createEngineTelemetry(
-  pressure: ReturnType<typeof usePressureEngine>,
-  shield: ReturnType<typeof useShieldEngine>,
-  battle: ReturnType<typeof useBattleEngine>,
-  cascade: ReturnType<typeof useCascadeEngine>,
-  time: ReturnType<typeof useTimeEngine>,
+  pressure: unknown,
+  shield: unknown,
+  battle: unknown,
+  cascade: unknown,
+  time: unknown,
 ): EngineTelemetryModel {
-  const pressureScore = clamp01(pressure.score ?? 0);
-  const battleHeat01 = clamp01((battle.haterHeatPct ?? 0) / 100);
-  const shieldIntegrity01 = clamp01(shield.overallPct ?? 0);
-  const timeout01 =
-    time.seasonTimeoutImminent || time.isFinalFiveTicks ? 0.72 : 0;
-  const cascade01 = cascade.hasCatastrophicChain
-    ? 1
-    : cascade.isInSpiral
-      ? 0.74
-      : clamp01(cascade.queueDepth / 4);
+  const pressureScore = clamp01(readNumber(pressure, 'score'));
+  const pressureTier = readString(pressure, 'tier', 'currentTier') || 'CALM';
+  const pressureCritical =
+    readBoolean(pressure, 'isCritical', 'isHigh') ||
+    pressureTier === 'CRITICAL' ||
+    pressureTier === 'HIGH';
+
+  const rawBattleHeat =
+    readNumber(battle, 'haterHeatPct') > 0
+      ? readNumber(battle, 'haterHeatPct') / 100
+      : (() => {
+          const heat = readNumber(battle, 'haterHeat');
+          return heat > 1 ? heat / 100 : heat;
+        })();
+
+  const battleHeat01 = clamp01(rawBattleHeat);
+  const activeBotCount = Math.max(
+    readNumber(battle, 'activeBotCount'),
+    readNumber(battle, 'activeBotsCount'),
+  );
+  const attackingBots = readArrayLength(battle, 'attackingBots');
+  const targetingBots = readArrayLength(battle, 'targetingBots');
+  const battleHot =
+    activeBotCount > 0 ||
+    attackingBots > 0 ||
+    targetingBots > 0 ||
+    battleHeat01 >= 0.58;
+
+  const shieldIntegrity01 = clamp01(
+    readNumber(shield, 'overallPct') ||
+      readNumber(shield, 'overallIntegrityPct') ||
+      (readNumber(shield, 'overallPct100') > 0
+        ? readNumber(shield, 'overallPct100') / 100
+        : 0),
+  );
+  const shieldCritical =
+    readBoolean(shield, 'isInBreachCascade', 'isAnyCritical', 'isAnyBreached') ||
+    shieldIntegrity01 <= 0.33;
+
+  const queueDepth = readNumber(cascade, 'queueDepth');
+  const cascadeHot =
+    readBoolean(cascade, 'hasCatastrophicChain', 'isInSpiral', 'isCatastrophicSpiral') ||
+    queueDepth >= 2;
+
+  const timeoutDanger =
+    readBoolean(time, 'seasonTimeoutImminent', 'isFinalFiveTicks', 'isFinalTick') ||
+    readNumber(time, 'ticksUntilTimeout') <= 5;
 
   const score01 = clamp01(
-    pressureScore * 0.24 +
-      battleHeat01 * 0.22 +
+    pressureScore * 0.26 +
+      battleHeat01 * 0.24 +
       (1 - shieldIntegrity01) * 0.22 +
-      cascade01 * 0.18 +
-      timeout01 * 0.14,
+      (cascadeHot ? 0.18 : clamp01(queueDepth / 4) * 0.18) +
+      (timeoutDanger ? 0.10 : 0),
   );
 
-  const pressureCritical = pressure.isCritical || pressure.isHigh;
-  const battleHot =
-    battle.hasAttackingBots || battle.hasTargetingBots || battleHeat01 >= 0.58;
-  const shieldCritical =
-    shield.isInBreachCascade || shield.isAnyCritical || shieldIntegrity01 <= 0.33;
-  const cascadeHot =
-    cascade.hasCatastrophicChain || cascade.isInSpiral || cascade.queueDepth >= 2;
-  const timeoutDanger = time.seasonTimeoutImminent || time.isFinalFiveTicks;
-
   const summaryParts = [
-    pressureCritical ? `pressure ${String(pressure.tier).toLowerCase()}` : null,
-    battleHot
-      ? `${battle.activeBotsCount} bot${battle.activeBotsCount === 1 ? '' : 's'} active`
-      : null,
+    pressureCritical ? `pressure ${pressureTier.toLowerCase()}` : null,
+    battleHot ? `${activeBotCount || Math.max(attackingBots, targetingBots)} bots active` : null,
     shieldCritical ? `shield ${Math.round(shieldIntegrity01 * 100)}%` : null,
-    cascadeHot ? `cascade ×${cascade.queueDepth}` : null,
-    timeoutDanger ? `${time.ticksUntilTimeout}t left` : null,
+    cascadeHot ? `cascade ×${queueDepth || 1}` : null,
+    timeoutDanger ? `${Math.max(0, Math.round(readNumber(time, 'ticksUntilTimeout')))}t left` : null,
   ].filter(Boolean);
 
   return {
     score01,
-    pressureTier: String(pressure.tier ?? 'CALM'),
+    pressureTier,
     pressureCritical,
     timeoutDanger,
     battleHeatPct: Math.round(battleHeat01 * 100),
@@ -724,7 +790,7 @@ const ThreatMeter = memo(function ThreatMeter({
         <Badge
           label={`attacks ${threat.attackCount}`}
           color={TOKENS.red}
-          bg="rgba(220,38,38,0.10)"
+          bg="rgba(255,83,83,0.08)"
         />
         <Badge
           label={`taunts ${threat.tauntCount}`}
@@ -734,7 +800,7 @@ const ThreatMeter = memo(function ThreatMeter({
         <Badge
           label={`shield ${threat.shieldMentions}`}
           color={TOKENS.cyan}
-          bg="rgba(34,211,238,0.08)"
+          bg="rgba(56,221,248,0.08)"
         />
       </div>
 
@@ -1304,7 +1370,6 @@ const CollapsedPill = memo(function CollapsedPill({
         gap: 4,
         cursor: 'pointer',
         minWidth: 210,
-        minHeight: 60,
         backdropFilter: 'blur(14px)',
       }}
     >
@@ -1375,8 +1440,8 @@ function buildLawFooterLines(): string[] {
   return [
     CHAT_ENGINE_RUNTIME_LAWS[0],
     CHAT_ENGINE_RUNTIME_LAWS[1],
-    CHAT_DOCK_FEATURE_LAWS[0],
-    CHAT_DOCK_FEATURE_LAWS[1],
+    'one dock, many mounts, zero per-screen chat brains',
+    'component lane owns shell posture, not transcript authority',
   ];
 }
 
@@ -1384,8 +1449,8 @@ export const UnifiedChatDock = memo(function UnifiedChatDock({
   gameCtx,
   onSabotage,
   accessToken = null,
-  mountTarget = DEFAULT_MOUNT_TARGET,
-  mountPreset,
+  mountTarget = 'BATTLE_HUD',
+  mountPreset = null,
   title = 'PZO Unified Chat',
   subtitle = 'One dock. Many mounts. Zero per-screen chat brains.',
   startCollapsed = false,
@@ -1398,8 +1463,15 @@ export const UnifiedChatDock = memo(function UnifiedChatDock({
   className,
   style,
 }: UnifiedChatDockProps) {
-  const bootstrapPreset = resolveChatMountPresetLocal(mountTarget, mountPreset);
-  const bootstrapTarget = resolveChatMountTargetLocal(mountTarget);
+  const bootstrapTarget = useMemo(
+    () => resolveMountTarget(mountTarget),
+    [mountTarget],
+  );
+
+  const bootstrapPreset = useMemo(
+    () => resolveMountPresetModel(bootstrapTarget.id, mountPreset),
+    [bootstrapTarget.id, mountPreset],
+  );
 
   const pressure = usePressureEngine();
   const shield = useShieldEngine();
@@ -1414,12 +1486,12 @@ export const UnifiedChatDock = memo(function UnifiedChatDock({
     shellMode: 'DOCK',
     initialChannel: defaultTab,
     initialOpen: true,
-    initialCollapsed: startCollapsed,
+    initialCollapsed: startCollapsed || bootstrapPreset.defaultCollapsed,
     initialTranscriptOpen: false,
     initialTranscriptSearch: '',
     persistUiState: true,
     persistDrafts: true,
-    storageNamespace: `dock:${mountTarget}`,
+    storageNamespace: `dock:${bootstrapTarget.id.toLowerCase()}`,
   });
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -1542,13 +1614,15 @@ export const UnifiedChatDock = memo(function UnifiedChatDock({
           ui.closeTranscript();
           return;
         }
-        ui.collapse();
+        if (bootstrapPreset.allowCollapse) {
+          ui.collapse();
+        }
       }
     };
 
     document.addEventListener('keydown', handler);
     return () => document.removeEventListener('keydown', handler);
-  }, [shellOpen, ui]);
+  }, [shellOpen, ui, bootstrapPreset.allowCollapse]);
 
   const handleToggleOpen = useCallback(() => {
     if (!ui.chatOpen) {
@@ -1562,8 +1636,10 @@ export const UnifiedChatDock = memo(function UnifiedChatDock({
       return;
     }
 
-    ui.collapse();
-  }, [ui]);
+    if (bootstrapPreset.allowCollapse) {
+      ui.collapse();
+    }
+  }, [bootstrapPreset.allowCollapse, ui]);
 
   const handleSend = useCallback(() => {
     ui.sendDraft();
@@ -1645,7 +1721,7 @@ export const UnifiedChatDock = memo(function UnifiedChatDock({
       }}
     >
       <TranscriptDrawer
-        open={enableTranscriptDrawer && ui.transcript.open}
+        open={enableTranscriptDrawer && bootstrapPreset.showTranscriptDrawer && ui.transcript.open}
         query={ui.transcript.searchQuery}
         onQueryChange={ui.setTranscriptSearchQuery}
         rows={filteredTranscriptRows}
@@ -1718,14 +1794,12 @@ export const UnifiedChatDock = memo(function UnifiedChatDock({
             bg="rgba(255,255,255,0.05)"
           />
           <Badge
-            label={`pressure ${String(pressure.tier ?? 'CALM').toLowerCase()}`}
-            color={pressure.isHigh ? TOKENS.orange : TOKENS.textSubtle}
+            label={`pressure ${String(telemetry.pressureTier || 'CALM').toLowerCase()}`}
+            color={telemetry.pressureCritical ? TOKENS.orange : TOKENS.textSubtle}
             bg={
-              pressure.isCritical
-                ? 'rgba(220,38,38,0.12)'
-                : pressure.isHigh
-                  ? 'rgba(255,154,61,0.10)'
-                  : 'rgba(255,255,255,0.05)'
+              telemetry.pressureCritical
+                ? 'rgba(255,154,61,0.10)'
+                : 'rgba(255,255,255,0.05)'
             }
           />
           <Badge
@@ -1733,8 +1807,8 @@ export const UnifiedChatDock = memo(function UnifiedChatDock({
             color={telemetry.shieldCritical ? TOKENS.red : TOKENS.cyan}
             bg={
               telemetry.shieldCritical
-                ? 'rgba(220,38,38,0.10)'
-                : 'rgba(34,211,238,0.10)'
+                ? 'rgba(255,83,83,0.10)'
+                : 'rgba(56,221,248,0.10)'
             }
           />
         </div>
@@ -1783,7 +1857,7 @@ export const UnifiedChatDock = memo(function UnifiedChatDock({
             ui.openTranscript();
           }}
           onVisibleRangeChange={() => {
-            // telemetry reserved
+            // reserved telemetry lane
           }}
           onSelectMessage={(messageId) => {
             ui.selectTranscriptMessage(messageId);
@@ -1853,11 +1927,11 @@ export const UnifiedChatDock = memo(function UnifiedChatDock({
           <Badge
             label={`shell ${ui.shellMode.toLowerCase()}`}
             color={TOKENS.cyan}
-            bg="rgba(34,211,238,0.10)"
+            bg="rgba(56,221,248,0.10)"
           />
-          {time.seasonTimeoutImminent ? (
+          {telemetry.timeoutDanger ? (
             <Badge
-              label={`${time.ticksUntilTimeout}t left`}
+              label={`${Math.max(0, Math.round(readNumber(time, 'ticksUntilTimeout')))}t left`}
               color={TOKENS.orange}
               bg="rgba(255,154,61,0.10)"
             />
@@ -1887,25 +1961,27 @@ export const UnifiedChatDock = memo(function UnifiedChatDock({
             </button>
           ) : null}
 
-          <button
-            type="button"
-            onClick={handleToggleOpen}
-            style={{
-              appearance: 'none',
-              border: `1px solid ${TOKENS.borderMedium}`,
-              background: 'rgba(255,255,255,0.04)',
-              color: TOKENS.text,
-              borderRadius: TOKENS.radiusSm,
-              padding: '10px 12px',
-              cursor: 'pointer',
-              fontFamily: TOKENS.mono,
-              fontSize: 11,
-              letterSpacing: 0.45,
-              textTransform: 'uppercase',
-            }}
-          >
-            {ui.collapsed ? 'expand' : 'collapse'}
-          </button>
+          {bootstrapPreset.allowCollapse ? (
+            <button
+              type="button"
+              onClick={handleToggleOpen}
+              style={{
+                appearance: 'none',
+                border: `1px solid ${TOKENS.borderMedium}`,
+                background: 'rgba(255,255,255,0.04)',
+                color: TOKENS.text,
+                borderRadius: TOKENS.radiusSm,
+                padding: '10px 12px',
+                cursor: 'pointer',
+                fontFamily: TOKENS.mono,
+                fontSize: 11,
+                letterSpacing: 0.45,
+                textTransform: 'uppercase',
+              }}
+            >
+              {ui.collapsed ? 'expand' : 'collapse'}
+            </button>
+          ) : null}
         </div>
       </div>
 

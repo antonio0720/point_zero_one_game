@@ -1,1215 +1,1868 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  CHAT_TYPES_RUNTIME_BUNDLE,
-  buildChannelSummaries,
-  buildTranscriptSearchResult,
-  createEmptyGameChatContext,
-  extractThreatSnapshot,
-  normalizeGameChatContext,
-  sortMessagesForRender,
-  type ChatChannel,
-  type ChatMessage,
-  type ChatThreatSnapshot,
-  type ChatTranscriptSearchResult,
-  type GameChatContext,
-  type SabotageEvent,
-} from './chatTypes';
-import { useChatEngine } from './useChatEngine';
-import { buildTranscriptDrawerSurfaceModel, createTranscriptDrawerCallbacks } from './transcriptDrawerAdapter';
-import { buildMessageFeedSurfaceModel } from './messageFeedSurfaceBuilder';
-import { buildChannelTabViewModels } from './channelTabsSurfaceBuilder';
-import { buildPresenceStripViewModel, buildTypingClusterViewModel } from './presenceTypingSurfaceBuilder';
-import type {
-  ChannelTabsViewModel,
-  ChatUiTranscriptDrawerCallbacks,
-  ChatUiTranscriptDrawerSurfaceModel,
-  MessageCardActionViewModel,
-  MessageFeedViewModel,
-  PresenceStripViewModel,
-  TypingClusterViewModel,
-} from './uiTypes';
 
 /**
  * ============================================================================
- * POINT ZERO ONE — UNIFIED CHAT UI HOOK
- * FILE: pzo-web/src/components/chat/useUnifiedChat.ts
- * VERSION: 2026.03.15-patched
+ * POINT ZERO ONE — LEGACY COMPONENT CHAT HOOK (ENGINE-BACKED COMPATIBILITY)
+ * FILE: pzo-web/src/components/chat/useChatEngine.ts
+ * VERSION: 2026.03.17-aligned
+ * ============================================================================
+ *
+ * Purpose
+ * -------
+ * Migration-safe compatibility hook for the legacy component chat surface.
+ *
+ * This file preserves the long-lived import path:
+ *   pzo-web/src/components/chat/useChatEngine.ts
+ *
+ * while stopping that path from behaving like an unauthorized second engine.
+ *
+ * Architectural position
+ * ----------------------
+ * - shared/contracts/chat            => canonical shared contracts
+ * - pzo-web/src/engines/chat         => frontend runtime authority lane
+ * - pzo-web/src/components/chat      => presentation lane + compatibility shims
+ * - backend/src/game/engine/chat     => authoritative persistent truth
+ * - pzo-server/src/chat              => transport / gateway / fanout
+ *
+ * This hook therefore does a constrained job:
+ * - preserve the legacy outward hook shape used by existing mounts
+ * - normalize the incoming component-lane GameChatContext
+ * - derive stable local UI-facing messages from game reality
+ * - preserve tab switching, unread, shell open/close, and local send behavior
+ * - surface sabotage callbacks for runtime screens still wired to the old lane
+ * - remain compatible with UnifiedChatDock.tsx and useUnifiedChat.ts while
+ *   migration continues
+ *
+ * This hook explicitly does NOT:
+ * - become the canonical source of transcript truth
+ * - own transport sockets for the final architecture
+ * - own moderation or persistent learning truth
+ * - import battle / pressure / shield / zero engine modules directly
+ * - redefine contracts already owned by shared/contracts/chat
+ *
+ * Design constraints
+ * ------------------
+ * 1. Preserve the old return shape exactly enough for current callers.
+ * 2. Source all structural truth from chatTypes.ts and shared/contracts/chat.
+ * 3. Keep fast local responsiveness for UI mounts.
+ * 4. Make message derivation deterministic and dedupe-safe.
+ * 5. Allow a later migration to replace this body with a thinner adapter over
+ *    pzo-web/src/engines/chat without breaking imports.
+ *
+ * Scale note
+ * ----------
+ * The legacy hook keeps only a bounded render window. Durable truth, paging,
+ * policy, replay, and multi-session authority belong outside this file.
+ *
+ * Density6 LLC · Point Zero One · Sovereign Chat Runtime · Confidential
  * ============================================================================
  */
 
-export const USE_UNIFIED_CHAT_FILE_PATH = 'pzo-web/src/components/chat/useUnifiedChat.ts' as const;
-export const USE_UNIFIED_CHAT_VERSION = '2026.03.15-patched' as const;
-export const USE_UNIFIED_CHAT_REVISION = 'pzo.components.chat.useUnifiedChat.v2' as const;
-export const USE_UNIFIED_CHAT_RUNTIME_LAWS = Object.freeze([
-  'This hook owns UI-shell state only; chat truth remains outside the component lane.',
-  'This hook may compose the legacy compatibility hook during migration, but it must never become a second engine.',
-  'Drafts, transcript drawer state, search, selection, pinning, and shell-open posture are legitimate UI concerns here.',
-  'Threat, helper, presence, and channel summaries returned here are render-safe mirrors rather than durable truth claims.',
-  'Shared contract law comes from shared/contracts/chat and is exposed through chatTypes.ts.',
-  'The hook must stay backward-compatible with the current mounted chat surfaces while progressively shrinking legacy dependencies.',
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
+
+import {
+  CHAT_TYPES_RUNTIME_BUNDLE,
+  SharedChat,
+  buildChannelSummaries,
+  coerceChatMessage,
+  coerceChatMessages,
+  createEmptyGameChatContext,
+  createSabotageEvent,
+  extractThreatSnapshot,
+  getChatChannelDescription,
+  getChatChannelLabel,
+  groupMessagesByChannel,
+  normalizeChatChannel,
+  normalizeGameChatContext,
+  sortMessagesForRender,
+  type AttackType,
+  type BotTauntSource,
+  type CascadeSeverity,
+  type ChatChannel,
+  type ChatChannelSummary,
+  type ChatConnectionState,
+  type ChatHelperPromptSnapshot,
+  type ChatMessage,
+  type ChatMessageMeta,
+  type ChatThreatSnapshot,
+  type ChatTranscriptSearchResult,
+  type ExtendedMessageKind,
+  type GameChatContext,
+  type PressureTier,
+  type RunOutcome,
+  type SabotageCardType,
+  type SabotageEvent,
+  type ShieldLayerId,
+  type TickTier,
+  type UnifiedVisibleChatChannel,
+  type UseChatEngineResult,
+} from './chatTypes';
+
+export type { SabotageEvent };
+
+export interface UseChatEngineInput {
+  readonly ctx: GameChatContext;
+  readonly accessToken?: string | null;
+  readonly onSabotage?: (event: SabotageEvent) => void;
+  /**
+   * Optional future-facing engine injection. This compatibility hook does not
+   * become authoritative if an engine is passed; it simply keeps the signature
+   * migration-safe while the component lane still exists.
+   */
+  readonly engine?: unknown;
+}
+
+// ============================================================================
+// MARK: Compatibility surface manifest
+// ============================================================================
+
+export const USE_CHAT_ENGINE_FILE_PATH =
+  'pzo-web/src/components/chat/useChatEngine.ts' as const;
+
+export const USE_CHAT_ENGINE_VERSION = '2026.03.17-aligned' as const;
+
+export const USE_CHAT_ENGINE_REVISION =
+  'pzo.components.chat.useChatEngine.compat.v2' as const;
+
+export const USE_CHAT_ENGINE_MIGRATION_MODE = Object.freeze({
+  isCompatibilityHook: true,
+  preservesLegacyReturnShape: true,
+  sharedContractBacked: true,
+  componentLaneOwned: true,
+  componentLaneAuthoritative: false,
+  directEngineImportsAllowed: false,
+  persistentTruthOwnedHere: false,
+  finalSocketAuthorityOwnedHere: false,
+  acceptsEngineOption: true,
+  engineOptionAuthoritative: false,
+});
+
+export const USE_CHAT_ENGINE_RUNTIME_LAWS = Object.freeze([
+  'This hook preserves the old component-lane API while authority migrates outward.',
+  'The hook may synthesize UI-safe local events, but it must not claim durable transcript truth.',
+  'All structural chat law is anchored on shared/contracts/chat via chatTypes.ts.',
+  'The hook may keep a bounded local render window only.',
+  'No direct imports from battle, zero, pressure, shield, or cascade engine modules are permitted.',
+  'Unread and shell-open state may live here temporarily because current mounts still depend on them.',
+  'System, helper, and hater reactions derived here are compatibility-grade local mirrors, not backend truth claims.',
+  'Every later engine-lane migration must be able to replace this implementation without changing the public import path.',
 ] as const);
-export const USE_UNIFIED_CHAT_RUNTIME_BUNDLE = Object.freeze({
-  filePath: USE_UNIFIED_CHAT_FILE_PATH,
-  version: USE_UNIFIED_CHAT_VERSION,
-  revision: USE_UNIFIED_CHAT_REVISION,
-  laws: USE_UNIFIED_CHAT_RUNTIME_LAWS,
+
+export const USE_CHAT_ENGINE_LIMITS = Object.freeze({
+  maxMessages: 500,
+  maxBodyLength: 280,
+  maxEventsPerDigest: 48,
+  maxSignalsPerTickDigest: 24,
+  recentFingerprintWindow: 2048,
+  localSendCooldownMs: 60,
+  duplicateWindowMs: 100,
+  helperRepeatCooldownMs: 18_000,
+  haterRepeatCooldownMs: 12_000,
+  systemRepeatCooldownMs: 7_500,
+  rescueWindowMs: 14_000,
+  connectionResumeWindowMs: 5_000,
+});
+
+export const USE_CHAT_ENGINE_RUNTIME_BUNDLE = Object.freeze({
+  filePath: USE_CHAT_ENGINE_FILE_PATH,
+  version: USE_CHAT_ENGINE_VERSION,
+  revision: USE_CHAT_ENGINE_REVISION,
+  migration: USE_CHAT_ENGINE_MIGRATION_MODE,
+  laws: USE_CHAT_ENGINE_RUNTIME_LAWS,
+  limits: USE_CHAT_ENGINE_LIMITS,
   inheritedChatTypesBundle: CHAT_TYPES_RUNTIME_BUNDLE,
 });
 
-export interface UnifiedChatDiagnostics {
-  readonly normalizedContext: GameChatContext;
-  readonly sortedMessageCount: number;
-  readonly searchMatchCount: number;
-  readonly threatSnapshot: ChatThreatSnapshot;
-  readonly transcriptSearchResult: ChatTranscriptSearchResult;
+// ============================================================================
+// MARK: Internal constants
+// ============================================================================
+
+const VISIBLE_CHANNELS: readonly ChatChannel[] = [
+  'GLOBAL',
+  'SYNDICATE',
+  'DEAL_ROOM',
+] as const;
+
+const CHANNEL_SENDERS = Object.freeze<Record<ChatChannel, string>>({
+  GLOBAL: 'player-local-global',
+  SYNDICATE: 'player-local-syndicate',
+  DEAL_ROOM: 'player-local-deal-room',
+});
+
+const DEFAULT_PLAYER_NAMES = Object.freeze({
+  GLOBAL: 'You',
+  SYNDICATE: 'You',
+  DEAL_ROOM: 'You',
+});
+
+const DEFAULT_PLAYER_RANK = 'You' as const;
+
+const CONNECTION_PRIORITY = Object.freeze<Record<ChatConnectionState, number>>({
+  DISCONNECTED: 0,
+  CONNECTING: 1,
+  RESUMING: 2,
+  DEGRADED: 3,
+  CONNECTED: 4,
+});
+
+const CHANNEL_PERSONAS = Object.freeze({
+  GLOBAL: {
+    helperName: 'Rook',
+    helperEmoji: '🛟',
+    helperRank: 'Systems Mentor',
+    haterName: 'THE CROWD',
+    haterEmoji: '☠️',
+    haterRank: 'Public Heat',
+  },
+  SYNDICATE: {
+    helperName: 'Kade',
+    helperEmoji: '🧠',
+    helperRank: 'Senior Partner',
+    haterName: 'THE AUDITOR',
+    haterEmoji: '🗂️',
+    haterRank: 'Pressure Analyst',
+  },
+  DEAL_ROOM: {
+    helperName: 'Mara',
+    helperEmoji: '📈',
+    helperRank: 'Deal Advisor',
+    haterName: 'THE LIQUIDATOR',
+    haterEmoji: '⚡',
+    haterRank: 'Predatory Creditor',
+  },
+} as const);
+
+interface RuntimePersonaProfile {
+  readonly id: string;
+  readonly name: string;
+  readonly rank: string;
+  readonly emoji: string;
+  readonly attackType: AttackType;
+  readonly sabotageCard: SabotageCardType;
+  readonly taunts: readonly string[];
+  readonly attacks: readonly string[];
+  readonly retreats: readonly string[];
+  readonly helperCounters: readonly string[];
 }
 
-export interface UnifiedChatMountState {
-  readonly mountTarget: string;
-  readonly modeScope: string;
-  readonly storageNamespace: string;
+const HATER_PERSONAS: readonly RuntimePersonaProfile[] = Object.freeze([
+  Object.freeze({
+    id: 'bot-liquidator',
+    name: 'THE LIQUIDATOR',
+    rank: 'Predatory Creditor',
+    emoji: '⚡',
+    attackType: 'LIQUIDITY_STRIKE',
+    sabotageCard: 'EMERGENCY_EXPENSE',
+    taunts: [
+      'Your cash posture is soft. The market notices softness before people do.',
+      'You are negotiating from need, not leverage. That smell travels.',
+      'Distress pricing is not personal. It is simply efficient.',
+    ],
+    attacks: [
+      'I am opening the window under your feet. Watch liquidity disappear first.',
+      'Your margin of error has become inventory for someone stronger.',
+      'This is the part where urgency starts making decisions for you.',
+    ],
+    retreats: [
+      'You bought time. Do not confuse time with safety.',
+      'The floor held. It will be tested again.',
+    ],
+    helperCounters: [
+      'Take the ugly exit before he prices your hesitation.',
+      'Protect runway first. Reputation recovers faster than insolvency.',
+    ],
+  }),
+  Object.freeze({
+    id: 'bot-bureaucrat',
+    name: 'THE BUREAUCRAT',
+    rank: 'Regulatory Burden',
+    emoji: '📑',
+    attackType: 'PRESSURE_SPIKE',
+    sabotageCard: 'SYSTEM_GLITCH',
+    taunts: [
+      'Every exception becomes paperwork eventually.',
+      'I do not need speed. Process wins by continuing to exist.',
+      'Your confidence is not a filing status.',
+    ],
+    attacks: [
+      'The form is the weapon. You noticed too late.',
+      'A delay can be more expensive than an error if timed correctly.',
+    ],
+    retreats: [
+      'You satisfied the surface requirements. I will return for the deeper layer.',
+      'For now, the checkbox remains checked.',
+    ],
+    helperCounters: [
+      'Tighten the sequence. He feeds on disorder more than weakness.',
+      'Document the clean path now while there is still time to do it calmly.',
+    ],
+  }),
+  Object.freeze({
+    id: 'bot-market-maker',
+    name: 'THE SPREAD',
+    rank: 'Liquidity Predator',
+    emoji: '📉',
+    attackType: 'NEGOTIATION_TRAP',
+    sabotageCard: 'MARKET_CORRECTION',
+    taunts: [
+      'You keep showing your urgency in public. Spreads widen when urgency talks.',
+      'A bad quote is still useful if it teaches the room how desperate you are.',
+      'The deal room remembers panic better than principle.',
+    ],
+    attacks: [
+      'Your ask is now a signal against you.',
+      'I am not here to trade. I am here to make your next trade worse.',
+    ],
+    retreats: [
+      'You denied me the cheap narrative. Annoying, but temporary.',
+      'Fine. The room stayed disciplined this round.',
+    ],
+    helperCounters: [
+      'Slow the tempo. He wants visible need.',
+      'Counter with structure, not emotion. Let him overplay first.',
+    ],
+  }),
+]);
+
+const HELPER_LINES = Object.freeze({
+  calm: [
+    'You do not need a dramatic move here. You need the next clean one.',
+    'Hold posture. The room gets louder before it gets clearer.',
+    'Breathe once, then make the smallest move that preserves optionality.',
+  ],
+  blunt: [
+    'Stop feeding the attack. Tighten the lane and cut noise.',
+    'This is recoverable only if you stop improvising in public.',
+    'Do less, cleaner, faster. Your leak is sequence, not effort.',
+  ],
+  urgent: [
+    'Protect cash now. Narrative can wait.',
+    'Exit the exposed line immediately. You are being shaped by urgency.',
+    'This is the rescue window. Use it before the room re-prices you.',
+  ],
+  strategic: [
+    'Take the counter-position that preserves proof and optionality.',
+    'Let the hater reveal intent. Counter after the pattern is obvious.',
+    'The best move is the one that leaves the fewest usable receipts against you.',
+  ],
+} as const);
+
+const SYSTEM_EVENT_PATTERNS = Object.freeze([
+  { needle: 'BOT_ATTACK', kind: 'BOT_ATTACK' as const, channel: 'GLOBAL' as const },
+  { needle: 'SABOTAGE', kind: 'BOT_ATTACK' as const, channel: 'GLOBAL' as const },
+  { needle: 'LIQUIDATOR', kind: 'BOT_TAUNT' as const, channel: 'DEAL_ROOM' as const },
+  { needle: 'SHIELD', kind: 'SHIELD_EVENT' as const, channel: 'SYNDICATE' as const },
+  { needle: 'CASCADE', kind: 'CASCADE_ALERT' as const, channel: 'GLOBAL' as const },
+  { needle: 'DEAL', kind: 'DEAL_RECAP' as const, channel: 'DEAL_ROOM' as const },
+  { needle: 'SOVEREIGN', kind: 'ACHIEVEMENT' as const, channel: 'DEAL_ROOM' as const },
+  { needle: 'BANKRUPT', kind: 'MARKET_ALERT' as const, channel: 'GLOBAL' as const },
+  { needle: 'COLLAPSE', kind: 'MARKET_ALERT' as const, channel: 'GLOBAL' as const },
+] as const);
+
+// ============================================================================
+// MARK: Internal types
+// ============================================================================
+
+interface HookMessageAccumulator {
+  readonly nextMessages: readonly ChatMessage[];
+  readonly generatedSabotageEvents: readonly SabotageEvent[];
 }
 
-const STORAGE_PREFIX = 'pzo_unified_chat';
-const MAX_HELPER_SCAN = 32;
-const MAX_THREAT_SCAN = 48;
-const MAX_RECENT_PEERS = 24;
-const MAX_DRAFT_CHARS = 1200;
-
-export type UnifiedChatConnectionState = 'CONNECTED' | 'CONNECTING' | 'DEGRADED' | 'DISCONNECTED';
-export type UnifiedChatShellMode = 'DOCK' | 'DRAWER';
-
-export interface UnifiedChatChannelSummary {
-  channel: ChatChannel;
-  label: string;
-  emoji: string;
-  unread: number;
-  totalMessages: number;
-  visibleMessages: number;
-  latestTs: number | null;
-  latestPreview: string;
-  latestSenderName: string | null;
-  hasPlayerActivity: boolean;
-  hasProofBearingMessage: boolean;
-  hasThreatActivity: boolean;
-  canCompose: boolean;
+interface ConnectionSnapshot {
+  readonly state: ChatConnectionState;
+  readonly connected: boolean;
+  readonly transportReady: boolean;
+  readonly reason: string;
 }
 
-export interface UnifiedChatThreatSummary {
-  score: number;
-  tier: 'CALM' | 'WATCH' | 'HIGH' | 'CRITICAL';
-  label: string;
-  reasons: string[];
-  latestThreatMessageId: string | null;
+interface ContextDelta {
+  readonly tickChanged: boolean;
+  readonly pressureChanged: boolean;
+  readonly tickTierChanged: boolean;
+  readonly runOutcomeChanged: boolean;
+  readonly heatChanged: boolean;
+  readonly netWorthDrop: boolean;
+  readonly liquidityShock: boolean;
+  readonly newEvents: readonly string[];
+  readonly scoreShock: boolean;
 }
 
-export interface UnifiedChatHelperPrompt {
-  id: string;
-  title: string;
-  body: string;
-  severity: 'INFO' | 'GUIDE' | 'WARNING' | 'CRITICAL';
-  sourceMessageId?: string;
-  ctaLabel?: string;
-  suggestedReply?: string;
+interface HookState {
+  readonly messages: readonly ChatMessage[];
+  readonly activeTab: ChatChannel;
+  readonly chatOpen: boolean;
+  readonly unread: Record<ChatChannel, number>;
+  readonly connectionState: ChatConnectionState;
 }
 
-export interface UnifiedChatPresencePreview {
-  onlineCount: number;
-  activeMembers: number;
-  typingCount: number;
-  recentPeerNames: string[];
-  recentRanks: string[];
+interface FingerprintEntry {
+  readonly ts: number;
+  readonly messageId: string;
 }
 
-export interface UnifiedChatTranscriptState {
-  open: boolean;
-  searchQuery: string;
-  selectedMessageId: string | null;
-  newestFirst: boolean;
+// ============================================================================
+// MARK: Pure helpers
+// ============================================================================
+
+function clamp01(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(1, value));
 }
 
-export interface UnifiedChatComposerState {
-  activeDraft: string;
-  charCount: number;
-  maxChars: number;
-  canSend: boolean;
-  isNearLimit: boolean;
-  placeholder: string;
+function nowMs(): number {
+  return Date.now();
 }
 
-export interface UseUnifiedChatOptions {
-  ctx: GameChatContext;
-  accessToken?: string | null;
-  shellMode?: UnifiedChatShellMode;
-  initialChannel?: ChatChannel;
-  initialOpen?: boolean;
-  initialCollapsed?: boolean;
-  initialTranscriptOpen?: boolean;
-  initialTranscriptSearch?: string;
-  persistUiState?: boolean;
-  persistDrafts?: boolean;
-  storageNamespace?: string;
-  onSabotage?: (event: SabotageEvent) => void;
+function safeUpper(value: string | null | undefined): string {
+  return String(value ?? '').trim().toUpperCase();
 }
 
-export interface UseUnifiedChatResult {
-  shellMode: UnifiedChatShellMode;
-  connected: boolean;
-  connectionState: UnifiedChatConnectionState;
-  chatOpen: boolean;
-  collapsed: boolean;
-  isPinned: boolean;
-  activeChannel: ChatChannel;
-  activeSummary: UnifiedChatChannelSummary;
-  channels: UnifiedChatChannelSummary[];
-  allMessages: ChatMessage[];
-  visibleMessages: ChatMessage[];
-  recentMessages: ChatMessage[];
-  unread: Record<ChatChannel, number>;
-  totalUnread: number;
-  threat: UnifiedChatThreatSummary;
-  helperPrompt: UnifiedChatHelperPrompt | null;
-  presence: UnifiedChatPresencePreview;
-  transcript: UnifiedChatTranscriptState;
-  transcriptDrawerModel: ChatUiTranscriptDrawerSurfaceModel;
-  transcriptDrawerCallbacks: ChatUiTranscriptDrawerCallbacks;
-  presenceStripModel: PresenceStripViewModel;
-  typingIndicatorModel: TypingClusterViewModel;
-  channelTabs: ChannelTabsViewModel;
-  messageFeedModel: MessageFeedViewModel;
-  messageFeedActionsByMessageId: Record<string, readonly MessageCardActionViewModel[]>;
-  composer: UnifiedChatComposerState;
-  latestMessage: ChatMessage | null;
-  latestPlayerMessage: ChatMessage | null;
-  latestSystemMessage: ChatMessage | null;
-  latestThreatMessage: ChatMessage | null;
-  transcriptLocked: boolean;
-  emptyStateMode: 'IDLE' | 'DISCONNECTED' | 'FILTERED' | 'DEAL_WAITING' | 'THREAT' | 'COLLAPSED';
-  sendDraft: () => void;
-  setActiveChannel: (channel: ChatChannel) => void;
-  setDraft: (next: string) => void;
-  appendDraft: (suffix: string) => void;
-  clearDraft: () => void;
-  openChat: () => void;
-  closeChat: () => void;
-  toggleChat: () => void;
-  collapse: () => void;
-  expand: () => void;
-  toggleCollapsed: () => void;
-  pin: () => void;
-  unpin: () => void;
-  togglePinned: () => void;
-  openTranscript: () => void;
-  closeTranscript: () => void;
-  toggleTranscript: () => void;
-  setTranscriptSearchQuery: (query: string) => void;
-  selectTranscriptMessage: (messageId: string | null) => void;
-  jumpToLatest: () => void;
-  quickReply: (reply: string) => void;
-  dismissHelperPrompt: () => void;
-  reopenHelperPrompt: () => void;
-  resetUi: () => void;
-  diagnostics: UnifiedChatDiagnostics;
-  mountState: UnifiedChatMountState;
-  runtimeBundle: typeof USE_UNIFIED_CHAT_RUNTIME_BUNDLE;
-}
-
-type PersistedUiSnapshot = {
-  collapsed: boolean;
-  pinned: boolean;
-  transcriptOpen: boolean;
-  transcriptSearch: string;
-  activeChannel: ChatChannel;
-};
-
-type PersistedDraftSnapshot = Record<ChatChannel, string>;
-
-const CHANNEL_META: Record<ChatChannel, { label: string; emoji: string; canCompose: boolean; placeholder: string }> = {
-  GLOBAL: { label: 'Global', emoji: '🌐', canCompose: true, placeholder: 'Broadcast into the public lane…' },
-  SYNDICATE: { label: 'Syndicate', emoji: '🏛️', canCompose: true, placeholder: 'Coordinate with your alliance…' },
-  DEAL_ROOM: { label: 'Deal Room', emoji: '⚡', canCompose: true, placeholder: 'State your offer, counter, or recap…' },
-};
-
-function safeWindow(): Window | null {
-  return typeof window === 'undefined' ? null : window;
-}
-
-function safeReadStorage<T>(key: string, fallback: T): T {
-  try {
-    const win = safeWindow();
-    if (!win) return fallback;
-    const raw = win.localStorage.getItem(key);
-    if (!raw) return fallback;
-    return JSON.parse(raw) as T;
-  } catch {
-    return fallback;
+function toStableKey(input: string): string {
+  let hash = 2166136261;
+  for (let i = 0; i < input.length; i += 1) {
+    hash ^= input.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
   }
+  return `k-${Math.abs(hash >>> 0).toString(36)}`;
 }
 
-function safeWriteStorage<T>(key: string, value: T): void {
-  try {
-    const win = safeWindow();
-    if (!win) return;
-    win.localStorage.setItem(key, JSON.stringify(value));
-  } catch {
-    // optional persistence only
+function isUseChatEngineInput(value: unknown): value is UseChatEngineInput {
+  return Boolean(
+    value &&
+      typeof value === 'object' &&
+      'ctx' in (value as Record<string, unknown>),
+  );
+}
+
+function resolveUseChatEngineArgs(
+  first: GameChatContext | UseChatEngineInput,
+  accessToken?: string | null,
+  onSabotage?: (event: SabotageEvent) => void,
+): UseChatEngineInput {
+  if (isUseChatEngineInput(first)) {
+    return {
+      ctx: first.ctx,
+      accessToken: first.accessToken,
+      onSabotage: first.onSabotage,
+      engine: first.engine,
+    };
   }
+
+  return {
+    ctx: first,
+    accessToken,
+    onSabotage,
+  };
 }
 
-function clamp(value: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, value));
-}
-
-function compactPreview(body: string, max = 96): string {
-  const trimmed = body.replace(/\s+/g, ' ').trim();
-  if (trimmed.length <= max) return trimmed;
-  return `${trimmed.slice(0, max - 1).trimEnd()}…`;
-}
-
-function latestBy<T extends ChatMessage>(messages: readonly T[], predicate?: (msg: T) => boolean): T | null {
-  for (let i = messages.length - 1; i >= 0; i -= 1) {
-    const candidate = messages[i];
-    if (!predicate || predicate(candidate)) return candidate;
-  }
-  return null;
-}
-
-function uniquePush(list: string[], next: string, limit: number): string[] {
-  if (!next.trim()) return list;
-  if (list.includes(next)) return list;
-  const combined = [...list, next];
-  return combined.slice(-limit);
-}
-
-function connectionStateFromFlags(
-  connected: boolean,
-  messages: readonly ChatMessage[],
+function inferConnectionSnapshot(
   ctx: GameChatContext,
-): UnifiedChatConnectionState {
-  if (connected) return 'CONNECTED';
-  if (ctx.tick <= 3 && messages.length === 0) return 'CONNECTING';
-  if (messages.length > 0) return 'DEGRADED';
-  return 'DISCONNECTED';
+  accessToken?: string | null,
+): ConnectionSnapshot {
+  const explicit = ctx.connectionState;
+  if (explicit) {
+    return {
+      state: explicit,
+      connected: explicit === 'CONNECTED' || explicit === 'DEGRADED',
+      transportReady: explicit !== 'DISCONNECTED',
+      reason: 'context-explicit',
+    };
+  }
+
+  if (accessToken && accessToken.trim().length > 0) {
+    return {
+      state: 'CONNECTED',
+      connected: true,
+      transportReady: true,
+      reason: 'access-token-present',
+    };
+  }
+
+  if ((ctx.roomId && ctx.sessionId) || ctx.playerId) {
+    return {
+      state: 'DEGRADED',
+      connected: true,
+      transportReady: false,
+      reason: 'context-has-session-shape',
+    };
+  }
+
+  return {
+    state: 'DISCONNECTED',
+    connected: false,
+    transportReady: false,
+    reason: 'no-token-no-session-shape',
+  };
 }
 
-function toChannelTabsConnectionState(
-  state: UnifiedChatConnectionState,
-): 'ONLINE' | 'CONNECTING' | 'DEGRADED' | 'OFFLINE' {
-  switch (state) {
-    case 'CONNECTED':
-      return 'ONLINE';
-    case 'CONNECTING':
-      return 'CONNECTING';
-    case 'DEGRADED':
-      return 'DEGRADED';
-    case 'DISCONNECTED':
-    default:
-      return 'OFFLINE';
+function chooseDefaultTab(ctx: GameChatContext): ChatChannel {
+  if (ctx.activeChannel) {
+    return normalizeChatChannel(ctx.activeChannel);
   }
+
+  if (ctx.mountTarget === 'LOBBY_SCREEN' || ctx.modeScope === 'LOBBY') {
+    return 'GLOBAL';
+  }
+
+  if (safeUpper(ctx.runOutcome) === 'SOVEREIGNTY') {
+    return 'DEAL_ROOM';
+  }
+
+  if ((ctx.haterHeat ?? 0) >= 0.72) {
+    return 'SYNDICATE';
+  }
+
+  return 'GLOBAL';
 }
 
-function scoreThreat(messages: readonly ChatMessage[], ctx: GameChatContext): UnifiedChatThreatSummary {
-  let score = clamp(ctx.haterHeat ?? 0, 0, 100);
-  const reasons: string[] = [];
-  let latestThreatMessageId: string | null = null;
+function inferThreatBandFromContext(ctx: GameChatContext): ChatThreatSnapshot {
+  const messages = coerceChatMessages([
+    {
+      id: 'ctx-threat-snapshot',
+      channel: chooseDefaultTab(ctx),
+      kind: (ctx.haterHeat ?? 0) > 0.55 ? 'BOT_ATTACK' : 'SYSTEM',
+      senderId: 'system',
+      senderName: 'System',
+      body: 'Threat snapshot',
+      ts: nowMs(),
+      pressureTier: ctx.pressureTier,
+      tickTier: ctx.tickTier,
+      rescueDecision:
+        (ctx.haterHeat ?? 0) >= 0.78
+          ? {
+              interventionId: 'ctx-rescue' as never,
+              triggerAt: nowMs() as never,
+              style: 'DIRECTIVE',
+              reason: 'FAILED_ACTION_CHAIN',
+              suggestedAction: 'Protect cash and reduce exposed lines.',
+            }
+          : undefined,
+    },
+  ]);
 
-  if (ctx.pressureTier === 'CRITICAL') {
-    score += 28;
-    reasons.push('Pressure tier is CRITICAL');
-  } else if (ctx.pressureTier === 'HIGH') {
-    score += 18;
-    reasons.push('Pressure tier is HIGH');
-  } else if (ctx.pressureTier === 'ELEVATED') {
-    score += 8;
-    reasons.push('Pressure tier is ELEVATED');
+  const base = extractThreatSnapshot(messages);
+  const score01 = clamp01(
+    Math.max(
+      base.score01,
+      (ctx.haterHeat ?? 0) * 0.65 +
+        (safeUpper(ctx.pressureTier) === 'BREAKPOINT' ||
+        safeUpper(ctx.pressureTier) === 'CRITICAL'
+          ? 0.22
+          : safeUpper(ctx.pressureTier) === 'PRESSURED'
+            ? 0.12
+            : 0) +
+        (safeUpper(ctx.tickTier) === 'SUDDEN_DEATH' ? 0.11 : 0),
+    ),
+  );
+
+  const band =
+    score01 >= 0.85
+      ? 'SEVERE'
+      : score01 >= 0.6
+        ? 'HIGH'
+        : score01 >= 0.35
+          ? 'ELEVATED'
+          : score01 >= 0.1
+            ? 'LOW'
+            : 'QUIET';
+
+  return {
+    ...base,
+    score01,
+    score100: Math.round(score01 * 100),
+    band,
+    rescueNeeded: base.rescueNeeded || score01 >= 0.72,
+    activePressureTier: ctx.pressureTier ?? base.activePressureTier,
+    activeTickTier: ctx.tickTier ?? base.activeTickTier,
+  };
+}
+
+function inferHelperPrompt(
+  ctx: GameChatContext,
+  threat: ChatThreatSnapshot,
+): ChatHelperPromptSnapshot {
+  if (threat.band === 'SEVERE') {
+    return {
+      visible: true,
+      tone: 'urgent',
+      title: 'Immediate posture correction',
+      body:
+        'You are inside a live pressure window. Preserve cash, cut exposed lines, and stop narrating urgency in public.',
+      ctaLabel: 'Stabilize now',
+    };
   }
 
-  if (ctx.tickTier === 'COLLAPSE_IMMINENT') {
-    score += 24;
-    reasons.push('Tick tier is COLLAPSE_IMMINENT');
-  } else if (ctx.tickTier === 'CRISIS') {
-    score += 16;
-    reasons.push('Tick tier is CRISIS');
-  } else if (ctx.tickTier === 'COMPRESSED') {
-    score += 8;
-    reasons.push('Tick tier is COMPRESSED');
+  if (
+    safeUpper(ctx.runOutcome) === 'LOSS' ||
+    safeUpper(ctx.runOutcome) === 'BANKRUPTCY'
+  ) {
+    return {
+      visible: true,
+      tone: 'calm',
+      title: 'Recovery lane is still open',
+      body:
+        'The collapse is real, but it is not the whole board. Recover sequence, reduce noise, and choose the next clean move.',
+      ctaLabel: 'Take recovery line',
+    };
   }
 
-  const scan = messages.slice(-MAX_THREAT_SCAN);
-  for (let i = scan.length - 1; i >= 0; i -= 1) {
-    const msg = scan[i];
+  if (
+    safeUpper(ctx.pressureTier) === 'PRESSURED' ||
+    safeUpper(ctx.pressureTier) === 'CRITICAL' ||
+    safeUpper(ctx.pressureTier) === 'BREAKPOINT' ||
+    threat.band === 'HIGH'
+  ) {
+    return {
+      visible: true,
+      tone: 'strategic',
+      title: 'Pressure is shaping the room',
+      body:
+        'Slow the tempo. The best next move is the one that preserves optionality and denies usable receipts.',
+      ctaLabel: 'Hold structure',
+    };
+  }
 
-    if (!latestThreatMessageId && (msg.kind === 'BOT_ATTACK' || msg.kind === 'BOT_TAUNT' || msg.kind === 'CASCADE_ALERT')) {
-      latestThreatMessageId = msg.id;
+  if ((ctx.haterHeat ?? 0) >= 0.55) {
+    return {
+      visible: true,
+      tone: 'blunt',
+      title: 'Visible aggression detected',
+      body:
+        'Do less, cleaner, faster. The attack feeds on your loose sequencing more than on your weakness.',
+      ctaLabel: 'Tighten lane',
+    };
+  }
+
+  return {
+    visible: false,
+    tone: 'calm',
+    title: '',
+    body: '',
+    ctaLabel: '',
+  };
+}
+
+function pickPersonaByContext(
+  ctx: GameChatContext,
+  channel: ChatChannel,
+): RuntimePersonaProfile {
+  if (channel === 'DEAL_ROOM') {
+    return HATER_PERSONAS[0];
+  }
+
+  if (
+    safeUpper(ctx.pressureTier) === 'CRITICAL' ||
+    safeUpper(ctx.pressureTier) === 'BREAKPOINT'
+  ) {
+    return HATER_PERSONAS[1];
+  }
+
+  if ((ctx.haterHeat ?? 0) >= 0.65) {
+    return HATER_PERSONAS[2];
+  }
+
+  return HATER_PERSONAS[1];
+}
+
+function buildMessageMeta(
+  ctx: GameChatContext,
+  options: {
+    statusText?: string;
+    pressureTier?: PressureTier;
+    tickTier?: TickTier;
+    runOutcome?: RunOutcome;
+    botSource?: BotTauntSource;
+  } = {},
+): ChatMessageMeta {
+  return {
+    requestId: undefined,
+    roomId: ctx.roomId as never,
+    channelId: undefined,
+    debug: {
+      statusText: options.statusText,
+      pressureTier: options.pressureTier ?? ctx.pressureTier,
+      tickTier: options.tickTier ?? ctx.tickTier,
+      runOutcome: options.runOutcome ?? ctx.runOutcome,
+      botSource: options.botSource
+        ? {
+            botId: options.botSource.botId,
+            attackType: options.botSource.attackType,
+            targetLayer: options.botSource.targetLayer,
+          }
+        : undefined,
+    },
+  };
+}
+
+function buildSystemMessage(
+  ctx: GameChatContext,
+  partial: Partial<ChatMessage> & {
+    channel?: ChatChannel;
+    kind?: ExtendedMessageKind;
+    body: string;
+  },
+  fallbackSeed: number,
+): ChatMessage {
+  return coerceChatMessage(
+    {
+      id: partial.id,
+      channel: partial.channel ?? chooseDefaultTab(ctx),
+      kind: partial.kind ?? 'SYSTEM',
+      senderId: partial.senderId ?? 'system',
+      senderName: partial.senderName ?? 'System',
+      senderRank: partial.senderRank ?? 'Runtime',
+      body: partial.body,
+      emoji: partial.emoji,
+      ts: partial.ts ?? nowMs(),
+      immutable: partial.immutable ?? true,
+      proofHash: partial.proofHash,
+      botSource: partial.botSource,
+      pressureTier: partial.pressureTier ?? ctx.pressureTier,
+      tickTier: partial.tickTier ?? ctx.tickTier,
+      runOutcome: partial.runOutcome ?? ctx.runOutcome,
+      shieldMeta: partial.shieldMeta,
+      cascadeMeta: partial.cascadeMeta,
+      meta:
+        partial.meta ??
+        buildMessageMeta(ctx, {
+          statusText: partial.kind ?? 'SYSTEM',
+          botSource: partial.botSource,
+        }),
+      rescueDecision: partial.rescueDecision,
+      relationshipState: partial.relationshipState,
+      affect: partial.affect,
+      learningProfile: partial.learningProfile ?? ctx.learningProfile,
+      liveOpsState: partial.liveOpsState ?? ctx.liveOpsState,
+      audienceHeat: partial.audienceHeat ?? ctx.audienceHeat,
+      reputationState: partial.reputationState ?? ctx.reputation,
+      compatibility: {
+        compatibilityLevel: 'ENGINE_BACKED',
+        derivesFromSharedContracts: true,
+        derivesFromEnginePublicLane: true,
+        derivedFromFrameKind: 'LegacyComponentCompatibility',
+        authoritative: false,
+      },
+    },
+    fallbackSeed,
+  );
+}
+
+function buildPlayerMessage(
+  ctx: GameChatContext,
+  channel: ChatChannel,
+  body: string,
+  fallbackSeed: number,
+): ChatMessage {
+  return coerceChatMessage(
+    {
+      id: `player-${channel.toLowerCase()}-${fallbackSeed}-${toStableKey(body)}`,
+      channel,
+      kind: 'PLAYER',
+      senderId: CHANNEL_SENDERS[channel],
+      senderName: ctx.playerName?.trim() || DEFAULT_PLAYER_NAMES[channel],
+      senderRank: DEFAULT_PLAYER_RANK,
+      senderRole: 'PLAYER',
+      body: body.slice(0, USE_CHAT_ENGINE_LIMITS.maxBodyLength),
+      ts: nowMs(),
+      immutable: false,
+      pressureTier: ctx.pressureTier,
+      tickTier: ctx.tickTier,
+      runOutcome: ctx.runOutcome,
+      meta: buildMessageMeta(ctx, { statusText: 'PLAYER_SENT' }),
+      compatibility: {
+        compatibilityLevel: 'ENGINE_BACKED',
+        derivesFromSharedContracts: true,
+        derivesFromEnginePublicLane: true,
+        derivedFromFrameKind: 'LegacyPlayerSend',
+        authoritative: false,
+      },
+    },
+    fallbackSeed,
+  );
+}
+
+function buildHelperMessage(
+  ctx: GameChatContext,
+  channel: ChatChannel,
+  tone: ChatHelperPromptSnapshot['tone'],
+  body: string,
+  fallbackSeed: number,
+): ChatMessage {
+  const persona = CHANNEL_PERSONAS[channel];
+  return buildSystemMessage(
+    ctx,
+    {
+      id: `helper-${channel.toLowerCase()}-${fallbackSeed}-${toStableKey(body)}`,
+      channel,
+      kind: 'HELPER_PROMPT',
+      senderId: `helper-${channel.toLowerCase()}`,
+      senderName: persona.helperName,
+      senderRank: persona.helperRank,
+      emoji: persona.helperEmoji,
+      body,
+      immutable: true,
+      meta: buildMessageMeta(ctx, { statusText: `HELPER_${tone.toUpperCase()}` }),
+      rescueDecision: {
+        interventionId: `rescue-${channel.toLowerCase()}-${fallbackSeed}` as never,
+        triggerAt: nowMs() as never,
+        style:
+          tone === 'urgent'
+            ? 'DIRECTIVE'
+            : tone === 'blunt'
+              ? 'BLUNT'
+              : tone === 'strategic'
+                ? 'DIRECTIVE'
+                : 'CALM',
+        reason: 'FAILED_ACTION_CHAIN',
+        suggestedAction:
+          tone === 'urgent'
+            ? 'Protect cash and cut exposed lines immediately.'
+            : tone === 'blunt'
+              ? 'Tighten sequencing and reduce public leakage.'
+              : tone === 'strategic'
+                ? 'Hold structure and preserve optionality.'
+                : 'Take the next clean move.',
+      },
+    },
+    fallbackSeed,
+  );
+}
+
+function buildHaterMessage(
+  ctx: GameChatContext,
+  channel: ChatChannel,
+  profile: RuntimePersonaProfile,
+  body: string,
+  fallbackSeed: number,
+): ChatMessage {
+  const botSource: BotTauntSource = {
+    botId: profile.id,
+    botName: profile.name,
+    botState: 'ATTACKING',
+    attackType: profile.attackType,
+    dialogue: body,
+    targetLayer: 'L2',
+    isRetreat: false,
+  };
+
+  return buildSystemMessage(
+    ctx,
+    {
+      id: `hater-${profile.id}-${fallbackSeed}-${toStableKey(body)}`,
+      channel,
+      kind: channel === 'DEAL_ROOM' ? 'BOT_ATTACK' : 'BOT_TAUNT',
+      senderId: profile.id,
+      senderName: profile.name,
+      senderRank: profile.rank,
+      emoji: profile.emoji,
+      body,
+      immutable: true,
+      botSource,
+      meta: buildMessageMeta(ctx, {
+        statusText: 'HATER_REACTION',
+        botSource,
+      }),
+    },
+    fallbackSeed,
+  );
+}
+
+function classifyEventKind(eventText: string): {
+  readonly kind: ExtendedMessageKind;
+  readonly channel: ChatChannel;
+} {
+  const upper = safeUpper(eventText);
+
+  for (const entry of SYSTEM_EVENT_PATTERNS) {
+    if (upper.includes(entry.needle)) {
+      return {
+        kind: entry.kind,
+        channel: entry.channel,
+      };
+    }
+  }
+
+  return {
+    kind: 'SYSTEM',
+    channel: 'GLOBAL',
+  };
+}
+
+function inferSabotageCard(
+  attackType: AttackType,
+  eventText: string,
+): SabotageCardType {
+  const upper = safeUpper(eventText);
+
+  if (attackType === 'LIQUIDITY_STRIKE' || upper.includes('CASH')) {
+    return 'EMERGENCY_EXPENSE';
+  }
+
+  if (
+    attackType === 'NEGOTIATION_TRAP' ||
+    upper.includes('MARKET') ||
+    upper.includes('REPUT')
+  ) {
+    return 'MARKET_CORRECTION';
+  }
+
+  if (
+    attackType === 'PRESSURE_SPIKE' ||
+    upper.includes('AUDIT') ||
+    upper.includes('INSPECT')
+  ) {
+    return 'INSPECTION_NOTICE';
+  }
+
+  if (upper.includes('DEBT')) {
+    return 'DEBT_SPIRAL';
+  }
+
+  if (upper.includes('INCOME')) {
+    return 'INCOME_SEIZURE';
+  }
+
+  return 'SYSTEM_GLITCH';
+}
+
+function inferShieldLayer(eventText: string): ShieldLayerId | undefined {
+  const upper = safeUpper(eventText);
+  if (upper.includes('L3') || upper.includes('LAYER_03') || upper.includes('LAYER 03')) return 'L3';
+  if (upper.includes('L2') || upper.includes('LAYER_02') || upper.includes('LAYER 02')) return 'L2';
+  if (upper.includes('L1') || upper.includes('LAYER_01') || upper.includes('LAYER 01')) return 'L1';
+  return undefined;
+}
+
+function deriveContextDelta(
+  previous: GameChatContext | null,
+  next: GameChatContext,
+): ContextDelta {
+  if (!previous) {
+    return {
+      tickChanged: true,
+      pressureChanged: true,
+      tickTierChanged: true,
+      runOutcomeChanged: true,
+      heatChanged: true,
+      netWorthDrop: false,
+      liquidityShock: false,
+      newEvents: next.events.slice(0, USE_CHAT_ENGINE_LIMITS.maxEventsPerDigest),
+      scoreShock: false,
+    };
+  }
+
+  const previousEvents = new Set(previous.events);
+  const newEvents = next.events
+    .filter((event) => !previousEvents.has(event))
+    .slice(0, USE_CHAT_ENGINE_LIMITS.maxEventsPerDigest);
+
+  const previousNetWorth = previous.netWorth ?? previous.economy?.netWorth ?? 0;
+  const nextNetWorth = next.netWorth ?? next.economy?.netWorth ?? 0;
+  const previousLiquidity = previous.economy?.availableLiquidity ?? previous.cash ?? 0;
+  const nextLiquidity = next.economy?.availableLiquidity ?? next.cash ?? 0;
+  const previousThreat = previous.score?.threatScore ?? previous.haterHeat ?? 0;
+  const nextThreat = next.score?.threatScore ?? next.haterHeat ?? 0;
+
+  return {
+    tickChanged: previous.tick !== next.tick,
+    pressureChanged: previous.pressureTier !== next.pressureTier,
+    tickTierChanged: previous.tickTier !== next.tickTier,
+    runOutcomeChanged: previous.runOutcome !== next.runOutcome,
+    heatChanged: previous.haterHeat !== next.haterHeat,
+    netWorthDrop: nextNetWorth < previousNetWorth,
+    liquidityShock: nextLiquidity < previousLiquidity * 0.8,
+    newEvents,
+    scoreShock: nextThreat > previousThreat + 0.14,
+  };
+}
+
+function buildContextDigestMessages(
+  previous: GameChatContext | null,
+  next: GameChatContext,
+  fallbackSeedBase: number,
+): HookMessageAccumulator {
+  const delta = deriveContextDelta(previous, next);
+  const nextMessages: ChatMessage[] = [];
+  const sabotageEvents: SabotageEvent[] = [];
+  let fallbackSeed = fallbackSeedBase;
+
+  if (!previous) {
+    nextMessages.push(
+      buildSystemMessage(
+        next,
+        {
+          id: 'system-boot',
+          channel: chooseDefaultTab(next),
+          kind: 'SYSTEM',
+          senderName: 'System',
+          senderRank: 'Runtime',
+          body:
+            'Chat runtime linked to the current game surface. Local compatibility lane is active while unified authority migration continues.',
+          immutable: true,
+        },
+        fallbackSeed++,
+      ),
+    );
+  }
+
+  if (delta.pressureChanged && next.pressureTier) {
+    nextMessages.push(
+      buildSystemMessage(
+        next,
+        {
+          channel: 'SYNDICATE',
+          kind:
+            safeUpper(next.pressureTier) === 'CRITICAL' ||
+            safeUpper(next.pressureTier) === 'BREAKPOINT'
+              ? 'MARKET_ALERT'
+              : 'SYSTEM',
+          senderName: 'Pressure Feed',
+          senderRank: 'Signal Runtime',
+          body: `Pressure tier shifted to ${next.pressureTier}. The room will now price hesitation differently.`,
+          immutable: true,
+        },
+        fallbackSeed++,
+      ),
+    );
+  }
+
+  if (delta.tickTierChanged && next.tickTier) {
+    nextMessages.push(
+      buildSystemMessage(
+        next,
+        {
+          channel: 'GLOBAL',
+          kind: 'SYSTEM',
+          senderName: 'Tick Feed',
+          senderRank: 'Run Tempo',
+          body: `Run tempo advanced to ${next.tickTier}. Expect cadence and hostility patterns to shift with the clock.`,
+          immutable: true,
+        },
+        fallbackSeed++,
+      ),
+    );
+  }
+
+  if (delta.runOutcomeChanged && next.runOutcome) {
+    nextMessages.push(
+      buildSystemMessage(
+        next,
+        {
+          channel: safeUpper(next.runOutcome) === 'SOVEREIGNTY' ? 'DEAL_ROOM' : 'GLOBAL',
+          kind:
+            safeUpper(next.runOutcome) === 'SOVEREIGNTY'
+              ? 'ACHIEVEMENT'
+              : safeUpper(next.runOutcome) === 'LOSS' ||
+                safeUpper(next.runOutcome) === 'BANKRUPTCY'
+                ? 'MARKET_ALERT'
+                : 'SYSTEM',
+          senderName: 'Outcome Feed',
+          senderRank: 'Run Verdict',
+          body:
+            safeUpper(next.runOutcome) === 'SOVEREIGNTY'
+              ? 'Sovereign posture achieved. The room will remember this line.'
+              : safeUpper(next.runOutcome) === 'LOSS'
+                ? 'Run integrity collapsed. Recovery chatter is now a first-class gameplay surface.'
+                : safeUpper(next.runOutcome) === 'BANKRUPTCY'
+                  ? 'Bankruptcy condition registered. Public heat will rise unless the next sequence is disciplined.'
+                  : `Run outcome changed to ${next.runOutcome}.`,
+          immutable: true,
+        },
+        fallbackSeed++,
+      ),
+    );
+  }
+
+  if (delta.netWorthDrop || delta.liquidityShock) {
+    nextMessages.push(
+      buildSystemMessage(
+        next,
+        {
+          channel: 'GLOBAL',
+          kind: 'MARKET_ALERT',
+          senderName: 'Market Feed',
+          senderRank: 'Liquidity Watch',
+          body:
+            delta.liquidityShock
+              ? 'Liquidity shock detected. The wrong public reply will now cost more than silence.'
+              : 'Net-worth drawdown detected. Expect hater pressure to convert loss into social leverage.',
+          immutable: true,
+        },
+        fallbackSeed++,
+      ),
+    );
+  }
+
+  if (delta.heatChanged && (next.haterHeat ?? 0) >= 0.68) {
+    const persona = pickPersonaByContext(next, 'GLOBAL');
+    nextMessages.push(
+      buildHaterMessage(
+        next,
+        'GLOBAL',
+        persona,
+        persona.taunts[(next.tick + fallbackSeed) % persona.taunts.length] ?? persona.taunts[0],
+        fallbackSeed++,
+      ),
+    );
+  }
+
+  for (const eventText of delta.newEvents) {
+    const classified = classifyEventKind(eventText);
+    const kind = classified.kind;
+    const channel = classified.channel;
+
+    const persona = pickPersonaByContext(next, channel);
+    const message = buildSystemMessage(
+      next,
+      {
+        channel,
+        kind,
+        senderName:
+          kind === 'BOT_ATTACK' || kind === 'BOT_TAUNT'
+            ? persona.name
+            : kind === 'DEAL_RECAP'
+              ? 'Deal Wire'
+              : kind === 'SHIELD_EVENT'
+                ? 'Shield Feed'
+                : kind === 'CASCADE_ALERT'
+                  ? 'Cascade Feed'
+                  : 'System',
+        senderRank:
+          kind === 'BOT_ATTACK' || kind === 'BOT_TAUNT'
+            ? persona.rank
+            : kind === 'DEAL_RECAP'
+              ? 'Negotiation Ledger'
+              : kind === 'SHIELD_EVENT'
+                ? 'Defense Runtime'
+                : kind === 'CASCADE_ALERT'
+                  ? 'Cascade Runtime'
+                  : 'Runtime',
+        emoji:
+          kind === 'BOT_ATTACK'
+            ? persona.emoji
+            : kind === 'BOT_TAUNT'
+              ? persona.emoji
+              : kind === 'SHIELD_EVENT'
+                ? '🛡️'
+                : kind === 'CASCADE_ALERT'
+                  ? '🌊'
+                  : kind === 'DEAL_RECAP'
+                    ? '🤝'
+                    : kind === 'ACHIEVEMENT'
+                      ? '👑'
+                      : kind === 'MARKET_ALERT'
+                        ? '📉'
+                        : '◎',
+        body:
+          kind === 'BOT_ATTACK'
+            ? persona.attacks[(fallbackSeed + next.tick) % persona.attacks.length] ?? eventText
+            : kind === 'BOT_TAUNT'
+              ? persona.taunts[(fallbackSeed + next.tick) % persona.taunts.length] ?? eventText
+              : eventText,
+        immutable: true,
+        botSource:
+          kind === 'BOT_ATTACK' || kind === 'BOT_TAUNT'
+            ? {
+                botId: persona.id,
+                botName: persona.name,
+                botState: kind === 'BOT_ATTACK' ? 'ATTACKING' : 'TAUNTING',
+                attackType: persona.attackType,
+                targetLayer: inferShieldLayer(eventText),
+                dialogue:
+                  kind === 'BOT_ATTACK'
+                    ? persona.attacks[(fallbackSeed + next.tick) % persona.attacks.length] ?? eventText
+                    : persona.taunts[(fallbackSeed + next.tick) % persona.taunts.length] ?? eventText,
+                isRetreat: false,
+              }
+            : undefined,
+        shieldMeta:
+          kind === 'SHIELD_EVENT'
+            ? {
+                layerId: inferShieldLayer(eventText) ?? 'L2',
+                integrity: 0.31,
+                maxIntegrity: 1,
+                isBreached: safeUpper(eventText).includes('BREACH'),
+                attackId: `shield-${toStableKey(eventText)}`,
+              }
+            : undefined,
+        cascadeMeta:
+          kind === 'CASCADE_ALERT'
+            ? {
+                cascadeId: `cascade-${toStableKey(eventText)}`,
+                severity: safeUpper(eventText).includes('SEVERE')
+                  ? ('SEVERE' as CascadeSeverity)
+                  : safeUpper(eventText).includes('HIGH')
+                    ? ('HIGH' as CascadeSeverity)
+                    : ('MEDIUM' as CascadeSeverity),
+                stepCount: 3,
+                trigger: eventText,
+              }
+            : undefined,
+      },
+      fallbackSeed++,
+    );
+
+    nextMessages.push(message);
+
+    if (kind === 'BOT_ATTACK') {
+      sabotageEvents.push(
+        createSabotageEvent({
+          haterId: persona.id,
+          haterName: persona.name,
+          cardType: inferSabotageCard(persona.attackType, eventText),
+          intensity: clamp01((next.haterHeat ?? 0.5) + 0.18),
+          botId: persona.id,
+          attackType: persona.attackType,
+          targetLayer: inferShieldLayer(eventText),
+          pressureTier: next.pressureTier,
+          tickTier: next.tickTier,
+          proofHash: message.proofHash,
+          ts: message.ts,
+          sourceChannel: channel,
+          sourceMessageId: message.id,
+          recoveryHint:
+            persona.helperCounters[(fallbackSeed + next.tick) % persona.helperCounters.length] ??
+            'Reduce exposure and preserve cash before responding publicly.',
+          relationshipState: next.learningProfile?.relationships?.[persona.id],
+          affect: next.affect,
+        }),
+      );
+    }
+  }
+
+  return {
+    nextMessages,
+    generatedSabotageEvents: sabotageEvents,
+  };
+}
+
+function createConnectionLifecycleMessages(
+  previous: ChatConnectionState | null,
+  next: ConnectionSnapshot,
+  ctx: GameChatContext,
+  fallbackSeedBase: number,
+): readonly ChatMessage[] {
+  if (!previous || previous === next.state) {
+    return [];
+  }
+
+  const label =
+    next.state === 'CONNECTED'
+      ? 'Transport linked to the current room.'
+      : next.state === 'DEGRADED'
+        ? 'Transport is degraded. UI lane remains responsive while authority stays remote.'
+        : next.state === 'RESUMING'
+          ? 'Transport is resuming. Expect brief synchronization delay.'
+          : next.state === 'CONNECTING'
+            ? 'Transport handshake started.'
+            : 'Transport disconnected. Local compatibility lane remains visible.';
+
+  return [
+    buildSystemMessage(
+      ctx,
+      {
+        id: `transport-state-${next.state.toLowerCase()}`,
+        channel: 'GLOBAL',
+        kind: 'SYSTEM',
+        senderName: 'Transport',
+        senderRank: 'Gateway',
+        body: label,
+        immutable: true,
+      },
+      fallbackSeedBase,
+    ),
+  ];
+}
+
+function appendBounded(
+  previous: readonly ChatMessage[],
+  incoming: readonly ChatMessage[],
+  dedupe: Map<string, FingerprintEntry>,
+): ChatMessage[] {
+  if (incoming.length === 0) {
+    return previous.slice();
+  }
+
+  const merged = [...previous];
+  const now = nowMs();
+
+  for (const message of incoming) {
+    const fingerprint = `${message.channel}|${message.kind}|${message.senderId}|${message.body}|${message.proofHash ?? ''}`;
+    const known = dedupe.get(fingerprint);
+
+    if (known && now - known.ts <= USE_CHAT_ENGINE_LIMITS.duplicateWindowMs) {
+      continue;
     }
 
-    if (msg.kind === 'BOT_ATTACK') score += 16;
-    if (msg.kind === 'BOT_TAUNT') score += 8;
-    if (msg.kind === 'CASCADE_ALERT') score += 10;
-    if (msg.kind === 'SHIELD_EVENT' && (msg as unknown as { shieldMeta?: { isBreached?: boolean } }).shieldMeta?.isBreached) score += 12;
-    if (msg.kind === 'MARKET_ALERT' && (msg as unknown as { pressureTier?: string }).pressureTier === 'CRITICAL') score += 12;
+    dedupe.set(fingerprint, { ts: now, messageId: message.id });
+    merged.push(message);
   }
 
-  score = clamp(score, 0, 100);
+  if (dedupe.size > USE_CHAT_ENGINE_LIMITS.recentFingerprintWindow) {
+    const sortedEntries = [...dedupe.entries()].sort((a, b) => a[1].ts - b[1].ts);
+    const toDelete = sortedEntries.slice(
+      0,
+      Math.max(0, sortedEntries.length - USE_CHAT_ENGINE_LIMITS.recentFingerprintWindow),
+    );
+    for (const [key] of toDelete) {
+      dedupe.delete(key);
+    }
+  }
 
-  if (score >= 85) return { score, tier: 'CRITICAL', label: 'Critical threat posture', reasons, latestThreatMessageId };
-  if (score >= 60) return { score, tier: 'HIGH', label: 'High threat posture', reasons, latestThreatMessageId };
-  if (score >= 35) return { score, tier: 'WATCH', label: 'Watch posture', reasons, latestThreatMessageId };
-  return { score, tier: 'CALM', label: 'Stable posture', reasons, latestThreatMessageId };
+  return sortMessagesForRender(merged).slice(-USE_CHAT_ENGINE_LIMITS.maxMessages);
 }
 
-function buildHelperPrompt(
+function recalculateUnread(
   messages: readonly ChatMessage[],
-  ctx: GameChatContext,
-  threat: UnifiedChatThreatSummary,
-): UnifiedChatHelperPrompt | null {
-  const recent = messages.slice(-MAX_HELPER_SCAN);
-  const latestBotAttack = latestBy(recent, (msg) => msg.kind === 'BOT_ATTACK');
-  const latestShieldBreach = latestBy(
-    recent,
-    (msg) => msg.kind === 'SHIELD_EVENT' && (msg as unknown as { shieldMeta?: { isBreached?: boolean } }).shieldMeta?.isBreached === true,
-  );
-  const latestCascade = latestBy(recent, (msg) => msg.kind === 'CASCADE_ALERT');
-  const latestPressure = latestBy(
-    recent,
-    (msg) => msg.kind === 'MARKET_ALERT' && Boolean((msg as unknown as { pressureTier?: string }).pressureTier),
-  );
+  state: HookState,
+): Record<ChatChannel, number> {
+  const grouped = groupMessagesByChannel(messages);
 
-  if (latestShieldBreach) {
+  if (!state.chatOpen) {
     return {
-      id: `helper-shield-${latestShieldBreach.id}`,
-      title: 'Shield integrity broke in the active window',
-      body: 'The last visible shield event shows a breach. Stabilize income and prevent a second chained hit before broadening risk.',
-      severity: 'CRITICAL',
-      sourceMessageId: latestShieldBreach.id,
-      ctaLabel: 'Jump to breach',
-      suggestedReply: 'Need the cleanest recovery route after that breach.',
+      GLOBAL: grouped.GLOBAL.length,
+      SYNDICATE: grouped.SYNDICATE.length,
+      DEAL_ROOM: grouped.DEAL_ROOM.length,
     };
   }
 
-  if (latestCascade) {
-    return {
-      id: `helper-cascade-${latestCascade.id}`,
-      title: 'Cascade pressure is visible in transcript',
-      body: 'A cascade lane was just triggered or acknowledged. Treat this as a compounding system event rather than a single isolated message.',
-      severity: threat.tier === 'CRITICAL' ? 'CRITICAL' : 'WARNING',
-      sourceMessageId: latestCascade.id,
-      ctaLabel: 'Inspect cascade',
-      suggestedReply: 'What is the fastest way to break this chain?',
-    };
-  }
-
-  if (latestBotAttack) {
-    return {
-      id: `helper-bot-${latestBotAttack.id}`,
-      title: 'A hater attack is now the dominant visible signal',
-      body: 'The latest hostile event in the active transcript is a bot-backed attack. The next best UI move is usually either a defensive reply or a channel shift to coordination.',
-      severity: threat.tier === 'CRITICAL' ? 'CRITICAL' : 'WARNING',
-      sourceMessageId: latestBotAttack.id,
-      ctaLabel: 'Inspect attack',
-      suggestedReply: 'What exactly did that attack target?',
-    };
-  }
-
-  if (latestPressure && (ctx.pressureTier === 'HIGH' || ctx.pressureTier === 'CRITICAL')) {
-    return {
-      id: `helper-pressure-${latestPressure.id}`,
-      title: 'Pressure tier is escalating',
-      body: 'Pressure has moved into a visible risk band. The shell should bias toward clarity, quick composition, and reduced navigation friction until the posture improves.',
-      severity: ctx.pressureTier === 'CRITICAL' ? 'CRITICAL' : 'WARNING',
-      sourceMessageId: latestPressure.id,
-      ctaLabel: 'Open latest alert',
-      suggestedReply: 'Give me the safest next move under this pressure tier.',
-    };
-  }
-
-  if (threat.tier === 'WATCH') {
-    return {
-      id: 'helper-watch-posture',
-      title: 'Threat posture is rising',
-      body: 'Nothing catastrophic is visible yet, but the signal stack is shifting. This is the window to tighten decision quality before the lane gets noisy.',
-      severity: 'GUIDE',
-      ctaLabel: 'Stay focused',
-      suggestedReply: 'What should I guard against next?',
-    };
-  }
-
-  return null;
+  return {
+    GLOBAL: state.activeTab === 'GLOBAL' ? 0 : grouped.GLOBAL.length,
+    SYNDICATE: state.activeTab === 'SYNDICATE' ? 0 : grouped.SYNDICATE.length,
+    DEAL_ROOM: state.activeTab === 'DEAL_ROOM' ? 0 : grouped.DEAL_ROOM.length,
+  };
 }
 
-function buildPresencePreview(messages: readonly ChatMessage[], activeChannel: ChatChannel): UnifiedChatPresencePreview {
-  const recentPeerNames: string[] = [];
-  const recentRanks: string[] = [];
-  let activeMembers = 0;
-  let typingCount = 0;
+function buildHookResult(
+  state: HookState,
+  switchTab: (tab: ChatChannel) => void,
+  toggleChat: () => void,
+  sendMessage: (body: string) => void,
+  clearUnread: (channel?: ChatChannel) => void,
+): UseChatEngineResult {
+  const summaries = buildChannelSummaries(state.messages, state.activeTab);
+  const threat = extractThreatSnapshot(state.messages);
 
-  const recent = messages.slice(-MAX_RECENT_PEERS);
-  for (const msg of recent) {
-    if (msg.channel !== activeChannel) continue;
-    if ((msg as unknown as { senderId?: string }).senderId === 'SYSTEM') continue;
+  const helperPrompt: ChatHelperPromptSnapshot = threat.rescueNeeded
+    ? {
+        visible: true,
+        tone: threat.band === 'SEVERE' ? 'urgent' : threat.band === 'HIGH' ? 'blunt' : 'strategic',
+        title:
+          threat.band === 'SEVERE'
+            ? 'Rescue window active'
+            : threat.band === 'HIGH'
+              ? 'Pressure correction needed'
+              : 'Tactical posture suggested',
+        body:
+          threat.band === 'SEVERE'
+            ? 'You are inside an expensive window. Stabilize cash, reduce exposure, and stop public leakage.'
+            : threat.band === 'HIGH'
+              ? 'The room is pricing your next move harshly. Tighten sequence and deny clean attack surfaces.'
+              : 'Pressure is climbing. Preserve optionality and let the hater overstate before you answer.',
+        ctaLabel:
+          threat.band === 'SEVERE'
+            ? 'Stabilize'
+            : threat.band === 'HIGH'
+              ? 'Tighten'
+              : 'Hold lane',
+      }
+    : {
+        visible: false,
+        tone: 'calm',
+        title: '',
+        body: '',
+        ctaLabel: '',
+      };
 
-    activeMembers += 1;
-    if ((msg as unknown as { senderId?: string }).senderId !== 'player-local') {
-      const nextName = ((msg as unknown as { senderName?: string }).senderName ?? '').trim();
-      if (nextName) {
-        const dedupedNames = uniquePush(recentPeerNames, nextName, 6);
-        recentPeerNames.length = 0;
-        recentPeerNames.push(...dedupedNames);
+  return {
+    messages: state.messages,
+    activeTab: state.activeTab,
+    chatOpen: state.chatOpen,
+    connected:
+      state.connectionState === 'CONNECTED' || state.connectionState === 'DEGRADED',
+    unread: {
+      GLOBAL: state.unread.GLOBAL,
+      SYNDICATE: state.unread.SYNDICATE,
+      DEAL_ROOM: state.unread.DEAL_ROOM,
+      global: state.unread.GLOBAL,
+      syndicate: state.unread.SYNDICATE,
+      deal_room: state.unread.DEAL_ROOM,
+    },
+    totalUnread:
+      state.unread.GLOBAL + state.unread.SYNDICATE + state.unread.DEAL_ROOM,
+    switchTab,
+    toggleChat,
+    sendMessage,
+    clearUnread,
+    summaries,
+    threat,
+    helperPrompt,
+    connectionState: state.connectionState,
+  };
+}
+
+// ============================================================================
+// MARK: Hook
+// ============================================================================
+
+export function useChatEngine(input: UseChatEngineInput): UseChatEngineResult;
+export function useChatEngine(
+  gameCtx: GameChatContext,
+  accessToken?: string | null,
+  onSabotage?: (event: SabotageEvent) => void,
+): UseChatEngineResult;
+export function useChatEngine(
+  first: GameChatContext | UseChatEngineInput,
+  accessToken?: string | null,
+  onSabotage?: (event: SabotageEvent) => void,
+): UseChatEngineResult {
+  const resolved = resolveUseChatEngineArgs(first, accessToken, onSabotage);
+
+  const normalizedContext = useMemo(
+    () => normalizeGameChatContext(resolved.ctx ?? createEmptyGameChatContext()),
+    [resolved.ctx],
+  );
+
+  const initialTab = useMemo(
+    () => chooseDefaultTab(normalizedContext),
+    [normalizedContext],
+  );
+
+  const connection = useMemo(
+    () => inferConnectionSnapshot(normalizedContext, resolved.accessToken),
+    [normalizedContext, resolved.accessToken],
+  );
+
+  const messageSeedRef = useRef(1);
+  const prevContextRef = useRef<GameChatContext | null>(null);
+  const dedupeRef = useRef<Map<string, FingerprintEntry>>(new Map());
+  const lastSendAtRef = useRef<number>(0);
+  const lastHelperAtRef = useRef<number>(0);
+  const lastHaterAtRef = useRef<number>(0);
+  const lastSystemAtRef = useRef<number>(0);
+  const lastConnectionStateRef = useRef<ChatConnectionState | null>(null);
+  const sabotageDispatchRef = useRef<Set<string>>(new Set());
+
+  const [state, setState] = useState<HookState>(() => {
+    const bootstrapContext = normalizeGameChatContext(
+      resolved.ctx ?? createEmptyGameChatContext(),
+    );
+    const bootstrapMessages = sortMessagesForRender([
+      buildSystemMessage(
+        bootstrapContext,
+        {
+          id: 'bootstrap-chat-runtime',
+          channel: chooseDefaultTab(bootstrapContext),
+          kind: 'SYSTEM',
+          senderName: 'System',
+          senderRank: 'Compatibility Lane',
+          body:
+            'Legacy component chat surface is online. Canonical contracts are shared-backed while migration continues.',
+          immutable: true,
+        },
+        messageSeedRef.current++,
+      ),
+    ]);
+
+    return {
+      messages: bootstrapMessages,
+      activeTab: initialTab,
+      chatOpen: true,
+      unread: {
+        GLOBAL: 0,
+        SYNDICATE: 0,
+        DEAL_ROOM: 0,
+      },
+      connectionState: inferConnectionSnapshot(
+        bootstrapContext,
+        resolved.accessToken,
+      ).state,
+    };
+  });
+
+  useEffect(() => {
+    const previous = prevContextRef.current;
+    const fallbackSeed = messageSeedRef.current;
+    const lifecycle = createConnectionLifecycleMessages(
+      lastConnectionStateRef.current,
+      connection,
+      normalizedContext,
+      fallbackSeed,
+    );
+
+    const digest = buildContextDigestMessages(
+      previous,
+      normalizedContext,
+      fallbackSeed + lifecycle.length,
+    );
+
+    messageSeedRef.current += lifecycle.length + digest.nextMessages.length + 4;
+
+    const threat = inferThreatBandFromContext(normalizedContext);
+    const helperPrompt = inferHelperPrompt(normalizedContext, threat);
+    const generated: ChatMessage[] = [...lifecycle, ...digest.nextMessages];
+    const now = nowMs();
+
+    if (
+      helperPrompt.visible &&
+      now - lastHelperAtRef.current >= USE_CHAT_ENGINE_LIMITS.helperRepeatCooldownMs
+    ) {
+      generated.push(
+        buildHelperMessage(
+          normalizedContext,
+          threat.band === 'SEVERE' ? 'SYNDICATE' : chooseDefaultTab(normalizedContext),
+          helperPrompt.tone,
+          helperPrompt.body,
+          messageSeedRef.current++,
+        ),
+      );
+      lastHelperAtRef.current = now;
+    }
+
+    if (threat.band === 'HIGH' || threat.band === 'SEVERE') {
+      const haterChannel =
+        threat.band === 'SEVERE' ? 'DEAL_ROOM' : chooseDefaultTab(normalizedContext);
+      const persona = pickPersonaByContext(normalizedContext, haterChannel);
+      if (now - lastHaterAtRef.current >= USE_CHAT_ENGINE_LIMITS.haterRepeatCooldownMs) {
+        generated.push(
+          buildHaterMessage(
+            normalizedContext,
+            haterChannel,
+            persona,
+            threat.band === 'SEVERE'
+              ? persona.attacks[(normalizedContext.tick + generated.length) % persona.attacks.length] ?? persona.attacks[0]
+              : persona.taunts[(normalizedContext.tick + generated.length) % persona.taunts.length] ?? persona.taunts[0],
+            messageSeedRef.current++,
+          ),
+        );
+        lastHaterAtRef.current = now;
       }
     }
 
-    const senderRank = (msg as unknown as { senderRank?: string }).senderRank;
-    if (senderRank) {
-      const dedupedRanks = uniquePush(recentRanks, senderRank, 6);
-      recentRanks.length = 0;
-      recentRanks.push(...dedupedRanks);
-    }
-
-    if (Date.now() - ((msg as unknown as { ts?: number }).ts ?? 0) < 18_000 && msg.channel === activeChannel) {
-      typingCount += msg.kind === 'PLAYER' ? 1 : 0;
-    }
-  }
-
-  const onlineBase = Math.max(1, recentPeerNames.length + 1);
-  const onlineCount = activeChannel === 'GLOBAL'
-    ? Math.max(onlineBase, 12 + recentPeerNames.length * 3)
-    : activeChannel === 'SYNDICATE'
-      ? Math.max(onlineBase, 4 + recentPeerNames.length)
-      : Math.max(onlineBase, 2 + recentPeerNames.length);
-
-  return {
-    onlineCount,
-    activeMembers: Math.max(activeMembers, recentPeerNames.length + 1),
-    typingCount: clamp(typingCount, 0, 6),
-    recentPeerNames,
-    recentRanks,
-  };
-}
-
-function summaryForChannel(
-  channel: ChatChannel,
-  messages: readonly ChatMessage[],
-  unread: Record<ChatChannel, number>,
-): UnifiedChatChannelSummary {
-  const scoped = messages.filter((msg) => msg.channel === channel);
-  const latest = scoped.length > 0 ? scoped[scoped.length - 1] : null;
-  const hasThreatActivity = scoped.some((msg) =>
-    msg.kind === 'BOT_ATTACK' ||
-    msg.kind === 'BOT_TAUNT' ||
-    msg.kind === 'CASCADE_ALERT' ||
-    (msg.kind === 'SHIELD_EVENT' && (msg as unknown as { shieldMeta?: { isBreached?: boolean } }).shieldMeta?.isBreached),
-  );
-
-  return {
-    channel,
-    label: CHANNEL_META[channel].label,
-    emoji: CHANNEL_META[channel].emoji,
-    unread: unread[channel],
-    totalMessages: scoped.length,
-    visibleMessages: scoped.length,
-    latestTs: latest?.ts ?? null,
-    latestPreview: latest ? compactPreview(latest.body, 74) : 'No visible messages yet.',
-    latestSenderName: latest?.senderName ?? null,
-    hasPlayerActivity: scoped.some((msg) => msg.kind === 'PLAYER'),
-    hasProofBearingMessage: scoped.some((msg) => Boolean((msg as unknown as { proofHash?: string }).proofHash)),
-    hasThreatActivity,
-    canCompose: CHANNEL_META[channel].canCompose,
-  };
-}
-
-function transcriptLockedForChannel(channel: ChatChannel, messages: readonly ChatMessage[]): boolean {
-  if (channel !== 'DEAL_ROOM') return false;
-  return messages.some((msg) => msg.channel === 'DEAL_ROOM' && Boolean((msg as unknown as { immutable?: boolean; proofHash?: string }).immutable || (msg as unknown as { proofHash?: string }).proofHash));
-}
-
-function emptyStateModeFromState(args: {
-  collapsed: boolean;
-  connected: boolean;
-  activeChannel: ChatChannel;
-  visibleMessages: readonly ChatMessage[];
-  transcriptOpen: boolean;
-  transcriptSearch: string;
-  threat: UnifiedChatThreatSummary;
-}): UseUnifiedChatResult['emptyStateMode'] {
-  if (args.collapsed) return 'COLLAPSED';
-  if (!args.connected && args.visibleMessages.length === 0) return 'DISCONNECTED';
-  if (args.transcriptOpen && args.transcriptSearch.trim().length > 0 && args.visibleMessages.length === 0) return 'FILTERED';
-  if (args.visibleMessages.length === 0 && args.activeChannel === 'DEAL_ROOM') return 'DEAL_WAITING';
-  if (args.visibleMessages.length === 0 && (args.threat.tier === 'HIGH' || args.threat.tier === 'CRITICAL')) return 'THREAT';
-  return 'IDLE';
-}
-
-export function useUnifiedChat({
-  ctx,
-  accessToken,
-  shellMode = 'DOCK',
-  initialChannel = 'GLOBAL',
-  initialOpen = false,
-  initialCollapsed = false,
-  initialTranscriptOpen = false,
-  initialTranscriptSearch = '',
-  persistUiState = true,
-  persistDrafts = true,
-  storageNamespace = STORAGE_PREFIX,
-  onSabotage,
-}: UseUnifiedChatOptions): UseUnifiedChatResult {
-  const uiStorageKey = `${storageNamespace}:ui`;
-  const draftsStorageKey = `${storageNamespace}:drafts`;
-
-  const persistedUi = persistUiState
-    ? safeReadStorage<PersistedUiSnapshot>(uiStorageKey, {
-        collapsed: initialCollapsed,
-        pinned: false,
-        transcriptOpen: initialTranscriptOpen,
-        transcriptSearch: initialTranscriptSearch,
-        activeChannel: initialChannel,
-      })
-    : {
-        collapsed: initialCollapsed,
-        pinned: false,
-        transcriptOpen: initialTranscriptOpen,
-        transcriptSearch: initialTranscriptSearch,
-        activeChannel: initialChannel,
-      };
-
-  const persistedDrafts = persistDrafts
-    ? safeReadStorage<PersistedDraftSnapshot>(draftsStorageKey, {
-        GLOBAL: '',
-        SYNDICATE: '',
-        DEAL_ROOM: '',
-      })
-    : {
-        GLOBAL: '',
-        SYNDICATE: '',
-        DEAL_ROOM: '',
-      };
-
-  const normalizedCtx = useMemo(
-    () => normalizeGameChatContext(ctx ?? createEmptyGameChatContext()),
-    [ctx],
-  );
-
-  const engine = useChatEngine(normalizedCtx, accessToken, onSabotage);
-
-  const [collapsed, setCollapsed] = useState<boolean>(persistedUi.collapsed);
-  const [isPinned, setIsPinned] = useState<boolean>(persistedUi.pinned);
-  const [transcriptOpen, setTranscriptOpen] = useState<boolean>(persistedUi.transcriptOpen);
-  const [transcriptSearch, setTranscriptSearch] = useState<string>(persistedUi.transcriptSearch);
-  const [selectedMessageId, setSelectedMessageId] = useState<string | null>(null);
-  const [drafts, setDrafts] = useState<PersistedDraftSnapshot>(persistedDrafts);
-  const [helperDismissed, setHelperDismissed] = useState<boolean>(false);
-  const [explicitOpen, setExplicitOpen] = useState<boolean>(initialOpen);
-
-  const hasMountedRef = useRef(false);
-  const lastJumpTargetRef = useRef<string | null>(null);
-
-  const { messages, activeTab, switchTab, chatOpen, toggleChat, sendMessage, unread, totalUnread, connected } = engine;
-  const sortedMessages = useMemo(() => sortMessagesForRender(messages), [messages]);
-
-  useEffect(() => {
-    if (hasMountedRef.current) return;
-    hasMountedRef.current = true;
-
-    if (persistedUi.activeChannel !== activeTab) {
-      switchTab(persistedUi.activeChannel);
-    }
-
-    if (initialOpen && !chatOpen) {
-      toggleChat();
-      setExplicitOpen(true);
-    }
-  }, [persistedUi.activeChannel, activeTab, switchTab, initialOpen, chatOpen, toggleChat]);
-
-  useEffect(() => {
-    if (!persistUiState) return;
-    safeWriteStorage<PersistedUiSnapshot>(uiStorageKey, {
-      collapsed,
-      pinned: isPinned,
-      transcriptOpen,
-      transcriptSearch,
-      activeChannel: activeTab,
-    });
-  }, [persistUiState, uiStorageKey, collapsed, isPinned, transcriptOpen, transcriptSearch, activeTab]);
-
-  useEffect(() => {
-    if (!persistDrafts) return;
-    safeWriteStorage<PersistedDraftSnapshot>(draftsStorageKey, drafts);
-  }, [persistDrafts, draftsStorageKey, drafts]);
-
-  const activeDraft = drafts[activeTab];
-  const allMessages = sortedMessages;
-  const latestMessage = useMemo(() => latestBy(messages), [messages]);
-  const latestPlayerMessage = useMemo(() => latestBy(messages, (msg) => msg.kind === 'PLAYER'), [messages]);
-  const latestSystemMessage = useMemo(() => latestBy(messages, (msg) => msg.kind !== 'PLAYER'), [messages]);
-  const latestThreatMessage = useMemo(
-    () => latestBy(messages, (msg) => msg.kind === 'BOT_ATTACK' || msg.kind === 'BOT_TAUNT' || msg.kind === 'CASCADE_ALERT'),
-    [messages],
-  );
-
-  const connectionState = useMemo(
-    () => connectionStateFromFlags(connected, messages, normalizedCtx),
-    [connected, messages, normalizedCtx],
-  );
-
-  const canonicalThreat = useMemo(() => extractThreatSnapshot(allMessages), [allMessages]);
-
-  const threat = useMemo(() => {
-    const localThreat = scoreThreat(allMessages, normalizedCtx);
-    return {
-      score: Math.max(localThreat.score, canonicalThreat.score100),
-      tier:
-        canonicalThreat.band === 'SEVERE'
-          ? 'CRITICAL'
-          : canonicalThreat.band === 'HIGH'
-            ? 'HIGH'
-            : canonicalThreat.band === 'ELEVATED' || canonicalThreat.band === 'LOW'
-              ? 'WATCH'
-              : localThreat.tier,
-      label: localThreat.label,
-      reasons: Array.from(
-        new Set(
-          [
-            ...localThreat.reasons,
-            canonicalThreat.activePressureTier ? `Shared pressure tier ${canonicalThreat.activePressureTier}` : '',
-            canonicalThreat.activeTickTier ? `Shared tick tier ${canonicalThreat.activeTickTier}` : '',
-          ].filter(Boolean),
+    if (
+      (normalizedContext.liveOpsState?.activeWorldEvents?.length ?? 0) > 0 &&
+      now - lastSystemAtRef.current >= USE_CHAT_ENGINE_LIMITS.systemRepeatCooldownMs
+    ) {
+      generated.push(
+        buildSystemMessage(
+          normalizedContext,
+          {
+            channel: 'GLOBAL',
+            kind: 'WORLD_EVENT',
+            senderName: 'LiveOps',
+            senderRank: 'World Event Director',
+            body: `World event pressure active: ${normalizedContext.liveOpsState?.activeWorldEvents?.join(', ')}`,
+            immutable: true,
+          },
+          messageSeedRef.current++,
         ),
-      ),
-      latestThreatMessageId: localThreat.latestThreatMessageId,
-    } satisfies UnifiedChatThreatSummary;
-  }, [allMessages, normalizedCtx, canonicalThreat]);
-
-  const rawHelperPrompt = useMemo(
-    () => buildHelperPrompt(allMessages, normalizedCtx, threat),
-    [allMessages, normalizedCtx, threat],
-  );
-  const helperPrompt = helperDismissed ? null : rawHelperPrompt;
-
-  useEffect(() => {
-    if (rawHelperPrompt) {
-      setHelperDismissed(false);
+      );
+      lastSystemAtRef.current = now;
     }
-  }, [rawHelperPrompt?.id]);
 
-  const presence = useMemo(() => buildPresencePreview(allMessages, activeTab), [allMessages, activeTab]);
-  const currentPlayerName = String((normalizedCtx as unknown as { playerName?: string }).playerName ?? 'You');
-  const currentPlayerId = String((normalizedCtx as unknown as { playerId?: string }).playerId ?? 'player-local');
+    setState((current) => {
+      const nextMessages = appendBounded(current.messages, generated, dedupeRef.current);
+      const nextUnread = recalculateUnread(nextMessages, {
+        ...current,
+        messages: nextMessages,
+        connectionState: connection.state,
+      });
 
-  const canonicalChannelSummaries = useMemo(
-    () => buildChannelSummaries(allMessages, activeTab),
-    [allMessages, activeTab],
-  );
-
-  const channels = useMemo<UnifiedChatChannelSummary[]>(() => {
-    return canonicalChannelSummaries.map((summary) => ({
-      channel: summary.channel,
-      label: summary.label,
-      emoji: CHANNEL_META[summary.channel].emoji,
-      unread: unread[summary.channel] ?? summary.unread,
-      totalMessages: summary.totalMessages,
-      visibleMessages: allMessages.filter((message) => message.channel === summary.channel).length,
-      latestTs: summary.lastMessageAt ?? null,
-      latestPreview: compactPreview(
-        allMessages.filter((message) => message.channel === summary.channel).at(-1)?.body ?? '',
-      ),
-      latestSenderName: summary.lastSenderName ?? null,
-      hasPlayerActivity: allMessages.some((message) => message.channel === summary.channel && message.kind === 'PLAYER'),
-      hasProofBearingMessage: allMessages.some((message) => message.channel === summary.channel && Boolean((message as unknown as { proofHash?: string }).proofHash)),
-      hasThreatActivity: summary.threatBand === 'HIGH' || summary.threatBand === 'SEVERE' || summary.helperNeeded,
-      canCompose: CHANNEL_META[summary.channel].canCompose,
-    }));
-  }, [canonicalChannelSummaries, unread, allMessages]);
-
-  const activeSummary = useMemo(
-    () => channels.find((summary) => summary.channel === activeTab) ?? summaryForChannel(activeTab, messages, unread),
-    [channels, activeTab, messages, unread],
-  );
-
-  const transcriptLocked = useMemo(
-    () => transcriptLockedForChannel(activeTab, messages),
-    [activeTab, messages],
-  );
-
-  const transcriptSearchResult = useMemo(
-    () => buildTranscriptSearchResult(allMessages, transcriptSearch, activeTab),
-    [allMessages, transcriptSearch, activeTab],
-  );
-
-  const visibleMessages = useMemo(
-    () => sortedMessages.filter((msg) => msg.channel === activeTab),
-    [sortedMessages, activeTab],
-  );
-  const transcriptFilteredMessages = useMemo(
-    () => transcriptSearchResult.messages,
-    [transcriptSearchResult.messages],
-  );
-  const recentMessages = useMemo(() => visibleMessages.slice(-24), [visibleMessages]);
-
-  const presenceStripModel = useMemo(
-    () =>
-      buildPresenceStripViewModel({
-        messages: allMessages,
-        activeChannel: activeTab,
-        playerName: currentPlayerName,
-        playerId: currentPlayerId,
-        onlineCount: presence.onlineCount,
-        activeMembers: presence.activeMembers,
-        typingCount: presence.typingCount,
-        recentPeerNames: presence.recentPeerNames,
-      }),
-    [
-      allMessages,
-      activeTab,
-      currentPlayerId,
-      currentPlayerName,
-      presence.activeMembers,
-      presence.onlineCount,
-      presence.recentPeerNames,
-      presence.typingCount,
-    ],
-  );
-
-  const typingIndicatorModel = useMemo(
-    () =>
-      buildTypingClusterViewModel({
-        messages: visibleMessages,
-        activeChannel: activeTab,
-        playerName: currentPlayerName,
-        playerId: currentPlayerId,
-        typingCount: presence.typingCount,
-      }),
-    [activeTab, currentPlayerId, currentPlayerName, presence.typingCount, visibleMessages],
-  );
-
-  const {
-    feed: messageFeedModel,
-    actionsByMessageId: messageFeedActionsByMessageId,
-  } = useMemo(
-    () =>
-      buildMessageFeedSurfaceModel({
-        activeChannel: activeTab,
-        messages: visibleMessages,
-        unreadCount: unread[activeTab] ?? 0,
-        currentUserId: currentPlayerId,
-        newestFirst: false,
-        density: shellMode === 'DRAWER' ? 'expanded' : 'comfortable',
-        transcriptLocked,
-        hasOlder: allMessages.length > visibleMessages.length,
-        hasNewer: false,
-        ctx: normalizedCtx,
-        threatSnapshot: canonicalThreat,
-      }),
-    [
-      activeTab,
-      allMessages.length,
-      canonicalThreat,
-      currentPlayerId,
-      normalizedCtx,
-      shellMode,
-      transcriptLocked,
-      unread,
-      visibleMessages,
-    ],
-  );
-
-  const recommendationChannel = useMemo<ChatChannel>(() => {
-    const dealUnread = unread.DEAL_ROOM ?? 0;
-    const syndicateUnread = unread.SYNDICATE ?? 0;
-    const globalUnread = unread.GLOBAL ?? 0;
-    if (transcriptLocked || dealUnread >= Math.max(globalUnread, syndicateUnread)) return 'DEAL_ROOM';
-    if (threat.tier === 'HIGH' || threat.tier === 'CRITICAL') return 'SYNDICATE';
-    if (globalUnread >= Math.max(syndicateUnread, dealUnread)) return 'GLOBAL';
-    return activeTab;
-  }, [activeTab, threat.tier, transcriptLocked, unread.DEAL_ROOM, unread.GLOBAL, unread.SYNDICATE]);
-
-  const channelTabs = useMemo<ChannelTabsViewModel>(() => {
-    const scopedMessages = (channel: ChatChannel) => allMessages.filter((message) => message.channel === channel);
-    const unreadByChannel = unread;
-    const makePresence = (channel: ChatChannel) => {
-      const scoped = scopedMessages(channel).slice(-18);
       return {
-        online: new Set(
-          scoped
-            .map((message) => (message as unknown as { senderId?: string }).senderId ?? '')
-            .filter(Boolean),
-        ).size,
-        typing: scoped.filter((message) => message.kind === 'PLAYER' && Date.now() - ((message as unknown as { ts?: number }).ts ?? 0) < 18_000).length,
-        watching: Math.max(0, scoped.length - 1),
-        helperVisible: channel === 'SYNDICATE' && helperPrompt !== null,
-        haterVisible: scoped.some((message) => message.kind === 'BOT_ATTACK' || message.kind === 'BOT_TAUNT'),
+        ...current,
+        messages: nextMessages,
+        unread: nextUnread,
+        connectionState: connection.state,
       };
-    };
-    const makeHeat = (channel: ChatChannel) => {
-      const scoped = scopedMessages(channel);
-      const attackCount = scoped.filter((message) => message.kind === 'BOT_ATTACK').length;
-      const tauntCount = scoped.filter((message) => message.kind === 'BOT_TAUNT').length;
-      const cascadeCount = scoped.filter((message) => message.kind === 'CASCADE_ALERT').length;
-      const score01 = Math.max(0, Math.min(1, (attackCount * 0.32) + (tauntCount * 0.18) + (cascadeCount * 0.24) + ((unreadByChannel[channel] ?? 0) / 16)));
-      const band = score01 >= 0.8 ? 'SEVERE' : score01 >= 0.6 ? 'HIGH' : score01 >= 0.35 ? 'ELEVATED' : score01 >= 0.1 ? 'LOW' : 'QUIET';
-      return { score01, band, label: band.toLowerCase() } as const;
-    };
-    const makeIntegrity = (channel: ChatChannel) => ({
-      locked: channel === 'DEAL_ROOM' ? transcriptLocked : false,
-      label: channel === 'DEAL_ROOM' && transcriptLocked ? 'sealed' : 'open',
-      proofState: channel === 'DEAL_ROOM' && transcriptLocked ? 'sealed' : 'clean',
-    } as const);
-    const makeMetaLines = (channel: ChatChannel) => {
-      const scoped = scopedMessages(channel);
-      const latest = scoped[scoped.length - 1];
-      return [
-        {
-          id: `${channel}:messages`,
-          label: 'msgs',
-          value: String(scoped.length),
-          visible: true,
-        },
-        {
-          id: `${channel}:latest`,
-          label: 'latest',
-          value: latest ? new Date(((latest as unknown as { ts?: number }).ts ?? 0)).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--:--',
-          visible: true,
-        },
-      ];
-    };
+    });
 
-    return {
-      activeChannel: activeTab,
-      onSelectChannel: (channel) => {
-        const nextChannel = channel as ChatChannel;
-        if (nextChannel === activeTab) return;
-        switchTab(nextChannel);
-        setHelperDismissed(false);
-      },
-      density: collapsed ? 'compact' : 'comfortable',
-      layout: 'inline',
-      collapsed,
-      connectionState: toChannelTabsConnectionState(connectionState),
-      totalUnread,
-      showDescriptions: !collapsed,
-      showMetaRail: !collapsed,
-      showHeatMeters: !collapsed,
-      showPresence: !collapsed,
-      showHotkeys: true,
-      showUnreadTotalSeal: true,
-      showConnectionPill: true,
-      showKeyboardHintsInLegend: true,
-      keyboardLegendLabel: 'switch',
-      onOpenPresencePanel: undefined,
-      onOpenIntegrityPanel: undefined,
-      tabs: buildChannelTabViewModels({
-        activeChannel: activeTab,
-        records: {
-          GLOBAL: {
-            unread: unreadByChannel.GLOBAL ?? 0,
-            heat: makeHeat('GLOBAL'),
-            presence: makePresence('GLOBAL'),
-            integrity: makeIntegrity('GLOBAL'),
-            metaLines: makeMetaLines('GLOBAL'),
-            recommended: recommendationChannel === 'GLOBAL',
-            recommendationLabel: recommendationChannel === 'GLOBAL' ? 'best next lane' : undefined,
-          },
-          SYNDICATE: {
-            unread: unreadByChannel.SYNDICATE ?? 0,
-            heat: makeHeat('SYNDICATE'),
-            presence: makePresence('SYNDICATE'),
-            integrity: makeIntegrity('SYNDICATE'),
-            metaLines: makeMetaLines('SYNDICATE'),
-            recommended: recommendationChannel === 'SYNDICATE',
-            recommendationLabel: recommendationChannel === 'SYNDICATE' ? 'best next lane' : undefined,
-          },
-          DEAL_ROOM: {
-            unread: unreadByChannel.DEAL_ROOM ?? 0,
-            heat: makeHeat('DEAL_ROOM'),
-            presence: makePresence('DEAL_ROOM'),
-            integrity: makeIntegrity('DEAL_ROOM'),
-            metaLines: makeMetaLines('DEAL_ROOM'),
-            seriousness: transcriptLocked ? 'high' : 'elevated',
-            recommended: recommendationChannel === 'DEAL_ROOM',
-            recommendationLabel: recommendationChannel === 'DEAL_ROOM' ? 'best next lane' : undefined,
-          },
-        },
-      }),
-    };
-  }, [
-    activeTab,
-    allMessages,
-    collapsed,
-    connectionState,
-    helperPrompt,
-    recommendationChannel,
-    switchTab,
-    totalUnread,
-    transcriptLocked,
-    unread,
-  ]);
+    for (const sabotage of digest.generatedSabotageEvents) {
+      const dispatchKey =
+        sabotage.sourceMessageId ??
+        `${sabotage.haterId}|${sabotage.cardType}|${sabotage.ts}`;
+      if (!sabotageDispatchRef.current.has(dispatchKey)) {
+        sabotageDispatchRef.current.add(dispatchKey);
+        resolved.onSabotage?.(sabotage);
+      }
+    }
 
-  const emptyStateMode = useMemo(
+    prevContextRef.current = normalizedContext;
+    lastConnectionStateRef.current = connection.state;
+  }, [normalizedContext, connection, resolved.onSabotage]);
+
+  const switchTab = useCallback((tab: ChatChannel) => {
+    setState((current) => {
+      const nextTab = normalizeChatChannel(tab, current.activeTab);
+      return {
+        ...current,
+        activeTab: nextTab,
+        unread: {
+          ...current.unread,
+          [nextTab]: 0,
+        },
+      };
+    });
+  }, []);
+
+  const toggleChat = useCallback(() => {
+    setState((current) => {
+      const nextOpen = !current.chatOpen;
+      const unread = nextOpen
+        ? {
+            ...current.unread,
+            [current.activeTab]: 0,
+          }
+        : current.unread;
+
+      return {
+        ...current,
+        chatOpen: nextOpen,
+        unread,
+      };
+    });
+  }, []);
+
+  const clearUnread = useCallback((channel?: ChatChannel) => {
+    setState((current) => {
+      if (!channel) {
+        return {
+          ...current,
+          unread: {
+            GLOBAL: 0,
+            SYNDICATE: 0,
+            DEAL_ROOM: 0,
+          },
+        };
+      }
+
+      const normalized = normalizeChatChannel(channel, current.activeTab);
+      return {
+        ...current,
+        unread: {
+          ...current.unread,
+          [normalized]: 0,
+        },
+      };
+    });
+  }, []);
+
+  const sendMessage = useCallback((body: string) => {
+    const trimmed = body.trim();
+    if (!trimmed) {
+      return;
+    }
+
+    const now = nowMs();
+    if (now - lastSendAtRef.current < USE_CHAT_ENGINE_LIMITS.localSendCooldownMs) {
+      return;
+    }
+    lastSendAtRef.current = now;
+
+    setState((current) => {
+      const playerMessage = buildPlayerMessage(
+        normalizedContext,
+        current.activeTab,
+        trimmed,
+        messageSeedRef.current++,
+      );
+
+      let generated: ChatMessage[] = [playerMessage];
+      const upper = safeUpper(trimmed);
+      const persona = pickPersonaByContext(normalizedContext, current.activeTab);
+
+      if (
+        current.activeTab === 'DEAL_ROOM' &&
+        (upper.includes('BUY') ||
+          upper.includes('SELL') ||
+          upper.includes('OFFER') ||
+          upper.includes('TERMS'))
+      ) {
+        generated = generated.concat([
+          buildSystemMessage(
+            normalizedContext,
+            {
+              channel: 'DEAL_ROOM',
+              kind: 'DEAL_RECAP',
+              senderName: 'Deal Wire',
+              senderRank: 'Negotiation Ledger',
+              body: 'Offer logged. Deal-room transcript integrity remains active while authority migrates outward.',
+              immutable: true,
+            },
+            messageSeedRef.current++,
+          ),
+        ]);
+      }
+
+      if (
+        upper.includes('HELP') ||
+        upper.includes('RESCUE') ||
+        upper.includes('WHAT NOW') ||
+        upper.includes('STUCK')
+      ) {
+        generated = generated.concat([
+          buildHelperMessage(
+            normalizedContext,
+            current.activeTab,
+            'strategic',
+            HELPER_LINES.strategic[
+              (generated.length + normalizedContext.tick) % HELPER_LINES.strategic.length
+            ] ?? HELPER_LINES.strategic[0],
+            messageSeedRef.current++,
+          ),
+        ]);
+      } else if (
+        upper.includes('COME GET ME') ||
+        upper.includes('TRY ME') ||
+        upper.includes('WEAK') ||
+        upper.includes('TOO EASY')
+      ) {
+        generated = generated.concat([
+          buildHaterMessage(
+            normalizedContext,
+            current.activeTab,
+            persona,
+            persona.taunts[
+              (generated.length + normalizedContext.tick) % persona.taunts.length
+            ] ?? persona.taunts[0],
+            messageSeedRef.current++,
+          ),
+        ]);
+      }
+
+      const nextMessages = appendBounded(current.messages, generated, dedupeRef.current);
+      const nextUnread = recalculateUnread(nextMessages, {
+        ...current,
+        messages: nextMessages,
+      });
+
+      return {
+        ...current,
+        messages: nextMessages,
+        unread: nextUnread,
+      };
+    });
+  }, [normalizedContext]);
+
+  return useMemo(
     () =>
-      emptyStateModeFromState({
-        collapsed,
-        connected,
-        activeChannel: activeTab,
-        visibleMessages: transcriptOpen && transcriptSearch.trim().length > 0 ? transcriptFilteredMessages : visibleMessages,
-        transcriptOpen,
-        transcriptSearch,
-        threat,
-      }),
-    [collapsed, connected, activeTab, visibleMessages, transcriptFilteredMessages, transcriptOpen, transcriptSearch, threat],
+      buildHookResult(
+        state,
+        switchTab,
+        toggleChat,
+        sendMessage,
+        clearUnread,
+      ),
+    [state, switchTab, toggleChat, sendMessage, clearUnread],
   );
+}
 
-  const setActiveChannel = useCallback(
-    (channel: ChatChannel) => {
-      if (channel === activeTab) return;
-      switchTab(channel);
-      setHelperDismissed(false);
-    },
-    [activeTab, switchTab],
+// ============================================================================
+// MARK: Public helpers for tests, tooling, and later engine-lane replacement
+// ============================================================================
+
+export function deriveChatSummariesForContext(
+  ctx: GameChatContext,
+  messages: readonly ChatMessage[],
+  activeTab?: ChatChannel,
+): readonly ChatChannelSummary[] {
+  const normalized = normalizeGameChatContext(ctx);
+  return buildChannelSummaries(
+    sortMessagesForRender(messages),
+    activeTab ?? chooseDefaultTab(normalized),
   );
+}
 
-  const setDraft = useCallback(
-    (next: string) => {
-      const clipped = next.slice(0, MAX_DRAFT_CHARS);
-      setDrafts((prev) => {
-        if (prev[activeTab] === clipped) return prev;
-        return { ...prev, [activeTab]: clipped };
-      });
-    },
-    [activeTab],
-  );
+export function deriveChatThreatForContext(
+  ctx: GameChatContext,
+  messages: readonly ChatMessage[],
+): ChatThreatSnapshot {
+  const messageThreat = extractThreatSnapshot(messages);
+  const contextThreat = inferThreatBandFromContext(normalizeGameChatContext(ctx));
 
-  const appendDraft = useCallback(
-    (suffix: string) => {
-      setDrafts((prev) => {
-        const current = prev[activeTab] ?? '';
-        const base = current.trim().length > 0 ? `${current.trimEnd()} ${suffix.trim()}` : suffix.trim();
-        return { ...prev, [activeTab]: base.slice(0, MAX_DRAFT_CHARS) };
-      });
-    },
-    [activeTab],
-  );
-
-  const clearDraft = useCallback(() => {
-    setDrafts((prev) => ({ ...prev, [activeTab]: '' }));
-  }, [activeTab]);
-
-  const openChat = useCallback(() => {
-    if (!chatOpen) toggleChat();
-    setExplicitOpen(true);
-    setCollapsed(false);
-  }, [chatOpen, toggleChat]);
-
-  const closeChat = useCallback(() => {
-    if (chatOpen) toggleChat();
-    setExplicitOpen(false);
-  }, [chatOpen, toggleChat]);
-
-  const stableToggleChat = useCallback(() => {
-    toggleChat();
-    setExplicitOpen((prev) => !prev);
-  }, [toggleChat]);
-
-  const collapse = useCallback(() => setCollapsed(true), []);
-  const expand = useCallback(() => setCollapsed(false), []);
-  const toggleCollapsed = useCallback(() => setCollapsed((prev) => !prev), []);
-  const pin = useCallback(() => setIsPinned(true), []);
-  const unpin = useCallback(() => setIsPinned(false), []);
-  const togglePinned = useCallback(() => setIsPinned((prev) => !prev), []);
-  const openTranscript = useCallback(() => { setTranscriptOpen(true); setCollapsed(false); }, []);
-  const closeTranscript = useCallback(() => setTranscriptOpen(false), []);
-  const toggleTranscript = useCallback(() => setTranscriptOpen((prev) => !prev), []);
-  const setTranscriptSearchQuery = useCallback((query: string) => setTranscriptSearch(query), []);
-  const selectTranscriptMessage = useCallback((messageId: string | null) => { setSelectedMessageId(messageId); lastJumpTargetRef.current = messageId; }, []);
-
-  const jumpToLatest = useCallback(() => {
-    const target = latestBy(messages.filter((msg) => msg.channel === activeTab));
-    if (!target) return;
-    setSelectedMessageId(target.id);
-    lastJumpTargetRef.current = target.id;
-  }, [messages, activeTab]);
-
-  const sendDraft = useCallback(() => {
-    const trimmed = activeDraft.trim();
-    if (!trimmed) return;
-    sendMessage(trimmed);
-    setDrafts((prev) => ({ ...prev, [activeTab]: '' }));
-    setHelperDismissed(false);
-    setSelectedMessageId(null);
-  }, [activeDraft, sendMessage, activeTab]);
-
-  const quickReply = useCallback(
-    (reply: string) => {
-      const trimmed = reply.trim();
-      if (!trimmed) return;
-      sendMessage(trimmed);
-      setDrafts((prev) => ({ ...prev, [activeTab]: '' }));
-      setHelperDismissed(true);
-    },
-    [sendMessage, activeTab],
-  );
-
-  const dismissHelperPrompt = useCallback(() => setHelperDismissed(true), []);
-  const reopenHelperPrompt = useCallback(() => setHelperDismissed(false), []);
-
-  const resetUi = useCallback(() => {
-    setCollapsed(initialCollapsed);
-    setIsPinned(false);
-    setTranscriptOpen(initialTranscriptOpen);
-    setTranscriptSearch(initialTranscriptSearch);
-    setSelectedMessageId(null);
-    setHelperDismissed(false);
-    setDrafts({ GLOBAL: '', SYNDICATE: '', DEAL_ROOM: '' });
-    if (activeTab !== initialChannel) switchTab(initialChannel);
-  }, [initialCollapsed, initialTranscriptOpen, initialTranscriptSearch, initialChannel, activeTab, switchTab]);
-
-  const composer = useMemo<UnifiedChatComposerState>(() => {
-    const trimmed = activeDraft.trim();
-    const nearLimit = activeDraft.length >= Math.floor(MAX_DRAFT_CHARS * 0.85);
-    return {
-      activeDraft,
-      charCount: activeDraft.length,
-      maxChars: MAX_DRAFT_CHARS,
-      canSend: trimmed.length > 0 && CHANNEL_META[activeTab].canCompose,
-      isNearLimit: nearLimit,
-      placeholder: CHANNEL_META[activeTab].placeholder,
-    };
-  }, [activeDraft, activeTab]);
-
-  const transcriptDrawerModel = useMemo(
-    () => buildTranscriptDrawerSurfaceModel({
-      open: transcriptOpen,
-      messages: allMessages,
-      activeChannel: activeTab,
-      roomTitle: activeSummary.label,
-      roomSubtitle: activeSummary.latestPreview || activeSummary.label,
-      modeName: shellMode,
-      context: normalizedCtx,
-      connected,
-      connectionState,
-      onlineCount: presence.onlineCount,
-      activeMembers: presence.activeMembers,
-      typingCount: presence.typingCount,
-      totalUnread,
-      selectedMessageId,
-      transcriptLocked,
-      searchQuery: transcriptSearch,
-      newestFirst: false,
-      proofOnly: false,
-      lockedOnly: false,
-      channelScope: activeTab,
-      kindScope: 'ALL',
-    }),
-    [
-      transcriptOpen,
-      allMessages,
-      activeTab,
-      activeSummary.label,
-      activeSummary.latestPreview,
-      shellMode,
-      normalizedCtx,
-      connected,
-      connectionState,
-      presence.onlineCount,
-      presence.activeMembers,
-      presence.typingCount,
-      totalUnread,
-      selectedMessageId,
-      transcriptLocked,
-      transcriptSearch,
-    ],
-  );
-
-  const transcriptDrawerCallbacks = useMemo(
-    () => createTranscriptDrawerCallbacks({
-      onClose: closeTranscript,
-      onSearchQueryChange: setTranscriptSearchQuery,
-      onSelectChannelScope: (scopeId) => {
-        if (scopeId === 'GLOBAL' || scopeId === 'SYNDICATE' || scopeId === 'DEAL_ROOM') {
-          setActiveChannel(scopeId);
-        }
-      },
-      onJumpToMessage: selectTranscriptMessage,
-      onRequestExport: undefined,
-      onJumpLatest: jumpToLatest,
-    }),
-    [closeTranscript, setTranscriptSearchQuery, setActiveChannel, selectTranscriptMessage, jumpToLatest],
-  );
-
+  const score01 = Math.max(messageThreat.score01, contextThreat.score01);
   return {
-    shellMode,
-    connected,
-    connectionState,
-    chatOpen: explicitOpen || chatOpen,
-    collapsed,
-    isPinned,
-    activeChannel: activeTab,
-    activeSummary,
-    channels,
-    allMessages,
-    visibleMessages,
-    recentMessages,
-    unread,
-    totalUnread,
-    threat,
-    helperPrompt,
-    presence,
-    transcript: {
-      open: transcriptOpen,
-      searchQuery: transcriptSearch,
-      selectedMessageId,
-      newestFirst: false,
-    },
-    transcriptDrawerModel,
-    transcriptDrawerCallbacks,
-    presenceStripModel,
-    typingIndicatorModel,
-    channelTabs,
-    messageFeedModel,
-    messageFeedActionsByMessageId,
-    composer,
-    latestMessage,
-    latestPlayerMessage,
-    latestSystemMessage,
-    latestThreatMessage,
-    transcriptLocked,
-    emptyStateMode,
-    sendDraft,
-    setActiveChannel,
-    setDraft,
-    appendDraft,
-    clearDraft,
-    openChat,
-    closeChat,
-    toggleChat: stableToggleChat,
-    collapse,
-    expand,
-    toggleCollapsed,
-    pin,
-    unpin,
-    togglePinned,
-    openTranscript,
-    closeTranscript,
-    toggleTranscript,
-    setTranscriptSearchQuery,
-    selectTranscriptMessage,
-    jumpToLatest,
-    quickReply,
-    dismissHelperPrompt,
-    reopenHelperPrompt,
-    resetUi,
-    diagnostics: {
-      normalizedContext: normalizedCtx,
-      sortedMessageCount: allMessages.length,
-      searchMatchCount: transcriptSearchResult.totalMatches,
-      threatSnapshot: canonicalThreat,
-      transcriptSearchResult,
-    },
-    mountState: {
-      mountTarget: String((normalizedCtx as unknown as { mountTarget?: string; run?: { mountTarget?: string } }).mountTarget ?? (normalizedCtx as unknown as { run?: { mountTarget?: string } }).run?.mountTarget ?? 'UNKNOWN'),
-      modeScope: String((normalizedCtx as unknown as { modeScope?: string; run?: { modeScope?: string } }).modeScope ?? (normalizedCtx as unknown as { run?: { modeScope?: string } }).run?.modeScope ?? 'UNKNOWN'),
-      storageNamespace,
-    },
-    runtimeBundle: USE_UNIFIED_CHAT_RUNTIME_BUNDLE,
+    ...messageThreat,
+    score01,
+    score100: Math.round(score01 * 100),
+    band:
+      score01 >= 0.85
+        ? 'SEVERE'
+        : score01 >= 0.60
+          ? 'HIGH'
+          : score01 >= 0.35
+            ? 'ELEVATED'
+            : score01 >= 0.10
+              ? 'LOW'
+              : 'QUIET',
+    rescueNeeded: messageThreat.rescueNeeded || contextThreat.rescueNeeded,
+    activePressureTier:
+      messageThreat.activePressureTier ?? contextThreat.activePressureTier,
+    activeTickTier:
+      messageThreat.activeTickTier ?? contextThreat.activeTickTier,
   };
 }
 
-export default useUnifiedChat;
+export function deriveHelperPromptForContext(
+  ctx: GameChatContext,
+  messages: readonly ChatMessage[],
+): ChatHelperPromptSnapshot {
+  const threat = deriveChatThreatForContext(ctx, messages);
+  return inferHelperPrompt(normalizeGameChatContext(ctx), threat);
+}
+
+export function buildTranscriptSearchResult(
+  messages: readonly ChatMessage[],
+  query: string,
+  channel: ChatChannel,
+): ChatTranscriptSearchResult {
+  const normalizedQuery = query.trim().toLowerCase();
+  const filtered = sortMessagesForRender(messages).filter(
+    (message) => normalizeChatChannel(message.channel) === normalizeChatChannel(channel),
+  );
+
+  const matched = !normalizedQuery
+    ? filtered
+    : filtered.filter((message) => {
+        const haystacks = [
+          message.body,
+          message.senderName,
+          message.senderRank,
+          message.proofHash,
+          message.botSource?.botName,
+          message.meta?.statusText,
+          getChatChannelLabel(message.channel),
+          getChatChannelDescription(message.channel),
+        ].filter(Boolean);
+
+        return haystacks.some((value) =>
+          String(value).toLowerCase().includes(normalizedQuery),
+        );
+      });
+
+  return {
+    query,
+    totalMatches: matched.length,
+    channel: normalizeChatChannel(channel),
+    messageIds: matched.map((message) => message.id),
+    messages: matched,
+  };
+}
+
+export const USE_CHAT_ENGINE_PUBLIC_MANIFEST = Object.freeze({
+  filePath: USE_CHAT_ENGINE_FILE_PATH,
+  version: USE_CHAT_ENGINE_VERSION,
+  revision: USE_CHAT_ENGINE_REVISION,
+  migration: USE_CHAT_ENGINE_MIGRATION_MODE,
+  laws: USE_CHAT_ENGINE_RUNTIME_LAWS,
+  limits: USE_CHAT_ENGINE_LIMITS,
+  visibleChannels: VISIBLE_CHANNELS,
+  defaultPlayerRank: DEFAULT_PLAYER_RANK,
+  runtimeBundle: USE_CHAT_ENGINE_RUNTIME_BUNDLE,
+});
+
+export default useChatEngine;
