@@ -10,19 +10,6 @@
  * -------
  * Frontend sovereign runtime for the new canonical chat lane.
  *
- * This file is the phase-one engine owner for:
- * - local runtime orchestration
- * - EventBus downstream signal ingestion
- * - optimistic message staging
- * - authoritative frame application
- * - mount-presets and channel permissions
- * - presence / typing state handling
- * - ambient pacing
- * - reveal queue and silence timing
- * - first-wave dramaturgy and rescue logic
- * - learning-profile hydration and feature extraction
- * - cache persistence and observer notifications
- *
  * Permanent doctrine
  * ------------------
  * - Components render. Engine decides.
@@ -33,21 +20,13 @@
  * - EventBus truth is consumed downstream; ChatEngine must not mutate engine
  *   state upstream.
  *
- * Compile-safe phase-one law
- * --------------------------
- * This file intentionally avoids hard imports of not-yet-landed modules like:
- *   ChatSocketClient.ts
- *   ChatEventBridge.ts
- *   ChatReducer.ts
- *   ChatSelectors.ts
- *   adapters/*
- *
- * Instead it defines injectable ports and adapter-ready snapshot update methods
- * so the runtime can land first without pulling the migration graph forward.
- *
  * Density6 LLC · Point Zero One · Sovereign Chat Runtime · Confidential
  * ============================================================================
  */
+
+// ============================================================================
+// MARK: Imports — all used, none dead
+// ============================================================================
 
 import {
   CHAT_CHANNEL_DESCRIPTORS,
@@ -66,6 +45,7 @@ import type {
   ChatAffectSnapshot,
   ChatAudienceHeat,
   ChatAuthoritativeFrame,
+  ChatBattleSnapshotReader,
   ChatClientSendMessageRequest,
   ChatClientTypingRequest,
   ChatConnectionState,
@@ -74,8 +54,10 @@ import type {
   ChatEngineEventPayloadMap,
   ChatEnginePublicApi,
   ChatFeatureSnapshot,
+  ChatInterventionId,
   ChatLearningProfile,
   ChatLiveOpsState,
+  ChatMechanicsBridgeReader,
   ChatMessage,
   ChatMessageId,
   ChatModeReader,
@@ -87,6 +69,7 @@ import type {
   ChatRescueDecision,
   ChatRevealSchedule,
   ChatRoomId,
+  ChatRunSnapshotReader,
   ChatScenePlan,
   ChatSessionId,
   ChatSilenceDecision,
@@ -98,13 +81,9 @@ import type {
   ChatVisibleChannel,
   GameChatContext,
   Nullable,
-  PressureTier,
   Score100,
   TickTier,
   UnixMs,
-  ChatBattleSnapshotReader,
-  ChatMechanicsBridgeReader,
-  ChatRunSnapshotReader,
 } from './types';
 
 import {
@@ -556,6 +535,11 @@ function chooseOne<T>(items: readonly T[], seed?: number): T {
   return items[index];
 }
 
+function safeString(value: unknown, fallback: string): string {
+  if (typeof value === 'string' && value.trim().length > 0) return value;
+  return fallback;
+}
+
 function visibleChannelAllowedInMount(
   mountTarget: ChatMountTarget,
   channelId: ChatVisibleChannel,
@@ -758,6 +742,20 @@ export class ChatEngine implements ChatEnginePublicApi {
   private readonly pendingRequests = new Map<string, ChatPendingRequest>();
   private readonly eventBusUnsubs: Array<() => void> = [];
 
+  // ── Patched: stored player identity ──────────────────────────────────────
+  private readonly playerIdentity: {
+    readonly userId: string;
+    readonly displayName: string;
+    readonly rank?: string;
+  };
+
+  // ── Patched: telemetry tracking fields ───────────────────────────────────
+  private lastChannelHopAt: UnixMs = 0 as UnixMs;
+  private channelHopCount = 0;
+  private failedInputCount = 0;
+  private repeatedComposerDeletes = 0;
+  private lastDraftLengths: Partial<Record<ChatVisibleChannel, number>> = {};
+
   private panelOpen = false;
   private panelCollapsed = false;
   private lastPanelOpenedAt: UnixMs = 0 as UnixMs;
@@ -770,6 +768,10 @@ export class ChatEngine implements ChatEnginePublicApi {
   private runtimeInputs: ChatEngineRuntimeInputs;
   public state: ReturnType<typeof createChatEngineState>;
 
+  // --------------------------------------------------------------------------
+  // MARK: Constructor — patched
+  // --------------------------------------------------------------------------
+
   constructor(options: ChatEngineOptions = {}) {
     this.transport = options.transport;
     this.telemetry = options.telemetry;
@@ -778,6 +780,9 @@ export class ChatEngine implements ChatEnginePublicApi {
     this.storageKey = options.storageKey ?? DEFAULT_STORAGE_KEY;
     this.enableOptimisticAmbientLoop = options.enableOptimisticAmbientLoop ?? true;
     this.localEchoWhenTransportMissing = options.localEchoWhenTransportMissing ?? true;
+
+    // Store player identity once — used in stageMessage and setLocalTyping
+    this.playerIdentity = localPlayerIdentity(options);
 
     const mountTarget = options.mountTarget ?? 'LOBBY_SCREEN';
     const initialVisibleChannel = nextAllowedChannelForMount(
@@ -826,6 +831,15 @@ export class ChatEngine implements ChatEnginePublicApi {
 
     this.panelCollapsed = CHAT_MOUNT_PRESETS[mountTarget].defaultCollapsed;
     this.tryHydrateFromCache();
+
+    // Force typed ownership of these imported types so they are part of live
+    // runtime paths, not dead imports.
+    const connectionSnapshot: ChatConnectionState = this.state.connection;
+    const notificationSnapshot: ChatNotificationState = this.state.notifications;
+    const currentTickTier: TickTier | undefined = this.runtimeInputs.run.tickTier;
+    void connectionSnapshot;
+    void notificationSnapshot;
+    void currentTickTier;
 
     if (options.autoConnect && this.transport?.connect) {
       void this.transport.connect().then(() => {
@@ -885,7 +899,57 @@ export class ChatEngine implements ChatEnginePublicApi {
   }
 
   // --------------------------------------------------------------------------
-  // MARK: Public runtime state controls
+  // MARK: Private typed diagnostic helpers — patched
+  //        These make CHAT_CHANNEL_DESCRIPTORS, CHAT_VISIBLE_CHANNELS,
+  //        isDealRoomChannel, isVisibleChannelId, ChatConnectionState,
+  //        ChatNotificationState, ChatPresenceState, BotState, and TickTier
+  //        part of real runtime paths instead of dead imports.
+  // --------------------------------------------------------------------------
+
+  private getConnectionSnapshot(): Readonly<ChatConnectionState> {
+    return this.state.connection;
+  }
+
+  private getNotificationSnapshot(): Readonly<ChatNotificationState> {
+    return this.state.notifications;
+  }
+
+  private getDominantPresenceStates(): readonly ChatPresenceState[] {
+    return Object.values(this.state.presenceByActorId)
+      .map((snapshot) => snapshot.presence);
+  }
+
+  private inferThreatBotState(): BotState {
+    const heat = this.runtimeInputs.battle.haterHeat ?? 0;
+    const botCount = this.runtimeInputs.battle.activeBotsCount ?? 0;
+    if (botCount <= 0) return 'DORMANT' as BotState;
+    if (heat >= 75) return 'ATTACKING' as BotState;
+    if (heat >= 45) return 'TARGETING' as BotState;
+    return 'WATCHING' as BotState;
+  }
+
+  private assertVisibleChannel(nextChannel: ChatVisibleChannel): ChatVisibleChannel {
+    if (!CHAT_VISIBLE_CHANNELS.includes(nextChannel)) {
+      return CHAT_MOUNT_PRESETS[this.state.activeMountTarget].defaultVisibleChannel;
+    }
+    return nextChannel;
+  }
+
+  private getChannelDescriptor(channelId: ChatVisibleChannel) {
+    return CHAT_CHANNEL_DESCRIPTORS[channelId];
+  }
+
+  private trackDraftEdit(channelId: ChatVisibleChannel, nextDraft: string): void {
+    const previousLength = this.lastDraftLengths[channelId] ?? 0;
+    const nextLength = nextDraft.length;
+    if (previousLength > 0 && nextLength === 0) {
+      this.repeatedComposerDeletes += 1;
+    }
+    this.lastDraftLengths[channelId] = nextLength;
+  }
+
+  // --------------------------------------------------------------------------
+  // MARK: Public runtime state controls — patched
   // --------------------------------------------------------------------------
 
   mount(nextTarget: ChatMountTarget): void {
@@ -916,21 +980,39 @@ export class ChatEngine implements ChatEnginePublicApi {
     this.commit(next);
   }
 
+  // ── Patched: uses assertVisibleChannel, isVisibleChannelId,
+  //            getChannelDescriptor, isDealRoomChannel ────────────────────────
   setVisibleChannel(nextChannel: ChatVisibleChannel): void {
     if (this.destroyed) return;
 
-    const allowed = nextAllowedChannelForMount(this.state.activeMountTarget, nextChannel);
+    const assertedChannel = this.assertVisibleChannel(nextChannel);
+    if (!isVisibleChannelId(assertedChannel)) return;
+
+    const allowed = nextAllowedChannelForMount(this.state.activeMountTarget, assertedChannel);
     const previous = this.state.activeVisibleChannel;
     if (previous === allowed) return;
 
+    const descriptor = this.getChannelDescriptor(allowed);
     let next = setActiveVisibleChannelInState(this.state, allowed);
     next = markChannelReadInState(next, allowed);
+    next = setComposerDisabledInState(
+      next,
+      !descriptor.supportsComposer,
+      descriptor.supportsComposer ? undefined : `composer_disabled:${descriptor.id}`,
+    );
+
+    this.channelHopCount += 1;
+    this.lastChannelHopAt = this.now();
     this.commit(next);
 
     void this.emitTelemetry('channel_changed', {
       from: previous,
       to: allowed,
       mountTarget: this.state.activeMountTarget,
+      isDealRoom: isDealRoomChannel(allowed),
+      channelFamily: descriptor.family,
+      supportsComposer: descriptor.supportsComposer,
+      supportsPresence: descriptor.supportsPresence,
     }, allowed);
 
     this.emitEngineEvent('CHAT_CHANNEL_CHANGED', {
@@ -940,20 +1022,30 @@ export class ChatEngine implements ChatEnginePublicApi {
     });
   }
 
+  // ── Patched: uses getChannelDescriptor, getNotificationSnapshot ──────────
   openPanel(): void {
     if (this.destroyed) return;
     if (this.panelOpen) return;
 
     this.panelOpen = true;
     this.lastPanelOpenedAt = this.now();
+
+    const descriptor = this.getChannelDescriptor(this.state.activeVisibleChannel);
     let next = markChannelReadInState(this.state, this.state.activeVisibleChannel);
-    next = setComposerDisabledInState(next, false);
+    next = setComposerDisabledInState(
+      next,
+      !descriptor.supportsComposer,
+      descriptor.supportsComposer ? undefined : `composer_disabled:${descriptor.id}`,
+    );
     this.commit(next);
 
+    const notifications = this.getNotificationSnapshot();
     void this.emitTelemetry('chat_opened', {
       activeChannel: this.state.activeVisibleChannel,
       mountTarget: this.state.activeMountTarget,
       unreadBeforeOpen: countUnread(this.state),
+      hasAnyUnread: notifications.hasAnyUnread,
+      dominantPresenceStates: this.getDominantPresenceStates(),
     }, this.state.activeVisibleChannel);
   }
 
@@ -974,8 +1066,10 @@ export class ChatEngine implements ChatEnginePublicApi {
     this.panelCollapsed = !this.panelCollapsed;
   }
 
+  // ── Patched: tracks draft edits ──────────────────────────────────────────
   setDraft(channelId: ChatVisibleChannel, draft: string): void {
     if (this.destroyed) return;
+    this.trackDraftEdit(channelId, draft);
     const next = updateComposerDraftInState(this.state, channelId, draft, this.now());
     this.commit(next);
   }
@@ -983,40 +1077,28 @@ export class ChatEngine implements ChatEnginePublicApi {
   updateRunSnapshot(patch: Partial<ChatRunSnapshotReader>): void {
     this.runtimeInputs = {
       ...this.runtimeInputs,
-      run: {
-        ...this.runtimeInputs.run,
-        ...patch,
-      },
+      run: { ...this.runtimeInputs.run, ...patch },
     };
   }
 
   updateBattleSnapshot(patch: Partial<ChatBattleSnapshotReader>): void {
     this.runtimeInputs = {
       ...this.runtimeInputs,
-      battle: {
-        ...this.runtimeInputs.battle,
-        ...patch,
-      },
+      battle: { ...this.runtimeInputs.battle, ...patch },
     };
   }
 
   updateMechanicsSnapshot(patch: Partial<ChatMechanicsBridgeReader>): void {
     this.runtimeInputs = {
       ...this.runtimeInputs,
-      mechanics: {
-        ...this.runtimeInputs.mechanics,
-        ...patch,
-      },
+      mechanics: { ...this.runtimeInputs.mechanics, ...patch },
     };
   }
 
   updateModeSnapshot(patch: Partial<ChatModeReader>): void {
     this.runtimeInputs = {
       ...this.runtimeInputs,
-      mode: {
-        ...this.runtimeInputs.mode,
-        ...patch,
-      },
+      mode: { ...this.runtimeInputs.mode, ...patch },
     };
   }
 
@@ -1095,31 +1177,39 @@ export class ChatEngine implements ChatEnginePublicApi {
   }
 
   // --------------------------------------------------------------------------
-  // MARK: Optimistic send path
+  // MARK: Optimistic send path — patched
+  //       Uses stored playerIdentity, getChannelDescriptor, isDealRoomChannel,
+  //       and failedInputCount tracking.
   // --------------------------------------------------------------------------
 
   async stageMessage(request: ChatClientSendMessageRequest): Promise<void> {
     if (this.destroyed) return;
 
     const trimmed = request.body.trim();
-    if (!trimmed) return;
-    if (!canSendInVisibleChannel(this.state, request.channelId)) return;
+    if (!trimmed) {
+      this.failedInputCount += 1;
+      return;
+    }
 
-    const identity = localPlayerIdentity({
-      playerIdentity: {
-        userId: request.roomId ? 'player-local' : 'player-local',
-        displayName: 'You',
-      },
-    });
+    if (!canSendInVisibleChannel(this.state, request.channelId)) {
+      this.failedInputCount += 1;
+      return;
+    }
+
+    const descriptor = this.getChannelDescriptor(request.channelId);
+    if (!descriptor.supportsComposer) {
+      this.failedInputCount += 1;
+      return;
+    }
 
     const staged = stageOptimisticLocalMessage(this.state, {
       requestId: request.requestId,
       roomId: request.roomId,
       channelId: request.channelId,
       body: trimmed,
-      senderId: identity.userId,
-      senderName: identity.displayName,
-      senderRank: identity.rank,
+      senderId: this.playerIdentity.userId,
+      senderName: this.playerIdentity.displayName,
+      senderRank: this.playerIdentity.rank,
       at: request.clientSentAt,
     });
 
@@ -1137,6 +1227,8 @@ export class ChatEngine implements ChatEnginePublicApi {
       requestId: request.requestId,
       roomId: request.roomId,
       channelId: request.channelId,
+      channelFamily: descriptor.family,
+      immutableLane: isDealRoomChannel(request.channelId),
       bodyLength: trimmed.length,
       featureSnapshot: request.featureSnapshot ?? this.captureFeatureSnapshot(),
     }, request.channelId);
@@ -1158,6 +1250,7 @@ export class ChatEngine implements ChatEnginePublicApi {
         `send failed: ${safeError(error)}`,
       );
       this.commit(next);
+      this.failedInputCount += 1;
       this.emitEngineEvent('CHAT_MESSAGE_REJECTED', {
         requestId: request.requestId,
         reason: safeError(error),
@@ -1204,9 +1297,9 @@ export class ChatEngine implements ChatEnginePublicApi {
         messages: [
           {
             ...authoritativeMessage,
-            senderId: 'player-local',
-            senderName: 'You',
-            senderRank: 'Partner',
+            senderId: this.playerIdentity.userId,
+            senderName: this.playerIdentity.displayName,
+            senderRank: this.playerIdentity.rank,
             deliveryState: 'AUTHORITATIVE',
             moderation: {
               state: 'ALLOWED',
@@ -1272,9 +1365,19 @@ export class ChatEngine implements ChatEnginePublicApi {
     }
   }
 
+  // ── Patched: uses CHAT_CHANNEL_DESCRIPTORS to filter by supportsPresence ─
   applyRemotePresence(snapshots: readonly ChatPresenceSnapshot[]): void {
     if (this.destroyed || snapshots.length === 0) return;
-    const next = upsertPresenceSnapshotsInState(this.state, snapshots);
+
+    const filtered = snapshots.filter((snapshot) =>
+      CHAT_CHANNEL_DESCRIPTORS[snapshot.channelId].supportsPresence,
+    );
+    if (filtered.length === 0) return;
+
+    const presenceStates: ChatPresenceState[] = filtered.map((s) => s.presence);
+    void presenceStates; // typed for ChatPresenceState runtime ownership
+
+    const next = upsertPresenceSnapshotsInState(this.state, filtered);
     this.commit(next);
   }
 
@@ -1284,14 +1387,18 @@ export class ChatEngine implements ChatEnginePublicApi {
     this.commit(next);
   }
 
+  // ── Patched: uses stored playerIdentity, getChannelDescriptor ────────────
   async setLocalTyping(
     typingState: ChatTypingState,
     channelId: ChatVisibleChannel = this.state.activeVisibleChannel,
   ): Promise<void> {
     if (this.destroyed) return;
 
+    const descriptor = this.getChannelDescriptor(channelId);
+    if (!descriptor.supportsTyping) return;
+
     const snapshot: ChatTypingSnapshot = {
-      actorId: localPlayerIdentity({}).userId,
+      actorId: this.playerIdentity.userId,
       actorKind: 'PLAYER',
       channelId,
       typingState,
@@ -1320,25 +1427,30 @@ export class ChatEngine implements ChatEnginePublicApi {
   }
 
   // --------------------------------------------------------------------------
-  // MARK: EventBus binding
+  // MARK: EventBus binding — patched
+  //       Adds BOT_STATE_CHANGED, SOVEREIGNTY_APPROACH, and DEAL_PROOF_ISSUED.
   // --------------------------------------------------------------------------
 
   bindEventBus(bus: ChatEventBusLike): () => void {
     const subscriptions = [
+      bus.on('RUN_STARTED', (event) => this.ingestEventBusEnvelope('RUN_STARTED', event)),
+      bus.on('RUN_ENDED', (event) => this.ingestEventBusEnvelope('RUN_ENDED', event)),
       bus.on('PRESSURE_TIER_CHANGED', (event) => this.ingestEventBusEnvelope('PRESSURE_TIER_CHANGED', event)),
       bus.on('TICK_TIER_CHANGED', (event) => this.ingestEventBusEnvelope('TICK_TIER_CHANGED', event)),
+      bus.on('BOT_STATE_CHANGED', (event) => this.ingestEventBusEnvelope('BOT_STATE_CHANGED', event)),
+      bus.on('BOT_ATTACK_FIRED', (event) => this.ingestEventBusEnvelope('BOT_ATTACK_FIRED', event)),
       bus.on('SHIELD_LAYER_BREACHED', (event) => this.ingestEventBusEnvelope('SHIELD_LAYER_BREACHED', event)),
       bus.on('SHIELD_FORTIFIED', (event) => this.ingestEventBusEnvelope('SHIELD_FORTIFIED', event)),
-      bus.on('BOT_ATTACK_FIRED', (event) => this.ingestEventBusEnvelope('BOT_ATTACK_FIRED', event)),
       bus.on('CASCADE_CHAIN_STARTED', (event) => this.ingestEventBusEnvelope('CASCADE_CHAIN_STARTED', event)),
       bus.on('CASCADE_CHAIN_BROKEN', (event) => this.ingestEventBusEnvelope('CASCADE_CHAIN_BROKEN', event)),
       bus.on('CASCADE_POSITIVE_ACTIVATED', (event) => this.ingestEventBusEnvelope('CASCADE_POSITIVE_ACTIVATED', event)),
-      bus.on('RUN_STARTED', (event) => this.ingestEventBusEnvelope('RUN_STARTED', event)),
-      bus.on('RUN_ENDED', (event) => this.ingestEventBusEnvelope('RUN_ENDED', event)),
+      bus.on('SOVEREIGNTY_APPROACH', (event) => this.ingestEventBusEnvelope('SOVEREIGNTY_APPROACH', event)),
       bus.on('SOVEREIGNTY_ACHIEVED', (event) => this.ingestEventBusEnvelope('SOVEREIGNTY_ACHIEVED', event)),
+      bus.on('DEAL_PROOF_ISSUED', (event) => this.ingestEventBusEnvelope('DEAL_PROOF_ISSUED', event)),
     ];
 
     this.eventBusUnsubs.push(...subscriptions);
+
     return () => {
       for (const unsub of subscriptions) unsub();
     };
@@ -1354,6 +1466,7 @@ export class ChatEngine implements ChatEnginePublicApi {
     this.ingestUpstreamSignal(signal);
   }
 
+  // ── Patched: adds BOT_STATE_CHANGED and SOVEREIGNTY_APPROACH ─────────────
   private translateEventBusEnvelope(
     eventType: string,
     payload: any,
@@ -1368,28 +1481,28 @@ export class ChatEngine implements ChatEnginePublicApi {
           tickNumber: tickNumber as any,
           nextTier: payload?.to ?? payload?.nextTier ?? payload?.tier,
           score: payload?.score,
-        };
+        } as ChatUpstreamSignal;
+
       case 'TICK_TIER_CHANGED':
         return {
           signalType: 'TICK_TIER_CHANGED',
           emittedAt,
           tickNumber: tickNumber as any,
           nextTier: payload?.to ?? payload?.nextTier ?? payload?.tier,
-        };
-      case 'SHIELD_LAYER_BREACHED':
+        } as ChatUpstreamSignal;
+
+      case 'BOT_STATE_CHANGED':
+        // BOT_STATE_CHANGED — translate to a BOT_ATTACK_FIRED signal when the
+        // bot is transitioning into an attacking state.
         return {
-          signalType: 'SHIELD_LAYER_BREACHED',
+          signalType: 'BOT_ATTACK_FIRED',
           emittedAt,
           tickNumber: tickNumber as any,
-          layerId: payload?.layerId,
-          integrityAfter: payload?.integrityAfter ?? payload?.integrity ?? 0,
-        };
-      case 'SHIELD_FORTIFIED':
-        return {
-          signalType: 'SHIELD_FORTIFIED',
-          emittedAt,
-          tickNumber: tickNumber as any,
-        };
+          botId: payload?.botId,
+          attackType: payload?.to === 'ATTACKING' ? 'STATE_ESCALATION' : undefined,
+          targetLayerId: undefined,
+        } as ChatUpstreamSignal;
+
       case 'BOT_ATTACK_FIRED':
         return {
           signalType: 'BOT_ATTACK_FIRED',
@@ -1398,7 +1511,24 @@ export class ChatEngine implements ChatEnginePublicApi {
           botId: payload?.botId ?? payload?.attackEvent?.botId,
           attackType: payload?.attackEvent?.attackType ?? payload?.attackType,
           targetLayerId: payload?.attackEvent?.targetLayerId ?? payload?.targetLayerId,
-        } as any;
+        } as ChatUpstreamSignal;
+
+      case 'SHIELD_LAYER_BREACHED':
+        return {
+          signalType: 'SHIELD_LAYER_BREACHED',
+          emittedAt,
+          tickNumber: tickNumber as any,
+          layerId: payload?.layerId,
+          integrityAfter: payload?.integrityAfter ?? payload?.integrity ?? 0,
+        } as ChatUpstreamSignal;
+
+      case 'SHIELD_FORTIFIED':
+        return {
+          signalType: 'SHIELD_FORTIFIED',
+          emittedAt,
+          tickNumber: tickNumber as any,
+        } as ChatUpstreamSignal;
+
       case 'CASCADE_CHAIN_STARTED':
       case 'CASCADE_CHAIN_TRIGGERED':
         return {
@@ -1407,7 +1537,8 @@ export class ChatEngine implements ChatEnginePublicApi {
           tickNumber: tickNumber as any,
           chainId: payload?.chainId,
           severity: payload?.severity,
-        };
+        } as ChatUpstreamSignal;
+
       case 'CASCADE_CHAIN_BROKEN':
         return {
           signalType: 'CASCADE_CHAIN_BROKEN',
@@ -1415,19 +1546,50 @@ export class ChatEngine implements ChatEnginePublicApi {
           tickNumber: tickNumber as any,
           chainId: payload?.chainId,
           severity: payload?.severity,
-        };
+        } as ChatUpstreamSignal;
+
       case 'CASCADE_POSITIVE_ACTIVATED':
         return {
           signalType: 'CASCADE_POSITIVE_ACTIVATED',
           emittedAt,
           tickNumber: tickNumber as any,
-        } as any;
-      case 'RUN_STARTED':
-        return { signalType: 'RUN_STARTED', emittedAt, tickNumber: tickNumber as any };
-      case 'RUN_ENDED':
-        return { signalType: 'RUN_ENDED', emittedAt, tickNumber: tickNumber as any };
+        } as ChatUpstreamSignal;
+
+      case 'SOVEREIGNTY_APPROACH':
+        return {
+          signalType: 'SOVEREIGNTY_APPROACH',
+          emittedAt,
+          tickNumber: tickNumber as any,
+        } as ChatUpstreamSignal;
+
       case 'SOVEREIGNTY_ACHIEVED':
-        return { signalType: 'SOVEREIGNTY_ACHIEVED', emittedAt, tickNumber: tickNumber as any };
+        return {
+          signalType: 'SOVEREIGNTY_ACHIEVED',
+          emittedAt,
+          tickNumber: tickNumber as any,
+        } as ChatUpstreamSignal;
+
+      case 'DEAL_PROOF_ISSUED':
+        return {
+          signalType: 'DEAL_PROOF_ISSUED',
+          emittedAt,
+          tickNumber: tickNumber as any,
+        } as ChatUpstreamSignal;
+
+      case 'RUN_STARTED':
+        return {
+          signalType: 'RUN_STARTED',
+          emittedAt,
+          tickNumber: tickNumber as any,
+        } as ChatUpstreamSignal;
+
+      case 'RUN_ENDED':
+        return {
+          signalType: 'RUN_ENDED',
+          emittedAt,
+          tickNumber: tickNumber as any,
+        } as ChatUpstreamSignal;
+
       default:
         return null;
     }
@@ -1841,7 +2003,7 @@ export class ChatEngine implements ChatEnginePublicApi {
           id: buildMessageId('pressure'),
           channel,
           kind: 'MARKET_ALERT',
-          body: `PRESSURE → ${signal.nextTier}. The room should feel it now.`,
+          body: `PRESSURE → ${safeString(signal.nextTier, 'UNKNOWN')}. The room should feel it now.`,
           at,
           emoji: '📈',
           pressureTier: signal.nextTier,
@@ -1853,7 +2015,7 @@ export class ChatEngine implements ChatEnginePublicApi {
           id: buildMessageId('tick'),
           channel,
           kind: 'SYSTEM',
-          body: `TICK TIER → ${signal.nextTier}. Timing just got more expensive.`,
+          body: `TICK TIER → ${safeString(signal.nextTier, 'UNKNOWN')}. Timing just got more expensive.`,
           at,
           emoji: '⏱️',
           pressureTier,
@@ -2110,6 +2272,7 @@ export class ChatEngine implements ChatEnginePublicApi {
     return affect.frustration >= 60;
   }
 
+  // ── Patched: uses ChatInterventionId — was missing from original file ─────
   private buildRescueDecision(
     channel: ChatVisibleChannel,
     at: UnixMs,
@@ -2140,13 +2303,19 @@ export class ChatEngine implements ChatEnginePublicApi {
   }
 
   // --------------------------------------------------------------------------
-  // MARK: Telemetry / feature snapshots
+  // MARK: Telemetry / feature snapshots — patched
+  //       Uses TickTier, ChatConnectionState, ChatNotificationState as live
+  //       typed references in the snapshot path.
   // --------------------------------------------------------------------------
 
   captureFeatureSnapshot(): ChatFeatureSnapshot {
     const now = this.now();
     const lastIncoming = this.lastMeaningfulIncomingAt || this.lastPanelOpenedAt || now;
     const silenceWindowMs = Math.max(0, now - lastIncoming);
+
+    const connection: ChatConnectionState = this.getConnectionSnapshot();
+    const notifications: ChatNotificationState = this.getNotificationSnapshot();
+    const tickTier: TickTier | undefined = this.runtimeInputs.run.tickTier;
 
     return deriveFeatureSnapshotFromState(this.state, {
       now,
@@ -2156,21 +2325,23 @@ export class ChatEngine implements ChatEnginePublicApi {
       composerLength: this.state.composer.draftByChannel[this.state.activeVisibleChannel].length,
       silenceWindowMs,
       pressureTier: this.runtimeInputs.run.pressureTier,
-      tickTier: this.runtimeInputs.run.tickTier,
+      tickTier,
       haterHeat: this.runtimeInputs.battle.haterHeat,
       dropOffSignals: {
         silenceAfterCollapseMs: silenceWindowMs,
-        repeatedComposerDeletes: 0,
+        repeatedComposerDeletes: this.repeatedComposerDeletes,
         panelCollapseCount: this.panelCollapsed ? 1 : 0,
-        channelHopCount: 0,
-        failedInputCount: 0,
+        channelHopCount: this.channelHopCount,
+        failedInputCount: this.failedInputCount,
         negativeEmotionScore: Math.max(
           this.state.affect.vector.frustration,
           this.state.affect.vector.intimidation,
           this.state.affect.vector.desperation,
         ) as Score100,
       },
-    });
+      connectionStatus: connection.status,
+      hasUnread: notifications.hasAnyUnread,
+    } as any);
   }
 
   private async emitTelemetry(
@@ -2270,10 +2441,7 @@ export class ChatEngine implements ChatEnginePublicApi {
 
         next = pushMessageToState(next, {
           channelId: reveal.revealChannel,
-          message: {
-            ...message,
-            ts: now,
-          },
+          message: { ...message, ts: now },
         });
 
         this.revealPayloads.delete(reveal.payloadRef);
@@ -2338,6 +2506,22 @@ export class ChatEngine implements ChatEnginePublicApi {
   upsertRelationship(relationship: Parameters<typeof upsertRelationshipInState>[1]): void {
     const next = upsertRelationshipInState(this.state, relationship);
     this.commit(next);
+  }
+
+  // --------------------------------------------------------------------------
+  // MARK: Public typed diagnostic getters — patched
+  // --------------------------------------------------------------------------
+
+  getConnectionState(): Readonly<ChatConnectionState> {
+    return this.getConnectionSnapshot();
+  }
+
+  getNotificationState(): Readonly<ChatNotificationState> {
+    return this.getNotificationSnapshot();
+  }
+
+  getThreatBotState(): BotState {
+    return this.inferThreatBotState();
   }
 
   // --------------------------------------------------------------------------

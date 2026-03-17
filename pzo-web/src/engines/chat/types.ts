@@ -51,8 +51,18 @@ import type {
 } from '../battle/types';
 import type { CascadeSeverity } from '../cascade/types';
 import type { PressureTier } from '../pressure/types';
+export type { PressureTier } from '../pressure/types';
 import type { ShieldLayerId } from '../shield/types';
-import type { RunOutcome, TickTier } from '../zero/types';
+import type { RunOutcome } from '../zero/types';
+
+// ── TickTier: declared locally so all consumers import from this file ─────────
+export type TickTier =
+  | 'OPENING'
+  | 'STABLE'
+  | 'BUILDING'
+  | 'COMPRESSED'
+  | 'CRISIS'
+  | 'COLLAPSE_IMMINENT';
 
 // ============================================================================
 // MARK: Generic utility types
@@ -67,6 +77,7 @@ export type TickNumber = Brand<number, 'TickNumber'>;
 export type Percentage = Brand<number, 'Percentage'>;
 export type Score01 = Brand<number, 'Score01'>;
 export type Score100 = Brand<number, 'Score100'>;
+export type { RunOutcome } from '../zero/types';
 
 export type ChatMessageId = Brand<string, 'ChatMessageId'>;
 export type ChatRoomId = Brand<string, 'ChatRoomId'>;
@@ -776,6 +787,7 @@ export interface BotTauntSource {
   readonly botName: string;
   readonly botState: BotState;
   readonly attackType: AttackType;
+  readonly injectionType?: InjectionType;
   readonly targetLayer?: ShieldLayerId;
   readonly dialogue: string;
   readonly isRetreat: boolean;
@@ -817,6 +829,16 @@ export interface DealRoomMeta {
   readonly urgencyScore?: Score01;
 }
 
+export interface ChatInjectionMeta {
+  readonly injectionType: InjectionType;
+  readonly sourceBotId?: BotId;
+  readonly sourceAttackType?: AttackType;
+  readonly targetLayerId?: ShieldLayerId;
+  readonly entitlementTier?: EntitlementTier;
+  readonly severityScore?: Score100;
+  readonly injectedAt?: UnixMs;
+}
+
 export interface ChatMessageMeta {
   readonly botSource?: BotTauntSource;
   readonly shieldMeta?: ShieldEventMeta;
@@ -824,6 +846,7 @@ export interface ChatMessageMeta {
   readonly pressure?: PressureMeta;
   readonly tick?: TickMeta;
   readonly dealRoom?: DealRoomMeta;
+  readonly injection?: ChatInjectionMeta;
 }
 
 // ============================================================================
@@ -1407,6 +1430,7 @@ export interface SabotageEvent {
   readonly haterName: string;
   readonly botId?: BotId;
   readonly attackType?: AttackType;
+  readonly injectionType?: InjectionType;
   readonly targetLayer?: ShieldLayerId;
 }
 
