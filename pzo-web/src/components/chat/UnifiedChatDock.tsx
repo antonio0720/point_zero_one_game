@@ -2,7 +2,15 @@
  * ============================================================================
  * POINT ZERO ONE — UNIFIED CHAT DOCK
  * FILE: pzo-web/src/components/chat/UnifiedChatDock.tsx
- * 
+ * VERSION: 2026.03.17-roadmap-safe
+ * ============================================================================
+ *
+ * Roadmap alignment
+ * -----------------
+ * - stays in the presentation lane
+ * - consumes useUnifiedChat instead of becoming a second chat engine
+ * - may reflect engine-state telemetry through existing run hooks
+ * - does not import or modify canonical chat runtime files
  * ============================================================================
  */
 
@@ -19,11 +27,7 @@ import React, {
 import {
   CHAT_ENGINE_PUBLIC_MANIFEST,
   CHAT_ENGINE_RUNTIME_LAWS,
-  CHAT_ENGINE_FEATURE_LAWS,
-  resolveChatMountPreset,
-  resolveChatMountTarget,
-  type ChatMountPresetId,
-  type ChatMountTargetId,
+  ChatMounts,
 } from '../../engines/chat';
 
 import type { ChatMessage, GameChatContext, SabotageEvent } from './chatTypes';
@@ -38,6 +42,9 @@ import { useBattleEngine } from '../../features/run/hooks/useBattleEngine';
 import { useCascadeEngine } from '../../features/run/hooks/useCascadeEngine';
 
 type VisibleChannelId = 'GLOBAL' | 'SYNDICATE' | 'DEAL_ROOM';
+type ChatMountTargetId = string;
+type ChatMountPresetId = string;
+
 type UnifiedMessageKind =
   | 'PLAYER'
   | 'SYSTEM'
@@ -105,7 +112,6 @@ interface EngineTelemetryModel {
   score01: number;
   pressureTier: string;
   pressureCritical: boolean;
-  tensionLike: number;
   timeoutDanger: boolean;
   battleHeatPct: number;
   battleHot: boolean;
@@ -113,6 +119,23 @@ interface EngineTelemetryModel {
   shieldCritical: boolean;
   cascadeHot: boolean;
   summary: string;
+}
+
+interface ResolvedChatMountTarget {
+  id: string;
+  label: string;
+}
+
+interface ResolvedChatMountPreset {
+  id: string;
+  label: string;
+  zIndex: number;
+  compact: boolean;
+  composerRows: number;
+  showPresenceStrip: boolean;
+  showThreatMeter: boolean;
+  enableHelperPrompts: boolean;
+  showTranscriptDrawer: boolean;
 }
 
 export interface UnifiedChatDockProps {
@@ -135,20 +158,20 @@ export interface UnifiedChatDockProps {
 }
 
 const TOKENS = Object.freeze({
-  panelGlass: 'rgba(10, 14, 28, 0.88)',
-  panel: '#0B0D18',
+  panelGlass: 'rgba(13, 13, 13, 0.95)',
+  panel: '#0D0D0D',
   border: 'rgba(255,255,255,0.08)',
   borderMedium: 'rgba(255,255,255,0.14)',
   text: '#F5F7FF',
   textSubtle: '#A7B2D4',
   textMuted: '#7180A8',
   green: '#20D98E',
-  red: '#FF5353',
+  red: '#DC2626',
   orange: '#FF9A3D',
   yellow: '#FFD75E',
-  cyan: '#38DDF8',
+  cyan: '#22D3EE',
   indigo: '#8B93FF',
-  purple: '#C183FF',
+  purple: '#A78BFA',
   teal: '#3EE6CC',
   shadowHeavy: '0 24px 80px rgba(0,0,0,0.48)',
   radiusSm: 12,
@@ -160,6 +183,13 @@ const TOKENS = Object.freeze({
 } as const);
 
 const FONT_IMPORT = `@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Syne:wght@400;600;700;800&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap');`;
+
+const CHAT_DOCK_FEATURE_LAWS = Object.freeze([
+  'Chat dock stays in the render shell, not the engine lane.',
+  'Threat meter mirrors live board pressure and battle intensity.',
+  'Collapsed state preserves a minimal 60px presence on the board edge.',
+  'Transcript search stays local and compile-safe during migration.',
+] as const);
 
 const CHANNEL_META = Object.freeze({
   GLOBAL: Object.freeze({
@@ -190,6 +220,19 @@ const THREAT_BANDS = Object.freeze([
   Object.freeze({ max: 1.01, label: 'SEVERE' as const, color: TOKENS.red }),
 ]);
 
+const DEFAULT_MOUNT_TARGET = 'BattleHUD';
+const DEFAULT_PRESET: ResolvedChatMountPreset = Object.freeze({
+  id: 'board-dock',
+  label: 'Board Dock',
+  zIndex: 120,
+  compact: false,
+  composerRows: 3,
+  showPresenceStrip: true,
+  showThreatMeter: true,
+  enableHelperPrompts: true,
+  showTranscriptDrawer: true,
+});
+
 function clamp01(value: number): number {
   if (!Number.isFinite(value)) return 0;
   if (value <= 0) return 0;
@@ -204,6 +247,99 @@ function asVisibleChannel(
   return value === 'GLOBAL' || value === 'SYNDICATE' || value === 'DEAL_ROOM'
     ? value
     : fallback;
+}
+
+function toRecordValues(input: unknown): Array<Record<string, unknown>> {
+  if (!input || typeof input !== 'object') return [];
+  if (Array.isArray(input)) {
+    return input.filter(
+      (entry): entry is Record<string, unknown> =>
+        Boolean(entry) && typeof entry === 'object',
+    );
+  }
+
+  return Object.values(input as Record<string, unknown>).filter(
+    (entry): entry is Record<string, unknown> =>
+      Boolean(entry) && typeof entry === 'object',
+  );
+}
+
+function resolveChatMountTargetLocal(
+  mountTarget?: ChatMountTargetId,
+): ResolvedChatMountTarget {
+  const requested = String(mountTarget ?? DEFAULT_MOUNT_TARGET);
+  const candidates = toRecordValues((ChatMounts as { targets?: unknown }).targets);
+
+  const exact = candidates.find((candidate) => candidate.id === requested);
+  if (exact) {
+    return {
+      id: String(exact.id ?? requested),
+      label: String(exact.label ?? exact.name ?? exact.id ?? requested),
+    };
+  }
+
+  return {
+    id: requested,
+    label:
+      requested === 'BattleHUD'
+        ? 'Battle HUD'
+        : requested === 'RunScreen'
+          ? 'Run Screen'
+          : requested === 'Lobby'
+            ? 'Lobby'
+            : requested,
+  };
+}
+
+function resolveChatMountPresetLocal(
+  mountTarget?: ChatMountTargetId,
+  mountPreset?: ChatMountPresetId,
+): ResolvedChatMountPreset {
+  const targetId = String(mountTarget ?? DEFAULT_MOUNT_TARGET);
+  const presetId = mountPreset ? String(mountPreset) : null;
+  const candidates = toRecordValues((ChatMounts as { presets?: unknown }).presets);
+
+  const matched = candidates.find((candidate) => {
+    const candidateId = String(candidate.id ?? '');
+    const candidateTarget = String(
+      candidate.mountTarget ?? candidate.targetId ?? candidate.target ?? '',
+    );
+    return (presetId && candidateId === presetId) || candidateTarget === targetId;
+  });
+
+  if (!matched) {
+    return DEFAULT_PRESET;
+  }
+
+  return {
+    id: String(matched.id ?? DEFAULT_PRESET.id),
+    label: String(matched.label ?? matched.name ?? DEFAULT_PRESET.label),
+    zIndex:
+      typeof matched.zIndex === 'number'
+        ? matched.zIndex
+        : DEFAULT_PRESET.zIndex,
+    compact: Boolean(matched.compact ?? DEFAULT_PRESET.compact),
+    composerRows:
+      typeof matched.composerRows === 'number'
+        ? matched.composerRows
+        : DEFAULT_PRESET.composerRows,
+    showPresenceStrip:
+      matched.showPresenceStrip !== undefined
+        ? Boolean(matched.showPresenceStrip)
+        : DEFAULT_PRESET.showPresenceStrip,
+    showThreatMeter:
+      matched.showThreatMeter !== undefined
+        ? Boolean(matched.showThreatMeter)
+        : DEFAULT_PRESET.showThreatMeter,
+    enableHelperPrompts:
+      matched.enableHelperPrompts !== undefined
+        ? Boolean(matched.enableHelperPrompts)
+        : DEFAULT_PRESET.enableHelperPrompts,
+    showTranscriptDrawer:
+      matched.showTranscriptDrawer !== undefined
+        ? Boolean(matched.showTranscriptDrawer)
+        : DEFAULT_PRESET.showTranscriptDrawer,
+  };
 }
 
 function normalizeMessages(messages: readonly ChatMessage[]): UnifiedChatMessage[] {
@@ -340,15 +476,19 @@ function createEngineTelemetry(
   );
 
   const pressureCritical = pressure.isCritical || pressure.isHigh;
-  const battleHot = battle.hasAttackingBots || battle.hasTargetingBots || battleHeat01 >= 0.58;
+  const battleHot =
+    battle.hasAttackingBots || battle.hasTargetingBots || battleHeat01 >= 0.58;
   const shieldCritical =
     shield.isInBreachCascade || shield.isAnyCritical || shieldIntegrity01 <= 0.33;
-  const cascadeHot = cascade.hasCatastrophicChain || cascade.isInSpiral || cascade.queueDepth >= 2;
+  const cascadeHot =
+    cascade.hasCatastrophicChain || cascade.isInSpiral || cascade.queueDepth >= 2;
   const timeoutDanger = time.seasonTimeoutImminent || time.isFinalFiveTicks;
 
   const summaryParts = [
     pressureCritical ? `pressure ${String(pressure.tier).toLowerCase()}` : null,
-    battleHot ? `${battle.activeBotsCount} bot${battle.activeBotsCount === 1 ? '' : 's'} active` : null,
+    battleHot
+      ? `${battle.activeBotsCount} bot${battle.activeBotsCount === 1 ? '' : 's'} active`
+      : null,
     shieldCritical ? `shield ${Math.round(shieldIntegrity01 * 100)}%` : null,
     cascadeHot ? `cascade ×${cascade.queueDepth}` : null,
     timeoutDanger ? `${time.ticksUntilTimeout}t left` : null,
@@ -358,7 +498,6 @@ function createEngineTelemetry(
     score01,
     pressureTier: String(pressure.tier ?? 'CALM'),
     pressureCritical,
-    tensionLike: clamp01(score01),
     timeoutDanger,
     battleHeatPct: Math.round(battleHeat01 * 100),
     battleHot,
@@ -585,7 +724,7 @@ const ThreatMeter = memo(function ThreatMeter({
         <Badge
           label={`attacks ${threat.attackCount}`}
           color={TOKENS.red}
-          bg="rgba(255,83,83,0.08)"
+          bg="rgba(220,38,38,0.10)"
         />
         <Badge
           label={`taunts ${threat.tauntCount}`}
@@ -595,7 +734,7 @@ const ThreatMeter = memo(function ThreatMeter({
         <Badge
           label={`shield ${threat.shieldMentions}`}
           color={TOKENS.cyan}
-          bg="rgba(56,221,248,0.08)"
+          bg="rgba(34,211,238,0.08)"
         />
       </div>
 
@@ -1165,6 +1304,7 @@ const CollapsedPill = memo(function CollapsedPill({
         gap: 4,
         cursor: 'pointer',
         minWidth: 210,
+        minHeight: 60,
         backdropFilter: 'blur(14px)',
       }}
     >
@@ -1235,8 +1375,8 @@ function buildLawFooterLines(): string[] {
   return [
     CHAT_ENGINE_RUNTIME_LAWS[0],
     CHAT_ENGINE_RUNTIME_LAWS[1],
-    CHAT_ENGINE_FEATURE_LAWS[0],
-    CHAT_ENGINE_FEATURE_LAWS[1],
+    CHAT_DOCK_FEATURE_LAWS[0],
+    CHAT_DOCK_FEATURE_LAWS[1],
   ];
 }
 
@@ -1244,7 +1384,7 @@ export const UnifiedChatDock = memo(function UnifiedChatDock({
   gameCtx,
   onSabotage,
   accessToken = null,
-  mountTarget = 'BattleHUD',
+  mountTarget = DEFAULT_MOUNT_TARGET,
   mountPreset,
   title = 'PZO Unified Chat',
   subtitle = 'One dock. Many mounts. Zero per-screen chat brains.',
@@ -1258,8 +1398,8 @@ export const UnifiedChatDock = memo(function UnifiedChatDock({
   className,
   style,
 }: UnifiedChatDockProps) {
-  const bootstrapPreset = resolveChatMountPreset(mountTarget, mountPreset);
-  const bootstrapTarget = resolveChatMountTarget(mountTarget);
+  const bootstrapPreset = resolveChatMountPresetLocal(mountTarget, mountPreset);
+  const bootstrapTarget = resolveChatMountTargetLocal(mountTarget);
 
   const pressure = usePressureEngine();
   const shield = useShieldEngine();
@@ -1338,7 +1478,7 @@ export const UnifiedChatDock = memo(function UnifiedChatDock({
             : actor.intent === 'watching'
               ? 'alert'
               : 'calm',
-      })) satisfies UnifiedPresenceMember[];
+      })) as UnifiedPresenceMember[];
     }
     return createPresenceModel(normalizedMessages, activeTab);
   }, [activeTab, normalizedMessages, ui.presenceStripModel]);
@@ -1582,7 +1722,7 @@ export const UnifiedChatDock = memo(function UnifiedChatDock({
             color={pressure.isHigh ? TOKENS.orange : TOKENS.textSubtle}
             bg={
               pressure.isCritical
-                ? 'rgba(255,83,83,0.12)'
+                ? 'rgba(220,38,38,0.12)'
                 : pressure.isHigh
                   ? 'rgba(255,154,61,0.10)'
                   : 'rgba(255,255,255,0.05)'
@@ -1593,8 +1733,8 @@ export const UnifiedChatDock = memo(function UnifiedChatDock({
             color={telemetry.shieldCritical ? TOKENS.red : TOKENS.cyan}
             bg={
               telemetry.shieldCritical
-                ? 'rgba(255,83,83,0.10)'
-                : 'rgba(56,221,248,0.10)'
+                ? 'rgba(220,38,38,0.10)'
+                : 'rgba(34,211,238,0.10)'
             }
           />
         </div>
@@ -1713,7 +1853,7 @@ export const UnifiedChatDock = memo(function UnifiedChatDock({
           <Badge
             label={`shell ${ui.shellMode.toLowerCase()}`}
             color={TOKENS.cyan}
-            bg="rgba(56,221,248,0.10)"
+            bg="rgba(34,211,238,0.10)"
           />
           {time.seasonTimeoutImminent ? (
             <Badge
@@ -1775,8 +1915,8 @@ export const UnifiedChatDock = memo(function UnifiedChatDock({
             new Set([
               ...buildLawFooterLines(),
               ...ui.runtimeBundle.laws,
-              `mount ${ui.mountState.mountTarget.toLowerCase()}`,
-              `scope ${ui.mountState.modeScope.toLowerCase()}`,
+              `mount ${String(ui.mountState.mountTarget).toLowerCase()}`,
+              `scope ${String(ui.mountState.modeScope).toLowerCase()}`,
             ]),
           ).map((line) => (
             <div

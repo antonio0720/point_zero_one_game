@@ -2,6 +2,7 @@
  * ============================================================================
  * POINT ZERO ONE — LEGACY COMPONENT CHAT HOOK (ENGINE-BACKED COMPATIBILITY)
  * FILE: pzo-web/src/components/chat/useChatEngine.ts
+ * VERSION: 2026.03.17-roadmap-safe
  * ============================================================================
  *
  * Purpose
@@ -64,8 +65,6 @@ import {
 
 import {
   CHAT_TYPES_RUNTIME_BUNDLE,
-  CHAT_TYPES_RUNTIME_LAWS,
-  SharedChat,
   buildChannelSummaries,
   coerceChatMessage,
   coerceChatMessages,
@@ -87,7 +86,6 @@ import {
   type ChatHelperPromptSnapshot,
   type ChatMessage,
   type ChatMessageMeta,
-  type ChatPresenceSnapshot,
   type ChatThreatSnapshot,
   type ChatTranscriptSearchResult,
   type ExtendedMessageKind,
@@ -98,7 +96,6 @@ import {
   type SabotageEvent,
   type ShieldLayerId,
   type TickTier,
-  type UnifiedVisibleChatChannel,
   type UseChatEngineResult,
 } from './chatTypes';
 
@@ -111,10 +108,10 @@ export type { SabotageEvent };
 export const USE_CHAT_ENGINE_FILE_PATH =
   'pzo-web/src/components/chat/useChatEngine.ts' as const;
 
-export const USE_CHAT_ENGINE_VERSION = '2026.03.15' as const;
+export const USE_CHAT_ENGINE_VERSION = '2026.03.17' as const;
 
 export const USE_CHAT_ENGINE_REVISION =
-  'pzo.components.chat.useChatEngine.compat.v1' as const;
+  'pzo.components.chat.useChatEngine.compat.v2' as const;
 
 export const USE_CHAT_ENGINE_MIGRATION_MODE = Object.freeze({
   isCompatibilityHook: true,
@@ -125,6 +122,7 @@ export const USE_CHAT_ENGINE_MIGRATION_MODE = Object.freeze({
   directEngineImportsAllowed: false,
   persistentTruthOwnedHere: false,
   finalSocketAuthorityOwnedHere: false,
+  acceptsFutureEngineObjectInput: true,
 });
 
 export const USE_CHAT_ENGINE_RUNTIME_LAWS = Object.freeze([
@@ -186,20 +184,6 @@ const DEFAULT_PLAYER_NAMES = Object.freeze({
 });
 
 const DEFAULT_PLAYER_RANK = 'You' as const;
-
-const CONNECTION_PRIORITY = Object.freeze<Record<ChatConnectionState, number>>({
-  DISCONNECTED: 0,
-  CONNECTING: 1,
-  RESUMING: 2,
-  DEGRADED: 3,
-  CONNECTED: 4,
-});
-
-
-
-
-
-
 
 const CHANNEL_PERSONAS = Object.freeze({
   GLOBAL: {
@@ -371,13 +355,6 @@ interface ConnectionSnapshot {
   readonly reason: string;
 }
 
-interface RuntimeSignalDigest {
-  readonly systemMessages: readonly ChatMessage[];
-  readonly sabotageEvents: readonly SabotageEvent[];
-  readonly helperSuggestion?: ChatMessage;
-  readonly haterReaction?: ChatMessage;
-}
-
 interface ContextDelta {
   readonly tickChanged: boolean;
   readonly pressureChanged: boolean;
@@ -401,6 +378,14 @@ interface HookState {
 interface FingerprintEntry {
   readonly ts: number;
   readonly messageId: string;
+}
+
+export interface UseChatEngineOptions {
+  readonly ctx?: GameChatContext;
+  readonly gameCtx?: GameChatContext;
+  readonly accessToken?: string | null;
+  readonly onSabotage?: (event: SabotageEvent) => void;
+  readonly engine?: unknown;
 }
 
 // ============================================================================
@@ -427,6 +412,46 @@ function toStableKey(input: string): string {
     hash = Math.imul(hash, 16777619);
   }
   return `k-${Math.abs(hash >>> 0).toString(36)}`;
+}
+
+function isUseChatEngineOptions(
+  value: GameChatContext | UseChatEngineOptions,
+): value is UseChatEngineOptions {
+  return Boolean(
+    value &&
+      typeof value === 'object' &&
+      (
+        'ctx' in value ||
+        'gameCtx' in value ||
+        'accessToken' in value ||
+        'onSabotage' in value ||
+        'engine' in value
+      ),
+  );
+}
+
+function resolveUseChatEngineArgs(
+  input: GameChatContext | UseChatEngineOptions,
+  positionalAccessToken?: string | null,
+  positionalOnSabotage?: (event: SabotageEvent) => void,
+): {
+  readonly gameCtx: GameChatContext;
+  readonly accessToken?: string | null;
+  readonly onSabotage?: (event: SabotageEvent) => void;
+} {
+  if (isUseChatEngineOptions(input)) {
+    return {
+      gameCtx: input.ctx ?? input.gameCtx ?? createEmptyGameChatContext(),
+      accessToken: input.accessToken,
+      onSabotage: input.onSabotage,
+    };
+  }
+
+  return {
+    gameCtx: input,
+    accessToken: positionalAccessToken,
+    onSabotage: positionalOnSabotage,
+  };
 }
 
 function inferConnectionSnapshot(
@@ -504,8 +529,8 @@ function inferThreatBandFromContext(ctx: GameChatContext): ChatThreatSnapshot {
       rescueDecision:
         (ctx.haterHeat ?? 0) >= 0.78
           ? {
-              interventionId: 'ctx-rescue' as any,
-              triggerAt: nowMs() as any,
+              interventionId: 'ctx-rescue' as never,
+              triggerAt: nowMs() as never,
               style: 'DIRECTIVE',
               reason: 'FAILED_ACTION_CHAIN',
               suggestedAction: 'Protect cash and reduce exposed lines.'
@@ -634,7 +659,7 @@ function buildMessageMeta(
 ): ChatMessageMeta {
   return {
     requestId: undefined,
-    roomId: ctx.roomId as any,
+    roomId: ctx.roomId as never,
     channelId: undefined,
     debug: {
       statusText: options.statusText,
@@ -759,8 +784,8 @@ function buildHelperMessage(
       immutable: true,
       meta: buildMessageMeta(ctx, { statusText: `HELPER_${tone.toUpperCase()}` }),
       rescueDecision: {
-        interventionId: `rescue-${channel.toLowerCase()}-${fallbackSeed}` as any,
-        triggerAt: nowMs() as any,
+        interventionId: `rescue-${channel.toLowerCase()}-${fallbackSeed}` as never,
+        triggerAt: nowMs() as never,
         style:
           tone === 'urgent'
             ? 'DIRECTIVE'
@@ -1349,23 +1374,31 @@ function buildHookResult(
 // ============================================================================
 
 export function useChatEngine(
+  options: UseChatEngineOptions,
+): UseChatEngineResult;
+export function useChatEngine(
   gameCtx: GameChatContext,
   accessToken?: string | null,
   onSabotage?: (event: SabotageEvent) => void,
+): UseChatEngineResult;
+export function useChatEngine(
+  gameCtxOrOptions: GameChatContext | UseChatEngineOptions,
+  accessToken?: string | null,
+  onSabotage?: (event: SabotageEvent) => void,
 ): UseChatEngineResult {
-  const normalizedContext = useMemo(
-    () => normalizeGameChatContext(gameCtx ?? createEmptyGameChatContext()),
-    [gameCtx],
+  const resolvedArgs = useMemo(
+    () => resolveUseChatEngineArgs(gameCtxOrOptions, accessToken, onSabotage),
+    [gameCtxOrOptions, accessToken, onSabotage],
   );
 
-  const initialTab = useMemo(
-    () => chooseDefaultTab(normalizedContext),
-    [normalizedContext],
+  const normalizedContext = useMemo(
+    () => normalizeGameChatContext(resolvedArgs.gameCtx ?? createEmptyGameChatContext()),
+    [resolvedArgs.gameCtx],
   );
 
   const connection = useMemo(
-    () => inferConnectionSnapshot(normalizedContext, accessToken),
-    [normalizedContext, accessToken],
+    () => inferConnectionSnapshot(normalizedContext, resolvedArgs.accessToken),
+    [normalizedContext, resolvedArgs.accessToken],
   );
 
   const messageSeedRef = useRef(1);
@@ -1379,7 +1412,7 @@ export function useChatEngine(
   const sabotageDispatchRef = useRef<Set<string>>(new Set());
 
   const [state, setState] = useState<HookState>(() => {
-    const bootstrapContext = normalizeGameChatContext(gameCtx);
+    const bootstrapContext = normalizeGameChatContext(resolvedArgs.gameCtx);
     const bootstrapMessages = sortMessagesForRender([
       buildSystemMessage(
         bootstrapContext,
@@ -1406,7 +1439,7 @@ export function useChatEngine(
         SYNDICATE: 0,
         DEAL_ROOM: 0,
       },
-      connectionState: inferConnectionSnapshot(bootstrapContext, accessToken).state,
+      connectionState: inferConnectionSnapshot(bootstrapContext, resolvedArgs.accessToken).state,
     };
   });
 
@@ -1449,9 +1482,7 @@ export function useChatEngine(
       lastHelperAtRef.current = now;
     }
 
-    if (
-      threat.band === 'HIGH' || threat.band === 'SEVERE'
-    ) {
+    if (threat.band === 'HIGH' || threat.band === 'SEVERE') {
       const haterChannel =
         threat.band === 'SEVERE' ? 'DEAL_ROOM' : chooseDefaultTab(normalizedContext);
       const persona = pickPersonaByContext(normalizedContext, haterChannel);
@@ -1509,16 +1540,18 @@ export function useChatEngine(
     });
 
     for (const sabotage of digest.generatedSabotageEvents) {
-      const dispatchKey = sabotage.sourceMessageId ?? `${sabotage.haterId}|${sabotage.cardType}|${sabotage.ts}`;
+      const dispatchKey =
+        sabotage.sourceMessageId ??
+        `${sabotage.haterId}|${sabotage.cardType}|${sabotage.ts}`;
       if (!sabotageDispatchRef.current.has(dispatchKey)) {
         sabotageDispatchRef.current.add(dispatchKey);
-        onSabotage?.(sabotage);
+        resolvedArgs.onSabotage?.(sabotage);
       }
     }
 
     prevContextRef.current = normalizedContext;
     lastConnectionStateRef.current = connection.state;
-  }, [normalizedContext, connection, onSabotage]);
+  }, [normalizedContext, connection, resolvedArgs.onSabotage]);
 
   const switchTab = useCallback((tab: ChatChannel) => {
     setState((current) => {
