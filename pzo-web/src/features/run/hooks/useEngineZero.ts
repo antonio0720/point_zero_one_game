@@ -52,6 +52,20 @@ export interface UseEngineZeroOptions {
   defaultStartOptions?: Partial<ZeroStartRunOptions>;
 }
 
+type EngineZeroStartRequest =
+  UseRunLifecycleStartRequest &
+  Partial<
+    Pick<
+      ZeroStartRunOptions,
+      | 'mode'
+      | 'modeSeed'
+      | 'modeOverrides'
+      | 'wireStoreHandlers'
+      | 'wireRunMirror'
+      | 'registerDefaultChannels'
+    >
+  >;
+
 export interface UseEngineZeroResult {
   facade: ZeroFacade | null;
   mode: {
@@ -113,10 +127,7 @@ export interface UseEngineZeroResult {
     activeDecisionWindows: number;
   };
   actions: {
-    startRun: (
-      request: Omit<UseRunLifecycleStartRequest, keyof Partial<StartRunParams>> &
-        Partial<StartRunParams>,
-    ) => Promise<void>;
+    startRun: (request: EngineZeroStartRequest) => Promise<void>;
     executeTick: () => Promise<unknown>;
     abandonRun: () => Promise<void>;
     resetRun: () => Promise<void>;
@@ -247,7 +258,10 @@ export function useEngineZero(
   const battleHot =
     engine.battle.activeBotsCount > 0 ||
     runtime.activeThreatCardCount > 0 ||
-    Math.max(asFiniteNumber(runtime.haterHeat), asFiniteNumber(engine.battle.haterHeat)) >= 0.8;
+    Math.max(
+      asFiniteNumber(runtime.haterHeat),
+      asFiniteNumber(engine.battle.haterHeat),
+    ) >= 0.8;
   const timeoutDanger =
     engine.time.seasonTimeoutImminent || engine.time.ticksRemaining <= 5;
 
@@ -266,13 +280,11 @@ export function useEngineZero(
     : 0;
 
   const startRun = useCallback(
-    async (
-      request: Omit<UseRunLifecycleStartRequest, keyof Partial<StartRunParams>> &
-        Partial<StartRunParams>,
-    ): Promise<void> => {
+    async (request: EngineZeroStartRequest): Promise<void> => {
       await lifecycle.startRun({
         ...defaultStartParams,
         ...request,
+        userId: request.userId,
         mode:
           request.mode ??
           defaultStartOptions?.mode ??
