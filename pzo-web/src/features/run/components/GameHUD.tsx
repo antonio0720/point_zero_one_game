@@ -1,5 +1,6 @@
 /**
  * FILE: GameHUD.tsx — SOVEREIGN COMMAND INTERFACE
+ * /Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/pzo-web/src/features/run/components/GameHUD.tsx
  * Density6 LLC · Point Zero One · Confidential
  *
  * Fully upgraded HUD integrating all 7 engines:

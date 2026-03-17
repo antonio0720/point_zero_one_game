@@ -1,5 +1,5 @@
 /**
- * FILE: RunHUD.tsx
+ * FILE: RunHUD.tsx-/Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/pzo-web/src/features/run/components/RunHUD.tsx
  * Density6 LLC · Point Zero One · Confidential
  *
  * RunHUD — thin wrapper that mounts GameHUD with live engine data.
