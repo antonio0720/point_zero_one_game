@@ -14,15 +14,13 @@
  *   ✦ ZustandSet is the single typed setter shared by all handlers.
  *   ✦ wireAllEngineHandlers() is the canonical full-stack wiring entry point.
  *
- * CARD SLICE INTEGRATION (added):
+ * CARD SLICE INTEGRATION:
  *   ✦ CardEngineStoreSlice is merged into EngineStoreState.
  *   ✦ defaultCardSlice() initializes the card sub-state.
  *   ✦ wireCardEngineHandlers() must be called separately via ModeRouter after
  *     CardEngine initialization, since card events use a separate EventBus instance.
- *   ✦ card actions (card_queuePlay, card_holdCard, card_releaseHold, card_resetSlice)
- *     are exposed on the store for component dispatch.
  *
- * SLICES (8 + Card):
+ * SLICES (8 + Card + Mechanics + Mirror):
  *   run          — Engine 0 orchestrator lifecycle
  *   time         — Engine 1 TimeEngine
  *   pressure     — Engine 2 PressureEngine
@@ -32,6 +30,8 @@
  *   cascade      — Engine 6 CascadeEngine
  *   sovereignty  — Engine 7 SovereigntyEngine
  *   card         — CardEngine cross-mode state
+ *   mechanics    — mechanics runtime activation/catalog state
+ *   runtime      — mirror of runStore for shell/HUD selectors
  *
  * Density6 LLC · Point Zero One · Engines 0–7 + Cards · Confidential
  * ═══════════════════════════════════════════════════════════════════════════════
@@ -69,7 +69,6 @@ import type {
   DamageResult,
   ShieldHitEvent,
   ShieldLayerBreachedEvent,
-  ShieldSnapshotUpdatedEvent,
 } from '../engines/shield/types';
 
 // ── Engine 5 — Battle Engine types ────────────────────────────────────────────
@@ -111,7 +110,7 @@ import type {
   ProofVerificationFailedPayload,
 } from '../engines/sovereignty/types';
 
-// ── Card Engine slice types ────────────────────────────────────────────────────
+// ── Card + mechanics slices ───────────────────────────────────────────────────
 import {
   type CardEngineStoreSlice,
   defaultCardSlice,
@@ -130,7 +129,10 @@ import {
 // ── EventBus ──────────────────────────────────────────────────────────────────
 import type { EventBus } from '../engines/zero/EventBus';
 
-// ── Engine 1 — Time Engine store-facing compatibility contracts ───────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Engine 1 — Time Engine store-facing compatibility contracts
+// ─────────────────────────────────────────────────────────────────────────────
+
 type TimeDecisionCardType =
   | 'FORCED_FATE'
   | 'HATER_INJECTION'
@@ -222,6 +224,7 @@ type LegacyHoldUsedPayload = {
 };
 
 // ── Engine 1 store-facing decision window shape ───────────────────────────────
+
 interface DecisionWindowEntry extends TimeDecisionWindow {
   /**
    * Legacy compatibility field used by older card/UI consumers that expect a
@@ -235,6 +238,23 @@ interface DecisionWindowEntry extends TimeDecisionWindow {
    */
   autoResolveChoice?: string;
 }
+
+type RunStartedEventPayload = {
+  runId: string;
+  userId: string;
+  seed: string;
+  tickBudget?: number;
+  seasonTickBudget?: number;
+};
+
+type RunEndedEventPayload = {
+  runId: string;
+  outcome: RunOutcome;
+  finalNetWorth?: number;
+  netWorth?: number;
+};
+
+type Unsubscribe = () => void;
 
 // =============================================================================
 // SECTION 1 — SLICE SHAPES
@@ -375,7 +395,7 @@ export interface RunMirrorStoreSlice {
 }
 
 // =============================================================================
-// SECTION 2 — ROOT STORE SHAPE (includes card slice)
+// SECTION 2 — ROOT STORE SHAPE
 // =============================================================================
 
 export type EngineStoreState =
@@ -438,12 +458,12 @@ export const defaultTimeSlice: TimeEngineStoreSlice = {
 
 export const defaultPressureSlice: PressureEngineStoreSlice = {
   pressure: {
-    score: 0.0,
+    score: 0,
     tier: null,
     previousTier: null,
     isCritical: false,
     triggerSignals: [],
-    postActionScore: 0.0,
+    postActionScore: 0,
     stagnationCount: 0,
     tickIndex: 0,
   },
@@ -451,7 +471,7 @@ export const defaultPressureSlice: PressureEngineStoreSlice = {
 
 export const defaultTensionSlice: TensionEngineStoreSlice = {
   tension: {
-    score: 0.0,
+    score: 0,
     scoreHistory: [],
     visibilityState: 'SHADOWED' as VisibilityState,
     previousVisibilityState: null,
@@ -474,7 +494,7 @@ export const defaultTensionSlice: TensionEngineStoreSlice = {
 export const defaultShieldSlice: ShieldEngineStoreSlice = {
   shield: {
     snapshot: null,
-    overallIntegrityPct: 1.0,
+    overallIntegrityPct: 1,
     weakestLayerId: null,
     isFortified: false,
     cascadeCount: 0,
@@ -571,6 +591,27 @@ function applyRunMirrorDraft(
   state.runtime = { ...snapshot };
 }
 
+function normalizeRunStartedPayload(
+  payload: RunStartedEventPayload,
+): { runId: string; userId: string; seed: string; tickBudget: number } {
+  return {
+    runId: payload.runId,
+    userId: payload.userId,
+    seed: payload.seed,
+    tickBudget: payload.tickBudget ?? payload.seasonTickBudget ?? 0,
+  };
+}
+
+function normalizeRunEndedPayload(
+  payload: RunEndedEventPayload,
+): { runId: string; outcome: RunOutcome; finalNetWorth: number } {
+  return {
+    runId: payload.runId,
+    outcome: payload.outcome,
+    finalNetWorth: payload.finalNetWorth ?? payload.netWorth ?? 0,
+  };
+}
+
 function applyRunStartedAtomic(
   state: EngineStoreState,
   payload: { runId: string; userId: string; seed: string; tickBudget: number },
@@ -618,17 +659,20 @@ function applyRunEndedAtomic(
 ): void {
   state.run.lifecycleState = 'ENDED';
   state.run.outcome = payload.outcome;
+
   state.time.activeDecisionWindows = [];
   state.time.isRunActive = false;
   state.time.isTierTransitioning = false;
   state.time.seasonTimeoutImminent = payload.outcome === 'TIMEOUT';
   state.time.ticksUntilTimeout = 0;
+
   state.pressure.isCritical = false;
   state.tension.isRunActive = false;
   state.shield.isRunActive = false;
   state.battle.isRunActive = false;
   state.cascade.isRunActive = false;
   state.sovereignty.isRunActive = false;
+
   state.runtime.netWorth = payload.finalNetWorth;
   state.runtime.lastUpdated = Date.now();
 }
@@ -773,7 +817,7 @@ function normalizeRunTimeoutPayload(
 }
 
 // =============================================================================
-// SECTION 4 — ZUSTAND STORE (card slice merged in)
+// SECTION 4 — ZUSTAND STORE
 // =============================================================================
 
 export const useEngineStore = create<EngineStoreState>()(
@@ -809,6 +853,16 @@ export const useEngineStore = create<EngineStoreState>()(
     }),
   ),
 );
+
+export const engineStoreSet: ZustandSet = (updater) => {
+  (useEngineStore as any).setState((draft: EngineStoreState) => {
+    updater(draft);
+  });
+};
+
+export function getEngineStoreState(): EngineStoreState {
+  return useEngineStore.getState();
+}
 
 // =============================================================================
 // SECTION 5 — ENGINE 0 — RUN LIFECYCLE HANDLERS
@@ -867,9 +921,10 @@ export const runLifecycleStoreHandlers = {
     payload: { engineId: EngineId; error: string; step: number },
   ): void {
     set((state) => {
-      if (state.run.healthReport) {
-        (state.run.healthReport as any)[payload.engineId] = 'ERROR';
+      if (!state.run.healthReport) {
+        state.run.healthReport = {};
       }
+      (state.run.healthReport as Partial<Record<EngineId, EngineHealth>>)[payload.engineId] = 'ERROR' as EngineHealth;
     });
   },
 };
@@ -933,7 +988,7 @@ export const timeStoreHandlers = {
       const entry = normalizeDecisionWindowOpenedPayload(payload, state.run.lastTickIndex);
 
       const existingIndex = state.time.activeDecisionWindows.findIndex(
-        (w) => w.windowId === entry.windowId || w.cardId === entry.cardId,
+        (window) => window.windowId === entry.windowId || window.cardId === entry.cardId,
       );
 
       if (existingIndex >= 0) {
@@ -952,16 +1007,16 @@ export const timeStoreHandlers = {
 
     set((state) => {
       state.time.activeDecisionWindows = state.time.activeDecisionWindows.filter(
-        (w) =>
-          (normalized.windowId ? w.windowId !== normalized.windowId : true) &&
-          (normalized.cardId ? w.cardId !== normalized.cardId : true),
+        (window) =>
+          (normalized.windowId ? window.windowId !== normalized.windowId : true) &&
+          (normalized.cardId ? window.cardId !== normalized.cardId : true),
       );
     });
   },
 
   onDecisionWindowTick(set: ZustandSet, windowId: string, remainingMs: number): void {
     set((state) => {
-      const window = state.time.activeDecisionWindows.find((w) => w.windowId === windowId);
+      const window = state.time.activeDecisionWindows.find((entry) => entry.windowId === windowId);
       if (window) {
         window.remainingMs = Math.max(0, remainingMs);
         window.expiresAtMs = Date.now() + Math.max(0, remainingMs);
@@ -978,7 +1033,7 @@ export const timeStoreHandlers = {
     set((state) => {
       state.time.holdsRemaining = normalized.holdsRemaining;
       if (normalized.windowId) {
-        const window = state.time.activeDecisionWindows.find((w) => w.windowId === normalized.windowId);
+        const window = state.time.activeDecisionWindows.find((entry) => entry.windowId === normalized.windowId);
         if (window) {
           window.isOnHold = true;
           window.holdExpiresAtMs = normalized.holdExpiresAtMs;
@@ -1131,6 +1186,34 @@ export const tensionStoreHandlers = {
     });
   },
 
+  onThreatQueued(
+    set: ZustandSet,
+    payload: { entry?: AnticipationEntry; queueDepth?: number; tickIndex?: number },
+  ): void {
+    set((state) => {
+      state.tension.queuedCount += 1;
+      state.tension.queueLength = payload.queueDepth ?? Math.max(state.tension.queueLength + 1, state.tension.queuedCount);
+      if (payload.entry) {
+        state.tension.sortedQueue = [...state.tension.sortedQueue, payload.entry];
+      }
+      if (payload.tickIndex !== undefined) {
+        state.tension.currentTick = payload.tickIndex;
+      }
+    });
+  },
+
+  onThreatMitigated(
+    set: ZustandSet,
+    payload: { queueDepth?: number; cardUsed?: string },
+  ): void {
+    set((state) => {
+      state.tension.queueLength = payload.queueDepth ?? Math.max(0, state.tension.queueLength - 1);
+      if (!payload.cardUsed && state.tension.sortedQueue.length > 0) {
+        state.tension.sortedQueue = state.tension.sortedQueue.slice(1);
+      }
+    });
+  },
+
   onSnapshotAvailable(
     set: ZustandSet,
     snapshot: TensionSnapshot,
@@ -1151,7 +1234,7 @@ export const tensionStoreHandlers = {
       state.tension.sortedQueue = [...sortedQueue];
       state.tension.currentTick = snapshot.tickNumber;
 
-      const firstArrived = sortedQueue.find((e) => e.isArrived) ?? null;
+      const firstArrived = sortedQueue.find((entry) => entry.isArrived) ?? null;
       if (firstArrived !== null) state.tension.lastArrivedEntry = firstArrived;
     });
   },
@@ -1165,6 +1248,7 @@ export const tensionStoreHandlers = {
   onRunEnded(set: ZustandSet): void {
     set((state) => {
       state.tension.isRunActive = false;
+      state.tension.isPulseActive = false;
     });
   },
 
@@ -1194,16 +1278,16 @@ export const shieldStoreHandlers = {
     });
   },
 
-  onShieldHit(set: ZustandSet, e: ShieldHitEvent): void {
+  onShieldHit(set: ZustandSet, event: ShieldHitEvent): void {
     set((state) => {
-      state.shield.lastDamageResult = e.damageResult;
+      state.shield.lastDamageResult = event.damageResult;
     });
   },
 
-  onLayerBreached(set: ZustandSet, e: ShieldLayerBreachedEvent): void {
+  onLayerBreached(set: ZustandSet, event: ShieldLayerBreachedEvent): void {
     set((state) => {
-      state.shield.lastBreachedLayerId = e.layerId;
-      if (e.cascadeTriggered) {
+      state.shield.lastBreachedLayerId = event.layerId;
+      if (event.cascadeTriggered) {
         state.shield.isInBreachCascade = true;
         state.shield.cascadeCount += 1;
       }
@@ -1228,53 +1312,53 @@ export const shieldStoreHandlers = {
 // =============================================================================
 
 export const battleStoreHandlers = {
-  onSnapshotUpdated(set: ZustandSet, e: BattleSnapshotUpdatedEvent): void {
+  onSnapshotUpdated(set: ZustandSet, event: BattleSnapshotUpdatedEvent): void {
     set((state) => {
-      const snap = e.snapshot;
-      state.battle.snapshot = snap;
-      state.battle.budget = snap.budget;
-      state.battle.haterHeat = snap.haterHeat;
-      state.battle.injectedCards = snap.injectedCards;
-      state.battle.activeBotsCount = snap.activeBotsCount;
-      state.battle.tickNumber = snap.tickNumber;
+      const snapshot = event.snapshot;
+      state.battle.snapshot = snapshot;
+      state.battle.budget = snapshot.budget;
+      state.battle.haterHeat = snapshot.haterHeat;
+      state.battle.injectedCards = snapshot.injectedCards;
+      state.battle.activeBotsCount = snapshot.activeBotsCount;
+      state.battle.tickNumber = snapshot.tickNumber;
 
-      state.battle.activeBots = (Object.values(snap.bots) as HaterBotRuntimeState[])
+      state.battle.activeBots = (Object.values(snapshot.bots) as HaterBotRuntimeState[])
         .filter(
-          (b) =>
-            b.state === BotState.TARGETING ||
-            b.state === BotState.ATTACKING ||
-            b.state === BotState.WATCHING,
+          (bot) =>
+            bot.state === BotState.TARGETING ||
+            bot.state === BotState.ATTACKING ||
+            bot.state === BotState.WATCHING,
         );
     });
   },
 
-  onBotStateChanged(set: ZustandSet, e: BotStateChangedEvent): void {
+  onBotStateChanged(set: ZustandSet, event: BotStateChangedEvent): void {
     set((state) => {
-      state.battle.lastStateChange = e;
+      state.battle.lastStateChange = event;
     });
   },
 
-  onBotAttackFired(set: ZustandSet, e: BotAttackFiredEvent): void {
+  onBotAttackFired(set: ZustandSet, event: BotAttackFiredEvent): void {
     set((state) => {
-      state.battle.lastAttackFired = e;
+      state.battle.lastAttackFired = event;
     });
   },
 
-  onCardInjected(set: ZustandSet, e: CardInjectedEvent): void {
+  onCardInjected(set: ZustandSet, event: CardInjectedEvent): void {
     set((state) => {
       const exists = state.battle.injectedCards.some(
-        (c) => c.injectionId === e.injectedCard.injectionId,
+        (card) => card.injectionId === event.injectedCard.injectionId,
       );
       if (!exists) {
-        state.battle.injectedCards = [...state.battle.injectedCards, e.injectedCard];
+        state.battle.injectedCards = [...state.battle.injectedCards, event.injectedCard];
       }
     });
   },
 
-  onCardExpired(set: ZustandSet, e: InjectedCardExpiredEvent): void {
+  onCardExpired(set: ZustandSet, event: InjectedCardExpiredEvent): void {
     set((state) => {
       state.battle.injectedCards = state.battle.injectedCards.filter(
-        (c) => c.injectionId !== e.injectionId,
+        (card) => card.injectionId !== event.injectionId,
       );
     });
   },
@@ -1297,56 +1381,56 @@ export const battleStoreHandlers = {
 // =============================================================================
 
 export const cascadeStoreHandlers = {
-  onSnapshotUpdated(set: ZustandSet, e: CascadeSnapshotUpdatedEvent): void {
+  onSnapshotUpdated(set: ZustandSet, event: CascadeSnapshotUpdatedEvent): void {
     set((state) => {
-      const snap = e.snapshot;
-      state.cascade.snapshot = snap;
-      state.cascade.activeNegativeChains = snap.activeNegativeChains;
-      state.cascade.activePositiveCascades = snap.activePositiveCascades;
-      state.cascade.totalLinksDefeated = snap.totalLinksDefeated;
-      state.cascade.tickNumber = snap.tickNumber;
+      const snapshot = event.snapshot;
+      state.cascade.snapshot = snapshot;
+      state.cascade.activeNegativeChains = snapshot.activeNegativeChains;
+      state.cascade.activePositiveCascades = snapshot.activePositiveCascades;
+      state.cascade.totalLinksDefeated = snapshot.totalLinksDefeated;
+      state.cascade.tickNumber = snapshot.tickNumber;
     });
   },
 
-  onChainStarted(set: ZustandSet, e: CascadeChainStartedEvent): void {
+  onChainStarted(set: ZustandSet, event: CascadeChainStartedEvent): void {
     set((state) => {
-      state.cascade.latestChainStarted = e;
+      state.cascade.latestChainStarted = event;
     });
   },
 
-  onLinkFired(set: ZustandSet, e: CascadeLinkFiredEvent): void {
+  onLinkFired(set: ZustandSet, event: CascadeLinkFiredEvent): void {
     set((state) => {
-      state.cascade.latestLinkFired = e;
+      state.cascade.latestLinkFired = event;
     });
   },
 
-  onChainBroken(set: ZustandSet, e: CascadeChainBrokenEvent): void {
+  onChainBroken(set: ZustandSet, event: CascadeChainBrokenEvent): void {
     set((state) => {
-      state.cascade.latestChainBroken = e;
+      state.cascade.latestChainBroken = event;
     });
   },
 
-  onChainCompleted(set: ZustandSet, e: CascadeChainCompletedEvent): void {
+  onChainCompleted(set: ZustandSet, event: CascadeChainCompletedEvent): void {
     set((state) => {
-      state.cascade.latestChainCompleted = e;
+      state.cascade.latestChainCompleted = event;
     });
   },
 
-  onPositiveActivated(set: ZustandSet, e: CascadePositiveActivatedEvent): void {
+  onPositiveActivated(set: ZustandSet, event: CascadePositiveActivatedEvent): void {
     set((state) => {
-      state.cascade.latestPositiveActivated = e;
+      state.cascade.latestPositiveActivated = event;
     });
   },
 
-  onPositiveDissolved(set: ZustandSet, e: CascadePositiveDissolvedEvent): void {
+  onPositiveDissolved(set: ZustandSet, event: CascadePositiveDissolvedEvent): void {
     set((state) => {
-      state.cascade.latestPositiveDissolved = e;
+      state.cascade.latestPositiveDissolved = event;
     });
   },
 
-  onNemesisBroken(set: ZustandSet, e: NemesisBrokenEvent): void {
+  onNemesisBroken(set: ZustandSet, event: NemesisBrokenEvent): void {
     set((state) => {
-      state.cascade.nemesisBrokenEvents = [...state.cascade.nemesisBrokenEvents, e];
+      state.cascade.nemesisBrokenEvents = [...state.cascade.nemesisBrokenEvents, event];
     });
   },
 
@@ -1368,22 +1452,22 @@ export const cascadeStoreHandlers = {
 // =============================================================================
 
 export const sovereigntyStoreHandlers = {
-  onRunCompleted(set: ZustandSet, e: RunCompletedPayload): void {
+  onRunCompleted(set: ZustandSet, event: RunCompletedPayload): void {
     set((state) => {
-      state.sovereignty.proofHash = e.proofHash;
-      state.sovereignty.grade = e.grade;
-      state.sovereignty.sovereigntyScore = e.sovereigntyScore;
-      state.sovereignty.integrityStatus = e.integrityStatus;
-      state.sovereignty.reward = e.reward;
+      state.sovereignty.proofHash = event.proofHash;
+      state.sovereignty.grade = event.grade;
+      state.sovereignty.sovereigntyScore = event.sovereigntyScore;
+      state.sovereignty.integrityStatus = event.integrityStatus;
+      state.sovereignty.reward = event.reward;
       state.sovereignty.pipelineStatus = 'COMPLETE';
     });
   },
 
-  onVerificationFailed(set: ZustandSet, e: ProofVerificationFailedPayload): void {
+  onVerificationFailed(set: ZustandSet, event: ProofVerificationFailedPayload): void {
     set((state) => {
-      state.sovereignty.lastFailureReason = e.reason;
-      state.sovereignty.lastFailureStep = e.step;
-      if (e.step === 2 || e.step === 3) {
+      state.sovereignty.lastFailureReason = event.reason;
+      state.sovereignty.lastFailureStep = event.step;
+      if (event.step === 2 || event.step === 3) {
         state.sovereignty.pipelineStatus = 'FAILED';
       }
     });
@@ -1412,70 +1496,171 @@ export const sovereigntyStoreHandlers = {
 };
 
 // =============================================================================
-// SECTION 13 — INDIVIDUAL WIRE FUNCTIONS
+// SECTION 13 — WIRING HELPERS
 // =============================================================================
 
-export function wireTimeEngineHandlers(eventBus: EventBus, set: ZustandSet): void {
-  eventBus.on('TICK_TIER_CHANGED', (e: any) => timeStoreHandlers.onTickTierChanged(set, e.payload ?? e));
-  eventBus.on('TICK_TIER_FORCED', (e: any) => timeStoreHandlers.onTickTierForced(set, e.payload ?? e));
-  eventBus.on('TICK_COMPLETE', (e: any) => timeStoreHandlers.onTickComplete(set, e.payload ?? e));
-  eventBus.on('DECISION_WINDOW_OPENED', (e: any) => timeStoreHandlers.onDecisionWindowOpened(set, e.payload ?? e));
-  eventBus.on('DECISION_WINDOW_EXPIRED', (e: any) => timeStoreHandlers.onDecisionWindowClosed(set, e.payload ?? e));
-  eventBus.on('DECISION_WINDOW_RESOLVED', (e: any) => timeStoreHandlers.onDecisionWindowClosed(set, e.payload ?? e));
-  eventBus.on('HOLD_ACTION_USED' as any, (e: any) => timeStoreHandlers.onHoldUsed(set, e.payload ?? e));
-  eventBus.on('RUN_TIMEOUT' as any, (e: any) => timeStoreHandlers.onRunTimeout(set, e.payload ?? e));
-  eventBus.on('SEASON_TIMEOUT_IMMINENT', (e: any) => timeStoreHandlers.onSeasonTimeoutImminent(set, e.payload ?? e));
+const wiredBusRegistry = new WeakMap<EventBus, Unsubscribe>();
+let runMirrorUnsubscribe: Unsubscribe | null = null;
+
+function composeUnsubs(unsubs: Array<Unsubscribe | undefined | null>): Unsubscribe {
+  return () => {
+    for (const unsub of unsubs) {
+      try {
+        unsub?.();
+      } catch {
+        // Intentionally swallow cleanup failures to keep teardown deterministic.
+      }
+    }
+  };
 }
 
-export function wirePressureEngineHandlers(eventBus: EventBus, set: ZustandSet): void {
-  eventBus.on('PRESSURE_SCORE_UPDATED', (e: any) => pressureStoreHandlers.onScoreUpdated(set, e.payload));
-  eventBus.on('PRESSURE_TIER_CHANGED', (e: any) => pressureStoreHandlers.onTierChanged(set, e.payload));
-  eventBus.on('PRESSURE_CRITICAL', (e: any) => pressureStoreHandlers.onCritical(set, e.payload));
-}
-
-export function wireTensionEngineHandlers(eventBus: EventBus, set: ZustandSet): void {
-  eventBus.on('TENSION_SCORE_UPDATED' as any, (e: any) => tensionStoreHandlers.onScoreUpdated(set, e.payload ?? e));
-  eventBus.on('TENSION_VISIBILITY_CHANGED' as any, (e: any) => tensionStoreHandlers.onVisibilityChanged(set, e.payload ?? e));
-  eventBus.on('TENSION_PULSE_FIRED' as any, (e: any) => tensionStoreHandlers.onPulseFired(set, e.payload ?? e));
-  eventBus.on('THREAT_ARRIVED' as any, (e: any) => tensionStoreHandlers.onThreatArrived(set, e.payload ?? e));
-  eventBus.on('THREAT_EXPIRED' as any, (e: any) => tensionStoreHandlers.onThreatExpired(set, e.payload ?? e));
-}
-
-export function wireShieldEngineHandlers(eventBus: EventBus, set: ZustandSet): void {
-  eventBus.on('SHIELD_HIT' as any, (e: any) => shieldStoreHandlers.onShieldHit(set, e.payload ?? e));
-  eventBus.on('SHIELD_LAYER_BREACHED' as any, (e: any) => shieldStoreHandlers.onLayerBreached(set, e.payload ?? e));
-  eventBus.on('SHIELD_SNAPSHOT_UPDATED' as any, (e: any) => {
-    const snap: ShieldSnapshot = (e.payload ?? e).snapshot ?? (e.payload ?? e);
-    shieldStoreHandlers.onSnapshotUpdated(set, snap);
+function subscribeAny(
+  eventBus: EventBus,
+  eventName: string,
+  handler: (payload: any) => void,
+  unsubs: Unsubscribe[],
+): void {
+  const unsub = (eventBus as any).on(eventName as any, (event: any) => {
+    handler(event?.payload ?? event);
   });
+
+  if (typeof unsub === 'function') {
+    unsubs.push(unsub);
+  }
 }
 
-export function wireBattleEngineHandlers(eventBus: EventBus, set: ZustandSet): void {
-  eventBus.on('BATTLE_SNAPSHOT_UPDATED' as any, (e: any) => battleStoreHandlers.onSnapshotUpdated(set, e.payload ?? e));
-  eventBus.on('BOT_STATE_CHANGED' as any, (e: any) => battleStoreHandlers.onBotStateChanged(set, e.payload ?? e));
-  eventBus.on('BOT_ATTACK_FIRED' as any, (e: any) => battleStoreHandlers.onBotAttackFired(set, e.payload ?? e));
-  eventBus.on('CARD_INJECTED' as any, (e: any) => battleStoreHandlers.onCardInjected(set, e.payload ?? e));
-  eventBus.on('INJECTED_CARD_EXPIRED' as any, (e: any) => battleStoreHandlers.onCardExpired(set, e.payload ?? e));
-}
-
-export function wireCascadeEngineHandlers(eventBus: EventBus, set: ZustandSet): void {
-  eventBus.on('CASCADE_CHAIN_STARTED' as any, (e: any) => cascadeStoreHandlers.onChainStarted(set, e.payload ?? e));
-  eventBus.on('CASCADE_LINK_FIRED' as any, (e: any) => cascadeStoreHandlers.onLinkFired(set, e.payload ?? e));
-  eventBus.on('CASCADE_CHAIN_BROKEN' as any, (e: any) => cascadeStoreHandlers.onChainBroken(set, e.payload ?? e));
-  eventBus.on('CASCADE_CHAIN_COMPLETED' as any, (e: any) => cascadeStoreHandlers.onChainCompleted(set, e.payload ?? e));
-  eventBus.on('CASCADE_POSITIVE_ACTIVATED' as any, (e: any) => cascadeStoreHandlers.onPositiveActivated(set, e.payload ?? e));
-  eventBus.on('CASCADE_POSITIVE_DISSOLVED' as any, (e: any) => cascadeStoreHandlers.onPositiveDissolved(set, e.payload ?? e));
-  eventBus.on('NEMESIS_BROKEN' as any, (e: any) => cascadeStoreHandlers.onNemesisBroken(set, e.payload ?? e));
-  eventBus.on('CASCADE_SNAPSHOT_UPDATED' as any, (e: any) => cascadeStoreHandlers.onSnapshotUpdated(set, e.payload ?? e));
-}
-
-export function wireSovereigntyEngineHandlers(eventBus: EventBus, set: ZustandSet): void {
-  eventBus.on('RUN_COMPLETED' as any, (e: any) => sovereigntyStoreHandlers.onRunCompleted(set, e.payload));
-  eventBus.on('PROOF_VERIFICATION_FAILED' as any, (e: any) => sovereigntyStoreHandlers.onVerificationFailed(set, e.payload));
+function registerAliasPair(
+  eventBus: EventBus,
+  primary: string,
+  legacy: string,
+  handler: (payload: any) => void,
+  unsubs: Unsubscribe[],
+): void {
+  subscribeAny(eventBus, primary, handler, unsubs);
+  if (legacy !== primary) {
+    subscribeAny(eventBus, legacy, handler, unsubs);
+  }
 }
 
 // =============================================================================
-// SECTION 14 — MASTER WIRING FUNCTION
+// SECTION 14 — INDIVIDUAL WIRE FUNCTIONS
+// =============================================================================
+
+export function wireTimeEngineHandlers(eventBus: EventBus, set: ZustandSet): Unsubscribe {
+  const unsubs: Unsubscribe[] = [];
+
+  subscribeAny(eventBus, 'TICK_TIER_CHANGED', (payload) => timeStoreHandlers.onTickTierChanged(set, payload), unsubs);
+  subscribeAny(eventBus, 'TICK_TIER_FORCED', (payload) => timeStoreHandlers.onTickTierForced(set, payload), unsubs);
+  subscribeAny(eventBus, 'TICK_COMPLETE', (payload) => timeStoreHandlers.onTickComplete(set, payload), unsubs);
+  subscribeAny(eventBus, 'DECISION_WINDOW_OPENED', (payload) => timeStoreHandlers.onDecisionWindowOpened(set, payload), unsubs);
+  subscribeAny(eventBus, 'DECISION_WINDOW_EXPIRED', (payload) => timeStoreHandlers.onDecisionWindowClosed(set, payload), unsubs);
+  subscribeAny(eventBus, 'DECISION_WINDOW_RESOLVED', (payload) => timeStoreHandlers.onDecisionWindowClosed(set, payload), unsubs);
+  subscribeAny(eventBus, 'HOLD_ACTION_USED', (payload) => timeStoreHandlers.onHoldUsed(set, payload), unsubs);
+  subscribeAny(eventBus, 'RUN_TIMEOUT', (payload) => timeStoreHandlers.onRunTimeout(set, payload), unsubs);
+  subscribeAny(eventBus, 'SEASON_TIMEOUT_IMMINENT', (payload) => timeStoreHandlers.onSeasonTimeoutImminent(set, payload), unsubs);
+
+  return composeUnsubs(unsubs);
+}
+
+export function wirePressureEngineHandlers(eventBus: EventBus, set: ZustandSet): Unsubscribe {
+  const unsubs: Unsubscribe[] = [];
+
+  subscribeAny(eventBus, 'PRESSURE_SCORE_UPDATED', (payload) => pressureStoreHandlers.onScoreUpdated(set, payload), unsubs);
+  subscribeAny(eventBus, 'PRESSURE_TIER_CHANGED', (payload) => pressureStoreHandlers.onTierChanged(set, payload), unsubs);
+  subscribeAny(eventBus, 'PRESSURE_CRITICAL', (payload) => pressureStoreHandlers.onCritical(set, payload), unsubs);
+
+  return composeUnsubs(unsubs);
+}
+
+export function wireTensionEngineHandlers(eventBus: EventBus, set: ZustandSet): Unsubscribe {
+  const unsubs: Unsubscribe[] = [];
+
+  registerAliasPair(eventBus, 'TENSION_SCORE_UPDATED', 'TENSION_SCORE_UPDATED', (payload) => {
+    tensionStoreHandlers.onScoreUpdated(set, payload);
+  }, unsubs);
+
+  registerAliasPair(eventBus, 'TENSION_VISIBILITY_CHANGED', 'THREAT_VISIBILITY_CHANGED', (payload) => {
+    tensionStoreHandlers.onVisibilityChanged(set, payload);
+  }, unsubs);
+
+  registerAliasPair(eventBus, 'TENSION_PULSE_FIRED', 'ANTICIPATION_PULSE', (payload) => {
+    const normalized = {
+      pulseTicksActive: payload?.pulseTicksActive ?? 1,
+      ...payload,
+    };
+    tensionStoreHandlers.onPulseFired(set, normalized);
+  }, unsubs);
+
+  subscribeAny(eventBus, 'THREAT_QUEUED', (payload) => tensionStoreHandlers.onThreatQueued(set, payload), unsubs);
+  subscribeAny(eventBus, 'THREAT_ARRIVED', (payload) => tensionStoreHandlers.onThreatArrived(set, payload), unsubs);
+  subscribeAny(eventBus, 'THREAT_EXPIRED', (payload) => tensionStoreHandlers.onThreatExpired(set, payload), unsubs);
+  subscribeAny(eventBus, 'THREAT_MITIGATED', (payload) => tensionStoreHandlers.onThreatMitigated(set, payload), unsubs);
+
+  subscribeAny(eventBus, 'TENSION_SNAPSHOT_UPDATED', (payload) => {
+    const snapshot = payload?.snapshot ?? payload;
+    const queue = payload?.sortedQueue ?? payload?.queue ?? [];
+    tensionStoreHandlers.onSnapshotAvailable(set, snapshot, queue);
+  }, unsubs);
+
+  return composeUnsubs(unsubs);
+}
+
+export function wireShieldEngineHandlers(eventBus: EventBus, set: ZustandSet): Unsubscribe {
+  const unsubs: Unsubscribe[] = [];
+
+  subscribeAny(eventBus, 'SHIELD_HIT', (payload) => shieldStoreHandlers.onShieldHit(set, payload), unsubs);
+  subscribeAny(eventBus, 'SHIELD_LAYER_BREACHED', (payload) => shieldStoreHandlers.onLayerBreached(set, payload), unsubs);
+  subscribeAny(eventBus, 'SHIELD_SNAPSHOT_UPDATED', (payload) => {
+    const snapshot: ShieldSnapshot = payload?.snapshot ?? payload;
+    shieldStoreHandlers.onSnapshotUpdated(set, snapshot);
+  }, unsubs);
+
+  return composeUnsubs(unsubs);
+}
+
+export function wireBattleEngineHandlers(eventBus: EventBus, set: ZustandSet): Unsubscribe {
+  const unsubs: Unsubscribe[] = [];
+
+  subscribeAny(eventBus, 'BATTLE_SNAPSHOT_UPDATED', (payload) => battleStoreHandlers.onSnapshotUpdated(set, payload), unsubs);
+  subscribeAny(eventBus, 'BOT_STATE_CHANGED', (payload) => battleStoreHandlers.onBotStateChanged(set, payload), unsubs);
+  subscribeAny(eventBus, 'BOT_ATTACK_FIRED', (payload) => battleStoreHandlers.onBotAttackFired(set, payload), unsubs);
+  subscribeAny(eventBus, 'CARD_INJECTED', (payload) => battleStoreHandlers.onCardInjected(set, payload), unsubs);
+  subscribeAny(eventBus, 'INJECTED_CARD_EXPIRED', (payload) => battleStoreHandlers.onCardExpired(set, payload), unsubs);
+
+  return composeUnsubs(unsubs);
+}
+
+export function wireCascadeEngineHandlers(eventBus: EventBus, set: ZustandSet): Unsubscribe {
+  const unsubs: Unsubscribe[] = [];
+
+  registerAliasPair(eventBus, 'CASCADE_CHAIN_STARTED', 'CASCADE_CHAIN_TRIGGERED', (payload) => {
+    cascadeStoreHandlers.onChainStarted(set, payload);
+  }, unsubs);
+
+  subscribeAny(eventBus, 'CASCADE_LINK_FIRED', (payload) => cascadeStoreHandlers.onLinkFired(set, payload), unsubs);
+  subscribeAny(eventBus, 'CASCADE_CHAIN_BROKEN', (payload) => cascadeStoreHandlers.onChainBroken(set, payload), unsubs);
+  subscribeAny(eventBus, 'CASCADE_CHAIN_COMPLETED', (payload) => cascadeStoreHandlers.onChainCompleted(set, payload), unsubs);
+  subscribeAny(eventBus, 'CASCADE_POSITIVE_ACTIVATED', (payload) => cascadeStoreHandlers.onPositiveActivated(set, payload), unsubs);
+  subscribeAny(eventBus, 'CASCADE_POSITIVE_DISSOLVED', (payload) => cascadeStoreHandlers.onPositiveDissolved(set, payload), unsubs);
+  subscribeAny(eventBus, 'NEMESIS_BROKEN', (payload) => cascadeStoreHandlers.onNemesisBroken(set, payload), unsubs);
+  subscribeAny(eventBus, 'CASCADE_SNAPSHOT_UPDATED', (payload) => cascadeStoreHandlers.onSnapshotUpdated(set, payload), unsubs);
+
+  return composeUnsubs(unsubs);
+}
+
+export function wireSovereigntyEngineHandlers(eventBus: EventBus, set: ZustandSet): Unsubscribe {
+  const unsubs: Unsubscribe[] = [];
+
+  subscribeAny(eventBus, 'RUN_COMPLETED', (payload) => sovereigntyStoreHandlers.onRunCompleted(set, payload), unsubs);
+  subscribeAny(eventBus, 'PROOF_VERIFICATION_FAILED', (payload) => sovereigntyStoreHandlers.onVerificationFailed(set, payload), unsubs);
+  subscribeAny(eventBus, 'SOVEREIGNTY_PIPELINE_STARTED', () => sovereigntyStoreHandlers.onPipelineStarted(set), unsubs);
+  subscribeAny(eventBus, 'RUN_GRADING_STARTED', () => sovereigntyStoreHandlers.onPipelineStarted(set), unsubs);
+
+  return composeUnsubs(unsubs);
+}
+
+// =============================================================================
+// SECTION 15 — MASTER WIRING FUNCTION
 // =============================================================================
 
 /**
@@ -1484,46 +1669,76 @@ export function wireSovereigntyEngineHandlers(eventBus: EventBus, set: ZustandSe
  * Card engine wiring is handled separately by ModeRouter via wireCardEngineHandlers().
  *
  * Usage:
- *   wireAllEngineHandlers(sharedEventBus, useEngineStore.setState);
+ *   const cleanup = wireAllEngineHandlers(sharedEventBus);
+ *   // later: cleanup();
  */
-export function wireAllEngineHandlers(eventBus: EventBus, set: ZustandSet): void {
-  const s = set;
+export function wireAllEngineHandlers(
+  eventBus: EventBus,
+  set: ZustandSet = engineStoreSet,
+): Unsubscribe {
+  const existing = wiredBusRegistry.get(eventBus);
+  if (existing) {
+    existing();
+    wiredBusRegistry.delete(eventBus);
+  }
 
-  wireTimeEngineHandlers(eventBus, s);
-  wirePressureEngineHandlers(eventBus, s);
-  wireTensionEngineHandlers(eventBus, s);
-  wireShieldEngineHandlers(eventBus, s);
-  wireBattleEngineHandlers(eventBus, s);
-  wireCascadeEngineHandlers(eventBus, s);
-  wireSovereigntyEngineHandlers(eventBus, s);
-  wireMechanicsRuntimeHandlers(eventBus, s as any);
+  const unsubs: Unsubscribe[] = [];
+  const stateSet = set;
 
-  eventBus.on('RUN_STARTED', (e: any) => {
-    const p = e.payload;
-    s((state) => {
-      applyRunStartedAtomic(state, p);
+  unsubs.push(wireTimeEngineHandlers(eventBus, stateSet));
+  unsubs.push(wirePressureEngineHandlers(eventBus, stateSet));
+  unsubs.push(wireTensionEngineHandlers(eventBus, stateSet));
+  unsubs.push(wireShieldEngineHandlers(eventBus, stateSet));
+  unsubs.push(wireBattleEngineHandlers(eventBus, stateSet));
+  unsubs.push(wireCascadeEngineHandlers(eventBus, stateSet));
+  unsubs.push(wireSovereigntyEngineHandlers(eventBus, stateSet));
+
+  // Mechanics runtime wiring already knows how to subscribe to the shared EventBus.
+  wireMechanicsRuntimeHandlers(eventBus, stateSet as any);
+
+  subscribeAny(eventBus, 'RUN_STARTED', (payload) => {
+    const normalized = normalizeRunStartedPayload(payload);
+    stateSet((state) => {
+      applyRunStartedAtomic(state, normalized);
     });
-  });
+  }, unsubs);
 
-  eventBus.on('RUN_ENDED', (e: any) => {
-    const p = e.payload;
-    s((state) => {
-      applyRunEndedAtomic(state, p);
+  subscribeAny(eventBus, 'RUN_ENDED', (payload) => {
+    const normalized = normalizeRunEndedPayload(payload);
+    stateSet((state) => {
+      applyRunEndedAtomic(state, normalized);
     });
-  });
+  }, unsubs);
 
-  eventBus.on('TICK_COMPLETE', (e: any) => {
-    s((state) => {
-      applyTickCompleteAtomic(state, e.payload);
+  subscribeAny(eventBus, 'TICK_COMPLETE', (payload) => {
+    stateSet((state) => {
+      applyTickCompleteAtomic(state, normalizeTickCompletePayload(payload));
     });
-  });
+  }, unsubs);
 
-  eventBus.on('ENGINE_ERROR', (e: any) => runLifecycleStoreHandlers.onEngineError(s, e.payload));
+  subscribeAny(eventBus, 'ENGINE_ERROR', (payload) => {
+    runLifecycleStoreHandlers.onEngineError(stateSet, payload);
+  }, unsubs);
+
+  const cleanup = composeUnsubs(unsubs);
+  wiredBusRegistry.set(eventBus, cleanup);
+
+  return () => {
+    cleanup();
+    if (wiredBusRegistry.get(eventBus) === cleanup) {
+      wiredBusRegistry.delete(eventBus);
+    }
+  };
 }
 
 export { wireTimeEngineHandlers as wireTimeEngine };
 
-export function wireRunStoreMirror(): () => void {
+export function wireRunStoreMirror(): Unsubscribe {
+  if (runMirrorUnsubscribe) {
+    runMirrorUnsubscribe();
+    runMirrorUnsubscribe = null;
+  }
+
   const applyMirror = (snapshot: EngineStoreMirrorSnapshot): void => {
     useEngineStore.getState().syncRunMirror(snapshot);
   };
@@ -1538,5 +1753,13 @@ export function wireRunStoreMirror(): () => void {
     { fireImmediately: false },
   );
 
-  return typeof unsub === 'function' ? unsub : () => undefined;
+  runMirrorUnsubscribe =
+    typeof unsub === 'function'
+      ? unsub
+      : () => undefined;
+
+  return () => {
+    runMirrorUnsubscribe?.();
+    runMirrorUnsubscribe = null;
+  };
 }
