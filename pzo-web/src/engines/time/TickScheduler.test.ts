@@ -1,7 +1,7 @@
 // pzo-web/src/engines/time/TickScheduler.test.ts
-import { TickScheduler } from '../TickScheduler'; // Adjust the import path as necessary
+import { TickScheduler } from './TickScheduler'; // Adjust the import path as necessary
 import * as jest from 'jest';
-import interpolator, { InterpolationState } from '../interpolator'; // Adjust the import paths accordingly
+import interpolator, { InterpolationState } from './TickRateInterpolator'; // Adjust the import paths accordingly
 
 describe('TickScheduler', () => {
   let tickScheduler: TickScheduler;

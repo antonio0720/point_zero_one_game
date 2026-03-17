@@ -36,7 +36,7 @@ import {
   type CardPlayRequest,
   type CardEngineInitParams,
   type DecisionRecord,
-} from '../types';
+} from './types';
 import type { CardUXBridge } from '../CardUXBridge';
 
 // ── COUNTER WINDOW CONFIG ──────────────────────────────────────────────────────

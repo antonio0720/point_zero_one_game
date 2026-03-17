@@ -1,5 +1,5 @@
 // pzo-web/src/engines/time/TimeEngine.test.ts (or create this file if it does not exist)
-import { TimeEngine } from '../TimeEngine'; // Adjust the import path as necessary based on your project structure
+import { TimeEngine } from './TimeEngine'; // Adjust the import path as necessary based on your project structure
 import React, { useEffect, useState } from 'react';
 import '@testing-library/jest-dom';
 

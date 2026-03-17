@@ -93,7 +93,6 @@ import * as ChatChannelPolicyModule from './ChatChannelPolicy';
 import * as ChatInvasionDirectorModule from './ChatInvasionDirector';
 import * as ChatNpcDirectorModule from './ChatNpcDirector';
 import * as ChatRuntimeConfigModule from './ChatRuntimeConfig';
-import * as UnifiedChatDockModule from './UnifiedChatDock';
 
 import * as ChatAdaptersModule from './adapters';
 import * as ChatChannelsModule from './channels';
@@ -122,7 +121,6 @@ export * from './ChatChannelPolicy';
 export * from './ChatInvasionDirector';
 export * from './ChatNpcDirector';
 export * from './ChatRuntimeConfig';
-export * from './UnifiedChatDock';
 
 export * from './adapters';
 export * from './channels';
@@ -150,7 +148,6 @@ export { ChatChannelPolicyModule };
 export { ChatInvasionDirectorModule };
 export { ChatNpcDirectorModule };
 export { ChatRuntimeConfigModule };
-export { UnifiedChatDockModule };
 
 export { ChatAdaptersModule };
 export { ChatChannelsModule };
@@ -213,7 +210,6 @@ export const CHAT_ENGINE_PRESENT_RUNTIME_FILES = Object.freeze([
   'ChatState.ts',
   'ChatTranscriptBuffer.ts',
   'ChatTypingController.ts',
-  'UnifiedChatDock.tsx',
   'index.ts',
   'types.ts',
 ] as const);
@@ -434,7 +430,6 @@ export const CHAT_ENGINE_MIGRATION_DONOR_ZONES = Object.freeze({
 
 export const CHAT_ENGINE_MIGRATION_EXTRACT_MAP = Object.freeze({
   'pzo-web/src/components/chat/ChatPanel.tsx': Object.freeze([
-    'UnifiedChatDock.tsx',
     'ChatMessageFeed.tsx',
     'ChatComposer.tsx',
     'ChatChannelTabs.tsx',
@@ -637,7 +632,6 @@ export const CHAT_ENGINE_PUBLIC_EXPORTS = Object.freeze({
     './ChatInvasionDirector',
     './ChatNpcDirector',
     './ChatRuntimeConfig',
-    './UnifiedChatDock',
   ] as const),
   trees: Object.freeze([
     './adapters',
@@ -667,7 +661,6 @@ export const CHAT_ENGINE_PUBLIC_EXPORTS = Object.freeze({
     'ChatInvasionDirectorModule',
     'ChatNpcDirectorModule',
     'ChatRuntimeConfigModule',
-    'UnifiedChatDockModule',
     'ChatAdaptersModule',
     'ChatChannelsModule',
     'ChatNpcModule',
@@ -701,7 +694,6 @@ export const CHAT_ENGINE_RUNTIME_MODULES = Object.freeze({
   ChatInvasionDirector: ChatInvasionDirectorModule,
   ChatNpcDirector: ChatNpcDirectorModule,
   ChatRuntimeConfig: ChatRuntimeConfigModule,
-  UnifiedChatDock: UnifiedChatDockModule,
 } as const);
 
 export const CHAT_ENGINE_SUBTREE_MODULES = Object.freeze({
@@ -751,7 +743,6 @@ export const CHAT_ENGINE_LAZY_LOADERS = Object.freeze({
   ChatInvasionDirector: () => import('./ChatInvasionDirector'),
   ChatNpcDirector: () => import('./ChatNpcDirector'),
   ChatRuntimeConfig: () => import('./ChatRuntimeConfig'),
-  UnifiedChatDock: () => import('./UnifiedChatDock'),
   adapters: () => import('./adapters'),
   channels: () => import('./channels'),
   npc: () => import('./npc'),

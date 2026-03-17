@@ -48,7 +48,7 @@ function extractPayload<T>(input: unknown): T {
 function mutateStore(mutator: (state: TimeSliceStateCarrier) => void): void {
   useEngineStore.setState((state) => {
     mutator(state as unknown as TimeSliceStateCarrier);
-  } as StoreUpdater);
+  });
 }
 
 export interface EngineEventBindingsOptions {

@@ -1,8 +1,8 @@
 // pzo-web/src/engines/core/__tests__/EngineOrchestrator.timeIntegration.test.ts
 import { beforeEach, describe, it, vi } from 'vitest';
-import { EventBus } from 'pzo-web/src/engines/core/EventBus';
-import { TimeEngine } from 'pzo-web/src/engines/time/TimeEngine';
-import { TICK_TIER_CHANGED } from 'pzo-web/src/engines/core/EventBus';
+import { EventBus } from '../EventBus';
+import { TimeEngine } from '../../time/TimeEngine';
+import { TICK_TIER_CHANGED } from '../EventBus';
 
 describe('EngineOrchestrator Time Integration Tests', () => {
   let eventBus: EventBus;
