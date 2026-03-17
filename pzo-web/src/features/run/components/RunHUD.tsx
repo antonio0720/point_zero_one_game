@@ -1,33 +1,43 @@
 /**
- * FILE: RunHUD.tsx-/Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/pzo-web/src/features/run/components/RunHUD.tsx
+ * FILE: RunHUD.tsx
+ * /Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/pzo-web/src/features/run/components/RunHUD.tsx
  * Density6 LLC · Point Zero One · Confidential
  *
- * RunHUD — thin wrapper that mounts GameHUD with live engine data.
- * GameHUD is self-contained: all engine hooks run inside it.
- * RunHUD's only job is gate-keeping visibility and supplying className/style.
+ * RunHUD — thin wrapper around GameHUD.
+ *
+ * Intent:
+ * - Keep App.tsx and run screens thin.
+ * - Let GameHUD own all hook subscriptions.
+ * - Only gate visibility and forward presentation props here.
  */
 'use client';
-import React             from 'react';
-import GameHUD           from './GameHUD';
+
+import React from 'react';
+import GameHUD from './GameHUD';
 
 export interface RunHUDProps {
   readonly isActiveRun?: boolean;
-  readonly showIntel?:   boolean;
-  readonly className?:   string;
-  readonly style?:       React.CSSProperties;
+  readonly showIntel?: boolean;
+  readonly className?: string;
+  readonly style?: React.CSSProperties;
 }
 
 export default function RunHUD({
   isActiveRun = true,
-  showIntel   = true,
+  showIntel = true,
   className,
   style,
 }: RunHUDProps) {
   if (!isActiveRun) return null;
 
   return (
-    <div className={className} style={style}>
+    <section
+      className={className}
+      style={style}
+      aria-label="Point Zero One run heads-up display"
+      data-pzo-surface="run-hud"
+    >
       <GameHUD isActiveRun={isActiveRun} showIntel={showIntel} />
-    </div>
+    </section>
   );
 }
