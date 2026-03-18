@@ -100,6 +100,9 @@ import * as ChatNpcModule from './npc';
 import * as ChatReplayModule from './replay';
 import * as ChatTelemetryModule from './telemetry';
 import * as ChatIntelligenceModule from './intelligence';
+import * as ChatDramaDirectorModule from './experience/ChatDramaDirector';
+import * as ChatMomentOrchestratorModule from './experience/ChatMomentOrchestrator';
+import * as ChatSilenceEngineModule from './experience/ChatSilenceEngine';
 import * as ChatMlCompatibilityModule from './ml/ml_index';
 import * as ChatDlCompatibilityModule from './dl/dl_index';
 
@@ -128,6 +131,9 @@ export * from './npc';
 export * from './replay';
 export * from './telemetry';
 export * from './intelligence';
+export * from './experience/ChatDramaDirector';
+export * from './experience/ChatMomentOrchestrator';
+export * from './experience/ChatSilenceEngine';
 export * from './ml/ml_index';
 export * from './dl/dl_index';
 
@@ -155,6 +161,9 @@ export { ChatNpcModule };
 export { ChatReplayModule };
 export { ChatTelemetryModule };
 export { ChatIntelligenceModule };
+export { ChatDramaDirectorModule };
+export { ChatMomentOrchestratorModule };
+export { ChatSilenceEngineModule };
 export { ChatMlCompatibilityModule };
 export { ChatDlCompatibilityModule };
 
@@ -212,6 +221,9 @@ export const CHAT_ENGINE_PRESENT_RUNTIME_FILES = Object.freeze([
   'ChatTypingController.ts',
   'index.ts',
   'types.ts',
+  'experience/ChatDramaDirector.ts',
+  'experience/ChatMomentOrchestrator.ts',
+  'experience/ChatSilenceEngine.ts',
 ] as const);
 
 export const CHAT_ENGINE_PRESENT_SUBTREES = Object.freeze([
@@ -309,12 +321,12 @@ export const CHAT_ENGINE_CANONICAL_FRONTEND_TARGET_TREE = Object.freeze([
   'intelligence/dl/ConversationStateEncoder.ts',
   'intelligence/dl/ResponseRankerClient.ts',
   'intelligence/dl/SequenceMemoryClient.ts',
-] as const);
-
-export const CHAT_ENGINE_CANONICAL_FUTURE_FRONTEND_EXPANSIONS = Object.freeze([
   'experience/ChatDramaDirector.ts',
   'experience/ChatMomentOrchestrator.ts',
   'experience/ChatSilenceEngine.ts',
+] as const);
+
+export const CHAT_ENGINE_CANONICAL_FUTURE_FRONTEND_EXPANSIONS = Object.freeze([
   'experience/ChatInterruptPriority.ts',
   'experience/ChatRevealScheduler.ts',
   'memory/RelationshipState.ts',
@@ -632,6 +644,9 @@ export const CHAT_ENGINE_PUBLIC_EXPORTS = Object.freeze({
     './ChatInvasionDirector',
     './ChatNpcDirector',
     './ChatRuntimeConfig',
+    './experience/ChatDramaDirector',
+    './experience/ChatMomentOrchestrator',
+    './experience/ChatSilenceEngine',
   ] as const),
   trees: Object.freeze([
     './adapters',
@@ -667,6 +682,9 @@ export const CHAT_ENGINE_PUBLIC_EXPORTS = Object.freeze({
     'ChatReplayModule',
     'ChatTelemetryModule',
     'ChatIntelligenceModule',
+    'ChatDramaDirectorModule',
+    'ChatMomentOrchestratorModule',
+    'ChatSilenceEngineModule',
     'ChatMlCompatibilityModule',
     'ChatDlCompatibilityModule',
   ] as const),
@@ -694,6 +712,9 @@ export const CHAT_ENGINE_RUNTIME_MODULES = Object.freeze({
   ChatInvasionDirector: ChatInvasionDirectorModule,
   ChatNpcDirector: ChatNpcDirectorModule,
   ChatRuntimeConfig: ChatRuntimeConfigModule,
+  ChatDramaDirector: ChatDramaDirectorModule,
+  ChatMomentOrchestrator: ChatMomentOrchestratorModule,
+  ChatSilenceEngine: ChatSilenceEngineModule,
 } as const);
 
 export const CHAT_ENGINE_SUBTREE_MODULES = Object.freeze({
@@ -749,6 +770,9 @@ export const CHAT_ENGINE_LAZY_LOADERS = Object.freeze({
   replay: () => import('./replay'),
   telemetry: () => import('./telemetry'),
   intelligence: () => import('./intelligence'),
+  ChatDramaDirector: () => import('./experience/ChatDramaDirector'),
+  ChatMomentOrchestrator: () => import('./experience/ChatMomentOrchestrator'),
+  ChatSilenceEngine: () => import('./experience/ChatSilenceEngine'),
   mlCompatibility: () => import('./ml/ml_index'),
   dlCompatibility: () => import('./dl/dl_index'),
 } as const);
