@@ -1,4 +1,3 @@
-
 // /Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/pzo-web/src/engines/chat/intelligence/ml/index.ts
 
 /**
@@ -12,8 +11,8 @@ export * from './FeatureExtractor';
 export * from './EngagementScorer';
 export * from './ColdStartPolicy';
 export * from './HaterPersonaPolicy';
-
 export * from './HelperInterventionPolicy';
 export * from './ChannelRecommendationPolicy';
 export * from './ToxicityRiskScorer';
 export * from './DropOffRiskScorer';
+export * from './ChatSemanticSimilarityIndex';

@@ -173,3 +173,55 @@ export interface SharedChatScenePlannerDecision {
   readonly chosenCallbackAnchorIds: readonly string[];
   readonly chosenTags: readonly string[];
 }
+
+export type SharedChatSceneOutcomeKind =
+  | 'COMPLETED'
+  | 'INTERRUPTED'
+  | 'CANCELLED'
+  | 'TIMED_OUT'
+  | 'OVERRIDDEN';
+
+export interface SharedChatSceneOutcome {
+  readonly outcomeKind: SharedChatSceneOutcomeKind;
+  readonly resolvedAt: number;
+  readonly summary: string;
+  readonly branchTaken?: string;
+  readonly callbackAnchorIds?: readonly string[];
+  readonly generatedTags?: readonly string[];
+}
+
+export interface SharedChatSceneArchiveRecord {
+  readonly archiveId: string;
+  readonly playerId: string;
+  readonly roomId: string;
+  readonly channelId: SharedChatChannelId;
+  readonly scene: SharedChatScenePlan;
+  readonly transcriptAnnotationIds: readonly string[];
+  readonly counterpartIds: readonly string[];
+  readonly callbackAnchorIds: readonly string[];
+  readonly createdAt: number;
+  readonly updatedAt: number;
+  readonly outcome?: SharedChatSceneOutcome;
+  readonly tags: readonly string[];
+}
+
+export interface SharedChatSceneArchiveQuery {
+  readonly playerId: string;
+  readonly roomId?: string;
+  readonly channelId?: SharedChatChannelId;
+  readonly archetypes?: readonly SharedChatSceneArchetype[];
+  readonly momentTypes?: readonly SharedChatMomentType[];
+  readonly counterpartIds?: readonly string[];
+  readonly tags?: readonly string[];
+  readonly onlyUnresolved?: boolean;
+  readonly limit?: number;
+}
+
+export interface SharedChatSceneCarryoverSummary {
+  readonly playerId: string;
+  readonly generatedAt: number;
+  readonly unresolvedSceneIds: readonly string[];
+  readonly activeCounterpartIds: readonly string[];
+  readonly summaryLines: readonly string[];
+  readonly suggestedCallbackAnchorIds: readonly string[];
+}
