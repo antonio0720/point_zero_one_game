@@ -124,6 +124,13 @@ import {
   ChatInvasionDirector,
 } from './ChatInvasionDirector';
 
+import {
+  ChatRelationshipModel,
+  type ChatRelationshipLegacyProjection,
+  type ChatRelationshipNpcSignal,
+  type ChatRelationshipSnapshot,
+} from './intelligence/ChatRelationshipModel';
+
 // -----------------------------------------------------------------------------
 // Exported core types
 // -----------------------------------------------------------------------------
@@ -327,6 +334,32 @@ export interface ChatNpcDirectorSnapshot {
   lastAmbientAt: number;
   lastHelperAt: number;
   lastHaterAt: number;
+  phaseTwo?: ChatNpcDirectorPhaseTwoSnapshot;
+}
+
+export interface ChatNpcRelationshipOverlay {
+  counterpartId: string;
+  stance: string;
+  objective: string;
+  intensity01: number;
+  volatility01: number;
+  obsession01: number;
+  predictiveConfidence01: number;
+  unfinishedBusiness01: number;
+  respect01: number;
+  fear01: number;
+  contempt01: number;
+  familiarity01: number;
+  callbackLabel?: string;
+  legacy: ChatRelationshipLegacyProjection;
+}
+
+export interface ChatNpcDirectorPhaseTwoSnapshot {
+  relationshipRoutingEnabled: boolean;
+  relationshipSnapshot?: ChatRelationshipSnapshot;
+  overlays: readonly ChatNpcRelationshipOverlay[];
+  strongestCounterpartId?: string;
+  strongestCounterpartIntensity01?: number;
 }
 
 export interface ChatNpcDirectorCallbacks {
@@ -360,6 +393,7 @@ export interface ChatNpcDirectorConfig {
   allowTranscriptMirror?: boolean;
   allowSocketMirror?: boolean;
   allowInvasionEscalation?: boolean;
+  allowRelationshipRouting?: boolean;
   historyLimit?: number;
   dedupWindowMs?: number;
   log?: (message: string, context?: Record<string, unknown>) => void;
@@ -379,6 +413,8 @@ export interface ChatNpcDirectorOptions {
   runtime?: Partial<ChatNpcRuntimeState>;
   config?: ChatNpcDirectorConfig;
   callbacks?: ChatNpcDirectorCallbacks;
+  relationshipModel?: ChatRelationshipModel;
+  playerId?: string;
 }
 
 interface InternalPlanEntry {
@@ -390,11 +426,13 @@ interface InternalPlanEntry {
 interface HelperScore {
   persona: ChatNpcHelperPersona;
   score: number;
+  relationshipSignal?: ChatRelationshipNpcSignal;
 }
 
 interface HaterScore {
   persona: ChatNpcHaterPersona;
   score: number;
+  relationshipSignal?: ChatRelationshipNpcSignal;
 }
 
 const DEFAULT_CONFIG: Required<
@@ -421,6 +459,7 @@ const DEFAULT_CONFIG: Required<
     | 'allowTranscriptMirror'
     | 'allowSocketMirror'
     | 'allowInvasionEscalation'
+    | 'allowRelationshipRouting'
     | 'historyLimit'
     | 'dedupWindowMs'
   >
@@ -446,6 +485,7 @@ const DEFAULT_CONFIG: Required<
   allowTranscriptMirror: true,
   allowSocketMirror: true,
   allowInvasionEscalation: true,
+  allowRelationshipRouting: true,
   historyLimit: 180,
   dedupWindowMs: 1_200,
 };
@@ -1512,6 +1552,10 @@ export class ChatNpcDirector {
 
   private readonly runtime: ChatNpcRuntimeState;
 
+  private readonly relationshipModel: ChatRelationshipModel;
+
+  private readonly playerId?: string;
+
   private readonly active = new Map<string, InternalPlanEntry>();
 
   private readonly history: ChatNpcHistoryEntry[] = [];
@@ -1554,6 +1598,11 @@ export class ChatNpcDirector {
       ...deepClone(EMPTY_RUNTIME),
       ...(options.runtime ?? {}),
     };
+    this.playerId = options.playerId ?? this.runtime.playerId;
+    this.relationshipModel = options.relationshipModel ?? new ChatRelationshipModel({
+      playerId: this.playerId,
+      now: now() as any,
+    });
   }
 
   // ---------------------------------------------------------------------------
@@ -1598,6 +1647,7 @@ export class ChatNpcDirector {
       lastAmbientAt: this.lastAmbientAt,
       lastHelperAt: this.lastHelperAt,
       lastHaterAt: this.lastHaterAt,
+      phaseTwo: this.getPhaseTwoSnapshot(),
     };
   }
 
@@ -1632,6 +1682,13 @@ export class ChatNpcDirector {
 
     if (!context) return [];
 
+    this.noteRelationshipEventFromContext(context, {
+      channel: input.preferredChannel ?? this.runtime.activeChannel,
+      payload: input.payload,
+      createdAt: ts,
+      sourceEvent: input.eventType,
+    });
+
     const plans = this.stageContextPlans({
       context,
       reason: 'game_event',
@@ -1665,6 +1722,8 @@ export class ChatNpcDirector {
 
     const responseClass = classifyPlayerResponse(message.body);
     const context = mapPlayerResponseClassToContext(responseClass);
+
+    this.noteRelationshipFromPlayerMessage(message);
 
     const plans: ChatNpcPlan[] = [];
 
@@ -1725,6 +1784,13 @@ export class ChatNpcDirector {
           responseClass: 'UNKNOWN',
           payload: event.metadata,
           preferredTone: undefined,
+          relationshipSignal: this.buildRelationshipSignal({
+            counterpartId: actor.id,
+            actorRole: 'HATER',
+            context: this.runtime.isNegotiationWindow ? 'NEGOTIATION_WINDOW' : 'TIME_PRESSURE',
+            channel: preferred,
+            payload: event.metadata,
+          }),
         }),
       }),
       body: body || this.composeBody({
@@ -1734,6 +1800,13 @@ export class ChatNpcDirector {
         responseClass: 'UNKNOWN',
         payload: event.metadata,
         preferredTone: undefined,
+        relationshipSignal: this.buildRelationshipSignal({
+          counterpartId: actor.id,
+          actorRole: 'HATER',
+          context: this.runtime.isNegotiationWindow ? 'NEGOTIATION_WINDOW' : 'TIME_PRESSURE',
+          channel: preferred,
+          payload: event.metadata,
+        }),
       }),
       severity: this.runtime.isNegotiationWindow ? 'HIGH' : isHighPressure(this.runtime) ? 'HIGH' : 'MEDIUM',
       createdAt: ts,
@@ -1747,6 +1820,13 @@ export class ChatNpcDirector {
         attackType: event.attackType,
         targetLayer: event.targetLayer,
         isRetreat: event.isRetreat,
+        relationshipOverlay: this.serializeRelationshipSignal(this.buildRelationshipSignal({
+          counterpartId: actor.id,
+          actorRole: 'HATER',
+          context: this.runtime.isNegotiationWindow ? 'NEGOTIATION_WINDOW' : 'TIME_PRESSURE',
+          channel: preferred,
+          payload: event.metadata,
+        })),
         ...event.metadata,
       },
       shouldEscalate: !event.isRetreat && rankSeverity(isHighPressure(this.runtime) ? 'HIGH' : 'MEDIUM') >= 3,
@@ -1912,6 +1992,29 @@ export class ChatNpcDirector {
           ? HELPER_PERSONAS.RIVAL
           : HELPER_PERSONAS.SURVIVOR;
 
+    const relationshipSignal = this.buildRelationshipSignal({
+      counterpartId: helper.id,
+      actorRole: helper.actorRole,
+      context,
+      channel: input.sourceMessage.channel,
+      playerResponseClass: input.responseClass,
+      payload: {
+        playerBody: input.sourceMessage.body,
+      },
+    });
+
+    const body = this.composeBody({
+      actorRole: helper.actorRole,
+      actorId: helper.id,
+      context,
+      responseClass: input.responseClass,
+      payload: {
+        playerBody: input.sourceMessage.body,
+      },
+      preferredTone: 'direct_reply',
+      relationshipSignal,
+    });
+
     return this.createPlan({
       actorId: helper.id,
       actorName: helper.displayName,
@@ -1923,27 +2026,9 @@ export class ChatNpcDirector {
         preferredChannels: [input.sourceMessage.channel, ...(helper.preferredChannels ?? [])],
         role: helper.actorRole,
         context,
-        body: this.composeBody({
-          actorRole: helper.actorRole,
-          actorId: helper.id,
-          context,
-          responseClass: input.responseClass,
-          payload: {
-            playerBody: input.sourceMessage.body,
-          },
-          preferredTone: 'direct_reply',
-        }),
+        body,
       }),
-      body: this.composeBody({
-        actorRole: helper.actorRole,
-        actorId: helper.id,
-        context,
-        responseClass: input.responseClass,
-        payload: {
-          playerBody: input.sourceMessage.body,
-        },
-        preferredTone: 'direct_reply',
-      }),
+      body,
       severity: input.responseClass === 'QUESTION' ? 'LOW' : 'MEDIUM',
       createdAt: now(),
       emitDelayMs: helper.actorRole === 'HELPER' ? 520 : 430,
@@ -1954,6 +2039,7 @@ export class ChatNpcDirector {
       metadata: {
         directReply: true,
         sourceChannel: input.sourceMessage.channel,
+        relationshipOverlay: this.serializeRelationshipSignal(relationshipSignal),
       },
     });
   }
@@ -1975,6 +2061,15 @@ export class ChatNpcDirector {
     if (!scored) return null;
     if (this.isCoolingDown(this.helperCooldowns, scored.persona.id, this.config.helperCooldownMs)) return null;
 
+    const relationshipSignal = scored.relationshipSignal ?? this.buildRelationshipSignal({
+      counterpartId: scored.persona.id,
+      actorRole: scored.persona.actorRole,
+      context: input.context,
+      channel: input.preferredChannel ?? this.runtime.activeChannel,
+      playerResponseClass: input.playerResponseClass,
+      payload: input.payload,
+    });
+
     const body = this.composeBody({
       actorRole: scored.persona.actorRole,
       actorId: scored.persona.id,
@@ -1982,6 +2077,7 @@ export class ChatNpcDirector {
       responseClass: input.playerResponseClass ?? 'UNKNOWN',
       payload: input.payload,
       preferredTone: scored.persona.id,
+      relationshipSignal,
     });
 
     const preferredChannels = input.preferredChannel
@@ -2015,6 +2111,7 @@ export class ChatNpcDirector {
       playerResponseClass: input.playerResponseClass,
       metadata: {
         helperScore: scored.score,
+        relationshipOverlay: this.serializeRelationshipSignal(relationshipSignal),
         ...input.metadata,
       },
     });
@@ -2037,6 +2134,15 @@ export class ChatNpcDirector {
     if (!scored) return null;
     if (this.isCoolingDown(this.haterCooldowns, scored.persona.id, this.config.haterCooldownMs)) return null;
 
+    const relationshipSignal = scored.relationshipSignal ?? this.buildRelationshipSignal({
+      counterpartId: scored.persona.id,
+      actorRole: 'HATER',
+      context: input.context,
+      channel: input.preferredChannel ?? this.runtime.activeChannel,
+      playerResponseClass: input.playerResponseClass,
+      payload: input.payload,
+    });
+
     const body = this.composeBody({
       actorRole: 'HATER',
       actorId: scored.persona.id,
@@ -2044,6 +2150,7 @@ export class ChatNpcDirector {
       responseClass: input.playerResponseClass ?? 'UNKNOWN',
       payload: input.payload,
       preferredTone: scored.persona.archetype,
+      relationshipSignal,
     });
 
     const preferredChannels = input.preferredChannel
@@ -2066,7 +2173,9 @@ export class ChatNpcDirector {
         || input.context === 'CASCADE_CHAIN'
         || input.context === 'TIME_PRESSURE'
         || input.context === 'NEAR_SOVEREIGNTY'
-        || input.context === 'NEGOTIATION_WINDOW');
+        || input.context === 'NEGOTIATION_WINDOW'
+        || relationshipSignal.unfinishedBusiness01 >= 0.72
+        || relationshipSignal.obsession01 >= 0.74);
 
     return this.createPlan({
       actorId: scored.persona.id,
@@ -2088,6 +2197,7 @@ export class ChatNpcDirector {
       metadata: {
         haterScore: scored.score,
         archetype: scored.persona.archetype,
+        relationshipOverlay: this.serializeRelationshipSignal(relationshipSignal),
         ...input.metadata,
       },
       shouldEscalate,
@@ -2310,6 +2420,7 @@ export class ChatNpcDirector {
 
       if (invasion) {
         plan.state = 'ESCALATED';
+        this.noteRelationshipFromPlan(plan, now() as any);
         this.pushHistory(plan, 'ESCALATED');
         this.callbacks.onPlanEscalated?.(deepClone(plan), invasion.id);
         this.resolvePresence(plan);
@@ -2349,6 +2460,7 @@ export class ChatNpcDirector {
 
       plan.state = 'EMITTED';
       this.runtime.lastInboundMessageAt = message.ts;
+      this.noteRelationshipFromPlan(plan, message.ts as any);
       this.pushHistory(plan, 'EMITTED');
       this.callbacks.onPlanEmitted?.(deepClone(plan), deepClone(message));
     } catch (error) {
@@ -2440,14 +2552,23 @@ export class ChatNpcDirector {
     const all = Object.values(HELPER_PERSONAS)
       .filter((persona) => persona.triggerConditions.includes(context))
       .map((persona) => {
+        const relationshipSignal = this.config.allowRelationshipRouting
+          ? this.buildRelationshipSignal({
+              counterpartId: persona.id,
+              actorRole: persona.actorRole,
+              context,
+              channel: this.runtime.activeChannel,
+            })
+          : undefined;
         let score = persona.personality.frequency * 100;
         score += (this.runtime.coldStartFactor ?? 1) * persona.personality.coldStartBoost * 12;
         if (persona.actorRole === 'HELPER' && context === 'PLAYER_NEAR_BANKRUPTCY') score += 24;
         if (persona.actorRole === 'RIVAL' && (context === 'PLAYER_COMEBACK' || context === 'NEAR_SOVEREIGNTY')) score += 20;
         if (persona.actorRole === 'ARCHIVIST' && (this.runtime.isPostRun || context === 'POSTRUN_DEBRIEF')) score += 26;
         if ((this.runtime.engagementScore ?? 0) < 0.2) score += 8;
+        score += (relationshipSignal?.selectionWeight01 ?? 0) * 42;
         score += stableHash(`${persona.id}:${context}:${this.runtime.modeId ?? 'mode'}`) % 11;
-        return { persona, score };
+        return { persona, score, relationshipSignal };
       });
 
     if (all.length === 0) return null;
@@ -2459,6 +2580,14 @@ export class ChatNpcDirector {
     const all = Object.values(HATER_PERSONAS)
       .filter((persona) => persona.triggerConditions.includes(context))
       .map((persona) => {
+        const relationshipSignal = this.config.allowRelationshipRouting
+          ? this.buildRelationshipSignal({
+              counterpartId: persona.id,
+              actorRole: 'HATER',
+              context,
+              channel: this.runtime.activeChannel,
+            })
+          : undefined;
         let score = persona.personality.frequency * 100;
         score += (this.runtime.haterHeat ?? 0) * 0.9;
         if (persona.archetype === 'LIQUIDATOR' && (context === 'PLAYER_NEAR_BANKRUPTCY' || context === 'PLAYER_LOST')) score += 35;
@@ -2467,8 +2596,9 @@ export class ChatNpcDirector {
         if (persona.archetype === 'CRASH_PROPHET' && (context === 'CASCADE_CHAIN' || context === 'TIME_PRESSURE' || context === 'PLAYER_SHIELD_BREAK')) score += 33;
         if (persona.archetype === 'LEGACY_HEIR' && (context === 'NEAR_SOVEREIGNTY' || context === 'POSTRUN_DEBRIEF')) score += 32;
         if (isHighPressure(this.runtime)) score += 12;
+        score += (relationshipSignal?.selectionWeight01 ?? 0) * 55;
         score += stableHash(`${persona.id}:${context}:${this.runtime.tickTier ?? 'tick'}`) % 13;
-        return { persona, score };
+        return { persona, score, relationshipSignal };
       });
 
     if (all.length === 0) return null;
@@ -2483,6 +2613,7 @@ export class ChatNpcDirector {
     responseClass: ChatNpcPlayerResponseClass;
     payload?: Record<string, unknown>;
     preferredTone?: string;
+    relationshipSignal?: ChatRelationshipNpcSignal;
   }): string {
     const used = this.usedTemplates.get(input.actorId) ?? new Set<string>();
 
@@ -2508,7 +2639,15 @@ export class ChatNpcDirector {
     this.usedTemplates.set(input.actorId, used);
 
     const enriched = this.interpolateTemplate(chosen, input.payload);
-    return normalizeText(enriched);
+    const realized = input.relationshipSignal
+      ? this.relationshipModel.realizeNpcLine(enriched, input.relationshipSignal, {
+          actorRole: input.actorRole,
+          context: input.context,
+          channelId: this.runtime.activeChannel ?? undefined,
+          pressureBand: this.pressureBandFromRuntime(),
+        })
+      : enriched;
+    return normalizeText(realized);
   }
 
   private resolveTemplates(input: {
@@ -2618,6 +2757,132 @@ export class ChatNpcDirector {
     if (body.includes('volatility') || body.includes('macro')) return HATER_PERSONAS.BOT_04_CRASH_PROPHET;
     if (body.includes('inherited') || body.includes('family')) return HATER_PERSONAS.BOT_05_LEGACY_HEIR;
     return HATER_PERSONAS.BOT_01_LIQUIDATOR;
+  }
+
+  private getPhaseTwoSnapshot(): ChatNpcDirectorPhaseTwoSnapshot {
+    const relationshipSnapshot = this.relationshipModel.snapshot(now() as any);
+    const overlays = this.relationshipModel.summaries().slice(0, 12).map((summary) => ({
+      counterpartId: summary.counterpartId,
+      stance: summary.stance,
+      objective: summary.objective,
+      intensity01: summary.intensity01,
+      volatility01: summary.volatility01,
+      obsession01: summary.obsession01,
+      predictiveConfidence01: summary.predictiveConfidence01,
+      unfinishedBusiness01: summary.unfinishedBusiness01,
+      respect01: summary.respect01,
+      fear01: summary.fear01,
+      contempt01: summary.contempt01,
+      familiarity01: summary.familiarity01,
+      callbackLabel: summary.callbackCount > 0 ? `${summary.callbackCount} callback${summary.callbackCount === 1 ? '' : 's'}` : undefined,
+      legacy: summary.legacy,
+    }));
+
+    return {
+      relationshipRoutingEnabled: this.config.allowRelationshipRouting,
+      relationshipSnapshot,
+      overlays,
+      strongestCounterpartId: overlays[0]?.counterpartId,
+      strongestCounterpartIntensity01: overlays[0]?.intensity01,
+    };
+  }
+
+  private pressureBandFromRuntime(): 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL' {
+    const pressure = String(this.runtime.pressureTier ?? '').toUpperCase();
+    if (pressure === 'CRITICAL') return 'CRITICAL';
+    if (pressure === 'HIGH') return 'HIGH';
+    if (pressure === 'ELEVATED' || pressure === 'MEDIUM') return 'MEDIUM';
+    return 'LOW';
+  }
+
+  private buildRelationshipSignal(input: {
+    counterpartId: string;
+    actorRole: string;
+    context: ChatNpcContext;
+    channel?: ChatChannel;
+    playerResponseClass?: ChatNpcPlayerResponseClass;
+    payload?: Record<string, unknown>;
+  }): ChatRelationshipNpcSignal {
+    return this.relationshipModel.buildNpcSignal({
+      counterpartId: input.counterpartId,
+      actorRole: input.actorRole,
+      context: input.context,
+      channelId: input.channel ?? this.runtime.activeChannel ?? 'GLOBAL',
+      pressureBand: this.pressureBandFromRuntime(),
+      publicWitness01: (input.channel ?? this.runtime.activeChannel) === 'GLOBAL' || (input.channel ?? this.runtime.activeChannel) === 'LOBBY' ? 0.82 : 0.24,
+      now: now() as any,
+    });
+  }
+
+  private serializeRelationshipSignal(signal: ChatRelationshipNpcSignal | undefined): Record<string, unknown> | undefined {
+    if (!signal) return undefined;
+    return {
+      counterpartId: signal.counterpartId,
+      stance: signal.stance,
+      objective: signal.objective,
+      intensity01: signal.intensity01,
+      volatility01: signal.volatility01,
+      obsession01: signal.obsession01,
+      predictiveConfidence01: signal.predictiveConfidence01,
+      unfinishedBusiness01: signal.unfinishedBusiness01,
+      respect01: signal.respect01,
+      fear01: signal.fear01,
+      contempt01: signal.contempt01,
+      familiarity01: signal.familiarity01,
+      publicPressureBias01: signal.publicPressureBias01,
+      privatePressureBias01: signal.privatePressureBias01,
+      callbackHint: signal.callbackHint?.label,
+      notes: [...signal.notes],
+    };
+  }
+
+  private noteRelationshipFromPlayerMessage(message: ChatMessage): void {
+    const focusedCounterpart = this.relationshipModel.selectCounterpartFocus(message.channel);
+    this.relationshipModel.notePlayerMessage({
+      counterpartId: focusedCounterpart,
+      channelId: message.channel,
+      messageId: message.id,
+      body: message.body,
+      responseClass: classifyPlayerResponse(message.body),
+      pressureBand: this.pressureBandFromRuntime(),
+      tags: Array.isArray(message.metadata?.tags) ? message.metadata?.tags as string[] : undefined,
+      createdAt: message.ts as any,
+    });
+  }
+
+  private noteRelationshipEventFromContext(context: ChatNpcContext, input: {
+    channel?: ChatChannel;
+    payload?: Record<string, unknown>;
+    createdAt: number;
+    sourceEvent?: string;
+  }): void {
+    const counterpartId = typeof input.payload?.botId === 'string'
+      ? String(input.payload.botId)
+      : typeof input.payload?.actorId === 'string'
+        ? String(input.payload.actorId)
+        : this.relationshipModel.selectCounterpartFocus(input.channel ?? this.runtime.activeChannel);
+
+    this.relationshipModel.noteGameEvent({
+      counterpartId,
+      channelId: input.channel ?? this.runtime.activeChannel ?? 'GLOBAL',
+      eventType: input.sourceEvent ?? context,
+      pressureBand: this.pressureBandFromRuntime(),
+      summary: context,
+      tags: [String(context).toLowerCase()],
+      createdAt: input.createdAt as any,
+    });
+  }
+
+  private noteRelationshipFromPlan(plan: ChatNpcPlan, emittedAt: number): void {
+    this.relationshipModel.noteNpcUtterance({
+      counterpartId: plan.actorId,
+      actorRole: plan.actorRole,
+      channelId: plan.channel,
+      context: plan.context,
+      severity: plan.severity,
+      body: plan.body,
+      emittedAt: emittedAt as any,
+    });
   }
 
   // ---------------------------------------------------------------------------

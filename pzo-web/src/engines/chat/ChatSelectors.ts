@@ -105,6 +105,12 @@ import {
   isVisibleChannelId,
 } from './ChatState';
 
+import {
+  getPhaseTwoState,
+  type ChatEngineStateWithPhaseTwo,
+  type ChatPhaseTwoCounterpartProjection,
+} from './phase2/ChatStatePhaseTwo';
+
 // ============================================================================
 // MARK: Public selector view models
 // ============================================================================
@@ -283,6 +289,46 @@ export interface ChatRelationshipBadgeView {
   readonly trust: Score100;
   readonly rivalryIntensity: Score100;
   readonly dominantAxis?: 'RESPECT' | 'FEAR' | 'TRUST' | 'RIVALRY';
+  readonly label?: string;
+  readonly tone?: 'COLD' | 'TENSE' | 'RESPECTFUL' | 'PROTECTIVE' | 'OBSESSIVE';
+  readonly predictiveConfidence?: Score100;
+  readonly obsession?: Score100;
+  readonly unfinishedBusiness?: Score100;
+}
+
+export interface ChatRelationshipMomentView {
+  readonly counterpartId: string;
+  readonly label: string;
+  readonly stance: string;
+  readonly objective: string;
+  readonly intensity: Score100;
+  readonly volatility: Score100;
+  readonly respect: Score100;
+  readonly fear: Score100;
+  readonly contempt: Score100;
+  readonly predictiveConfidence: Score100;
+  readonly obsession: Score100;
+  readonly unfinishedBusiness: Score100;
+  readonly callbackCount: number;
+  readonly tone: 'COLD' | 'TENSE' | 'RESPECTFUL' | 'PROTECTIVE' | 'OBSESSIVE';
+}
+
+export interface ChatPrimaryCounterpartView {
+  readonly visible: boolean;
+  readonly counterpartId?: string;
+  readonly label?: string;
+  readonly stance?: string;
+  readonly objective?: string;
+  readonly intensity?: Score100;
+  readonly volatility?: Score100;
+  readonly callbackCount?: number;
+}
+
+export interface ChatRelationshipBannerView {
+  readonly visible: boolean;
+  readonly title?: string;
+  readonly body?: string;
+  readonly tone: 'COLD' | 'TENSE' | 'RESPECTFUL' | 'PROTECTIVE' | 'OBSESSIVE';
 }
 
 export interface ChatSceneOverlayView {
@@ -323,6 +369,9 @@ export interface ChatDockView {
   readonly silence: ChatSilenceOverlayView;
   readonly worldEvents: ChatWorldEventBadgeView;
   readonly emptyState: ChatEmptyStateView;
+  readonly relationshipMoments: readonly ChatRelationshipMomentView[];
+  readonly primaryCounterpart: ChatPrimaryCounterpartView;
+  readonly relationshipBanner: ChatRelationshipBannerView;
 }
 
 // ============================================================================
@@ -929,6 +978,8 @@ export function selectThreatMeterView(
   const band = selectThreatBand(state, channelId);
   const heat = state.audienceHeat[channelId];
   const intimidation = state.affect.vector.intimidation;
+  const primaryRelationship = selectPrimaryCounterpartView(state);
+  const relationshipIntensity = primaryRelationship.intensity ?? (0 as Score100);
 
   return {
     score,
@@ -945,9 +996,9 @@ export function selectThreatMeterView(
       audienceHeat: heat.heat,
       intimidation,
       scrutiny: heat.scrutiny,
-      volatility: heat.volatility,
+      volatility: score100((heat.volatility + relationshipIntensity) / 2),
     },
-    shouldPulse: band === 'HIGH' || band === 'CRITICAL',
+    shouldPulse: band === 'HIGH' || band === 'CRITICAL' || relationshipIntensity >= (70 as Score100),
   };
 }
 
@@ -972,6 +1023,9 @@ export function selectHelperPromptView(
 ): ChatHelperPromptView {
   const latest = selectLatestVisibleMessage(state);
   const rescueLikelihood = selectRescueLikelihood(state);
+  const primaryRelationship = selectPrimaryCounterpartView(state);
+  const moments = selectRelationshipMomentViews(state, { limit: 1 });
+  const strongestMoment = moments[0];
 
   if (latest?.kind === 'HELPER_RESCUE') {
     return {
@@ -993,13 +1047,25 @@ export function selectHelperPromptView(
     };
   }
 
+  if (strongestMoment?.tone === 'PROTECTIVE' && rescueLikelihood >= 55) {
+    return {
+      visible: true,
+      tone: 'DIGNITY',
+      title: `${strongestMoment.label} is protecting the lane`,
+      body: 'Relationship state indicates rescue timing should feel personal, not generic.',
+      personaId: strongestMoment.counterpartId,
+    };
+  }
+
   if (rescueLikelihood >= 70) {
     return {
       visible: true,
       tone: 'WARN',
       title: 'Intervention ready',
-      body: 'The room reads elevated drop-off risk. Helper timing is justified.',
-      personaId: 'MENTOR',
+      body: primaryRelationship.visible
+        ? `The room reads elevated drop-off risk. ${primaryRelationship.label ?? 'A counterpart'} is now part of the emotional calculation.`
+        : 'The room reads elevated drop-off risk. Helper timing is justified.',
+      personaId: strongestMoment?.counterpartId ?? 'MENTOR',
     };
   }
 
@@ -1159,6 +1225,123 @@ function dealRoomToneFromState(
   return 'PROBING';
 }
 
+function selectPhaseTwoSlice(state: ChatEngineState): ReturnType<typeof getPhaseTwoState> {
+  return getPhaseTwoState(state as ChatEngineStateWithPhaseTwo);
+}
+
+function selectPhaseTwoCounterpartProjections(
+  state: ChatEngineState,
+): readonly ChatPhaseTwoCounterpartProjection[] {
+  return Object.values(selectPhaseTwoSlice(state).counterpartProjectionsById);
+}
+
+function relationshipToneFromSummary(
+  summary: ChatPhaseTwoCounterpartProjection['summary'],
+): ChatRelationshipMomentView['tone'] {
+  if (summary.obsession01 >= 0.72 || summary.unfinishedBusiness01 >= 0.74) return 'OBSESSIVE';
+  if (summary.respect01 >= 0.62 && summary.contempt01 < 0.42) return 'RESPECTFUL';
+  if (summary.objective === 'RESCUE') return 'PROTECTIVE';
+  if (summary.intensity01 >= 0.64 || summary.volatility01 >= 0.60) return 'TENSE';
+  return 'COLD';
+}
+
+function counterpartLabel(counterpartId: string): string {
+  return counterpartId
+    .split(':')
+    .pop()
+    ?.replace(/[_-]/g, ' ')
+    ?.replace(/\b\w/g, (s) => s.toUpperCase()) ?? counterpartId;
+}
+
+export function selectRelationshipMomentViews(
+  state: ChatEngineState,
+  options: { readonly limit?: number } = {},
+): readonly ChatRelationshipMomentView[] {
+  const limit = options.limit ?? 5;
+  const projections = selectPhaseTwoCounterpartProjections(state);
+  if (projections.length === 0) {
+    return selectRelationshipStates(state)
+      .slice(0, limit)
+      .map((relationship) => ({
+        counterpartId: relationship.counterpartId,
+        label: counterpartLabel(relationship.counterpartId),
+        stance: relationship.escalationTier,
+        objective: relationship.escalationTier === 'OBSESSIVE' ? 'PRESSURE' : 'WITNESS',
+        intensity: score100((relationship.vector.rivalryIntensity + relationship.vector.fear + relationship.vector.respect) / 3),
+        volatility: score100((relationship.vector.fear + relationship.vector.rivalryIntensity) / 2),
+        respect: relationship.vector.respect,
+        fear: relationship.vector.fear,
+        contempt: relationship.vector.contempt,
+        predictiveConfidence: relationship.vector.fascination,
+        obsession: relationship.vector.rivalryIntensity,
+        unfinishedBusiness: relationship.vector.rivalryIntensity,
+        callbackCount: relationship.callbacksAvailable.length,
+        tone: relationship.escalationTier === 'OBSESSIVE' ? 'OBSESSIVE' : relationship.vector.respect >= relationship.vector.contempt ? 'RESPECTFUL' : 'TENSE',
+      }));
+  }
+
+  return projections
+    .sort((a, b) => b.summary.intensity01 - a.summary.intensity01 || a.counterpartId.localeCompare(b.counterpartId))
+    .slice(0, limit)
+    .map((projection) => ({
+      counterpartId: projection.counterpartId,
+      label: counterpartLabel(projection.counterpartId),
+      stance: projection.summary.stance,
+      objective: projection.summary.objective,
+      intensity: score100(projection.summary.intensity01 * 100),
+      volatility: score100(projection.summary.volatility01 * 100),
+      respect: score100(projection.summary.respect01 * 100),
+      fear: score100(projection.summary.fear01 * 100),
+      contempt: score100(projection.summary.contempt01 * 100),
+      predictiveConfidence: score100(projection.summary.predictiveConfidence01 * 100),
+      obsession: score100(projection.summary.obsession01 * 100),
+      unfinishedBusiness: score100(projection.summary.unfinishedBusiness01 * 100),
+      callbackCount: projection.summary.callbackCount,
+      tone: relationshipToneFromSummary(projection),
+    }));
+}
+
+export function selectPrimaryCounterpartView(
+  state: ChatEngineState,
+): ChatPrimaryCounterpartView {
+  const moments = selectRelationshipMomentViews(state, { limit: 1 });
+  const strongest = moments[0];
+  if (!strongest) return { visible: false };
+  return {
+    visible: true,
+    counterpartId: strongest.counterpartId,
+    label: strongest.label,
+    stance: strongest.stance,
+    objective: strongest.objective,
+    intensity: strongest.intensity,
+    volatility: strongest.volatility,
+    callbackCount: strongest.callbackCount,
+  };
+}
+
+export function selectRelationshipBannerView(
+  state: ChatEngineState,
+): ChatRelationshipBannerView {
+  const primary = selectPrimaryCounterpartView(state);
+  const moments = selectRelationshipMomentViews(state, { limit: 1 });
+  const moment = moments[0];
+  if (!primary.visible || !moment) {
+    return { visible: false, tone: 'COLD' };
+  }
+  const tone = moment.tone;
+  const title = `${moment.label} · ${moment.stance}`;
+  const body = tone === 'PROTECTIVE'
+    ? 'Helper pressure is shifting from general support into player-specific protection.'
+    : tone === 'RESPECTFUL'
+      ? 'A counterpart has moved from generic pressure into earned recognition.'
+      : tone === 'OBSESSIVE'
+        ? 'This rivalry is no longer generic. The system is tracking unfinished business.'
+        : tone === 'TENSE'
+          ? 'Relationship heat is now shaping who should speak and how sharp the line should land.'
+          : 'Relationship drift is active.';
+  return { visible: true, title, body, tone };
+}
+
 // ============================================================================
 // MARK: Relationship / memory selectors
 // ============================================================================
@@ -1193,6 +1376,33 @@ export function selectStrongestRelationship(
 export function selectRelationshipBadgeView(
   state: ChatEngineState,
 ): ChatRelationshipBadgeView {
+  const moments = selectRelationshipMomentViews(state, { limit: 1 });
+  const strongestMoment = moments[0];
+  if (strongestMoment) {
+    const dominantAxis = strongestMoment.respect >= strongestMoment.fear && strongestMoment.respect >= strongestMoment.unfinishedBusiness
+      ? 'RESPECT'
+      : strongestMoment.fear >= strongestMoment.unfinishedBusiness
+        ? 'FEAR'
+        : strongestMoment.contempt >= strongestMoment.respect
+          ? 'RIVALRY'
+          : 'TRUST';
+
+    return {
+      visible: true,
+      counterpartId: strongestMoment.counterpartId,
+      respect: strongestMoment.respect,
+      fear: strongestMoment.fear,
+      trust: score100((strongestMoment.respect + (100 - strongestMoment.contempt) + strongestMoment.predictiveConfidence) / 3),
+      rivalryIntensity: strongestMoment.unfinishedBusiness,
+      dominantAxis,
+      label: strongestMoment.label,
+      tone: strongestMoment.tone,
+      predictiveConfidence: strongestMoment.predictiveConfidence,
+      obsession: strongestMoment.obsession,
+      unfinishedBusiness: strongestMoment.unfinishedBusiness,
+    };
+  }
+
   const strongest = selectStrongestRelationship(state);
   if (!strongest) {
     return {
@@ -1214,6 +1424,11 @@ export function selectRelationshipBadgeView(
     trust: strongest.vector.trust,
     rivalryIntensity: strongest.vector.rivalryIntensity,
     dominantAxis,
+    label: counterpartLabel(strongest.counterpartId),
+    tone: strongest.escalationTier === 'OBSESSIVE' ? 'OBSESSIVE' : strongest.vector.respect >= strongest.vector.contempt ? 'RESPECTFUL' : 'TENSE',
+    predictiveConfidence: strongest.vector.fascination,
+    obsession: strongest.vector.rivalryIntensity,
+    unfinishedBusiness: strongest.vector.rivalryIntensity,
   };
 }
 
@@ -1431,6 +1646,9 @@ export function selectDockView(
     silence: selectSilenceOverlayView(state),
     worldEvents: selectWorldEventBadgeView(state),
     emptyState: selectEmptyStateView(state, activeChannel),
+    relationshipMoments: selectRelationshipMomentViews(state),
+    primaryCounterpart: selectPrimaryCounterpartView(state),
+    relationshipBanner: selectRelationshipBannerView(state),
   };
 }
 
