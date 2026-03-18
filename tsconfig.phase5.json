@@ -1,0 +1,20 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ES2020",
+    "moduleResolution": "node",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "lib": ["ES2020", "DOM"]
+  },
+  "include": [
+    "shared/contracts/chat/**/*.ts",
+    "pzo-web/src/engines/chat/intelligence/**/*.ts",
+    "pzo-web/src/engines/chat/npc/**/*.ts",
+    "backend/src/game/engine/chat/intelligence/**/*.ts",
+    "backend/src/game/engine/chat/npc/**/*.ts",
+    "pzo-server/src/chat/**/*.ts"
+  ]
+}
