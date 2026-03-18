@@ -1,3 +1,4 @@
+
 /**
  * ============================================================================
  * POINT ZERO ONE — FRONTEND CHAT RELATIONSHIP MODEL
@@ -22,11 +23,12 @@
  */
 
 import type { BotId } from '../../battle/types';
-import type { ChatFeatureSnapshot, ChatMessage, ChatVisibleChannel, UnixMs } from '../types';
+import type { ChatFeatureSnapshot, ChatVisibleChannel, UnixMs } from '../types';
 
 import {
   clamp01,
   emptyRelationshipVector,
+  type ChatRelationshipAxisId,
   type ChatRelationshipCallbackHint,
   type ChatRelationshipCounterpartKind,
   type ChatRelationshipCounterpartState,
@@ -41,6 +43,13 @@ import {
   type ChatRelationshipSummaryView,
   type ChatRelationshipVector,
 } from '../../../../../shared/contracts/chat/relationship';
+
+export type {
+  ChatRelationshipLegacyProjection,
+  ChatRelationshipNpcSignal,
+  ChatRelationshipSnapshot,
+  ChatRelationshipSummaryView,
+};
 
 export interface ChatRelationshipModelOptions {
   readonly playerId?: string | null;
@@ -98,12 +107,26 @@ export interface ChatRelationshipSignalRequest {
   readonly now?: UnixMs;
 }
 
-interface MutableRelationshipCounterpartState extends Omit<ChatRelationshipCounterpartState, 'callbackHints' | 'eventHistoryTail' | 'dominantAxes'> {
-  vector: ChatRelationshipVector;
-  callbackHints: ChatRelationshipCallbackHint[];
-  eventHistoryTail: ChatRelationshipEventDescriptor[];
-  dominantAxes: ChatRelationshipCounterpartState['dominantAxes'];
-}
+type ResponseClass = NonNullable<ChatRelationshipPlayerMessageInput['responseClass']>;
+type MutableRelationshipVector = { -readonly [K in keyof ChatRelationshipVector]: ChatRelationshipVector[K] };
+type MutableRelationshipEventDescriptor = { -readonly [K in keyof ChatRelationshipEventDescriptor]: ChatRelationshipEventDescriptor[K] };
+type MutableRelationshipCallbackHint = { -readonly [K in keyof ChatRelationshipCallbackHint]: ChatRelationshipCallbackHint[K] };
+type DominantAxis = ChatRelationshipCounterpartState['dominantAxes'][number];
+
+type MutableRelationshipCounterpartState = {
+  -readonly [K in keyof ChatRelationshipCounterpartState]:
+    K extends 'vector'
+      ? MutableRelationshipVector
+      : K extends 'callbackHints'
+        ? MutableRelationshipCallbackHint[]
+        : K extends 'eventHistoryTail'
+          ? MutableRelationshipEventDescriptor[]
+          : K extends 'dominantAxes'
+            ? DominantAxis[]
+            : ChatRelationshipCounterpartState[K];
+};
+
+type MutableRelationshipDelta = { -readonly [K in keyof ChatRelationshipVector]?: number };
 
 const HISTORY_LIMIT = 64;
 const CALLBACK_LIMIT = 12;
@@ -136,8 +159,8 @@ export class ChatRelationshipModel {
       this.counterparts.set(state.counterpartId, {
         ...state,
         vector: { ...state.vector },
-        callbackHints: [...state.callbackHints],
-        eventHistoryTail: [...state.eventHistoryTail],
+        callbackHints: state.callbackHints.map((hint) => ({ ...hint })),
+        eventHistoryTail: state.eventHistoryTail.map((event) => ({ ...event })),
         dominantAxes: [...state.dominantAxes],
       });
     }
@@ -154,13 +177,7 @@ export class ChatRelationshipModel {
       playerId: this.playerId ?? null,
       counterparts: [...this.counterparts.values()]
         .sort((a, b) => Number(b.lastTouchedAt) - Number(a.lastTouchedAt) || a.counterpartId.localeCompare(b.counterpartId))
-        .map((state) => ({
-          ...state,
-          vector: { ...state.vector },
-          callbackHints: [...state.callbackHints],
-          eventHistoryTail: [...state.eventHistoryTail],
-          dominantAxes: [...state.dominantAxes],
-        })),
+        .map((state) => this.cloneState(state)),
       totalEventCount: this.totalEventCount,
       focusedCounterpartByChannel: Object.fromEntries(this.focusedCounterpartByChannel.entries()),
     };
@@ -199,14 +216,24 @@ export class ChatRelationshipModel {
     }
 
     const candidates = candidateIds?.length
-      ? candidateIds.map((id) => this.counterparts.get(id)).filter(Boolean) as MutableRelationshipCounterpartState[]
+      ? candidateIds
+          .map((id) => this.counterparts.get(id))
+          .filter((value): value is MutableRelationshipCounterpartState => Boolean(value))
       : [...this.counterparts.values()];
 
     if (!candidates.length) return undefined;
 
     const selected = [...candidates].sort((a, b) => {
-      const scoreA = a.intensity01 * 0.45 + a.vector.obsession01 * 0.20 + a.vector.unfinishedBusiness01 * 0.20 + a.vector.predictiveConfidence01 * 0.15;
-      const scoreB = b.intensity01 * 0.45 + b.vector.obsession01 * 0.20 + b.vector.unfinishedBusiness01 * 0.20 + b.vector.predictiveConfidence01 * 0.15;
+      const scoreA =
+        a.intensity01 * 0.45 +
+        a.vector.obsession01 * 0.20 +
+        a.vector.unfinishedBusiness01 * 0.20 +
+        a.vector.predictiveConfidence01 * 0.15;
+      const scoreB =
+        b.intensity01 * 0.45 +
+        b.vector.obsession01 * 0.20 +
+        b.vector.unfinishedBusiness01 * 0.20 +
+        b.vector.predictiveConfidence01 * 0.15;
       return scoreB - scoreA || Number(b.lastTouchedAt) - Number(a.lastTouchedAt);
     })[0];
 
@@ -216,67 +243,77 @@ export class ChatRelationshipModel {
 
   public notePlayerMessage(input: ChatRelationshipPlayerMessageInput): void {
     const now = input.createdAt ?? (Date.now() as UnixMs);
-    const counterpartId = input.counterpartId ?? this.selectCounterpartFocus(input.channelId ?? undefined) ?? 'room:general';
-    const state = this.ensureCounterpart(counterpartId, input.counterpartKind ?? 'NPC', now, input.botId ?? null, 'PLAYER_TARGET');
+    const counterpartId =
+      input.counterpartId ??
+      this.selectCounterpartFocus(input.channelId ?? undefined) ??
+      'room:general';
+
+    const state = this.ensureCounterpart(
+      counterpartId,
+      input.counterpartKind ?? 'NPC',
+      now,
+      input.botId ?? null,
+      'PLAYER_TARGET',
+    );
 
     const body = String(input.body ?? '').trim();
     const normalized = body.toLowerCase();
-    const responseClass = input.responseClass ?? inferResponseClass(body);
+    const responseClass: ResponseClass = input.responseClass ?? inferResponseClass(body);
     const eventType = mapResponseClassToEventType(responseClass, normalized);
     const tags = new Set((input.tags ?? []).map((tag) => String(tag).toLowerCase()));
 
     const delta = blankDelta();
     if (responseClass === 'QUESTION') {
-      delta.fascination01 += 0.08;
-      delta.patience01 += 0.04;
-      delta.respect01 += 0.03;
+      delta.fascination01 = (delta.fascination01 ?? 0) + 0.08;
+      delta.patience01 = (delta.patience01 ?? 0) + 0.04;
+      delta.respect01 = (delta.respect01 ?? 0) + 0.03;
     } else if (responseClass === 'ANGRY') {
-      delta.contempt01 += 0.06;
-      delta.fear01 += 0.04;
-      delta.unfinishedBusiness01 += 0.06;
-      delta.predictiveConfidence01 += 0.03;
+      delta.contempt01 = (delta.contempt01 ?? 0) + 0.06;
+      delta.fear01 = (delta.fear01 ?? 0) + 0.04;
+      delta.unfinishedBusiness01 = (delta.unfinishedBusiness01 ?? 0) + 0.06;
+      delta.predictiveConfidence01 = (delta.predictiveConfidence01 ?? 0) + 0.03;
     } else if (responseClass === 'TROLL') {
-      delta.contempt01 += 0.04;
-      delta.fascination01 += 0.03;
-      delta.predictiveConfidence01 += 0.05;
+      delta.contempt01 = (delta.contempt01 ?? 0) + 0.04;
+      delta.fascination01 = (delta.fascination01 ?? 0) + 0.03;
+      delta.predictiveConfidence01 = (delta.predictiveConfidence01 ?? 0) + 0.05;
     } else if (responseClass === 'FLEX') {
-      delta.fear01 += 0.06;
-      delta.contempt01 += 0.03;
-      delta.unfinishedBusiness01 += 0.04;
+      delta.fear01 = (delta.fear01 ?? 0) + 0.06;
+      delta.contempt01 = (delta.contempt01 ?? 0) + 0.03;
+      delta.unfinishedBusiness01 = (delta.unfinishedBusiness01 ?? 0) + 0.04;
     } else if (responseClass === 'CALM') {
-      delta.respect01 += 0.07;
-      delta.patience01 += 0.06;
-      delta.predictiveConfidence01 -= 0.02;
+      delta.respect01 = (delta.respect01 ?? 0) + 0.07;
+      delta.patience01 = (delta.patience01 ?? 0) + 0.06;
+      delta.predictiveConfidence01 = (delta.predictiveConfidence01 ?? 0) - 0.02;
     }
 
     if (normalized.length <= 18) {
-      delta.predictiveConfidence01 += 0.05;
-      delta.familiarity01 += 0.02;
+      delta.predictiveConfidence01 = (delta.predictiveConfidence01 ?? 0) + 0.05;
+      delta.familiarity01 = (delta.familiarity01 ?? 0) + 0.02;
     } else if (normalized.length >= 100) {
-      delta.patience01 += 0.04;
-      delta.fascination01 += 0.03;
+      delta.patience01 = (delta.patience01 ?? 0) + 0.04;
+      delta.fascination01 = (delta.fascination01 ?? 0) + 0.03;
     }
 
     if (tags.has('shield') || normalized.includes('hold')) {
-      delta.respect01 += 0.03;
-      delta.patience01 += 0.02;
+      delta.respect01 = (delta.respect01 ?? 0) + 0.03;
+      delta.patience01 = (delta.patience01 ?? 0) + 0.02;
     }
     if (tags.has('offer') || String(input.channelId) === 'DEAL_ROOM') {
-      delta.fear01 += 0.03;
-      delta.predictiveConfidence01 += 0.04;
-      delta.unfinishedBusiness01 += 0.05;
+      delta.fear01 = (delta.fear01 ?? 0) + 0.03;
+      delta.predictiveConfidence01 = (delta.predictiveConfidence01 ?? 0) + 0.04;
+      delta.unfinishedBusiness01 = (delta.unfinishedBusiness01 ?? 0) + 0.05;
     }
     if (normalized.includes('proof') || normalized.includes('show')) {
-      delta.respect01 += 0.03;
-      delta.predictiveConfidence01 -= 0.02;
+      delta.respect01 = (delta.respect01 ?? 0) + 0.03;
+      delta.predictiveConfidence01 = (delta.predictiveConfidence01 ?? 0) - 0.02;
     }
     if (normalized.includes('sorry') || normalized.includes('my fault')) {
-      delta.contempt01 -= 0.03;
-      delta.familiarity01 += 0.04;
+      delta.contempt01 = (delta.contempt01 ?? 0) - 0.03;
+      delta.familiarity01 = (delta.familiarity01 ?? 0) + 0.04;
     }
     if (normalized.includes('comeback')) {
-      delta.respect01 += 0.06;
-      delta.unfinishedBusiness01 += 0.04;
+      delta.respect01 = (delta.respect01 ?? 0) + 0.06;
+      delta.unfinishedBusiness01 = (delta.unfinishedBusiness01 ?? 0) + 0.04;
     }
 
     this.applyDelta(state, delta, now, 0.85);
@@ -305,46 +342,53 @@ export class ChatRelationshipModel {
 
   public noteNpcUtterance(input: ChatRelationshipNpcUtteranceInput): void {
     const now = input.emittedAt ?? (Date.now() as UnixMs);
-    const state = this.ensureCounterpart(input.counterpartId, input.counterpartKind ?? kindFromActorRole(input.actorRole), now, input.botId ?? null, input.actorRole ?? null);
+    const state = this.ensureCounterpart(
+      input.counterpartId,
+      input.counterpartKind ?? kindFromActorRole(input.actorRole),
+      now,
+      input.botId ?? null,
+      input.actorRole ?? null,
+    );
+
     const severity = input.severity ?? 'MEDIUM';
     const delta = blankDelta();
 
     if (severity === 'CRITICAL') {
-      delta.fear01 += 0.08;
-      delta.obsession01 += 0.07;
-      delta.unfinishedBusiness01 += 0.08;
-      delta.predictiveConfidence01 += 0.06;
+      delta.fear01 = (delta.fear01 ?? 0) + 0.08;
+      delta.obsession01 = (delta.obsession01 ?? 0) + 0.07;
+      delta.unfinishedBusiness01 = (delta.unfinishedBusiness01 ?? 0) + 0.08;
+      delta.predictiveConfidence01 = (delta.predictiveConfidence01 ?? 0) + 0.06;
     } else if (severity === 'HIGH') {
-      delta.fear01 += 0.06;
-      delta.obsession01 += 0.05;
-      delta.predictiveConfidence01 += 0.05;
+      delta.fear01 = (delta.fear01 ?? 0) + 0.06;
+      delta.obsession01 = (delta.obsession01 ?? 0) + 0.05;
+      delta.predictiveConfidence01 = (delta.predictiveConfidence01 ?? 0) + 0.05;
     } else {
-      delta.familiarity01 += 0.03;
-      delta.predictiveConfidence01 += 0.02;
+      delta.familiarity01 = (delta.familiarity01 ?? 0) + 0.03;
+      delta.predictiveConfidence01 = (delta.predictiveConfidence01 ?? 0) + 0.02;
     }
 
     const lower = String(input.body ?? '').toLowerCase();
     if (isHelperRole(input.actorRole)) {
-      delta.respect01 += 0.06;
-      delta.patience01 += 0.05;
-      delta.traumaDebt01 += severity === 'CRITICAL' ? 0.08 : 0.04;
+      delta.respect01 = (delta.respect01 ?? 0) + 0.06;
+      delta.patience01 = (delta.patience01 ?? 0) + 0.05;
+      delta.traumaDebt01 = (delta.traumaDebt01 ?? 0) + (severity === 'CRITICAL' ? 0.08 : 0.04);
     } else if (isHaterRole(input.actorRole)) {
-      delta.contempt01 += 0.06;
-      delta.fascination01 += 0.04;
-      delta.unfinishedBusiness01 += 0.07;
+      delta.contempt01 = (delta.contempt01 ?? 0) + 0.06;
+      delta.fascination01 = (delta.fascination01 ?? 0) + 0.04;
+      delta.unfinishedBusiness01 = (delta.unfinishedBusiness01 ?? 0) + 0.07;
     } else if (isRivalRole(input.actorRole)) {
-      delta.respect01 += 0.04;
-      delta.fear01 += 0.03;
-      delta.unfinishedBusiness01 += 0.05;
+      delta.respect01 = (delta.respect01 ?? 0) + 0.04;
+      delta.fear01 = (delta.fear01 ?? 0) + 0.03;
+      delta.unfinishedBusiness01 = (delta.unfinishedBusiness01 ?? 0) + 0.05;
     } else if (isArchivistRole(input.actorRole)) {
-      delta.familiarity01 += 0.05;
-      delta.fascination01 += 0.05;
-      delta.patience01 += 0.03;
+      delta.familiarity01 = (delta.familiarity01 ?? 0) + 0.05;
+      delta.fascination01 = (delta.fascination01 ?? 0) + 0.05;
+      delta.patience01 = (delta.patience01 ?? 0) + 0.03;
     }
 
     if (lower.includes('remember') || lower.includes('again') || lower.includes('last time')) {
-      delta.obsession01 += 0.05;
-      delta.familiarity01 += 0.05;
+      delta.obsession01 = (delta.obsession01 ?? 0) + 0.05;
+      delta.familiarity01 = (delta.familiarity01 ?? 0) + 0.05;
       this.addCallbackHint(state, {
         callbackId: randomId('rel_cb', input.counterpartId, now),
         label: 'Callback seeded',
@@ -365,7 +409,14 @@ export class ChatRelationshipModel {
       channelId: input.channelId ?? null,
       pressureBand: severityToPressureBand(severity),
       publicWitness01: isPublicChannel(input.channelId) ? 0.82 : 0.18,
-      intensity01: severity === 'CRITICAL' ? 0.92 : severity === 'HIGH' ? 0.76 : severity === 'MEDIUM' ? 0.54 : 0.32,
+      intensity01:
+        severity === 'CRITICAL'
+          ? 0.92
+          : severity === 'HIGH'
+            ? 0.76
+            : severity === 'MEDIUM'
+              ? 0.54
+              : 0.32,
       summary: truncateSentence(input.body, 160),
       rawText: input.body,
       tags: [String(input.actorRole ?? 'NPC').toLowerCase(), String(input.context ?? 'utterance').toLowerCase()],
@@ -380,8 +431,18 @@ export class ChatRelationshipModel {
   public noteGameEvent(input: ChatRelationshipGameEventInput): void {
     const now = input.createdAt ?? (Date.now() as UnixMs);
     const eventType = mapGameEventToRelationshipEvent(input.eventType);
-    const counterpartId = input.counterpartId ?? this.selectCounterpartFocus(input.channelId ?? undefined) ?? 'room:general';
-    const state = this.ensureCounterpart(counterpartId, input.counterpartKind ?? 'NPC', now, input.botId ?? null, 'EVENT');
+    const counterpartId =
+      input.counterpartId ??
+      this.selectCounterpartFocus(input.channelId ?? undefined) ??
+      'room:general';
+
+    const state = this.ensureCounterpart(
+      counterpartId,
+      input.counterpartKind ?? 'NPC',
+      now,
+      input.botId ?? null,
+      'EVENT',
+    );
 
     const delta = deltaForGameEvent(eventType);
     this.applyDelta(state, delta, now, 0.90);
@@ -398,7 +459,7 @@ export class ChatRelationshipModel {
       intensity01: clamp01(0.40 + (eventType === 'PLAYER_COMEBACK' || eventType === 'PLAYER_COLLAPSE' ? 0.22 : 0.08)),
       summary: input.summary ?? humanizeEventType(eventType),
       rawText: input.summary ?? null,
-      tags: input.tags ?? [],
+      tags: [...(input.tags ?? [])],
       createdAt: now,
     });
 
@@ -422,10 +483,23 @@ export class ChatRelationshipModel {
       this.focusedCounterpartByChannel.set(request.channelId, request.counterpartId);
     }
 
-    const publicBias = clamp01((request.publicWitness01 ?? (isPublicChannel(request.channelId) ? 0.80 : 0.20)) * 0.55 + state.publicPressureBias01 * 0.45);
+    const publicBias = clamp01(
+      (request.publicWitness01 ?? (isPublicChannel(request.channelId) ? 0.80 : 0.20)) * 0.55 +
+      state.publicPressureBias01 * 0.45,
+    );
     const privateBias = clamp01(1 - publicBias * 0.72);
-    const intensity = clamp01(state.intensity01 * 0.68 + state.vector.unfinishedBusiness01 * 0.12 + state.vector.obsession01 * 0.12 + state.vector.predictiveConfidence01 * 0.08);
-    const volatility = clamp01(state.volatility01 * 0.62 + state.vector.fear01 * 0.12 + state.vector.contempt01 * 0.10 + (request.pressureBand === 'CRITICAL' ? 0.10 : request.pressureBand === 'HIGH' ? 0.06 : 0.02));
+    const intensity = clamp01(
+      state.intensity01 * 0.68 +
+      state.vector.unfinishedBusiness01 * 0.12 +
+      state.vector.obsession01 * 0.12 +
+      state.vector.predictiveConfidence01 * 0.08,
+    );
+    const volatility = clamp01(
+      state.volatility01 * 0.62 +
+      state.vector.fear01 * 0.12 +
+      state.vector.contempt01 * 0.10 +
+      (request.pressureBand === 'CRITICAL' ? 0.10 : request.pressureBand === 'HIGH' ? 0.06 : 0.02),
+    );
     const selectionWeight = clamp01(
       state.intensity01 * 0.32 +
       state.vector.obsession01 * 0.18 +
@@ -434,7 +508,7 @@ export class ChatRelationshipModel {
       state.vector.fascination01 * 0.08 +
       state.vector.respect01 * (isHelperRole(request.actorRole) ? 0.10 : 0.04) +
       state.vector.contempt01 * (isHaterRole(request.actorRole) ? 0.10 : 0.02) +
-      publicBias * (isHaterRole(request.actorRole) ? 0.08 : 0.03)
+      publicBias * (isHaterRole(request.actorRole) ? 0.08 : 0.03),
     );
 
     const notes: string[] = [];
@@ -480,7 +554,12 @@ export class ChatRelationshipModel {
     if (!line) return line;
 
     const lower = line.toLowerCase();
-    if (signal.callbackHint && !lower.includes('again') && !lower.includes('remember') && signal.unfinishedBusiness01 >= 0.68) {
+    if (
+      signal.callbackHint &&
+      !lower.includes('again') &&
+      !lower.includes('remember') &&
+      signal.unfinishedBusiness01 >= 0.68
+    ) {
       line = `${line} ${callbackTail(signal, options.actorRole)}`.trim();
     }
 
@@ -510,11 +589,33 @@ export class ChatRelationshipModel {
   }
 
   public projectLegacy(counterpartId: string): ChatRelationshipLegacyProjection {
-    const state = this.counterparts.get(counterpartId) ?? this.ensureCounterpart(counterpartId, 'NPC', Date.now() as UnixMs, null, null);
-    const trust = clamp01(state.vector.respect01 * 0.34 + state.vector.familiarity01 * 0.24 + state.vector.patience01 * 0.22 + (1 - state.vector.contempt01) * 0.20);
-    const rivalry = clamp01(state.vector.unfinishedBusiness01 * 0.40 + state.vector.obsession01 * 0.18 + state.vector.contempt01 * 0.24 + state.vector.fear01 * 0.18);
-    const rescueDebt = clamp01(state.vector.traumaDebt01 * 0.70 + state.vector.respect01 * 0.15 + state.vector.familiarity01 * 0.15);
-    const adviceObedience = clamp01(state.vector.patience01 * 0.48 + state.vector.respect01 * 0.24 + (1 - state.vector.contempt01) * 0.14 + state.vector.familiarity01 * 0.14);
+    const state =
+      this.counterparts.get(counterpartId) ??
+      this.ensureCounterpart(counterpartId, 'NPC', Date.now() as UnixMs, null, null);
+
+    const trust = clamp01(
+      state.vector.respect01 * 0.34 +
+      state.vector.familiarity01 * 0.24 +
+      state.vector.patience01 * 0.22 +
+      (1 - state.vector.contempt01) * 0.20,
+    );
+    const rivalry = clamp01(
+      state.vector.unfinishedBusiness01 * 0.40 +
+      state.vector.obsession01 * 0.18 +
+      state.vector.contempt01 * 0.24 +
+      state.vector.fear01 * 0.18,
+    );
+    const rescueDebt = clamp01(
+      state.vector.traumaDebt01 * 0.70 +
+      state.vector.respect01 * 0.15 +
+      state.vector.familiarity01 * 0.15,
+    );
+    const adviceObedience = clamp01(
+      state.vector.patience01 * 0.48 +
+      state.vector.respect01 * 0.24 +
+      (1 - state.vector.contempt01) * 0.14 +
+      state.vector.familiarity01 * 0.14,
+    );
 
     return {
       counterpartId,
@@ -527,13 +628,14 @@ export class ChatRelationshipModel {
       rivalryIntensity: Math.round(rivalry * 100),
       rescueDebt: Math.round(rescueDebt * 100),
       adviceObedience: Math.round(adviceObedience * 100),
-      escalationTier: rivalry >= 0.82 || state.vector.obsession01 >= 0.82
-        ? 'OBSESSIVE'
-        : rivalry >= 0.60 || state.intensity01 >= 0.72
-          ? 'ACTIVE'
-          : rivalry >= 0.34
-            ? 'MILD'
-            : 'NONE',
+      escalationTier:
+        rivalry >= 0.82 || state.vector.obsession01 >= 0.82
+          ? 'OBSESSIVE'
+          : rivalry >= 0.60 || state.intensity01 >= 0.72
+            ? 'ACTIVE'
+            : rivalry >= 0.34
+              ? 'MILD'
+              : 'NONE',
     };
   }
 
@@ -552,7 +654,9 @@ export class ChatRelationshipModel {
     }
 
     if (this.counterparts.size >= MAX_COUNTERPARTS) {
-      const oldest = [...this.counterparts.values()].sort((a, b) => Number(a.lastTouchedAt) - Number(b.lastTouchedAt))[0];
+      const oldest = [...this.counterparts.values()].sort(
+        (a, b) => Number(a.lastTouchedAt) - Number(b.lastTouchedAt),
+      )[0];
       if (oldest) this.counterparts.delete(oldest.counterpartId);
     }
 
@@ -563,9 +667,19 @@ export class ChatRelationshipModel {
       botId: botId != null ? String(botId) : null,
       actorRole: actorRole != null ? String(actorRole) : null,
       lastChannelId: null,
-      vector: emptyRelationshipVector(),
-      stance: counterpartKind === 'HELPER' ? 'PROTECTIVE' : counterpartKind === 'ARCHIVIST' ? 'CURIOUS' : 'PROBING',
-      objective: counterpartKind === 'HELPER' ? 'RESCUE' : counterpartKind === 'ARCHIVIST' ? 'WITNESS' : 'STUDY',
+      vector: { ...emptyRelationshipVector() },
+      stance:
+        counterpartKind === 'HELPER'
+          ? 'PROTECTIVE'
+          : counterpartKind === 'ARCHIVIST'
+            ? 'CURIOUS'
+            : 'PROBING',
+      objective:
+        counterpartKind === 'HELPER'
+          ? 'RESCUE'
+          : counterpartKind === 'ARCHIVIST'
+            ? 'WITNESS'
+            : 'STUDY',
       intensity01: 0.18,
       volatility01: 0.14,
       publicPressureBias01: 0.52,
@@ -575,12 +689,18 @@ export class ChatRelationshipModel {
       dominantAxes: ['FASCINATION', 'PATIENCE'],
       lastTouchedAt: now,
     };
+
     this.counterparts.set(counterpartId, created);
     return created;
   }
 
-  private applyDelta(state: MutableRelationshipCounterpartState, delta: Partial<ChatRelationshipVector>, now: UnixMs, weight: number): void {
-    const vector = { ...state.vector };
+  private applyDelta(
+    state: MutableRelationshipCounterpartState,
+    delta: MutableRelationshipDelta,
+    now: UnixMs,
+    weight: number,
+  ): void {
+    const vector: MutableRelationshipVector = { ...state.vector };
     vector.contempt01 = clamp01(vector.contempt01 + (delta.contempt01 ?? 0) * weight);
     vector.fascination01 = clamp01(vector.fascination01 + (delta.fascination01 ?? 0) * weight);
     vector.respect01 = clamp01(vector.respect01 + (delta.respect01 ?? 0) * weight);
@@ -588,15 +708,22 @@ export class ChatRelationshipModel {
     vector.obsession01 = clamp01(vector.obsession01 + (delta.obsession01 ?? 0) * weight);
     vector.patience01 = clamp01(vector.patience01 + (delta.patience01 ?? 0) * weight);
     vector.familiarity01 = clamp01(vector.familiarity01 + (delta.familiarity01 ?? 0) * weight);
-    vector.predictiveConfidence01 = clamp01(vector.predictiveConfidence01 + (delta.predictiveConfidence01 ?? 0) * weight);
+    vector.predictiveConfidence01 = clamp01(
+      vector.predictiveConfidence01 + (delta.predictiveConfidence01 ?? 0) * weight,
+    );
     vector.traumaDebt01 = clamp01(vector.traumaDebt01 + (delta.traumaDebt01 ?? 0) * weight);
-    vector.unfinishedBusiness01 = clamp01(vector.unfinishedBusiness01 + (delta.unfinishedBusiness01 ?? 0) * weight);
+    vector.unfinishedBusiness01 = clamp01(
+      vector.unfinishedBusiness01 + (delta.unfinishedBusiness01 ?? 0) * weight,
+    );
     state.vector = vector;
     state.lastTouchedAt = now;
   }
 
-  private recordEvent(state: MutableRelationshipCounterpartState, event: ChatRelationshipEventDescriptor): void {
-    state.eventHistoryTail.unshift(event);
+  private recordEvent(
+    state: MutableRelationshipCounterpartState,
+    event: ChatRelationshipEventDescriptor,
+  ): void {
+    state.eventHistoryTail.unshift({ ...event });
     if (state.eventHistoryTail.length > HISTORY_LIMIT) state.eventHistoryTail.length = HISTORY_LIMIT;
     this.totalEventCount += 1;
   }
@@ -636,8 +763,11 @@ export class ChatRelationshipModel {
     state.lastTouchedAt = now;
   }
 
-  private addCallbackHint(state: MutableRelationshipCounterpartState, hint: ChatRelationshipCallbackHint): void {
-    state.callbackHints.unshift(hint);
+  private addCallbackHint(
+    state: MutableRelationshipCounterpartState,
+    hint: ChatRelationshipCallbackHint,
+  ): void {
+    state.callbackHints.unshift({ ...hint });
     if (state.callbackHints.length > CALLBACK_LIMIT) state.callbackHints.length = CALLBACK_LIMIT;
   }
 
@@ -645,14 +775,14 @@ export class ChatRelationshipModel {
     return {
       ...state,
       vector: { ...state.vector },
-      callbackHints: [...state.callbackHints],
-      eventHistoryTail: [...state.eventHistoryTail],
+      callbackHints: state.callbackHints.map((hint) => ({ ...hint })),
+      eventHistoryTail: state.eventHistoryTail.map((event) => ({ ...event })),
       dominantAxes: [...state.dominantAxes],
     };
   }
 }
 
-function inferResponseClass(body: string): ChatRelationshipPlayerMessageInput['responseClass'] {
+function inferResponseClass(body: string): ResponseClass {
   const text = String(body ?? '').trim().toLowerCase();
   if (!text) return 'UNKNOWN';
   if (text.includes('?')) return 'QUESTION';
@@ -664,7 +794,7 @@ function inferResponseClass(body: string): ChatRelationshipPlayerMessageInput['r
 }
 
 function mapResponseClassToEventType(
-  responseClass: NonNullable<ChatRelationshipPlayerMessageInput['responseClass']>,
+  responseClass: ResponseClass,
   normalized: string,
 ): ChatRelationshipEventType {
   if (responseClass === 'QUESTION') return 'PLAYER_QUESTION';
@@ -676,7 +806,7 @@ function mapResponseClassToEventType(
   return 'PLAYER_MESSAGE';
 }
 
-function deltaForGameEvent(eventType: ChatRelationshipEventType): Partial<ChatRelationshipVector> {
+function deltaForGameEvent(eventType: ChatRelationshipEventType): MutableRelationshipDelta {
   switch (eventType) {
     case 'PLAYER_COMEBACK':
       return { respect01: 0.10, fear01: 0.06, unfinishedBusiness01: 0.08, fascination01: 0.05 };
@@ -718,7 +848,10 @@ function mapGameEventToRelationshipEvent(eventType: string): ChatRelationshipEve
   return 'PUBLIC_WITNESS';
 }
 
-function deriveStance(vector: ChatRelationshipVector, kind: ChatRelationshipCounterpartKind): ChatRelationshipStance {
+function deriveStance(
+  vector: ChatRelationshipVector,
+  kind: ChatRelationshipCounterpartKind,
+): ChatRelationshipStance {
   if (kind === 'HELPER') {
     if (vector.traumaDebt01 >= 0.55 || vector.patience01 >= 0.72) return 'PROTECTIVE';
     if (vector.respect01 >= 0.60) return 'RESPECTFUL';
@@ -751,8 +884,8 @@ function deriveObjective(
   return 'STUDY';
 }
 
-function dominantAxes(vector: ChatRelationshipVector): readonly ChatRelationshipCounterpartState['dominantAxes'][number][] {
-  const ranked = [
+function dominantAxes(vector: ChatRelationshipVector): DominantAxis[] {
+  const ranked: Array<readonly [ChatRelationshipAxisId, number]> = [
     ['CONTEMPT', vector.contempt01],
     ['FASCINATION', vector.fascination01],
     ['RESPECT', vector.respect01],
@@ -763,12 +896,18 @@ function dominantAxes(vector: ChatRelationshipVector): readonly ChatRelationship
     ['PREDICTIVE_CONFIDENCE', vector.predictiveConfidence01],
     ['TRAUMA_DEBT', vector.traumaDebt01],
     ['UNFINISHED_BUSINESS', vector.unfinishedBusiness01],
-  ] as const;
+  ];
 
-  return ranked.sort((a, b) => b[1] - a[1]).slice(0, 3).map((item) => item[0]);
+  return [...ranked]
+    .sort(
+      (a: readonly [ChatRelationshipAxisId, number], b: readonly [ChatRelationshipAxisId, number]) =>
+        b[1] - a[1],
+    )
+    .slice(0, 3)
+    .map((item: readonly [ChatRelationshipAxisId, number]) => item[0] as DominantAxis);
 }
 
-function blankDelta(): Partial<ChatRelationshipVector> {
+function blankDelta(): MutableRelationshipDelta {
   return {
     contempt01: 0,
     fascination01: 0,
@@ -837,7 +976,9 @@ function softenForRespect(line: string): string {
 }
 
 function sharpenForPressure(line: string, publicBias: boolean): string {
-  const suffix = publicBias ? ' Everyone in the room can hear the angle now.' : ' You are running out of quiet places to hide it.';
+  const suffix = publicBias
+    ? ' Everyone in the room can hear the angle now.'
+    : ' You are running out of quiet places to hide it.';
   return /\.$/.test(line) ? `${line.slice(0, -1)}.${suffix}` : `${line} ${suffix}`;
 }
 
@@ -861,7 +1002,8 @@ function normalizeSentence(line: string): string {
 }
 
 function isPublicChannel(channelId?: string | null): boolean {
-  return String(channelId ?? '').toUpperCase() === 'GLOBAL' || String(channelId ?? '').toUpperCase() === 'LOBBY';
+  const normalized = String(channelId ?? '').toUpperCase();
+  return normalized === 'GLOBAL' || normalized === 'LOBBY';
 }
 
 function truncateSentence(value: string, max: number): string {
@@ -874,7 +1016,7 @@ function humanizeEventType(value: string): string {
   return String(value ?? '')
     .toLowerCase()
     .replace(/_/g, ' ')
-    .replace(/\w/g, (char) => char.toUpperCase());
+    .replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
 function randomId(prefix: string, seed: string, now: number): string {
