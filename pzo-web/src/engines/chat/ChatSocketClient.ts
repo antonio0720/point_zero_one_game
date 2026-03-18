@@ -1691,16 +1691,18 @@ export function createChatSocketClient(
     args.callbacks,
   );
 
-  client.setIdentity({
-    playerId: args.playerId,
-    displayName: args.displayName,
-    accessToken: args.accessToken ?? null,
-    sessionId: args.sessionId,
-    runId: args.runId,
-    modeId: args.modeId,
-    syndicateId: args.syndicateId,
-    dealId: args.dealId,
-  });
+  client.setIdentity(
+    buildRuntimeSocketIdentity({
+      playerId: args.playerId,
+      displayName: args.displayName,
+      accessToken: args.accessToken ?? null,
+      sessionId: args.sessionId,
+      runId: args.runId,
+      modeId: args.modeId,
+      syndicateId: args.syndicateId,
+      dealId: args.dealId,
+    }),
+  );
 
   if (args.room) {
     client.bindRoom(args.room);
@@ -1780,5 +1782,27 @@ export function buildVisibilitySnapshot(input?: Partial<ChatRuntimeVisibility>):
     isWindowFocused: input?.isWindowFocused ?? true,
     isChatOpen: input?.isChatOpen ?? false,
     activeChannel: input?.activeChannel ?? 'GLOBAL',
+  };
+}
+
+export function buildRuntimeSocketIdentity(input: {
+  playerId: string;
+  displayName: string;
+  accessToken?: string | null;
+  sessionId?: string;
+  runId?: string;
+  modeId?: string;
+  syndicateId?: string;
+  dealId?: string;
+}): ChatSocketIdentity {
+  return {
+    playerId: input.playerId,
+    displayName: input.displayName,
+    accessToken: input.accessToken ?? null,
+    sessionId: input.sessionId,
+    runId: input.runId,
+    modeId: input.modeId,
+    syndicateId: input.syndicateId,
+    dealId: input.dealId,
   };
 }

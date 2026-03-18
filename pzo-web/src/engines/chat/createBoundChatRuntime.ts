@@ -9,26 +9,40 @@
  * - bind ChatEngine to the game event bus
  *
  * Fixes applied
- * - aligns socket bootstrap with current ChatSocketClient constructor contract
- *   (`endpoint`, `setIdentity`, `bindRoom`) instead of the stale `url` factory arg
- * - adapts ChatSocketClient to ChatEngine's async ChatTransportPort contract
- * - maps legacy local mount aliases into the canonical ChatMountTarget union
- * - normalizes disconnect reasons into the current ChatDisconnectReason union
- * - normalizes legacy typing states into the current ChatTypingState union
+ * - uses the current ChatSocketClient factory/helpers instead of a stale inline bootstrap
+ * - performs type-safe mount registration through ChatMountRegistry instead of `as any`
+ * - keeps socket identity/room binding aligned with run id, mode id, and mount target
+ * - groups authoritative frames by visible channel instead of collapsing mixed batches
+ * - mirrors window focus/visibility into both registry state and socket presence
+ * - forwards moderation, invasion, and sabotage transport signals into canonical system frames
  */
 
+import type { RunMode } from '../core/types';
 import {
   ChatEngine,
   type ChatEngineRuntimeInputs,
   type ChatTransportPort,
 } from './ChatEngine';
-import { ChatMountRegistry } from './ChatMountRegistry';
 import {
-  ChatSocketClient,
+  ChatMountRegistry,
+  buildChatMountRuntimeRegistration,
+} from './ChatMountRegistry';
+import {
+  buildChatRoomBinding,
+  buildRuntimeSocketIdentity,
+  buildVisibilitySnapshot,
+  createChatSocketClient,
+  type ChatAckPayload,
   type ChatChannel,
   type ChatDisconnectReason,
-  type ChatRoomBinding,
-  type ChatTypingState,
+  type ChatNotification,
+  type ChatPresenceDelta,
+  type ChatPresenceMember,
+  type ChatPresenceSnapshot,
+  type ChatReplayResponse,
+  type ChatSabotageEvent,
+  type ChatSocketClient,
+  type ChatTypingSignal,
 } from './ChatSocketClient';
 import type {
   ChatActorKind,
@@ -49,6 +63,9 @@ export interface ChatRuntimeBootstrapIdentity {
   readonly rank?: string;
   readonly sessionId: string;
   readonly runId: string;
+  readonly modeId?: string;
+  readonly syndicateId?: string;
+  readonly dealId?: string;
 }
 
 export type LegacyChatRuntimeMountTarget =
@@ -65,6 +82,7 @@ export interface ChatRuntimeBootstrapOptions {
   };
   readonly runtimeInputs: ChatEngineRuntimeInputs;
   readonly identity: ChatRuntimeBootstrapIdentity;
+  readonly runMode: RunMode;
 }
 
 export interface BoundChatRuntime {
@@ -118,11 +136,16 @@ function defaultVisibleChannelForMountTarget(
 
 function roomScopeForMountTarget(
   mountTarget: ChatMountTarget,
-): ChatRoomBinding['scope'] {
+): 'RUN' | 'LOBBY' | 'MODE' | 'ACCOUNT' | 'SYNDICATE' | 'DEAL' | 'CUSTOM' {
   switch (mountTarget) {
     case 'LOBBY_SCREEN':
     case 'CLUB_UI':
+    case 'LEAGUE_UI':
       return 'LOBBY';
+    case 'SYNDICATE_GAME_SCREEN':
+      return 'SYNDICATE';
+    case 'POST_RUN_SUMMARY':
+      return 'MODE';
     default:
       return 'RUN';
   }
@@ -137,7 +160,7 @@ function normalizeDisconnectReason(reason?: string): ChatDisconnectReason {
 
 function normalizeTypingState(
   state?: 'STARTED' | 'PAUSED' | 'STOPPED' | 'SIMULATED' | 'NOT_TYPING',
-): ChatTypingState {
+): 'STARTED' | 'STOPPED' {
   switch (state) {
     case 'STARTED':
     case 'SIMULATED':
@@ -150,8 +173,21 @@ function normalizeTypingState(
   }
 }
 
-
 function toVisibleChannel(channel?: string): ChatVisibleChannel {
+  switch (channel) {
+    case 'SYNDICATE':
+      return 'SYNDICATE';
+    case 'DEAL_ROOM':
+      return 'DEAL_ROOM';
+    case 'LOBBY':
+      return 'LOBBY';
+    case 'GLOBAL':
+    default:
+      return 'GLOBAL';
+  }
+}
+
+function toSocketChannel(channel?: ChatVisibleChannel): ChatChannel {
   switch (channel) {
     case 'SYNDICATE':
       return 'SYNDICATE';
@@ -248,7 +284,7 @@ function toEnginePresenceState(state: import('./ChatSocketClient').ChatPresenceS
   }
 }
 
-function inferActorKindFromPresence(member: import('./ChatSocketClient').ChatPresenceMember): ChatActorKind {
+function inferActorKindFromPresence(member: ChatPresenceMember): ChatActorKind {
   if (member.isHelper) return 'HELPER';
   if (member.isHater) return 'HATER';
   if (member.isNpc) return 'AMBIENT_NPC';
@@ -256,7 +292,7 @@ function inferActorKindFromPresence(member: import('./ChatSocketClient').ChatPre
 }
 
 function toEnginePresenceSnapshots(
-  snapshot: import('./ChatSocketClient').ChatPresenceSnapshot,
+  snapshot: ChatPresenceSnapshot,
 ): EngineChatPresenceSnapshot[] {
   return snapshot.members.map((member) => ({
     actorId: member.playerId,
@@ -270,7 +306,7 @@ function toEnginePresenceSnapshots(
 }
 
 function toEnginePresenceSnapshotsFromDelta(
-  delta: import('./ChatSocketClient').ChatPresenceDelta,
+  delta: ChatPresenceDelta,
 ): EngineChatPresenceSnapshot[] {
   const members = [
     ...(delta.joins ?? []),
@@ -286,17 +322,17 @@ function toEnginePresenceSnapshotsFromDelta(
 
   return members.map((member) => ({
     actorId: member.playerId,
-    actorKind: inferActorKindFromPresence(member as any),
-    channelId: toVisibleChannel((member as any).channel ?? delta.channel),
-    presence: toEnginePresenceState((member as any).state ?? 'OFFLINE'),
+    actorKind: inferActorKindFromPresence(member as ChatPresenceMember),
+    channelId: toVisibleChannel((member as ChatPresenceMember).channel ?? delta.channel),
+    presence: toEnginePresenceState((member as ChatPresenceMember).state ?? 'OFFLINE'),
     updatedAt: delta.serverTs as any,
-    isVisibleToPlayer: !(member as any).hidden,
+    isVisibleToPlayer: !(member as ChatPresenceMember).hidden,
     latencyMs: undefined,
   }));
 }
 
 function toEngineTypingSnapshot(
-  signal: import('./ChatSocketClient').ChatTypingSignal,
+  signal: ChatTypingSignal,
 ): EngineChatTypingSnapshot {
   return {
     actorId: signal.playerId,
@@ -325,6 +361,67 @@ function createFrameFromSocketMessages(args: {
   };
 }
 
+function createSystemFrame(args: {
+  roomId: ChatRoomId;
+  channel: ChatVisibleChannel;
+  body: string;
+  ts: number;
+  id: string;
+  metadata?: Record<string, unknown>;
+}): ChatAuthoritativeFrame {
+  return {
+    roomId: args.roomId,
+    channelId: args.channel,
+    messages: [
+      {
+        id: args.id as any,
+        channel: args.channel,
+        kind: 'SYSTEM',
+        senderId: 'system:socket',
+        senderName: 'SYSTEM',
+        body: args.body,
+        ts: args.ts,
+        meta: {
+          roomId: args.roomId,
+          insertedAt: args.ts as any,
+          ...(args.metadata ? { source: args.metadata.source } : {}),
+        },
+      },
+    ],
+    syncedAt: args.ts as any,
+  };
+}
+
+function applyFramesForMessages(
+  engine: ChatEngine,
+  roomId: ChatRoomId,
+  messages: readonly import('./ChatSocketClient').ChatMessage[],
+  syncedAt: number,
+): void {
+  const byChannel = new Map<ChatVisibleChannel, import('./ChatSocketClient').ChatMessage[]>();
+
+  for (const message of messages) {
+    const channel = toVisibleChannel(message.channel);
+    const bucket = byChannel.get(channel);
+    if (bucket) {
+      bucket.push(message);
+    } else {
+      byChannel.set(channel, [message]);
+    }
+  }
+
+  for (const [channelId, channelMessages] of byChannel.entries()) {
+    engine.applyAuthoritativeFrame(
+      createFrameFromSocketMessages({
+        roomId,
+        channelId,
+        syncedAt,
+        messages: channelMessages,
+      }),
+    );
+  }
+}
+
 function queueSocketGameEvent(
   socket: ChatSocketClient,
   eventType: string,
@@ -335,7 +432,11 @@ function queueSocketGameEvent(
     event: eventType,
     channel: 'GLOBAL',
     roomId,
-    metadata: payload as Record<string, unknown> | undefined,
+    metadata: payload && typeof payload === 'object'
+      ? payload as Record<string, unknown>
+      : payload === undefined
+        ? undefined
+        : { value: payload },
   });
 }
 
@@ -360,7 +461,7 @@ function createSocketTransportAdapter(socket: ChatSocketClient): ChatTransportPo
 
       await socket.sendMessage({
         clientMessageId: outbound.requestId,
-        channel: outbound.channelId as ChatChannel,
+        channel: toSocketChannel(outbound.channelId),
         body: outbound.body,
         immutable: outbound.immutable,
         proofHash: outbound.proofHash,
@@ -376,7 +477,7 @@ function createSocketTransportAdapter(socket: ChatSocketClient): ChatTransportPo
       };
 
       socket.queueTyping({
-        channel: typing.channelId as ChatChannel,
+        channel: toSocketChannel(typing.channelId),
         state: normalizeTypingState(typing.typingState ?? typing.state),
         expiresAt: typing.expiresAt,
       });
@@ -404,47 +505,26 @@ export function createBoundChatRuntime(
       engine.handleTransportError(context?.phase ? `${String(context.phase)}: ${error.message}` : error.message);
     },
     onMessage: (message: import('./ChatSocketClient').ChatMessage) => {
-      engine.applyAuthoritativeFrame(
-        createFrameFromSocketMessages({
-          roomId,
-          channelId: toVisibleChannel(message.channel),
-          syncedAt: message.ts,
-          messages: [message],
-        }),
-      );
+      applyFramesForMessages(engine, roomId, [message], message.ts);
     },
     onMessageBatch: (messages: import('./ChatSocketClient').ChatMessage[]) => {
       if (messages.length === 0) return;
-      engine.applyAuthoritativeFrame(
-        createFrameFromSocketMessages({
-          roomId,
-          channelId: toVisibleChannel(messages[messages.length - 1]?.channel),
-          syncedAt: Date.now(),
-          messages,
-        }),
-      );
+      applyFramesForMessages(engine, roomId, messages, Date.now());
     },
-    onReplay: (replay: import('./ChatSocketClient').ChatReplayResponse) => {
+    onReplay: (replay: ChatReplayResponse) => {
       if (replay.messages.length === 0) return;
-      engine.applyAuthoritativeFrame(
-        createFrameFromSocketMessages({
-          roomId,
-          channelId: toVisibleChannel(replay.channel),
-          syncedAt: replay.serverTs,
-          messages: replay.messages,
-        }),
-      );
+      applyFramesForMessages(engine, roomId, replay.messages, replay.serverTs);
     },
-    onPresenceSnapshot: (snapshot: import('./ChatSocketClient').ChatPresenceSnapshot) => {
+    onPresenceSnapshot: (snapshot: ChatPresenceSnapshot) => {
       engine.applyRemotePresence(toEnginePresenceSnapshots(snapshot));
     },
-    onPresenceDelta: (delta: import('./ChatSocketClient').ChatPresenceDelta) => {
+    onPresenceDelta: (delta: ChatPresenceDelta) => {
       engine.applyRemotePresence(toEnginePresenceSnapshotsFromDelta(delta));
     },
-    onTyping: (signal: import('./ChatSocketClient').ChatTypingSignal) => {
+    onTyping: (signal: ChatTypingSignal) => {
       engine.applyRemoteTyping([toEngineTypingSnapshot(signal)]);
     },
-    onAck: (ack: import('./ChatSocketClient').ChatAckPayload) => {
+    onAck: (ack: ChatAckPayload) => {
       if (!ack.accepted) {
         engine.handleTransportError(ack.reason ?? 'chat ack rejected');
         return;
@@ -458,48 +538,93 @@ export function createBoundChatRuntime(
         syncedAt: ack.ackTs as any,
       });
     },
-    onNotification: (notification: import('./ChatSocketClient').ChatNotification) => {
-      engine.applyAuthoritativeFrame({
-        roomId,
-        channelId: toVisibleChannel(notification.channel),
-        messages: [
-          {
-            id: `notif:${notification.id}` as any,
-            channel: toVisibleChannel(notification.channel),
-            kind: 'SYSTEM',
-            senderId: 'system:socket',
-            senderName: 'SYSTEM',
-            body: notification.body,
-            ts: notification.ts,
-            meta: {
-              roomId,
-              insertedAt: notification.ts as any,
-            },
-          },
-        ],
-        syncedAt: notification.ts as any,
-      });
+    onNotification: (notification: ChatNotification) => {
+      engine.applyAuthoritativeFrame(
+        createSystemFrame({
+          roomId,
+          channel: toVisibleChannel(notification.channel),
+          body: notification.body,
+          ts: notification.ts,
+          id: `notif:${notification.id}`,
+          metadata: { source: 'notification' },
+        }),
+      );
+    },
+    onModeration: (event) => {
+      engine.applyAuthoritativeFrame(
+        createSystemFrame({
+          roomId,
+          channel: toVisibleChannel(event.channel ?? 'GLOBAL'),
+          body: event.reason
+            ? `MODERATION: ${event.code} — ${event.reason}`
+            : `MODERATION: ${event.code}`,
+          ts: event.ts,
+          id: `moderation:${event.code}:${event.ts}`,
+          metadata: { source: 'moderation' },
+        }),
+      );
+    },
+    onInvasion: (event) => {
+      engine.applyAuthoritativeFrame(
+        createSystemFrame({
+          roomId,
+          channel: toVisibleChannel(event.channel),
+          body: event.body || event.title,
+          ts: event.ts,
+          id: `invasion:${event.id}`,
+          metadata: { source: 'invasion' },
+        }),
+      );
+    },
+    onSabotage: (event: ChatSabotageEvent) => {
+      engine.applyAuthoritativeFrame(
+        createSystemFrame({
+          roomId,
+          channel: 'GLOBAL',
+          body: event.dialogue
+            ?? `${event.botName ?? 'HATER'} triggered ${event.attackType ?? 'SABOTAGE'} on ${event.targetLayer ?? 'a shield layer'}.`,
+          ts: event.ts ?? Date.now(),
+          id: `sabotage:${event.botId ?? 'unknown'}:${event.ts ?? Date.now()}`,
+          metadata: { source: 'sabotage' },
+        }),
+      );
     },
   } satisfies Partial<import('./ChatSocketClient').ChatSocketClientCallbacks>;
 
-  const socket = new ChatSocketClient({
-    endpoint: options.websocketUrl,
-    autoConnect: false,
-  }, socketCallbacks);
-
-  socket.setIdentity({
+  const identity = buildRuntimeSocketIdentity({
     playerId: options.identity.userId,
     displayName: options.identity.displayName,
     sessionId: options.identity.sessionId,
     runId: options.identity.runId,
+    modeId: options.identity.modeId ?? options.runMode,
+    syndicateId: options.identity.syndicateId,
+    dealId: options.identity.dealId,
   });
 
-  socket.bindRoom({
-    scope: roomScopeForMountTarget(canonicalMountTarget),
-    roomId: options.identity.runId,
-    channel: defaultVisibleChannel as ChatChannel,
-    runId: options.identity.runId,
-    allowReplay: true,
+  const socket = createChatSocketClient({
+    endpoint: options.websocketUrl,
+    playerId: identity.playerId,
+    displayName: identity.displayName,
+    sessionId: identity.sessionId,
+    runId: identity.runId,
+    modeId: identity.modeId,
+    syndicateId: identity.syndicateId,
+    dealId: identity.dealId,
+    room: buildChatRoomBinding({
+      scope: roomScopeForMountTarget(canonicalMountTarget),
+      roomId: options.identity.runId,
+      channel: toSocketChannel(defaultVisibleChannel),
+      runId: options.identity.runId,
+      modeId: options.identity.modeId ?? options.runMode,
+      syndicateId: options.identity.syndicateId,
+      dealId: options.identity.dealId,
+      allowReplay: true,
+    }),
+    activeChannel: toSocketChannel(defaultVisibleChannel),
+    callbacks: socketCallbacks,
+    config: {
+      autoConnect: false,
+    },
   });
 
   const registry = new ChatMountRegistry();
@@ -520,7 +645,6 @@ export function createBoundChatRuntime(
     enableOptimisticAmbientLoop: true,
     localEchoWhenTransportMissing: true,
   });
-
 
   const relayableEventTypes = [
     'RUN_STARTED',
@@ -548,23 +672,90 @@ export function createBoundChatRuntime(
     }),
   );
 
-  registry.registerMount({
-    mountId: `chat:${options.identity.runId}:${canonicalMountTarget}` as any,
-    mountTarget: canonicalMountTarget,
-    roomId,
-    sessionId: options.identity.sessionId as ChatSessionId,
-    visibleChannel: defaultVisibleChannel,
-  } as any);
+  const registrationId = registry.registerMount(
+    buildChatMountRuntimeRegistration({
+      mountTarget: canonicalMountTarget,
+      mode: options.runMode,
+      isVisible: true,
+      isFocused: true,
+      collapsed: false,
+      containerId: `chat:${options.identity.runId}:${canonicalMountTarget}`,
+      sceneTag: canonicalMountTarget.toLowerCase(),
+    }),
+  );
+
+  const syncWindowState = (): void => {
+    const isWindowVisible =
+      typeof document === 'undefined' ? true : document.visibilityState !== 'hidden';
+    const isWindowFocused =
+      typeof document !== 'undefined' && typeof document.hasFocus === 'function'
+        ? document.hasFocus()
+        : true;
+    const activeChannel = socket.getStateSnapshot().activeChannel ?? toSocketChannel(defaultVisibleChannel);
+
+    socket.setVisibility(
+      buildVisibilitySnapshot({
+        isWindowVisible,
+        isWindowFocused,
+        isChatOpen: true,
+        activeChannel,
+      }),
+    );
+
+    registry.updateMount(registrationId, {
+      isVisible: isWindowVisible,
+      isFocused: isWindowFocused,
+      sceneTag: canonicalMountTarget.toLowerCase(),
+    });
+  };
+
+  const handleVisibilityChange = (): void => {
+    syncWindowState();
+  };
+
+  if (typeof window !== 'undefined') {
+    window.addEventListener('focus', handleVisibilityChange);
+    window.addEventListener('blur', handleVisibilityChange);
+  }
+  if (typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+  }
+  syncWindowState();
+
+  const unsubEngine = engine.subscribe((state) => {
+    const activeChannel = toSocketChannel(state.activeVisibleChannel);
+    socket.setVisibility(
+      buildVisibilitySnapshot({
+        isWindowVisible:
+          typeof document === 'undefined' ? true : document.visibilityState !== 'hidden',
+        isWindowFocused:
+          typeof document !== 'undefined' && typeof document.hasFocus === 'function'
+            ? document.hasFocus()
+            : true,
+        isChatOpen: true,
+        activeChannel,
+      }),
+    );
+  });
 
   return {
     engine,
     socket,
     registry,
     async destroy() {
+      unsubEngine();
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('focus', handleVisibilityChange);
+        window.removeEventListener('blur', handleVisibilityChange);
+      }
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
+      }
       for (const unsub of relayUnsubs) {
         unsub();
       }
       unbindEventBus();
+      registry.unregisterMount(registrationId);
       engine.destroy();
       await transport.disconnect?.('destroyed');
       socket.destroy();

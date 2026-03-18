@@ -45,6 +45,7 @@
  */
 
 import type { RunMode } from '../core/types';
+import type { ChatMountTarget } from './types';
 
 /**
  * Channels supported by the unified chat system.
@@ -78,6 +79,7 @@ export type ChatMountSurfaceId =
   | 'GAME_BOARD'
   | 'CLUB_UI'
   | 'LEAGUE_UI'
+  | 'POST_RUN_SUMMARY'
   | 'COUNTERPLAY_MODAL'
   | 'EMPIRE_BLEED_BANNER'
   | 'MOMENT_FLASH'
@@ -503,6 +505,24 @@ const DEFAULT_PRESETS: readonly ChatMountPreset[] = Object.freeze([
     dimensions: { minWidthPx: 340, maxWidthPx: 460, minHeightPx: 320, maxHeightPx: 620 },
     zIndex: 65,
     sceneTags: ['league', 'social', 'meta'],
+    features: DEFAULT_FEATURES,
+  }),
+  createPreset({
+    surfaceId: 'POST_RUN_SUMMARY',
+    surfaceKind: 'SCREEN',
+    intent: 'PRIMARY_DOCK',
+    priority: 74,
+    modes: ['solo', 'asymmetric-pvp', 'co-op', 'ghost'],
+    anchor: 'BOTTOM_RIGHT',
+    allowedChannels: ['GLOBAL', 'DEAL_ROOM', 'DM'],
+    collapsedByDefault: false,
+    visibilityPolicy: 'ALWAYS',
+    canOwnPrimaryFocus: true,
+    mirrorsCriticalAlerts: true,
+    supportsConcurrentMirrors: true,
+    dimensions: { minWidthPx: 340, maxWidthPx: 460, minHeightPx: 320, maxHeightPx: 620 },
+    zIndex: 64,
+    sceneTags: ['post-run', 'summary', 'results'],
     features: DEFAULT_FEATURES,
   }),
   createPreset({
@@ -1070,6 +1090,83 @@ export class ChatMountRegistry {
       listener(snapshot);
     }
   }
+}
+
+export function chatMountTargetToSurfaceId(
+  mountTarget: ChatMountTarget,
+): ChatMountSurfaceId {
+  switch (mountTarget) {
+    case 'BATTLE_HUD':
+      return 'BATTLE_HUD';
+    case 'CLUB_UI':
+      return 'CLUB_UI';
+    case 'EMPIRE_GAME_SCREEN':
+      return 'EMPIRE_GAME_SCREEN';
+    case 'GAME_BOARD':
+      return 'GAME_BOARD';
+    case 'LEAGUE_UI':
+      return 'LEAGUE_UI';
+    case 'LOBBY_SCREEN':
+      return 'LOBBY_SCREEN';
+    case 'PHANTOM_GAME_SCREEN':
+      return 'PHANTOM_GAME_SCREEN';
+    case 'PREDATOR_GAME_SCREEN':
+      return 'PREDATOR_GAME_SCREEN';
+    case 'SYNDICATE_GAME_SCREEN':
+      return 'SYNDICATE_GAME_SCREEN';
+    case 'POST_RUN_SUMMARY':
+      return 'POST_RUN_SUMMARY';
+    default:
+      return 'LOBBY_SCREEN';
+  }
+}
+
+export function resolveChatRegistryMode(
+  mode: RunMode | string,
+): RunMode {
+  switch (mode) {
+    case 'solo':
+    case 'asymmetric-pvp':
+    case 'co-op':
+    case 'ghost':
+      return mode;
+    case 'empire':
+      return 'solo';
+    case 'predator':
+    case 'pvp':
+      return 'asymmetric-pvp';
+    case 'syndicate':
+    case 'coop':
+      return 'co-op';
+    case 'phantom':
+      return 'ghost';
+    default:
+      return 'solo';
+  }
+}
+
+export function buildChatMountRuntimeRegistration(input: {
+  mountTarget: ChatMountTarget;
+  mode: RunMode | string;
+  widthPx?: number;
+  heightPx?: number;
+  isVisible?: boolean;
+  isFocused?: boolean;
+  collapsed?: boolean;
+  containerId?: string;
+  sceneTag?: string;
+}): ChatMountRuntimeRegistration {
+  return {
+    surfaceId: chatMountTargetToSurfaceId(input.mountTarget),
+    mode: resolveChatRegistryMode(input.mode),
+    widthPx: input.widthPx,
+    heightPx: input.heightPx,
+    isVisible: input.isVisible,
+    isFocused: input.isFocused,
+    collapsed: input.collapsed,
+    containerId: input.containerId,
+    sceneTag: input.sceneTag,
+  };
 }
 
 /**

@@ -567,6 +567,7 @@ function GameRuntimeShell({
     rank: 'Operator',
     sessionId: String(run.seed ?? run.runId ?? `${mode}-session-local`),
     runId: String(run.runId ?? `${mode}-run-local`),
+    modeId: mode,
   }), [mode, run.runId, run.seed, run.userId, user?.displayName, user?.id, user?.username]);
 
   const lifecycleState = run.lifecycleState ?? 'IDLE';
@@ -699,6 +700,7 @@ function GameRuntimeShell({
         topThreatBotId: battle.activeBots?.[0]?.botId ?? null,
       }),
       identity: chatIdentity,
+      runMode: mode,
     });
 
     setChatRuntime(runtime);
