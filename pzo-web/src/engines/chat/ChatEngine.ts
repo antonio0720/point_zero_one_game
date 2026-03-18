@@ -41,6 +41,8 @@ import type {
   BotState,
 } from '../battle/types';
 
+import { PressureTier as RuntimePressureTier } from '../pressure/types';
+
 import type {
   ChatAffectSnapshot,
   ChatAudienceHeat,
@@ -80,7 +82,10 @@ import type {
   ChatUpstreamSignal,
   ChatVisibleChannel,
   GameChatContext,
+  JsonObject,
+  JsonValue,
   Nullable,
+  PressureTier,
   Score100,
   TickTier,
   UnixMs,
@@ -127,9 +132,10 @@ import {
   upsertTypingSnapshotsInState,
 } from './ChatState';
 
-// ============================================================================
-// MARK: Runtime ports and adapter contracts
-// ============================================================================
+import {
+  createChatBotResponseDirector,
+  type PersonaPressureBand,
+} from './ChatBotResponseDirector';
 
 export interface ChatEngineObserver {
   (state: Readonly<ReturnType<typeof createChatEngineState>>): void;
@@ -204,6 +210,11 @@ interface ChatLocalPersona {
   readonly actorId: string;
 }
 
+interface HaterPersona extends ChatLocalPersona {
+  readonly botId: BotId;
+  readonly preferredPressure: readonly PersonaPressureBand[];
+}
+
 interface ChatSignalReactionPlan {
   readonly immediateMessages: readonly ChatMessage[];
   readonly delayedMessages: readonly {
@@ -213,7 +224,6 @@ interface ChatSignalReactionPlan {
   readonly scene?: ChatScenePlan;
   readonly silence?: ChatSilenceDecision;
   readonly audienceHeatDelta?: Partial<Record<'heat' | 'hype' | 'ridicule' | 'scrutiny' | 'volatility', number>>;
-  readonly affect?: ChatAffectSnapshot;
   readonly channelMood?: {
     readonly channelId: ChatVisibleChannel;
     readonly mood: 'CALM' | 'SUSPICIOUS' | 'HOSTILE' | 'ECSTATIC' | 'PREDATORY' | 'MOURNFUL';
@@ -230,10 +240,6 @@ interface ChatPendingRequest {
 }
 
 const DEFAULT_STORAGE_KEY = 'pzo.frontend.chat-engine.v1';
-
-// ============================================================================
-// MARK: No-op ports
-// ============================================================================
 
 const DEFAULT_CLOCK: ChatClockPort = {
   now: () => Date.now(),
@@ -255,32 +261,19 @@ const DEFAULT_PERSISTENCE: ChatPersistencePort = {
     try {
       globalThis.localStorage?.setItem(key, value);
     } catch {
-      //
+      // noop
     }
   },
   remove: (key) => {
     try {
       globalThis.localStorage?.removeItem(key);
     } catch {
-      //
+      // noop
     }
   },
 };
 
-// ============================================================================
-// MARK: Local temporary donor extraction mirrors
-// ============================================================================
-
-const HATER_PERSONAS: Record<
-  string,
-  ChatLocalPersona & {
-    readonly botId: BotId;
-    readonly preferredPressure: readonly PressureTier[];
-    readonly taunts: readonly string[];
-    readonly telegraphs: readonly string[];
-    readonly retreats: readonly string[];
-  }
-> = {
+const HATER_PERSONAS: Record<string, HaterPersona> = {
   BOT_01: {
     id: 'BOT_01',
     botId: 'BOT_01' as BotId,
@@ -288,20 +281,6 @@ const HATER_PERSONAS: Record<
     displayName: 'THE LIQUIDATOR',
     emoji: '⚔️',
     preferredPressure: ['HIGH', 'CRITICAL'],
-    telegraphs: [
-      'The floor is visible from here.',
-      'Stress always reprices assets faster than confidence can defend them.',
-      'You are one weak layer away from a clearance sale.',
-    ],
-    taunts: [
-      'Your assets are priced for distress. I am simply here to help the market find the floor.',
-      'You built momentum. I built a window to extract it.',
-      'Public confidence drops first. Then numbers follow.',
-    ],
-    retreats: [
-      'This window closes. Another opens.',
-      'You absorbed this round. The market keeps memory.',
-    ],
   },
   BOT_02: {
     id: 'BOT_02',
@@ -309,21 +288,7 @@ const HATER_PERSONAS: Record<
     actorId: 'npc:hater:bureaucrat',
     displayName: 'THE BUREAUCRAT',
     emoji: '📋',
-    preferredPressure: ['ELEVATED', 'HIGH', 'CRITICAL'],
-    telegraphs: [
-      'A filing issue has entered review.',
-      'Compliance friction is still friction, even when it smiles.',
-      'Everything is provisionally approved until it is not.',
-    ],
-    taunts: [
-      'Every income stream requires verification. There are forms. I am simply doing my job.',
-      'The system requires reserves. You appear to prefer improvisation.',
-      'Please hold while your optimism is processed.',
-    ],
-    retreats: [
-      'Your paperwork appears to be in order. For now.',
-      'We will revisit your compliance posture.',
-    ],
+    preferredPressure: ['MEDIUM', 'HIGH', 'CRITICAL'],
   },
   BOT_03: {
     id: 'BOT_03',
@@ -331,21 +296,7 @@ const HATER_PERSONAS: Record<
     actorId: 'npc:hater:manipulator',
     displayName: 'THE MANIPULATOR',
     emoji: '🧠',
-    preferredPressure: ['BUILDING', 'ELEVATED', 'HIGH', 'CRITICAL'],
-    telegraphs: [
-      'Predictable players become readable players.',
-      'You left a pattern. I left a trap inside it.',
-      'Behavior is inventory to the prepared mind.',
-    ],
-    taunts: [
-      'Predictable decisions create exploitable markets. I have been studying your moves before you made them.',
-      'You did not lose to chance. You lost to readability.',
-      'Your panic cadence is a better signal than any chart.',
-    ],
-    retreats: [
-      'You changed your pattern. Interesting.',
-      'I will need to recalibrate the model.',
-    ],
+    preferredPressure: ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'],
   },
   BOT_04: {
     id: 'BOT_04',
@@ -354,20 +305,6 @@ const HATER_PERSONAS: Record<
     displayName: 'THE CRASH PROPHET',
     emoji: '🌩️',
     preferredPressure: ['HIGH', 'CRITICAL'],
-    telegraphs: [
-      'Volatility is near. Faith does not hedge.',
-      'Macro always arrives as if it were personal.',
-      'You hear weather. I hear inevitability.',
-    ],
-    taunts: [
-      'The market always corrects. The only question is whether you are positioned to survive or be consumed.',
-      'This was not bad luck. It was scale colliding with fragility.',
-      'You were building. I was waiting for the correction.',
-    ],
-    retreats: [
-      'Volatility windows open and close. You survived this one.',
-      'The next will be different.',
-    ],
   },
   BOT_05: {
     id: 'BOT_05',
@@ -375,21 +312,7 @@ const HATER_PERSONAS: Record<
     actorId: 'npc:hater:legacy-heir',
     displayName: 'THE LEGACY HEIR',
     emoji: '👑',
-    preferredPressure: ['BUILDING', 'ELEVATED', 'HIGH'],
-    telegraphs: [
-      'Runway is culture before it becomes math.',
-      'You call it grit. I call it insufficient inheritance.',
-      'One bad quarter decides classes differently.',
-    ],
-    taunts: [
-      'You have done well. It would be a shame if the system remembered you were not born into this position.',
-      'This is why legacy matters. One bad quarter and you are done.',
-      'Generational wealth does not apologize. It compounds.',
-    ],
-    retreats: [
-      'You found a way through.',
-      'The system will need to recalibrate its thresholds for you.',
-    ],
+    preferredPressure: ['LOW', 'MEDIUM', 'HIGH'],
   },
 };
 
@@ -410,12 +333,15 @@ const HELPER_PERSONAS: Record<
     emoji: '🛡️',
     warmth: 0.82,
     directness: 0.78,
-    frequency: 0.30,
+    frequency: 0.3,
     rescueBias: 0.75,
     cues: [
       'Breathe. Read the state, not the fear.',
       'One clean decision beats five panicked reactions.',
       'If a breach is visible, recovery is still possible.',
+      'Precision beats panic every time the room gets loud.',
+      'Do not perform collapse for an audience that wants a witness.',
+      'Protect sequence first. Emotion can be processed after the line holds.',
     ],
   },
   INSIDER: {
@@ -423,14 +349,17 @@ const HELPER_PERSONAS: Record<
     actorId: 'npc:helper:insider',
     displayName: 'THE INSIDER',
     emoji: '🧭',
-    warmth: 0.40,
-    directness: 0.90,
-    frequency: 0.30,
+    warmth: 0.4,
+    directness: 0.9,
+    frequency: 0.3,
     rescueBias: 0.45,
     cues: [
       'The pattern is telling you where the trap is.',
       'You do not need more speed. You need a cleaner read.',
       'Watch timing. The window matters more than the noise.',
+      'Do not give the room fresh tells just because it got impatient.',
+      'Your leverage is in what you refuse to volunteer.',
+      'Delay can be a weapon if you stop apologizing for it.',
     ],
   },
   SURVIVOR: {
@@ -438,14 +367,17 @@ const HELPER_PERSONAS: Record<
     actorId: 'npc:helper:survivor',
     displayName: 'THE SURVIVOR',
     emoji: '🫶',
-    warmth: 1.00,
+    warmth: 1,
     directness: 0.52,
-    frequency: 0.40,
+    frequency: 0.4,
     rescueBias: 0.92,
     cues: [
       'I have seen worse states than this recover.',
       'Do not hand the hater your exit by panicking.',
       'You are not dead yet. That matters.',
+      'Survival is still a strategy when the room wants theater.',
+      'Hold your dignity. Collapse is easier to script than recovery.',
+      'One clean breath is still market-moving if it stops the spiral.',
     ],
   },
   RIVAL: {
@@ -456,11 +388,14 @@ const HELPER_PERSONAS: Record<
     warmth: 0.52,
     directness: 0.82,
     frequency: 0.35,
-    rescueBias: 0.30,
+    rescueBias: 0.3,
     cues: [
       'If you are close, act like it.',
       'Do not waste the comeback by apologizing for it.',
       'Pressure is permission to separate yourself.',
+      'Finish like you were expected to survive this.',
+      'Winning timidly still teaches the room the wrong lesson.',
+      'If the finish line noticed you, good. Make it remember why.',
     ],
   },
   ARCHIVIST: {
@@ -468,14 +403,17 @@ const HELPER_PERSONAS: Record<
     actorId: 'npc:helper:archivist',
     displayName: 'THE ARCHIVIST',
     emoji: '📚',
-    warmth: 0.30,
+    warmth: 0.3,
     directness: 0.62,
-    frequency: 0.20,
-    rescueBias: 0.20,
+    frequency: 0.2,
+    rescueBias: 0.2,
     cues: [
       'This moment will matter later.',
       'The run remembers patterns, not excuses.',
       'Every collapse line becomes future evidence.',
+      'Archive the correction, not just the celebration.',
+      'The room will quote what survives this minute.',
+      'Witness is a resource. Spend it carefully.',
     ],
   },
 };
@@ -487,6 +425,8 @@ const GLOBAL_AMBIENT_LINES = [
   'deal room went quiet. somebody is bluffing or bleeding',
   'one shield line can be the difference between story and obituary',
   'I swear the world watches strong runs harder than weak ones',
+  'somebody in here is one disciplined decision away from changing the room',
+  'the silence is usually where the expensive tells live',
 ] as const;
 
 const SYNDICATE_AMBIENT_LINES = [
@@ -494,20 +434,29 @@ const SYNDICATE_AMBIENT_LINES = [
   'do not leak fear into the room unless it earns us something',
   'we can survive ugly if we stay clean',
   'one teammate panic line can cost more than a bad card',
+  'syndicate chat should sound calmer than the battlefield looks',
+  'if one of us blinks, make sure it was paid for',
 ] as const;
 
 const DEAL_ROOM_AMBIENT_LINES = [
   'seen too many players rush a counteroffer because silence scared them',
   'read delay is pressure. do not volunteer your urgency',
   'the best deal-room move is often letting the other side feel observed',
+  'never over-explain inside a negotiation window',
+  'proof is strongest right after the room expected a concession',
+  'bluffing is cheap. controlled stillness is expensive',
 ] as const;
-
-// ============================================================================
-// MARK: Utility helpers
-// ============================================================================
 
 function unixNow(clock: ChatClockPort): UnixMs {
   return clock.now() as UnixMs;
+}
+
+function toUnixMs(value: number): UnixMs {
+  return value as UnixMs;
+}
+
+function addUnixMs(value: UnixMs, delta: number): UnixMs {
+  return ((value as number) + delta) as UnixMs;
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -529,9 +478,7 @@ function randomId(prefix: string): string {
 
 function chooseOne<T>(items: readonly T[], seed?: number): T {
   if (items.length === 1) return items[0];
-  const index = seed == null
-    ? Math.floor(Math.random() * items.length)
-    : Math.abs(seed) % items.length;
+  const index = seed == null ? Math.floor(Math.random() * items.length) : Math.abs(seed) % items.length;
   return items[index];
 }
 
@@ -540,17 +487,11 @@ function safeString(value: unknown, fallback: string): string {
   return fallback;
 }
 
-function visibleChannelAllowedInMount(
-  mountTarget: ChatMountTarget,
-  channelId: ChatVisibleChannel,
-): boolean {
+function visibleChannelAllowedInMount(mountTarget: ChatMountTarget, channelId: ChatVisibleChannel): boolean {
   return CHAT_MOUNT_PRESETS[mountTarget].allowedVisibleChannels.includes(channelId);
 }
 
-function nextAllowedChannelForMount(
-  mountTarget: ChatMountTarget,
-  preferred: ChatVisibleChannel,
-): ChatVisibleChannel {
+function nextAllowedChannelForMount(mountTarget: ChatMountTarget, preferred: ChatVisibleChannel): ChatVisibleChannel {
   if (visibleChannelAllowedInMount(mountTarget, preferred)) return preferred;
   return CHAT_MOUNT_PRESETS[mountTarget].defaultVisibleChannel;
 }
@@ -567,10 +508,6 @@ function buildRevealPayloadRef(kind: string): string {
   return randomId(`chat_reveal:${kind}`);
 }
 
-function systemSenderId(): string {
-  return 'SYSTEM';
-}
-
 function localPlayerIdentity(options: ChatEngineOptions): {
   readonly userId: string;
   readonly displayName: string;
@@ -583,20 +520,18 @@ function localPlayerIdentity(options: ChatEngineOptions): {
   };
 }
 
-function detectDominantPressure(
-  pressureTier?: PressureTier,
-  haterHeat?: number,
-): 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL' {
-  if (pressureTier === 'CRITICAL') return 'CRITICAL';
-  if (pressureTier === 'HIGH') return 'HIGH';
+function detectDominantPressure(pressureTier?: PressureTier, haterHeat?: number): PersonaPressureBand {
+  if (pressureTier === RuntimePressureTier.CRITICAL) return 'CRITICAL';
+  if (pressureTier === RuntimePressureTier.HIGH) return 'HIGH';
+  if (pressureTier === RuntimePressureTier.ELEVATED) return 'MEDIUM';
+  if (pressureTier === RuntimePressureTier.BUILDING) return 'LOW';
+  if ((haterHeat ?? 0) >= 75) return 'CRITICAL';
   if ((haterHeat ?? 0) >= 60) return 'HIGH';
-  if (pressureTier === 'ELEVATED') return 'MEDIUM';
+  if ((haterHeat ?? 0) >= 40) return 'MEDIUM';
   return 'LOW';
 }
 
-function moodForSignal(
-  signal: ChatUpstreamSignal,
-): 'CALM' | 'SUSPICIOUS' | 'HOSTILE' | 'ECSTATIC' | 'PREDATORY' | 'MOURNFUL' {
+function moodForSignal(signal: ChatUpstreamSignal): 'CALM' | 'SUSPICIOUS' | 'HOSTILE' | 'ECSTATIC' | 'PREDATORY' | 'MOURNFUL' {
   switch (signal.signalType) {
     case 'BOT_ATTACK_FIRED':
     case 'SHIELD_LAYER_BREACHED':
@@ -609,14 +544,14 @@ function moodForSignal(
     case 'SOVEREIGNTY_APPROACH':
     case 'SOVEREIGNTY_ACHIEVED':
       return 'ECSTATIC';
+    case 'RUN_ENDED':
+      return 'MOURNFUL';
     default:
       return 'CALM';
   }
 }
 
-function audienceDeltaForSignal(
-  signal: ChatUpstreamSignal,
-): Partial<Record<'heat' | 'hype' | 'ridicule' | 'scrutiny' | 'volatility', number>> {
+function audienceDeltaForSignal(signal: ChatUpstreamSignal): Partial<Record<'heat' | 'hype' | 'ridicule' | 'scrutiny' | 'volatility', number>> {
   switch (signal.signalType) {
     case 'BOT_ATTACK_FIRED':
       return { heat: 18, scrutiny: 14, volatility: 12 };
@@ -635,85 +570,44 @@ function audienceDeltaForSignal(
   }
 }
 
-function affectForSignal(
-  signal: ChatUpstreamSignal,
-  current: ChatAffectSnapshot,
-): ChatAffectSnapshot {
+function affectForSignal(signal: ChatUpstreamSignal, current: ChatAffectSnapshot): ChatAffectSnapshot {
   const vector = { ...current.vector };
-
   switch (signal.signalType) {
     case 'SHIELD_LAYER_BREACHED':
-      vector.intimidation = score100(vector.intimidation + 18);
-      vector.frustration = score100(vector.frustration + 12);
-      vector.desperation = score100(vector.desperation + 10);
-      vector.confidence = score100(vector.confidence - 14);
-      return {
-        vector,
-        lastUpdatedAt: signal.emittedAt,
-        dominantEmotion: 'INTIMIDATION',
-        confidenceSwingDelta: -14,
-      };
+      vector.intimidation = score100((vector.intimidation as number) + 18);
+      vector.frustration = score100((vector.frustration as number) + 12);
+      vector.desperation = score100((vector.desperation as number) + 10);
+      vector.confidence = score100((vector.confidence as number) - 14);
+      return { vector, lastUpdatedAt: signal.emittedAt, dominantEmotion: 'INTIMIDATION', confidenceSwingDelta: -14 };
     case 'BOT_ATTACK_FIRED':
-      vector.intimidation = score100(vector.intimidation + 14);
-      vector.desperation = score100(vector.desperation + 8);
-      vector.confidence = score100(vector.confidence - 10);
-      return {
-        vector,
-        lastUpdatedAt: signal.emittedAt,
-        dominantEmotion: 'INTIMIDATION',
-        confidenceSwingDelta: -10,
-      };
+      vector.intimidation = score100((vector.intimidation as number) + 14);
+      vector.desperation = score100((vector.desperation as number) + 8);
+      vector.confidence = score100((vector.confidence as number) - 10);
+      return { vector, lastUpdatedAt: signal.emittedAt, dominantEmotion: 'INTIMIDATION', confidenceSwingDelta: -10 };
     case 'CASCADE_CHAIN_STARTED':
-      vector.frustration = score100(vector.frustration + 10);
-      vector.curiosity = score100(vector.curiosity + 4);
-      return {
-        vector,
-        lastUpdatedAt: signal.emittedAt,
-        dominantEmotion: 'FRUSTRATION',
-        confidenceSwingDelta: -4,
-      };
+      vector.frustration = score100((vector.frustration as number) + 10);
+      vector.curiosity = score100((vector.curiosity as number) + 4);
+      return { vector, lastUpdatedAt: signal.emittedAt, dominantEmotion: 'FRUSTRATION', confidenceSwingDelta: -4 };
     case 'CASCADE_CHAIN_BROKEN':
-      vector.relief = score100(vector.relief + 16);
-      vector.confidence = score100(vector.confidence + 8);
-      vector.desperation = score100(vector.desperation - 8);
-      return {
-        vector,
-        lastUpdatedAt: signal.emittedAt,
-        dominantEmotion: 'RELIEF',
-        confidenceSwingDelta: 8,
-      };
+      vector.relief = score100((vector.relief as number) + 16);
+      vector.confidence = score100((vector.confidence as number) + 8);
+      vector.desperation = score100((vector.desperation as number) - 8);
+      return { vector, lastUpdatedAt: signal.emittedAt, dominantEmotion: 'RELIEF', confidenceSwingDelta: 8 };
     case 'SOVEREIGNTY_APPROACH':
-      vector.confidence = score100(vector.confidence + 10);
-      vector.curiosity = score100(vector.curiosity + 8);
-      return {
-        vector,
-        lastUpdatedAt: signal.emittedAt,
-        dominantEmotion: 'CONFIDENCE',
-        confidenceSwingDelta: 10,
-      };
+      vector.confidence = score100((vector.confidence as number) + 10);
+      vector.curiosity = score100((vector.curiosity as number) + 8);
+      return { vector, lastUpdatedAt: signal.emittedAt, dominantEmotion: 'CONFIDENCE', confidenceSwingDelta: 10 };
     case 'SOVEREIGNTY_ACHIEVED':
-      vector.confidence = score100(vector.confidence + 24);
-      vector.relief = score100(vector.relief + 18);
-      vector.dominance = score100(vector.dominance + 20);
-      return {
-        vector,
-        lastUpdatedAt: signal.emittedAt,
-        dominantEmotion: 'DOMINANCE',
-        confidenceSwingDelta: 24,
-      };
+      vector.confidence = score100((vector.confidence as number) + 24);
+      vector.relief = score100((vector.relief as number) + 18);
+      vector.dominance = score100((vector.dominance as number) + 20);
+      return { vector, lastUpdatedAt: signal.emittedAt, dominantEmotion: 'DOMINANCE', confidenceSwingDelta: 24 };
     default:
-      return {
-        ...current,
-        vector,
-        lastUpdatedAt: signal.emittedAt,
-      };
+      return { ...current, vector, lastUpdatedAt: signal.emittedAt };
   }
 }
 
-function signalTargetChannel(
-  signal: ChatUpstreamSignal,
-  mountTarget: ChatMountTarget,
-): ChatVisibleChannel {
+function signalTargetChannel(signal: ChatUpstreamSignal, mountTarget: ChatMountTarget): ChatVisibleChannel {
   switch (signal.signalType) {
     case 'RUN_STARTED':
       return visibleChannelAllowedInMount(mountTarget, 'LOBBY') ? 'LOBBY' : 'GLOBAL';
@@ -724,9 +618,43 @@ function signalTargetChannel(
   }
 }
 
-// ============================================================================
-// MARK: Public engine
-// ============================================================================
+function isPressureTierSignal(signal: ChatUpstreamSignal): signal is ChatUpstreamSignal & { readonly signalType: 'PRESSURE_TIER_CHANGED'; readonly nextTier: PressureTier; readonly score?: number } {
+  return signal.signalType === 'PRESSURE_TIER_CHANGED' && 'nextTier' in signal;
+}
+
+function isTickTierSignal(signal: ChatUpstreamSignal): signal is ChatUpstreamSignal & { readonly signalType: 'TICK_TIER_CHANGED'; readonly nextTier: TickTier } {
+  return signal.signalType === 'TICK_TIER_CHANGED' && 'nextTier' in signal;
+}
+
+function isShieldBreachSignal(signal: ChatUpstreamSignal): signal is ChatUpstreamSignal & { readonly signalType: 'SHIELD_LAYER_BREACHED'; readonly layerId: string; readonly integrityAfter: number } {
+  return signal.signalType === 'SHIELD_LAYER_BREACHED' && 'layerId' in signal;
+}
+
+function isBotAttackSignal(signal: ChatUpstreamSignal): signal is ChatUpstreamSignal & { readonly signalType: 'BOT_ATTACK_FIRED'; readonly botId: BotId; readonly attackType?: string; readonly targetLayerId?: string } {
+  return signal.signalType === 'BOT_ATTACK_FIRED' && 'botId' in signal;
+}
+
+function isCascadeSignal(signal: ChatUpstreamSignal): signal is ChatUpstreamSignal & { readonly signalType: 'CASCADE_CHAIN_STARTED' | 'CASCADE_CHAIN_BROKEN'; readonly chainId: string; readonly severity?: string } {
+  return (signal.signalType === 'CASCADE_CHAIN_STARTED' || signal.signalType === 'CASCADE_CHAIN_BROKEN') && 'chainId' in signal;
+}
+
+function toJsonValue(value: unknown): JsonValue {
+  if (value == null) return null;
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return value;
+  if (Array.isArray(value)) return value.map((item) => toJsonValue(item));
+  if (typeof value === 'object') {
+    const out: JsonObject = {};
+    for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+      out[key] = toJsonValue(entry);
+    }
+    return out;
+  }
+  return String(value);
+}
+
+function toJsonObject(value: Record<string, unknown>): JsonObject {
+  return toJsonValue(value) as JsonObject;
+}
 
 export class ChatEngine implements ChatEnginePublicApi {
   private readonly transport?: ChatTransportPort;
@@ -741,36 +669,25 @@ export class ChatEngine implements ChatEnginePublicApi {
   private readonly revealPayloads = new Map<string, ChatMessage>();
   private readonly pendingRequests = new Map<string, ChatPendingRequest>();
   private readonly eventBusUnsubs: Array<() => void> = [];
-
-  // ── Patched: stored player identity ──────────────────────────────────────
-  private readonly playerIdentity: {
-    readonly userId: string;
-    readonly displayName: string;
-    readonly rank?: string;
-  };
-
-  // ── Patched: telemetry tracking fields ───────────────────────────────────
-  private lastChannelHopAt: UnixMs = 0 as UnixMs;
-  private channelHopCount = 0;
-  private failedInputCount = 0;
-  private repeatedComposerDeletes = 0;
-  private lastDraftLengths: Partial<Record<ChatVisibleChannel, number>> = {};
+  private readonly botResponseDirector = createChatBotResponseDirector();
+  private readonly playerIdentity: { readonly userId: string; readonly displayName: string; readonly rank?: string };
 
   private panelOpen = false;
   private panelCollapsed = false;
   private lastPanelOpenedAt: UnixMs = 0 as UnixMs;
   private lastMeaningfulIncomingAt: UnixMs = 0 as UnixMs;
   private lastSignalAt: UnixMs = 0 as UnixMs;
+  private lastChannelHopAt: UnixMs = 0 as UnixMs;
+  private channelHopCount = 0;
+  private failedInputCount = 0;
+  private repeatedComposerDeletes = 0;
+  private lastDraftLengths: Partial<Record<ChatVisibleChannel, number>> = {};
   private ambientTimer: unknown = null;
   private maintenanceInterval: unknown = null;
   private destroyed = false;
 
   private runtimeInputs: ChatEngineRuntimeInputs;
   public state: ReturnType<typeof createChatEngineState>;
-
-  // --------------------------------------------------------------------------
-  // MARK: Constructor — patched
-  // --------------------------------------------------------------------------
 
   constructor(options: ChatEngineOptions = {}) {
     this.transport = options.transport;
@@ -780,8 +697,6 @@ export class ChatEngine implements ChatEnginePublicApi {
     this.storageKey = options.storageKey ?? DEFAULT_STORAGE_KEY;
     this.enableOptimisticAmbientLoop = options.enableOptimisticAmbientLoop ?? true;
     this.localEchoWhenTransportMissing = options.localEchoWhenTransportMissing ?? true;
-
-    // Store player identity once — used in stageMessage and setLocalTyping
     this.playerIdentity = localPlayerIdentity(options);
 
     const mountTarget = options.mountTarget ?? 'LOBBY_SCREEN';
@@ -832,15 +747,6 @@ export class ChatEngine implements ChatEnginePublicApi {
     this.panelCollapsed = CHAT_MOUNT_PRESETS[mountTarget].defaultCollapsed;
     this.tryHydrateFromCache();
 
-    // Force typed ownership of these imported types so they are part of live
-    // runtime paths, not dead imports.
-    const connectionSnapshot: ChatConnectionState = this.state.connection;
-    const notificationSnapshot: ChatNotificationState = this.state.notifications;
-    const currentTickTier: TickTier | undefined = this.runtimeInputs.run.tickTier;
-    void connectionSnapshot;
-    void notificationSnapshot;
-    void currentTickTier;
-
     if (options.autoConnect && this.transport?.connect) {
       void this.transport.connect().then(() => {
         this.handleTransportConnected(this.state.connection.sessionId);
@@ -859,10 +765,6 @@ export class ChatEngine implements ChatEnginePublicApi {
     });
   }
 
-  // --------------------------------------------------------------------------
-  // MARK: Subscriptions / observers
-  // --------------------------------------------------------------------------
-
   subscribe(observer: ChatEngineObserver): () => void {
     this.observers.add(observer);
     observer(this.state);
@@ -879,16 +781,8 @@ export class ChatEngine implements ChatEnginePublicApi {
     for (const observer of this.observers) observer(snapshot);
   }
 
-  private emitEngineEvent<TName extends ChatEngineEventName>(
-    name: TName,
-    payload: ChatEngineEventPayloadMap[TName],
-  ): void {
-    const event: ChatEngineEvent<TName> = {
-      name,
-      payload,
-      emittedAt: this.now(),
-    };
-
+  private emitEngineEvent<TName extends ChatEngineEventName>(name: TName, payload: ChatEngineEventPayloadMap[TName]): void {
+    const event: ChatEngineEvent<TName> = { name, payload, emittedAt: this.now() };
     for (const observer of this.eventObservers) observer(event);
   }
 
@@ -897,14 +791,6 @@ export class ChatEngine implements ChatEnginePublicApi {
     this.persist();
     this.notifyObservers();
   }
-
-  // --------------------------------------------------------------------------
-  // MARK: Private typed diagnostic helpers — patched
-  //        These make CHAT_CHANNEL_DESCRIPTORS, CHAT_VISIBLE_CHANNELS,
-  //        isDealRoomChannel, isVisibleChannelId, ChatConnectionState,
-  //        ChatNotificationState, ChatPresenceState, BotState, and TickTier
-  //        part of real runtime paths instead of dead imports.
-  // --------------------------------------------------------------------------
 
   private getConnectionSnapshot(): Readonly<ChatConnectionState> {
     return this.state.connection;
@@ -915,8 +801,7 @@ export class ChatEngine implements ChatEnginePublicApi {
   }
 
   private getDominantPresenceStates(): readonly ChatPresenceState[] {
-    return Object.values(this.state.presenceByActorId)
-      .map((snapshot) => snapshot.presence);
+    return Object.values(this.state.presenceByActorId).map((snapshot) => snapshot.presence);
   }
 
   private inferThreatBotState(): BotState {
@@ -942,27 +827,25 @@ export class ChatEngine implements ChatEnginePublicApi {
   private trackDraftEdit(channelId: ChatVisibleChannel, nextDraft: string): void {
     const previousLength = this.lastDraftLengths[channelId] ?? 0;
     const nextLength = nextDraft.length;
-    if (previousLength > 0 && nextLength === 0) {
-      this.repeatedComposerDeletes += 1;
-    }
+    if (previousLength > 0 && nextLength === 0) this.repeatedComposerDeletes += 1;
     this.lastDraftLengths[channelId] = nextLength;
   }
-
-  // --------------------------------------------------------------------------
-  // MARK: Public runtime state controls — patched
-  // --------------------------------------------------------------------------
 
   mount(nextTarget: ChatMountTarget): void {
     if (this.destroyed) return;
     if (this.state.activeMountTarget === nextTarget) return;
 
     const preset = CHAT_MOUNT_PRESETS[nextTarget];
-    let next = cloneChatEngineState(this.state);
-    next.activeMountTarget = nextTarget;
-    next.continuity = {
-      ...next.continuity,
-      lastMountTarget: nextTarget,
+    const base = cloneChatEngineState(this.state);
+    let next: ReturnType<typeof createChatEngineState> = {
+      ...base,
+      activeMountTarget: nextTarget,
+      continuity: {
+        ...base.continuity,
+        lastMountTarget: nextTarget,
+      },
     };
+
     next = setActiveVisibleChannelInState(
       next,
       nextAllowedChannelForMount(nextTarget, next.activeVisibleChannel),
@@ -980,8 +863,6 @@ export class ChatEngine implements ChatEnginePublicApi {
     this.commit(next);
   }
 
-  // ── Patched: uses assertVisibleChannel, isVisibleChannelId,
-  //            getChannelDescriptor, isDealRoomChannel ────────────────────────
   setVisibleChannel(nextChannel: ChatVisibleChannel): void {
     if (this.destroyed) return;
 
@@ -995,11 +876,7 @@ export class ChatEngine implements ChatEnginePublicApi {
     const descriptor = this.getChannelDescriptor(allowed);
     let next = setActiveVisibleChannelInState(this.state, allowed);
     next = markChannelReadInState(next, allowed);
-    next = setComposerDisabledInState(
-      next,
-      !descriptor.supportsComposer,
-      descriptor.supportsComposer ? undefined : `composer_disabled:${descriptor.id}`,
-    );
+    next = setComposerDisabledInState(next, !descriptor.supportsComposer, descriptor.supportsComposer ? undefined : `composer_disabled:${descriptor.id}`);
 
     this.channelHopCount += 1;
     this.lastChannelHopAt = this.now();
@@ -1015,28 +892,17 @@ export class ChatEngine implements ChatEnginePublicApi {
       supportsPresence: descriptor.supportsPresence,
     }, allowed);
 
-    this.emitEngineEvent('CHAT_CHANNEL_CHANGED', {
-      from: previous,
-      to: allowed,
-      at: this.now(),
-    });
+    this.emitEngineEvent('CHAT_CHANNEL_CHANGED', { from: previous, to: allowed, at: this.now() });
   }
 
-  // ── Patched: uses getChannelDescriptor, getNotificationSnapshot ──────────
   openPanel(): void {
-    if (this.destroyed) return;
-    if (this.panelOpen) return;
-
+    if (this.destroyed || this.panelOpen) return;
     this.panelOpen = true;
     this.lastPanelOpenedAt = this.now();
 
     const descriptor = this.getChannelDescriptor(this.state.activeVisibleChannel);
     let next = markChannelReadInState(this.state, this.state.activeVisibleChannel);
-    next = setComposerDisabledInState(
-      next,
-      !descriptor.supportsComposer,
-      descriptor.supportsComposer ? undefined : `composer_disabled:${descriptor.id}`,
-    );
+    next = setComposerDisabledInState(next, !descriptor.supportsComposer, descriptor.supportsComposer ? undefined : `composer_disabled:${descriptor.id}`);
     this.commit(next);
 
     const notifications = this.getNotificationSnapshot();
@@ -1050,11 +916,8 @@ export class ChatEngine implements ChatEnginePublicApi {
   }
 
   closePanel(): void {
-    if (this.destroyed) return;
-    if (!this.panelOpen) return;
-
+    if (this.destroyed || !this.panelOpen) return;
     this.panelOpen = false;
-
     void this.emitTelemetry('chat_closed', {
       activeChannel: this.state.activeVisibleChannel,
       mountTarget: this.state.activeMountTarget,
@@ -1066,7 +929,6 @@ export class ChatEngine implements ChatEnginePublicApi {
     this.panelCollapsed = !this.panelCollapsed;
   }
 
-  // ── Patched: tracks draft edits ──────────────────────────────────────────
   setDraft(channelId: ChatVisibleChannel, draft: string): void {
     if (this.destroyed) return;
     this.trackDraftEdit(channelId, draft);
@@ -1075,41 +937,23 @@ export class ChatEngine implements ChatEnginePublicApi {
   }
 
   updateRunSnapshot(patch: Partial<ChatRunSnapshotReader>): void {
-    this.runtimeInputs = {
-      ...this.runtimeInputs,
-      run: { ...this.runtimeInputs.run, ...patch },
-    };
+    this.runtimeInputs = { ...this.runtimeInputs, run: { ...this.runtimeInputs.run, ...patch } };
   }
 
   updateBattleSnapshot(patch: Partial<ChatBattleSnapshotReader>): void {
-    this.runtimeInputs = {
-      ...this.runtimeInputs,
-      battle: { ...this.runtimeInputs.battle, ...patch },
-    };
+    this.runtimeInputs = { ...this.runtimeInputs, battle: { ...this.runtimeInputs.battle, ...patch } };
   }
 
   updateMechanicsSnapshot(patch: Partial<ChatMechanicsBridgeReader>): void {
-    this.runtimeInputs = {
-      ...this.runtimeInputs,
-      mechanics: { ...this.runtimeInputs.mechanics, ...patch },
-    };
+    this.runtimeInputs = { ...this.runtimeInputs, mechanics: { ...this.runtimeInputs.mechanics, ...patch } };
   }
 
   updateModeSnapshot(patch: Partial<ChatModeReader>): void {
-    this.runtimeInputs = {
-      ...this.runtimeInputs,
-      mode: { ...this.runtimeInputs.mode, ...patch },
-    };
+    this.runtimeInputs = { ...this.runtimeInputs, mode: { ...this.runtimeInputs.mode, ...patch } };
   }
 
-  // --------------------------------------------------------------------------
-  // MARK: Transport / connection
-  // --------------------------------------------------------------------------
-
   async connect(): Promise<void> {
-    if (this.destroyed) return;
-    if (!this.transport?.connect) return;
-
+    if (this.destroyed || !this.transport?.connect) return;
     this.commit(transitionConnectionState(this.state, {
       status: 'CONNECTING',
       retryCount: this.state.connection.retryCount,
@@ -1130,7 +974,7 @@ export class ChatEngine implements ChatEnginePublicApi {
       try {
         await this.transport.disconnect(reason);
       } catch {
-        //
+        // noop
       }
     }
     this.handleTransportDisconnected(reason);
@@ -1145,7 +989,6 @@ export class ChatEngine implements ChatEnginePublicApi {
     });
     next = setComposerDisabledInState(next, false);
     this.commit(next);
-
     this.emitEngineEvent('CHAT_ENGINE_CONNECTED', {
       sessionId: (sessionId ?? this.state.connection.sessionId ?? ('unknown' as ChatSessionId)),
       at: this.now(),
@@ -1160,11 +1003,7 @@ export class ChatEngine implements ChatEnginePublicApi {
     });
     next = setComposerDisabledInState(next, false);
     this.commit(next);
-
-    this.emitEngineEvent('CHAT_ENGINE_DISCONNECTED', {
-      reason,
-      at: this.now(),
-    });
+    this.emitEngineEvent('CHAT_ENGINE_DISCONNECTED', { reason, at: this.now() });
   }
 
   handleTransportError(reason: string): void {
@@ -1176,21 +1015,13 @@ export class ChatEngine implements ChatEnginePublicApi {
     this.commit(next);
   }
 
-  // --------------------------------------------------------------------------
-  // MARK: Optimistic send path — patched
-  //       Uses stored playerIdentity, getChannelDescriptor, isDealRoomChannel,
-  //       and failedInputCount tracking.
-  // --------------------------------------------------------------------------
-
   async stageMessage(request: ChatClientSendMessageRequest): Promise<void> {
     if (this.destroyed) return;
-
     const trimmed = request.body.trim();
     if (!trimmed) {
       this.failedInputCount += 1;
       return;
     }
-
     if (!canSendInVisibleChannel(this.state, request.channelId)) {
       this.failedInputCount += 1;
       return;
@@ -1233,39 +1064,25 @@ export class ChatEngine implements ChatEnginePublicApi {
       featureSnapshot: request.featureSnapshot ?? this.captureFeatureSnapshot(),
     }, request.channelId);
 
-    const canUseTransport = Boolean(this.transport?.sendMessage);
-    if (!canUseTransport) {
-      if (this.localEchoWhenTransportMissing) {
-        this.scheduleLocalAuthoritativeEcho(request);
-      }
+    if (!this.transport?.sendMessage) {
+      if (this.localEchoWhenTransportMissing) this.scheduleLocalAuthoritativeEcho(request);
       return;
     }
 
     try {
-      await this.transport!.sendMessage!(request);
+      await this.transport.sendMessage(request);
     } catch (error) {
-      const next = markRequestFailedInState(
-        this.state,
-        request.requestId,
-        `send failed: ${safeError(error)}`,
-      );
+      const next = markRequestFailedInState(this.state, request.requestId, `send failed: ${safeError(error)}`);
       this.commit(next);
       this.failedInputCount += 1;
-      this.emitEngineEvent('CHAT_MESSAGE_REJECTED', {
-        requestId: request.requestId,
-        reason: safeError(error),
-      });
+      this.emitEngineEvent('CHAT_MESSAGE_REJECTED', { requestId: request.requestId, reason: safeError(error) });
     }
   }
 
-  async sendText(
-    body: string,
-    channelId: ChatVisibleChannel = this.state.activeVisibleChannel,
-  ): Promise<void> {
-    const roomId = this.resolveRoomId();
+  async sendText(body: string, channelId: ChatVisibleChannel = this.state.activeVisibleChannel): Promise<void> {
     await this.stageMessage({
       requestId: buildRequestId(),
-      roomId,
+      roomId: this.resolveRoomId(),
       channelId,
       body,
       clientSentAt: this.now(),
@@ -1273,12 +1090,9 @@ export class ChatEngine implements ChatEnginePublicApi {
     });
   }
 
-  private scheduleLocalAuthoritativeEcho(
-    request: ChatClientSendMessageRequest,
-  ): void {
+  private scheduleLocalAuthoritativeEcho(request: ChatClientSendMessageRequest): void {
     const token = this.clock.setTimeout(() => {
       if (this.destroyed) return;
-
       const pending = this.pendingRequests.get(request.requestId);
       if (!pending) return;
 
@@ -1294,24 +1108,19 @@ export class ChatEngine implements ChatEnginePublicApi {
         requestId: request.requestId,
         roomId: request.roomId,
         channelId: request.channelId,
-        messages: [
-          {
-            ...authoritativeMessage,
-            senderId: this.playerIdentity.userId,
-            senderName: this.playerIdentity.displayName,
-            senderRank: this.playerIdentity.rank,
-            deliveryState: 'AUTHORITATIVE',
-            moderation: {
-              state: 'ALLOWED',
-              playerVisible: true,
-            },
-            audit: {
-              requestId: request.requestId,
-              roomId: request.roomId,
-              insertedAt: this.now(),
-            },
+        messages: [{
+          ...authoritativeMessage,
+          senderId: this.playerIdentity.userId,
+          senderName: this.playerIdentity.displayName,
+          senderRank: this.playerIdentity.rank,
+          deliveryState: 'AUTHORITATIVE',
+          moderation: { state: 'ALLOWED', playerVisible: true },
+          audit: {
+            requestId: request.requestId,
+            roomId: request.roomId,
+            insertedAt: this.now(),
           },
-        ],
+        }],
         syncedAt: this.now(),
       };
 
@@ -1321,13 +1130,8 @@ export class ChatEngine implements ChatEnginePublicApi {
     }, 90);
   }
 
-  // --------------------------------------------------------------------------
-  // MARK: Authoritative apply
-  // --------------------------------------------------------------------------
-
   applyAuthoritativeFrame(frame: ChatAuthoritativeFrame): void {
     if (this.destroyed) return;
-
     const next = applyAuthoritativeFrameToState(this.state, {
       frame,
       activeRoomId: frame.roomId,
@@ -1343,70 +1147,46 @@ export class ChatEngine implements ChatEnginePublicApi {
       }
     }
 
-    if (frame.scene) {
-      this.emitEngineEvent('CHAT_SCENE_STARTED', { scene: frame.scene });
-    }
-    if (frame.reveal) {
-      this.emitEngineEvent('CHAT_REVEAL_SCHEDULED', { reveal: frame.reveal });
-    }
-    if (frame.silence) {
-      this.emitEngineEvent('CHAT_SILENCE_STARTED', { silence: frame.silence });
-    }
-    if (frame.learningProfile) {
-      this.emitEngineEvent('CHAT_PROFILE_UPDATED', { profile: frame.learningProfile });
-    }
-
+    if (frame.scene) this.emitEngineEvent('CHAT_SCENE_STARTED', { scene: frame.scene });
+    if (frame.reveal) this.emitEngineEvent('CHAT_REVEAL_SCHEDULED', { reveal: frame.reveal });
+    if (frame.silence) this.emitEngineEvent('CHAT_SILENCE_STARTED', { silence: frame.silence });
+    if (frame.learningProfile) this.emitEngineEvent('CHAT_PROFILE_UPDATED', { profile: frame.learningProfile });
     if (frame.requestId) {
+      const resolvedMessageId = this.findMessageIdForRequest(frame.requestId) ?? buildMessageId('confirmed');
       this.pendingRequests.delete(frame.requestId);
-      this.emitEngineEvent('CHAT_MESSAGE_CONFIRMED', {
-        messageId: this.findMessageIdForRequest(frame.requestId) ?? buildMessageId('confirmed'),
-        authoritativeFrame: frame,
-      });
+      this.emitEngineEvent('CHAT_MESSAGE_CONFIRMED', { messageId: resolvedMessageId, authoritativeFrame: frame });
     }
   }
 
-  // ── Patched: uses CHAT_CHANNEL_DESCRIPTORS to filter by supportsPresence ─
   applyRemotePresence(snapshots: readonly ChatPresenceSnapshot[]): void {
     if (this.destroyed || snapshots.length === 0) return;
-
-    const filtered = snapshots.filter((snapshot) =>
-      CHAT_CHANNEL_DESCRIPTORS[snapshot.channelId].supportsPresence,
-    );
+    const filtered = snapshots.filter((snapshot) => isVisibleChannelId(snapshot.channelId) && CHAT_CHANNEL_DESCRIPTORS[snapshot.channelId].supportsPresence);
     if (filtered.length === 0) return;
-
-    const presenceStates: ChatPresenceState[] = filtered.map((s) => s.presence);
-    void presenceStates; // typed for ChatPresenceState runtime ownership
-
     const next = upsertPresenceSnapshotsInState(this.state, filtered);
     this.commit(next);
   }
 
   applyRemoteTyping(snapshots: readonly ChatTypingSnapshot[]): void {
     if (this.destroyed || snapshots.length === 0) return;
-    const next = upsertTypingSnapshotsInState(this.state, snapshots);
+    const filtered = snapshots.filter((snapshot) => isVisibleChannelId(snapshot.channelId));
+    if (filtered.length === 0) return;
+    const next = upsertTypingSnapshotsInState(this.state, filtered);
     this.commit(next);
   }
 
-  // ── Patched: uses stored playerIdentity, getChannelDescriptor ────────────
-  async setLocalTyping(
-    typingState: ChatTypingState,
-    channelId: ChatVisibleChannel = this.state.activeVisibleChannel,
-  ): Promise<void> {
+  async setLocalTyping(typingState: ChatTypingState, channelId: ChatVisibleChannel = this.state.activeVisibleChannel): Promise<void> {
     if (this.destroyed) return;
-
     const descriptor = this.getChannelDescriptor(channelId);
     if (!descriptor.supportsTyping) return;
 
+    const now = this.now();
     const snapshot: ChatTypingSnapshot = {
       actorId: this.playerIdentity.userId,
       actorKind: 'PLAYER',
       channelId,
       typingState,
-      startedAt: typingState === 'STARTED' ? this.now() : undefined,
-      expiresAt:
-        typingState === 'STARTED'
-          ? ((this.clock.now() + CHAT_ENGINE_CONSTANTS.typingDefaultTimeoutMs) as UnixMs)
-          : undefined,
+      startedAt: typingState === 'STARTED' ? now : undefined,
+      expiresAt: typingState === 'STARTED' ? addUnixMs(now, CHAT_ENGINE_CONSTANTS.typingDefaultTimeoutMs) : undefined,
     };
 
     const next = upsertTypingSnapshotsInState(this.state, [snapshot]);
@@ -1414,22 +1194,12 @@ export class ChatEngine implements ChatEnginePublicApi {
 
     if (this.transport?.sendTyping) {
       try {
-        await this.transport.sendTyping({
-          roomId: this.resolveRoomId(),
-          channelId,
-          typingState,
-          sentAt: this.now(),
-        });
+        await this.transport.sendTyping({ roomId: this.resolveRoomId(), channelId, typingState, sentAt: now });
       } catch {
-        //
+        // noop
       }
     }
   }
-
-  // --------------------------------------------------------------------------
-  // MARK: EventBus binding — patched
-  //       Adds BOT_STATE_CHANGED, SOVEREIGNTY_APPROACH, and DEAL_PROOF_ISSUED.
-  // --------------------------------------------------------------------------
 
   bindEventBus(bus: ChatEventBusLike): () => void {
     const subscriptions = [
@@ -1447,10 +1217,10 @@ export class ChatEngine implements ChatEnginePublicApi {
       bus.on('SOVEREIGNTY_APPROACH', (event) => this.ingestEventBusEnvelope('SOVEREIGNTY_APPROACH', event)),
       bus.on('SOVEREIGNTY_ACHIEVED', (event) => this.ingestEventBusEnvelope('SOVEREIGNTY_ACHIEVED', event)),
       bus.on('DEAL_PROOF_ISSUED', (event) => this.ingestEventBusEnvelope('DEAL_PROOF_ISSUED', event)),
+      bus.on('CARD_PLAYED', (event) => this.ingestEventBusEnvelope('CARD_PLAYED', event)),
     ];
 
     this.eventBusUnsubs.push(...subscriptions);
-
     return () => {
       for (const unsub of subscriptions) unsub();
     };
@@ -1458,150 +1228,54 @@ export class ChatEngine implements ChatEnginePublicApi {
 
   private ingestEventBusEnvelope(eventType: string, envelope: any): void {
     const payload = envelope?.payload ?? envelope ?? {};
-    const emittedAt = (envelope?.timestamp ?? this.clock.now()) as UnixMs;
+    const emittedAt = toUnixMs(envelope?.timestamp ?? this.clock.now());
     const tickNumber = envelope?.tickIndex as any;
-
     const signal = this.translateEventBusEnvelope(eventType, payload, emittedAt, tickNumber);
     if (!signal) return;
     this.ingestUpstreamSignal(signal);
   }
 
-  // ── Patched: adds BOT_STATE_CHANGED and SOVEREIGNTY_APPROACH ─────────────
-  private translateEventBusEnvelope(
-    eventType: string,
-    payload: any,
-    emittedAt: UnixMs,
-    tickNumber?: number,
-  ): Nullable<ChatUpstreamSignal> {
+  private translateEventBusEnvelope(eventType: string, payload: any, emittedAt: UnixMs, tickNumber?: number): Nullable<ChatUpstreamSignal> {
     switch (eventType) {
       case 'PRESSURE_TIER_CHANGED':
-        return {
-          signalType: 'PRESSURE_TIER_CHANGED',
-          emittedAt,
-          tickNumber: tickNumber as any,
-          nextTier: payload?.to ?? payload?.nextTier ?? payload?.tier,
-          score: payload?.score,
-        } as ChatUpstreamSignal;
-
+        return { signalType: 'PRESSURE_TIER_CHANGED', emittedAt, tickNumber: tickNumber as any, nextTier: payload?.to ?? payload?.nextTier ?? payload?.tier, score: payload?.score } as ChatUpstreamSignal;
       case 'TICK_TIER_CHANGED':
-        return {
-          signalType: 'TICK_TIER_CHANGED',
-          emittedAt,
-          tickNumber: tickNumber as any,
-          nextTier: payload?.to ?? payload?.nextTier ?? payload?.tier,
-        } as ChatUpstreamSignal;
-
+        return { signalType: 'TICK_TIER_CHANGED', emittedAt, tickNumber: tickNumber as any, nextTier: payload?.to ?? payload?.nextTier ?? payload?.tier } as ChatUpstreamSignal;
       case 'BOT_STATE_CHANGED':
-        // BOT_STATE_CHANGED — translate to a BOT_ATTACK_FIRED signal when the
-        // bot is transitioning into an attacking state.
-        return {
-          signalType: 'BOT_ATTACK_FIRED',
-          emittedAt,
-          tickNumber: tickNumber as any,
-          botId: payload?.botId,
-          attackType: payload?.to === 'ATTACKING' ? 'STATE_ESCALATION' : undefined,
-          targetLayerId: undefined,
-        } as ChatUpstreamSignal;
-
+        if (payload?.to !== 'ATTACKING') return null;
+        return { signalType: 'BOT_ATTACK_FIRED', emittedAt, tickNumber: tickNumber as any, botId: payload?.botId, attackType: payload?.attackType ?? 'STATE_ESCALATION', targetLayerId: payload?.targetLayerId } as ChatUpstreamSignal;
       case 'BOT_ATTACK_FIRED':
-        return {
-          signalType: 'BOT_ATTACK_FIRED',
-          emittedAt,
-          tickNumber: tickNumber as any,
-          botId: payload?.botId ?? payload?.attackEvent?.botId,
-          attackType: payload?.attackEvent?.attackType ?? payload?.attackType,
-          targetLayerId: payload?.attackEvent?.targetLayerId ?? payload?.targetLayerId,
-        } as ChatUpstreamSignal;
-
+        return { signalType: 'BOT_ATTACK_FIRED', emittedAt, tickNumber: tickNumber as any, botId: payload?.botId ?? payload?.attackEvent?.botId, attackType: payload?.attackEvent?.attackType ?? payload?.attackType ?? 'UNKNOWN_ATTACK', targetLayerId: payload?.attackEvent?.targetLayerId ?? payload?.targetLayerId } as ChatUpstreamSignal;
       case 'SHIELD_LAYER_BREACHED':
-        return {
-          signalType: 'SHIELD_LAYER_BREACHED',
-          emittedAt,
-          tickNumber: tickNumber as any,
-          layerId: payload?.layerId,
-          integrityAfter: payload?.integrityAfter ?? payload?.integrity ?? 0,
-        } as ChatUpstreamSignal;
-
+        return { signalType: 'SHIELD_LAYER_BREACHED', emittedAt, tickNumber: tickNumber as any, layerId: payload?.layerId, integrityAfter: payload?.integrityAfter ?? payload?.integrity ?? 0 } as ChatUpstreamSignal;
       case 'SHIELD_FORTIFIED':
-        return {
-          signalType: 'SHIELD_FORTIFIED',
-          emittedAt,
-          tickNumber: tickNumber as any,
-        } as ChatUpstreamSignal;
-
+        return { signalType: 'SHIELD_FORTIFIED', emittedAt, tickNumber: tickNumber as any } as ChatUpstreamSignal;
       case 'CASCADE_CHAIN_STARTED':
       case 'CASCADE_CHAIN_TRIGGERED':
-        return {
-          signalType: 'CASCADE_CHAIN_STARTED',
-          emittedAt,
-          tickNumber: tickNumber as any,
-          chainId: payload?.chainId,
-          severity: payload?.severity,
-        } as ChatUpstreamSignal;
-
+        return { signalType: 'CASCADE_CHAIN_STARTED', emittedAt, tickNumber: tickNumber as any, chainId: payload?.chainId, severity: payload?.severity } as ChatUpstreamSignal;
       case 'CASCADE_CHAIN_BROKEN':
-        return {
-          signalType: 'CASCADE_CHAIN_BROKEN',
-          emittedAt,
-          tickNumber: tickNumber as any,
-          chainId: payload?.chainId,
-          severity: payload?.severity,
-        } as ChatUpstreamSignal;
-
+        return { signalType: 'CASCADE_CHAIN_BROKEN', emittedAt, tickNumber: tickNumber as any, chainId: payload?.chainId, severity: payload?.severity } as ChatUpstreamSignal;
       case 'CASCADE_POSITIVE_ACTIVATED':
-        return {
-          signalType: 'CASCADE_POSITIVE_ACTIVATED',
-          emittedAt,
-          tickNumber: tickNumber as any,
-        } as ChatUpstreamSignal;
-
+        return { signalType: 'CASCADE_POSITIVE_ACTIVATED', emittedAt, tickNumber: tickNumber as any } as ChatUpstreamSignal;
       case 'SOVEREIGNTY_APPROACH':
-        return {
-          signalType: 'SOVEREIGNTY_APPROACH',
-          emittedAt,
-          tickNumber: tickNumber as any,
-        } as ChatUpstreamSignal;
-
+        return { signalType: 'SOVEREIGNTY_APPROACH', emittedAt, tickNumber: tickNumber as any } as ChatUpstreamSignal;
       case 'SOVEREIGNTY_ACHIEVED':
-        return {
-          signalType: 'SOVEREIGNTY_ACHIEVED',
-          emittedAt,
-          tickNumber: tickNumber as any,
-        } as ChatUpstreamSignal;
-
+        return { signalType: 'SOVEREIGNTY_ACHIEVED', emittedAt, tickNumber: tickNumber as any } as ChatUpstreamSignal;
       case 'DEAL_PROOF_ISSUED':
-        return {
-          signalType: 'DEAL_PROOF_ISSUED',
-          emittedAt,
-          tickNumber: tickNumber as any,
-        } as ChatUpstreamSignal;
-
+        return { signalType: 'DEAL_PROOF_ISSUED', emittedAt, tickNumber: tickNumber as any } as ChatUpstreamSignal;
       case 'RUN_STARTED':
-        return {
-          signalType: 'RUN_STARTED',
-          emittedAt,
-          tickNumber: tickNumber as any,
-        } as ChatUpstreamSignal;
-
+        return { signalType: 'RUN_STARTED', emittedAt, tickNumber: tickNumber as any } as ChatUpstreamSignal;
       case 'RUN_ENDED':
-        return {
-          signalType: 'RUN_ENDED',
-          emittedAt,
-          tickNumber: tickNumber as any,
-        } as ChatUpstreamSignal;
-
+        return { signalType: 'RUN_ENDED', emittedAt, tickNumber: tickNumber as any } as ChatUpstreamSignal;
+      case 'CARD_PLAYED':
+        return { signalType: 'CARD_PLAYED', emittedAt, tickNumber: tickNumber as any, ...payload } as ChatUpstreamSignal;
       default:
         return null;
     }
   }
 
-  // --------------------------------------------------------------------------
-  // MARK: Core signal ingestion
-  // --------------------------------------------------------------------------
-
   ingestUpstreamSignal(signal: ChatUpstreamSignal): void {
     if (this.destroyed) return;
-
     this.lastSignalAt = signal.emittedAt;
     const targetChannel = signalTargetChannel(signal, this.state.activeMountTarget);
 
@@ -1614,40 +1288,20 @@ export class ChatEngine implements ChatEnginePublicApi {
     });
 
     const plan = this.planSignalReaction(signal, targetChannel);
-
     for (const message of plan.immediateMessages) {
-      next = pushMessageToState(next, {
-        channelId: message.channel,
-        message,
-      });
+      next = pushMessageToState(next, { channelId: message.channel, message });
     }
-
-    if (plan.scene) {
-      next = setActiveSceneInState(next, plan.scene);
-    }
-
-    if (plan.silence) {
-      next = beginSilenceInState(next, plan.silence);
-    }
-
-    if (plan.channelMood) {
-      next = setChannelMoodInState(
-        next,
-        plan.channelMood.channelId,
-        plan.channelMood.mood,
-        plan.channelMood.reason,
-        signal.emittedAt,
-      );
-    }
-
+    if (plan.scene) next = setActiveSceneInState(next, plan.scene);
+    if (plan.silence) next = beginSilenceInState(next, plan.silence);
+    if (plan.channelMood) next = setChannelMoodInState(next, plan.channelMood.channelId, plan.channelMood.mood, plan.channelMood.reason, signal.emittedAt);
     if (plan.audienceHeatDelta) {
       const current = next.audienceHeat[targetChannel];
       next = setAudienceHeatInState(next, targetChannel, {
-        heat: score100(current.heat + (plan.audienceHeatDelta.heat ?? 0)),
-        hype: score100(current.hype + (plan.audienceHeatDelta.hype ?? 0)),
-        ridicule: score100(current.ridicule + (plan.audienceHeatDelta.ridicule ?? 0)),
-        scrutiny: score100(current.scrutiny + (plan.audienceHeatDelta.scrutiny ?? 0)),
-        volatility: score100(current.volatility + (plan.audienceHeatDelta.volatility ?? 0)),
+        heat: score100((current.heat as number) + (plan.audienceHeatDelta.heat ?? 0)),
+        hype: score100((current.hype as number) + (plan.audienceHeatDelta.hype ?? 0)),
+        ridicule: score100((current.ridicule as number) + (plan.audienceHeatDelta.ridicule ?? 0)),
+        scrutiny: score100((current.scrutiny as number) + (plan.audienceHeatDelta.scrutiny ?? 0)),
+        volatility: score100((current.volatility as number) + (plan.audienceHeatDelta.volatility ?? 0)),
         lastUpdatedAt: signal.emittedAt,
       });
     }
@@ -1659,10 +1313,8 @@ export class ChatEngine implements ChatEnginePublicApi {
     }
 
     this.commit(next);
-
     if (plan.scene) this.emitEngineEvent('CHAT_SCENE_STARTED', { scene: plan.scene });
     if (plan.silence) this.emitEngineEvent('CHAT_SILENCE_STARTED', { silence: plan.silence });
-
     if (plan.rescue) {
       this.emitEngineEvent('CHAT_RESCUE_TRIGGERED', { rescue: plan.rescue });
       this.commit(pushMessageToState(this.state, {
@@ -1672,16 +1324,10 @@ export class ChatEngine implements ChatEnginePublicApi {
     }
   }
 
-  private planSignalReaction(
-    signal: ChatUpstreamSignal,
-    targetChannel: ChatVisibleChannel,
-  ): ChatSignalReactionPlan {
+  private planSignalReaction(signal: ChatUpstreamSignal, targetChannel: ChatVisibleChannel): ChatSignalReactionPlan {
     const at = signal.emittedAt;
-    const pressureBand = detectDominantPressure(
-      this.runtimeInputs.run.pressureTier,
-      this.runtimeInputs.battle.haterHeat,
-    );
-
+    const pressureBand = detectDominantPressure(this.runtimeInputs.run.pressureTier, this.runtimeInputs.battle.haterHeat);
+    const recentBodies = this.getMessages(targetChannel).slice(-12).map((message) => message.body);
     const immediateMessages: ChatMessage[] = [];
     const delayedMessages: Array<{ schedule: ChatRevealSchedule; message: ChatMessage }> = [];
 
@@ -1699,18 +1345,8 @@ export class ChatEngine implements ChatEnginePublicApi {
         ]);
 
         delayedMessages.push(
-          this.delayedPersonaLine(
-            targetChannel,
-            at + 120,
-            'DELAYED_HATER',
-            this.buildPersonaMessage(hater, targetChannel, 'HATER_TELEGRAPH', chooseOne(hater.telegraphs), at + 120),
-          ),
-          this.delayedPersonaLine(
-            targetChannel,
-            at + 560,
-            'DELAYED_HELPER',
-            this.buildPersonaMessage(helper, targetChannel, 'HELPER_RESCUE', chooseOne(helper.cues), at + 560),
-          ),
+          this.delayedPersonaLine(targetChannel, addUnixMs(at, 120), 'DELAYED_HATER', this.buildPersonaMessage(hater, targetChannel, 'HATER_TELEGRAPH', this.pickBotLine(hater.botId, 'telegraph', pressureBand, signal.signalType, recentBodies), addUnixMs(at, 120))),
+          this.delayedPersonaLine(targetChannel, addUnixMs(at, 560), 'DELAYED_HELPER', this.buildPersonaMessage(helper, targetChannel, 'HELPER_RESCUE', chooseOne(helper.cues), addUnixMs(at, 560))),
         );
 
         return {
@@ -1724,429 +1360,213 @@ export class ChatEngine implements ChatEnginePublicApi {
             breakConditions: pressureBand === 'CRITICAL' ? ['PLAYER_REPLY_WINDOW', 'HELPER_RESCUE'] : [],
           },
           audienceHeatDelta: { heat: 8, scrutiny: 10 },
-          channelMood: {
-            channelId: targetChannel,
-            mood: 'HOSTILE',
-            reason: 'shield breach witnessed',
-          },
-          rescue: this.shouldTriggerRescue('breach')
-            ? this.buildRescueDecision(targetChannel, at, 'CALM')
-            : undefined,
+          channelMood: { channelId: targetChannel, mood: 'HOSTILE', reason: 'shield breach witnessed' },
+          rescue: this.shouldTriggerRescue('breach') ? this.buildRescueDecision(targetChannel, at, 'CALM') : undefined,
         };
       }
-
       case 'BOT_ATTACK_FIRED': {
-        const hater = this.pickThreatPersona(signal as any);
+        const hater = this.pickThreatPersona(isBotAttackSignal(signal) ? { botId: signal.botId } : undefined);
         const helper = pressureBand === 'CRITICAL' ? HELPER_PERSONAS.MENTOR : HELPER_PERSONAS.INSIDER;
-
-        delayedMessages.push(
-          this.delayedPersonaLine(
-            targetChannel,
-            at + 90,
-            'DELAYED_HATER',
-            this.buildPersonaMessage(hater, targetChannel, 'BOT_TAUNT', chooseOne(hater.taunts), at + 90),
-          ),
-        );
-
+        delayedMessages.push(this.delayedPersonaLine(targetChannel, addUnixMs(at, 90), 'DELAYED_HATER', this.buildPersonaMessage(hater, targetChannel, 'BOT_TAUNT', this.pickBotLine(hater.botId, 'taunt', pressureBand, signal.signalType, recentBodies), addUnixMs(at, 90))));
         if (pressureBand !== 'LOW') {
-          delayedMessages.push(
-            this.delayedPersonaLine(
-              targetChannel,
-              at + 420,
-              'DELAYED_HELPER',
-              this.buildPersonaMessage(helper, targetChannel, 'HELPER_PROMPT', chooseOne(helper.cues), at + 420),
-            ),
-          );
+          delayedMessages.push(this.delayedPersonaLine(targetChannel, addUnixMs(at, 420), 'DELAYED_HELPER', this.buildPersonaMessage(helper, targetChannel, 'HELPER_PROMPT', chooseOne(helper.cues), addUnixMs(at, 420))));
         }
-
         return {
           immediateMessages,
           delayedMessages,
-          silence: {
-            enforced: false,
-            durationMs: 0,
-            reason: 'NONE',
-            breakConditions: [],
-          },
+          silence: { enforced: false, durationMs: 0, reason: 'NONE', breakConditions: [] },
           audienceHeatDelta: { heat: 10, volatility: 8 },
-          channelMood: {
-            channelId: targetChannel,
-            mood: 'HOSTILE',
-            reason: 'bot attack fired',
-          },
+          channelMood: { channelId: targetChannel, mood: 'HOSTILE', reason: 'bot attack fired' },
         };
       }
-
       case 'CASCADE_CHAIN_STARTED': {
         const archivist = HELPER_PERSONAS.ARCHIVIST;
-        delayedMessages.push(
-          this.delayedPersonaLine(
-            targetChannel,
-            at + 380,
-            'SCENE_STAGING',
-            this.buildPersonaMessage(
-              archivist,
-              targetChannel,
-              'RELATIONSHIP_CALLBACK',
-              'The first consequence is rarely the only consequence. Respect the chain.',
-              at + 380,
-            ),
-          ),
-        );
-
+        delayedMessages.push(this.delayedPersonaLine(targetChannel, addUnixMs(at, 380), 'SCENE_STAGING', this.buildPersonaMessage(archivist, targetChannel, 'RELATIONSHIP_CALLBACK', 'The first consequence is rarely the only consequence. Respect the chain.', addUnixMs(at, 380))));
         return {
           immediateMessages,
           delayedMessages,
-          silence: {
-            enforced: true,
-            durationMs: 300,
-            reason: 'SCENE_COMPOSITION',
-            breakConditions: ['DELAYED_HELPER', 'PLAYER_REPLY_WINDOW'],
-          },
+          silence: { enforced: true, durationMs: 300, reason: 'SCENE_COMPOSITION', breakConditions: ['DELAYED_HELPER', 'PLAYER_REPLY_WINDOW'] },
           audienceHeatDelta: { scrutiny: 10, volatility: 12 },
-          channelMood: {
-            channelId: targetChannel,
-            mood: 'SUSPICIOUS',
-            reason: 'cascade chain started',
-          },
+          channelMood: { channelId: targetChannel, mood: 'SUSPICIOUS', reason: 'cascade chain started' },
         };
       }
-
       case 'CASCADE_CHAIN_BROKEN': {
         const rival = HELPER_PERSONAS.RIVAL;
-        delayedMessages.push(
-          this.delayedPersonaLine(
-            targetChannel,
-            at + 180,
-            'DELAYED_HELPER',
-            this.buildPersonaMessage(
-              rival,
-              targetChannel,
-              'HELPER_PROMPT',
-              'Good. Breaking chains is louder than surviving them.',
-              at + 180,
-            ),
-          ),
-        );
-
+        delayedMessages.push(this.delayedPersonaLine(targetChannel, addUnixMs(at, 180), 'DELAYED_HELPER', this.buildPersonaMessage(rival, targetChannel, 'HELPER_PROMPT', 'Good. Breaking chains is louder than surviving them.', addUnixMs(at, 180))));
         return {
           immediateMessages,
           delayedMessages,
           audienceHeatDelta: { hype: 10, heat: 6 },
-          channelMood: {
-            channelId: targetChannel,
-            mood: 'ECSTATIC',
-            reason: 'cascade broken',
-          },
+          channelMood: { channelId: targetChannel, mood: 'ECSTATIC', reason: 'cascade broken' },
         };
       }
-
       case 'SOVEREIGNTY_APPROACH': {
         const rival = HELPER_PERSONAS.RIVAL;
         const hater = this.pickThreatPersona();
-
         delayedMessages.push(
-          this.delayedPersonaLine(
-            targetChannel,
-            at + 120,
-            'DELAYED_HATER',
-            this.buildPersonaMessage(
-              hater,
-              targetChannel,
-              'HATER_TELEGRAPH',
-              'You are close. Which means I need to be closer.',
-              at + 120,
-            ),
-          ),
-          this.delayedPersonaLine(
-            targetChannel,
-            at + 420,
-            'DELAYED_HELPER',
-            this.buildPersonaMessage(
-              rival,
-              targetChannel,
-              'HELPER_PROMPT',
-              'Do not blink because the finish line noticed you.',
-              at + 420,
-            ),
-          ),
+          this.delayedPersonaLine(targetChannel, addUnixMs(at, 120), 'DELAYED_HATER', this.buildPersonaMessage(hater, targetChannel, 'HATER_TELEGRAPH', this.pickBotLine(hater.botId, 'telegraph', pressureBand, signal.signalType, recentBodies), addUnixMs(at, 120))),
+          this.delayedPersonaLine(targetChannel, addUnixMs(at, 420), 'DELAYED_HELPER', this.buildPersonaMessage(rival, targetChannel, 'HELPER_PROMPT', 'Do not blink because the finish line noticed you.', addUnixMs(at, 420))),
         );
-
         return {
           immediateMessages,
           delayedMessages,
           audienceHeatDelta: { hype: 12, scrutiny: 14 },
-          channelMood: {
-            channelId: targetChannel,
-            mood: 'ECSTATIC',
-            reason: 'sovereignty approach',
-          },
+          channelMood: { channelId: targetChannel, mood: 'ECSTATIC', reason: 'sovereignty approach' },
         };
       }
-
       case 'SOVEREIGNTY_ACHIEVED': {
         const archivist = HELPER_PERSONAS.ARCHIVIST;
-        immediateMessages.push(
-          buildLocalSystemMessage({
-            id: buildMessageId('legend'),
-            channel: targetChannel,
-            kind: 'LEGEND_MOMENT',
-            body: 'LEGEND MOMENT — sovereignty achieved under witnessed pressure.',
-            at,
-            emoji: '🏆',
-            legend: {
-              legendClass: 'SOVEREIGNTY',
-              title: 'Sovereignty Achieved',
-              prestigeScore: 95,
-              unlocksReward: true,
-            },
-            replay: {
-              replayEligible: true,
-              legendEligible: true,
-              worldEventEligible: false,
-            },
-          }),
-        );
-
-        delayedMessages.push(
-          this.delayedPersonaLine(
-            targetChannel,
-            at + 260,
-            'SCENE_STAGING',
-            this.buildPersonaMessage(
-              archivist,
-              targetChannel,
-              'POST_RUN_RITUAL',
-              'Archive this. The room will quote it later.',
-              at + 260,
-            ),
-          ),
-        );
-
+        immediateMessages.push(buildLocalSystemMessage({
+          id: buildMessageId('legend'),
+          channel: targetChannel,
+          kind: 'LEGEND_MOMENT',
+          body: 'LEGEND MOMENT — sovereignty achieved under witnessed pressure.',
+          at,
+          emoji: '🏆',
+          legend: { legendClass: 'SOVEREIGNTY', title: 'Sovereignty Achieved', prestigeScore: 95, unlocksReward: true },
+          replay: { replayEligible: true, legendEligible: true, worldEventEligible: false },
+        }));
+        delayedMessages.push(this.delayedPersonaLine(targetChannel, addUnixMs(at, 260), 'SCENE_STAGING', this.buildPersonaMessage(archivist, targetChannel, 'POST_RUN_RITUAL', 'Archive this. The room will quote it later.', addUnixMs(at, 260))));
+        const hater = this.pickThreatPersona();
+        delayedMessages.push(this.delayedPersonaLine(targetChannel, addUnixMs(at, 430), 'DELAYED_HATER', this.buildPersonaMessage(hater, targetChannel, 'BOT_TAUNT', this.pickBotLine(hater.botId, 'retreat', pressureBand, signal.signalType, recentBodies), addUnixMs(at, 430))));
         return {
           immediateMessages,
           delayedMessages,
           audienceHeatDelta: { hype: 18, heat: 12 },
-          channelMood: {
-            channelId: targetChannel,
-            mood: 'ECSTATIC',
-            reason: 'sovereignty achieved',
-          },
+          channelMood: { channelId: targetChannel, mood: 'ECSTATIC', reason: 'sovereignty achieved' },
         };
       }
-
       case 'RUN_STARTED': {
         if (targetChannel === 'LOBBY') {
-          delayedMessages.push(
-            this.delayedAmbientLine(targetChannel, at + 220, GLOBAL_AMBIENT_LINES[0]),
-          );
+          delayedMessages.push(this.delayedAmbientLine(targetChannel, addUnixMs(at, 220), GLOBAL_AMBIENT_LINES[0]));
         }
-
-        return {
-          immediateMessages,
-          delayedMessages,
-          channelMood: {
-            channelId: targetChannel,
-            mood: 'CALM',
-            reason: 'run started',
-          },
-        };
+        return { immediateMessages, delayedMessages, channelMood: { channelId: targetChannel, mood: 'CALM', reason: 'run started' } };
       }
-
       case 'RUN_ENDED': {
         const survivor = HELPER_PERSONAS.SURVIVOR;
-        delayedMessages.push(
-          this.delayedPersonaLine(
-            targetChannel,
-            at + 300,
-            'SCENE_STAGING',
-            this.buildPersonaMessage(
-              survivor,
-              targetChannel,
-              'POST_RUN_RITUAL',
-              'The run is over. The lesson is not.',
-              at + 300,
-            ),
-          ),
-        );
-
-        return {
-          immediateMessages,
-          delayedMessages,
-          channelMood: {
-            channelId: targetChannel,
-            mood: 'MOURNFUL',
-            reason: 'run ended',
-          },
-        };
+        delayedMessages.push(this.delayedPersonaLine(targetChannel, addUnixMs(at, 300), 'SCENE_STAGING', this.buildPersonaMessage(survivor, targetChannel, 'POST_RUN_RITUAL', 'The run is over. The lesson is not.', addUnixMs(at, 300))));
+        return { immediateMessages, delayedMessages, channelMood: { channelId: targetChannel, mood: 'MOURNFUL', reason: 'run ended' } };
       }
-
       default:
-        return {
-          immediateMessages,
-          delayedMessages,
-        };
+        return { immediateMessages, delayedMessages };
     }
   }
 
-  private buildSystemReactionMessage(
-    signal: ChatUpstreamSignal,
-    channel: ChatVisibleChannel,
-  ): Nullable<ChatMessage> {
+  private buildSystemReactionMessage(signal: ChatUpstreamSignal, channel: ChatVisibleChannel): Nullable<ChatMessage> {
     const at = signal.emittedAt;
     const pressureTier = this.runtimeInputs.run.pressureTier;
     const tickTier = this.runtimeInputs.run.tickTier;
 
+    if (isPressureTierSignal(signal)) {
+      return buildLocalSystemMessage({
+        id: buildMessageId('pressure'),
+        channel,
+        kind: 'MARKET_ALERT',
+        body: `PRESSURE → ${safeString(signal.nextTier, 'UNKNOWN')}. The room should feel it now.`,
+        at,
+        emoji: '📈',
+        pressureTier: signal.nextTier,
+        tickTier,
+      });
+    }
+
+    if (isTickTierSignal(signal)) {
+      return buildLocalSystemMessage({
+        id: buildMessageId('tick'),
+        channel,
+        kind: 'SYSTEM',
+        body: `TICK TIER → ${safeString(signal.nextTier, 'UNKNOWN')}. Timing just got more expensive.`,
+        at,
+        emoji: '⏱️',
+        pressureTier,
+        tickTier: signal.nextTier,
+      });
+    }
+
+    if (isShieldBreachSignal(signal)) {
+      return buildLocalSystemMessage({
+        id: buildMessageId('shield-breach'),
+        channel,
+        kind: 'SHIELD_EVENT',
+        body: `SHIELD BREACHED — ${safeString(signal.layerId, 'UNKNOWN_LAYER')} took the hit.`,
+        at,
+        emoji: '🛡️',
+        pressureTier,
+        tickTier,
+      });
+    }
+
+    if (signal.signalType === 'SHIELD_FORTIFIED') {
+      return buildLocalSystemMessage({
+        id: buildMessageId('shield-fortified'),
+        channel,
+        kind: 'SHIELD_EVENT',
+        body: 'SHIELD FORTIFIED — integrity recovered across the witnessed line.',
+        at,
+        emoji: '🛡️',
+        pressureTier,
+        tickTier,
+      });
+    }
+
+    if (isBotAttackSignal(signal)) {
+      return buildLocalSystemMessage({
+        id: buildMessageId('bot-attack'),
+        channel,
+        kind: 'BOT_ATTACK',
+        body: `HATER ATTACK FIRED — ${safeString(signal.botId, 'UNKNOWN_BOT')} opened an attack window.`,
+        at,
+        emoji: '⚔️',
+        pressureTier,
+        tickTier,
+      });
+    }
+
+    if (isCascadeSignal(signal) && signal.signalType === 'CASCADE_CHAIN_STARTED') {
+      return buildLocalSystemMessage({
+        id: buildMessageId('cascade-start'),
+        channel,
+        kind: 'CASCADE_ALERT',
+        body: `CASCADE STARTED — ${safeString(signal.chainId, 'UNKNOWN_CHAIN')} is now live.`,
+        at,
+        emoji: '⛓️',
+        pressureTier,
+        tickTier,
+      });
+    }
+
+    if (isCascadeSignal(signal) && signal.signalType === 'CASCADE_CHAIN_BROKEN') {
+      return buildLocalSystemMessage({
+        id: buildMessageId('cascade-broken'),
+        channel,
+        kind: 'CASCADE_ALERT',
+        body: `CASCADE BROKEN — ${safeString(signal.chainId, 'UNKNOWN_CHAIN')} was intercepted.`,
+        at,
+        emoji: '✂️',
+        pressureTier,
+        tickTier,
+      });
+    }
+
     switch (signal.signalType) {
-      case 'PRESSURE_TIER_CHANGED':
-        return buildLocalSystemMessage({
-          id: buildMessageId('pressure'),
-          channel,
-          kind: 'MARKET_ALERT',
-          body: `PRESSURE → ${safeString(signal.nextTier, 'UNKNOWN')}. The room should feel it now.`,
-          at,
-          emoji: '📈',
-          pressureTier: signal.nextTier,
-          tickTier,
-        });
-
-      case 'TICK_TIER_CHANGED':
-        return buildLocalSystemMessage({
-          id: buildMessageId('tick'),
-          channel,
-          kind: 'SYSTEM',
-          body: `TICK TIER → ${safeString(signal.nextTier, 'UNKNOWN')}. Timing just got more expensive.`,
-          at,
-          emoji: '⏱️',
-          pressureTier,
-          tickTier: signal.nextTier,
-        });
-
-      case 'SHIELD_LAYER_BREACHED':
-        return buildLocalSystemMessage({
-          id: buildMessageId('shield-breach'),
-          channel,
-          kind: 'SHIELD_EVENT',
-          body: `SHIELD BREACHED — ${safeString(signal.layerId, 'UNKNOWN_LAYER')} took the hit.`,
-          at,
-          emoji: '🛡️',
-          pressureTier,
-          tickTier,
-        });
-
-      case 'SHIELD_FORTIFIED':
-        return buildLocalSystemMessage({
-          id: buildMessageId('shield-fortified'),
-          channel,
-          kind: 'SHIELD_EVENT',
-          body: 'SHIELD FORTIFIED — integrity recovered across the witnessed line.',
-          at,
-          emoji: '🛡️',
-          pressureTier,
-          tickTier,
-        });
-
-      case 'BOT_ATTACK_FIRED':
-        return buildLocalSystemMessage({
-          id: buildMessageId('bot-attack'),
-          channel,
-          kind: 'BOT_ATTACK',
-          body: `HATER ATTACK FIRED — ${safeString(signal.botId, 'UNKNOWN_BOT')} opened an attack window.`,
-          at,
-          emoji: '⚔️',
-          pressureTier,
-          tickTier,
-        });
-
-      case 'CASCADE_CHAIN_STARTED':
-        return buildLocalSystemMessage({
-          id: buildMessageId('cascade-start'),
-          channel,
-          kind: 'CASCADE_ALERT',
-          body: `CASCADE STARTED — ${safeString(signal.chainId, 'UNKNOWN_CHAIN')} is now live.`,
-          at,
-          emoji: '⛓️',
-          pressureTier,
-          tickTier,
-        });
-
-      case 'CASCADE_CHAIN_BROKEN':
-        return buildLocalSystemMessage({
-          id: buildMessageId('cascade-broken'),
-          channel,
-          kind: 'CASCADE_ALERT',
-          body: `CASCADE BROKEN — ${safeString(signal.chainId, 'UNKNOWN_CHAIN')} was intercepted.`,
-          at,
-          emoji: '✂️',
-          pressureTier,
-          tickTier,
-        });
-
       case 'SOVEREIGNTY_APPROACH':
-        return buildLocalSystemMessage({
-          id: buildMessageId('sovereignty-approach'),
-          channel,
-          kind: 'ACHIEVEMENT',
-          body: 'SOVEREIGNTY APPROACH — the run is entering witnessed prestige territory.',
-          at,
-          emoji: '⚡',
-          pressureTier,
-          tickTier,
-        });
-
+        return buildLocalSystemMessage({ id: buildMessageId('sovereignty-approach'), channel, kind: 'ACHIEVEMENT', body: 'SOVEREIGNTY APPROACH — the run is entering witnessed prestige territory.', at, emoji: '⚡', pressureTier, tickTier });
       case 'SOVEREIGNTY_ACHIEVED':
-        return buildLocalSystemMessage({
-          id: buildMessageId('sovereignty-achieved'),
-          channel,
-          kind: 'ACHIEVEMENT',
-          body: 'SOVEREIGNTY ACHIEVED — proof-grade finish reached.',
-          at,
-          emoji: '🏆',
-          pressureTier,
-          tickTier,
-        });
-
+        return buildLocalSystemMessage({ id: buildMessageId('sovereignty-achieved'), channel, kind: 'ACHIEVEMENT', body: 'SOVEREIGNTY ACHIEVED — proof-grade finish reached.', at, emoji: '🏆', pressureTier, tickTier });
       case 'RUN_STARTED':
-        return buildLocalSystemMessage({
-          id: buildMessageId('run-start'),
-          channel,
-          kind: 'SYSTEM',
-          body: 'RUN STARTED — the room is live and already watching.',
-          at,
-          emoji: '▶️',
-          pressureTier,
-          tickTier,
-        });
-
+        return buildLocalSystemMessage({ id: buildMessageId('run-start'), channel, kind: 'SYSTEM', body: 'RUN STARTED — the room is live and already watching.', at, emoji: '▶️', pressureTier, tickTier });
       case 'RUN_ENDED':
-        return buildLocalSystemMessage({
-          id: buildMessageId('run-end'),
-          channel,
-          kind: 'SYSTEM',
-          body: `RUN ENDED — outcome: ${safeString(this.runtimeInputs.run.runOutcome, 'UNKNOWN')}.`,
-          at,
-          emoji: '⏹️',
-          pressureTier,
-          tickTier,
-        });
-
+        return buildLocalSystemMessage({ id: buildMessageId('run-end'), channel, kind: 'SYSTEM', body: `RUN ENDED — outcome: ${safeString(this.runtimeInputs.run.runOutcome, 'UNKNOWN')}.`, at, emoji: '⏹️', pressureTier, tickTier });
+      case 'DEAL_PROOF_ISSUED':
+        return buildLocalSystemMessage({ id: buildMessageId('deal-proof'), channel, kind: 'DEAL_RECAP', body: 'DEAL ROOM PROOF — a negotiation milestone was just witnessed.', at, emoji: '🤝', pressureTier, tickTier });
+      case 'CARD_PLAYED':
+        return buildLocalSystemMessage({ id: buildMessageId('card-played'), channel, kind: 'MARKET_ALERT', body: 'CARD PLAYED — the room just absorbed a hostile insertion.', at, emoji: '🃏', pressureTier, tickTier });
       default:
         return null;
     }
   }
 
-  private buildScenePlan(
-    moment: string,
-    channel: ChatVisibleChannel,
-    at: UnixMs,
-    beats: Array<{
-      readonly beatType: ChatScenePlan['beats'][number]['beatType'];
-      readonly delayMs: number;
-      readonly requiredChannel: ChatVisibleChannel;
-      readonly skippable: boolean;
-      readonly canInterrupt: boolean;
-    }>,
-  ): ChatScenePlan {
+  private buildScenePlan(moment: string, channel: ChatVisibleChannel, at: UnixMs, beats: Array<{ readonly beatType: ChatScenePlan['beats'][number]['beatType']; readonly delayMs: number; readonly requiredChannel: ChatVisibleChannel; readonly skippable: boolean; readonly canInterrupt: boolean; }>): ChatScenePlan {
     return {
       sceneId: randomId(`scene:${moment}`) as any,
       momentId: randomId(`moment:${moment}`) as any,
@@ -2160,44 +1580,19 @@ export class ChatEngine implements ChatEnginePublicApi {
     };
   }
 
-  private delayedPersonaLine(
-    channelId: ChatVisibleChannel,
-    revealAt: number,
-    revealReason: ChatRevealSchedule['revealReason'],
-    message: ChatMessage,
-  ): { schedule: ChatRevealSchedule; message: ChatMessage } {
+  private delayedPersonaLine(channelId: ChatVisibleChannel, revealAt: UnixMs, revealReason: ChatRevealSchedule['revealReason'], message: ChatMessage): { schedule: ChatRevealSchedule; message: ChatMessage } {
     const payloadRef = buildRevealPayloadRef(message.kind);
     return {
-      schedule: {
-        revealAt: revealAt as UnixMs,
-        revealChannel: channelId,
-        revealReason,
-        payloadRef,
-      },
+      schedule: { revealAt, revealChannel: channelId, revealReason, payloadRef },
       message,
     };
   }
 
-  private delayedAmbientLine(
-    channelId: ChatVisibleChannel,
-    revealAt: number,
-    line: string,
-  ): { schedule: ChatRevealSchedule; message: ChatMessage } {
-    return this.delayedPersonaLine(
-      channelId,
-      revealAt,
-      'SCENE_STAGING',
-      this.buildAmbientMessage(channelId, line, revealAt as UnixMs),
-    );
+  private delayedAmbientLine(channelId: ChatVisibleChannel, revealAt: UnixMs, line: string): { schedule: ChatRevealSchedule; message: ChatMessage } {
+    return this.delayedPersonaLine(channelId, revealAt, 'SCENE_STAGING', this.buildAmbientMessage(channelId, line, revealAt));
   }
 
-  private buildPersonaMessage(
-    persona: ChatLocalPersona,
-    channel: ChatVisibleChannel,
-    kind: ChatMessage['kind'],
-    body: string,
-    at: UnixMs,
-  ): ChatMessage {
+  private buildPersonaMessage(persona: ChatLocalPersona, channel: ChatVisibleChannel, kind: ChatMessage['kind'], body: string, at: UnixMs): ChatMessage {
     return {
       id: buildMessageId(kind),
       channel,
@@ -2206,20 +1601,13 @@ export class ChatEngine implements ChatEnginePublicApi {
       senderName: persona.displayName,
       body,
       emoji: persona.emoji,
-      ts: at,
+      ts: at as unknown as number,
       deliveryState: 'AUTHORITATIVE',
-      moderation: {
-        state: 'ALLOWED',
-        playerVisible: true,
-      },
+      moderation: { state: 'ALLOWED', playerVisible: true },
     };
   }
 
-  private buildAmbientMessage(
-    channel: ChatVisibleChannel,
-    line: string,
-    at: UnixMs,
-  ): ChatMessage {
+  private buildAmbientMessage(channel: ChatVisibleChannel, line: string, at: UnixMs): ChatMessage {
     return {
       id: buildMessageId('ambient'),
       channel,
@@ -2227,36 +1615,20 @@ export class ChatEngine implements ChatEnginePublicApi {
       senderId: `npc:ambient:${channel.toLowerCase()}`,
       senderName: channel === 'SYNDICATE' ? 'Syndicate Watcher' : 'Observer',
       body: line,
-      ts: at,
+      ts: at as unknown as number,
       deliveryState: 'AUTHORITATIVE',
-      moderation: {
-        state: 'ALLOWED',
-        playerVisible: true,
-      },
+      moderation: { state: 'ALLOWED', playerVisible: true },
     };
   }
 
-  private buildHelperRescueMessage(
-    rescue: ChatRescueDecision,
-  ): ChatMessage {
-    const helper =
-      rescue.intent === 'CALM' || rescue.intent === 'PROTECT_DIGNITY'
-        ? HELPER_PERSONAS.SURVIVOR
-        : rescue.intent === 'WARN'
-          ? HELPER_PERSONAS.INSIDER
-          : HELPER_PERSONAS.MENTOR;
-
-    return this.buildPersonaMessage(
-      helper,
-      rescue.deliverInChannel,
-      'HELPER_RESCUE',
-      chooseOne(helper.cues),
-      rescue.triggerAt,
-    );
+  private buildHelperRescueMessage(rescue: ChatRescueDecision): ChatMessage {
+    const helper = rescue.intent === 'CALM' || rescue.intent === 'PROTECT_DIGNITY' ? HELPER_PERSONAS.SURVIVOR : rescue.intent === 'WARN' ? HELPER_PERSONAS.INSIDER : HELPER_PERSONAS.MENTOR;
+    return this.buildPersonaMessage(helper, rescue.deliverInChannel, 'HELPER_RESCUE', chooseOne(helper.cues), rescue.triggerAt);
   }
 
-  private pickThreatPersona(signal?: { readonly botId?: BotId }): typeof HATER_PERSONAS[keyof typeof HATER_PERSONAS] {
-    if (signal?.botId && HATER_PERSONAS[signal.botId]) return HATER_PERSONAS[signal.botId];
+  private pickThreatPersona(signal?: { readonly botId?: BotId }): HaterPersona {
+    const maybeBotId = signal?.botId ? String(signal.botId) : undefined;
+    if (maybeBotId && HATER_PERSONAS[maybeBotId]) return HATER_PERSONAS[maybeBotId];
     const heat = this.runtimeInputs.battle.haterHeat ?? 0;
     if (heat >= 75) return HATER_PERSONAS.BOT_04;
     if (heat >= 60) return HATER_PERSONAS.BOT_01;
@@ -2264,20 +1636,25 @@ export class ChatEngine implements ChatEnginePublicApi {
     return HATER_PERSONAS.BOT_02;
   }
 
+  private pickBotLine(botId: BotId, category: 'telegraph' | 'taunt' | 'retreat', pressureBand: PersonaPressureBand, signalType: string, recentBodies: readonly string[]): string {
+    return this.botResponseDirector.pick(botId, category, {
+      now: this.now() as unknown as number,
+      category,
+      pressureBand,
+      signalType,
+      recentBodies,
+    });
+  }
+
   private shouldTriggerRescue(reason: 'breach' | 'silence'): boolean {
     const affect = this.state.affect.vector;
     if (reason === 'breach') {
-      return affect.frustration >= 55 || affect.intimidation >= 55 || affect.desperation >= 45;
+      return (affect.frustration as number) >= 55 || (affect.intimidation as number) >= 55 || (affect.desperation as number) >= 45;
     }
-    return affect.frustration >= 60;
+    return (affect.frustration as number) >= 60;
   }
 
-  // ── Patched: uses ChatInterventionId — was missing from original file ─────
-  private buildRescueDecision(
-    channel: ChatVisibleChannel,
-    at: UnixMs,
-    intent: ChatRescueDecision['intent'],
-  ): ChatRescueDecision {
+  private buildRescueDecision(channel: ChatVisibleChannel, at: UnixMs, intent: ChatRescueDecision['intent']): ChatRescueDecision {
     return {
       interventionId: randomId('rescue') as ChatInterventionId,
       intent,
@@ -2289,32 +1666,22 @@ export class ChatEngine implements ChatEnginePublicApi {
     };
   }
 
-  private mergeAudienceDelta(
-    current: ChatAudienceHeat,
-    delta: Partial<Record<'heat' | 'hype' | 'ridicule' | 'scrutiny' | 'volatility', number>>,
-  ): Partial<ChatAudienceHeat> {
+  private mergeAudienceDelta(current: ChatAudienceHeat, delta: Partial<Record<'heat' | 'hype' | 'ridicule' | 'scrutiny' | 'volatility', number>>): Partial<ChatAudienceHeat> {
     return {
-      heat: score100(current.heat + (delta.heat ?? 0)),
-      hype: score100(current.hype + (delta.hype ?? 0)),
-      ridicule: score100(current.ridicule + (delta.ridicule ?? 0)),
-      scrutiny: score100(current.scrutiny + (delta.scrutiny ?? 0)),
-      volatility: score100(current.volatility + (delta.volatility ?? 0)),
+      heat: score100((current.heat as number) + (delta.heat ?? 0)),
+      hype: score100((current.hype as number) + (delta.hype ?? 0)),
+      ridicule: score100((current.ridicule as number) + (delta.ridicule ?? 0)),
+      scrutiny: score100((current.scrutiny as number) + (delta.scrutiny ?? 0)),
+      volatility: score100((current.volatility as number) + (delta.volatility ?? 0)),
     };
   }
-
-  // --------------------------------------------------------------------------
-  // MARK: Telemetry / feature snapshots — patched
-  //       Uses TickTier, ChatConnectionState, ChatNotificationState as live
-  //       typed references in the snapshot path.
-  // --------------------------------------------------------------------------
 
   captureFeatureSnapshot(): ChatFeatureSnapshot {
     const now = this.now();
     const lastIncoming = this.lastMeaningfulIncomingAt || this.lastPanelOpenedAt || now;
-    const silenceWindowMs = Math.max(0, now - lastIncoming);
-
-    const connection: ChatConnectionState = this.getConnectionSnapshot();
-    const notifications: ChatNotificationState = this.getNotificationSnapshot();
+    const silenceWindowMs = Math.max(0, (now as number) - (lastIncoming as number));
+    const connection = this.getConnectionSnapshot();
+    const notifications = this.getNotificationSnapshot();
     const tickTier: TickTier | undefined = this.runtimeInputs.run.tickTier;
 
     return deriveFeatureSnapshotFromState(this.state, {
@@ -2333,24 +1700,15 @@ export class ChatEngine implements ChatEnginePublicApi {
         panelCollapseCount: this.panelCollapsed ? 1 : 0,
         channelHopCount: this.channelHopCount,
         failedInputCount: this.failedInputCount,
-        negativeEmotionScore: Math.max(
-          this.state.affect.vector.frustration,
-          this.state.affect.vector.intimidation,
-          this.state.affect.vector.desperation,
-        ) as Score100,
+        negativeEmotionScore: Math.max(this.state.affect.vector.frustration as number, this.state.affect.vector.intimidation as number, this.state.affect.vector.desperation as number) as Score100,
       },
       connectionStatus: connection.status,
       hasUnread: notifications.hasAnyUnread,
     } as any);
   }
 
-  private async emitTelemetry(
-    eventName: ChatTelemetryEventName,
-    payload: Record<string, unknown>,
-    channelId?: ChatVisibleChannel,
-  ): Promise<void> {
+  private async emitTelemetry(eventName: ChatTelemetryEventName, payload: Record<string, unknown>, channelId?: ChatVisibleChannel): Promise<void> {
     if (!this.telemetry?.emit) return;
-
     const envelope: ChatTelemetryEnvelope = {
       telemetryId: randomId('telemetry') as any,
       eventName,
@@ -2358,50 +1716,29 @@ export class ChatEngine implements ChatEnginePublicApi {
       sessionId: this.state.connection.sessionId,
       roomId: this.resolveRoomId(),
       channelId,
-      payload,
+      payload: toJsonObject(payload),
     };
 
     try {
       await this.telemetry.emit(envelope);
     } catch {
-      //
+      // noop
     }
   }
-
-  // --------------------------------------------------------------------------
-  // MARK: Ambient pacing
-  // --------------------------------------------------------------------------
 
   private scheduleAmbientPulse(): void {
     if (this.destroyed) return;
     if (this.ambientTimer != null) this.clock.clearTimeout(this.ambientTimer);
 
     const tickTier = this.runtimeInputs.run.tickTier;
-    const delayMs = tickTier === 'COLLAPSE_IMMINENT'
-      ? 3600
-      : tickTier === 'CRISIS'
-        ? 5200
-        : tickTier === 'COMPRESSED'
-          ? 7200
-          : 9800;
+    const delayMs = tickTier === 'COLLAPSE_IMMINENT' ? 3600 : tickTier === 'CRISIS' ? 5200 : tickTier === 'COMPRESSED' ? 7200 : 9800;
 
     this.ambientTimer = this.clock.setTimeout(() => {
       if (this.destroyed) return;
-
       const channel = this.pickAmbientChannel();
-      const line = chooseOne(
-        channel === 'SYNDICATE'
-          ? SYNDICATE_AMBIENT_LINES
-          : channel === 'DEAL_ROOM'
-            ? DEAL_ROOM_AMBIENT_LINES
-            : GLOBAL_AMBIENT_LINES,
-      );
-
+      const line = chooseOne(channel === 'SYNDICATE' ? SYNDICATE_AMBIENT_LINES : channel === 'DEAL_ROOM' ? DEAL_ROOM_AMBIENT_LINES : GLOBAL_AMBIENT_LINES);
       const message = this.buildAmbientMessage(channel, line, this.now());
-      const next = pushMessageToState(this.state, {
-        channelId: channel,
-        message,
-      });
+      const next = pushMessageToState(this.state, { channelId: channel, message });
       this.commit(next);
       this.scheduleAmbientPulse();
     }, delayMs);
@@ -2412,60 +1749,43 @@ export class ChatEngine implements ChatEnginePublicApi {
     const allowDeal = visibleChannelAllowedInMount(mountTarget, 'DEAL_ROOM');
     const allowSyndicate = visibleChannelAllowedInMount(mountTarget, 'SYNDICATE');
     const r = Math.random();
-
     if (allowDeal && r < 0.16) return 'DEAL_ROOM';
     if (allowSyndicate && r < 0.38) return 'SYNDICATE';
     if (visibleChannelAllowedInMount(mountTarget, 'LOBBY') && r < 0.48) return 'LOBBY';
     return 'GLOBAL';
   }
 
-  // --------------------------------------------------------------------------
-  // MARK: Maintenance loop
-  // --------------------------------------------------------------------------
-
   private startMaintenanceLoop(): void {
     if (this.maintenanceInterval != null) this.clock.clearInterval(this.maintenanceInterval);
-
     this.maintenanceInterval = this.clock.setInterval(() => {
       if (this.destroyed) return;
-
       const now = this.now();
       let next = pruneExpiredTypingSnapshotsInState(this.state, now);
-
       const reveals = popDueRevealsFromState(next, now);
       next = reveals.state;
 
       for (const reveal of reveals.due) {
         const message = this.revealPayloads.get(reveal.payloadRef);
         if (!message) continue;
-
-        next = pushMessageToState(next, {
-          channelId: reveal.revealChannel,
-          message: { ...message, ts: now },
-        });
-
+        if (!isVisibleChannelId(reveal.revealChannel)) continue;
+        next = pushMessageToState(next, { channelId: reveal.revealChannel, message: { ...message, ts: now as unknown as number } });
         this.revealPayloads.delete(reveal.payloadRef);
         this.emitEngineEvent('CHAT_REVEAL_FIRED', { reveal });
       }
 
       if (next.currentSilence && next.currentSilence.durationMs > 0) {
-        const silenceEnd = this.lastSignalAt + next.currentSilence.durationMs;
-        if (now >= silenceEnd) {
+        const silenceEnd = addUnixMs(this.lastSignalAt, next.currentSilence.durationMs);
+        if ((now as number) >= (silenceEnd as number)) {
           next = endSilenceInState(next);
           this.emitEngineEvent('CHAT_SILENCE_ENDED', { endedAt: now });
         }
       }
 
-      if (this.panelOpen) {
-        next = markChannelReadInState(next, next.activeVisibleChannel);
-      }
+      if (this.panelOpen) next = markChannelReadInState(next, next.activeVisibleChannel);
 
       if (this.shouldRunSilenceRescue(now)) {
         const rescue = this.buildRescueDecision(next.activeVisibleChannel, now, 'CALM');
-        next = pushMessageToState(next, {
-          channelId: rescue.deliverInChannel,
-          message: this.buildHelperRescueMessage(rescue),
-        });
+        next = pushMessageToState(next, { channelId: rescue.deliverInChannel, message: this.buildHelperRescueMessage(rescue) });
         this.emitEngineEvent('CHAT_RESCUE_TRIGGERED', { rescue });
         this.lastMeaningfulIncomingAt = now;
       }
@@ -2477,19 +1797,9 @@ export class ChatEngine implements ChatEnginePublicApi {
   private shouldRunSilenceRescue(now: UnixMs): boolean {
     if (!this.panelOpen) return false;
     if (this.state.currentSilence?.enforced) return false;
-
-    const silenceMs = Math.max(
-      0,
-      now - (this.lastMeaningfulIncomingAt || this.lastPanelOpenedAt || now),
-    );
-
-    return silenceMs >= CHAT_ENGINE_CONSTANTS.rescueSilenceThresholdMs &&
-      this.shouldTriggerRescue('silence');
+    const silenceMs = Math.max(0, (now as number) - ((this.lastMeaningfulIncomingAt || this.lastPanelOpenedAt || now) as number));
+    return silenceMs >= CHAT_ENGINE_CONSTANTS.rescueSilenceThresholdMs && this.shouldTriggerRescue('silence');
   }
-
-  // --------------------------------------------------------------------------
-  // MARK: Relationships / learning / liveops public hooks
-  // --------------------------------------------------------------------------
 
   setLearningProfile(profile?: ChatLearningProfile): void {
     const next = setLearningProfileInState(this.state, profile);
@@ -2508,10 +1818,6 @@ export class ChatEngine implements ChatEnginePublicApi {
     this.commit(next);
   }
 
-  // --------------------------------------------------------------------------
-  // MARK: Public typed diagnostic getters — patched
-  // --------------------------------------------------------------------------
-
   getConnectionState(): Readonly<ChatConnectionState> {
     return this.getConnectionSnapshot();
   }
@@ -2523,10 +1829,6 @@ export class ChatEngine implements ChatEnginePublicApi {
   getThreatBotState(): BotState {
     return this.inferThreatBotState();
   }
-
-  // --------------------------------------------------------------------------
-  // MARK: Cache / persistence
-  // --------------------------------------------------------------------------
 
   private tryHydrateFromCache(): void {
     const raw = this.persistence.load(this.storageKey);
@@ -2541,18 +1843,11 @@ export class ChatEngine implements ChatEnginePublicApi {
 
   private persist(): void {
     try {
-      this.persistence.save(
-        this.storageKey,
-        JSON.stringify(serializeChatStateForCache(this.state)),
-      );
+      this.persistence.save(this.storageKey, JSON.stringify(serializeChatStateForCache(this.state)));
     } catch {
-      //
+      // noop
     }
   }
-
-  // --------------------------------------------------------------------------
-  // MARK: Helpers / derived read models
-  // --------------------------------------------------------------------------
 
   getSnapshot(): Readonly<ReturnType<typeof createChatEngineState>> {
     return this.state;
@@ -2597,43 +1892,31 @@ export class ChatEngine implements ChatEnginePublicApi {
   private resolveRoomId(): ChatRoomId {
     const existing = this.state.memberships[0]?.roomId;
     if (existing) return existing;
-    return ('chat:room:local' as ChatRoomId);
+    return 'chat:room:local' as ChatRoomId;
   }
 
   private now(): UnixMs {
     return unixNow(this.clock);
   }
 
-  // --------------------------------------------------------------------------
-  // MARK: Destruction
-  // --------------------------------------------------------------------------
-
   destroy(): void {
     if (this.destroyed) return;
     this.destroyed = true;
-
     if (this.ambientTimer != null) this.clock.clearTimeout(this.ambientTimer);
     if (this.maintenanceInterval != null) this.clock.clearInterval(this.maintenanceInterval);
-
     for (const unsub of this.eventBusUnsubs) unsub();
     this.eventBusUnsubs.length = 0;
-
     try {
       void this.transport?.disconnect?.('destroy');
     } catch {
-      //
+      // noop
     }
-
     this.revealPayloads.clear();
     this.pendingRequests.clear();
     this.observers.clear();
     this.eventObservers.clear();
   }
 }
-
-// ============================================================================
-// MARK: Safe helpers
-// ============================================================================
 
 function safeError(error: unknown): string {
   if (error instanceof Error) return error.message;
@@ -2644,7 +1927,3 @@ function safeError(error: unknown): string {
     return 'unknown error';
   }
 }
-
-// ============================================================================
-// MARK: End
-// ============================================================================
