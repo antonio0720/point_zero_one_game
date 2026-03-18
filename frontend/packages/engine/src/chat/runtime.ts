@@ -1,22 +1,25 @@
 /**
  * ============================================================================
- * @pzo/engine/chat — Omnipresent package runtime
+ * @pzo/engine/chat/runtime.ts
  * FILE: frontend/packages/engine/src/chat/runtime.ts
  * ----------------------------------------------------------------------------
- * Purpose
- * - Package-level omnipresent chat runtime for pzo-web and platform-shell adoption
- * - Owns client-side panel state, unread state, room state, rivalry state,
- *   runtime message injection, and game-event -> chat projection
- * - Exposes both:
- *     1) pure model builders for package consumers
- *     2) a React hook for client runtime usage
+ * Omnipresent package runtime used by pzo-web and platform-shell adoption.
  *
- * Design rules
- * - Package contracts remain sourced from ./types
- * - Presentation shaping remains sourced from ./adapters
- * - Runtime stays transport-agnostic: remote send is caller-injected
- * - Channels stay aligned to current package contracts:
- *     GLOBAL | SERVER | SYNDICATE | DEAL_ROOM | DIRECT
+ * Owns:
+ * - client-side chat open/close state
+ * - active panel / visible transcript state
+ * - unread counts
+ * - room membership state
+ * - rivalry / deal-room state
+ * - game-event -> chat projection
+ * - learning-profile rollup
+ *
+ * Does not own:
+ * - reducer authority from pzo-web engines/chat
+ * - socket lifecycle
+ * - transport implementation
+ *
+ * Transport remains caller-injected through onSendRemote.
  * ============================================================================
  */
 
@@ -31,70 +34,31 @@ import {
   normalizeAllianceState,
   normalizeDealRoomState,
   normalizeRooms,
-  readRecord,
-  safeBoolean,
-  safeIsoDate,
-  safeNumber,
-  safeString,
 } from './adapters';
 
 import type {
   ActiveRivalry,
   AlliancePanelState,
   ChatChannel,
+  ChatPanelView,
   DealRoomState,
+  GameEventType,
+  LearningProfileSnapshot,
   MarketMoveAlertPayload,
+  OmnipresentChatContext,
   OmnipresentChatModel,
+  OmnipresentChatRuntimeApi,
   PackageChatMessage,
   PackageChatRoom,
+  PackageChatRuntimeOptions,
   RoomMember,
   RoomType,
   RivalryPhase,
 } from './types';
 
 /* ============================================================================
- * Runtime-local public types
+ * Public runtime model input
  * ========================================================================== */
-
-export type ChatPanelView = ChatChannel | 'ROOMS';
-
-export type GameEventType =
-  | 'RUN_STARTED'
-  | 'RUN_ENDED'
-  | 'PRESSURE_TIER_CHANGED'
-  | 'BOT_ATTACK'
-  | 'SHIELD_BREACH'
-  | 'CASCADE_TRIGGERED'
-  | 'SOVEREIGNTY_GRADE_CHANGED'
-  | 'PIPELINE_STATUS_CHANGED'
-  | 'RIVALRY_PHASE_CHANGED'
-  | 'MARKET_ALERT'
-  | 'SYSTEM';
-
-export interface LearningProfileSnapshot {
-  readonly dominantTone: 'UNKNOWN' | 'CALM' | 'QUESTION' | 'ANGRY' | 'TROLL' | 'FLEX';
-  readonly messagesSent: number;
-  readonly recentPressureMentions: number;
-  readonly recentMoneyMentions: number;
-  readonly recentBotMentions: number;
-}
-
-export interface OmnipresentChatContext {
-  readonly mode?: string | null;
-  readonly lifecycleState?: string | null;
-  readonly pressureTier?: string | null;
-  readonly activeBotsCount?: number | null;
-  readonly breachCascade?: boolean | null;
-  readonly weakestLayerId?: string | null;
-  readonly negativeCascadeCount?: number | null;
-  readonly sovereigntyGrade?: string | null;
-  readonly pipelineStatus?: string | null;
-  readonly proofHash?: string | null;
-  readonly rivalryId?: string | null;
-  readonly title?: string | null;
-  readonly subtitle?: string | null;
-  readonly [key: string]: unknown;
-}
 
 export interface PackageChatRuntimeInput {
   readonly currentUserId: string;
@@ -109,62 +73,6 @@ export interface PackageChatRuntimeInput {
   readonly subtitle?: string;
 }
 
-export interface PackageChatRuntimeOptions {
-  readonly currentUserId: string;
-  readonly displayName?: string;
-  readonly mode?: string;
-  readonly isLobby?: boolean;
-  readonly defaultOpen?: boolean;
-  readonly defaultPanel?: ChatPanelView;
-  readonly title?: string;
-  readonly subtitle?: string;
-  readonly initialMessages?: readonly PackageChatMessage[];
-  readonly initialRooms?: readonly PackageChatRoom[];
-  readonly initialAlliance?: Partial<AlliancePanelState>;
-  readonly initialRivalry?: ActiveRivalry | null;
-  readonly initialContext?: Partial<OmnipresentChatContext>;
-  readonly maxMessages?: number;
-  readonly onSendRemote?: (message: PackageChatMessage) => Promise<void> | void;
-}
-
-export interface OmnipresentChatRuntimeApi {
-  readonly currentUserId: string;
-  readonly isOpen: boolean;
-  readonly activePanel: ChatPanelView;
-  readonly visibleChannel: ChatChannel;
-  readonly messages: readonly PackageChatMessage[];
-  readonly allMessages: readonly PackageChatMessage[];
-  readonly unread: Record<ChatChannel, number>;
-  readonly totalUnread: number;
-  readonly availableChannels: readonly ChatChannel[];
-  readonly rooms: readonly PackageChatRoom[];
-  readonly activeRoomId: string | null;
-  readonly alliance: AlliancePanelState;
-  readonly activeRivalry: ActiveRivalry | null;
-  readonly dealRoom: DealRoomState | null;
-  readonly context: OmnipresentChatContext;
-  readonly learningProfile: LearningProfileSnapshot;
-  readonly model: OmnipresentChatModel;
-  readonly tabs: OmnipresentChatModel['tabs'];
-  readonly toggleOpen: () => void;
-  readonly setOpen: (next: boolean) => void;
-  readonly switchPanel: (panel: ChatPanelView) => void;
-  readonly sendMessage: (body: string, channel?: ChatChannel) => Promise<void>;
-  readonly injectMessages: (nextMessages: readonly PackageChatMessage[]) => void;
-  readonly processGameEvent: (type: GameEventType, payload?: Record<string, unknown>) => void;
-  readonly updateContext: (next: Partial<OmnipresentChatContext>) => void;
-  readonly createRoom: (
-    name: string,
-    type: RoomType,
-    maxMembers: number,
-    inviteOnly: boolean,
-  ) => Promise<string>;
-  readonly joinRoom: (roomId: string, inviteToken?: string) => Promise<void>;
-  readonly leaveRoom: (roomId: string) => Promise<void>;
-  readonly selectRoom: (roomId: string) => void;
-  readonly setRivalry: (rivalry: ActiveRivalry | null) => void;
-}
-
 /* ============================================================================
  * Constants
  * ========================================================================== */
@@ -173,10 +81,10 @@ const MAX_DEFAULT_MESSAGES = 400;
 
 const DEFAULT_CHANNELS: readonly ChatChannel[] = [
   'GLOBAL',
+  'SERVER',
   'SYNDICATE',
   'DEAL_ROOM',
   'DIRECT',
-  'SERVER',
 ] as const;
 
 const EMPTY_UNREAD: Record<ChatChannel, number> = {
@@ -185,6 +93,7 @@ const EMPTY_UNREAD: Record<ChatChannel, number> = {
   SYNDICATE: 0,
   DEAL_ROOM: 0,
   DIRECT: 0,
+  SPECTATOR: 0,
 };
 
 const EMPTY_PROFILE: LearningProfileSnapshot = {
@@ -196,7 +105,7 @@ const EMPTY_PROFILE: LearningProfileSnapshot = {
 };
 
 /* ============================================================================
- * Utilities
+ * Local helpers
  * ========================================================================== */
 
 function nowTs(): number {
@@ -209,6 +118,23 @@ function nowIso(): string {
 
 function randomId(prefix: string): string {
   return `${prefix}_${Math.random().toString(36).slice(2, 10)}_${Date.now().toString(36)}`;
+}
+
+function asString(value: unknown, fallback = ''): string {
+  return typeof value === 'string' && value.trim().length > 0 ? value : fallback;
+}
+
+function asNumber(value: unknown, fallback = 0): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+}
+
+function asBoolean(value: unknown, fallback = false): boolean {
+  return typeof value === 'boolean' ? value : fallback;
+}
+
+function asIsoDate(value: unknown, fallback?: string): string {
+  if (typeof value === 'string' && value.trim().length > 0) return value;
+  return fallback ?? nowIso();
 }
 
 function resolveVisibleChannel(
@@ -274,6 +200,7 @@ function createMessage(
   input: Partial<PackageChatMessage> &
     Pick<PackageChatMessage, 'channel' | 'senderId' | 'body'>,
 ): PackageChatMessage {
+  const ts = input.ts ?? nowTs();
   return {
     id: input.id ?? randomId('chat'),
     channel: input.channel,
@@ -283,8 +210,11 @@ function createMessage(
     senderName: input.senderName,
     senderRank: input.senderRank,
     body: input.body,
-    ts: input.ts ?? nowTs(),
+    ts,
+    createdAt: input.createdAt ?? new Date(ts).toISOString(),
     immutable: input.immutable ?? false,
+    recipientId: input.recipientId,
+    emoji: input.emoji,
     proofHash: input.proofHash,
     meta: input.meta,
     marketMoveAlert: input.marketMoveAlert,
@@ -292,14 +222,9 @@ function createMessage(
     bulletinPhase: input.bulletinPhase,
     phase: input.phase,
     dealRoomMeta: input.dealRoomMeta,
+    wasAdapted: input.wasAdapted,
+    sentimentSignal: input.sentimentSignal,
   };
-}
-
-function roomTypeFromMode(mode?: string): RoomType {
-  const normalized = safeString(mode).toUpperCase();
-  if (normalized.includes('SYNDICATE') || normalized.includes('TEAM')) return 'HOUSEHOLD_TABLE';
-  if (normalized.includes('PREDATOR') || normalized.includes('HEAD')) return 'RIVALRY_ROOM';
-  return 'CUSTOM';
 }
 
 function deriveChannels(
@@ -309,7 +234,7 @@ function deriveChannels(
 ): readonly ChatChannel[] {
   if (isLobby) return ['GLOBAL', 'SERVER', 'DIRECT'];
 
-  const normalized = safeString(mode).toUpperCase();
+  const normalized = asString(mode).toUpperCase();
 
   if (normalized.includes('SYNDICATE') || normalized.includes('TEAM')) {
     return rivalry
@@ -342,29 +267,29 @@ function buildDealRoomState(
 function buildMarketMoveAlertFromPayload(
   payload: Record<string, unknown>,
 ): MarketMoveAlertPayload | undefined {
-  const rivalryId = safeString(payload.rivalryId);
+  const rivalryId = asString(payload.rivalryId);
   if (!rivalryId) return undefined;
 
   return {
     rivalryId,
     phase: coerceRivalryPhase(payload.phase, 'NOTICE_FILED'),
     challenger: {
-      syndicateId: safeString(payload.challengerSyndicateId, 'challenger'),
-      name: safeString(payload.challengerName, 'Challenger'),
-      banner: safeString(payload.challengerBanner),
-      capitalScore: safeNumber(payload.challengerScore),
+      syndicateId: asString(payload.challengerSyndicateId, 'challenger'),
+      name: asString(payload.challengerName, 'Challenger'),
+      banner: asString(payload.challengerBanner),
+      capitalScore: asNumber(payload.challengerScore),
     },
     defender: {
-      syndicateId: safeString(payload.defenderSyndicateId, 'defender'),
-      name: safeString(payload.defenderName, 'Defender'),
-      banner: safeString(payload.defenderBanner),
-      capitalScore: safeNumber(payload.defenderScore),
+      syndicateId: asString(payload.defenderSyndicateId, 'defender'),
+      name: asString(payload.defenderName, 'Defender'),
+      banner: asString(payload.defenderBanner),
+      capitalScore: asNumber(payload.defenderScore),
     },
-    phaseEndsAt: safeIsoDate(payload.phaseEndsAt),
-    deepLink: safeString(payload.deepLink, rivalryId),
-    proofHash: safeString(payload.proofHash) || undefined,
+    phaseEndsAt: asIsoDate(payload.phaseEndsAt),
+    deepLink: asString(payload.deepLink, rivalryId),
+    proofHash: asString(payload.proofHash) || undefined,
     yieldCaptureAmount:
-      payload.yieldCaptureAmount == null ? undefined : safeNumber(payload.yieldCaptureAmount),
+      payload.yieldCaptureAmount == null ? undefined : asNumber(payload.yieldCaptureAmount),
   };
 }
 
@@ -419,6 +344,25 @@ function sumUnread(unread: Record<ChatChannel, number>): number {
   return Object.values(unread).reduce((sum, value) => sum + value, 0);
 }
 
+function resolveRoomMessageChannel(room: PackageChatRoom | undefined | null): ChatChannel {
+  if (!room) return 'DIRECT';
+  if (room.isWarRoom || room.type === 'RIVALRY_ROOM') return 'DEAL_ROOM';
+  if (room.type === 'HOUSEHOLD_TABLE') return 'SYNDICATE';
+  return 'DIRECT';
+}
+
+function filterVisibleMessages(
+  messages: readonly PackageChatMessage[],
+  activePanel: ChatPanelView,
+  visibleChannel: ChatChannel,
+  activeRoomId: string | null,
+): readonly PackageChatMessage[] {
+  if (activePanel === 'ROOMS' && activeRoomId) {
+    return messages.filter((message) => message.roomId === activeRoomId);
+  }
+  return messages.filter((message) => message.channel === visibleChannel);
+}
+
 /* ============================================================================
  * Pure model exports
  * ========================================================================== */
@@ -430,18 +374,26 @@ export function filterMessagesForChannel(
   return messages.filter((message) => message.channel === channel);
 }
 
-export function buildOmnipresentChatModel(input: PackageChatRuntimeInput): OmnipresentChatModel {
+export function buildOmnipresentChatModel(
+  input: PackageChatRuntimeInput,
+): OmnipresentChatModel {
   const activeChannel = input.activeChannel ?? 'GLOBAL';
   const visibleChannel = resolveVisibleChannel(activeChannel, input.visibleChannel);
   const allMessages = Array.isArray(input.messages) ? dedupeMessages(input.messages) : [];
+
   const alliance = normalizeAllianceState({
     ...input.alliance,
     activeRivalry: input.rivalry ?? input.alliance?.activeRivalry ?? null,
   });
 
-  const derivedDealRoom = buildDealRoomState(input.rivalry ?? alliance.activeRivalry ?? null, allMessages);
+  const derivedDealRoom = buildDealRoomState(
+    input.rivalry ?? alliance.activeRivalry ?? null,
+    allMessages,
+  );
+
   const dealRoom = normalizeDealRoomState(input.dealRoom ?? derivedDealRoom);
-  const modelSeed = {
+
+  const modelBase = {
     currentUserId: input.currentUserId,
     activeChannel,
     visibleChannel,
@@ -455,16 +407,16 @@ export function buildOmnipresentChatModel(input: PackageChatRuntimeInput): Omnip
   };
 
   return {
-    ...modelSeed,
+    ...modelBase,
     tabs: deriveTabs({
-      alliance: modelSeed.alliance,
-      dealRoom: modelSeed.dealRoom,
+      alliance: modelBase.alliance,
+      dealRoom: modelBase.dealRoom,
     }),
   };
 }
 
 /* ============================================================================
- * React runtime hook
+ * Hook runtime
  * ========================================================================== */
 
 export function useOmnipresentChatRuntime(
@@ -512,18 +464,14 @@ export function useOmnipresentChatRuntime(
     subtitle: initialContext?.subtitle ?? subtitle,
   });
   const [unread, setUnread] = useState<Record<ChatChannel, number>>({ ...EMPTY_UNREAD });
-  const [learningProfile, setLearningProfile] = useState<LearningProfileSnapshot>(EMPTY_PROFILE);
+  const [learningProfile, setLearningProfile] =
+    useState<LearningProfileSnapshot>(EMPTY_PROFILE);
 
   const isOpenRef = useRef(isOpen);
   const activePanelRef = useRef<ChatPanelView>(activePanel);
   const activeRoomRef = useRef<string | null>(activeRoomId);
   const contextRef = useRef<OmnipresentChatContext>(context);
   const previousContextRef = useRef<OmnipresentChatContext>(context);
-
-  const availableChannels = useMemo(
-    () => deriveChannels(context.mode ?? mode, isLobby, activeRivalry),
-    [activeRivalry, context.mode, isLobby, mode],
-  );
 
   useEffect(() => {
     isOpenRef.current = isOpen;
@@ -540,6 +488,11 @@ export function useOmnipresentChatRuntime(
   useEffect(() => {
     contextRef.current = context;
   }, [context]);
+
+  const availableChannels = useMemo(
+    () => deriveChannels(context.mode ?? mode, isLobby, activeRivalry),
+    [activeRivalry, context.mode, isLobby, mode],
+  );
 
   useEffect(() => {
     setActivePanel((prev) => sanitizePanel(prev, availableChannels));
@@ -563,10 +516,21 @@ export function useOmnipresentChatRuntime(
     );
   }, [activeRivalry]);
 
+  const activeRoom = useMemo(
+    () => rooms.find((room) => room.id === activeRoomId) ?? null,
+    [activeRoomId, rooms],
+  );
+
   const visibleChannel = resolveVisibleChannel(activePanel, undefined);
+
   const dealRoom = useMemo(
     () => buildDealRoomState(activeRivalry, messages),
     [activeRivalry, messages],
+  );
+
+  const visibleMessages = useMemo(
+    () => filterVisibleMessages(messages, activePanel, visibleChannel, activeRoomId),
+    [activePanel, activeRoomId, messages, visibleChannel],
   );
 
   const model = useMemo(
@@ -580,8 +544,8 @@ export function useOmnipresentChatRuntime(
         alliance,
         rivalry: activeRivalry,
         dealRoom,
-        title: safeString(context.title, title),
-        subtitle: safeString(context.subtitle, subtitle),
+        title: asString(context.title, title),
+        subtitle: asString(context.subtitle, subtitle),
       }),
     [
       activePanel,
@@ -609,10 +573,20 @@ export function useOmnipresentChatRuntime(
         const draft = { ...prev };
         const currentOpen = isOpenRef.current;
         const currentPanel = activePanelRef.current;
-        const currentVisible = resolveVisibleChannel(currentPanel, undefined);
+        const currentVisibleChannel = resolveVisibleChannel(currentPanel, undefined);
+        const currentRoomId = activeRoomRef.current;
 
         for (const message of nextMessages) {
-          if (message.channel === currentVisible && currentOpen && currentPanel !== 'ROOMS') continue;
+          const roomVisible =
+            currentPanel === 'ROOMS' &&
+            currentRoomId != null &&
+            message.roomId === currentRoomId;
+
+          const channelVisible =
+            currentPanel !== 'ROOMS' &&
+            message.channel === currentVisibleChannel;
+
+          if (currentOpen && (roomVisible || channelVisible)) continue;
           draft[message.channel] = (draft[message.channel] ?? 0) + 1;
         }
 
@@ -654,11 +628,13 @@ export function useOmnipresentChatRuntime(
       if (!trimmed) return;
 
       const panel = activePanelRef.current;
+      const roomId = panel === 'ROOMS' ? activeRoomRef.current : null;
+
       const targetChannel =
         channel ??
-        (panel === 'ROOMS' ? 'DIRECT' : resolveVisibleChannel(panel, undefined));
-
-      const roomId = panel === 'ROOMS' ? activeRoomRef.current : null;
+        (panel === 'ROOMS'
+          ? resolveRoomMessageChannel(activeRoom)
+          : resolveVisibleChannel(panel, undefined));
 
       const optimistic = createMessage({
         channel: targetChannel,
@@ -674,7 +650,7 @@ export function useOmnipresentChatRuntime(
 
       await onSendRemote?.(optimistic);
     },
-    [appendMessages, currentUserId, displayName, onSendRemote],
+    [activeRoom, appendMessages, currentUserId, displayName, onSendRemote],
   );
 
   const injectMessages = useCallback(
@@ -700,7 +676,7 @@ export function useOmnipresentChatRuntime(
 
       const room: PackageChatRoom = {
         id,
-        name: safeString(name, 'Room'),
+        name: asString(name, 'Room'),
         type,
         creatorId: currentUserId,
         maxMembers: Math.max(2, Math.floor(maxMembers || 2)),
@@ -724,6 +700,7 @@ export function useOmnipresentChatRuntime(
       setRooms((prev) =>
         prev.map((room) => {
           if (room.id !== roomId) return room;
+
           const members = [...(room.members ?? [])];
           if (members.some((member) => member.userId === currentUserId)) return room;
 
@@ -802,8 +779,8 @@ export function useOmnipresentChatRuntime(
             senderId: 'SYSTEM',
             senderName: 'SYSTEM',
             immutable: true,
-            body: `Run closed · ${safeString(payload.outcome, 'UNRESOLVED')}.`,
-            proofHash: safeString(payload.proofHash) || undefined,
+            body: `Run closed · ${asString(payload.outcome, 'UNRESOLVED')}.`,
+            proofHash: asString(payload.proofHash) || undefined,
             meta: payload,
           }),
         );
@@ -815,7 +792,7 @@ export function useOmnipresentChatRuntime(
             senderId: 'SYSTEM',
             senderName: 'SYSTEM',
             immutable: true,
-            body: `Pressure tier shifted to ${safeString(payload.tier, 'UNKNOWN')}.`,
+            body: `Pressure tier shifted to ${asString(payload.tier, 'UNKNOWN')}.`,
             meta: payload,
           }),
         );
@@ -824,12 +801,12 @@ export function useOmnipresentChatRuntime(
           createMessage({
             channel,
             kind: 'BOT_ATTACK',
-            senderId: safeString(payload.botId, 'BOT'),
-            senderName: safeString(payload.botName, 'BOT'),
+            senderId: asString(payload.botId, 'BOT'),
+            senderName: asString(payload.botName, 'BOT'),
             immutable: true,
             body:
-              safeString(payload.body) ||
-              `Attack fired on ${safeString(payload.targetLayer, 'core')} · ${safeString(payload.attackType, 'UNKNOWN')}.`,
+              asString(payload.body) ||
+              `Attack fired on ${asString(payload.targetLayer, 'core')} · ${asString(payload.attackType, 'UNKNOWN')}.`,
             meta: payload,
           }),
         );
@@ -841,7 +818,7 @@ export function useOmnipresentChatRuntime(
             senderId: 'SYSTEM',
             senderName: 'SYSTEM',
             immutable: true,
-            body: `Shield integrity compromised at ${safeString(payload.layerId, 'unknown layer')}.`,
+            body: `Shield integrity compromised at ${asString(payload.layerId, 'unknown layer')}.`,
             meta: payload,
           }),
         );
@@ -853,7 +830,7 @@ export function useOmnipresentChatRuntime(
             senderId: 'SYSTEM',
             senderName: 'SYSTEM',
             immutable: true,
-            body: `Cascade chain active · ${safeString(payload.chainId, 'UNNAMED')} · ${safeString(payload.severity, 'MAJOR')}.`,
+            body: `Cascade chain active · ${asString(payload.chainId, 'UNNAMED')} · ${asString(payload.severity, 'MAJOR')}.`,
             meta: payload,
           }),
         );
@@ -865,8 +842,8 @@ export function useOmnipresentChatRuntime(
             senderId: 'SYSTEM',
             senderName: 'SYSTEM',
             immutable: true,
-            body: `Sovereignty grade now ${safeString(payload.grade, 'UNVERIFIED')}.`,
-            proofHash: safeString(payload.proofHash) || undefined,
+            body: `Sovereignty grade now ${asString(payload.grade, 'UNVERIFIED')}.`,
+            proofHash: asString(payload.proofHash) || undefined,
             meta: payload,
           }),
         );
@@ -878,31 +855,33 @@ export function useOmnipresentChatRuntime(
             senderId: 'SYSTEM',
             senderName: 'SYSTEM',
             immutable: true,
-            body: `Proof pipeline ${safeString(payload.status, 'IDLE')}.`,
-            proofHash: safeString(payload.proofHash) || undefined,
+            body: `Proof pipeline ${asString(payload.status, 'IDLE')}.`,
+            proofHash: asString(payload.proofHash) || undefined,
             meta: payload,
           }),
         );
       } else if (type === 'RIVALRY_PHASE_CHANGED') {
+        const previous = activeRivalry;
+
         const nextRivalry: ActiveRivalry = {
-          rivalryId: safeString(payload.rivalryId, activeRivalry?.rivalryId ?? randomId('rivalry')),
-          phase: coerceRivalryPhase(payload.phase, activeRivalry?.phase ?? 'NOTICE_FILED'),
-          phaseEndsAt: safeIsoDate(payload.phaseEndsAt),
-          challengerSyndicateId: safeString(
+          rivalryId: asString(payload.rivalryId, previous?.rivalryId ?? randomId('rivalry')),
+          phase: coerceRivalryPhase(payload.phase, previous?.phase ?? 'NOTICE_FILED'),
+          phaseEndsAt: asIsoDate(payload.phaseEndsAt, previous?.phaseEndsAt),
+          challengerSyndicateId: asString(
             payload.challengerSyndicateId,
-            activeRivalry?.challengerSyndicateId ?? 'challenger',
+            previous?.challengerSyndicateId ?? 'challenger',
           ),
-          defenderSyndicateId: safeString(
+          defenderSyndicateId: asString(
             payload.defenderSyndicateId,
-            activeRivalry?.defenderSyndicateId ?? 'defender',
+            previous?.defenderSyndicateId ?? 'defender',
           ),
-          challengerName: safeString(payload.challengerName, activeRivalry?.challengerName ?? 'Challenger'),
-          defenderName: safeString(payload.defenderName, activeRivalry?.defenderName ?? 'Defender'),
-          challengerBanner: safeString(payload.challengerBanner, activeRivalry?.challengerBanner ?? ''),
-          defenderBanner: safeString(payload.defenderBanner, activeRivalry?.defenderBanner ?? ''),
-          challengerScore: safeNumber(payload.challengerScore, activeRivalry?.challengerScore ?? 0),
-          defenderScore: safeNumber(payload.defenderScore, activeRivalry?.defenderScore ?? 0),
-          mySyndicateId: safeString(payload.mySyndicateId, activeRivalry?.mySyndicateId ?? 'self'),
+          challengerName: asString(payload.challengerName, previous?.challengerName ?? 'Challenger'),
+          defenderName: asString(payload.defenderName, previous?.defenderName ?? 'Defender'),
+          challengerBanner: asString(payload.challengerBanner, previous?.challengerBanner ?? ''),
+          defenderBanner: asString(payload.defenderBanner, previous?.defenderBanner ?? ''),
+          challengerScore: asNumber(payload.challengerScore, previous?.challengerScore ?? 0),
+          defenderScore: asNumber(payload.defenderScore, previous?.defenderScore ?? 0),
+          mySyndicateId: asString(payload.mySyndicateId, previous?.mySyndicateId ?? 'self'),
           dealRoomChannel: 'DEAL_ROOM',
         };
 
@@ -916,13 +895,13 @@ export function useOmnipresentChatRuntime(
             senderName: 'SYSTEM',
             immutable: true,
             body:
-              safeString(payload.body) ||
-              `Rivalry phase shifted to ${safeString(payload.phase, 'UNKNOWN')}.`,
+              asString(payload.body) ||
+              `Rivalry phase shifted to ${asString(payload.phase, 'UNKNOWN')}.`,
             bulletinType: 'MARKET_PHASE_BULLETIN',
             bulletinPhase: nextRivalry.phase,
             phase: nextRivalry.phase,
             marketMoveAlert: buildMarketMoveAlertFromPayload(payload),
-            proofHash: safeString(payload.proofHash) || undefined,
+            proofHash: asString(payload.proofHash) || undefined,
             meta: payload,
             dealRoomMeta: {
               rivalryId: nextRivalry.rivalryId,
@@ -943,9 +922,9 @@ export function useOmnipresentChatRuntime(
             senderId: 'SYSTEM',
             senderName: 'SYSTEM',
             immutable: true,
-            body: safeString(payload.body, 'Market alert issued.'),
+            body: asString(payload.body, 'Market alert issued.'),
             marketMoveAlert: buildMarketMoveAlertFromPayload(payload),
-            proofHash: safeString(payload.proofHash) || undefined,
+            proofHash: asString(payload.proofHash) || undefined,
             meta: payload,
           }),
         );
@@ -957,7 +936,7 @@ export function useOmnipresentChatRuntime(
             senderId: 'SYSTEM',
             senderName: 'SYSTEM',
             immutable: true,
-            body: safeString(payload.body, 'System event recorded.'),
+            body: asString(payload.body, 'System event recorded.'),
             meta: payload,
           }),
         );
@@ -969,11 +948,11 @@ export function useOmnipresentChatRuntime(
   );
 
   useEffect(() => {
-    const prev = previousContextRef.current;
+    const previous = previousContextRef.current;
     const next = contextRef.current;
     previousContextRef.current = next;
 
-    if (safeString(prev.lifecycleState) !== safeString(next.lifecycleState) && next.lifecycleState) {
+    if (asString(previous.lifecycleState) !== asString(next.lifecycleState) && next.lifecycleState) {
       if (next.lifecycleState === 'ACTIVE') {
         processGameEvent('RUN_STARTED', {
           body: `Lifecycle ${next.lifecycleState}.`,
@@ -992,24 +971,24 @@ export function useOmnipresentChatRuntime(
       }
     }
 
-    if (safeString(prev.pressureTier) !== safeString(next.pressureTier) && next.pressureTier) {
+    if (asString(previous.pressureTier) !== asString(next.pressureTier) && next.pressureTier) {
       processGameEvent('PRESSURE_TIER_CHANGED', {
         tier: next.pressureTier,
       });
     }
 
     if (
-      safeNumber(next.activeBotsCount) > safeNumber(prev.activeBotsCount) &&
-      safeNumber(next.activeBotsCount) > 0
+      asNumber(next.activeBotsCount) > asNumber(previous.activeBotsCount) &&
+      asNumber(next.activeBotsCount) > 0
     ) {
       processGameEvent('BOT_ATTACK', {
         botName: 'HATER SWARM',
-        body: `${safeNumber(next.activeBotsCount)} active bot contacts detected.`,
+        body: `${asNumber(next.activeBotsCount)} active bot contacts detected.`,
         targetLayer: next.weakestLayerId ?? 'core',
       });
     }
 
-    if (!safeBoolean(prev.breachCascade) && safeBoolean(next.breachCascade)) {
+    if (!asBoolean(previous.breachCascade) && asBoolean(next.breachCascade)) {
       processGameEvent('SHIELD_BREACH', {
         layerId: next.weakestLayerId,
         body: 'Breach cascade detected.',
@@ -1017,17 +996,17 @@ export function useOmnipresentChatRuntime(
     }
 
     if (
-      safeNumber(next.negativeCascadeCount) > safeNumber(prev.negativeCascadeCount) &&
-      safeNumber(next.negativeCascadeCount) > 0
+      asNumber(next.negativeCascadeCount) > asNumber(previous.negativeCascadeCount) &&
+      asNumber(next.negativeCascadeCount) > 0
     ) {
       processGameEvent('CASCADE_TRIGGERED', {
-        chainId: `NEG-${safeNumber(next.negativeCascadeCount)}`,
+        chainId: `NEG-${asNumber(next.negativeCascadeCount)}`,
         severity: 'MAJOR',
       });
     }
 
     if (
-      safeString(prev.sovereigntyGrade) !== safeString(next.sovereigntyGrade) &&
+      asString(previous.sovereigntyGrade) !== asString(next.sovereigntyGrade) &&
       next.sovereigntyGrade
     ) {
       processGameEvent('SOVEREIGNTY_GRADE_CHANGED', {
@@ -1037,7 +1016,7 @@ export function useOmnipresentChatRuntime(
     }
 
     if (
-      safeString(prev.pipelineStatus) !== safeString(next.pipelineStatus) &&
+      asString(previous.pipelineStatus) !== asString(next.pipelineStatus) &&
       next.pipelineStatus
     ) {
       processGameEvent('PIPELINE_STATUS_CHANGED', {
@@ -1073,7 +1052,7 @@ export function useOmnipresentChatRuntime(
     isOpen,
     activePanel,
     visibleChannel,
-    messages: model.visibleMessages,
+    messages: visibleMessages,
     allMessages: messages,
     unread,
     totalUnread,
