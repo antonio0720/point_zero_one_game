@@ -38,7 +38,9 @@ import {
 } from '../../engines/chat';
 
 import type { ChatMessage, GameChatContext, SabotageEvent } from './chatTypes';
+import type { ChatEngine as FrontendChatEngine } from '../../engines/chat/ChatEngine';
 import useUnifiedChat from './useUnifiedChat';
+import useCanonicalUnifiedChat from './useCanonicalUnifiedChat';
 import ChatMessageFeed from './ChatMessageFeed';
 import ChatChannelTabs from './ChatChannelTabs';
 
@@ -150,6 +152,7 @@ export interface UnifiedChatDockProps {
   gameCtx: GameChatContext;
   onSabotage?: (event: SabotageEvent) => void;
   accessToken?: string | null;
+  engine?: FrontendChatEngine | null;
   mountTarget?: ChatMountTarget | string;
   mountPreset?: ChatMountPreset | ChatMountTarget | string | null;
   title?: string;
@@ -1515,7 +1518,14 @@ export const UnifiedChatDock = memo(function UnifiedChatDock({
   const cascade = useCascadeEngine();
   const time = useTimeEngine();
 
-  const ui = useUnifiedChat(gameCtx, accessToken, onSabotage);
+  const compatibilityUi = useUnifiedChat(gameCtx, accessToken, onSabotage);
+  const canonicalUi = useCanonicalUnifiedChat({
+    ctx: gameCtx,
+    accessToken,
+    onSabotage,
+    engine: engine ?? null,
+  });
+  const ui = engine ? canonicalUi : compatibilityUi;
 
   const openChat = ui.openChat ?? NOOP;
   const closeChat = ui.closeChat ?? NOOP;

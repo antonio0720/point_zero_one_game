@@ -41,6 +41,9 @@ import LobbyScreen from './components/LobbyScreen';
 
 import RunHUD from './features/run/components/RunHUD';
 import { UnifiedChatDock } from './components/chat/UnifiedChatDock';
+import { createBoundChatRuntime, type BoundChatRuntime } from './engines/chat/createBoundChatRuntime';
+import type { ChatEngineRuntimeInputs } from './engines/chat/ChatEngine';
+import type { ChatMountTarget } from './engines/chat/types';
 import {
   createEmptyGameChatContext,
   type GameChatContext,
@@ -188,6 +191,81 @@ function deriveRegime(params: {
   }
 
   return 'STABLE';
+}
+
+
+function resolveChatWebsocketUrl(): string {
+  const env = (typeof import.meta !== 'undefined' ? (import.meta as any).env : undefined) ?? {};
+  const explicit = env.VITE_PZO_CHAT_WS_URL ?? env.VITE_CHAT_WS_URL ?? env.VITE_SOCKET_URL;
+  if (typeof explicit === 'string' && explicit.trim().length > 0) {
+    return explicit;
+  }
+
+  if (typeof window !== 'undefined' && window.location?.origin) {
+    return window.location.origin;
+  }
+
+  return 'http://localhost:3000';
+}
+
+function modeToChatMountTarget(mode: RunMode): ChatMountTarget {
+  switch (mode) {
+    case 'solo':
+      return 'EMPIRE_GAME_SCREEN';
+    case 'asymmetric-pvp':
+      return 'PREDATOR_GAME_SCREEN';
+    case 'co-op':
+      return 'SYNDICATE_GAME_SCREEN';
+    case 'ghost':
+      return 'PHANTOM_GAME_SCREEN';
+    default:
+      return 'GAME_BOARD';
+  }
+}
+
+function buildChatRuntimeInputs(params: {
+  mode: RunMode;
+  run: ReturnType<typeof useEngineStore.getState>['run'];
+  time: ReturnType<typeof useEngineStore.getState>['time'];
+  battle: ReturnType<typeof useEngineStore.getState>['battle'];
+  cashBalance: number;
+  netWorth: number;
+  monthlyIncome: number;
+  monthlyExpenses: number;
+  sovereigntyGrade?: string | null;
+  pressureTier?: string | null;
+  haterHeat?: number;
+  topThreatBotId?: string | null;
+}): ChatEngineRuntimeInputs {
+  return {
+    run: {
+      tickNumber: params.run.lastTickIndex ?? params.time.ticksElapsed ?? 0,
+      netWorth: params.netWorth,
+      monthlyIncome: params.monthlyIncome,
+      monthlyExpenses: params.monthlyExpenses,
+      runOutcome: params.run.outcome ?? undefined,
+      pressureTier: params.pressureTier ?? undefined,
+      tickTier: params.time.currentTier ?? undefined,
+    },
+    battle: {
+      haterHeat: params.haterHeat ?? params.battle.haterHeat ?? 0,
+      activeBotsCount: params.battle.activeBotsCount ?? 0,
+      topThreatBotId: (params.topThreatBotId ?? params.battle.activeBots?.[0]?.botId ?? undefined) as any,
+      entitlementTier: params.sovereigntyGrade ?? undefined,
+    },
+    mechanics: {
+      modeKey: params.mode,
+      pendingDecisionWindows: params.time.activeDecisionWindows.length,
+      activeThreatCards: params.battle.activeBotsCount ?? 0,
+      freedomThreshold: params.cashBalance > 0 ? 1 : 0,
+    },
+    mode: {
+      mountTarget: modeToChatMountTarget(params.mode),
+      allowDealRoom: true,
+      allowSyndicate: params.mode === 'co-op',
+      allowLobby: true,
+    },
+  };
 }
 
 function buildRuntimeEvents(params: {
@@ -481,6 +559,16 @@ function GameRuntimeShell({
   const cashflow = useRunStore((state) => state.cashflow);
   const haterHeat = useRunStore((state) => state.haterHeat);
 
+  const [chatRuntime, setChatRuntime] = useState<BoundChatRuntime | null>(null);
+  const chatMountTarget = useMemo(() => modeToChatMountTarget(mode), [mode]);
+  const chatIdentity = useMemo(() => ({
+    userId: user?.id ?? run.userId ?? 'player-local',
+    displayName: user?.displayName ?? user?.username ?? 'PLAYER',
+    rank: 'Operator',
+    sessionId: String(run.seed ?? run.runId ?? `${mode}-session-local`),
+    runId: String(run.runId ?? `${mode}-run-local`),
+  }), [mode, run.runId, run.seed, run.userId, user?.displayName, user?.id, user?.username]);
+
   const lifecycleState = run.lifecycleState ?? 'IDLE';
   const isRunActive =
     lifecycleState === 'ACTIVE' ||
@@ -588,6 +676,96 @@ function GameRuntimeShell({
     cascade.activeNegativeChains.length,
     time.ticksRemaining,
     time.seasonTickBudget,
+  ]);
+
+
+  useEffect(() => {
+    const runtime = createBoundChatRuntime({
+      websocketUrl: resolveChatWebsocketUrl(),
+      mountTarget: chatMountTarget,
+      eventBus: zero.getEventBus(),
+      runtimeInputs: buildChatRuntimeInputs({
+        mode,
+        run,
+        time,
+        battle,
+        cashBalance,
+        netWorth,
+        monthlyIncome,
+        monthlyExpenses,
+        sovereigntyGrade: sovereignty.grade,
+        pressureTier: pressure.tier,
+        haterHeat: Math.round(haterHeat * 100),
+        topThreatBotId: battle.activeBots?.[0]?.botId ?? null,
+      }),
+      identity: chatIdentity,
+    });
+
+    setChatRuntime(runtime);
+
+    return () => {
+      setChatRuntime((current) => (current === runtime ? null : current));
+      void runtime.destroy();
+    };
+  }, [
+    chatIdentity,
+    chatMountTarget,
+    mode,
+    zero,
+  ]);
+
+  useEffect(() => {
+    const engine = chatRuntime?.engine;
+    if (!engine) return;
+
+    engine.updateRunSnapshot({
+      tickNumber: run.lastTickIndex ?? time.ticksElapsed ?? 0,
+      netWorth,
+      monthlyIncome,
+      monthlyExpenses,
+      runOutcome: run.outcome ?? undefined,
+      pressureTier: pressure.tier ?? undefined,
+      tickTier: time.currentTier ?? undefined,
+    });
+
+    engine.updateBattleSnapshot({
+      haterHeat: Math.round(haterHeat * 100),
+      activeBotsCount: battle.activeBotsCount ?? 0,
+      topThreatBotId: battle.activeBots?.[0]?.botId as any,
+      entitlementTier: sovereignty.grade ?? undefined,
+    });
+
+    engine.updateMechanicsSnapshot({
+      modeKey: mode,
+      pendingDecisionWindows: time.activeDecisionWindows.length,
+      activeThreatCards: battle.activeBotsCount ?? 0,
+      freedomThreshold: cashBalance > 0 ? 1 : 0,
+    });
+
+    engine.updateModeSnapshot({
+      mountTarget: chatMountTarget,
+      allowDealRoom: true,
+      allowSyndicate: mode === 'co-op',
+      allowLobby: true,
+    });
+  }, [
+    battle.activeBots,
+    battle.activeBotsCount,
+    cashBalance,
+    chatMountTarget,
+    chatRuntime,
+    haterHeat,
+    mode,
+    monthlyExpenses,
+    monthlyIncome,
+    netWorth,
+    pressure.tier,
+    run.lastTickIndex,
+    run.outcome,
+    sovereignty.grade,
+    time.activeDecisionWindows.length,
+    time.currentTier,
+    time.ticksElapsed,
   ]);
 
   const modeScreen = useMemo(() => {
@@ -870,6 +1048,7 @@ function GameRuntimeShell({
           title="COMMAND COMMS"
           subtitle={`${modeLabel(mode)} · ${regime}`}
           startCollapsed={false}
+          engine={chatRuntime?.engine ?? null}
           enableThreatMeter={true}
           enableTranscriptDrawer={true}
           enableHelperPrompt={true}
