@@ -79,6 +79,7 @@ import type {
   ChatNotificationState,
   ChatPresenceSnapshot,
   ChatRelationshipState,
+  ChatReadReceipt,
   ChatReplayMeta,
   ChatRequestId,
   ChatRescueDecision,
@@ -419,10 +420,12 @@ export interface ChatReducerActionMap {
 
 export type ChatReducerAction<
   TName extends keyof ChatReducerActionMap = keyof ChatReducerActionMap,
-> = {
-  readonly type: TName;
-  readonly payload: ChatReducerActionMap[TName];
-};
+> = TName extends keyof ChatReducerActionMap
+  ? {
+      readonly type: TName;
+      readonly payload: ChatReducerActionMap[TName];
+    }
+  : never;
 
 // ============================================================================
 // MARK: Reducer meta and transition diagnostics
@@ -967,11 +970,13 @@ function reduceMountChanged(
     state.activeVisibleChannel,
   );
 
-  let next = cloneChatEngineState(state);
-  next.activeMountTarget = nextMount;
-  next.continuity = {
-    ...next.continuity,
-    lastMountTarget: nextMount,
+  let next: ChatEngineState = {
+    ...cloneChatEngineState(state),
+    activeMountTarget: nextMount,
+    continuity: {
+      ...state.continuity,
+      lastMountTarget: nextMount,
+    },
   };
 
   next = setActiveVisibleChannelInState(next, nextVisible);
@@ -1091,12 +1096,14 @@ function reduceMessageReplaced(
   const next = cloneChatEngineState(state);
   const copy = [...existing];
   copy[idx] = cloneMessage(payload.replacement);
-  next.messagesByChannel = {
-    ...next.messagesByChannel,
-    [payload.channelId]: normalizeMessageWindowForReducer(copy),
-  };
 
-  return changed(next);
+  return changed({
+    ...next,
+    messagesByChannel: {
+      ...next.messagesByChannel,
+      [payload.channelId]: normalizeMessageWindowForReducer(copy),
+    },
+  });
 }
 
 function reduceReadReceiptApplied(
@@ -1112,14 +1119,14 @@ function reduceReadReceiptApplied(
     ...(target.readReceipts ?? []),
     {
       actorId: payload.actorId,
-      actorKind: 'PLAYER',
+      actorKind: 'PLAYER' as const,
       messageId: payload.messageId,
       readAt: payload.readAt,
       delayedByPolicy: false,
     },
   ];
 
-  const dedupMap = new Map<string, ChatMessage['readReceipts'][number]>();
+  const dedupMap = new Map<string, ChatReadReceipt>();
   for (const receipt of receipts) {
     const key = `${receipt.actorId}::${receipt.messageId}`;
     const current = dedupMap.get(key);
@@ -1190,12 +1197,14 @@ function reduceNotificationStateSet(
   payload: ChatNotificationStateSetPayload,
 ): ChatReducerResult {
   const next = cloneChatEngineState(state);
-  next.notifications = {
-    ...payload.notificationState,
-    unreadByChannel: { ...payload.notificationState.unreadByChannel },
-    notificationKinds: [...payload.notificationState.notificationKinds],
-  };
-  return changed(next);
+  return changed({
+    ...next,
+    notifications: {
+      ...payload.notificationState,
+      unreadByChannel: { ...payload.notificationState.unreadByChannel },
+      notificationKinds: [...payload.notificationState.notificationKinds],
+    },
+  });
 }
 
 function reduceNotificationKindPushed(
@@ -1207,13 +1216,15 @@ function reduceNotificationKindPushed(
   }
 
   const next = cloneChatEngineState(state);
-  next.notifications = {
-    ...next.notifications,
-    notificationKinds: [...next.notifications.notificationKinds, payload.kind],
-    lastNotifiedAt: payload.at ?? next.notifications.lastNotifiedAt,
-  };
 
-  return changed(next);
+  return changed({
+    ...next,
+    notifications: {
+      ...next.notifications,
+      notificationKinds: [...next.notifications.notificationKinds, payload.kind],
+      lastNotifiedAt: payload.at ?? next.notifications.lastNotifiedAt,
+    },
+  });
 }
 
 // ============================================================================
@@ -1289,6 +1300,36 @@ function reduceUpstreamSignalIngested(
 // ============================================================================
 // MARK: Reducer helpers — upstream signal interpretation
 // ============================================================================
+
+function isPressureTierChangedSignal(
+  signal: ChatUpstreamSignal,
+): signal is Extract<ChatUpstreamSignal, { signalType: 'PRESSURE_TIER_CHANGED' }> {
+  return signal.signalType === 'PRESSURE_TIER_CHANGED' && 'nextTier' in signal;
+}
+
+function isTickTierChangedSignal(
+  signal: ChatUpstreamSignal,
+): signal is Extract<ChatUpstreamSignal, { signalType: 'TICK_TIER_CHANGED' }> {
+  return signal.signalType === 'TICK_TIER_CHANGED' && 'nextTier' in signal;
+}
+
+function isBotAttackSignal(
+  signal: ChatUpstreamSignal,
+): signal is Extract<ChatUpstreamSignal, { signalType: 'BOT_ATTACK_FIRED' }> {
+  return signal.signalType === 'BOT_ATTACK_FIRED' && 'botId' in signal;
+}
+
+function isShieldBreachedSignal(
+  signal: ChatUpstreamSignal,
+): signal is Extract<ChatUpstreamSignal, { signalType: 'SHIELD_LAYER_BREACHED' }> {
+  return signal.signalType === 'SHIELD_LAYER_BREACHED' && 'layerId' in signal;
+}
+
+function isCascadeSignal(
+  signal: ChatUpstreamSignal,
+): signal is Extract<ChatUpstreamSignal, { signalType: 'CASCADE_CHAIN_STARTED' | 'CASCADE_CHAIN_BROKEN' }> {
+  return (signal.signalType === 'CASCADE_CHAIN_STARTED' || signal.signalType === 'CASCADE_CHAIN_BROKEN') && 'chainId' in signal;
+}
 
 function deriveMoodFromSignal(
   signal: ChatUpstreamSignal,
@@ -1457,6 +1498,7 @@ function buildImmediateSignalMessages(
 
   switch (signal.signalType) {
     case 'PRESSURE_TIER_CHANGED':
+      if (!isPressureTierChangedSignal(signal)) break;
       messages.push(
         buildLocalSystemMessage({
           id: (`sys:pressure:${signal.emittedAt}`) as ChatMessageId,
@@ -1472,6 +1514,7 @@ function buildImmediateSignalMessages(
       break;
 
     case 'TICK_TIER_CHANGED':
+      if (!isTickTierChangedSignal(signal)) break;
       messages.push(
         buildLocalSystemMessage({
           id: (`sys:tick:${signal.emittedAt}`) as ChatMessageId,
@@ -1487,6 +1530,7 @@ function buildImmediateSignalMessages(
       break;
 
     case 'BOT_ATTACK_FIRED':
+      if (!isBotAttackSignal(signal)) break;
       messages.push(
         buildLocalSystemMessage({
           id: (`sys:attack:${signal.emittedAt}`) as ChatMessageId,
@@ -1502,6 +1546,7 @@ function buildImmediateSignalMessages(
       break;
 
     case 'SHIELD_LAYER_BREACHED':
+      if (!isShieldBreachedSignal(signal)) break;
       messages.push(
         buildLocalSystemMessage({
           id: (`sys:breach:${signal.emittedAt}`) as ChatMessageId,
@@ -1517,6 +1562,7 @@ function buildImmediateSignalMessages(
       break;
 
     case 'CASCADE_CHAIN_STARTED':
+      if (!isCascadeSignal(signal)) break;
       messages.push(
         buildLocalSystemMessage({
           id: (`sys:cascade-start:${signal.emittedAt}`) as ChatMessageId,
@@ -1532,6 +1578,7 @@ function buildImmediateSignalMessages(
       break;
 
     case 'CASCADE_CHAIN_BROKEN':
+      if (!isCascadeSignal(signal)) break;
       messages.push(
         buildLocalSystemMessage({
           id: (`sys:cascade-broken:${signal.emittedAt}`) as ChatMessageId,

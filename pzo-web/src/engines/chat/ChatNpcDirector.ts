@@ -126,10 +126,11 @@ import {
 
 import {
   ChatRelationshipModel,
-  type ChatRelationshipLegacyProjection,
   type ChatRelationshipNpcSignal,
   type ChatRelationshipSnapshot,
 } from './intelligence/ChatRelationshipModel';
+
+type ChatRelationshipLegacyProjection = Record<string, unknown>;
 
 // -----------------------------------------------------------------------------
 // Exported core types
