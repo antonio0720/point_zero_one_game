@@ -55,6 +55,110 @@ export interface ZeroStartRunOptions
   modeOverrides?: Record<string, unknown>;
 }
 
+export interface ZeroStartRunRequest
+  extends Partial<StartRunParams>,
+    ZeroStartRunOptions {}
+
+interface NormalizedZeroStartRunRequest {
+  readonly params: StartRunParams;
+  readonly options: ZeroStartRunOptions;
+}
+
+const DEFAULT_SEASON_TICK_BUDGET = 60;
+const DEFAULT_FREEDOM_THRESHOLD = 1_000_000;
+const DEFAULT_CLIENT_VERSION = 'pzo-web';
+const DEFAULT_ENGINE_VERSION = 'engine-zero';
+const DEFAULT_USER_ID = 'anonymous-user';
+const DEFAULT_OUTCOME: RunOutcome = 'ABANDONED';
+
+function coerceNonEmptyString(value: unknown, fallback: string): string {
+  return typeof value === 'string' && value.trim().length > 0
+    ? value.trim()
+    : fallback;
+}
+
+function coercePositiveInt(value: unknown, fallback: number): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return fallback;
+  const normalized = Math.floor(value);
+  return normalized > 0 ? normalized : fallback;
+}
+
+function coerceNonNegativeNumber(value: unknown, fallback: number): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return fallback;
+  return value >= 0 ? value : fallback;
+}
+
+function createRunId(): string {
+  return `run_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function createSeed(): string {
+  return `${Date.now()}_${Math.random().toString(36).slice(2, 12)}`;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isStartRunParamsLike(value: unknown): value is StartRunParams {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return (
+    typeof value.runId === 'string' &&
+    typeof value.userId === 'string' &&
+    typeof value.seed === 'string' &&
+    typeof value.seasonTickBudget === 'number' &&
+    typeof value.freedomThreshold === 'number' &&
+    typeof value.clientVersion === 'string' &&
+    typeof value.engineVersion === 'string'
+  );
+}
+
+function normalizeStartRunRequest(
+  requestOrParams: StartRunParams | ZeroStartRunRequest,
+  options: ZeroStartRunOptions = {},
+): NormalizedZeroStartRunRequest {
+  const rawRequest = isStartRunParamsLike(requestOrParams)
+    ? { ...requestOrParams, ...options }
+    : { ...requestOrParams, ...options };
+
+  const params: StartRunParams = {
+    runId: coerceNonEmptyString(rawRequest.runId, createRunId()),
+    userId: coerceNonEmptyString(rawRequest.userId, DEFAULT_USER_ID),
+    seed: coerceNonEmptyString(rawRequest.seed, createSeed()),
+    seasonTickBudget: coercePositiveInt(
+      rawRequest.seasonTickBudget,
+      DEFAULT_SEASON_TICK_BUDGET,
+    ),
+    freedomThreshold: coerceNonNegativeNumber(
+      rawRequest.freedomThreshold,
+      DEFAULT_FREEDOM_THRESHOLD,
+    ),
+    clientVersion: coerceNonEmptyString(
+      rawRequest.clientVersion,
+      DEFAULT_CLIENT_VERSION,
+    ),
+    engineVersion: coerceNonEmptyString(
+      rawRequest.engineVersion,
+      DEFAULT_ENGINE_VERSION,
+    ),
+  };
+
+  return {
+    params,
+    options: {
+      mode: rawRequest.mode,
+      modeSeed: rawRequest.modeSeed,
+      modeOverrides: rawRequest.modeOverrides,
+      wireStoreHandlers: rawRequest.wireStoreHandlers,
+      wireRunMirror: rawRequest.wireRunMirror,
+      registerDefaultChannels: rawRequest.registerDefaultChannels,
+    },
+  };
+}
+
 export class ZeroFacade {
   private readonly orchestrator: EngineOrchestrator;
   private lastTickResult: TickResult | null = null;
@@ -91,30 +195,33 @@ export class ZeroFacade {
   }
 
   public async startRun(
-    params: StartRunParams,
+    requestOrParams: StartRunParams | ZeroStartRunRequest,
     options: ZeroStartRunOptions = {},
   ): Promise<void> {
-    if (options.mode) {
-      this.currentMode = options.mode;
+    const normalized = normalizeStartRunRequest(requestOrParams, options);
+    const { params, options: startOptions } = normalized;
+
+    this.lastTickResult = null;
+
+    if (startOptions.mode !== undefined) {
+      this.currentMode = startOptions.mode;
     }
 
     this.bind({
-      ...options,
-      mode: options.mode,
-      modeSeed: options.modeSeed ?? params.seed,
-      modeOverrides: options.modeOverrides,
-      wireStoreHandlers: options.wireStoreHandlers ?? true,
-      wireRunMirror: options.wireRunMirror ?? true,
-      registerDefaultChannels: options.registerDefaultChannels ?? true,
+      ...startOptions,
+      mode: startOptions.mode,
+      modeSeed: startOptions.modeSeed ?? params.seed,
+      modeOverrides: startOptions.modeOverrides,
+      wireStoreHandlers: startOptions.wireStoreHandlers ?? true,
+      wireRunMirror: startOptions.wireRunMirror ?? true,
+      registerDefaultChannels: startOptions.registerDefaultChannels ?? true,
     });
 
-    await Promise.resolve((this.orchestrator as any).startRun(params));
+    await Promise.resolve(this.orchestrator.startRun(params));
   }
 
   public async executeTick(): Promise<TickResult | null> {
-    const result = await Promise.resolve(
-      (this.orchestrator as any).executeTick?.(),
-    );
+    const result = await Promise.resolve(this.orchestrator.executeTick?.());
 
     this.lastTickResult = (result ?? null) as TickResult | null;
     return this.lastTickResult;
@@ -140,18 +247,41 @@ export class ZeroFacade {
     return results;
   }
 
-  public async endRun(outcome: RunOutcome): Promise<void> {
-    await Promise.resolve((this.orchestrator as any).endRun?.(outcome));
+  private resolveEndRunOutcome(outcome?: RunOutcome | null): RunOutcome {
+    if (outcome) {
+      return outcome;
+    }
+
+    if (this.lastTickResult?.runOutcome) {
+      return this.lastTickResult.runOutcome;
+    }
+
+    const runtimeOutcome = (this.getRunStoreSnapshot() as Record<string, unknown>)?.outcome;
+    return runtimeOutcome === 'FREEDOM' ||
+      runtimeOutcome === 'BANKRUPT' ||
+      runtimeOutcome === 'TIMEOUT' ||
+      runtimeOutcome === 'ABANDONED'
+      ? runtimeOutcome
+      : DEFAULT_OUTCOME;
   }
 
-  public reset(options: { rebindAfterReset?: boolean } = {}): void {
-    (this.orchestrator as any).reset?.();
+  public async endRun(outcome?: RunOutcome | null): Promise<void> {
+    await Promise.resolve(this.orchestrator.endRun?.(this.resolveEndRunOutcome(outcome)));
+  }
+
+  public reset(options: { rebindAfterReset?: boolean; preserveMode?: boolean } = {}): void {
+    this.orchestrator.reset?.();
     this.lastTickResult = null;
+
+    if (options.preserveMode !== true) {
+      this.currentMode = null;
+    }
 
     markZeroEventBusWiringDirty();
 
     if (options.rebindAfterReset !== false) {
       this.bind({
+        mode: options.preserveMode ? this.currentMode ?? undefined : undefined,
         wireStoreHandlers: true,
         wireRunMirror: true,
         registerDefaultChannels: true,
@@ -207,6 +337,10 @@ export class ZeroFacade {
 
   public getCurrentMode(): FrontendRunMode | null {
     return this.getBindings().mode?.runMode ?? this.currentMode;
+  }
+
+  public getCurrentRunId(): string | null {
+    return this.orchestrator.getCurrentRunId?.() ?? null;
   }
 
   public getModeCatalog() {

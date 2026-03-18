@@ -92,8 +92,106 @@ export interface ZeroStartRunOptions {
   syncRunMirrorImmediately?: boolean;
 }
 
+export interface ZeroLifecycleStartRequest
+  extends Partial<StartRunParams>,
+    ZeroStartRunOptions {}
+
 export interface ZeroPauseState extends ZeroPauseSnapshot {
   readonly resumeCount: number;
+}
+
+const DEFAULT_SEASON_TICK_BUDGET = 60;
+const DEFAULT_FREEDOM_THRESHOLD = 1_000_000;
+const DEFAULT_CLIENT_VERSION = 'pzo-web';
+const DEFAULT_ENGINE_VERSION = 'engine-zero';
+const DEFAULT_USER_ID = 'anonymous-user';
+const DEFAULT_OUTCOME: RunOutcome = 'ABANDONED';
+
+function coerceNonEmptyString(value: unknown, fallback: string): string {
+  return typeof value === 'string' && value.trim().length > 0
+    ? value.trim()
+    : fallback;
+}
+
+function coercePositiveInt(value: unknown, fallback: number): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return fallback;
+  const normalized = Math.floor(value);
+  return normalized > 0 ? normalized : fallback;
+}
+
+function coerceNonNegativeNumber(value: unknown, fallback: number): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return fallback;
+  return value >= 0 ? value : fallback;
+}
+
+function createRunId(): string {
+  return `run_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function createSeed(): string {
+  return `${Date.now()}_${Math.random().toString(36).slice(2, 12)}`;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isStartRunParamsLike(value: unknown): value is StartRunParams {
+  if (!isRecord(value)) {
+    return false
+  }
+
+  return (
+    typeof value.runId === 'string' &&
+    typeof value.userId === 'string' &&
+    typeof value.seed === 'string' &&
+    typeof value.seasonTickBudget === 'number' &&
+    typeof value.freedomThreshold === 'number' &&
+    typeof value.clientVersion === 'string' &&
+    typeof value.engineVersion === 'string'
+  );
+}
+
+function normalizeStartRequest(
+  requestOrParams: StartRunParams | ZeroLifecycleStartRequest,
+  options: ZeroStartRunOptions = {},
+): { params: StartRunParams; options: ZeroStartRunOptions } {
+  const rawRequest = isStartRunParamsLike(requestOrParams)
+    ? { ...requestOrParams, ...options }
+    : { ...requestOrParams, ...options };
+
+  return {
+    params: {
+      runId: coerceNonEmptyString(rawRequest.runId, createRunId()),
+      userId: coerceNonEmptyString(rawRequest.userId, DEFAULT_USER_ID),
+      seed: coerceNonEmptyString(rawRequest.seed, createSeed()),
+      seasonTickBudget: coercePositiveInt(
+        rawRequest.seasonTickBudget,
+        DEFAULT_SEASON_TICK_BUDGET,
+      ),
+      freedomThreshold: coerceNonNegativeNumber(
+        rawRequest.freedomThreshold,
+        DEFAULT_FREEDOM_THRESHOLD,
+      ),
+      clientVersion: coerceNonEmptyString(
+        rawRequest.clientVersion,
+        DEFAULT_CLIENT_VERSION,
+      ),
+      engineVersion: coerceNonEmptyString(
+        rawRequest.engineVersion,
+        DEFAULT_ENGINE_VERSION,
+      ),
+    },
+    options: {
+      mode: rawRequest.mode,
+      modeOverrides: rawRequest.modeOverrides,
+      bindStoreBridge: rawRequest.bindStoreBridge,
+      wireEngineHandlers: rawRequest.wireEngineHandlers,
+      wireRunMirror: rawRequest.wireRunMirror,
+      resetEngineSlicesBeforeBind: rawRequest.resetEngineSlicesBeforeBind,
+      syncRunMirrorImmediately: rawRequest.syncRunMirrorImmediately,
+    },
+  };
 }
 
 export class ZeroLifecycleController {
@@ -215,21 +313,23 @@ export class ZeroLifecycleController {
   }
 
   public startRun(
-    params: StartRunParams,
+    requestOrParams: StartRunParams | ZeroLifecycleStartRequest,
     options: ZeroStartRunOptions = {},
   ): void {
     const before = this.getLifecycleState();
+    const normalized = normalizeStartRequest(requestOrParams, options);
+    const { params, options: startOptions } = normalized;
 
-    if (options.mode !== undefined) {
-      this.setMode(options.mode, options.modeOverrides ?? {});
+    if (startOptions.mode !== undefined) {
+      this.setMode(startOptions.mode, startOptions.modeOverrides ?? {});
     }
 
-    if (options.bindStoreBridge !== false) {
+    if (startOptions.bindStoreBridge !== false) {
       this.bindStoreBridge({
-        wireEngineHandlers: options.wireEngineHandlers,
-        wireRunMirror: options.wireRunMirror,
-        resetEngineSlicesBeforeBind: options.resetEngineSlicesBeforeBind,
-        syncRunMirrorImmediately: options.syncRunMirrorImmediately,
+        wireEngineHandlers: startOptions.wireEngineHandlers,
+        wireRunMirror: startOptions.wireRunMirror,
+        resetEngineSlicesBeforeBind: startOptions.resetEngineSlicesBeforeBind,
+        syncRunMirrorImmediately: startOptions.syncRunMirrorImmediately,
       });
     }
 
@@ -340,9 +440,10 @@ export class ZeroLifecycleController {
     return results;
   }
 
-  public async endRun(outcome: RunOutcome): Promise<void> {
+  public async endRun(outcome?: RunOutcome | null): Promise<void> {
     const before = this.getLifecycleState();
-    await this.orchestrator.endRun(outcome);
+    const resolvedOutcome = outcome ?? DEFAULT_OUTCOME;
+    await this.orchestrator.endRun(resolvedOutcome);
     this.storeBridge.syncRunMirrorNow();
 
     this.isPausedFlag = false;
@@ -350,7 +451,7 @@ export class ZeroLifecycleController {
     this.pausedAt = null;
 
     this.recordTransition('END_RUN', before, this.getLifecycleState(), {
-      outcome,
+      outcome: resolvedOutcome,
       runId: this.orchestrator.getCurrentRunId(),
     });
   }
@@ -371,7 +472,7 @@ export class ZeroLifecycleController {
     });
   }
 
-  public reset(options: { resetEngineStoreSlices?: boolean } = {}): void {
+  public reset(options: { resetEngineStoreSlices?: boolean; preserveMode?: boolean } = {}): void {
     const before = this.getLifecycleState();
 
     this.orchestrator.reset();
@@ -386,8 +487,17 @@ export class ZeroLifecycleController {
     this.pauseReason = null;
     this.pausedAt = null;
 
+    if (options.preserveMode !== true) {
+      this.currentMode = null;
+      this.currentModeOverrides = {};
+      this.runtimeStatus.setMode(null, {});
+    }
+
+    this.runtimeStatus.setFreedomThreshold(0);
+
     this.recordTransition('RESET', before, this.getLifecycleState(), {
       resetEngineStoreSlices: options.resetEngineStoreSlices !== false,
+      preserveMode: options.preserveMode === true,
     });
   }
 
@@ -404,6 +514,13 @@ export class ZeroLifecycleController {
     handler: (event: EngineEvent<T>) => void,
   ): () => void {
     return this.eventBus.on(eventType as any, handler as any);
+  }
+
+  public once<T extends EngineEventName>(
+    eventType: T,
+    handler: (event: EngineEvent<T>) => void,
+  ): void {
+    this.eventBus.once(eventType as any, handler as any);
   }
 
   public dispose(): void {

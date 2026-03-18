@@ -55,7 +55,7 @@ export interface RunLifecycleController {
   ): MaybePromise<void>;
   executeTick(): MaybePromise<TickResult | null>;
   reset(options?: { resetEngineStoreSlices?: boolean }): MaybePromise<void>;
-  endRun?(outcome: RunOutcome): MaybePromise<void>;
+  endRun?(outcome?: RunOutcome | null): MaybePromise<void>;
   abandonRun?(reason?: string): MaybePromise<void>;
   pause?(reason?: string): MaybePromise<void>;
   resume?(): MaybePromise<void>;
@@ -67,7 +67,7 @@ export interface RunLifecycleController {
 }
 
 export interface UseRunLifecycleStartRequest extends Partial<StartRunParams> {
-  userId: string;
+  userId?: string;
   resetRunStore?: boolean;
   mode?: FrontendRunMode;
   modeSeed?: string | number;

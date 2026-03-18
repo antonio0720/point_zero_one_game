@@ -973,6 +973,26 @@ export class EngineOrchestrator {
     return this.currentRunId;
   }
 
+  public getCurrentUserId(): string | null {
+    return this.currentUserId;
+  }
+
+  public getCurrentSeed(): string | null {
+    return this.currentSeed;
+  }
+
+  public getFreedomThreshold(): number {
+    return this.freedomThreshold;
+  }
+
+  public canStartRun(): boolean {
+    return this.lifecycleState === 'IDLE';
+  }
+
+  public canEndRun(): boolean {
+    return this.lifecycleState === 'ACTIVE' || this.lifecycleState === 'TICK_LOCKED';
+  }
+
   public getCardReader(): CardReader {
     return this.cardReader;
   }
