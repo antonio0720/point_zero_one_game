@@ -1,9 +1,8 @@
-
 /**
  * ============================================================================
  * POINT ZERO ONE — AUTHORITATIVE BACKEND CHAT ROOT BARREL + LANE MANIFEST
  * FILE: backend/src/game/engine/chat/index.ts
- * VERSION: 2026.03.14
+ * VERSION: 2026.03.18-experience-upgrade
  * AUTHORSHIP: OpenAI for Antonio T. Smith Jr.
  * LICENSE: Internal / Proprietary / All Rights Reserved
  * ============================================================================
@@ -14,27 +13,26 @@
  *
  * Why this file is not a thin export list
  * --------------------------------------
- * The backend chat lane is being built as a sovereign simulation lane beside
- * battle, time, pressure, shield, tension, sovereignty, and zero. That means
- * the root index cannot merely export symbols. It also needs to encode:
+ * The backend chat lane is a first-class simulation lane beside battle, time,
+ * pressure, shield, tension, sovereignty, multiplayer, and zero. The barrel is
+ * therefore responsible for more than symbol forwarding. It must also encode:
  *
- * 1. the canonical backend chat tree you locked,
+ * 1. the canonical backend chat tree,
  * 2. the generated-vs-pending readiness of that tree,
- * 3. the explicit backend/public module boundaries,
- * 4. the authority bundle for the files already landed,
- * 5. the barrel exports that downstream backend lanes and the pzo-server chat
- *    transport layer can consume without importing donor zones directly.
+ * 3. the downstream import surface the rest of the backend is allowed to touch,
+ * 4. the experience-phase additions that make chat cinematic rather than merely
+ *    reactive, and
+ * 5. the ownership matrix that keeps frontend, transport, and backend authority
+ *    boundaries intact.
  *
  * Design doctrine
  * ---------------
  * - No UI ownership.
  * - No socket ownership.
- * - No frontend-only types.
- * - No hidden donor-zone dependency registry.
- * - This file represents the backend chat lane exactly as the canonical tree
- *   says it should exist, while staying honest about what is generated now and
- *   what remains pending.
- * ============================================================================
+ * - No frontend-only type ownership.
+ * - No donor-zone imports from pzo-web.
+ * - No hidden authority shifts.
+ * - Root barrel truth must stay honest about what is generated vs pending.
  */
 
 // ============================================================================
@@ -61,7 +59,75 @@ import * as Helper from './HelperResponseOrchestrator';
 import * as Npc from './ChatNpcOrchestrator';
 import * as Engine from './ChatEngine';
 
-export { Types as ChatTypesModule, Runtime as ChatRuntimeModule, State as ChatStateModule, Reducer as ChatReducerModule, MessageFactory as ChatMessageFactoryModule, TranscriptLedger as ChatTranscriptLedgerModule, ProofChain as ChatProofChainModule, RatePolicy as ChatRatePolicyModule, ModerationPolicy as ChatModerationPolicyModule, ChannelPolicy as ChatChannelPolicyModule, CommandParser as ChatCommandParserModule, EventBridge as ChatEventBridgeModule, PresenceState as ChatPresenceStateModule, SessionState as ChatSessionStateModule, Invasion as ChatInvasionOrchestratorModule, Hater as HaterResponseOrchestratorModule, Helper as HelperResponseOrchestratorModule, Npc as ChatNpcOrchestratorModule, Engine as ChatEngineModule };
+import * as Phase4 from './phase4_index';
+
+import * as DramaOrchestrator from './experience/ChatDramaOrchestrator';
+import * as ScenePlanner from './experience/ChatScenePlanner';
+import * as MomentLedger from './experience/ChatMomentLedger';
+import * as SilencePolicy from './experience/ChatSilencePolicy';
+
+import {
+  BACKEND_CHAT_ENGINE_PUBLIC_API_VERSION,
+  BACKEND_CHAT_ENGINE_VERSION,
+  CHAT_AUTHORITY_ROOTS,
+  type JsonValue,
+} from './types';
+
+// ============================================================================
+// MARK: Root barrel export surface
+// ============================================================================
+
+export * from './types';
+export * from './ChatRuntimeConfig';
+export * from './ChatState';
+export * from './ChatReducer';
+export * from './ChatMessageFactory';
+export * from './ChatTranscriptLedger';
+export * from './ChatProofChain';
+export * from './ChatRatePolicy';
+export * from './ChatModerationPolicy';
+export * from './ChatChannelPolicy';
+export * from './ChatCommandParser';
+export * from './ChatEventBridge';
+export * from './ChatPresenceState';
+export * from './ChatSessionState';
+export * from './ChatInvasionOrchestrator';
+export * from './HaterResponseOrchestrator';
+export * from './HelperResponseOrchestrator';
+export * from './ChatNpcOrchestrator';
+export * from './ChatEngine';
+export * from './phase4_index';
+export * from './experience/ChatDramaOrchestrator';
+export * from './experience/ChatScenePlanner';
+export * from './experience/ChatMomentLedger';
+export * from './experience/ChatSilencePolicy';
+
+export {
+  Types as ChatTypesModule,
+  Runtime as ChatRuntimeModule,
+  State as ChatStateModule,
+  Reducer as ChatReducerModule,
+  MessageFactory as ChatMessageFactoryModule,
+  TranscriptLedger as ChatTranscriptLedgerModule,
+  ProofChain as ChatProofChainModule,
+  RatePolicy as ChatRatePolicyModule,
+  ModerationPolicy as ChatModerationPolicyModule,
+  ChannelPolicy as ChatChannelPolicyModule,
+  CommandParser as ChatCommandParserModule,
+  EventBridge as ChatEventBridgeModule,
+  PresenceState as ChatPresenceStateModule,
+  SessionState as ChatSessionStateModule,
+  Invasion as ChatInvasionOrchestratorModule,
+  Hater as HaterResponseOrchestratorModule,
+  Helper as HelperResponseOrchestratorModule,
+  Npc as ChatNpcOrchestratorModule,
+  Engine as ChatEngineModule,
+  Phase4 as ChatPhase4Module,
+  DramaOrchestrator as ChatDramaOrchestratorModule,
+  ScenePlanner as ChatScenePlannerModule,
+  MomentLedger as ChatMomentLedgerModule,
+  SilencePolicy as ChatSilencePolicyModule,
+};
 
 export const ChatEngineClass = Engine.ChatEngine;
 export const HelperResponseAuthorityClass = Helper.HelperResponseAuthority;
@@ -71,12 +137,10 @@ export const ChatSessionAuthorityClass = SessionState.ChatSessionAuthority;
 export const ChatPresenceAuthorityClass = PresenceState.ChatPresenceAuthority;
 export const ChatCommandParserClass = CommandParser.ChatCommandParser;
 
-import {
-  BACKEND_CHAT_ENGINE_PUBLIC_API_VERSION,
-  BACKEND_CHAT_ENGINE_VERSION,
-  CHAT_AUTHORITY_ROOTS,
-  type JsonValue,
-} from './types';
+export const ChatDramaOrchestratorClass = DramaOrchestrator.ChatDramaOrchestrator;
+export const ChatScenePlannerClass = ScenePlanner.ChatScenePlanner;
+export const ChatMomentLedgerClass = MomentLedger.ChatMomentLedger;
+export const ChatSilencePolicyClass = SilencePolicy.ChatSilencePolicy;
 
 // ============================================================================
 // MARK: Canonical tree manifest contracts
@@ -89,6 +153,19 @@ export type BackendChatCanonicalModuleCategory =
   | 'NPC'
   | 'REPLAY'
   | 'TELEMETRY'
+  | 'EXPERIENCE'
+  | 'MEMORY'
+  | 'SOCIAL'
+  | 'PERSONA'
+  | 'RESCUE'
+  | 'DEALROOM'
+  | 'SHADOW'
+  | 'REWARDS'
+  | 'LIVEOPS'
+  | 'PRESENCE'
+  | 'CONTINUITY'
+  | 'COMBAT'
+  | 'POSTRUN'
   | 'INTELLIGENCE'
   | 'INTELLIGENCE_ML'
   | 'INTELLIGENCE_DL'
@@ -122,6 +199,8 @@ export interface BackendChatLaneReadinessReport {
   readonly byCategory: readonly BackendChatCanonicalModuleGroup[];
   readonly generatedPaths: readonly string[];
   readonly pendingPaths: readonly string[];
+  readonly plannedPaths: readonly string[];
+  readonly deferredPaths: readonly string[];
 }
 
 export interface BackendChatAuthorityBundle {
@@ -148,6 +227,13 @@ export interface BackendChatAuthorityBundle {
     readonly helper: typeof Helper;
     readonly npc: typeof Npc;
     readonly engine: typeof Engine;
+    readonly phase4: typeof Phase4;
+    readonly experience: {
+      readonly dramaOrchestrator: typeof DramaOrchestrator;
+      readonly scenePlanner: typeof ScenePlanner;
+      readonly momentLedger: typeof MomentLedger;
+      readonly silencePolicy: typeof SilencePolicy;
+    };
   };
   readonly readiness: BackendChatLaneReadinessReport;
 }
@@ -160,6 +246,7 @@ export const BACKEND_CHAT_CANONICAL_MODULES = Object.freeze([
   // Root
   descriptor('types', 'types.ts', 'ROOT', 'GENERATED', true, 'Backend-only type surface and authority contracts.'),
   descriptor('index', 'index.ts', 'ROOT', 'GENERATED', false, 'Backend public barrel and lane manifest.'),
+  descriptor('phase4_index', 'phase4_index.ts', 'ROOT', 'GENERATED', false, 'Phase-4/experience barrel for stateful chat continuity services.'),
   descriptor('ChatEngine', 'ChatEngine.ts', 'ROOT', 'GENERATED', true, 'Top-level authoritative backend chat engine façade.'),
   descriptor('ChatState', 'ChatState.ts', 'ROOT', 'GENERATED', true, 'Authoritative state shape and lawful state helpers.'),
   descriptor('ChatReducer', 'ChatReducer.ts', 'ROOT', 'GENERATED', true, 'Deterministic backend mutation layer.'),
@@ -169,31 +256,33 @@ export const BACKEND_CHAT_CANONICAL_MODULES = Object.freeze([
   descriptor('ChatRatePolicy', 'ChatRatePolicy.ts', 'ROOT', 'GENERATED', true, 'Rate law before mutation.'),
   descriptor('ChatModerationPolicy', 'ChatModerationPolicy.ts', 'ROOT', 'GENERATED', true, 'Moderation law before mutation.'),
   descriptor('ChatChannelPolicy', 'ChatChannelPolicy.ts', 'ROOT', 'GENERATED', true, 'Visible/shadow channel permission authority.'),
-  descriptor('ChatCommandParser', 'ChatCommandParser.ts', 'ROOT', 'GENERATED', true, 'Backend command parsing and execution planning.'),
-  descriptor('ChatRuntimeConfig', 'ChatRuntimeConfig.ts', 'ROOT', 'GENERATED', true, 'Authoritative runtime config normalization.'),
-  descriptor('ChatEventBridge', 'ChatEventBridge.ts', 'ROOT', 'GENERATED', true, 'Canonical normalization boundary from upstream domains.'),
-  descriptor('ChatPresenceState', 'ChatPresenceState.ts', 'ROOT', 'GENERATED', true, 'Presence truth and reconciliation authority.'),
-  descriptor('ChatSessionState', 'ChatSessionState.ts', 'ROOT', 'GENERATED', true, 'Session admission and room membership authority.'),
-  descriptor('ChatInvasionOrchestrator', 'ChatInvasionOrchestrator.ts', 'ROOT', 'GENERATED', true, 'Invasion planning and maintenance authority.'),
-  descriptor('ChatNpcOrchestrator', 'ChatNpcOrchestrator.ts', 'ROOT', 'GENERATED', true, 'Top-level NPC scheduling authority across helper/hater/ambient.'),
-  descriptor('HaterResponseOrchestrator', 'HaterResponseOrchestrator.ts', 'ROOT', 'GENERATED', true, 'Chat-native hostile response authority.'),
-  descriptor('HelperResponseOrchestrator', 'HelperResponseOrchestrator.ts', 'ROOT', 'GENERATED', true, 'Chat-native helper intervention authority.'),
+  descriptor('ChatCommandParser', 'ChatCommandParser.ts', 'ROOT', 'GENERATED', true, 'Command normalization and slash-command semantics.'),
+  descriptor('ChatRuntimeConfig', 'ChatRuntimeConfig.ts', 'ROOT', 'GENERATED', true, 'Normalized runtime configuration and hard defaults.'),
+  descriptor('ChatEventBridge', 'ChatEventBridge.ts', 'ROOT', 'GENERATED', true, 'Game-to-chat backend event translation authority.'),
+  descriptor('ChatPresenceState', 'ChatPresenceState.ts', 'ROOT', 'GENERATED', true, 'Backend presence truth.'),
+  descriptor('ChatSessionState', 'ChatSessionState.ts', 'ROOT', 'GENERATED', true, 'Backend session/room admission truth.'),
+  descriptor('ChatInvasionOrchestrator', 'ChatInvasionOrchestrator.ts', 'ROOT', 'GENERATED', true, 'Escalation and invasion choreography.'),
+  descriptor('ChatNpcOrchestrator', 'ChatNpcOrchestrator.ts', 'ROOT', 'GENERATED', true, 'NPC orchestration entry point.'),
+  descriptor('HaterResponseOrchestrator', 'HaterResponseOrchestrator.ts', 'ROOT', 'GENERATED', true, 'Backend hater response authority.'),
+  descriptor('HelperResponseOrchestrator', 'HelperResponseOrchestrator.ts', 'ROOT', 'GENERATED', true, 'Backend helper response authority.'),
 
   // Adapters
-  descriptor('adapters.index', 'adapters/index.ts', 'ADAPTERS', 'PENDING', false, 'Backend adapter barrel.'),
-  descriptor('BattleSignalAdapter', 'adapters/BattleSignalAdapter.ts', 'ADAPTERS', 'PENDING', false, 'Battle-to-chat authoritative signal translation.'),
-  descriptor('RunSignalAdapter', 'adapters/RunSignalAdapter.ts', 'ADAPTERS', 'PENDING', false, 'Run-to-chat authoritative signal translation.'),
-  descriptor('MultiplayerSignalAdapter', 'adapters/MultiplayerSignalAdapter.ts', 'ADAPTERS', 'PENDING', false, 'Multiplayer-to-chat room/member translation.'),
-  descriptor('EconomySignalAdapter', 'adapters/EconomySignalAdapter.ts', 'ADAPTERS', 'PENDING', false, 'Economy/deal-room signal translation.'),
+  descriptor('adapters.index', 'adapters/index.ts', 'ADAPTERS', 'PENDING', false, 'Signal adapter barrel.'),
+  descriptor('BattleSignalAdapter', 'adapters/BattleSignalAdapter.ts', 'ADAPTERS', 'PENDING', true, 'Battle engine to chat signal normalization.'),
+  descriptor('RunSignalAdapter', 'adapters/RunSignalAdapter.ts', 'ADAPTERS', 'PENDING', true, 'Run lifecycle to chat signal normalization.'),
+  descriptor('MultiplayerSignalAdapter', 'adapters/MultiplayerSignalAdapter.ts', 'ADAPTERS', 'PENDING', true, 'Multiplayer/session signal normalization.'),
+  descriptor('EconomySignalAdapter', 'adapters/EconomySignalAdapter.ts', 'ADAPTERS', 'PENDING', true, 'Economy/deal-room signal normalization.'),
+  descriptor('LiveOpsSignalAdapter', 'adapters/LiveOpsSignalAdapter.ts', 'ADAPTERS', 'PLANNED', true, 'World-event to chat signal normalization.'),
 
   // Channels
   descriptor('channels.index', 'channels/index.ts', 'CHANNELS', 'PENDING', false, 'Channel policy barrel.'),
-  descriptor('GlobalChannelPolicy', 'channels/GlobalChannelPolicy.ts', 'CHANNELS', 'PENDING', true, 'Global theatrical channel law.'),
+  descriptor('GlobalChannelPolicy', 'channels/GlobalChannelPolicy.ts', 'CHANNELS', 'PENDING', true, 'Global crowd-theater channel law.'),
   descriptor('SyndicateChannelPolicy', 'channels/SyndicateChannelPolicy.ts', 'CHANNELS', 'PENDING', true, 'Syndicate trust/reputation channel law.'),
   descriptor('DealRoomChannelPolicy', 'channels/DealRoomChannelPolicy.ts', 'CHANNELS', 'PENDING', true, 'Deal-room negotiation channel law.'),
   descriptor('LobbyChannelPolicy', 'channels/LobbyChannelPolicy.ts', 'CHANNELS', 'PENDING', true, 'Lobby pre-run channel law.'),
+  descriptor('ShadowChannelPolicy', 'channels/ShadowChannelPolicy.ts', 'CHANNELS', 'PLANNED', true, 'Backend-only shadow channel law.'),
 
-  // NPC registries
+  // NPC
   descriptor('npc.index', 'npc/index.ts', 'NPC', 'PENDING', false, 'NPC registry barrel.'),
   descriptor('HaterDialogueRegistry', 'npc/HaterDialogueRegistry.ts', 'NPC', 'PENDING', true, 'Canonical backend hater authored line registry.'),
   descriptor('HelperDialogueRegistry', 'npc/HelperDialogueRegistry.ts', 'NPC', 'PENDING', true, 'Canonical backend helper authored line registry.'),
@@ -209,33 +298,103 @@ export const BACKEND_CHAT_CANONICAL_MODULES = Object.freeze([
   // Telemetry
   descriptor('telemetry.index', 'telemetry/index.ts', 'TELEMETRY', 'PENDING', false, 'Telemetry barrel.'),
   descriptor('ChatTelemetrySink', 'telemetry/ChatTelemetrySink.ts', 'TELEMETRY', 'PENDING', true, 'Authoritative telemetry sink.'),
-  descriptor('ChatEventStreamWriter', 'telemetry/ChatEventStreamWriter.ts', 'TELEMETRY', 'PENDING', true, 'Event-stream writer for analytics/ML/replay.'),
+  descriptor('ChatEventStreamWriter', 'telemetry/ChatEventStreamWriter.ts', 'TELEMETRY', 'PENDING', true, 'Event-stream writer for analytics, ML, and replay.'),
+
+  // Experience — generated now
+  descriptor('experience.ChatDramaOrchestrator', 'experience/ChatDramaOrchestrator.ts', 'EXPERIENCE', 'GENERATED', true, 'Cinematic scene orchestration over existing backend authorities.'),
+  descriptor('experience.ChatScenePlanner', 'experience/ChatScenePlanner.ts', 'EXPERIENCE', 'GENERATED', true, 'Scene planning and beat sequencing for major moments.'),
+  descriptor('experience.ChatMomentLedger', 'experience/ChatMomentLedger.ts', 'EXPERIENCE', 'GENERATED', true, 'Durable moment/reveal/silence memory across a run.'),
+  descriptor('experience.ChatSilencePolicy', 'experience/ChatSilencePolicy.ts', 'EXPERIENCE', 'GENERATED', true, 'Silence, interruption, and reveal timing law.'),
+
+  // Memory / continuity family
+  descriptor('memory.RelationshipLedger', 'memory/RelationshipLedger.ts', 'MEMORY', 'PENDING', true, 'Backend durability for player-to-NPC relationship state.'),
+  descriptor('memory.RelationshipResolver', 'memory/RelationshipResolver.ts', 'MEMORY', 'PENDING', true, 'Relationship-state mutation and lookup authority.'),
+  descriptor('memory.RivalryEscalationPolicy', 'memory/RivalryEscalationPolicy.ts', 'MEMORY', 'PENDING', true, 'Rivalry escalation law.'),
+  descriptor('memory.HelperTrustPolicy', 'memory/HelperTrustPolicy.ts', 'MEMORY', 'PENDING', true, 'Helper trust adaptation law.'),
+  descriptor('memory.ConversationMemoryStore', 'memory/ConversationMemoryStore.ts', 'MEMORY', 'PENDING', true, 'Durable callback/carryover memory store.'),
+  descriptor('memory.QuoteRecallResolver', 'memory/QuoteRecallResolver.ts', 'MEMORY', 'PENDING', true, 'Quote and receipt recall resolution.'),
+  descriptor('memory.MemoryCompressionPolicy', 'memory/MemoryCompressionPolicy.ts', 'MEMORY', 'PENDING', true, 'Compression/trimming law for long-lived chat memory.'),
+  descriptor('memory.MemorySalienceScorer', 'memory/MemorySalienceScorer.ts', 'MEMORY', 'PENDING', true, 'Salience scoring for callback-worthy moments.'),
+
+  // Social
+  descriptor('social.AudienceHeatLedger', 'social/AudienceHeatLedger.ts', 'SOCIAL', 'PENDING', true, 'Durable crowd heat and audience-state tracking.'),
+  descriptor('social.ReputationResolver', 'social/ReputationResolver.ts', 'SOCIAL', 'PENDING', true, 'Reputation consequence resolution.'),
+  descriptor('social.CrowdSynthesisEngine', 'social/CrowdSynthesisEngine.ts', 'SOCIAL', 'PENDING', true, 'Crowd-theater line synthesis and timing.'),
+  descriptor('social.SwarmReactionPlanner', 'social/SwarmReactionPlanner.ts', 'SOCIAL', 'PENDING', true, 'Swarm reaction planning for global/social moments.'),
+
+  // Persona
+  descriptor('persona.PersonaRegistry', 'persona/PersonaRegistry.ts', 'PERSONA', 'PENDING', true, 'Backend persona registry.'),
+  descriptor('persona.VoiceprintPolicy', 'persona/VoiceprintPolicy.ts', 'PERSONA', 'PENDING', true, 'Cadence and lexicon law per NPC.'),
+  descriptor('persona.LatencyStyleResolver', 'persona/LatencyStyleResolver.ts', 'PERSONA', 'PENDING', true, 'Persona-specific typing/reveal latency policy.'),
+
+  // Rescue
+  descriptor('rescue.RescueInterventionPlanner', 'rescue/RescueInterventionPlanner.ts', 'RESCUE', 'PENDING', true, 'Rage-quit and overwhelm rescue planning.'),
+  descriptor('rescue.ChurnRescuePolicy', 'rescue/ChurnRescuePolicy.ts', 'RESCUE', 'PENDING', true, 'Churn-risk rescue law.'),
+  descriptor('rescue.RecoveryOutcomeTracker', 'rescue/RecoveryOutcomeTracker.ts', 'RESCUE', 'PENDING', true, 'Rescue outcome tracking and reinforcement.'),
+
+  // Deal room
+  descriptor('dealroom.NegotiationEngine', 'dealroom/NegotiationEngine.ts', 'DEALROOM', 'PENDING', true, 'Deal-room negotiation state and response authority.'),
+  descriptor('dealroom.OfferCounterEngine', 'dealroom/OfferCounterEngine.ts', 'DEALROOM', 'PENDING', true, 'Counter-offer generation and validation.'),
+  descriptor('dealroom.BluffResolver', 'dealroom/BluffResolver.ts', 'DEALROOM', 'PENDING', true, 'Bluff inference and consequence resolution.'),
+  descriptor('dealroom.NegotiationReputationPolicy', 'dealroom/NegotiationReputationPolicy.ts', 'DEALROOM', 'PENDING', true, 'Negotiation reputation law.'),
+
+  // Shadow
+  descriptor('shadow.ShadowStateLedger', 'shadow/ShadowStateLedger.ts', 'SHADOW', 'PENDING', true, 'Durable shadow-state ledger.'),
+  descriptor('shadow.RevealResolver', 'shadow/RevealResolver.ts', 'SHADOW', 'PENDING', true, 'Reveal resolution for delayed/suppressed beats.'),
+  descriptor('shadow.DeferredReactionPlanner', 'shadow/DeferredReactionPlanner.ts', 'SHADOW', 'PENDING', true, 'Deferred-reaction queue planning.'),
+
+  // Rewards / prestige
+  descriptor('rewards.LegendMomentLedger', 'rewards/LegendMomentLedger.ts', 'REWARDS', 'PENDING', true, 'Prestige-worthy moment archive.'),
+  descriptor('rewards.RewardGrantResolver', 'rewards/RewardGrantResolver.ts', 'REWARDS', 'PENDING', true, 'Chat reward grant resolution.'),
+  descriptor('rewards.ReplayMomentIndexer', 'rewards/ReplayMomentIndexer.ts', 'REWARDS', 'PENDING', true, 'Legend/replay cross-indexing.'),
+
+  // LiveOps
+  descriptor('liveops.WorldEventDirector', 'liveops/WorldEventDirector.ts', 'LIVEOPS', 'PENDING', true, 'World-scale chat event orchestration.'),
+  descriptor('liveops.FactionSurgePlanner', 'liveops/FactionSurgePlanner.ts', 'LIVEOPS', 'PENDING', true, 'Faction surge planning.'),
+  descriptor('liveops.GlobalEventScheduler', 'liveops/GlobalEventScheduler.ts', 'LIVEOPS', 'PENDING', true, 'Global event scheduling law.'),
+
+  // Presence theater
+  descriptor('presence.PresenceStyleResolver', 'presence/PresenceStyleResolver.ts', 'PRESENCE', 'PENDING', true, 'NPC presence style authority.'),
+  descriptor('presence.TypingSimulationEngine', 'presence/TypingSimulationEngine.ts', 'PRESENCE', 'PENDING', true, 'Typing/lurk simulation authority.'),
+  descriptor('presence.ReadReceiptPolicy', 'presence/ReadReceiptPolicy.ts', 'PRESENCE', 'PENDING', true, 'Read-delay and receipt law.'),
+
+  // Continuity
+  descriptor('continuity.CrossModeContinuityLedger', 'continuity/CrossModeContinuityLedger.ts', 'CONTINUITY', 'PENDING', true, 'Cross-mode continuity durability layer.'),
+  descriptor('continuity.CarryoverResolver', 'continuity/CarryoverResolver.ts', 'CONTINUITY', 'PENDING', true, 'Carryover scene-state resolution between modes.'),
+
+  // Combat / language-as-combat
+  descriptor('combat.ChatBossFightEngine', 'combat/ChatBossFightEngine.ts', 'COMBAT', 'PENDING', true, 'Conversational boss-fight authority.'),
+  descriptor('combat.ChatCounterResolver', 'combat/ChatCounterResolver.ts', 'COMBAT', 'PENDING', true, 'Counterplay resolution authority.'),
+  descriptor('combat.ChatTelegraphPolicy', 'combat/ChatTelegraphPolicy.ts', 'COMBAT', 'PENDING', true, 'Attack telegraph law.'),
+  descriptor('combat.ChatAttackWindowPolicy', 'combat/ChatAttackWindowPolicy.ts', 'COMBAT', 'PENDING', true, 'Attack-window timing law.'),
+
+  // Post-run ritual
+  descriptor('postrun.PostRunNarrativeEngine', 'postrun/PostRunNarrativeEngine.ts', 'POSTRUN', 'PENDING', true, 'Post-run authored narrative and debrief.'),
+  descriptor('postrun.TurningPointResolver', 'postrun/TurningPointResolver.ts', 'POSTRUN', 'PENDING', true, 'Turning-point selection authority.'),
+  descriptor('postrun.ForeshadowPlanner', 'postrun/ForeshadowPlanner.ts', 'POSTRUN', 'PENDING', true, 'Foreshadow and next-run pressure planning.'),
 
   // Intelligence root
   descriptor('intelligence.index', 'intelligence/index.ts', 'INTELLIGENCE', 'PENDING', false, 'Intelligence barrel.'),
-  descriptor('LearningProfileStore', 'intelligence/LearningProfileStore.ts', 'INTELLIGENCE', 'PENDING', true, 'Persistent learning profile truth.'),
-  descriptor('ColdStartPopulationModel', 'intelligence/ColdStartPopulationModel.ts', 'INTELLIGENCE', 'PENDING', true, 'Cold-start prior seeding.'),
-  descriptor('ChatLearningCoordinator', 'intelligence/ChatLearningCoordinator.ts', 'INTELLIGENCE', 'PENDING', true, 'Coordinator between live events and learning updates.'),
+  descriptor('ChatSemanticSimilarityIndex', 'intelligence/ChatSemanticSimilarityIndex.ts', 'INTELLIGENCE', 'GENERATED', true, 'Semantic anti-repetition and authored-line similarity index.'),
+  descriptor('BehavioralAnomalyDetector', 'intelligence/BehavioralAnomalyDetector.ts', 'INTELLIGENCE', 'PENDING', false, 'Detects behavioral outliers in player chat activity.'),
+  descriptor('PlayerIntentClassifier', 'intelligence/PlayerIntentClassifier.ts', 'INTELLIGENCE', 'PENDING', false, 'Intent-classification surface for player messages.'),
+  descriptor('MessageRiskClassifier', 'intelligence/MessageRiskClassifier.ts', 'INTELLIGENCE', 'PENDING', false, 'Risk scoring for risky or exploitative messages.'),
+  descriptor('RetrievalRankCoordinator', 'intelligence/RetrievalRankCoordinator.ts', 'INTELLIGENCE', 'PLANNED', false, 'Coordinates retrieval, ranking, and response gates.'),
 
   // Intelligence ML
   descriptor('intelligence.ml.index', 'intelligence/ml/index.ts', 'INTELLIGENCE_ML', 'PENDING', false, 'ML barrel.'),
-  descriptor('FeatureIngestor', 'intelligence/ml/FeatureIngestor.ts', 'INTELLIGENCE_ML', 'PENDING', false, 'Online feature ingestion from authoritative events.'),
-  descriptor('OnlineFeatureStore', 'intelligence/ml/OnlineFeatureStore.ts', 'INTELLIGENCE_ML', 'PENDING', true, 'Online feature state for inference.'),
-  descriptor('EngagementModel', 'intelligence/ml/EngagementModel.ts', 'INTELLIGENCE_ML', 'PENDING', false, 'Engagement scoring.'),
-  descriptor('HaterTargetingModel', 'intelligence/ml/HaterTargetingModel.ts', 'INTELLIGENCE_ML', 'PENDING', false, 'Hater targeting recommendation model.'),
-  descriptor('HelperTimingModel', 'intelligence/ml/HelperTimingModel.ts', 'INTELLIGENCE_ML', 'PENDING', false, 'Helper timing recommendation model.'),
-  descriptor('ChannelAffinityModel', 'intelligence/ml/ChannelAffinityModel.ts', 'INTELLIGENCE_ML', 'PENDING', false, 'Channel affinity recommendation model.'),
-  descriptor('ToxicityRiskModel', 'intelligence/ml/ToxicityRiskModel.ts', 'INTELLIGENCE_ML', 'PENDING', false, 'Toxicity risk recommendation model.'),
-  descriptor('ChurnRiskModel', 'intelligence/ml/ChurnRiskModel.ts', 'INTELLIGENCE_ML', 'PENDING', false, 'Churn risk model.'),
-  descriptor('InterventionPolicyModel', 'intelligence/ml/InterventionPolicyModel.ts', 'INTELLIGENCE_ML', 'PENDING', false, 'Model that fuses recommendation outputs.'),
+  descriptor('EmotionModel', 'intelligence/ml/EmotionModel.ts', 'INTELLIGENCE_ML', 'PENDING', false, 'Backend emotion scoring for intimidation/confidence/frustration.'),
+  descriptor('PressureAffectModel', 'intelligence/ml/PressureAffectModel.ts', 'INTELLIGENCE_ML', 'PENDING', false, 'Pressure-affect scoring.'),
+  descriptor('AttachmentModel', 'intelligence/ml/AttachmentModel.ts', 'INTELLIGENCE_ML', 'PENDING', false, 'Attachment/trust intensity scoring.'),
 
   // Intelligence DL
   descriptor('intelligence.dl.index', 'intelligence/dl/index.ts', 'INTELLIGENCE_DL', 'PENDING', false, 'DL barrel.'),
-  descriptor('DialogueEmbeddingService', 'intelligence/dl/DialogueEmbeddingService.ts', 'INTELLIGENCE_DL', 'PENDING', false, 'Embedding service over chat turns/scenes.'),
+  descriptor('MemoryAnchorStore', 'intelligence/dl/MemoryAnchorStore.ts', 'INTELLIGENCE_DL', 'PENDING', false, 'Retrieval-backed memory anchor durability.'),
+  descriptor('RetrievalContextBuilder', 'intelligence/dl/RetrievalContextBuilder.ts', 'INTELLIGENCE_DL', 'PENDING', false, 'Historical retrieval context builder.'),
+  descriptor('MemoryRankingPolicy', 'intelligence/dl/MemoryRankingPolicy.ts', 'INTELLIGENCE_DL', 'PENDING', false, 'Top-salience memory ranking policy.'),
   descriptor('IntentSequenceModel', 'intelligence/dl/IntentSequenceModel.ts', 'INTELLIGENCE_DL', 'PENDING', false, 'Sequence-level intent inference.'),
   descriptor('ResponseRankingModel', 'intelligence/dl/ResponseRankingModel.ts', 'INTELLIGENCE_DL', 'PENDING', false, 'Final response ranking.'),
   descriptor('ConversationMemoryModel', 'intelligence/dl/ConversationMemoryModel.ts', 'INTELLIGENCE_DL', 'PENDING', false, 'Long-window conversation memory.'),
-  descriptor('RetrievalContextBuilder', 'intelligence/dl/RetrievalContextBuilder.ts', 'INTELLIGENCE_DL', 'PENDING', false, 'Historical retrieval context builder.'),
 
   // Intelligence training
   descriptor('intelligence.training.index', 'intelligence/training/index.ts', 'INTELLIGENCE_TRAINING', 'PENDING', false, 'Training barrel.'),
@@ -275,6 +434,13 @@ export function createBackendChatAuthorityBundle(): BackendChatAuthorityBundle {
       helper: Helper,
       npc: Npc,
       engine: Engine,
+      phase4: Phase4,
+      experience: Object.freeze({
+        dramaOrchestrator: DramaOrchestrator,
+        scenePlanner: ScenePlanner,
+        momentLedger: MomentLedger,
+        silencePolicy: SilencePolicy,
+      }),
     }),
     readiness: buildBackendChatLaneReadinessReport(),
   });
@@ -292,42 +458,28 @@ export function buildBackendChatLaneReadinessReport(): BackendChatLaneReadinessR
   const planned = BACKEND_CHAT_CANONICAL_MODULES.filter((value) => value.readiness === 'PLANNED');
   const deferred = BACKEND_CHAT_CANONICAL_MODULES.filter((value) => value.readiness === 'DEFERRED');
 
+  const categories = uniqueCategories(BACKEND_CHAT_CANONICAL_MODULES);
+  const byCategory = categories.map((category) =>
+    Object.freeze({
+      category,
+      modules: Object.freeze(BACKEND_CHAT_CANONICAL_MODULES.filter((value) => value.category === category)),
+    }),
+  );
+
   return Object.freeze({
     generatedCount: generated.length,
     pendingCount: pending.length,
     plannedCount: planned.length,
     deferredCount: deferred.length,
-    byCategory: groupCanonicalModulesByCategory(BACKEND_CHAT_CANONICAL_MODULES),
+    byCategory: Object.freeze(byCategory),
     generatedPaths: Object.freeze(generated.map((value) => value.relativePath)),
     pendingPaths: Object.freeze(pending.map((value) => value.relativePath)),
+    plannedPaths: Object.freeze(planned.map((value) => value.relativePath)),
+    deferredPaths: Object.freeze(deferred.map((value) => value.relativePath)),
   });
 }
 
-export function groupCanonicalModulesByCategory(
-  modules: readonly BackendChatCanonicalModuleDescriptor[],
-): readonly BackendChatCanonicalModuleGroup[] {
-  const categories: BackendChatCanonicalModuleCategory[] = [
-    'ROOT',
-    'ADAPTERS',
-    'CHANNELS',
-    'NPC',
-    'REPLAY',
-    'TELEMETRY',
-    'INTELLIGENCE',
-    'INTELLIGENCE_ML',
-    'INTELLIGENCE_DL',
-    'INTELLIGENCE_TRAINING',
-  ];
-
-  return Object.freeze(
-    categories.map((category) => ({
-      category,
-      modules: Object.freeze(modules.filter((value) => value.category === category)),
-    })),
-  );
-}
-
-export function listBackendChatCanonicalModules(): readonly BackendChatCanonicalModuleDescriptor[] {
+export function listBackendChatModules(): readonly BackendChatCanonicalModuleDescriptor[] {
   return BACKEND_CHAT_CANONICAL_MODULES;
 }
 
@@ -339,9 +491,15 @@ export function listPendingBackendChatModules(): readonly BackendChatCanonicalMo
   return Object.freeze(BACKEND_CHAT_CANONICAL_MODULES.filter((value) => value.readiness === 'PENDING'));
 }
 
-export function getBackendChatModuleDescriptor(
-  id: string,
-): BackendChatCanonicalModuleDescriptor | null {
+export function listPlannedBackendChatModules(): readonly BackendChatCanonicalModuleDescriptor[] {
+  return Object.freeze(BACKEND_CHAT_CANONICAL_MODULES.filter((value) => value.readiness === 'PLANNED'));
+}
+
+export function listDeferredBackendChatModules(): readonly BackendChatCanonicalModuleDescriptor[] {
+  return Object.freeze(BACKEND_CHAT_CANONICAL_MODULES.filter((value) => value.readiness === 'DEFERRED'));
+}
+
+export function getBackendChatModuleDescriptor(id: string): BackendChatCanonicalModuleDescriptor | null {
   return BACKEND_CHAT_CANONICAL_MODULES.find((value) => value.id === id) ?? null;
 }
 
@@ -363,19 +521,19 @@ export function summarizeBackendChatLaneReadiness(): string {
   ].join(' | ');
 }
 
-export function summarizeBackendChatCategory(
+export function summarizeBackendChatCategory(category: BackendChatCanonicalModuleCategory): string {
+  const modules = BACKEND_CHAT_CANONICAL_MODULES.filter((value) => value.category === category);
+  const generated = modules.filter((value) => value.readiness === 'GENERATED').length;
+  const pending = modules.filter((value) => value.readiness === 'PENDING').length;
+  const planned = modules.filter((value) => value.readiness === 'PLANNED').length;
+  const deferred = modules.filter((value) => value.readiness === 'DEFERRED').length;
+  return `${category}: generated=${generated} pending=${pending} planned=${planned} deferred=${deferred}`;
+}
+
+export function listModulesByCategory(
   category: BackendChatCanonicalModuleCategory,
-): string {
-  const group = groupCanonicalModulesByCategory(BACKEND_CHAT_CANONICAL_MODULES)
-    .find((value) => value.category === category);
-
-  if (!group) {
-    return `${category}: none`;
-  }
-
-  const generated = group.modules.filter((value) => value.readiness === 'GENERATED').length;
-  const pending = group.modules.filter((value) => value.readiness === 'PENDING').length;
-  return `${category}: generated=${generated} pending=${pending}`;
+): readonly BackendChatCanonicalModuleDescriptor[] {
+  return Object.freeze(BACKEND_CHAT_CANONICAL_MODULES.filter((value) => value.category === category));
 }
 
 // ============================================================================
@@ -385,6 +543,7 @@ export function summarizeBackendChatCategory(
 export const BACKEND_CHAT_GENERATED_ROOT_MODULE_IDS = Object.freeze([
   'types',
   'index',
+  'phase4_index',
   'ChatEngine',
   'ChatState',
   'ChatReducer',
@@ -405,11 +564,20 @@ export const BACKEND_CHAT_GENERATED_ROOT_MODULE_IDS = Object.freeze([
   'HelperResponseOrchestrator',
 ] as const);
 
+export const BACKEND_CHAT_GENERATED_EXPERIENCE_MODULE_IDS = Object.freeze([
+  'experience.ChatDramaOrchestrator',
+  'experience.ChatScenePlanner',
+  'experience.ChatMomentLedger',
+  'experience.ChatSilencePolicy',
+] as const);
+
 export type BackendChatGeneratedRootModuleId = (typeof BACKEND_CHAT_GENERATED_ROOT_MODULE_IDS)[number];
+export type BackendChatGeneratedExperienceModuleId =
+  (typeof BACKEND_CHAT_GENERATED_EXPERIENCE_MODULE_IDS)[number];
 
 export interface BackendChatGeneratedSurfaceDescriptor {
-  readonly id: BackendChatGeneratedRootModuleId;
-  readonly namespaceKey: keyof BackendChatAuthorityBundle['modules'];
+  readonly id: BackendChatGeneratedRootModuleId | BackendChatGeneratedExperienceModuleId;
+  readonly namespaceKey: string;
   readonly exported: boolean;
   readonly description: string;
 }
@@ -420,115 +588,93 @@ export const BACKEND_CHAT_GENERATED_SURFACE = Object.freeze([
   generatedSurface('ChatState', 'state', 'Authoritative state creation, selectors, and lawful mutation helpers.'),
   generatedSurface('ChatReducer', 'reducer', 'Deterministic reducer operations.'),
   generatedSurface('ChatMessageFactory', 'messageFactory', 'Canonical message construction and revision authority.'),
-  generatedSurface('ChatTranscriptLedger', 'transcriptLedger', 'Transcript append/index/redact/delete operations.'),
-  generatedSurface('ChatProofChain', 'proofChain', 'Proof-edge creation and verification helpers.'),
-  generatedSurface('ChatRatePolicy', 'ratePolicy', 'Rate-law helpers.'),
-  generatedSurface('ChatModerationPolicy', 'moderationPolicy', 'Moderation-law helpers.'),
-  generatedSurface('ChatChannelPolicy', 'channelPolicy', 'Channel-law helpers.'),
-  generatedSurface('ChatCommandParser', 'commandParser', 'Command parsing authority.'),
-  generatedSurface('ChatEventBridge', 'eventBridge', 'Upstream normalization authority.'),
-  generatedSurface('ChatPresenceState', 'presenceState', 'Presence truth.'),
-  generatedSurface('ChatSessionState', 'sessionState', 'Session truth.'),
-  generatedSurface('ChatInvasionOrchestrator', 'invasion', 'Invasion planning authority.'),
-  generatedSurface('HaterResponseOrchestrator', 'hater', 'Hater response planning authority.'),
-  generatedSurface('HelperResponseOrchestrator', 'helper', 'Helper response planning authority.'),
-  generatedSurface('ChatNpcOrchestrator', 'npc', 'Top-level NPC scheduling authority.'),
-  generatedSurface('ChatEngine', 'engine', 'Top-level backend chat engine façade.'),
+  generatedSurface('ChatTranscriptLedger', 'transcriptLedger', 'Transcript append, index, redact, and delete operations.'),
+  generatedSurface('ChatProofChain', 'proofChain', 'Proof-edge creation and verification.'),
+  generatedSurface('ChatRatePolicy', 'ratePolicy', 'Rate-gating law before state mutation.'),
+  generatedSurface('ChatModerationPolicy', 'moderationPolicy', 'Moderation law before state mutation.'),
+  generatedSurface('ChatChannelPolicy', 'channelPolicy', 'Visible and shadow channel law.'),
+  generatedSurface('ChatCommandParser', 'commandParser', 'Canonical command semantics.'),
+  generatedSurface('ChatEventBridge', 'eventBridge', 'Backend event normalization into chat-native inputs.'),
+  generatedSurface('ChatPresenceState', 'presenceState', 'Presence truth and presence snapshots.'),
+  generatedSurface('ChatSessionState', 'sessionState', 'Authenticated session and room truth.'),
+  generatedSurface('ChatInvasionOrchestrator', 'invasion', 'Escalation/invasion timing and sequencing.'),
+  generatedSurface('ChatNpcOrchestrator', 'npc', 'NPC orchestration entry point.'),
+  generatedSurface('HaterResponseOrchestrator', 'hater', 'Hater-response authority.'),
+  generatedSurface('HelperResponseOrchestrator', 'helper', 'Helper-response authority.'),
+  generatedSurface('ChatEngine', 'engine', 'Top-level authoritative backend chat engine façade.'),
+  generatedSurface('experience.ChatDramaOrchestrator', 'experience.dramaOrchestrator', 'Cinematic scene orchestration.'),
+  generatedSurface('experience.ChatScenePlanner', 'experience.scenePlanner', 'Moment-to-scene planning and beat ranking.'),
+  generatedSurface('experience.ChatMomentLedger', 'experience.momentLedger', 'Durable moment/reveal/silence memory.'),
+  generatedSurface('experience.ChatSilencePolicy', 'experience.silencePolicy', 'Silence, reveal, and interruption law.'),
 ] as const satisfies readonly BackendChatGeneratedSurfaceDescriptor[]);
 
-export function listGeneratedBackendChatSurface(): readonly BackendChatGeneratedSurfaceDescriptor[] {
+export function listGeneratedSurfaceDescriptors(): readonly BackendChatGeneratedSurfaceDescriptor[] {
   return BACKEND_CHAT_GENERATED_SURFACE;
 }
 
-export function getGeneratedBackendChatSurfaceDescriptor(
-  id: BackendChatGeneratedRootModuleId,
-): BackendChatGeneratedSurfaceDescriptor | null {
-  return BACKEND_CHAT_GENERATED_SURFACE.find((value) => value.id === id) ?? null;
-}
-
 // ============================================================================
-// MARK: Pending tree query helpers by category
-// ============================================================================
-
-export function listPendingAdapterModules(): readonly BackendChatCanonicalModuleDescriptor[] {
-  return Object.freeze(BACKEND_CHAT_CANONICAL_MODULES.filter((value) => value.category === 'ADAPTERS' && value.readiness === 'PENDING'));
-}
-
-export function listPendingChannelModules(): readonly BackendChatCanonicalModuleDescriptor[] {
-  return Object.freeze(BACKEND_CHAT_CANONICAL_MODULES.filter((value) => value.category === 'CHANNELS' && value.readiness === 'PENDING'));
-}
-
-export function listPendingNpcRegistryModules(): readonly BackendChatCanonicalModuleDescriptor[] {
-  return Object.freeze(BACKEND_CHAT_CANONICAL_MODULES.filter((value) => value.category === 'NPC' && value.readiness === 'PENDING'));
-}
-
-export function listPendingReplayModules(): readonly BackendChatCanonicalModuleDescriptor[] {
-  return Object.freeze(BACKEND_CHAT_CANONICAL_MODULES.filter((value) => value.category === 'REPLAY' && value.readiness === 'PENDING'));
-}
-
-export function listPendingTelemetryModules(): readonly BackendChatCanonicalModuleDescriptor[] {
-  return Object.freeze(BACKEND_CHAT_CANONICAL_MODULES.filter((value) => value.category === 'TELEMETRY' && value.readiness === 'PENDING'));
-}
-
-export function listPendingIntelligenceModules(): readonly BackendChatCanonicalModuleDescriptor[] {
-  return Object.freeze(BACKEND_CHAT_CANONICAL_MODULES.filter((value) => value.category === 'INTELLIGENCE' && value.readiness === 'PENDING'));
-}
-
-export function listPendingMlModules(): readonly BackendChatCanonicalModuleDescriptor[] {
-  return Object.freeze(BACKEND_CHAT_CANONICAL_MODULES.filter((value) => value.category === 'INTELLIGENCE_ML' && value.readiness === 'PENDING'));
-}
-
-export function listPendingDlModules(): readonly BackendChatCanonicalModuleDescriptor[] {
-  return Object.freeze(BACKEND_CHAT_CANONICAL_MODULES.filter((value) => value.category === 'INTELLIGENCE_DL' && value.readiness === 'PENDING'));
-}
-
-export function listPendingTrainingModules(): readonly BackendChatCanonicalModuleDescriptor[] {
-  return Object.freeze(BACKEND_CHAT_CANONICAL_MODULES.filter((value) => value.category === 'INTELLIGENCE_TRAINING' && value.readiness === 'PENDING'));
-}
-
-// ============================================================================
-// MARK: Barrels for downstream integration points
+// MARK: Downstream integration surfaces
 // ============================================================================
 
 export interface BackendChatDownstreamIntegrationSurface {
   readonly forBackendLanes: readonly string[];
   readonly forServerTransport: readonly string[];
+  readonly forPhase4Consumers: readonly string[];
   readonly forbiddenImports: readonly string[];
 }
 
-export const BACKEND_CHAT_DOWNSTREAM_INTEGRATION_SURFACE: BackendChatDownstreamIntegrationSurface = Object.freeze({
-  forBackendLanes: Object.freeze([
-    './types',
-    './ChatRuntimeConfig',
-    './ChatState',
-    './ChatReducer',
-    './ChatEventBridge',
-    './ChatRatePolicy',
-    './ChatModerationPolicy',
-    './ChatChannelPolicy',
-    './ChatCommandParser',
-    './ChatPresenceState',
-    './ChatSessionState',
-    './ChatInvasionOrchestrator',
-    './ChatNpcOrchestrator',
-    './HaterResponseOrchestrator',
-    './HelperResponseOrchestrator',
-    './ChatEngine',
-  ]),
-  forServerTransport: Object.freeze([
-    './types',
-    './ChatEventBridge',
-    './ChatSessionState',
-    './ChatPresenceState',
-    './ChatEngine',
-  ]),
-  forbiddenImports: Object.freeze([
-    '/pzo-web/src/components/chat',
-    '/pzo-web/src/engines/chat',
-    '/frontend/apps/web/components/chat',
-    '/pzo_client/src/components/chat',
-  ]),
-});
+export const BACKEND_CHAT_DOWNSTREAM_INTEGRATION_SURFACE: BackendChatDownstreamIntegrationSurface =
+  Object.freeze({
+    forBackendLanes: Object.freeze([
+      './types',
+      './ChatRuntimeConfig',
+      './ChatState',
+      './ChatReducer',
+      './ChatEventBridge',
+      './ChatRatePolicy',
+      './ChatModerationPolicy',
+      './ChatChannelPolicy',
+      './ChatCommandParser',
+      './ChatPresenceState',
+      './ChatSessionState',
+      './ChatInvasionOrchestrator',
+      './ChatNpcOrchestrator',
+      './HaterResponseOrchestrator',
+      './HelperResponseOrchestrator',
+      './ChatEngine',
+      './phase4_index',
+      './experience/ChatDramaOrchestrator',
+      './experience/ChatScenePlanner',
+      './experience/ChatMomentLedger',
+      './experience/ChatSilencePolicy',
+    ]),
+    forServerTransport: Object.freeze([
+      './types',
+      './ChatEventBridge',
+      './ChatSessionState',
+      './ChatPresenceState',
+      './ChatEngine',
+      './phase4_index',
+    ]),
+    forPhase4Consumers: Object.freeze([
+      './ChatMemoryService',
+      './ChatNoveltyService',
+      './ChatRelationshipService',
+      './ChatSceneArchiveService',
+      './ChatPlayerModelService',
+      './intelligence/ChatSemanticSimilarityIndex',
+      './experience/ChatDramaOrchestrator',
+      './experience/ChatScenePlanner',
+      './experience/ChatMomentLedger',
+      './experience/ChatSilencePolicy',
+    ]),
+    forbiddenImports: Object.freeze([
+      '/pzo-web/src/components/chat',
+      '/pzo-web/src/engines/chat',
+      '/frontend/apps/web/components/chat',
+      '/pzo_client/src/components/chat',
+    ]),
+  });
 
 export function listBackendLaneIntegrationExports(): readonly string[] {
   return BACKEND_CHAT_DOWNSTREAM_INTEGRATION_SURFACE.forBackendLanes;
@@ -538,12 +684,16 @@ export function listServerTransportIntegrationExports(): readonly string[] {
   return BACKEND_CHAT_DOWNSTREAM_INTEGRATION_SURFACE.forServerTransport;
 }
 
+export function listPhase4IntegrationExports(): readonly string[] {
+  return BACKEND_CHAT_DOWNSTREAM_INTEGRATION_SURFACE.forPhase4Consumers;
+}
+
 export function listForbiddenBackendChatImports(): readonly string[] {
   return BACKEND_CHAT_DOWNSTREAM_INTEGRATION_SURFACE.forbiddenImports;
 }
 
 // ============================================================================
-// MARK: Integrity, assertions, and diagnostic helpers
+// MARK: Integrity and diagnostics
 // ============================================================================
 
 export function assertBackendChatManifestIntegrity(): readonly string[] {
@@ -552,57 +702,247 @@ export function assertBackendChatManifestIntegrity(): readonly string[] {
   const paths = new Set<string>();
 
   for (const module of BACKEND_CHAT_CANONICAL_MODULES) {
-    if (ids.has(module.id)) {
-      issues.push(`duplicate module id: ${module.id}`);
-    }
-    if (paths.has(module.relativePath)) {
-      issues.push(`duplicate module path: ${module.relativePath}`);
-    }
+    if (ids.has(module.id)) issues.push(`duplicate_module_id:${module.id}`);
+    if (paths.has(module.relativePath)) issues.push(`duplicate_module_path:${module.relativePath}`);
     ids.add(module.id);
     paths.add(module.relativePath);
+
+    if (module.relativePath.startsWith('/')) {
+      issues.push(`absolute_relative_path_forbidden:${module.relativePath}`);
+    }
+
+    if (module.category === 'EXPERIENCE' && !module.relativePath.startsWith('experience/')) {
+      issues.push(`experience_category_path_mismatch:${module.id}`);
+    }
   }
 
-  if (!backendChatModuleIsGenerated('types')) {
-    issues.push('types.ts must always be generated for the backend chat lane to compile.');
+  for (const id of BACKEND_CHAT_GENERATED_ROOT_MODULE_IDS) {
+    const descriptor = getBackendChatModuleDescriptor(id);
+    if (!descriptor) issues.push(`generated_surface_missing_descriptor:${id}`);
+    else if (descriptor.readiness !== 'GENERATED') issues.push(`generated_surface_not_generated:${id}`);
   }
-  if (!backendChatModuleIsGenerated('ChatState')) {
-    issues.push('ChatState.ts must be generated before authoritative orchestration is considered valid.');
-  }
-  if (!backendChatModuleIsGenerated('ChatEngine')) {
-    issues.push('ChatEngine.ts must be generated before the lane can expose a top-level façade.');
+
+  for (const id of BACKEND_CHAT_GENERATED_EXPERIENCE_MODULE_IDS) {
+    const descriptor = getBackendChatModuleDescriptor(id);
+    if (!descriptor) issues.push(`generated_experience_surface_missing_descriptor:${id}`);
+    else if (descriptor.readiness !== 'GENERATED') issues.push(`generated_experience_surface_not_generated:${id}`);
   }
 
   return Object.freeze(issues);
 }
 
-export function backendChatManifestIsHealthy(): boolean {
-  return assertBackendChatManifestIntegrity().length === 0;
+export function assertBackendChatAuthorityBundleIntegrity(): readonly string[] {
+  const issues = [...assertBackendChatManifestIntegrity()];
+
+  if (BACKEND_CHAT_AUTHORITY_BUNDLE.version !== BACKEND_CHAT_ENGINE_VERSION) {
+    issues.push('authority_bundle_version_mismatch');
+  }
+
+  if (BACKEND_CHAT_AUTHORITY_BUNDLE.publicApiVersion !== BACKEND_CHAT_ENGINE_PUBLIC_API_VERSION) {
+    issues.push('authority_bundle_public_api_version_mismatch');
+  }
+
+  return Object.freeze(issues);
 }
 
-export function buildBackendChatManifestDigest(): Readonly<Record<string, JsonValue>> {
+export function createBackendChatDiagnosticsSnapshot(): Readonly<Record<string, JsonValue>> {
   const readiness = buildBackendChatLaneReadinessReport();
+  const manifestIssues = assertBackendChatManifestIntegrity();
+  const bundleIssues = assertBackendChatAuthorityBundleIntegrity();
+
   return Object.freeze({
     version: BACKEND_CHAT_ENGINE_VERSION,
     publicApiVersion: BACKEND_CHAT_ENGINE_PUBLIC_API_VERSION,
+    authorityRoots: CHAT_AUTHORITY_ROOTS,
+    readinessSummary: summarizeBackendChatLaneReadiness(),
     generatedCount: readiness.generatedCount,
     pendingCount: readiness.pendingCount,
-    categories: groupCanonicalModulesByCategory(BACKEND_CHAT_CANONICAL_MODULES).map((group) => ({
-      category: group.category,
-      count: group.modules.length,
-      generatedCount: group.modules.filter((value) => value.readiness === 'GENERATED').length,
-      pendingCount: group.modules.filter((value) => value.readiness === 'PENDING').length,
-    })),
+    plannedCount: readiness.plannedCount,
+    deferredCount: readiness.deferredCount,
+    manifestIssues: [...manifestIssues],
+    bundleIssues: [...bundleIssues],
+    backendIntegrationExports: [...listBackendLaneIntegrationExports()],
+    serverTransportIntegrationExports: [...listServerTransportIntegrationExports()],
+    phase4IntegrationExports: [...listPhase4IntegrationExports()],
   });
 }
 
-export function explainWhyBackendChatIndexExists(): readonly string[] {
-  return Object.freeze([
-    'Exports the currently generated backend chat authority surface.',
-    'Encodes the canonical backend chat simulation tree you locked.',
-    'Makes generated-vs-pending readiness explicit instead of implicit.',
-    'Provides a downstream-safe bundle for backend lanes and pzo-server chat transport.',
-    'Prevents donor-zone imports from becoming hidden architecture.',
-  ]);
+// ============================================================================
+// MARK: Experience addendum and movement map
+// ============================================================================
+
+export type BackendChatMovementId =
+  | 'MOVEMENT_0_BOOT_AND_DOCTRINE'
+  | 'MOVEMENT_1_SESSION_ADMISSION_AND_PRESENCE'
+  | 'MOVEMENT_2_EVENT_INGESTION_AND_TRANSLATION'
+  | 'MOVEMENT_3_INPUT_GATING_AND_ENFORCEMENT'
+  | 'MOVEMENT_4_ENGINE_REDUCTION_AND_RUNTIME_TRUTH'
+  | 'MOVEMENT_5_MESSAGE_CREATION_AND_TRANSCRIPT_TRUTH'
+  | 'MOVEMENT_6_NPC_HELPER_HATER_INVASION_ORCHESTRATION'
+  | 'MOVEMENT_7_PHASE4_MEMORY_AND_SIMILARITY'
+  | 'MOVEMENT_8_DRAMA_AND_SCENE_DIRECTION'
+  | 'MOVEMENT_9_SILENCE_AND_REVEAL_TIMING'
+  | 'MOVEMENT_10_SOCIAL_MEMORY_AND_PRESTIGE'
+  | 'MOVEMENT_11_LIVEOPS_AND_WORLD_SCALE_PRESSURE'
+  | 'MOVEMENT_12_LEARNING_COORDINATION';
+
+export interface BackendChatMovementDescriptor {
+  readonly id: BackendChatMovementId;
+  readonly label: string;
+  readonly description: string;
+  readonly primaryModuleIds: readonly string[];
+  readonly secondaryModuleIds: readonly string[];
+}
+
+export const BACKEND_CHAT_MOVEMENTS = Object.freeze([
+  movement(
+    'MOVEMENT_0_BOOT_AND_DOCTRINE',
+    'Boot and doctrine',
+    'Defines runtime law, authority roots, root barrels, and backend-only type surface.',
+    ['ChatRuntimeConfig', 'types', 'index', 'phase4_index'],
+    ['ChatEngine'],
+  ),
+  movement(
+    'MOVEMENT_1_SESSION_ADMISSION_AND_PRESENCE',
+    'Session admission and presence truth',
+    'Owns authenticated session truth, room attachment truth, and live presence projections.',
+    ['ChatSessionState', 'ChatPresenceState'],
+    ['ChatState', 'ChatEngine'],
+  ),
+  movement(
+    'MOVEMENT_2_EVENT_INGESTION_AND_TRANSLATION',
+    'Event ingestion and translation',
+    'Normalizes battle, run, multiplayer, economy, and liveops facts into backend chat-native input.',
+    ['ChatEventBridge'],
+    ['adapters.index', 'BattleSignalAdapter', 'RunSignalAdapter', 'MultiplayerSignalAdapter', 'EconomySignalAdapter'],
+  ),
+  movement(
+    'MOVEMENT_3_INPUT_GATING_AND_ENFORCEMENT',
+    'Input gating and enforcement',
+    'Applies rate, moderation, channel, and command law before transcript truth changes.',
+    ['ChatRatePolicy', 'ChatModerationPolicy', 'ChatChannelPolicy', 'ChatCommandParser'],
+    ['GlobalChannelPolicy', 'SyndicateChannelPolicy', 'DealRoomChannelPolicy', 'ShadowChannelPolicy'],
+  ),
+  movement(
+    'MOVEMENT_4_ENGINE_REDUCTION_AND_RUNTIME_TRUTH',
+    'Engine reduction and runtime truth',
+    'Owns top-level backend orchestration and lawful state transitions.',
+    ['ChatEngine', 'ChatState', 'ChatReducer'],
+    ['ChatRuntimeConfig', 'ChatSessionState', 'ChatPresenceState'],
+  ),
+  movement(
+    'MOVEMENT_5_MESSAGE_CREATION_AND_TRANSCRIPT_TRUTH',
+    'Message creation and transcript truth',
+    'Ensures all visible and shadow messages are authored, indexed, and proof-linked from backend truth.',
+    ['ChatMessageFactory', 'ChatTranscriptLedger', 'ChatProofChain'],
+    ['ChatEventBridge', 'ChatReducer'],
+  ),
+  movement(
+    'MOVEMENT_6_NPC_HELPER_HATER_INVASION_ORCHESTRATION',
+    'NPC, helper, hater, and invasion orchestration',
+    'Routes helper, rival, and ambient authored responses from backend authority.',
+    ['ChatNpcOrchestrator', 'HaterResponseOrchestrator', 'HelperResponseOrchestrator', 'ChatInvasionOrchestrator'],
+    ['npc.index', 'HaterDialogueRegistry', 'HelperDialogueRegistry', 'NpcCadencePolicy'],
+  ),
+  movement(
+    'MOVEMENT_7_PHASE4_MEMORY_AND_SIMILARITY',
+    'Phase-4 memory, novelty, relationships, and semantic continuity',
+    'Preserves recall, novelty suppression, relationship continuity, scene archives, player modeling, and semantic repetition control.',
+    [
+      'phase4_index',
+      'ChatMemoryService',
+      'ChatNoveltyService',
+      'ChatRelationshipService',
+      'ChatSceneArchiveService',
+      'ChatPlayerModelService',
+      'ChatSemanticSimilarityIndex',
+    ],
+    ['memory.ConversationMemoryStore', 'memory.MemorySalienceScorer'],
+  ),
+  movement(
+    'MOVEMENT_8_DRAMA_AND_SCENE_DIRECTION',
+    'Drama and scene direction',
+    'Promotes chat from utility layer to emotional game director through scene planning and orchestration.',
+    [
+      'experience.ChatDramaOrchestrator',
+      'experience.ChatScenePlanner',
+      'experience.ChatMomentLedger',
+    ],
+    ['ChatNpcOrchestrator', 'HaterResponseOrchestrator', 'HelperResponseOrchestrator', 'ChatSceneArchiveService'],
+  ),
+  movement(
+    'MOVEMENT_9_SILENCE_AND_REVEAL_TIMING',
+    'Silence and reveal timing',
+    'Treats silence, delayed reveals, and interruption priority as first-class backend timing law.',
+    ['experience.ChatSilencePolicy', 'experience.ChatMomentLedger'],
+    ['presence.TypingSimulationEngine', 'shadow.RevealResolver'],
+  ),
+  movement(
+    'MOVEMENT_10_SOCIAL_MEMORY_AND_PRESTIGE',
+    'Social memory, callback continuity, and prestige',
+    'Extends chat into relationship memory, audience heat, legend moments, and callback continuity.',
+    ['memory.RelationshipResolver', 'social.AudienceHeatLedger', 'rewards.LegendMomentLedger'],
+    ['memory.QuoteRecallResolver', 'social.CrowdSynthesisEngine', 'rewards.ReplayMomentIndexer'],
+  ),
+  movement(
+    'MOVEMENT_11_LIVEOPS_AND_WORLD_SCALE_PRESSURE',
+    'LiveOps and world-scale pressure',
+    'Supports world events, coordinated raids, faction surges, and platform-wide social pressure.',
+    ['liveops.WorldEventDirector', 'liveops.GlobalEventScheduler'],
+    ['liveops.FactionSurgePlanner', 'shadow.DeferredReactionPlanner', 'presence.PresenceStyleResolver'],
+  ),
+  movement(
+    'MOVEMENT_12_LEARNING_COORDINATION',
+    'Learning coordination',
+    'Coordinates online intelligence, emotion scoring, retrieval, and offline training without breaking backend authority.',
+    ['intelligence.index', 'ChatSemanticSimilarityIndex'],
+    ['EmotionModel', 'PressureAffectModel', 'AttachmentModel', 'MemoryAnchorStore', 'RetrievalContextBuilder', 'PolicyTrainer'],
+  ),
+] as const satisfies readonly BackendChatMovementDescriptor[]);
+
+export function getBackendChatMovement(id: BackendChatMovementId): BackendChatMovementDescriptor | null {
+  return BACKEND_CHAT_MOVEMENTS.find((value) => value.id === id) ?? null;
+}
+
+export function listModulesForMovement(id: BackendChatMovementId): readonly BackendChatCanonicalModuleDescriptor[] {
+  const movementDescriptor = getBackendChatMovement(id);
+  if (!movementDescriptor) return Object.freeze([]);
+
+  const ids = new Set([...movementDescriptor.primaryModuleIds, ...movementDescriptor.secondaryModuleIds]);
+  return Object.freeze(BACKEND_CHAT_CANONICAL_MODULES.filter((value) => ids.has(value.id)));
+}
+
+// ============================================================================
+// MARK: Ownership matrix
+// ============================================================================
+
+export interface BackendChatOwnershipMatrixRow {
+  readonly concern: string;
+  readonly backendOwner: readonly string[];
+  readonly forbiddenOwners: readonly string[];
+}
+
+export const BACKEND_CHAT_OWNERSHIP_MATRIX = Object.freeze([
+  ownershipRow('Session truth', ['ChatSessionState', 'ChatState'], ['pzo-server transport', 'frontend chat engine']),
+  ownershipRow('Presence truth', ['ChatPresenceState', 'ChatState'], ['frontend chat presence controller', 'transport fanout']),
+  ownershipRow('Input normalization', ['ChatEventBridge'], ['transport handlers', 'frontend event bridge as authority']),
+  ownershipRow('Rate law', ['ChatRatePolicy'], ['client-side throttles as final truth']),
+  ownershipRow('Moderation law', ['ChatModerationPolicy'], ['frontend privacy guard as final truth']),
+  ownershipRow('Channel law', ['ChatChannelPolicy'], ['tab UI', 'frontend router as final truth']),
+  ownershipRow('Command semantics', ['ChatCommandParser'], ['socket handlers', 'composer UI']),
+  ownershipRow('Transcript truth', ['ChatMessageFactory', 'ChatTranscriptLedger', 'ChatState'], ['client transcript buffer']),
+  ownershipRow('Proof edges', ['ChatProofChain'], ['frontend-only proof badges']),
+  ownershipRow('NPC helper/hater orchestration', ['ChatNpcOrchestrator', 'HaterResponseOrchestrator', 'HelperResponseOrchestrator'], ['frontend-only bot reply generators']),
+  ownershipRow('Scene orchestration', ['experience.ChatDramaOrchestrator', 'experience.ChatScenePlanner'], ['frontend dock sequencing as final truth']),
+  ownershipRow('Silence/reveal timing', ['experience.ChatSilencePolicy', 'experience.ChatMomentLedger'], ['typing indicator UI', 'client reveal queues as final truth']),
+  ownershipRow('Memory continuity', ['ChatMemoryService', 'ChatRelationshipService', 'ChatSceneArchiveService'], ['browser-local chat memory as authority']),
+  ownershipRow('Player modeling', ['ChatPlayerModelService'], ['frontend analytics-only scores as authority']),
+  ownershipRow('Semantic repetition control', ['ChatSemanticSimilarityIndex'], ['frontend anti-spam heuristics as authority']),
+  ownershipRow('World events and pressure', ['liveops.WorldEventDirector', 'social.AudienceHeatLedger'], ['server transport banners', 'frontend overlays as authority']),
+]);
+
+export function listBackendChatOwnershipRows(): readonly BackendChatOwnershipMatrixRow[] {
+  return BACKEND_CHAT_OWNERSHIP_MATRIX;
 }
 
 // ============================================================================
@@ -628,8 +968,8 @@ function descriptor(
 }
 
 function generatedSurface(
-  id: BackendChatGeneratedRootModuleId,
-  namespaceKey: keyof BackendChatAuthorityBundle['modules'],
+  id: BackendChatGeneratedSurfaceDescriptor['id'],
+  namespaceKey: string,
   description: string,
 ): BackendChatGeneratedSurfaceDescriptor {
   return Object.freeze({
@@ -638,195 +978,6 @@ function generatedSurface(
     exported: true,
     description,
   });
-}
-
-// ============================================================================
-// MARK: Movement manifest — authoritative backend execution order
-// ============================================================================
-
-export type BackendChatMovementId =
-  | 'MOVEMENT_0_BOOT_AND_DOCTRINE'
-  | 'MOVEMENT_1_SESSION_ADMISSION_AND_PRESENCE'
-  | 'MOVEMENT_2_EVENT_INGESTION_AND_TRANSLATION'
-  | 'MOVEMENT_3_INPUT_GATING_AND_ENFORCEMENT'
-  | 'MOVEMENT_4_AUTHORITATIVE_STATE_MUTATION'
-  | 'MOVEMENT_5_MESSAGE_CREATION_AND_TRANSCRIPT_TRUTH'
-  | 'MOVEMENT_6_NPC_HELPER_HATER_INVASION_ORCHESTRATION'
-  | 'MOVEMENT_7_REPLAY_AND_AFTER_ACTION_TRUTH'
-  | 'MOVEMENT_8_TELEMETRY_AND_EVENT_STREAMING'
-  | 'MOVEMENT_9_LEARNING_COORDINATION'
-  | 'MOVEMENT_10_ML_ONLINE_INFERENCE'
-  | 'MOVEMENT_11_DL_SEQUENCE_RANKING_AND_MEMORY'
-  | 'MOVEMENT_12_OFFLINE_TRAINING_AND_EVALUATION';
-
-export interface BackendChatMovementDescriptor {
-  readonly id: BackendChatMovementId;
-  readonly label: string;
-  readonly description: string;
-  readonly primaryModuleIds: readonly string[];
-  readonly secondaryModuleIds: readonly string[];
-}
-
-export const BACKEND_CHAT_MOVEMENTS = Object.freeze([
-  movement(
-    'MOVEMENT_0_BOOT_AND_DOCTRINE',
-    'Boot and doctrine',
-    'Defines runtime law, authority roots, and backend-only type surface.',
-    ['ChatRuntimeConfig', 'types', 'index'],
-    ['ChatEngine'],
-  ),
-  movement(
-    'MOVEMENT_1_SESSION_ADMISSION_AND_PRESENCE',
-    'Session admission and presence truth',
-    'Owns authenticated session truth, room attachment truth, and live presence projections.',
-    ['ChatSessionState', 'ChatPresenceState'],
-    ['ChatState', 'ChatEngine'],
-  ),
-  movement(
-    'MOVEMENT_2_EVENT_INGESTION_AND_TRANSLATION',
-    'Event ingestion and translation',
-    'Normalizes transport, battle, run, multiplayer, economy, and liveops facts into backend chat-native input.',
-    ['ChatEventBridge'],
-    ['adapters.index', 'BattleSignalAdapter', 'RunSignalAdapter', 'MultiplayerSignalAdapter', 'EconomySignalAdapter'],
-  ),
-  movement(
-    'MOVEMENT_3_INPUT_GATING_AND_ENFORCEMENT',
-    'Input gating and enforcement',
-    'Applies rate, moderation, channel, and command law before transcript truth changes.',
-    ['ChatRatePolicy', 'ChatModerationPolicy', 'ChatChannelPolicy', 'ChatCommandParser'],
-    ['GlobalChannelPolicy', 'SyndicateChannelPolicy', 'DealRoomChannelPolicy', 'LobbyChannelPolicy'],
-  ),
-  movement(
-    'MOVEMENT_4_AUTHORITATIVE_STATE_MUTATION',
-    'Authoritative state mutation',
-    'Mutates authoritative backend chat state via deterministic reducer and engine orchestration.',
-    ['ChatState', 'ChatReducer', 'ChatEngine'],
-    ['ChatSessionState', 'ChatPresenceState'],
-  ),
-  movement(
-    'MOVEMENT_5_MESSAGE_CREATION_AND_TRANSCRIPT_TRUTH',
-    'Message creation and transcript truth',
-    'Constructs canonical messages, transcript entries, and proof edges.',
-    ['ChatMessageFactory', 'ChatTranscriptLedger', 'ChatProofChain'],
-    ['ChatState'],
-  ),
-  movement(
-    'MOVEMENT_6_NPC_HELPER_HATER_INVASION_ORCHESTRATION',
-    'NPC, helper, hater, and invasion orchestration',
-    'Plans backend-authored helper, hater, ambient, and invasion scenes.',
-    ['ChatInvasionOrchestrator', 'HaterResponseOrchestrator', 'HelperResponseOrchestrator', 'ChatNpcOrchestrator'],
-    ['HaterDialogueRegistry', 'HelperDialogueRegistry', 'AmbientNpcRegistry', 'NpcCadencePolicy', 'NpcSuppressionPolicy'],
-  ),
-  movement(
-    'MOVEMENT_7_REPLAY_AND_AFTER_ACTION_TRUTH',
-    'Replay and after-action truth',
-    'Assembles and indexes replay-ready chat artifacts.',
-    ['ChatReplayAssembler', 'ChatReplayIndex'],
-    ['ChatTranscriptLedger', 'ChatProofChain'],
-  ),
-  movement(
-    'MOVEMENT_8_TELEMETRY_AND_EVENT_STREAMING',
-    'Telemetry and event streaming',
-    'Writes authoritative backend telemetry and event-stream records.',
-    ['ChatTelemetrySink', 'ChatEventStreamWriter'],
-    ['ChatEngine'],
-  ),
-  movement(
-    'MOVEMENT_9_LEARNING_COORDINATION',
-    'Learning coordination',
-    'Turns transcript truth into durable profile and feature updates.',
-    ['LearningProfileStore', 'ColdStartPopulationModel', 'ChatLearningCoordinator'],
-    ['FeatureIngestor', 'OnlineFeatureStore'],
-  ),
-  movement(
-    'MOVEMENT_10_ML_ONLINE_INFERENCE',
-    'ML online inference',
-    'Scores live engagement, helper timing, hater targeting, channel affinity, toxicity, and churn.',
-    ['FeatureIngestor', 'OnlineFeatureStore', 'EngagementModel', 'HaterTargetingModel', 'HelperTimingModel', 'ChannelAffinityModel', 'ToxicityRiskModel', 'ChurnRiskModel', 'InterventionPolicyModel'],
-    ['ChatLearningCoordinator'],
-  ),
-  movement(
-    'MOVEMENT_11_DL_SEQUENCE_RANKING_AND_MEMORY',
-    'DL sequence, ranking, and memory',
-    'Embeds, retrieves, ranks, and remembers sequence-level conversation context.',
-    ['DialogueEmbeddingService', 'IntentSequenceModel', 'ResponseRankingModel', 'ConversationMemoryModel', 'RetrievalContextBuilder'],
-    ['ChatLearningCoordinator'],
-  ),
-  movement(
-    'MOVEMENT_12_OFFLINE_TRAINING_AND_EVALUATION',
-    'Offline training and evaluation',
-    'Builds datasets, labels, drift checks, training runs, and evaluation harnesses.',
-    ['DatasetBuilder', 'LabelAssembler', 'PolicyTrainer', 'DriftMonitor', 'EvaluationHarness'],
-    ['ChatEventStreamWriter', 'ChatReplayIndex'],
-  ),
-] as const satisfies readonly BackendChatMovementDescriptor[]);
-
-export function listBackendChatMovements(): readonly BackendChatMovementDescriptor[] {
-  return BACKEND_CHAT_MOVEMENTS;
-}
-
-export function getBackendChatMovement(
-  id: BackendChatMovementId,
-): BackendChatMovementDescriptor | null {
-  return BACKEND_CHAT_MOVEMENTS.find((value) => value.id === id) ?? null;
-}
-
-export function listModulesForMovement(
-  id: BackendChatMovementId,
-): readonly BackendChatCanonicalModuleDescriptor[] {
-  const movement = getBackendChatMovement(id);
-  if (!movement) {
-    return Object.freeze([]);
-  }
-  const ids = new Set([...movement.primaryModuleIds, ...movement.secondaryModuleIds]);
-  return Object.freeze(BACKEND_CHAT_CANONICAL_MODULES.filter((value) => ids.has(value.id)));
-}
-
-// ============================================================================
-// MARK: Ownership matrices and integration policy helpers
-// ============================================================================
-
-export interface BackendChatOwnershipMatrixRow {
-  readonly concern: string;
-  readonly backendOwner: readonly string[];
-  readonly forbiddenOwners: readonly string[];
-}
-
-export const BACKEND_CHAT_OWNERSHIP_MATRIX = Object.freeze([
-  ownershipRow('Session truth', ['ChatSessionState', 'ChatState'], ['pzo-server transport', 'frontend chat engine']),
-  ownershipRow('Presence truth', ['ChatPresenceState', 'ChatState'], ['frontend chat presence controller', 'transport fanout']),
-  ownershipRow('Input normalization', ['ChatEventBridge'], ['transport handlers', 'frontend event bridge as authority']),
-  ownershipRow('Rate law', ['ChatRatePolicy'], ['client-side throttles as final truth']),
-  ownershipRow('Moderation law', ['ChatModerationPolicy'], ['frontend privacy guard as final truth']),
-  ownershipRow('Channel law', ['ChatChannelPolicy'], ['tab UI', 'frontend router as final truth']),
-  ownershipRow('Command semantics', ['ChatCommandParser'], ['socket handlers', 'composer UI']),
-  ownershipRow('Transcript truth', ['ChatMessageFactory', 'ChatTranscriptLedger', 'ChatState'], ['client transcript buffer']),
-  ownershipRow('Proof edges', ['ChatProofChain'], ['frontend-only proof badges']),
-  ownershipRow('Helper judgment', ['HelperResponseOrchestrator'], ['frontend helper planners']),
-  ownershipRow('Hater judgment', ['HaterResponseOrchestrator'], ['battle donor files', 'server hater donor engine']),
-  ownershipRow('Top-level NPC scheduling', ['ChatNpcOrchestrator'], ['UI timing controllers']),
-  ownershipRow('Invasion authority', ['ChatInvasionOrchestrator'], ['visual banners']),
-  ownershipRow('Replay truth', ['ChatReplayAssembler', 'ChatReplayIndex'], ['frontend replay buffers']),
-  ownershipRow('Telemetry truth', ['ChatTelemetrySink', 'ChatEventStreamWriter'], ['frontend telemetry emitter as final truth']),
-  ownershipRow('Learning truth', ['LearningProfileStore', 'ChatLearningCoordinator'], ['localStorage learning mirrors']),
-] as const satisfies readonly BackendChatOwnershipMatrixRow[]);
-
-export function listBackendChatOwnershipMatrix(): readonly BackendChatOwnershipMatrixRow[] {
-  return BACKEND_CHAT_OWNERSHIP_MATRIX;
-}
-
-export function getOwnershipRowForConcern(
-  concern: string,
-): BackendChatOwnershipMatrixRow | null {
-  return BACKEND_CHAT_OWNERSHIP_MATRIX.find((value) => value.concern === concern) ?? null;
-}
-
-export function explainBackendChatOwnershipBoundaries(): readonly string[] {
-  return Object.freeze(
-    BACKEND_CHAT_OWNERSHIP_MATRIX.map(
-      (row) => `${row.concern} :: owner=${row.backendOwner.join(', ')} :: forbidden=${row.forbiddenOwners.join(', ')}`,
-    ),
-  );
 }
 
 function movement(
@@ -855,4 +1006,19 @@ function ownershipRow(
     backendOwner: Object.freeze([...backendOwner]),
     forbiddenOwners: Object.freeze([...forbiddenOwners]),
   });
+}
+
+function uniqueCategories(
+  modules: readonly BackendChatCanonicalModuleDescriptor[],
+): readonly BackendChatCanonicalModuleCategory[] {
+  const seen = new Set<BackendChatCanonicalModuleCategory>();
+  const categories: BackendChatCanonicalModuleCategory[] = [];
+
+  for (const module of modules) {
+    if (seen.has(module.category)) continue;
+    seen.add(module.category);
+    categories.push(module.category);
+  }
+
+  return Object.freeze(categories);
 }
