@@ -1,5 +1,10 @@
 /**
  * @pzo/engine/chat — Barrel export
+ * point_zero_one_master/frontend/packages/engine/src/chat/index.ts
+ *
+ * Public surface for package-level chat contracts, adapters, and runtime helpers.
+ * UI components are exported from:
+ *   frontend/packages/engine/src/components/chat/index.ts
  */
 
 export type {
@@ -42,4 +47,8 @@ export {
 } from './adapters';
 
 export type { PackageChatRuntimeInput } from './runtime';
-export { buildOmnipresentChatModel, filterMessagesForChannel } from './runtime';
+
+export {
+  buildOmnipresentChatModel,
+  filterMessagesForChannel,
+} from './runtime';
