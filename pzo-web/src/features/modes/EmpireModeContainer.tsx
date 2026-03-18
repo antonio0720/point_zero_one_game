@@ -1,28 +1,34 @@
-// pzo-web/src/features/modes/EmpireModeContainer.tsx
-import React from 'react';
+import React, { memo } from 'react';
 import EmpireGameScreen from '../../components/EmpireGameScreen';
-import { RUN_TICKS }   from '../../game/core/constants';
-import type { RunState } from '../../game/types/runState';
+import type { ZeroFacade } from '../../engines/zero/ZeroFacade';
 
-interface Props {
-  runState: RunState;
-  onPlayCard: (id: string) => void;
-  onMitigate: (id: string) => void;
-  modeState: unknown;
+/**
+ * EmpireModeContainer
+ *
+ * Thin lawful adapter for GO ALONE / EMPIRE.
+ * The current repo's EmpireGameScreen is already store-driven, so this container
+ * should not re-hydrate a fake RunState object. Its job is to preserve the
+ * mode-routing contract required by App.tsx and ZeroFacade while forwarding any
+ * explicit decision callbacks.
+ */
+
+export interface EmpireModeContainerProps {
+  facade?: ZeroFacade | null;
+  chatEngine?: unknown;
+  onCardCounterplay?: (cardId: string, actionId: string) => void;
+  onIgnoreCard?: (cardId: string) => void;
 }
 
-export function EmpireModeContainer({ runState, onPlayCard, onMitigate, modeState }: Props) {
-  const { cash, income, expenses, netWorth, shields, shieldConsuming, tick,
-          freezeTicks, regime, intelligence, equityHistory, hand, events } = runState;
+export const EmpireModeContainer = memo(function EmpireModeContainer({
+  onCardCounterplay,
+  onIgnoreCard,
+}: EmpireModeContainerProps) {
   return (
     <EmpireGameScreen
-      cash={cash} income={income} expenses={expenses} netWorth={netWorth}
-      shields={shields} shieldConsuming={shieldConsuming}
-      tick={tick} totalTicks={RUN_TICKS} freezeTicks={freezeTicks}
-      regime={regime} intelligence={intelligence as any} equityHistory={equityHistory}
-      hand={hand as any} onPlayCard={onPlayCard}
-      threats={[]} onMitigate={onMitigate}
-      events={events.slice(-30)} modeState={modeState}
+      onCardCounterplay={onCardCounterplay}
+      onIgnoreCard={onIgnoreCard}
     />
   );
-}
+});
+
+export default EmpireModeContainer;

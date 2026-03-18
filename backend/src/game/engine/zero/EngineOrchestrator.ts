@@ -208,6 +208,9 @@ function normalizeDecisionLatency(
   return snapshot.timers.currentTickDurationMs;
 }
 
+type TerminalRunOutcome = NonNullable<RunStateSnapshot['outcome']>;
+
+
 export class EngineOrchestrator {
   private readonly clock: SystemClock;
   private readonly bus: EventBus<EngineEventMap>;
@@ -337,6 +340,63 @@ export class EngineOrchestrator {
     return this.bus.getHistory(limit) as readonly FlushEnvelope[];
   }
 
+  public getCurrentRunId(): string | null {
+    return this.current?.runId ?? null;
+  }
+
+  public getCurrentUserId(): string | null {
+    return this.current?.userId ?? null;
+  }
+
+  public getCurrentMode(): ModeCode | null {
+    return this.current?.mode ?? null;
+  }
+
+  public getCurrentSeed(): string | null {
+    return this.current?.seed ?? null;
+  }
+
+  public isRunActive(): boolean {
+    return this.current !== null && this.current.outcome === null;
+  }
+
+  public canStartRun(): boolean {
+    return this.lifecycle === 'IDLE' && this.current === null;
+  }
+
+  public canEndRun(): boolean {
+    return this.current !== null && this.lifecycle !== 'FINALIZED';
+  }
+
+  public endRun(outcome?: TerminalRunOutcome): RunStateSnapshot | null {
+    if (this.current === null) {
+      return null;
+    }
+
+    const resolvedOutcome = outcome ?? this.current.outcome;
+    if (resolvedOutcome === null) {
+      throw new Error('endRun() requires a terminal outcome when the current run is still active.');
+    }
+
+    this.lifecycle = 'TERMINAL_PENDING_FINALIZE';
+
+    let next = this.current;
+    if (next.outcome !== resolvedOutcome) {
+      next = this.applyTerminalOutcome(next, resolvedOutcome);
+    }
+
+    next = this.finalizeTerminalSnapshotIfNeeded(
+      next,
+      this.forceProofFinalizeOnTerminalForCurrentRun,
+    );
+
+    this.current = deepFrozenClone(next);
+    this.currentTraceId = null;
+    this.lifecycle = 'FINALIZED';
+
+    return this.current;
+  }
+
   public playCard(
     definitionIdOrInput: string | PlayCardInput,
     actorIdArg?: string,
@@ -403,11 +463,14 @@ export class EngineOrchestrator {
     const current = this.getSnapshot();
 
     if (isTerminalOutcome(current.outcome)) {
+      this.lifecycle = 'TERMINAL_PENDING_FINALIZE';
       const finalized = this.finalizeTerminalSnapshotIfNeeded(
         current,
         this.forceProofFinalizeOnTerminalForCurrentRun,
       );
       this.current = deepFrozenClone(finalized);
+      this.currentTraceId = null;
+      this.lifecycle = 'FINALIZED';
       return this.current;
     }
 
@@ -984,6 +1047,31 @@ export class EngineOrchestrator {
 
   private projectPendingEventCount(snapshot: RunStateSnapshot): RunStateSnapshot {
     return snapshot;
+  }
+
+  private applyTerminalOutcome(
+    snapshot: RunStateSnapshot,
+    outcome: TerminalRunOutcome,
+  ): RunStateSnapshot {
+    const next = createMutableClone(snapshot);
+    const nextTelemetry = createMutableClone(snapshot.telemetry);
+
+    next.outcome = outcome;
+    nextTelemetry.outcomeReason =
+      nextTelemetry.outcomeReason ?? 'orchestrator.endRun';
+    nextTelemetry.outcomeReasonCode =
+      nextTelemetry.outcomeReasonCode ?? 'MANUAL_TERMINATION';
+    nextTelemetry.warnings = limitArray(
+      [...snapshot.telemetry.warnings, `RUN_ENDED:${String(outcome)}`],
+      this.maxWarningsBeforeIntegrityQuarantine * 2,
+    );
+
+    next.telemetry = freezeSnapshot(nextTelemetry) as RunStateSnapshot['telemetry'];
+    next.tags = Object.freeze([
+      ...new Set([...snapshot.tags, `runtime:end:${String(outcome)}`]),
+    ]);
+
+    return freezeSnapshot(next);
   }
 
   private flushAndProjectTelemetry(

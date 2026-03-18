@@ -49,10 +49,10 @@ import {
   type GameChatContext,
 } from './components/chat/chatTypes';
 
-import EmpireGameScreen from './components/EmpireGameScreen';
-import PredatorGameScreen from './components/PredatorGameScreen';
-import SyndicateGameScreen from './components/SyndicateGameScreen';
-import PhantomGameScreen from './components/PhantomGameScreen';
+import { EmpireModeContainer } from './features/modes/EmpireModeContainer';
+import { PredatorModeContainer } from './features/modes/PredatorModeContainer';
+import { SyndicateModeContainer } from './features/modes/SyndicateModeContainer';
+import { PhantomModeContainer } from './features/modes/PhantomModeContainer';
 
 import { useEngineStore } from './store/engineStore';
 import { useRunStore } from './store/runStore';
@@ -560,7 +560,8 @@ function GameRuntimeShell({
   const haterHeat = useRunStore((state) => state.haterHeat);
 
   const [chatRuntime, setChatRuntime] = useState<BoundChatRuntime | null>(null);
-  const chatMountTarget = useMemo(() => modeToChatMountTarget(mode), [mode]);
+  const activeMode = zero.getCurrentMode() ?? mode;
+  const chatMountTarget = useMemo(() => modeToChatMountTarget(activeMode), [activeMode]);
   const chatIdentity = useMemo(() => ({
     userId: user?.id ?? run.userId ?? 'player-local',
     displayName: user?.displayName ?? user?.username ?? 'PLAYER',
@@ -625,7 +626,7 @@ function GameRuntimeShell({
         sessionId: run.seed ?? undefined,
         playerId: user?.id ?? run.userId ?? undefined,
         playerName: user?.displayName ?? user?.username ?? run.userId ?? 'PLAYER',
-        activeChannel: mode === 'co-op' ? 'SYNDICATE' : 'GLOBAL',
+        activeChannel: activeMode === 'co-op' ? 'SYNDICATE' : 'GLOBAL',
         connectionState: isRunActive ? 'CONNECTED' : 'DEGRADED',
       }),
     [
@@ -635,7 +636,7 @@ function GameRuntimeShell({
       haterHeat,
       isRunActive,
       lifecycleState,
-      mode,
+      activeMode,
       monthlyExpenses,
       monthlyIncome,
       netWorth,
@@ -685,7 +686,7 @@ function GameRuntimeShell({
       mountTarget: chatMountTarget,
       eventBus: zero.getEventBus(),
       runtimeInputs: buildChatRuntimeInputs({
-        mode,
+        mode: activeMode,
         run,
         time,
         battle,
@@ -710,7 +711,7 @@ function GameRuntimeShell({
   }, [
     chatIdentity,
     chatMountTarget,
-    mode,
+    activeMode,
     zero,
   ]);
 
@@ -736,7 +737,7 @@ function GameRuntimeShell({
     });
 
     engine.updateMechanicsSnapshot({
-      modeKey: mode,
+      modeKey: activeMode,
       pendingDecisionWindows: time.activeDecisionWindows.length,
       activeThreatCards: battle.activeBotsCount ?? 0,
       freedomThreshold: cashBalance > 0 ? 1 : 0,
@@ -745,7 +746,7 @@ function GameRuntimeShell({
     engine.updateModeSnapshot({
       mountTarget: chatMountTarget,
       allowDealRoom: true,
-      allowSyndicate: mode === 'co-op',
+      allowSyndicate: activeMode === 'co-op',
       allowLobby: true,
     });
   }, [
@@ -755,7 +756,7 @@ function GameRuntimeShell({
     chatMountTarget,
     chatRuntime,
     haterHeat,
-    mode,
+    activeMode,
     monthlyExpenses,
     monthlyIncome,
     netWorth,
@@ -769,19 +770,45 @@ function GameRuntimeShell({
   ]);
 
   const modeScreen = useMemo(() => {
-    switch (mode) {
+    switch (activeMode) {
       case 'solo':
-        return <EmpireGameScreen onCardCounterplay={undefined} onIgnoreCard={undefined} />;
+        return (
+          <EmpireModeContainer
+            facade={zero}
+            chatEngine={chatRuntime?.engine ?? null}
+          />
+        );
       case 'asymmetric-pvp':
-        return <PredatorGameScreen {...({} as any)} />;
+        return (
+          <PredatorModeContainer
+            facade={zero}
+            chatEngine={chatRuntime?.engine ?? null}
+            onForfeit={() => onEndRun('ABANDONED')}
+          />
+        );
       case 'co-op':
-        return <SyndicateGameScreen {...({} as any)} />;
+        return (
+          <SyndicateModeContainer
+            facade={zero}
+            chatEngine={chatRuntime?.engine ?? null}
+          />
+        );
       case 'ghost':
-        return <PhantomGameScreen {...({} as any)} />;
+        return (
+          <PhantomModeContainer
+            facade={zero}
+            chatEngine={chatRuntime?.engine ?? null}
+          />
+        );
       default:
-        return <EmpireGameScreen onCardCounterplay={undefined} onIgnoreCard={undefined} />;
+        return (
+          <EmpireModeContainer
+            facade={zero}
+            chatEngine={chatRuntime?.engine ?? null}
+          />
+        );
     }
-  }, [mode]);
+  }, [activeMode, chatRuntime?.engine, onEndRun, zero]);
 
   return (
     <div
@@ -1046,7 +1073,7 @@ function GameRuntimeShell({
         <UnifiedChatDock
           gameCtx={gameCtx}
           title="COMMAND COMMS"
-          subtitle={`${modeLabel(mode)} · ${regime}`}
+          subtitle={`${modeLabel(activeMode)} · ${regime}`}
           startCollapsed={false}
           engine={chatRuntime?.engine ?? null}
           enableThreatMeter={true}
@@ -1054,7 +1081,7 @@ function GameRuntimeShell({
           enableHelperPrompt={true}
           enableRoomMeta={true}
           enableLawFooter={true}
-          defaultTab={mode === 'co-op' ? 'SYNDICATE' : 'GLOBAL'}
+          defaultTab={activeMode === 'co-op' ? 'SYNDICATE' : 'GLOBAL'}
           style={{
             height: '100%',
             maxHeight: '100%',
@@ -1243,7 +1270,7 @@ const App: React.FC = () => {
         resetRuntime(false);
 
         const ctx = await ModeRouter.startRunWithCards(
-          mode,
+          activeMode,
           buildExternalRunConfig(mode, auth.user ?? undefined, params.get('seed')),
           auth.user?.id ?? 'player_01',
         );
