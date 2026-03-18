@@ -246,7 +246,6 @@ function buildMessageIdentityKey(message: ChatMessage): string {
 function isBackgroundUnreadEligible(message: ChatMessage): boolean {
   if (message.moderation?.state === 'BLOCKED') return false;
   if (message.moderation?.state === 'REDACTED') return false;
-  if (message.senderRole === 'SELF') return false as never;
   return message.senderId !== 'player-local' && message.senderId !== 'self';
 }
 
@@ -757,19 +756,29 @@ export function setActiveVisibleChannelInState(
 ): ChatEngineState {
   if (state.activeVisibleChannel === nextChannel) return state;
 
-  const next = cloneChatEngineState(state);
-  next.activeVisibleChannel = nextChannel;
-  next.composer.activeChannel = nextChannel;
+  const unread = {
+    ...state.notifications.unreadByChannel,
+    [nextChannel]: 0,
+  };
+  const hasAnyUnread = computeHasAnyUnread(unread);
 
-  const unread = { ...next.notifications.unreadByChannel };
-  unread[nextChannel] = 0;
-  next.notifications.unreadByChannel = unread;
-  next.notifications.hasAnyUnread = computeHasAnyUnread(unread);
-  next.notifications.notificationKinds = next.notifications.hasAnyUnread
-    ? next.notifications.notificationKinds
-    : [];
-
-  return next;
+  return {
+    ...cloneChatEngineState(state),
+    activeVisibleChannel: nextChannel,
+    composer: {
+      ...state.composer,
+      draftByChannel: { ...state.composer.draftByChannel },
+      activeChannel: nextChannel,
+    },
+    notifications: {
+      ...state.notifications,
+      unreadByChannel: unread,
+      hasAnyUnread,
+      notificationKinds: hasAnyUnread
+        ? [...state.notifications.notificationKinds]
+        : [],
+    },
+  };
 }
 
 export function updateComposerDraftInState(
@@ -778,13 +787,17 @@ export function updateComposerDraftInState(
   draft: string,
   at: UnixMs = nowAsUnixMs(),
 ): ChatEngineState {
-  const next = cloneChatEngineState(state);
-  next.composer.draftByChannel = {
-    ...next.composer.draftByChannel,
-    [channelId]: draft.slice(0, next.composer.maxLength),
+  return {
+    ...cloneChatEngineState(state),
+    composer: {
+      ...state.composer,
+      draftByChannel: {
+        ...state.composer.draftByChannel,
+        [channelId]: draft.slice(0, state.composer.maxLength),
+      },
+      lastEditedAt: at,
+    },
   };
-  next.composer.lastEditedAt = at;
-  return next;
 }
 
 export function setComposerDisabledInState(
@@ -792,10 +805,15 @@ export function setComposerDisabledInState(
   disabled: boolean,
   reason?: string,
 ): ChatEngineState {
-  const next = cloneChatEngineState(state);
-  next.composer.disabled = disabled;
-  next.composer.disabledReason = disabled ? reason : undefined;
-  return next;
+  return {
+    ...cloneChatEngineState(state),
+    composer: {
+      ...state.composer,
+      draftByChannel: { ...state.composer.draftByChannel },
+      disabled,
+      disabledReason: disabled ? reason : undefined,
+    },
+  };
 }
 
 export function markChannelReadInState(
@@ -804,14 +822,23 @@ export function markChannelReadInState(
 ): ChatEngineState {
   if ((state.notifications.unreadByChannel[channelId] ?? 0) === 0) return state;
 
-  const next = cloneChatEngineState(state);
-  next.notifications.unreadByChannel = {
-    ...next.notifications.unreadByChannel,
+  const unreadByChannel = {
+    ...state.notifications.unreadByChannel,
     [channelId]: 0,
   };
-  next.notifications.hasAnyUnread = computeHasAnyUnread(next.notifications.unreadByChannel);
-  if (!next.notifications.hasAnyUnread) next.notifications.notificationKinds = [];
-  return next;
+  const hasAnyUnread = computeHasAnyUnread(unreadByChannel);
+
+  return {
+    ...cloneChatEngineState(state),
+    notifications: {
+      ...state.notifications,
+      unreadByChannel,
+      hasAnyUnread,
+      notificationKinds: hasAnyUnread
+        ? [...state.notifications.notificationKinds]
+        : [],
+    },
+  };
 }
 
 // ============================================================================
@@ -859,36 +886,43 @@ export function pushMessageToState(
   state: ChatEngineState,
   options: AppendMessageOptions,
 ): ChatEngineState {
-  const next = cloneChatEngineState(state);
   const targetChannel = options.channelId;
-  const existing = next.messagesByChannel[targetChannel];
+  const existing = state.messagesByChannel[targetChannel];
   const merged = normalizeMessageWindow([...existing, options.message]);
-
-  next.messagesByChannel = {
-    ...next.messagesByChannel,
-    [targetChannel]: merged,
-  };
 
   const shouldUnread =
     options.markUnreadWhenBackgrounded !== false &&
-    targetChannel !== next.activeVisibleChannel &&
+    targetChannel !== state.activeVisibleChannel &&
     isBackgroundUnreadEligible(options.message);
 
-  if (shouldUnread) {
-    const unreadByChannel = {
-      ...next.notifications.unreadByChannel,
-      [targetChannel]: (next.notifications.unreadByChannel[targetChannel] ?? 0) + 1,
-    };
-    next.notifications.unreadByChannel = unreadByChannel;
-    next.notifications.hasAnyUnread = true;
-    next.notifications.lastNotifiedAt = nowAsUnixMs();
-    next.notifications.notificationKinds = normalizeNotificationKinds([
-      ...next.notifications.notificationKinds,
-      notificationKindFromMessage(options.message),
-    ]);
-  }
+  const notifications = shouldUnread
+    ? {
+        ...state.notifications,
+        unreadByChannel: {
+          ...state.notifications.unreadByChannel,
+          [targetChannel]: (state.notifications.unreadByChannel[targetChannel] ?? 0) + 1,
+        },
+        hasAnyUnread: true,
+        lastNotifiedAt: nowAsUnixMs(),
+        notificationKinds: normalizeNotificationKinds([
+          ...state.notifications.notificationKinds,
+          notificationKindFromMessage(options.message),
+        ]),
+      }
+    : {
+        ...state.notifications,
+        unreadByChannel: { ...state.notifications.unreadByChannel },
+        notificationKinds: [...state.notifications.notificationKinds],
+      };
 
-  return next;
+  return {
+    ...cloneChatEngineState(state),
+    messagesByChannel: {
+      ...state.messagesByChannel,
+      [targetChannel]: merged,
+    },
+    notifications,
+  };
 }
 
 export function replaceMessageByIdInState(
@@ -901,15 +935,16 @@ export function replaceMessageByIdInState(
   const idx = current.findIndex((message) => message.id === messageId);
   if (idx === -1) return pushMessageToState(state, { channelId, message: replacement });
 
-  const next = cloneChatEngineState(state);
-  const copy = [...next.messagesByChannel[channelId]];
+  const copy = [...current];
   copy[idx] = cloneMessage(replacement);
 
-  next.messagesByChannel = {
-    ...next.messagesByChannel,
-    [channelId]: normalizeMessageWindow(copy),
+  return {
+    ...cloneChatEngineState(state),
+    messagesByChannel: {
+      ...state.messagesByChannel,
+      [channelId]: normalizeMessageWindow(copy),
+    },
   };
-  return next;
 }
 
 export function markRequestFailedInState(
@@ -917,14 +952,16 @@ export function markRequestFailedInState(
   requestId: ChatRequestId,
   reason: string,
 ): ChatEngineState {
-  let next = cloneChatEngineState(state);
+  let messagesByChannel = {
+    ...state.messagesByChannel,
+  };
 
   for (const channelId of CHAT_VISIBLE_CHANNELS) {
-    const updated = next.messagesByChannel[channelId].map((message) => {
+    const updated = state.messagesByChannel[channelId].map((message): ChatMessage => {
       if (message.audit?.requestId !== requestId) return message;
       return {
         ...message,
-        deliveryState: 'FAILED' as const,
+        deliveryState: 'FAILED',
         moderation: {
           state: 'ALLOWED',
           playerVisible: true,
@@ -934,13 +971,16 @@ export function markRequestFailedInState(
       };
     });
 
-    next.messagesByChannel = {
-      ...next.messagesByChannel,
+    messagesByChannel = {
+      ...messagesByChannel,
       [channelId]: normalizeMessageWindow(updated),
     };
   }
 
-  return next;
+  return {
+    ...cloneChatEngineState(state),
+    messagesByChannel,
+  };
 }
 
 // ============================================================================
@@ -952,15 +992,16 @@ export function upsertPresenceSnapshotsInState(
   snapshots: readonly ChatPresenceSnapshot[],
 ): ChatEngineState {
   if (snapshots.length === 0) return state;
-  const next = cloneChatEngineState(state);
-  const presence = { ...next.presenceByActorId };
+  const presence = { ...state.presenceByActorId };
 
   for (const snapshot of snapshots) {
     presence[snapshot.actorId] = { ...snapshot };
   }
 
-  next.presenceByActorId = presence;
-  return next;
+  return {
+    ...cloneChatEngineState(state),
+    presenceByActorId: presence,
+  };
 }
 
 export function upsertTypingSnapshotsInState(
@@ -968,15 +1009,16 @@ export function upsertTypingSnapshotsInState(
   snapshots: readonly ChatTypingSnapshot[],
 ): ChatEngineState {
   if (snapshots.length === 0) return state;
-  const next = cloneChatEngineState(state);
-  const typing = { ...next.typingByActorId };
+  const typing = { ...state.typingByActorId };
 
   for (const snapshot of snapshots) {
     typing[snapshot.actorId] = { ...snapshot };
   }
 
-  next.typingByActorId = typing;
-  return next;
+  return {
+    ...cloneChatEngineState(state),
+    typingByActorId: typing,
+  };
 }
 
 export function pruneExpiredTypingSnapshotsInState(
@@ -996,21 +1038,23 @@ export function pruneExpiredTypingSnapshotsInState(
   }
 
   if (!changed) return state;
-  const next = cloneChatEngineState(state);
-  next.typingByActorId = nextTyping;
-  return next;
+  return {
+    ...cloneChatEngineState(state),
+    typingByActorId: nextTyping,
+  };
 }
 
 export function transitionConnectionState(
   state: ChatEngineState,
   patch: Partial<ChatConnectionState>,
 ): ChatEngineState {
-  const next = cloneChatEngineState(state);
-  next.connection = {
-    ...next.connection,
-    ...patch,
+  return {
+    ...cloneChatEngineState(state),
+    connection: {
+      ...state.connection,
+      ...patch,
+    },
   };
-  return next;
 }
 
 // ============================================================================
@@ -1021,24 +1065,28 @@ export function setActiveSceneInState(
   state: ChatEngineState,
   scene?: ChatScenePlan,
 ): ChatEngineState {
-  const next = cloneChatEngineState(state);
-  next.activeScene = scene ? cloneScenePlan(scene) : undefined;
-  next.continuity = {
-    ...next.continuity,
-    activeSceneId: scene?.sceneId,
+  return {
+    ...cloneChatEngineState(state),
+    activeScene: scene ? cloneScenePlan(scene) : undefined,
+    continuity: {
+      ...state.continuity,
+      unresolvedMomentIds: [...state.continuity.unresolvedMomentIds],
+      carriedPersonaIds: [...state.continuity.carriedPersonaIds],
+      activeSceneId: scene?.sceneId,
+    },
   };
-  return next;
 }
 
 export function scheduleRevealInState(
   state: ChatEngineState,
   reveal: ChatRevealSchedule,
 ): ChatEngineState {
-  const next = cloneChatEngineState(state);
-  next.pendingReveals = [...next.pendingReveals, { ...reveal }].sort(
-    (a, b) => a.revealAt - b.revealAt,
-  );
-  return next;
+  return {
+    ...cloneChatEngineState(state),
+    pendingReveals: [...state.pendingReveals, { ...reveal }].sort(
+      (a, b) => a.revealAt - b.revealAt,
+    ),
+  };
 }
 
 export function popDueRevealsFromState(
@@ -1060,30 +1108,36 @@ export function popDueRevealsFromState(
 
   if (due.length === 0) return { state, due: [] };
 
-  const next = cloneChatEngineState(state);
-  next.pendingReveals = keep;
-  return { state: next, due };
+  return {
+    state: {
+      ...cloneChatEngineState(state),
+      pendingReveals: keep,
+    },
+    due,
+  };
 }
 
 export function beginSilenceInState(
   state: ChatEngineState,
   silence: ChatSilenceDecision,
 ): ChatEngineState {
-  const next = cloneChatEngineState(state);
-  next.currentSilence = {
-    ...silence,
-    breakConditions: [...silence.breakConditions],
+  return {
+    ...cloneChatEngineState(state),
+    currentSilence: {
+      ...silence,
+      breakConditions: [...silence.breakConditions],
+    },
   };
-  return next;
 }
 
 export function endSilenceInState(
   state: ChatEngineState,
 ): ChatEngineState {
   if (!state.currentSilence) return state;
-  const next = cloneChatEngineState(state);
-  next.currentSilence = undefined;
-  return next;
+  return {
+    ...cloneChatEngineState(state),
+    currentSilence: undefined,
+  };
 }
 
 // ============================================================================
@@ -1095,19 +1149,18 @@ export function applyAuthoritativeFrameToState(
   patch: AuthoritativeStatePatch,
 ): ChatEngineState {
   const { frame, activeRoomId, activeSessionId } = patch;
-  let next = cloneChatEngineState(state);
 
-  if (activeRoomId) next.memberships = upsertMemberships(next.memberships, activeRoomId);
-  if (activeSessionId) {
-    next.connection = {
-      ...next.connection,
-      sessionId: activeSessionId,
-    };
-  }
+  let next: ChatEngineState = {
+    ...cloneChatEngineState(state),
+    memberships: activeRoomId ? upsertMemberships(state.memberships, activeRoomId) : state.memberships.map((item) => ({ ...item })),
+    connection: activeSessionId
+      ? { ...state.connection, sessionId: activeSessionId }
+      : { ...state.connection },
+  };
 
   if (frame.messages?.length) {
     if (isVisibleChannelId(frame.channelId)) {
-      next.messagesByChannel = {
+      const messagesByChannel = {
         ...next.messagesByChannel,
         [frame.channelId]: normalizeMessageWindow([
           ...next.messagesByChannel[frame.channelId],
@@ -1115,31 +1168,62 @@ export function applyAuthoritativeFrameToState(
         ]),
       };
 
-      if (frame.channelId === next.activeVisibleChannel) {
-        next.notifications.unreadByChannel = {
-          ...next.notifications.unreadByChannel,
-          [frame.channelId]: 0,
-        };
-        next.notifications.hasAnyUnread = computeHasAnyUnread(next.notifications.unreadByChannel);
-      }
+      const notifications = frame.channelId === next.activeVisibleChannel
+        ? (() => {
+            const unreadByChannel = {
+              ...next.notifications.unreadByChannel,
+              [frame.channelId]: 0,
+            };
+            return {
+              ...next.notifications,
+              unreadByChannel,
+              hasAnyUnread: computeHasAnyUnread(unreadByChannel),
+              notificationKinds: [...next.notifications.notificationKinds],
+            };
+          })()
+        : {
+            ...next.notifications,
+            unreadByChannel: { ...next.notifications.unreadByChannel },
+            notificationKinds: [...next.notifications.notificationKinds],
+          };
+
+      next = {
+        ...next,
+        messagesByChannel,
+        notifications,
+      };
     } else {
-      next.shadowMessageCountByChannel = {
-        ...next.shadowMessageCountByChannel,
-        [frame.channelId]: next.shadowMessageCountByChannel[frame.channelId] + frame.messages.length,
+      next = {
+        ...next,
+        shadowMessageCountByChannel: {
+          ...next.shadowMessageCountByChannel,
+          [frame.channelId]: next.shadowMessageCountByChannel[frame.channelId] + frame.messages.length,
+        },
       };
     }
   }
 
-  if (frame.scene) next.activeScene = cloneScenePlan(frame.scene);
+  if (frame.scene) {
+    next = {
+      ...next,
+      activeScene: cloneScenePlan(frame.scene),
+    };
+  }
   if (frame.reveal) {
-    next.pendingReveals = [...next.pendingReveals, { ...frame.reveal }].sort(
-      (a, b) => a.revealAt - b.revealAt,
-    );
+    next = {
+      ...next,
+      pendingReveals: [...next.pendingReveals, { ...frame.reveal }].sort(
+        (a, b) => a.revealAt - b.revealAt,
+      ),
+    };
   }
   if (frame.silence) {
-    next.currentSilence = {
-      ...frame.silence,
-      breakConditions: [...frame.silence.breakConditions],
+    next = {
+      ...next,
+      currentSilence: {
+        ...frame.silence,
+        breakConditions: [...frame.silence.breakConditions],
+      },
     };
   }
 
@@ -1152,19 +1236,27 @@ export function applyAuthoritativeFrameToState(
   }
 
   if (frame.notification) {
-    next.notifications = {
-      ...frame.notification,
-      unreadByChannel: { ...frame.notification.unreadByChannel },
-      notificationKinds: [...frame.notification.notificationKinds],
+    next = {
+      ...next,
+      notifications: {
+        ...frame.notification,
+        unreadByChannel: { ...frame.notification.unreadByChannel },
+        notificationKinds: [...frame.notification.notificationKinds],
+      },
     };
   }
 
   if (frame.learningProfile) {
-    next.learningProfile = cloneLearningProfile(frame.learningProfile);
+    next = {
+      ...next,
+      learningProfile: cloneLearningProfile(frame.learningProfile),
+    };
   }
 
-  next.lastAuthoritativeSyncAt = frame.syncedAt;
-  return next;
+  return {
+    ...next,
+    lastAuthoritativeSyncAt: frame.syncedAt,
+  };
 }
 
 // ============================================================================
@@ -1175,25 +1267,27 @@ export function setLearningProfileInState(
   state: ChatEngineState,
   profile?: ChatLearningProfile,
 ): ChatEngineState {
-  const next = cloneChatEngineState(state);
-  next.learningProfile = profile ? cloneLearningProfile(profile) : undefined;
-  return next;
+  return {
+    ...cloneChatEngineState(state),
+    learningProfile: profile ? cloneLearningProfile(profile) : undefined,
+  };
 }
 
 export function upsertRelationshipInState(
   state: ChatEngineState,
   relationship: ChatRelationshipState,
 ): ChatEngineState {
-  const next = cloneChatEngineState(state);
-  next.relationshipsByCounterpartId = {
-    ...next.relationshipsByCounterpartId,
-    [relationship.counterpartId]: {
-      ...relationship,
-      vector: { ...relationship.vector },
-      callbacksAvailable: [...relationship.callbacksAvailable],
+  return {
+    ...cloneChatEngineState(state),
+    relationshipsByCounterpartId: {
+      ...state.relationshipsByCounterpartId,
+      [relationship.counterpartId]: {
+        ...relationship,
+        vector: { ...relationship.vector },
+        callbacksAvailable: [...relationship.callbacksAvailable],
+      },
     },
   };
-  return next;
 }
 
 export function setAudienceHeatInState(
@@ -1201,21 +1295,22 @@ export function setAudienceHeatInState(
   channelId: ChatVisibleChannel,
   patch: Partial<ChatAudienceHeat>,
 ): ChatEngineState {
-  const next = cloneChatEngineState(state);
-  next.audienceHeat = {
-    ...next.audienceHeat,
-    [channelId]: {
-      ...next.audienceHeat[channelId],
-      ...patch,
-      heat: toScore100(patch.heat ?? next.audienceHeat[channelId].heat),
-      hype: toScore100(patch.hype ?? next.audienceHeat[channelId].hype),
-      ridicule: toScore100(patch.ridicule ?? next.audienceHeat[channelId].ridicule),
-      scrutiny: toScore100(patch.scrutiny ?? next.audienceHeat[channelId].scrutiny),
-      volatility: toScore100(patch.volatility ?? next.audienceHeat[channelId].volatility),
-      lastUpdatedAt: patch.lastUpdatedAt ?? nowAsUnixMs(),
+  return {
+    ...cloneChatEngineState(state),
+    audienceHeat: {
+      ...state.audienceHeat,
+      [channelId]: {
+        ...state.audienceHeat[channelId],
+        ...patch,
+        heat: toScore100(Number(patch.heat ?? state.audienceHeat[channelId].heat)),
+        hype: toScore100(Number(patch.hype ?? state.audienceHeat[channelId].hype)),
+        ridicule: toScore100(Number(patch.ridicule ?? state.audienceHeat[channelId].ridicule)),
+        scrutiny: toScore100(Number(patch.scrutiny ?? state.audienceHeat[channelId].scrutiny)),
+        volatility: toScore100(Number(patch.volatility ?? state.audienceHeat[channelId].volatility)),
+        lastUpdatedAt: patch.lastUpdatedAt ?? nowAsUnixMs(),
+      },
     },
   };
-  return next;
 }
 
 export function accumulateAudienceHeatInState(
@@ -1242,43 +1337,49 @@ export function setChannelMoodInState(
   reason: string,
   updatedAt: UnixMs = nowAsUnixMs(),
 ): ChatEngineState {
-  const next = cloneChatEngineState(state);
-  next.channelMoodByChannel = {
-    ...next.channelMoodByChannel,
-    [channelId]: {
-      channelId,
-      mood,
-      reason,
-      updatedAt,
+  return {
+    ...cloneChatEngineState(state),
+    channelMoodByChannel: {
+      ...state.channelMoodByChannel,
+      [channelId]: {
+        channelId,
+        mood,
+        reason,
+        updatedAt,
+      },
     },
   };
-  return next;
 }
 
 export function setLiveOpsStateInState(
   state: ChatEngineState,
   liveOps: ChatLiveOpsState,
 ): ChatEngineState {
-  const next = cloneChatEngineState(state);
-  next.liveOps = {
-    ...liveOps,
-    activeWorldEvents: liveOps.activeWorldEvents.map((item) => ({ ...item })),
-    suppressedHelperChannels: [...liveOps.suppressedHelperChannels],
-    boostedCrowdChannels: [...liveOps.boostedCrowdChannels],
+  return {
+    ...cloneChatEngineState(state),
+    liveOps: {
+      ...liveOps,
+      activeWorldEvents: liveOps.activeWorldEvents.map((item) => ({
+        ...item,
+        affectedChannels: [...item.affectedChannels],
+      })),
+      suppressedHelperChannels: [...liveOps.suppressedHelperChannels],
+      boostedCrowdChannels: [...liveOps.boostedCrowdChannels],
+    },
   };
-  return next;
 }
 
 export function setAffectInState(
   state: ChatEngineState,
   affect: ChatAffectSnapshot,
 ): ChatEngineState {
-  const next = cloneChatEngineState(state);
-  next.affect = {
-    ...affect,
-    vector: { ...affect.vector },
+  return {
+    ...cloneChatEngineState(state),
+    affect: {
+      ...affect,
+      vector: { ...affect.vector },
+    },
   };
-  return next;
 }
 
 // ============================================================================
@@ -1409,53 +1510,54 @@ export function hydrateChatStateFromCache(
     const parsed = JSON.parse(serialized) as Partial<ChatStateCachePayload>;
     if (parsed.schemaVersion !== CHAT_STATE_CACHE_SCHEMA_VERSION) return base;
 
-    let next = cloneChatEngineState(base);
-    if (parsed.activeMountTarget) next.activeMountTarget = parsed.activeMountTarget;
-    if (parsed.activeVisibleChannel) {
-      next.activeVisibleChannel = parsed.activeVisibleChannel;
-      next.composer.activeChannel = parsed.activeVisibleChannel;
-    }
+    const activeVisibleChannel = parsed.activeVisibleChannel ?? base.activeVisibleChannel;
+    const unreadByChannel = {
+      GLOBAL: parsed.notifications?.unreadByChannel?.GLOBAL ?? 0,
+      SYNDICATE: parsed.notifications?.unreadByChannel?.SYNDICATE ?? 0,
+      DEAL_ROOM: parsed.notifications?.unreadByChannel?.DEAL_ROOM ?? 0,
+      LOBBY: parsed.notifications?.unreadByChannel?.LOBBY ?? 0,
+    };
 
-    if (parsed.messagesByChannel) {
-      next.messagesByChannel = {
-        GLOBAL: normalizeMessageWindow(parsed.messagesByChannel.GLOBAL ?? []),
-        SYNDICATE: normalizeMessageWindow(parsed.messagesByChannel.SYNDICATE ?? []),
-        DEAL_ROOM: normalizeMessageWindow(parsed.messagesByChannel.DEAL_ROOM ?? []),
-        LOBBY: normalizeMessageWindow(parsed.messagesByChannel.LOBBY ?? []),
-      };
-    }
-
-    if (parsed.notifications) {
-      next.notifications = {
-        ...createDefaultNotificationState(),
-        ...parsed.notifications,
-        unreadByChannel: {
-          GLOBAL: parsed.notifications.unreadByChannel?.GLOBAL ?? 0,
-          SYNDICATE: parsed.notifications.unreadByChannel?.SYNDICATE ?? 0,
-          DEAL_ROOM: parsed.notifications.unreadByChannel?.DEAL_ROOM ?? 0,
-          LOBBY: parsed.notifications.unreadByChannel?.LOBBY ?? 0,
-        },
-        notificationKinds: [...(parsed.notifications.notificationKinds ?? [])],
-        hasAnyUnread: computeHasAnyUnread({
-          GLOBAL: parsed.notifications.unreadByChannel?.GLOBAL ?? 0,
-          SYNDICATE: parsed.notifications.unreadByChannel?.SYNDICATE ?? 0,
-          DEAL_ROOM: parsed.notifications.unreadByChannel?.DEAL_ROOM ?? 0,
-          LOBBY: parsed.notifications.unreadByChannel?.LOBBY ?? 0,
-        }),
-      };
-    }
-
-    if (parsed.learningProfile) next.learningProfile = cloneLearningProfile(parsed.learningProfile);
-    if (parsed.continuity) {
-      next.continuity = {
-        ...next.continuity,
-        ...parsed.continuity,
-        unresolvedMomentIds: [...(parsed.continuity.unresolvedMomentIds ?? [])],
-        carriedPersonaIds: [...(parsed.continuity.carriedPersonaIds ?? [])],
-      };
-    }
-
-    return next;
+    return {
+      ...cloneChatEngineState(base),
+      activeMountTarget: parsed.activeMountTarget ?? base.activeMountTarget,
+      activeVisibleChannel,
+      composer: {
+        ...base.composer,
+        draftByChannel: { ...base.composer.draftByChannel },
+        activeChannel: activeVisibleChannel,
+      },
+      messagesByChannel: parsed.messagesByChannel
+        ? {
+            GLOBAL: normalizeMessageWindow(parsed.messagesByChannel.GLOBAL ?? []),
+            SYNDICATE: normalizeMessageWindow(parsed.messagesByChannel.SYNDICATE ?? []),
+            DEAL_ROOM: normalizeMessageWindow(parsed.messagesByChannel.DEAL_ROOM ?? []),
+            LOBBY: normalizeMessageWindow(parsed.messagesByChannel.LOBBY ?? []),
+          }
+        : base.messagesByChannel,
+      notifications: parsed.notifications
+        ? {
+            ...createDefaultNotificationState(),
+            ...parsed.notifications,
+            unreadByChannel,
+            notificationKinds: [...(parsed.notifications.notificationKinds ?? [])],
+            hasAnyUnread: computeHasAnyUnread(unreadByChannel),
+          }
+        : { ...base.notifications, unreadByChannel: { ...base.notifications.unreadByChannel }, notificationKinds: [...base.notifications.notificationKinds] },
+      learningProfile: parsed.learningProfile ? cloneLearningProfile(parsed.learningProfile) : base.learningProfile,
+      continuity: parsed.continuity
+        ? {
+            ...base.continuity,
+            ...parsed.continuity,
+            unresolvedMomentIds: [...(parsed.continuity.unresolvedMomentIds ?? [])],
+            carriedPersonaIds: [...(parsed.continuity.carriedPersonaIds ?? [])],
+          }
+        : {
+            ...base.continuity,
+            unresolvedMomentIds: [...base.continuity.unresolvedMomentIds],
+            carriedPersonaIds: [...base.continuity.carriedPersonaIds],
+          },
+    };
   } catch {
     return base;
   }
@@ -1469,14 +1571,15 @@ export function trimChatStateWindow(
   state: ChatEngineState,
   visibleLimit = MAX_VISIBLE_WINDOW,
 ): ChatEngineState {
-  const next = cloneChatEngineState(state);
-  next.messagesByChannel = {
-    GLOBAL: trimMessages(next.messagesByChannel.GLOBAL, visibleLimit),
-    SYNDICATE: trimMessages(next.messagesByChannel.SYNDICATE, visibleLimit),
-    DEAL_ROOM: trimMessages(next.messagesByChannel.DEAL_ROOM, visibleLimit),
-    LOBBY: trimMessages(next.messagesByChannel.LOBBY, visibleLimit),
+  return {
+    ...cloneChatEngineState(state),
+    messagesByChannel: {
+      GLOBAL: trimMessages(state.messagesByChannel.GLOBAL, visibleLimit),
+      SYNDICATE: trimMessages(state.messagesByChannel.SYNDICATE, visibleLimit),
+      DEAL_ROOM: trimMessages(state.messagesByChannel.DEAL_ROOM, visibleLimit),
+      LOBBY: trimMessages(state.messagesByChannel.LOBBY, visibleLimit),
+    },
   };
-  return next;
 }
 
 export function countUnread(state: ChatEngineState): number {
