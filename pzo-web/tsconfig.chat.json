@@ -21,15 +21,17 @@
     "isolatedModules": true,
     "resolveJsonModule": true,
     "allowImportingTsExtensions": true,
+    "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
 
     "skipLibCheck": true,
     "noEmit": true,
-    "incremental": true,
-
-    "types": ["vite/client", "vitest/globals"]
+    "incremental": true
   },
-  "include": ["src"],
-  "exclude": ["dist", "node_modules"],
-  "references": [{ "path": "./tsconfig.node.json" }]
+  "include": [
+    "frontend/packages/engine/src/chat/**/*.ts",
+    "frontend/packages/engine/src/components/chat/**/*.tsx",
+    "frontend/packages/engine/src/index.ts"
+  ],
+  "exclude": ["dist", "node_modules"]
 }
