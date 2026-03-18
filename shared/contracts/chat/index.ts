@@ -59,6 +59,8 @@ import * as ChatModerationModule from './ChatModeration';
 import * as ChatInvasionModule from './ChatInvasion';
 import * as ChatTelemetryModule from './ChatTelemetry';
 import * as ChatProofModule from './ChatProof';
+import * as ChatMomentModule from './ChatMoment';
+import * as ChatSceneModule from './ChatScene';
 import * as LearningModule from './learning';
 
 // ============================================================================
@@ -67,6 +69,8 @@ import * as LearningModule from './learning';
 
 export * from './ChatChannels';
 export * from './ChatEvents';
+export * from './ChatMoment';
+export * from './ChatScene';
 
 export {
   CHAT_CHANNEL_CONTRACT,
@@ -96,6 +100,8 @@ export {
   ChatInvasionModule as ChatInvasion,
   ChatTelemetryModule as ChatTelemetry,
   ChatProofModule as ChatProof,
+  ChatMomentModule as ChatMoment,
+  ChatSceneModule as ChatScene,
   LearningModule as Learning,
 };
 
