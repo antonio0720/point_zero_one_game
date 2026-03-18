@@ -25,7 +25,7 @@ import {
   createEmptyGameChatContext,
   type GameChatContext,
 } from '../../../components/chat/chatTypes';
-import { useEngineCSSBridge } from '../../../styles/useEngineCSSBridge';
+import { useEngineCSSBridge } from '../styles/useEngineCSSBridge';
 
 const SESSION_RUN_COUNT_KEY = 'pzo.sessionRunCount';
 const SESSION_LAST_RUN_ID_KEY = 'pzo.lastRunId';
