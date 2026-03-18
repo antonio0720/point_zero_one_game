@@ -228,6 +228,27 @@ function stableSortMessages(messages: readonly ChatMessage[]): ChatMessage[] {
   });
 }
 
+function resolveMountTarget(value: unknown): ChatMountTarget {
+  if (typeof value === 'string' && value in CHAT_MOUNT_PRESETS) {
+    return value as ChatMountTarget;
+  }
+
+  return 'LOBBY_SCREEN';
+}
+
+export function resolveVisibleChannelForMountTarget(
+  mountTarget: ChatMountTarget | undefined,
+  requested: ChatVisibleChannel | undefined,
+): ChatVisibleChannel {
+  const preset = CHAT_MOUNT_PRESETS[resolveMountTarget(mountTarget)];
+
+  if (requested && preset.allowedVisibleChannels.includes(requested)) {
+    return requested;
+  }
+
+  return preset.defaultVisibleChannel;
+}
+
 function trimMessages(messages: readonly ChatMessage[], limit = MAX_VISIBLE_WINDOW): ChatMessage[] {
   if (messages.length <= limit) return [...messages];
   return messages.slice(messages.length - limit);
@@ -435,6 +456,67 @@ export function createDefaultLiveOpsState(): ChatLiveOpsState {
   };
 }
 
+export function syncMembershipsToRoomInState(
+  state: ChatEngineState,
+  roomId?: ChatRoomId,
+): ChatEngineState {
+  if (!roomId) {
+    return state;
+  }
+
+  const nextMemberships = upsertMemberships(state.memberships, roomId);
+  const membershipsAlreadySynced =
+    nextMemberships.length === state.memberships.length &&
+    nextMemberships.every((membership, index) => {
+      const existing = state.memberships[index];
+      return Boolean(
+        existing &&
+          existing.roomId === membership.roomId &&
+          existing.channelId === membership.channelId &&
+          existing.joinedAt === membership.joinedAt &&
+          existing.isAuthoritative === membership.isAuthoritative,
+      );
+    });
+
+  if (membershipsAlreadySynced) {
+    return state;
+  }
+
+  return {
+    ...cloneChatEngineState(state),
+    memberships: nextMemberships,
+  };
+}
+
+export function reconcileChatStateWithMountPolicy(
+  state: ChatEngineState,
+): ChatEngineState {
+  const activeMountTarget = resolveMountTarget(state.activeMountTarget);
+  const activeVisibleChannel = resolveVisibleChannelForMountTarget(
+    activeMountTarget,
+    state.activeVisibleChannel,
+  );
+
+  if (
+    activeMountTarget === state.activeMountTarget &&
+    activeVisibleChannel === state.activeVisibleChannel &&
+    state.composer.activeChannel === activeVisibleChannel
+  ) {
+    return state;
+  }
+
+  return {
+    ...cloneChatEngineState(state),
+    activeMountTarget,
+    activeVisibleChannel,
+    composer: {
+      ...state.composer,
+      draftByChannel: { ...state.composer.draftByChannel },
+      activeChannel: activeVisibleChannel,
+    },
+  };
+}
+
 // ============================================================================
 // MARK: Membership helpers
 // ============================================================================
@@ -476,9 +558,12 @@ export function upsertMemberships(
 export function createChatEngineState(
   options: ChatStateBootstrapOptions = {},
 ): ChatEngineState {
-  const mountTarget = options.mountTarget ?? 'LOBBY_SCREEN';
+  const mountTarget = resolveMountTarget(options.mountTarget);
   const preset = CHAT_MOUNT_PRESETS[mountTarget];
-  const visibleChannel = options.initialVisibleChannel ?? preset.defaultVisibleChannel;
+  const visibleChannel = resolveVisibleChannelForMountTarget(
+    mountTarget,
+    options.initialVisibleChannel,
+  );
   const roomId = options.initialRoomId;
 
   let messagesByChannel = createEmptyMessagesByChannel();
@@ -1150,13 +1235,19 @@ export function applyAuthoritativeFrameToState(
 ): ChatEngineState {
   const { frame, activeRoomId, activeSessionId } = patch;
 
-  let next: ChatEngineState = {
-    ...cloneChatEngineState(state),
-    memberships: activeRoomId ? upsertMemberships(state.memberships, activeRoomId) : state.memberships.map((item) => ({ ...item })),
-    connection: activeSessionId
-      ? { ...state.connection, sessionId: activeSessionId }
-      : { ...state.connection },
-  };
+  let next = activeRoomId
+    ? syncMembershipsToRoomInState(state, activeRoomId)
+    : cloneChatEngineState(state);
+
+  if (activeSessionId) {
+    next = {
+      ...next,
+      connection: {
+        ...next.connection,
+        sessionId: activeSessionId,
+      },
+    };
+  }
 
   if (frame.messages?.length) {
     if (isVisibleChannelId(frame.channelId)) {
@@ -1181,11 +1272,33 @@ export function applyAuthoritativeFrameToState(
               notificationKinds: [...next.notifications.notificationKinds],
             };
           })()
-        : {
-            ...next.notifications,
-            unreadByChannel: { ...next.notifications.unreadByChannel },
-            notificationKinds: [...next.notifications.notificationKinds],
-          };
+        : (() => {
+            const unreadEligible = frame.messages.filter(isBackgroundUnreadEligible);
+            if (unreadEligible.length === 0) {
+              return {
+                ...next.notifications,
+                unreadByChannel: { ...next.notifications.unreadByChannel },
+                notificationKinds: [...next.notifications.notificationKinds],
+              };
+            }
+
+            const unreadByChannel = {
+              ...next.notifications.unreadByChannel,
+              [frame.channelId]:
+                (next.notifications.unreadByChannel[frame.channelId] ?? 0) + unreadEligible.length,
+            };
+
+            return {
+              ...next.notifications,
+              unreadByChannel,
+              hasAnyUnread: computeHasAnyUnread(unreadByChannel),
+              lastNotifiedAt: frame.syncedAt,
+              notificationKinds: normalizeNotificationKinds([
+                ...next.notifications.notificationKinds,
+                ...unreadEligible.map(notificationKindFromMessage),
+              ]),
+            };
+          })();
 
       next = {
         ...next,
@@ -1510,7 +1623,13 @@ export function hydrateChatStateFromCache(
     const parsed = JSON.parse(serialized) as Partial<ChatStateCachePayload>;
     if (parsed.schemaVersion !== CHAT_STATE_CACHE_SCHEMA_VERSION) return base;
 
-    const activeVisibleChannel = parsed.activeVisibleChannel ?? base.activeVisibleChannel;
+    const activeMountTarget = resolveMountTarget(
+      parsed.activeMountTarget ?? base.activeMountTarget,
+    );
+    const activeVisibleChannel = resolveVisibleChannelForMountTarget(
+      activeMountTarget,
+      parsed.activeVisibleChannel ?? base.activeVisibleChannel,
+    );
     const unreadByChannel = {
       GLOBAL: parsed.notifications?.unreadByChannel?.GLOBAL ?? 0,
       SYNDICATE: parsed.notifications?.unreadByChannel?.SYNDICATE ?? 0,

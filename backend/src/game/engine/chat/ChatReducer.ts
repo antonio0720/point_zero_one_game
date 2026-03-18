@@ -91,6 +91,7 @@ import {
   pruneExpiredTyping,
   queuePendingReveal,
   queueTelemetry,
+  reconcileRoomWithMountPolicy,
   redactTranscriptMessage,
   removePendingRequest,
   removeRoom,
@@ -1066,17 +1067,26 @@ function reduceApplyJoinAccepted(
   const sessionId = action.request.session.sessionId;
   const roomId = action.request.roomId;
 
-  if (!hasRoom(effect.state, roomId)) {
-    applyAction(effect, {
-      type: 'UPSERT_ROOM',
-      room: createChatRoomState({
+  const existingRoom = effect.state.rooms[roomId] ?? null;
+  const roomState = existingRoom
+    ? reconcileRoomWithMountPolicy(
+        existingRoom,
+        action.request.mountTarget,
+        action.request.requestedVisibleChannel,
+      )
+    : createChatRoomState({
         roomId: action.request.roomId,
         roomKind: action.request.roomKind,
         title: action.request.title,
         now: action.now,
         mountTarget: action.request.mountTarget,
         requestedVisibleChannel: action.request.requestedVisibleChannel,
-      }),
+      });
+
+  if (!existingRoom || roomState !== existingRoom) {
+    applyAction(effect, {
+      type: 'UPSERT_ROOM',
+      room: roomState,
     });
   }
 

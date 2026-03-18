@@ -116,6 +116,8 @@ import {
   popDueRevealsFromState,
   pruneExpiredTypingSnapshotsInState,
   pushMessageToState,
+  reconcileChatStateWithMountPolicy,
+  resolveVisibleChannelForMountTarget,
   scheduleRevealInState,
   setActiveSceneInState,
   setActiveVisibleChannelInState,
@@ -126,6 +128,7 @@ import {
   setLearningProfileInState,
   setLiveOpsStateInState,
   stageOptimisticLocalMessage,
+  syncMembershipsToRoomInState,
   transitionConnectionState,
   trimChatStateWindow,
   updateComposerDraftInState,
@@ -727,7 +730,7 @@ export function createInitialChatReducerState(
   payload: ChatBootstrapPayload = {},
 ): ChatEngineState {
   const mountTarget = payload.mountTarget ?? 'LOBBY_SCREEN';
-  const visibleChannel = nextAllowedVisibleChannel(
+  const visibleChannel = resolveVisibleChannelForMountTarget(
     mountTarget,
     payload.visibleChannel ?? CHAT_MOUNT_PRESETS[mountTarget].defaultVisibleChannel,
   );
@@ -937,10 +940,10 @@ export function reduceChatState(
       return reduceRescueTriggered(state, action.payload);
 
     case 'CHAT_CACHE_RESTORED':
-      return changed(trimChatStateWindow(action.payload.state));
+      return changed(reconcileChatStateWithMountPolicy(trimChatStateWindow(action.payload.state)));
 
     case 'CHAT_STATE_REPLACED':
-      return changed(trimChatStateWindow(action.payload.state));
+      return changed(reconcileChatStateWithMountPolicy(trimChatStateWindow(action.payload.state)));
 
     case 'CHAT_STATE_RESET':
       return changed(resetChatReducerState(action.payload));
@@ -965,7 +968,7 @@ function reduceMountChanged(
   payload: ChatMountChangedPayload,
 ): ChatReducerResult {
   const nextMount = payload.mountTarget;
-  const nextVisible = nextAllowedVisibleChannel(
+  const nextVisible = resolveVisibleChannelForMountTarget(
     nextMount,
     state.activeVisibleChannel,
   );
@@ -987,7 +990,7 @@ function reduceVisibleChannelSet(
   state: ChatEngineState,
   payload: ChatVisibleChannelSetPayload,
 ): ChatReducerResult {
-  const nextAllowed = nextAllowedVisibleChannel(
+  const nextAllowed = resolveVisibleChannelForMountTarget(
     state.activeMountTarget,
     payload.channelId,
   );
@@ -1961,16 +1964,6 @@ function changed(state: ChatEngineState): ChatReducerResult {
   };
 }
 
-function nextAllowedVisibleChannel(
-  mountTarget: ChatMountTarget,
-  preferred: ChatVisibleChannel,
-): ChatVisibleChannel {
-  const preset = CHAT_MOUNT_PRESETS[mountTarget];
-  return preset.allowedVisibleChannels.includes(preferred)
-    ? preferred
-    : preset.defaultVisibleChannel;
-}
-
 function clampScore100(value: number): Score100 {
   if (Number.isNaN(value)) return 0 as Score100;
   if (value < 0) return 0 as Score100;
@@ -2088,11 +2081,11 @@ function defaultTargetChannelForSignal(
 ): ChatVisibleChannel {
   switch (signal.signalType) {
     case 'RUN_STARTED':
-      return nextAllowedVisibleChannel(mountTarget, 'LOBBY');
+      return resolveVisibleChannelForMountTarget(mountTarget, 'LOBBY');
     case 'DEAL_PROOF_ISSUED':
-      return nextAllowedVisibleChannel(mountTarget, 'DEAL_ROOM');
+      return resolveVisibleChannelForMountTarget(mountTarget, 'DEAL_ROOM');
     default:
-      return nextAllowedVisibleChannel(mountTarget, 'GLOBAL');
+      return resolveVisibleChannelForMountTarget(mountTarget, 'GLOBAL');
   }
 }
 

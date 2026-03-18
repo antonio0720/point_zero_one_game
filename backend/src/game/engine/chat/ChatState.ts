@@ -280,16 +280,64 @@ export interface CreateChatRoomStateArgs {
   readonly requestedVisibleChannel?: ChatVisibleChannel;
 }
 
-export function createChatRoomState(args: CreateChatRoomStateArgs): ChatRoomState {
-  const preset =
-    args.mountTarget && args.mountTarget in CHAT_MOUNT_POLICIES
-      ? CHAT_MOUNT_POLICIES[args.mountTarget as keyof typeof CHAT_MOUNT_POLICIES]
-      : CHAT_MOUNT_POLICIES.BATTLE_HUD;
+function resolveMountPolicy(mountTarget?: string) {
+  if (mountTarget && mountTarget in CHAT_MOUNT_POLICIES) {
+    return CHAT_MOUNT_POLICIES[mountTarget as keyof typeof CHAT_MOUNT_POLICIES];
+  }
 
-  const activeVisibleChannel =
-    args.requestedVisibleChannel && preset.allowedVisibleChannels.includes(args.requestedVisibleChannel)
-      ? args.requestedVisibleChannel
-      : preset.defaultVisibleChannel;
+  return CHAT_MOUNT_POLICIES.BATTLE_HUD;
+}
+
+export function resolveVisibleChannelForMountPolicy(
+  mountTarget: string | undefined,
+  requestedVisibleChannel: ChatVisibleChannel | undefined,
+): ChatVisibleChannel {
+  const preset = resolveMountPolicy(mountTarget);
+
+  if (
+    requestedVisibleChannel &&
+    preset.allowedVisibleChannels.includes(requestedVisibleChannel)
+  ) {
+    return requestedVisibleChannel;
+  }
+
+  return preset.defaultVisibleChannel;
+}
+
+export function reconcileRoomWithMountPolicy(
+  room: ChatRoomState,
+  mountTarget?: string,
+  requestedVisibleChannel?: ChatVisibleChannel,
+): ChatRoomState {
+  const preset = resolveMountPolicy(mountTarget);
+  const activeVisibleChannel = resolveVisibleChannelForMountPolicy(
+    mountTarget,
+    requestedVisibleChannel ?? room.activeVisibleChannel,
+  );
+
+  if (
+    room.activeVisibleChannel === activeVisibleChannel &&
+    room.stageMood === preset.stageMood &&
+    room.allowedVisibleChannels.length === preset.allowedVisibleChannels.length &&
+    room.allowedVisibleChannels.every((channelId, index) => channelId === preset.allowedVisibleChannels[index])
+  ) {
+    return room;
+  }
+
+  return {
+    ...room,
+    activeVisibleChannel,
+    allowedVisibleChannels: [...preset.allowedVisibleChannels],
+    stageMood: preset.stageMood,
+  };
+}
+
+export function createChatRoomState(args: CreateChatRoomStateArgs): ChatRoomState {
+  const preset = resolveMountPolicy(args.mountTarget);
+  const activeVisibleChannel = resolveVisibleChannelForMountPolicy(
+    args.mountTarget,
+    args.requestedVisibleChannel,
+  );
 
   return {
     roomId: args.roomId,
