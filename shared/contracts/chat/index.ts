@@ -61,6 +61,7 @@ import * as ChatTelemetryModule from './ChatTelemetry';
 import * as ChatProofModule from './ChatProof';
 import * as ChatMomentModule from './ChatMoment';
 import * as ChatSceneModule from './ChatScene';
+import * as ChatInterruptionModule from './ChatInterruption';
 import * as LearningModule from './learning';
 
 // ============================================================================
@@ -71,6 +72,7 @@ export * from './ChatChannels';
 export * from './ChatEvents';
 export * from './ChatMoment';
 export * from './ChatScene';
+export * from './ChatInterruption';
 
 export {
   CHAT_CHANNEL_CONTRACT,
@@ -102,6 +104,7 @@ export {
   ChatProofModule as ChatProof,
   ChatMomentModule as ChatMoment,
   ChatSceneModule as ChatScene,
+  ChatInterruptionModule as ChatInterruption,
   LearningModule as Learning,
 };
 
@@ -132,6 +135,9 @@ export const CHAT_CONTRACT_MODULE_KEYS = [
   'ChatInvasion',
   'ChatTelemetry',
   'ChatProof',
+  'ChatMoment',
+  'ChatScene',
+  'ChatInterruption',
   'Learning',
 ] as const;
 
@@ -140,6 +146,7 @@ export type ChatContractModuleKey =
 
 export const CHAT_CONTRACT_CATEGORIES = [
   'FOUNDATION',
+  'EXPERIENCE',
   'MESSAGE',
   'PRESENCE',
   'TRANSCRIPT',
@@ -179,6 +186,9 @@ export const CHAT_CONTRACT_RELATIVE_PATHS = {
   ChatInvasion: './ChatInvasion',
   ChatTelemetry: './ChatTelemetry',
   ChatProof: './ChatProof',
+  ChatMoment: './ChatMoment',
+  ChatScene: './ChatScene',
+  ChatInterruption: './ChatInterruption',
   Learning: './learning',
 } as const satisfies Record<ChatContractModuleKey, string>;
 
@@ -199,6 +209,9 @@ export const CHAT_CONTRACT_FILE_NAMES = {
   ChatInvasion: 'ChatInvasion.ts',
   ChatTelemetry: 'ChatTelemetry.ts',
   ChatProof: 'ChatProof.ts',
+  ChatMoment: 'ChatMoment.ts',
+  ChatScene: 'ChatScene.ts',
+  ChatInterruption: 'ChatInterruption.ts',
   Learning: 'learning/index.ts',
 } as const satisfies Record<ChatContractModuleKey, string>;
 
@@ -233,6 +246,9 @@ export type ChatContractModuleNamespace =
   | typeof ChatInvasionModule
   | typeof ChatTelemetryModule
   | typeof ChatProofModule
+  | typeof ChatMomentModule
+  | typeof ChatSceneModule
+  | typeof ChatInterruptionModule
   | typeof LearningModule;
 
 const ALL_RUNTIME_LANES = [
@@ -468,6 +484,45 @@ export const CHAT_CONTRACT_MODULE_DESCRIPTORS = Object.freeze({
     contractExportName: 'CHAT_PROOF_CONTRACT',
     manifestExportName: null,
   }),
+  ChatMoment: Object.freeze<ChatContractModuleDescriptor>({
+    key: 'ChatMoment',
+    fileName: 'ChatMoment.ts',
+    importPath: './ChatMoment',
+    category: 'EXPERIENCE',
+    description: 'Moment-level dramaturgy contract.',
+    sharedRootPath: `${CHAT_CONTRACT_AUTHORITIES.sharedContractsRoot}/ChatMoment.ts`,
+    usedBy: ALL_RUNTIME_LANES,
+    dependsOn: ['ChatChannels', 'ChatEvents'] as const,
+    defaultExportName: null,
+    contractExportName: 'CHAT_MOMENT_CONTRACT_DESCRIPTOR',
+    manifestExportName: 'CHAT_MOMENT_CONTRACT_DESCRIPTOR',
+  }),
+  ChatScene: Object.freeze<ChatContractModuleDescriptor>({
+    key: 'ChatScene',
+    fileName: 'ChatScene.ts',
+    importPath: './ChatScene',
+    category: 'EXPERIENCE',
+    description: 'Scene and beat planning contract.',
+    sharedRootPath: `${CHAT_CONTRACT_AUTHORITIES.sharedContractsRoot}/ChatScene.ts`,
+    usedBy: ALL_RUNTIME_LANES,
+    dependsOn: ['ChatChannels', 'ChatEvents', 'ChatMoment'] as const,
+    defaultExportName: null,
+    contractExportName: 'CHAT_SCENE_CONTRACT_DESCRIPTOR',
+    manifestExportName: 'CHAT_SCENE_CONTRACT_DESCRIPTOR',
+  }),
+  ChatInterruption: Object.freeze<ChatContractModuleDescriptor>({
+    key: 'ChatInterruption',
+    fileName: 'ChatInterruption.ts',
+    importPath: './ChatInterruption',
+    category: 'EXPERIENCE',
+    description: 'Interruption arbitration, silence protection, and preemption law.',
+    sharedRootPath: `${CHAT_CONTRACT_AUTHORITIES.sharedContractsRoot}/ChatInterruption.ts`,
+    usedBy: ALL_RUNTIME_LANES,
+    dependsOn: ['ChatChannels', 'ChatEvents', 'ChatMoment', 'ChatScene'] as const,
+    defaultExportName: null,
+    contractExportName: 'CHAT_INTERRUPTION_CONTRACT_DESCRIPTOR',
+    manifestExportName: 'CHAT_INTERRUPTION_CONTRACT_DESCRIPTOR',
+  }),
   Learning: Object.freeze<ChatContractModuleDescriptor>({
     key: 'Learning',
     fileName: 'learning/index.ts',
@@ -543,6 +598,9 @@ export const CHAT_CONTRACT_DEPENDENCY_GRAPH = Object.freeze({
     'ChatTranscript',
     'ChatTelemetry',
   ] as const,
+  ChatMoment: ['ChatChannels', 'ChatEvents'] as const,
+  ChatScene: ['ChatChannels', 'ChatEvents', 'ChatMoment'] as const,
+  ChatInterruption: ['ChatChannels', 'ChatEvents', 'ChatMoment', 'ChatScene'] as const,
   Learning: ['ChatChannels', 'ChatEvents'] as const,
 } as const satisfies Record<ChatContractModuleKey, readonly ChatContractModuleKey[]>);
 
@@ -564,6 +622,9 @@ export const CHAT_CONTRACT_MODULE_NAMESPACES = Object.freeze({
   ChatInvasion: ChatInvasionModule,
   ChatTelemetry: ChatTelemetryModule,
   ChatProof: ChatProofModule,
+  ChatMoment: ChatMomentModule,
+  ChatScene: ChatSceneModule,
+  ChatInterruption: ChatInterruptionModule,
   Learning: LearningModule,
 } as const satisfies Record<ChatContractModuleKey, ChatContractModuleNamespace>);
 
@@ -662,6 +723,24 @@ export const CHAT_SHARED_CONTRACT_PACKAGES = Object.freeze({
     defaultContract: readNamedExport(ChatProofModule, 'CHAT_PROOF_CONTRACT'),
     manifest: readNamedExport(ChatProofModule, 'CHAT_PROOF_CONTRACT'),
   }),
+  ChatMoment: Object.freeze<ChatSharedContractPackage>({
+    descriptor: CHAT_CONTRACT_MODULE_DESCRIPTORS.ChatMoment,
+    namespace: ChatMomentModule,
+    defaultContract: readNamedExport(ChatMomentModule, 'CHAT_MOMENT_CONTRACT_DESCRIPTOR'),
+    manifest: readNamedExport(ChatMomentModule, 'CHAT_MOMENT_CONTRACT_DESCRIPTOR'),
+  }),
+  ChatScene: Object.freeze<ChatSharedContractPackage>({
+    descriptor: CHAT_CONTRACT_MODULE_DESCRIPTORS.ChatScene,
+    namespace: ChatSceneModule,
+    defaultContract: readNamedExport(ChatSceneModule, 'CHAT_SCENE_CONTRACT_DESCRIPTOR'),
+    manifest: readNamedExport(ChatSceneModule, 'CHAT_SCENE_CONTRACT_DESCRIPTOR'),
+  }),
+  ChatInterruption: Object.freeze<ChatSharedContractPackage>({
+    descriptor: CHAT_CONTRACT_MODULE_DESCRIPTORS.ChatInterruption,
+    namespace: ChatInterruptionModule,
+    defaultContract: readNamedExport(ChatInterruptionModule, 'CHAT_INTERRUPTION_CONTRACT_DESCRIPTOR'),
+    manifest: readNamedExport(ChatInterruptionModule, 'CHAT_INTERRUPTION_CONTRACT_DESCRIPTOR'),
+  }),
   Learning: Object.freeze<ChatSharedContractPackage>({
     descriptor: CHAT_CONTRACT_MODULE_DESCRIPTORS.Learning,
     namespace: LearningModule,
@@ -678,6 +757,7 @@ export type ChatSharedContractPackages = typeof CHAT_SHARED_CONTRACT_PACKAGES;
 
 export const CHAT_CONTRACT_KEYS_BY_CATEGORY = Object.freeze({
   FOUNDATION: ['ChatChannels', 'ChatEvents'] as const,
+  EXPERIENCE: ['ChatMoment', 'ChatScene', 'ChatInterruption'] as const,
   MESSAGE: ['ChatMessage'] as const,
   PRESENCE: ['ChatPresence', 'ChatTyping', 'ChatCursor'] as const,
   TRANSCRIPT: ['ChatTranscript'] as const,
@@ -768,6 +848,9 @@ export const CHAT_SHARED_CONTRACT_ORDER = [
   'ChatInvasion',
   'ChatTelemetry',
   'ChatProof',
+  'ChatMoment',
+  'ChatScene',
+  'ChatInterruption',
   'Learning',
 ] as const satisfies readonly ChatContractModuleKey[];
 
