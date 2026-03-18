@@ -101,7 +101,12 @@ export type ChatTranscriptSearchField =
   | 'sender'
   | 'proofHash'
   | 'messageId'
-  | 'metadata';
+  | 'metadata'
+  | 'sceneId'
+  | 'eventId'
+  | 'callbackRef'
+  | 'rhetoricalTemplate'
+  | 'semanticCluster';
 
 export type ChatTranscriptExportMode =
   | 'VISIBLE_WINDOW'
@@ -121,6 +126,35 @@ export type ChatTranscriptProofClass =
   | 'SYSTEM_RECEIPT'
   | 'LEGENDARY'
   | 'REPLAY_ANCHOR';
+
+export interface ChatTranscriptCallbackReference {
+  callbackId: string;
+  callbackType:
+    | 'QUOTE'
+    | 'MEMORY'
+    | 'HUMILIATION'
+    | 'COMEBACK'
+    | 'RESCUE'
+    | 'DEAL_ROOM'
+    | 'WORLD_EVENT'
+    | 'SOVEREIGNTY';
+  payloadRef: string;
+}
+
+export interface ChatTranscriptSceneAnnotation {
+  sceneId?: string;
+  momentId?: string;
+  eventIds?: readonly string[];
+  semanticClusterIds?: readonly string[];
+  rhetoricalTemplateIds?: readonly string[];
+  callbackRefs?: readonly ChatTranscriptCallbackReference[];
+  relatedMemoryAnchorIds?: readonly string[];
+  transcriptTags?: readonly string[];
+  canonicalLineId?: string;
+  surfaceVariantId?: string;
+  realizationStrategy?: string;
+}
+
 
 export interface ChatTranscriptRecord {
   localId: string;
@@ -148,6 +182,18 @@ export interface ChatTranscriptRecord {
   dedupKey: string;
   searchBody: string;
   searchSender: string;
+  normalizedBody: string;
+  semanticClusterIds: readonly string[];
+  rhetoricalTemplateIds: readonly string[];
+  callbackRefs: readonly ChatTranscriptCallbackReference[];
+  sceneId?: string;
+  momentId?: string;
+  eventIds: readonly string[];
+  relatedMemoryAnchorIds: readonly string[];
+  transcriptTags: readonly string[];
+  canonicalLineId?: string;
+  surfaceVariantId?: string;
+  realizationStrategy?: string;
   redactedBody?: string;
   tombstoneReason?: string;
   redactReason?: string;
@@ -238,6 +284,12 @@ export interface ChatTranscriptExportRecord {
   pressureTier?: string;
   tickTier?: string;
   runOutcome?: string;
+  sceneId?: string;
+  momentId?: string;
+  eventIds?: readonly string[];
+  semanticClusterIds?: readonly string[];
+  rhetoricalTemplateIds?: readonly string[];
+  callbackRefs?: readonly ChatTranscriptCallbackReference[];
   metadata?: Record<string, unknown>;
 }
 
@@ -395,6 +447,63 @@ function stableStringify(value: unknown): string {
     .join(',')}}`;
 }
 
+function normalizeStringArray(values: readonly string[] | undefined): string[] {
+  if (!values?.length) return [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+
+  for (const value of values) {
+    const normalized = normalizeText(value);
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    out.push(normalized);
+  }
+
+  return out;
+}
+
+function cloneCallbackRefs(
+  refs: readonly ChatTranscriptCallbackReference[] | undefined,
+): ChatTranscriptCallbackReference[] {
+  if (!refs?.length) return [];
+  const dedup = new Set<string>();
+  const out: ChatTranscriptCallbackReference[] = [];
+
+  for (const ref of refs) {
+    const callbackId = normalizeText(ref.callbackId);
+    const payloadRef = normalizeText(ref.payloadRef);
+    const callbackType = normalizeText(ref.callbackType).toUpperCase() as ChatTranscriptCallbackReference['callbackType'];
+    if (!callbackId || !payloadRef || !callbackType) continue;
+
+    const key = `${callbackType}|${callbackId}|${payloadRef}`;
+    if (dedup.has(key)) continue;
+    dedup.add(key);
+
+    out.push({
+      callbackId,
+      callbackType,
+      payloadRef,
+    });
+  }
+
+  return out;
+}
+
+function mergeStringArrays(
+  left: readonly string[] | undefined,
+  right: readonly string[] | undefined,
+): string[] {
+  return normalizeStringArray([...(left ?? []), ...(right ?? [])]);
+}
+
+function mergeCallbackRefs(
+  left: readonly ChatTranscriptCallbackReference[] | undefined,
+  right: readonly ChatTranscriptCallbackReference[] | undefined,
+): ChatTranscriptCallbackReference[] {
+  return cloneCallbackRefs([...(left ?? []), ...(right ?? [])]);
+}
+
+
 let localSequence = 0;
 function nextLocalId(): string {
   localSequence += 1;
@@ -514,6 +623,12 @@ function exportRecord(record: ChatTranscriptRecord): ChatTranscriptExportRecord 
     pressureTier: record.pressureTier,
     tickTier: record.tickTier,
     runOutcome: record.runOutcome,
+    sceneId: record.sceneId,
+    momentId: record.momentId,
+    eventIds: record.eventIds,
+    semanticClusterIds: record.semanticClusterIds,
+    rhetoricalTemplateIds: record.rhetoricalTemplateIds,
+    callbackRefs: record.callbackRefs,
     metadata: record.metadata,
   };
 }
@@ -557,6 +672,18 @@ function createRecord(
     dedupKey: transcriptDedupKey(message),
     searchBody: normalizeSearchText(normalizedBody),
     searchSender,
+    normalizedBody,
+    semanticClusterIds: [],
+    rhetoricalTemplateIds: [],
+    callbackRefs: [],
+    sceneId: undefined,
+    momentId: undefined,
+    eventIds: [],
+    relatedMemoryAnchorIds: [],
+    transcriptTags: [],
+    canonicalLineId: undefined,
+    surfaceVariantId: undefined,
+    realizationStrategy: undefined,
     sourceReason,
     history: [{
       ts: insertedAt,
@@ -955,6 +1082,8 @@ export class ChatTranscriptBuffer {
     record.redactedBody = normalizeText(input.redactedBody);
     record.redactReason = normalizeText(input.reason) || 'policy_redaction';
     record.state = 'REDACTED';
+    record.normalizedBody = normalizeText(record.redactedBody);
+    record.searchBody = normalizeSearchText(record.redactedBody);
     appendHistory(record, 'manual_patch', `redacted:${record.redactReason}`);
 
     const state = this.requireChannel(input.channel);
@@ -1132,6 +1261,43 @@ export class ChatTranscriptBuffer {
         }
       }
 
+      if (fields.includes('sceneId') && normalizeSearchText(record.sceneId).includes(query)) {
+        score += 35;
+        reasons.push('sceneId');
+      }
+
+      if (fields.includes('eventId')) {
+        const eventSearch = normalizeSearchText(record.eventIds.join(' '));
+        if (eventSearch.includes(query)) {
+          score += 35;
+          reasons.push('eventId');
+        }
+      }
+
+      if (fields.includes('callbackRef')) {
+        const callbackSearch = normalizeSearchText(stableStringify(record.callbackRefs));
+        if (callbackSearch.includes(query)) {
+          score += 30;
+          reasons.push('callbackRef');
+        }
+      }
+
+      if (fields.includes('rhetoricalTemplate')) {
+        const rhetoricalSearch = normalizeSearchText(record.rhetoricalTemplateIds.join(' '));
+        if (rhetoricalSearch.includes(query)) {
+          score += 20;
+          reasons.push('rhetoricalTemplate');
+        }
+      }
+
+      if (fields.includes('semanticCluster')) {
+        const semanticSearch = normalizeSearchText(record.semanticClusterIds.join(' '));
+        if (semanticSearch.includes(query)) {
+          score += 20;
+          reasons.push('semanticCluster');
+        }
+      }
+
       if (score > 0) {
         matches.push({ record, score, reasons });
       }
@@ -1201,6 +1367,129 @@ export class ChatTranscriptBuffer {
 
   public toMessages(channel: ChatChannel = this.activeChannel): ChatMessage[] {
     return this.getVisibleWindow(channel).map(recordToMessage);
+  }
+
+
+  public annotateMessage(input: {
+    channel: ChatChannel;
+    messageId: string;
+    annotation: ChatTranscriptSceneAnnotation;
+  }): ChatTranscriptRecord | undefined {
+    this.assertNotDestroyed('annotateMessage');
+
+    const record = this.getMessage(input.messageId, input.channel);
+    if (!record) return undefined;
+
+    const state = this.requireChannel(input.channel);
+    const annotation = input.annotation;
+
+    if (annotation.sceneId) record.sceneId = normalizeText(annotation.sceneId) || record.sceneId;
+    if (annotation.momentId) record.momentId = normalizeText(annotation.momentId) || record.momentId;
+    if (annotation.canonicalLineId) {
+      record.canonicalLineId = normalizeText(annotation.canonicalLineId) || record.canonicalLineId;
+    }
+    if (annotation.surfaceVariantId) {
+      record.surfaceVariantId = normalizeText(annotation.surfaceVariantId) || record.surfaceVariantId;
+    }
+    if (annotation.realizationStrategy) {
+      record.realizationStrategy = normalizeText(annotation.realizationStrategy) || record.realizationStrategy;
+    }
+
+    record.eventIds = mergeStringArrays(record.eventIds, annotation.eventIds);
+    record.semanticClusterIds = mergeStringArrays(record.semanticClusterIds, annotation.semanticClusterIds);
+    record.rhetoricalTemplateIds = mergeStringArrays(record.rhetoricalTemplateIds, annotation.rhetoricalTemplateIds);
+    record.relatedMemoryAnchorIds = mergeStringArrays(
+      record.relatedMemoryAnchorIds,
+      annotation.relatedMemoryAnchorIds,
+    );
+    record.transcriptTags = mergeStringArrays(record.transcriptTags, annotation.transcriptTags);
+    record.callbackRefs = mergeCallbackRefs(record.callbackRefs, annotation.callbackRefs);
+
+    appendHistory(
+      record,
+      'manual_patch',
+      `annotated:${record.sceneId ?? 'none'}:${record.momentId ?? 'none'}`,
+    );
+
+    this.bumpChannel(state, 'manual_patch');
+    return record;
+  }
+
+  public annotateSceneBatch(input: {
+    channel: ChatChannel;
+    messageIds: readonly string[];
+    annotation: ChatTranscriptSceneAnnotation;
+  }): readonly ChatTranscriptRecord[] {
+    this.assertNotDestroyed('annotateSceneBatch');
+
+    const updated: ChatTranscriptRecord[] = [];
+    for (const messageId of input.messageIds) {
+      const record = this.annotateMessage({
+        channel: input.channel,
+        messageId,
+        annotation: input.annotation,
+      });
+      if (record) updated.push(record);
+    }
+    return updated;
+  }
+
+  public getSceneRecords(
+    sceneId: string,
+    channel?: ChatChannel,
+  ): readonly ChatTranscriptRecord[] {
+    const normalized = normalizeText(sceneId);
+    if (!normalized) return [];
+
+    const pool = channel
+      ? this.requireChannel(channel).ordered
+      : CHANNELS.flatMap((candidate) => this.requireChannel(candidate).ordered);
+
+    return pool.filter((record) => record.sceneId === normalized);
+  }
+
+  public getEventRecords(
+    eventId: string,
+    channel?: ChatChannel,
+  ): readonly ChatTranscriptRecord[] {
+    const normalized = normalizeText(eventId);
+    if (!normalized) return [];
+
+    const pool = channel
+      ? this.requireChannel(channel).ordered
+      : CHANNELS.flatMap((candidate) => this.requireChannel(candidate).ordered);
+
+    return pool.filter((record) => record.eventIds.includes(normalized));
+  }
+
+  public getCallbackRecords(
+    callbackId: string,
+    channel?: ChatChannel,
+  ): readonly ChatTranscriptRecord[] {
+    const normalized = normalizeText(callbackId);
+    if (!normalized) return [];
+
+    const pool = channel
+      ? this.requireChannel(channel).ordered
+      : CHANNELS.flatMap((candidate) => this.requireChannel(candidate).ordered);
+
+    return pool.filter((record) =>
+      record.callbackRefs.some((ref) => ref.callbackId === normalized || ref.payloadRef === normalized),
+    );
+  }
+
+  public getSemanticClusterWindow(
+    semanticClusterId: string,
+    channel?: ChatChannel,
+  ): readonly ChatTranscriptRecord[] {
+    const normalized = normalizeText(semanticClusterId);
+    if (!normalized) return [];
+
+    const pool = channel
+      ? this.requireChannel(channel).ordered
+      : CHANNELS.flatMap((candidate) => this.requireChannel(candidate).ordered);
+
+    return pool.filter((record) => record.semanticClusterIds.includes(normalized));
   }
 
   // ---------------------------------------------------------------------------
@@ -1354,6 +1643,7 @@ export class ChatTranscriptBuffer {
       proofHash: record.proofHash,
       ts: record.ts,
     });
+    record.normalizedBody = normalizeText(record.redactedBody ?? record.body);
 
     appendHistory(record, reason, historySummary);
     this.reindexRecord(channelState, record);
