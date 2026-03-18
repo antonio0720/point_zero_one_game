@@ -126,11 +126,13 @@ import {
 
 import {
   ChatRelationshipModel,
-  type ChatRelationshipNpcSignal,
-  type ChatRelationshipSnapshot,
 } from './intelligence/ChatRelationshipModel';
 
-type ChatRelationshipLegacyProjection = Record<string, unknown>;
+import type {
+  ChatRelationshipLegacyProjection,
+  ChatRelationshipNpcSignal,
+  ChatRelationshipSnapshot,
+} from '../../../../shared/contracts/chat/relationship';
 
 // -----------------------------------------------------------------------------
 // Exported core types
