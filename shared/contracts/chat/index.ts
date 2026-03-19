@@ -62,6 +62,8 @@ import * as ChatProofModule from './ChatProof';
 import * as ChatMomentModule from './ChatMoment';
 import * as ChatSceneModule from './ChatScene';
 import * as ChatInterruptionModule from './ChatInterruption';
+import * as ChatBossFightModule from './ChatBossFight';
+import * as ChatCounterplayModule from './ChatCounterplay';
 import * as LearningModule from './learning';
 
 // ============================================================================
@@ -73,6 +75,8 @@ export * from './ChatEvents';
 export * from './ChatMoment';
 export * from './ChatScene';
 export * from './ChatInterruption';
+export * from './ChatBossFight';
+export * from './ChatCounterplay';
 
 export {
   CHAT_CHANNEL_CONTRACT,
@@ -105,6 +109,8 @@ export {
   ChatMomentModule as ChatMoment,
   ChatSceneModule as ChatScene,
   ChatInterruptionModule as ChatInterruption,
+  ChatBossFightModule as ChatBossFight,
+  ChatCounterplayModule as ChatCounterplay,
   LearningModule as Learning,
 };
 
@@ -138,6 +144,8 @@ export const CHAT_CONTRACT_MODULE_KEYS = [
   'ChatMoment',
   'ChatScene',
   'ChatInterruption',
+  'ChatBossFight',
+  'ChatCounterplay',
   'Learning',
 ] as const;
 
@@ -156,6 +164,8 @@ export const CHAT_CONTRACT_CATEGORIES = [
   'INVASION',
   'TELEMETRY',
   'PROOF',
+  'BOSSFIGHT',
+  'COUNTERPLAY',
   'LEARNING',
 ] as const;
 
@@ -189,6 +199,8 @@ export const CHAT_CONTRACT_RELATIVE_PATHS = {
   ChatMoment: './ChatMoment',
   ChatScene: './ChatScene',
   ChatInterruption: './ChatInterruption',
+  ChatBossFight: './ChatBossFight',
+  ChatCounterplay: './ChatCounterplay',
   Learning: './learning',
 } as const satisfies Record<ChatContractModuleKey, string>;
 
@@ -212,6 +224,8 @@ export const CHAT_CONTRACT_FILE_NAMES = {
   ChatMoment: 'ChatMoment.ts',
   ChatScene: 'ChatScene.ts',
   ChatInterruption: 'ChatInterruption.ts',
+  ChatBossFight: 'ChatBossFight.ts',
+  ChatCounterplay: 'ChatCounterplay.ts',
   Learning: 'learning/index.ts',
 } as const satisfies Record<ChatContractModuleKey, string>;
 
@@ -249,6 +263,8 @@ export type ChatContractModuleNamespace =
   | typeof ChatMomentModule
   | typeof ChatSceneModule
   | typeof ChatInterruptionModule
+  | typeof ChatBossFightModule
+  | typeof ChatCounterplayModule
   | typeof LearningModule;
 
 const ALL_RUNTIME_LANES = [
@@ -523,6 +539,53 @@ export const CHAT_CONTRACT_MODULE_DESCRIPTORS = Object.freeze({
     contractExportName: 'CHAT_INTERRUPTION_CONTRACT_DESCRIPTOR',
     manifestExportName: 'CHAT_INTERRUPTION_CONTRACT_DESCRIPTOR',
   }),
+  ChatBossFight: Object.freeze<ChatContractModuleDescriptor>({
+    key: 'ChatBossFight',
+    fileName: 'ChatBossFight.ts',
+    importPath: './ChatBossFight',
+    category: 'BOSSFIGHT',
+    description:
+      'Boss-fight phase contracts, encounter escalation envelopes, reward surfaces, and boss-fight descriptor exports.',
+    sharedRootPath: `${CHAT_CONTRACT_AUTHORITIES.sharedContractsRoot}/ChatBossFight.ts`,
+    usedBy: ALL_RUNTIME_LANES,
+    dependsOn: [
+      'ChatChannels',
+      'ChatEvents',
+      'ChatMessage',
+      'ChatPresence',
+      'ChatNpc',
+      'ChatInvasion',
+      'ChatMoment',
+      'ChatScene',
+    ] as const,
+    defaultExportName: null,
+    contractExportName: 'CHAT_BOSS_FIGHT_CONTRACT_DESCRIPTOR',
+    manifestExportName: null,
+  }),
+  ChatCounterplay: Object.freeze<ChatContractModuleDescriptor>({
+    key: 'ChatCounterplay',
+    fileName: 'ChatCounterplay.ts',
+    importPath: './ChatCounterplay',
+    category: 'COUNTERPLAY',
+    description:
+      'Counterplay response contracts, player-agency windows, defiance mechanics, and counterplay descriptor exports.',
+    sharedRootPath: `${CHAT_CONTRACT_AUTHORITIES.sharedContractsRoot}/ChatCounterplay.ts`,
+    usedBy: ALL_RUNTIME_LANES,
+    dependsOn: [
+      'ChatChannels',
+      'ChatEvents',
+      'ChatMessage',
+      'ChatPresence',
+      'ChatNpc',
+      'ChatInvasion',
+      'ChatMoment',
+      'ChatScene',
+      'ChatBossFight',
+    ] as const,
+    defaultExportName: null,
+    contractExportName: 'CHAT_COUNTERPLAY_CONTRACT_DESCRIPTOR',
+    manifestExportName: null,
+  }),
   Learning: Object.freeze<ChatContractModuleDescriptor>({
     key: 'Learning',
     fileName: 'learning/index.ts',
@@ -601,6 +664,27 @@ export const CHAT_CONTRACT_DEPENDENCY_GRAPH = Object.freeze({
   ChatMoment: ['ChatChannels', 'ChatEvents'] as const,
   ChatScene: ['ChatChannels', 'ChatEvents', 'ChatMoment'] as const,
   ChatInterruption: ['ChatChannels', 'ChatEvents', 'ChatMoment', 'ChatScene'] as const,
+  ChatBossFight: [
+    'ChatChannels',
+    'ChatEvents',
+    'ChatMessage',
+    'ChatPresence',
+    'ChatNpc',
+    'ChatInvasion',
+    'ChatMoment',
+    'ChatScene',
+  ] as const,
+  ChatCounterplay: [
+    'ChatChannels',
+    'ChatEvents',
+    'ChatMessage',
+    'ChatPresence',
+    'ChatNpc',
+    'ChatInvasion',
+    'ChatMoment',
+    'ChatScene',
+    'ChatBossFight',
+  ] as const,
   Learning: ['ChatChannels', 'ChatEvents'] as const,
 } as const satisfies Record<ChatContractModuleKey, readonly ChatContractModuleKey[]>);
 
@@ -625,6 +709,8 @@ export const CHAT_CONTRACT_MODULE_NAMESPACES = Object.freeze({
   ChatMoment: ChatMomentModule,
   ChatScene: ChatSceneModule,
   ChatInterruption: ChatInterruptionModule,
+  ChatBossFight: ChatBossFightModule,
+  ChatCounterplay: ChatCounterplayModule,
   Learning: LearningModule,
 } as const satisfies Record<ChatContractModuleKey, ChatContractModuleNamespace>);
 
@@ -741,6 +827,18 @@ export const CHAT_SHARED_CONTRACT_PACKAGES = Object.freeze({
     defaultContract: readNamedExport(ChatInterruptionModule, 'CHAT_INTERRUPTION_CONTRACT_DESCRIPTOR'),
     manifest: readNamedExport(ChatInterruptionModule, 'CHAT_INTERRUPTION_CONTRACT_DESCRIPTOR'),
   }),
+  ChatBossFight: Object.freeze<ChatSharedContractPackage>({
+    descriptor: CHAT_CONTRACT_MODULE_DESCRIPTORS.ChatBossFight,
+    namespace: ChatBossFightModule,
+    defaultContract: readNamedExport(ChatBossFightModule, 'CHAT_BOSS_FIGHT_CONTRACT_DESCRIPTOR'),
+    manifest: readNamedExport(ChatBossFightModule, 'CHAT_BOSS_FIGHT_CONTRACT_DESCRIPTOR'),
+  }),
+  ChatCounterplay: Object.freeze<ChatSharedContractPackage>({
+    descriptor: CHAT_CONTRACT_MODULE_DESCRIPTORS.ChatCounterplay,
+    namespace: ChatCounterplayModule,
+    defaultContract: readNamedExport(ChatCounterplayModule, 'CHAT_COUNTERPLAY_CONTRACT_DESCRIPTOR'),
+    manifest: readNamedExport(ChatCounterplayModule, 'CHAT_COUNTERPLAY_CONTRACT_DESCRIPTOR'),
+  }),
   Learning: Object.freeze<ChatSharedContractPackage>({
     descriptor: CHAT_CONTRACT_MODULE_DESCRIPTORS.Learning,
     namespace: LearningModule,
@@ -767,6 +865,8 @@ export const CHAT_CONTRACT_KEYS_BY_CATEGORY = Object.freeze({
   INVASION: ['ChatInvasion'] as const,
   TELEMETRY: ['ChatTelemetry'] as const,
   PROOF: ['ChatProof'] as const,
+  BOSSFIGHT: ['ChatBossFight'] as const,
+  COUNTERPLAY: ['ChatCounterplay'] as const,
   LEARNING: ['Learning'] as const,
 } as const satisfies Record<ChatContractCategory, readonly ChatContractModuleKey[]>);
 
@@ -851,6 +951,8 @@ export const CHAT_SHARED_CONTRACT_ORDER = [
   'ChatMoment',
   'ChatScene',
   'ChatInterruption',
+  'ChatBossFight',
+  'ChatCounterplay',
   'Learning',
 ] as const satisfies readonly ChatContractModuleKey[];
 
