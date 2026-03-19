@@ -73,6 +73,8 @@ import * as AttackWindowPolicy from './combat/ChatAttackWindowPolicy';
 import * as RescueInterventionPlanner from './rescue/RescueInterventionPlanner';
 import * as ChurnRescuePolicy from './rescue/ChurnRescuePolicy';
 import * as RecoveryOutcomeTracker from './rescue/RecoveryOutcomeTracker';
+import { ChatNegotiationEngineModule } from './dealroom/NegotiationEngine';
+import { ChatOfferCounterEngineModule } from './dealroom/OfferCounterEngine';
 
 import {
   BACKEND_CHAT_ENGINE_PUBLIC_API_VERSION,
@@ -116,6 +118,10 @@ export * from './combat/ChatAttackWindowPolicy';
 export * from './rescue/RescueInterventionPlanner';
 export * from './rescue/ChurnRescuePolicy';
 export * from './rescue/RecoveryOutcomeTracker';
+
+// ── Deal Room / Negotiation Runtime ─────────────────────────────────────────
+export { NegotiationEngine, createNegotiationEngine, ChatNegotiationEngineModule } from './dealroom/NegotiationEngine';
+export { OfferCounterEngine, createOfferCounterEngine, ChatOfferCounterEngineModule } from './dealroom/OfferCounterEngine';
 
 export {
   Types as ChatTypesModule,
@@ -490,6 +496,10 @@ export function createBackendChatAuthorityBundle(): BackendChatAuthorityBundle {
         churnRescuePolicy: ChurnRescuePolicy,
         recoveryOutcomeTracker: RecoveryOutcomeTracker,
       }),
+      dealroom: {
+        negotiationEngine: ChatNegotiationEngineModule,
+        offerCounterEngine: ChatOfferCounterEngineModule,
+      },
     }),
     readiness: buildBackendChatLaneReadinessReport(),
   });
@@ -673,6 +683,11 @@ export const BACKEND_CHAT_GENERATED_SURFACE = Object.freeze([
 export function listGeneratedSurfaceDescriptors(): readonly BackendChatGeneratedSurfaceDescriptor[] {
   return BACKEND_CHAT_GENERATED_SURFACE;
 }
+
+export const CHAT_BACKEND_DEALROOM_RUNTIME_MODULES = {
+  NegotiationEngine: () => import('./dealroom/NegotiationEngine'),
+  OfferCounterEngine: () => import('./dealroom/OfferCounterEngine'),
+} as const;
 
 // ============================================================================
 // MARK: Downstream integration surfaces
