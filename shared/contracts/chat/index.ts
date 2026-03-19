@@ -69,6 +69,11 @@ import * as ChatRecoveryModule from './ChatRecovery';
 import * as ChatNegotiationModuleNS from './ChatNegotiation';
 import * as ChatOfferModuleNS from './ChatOffer';
 import * as ChatShadowStateModule from './ChatShadowState';
+// ============================================================================
+// MARK: Legend / reward namespace exports
+// ============================================================================
+import * as ChatLegendModule from './ChatLegend';
+import * as ChatRewardModule from './ChatReward';
 import * as LearningModule from './learning';
 
 // ============================================================================
@@ -146,8 +151,14 @@ export {
   ChatNegotiationModuleNS as ChatNegotiation,
   ChatOfferModuleNS as ChatOffer,
   ChatShadowStateModule as ChatShadowState,
+  ChatLegendModule as ChatLegend,
+  ChatRewardModule as ChatReward,
   LearningModule as Learning,
 };
+
+export { ChatLegendModule, ChatRewardModule };
+export const ChatLegend = ChatLegendModule;
+export const ChatReward = ChatRewardModule;
 
 // ============================================================================
 // MARK: Registry keys and categories
@@ -186,6 +197,8 @@ export const CHAT_CONTRACT_MODULE_KEYS = [
   'ChatNegotiation',
   'ChatOffer',
   'ChatShadowState',
+  'ChatLegend',
+  'ChatReward',
   'Learning',
 ] as const;
 
@@ -209,6 +222,8 @@ export const CHAT_CONTRACT_CATEGORIES = [
   'RESCUE',
   'NEGOTIATION',
   'SHADOW',
+  'LEGEND',
+  'REWARD',
   'LEARNING',
 ] as const;
 
@@ -249,6 +264,8 @@ export const CHAT_CONTRACT_RELATIVE_PATHS = {
   ChatNegotiation: './ChatNegotiation',
   ChatOffer: './ChatOffer',
   ChatShadowState: './ChatShadowState',
+  ChatLegend: './ChatLegend',
+  ChatReward: './ChatReward',
   Learning: './learning',
 } as const satisfies Record<ChatContractModuleKey, string>;
 
@@ -279,6 +296,8 @@ export const CHAT_CONTRACT_FILE_NAMES = {
   ChatNegotiation: 'ChatNegotiation.ts',
   ChatOffer: 'ChatOffer.ts',
   ChatShadowState: 'ChatShadowState.ts',
+  ChatLegend: 'ChatLegend.ts',
+  ChatReward: 'ChatReward.ts',
   Learning: 'learning/index.ts',
 } as const satisfies Record<ChatContractModuleKey, string>;
 
@@ -323,6 +342,8 @@ export type ChatContractModuleNamespace =
   | typeof ChatNegotiationModuleNS
   | typeof ChatOfferModuleNS
   | typeof ChatShadowStateModule
+  | typeof ChatLegendModule
+  | typeof ChatRewardModule
   | typeof LearningModule;
 
 const ALL_RUNTIME_LANES = [
@@ -754,6 +775,34 @@ export const CHAT_CONTRACT_MODULE_DESCRIPTORS = Object.freeze({
     contractExportName: 'CHAT_SHADOW_STATE_MANIFEST',
     manifestExportName: 'CHAT_SHADOW_STATE_MANIFEST',
   }),
+  ChatLegend: Object.freeze<ChatContractModuleDescriptor>({
+    key: 'ChatLegend',
+    fileName: 'ChatLegend.ts',
+    importPath: './ChatLegend',
+    category: 'LEGEND',
+    description:
+      'Legend moment contracts, prestige markers, and legend manifest exports.',
+    sharedRootPath: `${CHAT_CONTRACT_AUTHORITIES.sharedContractsRoot}/ChatLegend.ts`,
+    usedBy: ALL_RUNTIME_LANES,
+    dependsOn: ['ChatChannels'] as const,
+    defaultExportName: null,
+    contractExportName: 'CHAT_LEGEND_MANIFEST',
+    manifestExportName: 'CHAT_LEGEND_MANIFEST',
+  }),
+  ChatReward: Object.freeze<ChatContractModuleDescriptor>({
+    key: 'ChatReward',
+    fileName: 'ChatReward.ts',
+    importPath: './ChatReward',
+    category: 'REWARD',
+    description:
+      'Reward grant contracts, reward ladder surfaces, and reward manifest exports.',
+    sharedRootPath: `${CHAT_CONTRACT_AUTHORITIES.sharedContractsRoot}/ChatReward.ts`,
+    usedBy: ALL_RUNTIME_LANES,
+    dependsOn: ['ChatChannels', 'ChatLegend'] as const,
+    defaultExportName: null,
+    contractExportName: 'CHAT_REWARD_MANIFEST',
+    manifestExportName: 'CHAT_REWARD_MANIFEST',
+  }),
   Learning: Object.freeze<ChatContractModuleDescriptor>({
     key: 'Learning',
     fileName: 'learning/index.ts',
@@ -898,6 +947,8 @@ export const CHAT_CONTRACT_DEPENDENCY_GRAPH = Object.freeze({
     'ChatScene',
     'ChatTranscript',
   ] as const,
+  ChatLegend: ['ChatChannels'] as const,
+  ChatReward: ['ChatChannels', 'ChatLegend'] as const,
   Learning: ['ChatChannels', 'ChatEvents'] as const,
 } as const satisfies Record<ChatContractModuleKey, readonly ChatContractModuleKey[]>);
 
@@ -929,6 +980,8 @@ export const CHAT_CONTRACT_MODULE_NAMESPACES = Object.freeze({
   ChatNegotiation: ChatNegotiationModuleNS,
   ChatOffer: ChatOfferModuleNS,
   ChatShadowState: ChatShadowStateModule,
+  ChatLegend: ChatLegendModule,
+  ChatReward: ChatRewardModule,
   Learning: LearningModule,
 } as const satisfies Record<ChatContractModuleKey, ChatContractModuleNamespace>);
 
@@ -1087,6 +1140,18 @@ export const CHAT_SHARED_CONTRACT_PACKAGES = Object.freeze({
     defaultContract: readNamedExport(ChatShadowStateModule, 'CHAT_SHADOW_STATE_MANIFEST'),
     manifest: readNamedExport(ChatShadowStateModule, 'CHAT_SHADOW_STATE_MANIFEST'),
   }),
+  ChatLegend: Object.freeze<ChatSharedContractPackage>({
+    descriptor: CHAT_CONTRACT_MODULE_DESCRIPTORS.ChatLegend,
+    namespace: ChatLegendModule,
+    defaultContract: readNamedExport(ChatLegendModule, 'CHAT_LEGEND_MANIFEST'),
+    manifest: readNamedExport(ChatLegendModule, 'CHAT_LEGEND_MANIFEST'),
+  }),
+  ChatReward: Object.freeze<ChatSharedContractPackage>({
+    descriptor: CHAT_CONTRACT_MODULE_DESCRIPTORS.ChatReward,
+    namespace: ChatRewardModule,
+    defaultContract: readNamedExport(ChatRewardModule, 'CHAT_REWARD_MANIFEST'),
+    manifest: readNamedExport(ChatRewardModule, 'CHAT_REWARD_MANIFEST'),
+  }),
   Learning: Object.freeze<ChatSharedContractPackage>({
     descriptor: CHAT_CONTRACT_MODULE_DESCRIPTORS.Learning,
     namespace: LearningModule,
@@ -1118,6 +1183,8 @@ export const CHAT_CONTRACT_KEYS_BY_CATEGORY = Object.freeze({
   RESCUE: ['ChatRescue', 'ChatRecovery'] as const,
   NEGOTIATION: ['ChatNegotiation', 'ChatOffer'] as const,
   SHADOW: ['ChatShadowState'] as const,
+  LEGEND: ['ChatLegend'] as const,
+  REWARD: ['ChatReward'] as const,
   LEARNING: ['Learning'] as const,
 } as const satisfies Record<ChatContractCategory, readonly ChatContractModuleKey[]>);
 
@@ -1209,6 +1276,8 @@ export const CHAT_SHARED_CONTRACT_ORDER = [
   'ChatNegotiation',
   'ChatOffer',
   'ChatShadowState',
+  'ChatLegend',
+  'ChatReward',
   'Learning',
 ] as const satisfies readonly ChatContractModuleKey[];
 
