@@ -105,6 +105,7 @@ import * as ChatMomentOrchestratorModule from './experience/ChatMomentOrchestrat
 import * as ChatSilenceEngineModule from './experience/ChatSilenceEngine';
 import * as ChatBossFightControllerModule from './combat/ChatBossFightController';
 import * as ChatCounterplayBridgeModule from './combat/ChatCounterplayBridge';
+import * as ChatAttackTelegraphModule from './combat/ChatAttackTelegraph';
 import * as ChatMlCompatibilityModule from './ml/ml_index';
 import * as ChatDlCompatibilityModule from './dl/dl_index';
 
@@ -138,6 +139,7 @@ export * from './experience/ChatMomentOrchestrator';
 export * from './experience/ChatSilenceEngine';
 export * from './combat/ChatBossFightController';
 export * from './combat/ChatCounterplayBridge';
+export * from './combat/ChatAttackTelegraph';
 export * from './ml/ml_index';
 export * from './dl/dl_index';
 
@@ -170,6 +172,7 @@ export { ChatMomentOrchestratorModule };
 export { ChatSilenceEngineModule };
 export { ChatBossFightControllerModule };
 export { ChatCounterplayBridgeModule };
+export { ChatAttackTelegraphModule };
 export { ChatMlCompatibilityModule };
 export { ChatDlCompatibilityModule };
 
@@ -658,6 +661,7 @@ export const CHAT_ENGINE_PUBLIC_EXPORTS = Object.freeze({
     './experience/ChatSilenceEngine',
     './combat/ChatBossFightController',
     './combat/ChatCounterplayBridge',
+    './combat/ChatAttackTelegraph',
   ] as const),
   trees: Object.freeze([
     './adapters',
@@ -698,6 +702,7 @@ export const CHAT_ENGINE_PUBLIC_EXPORTS = Object.freeze({
     'ChatSilenceEngineModule',
     'ChatBossFightControllerModule',
     'ChatCounterplayBridgeModule',
+    'ChatAttackTelegraphModule',
     'ChatMlCompatibilityModule',
     'ChatDlCompatibilityModule',
   ] as const),
@@ -730,6 +735,7 @@ export const CHAT_ENGINE_RUNTIME_MODULES = Object.freeze({
   ChatSilenceEngine: ChatSilenceEngineModule,
   ChatBossFightController: ChatBossFightControllerModule,
   ChatCounterplayBridge: ChatCounterplayBridgeModule,
+  ChatAttackTelegraph: ChatAttackTelegraphModule,
 } as const);
 
 export const CHAT_ENGINE_SUBTREE_MODULES = Object.freeze({
@@ -790,6 +796,7 @@ export const CHAT_ENGINE_LAZY_LOADERS = Object.freeze({
   ChatSilenceEngine: () => import('./experience/ChatSilenceEngine'),
   ChatBossFightController: () => import('./combat/ChatBossFightController'),
   ChatCounterplayBridge: () => import('./combat/ChatCounterplayBridge'),
+  ChatAttackTelegraph: () => import('./combat/ChatAttackTelegraph'),
   mlCompatibility: () => import('./ml/ml_index'),
   dlCompatibility: () => import('./dl/dl_index'),
 } as const);
