@@ -68,6 +68,8 @@ import * as SilencePolicy from './experience/ChatSilencePolicy';
 
 import * as BossFightEngine from './combat/ChatBossFightEngine';
 import * as CounterResolver from './combat/ChatCounterResolver';
+import * as TelegraphPolicy from './combat/ChatTelegraphPolicy';
+import * as AttackWindowPolicy from './combat/ChatAttackWindowPolicy';
 
 import {
   BACKEND_CHAT_ENGINE_PUBLIC_API_VERSION,
@@ -106,6 +108,8 @@ export * from './experience/ChatMomentLedger';
 export * from './experience/ChatSilencePolicy';
 export * from './combat/ChatBossFightEngine';
 export * from './combat/ChatCounterResolver';
+export * from './combat/ChatTelegraphPolicy';
+export * from './combat/ChatAttackWindowPolicy';
 
 export {
   Types as ChatTypesModule,
@@ -134,6 +138,8 @@ export {
   SilencePolicy as ChatSilencePolicyModule,
   BossFightEngine as ChatBossFightEngineModule,
   CounterResolver as ChatCounterResolverModule,
+  TelegraphPolicy as ChatTelegraphPolicyModule,
+  AttackWindowPolicy as ChatAttackWindowPolicyModule,
 };
 
 export const ChatEngineClass = Engine.ChatEngine;
@@ -150,6 +156,8 @@ export const ChatMomentLedgerClass = MomentLedger.ChatMomentLedger;
 export const ChatSilencePolicyClass = SilencePolicy.ChatSilencePolicy;
 export const ChatBossFightEngineClass = BossFightEngine.ChatBossFightEngine;
 export const ChatCounterResolverClass = CounterResolver.ChatCounterResolver;
+export const ChatTelegraphPolicyClass = TelegraphPolicy.ChatTelegraphPolicy;
+export const ChatAttackWindowPolicyClass = AttackWindowPolicy.ChatAttackWindowPolicy;
 
 // ============================================================================
 // MARK: Canonical tree manifest contracts
@@ -378,8 +386,8 @@ export const BACKEND_CHAT_CANONICAL_MODULES = Object.freeze([
   // Combat / language-as-combat
   descriptor('combat.ChatBossFightEngine', 'combat/ChatBossFightEngine.ts', 'COMBAT', 'GENERATED', true, 'Conversational boss-fight authority.'),
   descriptor('combat.ChatCounterResolver', 'combat/ChatCounterResolver.ts', 'COMBAT', 'GENERATED', true, 'Counterplay resolution authority.'),
-  descriptor('combat.ChatTelegraphPolicy', 'combat/ChatTelegraphPolicy.ts', 'COMBAT', 'PENDING', true, 'Attack telegraph law.'),
-  descriptor('combat.ChatAttackWindowPolicy', 'combat/ChatAttackWindowPolicy.ts', 'COMBAT', 'PENDING', true, 'Attack-window timing law.'),
+  descriptor('combat.ChatTelegraphPolicy', 'combat/ChatTelegraphPolicy.ts', 'COMBAT', 'GENERATED', true, 'Attack telegraph law.'),
+  descriptor('combat.ChatAttackWindowPolicy', 'combat/ChatAttackWindowPolicy.ts', 'COMBAT', 'GENERATED', true, 'Attack-window timing law.'),
 
   // Post-run ritual
   descriptor('postrun.PostRunNarrativeEngine', 'postrun/PostRunNarrativeEngine.ts', 'POSTRUN', 'PENDING', true, 'Post-run authored narrative and debrief.'),
@@ -457,6 +465,8 @@ export function createBackendChatAuthorityBundle(): BackendChatAuthorityBundle {
       combat: Object.freeze({
         bossFightEngine: BossFightEngine,
         counterResolver: CounterResolver,
+        telegraphPolicy: TelegraphPolicy,
+        attackWindowPolicy: AttackWindowPolicy,
       }),
     }),
     readiness: buildBackendChatLaneReadinessReport(),
@@ -591,6 +601,8 @@ export const BACKEND_CHAT_GENERATED_EXPERIENCE_MODULE_IDS = Object.freeze([
 export const BACKEND_CHAT_GENERATED_COMBAT_MODULE_IDS = Object.freeze([
   'combat.ChatBossFightEngine',
   'combat.ChatCounterResolver',
+  'combat.ChatTelegraphPolicy',
+  'combat.ChatAttackWindowPolicy',
 ] as const);
 
 export type BackendChatGeneratedRootModuleId = (typeof BACKEND_CHAT_GENERATED_ROOT_MODULE_IDS)[number];
@@ -632,6 +644,8 @@ export const BACKEND_CHAT_GENERATED_SURFACE = Object.freeze([
   generatedSurface('experience.ChatSilencePolicy', 'experience.silencePolicy', 'Silence, reveal, and interruption law.'),
   generatedSurface('combat.ChatBossFightEngine', 'combat.bossFightEngine', 'Authoritative conversational boss-fight runtime.'),
   generatedSurface('combat.ChatCounterResolver', 'combat.counterResolver', 'Authoritative counter window scoring and resolution.'),
+  generatedSurface('combat.ChatTelegraphPolicy', 'combat.telegraphPolicy', 'Authoritative attack telegraph selection and beat timing.'),
+  generatedSurface('combat.ChatAttackWindowPolicy', 'combat.attackWindowPolicy', 'Authoritative attack-window timing and grace law.'),
 ] as const satisfies readonly BackendChatGeneratedSurfaceDescriptor[]);
 
 export function listGeneratedSurfaceDescriptors(): readonly BackendChatGeneratedSurfaceDescriptor[] {
