@@ -195,6 +195,9 @@ export { RecoveryPromptPolicyModule };
 export { RescueBannerBridgeModule };
 export * as ShadowStateMirrorModule from './shadow/ShadowStateMirror';
 export * as RevealQueueModule from './shadow/RevealQueue';
+export { ShadowStateLedger, createShadowStateLedger, ChatShadowStateLedgerModule } from './shadow/ShadowStateLedger';
+export { RevealResolver, createRevealResolver, ChatRevealResolverModule } from './shadow/RevealResolver';
+export { DeferredReactionPlanner, createDeferredReactionPlanner, ChatDeferredReactionPlannerModule } from './shadow/DeferredReactionPlanner';
 export { ChatMlCompatibilityModule };
 export { ChatDlCompatibilityModule };
 
@@ -863,6 +866,12 @@ export const CHAT_ENGINE_LAZY_LOADERS = Object.freeze({
   mlCompatibility: () => import('./ml/ml_index'),
   dlCompatibility: () => import('./dl/dl_index'),
 } as const);
+
+export const CHAT_BACKEND_SHADOW_RUNTIME_MODULES = {
+  ShadowStateLedger: () => import('./shadow/ShadowStateLedger'),
+  RevealResolver: () => import('./shadow/RevealResolver'),
+  DeferredReactionPlanner: () => import('./shadow/DeferredReactionPlanner'),
+} as const;
 
 export type ChatEngineLazyLoaderKey = keyof typeof CHAT_ENGINE_LAZY_LOADERS;
 
