@@ -64,6 +64,8 @@ import * as ChatSceneModule from './ChatScene';
 import * as ChatInterruptionModule from './ChatInterruption';
 import * as ChatBossFightModule from './ChatBossFight';
 import * as ChatCounterplayModule from './ChatCounterplay';
+import * as ChatRescueModule from './ChatRescue';
+import * as ChatRecoveryModule from './ChatRecovery';
 import * as LearningModule from './learning';
 
 // ============================================================================
@@ -77,6 +79,8 @@ export * from './ChatScene';
 export * from './ChatInterruption';
 export * from './ChatBossFight';
 export * from './ChatCounterplay';
+export * from './ChatRescue';
+export * from './ChatRecovery';
 
 export {
   CHAT_CHANNEL_CONTRACT,
@@ -111,6 +115,8 @@ export {
   ChatInterruptionModule as ChatInterruption,
   ChatBossFightModule as ChatBossFight,
   ChatCounterplayModule as ChatCounterplay,
+  ChatRescueModule as ChatRescue,
+  ChatRecoveryModule as ChatRecovery,
   LearningModule as Learning,
 };
 
@@ -146,6 +152,8 @@ export const CHAT_CONTRACT_MODULE_KEYS = [
   'ChatInterruption',
   'ChatBossFight',
   'ChatCounterplay',
+  'ChatRescue',
+  'ChatRecovery',
   'Learning',
 ] as const;
 
@@ -166,6 +174,7 @@ export const CHAT_CONTRACT_CATEGORIES = [
   'PROOF',
   'BOSSFIGHT',
   'COUNTERPLAY',
+  'RESCUE',
   'LEARNING',
 ] as const;
 
@@ -201,6 +210,8 @@ export const CHAT_CONTRACT_RELATIVE_PATHS = {
   ChatInterruption: './ChatInterruption',
   ChatBossFight: './ChatBossFight',
   ChatCounterplay: './ChatCounterplay',
+  ChatRescue: './ChatRescue',
+  ChatRecovery: './ChatRecovery',
   Learning: './learning',
 } as const satisfies Record<ChatContractModuleKey, string>;
 
@@ -226,6 +237,8 @@ export const CHAT_CONTRACT_FILE_NAMES = {
   ChatInterruption: 'ChatInterruption.ts',
   ChatBossFight: 'ChatBossFight.ts',
   ChatCounterplay: 'ChatCounterplay.ts',
+  ChatRescue: 'ChatRescue.ts',
+  ChatRecovery: 'ChatRecovery.ts',
   Learning: 'learning/index.ts',
 } as const satisfies Record<ChatContractModuleKey, string>;
 
@@ -265,6 +278,8 @@ export type ChatContractModuleNamespace =
   | typeof ChatInterruptionModule
   | typeof ChatBossFightModule
   | typeof ChatCounterplayModule
+  | typeof ChatRescueModule
+  | typeof ChatRecoveryModule
   | typeof LearningModule;
 
 const ALL_RUNTIME_LANES = [
@@ -586,6 +601,51 @@ export const CHAT_CONTRACT_MODULE_DESCRIPTORS = Object.freeze({
     contractExportName: 'CHAT_COUNTERPLAY_CONTRACT_DESCRIPTOR',
     manifestExportName: null,
   }),
+  ChatRescue: Object.freeze<ChatContractModuleDescriptor>({
+    key: 'ChatRescue',
+    fileName: 'ChatRescue.ts',
+    importPath: './ChatRescue',
+    category: 'RESCUE',
+    description:
+      'Rescue interception contracts, churn-prevention triggers, helper handoff surfaces, and rescue descriptor exports.',
+    sharedRootPath: `${CHAT_CONTRACT_AUTHORITIES.sharedContractsRoot}/ChatRescue.ts`,
+    usedBy: ALL_RUNTIME_LANES,
+    dependsOn: [
+      'ChatChannels',
+      'ChatEvents',
+      'ChatMessage',
+      'ChatMoment',
+      'ChatScene',
+      'ChatInterruption',
+      'ChatBossFight',
+      'ChatCounterplay',
+    ] as const,
+    defaultExportName: null,
+    contractExportName: 'CHAT_RESCUE_CONTRACT_DESCRIPTOR',
+    manifestExportName: 'CHAT_RESCUE_CONTRACT_DESCRIPTOR',
+  }),
+  ChatRecovery: Object.freeze<ChatContractModuleDescriptor>({
+    key: 'ChatRecovery',
+    fileName: 'ChatRecovery.ts',
+    importPath: './ChatRecovery',
+    category: 'RESCUE',
+    description:
+      'Recovery ladders, one-card reset bundles, checkpoint contracts, and recovery descriptor exports.',
+    sharedRootPath: `${CHAT_CONTRACT_AUTHORITIES.sharedContractsRoot}/ChatRecovery.ts`,
+    usedBy: ALL_RUNTIME_LANES,
+    dependsOn: [
+      'ChatChannels',
+      'ChatEvents',
+      'ChatMoment',
+      'ChatScene',
+      'ChatBossFight',
+      'ChatCounterplay',
+      'ChatRescue',
+    ] as const,
+    defaultExportName: null,
+    contractExportName: 'CHAT_RECOVERY_CONTRACT_DESCRIPTOR',
+    manifestExportName: 'CHAT_RECOVERY_CONTRACT_DESCRIPTOR',
+  }),
   Learning: Object.freeze<ChatContractModuleDescriptor>({
     key: 'Learning',
     fileName: 'learning/index.ts',
@@ -685,6 +745,25 @@ export const CHAT_CONTRACT_DEPENDENCY_GRAPH = Object.freeze({
     'ChatScene',
     'ChatBossFight',
   ] as const,
+  ChatRescue: [
+    'ChatChannels',
+    'ChatEvents',
+    'ChatMessage',
+    'ChatMoment',
+    'ChatScene',
+    'ChatInterruption',
+    'ChatBossFight',
+    'ChatCounterplay',
+  ] as const,
+  ChatRecovery: [
+    'ChatChannels',
+    'ChatEvents',
+    'ChatMoment',
+    'ChatScene',
+    'ChatBossFight',
+    'ChatCounterplay',
+    'ChatRescue',
+  ] as const,
   Learning: ['ChatChannels', 'ChatEvents'] as const,
 } as const satisfies Record<ChatContractModuleKey, readonly ChatContractModuleKey[]>);
 
@@ -711,6 +790,8 @@ export const CHAT_CONTRACT_MODULE_NAMESPACES = Object.freeze({
   ChatInterruption: ChatInterruptionModule,
   ChatBossFight: ChatBossFightModule,
   ChatCounterplay: ChatCounterplayModule,
+  ChatRescue: ChatRescueModule,
+  ChatRecovery: ChatRecoveryModule,
   Learning: LearningModule,
 } as const satisfies Record<ChatContractModuleKey, ChatContractModuleNamespace>);
 
@@ -839,6 +920,18 @@ export const CHAT_SHARED_CONTRACT_PACKAGES = Object.freeze({
     defaultContract: readNamedExport(ChatCounterplayModule, 'CHAT_COUNTERPLAY_CONTRACT_DESCRIPTOR'),
     manifest: readNamedExport(ChatCounterplayModule, 'CHAT_COUNTERPLAY_CONTRACT_DESCRIPTOR'),
   }),
+  ChatRescue: Object.freeze<ChatSharedContractPackage>({
+    descriptor: CHAT_CONTRACT_MODULE_DESCRIPTORS.ChatRescue,
+    namespace: ChatRescueModule,
+    defaultContract: readNamedExport(ChatRescueModule, 'CHAT_RESCUE_CONTRACT_DESCRIPTOR'),
+    manifest: readNamedExport(ChatRescueModule, 'CHAT_RESCUE_CONTRACT_DESCRIPTOR'),
+  }),
+  ChatRecovery: Object.freeze<ChatSharedContractPackage>({
+    descriptor: CHAT_CONTRACT_MODULE_DESCRIPTORS.ChatRecovery,
+    namespace: ChatRecoveryModule,
+    defaultContract: readNamedExport(ChatRecoveryModule, 'CHAT_RECOVERY_CONTRACT_DESCRIPTOR'),
+    manifest: readNamedExport(ChatRecoveryModule, 'CHAT_RECOVERY_CONTRACT_DESCRIPTOR'),
+  }),
   Learning: Object.freeze<ChatSharedContractPackage>({
     descriptor: CHAT_CONTRACT_MODULE_DESCRIPTORS.Learning,
     namespace: LearningModule,
@@ -867,6 +960,7 @@ export const CHAT_CONTRACT_KEYS_BY_CATEGORY = Object.freeze({
   PROOF: ['ChatProof'] as const,
   BOSSFIGHT: ['ChatBossFight'] as const,
   COUNTERPLAY: ['ChatCounterplay'] as const,
+  RESCUE: ['ChatRescue', 'ChatRecovery'] as const,
   LEARNING: ['Learning'] as const,
 } as const satisfies Record<ChatContractCategory, readonly ChatContractModuleKey[]>);
 
@@ -953,6 +1047,8 @@ export const CHAT_SHARED_CONTRACT_ORDER = [
   'ChatInterruption',
   'ChatBossFight',
   'ChatCounterplay',
+  'ChatRescue',
+  'ChatRecovery',
   'Learning',
 ] as const satisfies readonly ChatContractModuleKey[];
 
