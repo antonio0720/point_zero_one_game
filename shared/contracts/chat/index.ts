@@ -66,6 +66,8 @@ import * as ChatBossFightModule from './ChatBossFight';
 import * as ChatCounterplayModule from './ChatCounterplay';
 import * as ChatRescueModule from './ChatRescue';
 import * as ChatRecoveryModule from './ChatRecovery';
+import * as ChatNegotiationModuleNS from './ChatNegotiation';
+import * as ChatOfferModuleNS from './ChatOffer';
 import * as LearningModule from './learning';
 
 // ============================================================================
@@ -81,6 +83,8 @@ export * from './ChatBossFight';
 export * from './ChatCounterplay';
 export * from './ChatRescue';
 export * from './ChatRecovery';
+export * from './ChatNegotiation';
+export * from './ChatOffer';
 
 export {
   CHAT_CHANNEL_CONTRACT,
@@ -117,6 +121,8 @@ export {
   ChatCounterplayModule as ChatCounterplay,
   ChatRescueModule as ChatRescue,
   ChatRecoveryModule as ChatRecovery,
+  ChatNegotiationModuleNS as ChatNegotiation,
+  ChatOfferModuleNS as ChatOffer,
   LearningModule as Learning,
 };
 
@@ -154,6 +160,8 @@ export const CHAT_CONTRACT_MODULE_KEYS = [
   'ChatCounterplay',
   'ChatRescue',
   'ChatRecovery',
+  'ChatNegotiation',
+  'ChatOffer',
   'Learning',
 ] as const;
 
@@ -175,6 +183,7 @@ export const CHAT_CONTRACT_CATEGORIES = [
   'BOSSFIGHT',
   'COUNTERPLAY',
   'RESCUE',
+  'NEGOTIATION',
   'LEARNING',
 ] as const;
 
@@ -212,6 +221,8 @@ export const CHAT_CONTRACT_RELATIVE_PATHS = {
   ChatCounterplay: './ChatCounterplay',
   ChatRescue: './ChatRescue',
   ChatRecovery: './ChatRecovery',
+  ChatNegotiation: './ChatNegotiation',
+  ChatOffer: './ChatOffer',
   Learning: './learning',
 } as const satisfies Record<ChatContractModuleKey, string>;
 
@@ -239,6 +250,8 @@ export const CHAT_CONTRACT_FILE_NAMES = {
   ChatCounterplay: 'ChatCounterplay.ts',
   ChatRescue: 'ChatRescue.ts',
   ChatRecovery: 'ChatRecovery.ts',
+  ChatNegotiation: 'ChatNegotiation.ts',
+  ChatOffer: 'ChatOffer.ts',
   Learning: 'learning/index.ts',
 } as const satisfies Record<ChatContractModuleKey, string>;
 
@@ -280,6 +293,8 @@ export type ChatContractModuleNamespace =
   | typeof ChatCounterplayModule
   | typeof ChatRescueModule
   | typeof ChatRecoveryModule
+  | typeof ChatNegotiationModuleNS
+  | typeof ChatOfferModuleNS
   | typeof LearningModule;
 
 const ALL_RUNTIME_LANES = [
@@ -646,6 +661,49 @@ export const CHAT_CONTRACT_MODULE_DESCRIPTORS = Object.freeze({
     contractExportName: 'CHAT_RECOVERY_CONTRACT_DESCRIPTOR',
     manifestExportName: 'CHAT_RECOVERY_CONTRACT_DESCRIPTOR',
   }),
+  ChatNegotiation: Object.freeze<ChatContractModuleDescriptor>({
+    key: 'ChatNegotiation',
+    fileName: 'ChatNegotiation.ts',
+    importPath: './ChatNegotiation',
+    category: 'NEGOTIATION',
+    description:
+      'Negotiation state contracts, offer ladders, deal-room session surfaces, and negotiation descriptor exports.',
+    sharedRootPath: `${CHAT_CONTRACT_AUTHORITIES.sharedContractsRoot}/ChatNegotiation.ts`,
+    usedBy: ALL_RUNTIME_LANES,
+    dependsOn: [
+      'ChatChannels',
+      'ChatEvents',
+      'ChatMessage',
+      'ChatPresence',
+      'ChatMoment',
+      'ChatScene',
+    ] as const,
+    defaultExportName: null,
+    contractExportName: 'CHAT_NEGOTIATION_CONTRACT_DESCRIPTOR',
+    manifestExportName: 'CHAT_NEGOTIATION_CONTRACT_DESCRIPTOR',
+  }),
+  ChatOffer: Object.freeze<ChatContractModuleDescriptor>({
+    key: 'ChatOffer',
+    fileName: 'ChatOffer.ts',
+    importPath: './ChatOffer',
+    category: 'NEGOTIATION',
+    description:
+      'Offer payload contracts, acceptance surfaces, counter-offer semantics, and offer descriptor exports.',
+    sharedRootPath: `${CHAT_CONTRACT_AUTHORITIES.sharedContractsRoot}/ChatOffer.ts`,
+    usedBy: ALL_RUNTIME_LANES,
+    dependsOn: [
+      'ChatChannels',
+      'ChatEvents',
+      'ChatMessage',
+      'ChatPresence',
+      'ChatMoment',
+      'ChatScene',
+      'ChatNegotiation',
+    ] as const,
+    defaultExportName: null,
+    contractExportName: 'CHAT_OFFER_CONTRACT_DESCRIPTOR',
+    manifestExportName: 'CHAT_OFFER_CONTRACT_DESCRIPTOR',
+  }),
   Learning: Object.freeze<ChatContractModuleDescriptor>({
     key: 'Learning',
     fileName: 'learning/index.ts',
@@ -764,6 +822,23 @@ export const CHAT_CONTRACT_DEPENDENCY_GRAPH = Object.freeze({
     'ChatCounterplay',
     'ChatRescue',
   ] as const,
+  ChatNegotiation: [
+    'ChatChannels',
+    'ChatEvents',
+    'ChatMessage',
+    'ChatPresence',
+    'ChatMoment',
+    'ChatScene',
+  ] as const,
+  ChatOffer: [
+    'ChatChannels',
+    'ChatEvents',
+    'ChatMessage',
+    'ChatPresence',
+    'ChatMoment',
+    'ChatScene',
+    'ChatNegotiation',
+  ] as const,
   Learning: ['ChatChannels', 'ChatEvents'] as const,
 } as const satisfies Record<ChatContractModuleKey, readonly ChatContractModuleKey[]>);
 
@@ -792,6 +867,8 @@ export const CHAT_CONTRACT_MODULE_NAMESPACES = Object.freeze({
   ChatCounterplay: ChatCounterplayModule,
   ChatRescue: ChatRescueModule,
   ChatRecovery: ChatRecoveryModule,
+  ChatNegotiation: ChatNegotiationModuleNS,
+  ChatOffer: ChatOfferModuleNS,
   Learning: LearningModule,
 } as const satisfies Record<ChatContractModuleKey, ChatContractModuleNamespace>);
 
@@ -932,6 +1009,18 @@ export const CHAT_SHARED_CONTRACT_PACKAGES = Object.freeze({
     defaultContract: readNamedExport(ChatRecoveryModule, 'CHAT_RECOVERY_CONTRACT_DESCRIPTOR'),
     manifest: readNamedExport(ChatRecoveryModule, 'CHAT_RECOVERY_CONTRACT_DESCRIPTOR'),
   }),
+  ChatNegotiation: Object.freeze<ChatSharedContractPackage>({
+    descriptor: CHAT_CONTRACT_MODULE_DESCRIPTORS.ChatNegotiation,
+    namespace: ChatNegotiationModuleNS,
+    defaultContract: readNamedExport(ChatNegotiationModuleNS, 'CHAT_NEGOTIATION_CONTRACT_DESCRIPTOR'),
+    manifest: readNamedExport(ChatNegotiationModuleNS, 'CHAT_NEGOTIATION_CONTRACT_DESCRIPTOR'),
+  }),
+  ChatOffer: Object.freeze<ChatSharedContractPackage>({
+    descriptor: CHAT_CONTRACT_MODULE_DESCRIPTORS.ChatOffer,
+    namespace: ChatOfferModuleNS,
+    defaultContract: readNamedExport(ChatOfferModuleNS, 'CHAT_OFFER_CONTRACT_DESCRIPTOR'),
+    manifest: readNamedExport(ChatOfferModuleNS, 'CHAT_OFFER_CONTRACT_DESCRIPTOR'),
+  }),
   Learning: Object.freeze<ChatSharedContractPackage>({
     descriptor: CHAT_CONTRACT_MODULE_DESCRIPTORS.Learning,
     namespace: LearningModule,
@@ -961,6 +1050,7 @@ export const CHAT_CONTRACT_KEYS_BY_CATEGORY = Object.freeze({
   BOSSFIGHT: ['ChatBossFight'] as const,
   COUNTERPLAY: ['ChatCounterplay'] as const,
   RESCUE: ['ChatRescue', 'ChatRecovery'] as const,
+  NEGOTIATION: ['ChatNegotiation', 'ChatOffer'] as const,
   LEARNING: ['Learning'] as const,
 } as const satisfies Record<ChatContractCategory, readonly ChatContractModuleKey[]>);
 
@@ -1049,6 +1139,8 @@ export const CHAT_SHARED_CONTRACT_ORDER = [
   'ChatCounterplay',
   'ChatRescue',
   'ChatRecovery',
+  'ChatNegotiation',
+  'ChatOffer',
   'Learning',
 ] as const satisfies readonly ChatContractModuleKey[];
 
