@@ -70,6 +70,8 @@ import * as BossFightEngine from './combat/ChatBossFightEngine';
 import * as CounterResolver from './combat/ChatCounterResolver';
 import * as TelegraphPolicy from './combat/ChatTelegraphPolicy';
 import * as AttackWindowPolicy from './combat/ChatAttackWindowPolicy';
+import * as RescueInterventionPlanner from './rescue/RescueInterventionPlanner';
+import * as ChurnRescuePolicy from './rescue/ChurnRescuePolicy';
 
 import {
   BACKEND_CHAT_ENGINE_PUBLIC_API_VERSION,
@@ -110,6 +112,8 @@ export * from './combat/ChatBossFightEngine';
 export * from './combat/ChatCounterResolver';
 export * from './combat/ChatTelegraphPolicy';
 export * from './combat/ChatAttackWindowPolicy';
+export * from './rescue/RescueInterventionPlanner';
+export * from './rescue/ChurnRescuePolicy';
 
 export {
   Types as ChatTypesModule,
@@ -140,6 +144,8 @@ export {
   CounterResolver as ChatCounterResolverModule,
   TelegraphPolicy as ChatTelegraphPolicyModule,
   AttackWindowPolicy as ChatAttackWindowPolicyModule,
+  RescueInterventionPlanner as ChatRescueInterventionPlannerModule,
+  ChurnRescuePolicy as ChatChurnRescuePolicyModule,
 };
 
 export const ChatEngineClass = Engine.ChatEngine;
@@ -158,6 +164,8 @@ export const ChatBossFightEngineClass = BossFightEngine.ChatBossFightEngine;
 export const ChatCounterResolverClass = CounterResolver.ChatCounterResolver;
 export const ChatTelegraphPolicyClass = TelegraphPolicy.ChatTelegraphPolicy;
 export const ChatAttackWindowPolicyClass = AttackWindowPolicy.ChatAttackWindowPolicy;
+export const RescueInterventionPlannerClass = RescueInterventionPlanner.RescueInterventionPlanner;
+export const ChurnRescuePolicyClass = ChurnRescuePolicy.ChurnRescuePolicy;
 
 // ============================================================================
 // MARK: Canonical tree manifest contracts
@@ -255,6 +263,10 @@ export interface BackendChatAuthorityBundle {
       readonly bossFightEngine: typeof BossFightEngine;
       readonly counterResolver: typeof CounterResolver;
     };
+    readonly rescue: {
+      readonly interventionPlanner: typeof RescueInterventionPlanner;
+      readonly churnRescuePolicy: typeof ChurnRescuePolicy;
+    };
   };
   readonly readiness: BackendChatLaneReadinessReport;
 }
@@ -349,8 +361,8 @@ export const BACKEND_CHAT_CANONICAL_MODULES = Object.freeze([
   descriptor('persona.LatencyStyleResolver', 'persona/LatencyStyleResolver.ts', 'PERSONA', 'PENDING', true, 'Persona-specific typing/reveal latency policy.'),
 
   // Rescue
-  descriptor('rescue.RescueInterventionPlanner', 'rescue/RescueInterventionPlanner.ts', 'RESCUE', 'PENDING', true, 'Rage-quit and overwhelm rescue planning.'),
-  descriptor('rescue.ChurnRescuePolicy', 'rescue/ChurnRescuePolicy.ts', 'RESCUE', 'PENDING', true, 'Churn-risk rescue law.'),
+  descriptor('rescue.RescueInterventionPlanner', 'rescue/RescueInterventionPlanner.ts', 'RESCUE', 'GENERATED', true, 'Rage-quit and overwhelm rescue planning.'),
+  descriptor('rescue.ChurnRescuePolicy', 'rescue/ChurnRescuePolicy.ts', 'RESCUE', 'GENERATED', true, 'Churn-risk rescue law.'),
   descriptor('rescue.RecoveryOutcomeTracker', 'rescue/RecoveryOutcomeTracker.ts', 'RESCUE', 'PENDING', true, 'Rescue outcome tracking and reinforcement.'),
 
   // Deal room
@@ -467,6 +479,10 @@ export function createBackendChatAuthorityBundle(): BackendChatAuthorityBundle {
         counterResolver: CounterResolver,
         telegraphPolicy: TelegraphPolicy,
         attackWindowPolicy: AttackWindowPolicy,
+      }),
+      rescue: Object.freeze({
+        interventionPlanner: RescueInterventionPlanner,
+        churnRescuePolicy: ChurnRescuePolicy,
       }),
     }),
     readiness: buildBackendChatLaneReadinessReport(),
