@@ -73,6 +73,9 @@ import * as AttackWindowPolicy from './combat/ChatAttackWindowPolicy';
 import * as RescueInterventionPlanner from './rescue/RescueInterventionPlanner';
 import * as ChurnRescuePolicy from './rescue/ChurnRescuePolicy';
 import * as RecoveryOutcomeTracker from './rescue/RecoveryOutcomeTracker';
+import * as LegendMomentLedger from './rewards/LegendMomentLedger';
+import * as RewardGrantResolver from './rewards/RewardGrantResolver';
+import * as ReplayMomentIndexer from './rewards/ReplayMomentIndexer';
 import { ChatNegotiationEngineModule } from './dealroom/NegotiationEngine';
 import { ChatOfferCounterEngineModule } from './dealroom/OfferCounterEngine';
 
@@ -118,6 +121,9 @@ export * from './combat/ChatAttackWindowPolicy';
 export * from './rescue/RescueInterventionPlanner';
 export * from './rescue/ChurnRescuePolicy';
 export * from './rescue/RecoveryOutcomeTracker';
+export * from './rewards/LegendMomentLedger';
+export * from './rewards/RewardGrantResolver';
+export * from './rewards/ReplayMomentIndexer';
 
 // ── Deal Room / Negotiation Runtime ─────────────────────────────────────────
 export { NegotiationEngine, createNegotiationEngine, ChatNegotiationEngineModule } from './dealroom/NegotiationEngine';
@@ -157,6 +163,9 @@ export {
   RescueInterventionPlanner as ChatRescueInterventionPlannerModule,
   ChurnRescuePolicy as ChatChurnRescuePolicyModule,
   RecoveryOutcomeTracker as ChatRecoveryOutcomeTrackerModule,
+  LegendMomentLedger as ChatLegendMomentLedgerModule,
+  RewardGrantResolver as ChatRewardGrantResolverModule,
+  ReplayMomentIndexer as ChatReplayMomentIndexerModule,
 };
 
 export const ChatEngineClass = Engine.ChatEngine;
@@ -178,6 +187,9 @@ export const ChatAttackWindowPolicyClass = AttackWindowPolicy.ChatAttackWindowPo
 export const RescueInterventionPlannerClass = RescueInterventionPlanner.RescueInterventionPlanner;
 export const ChurnRescuePolicyClass = ChurnRescuePolicy.ChurnRescuePolicy;
 export const RecoveryOutcomeTrackerClass = RecoveryOutcomeTracker.RecoveryOutcomeTracker;
+export const ChatLegendMomentLedgerClass = LegendMomentLedger.LegendMomentLedger;
+export const ChatRewardGrantResolverClass = RewardGrantResolver.RewardGrantResolver;
+export const ChatReplayMomentIndexerClass = ReplayMomentIndexer.ReplayMomentIndexer;
 
 // ============================================================================
 // MARK: Canonical tree manifest contracts
@@ -390,9 +402,9 @@ export const BACKEND_CHAT_CANONICAL_MODULES = Object.freeze([
   descriptor('shadow.DeferredReactionPlanner', 'shadow/DeferredReactionPlanner.ts', 'SHADOW', 'PENDING', true, 'Deferred-reaction queue planning.'),
 
   // Rewards / prestige
-  descriptor('rewards.LegendMomentLedger', 'rewards/LegendMomentLedger.ts', 'REWARDS', 'PENDING', true, 'Prestige-worthy moment archive.'),
-  descriptor('rewards.RewardGrantResolver', 'rewards/RewardGrantResolver.ts', 'REWARDS', 'PENDING', true, 'Chat reward grant resolution.'),
-  descriptor('rewards.ReplayMomentIndexer', 'rewards/ReplayMomentIndexer.ts', 'REWARDS', 'PENDING', true, 'Legend/replay cross-indexing.'),
+  descriptor('rewards.LegendMomentLedger', 'rewards/LegendMomentLedger.ts', 'REWARDS', 'GENERATED', true, 'Prestige-worthy moment archive.'),
+  descriptor('rewards.RewardGrantResolver', 'rewards/RewardGrantResolver.ts', 'REWARDS', 'GENERATED', true, 'Chat reward grant resolution.'),
+  descriptor('rewards.ReplayMomentIndexer', 'rewards/ReplayMomentIndexer.ts', 'REWARDS', 'GENERATED', true, 'Legend/replay cross-indexing.'),
 
   // LiveOps
   descriptor('liveops.WorldEventDirector', 'liveops/WorldEventDirector.ts', 'LIVEOPS', 'PENDING', true, 'World-scale chat event orchestration.'),
@@ -497,6 +509,11 @@ export function createBackendChatAuthorityBundle(): BackendChatAuthorityBundle {
         interventionPlanner: RescueInterventionPlanner,
         churnRescuePolicy: ChurnRescuePolicy,
         recoveryOutcomeTracker: RecoveryOutcomeTracker,
+      }),
+      rewards: Object.freeze({
+        legendMomentLedger: LegendMomentLedger,
+        rewardGrantResolver: RewardGrantResolver,
+        replayMomentIndexer: ReplayMomentIndexer,
       }),
       dealroom: {
         negotiationEngine: ChatNegotiationEngineModule,
@@ -639,14 +656,22 @@ export const BACKEND_CHAT_GENERATED_COMBAT_MODULE_IDS = Object.freeze([
   'combat.ChatAttackWindowPolicy',
 ] as const);
 
+export const BACKEND_CHAT_GENERATED_REWARD_MODULE_IDS = Object.freeze([
+  'rewards.LegendMomentLedger',
+  'rewards.RewardGrantResolver',
+  'rewards.ReplayMomentIndexer',
+] as const);
+
 export type BackendChatGeneratedRootModuleId = (typeof BACKEND_CHAT_GENERATED_ROOT_MODULE_IDS)[number];
 export type BackendChatGeneratedExperienceModuleId =
   (typeof BACKEND_CHAT_GENERATED_EXPERIENCE_MODULE_IDS)[number];
 export type BackendChatGeneratedCombatModuleId =
   (typeof BACKEND_CHAT_GENERATED_COMBAT_MODULE_IDS)[number];
+export type BackendChatGeneratedRewardModuleId =
+  (typeof BACKEND_CHAT_GENERATED_REWARD_MODULE_IDS)[number];
 
 export interface BackendChatGeneratedSurfaceDescriptor {
-  readonly id: BackendChatGeneratedRootModuleId | BackendChatGeneratedExperienceModuleId | BackendChatGeneratedCombatModuleId;
+  readonly id: BackendChatGeneratedRootModuleId | BackendChatGeneratedExperienceModuleId | BackendChatGeneratedCombatModuleId | BackendChatGeneratedRewardModuleId;
   readonly namespaceKey: string;
   readonly exported: boolean;
   readonly description: string;
@@ -680,6 +705,9 @@ export const BACKEND_CHAT_GENERATED_SURFACE = Object.freeze([
   generatedSurface('combat.ChatCounterResolver', 'combat.counterResolver', 'Authoritative counter window scoring and resolution.'),
   generatedSurface('combat.ChatTelegraphPolicy', 'combat.telegraphPolicy', 'Authoritative attack telegraph selection and beat timing.'),
   generatedSurface('combat.ChatAttackWindowPolicy', 'combat.attackWindowPolicy', 'Authoritative attack-window timing and grace law.'),
+  generatedSurface('rewards.LegendMomentLedger', 'rewards.legendMomentLedger', 'Authoritative prestige ledger over legend-class moments.'),
+  generatedSurface('rewards.RewardGrantResolver', 'rewards.rewardGrantResolver', 'Authoritative legend-to-reward grant resolution.'),
+  generatedSurface('rewards.ReplayMomentIndexer', 'rewards.replayMomentIndexer', 'Authoritative replay-to-prestige cross indexing.'),
 ] as const satisfies readonly BackendChatGeneratedSurfaceDescriptor[]);
 
 export function listGeneratedSurfaceDescriptors(): readonly BackendChatGeneratedSurfaceDescriptor[] {
@@ -691,6 +719,12 @@ export const CHAT_BACKEND_DEALROOM_RUNTIME_MODULES = {
   OfferCounterEngine: () => import('./dealroom/OfferCounterEngine'),
   BluffResolver: () => import('./dealroom/BluffResolver'),
   NegotiationReputationPolicy: () => import('./dealroom/NegotiationReputationPolicy'),
+} as const;
+
+export const CHAT_BACKEND_REWARD_RUNTIME_MODULES = {
+  LegendMomentLedger: () => import('./rewards/LegendMomentLedger'),
+  RewardGrantResolver: () => import('./rewards/RewardGrantResolver'),
+  ReplayMomentIndexer: () => import('./rewards/ReplayMomentIndexer'),
 } as const;
 
 // ============================================================================
@@ -807,6 +841,12 @@ export function assertBackendChatManifestIntegrity(): readonly string[] {
     const descriptor = getBackendChatModuleDescriptor(id);
     if (!descriptor) issues.push(`generated_experience_surface_missing_descriptor:${id}`);
     else if (descriptor.readiness !== 'GENERATED') issues.push(`generated_experience_surface_not_generated:${id}`);
+  }
+
+  for (const id of BACKEND_CHAT_GENERATED_REWARD_MODULE_IDS) {
+    const descriptor = getBackendChatModuleDescriptor(id);
+    if (!descriptor) issues.push(`generated_reward_surface_missing_descriptor:${id}`);
+    else if (descriptor.readiness !== 'GENERATED') issues.push(`generated_reward_surface_not_generated:${id}`);
   }
 
   return Object.freeze(issues);
