@@ -109,6 +109,8 @@ import * as ChatAttackTelegraphModule from './combat/ChatAttackTelegraph';
 import * as RageQuitInterceptorModule from './rescue/RageQuitInterceptor';
 import * as RecoveryPromptPolicyModule from './rescue/RecoveryPromptPolicy';
 import * as RescueBannerBridgeModule from './rescue/RescueBannerBridge';
+import * as ShadowStateMirrorModule from './shadow/ShadowStateMirror';
+import * as RevealQueueModule from './shadow/RevealQueue';
 import * as ChatMlCompatibilityModule from './ml/ml_index';
 import * as ChatDlCompatibilityModule from './dl/dl_index';
 
@@ -149,6 +151,8 @@ export * from './combat/ChatAttackTelegraph';
 export * from './rescue/RageQuitInterceptor';
 export * from './rescue/RecoveryPromptPolicy';
 export * from './rescue/RescueBannerBridge';
+export * from './shadow/ShadowStateMirror';
+export * from './shadow/RevealQueue';
 export * from './ml/ml_index';
 export * from './dl/dl_index';
 
@@ -189,6 +193,8 @@ export { ChatAttackTelegraphModule };
 export { RageQuitInterceptorModule };
 export { RecoveryPromptPolicyModule };
 export { RescueBannerBridgeModule };
+export * as ShadowStateMirrorModule from './shadow/ShadowStateMirror';
+export * as RevealQueueModule from './shadow/RevealQueue';
 export { ChatMlCompatibilityModule };
 export { ChatDlCompatibilityModule };
 
@@ -765,6 +771,8 @@ export const CHAT_ENGINE_RUNTIME_MODULES = Object.freeze({
   RageQuitInterceptor: RageQuitInterceptorModule,
   RecoveryPromptPolicy: RecoveryPromptPolicyModule,
   RescueBannerBridge: RescueBannerBridgeModule,
+  ShadowStateMirror: ShadowStateMirrorModule,
+  RevealQueue: RevealQueueModule,
 } as const);
 
 export const CHAT_ENGINE_SUBTREE_MODULES = Object.freeze({
@@ -778,6 +786,10 @@ export const CHAT_ENGINE_SUBTREE_MODULES = Object.freeze({
     NegotiationIntentTracker: NegotiationIntentTrackerModule,
     OfferPressureScorer: OfferPressureScorerModule,
     BluffSignalTracker: BluffSignalTrackerModule,
+  } as const),
+  shadow: Object.freeze({
+    ShadowStateMirror: ShadowStateMirrorModule,
+    RevealQueue: RevealQueueModule,
   } as const),
   mlCompatibility: ChatMlCompatibilityModule,
   dlCompatibility: ChatDlCompatibilityModule,
@@ -793,6 +805,10 @@ export const CHAT_ENGINE_NAMESPACE = Object.freeze({
     NegotiationIntentTracker: NegotiationIntentTrackerModule,
     OfferPressureScorer: OfferPressureScorerModule,
     BluffSignalTracker: BluffSignalTrackerModule,
+  } as const),
+  shadow: Object.freeze({
+    ShadowStateMirror: ShadowStateMirrorModule,
+    RevealQueue: RevealQueueModule,
   } as const),
   intelligence: Object.freeze({
     canonical: ChatIntelligenceModule,
@@ -842,6 +858,8 @@ export const CHAT_ENGINE_LAZY_LOADERS = Object.freeze({
   RageQuitInterceptor: () => import('./rescue/RageQuitInterceptor'),
   RecoveryPromptPolicy: () => import('./rescue/RecoveryPromptPolicy'),
   RescueBannerBridge: () => import('./rescue/RescueBannerBridge'),
+  ShadowStateMirror: () => import('./shadow/ShadowStateMirror'),
+  RevealQueue: () => import('./shadow/RevealQueue'),
   mlCompatibility: () => import('./ml/ml_index'),
   dlCompatibility: () => import('./dl/dl_index'),
 } as const);
