@@ -68,6 +68,7 @@ import * as ChatRescueModule from './ChatRescue';
 import * as ChatRecoveryModule from './ChatRecovery';
 import * as ChatNegotiationModuleNS from './ChatNegotiation';
 import * as ChatOfferModuleNS from './ChatOffer';
+import * as ChatShadowStateModule from './ChatShadowState';
 import * as LearningModule from './learning';
 
 // ============================================================================
@@ -85,6 +86,27 @@ export * from './ChatRescue';
 export * from './ChatRecovery';
 export * from './ChatNegotiation';
 export * from './ChatOffer';
+export {
+  CHAT_SHADOW_STATE_VERSION,
+  CHAT_SHADOW_STATE_MANIFEST,
+  CHAT_SHADOW_DEFAULT_THRESHOLDS,
+  CHAT_SHADOW_EMPTY_PRESSURE,
+  CHAT_SHADOW_EMPTY_WITNESSES,
+  clampShadowScalar,
+  normalizeShadowPressureVector,
+  addShadowPressureVectors,
+  createEmptyShadowRoomSnapshot,
+  computeShadowWitnessEnvelope,
+  summarizeShadowQueue,
+  computeShadowPressureFromAnchors,
+  foldShadowDelta,
+  isShadowPressureAnchor,
+  isShadowSuppressedReply,
+  isShadowRevealQueueItem,
+  isShadowMemoryMarker,
+  toShadowRoomPreview,
+  buildShadowDiagnostics,
+} from './ChatShadowState';
 
 export {
   CHAT_CHANNEL_CONTRACT,
@@ -123,6 +145,7 @@ export {
   ChatRecoveryModule as ChatRecovery,
   ChatNegotiationModuleNS as ChatNegotiation,
   ChatOfferModuleNS as ChatOffer,
+  ChatShadowStateModule as ChatShadowState,
   LearningModule as Learning,
 };
 
@@ -162,6 +185,7 @@ export const CHAT_CONTRACT_MODULE_KEYS = [
   'ChatRecovery',
   'ChatNegotiation',
   'ChatOffer',
+  'ChatShadowState',
   'Learning',
 ] as const;
 
@@ -184,6 +208,7 @@ export const CHAT_CONTRACT_CATEGORIES = [
   'COUNTERPLAY',
   'RESCUE',
   'NEGOTIATION',
+  'SHADOW',
   'LEARNING',
 ] as const;
 
@@ -223,6 +248,7 @@ export const CHAT_CONTRACT_RELATIVE_PATHS = {
   ChatRecovery: './ChatRecovery',
   ChatNegotiation: './ChatNegotiation',
   ChatOffer: './ChatOffer',
+  ChatShadowState: './ChatShadowState',
   Learning: './learning',
 } as const satisfies Record<ChatContractModuleKey, string>;
 
@@ -252,6 +278,7 @@ export const CHAT_CONTRACT_FILE_NAMES = {
   ChatRecovery: 'ChatRecovery.ts',
   ChatNegotiation: 'ChatNegotiation.ts',
   ChatOffer: 'ChatOffer.ts',
+  ChatShadowState: 'ChatShadowState.ts',
   Learning: 'learning/index.ts',
 } as const satisfies Record<ChatContractModuleKey, string>;
 
@@ -295,6 +322,7 @@ export type ChatContractModuleNamespace =
   | typeof ChatRecoveryModule
   | typeof ChatNegotiationModuleNS
   | typeof ChatOfferModuleNS
+  | typeof ChatShadowStateModule
   | typeof LearningModule;
 
 const ALL_RUNTIME_LANES = [
@@ -704,6 +732,28 @@ export const CHAT_CONTRACT_MODULE_DESCRIPTORS = Object.freeze({
     contractExportName: 'CHAT_OFFER_CONTRACT_DESCRIPTOR',
     manifestExportName: 'CHAT_OFFER_CONTRACT_DESCRIPTOR',
   }),
+  ChatShadowState: Object.freeze<ChatContractModuleDescriptor>({
+    key: 'ChatShadowState',
+    fileName: 'ChatShadowState.ts',
+    importPath: './ChatShadowState',
+    category: 'SHADOW',
+    description:
+      'hidden chat-state, reveal queues, latent hostility, witness pressure, callback anchors, and delayed reveal law.',
+    sharedRootPath: `${CHAT_CONTRACT_AUTHORITIES.sharedContractsRoot}/ChatShadowState.ts`,
+    usedBy: ALL_RUNTIME_LANES,
+    dependsOn: [
+      'ChatChannels',
+      'ChatEvents',
+      'ChatMessage',
+      'ChatPresence',
+      'ChatMoment',
+      'ChatScene',
+      'ChatTranscript',
+    ] as const,
+    defaultExportName: null,
+    contractExportName: 'CHAT_SHADOW_STATE_MANIFEST',
+    manifestExportName: 'CHAT_SHADOW_STATE_MANIFEST',
+  }),
   Learning: Object.freeze<ChatContractModuleDescriptor>({
     key: 'Learning',
     fileName: 'learning/index.ts',
@@ -839,6 +889,15 @@ export const CHAT_CONTRACT_DEPENDENCY_GRAPH = Object.freeze({
     'ChatScene',
     'ChatNegotiation',
   ] as const,
+  ChatShadowState: [
+    'ChatChannels',
+    'ChatEvents',
+    'ChatMessage',
+    'ChatPresence',
+    'ChatMoment',
+    'ChatScene',
+    'ChatTranscript',
+  ] as const,
   Learning: ['ChatChannels', 'ChatEvents'] as const,
 } as const satisfies Record<ChatContractModuleKey, readonly ChatContractModuleKey[]>);
 
@@ -869,6 +928,7 @@ export const CHAT_CONTRACT_MODULE_NAMESPACES = Object.freeze({
   ChatRecovery: ChatRecoveryModule,
   ChatNegotiation: ChatNegotiationModuleNS,
   ChatOffer: ChatOfferModuleNS,
+  ChatShadowState: ChatShadowStateModule,
   Learning: LearningModule,
 } as const satisfies Record<ChatContractModuleKey, ChatContractModuleNamespace>);
 
@@ -1021,6 +1081,12 @@ export const CHAT_SHARED_CONTRACT_PACKAGES = Object.freeze({
     defaultContract: readNamedExport(ChatOfferModuleNS, 'CHAT_OFFER_CONTRACT_DESCRIPTOR'),
     manifest: readNamedExport(ChatOfferModuleNS, 'CHAT_OFFER_CONTRACT_DESCRIPTOR'),
   }),
+  ChatShadowState: Object.freeze<ChatSharedContractPackage>({
+    descriptor: CHAT_CONTRACT_MODULE_DESCRIPTORS.ChatShadowState,
+    namespace: ChatShadowStateModule,
+    defaultContract: readNamedExport(ChatShadowStateModule, 'CHAT_SHADOW_STATE_MANIFEST'),
+    manifest: readNamedExport(ChatShadowStateModule, 'CHAT_SHADOW_STATE_MANIFEST'),
+  }),
   Learning: Object.freeze<ChatSharedContractPackage>({
     descriptor: CHAT_CONTRACT_MODULE_DESCRIPTORS.Learning,
     namespace: LearningModule,
@@ -1051,6 +1117,7 @@ export const CHAT_CONTRACT_KEYS_BY_CATEGORY = Object.freeze({
   COUNTERPLAY: ['ChatCounterplay'] as const,
   RESCUE: ['ChatRescue', 'ChatRecovery'] as const,
   NEGOTIATION: ['ChatNegotiation', 'ChatOffer'] as const,
+  SHADOW: ['ChatShadowState'] as const,
   LEARNING: ['Learning'] as const,
 } as const satisfies Record<ChatContractCategory, readonly ChatContractModuleKey[]>);
 
@@ -1141,6 +1208,7 @@ export const CHAT_SHARED_CONTRACT_ORDER = [
   'ChatRecovery',
   'ChatNegotiation',
   'ChatOffer',
+  'ChatShadowState',
   'Learning',
 ] as const satisfies readonly ChatContractModuleKey[];
 
