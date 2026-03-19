@@ -103,6 +103,8 @@ import * as ChatIntelligenceModule from './intelligence';
 import * as ChatDramaDirectorModule from './experience/ChatDramaDirector';
 import * as ChatMomentOrchestratorModule from './experience/ChatMomentOrchestrator';
 import * as ChatSilenceEngineModule from './experience/ChatSilenceEngine';
+import * as ChatBossFightControllerModule from './combat/ChatBossFightController';
+import * as ChatCounterplayBridgeModule from './combat/ChatCounterplayBridge';
 import * as ChatMlCompatibilityModule from './ml/ml_index';
 import * as ChatDlCompatibilityModule from './dl/dl_index';
 
@@ -134,6 +136,8 @@ export * from './intelligence';
 export * from './experience/ChatDramaDirector';
 export * from './experience/ChatMomentOrchestrator';
 export * from './experience/ChatSilenceEngine';
+export * from './combat/ChatBossFightController';
+export * from './combat/ChatCounterplayBridge';
 export * from './ml/ml_index';
 export * from './dl/dl_index';
 
@@ -164,6 +168,8 @@ export { ChatIntelligenceModule };
 export { ChatDramaDirectorModule };
 export { ChatMomentOrchestratorModule };
 export { ChatSilenceEngineModule };
+export { ChatBossFightControllerModule };
+export { ChatCounterplayBridgeModule };
 export { ChatMlCompatibilityModule };
 export { ChatDlCompatibilityModule };
 
@@ -224,11 +230,14 @@ export const CHAT_ENGINE_PRESENT_RUNTIME_FILES = Object.freeze([
   'experience/ChatDramaDirector.ts',
   'experience/ChatMomentOrchestrator.ts',
   'experience/ChatSilenceEngine.ts',
+  'combat/ChatBossFightController.ts',
+  'combat/ChatCounterplayBridge.ts',
 ] as const);
 
 export const CHAT_ENGINE_PRESENT_SUBTREES = Object.freeze([
   'adapters',
   'channels',
+  'combat',
   'dl',
   'intelligence',
   'ml',
@@ -324,6 +333,8 @@ export const CHAT_ENGINE_CANONICAL_FRONTEND_TARGET_TREE = Object.freeze([
   'experience/ChatDramaDirector.ts',
   'experience/ChatMomentOrchestrator.ts',
   'experience/ChatSilenceEngine.ts',
+  'combat/ChatBossFightController.ts',
+  'combat/ChatCounterplayBridge.ts',
 ] as const);
 
 export const CHAT_ENGINE_CANONICAL_FUTURE_FRONTEND_EXPANSIONS = Object.freeze([
@@ -342,8 +353,6 @@ export const CHAT_ENGINE_CANONICAL_FUTURE_FRONTEND_EXPANSIONS = Object.freeze([
   'persona/PersonaVoiceprint.ts',
   'persona/PersonaDelayProfile.ts',
   'persona/SignatureComposer.ts',
-  'combat/ChatBossFightController.ts',
-  'combat/ChatCounterplayBridge.ts',
   'combat/ChatAttackTelegraph.ts',
   'rescue/RageQuitInterceptor.ts',
   'rescue/RecoveryPromptPolicy.ts',
@@ -647,6 +656,8 @@ export const CHAT_ENGINE_PUBLIC_EXPORTS = Object.freeze({
     './experience/ChatDramaDirector',
     './experience/ChatMomentOrchestrator',
     './experience/ChatSilenceEngine',
+    './combat/ChatBossFightController',
+    './combat/ChatCounterplayBridge',
   ] as const),
   trees: Object.freeze([
     './adapters',
@@ -685,6 +696,8 @@ export const CHAT_ENGINE_PUBLIC_EXPORTS = Object.freeze({
     'ChatDramaDirectorModule',
     'ChatMomentOrchestratorModule',
     'ChatSilenceEngineModule',
+    'ChatBossFightControllerModule',
+    'ChatCounterplayBridgeModule',
     'ChatMlCompatibilityModule',
     'ChatDlCompatibilityModule',
   ] as const),
@@ -715,6 +728,8 @@ export const CHAT_ENGINE_RUNTIME_MODULES = Object.freeze({
   ChatDramaDirector: ChatDramaDirectorModule,
   ChatMomentOrchestrator: ChatMomentOrchestratorModule,
   ChatSilenceEngine: ChatSilenceEngineModule,
+  ChatBossFightController: ChatBossFightControllerModule,
+  ChatCounterplayBridge: ChatCounterplayBridgeModule,
 } as const);
 
 export const CHAT_ENGINE_SUBTREE_MODULES = Object.freeze({
@@ -773,6 +788,8 @@ export const CHAT_ENGINE_LAZY_LOADERS = Object.freeze({
   ChatDramaDirector: () => import('./experience/ChatDramaDirector'),
   ChatMomentOrchestrator: () => import('./experience/ChatMomentOrchestrator'),
   ChatSilenceEngine: () => import('./experience/ChatSilenceEngine'),
+  ChatBossFightController: () => import('./combat/ChatBossFightController'),
+  ChatCounterplayBridge: () => import('./combat/ChatCounterplayBridge'),
   mlCompatibility: () => import('./ml/ml_index'),
   dlCompatibility: () => import('./dl/dl_index'),
 } as const);
