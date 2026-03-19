@@ -66,6 +66,9 @@ import * as ScenePlanner from './experience/ChatScenePlanner';
 import * as MomentLedger from './experience/ChatMomentLedger';
 import * as SilencePolicy from './experience/ChatSilencePolicy';
 
+import * as BossFightEngine from './combat/ChatBossFightEngine';
+import * as CounterResolver from './combat/ChatCounterResolver';
+
 import {
   BACKEND_CHAT_ENGINE_PUBLIC_API_VERSION,
   BACKEND_CHAT_ENGINE_VERSION,
@@ -101,6 +104,8 @@ export * from './experience/ChatDramaOrchestrator';
 export * from './experience/ChatScenePlanner';
 export * from './experience/ChatMomentLedger';
 export * from './experience/ChatSilencePolicy';
+export * from './combat/ChatBossFightEngine';
+export * from './combat/ChatCounterResolver';
 
 export {
   Types as ChatTypesModule,
@@ -127,6 +132,8 @@ export {
   ScenePlanner as ChatScenePlannerModule,
   MomentLedger as ChatMomentLedgerModule,
   SilencePolicy as ChatSilencePolicyModule,
+  BossFightEngine as ChatBossFightEngineModule,
+  CounterResolver as ChatCounterResolverModule,
 };
 
 export const ChatEngineClass = Engine.ChatEngine;
@@ -141,6 +148,8 @@ export const ChatDramaOrchestratorClass = DramaOrchestrator.ChatDramaOrchestrato
 export const ChatScenePlannerClass = ScenePlanner.ChatScenePlanner;
 export const ChatMomentLedgerClass = MomentLedger.ChatMomentLedger;
 export const ChatSilencePolicyClass = SilencePolicy.ChatSilencePolicy;
+export const ChatBossFightEngineClass = BossFightEngine.ChatBossFightEngine;
+export const ChatCounterResolverClass = CounterResolver.ChatCounterResolver;
 
 // ============================================================================
 // MARK: Canonical tree manifest contracts
@@ -233,6 +242,10 @@ export interface BackendChatAuthorityBundle {
       readonly scenePlanner: typeof ScenePlanner;
       readonly momentLedger: typeof MomentLedger;
       readonly silencePolicy: typeof SilencePolicy;
+    };
+    readonly combat: {
+      readonly bossFightEngine: typeof BossFightEngine;
+      readonly counterResolver: typeof CounterResolver;
     };
   };
   readonly readiness: BackendChatLaneReadinessReport;
@@ -363,8 +376,8 @@ export const BACKEND_CHAT_CANONICAL_MODULES = Object.freeze([
   descriptor('continuity.CarryoverResolver', 'continuity/CarryoverResolver.ts', 'CONTINUITY', 'PENDING', true, 'Carryover scene-state resolution between modes.'),
 
   // Combat / language-as-combat
-  descriptor('combat.ChatBossFightEngine', 'combat/ChatBossFightEngine.ts', 'COMBAT', 'PENDING', true, 'Conversational boss-fight authority.'),
-  descriptor('combat.ChatCounterResolver', 'combat/ChatCounterResolver.ts', 'COMBAT', 'PENDING', true, 'Counterplay resolution authority.'),
+  descriptor('combat.ChatBossFightEngine', 'combat/ChatBossFightEngine.ts', 'COMBAT', 'GENERATED', true, 'Conversational boss-fight authority.'),
+  descriptor('combat.ChatCounterResolver', 'combat/ChatCounterResolver.ts', 'COMBAT', 'GENERATED', true, 'Counterplay resolution authority.'),
   descriptor('combat.ChatTelegraphPolicy', 'combat/ChatTelegraphPolicy.ts', 'COMBAT', 'PENDING', true, 'Attack telegraph law.'),
   descriptor('combat.ChatAttackWindowPolicy', 'combat/ChatAttackWindowPolicy.ts', 'COMBAT', 'PENDING', true, 'Attack-window timing law.'),
 
@@ -440,6 +453,10 @@ export function createBackendChatAuthorityBundle(): BackendChatAuthorityBundle {
         scenePlanner: ScenePlanner,
         momentLedger: MomentLedger,
         silencePolicy: SilencePolicy,
+      }),
+      combat: Object.freeze({
+        bossFightEngine: BossFightEngine,
+        counterResolver: CounterResolver,
       }),
     }),
     readiness: buildBackendChatLaneReadinessReport(),
@@ -571,12 +588,19 @@ export const BACKEND_CHAT_GENERATED_EXPERIENCE_MODULE_IDS = Object.freeze([
   'experience.ChatSilencePolicy',
 ] as const);
 
+export const BACKEND_CHAT_GENERATED_COMBAT_MODULE_IDS = Object.freeze([
+  'combat.ChatBossFightEngine',
+  'combat.ChatCounterResolver',
+] as const);
+
 export type BackendChatGeneratedRootModuleId = (typeof BACKEND_CHAT_GENERATED_ROOT_MODULE_IDS)[number];
 export type BackendChatGeneratedExperienceModuleId =
   (typeof BACKEND_CHAT_GENERATED_EXPERIENCE_MODULE_IDS)[number];
+export type BackendChatGeneratedCombatModuleId =
+  (typeof BACKEND_CHAT_GENERATED_COMBAT_MODULE_IDS)[number];
 
 export interface BackendChatGeneratedSurfaceDescriptor {
-  readonly id: BackendChatGeneratedRootModuleId | BackendChatGeneratedExperienceModuleId;
+  readonly id: BackendChatGeneratedRootModuleId | BackendChatGeneratedExperienceModuleId | BackendChatGeneratedCombatModuleId;
   readonly namespaceKey: string;
   readonly exported: boolean;
   readonly description: string;
@@ -606,6 +630,8 @@ export const BACKEND_CHAT_GENERATED_SURFACE = Object.freeze([
   generatedSurface('experience.ChatScenePlanner', 'experience.scenePlanner', 'Moment-to-scene planning and beat ranking.'),
   generatedSurface('experience.ChatMomentLedger', 'experience.momentLedger', 'Durable moment/reveal/silence memory.'),
   generatedSurface('experience.ChatSilencePolicy', 'experience.silencePolicy', 'Silence, reveal, and interruption law.'),
+  generatedSurface('combat.ChatBossFightEngine', 'combat.bossFightEngine', 'Authoritative conversational boss-fight runtime.'),
+  generatedSurface('combat.ChatCounterResolver', 'combat.counterResolver', 'Authoritative counter window scoring and resolution.'),
 ] as const satisfies readonly BackendChatGeneratedSurfaceDescriptor[]);
 
 export function listGeneratedSurfaceDescriptors(): readonly BackendChatGeneratedSurfaceDescriptor[] {
