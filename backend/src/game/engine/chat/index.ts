@@ -72,6 +72,7 @@ import * as TelegraphPolicy from './combat/ChatTelegraphPolicy';
 import * as AttackWindowPolicy from './combat/ChatAttackWindowPolicy';
 import * as RescueInterventionPlanner from './rescue/RescueInterventionPlanner';
 import * as ChurnRescuePolicy from './rescue/ChurnRescuePolicy';
+import * as RecoveryOutcomeTracker from './rescue/RecoveryOutcomeTracker';
 
 import {
   BACKEND_CHAT_ENGINE_PUBLIC_API_VERSION,
@@ -114,6 +115,7 @@ export * from './combat/ChatTelegraphPolicy';
 export * from './combat/ChatAttackWindowPolicy';
 export * from './rescue/RescueInterventionPlanner';
 export * from './rescue/ChurnRescuePolicy';
+export * from './rescue/RecoveryOutcomeTracker';
 
 export {
   Types as ChatTypesModule,
@@ -146,6 +148,7 @@ export {
   AttackWindowPolicy as ChatAttackWindowPolicyModule,
   RescueInterventionPlanner as ChatRescueInterventionPlannerModule,
   ChurnRescuePolicy as ChatChurnRescuePolicyModule,
+  RecoveryOutcomeTracker as ChatRecoveryOutcomeTrackerModule,
 };
 
 export const ChatEngineClass = Engine.ChatEngine;
@@ -166,6 +169,7 @@ export const ChatTelegraphPolicyClass = TelegraphPolicy.ChatTelegraphPolicy;
 export const ChatAttackWindowPolicyClass = AttackWindowPolicy.ChatAttackWindowPolicy;
 export const RescueInterventionPlannerClass = RescueInterventionPlanner.RescueInterventionPlanner;
 export const ChurnRescuePolicyClass = ChurnRescuePolicy.ChurnRescuePolicy;
+export const RecoveryOutcomeTrackerClass = RecoveryOutcomeTracker.RecoveryOutcomeTracker;
 
 // ============================================================================
 // MARK: Canonical tree manifest contracts
@@ -266,6 +270,7 @@ export interface BackendChatAuthorityBundle {
     readonly rescue: {
       readonly interventionPlanner: typeof RescueInterventionPlanner;
       readonly churnRescuePolicy: typeof ChurnRescuePolicy;
+      readonly recoveryOutcomeTracker: typeof RecoveryOutcomeTracker;
     };
   };
   readonly readiness: BackendChatLaneReadinessReport;
@@ -363,7 +368,7 @@ export const BACKEND_CHAT_CANONICAL_MODULES = Object.freeze([
   // Rescue
   descriptor('rescue.RescueInterventionPlanner', 'rescue/RescueInterventionPlanner.ts', 'RESCUE', 'GENERATED', true, 'Rage-quit and overwhelm rescue planning.'),
   descriptor('rescue.ChurnRescuePolicy', 'rescue/ChurnRescuePolicy.ts', 'RESCUE', 'GENERATED', true, 'Churn-risk rescue law.'),
-  descriptor('rescue.RecoveryOutcomeTracker', 'rescue/RecoveryOutcomeTracker.ts', 'RESCUE', 'PENDING', true, 'Rescue outcome tracking and reinforcement.'),
+  descriptor('rescue.RecoveryOutcomeTracker', 'rescue/RecoveryOutcomeTracker.ts', 'RESCUE', 'GENERATED', true, 'Rescue outcome tracking and reinforcement.'),
 
   // Deal room
   descriptor('dealroom.NegotiationEngine', 'dealroom/NegotiationEngine.ts', 'DEALROOM', 'PENDING', true, 'Deal-room negotiation state and response authority.'),
@@ -483,6 +488,7 @@ export function createBackendChatAuthorityBundle(): BackendChatAuthorityBundle {
       rescue: Object.freeze({
         interventionPlanner: RescueInterventionPlanner,
         churnRescuePolicy: ChurnRescuePolicy,
+        recoveryOutcomeTracker: RecoveryOutcomeTracker,
       }),
     }),
     readiness: buildBackendChatLaneReadinessReport(),

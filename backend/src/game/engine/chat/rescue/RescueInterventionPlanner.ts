@@ -72,6 +72,12 @@ import {
   type ChurnRescuePolicyOptions,
   type ChurnRescuePolicyRequest,
 } from './ChurnRescuePolicy';
+import {
+  RecoveryOutcomeTracker,
+  createRecoveryOutcomeTracker,
+  type RecoveryOutcomeTrackerOptions,
+  type RecoveryOutcomeTrackerResolutionRequest,
+} from './RecoveryOutcomeTracker';
 
 // ============================================================================
 // MARK: Public contracts
@@ -92,6 +98,8 @@ export interface RescueInterventionPlannerOptions {
   readonly logger?: RescueInterventionPlannerLogger;
   readonly churnPolicy?: ChurnRescuePolicy;
   readonly churnPolicyOptions?: ChurnRescuePolicyOptions;
+  readonly outcomeTracker?: RecoveryOutcomeTracker;
+  readonly outcomeTrackerOptions?: RecoveryOutcomeTrackerOptions;
   readonly maxActiveRescuesPerRoom?: number;
   readonly retainLedgerEntriesPerRoom?: number;
 }
@@ -252,6 +260,7 @@ export class RescueInterventionPlanner {
   private readonly clock: RescueInterventionPlannerClock;
   private readonly logger: RescueInterventionPlannerLogger;
   private readonly churnPolicy: ChurnRescuePolicy;
+  private readonly outcomeTracker: RecoveryOutcomeTracker;
   private readonly maxActiveRescuesPerRoom: number;
   private readonly retainLedgerEntriesPerRoom: number;
   private readonly rooms = new Map<string, MutableRoomLedger>();
@@ -260,6 +269,7 @@ export class RescueInterventionPlanner {
     this.clock = options.clock ?? DEFAULT_CLOCK;
     this.logger = options.logger ?? DEFAULT_LOGGER;
     this.churnPolicy = options.churnPolicy ?? createChurnRescuePolicy(options.churnPolicyOptions);
+    this.outcomeTracker = options.outcomeTracker ?? createRecoveryOutcomeTracker(options.outcomeTrackerOptions);
     this.maxActiveRescuesPerRoom = Math.max(1, safeNumber(options.maxActiveRescuesPerRoom, 3));
     this.retainLedgerEntriesPerRoom = Math.max(10, safeNumber(options.retainLedgerEntriesPerRoom, 120));
   }
@@ -327,6 +337,14 @@ export class RescueInterventionPlanner {
     if (intervention.predictedOutcome) {
       room.recoveryLedger.unshift(recoveryLedgerEntryFromOutcome(intervention, intervention.predictedOutcome, now));
     }
+    this.outcomeTracker.begin({
+      roomId: request.roomId,
+      rescuePlan: intervention.rescuePlan,
+      recoveryPlan: intervention.recoveryPlan,
+      predictedOutcome: intervention.predictedOutcome ?? null,
+      now,
+      notes: intervention.reasons,
+    });
     this.trimRoom(room);
 
     const frozen = freezeLedger(room);
@@ -378,6 +396,13 @@ export class RescueInterventionPlanner {
       acceptedOfferId: (request.acceptedOfferId as any) ?? active.rescuePlan.selectedOffer.offerId,
       acceptedActionId: (request.acceptedActionId as any) ?? null,
     });
+    this.outcomeTracker.acceptOption({
+      roomId: request.roomId,
+      recoveryId: active.recoveryPlan.recoveryId,
+      acceptedOptionId: (request.acceptedActionId as any) ?? active.recoveryPlan.bundle.options[0]?.optionId ?? null,
+      now,
+      notes: safeArray(request.notes),
+    });
     this.trimRoom(room);
     return freezeLedger(room);
   }
@@ -427,6 +452,18 @@ export class RescueInterventionPlanner {
       notes: active.reasons,
     });
     room.recoveryLedger.unshift(recoveryLedgerEntryFromOutcome(active, outcome, now));
+    const trackerResolutionRequest: RecoveryOutcomeTrackerResolutionRequest = {
+      roomId: request.roomId,
+      recoveryId: current.recoveryPlan.recoveryId,
+      acceptedOptionId,
+      stabilityLift01: outcome.stabilityLift01,
+      embarrassmentReduction01: outcome.embarrassmentReduction01,
+      confidenceLift01: outcome.confidenceLift01,
+      trustLift01: outcome.trustLift01,
+      now,
+      notes: active.reasons,
+    };
+    this.outcomeTracker.resolve(trackerResolutionRequest);
     this.trimRoom(room);
 
     this.logger.info('chat.rescue.backend.resolved', {
@@ -466,11 +503,13 @@ export class RescueInterventionPlanner {
     const room = this.ensureRoom(roomId);
     const rescueDigest = deriveRescueDigest(room.rescueLedger, unix(this.clock.now()));
     const recoveryDigest = deriveRecoveryDigest(room.recoveryLedger, unix(this.clock.now()));
+    const trackerSummary = this.outcomeTracker.summarizeRoom(roomId);
     return [
       `active=${room.active.length}`,
       `rescueActive=${rescueDigest.activeRescueIds.length}`,
       `recoveryActive=${recoveryDigest.activeRecoveryIds.length}`,
       `recoveryStrongest=${recoveryDigest.strongestSuccessBand ?? 'NONE'}`,
+      `tracker=${trackerSummary}`,
     ].join(' | ');
   }
 
@@ -525,6 +564,33 @@ export class RescueInterventionPlanner {
               updatedAt: now,
             });
         room.recoveryLedger.unshift(recoveryLedgerEntryFromOutcome(active, predicted, now));
+        if (active.rescueWindow.allowSilenceAsSuccess) {
+          this.outcomeTracker.resolve({
+            roomId: active.rescuePlan.roomId,
+            recoveryId: active.recoveryPlan.recoveryId,
+            acceptedOptionId: active.recoveryPlan.bundle.options[0]?.optionId ?? null,
+            stabilityLift01: predicted.stabilityLift01,
+            embarrassmentReduction01: predicted.embarrassmentReduction01,
+            confidenceLift01: predicted.confidenceLift01,
+            trustLift01: predicted.trustLift01,
+            now,
+            notes: [...active.reasons, 'silent-success'],
+          });
+        } else {
+          this.outcomeTracker.timeout({
+            roomId: active.rescuePlan.roomId,
+            recoveryId: active.recoveryPlan.recoveryId,
+            now,
+            notes: [...active.reasons, 'window-expired'],
+          });
+        }
+      } else {
+        this.outcomeTracker.timeout({
+          roomId: active.rescuePlan.roomId,
+          recoveryId: active.recoveryPlan.recoveryId,
+          now,
+          notes: [...active.reasons, 'window-expired-no-predicted-outcome'],
+        });
       }
     }
     room.active = survivors;
@@ -802,4 +868,38 @@ export class RescueInterventionAnalytics {
 
 export function createRescueInterventionAnalytics(): RescueInterventionAnalytics {
   return new RescueInterventionAnalytics();
+}
+
+
+// ============================================================================
+// MARK: Cross-authority tracker projections
+// ============================================================================
+
+export interface RescueInterventionTrackerProjection {
+  readonly roomId: ChatRoomId;
+  readonly plannerSummary: string;
+  readonly trackerSummary: string;
+  readonly activeInterventions: number;
+  readonly rescueDigest: ChatRescueDigest;
+  readonly recoveryDigest: ChatRecoveryDigest;
+  readonly notes: readonly string[];
+}
+
+export function buildRescueInterventionTrackerProjection(
+  planner: RescueInterventionPlanner,
+  roomId: ChatRoomId,
+): RescueInterventionTrackerProjection {
+  const room = planner.getRoomLedger(roomId);
+  return Object.freeze({
+    roomId,
+    plannerSummary: planner.summarizeRoom(roomId),
+    trackerSummary: 'delegated-to-recovery-outcome-tracker',
+    activeInterventions: room.active.length,
+    rescueDigest: room.rescueDigest,
+    recoveryDigest: room.recoveryDigest,
+    notes: Object.freeze([
+      'Planner summary remains backend truth for rescue openings and closures.',
+      'Outcome tracker summary remains backend truth for reinforcement and recovery cohorts.',
+    ]),
+  });
 }
