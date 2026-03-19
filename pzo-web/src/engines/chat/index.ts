@@ -130,6 +130,9 @@ export * from './ChatChannelPolicy';
 export * from './ChatInvasionDirector';
 export * from './ChatNpcDirector';
 export * from './ChatRuntimeConfig';
+export * from './dealroom/NegotiationIntentTracker';
+export * from './dealroom/OfferPressureScorer';
+export * from './dealroom/BluffSignalTracker';
 
 export * from './adapters';
 export * from './channels';
@@ -166,6 +169,10 @@ export { ChatChannelPolicyModule };
 export { ChatInvasionDirectorModule };
 export { ChatNpcDirectorModule };
 export { ChatRuntimeConfigModule };
+
+export * as NegotiationIntentTrackerModule from './dealroom/NegotiationIntentTracker';
+export * as OfferPressureScorerModule from './dealroom/OfferPressureScorer';
+export * as BluffSignalTrackerModule from './dealroom/BluffSignalTracker';
 
 export { ChatAdaptersModule };
 export { ChatChannelsModule };
@@ -250,6 +257,7 @@ export const CHAT_ENGINE_PRESENT_SUBTREES = Object.freeze([
   'adapters',
   'channels',
   'combat',
+  'dealroom',
   'dl',
   'intelligence',
   'ml',
@@ -709,6 +717,9 @@ export const CHAT_ENGINE_PUBLIC_EXPORTS = Object.freeze({
     'ChatDramaDirectorModule',
     'ChatMomentOrchestratorModule',
     'ChatSilenceEngineModule',
+    'NegotiationIntentTrackerModule',
+    'OfferPressureScorerModule',
+    'BluffSignalTrackerModule',
     'ChatBossFightControllerModule',
     'ChatCounterplayBridgeModule',
     'ChatAttackTelegraphModule',
@@ -745,6 +756,9 @@ export const CHAT_ENGINE_RUNTIME_MODULES = Object.freeze({
   ChatDramaDirector: ChatDramaDirectorModule,
   ChatMomentOrchestrator: ChatMomentOrchestratorModule,
   ChatSilenceEngine: ChatSilenceEngineModule,
+  NegotiationIntentTracker: NegotiationIntentTrackerModule,
+  OfferPressureScorer: OfferPressureScorerModule,
+  BluffSignalTracker: BluffSignalTrackerModule,
   ChatBossFightController: ChatBossFightControllerModule,
   ChatCounterplayBridge: ChatCounterplayBridgeModule,
   ChatAttackTelegraph: ChatAttackTelegraphModule,
@@ -760,6 +774,11 @@ export const CHAT_ENGINE_SUBTREE_MODULES = Object.freeze({
   replay: ChatReplayModule,
   telemetry: ChatTelemetryModule,
   intelligence: ChatIntelligenceModule,
+  dealroom: Object.freeze({
+    NegotiationIntentTracker: NegotiationIntentTrackerModule,
+    OfferPressureScorer: OfferPressureScorerModule,
+    BluffSignalTracker: BluffSignalTrackerModule,
+  } as const),
   mlCompatibility: ChatMlCompatibilityModule,
   dlCompatibility: ChatDlCompatibilityModule,
 } as const);
@@ -770,6 +789,11 @@ export const CHAT_ENGINE_NAMESPACE = Object.freeze({
   publicExports: CHAT_ENGINE_PUBLIC_EXPORTS,
   runtimeModules: CHAT_ENGINE_RUNTIME_MODULES,
   subtreeModules: CHAT_ENGINE_SUBTREE_MODULES,
+  dealroom: Object.freeze({
+    NegotiationIntentTracker: NegotiationIntentTrackerModule,
+    OfferPressureScorer: OfferPressureScorerModule,
+    BluffSignalTracker: BluffSignalTrackerModule,
+  } as const),
   intelligence: Object.freeze({
     canonical: ChatIntelligenceModule,
     compatibilityMl: ChatMlCompatibilityModule,
@@ -809,6 +833,9 @@ export const CHAT_ENGINE_LAZY_LOADERS = Object.freeze({
   ChatDramaDirector: () => import('./experience/ChatDramaDirector'),
   ChatMomentOrchestrator: () => import('./experience/ChatMomentOrchestrator'),
   ChatSilenceEngine: () => import('./experience/ChatSilenceEngine'),
+  NegotiationIntentTracker: () => import('./dealroom/NegotiationIntentTracker'),
+  OfferPressureScorer: () => import('./dealroom/OfferPressureScorer'),
+  BluffSignalTracker: () => import('./dealroom/BluffSignalTracker'),
   ChatBossFightController: () => import('./combat/ChatBossFightController'),
   ChatCounterplayBridge: () => import('./combat/ChatCounterplayBridge'),
   ChatAttackTelegraph: () => import('./combat/ChatAttackTelegraph'),
