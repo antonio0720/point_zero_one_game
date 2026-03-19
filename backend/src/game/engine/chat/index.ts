@@ -122,6 +122,8 @@ export * from './rescue/RecoveryOutcomeTracker';
 // ── Deal Room / Negotiation Runtime ─────────────────────────────────────────
 export { NegotiationEngine, createNegotiationEngine, ChatNegotiationEngineModule } from './dealroom/NegotiationEngine';
 export { OfferCounterEngine, createOfferCounterEngine, ChatOfferCounterEngineModule } from './dealroom/OfferCounterEngine';
+export { BluffResolver, createBluffResolver, ChatBluffResolverModule } from './dealroom/BluffResolver';
+export { NegotiationReputationPolicy, createNegotiationReputationPolicy, ChatNegotiationReputationPolicyModule } from './dealroom/NegotiationReputationPolicy';
 
 export {
   Types as ChatTypesModule,
@@ -687,6 +689,8 @@ export function listGeneratedSurfaceDescriptors(): readonly BackendChatGenerated
 export const CHAT_BACKEND_DEALROOM_RUNTIME_MODULES = {
   NegotiationEngine: () => import('./dealroom/NegotiationEngine'),
   OfferCounterEngine: () => import('./dealroom/OfferCounterEngine'),
+  BluffResolver: () => import('./dealroom/BluffResolver'),
+  NegotiationReputationPolicy: () => import('./dealroom/NegotiationReputationPolicy'),
 } as const;
 
 // ============================================================================
