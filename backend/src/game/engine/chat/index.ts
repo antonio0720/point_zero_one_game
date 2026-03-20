@@ -2,8 +2,8 @@
  * ============================================================================
  * POINT ZERO ONE — AUTHORITATIVE BACKEND CHAT ROOT BARREL + LANE MANIFEST
  * FILE: backend/src/game/engine/chat/index.ts
- * VERSION: 2026.03.18-experience-upgrade
- * AUTHORSHIP: OpenAI for Antonio T. Smith Jr.
+ * VERSION: 2026.03.20-backend-root-emotion.v1
+ * AUTHORSHIP: Antonio T. Smith Jr.
  * LICENSE: Internal / Proprietary / All Rights Reserved
  * ============================================================================
  *
@@ -81,6 +81,10 @@ import * as TypingSimulationEngine from './presence/TypingSimulationEngine';
 import * as ReadReceiptPolicy from './presence/ReadReceiptPolicy';
 import * as CrossModeContinuityLedger from './continuity/CrossModeContinuityLedger';
 import * as CarryoverResolver from './continuity/CarryoverResolver';
+import * as Intelligence from './intelligence';
+import * as EmotionModelRuntime from './intelligence/ml/EmotionModel';
+import * as PressureAffectModelRuntime from './intelligence/ml/PressureAffectModel';
+import * as AttachmentModelRuntime from './intelligence/ml/AttachmentModel';
 import { ChatNegotiationEngineModule } from './dealroom/NegotiationEngine';
 import { ChatOfferCounterEngineModule } from './dealroom/OfferCounterEngine';
 
@@ -134,6 +138,10 @@ export * from './presence/TypingSimulationEngine';
 export * from './presence/ReadReceiptPolicy';
 export * from './continuity/CrossModeContinuityLedger';
 export * from './continuity/CarryoverResolver';
+export * from './intelligence';
+export * from './intelligence/ml/EmotionModel';
+export * from './intelligence/ml/PressureAffectModel';
+export * from './intelligence/ml/AttachmentModel';
 
 // ── LiveOps world-event authority lane ─────────────────────────────────────
 export {
@@ -230,6 +238,10 @@ export {
   ReadReceiptPolicy as ChatReadReceiptPolicyModule,
   CrossModeContinuityLedger as ChatCrossModeContinuityLedgerModule,
   CarryoverResolver as ChatCarryoverResolverModule,
+  Intelligence as ChatIntelligenceModule,
+  EmotionModelRuntime as ChatEmotionModelModule,
+  PressureAffectModelRuntime as ChatPressureAffectModelModule,
+  AttachmentModelRuntime as ChatAttachmentModelModule,
 };
 
 export const ChatEngineClass = Engine.ChatEngine;
@@ -259,6 +271,9 @@ export const TypingSimulationEngineClass = TypingSimulationEngine.TypingSimulati
 export const ReadReceiptPolicyClass = ReadReceiptPolicy.ReadReceiptPolicy;
 export const CrossModeContinuityLedgerClass = CrossModeContinuityLedger.CrossModeContinuityLedger;
 export const CarryoverResolverClass = CarryoverResolver.CarryoverResolver;
+export const ChatEmotionModelClass = EmotionModelRuntime.EmotionModel;
+export const ChatPressureAffectModelClass = PressureAffectModelRuntime.PressureAffectModel;
+export const ChatAttachmentModelClass = AttachmentModelRuntime.AttachmentModel;
 
 // ============================================================================
 // MARK: Canonical tree manifest contracts
@@ -364,6 +379,12 @@ export interface BackendChatAuthorityBundle {
     readonly continuity: {
       readonly crossModeContinuityLedger: typeof CrossModeContinuityLedger;
       readonly carryoverResolver: typeof CarryoverResolver;
+    };
+    readonly intelligence: {
+      readonly barrel: typeof Intelligence;
+      readonly emotionModel: typeof EmotionModelRuntime;
+      readonly pressureAffectModel: typeof PressureAffectModelRuntime;
+      readonly attachmentModel: typeof AttachmentModelRuntime;
     };
   };
   readonly readiness: BackendChatLaneReadinessReport;
@@ -505,7 +526,7 @@ export const BACKEND_CHAT_CANONICAL_MODULES = Object.freeze([
   descriptor('postrun.ForeshadowPlanner', 'postrun/ForeshadowPlanner.ts', 'POSTRUN', 'PENDING', true, 'Foreshadow and next-run pressure planning.'),
 
   // Intelligence root
-  descriptor('intelligence.index', 'intelligence/index.ts', 'INTELLIGENCE', 'PENDING', false, 'Intelligence barrel.'),
+  descriptor('intelligence.index', 'intelligence/index.ts', 'INTELLIGENCE', 'GENERATED', false, 'Intelligence barrel.'),
   descriptor('ChatSemanticSimilarityIndex', 'intelligence/ChatSemanticSimilarityIndex.ts', 'INTELLIGENCE', 'GENERATED', true, 'Semantic anti-repetition and authored-line similarity index.'),
   descriptor('BehavioralAnomalyDetector', 'intelligence/BehavioralAnomalyDetector.ts', 'INTELLIGENCE', 'PENDING', false, 'Detects behavioral outliers in player chat activity.'),
   descriptor('PlayerIntentClassifier', 'intelligence/PlayerIntentClassifier.ts', 'INTELLIGENCE', 'PENDING', false, 'Intent-classification surface for player messages.'),
@@ -514,9 +535,9 @@ export const BACKEND_CHAT_CANONICAL_MODULES = Object.freeze([
 
   // Intelligence ML
   descriptor('intelligence.ml.index', 'intelligence/ml/index.ts', 'INTELLIGENCE_ML', 'PENDING', false, 'ML barrel.'),
-  descriptor('EmotionModel', 'intelligence/ml/EmotionModel.ts', 'INTELLIGENCE_ML', 'PENDING', false, 'Backend emotion scoring for intimidation/confidence/frustration.'),
-  descriptor('PressureAffectModel', 'intelligence/ml/PressureAffectModel.ts', 'INTELLIGENCE_ML', 'PENDING', false, 'Pressure-affect scoring.'),
-  descriptor('AttachmentModel', 'intelligence/ml/AttachmentModel.ts', 'INTELLIGENCE_ML', 'PENDING', false, 'Attachment/trust intensity scoring.'),
+  descriptor('EmotionModel', 'intelligence/ml/EmotionModel.ts', 'INTELLIGENCE_ML', 'GENERATED', true, 'Backend emotion scoring for intimidation/confidence/frustration.'),
+  descriptor('PressureAffectModel', 'intelligence/ml/PressureAffectModel.ts', 'INTELLIGENCE_ML', 'GENERATED', true, 'Pressure-affect scoring.'),
+  descriptor('AttachmentModel', 'intelligence/ml/AttachmentModel.ts', 'INTELLIGENCE_ML', 'GENERATED', true, 'Attachment/trust intensity scoring.'),
 
   // Intelligence DL
   descriptor('intelligence.dl.index', 'intelligence/dl/index.ts', 'INTELLIGENCE_DL', 'PENDING', false, 'DL barrel.'),
@@ -596,6 +617,12 @@ export function createBackendChatAuthorityBundle(): BackendChatAuthorityBundle {
         negotiationEngine: ChatNegotiationEngineModule,
         offerCounterEngine: ChatOfferCounterEngineModule,
       },
+      intelligence: Object.freeze({
+        barrel: Intelligence,
+        emotionModel: EmotionModelRuntime,
+        pressureAffectModel: PressureAffectModelRuntime,
+        attachmentModel: AttachmentModelRuntime,
+      }),
     }),
     readiness: buildBackendChatLaneReadinessReport(),
   });
@@ -839,6 +866,10 @@ export const BACKEND_CHAT_DOWNSTREAM_INTEGRATION_SURFACE: BackendChatDownstreamI
       './experience/ChatScenePlanner',
       './experience/ChatMomentLedger',
       './experience/ChatSilencePolicy',
+      './intelligence',
+      './intelligence/ml/EmotionModel',
+      './intelligence/ml/PressureAffectModel',
+      './intelligence/ml/AttachmentModel',
     ]),
     forServerTransport: Object.freeze([
       './types',
@@ -859,6 +890,10 @@ export const BACKEND_CHAT_DOWNSTREAM_INTEGRATION_SURFACE: BackendChatDownstreamI
       './experience/ChatScenePlanner',
       './experience/ChatMomentLedger',
       './experience/ChatSilencePolicy',
+      './intelligence',
+      './intelligence/ml/EmotionModel',
+      './intelligence/ml/PressureAffectModel',
+      './intelligence/ml/AttachmentModel',
     ]),
     forbiddenImports: Object.freeze([
       '/pzo-web/src/components/chat',

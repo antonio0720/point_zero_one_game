@@ -2,7 +2,7 @@
  * ============================================================================
  * POINT ZERO ONE — AUTHORITATIVE BACKEND CHAT INTELLIGENCE ENTRYPOINT
  * FILE: backend/src/game/engine/chat/intelligence/index.ts
- * VERSION: 2026.03.14
+ * VERSION: 2026.03.20-backend-intelligence-emotion.v1
  * AUTHORSHIP: OpenAI for Antonio T. Smith Jr.
  * LICENSE: Internal / Proprietary / All Rights Reserved
  * ============================================================================
@@ -12,12 +12,15 @@
  * Unified intelligence barrel + construction surface for the backend chat lane.
  *
  * This file is intentionally more than a passive export list.
- * It is the composition entrypoint for the three foundational backend chat
+ * It is the composition entrypoint for the foundational backend chat
  * intelligence authorities in this batch:
  *
  * - ColdStartPopulationModel.ts
  * - LearningProfileStore.ts
  * - ChatLearningCoordinator.ts
+ * - ml/EmotionModel.ts
+ * - ml/PressureAffectModel.ts
+ * - ml/AttachmentModel.ts
  *
  * Why this file exists
  * --------------------
@@ -41,6 +44,8 @@
 import type { ChatEnginePorts, ChatLearningProfile, ChatRuntimeConfig, ChatUserId } from '../types';
 
 import { CHAT_RUNTIME_DEFAULTS } from '../types';
+
+// ── Core intelligence exports ─────────────────────────────────────────────────
 
 export type {
   ColdStartArchetypeId,
@@ -102,6 +107,103 @@ export type {
 
 export { createChatLearningCoordinator } from './ChatLearningCoordinator';
 
+// ── 8 additional intelligence modules ─────────────────────────────────────────
+
+export type {
+  ChatEpisodicTriggerContext,
+  ChatEpisodicCallbackVariant,
+  ChatEpisodicMemoryRecord,
+  ChatEpisodicCallbackCandidate,
+  ChatEpisodicMemorySnapshot,
+  ChatEpisodicMemoryQuery,
+  ChatEpisodicMemoryOptions,
+} from './ChatEpisodicMemory';
+
+export { ChatEpisodicMemory, createChatEpisodicMemory } from './ChatEpisodicMemory';
+
+export type {
+  ChatNoveltyLedgerCandidate,
+  ChatNoveltyLedgerEvent,
+  ChatNoveltyLedgerCounter,
+  ChatNoveltyLedgerFatigue,
+  ChatNoveltyLedgerScore,
+  ChatNoveltyLedgerSnapshot,
+  ChatNoveltyLedgerOptions,
+} from './ChatNoveltyLedger';
+
+export { ChatNoveltyLedger, createChatNoveltyLedger } from './ChatNoveltyLedger';
+
+export { ChatPlayerFingerprintService, createChatPlayerFingerprintService } from './ChatPlayerFingerprintService';
+
+export type {
+  ChatRelationshipModelOptions,
+  ChatRelationshipPlayerMessageInput,
+  ChatRelationshipNpcUtteranceInput,
+  ChatRelationshipGameEventInput,
+  ChatRelationshipSignalRequest,
+} from './ChatRelationshipModel';
+
+export { ChatRelationshipModel } from './ChatRelationshipModel';
+
+export { ChatScenePlanner, createChatScenePlanner } from './ChatScenePlanner';
+
+export {
+  ChatSeasonalLiveOpsOverlayService,
+  createChatSeasonalLiveOpsOverlayService,
+} from './ChatSeasonalLiveOpsOverlayService';
+
+export type {
+  ChatSemanticSimilarityIndexConfig,
+} from './ChatSemanticSimilarityIndex';
+
+export {
+  CHAT_SEMANTIC_SIMILARITY_INDEX_VERSION,
+  DEFAULT_CHAT_SEMANTIC_SIMILARITY_INDEX_CONFIG,
+  ChatSemanticSimilarityIndex,
+  createChatSemanticSimilarityIndex,
+} from './ChatSemanticSimilarityIndex';
+
+export { ChatSurfaceRealizer, createChatSurfaceRealizer } from './ChatSurfaceRealizer';
+
+// ── Emotion ML exports (patch addition) ───────────────────────────────────────
+
+export type {
+  EmotionModelApi,
+  EmotionModelInput,
+  EmotionModelOptions,
+  EmotionModelRecommendation,
+  EmotionModelResult,
+} from './ml/EmotionModel';
+
+export { createEmotionModel, evaluateEmotionModel } from './ml/EmotionModel';
+
+export type {
+  AttachmentAssessment,
+  AttachmentAffinityCandidate,
+  AttachmentModelApi,
+  AttachmentModelInput,
+  AttachmentModelOptions,
+} from './ml/AttachmentModel';
+
+export { createAttachmentModel, assessAttachment } from './ml/AttachmentModel';
+
+export type {
+  PressureAffectModelApi,
+  PressureAffectModelInput,
+  PressureAffectModelOptions,
+  PressureAffectPolicyFlags,
+  PressureAffectRecommendation,
+  PressureAffectResult,
+} from './ml/PressureAffectModel';
+
+export {
+  createPressureAffectModel,
+  evaluatePressureAffect,
+  summarizePressureAffect,
+} from './ml/PressureAffectModel';
+
+// ── Private imports for bundle factory ────────────────────────────────────────
+
 import type {
   ChatColdStartPopulationModelApi,
   ChatColdStartPopulationModelOptions,
@@ -128,6 +230,27 @@ import type {
 
 import { createChatLearningCoordinator } from './ChatLearningCoordinator';
 
+import type {
+  EmotionModelApi,
+  EmotionModelOptions,
+} from './ml/EmotionModel';
+
+import { createEmotionModel } from './ml/EmotionModel';
+
+import type {
+  AttachmentModelApi,
+  AttachmentModelOptions,
+} from './ml/AttachmentModel';
+
+import { createAttachmentModel } from './ml/AttachmentModel';
+
+import type {
+  PressureAffectModelApi,
+  PressureAffectModelOptions,
+} from './ml/PressureAffectModel';
+
+import { createPressureAffectModel } from './ml/PressureAffectModel';
+
 // ============================================================================
 // MARK: Public bundle contracts
 // ============================================================================
@@ -137,6 +260,9 @@ export interface BackendChatIntelligenceBundle {
   readonly coldStartModel: ChatColdStartPopulationModelApi;
   readonly profileStore: LearningProfileStoreApi;
   readonly coordinator: ChatLearningCoordinatorApi;
+  readonly pressureAffectModel: PressureAffectModelApi;
+  readonly attachmentModel: AttachmentModelApi;
+  readonly emotionModel: EmotionModelApi;
   flush(): Promise<LearningProfileStoreFlushResult>;
   hydrate(
     payload: ChatLearningCoordinatorHydrationPayload,
@@ -150,6 +276,11 @@ export interface BackendChatIntelligenceBundle {
     readonly totalTrackedUsers: number;
     readonly diagnostics: ReturnType<ChatLearningCoordinatorApi['exportDiagnostics']>;
     readonly coldStartManifest: ReturnType<ChatColdStartPopulationModelApi['exportManifest']>;
+    readonly emotionModels: {
+      readonly pressureAffect: string;
+      readonly attachment: string;
+      readonly emotion: string;
+    };
   };
   snapshot(): {
     readonly profiles: Readonly<Record<ChatUserId, ChatLearningProfile>>;
@@ -169,6 +300,9 @@ export interface BackendChatIntelligenceBundleOptions {
     ChatLearningCoordinatorOptions,
     'runtime' | 'ports' | 'coldStartModel' | 'profileStore'
   >;
+  readonly pressureAffectModel?: PressureAffectModelOptions;
+  readonly attachmentModel?: AttachmentModelOptions;
+  readonly emotionModel?: Omit<EmotionModelOptions, 'pressureAffectModel' | 'attachmentModel'>;
 }
 
 // ============================================================================
@@ -213,6 +347,20 @@ export function createBackendChatIntelligenceBundle(
         : runtime.learningPolicy.acceptClientHints,
   });
 
+  const pressureAffectModel = createPressureAffectModel({
+    ...(options.pressureAffectModel ?? {}),
+  });
+
+  const attachmentModel = createAttachmentModel({
+    ...(options.attachmentModel ?? {}),
+  });
+
+  const emotionModel = createEmotionModel({
+    ...(options.emotionModel ?? {}),
+    pressureAffectModel,
+    attachmentModel,
+  });
+
   async function flush(): Promise<LearningProfileStoreFlushResult> {
     return coordinator.flush();
   }
@@ -238,6 +386,11 @@ export function createBackendChatIntelligenceBundle(
     readonly totalTrackedUsers: number;
     readonly diagnostics: ReturnType<ChatLearningCoordinatorApi['exportDiagnostics']>;
     readonly coldStartManifest: ReturnType<ChatColdStartPopulationModelApi['exportManifest']>;
+    readonly emotionModels: {
+      readonly pressureAffect: string;
+      readonly attachment: string;
+      readonly emotion: string;
+    };
   } {
     const profiles = coordinator.snapshotProfiles();
     const diagnostics = coordinator.exportDiagnostics();
@@ -248,6 +401,11 @@ export function createBackendChatIntelligenceBundle(
       totalTrackedUsers: coordinator.listSessionStates().length,
       diagnostics,
       coldStartManifest: coldStartModel.exportManifest(),
+      emotionModels: Object.freeze({
+        pressureAffect: pressureAffectModel.version,
+        attachment: attachmentModel.version,
+        emotion: emotionModel.version,
+      }),
     });
   }
 
@@ -271,6 +429,9 @@ export function createBackendChatIntelligenceBundle(
     coldStartModel,
     profileStore,
     coordinator,
+    pressureAffectModel,
+    attachmentModel,
+    emotionModel,
     flush,
     hydrate,
     importNdjson,
@@ -300,6 +461,24 @@ export function createBackendChatColdStartModel(
   options: BackendChatIntelligenceBundleOptions = {},
 ): ChatColdStartPopulationModelApi {
   return createBackendChatIntelligenceBundle(options).coldStartModel;
+}
+
+export function createBackendChatPressureAffectModel(
+  options: BackendChatIntelligenceBundleOptions = {},
+): PressureAffectModelApi {
+  return createBackendChatIntelligenceBundle(options).pressureAffectModel;
+}
+
+export function createBackendChatAttachmentModel(
+  options: BackendChatIntelligenceBundleOptions = {},
+): AttachmentModelApi {
+  return createBackendChatIntelligenceBundle(options).attachmentModel;
+}
+
+export function createBackendChatEmotionModel(
+  options: BackendChatIntelligenceBundleOptions = {},
+): EmotionModelApi {
+  return createBackendChatIntelligenceBundle(options).emotionModel;
 }
 
 // ============================================================================
@@ -335,4 +514,3 @@ function createPortableLogger(
     warn: ports.logger.warn.bind(ports.logger),
   });
 }
-

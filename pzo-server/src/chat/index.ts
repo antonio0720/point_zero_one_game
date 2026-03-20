@@ -3,7 +3,7 @@
  * POINT ZERO ONE — SERVER CHAT COMPOSITION ROOT + PUBLIC EXPORT SURFACE
  * FILE: pzo-server/src/chat/index.ts
  * VERSION: 2026.03.15
- * AUTHORSHIP: OpenAI for Antonio T. Smith Jr.
+ * AUTHORSHIP: Antonio T. Smith Jr.
  * LICENSE: Internal / Proprietary / All Rights Reserved
  * ============================================================================
  *
