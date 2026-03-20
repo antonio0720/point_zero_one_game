@@ -74,6 +74,8 @@ import * as ChatShadowStateModule from './ChatShadowState';
 // ============================================================================
 import * as ChatLegendModule from './ChatLegend';
 import * as ChatRewardModule from './ChatReward';
+import * as ChatLiveOps from './ChatLiveOps';
+import * as ChatWorldEvent from './ChatWorldEvent';
 import * as LearningModule from './learning';
 
 // ============================================================================
@@ -159,6 +161,78 @@ export {
 export { ChatLegendModule, ChatRewardModule };
 export const ChatLegend = ChatLegendModule;
 export const ChatReward = ChatRewardModule;
+
+export { ChatLiveOps };
+export { ChatWorldEvent };
+
+export type {
+  ChatLiveOpsVersion,
+  ChatLiveOpsProgram,
+  ChatLiveOpsProgramKind,
+  ChatLiveOpsProgramState,
+  ChatLiveOpsSeasonTheme,
+  ChatLiveOpsCampaign,
+  ChatLiveOpsSnapshot,
+  ChatLiveOpsSummary,
+  ChatLiveOpsHealthSnapshot,
+} from './ChatLiveOps';
+
+export {
+  CHAT_LIVEOPS_VERSION,
+  CHAT_LIVEOPS_MANIFEST,
+  createEmptyChatLiveOpsSnapshot,
+  normalizeChatLiveOpsProgram,
+  summarizeChatLiveOpsSnapshot,
+  collectChatLiveOpsChannels,
+  buildLegacyOverlaySnapshot,
+  buildChatLiveOpsSnapshot,
+  buildChatLiveOpsHealthSnapshot,
+  projectWorldEventToLegacyOverlayDefinition,
+  summarizeWorldEventsForLiveOps,
+  previewWorldEventsForLiveOps,
+} from './ChatLiveOps';
+
+export type {
+  ChatWorldEventVersion,
+  ChatWorldEventKind,
+  ChatWorldEventState,
+  ChatWorldEventScopeKind,
+  ChatWorldEventVisibilityMode,
+  ChatWorldEventPressureBand,
+  ChatWorldEventAnnouncementMode,
+  ChatWorldEventTriggerKind,
+  ChatWorldEventReactionMode,
+  ChatWorldEventDefinition,
+  ChatWorldEventActivation,
+  ChatWorldEventLedgerEntry,
+  ChatWorldEventFanoutEnvelope,
+  ChatWorldEventSummary,
+  ChatWorldEventPreview,
+} from './ChatWorldEvent';
+
+export {
+  CHAT_WORLD_EVENT_VERSION,
+  CHAT_WORLD_EVENT_REGISTRY_MANIFEST,
+  CHAT_WORLD_EVENT_KINDS,
+  CHAT_WORLD_EVENT_STATES,
+  CHAT_WORLD_EVENT_SCOPE_KINDS,
+  CHAT_WORLD_EVENT_VISIBILITY_MODES,
+  CHAT_WORLD_EVENT_PRESSURE_BANDS,
+  CHAT_WORLD_EVENT_ANNOUNCEMENT_MODES,
+  CHAT_WORLD_EVENT_TRIGGER_KINDS,
+  CHAT_WORLD_EVENT_REACTION_MODES,
+  DEFAULT_CHAT_WORLD_EVENT_PRESSURE,
+  isChatWorldEventKind,
+  isChatWorldEventState,
+  isChatWorldEventLive,
+  isChatWorldEventWarmup,
+  isChatWorldEventCooldown,
+  collectWorldEventTargetChannels,
+  summarizeChatWorldEvent,
+  previewChatWorldEvent,
+  normalizeChatWorldEvent,
+  projectChatWorldEventToLegacyOverlayDefinition,
+} from './ChatWorldEvent';
 
 // ============================================================================
 // MARK: Registry keys and categories
