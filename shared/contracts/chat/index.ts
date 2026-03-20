@@ -93,6 +93,7 @@ export * from './ChatRescue';
 export * from './ChatRecovery';
 export * from './ChatNegotiation';
 export * from './ChatOffer';
+export * from './ChatPresenceStyle';
 export {
   CHAT_SHADOW_STATE_VERSION,
   CHAT_SHADOW_STATE_MANIFEST,

@@ -111,6 +111,9 @@ import * as RecoveryPromptPolicyModule from './rescue/RecoveryPromptPolicy';
 import * as RescueBannerBridgeModule from './rescue/RescueBannerBridge';
 import * as ShadowStateMirrorModule from './shadow/ShadowStateMirror';
 import * as RevealQueueModule from './shadow/RevealQueue';
+import * as NpcPresenceStyleModule from './presence/NpcPresenceStyle';
+import * as TypingTheaterModule from './presence/TypingTheater';
+import * as ReadDelayPolicyModule from './presence/ReadDelayPolicy';
 import * as ChatMlCompatibilityModule from './ml/ml_index';
 import * as ChatDlCompatibilityModule from './dl/dl_index';
 
@@ -153,6 +156,9 @@ export * from './rescue/RecoveryPromptPolicy';
 export * from './rescue/RescueBannerBridge';
 export * from './shadow/ShadowStateMirror';
 export * from './shadow/RevealQueue';
+export * from './presence/NpcPresenceStyle';
+export * from './presence/TypingTheater';
+export * from './presence/ReadDelayPolicy';
 export * from './ml/ml_index';
 export * from './dl/dl_index';
 
@@ -203,6 +209,9 @@ export * as RevealQueueModule from './shadow/RevealQueue';
 export { ShadowStateLedger, createShadowStateLedger, ChatShadowStateLedgerModule } from './shadow/ShadowStateLedger';
 export { RevealResolver, createRevealResolver, ChatRevealResolverModule } from './shadow/RevealResolver';
 export { DeferredReactionPlanner, createDeferredReactionPlanner, ChatDeferredReactionPlannerModule } from './shadow/DeferredReactionPlanner';
+export { NpcPresenceStyleModule };
+export { TypingTheaterModule };
+export { ReadDelayPolicyModule };
 export { ChatMlCompatibilityModule };
 export { ChatDlCompatibilityModule };
 
@@ -740,6 +749,9 @@ export const CHAT_ENGINE_PUBLIC_EXPORTS = Object.freeze({
     'RageQuitInterceptorModule',
     'RecoveryPromptPolicyModule',
     'RescueBannerBridgeModule',
+    'NpcPresenceStyleModule',
+    'TypingTheaterModule',
+    'ReadDelayPolicyModule',
     'ChatMlCompatibilityModule',
     'ChatDlCompatibilityModule',
   ] as const),
@@ -781,6 +793,9 @@ export const CHAT_ENGINE_RUNTIME_MODULES = Object.freeze({
   RescueBannerBridge: RescueBannerBridgeModule,
   ShadowStateMirror: ShadowStateMirrorModule,
   RevealQueue: RevealQueueModule,
+  NpcPresenceStyle: NpcPresenceStyleModule,
+  TypingTheater: TypingTheaterModule,
+  ReadDelayPolicy: ReadDelayPolicyModule,
 } as const);
 
 export const CHAT_ENGINE_SUBTREE_MODULES = Object.freeze({
@@ -798,6 +813,11 @@ export const CHAT_ENGINE_SUBTREE_MODULES = Object.freeze({
   shadow: Object.freeze({
     ShadowStateMirror: ShadowStateMirrorModule,
     RevealQueue: RevealQueueModule,
+  } as const),
+  presence: Object.freeze({
+    NpcPresenceStyle: NpcPresenceStyleModule,
+    TypingTheater: TypingTheaterModule,
+    ReadDelayPolicy: ReadDelayPolicyModule,
   } as const),
   mlCompatibility: ChatMlCompatibilityModule,
   dlCompatibility: ChatDlCompatibilityModule,
@@ -817,6 +837,11 @@ export const CHAT_ENGINE_NAMESPACE = Object.freeze({
   shadow: Object.freeze({
     ShadowStateMirror: ShadowStateMirrorModule,
     RevealQueue: RevealQueueModule,
+  } as const),
+  presence: Object.freeze({
+    NpcPresenceStyle: NpcPresenceStyleModule,
+    TypingTheater: TypingTheaterModule,
+    ReadDelayPolicy: ReadDelayPolicyModule,
   } as const),
   intelligence: Object.freeze({
     canonical: ChatIntelligenceModule,
@@ -868,6 +893,9 @@ export const CHAT_ENGINE_LAZY_LOADERS = Object.freeze({
   RescueBannerBridge: () => import('./rescue/RescueBannerBridge'),
   ShadowStateMirror: () => import('./shadow/ShadowStateMirror'),
   RevealQueue: () => import('./shadow/RevealQueue'),
+  NpcPresenceStyle: () => import('./presence/NpcPresenceStyle'),
+  TypingTheater: () => import('./presence/TypingTheater'),
+  ReadDelayPolicy: () => import('./presence/ReadDelayPolicy'),
   mlCompatibility: () => import('./ml/ml_index'),
   dlCompatibility: () => import('./dl/dl_index'),
 } as const);
