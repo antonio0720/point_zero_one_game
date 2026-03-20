@@ -510,7 +510,7 @@ export class LobbyChannelPolicy {
   }
 
   public isModeSupported(modeId: LobbyModeId): boolean {
-    return LOBBY_ALLOWED_MODES.includes(modeId);
+    return (LOBBY_ALLOWED_MODES as readonly LobbyModeId[]).includes(modeId);
   }
 
   public buildSnapshot(room: LobbyChannelState): LobbyPolicySnapshot {
