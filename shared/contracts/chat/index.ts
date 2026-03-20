@@ -75,6 +75,7 @@ import * as ChatShadowStateModule from './ChatShadowState';
 // ============================================================================
 import * as ChatLegendModule from './ChatLegend';
 import * as ChatRewardModule from './ChatReward';
+import * as ChatPostRunModule from './ChatPostRun';
 import * as ChatLiveOps from './ChatLiveOps';
 import * as ChatWorldEvent from './ChatWorldEvent';
 import * as LearningModule from './learning';
@@ -95,6 +96,7 @@ export * from './ChatRecovery';
 export * from './ChatNegotiation';
 export * from './ChatOffer';
 export * from './ChatEmotion';
+export * from './ChatPostRun';
 export * from './ChatPresenceStyle';
 export {
   CHAT_SHADOW_STATE_VERSION,
@@ -159,12 +161,14 @@ export {
   ChatShadowStateModule as ChatShadowState,
   ChatLegendModule as ChatLegend,
   ChatRewardModule as ChatReward,
+  ChatPostRunModule as ChatPostRun,
   LearningModule as Learning,
 };
 
 export { ChatLegendModule, ChatRewardModule };
 export const ChatLegend = ChatLegendModule;
 export const ChatReward = ChatRewardModule;
+export const ChatPostRun = ChatPostRunModule;
 
 export { ChatLiveOps };
 export { ChatWorldEvent };

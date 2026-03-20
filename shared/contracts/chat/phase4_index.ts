@@ -5,7 +5,7 @@
  */
 
 export * from './memory';
-export * from './novelty';
+export * as novelty from './novelty';
 export * from './relationship';
 export * from './scene';
 export * from './surface-realization';
@@ -13,3 +13,5 @@ export * from './transcript-annotations';
 export * from './semantic-similarity';
 export * from './telemetry';
 export * from './player-model';
+
+export * from './ChatPostRun';
