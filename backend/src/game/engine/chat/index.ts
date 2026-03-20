@@ -125,6 +125,55 @@ export * from './rewards/LegendMomentLedger';
 export * from './rewards/RewardGrantResolver';
 export * from './rewards/ReplayMomentIndexer';
 
+// ── LiveOps world-event authority lane ─────────────────────────────────────
+export {
+  GlobalEventScheduler,
+  createGlobalEventScheduler,
+} from './liveops/GlobalEventScheduler';
+export type {
+  ForceActivationInput,
+  GlobalEventActivation,
+  GlobalEventDefinition,
+  GlobalEventFamily,
+  GlobalEventProjection,
+  GlobalEventRepeatGranularity,
+  GlobalEventScheduleKind,
+  GlobalEventSchedulerEvaluationContext,
+  GlobalEventSchedulerOptions,
+  GlobalEventSchedulerRoomContext,
+  GlobalEventSchedulerSnapshot,
+  GlobalEventSchedulerState,
+  GlobalEventVisibility,
+} from './liveops/GlobalEventScheduler';
+
+export {
+  FactionSurgePlanner,
+  createFactionSurgePlanner,
+} from './liveops/FactionSurgePlanner';
+export type {
+  FactionAlignment,
+  FactionDescriptor,
+  FactionSurgeChannelDirective,
+  FactionSurgePlan,
+  FactionSurgePlannerOptions,
+  FactionVoiceDirective,
+  FactionVoiceKind,
+} from './liveops/FactionSurgePlanner';
+
+export {
+  WorldEventDirector,
+  createWorldEventDirector,
+} from './liveops/WorldEventDirector';
+export type {
+  WorldEventAnnouncementDirective,
+  WorldEventAnnouncementStyle,
+  WorldEventDirectorOptions,
+  WorldEventDirectorTickResult,
+  WorldEventOverlayDirective,
+  WorldEventRoomPlan,
+  WorldEventShadowDirective,
+} from './liveops/WorldEventDirector';
+
 // ── Deal Room / Negotiation Runtime ─────────────────────────────────────────
 export { NegotiationEngine, createNegotiationEngine, ChatNegotiationEngineModule } from './dealroom/NegotiationEngine';
 export { OfferCounterEngine, createOfferCounterEngine, ChatOfferCounterEngineModule } from './dealroom/OfferCounterEngine';
