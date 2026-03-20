@@ -140,7 +140,7 @@ describe('SnapshotBuilder', () => {
           ...base.timers,
           frozenWindowIds: ['dw-1', 'dw-2'],
           activeDecisionWindows: {
-            dw-1: {
+            'dw-1': {
               id: 'dw-1',
               timingClass: ['ACTION'],
               label: 'Decision Window One',
@@ -160,7 +160,7 @@ describe('SnapshotBuilder', () => {
                 tier: 'T1',
               },
             },
-            dw-2: {
+            'dw-2': {
               id: 'dw-2',
               timingClass: ['ACTION'],
               label: 'Decision Window Two',
