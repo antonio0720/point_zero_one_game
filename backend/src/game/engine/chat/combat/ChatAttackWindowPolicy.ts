@@ -547,6 +547,8 @@ const WINDOW_STAGE_MOOD_PROFILE = Object.freeze({
   CEREMONIAL: Object.freeze({ multiplier: 1.08, idealShift: 0.04, graceShift: 0.03 }),
   WATCHFUL: Object.freeze({ multiplier: 0.98, idealShift: 0.01, graceShift: 0.01 }),
   CONSPIRATORIAL: Object.freeze({ multiplier: 0.94, idealShift: 0.03, graceShift: 0.00 }),
+  MOURNFUL: Object.freeze({ multiplier: 1.03, idealShift: 0.03, graceShift: 0.02 }),
+  ECSTATIC: Object.freeze({ multiplier: 0.95, idealShift: -0.02, graceShift: -0.01 }),
 } as const);
 
 const WINDOW_PUNISHMENT_PROFILE = Object.freeze({
@@ -1507,7 +1509,6 @@ export class ChatAttackWindowPolicy {
       case 'HIGH':
         return 'PRESSURED';
       case 'ELEVATED':
-        return 'WATCHFUL';
       case 'BUILDING':
         return 'WATCHFUL';
       case 'NONE':
@@ -1707,9 +1708,8 @@ export class ChatAttackWindowPolicy {
     return Object.freeze({
       actorId: this.createTargetActorId(request),
       actorKind: actor.actorKind,
-      displayName: actor.displayName,
-      npcId: actor.npcId ?? null,
       userId: actor.userId ?? null,
+      npcId: actor.npcId ?? null,
       relationshipId: actor.relationshipId ?? null,
       counterpartKind: actor.counterpartKind ?? null,
       stanceHint: actor.stance,
@@ -1808,6 +1808,7 @@ export const CHAT_ATTACK_WINDOW_POLICY_NOTES = Object.freeze([
   'Session identity resolves from session.identity.sessionId, not from a flattened session field.',
   'Moment/scene hints resolve from fight.pattern, not from the fight root object.',
   'Actor posture resolves from shared relationship stance/objective plus bias-derived score projections.',
+  'Counter actor snapshot stays contract-safe: no displayName or donor-only fields are written into targetActor.',
   'Risk bands are SAFE, MEASURED, VOLATILE, DANGEROUS, SUICIDAL — not low/medium/high shorthands.',
   'Backend pressure normalization maps NONE/BUILDING/ELEVATED/HIGH/CRITICAL into calm→breakpoint timing stress.',
   'Counter demands are VISIBLE_REPLY / PROOF_REPLY / QUOTE_REPLY / TIMED_REPLY / SILENCE_REPLY / HELPER_REPLY / NEGOTIATION_REPLY.',
