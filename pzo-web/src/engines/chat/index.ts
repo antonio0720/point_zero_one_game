@@ -117,6 +117,8 @@ import * as ReadDelayPolicyModule from './presence/ReadDelayPolicy';
 import * as CrossModeContinuityModule from './continuity/CrossModeContinuity';
 import * as CarryoverSceneStateModule from './continuity/CarryoverSceneState';
 import * as CompanionContinuityModule from './continuity/CompanionContinuity';
+import * as PostRunSceneBuilderModule from './postrun/PostRunSceneBuilder';
+import * as PostRunSummaryPolicyModule from './postrun/PostRunSummaryPolicy';
 import * as ChatMlCompatibilityModule from './ml/ml_index';
 import * as ChatDlCompatibilityModule from './dl/dl_index';
 
@@ -165,6 +167,8 @@ export * from './shadow/RevealQueue';
 export * from './presence/NpcPresenceStyle';
 export * from './presence/TypingTheater';
 export * from './presence/ReadDelayPolicy';
+export * from './postrun/PostRunSceneBuilder';
+export * from './postrun/PostRunSummaryPolicy';
 export * from './continuity/CrossModeContinuity';
 export * from './continuity/CarryoverSceneState';
 export * from './continuity/CompanionContinuity';
@@ -296,6 +300,7 @@ export const CHAT_ENGINE_PRESENT_SUBTREES = Object.freeze([
   'dl',
   'intelligence',
   'ml',
+  'postrun',
   'npc',
   'replay',
   'telemetry',
@@ -720,6 +725,8 @@ export const CHAT_ENGINE_PUBLIC_EXPORTS = Object.freeze({
     './combat/ChatBossFightController',
     './combat/ChatCounterplayBridge',
     './combat/ChatAttackTelegraph',
+    './postrun/PostRunSceneBuilder',
+    './postrun/PostRunSummaryPolicy',
   ] as const),
   trees: Object.freeze([
     './adapters',
@@ -770,6 +777,8 @@ export const CHAT_ENGINE_PUBLIC_EXPORTS = Object.freeze({
     'NpcPresenceStyleModule',
     'TypingTheaterModule',
     'ReadDelayPolicyModule',
+    'PostRunSceneBuilderModule',
+    'PostRunSummaryPolicyModule',
     'ChatMlCompatibilityModule',
     'ChatDlCompatibilityModule',
   ] as const),
@@ -817,6 +826,8 @@ export const CHAT_ENGINE_RUNTIME_MODULES = Object.freeze({
   CrossModeContinuity: CrossModeContinuityModule,
   CarryoverSceneState: CarryoverSceneStateModule,
   CompanionContinuity: CompanionContinuityModule,
+  PostRunSceneBuilder: PostRunSceneBuilderModule,
+  PostRunSummaryPolicy: PostRunSummaryPolicyModule,
 } as const);
 
 export const CHAT_ENGINE_SUBTREE_MODULES = Object.freeze({
@@ -844,6 +855,10 @@ export const CHAT_ENGINE_SUBTREE_MODULES = Object.freeze({
     CrossModeContinuity: CrossModeContinuityModule,
     CarryoverSceneState: CarryoverSceneStateModule,
     CompanionContinuity: CompanionContinuityModule,
+  } as const),
+  postrun: Object.freeze({
+    PostRunSceneBuilder: PostRunSceneBuilderModule,
+    PostRunSummaryPolicy: PostRunSummaryPolicyModule,
   } as const),
   mlCompatibility: ChatMlCompatibilityModule,
   dlCompatibility: ChatDlCompatibilityModule,
@@ -873,6 +888,10 @@ export const CHAT_ENGINE_NAMESPACE = Object.freeze({
     CrossModeContinuity: CrossModeContinuityModule,
     CarryoverSceneState: CarryoverSceneStateModule,
     CompanionContinuity: CompanionContinuityModule,
+  } as const),
+  postrun: Object.freeze({
+    PostRunSceneBuilder: PostRunSceneBuilderModule,
+    PostRunSummaryPolicy: PostRunSummaryPolicyModule,
   } as const),
   intelligence: Object.freeze({
     canonical: ChatIntelligenceModule,
@@ -930,6 +949,8 @@ export const CHAT_ENGINE_LAZY_LOADERS = Object.freeze({
   NpcPresenceStyle: () => import('./presence/NpcPresenceStyle'),
   TypingTheater: () => import('./presence/TypingTheater'),
   ReadDelayPolicy: () => import('./presence/ReadDelayPolicy'),
+  PostRunSceneBuilder: () => import('./postrun/PostRunSceneBuilder'),
+  PostRunSummaryPolicy: () => import('./postrun/PostRunSummaryPolicy'),
   mlCompatibility: () => import('./ml/ml_index'),
   dlCompatibility: () => import('./dl/dl_index'),
 } as const);
