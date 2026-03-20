@@ -79,6 +79,8 @@ import * as ReplayMomentIndexer from './rewards/ReplayMomentIndexer';
 import * as PresenceStyleResolver from './presence/PresenceStyleResolver';
 import * as TypingSimulationEngine from './presence/TypingSimulationEngine';
 import * as ReadReceiptPolicy from './presence/ReadReceiptPolicy';
+import * as CrossModeContinuityLedger from './continuity/CrossModeContinuityLedger';
+import * as CarryoverResolver from './continuity/CarryoverResolver';
 import { ChatNegotiationEngineModule } from './dealroom/NegotiationEngine';
 import { ChatOfferCounterEngineModule } from './dealroom/OfferCounterEngine';
 
@@ -130,6 +132,8 @@ export * from './rewards/ReplayMomentIndexer';
 export * from './presence/PresenceStyleResolver';
 export * from './presence/TypingSimulationEngine';
 export * from './presence/ReadReceiptPolicy';
+export * from './continuity/CrossModeContinuityLedger';
+export * from './continuity/CarryoverResolver';
 
 // ── LiveOps world-event authority lane ─────────────────────────────────────
 export {
@@ -224,6 +228,8 @@ export {
   PresenceStyleResolver as ChatPresenceStyleResolverModule,
   TypingSimulationEngine as ChatTypingSimulationEngineModule,
   ReadReceiptPolicy as ChatReadReceiptPolicyModule,
+  CrossModeContinuityLedger as ChatCrossModeContinuityLedgerModule,
+  CarryoverResolver as ChatCarryoverResolverModule,
 };
 
 export const ChatEngineClass = Engine.ChatEngine;
@@ -251,6 +257,8 @@ export const ChatReplayMomentIndexerClass = ReplayMomentIndexer.ReplayMomentInde
 export const PresenceStyleResolverClass = PresenceStyleResolver.PresenceStyleResolver;
 export const TypingSimulationEngineClass = TypingSimulationEngine.TypingSimulationEngine;
 export const ReadReceiptPolicyClass = ReadReceiptPolicy.ReadReceiptPolicy;
+export const CrossModeContinuityLedgerClass = CrossModeContinuityLedger.CrossModeContinuityLedger;
+export const CarryoverResolverClass = CarryoverResolver.CarryoverResolver;
 
 // ============================================================================
 // MARK: Canonical tree manifest contracts
@@ -352,6 +360,10 @@ export interface BackendChatAuthorityBundle {
       readonly interventionPlanner: typeof RescueInterventionPlanner;
       readonly churnRescuePolicy: typeof ChurnRescuePolicy;
       readonly recoveryOutcomeTracker: typeof RecoveryOutcomeTracker;
+    };
+    readonly continuity: {
+      readonly crossModeContinuityLedger: typeof CrossModeContinuityLedger;
+      readonly carryoverResolver: typeof CarryoverResolver;
     };
   };
   readonly readiness: BackendChatLaneReadinessReport;
@@ -478,8 +490,8 @@ export const BACKEND_CHAT_CANONICAL_MODULES = Object.freeze([
   descriptor('presence.ReadReceiptPolicy', 'presence/ReadReceiptPolicy.ts', 'PRESENCE', 'GENERATED', true, 'Read-delay and receipt law.'),
 
   // Continuity
-  descriptor('continuity.CrossModeContinuityLedger', 'continuity/CrossModeContinuityLedger.ts', 'CONTINUITY', 'PENDING', true, 'Cross-mode continuity durability layer.'),
-  descriptor('continuity.CarryoverResolver', 'continuity/CarryoverResolver.ts', 'CONTINUITY', 'PENDING', true, 'Carryover scene-state resolution between modes.'),
+  descriptor('continuity.CrossModeContinuityLedger', 'continuity/CrossModeContinuityLedger.ts', 'CONTINUITY', 'GENERATED', true, 'Cross-mode continuity durability layer.'),
+  descriptor('continuity.CarryoverResolver', 'continuity/CarryoverResolver.ts', 'CONTINUITY', 'GENERATED', true, 'Carryover scene-state resolution between modes.'),
 
   // Combat / language-as-combat
   descriptor('combat.ChatBossFightEngine', 'combat/ChatBossFightEngine.ts', 'COMBAT', 'GENERATED', true, 'Conversational boss-fight authority.'),
@@ -570,6 +582,10 @@ export function createBackendChatAuthorityBundle(): BackendChatAuthorityBundle {
         interventionPlanner: RescueInterventionPlanner,
         churnRescuePolicy: ChurnRescuePolicy,
         recoveryOutcomeTracker: RecoveryOutcomeTracker,
+      }),
+      continuity: Object.freeze({
+        crossModeContinuityLedger: CrossModeContinuityLedger,
+        carryoverResolver: CarryoverResolver,
       }),
       rewards: Object.freeze({
         legendMomentLedger: LegendMomentLedger,
