@@ -1,3 +1,4 @@
+
 /*
  * POINT ZERO ONE — BACKEND CASCADE ENGINE
  * /backend/src/game/engine/cascade/CascadeEngine.ts
@@ -27,7 +28,6 @@ import type {
 import type {
   EconomyState,
   RunStateSnapshot,
-  ShieldLayerState,
   ShieldState,
 } from '../core/RunStateSnapshot';
 import { CascadeChainRegistry } from './CascadeChainRegistry';
@@ -190,11 +190,11 @@ const LAYER_TEMPLATE_FALLBACK: Readonly<Record<ShieldLayerId, CascadeTemplateId>
 });
 
 const PRESSURE_TEMPLATE_HINTS: Readonly<Record<PressureTier, readonly CascadeTemplateId[]>> = Object.freeze({
-  T0: Object.freeze([]),
-  T1: Object.freeze(['LIQUIDITY_SPIRAL']),
-  T2: Object.freeze(['LIQUIDITY_SPIRAL', 'CREDIT_FREEZE']),
-  T3: Object.freeze(['CREDIT_FREEZE', 'INCOME_SHOCK']),
-  T4: Object.freeze(['INCOME_SHOCK', 'NETWORK_LOCKDOWN']),
+  T0: [] as const,
+  T1: ['LIQUIDITY_SPIRAL'] as const,
+  T2: ['LIQUIDITY_SPIRAL', 'CREDIT_FREEZE'] as const,
+  T3: ['CREDIT_FREEZE', 'INCOME_SHOCK'] as const,
+  T4: ['INCOME_SHOCK', 'NETWORK_LOCKDOWN'] as const,
 });
 
 const MODE_SEVERITY_BIAS: Readonly<Record<ModeCode, Readonly<Record<CascadeSeverity, number>>>> = Object.freeze({
@@ -204,8 +204,6 @@ const MODE_SEVERITY_BIAS: Readonly<Record<ModeCode, Readonly<Record<CascadeSever
   ghost: Object.freeze({ LOW: 0.85, MEDIUM: 0.95, HIGH: 1.0, CRITICAL: 1.1 }),
 });
 
-const PRESSURE_SCALAR_ORDER: readonly PressureTier[] = Object.freeze(['T0', 'T1', 'T2', 'T3', 'T4']);
-const SEVERITY_ORDER: readonly CascadeSeverity[] = Object.freeze(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']);
 const MAX_RUNTIME_MEMORY_TICKS = 24;
 const DEFAULT_HEALTHY_NOTE = 'Cascade engine operational.';
 const DEFAULT_RESET_NOTE = 'Cascade engine reset.';
@@ -313,8 +311,7 @@ function createMutableStats(): MutableRuntimeStats {
 /**
  * Authoritative backend cascade runtime.
  *
- * The original file was intentionally thin. This rewrite keeps the same public
- * shape while upgrading runtime depth in five concrete ways:
+ * This rewrite keeps the same public shape while upgrading runtime depth in five concrete ways:
  * 1. normalized multi-family event harvesting
  * 2. deterministic template routing with mode/pressure bias
  * 3. explicit per-link effect realization + delta buffering
@@ -468,12 +465,6 @@ export class CascadeEngine implements SimulationEngine {
           repeatedTriggerCounts: nextRepeatedTriggerCounts,
           lastResolvedTick,
         },
-        emittedEventCount:
-          snapshot.emittedEventCount +
-          creationPlan.createdChains.length +
-          progressedLinks.length +
-          aggregateDelta.injectedCards.length,
-        warnings: this.buildWarnings(snapshot.warnings, notes),
       };
 
       this.runtimeMemory = this.buildNextRuntimeMemory(
@@ -557,7 +548,6 @@ export class CascadeEngine implements SimulationEngine {
       }
     }
 
-    // Native snapshot-derived fallback for shield breaches and pressure spikes.
     normalized.push(...this.buildSnapshotDerivedEvents(snapshot, seen, stats));
 
     return normalized.sort((left, right) => {
@@ -962,14 +952,13 @@ export class CascadeEngine implements SimulationEngine {
       }
     }
 
-    // Positive cascades are also inferred from state, not just inbound events.
     for (const positiveChain of this.buildPositiveChains(snapshot, created, notes)) {
       created.push(positiveChain);
       stats.createdPositive += 1;
     }
 
     this.pruneDuplicateCreatedChains(created, suppressedEventIds, stats);
-    this.emitCreationPreviewSignals(context, created, snapshot.tick);
+    this.emitCreationPreviewSignals(context, created);
 
     return {
       createdChains: created,
@@ -988,7 +977,9 @@ export class CascadeEngine implements SimulationEngine {
     for (const templateId of inferred) {
       const template = this.resolveTemplate(templateId, notes);
       const trigger = `positive:${templateId}` as const;
-      const pending = alreadyCreated.filter((chain) => chain.trigger === trigger).length + created.filter((chain) => chain.trigger === trigger).length;
+      const pending =
+        alreadyCreated.filter((chain) => chain.trigger === trigger).length +
+        created.filter((chain) => chain.trigger === trigger).length;
 
       if (!this.queue.canCreate(snapshot, template, trigger, [...alreadyCreated, ...created], pending)) {
         continue;
@@ -1226,6 +1217,12 @@ export class CascadeEngine implements SimulationEngine {
 
       context.bus.emit('cascade.chain.progressed', {
         chainId: chain.chainId,
+        linkId: link.linkId,
+        tick: snapshot.tick,
+      });
+
+      context.bus.emit('cascade.chain.progressed.detail', {
+        chainId: chain.chainId,
         templateId: chain.templateId,
         linkId: link.linkId,
         tick: snapshot.tick,
@@ -1279,16 +1276,18 @@ export class CascadeEngine implements SimulationEngine {
 
     delta = mergeDelta(delta, {
       cashDelta: safeNumber(effect.cashDelta),
+      debtDelta: safeNumber(effect.debtDelta),
       incomeDelta: safeNumber(effect.incomeDelta),
+      expensesDelta: safeNumber(effect.expenseDelta),
       heatDelta: safeNumber(effect.heatDelta),
       shieldDelta: safeNumber(effect.shieldDelta),
       trustDelta: safeNumber(effect.trustDelta),
       timeDeltaMs: safeNumber(effect.timeDeltaMs),
       divergenceDelta: safeNumber(effect.divergenceDelta),
       injectedCards: safeArray(effect.injectCards),
+      proofBadges: safeArray(effect.grantBadges),
     });
 
-    // Derive secondary effects from template identity and mode posture.
     delta = mergeDelta(delta, this.deriveSecondaryEffects(snapshot, chain, template, effect));
 
     if (effect.cascadeTag) {
@@ -1316,39 +1315,75 @@ export class CascadeEngine implements SimulationEngine {
     template: CascadeTemplate,
     effect: EffectPayload,
   ): Partial<ChainExecutionDelta> {
-    const secondary = createEmptyDelta();
+    let cashDelta = 0;
+    let debtDelta = 0;
+    let incomeDelta = 0;
+    let expensesDelta = 0;
+    let heatDelta = 0;
+    let shieldDelta = 0;
+    let trustDelta = 0;
+    let timeDeltaMs = 0;
+    let divergenceDelta = 0;
+    const injectedCards: string[] = [];
+    const proofBadges: string[] = [];
+    const auditFlags: string[] = [];
+    const notes: string[] = [];
 
     if (!template.positive && template.templateId === 'LIQUIDITY_SPIRAL') {
-      secondary.debtDelta += Math.max(0, Math.round(Math.abs(safeNumber(effect.cashDelta)) * 0.2));
-      secondary.expensesDelta += Math.max(0, Math.round(Math.abs(safeNumber(effect.cashDelta)) * 0.05));
+      debtDelta += Math.max(0, Math.round(Math.abs(safeNumber(effect.cashDelta)) * 0.2));
+      expensesDelta += Math.max(0, Math.round(Math.abs(safeNumber(effect.cashDelta)) * 0.05));
+      notes.push(`Secondary liquidity spiral debt drag applied for ${chain.chainId}.`);
     }
 
     if (!template.positive && template.templateId === 'CREDIT_FREEZE') {
-      secondary.expensesDelta += 1;
-      secondary.auditFlags = [...secondary.auditFlags, 'credit-freeze-active'];
+      expensesDelta += 1;
+      auditFlags.push('credit-freeze-active');
     }
 
     if (!template.positive && template.templateId === 'INCOME_SHOCK') {
-      secondary.expensesDelta += snapshot.mode === 'solo' ? 1 : 0;
-      secondary.auditFlags = [...secondary.auditFlags, 'income-shock-active'];
+      expensesDelta += snapshot.mode === 'solo' ? 1 : 0;
+      auditFlags.push('income-shock-active');
     }
 
     if (!template.positive && template.templateId === 'NETWORK_LOCKDOWN') {
-      secondary.timeDeltaMs += 5_000;
-      secondary.auditFlags = [...secondary.auditFlags, 'network-lockdown-active'];
+      timeDeltaMs += 5_000;
+      auditFlags.push('network-lockdown-active');
     }
 
     if (template.positive && template.templateId === 'COMEBACK_SURGE') {
-      secondary.cashDelta += Math.max(0, Math.round(snapshot.economy.expensesPerTick * 0.5));
-      secondary.heatDelta -= snapshot.mode === 'coop' ? 2 : 1;
+      cashDelta += Math.max(0, Math.round(snapshot.economy.expensesPerTick * 0.5));
+      heatDelta -= snapshot.mode === 'coop' ? 2 : 1;
+      proofBadges.push('CASCADE_COMEBACK_WINDOW');
     }
 
     if (template.positive && template.templateId === 'MOMENTUM_ENGINE') {
-      secondary.incomeDelta += snapshot.mode === 'ghost' ? 0 : 1;
-      secondary.divergenceDelta += snapshot.mode === 'ghost' ? 0.01 : 0;
+      incomeDelta += snapshot.mode === 'ghost' ? 0 : 1;
+      divergenceDelta += snapshot.mode === 'ghost' ? 0.01 : 0;
     }
 
-    return secondary;
+    if (
+      template.positive &&
+      snapshot.mode === 'coop' &&
+      chain.trigger.startsWith('positive:')
+    ) {
+      trustDelta += 1;
+    }
+
+    return {
+      cashDelta,
+      debtDelta,
+      incomeDelta,
+      expensesDelta,
+      heatDelta,
+      shieldDelta,
+      trustDelta,
+      timeDeltaMs,
+      divergenceDelta,
+      injectedCards,
+      proofBadges,
+      auditFlags,
+      notes,
+    };
   }
 
   // ---------------------------------------------------------------------------
@@ -1617,16 +1652,6 @@ export class CascadeEngine implements SimulationEngine {
     ]);
   }
 
-  private buildWarnings(
-    existingWarnings: readonly string[],
-    notes: readonly string[],
-  ): readonly string[] {
-    return dedupeStrings([
-      ...existingWarnings,
-      ...notes.filter((note) => note.toLowerCase().includes('warning')),
-    ]);
-  }
-
   private buildNextRuntimeMemory(
     snapshot: RunStateSnapshot,
     normalizedEvents: readonly NormalizedCascadeEvent[],
@@ -1663,14 +1688,12 @@ export class CascadeEngine implements SimulationEngine {
   private emitCreationPreviewSignals(
     context: TickContext,
     created: readonly CascadeChainInstance[],
-    tick: number,
   ): void {
     for (const chain of created) {
       context.bus.emit('cascade.chain.created', {
         chainId: chain.chainId,
         templateId: chain.templateId,
         positive: chain.positive,
-        tick,
       });
     }
   }
@@ -1838,7 +1861,7 @@ export class CascadeEngine implements SimulationEngine {
 
   private resolveTemplate(templateId: string, notes: string[]): CascadeTemplate {
     try {
-      return this.registry.get(templateId as CascadeTemplateId);
+      return this.registry.get(templateId);
     } catch {
       notes.push(`Missing cascade template requested: ${templateId}. Falling back to LIQUIDITY_SPIRAL.`);
       return this.registry.get('LIQUIDITY_SPIRAL');
@@ -1882,7 +1905,9 @@ export class CascadeEngine implements SimulationEngine {
     return {
       ...effect,
       cashDelta: this.scaleMaybeNumber(effect.cashDelta, scalar),
+      debtDelta: this.scaleMaybeNumber(effect.debtDelta, scalar),
       incomeDelta: this.scaleMaybeNumber(effect.incomeDelta, scalar),
+      expenseDelta: this.scaleMaybeNumber(effect.expenseDelta, scalar),
       heatDelta: this.scaleMaybeNumber(effect.heatDelta, scalar),
       shieldDelta: this.scaleMaybeNumber(effect.shieldDelta, scalar),
       trustDelta: this.scaleMaybeNumber(effect.trustDelta, scalar),
@@ -1945,7 +1970,6 @@ export class CascadeEngine implements SimulationEngine {
   private severityForPressureTier(tier: PressureTier): CascadeSeverity {
     switch (tier) {
       case 'T0':
-        return 'LOW';
       case 'T1':
         return 'LOW';
       case 'T2':
