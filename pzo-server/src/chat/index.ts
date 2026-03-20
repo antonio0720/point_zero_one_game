@@ -65,6 +65,7 @@ import * as TypingHandler from './ChatTypingHandler';
 import * as CursorHandler from './ChatCursorHandler';
 import * as ReplayServiceModule from './ChatReplayService';
 import * as Fanout from './ChatFanoutService';
+import * as ChatEventFanoutModule from './liveops/ChatEventFanout';
 import * as MetricsModule from './ChatMetrics';
 import * as SocketContracts from './ChatSocketContracts';
 
@@ -82,6 +83,7 @@ export * as ChatTypingHandlerModule from './ChatTypingHandler';
 export * as ChatCursorHandlerModule from './ChatCursorHandler';
 export * as ChatReplayServiceModule from './ChatReplayService';
 export * as ChatFanoutServiceModule from './ChatFanoutService';
+export * as ChatEventFanoutModule from './liveops/ChatEventFanout';
 export * as ChatMetricsModule from './ChatMetrics';
 export * as ChatSocketContractsModule from './ChatSocketContracts';
 
@@ -162,6 +164,17 @@ export {
   createRescueShadowBroadcastPolicy,
   createLiveopsShadowBroadcastPolicy,
 } from './ChatFanoutService';
+
+export {
+  CHAT_EVENT_FANOUT_EVENTS,
+  DEFAULT_CHAT_EVENT_FANOUT_CONFIG,
+  ChatEventFanout,
+  createDefaultChatEventFanoutConfig,
+  normalizeWorldEventDeliveryWindow,
+  createWorldEventFanoutDigest,
+  createChatEventFanout,
+  createChatEventFanoutNoopEmitter,
+} from './liveops/ChatEventFanout';
 
 export {
   CHAT_METRIC_DEFINITIONS,
