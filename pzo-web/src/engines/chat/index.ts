@@ -114,6 +114,9 @@ import * as RevealQueueModule from './shadow/RevealQueue';
 import * as NpcPresenceStyleModule from './presence/NpcPresenceStyle';
 import * as TypingTheaterModule from './presence/TypingTheater';
 import * as ReadDelayPolicyModule from './presence/ReadDelayPolicy';
+import * as CrossModeContinuityModule from './continuity/CrossModeContinuity';
+import * as CarryoverSceneStateModule from './continuity/CarryoverSceneState';
+import * as CompanionContinuityModule from './continuity/CompanionContinuity';
 import * as ChatMlCompatibilityModule from './ml/ml_index';
 import * as ChatDlCompatibilityModule from './dl/dl_index';
 
@@ -159,6 +162,9 @@ export * from './shadow/RevealQueue';
 export * from './presence/NpcPresenceStyle';
 export * from './presence/TypingTheater';
 export * from './presence/ReadDelayPolicy';
+export * from './continuity/CrossModeContinuity';
+export * from './continuity/CarryoverSceneState';
+export * from './continuity/CompanionContinuity';
 export * from './ml/ml_index';
 export * from './dl/dl_index';
 
@@ -212,6 +218,9 @@ export { DeferredReactionPlanner, createDeferredReactionPlanner, ChatDeferredRea
 export { NpcPresenceStyleModule };
 export { TypingTheaterModule };
 export { ReadDelayPolicyModule };
+export { CrossModeContinuityModule };
+export { CarryoverSceneStateModule };
+export { CompanionContinuityModule };
 export { ChatMlCompatibilityModule };
 export { ChatDlCompatibilityModule };
 
@@ -796,6 +805,9 @@ export const CHAT_ENGINE_RUNTIME_MODULES = Object.freeze({
   NpcPresenceStyle: NpcPresenceStyleModule,
   TypingTheater: TypingTheaterModule,
   ReadDelayPolicy: ReadDelayPolicyModule,
+  CrossModeContinuity: CrossModeContinuityModule,
+  CarryoverSceneState: CarryoverSceneStateModule,
+  CompanionContinuity: CompanionContinuityModule,
 } as const);
 
 export const CHAT_ENGINE_SUBTREE_MODULES = Object.freeze({
@@ -818,6 +830,11 @@ export const CHAT_ENGINE_SUBTREE_MODULES = Object.freeze({
     NpcPresenceStyle: NpcPresenceStyleModule,
     TypingTheater: TypingTheaterModule,
     ReadDelayPolicy: ReadDelayPolicyModule,
+  } as const),
+  continuity: Object.freeze({
+    CrossModeContinuity: CrossModeContinuityModule,
+    CarryoverSceneState: CarryoverSceneStateModule,
+    CompanionContinuity: CompanionContinuityModule,
   } as const),
   mlCompatibility: ChatMlCompatibilityModule,
   dlCompatibility: ChatDlCompatibilityModule,
@@ -843,6 +860,11 @@ export const CHAT_ENGINE_NAMESPACE = Object.freeze({
     TypingTheater: TypingTheaterModule,
     ReadDelayPolicy: ReadDelayPolicyModule,
   } as const),
+  continuity: Object.freeze({
+    CrossModeContinuity: CrossModeContinuityModule,
+    CarryoverSceneState: CarryoverSceneStateModule,
+    CompanionContinuity: CompanionContinuityModule,
+  } as const),
   intelligence: Object.freeze({
     canonical: ChatIntelligenceModule,
     compatibilityMl: ChatMlCompatibilityModule,
@@ -866,6 +888,9 @@ export const CHAT_ENGINE_LAZY_LOADERS = Object.freeze({
   ChatSocketClient: () => import('./ChatSocketClient'),
   ChatPresenceController: () => import('./ChatPresenceController'),
   ChatTypingController: () => import('./ChatTypingController'),
+  CrossModeContinuity: () => import('./continuity/CrossModeContinuity'),
+  CarryoverSceneState: () => import('./continuity/CarryoverSceneState'),
+  CompanionContinuity: () => import('./continuity/CompanionContinuity'),
   ChatNotificationController: () => import('./ChatNotificationController'),
   ChatTranscriptBuffer: () => import('./ChatTranscriptBuffer'),
   ChatPrivacyPolicy: () => import('./ChatPrivacyPolicy'),
