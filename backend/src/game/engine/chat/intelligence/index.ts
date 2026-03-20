@@ -107,6 +107,11 @@ export type {
 
 export { createChatLearningCoordinator } from './ChatLearningCoordinator';
 
+// Canonical retrieval-backed continuity lane.
+// Keep this inside intelligence/ so newer backend surfaces do not have to reach
+// back through the legacy root dl/ compatibility barrel.
+export * from './dl';
+
 // ── 8 additional intelligence modules ─────────────────────────────────────────
 
 export type {

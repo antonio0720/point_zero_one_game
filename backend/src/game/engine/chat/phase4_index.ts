@@ -26,6 +26,9 @@ import * as Relationship from './ChatRelationshipService';
 import * as SceneArchive from './ChatSceneArchiveService';
 import * as PlayerModel from './ChatPlayerModelService';
 import * as SemanticSimilarity from './intelligence/ChatSemanticSimilarityIndex';
+import * as RetrievalMemory from './intelligence/dl/MemoryAnchorStore';
+import * as RetrievalContext from './intelligence/dl/RetrievalContextBuilder';
+import * as RetrievalRanking from './intelligence/dl/MemoryRankingPolicy';
 
 import * as DramaOrchestrator from './experience/ChatDramaOrchestrator';
 import * as ScenePlanner from './experience/ChatScenePlanner';
@@ -38,6 +41,7 @@ export * from './ChatRelationshipService';
 export * from './ChatSceneArchiveService';
 export * from './ChatPlayerModelService';
 export * from './intelligence/ChatSemanticSimilarityIndex';
+export * from './intelligence/dl';
 export * from './experience/ChatDramaOrchestrator';
 export * from './experience/ChatScenePlanner';
 export * from './experience/ChatMomentLedger';
@@ -56,6 +60,24 @@ export {
   SilencePolicy as ChatSilencePolicyModule,
 };
 
+export const BACKEND_CHAT_PHASE4_MODULES = Object.freeze({
+  ChatMemoryServiceModule: Memory,
+  ChatNoveltyServiceModule: Novelty,
+  ChatRelationshipServiceModule: Relationship,
+  ChatSceneArchiveServiceModule: SceneArchive,
+  ChatPlayerModelServiceModule: PlayerModel,
+  ChatSemanticSimilarityIndexModule: SemanticSimilarity,
+  ChatMemoryAnchorStoreModule: RetrievalMemory,
+  ChatRetrievalContextBuilderModule: RetrievalContext,
+  ChatMemoryRankingPolicyModule: RetrievalRanking,
+  ChatDramaOrchestratorModule: DramaOrchestrator,
+  ChatScenePlannerModule: ScenePlanner,
+  ChatMomentLedgerModule: MomentLedger,
+  ChatSilencePolicyModule: SilencePolicy,
+} as const);
+
+export type BackendChatPhase4ModuleKey = keyof typeof BACKEND_CHAT_PHASE4_MODULES;
+
 export interface BackendChatPhase4SurfaceDescriptor {
   readonly id: BackendChatPhase4SurfaceId;
   readonly relativePath: string;
@@ -72,6 +94,9 @@ export type BackendChatPhase4Concern =
   | 'SCENE_ARCHIVE'
   | 'PLAYER_MODEL'
   | 'SEMANTIC_SIMILARITY'
+  | 'RETRIEVAL_MEMORY'
+  | 'RETRIEVAL_CONTEXT'
+  | 'RETRIEVAL_RANKING'
   | 'DRAMA'
   | 'SCENE_PLANNING'
   | 'MOMENT_LEDGER'
@@ -84,6 +109,9 @@ export type BackendChatPhase4SurfaceId =
   | 'ChatSceneArchiveService'
   | 'ChatPlayerModelService'
   | 'ChatSemanticSimilarityIndex'
+  | 'intelligence.dl.MemoryAnchorStore'
+  | 'intelligence.dl.RetrievalContextBuilder'
+  | 'intelligence.dl.MemoryRankingPolicy'
   | 'experience.ChatDramaOrchestrator'
   | 'experience.ChatScenePlanner'
   | 'experience.ChatMomentLedger'
@@ -137,6 +165,30 @@ export const BACKEND_CHAT_PHASE4_SURFACE = Object.freeze([
     true,
     true,
     'Deterministic semantic repetition control for authored chat lines.',
+  ),
+  phase4Surface(
+    'intelligence.dl.MemoryAnchorStore',
+    './intelligence/dl/MemoryAnchorStore',
+    'RETRIEVAL_MEMORY',
+    true,
+    true,
+    'Authoritative durable store for retrieval-backed continuity anchors, windows, and receipts.',
+  ),
+  phase4Surface(
+    'intelligence.dl.RetrievalContextBuilder',
+    './intelligence/dl/RetrievalContextBuilder',
+    'RETRIEVAL_CONTEXT',
+    true,
+    true,
+    'Deterministic continuity packet builder for callback, rescue, post-run, and liveops authoring.',
+  ),
+  phase4Surface(
+    'intelligence.dl.MemoryRankingPolicy',
+    './intelligence/dl/MemoryRankingPolicy',
+    'RETRIEVAL_RANKING',
+    true,
+    true,
+    'Explainable ranking policy for durable memory-anchor retrieval.',
   ),
   phase4Surface(
     'experience.ChatDramaOrchestrator',
@@ -205,6 +257,9 @@ export interface BackendChatPhase4Bundle {
     readonly sceneArchive: typeof SceneArchive;
     readonly playerModel: typeof PlayerModel;
     readonly semanticSimilarity: typeof SemanticSimilarity;
+    readonly retrievalMemory: typeof RetrievalMemory;
+    readonly retrievalContext: typeof RetrievalContext;
+    readonly retrievalRanking: typeof RetrievalRanking;
     readonly experience: {
       readonly dramaOrchestrator: typeof DramaOrchestrator;
       readonly scenePlanner: typeof ScenePlanner;
@@ -224,6 +279,9 @@ export function createBackendChatPhase4Bundle(): BackendChatPhase4Bundle {
       sceneArchive: SceneArchive,
       playerModel: PlayerModel,
       semanticSimilarity: SemanticSimilarity,
+      retrievalMemory: RetrievalMemory,
+      retrievalContext: RetrievalContext,
+      retrievalRanking: RetrievalRanking,
       experience: Object.freeze({
         dramaOrchestrator: DramaOrchestrator,
         scenePlanner: ScenePlanner,
