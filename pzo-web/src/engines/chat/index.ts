@@ -148,6 +148,9 @@ export * from './npc';
 export * from './replay';
 export * from './telemetry';
 export * from './intelligence';
+export * from './intelligence/ml/EmotionScorer';
+export * from './intelligence/ml/SocialEmbarrassmentScorer';
+export * from './intelligence/ml/ConfidenceSwingTracker';
 export * from './experience/ChatDramaDirector';
 export * from './experience/ChatMomentOrchestrator';
 export * from './experience/ChatSilenceEngine';
@@ -303,6 +306,9 @@ export const CHAT_ENGINE_PRESENT_INTELLIGENCE_FILES = Object.freeze([
   'intelligence/ChatLearningBridge.ts',
   'intelligence/ChatLearningProfile.ts',
   'intelligence/index.ts',
+  'intelligence/ml/EmotionScorer.ts',
+  'intelligence/ml/SocialEmbarrassmentScorer.ts',
+  'intelligence/ml/ConfidenceSwingTracker.ts',
   'ml/ChannelRecommendationPolicy.ts',
   'ml/ColdStartPolicy.ts',
   'ml/DropOffRiskScorer.ts',
@@ -367,6 +373,9 @@ export const CHAT_ENGINE_CANONICAL_FRONTEND_TARGET_TREE = Object.freeze([
   'intelligence/ChatLearningBridge.ts',
   'intelligence/ChatLearningProfile.ts',
   'intelligence/ChatColdStartProfile.ts',
+  'intelligence/ml/EmotionScorer.ts',
+  'intelligence/ml/SocialEmbarrassmentScorer.ts',
+  'intelligence/ml/ConfidenceSwingTracker.ts',
   'intelligence/ml/index.ts',
   'intelligence/ml/FeatureExtractor.ts',
   'intelligence/ml/EngagementScorer.ts',

@@ -50,10 +50,16 @@ import {
 import * as ChatLearningBridgeRuntime from './ChatLearningBridge';
 import * as ChatLearningProfileRuntime from './ChatLearningProfile';
 import * as ChatColdStartProfileRuntime from './ChatColdStartProfile';
+import * as ChatEmotionScorerRuntime from './ml/EmotionScorer';
+import * as ChatSocialEmbarrassmentScorerRuntime from './ml/SocialEmbarrassmentScorer';
+import * as ChatConfidenceSwingTrackerRuntime from './ml/ConfidenceSwingTracker';
 
 export * from './ChatLearningBridge';
 export * from './ChatLearningProfile';
 export * from './ChatColdStartProfile';
+export * from './ml/EmotionScorer';
+export * from './ml/SocialEmbarrassmentScorer';
+export * from './ml/ConfidenceSwingTracker';
 
 /* ========================================================================== */
 /* MARK: Barrel identity                                                      */
@@ -63,7 +69,7 @@ export const CHAT_INTELLIGENCE_MODULE_NAME =
   'PZO_FRONTEND_CHAT_INTELLIGENCE' as const;
 
 export const CHAT_INTELLIGENCE_VERSION =
-  '2026.03.13-intelligence-barrel.v2' as const;
+  '2026.03.20-intelligence-barrel.v3-emotion-lane' as const;
 
 export const CHAT_INTELLIGENCE_BARREL_LAWS = Object.freeze([
   'Export what is real now, not what is merely planned.',
@@ -102,6 +108,9 @@ export const CHAT_INTELLIGENCE_PHASE_EXPORTS = Object.freeze({
     'ChatLearningBridge.ts',
     'ChatLearningProfile.ts',
     'ChatColdStartProfile.ts',
+    'ml/EmotionScorer.ts',
+    'ml/SocialEmbarrassmentScorer.ts',
+    'ml/ConfidenceSwingTracker.ts',
   ] as const),
   expectedNext: Object.freeze([
     'ml/index.ts',
@@ -132,6 +141,9 @@ export const CHAT_INTELLIGENCE_COMPILE_SAFE_SURFACE = Object.freeze({
   hasColdStartRuntime: true,
   hasLearningProfileRuntime: true,
   hasBridgeRuntime: true,
+  hasEmotionScorerRuntime: true,
+  hasSocialEmbarrassmentScorerRuntime: true,
+  hasConfidenceSwingTrackerRuntime: true,
   canInstantiateBridge: true,
   canHydrateColdStartProfile: true,
   canHydrateLearningProfile: true,
@@ -142,6 +154,15 @@ export const CHAT_INTELLIGENCE_COMPILE_SAFE_SURFACE = Object.freeze({
   canQueueOfflineEmission: true,
   canAcceptServerRevisions: true,
   canEmitFeatureSnapshots: true,
+  canScoreEmotion: true,
+  canEvaluateSocialEmbarrassment: true,
+  canTrackConfidenceSwing: true,
+  canRecommendEmotionIntervention: true,
+  canRecommendEmbarrassmentContainment: true,
+  canRecommendConfidenceSwingAction: true,
+  canRefineEmotionProfileState: true,
+  canRefineEmbarrassmentProfileState: true,
+  canRefineConfidenceSwingProfileState: true,
   awaitsFutureMlModules: true,
   awaitsFutureDlModules: true,
 } as const);
@@ -176,6 +197,32 @@ export const CHAT_INTELLIGENCE_RUNTIME_MODULES = Object.freeze({
     minimums: ChatColdStartProfileRuntime.CHAT_COLD_START_MINIMUMS,
     maximums: ChatColdStartProfileRuntime.CHAT_COLD_START_MAXIMUMS,
   }),
+  emotionScorer: Object.freeze({
+    moduleName: ChatEmotionScorerRuntime.CHAT_EMOTION_SCORER_MODULE_NAME,
+    version: ChatEmotionScorerRuntime.CHAT_EMOTION_SCORER_VERSION,
+    laws: ChatEmotionScorerRuntime.CHAT_EMOTION_SCORER_RUNTIME_LAWS,
+    defaults: ChatEmotionScorerRuntime.CHAT_EMOTION_SCORER_DEFAULTS,
+  }),
+  socialEmbarrassment: Object.freeze({
+    moduleName:
+      ChatSocialEmbarrassmentScorerRuntime.CHAT_SOCIAL_EMBARRASSMENT_SCORER_MODULE_NAME,
+    version:
+      ChatSocialEmbarrassmentScorerRuntime.CHAT_SOCIAL_EMBARRASSMENT_SCORER_VERSION,
+    laws:
+      ChatSocialEmbarrassmentScorerRuntime.CHAT_SOCIAL_EMBARRASSMENT_SCORER_RUNTIME_LAWS,
+    defaults:
+      ChatSocialEmbarrassmentScorerRuntime.CHAT_SOCIAL_EMBARRASSMENT_SCORER_DEFAULTS,
+  }),
+  confidenceSwing: Object.freeze({
+    moduleName:
+      ChatConfidenceSwingTrackerRuntime.CHAT_CONFIDENCE_SWING_TRACKER_MODULE_NAME,
+    version:
+      ChatConfidenceSwingTrackerRuntime.CHAT_CONFIDENCE_SWING_TRACKER_VERSION,
+    laws:
+      ChatConfidenceSwingTrackerRuntime.CHAT_CONFIDENCE_SWING_TRACKER_RUNTIME_LAWS,
+    defaults:
+      ChatConfidenceSwingTrackerRuntime.CHAT_CONFIDENCE_SWING_TRACKER_DEFAULTS,
+  }),
 } as const);
 
 export const CHAT_INTELLIGENCE_FRONTEND_LAWS = Object.freeze(
@@ -184,6 +231,9 @@ export const CHAT_INTELLIGENCE_FRONTEND_LAWS = Object.freeze(
     ...ChatLearningBridgeRuntime.CHAT_LEARNING_BRIDGE_RUNTIME_LAWS,
     ...ChatLearningProfileRuntime.CHAT_LEARNING_PROFILE_RUNTIME_LAWS,
     ...ChatColdStartProfileRuntime.CHAT_COLD_START_RUNTIME_LAWS,
+    ...ChatEmotionScorerRuntime.CHAT_EMOTION_SCORER_RUNTIME_LAWS,
+    ...ChatSocialEmbarrassmentScorerRuntime.CHAT_SOCIAL_EMBARRASSMENT_SCORER_RUNTIME_LAWS,
+    ...ChatConfidenceSwingTrackerRuntime.CHAT_CONFIDENCE_SWING_TRACKER_RUNTIME_LAWS,
   ]),
 );
 
@@ -328,6 +378,63 @@ export const CHAT_INTELLIGENCE_COLD_START_NAMESPACE = Object.freeze({
     ChatColdStartProfileRuntime.createChatColdStartRecommendation,
 } as const);
 
+export const CHAT_INTELLIGENCE_EMOTION_SCORER_NAMESPACE = Object.freeze({
+  moduleName: ChatEmotionScorerRuntime.CHAT_EMOTION_SCORER_MODULE_NAME,
+  version: ChatEmotionScorerRuntime.CHAT_EMOTION_SCORER_VERSION,
+  defaults: ChatEmotionScorerRuntime.CHAT_EMOTION_SCORER_DEFAULTS,
+  laws: ChatEmotionScorerRuntime.CHAT_EMOTION_SCORER_RUNTIME_LAWS,
+  ChatEmotionScorer: ChatEmotionScorerRuntime.ChatEmotionScorer,
+  createChatEmotionScorer: ChatEmotionScorerRuntime.createChatEmotionScorer,
+  scoreChatEmotion: ChatEmotionScorerRuntime.scoreChatEmotion,
+  summarizeChatEmotion: ChatEmotionScorerRuntime.summarizeChatEmotion,
+  recommendChatEmotionIntervention:
+    ChatEmotionScorerRuntime.recommendChatEmotionIntervention,
+  refineChatEmotionProfileState:
+    ChatEmotionScorerRuntime.refineChatEmotionProfileState,
+} as const);
+
+export const CHAT_INTELLIGENCE_SOCIAL_EMBARRASSMENT_NAMESPACE = Object.freeze({
+  moduleName:
+    ChatSocialEmbarrassmentScorerRuntime.CHAT_SOCIAL_EMBARRASSMENT_SCORER_MODULE_NAME,
+  version:
+    ChatSocialEmbarrassmentScorerRuntime.CHAT_SOCIAL_EMBARRASSMENT_SCORER_VERSION,
+  defaults:
+    ChatSocialEmbarrassmentScorerRuntime.CHAT_SOCIAL_EMBARRASSMENT_SCORER_DEFAULTS,
+  laws:
+    ChatSocialEmbarrassmentScorerRuntime.CHAT_SOCIAL_EMBARRASSMENT_SCORER_RUNTIME_LAWS,
+  ChatSocialEmbarrassmentScorer:
+    ChatSocialEmbarrassmentScorerRuntime.ChatSocialEmbarrassmentScorer,
+  createChatSocialEmbarrassmentScorer:
+    ChatSocialEmbarrassmentScorerRuntime.createChatSocialEmbarrassmentScorer,
+  evaluateChatSocialEmbarrassment:
+    ChatSocialEmbarrassmentScorerRuntime.evaluateChatSocialEmbarrassment,
+  recommendEmbarrassmentContainment:
+    ChatSocialEmbarrassmentScorerRuntime.recommendEmbarrassmentContainment,
+  refineEmbarrassmentProfileState:
+    ChatSocialEmbarrassmentScorerRuntime.refineEmbarrassmentProfileState,
+} as const);
+
+export const CHAT_INTELLIGENCE_CONFIDENCE_SWING_NAMESPACE = Object.freeze({
+  moduleName:
+    ChatConfidenceSwingTrackerRuntime.CHAT_CONFIDENCE_SWING_TRACKER_MODULE_NAME,
+  version:
+    ChatConfidenceSwingTrackerRuntime.CHAT_CONFIDENCE_SWING_TRACKER_VERSION,
+  defaults:
+    ChatConfidenceSwingTrackerRuntime.CHAT_CONFIDENCE_SWING_TRACKER_DEFAULTS,
+  laws:
+    ChatConfidenceSwingTrackerRuntime.CHAT_CONFIDENCE_SWING_TRACKER_RUNTIME_LAWS,
+  ChatConfidenceSwingTracker:
+    ChatConfidenceSwingTrackerRuntime.ChatConfidenceSwingTracker,
+  createChatConfidenceSwingTracker:
+    ChatConfidenceSwingTrackerRuntime.createChatConfidenceSwingTracker,
+  trackChatConfidenceSwing:
+    ChatConfidenceSwingTrackerRuntime.trackChatConfidenceSwing,
+  recommendConfidenceSwingAction:
+    ChatConfidenceSwingTrackerRuntime.recommendConfidenceSwingAction,
+  refineConfidenceSwingProfileState:
+    ChatConfidenceSwingTrackerRuntime.refineConfidenceSwingProfileState,
+} as const);
+
 export const CHAT_INTELLIGENCE_NAMESPACE = Object.freeze({
   manifest: CHAT_INTELLIGENCE_PUBLIC_MANIFEST,
   barrelLaws: CHAT_INTELLIGENCE_BARREL_LAWS,
@@ -338,6 +445,9 @@ export const CHAT_INTELLIGENCE_NAMESPACE = Object.freeze({
   bridge: CHAT_INTELLIGENCE_BRIDGE_NAMESPACE,
   learningProfile: CHAT_INTELLIGENCE_LEARNING_PROFILE_NAMESPACE,
   coldStart: CHAT_INTELLIGENCE_COLD_START_NAMESPACE,
+  emotionScorer: CHAT_INTELLIGENCE_EMOTION_SCORER_NAMESPACE,
+  socialEmbarrassment: CHAT_INTELLIGENCE_SOCIAL_EMBARRASSMENT_NAMESPACE,
+  confidenceSwing: CHAT_INTELLIGENCE_CONFIDENCE_SWING_NAMESPACE,
   compileSafeSurface: CHAT_INTELLIGENCE_COMPILE_SAFE_SURFACE,
 } as const);
 
@@ -352,6 +462,9 @@ export const ChatIntelligence = Object.freeze({
   bridge: CHAT_INTELLIGENCE_BRIDGE_NAMESPACE,
   learningProfile: CHAT_INTELLIGENCE_LEARNING_PROFILE_NAMESPACE,
   coldStart: CHAT_INTELLIGENCE_COLD_START_NAMESPACE,
+  emotionScorer: CHAT_INTELLIGENCE_EMOTION_SCORER_NAMESPACE,
+  socialEmbarrassment: CHAT_INTELLIGENCE_SOCIAL_EMBARRASSMENT_NAMESPACE,
+  confidenceSwing: CHAT_INTELLIGENCE_CONFIDENCE_SWING_NAMESPACE,
 
   ChatLearningBridge: ChatLearningBridgeRuntime.ChatLearningBridge,
   createChatLearningBridge: ChatLearningBridgeRuntime.createChatLearningBridge,
@@ -363,6 +476,27 @@ export const ChatIntelligence = Object.freeze({
     ChatColdStartProfileRuntime.createChatColdStartProfile,
   createChatColdStartRecommendation:
     ChatColdStartProfileRuntime.createChatColdStartRecommendation,
+  ChatEmotionScorer: ChatEmotionScorerRuntime.ChatEmotionScorer,
+  createChatEmotionScorer: ChatEmotionScorerRuntime.createChatEmotionScorer,
+  scoreChatEmotion: ChatEmotionScorerRuntime.scoreChatEmotion,
+  recommendChatEmotionIntervention:
+    ChatEmotionScorerRuntime.recommendChatEmotionIntervention,
+  ChatSocialEmbarrassmentScorer:
+    ChatSocialEmbarrassmentScorerRuntime.ChatSocialEmbarrassmentScorer,
+  createChatSocialEmbarrassmentScorer:
+    ChatSocialEmbarrassmentScorerRuntime.createChatSocialEmbarrassmentScorer,
+  evaluateChatSocialEmbarrassment:
+    ChatSocialEmbarrassmentScorerRuntime.evaluateChatSocialEmbarrassment,
+  recommendEmbarrassmentContainment:
+    ChatSocialEmbarrassmentScorerRuntime.recommendEmbarrassmentContainment,
+  ChatConfidenceSwingTracker:
+    ChatConfidenceSwingTrackerRuntime.ChatConfidenceSwingTracker,
+  createChatConfidenceSwingTracker:
+    ChatConfidenceSwingTrackerRuntime.createChatConfidenceSwingTracker,
+  trackChatConfidenceSwing:
+    ChatConfidenceSwingTrackerRuntime.trackChatConfidenceSwing,
+  recommendConfidenceSwingAction:
+    ChatConfidenceSwingTrackerRuntime.recommendConfidenceSwingAction,
 } as const);
 
 /* ========================================================================== */
@@ -376,6 +510,11 @@ export const CHAT_INTELLIGENCE_README = Object.freeze({
     learningProfile:
       '/pzo-web/src/engines/chat/intelligence/ChatLearningProfile',
     coldStart: '/pzo-web/src/engines/chat/intelligence/ChatColdStartProfile',
+    emotionScorer: '/pzo-web/src/engines/chat/intelligence/ml/EmotionScorer',
+    socialEmbarrassment:
+      '/pzo-web/src/engines/chat/intelligence/ml/SocialEmbarrassmentScorer',
+    confidenceSwing:
+      '/pzo-web/src/engines/chat/intelligence/ml/ConfidenceSwingTracker',
   }),
   recommendedConsumers: Object.freeze([
     'pzo-web/src/engines/chat/ChatEngine.ts',
@@ -393,6 +532,10 @@ export const CHAT_INTELLIGENCE_README = Object.freeze({
     'telemetry-driven profile mutation',
     'server profile merge',
     'channel recommendation hints',
+    'emotion scoring',
+    'social embarrassment evaluation',
+    'confidence swing tracking',
+    'emotion-driven intervention recommendation',
   ] as const),
   stagedNext: CHAT_INTELLIGENCE_PHASE_EXPORTS.expectedNext,
 } as const);
@@ -415,6 +558,12 @@ export type ChatIntelligenceLearningProfileNamespace =
   typeof CHAT_INTELLIGENCE_LEARNING_PROFILE_NAMESPACE;
 export type ChatIntelligenceColdStartNamespace =
   typeof CHAT_INTELLIGENCE_COLD_START_NAMESPACE;
+export type ChatIntelligenceEmotionScorerNamespace =
+  typeof CHAT_INTELLIGENCE_EMOTION_SCORER_NAMESPACE;
+export type ChatIntelligenceSocialEmbarrassmentNamespace =
+  typeof CHAT_INTELLIGENCE_SOCIAL_EMBARRASSMENT_NAMESPACE;
+export type ChatIntelligenceConfidenceSwingNamespace =
+  typeof CHAT_INTELLIGENCE_CONFIDENCE_SWING_NAMESPACE;
 
 export type {
   ChatLearningBridgeObserver,
