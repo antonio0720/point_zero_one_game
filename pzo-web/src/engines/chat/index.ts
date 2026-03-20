@@ -156,6 +156,11 @@ export * from './shadow/RevealQueue';
 export * from './ml/ml_index';
 export * from './dl/dl_index';
 
+// ── LiveOps / World Event Runtime ───────────────────────────────────────────
+export * from './liveops/SeasonalChatEventDirector';
+export * from './liveops/WorldEventOverlayPolicy';
+export * from './liveops/ChatEventBannerPolicy';
+
 export { ChatTypes };
 export { ChatEngineModule };
 export { ChatStateModule };
