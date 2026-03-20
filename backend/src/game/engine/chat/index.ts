@@ -76,6 +76,9 @@ import * as RecoveryOutcomeTracker from './rescue/RecoveryOutcomeTracker';
 import * as LegendMomentLedger from './rewards/LegendMomentLedger';
 import * as RewardGrantResolver from './rewards/RewardGrantResolver';
 import * as ReplayMomentIndexer from './rewards/ReplayMomentIndexer';
+import * as PresenceStyleResolver from './presence/PresenceStyleResolver';
+import * as TypingSimulationEngine from './presence/TypingSimulationEngine';
+import * as ReadReceiptPolicy from './presence/ReadReceiptPolicy';
 import { ChatNegotiationEngineModule } from './dealroom/NegotiationEngine';
 import { ChatOfferCounterEngineModule } from './dealroom/OfferCounterEngine';
 
@@ -124,6 +127,9 @@ export * from './rescue/RecoveryOutcomeTracker';
 export * from './rewards/LegendMomentLedger';
 export * from './rewards/RewardGrantResolver';
 export * from './rewards/ReplayMomentIndexer';
+export * from './presence/PresenceStyleResolver';
+export * from './presence/TypingSimulationEngine';
+export * from './presence/ReadReceiptPolicy';
 
 // ── LiveOps world-event authority lane ─────────────────────────────────────
 export {
@@ -215,6 +221,9 @@ export {
   LegendMomentLedger as ChatLegendMomentLedgerModule,
   RewardGrantResolver as ChatRewardGrantResolverModule,
   ReplayMomentIndexer as ChatReplayMomentIndexerModule,
+  PresenceStyleResolver as ChatPresenceStyleResolverModule,
+  TypingSimulationEngine as ChatTypingSimulationEngineModule,
+  ReadReceiptPolicy as ChatReadReceiptPolicyModule,
 };
 
 export const ChatEngineClass = Engine.ChatEngine;
@@ -239,6 +248,9 @@ export const RecoveryOutcomeTrackerClass = RecoveryOutcomeTracker.RecoveryOutcom
 export const ChatLegendMomentLedgerClass = LegendMomentLedger.LegendMomentLedger;
 export const ChatRewardGrantResolverClass = RewardGrantResolver.RewardGrantResolver;
 export const ChatReplayMomentIndexerClass = ReplayMomentIndexer.ReplayMomentIndexer;
+export const PresenceStyleResolverClass = PresenceStyleResolver.PresenceStyleResolver;
+export const TypingSimulationEngineClass = TypingSimulationEngine.TypingSimulationEngine;
+export const ReadReceiptPolicyClass = ReadReceiptPolicy.ReadReceiptPolicy;
 
 // ============================================================================
 // MARK: Canonical tree manifest contracts
@@ -461,9 +473,9 @@ export const BACKEND_CHAT_CANONICAL_MODULES = Object.freeze([
   descriptor('liveops.GlobalEventScheduler', 'liveops/GlobalEventScheduler.ts', 'LIVEOPS', 'PENDING', true, 'Global event scheduling law.'),
 
   // Presence theater
-  descriptor('presence.PresenceStyleResolver', 'presence/PresenceStyleResolver.ts', 'PRESENCE', 'PENDING', true, 'NPC presence style authority.'),
-  descriptor('presence.TypingSimulationEngine', 'presence/TypingSimulationEngine.ts', 'PRESENCE', 'PENDING', true, 'Typing/lurk simulation authority.'),
-  descriptor('presence.ReadReceiptPolicy', 'presence/ReadReceiptPolicy.ts', 'PRESENCE', 'PENDING', true, 'Read-delay and receipt law.'),
+  descriptor('presence.PresenceStyleResolver', 'presence/PresenceStyleResolver.ts', 'PRESENCE', 'GENERATED', true, 'NPC presence style authority.'),
+  descriptor('presence.TypingSimulationEngine', 'presence/TypingSimulationEngine.ts', 'PRESENCE', 'GENERATED', true, 'Typing/lurk simulation authority.'),
+  descriptor('presence.ReadReceiptPolicy', 'presence/ReadReceiptPolicy.ts', 'PRESENCE', 'GENERATED', true, 'Read-delay and receipt law.'),
 
   // Continuity
   descriptor('continuity.CrossModeContinuityLedger', 'continuity/CrossModeContinuityLedger.ts', 'CONTINUITY', 'PENDING', true, 'Cross-mode continuity durability layer.'),
