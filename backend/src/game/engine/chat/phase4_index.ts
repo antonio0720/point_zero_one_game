@@ -34,6 +34,9 @@ import * as DramaOrchestrator from './experience/ChatDramaOrchestrator';
 import * as ScenePlanner from './experience/ChatScenePlanner';
 import * as MomentLedger from './experience/ChatMomentLedger';
 import * as SilencePolicy from './experience/ChatSilencePolicy';
+import * as PostRunNarrativeEngine from './postrun/PostRunNarrativeEngine';
+import * as TurningPointResolver from './postrun/TurningPointResolver';
+import * as ForeshadowPlanner from './postrun/ForeshadowPlanner';
 
 export * from './ChatMemoryService';
 export * from './ChatNoveltyService';
@@ -46,6 +49,9 @@ export * from './experience/ChatDramaOrchestrator';
 export * from './experience/ChatScenePlanner';
 export * from './experience/ChatMomentLedger';
 export * from './experience/ChatSilencePolicy';
+export * from './postrun/PostRunNarrativeEngine';
+export * from './postrun/TurningPointResolver';
+export * from './postrun/ForeshadowPlanner';
 
 export {
   Memory as ChatMemoryServiceModule,
@@ -58,6 +64,9 @@ export {
   ScenePlanner as ChatScenePlannerModule,
   MomentLedger as ChatMomentLedgerModule,
   SilencePolicy as ChatSilencePolicyModule,
+  PostRunNarrativeEngine as ChatPostRunNarrativeEngineModule,
+  TurningPointResolver as ChatTurningPointResolverModule,
+  ForeshadowPlanner as ChatForeshadowPlannerModule,
 };
 
 export const BACKEND_CHAT_PHASE4_MODULES = Object.freeze({
@@ -74,6 +83,9 @@ export const BACKEND_CHAT_PHASE4_MODULES = Object.freeze({
   ChatScenePlannerModule: ScenePlanner,
   ChatMomentLedgerModule: MomentLedger,
   ChatSilencePolicyModule: SilencePolicy,
+  ChatPostRunNarrativeEngineModule: PostRunNarrativeEngine,
+  ChatTurningPointResolverModule: TurningPointResolver,
+  ChatForeshadowPlannerModule: ForeshadowPlanner,
 } as const);
 
 export type BackendChatPhase4ModuleKey = keyof typeof BACKEND_CHAT_PHASE4_MODULES;
@@ -100,7 +112,10 @@ export type BackendChatPhase4Concern =
   | 'DRAMA'
   | 'SCENE_PLANNING'
   | 'MOMENT_LEDGER'
-  | 'SILENCE_POLICY';
+  | 'SILENCE_POLICY'
+  | 'POSTRUN_NARRATIVE'
+  | 'TURNING_POINT'
+  | 'FORESHADOW';
 
 export type BackendChatPhase4SurfaceId =
   | 'ChatMemoryService'
@@ -115,7 +130,10 @@ export type BackendChatPhase4SurfaceId =
   | 'experience.ChatDramaOrchestrator'
   | 'experience.ChatScenePlanner'
   | 'experience.ChatMomentLedger'
-  | 'experience.ChatSilencePolicy';
+  | 'experience.ChatSilencePolicy'
+  | 'postrun.PostRunNarrativeEngine'
+  | 'postrun.TurningPointResolver'
+  | 'postrun.ForeshadowPlanner';
 
 export const BACKEND_CHAT_PHASE4_SURFACE = Object.freeze([
   phase4Surface(
@@ -222,6 +240,30 @@ export const BACKEND_CHAT_PHASE4_SURFACE = Object.freeze([
     true,
     'Silence, interruption, delayed reveal, and timing law.',
   ),
+  phase4Surface(
+    'postrun.PostRunNarrativeEngine',
+    './postrun/PostRunNarrativeEngine',
+    'POSTRUN_NARRATIVE',
+    true,
+    true,
+    'Authoritative post-run ritual composition, archive shaping, and bundle authoring.',
+  ),
+  phase4Surface(
+    'postrun.TurningPointResolver',
+    './postrun/TurningPointResolver',
+    'TURNING_POINT',
+    true,
+    true,
+    'Deterministic turning-point synthesis and selection.',
+  ),
+  phase4Surface(
+    'postrun.ForeshadowPlanner',
+    './postrun/ForeshadowPlanner',
+    'FORESHADOW',
+    true,
+    true,
+    'Future-pressure, directive, and witness-seed planning for post-run ritual.',
+  ),
 ] as const satisfies readonly BackendChatPhase4SurfaceDescriptor[]);
 
 export interface BackendChatPhase4ConcernGroup {
@@ -247,6 +289,9 @@ export const BACKEND_CHAT_PHASE4_EXPERIENCE_PATHS = Object.freeze([
   './experience/ChatScenePlanner',
   './experience/ChatMomentLedger',
   './experience/ChatSilencePolicy',
+  './postrun/PostRunNarrativeEngine',
+  './postrun/TurningPointResolver',
+  './postrun/ForeshadowPlanner',
 ] as const);
 
 export interface BackendChatPhase4Bundle {
@@ -265,6 +310,11 @@ export interface BackendChatPhase4Bundle {
       readonly scenePlanner: typeof ScenePlanner;
       readonly momentLedger: typeof MomentLedger;
       readonly silencePolicy: typeof SilencePolicy;
+    };
+    readonly postrun: {
+      readonly narrativeEngine: typeof PostRunNarrativeEngine;
+      readonly turningPointResolver: typeof TurningPointResolver;
+      readonly foreshadowPlanner: typeof ForeshadowPlanner;
     };
   };
   readonly surface: readonly BackendChatPhase4SurfaceDescriptor[];
@@ -287,6 +337,11 @@ export function createBackendChatPhase4Bundle(): BackendChatPhase4Bundle {
         scenePlanner: ScenePlanner,
         momentLedger: MomentLedger,
         silencePolicy: SilencePolicy,
+      }),
+      postrun: Object.freeze({
+        narrativeEngine: PostRunNarrativeEngine,
+        turningPointResolver: TurningPointResolver,
+        foreshadowPlanner: ForeshadowPlanner,
       }),
     }),
     surface: BACKEND_CHAT_PHASE4_SURFACE,
@@ -322,7 +377,10 @@ export function listBackendChatPhase4ExperienceDescriptors(): readonly BackendCh
         value.concern === 'DRAMA' ||
         value.concern === 'SCENE_PLANNING' ||
         value.concern === 'MOMENT_LEDGER' ||
-        value.concern === 'SILENCE_POLICY',
+        value.concern === 'SILENCE_POLICY' ||
+        value.concern === 'POSTRUN_NARRATIVE' ||
+        value.concern === 'TURNING_POINT' ||
+        value.concern === 'FORESHADOW',
     ),
   );
 }

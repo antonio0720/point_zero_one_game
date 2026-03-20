@@ -81,6 +81,9 @@ import * as TypingSimulationEngine from './presence/TypingSimulationEngine';
 import * as ReadReceiptPolicy from './presence/ReadReceiptPolicy';
 import * as CrossModeContinuityLedger from './continuity/CrossModeContinuityLedger';
 import * as CarryoverResolver from './continuity/CarryoverResolver';
+import * as PostRunNarrativeEngineRuntime from './postrun/PostRunNarrativeEngine';
+import * as TurningPointResolverRuntime from './postrun/TurningPointResolver';
+import * as ForeshadowPlannerRuntime from './postrun/ForeshadowPlanner';
 import * as Intelligence from './intelligence';
 import * as EmotionModelRuntime from './intelligence/ml/EmotionModel';
 import * as PressureAffectModelRuntime from './intelligence/ml/PressureAffectModel';
@@ -138,6 +141,9 @@ export * from './presence/TypingSimulationEngine';
 export * from './presence/ReadReceiptPolicy';
 export * from './continuity/CrossModeContinuityLedger';
 export * from './continuity/CarryoverResolver';
+export * from './postrun/PostRunNarrativeEngine';
+export * from './postrun/TurningPointResolver';
+export * from './postrun/ForeshadowPlanner';
 export * from './intelligence';
 export * from './intelligence/ml/EmotionModel';
 export * from './intelligence/ml/PressureAffectModel';
@@ -238,6 +244,9 @@ export {
   ReadReceiptPolicy as ChatReadReceiptPolicyModule,
   CrossModeContinuityLedger as ChatCrossModeContinuityLedgerModule,
   CarryoverResolver as ChatCarryoverResolverModule,
+  PostRunNarrativeEngineRuntime as ChatPostRunNarrativeEngineModule,
+  TurningPointResolverRuntime as ChatTurningPointResolverModule,
+  ForeshadowPlannerRuntime as ChatForeshadowPlannerModule,
   Intelligence as ChatIntelligenceModule,
   EmotionModelRuntime as ChatEmotionModelModule,
   PressureAffectModelRuntime as ChatPressureAffectModelModule,
@@ -271,6 +280,9 @@ export const TypingSimulationEngineClass = TypingSimulationEngine.TypingSimulati
 export const ReadReceiptPolicyClass = ReadReceiptPolicy.ReadReceiptPolicy;
 export const CrossModeContinuityLedgerClass = CrossModeContinuityLedger.CrossModeContinuityLedger;
 export const CarryoverResolverClass = CarryoverResolver.CarryoverResolver;
+export const PostRunNarrativeEngineClass = PostRunNarrativeEngineRuntime.PostRunNarrativeEngine;
+export const TurningPointResolverClass = TurningPointResolverRuntime.TurningPointResolver;
+export const ForeshadowPlannerClass = ForeshadowPlannerRuntime.ForeshadowPlanner;
 export const ChatEmotionModelClass = EmotionModelRuntime.EmotionModel;
 export const ChatPressureAffectModelClass = PressureAffectModelRuntime.PressureAffectModel;
 export const ChatAttachmentModelClass = AttachmentModelRuntime.AttachmentModel;
@@ -521,9 +533,9 @@ export const BACKEND_CHAT_CANONICAL_MODULES = Object.freeze([
   descriptor('combat.ChatAttackWindowPolicy', 'combat/ChatAttackWindowPolicy.ts', 'COMBAT', 'GENERATED', true, 'Attack-window timing law.'),
 
   // Post-run ritual
-  descriptor('postrun.PostRunNarrativeEngine', 'postrun/PostRunNarrativeEngine.ts', 'POSTRUN', 'PENDING', true, 'Post-run authored narrative and debrief.'),
-  descriptor('postrun.TurningPointResolver', 'postrun/TurningPointResolver.ts', 'POSTRUN', 'PENDING', true, 'Turning-point selection authority.'),
-  descriptor('postrun.ForeshadowPlanner', 'postrun/ForeshadowPlanner.ts', 'POSTRUN', 'PENDING', true, 'Foreshadow and next-run pressure planning.'),
+  descriptor('postrun.PostRunNarrativeEngine', 'postrun/PostRunNarrativeEngine.ts', 'POSTRUN', 'GENERATED', true, 'Post-run authored narrative and debrief.'),
+  descriptor('postrun.TurningPointResolver', 'postrun/TurningPointResolver.ts', 'POSTRUN', 'GENERATED', true, 'Turning-point selection authority.'),
+  descriptor('postrun.ForeshadowPlanner', 'postrun/ForeshadowPlanner.ts', 'POSTRUN', 'GENERATED', true, 'Foreshadow and next-run pressure planning.'),
 
   // Intelligence root
   descriptor('intelligence.index', 'intelligence/index.ts', 'INTELLIGENCE', 'GENERATED', false, 'Intelligence barrel.'),
