@@ -33,6 +33,7 @@ import * as LearningFeaturesModule from './LearningFeatures';
 import * as LearningLabelsModule from './LearningLabels';
 import * as ColdStartDefaultsModule from './ColdStartDefaults';
 import * as ResponseRankingModule from './ResponseRanking';
+import * as EmotionSignalsModule from './EmotionSignals';
 
 export * from './LearningEvents';
 export * from './LearningProfile';
@@ -40,6 +41,7 @@ export * from './LearningFeatures';
 export * from './LearningLabels';
 export * from './ColdStartDefaults';
 export * from './ResponseRanking';
+export * from './EmotionSignals';
 
 export const LEARNING_CONTRACT_BARREL_PATH =
   'shared/contracts/chat/learning/index.ts' as const;
@@ -54,6 +56,7 @@ export const LEARNING_CONTRACT_MODULE_KEYS = [
   'LearningLabels',
   'ColdStartDefaults',
   'ResponseRanking',
+  'EmotionSignals',
 ] as const;
 
 export type LearningContractModuleKey =
@@ -66,6 +69,7 @@ export const LEARNING_CONTRACT_RELATIVE_PATHS = {
   LearningLabels: './LearningLabels',
   ColdStartDefaults: './ColdStartDefaults',
   ResponseRanking: './ResponseRanking',
+  EmotionSignals: './EmotionSignals',
 } as const satisfies Record<LearningContractModuleKey, string>;
 
 export type LearningContractModulePath =
@@ -80,7 +84,8 @@ export type LearningContractModuleNamespace =
   | typeof LearningFeaturesModule
   | typeof LearningLabelsModule
   | typeof ColdStartDefaultsModule
-  | typeof ResponseRankingModule;
+  | typeof ResponseRankingModule
+  | typeof EmotionSignalsModule;
 
 export interface LearningContractModuleDescriptor {
   readonly key: LearningContractModuleKey;
@@ -669,13 +674,49 @@ export type LearningColdStartExportName =
 export type LearningResponseRankingExportName =
   (typeof LEARNING_RESPONSE_RANKING_EXPORT_NAMES)[number];
 
+export const LEARNING_EMOTION_SIGNALS_EXPORT_NAMES = [
+  'EMOTION_SIGNAL_VERSION',
+  'EMOTION_SIGNAL_KINDS',
+  'EMOTION_SIGNAL_WINDOW_KINDS',
+  'EMOTION_SIGNAL_TRANSITION_TAGS',
+  'EMOTION_SIGNAL_SUBJECT_KINDS',
+  'EMOTION_RANKING_HINT_KINDS',
+  'EMOTION_SIGNAL_FEATURE_NAMES',
+  'EMOTION_SIGNAL_CONTRACT_MANIFEST',
+  'createEmotionSignalId',
+  'createEmotionSignalSequenceId',
+  'createEmotionSignalWindowRecordId',
+  'createEmotionSignalPreviewId',
+  'createEmotionSignalReceiptId',
+  'createEmotionSignalSubjectRef',
+  'createEmotionSignalContext',
+  'inferEmotionSignalSubject',
+  'detectEmotionTransitionTags',
+  'buildEmotionScalarSignals',
+  'buildEmotionDeltaSignals',
+  'buildEmotionTrendSignal',
+  'summarizeEmotionWindow',
+  'buildEmotionSequenceSignal',
+  'buildEmotionFeatureBag',
+  'deriveEmotionTrainingLabels',
+  'buildEmotionMemoryAnchorSignal',
+  'buildEmotionRankingHint',
+  'buildEmotionSignalPreview',
+  'buildEmotionSignalReceipt',
+  'buildAllEmotionSignals',
+] as const;
+
+export type LearningEmotionSignalsExportName =
+  (typeof LEARNING_EMOTION_SIGNALS_EXPORT_NAMES)[number];
+
 export type LearningContractExportName =
   | LearningEventsExportName
   | LearningProfileExportName
   | LearningFeaturesExportName
   | LearningLabelsExportName
   | LearningColdStartExportName
-  | LearningResponseRankingExportName;
+  | LearningResponseRankingExportName
+  | LearningEmotionSignalsExportName;
 
 export const LEARNING_CONTRACT_EXPORT_NAME_REGISTRY = {
   LearningEvents: LEARNING_EVENTS_EXPORT_NAMES,
@@ -684,6 +725,7 @@ export const LEARNING_CONTRACT_EXPORT_NAME_REGISTRY = {
   LearningLabels: LEARNING_LABELS_EXPORT_NAMES,
   ColdStartDefaults: LEARNING_COLD_START_EXPORT_NAMES,
   ResponseRanking: LEARNING_RESPONSE_RANKING_EXPORT_NAMES,
+  EmotionSignals: LEARNING_EMOTION_SIGNALS_EXPORT_NAMES,
 } as const satisfies Record<
   LearningContractModuleKey,
   readonly LearningContractExportName[]
@@ -696,6 +738,7 @@ export const LEARNING_CONTRACT_DEPENDENCY_GRAPH = {
   LearningLabels: ["LearningEvents", "LearningFeatures"],
   ColdStartDefaults: ["LearningEvents", "LearningFeatures", "LearningProfile", "LearningLabels"],
   ResponseRanking: ["LearningEvents", "LearningFeatures", "LearningProfile", "LearningLabels", "ColdStartDefaults"],
+  EmotionSignals: ["LearningEvents", "LearningFeatures", "LearningProfile", "LearningLabels", "ResponseRanking"],
 } as const satisfies Record<
   LearningContractModuleKey,
   readonly LearningContractModuleKey[]
@@ -708,6 +751,7 @@ export const LEARNING_CONTRACT_MODULE_NAMESPACES = {
   LearningLabels: LearningLabelsModule,
   ColdStartDefaults: ColdStartDefaultsModule,
   ResponseRanking: ResponseRankingModule,
+  EmotionSignals: EmotionSignalsModule,
 } as const satisfies Record<
   LearningContractModuleKey,
   LearningContractModuleNamespace
@@ -768,6 +812,15 @@ export const LEARNING_CONTRACT_MODULE_DESCRIPTORS = [
     description:
       'Candidate, context, scoring, policy, guardrail, receipt, decision, and evaluation contracts for response selection.',
   },
+  {
+    key: 'EmotionSignals',
+    path: LEARNING_CONTRACT_RELATIVE_PATHS.EmotionSignals,
+    dependsOn: LEARNING_CONTRACT_DEPENDENCY_GRAPH.EmotionSignals,
+    exportNames: LEARNING_CONTRACT_EXPORT_NAME_REGISTRY.EmotionSignals,
+    exportCount: LEARNING_CONTRACT_EXPORT_NAME_REGISTRY.EmotionSignals.length,
+    description:
+      'Emotional learning signals, features, labels, anchors, ranking hints, previews, and receipts.',
+  },
 ] as const satisfies readonly LearningContractModuleDescriptor[];
 
 export const LEARNING_CONTRACT_MANIFEST = {
@@ -794,6 +847,7 @@ export const LEARNING_RUNTIME_EXPORT_GROUPS = {
     'LEARNING_LABEL_CONTRACT_MANIFEST',
     'LEARNING_COLD_START_CONTRACT_MANIFEST',
     'LEARNING_RESPONSE_RANKING_CONTRACT_MANIFEST',
+    'EMOTION_SIGNAL_CONTRACT_MANIFEST',
   ],
   defaults: [
     'LEARNING_DEFAULT_PRIVACY_ENVELOPE',
@@ -950,6 +1004,7 @@ export const LEARNING_IMPORT_RECIPES = {
       "import { LEARNING_CONTRACT_MANIFEST } from 'shared/contracts/chat/learning';",
       "import { createLearningColdStartPacket } from 'shared/contracts/chat/learning';",
       "import { createLearningRankingReceipt } from 'shared/contracts/chat/learning';",
+      "import { buildAllEmotionSignals } from 'shared/contracts/chat/learning';",
     ],
   },
   direct: {
@@ -959,6 +1014,7 @@ export const LEARNING_IMPORT_RECIPES = {
     LearningLabels: 'shared/contracts/chat/learning/LearningLabels',
     ColdStartDefaults: 'shared/contracts/chat/learning/ColdStartDefaults',
     ResponseRanking: 'shared/contracts/chat/learning/ResponseRanking',
+    EmotionSignals: 'shared/contracts/chat/learning/EmotionSignals',
   },
 } as const;
 
@@ -969,6 +1025,7 @@ export interface LearningCrossModuleSurface {
   readonly labels: typeof LearningLabelsModule;
   readonly coldStart: typeof ColdStartDefaultsModule;
   readonly ranking: typeof ResponseRankingModule;
+  readonly emotionSignals: typeof EmotionSignalsModule;
 }
 
 export const LEARNING_CROSS_MODULE_SURFACE = {
@@ -978,6 +1035,7 @@ export const LEARNING_CROSS_MODULE_SURFACE = {
   labels: LearningLabelsModule,
   coldStart: ColdStartDefaultsModule,
   ranking: ResponseRankingModule,
+  emotionSignals: EmotionSignalsModule,
 } as const satisfies LearningCrossModuleSurface;
 
 export function getLearningCrossModuleSurface():
@@ -994,6 +1052,7 @@ export const LEARNING_BOOTSTRAP_EXPORT_PAIRS = [
   ['LearningLabels', 'LEARNING_LABEL_MANIFEST'],
   ['ColdStartDefaults', 'createLearningColdStartPacket'],
   ['ResponseRanking', 'createLearningRankingReceipt'],
+  ['EmotionSignals', 'buildAllEmotionSignals'],
 ] as const;
 
 export type LearningBootstrapExportPair =
@@ -1016,6 +1075,7 @@ export const LEARNING_EXPORT_COUNTS = {
   LearningLabels: LEARNING_LABELS_EXPORT_NAMES.length,
   ColdStartDefaults: LEARNING_COLD_START_EXPORT_NAMES.length,
   ResponseRanking: LEARNING_RESPONSE_RANKING_EXPORT_NAMES.length,
+  EmotionSignals: LEARNING_EMOTION_SIGNALS_EXPORT_NAMES.length,
 } as const satisfies Record<LearningContractModuleKey, number>;
 
 export const LEARNING_TOTAL_EXPORT_COUNT =
@@ -1024,7 +1084,8 @@ export const LEARNING_TOTAL_EXPORT_COUNT =
   LEARNING_FEATURES_EXPORT_NAMES.length +
   LEARNING_LABELS_EXPORT_NAMES.length +
   LEARNING_COLD_START_EXPORT_NAMES.length +
-  LEARNING_RESPONSE_RANKING_EXPORT_NAMES.length;
+  LEARNING_RESPONSE_RANKING_EXPORT_NAMES.length +
+  LEARNING_EMOTION_SIGNALS_EXPORT_NAMES.length;
 
 export interface LearningModuleStats {
   readonly key: LearningContractModuleKey;

@@ -68,6 +68,7 @@ import * as ChatRescueModule from './ChatRescue';
 import * as ChatRecoveryModule from './ChatRecovery';
 import * as ChatNegotiationModuleNS from './ChatNegotiation';
 import * as ChatOfferModuleNS from './ChatOffer';
+import * as ChatEmotionModule from './ChatEmotion';
 import * as ChatShadowStateModule from './ChatShadowState';
 // ============================================================================
 // MARK: Legend / reward namespace exports
@@ -93,6 +94,7 @@ export * from './ChatRescue';
 export * from './ChatRecovery';
 export * from './ChatNegotiation';
 export * from './ChatOffer';
+export * from './ChatEmotion';
 export * from './ChatPresenceStyle';
 export {
   CHAT_SHADOW_STATE_VERSION,
@@ -153,6 +155,7 @@ export {
   ChatRecoveryModule as ChatRecovery,
   ChatNegotiationModuleNS as ChatNegotiation,
   ChatOfferModuleNS as ChatOffer,
+  ChatEmotionModule as ChatEmotion,
   ChatShadowStateModule as ChatShadowState,
   ChatLegendModule as ChatLegend,
   ChatRewardModule as ChatReward,
@@ -271,6 +274,7 @@ export const CHAT_CONTRACT_MODULE_KEYS = [
   'ChatRecovery',
   'ChatNegotiation',
   'ChatOffer',
+  'ChatEmotion',
   'ChatShadowState',
   'ChatLegend',
   'ChatReward',
@@ -296,6 +300,7 @@ export const CHAT_CONTRACT_CATEGORIES = [
   'COUNTERPLAY',
   'RESCUE',
   'NEGOTIATION',
+  'EMOTION',
   'SHADOW',
   'LEGEND',
   'REWARD',
@@ -338,6 +343,7 @@ export const CHAT_CONTRACT_RELATIVE_PATHS = {
   ChatRecovery: './ChatRecovery',
   ChatNegotiation: './ChatNegotiation',
   ChatOffer: './ChatOffer',
+  ChatEmotion: './ChatEmotion',
   ChatShadowState: './ChatShadowState',
   ChatLegend: './ChatLegend',
   ChatReward: './ChatReward',
@@ -370,6 +376,7 @@ export const CHAT_CONTRACT_FILE_NAMES = {
   ChatRecovery: 'ChatRecovery.ts',
   ChatNegotiation: 'ChatNegotiation.ts',
   ChatOffer: 'ChatOffer.ts',
+  ChatEmotion: 'ChatEmotion.ts',
   ChatShadowState: 'ChatShadowState.ts',
   ChatLegend: 'ChatLegend.ts',
   ChatReward: 'ChatReward.ts',
@@ -416,6 +423,7 @@ export type ChatContractModuleNamespace =
   | typeof ChatRecoveryModule
   | typeof ChatNegotiationModuleNS
   | typeof ChatOfferModuleNS
+  | typeof ChatEmotionModule
   | typeof ChatShadowStateModule
   | typeof ChatLegendModule
   | typeof ChatRewardModule
@@ -828,6 +836,20 @@ export const CHAT_CONTRACT_MODULE_DESCRIPTORS = Object.freeze({
     contractExportName: 'CHAT_OFFER_CONTRACT_DESCRIPTOR',
     manifestExportName: 'CHAT_OFFER_CONTRACT_DESCRIPTOR',
   }),
+  ChatEmotion: Object.freeze<ChatContractModuleDescriptor>({
+    key: 'ChatEmotion',
+    fileName: 'ChatEmotion.ts',
+    importPath: './ChatEmotion',
+    category: 'EMOTION',
+    description:
+      'Emotional operating model for intimidation, confidence, frustration, curiosity, attachment, embarrassment, relief, dominance, desperation, and trust.',
+    sharedRootPath: `${CHAT_CONTRACT_AUTHORITIES.sharedContractsRoot}/ChatEmotion.ts`,
+    usedBy: ALL_RUNTIME_LANES,
+    dependsOn: ['ChatChannels', 'ChatEvents', 'Learning'] as const,
+    defaultExportName: null,
+    contractExportName: 'CHAT_EMOTION_CONTRACT_MANIFEST',
+    manifestExportName: 'CHAT_EMOTION_CONTRACT_MANIFEST',
+  }),
   ChatShadowState: Object.freeze<ChatContractModuleDescriptor>({
     key: 'ChatShadowState',
     fileName: 'ChatShadowState.ts',
@@ -1013,6 +1035,7 @@ export const CHAT_CONTRACT_DEPENDENCY_GRAPH = Object.freeze({
     'ChatScene',
     'ChatNegotiation',
   ] as const,
+  ChatEmotion: ['ChatChannels', 'ChatEvents', 'Learning'] as const,
   ChatShadowState: [
     'ChatChannels',
     'ChatEvents',
@@ -1054,6 +1077,7 @@ export const CHAT_CONTRACT_MODULE_NAMESPACES = Object.freeze({
   ChatRecovery: ChatRecoveryModule,
   ChatNegotiation: ChatNegotiationModuleNS,
   ChatOffer: ChatOfferModuleNS,
+  ChatEmotion: ChatEmotionModule,
   ChatShadowState: ChatShadowStateModule,
   ChatLegend: ChatLegendModule,
   ChatReward: ChatRewardModule,
@@ -1209,6 +1233,12 @@ export const CHAT_SHARED_CONTRACT_PACKAGES = Object.freeze({
     defaultContract: readNamedExport(ChatOfferModuleNS, 'CHAT_OFFER_CONTRACT_DESCRIPTOR'),
     manifest: readNamedExport(ChatOfferModuleNS, 'CHAT_OFFER_CONTRACT_DESCRIPTOR'),
   }),
+  ChatEmotion: Object.freeze<ChatSharedContractPackage>({
+    descriptor: CHAT_CONTRACT_MODULE_DESCRIPTORS.ChatEmotion,
+    namespace: ChatEmotionModule,
+    defaultContract: readNamedExport(ChatEmotionModule, 'CHAT_EMOTION_CONTRACT_MANIFEST'),
+    manifest: readNamedExport(ChatEmotionModule, 'CHAT_EMOTION_CONTRACT_MANIFEST'),
+  }),
   ChatShadowState: Object.freeze<ChatSharedContractPackage>({
     descriptor: CHAT_CONTRACT_MODULE_DESCRIPTORS.ChatShadowState,
     namespace: ChatShadowStateModule,
@@ -1257,6 +1287,7 @@ export const CHAT_CONTRACT_KEYS_BY_CATEGORY = Object.freeze({
   COUNTERPLAY: ['ChatCounterplay'] as const,
   RESCUE: ['ChatRescue', 'ChatRecovery'] as const,
   NEGOTIATION: ['ChatNegotiation', 'ChatOffer'] as const,
+  EMOTION: ['ChatEmotion'] as const,
   SHADOW: ['ChatShadowState'] as const,
   LEGEND: ['ChatLegend'] as const,
   REWARD: ['ChatReward'] as const,
@@ -1350,6 +1381,7 @@ export const CHAT_SHARED_CONTRACT_ORDER = [
   'ChatRecovery',
   'ChatNegotiation',
   'ChatOffer',
+  'ChatEmotion',
   'ChatShadowState',
   'ChatLegend',
   'ChatReward',
