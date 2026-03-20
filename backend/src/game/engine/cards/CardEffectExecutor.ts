@@ -190,6 +190,39 @@ const TRUST_BANDS: readonly TrustBandProfile[] = Object.freeze([
   }),
 ]);
 
+const TARGETING_AUDIT_WEIGHT: Readonly<Record<Targeting, number>> = Object.freeze({
+  SELF: 10,
+  TEAMMATE: 20,
+  TEAM: 30,
+  OPPONENT: 40,
+  GLOBAL: 50,
+});
+
+const TIMING_CLASS_AUDIT_WEIGHT: Readonly<Record<TimingClass, number>> = Object.freeze({
+  PRE: 10,
+  AID: 20,
+  CTR: 30,
+  RES: 40,
+  POST: 50,
+  FATE: 60,
+  GBM: 70,
+  CAS: 80,
+  PHZ: 90,
+  PSK: 100,
+  END: 110,
+  ANY: 999,
+});
+
+const NUMERIC_OPERATION_AUDIT_WEIGHT: Readonly<Record<NumericOperationKind, number>> = Object.freeze({
+  cash: 10,
+  income: 20,
+  shield: 30,
+  heat: 40,
+  trust: 50,
+  time: 60,
+  divergence: 70,
+});
+
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
@@ -230,6 +263,60 @@ function appendBounded<T>(
 ): T[] {
   const merged = [...existing, ...additions];
   return merged.slice(Math.max(0, merged.length - limit));
+}
+
+function describeTargeting(targeting: Targeting): string {
+  return `${targeting}@${TARGETING_AUDIT_WEIGHT[targeting]}`;
+}
+
+function describeTimingClasses(timingClass: readonly TimingClass[]): string {
+  const unique = Array.from(new Set(timingClass));
+  unique.sort((left, right) => {
+    const delta = TIMING_CLASS_AUDIT_WEIGHT[left] - TIMING_CLASS_AUDIT_WEIGHT[right];
+    if (delta !== 0) {
+      return delta;
+    }
+    return left.localeCompare(right);
+  });
+  return unique.join('+') || 'NONE';
+}
+
+function resolveNumericOperationKinds(
+  operations: readonly CompiledOperation[],
+): NumericOperationKind[] {
+  const kinds = new Set<NumericOperationKind>();
+
+  for (const operation of operations) {
+    if (operation.kind === 'inject' || operation.kind === 'cascadeTag') {
+      continue;
+    }
+
+    kinds.add(operation.kind);
+  }
+
+  return [...kinds].sort((left, right) => {
+    const delta = NUMERIC_OPERATION_AUDIT_WEIGHT[left] - NUMERIC_OPERATION_AUDIT_WEIGHT[right];
+    if (delta !== 0) {
+      return delta;
+    }
+    return left.localeCompare(right);
+  });
+}
+
+function buildExecutionContext(
+  actorId: string,
+  plan: CardCompilationPlan,
+  cost: CostResolution,
+  trustBefore: number,
+  markers: readonly ExecutionTraceMarker[],
+): ExecutionContext {
+  return {
+    actorId,
+    plan,
+    cost,
+    trustBefore,
+    markers: [...markers],
+  };
 }
 
 function prependBounded<T>(
@@ -478,7 +565,7 @@ function withTelemetryMutation(
     uniqueStrings(hints, hints.length || 1),
     TELEMETRY_HINT_LIMIT,
   );
-  const nextWarnings = appendBounded(
+  const nextWarnings = prependBounded(
     snapshot.telemetry.warnings,
     uniqueStrings(warnings, warnings.length || 1),
     TELEMETRY_WARNING_LIMIT,
@@ -794,7 +881,7 @@ function applyCost(
   snapshot: RunStateSnapshot,
   cost: CostResolution,
 ): RunStateSnapshot {
-  if (cost.amount <= 0 || cost.pool === 'FREE') {
+  if (cost.amount <= 0) {
     return snapshot;
   }
 
@@ -843,6 +930,46 @@ function withOutcomeReasonHint(
     snapshot,
     [buildHint('card_outcome', card, 'system', detail)],
   );
+}
+
+function withExecutionChecksum(
+  snapshot: RunStateSnapshot,
+  card: CardInstance,
+  context: ExecutionContext,
+): RunStateSnapshot {
+  const checksum = hashString(
+    JSON.stringify({
+      runId: snapshot.runId,
+      tick: snapshot.tick,
+      actorId: context.actorId,
+      cardInstanceId: card.instanceId,
+      definitionId: card.definitionId,
+      planKey: context.plan.overlayDeterminismKey,
+      targeting: describeTargeting(context.plan.targeting),
+      timing: describeTimingClasses(context.plan.canonicalTimingClass),
+      costPool: context.cost.pool,
+      costAmount: context.cost.amount,
+      trustBefore: context.trustBefore,
+      preconditionMarkers: context.markers.map((marker) => marker.id),
+      numericKinds: resolveNumericOperationKinds(context.plan.supportedOperations),
+    }),
+  );
+
+  return {
+    ...snapshot,
+    sovereignty: {
+      ...snapshot.sovereignty,
+      tickChecksums: appendBounded(
+        snapshot.sovereignty.tickChecksums,
+        [checksum],
+        CHECKSUM_LIMIT,
+      ),
+    },
+    telemetry: {
+      ...snapshot.telemetry,
+      lastTickChecksum: checksum,
+    },
+  };
 }
 
 function createTraceMarker(
@@ -1364,10 +1491,15 @@ function applyEmergencyCapital(snapshot: RunStateSnapshot): RunStateSnapshot {
 }
 
 function applyShieldEmergency(snapshot: RunStateSnapshot): RunStateSnapshot {
-  return {
+  const next = {
     ...snapshot,
     shield: withSpecificShieldLayerDelta(snapshot.shield, 'L4', SHIELD_EMERGENCY_L4_FULL, snapshot.tick),
   };
+
+  return withTelemetryMutation(next, [
+    `shield_emergency:L4:instant=${SHIELD_EMERGENCY_L4_FULL}`,
+    `shield_emergency:L4:delayed=${SHIELD_EMERGENCY_L4_DELAYED}`,
+  ]);
 }
 
 function applyShieldLoan(snapshot: RunStateSnapshot, actorId: string): RunStateSnapshot {
@@ -1581,9 +1713,9 @@ function buildNamedActionRegistry(): Readonly<Record<string, NamedActionHandler>
 function finalizeSnapshot(
   snapshot: RunStateSnapshot,
   card: CardInstance,
-  actorId: string,
-  plan: CardCompilationPlan,
+  context: ExecutionContext,
 ): RunStateSnapshot {
+  const { actorId, plan } = context;
   let next = snapshot;
 
   next = boostOpportunityPurchaseCount(next, card);
@@ -1597,18 +1729,24 @@ function finalizeSnapshot(
   const trustBand = findTrustBand(currentTrust);
   const opposingTrustAverage = getOpposingTrustAverage(next, actorId);
 
+  const numericKinds = resolveNumericOperationKinds(plan.supportedOperations);
+
   const finalHints = [
     `card_finalize:${card.definitionId}:mode=${next.mode}`,
     `card_finalize:${card.definitionId}:strategy=${plan.strategicClass}`,
     `card_finalize:${card.definitionId}:priority=${plan.priorityBand}`,
     `card_finalize:${card.definitionId}:witness=${plan.witnessHint}`,
     `card_finalize:${card.definitionId}:trust_band=${trustBand.code}`,
+    `card_finalize:${card.definitionId}:trust_before=${context.trustBefore}`,
     `card_finalize:${card.definitionId}:opp_trust_avg=${opposingTrustAverage}`,
-    `card_finalize:${card.definitionId}:timing=${plan.canonicalTimingClass.join('+') || 'NONE'}`,
-    `card_finalize:${card.definitionId}:targeting=${plan.targeting}`,
+    `card_finalize:${card.definitionId}:timing=${describeTimingClasses(plan.canonicalTimingClass)}`,
+    `card_finalize:${card.definitionId}:targeting=${describeTargeting(plan.targeting)}`,
     `card_finalize:${card.definitionId}:deferred=${plan.deferredRequirements.length}`,
     `card_finalize:${card.definitionId}:ops=${plan.supportedOperations.length}`,
+    `card_finalize:${card.definitionId}:numeric_ops=${numericKinds.join('+') || 'NONE'}`,
+    `card_finalize:${card.definitionId}:cost=${context.cost.pool}:${context.cost.amount}`,
     `card_finalize:${card.definitionId}:determinism=${plan.overlayDeterminismKey}`,
+    `card_finalize:${card.definitionId}:pre_markers=${context.markers.length}`,
   ];
 
   const warnings: string[] = [];
@@ -1631,7 +1769,18 @@ function finalizeSnapshot(
     );
   }
 
+  if (
+    next.mode === 'pvp' &&
+    plan.targeting === 'OPPONENT' &&
+    (card.definitionId.includes('LOCK') || plan.canonicalTimingClass.includes('CTR'))
+  ) {
+    finalHints.push(
+      `card_finalize:${card.definitionId}:pvp_lock_penalty_bb=${PVP_SOVEREIGNTY_LOCK_PENALTY_BB}`,
+    );
+  }
+
   next = withTelemetryMutation(next, finalHints, warnings);
+  next = withExecutionChecksum(next, card, context);
 
   return next;
 }
@@ -1657,6 +1806,13 @@ export class CardEffectExecutor {
       plan,
       cost,
     );
+    const context = buildExecutionContext(
+      actorId,
+      plan,
+      cost,
+      getActorTrust(snapshot, actorId),
+      preMarkers,
+    );
 
     let next = snapshot;
 
@@ -1669,7 +1825,7 @@ export class CardEffectExecutor {
     next = this.applyDeferredRequirements(next, plan.deferredRequirements, actorId, card, plan);
     next = this.applyNamedActions(next, plan.deferredRequirements, actorId, card, plan);
     next = applySpecialCardRules(next, card, actorId);
-    next = finalizeSnapshot(next, card, actorId, plan);
+    next = finalizeSnapshot(next, card, context);
 
     return next;
   }
@@ -1737,6 +1893,19 @@ export class CardEffectExecutor {
         {
           deckType: card.card.deckType,
           mode: snapshot.mode,
+        },
+      ),
+    );
+
+    markers.push(
+      createTraceMarker(
+        'PRECONDITION',
+        'INFO',
+        'TARGETING_AND_TIMING_RESOLVED',
+        `targeting ${describeTargeting(plan.targeting)} timing ${describeTimingClasses(plan.canonicalTimingClass)}`,
+        {
+          targeting: plan.targeting,
+          timing: [...plan.canonicalTimingClass],
         },
       ),
     );

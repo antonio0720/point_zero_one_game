@@ -210,6 +210,17 @@ const SUPPORTED_NUMERIC_FIELDS: readonly SupportedEffectField[] = Object.freeze(
   'divergenceDelta',
 ]);
 
+function resolveSupportedKindForField(
+  field: SupportedEffectField,
+): NumericOperationKind | null {
+  const entry = (Object.entries(SUPPORTED_FIELD_TO_KIND) as readonly [
+    NumericOperationKind,
+    SupportedEffectField,
+  ][]).find(([, supportedField]) => supportedField === field);
+
+  return entry?.[0] ?? null;
+}
+
 const DEFERRED_EFFECT_FIELDS: readonly DeferredEffectField[] = Object.freeze([
   'debtDelta',
   'expenseDelta',
@@ -894,51 +905,53 @@ function compileNumericOperations(context: CompilationContext): CompiledOperatio
   const effect = context.effect;
 
   for (const field of SUPPORTED_NUMERIC_FIELDS) {
+    const expectedKind = resolveSupportedKindForField(field);
+
     switch (field) {
       case 'cashDelta': {
-        const operation = createNumericOperation(context, 'cash', field, effect.cashDelta ?? 0);
+        const operation = createNumericOperation(context, expectedKind ?? 'cash', field, effect.cashDelta ?? 0);
         if (operation) {
           operations.push(operation);
         }
         break;
       }
       case 'incomeDelta': {
-        const operation = createNumericOperation(context, 'income', field, effect.incomeDelta ?? 0);
+        const operation = createNumericOperation(context, expectedKind ?? 'income', field, effect.incomeDelta ?? 0);
         if (operation) {
           operations.push(operation);
         }
         break;
       }
       case 'shieldDelta': {
-        const operation = createNumericOperation(context, 'shield', field, effect.shieldDelta ?? 0);
+        const operation = createNumericOperation(context, expectedKind ?? 'shield', field, effect.shieldDelta ?? 0);
         if (operation) {
           operations.push(operation);
         }
         break;
       }
       case 'heatDelta': {
-        const operation = createNumericOperation(context, 'heat', field, effect.heatDelta ?? 0);
+        const operation = createNumericOperation(context, expectedKind ?? 'heat', field, effect.heatDelta ?? 0);
         if (operation) {
           operations.push(operation);
         }
         break;
       }
       case 'trustDelta': {
-        const operation = createNumericOperation(context, 'trust', field, effect.trustDelta ?? 0);
+        const operation = createNumericOperation(context, expectedKind ?? 'trust', field, effect.trustDelta ?? 0);
         if (operation) {
           operations.push(operation);
         }
         break;
       }
       case 'timeDeltaMs': {
-        const operation = createNumericOperation(context, 'time', field, effect.timeDeltaMs ?? 0);
+        const operation = createNumericOperation(context, expectedKind ?? 'time', field, effect.timeDeltaMs ?? 0);
         if (operation) {
           operations.push(operation);
         }
         break;
       }
       case 'divergenceDelta': {
-        const operation = createNumericOperation(context, 'divergence', field, effect.divergenceDelta ?? 0);
+        const operation = createNumericOperation(context, expectedKind ?? 'divergence', field, effect.divergenceDelta ?? 0);
         if (operation) {
           operations.push(operation);
         }
