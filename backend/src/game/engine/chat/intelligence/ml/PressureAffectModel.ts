@@ -2,17 +2,17 @@
  * ============================================================================
  * POINT ZERO ONE — BACKEND CHAT PRESSURE AFFECT MODEL
  * FILE: backend/src/game/engine/chat/intelligence/ml/PressureAffectModel.ts
- * VERSION: 2026.03.20-backend-pressure-affect.v1
+ * VERSION: 2026.03.21-backend-pressure-affect.v2
  * AUTHORSHIP: Antonio T. Smith Jr.
  * LICENSE: Internal / Proprietary / All Rights Reserved
  * ============================================================================
  *
  * Purpose
  * -------
- * Authoritative backend pressure/affect scoring for the chat lane.
+ * Authoritative backend pressure / affect scoring for the chat lane.
  *
- * This module isolates the parts of emotional state that should be dominated by
- * gameplay pressure rather than pure social interpretation:
+ * This model isolates the emotional dimensions that should be governed by
+ * runtime battlefield condition rather than broad social sentiment alone:
  *
  * - intimidation
  * - frustration
@@ -20,24 +20,17 @@
  * - desperation
  * - confidence repair under pressure
  *
- * Why this file exists
- * --------------------
- * Frontend emotion scoring is useful for immediate adaptation, but the backend
- * needs a deterministic pressure-aware model that can:
- *
- * 1. evaluate pressure and exposure from authoritative room state,
- * 2. score affect under different pressure tiers,
- * 3. identify when silence should linger instead of helper spam,
- * 4. identify rescue urgency and comeback windows, and
- * 5. feed the durable emotion model without flattening authored gameplay law.
- *
  * Design doctrine
  * ---------------
- * - Pressure is not sentiment. It is runtime battlefield condition.
+ * - Pressure is authoritative runtime state, not flavor text.
+ * - Global humiliation must score harder than intimate-channel pressure.
  * - Deal-room quiet may be predatory rather than calm.
- * - Global humiliation must score harder than private pressure.
- * - Rescue urgency and comeback readiness can coexist.
- * - Relief must rise slower than panic spikes unless a true stabilizer exists.
+ * - Rescue urgency and comeback readiness may coexist.
+ * - Relief should repair slower than intimidation spikes unless a real
+ *   stabilizer exists.
+ * - Driver evidence must be explainable, replay-safe, and contract-aligned.
+ * - This file feeds the durable backend emotion lane without flattening mode,
+ *   relationship, rescue, or audience context.
  * ============================================================================
  */
 
@@ -58,10 +51,16 @@ import type {
 } from '../../types';
 
 import type {
-  ChatAuthority,
+  ChatEmotionAxis,
   ChatEmotionConfidenceBand,
   ChatEmotionDriverEvidence,
+  ChatEmotionDriverKind,
+  ChatEmotionOperatingState,
+  ChatEmotionSourceKind,
+  ChatEmotionVector,
 } from '../../../../../../../shared/contracts/chat/ChatEmotion';
+
+import type { ChatAuthority } from '../../../../../../../shared/contracts/chat/ChatEvents';
 
 import {
   CHAT_EMOTION_AXES,
@@ -80,7 +79,7 @@ export const CHAT_PRESSURE_AFFECT_MODEL_MODULE_NAME =
   'PZO_BACKEND_CHAT_PRESSURE_AFFECT_MODEL' as const;
 
 export const CHAT_PRESSURE_AFFECT_MODEL_VERSION =
-  '2026.03.20-backend-pressure-affect.v1' as const;
+  '2026.03.21-backend-pressure-affect.v2' as const;
 
 export const CHAT_PRESSURE_AFFECT_MODEL_RUNTIME_LAWS = Object.freeze([
   'Pressure is authoritative runtime state, not flavor text.',
@@ -90,6 +89,7 @@ export const CHAT_PRESSURE_AFFECT_MODEL_RUNTIME_LAWS = Object.freeze([
   'Silence can be correct when authored pressure should linger.',
   'Rescue urgency and comeback readiness can exist at the same time.',
   'Driver evidence must remain explainable for replay, tuning, and training.',
+  'The pressure model must expose deterministic recommendations for the durable emotion lane.',
 ] as const);
 
 export const CHAT_PRESSURE_AFFECT_MODEL_DEFAULTS = Object.freeze({
@@ -134,6 +134,13 @@ export const CHAT_PRESSURE_AFFECT_MODEL_DEFAULTS = Object.freeze({
   publicHumiliationEscalationThreshold: 0.62,
   confidenceRepairDampening: 0.61,
   reliefRepairDampening: 0.58,
+  crowdPileOnThreshold: 0.58,
+  predatoryStateThreshold: 0.64,
+  woundedStateThreshold: 0.68,
+  rescuedStateThreshold: 0.62,
+  ceremonialStateThreshold: 0.76,
+  volatilityThreshold: 0.67,
+  calmThreshold: 0.24,
 } as const);
 
 /* ========================================================================== *
@@ -185,8 +192,14 @@ export interface PressureAffectPolicyFlags {
 
 export interface PressureAffectRecommendation {
   readonly state: PressureNarrativeState;
+  readonly operatingState: ChatEmotionOperatingState;
   readonly confidenceBand: ChatEmotionConfidenceBand;
   readonly policyFlags: PressureAffectPolicyFlags;
+  readonly comebackReadiness01: Score01;
+  readonly celebrationTolerance01: Score01;
+  readonly silenceSuitability01: Score01;
+  readonly rescueUrgency01: Score01;
+  readonly crowdPileOnRisk01: Score01;
   readonly driverSummary: readonly string[];
 }
 
@@ -205,6 +218,9 @@ export interface PressureAffectResult {
   readonly crowdThreat01: Score01;
   readonly confidenceBand: ChatEmotionConfidenceBand;
   readonly narrativeState: PressureNarrativeState;
+  readonly operatingState: ChatEmotionOperatingState;
+  readonly pressureVector: Readonly<Pick<ChatEmotionVector, 'intimidation' | 'frustration' | 'relief' | 'desperation' | 'confidence'>>;
+  readonly pressureVectorSummary: string;
   readonly drivers: readonly ChatEmotionDriverEvidence[];
   readonly recommendation: PressureAffectRecommendation;
   readonly notes: readonly string[];
@@ -226,6 +242,33 @@ export interface PressureAffectModelApi {
 }
 
 /* ========================================================================== *
+ * MARK: Internal contracts
+ * ========================================================================== */
+
+interface DriverInput {
+  readonly axis: ChatEmotionAxis;
+  readonly driver: ChatEmotionDriverKind;
+  readonly sourceKind: ChatEmotionSourceKind;
+  readonly signedImpact01: Score01;
+  readonly evidence: string;
+  readonly label: string;
+  readonly roomId: ChatRoomId;
+  readonly channel: ChatVisibleChannel;
+  readonly metadata: JsonObject;
+}
+
+interface NarrativeResolutionInput {
+  readonly pressureSeverity: Score01;
+  readonly intimidation01: Score01;
+  readonly frustration01: Score01;
+  readonly relief01: Score01;
+  readonly desperation01: Score01;
+  readonly confidenceRepair01: Score01;
+  readonly publicExposure: Score01;
+  readonly crowdThreat: Score01;
+}
+
+/* ========================================================================== *
  * MARK: Model implementation
  * ========================================================================== */
 
@@ -239,12 +282,13 @@ export class PressureAffectModel implements PressureAffectModelApi {
 
   public constructor(options: PressureAffectModelOptions = {}) {
     this.defaults = mergeDefaults(options.defaults);
-    this.authority = (options.authority ?? 'BACKEND_ENGINE') as ChatAuthority;
+    this.authority = (options.authority ?? 'BACKEND_AUTHORITATIVE') as ChatAuthority;
     this.now = options.now ?? (() => Date.now() as UnixMs);
   }
 
   public evaluate(input: PressureAffectModelInput): PressureAffectResult {
     const evaluatedAt = input.evaluatedAt ?? this.now();
+    const authority = (input.authority ?? this.authority) as ChatAuthority;
     const feature = input.featureSnapshot;
     const profile = input.learningProfile;
     const audienceHeat = input.audienceHeat;
@@ -253,41 +297,59 @@ export class PressureAffectModel implements PressureAffectModelApi {
     const inference = input.inferenceSnapshot;
     const relationships = input.relationships ?? [];
 
-    const pressureSeverity = this.computePressureSeverity(input.channel, feature, audienceHeat);
-    const publicExposure = this.computePublicExposure(input.channel, feature, audienceHeat, relationships);
+    const pressureSeverity = this.computePressureSeverity(
+      input.channel,
+      feature,
+      audienceHeat,
+    );
+    const publicExposure = this.computePublicExposure(
+      input.channel,
+      feature,
+      audienceHeat,
+      relationships,
+    );
     const stabilizer = this.computeStabilizer(profile, rescue, relationships);
-    const crowdThreat = this.computeCrowdThreat(input.channel, feature, audienceHeat, inference);
+    const crowdThreat = this.computeCrowdThreat(
+      input.channel,
+      feature,
+      audienceHeat,
+      inference,
+    );
 
     const intimidation01 = clampEmotionScalar(
       pressureSeverity * this.defaults.pressureIntimidationWeight +
-      safe01(feature?.hostileMomentum01) * this.defaults.hostileMomentumWeight +
-      crowdThreat * this.defaults.roomHeatWeight +
-      safe01(profile?.affect.embarrassment01) * this.defaults.embarrassmentCarryWeight +
-      publicExposure * 0.11,
+        safe01(feature?.hostileMomentum01) * this.defaults.hostileMomentumWeight +
+        crowdThreat * this.defaults.roomHeatWeight +
+        safe01(profile?.affect.embarrassment01) * this.defaults.embarrassmentCarryWeight +
+        publicExposure * 0.11 +
+        inferNegativeAudienceBias(audienceHeat) * 0.06,
     );
 
     const frustration01 = clampEmotionScalar(
       pressureSeverity * this.defaults.frustrationPressureWeight +
-      normalizeIgnoredHelperCount(feature?.ignoredHelperCountWindow) * this.defaults.ignoredHelperWeight +
-      inferOutboundFailure(feature) * this.defaults.outboundFailureWeight +
-      safe01(profile?.affect.frustration01) * 0.18 +
-      crowdThreat * 0.11,
+        normalizeIgnoredHelperCount(feature?.ignoredHelperCountWindow) *
+          this.defaults.ignoredHelperWeight +
+        inferOutboundFailure(feature) * this.defaults.outboundFailureWeight +
+        safe01(profile?.affect.frustration01) * 0.18 +
+        crowdThreat * 0.11 +
+        inferSilenceTax(silence) * 0.09,
     );
 
     const desperation01 = clampEmotionScalar(
       safe01(profile?.churnRisk01) * this.defaults.desperationChurnWeight +
-      normalizeRescueUrgency(rescue) * this.defaults.desperationRescueWeight +
-      pressureSeverity * 0.16 +
-      (silence?.active ? 0.1 : 0) * this.defaults.desperationSilenceWeight +
-      inferTimePressure(feature) * 0.12,
+        normalizeRescueUrgency(rescue) * this.defaults.desperationRescueWeight +
+        pressureSeverity * 0.16 +
+        inferSilenceTax(silence) * this.defaults.desperationSilenceWeight +
+        inferTimePressure(feature) * 0.12,
     );
 
     const confidenceRepairBase = clampEmotionScalar(
       safe01(profile?.affect.confidence01) * this.defaults.confidenceStabilityWeight +
-      stabilizer * this.defaults.confidenceRecoveryWeight +
-      invert01(intimidation01) * this.defaults.confidenceFearInverseWeight +
-      invert01(frustration01) * 0.1 +
-      inferComebackSeed(inference, feature) * 0.11,
+        stabilizer * this.defaults.confidenceRecoveryWeight +
+        invert01(intimidation01) * this.defaults.confidenceFearInverseWeight +
+        invert01(frustration01) * 0.1 +
+        inferComebackSeed(inference, feature) * 0.11 +
+        helperPresenceFromRelationships(relationships) * 0.07,
     );
 
     const confidenceRepair01 = clampEmotionScalar(
@@ -297,39 +359,28 @@ export class PressureAffectModel implements PressureAffectModelApi {
 
     const reliefBase = clampEmotionScalar(
       stabilizer * this.defaults.reliefStabilizerWeight +
-      helperPresenceFromRelationships(relationships) * this.defaults.reliefHelperWeight +
-      invert01(pressureSeverity) * this.defaults.reliefPressureInverseWeight +
-      inferRecentSurvival(inference) * 0.11,
+        helperPresenceFromRelationships(relationships) *
+          this.defaults.reliefHelperWeight +
+        invert01(pressureSeverity) * this.defaults.reliefPressureInverseWeight +
+        inferRecentSurvival(inference) * 0.11 +
+        invert01(crowdThreat) * 0.06,
     );
 
     const relief01 = clampEmotionScalar(
-      reliefBase * (pressureSeverity >= 0.46 ? this.defaults.reliefRepairDampening : 1),
+      reliefBase *
+        (pressureSeverity >= 0.46 ? this.defaults.reliefRepairDampening : 1),
     );
 
-    const drivers = Object.freeze([
-      this.driver('intimidation', intimidation01, 'PRESSURE', pressureSeverity, {
-        pressureSeverity01: pressureSeverity,
-        hostileMomentum01: safe01(feature?.hostileMomentum01),
-        crowdThreat01: crowdThreat,
-        publicExposure01: publicExposure,
-      }),
-      this.driver('frustration', frustration01, 'FAILURE_LOOP', inferOutboundFailure(feature), {
-        ignoredHelperCountWindow: feature?.ignoredHelperCountWindow ?? 0,
-        messageCountWindow: feature?.messageCountWindow ?? 0,
-      }),
-      this.driver('desperation', desperation01, 'RESCUE_WINDOW', normalizeRescueUrgency(rescue), {
-        churnRisk01: safe01(profile?.churnRisk01),
-        silenceActive: Boolean(silence?.active),
-      }),
-      this.driver('relief', relief01, 'STABILIZER', stabilizer, {
-        helperPresence01: helperPresenceFromRelationships(relationships),
-        rescueTriggered: Boolean(rescue?.triggered),
-      }),
-      this.driver('confidence', confidenceRepair01, 'COMEBACK_WINDOW', inferComebackSeed(inference, feature), {
-        confidenceBaseline01: safe01(profile?.affect.confidence01),
-        stabilizer01: stabilizer,
-      }),
-    ]);
+    const pressureVector = Object.freeze({
+      intimidation: intimidation01,
+      confidence: confidenceRepair01,
+      frustration: frustration01,
+      relief: relief01,
+      desperation: desperation01,
+    } satisfies Pick<
+      ChatEmotionVector,
+      'intimidation' | 'confidence' | 'frustration' | 'relief' | 'desperation'
+    >);
 
     const confidenceBand = computeEmotionConfidenceBand(
       average([
@@ -348,52 +399,206 @@ export class PressureAffectModel implements PressureAffectModelApi {
       desperation01,
       confidenceRepair01,
       publicExposure,
+      crowdThreat,
     });
 
-    const policyFlags = Object.freeze({
-      shouldPreferSilence:
-        pressureSeverity >= this.defaults.silenceSuitabilityThreshold &&
-        relief01 < 0.43 &&
-        stabilizer < 0.44,
-      shouldEscalateRescue:
-        desperation01 >= this.defaults.rescueEscalationThreshold ||
-        (frustration01 >= 0.66 && pressureSeverity >= 0.72),
-      shouldPrimeComebackSpeech:
-        confidenceRepair01 >= this.defaults.comebackConfidenceThreshold &&
-        intimidation01 <= 0.66,
-      shouldRestrainCelebration:
-        pressureSeverity >= 0.5 || relief01 < 0.41,
-      shouldWarnCrowdPileOn:
-        publicExposure >= this.defaults.publicHumiliationEscalationThreshold &&
-        crowdThreat >= 0.53,
-    } satisfies PressureAffectPolicyFlags);
-
-    const recommendation = Object.freeze({
-      state: narrativeState,
-      confidenceBand,
-      policyFlags,
-      driverSummary: Object.freeze(this.summarizeDrivers(drivers)),
-    } satisfies PressureAffectRecommendation);
-
-    const notes = Object.freeze(this.buildNotes({
-      input,
+    const operatingState = this.resolveOperatingState({
       pressureSeverity,
-      publicExposure,
-      stabilizer,
-      crowdThreat,
       intimidation01,
       frustration01,
       relief01,
       desperation01,
       confidenceRepair01,
-      recommendation,
-    }));
+      publicExposure,
+      crowdThreat,
+    });
+
+    const comebackReadiness01 = clampEmotionScalar(
+      confidenceRepair01 * 0.54 +
+        invert01(intimidation01) * 0.18 +
+        invert01(desperation01) * 0.16 +
+        inferComebackSeed(inference, feature) * 0.12,
+    );
+
+    const celebrationTolerance01 = clampEmotionScalar(
+      relief01 * 0.34 +
+        confidenceRepair01 * 0.18 +
+        invert01(publicExposure) * 0.24 +
+        invert01(crowdThreat) * 0.14 +
+        invert01(pressureSeverity) * 0.1,
+    );
+
+    const silenceSuitability01 = clampEmotionScalar(
+      pressureSeverity * 0.39 +
+        intimidation01 * 0.18 +
+        desperation01 * 0.12 +
+        invert01(relief01) * 0.18 +
+        invert01(stabilizer) * 0.13,
+    );
+
+    const rescueUrgency01 = clampEmotionScalar(
+      desperation01 * 0.42 +
+        frustration01 * 0.14 +
+        pressureSeverity * 0.18 +
+        normalizeRescueUrgency(rescue) * 0.16 +
+        inferSilenceTax(silence) * 0.1,
+    );
+
+    const crowdPileOnRisk01 = clampEmotionScalar(
+      publicExposure * 0.33 +
+        crowdThreat * 0.27 +
+        intimidation01 * 0.11 +
+        frustration01 * 0.11 +
+        inferNegativeAudienceBias(audienceHeat) * 0.18,
+    );
+
+    const drivers = Object.freeze([
+      this.driver({
+        axis: 'INTIMIDATION',
+        driver: 'PRESSURE_SPIKE',
+        sourceKind: 'MOMENT',
+        signedImpact01: intimidation01,
+        label: 'Pressure spike intimidation',
+        evidence:
+          'Authoritative pressure tier, hostile momentum, crowd threat, and public exposure increased intimidation.',
+        roomId: input.roomId,
+        channel: input.channel,
+        metadata: Object.freeze({
+          pressureSeverity01: pressureSeverity,
+          hostileMomentum01: safe01(feature?.hostileMomentum01),
+          crowdThreat01: crowdThreat,
+          publicExposure01: publicExposure,
+          eventTags: Object.freeze([...(input.eventTags ?? [])]),
+        }),
+      }),
+      this.driver({
+        axis: 'FRUSTRATION',
+        driver: 'COUNTERPLAY_FAILURE',
+        sourceKind: 'COUNTERPLAY',
+        signedImpact01: frustration01,
+        label: 'Counterplay failure frustration',
+        evidence:
+          'Ignored helper windows, outbound failure, silence friction, and room pressure increased frustration.',
+        roomId: input.roomId,
+        channel: input.channel,
+        metadata: Object.freeze({
+          ignoredHelperCountWindow: feature?.ignoredHelperCountWindow ?? 0,
+          outboundFailure01: inferOutboundFailure(feature),
+          silenceTax01: inferSilenceTax(silence),
+          messageCountWindow: feature?.messageCountWindow ?? 0,
+        }),
+      }),
+      this.driver({
+        axis: 'DESPERATION',
+        driver: 'BANKRUPTCY_THREAT',
+        sourceKind: 'RESCUE',
+        signedImpact01: desperation01,
+        label: 'Rescue urgency desperation',
+        evidence:
+          'Churn risk, rescue urgency, time pressure, and unresolved silence increased desperation.',
+        roomId: input.roomId,
+        channel: input.channel,
+        metadata: Object.freeze({
+          churnRisk01: safe01(profile?.churnRisk01),
+          rescueUrgency01: normalizeRescueUrgency(rescue),
+          timePressure01: inferTimePressure(feature),
+          silenceActive: Boolean(silence?.active),
+        }),
+      }),
+      this.driver({
+        axis: 'RELIEF',
+        driver: 'RESCUE_INTERVENTION',
+        sourceKind: rescue?.triggered ? 'RESCUE' : 'HELPER_MESSAGE',
+        signedImpact01: relief01,
+        label: 'Stabilizer relief',
+        evidence:
+          'Helper presence, rescue posture, survival signals, and lower crowd threat improved relief.',
+        roomId: input.roomId,
+        channel: input.channel,
+        metadata: Object.freeze({
+          helperPresence01: helperPresenceFromRelationships(relationships),
+          stabilizer01: stabilizer,
+          rescueTriggered: Boolean(rescue?.triggered),
+          recentSurvival01: inferRecentSurvival(inference),
+        }),
+      }),
+      this.driver({
+        axis: 'CONFIDENCE',
+        driver: 'COMEBACK_WINDOW',
+        sourceKind: 'SYSTEM',
+        signedImpact01: confidenceRepair01,
+        label: 'Confidence repair window',
+        evidence:
+          'Stabilizer carryover, helper presence, and reduced fear created a comeback repair window.',
+        roomId: input.roomId,
+        channel: input.channel,
+        metadata: Object.freeze({
+          confidenceBaseline01: safe01(profile?.affect.confidence01),
+          stabilizer01: stabilizer,
+          comebackSeed01: inferComebackSeed(inference, feature),
+          dampenedUnderPressure: pressureSeverity >= 0.72,
+        }),
+      }),
+    ] satisfies readonly ChatEmotionDriverEvidence[]);
+
+    const policyFlags = Object.freeze({
+      shouldPreferSilence:
+        silenceSuitability01 >= this.defaults.silenceSuitabilityThreshold &&
+        relief01 < 0.43 &&
+        stabilizer < 0.44,
+      shouldEscalateRescue:
+        rescueUrgency01 >= this.defaults.rescueEscalationThreshold ||
+        (frustration01 >= 0.66 && pressureSeverity >= 0.72),
+      shouldPrimeComebackSpeech:
+        comebackReadiness01 >= this.defaults.comebackConfidenceThreshold &&
+        intimidation01 <= 0.66,
+      shouldRestrainCelebration:
+        pressureSeverity >= 0.5 || celebrationTolerance01 < 0.41,
+      shouldWarnCrowdPileOn:
+        publicExposure >= this.defaults.publicHumiliationEscalationThreshold &&
+        crowdPileOnRisk01 >= this.defaults.crowdPileOnThreshold,
+    } satisfies PressureAffectPolicyFlags);
+
+    const recommendation = Object.freeze({
+      state: narrativeState,
+      operatingState,
+      confidenceBand,
+      policyFlags,
+      comebackReadiness01,
+      celebrationTolerance01,
+      silenceSuitability01,
+      rescueUrgency01,
+      crowdPileOnRisk01,
+      driverSummary: Object.freeze(this.summarizeDrivers(drivers)),
+    } satisfies PressureAffectRecommendation);
+
+    const pressureVectorSummary = describeEmotionVector(
+      buildDescriptiveVectorFromPressure(pressureVector),
+    );
+
+    const notes = Object.freeze(
+      this.buildNotes({
+        input,
+        pressureSeverity,
+        publicExposure,
+        stabilizer,
+        crowdThreat,
+        intimidation01,
+        frustration01,
+        relief01,
+        desperation01,
+        confidenceRepair01,
+        operatingState,
+        recommendation,
+        pressureVectorSummary,
+      }),
+    );
 
     return Object.freeze({
       model: CHAT_PRESSURE_AFFECT_MODEL_MODULE_NAME,
       version: CHAT_PRESSURE_AFFECT_MODEL_VERSION,
       evaluatedAt,
-      authority: input.authority ?? this.authority,
+      authority,
       userId: input.userId,
       roomId: input.roomId,
       channel: input.channel,
@@ -410,16 +615,29 @@ export class PressureAffectModel implements PressureAffectModelApi {
       crowdThreat01: crowdThreat,
       confidenceBand,
       narrativeState,
+      operatingState,
+      pressureVector,
+      pressureVectorSummary,
       drivers,
       recommendation,
       notes,
-      metadata: input.metadata,
+      metadata: buildResultMetadata({
+        authority,
+        input,
+        pressureSeverity,
+        publicExposure,
+        stabilizer,
+        crowdThreat,
+        operatingState,
+        pressureVector,
+      }),
     });
   }
 
   public summarize(result: PressureAffectResult): readonly string[] {
     return Object.freeze([
       `state=${result.narrativeState}`,
+      `operatingState=${result.operatingState}`,
       `pressure=${toPct(result.pressureSeverity01)}`,
       `exposure=${toPct(result.publicExposure01)}`,
       `intimidation=${toPct(result.breakdown.intimidation01)}`,
@@ -427,6 +645,7 @@ export class PressureAffectModel implements PressureAffectModelApi {
       `desperation=${toPct(result.breakdown.desperation01)}`,
       `relief=${toPct(result.breakdown.relief01)}`,
       `confidenceRepair=${toPct(result.breakdown.confidenceRepair01)}`,
+      `vector=${result.pressureVectorSummary}`,
       ...result.recommendation.driverSummary,
     ]);
   }
@@ -436,7 +655,8 @@ export class PressureAffectModel implements PressureAffectModelApi {
     feature?: ChatFeatureSnapshot,
     audienceHeat?: ChatAudienceHeat,
   ): Score01 {
-    const tierWeight = this.defaults.pressureTierWeights[feature?.pressureTier ?? 'NONE'];
+    const tierWeight =
+      this.defaults.pressureTierWeights[feature?.pressureTier ?? 'NONE'];
     const hostileMomentum = safe01(feature?.hostileMomentum01);
     const heat = safe01(feature?.roomHeat01);
     const crowd = safe01(audienceHeat?.heat01);
@@ -461,10 +681,16 @@ export class PressureAffectModel implements PressureAffectModelApi {
     const witnessFactor = normalizeCount(feature?.inboundNpcCountWindow, 0.24);
     const crowd = safe01(audienceHeat?.heat01);
     const rivalryThreat = average(
-      relationships.map((value) => safe01(value.rivalry01) * 0.5 + safe01(value.contempt01) * 0.5),
+      relationships.map(
+        (value) =>
+          safe01(value.rivalry01) * 0.5 + safe01(value.contempt01) * 0.5,
+      ),
       0,
     );
-    return clampEmotionScalar(channelBias + witnessFactor + crowd * 0.26 + rivalryThreat * 0.19);
+
+    return clampEmotionScalar(
+      channelBias + witnessFactor + crowd * 0.26 + rivalryThreat * 0.19,
+    );
   }
 
   private computeStabilizer(
@@ -473,13 +699,22 @@ export class PressureAffectModel implements PressureAffectModelApi {
     relationships: readonly ChatRelationshipState[] = [],
   ): Score01 {
     const helperTrust = average(
-      relationships.map((value) => safe01(value.trust01) * 0.58 + safe01(value.rescueDebt01) * 0.42),
+      relationships.map(
+        (value) =>
+          safe01(value.trust01) * 0.58 + safe01(value.rescueDebt01) * 0.42,
+      ),
       0,
     );
     const attachment = safe01(profile?.affect.attachment01);
     const relief = safe01(profile?.affect.relief01);
     const rescueBoost = normalizeRescueUrgencyInverse(rescue);
-    return clampEmotionScalar(helperTrust * 0.34 + attachment * 0.22 + relief * 0.16 + rescueBoost * 0.14);
+
+    return clampEmotionScalar(
+      helperTrust * 0.34 +
+        attachment * 0.22 +
+        relief * 0.16 +
+        rescueBoost * 0.14,
+    );
   }
 
   private computeCrowdThreat(
@@ -494,20 +729,20 @@ export class PressureAffectModel implements PressureAffectModelApi {
       : 0;
     const hostility = safe01(feature?.hostileMomentum01);
     const haterTargeting = safe01(inference?.haterTargeting01);
-    const channelBias = channel === 'GLOBAL' ? 0.12 : channel === 'DEAL_ROOM' ? 0.07 : 0.03;
-    return clampEmotionScalar(heat * 0.31 + hostility * 0.27 + haterTargeting * 0.16 + swarmBias + channelBias);
+    const channelBias =
+      channel === 'GLOBAL' ? 0.12 : channel === 'DEAL_ROOM' ? 0.07 : 0.03;
+
+    return clampEmotionScalar(
+      heat * 0.31 + hostility * 0.27 + haterTargeting * 0.16 + swarmBias + channelBias,
+    );
   }
 
-  private resolveNarrativeState(input: {
-    readonly pressureSeverity: Score01;
-    readonly intimidation01: Score01;
-    readonly frustration01: Score01;
-    readonly relief01: Score01;
-    readonly desperation01: Score01;
-    readonly confidenceRepair01: Score01;
-    readonly publicExposure: Score01;
-  }): PressureNarrativeState {
-    if (input.relief01 >= 0.61 && input.pressureSeverity <= 0.42) return 'BREATHING_ROOM';
+  private resolveNarrativeState(
+    input: NarrativeResolutionInput,
+  ): PressureNarrativeState {
+    if (input.relief01 >= 0.61 && input.pressureSeverity <= 0.42) {
+      return 'BREATHING_ROOM';
+    }
     if (
       input.confidenceRepair01 >= this.defaults.comebackConfidenceThreshold &&
       input.intimidation01 <= 0.59 &&
@@ -515,56 +750,117 @@ export class PressureAffectModel implements PressureAffectModelApi {
     ) {
       return 'COMEBACK_READY';
     }
-    if (input.desperation01 >= 0.76 || (input.pressureSeverity >= 0.84 && input.frustration01 >= 0.66)) {
+    if (
+      input.desperation01 >= 0.76 ||
+      (input.pressureSeverity >= 0.84 && input.frustration01 >= 0.66)
+    ) {
       return 'CORNERED';
     }
-    if (input.intimidation01 >= 0.7 && input.publicExposure >= 0.6) return 'HUNTED';
-    if (input.frustration01 >= 0.68) return 'WOUNDED';
-    if (input.publicExposure >= 0.52) return 'EXPOSED';
-    if (input.pressureSeverity >= 0.46) return 'WATCHED';
+    if (input.intimidation01 >= 0.7 && input.publicExposure >= 0.6) {
+      return 'HUNTED';
+    }
+    if (input.frustration01 >= this.defaults.woundedStateThreshold) {
+      return 'WOUNDED';
+    }
+    if (input.publicExposure >= 0.52) {
+      return 'EXPOSED';
+    }
+    if (input.pressureSeverity >= 0.46) {
+      return 'WATCHED';
+    }
     return 'STEADY';
   }
 
-  private driver(
-    axis: 'intimidation' | 'frustration' | 'desperation' | 'relief' | 'confidence',
-    score: Score01,
-    reason: string,
-    intensity: number,
-    metadata: JsonObject,
-  ): ChatEmotionDriverEvidence {
-    const kindMap: Record<string, ChatEmotionDriverEvidence['kind']> = {
-      intimidation: 'PRESSURE_TIER',
-      frustration: 'FAILED_COUNTERPLAY',
-      desperation: 'RESCUE_TRIGGER',
-      relief: 'HELPER_PRESENCE',
-      confidence: 'COMEBACK_WINDOW',
-    };
+  private resolveOperatingState(
+    input: NarrativeResolutionInput,
+  ): ChatEmotionOperatingState {
+    if (
+      input.relief01 >= this.defaults.rescuedStateThreshold &&
+      input.pressureSeverity <= 0.34
+    ) {
+      return ensureOperatingState('RESCUED');
+    }
+
+    if (
+      input.publicExposure >= this.defaults.publicHumiliationEscalationThreshold &&
+      input.crowdThreat >= this.defaults.predatoryStateThreshold
+    ) {
+      return ensureOperatingState('PREDATORY');
+    }
+
+    if (
+      input.intimidation01 >= this.defaults.volatilityThreshold &&
+      input.frustration01 >= this.defaults.volatilityThreshold
+    ) {
+      return ensureOperatingState('VOLATILE');
+    }
+
+    if (
+      input.frustration01 >= this.defaults.woundedStateThreshold ||
+      input.desperation01 >= this.defaults.woundedStateThreshold
+    ) {
+      return ensureOperatingState('WOUNDED');
+    }
+
+    if (
+      input.confidenceRepair01 >= this.defaults.comebackConfidenceThreshold &&
+      input.relief01 >= 0.44 &&
+      input.publicExposure <= 0.36 &&
+      input.crowdThreat <= 0.3
+    ) {
+      return ensureOperatingState('CEREMONIAL');
+    }
+
+    if (input.pressureSeverity >= this.defaults.volatilityThreshold) {
+      return ensureOperatingState('SPIKED');
+    }
+
+    if (input.pressureSeverity >= 0.42 || input.publicExposure >= 0.42) {
+      return ensureOperatingState('RISING');
+    }
+
+    if (input.pressureSeverity <= this.defaults.calmThreshold) {
+      return ensureOperatingState('STABLE');
+    }
+
+    return ensureOperatingState('COLD_START');
+  }
+
+  private driver(input: DriverInput): ChatEmotionDriverEvidence {
+    const salience = clampEmotionScalar(Math.max(Number(input.signedImpact01), 0.14));
+    const confidence = clampEmotionScalar(salience * 0.72 + 0.12);
 
     return Object.freeze({
       driverId: createChatEmotionDriverId(),
-      kind: kindMap[axis],
-      axis:
-        axis === 'confidence'
-          ? 'CONFIDENCE'
-          : axis === 'frustration'
-          ? 'FRUSTRATION'
-          : axis === 'relief'
-          ? 'RELIEF'
-          : axis === 'desperation'
-          ? 'DESPERATION'
-          : 'INTIMIDATION',
+      driver: input.driver,
+      sourceKind: input.sourceKind,
       sourceAuthority: this.authority,
-      source: 'SYSTEM_INFERENCE',
-      weight01: clampEmotionScalar(intensity),
-      signedImpact01: score,
-      evidence: reason,
-      observedAtUnixMs: this.now(),
-      metadata,
+      sourceWeight: Number(clampEmotionScalar(Number(input.signedImpact01))),
+      salience,
+      confidence,
+      confidenceBand: computeEmotionConfidenceBand(confidence),
+      label: input.label,
+      reason: input.evidence,
+      roomId: input.roomId,
+      channelId: input.channel as unknown as ChatEmotionDriverEvidence['channelId'],
+      happenedAt: new Date(this.now()).toISOString(),
+      metadata: Object.freeze({
+        emotionAxis: input.axis,
+        signedImpact01: Number(input.signedImpact01),
+        ...input.metadata,
+      }),
     });
   }
 
-  private summarizeDrivers(drivers: readonly ChatEmotionDriverEvidence[]): readonly string[] {
-    return drivers.map((driver) => `${driver.axis.toLowerCase()}<=${driver.kind}:${toPct(driver.signedImpact01)}`);
+  private summarizeDrivers(
+    drivers: readonly ChatEmotionDriverEvidence[],
+  ): readonly string[] {
+    return Object.freeze(
+      drivers.map((driver) => {
+        const axis = String(driver.metadata?.emotionAxis ?? 'UNKNOWN').toLowerCase();
+        return `${axis}<=${driver.driver}:${toPct(driver.sourceWeight)}`;
+      }),
+    );
   }
 
   private buildNotes(input: {
@@ -578,9 +874,12 @@ export class PressureAffectModel implements PressureAffectModelApi {
     readonly relief01: Score01;
     readonly desperation01: Score01;
     readonly confidenceRepair01: Score01;
+    readonly operatingState: ChatEmotionOperatingState;
     readonly recommendation: PressureAffectRecommendation;
+    readonly pressureVectorSummary: string;
   }): readonly string[] {
     const notes: string[] = [];
+
     notes.push(`channel=${input.input.channel}`);
     notes.push(`pressureSeverity=${toPct(input.pressureSeverity)}`);
     notes.push(`publicExposure=${toPct(input.publicExposure)}`);
@@ -592,12 +891,42 @@ export class PressureAffectModel implements PressureAffectModelApi {
     notes.push(`desperation=${toPct(input.desperation01)}`);
     notes.push(`confidenceRepair=${toPct(input.confidenceRepair01)}`);
     notes.push(`narrativeState=${input.recommendation.state}`);
-    if (input.recommendation.policyFlags.shouldPreferSilence) notes.push('policy=silence_linger');
-    if (input.recommendation.policyFlags.shouldEscalateRescue) notes.push('policy=rescue_escalate');
-    if (input.recommendation.policyFlags.shouldPrimeComebackSpeech) notes.push('policy=comeback_prime');
-    if (input.recommendation.policyFlags.shouldRestrainCelebration) notes.push('policy=celebration_hold');
-    if (input.recommendation.policyFlags.shouldWarnCrowdPileOn) notes.push('policy=crowd_pile_on_warn');
-    if (input.input.eventTags?.length) notes.push(`eventTags=${input.input.eventTags.join('|')}`);
+    notes.push(`operatingState=${input.operatingState}`);
+    notes.push(`vector=${input.pressureVectorSummary}`);
+    notes.push(`confidenceBand=${input.recommendation.confidenceBand}`);
+    notes.push(
+      `comebackReadiness=${toPct(input.recommendation.comebackReadiness01)}`,
+    );
+    notes.push(
+      `celebrationTolerance=${toPct(input.recommendation.celebrationTolerance01)}`,
+    );
+    notes.push(
+      `silenceSuitability=${toPct(input.recommendation.silenceSuitability01)}`,
+    );
+    notes.push(`rescueUrgency=${toPct(input.recommendation.rescueUrgency01)}`);
+    notes.push(
+      `crowdPileOnRisk=${toPct(input.recommendation.crowdPileOnRisk01)}`,
+    );
+
+    if (input.recommendation.policyFlags.shouldPreferSilence) {
+      notes.push('policy=silence_linger');
+    }
+    if (input.recommendation.policyFlags.shouldEscalateRescue) {
+      notes.push('policy=rescue_escalate');
+    }
+    if (input.recommendation.policyFlags.shouldPrimeComebackSpeech) {
+      notes.push('policy=comeback_prime');
+    }
+    if (input.recommendation.policyFlags.shouldRestrainCelebration) {
+      notes.push('policy=celebration_hold');
+    }
+    if (input.recommendation.policyFlags.shouldWarnCrowdPileOn) {
+      notes.push('policy=crowd_pile_on_warn');
+    }
+    if (input.input.eventTags?.length) {
+      notes.push(`eventTags=${input.input.eventTags.join('|')}`);
+    }
+
     return notes;
   }
 }
@@ -655,9 +984,15 @@ function safe01(value: Score01 | number | undefined | null): Score01 {
 }
 
 function average(values: readonly (number | undefined)[], fallback = 0): Score01 {
-  const filtered = values.filter((value): value is number => Number.isFinite(value as number));
-  if (!filtered.length) return clampEmotionScalar(fallback);
-  return clampEmotionScalar(filtered.reduce((sum, value) => sum + value, 0) / filtered.length);
+  const filtered = values.filter(
+    (value): value is number => Number.isFinite(value as number),
+  );
+  if (!filtered.length) {
+    return clampEmotionScalar(fallback);
+  }
+  return clampEmotionScalar(
+    filtered.reduce((sum, value) => sum + value, 0) / filtered.length,
+  );
 }
 
 function invert01(value: Score01 | number | undefined): Score01 {
@@ -673,7 +1008,9 @@ function normalizeIgnoredHelperCount(value: number | undefined): Score01 {
 }
 
 function normalizeRescueUrgency(value: ChatRescueDecision | undefined): Score01 {
-  if (!value?.triggered) return clampEmotionScalar(0);
+  if (!value?.triggered) {
+    return clampEmotionScalar(0);
+  }
   switch (value.urgency) {
     case 'CRITICAL':
       return clampEmotionScalar(1);
@@ -688,12 +1025,16 @@ function normalizeRescueUrgency(value: ChatRescueDecision | undefined): Score01 
   }
 }
 
-function normalizeRescueUrgencyInverse(value: ChatRescueDecision | undefined): Score01 {
+function normalizeRescueUrgencyInverse(
+  value: ChatRescueDecision | undefined,
+): Score01 {
   return invert01(normalizeRescueUrgency(value));
 }
 
 function inferOutboundFailure(feature?: ChatFeatureSnapshot): Score01 {
-  if (!feature) return clampEmotionScalar(0);
+  if (!feature) {
+    return clampEmotionScalar(0);
+  }
   const outbound = Math.max(1, feature.outboundPlayerCountWindow);
   const ignored = feature.ignoredHelperCountWindow;
   const silenceTax = feature.messageCountWindow === 0 ? 0.08 : 0;
@@ -718,14 +1059,16 @@ function inferComebackSeed(
   return clampEmotionScalar(
     safe01(inference?.engagement01) * 0.34 +
       invert01(feature?.churnRisk01) * 0.22 +
-      invert01(feature?.hostileMomentum01) * 0.12,
+      invert01(feature?.hostileMomentum01) * 0.12 +
+      safe01(inference?.helperTiming01) * 0.1,
   );
 }
 
 function inferRecentSurvival(inference?: ChatInferenceSnapshot): Score01 {
   return clampEmotionScalar(
     safe01(inference?.helperTiming01) * 0.23 +
-      invert01(inference?.toxicityRisk01) * 0.11,
+      invert01(inference?.toxicityRisk01) * 0.11 +
+      invert01(inference?.churnRisk01) * 0.08,
   );
 }
 
@@ -733,9 +1076,96 @@ function helperPresenceFromRelationships(
   relationships: readonly ChatRelationshipState[],
 ): Score01 {
   return average(
-    relationships.map((value) => safe01(value.trust01) * 0.52 + safe01(value.rescueDebt01) * 0.48),
+    relationships.map(
+      (value) =>
+        safe01(value.trust01) * 0.52 + safe01(value.rescueDebt01) * 0.48,
+    ),
     0,
   );
+}
+
+function inferNegativeAudienceBias(
+  audienceHeat: ChatAudienceHeat | undefined,
+): Score01 {
+  if (!audienceHeat) {
+    return clampEmotionScalar(0);
+  }
+  return clampEmotionScalar(
+    audienceHeat.swarmDirection === 'NEGATIVE'
+      ? 1
+      : audienceHeat.swarmDirection === 'NEUTRAL'
+        ? 0.2
+        : 0,
+  );
+}
+
+function inferSilenceTax(decision: ChatSilenceDecision | undefined): Score01 {
+  return clampEmotionScalar(decision?.active ? 0.28 : 0);
+}
+
+function buildDescriptiveVectorFromPressure(
+  vector: Readonly<
+    Pick<
+      ChatEmotionVector,
+      'intimidation' | 'confidence' | 'frustration' | 'relief' | 'desperation'
+    >
+  >,
+): ChatEmotionVector {
+  return Object.freeze({
+    intimidation: vector.intimidation,
+    confidence: vector.confidence,
+    frustration: vector.frustration,
+    curiosity: clampEmotionScalar(0),
+    attachment: clampEmotionScalar(0),
+    socialEmbarrassment: clampEmotionScalar(0),
+    relief: vector.relief,
+    dominance: clampEmotionScalar(0),
+    desperation: vector.desperation,
+    trust: clampEmotionScalar(0),
+  });
+}
+
+function ensureOperatingState(
+  value: ChatEmotionOperatingState,
+): ChatEmotionOperatingState {
+  return CHAT_EMOTION_OPERATING_STATES.includes(value) ? value : 'UNSET';
+}
+
+function buildResultMetadata(input: {
+  readonly authority: ChatAuthority;
+  readonly input: PressureAffectModelInput;
+  readonly pressureSeverity: Score01;
+  readonly publicExposure: Score01;
+  readonly stabilizer: Score01;
+  readonly crowdThreat: Score01;
+  readonly operatingState: ChatEmotionOperatingState;
+  readonly pressureVector: Readonly<
+    Pick<
+      ChatEmotionVector,
+      'intimidation' | 'confidence' | 'frustration' | 'relief' | 'desperation'
+    >
+  >;
+}): JsonObject {
+  return Object.freeze({
+    authority: input.authority,
+    eventTags: Object.freeze([...(input.input.eventTags ?? [])]),
+    operatingState: input.operatingState,
+    axesUsed: Object.freeze([...CHAT_EMOTION_AXES]),
+    pressureVector: Object.freeze({
+      intimidation: input.pressureVector.intimidation,
+      confidence: input.pressureVector.confidence,
+      frustration: input.pressureVector.frustration,
+      relief: input.pressureVector.relief,
+      desperation: input.pressureVector.desperation,
+    }),
+    roomId: input.input.roomId,
+    channel: input.input.channel,
+    userId: input.input.userId,
+    pressureSeverity01: input.pressureSeverity,
+    publicExposure01: input.publicExposure,
+    stabilizer01: input.stabilizer,
+    crowdThreat01: input.crowdThreat,
+  });
 }
 
 function toPct(value: Score01 | number): string {
