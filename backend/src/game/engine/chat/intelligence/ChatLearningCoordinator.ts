@@ -78,7 +78,6 @@ import type {
   ChatNormalizedEvent,
   ChatRoomId,
   ChatRuntimeConfig,
-  ChatTelemetryEnvelope,
   ChatUserId,
   ChatVisibleChannel,
   JsonValue,
@@ -99,7 +98,6 @@ import type {
   ChatColdStartPopulationModelApi,
   ChatColdStartPopulationPrior,
   ChatColdStartRecommendation,
-  ChatColdStartProfileSeed,
 } from './ColdStartPopulationModel';
 
 import {
@@ -237,8 +235,12 @@ export interface ChatLearningCoordinatorHydrationPayload {
 }
 
 export interface ChatLearningCoordinatorHydrationResult {
-  readonly profiles: LearningProfileStoreHydrationResult;
+  readonly profiles: readonly LearningProfileStoreHydrationResult[];
   readonly hydratedUsers: readonly ChatUserId[];
+  readonly rejectedProfiles: readonly {
+    readonly raw: JsonValue;
+    readonly reason: LearningProfileStoreHydrationResult['reason'] | string;
+  }[];
   readonly rejectedSessionRecords: readonly {
     readonly raw: JsonValue;
     readonly reason: string;
@@ -448,6 +450,8 @@ export interface ChatLearningCoordinatorApi {
   snapshotProfiles(): Readonly<Record<ChatUserId, ChatLearningProfile>>;
 }
 
+type ChatLearningSalienceAnchorId = ChatLearningProfile['salienceAnchorIds'][number];
+
 // ============================================================================
 // MARK: Defaults
 // ============================================================================
@@ -577,6 +581,11 @@ export function createChatLearningCoordinator(
     }),
   });
 
+  loggerInfo('Chat learning coordinator booted.', Object.freeze({
+    runtimeVersion: runtime.version,
+    acceptClientHints: runtime.learningPolicy.acceptClientHints,
+  }));
+
   function now(value?: UnixMs | number): UnixMs {
     if (typeof value === 'number' && Number.isFinite(value)) {
       return asUnixMs(Math.max(0, value));
@@ -647,6 +656,12 @@ export function createChatLearningCoordinator(
       mutable.activeRoomId = record.roomId ?? mutable.activeRoomId;
       mutable.lastActivityAt = record.at;
     }
+
+    loggerDebug('Chat learning telemetry record emitted.', Object.freeze({
+      kind: record.kind,
+      userId: record.userId ?? null,
+      roomId: record.roomId ?? null,
+    }));
 
     void observers.onTelemetryRecord?.(record);
     return record;
@@ -922,7 +937,7 @@ export function createChatLearningCoordinator(
     const anchorMutation = observeMutation(
       profileStore.attachSalienceAnchor(
         context.userId,
-        context.salienceAnchorId,
+        normalizeSalienceAnchorId(context.salienceAnchorId),
         mutationMeta(context),
       ),
     );
@@ -1338,7 +1353,7 @@ export function createChatLearningCoordinator(
     const mutation = observeMutation(
       profileStore.attachSalienceAnchor(
         context.userId,
-        context.anchorId as ChatLearningProfile['salienceAnchorIds'][number],
+        normalizeSalienceAnchorId(context.anchorId),
         mutationMeta(context),
       ),
     );
@@ -1509,15 +1524,36 @@ export function createChatLearningCoordinator(
   function hydrate(
     value: ChatLearningCoordinatorHydrationPayload,
   ): ChatLearningCoordinatorHydrationResult {
-    const profileHydration = profileStore.hydrate(value.profiles ?? null);
-
+    const profileHydrations: LearningProfileStoreHydrationResult[] = [];
     const hydratedUsers: ChatUserId[] = [];
+    const rejectedProfiles: Array<{
+      readonly raw: JsonValue;
+      readonly reason: LearningProfileStoreHydrationResult['reason'] | string;
+    }> = [];
     const rejectedSessionRecords: Array<{
       readonly raw: JsonValue;
       readonly reason: string;
     }> = [];
 
-    for (const profile of profileHydration.hydratedProfiles) {
+    for (const rawProfile of normalizeHydrationProfileInputs(value.profiles)) {
+      const hydration = profileStore.hydrate(rawProfile);
+      profileHydrations.push(hydration);
+
+      if (!isLearningProfileHydrationSuccess(hydration)) {
+        rejectedProfiles.push(
+          Object.freeze({
+            raw: rawProfile,
+            reason: hydration.reason,
+          }),
+        );
+        loggerWarn('Rejected learning profile hydration record.', Object.freeze({
+          reason: hydration.reason,
+        }));
+        continue;
+      }
+
+      const profile = hydration.profile;
+      profileStore.upsert(profile);
       hydratedUsers.push(profile.userId);
       const mutable = getOrCreateSession(profile.userId);
       mutable.lastActivityAt = profile.updatedAt;
@@ -1531,10 +1567,13 @@ export function createChatLearningCoordinator(
       : [];
     for (const raw of rawSessions) {
       const normalized = parseSessionStateRecord(raw as JsonValue);
-      if (!normalized.ok) {
+      if (isSessionStateParseFailure(normalized)) {
         rejectedSessionRecords.push(
           Object.freeze({ raw: raw as JsonValue, reason: normalized.reason }),
         );
+        loggerWarn('Rejected learning coordinator session hydration record.', Object.freeze({
+          reason: normalized.reason,
+        }));
         continue;
       }
       sessionState.set(normalized.value.userId, normalized.value);
@@ -1547,8 +1586,11 @@ export function createChatLearningCoordinator(
       : [];
     for (const raw of rawTelemetry) {
       const normalized = parseTelemetryRecord(raw as JsonValue);
-      if (!normalized.ok) {
+      if (isTelemetryParseFailure(normalized)) {
         telemetryRejected += 1;
+        loggerWarn('Rejected buffered learning telemetry hydration record.', Object.freeze({
+          reason: normalized.reason,
+        }));
         continue;
       }
       telemetryBuffer.push(normalized.value);
@@ -1562,16 +1604,17 @@ export function createChatLearningCoordinator(
       at: now(),
       reason: 'hydrate',
       payload: Object.freeze({
-        hydratedProfiles: profileHydration.hydratedProfiles.length,
-        rejectedProfiles: profileHydration.rejected.length,
+        hydratedProfiles: hydratedUsers.length,
+        rejectedProfiles: rejectedProfiles.length,
         telemetryAccepted,
         telemetryRejected,
       }),
     });
 
     return Object.freeze({
-      profiles: profileHydration,
+      profiles: Object.freeze(profileHydrations.slice()),
       hydratedUsers: Object.freeze(hydratedUsers),
+      rejectedProfiles: Object.freeze(rejectedProfiles),
       rejectedSessionRecords: Object.freeze(rejectedSessionRecords),
       telemetryAccepted,
       telemetryRejected,
@@ -1807,14 +1850,18 @@ function createPortableLogger(
 function dominantChannel(
   affinity: Readonly<Record<ChatVisibleChannel, Score01>>,
 ): ChatVisibleChannel {
-  const ordered = [
-    ['GLOBAL', Number(affinity.GLOBAL)],
-    ['SYNDICATE', Number(affinity.SYNDICATE)],
-    ['DEAL_ROOM', Number(affinity.DEAL_ROOM)],
-    ['LOBBY', Number(affinity.LOBBY)],
-  ] as const;
-  ordered.sort((left, right) => right[1] - left[1]);
-  return ordered[0]?.[0] ?? 'GLOBAL';
+  let bestChannel: ChatVisibleChannel = 'GLOBAL';
+  let bestScore = Number(affinity.GLOBAL);
+
+  for (const channel of visibleChannels()) {
+    const score = Number(affinity[channel]);
+    if (score > bestScore) {
+      bestChannel = channel;
+      bestScore = score;
+    }
+  }
+
+  return bestChannel;
 }
 
 function selectRecommendedVisibleChannel(
@@ -1927,6 +1974,53 @@ function normalizedEventSummary(
     hasUserId: Boolean(event.userId),
     hasPayload: Boolean(event.payload && typeof event.payload === 'object'),
   });
+}
+
+function normalizeHydrationProfileInputs(value: unknown): readonly JsonValue[] {
+  if (Array.isArray(value)) {
+    return value as readonly JsonValue[];
+  }
+  if (value && typeof value === 'object') {
+    return Object.freeze(Object.values(value as Record<string, JsonValue>));
+  }
+  return Object.freeze([]);
+}
+
+function normalizeSalienceAnchorId(
+  anchorId: string,
+): ChatLearningSalienceAnchorId {
+  const normalized = String(anchorId ?? '').trim();
+  if (!normalized) {
+    return 'cma_missing_anchor' as ChatLearningSalienceAnchorId;
+  }
+  if (normalized.startsWith('cma_')) {
+    return normalized as ChatLearningSalienceAnchorId;
+  }
+  return `cma_${normalized
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')}` as ChatLearningSalienceAnchorId;
+}
+
+function isLearningProfileHydrationSuccess(
+  result: LearningProfileStoreHydrationResult,
+): result is LearningProfileStoreHydrationResult & {
+  readonly ok: true;
+  readonly profile: ChatLearningProfile;
+} {
+  return result.ok === true && result.profile !== null;
+}
+
+function isSessionStateParseFailure(
+  result: ReturnType<typeof parseSessionStateRecord>,
+): result is { readonly ok: false; readonly reason: string } {
+  return result.ok === false;
+}
+
+function isTelemetryParseFailure(
+  result: ReturnType<typeof parseTelemetryRecord>,
+): result is { readonly ok: false; readonly reason: string } {
+  return result.ok === false;
 }
 
 function parseSessionStateRecord(
