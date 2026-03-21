@@ -35,6 +35,7 @@ import {
   type ChatPlayerFingerprintEvent,
   type ChatPlayerFingerprintEventType,
   type ChatPlayerFingerprintSnapshot,
+  type ChatPlayerFingerprintVector,
   clamp01,
 } from '../../../../../../shared/contracts/chat/player-fingerprint';
 import {
@@ -121,6 +122,146 @@ export interface ChatPlayerFingerprintChannelSummary {
   readonly pressureResponseTags: readonly string[];
   readonly resilienceTags: readonly string[];
   readonly mostRecentEventAt: number | null;
+}
+
+
+export interface ChatPlayerFingerprintEventQuery {
+  readonly playerIds?: readonly string[];
+  readonly roomIds?: readonly string[];
+  readonly channelIds?: readonly string[];
+  readonly eventTypes?: readonly ChatPlayerFingerprintEventType[];
+  readonly tags?: readonly string[];
+  readonly sinceMs?: number;
+  readonly untilMs?: number;
+  readonly limit?: number;
+  readonly order?: 'ASC' | 'DESC';
+}
+
+export interface ChatPlayerFingerprintEventTypeBreakdownEntry {
+  readonly eventType: ChatPlayerFingerprintEventType;
+  readonly count: number;
+  readonly ratio01: number;
+}
+
+export interface ChatPlayerFingerprintTagBreakdownEntry {
+  readonly tag: string;
+  readonly count: number;
+  readonly ratio01: number;
+}
+
+export interface ChatPlayerFingerprintDirectorProfile {
+  readonly playerId: string;
+  readonly archetype: ChatPlayerArchetypeId;
+  readonly preferredObjectives: readonly string[];
+  readonly preferredSceneArchetypes: readonly string[];
+  readonly transformBiases: readonly string[];
+  readonly escalationBias01: number;
+  readonly publicPressureBias01: number;
+  readonly dealPressureBias01: number;
+  readonly rescueUrgency01: number;
+  readonly callbackReadiness01: number;
+  readonly silenceBias01: number;
+  readonly notes: readonly string[];
+}
+
+export interface ChatPlayerFingerprintPlayerDigest {
+  readonly playerId: string;
+  readonly envelope: ChatPlayerFingerprintEnvelope;
+  readonly directorProfile: ChatPlayerFingerprintDirectorProfile;
+  readonly recentEvents: readonly ChatPlayerFingerprintEvent[];
+  readonly recentEventBreakdown: readonly ChatPlayerFingerprintEventTypeBreakdownEntry[];
+  readonly recentTagBreakdown: readonly ChatPlayerFingerprintTagBreakdownEntry[];
+  readonly primaryRoomId: string | null;
+  readonly primaryChannelId: string | null;
+  readonly pressureScore01: number;
+  readonly rescuePriority01: number;
+  readonly volatilityScore01: number;
+}
+
+export interface ChatPlayerFingerprintMatchup {
+  readonly playerId: string;
+  readonly opponentId: string;
+  readonly playerArchetype: ChatPlayerArchetypeId;
+  readonly opponentArchetype: ChatPlayerArchetypeId;
+  readonly playerPressureScore01: number;
+  readonly opponentPressureScore01: number;
+  readonly pressureDelta01: number;
+  readonly leverageScore01: number;
+  readonly publicStageEdge: 'PLAYER' | 'OPPONENT' | 'EVEN';
+  readonly recommendedObjectives: readonly string[];
+  readonly recommendedSceneArchetypes: readonly string[];
+  readonly watchpoints: readonly string[];
+}
+
+export interface ChatPlayerFingerprintRoomHeatSnapshot {
+  readonly roomId: string;
+  readonly summary: ChatPlayerFingerprintRoomSummary;
+  readonly recentPlayerIds: readonly string[];
+  readonly hottestPlayerIds: readonly string[];
+  readonly directorProfiles: readonly ChatPlayerFingerprintDirectorProfile[];
+  readonly recentEventBreakdown: readonly ChatPlayerFingerprintEventTypeBreakdownEntry[];
+  readonly recentTagBreakdown: readonly ChatPlayerFingerprintTagBreakdownEntry[];
+  readonly heatScore01: number;
+  readonly instability01: number;
+  readonly rescuePressure01: number;
+}
+
+export interface ChatPlayerFingerprintChannelHeatSnapshot {
+  readonly channelId: string;
+  readonly summary: ChatPlayerFingerprintChannelSummary;
+  readonly recentPlayerIds: readonly string[];
+  readonly hottestPlayerIds: readonly string[];
+  readonly directorProfiles: readonly ChatPlayerFingerprintDirectorProfile[];
+  readonly recentEventBreakdown: readonly ChatPlayerFingerprintEventTypeBreakdownEntry[];
+  readonly recentTagBreakdown: readonly ChatPlayerFingerprintTagBreakdownEntry[];
+  readonly heatScore01: number;
+  readonly instability01: number;
+  readonly rescuePressure01: number;
+}
+
+export interface ChatPlayerFingerprintCohortSnapshot {
+  readonly byArchetype: Readonly<Record<ChatPlayerArchetypeId, readonly string[]>>;
+  readonly byRiskBand: Readonly<Record<FingerprintRiskBand, readonly string[]>>;
+  readonly byTiltBand: Readonly<Record<FingerprintTiltBand, readonly string[]>>;
+  readonly byPublicnessBand: Readonly<Record<FingerprintPublicnessBand, readonly string[]>>;
+  readonly hottestPlayerIds: readonly string[];
+  readonly rescuePriorityPlayerIds: readonly string[];
+  readonly disciplinedPlayerIds: readonly string[];
+}
+
+export interface ChatPlayerFingerprintWindowDigest {
+  readonly query: Required<Pick<ChatPlayerFingerprintEventQuery, 'order'>> & Omit<ChatPlayerFingerprintEventQuery, 'order'>;
+  readonly eventCount: number;
+  readonly uniquePlayers: readonly string[];
+  readonly uniqueRooms: readonly string[];
+  readonly uniqueChannels: readonly string[];
+  readonly averageIntensity01: number;
+  readonly averagePublicWitness01: number;
+  readonly eventTypeBreakdown: readonly ChatPlayerFingerprintEventTypeBreakdownEntry[];
+  readonly tagBreakdown: readonly ChatPlayerFingerprintTagBreakdownEntry[];
+  readonly comebackPressure01: number;
+  readonly collapsePressure01: number;
+}
+
+export interface ChatPlayerFingerprintDriftSnapshot {
+  readonly playerId: string;
+  readonly before: ChatPlayerFingerprintSnapshot;
+  readonly after: ChatPlayerFingerprintSnapshot;
+  readonly changedArchetype: boolean;
+  readonly dominantAxisDelta: Readonly<Record<ChatPlayerFingerprintAxisId, number>>;
+  readonly strongestShiftAxes: readonly ChatPlayerFingerprintAxisId[];
+  readonly notes: readonly string[];
+}
+
+export interface ChatPlayerFingerprintServiceManifest {
+  readonly service: 'ChatPlayerFingerprintService';
+  readonly tailSize: number;
+  readonly maxPlayers: number;
+  readonly eventJournalLimit: number;
+  readonly pruneIdleMs: number;
+  readonly recentWindowMs: number;
+  readonly knownPlayers: number;
+  readonly totalEvents: number;
 }
 
 interface PlayerLedgerEntry {
@@ -345,6 +486,296 @@ export class ChatPlayerFingerprintService {
   getAllRecentEvents(limit = 64): readonly ChatPlayerFingerprintEvent[] {
     const safeLimit = Math.max(1, limit);
     return this.journal.slice(-safeLimit);
+  }
+
+
+  getEnvelopes(playerIds: readonly string[]): Readonly<Record<string, ChatPlayerFingerprintEnvelope>> {
+    return Object.freeze(
+      Object.fromEntries(playerIds.map((playerId) => [playerId, this.getEnvelope(playerId)])),
+    );
+  }
+
+  getDirectorProfile(playerId: string): ChatPlayerFingerprintDirectorProfile {
+    const envelope = this.getEnvelope(playerId);
+    return this.buildDirectorProfile(envelope.snapshot, envelope.counterplay);
+  }
+
+  getDirectorProfiles(playerIds: readonly string[]): readonly ChatPlayerFingerprintDirectorProfile[] {
+    return playerIds.map((playerId) => this.getDirectorProfile(playerId));
+  }
+
+  getPlayerDigest(playerId: string, recentLimit = 16): ChatPlayerFingerprintPlayerDigest {
+    const envelope = this.getEnvelope(playerId);
+    const recentEvents = this.getRecentEvents(playerId, recentLimit);
+    const directorProfile = this.buildDirectorProfile(envelope.snapshot, envelope.counterplay);
+
+    return {
+      playerId,
+      envelope,
+      directorProfile,
+      recentEvents,
+      recentEventBreakdown: this.buildEventBreakdown(recentEvents),
+      recentTagBreakdown: this.buildTagBreakdown(recentEvents),
+      primaryRoomId: this.resolvePrimaryRoomId(recentEvents),
+      primaryChannelId: this.resolvePrimaryChannelId(recentEvents),
+      pressureScore01: this.computePressureWeight(envelope.snapshot),
+      rescuePriority01: this.computeRescuePriority(envelope.snapshot),
+      volatilityScore01: this.computeVolatilityScore(envelope.snapshot),
+    };
+  }
+
+  getMatchup(playerId: string, opponentId: string): ChatPlayerFingerprintMatchup {
+    const playerDigest = this.getPlayerDigest(playerId, 12);
+    const opponentDigest = this.getPlayerDigest(opponentId, 12);
+    const player = playerDigest.envelope.snapshot;
+    const opponent = opponentDigest.envelope.snapshot;
+    const playerCounterplay = playerDigest.envelope.counterplay;
+    const opponentCounterplay = opponentDigest.envelope.counterplay;
+    const leverageScore01 = clamp01(
+      playerDigest.pressureScore01 * 0.22 +
+        opponent.vector.tilt01 * 0.24 +
+        opponent.vector.publicness01 * 0.12 +
+        (1 - opponent.vector.recoveryStrength01) * 0.18 +
+        player.vector.procedureAwareness01 * 0.08 +
+        this.computeObjectivePressureScore(playerCounterplay.idealBotObjectives) * 0.16,
+    );
+    const publicDelta = player.vector.publicness01 - opponent.vector.publicness01;
+
+    return {
+      playerId,
+      opponentId,
+      playerArchetype: player.archetype,
+      opponentArchetype: opponent.archetype,
+      playerPressureScore01: playerDigest.pressureScore01,
+      opponentPressureScore01: opponentDigest.pressureScore01,
+      pressureDelta01: Number((playerDigest.pressureScore01 - opponentDigest.pressureScore01).toFixed(6)),
+      leverageScore01,
+      publicStageEdge: publicDelta > 0.08 ? 'PLAYER' : publicDelta < -0.08 ? 'OPPONENT' : 'EVEN',
+      recommendedObjectives: this.resolveMostCommonTokens(
+        [...playerCounterplay.idealBotObjectives, ...opponentCounterplay.idealBotObjectives],
+        6,
+      ),
+      recommendedSceneArchetypes: this.resolveMostCommonTokens(
+        [...playerCounterplay.idealSceneArchetypes, ...opponentCounterplay.idealSceneArchetypes],
+        5,
+      ),
+      watchpoints: this.resolveMostCommonTokens(
+        [
+          ...player.exploitableSeams,
+          ...opponent.exploitableSeams,
+          ...playerCounterplay.notes,
+          ...opponentCounterplay.notes,
+        ],
+        6,
+      ),
+    };
+  }
+
+  queryEvents(query: ChatPlayerFingerprintEventQuery = {}): readonly ChatPlayerFingerprintEvent[] {
+    const filtered = this.filterJournal(query);
+    if (query.limit == null) return filtered;
+    return filtered.slice(0, Math.max(1, query.limit));
+  }
+
+  getEventBreakdown(
+    query: ChatPlayerFingerprintEventQuery = {},
+  ): readonly ChatPlayerFingerprintEventTypeBreakdownEntry[] {
+    return this.buildEventBreakdown(this.filterJournal(query));
+  }
+
+  getTagBreakdown(query: ChatPlayerFingerprintEventQuery = {}): readonly ChatPlayerFingerprintTagBreakdownEntry[] {
+    return this.buildTagBreakdown(this.filterJournal(query));
+  }
+
+  getWindowDigest(query: ChatPlayerFingerprintEventQuery = {}): ChatPlayerFingerprintWindowDigest {
+    const normalizedQuery = this.normalizeQuery(query);
+    const events = this.filterJournal(normalizedQuery);
+    const comebackCount = events.filter((event) => event.eventType === 'COMEBACK').length;
+    const collapseCount = events.filter((event) => event.eventType === 'COLLAPSE').length;
+
+    return {
+      query: normalizedQuery,
+      eventCount: events.length,
+      uniquePlayers: this.collectUnique(events.map((event) => event.playerId)),
+      uniqueRooms: this.collectUnique(events.map((event) => event.roomId).filter((value): value is string => Boolean(value))),
+      uniqueChannels: this.collectUnique(
+        events.map((event) => event.channelId).filter((value): value is string => Boolean(value)),
+      ),
+      averageIntensity01: this.average(events.map((event) => event.intensity01 ?? 0)),
+      averagePublicWitness01: this.average(events.map((event) => event.publicWitness01 ?? 0)),
+      eventTypeBreakdown: this.buildEventBreakdown(events),
+      tagBreakdown: this.buildTagBreakdown(events),
+      comebackPressure01: clamp01(events.length === 0 ? 0 : comebackCount / events.length),
+      collapsePressure01: clamp01(events.length === 0 ? 0 : collapseCount / events.length),
+    };
+  }
+
+  getRoomHeatSnapshot(roomId: string, windowMs = this.recentWindowMs): ChatPlayerFingerprintRoomHeatSnapshot {
+    const normalizedRoomId = this.normalizeRoomId(roomId);
+    const summary = this.getRoomSummary(roomId);
+    const events = this.queryEvents({ roomIds: [normalizedRoomId], sinceMs: this.clock.now() - windowMs });
+    const playerIds = this.collectUnique(events.map((event) => event.playerId));
+    const snapshots = playerIds.map((playerId) => this.getSnapshot(playerId));
+    const hottest = [...snapshots]
+      .sort((left, right) => this.computePressureWeight(right) - this.computePressureWeight(left))
+      .slice(0, 6)
+      .map((snapshot) => snapshot.playerId);
+
+    return {
+      roomId,
+      summary,
+      recentPlayerIds: playerIds,
+      hottestPlayerIds: hottest,
+      directorProfiles: hottest.map((playerId) => this.getDirectorProfile(playerId)),
+      recentEventBreakdown: this.buildEventBreakdown(events),
+      recentTagBreakdown: this.buildTagBreakdown(events),
+      heatScore01: clamp01(
+        summary.averageRisk01 * 0.18 +
+          summary.averageTilt01 * 0.22 +
+          this.average(events.map((event) => event.intensity01 ?? 0)) * 0.3 +
+          this.average(events.map((event) => event.publicWitness01 ?? 0)) * 0.2 +
+          clamp01(playerIds.length / 8) * 0.1,
+      ),
+      instability01: this.average(snapshots.map((snapshot) => this.computeVolatilityScore(snapshot))),
+      rescuePressure01: this.average(snapshots.map((snapshot) => this.computeRescuePriority(snapshot))),
+    };
+  }
+
+  getChannelHeatSnapshot(
+    channelId: string,
+    windowMs = this.recentWindowMs,
+  ): ChatPlayerFingerprintChannelHeatSnapshot {
+    const normalizedChannelId = this.normalizeChannelId(channelId);
+    const summary = this.getChannelSummary(channelId);
+    const events = this.queryEvents({ channelIds: [normalizedChannelId], sinceMs: this.clock.now() - windowMs });
+    const playerIds = this.collectUnique(events.map((event) => event.playerId));
+    const snapshots = playerIds.map((playerId) => this.getSnapshot(playerId));
+    const hottest = [...snapshots]
+      .sort((left, right) => this.computePressureWeight(right) - this.computePressureWeight(left))
+      .slice(0, 6)
+      .map((snapshot) => snapshot.playerId);
+
+    return {
+      channelId,
+      summary,
+      recentPlayerIds: playerIds,
+      hottestPlayerIds: hottest,
+      directorProfiles: hottest.map((playerId) => this.getDirectorProfile(playerId)),
+      recentEventBreakdown: this.buildEventBreakdown(events),
+      recentTagBreakdown: this.buildTagBreakdown(events),
+      heatScore01: clamp01(
+        summary.averageRisk01 * 0.18 +
+          summary.averageTilt01 * 0.22 +
+          this.average(events.map((event) => event.intensity01 ?? 0)) * 0.26 +
+          this.average(events.map((event) => event.publicWitness01 ?? 0)) * 0.24 +
+          clamp01(playerIds.length / 8) * 0.1,
+      ),
+      instability01: this.average(snapshots.map((snapshot) => this.computeVolatilityScore(snapshot))),
+      rescuePressure01: this.average(snapshots.map((snapshot) => this.computeRescuePriority(snapshot))),
+    };
+  }
+
+  getCohortSnapshot(limit = DEFAULT_SUMMARY_PLAYER_LIMIT): ChatPlayerFingerprintCohortSnapshot {
+    const safeLimit = Math.max(1, limit);
+    const players = [...this.derivedByPlayer.values()].map((entry) => entry.snapshot);
+    const byArchetype = Object.freeze(
+      Object.fromEntries(
+        ARCHETYPES.map((archetype) => [archetype, this.getPlayersByArchetype(archetype).slice(0, safeLimit)]),
+      ) as unknown as Record<ChatPlayerArchetypeId, readonly string[]>,
+    );
+    const byRiskBand = Object.freeze({
+      LOW: this.getPlayersByRiskBand('LOW').slice(0, safeLimit),
+      MEDIUM: this.getPlayersByRiskBand('MEDIUM').slice(0, safeLimit),
+      HIGH: this.getPlayersByRiskBand('HIGH').slice(0, safeLimit),
+      EXTREME: this.getPlayersByRiskBand('EXTREME').slice(0, safeLimit),
+    });
+    const byTiltBand = Object.freeze({
+      STEADY: this.getPlayersByTiltBand('STEADY').slice(0, safeLimit),
+      UNSETTLED: this.getPlayersByTiltBand('UNSETTLED').slice(0, safeLimit),
+      TILTED: this.getPlayersByTiltBand('TILTED').slice(0, safeLimit),
+      BROKEN: this.getPlayersByTiltBand('BROKEN').slice(0, safeLimit),
+    });
+    const byPublicnessBand = Object.freeze({
+      PRIVATE: players.filter((snapshot) => this.resolvePublicnessBand(snapshot) === 'PRIVATE').map((snapshot) => snapshot.playerId).slice(0, safeLimit),
+      MIXED: players.filter((snapshot) => this.resolvePublicnessBand(snapshot) === 'MIXED').map((snapshot) => snapshot.playerId).slice(0, safeLimit),
+      PUBLIC: players.filter((snapshot) => this.resolvePublicnessBand(snapshot) === 'PUBLIC').map((snapshot) => snapshot.playerId).slice(0, safeLimit),
+    });
+
+    const hottestPlayerIds = [...players]
+      .sort((left, right) => this.computePressureWeight(right) - this.computePressureWeight(left))
+      .slice(0, safeLimit)
+      .map((snapshot) => snapshot.playerId);
+    const rescuePriorityPlayerIds = [...players]
+      .sort((left, right) => this.computeRescuePriority(right) - this.computeRescuePriority(left))
+      .slice(0, safeLimit)
+      .map((snapshot) => snapshot.playerId);
+    const disciplinedPlayerIds = [...players]
+      .sort(
+        (left, right) =>
+          (right.vector.procedureAwareness01 + right.vector.recoveryStrength01) -
+            (left.vector.procedureAwareness01 + left.vector.recoveryStrength01) ||
+          left.playerId.localeCompare(right.playerId),
+      )
+      .slice(0, safeLimit)
+      .map((snapshot) => snapshot.playerId);
+
+    return {
+      byArchetype,
+      byRiskBand,
+      byTiltBand,
+      byPublicnessBand,
+      hottestPlayerIds,
+      rescuePriorityPlayerIds,
+      disciplinedPlayerIds,
+    };
+  }
+
+  getPlayerDrift(playerId: string, sinceMs: number, untilMs = this.clock.now()): ChatPlayerFingerprintDriftSnapshot | null {
+    const playerEvents = this.queryEvents({ playerIds: [playerId], order: 'ASC' });
+    const beforeEvents = playerEvents.filter((event) => event.createdAt <= sinceMs);
+    const afterEvents = playerEvents.filter((event) => event.createdAt <= untilMs);
+    if (afterEvents.length === 0) return null;
+
+    const beforeSnapshot = this.replaySnapshot(playerId, beforeEvents);
+    const afterSnapshot = this.replaySnapshot(playerId, afterEvents);
+    const dominantAxisDelta = this.computeAxisDelta(beforeSnapshot.vector, afterSnapshot.vector);
+    const strongestShiftAxes = [...AXES]
+      .sort(
+        (left, right) =>
+          Math.abs(dominantAxisDelta[right]) - Math.abs(dominantAxisDelta[left]) || left.localeCompare(right),
+      )
+      .slice(0, 4);
+
+    return {
+      playerId,
+      before: beforeSnapshot,
+      after: afterSnapshot,
+      changedArchetype: beforeSnapshot.archetype !== afterSnapshot.archetype,
+      dominantAxisDelta,
+      strongestShiftAxes,
+      notes: this.resolveMostCommonTokens(
+        [
+          ...(beforeSnapshot.archetype === afterSnapshot.archetype ? [] : [`archetype:${beforeSnapshot.archetype}->${afterSnapshot.archetype}`]),
+          ...afterSnapshot.exploitableSeams,
+          ...afterSnapshot.resilienceTags,
+        ],
+        6,
+      ),
+    };
+  }
+
+  getManifest(): ChatPlayerFingerprintServiceManifest {
+    const stats = this.getStats();
+    return {
+      service: 'ChatPlayerFingerprintService',
+      tailSize: this.tailSize,
+      maxPlayers: this.maxPlayers,
+      eventJournalLimit: this.eventJournalLimit,
+      pruneIdleMs: this.pruneIdleMs,
+      recentWindowMs: this.recentWindowMs,
+      knownPlayers: stats.knownPlayers,
+      totalEvents: stats.totalEvents,
+    };
   }
 
   // ==========================================================================
@@ -815,6 +1246,218 @@ export class ChatPlayerFingerprintService {
   private average(values: readonly number[]): number {
     if (values.length === 0) return 0;
     return Number((values.reduce((sum, value) => sum + value, 0) / values.length).toFixed(6));
+  }
+
+
+
+  private buildDirectorProfile(
+    snapshot: ChatPlayerFingerprintSnapshot,
+    counterplay: ChatPlayerCounterplayHint,
+  ): ChatPlayerFingerprintDirectorProfile {
+    const pressureScore = this.computePressureWeight(snapshot);
+    const rescueUrgency01 = this.computeRescuePriority(snapshot);
+    const callbackReadiness01 = clamp01(
+      snapshot.vector.procedureAwareness01 * 0.28 +
+        snapshot.vector.publicness01 * 0.12 +
+        snapshot.vector.comeback01 * 0.14 +
+        clamp01(snapshot.confidence01) * 0.16 +
+        clamp01(snapshot.recentEventCount / 20) * 0.3,
+    );
+    const silenceBias01 = clamp01(
+      snapshot.vector.procedureAwareness01 * 0.18 +
+        (1 - snapshot.vector.noveltySeeking01) * 0.22 +
+        (1 - snapshot.vector.publicness01) * 0.22 +
+        (counterplay.idealBotObjectives.includes('DELAY') ? 0.18 : 0) +
+        (counterplay.idealBotObjectives.includes('STUDY') ? 0.12 : 0),
+    );
+
+    return {
+      playerId: snapshot.playerId,
+      archetype: snapshot.archetype,
+      preferredObjectives: counterplay.idealBotObjectives,
+      preferredSceneArchetypes: counterplay.idealSceneArchetypes,
+      transformBiases: counterplay.transformBiases,
+      escalationBias01: pressureScore,
+      publicPressureBias01: clamp01(snapshot.vector.publicness01 * 0.6 + pressureScore * 0.4),
+      dealPressureBias01: clamp01(snapshot.vector.greed01 * 0.36 + snapshot.vector.bluff01 * 0.24 + pressureScore * 0.4),
+      rescueUrgency01,
+      callbackReadiness01,
+      silenceBias01,
+      notes: this.resolveMostCommonTokens(
+        [...counterplay.notes, ...snapshot.exploitableSeams, ...snapshot.resilienceTags],
+        7,
+      ),
+    };
+  }
+
+  private buildEventBreakdown(
+    events: readonly ChatPlayerFingerprintEvent[],
+  ): readonly ChatPlayerFingerprintEventTypeBreakdownEntry[] {
+    const counts = new Map<ChatPlayerFingerprintEventType, number>();
+    for (const event of events) {
+      counts.set(event.eventType, (counts.get(event.eventType) ?? 0) + 1);
+    }
+
+    const total = events.length || 1;
+    return [...counts.entries()]
+      .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+      .map(([eventType, count]) => ({ eventType, count, ratio01: clamp01(count / total) }));
+  }
+
+  private buildTagBreakdown(
+    events: readonly ChatPlayerFingerprintEvent[],
+  ): readonly ChatPlayerFingerprintTagBreakdownEntry[] {
+    const counts = new Map<string, number>();
+    let total = 0;
+
+    for (const event of events) {
+      for (const tag of event.tags ?? []) {
+        counts.set(tag, (counts.get(tag) ?? 0) + 1);
+        total += 1;
+      }
+    }
+
+    const denominator = total || 1;
+    return [...counts.entries()]
+      .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+      .map(([tag, count]) => ({ tag, count, ratio01: clamp01(count / denominator) }));
+  }
+
+  private normalizeQuery(query: ChatPlayerFingerprintEventQuery): Required<Pick<ChatPlayerFingerprintEventQuery, 'order'>> &
+    Omit<ChatPlayerFingerprintEventQuery, 'order'> {
+    return {
+      ...query,
+      order: query.order ?? 'DESC',
+    };
+  }
+
+  private filterJournal(query: ChatPlayerFingerprintEventQuery): readonly ChatPlayerFingerprintEvent[] {
+    const normalized = this.normalizeQuery(query);
+    const playerIds = normalized.playerIds ? new Set(normalized.playerIds) : null;
+    const roomIds = normalized.roomIds ? new Set(normalized.roomIds.map((value) => this.normalizeRoomId(value))) : null;
+    const channelIds = normalized.channelIds
+      ? new Set(normalized.channelIds.map((value) => this.normalizeChannelId(value)))
+      : null;
+    const eventTypes = normalized.eventTypes ? new Set(normalized.eventTypes) : null;
+    const tags = normalized.tags ? new Set(normalized.tags.map((tag) => tag.trim().toLowerCase())) : null;
+
+    const filtered = this.journal.filter((event) => {
+      if (playerIds && !playerIds.has(event.playerId)) return false;
+      if (roomIds && !roomIds.has(this.normalizeRoomId(event.roomId))) return false;
+      if (channelIds && !channelIds.has(this.normalizeChannelId(event.channelId))) return false;
+      if (eventTypes && !eventTypes.has(event.eventType)) return false;
+      if (normalized.sinceMs != null && event.createdAt < normalized.sinceMs) return false;
+      if (normalized.untilMs != null && event.createdAt > normalized.untilMs) return false;
+      if (tags) {
+        const eventTags = new Set(this.normalizeTags(event.tags));
+        for (const tag of tags) {
+          if (!eventTags.has(tag)) return false;
+        }
+      }
+      return true;
+    });
+
+    const ordered = normalized.order === 'ASC' ? filtered : [...filtered].reverse();
+    if (normalized.limit == null) return ordered;
+    return ordered.slice(0, Math.max(1, normalized.limit));
+  }
+
+  private collectUnique(values: readonly string[]): readonly string[] {
+    return [...new Set(values)].sort();
+  }
+
+  private resolvePrimaryRoomId(events: readonly ChatPlayerFingerprintEvent[]): string | null {
+    const top = this.buildTopFrequency(events.flatMap((event) => (event.roomId ? [event.roomId] : [])), 1)[0];
+    return top ?? null;
+  }
+
+  private resolvePrimaryChannelId(events: readonly ChatPlayerFingerprintEvent[]): string | null {
+    const top = this.buildTopFrequency(events.flatMap((event) => (event.channelId ? [event.channelId] : [])), 1)[0];
+    return top ?? null;
+  }
+
+  private buildTopFrequency(values: readonly string[], limit: number): readonly string[] {
+    const counts = new Map<string, number>();
+    for (const value of values) {
+      const normalized = value.trim();
+      if (!normalized) continue;
+      counts.set(normalized, (counts.get(normalized) ?? 0) + 1);
+    }
+
+    return [...counts.entries()]
+      .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+      .slice(0, Math.max(1, limit))
+      .map(([value]) => value);
+  }
+
+  private computeRescuePriority(snapshot: ChatPlayerFingerprintSnapshot): number {
+    return clamp01(
+      snapshot.vector.tilt01 * 0.34 +
+        (1 - snapshot.vector.recoveryStrength01) * 0.26 +
+        (1 - snapshot.vector.comeback01) * 0.08 +
+        snapshot.vector.publicness01 * 0.08 +
+        snapshot.vector.riskAppetite01 * 0.08 +
+        (1 - snapshot.vector.procedureAwareness01) * 0.16,
+    );
+  }
+
+  private computeVolatilityScore(snapshot: ChatPlayerFingerprintSnapshot): number {
+    return clamp01(
+      snapshot.vector.impulsive01 * 0.18 +
+        snapshot.vector.bluff01 * 0.18 +
+        snapshot.vector.noveltySeeking01 * 0.16 +
+        snapshot.vector.tilt01 * 0.18 +
+        snapshot.vector.riskAppetite01 * 0.16 +
+        (1 - snapshot.vector.procedureAwareness01) * 0.14,
+    );
+  }
+
+  private computeObjectivePressureScore(objectives: readonly string[]): number {
+    const normalized = objectives.map((objective) => objective.trim().toUpperCase());
+    let score = 0;
+    if (normalized.includes('PRESSURE')) score += 0.24;
+    if (normalized.includes('HUMILIATE')) score += 0.2;
+    if (normalized.includes('PUBLIC_WITNESS')) score += 0.16;
+    if (normalized.includes('PROVOKE')) score += 0.14;
+    if (normalized.includes('NEGOTIATE')) score += 0.12;
+    if (normalized.includes('DELAY')) score += 0.08;
+    if (normalized.includes('STUDY')) score += 0.06;
+    return clamp01(score);
+  }
+
+  private replaySnapshot(
+    playerId: string,
+    events: readonly ChatPlayerFingerprintEvent[],
+  ): ChatPlayerFingerprintSnapshot {
+    const model = new ChatPlayerFingerprintModel({ tailSize: this.tailSize });
+    const filtered = events.filter((event) => event.playerId === playerId);
+    for (const event of filtered) {
+      model.observe(event);
+    }
+
+    if (filtered.length === 0) {
+      return model.getSnapshot(playerId);
+    }
+
+    return model.getSnapshot(playerId);
+  }
+
+  private computeAxisDelta(
+    before: ChatPlayerFingerprintVector,
+    after: ChatPlayerFingerprintVector,
+  ): Readonly<Record<ChatPlayerFingerprintAxisId, number>> {
+    return Object.freeze({
+      IMPULSIVE_VS_PATIENT: Number((after.impulsive01 - before.impulsive01).toFixed(6)),
+      GREED_VS_DEFENSE: Number((after.greed01 - before.greed01).toFixed(6)),
+      BLUFF_VS_LITERAL: Number((after.bluff01 - before.bluff01).toFixed(6)),
+      COMEBACK_VS_COLLAPSE: Number((after.comeback01 - before.comeback01).toFixed(6)),
+      PUBLIC_VS_PRIVATE: Number((after.publicness01 - before.publicness01).toFixed(6)),
+      PROCEDURE_AWARE_VS_CARELESS: Number((after.procedureAwareness01 - before.procedureAwareness01).toFixed(6)),
+      NOVELTY_SEEKING_VS_STABILITY: Number((after.noveltySeeking01 - before.noveltySeeking01).toFixed(6)),
+      TILT_VS_DISCIPLINE: Number((after.tilt01 - before.tilt01).toFixed(6)),
+      RISK_APPETITE: Number((after.riskAppetite01 - before.riskAppetite01).toFixed(6)),
+      RECOVERY_STRENGTH: Number((after.recoveryStrength01 - before.recoveryStrength01).toFixed(6)),
+    });
   }
 
   // ==========================================================================
