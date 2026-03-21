@@ -1,4 +1,3 @@
-
 /**
  * ============================================================================
  * POINT ZERO ONE — AUTHORITATIVE BACKEND CHAT DEALROOM NEGOTIATION REPUTATION POLICY
@@ -166,12 +165,53 @@ export interface NegotiationReputationRequest {
   readonly traceLabel?: string;
 }
 
+
+export interface NegotiationReputationEvidenceSummary {
+  readonly totalSignals: number;
+  readonly highConfidenceSignals: number;
+  readonly dominantSignalKind: string;
+  readonly leakSignal01: Score0To1;
+  readonly trustSignal01: Score0To1;
+  readonly aggressionSignal01: Score0To1;
+  readonly helperNeedSignal01: Score0To1;
+  readonly faceThreatSignal01: Score0To1;
+}
+
+export interface NegotiationReputationScorecard {
+  readonly trustLift100: Score0To100;
+  readonly trustDamage100: Score0To100;
+  readonly prestigeSwing100: Score0To100;
+  readonly rescuePriorityShift100: Score0To100;
+  readonly leakSeverity100: Score0To100;
+  readonly faceLoss100: Score0To100;
+  readonly faceRecovery100: Score0To100;
+  readonly stability100: Score0To100;
+  readonly socialVolatility100: Score0To100;
+}
+
+export interface NegotiationReputationOfferContext {
+  readonly counterOutcome: ChatOfferCounterOutcome;
+  readonly status: NegotiationStatus;
+  readonly offerCreatedAt?: UnixMs;
+  readonly offerUpdatedAt?: UnixMs;
+  readonly versionCreatedAt?: UnixMs;
+  readonly envelopeCreatedAt?: NegotiationUnixMs;
+  readonly offerAgeMs: number;
+  readonly visibleToAudience: boolean;
+  readonly visibleToPlayer: boolean;
+  readonly witnessPressure01: Score0To1;
+  readonly secrecyPressure01: Score0To1;
+  readonly envelopeCrowdHeat01: Score0To1;
+}
+
 export interface NegotiationReputationProjection {
   readonly projectionId: string;
   readonly roomId: ChatRoomId;
   readonly negotiationId: string;
   readonly projectedAt: NegotiationUnixMs;
   readonly eventKind: ReputationEventKind;
+  readonly negotiationStatus: NegotiationStatus;
+  readonly counterOutcome: ChatOfferCounterOutcome;
   readonly deltas: readonly ReputationDelta[];
   readonly actions: readonly ReputationPolicyAction[];
   readonly trustLift01: Score0To1;
@@ -182,6 +222,9 @@ export interface NegotiationReputationProjection {
   readonly faceLoss01: Score0To1;
   readonly faceRecovery01: Score0To1;
   readonly dominantPressure: string;
+  readonly scorecard: NegotiationReputationScorecard;
+  readonly offerContext: NegotiationReputationOfferContext;
+  readonly evidenceSummary: NegotiationReputationEvidenceSummary;
   readonly debug: JsonValue;
 }
 
@@ -246,9 +289,32 @@ export class NegotiationReputationPolicy {
     const negotiation = request.negotiation;
     const offer = request.offer ?? null;
     const priorOffer = request.priorOffer ?? null;
+    const negotiationStatus: NegotiationStatus = negotiation.status;
+    const offerEnvelope = resolveOfferEnvelope(negotiation);
+    const counterOutcome = resolveCounterOutcome(offer);
+    const evidenceSummary = summarizeEvidence(request.evidence);
+    const offerContext = createOfferContext({
+      now,
+      negotiation,
+      offer,
+      envelope: offerEnvelope,
+      counterOutcome,
+      status: negotiationStatus,
+    });
     const outcome = request.outcome ?? inferOutcomeFromResolution(request.resolution);
-    const eventKind = determineEventKind(negotiation, outcome, request.resolution, offer, request.latestLeakThreat);
-    const dominantPressure = negotiationInferDominantPressure(request.latestInference);
+    const eventKind = determineEventKind(
+      negotiation,
+      negotiationStatus,
+      outcome,
+      request.resolution,
+      offer,
+      counterOutcome,
+      request.latestLeakThreat,
+    );
+    const dominantPressure =
+      negotiationInferDominantPressure(request.latestInference) ??
+      inferDominantPressureFromEvidence(request.evidence) ??
+      'SYSTEM';
     const actorState = negotiationPrimaryActorState(negotiation, negotiation.parties.primary.actorId);
     const deltas: ReputationDelta[] = [];
     const actions: ReputationPolicyAction[] = [];
@@ -258,6 +324,10 @@ export class NegotiationReputationPolicy {
       offer,
       priorOffer,
       outcome,
+      negotiationStatus,
+      counterOutcome,
+      offerEnvelope,
+      evidenceSummary,
       latestLeakThreat: request.latestLeakThreat,
       latestInference: request.latestInference,
       options: this.options,
@@ -268,6 +338,10 @@ export class NegotiationReputationPolicy {
       offer,
       priorOffer,
       outcome,
+      negotiationStatus,
+      counterOutcome,
+      offerEnvelope,
+      evidenceSummary,
       options: this.options,
     });
 
@@ -277,12 +351,20 @@ export class NegotiationReputationPolicy {
       priorOffer,
       outcome,
       eventKind,
+      counterOutcome,
+      negotiationStatus,
+      offerEnvelope,
+      evidenceSummary,
     });
 
     const rescuePriorityShift01 = computeRescueShift01({
       negotiation,
       offer,
       outcome,
+      negotiationStatus,
+      counterOutcome,
+      offerEnvelope,
+      evidenceSummary,
       latestInference: request.latestInference,
       options: this.options,
     });
@@ -290,6 +372,10 @@ export class NegotiationReputationPolicy {
     const leakSeverity01 = computeLeakSeverity01({
       negotiation,
       offer,
+      negotiationStatus,
+      counterOutcome,
+      offerEnvelope,
+      evidenceSummary,
       latestLeakThreat: request.latestLeakThreat,
       options: this.options,
     });
@@ -300,6 +386,10 @@ export class NegotiationReputationPolicy {
       priorOffer,
       outcome,
       eventKind,
+      negotiationStatus,
+      counterOutcome,
+      offerEnvelope,
+      evidenceSummary,
       actorState,
     });
 
@@ -309,7 +399,22 @@ export class NegotiationReputationPolicy {
       priorOffer,
       outcome,
       eventKind,
+      negotiationStatus,
+      counterOutcome,
+      offerEnvelope,
+      evidenceSummary,
       actorState,
+    });
+
+    const scorecard = createScorecard({
+      trustLift01,
+      trustDamage01,
+      prestigeSwing01,
+      rescuePriorityShift01,
+      leakSeverity01,
+      faceLoss01,
+      faceRecovery01,
+      evidenceSummary,
     });
 
     deltas.push(...this.buildDealRoomDeltas({
@@ -387,6 +492,10 @@ export class NegotiationReputationPolicy {
       faceRecovery01,
       offer,
       outcome,
+      negotiationStatus,
+      counterOutcome,
+      offerContext,
+      evidenceSummary,
     }));
 
     const projection: NegotiationReputationProjection = {
@@ -395,6 +504,8 @@ export class NegotiationReputationPolicy {
       negotiationId: String(negotiation.negotiationId),
       projectedAt: now,
       eventKind,
+      negotiationStatus,
+      counterOutcome,
       deltas,
       actions,
       trustLift01: asScore0To1(trustLift01),
@@ -405,6 +516,9 @@ export class NegotiationReputationPolicy {
       faceLoss01: asScore0To1(faceLoss01),
       faceRecovery01: asScore0To1(faceRecovery01),
       dominantPressure,
+      scorecard,
+      offerContext,
+      evidenceSummary,
       debug: {
         outcome: outcome ?? null,
         latestOfferId: negotiationLatestOfferId(negotiation) ?? null,
@@ -413,6 +527,13 @@ export class NegotiationReputationPolicy {
         negotiationSupportsRescue: negotiationSupportsRescue(negotiation),
         negotiationHasLeakThreat: negotiationHasLeakThreat(negotiation),
         audiencePressure: negotiationHasAudiencePressure(negotiation),
+        envelopeVisibleToAudience: offerContext.visibleToAudience,
+        envelopeVisibleToPlayer: offerContext.visibleToPlayer,
+        counterOutcome,
+        negotiationStatus,
+        scorecard: serializeScorecard(scorecard),
+        offerContext: serializeOfferContext(offerContext),
+        evidenceSummary: serializeEvidenceSummary(evidenceSummary),
         traceLabel: request.traceLabel ?? null,
       },
     };
@@ -423,6 +544,8 @@ export class NegotiationReputationPolicy {
       roomId: request.roomId as unknown as string,
       negotiationId: String(negotiation.negotiationId),
       eventKind,
+      negotiationStatus,
+      counterOutcome,
       trustDamage01,
       trustLift01,
       prestigeSwing01,
@@ -430,6 +553,7 @@ export class NegotiationReputationPolicy {
       leakSeverity01,
       faceLoss01,
       faceRecovery01,
+      dominantPressure,
     });
 
     return projection;
@@ -631,40 +755,67 @@ export class NegotiationReputationPolicy {
     readonly faceRecovery01: number;
     readonly offer: ChatOffer | null;
     readonly outcome: NegotiationOutcome | null | undefined;
+    readonly negotiationStatus: NegotiationStatus;
+    readonly counterOutcome: ChatOfferCounterOutcome;
+    readonly offerContext: NegotiationReputationOfferContext;
+    readonly evidenceSummary: NegotiationReputationEvidenceSummary;
   }): readonly ReputationPolicyAction[] {
     const actions: ReputationPolicyAction[] = [];
 
-    if (input.leakSeverity01 > 0.42) {
+    if (input.leakSeverity01 > 0.42 || input.counterOutcome === 'LIKELY_LEAK' || input.negotiationStatus === 'LEAKED') {
       actions.push(action(
         'OPEN_WITNESS_THREAD',
-        input.leakSeverity01,
+        Math.max(input.leakSeverity01, Number(input.evidenceSummary.leakSignal01)),
         'Leak pressure is high enough to justify witness-thread follow-up.',
-        { leakSeverity01: input.leakSeverity01 },
+        {
+          leakSeverity01: input.leakSeverity01,
+          counterOutcome: input.counterOutcome,
+          status: input.negotiationStatus,
+        },
       ));
     } else {
       actions.push(action(
         'SUPPRESS_GLOBAL_LEAK',
         clamp01(1 - input.leakSeverity01),
         'Leak pressure is low enough to suppress unnecessary global spill.',
+        {
+          counterOutcome: input.counterOutcome,
+          visibleToAudience: input.offerContext.visibleToAudience,
+        },
       ));
     }
 
-    if (input.rescuePriorityShift01 > 0.34 || input.faceLoss01 > 0.5) {
+    if (
+      input.rescuePriorityShift01 > 0.34 ||
+      input.faceLoss01 > 0.5 ||
+      input.counterOutcome === 'LIKELY_RESCUE' ||
+      Number(input.evidenceSummary.helperNeedSignal01) > 0.44
+    ) {
       actions.push(action(
         'ENABLE_RESCUE_PRIORITY',
-        Math.max(input.rescuePriorityShift01, input.faceLoss01),
+        Math.max(input.rescuePriorityShift01, input.faceLoss01, Number(input.evidenceSummary.helperNeedSignal01)),
         'Negotiation outcome indicates rescue priority should increase.',
+        {
+          status: input.negotiationStatus,
+          counterOutcome: input.counterOutcome,
+        },
       ));
       actions.push(action(
         'BOOST_HELPER_ATTENTION',
-        Math.max(input.rescuePriorityShift01, input.faceLoss01),
+        Math.max(input.rescuePriorityShift01, input.faceLoss01, Number(input.evidenceSummary.helperNeedSignal01)),
         'Helper network should track this actor more aggressively.',
+        {
+          helperNeedSignal01: Number(input.evidenceSummary.helperNeedSignal01),
+        },
       ));
     } else if (input.faceRecovery01 > 0.44 && input.trustLift01 > 0.38) {
       actions.push(action(
         'REDUCE_RESCUE_PRIORITY',
         Math.max(input.faceRecovery01, input.trustLift01),
         'Recent recovery reduces immediate rescue urgency.',
+        {
+          negotiationStatus: input.negotiationStatus,
+        },
       ));
       actions.push(action(
         'DECREASE_HELPER_ATTENTION',
@@ -673,20 +824,33 @@ export class NegotiationReputationPolicy {
       ));
     }
 
-    if (input.faceLoss01 > 0.48 || input.leakSeverity01 > 0.44) {
+    if (
+      input.faceLoss01 > 0.48 ||
+      input.leakSeverity01 > 0.44 ||
+      input.counterOutcome === 'LIKELY_REJECT' ||
+      input.counterOutcome === 'LIKELY_COUNTER'
+    ) {
       actions.push(action(
         'INCREASE_RIVAL_FOCUS',
-        Math.max(input.faceLoss01, input.leakSeverity01),
-        'Rivals are likely to press further after visible weakness.',
+        Math.max(input.faceLoss01, input.leakSeverity01, Number(input.evidenceSummary.aggressionSignal01)),
+        'Rivals are likely to press further after visible weakness or a hard counter posture.',
+        {
+          counterOutcome: input.counterOutcome,
+          aggressionSignal01: Number(input.evidenceSummary.aggressionSignal01),
+        },
       ));
       actions.push(action(
         'ARCHIVE_FACE_LOSS',
-        input.faceLoss01,
+        Math.max(input.faceLoss01, Number(input.evidenceSummary.faceThreatSignal01)),
         'Archive face-loss memory for future callbacks.',
       ));
     }
 
-    if (input.faceRecovery01 > 0.42 || (input.outcome === 'ACCEPTED' && input.trustLift01 > 0.36)) {
+    if (
+      input.faceRecovery01 > 0.42 ||
+      (input.outcome === 'ACCEPTED' && input.trustLift01 > 0.36) ||
+      input.counterOutcome === 'LIKELY_ACCEPT'
+    ) {
       actions.push(action(
         'REDUCE_RIVAL_FOCUS',
         Math.max(input.faceRecovery01, input.trustLift01),
@@ -694,8 +858,28 @@ export class NegotiationReputationPolicy {
       ));
       actions.push(action(
         'ARCHIVE_FACE_RECOVERY',
-        input.faceRecovery01,
+        Math.max(input.faceRecovery01, input.trustLift01),
         'Archive face-recovery memory for later prestige callbacks.',
+        {
+          visibleToAudience: input.offerContext.visibleToAudience,
+          trustSignal01: Number(input.evidenceSummary.trustSignal01),
+        },
+      ));
+    }
+
+    if (
+      input.offer &&
+      chatOfferShouldTriggerHelperReview(input.offer) &&
+      input.counterOutcome !== 'LIKELY_ACCEPT'
+    ) {
+      actions.push(action(
+        'BOOST_HELPER_ATTENTION',
+        Math.max(input.rescuePriorityShift01, Number(input.evidenceSummary.helperNeedSignal01), 0.28),
+        'Offer semantics suggest helper review should remain hot.',
+        {
+          helperReview: true,
+          status: input.negotiationStatus,
+        },
       ));
     }
 
@@ -765,6 +949,10 @@ function computeTrustDamage01(input: {
   readonly offer: ChatOffer | null;
   readonly priorOffer: ChatOffer | null;
   readonly outcome: NegotiationOutcome | null | undefined;
+  readonly negotiationStatus: NegotiationStatus;
+  readonly counterOutcome: ChatOfferCounterOutcome;
+  readonly offerEnvelope: NegotiationOfferEnvelope | null;
+  readonly evidenceSummary: NegotiationReputationEvidenceSummary;
   readonly latestLeakThreat?: NegotiationLeakThreat | null;
   readonly latestInference?: NegotiationInferenceFrame | null;
   readonly options: Required<Omit<NegotiationReputationPolicyOptions, 'clock' | 'logger'>>;
@@ -776,11 +964,22 @@ function computeTrustDamage01(input: {
   const abandonment = input.outcome === 'WITHDRAWN' ? 0.34 : 0;
   const rejection = input.outcome === 'REJECTED' ? 0.2 : 0;
   const leak = input.outcome === 'LEAKED' ? 0.36 : 0;
+  const counterPenalty = counterOutcomeDamageModifier(input.counterOutcome);
+  const statusPenalty = statusInstabilityModifier(input.negotiationStatus);
+  const envelopeExposure = computeEnvelopeExposure01(input.offerEnvelope);
+  const evidencePenalty =
+    Number(input.evidenceSummary.leakSignal01) * 0.18 +
+    Number(input.evidenceSummary.faceThreatSignal01) * 0.12 +
+    Number(input.evidenceSummary.aggressionSignal01) * 0.08;
   return clamp01(
     (1 - offerTrust) * 0.34 * input.options.trustDamageMultiplier +
       hostility * 0.14 +
       leakPressure * 0.23 * input.options.leakDamageMultiplier +
       inferenceTrustBreak * 0.17 +
+      envelopeExposure * 0.11 +
+      evidencePenalty +
+      counterPenalty +
+      statusPenalty +
       abandonment +
       rejection +
       leak,
@@ -792,6 +991,10 @@ function computeTrustLift01(input: {
   readonly offer: ChatOffer | null;
   readonly priorOffer: ChatOffer | null;
   readonly outcome: NegotiationOutcome | null | undefined;
+  readonly negotiationStatus: NegotiationStatus;
+  readonly counterOutcome: ChatOfferCounterOutcome;
+  readonly offerEnvelope: NegotiationOfferEnvelope | null;
+  readonly evidenceSummary: NegotiationReputationEvidenceSummary;
   readonly options: Required<Omit<NegotiationReputationPolicyOptions, 'clock' | 'logger'>>;
 }): number {
   const trustProjection = input.offer ? Number(chatOfferProjectedTrustworthiness(input.offer)) : 0.48;
@@ -800,10 +1003,18 @@ function computeTrustLift01(input: {
   const acceptance = input.outcome === 'ACCEPTED' ? 0.18 : 0;
   const fairClose = input.outcome === 'ACCEPTED' ? 0.14 : 0;
   const helper = input.offer && chatOfferShouldTriggerHelperReview(input.offer) ? 0.06 : 0;
+  const counterSupport = counterOutcomeLiftModifier(input.counterOutcome);
+  const statusSupport = statusStabilityModifier(input.negotiationStatus);
+  const envelopeDiscipline = input.offerEnvelope && !input.offerEnvelope.channelContext.visibleToAudience ? 0.04 : 0;
+  const evidenceTrust = Number(input.evidenceSummary.trustSignal01) * 0.16;
   return clamp01(
     trustProjection * 0.38 +
       softness * 0.12 +
       clamp01(concessions / 4) * 0.16 +
+      counterSupport +
+      statusSupport +
+      envelopeDiscipline +
+      evidenceTrust +
       acceptance +
       fairClose +
       helper,
@@ -816,6 +1027,10 @@ function computePrestigeSwing01(input: {
   readonly priorOffer: ChatOffer | null;
   readonly outcome: NegotiationOutcome | null | undefined;
   readonly eventKind: ReputationEventKind;
+  readonly counterOutcome: ChatOfferCounterOutcome;
+  readonly negotiationStatus: NegotiationStatus;
+  readonly offerEnvelope: NegotiationOfferEnvelope | null;
+  readonly evidenceSummary: NegotiationReputationEvidenceSummary;
 }): number {
   const hostility = input.offer ? Number(chatOfferProjectedHostility(input.offer)) : 0.3;
   const witness = negotiationHasAudiencePressure(input.negotiation) ? 0.18 : 0.06;
@@ -823,13 +1038,21 @@ function computePrestigeSwing01(input: {
   const leak = input.outcome === 'LEAKED' ? -0.22 : 0;
   const faceLoss = input.eventKind === 'FACE_LOST' ? -0.18 : 0;
   const faceSave = input.eventKind === 'FACE_SAVED' ? 0.14 : 0;
-  return clamp01(Math.abs(hostility * 0.32 + witness + accepted + leak + faceLoss + faceSave));
+  const counterPrestige = counterOutcomePrestigeModifier(input.counterOutcome);
+  const statusPrestige = input.negotiationStatus === 'RESOLVED' ? 0.08 : input.negotiationStatus === 'LEAKED' ? -0.12 : 0;
+  const envelopeAudience = computeEnvelopeAudienceAmplifier(input.offerEnvelope) * 0.12;
+  const evidencePrestige = Number(input.evidenceSummary.aggressionSignal01) * 0.06 + Number(input.evidenceSummary.trustSignal01) * 0.04;
+  return clamp01(Math.abs(hostility * 0.32 + witness + accepted + leak + faceLoss + faceSave + counterPrestige + statusPrestige + envelopeAudience + evidencePrestige));
 }
 
 function computeRescueShift01(input: {
   readonly negotiation: ChatNegotiation;
   readonly offer: ChatOffer | null;
   readonly outcome: NegotiationOutcome | null | undefined;
+  readonly negotiationStatus: NegotiationStatus;
+  readonly counterOutcome: ChatOfferCounterOutcome;
+  readonly offerEnvelope: NegotiationOfferEnvelope | null;
+  readonly evidenceSummary: NegotiationReputationEvidenceSummary;
   readonly latestInference?: NegotiationInferenceFrame | null;
   readonly options: Required<Omit<NegotiationReputationPolicyOptions, 'clock' | 'logger'>>;
 }): number {
@@ -837,19 +1060,31 @@ function computeRescueShift01(input: {
   const helperReview = input.offer && chatOfferShouldTriggerHelperReview(input.offer) ? 0.12 : 0;
   const inference = input.latestInference ? Number(input.latestInference.risk.rescueNeed ?? asScore0To1(0)) : 0;
   const collapse = input.outcome === 'COLLAPSED' || input.outcome === 'WITHDRAWN' ? 0.18 : 0;
-  return clamp01((rescueSupport + helperReview + inference + collapse) * input.options.rescueGraceMultiplier);
+  const counterRescue = counterOutcomeRescueModifier(input.counterOutcome);
+  const statusRescue = input.negotiationStatus === 'FAILED' || input.negotiationStatus === 'ABANDONED' ? 0.12 : 0;
+  const evidenceRescue = Number(input.evidenceSummary.helperNeedSignal01) * 0.18;
+  const envelopeRescue = computeEnvelopeExposure01(input.offerEnvelope) * 0.08;
+  return clamp01((rescueSupport + helperReview + inference + collapse + counterRescue + statusRescue + evidenceRescue + envelopeRescue) * input.options.rescueGraceMultiplier);
 }
 
 function computeLeakSeverity01(input: {
   readonly negotiation: ChatNegotiation;
   readonly offer: ChatOffer | null;
+  readonly negotiationStatus: NegotiationStatus;
+  readonly counterOutcome: ChatOfferCounterOutcome;
+  readonly offerEnvelope: NegotiationOfferEnvelope | null;
+  readonly evidenceSummary: NegotiationReputationEvidenceSummary;
   readonly latestLeakThreat?: NegotiationLeakThreat | null;
   readonly options: Required<Omit<NegotiationReputationPolicyOptions, 'clock' | 'logger'>>;
 }): number {
   const leakThreat = input.latestLeakThreat ? Number(input.latestLeakThreat.severity.normalized) : (negotiationHasLeakThreat(input.negotiation) ? 0.34 : 0);
   const leakableOffer = input.offer && chatOfferCanLeak(input.offer) ? 0.24 : 0;
   const witness = negotiationHasAudiencePressure(input.negotiation) ? 0.12 : 0;
-  return clamp01((leakThreat + leakableOffer + witness) * input.options.leakDamageMultiplier);
+  const counterLeak = counterOutcomeLeakModifier(input.counterOutcome);
+  const statusLeak = input.negotiationStatus === 'LEAKED' ? 0.22 : input.negotiationStatus === 'EXPIRED' ? 0.04 : 0;
+  const envelopeLeak = computeEnvelopeAudienceAmplifier(input.offerEnvelope) * 0.16;
+  const evidenceLeak = Number(input.evidenceSummary.leakSignal01) * 0.24;
+  return clamp01((leakThreat + leakableOffer + witness + counterLeak + statusLeak + envelopeLeak + evidenceLeak) * input.options.leakDamageMultiplier);
 }
 
 function computeFaceLoss01(input: {
@@ -858,6 +1093,10 @@ function computeFaceLoss01(input: {
   readonly priorOffer: ChatOffer | null;
   readonly outcome: NegotiationOutcome | null | undefined;
   readonly eventKind: ReputationEventKind;
+  readonly negotiationStatus: NegotiationStatus;
+  readonly counterOutcome: ChatOfferCounterOutcome;
+  readonly offerEnvelope: NegotiationOfferEnvelope | null;
+  readonly evidenceSummary: NegotiationReputationEvidenceSummary;
   readonly actorState: NegotiationActorState | null | undefined;
 }): number {
   const hostility = input.offer ? Number(chatOfferProjectedHostility(input.offer)) : 0.25;
@@ -867,7 +1106,11 @@ function computeFaceLoss01(input: {
   const panic = input.actorState ? Number(input.actorState.emotion.frustration ?? asScore0To1(0)) * 0.18 : 0;
   const witness = negotiationHasAudiencePressure(input.negotiation) ? 0.18 : 0.08;
   const faceKind = input.eventKind === 'FACE_LOST' ? 0.22 : 0;
-  return clamp01(hostility * 0.14 + rejection + leak + abandonment + panic + witness + faceKind);
+  const counterLoss = counterOutcomeFaceLossModifier(input.counterOutcome);
+  const statusLoss = statusInstabilityModifier(input.negotiationStatus) * 0.35;
+  const evidenceLoss = Number(input.evidenceSummary.faceThreatSignal01) * 0.18 + Number(input.evidenceSummary.aggressionSignal01) * 0.06;
+  const envelopeLoss = computeEnvelopeAudienceAmplifier(input.offerEnvelope) * 0.08;
+  return clamp01(hostility * 0.14 + rejection + leak + abandonment + panic + witness + faceKind + counterLoss + statusLoss + evidenceLoss + envelopeLoss);
 }
 
 function computeFaceRecovery01(input: {
@@ -876,6 +1119,10 @@ function computeFaceRecovery01(input: {
   readonly priorOffer: ChatOffer | null;
   readonly outcome: NegotiationOutcome | null | undefined;
   readonly eventKind: ReputationEventKind;
+  readonly negotiationStatus: NegotiationStatus;
+  readonly counterOutcome: ChatOfferCounterOutcome;
+  readonly offerEnvelope: NegotiationOfferEnvelope | null;
+  readonly evidenceSummary: NegotiationReputationEvidenceSummary;
   readonly actorState: NegotiationActorState | null | undefined;
 }): number {
   const trust = input.offer ? Number(chatOfferProjectedTrustworthiness(input.offer)) : 0.42;
@@ -884,28 +1131,406 @@ function computeFaceRecovery01(input: {
   const settled = input.outcome === 'ACCEPTED' ? 0.18 : 0;
   const faceKind = input.eventKind === 'FACE_SAVED' ? 0.18 : 0;
   const confidence = input.actorState ? Number(input.actorState.emotion.confidence ?? asScore0To1(0)) * 0.12 : 0;
-  return clamp01(trust * 0.18 + softness * 0.1 + accepted + settled + faceKind + confidence);
+  const counterRecovery = counterOutcomeFaceRecoveryModifier(input.counterOutcome);
+  const statusRecovery = statusStabilityModifier(input.negotiationStatus) * 0.5;
+  const evidenceRecovery = Number(input.evidenceSummary.trustSignal01) * 0.14 + Number(input.evidenceSummary.helperNeedSignal01) * 0.04;
+  const envelopeRecovery = input.offerEnvelope && !input.offerEnvelope.channelContext.visibleToAudience ? 0.04 : 0;
+  return clamp01(trust * 0.18 + softness * 0.1 + accepted + settled + faceKind + confidence + counterRecovery + statusRecovery + evidenceRecovery + envelopeRecovery);
 }
 
 function determineEventKind(
   negotiation: ChatNegotiation,
+  negotiationStatus: NegotiationStatus,
   outcome: NegotiationOutcome | null | undefined,
   resolution: NegotiationResolution | null | undefined,
   offer: ChatOffer | null,
+  counterOutcome: ChatOfferCounterOutcome,
   latestLeakThreat?: NegotiationLeakThreat | null,
 ): ReputationEventKind {
-  if (outcome === 'LEAKED') return 'LEAKED';
-  if (outcome === 'WITHDRAWN') return 'ABANDONED';
+  if (resolution?.leakOccurred || negotiationStatus === 'LEAKED' || outcome === 'LEAKED') return 'LEAKED';
+  if (resolution?.rescueOccurred || outcome === 'RESCUED') return 'RESCUED';
+  if (negotiationStatus === 'EXPIRED' || outcome === 'TIMED_OUT') return 'EXPIRED';
+  if (negotiationStatus === 'ABANDONED' || outcome === 'WITHDRAWN') return 'ABANDONED';
   if (outcome === 'REJECTED') return 'REJECTED';
+  if (outcome === 'ACCEPTED' && counterOutcome === 'LIKELY_ACCEPT') return 'FAIR_CLOSE';
   if (outcome === 'ACCEPTED') return 'ACCEPTED';
-  if (outcome === 'FACE_SAVED') return 'FAIR_CLOSE';
+  if (outcome === 'FACE_SAVED') return 'FACE_SAVED';
+  if (counterOutcome === 'LIKELY_COUNTER') return 'COUNTERPUNCHED';
+  if (counterOutcome === 'LIKELY_RESCUE') return offer && chatOfferShouldTriggerHelperReview(offer) ? 'HELPER_VALIDATED' : 'HELPER_IGNORED';
   if (offer && chatOfferShouldTriggerHelperReview(offer)) return 'HELPER_VALIDATED';
+  if (counterOutcome === 'LIKELY_LEAK') return 'PRESSURED';
   if (latestLeakThreat && Number(latestLeakThreat.severity.normalized) > 0.44) return 'PRESSURED';
   if (negotiationHasLeakThreat(negotiation)) return 'PRESSURED';
   return 'OPENED';
 }
 
+function resolveOfferEnvelope(negotiation: ChatNegotiation): NegotiationOfferEnvelope | null {
+  return negotiation.activeOffer ?? negotiation.scene.currentOffer ?? null;
+}
+
+function resolveCounterOutcome(offer: ChatOffer | null): ChatOfferCounterOutcome {
+  return offer?.counterRead?.likelyOutcome ?? 'NONE';
+}
+
+function summarizeEvidence(
+  evidence?: readonly NegotiationSignalEvidence[] | null,
+): NegotiationReputationEvidenceSummary {
+  const signals = evidence ?? [];
+  let leakSignal = 0;
+  let trustSignal = 0;
+  let aggressionSignal = 0;
+  let helperNeedSignal = 0;
+  let faceThreatSignal = 0;
+  let highConfidenceSignals = 0;
+  let dominantSignalKind = 'NONE';
+  let dominantSignalScore = -1;
+
+  for (const signal of signals) {
+    const score = Number(signal.score.normalized);
+    const confidence = Number(signal.confidence.normalized);
+    if (confidence >= 0.66) {
+      highConfidenceSignals += 1;
+    }
+    if (score > dominantSignalScore) {
+      dominantSignalScore = score;
+      dominantSignalKind = signal.kind;
+    }
+    switch (signal.kind) {
+      case 'LEAK_RISK':
+        leakSignal = Math.max(leakSignal, score);
+        break;
+      case 'TRUST_SIGNAL':
+        trustSignal = Math.max(trustSignal, score);
+        break;
+      case 'AGGRESSION':
+      case 'DOMINANCE_PLAY':
+        aggressionSignal = Math.max(aggressionSignal, score);
+        break;
+      case 'HELPER_NEED':
+      case 'CHURN_RISK':
+        helperNeedSignal = Math.max(helperNeedSignal, score);
+        break;
+      case 'FACE_THREAT':
+      case 'REPUTATION_RISK':
+        faceThreatSignal = Math.max(faceThreatSignal, score);
+        break;
+      default:
+        break;
+    }
+  }
+
+  return {
+    totalSignals: signals.length,
+    highConfidenceSignals,
+    dominantSignalKind,
+    leakSignal01: asScore0To1(clamp01(leakSignal)),
+    trustSignal01: asScore0To1(clamp01(trustSignal)),
+    aggressionSignal01: asScore0To1(clamp01(aggressionSignal)),
+    helperNeedSignal01: asScore0To1(clamp01(helperNeedSignal)),
+    faceThreatSignal01: asScore0To1(clamp01(faceThreatSignal)),
+  };
+}
+
+function createOfferContext(input: {
+  readonly now: NegotiationUnixMs;
+  readonly negotiation: ChatNegotiation;
+  readonly offer: ChatOffer | null;
+  readonly envelope: NegotiationOfferEnvelope | null;
+  readonly counterOutcome: ChatOfferCounterOutcome;
+  readonly status: NegotiationStatus;
+}): NegotiationReputationOfferContext {
+  const witnessPressure = input.envelope ? Number(input.envelope.channelContext.witnessPressure) : (negotiationHasAudiencePressure(input.negotiation) ? 0.6 : 0);
+  const secrecyPressure = input.envelope ? Number(input.envelope.channelContext.secrecyPressure) : 0;
+  const crowdHeat = input.envelope ? Number(input.envelope.channelContext.crowdHeat ?? asScore0To1(0)) : 0;
+  const latestOfferAt = input.offer ? latestOfferTimestamp(input.offer) : undefined;
+  return {
+    counterOutcome: input.counterOutcome,
+    status: input.status,
+    offerCreatedAt: input.offer?.createdAt,
+    offerUpdatedAt: input.offer?.updatedAt,
+    versionCreatedAt: input.offer?.currentVersion.createdAt,
+    envelopeCreatedAt: input.envelope?.createdAt,
+    offerAgeMs: computeOfferAgeMs(input.now, latestOfferAt),
+    visibleToAudience: input.envelope?.channelContext.visibleToAudience ?? negotiationHasAudiencePressure(input.negotiation),
+    visibleToPlayer: input.envelope?.channelContext.visibleToPlayer ?? true,
+    witnessPressure01: asScore0To1(clamp01(witnessPressure)),
+    secrecyPressure01: asScore0To1(clamp01(secrecyPressure)),
+    envelopeCrowdHeat01: asScore0To1(clamp01(crowdHeat)),
+  };
+}
+
+function createScorecard(input: {
+  readonly trustLift01: number;
+  readonly trustDamage01: number;
+  readonly prestigeSwing01: number;
+  readonly rescuePriorityShift01: number;
+  readonly leakSeverity01: number;
+  readonly faceLoss01: number;
+  readonly faceRecovery01: number;
+  readonly evidenceSummary: NegotiationReputationEvidenceSummary;
+}): NegotiationReputationScorecard {
+  const socialVolatility01 = Math.max(
+    input.leakSeverity01,
+    input.faceLoss01,
+    Number(input.evidenceSummary.faceThreatSignal01),
+    Number(input.evidenceSummary.aggressionSignal01),
+  );
+  const stability01 = clamp01(1 - Math.max(input.trustDamage01, input.leakSeverity01, input.faceLoss01));
+  return {
+    trustLift100: percentageFrom01(input.trustLift01),
+    trustDamage100: percentageFrom01(input.trustDamage01),
+    prestigeSwing100: percentageFrom01(input.prestigeSwing01),
+    rescuePriorityShift100: percentageFrom01(input.rescuePriorityShift01),
+    leakSeverity100: percentageFrom01(input.leakSeverity01),
+    faceLoss100: percentageFrom01(input.faceLoss01),
+    faceRecovery100: percentageFrom01(input.faceRecovery01),
+    stability100: percentageFrom01(stability01),
+    socialVolatility100: percentageFrom01(socialVolatility01),
+  };
+}
+
+function inferDominantPressureFromEvidence(
+  evidence?: readonly NegotiationSignalEvidence[] | null,
+): string | undefined {
+  const dominantSignalKind = summarizeEvidence(evidence).dominantSignalKind;
+  switch (dominantSignalKind) {
+    case 'LEAK_RISK':
+      return 'LEAK';
+    case 'HELPER_NEED':
+    case 'CHURN_RISK':
+      return 'RESCUE';
+    case 'URGENCY':
+    case 'STALL':
+      return 'TIME';
+    case 'ANCHOR_FORCE':
+    case 'OVERPAY_RISK':
+    case 'UNDERBID_RISK':
+      return 'PRICE';
+    case 'TRUST_SIGNAL':
+      return 'MEMORY';
+    case 'AGGRESSION':
+    case 'DOMINANCE_PLAY':
+      return 'RIVAL';
+    case 'FACE_THREAT':
+    case 'REPUTATION_RISK':
+      return 'AUDIENCE';
+    default:
+      return undefined;
+  }
+}
+
+function counterOutcomeDamageModifier(counterOutcome: ChatOfferCounterOutcome): number {
+  switch (counterOutcome) {
+    case 'LIKELY_REJECT':
+      return 0.14;
+    case 'LIKELY_STALL':
+      return 0.08;
+    case 'LIKELY_LEAK':
+      return 0.18;
+    case 'LIKELY_RESCUE':
+      return 0.06;
+    default:
+      return 0;
+  }
+}
+
+function counterOutcomeLiftModifier(counterOutcome: ChatOfferCounterOutcome): number {
+  switch (counterOutcome) {
+    case 'LIKELY_ACCEPT':
+      return 0.18;
+    case 'LIKELY_COUNTER':
+      return 0.07;
+    case 'LIKELY_RESCUE':
+      return 0.03;
+    default:
+      return 0;
+  }
+}
+
+function counterOutcomePrestigeModifier(counterOutcome: ChatOfferCounterOutcome): number {
+  switch (counterOutcome) {
+    case 'LIKELY_ACCEPT':
+      return 0.12;
+    case 'LIKELY_COUNTER':
+      return 0.08;
+    case 'LIKELY_REJECT':
+      return -0.06;
+    case 'LIKELY_LEAK':
+      return -0.16;
+    case 'LIKELY_RESCUE':
+      return 0.04;
+    case 'LIKELY_STALL':
+      return -0.04;
+    default:
+      return 0;
+  }
+}
+
+function counterOutcomeRescueModifier(counterOutcome: ChatOfferCounterOutcome): number {
+  switch (counterOutcome) {
+    case 'LIKELY_RESCUE':
+      return 0.18;
+    case 'LIKELY_LEAK':
+      return 0.06;
+    default:
+      return 0;
+  }
+}
+
+function counterOutcomeLeakModifier(counterOutcome: ChatOfferCounterOutcome): number {
+  switch (counterOutcome) {
+    case 'LIKELY_LEAK':
+      return 0.2;
+    case 'LIKELY_STALL':
+      return 0.05;
+    default:
+      return 0;
+  }
+}
+
+function counterOutcomeFaceLossModifier(counterOutcome: ChatOfferCounterOutcome): number {
+  switch (counterOutcome) {
+    case 'LIKELY_REJECT':
+      return 0.18;
+    case 'LIKELY_LEAK':
+      return 0.22;
+    case 'LIKELY_COUNTER':
+      return 0.1;
+    default:
+      return 0;
+  }
+}
+
+function counterOutcomeFaceRecoveryModifier(counterOutcome: ChatOfferCounterOutcome): number {
+  switch (counterOutcome) {
+    case 'LIKELY_ACCEPT':
+      return 0.18;
+    case 'LIKELY_COUNTER':
+      return 0.08;
+    case 'LIKELY_RESCUE':
+      return 0.06;
+    default:
+      return 0;
+  }
+}
+
+function statusInstabilityModifier(status: NegotiationStatus): number {
+  switch (status) {
+    case 'FAILED':
+      return 0.18;
+    case 'ABANDONED':
+      return 0.16;
+    case 'EXPIRED':
+      return 0.12;
+    case 'LEAKED':
+      return 0.22;
+    case 'HARD_LOCKED':
+      return 0.08;
+    case 'SOFT_LOCKED':
+      return 0.05;
+    default:
+      return 0;
+  }
+}
+
+function statusStabilityModifier(status: NegotiationStatus): number {
+  switch (status) {
+    case 'RESOLVED':
+      return 0.12;
+    case 'ACTIVE':
+      return 0.04;
+    case 'OPEN':
+      return 0.02;
+    default:
+      return 0;
+  }
+}
+
+function computeEnvelopeExposure01(envelope: NegotiationOfferEnvelope | null): number {
+  if (!envelope) {
+    return 0;
+  }
+  return clamp01(
+    Number(envelope.channelContext.witnessPressure) * 0.45 +
+      Number(envelope.channelContext.secrecyPressure) * 0.2 +
+      Number(envelope.channelContext.crowdHeat ?? asScore0To1(0)) * 0.2 +
+      (envelope.channelContext.visibleToAudience ? 0.15 : 0),
+  );
+}
+
+function computeEnvelopeAudienceAmplifier(envelope: NegotiationOfferEnvelope | null): number {
+  if (!envelope) {
+    return 0;
+  }
+  return clamp01(
+    Number(envelope.channelContext.witnessPressure) * 0.5 +
+      Number(envelope.channelContext.crowdHeat ?? asScore0To1(0)) * 0.35 +
+      (envelope.channelContext.visibleToAudience ? 0.15 : 0),
+  );
+}
+
+function latestOfferTimestamp(offer: ChatOffer): UnixMs {
+  return offer.updatedAt ?? offer.createdAt;
+}
+
+function computeOfferAgeMs(now: NegotiationUnixMs, createdAt?: UnixMs): number {
+  if (!createdAt) {
+    return 0;
+  }
+  return Math.max(0, Number(now) - Number(createdAt));
+}
+
+function percentageFrom01(value: number): Score0To100 {
+  return asScore0To100(Math.round(clamp01(value) * 100));
+}
+
+
+function serializeScorecard(scorecard: NegotiationReputationScorecard): JsonValue {
+  return {
+    trustLift100: Number(scorecard.trustLift100),
+    trustDamage100: Number(scorecard.trustDamage100),
+    prestigeSwing100: Number(scorecard.prestigeSwing100),
+    rescuePriorityShift100: Number(scorecard.rescuePriorityShift100),
+    leakSeverity100: Number(scorecard.leakSeverity100),
+    faceLoss100: Number(scorecard.faceLoss100),
+    faceRecovery100: Number(scorecard.faceRecovery100),
+    stability100: Number(scorecard.stability100),
+    socialVolatility100: Number(scorecard.socialVolatility100),
+  };
+}
+
+function serializeOfferContext(context: NegotiationReputationOfferContext): JsonValue {
+  return {
+    counterOutcome: context.counterOutcome,
+    status: context.status,
+    offerCreatedAt: context.offerCreatedAt === undefined ? null : Number(context.offerCreatedAt),
+    offerUpdatedAt: context.offerUpdatedAt === undefined ? null : Number(context.offerUpdatedAt),
+    versionCreatedAt: context.versionCreatedAt === undefined ? null : Number(context.versionCreatedAt),
+    envelopeCreatedAt: context.envelopeCreatedAt === undefined ? null : Number(context.envelopeCreatedAt),
+    offerAgeMs: context.offerAgeMs,
+    visibleToAudience: context.visibleToAudience,
+    visibleToPlayer: context.visibleToPlayer,
+    witnessPressure01: Number(context.witnessPressure01),
+    secrecyPressure01: Number(context.secrecyPressure01),
+    envelopeCrowdHeat01: Number(context.envelopeCrowdHeat01),
+  };
+}
+
+function serializeEvidenceSummary(summary: NegotiationReputationEvidenceSummary): JsonValue {
+  return {
+    totalSignals: summary.totalSignals,
+    highConfidenceSignals: summary.highConfidenceSignals,
+    dominantSignalKind: summary.dominantSignalKind,
+    leakSignal01: Number(summary.leakSignal01),
+    trustSignal01: Number(summary.trustSignal01),
+    aggressionSignal01: Number(summary.aggressionSignal01),
+    helperNeedSignal01: Number(summary.helperNeedSignal01),
+    faceThreatSignal01: Number(summary.faceThreatSignal01),
+  };
+}
+
 function inferOutcomeFromResolution(
+
   resolution?: NegotiationResolution | null,
 ): NegotiationOutcome | null {
   if (!resolution) return null;
@@ -1011,3 +1636,8 @@ function freezeReputationLedger(
     lastUpdatedAt: ledger.lastUpdatedAt,
   };
 }
+
+
+
+
+
