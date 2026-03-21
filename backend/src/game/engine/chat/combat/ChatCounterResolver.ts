@@ -164,6 +164,26 @@ export interface ChatCounterSourceContext {
   readonly notes?: readonly string[];
 }
 
+
+export interface ChatCounterRuntimeContext {
+  readonly windowId: ChatCounterWindowId;
+  readonly sessionId: ChatSessionId;
+  readonly sourceMessageId: Nullable<ChatMessageId>;
+  readonly attackType: AttackType;
+  readonly validationStatus: ChatCounterValidationStatus;
+  readonly assignedBotId: Nullable<BotId>;
+  readonly audienceHeat: Nullable<ChatAudienceHeat>;
+  readonly inference: Nullable<ChatInferenceSnapshot>;
+  readonly learningProfile: Nullable<ChatLearningProfile>;
+  readonly confidenceScore100: Score100;
+  readonly pressureScore100: Score100;
+  readonly witnessScore100: Score100;
+  readonly rescueScore100: Score100;
+  readonly notes: readonly string[];
+}
+
+type CounterplayAttackType = ChatCounterWindow['sourceAttackType'];
+
 export interface ChatCounterWindowSeed {
   readonly fight: ChatBossFightPlan;
   readonly round: ChatBossRound;
@@ -208,6 +228,7 @@ export interface ChatCounterPlanResult {
   readonly window: ChatCounterWindow;
   readonly signal: ChatCounterSignalSnapshot;
   readonly actor: ChatCounterActorSnapshot;
+  readonly context: ChatCounterRuntimeContext;
   readonly generatedMoves: readonly ChatCounterMove[];
   readonly plan: ChatCounterplayPlan;
   readonly bestCandidate?: ChatCounterCandidate | null;
@@ -218,6 +239,7 @@ export interface ChatCounterPlanResult {
 export interface ChatCounterResolveResult {
   readonly ledger: ChatCounterplayLedger;
   readonly plan: ChatCounterplayPlan;
+  readonly context: ChatCounterRuntimeContext;
   readonly chosenCandidate?: ChatCounterCandidate | null;
   readonly resolution: ChatCounterplayResolution;
   readonly forcedClose: boolean;
@@ -570,7 +592,7 @@ export class ChatCounterResolver {
   public plan(request: ChatCounterPlanRequest): ChatCounterPlanResult {
     const now = request.source.now ?? this.now();
     const ledger = request.ledger ?? this.createEmptyLedger(request.source.room.roomId, request.source.room.activeVisibleChannel, now);
-    const window = this.createWindow({
+    let window = this.createWindow({
       fight: request.fight,
       round: request.round,
       binding: request.binding,
@@ -579,6 +601,8 @@ export class ChatCounterResolver {
 
     const actor = this.createActorSnapshot(request.source);
     const signal = this.createSignalSnapshot(request.source, request.fight, request.round, window);
+    const context = this.createRuntimeContext(request.source, request.fight, request.round, window, signal);
+    window = this.applyRuntimeContextToWindow(window, context);
     const helperSuggested = Boolean(request.forceHelperSuggestion || shouldForceHelperSuggestion(request.source, signal));
     const generatedMoves = this.generateMoves({
       source: request.source,
@@ -591,14 +615,20 @@ export class ChatCounterResolver {
     });
 
     const candidates = generatedMoves.map((move) =>
-      buildCounterCandidate(
+      this.decorateCandidate(
+        buildCounterCandidate(
+          window,
+          move,
+          signal,
+          now,
+          actor,
+          'BACKEND_AUTHORITATIVE',
+          (`pattern:${request.fight.pattern.patternId}:${request.round.attack.attackClass}`) as any,
+        ),
         window,
         move,
         signal,
-        now,
-        actor,
-        'BACKEND_AUTHORITATIVE',
-        (`pattern:${request.fight.pattern.patternId}:${request.round.attack.attackClass}`) as any,
+        context,
       ),
     );
 
@@ -619,6 +649,8 @@ export class ChatCounterResolver {
         fightId: request.fight.bossFightId,
         roundId: request.round.roundId,
         attackClass: request.round.attack.attackClass,
+        validationStatus: context.validationStatus,
+        assignedBotId: context.assignedBotId,
       }),
     );
 
@@ -630,6 +662,10 @@ export class ChatCounterResolver {
       rankedCount: ranked.length,
       bestCounterplayId: bestCandidate?.counterplayId ?? null,
       helperSuggested,
+      validationStatus: context.validationStatus,
+      assignedBotId: context.assignedBotId ?? null,
+      confidenceScore100: context.confidenceScore100,
+      pressureScore100: context.pressureScore100,
     });
 
     return {
@@ -637,6 +673,7 @@ export class ChatCounterResolver {
       window,
       signal,
       actor,
+      context,
       generatedMoves,
       plan,
       bestCandidate,
@@ -646,6 +683,12 @@ export class ChatCounterResolver {
         helperSuggested,
         bestScore01: bestCandidate?.score01 ?? null,
         bestValidationStatus: bestCandidate?.validationStatus ?? null,
+        validationStatus: context.validationStatus,
+        assignedBotId: context.assignedBotId ?? null,
+        sourceMessageId: context.sourceMessageId ?? null,
+        confidenceScore100: context.confidenceScore100,
+        pressureScore100: context.pressureScore100,
+        witnessScore100: context.witnessScore100,
       }),
     };
   }
@@ -653,12 +696,14 @@ export class ChatCounterResolver {
   public resolve(request: ChatCounterResolveRequest): ChatCounterResolveResult {
     const now = request.source.now ?? this.now();
     const actor = this.createActorSnapshot(request.source);
-    const signal = this.createSignalSnapshot(request.source, request.fight, request.round, this.createWindow({
+    const baseWindow = this.createWindow({
       fight: request.fight,
       round: request.round,
       binding: request.binding,
       source: request.source,
-    }));
+    });
+    const signal = this.createSignalSnapshot(request.source, request.fight, request.round, baseWindow);
+    const context = this.createRuntimeContext(request.source, request.fight, request.round, baseWindow, signal);
 
     const chosenCandidate = this.selectCandidateForResolution({
       plan: request.plan,
@@ -684,11 +729,15 @@ export class ChatCounterResolver {
       efficacyBand: resolution.efficacyBand,
       chosenCounterplayId: chosenCandidate?.counterplayId ?? null,
       forcedClose,
+      validationStatus: context.validationStatus,
+      assignedBotId: context.assignedBotId ?? null,
+      pressureScore100: context.pressureScore100,
     });
 
     return {
       ledger: nextLedger,
       plan: request.plan,
+      context,
       chosenCandidate,
       resolution,
       forcedClose,
@@ -698,6 +747,10 @@ export class ChatCounterResolver {
         chosenValidationStatus: chosenCandidate?.validationStatus ?? null,
         reputationDeltaScore: resolution.reputationDeltaScore,
         legendQualified: resolution.legendQualified,
+        validationStatus: context.validationStatus,
+        sourceMessageId: context.sourceMessageId ?? null,
+        sessionId: context.sessionId,
+        confidenceScore100: context.confidenceScore100,
       }),
     };
   }
@@ -726,18 +779,24 @@ export class ChatCounterResolver {
     const baseWindowMs = deriveBaseWindowMs(seed.round.attack, this.policy);
     const closesAt = asUnixMs(Number(openedAt) + baseWindowMs);
     const idealResponseAt = deriveIdealResponseAt(openedAt, closesAt, seed.round.attack);
+    const windowId: ChatCounterWindowId = seed.binding.windowId;
+    const sessionId: ChatSessionId = seed.source.session.identity.sessionId;
+    const sourceMessageId: Nullable<ChatMessageId> = coerceMessageId(seed.source.sourceMessage?.id ?? null);
+    const sourceAttackType: AttackType = mapAttackType(seed.round.attack.attackType);
+    const counterplayAttackType: CounterplayAttackType = mapCounterplayAttackType(sourceAttackType);
+    const validationStatus: ChatCounterValidationStatus = 'UNVALIDATED';
 
     return {
-      windowId: seed.binding.windowId,
+      windowId,
       roomId: seed.source.room.roomId,
-      sessionId: seed.source.session.identity.sessionId,
+      sessionId,
       requestId: seed.fight.requestId ?? null,
       channelId: seed.fight.channelId,
-      sourceMessageId: seed.source.sourceMessage?.id ?? null,
+      sourceMessageId,
       sourceMomentId: seed.fight.momentId ?? null,
       sourceSceneId: seed.fight.sceneId ?? null,
       sourceTick: null,
-      sourceAttackType: mapAttackType(seed.round.attack.attackType),
+      sourceAttackType: counterplayAttackType,
       sourceMomentType: seed.fight.pattern.momentTypeHint ?? null,
       sourceSceneArchetype: seed.fight.pattern.preferredSceneArchetype ?? null,
       sourceSceneRole: seed.fight.pattern.preferredSceneRole ?? null,
@@ -746,7 +805,7 @@ export class ChatCounterResolver {
       closesAt,
       idealResponseAt,
       timingClass: mapCounterTiming(seed.round.attack.preferredCounterTiming),
-      validationStatus: 'UNVALIDATED',
+      validationStatus,
       preferredDeliveryPriority: 'HIGH' as any,
       playerVisible: isVisibleChannelId(seed.fight.visibleChannel),
       requiresVisibleReply: seed.round.attack.counterDemands.includes('VISIBLE_REPLY'),
@@ -771,6 +830,8 @@ export class ChatCounterResolver {
     window: ChatCounterWindow,
   ): ChatCounterSignalSnapshot {
     const now = source.now ?? this.now();
+    const sourceAttackType: AttackType = mapAttackType(round.attack.attackType);
+    const counterplayAttackType: CounterplayAttackType = mapCounterplayAttackType(sourceAttackType);
     const affect = selectAffect(source.state, source.session.identity.userId);
     const relationship = selectPrimaryRelationship(source.state, source.room.roomId, source.session.identity.userId, fight.boss.actorId);
     const publicWitness01 = deriveWitness01(source.state, source.room.roomId, source.room.activeVisibleChannel);
@@ -788,7 +849,7 @@ export class ChatCounterResolver {
       roomId: source.room.roomId,
       channelId: window.channelId,
       signalAt: now,
-      attackType: mapAttackType(round.attack.attackType),
+      attackType: counterplayAttackType,
       pressureTier: mapPressureTier(source.signal?.battle?.pressureTier ?? null),
       affect: mapAffectToContract(affect),
       reputation: null,
@@ -824,6 +885,96 @@ export class ChatCounterResolver {
       confidenceScore: toContractScore100(Number(affect?.confidence01 ?? 0.5) * 100),
       intimidationScore: toContractScore100(Number(affect?.intimidation01 ?? 0.25) * 100),
       embarrassmentScore: toContractScore100(Number(affect?.embarrassment01 ?? 0.25) * 100),
+    };
+  }
+
+
+  public createRuntimeContext(
+    source: ChatCounterSourceContext,
+    fight: ChatBossFightPlan,
+    round: ChatBossRound,
+    window: ChatCounterWindow,
+    signal: ChatCounterSignalSnapshot,
+  ): ChatCounterRuntimeContext {
+    const learningProfile = selectLearningProfile(source.state, source.session.identity.userId);
+    const audienceHeat = selectAudienceHeat(source, signal);
+    const inference = selectInferenceSnapshot(source);
+    const assignedBotId = selectAssignedBotId(source);
+    const validationStatus = deriveWindowValidationStatus(window, signal, source);
+    const confidenceScore100: Score100 = clamp100(Number(signal.affect?.confidence ?? 0.5) * 100);
+    const pressureScore100: Score100 = clamp100(score01To100(Number(signal.closeWindowRisk01)));
+    const witnessScore100: Score100 = clamp100(score01To100(Number(signal.publicWitness01)));
+    const rescueScore100: Score100 = clamp100(score01To100(Number(signal.helperNeed01)));
+    const sourceMessageId: Nullable<ChatMessageId> = coerceMessageId(source.sourceMessage?.id ?? null);
+    const sessionId: ChatSessionId = source.session.identity.sessionId;
+    const windowId: ChatCounterWindowId = window.windowId;
+    const attackType: AttackType = mapAttackType(round.attack.attackType);
+
+    return {
+      windowId,
+      sessionId,
+      sourceMessageId,
+      attackType,
+      validationStatus,
+      assignedBotId,
+      audienceHeat,
+      inference,
+      learningProfile,
+      confidenceScore100,
+      pressureScore100,
+      witnessScore100,
+      rescueScore100,
+      notes: Object.freeze([
+        `fight=${fight.bossFightId}`,
+        `round=${round.roundId}`,
+        `validation=${validationStatus}`,
+        assignedBotId ? `bot=${assignedBotId}` : 'bot=none',
+        sourceMessageId ? `message=${sourceMessageId}` : 'message=none',
+      ]),
+    };
+  }
+
+  public applyRuntimeContextToWindow(
+    window: ChatCounterWindow,
+    context: ChatCounterRuntimeContext,
+  ): ChatCounterWindow {
+    return {
+      ...window,
+      validationStatus: context.validationStatus,
+      notes: Object.freeze([
+        ...window.notes,
+        ...context.notes,
+      ]),
+    };
+  }
+
+  public decorateCandidate(
+    candidate: ChatCounterCandidate,
+    window: ChatCounterWindow,
+    move: ChatCounterMove,
+    signal: ChatCounterSignalSnapshot,
+    context: ChatCounterRuntimeContext,
+  ): ChatCounterCandidate {
+    const validationStatus = deriveCandidateValidationStatus(window, move, signal, context);
+    const validationBonus = validationStatus === 'AUTHORITATIVE_ACCEPT'
+      ? 0.04
+      : validationStatus === 'WINDOW_OPEN'
+        ? 0.02
+        : 0;
+    const adjustedScore01 = clamp01(Number(candidate.score01) + validationBonus);
+    const adjustedRiskScore01 = clamp01(Number(candidate.riskAdjustedScore01) + validationBonus * 0.75);
+
+    return {
+      ...candidate,
+      validationStatus,
+      score01: toContractScore01(adjustedScore01),
+      riskAdjustedScore01: toContractScore01(adjustedRiskScore01),
+      notes: Object.freeze([
+        ...candidate.notes,
+        `validationStatus=${validationStatus}`,
+        `attackType=${context.attackType}`,
+        context.assignedBotId ? `assignedBotId=${context.assignedBotId}` : 'assignedBotId=none',
+      ]),
     };
   }
 
@@ -1040,6 +1191,90 @@ export class ChatCounterResolver {
 
 export function createChatCounterResolver(options: ChatCounterResolverOptions = {}): ChatCounterResolver {
   return new ChatCounterResolver(options);
+}
+
+
+// ============================================================================
+// MARK: Runtime context + validation helpers
+// ============================================================================
+
+function score01To100(value: number): number {
+  return value * 100;
+}
+
+function coerceMessageId(value: string | null | undefined): Nullable<ChatMessageId> {
+  return value ? (value as ChatMessageId) : null;
+}
+
+function selectLearningProfile(state: ChatState, userId: string): Nullable<ChatLearningProfile> {
+  const profile = state.learningProfiles[userId] ?? null;
+  return (profile as Nullable<ChatLearningProfile>);
+}
+
+function selectAudienceHeat(
+  source: ChatCounterSourceContext,
+  signal: ChatCounterSignalSnapshot,
+): Nullable<ChatAudienceHeat> {
+  const signalRecord = source.signal as unknown as Readonly<Record<string, unknown>> | null | undefined;
+  const roomRecord = source.room as unknown as Readonly<Record<string, unknown>>;
+  const direct = (signalRecord?.['audienceHeat'] ?? roomRecord['audienceHeat'] ?? null) as Nullable<ChatAudienceHeat>;
+  if (direct) return direct;
+
+  return ({
+    roomId: source.room.roomId,
+    channelId: source.room.activeVisibleChannel,
+    witnessScore100: clamp100(score01To100(Number(signal.publicWitness01))),
+    hostilityScore100: clamp100(score01To100(Number(signal.humiliationRisk01))),
+    volatilityScore100: clamp100(score01To100(Number(signal.trapLikelihood01))),
+  } as unknown) as ChatAudienceHeat;
+}
+
+function selectInferenceSnapshot(source: ChatCounterSourceContext): Nullable<ChatInferenceSnapshot> {
+  const signalRecord = source.signal as unknown as Readonly<Record<string, unknown>> | null | undefined;
+  const stateRecord = source.state as unknown as Readonly<Record<string, unknown>>;
+  return (signalRecord?.['inference'] ?? stateRecord['chatInferenceSnapshot'] ?? null) as Nullable<ChatInferenceSnapshot>;
+}
+
+function selectAssignedBotId(source: ChatCounterSourceContext): Nullable<BotId> {
+  const signalRecord = source.signal as unknown as Readonly<Record<string, unknown>> | null | undefined;
+  const rescueRecord = source.rescue as unknown as Readonly<Record<string, unknown>> | null | undefined;
+  const roomRecord = source.room as unknown as Readonly<Record<string, unknown>>;
+  const candidate = signalRecord?.['botId'] ?? rescueRecord?.['botId'] ?? roomRecord['botId'] ?? null;
+  return candidate ? (candidate as BotId) : null;
+}
+
+function deriveWindowValidationStatus(
+  window: ChatCounterWindow,
+  signal: ChatCounterSignalSnapshot,
+  source: ChatCounterSourceContext,
+): ChatCounterValidationStatus {
+  const now = Number(source.now ?? asUnixMs(Date.now()));
+  if (now >= Number(window.closesAt)) return 'WINDOW_CLOSED';
+  if (window.allowsProofSpike && Number(signal.proofAdvantage01) >= 0.52) return 'REQUIRES_PROOF';
+  if (window.allowsQuoteTurn && Number(signal.quoteAdvantage01) >= 0.52) return 'REQUIRES_QUOTE';
+  if (window.allowsSilence && Number(signal.silenceValue01) >= 0.68) return 'REQUIRES_SILENCE';
+  if (window.requiresVisibleReply && Number(signal.closeWindowRisk01) >= 0.72) return 'REQUIRES_TIMING';
+  return 'WINDOW_OPEN';
+}
+
+function deriveCandidateValidationStatus(
+  window: ChatCounterWindow,
+  move: ChatCounterMove,
+  signal: ChatCounterSignalSnapshot,
+  context: ChatCounterRuntimeContext,
+): ChatCounterValidationStatus {
+  if (context.validationStatus === 'WINDOW_CLOSED') return 'WINDOW_CLOSED';
+  if (move.requiresProof && !move.proofHash) return 'REQUIRES_PROOF';
+  if (move.requiresQuote && !move.quoteReference) return 'REQUIRES_QUOTE';
+  if (move.canBeSilent && !move.requiresVisibleReply && Number(signal.silenceValue01) >= 0.60) return 'REQUIRES_SILENCE';
+  if (window.requiresVisibleReply && !move.recommendedReplyText && !move.canBeSilent) return 'REQUIRES_TIMING';
+  if (Number(signal.closeWindowRisk01) >= 0.94) return 'WINDOW_CLOSED';
+  if (Number(signal.helperNeed01) >= 0.72 && move.kind !== 'HELPER_ASSIST' && context.assignedBotId) return 'BLOCKED_BY_POLICY';
+  if (Number(signal.trapLikelihood01) >= 0.84 && move.riskBand === 'DANGEROUS') return 'AUTHORITATIVE_REJECT';
+  if (Number(signal.publicWitness01) >= 0.56 || Number(signal.proofAdvantage01) >= 0.54 || Number(signal.quoteAdvantage01) >= 0.54) {
+    return 'AUTHORITATIVE_ACCEPT';
+  }
+  return 'WINDOW_OPEN';
 }
 
 // ============================================================================
@@ -1481,6 +1716,25 @@ function mapAttackType(attackType: string | null | undefined): any {
   }
 }
 
+function mapCounterplayAttackType(attackType: AttackType): CounterplayAttackType {
+  switch (attackType) {
+    case 'SABOTAGE':
+      return 'SABOTAGE';
+    case 'TAUNT':
+      return 'TAUNT';
+    case 'LIQUIDATION':
+      return 'LIQUIDITY_STRIKE';
+    case 'COMPLIANCE':
+      return 'NEGOTIATION_TRAP';
+    case 'CROWD_SWARM':
+      return 'CASCADE_PUSH';
+    case 'SHADOW_LEAK':
+      return 'TELEGRAPH';
+    default:
+      return 'TAUNT';
+  }
+}
+
 function mapCounterTiming(value: string | null | undefined): any {
   switch (value) {
     case 'INSTANT':
@@ -1512,7 +1766,7 @@ function mapPressureTier(value: PressureTier | null | undefined): any {
 function mapAffectToContract(affect: ChatAffectSnapshot | null): any {
   if (!affect) return null;
   return {
-    confidence01: toContractScore01(Number(affect.confidence01)),
+    confidence: toContractScore01(Number(affect.confidence01)),
     frustration01: toContractScore01(Number(affect.frustration01)),
     intimidation01: toContractScore01(Number(affect.intimidation01)),
     attachment01: toContractScore01(Number(affect.attachment01)),
@@ -1559,3 +1813,7 @@ function deriveForcedFailureReason(forceCloseReason: string | null | undefined):
 // ============================================================================
 // MARK: End
 // ============================================================================
+
+
+
+
