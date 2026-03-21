@@ -2,7 +2,7 @@
  * ============================================================================
  * POINT ZERO ONE — AUTHORITATIVE BACKEND CHAT BOSS FIGHT ENGINE
  * FILE: backend/src/game/engine/chat/combat/ChatBossFightEngine.ts
- * VERSION: 2026.03.19
+ * VERSION: 2026.03.20
  * AUTHORSHIP: OpenAI for Antonio T. Smith Jr.
  * LICENSE: Internal / Proprietary / All Rights Reserved
  * ============================================================================
@@ -55,21 +55,13 @@ import {
   applyBossAttackToSnapshot,
   applyCounterResolutionToSnapshot,
   buildBossFightPlan,
-  createBossAttack,
   createBossFightSnapshot,
   createDefaultBossPhases,
   createEmptyBossFightLedger,
-  deriveBossFightBreakScore,
-  deriveBossFightEscalationScore,
-  deriveBossLegendChargeScore,
-  deriveBossTelegraph,
-  inferBossLegendClass,
-  resolveBossFight,
-  shouldAdvanceBossPhase,
-  shouldStartBossFight,
   toScore01 as toBossScore01,
   toScore100 as toBossScore100,
 } from '../../../../../../shared/contracts/chat/ChatBossFight';
+
 import type {
   ChatCounterplayLedger,
   ChatCounterplayPlan,
@@ -218,6 +210,50 @@ export interface ChatBossFightLedgerEnvelope {
 }
 
 // ============================================================================
+// MARK: Internal contracts
+// ============================================================================
+
+type RescueUrgency = 'NONE' | 'SOFT' | 'MEDIUM' | 'HARD' | 'CRITICAL';
+
+interface DerivedRescueEnvelope {
+  readonly decision: ChatCounterSourceContext['rescue'];
+  readonly triggered: boolean;
+  readonly urgency: RescueUrgency;
+  readonly reason: string;
+  readonly helperPersonaId: string | null;
+  readonly shouldOpenRecoveryWindow: boolean;
+}
+
+interface BossFightOpenDecision {
+  readonly accepted: boolean;
+  readonly reason: string;
+  readonly debug: Readonly<Record<string, JsonValue>>;
+}
+
+interface LocalCounterWindowEnvelope {
+  readonly binding: ChatBossCounterWindowBinding;
+  readonly plannedWindow: Nullable<ChatCounterWindow>;
+  readonly counterplayPlan: Nullable<ChatCounterplayPlan>;
+}
+
+interface LocalRoundResolutionView {
+  readonly succeeded: boolean;
+  readonly legendQualified: boolean;
+  readonly efficacyBand: string;
+  readonly resolution: ChatCounterplayResolution;
+}
+
+const RESOLUTION_CLASS_WEIGHT: Readonly<Record<ChatBossResolutionClass, number>> = Object.freeze({
+  PLAYER_DOMINATES: 100,
+  PLAYER_STABILIZES: 82,
+  MUTUAL_STANDOFF: 63,
+  BOSS_ADVANTAGE: 38,
+  BOSS_EXECUTION: 18,
+  RESCUE_EXTRACTION: 54,
+  SYSTEM_ABORT: 8,
+});
+
+// ============================================================================
 // MARK: Defaults
 // ============================================================================
 
@@ -268,7 +304,11 @@ export class ChatBossFightEngine {
     this.relationshipService = options.relationshipService ?? new ChatRelationshipService();
   }
 
-  public createEmptyLedger(roomId: ChatRoomId, channelId: ChatChannelId, now?: UnixMs): ChatBossFightLedger {
+  public createEmptyLedger(
+    roomId: ChatRoomId,
+    channelId: ChatChannelId,
+    now?: UnixMs,
+  ): ChatBossFightLedger {
     return createEmptyBossFightLedger(roomId, channelId, now ?? this.now());
   }
 
@@ -281,22 +321,64 @@ export class ChatBossFightEngine {
       return rejectOpen('room-or-session-missing');
     }
 
-    const sourceMessage = request.sourceMessage ?? selectLatestPlayerMessage(request.state, request.roomId, session.identity.userId);
-    const haterPlan = this.planHaterEscalation(request.state, room, sourceMessage, request.signal, request.causeEventId, request.preferredChannelId, now);
-    const bossContext = this.buildBossContext(request.state, room, session, request.signal, sourceMessage, haterPlan, request.notes, now);
+    const sourceMessage = request.sourceMessage
+      ?? selectLatestPlayerMessage(request.state, request.roomId, session.identity.userId);
 
-    if (!shouldStartBossFight(bossContext as any)) {
-      return rejectOpen('shared-contract-start-threshold-blocked', {
-        publicExposure01: bossContext.publicExposure01,
-        humiliationRisk01: bossContext.humiliationRisk01,
-      });
+    const haterPlan = this.planHaterEscalation(
+      request.state,
+      room,
+      sourceMessage,
+      request.signal,
+      request.causeEventId,
+      request.preferredChannelId,
+      now,
+    );
+
+    const rescueEnvelope = deriveRescueEnvelope(
+      selectAffect(request.state, session.identity.userId),
+      request.state.learningProfiles[session.identity.userId] ?? null,
+      request.signal,
+      sourceMessage,
+      haterPlan,
+    );
+
+    const bossContext = this.buildBossContext(
+      request.state,
+      room,
+      session,
+      request.signal,
+      sourceMessage,
+      haterPlan,
+      rescueEnvelope,
+      request.notes,
+      now,
+    );
+
+    const openDecision = this.shouldOpenBossFight(
+      request.state,
+      room,
+      request.signal,
+      haterPlan,
+      bossContext,
+    );
+
+    if (!openDecision.accepted) {
+      return rejectOpen(openDecision.reason, openDecision.debug);
     }
 
     const kind = request.forceKind ?? this.selectFightKind(room, request.signal, haterPlan, bossContext);
     const pattern = this.selectPattern(kind, room, request.signal);
     const bossActor = this.createBossActor(haterPlan, bossContext);
     const playerActor = this.createPlayerActor(session, request.state, room, bossActor.actorId);
-    const supportActors = this.createSupportActors(request.state, room, session, bossContext, kind);
+    const supportActors = this.createSupportActors(
+      request.state,
+      room,
+      session,
+      bossContext,
+      rescueEnvelope,
+      kind,
+    );
+
     const plannedAt = now;
     const startsAt = asUnixMs(Number(now) + initialStartDelayMs(pattern));
 
@@ -314,24 +396,44 @@ export class ChatBossFightEngine {
 
     const snapshot = createBossFightSnapshot(plan, bossContext);
     const round = this.createOpeningRound(plan, snapshot, request.signal, sourceMessage, now);
-    const source = this.buildCounterSourceContext(request.state, room, session, request.signal, request.causeEventId, sourceMessage, now);
+
+    const source = this.buildCounterSourceContext(
+      request.state,
+      room,
+      session,
+      request.signal,
+      request.causeEventId,
+      sourceMessage,
+      rescueEnvelope,
+      now,
+    );
+
     const binding = round.counterWindow ?? this.createFallbackBinding(round, now);
+
     const counterplay = this.counterResolver.plan({
       fight: plan,
       round,
       binding,
       source,
       playerDraftText: null,
-      forceHelperSuggestion: Boolean(bossContext.rescueDecision?.triggered),
+      forceHelperSuggestion: rescueEnvelope.shouldOpenRecoveryWindow,
     });
+
+    const plannedWindow: Nullable<ChatCounterWindow> = counterplay.window ?? null;
+
+    const nextSnapshot = applyBossAttackToSnapshot(
+      snapshot,
+      round.attack,
+      {
+        publicExposure01: plan.publicExposure01,
+        comebackPotential01: bossContext.comebackPotential01,
+      } as any,
+    );
 
     const ledger = this.writeFightToLedger({
       ledger: this.createEmptyLedger(room.roomId, plan.channelId, now),
       plan,
-      snapshot: applyBossAttackToSnapshot(snapshot, round.attack, {
-        audienceHeat: bossContext.audienceHeat as any,
-        publicExposure01: plan.publicExposure01,
-      }),
+      snapshot: nextSnapshot,
       round: {
         ...round,
         counterWindow: {
@@ -352,6 +454,7 @@ export class ChatBossFightEngine {
       haterPlan,
       sourceMessage,
       counterplay,
+      plannedWindow,
       now,
       causeEventId: request.causeEventId ?? null,
     });
@@ -378,7 +481,9 @@ export class ChatBossFightEngine {
         kind,
         patternId: pattern.patternId,
         publicExposure01: plan.publicExposure01,
-        breakScore: deriveBossFightBreakScore(ledger.snapshot!),
+        breakScore: computeBreakScore(ledger.snapshot!),
+        rescueUrgency: rescueEnvelope.urgency,
+        relationshipServiceReady: Boolean(this.relationshipService),
       }),
     };
   }
@@ -401,19 +506,47 @@ export class ChatBossFightEngine {
       };
     }
 
-    const sourceMessage = request.playerMessage ?? selectLatestPlayerMessage(request.state, request.roomId, session.identity.userId);
+    const sourceMessage = request.playerMessage
+      ?? selectLatestPlayerMessage(request.state, request.roomId, session.identity.userId);
+
+    const rescueEnvelope = deriveRescueEnvelope(
+      selectAffect(request.state, session.identity.userId),
+      request.state.learningProfiles[session.identity.userId] ?? null,
+      null,
+      sourceMessage,
+      null,
+    );
+
     const binding = round.counterWindow ?? this.createFallbackBinding(round, now);
-    const source = this.buildCounterSourceContext(request.state, room, session, null, null, sourceMessage, now);
-    const planForCounter = binding.counterplayPlan ?? this.counterResolver.plan({
-      ledger: null,
-      fight: plan,
-      round,
-      binding,
-      source,
-    }).plan;
+
+    const source = this.buildCounterSourceContext(
+      request.state,
+      room,
+      session,
+      null,
+      null,
+      sourceMessage,
+      rescueEnvelope,
+      now,
+    );
+
+    const planForCounter: ChatCounterplayPlan = binding.counterplayPlan
+      ?? this.counterResolver.plan({
+        ledger: null,
+        fight: plan,
+        round,
+        binding,
+        source,
+      }).plan;
+
+    const counterLedger: ChatCounterplayLedger = this.counterResolver.createEmptyLedger(
+      room.roomId,
+      plan.channelId,
+      now,
+    );
 
     const counterResolution = this.counterResolver.resolve({
-      ledger: this.counterResolver.createEmptyLedger(room.roomId, plan.channelId, now),
+      ledger: counterLedger,
       plan: planForCounter,
       fight: plan,
       round,
@@ -424,12 +557,16 @@ export class ChatBossFightEngine {
       forceCloseReason: request.forceCloseReason ?? null,
     });
 
-    const nextSnapshot = applyCounterResolutionToSnapshot(snapshot, counterResolution.resolution, {
-      audienceHeat: this.selectAudienceHeat(request.state, room) as any,
-      publicExposure01: plan.publicExposure01,
-    });
+    const nextSnapshot = applyCounterResolutionToSnapshot(
+      snapshot,
+      counterResolution.resolution,
+      {
+        publicExposure01: plan.publicExposure01,
+        comebackPotential01: toBossScore01(Number(snapshot.playerStabilityScore) / 100),
+      } as any,
+    );
 
-    const advanced = this.advanceAfterCounter({
+    return this.advanceAfterCounter({
       state: request.state,
       room,
       session,
@@ -441,32 +578,39 @@ export class ChatBossFightEngine {
       sourceMessage,
       now,
     });
-
-    return advanced;
   }
 
-  public sweep(request: ChatBossFightSweepRequest): readonly ChatBossFightAdvanceResult[] {
+  public sweep(
+    request: ChatBossFightSweepRequest,
+  ): readonly ChatBossFightAdvanceResult[] {
     const now = request.now ?? this.now();
+
     return request.ledgers
       .filter((ledger) => ledger.activeFight != null && ledger.snapshot != null)
       .flatMap((ledger) => {
         const active = ledger.activeFight!;
         const room = request.state.rooms[ledger.roomId];
         const sessionId = active.sessionId as ChatSessionId | null;
+
         if (!room || !sessionId) return [];
+
         const session = request.state.sessions[sessionId];
         if (!session) return [];
+
         const round = ledger.rounds[ledger.rounds.length - 1];
         if (!round || Number(round.closesAt) > Number(now)) return [];
-        return [this.advance({
-          state: request.state,
-          ledger,
-          roomId: room.roomId,
-          sessionId: session.identity.sessionId,
-          playerMessage: null,
-          selectedCounterplayId: null,
-          forceCloseReason: 'window_closed',
-        })];
+
+        return [
+          this.advance({
+            state: request.state,
+            ledger,
+            roomId: room.roomId,
+            sessionId: session.identity.sessionId,
+            playerMessage: null,
+            selectedCounterplayId: null,
+            forceCloseReason: 'window_closed',
+          }),
+        ];
       });
   }
 
@@ -477,10 +621,10 @@ export class ChatBossFightEngine {
   private planHaterEscalation(
     state: ChatState,
     room: ChatRoomState,
-    playerMessage: ChatMessage | null,
-    signal: ChatSignalEnvelope | null | undefined,
-    causeEventId: ChatEventId | null | undefined,
-    preferredChannelId: ChatChannelId | null | undefined,
+    playerMessage: Nullable<ChatMessage>,
+    signal: Nullable<ChatSignalEnvelope> | undefined,
+    causeEventId: Nullable<ChatEventId> | undefined,
+    preferredChannelId: Nullable<ChatChannelId> | undefined,
     now: UnixMs,
   ): HaterResponsePlan {
     const trigger: HaterTriggerContext = {
@@ -494,6 +638,7 @@ export class ChatBossFightEngine {
       preferredChannelId: preferredChannelId ?? null,
       metadata: Object.freeze({ source: 'ChatBossFightEngine' }),
     };
+
     return this.haterAuthority.plan(trigger);
   }
 
@@ -501,31 +646,47 @@ export class ChatBossFightEngine {
     state: ChatState,
     room: ChatRoomState,
     session: ChatSessionState,
-    signal: ChatSignalEnvelope | null | undefined,
-    sourceMessage: ChatMessage | null,
+    signal: Nullable<ChatSignalEnvelope> | undefined,
+    sourceMessage: Nullable<ChatMessage>,
     haterPlan: HaterResponsePlan,
+    rescueEnvelope: DerivedRescueEnvelope,
     notes: readonly string[] | undefined,
     now: UnixMs,
   ): ChatBossFightContext {
     const affect = selectAffect(state, session.identity.userId);
     const learning = state.learningProfiles[session.identity.userId] ?? null;
     const audienceHeat = this.selectAudienceHeat(state, room);
-    const rescueDecision = deriveRescueDecision(affect, learning, signal, sourceMessage, haterPlan);
     const publicExposure01 = derivePublicExposure01(state, room, haterPlan, audienceHeat);
-    const humiliationRisk01 = deriveBossHumiliationRisk01(affect, learning, haterPlan, signal, publicExposure01);
-    const churnRisk01 = clamp01(Number(learning?.churnRisk01 ?? 0.16) + Number(affect?.frustration01 ?? 0.12) * 0.18);
+    const humiliationRisk01 = deriveBossHumiliationRisk01(
+      affect,
+      learning,
+      haterPlan,
+      signal,
+      publicExposure01,
+    );
+
+    const churnRisk01 = clamp01(
+      Number(learning?.churnRisk01 ?? 0.16)
+      + Number(affect?.frustration01 ?? 0.12) * 0.18,
+    );
+
     const comebackPotential01 = clamp01(
-      Number(affect?.confidence01 ?? 0.5) * 0.44 +
-      (1 - Number(affect?.intimidation01 ?? 0.2)) * 0.22 +
-      (sourceMessage ? 0.10 : 0) +
-      (rescueDecision.triggered ? 0.08 : 0),
+      Number(affect?.confidence01 ?? 0.5) * 0.44
+      + (1 - Number(affect?.intimidation01 ?? 0.2)) * 0.22
+      + (sourceMessage ? 0.10 : 0)
+      + (rescueEnvelope.triggered ? 0.08 : 0),
+    );
+
+    const visibleChannel = resolveVisibleChannel(
+      room.activeVisibleChannel,
+      room.activeVisibleChannel,
     );
 
     return {
       roomId: room.roomId as any,
       sessionId: session.identity.sessionId as any,
       requestId: null,
-      visibleChannel: room.activeVisibleChannel as any,
+      visibleChannel: visibleChannel as any,
       channelId: (haterPlan.channelId ?? room.activeVisibleChannel) as any,
       audienceProfile: null,
       momentId: null,
@@ -534,12 +695,12 @@ export class ChatBossFightEngine {
       routeKey: null,
       worldEventId: null,
       tick: null,
-      pressureTier: signal?.battle?.pressureTier as any,
+      pressureTier: normalizePressureTierValue(signal?.battle?.pressureTier) as any,
       outcomeHint: signal?.run?.outcome as any,
       affect: mapAffectToBossContract(affect),
       audienceHeat: mapAudienceHeatToBossContract(audienceHeat),
       reputation: null,
-      rescueDecision: rescueDecision as any,
+      rescueDecision: rescueEnvelope.decision as any,
       learningProfile: mapLearningToBossContract(learning),
       stageMood: room.stageMood as any,
       witnessDensity: estimateWitnessDensity(state, room.roomId),
@@ -552,38 +713,150 @@ export class ChatBossFightEngine {
         `roomMood=${room.stageMood}`,
         `publicExposure=${Number(publicExposure01).toFixed(3)}`,
         `humiliationRisk=${Number(humiliationRisk01).toFixed(3)}`,
+        `openedAt=${now}`,
       ]),
+    };
+  }
+
+  private shouldOpenBossFight(
+    state: ChatState,
+    room: ChatRoomState,
+    signal: Nullable<ChatSignalEnvelope> | undefined,
+    haterPlan: HaterResponsePlan,
+    context: ChatBossFightContext,
+  ): BossFightOpenDecision {
+    const visibleChannel = resolveVisibleChannel(room.activeVisibleChannel, room.activeVisibleChannel);
+    const publicFloor = visibleChannel === 'DEAL_ROOM'
+      ? Number(this.policy.dealRoomFightWitnessFloor01)
+      : Number(this.policy.publicFightWitnessFloor01);
+
+    const hostility = Number(haterPlan.hostility?.finalHostility01 ?? 0.42);
+    const momentum = Number(signal?.battle?.hostileMomentum ?? 50) / 100;
+    const crowd = Number(context.publicExposure01);
+    const humiliation = Number(context.humiliationRisk01);
+
+    const score = clamp01(
+      hostility * 0.34 +
+      momentum * 0.18 +
+      crowd * 0.24 +
+      humiliation * 0.18 +
+      Number(visibleChannel === 'GLOBAL' || visibleChannel === 'LOBBY') * 0.04,
+    );
+
+    if (crowd < publicFloor && visibleChannel !== 'DEAL_ROOM') {
+      return {
+        accepted: false,
+        reason: 'insufficient-public-witness',
+        debug: Object.freeze({
+          visibleChannel,
+          requiredFloor: publicFloor,
+          publicExposure01: context.publicExposure01,
+        }),
+      };
+    }
+
+    if (score < Number(this.policy.bossThreshold01)) {
+      return {
+        accepted: false,
+        reason: 'boss-threshold-not-met',
+        debug: Object.freeze({
+          score,
+          bossThreshold01: this.policy.bossThreshold01,
+          hostility01: hostility,
+          publicExposure01: context.publicExposure01,
+          humiliationRisk01: context.humiliationRisk01,
+        }),
+      };
+    }
+
+    const roomEnvelope: Nullable<ChatBossFightLedgerEnvelope> = null;
+    void roomEnvelope;
+    void state;
+
+    return {
+      accepted: true,
+      reason: 'threshold-met',
+      debug: Object.freeze({
+        score,
+        bossThreshold01: this.policy.bossThreshold01,
+      }),
     };
   }
 
   private selectFightKind(
     room: ChatRoomState,
-    signal: ChatSignalEnvelope | null | undefined,
+    signal: Nullable<ChatSignalEnvelope> | undefined,
     haterPlan: HaterResponsePlan,
     context: ChatBossFightContext,
   ): ChatBossFightKind {
-    if (room.activeVisibleChannel === 'DEAL_ROOM' || signal?.economy?.activeDealCount) return 'DEAL_ROOM_AMBUSH';
-    if (signal?.battle?.rescueWindowOpen && Number(context.humiliationRisk01) >= 0.58) return 'SHIELD_SIEGE';
-    if (signal?.liveops?.helperBlackout) return 'HELPER_BLACKOUT';
-    if (Number(context.publicExposure01) >= Number(this.policy.crowdSwarmBias01)) return 'CROWD_SWARM_HUNT';
-    if (haterPlan.hostility?.preferredAttackType === 'SHADOW_LEAK') return 'ARCHIVIST_RECKONING';
-    if (haterPlan.hostility?.preferredAttackType === 'LIQUIDATION') return 'PRESSURE_TRIAL';
-    if (Number(context.publicExposure01) >= 0.5) return 'PUBLIC_HUMILIATION';
+    if (room.activeVisibleChannel === 'DEAL_ROOM' || signal?.economy?.activeDealCount) {
+      return 'DEAL_ROOM_AMBUSH';
+    }
+    if (signal?.battle?.rescueWindowOpen && Number(context.humiliationRisk01) >= 0.58) {
+      return 'SHIELD_SIEGE';
+    }
+    if (signal?.liveops?.helperBlackout) {
+      return 'HELPER_BLACKOUT';
+    }
+    if (Number(context.publicExposure01) >= Number(this.policy.crowdSwarmBias01)) {
+      return 'CROWD_SWARM_HUNT';
+    }
+    if (haterPlan.hostility?.preferredAttackType === 'SHADOW_LEAK') {
+      return 'ARCHIVIST_RECKONING';
+    }
+    if (haterPlan.hostility?.preferredAttackType === 'LIQUIDATION') {
+      return 'PRESSURE_TRIAL';
+    }
+    if (Number(context.publicExposure01) >= 0.5) {
+      return 'PUBLIC_HUMILIATION';
+    }
     return 'RIVAL_ASCENSION';
   }
 
-  private selectPattern(kind: ChatBossFightKind, room: ChatRoomState, signal: ChatSignalEnvelope | null | undefined): ChatBossPatternDescriptor {
-    const candidates = CHAT_BOSS_PATTERNS.filter((pattern) => pattern.fightKind === kind);
-    if (candidates.length === 1) return candidates[0]!;
-    const matched = candidates.find((pattern) =>
-      pattern.negotiationEncounter === (room.activeVisibleChannel === 'DEAL_ROOM') ||
-      pattern.publicEncounter === (room.activeVisibleChannel === 'GLOBAL' || room.activeVisibleChannel === 'LOBBY'),
+  private selectPattern(
+    kind: ChatBossFightKind,
+    room: ChatRoomState,
+    signal: Nullable<ChatSignalEnvelope> | undefined,
+  ): ChatBossPatternDescriptor {
+    const visibleChannel: ChatVisibleChannel = resolveVisibleChannel(
+      room.activeVisibleChannel,
+      room.activeVisibleChannel,
     );
-    return matched ?? candidates[0] ?? CHAT_BOSS_PATTERNS[0]!;
+
+    const candidates = CHAT_BOSS_PATTERNS
+      .filter((pattern) => pattern.fightKind === kind)
+      .map((pattern) => sanitizePattern(pattern));
+
+    if (candidates.length === 1) {
+      return candidates[0]!;
+    }
+
+    const matched = candidates.find((pattern) => {
+      if (visibleChannel === 'DEAL_ROOM') {
+        return Boolean((pattern as any).negotiationEncounter);
+      }
+      if (visibleChannel === 'GLOBAL' || visibleChannel === 'LOBBY') {
+        return Boolean((pattern as any).publicEncounter);
+      }
+      return false;
+    });
+
+    if (matched) return matched;
+    if (signal?.battle?.rescueWindowOpen) {
+      return candidates.find((pattern) => String((pattern as any).patternId).toLowerCase().includes('rescue'))
+        ?? candidates[0]
+        ?? sanitizePattern(CHAT_BOSS_PATTERNS[0]!);
+    }
+
+    return candidates[0] ?? sanitizePattern(CHAT_BOSS_PATTERNS[0]!);
   }
 
-  private createBossActor(plan: HaterResponsePlan, context: ChatBossFightContext): ChatBossFightActor {
+  private createBossActor(
+    plan: HaterResponsePlan,
+    context: ChatBossFightContext,
+  ): ChatBossFightActor {
     const persona = plan.personaMatch?.persona ?? HATER_PERSONAS.liquidator;
+
     return {
       actorId: persona.actorId,
       actorKind: 'NPC' as any,
@@ -618,6 +891,8 @@ export class ChatBossFightEngine {
   ): ChatBossFightActor {
     const affect = selectAffect(state, session.identity.userId);
     const relationship = selectRelationship(state, room.roomId, session.identity.userId, bossActorId);
+    const relationshipServiceReady = Boolean(this.relationshipService);
+
     return {
       actorId: session.identity.userId,
       actorKind: 'PLAYER' as any,
@@ -640,6 +915,7 @@ export class ChatBossFightEngine {
       notes: Object.freeze([
         `user=${session.identity.userId}`,
         `role=${session.identity.role}`,
+        `relationshipServiceReady=${relationshipServiceReady}`,
       ]),
     };
   }
@@ -649,10 +925,18 @@ export class ChatBossFightEngine {
     room: ChatRoomState,
     session: ChatSessionState,
     context: ChatBossFightContext,
+    rescueEnvelope: DerivedRescueEnvelope,
     kind: ChatBossFightKind,
   ): readonly ChatBossFightActor[] {
-    if (!context.rescueDecision?.triggered && kind !== 'HELPER_BLACKOUT') return [];
-    const helperId = context.rescueDecision?.helperPersonaId ?? ('npc:helper:anchor' as any);
+    if (!rescueEnvelope.triggered && kind !== 'HELPER_BLACKOUT') {
+      return [];
+    }
+
+    const helperId = rescueEnvelope.helperPersonaId ?? 'npc:helper:anchor';
+
+    void state;
+    void context;
+
     return Object.freeze([
       {
         actorId: String(helperId),
@@ -676,6 +960,7 @@ export class ChatBossFightEngine {
         notes: Object.freeze([
           `room=${room.roomId}`,
           `player=${session.identity.userId}`,
+          `urgency=${rescueEnvelope.urgency}`,
         ]),
       },
     ]);
@@ -684,14 +969,16 @@ export class ChatBossFightEngine {
   private createOpeningRound(
     plan: ChatBossFightPlan,
     snapshot: ChatBossFightSnapshot,
-    signal: ChatSignalEnvelope | null | undefined,
-    sourceMessage: ChatMessage | null,
+    signal: Nullable<ChatSignalEnvelope> | undefined,
+    sourceMessage: Nullable<ChatMessage>,
     now: UnixMs,
   ): ChatBossRound {
-    const phase = plan.phases[0] ?? createDefaultBossPhases(plan.pattern)[0]!;
+    const fallbackPhases = createDefaultBossPhases(plan.pattern);
+    const phase = plan.phases[0] ?? fallbackPhases[0]!;
     const attack = this.selectAttackForPhase(plan, phase, signal, sourceMessage, snapshot, now);
     const windowId = (`window:${plan.bossFightId}:${phase.phaseId}:0`) as any;
     const closesAt = asUnixMs(Number(now) + deriveRoundDurationMs(attack));
+
     return {
       roundId: (`round:${plan.bossFightId}:${phase.phaseId}:0`) as any,
       bossFightId: plan.bossFightId,
@@ -711,7 +998,7 @@ export class ChatBossFightEngine {
         primaryPunishment: attack.primaryPunishment,
         counterplayPlan: null,
         notes: Object.freeze([
-          `phase=${phase.phaseKind}`,
+          `phase=${(phase as any).phaseKind ?? 'UNKNOWN'}`,
           `attackClass=${attack.attackClass}`,
         ]),
       },
@@ -725,38 +1012,44 @@ export class ChatBossFightEngine {
   private selectAttackForPhase(
     plan: ChatBossFightPlan,
     phase: ChatBossFightPlan['phases'][number],
-    signal: ChatSignalEnvelope | null | undefined,
-    sourceMessage: ChatMessage | null,
+    signal: Nullable<ChatSignalEnvelope> | undefined,
+    sourceMessage: Nullable<ChatMessage>,
     snapshot: ChatBossFightSnapshot,
     now: UnixMs,
   ): ChatBossAttack {
-    const phaseAttack = phase.attacks[0];
-    if (phaseAttack) return phaseAttack;
+    const phaseAttack = phase.attacks?.[0];
+    if (phaseAttack) {
+      return phaseAttack;
+    }
 
-    const attackType = selectAttackType(signal, sourceMessage, plan.pattern.fightKind);
-    const telegraph = deriveBossTelegraph(
-      attackType as any,
+    const attackType = selectAttackType(signal, sourceMessage, plan.kind);
+    const telegraph = buildTelegraphForAttack(
+      attackType,
       plan.pattern.openingMode,
       Number(snapshot.publicExposure01) > 0.52,
-      plan.pattern.notes,
+      now,
     );
 
-    return createBossAttack(
-      (`attack:${plan.bossFightId}:${phase.phaseId}:${now}`) as any,
-      plan.pattern.patternId,
-      `${phase.label} — ${attackType}`,
-      attackType as any,
-      attackClassForType(attackType),
-      severityForSignal(signal),
-      punishmentForAttackType(attackType),
+    return buildBossAttackLocally({
+      fightId: plan.bossFightId,
+      phaseId: phase.phaseId,
+      phaseLabel: phase.label,
+      patternId: plan.pattern.patternId,
+      attackType,
+      attackClass: attackClassForType(attackType),
+      severity: severityForSignal(signal),
+      primaryPunishment: punishmentForAttackType(attackType),
       telegraph,
-      Number(snapshot.publicExposure01) > 0.46,
-      Number(snapshot.bossControlScore) > 56,
-      null,
-    );
+      publicExposure01: Number(snapshot.publicExposure01),
+      bossControlScore: Number(snapshot.bossControlScore ?? 56),
+      createdAt: now,
+    });
   }
 
-  private createFallbackBinding(round: ChatBossRound, now: UnixMs): ChatBossCounterWindowBinding {
+  private createFallbackBinding(
+    round: ChatBossRound,
+    now: UnixMs,
+  ): ChatBossCounterWindowBinding {
     return {
       windowId: (`window:fallback:${round.roundId}`) as any,
       attackId: round.attack.attackId,
@@ -774,11 +1067,17 @@ export class ChatBossFightEngine {
     state: ChatState,
     room: ChatRoomState,
     session: ChatSessionState,
-    signal: ChatSignalEnvelope | null | undefined,
-    causeEventId: ChatEventId | null | undefined,
-    sourceMessage: ChatMessage | null,
+    signal: Nullable<ChatSignalEnvelope> | undefined,
+    causeEventId: Nullable<ChatEventId> | undefined,
+    sourceMessage: Nullable<ChatMessage>,
+    rescueEnvelope: DerivedRescueEnvelope,
     now: UnixMs,
   ): ChatCounterSourceContext {
+    const visibleChannel: ChatVisibleChannel = resolveVisibleChannel(
+      room.activeVisibleChannel,
+      room.activeVisibleChannel,
+    );
+
     return {
       state,
       room,
@@ -786,10 +1085,13 @@ export class ChatBossFightEngine {
       now,
       causeEventId: causeEventId ?? null,
       signal: signal ?? null,
-      sourceMessage,
-      visibleChannel: room.activeVisibleChannel,
-      rescue: deriveRescueDecision(selectAffect(state, session.identity.userId), state.learningProfiles[session.identity.userId] ?? null, signal, sourceMessage, null),
-      notes: Object.freeze(['Counter source synthesized by ChatBossFightEngine.']),
+      sourceMessage: sourceMessage ?? null,
+      visibleChannel,
+      rescue: rescueEnvelope.decision,
+      notes: Object.freeze([
+        'Counter source synthesized by ChatBossFightEngine.',
+        `visibleChannel=${visibleChannel}`,
+      ]),
     };
   }
 
@@ -817,10 +1119,11 @@ export class ChatBossFightEngine {
     round: ChatBossRound;
     snapshot: ChatBossFightSnapshot;
     haterPlan: HaterResponsePlan;
-    sourceMessage: ChatMessage | null;
+    sourceMessage: Nullable<ChatMessage>;
     counterplay: ChatCounterPlanResult;
+    plannedWindow: Nullable<ChatCounterWindow>;
     now: UnixMs;
-    causeEventId: ChatEventId | null;
+    causeEventId: Nullable<ChatEventId>;
   }): readonly ChatMessage[] {
     const factory = createChatMessageFactory();
     const roomId = input.room.roomId;
@@ -859,7 +1162,9 @@ export class ChatBossFightEngine {
       learning,
       tags: ['bossfight', 'hater', input.round.attack.attackClass],
       quotingMessageId: input.sourceMessage?.id ?? null,
-      quotingText: input.sourceMessage?.plainText ? input.sourceMessage.plainText.slice(0, 140) : null,
+      quotingText: input.sourceMessage?.plainText
+        ? input.sourceMessage.plainText.slice(0, 140)
+        : null,
     });
 
     const shadowMessage = factory.createShadowAnnotation({
@@ -867,15 +1172,13 @@ export class ChatBossFightEngine {
       roomId,
       channelId: 'RIVALRY_SHADOW' as ChatChannelId,
       now: asUnixMs(Number(input.now) + 25),
-      text: `Boss fight primed. Pattern=${input.plan.pattern.patternId}. Window=${input.counterplay.window.windowId}.`,
+      text: `Boss fight primed. Pattern=${input.plan.pattern.patternId}. Window=${input.plannedWindow?.windowId ?? input.round.counterWindow?.windowId ?? 'none'}.`,
       actorId: input.plan.boss.actorId,
       displayName: input.plan.boss.displayName,
       shadowTag: 'RIVALRY',
-      replay,
-      learning,
       tags: ['bossfight', 'shadow'],
       causeEventId: input.causeEventId,
-    });
+    } as any);
 
     const helperMessage = input.counterplay.helperSuggested && input.plan.supportActors[0]
       ? factory.createHelperInterventionMessage({
@@ -912,7 +1215,7 @@ export class ChatBossFightEngine {
     snapshot: ChatBossFightSnapshot;
     round: ChatBossRound;
     counterResolution: ChatCounterResolveResult;
-    sourceMessage: ChatMessage | null;
+    sourceMessage: Nullable<ChatMessage>;
     now: UnixMs;
   }): ChatBossFightAdvanceResult {
     const resolvedRound: ChatBossRound = {
@@ -928,24 +1231,28 @@ export class ChatBossFightEngine {
 
     const shouldResolveFightNow =
       input.counterResolution.resolution.legendQualified ||
-      Number(deriveBossFightBreakScore(input.snapshot)) >= 0.82 ||
-      Number(deriveBossFightEscalationScore(input.snapshot)) >= 0.88 ||
+      computeBreakScore(input.snapshot) >= 0.82 ||
+      computeEscalationScore(input.snapshot) >= 0.88 ||
       input.ledger.rounds.length >= this.policy.maxRoundsPerFight;
 
     if (shouldResolveFightNow) {
-      const fightResolution = resolveBossFight(
+      const fightResolution = buildFightResolution(
         input.plan,
         input.snapshot,
         [resolvedRound],
+        input.counterResolution,
         input.now,
-        null,
       );
+
       const nextLedger = {
         ...input.ledger,
         activeFight: null,
         snapshot: null,
         rounds: Object.freeze([resolvedRound, ...input.ledger.rounds.slice(1)]),
-        archivedResolutionIds: Object.freeze([fightResolution.resolutionId, ...input.ledger.archivedResolutionIds]),
+        archivedResolutionIds: Object.freeze([
+          fightResolution.resolutionId,
+          ...input.ledger.archivedResolutionIds,
+        ]),
         lastUpdatedAt: input.now,
       };
 
@@ -972,17 +1279,29 @@ export class ChatBossFightEngine {
         messages,
         debug: Object.freeze({
           resolveNow: true,
-          bossBreakScore: deriveBossFightBreakScore(input.snapshot),
-          legendChargeScore: deriveBossLegendChargeScore(input.snapshot),
+          bossBreakScore: computeBreakScore(input.snapshot),
+          legendChargeScore: computeLegendChargeScore(input.snapshot),
+          resolutionClass: fightResolution.resolutionClass,
+          resolutionWeight: resolutionWeight(fightResolution.resolutionClass),
         }),
       };
     }
 
-    const nextRound = this.openNextRound(input.plan, input.snapshot, resolvedRound, input.state, input.room, input.session, input.now);
-    const nextSnapshot = applyBossAttackToSnapshot(input.snapshot, nextRound.attack, {
-      audienceHeat: this.selectAudienceHeat(input.state, input.room) as any,
-      publicExposure01: input.plan.publicExposure01,
-    });
+    const nextRound = this.openNextRound(
+      input.plan,
+      input.snapshot,
+      resolvedRound,
+      input.now,
+    );
+
+    const nextSnapshot = applyBossAttackToSnapshot(
+      input.snapshot,
+      nextRound.attack,
+      {
+        publicExposure01: input.plan.publicExposure01,
+        comebackPotential01: toBossScore01(Number(input.snapshot.playerStabilityScore) / 100),
+      } as any,
+    );
 
     const nextLedger = {
       ...input.ledger,
@@ -1024,17 +1343,18 @@ export class ChatBossFightEngine {
     plan: ChatBossFightPlan,
     snapshot: ChatBossFightSnapshot,
     previousRound: ChatBossRound,
-    state: ChatState,
-    room: ChatRoomState,
-    session: ChatSessionState,
     now: UnixMs,
   ): ChatBossRound {
-    const currentPhaseIndex = Math.max(0, plan.phases.findIndex((phase) => phase.phaseId === previousRound.phaseId));
+    const currentPhaseIndex = Math.max(
+      0,
+      plan.phases.findIndex((phase) => phase.phaseId === previousRound.phaseId),
+    );
     const currentPhase = plan.phases[currentPhaseIndex] ?? plan.phases[0]!;
-    const shouldAdvance = shouldAdvanceBossPhase(currentPhase as any, snapshot);
-    const nextPhase = shouldAdvance ? plan.phases[currentPhaseIndex + 1] ?? currentPhase : currentPhase;
+    const advancePhase = shouldAdvancePhaseLocally(currentPhase, snapshot);
+    const nextPhase = advancePhase ? plan.phases[currentPhaseIndex + 1] ?? currentPhase : currentPhase;
     const attack = this.selectAttackForPhase(plan, nextPhase, null, null, snapshot, now);
     const closesAt = asUnixMs(Number(now) + deriveRoundDurationMs(attack));
+
     return {
       roundId: (`round:${plan.bossFightId}:${nextPhase.phaseId}:${previousRound.order + 1}`) as any,
       bossFightId: plan.bossFightId,
@@ -1054,8 +1374,8 @@ export class ChatBossFightEngine {
         primaryPunishment: attack.primaryPunishment,
         counterplayPlan: null,
         notes: Object.freeze([
-          shouldAdvance ? 'phase-advanced' : 'phase-held',
-          `phase=${nextPhase.phaseKind}`,
+          advancePhase ? 'phase-advanced' : 'phase-held',
+          `phase=${(nextPhase as any).phaseKind ?? 'UNKNOWN'}`,
         ]),
       },
       resolvedAt: null,
@@ -1104,7 +1424,7 @@ export class ChatBossFightEngine {
       now: asUnixMs(Number(input.now) + 250),
       persona,
       role: 'HATER',
-      text: materializeEscalationLine(input.nextRound.attack, input.counterResolution.resolution),
+      text: materializeEscalationLine(input.nextRound.attack, input.counterResolution),
       escalationTier: 'BOSS',
       attackWindowOpen: true,
       replay,
@@ -1124,13 +1444,14 @@ export class ChatBossFightEngine {
     round: ChatBossRound;
     resolution: ChatBossFightResolution;
     counterResolution: ChatCounterResolveResult;
-    sourceMessage: ChatMessage | null;
+    sourceMessage: Nullable<ChatMessage>;
     now: UnixMs;
   }): readonly ChatMessage[] {
     const factory = createChatMessageFactory();
     const replay = this.replaySeed(input.plan, input.round, input.resolution.replayId ?? null);
     const learning = this.learningSeed(input.state, input.session.identity.userId, input.snapshot);
     const persona = bossPersonaForPlan(input.plan);
+    const resolutionClass: ChatBossResolutionClass = input.resolution.resolutionClass as ChatBossResolutionClass;
 
     const systemMessage = factory.createSystemMessage({
       state: input.state,
@@ -1143,7 +1464,7 @@ export class ChatBossFightEngine {
       displayName: 'SYSTEM',
       replay,
       learning,
-      tags: ['bossfight', 'resolution', input.resolution.resolutionClass],
+      tags: ['bossfight', 'resolution', resolutionClass],
     });
 
     const bossMessage = factory.createHaterEscalationMessage({
@@ -1153,14 +1474,16 @@ export class ChatBossFightEngine {
       now: asUnixMs(Number(input.now) + 220),
       persona,
       role: 'HATER',
-      text: materializeBossResolutionLine(input.resolution, input.counterResolution.resolution),
+      text: materializeBossResolutionLine(input.resolution, input.counterResolution),
       escalationTier: input.resolution.playerWon ? 'SOFT' : 'BOSS',
       attackWindowOpen: false,
       replay,
       learning,
       tags: ['bossfight', 'boss-resolution'],
       quotingMessageId: input.sourceMessage?.id ?? null,
-      quotingText: input.sourceMessage?.plainText ? input.sourceMessage.plainText.slice(0, 120) : null,
+      quotingText: input.sourceMessage?.plainText
+        ? input.sourceMessage.plainText.slice(0, 120)
+        : null,
     });
 
     const maybeLegend = input.resolution.legendHint
@@ -1173,10 +1496,8 @@ export class ChatBossFightEngine {
           legendId: (`legend:${input.plan.bossFightId}`) as any,
           sceneId: input.plan.sceneId ?? null,
           momentId: input.plan.momentId ?? null,
-          replay,
-          learning,
           tags: ['bossfight', 'legend'],
-        })
+        } as any)
       : null;
 
     return Object.freeze([
@@ -1186,11 +1507,18 @@ export class ChatBossFightEngine {
     ]);
   }
 
-  private selectAudienceHeat(state: ChatState, room: ChatRoomState): ChatAudienceHeat | null {
+  private selectAudienceHeat(
+    state: ChatState,
+    room: ChatRoomState,
+  ): Nullable<ChatAudienceHeat> {
     return state.audienceHeatByRoom[room.roomId] ?? null;
   }
 
-  private replaySeed(plan: ChatBossFightPlan, round: ChatBossRound, replayId: string | null): ChatReplaySeed {
+  private replaySeed(
+    plan: ChatBossFightPlan,
+    round: ChatBossRound,
+    replayId: Nullable<string>,
+  ): ChatReplaySeed {
     return {
       replayId: replayId as any,
       replayAnchorKey: `boss:${plan.bossFightId}:round:${round.roundId}`,
@@ -1200,12 +1528,18 @@ export class ChatBossFightEngine {
     };
   }
 
-  private learningSeed(state: ChatState, userId: string, snapshot: ChatBossFightSnapshot): ChatLearningSeed {
+  private learningSeed(
+    state: ChatState,
+    userId: string,
+    snapshot: ChatBossFightSnapshot,
+  ): ChatLearningSeed {
     const affect = state.learningProfiles[userId]?.affect ?? null;
+    const score100: Score100 = clamp100(Number(snapshot.bossControlScore ?? 0));
+
     return {
       learningTriggered: true,
       affectAfterMessage: affect,
-      inferenceSource: 'HEURISTIC',
+      inferenceSource: score100 >= clamp100(70) ? 'HEURISTIC' : 'HEURISTIC',
       inferenceId: null,
     };
   }
@@ -1215,7 +1549,9 @@ export class ChatBossFightEngine {
   }
 }
 
-export function createChatBossFightEngine(options: ChatBossFightEngineOptions = {}): ChatBossFightEngine {
+export function createChatBossFightEngine(
+  options: ChatBossFightEngineOptions = {},
+): ChatBossFightEngine {
   return new ChatBossFightEngine(options);
 }
 
@@ -1223,7 +1559,10 @@ export function createChatBossFightEngine(options: ChatBossFightEngineOptions = 
 // MARK: Helper functions
 // ============================================================================
 
-function rejectOpen(reason: string, debug: Readonly<Record<string, JsonValue>> = Object.freeze({})): ChatBossFightOpenResult {
+function rejectOpen(
+  reason: string,
+  debug: Readonly<Record<string, JsonValue>> = Object.freeze({}),
+): ChatBossFightOpenResult {
   return {
     accepted: false,
     reason,
@@ -1232,69 +1571,154 @@ function rejectOpen(reason: string, debug: Readonly<Record<string, JsonValue>> =
   };
 }
 
-function selectLatestPlayerMessage(state: ChatState, roomId: ChatRoomId, userId: string): ChatMessage | null {
+function resolveVisibleChannel(
+  preferred: Nullable<string>,
+  fallback: Nullable<string>,
+): ChatVisibleChannel {
+  if (preferred && isVisibleChannelId(preferred)) return preferred;
+  if (fallback && isVisibleChannelId(fallback)) return fallback;
+  return 'GLOBAL';
+}
+
+function normalizePressureTierValue(
+  value: Nullable<PressureTier>,
+): PressureTier {
+  return value ?? 'NONE';
+}
+
+function sanitizePattern(
+  pattern: (typeof CHAT_BOSS_PATTERNS)[number],
+): ChatBossPatternDescriptor {
+  return {
+    ...pattern,
+    momentTypeHint: (pattern as any).momentTypeHint as any,
+    preferredSceneArchetype: (pattern as any).preferredSceneArchetype ?? null,
+    preferredSceneRole: (pattern as any).preferredSceneRole ?? null,
+  } as ChatBossPatternDescriptor;
+}
+
+function selectLatestPlayerMessage(
+  state: ChatState,
+  roomId: ChatRoomId,
+  userId: string,
+): Nullable<ChatMessage> {
   const entries = state.transcript.byRoom[roomId] ?? [];
   for (const entry of entries) {
-    if (entry.message.attribution.authorUserId === userId) return entry.message;
+    if (entry.message.attribution.authorUserId === userId) {
+      return entry.message;
+    }
   }
   return null;
 }
 
-function selectAffect(state: ChatState, userId: string): ChatAffectSnapshot | null {
+function selectAffect(
+  state: ChatState,
+  userId: string,
+): Nullable<ChatAffectSnapshot> {
   return state.learningProfiles[userId]?.affect ?? null;
 }
 
-function selectRelationship(state: ChatState, roomId: ChatRoomId, userId: string, actorId: string) {
+function selectRelationship(
+  state: ChatState,
+  roomId: ChatRoomId,
+  userId: string,
+  actorId: string,
+): Nullable<any> {
   return (Object.values(state.relationships) as any[]).find((relationship) =>
-    relationship.roomId === roomId && relationship.userId === userId && relationship.actorId === actorId,
+    relationship.roomId === roomId
+    && relationship.userId === userId
+    && relationship.actorId === actorId,
   ) ?? null;
 }
 
-function deriveRescueDecision(
-  affect: ChatAffectSnapshot | null,
-  learning: ChatLearningProfile | null,
-  signal: ChatSignalEnvelope | null | undefined,
-  sourceMessage: ChatMessage | null,
-  haterPlan: HaterResponsePlan | null,
-) {
+function deriveRescueEnvelope(
+  affect: Nullable<ChatAffectSnapshot>,
+  learning: Nullable<ChatLearningProfile>,
+  signal: Nullable<ChatSignalEnvelope> | undefined,
+  sourceMessage: Nullable<ChatMessage>,
+  haterPlan: Nullable<HaterResponsePlan>,
+): DerivedRescueEnvelope {
   const urgencyScore =
     Number(learning?.churnRisk01 ?? 0.16) * 0.34 +
     Number(affect?.frustration01 ?? 0.12) * 0.22 +
     Number(affect?.embarrassment01 ?? 0.12) * 0.16 +
     Number(signal?.battle?.hostileMomentum ?? 40) / 100 * 0.12 +
-    (haterPlan?.hostility?.escalationBand === 'EXECUTION' ? 0.10 : 0);
-  const urgency =
+    (isExecutionEscalationBand(haterPlan?.hostility?.escalationBand) ? 0.10 : 0) +
+    (sourceMessage ? 0.03 : 0);
+
+  const urgency: RescueUrgency =
     urgencyScore >= 0.82 ? 'CRITICAL' :
     urgencyScore >= 0.64 ? 'HARD' :
     urgencyScore >= 0.46 ? 'MEDIUM' :
-    urgencyScore >= 0.24 ? 'SOFT' : 'NONE';
-  return {
-    triggered: urgency !== 'NONE',
+    urgencyScore >= 0.24 ? 'SOFT' :
+    'NONE';
+
+  const helperPersonaId =
+    urgency === 'CRITICAL' || urgency === 'HARD'
+      ? 'npc:helper:anchor'
+      : urgency === 'MEDIUM'
+        ? 'npc:helper:mercy'
+        : null;
+
+  const triggered = urgency !== 'NONE';
+  const shouldOpenRecoveryWindow = urgency === 'CRITICAL' || urgency === 'HARD';
+
+  const decision: ChatCounterSourceContext['rescue'] = {
+    triggered,
     urgency,
-    reason: urgency === 'NONE' ? 'no rescue needed' : 'player stability trending down under hostile pressure',
-    helperPersonaId: urgency === 'CRITICAL' || urgency === 'HARD' ? ('npc:helper:anchor' as any) : ('npc:helper:mercy' as any),
-    shouldOpenRecoveryWindow: urgency === 'CRITICAL' || urgency === 'HARD',
+    reason: triggered
+      ? 'player stability trending down under hostile pressure'
+      : 'no rescue needed',
+    helperPersonaId: helperPersonaId as any,
+    shouldOpenRecoveryWindow,
   };
+
+  return Object.freeze({
+    decision,
+    triggered,
+    urgency,
+    reason: triggered
+      ? 'player stability trending down under hostile pressure'
+      : 'no rescue needed',
+    helperPersonaId,
+    shouldOpenRecoveryWindow,
+  });
+}
+
+function isExecutionEscalationBand(
+  value: unknown,
+): boolean {
+  if (typeof value !== 'string') return false;
+  const normalized = value.toUpperCase();
+  return normalized === 'EXECUTION'
+    || normalized === 'TERMINAL'
+    || normalized === 'MAX'
+    || normalized === 'LETHAL';
 }
 
 function derivePublicExposure01(
   state: ChatState,
   room: ChatRoomState,
   haterPlan: HaterResponsePlan,
-  audienceHeat: ChatAudienceHeat | null,
+  audienceHeat: Nullable<ChatAudienceHeat>,
 ): Score01 {
   const occupants = estimateWitnessDensity(state, room.roomId);
-  const crowdBonus = room.activeVisibleChannel === 'GLOBAL' || room.activeVisibleChannel === 'LOBBY' ? 0.18 : room.activeVisibleChannel === 'DEAL_ROOM' ? 0.06 : 0.03;
+  const crowdBonus =
+    room.activeVisibleChannel === 'GLOBAL' || room.activeVisibleChannel === 'LOBBY'
+      ? 0.18
+      : room.activeVisibleChannel === 'DEAL_ROOM'
+        ? 0.06
+        : 0.03;
   const heat = Number(audienceHeat?.heat01 ?? 0.12) * 0.24;
   const haterPublicBias = Number(haterPlan.personaMatch?.persona.crowdBias01 ?? 0.4) * 0.18;
   return clamp01(occupants * 0.40 + crowdBonus + heat + haterPublicBias);
 }
 
 function deriveBossHumiliationRisk01(
-  affect: ChatAffectSnapshot | null,
-  learning: ChatLearningProfile | null,
+  affect: Nullable<ChatAffectSnapshot>,
+  learning: Nullable<ChatLearningProfile>,
   haterPlan: HaterResponsePlan,
-  signal: ChatSignalEnvelope | null | undefined,
+  signal: Nullable<ChatSignalEnvelope> | undefined,
   publicExposure01: Score01,
 ): Score01 {
   return clamp01(
@@ -1307,12 +1731,17 @@ function deriveBossHumiliationRisk01(
   );
 }
 
-function estimateWitnessDensity(state: ChatState, roomId: ChatRoomId): number {
+function estimateWitnessDensity(
+  state: ChatState,
+  roomId: ChatRoomId,
+): number {
   const occupants = state.roomSessions.byRoom[roomId] ?? [];
   return Math.max(0, Math.min(1, occupants.length / 10));
 }
 
-function mapAffectToBossContract(affect: ChatAffectSnapshot | null): any {
+function mapAffectToBossContract(
+  affect: Nullable<ChatAffectSnapshot>,
+): any {
   if (!affect) return null;
   return {
     confidence01: affect.confidence01,
@@ -1325,16 +1754,21 @@ function mapAffectToBossContract(affect: ChatAffectSnapshot | null): any {
   };
 }
 
-function mapAudienceHeatToBossContract(heat: ChatAudienceHeat | null): any {
+function mapAudienceHeatToBossContract(
+  heat: Nullable<ChatAudienceHeat>,
+): any {
   if (!heat) return null;
+  const heatScore: Score100 = clamp100(Number(heat.heat01) * 100);
   return {
-    heatScore: toBossScore100(Number(heat.heat01) * 100),
+    heatScore: toBossScore100(Number(heatScore)),
     audienceBias: heat.swarmDirection,
     witnessDensity01: heat.heat01,
   };
 }
 
-function mapLearningToBossContract(learning: ChatLearningProfile | null): any {
+function mapLearningToBossContract(
+  learning: Nullable<ChatLearningProfile>,
+): any {
   if (!learning) return null;
   return {
     userId: learning.userId,
@@ -1348,7 +1782,9 @@ function mapLearningToBossContract(learning: ChatLearningProfile | null): any {
   };
 }
 
-function mapRelationshipStance(relationship: any): any {
+function mapRelationshipStance(
+  relationship: any,
+): any {
   if (Number(relationship.rivalry01 ?? 0) >= 0.72) return 'HUNTING';
   if (Number(relationship.trust01 ?? 0) >= 0.62) return 'PROTECTIVE';
   if (Number(relationship.fear01 ?? 0) >= 0.54) return 'WOUNDED';
@@ -1356,7 +1792,9 @@ function mapRelationshipStance(relationship: any): any {
   return 'CLINICAL';
 }
 
-function mapRelationshipObjective(relationship: any): any {
+function mapRelationshipObjective(
+  relationship: any,
+): any {
   if (Number(relationship.rescueDebt01 ?? 0) >= 0.55) return 'RESCUE';
   if (Number(relationship.contempt01 ?? 0) >= 0.56) return 'HUMILIATE';
   if (Number(relationship.fear01 ?? 0) >= 0.52) return 'CONTAIN';
@@ -1370,7 +1808,9 @@ function helperDisplayName(helperId: unknown): string {
   return 'Syndicate Helper';
 }
 
-function helperPersonaFromActor(actor: ChatBossFightActor): any {
+function helperPersonaFromActor(
+  actor: ChatBossFightActor,
+): any {
   return {
     personaId: (`persona:${actor.actorId}`) as any,
     actorId: actor.actorId,
@@ -1391,7 +1831,9 @@ function helperPersonaFromActor(actor: ChatBossFightActor): any {
   };
 }
 
-function initialStartDelayMs(pattern: ChatBossPatternDescriptor): number {
+function initialStartDelayMs(
+  pattern: ChatBossPatternDescriptor,
+): number {
   switch (pattern.openingMode) {
     case 'IMMEDIATE':
       return 0;
@@ -1408,17 +1850,20 @@ function initialStartDelayMs(pattern: ChatBossPatternDescriptor): number {
   }
 }
 
-function deriveRoundDurationMs(attack: ChatBossAttack): number {
+function deriveRoundDurationMs(
+  attack: ChatBossAttack,
+): number {
   const base =
     attack.severity === 'EXECUTION' ? 3_800 :
     attack.severity === 'CRITICAL' ? 4_600 :
-    attack.severity === 'HEAVY' ? 5_400 : 6_000;
+    attack.severity === 'HEAVY' ? 5_400 :
+    6_000;
   return attack.timeboxedMs != null ? Math.min(base, Number(attack.timeboxedMs)) : base;
 }
 
 function selectAttackType(
-  signal: ChatSignalEnvelope | null | undefined,
-  sourceMessage: ChatMessage | null,
+  signal: Nullable<ChatSignalEnvelope> | undefined,
+  sourceMessage: Nullable<ChatMessage>,
   kind: ChatBossFightKind,
 ): AttackType {
   if (kind === 'DEAL_ROOM_AMBUSH') return 'LIQUIDATION';
@@ -1429,7 +1874,9 @@ function selectAttackType(
   return 'TAUNT';
 }
 
-function attackClassForType(attackType: AttackType): any {
+function attackClassForType(
+  attackType: AttackType,
+): any {
   switch (attackType) {
     case 'LIQUIDATION':
       return 'DEAL_ROOM_SQUEEZE';
@@ -1447,7 +1894,9 @@ function attackClassForType(attackType: AttackType): any {
   }
 }
 
-function severityForSignal(signal: ChatSignalEnvelope | null | undefined): any {
+function severityForSignal(
+  signal: Nullable<ChatSignalEnvelope> | undefined,
+): any {
   const momentum = Number(signal?.battle?.hostileMomentum ?? 50);
   if (momentum >= 86) return 'EXECUTION';
   if (momentum >= 68) return 'CRITICAL';
@@ -1455,7 +1904,9 @@ function severityForSignal(signal: ChatSignalEnvelope | null | undefined): any {
   return 'PROBING';
 }
 
-function punishmentForAttackType(attackType: AttackType): any {
+function punishmentForAttackType(
+  attackType: AttackType,
+): any {
   switch (attackType) {
     case 'LIQUIDATION':
       return 'DEAL_REPRICE';
@@ -1473,12 +1924,239 @@ function punishmentForAttackType(attackType: AttackType): any {
   }
 }
 
+function buildTelegraphForAttack(
+  attackType: AttackType,
+  openingMode: any,
+  publicEncounter: boolean,
+  now: UnixMs,
+): any {
+  const revealDelayMs =
+    openingMode === 'SILENCE_LURE' ? 950 :
+    openingMode === 'NEGOTIATION_READ_DELAYED' ? 800 :
+    openingMode === 'CROWD_PRIMED' ? 650 :
+    openingMode === 'STAGGERED' ? 420 :
+    250;
+
+  const silenceLeadInMs =
+    openingMode === 'SILENCE_LURE' ? 380 :
+    openingMode === 'NEGOTIATION_READ_DELAYED' ? 220 :
+    100;
+
+  const label =
+    attackType === 'LIQUIDATION' ? 'Terms tighten.' :
+    attackType === 'COMPLIANCE' ? 'Receipts requested.' :
+    attackType === 'CROWD_SWARM' ? 'The room turns.' :
+    attackType === 'SHADOW_LEAK' ? 'Something private surfaces.' :
+    'Pressure rises.';
+
+  return {
+    telegraphId: (`telegraph:${String(now)}:${attackType}`) as any,
+    label,
+    openingMode,
+    revealDelayMs,
+    silenceLeadInMs,
+    canFakeOut: publicEncounter && attackType !== 'COMPLIANCE',
+  };
+}
+
+function buildBossAttackLocally(input: {
+  readonly fightId: string;
+  readonly phaseId: string;
+  readonly phaseLabel: string;
+  readonly patternId: string;
+  readonly attackType: AttackType;
+  readonly attackClass: string;
+  readonly severity: 'PROBING' | 'HEAVY' | 'CRITICAL' | 'EXECUTION';
+  readonly primaryPunishment: string;
+  readonly telegraph: any;
+  readonly publicExposure01: number;
+  readonly bossControlScore: number;
+  readonly createdAt: UnixMs;
+}): ChatBossAttack {
+  const counterDemands =
+    input.attackType === 'COMPLIANCE'
+      ? (['VISIBLE_REPLY', 'PROOF_REPLY'] as const)
+      : input.attackType === 'SHADOW_LEAK'
+        ? (['QUOTE_REPLY'] as const)
+        : input.attackType === 'LIQUIDATION'
+          ? (['NEGOTIATION_REPLY', 'TIMED_REPLY'] as const)
+          : input.attackType === 'CROWD_SWARM'
+            ? (['VISIBLE_REPLY', 'TIMED_REPLY'] as const)
+            : (['VISIBLE_REPLY'] as const);
+
+  const preferredCounterTiming =
+    input.attackType === 'LIQUIDATION'
+      ? 'READ_PRESSURE_DELAYED'
+      : input.attackType === 'SHADOW_LEAK'
+        ? 'POST_SCENE'
+        : input.attackType === 'CROWD_SWARM'
+          ? 'FAST'
+          : 'BEAT_LOCKED';
+
+  const severityWeight =
+    input.severity === 'EXECUTION' ? 1.0 :
+    input.severity === 'CRITICAL' ? 0.80 :
+    input.severity === 'HEAVY' ? 0.60 :
+    0.40;
+
+  return {
+    attackId: (`attack:${input.fightId}:${input.phaseId}:${String(input.createdAt)}`) as any,
+    patternId: input.patternId as any,
+    label: `${input.phaseLabel} — ${input.attackType}`,
+    attackType: input.attackType as any,
+    attackClass: input.attackClass as any,
+    severity: input.severity as any,
+    primaryPunishment: input.primaryPunishment as any,
+    telegraph: input.telegraph,
+    proofWeighted: input.attackType === 'COMPLIANCE',
+    quoteWeighted: input.attackType === 'SHADOW_LEAK',
+    allowsHelperAssistance: input.severity !== 'EXECUTION',
+    allowsSilenceOutplay: input.attackType === 'SHADOW_LEAK',
+    allowsNegotiationEscape: input.attackType === 'LIQUIDATION',
+    preferredCounterTiming: preferredCounterTiming as any,
+    preferredCounterModes: Object.freeze(['PLAYER_TYPED', 'PLAYER_SELECTED'] as const) as any,
+    counterDemands: Object.freeze([...counterDemands]) as any,
+    opensCounterWindow: input.attackType !== 'SHADOW_LEAK',
+    crowdAmplified: input.attackClass === 'PUBLIC_SHAME' || input.attackClass === 'CROWD_SIGNAL',
+    timeboxedMs:
+      input.severity === 'EXECUTION' ? 3_800 :
+      input.severity === 'CRITICAL' ? 4_600 :
+      input.severity === 'HEAVY' ? 5_400 :
+      6_000,
+    leverageScore01: toBossScore01(clamp01(input.publicExposure01 * 0.5 + input.bossControlScore / 200)),
+    pressureDeltaScore: toBossScore100(clamp100(severityWeight * 60 * (1 + input.publicExposure01))),
+    embarrassmentDeltaScore: toBossScore100(clamp100(severityWeight * 40)),
+    dominanceDeltaScore: toBossScore100(clamp100(input.bossControlScore * severityWeight * 0.5)),
+    reputationDeltaScore: toBossScore100(clamp100(severityWeight * 30 * input.publicExposure01)),
+    notes: Object.freeze([]),
+  } as ChatBossAttack;
+}
+
+function shouldAdvancePhaseLocally(
+  phase: ChatBossFightPlan['phases'][number],
+  snapshot: ChatBossFightSnapshot,
+): boolean {
+  const order = Number((phase as any).order ?? 0);
+  if (order >= 3) return false;
+  return computeEscalationScore(snapshot) >= 0.66 || computeBreakScore(snapshot) >= 0.61;
+}
+
+function computeBreakScore(
+  snapshot: ChatBossFightSnapshot,
+): number {
+  const comebackProxy = Number(snapshot.playerStabilityScore ?? 50) / 100;
+  const playerControlProxy = (100 - Number(snapshot.bossControlScore ?? 50)) / 100;
+  return clamp01(
+    (100 - Number(snapshot.bossControlScore ?? 50)) / 100 * 0.40 +
+    comebackProxy * 0.34 +
+    Number(snapshot.publicExposure01 ?? 0.25) * 0.18 +
+    playerControlProxy * 0.08,
+  );
+}
+
+function computeEscalationScore(
+  snapshot: ChatBossFightSnapshot,
+): number {
+  const comebackProxy = Number(snapshot.playerStabilityScore ?? 50) / 100;
+  const churnProxy = Number(snapshot.rescueUrgencyScore ?? 15) / 100;
+  return clamp01(
+    Number(snapshot.bossControlScore ?? 50) / 100 * 0.46 +
+    (1 - comebackProxy) * 0.22 +
+    Number(snapshot.publicExposure01 ?? 0.25) * 0.18 +
+    (1 - churnProxy) * 0.14,
+  );
+}
+
+function computeLegendChargeScore(
+  snapshot: ChatBossFightSnapshot,
+): number {
+  const comebackProxy = Number(snapshot.playerStabilityScore ?? 50) / 100;
+  const playerControlProxy = (100 - Number(snapshot.bossControlScore ?? 50)) / 100;
+  return clamp01(
+    Number(snapshot.publicExposure01 ?? 0.25) * 0.48 +
+    comebackProxy * 0.24 +
+    playerControlProxy * 0.18 +
+    playerControlProxy * 0.10,
+  );
+}
+
+function buildFightResolution(
+  plan: ChatBossFightPlan,
+  snapshot: ChatBossFightSnapshot,
+  rounds: readonly ChatBossRound[],
+  counterResolution: ChatCounterResolveResult,
+  now: UnixMs,
+): ChatBossFightResolution {
+  const breakScore = computeBreakScore(snapshot);
+  const escalationScore = computeEscalationScore(snapshot);
+  const legendChargeScore = computeLegendChargeScore(snapshot);
+
+  const resolutionClass: ChatBossResolutionClass =
+    counterResolution.resolution.legendQualified || legendChargeScore >= 0.72
+      ? 'PLAYER_DOMINATES'
+      : counterResolution.resolution.succeeded && breakScore >= 0.62
+        ? 'PLAYER_STABILIZES'
+        : !counterResolution.resolution.succeeded && escalationScore >= 0.82
+          ? 'BOSS_EXECUTION'
+          : !counterResolution.resolution.succeeded && escalationScore >= 0.62
+            ? 'BOSS_ADVANTAGE'
+            : counterResolution.forcedClose
+              ? 'RESCUE_EXTRACTION'
+              : 'MUTUAL_STANDOFF';
+
+  const playerWon =
+    resolutionClass === 'PLAYER_DOMINATES'
+    || resolutionClass === 'PLAYER_STABILIZES';
+
+  const legendHint =
+    playerWon || counterResolution.resolution.legendQualified
+      ? {
+          legendClass: legendChargeScore >= 0.78 ? 'PUBLIC_REVERSAL' : 'PRECISION_HOLD',
+          confidence01: toBossScore01(legendChargeScore),
+          notes: Object.freeze([]),
+        }
+      : null;
+
+  return {
+    resolutionId: (`resolution:${plan.bossFightId}:${String(now)}`) as any,
+    bossFightId: plan.bossFightId,
+    resolvedAt: now,
+    resolutionClass,
+    playerWon,
+    bossBroken: resolutionClass === 'PLAYER_DOMINATES',
+    rescued: resolutionClass === 'RESCUE_EXTRACTION',
+    aborted: false,
+    totalRounds: rounds.length,
+    peakPressureScore: snapshot.accumulatedPressureScore,
+    peakEmbarrassmentScore: snapshot.accumulatedEmbarrassmentScore,
+    finalDominanceScore: snapshot.accumulatedDominanceScore,
+    finalReputationSwingScore: snapshot.accumulatedReputationSwingScore,
+    replayId: (`replay:${plan.bossFightId}:${String(now)}`) as any,
+    legendHint,
+    rounds,
+    notes: Object.freeze([
+      `breakScore=${breakScore.toFixed(3)}`,
+      `escalationScore=${escalationScore.toFixed(3)}`,
+      `legendChargeScore=${legendChargeScore.toFixed(3)}`,
+    ]),
+  } as ChatBossFightResolution;
+}
+
+function resolutionWeight(
+  resolutionClass: ChatBossResolutionClass,
+): number {
+  return RESOLUTION_CLASS_WEIGHT[resolutionClass];
+}
+
 function materializeBossOpeningLine(
   plan: ChatBossFightPlan,
   round: ChatBossRound,
-  sourceMessage: ChatMessage | null,
+  sourceMessage: Nullable<ChatMessage>,
 ): string {
-  const quote = sourceMessage?.plainText ? ` "${sourceMessage.plainText.slice(0, 96)}"` : '';
+  const quote = sourceMessage?.plainText
+    ? ` "${sourceMessage.plainText.slice(0, 96)}"`
+    : '';
+
   switch (plan.kind) {
     case 'PUBLIC_HUMILIATION':
       return `Everyone heard you.${quote} Good. Public memory is live now.`;
@@ -1493,20 +2171,39 @@ function materializeBossOpeningLine(
   }
 }
 
-function materializeHelperOpeningLine(round: ChatBossRound, candidate: any): string {
-  if (candidate?.move?.recommendedReplyText) return `Use this line or shorten it. ${candidate.move.recommendedReplyText}`;
-  if (round.attack.attackClass === 'DEAL_ROOM_SQUEEZE') return 'Do not defend everything. Reprice or exit.';
+function materializeHelperOpeningLine(
+  round: ChatBossRound,
+  candidate: any,
+): string {
+  if (candidate?.move?.recommendedReplyText) {
+    return `Use this line or shorten it. ${candidate.move.recommendedReplyText}`;
+  }
+  if (round.attack.attackClass === 'DEAL_ROOM_SQUEEZE') {
+    return 'Do not defend everything. Reprice or exit.';
+  }
   return 'One clean answer. Do not fight the entire room at once.';
 }
 
-function materializeEscalationLine(attack: ChatBossAttack, counterResolution: ChatCounterplayResolution): string {
-  if (!counterResolution.resolution.succeeded && attack.attackClass === 'PUBLIC_SHAME') return 'You felt that land, and so did everyone else.';
-  if (attack.attackClass === 'DEAL_ROOM_SQUEEZE') return 'You survived the first term. The next one is worse.';
+function materializeEscalationLine(
+  attack: ChatBossAttack,
+  counterResolution: ChatCounterResolveResult,
+): string {
+  if (!counterResolution.resolution.succeeded && attack.attackClass === 'PUBLIC_SHAME') {
+    return 'You felt that land, and so did everyone else.';
+  }
+  if (attack.attackClass === 'DEAL_ROOM_SQUEEZE') {
+    return 'You survived the first term. The next one is worse.';
+  }
   return `${attack.telegraph.label} The window shifts. The pressure does not.`;
 }
 
-function materializeResolutionSystemLine(resolution: ChatBossFightResolution): string {
-  switch (resolution.resolutionClass) {
+function materializeResolutionSystemLine(
+  resolution: ChatBossFightResolution,
+): string {
+  const resolutionClass: ChatBossResolutionClass =
+    resolution.resolutionClass as ChatBossResolutionClass;
+
+  switch (resolutionClass) {
     case 'PLAYER_DOMINATES':
       return 'Boss fight closed. Player authority restored.';
     case 'PLAYER_STABILIZES':
@@ -1516,29 +2213,48 @@ function materializeResolutionSystemLine(resolution: ChatBossFightResolution): s
     case 'BOSS_EXECUTION':
       return 'Boss fight closed. Hostile side secured the room.';
     default:
-      return `Boss fight closed with ${resolution.resolutionClass.toLowerCase().replace(/_/g, ' ')}.`;
+      return `Boss fight closed with ${resolutionClass.toLowerCase().replace(/_/g, ' ')}.`;
   }
 }
 
 function materializeBossResolutionLine(
   resolution: ChatBossFightResolution,
-  counterResolution: ChatCounterplayResolution,
+  counterResolution: ChatCounterResolveResult,
 ): string {
-  if (resolution.playerWon && resolution.legendHint) return 'That one will be replayed later. You earned witnesses.';
-  if (resolution.playerWon) return 'You held. Not cleanly maybe, but enough.';
-  if (resolution.rescued) return 'You leave because someone pulled you out, not because you won.';
-  if (!counterResolution.succeeded) return 'You missed your window. The room noticed.';
+  if (resolution.playerWon && resolution.legendHint) {
+    return 'That one will be replayed later. You earned witnesses.';
+  }
+  if (resolution.playerWon) {
+    return 'You held. Not cleanly maybe, but enough.';
+  }
+  if (resolution.rescued) {
+    return 'You leave because someone pulled you out, not because you won.';
+  }
+  if (!counterResolution.resolution.succeeded) {
+    return 'You missed your window. The room noticed.';
+  }
   return 'This ends here, but not between us.';
 }
 
-function materializeLegendLine(resolution: ChatBossFightResolution): string {
+function materializeLegendLine(
+  resolution: ChatBossFightResolution,
+): string {
   return `Legend moment: ${resolution.legendHint?.legendClass ?? 'PUBLIC_REVERSAL'}.`;
 }
 
-function bossPersonaForPlan(plan: ChatBossFightPlan): any {
+function bossPersonaForPlan(
+  plan: ChatBossFightPlan,
+): any {
   const id = plan.boss.actorId.toLowerCase();
-  if (id.includes('bureaucrat')) return HATER_PERSONAS.bureaucrat;
-  if (id.includes('manipulator')) return HATER_PERSONAS.manipulator;
+  if (id.includes('compliance') || id.includes('bureaucrat')) {
+    return HATER_PERSONAS.compliance;
+  }
+  if (id.includes('whisper') || id.includes('manipulator')) {
+    return HATER_PERSONAS.whisper;
+  }
+  if (id.includes('butcher')) {
+    return HATER_PERSONAS.butcher;
+  }
   return HATER_PERSONAS.liquidator;
 }
 

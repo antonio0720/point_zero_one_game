@@ -55,22 +55,25 @@ import {
 
 import {
   type ChatActorKind,
-  type ChatAuthority,
   type ChatCursorId,
-  type ChatCursorSnapshot,
   type ChatMessageId,
   type ChatNpcId,
-  type ChatPresenceSnapshot,
-  type ChatPresenceState,
   type ChatRange,
   type ChatRequestId,
-  type ChatSenderIdentity,
   type ChatSessionId,
-  type ChatTypingSnapshot,
-  type ChatTypingState,
   type ChatTypingToken,
   type ChatUserId,
   CHAT_ACTOR_KINDS,
+} from './ChatChannels';
+
+import {
+  type ChatAuthority,
+  type ChatCursorSnapshot,
+  type ChatPresenceSnapshot,
+  type ChatPresenceState,
+  type ChatSenderIdentity,
+  type ChatTypingSnapshot,
+  type ChatTypingState,
   CHAT_AUTHORITIES,
   CHAT_PRESENCE_STATES,
   CHAT_TYPING_STATES,

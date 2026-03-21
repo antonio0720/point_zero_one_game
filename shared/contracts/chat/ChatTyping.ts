@@ -60,18 +60,21 @@ import {
 
 import {
   type ChatActorKind,
-  type ChatAuthority,
   type ChatMessageId,
   type ChatRange,
   type ChatRequestId,
   type ChatSessionId,
   type ChatTypingToken,
   type ChatUserId,
+  CHAT_ACTOR_KINDS,
+} from './ChatChannels';
+
+import {
+  type ChatAuthority,
   type ChatTypingState as LegacyChatTypingState,
   type ChatTypingSnapshot as LegacyChatTypingSnapshot,
   type ChatClientTypingRequest as LegacyChatClientTypingRequest,
   type ChatReadReceipt as LegacyChatReadReceipt,
-  CHAT_ACTOR_KINDS,
   CHAT_AUTHORITIES,
   CHAT_TYPING_STATES,
 } from './ChatEvents';

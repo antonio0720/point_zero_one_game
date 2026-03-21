@@ -36,7 +36,8 @@ import type {
   UnixMs,
 } from '../types';
 
-import type { ChatActorKind, ChatAuthority, ChatMessageId } from '../../../../../../shared/contracts/chat/ChatEvents';
+import type { ChatActorKind, ChatMessageId } from '../../../../../../shared/contracts/chat/ChatChannels';
+import type { ChatAuthority } from '../../../../../../shared/contracts/chat/ChatEvents';
 
 import {
   DEFAULT_NEGOTIATION_READ_POLICY,

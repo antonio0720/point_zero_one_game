@@ -1,6 +1,3 @@
-Here is the TypeScript file `shared/contracts/loss_is_content/counterfactual_fork_contract.ts` as per your specifications:
-
-```typescript
 /**
  * Counterfactual Fork Contract
  */

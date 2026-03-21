@@ -1,6 +1,3 @@
-Here is the TypeScript file `shared/contracts/game/profile_contract.ts` as per your specifications:
-
-```typescript
 /**
  * PlayerProfile Interface
  */
@@ -51,6 +48,3 @@ export interface SpecialRule {
   description: string;
   effect: string; // Deterministic game engine or replay effects
 }
-```
-
-Please note that this TypeScript file only contains the types and interfaces as per your specifications. The actual implementation of the game engine, database schema, bash scripts, and Terraform configurations would require additional files and details not provided in this example.

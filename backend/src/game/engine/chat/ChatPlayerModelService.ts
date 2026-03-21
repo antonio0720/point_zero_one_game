@@ -62,7 +62,7 @@ function dominantAxes(vector: ChatPlayerModelVector): readonly ChatPlayerModelAx
     ['STABILITY_SEEKING', vector.stabilitySeeking01],
     ['RESCUE_RELIANT', vector.rescueReliant01],
   ]
-    .sort((a, b) => b[1] - a[1])
+    .sort((a, b) => Number(b[1]) - Number(a[1]))
     .slice(0, 4)
     .map(([axis]) => axis as ChatPlayerModelAxis);
 }

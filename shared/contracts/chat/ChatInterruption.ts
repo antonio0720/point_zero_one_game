@@ -54,8 +54,8 @@ import {
 import {
   CHAT_MOMENT_TYPES,
   type ChatMomentType,
-  type ChatSceneBeatType,
 } from './ChatEvents';
+import { type SharedChatSceneBeatType as ChatSceneBeatType } from './scene';
 
 // ============================================================================
 // MARK: Core enums and constants

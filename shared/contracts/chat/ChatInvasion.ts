@@ -62,32 +62,35 @@ import {
 
 import {
   type ChatActorKind,
-  type ChatAffectSnapshot,
-  type ChatAuthority,
-  type ChatFeatureSnapshot,
-  type ChatInferenceSnapshot,
   type ChatMessageId,
   type ChatMomentId,
-  type ChatNotificationKind,
   type ChatNpcId,
-  type ChatPressureTier,
   type ChatProofHash,
   type ChatRange,
   type ChatReplayId,
   type ChatRequestId,
   type ChatSequenceNumber,
   type ChatSessionId,
+  type ChatUserId,
+  type ChatWorldEventId,
+  CHAT_ACTOR_KINDS,
+} from './ChatChannels';
+
+import {
+  type ChatAffectSnapshot,
+  type ChatAuthority,
+  type ChatFeatureSnapshot,
+  type ChatNotificationKind,
+  type ChatPressureTier,
   type ChatTickTier,
   type ChatUpstreamSignal,
   type ChatUpstreamSignalType,
-  type ChatUserId,
-  type ChatWorldEventDescriptor,
-  type ChatWorldEventId,
-  CHAT_ACTOR_KINDS,
   CHAT_AUTHORITIES,
   CHAT_NOTIFICATION_KINDS,
   CHAT_UPSTREAM_SIGNAL_TYPES,
 } from './ChatEvents';
+
+import { type ChatWorldEventDefinition as ChatWorldEventDescriptor } from './ChatWorldEvent';
 
 import {
   type ChatAttachment,
@@ -653,7 +656,7 @@ export interface ChatInvasionCandidate {
   readonly activeChannelId: ChatChannelId;
   readonly score: Score100;
   readonly reason: string;
-  readonly inferenceSnapshot?: ChatInferenceSnapshot;
+  readonly inferenceSnapshot?: unknown;
   readonly featureSnapshot?: ChatFeatureSnapshot;
   readonly upstreamSignal?: ChatUpstreamSignal;
   readonly worldEvent?: ChatWorldEventDescriptor;

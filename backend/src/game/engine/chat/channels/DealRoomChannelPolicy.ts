@@ -776,7 +776,7 @@ export class DealRoomChannelPolicy {
   }
 
   public isModeSupported(modeId: DealRoomModeId): boolean {
-    return DEAL_ROOM_ALLOWED_MODES.includes(modeId);
+    return (DEAL_ROOM_ALLOWED_MODES as readonly DealRoomModeId[]).includes(modeId);
   }
 
   public isReadOnlyLifecycle(lifecycle: DealRoomLifecycleState): boolean {
@@ -1058,12 +1058,12 @@ export class DealRoomChannelPolicy {
       case '/dispute':
         return role === 'owner' || role === 'counterparty' || role === 'arbiter';
       case '/seal':
-        return role === 'arbiter' || role === 'admin';
+        return role === 'arbiter' || (role as string) === 'admin';
       case '/reopen':
         return lifecycle === 'cancelled' && (role === 'owner' || role === 'counterparty' || role === 'arbiter');
       case '/mute':
       case '/unmute':
-        return role === 'arbiter' || role === 'admin' || role === 'moderator';
+        return role === 'arbiter' || (role as string) === 'admin' || (role as string) === 'moderator';
       case '/ready':
       case '/note':
         return role !== 'spectator' && role !== 'none';

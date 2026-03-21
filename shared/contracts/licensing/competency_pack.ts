@@ -1,6 +1,3 @@
-Here is the TypeScript file `shared/contracts/licensing/competency_pack.ts` as per your specifications:
-
-```typescript
 /**
  * Represents a Competency Pack in Point Zero One Digital's financial roguelike game.
  */

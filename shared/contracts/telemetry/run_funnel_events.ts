@@ -1,6 +1,3 @@
-Here is the TypeScript file `shared/contracts/telemetry/run_funnel_events.ts` as per your specifications:
-
-```typescript
 /**
  * Telemetry contract for tracking game funnels and events
  */

@@ -709,7 +709,7 @@ function mapGlobalMatrixRows(): readonly BackendChatPolicyMatrixRow[] {
     channelId: 'GLOBAL',
     actorClass: row.actor,
     messageKind: row.kind,
-    expectation: 'defaultDecision' in row ? row.defaultDecision : row.baseDecision,
+    expectation: String('defaultDecision' in row ? row.defaultDecision : (row as any).baseDecision ?? ''),
   }));
 }
 
@@ -718,7 +718,7 @@ function mapSyndicateMatrixRows(): readonly BackendChatPolicyMatrixRow[] {
     channelId: 'SYNDICATE',
     actorClass: row.actor,
     messageKind: row.kind,
-    expectation: 'defaultDecision' in row ? row.defaultDecision : row.baseDecision,
+    expectation: String('defaultDecision' in row ? row.defaultDecision : (row as any).baseDecision ?? ''),
   }));
 }
 
@@ -1005,7 +1005,7 @@ export class BackendChatChannelSuite {
         const membership = context?.syndicateMembership ?? {
           roomId: 'suite-default-room',
           roomType: 'UNKNOWN',
-          roomPosture: 'ACTIVE',
+          roomPosture: 'BRIEFING',
           securityTier: 'OPEN',
           members: [],
         };

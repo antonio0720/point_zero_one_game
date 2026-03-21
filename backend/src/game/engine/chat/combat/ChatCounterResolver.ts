@@ -64,8 +64,8 @@ import type {
   ChatCounterValidationStatus,
   ChatCounterWindow,
   ChatCounterWindowId,
-  ChatQuoteReference,
 } from '../../../../../../shared/contracts/chat/ChatCounterplay';
+import type { ChatQuoteReference } from '../../../../../../shared/contracts/chat/ChatMessage';
 import {
   buildCounterCandidate,
   buildCounterplayPlan,
@@ -902,12 +902,17 @@ export class ChatCounterResolver {
     const helperWeight = template.kind === 'HELPER_ASSIST' ? Math.max(Number(input.signal.helperNeed01), 0.48) : Number(input.signal.helperNeed01) * 0.45;
     const embarrassmentRelief = Math.max(0, Number(input.signal.humiliationRisk01) - riskPenalty(template.riskBand));
     const dominanceSwing = computeDominanceSwing(template, input.signal, input.confidence01);
-    const legendReady = shouldCounterBecomeLegend(
-      template.canBecomeLegend,
-      input.signal.publicWitness01,
-      toContractScore01(Math.max(proofWeight, quoteWeight)),
-      toContractScore01(dominanceSwing),
-    );
+    const legendEfficacy: ChatCounterEfficacyBand =
+      dominanceSwing >= 80 ? 'LEGENDARY' :
+      dominanceSwing >= 60 ? 'DOMINANT' :
+      dominanceSwing >= 40 ? 'STRONG' :
+      'STABLE';
+    const legendReady = shouldCounterBecomeLegend({
+      legendQualified: template.canBecomeLegend && Number(input.signal.publicWitness01) >= 0.5,
+      efficacyBand: legendEfficacy,
+      pressureReliefScore: toContractScore100(Math.max(proofWeight, quoteWeight) * 100),
+      dominanceSwingScore: toContractScore100(dominanceSwing),
+    });
 
     return {
       moveId: (`move:${template.templateId}:${input.ordinal}`) as any,
@@ -1258,11 +1263,10 @@ function sanitizeDraft(text: string | null | undefined): string | null {
 function createQuoteReference(message: ChatMessage | null | undefined): ChatQuoteReference | null {
   if (!message?.plainText) return null;
   return {
-    messageId: message.id as any,
-    excerpt: message.plainText.slice(0, 120),
-    actorId: message.attribution.actorId,
-    roomId: message.roomId as any,
-    channelId: message.channelId as any,
+    quoteId: message.id as any,
+    quotedMessageId: message.id as any,
+    quotedSenderName: message.attribution.actorId,
+    quotedExcerpt: message.plainText.slice(0, 120),
   } as ChatQuoteReference;
 }
 
@@ -1494,7 +1498,7 @@ function mapCounterTiming(value: string | null | undefined): any {
 
 function mapPressureTier(value: PressureTier | null | undefined): any {
   switch (value) {
-    case 'LOW':
+    case 'NONE':
     case 'BUILDING':
     case 'ELEVATED':
     case 'HIGH':

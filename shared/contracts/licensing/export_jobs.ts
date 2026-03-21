@@ -1,6 +1,3 @@
-Here is the TypeScript code for the `ExportJob` contract as per your specifications:
-
-```typescript
 /**
  * ExportJob Contract
  */

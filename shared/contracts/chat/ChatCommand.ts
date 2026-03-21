@@ -61,14 +61,17 @@ import {
 
 import {
   type ChatActorKind,
-  type ChatAuthority,
   type ChatMessageId,
   type ChatNpcId,
   type ChatRequestId,
   type ChatSessionId,
-  type ChatTelemetryEventName,
   type ChatUserId,
   CHAT_ACTOR_KINDS,
+} from './ChatChannels';
+
+import {
+  type ChatAuthority,
+  type ChatTelemetryEventName,
   CHAT_AUTHORITIES,
 } from './ChatEvents';
 

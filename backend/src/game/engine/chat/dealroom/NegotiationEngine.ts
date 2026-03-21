@@ -85,7 +85,9 @@ import {
   asNegotiationThreadId,
   asNegotiationWindowId,
   asPricePoints,
+  asProbability,
   asScore0To1,
+  asScore0To100,
   asUnixMs,
   createNegotiationPriceVector,
   createNegotiationScoreBand,
@@ -304,7 +306,7 @@ export class NegotiationEngine {
 
     const openingOffer = request.openingOffer ? normalizeDraftToOffer(request.openingOffer, request.threadId, now, scene.sceneId) : undefined;
     const activeOffer = openingOffer ? toNegotiationEnvelope(negotiationId, request.threadId, request.primaryChannel, openingOffer, request.parties, phase, undefined, now) : undefined;
-    const activeWindow = openingOffer ? toNegotiationWindowFromOffer(openingOffer, request.primaryChannel, 'OPEN_RESPONSE') : scene.activeWindow;
+    const activeWindow = openingOffer ? toNegotiationWindowFromOffer(openingOffer, request.primaryChannel, 'OPENING_ANCHOR') : scene.activeWindow;
     const latestInference = deriveInferenceFromScene(negotiationId, phase, request.initialIntent ?? (openingOffer ? 'PRICE_DISCOVERY' : 'FAIR_TRADE'), actorStates, [], [], now);
 
     const negotiation: ChatNegotiation = {
@@ -357,7 +359,16 @@ export class NegotiationEngine {
     const record = this.requireActiveRecord(request.roomId, request.negotiationId);
     const now = asUnixMs(Number(request.createdAt ?? this.clock.now()));
     const signalFrame = deriveSignalsFromMessage(record.negotiation, request.body, request.messageId, now);
-    const inference = mergeInference(record.negotiation, signalFrame, now);
+    const inferenceFrame = deriveInferenceFromScene(
+      String(record.negotiation.negotiationId),
+      record.negotiation.phase,
+      record.negotiation.latestInference?.inferredIntent ?? 'FAIR_TRADE',
+      record.negotiation.actorStates,
+      signalFrame,
+      record.negotiation.latestInference?.pressureEdges ?? [],
+      now,
+    );
+    const inference = mergeInference(record.negotiation, inferenceFrame, now);
     const beats = buildSceneBeatsFromMessage(record.negotiation, request, now, inference);
     const leakThreats = maybeBuildLeakThreats(record.negotiation, request.body, request.actorId, now, inference);
     const memories = maybeBuildMessageMemories(request.body, request.messageId, now);
@@ -410,7 +421,7 @@ export class NegotiationEngine {
     );
 
     const leakThreats = maybeEscalateLeakFromEvaluation(record.negotiation, evaluation, request.offer, now, request.roomId);
-    const activeWindow = toNegotiationWindowFromOffer(request.offer, record.negotiation.primaryChannel, 'COUNTERPLAY');
+    const activeWindow = toNegotiationWindowFromOffer(request.offer, record.negotiation.primaryChannel, 'COUNTER_REQUIRED');
     const nextPhase = derivePhaseFromEvaluation(evaluation, false);
     const nextStatus: NegotiationStatus = 'ACTIVE';
 
@@ -585,7 +596,7 @@ export class NegotiationEngine {
       if (record.negotiation.activeWindow && negotiationWindowHasExpired(record.negotiation.activeWindow, now)) {
         const resolution: NegotiationResolution = {
           negotiationId: record.negotiation.negotiationId,
-          outcome: 'EXPIRED',
+          outcome: 'TIMED_OUT',
           winningActorId: undefined,
           acceptedOfferId: undefined,
           finalPrice: undefined,
@@ -742,7 +753,7 @@ function createActorState(
     urgencySignal: asScore0To1(urgencySignal),
     attachmentToOutcome: asScore0To1(attachmentToOutcome),
     walkAwayLikelihood: asScore0To1(walkAwayLikelihood),
-    reputation: createReputationVector(0.52, 0.47, 0.42, 0.3),
+    reputation: createReputationVector(52, 0.47, 0.42, 0.3),
     emotion: createEmotionVector(0.32, 0.41, 0.28, 0.35, 0.2, 0.22),
     updatedAt: now,
   };
@@ -770,7 +781,7 @@ function createInitialScene(input: {
   };
 
   const openWindow = createNegotiationWindow(
-    'OPEN_RESPONSE',
+    'OPENING_ANCHOR',
     input.primaryChannel,
     Number(input.openedAt),
     Number(input.openedAt) + input.defaultOpenWindowMs,
@@ -866,9 +877,9 @@ function toNegotiationEnvelope(
       price: createNegotiationPriceVector(Number(offer.currentVersion.price.amount), String(offer.currentVersion.price.currency)),
       valueEstimate: offer.currentVersion.price.marketRange
         ? {
-            low: asPricePoints(Number(offer.currentVersion.price.marketRange.min)),
-            high: asPricePoints(Number(offer.currentVersion.price.marketRange.max)),
-            midpoint: offer.currentVersion.price.marketRange.expected === undefined ? undefined : asPricePoints(Number(offer.currentVersion.price.marketRange.expected)),
+            min: Number(offer.currentVersion.price.marketRange.min),
+            max: Number(offer.currentVersion.price.marketRange.max),
+            preferred: offer.currentVersion.price.marketRange.expected === undefined ? undefined : Number(offer.currentVersion.price.marketRange.expected),
           }
         : undefined,
       riskAdjustmentBps: offer.currentVersion.price.feeBps,
@@ -945,10 +956,10 @@ function inferIntentFromOffer(offer: ChatOffer): NegotiationIntent {
   }
 }
 
-function toNegotiationConcessions(concessions: readonly ChatOffer['currentVersion']['concessions'] | undefined): NegotiationConcession[] | undefined {
+function toNegotiationConcessions(concessions: ChatOffer['currentVersion']['concessions'] | undefined): NegotiationConcession[] | undefined {
   if (!concessions || concessions.length === 0) return undefined;
   return concessions.map((concession) => ({
-    type: 'SOFTENER',
+    type: 'PROOF' as const,
     magnitude: Number(concession.valueDelta ?? 0),
     describedAs: concession.label,
     reversible: false,
@@ -1007,12 +1018,13 @@ function createRiskVector(signals: readonly NegotiationSignalEvidence[], edges: 
   const helper = maxSignal(signals, 'HELPER_NEED');
   const pressureIntensity = Math.max(...edges.map((edge) => Number(edge.intensity.normalized)), 0.2);
   return {
+    overpayRisk: asScore0To1(clamp01(pressureIntensity * 0.3)),
+    underbidRisk: asScore0To1(clamp01(fear * 0.24 + pressureIntensity * 0.22)),
+    churnRisk: asScore0To1(clamp01((1 - pressureIntensity) * 0.22 + helper * 0.1)),
+    bluffLikelihood: asProbability(clamp01(reputation)),
     collapseRisk: asScore0To1(clamp01(fear * 0.35 + leak * 0.25 + pressureIntensity * 0.2)),
     leakRisk: asScore0To1(leak),
-    rejectionRisk: asScore0To1(clamp01(fear * 0.24 + pressureIntensity * 0.22)),
-    stallRisk: asScore0To1(clamp01((1 - pressureIntensity) * 0.22 + helper * 0.1)),
     rescueNeed: asScore0To1(clamp01(helper * 0.5 + fear * 0.18 + leak * 0.12)),
-    reputationRisk: asScore0To1(reputation),
   };
 }
 
@@ -1090,12 +1102,13 @@ function mergeInference(negotiation: ChatNegotiation, frame: NegotiationInferenc
   const mergedSignals = [...prior.signals, ...frame.signals].slice(-24);
   const mergedEdges = [...prior.pressureEdges, ...frame.pressureEdges].slice(-24);
   const averagedRisk: NegotiationRiskVector = {
+    overpayRisk: asScore0To1((Number(prior.risk.overpayRisk) + Number(frame.risk.overpayRisk)) / 2),
+    underbidRisk: asScore0To1((Number(prior.risk.underbidRisk) + Number(frame.risk.underbidRisk)) / 2),
+    churnRisk: asScore0To1((Number(prior.risk.churnRisk) + Number(frame.risk.churnRisk)) / 2),
+    bluffLikelihood: asProbability((Number(prior.risk.bluffLikelihood) + Number(frame.risk.bluffLikelihood)) / 2),
     collapseRisk: asScore0To1((Number(prior.risk.collapseRisk) + Number(frame.risk.collapseRisk)) / 2),
     leakRisk: asScore0To1((Number(prior.risk.leakRisk) + Number(frame.risk.leakRisk)) / 2),
-    rejectionRisk: asScore0To1((Number(prior.risk.rejectionRisk) + Number(frame.risk.rejectionRisk)) / 2),
-    stallRisk: asScore0To1((Number(prior.risk.stallRisk) + Number(frame.risk.stallRisk)) / 2),
     rescueNeed: asScore0To1((Number(prior.risk.rescueNeed) + Number(frame.risk.rescueNeed)) / 2),
-    reputationRisk: asScore0To1((Number(prior.risk.reputationRisk) + Number(frame.risk.reputationRisk)) / 2),
   };
   return {
     ...frame,
@@ -1283,12 +1296,16 @@ function patchActorStatesFromMessage(
 
 function patchEmotionFromInference(emotion: NegotiationEmotionVector, inference: NegotiationInferenceFrame): NegotiationEmotionVector {
   return {
-    fear: asScore0To1(clamp01((Number(emotion.fear) + Number(inference.risk.collapseRisk)) / 2)),
-    confidence: asScore0To1(clamp01((Number(emotion.confidence) + (1 - Number(inference.risk.rejectionRisk))) / 2)),
-    frustration: asScore0To1(clamp01((Number(emotion.frustration) + Number(inference.risk.stallRisk)) / 2)),
+    intimidation: emotion.intimidation,
+    confidence: asScore0To1(clamp01((Number(emotion.confidence) + (1 - Number(inference.risk.underbidRisk))) / 2)),
+    frustration: asScore0To1(clamp01((Number(emotion.frustration) + Number(inference.risk.churnRisk)) / 2)),
+    curiosity: emotion.curiosity,
     attachment: asScore0To1(clamp01((Number(emotion.attachment) + Number(inference.risk.rescueNeed)) / 2)),
+    embarrassment: emotion.embarrassment,
     relief: asScore0To1(clamp01((Number(emotion.relief) + (1 - Number(inference.risk.leakRisk))) / 2)),
-    dominance: asScore0To1(clamp01((Number(emotion.dominance) + Number(inference.reputation.dominance)) / 2)),
+    dominance: emotion.dominance,
+    desperation: asScore0To1(clamp01((Number(emotion.desperation) + Number(inference.risk.collapseRisk)) / 2)),
+    trust: emotion.trust,
   };
 }
 
@@ -1415,54 +1432,62 @@ function shouldSoftLock(evaluation: OfferCounterEngineEvaluation): boolean {
 // ============================================================================
 
 function averageReputation(actorStates: readonly NegotiationActorState[]): NegotiationReputationVector {
-  if (actorStates.length === 0) return createReputationVector(0.4, 0.4, 0.4, 0.3);
+  if (actorStates.length === 0) return createReputationVector(40, 0.4, 0.4, 0.3);
   const acc = actorStates.reduce(
     (memo, state) => {
-      memo.respect += Number(state.reputation.respect);
-      memo.trust += Number(state.reputation.trust);
-      memo.embarrassment += Number(state.reputation.embarrassment);
-      memo.dominance += Number(state.reputation.dominance);
+      memo.current += Number(state.reputation.current);
+      memo.leakRisk += Number(state.reputation.leakRisk);
+      memo.faceThreat += Number(state.reputation.faceThreat);
+      memo.witnessHeat += Number(state.reputation.witnessHeat);
       return memo;
     },
-    { respect: 0, trust: 0, embarrassment: 0, dominance: 0 },
+    { current: 0, leakRisk: 0, faceThreat: 0, witnessHeat: 0 },
   );
-  return createReputationVector(acc.respect / actorStates.length, acc.trust / actorStates.length, acc.embarrassment / actorStates.length, acc.dominance / actorStates.length);
+  const n = actorStates.length;
+  return createReputationVector(acc.current / n, acc.leakRisk / n, acc.faceThreat / n, acc.witnessHeat / n);
 }
 
 function averageEmotion(actorStates: readonly NegotiationActorState[]): NegotiationEmotionVector {
   if (actorStates.length === 0) return createEmotionVector(0.3, 0.4, 0.3, 0.3, 0.2, 0.3);
   const acc = actorStates.reduce(
     (memo, state) => {
-      memo.fear += Number(state.emotion.fear);
+      memo.intimidation += Number(state.emotion.intimidation);
       memo.confidence += Number(state.emotion.confidence);
       memo.frustration += Number(state.emotion.frustration);
       memo.attachment += Number(state.emotion.attachment);
       memo.relief += Number(state.emotion.relief);
       memo.dominance += Number(state.emotion.dominance);
+      memo.desperation += Number(state.emotion.desperation);
       return memo;
     },
-    { fear: 0, confidence: 0, frustration: 0, attachment: 0, relief: 0, dominance: 0 },
+    { intimidation: 0, confidence: 0, frustration: 0, attachment: 0, relief: 0, dominance: 0, desperation: 0 },
   );
-  return createEmotionVector(acc.fear / actorStates.length, acc.confidence / actorStates.length, acc.frustration / actorStates.length, acc.attachment / actorStates.length, acc.relief / actorStates.length, acc.dominance / actorStates.length);
+  const n = actorStates.length;
+  return createEmotionVector(acc.intimidation / n, acc.confidence / n, acc.frustration / n, acc.attachment / n, acc.relief / n, acc.dominance / n, acc.desperation / n);
 }
 
-function createReputationVector(respect: number, trust: number, embarrassment: number, dominance: number): NegotiationReputationVector {
+function createReputationVector(current: number, leakRisk: number, faceThreat: number, witnessHeat: number): NegotiationReputationVector {
   return {
-    respect: asScore0To1(clamp01(respect)),
-    trust: asScore0To1(clamp01(trust)),
-    embarrassment: asScore0To1(clamp01(embarrassment)),
-    dominance: asScore0To1(clamp01(dominance)),
+    current: asScore0To100(Math.min(100, Math.max(0, current))),
+    projectedDelta: 0,
+    leakRisk: asScore0To1(clamp01(leakRisk)),
+    faceThreat: asScore0To1(clamp01(faceThreat)),
+    witnessHeat: asScore0To1(clamp01(witnessHeat)),
   };
 }
 
-function createEmotionVector(fear: number, confidence: number, frustration: number, attachment: number, relief: number, dominance: number): NegotiationEmotionVector {
+function createEmotionVector(intimidation: number, confidence: number, frustration: number, attachment: number, relief: number, dominance: number, desperation: number = 0): NegotiationEmotionVector {
   return {
-    fear: asScore0To1(clamp01(fear)),
+    intimidation: asScore0To1(clamp01(intimidation)),
     confidence: asScore0To1(clamp01(confidence)),
     frustration: asScore0To1(clamp01(frustration)),
+    curiosity: asScore0To1(0),
     attachment: asScore0To1(clamp01(attachment)),
+    embarrassment: asScore0To1(0),
     relief: asScore0To1(clamp01(relief)),
     dominance: asScore0To1(clamp01(dominance)),
+    desperation: asScore0To1(clamp01(desperation)),
+    trust: asScore0To1(0),
   };
 }
 

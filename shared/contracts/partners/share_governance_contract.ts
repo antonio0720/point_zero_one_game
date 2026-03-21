@@ -1,6 +1,3 @@
-Here is the TypeScript file `share_governance_contract.ts` following your specifications:
-
-```typescript
 /**
  * Share Governance Contract for partners in Slack/Teams contexts
  */

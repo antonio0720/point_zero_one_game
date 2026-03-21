@@ -545,7 +545,7 @@ export class ChatTelegraphPolicy {
   public deriveProjection(request: ChatTelegraphProjectionRequest): ChatTelegraphProjection {
     const now = asUnixMs(request.now ?? this.clock.now());
     const visibleChannel = this.resolveVisibleChannel(request.fight.visibleChannel, request.fight.channelId);
-    const telegraph = deriveBossTelegraph(request.attack);
+    const telegraph = request.attack.telegraph;
     const channelProfile = this.getChannelProfile(visibleChannel);
     const openingProfile = this.getOpeningProfile(telegraph.openingMode);
     const severityProfile = this.getSeverityProfile(request.attack.severity);
@@ -577,8 +577,8 @@ export class ChatTelegraphPolicy {
     const fakeOutRisk01 = clamp01(
       severityProfile.fakeOutRisk01
       + openingProfile.fakeOutBias01
-      + telegraph.canFakeOut * 0.14
-      + request.attack.opensCounterWindow * 0.04
+      + Number(telegraph.canFakeOut) * 0.14
+      + Number(request.attack.opensCounterWindow) * 0.04
       - threatReadability01 * 0.08,
     );
 
@@ -662,7 +662,7 @@ export class ChatTelegraphPolicy {
 
     return Object.freeze({
       roomId: request.room.roomId,
-      sessionId: request.session.sessionId,
+      sessionId: request.session.identity.sessionId,
       fightId: String(request.fight.bossFightId),
       roundId: String(request.round.roundId),
       attackId: String(request.attack.attackId),
@@ -787,7 +787,7 @@ export class ChatTelegraphPolicy {
         this.describeCrowdShift(input.visibleChannel, input.dreadScore01),
         cursor,
         cursor + crowdDuration,
-        input.visibleChannel !== 'DIRECT',
+        (input.visibleChannel as string) !== 'DIRECT',
         input.request.fight.channelId,
         clamp01(0.18 + input.dreadScore01 * 0.29),
         ['Crowd shift expresses witness behavior before the attack text resolves.'],
@@ -854,7 +854,7 @@ export class ChatTelegraphPolicy {
     const ridiculeRisk01 = clamp01(channelProfile.ridiculeBias01 + humiliationRisk01 * 0.33);
     const syndicateLeakRisk01 = clamp01(
       Number(request.fight.visibleChannel === 'SYNDICATE') * 0.18
-      + Number(request.attack.attackClass === 'NEGOTIATION') * 0.16
+      + Number((request.attack.attackClass as string) === 'NEGOTIATION') * 0.16
       + publicExposure01 * 0.09,
     );
     const recommendedCrowdLineCount = Math.max(
@@ -897,9 +897,9 @@ export class ChatTelegraphPolicy {
     readonly shouldEchoToThreatRadar: boolean;
   }): ChatTelegraphOverlayPlan {
     const topHint = input.counterHints[0] ?? null;
-    const proofCueVisible = input.counterHints.some((hint) => hint.demand === 'PROOF')
+    const proofCueVisible = input.counterHints.some((hint) => hint.demand === 'PROOF_REPLY')
       && input.threatReadability01 >= this.tuning.proofHintThreshold01;
-    const quoteCueVisible = input.counterHints.some((hint) => hint.demand === 'QUOTE')
+    const quoteCueVisible = input.counterHints.some((hint) => hint.demand === 'QUOTE_REPLY')
       && input.threatReadability01 >= this.tuning.quoteHintThreshold01;
     const rescueTone = input.rescueNeed01 >= this.tuning.rescueBannerThreshold01
       ? 'URGENT'
@@ -976,7 +976,7 @@ export class ChatTelegraphPolicy {
   ): Score01 {
     const base =
       Number(request.fight.visibleChannel === 'GLOBAL') * 0.42
-      + Number(request.fight.visibleChannel === 'SPECTATOR') * 0.31
+      + Number((request.fight.visibleChannel as string) === 'SPECTATOR') * 0.31
       + Number(request.fight.visibleChannel === 'SYNDICATE') * 0.19
       + channelProfile.witnessBonus01 * 0.66;
 
@@ -990,11 +990,11 @@ export class ChatTelegraphPolicy {
     publicExposure01: Score01,
   ): Score01 {
     const base =
-      Number(request.attack.attackClass === 'HUMILIATION') * 0.28
-      + Number(request.attack.attackClass === 'DOMINANCE') * 0.18
+      Number((request.attack.attackClass as string) === 'HUMILIATION') * 0.28
+      + Number((request.attack.attackClass as string) === 'DOMINANCE') * 0.18
       + Number(request.attack.crowdAmplified) * 0.11
-      + Number(request.attack.primaryPunishment === 'PUBLIC_MARK') * 0.15
-      + Number(request.attack.primaryPunishment === 'REPUTATION_BLEED') * 0.13;
+      + Number((request.attack.primaryPunishment as string) === 'PUBLIC_MARK') * 0.15
+      + Number((request.attack.primaryPunishment as string) === 'REPUTATION_BLEED') * 0.13;
 
     return clamp01(base + publicExposure01 * 0.29 + this.estimateAffectFragility01(request.signal) * 0.14);
   }
@@ -1002,15 +1002,15 @@ export class ChatTelegraphPolicy {
   private derivePressureStress01(request: ChatTelegraphProjectionRequest): Score01 {
     const pressureTier = this.estimatePressureTier(request.signal);
     switch (pressureTier) {
-      case 'BREAKPOINT':
-        return clamp01(0.91);
       case 'CRITICAL':
+        return clamp01(0.91);
+      case 'HIGH':
         return clamp01(0.76);
-      case 'PRESSURED':
+      case 'ELEVATED':
         return clamp01(0.58);
-      case 'WATCHFUL':
+      case 'BUILDING':
         return clamp01(0.32);
-      case 'CALM':
+      case 'NONE':
       default:
         return clamp01(0.18);
     }
@@ -1030,7 +1030,7 @@ export class ChatTelegraphPolicy {
   }
 
   private visibilityPenaltyForQuietChannel(visibleChannel: ChatVisibleChannel): number {
-    if (visibleChannel === 'DEAL_ROOM' || visibleChannel === 'DIRECT') {
+    if (visibleChannel === 'DEAL_ROOM' || (visibleChannel as string) === 'DIRECT') {
       return this.tuning.quietChannelVisibilityPenalty01;
     }
     return 0;
@@ -1066,13 +1066,13 @@ export class ChatTelegraphPolicy {
   private explanationForDemand(demand: ChatBossCounterDemand, attack: ChatBossAttack): string {
     const fromRegistry = (CHAT_TELEGRAPH_DEMAND_LABELS as Record<string, string>)[String(demand)];
     const contextual =
-      demand === 'PROOF' && attack.proofWeighted
+      demand === 'PROOF_REPLY' && attack.proofWeighted
         ? 'This attack is weighted toward evidence. Unsupported swagger will underperform.'
-        : demand === 'QUOTE' && attack.quoteWeighted
+        : demand === 'QUOTE_REPLY' && attack.quoteWeighted
           ? 'This boss lane rewards callbacks and direct reversals of prior language.'
-          : demand === 'SILENCE' && attack.allowsSilenceOutplay
+          : demand === 'SILENCE_REPLY' && attack.allowsSilenceOutplay
             ? 'Deliberate timing may be stronger than instant speech here.'
-            : demand === 'NEGOTIATION' && attack.allowsNegotiationEscape
+            : demand === 'NEGOTIATION_REPLY' && attack.allowsNegotiationEscape
               ? 'Terms can be changed; you do not have to accept the hostile frame.'
               : 'Meet the demand with timing, clarity, and authored intent.';
     return `${fromRegistry ?? 'Readable counter demand.'} ${contextual}`;
@@ -1096,7 +1096,7 @@ export class ChatTelegraphPolicy {
 
   private describeWarningLabel(telegraph: ChatBossTelegraph, visibleChannel: ChatVisibleChannel): string {
     if (visibleChannel === 'DEAL_ROOM') return `${telegraph.label} — terms are shifting.`;
-    if (visibleChannel === 'DIRECT') return `${telegraph.label} — direct pressure incoming.`;
+    if ((visibleChannel as string) === 'DIRECT') return `${telegraph.label} — direct pressure incoming.`;
     return `${telegraph.label} — the room can see it forming.`;
   }
 
@@ -1219,7 +1219,7 @@ export class ChatTelegraphPolicy {
     if (probe?.pressureTier) return probe.pressureTier;
     const metadataTier = probe?.metadata?.['pressureTier'];
     if (typeof metadataTier === 'string') return metadataTier as PressureTier;
-    return 'WATCHFUL';
+    return 'BUILDING';
   }
 }
 

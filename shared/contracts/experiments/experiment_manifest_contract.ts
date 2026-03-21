@@ -1,6 +1,3 @@
-Here is the TypeScript file `shared/contracts/experiments/experiment_manifest_contract.ts`:
-
-```typescript
 /**
  * Experiment manifest contract
  */

@@ -1,6 +1,3 @@
-Here is the TypeScript file `shared/contracts/licensing/learner_overlays.ts` as per your specifications:
-
-```typescript
 /**
  * Learner Overlay Contract Interface
  */

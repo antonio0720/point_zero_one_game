@@ -1,6 +1,3 @@
-Here is the TypeScript file `shared/contracts/share/share_contract.ts`:
-
-```typescript
 /**
  * ShareableArtifact types for Point Zero One Digital's financial roguelike game.
  */

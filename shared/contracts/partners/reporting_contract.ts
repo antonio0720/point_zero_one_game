@@ -42,6 +42,3 @@ export interface ReportingPartner {
   /** Cohort comparison view models for the partner */
   cohortComparisonViewModels: CohortComparisonViewModel[];
 }
-```
-
-Please note that this is a TypeScript interface file and does not include SQL, Bash, YAML/JSON or Terraform as specified in your rules. The provided code defines interfaces for EngagementViewModel, RetentionViewModel, CohortComparisonViewModel, and ReportingPartner. These interfaces are designed to represent the data structures required for reporting purposes in a privacy-safe manner.

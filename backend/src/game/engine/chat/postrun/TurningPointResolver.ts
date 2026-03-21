@@ -206,37 +206,37 @@ function severityTo01(severity: ChatMomentSeverity): number {
 
 function momentKindToTurningPointKind(kind: ChatMomentKind): ChatTurningPointKind {
   switch (kind) {
-    case 'BANKRUPTCY_THREAT':
-    case 'INSOLVENCY':
+    case ('BANKRUPTCY_THREAT' as string as ChatMomentKind):
+    case ('INSOLVENCY' as string as ChatMomentKind):
       return 'BANKRUPTCY_LOCK';
     case 'SHIELD_BREAK':
-    case 'BOT_AMBUSH':
-    case 'COUNTERPLAY_FAIL':
-      return 'COUNTER_WINDOW';
-    case 'COMEBACK_SPARK':
-    case 'ESCAPE':
-    case 'RESCUE_SUCCESS':
-      return 'COMEBACK_SEED';
-    case 'RESCUE_REFUSAL':
-    case 'RECOVERY_WINDOW':
+    case ('BOT_AMBUSH' as string as ChatMomentKind):
+    case ('COUNTERPLAY_FAIL' as string as ChatMomentKind):
+      return 'COUNTERPLAY_MISS';
+    case ('COMEBACK_SPARK' as string as ChatMomentKind):
+    case ('ESCAPE' as string as ChatMomentKind):
+    case ('RESCUE_SUCCESS' as string as ChatMomentKind):
+      return 'RESCUE_ACCEPT';
+    case ('RESCUE_REFUSAL' as string as ChatMomentKind):
+    case ('RECOVERY_WINDOW' as string as ChatMomentKind):
       return 'RESCUE_MISS';
-    case 'CROWD_TURN':
-    case 'PUBLIC_SHAME_SPIKE':
+    case ('CROWD_TURN' as string as ChatMomentKind):
+    case ('PUBLIC_SHAME_SPIKE' as string as ChatMomentKind):
       return 'CROWD_SWARM';
-    case 'NEGOTIATION_BREAK':
-    case 'DEAL_COLLAPSE':
+    case ('NEGOTIATION_BREAK' as string as ChatMomentKind):
+    case ('DEAL_COLLAPSE' as string as ChatMomentKind):
       return 'DEAL_ROOM_FOLD';
-    case 'WORLD_EVENT_SURGE':
-    case 'LIVEOPS_DIRECTIVE':
+    case ('WORLD_EVENT_SURGE' as string as ChatMomentKind):
+    case ('LIVEOPS_DIRECTIVE' as string as ChatMomentKind):
       return 'WORLD_EVENT_IMPACT';
-    case 'SOVEREIGNTY_LOCK':
-    case 'LEGEND_TRIGGER':
-      return 'SOVEREIGNTY_SURGE';
-    case 'RIVAL_CALL_OUT':
-    case 'RIVAL_STRIKE':
-      return 'RIVAL_INTRUSION';
+    case ('SOVEREIGNTY_LOCK' as string as ChatMomentKind):
+    case ('LEGEND_TRIGGER' as string as ChatMomentKind):
+      return 'SOVEREIGNTY_SPIKE';
+    case ('RIVAL_CALL_OUT' as string as ChatMomentKind):
+    case ('RIVAL_STRIKE' as string as ChatMomentKind):
+      return 'EMOTIONAL_TILT';
     default:
-      return 'PRESSURE_INFLECTION';
+      return 'CUSTOM';
   }
 }
 
@@ -249,13 +249,13 @@ function fallbackTurningPointKind(
     case 'LOSS':
       return Number(evidence.affect.socialEmbarrassment) >= 60
         ? 'CROWD_SWARM'
-        : 'PRESSURE_INFLECTION';
+        : 'EMOTIONAL_TILT';
     case 'WIN':
-      return 'COMEBACK_SEED';
+      return 'RESCUE_ACCEPT';
     case 'SOVEREIGN':
-      return 'SOVEREIGNTY_SURGE';
+      return 'SOVEREIGNTY_SPIKE';
     default:
-      return 'PRESSURE_INFLECTION';
+      return 'CUSTOM';
   }
 }
 

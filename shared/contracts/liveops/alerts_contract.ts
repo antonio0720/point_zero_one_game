@@ -1,6 +1,3 @@
-Here is the TypeScript file `shared/contracts/liveops/alerts_contract.ts`:
-
-```typescript
 /**
  * Alert definitions schema (thresholds, windows, severity, runbooks).
  */

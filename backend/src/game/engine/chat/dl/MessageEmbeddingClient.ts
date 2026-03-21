@@ -519,8 +519,7 @@ function pressureBiasValue(
   switch (pressureTier) {
     case 'HIGH':
       return defaults.pressureBiasHigh01;
-    case 'MAX':
-    case 'EXTREME':
+    case 'CRITICAL':
       return defaults.pressureBiasMax01;
     default:
       return 0;
@@ -549,7 +548,7 @@ function roomBiasValue(
   roomKind: Nullable<ChatRoomKind> | undefined,
   defaults: typeof CHAT_MESSAGE_EMBEDDING_DEFAULTS,
 ): number {
-  switch (roomKind) {
+  switch (roomKind as string) {
     case 'BATTLE':
       return defaults.roomBiasBattle01;
     case 'DEAL_ROOM':
@@ -1006,9 +1005,9 @@ export class MessageEmbeddingClient {
     else uniquePush(tokens, seen, 'heat:cold');
 
     if (signalEnvelope && typeof signalEnvelope === 'object') {
-      const kind = stringOrEmpty((signalEnvelope as Record<string, unknown>).kind as Nullable<string>);
-      const type = stringOrEmpty((signalEnvelope as Record<string, unknown>).type as Nullable<string>);
-      const event = stringOrEmpty((signalEnvelope as Record<string, unknown>).event as Nullable<string>);
+      const kind = stringOrEmpty(((signalEnvelope as unknown) as Record<string, unknown>).kind as Nullable<string>);
+      const type = stringOrEmpty(((signalEnvelope as unknown) as Record<string, unknown>).type as Nullable<string>);
+      const event = stringOrEmpty(((signalEnvelope as unknown) as Record<string, unknown>).event as Nullable<string>);
       if (kind) uniquePush(tokens, seen, `signal_kind:${lower(kind)}`);
       if (type) uniquePush(tokens, seen, `signal_type:${lower(type)}`);
       if (event) uniquePush(tokens, seen, `signal_event:${lower(event)}`);
@@ -1129,7 +1128,7 @@ export class MessageEmbeddingClient {
       return;
     }
 
-    const entries = Object.entries(signalEnvelope as Record<string, unknown>).slice(0, 24);
+    const entries = Object.entries((signalEnvelope as unknown) as Record<string, unknown>).slice(0, 24);
     for (const [key, value] of entries) {
       const descriptor = `${key}:${typeof value === 'string' ? lower(value) : String(value)}`;
       const dimension = hashString(descriptor, this.defaults.tokenHashPrimeA ^ this.defaults.tokenHashPrimeD) %

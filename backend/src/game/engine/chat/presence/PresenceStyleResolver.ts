@@ -50,7 +50,8 @@ import type {
   UnixMs,
 } from '../types';
 
-import type { ChatActorKind, ChatAuthority } from '../../../../../../shared/contracts/chat/ChatEvents';
+import type { ChatActorKind } from '../../../../../../shared/contracts/chat/ChatChannels';
+import type { ChatAuthority } from '../../../../../../shared/contracts/chat/ChatEvents';
 
 import {
   DEFAULT_HELPER_SOFT_STYLE,

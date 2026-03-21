@@ -1,6 +1,3 @@
-Here is the TypeScript file `shared/contracts/ladder/ranked_entitlement_compat_contract.ts` based on your specifications:
-
-```typescript
 /**
  * Ranked Entitlement Compatibility Contract
  */

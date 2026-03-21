@@ -57,7 +57,6 @@ import {
 } from './ChatChannels';
 
 import {
-  type ChatAuthority,
   type ChatInterventionId,
   type ChatMessageId,
   type ChatNpcId,
@@ -65,6 +64,10 @@ import {
   type ChatSessionId,
   type ChatUserId,
   type ChatWorldEventId,
+} from './ChatChannels';
+
+import {
+  type ChatAuthority,
   CHAT_AUTHORITIES,
 } from './ChatEvents';
 
@@ -685,7 +688,7 @@ export function createEmptyEmotionVector(): ChatEmotionVector {
 }
 
 export function normalizeEmotionVector(
-  vector: Partial<ChatEmotionVector>,
+  vector: { [K in keyof ChatEmotionVector]?: number },
 ): ChatEmotionVector {
   return {
     intimidation: clampEmotionScalar(vector.intimidation ?? 0),

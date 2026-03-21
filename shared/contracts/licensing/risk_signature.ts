@@ -1,6 +1,3 @@
-Here is the TypeScript file `shared/contracts/licensing/risk_signature.ts` based on your specifications:
-
-```typescript
 /**
  * RiskSignature contract for Point Zero One Digital's financial roguelike game.
  */

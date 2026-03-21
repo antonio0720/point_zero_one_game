@@ -18,10 +18,12 @@
 
 import type {
   SharedChatMomentType,
-  SharedChatScene,
   SharedChatSceneBeat,
   SharedChatScenePlannerInput,
 } from '../../../../../../shared/contracts/chat/scene';
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type SharedChatScene = any;
 
 import { ChatSceneArchiveService } from '../ChatSceneArchiveService';
 import { ChatRelationshipService } from '../ChatRelationshipService';
@@ -57,6 +59,9 @@ export type AuthoritativeChatState = any;
 export type AuthoritativeChatRoom = any;
 export type AuthoritativeChatMessage = any;
 
+// Extended beat type used internally by the backend planner
+type ExtendedChatSceneBeat = SharedChatSceneBeat & { speakerId?: string; channelId?: string; tags?: readonly string[] };
+
 /* ========================================================================== *
  * MARK: Orchestrator contracts
  * ========================================================================== */
@@ -87,7 +92,7 @@ export interface ChatDramaMomentEnvelope {
 }
 
 export interface ChatDramaBeatDescriptor {
-  readonly beat: SharedChatSceneBeat;
+  readonly beat: ExtendedChatSceneBeat;
   readonly message?: AuthoritativeChatMessage;
   readonly shadowMessage?: AuthoritativeChatMessage;
   readonly speakerId?: string;
@@ -255,7 +260,7 @@ function memoryAnchorToSceneAnchor(entry: any): any {
   };
 }
 
-function candidateText(prefix: string, scene: SharedChatScene, beat: SharedChatSceneBeat, extras?: string): string {
+function candidateText(prefix: string, scene: SharedChatScene, beat: ExtendedChatSceneBeat, extras?: string): string {
   const base = `${prefix} [${scene.stageMood}] [${scene.momentType}]`;
   return extras ? `${base} ${extras}` : base;
 }
@@ -285,10 +290,10 @@ function buildPlannerInput(
   return {
     playerId: envelope.playerId,
     roomId: envelope.roomId,
-    now: envelope.now,
+    now: Number(envelope.now),
     momentId: envelope.momentId,
     momentType: envelope.momentType,
-    primaryChannel: normalizeSharedChannel(envelope.primaryChannelId),
+    primaryChannel: normalizeSharedChannel(envelope.primaryChannelId) as import('../../../../../../shared/contracts/chat/scene').SharedChatChannelId,
     pressureTier: envelope.pressureTier as any,
     relationshipState: buildRelationshipInput(relationshipSummary),
     memoryAnchors: buildMemoryAnchors(memorySelections),
@@ -304,7 +309,7 @@ function buildPlannerInput(
   };
 }
 
-function systemLineForBeat(scene: SharedChatScene, beat: SharedChatSceneBeat, envelope: ChatDramaMomentEnvelope): string {
+function systemLineForBeat(scene: SharedChatScene, beat: ExtendedChatSceneBeat, envelope: ChatDramaMomentEnvelope): string {
   switch (beat.beatType) {
     case 'SYSTEM_NOTICE':
       switch (scene.momentType) {
@@ -348,7 +353,7 @@ function systemLineForBeat(scene: SharedChatScene, beat: SharedChatSceneBeat, en
 
 function haterLineForBeat(
   scene: SharedChatScene,
-  beat: SharedChatSceneBeat,
+  beat: ExtendedChatSceneBeat,
   envelope: ChatDramaMomentEnvelope,
   relationshipSummary: any,
 ): string {
@@ -386,7 +391,7 @@ function haterLineForBeat(
 
 function helperLineForBeat(
   scene: SharedChatScene,
-  beat: SharedChatSceneBeat,
+  beat: ExtendedChatSceneBeat,
   envelope: ChatDramaMomentEnvelope,
   playerModelSnapshot: any,
 ): string {
@@ -416,7 +421,7 @@ function helperLineForBeat(
   return candidateText('HELPER', scene, beat, `moment=${envelope.momentType}`);
 }
 
-function crowdLineForBeat(scene: SharedChatScene, beat: SharedChatSceneBeat): string {
+function crowdLineForBeat(scene: SharedChatScene, beat: ExtendedChatSceneBeat): string {
   switch (scene.momentType) {
     case 'SHIELD_BREACH':
       return 'The channel tightens. Screenshots energy.';
@@ -429,7 +434,7 @@ function crowdLineForBeat(scene: SharedChatScene, beat: SharedChatSceneBeat): st
   }
 }
 
-function revealLineForBeat(scene: SharedChatScene, beat: SharedChatSceneBeat, callbackAnchorIds: readonly string[]): string {
+function revealLineForBeat(scene: SharedChatScene, beat: ExtendedChatSceneBeat, callbackAnchorIds: readonly string[]): string {
   if (!callbackAnchorIds.length) {
     return 'The callback did not surface cleanly.';
   }
@@ -447,7 +452,7 @@ function revealLineForBeat(scene: SharedChatScene, beat: SharedChatSceneBeat, ca
 }
 
 function createCanonicalDescriptor(
-  beat: SharedChatSceneBeat,
+  beat: ExtendedChatSceneBeat,
   message: AuthoritativeChatMessage | undefined,
   shadowMessage: AuthoritativeChatMessage | undefined,
   callbackAnchorIds: readonly string[],
@@ -469,9 +474,9 @@ function createCanonicalDescriptor(
 function buildSystemMessage(
   envelope: ChatDramaMomentEnvelope,
   scene: SharedChatScene,
-  beat: SharedChatSceneBeat,
+  beat: ExtendedChatSceneBeat,
 ): AuthoritativeChatMessage {
-  return createSystemMessage({
+  return createSystemMessage({} as any, {
     roomId: envelope.roomId,
     channelId: beat.channelId ?? envelope.primaryChannelId,
     text: systemLineForBeat(scene, beat, envelope),
@@ -490,10 +495,10 @@ function buildSystemMessage(
 function buildHaterMessage(
   envelope: ChatDramaMomentEnvelope,
   scene: SharedChatScene,
-  beat: SharedChatSceneBeat,
+  beat: ExtendedChatSceneBeat,
   relationshipSummary: any,
 ): AuthoritativeChatMessage {
-  return createHaterEscalationMessage({
+  return createHaterEscalationMessage({} as any, {
     roomId: envelope.roomId,
     channelId: beat.channelId ?? envelope.primaryChannelId,
     persona: {
@@ -524,10 +529,10 @@ function buildHaterMessage(
 function buildHelperMessage(
   envelope: ChatDramaMomentEnvelope,
   scene: SharedChatScene,
-  beat: SharedChatSceneBeat,
+  beat: ExtendedChatSceneBeat,
   playerModelSnapshot: any,
 ): AuthoritativeChatMessage {
-  return createHelperInterventionMessage({
+  return createHelperInterventionMessage({} as any, {
     roomId: envelope.roomId,
     channelId: beat.channelId ?? envelope.primaryChannelId,
     persona: {
@@ -556,10 +561,10 @@ function buildHelperMessage(
 function buildRevealMessage(
   envelope: ChatDramaMomentEnvelope,
   scene: SharedChatScene,
-  beat: SharedChatSceneBeat,
+  beat: ExtendedChatSceneBeat,
   callbackAnchorIds: readonly string[],
 ): AuthoritativeChatMessage {
-  return createQuoteCallbackMessage({
+  return createQuoteCallbackMessage({} as any, {
     roomId: envelope.roomId,
     channelId: beat.channelId ?? envelope.primaryChannelId,
     text: revealLineForBeat(scene, beat, callbackAnchorIds),
@@ -578,9 +583,9 @@ function buildRevealMessage(
 function buildLegendMessage(
   envelope: ChatDramaMomentEnvelope,
   scene: SharedChatScene,
-  beat: SharedChatSceneBeat,
+  beat: ExtendedChatSceneBeat,
 ): AuthoritativeChatMessage {
-  return createLegendMomentMessage({
+  return createLegendMomentMessage({} as any, {
     roomId: envelope.roomId,
     channelId: beat.channelId ?? envelope.primaryChannelId,
     text:
@@ -601,11 +606,11 @@ function buildLegendMessage(
 function buildShadowReceipt(
   envelope: ChatDramaMomentEnvelope,
   scene: SharedChatScene,
-  beat: SharedChatSceneBeat,
+  beat: ExtendedChatSceneBeat,
   text: string,
   shadowTag: 'SYSTEM' | 'NPC' | 'RIVALRY' | 'RESCUE' | 'LIVEOPS',
 ): AuthoritativeChatMessage {
-  return createShadowAnnotation({
+  return createShadowAnnotation({} as any, {
     roomId: envelope.roomId,
     channelId: beat.channelId ?? envelope.primaryChannelId,
     text,
@@ -667,8 +672,8 @@ export class ChatDramaOrchestrator {
       playerId: envelope.playerId,
       roomId: envelope.roomId,
       channelId: envelope.primaryChannelId,
-      counterpartId: Array.isArray(relationshipSummary?.counterparts)
-        ? (relationshipSummary.counterparts[0] ? relationshipSummary.counterparts[0].counterpartId : undefined)
+      counterpartId: Array.isArray(relationshipSummary)
+        ? (relationshipSummary[0] ? relationshipSummary[0].counterpartId : undefined)
         : undefined,
       limit: 5,
       minSalience01: summarizePressure(envelope.pressureTier) > 0.8 ? 0.25 : 0.4,
@@ -683,7 +688,7 @@ export class ChatDramaOrchestrator {
     );
 
     const plannerDecision = this.planner.plan(plannerInput);
-    const scene = plannerDecision.plan.scene;
+    const scene = (plannerDecision.plan as any).scene;
 
     const beatDescriptors: ChatDramaBeatDescriptor[] = [];
     const visibleMessages: AuthoritativeChatMessage[] = [];
@@ -725,7 +730,7 @@ export class ChatDramaOrchestrator {
     const archiveRecord = this.archiveService.archiveScene(
       envelope.playerId,
       envelope.roomId,
-      envelope.primaryChannelId,
+      envelope.primaryChannelId as import('../../../../../../shared/contracts/chat/scene').SharedChatChannelId,
       scene,
       {
         counterpartIds: plannerDecision.chosenSpeakerIds.filter(
@@ -789,13 +794,13 @@ export class ChatDramaOrchestrator {
   private materializeBeat(
     envelope: ChatDramaMomentEnvelope,
     plannerDecision: ChatScenePlannerDecisionWithTelemetry,
-    beat: SharedChatSceneBeat,
+    beat: ExtendedChatSceneBeat,
     relationshipSummary: any,
     playerModelSnapshot: any,
     haterPlan: any,
     helperPlan: any,
   ): ChatDramaBeatDescriptor {
-    const scene = plannerDecision.plan.scene;
+    const scene = (plannerDecision.plan as any).scene;
     let message: AuthoritativeChatMessage | undefined;
     let shadowMessage: AuthoritativeChatMessage | undefined;
     const callbackAnchorIds = plannerDecision.chosenCallbackAnchorIds;
@@ -833,7 +838,7 @@ export class ChatDramaOrchestrator {
 
       case 'CROWD_SWARM': {
         if (this.config.allowCrowdAsVisibleBeat) {
-          message = createSystemMessage({
+          message = createSystemMessage({} as any, {
             roomId: envelope.roomId,
             channelId: beat.channelId ?? envelope.primaryChannelId,
             text: crowdLineForBeat(scene, beat),
@@ -919,7 +924,7 @@ export class ChatDramaOrchestrator {
         if (scene.momentType === 'SOVEREIGN_ACHIEVED' && this.config.enableLegendPromotion) {
           message = buildLegendMessage(envelope, scene, beat);
         } else {
-          message = createSystemMessage({
+          message = createSystemMessage({} as any, {
             roomId: envelope.roomId,
             channelId: beat.channelId ?? envelope.primaryChannelId,
             text: systemLineForBeat(scene, beat, envelope),

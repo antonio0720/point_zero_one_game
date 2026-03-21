@@ -779,7 +779,7 @@ export class DialogueIntentEncoder {
         break;
     }
 
-    switch (roomKind) {
+    switch (roomKind as string) {
       case 'BATTLE':
         addIntentScore(accumulator, 'COUNTER', 0.08, 'battle room bias');
         addIntentScore(accumulator, 'ATTACK', 0.08, 'battle room bias');
@@ -792,7 +792,7 @@ export class DialogueIntentEncoder {
         break;
     }
 
-    if (pressureTier === 'HIGH' || pressureTier === 'MAX' || pressureTier === 'EXTREME') {
+    if (pressureTier === 'HIGH' || pressureTier === 'CRITICAL') {
       addIntentScore(accumulator, 'WARN', this.defaults.distressBiasHighPressure01 * 0.55, 'high-pressure bias');
       addIntentScore(accumulator, 'CALL_FOR_HELP', this.defaults.distressBiasHighPressure01 * 0.45, 'high-pressure bias');
     }
@@ -817,7 +817,7 @@ export class DialogueIntentEncoder {
       clamp01(
         (channel === 'DEAL_ROOM' ? 0.10 : 0) +
           (channel === 'GLOBAL' ? 0.08 : 0) +
-          (pressureTier === 'HIGH' || pressureTier === 'MAX' || pressureTier === 'EXTREME' ? 0.10 : 0) +
+          (pressureTier === 'HIGH' || pressureTier === 'CRITICAL' ? 0.10 : 0) +
           (witnessCount > 0 ? 0.08 : 0),
       ),
       `Scene bias resolved from channel=${channel ?? 'n/a'}, room=${roomKind ?? 'n/a'}, pressure=${pressureTier ?? 'n/a'}.`,
@@ -880,12 +880,12 @@ export class DialogueIntentEncoder {
     const exclamation = text.includes('!');
     const containsSovereignty = embedding.explanation.dominantFamilies.includes('SOVEREIGNTY');
 
-    if ((pressureTier === 'HIGH' || pressureTier === 'MAX' || pressureTier === 'EXTREME') && shortReply) {
+    if ((pressureTier === 'HIGH' || pressureTier === 'CRITICAL') && shortReply) {
       addIntentScore(accumulator, 'STALL', 0.08, 'high-pressure short reply');
       addIntentScore(accumulator, 'COUNTER', 0.05, 'high-pressure short reply');
     }
 
-    if ((pressureTier === 'HIGH' || pressureTier === 'MAX' || pressureTier === 'EXTREME') && questionMark) {
+    if ((pressureTier === 'HIGH' || pressureTier === 'CRITICAL') && questionMark) {
       addIntentScore(accumulator, 'CALL_FOR_HELP', 0.08, 'high-pressure question');
       addIntentScore(accumulator, 'ASK_FOR_CLARITY', 0.08, 'high-pressure question');
     }
@@ -903,7 +903,7 @@ export class DialogueIntentEncoder {
       explanation,
       'pressure_read',
       clamp01(
-        (pressureTier === 'HIGH' || pressureTier === 'MAX' || pressureTier === 'EXTREME' ? 0.10 : 0) +
+        (pressureTier === 'HIGH' || pressureTier === 'CRITICAL' ? 0.10 : 0) +
           (containsSovereignty ? 0.08 : 0),
       ),
       `Pressure read evaluated under pressure=${pressureTier ?? 'n/a'}.`,
@@ -1043,7 +1043,7 @@ export class DialogueIntentEncoder {
       helperNeed01 * 0.52 +
         score('WITHDRAW') * 0.20 +
         (embedding.explanation.dominantFamilies.includes('DISTRESS') ? 0.16 : 0) +
-        (message.text.length <= 12 && (message.sceneContext?.pressureTier === 'HIGH' || message.sceneContext?.pressureTier === 'MAX' || message.sceneContext?.pressureTier === 'EXTREME') ? 0.12 : 0),
+        (message.text.length <= 12 && (message.sceneContext?.pressureTier === 'HIGH' || message.sceneContext?.pressureTier === 'CRITICAL') ? 0.12 : 0),
     );
 
     const confidence01 = clamp01(

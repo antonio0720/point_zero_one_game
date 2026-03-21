@@ -33,7 +33,6 @@ import {
 } from '../ChatChannels';
 
 import {
-  type ChatAuthority,
   type ChatInterventionId,
   type ChatLegendId,
   type ChatMemoryAnchorId,
@@ -47,6 +46,10 @@ import {
   type ChatTelemetryId,
   type ChatUserId,
   type ChatWorldEventId,
+} from '../ChatChannels';
+
+import {
+  type ChatAuthority,
   CHAT_AUTHORITIES,
 } from '../ChatEvents';
 

@@ -1,6 +1,3 @@
-Here is the TypeScript file `shared/contracts/licensing/institution_report.ts`:
-
-```typescript
 /**
  * InstitutionReport Interface
  */

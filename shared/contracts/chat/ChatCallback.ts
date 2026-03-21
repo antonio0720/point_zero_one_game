@@ -23,7 +23,8 @@ import type {
   UnixMs,
 } from './ChatChannels';
 import { CHAT_CONTRACT_AUTHORITIES, CHAT_CONTRACT_VERSION } from './ChatChannels';
-import type { ChatActorKind, ChatMessageId, ChatPressureTier } from './ChatEvents';
+import type { ChatActorKind, ChatMessageId } from './ChatChannels';
+import type { ChatPressureTier } from './ChatEvents';
 import type { ChatQuoteReference } from './ChatMessage';
 import type {
   ChatQuoteAudienceClass,

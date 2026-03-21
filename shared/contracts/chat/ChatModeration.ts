@@ -58,10 +58,7 @@ import {
 
 import {
   type ChatActorKind,
-  type ChatAuthority,
   type ChatMessageId,
-  type ChatModerationDecision,
-  type ChatModerationState,
   type ChatNpcId,
   type ChatProofHash,
   type ChatRange,
@@ -70,6 +67,12 @@ import {
   type ChatSessionId,
   type ChatUserId,
   CHAT_ACTOR_KINDS,
+} from './ChatChannels';
+
+import {
+  type ChatAuthority,
+  type ChatModerationDecision,
+  type ChatModerationState,
   CHAT_AUTHORITIES,
   CHAT_MODERATION_STATES,
 } from './ChatEvents';

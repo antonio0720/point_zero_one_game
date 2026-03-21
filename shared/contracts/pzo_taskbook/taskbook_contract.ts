@@ -1,6 +1,3 @@
-Here is the TypeScript file `shared/contracts/pzo_taskbook/taskbook_contract.ts` as per your specifications:
-
-```typescript
 /**
  * Taskbook Contract
  */

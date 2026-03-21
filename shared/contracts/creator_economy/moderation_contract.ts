@@ -1,6 +1,3 @@
-Here is the TypeScript file `shared/contracts/creator_economy/moderation_contract.ts` based on your specifications:
-
-```typescript
 /**
  * Moderation Contract for Creator Economy
  */

@@ -18,7 +18,7 @@ import type {
   UnixMs,
 } from '../types';
 
-import type { BotId } from '../../battle/types';
+import type { BotId } from '../types';
 
 export type ChatEpisodicEventType =
   | 'HUMILIATION'
@@ -152,13 +152,13 @@ function randomId(prefix: string, at: UnixMs): string {
 }
 
 function inferEventTypeFromMessage(message: ChatMessage): ChatEpisodicEventType | null {
-  const kind = String(message.kind ?? '').toUpperCase();
+  const kind = String((message as any).kind ?? '').toUpperCase();
   if (kind.includes('RESCUE')) return 'RESCUE';
   if (kind.includes('BREACH')) return 'BREACH';
   if (kind.includes('LEGEND')) return 'PUBLIC_WITNESS';
   if (kind.includes('NEGOTIATION')) return 'DEAL_ROOM_STANDOFF';
 
-  const body = normalizeText(message.body).toLowerCase();
+  const body = normalizeText(message.plainText).toLowerCase();
   if (body.includes('comeback')) return 'COMEBACK';
   if (body.includes('hesitat')) return 'HESITATION';
   if (body.includes('collapse')) return 'COLLAPSE';
@@ -247,7 +247,7 @@ export class ChatEpisodicMemory {
     };
   }
 
-  public noteMessage(message: ChatMessage, now: UnixMs = message.ts as UnixMs): ChatEpisodicMemoryRecord | null {
+  public noteMessage(message: ChatMessage, now: UnixMs = message.createdAt as UnixMs): ChatEpisodicMemoryRecord | null {
     const inferred = inferEventTypeFromMessage(message);
     if (!inferred) return null;
 
@@ -255,23 +255,23 @@ export class ChatEpisodicMemory {
       inferred,
       {
         roomId: null,
-        channelId: message.channel,
+        channelId: message.channelId,
         messageId: String(message.id),
-        sceneId: message.sceneId ? String(message.sceneId) : null,
-        momentId: message.momentId ? String(message.momentId) : null,
-        botId: message.botSource?.botId ?? null,
-        counterpartId: message.senderId ?? null,
-        pressureBand: this.toPressureBand(message.pressureTier),
+        sceneId: (message.metadata as any)?.sceneId ? String((message.metadata as any)?.sceneId) : null,
+        momentId: (message.metadata as any)?.momentId ? String((message.metadata as any)?.momentId) : null,
+        botId: (message.attribution as any)?.botId ?? null,
+        counterpartId: (message.attribution as any)?.actorId ?? null,
+        pressureBand: this.toPressureBand((message.metadata as any)?.pressureTier),
         tags: message.tags ?? [],
-        summary: message.body,
-        rawText: message.body,
+        summary: message.plainText,
+        rawText: message.plainText,
       },
       now,
     );
   }
 
-  public noteScene(scene: ChatScenePlan, summary: string, now: UnixMs = scene.startedAt): ChatEpisodicMemoryRecord | null {
-    const momentType = String(scene.momentType ?? '').toUpperCase();
+  public noteScene(scene: ChatScenePlan, summary: string, now: UnixMs = scene.openedAt): ChatEpisodicMemoryRecord | null {
+    const momentType = String((scene as any).momentType ?? '').toUpperCase();
     const type: ChatEpisodicEventType | null =
       momentType.includes('COMEBACK') ? 'COMEBACK'
       : momentType.includes('BREACH') ? 'BREACH'
@@ -283,12 +283,12 @@ export class ChatEpisodicMemory {
 
     return this.recordEvent(type, {
       roomId: null,
-      channelId: scene.primaryChannel,
+      channelId: (scene as any).primaryChannel,
       sceneId: String(scene.sceneId),
-      momentId: String(scene.momentId),
+      momentId: String((scene as any).momentId),
       summary,
       rawText: summary,
-      tags: ['scene', String(scene.momentType ?? '').toLowerCase()],
+      tags: ['scene', String((scene as any).momentType ?? '').toLowerCase()],
     }, now);
   }
 
@@ -465,7 +465,7 @@ export class ChatEpisodicMemory {
   }
 
   private evictIfNeeded(): void {
-    const active = this.sortMemories([...this.activeMemories.values()]);
+    const active = [...this.sortMemories([...this.activeMemories.values()])];
     while (active.length > this.options.activeMemoryCap) {
       const victim = active.pop();
       if (!victim) break;
@@ -473,7 +473,7 @@ export class ChatEpisodicMemory {
       this.archivedMemories.set(victim.memoryId, { ...victim, archived: true });
     }
 
-    const archived = this.sortMemories([...this.archivedMemories.values()]);
+    const archived = [...this.sortMemories([...this.archivedMemories.values()])];
     while (archived.length > this.options.archivedMemoryCap) {
       const victim = archived.pop();
       if (!victim) break;

@@ -58,10 +58,7 @@ import {
 
 import {
   type ChatActorKind,
-  type ChatAuthority,
   type ChatCursorId as LegacyChatCursorId,
-  type ChatCursorSnapshot as LegacyChatCursorSnapshot,
-  type ChatClientCursorRequest as LegacyChatClientCursorRequest,
   type ChatMessageId,
   type ChatRange,
   type ChatReplayId,
@@ -70,6 +67,12 @@ import {
   type ChatSessionId,
   type ChatUserId,
   CHAT_ACTOR_KINDS,
+} from './ChatChannels';
+
+import {
+  type ChatAuthority,
+  type ChatCursorSnapshot as LegacyChatCursorSnapshot,
+  type ChatClientCursorRequest as LegacyChatClientCursorRequest,
   CHAT_AUTHORITIES,
 } from './ChatEvents';
 

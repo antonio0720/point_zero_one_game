@@ -1,6 +1,3 @@
-Here is the TypeScript file `shared/contracts/integrity/run_verification_response.ts` as per your specifications:
-
-```typescript
 /**
  * RunVerificationResponse contract
  */

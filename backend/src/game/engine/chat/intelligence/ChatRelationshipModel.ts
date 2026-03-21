@@ -580,7 +580,7 @@ export class ChatRelationshipModel {
   }
 
   private applyDelta(state: MutableRelationshipCounterpartState, delta: Partial<ChatRelationshipVector>, now: UnixMs, weight: number): void {
-    const vector = { ...state.vector };
+    const vector = { ...state.vector } as { -readonly [K in keyof ChatRelationshipVector]: number };
     vector.contempt01 = clamp01(vector.contempt01 + (delta.contempt01 ?? 0) * weight);
     vector.fascination01 = clamp01(vector.fascination01 + (delta.fascination01 ?? 0) * weight);
     vector.respect01 = clamp01(vector.respect01 + (delta.respect01 ?? 0) * weight);
@@ -768,7 +768,7 @@ function dominantAxes(vector: ChatRelationshipVector): readonly ChatRelationship
   return ranked.sort((a, b) => b[1] - a[1]).slice(0, 3).map((item) => item[0]);
 }
 
-function blankDelta(): Partial<ChatRelationshipVector> {
+function blankDelta(): { -readonly [K in keyof ChatRelationshipVector]: number } {
   return {
     contempt01: 0,
     fascination01: 0,

@@ -1717,7 +1717,7 @@ function coerceJsonValue(value: unknown): JsonValue | undefined {
     return undefined;
   }
   if (value === null || typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
-    return value;
+    return value as JsonValue;
   }
   if (Array.isArray(value)) {
     return value.map((item) => coerceJsonValue(item) ?? null);

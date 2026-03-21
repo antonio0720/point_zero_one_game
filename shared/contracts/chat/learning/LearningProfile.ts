@@ -48,7 +48,6 @@ import {
 } from '../ChatChannels';
 
 import {
-  type ChatAuthority,
   type ChatInterventionId,
   type ChatLegendId,
   type ChatMemoryAnchorId,
@@ -57,13 +56,18 @@ import {
   type ChatOfferId,
   type ChatQuoteId,
   type ChatReplayId,
-  type ChatRoomAura,
   type ChatSceneId,
   type ChatSessionId,
   type ChatUserId,
   type ChatWorldEventId,
+} from '../ChatChannels';
+
+import {
+  type ChatAuthority,
   CHAT_AUTHORITIES,
 } from '../ChatEvents';
+
+import { type ChatRoomAura } from '../ChatPresence';
 
 import {
   type ChatMessageToneBand,

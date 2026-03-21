@@ -59,29 +59,18 @@ import {
   CHAT_MOUNT_PRESETS,
   CHAT_SHADOW_CHANNELS,
   CHAT_VISIBLE_CHANNELS,
-  channelExposesProofHashes,
   channelSupportsReplay,
   channelSupportsShadowWrites,
 } from './ChatChannels';
 
 import {
   type ChatActorKind,
-  type ChatAuditMeta,
-  type ChatAuthority,
   type ChatCausalEdgeId,
   type ChatLegendId,
-  type ChatLegendMeta,
   type ChatMomentId,
-  type ChatMomentType,
-  type ChatMessage,
   type ChatMessageId,
-  type ChatMessageKind,
-  type ChatNotificationKind,
   type ChatProofHash,
-  type ChatProofMeta,
-  type ChatReadReceipt,
   type ChatReplayId,
-  type ChatReplayMeta,
   type ChatRequestId,
   type ChatSceneId,
   type ChatSequenceNumber,
@@ -89,6 +78,19 @@ import {
   type ChatTelemetryId,
   type ChatUserId,
   type ChatWorldEventId,
+} from './ChatChannels';
+
+import {
+  type ChatAuditMeta,
+  type ChatAuthority,
+  type ChatLegendMeta,
+  type ChatMomentType,
+  type ChatMessage,
+  type ChatMessageKind,
+  type ChatNotificationKind,
+  type ChatProofMeta,
+  type ChatReadReceipt,
+  type ChatReplayMeta,
 } from './ChatEvents';
 
 import {
@@ -1320,7 +1322,7 @@ export const toLegacyChatMessage = (message: ChatCanonicalMessage): ChatMessage 
   body: canonicalMessageBodyText(message),
   emoji: undefined,
   ts: Number(message.sequenceStamp.createdAt),
-  immutable: Boolean(message.proof.proofHash && channelExposesProofHashes(message.channelId)),
+  immutable: Boolean(message.proof.proofHash && channelSupportsReplay(message.channelId)),
   proofHash: message.proof.proofHash,
   sender: message.sender,
   deliveryState: message.delivery.state,
@@ -1331,7 +1333,7 @@ export const toLegacyChatMessage = (message: ChatCanonicalMessage): ChatMessage 
     proofChainPosition: undefined,
     transcriptNonce: undefined,
     runId: undefined,
-    immutable: Boolean(message.proof.proofHash && channelExposesProofHashes(message.channelId)),
+    immutable: Boolean(message.proof.proofHash && channelSupportsReplay(message.channelId)),
     authority: message.authorityStamp.currentAuthority === 'CLIENT_STAGED' ? 'LOCAL' : message.authorityStamp.currentAuthority === 'BACKEND_LEDGER' ? 'BACKEND_LEDGER' : 'SERVER',
   },
   replay: {

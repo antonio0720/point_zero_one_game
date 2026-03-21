@@ -248,8 +248,8 @@ export class NegotiationReputationPolicy {
     const priorOffer = request.priorOffer ?? null;
     const outcome = request.outcome ?? inferOutcomeFromResolution(request.resolution);
     const eventKind = determineEventKind(negotiation, outcome, request.resolution, offer, request.latestLeakThreat);
-    const dominantPressure = negotiationInferDominantPressure(negotiation);
-    const actorState = negotiationPrimaryActorState(negotiation);
+    const dominantPressure = negotiationInferDominantPressure(request.latestInference);
+    const actorState = negotiationPrimaryActorState(negotiation, negotiation.parties.primary.actorId);
     const deltas: ReputationDelta[] = [];
     const actions: ReputationPolicyAction[] = [];
 
@@ -390,9 +390,9 @@ export class NegotiationReputationPolicy {
     }));
 
     const projection: NegotiationReputationProjection = {
-      projectionId: createProjectionId(negotiation.id, eventKind, now),
+      projectionId: createProjectionId(negotiation.negotiationId, eventKind, now),
       roomId: request.roomId,
-      negotiationId: String(negotiation.id),
+      negotiationId: String(negotiation.negotiationId),
       projectedAt: now,
       eventKind,
       deltas,
@@ -421,7 +421,7 @@ export class NegotiationReputationPolicy {
 
     this.logger.debug('chat.dealroom.reputation.projected', {
       roomId: request.roomId as unknown as string,
-      negotiationId: String(negotiation.id),
+      negotiationId: String(negotiation.negotiationId),
       eventKind,
       trustDamage01,
       trustLift01,
@@ -769,11 +769,11 @@ function computeTrustDamage01(input: {
   readonly latestInference?: NegotiationInferenceFrame | null;
   readonly options: Required<Omit<NegotiationReputationPolicyOptions, 'clock' | 'logger'>>;
 }): number {
-  const leakPressure = input.latestLeakThreat ? Number(input.latestLeakThreat.severity01) : (negotiationHasLeakThreat(input.negotiation) ? 0.42 : 0);
+  const leakPressure = input.latestLeakThreat ? Number(input.latestLeakThreat.severity.normalized) : (negotiationHasLeakThreat(input.negotiation) ? 0.42 : 0);
   const offerTrust = input.offer ? Number(chatOfferProjectedTrustworthiness(input.offer)) : 0.5;
   const hostility = input.offer ? Number(chatOfferProjectedHostility(input.offer)) : 0.35;
-  const inferenceTrustBreak = input.latestInference ? Number(input.latestInference.trustBreak01 ?? asScore0To1(0)) : 0;
-  const abandonment = input.outcome === 'ABANDONED' ? 0.34 : 0;
+  const inferenceTrustBreak = input.latestInference ? Number(input.latestInference.risk.collapseRisk ?? asScore0To1(0)) : 0;
+  const abandonment = input.outcome === 'WITHDRAWN' ? 0.34 : 0;
   const rejection = input.outcome === 'REJECTED' ? 0.2 : 0;
   const leak = input.outcome === 'LEAKED' ? 0.36 : 0;
   return clamp01(
@@ -798,7 +798,7 @@ function computeTrustLift01(input: {
   const softness = input.offer ? Number(chatOfferProjectedSoftness(input.offer)) : 0.4;
   const concessions = input.offer ? chatOfferConcessionCount(input.offer) : 0;
   const acceptance = input.outcome === 'ACCEPTED' ? 0.18 : 0;
-  const fairClose = input.outcome === 'SETTLED' ? 0.14 : 0;
+  const fairClose = input.outcome === 'ACCEPTED' ? 0.14 : 0;
   const helper = input.offer && chatOfferShouldTriggerHelperReview(input.offer) ? 0.06 : 0;
   return clamp01(
     trustProjection * 0.38 +
@@ -835,8 +835,8 @@ function computeRescueShift01(input: {
 }): number {
   const rescueSupport = negotiationSupportsRescue(input.negotiation) ? 0.22 : 0;
   const helperReview = input.offer && chatOfferShouldTriggerHelperReview(input.offer) ? 0.12 : 0;
-  const inference = input.latestInference ? Number(input.latestInference.rescueNeed01 ?? asScore0To1(0)) : 0;
-  const collapse = input.outcome === 'FAILED' || input.outcome === 'ABANDONED' ? 0.18 : 0;
+  const inference = input.latestInference ? Number(input.latestInference.risk.rescueNeed ?? asScore0To1(0)) : 0;
+  const collapse = input.outcome === 'COLLAPSED' || input.outcome === 'WITHDRAWN' ? 0.18 : 0;
   return clamp01((rescueSupport + helperReview + inference + collapse) * input.options.rescueGraceMultiplier);
 }
 
@@ -846,7 +846,7 @@ function computeLeakSeverity01(input: {
   readonly latestLeakThreat?: NegotiationLeakThreat | null;
   readonly options: Required<Omit<NegotiationReputationPolicyOptions, 'clock' | 'logger'>>;
 }): number {
-  const leakThreat = input.latestLeakThreat ? Number(input.latestLeakThreat.severity01) : (negotiationHasLeakThreat(input.negotiation) ? 0.34 : 0);
+  const leakThreat = input.latestLeakThreat ? Number(input.latestLeakThreat.severity.normalized) : (negotiationHasLeakThreat(input.negotiation) ? 0.34 : 0);
   const leakableOffer = input.offer && chatOfferCanLeak(input.offer) ? 0.24 : 0;
   const witness = negotiationHasAudiencePressure(input.negotiation) ? 0.12 : 0;
   return clamp01((leakThreat + leakableOffer + witness) * input.options.leakDamageMultiplier);
@@ -863,8 +863,8 @@ function computeFaceLoss01(input: {
   const hostility = input.offer ? Number(chatOfferProjectedHostility(input.offer)) : 0.25;
   const rejection = input.outcome === 'REJECTED' ? 0.24 : 0;
   const leak = input.outcome === 'LEAKED' ? 0.3 : 0;
-  const abandonment = input.outcome === 'ABANDONED' ? 0.26 : 0;
-  const panic = input.actorState ? Number(input.actorState.frustration01 ?? asScore0To1(0)) * 0.18 : 0;
+  const abandonment = input.outcome === 'WITHDRAWN' ? 0.26 : 0;
+  const panic = input.actorState ? Number(input.actorState.emotion.frustration ?? asScore0To1(0)) * 0.18 : 0;
   const witness = negotiationHasAudiencePressure(input.negotiation) ? 0.18 : 0.08;
   const faceKind = input.eventKind === 'FACE_LOST' ? 0.22 : 0;
   return clamp01(hostility * 0.14 + rejection + leak + abandonment + panic + witness + faceKind);
@@ -881,9 +881,9 @@ function computeFaceRecovery01(input: {
   const trust = input.offer ? Number(chatOfferProjectedTrustworthiness(input.offer)) : 0.42;
   const softness = input.offer ? Number(chatOfferProjectedSoftness(input.offer)) : 0.33;
   const accepted = input.outcome === 'ACCEPTED' ? 0.26 : 0;
-  const settled = input.outcome === 'SETTLED' ? 0.18 : 0;
+  const settled = input.outcome === 'ACCEPTED' ? 0.18 : 0;
   const faceKind = input.eventKind === 'FACE_SAVED' ? 0.18 : 0;
-  const confidence = input.actorState ? Number(input.actorState.confidence01 ?? asScore0To1(0)) * 0.12 : 0;
+  const confidence = input.actorState ? Number(input.actorState.emotion.confidence ?? asScore0To1(0)) * 0.12 : 0;
   return clamp01(trust * 0.18 + softness * 0.1 + accepted + settled + faceKind + confidence);
 }
 
@@ -895,12 +895,12 @@ function determineEventKind(
   latestLeakThreat?: NegotiationLeakThreat | null,
 ): ReputationEventKind {
   if (outcome === 'LEAKED') return 'LEAKED';
-  if (outcome === 'ABANDONED') return 'ABANDONED';
+  if (outcome === 'WITHDRAWN') return 'ABANDONED';
   if (outcome === 'REJECTED') return 'REJECTED';
   if (outcome === 'ACCEPTED') return 'ACCEPTED';
-  if (outcome === 'SETTLED') return 'FAIR_CLOSE';
+  if (outcome === 'FACE_SAVED') return 'FAIR_CLOSE';
   if (offer && chatOfferShouldTriggerHelperReview(offer)) return 'HELPER_VALIDATED';
-  if (latestLeakThreat && Number(latestLeakThreat.severity01) > 0.44) return 'PRESSURED';
+  if (latestLeakThreat && Number(latestLeakThreat.severity.normalized) > 0.44) return 'PRESSURED';
   if (negotiationHasLeakThreat(negotiation)) return 'PRESSURED';
   return 'OPENED';
 }

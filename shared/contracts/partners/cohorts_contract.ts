@@ -1,6 +1,3 @@
-Here is the TypeScript file `shared/contracts/partners/cohorts_contract.ts` based on your specifications:
-
-```typescript
 /**
  * Cohort Contract Interface
  */

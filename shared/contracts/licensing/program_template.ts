@@ -1,6 +1,3 @@
-Here is the TypeScript file `shared/contracts/licensing/program_template.ts` based on your specifications:
-
-```typescript
 /**
  * ProgramTemplate class representing a template for financial roguelike games.
  */

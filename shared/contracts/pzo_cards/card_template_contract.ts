@@ -1,6 +1,3 @@
-Here is the complete `card_template_contract.ts` file:
-
-```typescript
 /**
  * @file CardTemplate contract and related types.
  */
@@ -81,6 +78,3 @@ export function validateCardTemplate(cardTemplate: CardTemplate) {
 export function validateEconBlock(econBlock: EconBlock) {
   return EconBlockSchema.parse(econBlock);
 }
-```
-
-This file exports the `DeckType` enum, `CardTemplate` and `EconBlock` interfaces, as well as the `CardTemplateSchema` and `EconBlockSchema` Zod schemas. It also includes two validator functions: `validateCardTemplate` and `validateEconBlock`.

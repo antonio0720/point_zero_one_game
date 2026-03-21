@@ -57,13 +57,11 @@ import {
 } from '../ChatChannels';
 
 import {
-  type ChatAuthority,
   type ChatActorKind,
   type ChatInterventionId,
   type ChatLegendId,
   type ChatMemoryAnchorId,
   type ChatMessageId,
-  type ChatMessageKind,
   type ChatMomentId,
   type ChatNpcId,
   type ChatOfferId,
@@ -72,16 +70,19 @@ import {
   type ChatRange,
   type ChatReplayId,
   type ChatRequestId,
-  type ChatRequestCorrelationHint,
   type ChatSceneId,
-  type ChatSenderIdentity,
   type ChatSequenceNumber,
   type ChatSessionId,
   type ChatTelemetryId,
-  type ChatTelemetryStreamHint,
   type ChatUserId,
   type ChatWorldEventId,
   CHAT_ACTOR_KINDS,
+} from '../ChatChannels';
+
+import {
+  type ChatAuthority,
+  type ChatMessageKind,
+  type ChatSenderIdentity,
   CHAT_AUTHORITIES,
   CHAT_MESSAGE_KINDS,
 } from '../ChatEvents';

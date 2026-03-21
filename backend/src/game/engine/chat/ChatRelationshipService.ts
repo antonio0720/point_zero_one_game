@@ -46,7 +46,7 @@ function dominantAxes(vector: ChatRelationshipVector): readonly ChatRelationship
     ['TRAUMA_DEBT', vector.traumaDebt01],
     ['UNFINISHED_BUSINESS', vector.unfinishedBusiness01],
   ]
-    .sort((a, b) => b[1] - a[1])
+    .sort((a, b) => Number(b[1]) - Number(a[1]))
     .slice(0, 3)
     .map(([axis]) => axis as ChatRelationshipAxisId);
 }

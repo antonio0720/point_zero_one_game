@@ -1,6 +1,3 @@
-Here is the TypeScript file `shared/contracts/licensing/benchmark_run.ts` based on your specifications:
-
-```typescript
 /**
  * BenchmarkRun contract for Point Zero One Digital's financial roguelike game.
  */

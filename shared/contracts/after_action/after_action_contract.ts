@@ -1,6 +1,3 @@
-Here is the TypeScript file `shared/contracts/after_action/after_action_contract.ts` based on your specifications:
-
-```typescript
 /**
  * AfterAction Contract Interface
  */

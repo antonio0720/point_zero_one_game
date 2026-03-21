@@ -323,15 +323,18 @@ export class ConversationMemoryModel {
     const nowMs = context.nowMs ?? this.now();
     const sceneContext = this.buildSceneContext(context);
     const encodedIntent = this.intentEncoder.encodeTurn({
-      messageId: turn.messageId,
-      userId: turn.userId ?? (context.ownerUserId ?? ('system' as ChatUserId)),
-      roomId: turn.roomId,
-      roomKind: turn.roomKind,
-      channel: turn.channel,
-      body: turn.body,
-      createdAt: turn.createdAt,
-      semanticFamilies: turn.semanticFamilies ?? [],
-    }, sceneContext);
+      message: {
+        messageId: turn.messageId,
+        text: turn.body,
+        createdAtMs: turn.createdAt,
+        channel: turn.channel,
+        roomKind: turn.roomKind,
+        modeId: turn.modeId ?? null,
+        pressureTier: turn.pressureTier ?? null,
+        sceneContext,
+      },
+      sceneContext,
+    });
 
     const record: ConversationMemoryRecord = {
       memoryId: `memory::turn::${turn.messageId}`,
@@ -343,13 +346,13 @@ export class ConversationMemoryModel {
       modeId: turn.modeId ?? context.modeId ?? null,
       channel: turn.channel,
       memoryKind: this.resolveTurnMemoryKind(turn, context),
-      intentKind: encodedIntent.primaryIntent?.kind ?? null,
+      intentKind: encodedIntent.primaryIntent ?? null,
       semanticFamilies: [...(turn.semanticFamilies ?? [])],
       sourceMessageIds: [turn.messageId],
       callbackQuoteIds: [],
-      title: this.buildTurnTitle(turn, encodedIntent.primaryIntent?.kind ?? null),
+      title: this.buildTurnTitle(turn, encodedIntent.primaryIntent ?? null),
       body: turn.body,
-      summary: this.buildTurnSummary(turn, encodedIntent.primaryIntent?.kind ?? null, context),
+      summary: this.buildTurnSummary(turn, encodedIntent.primaryIntent ?? null, context),
       createdAt: turn.createdAt,
       updatedAt: nowMs,
       signalStrength: clamp01(turn.signalStrength ?? this.estimateSignalStrength(turn, context)),
@@ -450,13 +453,13 @@ export class ConversationMemoryModel {
       notes: [],
     } as EmbeddingSceneContext;
 
-    const queryEmbedding = this.embeddingClient.embedRawTextQuery(
-      request.queryText,
+    const queryEmbedding = this.embeddingClient.embedMessage({
+      text: request.queryText,
       sceneContext,
-    );
+    });
 
     const scored = filtered
-      .map((record) => this.scoreRetrievedRecord(record, queryEmbedding.combinedVector, request, nowMs))
+      .map((record) => this.scoreRetrievedRecord(record, queryEmbedding, request, nowMs))
       .sort((a, b) => b.normalizedScore - a.normalizedScore)
       .slice(0, request.maxResults ?? CHAT_CONVERSATION_MEMORY_DEFAULTS.maxRetrievals);
 
@@ -797,9 +800,9 @@ export class ConversationMemoryModel {
     request: ConversationMemoryRetrievalRequest,
     nowMs: UnixMs,
   ): RetrievedConversationMemory {
-    const similarity = record.embeddingVector
-      ? this.embeddingClient.compare(queryVector, record.embeddingVector)
-      : ({ score: 0.24 } as unknown as { score: Score01 });
+    const similarityScore: Score01 = record.embeddingVector
+      ? this.embeddingClient.cosineSimilarity(queryVector, record.embeddingVector).clipped01
+      : clamp01(0.24);
 
     const context: ConversationMemoryContext = {
       roomId: request.roomId,
@@ -811,11 +814,11 @@ export class ConversationMemoryModel {
       modeId: request.modeId ?? null,
       nowMs,
       pressureTier: null,
-      publicWitnessHeat: 0.5,
-      helperUrgency: 0.5,
-      haterPressure: 0.5,
-      toxicityRisk: 0.5,
-      churnRisk: 0.5,
+      publicWitnessHeat: clamp01(0.5),
+      helperUrgency: clamp01(0.5),
+      haterPressure: clamp01(0.5),
+      toxicityRisk: clamp01(0.5),
+      churnRisk: clamp01(0.5),
     };
 
     const salience = clamp01(
@@ -837,7 +840,7 @@ export class ConversationMemoryModel {
     const callbackWeight = clamp01(record.callbackPotential * 0.72 + record.legendValue * 0.28);
 
     const normalizedScore = clamp01(
-      similarity.score * 0.28 +
+      similarityScore * 0.28 +
       salience * 0.22 +
       recency * 0.12 +
       relationshipWeight * 0.14 +
@@ -864,7 +867,7 @@ export class ConversationMemoryModel {
       callbackQuoteIds: [...record.callbackQuoteIds],
       metadata: {
         ...record.metadata,
-        similarity: similarity.score,
+        similarity: similarityScore,
         retention: this.computeRetention(record, nowMs),
       },
     };
@@ -916,21 +919,13 @@ export class ConversationMemoryModel {
     const semanticFamilies = Array.from(new Set(window.turns.flatMap((turn) => turn.semanticFamilies ?? [])));
     const sourceMessageIds = window.turns.map((turn) => turn.messageId);
 
-    const embeddingVector = this.embeddingClient.embedSceneSummary(
-      {
-        roomId: window.roomId,
-        roomKind: window.roomKind,
-        channel: window.channel,
-        modeId: window.modeId,
-        turns: window.turns.map((turn) => ({
-          messageId: turn.messageId,
-          body: turn.body,
-          channel: turn.channel,
-          semanticFamilies: turn.semanticFamilies ?? [],
-        })),
-        summary,
-      },
-      {
+    const embeddingVector = this.embeddingClient.embedTranscriptWindow({
+      messages: window.turns.map((turn) => ({
+        messageId: turn.messageId,
+        text: turn.body,
+        channel: turn.channel,
+      })),
+      sceneContext: {
         roomId: window.roomId,
         roomKind: window.roomKind,
         channel: window.channel,
@@ -944,7 +939,7 @@ export class ConversationMemoryModel {
         churnRisk: 0.5,
         notes: [],
       } as EmbeddingSceneContext,
-    ).combinedVector;
+    });
 
     return {
       memoryId: `memory::scene::${window.roomId}::${window.openedAt}::${window.closedAt}`,
@@ -977,7 +972,7 @@ export class ConversationMemoryModel {
       legendValue: clamp01(this.aggregate(window.turns.map((turn) => turn.legendValue ?? 0.2))),
       emotionalCharge: clamp01(this.aggregate(window.turns.map((turn) => turn.emotionalCharge ?? 0.2))),
       continuityValue: clamp01(0.4 + Math.min(window.turns.length, 8) / 12),
-      decayMultiplier: 0.82,
+      decayMultiplier: clamp01(0.82),
       embeddingVector,
       metadata: {
         source: 'compressWindowToSceneSummary',
@@ -1127,20 +1122,17 @@ export class ConversationMemoryModel {
     turn: ConversationMemoryTurn,
     sceneContext: EmbeddingSceneContext,
   ): Nullable<EmbeddingVector> {
-    const embedded = this.embeddingClient.embedMessage(
-      {
-        messageId: turn.messageId,
-        userId: turn.userId ?? ('system' as ChatUserId),
-        roomId: turn.roomId,
-        roomKind: turn.roomKind,
-        channel: turn.channel,
-        body: turn.body,
-        createdAt: turn.createdAt,
-        semanticFamilies: turn.semanticFamilies ?? [],
-      },
+    const embedded = this.embeddingClient.embedMessage({
+      messageId: turn.messageId,
+      text: turn.body,
+      createdAtMs: turn.createdAt,
+      channel: turn.channel,
+      roomKind: turn.roomKind,
+      modeId: turn.modeId ?? null,
+      pressureTier: turn.pressureTier ?? null,
       sceneContext,
-    );
-    return embedded.combinedVector;
+    });
+    return embedded;
   }
 
   private buildSceneContext(
@@ -1310,12 +1302,12 @@ export class ConversationMemoryModel {
     context: ConversationMemoryContext,
   ): Score01 {
     if ((turn.legendValue ?? 0) >= 0.72) {
-      return 0.96;
+      return clamp01(0.96);
     }
     if ((turn.rescueValue ?? 0) >= 0.72 || (turn.threatValue ?? 0) >= 0.72) {
-      return 0.9;
+      return clamp01(0.9);
     }
-    return 0.78;
+    return clamp01(0.78);
   }
 
   private computeRecencyWeight(
@@ -1349,7 +1341,7 @@ export class ConversationMemoryModel {
       record.negotiationValue * 0.08 +
       record.legendValue * 0.1 +
       record.emotionalCharge * 0.08;
-    return clamp01(ageWeight * 0.62 + salience * 0.38) * record.decayMultiplier;
+    return clamp01(clamp01(ageWeight * 0.62 + salience * 0.38) * record.decayMultiplier);
   }
 
   private aggregate(values: readonly number[]): number {
@@ -1388,15 +1380,15 @@ export class ConversationMemoryModel {
   ): Score01 {
     switch (roomKind) {
       case 'GLOBAL':
-        return dimension === 'witness' || dimension === 'legend' ? 0.84 : 0.58;
+        return clamp01(dimension === 'witness' || dimension === 'legend' ? 0.84 : 0.58);
       case 'DEAL_ROOM':
-        return dimension === 'strategic' || dimension === 'continuity' ? 0.84 : 0.56;
+        return clamp01(dimension === 'strategic' || dimension === 'continuity' ? 0.84 : 0.56);
       case 'SYNDICATE':
-        return dimension === 'relational' || dimension === 'persona' ? 0.82 : 0.58;
+        return clamp01(dimension === 'relational' || dimension === 'persona' ? 0.82 : 0.58);
       case 'LOBBY':
-        return dimension === 'recovery' || dimension === 'witness' ? 0.74 : 0.56;
+        return clamp01(dimension === 'recovery' || dimension === 'witness' ? 0.74 : 0.56);
       default:
-        return 0.58;
+        return clamp01(0.58);
     }
   }
 
@@ -1406,15 +1398,15 @@ export class ConversationMemoryModel {
   ): Score01 {
     switch (channel) {
       case 'GLOBAL':
-        return dimension === 'witness' || dimension === 'legend' ? 0.86 : 0.56;
+        return clamp01(dimension === 'witness' || dimension === 'legend' ? 0.86 : 0.56);
       case 'DEAL_ROOM':
-        return dimension === 'strategic' ? 0.88 : 0.54;
+        return clamp01(dimension === 'strategic' ? 0.88 : 0.54);
       case 'SYNDICATE':
-        return dimension === 'relational' || dimension === 'persona' ? 0.82 : 0.56;
+        return clamp01(dimension === 'relational' || dimension === 'persona' ? 0.82 : 0.56);
       case 'LOBBY':
-        return dimension === 'recovery' ? 0.76 : 0.56;
+        return clamp01(dimension === 'recovery' ? 0.76 : 0.56);
       default:
-        return 0.56;
+        return clamp01(0.56);
     }
   }
 
@@ -1423,22 +1415,22 @@ export class ConversationMemoryModel {
     dimension: string,
   ): Score01 {
     if (!modeId) {
-      return 0.58;
+      return clamp01(0.58);
     }
     const normalized = modeId.toLowerCase();
     if (normalized.includes('battle')) {
-      return dimension === 'shock' || dimension === 'legend' ? 0.86 : 0.58;
+      return clamp01(dimension === 'shock' || dimension === 'legend' ? 0.86 : 0.58);
     }
     if (normalized.includes('deal')) {
-      return dimension === 'strategic' ? 0.88 : 0.56;
+      return clamp01(dimension === 'strategic' ? 0.88 : 0.56);
     }
     if (normalized.includes('lobby')) {
-      return dimension === 'recovery' || dimension === 'continuity' ? 0.74 : 0.56;
+      return clamp01(dimension === 'recovery' || dimension === 'continuity' ? 0.74 : 0.56);
     }
     if (normalized.includes('syndicate')) {
-      return dimension === 'relational' || dimension === 'persona' ? 0.82 : 0.58;
+      return clamp01(dimension === 'relational' || dimension === 'persona' ? 0.82 : 0.58);
     }
-    return 0.58;
+    return clamp01(0.58);
   }
 }
 

@@ -36,7 +36,7 @@ import type {
   TickNumber,
   UnixMs,
 } from './ChatChannels';
-import { CHAT_CONTRACT_AUTHORITIES, CHAT_CONTRACT_VERSION, channelSupportsRescue, getVisibleChannelAudienceProfile } from './ChatChannels';
+import { CHAT_CONTRACT_AUTHORITIES, CHAT_CONTRACT_VERSION, channelSupportsRescue, getChatChannelDescriptor } from './ChatChannels';
 import type { ChatAffectSnapshot, ChatFeatureSnapshot, ChatLearningProfile, ChatPressureTier, ChatReputationState, ChatRescueDecision, ChatRunOutcome } from './ChatEvents';
 import type { ChatBossFightId, ChatBossFightKind, ChatBossFightState } from './ChatBossFight';
 import type { ChatCounterplayKind, ChatCounterWindowId } from './ChatCounterplay';
@@ -514,13 +514,14 @@ export function deriveRescuePublicRisk01(input: {
   readonly crowdHostility01: Score01;
   readonly publicExposure01?: Score01;
 }): Score01 {
-  const audience = getVisibleChannelAudienceProfile(input.visibleChannel);
+  const channelDescriptor = getChatChannelDescriptor(input.visibleChannel);
+  const audienceProfile = channelDescriptor.audienceProfile;
   const channelExposure =
-    audience.crowdPressureBias === 'EXTREME'
+    audienceProfile === 'PUBLIC_ARENA'
       ? 0.95
-      : audience.crowdPressureBias === 'HIGH'
+      : audienceProfile === 'PREDATORY_TABLE'
         ? 0.75
-        : audience.crowdPressureBias === 'MEDIUM'
+        : audienceProfile === 'TRUST_CIRCLE'
           ? 0.48
           : 0.25;
 

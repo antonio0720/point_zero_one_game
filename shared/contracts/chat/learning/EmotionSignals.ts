@@ -53,13 +53,16 @@ import {
 } from '../ChatChannels';
 
 import {
-  type ChatAuthority,
   type ChatMessageId,
   type ChatNpcId,
   type ChatSceneId,
   type ChatSessionId,
   type ChatUserId,
   type ChatWorldEventId,
+} from '../ChatChannels';
+
+import {
+  type ChatAuthority,
   CHAT_AUTHORITIES,
 } from '../ChatEvents';
 

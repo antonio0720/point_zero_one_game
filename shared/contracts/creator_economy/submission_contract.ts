@@ -49,8 +49,3 @@ export function isRejected(submission: UGCSubmission): submission is RejectedSub
 export interface RejectedSubmission extends UGCSubmission {
   // Additional properties for rejected submissions, if needed
 }
-```
-
-Please note that this TypeScript file only defines the interfaces and type guards for the UGCSubmission, its states, and transitions. The actual implementation of the game engine or replay determinism is not included here.
-
-Regarding SQL, YAML/JSON, Bash, and Terraform, they are not provided as they are not part of the specific request in this example.

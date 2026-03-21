@@ -22,7 +22,7 @@ import type {
   UnixMs,
 } from '../types';
 
-import type { BotId } from '../../battle/types';
+import type { BotId } from '../types';
 
 export type NoveltyPressureBand = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
 
@@ -249,38 +249,38 @@ export class ChatNoveltyLedger {
     };
   }
 
-  public noteMessage(message: ChatMessage, now: UnixMs = message.ts as UnixMs): void {
+  public noteMessage(message: ChatMessage, now: UnixMs = message.createdAt as UnixMs): void {
     this.noteEvent({
       eventId: String(message.id),
       occurredAt: now,
       lineId: message.id,
-      botId: message.botSource?.botId ?? null,
-      counterpartId: message.senderId ?? null,
-      channelId: message.channel,
-      pressureBand: this.toPressureBand(message.pressureTier),
+      botId: (message.attribution as any)?.botId ?? null,
+      counterpartId: (message.attribution as any)?.actorId ?? null,
+      channelId: message.channelId,
+      pressureBand: this.toPressureBand((message.metadata as any)?.pressureTier),
       motifIds: this.extractMotifsFromMessage(message),
-      rhetoricalForms: this.extractRhetoricalFormsFromText(message.body),
-      sceneRoles: message.sceneId ? ['SCENE_LINE'] : [],
-      semanticClusterIds: this.extractSemanticKeysFromText(message.body),
-      callbackSourceIds: message.quoteIds?.map((item) => String(item)) ?? [],
+      rhetoricalForms: this.extractRhetoricalFormsFromText(message.plainText),
+      sceneRoles: (message.metadata as any)?.sceneId ? ['SCENE_LINE'] : [],
+      semanticClusterIds: this.extractSemanticKeysFromText(message.plainText),
+      callbackSourceIds: (message.metadata as any)?.quoteIds?.map((item: unknown) => String(item)) ?? [],
       tags: message.tags ?? [],
-      text: message.body,
+      text: message.plainText,
     });
   }
 
-  public noteScene(scene: ChatScenePlan, channelId?: ChatVisibleChannel, now: UnixMs = scene.startedAt): void {
+  public noteScene(scene: ChatScenePlan, channelId?: ChatVisibleChannel, now: UnixMs = scene.openedAt): void {
     this.noteEvent({
       eventId: String(scene.sceneId),
       occurredAt: now,
       lineId: undefined,
       botId: null,
       counterpartId: null,
-      channelId: channelId ?? scene.primaryChannel,
+      channelId: channelId ?? (scene as any).primaryChannel,
       motifIds: [],
       rhetoricalForms: [],
       sceneRoles: [
-        String(scene.momentType ?? 'SCENE'),
-        ...scene.beats.map((beat) => String(beat.beatType)),
+        String((scene as any).momentType ?? 'SCENE'),
+        ...((scene as any).beats ?? []).map((beat: any) => String(beat.beatType)),
       ],
       semanticClusterIds: [],
       callbackSourceIds: [],

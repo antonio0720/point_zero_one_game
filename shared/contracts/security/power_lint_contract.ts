@@ -1,6 +1,3 @@
-Here is the TypeScript file `shared/contracts/security/power_lint_contract.ts` based on your specifications:
-
-```typescript
 /**
  * Power-Lint Job Contract Interface
  */

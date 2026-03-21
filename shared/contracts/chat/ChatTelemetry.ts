@@ -63,18 +63,10 @@ import {
 
 import {
   type ChatActorKind,
-  type ChatAffectSnapshot,
-  type ChatAuthority,
-  type ChatDeliveryState,
-  type ChatFeatureSnapshot,
-  type ChatInferenceSnapshot,
   type ChatInterventionId,
   type ChatLegendId,
   type ChatMemoryAnchorId,
   type ChatMessageId,
-  type ChatModerationDecision,
-  type ChatModerationState,
-  type ChatNotificationKind,
   type ChatNpcId,
   type ChatOfferId,
   type ChatProofHash,
@@ -82,20 +74,31 @@ import {
   type ChatReplayId,
   type ChatRequestId,
   type ChatSessionId,
-  type ChatTelemetryEnvelope,
-  type ChatTelemetryEventName,
   type ChatTelemetryId,
-  type ChatUpstreamSignal,
   type ChatUserId,
-  type ChatWorldEventDescriptor,
   type ChatWorldEventId,
   CHAT_ACTOR_KINDS,
+} from './ChatChannels';
+
+import {
+  type ChatAffectSnapshot,
+  type ChatAuthority,
+  type ChatDeliveryState,
+  type ChatFeatureSnapshot,
+  type ChatModerationDecision,
+  type ChatModerationState,
+  type ChatNotificationKind,
+  type ChatTelemetryEvent as ChatTelemetryEnvelope,
+  type ChatTelemetryEventName,
+  type ChatUpstreamSignal,
   CHAT_AUTHORITIES,
   CHAT_DELIVERY_STATES,
   CHAT_MODERATION_STATES,
   CHAT_NOTIFICATION_KINDS,
   CHAT_TELEMETRY_EVENTS,
 } from './ChatEvents';
+
+import { type ChatWorldEventDefinition as ChatWorldEventDescriptor } from './ChatWorldEvent';
 
 import {
   type ChatAttachment,
@@ -1187,7 +1190,7 @@ export function buildLearningTelemetryFact(
   telemetryId: ChatTelemetryId,
   occurredAt: UnixMs,
   context: ChatTelemetryContext,
-  inferenceSnapshot: ChatInferenceSnapshot,
+  inferenceSnapshot: { requestId?: ChatRequestId; selectedCandidateId?: string; helperShouldIntervene?: boolean; haterShouldEscalate?: boolean; retrievalAnchorIds: readonly unknown[] },
 ): ChatLearningTelemetryFact {
   return {
     factId: (`fact:learning:${inferenceSnapshot.requestId}`) as ChatTelemetryFactId,

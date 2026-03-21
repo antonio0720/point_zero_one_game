@@ -67,6 +67,7 @@ import {
   asUnixMs as asOfferUnixMs,
   chatOfferCanLeak,
   chatOfferConcessionCount,
+  chatOfferSupportsRescue,
   chatOfferConditionCount,
   chatOfferGuaranteeStrength,
   chatOfferHasConditions,
@@ -483,9 +484,9 @@ export class OfferCounterEngine {
         price: createNegotiationPriceVector(Number(counterPrice.amount), String(counterPrice.currency)),
         valueEstimate: counterPrice.marketRange
           ? {
-              low: asPricePoints(Number(counterPrice.marketRange.min)),
-              high: asPricePoints(Number(counterPrice.marketRange.max)),
-              midpoint: counterPrice.marketRange.expected === undefined ? undefined : asPricePoints(Number(counterPrice.marketRange.expected)),
+              min: asPricePoints(Number(counterPrice.marketRange.min)),
+              max: asPricePoints(Number(counterPrice.marketRange.max)),
+              preferred: counterPrice.marketRange.expected === undefined ? undefined : asPricePoints(Number(counterPrice.marketRange.expected)),
             }
           : undefined,
         riskAdjustmentBps: counterPrice.feeBps,
@@ -514,7 +515,7 @@ export class OfferCounterEngine {
       counterEnvelope,
       counterWindow: {
         windowId: asNegotiationWindowId(String(counterWindow.windowId)),
-        reason: strategy === 'STALL' ? 'STALL_RESPONSE' : 'COUNTERPLAY',
+        reason: strategy === 'STALL' ? 'TIME_PRESSURE' : 'COUNTER_REQUIRED',
         channel: request.negotiation.primaryChannel,
         openedAt: asUnixMs(Number(counterWindow.opensAt)),
         closesAt: asUnixMs(Number(counterWindow.closesAt)),
@@ -571,7 +572,7 @@ function scoreFairness(incomingOffer: ChatOffer, priorOffer: ChatOffer | null | 
 
   let score = 0.5;
 
-  if (chatOfferPriceWithinRange(incomingOffer, price)) {
+  if (chatOfferPriceWithinRange(incomingOffer, marketMin, marketMax)) {
     score += 0.14;
   }
 
@@ -603,7 +604,7 @@ function scoreFairness(incomingOffer: ChatOffer, priorOffer: ChatOffer | null | 
 }
 
 function scoreAggression(incomingOffer: ChatOffer, negotiation: ChatNegotiation): number {
-  let score = clamp01(chatOfferProjectedHostility(incomingOffer));
+  let score: number = clamp01(chatOfferProjectedHostility(incomingOffer));
 
   if (incomingOffer.visibility.revealMode === 'TRAP' || incomingOffer.visibility.revealMode === 'FAKEOUT') {
     score += 0.12;
@@ -625,7 +626,7 @@ function scoreAggression(incomingOffer: ChatOffer, negotiation: ChatNegotiation)
 }
 
 function scoreUrgency(incomingOffer: ChatOffer, negotiation: ChatNegotiation, now: UnixMs): number {
-  let score = clamp01(Number(incomingOffer.currentVersion.analytics?.urgency.normalized ?? 0.35));
+  let score: number = clamp01(Number(incomingOffer.currentVersion.analytics?.urgency.normalized ?? 0.35));
 
   if (incomingOffer.window) {
     const span = Math.max(1, Number(incomingOffer.window.closesAt) - Number(incomingOffer.window.opensAt));
@@ -650,7 +651,7 @@ function scoreUrgency(incomingOffer: ChatOffer, negotiation: ChatNegotiation, no
 }
 
 function scoreDesperation(incomingOffer: ChatOffer, negotiation: ChatNegotiation): number {
-  let score = clamp01(Number(incomingOffer.currentVersion.analytics?.desperation ?? 0.25));
+  let score: number = clamp01(Number(incomingOffer.currentVersion.analytics?.desperation ?? 0.25));
   if (incomingOffer.kind === 'LIQUIDATION' || incomingOffer.kind === 'RESCUE_OVERRIDE') {
     score += 0.22;
   }
@@ -664,7 +665,7 @@ function scoreDesperation(incomingOffer: ChatOffer, negotiation: ChatNegotiation
 }
 
 function scoreTrust(incomingOffer: ChatOffer, negotiation: ChatNegotiation): number {
-  let score = clamp01(chatOfferProjectedTrustworthiness(incomingOffer));
+  let score: number = clamp01(chatOfferProjectedTrustworthiness(incomingOffer));
   if (chatOfferHasGuarantee(incomingOffer)) {
     score += 0.12 * clamp01(chatOfferGuaranteeStrength(incomingOffer));
   }
@@ -733,7 +734,7 @@ function scoreCounterDistance(incomingOffer: ChatOffer, priorOffer: ChatOffer | 
   }
   const delta = Math.abs(Number(incomingOffer.currentVersion.price.amount) - Number(priorOffer.currentVersion.price.amount));
   const relative = delta / Math.max(1, Number(priorOffer.currentVersion.price.amount));
-  let score = clamp01(relative);
+  let score: number = clamp01(relative);
   if (negotiation.phase === 'COUNTER' || negotiation.phase === 'PRESSURE') {
     score += 0.08;
   }
@@ -1136,7 +1137,7 @@ function toNegotiationActorRef(actor: ChatOfferActorRef, role: 'BUYER' | 'SELLER
 function toNegotiationConcessions(concessions: readonly ChatOfferConcession[] | undefined): NegotiationConcession[] | undefined {
   if (!concessions || concessions.length === 0) return undefined;
   return concessions.map((concession) => ({
-    type: 'SOFTENER',
+    type: 'PRICE',
     magnitude: Number(concession.valueDelta ?? 0),
     describedAs: concession.label,
     reversible: false,
@@ -1240,10 +1241,12 @@ function derivePriorOfferFromNegotiation(negotiation: ChatNegotiation, incomingO
 }
 
 function toChatOfferActor(actor: NegotiationActorRef): ChatOfferActorRef {
+  const actorKind: ChatOfferActorRef['actorKind'] =
+    actor.actorKind === 'OBSERVER' ? 'SYSTEM' : actor.actorKind;
   return {
     actorId: actor.actorId as unknown as any,
     displayName: actor.displayName,
-    actorKind: actor.actorKind,
+    actorKind,
     factionId: actor.factionId,
     personaKey: actor.personaKey,
     voiceprintKey: actor.voiceprintKey,

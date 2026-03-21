@@ -58,20 +58,23 @@ import {
 
 import {
   type ChatActorKind,
-  type ChatAuthority,
-  type ChatAffectSnapshot,
-  type ChatAudienceHeat,
-  type ChatChannelMood,
   type ChatMessageId,
-  type ChatMessageKind,
-  type ChatMomentType,
   type ChatNpcId,
   type ChatRelationshipId,
   type ChatSceneId,
   type ChatSequenceNumber,
+  type ChatUserId,
+} from './ChatChannels';
+
+import {
+  type ChatAuthority,
+  type ChatAffectSnapshot,
+  type ChatAudienceHeat,
+  type ChatChannelMood,
+  type ChatMessageKind,
+  type ChatMomentType,
   type ChatTelemetryEventName,
   type ChatTypingState,
-  type ChatUserId,
 } from './ChatEvents';
 
 import {

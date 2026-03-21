@@ -1,6 +1,3 @@
-Here is the TypeScript file `shared/contracts/loss_is_content/death_autopsy_contract.ts`:
-
-```typescript
 /**
  * Death Autopsy Contract Interface
  */

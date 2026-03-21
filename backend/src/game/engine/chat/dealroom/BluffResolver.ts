@@ -397,10 +397,10 @@ export class BluffResolver {
     });
 
     const analysis: BluffAnalysis = {
-      analysisId: createAnalysisId(negotiation.id, actorState?.actorId, now),
+      analysisId: createAnalysisId(negotiation.negotiationId, actorState?.actor.actorId, now),
       roomId: request.roomId,
-      negotiationId: String(negotiation.id),
-      actorId: actorState?.actorId ? String(actorState.actorId) : request.actorId ?? undefined,
+      negotiationId: String(negotiation.negotiationId),
+      actorId: actorState?.actor.actorId ? String(actorState.actor.actorId) : request.actorId ?? undefined,
       analyzedAt: now,
       family,
       bluffConfidence01,
@@ -433,7 +433,7 @@ export class BluffResolver {
 
     this.logger.debug('chat.dealroom.bluff.analyzed', {
       roomId: request.roomId as unknown as string,
-      negotiationId: String(negotiation.id),
+      negotiationId: String(negotiation.negotiationId),
       actorId: analysis.actorId ?? null,
       family,
       bluffConfidence01,
@@ -529,10 +529,10 @@ export class BluffResolver {
       ));
     }
 
-    if (panicHits > 0 && actorState && actorState.confidence01 > 0.72) {
+    if (panicHits > 0 && actorState && actorState.emotion.confidence > 0.72) {
       signals.push(signal(
         'COUNTERFEIT_PANIC',
-        asScore0To1(clamp01((panicHits / 5) * 0.55 + Number(actorState.confidence01) * 0.25)),
+        asScore0To1(clamp01((panicHits / 5) * 0.55 + Number(actorState.emotion.confidence) * 0.25)),
         'Panic language may be theatrical relative to observed confidence.',
       ));
     }
@@ -545,10 +545,10 @@ export class BluffResolver {
       ));
     }
 
-    if (trustHits > 0 && actorState && actorState.trust01 < 0.35) {
+    if (trustHits > 0 && actorState && actorState.emotion.trust < 0.35) {
       signals.push(signal(
         'TRUST_LANGUAGE_LOW_TRUST_OFFER',
-        asScore0To1(clamp01(Number(actorState.trust01) * -0.4 + 0.58)),
+        asScore0To1(clamp01(Number(actorState.emotion.trust) * -0.4 + 0.58)),
         'Trust rhetoric exceeds recorded trust posture.',
       ));
     }
@@ -599,7 +599,7 @@ export class BluffResolver {
     }
 
     const signals: BluffSignal[] = [];
-    const delta = priorOffer ? Math.abs(Number(chatOfferPriceDeltaFromPrior(offer, priorOffer))) : 0;
+    const delta = priorOffer ? Math.abs(Number(chatOfferPriceDeltaFromPrior(offer))) : 0;
     const guaranteeStrength = Number(chatOfferGuaranteeStrength(offer));
     const trustProjection = Number(chatOfferProjectedTrustworthiness(offer));
     const hostilityProjection = Number(chatOfferProjectedHostility(offer));
@@ -671,7 +671,7 @@ export class BluffResolver {
       ));
     }
 
-    if (actorState && actorState.confidence01 < 0.28 && hostilityProjection > 0.72) {
+    if (actorState && actorState.emotion.confidence < 0.28 && hostilityProjection > 0.72) {
       signals.push(signal(
         'COUNTERFEIT_CALM',
         asScore0To1(0.55),
@@ -689,10 +689,10 @@ export class BluffResolver {
     latestLeakThreat?: NegotiationLeakThreat | null,
   ): BluffSignal[] {
     const signals: BluffSignal[] = [];
-    const dominantPressure = negotiationInferDominantPressure(negotiation);
+    const dominantPressure = negotiationInferDominantPressure(latestInference ?? negotiation.latestInference);
     const failure01 = softFailureSignal01(actorState);
 
-    if (negotiationHasAudiencePressure(negotiation) && actorState && actorState.visibilityPreference === 'PRIVATE') {
+    if (negotiationHasAudiencePressure(negotiation) && actorState && (actorState as any).visibilityPreference === 'PRIVATE') {
       signals.push(signal(
         'AUDIENCE_HEAT_PERFORMANCE',
         asScore0To1(0.44),
@@ -701,7 +701,7 @@ export class BluffResolver {
       ));
     }
 
-    if (latestLeakThreat && Number(latestLeakThreat.severity01) > 0.62 && !negotiationHasLeakThreat(negotiation)) {
+    if (latestLeakThreat && Number(latestLeakThreat.severity.normalized) > 0.62 && !negotiationHasLeakThreat(negotiation)) {
       signals.push(signal(
         'LEAK_POSTURE_OVERPLAY',
         asScore0To1(0.48),
@@ -709,7 +709,7 @@ export class BluffResolver {
       ));
     }
 
-    if (latestInference && Number(latestInference.urgency01) > 0.68 && dominantPressure !== 'TIME') {
+    if (latestInference && Number((latestInference as any).urgency01) > 0.68 && dominantPressure !== 'TIME') {
       signals.push(signal(
         'WINDOW_MISMATCH',
         asScore0To1(0.53),
@@ -717,7 +717,7 @@ export class BluffResolver {
       ));
     }
 
-    if (latestInference && Number(latestInference.rescueNeed01) > 0.63 && !negotiationSupportsRescue(negotiation)) {
+    if (latestInference && Number(latestInference.risk.rescueNeed) > 0.63 && !negotiationSupportsRescue(negotiation)) {
       signals.push(signal(
         'RESCUE_SIGNAL_OVERPLAY',
         asScore0To1(0.56),
@@ -725,7 +725,7 @@ export class BluffResolver {
       ));
     }
 
-    if (failure01 > 0.6 && actorState?.confidence01 && Number(actorState.confidence01) > 0.7) {
+    if (failure01 > 0.6 && actorState?.emotion.confidence && Number(actorState.emotion.confidence) > 0.7) {
       signals.push(signal(
         'PUBLIC_CONFIDENCE_PRIVATE_FEAR',
         asScore0To1(0.59),
@@ -733,7 +733,7 @@ export class BluffResolver {
       ));
     }
 
-    if (failure01 > 0.72 && actorState?.helpSeeking01 && Number(actorState.helpSeeking01) < 0.22) {
+    if (failure01 > 0.72 && (actorState as any)?.helpSeeking01 && Number((actorState as any).helpSeeking01) < 0.22) {
       signals.push(signal(
         'COUNTERFEIT_CALM',
         asScore0To1(0.51),
@@ -759,7 +759,7 @@ export class BluffResolver {
     const rescueEvidence = evidence.filter((item) => String(item.kind).includes('HELPER') || String(item.kind).includes('CHURN')).length;
     const trustEvidence = evidence.filter((item) => String(item.kind).includes('TRUST')).length;
 
-    if (urgencyEvidence > 2 && negotiationInferDominantPressure(negotiation) !== 'TIME') {
+    if (urgencyEvidence > 2 && negotiationInferDominantPressure(negotiation.latestInference) !== 'TIME') {
       signals.push(signal(
         'WINDOW_MISMATCH',
         scaledHitWeight(urgencyEvidence, 6),
@@ -783,7 +783,7 @@ export class BluffResolver {
       ));
     }
 
-    if (trustEvidence > 1 && actorState && actorState.trust01 < 0.28) {
+    if (trustEvidence > 1 && actorState && actorState.emotion.trust < 0.28) {
       signals.push(signal(
         'TRUST_LANGUAGE_LOW_TRUST_OFFER',
         scaledHitWeight(trustEvidence, 5),
@@ -853,7 +853,7 @@ export class BluffResolver {
       ));
     }
 
-    if (input.family === 'ANCHOR_TRAP' || Number(input.offer ? chatOfferPriceDeltaFromPrior(input.offer, input.priorOffer ?? null) : 0) > 0.2) {
+    if (input.family === 'ANCHOR_TRAP' || Number(input.offer ? chatOfferPriceDeltaFromPrior(input.offer) : 0) > 0.2) {
       windows.push(exploitWindow(
         'ANCHOR_RESET',
         clamp01(exploitability * 0.82 + 0.05),
@@ -1081,22 +1081,19 @@ function resolveActorState(
   actorId?: string | null,
 ): NegotiationActorState | null {
   if (!actorId) {
-    const state = negotiationPrimaryActorState(negotiation);
-    return state ?? null;
+    return negotiation.actorStates[0] ?? null;
   }
-  const states = Array.isArray((negotiation as { actorStates?: unknown }).actorStates)
-    ? ((negotiation as { actorStates?: NegotiationActorState[] }).actorStates ?? [])
-    : [];
-  return states.find((state) => String(state.actorId) === String(actorId)) ?? negotiationPrimaryActorState(negotiation) ?? null;
+  const states: readonly NegotiationActorState[] = negotiation.actorStates;
+  return states.find((state) => String(state.actor.actorId) === String(actorId)) ?? negotiation.actorStates[0] ?? null;
 }
 
 function softFailureSignal01(actorState: NegotiationActorState | null): number {
   if (!actorState) return 0.25;
   return clamp01(
-    (1 - Number(actorState.confidence01 ?? asScore0To1(0.5))) * 0.42 +
-      Number(actorState.fatigue01 ?? asScore0To1(0.2)) * 0.28 +
-      Number(actorState.helpSeeking01 ?? asScore0To1(0.1)) * 0.18 +
-      Number(actorState.frustration01 ?? asScore0To1(0.1)) * 0.12,
+    (1 - Number(actorState.emotion.confidence ?? asScore0To1(0.5))) * 0.42 +
+      Number((actorState as any).fatigue01 ?? asScore0To1(0.2)) * 0.28 +
+      Number((actorState as any).helpSeeking01 ?? asScore0To1(0.1)) * 0.18 +
+      Number(actorState.emotion.frustration ?? asScore0To1(0.1)) * 0.12,
   );
 }
 
@@ -1106,12 +1103,12 @@ function scoreDominantPressure(
   offer: ChatOffer | null,
   priorOffer: ChatOffer | null,
 ): string {
-  const enginePressure = negotiationInferDominantPressure(negotiation);
-  const delta = offer && priorOffer ? Math.abs(Number(chatOfferPriceDeltaFromPrior(offer, priorOffer))) : 0;
+  const enginePressure = negotiationInferDominantPressure(negotiation.latestInference);
+  const delta = offer ? Math.abs(Number(chatOfferPriceDeltaFromPrior(offer))) : 0;
   if (delta > 0.18) return 'PRICE';
   if (negotiationHasAudiencePressure(negotiation)) return 'AUDIENCE';
   if (negotiationHasLeakThreat(negotiation)) return 'LEAK';
-  if (actorState && Number(actorState.helpSeeking01 ?? asScore0To1(0)) > 0.45) return 'RESCUE';
+  if (actorState && Number((actorState as any).helpSeeking01 ?? asScore0To1(0)) > 0.45) return 'RESCUE';
   return enginePressure;
 }
 
@@ -1142,7 +1139,7 @@ function hasActiveDeadlineWindow(negotiation: ChatNegotiation, priorOffer: ChatO
     ? ((priorOffer as { windows?: ChatOfferWindow[] }).windows ?? [])
     : [];
   return windows.some((window) => !window.expired && !window.closed) ||
-    offerWindows.some((window) => Number(window.deadlineAt ?? asOfferUnixMs(0)) > Date.now());
+    offerWindows.some((window) => Number(window.closesAt ?? asOfferUnixMs(0)) > Date.now());
 }
 
 function supportsScarcityClaim(
@@ -1151,7 +1148,7 @@ function supportsScarcityClaim(
 ): boolean {
   if (negotiationHasAudiencePressure(negotiation)) return true;
   if (negotiationHasLeakThreat(negotiation)) return true;
-  if (actorState && Number(actorState.inventoryTightness01 ?? asScore0To1(0)) > 0.58) return true;
+  if (actorState && Number((actorState as any).inventoryTightness01 ?? asScore0To1(0)) > 0.58) return true;
   return false;
 }
 
@@ -1164,8 +1161,8 @@ function hasEvidenceBackfill(negotiation: ChatNegotiation): boolean {
 
 function actorCanCarryGuarantee(actorState: NegotiationActorState | null): boolean {
   if (!actorState) return false;
-  return Number(actorState.trust01 ?? asScore0To1(0)) > 0.52 ||
-    Number(actorState.reputation01 ?? asScore0To1(0)) > 0.58;
+  return Number(actorState.emotion.trust ?? asScore0To1(0)) > 0.52 ||
+    Number(actorState.reputation.current ?? asScore0To1(0)) > 58;
 }
 
 function repeatedNonAnswer(currentBody: string, priorBodies: readonly string[]): boolean {

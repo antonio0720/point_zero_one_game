@@ -1,6 +1,3 @@
-Here is the TypeScript file `shared/contracts/biometric/biometric_contract.ts` as per your specifications:
-
-```typescript
 /**
  * Biometric Contract Interface
  */

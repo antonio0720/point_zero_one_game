@@ -1,6 +1,3 @@
-Here is the TypeScript file `shared/contracts/curriculum/measurement_contract.ts` based on your specifications:
-
-```typescript
 /**
  * Measurement contract for aggregates, individual progress signals, and risk literacy composite inputs.
  */

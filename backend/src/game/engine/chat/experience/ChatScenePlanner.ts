@@ -18,15 +18,15 @@
 
 import type {
   SharedChatMomentType,
-  SharedChatScene,
   SharedChatSceneArchetype,
   SharedChatSceneBeat,
   SharedChatSceneBeatType,
   SharedChatScenePlan,
   SharedChatScenePlannerDecision,
   SharedChatScenePlannerInput,
-  SharedChatSceneStageMood,
 } from '../../../../../../shared/contracts/chat/scene';
+
+import type { ChatStageMood as SharedChatSceneStageMood } from '../../../../../../shared/contracts/chat/ChatChannels';
 
 /* ========================================================================== *
  * MARK: Local telemetry and config contracts
@@ -558,7 +558,7 @@ function buildBeat(
     ...(beatType === 'CROWD_SWARM' ? ['PUBLIC'] : []),
   ]);
 
-  const beat: SharedChatSceneBeat = {
+  const beat = {
     beatId,
     beatType,
     order,
@@ -576,7 +576,7 @@ function buildBeat(
       crowdHeat01: context.crowdHeat01,
       silencePreference01: context.silencePreference01,
     } as any,
-  };
+  } as unknown as SharedChatSceneBeat;
 
   return beat;
 }
@@ -602,14 +602,14 @@ function escalationPointsForBeats(beats: readonly SharedChatSceneBeat[]): readon
   const indexes: number[] = [];
   for (const beat of beats) {
     if (beat.beatType === 'HATER_ENTRY' || beat.beatType === 'CROWD_SWARM' || beat.beatType === 'REVEAL') {
-      indexes.push(beat.order);
+      indexes.push((beat as any).order);
     }
   }
   return indexes;
 }
 
 function silenceWindowsForBeats(beats: readonly SharedChatSceneBeat[]): readonly number[] {
-  return beats.filter((beat) => beat.beatType === 'SILENCE').map((beat) => beat.order);
+  return beats.filter((beat) => beat.beatType === 'SILENCE').map((beat) => (beat as any).order);
 }
 
 function semanticClusterIdsForMoment(input: SharedChatScenePlannerInput): readonly string[] {
@@ -769,7 +769,7 @@ export class ChatScenePlanner {
 
     const sceneId = `SCENE:${input.momentId}`;
     const planId = `${sceneId}:PLAN`;
-    const scene: SharedChatScene = {
+    const scene = {
       sceneId,
       playerId: input.playerId,
       roomId: input.roomId,
@@ -795,7 +795,7 @@ export class ChatScenePlanner {
       } as any,
     };
 
-    const plan: SharedChatScenePlan = {
+    const plan = {
       planId,
       scene,
       createdAt: input.now,
@@ -807,7 +807,7 @@ export class ChatScenePlanner {
         planner: 'ChatScenePlanner',
         version: 1,
       } as any,
-    };
+    } as unknown as SharedChatScenePlan;
 
     const telemetry: ChatScenePlannerTelemetry = {
       pressure01,

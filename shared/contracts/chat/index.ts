@@ -42,9 +42,10 @@ import {
 } from './ChatChannels';
 import {
   CHAT_EVENT_CONTRACT,
-  CHAT_EVENTS_PUBLIC_API_VERSION,
   CHAT_SOCKET_PROTOCOL_VERSION,
 } from './ChatEvents';
+
+const CHAT_EVENTS_PUBLIC_API_VERSION = CHAT_SOCKET_PROTOCOL_VERSION;
 
 import * as ChatChannelsModule from './ChatChannels';
 import * as ChatEventsModule from './ChatEvents';

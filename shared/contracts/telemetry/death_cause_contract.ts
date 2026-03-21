@@ -1,6 +1,3 @@
-Here is the TypeScript file `shared/contracts/telemetry/death_cause_contract.ts` based on your specifications:
-
-```typescript
 /**
  * Death Cause Contract Interface
  */

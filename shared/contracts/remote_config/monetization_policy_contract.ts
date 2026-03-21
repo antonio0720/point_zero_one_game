@@ -1,6 +1,3 @@
-Here is the TypeScript file `shared/contracts/remote_config/monetization_policy_contract.ts` as per your specifications:
-
-```typescript
 /**
  * Monetization Policy Contract
  */

@@ -82,13 +82,12 @@ import type {
 } from '../../../../../../shared/contracts/chat/ChatRescue';
 import {
   buildRescuePlan,
-  buildRescueWindow,
+  createRescueWindow,
   deriveRescueDigest,
   deriveRescueRecoverability01,
   deriveRescueStateSnapshot,
   deriveRescueTilt01,
   deriveRescueTriggerCandidates,
-  createRescueLedgerEntry,
   shouldSuppressRescue,
   toScore01 as toRescueScore01,
   toScore100 as toRescueScore100,
@@ -324,7 +323,7 @@ const EMPTY_FEATURE: ChatFeatureSnapshot = Object.freeze({
   unreadPressure01: 0 as Score01,
   directPressure01: 0 as Score01,
   publicExposure01: 0 as Score01,
-} as ChatFeatureSnapshot);
+} as unknown as ChatFeatureSnapshot);
 
 const EMPTY_LEARNING: ChatLearningProfile = Object.freeze({
   helperReceptivity: 45 as Score100,
@@ -342,7 +341,7 @@ const EMPTY_REPUTATION: ChatReputationState = Object.freeze({
   dealRoomComposure: 50 as Score100,
 } as unknown as ChatReputationState);
 
-const CHANNEL_FALLBACK_ORDER: readonly ChatVisibleChannel[] = ['DIRECT', 'SYNDICATE', 'DEAL_ROOM', 'GLOBAL', 'SPECTATOR'];
+const CHANNEL_FALLBACK_ORDER: readonly ChatVisibleChannel[] = ['SYNDICATE' as ChatVisibleChannel, 'DEAL_ROOM' as ChatVisibleChannel, 'GLOBAL' as ChatVisibleChannel];
 
 // ============================================================================
 // MARK: Utility helpers
@@ -636,7 +635,7 @@ function estimateStabilityLift(churnRisk01: Score01, helperReadiness01: Score01,
 }
 
 function createRescueWindowForUrgency(plan: ChatRescuePlan, openedAt: UnixMs, tuning: ChurnRescuePolicyTuning): ChatRescueWindow {
-  const window = buildRescueWindow(plan.rescueId, plan.kind, plan.urgency, openedAt);
+  const window = createRescueWindow(plan.rescueId, plan.kind, plan.urgency, openedAt);
   const closesAt = plan.urgency === 'CRITICAL'
     ? unix(Number(openedAt) + tuning.criticalWindowMs)
     : plan.urgency === 'IMMEDIATE'
@@ -653,7 +652,8 @@ function createRescueWindowForUrgency(plan: ChatRescuePlan, openedAt: UnixMs, tu
 }
 
 function createRescueDigestFromPlan(plan: ChatRescuePlan, now: UnixMs): ChatRescueDigest {
-  const entry = createRescueLedgerEntry({
+  const entry: ChatRescueLedgerEntry = {
+    ledgerId: (`rescue-ledger:${String(plan.rescueId)}:${Number(now)}` as any),
     rescueId: plan.rescueId,
     rescuePlanId: plan.rescuePlanId,
     roomId: plan.roomId,
@@ -665,7 +665,7 @@ function createRescueDigestFromPlan(plan: ChatRescuePlan, now: UnixMs): ChatResc
     style: plan.style,
     createdAt: now,
     updatedAt: now,
-  } as any);
+  };
   return deriveRescueDigest([entry], now);
 }
 

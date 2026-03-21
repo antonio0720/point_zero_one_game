@@ -1,6 +1,3 @@
-Here is the TypeScript file `shared/contracts/season0/streaks_contract.ts` based on your specifications:
-
-```typescript
 /**
  * Streaks Contract for Point Zero One Digital's financial roguelike game
  */

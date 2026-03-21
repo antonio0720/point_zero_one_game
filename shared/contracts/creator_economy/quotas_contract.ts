@@ -1,6 +1,3 @@
-Here is the TypeScript file `shared/contracts/creator_economy/quotas_contract.ts` as per your specifications:
-
-```typescript
 /**
  * Quotas Contract for Creator Economy
  */

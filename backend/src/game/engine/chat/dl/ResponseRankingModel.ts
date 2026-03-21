@@ -476,7 +476,7 @@ export class ResponseRankingModel {
   private normalizeCandidates(
     rawCandidates: readonly ResponseRankingCandidateInput[],
   ): RankedResponseCandidate[] {
-    const normalized = rawCandidates.map((candidate) => ({
+    const normalized: RankedResponseCandidate[] = rawCandidates.map((candidate) => ({
       ...candidate,
       channelPreference: candidate.channelPreference ?? 'same',
       latencyClass: candidate.latencyClass ?? 'instant',
@@ -511,13 +511,13 @@ export class ResponseRankingModel {
       body: '',
       channelPreference: 'same',
       latencyClass: 'hold',
-      moderationSensitivity: 0.02,
-      recoveryValue: 0.3,
-      aggressionValue: 0.02,
-      teachingValue: 0.08,
-      witnessValue: 0.18,
-      negotiationValue: 0.22,
-      silenceCompatibility: 0.94,
+      moderationSensitivity: clamp01(0.02),
+      recoveryValue: clamp01(0.3),
+      aggressionValue: clamp01(0.02),
+      teachingValue: clamp01(0.08),
+      witnessValue: clamp01(0.18),
+      negotiationValue: clamp01(0.22),
+      silenceCompatibility: clamp01(0.94),
       callbackAnchorIds: [],
       callbackQuoteIds: [],
       semanticFamilies: [],
@@ -535,36 +535,28 @@ export class ResponseRankingModel {
     const transcriptBodies = context.transcriptWindow.map((turn) => turn.body).filter(Boolean);
     const recentTurnBodies = transcriptBodies.slice(-CHAT_RESPONSE_RANKING_DEFAULTS.semanticWindowDepth);
     const transcriptEmbedding = recentTurnBodies.length
-      ? this.embeddingClient.embedTranscriptWindow(
-          recentTurnBodies.map((body, turnIndex) => ({
+      ? this.embeddingClient.embedTranscriptWindow({
+          messages: recentTurnBodies.map((body, turnIndex) => ({
             messageId: (`window::${turnIndex}` as ChatMessageId),
-            userId: context.actorUserId ?? ('system' as ChatUserId),
-            roomId: context.roomId,
-            roomKind: context.roomKind,
+            text: body,
             channel: context.activeChannel,
-            body,
-            createdAt: nowMs - (recentTurnBodies.length - turnIndex) * 1000,
-            semanticFamilies: [],
+            createdAtMs: asUnixMs(nowMs - (recentTurnBodies.length - turnIndex) * 1000),
           })),
-          context.sceneContext ?? this.buildSceneContext(context),
-        )
+          sceneContext: context.sceneContext ?? this.buildSceneContext(context),
+        })
       : null;
 
-    const encodedIntent = this.intentEncoder.encodeSequence(
-      context.transcriptWindow.map((turn) => ({
+    const encodedIntent = this.intentEncoder.encodeSequence({
+      turns: context.transcriptWindow.map((turn) => ({
         messageId: turn.messageId ?? (`turn::${turn.sequenceIndex}` as ChatMessageId),
-        userId: turn.userId ?? (context.actorUserId ?? ('system' as ChatUserId)),
-        roomId: context.roomId,
-        roomKind: turn.roomKind,
+        text: turn.body,
         channel: turn.channel,
-        body: turn.body,
-        createdAt: turn.createdAt,
-        semanticFamilies: turn.semanticFamilies ?? [],
+        createdAtMs: turn.createdAt,
       })),
-      context.sceneContext ?? this.buildSceneContext(context),
-    );
+      sceneContext: context.sceneContext ?? this.buildSceneContext(context),
+    });
 
-    const semanticQueryVector = transcriptEmbedding?.combinedVector ?? null;
+    const semanticQueryVector = transcriptEmbedding ?? null;
     const volatility = clamp01(context.toxicityRisk * 0.44 + context.haterPressure * 0.24 + context.churnRisk * 0.18 + (1 - context.shieldIntegrity) * 0.14);
     const stability = clamp01(1 - volatility * 0.66 + context.recoveryPotential * 0.22 + (1 - context.toxicityRisk) * 0.12);
     const novelty = clamp01(
@@ -604,8 +596,8 @@ export class ResponseRankingModel {
       continuity,
       repetitionHeat,
       relationshipContinuity,
-      primaryIntentKind: encodedIntent.primaryIntent?.kind ?? null,
-      intentEntropy: clamp01(encodedIntent.intentEntropy ?? 0.5),
+      primaryIntentKind: encodedIntent.dominantSequenceIntent ?? null,
+      intentEntropy: clamp01(0.5),
       publicWitnessNeed,
       privacyNeed,
       negotiationNeed,
@@ -613,7 +605,7 @@ export class ResponseRankingModel {
       aggressionWindow,
       silenceValue,
       semanticQueryVector,
-      transcriptEmbeddingVector: transcriptEmbedding?.combinedVector ?? null,
+      transcriptEmbeddingVector: transcriptEmbedding ?? null,
       recentTurnBodies,
     };
   }
@@ -659,7 +651,7 @@ export class ResponseRankingModel {
       moderationPenalty: this.computeModerationPenalty(candidate, context, surface),
       suppressionPenalty: this.computeSuppressionPenalty(candidate, context, surface),
       silenceBonus: this.computeSilenceBonus(candidate, context, surface),
-      overall: 0,
+      overall: clamp01(0),
     };
 
     const semanticSimilarity = this.computeSemanticSimilarity(candidate, context, surface);
@@ -1175,31 +1167,25 @@ export class ResponseRankingModel {
     surface: ResponseRankingWorkingSurface,
   ): Score01 {
     if (!candidate.body || !surface.semanticQueryVector) {
-      return candidate.sourceKind === 'silence' ? surface.silenceValue : 0.22;
+      return candidate.sourceKind === 'silence' ? surface.silenceValue : clamp01(0.22);
     }
 
     const embeddingInput: EmbeddingMessageInput = {
       messageId: (candidate.candidateId as ChatMessageId),
-      userId: context.actorUserId ?? ('system' as ChatUserId),
-      roomId: context.roomId,
-      roomKind: context.roomKind,
-      channel: this.resolveCandidateChannel(candidate, context),
-      body: candidate.body,
-      createdAt: surface.nowMs,
-      semanticFamilies: candidate.semanticFamilies ?? [],
+      text: candidate.body,
+      channel: this.resolveCandidateChannel(candidate, context) as ChatVisibleChannel,
+      createdAtMs: surface.nowMs,
+      sceneContext: context.sceneContext ?? this.buildSceneContext(context),
     };
 
-    const embeddedCandidate = this.embeddingClient.embedMessage(
-      embeddingInput,
-      context.sceneContext ?? this.buildSceneContext(context),
-    );
+    const embeddedCandidate = this.embeddingClient.embedMessage(embeddingInput);
 
-    const similarity = this.embeddingClient.compare(
+    const similarity = this.embeddingClient.cosineSimilarity(
       surface.semanticQueryVector,
-      embeddedCandidate.combinedVector,
+      embeddedCandidate,
     );
 
-    return clamp01(similarity.score);
+    return clamp01(similarity.clipped01);
   }
 
   private composeOverallScore(
@@ -1306,7 +1292,7 @@ export class ResponseRankingModel {
     surface: ResponseRankingWorkingSurface,
   ): Score01 {
     if (candidate.sourceKind === 'silence') {
-      return 0;
+      return clamp01(0);
     }
     const publicMismatch =
       candidate.channelPreference === 'same' &&
@@ -1558,7 +1544,7 @@ export class ResponseRankingModel {
     candidates: readonly RankedResponseCandidate[],
   ): Score01 {
     if (!transcriptBodies.length) {
-      return 0.88;
+      return clamp01(0.88);
     }
     const transcriptSet = new Set(transcriptBodies.map((value) => value.toLowerCase().trim()));
     const repeatedCandidates = candidates.filter((candidate) => transcriptSet.has(candidate.body.toLowerCase().trim())).length;
@@ -1569,7 +1555,7 @@ export class ResponseRankingModel {
     transcriptWindow: readonly ResponseTranscriptTurn[],
   ): Score01 {
     if (transcriptWindow.length <= 1) {
-      return 0.64;
+      return clamp01(0.64);
     }
     let continuityHits = 0;
     for (let windowIndex = 1; windowIndex < transcriptWindow.length; windowIndex += 1) {
@@ -1608,7 +1594,7 @@ export class ResponseRankingModel {
     transcriptWindow: readonly ResponseTranscriptTurn[],
   ): Score01 {
     if (!transcriptWindow.length) {
-      return 0.42;
+      return clamp01(0.42);
     }
     const authorCounts = new Map<string, number>();
     for (const turn of transcriptWindow) {
@@ -1624,30 +1610,30 @@ export class ResponseRankingModel {
     dimensionKey: string,
   ): Score01 {
     if (!modeId) {
-      return 0.5;
+      return clamp01(0.5);
     }
     const normalized = modeId.toLowerCase();
     if (normalized.includes('battle')) {
       return dimensionKey.includes('Aggression') || dimensionKey.includes('Pressure')
-        ? 0.86
-        : 0.58;
+        ? clamp01(0.86)
+        : clamp01(0.58);
     }
     if (normalized.includes('lobby')) {
       return dimensionKey.includes('Witness') || dimensionKey.includes('Continuity')
-        ? 0.78
-        : 0.56;
+        ? clamp01(0.78)
+        : clamp01(0.56);
     }
     if (normalized.includes('syndicate')) {
       return dimensionKey.includes('Memory') || dimensionKey.includes('Negotiation')
-        ? 0.8
-        : 0.57;
+        ? clamp01(0.8)
+        : clamp01(0.57);
     }
     if (normalized.includes('deal')) {
       return dimensionKey.includes('Negotiation') || dimensionKey.includes('Silence')
-        ? 0.84
-        : 0.54;
+        ? clamp01(0.84)
+        : clamp01(0.54);
     }
-    return 0.6;
+    return clamp01(0.6);
   }
 
   private lookupRoomWeight(
@@ -1657,22 +1643,22 @@ export class ResponseRankingModel {
     switch (roomKind) {
       case 'GLOBAL':
         return dimensionKey === 'witnessValue' || dimensionKey === 'cinematicFitness'
-          ? 0.85
-          : 0.58;
+          ? clamp01(0.85)
+          : clamp01(0.58);
       case 'SYNDICATE':
         return dimensionKey === 'memoryFitness' || dimensionKey === 'continuityValue'
-          ? 0.82
-          : 0.6;
+          ? clamp01(0.82)
+          : clamp01(0.6);
       case 'DEAL_ROOM':
         return dimensionKey === 'negotiationFitness' || dimensionKey === 'latencyFitness'
-          ? 0.88
-          : 0.55;
+          ? clamp01(0.88)
+          : clamp01(0.55);
       case 'LOBBY':
         return dimensionKey === 'teachingFitness' || dimensionKey === 'witnessValue'
-          ? 0.72
-          : 0.57;
+          ? clamp01(0.72)
+          : clamp01(0.57);
       default:
-        return 0.58;
+        return clamp01(0.58);
     }
   }
 
@@ -1682,26 +1668,26 @@ export class ResponseRankingModel {
     dimensionKey: string,
   ): Score01 {
     if (preference === 'same') {
-      return dimensionKey === 'continuityValue' ? 0.82 : 0.72;
+      return dimensionKey === 'continuityValue' ? clamp01(0.82) : clamp01(0.72);
     }
     if (preference === 'shadow') {
       return dimensionKey === 'memoryFitness' || dimensionKey === 'recoveryFitness'
-        ? 0.78
-        : 0.5;
+        ? clamp01(0.78)
+        : clamp01(0.5);
     }
     if (preference === activeChannel) {
-      return 0.78;
+      return clamp01(0.78);
     }
     if (preference === 'GLOBAL') {
-      return dimensionKey === 'witnessValue' ? 0.86 : 0.58;
+      return dimensionKey === 'witnessValue' ? clamp01(0.86) : clamp01(0.58);
     }
     if (preference === 'DEAL_ROOM') {
-      return dimensionKey === 'negotiationFitness' ? 0.88 : 0.54;
+      return dimensionKey === 'negotiationFitness' ? clamp01(0.88) : clamp01(0.54);
     }
     if (preference === 'SYNDICATE') {
-      return dimensionKey === 'memoryFitness' ? 0.8 : 0.58;
+      return dimensionKey === 'memoryFitness' ? clamp01(0.8) : clamp01(0.58);
     }
-    return 0.56;
+    return clamp01(0.56);
   }
 
   private lookupIntentWeight(
@@ -1710,26 +1696,26 @@ export class ResponseRankingModel {
     dimensionKey: string,
   ): Score01 {
     if (!primaryIntentKind) {
-      return 0.55;
+      return clamp01(0.55);
     }
     const family = intentFamily.toLowerCase();
     const primary = primaryIntentKind.toLowerCase();
     if (family.includes(primary) || primary.includes(family)) {
-      return 0.9;
+      return clamp01(0.9);
     }
     if ((family === 'rescue' || family === 'teaching') && primary.includes('help')) {
-      return 0.84;
+      return clamp01(0.84);
     }
     if ((family === 'taunt' || family === 'pressure') && (primary.includes('taunt') || primary.includes('threat'))) {
-      return 0.85;
+      return clamp01(0.85);
     }
     if (family === 'negotiation' && (primary.includes('bluff') || primary.includes('offer'))) {
-      return 0.87;
+      return clamp01(0.87);
     }
     if (family === 'silence' && primary.includes('hesitation')) {
-      return 0.76;
+      return clamp01(0.76);
     }
-    return 0.52;
+    return clamp01(0.52);
   }
 }
 

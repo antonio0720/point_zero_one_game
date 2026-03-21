@@ -1,6 +1,3 @@
-Here is the TypeScript file `shared/contracts/onboarding/onboarding_arc_contract.ts` as per your specifications:
-
-```typescript
 /**
  * Onboarding Arc Contract
  */
@@ -36,8 +33,3 @@ async function saveProgress(userId: string, progress: OnboardingProgress): Promi
 }
 
 export { OnboardingStage, OnboardingProgress, gate, saveProgress };
-```
-
-Please note that the implementation details for `gate` and `saveProgress` functions are not provided in this example. You would need to implement these functions based on your specific database schema, game engine, and replay requirements.
-
-Regarding SQL, Bash, YAML/JSON, and Terraform files, they are not included in the TypeScript file as per your request. However, I can help you create those files if needed, following the same strict guidelines.
