@@ -271,18 +271,45 @@ export interface BackendChatContinuityActorCue {
   readonly botId?: string;
   readonly npcRole?: string;
   readonly sourceChannelId: ChatChannelId;
+  readonly sourceSessionId?: ChatSessionId;
   readonly lastMessageId?: string;
+  readonly lastVisibleMessageId?: string;
   readonly lastMessageAt: UnixMs;
+  readonly lastVisibleMessageAt?: UnixMs;
   readonly lastSeenAt: UnixMs;
   readonly escortScore01: number;
   readonly threat01: number;
   readonly helper01: number;
   readonly intimacy01: number;
   readonly unresolvedMomentum01: number;
+  readonly visibleMessageCount: number;
+  readonly totalMessageCount: number;
+  readonly visibleMessageRatio01: number;
   readonly visibleFollow: boolean;
   readonly shadowFollow: boolean;
   readonly preferredEscortStyle: BackendChatEscortStyle;
   readonly relationship?: BackendChatContinuityRelationshipDigest;
+  readonly tags: readonly string[];
+}
+
+export interface BackendChatContinuitySessionCue {
+  readonly sessionId: ChatSessionId;
+  readonly userId?: ChatUserId;
+  readonly displayName: string;
+  readonly role: string;
+  readonly connectionState?: string;
+  readonly invisible: boolean;
+  readonly shadowMuted: boolean;
+  readonly visibleToRoom: boolean;
+  readonly spectating: boolean;
+  readonly typingLive: boolean;
+  readonly visibleMessageCount: number;
+  readonly authoredMessageCount: number;
+  readonly lastVisibleMessageId?: string;
+  readonly lastVisibleMessageAt?: UnixMs;
+  readonly lastSeenAt?: UnixMs;
+  readonly dominantChannelId?: ChatChannelId;
+  readonly carryPressure01: number;
   readonly tags: readonly string[];
 }
 
@@ -304,8 +331,10 @@ export interface BackendChatContinuityTranscriptCue {
   readonly actorId: string;
   readonly displayName: string;
   readonly sourceType: string;
+  readonly sourceSessionId?: ChatSessionId;
   readonly relevance01: number;
   readonly visible: boolean;
+  readonly visibleSessionLinked: boolean;
   readonly tags: readonly string[];
 }
 
@@ -342,6 +371,15 @@ export interface BackendChatRoomContinuitySnapshot {
   readonly heat01: number;
   readonly occupancy: number;
   readonly typingCount: number;
+  readonly visibleMessageCount: number;
+  readonly recentVisibleMessageCount: number;
+  readonly shadowMessageCount: number;
+  readonly dominantVisibleChannel: ChatVisibleChannel;
+  readonly visibleSessionIds: readonly ChatSessionId[];
+  readonly activeSessionIds: readonly ChatSessionId[];
+  readonly dominantVisibleSessionId?: ChatSessionId;
+  readonly latestVisibleMessageId?: string;
+  readonly latestVisibleMessageAt?: UnixMs;
   readonly hasPendingReveals: boolean;
   readonly activeSceneId?: string;
   readonly activeMomentId?: string;
@@ -350,6 +388,7 @@ export interface BackendChatRoomContinuitySnapshot {
   readonly shadowSummaryLine: string;
   readonly transcriptPreview: readonly BackendChatContinuityTranscriptCue[];
   readonly carriedActors: readonly BackendChatContinuityActorCue[];
+  readonly sessionCues: readonly BackendChatContinuitySessionCue[];
   readonly pendingRevealCues: readonly BackendChatContinuityRevealCue[];
   readonly unresolvedMoments: readonly BackendChatContinuityMomentCue[];
   readonly carriedPersonaIds: readonly string[];
@@ -367,6 +406,7 @@ export interface BackendChatPlayerContinuityState {
   readonly roomSnapshots: Readonly<Record<ChatRoomId, BackendChatRoomContinuitySnapshot>>;
   readonly carriedPersonaIds: readonly string[];
   readonly activeActorIds: readonly string[];
+  readonly activeSessionIds: readonly ChatSessionId[];
   readonly unresolvedMomentIds: readonly string[];
   readonly carryoverSummary?: Record<string, JsonValue>;
 }
@@ -383,6 +423,9 @@ export interface BackendChatMountTransitionRecord {
   readonly summaryLine: string;
   readonly carriedPersonaIds: readonly string[];
   readonly escortActorId?: string;
+  readonly escortSessionId?: ChatSessionId;
+  readonly dominantVisibleSessionId?: ChatSessionId;
+  readonly latestVisibleMessageId?: string;
   readonly unresolvedMomentIds: readonly string[];
   readonly continuityId: string;
 }
@@ -417,6 +460,7 @@ export interface CrossModeContinuityLedgerConfig {
   readonly maxTransitionsPerPlayer: number;
   readonly maxTranscriptPreview: number;
   readonly maxCarriedActors: number;
+  readonly maxSessionCues: number;
   readonly maxPendingRevealCues: number;
   readonly maxUnresolvedMoments: number;
   readonly staleSnapshotMs: number;
@@ -424,6 +468,8 @@ export interface CrossModeContinuityLedgerConfig {
   readonly helperCarryThreshold01: number;
   readonly rivalCarryThreshold01: number;
   readonly reopenThreshold01: number;
+  readonly visibleVelocityWindowMs: number;
+  readonly sessionCarryThreshold01: number;
 }
 
 export const DEFAULT_CROSS_MODE_CONTINUITY_LEDGER_CONFIG: CrossModeContinuityLedgerConfig = Object.freeze({
@@ -431,6 +477,7 @@ export const DEFAULT_CROSS_MODE_CONTINUITY_LEDGER_CONFIG: CrossModeContinuityLed
   maxTransitionsPerPlayer: 48,
   maxTranscriptPreview: 8,
   maxCarriedActors: 6,
+  maxSessionCues: 8,
   maxPendingRevealCues: 6,
   maxUnresolvedMoments: 6,
   staleSnapshotMs: 20 * 60 * 1000,
@@ -438,6 +485,8 @@ export const DEFAULT_CROSS_MODE_CONTINUITY_LEDGER_CONFIG: CrossModeContinuityLed
   helperCarryThreshold01: 0.42,
   rivalCarryThreshold01: 0.44,
   reopenThreshold01: 0.46,
+  visibleVelocityWindowMs: 90 * 1000,
+  sessionCarryThreshold01: 0.28,
 });
 
 interface PlayerLedgerBucket {
@@ -473,6 +522,133 @@ function asString(value: unknown): string | undefined {
 
 function unique<T>(values: readonly T[]): T[] {
   return [...new Set(values)];
+}
+
+function uniqueSessionIds(values: readonly (ChatSessionId | null | undefined)[]): ChatSessionId[] {
+  const ids = new Set<ChatSessionId>();
+  for (const value of values) {
+    if (value) ids.add(value);
+  }
+  return [...ids];
+}
+
+interface VisibleMessageTruthDigest {
+  readonly visibleMessages: readonly ChatMessage[];
+  readonly visibleMessageCount: number;
+  readonly recentVisibleMessageCount: number;
+  readonly shadowMessageCount: number;
+  readonly dominantChannelId?: ChatChannelId;
+  readonly dominantSessionId?: ChatSessionId;
+  readonly latestVisibleMessage?: ChatMessage;
+  readonly visibleSessionIds: readonly ChatSessionId[];
+  readonly activeSessionIds: readonly ChatSessionId[];
+}
+
+function dominantKeyFromMessages<T extends string>(
+  values: readonly { readonly key: T; readonly createdAt: UnixMs }[],
+): T | undefined {
+  const counts = new Map<T, { count: number; lastAt: UnixMs }>();
+  for (const value of values) {
+    const current = counts.get(value.key);
+    counts.set(value.key, {
+      count: (current?.count ?? 0) + 1,
+      lastAt: current && Number(current.lastAt) > Number(value.createdAt) ? current.lastAt : value.createdAt,
+    });
+  }
+
+  let winner: T | undefined;
+  let winnerCount = -1;
+  let winnerAt = 0;
+  for (const [key, state] of counts) {
+    if (state.count > winnerCount || (state.count === winnerCount && Number(state.lastAt) > winnerAt)) {
+      winner = key;
+      winnerCount = state.count;
+      winnerAt = Number(state.lastAt);
+    }
+  }
+  return winner;
+}
+
+function visibleMessageTruth(
+  state: Readonly<ChatState>,
+  roomId: ChatRoomId,
+  transcript: readonly ChatTranscriptEntry[],
+  visibleMessages: readonly ChatMessage[],
+  presence: readonly ChatPresenceSnapshot[],
+  typing: readonly ChatTypingSnapshot[],
+  now: UnixMs,
+  config: CrossModeContinuityLedgerConfig,
+): VisibleMessageTruthDigest {
+  const recentVisibleMessageCount = visibleMessages.filter(
+    (message) => Number(now) - Number(message.createdAt) <= config.visibleVelocityWindowMs,
+  ).length;
+  const shadowMessageCount = transcript.filter((entry) => entry.visibility === 'SHADOW').length;
+  const dominantChannelId = dominantKeyFromMessages(
+    visibleMessages.map((message) => ({ key: message.channelId, createdAt: message.createdAt })),
+  );
+  const dominantSessionId = dominantKeyFromMessages(
+    visibleMessages
+      .filter((message) => Boolean(message.attribution.authorSessionId))
+      .map((message) => ({ key: message.attribution.authorSessionId as ChatSessionId, createdAt: message.createdAt })),
+  );
+  const latestVisibleMessage = [...visibleMessages].sort((a, b) => Number(b.createdAt) - Number(a.createdAt))[0];
+  const visibleSessionIds = uniqueSessionIds(visibleMessages.map((message) => message.attribution.authorSessionId ?? undefined));
+  const activeSessionIds = uniqueSessionIds([
+    ...(state.roomSessions.byRoom[roomId] ?? []),
+    ...presence.map((value) => value.sessionId),
+    ...typing.map((value) => value.sessionId),
+    ...visibleSessionIds,
+  ]);
+
+  return {
+    visibleMessages,
+    visibleMessageCount: visibleMessages.length,
+    recentVisibleMessageCount,
+    shadowMessageCount,
+    dominantChannelId,
+    dominantSessionId,
+    latestVisibleMessage,
+    visibleSessionIds,
+    activeSessionIds,
+  };
+}
+
+function channelToVisibleChannel(
+  channelId: ChatChannelId | undefined,
+  mount: BackendChatMountTarget,
+  fallback: ChatVisibleChannel,
+): ChatVisibleChannel {
+  if (!channelId) return fallback;
+  return pickPreferredChannel(channelId as ChatVisibleChannel, mount, fallback);
+}
+
+function sessionIdFromAttribution(attribution: ChatMessageAttribution): ChatSessionId | undefined {
+  return attribution.authorSessionId ?? undefined;
+}
+
+function latestVisibleMessageByActor(visibleMessages: readonly ChatMessage[]): Readonly<Map<string, ChatMessage>> {
+  const map = new Map<string, ChatMessage>();
+  for (const message of visibleMessages) {
+    const actorId = actorFromAttribution(message.attribution);
+    const current = map.get(actorId);
+    if (!current || Number(message.createdAt) >= Number(current.createdAt)) {
+      map.set(actorId, message);
+    }
+  }
+  return map;
+}
+
+function countVisibleMessagesByActor(visibleMessages: readonly ChatMessage[]): Readonly<Map<string, number>> {
+  const map = new Map<string, number>();
+  for (const message of visibleMessages) {
+    const actorId = actorFromAttribution(message.attribution);
+    map.set(actorId, (map.get(actorId) ?? 0) + 1);
+  }
+  return map;
+}
+
+function dominantChannelForSession(messages: readonly ChatMessage[]): ChatChannelId | undefined {
+  return dominantKeyFromMessages(messages.map((message) => ({ key: message.channelId, createdAt: message.createdAt })));
 }
 
 function normalizeMountTarget(value: unknown, fallback: BackendChatMountTarget): BackendChatMountTarget {
@@ -588,6 +764,7 @@ function pressureScore(
   heat: ChatAudienceHeat | null,
   typing: readonly ChatTypingSnapshot[],
   pendingReveals: readonly ChatPendingReveal[],
+  visibleTruth: VisibleMessageTruthDigest,
 ): number {
   const unreadGlobal = Number(room.unreadByChannel.GLOBAL ?? 0);
   const unreadDeal = Number(room.unreadByChannel.DEAL_ROOM ?? 0);
@@ -597,7 +774,19 @@ function pressureScore(
   const unreadWeight = Math.min(0.22, ((unreadGlobal * 0.03) + (unreadDeal * 0.04) + (unreadLobby * 0.01)));
   const activeMomentWeight = room.activeMomentId ? 0.18 : 0;
   const heatWeight = clamp01(Number(heat?.heat01 ?? 0));
-  return clamp01((heatWeight * 0.36) + revealWeight + typingWeight + unreadWeight + activeMomentWeight);
+  const visibleVelocityWeight = Math.min(0.2, visibleTruth.recentVisibleMessageCount * 0.035);
+  const visibleSessionWeight = Math.min(0.12, visibleTruth.visibleSessionIds.length * 0.03);
+  const shadowTailWeight = Math.min(0.1, visibleTruth.shadowMessageCount * 0.02);
+  return clamp01(
+    (heatWeight * 0.28) +
+    revealWeight +
+    typingWeight +
+    unreadWeight +
+    activeMomentWeight +
+    visibleVelocityWeight +
+    visibleSessionWeight +
+    shadowTailWeight,
+  );
 }
 
 function urgencyScore(
@@ -681,6 +870,7 @@ function revealCues(
 function transcriptPreview(
   room: ChatRoomState,
   transcript: readonly ChatTranscriptEntry[],
+  visibleTruth: VisibleMessageTruthDigest,
   heat01: number,
   mount: BackendChatMountTarget,
   now: UnixMs,
@@ -688,22 +878,30 @@ function transcriptPreview(
 ): readonly BackendChatContinuityTranscriptCue[] {
   const cap = Math.min(config.maxTranscriptPreview, BACKEND_CHAT_CONTINUITY_MOUNT_PRESETS[mount].transcriptPreviewCap);
   const allowedVisible = new Set(BACKEND_CHAT_CONTINUITY_MOUNT_PRESETS[mount].allowedVisibleChannels);
+  const visibleMessageIds = new Set(visibleTruth.visibleMessages.map((message) => message.id));
+  const visibleSessionIds = new Set(visibleTruth.visibleSessionIds);
   return transcript
     .filter((entry) => Number(now) - Number(entry.message.createdAt) <= config.transcriptRecencyWindowMs)
     .filter((entry) => entry.visibility === 'VISIBLE' || entry.visibility === 'SHADOW')
     .filter((entry) => entry.visibility === 'SHADOW' || allowedVisible.has(entry.message.channelId as ChatVisibleChannel))
-    .map((entry) => ({
-      messageId: entry.message.id,
-      channelId: entry.message.channelId,
-      plainText: entry.message.plainText,
-      createdAt: entry.message.createdAt,
-      actorId: actorFromAttribution(entry.message.attribution),
-      displayName: entry.message.attribution.displayName,
-      sourceType: entry.message.attribution.sourceType,
-      relevance01: messageRelevance(entry, room, heat01, now),
-      visible: entry.visibility === 'VISIBLE',
-      tags: entry.message.tags,
-    }))
+    .map((entry) => {
+      const sourceSessionId = sessionIdFromAttribution(entry.message.attribution);
+      const visibilityBoost = visibleMessageIds.has(entry.message.id) ? 0.08 : 0;
+      return {
+        messageId: entry.message.id,
+        channelId: entry.message.channelId,
+        plainText: entry.message.plainText,
+        createdAt: entry.message.createdAt,
+        actorId: actorFromAttribution(entry.message.attribution),
+        displayName: entry.message.attribution.displayName,
+        sourceType: entry.message.attribution.sourceType,
+        sourceSessionId,
+        relevance01: clamp01(messageRelevance(entry, room, heat01, now) + visibilityBoost),
+        visible: entry.visibility === 'VISIBLE',
+        visibleSessionLinked: Boolean(sourceSessionId && visibleSessionIds.has(sourceSessionId)),
+        tags: entry.message.tags,
+      };
+    })
     .sort((a, b) => (b.relevance01 - a.relevance01) || (Number(b.createdAt) - Number(a.createdAt)))
     .slice(0, cap);
 }
@@ -711,6 +909,7 @@ function transcriptPreview(
 function actorCues(
   room: ChatRoomState,
   transcript: readonly ChatTranscriptEntry[],
+  visibleTruth: VisibleMessageTruthDigest,
   presence: readonly ChatPresenceSnapshot[],
   relationships: readonly ChatRelationshipState[],
   mount: BackendChatMountTarget,
@@ -722,17 +921,29 @@ function actorCues(
   }
 
   const latestByActor = new Map<string, ChatTranscriptEntry>();
+  const totalMessagesByActor = new Map<string, number>();
   for (const entry of transcript) {
     const actorId = actorFromAttribution(entry.message.attribution);
     latestByActor.set(actorId, entry);
+    totalMessagesByActor.set(actorId, (totalMessagesByActor.get(actorId) ?? 0) + 1);
   }
+
+  const visibleCountByActor = countVisibleMessagesByActor(visibleTruth.visibleMessages);
+  const latestVisibleByActor = latestVisibleMessageByActor(visibleTruth.visibleMessages);
+  const visibleSessionIds = new Set(visibleTruth.visibleSessionIds);
 
   const cues: BackendChatContinuityActorCue[] = [];
   for (const [actorId, entry] of latestByActor) {
     const rel = relationshipByActorId.get(actorId);
+    const latestVisibleMessage = latestVisibleByActor.get(actorId);
+    const sourceSessionId = sessionIdFromAttribution(latestVisibleMessage?.attribution ?? entry.message.attribution);
     const visiblePresenceBonus = presence.some((snapshot) => snapshot.actorLabel === entry.message.attribution.displayName && snapshot.visibleToRoom)
       ? 0.08
       : 0;
+    const visibleMessageCount = visibleCountByActor.get(actorId) ?? 0;
+    const totalMessageCount = totalMessagesByActor.get(actorId) ?? 1;
+    const visibleMessageRatio01 = clamp01(visibleMessageCount / Math.max(1, totalMessageCount));
+    const visibleSessionBonus = sourceSessionId && visibleSessionIds.has(sourceSessionId) ? 0.06 : 0;
     const intimacy01 = rel?.intimacy01 ?? 0;
     const threat01 = rel?.threat01 ?? (entry.message.attribution.npcRole === 'HATER' ? 0.38 : 0.12);
     const helper01 = rel?.helperBias01 ?? (entry.message.attribution.npcRole === 'HELPER' ? 0.42 : 0.08);
@@ -740,19 +951,27 @@ function actorCues(
       (entry.message.replay.momentId ? 0.24 : 0) +
       (entry.message.replay.sceneId ? 0.18 : 0) +
       (entry.message.replay.legendId ? 0.12 : 0) +
-      (entry.message.tags.some((tag) => /BREACH|ATTACK|RESCUE|COMEBACK|REVEAL|TURNING_POINT/i.test(tag)) ? 0.2 : 0),
+      (entry.message.tags.some((tag) => /BREACH|ATTACK|RESCUE|COMEBACK|REVEAL|TURNING_POINT/i.test(tag)) ? 0.2 : 0) +
+      (visibleMessageRatio01 * 0.14),
     );
     const escortScore01 = clamp01(
-      (intimacy01 * 0.22) +
-      (threat01 * 0.22) +
-      (helper01 * 0.26) +
-      (unresolvedMomentum01 * 0.22) +
-      visiblePresenceBonus,
+      (intimacy01 * 0.18) +
+      (threat01 * 0.2) +
+      (helper01 * 0.22) +
+      (unresolvedMomentum01 * 0.2) +
+      (visibleMessageRatio01 * 0.12) +
+      visiblePresenceBonus +
+      visibleSessionBonus,
     );
 
     const visibleFollow = escortScore01 >= Math.min(config.helperCarryThreshold01, config.rivalCarryThreshold01)
-      && (helper01 >= config.helperCarryThreshold01 || threat01 >= config.rivalCarryThreshold01 || unresolvedMomentum01 >= 0.44);
-    const shadowFollow = !visibleFollow && (threat01 >= 0.26 || unresolvedMomentum01 >= 0.34);
+      && (
+        helper01 >= config.helperCarryThreshold01 ||
+        threat01 >= config.rivalCarryThreshold01 ||
+        unresolvedMomentum01 >= 0.44 ||
+        visibleMessageRatio01 >= 0.5
+      );
+    const shadowFollow = !visibleFollow && (threat01 >= 0.26 || unresolvedMomentum01 >= 0.34 || visibleMessageCount > 0);
     const preferredEscortStyle = escortStyleForCue(threat01, helper01, mount, unresolvedMomentum01);
 
     cues.push({
@@ -761,15 +980,21 @@ function actorCues(
       personaId: asString(entry.message.metadata.personaId),
       botId: entry.message.attribution.botId ?? undefined,
       npcRole: entry.message.attribution.npcRole ?? undefined,
-      sourceChannelId: entry.message.channelId,
+      sourceChannelId: latestVisibleMessage?.channelId ?? entry.message.channelId,
+      sourceSessionId,
       lastMessageId: entry.message.id,
+      lastVisibleMessageId: latestVisibleMessage?.id,
       lastMessageAt: entry.message.createdAt,
-      lastSeenAt: entry.message.createdAt,
+      lastVisibleMessageAt: latestVisibleMessage?.createdAt ?? undefined,
+      lastSeenAt: latestVisibleMessage?.createdAt ?? entry.message.createdAt,
       escortScore01,
       threat01,
       helper01,
       intimacy01,
       unresolvedMomentum01,
+      visibleMessageCount,
+      totalMessageCount,
+      visibleMessageRatio01,
       visibleFollow,
       shadowFollow,
       preferredEscortStyle,
@@ -778,37 +1003,110 @@ function actorCues(
         ...(entry.message.tags ?? []),
         visibleFollow ? 'VISIBLE_FOLLOW' : '',
         shadowFollow ? 'SHADOW_FOLLOW' : '',
+        visibleMessageCount > 0 ? 'VISIBLE_AUTHOR' : '',
+        visibleMessageRatio01 >= 0.5 ? 'VISIBLE_DOMINANT' : '',
+        sourceSessionId ? `SESSION:${sourceSessionId}` : '',
         rel?.stance ? `REL_${rel.stance}` : '',
       ].filter(Boolean)),
     });
   }
 
   return cues
-    .sort((a, b) => (b.escortScore01 - a.escortScore01) || (Number(b.lastMessageAt) - Number(a.lastMessageAt)))
+    .sort((a, b) => (b.escortScore01 - a.escortScore01) || (Number(b.lastSeenAt) - Number(a.lastSeenAt)))
     .slice(0, config.maxCarriedActors);
+}
+
+function sessionCues(
+  state: Readonly<ChatState>,
+  roomId: ChatRoomId,
+  visibleTruth: VisibleMessageTruthDigest,
+  transcript: readonly ChatTranscriptEntry[],
+  presence: readonly ChatPresenceSnapshot[],
+  typing: readonly ChatTypingSnapshot[],
+  config: CrossModeContinuityLedgerConfig,
+): readonly BackendChatContinuitySessionCue[] {
+  const transcriptMessages = transcript.map((entry) => entry.message);
+  const cues: BackendChatContinuitySessionCue[] = [];
+
+  for (const sessionId of visibleTruth.activeSessionIds) {
+    const session = state.sessions[sessionId];
+    const sessionPresence = presence.filter((value) => value.sessionId === sessionId);
+    const sessionTyping = typing.some((value) => value.sessionId === sessionId);
+    const authoredVisibleMessages = visibleTruth.visibleMessages.filter((message) => message.attribution.authorSessionId === sessionId);
+    const authoredMessages = transcriptMessages.filter((message) => message.attribution.authorSessionId === sessionId);
+    const latestVisibleMessage = [...authoredVisibleMessages].sort((a, b) => Number(b.createdAt) - Number(a.createdAt))[0];
+    const dominantChannelId = dominantChannelForSession(authoredVisibleMessages);
+    const visibleToRoom = sessionPresence.some((value) => value.visibleToRoom);
+    const spectating = sessionPresence.some((value) => value.spectating);
+    const carryPressure01 = clamp01(
+      (authoredVisibleMessages.length * 0.09) +
+      (visibleToRoom ? 0.18 : 0) +
+      (sessionTyping ? 0.12 : 0) +
+      (spectating ? 0.04 : 0) +
+      (latestVisibleMessage?.tags.some((tag) => /BREACH|ATTACK|REVEAL|RESCUE|TURNING_POINT/i.test(tag)) ? 0.16 : 0),
+    );
+    if (!session && carryPressure01 < config.sessionCarryThreshold01) continue;
+
+    cues.push({
+      sessionId,
+      userId: session?.identity.userId ?? undefined,
+      displayName: session?.identity.displayName ?? sessionPresence.at(-1)?.actorLabel ?? String(sessionId),
+      role: String(session?.identity.role ?? 'UNKNOWN'),
+      connectionState: session ? String(session.connectionState) : undefined,
+      invisible: session?.invisible ?? false,
+      shadowMuted: session?.shadowMuted ?? false,
+      visibleToRoom,
+      spectating,
+      typingLive: sessionTyping,
+      visibleMessageCount: authoredVisibleMessages.length,
+      authoredMessageCount: authoredMessages.length,
+      lastVisibleMessageId: latestVisibleMessage?.id,
+      lastVisibleMessageAt: latestVisibleMessage?.createdAt ?? undefined,
+      lastSeenAt: session?.lastSeenAt ?? sessionPresence.at(-1)?.updatedAt,
+      dominantChannelId,
+      carryPressure01,
+      tags: unique([
+        visibleToRoom ? 'VISIBLE_TO_ROOM' : '',
+        spectating ? 'SPECTATING' : '',
+        sessionTyping ? 'TYPING' : '',
+        session?.invisible ? 'INVISIBLE' : '',
+        session?.shadowMuted ? 'SHADOW_MUTED' : '',
+        authoredVisibleMessages.length > 0 ? 'VISIBLE_AUTHOR' : '',
+      ].filter(Boolean)),
+    });
+  }
+
+  return cues
+    .sort((a, b) => (b.carryPressure01 - a.carryPressure01) || (Number(b.lastVisibleMessageAt ?? 0) - Number(a.lastVisibleMessageAt ?? 0)))
+    .slice(0, config.maxSessionCues);
 }
 
 function composeSummaryLine(args: {
   readonly room: ChatRoomState;
   readonly mount: BackendChatMountTarget;
   readonly cues: readonly BackendChatContinuityActorCue[];
+  readonly sessionCues: readonly BackendChatContinuitySessionCue[];
   readonly reveals: readonly BackendChatContinuityRevealCue[];
   readonly moments: readonly BackendChatContinuityMomentCue[];
   readonly temperature: BackendChatContinuityTemperature;
   readonly band: BackendChatContinuityBand;
+  readonly visibleTruth: VisibleMessageTruthDigest;
 }): string {
   const escort = args.cues[0]?.displayName ?? 'the room';
   const scene = args.room.activeSceneId ? `scene ${args.room.activeSceneId}` : 'no active scene id';
   const pressure = `${args.temperature}/${args.band}`;
   const revealPhrase = args.reveals.length > 0 ? `${args.reveals.length} reveal${args.reveals.length === 1 ? '' : 's'} pending` : 'no queued reveal';
   const momentPhrase = args.moments.length > 0 ? `${args.moments.length} unresolved moment${args.moments.length === 1 ? '' : 's'}` : 'no unresolved moment';
-  return `${args.mount} carryover holds ${escort} near the player; ${scene}; ${pressure}; ${revealPhrase}; ${momentPhrase}.`;
+  const visiblePhrase = `${args.visibleTruth.visibleMessageCount} visible / ${args.visibleTruth.shadowMessageCount} shadow`;
+  const sessionPhrase = `${args.sessionCues.length} session${args.sessionCues.length === 1 ? '' : 's'} active`;
+  return `${args.mount} carryover holds ${escort} near the player; ${scene}; ${pressure}; ${revealPhrase}; ${momentPhrase}; ${visiblePhrase}; ${sessionPhrase}.`;
 }
 
 function composeShadowSummaryLine(args: {
   readonly cues: readonly BackendChatContinuityActorCue[];
   readonly reveals: readonly BackendChatContinuityRevealCue[];
   readonly room: ChatRoomState;
+  readonly visibleTruth: VisibleMessageTruthDigest;
 }): string {
   const shadow = args.cues.filter((cue) => cue.shadowFollow).map((cue) => cue.actorId).slice(0, 3);
   const revealTag = args.reveals.length > 0 ? 'REVEAL_PRESSURE' : 'NO_REVEAL_PRESSURE';
@@ -816,6 +1114,8 @@ function composeShadowSummaryLine(args: {
     args.room.activeMomentId ? `ACTIVE_MOMENT:${args.room.activeMomentId}` : '',
     args.room.activeLegendId ? `ACTIVE_LEGEND:${args.room.activeLegendId}` : '',
     shadow.length > 0 ? `SHADOW_FOLLOW:${shadow.join(',')}` : '',
+    args.visibleTruth.dominantSessionId ? `DOMINANT_SESSION:${args.visibleTruth.dominantSessionId}` : '',
+    args.visibleTruth.latestVisibleMessage ? `LATEST_VISIBLE:${args.visibleTruth.latestVisibleMessage.id}` : '',
     revealTag,
   ].filter(Boolean)).join(' | ');
 }
@@ -827,17 +1127,20 @@ function overlayState(
   urgency01: number,
   summaryLine: string,
   config: CrossModeContinuityLedgerConfig,
+  visibleTruth: VisibleMessageTruthDigest,
 ): BackendChatContinuityOverlayState {
   const preset = BACKEND_CHAT_CONTINUITY_MOUNT_PRESETS[mount];
-  const preferredChannel = pickPreferredChannel(room.activeVisibleChannel, mount, preset.defaultVisibleChannel);
-  const restoreCollapsed = preset.allowCollapse ? (pressure01 < 0.34 && urgency01 < 0.28 ? preset.defaultCollapsed : false) : false;
-  const restorePanelOpen = Math.max(pressure01, urgency01) >= config.reopenThreshold01 || !restoreCollapsed;
+  const preferredChannel = channelToVisibleChannel(visibleTruth.dominantChannelId, mount, room.activeVisibleChannel);
+  const restoreCollapsed = preset.allowCollapse
+    ? (pressure01 < 0.34 && urgency01 < 0.28 && visibleTruth.recentVisibleMessageCount < 2 ? preset.defaultCollapsed : false)
+    : false;
+  const restorePanelOpen = Math.max(pressure01, urgency01) >= config.reopenThreshold01 || visibleTruth.recentVisibleMessageCount >= 2 || !restoreCollapsed;
   return {
     preferredChannel,
     restoreCollapsed,
     restorePanelOpen,
-    transcriptWindowTarget: preset.transcriptPreviewCap,
-    reason: `${summaryLine} overlay->${preferredChannel}/${restoreCollapsed ? 'collapsed' : 'expanded'}`,
+    transcriptWindowTarget: Math.max(preset.transcriptPreviewCap, Math.min(config.maxTranscriptPreview, visibleTruth.recentVisibleMessageCount + 2)),
+    reason: `${summaryLine} overlay->${preferredChannel}/${restoreCollapsed ? 'collapsed' : 'expanded'}/recentVisible:${visibleTruth.recentVisibleMessageCount}`,
   };
 }
 
@@ -869,31 +1172,37 @@ export class CrossModeContinuityLedger {
 
     const mount = normalizeMountTarget(args.sourceMount, 'GAME_BOARD');
     const transcript = selectRoomTranscript(args.state, args.roomId);
+    const visibleMessages = selectVisibleMessages(args.state, args.roomId);
     const presence = selectRoomPresence(args.state, args.roomId);
     const typing = selectRoomTyping(args.state, args.roomId);
     const relationships = selectRoomRelationships(args.state, args.roomId).filter((value) => value.userId === args.userId);
     const heat = selectAudienceHeat(args.state, args.roomId);
+    const visibleTruth = visibleMessageTruth(args.state, args.roomId, transcript, visibleMessages, presence, typing, now, this.config);
     const pendingRevealCues = revealCues(args.roomId, args.state.pendingReveals, this.config);
-    const pressure01 = pressureScore(room, heat, typing, args.state.pendingReveals.filter((entry) => entry.roomId === args.roomId));
+    const pressure01 = pressureScore(room, heat, typing, args.state.pendingReveals.filter((entry) => entry.roomId === args.roomId), visibleTruth);
     const urgency01 = urgencyScore(room, relationships, args.state.pendingReveals.filter((entry) => entry.roomId === args.roomId));
     const heat01 = clamp01(Number(heat?.heat01 ?? 0));
     const band = tensionBandFrom(pressure01, urgency01, heat01);
     const temperature = temperatureForRoom(room, heat01, urgency01, mount);
-    const preview = transcriptPreview(room, transcript, heat01, mount, now, this.config);
-    const cues = actorCues(room, transcript, presence, relationships, mount, this.config);
+    const preview = transcriptPreview(room, transcript, visibleTruth, heat01, mount, now, this.config);
+    const sessionCarry = sessionCues(args.state, args.roomId, visibleTruth, transcript, presence, typing, this.config);
+    const cues = actorCues(room, transcript, visibleTruth, presence, relationships, mount, this.config);
     const moments = unresolvedMomentCues(room, transcript, this.config);
     const summaryLine = composeSummaryLine({
       room,
       mount,
       cues,
+      sessionCues: sessionCarry,
       reveals: pendingRevealCues,
       moments,
       temperature,
       band,
+      visibleTruth,
     });
-    const shadowSummaryLine = composeShadowSummaryLine({ cues, reveals: pendingRevealCues, room });
-    const overlay = overlayState(room, mount, pressure01, urgency01, summaryLine, this.config);
+    const shadowSummaryLine = composeShadowSummaryLine({ cues, reveals: pendingRevealCues, room, visibleTruth });
+    const overlay = overlayState(room, mount, pressure01, urgency01, summaryLine, this.config, visibleTruth);
     const carriedPersonaIds = unique(cues.map((cue) => cue.personaId).filter((value): value is string => Boolean(value)));
+    const dominantVisibleChannel = channelToVisibleChannel(visibleTruth.dominantChannelId, mount, overlay.preferredChannel);
     const snapshot: BackendChatRoomContinuitySnapshot = {
       continuityId: `continuity:${args.userId}:${args.roomId}:${now}`,
       capturedAt: now,
@@ -910,6 +1219,15 @@ export class CrossModeContinuityLedger {
       heat01,
       occupancy: presence.filter((value) => value.visibleToRoom).length,
       typingCount: typing.length,
+      visibleMessageCount: visibleTruth.visibleMessageCount,
+      recentVisibleMessageCount: visibleTruth.recentVisibleMessageCount,
+      shadowMessageCount: visibleTruth.shadowMessageCount,
+      dominantVisibleChannel,
+      visibleSessionIds: visibleTruth.visibleSessionIds,
+      activeSessionIds: visibleTruth.activeSessionIds,
+      dominantVisibleSessionId: visibleTruth.dominantSessionId ?? undefined,
+      latestVisibleMessageId: visibleTruth.latestVisibleMessage?.id,
+      latestVisibleMessageAt: visibleTruth.latestVisibleMessage?.createdAt ?? undefined,
       hasPendingReveals: pendingRevealCues.length > 0,
       activeSceneId: room.activeSceneId ?? undefined,
       activeMomentId: room.activeMomentId ?? undefined,
@@ -918,6 +1236,7 @@ export class CrossModeContinuityLedger {
       shadowSummaryLine,
       transcriptPreview: preview,
       carriedActors: cues,
+      sessionCues: sessionCarry,
       pendingRevealCues,
       unresolvedMoments: moments,
       carriedPersonaIds,
@@ -933,6 +1252,8 @@ export class CrossModeContinuityLedger {
         pendingRevealCues.length > 0 ? 'HAS_REVEALS' : '',
         cues.some((cue) => cue.visibleFollow) ? 'VISIBLE_FOLLOWERS' : '',
         cues.some((cue) => cue.shadowFollow) ? 'SHADOW_FOLLOWERS' : '',
+        visibleTruth.visibleMessageCount > 0 ? 'VISIBLE_MESSAGE_TRUTH' : '',
+        visibleTruth.visibleSessionIds.length > 0 ? 'VISIBLE_SESSIONS_PRESENT' : '',
       ].filter(Boolean)),
     };
 
@@ -963,6 +1284,9 @@ export class CrossModeContinuityLedger {
       summaryLine: snapshot.summaryLine,
       carriedPersonaIds: snapshot.carriedPersonaIds,
       escortActorId: snapshot.carriedActors[0]?.actorId,
+      escortSessionId: snapshot.sessionCues[0]?.sessionId,
+      dominantVisibleSessionId: snapshot.dominantVisibleSessionId,
+      latestVisibleMessageId: snapshot.latestVisibleMessageId,
       unresolvedMomentIds: snapshot.unresolvedMoments.map((value) => value.momentId),
       continuityId: snapshot.continuityId,
     };
@@ -1127,7 +1451,15 @@ export class CrossModeContinuityLedger {
       unresolvedMomentIds: snapshot.unresolvedMoments.map((value) => value.momentId),
       carriedPersonaIds: snapshot.carriedPersonaIds,
       carriedActorIds: snapshot.carriedActors.map((value) => value.actorId),
+      activeSessionIds: snapshot.activeSessionIds,
+      visibleSessionIds: snapshot.visibleSessionIds,
       escortActorId: snapshot.carriedActors[0]?.actorId ?? null,
+      escortSessionId: snapshot.sessionCues[0]?.sessionId ?? null,
+      dominantVisibleSessionId: snapshot.dominantVisibleSessionId ?? null,
+      latestVisibleMessageId: snapshot.latestVisibleMessageId ?? null,
+      visibleMessageCount: snapshot.visibleMessageCount,
+      recentVisibleMessageCount: snapshot.recentVisibleMessageCount,
+      shadowMessageCount: snapshot.shadowMessageCount,
       leadRoomId: bucket.leadRoomId ?? null,
       lastMountTarget: bucket.lastMountTarget ?? null,
       lastTransitionId: transition?.transitionId ?? null,
@@ -1141,6 +1473,7 @@ export class CrossModeContinuityLedger {
     const roomSnapshots = Object.fromEntries(bucket.roomSnapshots.entries()) as Readonly<Record<ChatRoomId, BackendChatRoomContinuitySnapshot>>;
     const carriedPersonaIds = unique([...bucket.roomSnapshots.values()].flatMap((value) => value.carriedPersonaIds));
     const activeActorIds = unique([...bucket.roomSnapshots.values()].flatMap((value) => value.carriedActors.map((cue) => cue.actorId)));
+    const activeSessionIds = uniqueSessionIds([...bucket.roomSnapshots.values()].flatMap((value) => value.activeSessionIds));
     const unresolvedMomentIds = unique([...bucket.roomSnapshots.values()].flatMap((value) => value.unresolvedMoments.map((cue) => cue.momentId)));
     return {
       userId: bucket.userId,
@@ -1152,6 +1485,7 @@ export class CrossModeContinuityLedger {
       roomSnapshots,
       carriedPersonaIds,
       activeActorIds,
+      activeSessionIds,
       unresolvedMomentIds,
       carryoverSummary: bucket.carryoverSummary ? { ...bucket.carryoverSummary } : undefined,
     };
