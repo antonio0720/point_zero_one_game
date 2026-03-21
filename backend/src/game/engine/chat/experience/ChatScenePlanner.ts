@@ -83,6 +83,42 @@ export interface ChatScenePlannerDecisionWithTelemetry extends SharedChatScenePl
   readonly telemetry: ChatScenePlannerTelemetry;
 }
 
+
+export interface ChatScenePlanValidationIssue {
+  readonly code:
+    | 'EMPTY_BEATS'
+    | 'CHANNEL_MISMATCH'
+    | 'DUPLICATE_BEAT_ID'
+    | 'MISSING_SPEAKER_ORDER'
+    | 'MISSING_CALLBACK_TAGS'
+    | 'NON_ASCENDING_ESCALATION'
+    | 'INVALID_DURATION';
+  readonly message: string;
+  readonly beatId?: string;
+}
+
+export interface ChatScenePlanValidationReport {
+  readonly ok: boolean;
+  readonly issues: readonly ChatScenePlanValidationIssue[];
+  readonly beatTypes: readonly SharedChatSceneBeatType[];
+  readonly stageMood: SharedChatSceneStageMood;
+  readonly archetype: SharedChatSceneArchetype;
+  readonly primaryChannel: SharedChatScenePlan['primaryChannel'];
+}
+
+export interface ChatSceneDecisionExplanation {
+  readonly momentType: SharedChatMomentType;
+  readonly archetype: SharedChatSceneArchetype;
+  readonly stageMood: SharedChatSceneStageMood;
+  readonly beatTypes: readonly SharedChatSceneBeatType[];
+  readonly speakerOrder: readonly string[];
+  readonly callbackAnchorIds: readonly string[];
+  readonly planningTags: readonly string[];
+  readonly branchPoints: readonly string[];
+  readonly confidence01: number;
+  readonly reasons: readonly ChatScenePlannerReason[];
+}
+
 export interface ChatScenePlannerConfig {
   readonly maxChosenSpeakerIds: number;
   readonly maxChosenCallbackAnchorIds: number;
@@ -1590,3 +1626,95 @@ export function projectSceneSpeakerOrder(
 ): readonly string[] {
   return projectScenePlan(input, config).speakerOrder;
 }
+
+export function projectSceneBeatTypes(
+  input: SharedChatScenePlannerInput,
+  config?: Partial<ChatScenePlannerConfig>,
+): readonly SharedChatSceneBeatType[] {
+  return projectScenePlan(input, config).beats.map((beat) => beat.beatType);
+}
+
+export function projectSceneCallbackAnchors(
+  input: SharedChatScenePlannerInput,
+  config?: Partial<ChatScenePlannerConfig>,
+): readonly string[] {
+  return planChatScene(input, config).chosenCallbackAnchorIds;
+}
+
+export function validateScenePlan(
+  plan: SharedChatScenePlan,
+  stageMood?: SharedChatSceneStageMood,
+  archetype?: SharedChatSceneArchetype,
+): ChatScenePlanValidationReport {
+  const issues: ChatScenePlanValidationIssue[] = [];
+  const beatTypes: SharedChatSceneBeatType[] = [];
+  const seenBeatIds = new Set<string>();
+
+  if (!Array.isArray(plan.beats) || plan.beats.length === 0) {
+    issues.push({ code: 'EMPTY_BEATS', message: 'Scene plan must contain at least one beat.' });
+  }
+
+  for (const beat of plan.beats) {
+    beatTypes.push(beat.beatType);
+    if (seenBeatIds.has(beat.beatId)) {
+      issues.push({ code: 'DUPLICATE_BEAT_ID', message: `Duplicate beatId detected: ${beat.beatId}`, beatId: beat.beatId });
+    }
+    seenBeatIds.add(beat.beatId);
+
+    if (beat.requiredChannel !== plan.primaryChannel && beat.requiredChannel !== 'GLOBAL' && plan.primaryChannel !== 'GLOBAL') {
+      issues.push({
+        code: 'CHANNEL_MISMATCH',
+        message: `Beat ${beat.beatId} requires ${beat.requiredChannel} but scene primary channel is ${plan.primaryChannel}.`,
+        beatId: beat.beatId,
+      });
+    }
+  }
+
+  if (!Array.isArray(plan.speakerOrder) || plan.speakerOrder.length === 0) {
+    issues.push({ code: 'MISSING_SPEAKER_ORDER', message: 'Scene plan must provide a speakerOrder.' });
+  }
+
+  if ((plan.archetype === 'LONG_ARC_CALLBACK_SCENE' || plan.archetype === 'END_OF_RUN_RECKONING_SCENE') && plan.callbackAnchorIds.length === 0) {
+    issues.push({ code: 'MISSING_CALLBACK_TAGS', message: 'Callback-centric scenes should carry callbackAnchorIds.' });
+  }
+
+  for (let index = 1; index < plan.escalationPoints.length; index += 1) {
+    if (plan.escalationPoints[index] < plan.escalationPoints[index - 1]) {
+      issues.push({ code: 'NON_ASCENDING_ESCALATION', message: 'Escalation points must be ascending.' });
+      break;
+    }
+  }
+
+  if (!(plan.expectedDurationMs > 0)) {
+    issues.push({ code: 'INVALID_DURATION', message: 'Scene plan expectedDurationMs must be greater than zero.' });
+  }
+
+  return {
+    ok: issues.length === 0,
+    issues,
+    beatTypes,
+    stageMood: stageMood ?? MOMENT_DEFAULT_STAGE_MOOD[plan.momentType],
+    archetype: archetype ?? plan.archetype,
+    primaryChannel: plan.primaryChannel,
+  };
+}
+
+export function explainSceneDecision(
+  input: SharedChatScenePlannerInput,
+  config?: Partial<ChatScenePlannerConfig>,
+): ChatSceneDecisionExplanation {
+  const decision = planChatScene(input, config);
+  return {
+    momentType: input.momentType,
+    archetype: decision.telemetry.archetype,
+    stageMood: decision.telemetry.stageMood,
+    beatTypes: decision.plan.beats.map((beat) => beat.beatType),
+    speakerOrder: decision.plan.speakerOrder,
+    callbackAnchorIds: decision.chosenCallbackAnchorIds,
+    planningTags: decision.plan.planningTags,
+    branchPoints: decision.plan.possibleBranchPoints,
+    confidence01: decision.telemetry.confidence01,
+    reasons: decision.telemetry.reasons,
+  };
+}
+
