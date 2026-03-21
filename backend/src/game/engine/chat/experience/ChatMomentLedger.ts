@@ -606,8 +606,34 @@ interface UpsertMomentPatch {
  * ============================================================================
  */
 
-function buildMemoryAnchorsFromSnapshot(snapshot: EpisodicMemorySnapshot, roomId: string): readonly SharedChatMemoryAnchor[] {
-  return snapshot.activeMemories
+function extractMemoryEmbeddingKey(record: EpisodicMemoryRecord): string | undefined {
+  const semanticKey = (record as EpisodicMemoryRecord & { readonly semanticKey?: string | null }).semanticKey;
+  if (typeof semanticKey === 'string' && semanticKey.trim().length > 0) {
+    return semanticKey.trim();
+  }
+
+  const rawTags = Array.isArray(record.triggerContext.tags) ? record.triggerContext.tags : [];
+  const normalizedTags = rawTags
+    .map((tag) => normalizeTag(String(tag)))
+    .filter((tag) => tag.length > 0)
+    .slice(0, 4);
+
+  if (normalizedTags.length > 0) {
+    return `MEM:${record.eventType}:${normalizedTags.join(':')}`;
+  }
+
+  if (record.counterpartId) {
+    return `MEM:${record.eventType}:${normalizeTag(record.counterpartId)}`;
+  }
+
+  return undefined;
+}
+
+function buildMemoryAnchorsFromRecords(
+  records: readonly EpisodicMemoryRecord[],
+  roomId: string,
+): readonly SharedChatMemoryAnchor[] {
+  return records
     .filter((record) => record.triggerContext.roomId === roomId)
     .slice(0, 24)
     .map((record) => ({
@@ -618,8 +644,39 @@ function buildMemoryAnchorsFromSnapshot(snapshot: EpisodicMemorySnapshot, roomId
       messageIds: record.triggerContext.messageId ? [record.triggerContext.messageId] : [],
       salience: clamp01(record.salience01),
       createdAt: record.createdAt,
-      embeddingKey: record.semanticKey ?? undefined,
+      embeddingKey: extractMemoryEmbeddingKey(record),
     }));
+}
+
+function buildMemoryAnchorsFromSnapshot(snapshot: EpisodicMemorySnapshot, roomId: string): readonly SharedChatMemoryAnchor[] {
+  return buildMemoryAnchorsFromRecords(snapshot.activeMemories, roomId);
+}
+
+function memoryRoomRelevance(
+  record: EpisodicMemoryRecord,
+  roomId: string,
+  channelId: ChatVisibleChannel | SharedChatChannelId,
+  counterpartIds: readonly string[],
+): number {
+  const sameRoom = record.triggerContext.roomId === roomId ? 0.34 : 0;
+  const sameChannel = normalizeVisibleChannel(record.triggerContext.channelId) === normalizeVisibleChannel(channelId) ? 0.16 : 0;
+  const counterpartMatch = record.counterpartId && counterpartIds.includes(record.counterpartId) ? 0.18 : 0;
+  const unresolvedBoost = record.unresolved ? 0.14 : 0;
+  const reuseBoost = Math.min(record.timesReused, 4) * 0.03;
+  const embarrassmentBoost = clamp01(record.embarrassmentRisk01) * 0.08;
+  return clamp01(sameRoom + sameChannel + counterpartMatch + unresolvedBoost + reuseBoost + embarrassmentBoost);
+}
+
+function deriveMemoryContinuityTags(records: readonly EpisodicMemoryRecord[]): readonly string[] {
+  const tags: string[] = [];
+  for (const record of records.slice(0, 8)) {
+    tags.push(`MEMORY_EVENT:${normalizeTag(record.eventType)}`);
+    if (record.unresolved) tags.push('MEMORY_UNRESOLVED');
+    if (record.embarrassmentRisk01 >= 0.72) tags.push('MEMORY_EMBARRASSMENT_RISK');
+    if (record.callbackVariants.length > 0) tags.push('MEMORY_CALLBACK_READY');
+    if (record.counterpartId) tags.push(`MEMORY_COUNTERPART:${normalizeTag(record.counterpartId)}`);
+  }
+  return uniq(tags);
 }
 
 function mapMemoryEventTypeToAnchor(
@@ -1763,6 +1820,96 @@ export class ChatMomentLedger {
   }
 
   /* -------------------------------------------------------------------------
+   * MARK: memory query authority
+   * -------------------------------------------------------------------------
+   */
+
+  private buildPlannerMemoryQuery(input: {
+    readonly playerId: string;
+    readonly roomId: string;
+    readonly channelId: ChatVisibleChannel | SharedChatChannelId;
+    readonly counterpartIds?: readonly string[];
+    readonly minSalience01?: number;
+    readonly unresolvedOnly?: boolean;
+    readonly activeOnly?: boolean;
+    readonly limit?: number;
+  }): EpisodicMemoryQuery {
+    const normalizedCounterpartId = asArray(input.counterpartIds).find((value) => String(value ?? '').trim().length > 0);
+
+    const query: EpisodicMemoryQuery = {
+      playerId: input.playerId,
+      counterpartId: normalizedCounterpartId,
+      roomId: input.roomId,
+      channelId: normalizeVisibleChannel(input.channelId),
+      unresolvedOnly: input.unresolvedOnly ?? false,
+      activeOnly: input.activeOnly ?? true,
+      minSalience01: clamp01(input.minSalience01 ?? 0.34),
+      limit: Math.max(1, Math.min(input.limit ?? 24, 48)),
+    };
+
+    return query;
+  }
+
+  private queryPlannerMemories(input: {
+    readonly playerId: string;
+    readonly roomId: string;
+    readonly channelId: ChatVisibleChannel | SharedChatChannelId;
+    readonly counterpartIds?: readonly string[];
+    readonly limit?: number;
+  }): readonly EpisodicMemoryRecord[] {
+    if (!this.config.memoryService) return [];
+
+    const primaryQuery = this.buildPlannerMemoryQuery({
+      playerId: input.playerId,
+      roomId: input.roomId,
+      channelId: input.channelId,
+      counterpartIds: input.counterpartIds,
+      minSalience01: 0.36,
+      unresolvedOnly: false,
+      activeOnly: true,
+      limit: input.limit ?? 16,
+    });
+
+    const unresolvedQuery = this.buildPlannerMemoryQuery({
+      playerId: input.playerId,
+      roomId: input.roomId,
+      channelId: input.channelId,
+      counterpartIds: input.counterpartIds,
+      minSalience01: 0.22,
+      unresolvedOnly: true,
+      activeOnly: true,
+      limit: Math.max(6, Math.floor((input.limit ?? 16) / 2)),
+    });
+
+    const primary = this.config.memoryService.query(primaryQuery);
+    const unresolved = this.config.memoryService.query(unresolvedQuery);
+    const combined = uniq([...primary, ...unresolved]);
+    const counterpartIds = uniq(asArray(input.counterpartIds));
+
+    return [...combined]
+      .sort((left, right) => {
+        const leftScore = memoryRoomRelevance(left, input.roomId, input.channelId, counterpartIds);
+        const rightScore = memoryRoomRelevance(right, input.roomId, input.channelId, counterpartIds);
+        return (
+          rightScore - leftScore ||
+          (right.lastReferencedAt ?? right.createdAt) - (left.lastReferencedAt ?? left.createdAt) ||
+          right.salience01 - left.salience01
+        );
+      })
+      .slice(0, input.limit ?? 16);
+  }
+
+  public queryRelevantMemories(input: {
+    readonly playerId: string;
+    readonly roomId: string;
+    readonly channelId: ChatVisibleChannel | SharedChatChannelId;
+    readonly counterpartIds?: readonly string[];
+    readonly limit?: number;
+  }): readonly EpisodicMemoryRecord[] {
+    return this.queryPlannerMemories(input);
+  }
+
+  /* -------------------------------------------------------------------------
    * MARK: continuity projections
    * -------------------------------------------------------------------------
    */
@@ -1778,11 +1925,7 @@ export class ChatMomentLedger {
       ? projectRelationshipCounterparts(this.config.relationshipService.getSnapshot(playerId)).slice(0, 12)
       : [];
 
-    const memoryAnchors = this.config.memoryService
-      ? buildMemoryAnchorsFromSnapshot(this.config.memoryService.getSnapshot(playerId), roomId)
-      : [];
-
-    const unresolvedMomentIds = [...player.moments.values()]
+    const unresolvedMomentRecords = [...player.moments.values()]
       .filter((record) =>
         record.roomId === roomId &&
         record.status !== 'RESOLVED' &&
@@ -1790,8 +1933,28 @@ export class ChatMomentLedger {
         record.status !== 'TIMED_OUT',
       )
       .sort((a, b) => b.updatedAt - a.updatedAt)
-      .map((record) => record.momentId)
       .slice(0, 16);
+
+    const unresolvedMomentIds = unresolvedMomentRecords.map((record) => record.momentId);
+    const activeCounterpartIds = uniq([
+      ...relationshipState.map((state) => state.counterpartId),
+      ...unresolvedMomentRecords.flatMap((record) => record.counterpartIds),
+      ...player.carryover.filter((record) => record.roomId === roomId).flatMap((record) => record.counterpartIds),
+    ]).slice(0, 12);
+
+    const queriedMemories = this.queryPlannerMemories({
+      playerId,
+      roomId,
+      channelId,
+      counterpartIds: activeCounterpartIds,
+      limit: 24,
+    });
+
+    const memoryAnchors = queriedMemories.length > 0
+      ? buildMemoryAnchorsFromRecords(queriedMemories, roomId)
+      : this.config.memoryService
+        ? buildMemoryAnchorsFromSnapshot(this.config.memoryService.getSnapshot(playerId), roomId)
+        : [];
 
     const carriedPersonaIds = relationshipState
       .filter((state) => state.intensity01 >= 0.55 || state.callbackHints.length > 0)
@@ -1811,12 +1974,15 @@ export class ChatMomentLedger {
 
     const continuityTags = uniq([
       ...relationshipContinuityTags(relationshipState),
+      ...deriveMemoryContinuityTags(queriedMemories),
       ...carryoverTags,
       `CHANNEL:${normalizeTag(channelId)}`,
+      queriedMemories.some((record) => record.unresolved) ? 'MEMORY_PRESSURE_OPEN' : 'MEMORY_PRESSURE_STABLE',
     ]);
 
     const suggestedCallbackAnchorIds = uniq([
       ...memoryAnchors.slice(0, 8).map((anchor) => anchor.anchorId),
+      ...queriedMemories.slice(0, 8).flatMap((record) => record.callbackVariants.slice(0, 2).map((variant) => variant.callbackId)),
       ...relationshipState.flatMap((state) => state.callbackHints.slice(0, 2).map((hint) => hint.callbackId)),
       ...player.carryover.slice(0, 8).flatMap((record) => record.callbackAnchorIds),
     ]).slice(0, 24);
@@ -1972,6 +2138,26 @@ export class ChatMomentLedger {
   }): readonly EpisodicMemoryCallbackCandidate[] {
     if (!this.config.memoryService) return [];
 
+    const query: EpisodicMemoryQuery = this.buildPlannerMemoryQuery({
+      playerId: input.playerId,
+      roomId: input.roomId,
+      channelId: input.channelId,
+      counterpartIds: input.counterpartId ? [input.counterpartId] : [],
+      minSalience01: 0.18,
+      unresolvedOnly: false,
+      activeOnly: true,
+      limit: Math.max(12, input.maxResults ?? 8),
+    });
+
+    const warmPool = this.config.memoryService
+      .query(query)
+      .filter((record) => !input.botId || record.botId == null || record.botId === input.botId)
+      .slice(0, Math.max(12, input.maxResults ?? 8));
+
+    for (const record of warmPool.slice(0, 3)) {
+      this.config.memoryService.markReferenced(input.playerId, record.memoryId, now());
+    }
+
     const response = this.config.memoryService.selectCallbacks({
       requestId: `callback-request:${input.playerId}:${input.roomId}:${now()}`,
       createdAt: now(),
@@ -1986,7 +2172,14 @@ export class ChatMomentLedger {
       maxResults: input.maxResults ?? 8,
     });
 
-    return response.candidates;
+    const warmedIds = new Set(warmPool.map((record) => record.memoryId));
+    return response.candidates
+      .sort((left, right) => {
+        const leftWarm = warmedIds.has(left.memoryId) ? 1 : 0;
+        const rightWarm = warmedIds.has(right.memoryId) ? 1 : 0;
+        return rightWarm - leftWarm || right.score01 - left.score01 || left.callbackId.localeCompare(right.callbackId);
+      })
+      .slice(0, input.maxResults ?? 8);
   }
 
   /* -------------------------------------------------------------------------
@@ -2166,3 +2359,9 @@ export class ChatMomentLedger {
     return next;
   }
 }
+
+
+
+
+
+export default ChatMomentLedger;
