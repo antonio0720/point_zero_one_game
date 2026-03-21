@@ -87,8 +87,8 @@ export * from './LobbyChannelPolicy';
 // MARK: Suite versions, paths, and identity
 // ============================================================================
 
-export const BACKEND_CHAT_CHANNEL_SUITE_VERSION = '2026.03.14' as const;
-export const BACKEND_CHAT_CHANNEL_SUITE_PUBLIC_API_VERSION = '1.0.0-alpha' as const;
+export const BACKEND_CHAT_CHANNEL_SUITE_VERSION = '2026.03.20' as const;
+export const BACKEND_CHAT_CHANNEL_SUITE_PUBLIC_API_VERSION = '1.1.0-alpha' as const;
 
 export const BACKEND_CHAT_CHANNEL_TREE_PATHS = Object.freeze({
   root: 'backend/src/game/engine/chat/channels',
@@ -709,7 +709,7 @@ function mapGlobalMatrixRows(): readonly BackendChatPolicyMatrixRow[] {
     channelId: 'GLOBAL',
     actorClass: row.actor,
     messageKind: row.kind,
-    expectation: String('defaultDecision' in row ? row.defaultDecision : (row as any).baseDecision ?? ''),
+    expectation: String(row.defaultDecision),
   }));
 }
 
@@ -718,7 +718,7 @@ function mapSyndicateMatrixRows(): readonly BackendChatPolicyMatrixRow[] {
     channelId: 'SYNDICATE',
     actorClass: row.actor,
     messageKind: row.kind,
-    expectation: String('defaultDecision' in row ? row.defaultDecision : (row as any).baseDecision ?? ''),
+    expectation: String(row.baseDecision),
   }));
 }
 
@@ -834,15 +834,33 @@ function scenarioBundleForDealRoom(): BackendChatScenarioBundle {
       },
       {
         channelId: 'DEAL_ROOM',
-        id: 'DEAL_ROOM_SCENARIO_4_DISPUTE_ESCALATION',
-        title: 'Dispute escalation',
-        payload: DealRoom.DEAL_ROOM_SCENARIO_4_DISPUTE_ESCALATION,
+        id: 'DEAL_ROOM_SCENARIO_4_SETTLEMENT_LOCK',
+        title: 'Settlement lock',
+        payload: DealRoom.DEAL_ROOM_SCENARIO_4_SETTLEMENT_LOCK,
       },
       {
         channelId: 'DEAL_ROOM',
-        id: 'DEAL_ROOM_SCENARIO_5_ARCHIVE_PROOF',
+        id: 'DEAL_ROOM_SCENARIO_5_DISPUTE_ESCALATION',
+        title: 'Dispute escalation',
+        payload: DealRoom.DEAL_ROOM_SCENARIO_5_DISPUTE_ESCALATION,
+      },
+      {
+        channelId: 'DEAL_ROOM',
+        id: 'DEAL_ROOM_SCENARIO_6_SPECTATOR_READ_ONLY',
+        title: 'Spectator read only',
+        payload: DealRoom.DEAL_ROOM_SCENARIO_6_SPECTATOR_READ_ONLY,
+      },
+      {
+        channelId: 'DEAL_ROOM',
+        id: 'DEAL_ROOM_SCENARIO_7_ARCHIVE_PROOF',
         title: 'Archive proof',
-        payload: DealRoom.DEAL_ROOM_SCENARIO_5_ARCHIVE_PROOF,
+        payload: DealRoom.DEAL_ROOM_SCENARIO_7_ARCHIVE_PROOF,
+      },
+      {
+        channelId: 'DEAL_ROOM',
+        id: 'DEAL_ROOM_SCENARIO_8_MODERATOR_SEAL',
+        title: 'Moderator seal',
+        payload: DealRoom.DEAL_ROOM_SCENARIO_8_MODERATOR_SEAL,
       },
     ],
   };
@@ -881,6 +899,24 @@ function scenarioBundleForLobby(): BackendChatScenarioBundle {
         id: 'LOBBY_SCENARIO_5_POST_CANCEL_RESET',
         title: 'Post-cancel reset',
         payload: Lobby.LOBBY_SCENARIO_5_POST_CANCEL_RESET,
+      },
+      {
+        channelId: 'LOBBY',
+        id: 'LOBBY_SCENARIO_6_SPECTATOR_READ_ONLY',
+        title: 'Spectator read only',
+        payload: Lobby.LOBBY_SCENARIO_6_SPECTATOR_READ_ONLY,
+      },
+      {
+        channelId: 'LOBBY',
+        id: 'LOBBY_SCENARIO_7_LAUNCH_LOCK',
+        title: 'Launch lock',
+        payload: Lobby.LOBBY_SCENARIO_7_LAUNCH_LOCK,
+      },
+      {
+        channelId: 'LOBBY',
+        id: 'LOBBY_SCENARIO_8_PARTY_INVITE',
+        title: 'Party invite',
+        payload: Lobby.LOBBY_SCENARIO_8_PARTY_INVITE,
       },
     ],
   };
@@ -1482,6 +1518,10 @@ export const BACKEND_CHAT_CHANNEL_SUMMARY_ROWS: readonly BackendChatChannelSumma
       'canRead',
       'canWrite',
       'getProofDirective',
+      'buildAudienceSnapshot',
+      'buildFeedGuidance',
+      'inferStageMood',
+      'explainIngress',
       'buildAuditRecord',
     ],
   },
@@ -1495,6 +1535,11 @@ export const BACKEND_CHAT_CHANNEL_SUMMARY_ROWS: readonly BackendChatChannelSumma
       'evaluateIngress',
       'buildSnapshot',
       'getVisibilityClass',
+      'buildFeedGuidance',
+      'inferStageMood',
+      'inferCountdownUrgency',
+      'inferReadyPressure',
+      'explainIngress',
       'isCommandAllowed',
       'summarizeRestrictions',
     ],
@@ -1639,4 +1684,307 @@ export function inspectBackendChatChannelNotes(
   channelId: BackendChatChannelId,
 ): readonly string[] {
   return BACKEND_CHAT_CHANNEL_NOTES[channelId];
+}
+
+
+// ============================================================================
+// MARK: Deep inspectable suite synthesis — directives, mounts, commands, gates
+// ============================================================================
+
+export interface BackendChatDirectiveSurfaceRow {
+  readonly channelId: 'DEAL_ROOM' | 'LOBBY';
+  readonly messageKind: string;
+  readonly notificationHint: string;
+  readonly transcriptDisposition: string;
+  readonly shadowLane: string | null;
+  readonly replayPriority: string | null;
+  readonly proofRequirement: string | null;
+  readonly labels: readonly string[];
+}
+
+export interface BackendChatMountRuleSummaryRow {
+  readonly channelId: 'DEAL_ROOM' | 'LOBBY';
+  readonly surface: string;
+  readonly composerEnabled: boolean;
+  readonly transcriptDrawerRecommended: boolean | null;
+  readonly proofStripVisible: boolean | null;
+  readonly spectatorReadVisible: boolean | null;
+  readonly allowedKindsOrPhases: readonly string[];
+  readonly preferredDirectiveKind: string | null;
+  readonly defaultNotificationHint: string | null;
+  readonly defaultFanoutClass: string | null;
+  readonly density: string | null;
+  readonly stageMoodBias: string | null;
+  readonly showPresenceStrip: boolean | null;
+  readonly showThreatMeter: boolean | null;
+}
+
+export interface BackendChatCommandRuleSummaryRow {
+  readonly channelId: 'DEAL_ROOM' | 'LOBBY';
+  readonly command: string;
+  readonly allowedRoles: readonly string[];
+  readonly allowedStates: readonly string[];
+  readonly blockedStates: readonly string[];
+  readonly requiresCounterparty: boolean | null;
+  readonly requiresArbiter: boolean | null;
+  readonly description: string;
+}
+
+export interface BackendChatStateGateSummaryRow {
+  readonly channelId: 'DEAL_ROOM' | 'LOBBY';
+  readonly gateClass: 'LIFECYCLE' | 'PHASE';
+  readonly gateValue: string;
+  readonly allowedKinds: readonly string[];
+}
+
+export interface BackendChatScenarioCoverageRow {
+  readonly channelId: BackendChatChannelId;
+  readonly scenarioCount: number;
+  readonly scenarioIds: readonly string[];
+  readonly titles: readonly string[];
+}
+
+export interface BackendChatPolicyDepthReport {
+  readonly version: string;
+  readonly channelCount: number;
+  readonly scenarioCount: number;
+  readonly matrixRowCount: number;
+  readonly directiveRowCount: number;
+  readonly mountRuleCount: number;
+  readonly commandRuleCount: number;
+  readonly stateGateCount: number;
+}
+
+function createDealRoomDirectiveSurfaceRows(): readonly BackendChatDirectiveSurfaceRow[] {
+  const notifications = DealRoom.inspectDealRoomNotificationHints();
+  const transcripts = DealRoom.inspectDealRoomTranscriptDispositions();
+  const shadows = DealRoom.inspectDealRoomShadowLaneDefaults();
+  const replays = DealRoom.inspectDealRoomReplayPriorities();
+  const proofs = DealRoom.inspectDealRoomProofMatrix();
+  const labels = DealRoom.inspectDealRoomKindLabels();
+
+  return (Object.keys(notifications) as DealRoom.DealRoomMessageKind[]).map((messageKind) => ({
+    channelId: 'DEAL_ROOM',
+    messageKind,
+    notificationHint: notifications[messageKind],
+    transcriptDisposition: transcripts[messageKind],
+    shadowLane: shadows[messageKind],
+    replayPriority: replays[messageKind],
+    proofRequirement: proofs[messageKind],
+    labels: labels[messageKind],
+  }));
+}
+
+function createLobbyDirectiveSurfaceRows(): readonly BackendChatDirectiveSurfaceRow[] {
+  const notifications = Lobby.inspectLobbyNotificationHints();
+  const transcripts = Lobby.inspectLobbyTranscriptDispositions();
+  const shadows = Lobby.inspectLobbyShadowLaneDefaults();
+
+  return (Object.keys(notifications) as Lobby.LobbyMessageKind[]).map((messageKind) => ({
+    channelId: 'LOBBY',
+    messageKind,
+    notificationHint: notifications[messageKind],
+    transcriptDisposition: transcripts[messageKind],
+    shadowLane: shadows[messageKind],
+    replayPriority: null,
+    proofRequirement: null,
+    labels: [],
+  }));
+}
+
+function createDealRoomMountRuleSummaryRows(): readonly BackendChatMountRuleSummaryRow[] {
+  const matrix = DealRoom.inspectDealRoomMountMatrix();
+  return (Object.keys(matrix) as DealRoom.DealRoomMountSurface[]).map((surface) => {
+    const rule = matrix[surface];
+    return {
+      channelId: 'DEAL_ROOM',
+      surface,
+      composerEnabled: rule.composerEnabled,
+      transcriptDrawerRecommended: rule.transcriptDrawerRecommended,
+      proofStripVisible: rule.proofStripVisible,
+      spectatorReadVisible: rule.spectatorReadVisible,
+      allowedKindsOrPhases: rule.allowedKinds,
+      preferredDirectiveKind: rule.preferredDirectiveKind,
+      defaultNotificationHint: rule.defaultNotificationHint,
+      defaultFanoutClass: null,
+      density: null,
+      stageMoodBias: null,
+      showPresenceStrip: null,
+      showThreatMeter: null,
+    };
+  });
+}
+
+function createLobbyMountRuleSummaryRows(): readonly BackendChatMountRuleSummaryRow[] {
+  const matrix = Lobby.inspectLobbyMountMatrix();
+  return (Object.keys(matrix) as Lobby.LobbyMountSurface[]).map((surface) => {
+    const rule = matrix[surface];
+    return {
+      channelId: 'LOBBY',
+      surface,
+      composerEnabled: rule.allowComposer,
+      transcriptDrawerRecommended: null,
+      proofStripVisible: null,
+      spectatorReadVisible: null,
+      allowedKindsOrPhases: rule.allowedPhases,
+      preferredDirectiveKind: null,
+      defaultNotificationHint: null,
+      defaultFanoutClass: rule.defaultFanoutClass,
+      density: rule.density,
+      stageMoodBias: rule.stageMoodBias,
+      showPresenceStrip: rule.showPresenceStrip,
+      showThreatMeter: rule.showThreatMeter,
+    };
+  });
+}
+
+function createDealRoomCommandRuleSummaryRows(): readonly BackendChatCommandRuleSummaryRow[] {
+  const matrix = DealRoom.inspectDealRoomCommandMatrix();
+  return (Object.keys(matrix) as DealRoom.DealRoomCommand[]).map((command) => {
+    const rule = matrix[command];
+    return {
+      channelId: 'DEAL_ROOM',
+      command,
+      allowedRoles: rule.allowedRoles,
+      allowedStates: [],
+      blockedStates: rule.blockedLifecycles,
+      requiresCounterparty: rule.requiresCounterparty,
+      requiresArbiter: rule.requiresArbiter,
+      description: rule.description,
+    };
+  });
+}
+
+function createLobbyCommandRuleSummaryRows(): readonly BackendChatCommandRuleSummaryRow[] {
+  const matrix = Lobby.inspectLobbyCommandMatrix();
+  return (Object.keys(matrix) as Lobby.LobbyCommand[]).map((command) => {
+    const rule = matrix[command];
+    return {
+      channelId: 'LOBBY',
+      command,
+      allowedRoles: rule.roles,
+      allowedStates: rule.allowedPhases,
+      blockedStates: [],
+      requiresCounterparty: null,
+      requiresArbiter: null,
+      description: rule.description,
+    };
+  });
+}
+
+function createDealRoomStateGateSummaryRows(): readonly BackendChatStateGateSummaryRow[] {
+  const matrix = DealRoom.inspectDealRoomLifecycleMatrix();
+  return (Object.keys(matrix) as DealRoom.DealRoomLifecycleState[]).map((gateValue) => ({
+    channelId: 'DEAL_ROOM',
+    gateClass: 'LIFECYCLE',
+    gateValue,
+    allowedKinds: matrix[gateValue],
+  }));
+}
+
+function createLobbyStateGateSummaryRows(): readonly BackendChatStateGateSummaryRow[] {
+  const matrix = Lobby.inspectLobbyPhaseMatrix();
+  return (Object.keys(matrix) as Lobby.LobbyPhase[]).map((gateValue) => ({
+    channelId: 'LOBBY',
+    gateClass: 'PHASE',
+    gateValue,
+    allowedKinds: matrix[gateValue],
+  }));
+}
+
+function createScenarioCoverageRows(): readonly BackendChatScenarioCoverageRow[] {
+  const bundles = [
+    scenarioBundleForGlobal(),
+    scenarioBundleForSyndicate(),
+    scenarioBundleForDealRoom(),
+    scenarioBundleForLobby(),
+  ] as const;
+
+  return bundles.map((bundle) => ({
+    channelId: bundle.channelId,
+    scenarioCount: bundle.scenarios.length,
+    scenarioIds: bundle.scenarios.map((scenario) => scenario.id),
+    titles: bundle.scenarios.map((scenario) => scenario.title),
+  }));
+}
+
+export const BACKEND_CHAT_DIRECTIVE_SURFACE_ROWS: readonly BackendChatDirectiveSurfaceRow[] = [
+  ...createDealRoomDirectiveSurfaceRows(),
+  ...createLobbyDirectiveSurfaceRows(),
+];
+
+export const BACKEND_CHAT_MOUNT_RULE_SUMMARY_ROWS: readonly BackendChatMountRuleSummaryRow[] = [
+  ...createDealRoomMountRuleSummaryRows(),
+  ...createLobbyMountRuleSummaryRows(),
+];
+
+export const BACKEND_CHAT_COMMAND_RULE_SUMMARY_ROWS: readonly BackendChatCommandRuleSummaryRow[] = [
+  ...createDealRoomCommandRuleSummaryRows(),
+  ...createLobbyCommandRuleSummaryRows(),
+];
+
+export const BACKEND_CHAT_STATE_GATE_SUMMARY_ROWS: readonly BackendChatStateGateSummaryRow[] = [
+  ...createDealRoomStateGateSummaryRows(),
+  ...createLobbyStateGateSummaryRows(),
+];
+
+export const BACKEND_CHAT_SCENARIO_COVERAGE_ROWS: readonly BackendChatScenarioCoverageRow[] =
+  createScenarioCoverageRows();
+
+export function inspectBackendChatDirectiveSurfaceRows(
+  channelId?: 'DEAL_ROOM' | 'LOBBY',
+): readonly BackendChatDirectiveSurfaceRow[] {
+  if (!channelId) {
+    return BACKEND_CHAT_DIRECTIVE_SURFACE_ROWS;
+  }
+  return BACKEND_CHAT_DIRECTIVE_SURFACE_ROWS.filter((row) => row.channelId === channelId);
+}
+
+export function inspectBackendChatMountRuleSummaryRows(
+  channelId?: 'DEAL_ROOM' | 'LOBBY',
+): readonly BackendChatMountRuleSummaryRow[] {
+  if (!channelId) {
+    return BACKEND_CHAT_MOUNT_RULE_SUMMARY_ROWS;
+  }
+  return BACKEND_CHAT_MOUNT_RULE_SUMMARY_ROWS.filter((row) => row.channelId === channelId);
+}
+
+export function inspectBackendChatCommandRuleSummaryRows(
+  channelId?: 'DEAL_ROOM' | 'LOBBY',
+): readonly BackendChatCommandRuleSummaryRow[] {
+  if (!channelId) {
+    return BACKEND_CHAT_COMMAND_RULE_SUMMARY_ROWS;
+  }
+  return BACKEND_CHAT_COMMAND_RULE_SUMMARY_ROWS.filter((row) => row.channelId === channelId);
+}
+
+export function inspectBackendChatStateGateSummaryRows(
+  channelId?: 'DEAL_ROOM' | 'LOBBY',
+): readonly BackendChatStateGateSummaryRow[] {
+  if (!channelId) {
+    return BACKEND_CHAT_STATE_GATE_SUMMARY_ROWS;
+  }
+  return BACKEND_CHAT_STATE_GATE_SUMMARY_ROWS.filter((row) => row.channelId === channelId);
+}
+
+export function inspectBackendChatScenarioCoverageRows(): readonly BackendChatScenarioCoverageRow[] {
+  return BACKEND_CHAT_SCENARIO_COVERAGE_ROWS;
+}
+
+export function inspectBackendChatPolicyDepthReport(): BackendChatPolicyDepthReport {
+  const matrixRowCount = mapGlobalMatrixRows().length
+    + mapSyndicateMatrixRows().length
+    + mapDealRoomMatrixRows().length
+    + mapLobbyMatrixRows().length;
+
+  return {
+    version: BACKEND_CHAT_CHANNEL_SUITE_VERSION,
+    channelCount: BACKEND_CHAT_CHANNEL_IDS.length,
+    scenarioCount: BACKEND_CHAT_SCENARIO_COVERAGE_ROWS.reduce((total, row) => total + row.scenarioCount, 0),
+    matrixRowCount,
+    directiveRowCount: BACKEND_CHAT_DIRECTIVE_SURFACE_ROWS.length,
+    mountRuleCount: BACKEND_CHAT_MOUNT_RULE_SUMMARY_ROWS.length,
+    commandRuleCount: BACKEND_CHAT_COMMAND_RULE_SUMMARY_ROWS.length,
+    stateGateCount: BACKEND_CHAT_STATE_GATE_SUMMARY_ROWS.length,
+  };
 }
