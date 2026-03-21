@@ -1,4 +1,3 @@
-
 /**
  * ============================================================================
  * POINT ZERO ONE — AUTHORITATIVE BACKEND CHAT DEALROOM BLUFF RESOLVER
@@ -146,7 +145,18 @@ export type BluffSignalCode =
   | 'COUNTERFEIT_PANIC'
   | 'MEMORY_EVASION'
   | 'HELPER_SHIELDING'
-  | 'RIVAL_WITNESS_PLAY';
+  | 'RIVAL_WITNESS_PLAY'
+  | 'VISIBILITY_POSTURE_OVERPLAY'
+  | 'HELPER_VISIBLE_SECRECY_CONTRADICTION'
+  | 'CONCESSION_STACK_PRESSURE'
+  | 'CONCESSION_REPUTATION_BLEED'
+  | 'CONCESSION_URGENCY_BLEED'
+  | 'CONCESSION_HELPER_CRUTCH'
+  | 'INTENT_STATE_MISMATCH'
+  | 'ACTIVE_ENVELOPE_COUNTER_STRESS'
+  | 'FACE_SAVE_COUNTER_MASK'
+  | 'ROLE_POSTURE_CONTRADICTION'
+  | 'AUTHORITY_POSTURE_OVERPLAY';
 
 export interface BluffResolverRequest {
   readonly roomId: ChatRoomId;
@@ -186,6 +196,43 @@ export interface BluffExploitWindow {
   readonly rationale: string;
 }
 
+export interface BluffActorRead {
+  readonly actor: NegotiationActorRef | null;
+  readonly role: string;
+  readonly actorKind: string;
+  readonly authorityMask01: Score0To1;
+  readonly reputation100: Score0To100;
+  readonly leverage01: Score0To1;
+  readonly patience01: Score0To1;
+}
+
+export interface BluffVisibilityRead {
+  readonly envelope: ChatOfferVisibilityEnvelope | null;
+  readonly visibility: string;
+  readonly revealMode: string;
+  readonly witnessCount: number;
+  readonly helperVisible: boolean;
+  readonly visibilityMask01: Score0To1;
+}
+
+export interface BluffConcessionRead {
+  readonly concessions: readonly ChatOfferConcession[];
+  readonly count: number;
+  readonly helperRecommendedCount: number;
+  readonly totalUrgencyCost: number;
+  readonly totalReputationCost: number;
+  readonly aggregateValueDelta: number;
+  readonly concessionMask01: Score0To1;
+}
+
+export interface BluffIntentRead {
+  readonly intent: NegotiationIntent | null;
+  readonly envelope: NegotiationOfferEnvelope | null;
+  readonly mismatch01: Score0To1;
+  readonly faceSavePressure01: Score0To1;
+  readonly counterStress01: Score0To1;
+}
+
 export interface BluffAnalysis {
   readonly analysisId: string;
   readonly roomId: ChatRoomId;
@@ -202,9 +249,20 @@ export interface BluffAnalysis {
   readonly anchorManipulation01: Score0To1;
   readonly helperBait01: Score0To1;
   readonly proofMask01: Score0To1;
+  readonly visibilityMask01: Score0To1;
+  readonly concessionMask01: Score0To1;
+  readonly intentMismatch01: Score0To1;
   readonly truthfulnessProjection01: Score0To1;
   readonly exploitability01: Score0To1;
+  readonly probableBluff: Probability;
+  readonly bluffConfidence100: Score0To100;
+  readonly truthfulnessProjection100: Score0To100;
+  readonly exploitability100: Score0To100;
   readonly dominantPressure: string;
+  readonly actorRead: BluffActorRead;
+  readonly visibilityRead: BluffVisibilityRead;
+  readonly concessionRead: BluffConcessionRead;
+  readonly intentRead: BluffIntentRead;
   readonly signals: readonly BluffSignal[];
   readonly exploitWindows: readonly BluffExploitWindow[];
   readonly debug: JsonValue;
@@ -268,19 +326,40 @@ export class BluffResolver {
   public analyze(request: BluffResolverRequest): BluffAnalysis {
     const now = request.now ?? asUnixMs(this.clock.now());
     const negotiation = request.negotiation;
-    const actorState = request.actorState ?? resolveActorState(negotiation, request.actorId);
+    const activeEnvelope = resolveNegotiationOfferEnvelope(negotiation);
+    const actorState = request.actorState ?? resolveActorState(
+      negotiation,
+      request.actorId ?? activeEnvelope?.offeredBy.actorId ?? null,
+    );
+    const actorRef = resolveAnalysisActorRef(negotiation, actorState, activeEnvelope, request.actorId);
     const body = normalizeBody(request.body);
     const offer = request.offer ?? null;
     const priorOffer = request.priorOffer ?? null;
     const signals: BluffSignal[] = [];
 
-    const pressure = scoreDominantPressure(negotiation, actorState, offer, priorOffer);
+    const pressure = scoreDominantPressure(negotiation, actorState, offer, priorOffer, activeEnvelope);
+    const actorRead = buildActorRead(actorRef, actorState);
+    const visibilityRead = buildVisibilityRead(offer, negotiation, actorState);
+    const concessionRead = buildConcessionRead(offer, negotiation, actorState);
+    const intentRead = buildIntentRead(negotiation, activeEnvelope, actorState, offer);
+
     const textSignals = this.scoreTextSignals(body, negotiation, actorState, priorOffer, request.priorBodies);
     const offerSignals = this.scoreOfferSignals(offer, priorOffer, negotiation, actorState);
     const stateSignals = this.scoreStateSignals(negotiation, actorState, request.latestInference, request.latestLeakThreat);
     const evidenceSignals = this.scoreEvidenceSignals(request.evidence ?? [], negotiation, actorState);
+    const visibilitySignals = this.scoreVisibilitySignals(visibilityRead, negotiation, actorState);
+    const concessionSignals = this.scoreConcessionSignals(concessionRead, negotiation, actorState, offer);
+    const intentSignals = this.scoreIntentSignals(intentRead, negotiation, actorState, offer);
 
-    signals.push(...textSignals, ...offerSignals, ...stateSignals, ...evidenceSignals);
+    signals.push(
+      ...textSignals,
+      ...offerSignals,
+      ...stateSignals,
+      ...evidenceSignals,
+      ...visibilitySignals,
+      ...concessionSignals,
+      ...intentSignals,
+    );
 
     const contradiction01 = weightedAverage01(
       signals.filter((signal) =>
@@ -290,7 +369,8 @@ export class BluffResolver {
         signal.code === 'PROOF_LANGUAGE_LOW_PROOF_STATE' ||
         signal.code === 'GUARANTEE_LANGUAGE_WEAK_GUARANTEE' ||
         signal.code === 'DOMINANCE_LANGUAGE_SOFT_TERMS' ||
-        signal.code === 'SOFT_LANGUAGE_PREDATORY_TERMS',
+        signal.code === 'SOFT_LANGUAGE_PREDATORY_TERMS' ||
+        signal.code === 'ROLE_POSTURE_CONTRADICTION',
       ),
     );
 
@@ -298,14 +378,16 @@ export class BluffResolver {
       signals.filter((signal) =>
         signal.code === 'MESSAGE_URGENCY_SPIKE' ||
         signal.code === 'DEADLINE_LANGUAGE_NO_DEADLINE' ||
-        signal.code === 'WINDOW_MISMATCH',
+        signal.code === 'WINDOW_MISMATCH' ||
+        signal.code === 'CONCESSION_URGENCY_BLEED',
       ),
     );
 
     const rescueMask01 = weightedAverage01(
       signals.filter((signal) =>
         signal.code === 'RESCUE_SIGNAL_OVERPLAY' ||
-        signal.code === 'HELPER_SHIELDING',
+        signal.code === 'HELPER_SHIELDING' ||
+        signal.code === 'CONCESSION_HELPER_CRUTCH',
       ),
     );
 
@@ -320,19 +402,25 @@ export class BluffResolver {
       signals.filter((signal) =>
         signal.code === 'COUNTERFEIT_CALM' ||
         signal.code === 'COUNTERFEIT_PANIC' ||
-        signal.code === 'PUBLIC_CONFIDENCE_PRIVATE_FEAR',
+        signal.code === 'PUBLIC_CONFIDENCE_PRIVATE_FEAR' ||
+        signal.code === 'AUTHORITY_POSTURE_OVERPLAY',
       ),
     );
 
     const anchorManipulation01 = weightedAverage01(
       signals.filter((signal) =>
-        signal.code === 'ANCHOR_SHOCK' || signal.code === 'REVISION_BACKTRACK',
+        signal.code === 'ANCHOR_SHOCK' ||
+        signal.code === 'REVISION_BACKTRACK' ||
+        signal.code === 'ACTIVE_ENVELOPE_COUNTER_STRESS',
       ),
     );
 
     const helperBait01 = weightedAverage01(
       signals.filter((signal) =>
-        signal.code === 'HELPER_SHIELDING' || signal.code === 'RESCUE_SIGNAL_OVERPLAY',
+        signal.code === 'HELPER_SHIELDING' ||
+        signal.code === 'RESCUE_SIGNAL_OVERPLAY' ||
+        signal.code === 'CONCESSION_HELPER_CRUTCH' ||
+        signal.code === 'HELPER_VISIBLE_SECRECY_CONTRADICTION',
       ),
     );
 
@@ -343,32 +431,68 @@ export class BluffResolver {
       ),
     );
 
-    const bluffConfidence01 = asScore0To1(
-      clamp01(
-        contradiction01 * 0.18 +
-          urgencyMask01 * 0.13 +
-          rescueMask01 * 0.11 +
-          leakTheater01 * 0.12 +
-          confidenceMask01 * 0.1 +
-          anchorManipulation01 * 0.13 +
-          helperBait01 * 0.08 +
-          proofMask01 * 0.08 +
-          normalizedSignalDensity(signals) * 0.07,
+    const visibilityMask01 = weightedAverage01(
+      signals.filter((signal) =>
+        signal.code === 'VISIBILITY_POSTURE_OVERPLAY' ||
+        signal.code === 'HELPER_VISIBLE_SECRECY_CONTRADICTION',
       ),
     );
 
-    const truthfulnessProjection01 = asScore0To1(clamp01(1 - bluffConfidence01));
-    const exploitability01 = asScore0To1(
-      clamp01(
-        contradiction01 * 0.24 +
-          anchorManipulation01 * 0.17 +
-          leakTheater01 * 0.14 +
-          urgencyMask01 * 0.15 +
-          helperBait01 * 0.07 +
-          proofMask01 * 0.08 +
-          softFailureSignal01(actorState) * 0.15,
+    const concessionMask01 = weightedAverage01(
+      signals.filter((signal) =>
+        signal.code === 'CONCESSION_STACK_PRESSURE' ||
+        signal.code === 'CONCESSION_REPUTATION_BLEED' ||
+        signal.code === 'CONCESSION_URGENCY_BLEED' ||
+        signal.code === 'CONCESSION_HELPER_CRUTCH',
       ),
     );
+
+    const intentMismatch01 = weightedAverage01(
+      signals.filter((signal) =>
+        signal.code === 'INTENT_STATE_MISMATCH' ||
+        signal.code === 'FACE_SAVE_COUNTER_MASK' ||
+        signal.code === 'ACTIVE_ENVELOPE_COUNTER_STRESS',
+      ),
+    );
+
+    const bluffConfidence01 = asScore0To1(
+      clamp01(
+        contradiction01 * 0.16 +
+          urgencyMask01 * 0.1 +
+          rescueMask01 * 0.08 +
+          leakTheater01 * 0.1 +
+          confidenceMask01 * 0.09 +
+          anchorManipulation01 * 0.1 +
+          helperBait01 * 0.06 +
+          proofMask01 * 0.07 +
+          visibilityMask01 * 0.08 +
+          concessionMask01 * 0.08 +
+          intentMismatch01 * 0.08 +
+          actorRead.authorityMask01 * 0.04 +
+          normalizedSignalDensity(signals) * 0.06,
+      ),
+    );
+
+    const truthfulnessProjection01 = asScore0To1(clamp01(1 - Number(bluffConfidence01)));
+    const exploitability01 = asScore0To1(
+      clamp01(
+        contradiction01 * 0.2 +
+          anchorManipulation01 * 0.15 +
+          leakTheater01 * 0.11 +
+          urgencyMask01 * 0.1 +
+          helperBait01 * 0.06 +
+          proofMask01 * 0.07 +
+          visibilityMask01 * 0.07 +
+          concessionMask01 * 0.09 +
+          intentMismatch01 * 0.08 +
+          softFailureSignal01(actorState) * 0.07,
+      ),
+    );
+
+    const probableBluff = deriveProbableBluff(bluffConfidence01, offer, negotiation, activeEnvelope, intentRead);
+    const bluffConfidence100 = score01To100(bluffConfidence01);
+    const truthfulnessProjection100 = score01To100(truthfulnessProjection01);
+    const exploitability100 = score01To100(exploitability01);
 
     const family = determineBluffFamily({
       contradiction01,
@@ -379,6 +503,11 @@ export class BluffResolver {
       anchorManipulation01,
       helperBait01,
       proofMask01,
+      visibilityMask01,
+      concessionMask01,
+      intentMismatch01,
+      actorAuthorityMask01: Number(actorRead.authorityMask01),
+      intentRead,
       signals,
     });
 
@@ -390,17 +519,21 @@ export class BluffResolver {
       rescueMask01,
       leakTheater01,
       exploitability01,
+      visibilityMask01,
+      concessionMask01,
+      intentMismatch01,
       negotiation,
       actorState,
       offer,
       priorOffer,
+      intentRead,
     });
 
     const analysis: BluffAnalysis = {
-      analysisId: createAnalysisId(negotiation.negotiationId, actorState?.actor.actorId, now),
+      analysisId: createAnalysisId(negotiation.negotiationId, actorRef?.actorId ?? actorState?.actor.actorId, now),
       roomId: request.roomId,
       negotiationId: String(negotiation.negotiationId),
-      actorId: actorState?.actor.actorId ? String(actorState.actor.actorId) : request.actorId ?? undefined,
+      actorId: actorRef?.actorId ? String(actorRef.actorId) : request.actorId ?? undefined,
       analyzedAt: now,
       family,
       bluffConfidence01,
@@ -412,9 +545,20 @@ export class BluffResolver {
       anchorManipulation01: asScore0To1(anchorManipulation01),
       helperBait01: asScore0To1(helperBait01),
       proofMask01: asScore0To1(proofMask01),
+      visibilityMask01: asScore0To1(visibilityMask01),
+      concessionMask01: asScore0To1(concessionMask01),
+      intentMismatch01: asScore0To1(intentMismatch01),
       truthfulnessProjection01,
       exploitability01,
+      probableBluff,
+      bluffConfidence100,
+      truthfulnessProjection100,
+      exploitability100,
       dominantPressure: pressure,
+      actorRead,
+      visibilityRead,
+      concessionRead,
+      intentRead,
       signals,
       exploitWindows,
       debug: {
@@ -425,6 +569,14 @@ export class BluffResolver {
         negotiationHasLeakThreat: negotiationHasLeakThreat(negotiation),
         dominantPressure: pressure,
         signalCount: signals.length,
+        primaryIntent: intentRead.intent,
+        probableBluff: Number(probableBluff),
+        actorRole: actorRead.role,
+        actorKind: actorRead.actorKind,
+        witnessCount: visibilityRead.witnessCount,
+        helperVisible: visibilityRead.helperVisible,
+        concessionCount: concessionRead.count,
+        activeEnvelopeOfferId: intentRead.envelope?.vector.offerId ?? null,
         traceLabel: request.traceLabel ?? null,
       },
     };
@@ -437,10 +589,14 @@ export class BluffResolver {
       actorId: analysis.actorId ?? null,
       family,
       bluffConfidence01,
+      probableBluff: Number(probableBluff),
       contradiction01,
       urgencyMask01,
       leakTheater01,
       rescueMask01,
+      visibilityMask01,
+      concessionMask01,
+      intentMismatch01,
     });
 
     return analysis;
@@ -794,6 +950,215 @@ export class BluffResolver {
     return signals;
   }
 
+  private scoreVisibilitySignals(
+    visibilityRead: BluffVisibilityRead,
+    negotiation: ChatNegotiation,
+    actorState: NegotiationActorState | null,
+  ): BluffSignal[] {
+    const signals: BluffSignal[] = [];
+    const envelope = visibilityRead.envelope;
+    if (!envelope) {
+      return signals;
+    }
+
+    const secrecyPressure = Number(envelope.secrecyPressure ?? asScore0To1(0));
+    const audienceHeat = Number(envelope.audienceHeat ?? asScore0To1(0));
+    const visibility = visibilityRead.visibility;
+    const revealMode = visibilityRead.revealMode;
+    const isPrivate = visibility.includes('PRIVATE') || visibility.includes('DIRECT') || visibility.includes('SECRET');
+    const isPublic = visibility.includes('PUBLIC') || visibility.includes('GLOBAL') || visibility.includes('ROOM');
+    const isHiddenReveal = revealMode.includes('HIDDEN') || revealMode.includes('DELAY') || revealMode.includes('MASK');
+
+    if (isPrivate && negotiationHasAudiencePressure(negotiation) && visibilityRead.witnessCount > 1) {
+      signals.push(signal(
+        'VISIBILITY_POSTURE_OVERPLAY',
+        asScore0To1(clamp01(0.42 + secrecyPressure * 0.3 + audienceHeat * 0.2)),
+        'Offer posture claims privacy while witness geometry implies broader observation.',
+        {
+          visibility,
+          revealMode,
+          witnessCount: visibilityRead.witnessCount,
+        },
+      ));
+    }
+
+    if (visibilityRead.helperVisible && secrecyPressure > 0.52) {
+      signals.push(signal(
+        'HELPER_VISIBLE_SECRECY_CONTRADICTION',
+        asScore0To1(clamp01(0.36 + secrecyPressure * 0.5)),
+        'Helper visibility collides with a secrecy-heavy offer posture.',
+      ));
+    }
+
+    if (isPublic && isHiddenReveal && negotiationHasAudiencePressure(negotiation)) {
+      signals.push(signal(
+        'VISIBILITY_POSTURE_OVERPLAY',
+        asScore0To1(clamp01(0.38 + audienceHeat * 0.4)),
+        'Offer attempts a hidden reveal inside an audience-heated context.',
+      ));
+    }
+
+    if (actorState && isPrivate && Number(actorState.reputation.witnessHeat) > 0.65) {
+      signals.push(signal(
+        'ROLE_POSTURE_CONTRADICTION',
+        asScore0To1(clamp01(0.31 + Number(actorState.reputation.witnessHeat) * 0.4)),
+        'Actor is under strong witness heat while the offer posture insists on privacy.',
+      ));
+    }
+
+    return signals;
+  }
+
+  private scoreConcessionSignals(
+    concessionRead: BluffConcessionRead,
+    negotiation: ChatNegotiation,
+    actorState: NegotiationActorState | null,
+    offer: ChatOffer | null,
+  ): BluffSignal[] {
+    const signals: BluffSignal[] = [];
+    if (!concessionRead.count) {
+      return signals;
+    }
+
+    const trustProjection = offer ? Number(chatOfferProjectedTrustworthiness(offer)) : 0.5;
+    const urgencyProjection = offer?.currentVersion?.analytics?.urgency
+      ? normalizedOfferScore(offer.currentVersion.analytics.urgency)
+      : 0;
+
+    if (concessionRead.count >= 3 && trustProjection < 0.5) {
+      signals.push(signal(
+        'CONCESSION_STACK_PRESSURE',
+        asScore0To1(clamp01(0.34 + concessionRead.count / 8)),
+        'Concession count is high enough to resemble pressure theater rather than fair trade.',
+        {
+          count: concessionRead.count,
+          helperRecommendedCount: concessionRead.helperRecommendedCount,
+        },
+      ));
+    }
+
+    if (concessionRead.totalReputationCost >= 12) {
+      signals.push(signal(
+        'CONCESSION_REPUTATION_BLEED',
+        asScore0To1(clamp01(concessionRead.totalReputationCost / 30)),
+        'Concessions extract unusual reputation cost for the current move.',
+      ));
+    }
+
+    if (concessionRead.totalUrgencyCost >= 8 || urgencyProjection > 0.62) {
+      signals.push(signal(
+        'CONCESSION_URGENCY_BLEED',
+        asScore0To1(clamp01(Math.max(concessionRead.totalUrgencyCost / 20, urgencyProjection * 0.8))),
+        'Concessions are carrying hidden urgency pressure.',
+      ));
+    }
+
+    if (concessionRead.helperRecommendedCount > 0 && !negotiationSupportsRescue(negotiation)) {
+      signals.push(signal(
+        'CONCESSION_HELPER_CRUTCH',
+        asScore0To1(clamp01(0.28 + concessionRead.helperRecommendedCount * 0.18)),
+        'Offer concessions lean on helper framing without rescue support from the negotiation.',
+      ));
+    }
+
+    if (
+      actorState &&
+      concessionRead.totalReputationCost > 0 &&
+      Number(actorState.reputation.current) < 40
+    ) {
+      signals.push(signal(
+        'CONCESSION_REPUTATION_BLEED',
+        asScore0To1(clamp01(0.3 + concessionRead.totalReputationCost / 24)),
+        'Low-reputation actor is spending further reputation inside the concession stack.',
+      ));
+    }
+
+    return signals;
+  }
+
+  private scoreIntentSignals(
+    intentRead: BluffIntentRead,
+    negotiation: ChatNegotiation,
+    actorState: NegotiationActorState | null,
+    offer: ChatOffer | null,
+  ): BluffSignal[] {
+    const signals: BluffSignal[] = [];
+    const intent = intentRead.intent;
+    if (!intent) {
+      return signals;
+    }
+
+    const intentKey = String(intent);
+    const hostilityProjection = offer ? Number(chatOfferProjectedHostility(offer)) : 0;
+    const softnessProjection = offer ? Number(chatOfferProjectedSoftness(offer)) : 0;
+    const trustProjection = offer ? Number(chatOfferProjectedTrustworthiness(offer)) : 0;
+
+    if (intentRead.mismatch01 > 0.28) {
+      signals.push(signal(
+        'INTENT_STATE_MISMATCH',
+        intentRead.mismatch01,
+        'Negotiation intent and observed state are drifting apart.',
+        {
+          intent,
+          role: actorState?.actor.role ?? null,
+        },
+      ));
+    }
+
+    if (intentRead.counterStress01 > 0.35) {
+      signals.push(signal(
+        'ACTIVE_ENVELOPE_COUNTER_STRESS',
+        intentRead.counterStress01,
+        'Active negotiation envelope projects counter-pressure instability.',
+      ));
+    }
+
+    if (intentRead.faceSavePressure01 > 0.35) {
+      signals.push(signal(
+        'FACE_SAVE_COUNTER_MASK',
+        intentRead.faceSavePressure01,
+        'Counter-shape implies face-saving theater rather than transparent bargaining.',
+      ));
+    }
+
+    if (intentKey === 'FAIR_TRADE' && hostilityProjection > 0.65) {
+      signals.push(signal(
+        'INTENT_STATE_MISMATCH',
+        asScore0To1(clamp01(0.36 + hostilityProjection * 0.4)),
+        'Fair-trade intent is contradicted by hostile economic projection.',
+      ));
+    }
+
+    if (intentKey === 'PRICE_DISCOVERY' && softnessProjection > 0.68 && trustProjection < 0.32) {
+      signals.push(signal(
+        'INTENT_STATE_MISMATCH',
+        asScore0To1(0.49),
+        'Price-discovery language may be masking manipulative softness.',
+      ));
+    }
+
+    if ((intentKey === 'REPUTATION_SIGNAL' || intentKey === 'FACE_SAVE') && actorState) {
+      const faceThreat = Number(actorState.reputation.faceThreat ?? asScore0To1(0));
+      if (faceThreat < 0.25 && Number(actorState.emotion.confidence) > 0.7) {
+        signals.push(signal(
+          'AUTHORITY_POSTURE_OVERPLAY',
+          asScore0To1(clamp01(0.31 + Number(actorState.emotion.confidence) * 0.4)),
+          'Authority/reputation framing appears stronger than the actor’s face-threat reality.',
+        ));
+      }
+    }
+
+    if ((intentKey === 'HELPER_INTERVENTION' || intentKey === 'RESCUE_OVERRIDE') && !negotiationSupportsRescue(negotiation)) {
+      signals.push(signal(
+        'RESCUE_SIGNAL_OVERPLAY',
+        asScore0To1(0.58),
+        'Rescue-linked intent appears without backend rescue support.',
+      ));
+    }
+
+    return signals;
+  }
+
   private buildExploitWindows(input: {
     readonly family: BluffFamily;
     readonly bluffConfidence01: Score0To1;
@@ -802,10 +1167,14 @@ export class BluffResolver {
     readonly rescueMask01: number;
     readonly leakTheater01: number;
     readonly exploitability01: Score0To1;
+    readonly visibilityMask01: number;
+    readonly concessionMask01: number;
+    readonly intentMismatch01: number;
     readonly negotiation: ChatNegotiation;
     readonly actorState: NegotiationActorState | null;
     readonly offer: ChatOffer | null;
     readonly priorOffer: ChatOffer | null;
+    readonly intentRead: BluffIntentRead;
   }): readonly BluffExploitWindow[] {
     const windows: BluffExploitWindow[] = [];
     const exploitability = Number(input.exploitability01);
@@ -850,6 +1219,33 @@ export class BluffResolver {
         clamp01(input.urgencyMask01 * 0.87),
         900,
         'Urgency theater becomes easier to punish if the actor is forced to wait.',
+      ));
+    }
+
+    if (input.visibilityMask01 > 0.42) {
+      windows.push(exploitWindow(
+        'WAIT_AND_WITNESS',
+        clamp01(input.visibilityMask01 * 0.82),
+        650,
+        'Visibility posture can be stress-tested by forcing additional witnesses or time.',
+      ));
+    }
+
+    if (input.concessionMask01 > 0.4) {
+      windows.push(exploitWindow(
+        'SOFT_COUNTER',
+        clamp01(input.concessionMask01 * 0.84),
+        250,
+        'Counter the concession stack by isolating hidden urgency and reputation costs.',
+      ));
+    }
+
+    if (input.intentMismatch01 > 0.4 || Number(input.intentRead.faceSavePressure01) > 0.4) {
+      windows.push(exploitWindow(
+        'PROOF_CHALLENGE',
+        clamp01(Math.max(input.intentMismatch01, Number(input.intentRead.faceSavePressure01)) * 0.9),
+        0,
+        'Intent drift is high enough to challenge with role, proof, or face-saving pressure.',
       ));
     }
 
@@ -1080,11 +1476,302 @@ function resolveActorState(
   negotiation: ChatNegotiation,
   actorId?: string | null,
 ): NegotiationActorState | null {
+  const primaryResolved = resolvePrimaryActorStateFromNegotiation(negotiation, actorId);
+  if (primaryResolved) {
+    return primaryResolved;
+  }
   if (!actorId) {
-    return negotiation.actorStates[0] ?? null;
+    return resolvePrimaryActorStateFromNegotiation(
+      negotiation,
+      negotiation.parties.primary.actorId as unknown as string,
+    ) ?? negotiation.actorStates[0] ?? null;
   }
   const states: readonly NegotiationActorState[] = negotiation.actorStates;
   return states.find((state) => String(state.actor.actorId) === String(actorId)) ?? negotiation.actorStates[0] ?? null;
+}
+
+function resolvePrimaryActorStateFromNegotiation(
+  negotiation: ChatNegotiation,
+  actorId?: string | null,
+): NegotiationActorState | undefined {
+  if (!actorId) {
+    return undefined;
+  }
+  return negotiationPrimaryActorState(
+    negotiation,
+    actorId as Parameters<typeof negotiationPrimaryActorState>[1],
+  );
+}
+
+function resolveNegotiationOfferEnvelope(
+  negotiation: ChatNegotiation,
+): NegotiationOfferEnvelope | null {
+  return negotiation.activeOffer ?? negotiation.scene.currentOffer ?? null;
+}
+
+function resolveAnalysisActorRef(
+  negotiation: ChatNegotiation,
+  actorState: NegotiationActorState | null,
+  envelope: NegotiationOfferEnvelope | null,
+  requestedActorId?: string | null,
+): NegotiationActorRef | null {
+  if (actorState?.actor) {
+    return actorState.actor;
+  }
+  if (requestedActorId) {
+    if (String(negotiation.parties.primary.actorId) === String(requestedActorId)) {
+      return negotiation.parties.primary;
+    }
+    if (String(negotiation.parties.counterparty.actorId) === String(requestedActorId)) {
+      return negotiation.parties.counterparty;
+    }
+    if (envelope?.offeredBy && String(envelope.offeredBy.actorId) === String(requestedActorId)) {
+      return envelope.offeredBy;
+    }
+    if (envelope?.offeredTo && String(envelope.offeredTo.actorId) === String(requestedActorId)) {
+      return envelope.offeredTo;
+    }
+  }
+  return envelope?.offeredBy ?? negotiation.parties.primary ?? negotiation.parties.counterparty ?? null;
+}
+
+function buildActorRead(
+  actorRef: NegotiationActorRef | null,
+  actorState: NegotiationActorState | null,
+): BluffActorRead {
+  const authorityMask01 = actorRef
+    ? clamp01(
+      roleAuthorityBias(actorRef) * 0.45 +
+      Number(actorState?.leverage ?? asScore0To1(0.45)) * 0.2 +
+      Number(actorState?.emotion.confidence ?? asScore0To1(0.45)) * 0.15 +
+      Number(actorState?.reputation.current ?? asScore0To100(45)) / 100 * 0.2,
+    )
+    : 0.22;
+
+  return {
+    actor: actorRef,
+    role: actorRef ? String(actorRef.role) : 'UNKNOWN',
+    actorKind: actorRef ? String(actorRef.actorKind) : 'UNKNOWN',
+    authorityMask01: asScore0To1(authorityMask01),
+    reputation100: actorState
+      ? asScore0To100(clamp100(Number(actorState.reputation.current)))
+      : asScore0To100(45),
+    leverage01: actorState?.leverage ?? asScore0To1(0.45),
+    patience01: actorState?.patience ?? asScore0To1(0.45),
+  };
+}
+
+function buildVisibilityRead(
+  offer: ChatOffer | null,
+  negotiation: ChatNegotiation,
+  actorState: NegotiationActorState | null,
+): BluffVisibilityRead {
+  const envelope = resolveOfferVisibilityEnvelope(offer);
+  if (!envelope) {
+    return {
+      envelope: null,
+      visibility: 'UNKNOWN',
+      revealMode: 'UNKNOWN',
+      witnessCount: 0,
+      helperVisible: false,
+      visibilityMask01: asScore0To1(0),
+    };
+  }
+
+  const witnessCount = envelope.witnessCount ?? 0;
+  const secrecyPressure = Number(envelope.secrecyPressure ?? asScore0To1(0));
+  const audienceHeat = Number(envelope.audienceHeat ?? asScore0To1(0));
+  const visibility = String(envelope.visibility).toUpperCase();
+  const revealMode = String(envelope.revealMode).toUpperCase();
+  const visibilityMask01 = clamp01(
+    (visibility.includes('PRIVATE') && negotiationHasAudiencePressure(negotiation) ? 0.26 : 0) +
+    (envelope.helperVisible && secrecyPressure > 0.5 ? 0.24 : 0) +
+    (witnessCount >= 3 ? 0.1 : 0) +
+    audienceHeat * 0.2 +
+    secrecyPressure * 0.2 +
+    (actorState && Number(actorState.reputation.witnessHeat) > 0.65 && visibility.includes('PRIVATE') ? 0.12 : 0),
+  );
+
+  return {
+    envelope,
+    visibility,
+    revealMode,
+    witnessCount,
+    helperVisible: envelope.helperVisible,
+    visibilityMask01: asScore0To1(visibilityMask01),
+  };
+}
+
+function buildConcessionRead(
+  offer: ChatOffer | null,
+  negotiation: ChatNegotiation,
+  actorState: NegotiationActorState | null,
+): BluffConcessionRead {
+  const concessions = extractOfferConcessions(offer);
+  const helperRecommendedCount = concessions.filter((entry) => Boolean(entry.helperRecommended)).length;
+  const totalUrgencyCost = concessions.reduce((sum, entry) => sum + Number(entry.urgencyCost ?? 0), 0);
+  const totalReputationCost = concessions.reduce((sum, entry) => sum + Number(entry.reputationCost ?? 0), 0);
+  const aggregateValueDelta = concessions.reduce((sum, entry) => sum + Math.abs(Number(entry.valueDelta ?? 0)), 0);
+  const rescueBias = negotiationSupportsRescue(negotiation) ? 0.05 : 0;
+  const concessionMask01 = clamp01(
+    (concessions.length >= 3 ? 0.25 : concessions.length * 0.06) +
+    clamp01(totalUrgencyCost / 20) * 0.25 +
+    clamp01(totalReputationCost / 25) * 0.25 +
+    clamp01(aggregateValueDelta / 1000) * 0.1 +
+    clamp01(helperRecommendedCount / 3) * 0.1 -
+    rescueBias +
+    (actorState && Number(actorState.reputation.current) < 40 ? 0.05 : 0),
+  );
+
+  return {
+    concessions,
+    count: concessions.length,
+    helperRecommendedCount,
+    totalUrgencyCost,
+    totalReputationCost,
+    aggregateValueDelta,
+    concessionMask01: asScore0To1(concessionMask01),
+  };
+}
+
+function buildIntentRead(
+  negotiation: ChatNegotiation,
+  envelope: NegotiationOfferEnvelope | null,
+  actorState: NegotiationActorState | null,
+  offer: ChatOffer | null,
+): BluffIntentRead {
+  const intent: NegotiationIntent | null = envelope?.vector.intent ?? negotiation.latestInference?.inferredIntent ?? null;
+  const counterStress01 = envelope?.counterShape
+    ? clamp01(
+      Number(envelope.counterShape.counterDistance) * 0.6 +
+      (envelope.counterShape.hardReversal ? 0.24 : 0) +
+      (envelope.counterShape.softLanding ? 0.06 : 0) +
+      (envelope.counterShape.faceSaving ? 0.1 : 0),
+    )
+    : 0;
+  const faceSavePressure01 = envelope?.counterShape?.faceSaving
+    ? clamp01(counterStress01 * 0.72 + Number(actorState?.reputation.faceThreat ?? asScore0To1(0.15)) * 0.28)
+    : 0;
+
+  let mismatch01 = 0;
+  if (intent) {
+    mismatch01 = inferIntentMismatch01(intent, actorState, offer, envelope, negotiation);
+  }
+
+  return {
+    intent,
+    envelope,
+    mismatch01: asScore0To1(mismatch01),
+    faceSavePressure01: asScore0To1(faceSavePressure01),
+    counterStress01: asScore0To1(counterStress01),
+  };
+}
+
+function resolveOfferVisibilityEnvelope(
+  offer: ChatOffer | null,
+): ChatOfferVisibilityEnvelope | null {
+  return offer?.visibility ?? null;
+}
+
+function extractOfferConcessions(
+  offer: ChatOffer | null,
+): readonly ChatOfferConcession[] {
+  return offer?.currentVersion?.concessions ?? [];
+}
+
+function roleAuthorityBias(actorRef: NegotiationActorRef): number {
+  const role = String(actorRef.role).toUpperCase();
+  if (role.includes('PRIMARY')) return 0.88;
+  if (role.includes('SELLER') || role.includes('BUYER')) return 0.72;
+  if (role.includes('BROKER') || role.includes('MEDIATOR')) return 0.64;
+  if (role.includes('WITNESS') || role.includes('AUDIENCE')) return 0.38;
+  return 0.5;
+}
+
+function inferIntentMismatch01(
+  intent: NegotiationIntent,
+  actorState: NegotiationActorState | null,
+  offer: ChatOffer | null,
+  envelope: NegotiationOfferEnvelope | null,
+  negotiation: ChatNegotiation,
+): number {
+  const intentKey = String(intent);
+  const hostility = offer ? Number(chatOfferProjectedHostility(offer)) : 0;
+  const softness = offer ? Number(chatOfferProjectedSoftness(offer)) : 0;
+  const trust = offer ? Number(chatOfferProjectedTrustworthiness(offer)) : 0;
+  const confidence = Number(actorState?.emotion.confidence ?? asScore0To1(0.45));
+  const urgency = Number(actorState?.urgencySignal ?? asScore0To1(0.25));
+  const bluffFrequency = Number(actorState?.bluffFrequency ?? asScore0To1(0.2));
+  const leakRisk = Number(actorState?.reputation.leakRisk ?? asScore0To1(0.15));
+  const faceThreat = Number(actorState?.reputation.faceThreat ?? asScore0To1(0.15));
+
+  if (intentKey === 'FAIR_TRADE') {
+    return clamp01(hostility * 0.45 + (1 - trust) * 0.35 + bluffFrequency * 0.2);
+  }
+  if (intentKey === 'VALUE_EXTRACT') {
+    return clamp01(softness * 0.25 + trust * 0.15);
+  }
+  if (intentKey === 'PRICE_DISCOVERY') {
+    return clamp01((softness > 0.68 && trust < 0.35 ? 0.42 : 0.1) + bluffFrequency * 0.25);
+  }
+  if (intentKey === 'LIQUIDATION' || intentKey === 'PANIC_EXIT') {
+    return clamp01(confidence * 0.35 + (1 - urgency) * 0.25 + Number(actorState?.walkAwayLikelihood ?? asScore0To1(0.2)) * 0.2);
+  }
+  if (intentKey === 'DELAY') {
+    return clamp01(urgency * 0.45 + hostility * 0.15 + (envelope?.counterShape?.hardReversal ? 0.18 : 0));
+  }
+  if (intentKey === 'FACE_SAVE') {
+    return clamp01((1 - faceThreat) * 0.4 + confidence * 0.2 + (envelope?.counterShape?.faceSaving ? 0 : 0.2));
+  }
+  if (intentKey === 'REPUTATION_SIGNAL') {
+    return clamp01((1 - faceThreat) * 0.35 + trust * 0.1 + confidence * 0.2);
+  }
+  if (intentKey === 'HELPER_INTERVENTION' || intentKey === 'RESCUE_OVERRIDE') {
+    return clamp01((negotiationSupportsRescue(negotiation) ? 0.05 : 0.4) + confidence * 0.1);
+  }
+  if (intentKey === 'BLUFF' || intentKey === 'BAIT' || intentKey === 'TRAP') {
+    return clamp01((1 - bluffFrequency) * 0.2 + trust * 0.15 + softness * 0.15);
+  }
+  if (intentKey === 'REPUTATION_SIGNAL') {
+    return clamp01((1 - faceThreat) * 0.35 + confidence * 0.2);
+  }
+  if (intentKey === 'HELPER_INTERVENTION') {
+    return clamp01((negotiationSupportsRescue(negotiation) ? 0.05 : 0.4) + leakRisk * 0.15);
+  }
+  return clamp01(bluffFrequency * 0.2 + hostility * 0.12 + leakRisk * 0.1);
+}
+
+function deriveProbableBluff(
+  bluffConfidence01: Score0To1,
+  offer: ChatOffer | null,
+  negotiation: ChatNegotiation,
+  envelope: NegotiationOfferEnvelope | null,
+  intentRead: BluffIntentRead,
+): Probability {
+  const offerAnalyticsLikelihood = offer?.currentVersion?.analytics?.bluffLikelihood;
+  const inferenceLikelihood = negotiation.latestInference?.risk?.bluffLikelihood;
+  const offerProbability = offerAnalyticsLikelihood != null ? Number(offerAnalyticsLikelihood) : Number(bluffConfidence01);
+  const inferenceProbability = inferenceLikelihood != null ? Number(inferenceLikelihood) : Number(bluffConfidence01);
+  const intentBias = intentRead.intent && ['BLUFF', 'BAIT', 'TRAP', 'PRICE_DISCOVERY'].includes(String(intentRead.intent))
+    ? 0.08
+    : 0;
+  const counterBias = envelope?.counterShape
+    ? Number(intentRead.counterStress01) * 0.12
+    : 0;
+
+  return asProbability(
+    clamp01(
+      Number(bluffConfidence01) * 0.54 +
+      offerProbability * 0.2 +
+      inferenceProbability * 0.18 +
+      intentBias +
+      counterBias,
+    ),
+  );
+}
+
+function score01To100(value: Score0To1): Score0To100 {
+  return asScore0To100(clamp100(Number(value) * 100));
 }
 
 function softFailureSignal01(actorState: NegotiationActorState | null): number {
@@ -1102,13 +1789,18 @@ function scoreDominantPressure(
   actorState: NegotiationActorState | null,
   offer: ChatOffer | null,
   priorOffer: ChatOffer | null,
+  envelope?: NegotiationOfferEnvelope | null,
 ): string {
   const enginePressure = negotiationInferDominantPressure(negotiation.latestInference);
   const delta = offer ? Math.abs(Number(chatOfferPriceDeltaFromPrior(offer))) : 0;
+  const intent = envelope?.vector.intent ? String(envelope.vector.intent) : '';
   if (delta > 0.18) return 'PRICE';
+  if (intent === 'LIQUIDATION' || intent === 'PANIC_EXIT') return 'EXIT';
+  if (intent === 'HELPER_INTERVENTION' || intent === 'RESCUE_OVERRIDE') return 'RESCUE';
   if (negotiationHasAudiencePressure(negotiation)) return 'AUDIENCE';
   if (negotiationHasLeakThreat(negotiation)) return 'LEAK';
   if (actorState && Number((actorState as any).helpSeeking01 ?? asScore0To1(0)) > 0.45) return 'RESCUE';
+  if (priorOffer && reviseDirectionFlipped(offer ?? priorOffer, priorOffer)) return 'REVERSAL';
   return enginePressure;
 }
 
@@ -1123,23 +1815,35 @@ function normalizedSignalDensity(signals: readonly BluffSignal[]): number {
   return clamp01(signals.length / 10);
 }
 
+function normalizedOfferScore(
+  value?: { readonly normalized?: Score0To1 } | null,
+): number {
+  return clamp01(Number(value?.normalized ?? asScore0To1(0)));
+}
+
+function clamp100(value: number): number {
+  if (value < 0) return 0;
+  if (value > 100) return 100;
+  return value;
+}
+
 function projectedGuaranteeMask01(offer: ChatOffer): number {
-  const strength = Number(chatOfferGuaranteeStrength(offer));
-  const guaranteeCount = Array.isArray((offer as { guarantees?: unknown }).guarantees)
-    ? ((offer as { guarantees?: ChatOfferGuarantee[] }).guarantees ?? []).length
-    : 0;
-  return clamp01((guaranteeCount / 4) * 0.55 + (1 - strength) * 0.45);
+  const guarantees = offer.currentVersion?.guarantees ?? [];
+  const guaranteeCount = guarantees.length;
+  const guaranteeStrengthAverage = guaranteeCount
+    ? guarantees.reduce((sum, entry) => sum + normalizedOfferScore(entry.strength), 0) / guaranteeCount
+    : Number(chatOfferGuaranteeStrength(offer));
+  return clamp01((guaranteeCount / 4) * 0.45 + (1 - guaranteeStrengthAverage) * 0.55);
 }
 
 function hasActiveDeadlineWindow(negotiation: ChatNegotiation, priorOffer: ChatOffer | null): boolean {
-  const windows = Array.isArray((negotiation as { windows?: unknown }).windows)
-    ? ((negotiation as { windows?: NegotiationWindowLike[] }).windows ?? [])
-    : [];
-  const offerWindows = priorOffer && Array.isArray((priorOffer as { windows?: unknown }).windows)
-    ? ((priorOffer as { windows?: ChatOfferWindow[] }).windows ?? [])
-    : [];
-  return windows.some((window) => !window.expired && !window.closed) ||
-    offerWindows.some((window) => Number(window.closesAt ?? asOfferUnixMs(0)) > Date.now());
+  const now = Date.now();
+  const activeWindow = negotiation.activeWindow ?? negotiation.scene.activeWindow;
+  const priorWindow = priorOffer?.window ?? null;
+  return Boolean(
+    (activeWindow && Number(activeWindow.closesAt ?? asOfferUnixMs(0)) > now) ||
+    (priorWindow && Number(priorWindow.closesAt ?? asOfferUnixMs(0)) > now),
+  );
 }
 
 function supportsScarcityClaim(
@@ -1149,20 +1853,20 @@ function supportsScarcityClaim(
   if (negotiationHasAudiencePressure(negotiation)) return true;
   if (negotiationHasLeakThreat(negotiation)) return true;
   if (actorState && Number((actorState as any).inventoryTightness01 ?? asScore0To1(0)) > 0.58) return true;
+  if (actorState && Number(actorState.walkAwayLikelihood ?? asScore0To1(0)) > 0.62) return true;
   return false;
 }
 
 function hasEvidenceBackfill(negotiation: ChatNegotiation): boolean {
-  const evidence = Array.isArray((negotiation as { evidence?: unknown }).evidence)
-    ? ((negotiation as { evidence?: NegotiationSignalEvidence[] }).evidence ?? [])
-    : [];
-  return evidence.length > 0;
+  const sceneBeats = negotiation.scene?.beats ?? [];
+  const inferenceSignals = negotiation.latestInference?.signals ?? [];
+  return sceneBeats.length > 0 || inferenceSignals.length > 0;
 }
 
 function actorCanCarryGuarantee(actorState: NegotiationActorState | null): boolean {
   if (!actorState) return false;
   return Number(actorState.emotion.trust ?? asScore0To1(0)) > 0.52 ||
-    Number(actorState.reputation.current ?? asScore0To1(0)) > 58;
+    Number(actorState.reputation.current ?? asScore0To100(0)) > 58;
 }
 
 function repeatedNonAnswer(currentBody: string, priorBodies: readonly string[]): boolean {
@@ -1208,6 +1912,11 @@ function determineBluffFamily(input: {
   readonly anchorManipulation01: number;
   readonly helperBait01: number;
   readonly proofMask01: number;
+  readonly visibilityMask01: number;
+  readonly concessionMask01: number;
+  readonly intentMismatch01: number;
+  readonly actorAuthorityMask01: number;
+  readonly intentRead: BluffIntentRead;
   readonly signals: readonly BluffSignal[];
 }): BluffFamily {
   const maxSignal = Math.max(
@@ -1219,16 +1928,26 @@ function determineBluffFamily(input: {
     input.anchorManipulation01,
     input.helperBait01,
     input.proofMask01,
+    input.visibilityMask01,
+    input.concessionMask01,
+    input.intentMismatch01,
+    input.actorAuthorityMask01,
   );
   if (maxSignal < 0.24) return 'NONE';
+  if (input.visibilityMask01 >= maxSignal && input.visibilityMask01 > 0.38) return 'VISIBILITY_FAKE';
   if (input.leakTheater01 >= maxSignal && input.leakTheater01 > 0.42) return 'LEAK_BAIT';
   if (input.rescueMask01 >= maxSignal && input.helperBait01 > 0.32) return 'RESCUE_BAIT';
   if (input.helperBait01 >= maxSignal) return 'HELPER_BAIT';
   if (input.anchorManipulation01 >= maxSignal) return 'ANCHOR_TRAP';
+  if (input.intentMismatch01 >= maxSignal && String(input.intentRead.intent ?? '') === 'FACE_SAVE') return 'FACE_SAVE_MASK';
+  if (input.intentMismatch01 >= maxSignal && input.actorAuthorityMask01 > 0.42) return 'AUTHORITY_FAKE';
+  if (input.concessionMask01 >= maxSignal && input.concessionMask01 > 0.45) return 'COLLAPSE_MASK';
   if (input.urgencyMask01 >= maxSignal) return 'URGENCY_FAKE';
   if (input.proofMask01 >= maxSignal) return 'PROOF_MASK';
   if (input.confidenceMask01 >= maxSignal) return 'CONFIDENCE_MASK';
-  if (input.contradiction01 > 0.55 && input.urgencyMask01 > 0.45) return 'MULTI_LAYER';
+  if (input.contradiction01 > 0.55 && (input.urgencyMask01 > 0.45 || input.visibilityMask01 > 0.35 || input.intentMismatch01 > 0.35)) {
+    return 'MULTI_LAYER';
+  }
   return 'PRICE_FAKE';
 }
 
