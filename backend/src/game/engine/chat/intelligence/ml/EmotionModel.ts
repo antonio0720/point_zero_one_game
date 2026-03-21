@@ -2,7 +2,7 @@
  * ============================================================================
  * POINT ZERO ONE — BACKEND CHAT EMOTION MODEL
  * FILE: backend/src/game/engine/chat/intelligence/ml/EmotionModel.ts
- * VERSION: 2026.03.20-backend-emotion-model.v1
+ * VERSION: 2026.03.21-backend-emotion-model.v2
  * AUTHORSHIP: Antonio T. Smith Jr.
  * LICENSE: Internal / Proprietary / All Rights Reserved
  * ============================================================================
@@ -56,22 +56,31 @@ import type {
 } from '../../types';
 
 import type {
-  ChatAuthority,
+  ChatEmotionAxis,
   ChatEmotionContextFrame,
   ChatEmotionDelta,
   ChatEmotionDriverEvidence,
+  ChatEmotionDriverKind,
   ChatEmotionEnvelope,
   ChatEmotionSnapshot,
+  ChatEmotionSourceKind,
   ChatEmotionSummary,
   ChatEmotionVector,
 } from '../../../../../../../shared/contracts/chat/ChatEmotion';
 
+import type { ChatAuthority } from '../../../../../../../shared/contracts/chat/ChatEvents';
+
 import {
   CHAT_EMOTION_CONTRACT_MANIFEST,
+  buildEmotionDebugNotes,
   clampEmotionScalar,
+  computeEmotionConfidenceBand,
   createChatEmotionDeltaId,
-  createEmotionSnapshot,
+  createChatEmotionDriverId,
+  createChatEmotionTraceId,
+  createEmotionDelta,
   createEmotionEnvelope,
+  createEmotionSnapshot,
   describeEmotionVector,
   emotionScore01To100,
   getDominantEmotionAxis,
@@ -126,7 +135,7 @@ export const CHAT_EMOTION_MODEL_MODULE_NAME =
   'PZO_BACKEND_CHAT_EMOTION_MODEL' as const;
 
 export const CHAT_EMOTION_MODEL_VERSION =
-  '2026.03.20-backend-emotion-model.v1' as const;
+  '2026.03.21-backend-emotion-model.v2' as const;
 
 export const CHAT_EMOTION_MODEL_RUNTIME_LAWS = Object.freeze([
   'Emotion is backend runtime truth, not only UI adaptation metadata.',
@@ -164,6 +173,46 @@ export const CHAT_EMOTION_MODEL_DEFAULTS = Object.freeze({
   comebackThreshold: 0.55,
   celebrationRestraintThreshold: 0.49,
 } as const);
+
+/* ========================================================================== *
+ * MARK: Internal contracts
+ * ========================================================================== */
+
+type EmotionAxisValueMap = Readonly<{
+  confidence01: Score01;
+  intimidation01: Score01;
+  frustration01: Score01;
+  curiosity01: Score01;
+  attachment01: Score01;
+  socialEmbarrassment01: Score01;
+  relief01: Score01;
+  dominance01: Score01;
+  desperation01: Score01;
+  trust01: Score01;
+}>;
+
+interface EmotionDriverInput {
+  readonly axis: ChatEmotionAxis;
+  readonly driver: ChatEmotionDriverKind;
+  readonly sourceKind: ChatEmotionSourceKind;
+  readonly signedImpact01: Score01;
+  readonly label: string;
+  readonly evidence: string;
+  readonly roomId: ChatRoomId;
+  readonly channel: ChatVisibleChannel;
+  readonly sceneId?: string;
+  readonly messageId?: string;
+  readonly metadata: JsonObject;
+}
+
+interface EmotionDeltaInput {
+  readonly axis: ChatEmotionAxis;
+  readonly previousVector: ChatEmotionVector;
+  readonly nextVector: ChatEmotionVector;
+  readonly authority: ChatAuthority;
+  readonly evaluatedAt: UnixMs;
+  readonly traceId: ChatEmotionSnapshot['traceId'];
+}
 
 /* ========================================================================== *
  * MARK: Public contracts
@@ -243,6 +292,69 @@ export interface EmotionModelApi {
 }
 
 /* ========================================================================== *
+ * MARK: Static mapping registries
+ * ========================================================================== */
+
+const AXIS_KEY_TO_CONTRACT_AXIS = Object.freeze({
+  confidence: 'CONFIDENCE',
+  intimidation: 'INTIMIDATION',
+  frustration: 'FRUSTRATION',
+  curiosity: 'CURIOSITY',
+  attachment: 'ATTACHMENT',
+  socialEmbarrassment: 'SOCIAL_EMBARRASSMENT',
+  relief: 'RELIEF',
+  dominance: 'DOMINANCE',
+  desperation: 'DESPERATION',
+  trust: 'TRUST',
+} satisfies Record<keyof ChatEmotionVector, ChatEmotionAxis>);
+
+const CONTRACT_AXIS_TO_VECTOR_KEY = Object.freeze({
+  CONFIDENCE: 'confidence',
+  INTIMIDATION: 'intimidation',
+  FRUSTRATION: 'frustration',
+  CURIOSITY: 'curiosity',
+  ATTACHMENT: 'attachment',
+  SOCIAL_EMBARRASSMENT: 'socialEmbarrassment',
+  RELIEF: 'relief',
+  DOMINANCE: 'dominance',
+  DESPERATION: 'desperation',
+  TRUST: 'trust',
+} satisfies Record<ChatEmotionAxis, keyof ChatEmotionVector>);
+
+const AXIS_TO_DELTA_DRIVER = Object.freeze({
+  CONFIDENCE: 'COMEBACK_WINDOW',
+  INTIMIDATION: 'PRESSURE_SPIKE',
+  FRUSTRATION: 'PRESSURE_SPIKE',
+  CURIOSITY: 'MEMORY_CALLBACK',
+  ATTACHMENT: 'MEMORY_CALLBACK',
+  SOCIAL_EMBARRASSMENT: 'CROWD_SWARM',
+  RELIEF: 'RESCUE_INTERVENTION',
+  DOMINANCE: 'COMEBACK_WINDOW',
+  DESPERATION: 'BANKRUPTCY_THREAT',
+  TRUST: 'HELPER_PRESENCE',
+} satisfies Record<ChatEmotionAxis, ChatEmotionDriverKind>);
+
+const AXIS_TO_DELTA_SOURCE_KIND = Object.freeze({
+  CONFIDENCE: 'SYSTEM',
+  INTIMIDATION: 'MOMENT',
+  FRUSTRATION: 'MOMENT',
+  CURIOSITY: 'SCENE',
+  ATTACHMENT: 'LEARNING',
+  SOCIAL_EMBARRASSMENT: 'CROWD_REACTION',
+  RELIEF: 'RESCUE',
+  DOMINANCE: 'MOMENT',
+  DESPERATION: 'RESCUE',
+  TRUST: 'HELPER_MESSAGE',
+} satisfies Record<ChatEmotionAxis, ChatEmotionSourceKind>);
+
+const DRIVER_LABELS = Object.freeze({
+  curiosity: 'Curiosity window pressure',
+  embarrassment: 'Crowd embarrassment pressure',
+  dominance: 'Comeback authority pressure',
+  trust: 'Helper trust carryover',
+} as const);
+
+/* ========================================================================== *
  * MARK: Implementation
  * ========================================================================== */
 
@@ -279,13 +391,14 @@ export class EmotionModel implements EmotionModelApi {
 
   public evaluate(input: EmotionModelInput): EmotionModelResult {
     const evaluatedAt = input.evaluatedAt ?? this.now();
+    const authority = input.authority ?? this.authority;
 
-    const pressureAffect = this.pressureAffectModel.evaluate({
+    const pressureInput: PressureAffectModelInput = {
       userId: input.userId,
       roomId: input.roomId,
       channel: input.channel,
       evaluatedAt,
-      authority: input.authority ?? this.authority,
+      authority,
       featureSnapshot: input.featureSnapshot,
       learningProfile: input.learningProfile,
       audienceHeat: input.audienceHeat,
@@ -295,49 +408,58 @@ export class EmotionModel implements EmotionModelApi {
       relationships: input.relationships,
       eventTags: input.eventTags,
       metadata: input.metadata,
-    });
+    };
 
-    const attachment = this.attachmentModel.assess({
+    const attachmentInput: AttachmentModelInput = {
       userId: input.userId,
       roomId: input.roomId,
       channel: input.channel,
       evaluatedAt,
-      authority: input.authority ?? this.authority,
+      authority,
       relationships: input.relationships ?? [],
       learningProfile: input.learningProfile,
       featureSnapshot: input.featureSnapshot,
       helperPersonaIds: input.helperPersonaIds,
       haterPersonaIds: input.haterPersonaIds,
       metadata: input.metadata,
-    });
+    };
+
+    const pressureAffect = this.pressureAffectModel.evaluate(pressureInput);
+    const attachment = this.attachmentModel.assess(attachmentInput);
 
     const profile = input.learningProfile;
     const feature = input.featureSnapshot;
     const previousVector = input.previousSnapshot?.vector;
 
     const confidence01 = clampEmotionScalar(
-      Number(pressureAffect.breakdown.confidenceRepair01) * this.defaults.confidenceRepairBlend +
+      Number(pressureAffect.breakdown.confidenceRepair01) *
+        this.defaults.confidenceRepairBlend +
         safe01(profile?.affect.confidence01) * 0.21 +
         invert01(pressureAffect.breakdown.desperation01) * 0.12 +
         safe01(input.inferenceSnapshot?.engagement01) * 0.1,
     );
 
     const intimidation01 = clampEmotionScalar(
-      Number(pressureAffect.breakdown.intimidation01) * this.defaults.intimidationPressureBlend +
-        Number(attachment.rivalryContamination01) * 0.12 +
+      Number(pressureAffect.breakdown.intimidation01) *
+        this.defaults.intimidationPressureBlend +
+        Number(attachment.rivalryContamination01) *
+          this.defaults.intimidationAttachmentPenaltyBlend +
         channelPredationBias(input.channel, this.defaults.dealRoomPredationBias),
     );
 
     const frustration01 = clampEmotionScalar(
-      Number(pressureAffect.breakdown.frustration01) * this.defaults.frustrationPressureBlend +
+      Number(pressureAffect.breakdown.frustration01) *
+        this.defaults.frustrationPressureBlend +
         safe01(profile?.affect.frustration01) * 0.18 +
         inferSilenceFriction(input.silenceDecision) * 0.08,
     );
 
     const curiosity01 = clampEmotionScalar(
-      inferCuriosity(feature, profile, input.inferenceSnapshot) * this.defaults.curiosityWindowBlend +
+      inferCuriosity(feature, profile, input.inferenceSnapshot) *
+        this.defaults.curiosityWindowBlend +
         safe01(profile?.affect.curiosity01) * 0.2 +
-        Number(pressureAffect.publicExposure01) * this.defaults.curiosityExposureBlend,
+        Number(pressureAffect.publicExposure01) *
+          this.defaults.curiosityExposureBlend,
     );
 
     const attachment01 = clampEmotionScalar(
@@ -346,8 +468,15 @@ export class EmotionModel implements EmotionModelApi {
     );
 
     const socialEmbarrassment01 = clampEmotionScalar(
-      inferEmbarrassment(input.channel, pressureAffect, attachment, profile) * this.defaults.embarrassmentPublicBlend +
-        Number(attachment.rivalryContamination01) * this.defaults.embarrassmentRivalryBlend +
+      inferEmbarrassment(
+        input.channel,
+        pressureAffect,
+        attachment,
+        profile,
+        this.defaults.globalStageEmbarrassmentBias,
+      ) * this.defaults.embarrassmentPublicBlend +
+        Number(attachment.rivalryContamination01) *
+          this.defaults.embarrassmentRivalryBlend +
         safe01(profile?.affect.embarrassment01) * 0.19,
     );
 
@@ -359,13 +488,16 @@ export class EmotionModel implements EmotionModelApi {
 
     const dominance01 = clampEmotionScalar(
       confidence01 * this.defaults.dominanceConfidenceBlend +
-        invert01(socialEmbarrassment01) * this.defaults.dominanceEmbarrassmentInverseBlend +
+        invert01(socialEmbarrassment01) *
+          this.defaults.dominanceEmbarrassmentInverseBlend +
         inferDominance(input.inferenceSnapshot, feature) * 0.15,
     );
 
     const desperation01 = clampEmotionScalar(
-      Number(pressureAffect.breakdown.desperation01) * this.defaults.desperationPressureBlend +
-        normalizeRescue(input.rescueDecision) * this.defaults.desperationRescueBlend +
+      Number(pressureAffect.breakdown.desperation01) *
+        this.defaults.desperationPressureBlend +
+        normalizeRescue(input.rescueDecision) *
+          this.defaults.desperationRescueBlend +
         safe01(profile?.churnRisk01) * 0.17,
     );
 
@@ -376,7 +508,7 @@ export class EmotionModel implements EmotionModelApi {
         Number(attachment.rivalryContamination01) * 0.08,
     );
 
-    const vector: Partial<ChatEmotionVector> = Object.freeze({
+    const rawAxisValues = Object.freeze({
       confidence01,
       intimidation01,
       frustration01,
@@ -387,7 +519,10 @@ export class EmotionModel implements EmotionModelApi {
       dominance01,
       desperation01,
       trust01,
-    });
+    } satisfies EmotionAxisValueMap);
+
+    const vector = createBackendEmotionVector(rawAxisValues);
+    const traceId = createChatEmotionTraceId();
 
     const drivers = Object.freeze(
       this.buildDrivers({
@@ -399,19 +534,26 @@ export class EmotionModel implements EmotionModelApi {
     );
 
     const deltas = Object.freeze(
-      this.buildDeltas(previousVector, vector, input.authority ?? this.authority, evaluatedAt),
+      this.buildDeltas({
+        previousVector,
+        nextVector: vector,
+        authority,
+        evaluatedAt,
+        traceId,
+      }),
     );
 
     const snapshot = createEmotionSnapshot({
-      context: this.createContext(input, evaluatedAt),
+      context: this.createContext(input, pressureAffect, evaluatedAt),
       vector,
       previousVector,
       drivers,
       deltas,
       notes: this.buildSnapshotNotes(input, pressureAffect, attachment, vector),
-      metadata: this.buildMetadata(input, pressureAffect, attachment),
+      metadata: this.buildMetadata(input, pressureAffect, attachment, vector),
       observedAtUnixMs: evaluatedAt,
-      authority: input.authority ?? this.authority,
+      authority,
+      traceId,
     });
 
     const envelope = createEmotionEnvelope(snapshot);
@@ -427,8 +569,10 @@ export class EmotionModel implements EmotionModelApi {
         snapshot.derived.comebackReadiness >= this.defaults.comebackThreshold &&
         snapshot.derived.operatingState !== 'WOUNDED',
       shouldHoldCelebration:
-        snapshot.derived.reliefNeed >= this.defaults.celebrationRestraintThreshold ||
-        snapshot.derived.silenceSuitability >= 0.55,
+        snapshot.derived.celebrationTolerance <=
+          this.defaults.celebrationRestraintThreshold ||
+        snapshot.derived.silenceSuitability >=
+          this.defaults.silencePreferenceThreshold,
       shouldEscalateHelper:
         snapshot.derived.helperUrgency >= this.defaults.helperRestraintThreshold ||
         pressureAffect.recommendation.policyFlags.shouldEscalateRescue,
@@ -441,13 +585,18 @@ export class EmotionModel implements EmotionModelApi {
 
     const notes = Object.freeze([
       `model=${CHAT_EMOTION_MODEL_MODULE_NAME}`,
+      `traceId=${snapshot.traceId}`,
       `dominant=${snapshot.derived.dominantAxis}`,
-      snapshot.derived.secondaryAxis ? `secondary=${snapshot.derived.secondaryAxis}` : 'secondary=NONE',
+      snapshot.derived.secondaryAxis
+        ? `secondary=${snapshot.derived.secondaryAxis}`
+        : 'secondary=NONE',
       `state=${snapshot.derived.operatingState}`,
       `helperUrgency=${emotionScore01To100(snapshot.derived.helperUrgency)}`,
       `haterOpportunity=${emotionScore01To100(snapshot.derived.haterOpportunity)}`,
       `crowdPileOnRisk=${emotionScore01To100(snapshot.derived.crowdPileOnRisk)}`,
       `silenceSuitability=${emotionScore01To100(snapshot.derived.silenceSuitability)}`,
+      `celebrationTolerance=${emotionScore01To100(snapshot.derived.celebrationTolerance)}`,
+      ...buildEmotionDebugNotes(snapshot),
       ...pressureAffect.notes,
       ...attachment.notes,
     ]);
@@ -485,11 +634,14 @@ export class EmotionModel implements EmotionModelApi {
       `haterOpportunity=${emotionScore01To100(result.snapshot.derived.haterOpportunity)}`,
       `crowdPileOnRisk=${emotionScore01To100(result.snapshot.derived.crowdPileOnRisk)}`,
       `silenceSuitability=${emotionScore01To100(result.snapshot.derived.silenceSuitability)}`,
+      `celebrationTolerance=${emotionScore01To100(result.snapshot.derived.celebrationTolerance)}`,
+      `summary=${result.summary.narrative}`,
     ]);
   }
 
   private createContext(
     input: EmotionModelInput,
+    pressureAffect: PressureAffectResult,
     evaluatedAt: UnixMs,
   ): ChatEmotionContextFrame {
     return {
@@ -498,12 +650,28 @@ export class EmotionModel implements EmotionModelApi {
       modeScope: 'RUN' as ChatEmotionContextFrame['modeScope'],
       mountTarget: 'CHAT_PANEL' as ChatEmotionContextFrame['mountTarget'],
       sourceAuthority: (input.authority ?? this.authority) as ChatEmotionContextFrame['sourceAuthority'],
-      userId: input.userId as unknown as ChatEmotionContextFrame['userId'],
-      sessionId: input.sessionId as unknown as ChatEmotionContextFrame['sessionId'],
+      playerUserId:
+        input.userId as unknown as ChatEmotionContextFrame['playerUserId'],
+      sessionId:
+        input.sessionId as unknown as ChatEmotionContextFrame['sessionId'],
       sceneId: input.sceneId as unknown as ChatEmotionContextFrame['sceneId'],
-      messageId: input.messageId as unknown as ChatEmotionContextFrame['messageId'],
-      observedAtUnixMs: evaluatedAt,
-      tags: Object.freeze([...(input.eventTags ?? [])]),
+      activeMessageId:
+        input.messageId as unknown as ChatEmotionContextFrame['activeMessageId'],
+      audienceMood:
+        input.audienceHeat?.mood as ChatEmotionContextFrame['audienceMood'],
+      audienceSeverity:
+        input.audienceHeat?.severity as ChatEmotionContextFrame['audienceSeverity'],
+      audienceSwarmRisk:
+        input.audienceHeat?.swarmRisk as ChatEmotionContextFrame['audienceSwarmRisk'],
+      witnessDensity:
+        input.audienceHeat?.witnessDensity as ChatEmotionContextFrame['witnessDensity'],
+      metadata: Object.freeze({
+        evaluatedAt,
+        eventTags: Object.freeze([...(input.eventTags ?? [])]),
+        publicExposure01: pressureAffect.publicExposure01,
+        pressureSeverity01: pressureAffect.pressureSeverity01,
+        messageId: input.messageId ?? null,
+      }),
     };
   }
 
@@ -511,63 +679,139 @@ export class EmotionModel implements EmotionModelApi {
     readonly input: EmotionModelInput;
     readonly pressureAffect: PressureAffectResult;
     readonly attachment: AttachmentAssessment;
-    readonly vector: Partial<ChatEmotionVector>;
+    readonly vector: ChatEmotionVector;
   }): readonly ChatEmotionDriverEvidence[] {
     const vector = input.vector;
+
     const drivers: ChatEmotionDriverEvidence[] = [
       ...input.pressureAffect.drivers,
       ...input.attachment.drivers,
-      this.driver('CURIOSITY', safe01(vector.curiosity01), 'SCENE_WINDOW', {
+      this.driver({
+        axis: 'CURIOSITY',
+        driver: 'MEMORY_CALLBACK',
+        sourceKind: 'SCENE',
+        signedImpact01: safe01(vector.curiosity),
+        label: DRIVER_LABELS.curiosity,
+        evidence: 'Scene-window uncertainty and room exposure increased curiosity.',
+        roomId: input.input.roomId,
         channel: input.input.channel,
-        pressureSeverity01: input.pressureAffect.pressureSeverity01,
-        eventTags: input.input.eventTags ?? [],
+        sceneId: input.input.sceneId,
+        messageId: input.input.messageId,
+        metadata: Object.freeze({
+          pressureSeverity01: input.pressureAffect.pressureSeverity01,
+          publicExposure01: input.pressureAffect.publicExposure01,
+          eventTags: Object.freeze([...(input.input.eventTags ?? [])]),
+        }),
       }),
-      this.driver('SOCIAL_EMBARRASSMENT', safe01(vector.socialEmbarrassment01), 'CROWD_HEAT', {
-        publicExposure01: input.pressureAffect.publicExposure01,
-        rivalryContamination01: input.attachment.rivalryContamination01,
+      this.driver({
+        axis: 'SOCIAL_EMBARRASSMENT',
+        driver: 'CROWD_SWARM',
+        sourceKind: 'CROWD_REACTION',
+        signedImpact01: safe01(vector.socialEmbarrassment),
+        label: DRIVER_LABELS.embarrassment,
+        evidence:
+          'Public exposure and rivalry contamination pushed embarrassment into the crowd lane.',
+        roomId: input.input.roomId,
+        channel: input.input.channel,
+        sceneId: input.input.sceneId,
+        messageId: input.input.messageId,
+        metadata: Object.freeze({
+          publicExposure01: input.pressureAffect.publicExposure01,
+          crowdThreat01: input.pressureAffect.crowdThreat01,
+          rivalryContamination01: input.attachment.rivalryContamination01,
+        }),
       }),
-      this.driver('DOMINANCE', safe01(vector.dominance01), 'COMEBACK_WINDOW', {
-        confidenceRepair01: input.pressureAffect.breakdown.confidenceRepair01,
+      this.driver({
+        axis: 'DOMINANCE',
+        driver: 'COMEBACK_WINDOW',
+        sourceKind: 'MOMENT',
+        signedImpact01: safe01(vector.dominance),
+        label: DRIVER_LABELS.dominance,
+        evidence:
+          'Confidence repair plus reduced embarrassment created a comeback-authority window.',
+        roomId: input.input.roomId,
+        channel: input.input.channel,
+        sceneId: input.input.sceneId,
+        messageId: input.input.messageId,
+        metadata: Object.freeze({
+          confidenceRepair01: input.pressureAffect.breakdown.confidenceRepair01,
+          comebackReadiness01: input.pressureAffect.recommendation.comebackReadiness01,
+        }),
       }),
-      this.driver('TRUST', safe01(vector.trust01), 'HELPER_TRUST', {
-        helperAffinity01: input.attachment.helperAffinity01,
-        followPersonaId: input.attachment.followPersonaId ?? null,
+      this.driver({
+        axis: 'TRUST',
+        driver: 'HELPER_PRESENCE',
+        sourceKind: 'HELPER_MESSAGE',
+        signedImpact01: safe01(vector.trust),
+        label: DRIVER_LABELS.trust,
+        evidence:
+          'Helper affinity and attachment continuity produced trust carryover.',
+        roomId: input.input.roomId,
+        channel: input.input.channel,
+        sceneId: input.input.sceneId,
+        messageId: input.input.messageId,
+        metadata: Object.freeze({
+          helperAffinity01: input.attachment.helperAffinity01,
+          attachment01: input.attachment.attachment01,
+          followPersonaId: input.attachment.followPersonaId ?? null,
+        }),
       }),
     ];
+
     return drivers;
   }
 
-  private buildDeltas(
-    previousVector: Partial<ChatEmotionVector> | undefined,
-    nextVector: Partial<ChatEmotionVector>,
-    authority: ChatAuthority,
-    evaluatedAt: UnixMs,
-  ): readonly ChatEmotionDelta[] {
-    if (!previousVector) return [];
+  private buildDeltas(input: EmotionDeltaInput): readonly ChatEmotionDelta[] {
+    if (!input.previousVector) {
+      return [];
+    }
+
     const deltas: ChatEmotionDelta[] = [];
-    for (const axis of Object.keys(nextVector) as (keyof ChatEmotionVector)[]) {
-      const nextValue = Number(nextVector[axis] ?? 0);
-      const prevValue = Number(previousVector[axis] ?? 0);
-      if (Math.abs(nextValue - prevValue) < 0.015) continue;
-      const normalizedAxis = normalizeAxis(axis);
+
+    for (const axisKey of Object.keys(input.nextVector) as (keyof ChatEmotionVector)[]) {
+      const nextValue = Number(input.nextVector[axisKey] ?? 0);
+      const prevValue = Number(input.previousVector[axisKey] ?? 0);
+      const signedDelta = nextValue - prevValue;
+      const magnitude = Math.abs(signedDelta);
+
+      if (magnitude < 0.015) {
+        continue;
+      }
+
+      const axis = normalizeAxis(axisKey);
+      const deltaVector = createSingleAxisDeltaVector(axis, signedDelta);
+      const directionLabel = signedDelta > 0 ? 'rise' : 'fall';
+      const label = `${axis.toLowerCase().replace(/_/g, ' ')} ${directionLabel}`;
+      const reason = `${axis.toLowerCase().replace(/_/g, '_')}_${directionLabel}`;
+
       deltas.push(
-        Object.freeze({
+        createEmotionDelta({
           deltaId: createChatEmotionDeltaId(),
-          axis: normalizedAxis,
-          previous01: clampEmotionScalar(prevValue),
-          current01: clampEmotionScalar(nextValue),
-          change01: clampEmotionScalar(Math.abs(nextValue - prevValue)),
-          direction:
-            nextValue > prevValue ? 'UP' : nextValue < prevValue ? 'DOWN' : 'FLAT',
-          authority,
-          observedAtUnixMs: evaluatedAt,
-          reason:
-            nextValue > prevValue
-              ? `${normalizedAxis}_rise`
-              : `${normalizedAxis}_fall`,
+          traceId: input.traceId,
+          emittedAt: new Date(input.evaluatedAt).toISOString(),
+          sourceKind: AXIS_TO_DELTA_SOURCE_KIND[axis],
+          driver: AXIS_TO_DELTA_DRIVER[axis],
+          authority: input.authority,
+          label,
+          reason,
+          vectorDelta: deltaVector,
+          before: input.previousVector,
+          after: input.nextVector,
+          confidence: clampEmotionScalar(0.4 + magnitude * 0.5),
+          urgency: clampEmotionScalar(magnitude),
+          sticky: magnitude >= 0.18,
+          hidden: false,
+          metadata: Object.freeze({
+            emotionAxis: axis,
+            previous01: clampEmotionScalar(prevValue),
+            current01: clampEmotionScalar(nextValue),
+            signedDelta,
+            magnitude01: clampEmotionScalar(magnitude),
+          }),
         }),
       );
     }
+
     return deltas;
   }
 
@@ -575,14 +819,19 @@ export class EmotionModel implements EmotionModelApi {
     input: EmotionModelInput,
     pressureAffect: PressureAffectResult,
     attachment: AttachmentAssessment,
-    vector: Partial<ChatEmotionVector>,
+    vector: ChatEmotionVector,
   ): readonly string[] {
+    const dominant = getDominantEmotionAxis(vector);
+    const secondary = getSecondaryEmotionAxis(vector);
+
     return Object.freeze([
       `room=${input.roomId}`,
       `channel=${input.channel}`,
       `pressureModel=${pressureAffect.model}@${pressureAffect.version}`,
       `attachmentModel=${attachment.model}@${attachment.version}`,
-      `vector=${describeEmotionVector(vector as ChatEmotionVector)}`,
+      `dominant=${dominant}`,
+      secondary ? `secondary=${secondary}` : 'secondary=NONE',
+      `vector=${describeEmotionVector(vector)}`,
       `followPersonaId=${attachment.followPersonaId ?? 'none'}`,
       ...(input.eventTags?.map((value) => `tag=${value}`) ?? []),
     ]);
@@ -592,11 +841,21 @@ export class EmotionModel implements EmotionModelApi {
     input: EmotionModelInput,
     pressureAffect: PressureAffectResult,
     attachment: AttachmentAssessment,
+    vector: ChatEmotionVector,
   ): JsonObject {
+    const dominant = getDominantEmotionAxis(vector);
+    const secondary = getSecondaryEmotionAxis(vector);
+
     return Object.freeze({
       contracts: Object.freeze({
-        emotion: CHAT_EMOTION_CONTRACT_MANIFEST.contractId,
-        emotionSignals: EMOTION_SIGNAL_CONTRACT_MANIFEST.contractId,
+        emotion: Object.freeze({
+          path: CHAT_EMOTION_CONTRACT_MANIFEST.path,
+          version: CHAT_EMOTION_CONTRACT_MANIFEST.version,
+        }),
+        emotionSignals: Object.freeze({
+          path: EMOTION_SIGNAL_CONTRACT_MANIFEST.path,
+          version: EMOTION_SIGNAL_CONTRACT_MANIFEST.version,
+        }),
       }),
       backendModels: Object.freeze({
         pressureAffect: Object.freeze({
@@ -608,8 +867,19 @@ export class EmotionModel implements EmotionModelApi {
           version: CHAT_ATTACHMENT_MODEL_VERSION,
         }),
       }),
+      upstreamDefaults: Object.freeze({
+        pressureAffectDefaultKeys: Object.freeze(
+          Object.keys(CHAT_PRESSURE_AFFECT_MODEL_DEFAULTS),
+        ),
+        attachmentDefaultKeys: Object.freeze(
+          Object.keys(CHAT_ATTACHMENT_MODEL_DEFAULTS),
+        ),
+      }),
+      dominantAxis: dominant,
+      secondaryAxis: secondary ?? null,
       channel: input.channel,
       publicExposure01: pressureAffect.publicExposure01,
+      crowdThreat01: pressureAffect.crowdThreat01,
       pressureSeverity01: pressureAffect.pressureSeverity01,
       helperAffinity01: attachment.helperAffinity01,
       followPersonaId: attachment.followPersonaId ?? null,
@@ -617,29 +887,37 @@ export class EmotionModel implements EmotionModelApi {
     });
   }
 
-  private driver(
-    axis: ChatEmotionDriverEvidence['axis'],
-    signedImpact01: Score01,
-    evidence: string,
-    metadata: JsonObject,
-  ): ChatEmotionDriverEvidence {
-    const kindMap: Partial<Record<ChatEmotionDriverEvidence['axis'], ChatEmotionDriverEvidence['kind']>> = {
-      CURIOSITY: 'SCENE_CONTEXT',
-      SOCIAL_EMBARRASSMENT: 'CROWD_HEAT',
-      DOMINANCE: 'COMEBACK_WINDOW',
-      TRUST: 'HELPER_TRUST',
-    };
+  private driver(input: EmotionDriverInput): ChatEmotionDriverEvidence {
+    const salience = clampEmotionScalar(Math.max(Number(input.signedImpact01), 0.14));
+    const confidence = clampEmotionScalar(
+      salience * 0.72 +
+        (input.driver === 'HELPER_PRESENCE' || input.driver === 'MEMORY_CALLBACK'
+          ? 0.16
+          : 0.1),
+    );
+
     return Object.freeze({
       driverId: createChatEmotionDriverId(),
-      kind: kindMap[axis] ?? 'SCENE_CONTEXT',
-      axis,
+      driver: input.driver,
+      sourceKind: input.sourceKind,
       sourceAuthority: this.authority,
-      source: 'SYSTEM_INFERENCE',
-      weight01: clampEmotionScalar(signedImpact01),
-      signedImpact01,
-      evidence,
-      observedAtUnixMs: this.now(),
-      metadata,
+      sourceWeight: Number(clampEmotionScalar(Number(input.signedImpact01))),
+      salience,
+      confidence,
+      confidenceBand: computeEmotionConfidenceBand(confidence),
+      label: input.label,
+      reason: input.evidence,
+      roomId: input.roomId,
+      channelId: input.channel,
+      sceneId: input.sceneId as unknown as ChatEmotionDriverEvidence['sceneId'],
+      messageId:
+        input.messageId as unknown as ChatEmotionDriverEvidence['messageId'],
+      happenedAt: new Date(this.now()).toISOString(),
+      metadata: Object.freeze({
+        emotionAxis: input.axis,
+        signedImpact01: Number(input.signedImpact01),
+        ...input.metadata,
+      }),
     });
   }
 }
@@ -671,22 +949,46 @@ export function summarizeEmotionModel(
  * MARK: Internal helpers
  * ========================================================================== */
 
+function createBackendEmotionVector(axisValues: EmotionAxisValueMap): ChatEmotionVector {
+  return Object.freeze({
+    confidence: axisValues.confidence01,
+    intimidation: axisValues.intimidation01,
+    frustration: axisValues.frustration01,
+    curiosity: axisValues.curiosity01,
+    attachment: axisValues.attachment01,
+    socialEmbarrassment: axisValues.socialEmbarrassment01,
+    relief: axisValues.relief01,
+    dominance: axisValues.dominance01,
+    desperation: axisValues.desperation01,
+    trust: axisValues.trust01,
+  });
+}
+
 function safe01(value: Score01 | number | undefined | null): Score01 {
   return clampEmotionScalar(Number(value ?? 0));
 }
 
 function average(values: readonly (number | undefined)[], fallback = 0): Score01 {
-  const filtered = values.filter((value): value is number => Number.isFinite(value as number));
-  if (!filtered.length) return clampEmotionScalar(fallback);
-  return clampEmotionScalar(filtered.reduce((sum, value) => sum + value, 0) / filtered.length);
+  const filtered = values.filter(
+    (value): value is number => Number.isFinite(value as number),
+  );
+  if (!filtered.length) {
+    return clampEmotionScalar(fallback);
+  }
+  return clampEmotionScalar(
+    filtered.reduce((sum, value) => sum + value, 0) / filtered.length,
+  );
 }
 
-function invert01(value: Score01 | number | undefined): Score01 {
+function invert01(value: Score01 | number | undefined | null): Score01 {
   return clampEmotionScalar(1 - Number(value ?? 0));
 }
 
 function normalizeRescue(value: ChatRescueDecision | undefined): Score01 {
-  if (!value?.triggered) return clampEmotionScalar(0);
+  if (!value?.triggered) {
+    return clampEmotionScalar(0);
+  }
+
   switch (value.urgency) {
     case 'CRITICAL':
       return clampEmotionScalar(1);
@@ -705,7 +1007,9 @@ function channelPredationBias(
   channel: ChatVisibleChannel,
   dealRoomPredationBias: number,
 ): Score01 {
-  if (channel === 'DEAL_ROOM') return clampEmotionScalar(dealRoomPredationBias);
+  if (channel === 'DEAL_ROOM') {
+    return clampEmotionScalar(dealRoomPredationBias);
+  }
   return clampEmotionScalar(0);
 }
 
@@ -714,11 +1018,19 @@ function inferCuriosity(
   profile: ChatLearningProfile | undefined,
   inference: ChatInferenceSnapshot | undefined,
 ): Score01 {
+  const sceneMovement01 = average(
+    [
+      normalizeCount(feature?.inboundNpcCountWindow, 0.14),
+      safe01(inference?.engagement01),
+      invert01(feature?.churnRisk01),
+    ],
+    0,
+  );
+
   return clampEmotionScalar(
     safe01(profile?.affect.curiosity01) * 0.32 +
-      normalizeCount(feature?.inboundNpcCountWindow, 0.14) * 0.22 +
-      safe01(inference?.engagement01) * 0.16 +
-      invert01(feature?.churnRisk01) * 0.1,
+      sceneMovement01 * 0.38 +
+      safe01(feature?.noveltySeeking01) * 0.1,
   );
 }
 
@@ -727,8 +1039,15 @@ function inferEmbarrassment(
   pressureAffect: PressureAffectResult,
   attachment: AttachmentAssessment,
   profile: ChatLearningProfile | undefined,
+  globalStageEmbarrassmentBias: number,
 ): Score01 {
-  const stageBias = channel === 'GLOBAL' ? 0.16 : channel === 'DEAL_ROOM' ? 0.09 : 0.04;
+  const stageBias =
+    channel === 'GLOBAL'
+      ? globalStageEmbarrassmentBias
+      : channel === 'DEAL_ROOM'
+        ? 0.09
+        : 0.04;
+
   return clampEmotionScalar(
     Number(pressureAffect.publicExposure01) * 0.34 +
       Number(pressureAffect.crowdThreat01) * 0.22 +
@@ -742,12 +1061,17 @@ function inferDominance(
   inference: ChatInferenceSnapshot | undefined,
   feature: ChatFeatureSnapshot | undefined,
 ): Score01 {
-  return clampEmotionScalar(
-    safe01(inference?.engagement01) * 0.22 +
-      safe01(inference?.helperTiming01) * 0.08 +
-      invert01(feature?.hostileMomentum01) * 0.17 +
-      invert01(feature?.churnRisk01) * 0.12,
+  const control01 = average(
+    [
+      safe01(inference?.engagement01),
+      safe01(inference?.helperTiming01),
+      invert01(feature?.hostileMomentum01),
+      invert01(feature?.churnRisk01),
+    ],
+    0,
   );
+
+  return clampEmotionScalar(control01 * 0.59);
 }
 
 function inferSilenceFriction(decision: ChatSilenceDecision | undefined): Score01 {
@@ -758,18 +1082,19 @@ function normalizeCount(value: number | undefined, weight = 0.12): Score01 {
   return clampEmotionScalar(Math.min(1, Number(value ?? 0) * weight));
 }
 
-function normalizeAxis(key: keyof ChatEmotionVector): ChatEmotionDelta['axis'] {
-  const map: Record<keyof ChatEmotionVector, ChatEmotionDelta['axis']> = {
-    confidence01: 'CONFIDENCE',
-    intimidation01: 'INTIMIDATION',
-    frustration01: 'FRUSTRATION',
-    curiosity01: 'CURIOSITY',
-    attachment01: 'ATTACHMENT',
-    socialEmbarrassment01: 'SOCIAL_EMBARRASSMENT',
-    relief01: 'RELIEF',
-    dominance01: 'DOMINANCE',
-    desperation01: 'DESPERATION',
-    trust01: 'TRUST',
-  };
-  return map[key];
+function normalizeAxis(key: keyof ChatEmotionVector): ChatEmotionAxis {
+  return AXIS_KEY_TO_CONTRACT_AXIS[key];
+}
+
+function createSingleAxisDeltaVector(
+  axis: ChatEmotionAxis,
+  signedDelta: number,
+): Partial<ChatEmotionVector> {
+  const value = clampEmotionScalar(Math.abs(signedDelta));
+  const scalar = signedDelta >= 0 ? value : (0 - Number(value)) as number;
+  const key = CONTRACT_AXIS_TO_VECTOR_KEY[axis];
+
+  return Object.freeze({
+    [key]: scalar,
+  }) as Partial<ChatEmotionVector>;
 }
