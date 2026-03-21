@@ -2,7 +2,7 @@
  * ============================================================================
  * POINT ZERO ONE — BACKEND CHAT EMOTION MODEL
  * FILE: backend/src/game/engine/chat/intelligence/ml/EmotionModel.ts
- * VERSION: 2026.03.21-backend-emotion-model.v2
+ * VERSION: 2026.03.21-backend-emotion-model.v3
  * AUTHORSHIP: Antonio T. Smith Jr.
  * LICENSE: Internal / Proprietary / All Rights Reserved
  * ============================================================================
@@ -85,6 +85,8 @@ import {
   emotionScore01To100,
   getDominantEmotionAxis,
   getSecondaryEmotionAxis,
+  projectEmotionToAudienceMood,
+  projectEmotionToAudienceSeverity,
   summarizeEmotionSnapshot,
 } from '../../../../../../../shared/contracts/chat/ChatEmotion';
 
@@ -135,7 +137,7 @@ export const CHAT_EMOTION_MODEL_MODULE_NAME =
   'PZO_BACKEND_CHAT_EMOTION_MODEL' as const;
 
 export const CHAT_EMOTION_MODEL_VERSION =
-  '2026.03.21-backend-emotion-model.v2' as const;
+  '2026.03.21-backend-emotion-model.v3' as const;
 
 export const CHAT_EMOTION_MODEL_RUNTIME_LAWS = Object.freeze([
   'Emotion is backend runtime truth, not only UI adaptation metadata.',
@@ -206,7 +208,6 @@ interface EmotionDriverInput {
 }
 
 interface EmotionDeltaInput {
-  readonly axis: ChatEmotionAxis;
   readonly previousVector: ChatEmotionVector;
   readonly nextVector: ChatEmotionVector;
   readonly authority: ChatAuthority;
@@ -544,7 +545,7 @@ export class EmotionModel implements EmotionModelApi {
     );
 
     const snapshot = createEmotionSnapshot({
-      context: this.createContext(input, pressureAffect, evaluatedAt),
+      context: this.createContext(input, pressureAffect, vector, evaluatedAt),
       vector,
       previousVector,
       drivers,
@@ -642,6 +643,7 @@ export class EmotionModel implements EmotionModelApi {
   private createContext(
     input: EmotionModelInput,
     pressureAffect: PressureAffectResult,
+    vector: ChatEmotionVector,
     evaluatedAt: UnixMs,
   ): ChatEmotionContextFrame {
     return {
@@ -658,18 +660,28 @@ export class EmotionModel implements EmotionModelApi {
       activeMessageId:
         input.messageId as unknown as ChatEmotionContextFrame['activeMessageId'],
       audienceMood:
-        input.audienceHeat?.mood as ChatEmotionContextFrame['audienceMood'],
+        projectEmotionToAudienceMood(vector) as ChatEmotionContextFrame['audienceMood'],
       audienceSeverity:
-        input.audienceHeat?.severity as ChatEmotionContextFrame['audienceSeverity'],
+        projectEmotionToAudienceSeverity(
+          vector,
+        ) as ChatEmotionContextFrame['audienceSeverity'],
       audienceSwarmRisk:
-        input.audienceHeat?.swarmRisk as ChatEmotionContextFrame['audienceSwarmRisk'],
+        deriveAudienceSwarmRisk(
+          input.audienceHeat,
+          vector,
+        ) as ChatEmotionContextFrame['audienceSwarmRisk'],
       witnessDensity:
-        input.audienceHeat?.witnessDensity as ChatEmotionContextFrame['witnessDensity'],
+        deriveWitnessDensity(
+          input.audienceHeat,
+          input.featureSnapshot,
+        ) as ChatEmotionContextFrame['witnessDensity'],
       metadata: Object.freeze({
         evaluatedAt,
         eventTags: Object.freeze([...(input.eventTags ?? [])]),
         publicExposure01: pressureAffect.publicExposure01,
         pressureSeverity01: pressureAffect.pressureSeverity01,
+        audienceHeat01: input.audienceHeat?.heat01 ?? null,
+        swarmDirection: input.audienceHeat?.swarmDirection ?? null,
         messageId: input.messageId ?? null,
       }),
     };
@@ -735,7 +747,8 @@ export class EmotionModel implements EmotionModelApi {
         messageId: input.input.messageId,
         metadata: Object.freeze({
           confidenceRepair01: input.pressureAffect.breakdown.confidenceRepair01,
-          comebackReadiness01: input.pressureAffect.recommendation.comebackReadiness01,
+          shouldPrimeComebackSpeech:
+            input.pressureAffect.recommendation.policyFlags.shouldPrimeComebackSpeech,
         }),
       }),
       this.driver({
@@ -1027,10 +1040,20 @@ function inferCuriosity(
     0,
   );
 
+  const noveltyProxy01 = average(
+    [
+      normalizeCount(feature?.messageCountWindow, 0.04),
+      normalizeCount(feature?.outboundPlayerCountWindow, 0.07),
+      safe01(feature?.roomHeat01),
+    ],
+    0,
+  );
+
   return clampEmotionScalar(
     safe01(profile?.affect.curiosity01) * 0.32 +
       sceneMovement01 * 0.38 +
-      safe01(feature?.noveltySeeking01) * 0.1,
+      noveltyProxy01 * 0.14 +
+      safe01(inference?.engagement01) * 0.06,
   );
 }
 
@@ -1084,6 +1107,70 @@ function normalizeCount(value: number | undefined, weight = 0.12): Score01 {
 
 function normalizeAxis(key: keyof ChatEmotionVector): ChatEmotionAxis {
   return AXIS_KEY_TO_CONTRACT_AXIS[key];
+}
+
+function deriveAudienceSwarmRisk(
+  audienceHeat: ChatAudienceHeat | undefined,
+  vector: ChatEmotionVector,
+): ChatEmotionContextFrame['audienceSwarmRisk'] {
+  const base = average(
+    [
+      safe01(audienceHeat?.heat01),
+      safe01(vector.socialEmbarrassment),
+      safe01(vector.frustration),
+      safe01(vector.intimidation),
+    ],
+    0,
+  );
+
+  if (base >= 0.9) {
+    return 'OVERWHELMING';
+  }
+  if (base >= 0.74) {
+    return 'SEVERE';
+  }
+  if (base >= 0.56) {
+    return 'HIGH';
+  }
+  if (base >= 0.34) {
+    return 'ELEVATED';
+  }
+  if (base >= 0.14) {
+    return 'LOW';
+  }
+  return audienceHeat?.swarmDirection === 'NEGATIVE' ? 'LOW' : 'NONE';
+}
+
+function deriveWitnessDensity(
+  audienceHeat: ChatAudienceHeat | undefined,
+  feature: ChatFeatureSnapshot | undefined,
+): ChatEmotionContextFrame['witnessDensity'] {
+  const witnessProxy01 = average(
+    [
+      safe01(audienceHeat?.heat01),
+      normalizeCount(feature?.messageCountWindow, 0.03),
+      normalizeCount(feature?.inboundNpcCountWindow, 0.08),
+      normalizeCount(feature?.outboundPlayerCountWindow, 0.08),
+    ],
+    0,
+  );
+
+  if (witnessProxy01 >= 0.86) {
+    return 'SATURATED';
+  }
+  if (witnessProxy01 >= 0.66) {
+    return 'HEAVY';
+  }
+  if (witnessProxy01 >= 0.42) {
+    return 'MODERATE';
+  }
+  if (witnessProxy01 >= 0.2) {
+    return 'LIGHT';
+  }
+  if (witnessProxy01 > 0) {
+    return 'TRACE';
+  }
+  return 'NONE';
 }
 
 function createSingleAxisDeltaVector(
