@@ -1,8 +1,9 @@
+
 /**
  * ============================================================================
  * POINT ZERO ONE — BACKEND CHAT RETRIEVAL RANKING AUTHORITY
  * FILE: backend/src/game/engine/chat/intelligence/dl/MemoryRankingPolicy.ts
- * VERSION: 2026.03.20-retrieval-continuity.v1
+ * VERSION: 2026.03.21-retrieval-continuity.v2
  * AUTHORSHIP: Antonio T. Smith Jr.
  * LICENSE: Internal / Proprietary / All Rights Reserved
  * ============================================================================
@@ -38,10 +39,10 @@ import type {
   MemoryAnchorQueryIntent,
   MemoryAnchorRetrievalPriority,
   MemoryAnchorStabilityClass,
-} from '../../../../../../shared/contracts/chat/learning/MemoryAnchors';
+} from '../../../../../../../shared/contracts/chat/learning/MemoryAnchors';
 
 export const MEMORY_RANKING_POLICY_VERSION =
-  '2026.03.20-retrieval-continuity.v1' as const;
+  '2026.03.21-retrieval-continuity.v2' as const;
 
 export const MEMORY_RANKING_POLICY_PRIORITY_WEIGHT = Object.freeze<
   Record<MemoryAnchorRetrievalPriority, number>
@@ -91,6 +92,16 @@ export const MEMORY_RANKING_POLICY_MATCH_KIND_WEIGHT = Object.freeze<
   UNKNOWN: 0.45,
 });
 
+export const MEMORY_RANKING_POLICY_RETRIEVAL_SOURCE_WEIGHT = Object.freeze<
+  Record<NonNullable<MemoryRankingCandidate['retrievalSource']>, number>
+>({
+  INDEX: 0.66,
+  WINDOW: 0.58,
+  VECTOR: 0.74,
+  HYBRID: 0.92,
+  UNKNOWN: 0.4,
+});
+
 export const MEMORY_RANKING_POLICY_DEFAULTS = Object.freeze({
   topK: 6,
   candidateCap: 128,
@@ -116,6 +127,13 @@ export const MEMORY_RANKING_POLICY_DEFAULTS = Object.freeze({
   blockedTagPenalty: 0.45,
   requiredTagMissPenalty: 0.35,
   coldStartFallback: 0.42,
+  targetKindMismatchPenalty: 0.32,
+  queryTextFallback: 0.18,
+  retrievalOrdinalSpan: 24,
+  retrievalOrdinalBoost: 0.1,
+  retrievalSourceBoost: 0.12,
+  currentModeBoost: 0.08,
+  exactActorPersonaBoost: 0.1,
 });
 
 export interface MemoryRankingPolicyWeights {
@@ -134,6 +152,9 @@ export interface MemoryRankingPolicyWeights {
   readonly continuity: number;
   readonly scopeMatch: number;
   readonly callbacks: number;
+  readonly queryText: number;
+  readonly retrievalSignal: number;
+  readonly targetKind: number;
 }
 
 export interface MemoryRankingEmbeddingMatch {
@@ -251,6 +272,33 @@ export interface MemoryRankingPolicyApi {
   ): MemoryAnchorMatch;
 }
 
+interface PreparedRankingContext {
+  readonly nowMs: number;
+  readonly thresholdScore: number;
+  readonly requiredTags: readonly string[];
+  readonly blockedTags: readonly string[];
+  readonly currentTags: readonly string[];
+  readonly emotionSignals: readonly string[];
+  readonly relationshipSignals: readonly string[];
+  readonly targetKinds: readonly MemoryAnchorKind[];
+  readonly excludedAnchorIds: readonly MemoryAnchorId[];
+  readonly excludedFamilyIds: readonly string[];
+  readonly alreadyUsedCallbackPhrases: readonly string[];
+  readonly queryTokens: readonly string[];
+  readonly topK: number;
+  readonly currentModeId?: string;
+  readonly actorId?: string;
+  readonly actorPersonaId?: string;
+  readonly relationshipId?: string;
+  readonly roomId?: string;
+  readonly channelId?: string;
+  readonly runId?: string;
+  readonly sceneId?: string;
+  readonly momentId?: string;
+  readonly intent: MemoryAnchorQueryIntent;
+  readonly queryText?: string;
+}
+
 export function createMemoryRankingPolicy(
   options: MemoryRankingPolicyOptions = {},
 ): MemoryRankingPolicyApi {
@@ -265,69 +313,67 @@ export function createMemoryRankingPolicy(
       candidates: readonly MemoryRankingCandidate[],
       context: MemoryRankingContext,
     ): MemoryRankingResult {
-      const nowMs = normalizeNow(context.nowMs);
-      const thresholdScore = clampUnit(
-        context.minimumScore ?? options.baseMinimumScore ?? MEMORY_RANKING_POLICY_DEFAULTS.baseMinimumScore,
-      );
+      const prepared = prepareContext(context, options);
       const cap = Math.max(
         1,
         Math.floor(options.candidateCap ?? MEMORY_RANKING_POLICY_DEFAULTS.candidateCap),
       );
 
-      const ranked = candidates
-        .slice(0, cap)
-        .map((candidate) =>
-          api.scoreCandidate(candidate, {
-            ...context,
-            nowMs,
-            minimumScore: thresholdScore,
-          }),
-        )
+      const limitedCandidates = candidates.slice(0, cap);
+      const scored = limitedCandidates.map((candidate) =>
+        api.scoreCandidate(candidate, {
+          ...context,
+          nowMs: prepared.nowMs,
+          topK: prepared.topK,
+          minimumScore: prepared.thresholdScore,
+        }),
+      );
+
+      const ranked = scored
         .filter((rankedCandidate) => rankedCandidate.trace.passedThreshold)
         .sort(compareRankedAnchors)
-        .map((rankedCandidate, index) => ({
-          ...rankedCandidate,
-          rank: index + 1,
-          projection: api.projectMatch({
-            rank: index + 1,
+        .map((rankedCandidate, index) => {
+          const rank = index + 1;
+          const projection = api.projectMatch({
+            rank,
             anchor: rankedCandidate.anchor,
             score: rankedCandidate.score,
             trace: rankedCandidate.trace,
             matchedTags: rankedCandidate.matchedTags,
             blockedTags: rankedCandidate.blockedTags,
-          }),
-        }));
+          });
 
-      const topK = Math.max(
-        1,
-        Math.floor(context.topK ?? MEMORY_RANKING_POLICY_DEFAULTS.topK),
-      );
+          return Object.freeze({
+            ...rankedCandidate,
+            rank,
+            projection,
+          });
+        });
 
-      const limited = Object.freeze(ranked.slice(0, topK));
+      const limited = Object.freeze(ranked.slice(0, prepared.topK));
       const traces = Object.freeze(
-        candidates
-          .slice(0, cap)
-          .map((candidate) =>
-            api.scoreCandidate(candidate, {
-              ...context,
-              nowMs,
-              minimumScore: thresholdScore,
-            }).trace,
-          )
-          .sort((left, right) => right.totalScore - left.totalScore),
+        scored
+          .map((entry) => entry.trace)
+          .sort((left, right) => {
+            return (
+              right.totalScore - left.totalScore ||
+              right.retrievalScore - left.retrievalScore ||
+              left.anchorId.localeCompare(right.anchorId)
+            );
+          }),
       );
 
       return Object.freeze({
-        nowMs,
+        nowMs: prepared.nowMs,
         context: Object.freeze({
           ...context,
-          nowMs,
-          minimumScore: thresholdScore,
-          topK,
+          nowMs: prepared.nowMs,
+          minimumScore: prepared.thresholdScore,
+          topK: prepared.topK,
         }),
-        totalCandidates: Math.min(candidates.length, cap),
+        totalCandidates: limitedCandidates.length,
         returnedCount: limited.length,
-        thresholdScore,
+        thresholdScore: prepared.thresholdScore,
         ranked: limited,
         traces,
       });
@@ -338,50 +384,42 @@ export function createMemoryRankingPolicy(
       context: MemoryRankingContext,
     ): RankedMemoryAnchor {
       const anchor = candidate.anchor;
-      const nowMs = normalizeNow(context.nowMs);
-      const thresholdScore = clampUnit(
-        context.minimumScore ?? options.baseMinimumScore ?? MEMORY_RANKING_POLICY_DEFAULTS.baseMinimumScore,
-      );
-      const matchedTags = intersectTags(
-        collectAnchorTags(anchor),
-        normalizeStringList([
-          ...(context.requiredTags ?? []),
-          ...(context.currentTags ?? []),
-          ...(candidate.currentTags ?? []),
-          ...(context.relationshipSignals ?? []),
-          ...(candidate.relationshipSignals ?? []),
-          ...(context.emotionSignals ?? []),
-          ...(candidate.emotionSignals ?? []),
-        ]),
-      );
-      const blockedTags = intersectTags(
-        collectAnchorTags(anchor),
-        normalizeStringList(context.blockedTags ?? []),
-      );
+      const prepared = prepareContext(context, options);
+      const anchorTags = collectAnchorTags(anchor);
+      const candidateTags = collectCandidateTags(prepared, candidate);
+      const matchedTags = intersectTags(anchorTags, candidateTags);
+      const blockedTags = intersectTags(anchorTags, prepared.blockedTags);
 
-      const duplicatePenaltyApplied = shouldApplyDuplicatePenalty(anchor, context);
       const components: MemoryRankingComponentTrace[] = [];
-
       const addComponent = (key: string, value: number, note?: string): number => {
         const normalized = round4(value);
         components.push(Object.freeze({ key, value: normalized, note }));
         return normalized;
       };
 
+      const excludedByAnchorId = prepared.excludedAnchorIds.includes(anchor.id);
+      const targetKindMismatch =
+        prepared.targetKinds.length > 0 && !prepared.targetKinds.includes(anchor.kind);
+      const duplicatePenaltyApplied = shouldApplyDuplicatePenalty(anchor, prepared);
+
       const baseSalience =
         clampUnit(anchor.salience.final) * weights.salience;
-      addComponent('salience.final', baseSalience, `anchor.salience.final=${round4(anchor.salience.final)}`);
+      addComponent(
+        'salience.final',
+        baseSalience,
+        `anchor.salience.final=${round4(anchor.salience.final)}`,
+      );
 
       const priorityWeight =
         priorityScore(anchor.retrieval.priority) * weights.priority;
       addComponent('retrieval.priority', priorityWeight, anchor.retrieval.priority);
 
       const intentAlignment =
-        intentScore(anchor, context.intent) * weights.intent;
-      addComponent('intent.alignment', intentAlignment, context.intent);
+        intentScore(anchor, prepared.intent) * weights.intent;
+      addComponent('intent.alignment', intentAlignment, prepared.intent);
 
       const recency =
-        recencyScore(anchor, nowMs, options.halfLifeMs) * weights.recency;
+        recencyScore(anchor, prepared.nowMs, options.halfLifeMs) * weights.recency;
       addComponent('formation.recency', recency);
 
       const evidence =
@@ -403,7 +441,7 @@ export function createMemoryRankingPolicy(
       addComponent('formation.reaffirmCount', reaffirm);
 
       const tagOverlap =
-        tagOverlapScore(anchor, context, candidate, matchedTags, blockedTags) *
+        tagOverlapScore(anchor, prepared, candidate, matchedTags, blockedTags) *
         weights.tagOverlap;
       addComponent('tags.overlap', tagOverlap, matchedTags.join(', ') || 'none');
 
@@ -416,24 +454,48 @@ export function createMemoryRankingPolicy(
       addComponent('stability.class', stability, anchor.stabilityClass);
 
       const relationship =
-        relationshipScore(anchor, context, candidate) * weights.relationship;
+        relationshipScore(anchor, prepared, candidate) * weights.relationship;
       addComponent('relationship.signal', relationship);
 
       const emotion =
-        emotionScore(anchor, context, candidate) * weights.emotion;
+        emotionScore(anchor, prepared, candidate) * weights.emotion;
       addComponent('emotion.signal', emotion);
 
       const continuity =
-        continuityScore(anchor, context) * weights.continuity;
+        continuityScore(anchor, prepared, candidate) * weights.continuity;
       addComponent('continuity.signal', continuity);
 
       const scopeMatch =
-        scopeScore(anchor, context) * weights.scopeMatch;
+        scopeScore(anchor, prepared, candidate) * weights.scopeMatch;
       addComponent('scope.match', scopeMatch);
 
       const callbacks =
-        callbackScore(anchor, context) * weights.callbacks;
+        callbackScore(anchor, prepared) * weights.callbacks;
       addComponent('callback.signal', callbacks);
+
+      const queryText =
+        queryTextScore(anchor, prepared, candidate) * weights.queryText;
+      addComponent(
+        'query.text',
+        queryText,
+        prepared.queryText ? prepared.queryTokens.join(', ') || 'query' : 'no_query',
+      );
+
+      const retrievalSignal =
+        retrievalSignalScore(candidate) * weights.retrievalSignal;
+      addComponent(
+        'retrieval.signal',
+        retrievalSignal,
+        `${candidate.retrievalSource ?? 'UNKNOWN'}:${candidate.retrievalOrdinal ?? 'na'}`,
+      );
+
+      const targetKindAlignment =
+        targetKindScore(anchor, prepared) * weights.targetKind;
+      addComponent(
+        'target.kind',
+        targetKindAlignment,
+        prepared.targetKinds.length ? prepared.targetKinds.join(', ') : 'none',
+      );
 
       const positiveScore =
         baseSalience +
@@ -450,7 +512,10 @@ export function createMemoryRankingPolicy(
         emotion +
         continuity +
         scopeMatch +
-        callbacks;
+        callbacks +
+        queryText +
+        retrievalSignal +
+        targetKindAlignment;
 
       const blockedPenalty = blockedTags.length
         ? MEMORY_RANKING_POLICY_DEFAULTS.blockedTagPenalty
@@ -461,36 +526,77 @@ export function createMemoryRankingPolicy(
         blockedTags.join(', ') || undefined,
       );
 
-      const requiredMissPenalty = requiredTagMissPenalty(anchor, context);
+      const requiredMissPenalty = requiredMissPenaltyScore(anchor, prepared);
       addComponent('penalty.requiredMiss', -requiredMissPenalty);
 
-      const duplicatePenalty = duplicatePenaltyApplied
-        ? MEMORY_RANKING_POLICY_DEFAULTS.duplicateFamilyPenalty
-        : 0;
-      addComponent('penalty.duplicate', -duplicatePenalty);
+      const duplicatePenalty = excludedByAnchorId
+        ? MEMORY_RANKING_POLICY_DEFAULTS.duplicateAnchorPenalty
+        : duplicatePenaltyApplied
+          ? MEMORY_RANKING_POLICY_DEFAULTS.duplicateFamilyPenalty
+          : 0;
+      addComponent(
+        'penalty.duplicate',
+        -duplicatePenalty,
+        excludedByAnchorId ? 'excluded-anchor-id' : duplicatePenaltyApplied ? 'duplicate-family' : undefined,
+      );
 
-      const totalScore = clampUnit(
-        positiveScore - blockedPenalty - requiredMissPenalty - duplicatePenalty,
+      const targetKindPenalty = targetKindMismatch
+        ? MEMORY_RANKING_POLICY_DEFAULTS.targetKindMismatchPenalty
+        : 0;
+      addComponent(
+        'penalty.targetKindMismatch',
+        -targetKindPenalty,
+        targetKindMismatch ? anchor.kind : undefined,
       );
-      const retrievalScore = clampUnit(
-        (priorityWeight + intentAlignment + embedding + continuity + relationship + emotion) /
-          maxSafe(
-            weights.priority +
-              weights.intent +
-              weights.embedding +
-              weights.continuity +
-              weights.relationship +
-              weights.emotion,
-            0.0001,
-          ),
+
+      const gatedOut = excludedByAnchorId;
+      addComponent(
+        'gate.excludedAnchor',
+        gatedOut ? -1 : 0,
+        gatedOut ? anchor.id : undefined,
       );
+
+      const unclampedTotal =
+        positiveScore -
+        blockedPenalty -
+        requiredMissPenalty -
+        duplicatePenalty -
+        targetKindPenalty;
+
+      const totalScore = gatedOut ? 0 : clampUnit(unclampedTotal);
+
+      const retrievalScore = gatedOut
+        ? 0
+        : clampUnit(
+            (
+              priorityWeight +
+              intentAlignment +
+              embedding +
+              continuity +
+              relationship +
+              emotion +
+              queryText +
+              retrievalSignal
+            ) /
+              maxSafe(
+                weights.priority +
+                  weights.intent +
+                  weights.embedding +
+                  weights.continuity +
+                  weights.relationship +
+                  weights.emotion +
+                  weights.queryText +
+                  weights.retrievalSignal,
+                0.0001,
+              ),
+          );
 
       const trace: MemoryRankingTrace = Object.freeze({
         anchorId: anchor.id,
         totalScore: round4(totalScore),
         retrievalScore: round4(retrievalScore),
-        thresholdScore: round4(thresholdScore),
-        passedThreshold: totalScore >= thresholdScore,
+        thresholdScore: round4(prepared.thresholdScore),
+        passedThreshold: totalScore >= prepared.thresholdScore,
         components: Object.freeze(components),
         matchedTags: Object.freeze(matchedTags),
         blockedTags: Object.freeze(blockedTags),
@@ -504,7 +610,7 @@ export function createMemoryRankingPolicy(
         score: totalScore,
         retrievalScore,
         finalScore: totalScore,
-        thresholdScore,
+        thresholdScore: prepared.thresholdScore,
         matchedTags: Object.freeze(matchedTags),
         blockedTags: Object.freeze(blockedTags),
         trace,
@@ -537,9 +643,30 @@ export function createMemoryRankingPolicy(
         headline: anchor.payload.headline,
         summary: anchor.payload.summary,
         finalSalience: round4(anchor.salience.final),
-        retrievalScore: round4(ranked.score),
+        retrievalScore: round4(ranked.trace.retrievalScore),
         evidenceWeight: round4(totalEvidenceWeight(anchor)),
-        continuityBoost: round4(continuityScore(anchor, { intent: 'CALLBACK' })),
+        continuityBoost: round4(
+          continuityScore(
+            anchor,
+            Object.freeze({
+              nowMs: 0,
+              thresholdScore: 0,
+              requiredTags: Object.freeze([]),
+              blockedTags: Object.freeze([]),
+              currentTags: Object.freeze([]),
+              emotionSignals: Object.freeze([]),
+              relationshipSignals: Object.freeze([]),
+              targetKinds: Object.freeze([]),
+              excludedAnchorIds: Object.freeze([]),
+              excludedFamilyIds: Object.freeze([]),
+              alreadyUsedCallbackPhrases: Object.freeze([]),
+              queryTokens: Object.freeze([]),
+              topK: MEMORY_RANKING_POLICY_DEFAULTS.topK,
+              intent: 'CALLBACK',
+            }),
+            Object.freeze({ anchor }),
+          ),
+        ),
         reaffirmCount: anchor.formation.reaffirmCount,
         quoteRefs: Object.freeze([...anchor.quoteRefs]),
         relationshipRefs: Object.freeze([...anchor.relationshipRefs]),
@@ -555,21 +682,69 @@ function createWeights(
   overrides: Partial<MemoryRankingPolicyWeights> | undefined,
 ): Readonly<MemoryRankingPolicyWeights> {
   return Object.freeze({
-    salience: overrides?.salience ?? 0.16,
-    priority: overrides?.priority ?? 0.11,
-    intent: overrides?.intent ?? 0.13,
-    recency: overrides?.recency ?? 0.08,
+    salience: overrides?.salience ?? 0.15,
+    priority: overrides?.priority ?? 0.1,
+    intent: overrides?.intent ?? 0.12,
+    recency: overrides?.recency ?? 0.07,
     evidence: overrides?.evidence ?? 0.05,
     hitCount: overrides?.hitCount ?? 0.05,
     reaffirm: overrides?.reaffirm ?? 0.04,
-    tagOverlap: overrides?.tagOverlap ?? 0.08,
+    tagOverlap: overrides?.tagOverlap ?? 0.07,
     embedding: overrides?.embedding ?? 0.09,
     stability: overrides?.stability ?? 0.05,
     relationship: overrides?.relationship ?? 0.05,
     emotion: overrides?.emotion ?? 0.04,
-    continuity: overrides?.continuity ?? 0.03,
-    scopeMatch: overrides?.scopeMatch ?? 0.02,
-    callbacks: overrides?.callbacks ?? 0.02,
+    continuity: overrides?.continuity ?? 0.04,
+    scopeMatch: overrides?.scopeMatch ?? 0.03,
+    callbacks: overrides?.callbacks ?? 0.03,
+    queryText: overrides?.queryText ?? 0.04,
+    retrievalSignal: overrides?.retrievalSignal ?? 0.04,
+    targetKind: overrides?.targetKind ?? 0.02,
+  });
+}
+
+function prepareContext(
+  context: MemoryRankingContext,
+  options: MemoryRankingPolicyOptions,
+): PreparedRankingContext {
+  const nowMs = normalizeNow(context.nowMs);
+  const thresholdScore = clampUnit(
+    context.minimumScore ??
+      options.baseMinimumScore ??
+      MEMORY_RANKING_POLICY_DEFAULTS.baseMinimumScore,
+  );
+  const topK = Math.max(
+    1,
+    Math.floor(context.topK ?? MEMORY_RANKING_POLICY_DEFAULTS.topK),
+  );
+
+  return Object.freeze({
+    nowMs,
+    thresholdScore,
+    requiredTags: normalizeStringList(context.requiredTags ?? []),
+    blockedTags: normalizeStringList(context.blockedTags ?? []),
+    currentTags: normalizeStringList(context.currentTags ?? []),
+    emotionSignals: normalizeStringList(context.emotionSignals ?? []),
+    relationshipSignals: normalizeStringList(context.relationshipSignals ?? []),
+    targetKinds: Object.freeze([...(context.targetKinds ?? [])]),
+    excludedAnchorIds: Object.freeze([...(context.excludedAnchorIds ?? [])]),
+    excludedFamilyIds: normalizeStringList(context.excludedFamilyIds ?? []),
+    alreadyUsedCallbackPhrases: normalizeStringList(
+      context.alreadyUsedCallbackPhrases ?? [],
+    ),
+    queryTokens: tokenizeText(context.queryText),
+    topK,
+    currentModeId: normalizeOptionalToken(context.currentModeId),
+    actorId: normalizeOptionalToken(context.actorId),
+    actorPersonaId: normalizeOptionalToken(context.actorPersonaId),
+    relationshipId: normalizeOptionalToken(context.relationshipId),
+    roomId: normalizeOptionalToken(context.roomId),
+    channelId: normalizeOptionalToken(context.channelId),
+    runId: normalizeOptionalToken(context.runId),
+    sceneId: normalizeOptionalToken(context.sceneId),
+    momentId: normalizeOptionalToken(context.momentId),
+    intent: context.intent,
+    queryText: context.queryText,
   });
 }
 
@@ -593,7 +768,9 @@ function intentScore(anchor: MemoryAnchor, intent: MemoryAnchorQueryIntent): num
     case 'CALLBACK':
       return clampUnit(
         semanticBias *
-          (anchor.payload.callbackPhrases.length > 0 || anchor.quoteRefs.length > 0 ? 0.9 : 0.44),
+          (anchor.payload.callbackPhrases.length > 0 || anchor.quoteRefs.length > 0
+            ? 0.9
+            : 0.44),
       );
     case 'RESCUE':
       return clampUnit(
@@ -617,23 +794,30 @@ function intentScore(anchor: MemoryAnchor, intent: MemoryAnchorQueryIntent): num
     case 'RELATIONSHIP_CONTEXT':
       return clampUnit(
         semanticBias *
-          (anchor.relationshipRefs.length > 0 || anchor.salience.relationship > 0.4 ? 0.92 : 0.24),
+          (anchor.relationshipRefs.length > 0 || anchor.salience.relationship > 0.4
+            ? 0.92
+            : 0.24),
       );
     case 'DEALROOM_CONTEXT':
       return clampUnit(
         semanticBias *
-          (anchor.kind === 'DEALROOM_BLUFF' || anchor.kind === 'DEALROOM_EXPOSURE' ? 1 : 0.2),
+          (anchor.kind === 'DEALROOM_BLUFF' || anchor.kind === 'DEALROOM_EXPOSURE'
+            ? 1
+            : 0.2),
       );
     case 'POSTRUN_CONTEXT':
       return clampUnit(
         semanticBias *
-          (anchor.kind === 'TURNING_POINT' || anchor.kind === 'COLLAPSE' || anchor.kind === 'COMEBACK'
+          (anchor.kind === 'TURNING_POINT' ||
+          anchor.kind === 'COLLAPSE' ||
+          anchor.kind === 'COMEBACK'
             ? 0.88
             : 0.24),
       );
     case 'LIVEOPS_CONTEXT':
       return clampUnit(
-        semanticBias * (anchor.kind === 'WORLD_EVENT' || anchor.kind === 'LEGEND' ? 0.82 : 0.2),
+        semanticBias *
+          (anchor.kind === 'WORLD_EVENT' || anchor.kind === 'LEGEND' ? 0.82 : 0.2),
       );
     case 'RANKING_CONTEXT':
     default:
@@ -651,6 +835,7 @@ function recencyScore(
     anchor.formation.reaffirmedAtMs || 0,
     anchor.formation.createdAtMs || 0,
   );
+
   if (!updatedAtMs || updatedAtMs > nowMs) {
     return MEMORY_RANKING_POLICY_DEFAULTS.coldStartFallback;
   }
@@ -660,8 +845,8 @@ function recencyScore(
     anchor.retrieval.timeDecayHalfLifeMs ??
     overrideHalfLifeMs ??
     MEMORY_RANKING_POLICY_DEFAULTS.halfLifeMs;
-
   const decay = Math.pow(0.5, ageMs / maxSafe(halfLifeMs, 1));
+
   return clampUnit(decay);
 }
 
@@ -678,7 +863,10 @@ function totalEvidenceWeight(anchor: MemoryAnchor): number {
     return 0;
   }
 
-  const total = anchor.evidence.reduce((sum, evidence) => sum + clampUnit(evidence.weight), 0);
+  const total = anchor.evidence.reduce((sum, evidence) => {
+    return sum + clampUnit(evidence.weight);
+  }, 0);
+
   return total / anchor.evidence.length;
 }
 
@@ -688,7 +876,7 @@ function normalizeCounter(value: number, normalizer: number): number {
 
 function tagOverlapScore(
   anchor: MemoryAnchor,
-  context: MemoryRankingContext,
+  context: PreparedRankingContext,
   candidate: MemoryRankingCandidate,
   matchedTags: readonly string[],
   blockedTags: readonly string[],
@@ -697,21 +885,22 @@ function tagOverlapScore(
     return 0;
   }
 
-  const targetTags = normalizeStringList([
-    ...(context.requiredTags ?? []),
-    ...(context.currentTags ?? []),
-    ...(candidate.currentTags ?? []),
-    ...(context.relationshipSignals ?? []),
-    ...(candidate.relationshipSignals ?? []),
-    ...(context.emotionSignals ?? []),
-    ...(candidate.emotionSignals ?? []),
-  ]);
-
+  const targetTags = collectCandidateTags(context, candidate);
   if (!targetTags.length) {
     return matchedTags.length ? 0.5 : 0.36;
   }
 
-  return clampUnit(matchedTags.length / targetTags.length);
+  const directRequiredOverlap = intersectTags(
+    collectAnchorTags(anchor),
+    context.requiredTags,
+  ).length;
+
+  const overlapRatio = matchedTags.length / maxSafe(targetTags.length, 1);
+  const requiredBias = context.requiredTags.length
+    ? directRequiredOverlap / maxSafe(context.requiredTags.length, 1)
+    : 0;
+
+  return clampUnit(overlapRatio * 0.84 + requiredBias * 0.16);
 }
 
 function embeddingScore(
@@ -730,17 +919,28 @@ function embeddingScore(
         normalizeToken(match.kind) || 'UNKNOWN'
       ] ?? MEMORY_RANKING_POLICY_MATCH_KIND_WEIGHT.UNKNOWN;
     const rawScore = clampUnit(match.score ?? 0);
-    const documentBoost = match.documentId && anchor.embeddingDocumentIds.includes(match.documentId)
-      ? 0.12
-      : 0;
+    const documentBoost =
+      match.documentId &&
+      anchor.embeddingDocumentIds.includes(
+        match.documentId as import('../../../../../../../shared/contracts/chat/learning/ConversationEmbeddings').EmbeddingDocumentId,
+      )
+        ? 0.12
+        : 0;
     const overlapBoost = intersectTags(
       normalizeStringList(match.tags ?? []),
       collectAnchorTags(anchor),
     ).length
       ? 0.08
       : 0;
+    const previewBoost =
+      match.preview && textOverlapScore(tokenizeText(match.preview), collectAnchorSearchCorpus(anchor)) > 0.18
+        ? 0.05
+        : 0;
 
-    best = Math.max(best, clampUnit(rawScore * kindWeight + documentBoost + overlapBoost));
+    best = Math.max(
+      best,
+      clampUnit(rawScore * kindWeight + documentBoost + overlapBoost + previewBoost),
+    );
   }
 
   return clampUnit(best);
@@ -748,17 +948,17 @@ function embeddingScore(
 
 function relationshipScore(
   anchor: MemoryAnchor,
-  context: MemoryRankingContext,
+  context: PreparedRankingContext,
   candidate: MemoryRankingCandidate,
 ): number {
   let score = 0;
 
-  if (context.relationshipId && anchor.relationshipRefs.includes(context.relationshipId)) {
+  if (context.relationshipId && normalizeOptionalToken(anchor.subject.relationshipId) === context.relationshipId) {
     score += 0.52;
   }
 
   const targetSignals = normalizeStringList([
-    ...(context.relationshipSignals ?? []),
+    ...context.relationshipSignals,
     ...(candidate.relationshipSignals ?? []),
   ]);
 
@@ -767,9 +967,18 @@ function relationshipScore(
       normalizeStringList(anchor.payload.relationshipTags),
       targetSignals,
     );
+
     score += overlap.length
-      ? (overlap.length / targetSignals.length) * MEMORY_RANKING_POLICY_DEFAULTS.relationshipBoost
+      ? (overlap.length / targetSignals.length) *
+        MEMORY_RANKING_POLICY_DEFAULTS.relationshipBoost
       : 0;
+  }
+
+  if (
+    context.actorPersonaId &&
+    normalizeOptionalToken(anchor.subject.actorPersonaId) === context.actorPersonaId
+  ) {
+    score += MEMORY_RANKING_POLICY_DEFAULTS.exactActorPersonaBoost;
   }
 
   if (anchor.salience.relationship > 0.5) {
@@ -781,11 +990,11 @@ function relationshipScore(
 
 function emotionScore(
   anchor: MemoryAnchor,
-  context: MemoryRankingContext,
+  context: PreparedRankingContext,
   candidate: MemoryRankingCandidate,
 ): number {
   const signals = normalizeStringList([
-    ...(context.emotionSignals ?? []),
+    ...context.emotionSignals,
     ...(candidate.emotionSignals ?? []),
   ]);
 
@@ -796,13 +1005,26 @@ function emotionScore(
   const overlap = intersectTags(normalizeStringList(anchor.payload.emotions), signals);
   const ratio = overlap.length / maxSafe(signals.length, 1);
   const salienceBias = clampUnit(anchor.salience.emotional);
+
   return clampUnit(ratio * 0.78 + salienceBias * 0.22);
 }
 
-function continuityScore(anchor: MemoryAnchor, context: MemoryRankingContext): number {
+function continuityScore(
+  anchor: MemoryAnchor,
+  context: PreparedRankingContext,
+  candidate: MemoryRankingCandidate,
+): number {
   let score = 0;
+  const candidateModeId = normalizeOptionalToken(candidate.currentModeId);
 
-  if (anchor.continuity.carriesAcrossModes && context.currentModeId) {
+  if (
+    anchor.continuity.carriesAcrossModes &&
+    context.currentModeId &&
+    candidateModeId &&
+    context.currentModeId === candidateModeId
+  ) {
+    score += MEMORY_RANKING_POLICY_DEFAULTS.currentModeBoost;
+  } else if (anchor.continuity.carriesAcrossModes && context.currentModeId) {
     score += 0.16;
   }
 
@@ -814,56 +1036,68 @@ function continuityScore(anchor: MemoryAnchor, context: MemoryRankingContext): n
     score += MEMORY_RANKING_POLICY_DEFAULTS.unresolvedBoost;
   }
 
-  if (context.excludedFamilyIds?.length && anchor.continuity.familyId) {
-    score += context.excludedFamilyIds.includes(anchor.continuity.familyId) ? -0.2 : 0;
+  if (context.excludedFamilyIds.length && anchor.continuity.familyId) {
+    score += context.excludedFamilyIds.includes(normalizeToken(anchor.continuity.familyId))
+      ? -0.2
+      : 0;
   }
 
   if (anchor.continuity.followPersonaIds.length && context.actorPersonaId) {
-    score += anchor.continuity.followPersonaIds.includes(context.actorPersonaId) ? 0.14 : 0;
+    const normalizedFollowPersonaIds = normalizeStringList(anchor.continuity.followPersonaIds);
+    score += normalizedFollowPersonaIds.includes(context.actorPersonaId) ? 0.14 : 0;
   }
 
-  if (context.momentId && anchor.subject.momentId === context.momentId) {
+  if (context.momentId && normalizeOptionalToken(anchor.subject.momentId) === context.momentId) {
     score += MEMORY_RANKING_POLICY_DEFAULTS.momentMatchBoost;
   }
 
-  if (context.sceneId && anchor.subject.sceneId === context.sceneId) {
+  if (context.sceneId && normalizeOptionalToken(anchor.subject.sceneId) === context.sceneId) {
     score += MEMORY_RANKING_POLICY_DEFAULTS.sceneMatchBoost;
   }
 
   return clampUnit(score);
 }
 
-function scopeScore(anchor: MemoryAnchor, context: MemoryRankingContext): number {
+function scopeScore(
+  anchor: MemoryAnchor,
+  context: PreparedRankingContext,
+  candidate: MemoryRankingCandidate,
+): number {
   let score = 0;
 
-  if (context.roomId && anchor.subject.roomId === context.roomId) {
+  if (context.roomId && normalizeOptionalToken(anchor.subject.roomId) === context.roomId) {
     score += MEMORY_RANKING_POLICY_DEFAULTS.roomMatchBoost;
   }
 
-  if (context.channelId && anchor.subject.channelId === context.channelId) {
+  if (context.channelId && normalizeOptionalToken(anchor.subject.channelId) === context.channelId) {
     score += MEMORY_RANKING_POLICY_DEFAULTS.channelMatchBoost;
   }
 
-  if (context.runId && anchor.subject.runId === context.runId) {
+  if (context.runId && normalizeOptionalToken(anchor.subject.runId) === context.runId) {
     score += MEMORY_RANKING_POLICY_DEFAULTS.runMatchBoost;
   }
 
-  if (context.sceneId && anchor.subject.sceneId === context.sceneId) {
+  if (context.sceneId && normalizeOptionalToken(anchor.subject.sceneId) === context.sceneId) {
     score += MEMORY_RANKING_POLICY_DEFAULTS.sceneMatchBoost;
   }
 
-  if (context.momentId && anchor.subject.momentId === context.momentId) {
+  if (context.momentId && normalizeOptionalToken(anchor.subject.momentId) === context.momentId) {
     score += MEMORY_RANKING_POLICY_DEFAULTS.momentMatchBoost;
   }
 
-  if (context.actorId && anchor.subject.actorId === context.actorId) {
+  if (context.actorId && normalizeOptionalToken(anchor.subject.actorId) === context.actorId) {
     score += MEMORY_RANKING_POLICY_DEFAULTS.actorMatchBoost;
+  }
+
+  const candidateModeId = normalizeOptionalToken(candidate.currentModeId);
+  if (candidateModeId && context.currentModeId && candidateModeId === context.currentModeId) {
+    score += MEMORY_RANKING_POLICY_DEFAULTS.currentModeBoost;
   }
 
   return clampUnit(score);
 }
 
-function callbackScore(anchor: MemoryAnchor, context: MemoryRankingContext): number {
+function callbackScore(anchor: MemoryAnchor, context: PreparedRankingContext): number {
   let score = 0;
 
   if (anchor.payload.callbackPhrases.length) {
@@ -874,18 +1108,22 @@ function callbackScore(anchor: MemoryAnchor, context: MemoryRankingContext): num
     score += MEMORY_RANKING_POLICY_DEFAULTS.quoteBoost;
   }
 
-  if (context.alreadyUsedCallbackPhrases?.length && anchor.payload.callbackPhrases.length) {
-    const unused = anchor.payload.callbackPhrases.filter(
-      (phrase) => !context.alreadyUsedCallbackPhrases?.includes(phrase),
-    );
+  if (context.alreadyUsedCallbackPhrases.length && anchor.payload.callbackPhrases.length) {
+    const normalizedCallbackPhrases = normalizeStringList(anchor.payload.callbackPhrases);
+    const unused = normalizedCallbackPhrases.filter((phrase) => {
+      return !context.alreadyUsedCallbackPhrases.includes(phrase);
+    });
     score += unused.length ? 0.08 : -0.16;
   }
 
   return clampUnit(score);
 }
 
-function requiredMissPenalty(anchor: MemoryAnchor, context: MemoryRankingContext): number {
-  const requiredTags = normalizeStringList(context.requiredTags ?? []);
+function requiredMissPenaltyScore(
+  anchor: MemoryAnchor,
+  context: PreparedRankingContext,
+): number {
+  const requiredTags = context.requiredTags;
   if (!requiredTags.length) {
     return 0;
   }
@@ -895,21 +1133,77 @@ function requiredMissPenalty(anchor: MemoryAnchor, context: MemoryRankingContext
     return 0;
   }
 
-  return MEMORY_RANKING_POLICY_DEFAULTS.requiredTagMissPenalty *
-    ((requiredTags.length - overlap.length) / requiredTags.length);
+  return (
+    MEMORY_RANKING_POLICY_DEFAULTS.requiredTagMissPenalty *
+    ((requiredTags.length - overlap.length) / requiredTags.length)
+  );
+}
+
+function retrievalSignalScore(candidate: MemoryRankingCandidate): number {
+  const retrievalSourceWeight =
+    MEMORY_RANKING_POLICY_RETRIEVAL_SOURCE_WEIGHT[
+      candidate.retrievalSource ?? 'UNKNOWN'
+    ] ?? MEMORY_RANKING_POLICY_RETRIEVAL_SOURCE_WEIGHT.UNKNOWN;
+
+  const ordinal = Number.isFinite(candidate.retrievalOrdinal)
+    ? Math.max(0, Math.floor(candidate.retrievalOrdinal as number))
+    : MEMORY_RANKING_POLICY_DEFAULTS.retrievalOrdinalSpan;
+
+  const ordinalRatio =
+    1 -
+    Math.min(ordinal, MEMORY_RANKING_POLICY_DEFAULTS.retrievalOrdinalSpan) /
+      maxSafe(MEMORY_RANKING_POLICY_DEFAULTS.retrievalOrdinalSpan, 1);
+
+  return clampUnit(
+    retrievalSourceWeight * MEMORY_RANKING_POLICY_DEFAULTS.retrievalSourceBoost +
+      ordinalRatio * MEMORY_RANKING_POLICY_DEFAULTS.retrievalOrdinalBoost,
+  );
+}
+
+function targetKindScore(
+  anchor: MemoryAnchor,
+  context: PreparedRankingContext,
+): number {
+  if (!context.targetKinds.length) {
+    return 0.5;
+  }
+
+  return context.targetKinds.includes(anchor.kind) ? 1 : 0;
+}
+
+function queryTextScore(
+  anchor: MemoryAnchor,
+  context: PreparedRankingContext,
+  candidate: MemoryRankingCandidate,
+): number {
+  if (!context.queryTokens.length) {
+    return MEMORY_RANKING_POLICY_DEFAULTS.queryTextFallback;
+  }
+
+  const anchorCorpus = collectAnchorSearchCorpus(anchor);
+  const baseOverlap = textOverlapScore(context.queryTokens, anchorCorpus);
+
+  const embeddingPreviewCorpus = normalizeStringList(
+    (candidate.embeddingMatches ?? []).flatMap((match) => {
+      return [
+        ...(match.tags ?? []),
+        ...(tokenizeText(match.preview) ?? []),
+      ];
+    }),
+  );
+
+  const previewOverlap = textOverlapScore(context.queryTokens, embeddingPreviewCorpus);
+
+  return clampUnit(baseOverlap * 0.82 + previewOverlap * 0.18);
 }
 
 function shouldApplyDuplicatePenalty(
   anchor: MemoryAnchor,
-  context: MemoryRankingContext,
+  context: PreparedRankingContext,
 ): boolean {
-  if (context.excludedAnchorIds?.includes(anchor.id)) {
-    return true;
-  }
-
   return Boolean(
     anchor.continuity.familyId &&
-      context.excludedFamilyIds?.includes(anchor.continuity.familyId),
+      context.excludedFamilyIds.includes(normalizeToken(anchor.continuity.familyId)),
   );
 }
 
@@ -934,6 +1228,58 @@ function collectAnchorTags(anchor: MemoryAnchor): readonly string[] {
     anchor.subject.relationshipId,
     anchor.continuity.familyId,
     ...anchor.continuity.followPersonaIds,
+    ...anchor.retrieval.queryIntents,
+  ]);
+}
+
+function collectAnchorSearchCorpus(anchor: MemoryAnchor): readonly string[] {
+  const p = anchor.payload as any;
+  return normalizeStringList([
+    ...tokenizeText(anchor.payload.headline),
+    ...tokenizeText(anchor.payload.summary),
+    ...tokenizeText(p.body),
+    ...tokenizeText(p.resolution),
+    ...tokenizeText(p.outcome),
+    ...tokenizeText(p.lessonsLearned),
+    ...tokenizeText(p.worldStateHint),
+    ...anchor.payload.callbackPhrases,
+    ...anchor.payload.tags,
+    ...anchor.payload.emotions,
+    ...anchor.payload.relationshipTags,
+    ...anchor.quoteRefs,
+    ...anchor.relationshipRefs,
+    anchor.kind,
+    anchor.stabilityClass,
+    anchor.retrieval.priority,
+    ...anchor.retrieval.queryIntents,
+  ]);
+}
+
+function collectCandidateTags(
+  context: PreparedRankingContext,
+  candidate: MemoryRankingCandidate,
+): readonly string[] {
+  return normalizeStringList([
+    ...context.requiredTags,
+    ...context.currentTags,
+    ...(candidate.currentTags ?? []),
+    ...context.relationshipSignals,
+    ...(candidate.relationshipSignals ?? []),
+    ...context.emotionSignals,
+    ...(candidate.emotionSignals ?? []),
+    context.currentModeId,
+    candidate.currentModeId,
+    context.roomId,
+    context.channelId,
+    context.runId,
+    context.sceneId,
+    context.momentId,
+    context.actorId,
+    context.actorPersonaId,
+    context.relationshipId,
+    ...(candidate.embeddingMatches ?? []).flatMap((match) => {
+      return [match.kind, ...(match.tags ?? [])];
+    }),
   ]);
 }
 
@@ -953,6 +1299,21 @@ function intersectTags(
   return Object.freeze(Array.from(new Set(intersection)));
 }
 
+function textOverlapScore(
+  left: readonly string[],
+  right: readonly string[],
+): number {
+  if (!left.length || !right.length) {
+    return 0;
+  }
+
+  const overlap = intersectTags(left, right);
+  const precision = overlap.length / maxSafe(left.length, 1);
+  const recall = overlap.length / maxSafe(right.length, 1);
+
+  return clampUnit(precision * 0.72 + recall * 0.28);
+}
+
 function compareRankedAnchors(
   left: RankedMemoryAnchor,
   right: RankedMemoryAnchor,
@@ -961,16 +1322,41 @@ function compareRankedAnchors(
     right.finalScore - left.finalScore ||
     right.retrievalScore - left.retrievalScore ||
     right.anchor.salience.final - left.anchor.salience.final ||
-    right.anchor.formation.updatedAtMs - left.anchor.formation.updatedAtMs
+    right.anchor.formation.updatedAtMs - left.anchor.formation.updatedAtMs ||
+    right.anchor.formation.createdAtMs - left.anchor.formation.createdAtMs ||
+    left.anchor.id.localeCompare(right.anchor.id)
   );
 }
 
-function normalizeStringList(values: readonly (string | undefined | null)[]): readonly string[] {
+function tokenizeText(value: string | undefined | null): readonly string[] {
+  if (!value) {
+    return Object.freeze([]);
+  }
+
+  const normalized = value
+    .toLowerCase()
+    .replace(/[\n\r\t]+/g, ' ')
+    .replace(/[^a-z0-9:_ -]/g, ' ')
+    .split(/\s+/g)
+    .map((token) => normalizeToken(token))
+    .filter((token): token is string => Boolean(token && token.length >= 2));
+
+  return Object.freeze(Array.from(new Set(normalized)));
+}
+
+function normalizeStringList(
+  values: readonly (string | undefined | null)[],
+): readonly string[] {
   const normalized = values
     .map((value) => normalizeToken(value))
     .filter((value): value is string => Boolean(value));
 
   return Object.freeze(Array.from(new Set(normalized)));
+}
+
+function normalizeOptionalToken(value: string | undefined | null): string | undefined {
+  const normalized = normalizeToken(value);
+  return normalized || undefined;
 }
 
 function normalizeToken(value: string | undefined | null): string {
