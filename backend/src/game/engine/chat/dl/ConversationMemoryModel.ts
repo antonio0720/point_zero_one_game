@@ -68,6 +68,7 @@ import {
   type Score01,
   type Score100,
   type UnixMs,
+  type ChatRuntimeConfig,
 } from '../types';
 import {
   DEFAULT_BACKEND_CHAT_RUNTIME,
@@ -265,6 +266,7 @@ export interface ConversationMemoryModelDependencies {
   embeddingClient?: Nullable<MessageEmbeddingClient>;
   intentEncoder?: Nullable<DialogueIntentEncoder>;
   now?: Nullable<() => UnixMs>;
+  runtimeConfigOverride?: Partial<ChatRuntimeConfig>;
 }
 
 // ============================================================================
@@ -289,6 +291,30 @@ interface SceneCompressionWindow {
   turns: ConversationMemoryTurn[];
 }
 
+interface ConversationMemoryRuntimeTuning {
+  readonly maxRecordsPerRoom: number;
+  readonly maxRecordsPerUser: number;
+  readonly maxRetrievals: number;
+  readonly compactionWindowSize: number;
+  readonly decayHalfLifeMs: number;
+  readonly legendDecayHalfLifeMs: number;
+  readonly relationshipDecayHalfLifeMs: number;
+  readonly minimumRetentionThreshold: Score01;
+  readonly callbackQuoteThreshold: Score01;
+  readonly relationshipPersistenceFloor: Score01;
+  readonly replayPersistenceBias: Score01;
+  readonly allowedVisibleChannels: ReadonlySet<ChatVisibleChannel>;
+  readonly maxMessageCharacters: number;
+  readonly maxMessageLines: number;
+  readonly replayEnabled: boolean;
+  readonly learningEnabled: boolean;
+  readonly proofEnabled: boolean;
+  readonly shadowModeOnHighRisk: boolean;
+  readonly helperMinimumGapMs: number;
+  readonly haterMinimumGapMs: number;
+  readonly invasionEnabled: boolean;
+}
+
 // ============================================================================
 // MARK: Model class
 // ============================================================================
@@ -299,8 +325,15 @@ export class ConversationMemoryModel {
   private readonly now: () => UnixMs;
   private readonly index: ConversationMemoryIndex;
   private readonly activeWindows: Map<string, SceneCompressionWindow>;
+  private readonly runtimeConfig: ChatRuntimeConfig;
+  private readonly runtimeTuning: ConversationMemoryRuntimeTuning;
 
   constructor(deps: ConversationMemoryModelDependencies = {}) {
+    this.runtimeConfig = mergeRuntimeConfig(deps.runtimeConfigOverride ?? {});
+    this.runtimeTuning = this.buildRuntimeTuning(
+      this.runtimeConfig,
+      DEFAULT_BACKEND_CHAT_RUNTIME,
+    );
     this.embeddingClient =
       deps.embeddingClient ?? createMessageEmbeddingClient();
     this.intentEncoder =
@@ -316,72 +349,285 @@ export class ConversationMemoryModel {
     this.activeWindows = new Map();
   }
 
+  public getRuntimeConfig(): ChatRuntimeConfig {
+    return this.runtimeConfig;
+  }
+
+  public getRuntimeMemoryDiagnostics(): Readonly<Record<string, JsonValue>> {
+    return Object.freeze({
+      runtimeVersion: this.runtimeConfig.version,
+      defaultRuntimeVersion: DEFAULT_BACKEND_CHAT_RUNTIME.version,
+      allowedVisibleChannels: [...this.runtimeConfig.allowVisibleChannels],
+      replayEnabled: this.runtimeTuning.replayEnabled,
+      learningEnabled: this.runtimeTuning.learningEnabled,
+      proofEnabled: this.runtimeTuning.proofEnabled,
+      compactionWindowSize: this.runtimeTuning.compactionWindowSize,
+      maxRecordsPerRoom: this.runtimeTuning.maxRecordsPerRoom,
+      maxRecordsPerUser: this.runtimeTuning.maxRecordsPerUser,
+      maxRetrievals: this.runtimeTuning.maxRetrievals,
+      decayHalfLifeMs: this.runtimeTuning.decayHalfLifeMs,
+      legendDecayHalfLifeMs: this.runtimeTuning.legendDecayHalfLifeMs,
+      relationshipDecayHalfLifeMs: this.runtimeTuning.relationshipDecayHalfLifeMs,
+      callbackQuoteThreshold: this.runtimeTuning.callbackQuoteThreshold,
+      minimumRetentionThreshold: this.runtimeTuning.minimumRetentionThreshold,
+      maxMessageCharacters: this.runtimeTuning.maxMessageCharacters,
+      maxMessageLines: this.runtimeTuning.maxMessageLines,
+      invasionEnabled: this.runtimeTuning.invasionEnabled,
+    });
+  }
+
+  private buildRuntimeTuning(
+    runtime: ChatRuntimeConfig,
+    baseline: ChatRuntimeConfig,
+  ): ConversationMemoryRuntimeTuning {
+    const replayWindowFloor = Math.max(
+      this.runtimeTuning.decayHalfLifeMs,
+      Math.floor(runtime.replayPolicy.replayTimeWindowMs / 32),
+    );
+    const baselineReplayCap = Math.max(
+      CHAT_CONVERSATION_MEMORY_DEFAULTS.maxRecordsPerRoom,
+      Math.floor(baseline.replayPolicy.maxMessagesPerRoom * 0.14),
+    );
+    const runtimeReplayCap = Math.max(
+      CHAT_CONVERSATION_MEMORY_DEFAULTS.maxRecordsPerRoom,
+      Math.floor(runtime.replayPolicy.maxMessagesPerRoom * 0.14),
+    );
+    const maxRecordsPerRoom = Math.min(
+      runtime.replayPolicy.maxMessagesPerRoom,
+      Math.max(baselineReplayCap, runtimeReplayCap),
+    );
+    const maxRecordsPerUser = Math.max(
+      CHAT_CONVERSATION_MEMORY_DEFAULTS.maxRecordsPerUser,
+      Math.min(maxRecordsPerRoom, Math.floor(maxRecordsPerRoom * 0.75)),
+    );
+    const maxRetrievals = Math.max(
+      8,
+      Math.min(
+        CHAT_CONVERSATION_MEMORY_DEFAULTS.maxRetrievals,
+        Math.floor(runtime.replayPolicy.maxMessagesPerRoom / 160),
+      ),
+    );
+    const compactionWindowSize = Math.max(
+      4,
+      Math.min(
+        16,
+        Math.floor(
+          CHAT_CONVERSATION_MEMORY_DEFAULTS.compactionWindowSize +
+            (runtime.learningPolicy.emitInferenceSnapshots ? 2 : 0) +
+            (runtime.proofPolicy.linkReplayEdges ? 1 : 0),
+        ),
+      ),
+    );
+    const relationshipHalfLife = runtime.learningPolicy.persistProfiles
+      ? Math.max(
+          this.runtimeTuning.relationshipDecayHalfLifeMs,
+          Math.floor(runtime.replayPolicy.replayTimeWindowMs / 12),
+        )
+      : this.runtimeTuning.relationshipDecayHalfLifeMs;
+    const legendHalfLife = runtime.proofPolicy.enabled
+      ? Math.max(
+          this.runtimeTuning.legendDecayHalfLifeMs,
+          Math.floor(runtime.replayPolicy.replayTimeWindowMs / 2),
+        )
+      : this.runtimeTuning.legendDecayHalfLifeMs;
+    const minimumRetentionThreshold = clamp01(
+      CHAT_CONVERSATION_MEMORY_DEFAULTS.minimumRetentionThreshold +
+        (runtime.replayPolicy.enabled ? -0.02 : 0.06) +
+        (runtime.proofPolicy.enabled ? -0.01 : 0.03),
+    );
+    const callbackQuoteThreshold = clamp01(
+      CHAT_CONVERSATION_MEMORY_DEFAULTS.callbackQuoteThreshold +
+        (runtime.proofPolicy.linkReplayEdges ? -0.03 : 0.02) +
+        (runtime.learningPolicy.enabled ? -0.01 : 0.03),
+    );
+    const relationshipPersistenceFloor = clamp01(
+      CHAT_CONVERSATION_MEMORY_DEFAULTS.relationshipPersistenceFloor +
+        (runtime.learningPolicy.persistProfiles ? 0.08 : 0),
+    );
+    const replayPersistenceBias = clamp01(
+      CHAT_CONVERSATION_MEMORY_DEFAULTS.replayPersistenceBias +
+        (runtime.replayPolicy.enabled ? 0.06 : -0.06) +
+        (runtime.proofPolicy.linkReplayEdges ? 0.04 : 0),
+    );
+
+    return Object.freeze({
+      maxRecordsPerRoom,
+      maxRecordsPerUser,
+      maxRetrievals,
+      compactionWindowSize,
+      decayHalfLifeMs: replayWindowFloor,
+      legendDecayHalfLifeMs: legendHalfLife,
+      relationshipDecayHalfLifeMs: relationshipHalfLife,
+      minimumRetentionThreshold,
+      callbackQuoteThreshold,
+      relationshipPersistenceFloor,
+      replayPersistenceBias,
+      allowedVisibleChannels: new Set(runtime.allowVisibleChannels),
+      maxMessageCharacters: runtime.moderationPolicy.maxCharactersPerMessage,
+      maxMessageLines: runtime.moderationPolicy.maxLinesPerMessage,
+      replayEnabled: runtime.replayPolicy.enabled,
+      learningEnabled: runtime.learningPolicy.enabled,
+      proofEnabled: runtime.proofPolicy.enabled,
+      shadowModeOnHighRisk: runtime.moderationPolicy.shadowModeOnHighRisk,
+      helperMinimumGapMs: runtime.ratePolicy.helperMinimumGapMs,
+      haterMinimumGapMs: runtime.ratePolicy.haterMinimumGapMs,
+      invasionEnabled: runtime.invasionPolicy.enabled,
+    });
+  }
+
+  private resolveRuntimeVisibleChannel(
+    requested: ChatVisibleChannel,
+    fallbackRoomKind: ChatRoomKind,
+  ): ChatVisibleChannel {
+    if (this.runtimeTuning.allowedVisibleChannels.has(requested)) {
+      return requested;
+    }
+    switch (fallbackRoomKind) {
+      case 'DEAL_ROOM':
+        return this.runtimeTuning.allowedVisibleChannels.has('DEAL_ROOM')
+          ? 'DEAL_ROOM'
+          : this.runtimeConfig.allowVisibleChannels[0] ?? 'GLOBAL';
+      case 'SYNDICATE':
+        return this.runtimeTuning.allowedVisibleChannels.has('SYNDICATE')
+          ? 'SYNDICATE'
+          : this.runtimeConfig.allowVisibleChannels[0] ?? 'GLOBAL';
+      case 'LOBBY':
+        return this.runtimeTuning.allowedVisibleChannels.has('LOBBY')
+          ? 'LOBBY'
+          : this.runtimeConfig.allowVisibleChannels[0] ?? 'GLOBAL';
+      default:
+        return this.runtimeConfig.allowVisibleChannels[0] ?? 'GLOBAL';
+    }
+  }
+
+  private normalizeBodyForRuntime(body: string): string {
+    const boundedLines = body
+      .split(/\r?\n/g)
+      .slice(0, this.runtimeTuning.maxMessageLines)
+      .join('\n');
+    if (boundedLines.length <= this.runtimeTuning.maxMessageCharacters) {
+      return boundedLines;
+    }
+    return boundedLines.slice(0, this.runtimeTuning.maxMessageCharacters);
+  }
+
+  private normalizeTurnForRuntime(
+    turn: ConversationMemoryTurn,
+    context: ConversationMemoryContext,
+  ): ConversationMemoryTurn {
+    return {
+      ...turn,
+      channel: this.resolveRuntimeVisibleChannel(turn.channel, context.roomKind),
+      body: this.normalizeBodyForRuntime(turn.body),
+    };
+  }
+
+  private normalizeContextForRuntime(
+    context: ConversationMemoryContext,
+    turn: ConversationMemoryTurn,
+  ): ConversationMemoryContext {
+    return {
+      ...context,
+      activeChannel: this.resolveRuntimeVisibleChannel(
+        context.activeChannel ?? turn.channel,
+        context.roomKind,
+      ),
+      nowMs: context.nowMs ?? this.now(),
+    };
+  }
+
+  private shouldPersistEmbeddings(): boolean {
+    return this.runtimeTuning.learningEnabled || this.runtimeTuning.proofEnabled;
+  }
+
+  private shouldPersistInferenceSnapshots(): boolean {
+    return this.runtimeConfig.learningPolicy.emitInferenceSnapshots;
+  }
+
+  private buildRuntimeMetadata(): Readonly<Record<string, JsonValue>> {
+    return Object.freeze({
+      runtimeVersion: this.runtimeConfig.version,
+      allowedVisibleChannels: [...this.runtimeConfig.allowVisibleChannels],
+      replayEnabled: this.runtimeTuning.replayEnabled,
+      learningEnabled: this.runtimeTuning.learningEnabled,
+      proofEnabled: this.runtimeTuning.proofEnabled,
+      compactionWindowSize: this.runtimeTuning.compactionWindowSize,
+      callbackQuoteThreshold: this.runtimeTuning.callbackQuoteThreshold,
+      retentionThreshold: this.runtimeTuning.minimumRetentionThreshold,
+      maxMessageCharacters: this.runtimeTuning.maxMessageCharacters,
+      maxMessageLines: this.runtimeTuning.maxMessageLines,
+    });
+  }
+
   public ingestAcceptedTurn(
     turn: ConversationMemoryTurn,
     context: ConversationMemoryContext,
   ): ConversationMemoryRecord {
-    const nowMs = context.nowMs ?? this.now();
-    const sceneContext = this.buildSceneContext(context);
+    const normalizedTurn = this.normalizeTurnForRuntime(turn, context);
+    const normalizedContext = this.normalizeContextForRuntime(context, normalizedTurn);
+    const nowMs = normalizedContext.nowMs ?? this.now();
+    const sceneContext = this.buildSceneContext(normalizedContext);
     const encodedIntent = this.intentEncoder.encodeTurn({
       message: {
-        messageId: turn.messageId,
-        text: turn.body,
-        createdAtMs: turn.createdAt,
-        channel: turn.channel,
-        roomKind: turn.roomKind,
-        modeId: turn.modeId ?? null,
-        pressureTier: turn.pressureTier ?? null,
+        messageId: normalizedTurn.messageId,
+        text: normalizedTurn.body,
+        createdAtMs: normalizedTurn.createdAt,
+        channel: normalizedTurn.channel,
+        roomKind: normalizedTurn.roomKind,
+        modeId: normalizedTurn.modeId ?? null,
+        pressureTier: normalizedTurn.pressureTier ?? null,
         sceneContext,
       },
       sceneContext,
     });
 
     const record: ConversationMemoryRecord = {
-      memoryId: `memory::turn::${turn.messageId}`,
-      roomId: turn.roomId,
-      roomKind: turn.roomKind,
-      sessionId: turn.sessionId ?? context.sessionId ?? null,
-      ownerUserId: turn.userId ?? context.ownerUserId ?? null,
-      counterpartUserId: turn.counterpartUserId ?? context.counterpartUserId ?? null,
-      modeId: turn.modeId ?? context.modeId ?? null,
-      channel: turn.channel,
-      memoryKind: this.resolveTurnMemoryKind(turn, context),
+      memoryId: `memory::turn::${normalizedTurn.messageId}`,
+      roomId: normalizedTurn.roomId,
+      roomKind: normalizedTurn.roomKind,
+      sessionId: normalizedTurn.sessionId ?? normalizedContext.sessionId ?? null,
+      ownerUserId: normalizedTurn.userId ?? normalizedContext.ownerUserId ?? null,
+      counterpartUserId: normalizedTurn.counterpartUserId ?? normalizedContext.counterpartUserId ?? null,
+      modeId: normalizedTurn.modeId ?? normalizedContext.modeId ?? null,
+      channel: normalizedTurn.channel,
+      memoryKind: this.resolveTurnMemoryKind(normalizedTurn, normalizedContext),
       intentKind: encodedIntent.primaryIntent ?? null,
-      semanticFamilies: [...(turn.semanticFamilies ?? [])],
-      sourceMessageIds: [turn.messageId],
+      semanticFamilies: [...(normalizedTurn.semanticFamilies ?? [])],
+      sourceMessageIds: [normalizedTurn.messageId],
       callbackQuoteIds: [],
-      title: this.buildTurnTitle(turn, encodedIntent.primaryIntent ?? null),
-      body: turn.body,
-      summary: this.buildTurnSummary(turn, encodedIntent.primaryIntent ?? null, context),
-      createdAt: turn.createdAt,
+      title: this.buildTurnTitle(normalizedTurn, encodedIntent.primaryIntent ?? null),
+      body: normalizedTurn.body,
+      summary: this.buildTurnSummary(normalizedTurn, encodedIntent.primaryIntent ?? null, normalizedContext),
+      createdAt: normalizedTurn.createdAt,
       updatedAt: nowMs,
-      signalStrength: clamp01(turn.signalStrength ?? this.estimateSignalStrength(turn, context)),
-      eventDensity: clamp01(this.estimateEventDensity(turn, context)),
-      relationshipHeat: clamp01(this.estimateRelationshipHeat(turn, context)),
-      callbackPotential: clamp01(this.estimateCallbackPotential(turn, context)),
-      witnessValue: clamp01(turn.witnessValue ?? this.estimateWitnessValue(turn, context)),
-      replayValue: clamp01(this.estimateReplayValue(turn, context)),
-      rescueValue: clamp01(turn.rescueValue ?? this.estimateRescueValue(turn, context)),
-      threatValue: clamp01(turn.threatValue ?? this.estimateThreatValue(turn, context)),
-      negotiationValue: clamp01(turn.negotiationValue ?? this.estimateNegotiationValue(turn, context)),
-      legendValue: clamp01(turn.legendValue ?? this.estimateLegendValue(turn, context)),
-      emotionalCharge: clamp01(turn.emotionalCharge ?? this.estimateEmotionalCharge(turn, context)),
-      continuityValue: clamp01(this.estimateContinuityValue(turn, context)),
-      decayMultiplier: clamp01(this.resolveDecayMultiplier(turn, context)),
-      embeddingVector: this.embedTurn(turn, sceneContext),
+      signalStrength: clamp01(normalizedTurn.signalStrength ?? this.estimateSignalStrength(normalizedTurn, normalizedContext)),
+      eventDensity: clamp01(this.estimateEventDensity(normalizedTurn, normalizedContext)),
+      relationshipHeat: clamp01(this.estimateRelationshipHeat(normalizedTurn, normalizedContext)),
+      callbackPotential: clamp01(this.estimateCallbackPotential(normalizedTurn, normalizedContext)),
+      witnessValue: clamp01(normalizedTurn.witnessValue ?? this.estimateWitnessValue(normalizedTurn, normalizedContext)),
+      replayValue: clamp01(this.estimateReplayValue(normalizedTurn, normalizedContext)),
+      rescueValue: clamp01(normalizedTurn.rescueValue ?? this.estimateRescueValue(normalizedTurn, normalizedContext)),
+      threatValue: clamp01(normalizedTurn.threatValue ?? this.estimateThreatValue(normalizedTurn, normalizedContext)),
+      negotiationValue: clamp01(normalizedTurn.negotiationValue ?? this.estimateNegotiationValue(normalizedTurn, normalizedContext)),
+      legendValue: clamp01(normalizedTurn.legendValue ?? this.estimateLegendValue(normalizedTurn, normalizedContext)),
+      emotionalCharge: clamp01(normalizedTurn.emotionalCharge ?? this.estimateEmotionalCharge(normalizedTurn, normalizedContext)),
+      continuityValue: clamp01(this.estimateContinuityValue(normalizedTurn, normalizedContext)),
+      decayMultiplier: clamp01(this.resolveDecayMultiplier(normalizedTurn, normalizedContext)),
+      embeddingVector: this.embedTurn(normalizedTurn, sceneContext),
       metadata: {
         source: 'ingestAcceptedTurn',
         modelVersion: CHAT_CONVERSATION_MEMORY_MODEL_VERSION,
         embeddingVersion: CHAT_MESSAGE_EMBEDDING_CLIENT_VERSION,
         intentEncoderVersion: CHAT_DIALOGUE_INTENT_ENCODER_VERSION,
-        pressureTier: turn.pressureTier ?? null,
-        ...(turn.metadata ?? {}),
+        pressureTier: normalizedTurn.pressureTier ?? null,
+        runtime: this.buildRuntimeMetadata(),
+        ...(normalizedTurn.metadata ?? {}),
       },
     };
 
     this.storeRecord(record);
-    this.appendToCompressionWindow(turn, context);
-    this.compactIfNeeded(turn.roomId, context.ownerUserId ?? null);
+    this.appendToCompressionWindow(normalizedTurn, normalizedContext);
+    this.compactIfNeeded(normalizedTurn.roomId, normalizedContext.ownerUserId ?? null);
     return record;
   }
 
@@ -407,13 +653,19 @@ export class ConversationMemoryModel {
       summary: `Callback-ready receipt referencing: ${sourceRecord.summary}`,
       createdAt: sourceRecord.createdAt,
       updatedAt: nowMs,
-      callbackPotential: clamp01(sourceRecord.callbackPotential * 0.68 + 0.32),
+      callbackPotential: clamp01(
+        Math.max(
+          this.runtimeTuning.callbackQuoteThreshold,
+          sourceRecord.callbackPotential * 0.68 + 0.32,
+        ),
+      ),
       emotionalCharge: clamp01(sourceRecord.emotionalCharge * 0.72 + 0.18),
       legendValue: clamp01(sourceRecord.legendValue * 0.64 + 0.16),
       metadata: {
         ...sourceRecord.metadata,
         source: 'recordCallbackMemory',
         callbackFrom: sourceRecord.memoryId,
+        runtime: this.buildRuntimeMetadata(),
       },
     };
     this.storeRecord(callbackRecord);
@@ -423,6 +675,10 @@ export class ConversationMemoryModel {
   public retrieveRelevantMemories(
     request: ConversationMemoryRetrievalRequest,
   ): ConversationMemoryRetrievalResult {
+    const requestChannel = this.resolveRuntimeVisibleChannel(
+      request.activeChannel,
+      request.roomKind,
+    );
     const nowMs = request.nowMs ?? this.now();
     const roomRecords = this.index.byRoom.get(request.roomId) ?? [];
     const filtered = roomRecords.filter((record) => {
@@ -441,7 +697,7 @@ export class ConversationMemoryModel {
     const sceneContext = request.sceneContext ?? {
       roomId: request.roomId,
       roomKind: request.roomKind,
-      channel: request.activeChannel,
+      channel: requestChannel,
       pressureTier: null,
       activeModeId: request.modeId ?? null,
       sovereigntyProximity: 0.5,
@@ -461,7 +717,7 @@ export class ConversationMemoryModel {
     const scored = filtered
       .map((record) => this.scoreRetrievedRecord(record, queryEmbedding, request, nowMs))
       .sort((a, b) => b.normalizedScore - a.normalizedScore)
-      .slice(0, request.maxResults ?? CHAT_CONVERSATION_MEMORY_DEFAULTS.maxRetrievals);
+      .slice(0, request.maxResults ?? this.runtimeTuning.maxRetrievals);
 
     return {
       modelVersion: CHAT_CONVERSATION_MEMORY_MODEL_VERSION,
@@ -503,13 +759,13 @@ export class ConversationMemoryModel {
       )
       .sort((a, b) => a.createdAt - b.createdAt);
 
-    if (eligible.length < CHAT_CONVERSATION_MEMORY_DEFAULTS.compactionWindowSize) {
+    if (eligible.length < this.runtimeTuning.compactionWindowSize) {
       return [];
     }
 
     const compacted: ConversationMemoryRecord[] = [];
-    for (let offset = 0; offset < eligible.length; offset += CHAT_CONVERSATION_MEMORY_DEFAULTS.compactionWindowSize) {
-      const slice = eligible.slice(offset, offset + CHAT_CONVERSATION_MEMORY_DEFAULTS.compactionWindowSize);
+    for (let offset = 0; offset < eligible.length; offset += this.runtimeTuning.compactionWindowSize) {
+      const slice = eligible.slice(offset, offset + this.runtimeTuning.compactionWindowSize);
       if (slice.length < 2) {
         continue;
       }
@@ -523,17 +779,17 @@ export class ConversationMemoryModel {
 
   public decayAll(nowMs: UnixMs = this.now()): void {
     for (const [roomId, records] of this.index.byRoom.entries()) {
-      const kept = records.filter((record) => this.computeRetention(record, nowMs) >= CHAT_CONVERSATION_MEMORY_DEFAULTS.minimumRetentionThreshold);
+      const kept = records.filter((record) => this.computeRetention(record, nowMs) >= this.runtimeTuning.minimumRetentionThreshold);
       this.index.byRoom.set(roomId, kept);
     }
 
     for (const [userKey, records] of this.index.byUser.entries()) {
-      const kept = records.filter((record) => this.computeRetention(record, nowMs) >= CHAT_CONVERSATION_MEMORY_DEFAULTS.minimumRetentionThreshold);
+      const kept = records.filter((record) => this.computeRetention(record, nowMs) >= this.runtimeTuning.minimumRetentionThreshold);
       this.index.byUser.set(userKey, kept);
     }
 
     for (const [messageId, records] of this.index.byMessageId.entries()) {
-      const kept = records.filter((record) => this.computeRetention(record, nowMs) >= CHAT_CONVERSATION_MEMORY_DEFAULTS.minimumRetentionThreshold);
+      const kept = records.filter((record) => this.computeRetention(record, nowMs) >= this.runtimeTuning.minimumRetentionThreshold);
       if (kept.length) {
         this.index.byMessageId.set(messageId, kept);
       } else {
@@ -810,7 +1066,7 @@ export class ConversationMemoryModel {
       sessionId: null,
       ownerUserId: request.ownerUserId ?? null,
       counterpartUserId: request.counterpartUserId ?? null,
-      activeChannel: request.activeChannel,
+      activeChannel: this.resolveRuntimeVisibleChannel(request.activeChannel, request.roomKind),
       modeId: request.modeId ?? null,
       nowMs,
       pressureTier: null,
@@ -905,7 +1161,7 @@ export class ConversationMemoryModel {
     if (!window) {
       return;
     }
-    if (window.turns.length >= CHAT_CONVERSATION_MEMORY_DEFAULTS.compactionWindowSize) {
+    if (window.turns.length >= this.runtimeTuning.compactionWindowSize) {
       this.closeSceneWindow(roomId, ownerUserId);
     }
   }
@@ -961,7 +1217,7 @@ export class ConversationMemoryModel {
       createdAt: window.openedAt,
       updatedAt: nowMs,
       signalStrength: clamp01(this.aggregate(window.turns.map((turn) => turn.signalStrength ?? 0.5))),
-      eventDensity: clamp01(window.turns.length / CHAT_CONVERSATION_MEMORY_DEFAULTS.compactionWindowSize),
+      eventDensity: clamp01(window.turns.length / this.runtimeTuning.compactionWindowSize),
       relationshipHeat: clamp01(this.aggregate(window.turns.map((turn) => turn.threatValue ?? 0.2)) * 0.4 + this.aggregate(window.turns.map((turn) => turn.rescueValue ?? 0.2)) * 0.6),
       callbackPotential: clamp01(0.2 + this.aggregate(window.turns.map((turn) => turn.legendValue ?? 0.2)) * 0.5),
       witnessValue: clamp01(this.aggregate(window.turns.map((turn) => turn.witnessValue ?? 0.3))),
@@ -977,6 +1233,7 @@ export class ConversationMemoryModel {
       metadata: {
         source: 'compressWindowToSceneSummary',
         modelVersion: CHAT_CONVERSATION_MEMORY_MODEL_VERSION,
+        runtime: this.buildRuntimeMetadata(),
       },
     };
   }
@@ -1030,6 +1287,7 @@ export class ConversationMemoryModel {
       metadata: {
         source: 'compressRecords',
         compressedCount: records.length,
+        runtime: this.buildRuntimeMetadata(),
       },
     };
   }
@@ -1037,12 +1295,12 @@ export class ConversationMemoryModel {
   private storeRecord(record: ConversationMemoryRecord): void {
     const roomRecords = this.index.byRoom.get(record.roomId) ?? [];
     roomRecords.push(record);
-    this.index.byRoom.set(record.roomId, this.trimNewest(roomRecords, CHAT_CONVERSATION_MEMORY_DEFAULTS.maxRecordsPerRoom));
+    this.index.byRoom.set(record.roomId, this.trimNewest(roomRecords, this.runtimeTuning.maxRecordsPerRoom));
 
     const userKey = this.buildUserKey(record.ownerUserId, record.roomId);
     const userRecords = this.index.byUser.get(userKey) ?? [];
     userRecords.push(record);
-    this.index.byUser.set(userKey, this.trimNewest(userRecords, CHAT_CONVERSATION_MEMORY_DEFAULTS.maxRecordsPerUser));
+    this.index.byUser.set(userKey, this.trimNewest(userRecords, this.runtimeTuning.maxRecordsPerUser));
 
     for (const messageId of record.sourceMessageIds) {
       const existing = this.index.byMessageId.get(messageId) ?? [];
@@ -1055,20 +1313,33 @@ export class ConversationMemoryModel {
     turn: ConversationMemoryTurn,
     context: ConversationMemoryContext,
   ): ConversationMemoryKind {
-    if ((turn.legendValue ?? 0) >= 0.72) {
+    const witnessBoost = clamp01((turn.witnessValue ?? 0) + context.publicWitnessHeat * 0.18);
+    const rescueBoost = clamp01((turn.rescueValue ?? 0) + context.helperUrgency * 0.22);
+    const threatBoost = clamp01((turn.threatValue ?? 0) + context.haterPressure * 0.18);
+    const negotiationBoost = clamp01(
+      (turn.negotiationValue ?? 0) + (context.activeChannel === 'DEAL_ROOM' ? 0.16 : 0),
+    );
+    const legendBoost = clamp01(
+      (turn.legendValue ?? 0) + context.publicWitnessHeat * 0.12 + context.churnRisk * 0.08,
+    );
+
+    if (legendBoost >= 0.72) {
       return 'legend';
     }
-    if ((turn.rescueValue ?? 0) >= 0.72) {
+    if (rescueBoost >= 0.72) {
       return 'rescue';
     }
-    if ((turn.threatValue ?? 0) >= 0.72) {
+    if (threatBoost >= 0.72) {
       return 'threat';
     }
-    if ((turn.negotiationValue ?? 0) >= 0.72) {
+    if (negotiationBoost >= 0.72) {
       return 'negotiation';
     }
-    if ((turn.witnessValue ?? 0) >= 0.74) {
+    if (witnessBoost >= 0.74 && this.runtimeTuning.proofEnabled) {
       return 'proof';
+    }
+    if ((turn.counterpartUserId ?? context.counterpartUserId) && context.publicWitnessHeat < 0.45) {
+      return 'relationship';
     }
     return 'turn';
   }
@@ -1089,7 +1360,15 @@ export class ConversationMemoryModel {
     context: ConversationMemoryContext,
   ): string {
     const prefix = intentKind ? `${intentKind}:` : 'Turn:';
-    return `${prefix} ${turn.body.slice(0, 160)}`;
+    const modeLabel = context.modeId ? ` [${context.modeId}]` : '';
+    const pressureLabel = context.helperUrgency >= 0.7
+      ? ' rescue-pressure'
+      : context.haterPressure >= 0.7
+        ? ' threat-pressure'
+        : context.publicWitnessHeat >= 0.7
+          ? ' witnessed'
+          : '';
+    return `${prefix}${modeLabel}${pressureLabel} ${turn.body.slice(0, 160)}`;
   }
 
   private buildSceneSummary(
@@ -1115,13 +1394,16 @@ export class ConversationMemoryModel {
       return 'No memory anchors cleared retrieval threshold for the query.';
     }
     const top = results[0];
-    return `Top memory kind ${top.kind} scored ${top.score.toFixed(1)} for query "${request.queryText.slice(0, 80)}".`;
+    return `Top memory kind ${top.kind} scored ${top.score.toFixed(1)} for query "${request.queryText.slice(0, 80)}" under runtime ${this.runtimeConfig.version}.`;
   }
 
   private embedTurn(
     turn: ConversationMemoryTurn,
     sceneContext: EmbeddingSceneContext,
   ): Nullable<EmbeddingVector> {
+    if (!this.shouldPersistEmbeddings()) {
+      return null;
+    }
     const embedded = this.embeddingClient.embedMessage({
       messageId: turn.messageId,
       text: turn.body,
@@ -1141,7 +1423,7 @@ export class ConversationMemoryModel {
     return {
       roomId: context.roomId,
       roomKind: context.roomKind,
-      channel: context.activeChannel,
+      channel: this.resolveRuntimeVisibleChannel(context.activeChannel, context.roomKind),
       pressureTier: context.pressureTier ?? null,
       activeModeId: context.modeId ?? null,
       sovereigntyProximity: 0.5,
@@ -1172,12 +1454,22 @@ export class ConversationMemoryModel {
     turn: ConversationMemoryTurn,
     context: ConversationMemoryContext,
   ): Score01 {
+    const lineDensity = clamp01(turn.body.split(/\r?\n/g).length / Math.max(1, this.runtimeTuning.maxMessageLines));
+    const punctuationDensity = clamp01((turn.body.match(/[!?]/g)?.length ?? 0) / 8);
+    const ratePressure = clamp01(
+      1 -
+        Math.min(this.runtimeTuning.helperMinimumGapMs, this.runtimeTuning.haterMinimumGapMs) /
+          Math.max(this.runtimeTuning.haterMinimumGapMs, 1),
+    );
     return clamp01(
-      0.24 +
+      0.18 +
       context.publicWitnessHeat * 0.1 +
       context.haterPressure * 0.1 +
       context.helperUrgency * 0.1 +
-      context.churnRisk * 0.08
+      context.churnRisk * 0.08 +
+      lineDensity * 0.12 +
+      punctuationDensity * 0.12 +
+      ratePressure * 0.1
     );
   }
 
@@ -1302,12 +1594,24 @@ export class ConversationMemoryModel {
     context: ConversationMemoryContext,
   ): Score01 {
     if ((turn.legendValue ?? 0) >= 0.72) {
-      return clamp01(0.96);
+      return clamp01(
+        0.92 +
+          (this.runtimeTuning.proofEnabled ? 0.04 : 0) +
+          context.publicWitnessHeat * 0.02,
+      );
     }
     if ((turn.rescueValue ?? 0) >= 0.72 || (turn.threatValue ?? 0) >= 0.72) {
-      return clamp01(0.9);
+      return clamp01(
+        0.84 +
+          (this.runtimeTuning.learningEnabled ? 0.03 : 0) +
+          Math.max(context.helperUrgency, context.haterPressure) * 0.03,
+      );
     }
-    return clamp01(0.78);
+    return clamp01(
+      0.72 +
+        this.runtimeTuning.relationshipPersistenceFloor * 0.08 +
+        (context.activeChannel === 'DEAL_ROOM' ? this.runtimeTuning.replayPersistenceBias * 0.08 : 0),
+    );
   }
 
   private computeRecencyWeight(
@@ -1315,7 +1619,7 @@ export class ConversationMemoryModel {
     nowMs: UnixMs,
   ): Score01 {
     const elapsed = Math.max(0, nowMs - updatedAt);
-    return clamp01(Math.exp(-elapsed / CHAT_CONVERSATION_MEMORY_DEFAULTS.decayHalfLifeMs));
+    return clamp01(Math.exp(-elapsed / this.runtimeTuning.decayHalfLifeMs));
   }
 
   private computeRetention(
@@ -1325,17 +1629,17 @@ export class ConversationMemoryModel {
     const elapsed = Math.max(0, nowMs - record.updatedAt);
     const halfLife =
       record.memoryKind === 'legend'
-        ? CHAT_CONVERSATION_MEMORY_DEFAULTS.legendDecayHalfLifeMs
+        ? this.runtimeTuning.legendDecayHalfLifeMs
         : record.memoryKind === 'relationship'
-          ? CHAT_CONVERSATION_MEMORY_DEFAULTS.relationshipDecayHalfLifeMs
-          : CHAT_CONVERSATION_MEMORY_DEFAULTS.decayHalfLifeMs;
+          ? this.runtimeTuning.relationshipDecayHalfLifeMs
+          : this.runtimeTuning.decayHalfLifeMs;
     const ageWeight = clamp01(Math.exp(-elapsed / halfLife));
     const salience =
       record.signalStrength * 0.12 +
-      record.relationshipHeat * 0.12 +
+      Math.max(record.relationshipHeat, this.runtimeTuning.relationshipPersistenceFloor) * 0.12 +
       record.callbackPotential * 0.12 +
       record.witnessValue * 0.08 +
-      record.replayValue * 0.1 +
+      clamp01(record.replayValue + this.runtimeTuning.replayPersistenceBias) * 0.1 +
       record.rescueValue * 0.1 +
       record.threatValue * 0.1 +
       record.negotiationValue * 0.08 +
