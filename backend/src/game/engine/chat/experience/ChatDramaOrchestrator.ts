@@ -774,7 +774,7 @@ function haterLineForBeat(
   haterPlan: any,
   enableSignatureHints: boolean,
 ): string {
-  const counterpart = safeArray(relationshipSummary?.counterparts)[0];
+  const counterpart: any = safeArray(relationshipSummary?.counterparts)[0];
   const unfinished = clamp01(safeNumber(counterpart?.unfinishedBusiness01, 0));
   const contempt = clamp01(safeNumber(counterpart?.contempt01, 0));
   const respect = clamp01(safeNumber(counterpart?.respect01, 0));
@@ -1419,16 +1419,15 @@ export class ChatDramaOrchestrator {
     const relationshipState = relationshipSummariesToSceneState(relationshipSummary, envelope, playerModelSnapshot);
     const counterpartId = selectCounterpartId(relationshipState);
 
-    const memorySelections = safeArray(
-      this.memoryService.selectCallbacks({
-        playerId: envelope.playerId,
-        roomId: envelope.roomId,
-        channelId: envelope.primaryChannelId,
-        counterpartId,
-        limit: this.config.maxMemorySelections,
-        minSalience01: summarizePressure(envelope.pressureTier) > 0.8 ? 0.25 : 0.4,
-      } as any),
-    );
+    const _memoryResponse = this.memoryService.selectCallbacks({
+      playerId: envelope.playerId,
+      roomId: envelope.roomId,
+      channelId: envelope.primaryChannelId,
+      counterpartId,
+      limit: this.config.maxMemorySelections,
+      minSalience01: summarizePressure(envelope.pressureTier) > 0.8 ? 0.25 : 0.4,
+    } as any);
+    const memorySelections = safeArray(_memoryResponse?.candidates);
 
     const memoryAnchors = memorySelections.map((entry) => memoryAnchorToSceneAnchor(entry, envelope));
     const normalizedPrimaryChannel = toSharedChannelId(envelope.primaryChannelId);

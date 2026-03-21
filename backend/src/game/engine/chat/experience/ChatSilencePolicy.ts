@@ -53,6 +53,16 @@ function clamp01(value: number): number {
   return Number(value.toFixed(6));
 }
 
+function max01(values: readonly number[]): number {
+  if (!Array.isArray(values) || values.length === 0) return 0;
+  let m = 0;
+  for (const v of values) {
+    const n = clamp01(Number(v) ?? 0);
+    if (n > m) m = n;
+  }
+  return m;
+}
+
 function uniq<T>(values: readonly T[]): readonly T[] {
   const out: T[] = [];
   const seen = new Set<T>();

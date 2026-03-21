@@ -1533,16 +1533,20 @@ export class ChatMomentLedger {
     const current = player.revealReservations.get(reservationId);
     if (!current) return undefined;
 
+    const expiresAt = patch.expiresAt ?? current.expiresAt;
+    let status = (patch.status ?? current.status) as ChatMomentRevealReservation['status'];
+
+    if (expiresAt <= now() && status !== 'CONSUMED' && status !== 'CANCELLED') {
+      status = 'EXPIRED';
+    }
+
     const next: ChatMomentRevealReservation = {
       ...current,
       ...patch,
+      status,
       callbackAnchorIds: patch.callbackAnchorIds ? uniq(patch.callbackAnchorIds) : current.callbackAnchorIds,
       tags: patch.tags ? uniq(patch.tags) : current.tags,
     };
-
-    if (next.expiresAt <= now() && next.status !== 'CONSUMED' && next.status !== 'CANCELLED') {
-      next.status = 'EXPIRED';
-    }
 
     player.revealReservations.set(reservationId, next);
     this.updatedAt = now();
@@ -2173,7 +2177,7 @@ export class ChatMomentLedger {
     });
 
     const warmedIds = new Set(warmPool.map((record) => record.memoryId));
-    return response.candidates
+    return [...response.candidates]
       .sort((left, right) => {
         const leftWarm = warmedIds.has(left.memoryId) ? 1 : 0;
         const rightWarm = warmedIds.has(right.memoryId) ? 1 : 0;
