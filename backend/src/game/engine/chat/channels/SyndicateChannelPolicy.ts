@@ -1,4 +1,3 @@
-
 /**
  * ============================================================================
  * POINT ZERO ONE — AUTHORITATIVE BACKEND CHAT SYNDICATE CHANNEL POLICY
@@ -213,6 +212,97 @@ export type SyndicateTranscriptDisposition =
   | 'SHADOW_LEDGER'
   | 'DROP';
 
+export type SyndicateStageMood =
+  | 'QUIET'
+  | 'WATCHFUL'
+  | 'COORDINATED'
+  | 'COMPRESSED'
+  | 'CRITICAL'
+  | 'BREACH_RISK'
+  | 'RECOVERY';
+
+export type SyndicateTrustPosture =
+  | 'BROKEN'
+  | 'FRAGILE'
+  | 'WORKING'
+  | 'STRONG'
+  | 'ELITE';
+
+export type SyndicateRescuePriority =
+  | 'NONE'
+  | 'WATCH'
+  | 'READY'
+  | 'IMMEDIATE'
+  | 'COLLAPSE_IMMINENT';
+
+export type SyndicateSharedObjectiveUrgency =
+  | 'NONE'
+  | 'BACKGROUND'
+  | 'ACTIVE'
+  | 'URGENT'
+  | 'CRITICAL';
+
+export type SyndicateCounterWindowState =
+  | 'NONE'
+  | 'OPEN'
+  | 'EXPIRING'
+  | 'EXPIRED'
+  | 'SEALED';
+
+export type SyndicateReplayClass =
+  | 'NONE'
+  | 'PRIVATE_APPEND'
+  | 'TACTICAL_HIGHLIGHT'
+  | 'COMMAND_HIGHLIGHT'
+  | 'SEALED_APPEND';
+
+export type SyndicateFanoutClass =
+  | 'NONE'
+  | 'ROOM_ONLY'
+  | 'ROOM_PLUS_COMMAND'
+  | 'ROOM_PLUS_HELPER'
+  | 'SHADOW_ONLY';
+
+export type SyndicateShadowLane =
+  | 'NONE'
+  | 'SYSTEM_SHADOW'
+  | 'NPC_SHADOW'
+  | 'RIVALRY_SHADOW'
+  | 'RESCUE_SHADOW'
+  | 'LIVEOPS_SHADOW';
+
+export type SyndicateStageDirectiveKind =
+  | 'QUIET_APPEND'
+  | 'TACTICAL_PIN'
+  | 'COMMAND_FOCUS'
+  | 'SEALED_COORDINATION'
+  | 'RESCUE_ESCALATION'
+  | 'COUNTERPLAY_WINDOW'
+  | 'TRUST_STABILIZE'
+  | 'SHARED_OBJECTIVE_SPOTLIGHT'
+  | 'DEFECTION_ALERT';
+
+export type SyndicateCounterplayDisposition =
+  | 'NONE'
+  | 'WATCH'
+  | 'PREPARE'
+  | 'RESPOND'
+  | 'SEAL';
+
+export type SyndicateDefectionArcState =
+  | 'NONE'
+  | 'BREAK_PACT'
+  | 'SILENT_EXIT'
+  | 'ASSET_SEIZURE'
+  | 'CONFIRMED';
+
+export type SyndicateWitnessClass =
+  | 'PRIVATE_ROOM'
+  | 'PINNED_PRIVATE_ROOM'
+  | 'SEALED_ROOM'
+  | 'AUDIT_ONLY'
+  | 'SHADOW_ONLY';
+
 export type SyndicateReasonCode =
   | 'MODE_ALLOWED'
   | 'MODE_BLOCKED'
@@ -250,6 +340,28 @@ export type SyndicateReasonCode =
   | 'TACTICAL_SIGNAL'
   | 'COMMAND_SIGNAL'
   | 'ROOM_DISRUPTED'
+  | 'MOUNT_ALLOWED'
+  | 'MOUNT_BLOCKED'
+  | 'TRUST_HIGH'
+  | 'SECURITY_OPEN'
+  | 'ROOM_BRIEFING'
+  | 'ROOM_EXECUTION'
+  | 'ROOM_RECOVERY'
+  | 'RESCUE_WINDOW_OPEN'
+  | 'RESCUE_WINDOW_CLOSED'
+  | 'RESCUE_PRIORITY_IMMEDIATE'
+  | 'SHARED_OBJECTIVE_ACTIVE'
+  | 'SHARED_OBJECTIVE_URGENT'
+  | 'COUNTER_WINDOW_OPEN'
+  | 'COUNTER_WINDOW_EXPIRING'
+  | 'COUNTER_WINDOW_EXPIRED'
+  | 'DEFECTION_RISK'
+  | 'DEFECTION_SEQUENCE'
+  | 'TRUST_STABILITY'
+  | 'FANOUT_PRIVATE'
+  | 'REPLAY_APPEND'
+  | 'SHADOW_WRITE'
+  | 'SCENE_ARCHIVE_APPEND'
   | 'CHANNEL_POLICY_SCORE';
 
 // ============================================================================
@@ -292,10 +404,24 @@ export interface SyndicateGameplayState {
   modeFamily?: SyndicateModeFamily | null;
   pressureScore?: number | null;
   rescueWindowOpen?: boolean;
+  rescueWindowDeadlineMs?: number | null;
+  rescueTargetActorId?: string | null;
   collapseRisk?: number | null;
   activeThreatCardCount?: number | null;
   factionIntegrity?: number | null;
   squadIntegrity?: number | null;
+  trustScore?: number | null;
+  teamTrustScore?: number | null;
+  sharedObjectiveActive?: boolean;
+  sharedObjectiveDeadlineMs?: number | null;
+  sharedObjectiveLabel?: string | null;
+  sharedObjectiveRewardHint?: string | null;
+  defectionArcState?: SyndicateDefectionArcState | null;
+  defectionRisk?: number | null;
+  counterWindowDeadlineMs?: number | null;
+  counterWindowOpen?: boolean;
+  aidContractOutstandingCount?: number | null;
+  pendingLoanRepaymentCount?: number | null;
 }
 
 export interface SyndicateSurfaceContext {
@@ -305,6 +431,10 @@ export interface SyndicateSurfaceContext {
   chatFocused: boolean;
   drawerOpen?: boolean;
   collapsed?: boolean;
+  mountSupportsPins?: boolean;
+  mountSupportsRescueBanner?: boolean;
+  mountSupportsThreatRadar?: boolean;
+  mountSupportsPresenceStrip?: boolean;
 }
 
 export interface SyndicateAudienceState {
@@ -313,6 +443,10 @@ export interface SyndicateAudienceState {
   audienceBand?: SyndicateAudienceBand | null;
   tensionScore: number;
   fractureRisk: number;
+  audienceHeat?: number | null;
+  hypePressure?: number | null;
+  humiliationPressure?: number | null;
+  crowdVelocity?: number | null;
 }
 
 export interface SyndicateRateState {
@@ -331,6 +465,9 @@ export interface SyndicateChannelHealth {
   readOnlyWindow: boolean;
   replaySyncInProgress: boolean;
   localBackpressure: boolean;
+  transportLatencyMs?: number | null;
+  droppedFanoutCount?: number | null;
+  sceneArchiveDelayed?: boolean;
 }
 
 export interface SyndicateModerationSnapshot {
@@ -339,6 +476,8 @@ export interface SyndicateModerationSnapshot {
   actorQuarantined?: boolean;
   bodyFlagged?: boolean;
   bodyRiskScore?: number;
+  proofBypassApproved?: boolean;
+  roomSealEnforced?: boolean;
 }
 
 export interface SyndicateMembershipState {
@@ -351,6 +490,11 @@ export interface SyndicateMembershipState {
   factionId?: string | null;
   squadId?: string | null;
   allowCrossFactionMentors?: boolean;
+  allowCrossFactionNpc?: boolean;
+  roomLeadActorId?: string | null;
+  rescueDutyActorIds?: string[];
+  betrayalWatchActorIds?: string[];
+  sealedWitnessActorIds?: string[];
 }
 
 export interface SyndicatePolicyInput {
@@ -398,6 +542,10 @@ export interface SyndicateComposeCapability {
   canIssueCommandDirective: boolean;
   canDropProofWitness: boolean;
   maxBodyLength: number;
+  trustPosture?: SyndicateTrustPosture;
+  rescuePriority?: SyndicateRescuePriority;
+  sharedObjectiveUrgency?: SyndicateSharedObjectiveUrgency;
+  preferredDirectiveKind?: SyndicateStageDirectiveKind;
   reasons: SyndicatePolicyReason[];
 }
 
@@ -414,6 +562,14 @@ export interface SyndicateIngressDecision {
   shouldRequestHelperFollowup: boolean;
   shouldOpenCollapsedPill: boolean;
   shouldEmitTacticalPing: boolean;
+  shouldAppendSceneArchive?: boolean;
+  shouldPersistAuditOnly?: boolean;
+  stageDirective?: SyndicateStageDirective;
+  counterplay?: SyndicateCounterplayPlan;
+  replay?: SyndicateReplayDirective;
+  fanout?: SyndicateFanoutDirective;
+  shadow?: SyndicateShadowDirective;
+  explainability?: SyndicateIngressExplainability;
   deferForMs?: number;
   rerouteChannel?: string;
   reasons: SyndicatePolicyReason[];
@@ -441,10 +597,83 @@ export interface SyndicateChannelSnapshot {
   modeFamily: SyndicateModeFamily;
   audienceBand: SyndicateAudienceBand;
   securityTier: SyndicateSecurityTier;
+  stageMood?: SyndicateStageMood;
+  trustPosture?: SyndicateTrustPosture;
+  rescuePriority?: SyndicateRescuePriority;
+  sharedObjectiveUrgency?: SyndicateSharedObjectiveUrgency;
   compose: SyndicateComposeCapability;
   layout: SyndicateFeatureLayout;
   recommendations: SyndicateRecommendation[];
   reasons: SyndicatePolicyReason[];
+}
+
+export interface SyndicateStageDirective {
+  kind: SyndicateStageDirectiveKind;
+  mood: SyndicateStageMood;
+  priority: number;
+  title: string;
+  detail: string;
+  shouldPin: boolean;
+  shouldHighlightRescueWindow: boolean;
+  shouldHighlightCounterWindow: boolean;
+  shouldShowTrustSignal: boolean;
+  shouldShowSharedObjective: boolean;
+  preferredVisibility: SyndicateVisibilityBand;
+}
+
+export interface SyndicateCounterplayWindow {
+  state: SyndicateCounterWindowState;
+  opensAtMs?: number;
+  closesAtMs?: number;
+  remainingMs: number;
+}
+
+export interface SyndicateCounterplayLedger {
+  activeThreatCardCount: number;
+  outstandingAidContracts: number;
+  pendingRepayments: number;
+  collapseRisk: number;
+  trustScore: number;
+  defectionRisk: number;
+}
+
+export interface SyndicateCounterplayPlan {
+  disposition: SyndicateCounterplayDisposition;
+  urgency: number;
+  title: string;
+  detail: string;
+  window: SyndicateCounterplayWindow;
+  ledger: SyndicateCounterplayLedger;
+}
+
+export interface SyndicateReplayDirective {
+  replayClass: SyndicateReplayClass;
+  shouldAppend: boolean;
+  shouldHighlight: boolean;
+  shouldSeal: boolean;
+  retainAuditTrail: boolean;
+}
+
+export interface SyndicateFanoutDirective {
+  fanoutClass: SyndicateFanoutClass;
+  targetActorIds: string[];
+  includeHelperLane: boolean;
+  includeCommandWitnesses: boolean;
+}
+
+export interface SyndicateShadowDirective {
+  lane: SyndicateShadowLane;
+  shouldWrite: boolean;
+  reason: string;
+}
+
+export interface SyndicateIngressExplainability {
+  stageMood: SyndicateStageMood;
+  trustPosture: SyndicateTrustPosture;
+  rescuePriority: SyndicateRescuePriority;
+  sharedObjectiveUrgency: SyndicateSharedObjectiveUrgency;
+  counterWindowState: SyndicateCounterWindowState;
+  witnessClass: SyndicateWitnessClass;
 }
 
 // ============================================================================
@@ -457,6 +686,9 @@ export interface SyndicateChannelPolicyOptions {
   allowMentorCrossFaction?: boolean;
   allowNpcCrossFaction?: boolean;
   tacticalPinCooldownMs?: number;
+  rescueCriticalRiskThreshold?: number;
+  sharedObjectiveUrgentMs?: number;
+  defectionRiskThreshold?: number;
 }
 
 export interface SyndicateChannelPolicyManifest {
@@ -527,6 +759,9 @@ export const SYNDICATE_OPTIONS_DEFAULT: Required<SyndicateChannelPolicyOptions> 
   allowMentorCrossFaction: true,
   allowNpcCrossFaction: false,
   tacticalPinCooldownMs: 9000,
+  rescueCriticalRiskThreshold: 0.74,
+  sharedObjectiveUrgentMs: 18000,
+  defectionRiskThreshold: 0.68,
 };
 
 export const SYNDICATE_MANIFEST: SyndicateChannelPolicyManifest = {
@@ -573,6 +808,24 @@ export const SYNDICATE_RATE_LIMITS = {
   baseDeferMs: 1800,
   stressedDeferMs: 2800,
 };
+
+
+export const SYNDICATE_STAGE_PRIORITY = {
+  quiet: 24,
+  tactical: 58,
+  command: 76,
+  rescue: 89,
+  sealed: 96,
+};
+
+export const SYNDICATE_TRUST_SCORE_BANDS = {
+  broken: 0.24,
+  fragile: 0.45,
+  working: 0.66,
+  strong: 0.84,
+};
+
+export const SYNDICATE_COUNTER_WINDOW_EXPIRING_MS = 1500;
 
 // ============================================================================
 // Utility helpers
@@ -652,6 +905,103 @@ function syndIsNpc(actor: SyndicateIdentity): boolean {
 
 function syndIsHater(actor: SyndicateIdentity): boolean {
   return actor.speakerClass === 'HATER';
+}
+
+
+function syndTrustScoreFromGameplay(gameplay: SyndicateGameplayState): number {
+  if (typeof gameplay.teamTrustScore === 'number' && Number.isFinite(gameplay.teamTrustScore)) {
+    return syndClamp01(gameplay.teamTrustScore / 100);
+  }
+  if (typeof gameplay.trustScore === 'number' && Number.isFinite(gameplay.trustScore)) {
+    return syndClamp01(gameplay.trustScore / 100);
+  }
+  return 0.5;
+}
+
+function syndTrustPosture(gameplay: SyndicateGameplayState, actor?: SyndicateIdentity): SyndicateTrustPosture {
+  const teamScore = syndTrustScoreFromGameplay(gameplay);
+  const actorScore = actor ? syndTrustScore(actor.trustBand) : teamScore;
+  const blended = syndClamp01((teamScore * 0.6) + (actorScore * 0.4));
+  if (blended < SYNDICATE_TRUST_SCORE_BANDS.broken) return 'BROKEN';
+  if (blended < SYNDICATE_TRUST_SCORE_BANDS.fragile) return 'FRAGILE';
+  if (blended < SYNDICATE_TRUST_SCORE_BANDS.working) return 'WORKING';
+  if (blended < SYNDICATE_TRUST_SCORE_BANDS.strong) return 'STRONG';
+  return 'ELITE';
+}
+
+function syndRescuePriority(
+  gameplay: SyndicateGameplayState,
+  audience: SyndicateAudienceState,
+  threshold: number,
+): SyndicateRescuePriority {
+  const collapseRisk = syndClamp01(syndSafeNumber(gameplay.collapseRisk, 0));
+  const tension = syndClamp01(audience.tensionScore);
+  if (!gameplay.rescueWindowOpen && collapseRisk < 0.45 && tension < 0.5) return 'NONE';
+  if (gameplay.rescueWindowOpen && collapseRisk >= 0.9) return 'COLLAPSE_IMMINENT';
+  if (gameplay.rescueWindowOpen && collapseRisk >= threshold) return 'IMMEDIATE';
+  if (gameplay.rescueWindowOpen || collapseRisk >= 0.58 || tension >= 0.7) return 'READY';
+  return 'WATCH';
+}
+
+function syndSharedObjectiveUrgency(
+  gameplay: SyndicateGameplayState,
+  nowMs: number,
+  urgentMs: number,
+): SyndicateSharedObjectiveUrgency {
+  if (!gameplay.sharedObjectiveActive) return 'NONE';
+  const deadline = gameplay.sharedObjectiveDeadlineMs;
+  if (typeof deadline !== 'number' || !Number.isFinite(deadline)) return 'ACTIVE';
+  const remaining = deadline - nowMs;
+  if (remaining <= 5000) return 'CRITICAL';
+  if (remaining <= urgentMs) return 'URGENT';
+  return 'ACTIVE';
+}
+
+function syndCounterWindowState(gameplay: SyndicateGameplayState, nowMs: number): SyndicateCounterWindowState {
+  const open = Boolean(gameplay.counterWindowOpen);
+  const deadline = gameplay.counterWindowDeadlineMs;
+  if (!open && typeof deadline !== 'number') return 'NONE';
+  if (typeof deadline !== 'number' || !Number.isFinite(deadline)) return open ? 'OPEN' : 'NONE';
+  const remaining = deadline - nowMs;
+  if (remaining <= 0) return 'EXPIRED';
+  if (!open) return 'SEALED';
+  if (remaining <= SYNDICATE_COUNTER_WINDOW_EXPIRING_MS) return 'EXPIRING';
+  return 'OPEN';
+}
+
+function syndDefectionRisk(gameplay: SyndicateGameplayState): number {
+  const explicit = syndSafeNumber(gameplay.defectionRisk, -1);
+  if (explicit >= 0) return syndClamp01(explicit);
+  const trustPenalty = 1 - syndTrustScoreFromGameplay(gameplay);
+  const loanPressure = syndClamp01(syndSafeNumber(gameplay.pendingLoanRepaymentCount, 0) / 4);
+  const aidPressure = syndClamp01(syndSafeNumber(gameplay.aidContractOutstandingCount, 0) / 5);
+  return syndClamp01((trustPenalty * 0.58) + (loanPressure * 0.22) + (aidPressure * 0.2));
+}
+
+function syndStageMood(
+  gameplay: SyndicateGameplayState,
+  membership: SyndicateMembershipState,
+  audience: SyndicateAudienceState,
+  threshold: number,
+): SyndicateStageMood {
+  if (membership.securityTier === 'INNER_RING') return 'BREACH_RISK';
+  if (membership.roomPosture === 'RECOVERY') return 'RECOVERY';
+  if (gameplay.rescueWindowOpen && syndClamp01(syndSafeNumber(gameplay.collapseRisk, 0)) >= threshold) return 'CRITICAL';
+  if (membership.roomPosture === 'EXECUTION') return 'COORDINATED';
+  if (membership.roomPosture === 'STEALTH') return 'WATCHFUL';
+  if (syndClamp01(audience.fractureRisk) >= 0.7) return 'COMPRESSED';
+  return 'QUIET';
+}
+
+function syndWitnessClass(
+  visibility: SyndicateVisibilityBand,
+  transcript: SyndicateTranscriptDisposition,
+): SyndicateWitnessClass {
+  if (transcript === 'SHADOW_LEDGER') return 'SHADOW_ONLY';
+  if (transcript === 'DROP') return 'AUDIT_ONLY';
+  if (visibility === 'SEALED') return 'SEALED_ROOM';
+  if (visibility === 'PINNED' || visibility === 'COMMAND') return 'PINNED_PRIVATE_ROOM';
+  return 'PRIVATE_ROOM';
 }
 
 // ============================================================================
@@ -773,12 +1123,34 @@ export class SyndicateChannelPolicy {
       }
     }
 
+    const trustPosture = syndTrustPosture(gameplay, actor);
+    const rescuePriority = syndRescuePriority(gameplay, {
+      participantCount: 0,
+      activeSpeakers: 0,
+      tensionScore: syndClamp01(syndSafeNumber(gameplay.pressureScore, 0)),
+      fractureRisk: syndClamp01(syndSafeNumber(gameplay.collapseRisk, 0)),
+    }, this.options.rescueCriticalRiskThreshold);
+    const sharedObjectiveUrgency = syndSharedObjectiveUrgency(gameplay, Date.now(), this.options.sharedObjectiveUrgentMs);
+    const preferredDirectiveKind: SyndicateStageDirectiveKind = rescuePriority === 'IMMEDIATE' || rescuePriority === 'COLLAPSE_IMMINENT'
+      ? 'RESCUE_ESCALATION'
+      : sharedObjectiveUrgency === 'URGENT' || sharedObjectiveUrgency === 'CRITICAL'
+        ? 'SHARED_OBJECTIVE_SPOTLIGHT'
+        : canIssueCommandDirective
+          ? 'COMMAND_FOCUS'
+          : canIssueTacticalCall
+            ? 'TACTICAL_PIN'
+            : 'QUIET_APPEND';
+
     return {
       canCompose,
       canIssueTacticalCall,
       canIssueCommandDirective,
       canDropProofWitness,
       maxBodyLength,
+      trustPosture,
+      rescuePriority,
+      sharedObjectiveUrgency,
+      preferredDirectiveKind,
       reasons,
     };
   }
@@ -891,6 +1263,40 @@ export class SyndicateChannelPolicy {
       visibility === 'SEALED' ||
       input.message.kind === 'TACTICAL_CALL' ||
       input.message.kind === 'SYSTEM_DIRECTIVE';
+    const stageDirective = this.buildStageDirective(input, visibility, notification, shouldRequestHelperFollowup);
+    const counterplay = this.buildCounterplayPlan(input, Date.now());
+    const replay = this.buildReplayDirective(input, visibility, transcript);
+    const fanout = this.buildFanoutDirective(input, visibility);
+    const shadow = this.buildShadowDirective(input, transcript, shouldRequestHelperFollowup);
+    const explainability = this.buildExplainability(input, visibility, transcript);
+    const shouldAppendSceneArchive = replay.shouldAppend || Boolean(input.gameplay.sharedObjectiveActive);
+    const shouldPersistAuditOnly = transcript === 'SHADOW_LEDGER' || visibility === 'WHISPER';
+
+    if (input.gameplay.rescueWindowOpen) {
+      syndPushReason(reasons, 'RESCUE_WINDOW_OPEN', 'rescue window open in syndicate lane', 0.18);
+    } else {
+      syndPushReason(reasons, 'RESCUE_WINDOW_CLOSED', 'rescue window closed', 0.02);
+    }
+
+    if (counterplay.window.state === 'OPEN') {
+      syndPushReason(reasons, 'COUNTER_WINDOW_OPEN', 'counter window open', 0.08);
+    } else if (counterplay.window.state === 'EXPIRING') {
+      syndPushReason(reasons, 'COUNTER_WINDOW_EXPIRING', 'counter window expiring', 0.12);
+    } else if (counterplay.window.state === 'EXPIRED') {
+      syndPushReason(reasons, 'COUNTER_WINDOW_EXPIRED', 'counter window expired', -0.05);
+    }
+
+    if (input.gameplay.sharedObjectiveActive) {
+      syndPushReason(reasons, explainability.sharedObjectiveUrgency === 'URGENT' || explainability.sharedObjectiveUrgency === 'CRITICAL'
+        ? 'SHARED_OBJECTIVE_URGENT'
+        : 'SHARED_OBJECTIVE_ACTIVE',
+      `shared objective active${input.gameplay.sharedObjectiveLabel ? `: ${input.gameplay.sharedObjectiveLabel}` : ''}`,
+      explainability.sharedObjectiveUrgency === 'URGENT' || explainability.sharedObjectiveUrgency === 'CRITICAL' ? 0.18 : 0.08);
+    }
+
+    if (counterplay.ledger.defectionRisk >= this.options.defectionRiskThreshold) {
+      syndPushReason(reasons, 'DEFECTION_RISK', `defection risk=${counterplay.ledger.defectionRisk.toFixed(3)}`, -0.12);
+    }
 
     score = syndClamp01(score);
     syndPushReason(reasons, 'CHANNEL_POLICY_SCORE', `final SYNDICATE score=${score.toFixed(3)}`, score);
@@ -908,6 +1314,14 @@ export class SyndicateChannelPolicy {
       shouldRequestHelperFollowup,
       shouldOpenCollapsedPill,
       shouldEmitTacticalPing,
+      shouldAppendSceneArchive,
+      shouldPersistAuditOnly,
+      stageDirective,
+      counterplay,
+      replay,
+      fanout,
+      shadow,
+      explainability,
       reasons,
     };
   }
@@ -939,6 +1353,24 @@ export class SyndicateChannelPolicy {
     const layout = this.resolveFeatureLayout(input);
     const recommendations = this.buildRecommendations(input);
 
+    const stageMood = syndStageMood(
+      input.gameplay,
+      input.membership,
+      input.audience,
+      this.options.rescueCriticalRiskThreshold,
+    );
+    const trustPosture = syndTrustPosture(input.gameplay);
+    const rescuePriority = syndRescuePriority(
+      input.gameplay,
+      input.audience,
+      this.options.rescueCriticalRiskThreshold,
+    );
+    const sharedObjectiveUrgency = syndSharedObjectiveUrgency(
+      input.gameplay,
+      Date.now(),
+      this.options.sharedObjectiveUrgentMs,
+    );
+
     return {
       channel: SYNDICATE_CHANNEL_ID,
       available: this.isAvailableInMode(input.gameplay.runMode, input.membership),
@@ -946,6 +1378,10 @@ export class SyndicateChannelPolicy {
       modeFamily: syndModeFamily(input.gameplay.runMode, input.gameplay.modeFamily ?? null),
       audienceBand,
       securityTier: input.membership.securityTier,
+      stageMood,
+      trustPosture,
+      rescuePriority,
+      sharedObjectiveUrgency,
       compose,
       layout,
       recommendations,
@@ -1250,6 +1686,318 @@ export class SyndicateChannelPolicy {
     return recommendations.sort((a, b) => b.priority - a.priority);
   }
 
+
+  public buildAuditRecord(
+    input: SyndicatePolicyInput,
+    decision: SyndicateIngressDecision,
+  ): SyndicatePolicyAuditRecord {
+    return createSyndicatePolicyAuditRecord(input, decision);
+  }
+
+  private buildStageDirective(
+    input: SyndicatePolicyInput,
+    visibility: SyndicateVisibilityBand,
+    notification: SyndicateNotificationHint,
+    shouldRequestHelperFollowup: boolean,
+  ): SyndicateStageDirective {
+    const mood = syndStageMood(
+      input.gameplay,
+      input.membership,
+      input.audience,
+      this.options.rescueCriticalRiskThreshold,
+    );
+    const rescuePriority = syndRescuePriority(
+      input.gameplay,
+      input.audience,
+      this.options.rescueCriticalRiskThreshold,
+    );
+    const sharedObjectiveUrgency = syndSharedObjectiveUrgency(
+      input.gameplay,
+      Date.now(),
+      this.options.sharedObjectiveUrgentMs,
+    );
+    const defectionRisk = syndDefectionRisk(input.gameplay);
+    let kind: SyndicateStageDirectiveKind = 'QUIET_APPEND';
+    let title = 'Quiet append';
+    let detail = 'Standard syndicate coordination remains private and compact.';
+    let priority = SYNDICATE_STAGE_PRIORITY.quiet;
+
+    if (defectionRisk >= this.options.defectionRiskThreshold) {
+      kind = 'DEFECTION_ALERT';
+      title = 'Defection risk rising';
+      detail = 'Trust and contract pressure suggest betrayal detection should increase.';
+      priority = SYNDICATE_STAGE_PRIORITY.command;
+    }
+
+    if (sharedObjectiveUrgency === 'URGENT' || sharedObjectiveUrgency === 'CRITICAL') {
+      kind = 'SHARED_OBJECTIVE_SPOTLIGHT';
+      title = 'Shared objective live';
+      detail = input.gameplay.sharedObjectiveLabel
+        ? `Shared objective active: ${input.gameplay.sharedObjectiveLabel}`
+        : 'Shared objective pressure is live in the syndicate room.';
+      priority = Math.max(priority, SYNDICATE_STAGE_PRIORITY.command);
+    }
+
+    if (rescuePriority === 'IMMEDIATE' || rescuePriority === 'COLLAPSE_IMMINENT') {
+      kind = 'RESCUE_ESCALATION';
+      title = 'Rescue window critical';
+      detail = shouldRequestHelperFollowup
+        ? 'A teammate is approaching collapse; rescue coordination and helper intervention should surface now.'
+        : 'A teammate is approaching collapse; rescue coordination should surface now.';
+      priority = SYNDICATE_STAGE_PRIORITY.rescue;
+    } else if (input.gameplay.counterWindowOpen) {
+      kind = 'COUNTERPLAY_WINDOW';
+      title = 'Counterplay window open';
+      detail = 'Incoming hostile tempo can still be answered if the room coordinates immediately.';
+      priority = Math.max(priority, SYNDICATE_STAGE_PRIORITY.tactical);
+    } else if (visibility === 'SEALED') {
+      kind = 'SEALED_COORDINATION';
+      title = 'Sealed coordination';
+      detail = 'Inner-ring or sealed-room traffic should remain compact and tightly witnessed.';
+      priority = SYNDICATE_STAGE_PRIORITY.sealed;
+    } else if (visibility === 'COMMAND') {
+      kind = 'COMMAND_FOCUS';
+      title = 'Command focus';
+      detail = 'Lead/tactician authority should remain legible to the room.';
+      priority = Math.max(priority, SYNDICATE_STAGE_PRIORITY.command);
+    } else if (visibility === 'PINNED') {
+      kind = 'TACTICAL_PIN';
+      title = 'Tactical pin';
+      detail = 'The room should hold this signal high until the next action closes the loop.';
+      priority = Math.max(priority, SYNDICATE_STAGE_PRIORITY.tactical);
+    }
+
+    return {
+      kind,
+      mood,
+      priority,
+      title,
+      detail,
+      shouldPin: visibility === 'PINNED' || visibility === 'COMMAND' || visibility === 'SEALED',
+      shouldHighlightRescueWindow: rescuePriority === 'IMMEDIATE' || rescuePriority === 'COLLAPSE_IMMINENT',
+      shouldHighlightCounterWindow: Boolean(input.gameplay.counterWindowOpen),
+      shouldShowTrustSignal: syndTrustPosture(input.gameplay, input.message.actor) === 'BROKEN' || syndTrustPosture(input.gameplay, input.message.actor) === 'FRAGILE',
+      shouldShowSharedObjective: sharedObjectiveUrgency !== 'NONE',
+      preferredVisibility: visibility === 'WHISPER' && notification === 'TACTICAL_PING' ? 'PINNED' : visibility,
+    };
+  }
+
+  private buildCounterplayPlan(
+    input: SyndicatePolicyInput,
+    nowMs: number,
+  ): SyndicateCounterplayPlan {
+    const state = syndCounterWindowState(input.gameplay, nowMs);
+    const deadline = input.gameplay.counterWindowDeadlineMs;
+    const remainingMs = typeof deadline === 'number' && Number.isFinite(deadline)
+      ? Math.max(0, deadline - nowMs)
+      : 0;
+    const ledger: SyndicateCounterplayLedger = {
+      activeThreatCardCount: Math.max(0, syndSafeNumber(input.gameplay.activeThreatCardCount, 0)),
+      outstandingAidContracts: Math.max(0, syndSafeNumber(input.gameplay.aidContractOutstandingCount, 0)),
+      pendingRepayments: Math.max(0, syndSafeNumber(input.gameplay.pendingLoanRepaymentCount, 0)),
+      collapseRisk: syndClamp01(syndSafeNumber(input.gameplay.collapseRisk, 0)),
+      trustScore: syndClamp01(syndTrustScoreFromGameplay(input.gameplay)),
+      defectionRisk: syndDefectionRisk(input.gameplay),
+    };
+
+    let disposition: SyndicateCounterplayDisposition = 'NONE';
+    let urgency = 0.18;
+    let title = 'Maintain formation';
+    let detail = 'No exceptional counterplay posture is currently required.';
+
+    if (state === 'OPEN' || state === 'EXPIRING') {
+      disposition = state === 'EXPIRING' ? 'RESPOND' : 'PREPARE';
+      urgency = state === 'EXPIRING' ? 0.92 : 0.76;
+      title = state === 'EXPIRING' ? 'Counter now' : 'Prepare counterplay';
+      detail = ledger.activeThreatCardCount > 0
+        ? 'Threat pressure is live; teammates with prepared responses should act inside the counter window.'
+        : 'A counter window is open; preserve tempo and avoid wasteful chatter.';
+    } else if (ledger.collapseRisk >= this.options.rescueCriticalRiskThreshold) {
+      disposition = 'RESPOND';
+      urgency = 0.88;
+      title = 'Rescue the weakest link';
+      detail = 'Collapse pressure is now more dangerous than additional optimization.';
+    } else if (ledger.defectionRisk >= this.options.defectionRiskThreshold) {
+      disposition = 'WATCH';
+      urgency = 0.69;
+      title = 'Watch for betrayal sequence';
+      detail = 'Trust and contract pressure suggest that Break Pact / Silent Exit / Asset Seizure style behavior should be watched.';
+    } else if (input.membership.securityTier === 'INNER_RING') {
+      disposition = 'SEAL';
+      urgency = 0.81;
+      title = 'Seal the room';
+      detail = 'Inner-ring coordination favors fewer, higher-confidence signals.';
+    }
+
+    return {
+      disposition,
+      urgency,
+      title,
+      detail,
+      window: {
+        state,
+        opensAtMs: typeof deadline === 'number' && Number.isFinite(deadline) ? Math.max(0, deadline - 5000) : undefined,
+        closesAtMs: typeof deadline === 'number' && Number.isFinite(deadline) ? deadline : undefined,
+        remainingMs,
+      },
+      ledger,
+    };
+  }
+
+  private buildReplayDirective(
+    input: SyndicatePolicyInput,
+    visibility: SyndicateVisibilityBand,
+    transcript: SyndicateTranscriptDisposition,
+  ): SyndicateReplayDirective {
+    if (transcript === 'DROP') {
+      return {
+        replayClass: 'NONE',
+        shouldAppend: false,
+        shouldHighlight: false,
+        shouldSeal: false,
+        retainAuditTrail: true,
+      };
+    }
+
+    if (visibility === 'SEALED') {
+      return {
+        replayClass: 'SEALED_APPEND',
+        shouldAppend: true,
+        shouldHighlight: true,
+        shouldSeal: true,
+        retainAuditTrail: true,
+      };
+    }
+
+    if (visibility === 'COMMAND') {
+      return {
+        replayClass: 'COMMAND_HIGHLIGHT',
+        shouldAppend: true,
+        shouldHighlight: true,
+        shouldSeal: false,
+        retainAuditTrail: true,
+      };
+    }
+
+    if (input.message.kind === 'TACTICAL_CALL' || input.message.kind === 'SQUAD_SIGNAL') {
+      return {
+        replayClass: 'TACTICAL_HIGHLIGHT',
+        shouldAppend: true,
+        shouldHighlight: true,
+        shouldSeal: false,
+        retainAuditTrail: true,
+      };
+    }
+
+    return {
+      replayClass: 'PRIVATE_APPEND',
+      shouldAppend: transcript !== 'SHADOW_LEDGER',
+      shouldHighlight: false,
+      shouldSeal: false,
+      retainAuditTrail: true,
+    };
+  }
+
+  private buildFanoutDirective(
+    input: SyndicatePolicyInput,
+    visibility: SyndicateVisibilityBand,
+  ): SyndicateFanoutDirective {
+    const members = Array.from(new Set(input.membership.members));
+    const leadWitness = input.membership.roomLeadActorId ? [input.membership.roomLeadActorId] : [];
+    if (input.moderation?.actorShadowMuted) {
+      return {
+        fanoutClass: 'SHADOW_ONLY',
+        targetActorIds: [],
+        includeHelperLane: false,
+        includeCommandWitnesses: false,
+      };
+    }
+    if (visibility === 'SEALED' || visibility === 'COMMAND') {
+      return {
+        fanoutClass: 'ROOM_PLUS_COMMAND',
+        targetActorIds: Array.from(new Set([...members, ...leadWitness, ...(input.membership.sealedWitnessActorIds ?? [])])),
+        includeHelperLane: false,
+        includeCommandWitnesses: true,
+      };
+    }
+    if (syndIsHelper(input.message.actor) || syndIsNpc(input.message.actor)) {
+      return {
+        fanoutClass: 'ROOM_PLUS_HELPER',
+        targetActorIds: members,
+        includeHelperLane: true,
+        includeCommandWitnesses: false,
+      };
+    }
+    return {
+      fanoutClass: 'ROOM_ONLY',
+      targetActorIds: members,
+      includeHelperLane: false,
+      includeCommandWitnesses: false,
+    };
+  }
+
+  private buildShadowDirective(
+    input: SyndicatePolicyInput,
+    transcript: SyndicateTranscriptDisposition,
+    shouldRequestHelperFollowup: boolean,
+  ): SyndicateShadowDirective {
+    if (transcript === 'SHADOW_LEDGER') {
+      return {
+        lane: 'SYSTEM_SHADOW',
+        shouldWrite: true,
+        reason: 'Shadow-muted or deferred traffic remains audit-visible but not room-visible.',
+      };
+    }
+    if (shouldRequestHelperFollowup) {
+      return {
+        lane: 'RESCUE_SHADOW',
+        shouldWrite: true,
+        reason: 'Rescue conditions should influence later helper timing even if no helper speaks immediately.',
+      };
+    }
+    if (syndDefectionRisk(input.gameplay) >= this.options.defectionRiskThreshold) {
+      return {
+        lane: 'RIVALRY_SHADOW',
+        shouldWrite: true,
+        reason: 'Defection risk should remain visible to later betrayal-detection logic.',
+      };
+    }
+    return {
+      lane: 'NONE',
+      shouldWrite: false,
+      reason: 'No shadow write required.',
+    };
+  }
+
+  private buildExplainability(
+    input: SyndicatePolicyInput,
+    visibility: SyndicateVisibilityBand,
+    transcript: SyndicateTranscriptDisposition,
+  ): SyndicateIngressExplainability {
+    const nowMs = Date.now();
+    return {
+      stageMood: syndStageMood(
+        input.gameplay,
+        input.membership,
+        input.audience,
+        this.options.rescueCriticalRiskThreshold,
+      ),
+      trustPosture: syndTrustPosture(input.gameplay, input.message.actor),
+      rescuePriority: syndRescuePriority(
+        input.gameplay,
+        input.audience,
+        this.options.rescueCriticalRiskThreshold,
+      ),
+      sharedObjectiveUrgency: syndSharedObjectiveUrgency(
+        input.gameplay,
+        nowMs,
+        this.options.sharedObjectiveUrgentMs,
+      ),
+      counterWindowState: syndCounterWindowState(input.gameplay, nowMs),
+      witnessClass: syndWitnessClass(visibility, transcript),
+    };
+  }
+
   private buildSuppressed(
     score: number,
     reasons: SyndicatePolicyReason[],
@@ -1267,6 +2015,26 @@ export class SyndicateChannelPolicy {
       shouldRequestHelperFollowup: false,
       shouldOpenCollapsedPill: false,
       shouldEmitTacticalPing: false,
+      shouldAppendSceneArchive: false,
+      shouldPersistAuditOnly: true,
+      replay: {
+        replayClass: 'NONE',
+        shouldAppend: false,
+        shouldHighlight: false,
+        shouldSeal: false,
+        retainAuditTrail: true,
+      },
+      fanout: {
+        fanoutClass: 'NONE',
+        targetActorIds: [],
+        includeHelperLane: false,
+        includeCommandWitnesses: false,
+      },
+      shadow: {
+        lane: 'NONE',
+        shouldWrite: false,
+        reason: 'Suppressed traffic does not surface into room state.',
+      },
       reasons,
     };
   }
@@ -1289,6 +2057,26 @@ export class SyndicateChannelPolicy {
       shouldRequestHelperFollowup: false,
       shouldOpenCollapsedPill: false,
       shouldEmitTacticalPing: false,
+      shouldAppendSceneArchive: false,
+      shouldPersistAuditOnly: true,
+      replay: {
+        replayClass: 'PRIVATE_APPEND',
+        shouldAppend: false,
+        shouldHighlight: false,
+        shouldSeal: false,
+        retainAuditTrail: true,
+      },
+      fanout: {
+        fanoutClass: 'SHADOW_ONLY',
+        targetActorIds: [],
+        includeHelperLane: false,
+        includeCommandWitnesses: false,
+      },
+      shadow: {
+        lane: 'SYSTEM_SHADOW',
+        shouldWrite: true,
+        reason: 'Deferred traffic is held in shadow/audit space until the lane is safe to surface it.',
+      },
       deferForMs,
       reasons,
     };
@@ -1456,6 +2244,261 @@ export function inferSyndicateModeFamily(
   return syndModeFamily(mode, family);
 }
 
+
+export function inferSyndicateTrustPosture(
+  gameplay: SyndicateGameplayState,
+  actor?: SyndicateIdentity,
+): SyndicateTrustPosture {
+  return syndTrustPosture(gameplay, actor);
+}
+
+export function inferSyndicateRescuePriority(
+  gameplay: SyndicateGameplayState,
+  audience: SyndicateAudienceState,
+  threshold = SYNDICATE_OPTIONS_DEFAULT.rescueCriticalRiskThreshold,
+): SyndicateRescuePriority {
+  return syndRescuePriority(gameplay, audience, threshold);
+}
+
+export function inferSyndicateSharedObjectiveUrgency(
+  gameplay: SyndicateGameplayState,
+  nowMs = Date.now(),
+  urgentMs = SYNDICATE_OPTIONS_DEFAULT.sharedObjectiveUrgentMs,
+): SyndicateSharedObjectiveUrgency {
+  return syndSharedObjectiveUrgency(gameplay, nowMs, urgentMs);
+}
+
+export function inferSyndicateCounterWindowState(
+  gameplay: SyndicateGameplayState,
+  nowMs = Date.now(),
+): SyndicateCounterWindowState {
+  return syndCounterWindowState(gameplay, nowMs);
+}
+
+export function inferSyndicateDefectionRisk(
+  gameplay: SyndicateGameplayState,
+): number {
+  return syndDefectionRisk(gameplay);
+}
+
+// ============================================================================
+// Scenario fixtures
+// ============================================================================
+
+export interface SyndicateScenarioFixture {
+  id: string;
+  title: string;
+  description: string;
+  input: SyndicatePolicyInput;
+}
+
+function buildFixtureBase(nowMs: number): SyndicatePolicyInput {
+  return {
+    message: {
+      id: 'msg_fixture',
+      channel: 'SYNDICATE',
+      kind: 'TACTICAL_UPDATE',
+      body: 'Hold formation.',
+      ts: nowMs,
+      actor: {
+        actorId: 'player_lead',
+        displayName: 'Lead',
+        speakerClass: 'PLAYER',
+        role: 'LEAD',
+        trustBand: 'TRUSTED',
+        clearance: 'COMMAND',
+        teamId: 'team_alpha',
+        squadId: 'squad_alpha',
+        factionId: 'faction_alpha',
+        isLocalPlayer: true,
+        isOpponent: false,
+      },
+    },
+    gameplay: {
+      runId: 'run_fixture',
+      seed: 'fixture',
+      tick: 144,
+      runMode: 'co-op',
+      modeFamily: 'SYNDICATE',
+      pressureScore: 0.42,
+      rescueWindowOpen: false,
+      collapseRisk: 0.31,
+      activeThreatCardCount: 1,
+      factionIntegrity: 0.83,
+      squadIntegrity: 0.78,
+      teamTrustScore: 73,
+      sharedObjectiveActive: false,
+      defectionRisk: 0.18,
+      counterWindowOpen: false,
+    },
+    surface: {
+      activeSurface: 'SYNDICATE_SCREEN',
+      visibleSurfaces: ['SYNDICATE_SCREEN', 'CHAT_DRAWER'],
+      chatDockOpen: true,
+      chatFocused: true,
+      collapsed: false,
+      mountSupportsPins: true,
+      mountSupportsRescueBanner: true,
+      mountSupportsThreatRadar: true,
+      mountSupportsPresenceStrip: true,
+    },
+    audience: {
+      participantCount: 4,
+      activeSpeakers: 2,
+      tensionScore: 0.46,
+      fractureRisk: 0.25,
+      audienceHeat: 0.41,
+      hypePressure: 0.38,
+      humiliationPressure: 0.08,
+      crowdVelocity: 0.18,
+    },
+    rate: {
+      now: nowMs,
+      trailing10sCount: 2,
+      trailing30sCount: 6,
+      trailing60sCount: 11,
+      sameActorTrailing30sCount: 2,
+      sameKindTrailing30sCount: 2,
+      sameBodyFingerprintTrailing60sCount: 0,
+    },
+    health: {
+      degradedTransport: false,
+      moderationLock: false,
+      readOnlyWindow: false,
+      replaySyncInProgress: false,
+      localBackpressure: false,
+      transportLatencyMs: 41,
+      droppedFanoutCount: 0,
+      sceneArchiveDelayed: false,
+    },
+    membership: {
+      roomId: 'room_syndicate_alpha',
+      roomType: 'SYNDICATE_ROOM',
+      roomPosture: 'EXECUTION',
+      securityTier: 'TACTICAL',
+      members: ['player_lead', 'player_banker', 'player_runner', 'player_analyst'],
+      trustedMembers: ['player_lead', 'player_banker', 'player_runner', 'player_analyst'],
+      factionId: 'faction_alpha',
+      squadId: 'squad_alpha',
+      allowCrossFactionMentors: true,
+      allowCrossFactionNpc: false,
+      roomLeadActorId: 'player_lead',
+      rescueDutyActorIds: ['player_runner'],
+      betrayalWatchActorIds: ['player_analyst'],
+      sealedWitnessActorIds: ['player_lead'],
+    },
+    moderation: {
+      actorShadowMuted: false,
+      actorHardMuted: false,
+      actorQuarantined: false,
+      bodyFlagged: false,
+      bodyRiskScore: 0.01,
+      proofBypassApproved: false,
+      roomSealEnforced: false,
+    },
+  };
+}
+
+export const SYNDICATE_SCENARIO_FIXTURES: readonly SyndicateScenarioFixture[] = (() => {
+  const nowMs = Date.now();
+  const base = buildFixtureBase(nowMs);
+  return [
+    {
+      id: 'standard_execution',
+      title: 'Standard execution lane',
+      description: 'Trusted co-op room with tactical chatter and normal pacing.',
+      input: base,
+    },
+    {
+      id: 'critical_rescue',
+      title: 'Critical rescue window',
+      description: 'Rescue window is open and collapse pressure is close to terminal.',
+      input: {
+        ...base,
+        message: {
+          ...base.message,
+          kind: 'TACTICAL_CALL',
+          body: 'Runner is critical — rescue now.',
+        },
+        gameplay: {
+          ...base.gameplay,
+          rescueWindowOpen: true,
+          rescueWindowDeadlineMs: nowMs + 4200,
+          rescueTargetActorId: 'player_runner',
+          collapseRisk: 0.88,
+          pressureScore: 0.91,
+        },
+        audience: {
+          ...base.audience,
+          tensionScore: 0.87,
+          fractureRisk: 0.72,
+        },
+      },
+    },
+    {
+      id: 'shared_objective_urgent',
+      title: 'Shared objective urgent',
+      description: 'A shared objective is time-limited and should alter room emphasis.',
+      input: {
+        ...base,
+        gameplay: {
+          ...base.gameplay,
+          sharedObjectiveActive: true,
+          sharedObjectiveDeadlineMs: nowMs + 9000,
+          sharedObjectiveLabel: 'Secure the team contract',
+          sharedObjectiveRewardHint: 'Teamwide rate reduction',
+        },
+        message: {
+          ...base.message,
+          kind: 'ROOM_STATE',
+          body: 'Shared objective active: secure the team contract.',
+          actor: {
+            ...base.message.actor,
+            speakerClass: 'SYSTEM',
+            role: 'SYSTEM',
+            clearance: 'COMMAND',
+          },
+        },
+      },
+    },
+    {
+      id: 'defection_watch',
+      title: 'Defection watch',
+      description: 'Trust is slipping and betrayal detection should intensify.',
+      input: {
+        ...base,
+        gameplay: {
+          ...base.gameplay,
+          teamTrustScore: 28,
+          defectionRisk: 0.79,
+          defectionArcState: 'SILENT_EXIT',
+          pendingLoanRepaymentCount: 3,
+          aidContractOutstandingCount: 2,
+        },
+        message: {
+          ...base.message,
+          kind: 'COUNTER_INTEL',
+          body: 'Silent Exit pattern detected. Watch contract drift.',
+          actor: {
+            ...base.message.actor,
+            actorId: 'helper_archivist',
+            displayName: 'Archivist',
+            speakerClass: 'HELPER',
+            role: 'MENTOR',
+            trustBand: 'INNER_CIRCLE',
+            clearance: 'TACTICAL',
+            isLocalPlayer: false,
+          },
+        },
+      },
+    },
+  ] as const;
+})();
+
+export function listSyndicateScenarioFixtures(): readonly SyndicateScenarioFixture[] {
+  return SYNDICATE_SCENARIO_FIXTURES;
+}
+
 // ============================================================================
 // Audit / telemetry-friendly record
 // ============================================================================
@@ -1475,6 +2518,11 @@ export interface SyndicatePolicyAuditRecord {
   visibility: SyndicateVisibilityBand;
   transcript: SyndicateTranscriptDisposition;
   score: number;
+  stageMood?: SyndicateStageMood;
+  trustPosture?: SyndicateTrustPosture;
+  rescuePriority?: SyndicateRescuePriority;
+  sharedObjectiveUrgency?: SyndicateSharedObjectiveUrgency;
+  witnessClass?: SyndicateWitnessClass;
   reasons: SyndicatePolicyReason[];
 }
 
@@ -1497,6 +2545,11 @@ export function createSyndicatePolicyAuditRecord(
     visibility: decision.visibility,
     transcript: decision.transcript,
     score: decision.score,
+    stageMood: decision.explainability?.stageMood,
+    trustPosture: decision.explainability?.trustPosture,
+    rescuePriority: decision.explainability?.rescuePriority,
+    sharedObjectiveUrgency: decision.explainability?.sharedObjectiveUrgency,
+    witnessClass: decision.explainability?.witnessClass,
     reasons: decision.reasons,
   };
 }
