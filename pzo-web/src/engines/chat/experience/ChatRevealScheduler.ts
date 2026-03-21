@@ -3,7 +3,7 @@
  * POINT ZERO ONE — CHAT EXPERIENCE REVEAL SCHEDULER
  * FILE: pzo-web/src/engines/chat/experience/ChatRevealScheduler.ts
  * VERSION: 2026.03.18
- * AUTHORSHIP: OpenAI for Antonio T. Smith Jr.
+ * AUTHORSHIP: Antonio T. Smith Jr.
  * LICENSE: Internal / Proprietary / All Rights Reserved
  * ============================================================================
  *

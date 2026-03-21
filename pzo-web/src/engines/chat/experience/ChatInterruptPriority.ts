@@ -3,7 +3,7 @@
  * POINT ZERO ONE — CHAT EXPERIENCE INTERRUPT PRIORITY AUTHORITY
  * FILE: pzo-web/src/engines/chat/experience/ChatInterruptPriority.ts
  * VERSION: 2026.03.18
- * AUTHORSHIP: OpenAI for Antonio T. Smith Jr.
+ * AUTHORSHIP: Antonio T. Smith Jr.
  * LICENSE: Internal / Proprietary / All Rights Reserved
  * ============================================================================
  *

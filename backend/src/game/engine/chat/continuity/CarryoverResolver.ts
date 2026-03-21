@@ -3,7 +3,7 @@
  * POINT ZERO ONE — AUTHORITATIVE BACKEND CHAT CARRYOVER RESOLVER
  * FILE: backend/src/game/engine/chat/continuity/CarryoverResolver.ts
  * VERSION: 2026.03.19-continuity-upgrade
- * AUTHORSHIP: OpenAI for Antonio T. Smith Jr.
+ * AUTHORSHIP: Antonio T. Smith Jr.
  * LICENSE: Internal / Proprietary / All Rights Reserved
  * ============================================================================
  *

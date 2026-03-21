@@ -3,7 +3,7 @@
  * POINT ZERO ONE — AUTHORITATIVE BACKEND CHAT TURNING-POINT RESOLVER
  * FILE: backend/src/game/engine/chat/postrun/TurningPointResolver.ts
  * VERSION: 2026.03.20
- * AUTHORSHIP: OpenAI for Antonio T. Smith Jr.
+ * AUTHORSHIP: Antonio T. Smith Jr.
  * LICENSE: Internal / Proprietary / All Rights Reserved
  * ============================================================================
  *

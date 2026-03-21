@@ -3,7 +3,7 @@
  * POINT ZERO ONE — AUTHORITATIVE BACKEND CHAT TELEGRAPH POLICY
  * FILE: backend/src/game/engine/chat/combat/ChatTelegraphPolicy.ts
  * VERSION: 2026.03.19
- * AUTHORSHIP: OpenAI for Antonio T. Smith Jr.
+ * AUTHORSHIP: Antonio T. Smith Jr.
  * LICENSE: Internal / Proprietary / All Rights Reserved
  * ============================================================================
  *

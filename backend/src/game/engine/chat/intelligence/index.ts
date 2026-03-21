@@ -3,7 +3,7 @@
  * POINT ZERO ONE — AUTHORITATIVE BACKEND CHAT INTELLIGENCE ENTRYPOINT
  * FILE: backend/src/game/engine/chat/intelligence/index.ts
  * VERSION: 2026.03.20-backend-intelligence-emotion.v1
- * AUTHORSHIP: OpenAI for Antonio T. Smith Jr.
+ * AUTHORSHIP: Antonio T. Smith Jr.
  * LICENSE: Internal / Proprietary / All Rights Reserved
  * ============================================================================
  *

@@ -3,7 +3,7 @@
  * POINT ZERO ONE — BACKEND CHAT RETRIEVAL RANKING AUTHORITY
  * FILE: backend/src/game/engine/chat/intelligence/dl/MemoryRankingPolicy.ts
  * VERSION: 2026.03.20-retrieval-continuity.v1
- * AUTHORSHIP: OpenAI for Antonio T. Smith Jr.
+ * AUTHORSHIP: Antonio T. Smith Jr.
  * LICENSE: Internal / Proprietary / All Rights Reserved
  * ============================================================================
  *

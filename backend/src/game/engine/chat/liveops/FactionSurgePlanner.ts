@@ -3,7 +3,7 @@
  * POINT ZERO ONE — BACKEND CHAT LIVEOPS FACTION SURGE PLANNER
  * FILE: backend/src/game/engine/chat/liveops/FactionSurgePlanner.ts
  * VERSION: 2026.03.19-liveops-world-events
- * AUTHORSHIP: OpenAI for Antonio T. Smith Jr.
+ * AUTHORSHIP: Antonio T. Smith Jr.
  * LICENSE: Internal / Proprietary / All Rights Reserved
  * ============================================================================
  *

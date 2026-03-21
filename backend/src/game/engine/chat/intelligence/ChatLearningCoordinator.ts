@@ -3,7 +3,7 @@
  * POINT ZERO ONE — AUTHORITATIVE BACKEND CHAT LEARNING COORDINATOR
  * FILE: backend/src/game/engine/chat/intelligence/ChatLearningCoordinator.ts
  * VERSION: 2026.03.14
- * AUTHORSHIP: OpenAI for Antonio T. Smith Jr.
+ * AUTHORSHIP: Antonio T. Smith Jr.
  * LICENSE: Internal / Proprietary / All Rights Reserved
  * ============================================================================
  *

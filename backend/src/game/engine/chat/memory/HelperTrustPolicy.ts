@@ -3,7 +3,7 @@
  * POINT ZERO ONE — BACKEND CHAT HELPER TRUST POLICY
  * FILE: backend/src/game/engine/chat/memory/HelperTrustPolicy.ts
  * VERSION: 2026.03.18
- * AUTHORSHIP: OpenAI for Antonio T. Smith Jr.
+ * AUTHORSHIP: Antonio T. Smith Jr.
  * LICENSE: Internal / Proprietary / All Rights Reserved
  * ============================================================================
  *

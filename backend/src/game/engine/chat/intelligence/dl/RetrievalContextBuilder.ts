@@ -3,7 +3,7 @@
  * POINT ZERO ONE — BACKEND CHAT RETRIEVAL CONTEXT BUILDER
  * FILE: backend/src/game/engine/chat/intelligence/dl/RetrievalContextBuilder.ts
  * VERSION: 2026.03.20-retrieval-continuity.v1
- * AUTHORSHIP: OpenAI for Antonio T. Smith Jr.
+ * AUTHORSHIP: Antonio T. Smith Jr.
  * LICENSE: Internal / Proprietary / All Rights Reserved
  * ============================================================================
  *

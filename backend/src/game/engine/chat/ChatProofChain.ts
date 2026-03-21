@@ -4,7 +4,7 @@
  * POINT ZERO ONE — AUTHORITATIVE BACKEND CHAT PROOF CHAIN
  * FILE: backend/src/game/engine/chat/ChatProofChain.ts
  * VERSION: 2026.03.14
- * AUTHORSHIP: OpenAI for Antonio T. Smith Jr.
+ * AUTHORSHIP: Antonio T. Smith Jr.
  * LICENSE: Internal / Proprietary / All Rights Reserved
  * ============================================================================
  *

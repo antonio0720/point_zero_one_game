@@ -3,7 +3,7 @@
  * POINT ZERO ONE — FRONTEND PERSONA SIGNATURE COMPOSER
  * FILE: pzo-web/src/engines/chat/persona/SignatureComposer.ts
  * VERSION: 2026.03.19
- * AUTHORSHIP: OpenAI for Antonio T. Smith Jr.
+ * AUTHORSHIP: Antonio T. Smith Jr.
  * LICENSE: Internal / Proprietary / All Rights Reserved
  * ============================================================================
  *

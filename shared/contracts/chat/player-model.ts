@@ -3,7 +3,7 @@
  * POINT ZERO ONE — SHARED CHAT PLAYER MODEL CONTRACTS
  * FILE: shared/contracts/chat/player-model.ts
  * VERSION: 2026.03.17-phase4
- * AUTHORSHIP: OpenAI for Antonio T. Smith Jr.
+ * AUTHORSHIP: Antonio T. Smith Jr.
  * LICENSE: Internal / Proprietary / All Rights Reserved
  * ============================================================================
  */

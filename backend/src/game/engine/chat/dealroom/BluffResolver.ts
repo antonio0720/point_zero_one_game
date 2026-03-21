@@ -4,7 +4,7 @@
  * POINT ZERO ONE — AUTHORITATIVE BACKEND CHAT DEALROOM BLUFF RESOLVER
  * FILE: backend/src/game/engine/chat/dealroom/BluffResolver.ts
  * VERSION: 2026.03.19
- * AUTHORSHIP: OpenAI for Antonio T. Smith Jr.
+ * AUTHORSHIP: Antonio T. Smith Jr.
  * LICENSE: Internal / Proprietary / All Rights Reserved
  * ============================================================================
  *

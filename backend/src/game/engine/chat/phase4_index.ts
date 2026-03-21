@@ -3,7 +3,7 @@
  * POINT ZERO ONE — BACKEND CHAT PHASE-4 + EXPERIENCE BARREL
  * FILE: backend/src/game/engine/chat/phase4_index.ts
  * VERSION: 2026.03.18-experience-upgrade
- * AUTHORSHIP: OpenAI for Antonio T. Smith Jr.
+ * AUTHORSHIP: Antonio T. Smith Jr.
  * LICENSE: Internal / Proprietary / All Rights Reserved
  * ============================================================================
  *

@@ -4,7 +4,7 @@
  * POINT ZERO ONE — AUTHORITATIVE CHAT MESSAGE HANDLER
  * FILE: pzo-server/src/chat/ChatMessageHandler.ts
  * VERSION: 2026.03.14
- * AUTHORSHIP: OpenAI for Antonio T. Smith Jr.
+ * AUTHORSHIP: Antonio T. Smith Jr.
  * LICENSE: Internal / Proprietary / All Rights Reserved
  * ============================================================================
  *

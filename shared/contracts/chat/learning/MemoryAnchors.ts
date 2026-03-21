@@ -3,7 +3,7 @@
  * POINT ZERO ONE — SHARED CHAT LEARNING CONTRACT
  * FILE: shared/contracts/chat/learning/MemoryAnchors.ts
  * VERSION: 2026.03.20-retrieval-continuity.v1
- * AUTHORSHIP: OpenAI for Antonio T. Smith Jr.
+ * AUTHORSHIP: Antonio T. Smith Jr.
  * LICENSE: Internal / Proprietary / All Rights Reserved
  * ============================================================================
  *
