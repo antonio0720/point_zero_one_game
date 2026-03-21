@@ -48,7 +48,7 @@ import {
   type MemoryAnchorQueryIntent,
   type MemoryAnchorReceipt,
   type MemoryAnchorWindow,
-} from '../../../../../../shared/contracts/chat/learning/MemoryAnchors';
+} from '../../../../../../../shared/contracts/chat/learning/MemoryAnchors';
 import {
   createMemoryRankingPolicy,
   type MemoryRankingCandidate,
@@ -857,7 +857,7 @@ export function createMemoryAnchorStore(
 
   function toPreview(
     anchor: MemoryAnchor,
-    score: number,
+    _score: number,
     rank: number,
   ): MemoryAnchorPreview {
     return Object.freeze({
@@ -1146,3 +1146,12 @@ function clampUnit(value: number): number {
 function round4(value: number): number {
   return Math.round(value * 10000) / 10000;
 }
+
+
+
+
+
+
+
+
+
