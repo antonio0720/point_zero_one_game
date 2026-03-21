@@ -43,6 +43,7 @@
 import * as ChatLearningBridgeRuntime from './ChatLearningBridge';
 import * as ChatLearningProfileRuntime from './ChatLearningProfile';
 import * as ChatColdStartProfileRuntime from './ChatColdStartProfile';
+import * as ChatNoveltyLedgerRuntime from './ChatNoveltyLedger';
 
 // ── ML lane ──────────────────────────────────────────────────────────────────
 import * as ChatFeatureExtractorRuntime from './ml/FeatureExtractor';
@@ -73,6 +74,7 @@ import * as ChatSaliencePreviewRuntime from './dl/SaliencePreview';
 export * from './ChatLearningBridge';
 export * from './ChatLearningProfile';
 export * from './ChatColdStartProfile';
+export * from './ChatNoveltyLedger';
 export * from './ml/EmotionScorer';
 export * from './ml/SocialEmbarrassmentScorer';
 export * from './ml/ConfidenceSwingTracker';
@@ -97,6 +99,7 @@ export const CHAT_INTELLIGENCE_BARREL_LAWS = Object.freeze([
   'Emotion state is a signal surface, not a display flag.',
   'Retrieval is read-only from the frontend; writes flow through backend authority.',
   'Salience previews are ephemeral rendering hints, not ground truth.',
+  'Novelty ledgers should be imported from this barrel when local anti-repeat scoring is needed.',
   'Every memory retrieval result must carry a confidence bound.',
   'Do not collapse retrieval results into UI decisions without a policy gate.',
 ] as const);
@@ -110,6 +113,7 @@ export const CHAT_INTELLIGENCE_PHASE_EXPORTS = Object.freeze({
     'ChatLearningBridge.ts',
     'ChatLearningProfile.ts',
     'ChatColdStartProfile.ts',
+    'ChatNoveltyLedger.ts',
     'ml/FeatureExtractor.ts',
     'ml/EngagementScorer.ts',
     'ml/ColdStartPolicy.ts',
@@ -149,6 +153,7 @@ export const CHAT_INTELLIGENCE_COMPILE_SAFE_SURFACE = Object.freeze({
   hasBridgeRuntime: true,
   hasColdStartProfileRuntime: true,
   hasLearningProfileRuntime: true,
+  hasNoveltyLedgerRuntime: true,
   // ML lane
   hasFeatureExtractorRuntime: true,
   hasEngagementScorerRuntime: true,
@@ -175,6 +180,7 @@ export const CHAT_INTELLIGENCE_COMPILE_SAFE_SURFACE = Object.freeze({
   canInstantiateBridge: true,
   canHydrateColdStartProfile: true,
   canHydrateLearningProfile: true,
+  canInstantiateNoveltyLedger: true,
   canExtractFeatures: true,
   canScoreEngagement: true,
   canApplyColdStartPolicy: true,
@@ -223,6 +229,12 @@ export const CHAT_INTELLIGENCE_MODULE_MANIFESTS = Object.freeze({
     version: ChatLearningProfileRuntime.CHAT_LEARNING_PROFILE_VERSION,
     laws: ChatLearningProfileRuntime.CHAT_LEARNING_PROFILE_RUNTIME_LAWS,
     defaults: ChatLearningProfileRuntime.CHAT_LEARNING_PROFILE_DEFAULTS,
+  }),
+  noveltyLedger: Object.freeze({
+    moduleName: ChatNoveltyLedgerRuntime.CHAT_NOVELTY_LEDGER_MODULE_NAME,
+    version: ChatNoveltyLedgerRuntime.CHAT_NOVELTY_LEDGER_VERSION,
+    laws: ChatNoveltyLedgerRuntime.CHAT_NOVELTY_LEDGER_RUNTIME_LAWS,
+    defaults: ChatNoveltyLedgerRuntime.CHAT_NOVELTY_LEDGER_DEFAULTS,
   }),
   featureExtractor: Object.freeze({
     moduleName: ChatFeatureExtractorRuntime.CHAT_FEATURE_EXTRACTOR_MODULE_NAME,
@@ -348,6 +360,7 @@ export const CHAT_INTELLIGENCE_FRONTEND_LAWS = Object.freeze(
     ...ChatLearningBridgeRuntime.CHAT_LEARNING_BRIDGE_RUNTIME_LAWS,
     ...ChatColdStartProfileRuntime.CHAT_COLD_START_PROFILE_RUNTIME_LAWS,
     ...ChatLearningProfileRuntime.CHAT_LEARNING_PROFILE_RUNTIME_LAWS,
+    ...ChatNoveltyLedgerRuntime.CHAT_NOVELTY_LEDGER_RUNTIME_LAWS,
     ...ChatFeatureExtractorRuntime.CHAT_FEATURE_EXTRACTOR_RUNTIME_LAWS,
     ...ChatEngagementScorerRuntime.CHAT_ENGAGEMENT_SCORER_RUNTIME_LAWS,
     ...ChatColdStartPolicyRuntime.CHAT_COLD_START_POLICY_RUNTIME_LAWS,
@@ -416,6 +429,17 @@ export const CHAT_INTELLIGENCE_LEARNING_PROFILE_NAMESPACE = Object.freeze({
   createChatLearningProfile: ChatLearningProfileRuntime.createChatLearningProfile,
   hydrateLearningProfile: ChatLearningProfileRuntime.hydrateLearningProfile,
   mergeLearningProfileDelta: ChatLearningProfileRuntime.mergeLearningProfileDelta,
+} as const);
+
+export const CHAT_INTELLIGENCE_NOVELTY_LEDGER_NAMESPACE = Object.freeze({
+  moduleName: ChatNoveltyLedgerRuntime.CHAT_NOVELTY_LEDGER_MODULE_NAME,
+  version: ChatNoveltyLedgerRuntime.CHAT_NOVELTY_LEDGER_VERSION,
+  defaults: ChatNoveltyLedgerRuntime.CHAT_NOVELTY_LEDGER_DEFAULTS,
+  laws: ChatNoveltyLedgerRuntime.CHAT_NOVELTY_LEDGER_RUNTIME_LAWS,
+  ChatNoveltyLedger: ChatNoveltyLedgerRuntime.ChatNoveltyLedger,
+  createChatNoveltyLedger: ChatNoveltyLedgerRuntime.createChatNoveltyLedger,
+  restoreChatNoveltyLedger: ChatNoveltyLedgerRuntime.restoreChatNoveltyLedger,
+  describeChatNoveltyScore: ChatNoveltyLedgerRuntime.describeChatNoveltyScore,
 } as const);
 
 export const CHAT_INTELLIGENCE_EMOTION_SCORER_NAMESPACE = Object.freeze({
@@ -495,6 +519,7 @@ export const CHAT_INTELLIGENCE_NAMESPACE = Object.freeze({
   bridge: CHAT_INTELLIGENCE_BRIDGE_NAMESPACE,
   coldStart: CHAT_INTELLIGENCE_COLD_START_NAMESPACE,
   learningProfile: CHAT_INTELLIGENCE_LEARNING_PROFILE_NAMESPACE,
+  noveltyLedger: CHAT_INTELLIGENCE_NOVELTY_LEDGER_NAMESPACE,
   emotionScorer: CHAT_INTELLIGENCE_EMOTION_SCORER_NAMESPACE,
   socialEmbarrassment: CHAT_INTELLIGENCE_SOCIAL_EMBARRASSMENT_NAMESPACE,
   confidenceSwing: CHAT_INTELLIGENCE_CONFIDENCE_SWING_NAMESPACE,
@@ -515,6 +540,7 @@ export const CHAT_INTELLIGENCE_FULL_SURFACE = Object.freeze({
   bridge: CHAT_INTELLIGENCE_BRIDGE_NAMESPACE,
   coldStart: CHAT_INTELLIGENCE_COLD_START_NAMESPACE,
   learningProfile: CHAT_INTELLIGENCE_LEARNING_PROFILE_NAMESPACE,
+  noveltyLedger: CHAT_INTELLIGENCE_NOVELTY_LEDGER_NAMESPACE,
   emotionScorer: CHAT_INTELLIGENCE_EMOTION_SCORER_NAMESPACE,
   socialEmbarrassment: CHAT_INTELLIGENCE_SOCIAL_EMBARRASSMENT_NAMESPACE,
   confidenceSwing: CHAT_INTELLIGENCE_CONFIDENCE_SWING_NAMESPACE,
@@ -535,6 +561,11 @@ export const CHAT_INTELLIGENCE_FULL_SURFACE = Object.freeze({
   createChatLearningProfile: ChatLearningProfileRuntime.createChatLearningProfile,
   hydrateLearningProfile: ChatLearningProfileRuntime.hydrateLearningProfile,
   mergeLearningProfileDelta: ChatLearningProfileRuntime.mergeLearningProfileDelta,
+
+  ChatNoveltyLedger: ChatNoveltyLedgerRuntime.ChatNoveltyLedger,
+  createChatNoveltyLedger: ChatNoveltyLedgerRuntime.createChatNoveltyLedger,
+  restoreChatNoveltyLedger: ChatNoveltyLedgerRuntime.restoreChatNoveltyLedger,
+  describeChatNoveltyScore: ChatNoveltyLedgerRuntime.describeChatNoveltyScore,
 
   EmotionScorer: ChatEmotionScorerRuntime.EmotionScorer,
   createEmotionScorer: ChatEmotionScorerRuntime.createEmotionScorer,
@@ -653,6 +684,7 @@ export type ChatIntelligenceCompileSafeSurface = typeof CHAT_INTELLIGENCE_COMPIL
 export type ChatIntelligenceBridgeNamespace = typeof CHAT_INTELLIGENCE_BRIDGE_NAMESPACE;
 export type ChatIntelligenceColdStartNamespace = typeof CHAT_INTELLIGENCE_COLD_START_NAMESPACE;
 export type ChatIntelligenceLearningProfileNamespace = typeof CHAT_INTELLIGENCE_LEARNING_PROFILE_NAMESPACE;
+export type ChatIntelligenceNoveltyLedgerNamespace = typeof CHAT_INTELLIGENCE_NOVELTY_LEDGER_NAMESPACE;
 export type ChatIntelligenceEmotionScorerNamespace =
   typeof CHAT_INTELLIGENCE_EMOTION_SCORER_NAMESPACE;
 export type ChatIntelligenceSocialEmbarrassmentNamespace =

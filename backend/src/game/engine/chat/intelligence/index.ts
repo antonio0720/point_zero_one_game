@@ -88,7 +88,7 @@ export type {
   ChatLearningCoordinatorAcceptedMessageContext,
   ChatLearningCoordinatorApi,
   ChatLearningCoordinatorChannelSwitchContext,
-  ChatLearningCoordinatorDecisionSnapshot,
+  ChatLearningDecisionSnapshot,
   ChatLearningCoordinatorDiagnostics,
   ChatLearningCoordinatorFeatureContext,
   ChatLearningCoordinatorHydrationPayload,
