@@ -78,7 +78,7 @@ import {
   type MemoryAnchorQueryIntent,
   type MemoryAnchorReceipt,
   type MemoryAnchorWindow,
-} from '../../../../../../shared/contracts/chat/learning/MemoryAnchors';
+} from '../../../../../../../shared/contracts/chat/learning/MemoryAnchors';
 
 import {
   createMemoryRankingPolicy,
@@ -260,11 +260,11 @@ export interface MemoryAnchorStoreQueryRequest {
 export interface MemoryAnchorQueryResponse {
   readonly query:          MemoryAnchorQuery;
   readonly matches:        readonly MemoryAnchorMatch[];
-  readonly ranked:         readonly RankedMemoryAnchor[];
+  readonly ranked:         ReadonlyArray<RankedMemoryAnchor>;
   readonly previews:       readonly MemoryAnchorPreview[];
   readonly receipt:        MemoryAnchorReceipt;
   readonly candidateIds:   readonly MemoryAnchorId[];
-  readonly shadowMatches:  readonly MemoryAnchorId[];  // shadow anchors surfaced for InvasionOrchestrator
+  readonly shadowMatches:  ReadonlyArray<MemoryAnchorId>;  // shadow anchors surfaced for InvasionOrchestrator
   readonly debugNotes:     readonly string[];
 }
 
@@ -290,6 +290,16 @@ export interface MemoryAnchorStoreMetrics {
 
 // ── SNAPSHOT ──────────────────────────────────────────────────────────────────
 
+export type MemoryAnchorStoreProofBindingEntry = readonly [
+  MemoryAnchorId,
+  AnchorProofBinding,
+];
+
+export type MemoryAnchorStoreModeAnchorIndexEntry = readonly [
+  ChatModeId,
+  ReadonlyArray<MemoryAnchorId>,
+];
+
 export interface MemoryAnchorStoreSnapshot {
   readonly version:              typeof MEMORY_ANCHOR_STORE_VERSION;
   readonly exportedAtMs:         number;
@@ -297,11 +307,11 @@ export interface MemoryAnchorStoreSnapshot {
   readonly archivedAnchorIds:    readonly MemoryAnchorId[];
   readonly windows:              readonly MemoryAnchorWindow[];
   readonly receipts:             readonly MemoryAnchorReceipt[];
-  readonly proofBindings:        readonly Array<[MemoryAnchorId, AnchorProofBinding]>;
+  readonly proofBindings:        ReadonlyArray<MemoryAnchorStoreProofBindingEntry>;
   readonly usedCallbackPhrases:  readonly string[];
   readonly shadowAnchorIds:      readonly MemoryAnchorId[];
   readonly relationshipEdges:    readonly RelationshipEdge[];
-  readonly modeAnchorIndex:      readonly Array<[ChatModeId, MemoryAnchorId[]]>;
+  readonly modeAnchorIndex:      ReadonlyArray<MemoryAnchorStoreModeAnchorIndexEntry>;
 }
 
 // ── PERSISTENCE ADAPTER ───────────────────────────────────────────────────────
@@ -510,6 +520,16 @@ export function createMemoryAnchorStore(
 
     // ── EXPORT SNAPSHOT ──────────────────────────────────────────────────────
     exportSnapshot(): MemoryAnchorStoreSnapshot {
+      const proofBindingEntries: MemoryAnchorStoreProofBindingEntry[] = [];
+      for (const [anchorId, binding] of proofBindings.entries()) {
+        proofBindingEntries.push(freezeProofBindingEntry(anchorId, binding));
+      }
+
+      const modeAnchorEntries: MemoryAnchorStoreModeAnchorIndexEntry[] = [];
+      for (const [modeId, ids] of modeIndex.entries()) {
+        modeAnchorEntries.push(freezeModeAnchorIndexEntry(modeId, [...ids]));
+      }
+
       return Object.freeze({
         version: MEMORY_ANCHOR_STORE_VERSION,
         exportedAtMs: now(),
@@ -517,13 +537,11 @@ export function createMemoryAnchorStore(
         archivedAnchorIds: Object.freeze([...archivedIds]),
         windows: Object.freeze([...windows.values()]),
         receipts: Object.freeze([...receipts]),
-        proofBindings: Object.freeze([...proofBindings.entries()]),
+        proofBindings: Object.freeze(proofBindingEntries),
         usedCallbackPhrases: Object.freeze([...usedCallbackPhrases]),
         shadowAnchorIds: Object.freeze([...shadowIds]),
         relationshipEdges: Object.freeze([...relationshipEdges.values()]),
-        modeAnchorIndex: Object.freeze(
-          [...modeIndex.entries()].map(([k, v]) => [k, [...v]] as [ChatModeId, MemoryAnchorId[]])
-        ),
+        modeAnchorIndex: Object.freeze(modeAnchorEntries),
       });
     },
 
@@ -592,12 +610,16 @@ export function createMemoryAnchorStore(
         }
 
         if (existed && request.conflictPolicy === 'MERGE') {
-          const mergeResult = api.merge(anchor.id, anchor.id);
-          // Re-upsert the merged product
-          const r = api.upsert(anchor, binding);
-          if (r.created) created++; else { merged++; }
+          const existing = anchors.get(anchor.id)!;
+          const mergedAnchor = mergeAnchorRecords(existing, anchor, now());
+          const r = api.upsert(mergedAnchor, binding ?? proofBindings.get(anchor.id));
+          merged++;
           if (r.debugNotes.some(n => n.startsWith('evicted='))) evicted++;
-          receipts_.push(mergeResult);
+          receipts_.push(Object.freeze({
+            ok: true, operation: 'BATCH_UPSERT', anchorId: anchor.id,
+            created: false, updated: true,
+            debugNotes: Object.freeze(['conflict=MERGE', `family=${mergedAnchor.continuity.familyId ?? 'none'}`]),
+          }));
           continue;
         }
 
@@ -880,13 +902,14 @@ export function createMemoryAnchorStore(
 
       for (const [id, anchor] of anchors) {
         if (archivedIds.has(id)) continue;
-        // Only decay TRANSIENT and VOLATILE stability classes
-        if (anchor.stabilityClass !== 'TRANSIENT' && anchor.stabilityClass !== 'VOLATILE') continue;
+        // Only decay TRANSIENT and VOLATILE stability classes (cast to string for type safety)
+        const stabilityClass = String(anchor.stabilityClass);
+        if (stabilityClass !== 'TRANSIENT' && stabilityClass !== 'VOLATILE') continue;
 
         const formationTick: number = (anchor.formation as any).formationTickIndex ?? 0;
         const ticksElapsed = Math.max(0, tickIndex - formationTick);
         const decayFactor  = Math.pow(0.5, ticksElapsed / halfLife);
-        const newFinal     = round4(anchor.salience.base * decayFactor);
+        const newFinal     = round4(anchor.salience.final * decayFactor);
 
         if (newFinal === anchor.salience.final) continue;
 
@@ -979,7 +1002,7 @@ export function createMemoryAnchorStore(
         anchorsByRoom:     Object.freeze(countBy(all, a => a.subject.roomId ?? 'UNSCOPED')),
         anchorsByChannel:  Object.freeze(countBy(all, a => a.subject.channelId ?? 'UNSCOPED')),
         anchorsByRun:      Object.freeze(countBy(all, a => a.subject.runId ?? 'UNSCOPED')),
-        anchorsByMode:     Object.freeze(countBy(all, a => a.subject.modeId ?? 'UNKNOWN')),
+        anchorsByMode:     Object.freeze(countBy(all, a => (a.subject as any).modeId ?? 'UNKNOWN')),
         avgFinalSalience,
         proofBoundAnchors: proofBindings.size,
       });
@@ -1216,7 +1239,7 @@ export function createMemoryAnchorStore(
 
   function filterEmbeddingMatches(anchor: MemoryAnchor, matches?: readonly MemoryRankingEmbeddingMatch[]): readonly MemoryRankingEmbeddingMatch[] {
     if (!matches?.length) return Object.freeze([]);
-    return Object.freeze(matches.filter(m => m.documentId && anchor.embeddingDocumentIds.includes(m.documentId)));
+    return Object.freeze(matches.filter(m => m.documentId && anchor.embeddingDocumentIds.includes(m.documentId as import('../../../../../../../shared/contracts/chat/learning/ConversationEmbeddings').EmbeddingDocumentId)));
   }
 
   function toPreview(anchor: MemoryAnchor, score: number, rank: number): MemoryAnchorPreview {
@@ -1253,6 +1276,103 @@ export function createMemoryAnchorStore(
   function sumWindowSalience(anchorIds: readonly MemoryAnchorId[]): number {
     return anchorIds.reduce((sum, id) => sum + (anchors.get(id)?.salience.final ?? 0), 0);
   }
+}
+
+function mergeAnchorRecords(
+  primary: MemoryAnchor,
+  incoming: MemoryAnchor,
+  nowMs: number,
+): MemoryAnchor {
+  return freezeAnchor({
+    ...primary,
+    kind: incoming.kind ?? primary.kind,
+    purpose: incoming.purpose ?? primary.purpose,
+    stabilityClass: incoming.stabilityClass ?? primary.stabilityClass,
+    retentionClass: incoming.retentionClass ?? primary.retentionClass,
+    subject: Object.freeze({
+      ...primary.subject,
+      ...incoming.subject,
+    }),
+    formation: Object.freeze({
+      ...primary.formation,
+      ...incoming.formation,
+      createdAtMs: Math.min(primary.formation.createdAtMs, incoming.formation.createdAtMs),
+      firstSeenAtMs: Math.min(primary.formation.firstSeenAtMs, incoming.formation.firstSeenAtMs),
+      updatedAtMs: nowMs,
+      reaffirmedAtMs: Math.max(
+        primary.formation.reaffirmedAtMs ?? 0,
+        incoming.formation.reaffirmedAtMs ?? 0,
+      ) || undefined,
+      hitCount: primary.formation.hitCount + incoming.formation.hitCount,
+      reaffirmCount: primary.formation.reaffirmCount + incoming.formation.reaffirmCount,
+    }),
+    payload: Object.freeze({
+      ...primary.payload,
+      ...incoming.payload,
+      headline: incoming.payload.headline || primary.payload.headline,
+      summary: incoming.payload.summary || primary.payload.summary,
+      canonicalText: incoming.payload.canonicalText || primary.payload.canonicalText,
+      tags: mergeUnique(primary.payload.tags, incoming.payload.tags),
+      emotions: mergeUnique(primary.payload.emotions, incoming.payload.emotions),
+      relationshipTags: mergeUnique(primary.payload.relationshipTags, incoming.payload.relationshipTags),
+      callbackPhrases: mergeUnique(primary.payload.callbackPhrases, incoming.payload.callbackPhrases),
+    }),
+    salience: Object.freeze({
+      ...primary.salience,
+      ...incoming.salience,
+      final: Math.max(primary.salience.final, incoming.salience.final),
+    }),
+    evidence: mergeUnique(primary.evidence, incoming.evidence),
+    continuity: Object.freeze({
+      ...primary.continuity,
+      ...incoming.continuity,
+      predecessorAnchorIds: mergeUnique(primary.continuity.predecessorAnchorIds, incoming.continuity.predecessorAnchorIds),
+      successorAnchorIds: mergeUnique(primary.continuity.successorAnchorIds, incoming.continuity.successorAnchorIds),
+      followPersonaIds: mergeUnique(primary.continuity.followPersonaIds, incoming.continuity.followPersonaIds),
+      familyId: incoming.continuity.familyId ?? primary.continuity.familyId,
+      carriesAcrossModes: primary.continuity.carriesAcrossModes || incoming.continuity.carriesAcrossModes,
+      carriesAcrossRuns: primary.continuity.carriesAcrossRuns || incoming.continuity.carriesAcrossRuns,
+      unresolved: primary.continuity.unresolved || incoming.continuity.unresolved,
+    }),
+    retrieval: Object.freeze({
+      ...primary.retrieval,
+      ...incoming.retrieval,
+      queryIntents: mergeUnique(primary.retrieval.queryIntents, incoming.retrieval.queryIntents),
+      requiredTags: mergeUnique(primary.retrieval.requiredTags, incoming.retrieval.requiredTags),
+      blockedTags: mergeUnique(primary.retrieval.blockedTags, incoming.retrieval.blockedTags),
+      matchKinds: mergeUnique(primary.retrieval.matchKinds, incoming.retrieval.matchKinds),
+      weight: Math.max(primary.retrieval.weight, incoming.retrieval.weight),
+      minimumScore: Math.max(primary.retrieval.minimumScore, incoming.retrieval.minimumScore),
+      relationshipBoost: Math.max(primary.retrieval.relationshipBoost, incoming.retrieval.relationshipBoost),
+      emotionBoost: Math.max(primary.retrieval.emotionBoost, incoming.retrieval.emotionBoost),
+      continuityBoost: Math.max(primary.retrieval.continuityBoost, incoming.retrieval.continuityBoost),
+      timeDecayHalfLifeMs: incoming.retrieval.timeDecayHalfLifeMs ?? primary.retrieval.timeDecayHalfLifeMs,
+    }),
+    embeddingDocumentIds: mergeUnique(primary.embeddingDocumentIds, incoming.embeddingDocumentIds),
+    quoteRefs: mergeUnique(primary.quoteRefs, incoming.quoteRefs),
+    relationshipRefs: mergeUnique(primary.relationshipRefs, incoming.relationshipRefs),
+    debugNotes: mergeUnique(primary.debugNotes, incoming.debugNotes),
+  });
+}
+
+function freezeProofBindingEntry(
+  anchorId: MemoryAnchorId,
+  binding: AnchorProofBinding,
+): MemoryAnchorStoreProofBindingEntry {
+  return Object.freeze([
+    anchorId,
+    Object.freeze({ ...binding }),
+  ]) as MemoryAnchorStoreProofBindingEntry;
+}
+
+function freezeModeAnchorIndexEntry(
+  modeId: ChatModeId,
+  anchorIds: readonly MemoryAnchorId[],
+): MemoryAnchorStoreModeAnchorIndexEntry {
+  return Object.freeze([
+    modeId,
+    Object.freeze([...anchorIds]),
+  ]) as MemoryAnchorStoreModeAnchorIndexEntry;
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -1396,18 +1516,18 @@ function edgeKey(a: MemoryAnchorId, b: MemoryAnchorId): string {
   return a < b ? `${a}::${b}` : `${b}::${a}`;
 }
 
-/** Priority tier ladder: LOW → NORMAL → HIGH → CRITICAL */
-const PRIORITY_LADDER = ['LOW', 'NORMAL', 'HIGH', 'CRITICAL'] as const;
+/** Priority tier ladder: LOW → MEDIUM → HIGH → CRITICAL */
+const PRIORITY_LADDER = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'] as const;
 type RetrievalPriority = typeof PRIORITY_LADDER[number];
 
-function promotePriority(p: string): string {
+function promotePriority(p: RetrievalPriority | string): RetrievalPriority {
   const idx = PRIORITY_LADDER.indexOf(p as RetrievalPriority);
-  if (idx === -1 || idx === PRIORITY_LADDER.length - 1) return p;
+  if (idx === -1 || idx === PRIORITY_LADDER.length - 1) return p as RetrievalPriority;
   return PRIORITY_LADDER[idx + 1];
 }
 
-function demotePriority(p: string): string {
+function demotePriority(p: RetrievalPriority | string): RetrievalPriority {
   const idx = PRIORITY_LADDER.indexOf(p as RetrievalPriority);
-  if (idx <= 0) return p;
+  if (idx <= 0) return p as RetrievalPriority;
   return PRIORITY_LADDER[idx - 1];
 }
