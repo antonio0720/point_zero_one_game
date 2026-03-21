@@ -173,6 +173,7 @@ export type ResponseCandidateIntentFamily =
 export interface ResponseRankingDependencyBundle {
   embeddingClient?: Nullable<MessageEmbeddingClient>;
   intentEncoder?: Nullable<DialogueIntentEncoder>;
+  runtimeConfigOverride?: Nullable<Partial<typeof DEFAULT_BACKEND_CHAT_RUNTIME>>;
   now?: Nullable<() => UnixMs>;
 }
 
@@ -369,9 +370,38 @@ interface ResponseRankingWorkingSurface {
   rescueNeed: Score01;
   aggressionWindow: Score01;
   silenceValue: Score01;
+  runtimeChannel: ChatVisibleChannel;
+  transcriptTurnCount: number;
+  transcriptTimeSpanMs: number;
+  replayCompression: Score01;
+  moderationStrictness: Score01;
+  learningValue: Score01;
+  proofValue: Score01;
+  shadowSupport: boolean;
+  runtimePolicy: ResponseRankingRuntimePolicy;
   semanticQueryVector: Nullable<EmbeddingVector>;
   transcriptEmbeddingVector: Nullable<EmbeddingVector>;
   recentTurnBodies: string[];
+}
+
+interface ResponseRankingRuntimePolicy {
+  candidateCutoff: number;
+  semanticWindowDepth: number;
+  maxTranscriptTurns: number;
+  replayWindowMs: number;
+  maxCharactersPerMessage: number;
+  maxLinesPerMessage: number;
+  helperMinimumGapMs: number;
+  haterMinimumGapMs: number;
+  npcMinimumGapMs: number;
+  identicalMessageWindowMs: number;
+  shadowWritesEnabled: boolean;
+  learningSnapshotsEnabled: boolean;
+  proofEnabled: boolean;
+  replayEnabled: boolean;
+  invasionPrimingEnabled: boolean;
+  strictModeration: boolean;
+  channelFallback: ChatVisibleChannel;
 }
 
 interface RankedCandidateScratch {
@@ -389,9 +419,15 @@ interface RankedCandidateScratch {
 export class ResponseRankingModel {
   private readonly embeddingClient: MessageEmbeddingClient;
   private readonly intentEncoder: DialogueIntentEncoder;
+  private readonly runtimeDefaults: typeof DEFAULT_BACKEND_CHAT_RUNTIME;
+  private readonly runtimeConfig: typeof DEFAULT_BACKEND_CHAT_RUNTIME;
+  private readonly runtimePolicy: ResponseRankingRuntimePolicy;
   private readonly now: () => UnixMs;
 
   constructor(deps: ResponseRankingDependencyBundle = {}) {
+    this.runtimeDefaults = DEFAULT_BACKEND_CHAT_RUNTIME;
+    this.runtimeConfig = mergeRuntimeConfig(deps.runtimeConfigOverride ?? this.runtimeDefaults);
+    this.runtimePolicy = this.deriveRuntimePolicy(this.runtimeConfig, this.runtimeDefaults);
     this.embeddingClient =
       deps.embeddingClient ?? createMessageEmbeddingClient();
     this.intentEncoder =
@@ -405,24 +441,25 @@ export class ResponseRankingModel {
     context: ResponseRankingContext,
     rawCandidates: readonly ResponseRankingCandidateInput[],
   ): ResponseRankingResult {
-    const nowMs = context.nowMs ?? this.now();
-    const candidates = this.normalizeCandidates(rawCandidates);
-    const workingSurface = this.buildWorkingSurface(context, candidates, nowMs);
+    const normalizedContext = this.normalizeContextForRuntime(context);
+    const nowMs = normalizedContext.nowMs ?? this.now();
+    const candidates = this.normalizeCandidates(rawCandidates, normalizedContext);
+    const workingSurface = this.buildWorkingSurface(normalizedContext, candidates, nowMs);
 
     const scratches = candidates
-      .map((candidate) => this.rankOneCandidate(candidate, context, workingSurface))
+      .map((candidate) => this.rankOneCandidate(candidate, normalizedContext, workingSurface))
       .sort((a, b) => b.provisionalScore - a.provisionalScore)
-      .slice(0, CHAT_RESPONSE_RANKING_DEFAULTS.candidateCutoff)
-      .map((scratch, index) => this.finalizeRankedDecision(scratch, index + 1, context, workingSurface));
+      .slice(0, this.runtimePolicy.candidateCutoff)
+      .map((scratch, index) => this.finalizeRankedDecision(scratch, index + 1, normalizedContext, workingSurface));
 
     const top = scratches[0] ?? null;
-    const sceneDisposition = this.computeSceneDisposition(context, scratches, workingSurface);
-    const rankingSummary = this.buildRankingSummary(context, scratches, sceneDisposition, workingSurface);
+    const sceneDisposition = this.computeSceneDisposition(normalizedContext, scratches, workingSurface);
+    const rankingSummary = this.buildRankingSummary(normalizedContext, scratches, sceneDisposition, workingSurface);
 
     return {
       modelVersion: CHAT_RESPONSE_RANKING_MODEL_VERSION,
-      roomId: context.roomId,
-      activeChannel: context.activeChannel,
+      roomId: normalizedContext.roomId,
+      activeChannel: normalizedContext.activeChannel,
       ranked: scratches,
       top,
       silenceCandidateIncluded: scratches.some((item) => item.sourceKind === 'silence'),
@@ -475,28 +512,44 @@ export class ResponseRankingModel {
 
   private normalizeCandidates(
     rawCandidates: readonly ResponseRankingCandidateInput[],
+    context: ResponseRankingContext,
   ): RankedResponseCandidate[] {
-    const normalized: RankedResponseCandidate[] = rawCandidates.map((candidate) => ({
-      ...candidate,
-      channelPreference: candidate.channelPreference ?? 'same',
-      latencyClass: candidate.latencyClass ?? 'instant',
-      moderationSensitivity: clamp01(candidate.moderationSensitivity ?? 0.25),
-      recoveryValue: clamp01(candidate.recoveryValue ?? (candidate.intentFamily === 'rescue' ? 0.72 : 0.22)),
-      aggressionValue: clamp01(candidate.aggressionValue ?? (candidate.intentFamily === 'taunt' || candidate.intentFamily === 'pressure' ? 0.72 : 0.16)),
-      teachingValue: clamp01(candidate.teachingValue ?? (candidate.intentFamily === 'teaching' ? 0.74 : 0.18)),
-      witnessValue: clamp01(candidate.witnessValue ?? (candidate.intentFamily === 'witness' ? 0.78 : 0.28)),
-      negotiationValue: clamp01(candidate.negotiationValue ?? (candidate.intentFamily === 'negotiation' ? 0.82 : 0.2)),
-      silenceCompatibility: clamp01(candidate.silenceCompatibility ?? (candidate.sourceKind === 'silence' ? 0.9 : 0.22)),
-      repetitionKey: candidate.repetitionKey ?? null,
-      callbackAnchorIds: [...(candidate.callbackAnchorIds ?? [])],
-      callbackQuoteIds: [...(candidate.callbackQuoteIds ?? [])],
-      semanticFamilies: [...(candidate.semanticFamilies ?? [])],
-      dimensionBias: { ...(candidate.dimensionBias ?? {}) },
-      metadata: { ...(candidate.metadata ?? {}) },
-    }));
+    const normalized: RankedResponseCandidate[] = rawCandidates.map((candidate) => {
+      const normalizedBody = this.normalizeCandidateBody(candidate.body);
+      const bodyRisk = this.computeCandidateBodyRisk(normalizedBody);
+      const normalizedChannelPreference = this.normalizeCandidateChannelPreference(
+        candidate.channelPreference ?? 'same',
+        context.activeChannel,
+      );
+
+      return {
+        ...candidate,
+        body: normalizedBody,
+        channelPreference: normalizedChannelPreference,
+        latencyClass: candidate.latencyClass ?? 'instant',
+        moderationSensitivity: clamp01((candidate.moderationSensitivity ?? 0.25) + bodyRisk * 0.22 + (this.runtimePolicy.strictModeration ? 0.05 : 0)),
+        recoveryValue: clamp01(candidate.recoveryValue ?? (candidate.intentFamily === 'rescue' ? 0.72 : 0.22)),
+        aggressionValue: clamp01(candidate.aggressionValue ?? (candidate.intentFamily === 'taunt' || candidate.intentFamily === 'pressure' ? 0.72 : 0.16)),
+        teachingValue: clamp01(candidate.teachingValue ?? (candidate.intentFamily === 'teaching' ? 0.74 : 0.18)),
+        witnessValue: clamp01(candidate.witnessValue ?? (candidate.intentFamily === 'witness' ? 0.78 : 0.28)),
+        negotiationValue: clamp01(candidate.negotiationValue ?? (candidate.intentFamily === 'negotiation' ? 0.82 : 0.2)),
+        silenceCompatibility: clamp01(candidate.silenceCompatibility ?? (candidate.sourceKind === 'silence' ? 0.9 : 0.22)),
+        repetitionKey: candidate.repetitionKey ?? null,
+        callbackAnchorIds: [...(candidate.callbackAnchorIds ?? [])].slice(0, CHAT_RESPONSE_RANKING_DEFAULTS.maxSceneCallbacks),
+        callbackQuoteIds: [...(candidate.callbackQuoteIds ?? [])].slice(0, CHAT_RESPONSE_RANKING_DEFAULTS.maxSceneCallbacks),
+        semanticFamilies: [...(candidate.semanticFamilies ?? [])],
+        dimensionBias: { ...(candidate.dimensionBias ?? {}) },
+        metadata: {
+          ...(candidate.metadata ?? {}),
+          runtimeChannelPreference: normalizedChannelPreference,
+          runtimeNormalizedBodyLength: normalizedBody.length,
+          runtimeBodyRisk: bodyRisk,
+        },
+      };
+    });
 
     const hasSilence = normalized.some((candidate) => candidate.sourceKind === 'silence');
-    if (!hasSilence) {
+    if (!hasSilence && this.shouldInjectSilenceCandidate(context)) {
       normalized.push(this.buildDefaultSilenceCandidate());
     }
     return normalized;
@@ -511,19 +564,23 @@ export class ResponseRankingModel {
       body: '',
       channelPreference: 'same',
       latencyClass: 'hold',
-      moderationSensitivity: clamp01(0.02),
-      recoveryValue: clamp01(0.3),
+      moderationSensitivity: clamp01(this.runtimePolicy.strictModeration ? 0.03 : 0.02),
+      recoveryValue: clamp01(this.runtimePolicy.learningSnapshotsEnabled ? 0.34 : 0.3),
       aggressionValue: clamp01(0.02),
-      teachingValue: clamp01(0.08),
-      witnessValue: clamp01(0.18),
-      negotiationValue: clamp01(0.22),
+      teachingValue: clamp01(this.runtimePolicy.learningSnapshotsEnabled ? 0.12 : 0.08),
+      witnessValue: clamp01(this.runtimePolicy.proofEnabled ? 0.22 : 0.18),
+      negotiationValue: clamp01(this.runtimePolicy.shadowWritesEnabled ? 0.28 : 0.22),
       silenceCompatibility: clamp01(0.94),
       callbackAnchorIds: [],
       callbackQuoteIds: [],
       semanticFamilies: [],
       repetitionKey: 'system::silence::default-hold',
       dimensionBias: {} as never,
-      metadata: { generated: true },
+      metadata: {
+        generated: true,
+        runtimeProofEnabled: this.runtimePolicy.proofEnabled,
+        runtimeShadowEnabled: this.runtimePolicy.shadowWritesEnabled,
+      },
     };
   }
 
@@ -532,8 +589,9 @@ export class ResponseRankingModel {
     candidates: readonly RankedResponseCandidate[],
     nowMs: UnixMs,
   ): ResponseRankingWorkingSurface {
-    const transcriptBodies = context.transcriptWindow.map((turn) => turn.body).filter(Boolean);
-    const recentTurnBodies = transcriptBodies.slice(-CHAT_RESPONSE_RANKING_DEFAULTS.semanticWindowDepth);
+    const runtimeTranscriptWindow = this.sliceTranscriptWindowForRuntime(context.transcriptWindow, nowMs);
+    const transcriptBodies = runtimeTranscriptWindow.map((turn) => turn.body).filter(Boolean);
+    const recentTurnBodies = transcriptBodies.slice(-this.runtimePolicy.semanticWindowDepth);
     const transcriptEmbedding = recentTurnBodies.length
       ? this.embeddingClient.embedTranscriptWindow({
           messages: recentTurnBodies.map((body, turnIndex) => ({
@@ -547,7 +605,7 @@ export class ResponseRankingModel {
       : null;
 
     const encodedIntent = this.intentEncoder.encodeSequence({
-      turns: context.transcriptWindow.map((turn) => ({
+      turns: runtimeTranscriptWindow.map((turn) => ({
         messageId: turn.messageId ?? (`turn::${turn.sequenceIndex}` as ChatMessageId),
         text: turn.body,
         channel: turn.channel,
@@ -557,36 +615,56 @@ export class ResponseRankingModel {
     });
 
     const semanticQueryVector = transcriptEmbedding ?? null;
-    const volatility = clamp01(context.toxicityRisk * 0.44 + context.haterPressure * 0.24 + context.churnRisk * 0.18 + (1 - context.shieldIntegrity) * 0.14);
-    const stability = clamp01(1 - volatility * 0.66 + context.recoveryPotential * 0.22 + (1 - context.toxicityRisk) * 0.12);
+    const transcriptTimeSpanMs = runtimeTranscriptWindow.length > 1
+      ? Math.max(0, Number(runtimeTranscriptWindow[runtimeTranscriptWindow.length - 1]!.createdAt) - Number(runtimeTranscriptWindow[0]!.createdAt))
+      : 0;
+    const signalPressure = this.computeSignalPressure(context.currentSignals);
+    const volatility = clamp01(context.toxicityRisk * 0.4 + context.haterPressure * 0.2 + context.churnRisk * 0.16 + (1 - context.shieldIntegrity) * 0.12 + signalPressure * 0.12);
+    const stability = clamp01(1 - volatility * 0.62 + context.recoveryPotential * 0.22 + (1 - context.toxicityRisk) * 0.08 + (this.runtimePolicy.learningSnapshotsEnabled ? 0.08 : 0.02));
     const novelty = clamp01(
-      0.25 +
-      this.computeTranscriptNovelty(recentTurnBodies, candidates) * 0.75
+      0.2 +
+      this.computeTranscriptNovelty(recentTurnBodies, candidates) * 0.7 +
+      (this.runtimePolicy.replayEnabled ? 0.06 : 0.02)
     );
     const continuity = clamp01(
-      0.28 +
-      this.computeTranscriptContinuity(context.transcriptWindow) * 0.72
+      0.24 +
+      this.computeTranscriptContinuity(runtimeTranscriptWindow) * 0.66 +
+      (this.runtimePolicy.proofEnabled ? 0.1 : 0.04)
     );
     const repetitionHeat = clamp01(
-      1 - novelty * 0.62 + this.computeRepetitionHeat(candidates) * 0.38
+      1 - novelty * 0.58 + this.computeRepetitionHeat(candidates) * 0.32 + this.computeTranscriptEcho(runtimeTranscriptWindow) * 0.1
     );
     const relationshipContinuity = clamp01(
-      this.computeRelationshipContinuity(context.transcriptWindow) * 0.72 +
-      continuity * 0.28
+      this.computeRelationshipContinuity(runtimeTranscriptWindow) * 0.68 +
+      continuity * 0.22 +
+      (this.runtimePolicy.replayEnabled ? 0.1 : 0.04)
     );
-    const publicWitnessNeed = clamp01(context.publicWitnessHeat * 0.58 + context.haterPressure * 0.16 + context.sovereigntyProximity * 0.12 + (1 - context.shieldIntegrity) * 0.14);
-    const privacyNeed = clamp01(context.churnRisk * 0.28 + context.toxicityRisk * 0.32 + context.helperUrgency * 0.16 + (1 - context.shieldIntegrity) * 0.08 + (1 - context.publicWitnessHeat) * 0.16);
-    const negotiationNeed = clamp01((context.activeChannel === 'DEAL_ROOM' ? 0.78 : 0.18) + context.recoveryPotential * 0.05);
-    const rescueNeed = clamp01(context.helperUrgency * 0.45 + context.churnRisk * 0.3 + context.toxicityRisk * 0.1 + (1 - context.shieldIntegrity) * 0.15);
-    const aggressionWindow = clamp01(context.haterPressure * 0.46 + context.publicWitnessHeat * 0.18 + (1 - context.shieldIntegrity) * 0.14 + context.sovereigntyProximity * 0.1 + (1 - context.helperUrgency) * 0.12);
+    const publicWitnessNeed = clamp01(context.publicWitnessHeat * 0.52 + context.haterPressure * 0.12 + context.sovereigntyProximity * 0.1 + (1 - context.shieldIntegrity) * 0.12 + signalPressure * 0.06 + (this.runtimePolicy.proofEnabled ? 0.08 : 0.02));
+    const privacyNeed = clamp01(context.churnRisk * 0.26 + context.toxicityRisk * 0.28 + context.helperUrgency * 0.14 + (1 - context.shieldIntegrity) * 0.06 + (1 - context.publicWitnessHeat) * 0.12 + (this.runtimePolicy.strictModeration ? 0.14 : 0.04));
+    const negotiationNeed = clamp01((context.activeChannel === 'DEAL_ROOM' ? 0.74 : 0.16) + context.recoveryPotential * 0.05 + (this.runtimePolicy.shadowWritesEnabled ? 0.05 : 0));
+    const rescueNeed = clamp01(context.helperUrgency * 0.4 + context.churnRisk * 0.26 + context.toxicityRisk * 0.1 + (1 - context.shieldIntegrity) * 0.12 + signalPressure * 0.06 + (this.runtimePolicy.learningSnapshotsEnabled ? 0.06 : 0.02));
+    const aggressionWindow = clamp01(context.haterPressure * 0.42 + context.publicWitnessHeat * 0.16 + (1 - context.shieldIntegrity) * 0.12 + context.sovereigntyProximity * 0.08 + (1 - context.helperUrgency) * 0.1 + signalPressure * 0.12);
+    const replayCompression = clamp01(runtimeTranscriptWindow.length / Math.max(1, this.runtimePolicy.maxTranscriptTurns));
+    const moderationStrictness = clamp01(
+      (this.runtimePolicy.strictModeration ? 0.58 : 0.24) +
+      (this.runtimeConfig.moderationPolicy.shadowModeOnHighRisk ? 0.12 : 0) +
+      (this.runtimeDefaults.moderationPolicy.shadowModeOnHighRisk ? 0.04 : 0)
+    );
+    const learningValue = clamp01((this.runtimeConfig.learningPolicy.enabled ? 0.4 : 0.08) + (this.runtimeConfig.learningPolicy.emitInferenceSnapshots ? 0.34 : 0.06) + (this.runtimeDefaults.learningPolicy.coldStartEnabled ? 0.12 : 0));
+    const proofValue = clamp01((this.runtimeConfig.proofPolicy.enabled ? 0.42 : 0.08) + (this.runtimeConfig.proofPolicy.linkReplayEdges ? 0.18 : 0.04) + (this.runtimeConfig.proofPolicy.linkLearningEdges ? 0.14 : 0.04));
     const silenceValue = clamp01(
-      0.2 +
-      (context.toxicityRisk * 0.18) +
-      (context.churnRisk * 0.14) +
-      (negotiationNeed * 0.16) +
-      ((1 - context.publicWitnessHeat) * 0.08) +
-      (stability * 0.08)
+      0.18 +
+      (context.toxicityRisk * 0.14) +
+      (context.churnRisk * 0.1) +
+      (negotiationNeed * 0.14) +
+      ((1 - context.publicWitnessHeat) * 0.06) +
+      (stability * 0.08) +
+      (moderationStrictness * 0.1) +
+      (replayCompression * 0.08)
     );
+    const sequenceConfidence = encodedIntent.turnResults.length
+      ? encodedIntent.turnResults.reduce((sum, turn) => sum + Number(turn.confidence01), 0) / encodedIntent.turnResults.length
+      : 0.5;
 
     return {
       nowMs,
@@ -597,13 +675,22 @@ export class ResponseRankingModel {
       repetitionHeat,
       relationshipContinuity,
       primaryIntentKind: encodedIntent.dominantSequenceIntent ?? null,
-      intentEntropy: clamp01(0.5),
+      intentEntropy: clamp01(1 - sequenceConfidence),
       publicWitnessNeed,
       privacyNeed,
       negotiationNeed,
       rescueNeed,
       aggressionWindow,
       silenceValue,
+      runtimeChannel: context.activeChannel,
+      transcriptTurnCount: runtimeTranscriptWindow.length,
+      transcriptTimeSpanMs,
+      replayCompression,
+      moderationStrictness,
+      learningValue,
+      proofValue,
+      shadowSupport: this.runtimePolicy.shadowWritesEnabled,
+      runtimePolicy: this.runtimePolicy,
       semanticQueryVector,
       transcriptEmbeddingVector: transcriptEmbedding ?? null,
       recentTurnBodies,
@@ -689,16 +776,18 @@ export class ResponseRankingModel {
     const continuityBoost = clamp01(0.2 + surface.continuity * 0.8);
     const noveltyBoost = clamp01(0.2 + surface.novelty * 0.8);
     const relationBoost = clamp01(0.2 + surface.relationshipContinuity * 0.8);
+    const runtimeLegality = this.scoreRuntimeChannelLegality(candidate, context);
     const result = clamp01(
-      modeWeight * 0.16 +
-      roomWeight * 0.11 +
-      channelWeight * 0.12 +
-      intentWeight * 0.18 +
-      volatilityPenalty * 0.08 +
-      stabilityBoost * 0.08 +
-      continuityBoost * 0.09 +
-      noveltyBoost * 0.08 +
-      relationBoost * 0.10
+      modeWeight * 0.14 +
+      roomWeight * 0.1 +
+      channelWeight * 0.11 +
+      intentWeight * 0.16 +
+      runtimeLegality * 0.14 +
+      volatilityPenalty * 0.07 +
+      stabilityBoost * 0.07 +
+      continuityBoost * 0.08 +
+      noveltyBoost * 0.06 +
+      relationBoost * 0.07
     );
     return candidate.dimensionBias['intentAlignment'] != null
       ? clamp01(result * 0.82 + candidate.dimensionBias['intentAlignment']! * 0.18)
@@ -934,16 +1023,23 @@ export class ResponseRankingModel {
     const continuityBoost = clamp01(0.2 + surface.continuity * 0.8);
     const noveltyBoost = clamp01(0.2 + surface.novelty * 0.8);
     const relationBoost = clamp01(0.2 + surface.relationshipContinuity * 0.8);
+    const expectedGap = this.resolveExpectedGapForCandidate(candidate);
+    const recentGap = surface.transcriptTurnCount > 1
+      ? clamp01(surface.transcriptTimeSpanMs / Math.max(expectedGap, 1))
+      : clamp01(0.72);
+    const latencyClassFitness = this.scoreLatencyClassAgainstRuntime(candidate.latencyClass ?? 'instant', expectedGap, surface);
     const result = clamp01(
-      modeWeight * 0.16 +
-      roomWeight * 0.11 +
-      channelWeight * 0.12 +
-      intentWeight * 0.18 +
-      volatilityPenalty * 0.08 +
-      stabilityBoost * 0.08 +
-      continuityBoost * 0.09 +
-      noveltyBoost * 0.08 +
-      relationBoost * 0.10
+      modeWeight * 0.12 +
+      roomWeight * 0.09 +
+      channelWeight * 0.1 +
+      intentWeight * 0.14 +
+      latencyClassFitness * 0.18 +
+      recentGap * 0.12 +
+      volatilityPenalty * 0.06 +
+      stabilityBoost * 0.06 +
+      continuityBoost * 0.07 +
+      noveltyBoost * 0.05 +
+      relationBoost * 0.07
     );
     return candidate.dimensionBias['latencyFitness'] != null
       ? clamp01(result * 0.82 + candidate.dimensionBias['latencyFitness']! * 0.18)
@@ -1274,16 +1370,18 @@ export class ResponseRankingModel {
   ): Score01 {
     const base = candidate.moderationSensitivity ?? 0.25;
     const risk = context.toxicityRisk;
+    const bodyRisk = this.computeCandidateBodyRisk(candidate.body);
+    const strictness = surface.moderationStrictness;
     if (candidate.sourceKind === 'system') {
-      return clamp01(base * 0.2);
+      return clamp01(base * 0.16 + strictness * 0.06);
     }
     if (candidate.intentFamily === 'taunt' || candidate.intentFamily === 'pressure') {
-      return clamp01(base * 0.5 + risk * 0.5);
+      return clamp01(base * 0.36 + risk * 0.28 + bodyRisk * 0.2 + strictness * 0.16);
     }
     if (candidate.intentFamily === 'rescue') {
-      return clamp01(base * 0.28 + risk * 0.12);
+      return clamp01(base * 0.22 + risk * 0.08 + bodyRisk * 0.08 + strictness * 0.1);
     }
-    return clamp01(base * 0.38 + risk * 0.22 + surface.volatility * 0.12);
+    return clamp01(base * 0.24 + risk * 0.18 + surface.volatility * 0.1 + bodyRisk * 0.16 + strictness * 0.12);
   }
 
   private computeSuppressionPenalty(
@@ -1302,7 +1400,9 @@ export class ResponseRankingModel {
         : 0;
     const aggressionSuppression =
       candidate.aggressionValue! * context.helperUrgency * 0.18;
-    return clamp01(publicMismatch + aggressionSuppression);
+    const illegalChannelPenalty = this.scoreRuntimeChannelLegality(candidate, context) < 0.5 ? 0.3 : 0;
+    const shadowPenalty = candidate.channelPreference === 'shadow' && !surface.shadowSupport ? 0.32 : 0;
+    return clamp01(publicMismatch + aggressionSuppression + illegalChannelPenalty + shadowPenalty);
   }
 
   private computeSilenceBonus(
@@ -1310,10 +1410,11 @@ export class ResponseRankingModel {
     context: ResponseRankingContext,
     surface: ResponseRankingWorkingSurface,
   ): Score01 {
+    const channelPrivacyBoost = context.activeChannel === 'DEAL_ROOM' ? 0.04 : 0;
     if (candidate.sourceKind === 'silence' || candidate.actionKind === 'hold') {
-      return clamp01(surface.silenceValue * 0.78 + surface.negotiationNeed * 0.12 + surface.volatility * 0.1);
+      return clamp01(surface.silenceValue * 0.74 + surface.negotiationNeed * 0.12 + surface.volatility * 0.08 + channelPrivacyBoost);
     }
-    return clamp01(candidate.silenceCompatibility! * surface.silenceValue * 0.12);
+    return clamp01(candidate.silenceCompatibility! * surface.silenceValue * 0.12 + channelPrivacyBoost * 0.4);
   }
 
   private buildExplanation(
@@ -1373,12 +1474,12 @@ export class ResponseRankingModel {
     surface: ResponseRankingWorkingSurface,
   ): string {
     if (candidate.channelPreference === 'shadow') {
-      return 'Candidate is better kept off visible transcript until privacy / rescue posture resolves.';
+      return `Candidate is better kept off visible transcript until privacy / rescue posture resolves; runtime shadow support is ${surface.shadowSupport ? 'enabled' : 'disabled'}.`;
     }
     if (candidate.channelPreference === 'same') {
-      return `Candidate preserves current ${context.activeChannel} continuity.`;
+      return `Candidate preserves current ${context.activeChannel} continuity under runtime channel law.`;
     }
-    return `Candidate prefers ${candidate.channelPreference} because channel-fit and scene semantics outweigh current-lane continuity.`;
+    return `Candidate prefers ${candidate.channelPreference} because channel-fit and scene semantics outweigh current-lane continuity in ${context.activeChannel}.`;
   }
 
   private describePressureRead(
@@ -1387,12 +1488,12 @@ export class ResponseRankingModel {
     surface: ResponseRankingWorkingSurface,
   ): string {
     if (candidate.intentFamily === 'pressure' || candidate.intentFamily === 'taunt') {
-      return 'Aggressive reply aligns with active pressure window and witness appetite.';
+      return `Aggressive reply aligns with active pressure window and witness appetite on ${context.activeChannel}, with volatility at ${surface.volatility.toFixed(2)}.`;
     }
     if (candidate.intentFamily === 'rescue') {
-      return 'Recovery posture outranks spectacle under current churn / toxicity balance.';
+      return `Recovery posture outranks spectacle under current churn / toxicity balance and rescue need ${surface.rescueNeed.toFixed(2)}.`;
     }
-    return 'Pressure does not disqualify the candidate, but it does shape timing and witness value.';
+    return `Pressure does not disqualify the candidate, but it does shape timing and witness value under volatility ${surface.volatility.toFixed(2)}.`;
   }
 
   private describeMemoryRead(
@@ -1400,11 +1501,11 @@ export class ResponseRankingModel {
     dimensions: ResponseRankingDimensionBreakdown,
     surface: ResponseRankingWorkingSurface,
   ): string {
-    if (candidate.callbackAnchorIds.length || candidate.callbackQuoteIds.length) {
-      return 'Candidate carries callback potential and benefits from memory-backed continuity.';
+    if ((candidate.callbackAnchorIds ?? []).length || (candidate.callbackQuoteIds ?? []).length) {
+      return `Candidate carries callback potential and benefits from memory-backed continuity; learning value is ${surface.learningValue.toFixed(2)}.`;
     }
     if (dimensions.memoryFitness >= 0.65) {
-      return 'Candidate fits remembered scene posture even without explicit callback anchors.';
+      return `Candidate fits remembered scene posture even without explicit callback anchors, supported by replay depth ${surface.transcriptTurnCount}.`;
     }
     return 'Candidate does not rely heavily on memory, which may keep the turn fresher.';
   }
@@ -1415,10 +1516,10 @@ export class ResponseRankingModel {
     surface: ResponseRankingWorkingSurface,
   ): string {
     if (dimensions.continuityValue >= 0.7) {
-      return 'Candidate preserves persona / scene continuity without collapsing into repetition.';
+      return `Candidate preserves persona / scene continuity for ${candidate.personaId ?? 'unbound persona'} without collapsing into repetition.`;
     }
     if (dimensions.noveltyValue >= 0.68) {
-      return 'Candidate wins partly because the scene needs a fresh move rather than continuity.';
+      return `Candidate wins partly because the scene needs a fresh move rather than continuity, despite replay compression ${surface.replayCompression.toFixed(2)}.`;
     }
     return 'Candidate balances continuity and novelty without strongly leaning either direction.';
   }
@@ -1435,12 +1536,12 @@ export class ResponseRankingModel {
       dimensions.repetitionPenalty * 0.2
     );
     if (penalty >= 0.55) {
-      return 'Candidate remains viable but carries meaningful moderation / suppression / repetition cost.';
+      return `Candidate remains viable but carries meaningful moderation / suppression / repetition cost in ${context.activeChannel}, with strictness ${surface.moderationStrictness.toFixed(2)}.`;
     }
     if (candidate.sourceKind === 'silence') {
       return 'Risk is carried by over-speaking, so the model rewards a deliberate hold.';
     }
-    return 'Candidate carries manageable risk relative to current scene pressure.';
+    return `Candidate carries manageable risk relative to current scene pressure and proof value ${surface.proofValue.toFixed(2)}.`;
   }
 
   private finalizeRankedDecision(
@@ -1460,8 +1561,8 @@ export class ResponseRankingModel {
       rank,
       dimensions: scratch.dimensions,
       explanation: scratch.explanation,
-      callbackAnchorIds: [...scratch.candidate.callbackAnchorIds],
-      callbackQuoteIds: [...scratch.candidate.callbackQuoteIds],
+      callbackAnchorIds: [...(scratch.candidate.callbackAnchorIds ?? [])],
+      callbackQuoteIds: [...(scratch.candidate.callbackQuoteIds ?? [])],
       repetitionKey: scratch.candidate.repetitionKey ?? null,
       personaId: scratch.candidate.personaId ?? null,
       sceneId: scratch.candidate.sceneId ?? null,
@@ -1471,6 +1572,15 @@ export class ResponseRankingModel {
         modelVersion: CHAT_RESPONSE_RANKING_MODEL_VERSION,
         embeddingVersion: CHAT_MESSAGE_EMBEDDING_CLIENT_VERSION,
         intentEncoderVersion: CHAT_DIALOGUE_INTENT_ENCODER_VERSION,
+        runtimeVisibleChannels: [...this.runtimeConfig.allowVisibleChannels],
+        runtimeReplayEnabled: this.runtimeConfig.replayPolicy.enabled,
+        runtimeLearningEnabled: this.runtimeConfig.learningPolicy.enabled,
+        runtimeProofEnabled: this.runtimeConfig.proofPolicy.enabled,
+        runtimeStrictModeration: this.runtimePolicy.strictModeration,
+        runtimeCandidateCutoff: this.runtimePolicy.candidateCutoff,
+        runtimeSemanticWindowDepth: this.runtimePolicy.semanticWindowDepth,
+        runtimeTranscriptTurns: surface.transcriptTurnCount,
+        runtimeReplayCompression: surface.replayCompression,
         activeModeId: context.activeModeId ?? null,
         sovereigntyProximity: context.sovereigntyProximity,
         publicWitnessHeat: context.publicWitnessHeat,
@@ -1488,12 +1598,15 @@ export class ResponseRankingModel {
     context: ResponseRankingContext,
   ): ChatVisibleChannel | 'shadow' {
     if (candidate.channelPreference === 'shadow') {
-      return 'shadow';
+      return this.runtimePolicy.shadowWritesEnabled ? 'shadow' : context.activeChannel;
     }
     if (candidate.channelPreference === 'same') {
       return context.activeChannel;
     }
-    return candidate.channelPreference;
+    if (this.runtimeConfig.allowVisibleChannels.includes(candidate.channelPreference)) {
+      return candidate.channelPreference;
+    }
+    return this.runtimePolicy.channelFallback;
   }
 
   private computeSceneDisposition(
@@ -1514,10 +1627,16 @@ export class ResponseRankingModel {
     if (context.churnRisk >= 0.8 && top.intentFamily !== 'rescue' && surface.rescueNeed >= 0.68) {
       return 'recovery_override';
     }
+    if (top.recommendedChannel === 'shadow' && !surface.shadowSupport) {
+      return 'redirect';
+    }
     if (top.recommendedChannel !== context.activeChannel && top.recommendedChannel !== 'shadow') {
       return 'redirect';
     }
-    if (top.actionKind === 'hold') {
+    if (top.actionKind === 'hold' || (surface.replayCompression >= 0.92 && top.normalizedScore < 0.7)) {
+      return 'delay';
+    }
+    if (surface.runtimePolicy.invasionPrimingEnabled && context.activeModeId?.toLowerCase().includes('raid') && top.intentFamily === 'silence') {
       return 'delay';
     }
     return 'respond_now';
@@ -1534,9 +1653,9 @@ export class ResponseRankingModel {
       return 'No lawful candidates survived ranking; backend should hold scene state.';
     }
     if (sceneDisposition === 'hold') {
-      return 'Silence outranked visible speech because hold value, privacy need, and/or negotiation tension currently dominate.';
+      return 'Silence outranked visible speech because hold value, privacy need, negotiation tension, and runtime moderation pressure currently dominate.';
     }
-    return `Top-ranked ${top.sourceKind} / ${top.intentFamily} candidate scored ${top.score.toFixed(1)} and scene disposition resolved to ${sceneDisposition}.`;
+    return `Top-ranked ${top.sourceKind} / ${top.intentFamily} candidate scored ${top.score.toFixed(1)} on ${context.activeChannel}, scene disposition resolved to ${sceneDisposition}, and runtime used ${surface.transcriptTurnCount} replay turns across ${surface.runtimePolicy.semanticWindowDepth} semantic slots.`;
   }
 
   private computeTranscriptNovelty(
@@ -1700,8 +1819,9 @@ export class ResponseRankingModel {
     }
     const family = intentFamily.toLowerCase();
     const primary = primaryIntentKind.toLowerCase();
+    const dimension = dimensionKey.toLowerCase();
     if (family.includes(primary) || primary.includes(family)) {
-      return clamp01(0.9);
+      return clamp01(dimension.includes('continuity') || dimension.includes('memory') ? 0.92 : 0.9);
     }
     if ((family === 'rescue' || family === 'teaching') && primary.includes('help')) {
       return clamp01(0.84);
@@ -1710,12 +1830,277 @@ export class ResponseRankingModel {
       return clamp01(0.85);
     }
     if (family === 'negotiation' && (primary.includes('bluff') || primary.includes('offer'))) {
-      return clamp01(0.87);
+      return clamp01(dimension.includes('negotiation') ? 0.9 : 0.87);
     }
     if (family === 'silence' && primary.includes('hesitation')) {
-      return clamp01(0.76);
+      return clamp01(dimension.includes('latency') || dimension.includes('memory') ? 0.8 : 0.76);
     }
     return clamp01(0.52);
+  }
+
+  private normalizeContextForRuntime(
+    context: ResponseRankingContext,
+  ): ResponseRankingContext {
+    const activeChannel = this.runtimeConfig.allowVisibleChannels.includes(context.activeChannel)
+      ? context.activeChannel
+      : this.runtimePolicy.channelFallback;
+
+    return {
+      ...context,
+      activeChannel,
+      transcriptWindow: this.sliceTranscriptWindowForRuntime(
+        context.transcriptWindow,
+        context.nowMs ?? this.now(),
+      ),
+      optionalSceneNotes: [
+        ...(context.optionalSceneNotes ?? []),
+        `runtime.channels=${this.runtimeConfig.allowVisibleChannels.join(',')}`,
+        `runtime.strictModeration=${String(this.runtimePolicy.strictModeration)}`,
+      ],
+    };
+  }
+
+  private deriveRuntimePolicy(
+    runtimeConfig: typeof DEFAULT_BACKEND_CHAT_RUNTIME,
+    runtimeDefaults: typeof DEFAULT_BACKEND_CHAT_RUNTIME,
+  ): ResponseRankingRuntimePolicy {
+    const candidateCutoff = Math.max(
+      12,
+      Math.min(
+        48,
+        Math.round(
+          CHAT_RESPONSE_RANKING_DEFAULTS.candidateCutoff +
+          runtimeConfig.ratePolicy.perSecondBurstLimit +
+          (runtimeConfig.learningPolicy.emitInferenceSnapshots ? 4 : 0) +
+          (runtimeConfig.proofPolicy.enabled ? 2 : 0),
+        ),
+      ),
+    );
+
+    const semanticWindowDepth = Math.max(
+      8,
+      Math.min(
+        24,
+        Math.round(
+          CHAT_RESPONSE_RANKING_DEFAULTS.semanticWindowDepth +
+          (runtimeConfig.replayPolicy.enabled ? 4 : 0) +
+          (runtimeConfig.learningPolicy.coldStartEnabled ? 1 : 0),
+        ),
+      ),
+    );
+
+    const channelFallback = runtimeConfig.allowVisibleChannels[0]
+      ?? runtimeDefaults.allowVisibleChannels[0]
+      ?? 'GLOBAL';
+
+    return {
+      candidateCutoff,
+      semanticWindowDepth,
+      maxTranscriptTurns: Math.max(24, Math.min(256, Math.round(runtimeConfig.replayPolicy.maxMessagesPerRoom / 24))),
+      replayWindowMs: runtimeConfig.replayPolicy.replayTimeWindowMs,
+      maxCharactersPerMessage: runtimeConfig.moderationPolicy.maxCharactersPerMessage,
+      maxLinesPerMessage: runtimeConfig.moderationPolicy.maxLinesPerMessage,
+      helperMinimumGapMs: runtimeConfig.ratePolicy.helperMinimumGapMs,
+      haterMinimumGapMs: runtimeConfig.ratePolicy.haterMinimumGapMs,
+      npcMinimumGapMs: runtimeConfig.ratePolicy.npcMinimumGapMs,
+      identicalMessageWindowMs: runtimeConfig.ratePolicy.identicalMessageWindowMs,
+      shadowWritesEnabled: runtimeConfig.allowShadowChannels.length > 0,
+      learningSnapshotsEnabled: runtimeConfig.learningPolicy.emitInferenceSnapshots,
+      proofEnabled: runtimeConfig.proofPolicy.enabled,
+      replayEnabled: runtimeConfig.replayPolicy.enabled,
+      invasionPrimingEnabled: runtimeConfig.invasionPolicy.allowShadowPriming,
+      strictModeration: runtimeConfig.moderationPolicy.shadowModeOnHighRisk,
+      channelFallback,
+    };
+  }
+
+  private normalizeCandidateChannelPreference(
+    preference: RankedResponseCandidate['channelPreference'],
+    activeChannel: ChatVisibleChannel,
+  ): RankedResponseCandidate['channelPreference'] {
+    if (preference === 'same') {
+      return this.runtimeConfig.allowVisibleChannels.includes(activeChannel)
+        ? 'same'
+        : this.runtimePolicy.channelFallback;
+    }
+    if (preference === 'shadow') {
+      return this.runtimePolicy.shadowWritesEnabled ? 'shadow' : 'same';
+    }
+    if (this.runtimeConfig.allowVisibleChannels.includes(preference)) {
+      return preference;
+    }
+    return 'same';
+  }
+
+  private normalizeCandidateBody(body: string): string {
+    const normalized = (body ?? '')
+      .replace(/\r\n/g, '\n')
+      .split('\n')
+      .slice(0, this.runtimePolicy.maxLinesPerMessage)
+      .join('\n')
+      .slice(0, this.runtimePolicy.maxCharactersPerMessage);
+
+    return normalized;
+  }
+
+  private computeCandidateBodyRisk(body: string): Score01 {
+    if (!body) {
+      return clamp01(0);
+    }
+
+    const normalized = body.toLowerCase();
+    const lineCount = body.split('\n').length;
+    const charPressure = clamp01(body.length / Math.max(1, this.runtimePolicy.maxCharactersPerMessage));
+    const linePressure = clamp01(lineCount / Math.max(1, this.runtimePolicy.maxLinesPerMessage));
+    const maskedHits = this.runtimeConfig.moderationPolicy.maskBannedLexemes.filter((lexeme) => normalized.includes(lexeme.toLowerCase())).length;
+    const rejectHits = this.runtimeConfig.moderationPolicy.rejectBannedLexemes.filter((lexeme) => normalized.includes(lexeme.toLowerCase())).length;
+    const urlHits = (normalized.match(/https?:\/\//g) ?? []).length;
+    const capsRatio = this.computeAllCapsRatio(body);
+
+    return clamp01(
+      charPressure * 0.18 +
+      linePressure * 0.14 +
+      clamp01(maskedHits / Math.max(1, this.runtimeConfig.moderationPolicy.maskBannedLexemes.length)) * 0.16 +
+      clamp01(rejectHits) * 0.28 +
+      clamp01(urlHits / Math.max(1, this.runtimeConfig.moderationPolicy.maxSuspiciousUrlCount)) * 0.08 +
+      clamp01(capsRatio / Math.max(0.01, this.runtimeConfig.moderationPolicy.rewriteAllCapsThreshold)) * 0.16
+    );
+  }
+
+  private computeAllCapsRatio(body: string): number {
+    const letters = [...body].filter((char) => /[A-Za-z]/.test(char));
+    if (!letters.length) {
+      return 0;
+    }
+    const upper = letters.filter((char) => char === char.toUpperCase()).length;
+    return upper / letters.length;
+  }
+
+  private shouldInjectSilenceCandidate(
+    context: ResponseRankingContext,
+  ): boolean {
+    if (!this.runtimePolicy.replayEnabled) {
+      return true;
+    }
+    return context.transcriptWindow.length <= this.runtimePolicy.maxTranscriptTurns;
+  }
+
+  private sliceTranscriptWindowForRuntime(
+    transcriptWindow: readonly ResponseTranscriptTurn[],
+    nowMs: UnixMs,
+  ): readonly ResponseTranscriptTurn[] {
+    if (!transcriptWindow.length) {
+      return transcriptWindow;
+    }
+
+    const earliestAllowed = Number(nowMs) - this.runtimePolicy.replayWindowMs;
+    const sliced = transcriptWindow
+      .filter((turn) => Number(turn.createdAt) >= earliestAllowed)
+      .slice(-this.runtimePolicy.maxTranscriptTurns);
+
+    return sliced.length ? sliced : transcriptWindow.slice(-this.runtimePolicy.maxTranscriptTurns);
+  }
+
+  private computeSignalPressure(
+    signals: readonly ChatSignalEnvelope[],
+  ): Score01 {
+    if (!signals.length) {
+      return clamp01(0);
+    }
+
+    let total = 0;
+    for (const signal of signals) {
+      if (signal.battle) {
+        total += Number(signal.battle.hostileMomentum) / 100 * 0.28;
+        total += signal.battle.rescueWindowOpen ? 0.04 : 0;
+      }
+      if (signal.run) {
+        total += signal.run.bankruptcyWarning ? 0.1 : 0;
+        total += signal.run.nearSovereignty ? 0.06 : 0;
+      }
+      if (signal.multiplayer) {
+        total += Math.min(0.12, Number(signal.multiplayer.rankingPressure) / 100 * 0.12);
+      }
+      if (signal.economy) {
+        total += signal.economy.bluffRisk01 * 0.12;
+        total += signal.economy.liquidityStress01 * 0.1;
+      }
+      if (signal.liveops) {
+        total += signal.liveops.heatMultiplier01 * 0.1;
+        total += signal.liveops.helperBlackout ? 0.06 : 0;
+      }
+    }
+
+    return clamp01(total / Math.max(1, signals.length) * 1.8);
+  }
+
+  private computeTranscriptEcho(
+    transcriptWindow: readonly ResponseTranscriptTurn[],
+  ): Score01 {
+    if (transcriptWindow.length < 2) {
+      return clamp01(0);
+    }
+
+    const seen = new Set<string>();
+    let repeats = 0;
+    for (const turn of transcriptWindow) {
+      const normalized = turn.body.trim().toLowerCase();
+      if (!normalized) {
+        continue;
+      }
+      if (seen.has(normalized)) {
+        repeats += 1;
+      } else {
+        seen.add(normalized);
+      }
+    }
+    return clamp01(repeats / transcriptWindow.length);
+  }
+
+  private resolveExpectedGapForCandidate(
+    candidate: RankedResponseCandidate,
+  ): number {
+    if (candidate.sourceKind === 'helper') {
+      return this.runtimePolicy.helperMinimumGapMs;
+    }
+    if (candidate.sourceKind === 'hater') {
+      return this.runtimePolicy.haterMinimumGapMs;
+    }
+    return this.runtimePolicy.npcMinimumGapMs;
+  }
+
+  private scoreLatencyClassAgainstRuntime(
+    latencyClass: NonNullable<RankedResponseCandidate['latencyClass']>,
+    expectedGap: number,
+    surface: ResponseRankingWorkingSurface,
+  ): Score01 {
+    switch (latencyClass) {
+      case 'instant':
+        return clamp01(1 - clamp01(expectedGap / Math.max(1, surface.runtimePolicy.haterMinimumGapMs * 1.5)) * 0.35);
+      case 'short_delay':
+        return clamp01(0.72 + surface.volatility * 0.08 + surface.continuity * 0.06);
+      case 'dramatic_delay':
+        return clamp01(0.58 + surface.proofValue * 0.08 + surface.replayCompression * 0.1);
+      case 'hold':
+        return clamp01(0.52 + surface.silenceValue * 0.24 + surface.moderationStrictness * 0.08);
+      default:
+        return clamp01(0.6);
+    }
+  }
+
+  private scoreRuntimeChannelLegality(
+    candidate: RankedResponseCandidate,
+    context: ResponseRankingContext,
+  ): Score01 {
+    if (candidate.channelPreference === 'same') {
+      return this.runtimeConfig.allowVisibleChannels.includes(context.activeChannel) ? clamp01(0.9) : clamp01(0.42);
+    }
+    if (candidate.channelPreference === 'shadow') {
+      return this.runtimePolicy.shadowWritesEnabled ? clamp01(0.88) : clamp01(0.2);
+    }
+    return this.runtimeConfig.allowVisibleChannels.includes(candidate.channelPreference)
+      ? clamp01(0.94)
+      : clamp01(0.24);
   }
 }
 
