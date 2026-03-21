@@ -41,6 +41,7 @@ import type {
 import {
   asChatOfferId,
   asChatOfferThreadId,
+  asOfferAmount,
   asUnixMs as asOfferUnixMs,
   chatOfferHasGuarantee,
   chatOfferSupportsRescue,
@@ -1031,6 +1032,20 @@ function createInitialScene(input: {
 // MARK: Offer normalization + conversion
 // ============================================================================
 
+function normalizeOfferMarketRange(
+  marketRange: ChatOffer['currentVersion']['price']['marketRange'] | ChatOfferDraft['price']['marketRange'] | undefined,
+): ChatOffer['currentVersion']['price']['marketRange'] | undefined {
+  if (!marketRange) {
+    return undefined;
+  }
+  return {
+    min: asOfferAmount(Number(marketRange.min)),
+    max: asOfferAmount(Number(marketRange.max)),
+    expected: marketRange.expected === undefined ? undefined : asOfferAmount(Number(marketRange.expected)),
+    fairValue: marketRange.fairValue === undefined ? undefined : asOfferAmount(Number(marketRange.fairValue)),
+  };
+}
+
 function normalizeDraftToOffer(draft: ChatOfferDraft | ChatOffer, threadId: string, now: UnixMs, sceneId: any): ChatOffer {
   if ('offerId' in draft) {
     return draft;
@@ -1038,17 +1053,7 @@ function normalizeDraftToOffer(draft: ChatOfferDraft | ChatOffer, threadId: stri
   const createdAt = asOfferUnixMs(Number(draft.createdAt ?? now));
   const normalizedPrice = createChatOfferPrice(Number(draft.price.amount), String(draft.price.currency), {
     ...draft.price,
-    marketRange: draft.price.marketRange
-      ? {
-          ...draft.price.marketRange,
-          min: Number(asPricePoints(Number(draft.price.marketRange.min))),
-          max: Number(asPricePoints(Number(draft.price.marketRange.max))),
-          expected:
-            draft.price.marketRange.expected === undefined
-              ? undefined
-              : Number(asPricePoints(Number(draft.price.marketRange.expected))),
-        }
-      : undefined,
+    marketRange: normalizeOfferMarketRange(draft.price.marketRange),
   });
   const normalizedVisibility = normalizeOfferVisibilityEnvelope(draft.visibility, 'DEAL_ROOM');
   const normalizedWindow = ensureOfferWindowIntegrity(
@@ -1229,16 +1234,16 @@ function deriveCounterReadFromOfferData(
   return {
     likelyOutcome:
       leakRisk >= 0.72
-        ? 'LEAK_RISK'
+        ? 'LIKELY_LEAK'
         : rescueNeed >= 0.66
-          ? 'HELPER_NEEDED'
+          ? 'LIKELY_RESCUE'
           : rejectionRisk >= 0.58
             ? 'LIKELY_REJECT'
             : stallRisk >= 0.54
               ? 'LIKELY_STALL'
               : baseDelta <= 0.12
                 ? 'LIKELY_ACCEPT'
-                : 'COUNTER_LIKELY',
+                : 'LIKELY_COUNTER',
     counterDistance: asScore0To1(clamp01(baseDelta)),
     rejectionRisk: asScore0To1(rejectionRisk),
     stallRisk: asScore0To1(stallRisk),
@@ -1291,17 +1296,7 @@ function assessOfferLifecycle(
   const counterRead = deriveCounterReadFromOfferData(offer, priorOffer, visibility);
   const normalizedPrice = createChatOfferPrice(Number(offer.currentVersion.price.amount), String(offer.currentVersion.price.currency), {
     ...offer.currentVersion.price,
-    marketRange: offer.currentVersion.price.marketRange
-      ? {
-          ...offer.currentVersion.price.marketRange,
-          min: Number(asPricePoints(Number(offer.currentVersion.price.marketRange.min))),
-          max: Number(asPricePoints(Number(offer.currentVersion.price.marketRange.max))),
-          expected:
-            offer.currentVersion.price.marketRange.expected === undefined
-              ? undefined
-              : Number(asPricePoints(Number(offer.currentVersion.price.marketRange.expected))),
-        }
-      : undefined,
+    marketRange: normalizeOfferMarketRange(offer.currentVersion.price.marketRange),
   });
   const currentVersion = createChatOfferVersion(offer.currentVersion.versionNumber, normalizedPrice, offer.currentVersion.paymentTerms, {
     ...offer.currentVersion,
