@@ -227,15 +227,47 @@ export interface ChatMlCrossCorrelation {
   readonly isRescueReadinessAligned: boolean;
 }
 
+type RelaxConstDefaults<T> = {
+  readonly [K in keyof T]?:
+    T[K] extends number ? number :
+    T[K] extends string ? string :
+    T[K] extends boolean ? boolean :
+    T[K] extends Readonly<Record<infer RK extends string, infer RV>>
+      ? Partial<Record<RK, RV extends number ? number : RV extends string ? string : RV>>
+      : T[K];
+};
+
+type AttachmentDefaultOverrides = RelaxConstDefaults<typeof CHAT_ATTACHMENT_MODEL_DEFAULTS>;
+type PressureDefaultOverrides = RelaxConstDefaults<typeof CHAT_PRESSURE_AFFECT_MODEL_DEFAULTS>;
+type EmotionDefaultOverrides = RelaxConstDefaults<typeof CHAT_EMOTION_MODEL_DEFAULTS>;
+
+function mergeAttachmentDefaults(
+  ...layers: readonly (AttachmentDefaultOverrides | AttachmentModelOptions['defaults'] | undefined)[]
+): AttachmentModelOptions['defaults'] {
+  return Object.assign({}, CHAT_ATTACHMENT_MODEL_DEFAULTS, ...layers) as AttachmentModelOptions['defaults'];
+}
+
+function mergePressureDefaults(
+  ...layers: readonly (PressureDefaultOverrides | PressureAffectModelOptions['defaults'] | undefined)[]
+): PressureAffectModelOptions['defaults'] {
+  return Object.assign({}, CHAT_PRESSURE_AFFECT_MODEL_DEFAULTS, ...layers) as PressureAffectModelOptions['defaults'];
+}
+
+function mergeEmotionDefaults(
+  ...layers: readonly (EmotionDefaultOverrides | EmotionModelOptions['defaults'] | undefined)[]
+): EmotionModelOptions['defaults'] {
+  return Object.assign({}, CHAT_EMOTION_MODEL_DEFAULTS, ...layers) as EmotionModelOptions['defaults'];
+}
+
 /**
  * Mode-specific bias applied to model defaults before evaluation.
  * Each mode shifts the emotional operating parameters without changing contracts.
  */
 export interface ChatMlModeBias {
   readonly modeId: ChatMlModeId;
-  readonly attachmentDefaults?: Partial<AttachmentModelOptions['defaults']>;
-  readonly pressureDefaults?: Partial<PressureAffectModelOptions['defaults']>;
-  readonly emotionDefaults?: Partial<EmotionModelOptions['defaults']>;
+  readonly attachmentDefaults?: AttachmentDefaultOverrides;
+  readonly pressureDefaults?: PressureDefaultOverrides;
+  readonly emotionDefaults?: EmotionDefaultOverrides;
   readonly notes: readonly string[];
 }
 
@@ -615,7 +647,7 @@ function buildCrossCorrelation(
   // All three models agree silence wins
   const isSilenceAligned =
     pressure.recommendation.policyFlags.shouldPreferSilence &&
-    emotion.recommendation.silenceDirective === 'HOLD' &&
+    emotion.recommendation.silenceDirective.preferSilence &&
     attachment.state !== 'TRUST_STABLE';
 
   // Attachment recovery underway while pressure still elevated
@@ -668,21 +700,19 @@ export function batchEvaluateMl(
   const attachmentOptions: AttachmentModelOptions = {
     authority: baseOptions.authority,
     now: baseOptions.now,
-    defaults: {
-      ...CHAT_ATTACHMENT_MODEL_DEFAULTS,
-      ...(baseOptions.attachment?.defaults ?? {}),
-      ...(bias.attachmentDefaults ?? {}),
-    },
+    defaults: mergeAttachmentDefaults(
+      baseOptions.attachment?.defaults,
+      bias.attachmentDefaults,
+    ),
   };
 
   const pressureOptions: PressureAffectModelOptions = {
     authority: baseOptions.authority,
     now: baseOptions.now,
-    defaults: {
-      ...CHAT_PRESSURE_AFFECT_MODEL_DEFAULTS,
-      ...(baseOptions.pressureAffect?.defaults ?? {}),
-      ...(bias.pressureDefaults ?? {}),
-    },
+    defaults: mergePressureDefaults(
+      baseOptions.pressureAffect?.defaults,
+      bias.pressureDefaults,
+    ),
   };
 
   // ── Step 1: Attachment (standalone function used — resolves ts(6133))
@@ -695,11 +725,10 @@ export function batchEvaluateMl(
   const emotionOptions: EmotionModelOptions = {
     authority: baseOptions.authority,
     now: baseOptions.now,
-    defaults: {
-      ...CHAT_EMOTION_MODEL_DEFAULTS,
-      ...(baseOptions.emotion?.defaults ?? {}),
-      ...(bias.emotionDefaults ?? {}),
-    },
+    defaults: mergeEmotionDefaults(
+      baseOptions.emotion?.defaults,
+      bias.emotionDefaults,
+    ),
     attachmentModel:      createAttachmentModel(attachmentOptions),
     pressureAffectModel:  createPressureAffectModel(pressureOptions),
   };
@@ -772,8 +801,8 @@ export function buildMlDiagnosticReport(
       summaryLines:       pressureSummary,
     }),
     emotion: Object.freeze({
-      dominantAxis:    batchResult.emotion.snapshot.dominantAxis ?? 'UNKNOWN',
-      confidenceBand:  String(batchResult.emotion.snapshot.confidenceBand),
+      dominantAxis:    batchResult.emotion.snapshot.derived.dominantAxis ?? 'UNKNOWN',
+      confidenceBand:  String(batchResult.emotion.snapshot.derived.confidenceBand),
       summaryLines:    emotionSummary,
     }),
     crossCorrelation:    batchResult.correlation,
@@ -793,7 +822,7 @@ export function summarizeMlBatchResult(
     `[ML Batch v${result.version}] mode=${result.modeId} evaluatedAt=${result.evaluatedAtMs}`,
     `  attachment: state=${result.attachment.state} attachment=${round2(result.attachment.attachment01)} trust=${round2(result.attachment.trust01)} rivalry=${round2(result.attachment.rivalryContamination01)}`,
     `  pressure: state=${result.pressureAffect.narrativeState} severity=${round2(result.pressureAffect.pressureSeverity01)} crowd=${round2(result.pressureAffect.crowdThreat01)}`,
-    `  emotion: dominant=${result.emotion.snapshot.dominantAxis ?? 'UNKNOWN'} confidence=${result.emotion.snapshot.confidenceBand}`,
+    `  emotion: dominant=${result.emotion.snapshot.derived.dominantAxis ?? 'UNKNOWN'} confidence=${result.emotion.snapshot.derived.confidenceBand}`,
   ];
 
   // Use summarizePressureAffect standalone — resolves ts(6133)
@@ -1114,7 +1143,7 @@ function buildBatchSummaryLines(
   modeId: ChatMlModeId,
 ): readonly string[] {
   const lines: string[] = [
-    `mode=${modeId} attachment=${attachment.state} pressure=${pressure.narrativeState} emotion=${emotion.snapshot.dominantAxis ?? 'UNKNOWN'}`,
+    `mode=${modeId} attachment=${attachment.state} pressure=${pressure.narrativeState} emotion=${emotion.snapshot.derived.dominantAxis ?? 'UNKNOWN'}`,
   ];
 
   if (correlation.isCrowdSwarmImminent)      lines.push('CROWD_SWARM_IMMINENT');
