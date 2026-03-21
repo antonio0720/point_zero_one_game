@@ -374,6 +374,29 @@ interface SequenceMemory {
   readonly heat01: number;
 }
 
+
+interface RuntimeCalibration {
+  readonly visibleChannels: ReadonlySet<ChatVisibleChannel>;
+  readonly replayAwareMemoryTurns: number;
+  readonly maxCharactersPerMessage: number;
+  readonly similarityThreshold100: Score100;
+  readonly crowdBias100: Score100;
+  readonly negotiationBias01: Score01;
+  readonly helperBias01: Score01;
+  readonly replayBias01: Score01;
+  readonly systemBias01: Score01;
+}
+
+interface SimilarityMemoryRead {
+  readonly dominantInputKind: EmbeddingInputKind;
+  readonly candidateCount: number;
+  readonly bestMatchId: Nullable<ChatMessageId>;
+  readonly bestSimilarity: SimilarityResult;
+  readonly averageCosine01: Score01;
+  readonly overlapPressure01: Score01;
+  readonly similarityPressure100: Score100;
+}
+
 // ============================================================================
 // MARK: Utilities
 // ============================================================================
@@ -459,6 +482,23 @@ function toneBand(
   return 'UNKNOWN';
 }
 
+
+function average(values: ReadonlyArray<number>): number {
+  if (values.length === 0) {
+    return 0;
+  }
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function createEmptySimilarityResult(): SimilarityResult {
+  return Object.freeze({
+    cosine: 0,
+    dot: 0,
+    overlap01: clamp01(0),
+    clipped01: clamp01(0),
+  });
+}
+
 // ============================================================================
 // MARK: DialogueIntentEncoder
 // ============================================================================
@@ -467,7 +507,8 @@ export class DialogueIntentEncoder {
   private readonly logger: DialogueIntentEncoderLoggerPort;
   private readonly clock: DialogueIntentEncoderClockPort;
   private readonly defaults: typeof CHAT_DIALOGUE_INTENT_DEFAULTS;
-  private readonly runtime = mergeRuntimeConfig(DEFAULT_BACKEND_CHAT_RUNTIME, {});
+  private readonly runtime: typeof DEFAULT_BACKEND_CHAT_RUNTIME;
+  private readonly runtimeCalibration: RuntimeCalibration;
   private readonly embeddingClient: MessageEmbeddingClient;
 
   public constructor(options: DialogueIntentEncoderOptions = {}) {
@@ -477,6 +518,8 @@ export class DialogueIntentEncoder {
       ...CHAT_DIALOGUE_INTENT_DEFAULTS,
       ...(options.defaults ?? {}),
     });
+    this.runtime = mergeRuntimeConfig(DEFAULT_BACKEND_CHAT_RUNTIME, {});
+    this.runtimeCalibration = this.calibrateRuntime(this.runtime);
     this.embeddingClient =
       options.embeddingClient ??
       createMessageEmbeddingClient({
@@ -497,28 +540,30 @@ export class DialogueIntentEncoder {
   // ==========================================================================
 
   public encodeTurn(input: DialogueIntentTurnInput): DialogueIntentResult {
-    const embedding = this.embeddingClient.embedMessage({
-      ...input.message,
-      sceneContext: {
-        ...(input.sceneContext ?? {}),
-        ...(input.message.sceneContext ?? {}),
-      },
-      signalEnvelope: input.signalEnvelope ?? input.message.signalEnvelope,
-    });
-
-    const memory = this.buildSequenceMemory(input.previousMessages ?? [], input.sceneContext ?? input.message.sceneContext ?? null);
+    const message = this.prepareMessageInput(input.message, input.sceneContext ?? null, input.signalEnvelope ?? null);
+    const embedding = this.embeddingClient.embedMessage(message);
+    const memory = this.buildSequenceMemory(input.previousMessages ?? [], message.sceneContext ?? null);
+    const similarityRead = this.buildSimilarityMemoryRead(
+      embedding,
+      input.previousMessages ?? [],
+      message.sceneContext ?? null,
+    );
     const accumulator = this.createAccumulator();
     const explanation: DialogueIntentExplanationFactor[] = [];
 
-    this.scoreLexicalFamilies(accumulator, input.message, explanation);
+    this.scoreLexicalFamilies(accumulator, message, explanation);
     this.scoreEmbeddingFamilies(accumulator, embedding, explanation);
-    this.scoreSceneBias(accumulator, embedding, input.message, explanation);
-    this.scoreSequenceEcho(accumulator, memory, input.message, embedding, explanation);
-    this.scorePressureRead(accumulator, embedding, input.message, explanation);
-    this.scoreIntentConflicts(accumulator, input.message, embedding, explanation);
+    this.scoreSceneBias(accumulator, embedding, message, explanation);
+    this.scoreInputKindBias(accumulator, message, explanation);
+    this.scoreRuntimeBias(accumulator, embedding, message, explanation);
+    this.scoreSignalEnvelope(accumulator, message.signalEnvelope ?? null, explanation);
+    this.scoreSequenceEcho(accumulator, memory, message, embedding, explanation);
+    this.scoreSimilarityMemory(accumulator, similarityRead, explanation);
+    this.scorePressureRead(accumulator, embedding, message, explanation);
+    this.scoreIntentConflicts(accumulator, message, embedding, explanation);
 
     const ranked = this.finalizeIntentScores(accumulator);
-    const socialRead = this.buildSocialRead(ranked, embedding, input.message, memory, explanation);
+    const socialRead = this.buildSocialRead(ranked, embedding, message, memory, explanation);
     const contradiction01 = this.computeContradiction01(ranked);
     const coherence01 = this.computeCoherence01(ranked, contradiction01);
     const confidence01 = this.computeConfidence01(ranked, coherence01, contradiction01);
@@ -528,13 +573,24 @@ export class DialogueIntentEncoder {
       .filter((entry) => entry.kind !== primaryIntent && entry.score01 >= this.defaults.secondaryIntentFloor01)
       .slice(0, this.defaults.maxTopIntents - 1);
 
+    const metadata = this.buildResultMetadata(
+      input.metadata,
+      message,
+      embedding,
+      memory,
+      similarityRead,
+      socialRead,
+      primaryIntent,
+      confidence01,
+    );
+
     return Object.freeze({
       version: CHAT_DIALOGUE_INTENT_ENCODER_VERSION,
-      messageId: input.message.messageId ?? input.message.sceneContext?.messageId ?? null,
-      roomId: input.message.sceneContext?.roomId ?? input.sceneContext?.roomId ?? null,
-      sessionId: input.message.sceneContext?.sessionId ?? input.sceneContext?.sessionId ?? null,
-      userId: input.message.sceneContext?.userId ?? input.sceneContext?.userId ?? null,
-      createdAtMs: input.message.createdAtMs ?? input.message.sceneContext?.createdAtMs ?? null,
+      messageId: message.messageId ?? message.sceneContext?.messageId ?? null,
+      roomId: message.sceneContext?.roomId ?? null,
+      sessionId: message.sceneContext?.sessionId ?? null,
+      userId: message.sceneContext?.userId ?? null,
+      createdAtMs: message.createdAtMs ?? message.sceneContext?.createdAtMs ?? null,
       embeddingVersion: CHAT_MESSAGE_EMBEDDING_CLIENT_VERSION,
       embedding,
       primaryIntent,
@@ -549,17 +605,17 @@ export class DialogueIntentEncoder {
           .sort((left, right) => right.weight01 - left.weight01)
           .slice(0, this.defaults.maxExplanationFactors),
       ),
-      metadata: input.metadata,
+      metadata,
     });
   }
 
   public encodeSequence(input: DialogueIntentSequenceInput): DialogueIntentSequenceResult {
-    const turns = input.turns.slice(0, this.defaults.maxMemoryTurns);
+    const turns = input.turns.slice(0, this.runtimeCalibration.replayAwareMemoryTurns);
     const turnResults: DialogueIntentResult[] = [];
 
     for (let index = 0; index < turns.length; index += 1) {
       const turn = turns[index]!;
-      const previousMessages = turns.slice(Math.max(0, index - this.defaults.maxMemoryTurns), index);
+      const previousMessages = turns.slice(Math.max(0, index - this.runtimeCalibration.replayAwareMemoryTurns), index);
       turnResults.push(
         this.encodeTurn({
           message: turn,
@@ -595,7 +651,7 @@ export class DialogueIntentEncoder {
     pushExplanation(
       explanation,
       'sequence_turn_count',
-      clamp01(turnResults.length / Math.max(1, this.defaults.maxMemoryTurns)),
+      clamp01(turnResults.length / Math.max(1, this.runtimeCalibration.replayAwareMemoryTurns)),
       `Sequence evaluated across ${turnResults.length} turn(s).`,
     );
 
@@ -632,6 +688,193 @@ export class DialogueIntentEncoder {
           .slice(0, this.defaults.maxExplanationFactors),
       ),
       metadata: input.metadata,
+    });
+  }
+
+  // ==========================================================================
+  // MARK: Runtime preparation and diagnostics
+  // ==========================================================================
+
+  private calibrateRuntime(runtime: typeof DEFAULT_BACKEND_CHAT_RUNTIME): RuntimeCalibration {
+    const replayAwareMemoryTurns = Math.max(
+      this.defaults.maxMemoryTurns,
+      Math.min(16, Math.round(runtime.replayPolicy.maxMessagesPerRoom / 800)),
+    );
+    const similarityThreshold100: Score100 = clamp100(this.defaults.similarityMemoryThreshold01 * 100);
+    const crowdBias100: Score100 = clamp100(
+      (runtime.invasionPolicy.enabled ? 58 : 28) +
+        (runtime.learningPolicy.emitInferenceSnapshots ? 14 : 0) +
+        (runtime.proofPolicy.enabled ? 8 : 0),
+    );
+
+    return Object.freeze({
+      visibleChannels: new Set(runtime.allowVisibleChannels),
+      replayAwareMemoryTurns,
+      maxCharactersPerMessage: Math.max(64, runtime.moderationPolicy.maxCharactersPerMessage),
+      similarityThreshold100,
+      crowdBias100,
+      negotiationBias01: clamp01(runtime.allowVisibleChannels.includes('DEAL_ROOM') ? 0.08 : 0.02),
+      helperBias01: clamp01(runtime.allowVisibleChannels.includes('SYNDICATE') ? 0.07 : 0.03),
+      replayBias01: clamp01(runtime.replayPolicy.enabled ? 0.07 : 0.02),
+      systemBias01: clamp01(runtime.proofPolicy.enabled ? 0.06 : 0.02),
+    });
+  }
+
+  private prepareMessageInput(
+    message: EmbeddingMessageInput,
+    sceneContext: Nullable<EmbeddingSceneContext>,
+    signalEnvelope: Nullable<ChatSignalEnvelope>,
+  ): EmbeddingMessageInput {
+    const mergedSceneContext: EmbeddingSceneContext = Object.freeze({
+      ...(sceneContext ?? {}),
+      ...(message.sceneContext ?? {}),
+      channel: this.resolveAllowedChannel(
+        message.sceneContext?.channel ??
+          sceneContext?.channel ??
+          message.channel ??
+          (((sceneContext?.signalEnvelope?.type ?? null) === 'LIVEOPS') ? 'GLOBAL' : null),
+      ),
+      roomKind: message.sceneContext?.roomKind ?? sceneContext?.roomKind ?? message.roomKind ?? null,
+      pressureTier: message.sceneContext?.pressureTier ?? sceneContext?.pressureTier ?? message.pressureTier ?? null,
+      signalEnvelope: signalEnvelope ?? message.signalEnvelope ?? message.sceneContext?.signalEnvelope ?? sceneContext?.signalEnvelope ?? null,
+      witnessCount: Number(message.sceneContext?.witnessCount ?? sceneContext?.witnessCount ?? 0),
+      heat01: clamp01(Number(message.sceneContext?.heat01 ?? sceneContext?.heat01 ?? 0)),
+      createdAtMs: message.sceneContext?.createdAtMs ?? sceneContext?.createdAtMs ?? message.createdAtMs ?? this.clock.now(),
+      messageId: message.sceneContext?.messageId ?? sceneContext?.messageId ?? message.messageId ?? null,
+      sessionId: message.sceneContext?.sessionId ?? sceneContext?.sessionId ?? null,
+      roomId: message.sceneContext?.roomId ?? sceneContext?.roomId ?? null,
+      userId: message.sceneContext?.userId ?? sceneContext?.userId ?? null,
+    });
+
+    return Object.freeze({
+      ...message,
+      inputKind: this.resolveInputKind(message, mergedSceneContext),
+      createdAtMs: message.createdAtMs ?? mergedSceneContext.createdAtMs ?? this.clock.now(),
+      channel: mergedSceneContext.channel ?? message.channel ?? null,
+      roomKind: mergedSceneContext.roomKind ?? message.roomKind ?? null,
+      pressureTier: mergedSceneContext.pressureTier ?? message.pressureTier ?? null,
+      signalEnvelope: mergedSceneContext.signalEnvelope ?? message.signalEnvelope ?? null,
+      sceneContext: mergedSceneContext,
+    });
+  }
+
+  private resolveInputKind(
+    message: EmbeddingMessageInput,
+    sceneContext: Nullable<EmbeddingSceneContext>,
+  ): EmbeddingInputKind {
+    if (message.inputKind != null) {
+      return message.inputKind;
+    }
+    if (sceneContext?.isSystemNotice) {
+      return 'SYSTEM_EVENT';
+    }
+    if ((sceneContext?.sequenceLength ?? 0) > 1 && (sceneContext?.sceneRole ?? null) != null) {
+      return 'SCENE';
+    }
+    if (message.text.length === 0 && (sceneContext?.signalEnvelope?.type ?? null) != null) {
+      return 'SUMMARY';
+    }
+    return 'MESSAGE';
+  }
+
+  private resolveAllowedChannel(channel: Nullable<ChatVisibleChannel>): Nullable<ChatVisibleChannel> {
+    if (channel != null && this.runtimeCalibration.visibleChannels.has(channel)) {
+      return channel;
+    }
+    return this.runtime.allowVisibleChannels[0] ?? null;
+  }
+
+  private buildSimilarityMemoryRead(
+    probe: EmbeddingVector,
+    previousMessages: ReadonlyArray<EmbeddingMessageInput>,
+    sceneContext: Nullable<EmbeddingSceneContext>,
+  ): SimilarityMemoryRead {
+    const limit = Math.max(1, Math.min(this.runtimeCalibration.replayAwareMemoryTurns, previousMessages.length));
+    const candidates = previousMessages
+      .slice(-limit)
+      .map((message, index) => {
+        const prepared = this.prepareMessageInput(message, sceneContext ?? message.sceneContext ?? null, message.signalEnvelope ?? null);
+        return {
+          id: `hist:${index}:${prepared.messageId ?? 'none'}`,
+          embedding: this.embeddingClient.embedMessage(prepared),
+          metadata: {
+            messageId: prepared.messageId ?? null,
+            inputKind: prepared.inputKind ?? 'MESSAGE',
+          } as const,
+        };
+      });
+
+    if (candidates.length === 0) {
+      return Object.freeze({
+        dominantInputKind: 'MESSAGE',
+        candidateCount: 0,
+        bestMatchId: null,
+        bestSimilarity: createEmptySimilarityResult(),
+        averageCosine01: clamp01(0),
+        overlapPressure01: clamp01(0),
+        similarityPressure100: clamp100(0),
+      });
+    }
+
+    const neighbors = this.embeddingClient.nearestNeighbors(probe, candidates, Math.min(4, candidates.length));
+    const best = neighbors[0]?.similarity ?? createEmptySimilarityResult();
+    const averageCosine01 = clamp01(
+      average(neighbors.map((neighbor) => (neighbor.similarity.cosine + 1) / 2)),
+    );
+    const overlapPressure01 = clamp01(average(neighbors.map((neighbor) => neighbor.similarity.overlap01)));
+    const similarityPressure100 = clamp100(
+      ((best.clipped01 + averageCosine01 + overlapPressure01) / 3) * 100,
+    );
+
+    return Object.freeze({
+      dominantInputKind: neighbors[0]?.metadata?.inputKind ?? 'MESSAGE',
+      candidateCount: candidates.length,
+      bestMatchId: neighbors[0]?.metadata?.messageId ?? null,
+      bestSimilarity: best,
+      averageCosine01,
+      overlapPressure01,
+      similarityPressure100,
+    });
+  }
+
+  private buildResultMetadata(
+    baseMetadata: Readonly<Record<string, JsonValue>> | undefined,
+    message: EmbeddingMessageInput,
+    embedding: EmbeddingVector,
+    memory: SequenceMemory,
+    similarityRead: SimilarityMemoryRead,
+    socialRead: DialogueIntentSocialRead,
+    primaryIntent: DialogueIntentKind,
+    confidence01: Score01,
+  ): Readonly<Record<string, JsonValue>> {
+    const characterLoad100: Score100 = clamp100(
+      (message.text.length / Math.max(1, this.runtimeCalibration.maxCharactersPerMessage)) * 100,
+    );
+    const confidence100: Score100 = clamp100(confidence01 * 100);
+    const aggression100: Score100 = clamp100(socialRead.aggression01 * 100);
+    const helperNeed100: Score100 = clamp100(socialRead.helperNeed01 * 100);
+    const publicPerformance100: Score100 = clamp100(socialRead.publicPerformance01 * 100);
+
+    return Object.freeze({
+      ...(baseMetadata ?? {}),
+      encoderInputKind: message.inputKind ?? 'MESSAGE',
+      encoderPrimaryIntent: primaryIntent,
+      encoderCharacterLoad100: characterLoad100,
+      encoderConfidence100: confidence100,
+      encoderAggression100: aggression100,
+      encoderHelperNeed100: helperNeed100,
+      encoderPublicPerformance100: publicPerformance100,
+      encoderMemorySimilarity100: similarityRead.similarityPressure100,
+      encoderMemoryBestMatchId: similarityRead.bestMatchId ?? null,
+      encoderMemoryCandidateCount: similarityRead.candidateCount,
+      encoderRuntimeReplayEnabled: this.runtime.replayPolicy.enabled,
+      encoderRuntimeLearningEnabled: this.runtime.learningPolicy.enabled,
+      encoderRuntimeAllowedChannels: Array.from(this.runtimeCalibration.visibleChannels),
+      encoderRuntimeCrowdBias100: this.runtimeCalibration.crowdBias100,
+      encoderMemoryWitnessCount: memory.witnessCount,
+      encoderMemoryHeat01: memory.heat01,
+      encoderEmbeddingMagnitude100: embedding.magnitude100,
+      encoderCreatedAtMs: message.createdAtMs ?? null,
     });
   }
 
@@ -821,6 +1064,171 @@ export class DialogueIntentEncoder {
           (witnessCount > 0 ? 0.08 : 0),
       ),
       `Scene bias resolved from channel=${channel ?? 'n/a'}, room=${roomKind ?? 'n/a'}, pressure=${pressureTier ?? 'n/a'}.`,
+    );
+  }
+
+  private scoreInputKindBias(
+    accumulator: IntentAccumulator,
+    message: EmbeddingMessageInput,
+    explanation: DialogueIntentExplanationFactor[],
+  ): void {
+    const inputKind = message.inputKind ?? 'MESSAGE';
+
+    switch (inputKind) {
+      case 'SYSTEM_EVENT':
+        addIntentScore(accumulator, 'SYSTEM_SIGNAL', 0.18, 'system-event input kind');
+        addIntentScore(accumulator, 'STATUS_SIGNAL', 0.08, 'system-event input kind');
+        break;
+      case 'SCENE':
+        addIntentScore(accumulator, 'WITNESS', 0.10, 'scene input kind');
+        addIntentScore(accumulator, 'PUBLIC_PERFORMANCE', 0.08, 'scene input kind');
+        break;
+      case 'TRANSCRIPT_WINDOW':
+        addIntentScore(accumulator, 'WITNESS', 0.08, 'transcript-window input kind');
+        addIntentScore(accumulator, 'STATUS_SIGNAL', 0.06, 'transcript-window input kind');
+        break;
+      case 'SUMMARY':
+        addIntentScore(accumulator, 'GUIDE', 0.06, 'summary input kind');
+        addIntentScore(accumulator, 'TEACH', 0.06, 'summary input kind');
+        break;
+      case 'MESSAGE':
+      default:
+        addIntentScore(accumulator, 'UNKNOWN', 0.01, 'message input kind baseline');
+        break;
+    }
+
+    pushExplanation(
+      explanation,
+      'input_kind_bias',
+      clamp01(
+        inputKind === 'SYSTEM_EVENT'
+          ? 0.14
+          : inputKind === 'SCENE'
+            ? 0.10
+            : inputKind === 'TRANSCRIPT_WINDOW'
+              ? 0.08
+              : inputKind === 'SUMMARY'
+                ? 0.06
+                : 0.02,
+      ),
+      `Input kind bias resolved from ${inputKind}.`,
+    );
+  }
+
+  private scoreRuntimeBias(
+    accumulator: IntentAccumulator,
+    embedding: EmbeddingVector,
+    message: EmbeddingMessageInput,
+    explanation: DialogueIntentExplanationFactor[],
+  ): void {
+    const channel = embedding.channel ?? message.sceneContext?.channel ?? message.channel ?? null;
+
+    if (channel === 'DEAL_ROOM') {
+      addIntentScore(accumulator, 'NEGOTIATE', this.runtimeCalibration.negotiationBias01, 'runtime channel support');
+      addIntentScore(accumulator, 'STALL', this.runtimeCalibration.replayBias01 * 0.5, 'runtime channel support');
+    }
+
+    if (channel === 'SYNDICATE') {
+      addIntentScore(accumulator, 'GUIDE', this.runtimeCalibration.helperBias01 * 0.55, 'runtime helper support');
+      addIntentScore(accumulator, 'BOND', this.runtimeCalibration.helperBias01 * 0.45, 'runtime helper support');
+    }
+
+    if (this.runtime.proofPolicy.enabled && message.sceneContext?.isSystemNotice) {
+      addIntentScore(accumulator, 'SYSTEM_SIGNAL', this.runtimeCalibration.systemBias01, 'runtime proof support');
+    }
+
+    if (this.runtime.invasionPolicy.enabled && (message.signalEnvelope?.type ?? null) === 'LIVEOPS') {
+      addIntentScore(accumulator, 'PUBLIC_PERFORMANCE', clamp01(this.runtimeCalibration.crowdBias100 / 100 * 0.10), 'runtime invasion support');
+      addIntentScore(accumulator, 'WARN', 0.05, 'runtime invasion support');
+    }
+
+    if (!this.runtime.learningPolicy.enabled) {
+      addIntentScore(accumulator, 'STATUS_SIGNAL', 0.02, 'runtime learning disabled');
+    }
+
+    pushExplanation(
+      explanation,
+      'runtime_bias',
+      clamp01(
+        (channel === 'DEAL_ROOM' ? this.runtimeCalibration.negotiationBias01 : 0) +
+          (channel === 'SYNDICATE' ? this.runtimeCalibration.helperBias01 : 0) +
+          (this.runtime.invasionPolicy.enabled ? 0.04 : 0) +
+          (this.runtime.proofPolicy.enabled ? 0.04 : 0),
+      ),
+      `Runtime bias evaluated for channel=${channel ?? 'n/a'} under runtime version ${this.runtime.version}.`,
+    );
+  }
+
+  private scoreSignalEnvelope(
+    accumulator: IntentAccumulator,
+    signalEnvelope: Nullable<ChatSignalEnvelope>,
+    explanation: DialogueIntentExplanationFactor[],
+  ): void {
+    if (signalEnvelope == null) {
+      return;
+    }
+
+    switch (signalEnvelope.type) {
+      case 'BATTLE':
+        addIntentScore(accumulator, 'ATTACK', 0.10, 'battle signal envelope');
+        addIntentScore(accumulator, 'COUNTER', 0.08, 'battle signal envelope');
+        break;
+      case 'RUN':
+        addIntentScore(accumulator, 'STATUS_SIGNAL', 0.10, 'run signal envelope');
+        addIntentScore(accumulator, 'COMMIT', 0.04, 'run signal envelope');
+        break;
+      case 'MULTIPLAYER':
+        addIntentScore(accumulator, 'WITNESS', 0.10, 'multiplayer signal envelope');
+        addIntentScore(accumulator, 'PUBLIC_PERFORMANCE', 0.08, 'multiplayer signal envelope');
+        break;
+      case 'ECONOMY':
+        addIntentScore(accumulator, 'NEGOTIATE', 0.12, 'economy signal envelope');
+        addIntentScore(accumulator, 'STATUS_SIGNAL', 0.06, 'economy signal envelope');
+        break;
+      case 'LIVEOPS':
+        addIntentScore(accumulator, 'SYSTEM_SIGNAL', 0.16, 'liveops signal envelope');
+        addIntentScore(accumulator, 'WARN', 0.06, 'liveops signal envelope');
+        break;
+      default:
+        break;
+    }
+
+    pushExplanation(
+      explanation,
+      'signal_envelope',
+      clamp01((signalEnvelope.metadata != null ? 0.04 : 0.02) + 0.08),
+      `Signal envelope type ${signalEnvelope.type} influenced intent scoring.`,
+    );
+  }
+
+  private scoreSimilarityMemory(
+    accumulator: IntentAccumulator,
+    similarityRead: SimilarityMemoryRead,
+    explanation: DialogueIntentExplanationFactor[],
+  ): void {
+    if (similarityRead.candidateCount === 0) {
+      return;
+    }
+
+    if (similarityRead.bestSimilarity.clipped01 >= this.runtimeCalibration.similarityThreshold100 / 100) {
+      addIntentScore(accumulator, 'STATUS_SIGNAL', 0.08, 'high similarity memory echo');
+      addIntentScore(accumulator, 'PUBLIC_PERFORMANCE', 0.04, 'high similarity memory echo');
+    }
+
+    if (similarityRead.dominantInputKind === 'SYSTEM_EVENT') {
+      addIntentScore(accumulator, 'SYSTEM_SIGNAL', 0.06, 'system-event similarity echo');
+    }
+
+    if (similarityRead.overlapPressure01 >= 0.55) {
+      addIntentScore(accumulator, 'STALL', 0.04, 'overlap pressure echo');
+      addIntentScore(accumulator, 'BLUFF', 0.03, 'overlap pressure echo');
+    }
+
+    pushExplanation(
+      explanation,
+      'memory_similarity',
+      clamp01(similarityRead.similarityPressure100 / 100),
+      `Similarity memory read used ${similarityRead.candidateCount} candidate(s); best cosine=${similarityRead.bestSimilarity.cosine.toFixed(3)}.`,
     );
   }
 
@@ -1055,33 +1463,45 @@ export class DialogueIntentEncoder {
         Math.max(0, 1 - distress01) * 0.26,
     );
 
+    const memoryWeightedPerformance01 = clamp01(
+      publicPerformance01 + clamp01(memory.witnessCount / 8) * 0.08 + memory.heat01 * 0.10,
+    );
+    const memoryWeightedNegotiation01 = clamp01(
+      negotiation01 + (memory.channel === 'DEAL_ROOM' ? 0.06 : 0) + (memory.roomKind === 'DEAL_ROOM' ? 0.04 : 0),
+    );
+    const memoryWeightedHelper01 = clamp01(
+      helperNeed01 + (memory.channel === 'SYNDICATE' ? 0.04 : 0) + (memory.pressureTier === 'CRITICAL' ? 0.05 : 0),
+    );
+
     let posture: DialogueSocialPosture = 'UNKNOWN';
-    if (negotiation01 >= this.defaults.negotiationThreshold01) posture = 'PREDATORY';
-    else if (publicPerformance01 >= this.defaults.publicPerformanceThreshold01) posture = 'THEATRICAL';
-    else if (helperNeed01 >= this.defaults.helperNeedThreshold01) posture = 'SUPPORTIVE';
-    else if ((embedding.channel ?? message.sceneContext?.channel) === 'SYNDICATE') posture = 'PRIVATE';
-    else if ((embedding.channel ?? message.sceneContext?.channel) === 'DEAL_ROOM') posture = 'TACTICAL';
-    else if ((embedding.channel ?? message.sceneContext?.channel) === 'GLOBAL') posture = 'PUBLIC';
+    if (memoryWeightedNegotiation01 >= this.defaults.negotiationThreshold01) posture = 'PREDATORY';
+    else if (memoryWeightedPerformance01 >= this.defaults.publicPerformanceThreshold01) posture = 'THEATRICAL';
+    else if (memoryWeightedHelper01 >= this.defaults.helperNeedThreshold01) posture = 'SUPPORTIVE';
+    else if ((embedding.channel ?? message.sceneContext?.channel ?? memory.channel) === 'SYNDICATE') posture = 'PRIVATE';
+    else if ((embedding.channel ?? message.sceneContext?.channel ?? memory.channel) === 'DEAL_ROOM') posture = 'TACTICAL';
+    else if ((embedding.channel ?? message.sceneContext?.channel ?? memory.channel) === 'GLOBAL') posture = 'PUBLIC';
 
     const tone = toneBand(aggression01, distress01, confidence01);
     const risk = riskBand(
       aggression01 * 0.35 +
-        helperNeed01 * 0.30 +
-        negotiation01 * 0.15 +
-        publicPerformance01 * 0.10 +
-        Math.max(0, 0.5 - confidence01) * 0.20,
+        memoryWeightedHelper01 * 0.25 +
+        memoryWeightedNegotiation01 * 0.15 +
+        memoryWeightedPerformance01 * 0.10 +
+        Math.max(0, 0.5 - confidence01) * 0.20 +
+        (memory.pressureTier === 'CRITICAL' ? 0.08 : memory.pressureTier === 'HIGH' ? 0.04 : 0),
     );
 
     pushExplanation(
       explanation,
       'social_read',
       clamp01(
-        aggression01 * 0.20 +
-          helperNeed01 * 0.20 +
-          negotiation01 * 0.15 +
-          publicPerformance01 * 0.15 +
-          distress01 * 0.15 +
-          confidence01 * 0.15,
+        aggression01 * 0.18 +
+          memoryWeightedHelper01 * 0.18 +
+          memoryWeightedNegotiation01 * 0.14 +
+          memoryWeightedPerformance01 * 0.14 +
+          distress01 * 0.16 +
+          confidence01 * 0.12 +
+          memory.heat01 * 0.08,
       ),
       `Social read posture=${posture}, tone=${tone}, risk=${risk}.`,
     );
@@ -1214,7 +1634,7 @@ export class DialogueIntentEncoder {
     sceneContext: Nullable<EmbeddingSceneContext>,
   ): SequenceMemory {
     const priorResults = previousMessages
-      .slice(-this.defaults.maxMemoryTurns)
+      .slice(-this.runtimeCalibration.replayAwareMemoryTurns)
       .map((message) =>
         this.encodeTurn({
           message,
