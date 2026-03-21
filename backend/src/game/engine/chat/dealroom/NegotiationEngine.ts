@@ -27,7 +27,6 @@
  * This engine does not replace transcript or proof systems.
  * ============================================================================
  */
-
 import type {
   ChatOffer,
   ChatOfferActorRef,
@@ -215,6 +214,9 @@ export interface NegotiationEngineRoomLedger {
   readonly activeNegotiations: readonly ChatNegotiation[];
   readonly settledNegotiations: readonly ChatNegotiation[];
   readonly offersByNegotiation: Readonly<Record<string, readonly ChatOffer[]>>;
+  readonly offerBundlesByNegotiation?: Readonly<Record<string, ChatOfferBundle | undefined>>;
+  readonly recentOfferPatchesByNegotiation?: Readonly<Record<string, readonly ChatOfferPatch[]>>;
+  readonly recentNegotiationPatchesByNegotiation?: Readonly<Record<string, readonly ChatNegotiationPatch[]>>;
   readonly lastUpdatedAt?: UnixMs;
 }
 
@@ -222,6 +224,7 @@ export interface NegotiationCounterResult {
   readonly negotiation: ChatNegotiation;
   readonly counter: OfferCounterBuildResult;
   readonly patches: readonly ChatNegotiationPatch[];
+  readonly offerPatches?: readonly ChatOfferPatch[];
 }
 
 interface NegotiationRecord {
@@ -229,6 +232,10 @@ interface NegotiationRecord {
   negotiation: ChatNegotiation;
   offers: ChatOffer[];
   evaluations: OfferCounterEngineEvaluation[];
+  offerBundles: ChatOfferBundle[];
+  offerPatches: ChatOfferPatch[];
+  negotiationPatches: ChatNegotiationPatch[];
+  lastAuditedOfferWindow?: ChatOfferWindow;
   openedAt: UnixMs;
   updatedAt: UnixMs;
 }
@@ -238,6 +245,14 @@ interface NegotiationRoomState {
   active: Map<string, NegotiationRecord>;
   settled: NegotiationRecord[];
   lastUpdatedAt?: UnixMs;
+}
+
+interface OfferLifecycleAssessment {
+  readonly offer: ChatOffer;
+  readonly visibility: ChatOfferVisibilityEnvelope;
+  readonly window?: ChatOfferWindow;
+  readonly counterRead: ChatOfferCounterRead;
+  readonly patches: readonly ChatOfferPatch[];
 }
 
 // ============================================================================
@@ -272,13 +287,15 @@ export class NegotiationEngine {
   constructor(options: NegotiationEngineOptions = {}) {
     this.clock = options.clock ?? DEFAULT_CLOCK;
     this.logger = options.logger ?? DEFAULT_LOGGER;
+    const providedCounterEngine = options.offerCounterEngine;
     this.offerCounterEngine =
-      options.offerCounterEngine ??
-      createOfferCounterEngine({
-        ...(options.offerCounterOptions ?? {}),
-        clock: options.offerCounterOptions?.clock ?? (this.clock as OfferCounterEngineClock),
-        logger: options.offerCounterOptions?.logger ?? (this.logger as OfferCounterEngineLogger),
-      });
+      providedCounterEngine instanceof OfferCounterEngine
+        ? providedCounterEngine
+        : createOfferCounterEngine({
+            ...(options.offerCounterOptions ?? {}),
+            clock: options.offerCounterOptions?.clock ?? (this.clock as OfferCounterEngineClock),
+            logger: options.offerCounterOptions?.logger ?? (this.logger as OfferCounterEngineLogger),
+          });
     this.retainSettledNegotiationsPerRoom = clampInt(options.retainSettledNegotiationsPerRoom ?? 300, 25, 5_000);
     this.retainOpenNegotiationsPerRoom = clampInt(options.retainOpenNegotiationsPerRoom ?? 100, 10, 2_000);
     this.defaultOpenWindowMs = clampInt(options.defaultOpenWindowMs ?? 60_000, 8_000, 300_000);
@@ -304,10 +321,39 @@ export class NegotiationEngine {
       defaultOpenWindowMs: this.defaultOpenWindowMs,
     });
 
-    const openingOffer = request.openingOffer ? normalizeDraftToOffer(request.openingOffer, request.threadId, now, scene.sceneId) : undefined;
-    const activeOffer = openingOffer ? toNegotiationEnvelope(negotiationId, request.threadId, request.primaryChannel, openingOffer, request.parties, phase, undefined, now) : undefined;
-    const activeWindow = openingOffer ? toNegotiationWindowFromOffer(openingOffer, request.primaryChannel, 'OPENING_ANCHOR') : scene.activeWindow;
-    const latestInference = deriveInferenceFromScene(negotiationId, phase, request.initialIntent ?? (openingOffer ? 'PRICE_DISCOVERY' : 'FAIR_TRADE'), actorStates, [], [], now);
+    const openingOfferDraft = request.openingOffer
+      ? normalizeDraftToOffer(request.openingOffer, request.threadId, now, scene.sceneId)
+      : undefined;
+    const openingAssessment = openingOfferDraft
+      ? assessOfferLifecycle(openingOfferDraft, request.primaryChannel, now, undefined, this.defaultOpenWindowMs)
+      : undefined;
+    const openingOffer = openingAssessment?.offer;
+    const openingBundle = openingOffer ? createOfferBundleSnapshot(openingOffer, request.threadId, now) : undefined;
+    const activeOffer = openingOffer
+      ? toNegotiationEnvelope(
+          negotiationId,
+          request.threadId,
+          request.primaryChannel,
+          openingOffer,
+          request.parties,
+          phase,
+          undefined,
+          now,
+        )
+      : undefined;
+    const activeWindow = openingOffer
+      ? toNegotiationWindowFromOffer(openingOffer, request.primaryChannel, 'OPENING_ANCHOR')
+      : scene.activeWindow;
+    const openingSignals = openingOffer ? buildOfferSignals(openingOffer, now) : [];
+    const latestInference = deriveInferenceFromScene(
+      negotiationId,
+      phase,
+      request.initialIntent ?? (openingOffer ? inferIntentFromOffer(openingOffer) : 'FAIR_TRADE'),
+      actorStates,
+      openingSignals,
+      openingOffer ? buildOfferPressureEdges(openingOffer, openingAssessment?.counterRead, now) : [],
+      now,
+    );
 
     const negotiation: ChatNegotiation = {
       negotiationId: asNegotiationId(negotiationId),
@@ -339,9 +385,36 @@ export class NegotiationEngine {
       negotiation,
       offers: openingOffer ? [openingOffer] : [],
       evaluations: [],
+      offerBundles: openingBundle ? [openingBundle] : [],
+      offerPatches: openingAssessment ? [...openingAssessment.patches] : [],
+      negotiationPatches: [],
+      lastAuditedOfferWindow: openingAssessment?.window,
       openedAt: now,
       updatedAt: now,
     };
+
+    const maintenance = deriveNegotiationMaintenance(record.negotiation, now);
+    const maintenanceBeats = maintenance.hasAudiencePressure || maintenance.hasLeakThreat
+      ? [buildMaintenanceBeat(record.negotiation, maintenance, now, 'Opening telemetry projected into scene.')]
+      : [];
+
+    record.negotiation = {
+      ...record.negotiation,
+      latestInference: mergeInference(record.negotiation, record.negotiation.latestInference ?? latestInference, now),
+      scene: {
+        ...record.negotiation.scene,
+        beats: [...record.negotiation.scene.beats, ...maintenanceBeats].slice(-220),
+        updatedAt: now,
+      },
+      updatedAt: now,
+    };
+
+    record.negotiationPatches.push(
+      buildNegotiationPatchSnapshot(record.negotiation, now, {
+        appendedBeats: maintenanceBeats,
+        appendedMemories: record.negotiation.memories,
+      }),
+    );
 
     room.active.set(negotiationId, record);
     room.lastUpdatedAt = now;
@@ -351,14 +424,24 @@ export class NegotiationEngine {
       negotiationId,
       channel: request.primaryChannel,
       openingOfferId: openingOffer ? String(openingOffer.offerId) : null,
+      openingBundleId: openingBundle ? String(openingBundle.bundleId) : null,
+      live: maintenance.isLive,
+      audiencePressure: maintenance.hasAudiencePressure,
+      leakPressure: maintenance.hasLeakThreat,
     });
-    return negotiation;
+    return record.negotiation;
   }
 
   ingestMessage(request: NegotiationIngestMessageRequest): ChatNegotiation {
     const record = this.requireActiveRecord(request.roomId, request.negotiationId);
     const now = asUnixMs(Number(request.createdAt ?? this.clock.now()));
-    const signalFrame = deriveSignalsFromMessage(record.negotiation, request.body, request.messageId, now);
+    const maintenance = deriveNegotiationMaintenance(record.negotiation, now);
+    const primaryState = maintenance.primaryActorState;
+    const signalFrame = [
+      ...deriveSignalsFromMessage(record.negotiation, request.body, request.messageId, now),
+      ...buildMaintenanceSignals(record.negotiation, maintenance, now),
+      ...buildActorStateSignals(primaryState, now),
+    ];
     const inferenceFrame = deriveInferenceFromScene(
       String(record.negotiation.negotiationId),
       record.negotiation.phase,
@@ -369,7 +452,12 @@ export class NegotiationEngine {
       now,
     );
     const inference = mergeInference(record.negotiation, inferenceFrame, now);
-    const beats = buildSceneBeatsFromMessage(record.negotiation, request, now, inference);
+    const beats = [
+      ...buildSceneBeatsFromMessage(record.negotiation, request, now, inference),
+      ...(maintenance.inGraceWindow
+        ? [buildMaintenanceBeat(record.negotiation, maintenance, now, 'Message arrived during grace window.')]
+        : []),
+    ];
     const leakThreats = maybeBuildLeakThreats(record.negotiation, request.body, request.actorId, now, inference);
     const memories = maybeBuildMessageMemories(request.body, request.messageId, now);
     const actorStates = patchActorStatesFromMessage(record.negotiation.actorStates, request.body, request.actorId, now, inference);
@@ -378,52 +466,85 @@ export class NegotiationEngine {
       ...record.negotiation,
       actorStates,
       latestInference: inference,
-      leakThreats: [...(record.negotiation.leakThreats ?? []), ...leakThreats],
-      memories: [...(record.negotiation.memories ?? []), ...memories].slice(-50),
+      leakThreats: [...(record.negotiation.leakThreats ?? []), ...leakThreats].slice(-24),
+      memories: [...(record.negotiation.memories ?? []), ...memories].slice(-64),
       scene: {
         ...record.negotiation.scene,
-        beats: [...record.negotiation.scene.beats, ...beats].slice(-200),
+        beats: [...record.negotiation.scene.beats, ...beats].slice(-240),
         currentInference: inference,
         leakThreat: leakThreats.at(-1) ?? record.negotiation.scene.leakThreat,
         updatedAt: now,
       },
       updatedAt: now,
     };
+    record.negotiationPatches.push(
+      buildNegotiationPatchSnapshot(record.negotiation, now, {
+        appendedBeats: beats,
+        appendedMemories: memories,
+        appendedLeakThreats: leakThreats,
+      }),
+    );
     record.updatedAt = now;
     this.touchRoom(request.roomId, now);
+    this.logger.debug('negotiation:message', {
+      roomId: String(request.roomId),
+      negotiationId: request.negotiationId,
+      live: maintenance.isLive,
+      inGrace: maintenance.inGraceWindow,
+      latestOfferId: maintenance.latestOfferId ? String(maintenance.latestOfferId) : null,
+    });
     return record.negotiation;
   }
 
   postOffer(request: NegotiationPostOfferRequest): ChatNegotiation {
     const record = this.requireActiveRecord(request.roomId, request.negotiationId);
     const now = asUnixMs(Number(request.postedAt ?? this.clock.now()));
+    const priorOffer = selectPriorOfferForEvaluation(record.offers, request.priorOffer, now);
+    const offerAssessment = assessOfferLifecycle(
+      request.offer,
+      record.negotiation.primaryChannel,
+      now,
+      priorOffer,
+      this.defaultOpenWindowMs,
+    );
+    const offer = offerAssessment.offer;
     const evaluation = this.offerCounterEngine.evaluate({
       roomId: request.roomId,
       negotiation: record.negotiation,
-      incomingOffer: request.offer,
-      priorOffer: request.priorOffer ?? record.offers.at(-1),
+      incomingOffer: offer,
+      priorOffer,
       now,
       traceLabel: 'NegotiationEngine.postOffer',
     });
 
-    record.offers.push(request.offer);
+    record.offers.push(offer);
     record.evaluations.push(evaluation);
+    appendOfferArtifacts(record, offer, offerAssessment.patches, String(record.negotiation.threadId), now);
 
     const envelope = toNegotiationEnvelope(
       String(record.negotiation.negotiationId),
       String(record.negotiation.threadId),
       record.negotiation.primaryChannel,
-      request.offer,
+      offer,
       record.negotiation.parties,
       'ANCHOR',
       record.negotiation.latestInference,
       now,
+      record.negotiation,
     );
 
-    const leakThreats = maybeEscalateLeakFromEvaluation(record.negotiation, evaluation, request.offer, now, request.roomId);
-    const activeWindow = toNegotiationWindowFromOffer(request.offer, record.negotiation.primaryChannel, 'COUNTER_REQUIRED');
+    const evaluationInference = buildInferenceFromEvaluation(record.negotiation, offer, evaluation, now);
+    const leakThreats = maybeEscalateLeakFromEvaluation(record.negotiation, evaluation, offer, now, request.roomId);
+    const activeWindow = toNegotiationWindowFromOffer(offer, record.negotiation.primaryChannel, 'COUNTER_REQUIRED');
     const nextPhase = derivePhaseFromEvaluation(evaluation, false);
     const nextStatus: NegotiationStatus = 'ACTIVE';
+    const maintenance = deriveNegotiationMaintenance(record.negotiation, now);
+    const beats = [
+      buildOfferBeat(offer, evaluation, now),
+      ...(maintenance.hasAudiencePressure || maintenance.hasLeakThreat
+        ? [buildMaintenanceBeat(record.negotiation, maintenance, now, 'Offer posted under external pressure.')]
+        : []),
+    ];
 
     record.negotiation = {
       ...record.negotiation,
@@ -431,21 +552,28 @@ export class NegotiationEngine {
       status: nextStatus,
       activeOffer: envelope,
       activeWindow,
-      latestInference: mergeInference(record.negotiation, buildInferenceFromEvaluation(record.negotiation, request.offer, evaluation, now), now),
-      leakThreats: [...(record.negotiation.leakThreats ?? []), ...leakThreats].slice(-20),
+      latestInference: mergeInference(record.negotiation, evaluationInference, now),
+      leakThreats: [...(record.negotiation.leakThreats ?? []), ...leakThreats].slice(-24),
       scene: {
         ...record.negotiation.scene,
         status: nextStatus,
         activeWindow,
         currentOffer: envelope,
-        currentInference: buildInferenceFromEvaluation(record.negotiation, request.offer, evaluation, now),
-        beats: [...record.negotiation.scene.beats, buildOfferBeat(request.offer, evaluation, now)].slice(-220),
+        currentInference: evaluationInference,
+        beats: [...record.negotiation.scene.beats, ...beats].slice(-260),
         leakThreat: leakThreats.at(-1) ?? record.negotiation.scene.leakThreat,
         updatedAt: now,
       },
       updatedAt: now,
     };
 
+    record.negotiationPatches.push(
+      buildNegotiationPatchSnapshot(record.negotiation, now, {
+        appendedBeats: beats,
+        appendedLeakThreats: leakThreats,
+      }),
+    );
+    record.lastAuditedOfferWindow = offerAssessment.window;
     record.updatedAt = now;
     this.touchRoom(request.roomId, now);
     return record.negotiation;
@@ -454,67 +582,106 @@ export class NegotiationEngine {
   counter(request: NegotiationCounterRequest): NegotiationCounterResult {
     const record = this.requireActiveRecord(request.roomId, request.negotiationId);
     const now = asUnixMs(Number(request.postedAt ?? this.clock.now()));
+    const priorOffer = selectPriorOfferForEvaluation(record.offers, request.priorOffer, now);
+    const incomingAssessment = assessOfferLifecycle(
+      request.incomingOffer,
+      record.negotiation.primaryChannel,
+      now,
+      priorOffer,
+      this.defaultOpenWindowMs,
+    );
+    const incomingOffer = incomingAssessment.offer;
     const counter = this.offerCounterEngine.buildCounter({
       roomId: request.roomId,
       negotiation: record.negotiation,
-      incomingOffer: request.incomingOffer,
-      priorOffer: request.priorOffer ?? record.offers.at(-1),
+      incomingOffer,
+      priorOffer,
       now,
       note: request.note,
     });
+    const counterAssessment = assessOfferLifecycle(
+      counter.counterOffer,
+      record.negotiation.primaryChannel,
+      now,
+      incomingOffer,
+      this.defaultOpenWindowMs,
+    );
+    const counterOffer = counterAssessment.offer;
 
-    record.offers.push(request.incomingOffer, counter.counterOffer);
+    record.offers.push(incomingOffer, counterOffer);
     record.evaluations.push(counter.evaluation);
+    appendOfferArtifacts(record, incomingOffer, incomingAssessment.patches, String(record.negotiation.threadId), now);
+    appendOfferArtifacts(record, counterOffer, counterAssessment.patches, String(record.negotiation.threadId), now);
 
     const nextStatus: NegotiationStatus = shouldSoftLock(counter.evaluation) ? 'SOFT_LOCKED' : 'ACTIVE';
     const nextPhase = derivePhaseFromEvaluation(counter.evaluation, true);
-    const inference = buildInferenceFromEvaluation(record.negotiation, counter.counterOffer, counter.evaluation, now);
-    const leakThreats = maybeEscalateLeakFromEvaluation(record.negotiation, counter.evaluation, counter.counterOffer, now, request.roomId);
-    const memories = maybeBuildCounterMemories(counter.counterOffer, counter.evaluation, now);
+    const inference = buildInferenceFromEvaluation(record.negotiation, counterOffer, counter.evaluation, now);
+    const leakThreats = maybeEscalateLeakFromEvaluation(record.negotiation, counter.evaluation, counterOffer, now, request.roomId);
+    const memories = maybeBuildCounterMemories(counterOffer, counter.evaluation, now);
+    const maintenance = deriveNegotiationMaintenance(record.negotiation, now);
+    const activeWindow = chooseNegotiationWindow(counter.counterWindow, counterAssessment.window, record.negotiation.primaryChannel, now);
+    const activeEnvelope = toNegotiationEnvelope(
+      String(record.negotiation.negotiationId),
+      String(record.negotiation.threadId),
+      record.negotiation.primaryChannel,
+      counterOffer,
+      record.negotiation.parties,
+      nextPhase,
+      inference,
+      now,
+      record.negotiation,
+    );
+    const beats = [
+      buildOfferBeat(counterOffer, counter.evaluation, now),
+      ...(maintenance.supportsRescue && Number(counter.evaluation.rescueNeed01) >= this.rescueEscalationThreshold01
+        ? [buildMaintenanceBeat(record.negotiation, maintenance, now, 'Counter path entered rescue-aware escalation lane.')]
+        : []),
+    ];
 
     record.negotiation = {
       ...record.negotiation,
       status: nextStatus,
       phase: nextPhase,
-      activeOffer: counter.counterEnvelope,
-      activeWindow: counter.counterWindow,
+      activeOffer: activeEnvelope,
+      activeWindow,
       latestInference: inference,
-      memories: [...(record.negotiation.memories ?? []), ...memories].slice(-60),
-      leakThreats: [...(record.negotiation.leakThreats ?? []), ...leakThreats].slice(-24),
+      memories: [...(record.negotiation.memories ?? []), ...memories].slice(-72),
+      leakThreats: [...(record.negotiation.leakThreats ?? []), ...leakThreats].slice(-28),
       scene: {
         ...record.negotiation.scene,
         status: nextStatus,
-        activeWindow: counter.counterWindow,
-        currentOffer: counter.counterEnvelope,
+        activeWindow,
+        currentOffer: activeEnvelope,
         currentInference: inference,
-        beats: [...record.negotiation.scene.beats, buildOfferBeat(counter.counterOffer, counter.evaluation, now)].slice(-240),
+        beats: [...record.negotiation.scene.beats, ...beats].slice(-280),
         leakThreat: leakThreats.at(-1) ?? record.negotiation.scene.leakThreat,
         updatedAt: now,
       },
       updatedAt: now,
     };
     record.updatedAt = now;
+    record.lastAuditedOfferWindow = counterAssessment.window;
     this.touchRoom(request.roomId, now);
 
     const patches: ChatNegotiationPatch[] = [
-      {
-        negotiationId: record.negotiation.negotiationId,
-        phase: nextPhase,
-        status: nextStatus,
-        activeOffer: counter.counterEnvelope,
-        activeWindow: counter.counterWindow,
-        latestInference: inference,
+      buildNegotiationPatchSnapshot(record.negotiation, now, {
         appendedMemories: memories,
         appendedLeakThreats: leakThreats,
-        appendedBeats: [buildOfferBeat(counter.counterOffer, counter.evaluation, now)],
-        updatedAt: now,
-      },
+        appendedBeats: beats,
+      }),
     ];
+    record.negotiationPatches.push(...patches);
 
     return {
       negotiation: record.negotiation,
-      counter,
+      counter: {
+        ...counter,
+        counterOffer,
+        counterEnvelope: activeEnvelope,
+        counterWindow: activeWindow,
+      },
       patches,
+      offerPatches: [...incomingAssessment.patches, ...counterAssessment.patches],
     };
   }
 
@@ -593,7 +760,10 @@ export class NegotiationEngine {
     const now = asUnixMs(Number(request.now ?? this.clock.now()));
     const expired: ChatNegotiation[] = [];
     for (const record of room.active.values()) {
-      if (record.negotiation.activeWindow && negotiationWindowHasExpired(record.negotiation.activeWindow, now)) {
+      const activeWindowExpired = Boolean(record.negotiation.activeWindow && negotiationWindowHasExpired(record.negotiation.activeWindow, now));
+      const offerWindowExpired = Boolean(record.lastAuditedOfferWindow && chatOfferWindowExpired(record.lastAuditedOfferWindow, now));
+      const inGrace = Boolean(record.negotiation.activeWindow && negotiationWindowIsInGrace(record.negotiation.activeWindow, now));
+      if ((activeWindowExpired || offerWindowExpired) && !inGrace) {
         const resolution: NegotiationResolution = {
           negotiationId: record.negotiation.negotiationId,
           outcome: 'TIMED_OUT',
@@ -618,19 +788,48 @@ export class NegotiationEngine {
   getRoomLedger(roomId: ChatRoomId): NegotiationEngineRoomLedger {
     const room = this.getOrCreateRoom(roomId);
     const offersByNegotiation: Record<string, readonly ChatOffer[]> = {};
+    const offerBundlesByNegotiation: Record<string, ChatOfferBundle | undefined> = {};
+    const recentOfferPatchesByNegotiation: Record<string, readonly ChatOfferPatch[]> = {};
+    const recentNegotiationPatchesByNegotiation: Record<string, readonly ChatNegotiationPatch[]> = {};
     for (const [id, record] of room.active.entries()) {
       offersByNegotiation[id] = [...record.offers];
+      offerBundlesByNegotiation[id] = record.offerBundles.at(-1);
+      recentOfferPatchesByNegotiation[id] = record.offerPatches.slice(-16);
+      recentNegotiationPatchesByNegotiation[id] = record.negotiationPatches.slice(-16);
     }
     for (const record of room.settled) {
       offersByNegotiation[record.negotiationId] = [...record.offers];
+      offerBundlesByNegotiation[record.negotiationId] = record.offerBundles.at(-1);
+      recentOfferPatchesByNegotiation[record.negotiationId] = record.offerPatches.slice(-16);
+      recentNegotiationPatchesByNegotiation[record.negotiationId] = record.negotiationPatches.slice(-16);
     }
     return {
       roomId,
       activeNegotiations: [...room.active.values()].map((record) => record.negotiation),
       settledNegotiations: room.settled.map((record) => record.negotiation),
       offersByNegotiation,
+      offerBundlesByNegotiation,
+      recentOfferPatchesByNegotiation,
+      recentNegotiationPatchesByNegotiation,
       lastUpdatedAt: room.lastUpdatedAt,
     };
+  }
+
+  getNegotiation(roomId: ChatRoomId, negotiationId: string): ChatNegotiation | undefined {
+    const room = this.getOrCreateRoom(roomId);
+    return room.active.get(negotiationId)?.negotiation ?? room.settled.find((record) => record.negotiationId === negotiationId)?.negotiation;
+  }
+
+  getLatestOfferBundle(roomId: ChatRoomId, negotiationId: string): ChatOfferBundle | undefined {
+    const room = this.getOrCreateRoom(roomId);
+    const record = room.active.get(negotiationId) ?? room.settled.find((candidate) => candidate.negotiationId === negotiationId);
+    return record?.offerBundles.at(-1);
+  }
+
+  getRecentOfferPatches(roomId: ChatRoomId, negotiationId: string): readonly ChatOfferPatch[] {
+    const room = this.getOrCreateRoom(roomId);
+    const record = room.active.get(negotiationId) ?? room.settled.find((candidate) => candidate.negotiationId === negotiationId);
+    return record ? record.offerPatches.slice(-24) : [];
   }
 
   private settle(
@@ -642,6 +841,8 @@ export class NegotiationEngine {
     now: UnixMs,
   ): ChatNegotiation {
     const room = this.getOrCreateRoom(roomId);
+    const maintenance = deriveNegotiationMaintenance(record.negotiation, now);
+    const closingBeat = buildResolutionBeat(resolution, now);
     record.negotiation = {
       ...record.negotiation,
       status,
@@ -653,11 +854,17 @@ export class NegotiationEngine {
         status,
         activeWindow: undefined,
         currentInference: record.negotiation.latestInference,
-        beats: [...record.negotiation.scene.beats, buildResolutionBeat(resolution, now)].slice(-260),
+        beats: [...record.negotiation.scene.beats, closingBeat].slice(-300),
         updatedAt: now,
       },
       updatedAt: now,
     };
+    record.negotiationPatches.push(
+      buildNegotiationPatchSnapshot(record.negotiation, now, {
+        appendedBeats: [closingBeat],
+        appendedLeakThreats: maintenance.hasLeakThreat ? record.negotiation.leakThreats?.slice(-2) : undefined,
+      }),
+    );
     record.updatedAt = now;
     room.active.delete(record.negotiationId);
     room.settled.push(record);
@@ -828,8 +1035,31 @@ function normalizeDraftToOffer(draft: ChatOfferDraft | ChatOffer, threadId: stri
   if ('offerId' in draft) {
     return draft;
   }
-  return {
-    offerId: asChatOfferId(`offer:${threadId}:${Number(now)}`),
+  const createdAt = asOfferUnixMs(Number(draft.createdAt ?? now));
+  const normalizedPrice = createChatOfferPrice(Number(draft.price.amount), String(draft.price.currency), {
+    ...draft.price,
+    marketRange: draft.price.marketRange
+      ? {
+          ...draft.price.marketRange,
+          min: Number(asPricePoints(Number(draft.price.marketRange.min))),
+          max: Number(asPricePoints(Number(draft.price.marketRange.max))),
+          expected:
+            draft.price.marketRange.expected === undefined
+              ? undefined
+              : Number(asPricePoints(Number(draft.price.marketRange.expected))),
+        }
+      : undefined,
+  });
+  const normalizedVisibility = normalizeOfferVisibilityEnvelope(draft.visibility, 'DEAL_ROOM');
+  const normalizedWindow = ensureOfferWindowIntegrity(
+    draft.window,
+    createdAt,
+    draft.kind,
+    normalizedVisibility,
+    45_000,
+  );
+  const seededOffer: ChatOffer = {
+    offerId: asChatOfferId(`offer:${threadId}:${Number(createdAt)}`),
     threadId: asChatOfferThreadId(threadId),
     roomId: draft.roomId,
     sceneId: sceneId as any,
@@ -837,21 +1067,25 @@ function normalizeDraftToOffer(draft: ChatOfferDraft | ChatOffer, threadId: stri
     status: draft.status === 'DRAFT' ? 'STAGED' : 'POSTED',
     offeredBy: draft.offeredBy,
     offeredTo: draft.offeredTo,
-    currentVersion: createChatOfferVersion(1, draft.price, draft.paymentTerms, {
+    currentVersion: createChatOfferVersion(1, normalizedPrice, draft.paymentTerms, {
       guarantees: draft.guarantees,
       conditions: draft.conditions,
       concessions: draft.concessions,
       analytics: draft.analytics,
-      createdAt: Number(draft.createdAt),
+      createdAt: Number(createdAt),
       note: 'Negotiation opening draft normalized to offer.',
     }),
     priorVersions: [],
-    visibility: draft.visibility,
-    window: draft.window,
+    visibility: normalizedVisibility,
+    window: normalizedWindow,
     counterRead: undefined,
     proof: undefined,
-    createdAt: draft.createdAt,
-    updatedAt: draft.createdAt,
+    createdAt,
+    updatedAt: createdAt,
+  };
+  return {
+    ...seededOffer,
+    counterRead: deriveCounterReadFromOfferData(seededOffer, undefined, normalizedVisibility),
   };
 }
 
@@ -864,6 +1098,7 @@ function toNegotiationEnvelope(
   phase: NegotiationPhase,
   inference: NegotiationInferenceFrame | undefined,
   now: UnixMs,
+  negotiation?: ChatNegotiation,
 ): NegotiationOfferEnvelope {
   return {
     negotiationId: asNegotiationId(negotiationId),
@@ -892,7 +1127,7 @@ function toNegotiationEnvelope(
     counterShape: offer.kind === 'COUNTER'
       ? {
           isCounter: true,
-          referencesOfferId: negotiationLatestOfferId as any,
+          referencesOfferId: safeLatestOfferId(negotiation),
           counterDistance: asScore0To1(Number(offer.counterRead?.counterDistance ?? 0.4)),
           hardReversal: Number(offer.currentVersion.analytics?.aggression.normalized ?? 0) > 0.62,
           softLanding: Number(offer.currentVersion.analytics?.fairness.normalized ?? 0) > 0.55,
@@ -912,6 +1147,416 @@ function toNegotiationEnvelope(
     inference,
     createdAt: now,
   };
+}
+
+
+interface NegotiationMaintenanceEnvelope {
+  readonly isLive: boolean;
+  readonly hasAudiencePressure: boolean;
+  readonly hasLeakThreat: boolean;
+  readonly supportsRescue: boolean;
+  readonly inGraceWindow: boolean;
+  readonly latestOfferId?: ReturnType<typeof asNegotiationOfferId>;
+  readonly primaryActorState?: NegotiationActorState;
+}
+
+function normalizeOfferVisibilityEnvelope(
+  visibility: ChatOfferVisibilityEnvelope,
+  channel: ChatNegotiation['primaryChannel'],
+): ChatOfferVisibilityEnvelope {
+  const audienceHeat = clamp01(Number(visibility.audienceHeat ?? (channel === 'GLOBAL' ? 0.48 : 0.16)));
+  const secrecyPressure = clamp01(Number(visibility.secrecyPressure ?? (channel === 'DEAL_ROOM' ? 0.46 : 0.22)));
+  return {
+    ...visibility,
+    visibility:
+      visibility.visibility === 'PRIVATE' && channel === 'GLOBAL'
+        ? 'DEAL_ROOM_PLUS_WITNESSES'
+        : visibility.visibility,
+    revealMode: visibility.revealMode,
+    witnessCount: Math.max(0, Number(visibility.witnessCount ?? (channel === 'SPECTATOR' ? 3 : 1))),
+    helperVisible: Boolean(visibility.helperVisible),
+    audienceHeat: asScore0To1(audienceHeat),
+    secrecyPressure: asScore0To1(secrecyPressure),
+  };
+}
+
+function ensureOfferWindowIntegrity(
+  window: ChatOfferWindow | undefined,
+  now: UnixMs,
+  kind: ChatOffer['kind'],
+  visibility: ChatOfferVisibilityEnvelope,
+  fallbackWindowMs: number,
+): ChatOfferWindow | undefined {
+  const windowMs = clampInt(
+    fallbackWindowMs + Math.round(Number(visibility.witnessCount ?? 0) * 2_500) + (kind === 'TAKE_IT_OR_LEAVE_IT' ? -8_000 : 0),
+    8_000,
+    180_000,
+  );
+  if (!window) {
+    return createChatOfferWindow(Number(now), Number(now) + windowMs, {
+      graceUntil: asOfferUnixMs(Number(now) + Math.round(windowMs * 1.15)),
+      rescueEligibleAt: asOfferUnixMs(Number(now) + Math.round(windowMs * 0.45)),
+      leakEligibleAt: asOfferUnixMs(Number(now) + Math.round(windowMs * 0.72)),
+      readPreferredBy: asOfferUnixMs(Number(now) + Math.round(windowMs * 0.4)),
+    });
+  }
+  if (!chatOfferWindowExpired(window, now)) {
+    return window;
+  }
+  const reopenedAt = asOfferUnixMs(Number(now));
+  return createChatOfferWindow(Number(reopenedAt), Number(reopenedAt) + Math.round(windowMs * 0.6), {
+    windowId: String(window.windowId),
+    graceUntil: asOfferUnixMs(Number(reopenedAt) + Math.round(windowMs * 0.8)),
+    rescueEligibleAt: window.rescueEligibleAt,
+    leakEligibleAt: window.leakEligibleAt,
+    readPreferredBy: asOfferUnixMs(Number(reopenedAt) + Math.round(windowMs * 0.25)),
+  });
+}
+
+function deriveCounterReadFromOfferData(
+  offer: ChatOffer,
+  priorOffer: ChatOffer | null | undefined,
+  visibility: ChatOfferVisibilityEnvelope,
+): ChatOfferCounterRead {
+  const currentAmount = Number(asPricePoints(Number(offer.currentVersion.price.amount)));
+  const priorAmount = priorOffer ? Number(asPricePoints(Number(priorOffer.currentVersion.price.amount))) : currentAmount;
+  const baseDelta = priorOffer ? Math.abs(currentAmount - priorAmount) / Math.max(1, Math.abs(priorAmount)) : 0.12;
+  const urgency = Number(offer.currentVersion.analytics?.urgency.normalized ?? 0.35);
+  const leakRisk = clamp01(Number(visibility.audienceHeat ?? 0) * 0.45 + Number(visibility.secrecyPressure ?? 0) * 0.35 + urgency * 0.2);
+  const rescueNeed = clamp01(Number(visibility.helperVisible ? 0.14 : 0) + Number(offer.currentVersion.analytics?.desperation ?? 0) * 0.55 + baseDelta * 0.25);
+  const stallRisk = clamp01((1 - urgency) * 0.42 + baseDelta * 0.18);
+  const rejectionRisk = clamp01(baseDelta * 0.58 + Number(offer.currentVersion.analytics?.aggression.normalized ?? 0) * 0.22);
+  return {
+    likelyOutcome:
+      leakRisk >= 0.72
+        ? 'LEAK_RISK'
+        : rescueNeed >= 0.66
+          ? 'HELPER_NEEDED'
+          : rejectionRisk >= 0.58
+            ? 'LIKELY_REJECT'
+            : stallRisk >= 0.54
+              ? 'LIKELY_STALL'
+              : baseDelta <= 0.12
+                ? 'LIKELY_ACCEPT'
+                : 'COUNTER_LIKELY',
+    counterDistance: asScore0To1(clamp01(baseDelta)),
+    rejectionRisk: asScore0To1(rejectionRisk),
+    stallRisk: asScore0To1(stallRisk),
+    rescueNeed: asScore0To1(rescueNeed),
+    leakRisk: asScore0To1(leakRisk),
+  };
+}
+
+function buildOfferLifecyclePatches(
+  offer: ChatOffer,
+  visibility: ChatOfferVisibilityEnvelope,
+  window: ChatOfferWindow | undefined,
+  counterRead: ChatOfferCounterRead,
+  now: UnixMs,
+): ChatOfferPatch[] {
+  const lifecyclePatch: ChatOfferPatch = {
+    offerId: offer.offerId,
+    status: offer.status,
+    currentVersion: offer.currentVersion,
+    visibility,
+    window: window ?? null,
+    counterRead,
+    updatedAt: now,
+  };
+  return [lifecyclePatch];
+}
+
+function applyOfferPatches(offer: ChatOffer, patches: readonly ChatOfferPatch[]): ChatOffer {
+  return patches.reduce<ChatOffer>((current, patch) => ({
+    ...current,
+    status: patch.status ?? current.status,
+    currentVersion: patch.currentVersion ?? current.currentVersion,
+    visibility: patch.visibility ?? current.visibility,
+    window: patch.window === undefined ? current.window : patch.window ?? undefined,
+    counterRead: patch.counterRead === undefined ? current.counterRead : patch.counterRead ?? undefined,
+    proof: patch.proof === undefined ? current.proof : patch.proof ?? undefined,
+    updatedAt: patch.updatedAt ?? current.updatedAt,
+  }), offer);
+}
+
+function assessOfferLifecycle(
+  offer: ChatOffer,
+  channel: ChatNegotiation['primaryChannel'],
+  now: UnixMs,
+  priorOffer: ChatOffer | null | undefined,
+  fallbackWindowMs: number,
+): OfferLifecycleAssessment {
+  const visibility = normalizeOfferVisibilityEnvelope(offer.visibility, channel);
+  const window = ensureOfferWindowIntegrity(offer.window, now, offer.kind, visibility, fallbackWindowMs);
+  const counterRead = deriveCounterReadFromOfferData(offer, priorOffer, visibility);
+  const normalizedPrice = createChatOfferPrice(Number(offer.currentVersion.price.amount), String(offer.currentVersion.price.currency), {
+    ...offer.currentVersion.price,
+    marketRange: offer.currentVersion.price.marketRange
+      ? {
+          ...offer.currentVersion.price.marketRange,
+          min: Number(asPricePoints(Number(offer.currentVersion.price.marketRange.min))),
+          max: Number(asPricePoints(Number(offer.currentVersion.price.marketRange.max))),
+          expected:
+            offer.currentVersion.price.marketRange.expected === undefined
+              ? undefined
+              : Number(asPricePoints(Number(offer.currentVersion.price.marketRange.expected))),
+        }
+      : undefined,
+  });
+  const currentVersion = createChatOfferVersion(offer.currentVersion.versionNumber, normalizedPrice, offer.currentVersion.paymentTerms, {
+    ...offer.currentVersion,
+    guarantees: offer.currentVersion.guarantees,
+    conditions: offer.currentVersion.conditions,
+    concessions: offer.currentVersion.concessions,
+    analytics: offer.currentVersion.analytics,
+    createdAt: Number(offer.currentVersion.createdAt),
+    note: chatOfferHasGuarantee(offer)
+      ? `${offer.currentVersion.note ?? ''}`.trim() || 'Guaranteed offer lifecycle audited.'
+      : offer.currentVersion.note,
+  });
+  const patchedOffer = applyOfferPatches(
+    {
+      ...offer,
+      currentVersion,
+      visibility,
+      window,
+      counterRead,
+      updatedAt: now,
+    },
+    buildOfferLifecyclePatches(
+      {
+        ...offer,
+        currentVersion,
+        visibility,
+        window,
+        counterRead,
+        updatedAt: now,
+      },
+      visibility,
+      window,
+      counterRead,
+      now,
+    ),
+  );
+  const patches = buildOfferLifecyclePatches(patchedOffer, visibility, window, counterRead, now);
+  return {
+    offer: applyOfferPatches(patchedOffer, patches),
+    visibility,
+    window,
+    counterRead,
+    patches,
+  };
+}
+
+function createOfferBundleSnapshot(
+  offer: ChatOffer,
+  threadId: string,
+  now: UnixMs,
+  priorBundle?: ChatOfferBundle,
+): ChatOfferBundle {
+  const offers = priorBundle
+    ? [...priorBundle.offers.filter((candidate) => String(candidate.offerId) !== String(offer.offerId)), offer]
+    : [offer];
+  return {
+    bundleId: (priorBundle?.bundleId ?? (`bundle:${threadId}:${String(offer.offerId)}` as any)) as any,
+    threadId: asChatOfferThreadId(threadId),
+    offers,
+    leadOfferId: (priorBundle?.leadOfferId ?? offer.offerId) as any,
+    createdAt: priorBundle?.createdAt ?? now,
+    updatedAt: now,
+  };
+}
+
+function appendOfferArtifacts(
+  record: NegotiationRecord,
+  offer: ChatOffer,
+  patches: readonly ChatOfferPatch[],
+  threadId: string,
+  now: UnixMs,
+): void {
+  record.offerPatches.push(...patches);
+  const priorBundle = record.offerBundles.at(-1);
+  const nextBundle = createOfferBundleSnapshot(offer, threadId, now, priorBundle);
+  record.offerBundles.push(nextBundle);
+}
+
+function selectPriorOfferForEvaluation(
+  offers: readonly ChatOffer[],
+  explicitPrior: ChatOffer | null | undefined,
+  now: UnixMs,
+): ChatOffer | null | undefined {
+  if (explicitPrior && !chatOfferWindowExpired(explicitPrior.window, now)) {
+    return explicitPrior;
+  }
+  for (let index = offers.length - 1; index >= 0; index -= 1) {
+    const candidate = offers[index];
+    if (!chatOfferWindowExpired(candidate.window, now)) {
+      return candidate;
+    }
+  }
+  return explicitPrior ?? offers.at(-1);
+}
+
+function chooseNegotiationWindow(
+  engineWindow: NegotiationWindow | undefined,
+  offerWindow: ChatOfferWindow | undefined,
+  channel: ChatNegotiation['primaryChannel'],
+  now: UnixMs,
+): NegotiationWindow {
+  if (engineWindow) {
+    return engineWindow;
+  }
+  if (offerWindow) {
+    return createNegotiationWindow('COUNTER_REQUIRED', channel, Number(offerWindow.opensAt), Number(offerWindow.closesAt), {
+      windowId: String(offerWindow.windowId),
+      graceUntil: offerWindow.graceUntil,
+      helperEligibleAt: offerWindow.rescueEligibleAt,
+      rescueEligibleAt: offerWindow.rescueEligibleAt,
+      leakEligibleAt: offerWindow.leakEligibleAt,
+    });
+  }
+  return createNegotiationWindow('COUNTER_REQUIRED', channel, Number(now), Number(now) + 30_000, {
+    graceUntil: asUnixMs(Number(now) + 42_000),
+    helperEligibleAt: asUnixMs(Number(now) + 12_000),
+    rescueEligibleAt: asUnixMs(Number(now) + 18_000),
+    leakEligibleAt: asUnixMs(Number(now) + 24_000),
+  });
+}
+
+function safeLatestOfferId(negotiation?: ChatNegotiation): ReturnType<typeof asNegotiationOfferId> | undefined {
+  if (!negotiation) {
+    return undefined;
+  }
+  const latest = negotiationLatestOfferId(negotiation as any) as unknown;
+  return latest ? (latest as ReturnType<typeof asNegotiationOfferId>) : undefined;
+}
+
+function deriveNegotiationMaintenance(negotiation: ChatNegotiation, now: UnixMs): NegotiationMaintenanceEnvelope {
+  const primaryActorState = negotiationPrimaryActorState(
+    negotiation,
+    asNegotiationActorId(String(negotiation.parties.primary.actorId)),
+  );
+  return {
+    isLive: Boolean(negotiationIsLive(negotiation as any)),
+    hasAudiencePressure: Boolean(negotiationHasAudiencePressure(negotiation as any)),
+    hasLeakThreat: Boolean(negotiationHasLeakThreat(negotiation as any)),
+    supportsRescue: Boolean(negotiationSupportsRescue(negotiation as any)),
+    inGraceWindow: Boolean(negotiation.activeWindow && negotiationWindowIsInGrace(negotiation.activeWindow, now)),
+    latestOfferId: safeLatestOfferId(negotiation),
+    primaryActorState,
+  };
+}
+
+function buildOfferSignals(offer: ChatOffer, now: UnixMs): NegotiationSignalEvidence[] {
+  return [
+    signal('TRUST_SIGNAL', chatOfferHasGuarantee(offer) ? 0.68 : 0.24, now, 'Offer guarantee posture evaluated from lifecycle contract.'),
+    signal('LEAK_RISK', Number(offer.counterRead?.leakRisk ?? 0.18), now, 'Offer visibility and secrecy projected into leak risk.'),
+    signal('HELPER_NEED', Number(offer.counterRead?.rescueNeed ?? 0.14), now, 'Offer counter-read projected helper need.'),
+  ];
+}
+
+function buildOfferPressureEdges(
+  offer: ChatOffer,
+  counterRead: ChatOfferCounterRead | undefined,
+  now: UnixMs,
+): NegotiationPressureEdge[] {
+  return [
+    pressure('PRICE', Number(counterRead?.counterDistance ?? 0.18), `Offer ${String(offer.offerId)} price pressure.`),
+    pressure('TIME', Number(offer.currentVersion.analytics?.urgency.normalized ?? 0.22), `Offer ${String(offer.offerId)} urgency pressure.`),
+    pressure('LEAK', Number(counterRead?.leakRisk ?? 0.14), `Offer ${String(offer.offerId)} leak pressure.`),
+  ];
+}
+
+function buildMaintenanceSignals(
+  negotiation: ChatNegotiation,
+  maintenance: NegotiationMaintenanceEnvelope,
+  now: UnixMs,
+): NegotiationSignalEvidence[] {
+  const signals: NegotiationSignalEvidence[] = [];
+  if (maintenance.hasAudiencePressure) {
+    signals.push(signal('REPUTATION_RISK', 0.62, now, 'Audience pressure helper flagged the negotiation state.'));
+  }
+  if (maintenance.hasLeakThreat) {
+    signals.push(signal('LEAK_RISK', 0.7, now, 'Negotiation-level leak helper flagged an active leak threat.'));
+  }
+  if (maintenance.supportsRescue) {
+    signals.push(signal('HELPER_NEED', 0.38, now, 'Negotiation supports rescue escalation.'));
+  }
+  if (!maintenance.isLive) {
+    signals.push(signal('PASSIVITY', 0.32, now, 'Negotiation is not considered live by derived helper.'));
+  }
+  if (maintenance.inGraceWindow) {
+    signals.push(signal('URGENCY', 0.54, now, 'Negotiation is operating inside a grace window.'));
+  }
+  if (maintenance.latestOfferId) {
+    signals.push(signal('TRUST_SIGNAL', 0.26, now, `Latest offer tracked as ${String(maintenance.latestOfferId)}.`));
+  }
+  if (negotiation.activeOffer?.vector.intent === 'RESCUE_OVERRIDE') {
+    signals.push(signal('HELPER_NEED', 0.66, now, 'Active offer already implies rescue override posture.'));
+  }
+  return signals;
+}
+
+function buildActorStateSignals(
+  primaryActorState: NegotiationActorState | undefined,
+  now: UnixMs,
+): NegotiationSignalEvidence[] {
+  if (!primaryActorState) {
+    return [];
+  }
+  return [
+    signal('AGGRESSION', Number(primaryActorState.aggression), now, 'Primary actor aggression projected into inference.'),
+    signal('BLUFF', Number(primaryActorState.bluffFrequency), now, 'Primary actor bluff frequency projected into inference.'),
+    signal('TRUST_SIGNAL', Number(primaryActorState.honestySignal), now, 'Primary actor honesty projected into inference.'),
+  ];
+}
+
+function buildMaintenanceBeat(
+  negotiation: ChatNegotiation,
+  maintenance: NegotiationMaintenanceEnvelope,
+  now: UnixMs,
+  description: string,
+): NegotiationSceneBeat {
+  return {
+    beatId: `beat:${String(negotiation.negotiationId)}:maintenance:${Number(now)}`,
+    phase: negotiation.phase,
+    description,
+    actorId: maintenance.primaryActorState?.actor.actorId,
+    messageId: undefined,
+    witnessHeat: asScore0To1(
+      clamp01(
+        (maintenance.hasAudiencePressure ? 0.42 : 0.12) +
+          (maintenance.hasLeakThreat ? 0.24 : 0) +
+          (maintenance.inGraceWindow ? 0.14 : 0),
+      ),
+    ),
+    silenceBeforeMs: 30,
+    silenceAfterMs: 90,
+  };
+}
+
+function buildNegotiationPatchSnapshot(
+  negotiation: ChatNegotiation,
+  now: UnixMs,
+  input: {
+    appendedBeats?: readonly NegotiationSceneBeat[];
+    appendedMemories?: readonly NegotiationMemoryAnchor[];
+    appendedLeakThreats?: readonly NegotiationLeakThreat[];
+  } = {},
+): ChatNegotiationPatch {
+  return {
+    negotiationId: negotiation.negotiationId,
+    phase: negotiation.phase,
+    status: negotiation.status,
+    activeOffer: negotiation.activeOffer,
+    activeWindow: negotiation.activeWindow,
+    latestInference: negotiation.latestInference,
+    latestResolution: negotiation.latestResolution,
+    appendedBeats: input.appendedBeats,
+    appendedMemories: input.appendedMemories,
+    appendedLeakThreats: input.appendedLeakThreats,
+    updatedAt: now,
+  } as ChatNegotiationPatch;
 }
 
 function toNegotiationActor(actor: ChatOfferActorRef, parties: NegotiationPartyPair): NegotiationActorRef {
