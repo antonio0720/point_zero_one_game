@@ -2,7 +2,7 @@
  * ============================================================================
  * POINT ZERO ONE — BACKEND CHAT RETRIEVAL CONTEXT BUILDER
  * FILE: backend/src/game/engine/chat/intelligence/dl/RetrievalContextBuilder.ts
- * VERSION: 2026.03.21-retrieval-continuity.v2
+ * VERSION: 2026.03.22-retrieval-continuity.v15
  * AUTHORSHIP: Antonio T. Smith Jr.
  * LICENSE: Internal / Proprietary / All Rights Reserved
  * ============================================================================
@@ -52,7 +52,7 @@ import type {
 } from './MemoryAnchorStore';
 
 export const RETRIEVAL_CONTEXT_BUILDER_VERSION =
-  '2026.03.21-retrieval-continuity.v2' as const;
+  '2026.03.22-retrieval-continuity.v15' as const;
 
 export const RETRIEVAL_CONTEXT_BUILDER_DEFAULTS = Object.freeze({
   maxPromptLines: 48,
@@ -1031,4 +1031,1912 @@ function isDocumentItem(
 
 function unique<T>(value: T, index: number, values: readonly T[]): boolean {
   return values.indexOf(value) === index;
+}
+
+
+
+
+
+
+/**
+ * ============================================================================
+ * Retrieval Context Supplemental Diagnostics & Selection Helpers
+ * These utilities are deterministic and side-effect free. They are intentionally
+ * colocated with the builder so directors, tests, replay tools, and analytics
+ * lanes can reuse identical logic without importing UI or orchestration code.
+ * ============================================================================
+ */
+
+export const RETRIEVAL_CONTEXT_ANALYZER_VERSION =
+  '2026.03.22-retrieval-analyzers.v1' as const;
+
+export interface RetrievalContextSummary {
+  readonly responseIntent: RetrievalContextPacket['responseIntent'];
+  readonly memoryIntent: RetrievalContextPacket['memoryIntent'];
+  readonly topAnchorId?: MemoryAnchorId;
+  readonly topAnchorHeadline?: string;
+  readonly topDocumentId?: string;
+  readonly callbackCount: number;
+  readonly restraintCount: number;
+  readonly tacticalCount: number;
+  readonly promptBlockCount: number;
+  readonly debugCount: number;
+}
+
+export function summarizeRetrievalContextPacket(
+  packet: RetrievalContextPacket,
+): RetrievalContextSummary {
+  return Object.freeze({
+    responseIntent: packet.responseIntent,
+    memoryIntent: packet.memoryIntent,
+    topAnchorId: packet.anchors[0]?.anchorId,
+    topAnchorHeadline: packet.anchors[0]?.headline,
+    topDocumentId: packet.documents[0]?.documentId,
+    callbackCount: packet.callbackPhrases.length,
+    restraintCount: packet.restraintFlags.length,
+    tacticalCount: packet.tacticalNotes.length,
+    promptBlockCount: packet.promptBlocks.length,
+    debugCount: packet.debugNotes.length,
+  });
+}
+
+export function hasAnyAnchors(packet: RetrievalContextPacket): boolean {
+  return packet.anchors.length > 0;
+}
+
+export function hasAnyDocuments(packet: RetrievalContextPacket): boolean {
+  return packet.documents.length > 0;
+}
+
+export function hasAnyCallbacks(packet: RetrievalContextPacket): boolean {
+  return packet.callbackPhrases.length > 0;
+}
+
+export function hasAnyRestraints(packet: RetrievalContextPacket): boolean {
+  return packet.restraintFlags.length > 0;
+}
+
+export function hasAnyTacticalNotes(packet: RetrievalContextPacket): boolean {
+  return packet.tacticalNotes.length > 0;
+}
+
+export function getTopAnchor(
+  packet: RetrievalContextPacket,
+): RetrievalContextAnchorItem | null {
+  return packet.anchors[0] ?? null;
+}
+
+export function getTopDocument(
+  packet: RetrievalContextPacket,
+): RetrievalContextDocumentItem | null {
+  return packet.documents[0] ?? null;
+}
+
+export function getTopCallback(
+  packet: RetrievalContextPacket,
+): string | null {
+  return packet.callbackPhrases[0] ?? null;
+}
+
+export function getTopPromptBlock(
+  packet: RetrievalContextPacket,
+): RetrievalPromptBlock | null {
+  return packet.promptBlocks[0] ?? null;
+}
+
+export function retrievalContextIsBotResponse(
+  packet: RetrievalContextPacket,
+): boolean {
+  return packet.responseIntent === 'BOT_RESPONSE';
+}
+
+export function requestIsBotResponse(
+  request: RetrievalContextBuildRequest,
+): boolean {
+  return request.responseIntent === 'BOT_RESPONSE';
+}
+
+export function retrievalContextIsHelperIntervention(
+  packet: RetrievalContextPacket,
+): boolean {
+  return packet.responseIntent === 'HELPER_INTERVENTION';
+}
+
+export function requestIsHelperIntervention(
+  request: RetrievalContextBuildRequest,
+): boolean {
+  return request.responseIntent === 'HELPER_INTERVENTION';
+}
+
+export function retrievalContextIsHaterTaunt(
+  packet: RetrievalContextPacket,
+): boolean {
+  return packet.responseIntent === 'HATER_TAUNT';
+}
+
+export function requestIsHaterTaunt(
+  request: RetrievalContextBuildRequest,
+): boolean {
+  return request.responseIntent === 'HATER_TAUNT';
+}
+
+export function retrievalContextIsDealroomCounter(
+  packet: RetrievalContextPacket,
+): boolean {
+  return packet.responseIntent === 'DEALROOM_COUNTER';
+}
+
+export function requestIsDealroomCounter(
+  request: RetrievalContextBuildRequest,
+): boolean {
+  return request.responseIntent === 'DEALROOM_COUNTER';
+}
+
+export function retrievalContextIsPostrunNarration(
+  packet: RetrievalContextPacket,
+): boolean {
+  return packet.responseIntent === 'POSTRUN_NARRATION';
+}
+
+export function requestIsPostrunNarration(
+  request: RetrievalContextBuildRequest,
+): boolean {
+  return request.responseIntent === 'POSTRUN_NARRATION';
+}
+
+export function retrievalContextIsScenePlanning(
+  packet: RetrievalContextPacket,
+): boolean {
+  return packet.responseIntent === 'SCENE_PLANNING';
+}
+
+export function requestIsScenePlanning(
+  request: RetrievalContextBuildRequest,
+): boolean {
+  return request.responseIntent === 'SCENE_PLANNING';
+}
+
+export function retrievalContextIsLiveopsOverlay(
+  packet: RetrievalContextPacket,
+): boolean {
+  return packet.responseIntent === 'LIVEOPS_OVERLAY';
+}
+
+export function requestIsLiveopsOverlay(
+  request: RetrievalContextBuildRequest,
+): boolean {
+  return request.responseIntent === 'LIVEOPS_OVERLAY';
+}
+
+export function packetHasRescueAnchor(
+  packet: RetrievalContextPacket,
+): boolean {
+  return packet.anchors.some((anchor) => anchor.kind === 'RESCUE');
+}
+
+export function anchorIsRescue(
+  anchor: RetrievalContextAnchorItem,
+): boolean {
+  return anchor.kind === 'RESCUE';
+}
+
+export function packetHasLegendAnchor(
+  packet: RetrievalContextPacket,
+): boolean {
+  return packet.anchors.some((anchor) => anchor.kind === 'LEGEND');
+}
+
+export function anchorIsLegend(
+  anchor: RetrievalContextAnchorItem,
+): boolean {
+  return anchor.kind === 'LEGEND';
+}
+
+export function packetHasQuoteReversalAnchor(
+  packet: RetrievalContextPacket,
+): boolean {
+  return packet.anchors.some((anchor) => anchor.kind === 'QUOTE_REVERSAL');
+}
+
+export function anchorIsQuoteReversal(
+  anchor: RetrievalContextAnchorItem,
+): boolean {
+  return anchor.kind === 'QUOTE_REVERSAL';
+}
+
+export function packetHasDealroomExposureAnchor(
+  packet: RetrievalContextPacket,
+): boolean {
+  return packet.anchors.some((anchor) => anchor.kind === 'DEALROOM_EXPOSURE');
+}
+
+export function anchorIsDealroomExposure(
+  anchor: RetrievalContextAnchorItem,
+): boolean {
+  return anchor.kind === 'DEALROOM_EXPOSURE';
+}
+
+export function packetHasWorldEventAnchor(
+  packet: RetrievalContextPacket,
+): boolean {
+  return packet.anchors.some((anchor) => anchor.kind === 'WORLD_EVENT');
+}
+
+export function anchorIsWorldEvent(
+  anchor: RetrievalContextAnchorItem,
+): boolean {
+  return anchor.kind === 'WORLD_EVENT';
+}
+
+export function packetHasPromiseAnchor(
+  packet: RetrievalContextPacket,
+): boolean {
+  return packet.anchors.some((anchor) => anchor.kind === 'PROMISE');
+}
+
+export function anchorIsPromise(
+  anchor: RetrievalContextAnchorItem,
+): boolean {
+  return anchor.kind === 'PROMISE';
+}
+
+export function packetHasBetrayalAnchor(
+  packet: RetrievalContextPacket,
+): boolean {
+  return packet.anchors.some((anchor) => anchor.kind === 'BETRAYAL');
+}
+
+export function anchorIsBetrayal(
+  anchor: RetrievalContextAnchorItem,
+): boolean {
+  return anchor.kind === 'BETRAYAL';
+}
+
+export function packetHasComebackAnchor(
+  packet: RetrievalContextPacket,
+): boolean {
+  return packet.anchors.some((anchor) => anchor.kind === 'COMEBACK');
+}
+
+export function anchorIsComeback(
+  anchor: RetrievalContextAnchorItem,
+): boolean {
+  return anchor.kind === 'COMEBACK';
+}
+
+export function packetHasCollapseAnchor(
+  packet: RetrievalContextPacket,
+): boolean {
+  return packet.anchors.some((anchor) => anchor.kind === 'COLLAPSE');
+}
+
+export function anchorIsCollapse(
+  anchor: RetrievalContextAnchorItem,
+): boolean {
+  return anchor.kind === 'COLLAPSE';
+}
+
+export function packetHasHumiliationAnchor(
+  packet: RetrievalContextPacket,
+): boolean {
+  return packet.anchors.some((anchor) => anchor.kind === 'HUMILIATION');
+}
+
+export function anchorIsHumiliation(
+  anchor: RetrievalContextAnchorItem,
+): boolean {
+  return anchor.kind === 'HUMILIATION';
+}
+
+export function packetHasHypeAnchor(
+  packet: RetrievalContextPacket,
+): boolean {
+  return packet.anchors.some((anchor) => anchor.kind === 'HYPE');
+}
+
+export function anchorIsHype(
+  anchor: RetrievalContextAnchorItem,
+): boolean {
+  return anchor.kind === 'HYPE';
+}
+
+export function packetHasThreatAnchor(
+  packet: RetrievalContextPacket,
+): boolean {
+  return packet.anchors.some((anchor) => anchor.kind === 'THREAT');
+}
+
+export function anchorIsThreat(
+  anchor: RetrievalContextAnchorItem,
+): boolean {
+  return anchor.kind === 'THREAT';
+}
+
+export function packetHasClutchAnchor(
+  packet: RetrievalContextPacket,
+): boolean {
+  return packet.anchors.some((anchor) => anchor.kind === 'CLUTCH');
+}
+
+export function anchorIsClutch(
+  anchor: RetrievalContextAnchorItem,
+): boolean {
+  return anchor.kind === 'CLUTCH';
+}
+
+export function packetHasWarningAnchor(
+  packet: RetrievalContextPacket,
+): boolean {
+  return packet.anchors.some((anchor) => anchor.kind === 'WARNING');
+}
+
+export function anchorIsWarning(
+  anchor: RetrievalContextAnchorItem,
+): boolean {
+  return anchor.kind === 'WARNING';
+}
+
+export function packetHasReceiptAnchor(
+  packet: RetrievalContextPacket,
+): boolean {
+  return packet.anchors.some((anchor) => anchor.kind === 'RECEIPT');
+}
+
+export function anchorIsReceipt(
+  anchor: RetrievalContextAnchorItem,
+): boolean {
+  return anchor.kind === 'RECEIPT';
+}
+
+export function packetHasRivalryAnchor(
+  packet: RetrievalContextPacket,
+): boolean {
+  return packet.anchors.some((anchor) => anchor.kind === 'RIVALRY');
+}
+
+export function anchorIsRivalry(
+  anchor: RetrievalContextAnchorItem,
+): boolean {
+  return anchor.kind === 'RIVALRY';
+}
+
+export function packetHasNegotiationAnchor(
+  packet: RetrievalContextPacket,
+): boolean {
+  return packet.anchors.some((anchor) => anchor.kind === 'NEGOTIATION');
+}
+
+export function anchorIsNegotiation(
+  anchor: RetrievalContextAnchorItem,
+): boolean {
+  return anchor.kind === 'NEGOTIATION';
+}
+
+export function packetHasVowAnchor(
+  packet: RetrievalContextPacket,
+): boolean {
+  return packet.anchors.some((anchor) => anchor.kind === 'VOW');
+}
+
+export function anchorIsVow(
+  anchor: RetrievalContextAnchorItem,
+): boolean {
+  return anchor.kind === 'VOW';
+}
+
+export function packetHasAllianceAnchor(
+  packet: RetrievalContextPacket,
+): boolean {
+  return packet.anchors.some((anchor) => anchor.kind === 'ALLIANCE');
+}
+
+export function anchorIsAlliance(
+  anchor: RetrievalContextAnchorItem,
+): boolean {
+  return anchor.kind === 'ALLIANCE';
+}
+
+export function packetHasSystemMarkerAnchor(
+  packet: RetrievalContextPacket,
+): boolean {
+  return packet.anchors.some((anchor) => anchor.kind === 'SYSTEM_MARKER');
+}
+
+export function anchorIsSystemMarker(
+  anchor: RetrievalContextAnchorItem,
+): boolean {
+  return anchor.kind === 'SYSTEM_MARKER';
+}
+
+export function requestMatchesPressureCritical(
+  request: RetrievalContextBuildRequest,
+): boolean {
+  const source =
+    request.currentPressureTier;
+  return typeof source === 'string' && /critical/i.test(source);
+}
+
+export function requestMatchesPressureBreakpoint(
+  request: RetrievalContextBuildRequest,
+): boolean {
+  const source =
+    request.currentPressureTier;
+  return typeof source === 'string' && /breakpoint/i.test(source);
+}
+
+export function requestMatchesPressureCollapse(
+  request: RetrievalContextBuildRequest,
+): boolean {
+  const source =
+    request.currentPressureTier;
+  return typeof source === 'string' && /collapse/i.test(source);
+}
+
+export function requestMatchesPressureHigh(
+  request: RetrievalContextBuildRequest,
+): boolean {
+  const source =
+    request.currentPressureTier;
+  return typeof source === 'string' && /high/i.test(source);
+}
+
+export function requestMatchesPressureElevated(
+  request: RetrievalContextBuildRequest,
+): boolean {
+  const source =
+    request.currentPressureTier;
+  return typeof source === 'string' && /elevated/i.test(source);
+}
+
+export function requestMatchesPressureVolatile(
+  request: RetrievalContextBuildRequest,
+): boolean {
+  const source =
+    request.currentPressureTier;
+  return typeof source === 'string' && /volatile/i.test(source);
+}
+
+export function requestMatchesPressureReset(
+  request: RetrievalContextBuildRequest,
+): boolean {
+  const source =
+    request.currentPressureTier;
+  return typeof source === 'string' && /reset/i.test(source);
+}
+
+export function requestMatchesPressureCalm(
+  request: RetrievalContextBuildRequest,
+): boolean {
+  const source =
+    request.currentPressureTier;
+  return typeof source === 'string' && /calm/i.test(source);
+}
+
+export function requestMatchesEmotionFrustrated(
+  request: RetrievalContextBuildRequest,
+): boolean {
+  const source =
+    request.currentEmotionBand;
+  return typeof source === 'string' && /frustrated/i.test(source);
+}
+
+export function requestMatchesEmotionDesperate(
+  request: RetrievalContextBuildRequest,
+): boolean {
+  const source =
+    request.currentEmotionBand;
+  return typeof source === 'string' && /desperate/i.test(source);
+}
+
+export function requestMatchesEmotionEmbarrassed(
+  request: RetrievalContextBuildRequest,
+): boolean {
+  const source =
+    request.currentEmotionBand;
+  return typeof source === 'string' && /embarrassed/i.test(source);
+}
+
+export function requestMatchesEmotionAngry(
+  request: RetrievalContextBuildRequest,
+): boolean {
+  const source =
+    request.currentEmotionBand;
+  return typeof source === 'string' && /angry/i.test(source);
+}
+
+export function requestMatchesEmotionAnxious(
+  request: RetrievalContextBuildRequest,
+): boolean {
+  const source =
+    request.currentEmotionBand;
+  return typeof source === 'string' && /anxious/i.test(source);
+}
+
+export function requestMatchesEmotionHaunted(
+  request: RetrievalContextBuildRequest,
+): boolean {
+  const source =
+    request.currentEmotionBand;
+  return typeof source === 'string' && /haunted/i.test(source);
+}
+
+export function requestMatchesEmotionHopeful(
+  request: RetrievalContextBuildRequest,
+): boolean {
+  const source =
+    request.currentEmotionBand;
+  return typeof source === 'string' && /hopeful/i.test(source);
+}
+
+export function requestMatchesEmotionTriumphant(
+  request: RetrievalContextBuildRequest,
+): boolean {
+  const source =
+    request.currentEmotionBand;
+  return typeof source === 'string' && /triumphant/i.test(source);
+}
+
+export function requestMatchesEmotionCold(
+  request: RetrievalContextBuildRequest,
+): boolean {
+  const source =
+    request.currentEmotionBand;
+  return typeof source === 'string' && /cold/i.test(source);
+}
+
+export function requestMatchesEmotionCalm(
+  request: RetrievalContextBuildRequest,
+): boolean {
+  const source =
+    request.currentEmotionBand;
+  return typeof source === 'string' && /calm/i.test(source);
+}
+
+export function requestMatchesAudienceHigh(
+  request: RetrievalContextBuildRequest,
+): boolean {
+  const source =
+    request.currentAudienceHeat;
+  return typeof source === 'string' && /high/i.test(source);
+}
+
+export function requestMatchesAudienceCritical(
+  request: RetrievalContextBuildRequest,
+): boolean {
+  const source =
+    request.currentAudienceHeat;
+  return typeof source === 'string' && /critical/i.test(source);
+}
+
+export function requestMatchesAudienceMob(
+  request: RetrievalContextBuildRequest,
+): boolean {
+  const source =
+    request.currentAudienceHeat;
+  return typeof source === 'string' && /mob/i.test(source);
+}
+
+export function requestMatchesAudienceVolatile(
+  request: RetrievalContextBuildRequest,
+): boolean {
+  const source =
+    request.currentAudienceHeat;
+  return typeof source === 'string' && /volatile/i.test(source);
+}
+
+export function requestMatchesAudienceHot(
+  request: RetrievalContextBuildRequest,
+): boolean {
+  const source =
+    request.currentAudienceHeat;
+  return typeof source === 'string' && /hot/i.test(source);
+}
+
+export function requestMatchesAudienceCalm(
+  request: RetrievalContextBuildRequest,
+): boolean {
+  const source =
+    request.currentAudienceHeat;
+  return typeof source === 'string' && /calm/i.test(source);
+}
+
+export function requestMatchesRelationshipAlly(
+  request: RetrievalContextBuildRequest,
+): boolean {
+  const source =
+    request.currentRelationshipState;
+  return typeof source === 'string' && /ally/i.test(source);
+}
+
+export function requestMatchesRelationshipRival(
+  request: RetrievalContextBuildRequest,
+): boolean {
+  const source =
+    request.currentRelationshipState;
+  return typeof source === 'string' && /rival/i.test(source);
+}
+
+export function requestMatchesRelationshipDistrust(
+  request: RetrievalContextBuildRequest,
+): boolean {
+  const source =
+    request.currentRelationshipState;
+  return typeof source === 'string' && /distrust/i.test(source);
+}
+
+export function requestMatchesRelationshipMentor(
+  request: RetrievalContextBuildRequest,
+): boolean {
+  const source =
+    request.currentRelationshipState;
+  return typeof source === 'string' && /mentor/i.test(source);
+}
+
+export function requestMatchesRelationshipHunted(
+  request: RetrievalContextBuildRequest,
+): boolean {
+  const source =
+    request.currentRelationshipState;
+  return typeof source === 'string' && /hunted/i.test(source);
+}
+
+export function requestMatchesRelationshipFascinated(
+  request: RetrievalContextBuildRequest,
+): boolean {
+  const source =
+    request.currentRelationshipState;
+  return typeof source === 'string' && /fascinated/i.test(source);
+}
+
+export function requestMatchesRelationshipBroken(
+  request: RetrievalContextBuildRequest,
+): boolean {
+  const source =
+    request.currentRelationshipState;
+  return typeof source === 'string' && /broken/i.test(source);
+}
+
+export function getRetrievalContextAnchorIds(
+  packet: RetrievalContextPacket,
+): readonly any[] {
+  return Object.freeze(packet.anchors.map((anchor) => anchor.anchorId));
+}
+
+export function getRetrievalContextAnchorKinds(
+  packet: RetrievalContextPacket,
+): readonly any[] {
+  return Object.freeze(packet.anchors.map((anchor) => anchor.kind));
+}
+
+export function getRetrievalContextAnchorHeadlines(
+  packet: RetrievalContextPacket,
+): readonly any[] {
+  return Object.freeze(packet.anchors.map((anchor) => anchor.headline));
+}
+
+export function getRetrievalContextAnchorScores(
+  packet: RetrievalContextPacket,
+): readonly any[] {
+  return Object.freeze(packet.anchors.map((anchor) => anchor.score));
+}
+
+export function getRetrievalContextAnchorSalience(
+  packet: RetrievalContextPacket,
+): readonly any[] {
+  return Object.freeze(packet.anchors.map((anchor) => anchor.finalSalience));
+}
+
+export function getRetrievalContextDocumentIds(
+  packet: RetrievalContextPacket,
+): readonly any[] {
+  return Object.freeze(packet.documents.map((document) => document.documentId));
+}
+
+export function getRetrievalContextDocumentScores(
+  packet: RetrievalContextPacket,
+): readonly any[] {
+  return Object.freeze(packet.documents.map((document) => document.score));
+}
+
+export function getRetrievalContextCallbackPhrases(
+  packet: RetrievalContextPacket,
+): readonly any[] {
+  return Object.freeze(packet.callbackPhrases);
+}
+
+export function getRetrievalContextRestraintFlags(
+  packet: RetrievalContextPacket,
+): readonly any[] {
+  return Object.freeze(packet.restraintFlags);
+}
+
+export function getRetrievalContextTacticalNotes(
+  packet: RetrievalContextPacket,
+): readonly any[] {
+  return Object.freeze(packet.tacticalNotes);
+}
+
+export function getRetrievalContextDebugNotes(
+  packet: RetrievalContextPacket,
+): readonly any[] {
+  return Object.freeze(packet.debugNotes);
+}
+
+export function getAnchorById(
+  packet: RetrievalContextPacket,
+  anchorId: MemoryAnchorId,
+): RetrievalContextAnchorItem | null {
+  return packet.anchors.find((anchor) => anchor.anchorId === anchorId) ?? null;
+}
+
+export function getDocumentById(
+  packet: RetrievalContextPacket,
+  documentId: string,
+): RetrievalContextDocumentItem | null {
+  return packet.documents.find((document) => document.documentId === documentId) ?? null;
+}
+
+export function getPromptBlockByKey(
+  packet: RetrievalContextPacket,
+  key: RetrievalPromptBlock['key'],
+): RetrievalPromptBlock | null {
+  return packet.promptBlocks.find((block) => block.key === key) ?? null;
+}
+
+export function listPromptBlockKeys(
+  packet: RetrievalContextPacket,
+): readonly RetrievalPromptBlock['key'][] {
+  return Object.freeze(packet.promptBlocks.map((block) => block.key));
+}
+
+export function flattenPromptBlockLines(
+  packet: RetrievalContextPacket,
+): readonly string[] {
+  return Object.freeze(packet.promptBlocks.flatMap((block) => block.lines));
+}
+
+export function renderPromptBlock(
+  block: RetrievalPromptBlock,
+): string {
+  return [`[${block.key}] ${block.title}`, ...block.lines.map((line) => `- ${line}`)].join('\n');
+}
+
+export function renderPromptBlocks(
+  packet: RetrievalContextPacket,
+): string {
+  return packet.promptBlocks.map(renderPromptBlock).join('\n\n');
+}
+
+export function collectAllAnchorTags(
+  packet: RetrievalContextPacket,
+): readonly string[] {
+  return Object.freeze(
+    packet.anchors.flatMap((anchor) => anchor.tags).filter(unique),
+  );
+}
+
+export function collectAllAnchorEmotions(
+  packet: RetrievalContextPacket,
+): readonly string[] {
+  return Object.freeze(
+    packet.anchors.flatMap((anchor) => anchor.emotions).filter(unique),
+  );
+}
+
+export function collectAllRelationshipRefs(
+  packet: RetrievalContextPacket,
+): readonly string[] {
+  return Object.freeze(
+    packet.anchors.flatMap((anchor) => anchor.relationshipRefs).filter(unique),
+  );
+}
+
+export function collectAllQuoteRefs(
+  packet: RetrievalContextPacket,
+): readonly string[] {
+  return Object.freeze(
+    packet.anchors.flatMap((anchor) => anchor.quoteRefs).filter(unique),
+  );
+}
+
+export function averageAnchorScore(
+  packet: RetrievalContextPacket,
+): number {
+  if (!packet.anchors.length) {
+    return 0;
+  }
+
+  return round4(
+    packet.anchors.reduce((sum, anchor) => sum + anchor.score, 0) / packet.anchors.length,
+  );
+}
+
+export function averageAnchorSalience(
+  packet: RetrievalContextPacket,
+): number {
+  if (!packet.anchors.length) {
+    return 0;
+  }
+
+  return round4(
+    packet.anchors.reduce((sum, anchor) => sum + anchor.finalSalience, 0) /
+      packet.anchors.length,
+  );
+}
+
+export function averageDocumentScore(
+  packet: RetrievalContextPacket,
+): number {
+  if (!packet.documents.length) {
+    return 0;
+  }
+
+  return round4(
+    packet.documents.reduce((sum, document) => sum + document.score, 0) /
+      packet.documents.length,
+  );
+}
+
+export function highestAnchorScore(
+  packet: RetrievalContextPacket,
+): number {
+  return round4(
+    Math.max(0, ...packet.anchors.map((anchor) => anchor.score)),
+  );
+}
+
+export function highestDocumentScore(
+  packet: RetrievalContextPacket,
+): number {
+  return round4(
+    Math.max(0, ...packet.documents.map((document) => document.score)),
+  );
+}
+
+export function countAnchorsByKind(
+  packet: RetrievalContextPacket,
+): Readonly<Record<string, number>> {
+  const counts: Record<string, number> = {};
+
+  for (const anchor of packet.anchors) {
+    counts[anchor.kind] = (counts[anchor.kind] ?? 0) + 1;
+  }
+
+  return Object.freeze({ ...counts });
+}
+
+export function countPromptBlocksByKey(
+  packet: RetrievalContextPacket,
+): Readonly<Record<string, number>> {
+  const counts: Record<string, number> = {};
+
+  for (const block of packet.promptBlocks) {
+    counts[block.key] = (counts[block.key] ?? 0) + 1;
+  }
+
+  return Object.freeze({ ...counts });
+}
+
+export function countDocumentsBySourceKind(
+  packet: RetrievalContextPacket,
+): Readonly<Record<string, number>> {
+  const counts: Record<string, number> = {};
+
+  for (const document of packet.documents) {
+    const key = document.sourceKind ?? 'UNKNOWN';
+    counts[key] = (counts[key] ?? 0) + 1;
+  }
+
+  return Object.freeze({ ...counts });
+}
+
+export function selectAnchorsByMinimumScore(
+  packet: RetrievalContextPacket,
+  minimumScore: number,
+): readonly RetrievalContextAnchorItem[] {
+  return Object.freeze(
+    packet.anchors.filter((anchor) => anchor.score >= minimumScore),
+  );
+}
+
+export function selectDocumentsByMinimumScore(
+  packet: RetrievalContextPacket,
+  minimumScore: number,
+): readonly RetrievalContextDocumentItem[] {
+  return Object.freeze(
+    packet.documents.filter((document) => document.score >= minimumScore),
+  );
+}
+
+export function selectAnchorsByPriority(
+  packet: RetrievalContextPacket,
+  priority: string,
+): readonly RetrievalContextAnchorItem[] {
+  return Object.freeze(
+    packet.anchors.filter((anchor) => anchor.priority === priority),
+  );
+}
+
+export function selectAnchorsByStabilityClass(
+  packet: RetrievalContextPacket,
+  stabilityClass: string,
+): readonly RetrievalContextAnchorItem[] {
+  return Object.freeze(
+    packet.anchors.filter((anchor) => anchor.stabilityClass === stabilityClass),
+  );
+}
+
+export function selectDocumentsByPurpose(
+  packet: RetrievalContextPacket,
+  purpose: string,
+): readonly RetrievalContextDocumentItem[] {
+  return Object.freeze(
+    packet.documents.filter((document) => document.purpose === purpose),
+  );
+}
+
+export function selectAnchorsByTag(
+  packet: RetrievalContextPacket,
+  tag: string,
+): readonly RetrievalContextAnchorItem[] {
+  const normalized = tag.trim().toLowerCase();
+  return Object.freeze(
+    packet.anchors.filter((anchor) =>
+      anchor.tags.some((value) => value.trim().toLowerCase() === normalized),
+    ),
+  );
+}
+
+export function selectAnchorsByEmotion(
+  packet: RetrievalContextPacket,
+  emotion: string,
+): readonly RetrievalContextAnchorItem[] {
+  const normalized = emotion.trim().toLowerCase();
+  return Object.freeze(
+    packet.anchors.filter((anchor) =>
+      anchor.emotions.some((value) => value.trim().toLowerCase() === normalized),
+    ),
+  );
+}
+
+export function selectAnchorsByRelationshipRef(
+  packet: RetrievalContextPacket,
+  relationshipRef: string,
+): readonly RetrievalContextAnchorItem[] {
+  const normalized = relationshipRef.trim().toLowerCase();
+  return Object.freeze(
+    packet.anchors.filter((anchor) =>
+      anchor.relationshipRefs.some((value) => value.trim().toLowerCase() === normalized),
+    ),
+  );
+}
+
+export function selectAnchorsByQuoteRef(
+  packet: RetrievalContextPacket,
+  quoteRef: string,
+): readonly RetrievalContextAnchorItem[] {
+  const normalized = quoteRef.trim().toLowerCase();
+  return Object.freeze(
+    packet.anchors.filter((anchor) =>
+      anchor.quoteRefs.some((value) => value.trim().toLowerCase() === normalized),
+    ),
+  );
+}
+
+export function packetUsesCallbackPhrase(
+  packet: RetrievalContextPacket,
+  callbackPhrase: string,
+): boolean {
+  const normalized = callbackPhrase.trim().toLowerCase();
+  return packet.callbackPhrases.some((phrase) => phrase.trim().toLowerCase() === normalized);
+}
+
+export function packetUsesRestraintFlag(
+  packet: RetrievalContextPacket,
+  restraintFlag: string,
+): boolean {
+  const normalized = restraintFlag.trim().toLowerCase();
+  return packet.restraintFlags.some((flag) => flag.trim().toLowerCase() === normalized);
+}
+
+export function packetUsesTacticalNote(
+  packet: RetrievalContextPacket,
+  tacticalNote: string,
+): boolean {
+  const normalized = tacticalNote.trim().toLowerCase();
+  return packet.tacticalNotes.some((note) => note.trim().toLowerCase() === normalized);
+}
+
+export function packetHasPromptBlockKey(
+  packet: RetrievalContextPacket,
+  key: RetrievalPromptBlock['key'],
+): boolean {
+  return packet.promptBlocks.some((block) => block.key === key);
+}
+
+export function packetHasDiagnosticPrefix(
+  packet: RetrievalContextPacket,
+  prefix: string,
+): boolean {
+  return packet.debugNotes.some((note) => note.startsWith(prefix));
+}
+
+export function summarizeAnchor(
+  anchor: RetrievalContextAnchorItem,
+): string {
+  return [
+    `rank=${anchor.rank}`,
+    `id=${anchor.anchorId}`,
+    `kind=${anchor.kind}`,
+    `score=${round4(anchor.score)}`,
+    `salience=${round4(anchor.finalSalience)}`,
+    anchor.headline,
+  ].join(' | ');
+}
+
+export function summarizeDocument(
+  document: RetrievalContextDocumentItem,
+): string {
+  return [
+    `id=${document.documentId}`,
+    `score=${round4(document.score)}`,
+    document.sourceKind ?? 'UNKNOWN',
+    document.preview ?? 'no_preview',
+  ].join(' | ');
+}
+
+export function summarizePacketTopline(
+  packet: RetrievalContextPacket,
+): string {
+  return [
+    `responseIntent=${packet.responseIntent}`,
+    `memoryIntent=${packet.memoryIntent}`,
+    `anchorCount=${packet.anchors.length}`,
+    `documentCount=${packet.documents.length}`,
+    `callbackCount=${packet.callbackPhrases.length}`,
+    `restraintCount=${packet.restraintFlags.length}`,
+  ].join(' | ');
+}
+
+export function selectMostActionableCallback(
+  packet: RetrievalContextPacket,
+): string | null {
+  const helperBias = retrievalContextIsHelperIntervention(packet);
+  const dealroomBias = retrievalContextIsDealroomCounter(packet);
+
+  const sorted = [...packet.callbackPhrases].sort((left, right) => {
+    const leftScore = computeCallbackActionability(left, helperBias, dealroomBias);
+    const rightScore = computeCallbackActionability(right, helperBias, dealroomBias);
+    return rightScore - leftScore;
+  });
+
+  return sorted[0] ?? null;
+}
+
+export function computeCallbackActionability(
+  callbackPhrase: string,
+  helperBias = false,
+  dealroomBias = false,
+): number {
+  const normalized = callbackPhrase.trim().toLowerCase();
+  let score = normalized.length > 10 ? 0.2 : 0;
+  score += /you|your|remember|last|again/.test(normalized) ? 0.2 : 0;
+  score += /offer|price|deal|counter|terms|leverage/.test(normalized) ? 0.2 : 0;
+  score += /calm|steady|breathe|focus|hold|stop/.test(normalized) ? 0.15 : 0;
+  score += /proof|receipt|said|promised|told/.test(normalized) ? 0.15 : 0;
+  score += helperBias && /calm|steady|focus|hold/.test(normalized) ? 0.1 : 0;
+  score += dealroomBias && /offer|deal|counter|terms|price/.test(normalized) ? 0.1 : 0;
+  return round4(clampUnit(score));
+}
+
+export function getRescueAnchors(
+  packet: RetrievalContextPacket,
+): readonly RetrievalContextAnchorItem[] {
+  return Object.freeze(
+    packet.anchors.filter((anchor) => anchor.kind === 'RESCUE'),
+  );
+}
+
+export function countRescueAnchors(
+  packet: RetrievalContextPacket,
+): number {
+  return getRescueAnchors(packet).length;
+}
+
+export function getLegendAnchors(
+  packet: RetrievalContextPacket,
+): readonly RetrievalContextAnchorItem[] {
+  return Object.freeze(
+    packet.anchors.filter((anchor) => anchor.kind === 'LEGEND'),
+  );
+}
+
+export function countLegendAnchors(
+  packet: RetrievalContextPacket,
+): number {
+  return getLegendAnchors(packet).length;
+}
+
+export function getQuoteReversalAnchors(
+  packet: RetrievalContextPacket,
+): readonly RetrievalContextAnchorItem[] {
+  return Object.freeze(
+    packet.anchors.filter((anchor) => anchor.kind === 'QUOTE_REVERSAL'),
+  );
+}
+
+export function countQuoteReversalAnchors(
+  packet: RetrievalContextPacket,
+): number {
+  return getQuoteReversalAnchors(packet).length;
+}
+
+export function getDealroomExposureAnchors(
+  packet: RetrievalContextPacket,
+): readonly RetrievalContextAnchorItem[] {
+  return Object.freeze(
+    packet.anchors.filter((anchor) => anchor.kind === 'DEALROOM_EXPOSURE'),
+  );
+}
+
+export function countDealroomExposureAnchors(
+  packet: RetrievalContextPacket,
+): number {
+  return getDealroomExposureAnchors(packet).length;
+}
+
+export function getWorldEventAnchors(
+  packet: RetrievalContextPacket,
+): readonly RetrievalContextAnchorItem[] {
+  return Object.freeze(
+    packet.anchors.filter((anchor) => anchor.kind === 'WORLD_EVENT'),
+  );
+}
+
+export function countWorldEventAnchors(
+  packet: RetrievalContextPacket,
+): number {
+  return getWorldEventAnchors(packet).length;
+}
+
+export function getPromiseAnchors(
+  packet: RetrievalContextPacket,
+): readonly RetrievalContextAnchorItem[] {
+  return Object.freeze(
+    packet.anchors.filter((anchor) => anchor.kind === 'PROMISE'),
+  );
+}
+
+export function countPromiseAnchors(
+  packet: RetrievalContextPacket,
+): number {
+  return getPromiseAnchors(packet).length;
+}
+
+export function getBetrayalAnchors(
+  packet: RetrievalContextPacket,
+): readonly RetrievalContextAnchorItem[] {
+  return Object.freeze(
+    packet.anchors.filter((anchor) => anchor.kind === 'BETRAYAL'),
+  );
+}
+
+export function countBetrayalAnchors(
+  packet: RetrievalContextPacket,
+): number {
+  return getBetrayalAnchors(packet).length;
+}
+
+export function getComebackAnchors(
+  packet: RetrievalContextPacket,
+): readonly RetrievalContextAnchorItem[] {
+  return Object.freeze(
+    packet.anchors.filter((anchor) => anchor.kind === 'COMEBACK'),
+  );
+}
+
+export function countComebackAnchors(
+  packet: RetrievalContextPacket,
+): number {
+  return getComebackAnchors(packet).length;
+}
+
+export function getCollapseAnchors(
+  packet: RetrievalContextPacket,
+): readonly RetrievalContextAnchorItem[] {
+  return Object.freeze(
+    packet.anchors.filter((anchor) => anchor.kind === 'COLLAPSE'),
+  );
+}
+
+export function countCollapseAnchors(
+  packet: RetrievalContextPacket,
+): number {
+  return getCollapseAnchors(packet).length;
+}
+
+export function getHumiliationAnchors(
+  packet: RetrievalContextPacket,
+): readonly RetrievalContextAnchorItem[] {
+  return Object.freeze(
+    packet.anchors.filter((anchor) => anchor.kind === 'HUMILIATION'),
+  );
+}
+
+export function countHumiliationAnchors(
+  packet: RetrievalContextPacket,
+): number {
+  return getHumiliationAnchors(packet).length;
+}
+
+export function getHypeAnchors(
+  packet: RetrievalContextPacket,
+): readonly RetrievalContextAnchorItem[] {
+  return Object.freeze(
+    packet.anchors.filter((anchor) => anchor.kind === 'HYPE'),
+  );
+}
+
+export function countHypeAnchors(
+  packet: RetrievalContextPacket,
+): number {
+  return getHypeAnchors(packet).length;
+}
+
+export function getThreatAnchors(
+  packet: RetrievalContextPacket,
+): readonly RetrievalContextAnchorItem[] {
+  return Object.freeze(
+    packet.anchors.filter((anchor) => anchor.kind === 'THREAT'),
+  );
+}
+
+export function countThreatAnchors(
+  packet: RetrievalContextPacket,
+): number {
+  return getThreatAnchors(packet).length;
+}
+
+export function getClutchAnchors(
+  packet: RetrievalContextPacket,
+): readonly RetrievalContextAnchorItem[] {
+  return Object.freeze(
+    packet.anchors.filter((anchor) => anchor.kind === 'CLUTCH'),
+  );
+}
+
+export function countClutchAnchors(
+  packet: RetrievalContextPacket,
+): number {
+  return getClutchAnchors(packet).length;
+}
+
+export function getWarningAnchors(
+  packet: RetrievalContextPacket,
+): readonly RetrievalContextAnchorItem[] {
+  return Object.freeze(
+    packet.anchors.filter((anchor) => anchor.kind === 'WARNING'),
+  );
+}
+
+export function countWarningAnchors(
+  packet: RetrievalContextPacket,
+): number {
+  return getWarningAnchors(packet).length;
+}
+
+export function getReceiptAnchors(
+  packet: RetrievalContextPacket,
+): readonly RetrievalContextAnchorItem[] {
+  return Object.freeze(
+    packet.anchors.filter((anchor) => anchor.kind === 'RECEIPT'),
+  );
+}
+
+export function countReceiptAnchors(
+  packet: RetrievalContextPacket,
+): number {
+  return getReceiptAnchors(packet).length;
+}
+
+export function getRivalryAnchors(
+  packet: RetrievalContextPacket,
+): readonly RetrievalContextAnchorItem[] {
+  return Object.freeze(
+    packet.anchors.filter((anchor) => anchor.kind === 'RIVALRY'),
+  );
+}
+
+export function countRivalryAnchors(
+  packet: RetrievalContextPacket,
+): number {
+  return getRivalryAnchors(packet).length;
+}
+
+export function getNegotiationAnchors(
+  packet: RetrievalContextPacket,
+): readonly RetrievalContextAnchorItem[] {
+  return Object.freeze(
+    packet.anchors.filter((anchor) => anchor.kind === 'NEGOTIATION'),
+  );
+}
+
+export function countNegotiationAnchors(
+  packet: RetrievalContextPacket,
+): number {
+  return getNegotiationAnchors(packet).length;
+}
+
+export function getVowAnchors(
+  packet: RetrievalContextPacket,
+): readonly RetrievalContextAnchorItem[] {
+  return Object.freeze(
+    packet.anchors.filter((anchor) => anchor.kind === 'VOW'),
+  );
+}
+
+export function countVowAnchors(
+  packet: RetrievalContextPacket,
+): number {
+  return getVowAnchors(packet).length;
+}
+
+export function getAllianceAnchors(
+  packet: RetrievalContextPacket,
+): readonly RetrievalContextAnchorItem[] {
+  return Object.freeze(
+    packet.anchors.filter((anchor) => anchor.kind === 'ALLIANCE'),
+  );
+}
+
+export function countAllianceAnchors(
+  packet: RetrievalContextPacket,
+): number {
+  return getAllianceAnchors(packet).length;
+}
+
+export function getSystemMarkerAnchors(
+  packet: RetrievalContextPacket,
+): readonly RetrievalContextAnchorItem[] {
+  return Object.freeze(
+    packet.anchors.filter((anchor) => anchor.kind === 'SYSTEM_MARKER'),
+  );
+}
+
+export function countSystemMarkerAnchors(
+  packet: RetrievalContextPacket,
+): number {
+  return getSystemMarkerAnchors(packet).length;
+}
+
+export function packetSuggestsPressureCritical(
+  packet: RetrievalContextPacket,
+): boolean {
+  return packet.debugNotes.some((note) => /critical/i.test(note)) ||
+    packet.tacticalNotes.some((note) => /critical/i.test(note)) ||
+    packet.restraintFlags.some((flag) => /critical/i.test(flag));
+}
+
+export function requestSuggestsPressureCritical(
+  request: RetrievalContextBuildRequest,
+): boolean {
+  const value = request.currentPressureTier;
+  return typeof value === 'string' && /critical/i.test(value);
+}
+
+export function packetSuggestsPressureBreakpoint(
+  packet: RetrievalContextPacket,
+): boolean {
+  return packet.debugNotes.some((note) => /breakpoint/i.test(note)) ||
+    packet.tacticalNotes.some((note) => /breakpoint/i.test(note)) ||
+    packet.restraintFlags.some((flag) => /breakpoint/i.test(flag));
+}
+
+export function requestSuggestsPressureBreakpoint(
+  request: RetrievalContextBuildRequest,
+): boolean {
+  const value = request.currentPressureTier;
+  return typeof value === 'string' && /breakpoint/i.test(value);
+}
+
+export function packetSuggestsPressureCollapse(
+  packet: RetrievalContextPacket,
+): boolean {
+  return packet.debugNotes.some((note) => /collapse/i.test(note)) ||
+    packet.tacticalNotes.some((note) => /collapse/i.test(note)) ||
+    packet.restraintFlags.some((flag) => /collapse/i.test(flag));
+}
+
+export function requestSuggestsPressureCollapse(
+  request: RetrievalContextBuildRequest,
+): boolean {
+  const value = request.currentPressureTier;
+  return typeof value === 'string' && /collapse/i.test(value);
+}
+
+export function packetSuggestsPressureHigh(
+  packet: RetrievalContextPacket,
+): boolean {
+  return packet.debugNotes.some((note) => /high/i.test(note)) ||
+    packet.tacticalNotes.some((note) => /high/i.test(note)) ||
+    packet.restraintFlags.some((flag) => /high/i.test(flag));
+}
+
+export function requestSuggestsPressureHigh(
+  request: RetrievalContextBuildRequest,
+): boolean {
+  const value = request.currentPressureTier;
+  return typeof value === 'string' && /high/i.test(value);
+}
+
+export function packetSuggestsPressureElevated(
+  packet: RetrievalContextPacket,
+): boolean {
+  return packet.debugNotes.some((note) => /elevated/i.test(note)) ||
+    packet.tacticalNotes.some((note) => /elevated/i.test(note)) ||
+    packet.restraintFlags.some((flag) => /elevated/i.test(flag));
+}
+
+export function requestSuggestsPressureElevated(
+  request: RetrievalContextBuildRequest,
+): boolean {
+  const value = request.currentPressureTier;
+  return typeof value === 'string' && /elevated/i.test(value);
+}
+
+export function packetSuggestsPressureVolatile(
+  packet: RetrievalContextPacket,
+): boolean {
+  return packet.debugNotes.some((note) => /volatile/i.test(note)) ||
+    packet.tacticalNotes.some((note) => /volatile/i.test(note)) ||
+    packet.restraintFlags.some((flag) => /volatile/i.test(flag));
+}
+
+export function requestSuggestsPressureVolatile(
+  request: RetrievalContextBuildRequest,
+): boolean {
+  const value = request.currentPressureTier;
+  return typeof value === 'string' && /volatile/i.test(value);
+}
+
+export function packetSuggestsPressureReset(
+  packet: RetrievalContextPacket,
+): boolean {
+  return packet.debugNotes.some((note) => /reset/i.test(note)) ||
+    packet.tacticalNotes.some((note) => /reset/i.test(note)) ||
+    packet.restraintFlags.some((flag) => /reset/i.test(flag));
+}
+
+export function requestSuggestsPressureReset(
+  request: RetrievalContextBuildRequest,
+): boolean {
+  const value = request.currentPressureTier;
+  return typeof value === 'string' && /reset/i.test(value);
+}
+
+export function packetSuggestsPressureCalm(
+  packet: RetrievalContextPacket,
+): boolean {
+  return packet.debugNotes.some((note) => /calm/i.test(note)) ||
+    packet.tacticalNotes.some((note) => /calm/i.test(note)) ||
+    packet.restraintFlags.some((flag) => /calm/i.test(flag));
+}
+
+export function requestSuggestsPressureCalm(
+  request: RetrievalContextBuildRequest,
+): boolean {
+  const value = request.currentPressureTier;
+  return typeof value === 'string' && /calm/i.test(value);
+}
+
+export function packetSuggestsEmotionFrustrated(
+  packet: RetrievalContextPacket,
+): boolean {
+  return packet.debugNotes.some((note) => /frustrated/i.test(note)) ||
+    packet.tacticalNotes.some((note) => /frustrated/i.test(note)) ||
+    packet.restraintFlags.some((flag) => /frustrated/i.test(flag));
+}
+
+export function requestSuggestsEmotionFrustrated(
+  request: RetrievalContextBuildRequest,
+): boolean {
+  const value = request.currentEmotionBand;
+  return typeof value === 'string' && /frustrated/i.test(value);
+}
+
+export function packetSuggestsEmotionDesperate(
+  packet: RetrievalContextPacket,
+): boolean {
+  return packet.debugNotes.some((note) => /desperate/i.test(note)) ||
+    packet.tacticalNotes.some((note) => /desperate/i.test(note)) ||
+    packet.restraintFlags.some((flag) => /desperate/i.test(flag));
+}
+
+export function requestSuggestsEmotionDesperate(
+  request: RetrievalContextBuildRequest,
+): boolean {
+  const value = request.currentEmotionBand;
+  return typeof value === 'string' && /desperate/i.test(value);
+}
+
+export function packetSuggestsEmotionEmbarrassed(
+  packet: RetrievalContextPacket,
+): boolean {
+  return packet.debugNotes.some((note) => /embarrassed/i.test(note)) ||
+    packet.tacticalNotes.some((note) => /embarrassed/i.test(note)) ||
+    packet.restraintFlags.some((flag) => /embarrassed/i.test(flag));
+}
+
+export function requestSuggestsEmotionEmbarrassed(
+  request: RetrievalContextBuildRequest,
+): boolean {
+  const value = request.currentEmotionBand;
+  return typeof value === 'string' && /embarrassed/i.test(value);
+}
+
+export function packetSuggestsEmotionAngry(
+  packet: RetrievalContextPacket,
+): boolean {
+  return packet.debugNotes.some((note) => /angry/i.test(note)) ||
+    packet.tacticalNotes.some((note) => /angry/i.test(note)) ||
+    packet.restraintFlags.some((flag) => /angry/i.test(flag));
+}
+
+export function requestSuggestsEmotionAngry(
+  request: RetrievalContextBuildRequest,
+): boolean {
+  const value = request.currentEmotionBand;
+  return typeof value === 'string' && /angry/i.test(value);
+}
+
+export function packetSuggestsEmotionAnxious(
+  packet: RetrievalContextPacket,
+): boolean {
+  return packet.debugNotes.some((note) => /anxious/i.test(note)) ||
+    packet.tacticalNotes.some((note) => /anxious/i.test(note)) ||
+    packet.restraintFlags.some((flag) => /anxious/i.test(flag));
+}
+
+export function requestSuggestsEmotionAnxious(
+  request: RetrievalContextBuildRequest,
+): boolean {
+  const value = request.currentEmotionBand;
+  return typeof value === 'string' && /anxious/i.test(value);
+}
+
+export function packetSuggestsEmotionHaunted(
+  packet: RetrievalContextPacket,
+): boolean {
+  return packet.debugNotes.some((note) => /haunted/i.test(note)) ||
+    packet.tacticalNotes.some((note) => /haunted/i.test(note)) ||
+    packet.restraintFlags.some((flag) => /haunted/i.test(flag));
+}
+
+export function requestSuggestsEmotionHaunted(
+  request: RetrievalContextBuildRequest,
+): boolean {
+  const value = request.currentEmotionBand;
+  return typeof value === 'string' && /haunted/i.test(value);
+}
+
+export function packetSuggestsEmotionHopeful(
+  packet: RetrievalContextPacket,
+): boolean {
+  return packet.debugNotes.some((note) => /hopeful/i.test(note)) ||
+    packet.tacticalNotes.some((note) => /hopeful/i.test(note)) ||
+    packet.restraintFlags.some((flag) => /hopeful/i.test(flag));
+}
+
+export function requestSuggestsEmotionHopeful(
+  request: RetrievalContextBuildRequest,
+): boolean {
+  const value = request.currentEmotionBand;
+  return typeof value === 'string' && /hopeful/i.test(value);
+}
+
+export function packetSuggestsEmotionTriumphant(
+  packet: RetrievalContextPacket,
+): boolean {
+  return packet.debugNotes.some((note) => /triumphant/i.test(note)) ||
+    packet.tacticalNotes.some((note) => /triumphant/i.test(note)) ||
+    packet.restraintFlags.some((flag) => /triumphant/i.test(flag));
+}
+
+export function requestSuggestsEmotionTriumphant(
+  request: RetrievalContextBuildRequest,
+): boolean {
+  const value = request.currentEmotionBand;
+  return typeof value === 'string' && /triumphant/i.test(value);
+}
+
+export function packetSuggestsEmotionCold(
+  packet: RetrievalContextPacket,
+): boolean {
+  return packet.debugNotes.some((note) => /cold/i.test(note)) ||
+    packet.tacticalNotes.some((note) => /cold/i.test(note)) ||
+    packet.restraintFlags.some((flag) => /cold/i.test(flag));
+}
+
+export function requestSuggestsEmotionCold(
+  request: RetrievalContextBuildRequest,
+): boolean {
+  const value = request.currentEmotionBand;
+  return typeof value === 'string' && /cold/i.test(value);
+}
+
+export function packetSuggestsEmotionCalm(
+  packet: RetrievalContextPacket,
+): boolean {
+  return packet.debugNotes.some((note) => /calm/i.test(note)) ||
+    packet.tacticalNotes.some((note) => /calm/i.test(note)) ||
+    packet.restraintFlags.some((flag) => /calm/i.test(flag));
+}
+
+export function requestSuggestsEmotionCalm(
+  request: RetrievalContextBuildRequest,
+): boolean {
+  const value = request.currentEmotionBand;
+  return typeof value === 'string' && /calm/i.test(value);
+}
+
+export function packetSuggestsAudienceHigh(
+  packet: RetrievalContextPacket,
+): boolean {
+  return packet.debugNotes.some((note) => /high/i.test(note)) ||
+    packet.tacticalNotes.some((note) => /high/i.test(note)) ||
+    packet.restraintFlags.some((flag) => /high/i.test(flag));
+}
+
+export function requestSuggestsAudienceHigh(
+  request: RetrievalContextBuildRequest,
+): boolean {
+  const value = request.currentAudienceHeat;
+  return typeof value === 'string' && /high/i.test(value);
+}
+
+export function packetSuggestsAudienceCritical(
+  packet: RetrievalContextPacket,
+): boolean {
+  return packet.debugNotes.some((note) => /critical/i.test(note)) ||
+    packet.tacticalNotes.some((note) => /critical/i.test(note)) ||
+    packet.restraintFlags.some((flag) => /critical/i.test(flag));
+}
+
+export function requestSuggestsAudienceCritical(
+  request: RetrievalContextBuildRequest,
+): boolean {
+  const value = request.currentAudienceHeat;
+  return typeof value === 'string' && /critical/i.test(value);
+}
+
+export function packetSuggestsAudienceMob(
+  packet: RetrievalContextPacket,
+): boolean {
+  return packet.debugNotes.some((note) => /mob/i.test(note)) ||
+    packet.tacticalNotes.some((note) => /mob/i.test(note)) ||
+    packet.restraintFlags.some((flag) => /mob/i.test(flag));
+}
+
+export function requestSuggestsAudienceMob(
+  request: RetrievalContextBuildRequest,
+): boolean {
+  const value = request.currentAudienceHeat;
+  return typeof value === 'string' && /mob/i.test(value);
+}
+
+export function packetSuggestsAudienceVolatile(
+  packet: RetrievalContextPacket,
+): boolean {
+  return packet.debugNotes.some((note) => /volatile/i.test(note)) ||
+    packet.tacticalNotes.some((note) => /volatile/i.test(note)) ||
+    packet.restraintFlags.some((flag) => /volatile/i.test(flag));
+}
+
+export function requestSuggestsAudienceVolatile(
+  request: RetrievalContextBuildRequest,
+): boolean {
+  const value = request.currentAudienceHeat;
+  return typeof value === 'string' && /volatile/i.test(value);
+}
+
+export function packetSuggestsAudienceHot(
+  packet: RetrievalContextPacket,
+): boolean {
+  return packet.debugNotes.some((note) => /hot/i.test(note)) ||
+    packet.tacticalNotes.some((note) => /hot/i.test(note)) ||
+    packet.restraintFlags.some((flag) => /hot/i.test(flag));
+}
+
+export function requestSuggestsAudienceHot(
+  request: RetrievalContextBuildRequest,
+): boolean {
+  const value = request.currentAudienceHeat;
+  return typeof value === 'string' && /hot/i.test(value);
+}
+
+export function packetSuggestsAudienceCalm(
+  packet: RetrievalContextPacket,
+): boolean {
+  return packet.debugNotes.some((note) => /calm/i.test(note)) ||
+    packet.tacticalNotes.some((note) => /calm/i.test(note)) ||
+    packet.restraintFlags.some((flag) => /calm/i.test(flag));
+}
+
+export function requestSuggestsAudienceCalm(
+  request: RetrievalContextBuildRequest,
+): boolean {
+  const value = request.currentAudienceHeat;
+  return typeof value === 'string' && /calm/i.test(value);
+}
+
+export function packetSuggestsRelationshipAlly(
+  packet: RetrievalContextPacket,
+): boolean {
+  return packet.debugNotes.some((note) => /ally/i.test(note)) ||
+    packet.tacticalNotes.some((note) => /ally/i.test(note)) ||
+    packet.restraintFlags.some((flag) => /ally/i.test(flag));
+}
+
+export function requestSuggestsRelationshipAlly(
+  request: RetrievalContextBuildRequest,
+): boolean {
+  const value = request.currentRelationshipState;
+  return typeof value === 'string' && /ally/i.test(value);
+}
+
+export function packetSuggestsRelationshipRival(
+  packet: RetrievalContextPacket,
+): boolean {
+  return packet.debugNotes.some((note) => /rival/i.test(note)) ||
+    packet.tacticalNotes.some((note) => /rival/i.test(note)) ||
+    packet.restraintFlags.some((flag) => /rival/i.test(flag));
+}
+
+export function requestSuggestsRelationshipRival(
+  request: RetrievalContextBuildRequest,
+): boolean {
+  const value = request.currentRelationshipState;
+  return typeof value === 'string' && /rival/i.test(value);
+}
+
+export function packetSuggestsRelationshipDistrust(
+  packet: RetrievalContextPacket,
+): boolean {
+  return packet.debugNotes.some((note) => /distrust/i.test(note)) ||
+    packet.tacticalNotes.some((note) => /distrust/i.test(note)) ||
+    packet.restraintFlags.some((flag) => /distrust/i.test(flag));
+}
+
+export function requestSuggestsRelationshipDistrust(
+  request: RetrievalContextBuildRequest,
+): boolean {
+  const value = request.currentRelationshipState;
+  return typeof value === 'string' && /distrust/i.test(value);
+}
+
+export function packetSuggestsRelationshipMentor(
+  packet: RetrievalContextPacket,
+): boolean {
+  return packet.debugNotes.some((note) => /mentor/i.test(note)) ||
+    packet.tacticalNotes.some((note) => /mentor/i.test(note)) ||
+    packet.restraintFlags.some((flag) => /mentor/i.test(flag));
+}
+
+export function requestSuggestsRelationshipMentor(
+  request: RetrievalContextBuildRequest,
+): boolean {
+  const value = request.currentRelationshipState;
+  return typeof value === 'string' && /mentor/i.test(value);
+}
+
+export function packetSuggestsRelationshipHunted(
+  packet: RetrievalContextPacket,
+): boolean {
+  return packet.debugNotes.some((note) => /hunted/i.test(note)) ||
+    packet.tacticalNotes.some((note) => /hunted/i.test(note)) ||
+    packet.restraintFlags.some((flag) => /hunted/i.test(flag));
+}
+
+export function requestSuggestsRelationshipHunted(
+  request: RetrievalContextBuildRequest,
+): boolean {
+  const value = request.currentRelationshipState;
+  return typeof value === 'string' && /hunted/i.test(value);
+}
+
+export function packetSuggestsRelationshipFascinated(
+  packet: RetrievalContextPacket,
+): boolean {
+  return packet.debugNotes.some((note) => /fascinated/i.test(note)) ||
+    packet.tacticalNotes.some((note) => /fascinated/i.test(note)) ||
+    packet.restraintFlags.some((flag) => /fascinated/i.test(flag));
+}
+
+export function requestSuggestsRelationshipFascinated(
+  request: RetrievalContextBuildRequest,
+): boolean {
+  const value = request.currentRelationshipState;
+  return typeof value === 'string' && /fascinated/i.test(value);
+}
+
+export function packetSuggestsRelationshipBroken(
+  packet: RetrievalContextPacket,
+): boolean {
+  return packet.debugNotes.some((note) => /broken/i.test(note)) ||
+    packet.tacticalNotes.some((note) => /broken/i.test(note)) ||
+    packet.restraintFlags.some((flag) => /broken/i.test(flag));
+}
+
+export function requestSuggestsRelationshipBroken(
+  request: RetrievalContextBuildRequest,
+): boolean {
+  const value = request.currentRelationshipState;
+  return typeof value === 'string' && /broken/i.test(value);
+}
+
+export function packetScoreProfile(
+  packet: RetrievalContextPacket,
+): Readonly<Record<string, number>> {
+  return Object.freeze({
+    averageAnchorScore: averageAnchorScore(packet),
+    averageAnchorSalience: averageAnchorSalience(packet),
+    averageDocumentScore: averageDocumentScore(packet),
+    highestAnchorScore: highestAnchorScore(packet),
+    highestDocumentScore: highestDocumentScore(packet),
+  });
+}
+
+export function packetDensityProfile(
+  packet: RetrievalContextPacket,
+): Readonly<Record<string, number>> {
+  return Object.freeze({
+    anchors: packet.anchors.length,
+    documents: packet.documents.length,
+    callbacks: packet.callbackPhrases.length,
+    restraints: packet.restraintFlags.length,
+    tactical: packet.tacticalNotes.length,
+    promptBlocks: packet.promptBlocks.length,
+    debugNotes: packet.debugNotes.length,
+  });
+}
+
+export function packetQualityGate(
+  packet: RetrievalContextPacket,
+): Readonly<Record<string, boolean>> {
+  return Object.freeze({
+    hasAnchors: hasAnyAnchors(packet),
+    hasPromptBlocks: packet.promptBlocks.length > 0,
+    hasRoleBlock: packetHasPromptBlockKey(packet, 'ROLE'),
+    hasIntentBlock: packetHasPromptBlockKey(packet, 'INTENT'),
+    hasStateBlock: packetHasPromptBlockKey(packet, 'CURRENT_STATE'),
+    hasDiagnostics: packet.debugNotes.length > 0,
+    hasRetrievalReceipt: Boolean(packet.queryResponse.receipt.id),
+    hasCandidateIds: packet.queryResponse.candidateIds.length > 0,
+  });
+}
+
+export function packetNarrativeProfile(
+  packet: RetrievalContextPacket,
+): Readonly<Record<string, boolean>> {
+  return Object.freeze({
+    rescue: packetHasRescueAnchor(packet),
+    legend: packetHasLegendAnchor(packet),
+    threat: packetHasThreatAnchor(packet),
+    receipt: packetHasReceiptAnchor(packet),
+    rivalry: packetHasRivalryAnchor(packet),
+    negotiation: packetHasNegotiationAnchor(packet) || packetHasDealroomExposureAnchor(packet),
+    comeback: packetHasComebackAnchor(packet),
+    collapse: packetHasCollapseAnchor(packet),
+    humiliation: packetHasHumiliationAnchor(packet),
+    worldEvent: packetHasWorldEventAnchor(packet),
+  });
+}
+
+export function packetSortingView(
+  packet: RetrievalContextPacket,
+): readonly string[] {
+  return Object.freeze([
+    ...packet.anchors.map((anchor) => `anchor:${summarizeAnchor(anchor)}`),
+    ...packet.documents.map((document) => `document:${summarizeDocument(document)}`),
+  ]);
 }
