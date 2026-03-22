@@ -9,14 +9,23 @@
  */
 
 import type {
-  ChatCallbackMode,
-  ChatCallbackResolution,
-} from '../../../../../shared/contracts/chat/ChatCallback';
+  ChatCallbackKind,
+  ChatCallbackPrivacyClass,
+} from '../../../../../../shared/contracts/chat/ChatCallback';
 import type {
-  ChatQuoteKind,
-  ChatQuoteResolution,
-  ChatQuoteSelection,
-} from '../../../../../shared/contracts/chat/ChatQuote';
+  ChatQuoteAudienceClass,
+  ChatQuoteSelectionCandidate,
+  ChatQuoteSelectionResponse,
+  ChatQuoteRequestId,
+  ChatQuoteToneClass,
+  ChatQuoteUseIntent,
+} from '../../../../../../shared/contracts/chat/ChatQuote';
+import type {
+  ChatQuoteId,
+  ChatRequestId,
+  Score01,
+  UnixMs,
+} from '../../../../../../shared/contracts/chat/ChatChannels';
 import {
   ConversationMemoryStore,
   type ConversationCallbackCandidate,
@@ -24,6 +33,20 @@ import {
   type ConversationMemoryQuoteRecord,
   type ConversationQuoteCandidate,
 } from './ConversationMemoryStore';
+
+// ============================================================================
+// MARK: Local type aliases — types referenced throughout recall logic that are
+// not exported from the shared contracts. Mirror the pattern established in
+// ConversationMemoryStore.ts to keep backend recall decoupled from transport.
+// ============================================================================
+type ChatCallbackMode = string;
+type ChatCallbackResolution = { readonly outcome?: string; readonly [key: string]: unknown };
+type ChatQuoteKind = string;
+type ChatQuoteResolution = { readonly requestId: string; readonly createdAt: number; readonly selected: readonly ChatQuoteSelection[]; readonly winningQuoteId?: string; readonly winningText?: string; readonly winningProof?: unknown; readonly summary?: string };
+type ChatQuoteSelection = { readonly quoteId: string; readonly score01: number; readonly text: string; readonly normalizedText: string; readonly kind: string; readonly proof: unknown; readonly evidence: readonly unknown[]; readonly tags: readonly string[] };
+
+/** Brand a plain string as ChatRequestId for contract-surface integration. */
+function toRequestId(id: string): ChatRequestId { return id as unknown as ChatRequestId; }
 
 export type QuoteRecallMode = 'RIVALRY' | 'HELPER' | 'SYSTEM' | 'DEAL_ROOM' | 'AUDIENCE' | 'RESCUE' | 'POSTRUN';
 export type QuoteRecallReasonCode =
@@ -54,6 +77,7 @@ export type QuoteRecallReasonCode =
   | 'hostility_match'
   | 'intimacy_match'
   | 'strategic_match'
+  | 'cross_run_bridge_boost'
   ;
 
 export interface QuoteRecallResolverRequest {
@@ -77,6 +101,11 @@ export interface QuoteRecallResolverRequest {
   readonly allowReuse?: boolean;
   readonly proofRequired?: boolean;
   readonly tags?: readonly string[];
+  readonly callbackKindFilter?: readonly ChatCallbackKind[];
+  readonly audienceClassFilter?: readonly ChatQuoteAudienceClass[];
+  readonly toneClassFilter?: readonly ChatQuoteToneClass[];
+  readonly useIntentFilter?: readonly ChatQuoteUseIntent[];
+  readonly privacyFilter?: readonly ChatCallbackPrivacyClass[];
 }
 
 export interface QuoteRecallSelection {
@@ -93,6 +122,9 @@ export interface QuoteRecallSelection {
   readonly tags: readonly string[];
   readonly createdAt: number;
   readonly proofChainId?: string;
+  readonly usageCount: number;
+  readonly quoteKind?: ChatQuoteKind;
+  readonly callbackMode?: ChatCallbackMode;
   readonly quote?: ConversationMemoryQuoteRecord;
   readonly callback?: ConversationCallbackCandidate['record'];
 }
@@ -147,7 +179,7 @@ export const DEFAULT_QUOTE_RECALL_RESOLVER_CONFIG: QuoteRecallResolverConfig = O
 });
 
 function clamp01(value: number): number { if (Number.isNaN(value)) return 0; if (value <= 0) return 0; if (value >= 1) return 1; return value; }
-function normalizeText(input: string): string { return input.toLowerCase().replace(/[“”]/g, '"').replace(/[‘’]/g, "'").replace(/[^a-z0-9\s'"!?.,:-]/g, ' ').replace(/\s+/g, ' ').trim(); }
+function normalizeText(input: string): string { return input.toLowerCase().replace(/[""]/g, '"').replace(/['']/g, "'").replace(/[^a-z0-9\s'"!?.,:-]/g, ' ').replace(/\s+/g, ' ').trim(); }
 function unique<T>(values: readonly T[]): readonly T[] { return [...new Set(values)]; }
 function recencyBoost(createdAt: number, nowAt: number, windowMs: number): number { const age = Math.max(0, nowAt - createdAt); if (age >= windowMs) return 0; return 1 - age / windowMs; }
 function confidenceSignal(text: string): number { const normalized = normalizeText(text); const markers = ['easy','watch me','locked','free','certain','clean']; let score = 0; for (const marker of markers) if (normalized.includes(marker)) score += 0.11; return clamp01(score); }
@@ -425,7 +457,7 @@ private profile(mode: QuoteRecallMode): QuoteRecallModeProfile {
     return QUOTE_RECALL_MODE_PROFILES[mode];
   }
 
-  private quoteReasonCodes(request: QuoteRecallResolverRequest, record: ConversationMemoryQuoteRecord): QuoteRecallReasonCode[] {
+  private quoteReasonCodes(request: QuoteRecallResolverRequest, record: ConversationMemoryQuoteRecord): readonly QuoteRecallReasonCode[] {
     const reasons: QuoteRecallReasonCode[] = [];
     if (request.counterpartId && record.counterpartId === request.counterpartId) reasons.push('counterpart_match');
     if (request.actorId && record.actorId === request.actorId) reasons.push('actor_match');
@@ -442,7 +474,7 @@ private profile(mode: QuoteRecallMode): QuoteRecallModeProfile {
     return unique(reasons);
   }
 
-  private callbackReasonCodes(request: QuoteRecallResolverRequest, candidate: ConversationCallbackCandidate): QuoteRecallReasonCode[] {
+  private callbackReasonCodes(request: QuoteRecallResolverRequest, candidate: ConversationCallbackCandidate): readonly QuoteRecallReasonCode[] {
     const reasons: QuoteRecallReasonCode[] = [];
     const record = candidate.record;
     if (request.counterpartId && record.context.counterpartId === request.counterpartId) reasons.push('counterpart_match');
@@ -520,6 +552,8 @@ private profile(mode: QuoteRecallMode): QuoteRecallModeProfile {
       tags: candidate.record.tags,
       createdAt: request.createdAt,
       proofChainId: candidate.record.proof.proofChainId,
+      usageCount: candidate.record.usageCount ?? 0,
+      quoteKind: candidate.record.kind as ChatQuoteKind,
       quote: candidate.record,
     };
   }
@@ -539,7 +573,32 @@ private profile(mode: QuoteRecallMode): QuoteRecallModeProfile {
       tags: candidate.record.tags,
       createdAt: request.createdAt,
       proofChainId: candidate.record.anchor.proofChainId,
+      usageCount: candidate.record.usageCount ?? 0,
+      callbackMode: candidate.record.mode as ChatCallbackMode,
       callback: candidate.record,
+    };
+  }
+
+  /** Convert internal selection to shared contract ChatQuoteSelectionCandidate. */
+  private toContractCandidate(selection: QuoteRecallSelection): ChatQuoteSelectionCandidate {
+    return {
+      quoteId: (selection.quoteId ?? selection.selectionId) as unknown as ChatQuoteId,
+      score01: selection.score01 as unknown as Score01,
+      visibilityState: 'VISIBLE' as const,
+      intent: 'RECEIPT' as ChatQuoteUseIntent,
+      toneClass: 'NEUTRAL' as ChatQuoteToneClass,
+      excerpt: selection.text.slice(0, 200),
+      notes: [...selection.reasonCodes],
+    };
+  }
+
+  /** Build a ChatQuoteSelectionResponse for proof-chain integration. */
+  public buildContractSelectionResponse(request: QuoteRecallResolverRequest): ChatQuoteSelectionResponse {
+    const response = this.resolve(request);
+    return {
+      requestId: request.requestId as unknown as ChatQuoteRequestId,
+      createdAt: request.createdAt as unknown as UnixMs,
+      candidates: response.selections.filter(s => s.quoteId).slice(0, 8).map(s => this.toContractCandidate(s)),
     };
   }
 
@@ -610,10 +669,27 @@ private profile(mode: QuoteRecallMode): QuoteRecallModeProfile {
     };
   }
 
+  /** Filter and rank recall candidates based on originating memory events. */
+  public rankByOriginatingEvent(
+    playerId: string,
+    selections: readonly QuoteRecallSelection[],
+    eventFilter: (event: ConversationMemoryEventRecord) => boolean,
+  ): readonly QuoteRecallSelection[] {
+    return selections.filter((selection) => {
+      if (selection.quote) {
+        const events = this.store.queryEvents({
+          playerId,
+          actorId: selection.quote.actorId,
+          counterpartId: selection.quote.counterpartId,
+        });
+        return events.some(eventFilter);
+      }
+      return true;
+    });
+  }
+
   public resolve(request: QuoteRecallResolverRequest): QuoteRecallResolverResponse {
     const quoteCandidates = request.includeQuotes === false ? [] : this.store.selectQuoteCandidates({
-      requestId: request.requestId,
-      createdAt: request.createdAt,
       playerId: request.playerId,
       actorId: request.actorId,
       counterpartId: request.counterpartId,
@@ -634,7 +710,11 @@ private profile(mode: QuoteRecallMode): QuoteRecallModeProfile {
     const quoteSelections = quoteCandidates.map((candidate) => this.makeQuoteSelection(request, candidate, this.scoreQuote(request, candidate)));
     const callbackSelections = callbackCandidates.map((candidate) => this.makeCallbackSelection(request, candidate, this.scoreCallback(request, candidate)));
     const merged = [...quoteSelections, ...callbackSelections].filter((selection) => selection.score01 >= this.config.minimumSelectionScore01).sort((left, right) => right.score01 - left.score01);
-    const filtered = request.allowReuse ? merged : merged.filter((selection) => (selection.quote?.usageCount ?? selection.callback?.usageCount ?? 0) < 6);
+    const kindFiltered = request.desiredKinds?.length ? merged.filter((selection) => {
+      const kind = selection.quoteKind;
+      return !kind || (request.desiredKinds as readonly string[]).includes(kind);
+    }) : merged;
+    const filtered = request.allowReuse ? kindFiltered : kindFiltered.filter((selection) => selection.usageCount < 6);
     const selections = this.dedupeSelections(filtered).slice(0, request.maxSelections ?? this.config.defaultMaxSelections);
     const winningSelection = selections[0];
     const quoteResolution = this.buildQuoteResolution(request, selections);
@@ -705,9 +785,9 @@ private profile(mode: QuoteRecallMode): QuoteRecallModeProfile {
   /** Compute the optimal delay before delivering a recalled quote for maximum dramatic impact. */
   public computeOptimalDelay(selection: QuoteRecallSelection, audienceHeat01: number, pressureTier?: string): number {
     let baseDelay = 800;
-    if (selection.surface === 'RIVALRY') baseDelay = 2200;
-    if (selection.surface === 'DEAL_ROOM') baseDelay = 3400;
-    if (selection.surface === 'HELPER') baseDelay = 1200;
+    if (selection.mode === 'RIVALRY') baseDelay = 2200;
+    if (selection.mode === 'DEAL_ROOM') baseDelay = 3400;
+    if (selection.mode === 'HELPER') baseDelay = 1200;
     const heatBonus = audienceHeat01 * 1500;
     const pressureBonus = pressureTier === 'CRITICAL' ? 1200 : pressureTier === 'HIGH' ? 800 : 0;
     const scoreBonus = selection.score01 * 1000;
@@ -716,7 +796,7 @@ private profile(mode: QuoteRecallMode): QuoteRecallModeProfile {
 
   /** Should this recall be held for dramatic impact instead of fired immediately? */
   public shouldHoldForDramaticImpact(selection: QuoteRecallSelection, audienceHeat01: number): boolean {
-    return selection.score01 >= 0.65 && audienceHeat01 >= 0.45 && selection.surface === 'RIVALRY';
+    return selection.score01 >= 0.65 && audienceHeat01 >= 0.45 && selection.mode === 'RIVALRY';
   }
 
   // ==========================================================================
@@ -726,8 +806,8 @@ private profile(mode: QuoteRecallMode): QuoteRecallModeProfile {
   /** Select how a recalled quote should be presented (verbatim, paraphrased, truncated, etc). */
   public selectMutationStrategy(selection: QuoteRecallSelection, counterpartKind: string): QuoteMutationStrategy {
     if (counterpartKind === 'HELPER') return 'SOFT_REFERENCE';
-    if (selection.score01 >= 0.8 && selection.surface === 'RIVALRY') return 'VERBATIM';
-    if (selection.surface === 'DEAL_ROOM') return 'WEAPONIZE';
+    if (selection.score01 >= 0.8 && selection.mode === 'RIVALRY') return 'VERBATIM';
+    if (selection.mode === 'DEAL_ROOM') return 'WEAPONIZE';
     if (selection.text.length > 120) return 'TRUNCATE';
     if (selection.usageCount >= 3) return 'PARAPHRASE';
     return 'VERBATIM';
@@ -872,7 +952,7 @@ private profile(mode: QuoteRecallMode): QuoteRecallModeProfile {
     if (bridgedQuoteIds.length === 0) return base;
     const boosted = base.selections.map((s) => {
       if (bridgedQuoteIds.includes(s.quote?.quoteId ?? '') || bridgedQuoteIds.includes(s.callback?.callbackId ?? '')) {
-        return { ...s, score01: Math.min(1, s.score01 + 0.15), reasonCodes: [...s.reasonCodes, 'cross_run_bridge_boost'] };
+        return { ...s, score01: Math.min(1, s.score01 + 0.15), reasonCodes: [...s.reasonCodes, 'cross_run_bridge_boost' as QuoteRecallReasonCode] as readonly QuoteRecallReasonCode[] };
       }
       return s;
     }).sort((a, b) => b.score01 - a.score01);
@@ -913,7 +993,165 @@ private profile(mode: QuoteRecallMode): QuoteRecallModeProfile {
     });
   }
 
-  /** Build diagnostic lines for logging. */
+  // ==========================================================================
+  // MARK: Mode-aware resolve with strategy matrix
+  // ==========================================================================
+
+  /** Resolve with mode-specific strategy applied from MODE_RECALL_STRATEGY_MATRIX. */
+  public resolveWithModeStrategy(request: QuoteRecallResolverRequest, modeId: string): QuoteRecallResolverResponse {
+    const strategy = getModeRecallStrategy(modeId);
+    const modeRequest: QuoteRecallResolverRequest = {
+      ...request,
+      desiredKinds: request.desiredKinds?.length ? request.desiredKinds : strategy.kindPriority as readonly ChatQuoteKind[],
+      allowedCallbackModes: request.allowedCallbackModes?.length ? request.allowedCallbackModes : strategy.callbackModePriority as readonly string[],
+      proofRequired: request.proofRequired ?? strategy.proofRequiredByDefault,
+      maxSelections: request.maxSelections ?? Math.min(strategy.maxRecallsPerMinute, this.config.defaultMaxSelections),
+    };
+    return this.resolve(modeRequest);
+  }
+
+  // ==========================================================================
+  // MARK: Impact-predicted resolve
+  // ==========================================================================
+
+  /** Resolve and annotate each selection with impact predictions. */
+  public resolveWithImpactPredictions(
+    request: QuoteRecallResolverRequest,
+    audienceHeat01: number,
+    pressureTier?: string,
+  ): { response: QuoteRecallResolverResponse; impacts: readonly RecallImpactAssessment[] } {
+    const response = this.resolve(request);
+    const impacts = response.selections.map((selection, index) => {
+      const counterpartProfile = request.counterpartId
+        ? this.buildCounterpartProfile(request.playerId, request.counterpartId)
+        : undefined;
+      return predictRecallImpact(selection, audienceHeat01, pressureTier, counterpartProfile, index === 0);
+    });
+    return { response, impacts };
+  }
+
+  // ==========================================================================
+  // MARK: Counterpart profile builder
+  // ==========================================================================
+
+  /** Build a counterpart recall profile from accumulated history. */
+  public buildCounterpartProfile(playerId: string, counterpartId: string): CounterpartRecallProfile {
+    const history = this.getRecallHistory(playerId, counterpartId);
+    const effectivenessRate = this.recallEffectivenessRate(playerId, counterpartId);
+    const chain = this.detectActiveChain(playerId, counterpartId);
+    const effective = Math.round(effectivenessRate * Math.max(1, history.length));
+    const kindFreq = new Map<string, number>();
+    const mutFreq = new Map<string, number>();
+    for (const h of history) {
+      kindFreq.set(h.surface, (kindFreq.get(h.surface) ?? 0) + 1);
+      mutFreq.set(h.mutationStrategy, (mutFreq.get(h.mutationStrategy) ?? 0) + 1);
+    }
+    const topKinds = [...kindFreq.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map(e => e[0]) as ChatQuoteKind[];
+    const topMuts = [...mutFreq.entries()].sort((a, b) => b[1] - a[1]).slice(0, 2).map(e => e[0]) as QuoteMutationStrategy[];
+    return Object.freeze({
+      counterpartId, playerId,
+      totalRecalls: history.length,
+      effectiveRecalls: effective,
+      ineffectiveRecalls: history.length - effective,
+      effectivenessRate01: effectivenessRate,
+      lastRecalledAt: history.length > 0 ? history[history.length - 1]!.timestamp : 0,
+      preferredKinds: topKinds,
+      preferredMutations: topMuts,
+      avgScore01: history.length > 0 ? history.reduce((s, h) => s + h.score01, 0) / history.length : 0,
+      peakScore01: history.length > 0 ? Math.max(...history.map(h => h.score01)) : 0,
+      activeChainDepth: chain?.currentDepth ?? 0,
+      lastCallbackMode: undefined,
+      fatigueLevel01: history.length > 0 ? history[history.length - 1]!.fatigueAtRecall : 0,
+    });
+  }
+
+  // ==========================================================================
+  // MARK: Weaponize top selection
+  // ==========================================================================
+
+  /** Select and weaponize the top recall for deployment. */
+  public weaponizeTopSelection(request: QuoteRecallResolverRequest): WeaponizedQuote | undefined {
+    const response = this.resolve(request);
+    if (!response.winningSelection) return undefined;
+    const selection = response.winningSelection;
+    const mutation = this.selectMutationStrategy(selection, request.mode === 'HELPER' ? 'HELPER' : 'HATER');
+    return weaponizeQuote(selection, request.mode, mutation);
+  }
+
+  // ==========================================================================
+  // MARK: Semantic deduplication pass
+  // ==========================================================================
+
+  /** Resolve with semantic deduplication applied. */
+  public resolveWithSemanticDedupe(request: QuoteRecallResolverRequest, similarityThreshold01: number = 0.65): QuoteRecallResolverResponse {
+    const base = this.resolve(request);
+    const deduped = deduplicateBySemanticSimilarity(base.selections, similarityThreshold01);
+    return { ...base, selections: deduped, winningSelection: deduped[0] };
+  }
+
+  // ==========================================================================
+  // MARK: Audience-timed resolve
+  // ==========================================================================
+
+  /** Resolve and compute audience-responsive timing for the winning selection. */
+  public resolveWithAudienceTiming(
+    request: QuoteRecallResolverRequest,
+    audienceHeat01: number,
+    pressureTier?: string,
+    modeId?: string,
+  ): { response: QuoteRecallResolverResponse; timing?: AudienceResponsiveRecallTiming } {
+    const response = this.resolve(request);
+    if (!response.winningSelection) return { response };
+    const timing = computeAudienceResponsiveRecallTiming(response.winningSelection, audienceHeat01, pressureTier, modeId);
+    return { response, timing };
+  }
+
+  // ==========================================================================
+  // MARK: Full pipeline resolve (mode + impact + timing + weaponization)
+  // ==========================================================================
+
+  /** Execute the complete recall pipeline: mode strategy → resolve → impact → timing → weaponization. */
+  public resolveFullPipeline(
+    request: QuoteRecallResolverRequest,
+    modeId: string,
+    audienceHeat01: number,
+    pressureTier?: string,
+  ): {
+    response: QuoteRecallResolverResponse;
+    impacts: readonly RecallImpactAssessment[];
+    timing?: AudienceResponsiveRecallTiming;
+    weapon?: WeaponizedQuote;
+    proofPackage?: RecallProofPackage;
+  } {
+    const strategy = getModeRecallStrategy(modeId);
+    const modeRequest: QuoteRecallResolverRequest = {
+      ...request,
+      desiredKinds: request.desiredKinds?.length ? request.desiredKinds : strategy.kindPriority as readonly ChatQuoteKind[],
+      allowedCallbackModes: request.allowedCallbackModes?.length ? request.allowedCallbackModes : strategy.callbackModePriority as readonly string[],
+      proofRequired: request.proofRequired ?? strategy.proofRequiredByDefault,
+    };
+    const response = this.resolveWithSemanticDedupe(modeRequest);
+    const impacts = response.selections.map((selection, index) => {
+      const cp = request.counterpartId ? this.buildCounterpartProfile(request.playerId, request.counterpartId) : undefined;
+      return predictRecallImpact(selection, audienceHeat01, pressureTier, cp, index === 0);
+    });
+    const topImpact = impacts[0];
+    const timing = response.winningSelection
+      ? computeAudienceResponsiveRecallTiming(response.winningSelection, audienceHeat01, pressureTier, modeId)
+      : undefined;
+    let weapon: WeaponizedQuote | undefined;
+    if (response.winningSelection && topImpact) {
+      weapon = weaponizeQuote(response.winningSelection, request.mode, topImpact.suggestedMutation);
+    }
+    let proofPackage: RecallProofPackage | undefined;
+    if (response.winningSelection && topImpact) {
+      proofPackage = buildRecallProofPackage(response.winningSelection, request, topImpact, audienceHeat01, Date.now());
+    }
+    return { response, impacts, timing, weapon, proofPackage };
+  }
+
+
+    /** Build diagnostic lines for logging. */
   public buildDiagnosticLines(playerId: string, counterpartId: string, request: QuoteRecallResolverRequest): readonly string[] {
     const report = this.generateRecallDiagnostic(playerId, counterpartId, request);
     const lines: string[] = [];
@@ -931,8 +1169,631 @@ private profile(mode: QuoteRecallMode): QuoteRecallModeProfile {
 
 
 
+
 // ============================================================================
-// MARK: Real audit slices — 25 unique diagnostic tools
+// MARK: Resolution lifecycle state machine
+// ============================================================================
+
+export type RecallResolutionState = 'PENDING' | 'SELECTED' | 'DELIVERED' | 'CONFIRMED' | 'SPENT' | 'FAILED' | 'EXPIRED';
+
+export interface RecallResolutionLifecycle {
+  readonly resolutionId: string;
+  readonly requestId: string;
+  readonly brandedRequestId: ChatRequestId;
+  readonly playerId: string;
+  readonly counterpartId?: string;
+  readonly state: RecallResolutionState;
+  readonly selectionId?: string;
+  readonly quoteResolution?: ChatQuoteResolution;
+  readonly callbackResolution?: ChatCallbackResolution;
+  readonly createdAt: number;
+  readonly updatedAt: number;
+  readonly deliveredAt?: number;
+  readonly confirmedAt?: number;
+  readonly expiredAt?: number;
+  readonly audienceHeatAtResolution01: number;
+  readonly pressureTierAtResolution?: string;
+  readonly modeIdAtResolution?: string;
+}
+
+export interface RecallResolutionTransition {
+  readonly from: RecallResolutionState;
+  readonly to: RecallResolutionState;
+  readonly at: number;
+  readonly reason: string;
+}
+
+// ============================================================================
+// MARK: Mode-specific recall strategy matrix
+// ============================================================================
+
+export interface ModeRecallStrategyEntry {
+  readonly modeId: string;
+  readonly modeName: string;
+  readonly preferredRecallModes: readonly QuoteRecallMode[];
+  readonly kindPriority: readonly ChatQuoteKind[];
+  readonly callbackModePriority: readonly string[];
+  readonly maxRecallsPerMinute: number;
+  readonly dramaticDelayMultiplier: number;
+  readonly audienceHeatThreshold01: number;
+  readonly preferVerbatim: boolean;
+  readonly counterRecallEnabled: boolean;
+  readonly chainDepthLimit: number;
+  readonly proofRequiredByDefault: boolean;
+}
+
+export const MODE_RECALL_STRATEGY_MATRIX: Readonly<Record<string, ModeRecallStrategyEntry>> = Object.freeze({
+  'GO_ALONE': Object.freeze({
+    modeId: 'GO_ALONE', modeName: 'Empire',
+    preferredRecallModes: ['RIVALRY', 'SYSTEM', 'HELPER', 'AUDIENCE', 'POSTRUN'] as QuoteRecallMode[],
+    kindPriority: ['RECEIPT', 'CALLBACK', 'BOAST', 'THREAT', 'ADVICE', 'BLUFF', 'STATEMENT'] as ChatQuoteKind[],
+    callbackModePriority: ['RECEIPT', 'RIVALRY', 'HELPER_RECALL', 'NEGOTIATION'] as string[],
+    maxRecallsPerMinute: 4,
+    dramaticDelayMultiplier: 1.0,
+    audienceHeatThreshold01: 0.35,
+    preferVerbatim: true,
+    counterRecallEnabled: false,
+    chainDepthLimit: 3,
+    proofRequiredByDefault: false,
+  }),
+  'HEAD_TO_HEAD': Object.freeze({
+    modeId: 'HEAD_TO_HEAD', modeName: 'Predator',
+    preferredRecallModes: ['DEAL_ROOM', 'RIVALRY', 'AUDIENCE', 'SYSTEM', 'POSTRUN'] as QuoteRecallMode[],
+    kindPriority: ['BLUFF', 'RECEIPT', 'THREAT', 'BOAST', 'CALLBACK', 'STATEMENT', 'ADVICE'] as ChatQuoteKind[],
+    callbackModePriority: ['NEGOTIATION', 'RECEIPT', 'RIVALRY', 'HELPER_RECALL'] as string[],
+    maxRecallsPerMinute: 6,
+    dramaticDelayMultiplier: 0.65,
+    audienceHeatThreshold01: 0.45,
+    preferVerbatim: false,
+    counterRecallEnabled: true,
+    chainDepthLimit: 6,
+    proofRequiredByDefault: true,
+  }),
+  'TEAM_UP': Object.freeze({
+    modeId: 'TEAM_UP', modeName: 'Syndicate',
+    preferredRecallModes: ['HELPER', 'RESCUE', 'SYSTEM', 'RIVALRY', 'POSTRUN'] as QuoteRecallMode[],
+    kindPriority: ['ADVICE', 'CALLBACK', 'RECEIPT', 'STATEMENT', 'BOAST', 'THREAT', 'BLUFF'] as ChatQuoteKind[],
+    callbackModePriority: ['HELPER_RECALL', 'RECEIPT', 'RIVALRY', 'NEGOTIATION'] as string[],
+    maxRecallsPerMinute: 3,
+    dramaticDelayMultiplier: 1.3,
+    audienceHeatThreshold01: 0.25,
+    preferVerbatim: true,
+    counterRecallEnabled: false,
+    chainDepthLimit: 4,
+    proofRequiredByDefault: false,
+  }),
+  'CHASE_A_LEGEND': Object.freeze({
+    modeId: 'CHASE_A_LEGEND', modeName: 'Phantom',
+    preferredRecallModes: ['SYSTEM', 'RIVALRY', 'AUDIENCE', 'POSTRUN', 'HELPER'] as QuoteRecallMode[],
+    kindPriority: ['CALLBACK', 'RECEIPT', 'ADVICE', 'THREAT', 'BOAST', 'BLUFF', 'STATEMENT'] as ChatQuoteKind[],
+    callbackModePriority: ['RECEIPT', 'RIVALRY', 'HELPER_RECALL', 'NEGOTIATION'] as string[],
+    maxRecallsPerMinute: 2,
+    dramaticDelayMultiplier: 2.0,
+    audienceHeatThreshold01: 0.3,
+    preferVerbatim: false,
+    counterRecallEnabled: false,
+    chainDepthLimit: 2,
+    proofRequiredByDefault: true,
+  }),
+});
+
+/** Get mode-specific recall strategy. */
+export function getModeRecallStrategy(modeId: string | undefined): ModeRecallStrategyEntry {
+  return MODE_RECALL_STRATEGY_MATRIX[modeId ?? ''] ?? MODE_RECALL_STRATEGY_MATRIX['GO_ALONE']!;
+}
+
+// ============================================================================
+// MARK: Counterpart recall priority system
+// ============================================================================
+
+export interface CounterpartRecallProfile {
+  readonly counterpartId: string;
+  readonly playerId: string;
+  readonly totalRecalls: number;
+  readonly effectiveRecalls: number;
+  readonly ineffectiveRecalls: number;
+  readonly effectivenessRate01: number;
+  readonly lastRecalledAt: number;
+  readonly preferredKinds: readonly ChatQuoteKind[];
+  readonly preferredMutations: readonly QuoteMutationStrategy[];
+  readonly avgScore01: number;
+  readonly peakScore01: number;
+  readonly activeChainDepth: number;
+  readonly lastCallbackMode?: ChatCallbackMode;
+  readonly fatigueLevel01: number;
+}
+
+// ============================================================================
+// MARK: Recall impact prediction
+// ============================================================================
+
+export type RecallImpactPrediction = 'DEVASTATING' | 'STRONG' | 'MODERATE' | 'WEAK' | 'BACKFIRE';
+
+export interface RecallImpactAssessment {
+  readonly prediction: RecallImpactPrediction;
+  readonly confidence01: number;
+  readonly audienceReaction: 'HYPE' | 'SHOCK' | 'COLD' | 'INDIFFERENT';
+  readonly audienceIntensity01: number;
+  readonly counterpartVulnerability01: number;
+  readonly proofStrength01: number;
+  readonly noveltyFactor01: number;
+  readonly timingQuality01: number;
+  readonly suggestedDelay: number;
+  readonly suggestedMutation: QuoteMutationStrategy;
+  readonly reasoning: readonly string[];
+}
+
+/** Predict the impact of deploying a specific recall selection. */
+export function predictRecallImpact(
+  selection: QuoteRecallSelection,
+  audienceHeat01: number,
+  pressureTier: string | undefined,
+  counterpartProfile: CounterpartRecallProfile | undefined,
+  isFirstRecallInScene: boolean,
+): RecallImpactAssessment {
+  const reasoning: string[] = [];
+  let impactScore = selection.score01 * 0.4;
+  const noveltyFactor = selection.usageCount <= 1 ? 0.9 : selection.usageCount <= 3 ? 0.6 : 0.3;
+  impactScore += noveltyFactor * 0.15;
+  const audienceBoost = audienceHeat01 * 0.2;
+  impactScore += audienceBoost;
+  const pressureBoost = pressureTier === 'CRITICAL' ? 0.18 : pressureTier === 'HIGH' ? 0.12 : pressureTier === 'ELEVATED' ? 0.06 : 0;
+  impactScore += pressureBoost;
+  if (isFirstRecallInScene) { impactScore += 0.12; reasoning.push('first_recall_bonus'); }
+  if (selection.proofChainId) { impactScore += 0.08; reasoning.push('proof_backed'); }
+  const counterpartVulnerability01 = counterpartProfile ? clamp01(1 - counterpartProfile.effectivenessRate01) : 0.5;
+  impactScore += counterpartVulnerability01 * 0.1;
+  const timingQuality01 = clamp01(audienceHeat01 * 0.5 + pressureBoost * 2);
+  const finalScore = clamp01(impactScore);
+  let prediction: RecallImpactPrediction;
+  if (finalScore >= 0.82) prediction = 'DEVASTATING';
+  else if (finalScore >= 0.62) prediction = 'STRONG';
+  else if (finalScore >= 0.4) prediction = 'MODERATE';
+  else if (finalScore >= 0.2) prediction = 'WEAK';
+  else prediction = 'BACKFIRE';
+  if (prediction === 'DEVASTATING') reasoning.push('high_score_convergence');
+  if (noveltyFactor >= 0.8) reasoning.push('high_novelty');
+  if (audienceHeat01 >= 0.6) reasoning.push('hot_audience');
+  if (pressureBoost >= 0.12) reasoning.push('high_pressure_context');
+  const audienceReaction = audienceHeat01 >= 0.6 && finalScore >= 0.7 ? 'HYPE' as const
+    : finalScore >= 0.6 && selection.surface === 'QUOTE' ? 'SHOCK' as const
+    : audienceHeat01 < 0.2 ? 'COLD' as const : 'INDIFFERENT' as const;
+  let suggestedMutation: QuoteMutationStrategy = 'VERBATIM';
+  if (finalScore >= 0.8 && selection.surface === 'QUOTE') suggestedMutation = 'VERBATIM';
+  else if (selection.surface === 'CALLBACK') suggestedMutation = 'WEAPONIZE';
+  else if (selection.usageCount >= 3) suggestedMutation = 'PARAPHRASE';
+  else if (selection.text.length > 120) suggestedMutation = 'TRUNCATE';
+  const suggestedDelay = prediction === 'DEVASTATING' ? 3500 : prediction === 'STRONG' ? 2200 : prediction === 'MODERATE' ? 1400 : 800;
+  return Object.freeze({
+    prediction, confidence01: clamp01(finalScore * 0.8 + 0.2),
+    audienceReaction, audienceIntensity01: clamp01(audienceHeat01 * finalScore),
+    counterpartVulnerability01, proofStrength01: selection.proofChainId ? 0.85 : 0.35,
+    noveltyFactor01: noveltyFactor, timingQuality01,
+    suggestedDelay, suggestedMutation, reasoning,
+  });
+}
+
+// ============================================================================
+// MARK: Resolution proof packaging for SovereigntyEngine
+// ============================================================================
+
+export interface RecallProofPackage {
+  readonly packageId: string;
+  readonly requestId: string;
+  readonly brandedRequestId: ChatRequestId;
+  readonly playerId: string;
+  readonly counterpartId?: string;
+  readonly selectionId: string;
+  readonly quoteText: string;
+  readonly proofChainId?: string;
+  readonly recallMode: QuoteRecallMode;
+  readonly quoteKind?: ChatQuoteKind;
+  readonly callbackMode?: ChatCallbackMode;
+  readonly score01: number;
+  readonly impactPrediction: RecallImpactPrediction;
+  readonly audienceHeatAtRecall01: number;
+  readonly pressureTierAtRecall?: string;
+  readonly mutationStrategy: QuoteMutationStrategy;
+  readonly deliveredAt: number;
+  readonly effectivenessVerified?: boolean;
+  readonly tags: readonly string[];
+}
+
+/** Build a proof package from a completed recall for the SovereigntyEngine. */
+export function buildRecallProofPackage(
+  selection: QuoteRecallSelection,
+  request: QuoteRecallResolverRequest,
+  impact: RecallImpactAssessment,
+  audienceHeat01: number,
+  at: number,
+): RecallProofPackage {
+  return Object.freeze({
+    packageId: `proof:recall:${selection.selectionId}:${at}`,
+    requestId: request.requestId,
+    brandedRequestId: toRequestId(request.requestId),
+    playerId: request.playerId,
+    counterpartId: request.counterpartId,
+    selectionId: selection.selectionId,
+    quoteText: selection.text,
+    proofChainId: selection.proofChainId,
+    recallMode: request.mode,
+    quoteKind: selection.quoteKind,
+    callbackMode: selection.callbackMode,
+    score01: selection.score01,
+    impactPrediction: impact.prediction,
+    audienceHeatAtRecall01: audienceHeat01,
+    pressureTierAtRecall: request.pressureTier,
+    mutationStrategy: impact.suggestedMutation,
+    deliveredAt: at,
+    tags: [...selection.tags, impact.prediction.toLowerCase(), selection.surface.toLowerCase()],
+  });
+}
+
+// ============================================================================
+// MARK: Dramatic pacing coordinator
+// ============================================================================
+
+export interface RecallPacingWindow {
+  readonly windowId: string;
+  readonly playerId: string;
+  readonly counterpartId: string;
+  readonly modeId: string;
+  readonly windowStartAt: number;
+  readonly windowEndAt: number;
+  readonly maxRecallsInWindow: number;
+  readonly recallsFired: number;
+  readonly isExhausted: boolean;
+  readonly cooldownUntil: number;
+  readonly lastRecallAt: number;
+}
+
+export interface RecallPacingDecision {
+  readonly shouldFire: boolean;
+  readonly suggestedDelayMs: number;
+  readonly reason: string;
+  readonly windowRemaining: number;
+  readonly cooldownActive: boolean;
+}
+
+/** Compute whether a recall should fire now or be delayed for dramatic pacing. */
+export function computeRecallPacingDecision(
+  window: RecallPacingWindow,
+  selection: QuoteRecallSelection,
+  audienceHeat01: number,
+  now: number,
+): RecallPacingDecision {
+  if (now < window.cooldownUntil) {
+    return { shouldFire: false, suggestedDelayMs: window.cooldownUntil - now, reason: 'cooldown_active', windowRemaining: window.maxRecallsInWindow - window.recallsFired, cooldownActive: true };
+  }
+  if (window.isExhausted || window.recallsFired >= window.maxRecallsInWindow) {
+    return { shouldFire: false, suggestedDelayMs: Math.max(0, window.windowEndAt - now), reason: 'window_exhausted', windowRemaining: 0, cooldownActive: false };
+  }
+  if (now > window.windowEndAt) {
+    return { shouldFire: false, suggestedDelayMs: 0, reason: 'window_expired', windowRemaining: 0, cooldownActive: false };
+  }
+  const timeSinceLast = now - window.lastRecallAt;
+  const minGap = selection.score01 >= 0.7 ? 3000 : 5000;
+  if (timeSinceLast < minGap) {
+    return { shouldFire: false, suggestedDelayMs: minGap - timeSinceLast, reason: 'too_soon_after_last', windowRemaining: window.maxRecallsInWindow - window.recallsFired, cooldownActive: false };
+  }
+  const heatDelay = audienceHeat01 >= 0.7 ? 0 : audienceHeat01 >= 0.4 ? 1500 : 3000;
+  if (heatDelay > 0 && selection.score01 < 0.6) {
+    return { shouldFire: false, suggestedDelayMs: heatDelay, reason: 'audience_not_primed', windowRemaining: window.maxRecallsInWindow - window.recallsFired, cooldownActive: false };
+  }
+  return { shouldFire: true, suggestedDelayMs: 0, reason: 'clear_to_fire', windowRemaining: window.maxRecallsInWindow - window.recallsFired - 1, cooldownActive: false };
+}
+
+// ============================================================================
+// MARK: Quote weaponization pipeline
+// ============================================================================
+
+export type WeaponizationClass = 'RECEIPT_DEPLOY' | 'BOAST_EXPOSURE' | 'BLUFF_REVEAL' | 'THREAT_CALLBACK' | 'ADVICE_ECHO' | 'CONFESSION_LEVERAGE' | 'STATEMENT_TWIST';
+
+export interface WeaponizedQuote {
+  readonly weaponId: string;
+  readonly sourceSelectionId: string;
+  readonly originalText: string;
+  readonly weaponizedText: string;
+  readonly weaponClass: WeaponizationClass;
+  readonly originalKind: ChatQuoteKind;
+  readonly mutationApplied: QuoteMutationStrategy;
+  readonly impactBoost01: number;
+  readonly proofChainId?: string;
+  readonly deployedAt?: number;
+}
+
+/** Classify the weaponization class of a quote based on its kind and context. */
+export function classifyWeaponization(kind: ChatQuoteKind, mode: QuoteRecallMode): WeaponizationClass {
+  if (kind === 'RECEIPT') return 'RECEIPT_DEPLOY';
+  if (kind === 'BOAST') return 'BOAST_EXPOSURE';
+  if (kind === 'BLUFF' && mode === 'DEAL_ROOM') return 'BLUFF_REVEAL';
+  if (kind === 'THREAT') return 'THREAT_CALLBACK';
+  if (kind === 'ADVICE') return 'ADVICE_ECHO';
+  return 'STATEMENT_TWIST';
+}
+
+/** Weaponize a quote selection for maximum dramatic/strategic impact. */
+export function weaponizeQuote(selection: QuoteRecallSelection, mode: QuoteRecallMode, mutation: QuoteMutationStrategy): WeaponizedQuote {
+  const kind = selection.quoteKind ?? ('STATEMENT' as ChatQuoteKind);
+  const weaponClass = classifyWeaponization(kind, mode);
+  let weaponizedText = selection.text;
+  let impactBoost = 0;
+  switch (mutation) {
+    case 'VERBATIM': impactBoost = 0.12; break;
+    case 'PARAPHRASE': weaponizedText = selection.text.length > 60 ? selection.text.slice(0, 57) + '...' : selection.text; impactBoost = 0.06; break;
+    case 'TRUNCATE': weaponizedText = selection.text.slice(0, 40) + '...'; impactBoost = 0.04; break;
+    case 'WEAPONIZE': impactBoost = 0.18; break;
+    case 'SOFT_REFERENCE': weaponizedText = `(referencing: ${selection.text.slice(0, 30)}...)`; impactBoost = 0.02; break;
+  }
+  return Object.freeze({
+    weaponId: `weapon:${selection.selectionId}:${Date.now()}`,
+    sourceSelectionId: selection.selectionId,
+    originalText: selection.text,
+    weaponizedText,
+    weaponClass,
+    originalKind: kind,
+    mutationApplied: mutation,
+    impactBoost01: clamp01(impactBoost),
+    proofChainId: selection.proofChainId,
+  });
+}
+
+// ============================================================================
+// MARK: Post-run recall archive
+// ============================================================================
+
+export interface PostRunRecallArchive {
+  readonly archiveId: string;
+  readonly playerId: string;
+  readonly runId: string;
+  readonly modeId: string;
+  readonly totalRecalls: number;
+  readonly totalSelections: number;
+  readonly avgScore01: number;
+  readonly peakScore01: number;
+  readonly effectivenessRate01: number;
+  readonly mostUsedKind: ChatQuoteKind;
+  readonly mostUsedMode: QuoteRecallMode;
+  readonly bestSelection?: QuoteRecallSelection;
+  readonly bestImpact?: RecallImpactAssessment;
+  readonly quoteResolutions: readonly ChatQuoteResolution[];
+  readonly callbackResolutions: readonly ChatCallbackResolution[];
+  readonly proofPackages: readonly RecallProofPackage[];
+  readonly chainHistory: readonly QuoteChain[];
+  readonly weaponizedQuotes: readonly WeaponizedQuote[];
+  readonly counterpartProfiles: readonly CounterpartRecallProfile[];
+  readonly createdAt: number;
+}
+
+/** Build post-run archive from resolver state. */
+export function buildPostRunRecallArchive(
+  resolver: QuoteRecallResolver,
+  playerId: string,
+  runId: string,
+  modeId: string,
+  proofPackages: readonly RecallProofPackage[],
+  weaponized: readonly WeaponizedQuote[],
+  quoteResolutions: readonly ChatQuoteResolution[],
+  callbackResolutions: readonly ChatCallbackResolution[],
+): PostRunRecallArchive {
+  const allPlayerIds = (resolver as unknown as { _recallHistory: Map<string, RecallHistoryEntry[]> })._recallHistory ?? new Map<string, RecallHistoryEntry[]>();
+  const counterpartIds = new Set<string>();
+  for (const key of allPlayerIds.keys()) {
+    if (key.startsWith(`${playerId}:`)) {
+      counterpartIds.add(key.split(':')[1]!);
+    }
+  }
+  const profiles: CounterpartRecallProfile[] = [];
+  for (const cpId of counterpartIds) {
+    const history = resolver.getRecallHistory(playerId, cpId);
+    const effectiveness = resolver.recallEffectivenessRate(playerId, cpId);
+    const chain = resolver.detectActiveChain(playerId, cpId);
+    if (history.length > 0) {
+      const effective = Math.round(effectiveness * history.length);
+      profiles.push({
+        counterpartId: cpId, playerId,
+        totalRecalls: history.length,
+        effectiveRecalls: effective,
+        ineffectiveRecalls: history.length - effective,
+        effectivenessRate01: effectiveness,
+        lastRecalledAt: history[history.length - 1]?.timestamp ?? 0,
+        preferredKinds: [] as ChatQuoteKind[],
+        preferredMutations: [] as QuoteMutationStrategy[],
+        avgScore01: history.reduce((s, h) => s + h.score01, 0) / Math.max(1, history.length),
+        peakScore01: Math.max(...history.map(h => h.score01), 0),
+        activeChainDepth: chain?.currentDepth ?? 0,
+        fatigueLevel01: history.length > 0 ? clamp01(history[history.length - 1]!.fatigueAtRecall) : 0,
+      });
+    }
+  }
+  const allScores = proofPackages.map(p => p.score01);
+  return Object.freeze({
+    archiveId: `archive:recall:${playerId}:${runId}:${Date.now()}`,
+    playerId, runId, modeId,
+    totalRecalls: proofPackages.length,
+    totalSelections: proofPackages.length,
+    avgScore01: allScores.length > 0 ? allScores.reduce((s, v) => s + v, 0) / allScores.length : 0,
+    peakScore01: allScores.length > 0 ? Math.max(...allScores) : 0,
+    effectivenessRate01: profiles.length > 0 ? profiles.reduce((s, p) => s + p.effectivenessRate01, 0) / profiles.length : 0.5,
+    mostUsedKind: 'RECEIPT' as ChatQuoteKind,
+    mostUsedMode: 'RIVALRY' as QuoteRecallMode,
+    quoteResolutions, callbackResolutions,
+    proofPackages, chainHistory: [],
+    weaponizedQuotes: weaponized,
+    counterpartProfiles: profiles,
+    createdAt: Date.now(),
+  });
+}
+
+// ============================================================================
+// MARK: Recall budget governor
+// ============================================================================
+
+export interface RecallBudgetConfig {
+  readonly maxPerMinute: number;
+  readonly maxPerCounterpart: number;
+  readonly maxPerWindow: number;
+  readonly windowMs: number;
+  readonly cooldownMs: number;
+  readonly fatigueThreshold01: number;
+  readonly retirementThreshold01: number;
+}
+
+export const MODE_RECALL_BUDGET_CONFIGS: Readonly<Record<string, RecallBudgetConfig>> = Object.freeze({
+  'GO_ALONE': Object.freeze({ maxPerMinute: 4, maxPerCounterpart: 12, maxPerWindow: 3, windowMs: 60000, cooldownMs: 8000, fatigueThreshold01: 0.7, retirementThreshold01: 0.85 }),
+  'HEAD_TO_HEAD': Object.freeze({ maxPerMinute: 6, maxPerCounterpart: 18, maxPerWindow: 4, windowMs: 45000, cooldownMs: 5000, fatigueThreshold01: 0.8, retirementThreshold01: 0.92 }),
+  'TEAM_UP': Object.freeze({ maxPerMinute: 3, maxPerCounterpart: 8, maxPerWindow: 2, windowMs: 90000, cooldownMs: 12000, fatigueThreshold01: 0.6, retirementThreshold01: 0.8 }),
+  'CHASE_A_LEGEND': Object.freeze({ maxPerMinute: 2, maxPerCounterpart: 6, maxPerWindow: 1, windowMs: 120000, cooldownMs: 15000, fatigueThreshold01: 0.55, retirementThreshold01: 0.75 }),
+});
+
+/** Get mode-specific recall budget config. */
+export function getModeRecallBudgetConfig(modeId: string | undefined): RecallBudgetConfig {
+  return MODE_RECALL_BUDGET_CONFIGS[modeId ?? ''] ?? MODE_RECALL_BUDGET_CONFIGS['GO_ALONE']!;
+}
+
+// ============================================================================
+// MARK: Audience-heat-responsive recall timing
+// ============================================================================
+
+export interface AudienceResponsiveRecallTiming {
+  readonly audienceHeat01: number;
+  readonly optimalDelayMs: number;
+  readonly shouldAmplify: boolean;
+  readonly shouldSilence: boolean;
+  readonly crowdVelocityEstimate01: number;
+  readonly humiliationPressure01: number;
+  readonly hypePressure01: number;
+}
+
+/** Compute audience-responsive timing for a recall deployment. */
+export function computeAudienceResponsiveRecallTiming(
+  selection: QuoteRecallSelection,
+  audienceHeat01: number,
+  pressureTier: string | undefined,
+  modeId: string | undefined,
+): AudienceResponsiveRecallTiming {
+  const strategy = getModeRecallStrategy(modeId);
+  const baseDelay = selection.score01 >= 0.7 ? 1200 : 2400;
+  const heatMultiplier = audienceHeat01 >= 0.7 ? 0.5 : audienceHeat01 >= 0.4 ? 0.8 : 1.4;
+  const modeMultiplier = strategy.dramaticDelayMultiplier;
+  const pressureMultiplier = pressureTier === 'CRITICAL' ? 0.6 : pressureTier === 'HIGH' ? 0.8 : 1.0;
+  const optimalDelayMs = Math.round(baseDelay * heatMultiplier * modeMultiplier * pressureMultiplier);
+  const shouldAmplify = audienceHeat01 >= strategy.audienceHeatThreshold01 && selection.score01 >= 0.55;
+  const shouldSilence = audienceHeat01 < 0.1 && selection.score01 < 0.35;
+  const crowdVelocity = clamp01(audienceHeat01 * 1.2 + (pressureTier === 'CRITICAL' ? 0.2 : 0));
+  const humiliationPressure = clamp01(selection.score01 * audienceHeat01 * (selection.surface === 'QUOTE' ? 1.2 : 0.8));
+  const hypePressure = clamp01(audienceHeat01 * 0.6 + selection.score01 * 0.4);
+  return Object.freeze({
+    audienceHeat01, optimalDelayMs, shouldAmplify, shouldSilence,
+    crowdVelocityEstimate01: crowdVelocity,
+    humiliationPressure01: humiliationPressure,
+    hypePressure01: hypePressure,
+  });
+}
+
+// ============================================================================
+// MARK: Cross-run recall intelligence
+// ============================================================================
+
+export interface CrossRunRecallIntelligence {
+  readonly playerId: string;
+  readonly counterpartId: string;
+  readonly totalCrossRunRecalls: number;
+  readonly crossRunEffectiveness01: number;
+  readonly recurringPatterns: readonly string[];
+  readonly legendaryRecalls: readonly string[];
+  readonly mostEffectiveKind: ChatQuoteKind;
+  readonly mostEffectiveMode: QuoteRecallMode;
+  readonly avgCrossRunScore01: number;
+}
+
+/** Build cross-run intelligence from bridged recall data. */
+export function buildCrossRunRecallIntelligence(
+  currentRunHistory: readonly RecallHistoryEntry[],
+  bridgedHistory: readonly RecallHistoryEntry[],
+  playerId: string,
+  counterpartId: string,
+): CrossRunRecallIntelligence {
+  const allHistory = [...currentRunHistory, ...bridgedHistory];
+  const totalRecalls = allHistory.length;
+  const avgScore = totalRecalls > 0 ? allHistory.reduce((s, h) => s + h.score01, 0) / totalRecalls : 0;
+  return Object.freeze({
+    playerId, counterpartId,
+    totalCrossRunRecalls: totalRecalls,
+    crossRunEffectiveness01: avgScore,
+    recurringPatterns: [],
+    legendaryRecalls: allHistory.filter(h => h.score01 >= 0.85).map(h => h.selectionId),
+    mostEffectiveKind: 'RECEIPT' as ChatQuoteKind,
+    mostEffectiveMode: 'RIVALRY' as QuoteRecallMode,
+    avgCrossRunScore01: avgScore,
+  });
+}
+
+// ============================================================================
+// MARK: Semantic similarity deduplication
+// ============================================================================
+
+/** Compute Jaccard similarity between two normalized text strings. */
+export function computeJaccardSimilarity(a: string, b: string): number {
+  const tokensA = new Set(normalizeText(a).split(/\s+/).filter(Boolean));
+  const tokensB = new Set(normalizeText(b).split(/\s+/).filter(Boolean));
+  if (tokensA.size === 0 && tokensB.size === 0) return 1;
+  if (tokensA.size === 0 || tokensB.size === 0) return 0;
+  let intersection = 0;
+  for (const t of tokensA) if (tokensB.has(t)) intersection++;
+  return intersection / (tokensA.size + tokensB.size - intersection);
+}
+
+/** Deduplicate selections by semantic similarity threshold. */
+export function deduplicateBySemanticSimilarity(
+  selections: readonly QuoteRecallSelection[],
+  threshold01: number = 0.65,
+): readonly QuoteRecallSelection[] {
+  const kept: QuoteRecallSelection[] = [];
+  for (const selection of selections) {
+    const isDuplicate = kept.some(existing => computeJaccardSimilarity(existing.normalizedText, selection.normalizedText) >= threshold01);
+    if (!isDuplicate) kept.push(selection);
+  }
+  return kept;
+}
+
+// ============================================================================
+// MARK: Resolution outcome tracking
+// ============================================================================
+
+export interface RecallOutcomeRecord {
+  readonly outcomeId: string;
+  readonly selectionId: string;
+  readonly playerId: string;
+  readonly counterpartId?: string;
+  readonly quoteKind?: ChatQuoteKind;
+  readonly callbackMode?: ChatCallbackMode;
+  readonly quoteResolution?: ChatQuoteResolution;
+  readonly callbackResolution?: ChatCallbackResolution;
+  readonly impactPrediction: RecallImpactPrediction;
+  readonly actualEffectiveness: boolean;
+  readonly audienceHeatBefore01: number;
+  readonly audienceHeatAfter01: number;
+  readonly heatDelta01: number;
+  readonly deliveredAt: number;
+  readonly confirmedAt: number;
+}
+
+/** Compute heat delta from a recall outcome. */
+export function computeRecallHeatDelta(before01: number, after01: number): number {
+  return clamp01(after01) - clamp01(before01);
+}
+
+/** Determine if a recall outcome matched its prediction. */
+export function didRecallMatchPrediction(outcome: RecallOutcomeRecord): boolean {
+  if (outcome.impactPrediction === 'DEVASTATING' || outcome.impactPrediction === 'STRONG') return outcome.actualEffectiveness;
+  if (outcome.impactPrediction === 'BACKFIRE') return !outcome.actualEffectiveness;
+  return true;
+}
+
+
+// ============================================================================
+// MARK: Real audit slices — 33 unique diagnostic tools
 // ============================================================================
 
 /** Slice 1: Recall mode distribution — what modes are requesting recalls. */
@@ -1033,7 +1894,7 @@ export function buildQuoteRecallAuditSlice8(resolver: QuoteRecallResolver, reque
   return lines;
 }
 
-/** Slice 9-25: Per-mode recall profile diagnostics and additional analytics. */
+/** Slice 9: Per-mode recall profile diagnostics. */
 export function buildQuoteRecallAuditSlice9(resolver: QuoteRecallResolver, request: QuoteRecallResolverRequest): readonly string[] {
   const lines: string[] = ['slice=9|mode_profiles'];
   for (const modeId of ['GO_ALONE', 'HEAD_TO_HEAD', 'TEAM_UP', 'CHASE_A_LEGEND']) {
@@ -1069,8 +1930,8 @@ export function buildQuoteRecallAuditSlice12(resolver: QuoteRecallResolver, requ
 }
 
 export function buildQuoteRecallAuditSlice13(r: QuoteRecallResolver, req: QuoteRecallResolverRequest): readonly string[] { const resp = r.resolve({ ...req, maxSelections: 6 }); return ['slice=13|audit_trail', ...resp.auditTrail.slice(0, 10)]; }
-export function buildQuoteRecallAuditSlice14(r: QuoteRecallResolver, req: QuoteRecallResolverRequest): readonly string[] { const resp = r.resolve({ ...req, maxSelections: 6 }); return ['slice=14|resolution_quote', resp.quoteResolution ? `resolved|${resp.quoteResolution.outcome}` : 'none']; }
-export function buildQuoteRecallAuditSlice15(r: QuoteRecallResolver, req: QuoteRecallResolverRequest): readonly string[] { const resp = r.resolve({ ...req, maxSelections: 6 }); return ['slice=15|resolution_callback', resp.callbackResolution ? `resolved|${resp.callbackResolution.outcome}` : 'none']; }
+export function buildQuoteRecallAuditSlice14(r: QuoteRecallResolver, req: QuoteRecallResolverRequest): readonly string[] { const resp = r.resolve({ ...req, maxSelections: 6 }); return ['slice=14|resolution_quote', resp.quoteResolution ? `resolved|winning=${resp.quoteResolution.winningQuoteId ?? 'none'}` : 'none']; }
+export function buildQuoteRecallAuditSlice15(r: QuoteRecallResolver, req: QuoteRecallResolverRequest): readonly string[] { const resp = r.resolve({ ...req, maxSelections: 6 }); return ['slice=15|resolution_callback', resp.callbackResolution ? `resolved|mode=${resp.callbackResolution.outcome ?? 'unknown'}` : 'none']; }
 export function buildQuoteRecallAuditSlice16(r: QuoteRecallResolver, req: QuoteRecallResolverRequest): readonly string[] { return ['slice=16|request_params', `mode=${req.mode}|player=${req.playerId}|actor=${req.actorId ?? 'none'}|cp=${req.counterpartId ?? 'none'}|max=${req.maxSelections ?? 'default'}`]; }
 export function buildQuoteRecallAuditSlice17(r: QuoteRecallResolver, req: QuoteRecallResolverRequest): readonly string[] { const resp = r.resolve({ ...req, maxSelections: 4, mode: 'RIVALRY' }); return ['slice=17|rivalry_recall', `selections=${resp.selections.length}`, ...resp.selections.map(s => `${s.score01.toFixed(3)}|"${s.text.slice(0,48)}"`)]; }
 export function buildQuoteRecallAuditSlice18(r: QuoteRecallResolver, req: QuoteRecallResolverRequest): readonly string[] { const resp = r.resolve({ ...req, maxSelections: 4, mode: 'HELPER' }); return ['slice=18|helper_recall', `selections=${resp.selections.length}`, ...resp.selections.map(s => `${s.score01.toFixed(3)}|"${s.text.slice(0,48)}"`)]; }
@@ -1107,7 +1968,7 @@ export function shouldOfferCounterRecall(
   playerHasReceipts: boolean,
 ): boolean {
   if (!playerHasReceipts) return false;
-  if (selection.surface !== 'RIVALRY' && selection.surface !== 'DEAL_ROOM') return false;
+  if (selection.mode !== 'RIVALRY' && selection.mode !== 'DEAL_ROOM') return false;
   return playerConfidence01 >= 0.5 && selection.score01 >= 0.4;
 }
 
@@ -1119,7 +1980,7 @@ export function estimateAudienceReaction(
   if (selection.score01 >= 0.8 && audienceHeat01 >= 0.6) {
     return { reactionType: 'HYPE', intensity01: Math.min(1, selection.score01 * audienceHeat01 * 1.5) };
   }
-  if (selection.score01 >= 0.6 && selection.surface === 'RIVALRY') {
+  if (selection.score01 >= 0.6 && selection.mode === 'RIVALRY') {
     return { reactionType: 'SHOCK', intensity01: selection.score01 * 0.8 };
   }
   if (audienceHeat01 < 0.2) {
@@ -1145,3 +2006,94 @@ export function buildRecallAuditReport(
 }
 
 
+/** Slice 26: Impact prediction distribution. */
+export function buildQuoteRecallAuditSlice26(r: QuoteRecallResolver, req: QuoteRecallResolverRequest, audienceHeat01: number): readonly string[] {
+  const { impacts } = r.resolveWithImpactPredictions(req, audienceHeat01);
+  const lines: string[] = ['slice=26|impact_predictions'];
+  const dist = new Map<string, number>();
+  for (const impact of impacts) dist.set(impact.prediction, (dist.get(impact.prediction) ?? 0) + 1);
+  for (const [pred, count] of dist) lines.push(`${pred}=${count}`);
+  return lines;
+}
+
+/** Slice 27: Counterpart profile summary. */
+export function buildQuoteRecallAuditSlice27(r: QuoteRecallResolver, req: QuoteRecallResolverRequest): readonly string[] {
+  const lines: string[] = ['slice=27|counterpart_profile'];
+  if (!req.counterpartId) { lines.push('no_counterpart'); return lines; }
+  const profile = r.buildCounterpartProfile(req.playerId, req.counterpartId);
+  lines.push(`recalls=${profile.totalRecalls}|effective=${profile.effectiveRecalls}|rate=${profile.effectivenessRate01.toFixed(3)}`);
+  lines.push(`avg=${profile.avgScore01.toFixed(3)}|peak=${profile.peakScore01.toFixed(3)}|fatigue=${profile.fatigueLevel01.toFixed(3)}`);
+  lines.push(`chain_depth=${profile.activeChainDepth}`);
+  return lines;
+}
+
+/** Slice 28: Mode strategy comparison. */
+export function buildQuoteRecallAuditSlice28(_r: QuoteRecallResolver, _req: QuoteRecallResolverRequest): readonly string[] {
+  const lines: string[] = ['slice=28|mode_strategy_comparison'];
+  for (const modeId of ['GO_ALONE', 'HEAD_TO_HEAD', 'TEAM_UP', 'CHASE_A_LEGEND']) {
+    const s = getModeRecallStrategy(modeId);
+    lines.push(`${modeId}|maxPerMin=${s.maxRecallsPerMinute}|delay=${s.dramaticDelayMultiplier}|verbatim=${s.preferVerbatim}|chain=${s.chainDepthLimit}`);
+  }
+  return lines;
+}
+
+/** Slice 29: Recall budget status per mode. */
+export function buildQuoteRecallAuditSlice29(r: QuoteRecallResolver, req: QuoteRecallResolverRequest): readonly string[] {
+  const lines: string[] = ['slice=29|budget_status'];
+  for (const modeId of ['GO_ALONE', 'HEAD_TO_HEAD', 'TEAM_UP', 'CHASE_A_LEGEND']) {
+    const cfg = getModeRecallBudgetConfig(modeId);
+    const remaining = req.counterpartId ? r.remainingRecallBudget(req.playerId, req.counterpartId, cfg.maxPerWindow, cfg.windowMs, req.createdAt) : cfg.maxPerWindow;
+    lines.push(`${modeId}|max=${cfg.maxPerWindow}|remaining=${remaining}|cooldown=${cfg.cooldownMs}ms|fatigue_thresh=${cfg.fatigueThreshold01}`);
+  }
+  return lines;
+}
+
+/** Slice 30: Weaponization class distribution. */
+export function buildQuoteRecallAuditSlice30(r: QuoteRecallResolver, req: QuoteRecallResolverRequest): readonly string[] {
+  const resp = r.resolve({ ...req, maxSelections: 8 });
+  const lines: string[] = ['slice=30|weaponization_classes'];
+  for (const s of resp.selections.slice(0, 6)) {
+    const kind = s.quoteKind ?? ('STATEMENT' as ChatQuoteKind);
+    const wclass = classifyWeaponization(kind, req.mode);
+    lines.push(`${s.selectionId}|kind=${kind}|weapon=${wclass}|score=${s.score01.toFixed(3)}`);
+  }
+  return lines;
+}
+
+/** Slice 31: Semantic similarity matrix (top 4 vs each other). */
+export function buildQuoteRecallAuditSlice31(r: QuoteRecallResolver, req: QuoteRecallResolverRequest): readonly string[] {
+  const resp = r.resolve({ ...req, maxSelections: 4 });
+  const lines: string[] = ['slice=31|semantic_similarity'];
+  const sels = resp.selections;
+  for (let i = 0; i < sels.length; i++) {
+    for (let j = i + 1; j < sels.length; j++) {
+      const sim = computeJaccardSimilarity(sels[i]!.normalizedText, sels[j]!.normalizedText);
+      if (sim > 0.2) lines.push(`${i}↔${j}|sim=${sim.toFixed(3)}|dup=${sim >= 0.65}`);
+    }
+  }
+  if (lines.length === 1) lines.push('no_significant_similarity');
+  return lines;
+}
+
+/** Slice 32: Full pipeline summary. */
+export function buildQuoteRecallAuditSlice32(r: QuoteRecallResolver, req: QuoteRecallResolverRequest, modeId: string, audienceHeat01: number): readonly string[] {
+  const pipeline = r.resolveFullPipeline(req, modeId, audienceHeat01);
+  const lines: string[] = ['slice=32|full_pipeline'];
+  lines.push(`selections=${pipeline.response.selections.length}|impacts=${pipeline.impacts.length}`);
+  if (pipeline.timing) lines.push(`delay=${pipeline.timing.optimalDelayMs}ms|amplify=${pipeline.timing.shouldAmplify}|silence=${pipeline.timing.shouldSilence}`);
+  if (pipeline.weapon) lines.push(`weapon=${pipeline.weapon.weaponClass}|mutation=${pipeline.weapon.mutationApplied}|boost=${pipeline.weapon.impactBoost01.toFixed(3)}`);
+  if (pipeline.proofPackage) lines.push(`proof=${pipeline.proofPackage.packageId}|impact=${pipeline.proofPackage.impactPrediction}`);
+  return lines;
+}
+
+/** Slice 33: Resolution lifecycle state summary. */
+export function buildQuoteRecallAuditSlice33(r: QuoteRecallResolver, req: QuoteRecallResolverRequest): readonly string[] {
+  const resp = r.resolve({ ...req, maxSelections: 6 });
+  const lines: string[] = ['slice=33|resolution_lifecycle'];
+  lines.push(`total=${resp.selections.length}`);
+  lines.push(`has_quote_resolution=${resp.quoteResolution ? 'yes' : 'no'}`);
+  lines.push(`has_callback_resolution=${resp.callbackResolution ? 'yes' : 'no'}`);
+  if (resp.quoteResolution) lines.push(`quote_winning=${(resp.quoteResolution as any).winningQuoteId ?? 'none'}`);
+  if (resp.callbackResolution) lines.push(`callback_mode=${(resp.callbackResolution as any).mode ?? 'none'}`);
+  return lines;
+}

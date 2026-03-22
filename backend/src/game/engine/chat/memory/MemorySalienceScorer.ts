@@ -51,7 +51,9 @@ export type MemorySalienceReasonCode =
   | 'privacy_penalty'
   | 'public_witness'
   | 'shadow_signal'
+  | 'rescue_signal'
   | 'rescue_pressure'
+  | 'rivalry_signal'
   | 'rivalry_pressure'
   | 'helper_trust'
   | 'deal_room_pressure'
@@ -97,7 +99,8 @@ export type MemorySalienceReasonCode =
   | 'dormant_status'
   | 'critical_event_type'
   | 'surface_alignment'
-  | 'relevance_decay';
+  | 'relevance_decay'
+  | 'temporal_decay';
 
 export interface MemorySalienceContext {
   readonly playerId: string;
@@ -116,6 +119,8 @@ export interface MemorySalienceContext {
   readonly preferredTriggers?: readonly ChatCallbackTrigger[];
   readonly preferredTones?: readonly ChatQuoteToneClass[];
   readonly preferredIntents?: readonly ChatQuoteUseIntent[];
+  readonly preferredAudienceClasses?: readonly ChatQuoteAudienceClass[];
+  readonly preferredCallbackPrivacyClasses?: readonly ChatCallbackPrivacyClass[];
   readonly requiredTags?: readonly string[];
   readonly suppressedTags?: readonly string[];
   readonly now?: number;
@@ -427,10 +432,19 @@ function tierFromScore(score01: number): MemorySalienceTier {
 function normalizePrivacy(value: string | undefined): string {
   switch (value) {
     case 'PUBLIC':
-    case 'TEAM':
     case 'PRIVATE':
     case 'SHADOW':
+    case 'HELPER_ONLY':
+    case 'RIVAL_ONLY':
+    case 'SYSTEM_ONLY':
       return value;
+    case 'TEAM':
+    case 'SYNDICATE':
+    case 'DEAL_ROOM':
+      return 'PRIVATE';
+    case 'LEGEND':
+    case 'POST_RUN':
+      return 'SYSTEM_ONLY';
     default:
       return 'PUBLIC';
   }
@@ -569,6 +583,131 @@ export interface SalienceTrend {
 }
 
 
+export interface MemorySalienceReasonHistogramEntry {
+  readonly reason: MemorySalienceReasonCode;
+  readonly count: number;
+  readonly ratio01: number;
+  readonly topScore01: number;
+  readonly averageScore01: number;
+}
+
+export interface MemorySalienceTagHistogramEntry {
+  readonly tag: string;
+  readonly count: number;
+  readonly ratio01: number;
+  readonly averageScore01: number;
+  readonly maxScore01: number;
+}
+
+export interface MemorySalienceActorAggregate {
+  readonly actorId: string;
+  readonly count: number;
+  readonly averageScore01: number;
+  readonly maxScore01: number;
+  readonly criticalCount: number;
+  readonly legendCount: number;
+}
+
+export interface MemorySalienceCounterpartAggregate {
+  readonly counterpartId: string;
+  readonly count: number;
+  readonly averageScore01: number;
+  readonly maxScore01: number;
+  readonly unresolvedPressure01: number;
+}
+
+export interface MemorySalienceChannelAggregate {
+  readonly channelId: string;
+  readonly count: number;
+  readonly averageScore01: number;
+  readonly maxScore01: number;
+  readonly topTier: MemorySalienceTier;
+}
+
+export interface MemorySalienceAudienceAggregate {
+  readonly audienceClass: ChatQuoteAudienceClass;
+  readonly count: number;
+  readonly averageScore01: number;
+  readonly maxScore01: number;
+}
+
+export interface MemorySaliencePrivacyAggregate {
+  readonly privacyClass: ChatCallbackPrivacyClass;
+  readonly count: number;
+  readonly averageScore01: number;
+  readonly maxScore01: number;
+}
+
+export interface MemorySalienceDomainAggregate {
+  readonly domain: MemorySalienceDomain;
+  readonly count: number;
+  readonly averageScore01: number;
+  readonly maxScore01: number;
+  readonly criticalCount: number;
+  readonly legendCount: number;
+  readonly dormantCount: number;
+}
+
+export interface MemorySalienceTimelinePoint {
+  readonly id: string;
+  readonly domain: MemorySalienceDomain;
+  readonly createdAt: number;
+  readonly score01: number;
+  readonly tier: MemorySalienceTier;
+  readonly primaryReason?: MemorySalienceReasonCode;
+}
+
+export interface MemorySalienceRecommendation {
+  readonly kind:
+    | 'RECALL_QUOTE'
+    | 'EMIT_CALLBACK'
+    | 'PRESERVE_EVENT'
+    | 'COMPRESS_DORMANT'
+    | 'ESCALATE_COUNTERPART'
+    | 'PREPARE_POST_RUN';
+  readonly id: string;
+  readonly domain: MemorySalienceDomain;
+  readonly score01: number;
+  readonly tier: MemorySalienceTier;
+  readonly rationale: readonly string[];
+}
+
+export interface MemorySalienceReplayFrame {
+  readonly ordinal: number;
+  readonly at: number;
+  readonly topEvent?: MemorySalienceScore;
+  readonly topQuote?: MemorySalienceScore;
+  readonly topCallback?: MemorySalienceScore;
+  readonly momentum01: number;
+}
+
+export interface MemorySalienceCandidateNarrative {
+  readonly title: string;
+  readonly domain: MemorySalienceDomain;
+  readonly ids: readonly string[];
+  readonly counterpartIds: readonly string[];
+  readonly channels: readonly string[];
+  readonly topReasons: readonly string[];
+  readonly averageScore01: number;
+}
+
+export interface MemorySalienceReport {
+  readonly playerId: string;
+  readonly createdAt: number;
+  readonly context: MemorySalienceContext;
+  readonly batch: MemorySalienceBatch;
+  readonly domains: readonly MemorySalienceDomainAggregate[];
+  readonly reasonHistogram: readonly MemorySalienceReasonHistogramEntry[];
+  readonly tagHistogram: readonly MemorySalienceTagHistogramEntry[];
+  readonly actorBoard: readonly MemorySalienceActorAggregate[];
+  readonly counterpartBoard: readonly MemorySalienceCounterpartAggregate[];
+  readonly channelBoard: readonly MemorySalienceChannelAggregate[];
+  readonly audienceBoard: readonly MemorySalienceAudienceAggregate[];
+  readonly privacyBoard: readonly MemorySaliencePrivacyAggregate[];
+  readonly timeline: readonly MemorySalienceTimelinePoint[];
+  readonly recommendations: readonly MemorySalienceRecommendation[];
+}
+
 export class MemorySalienceScorer {
   private readonly config: MemorySalienceScorerConfig;
 
@@ -653,6 +792,7 @@ export class MemorySalienceScorer {
     const reasons = new Set<MemorySalienceReasonCode>();
     const tags = uniqueStrings([...(input.record.tags ?? []), ...(input.parentEvent?.context.tags ?? []), ...(input.context.requiredTags ?? [])]);
 
+    const audienceClass = this.normalizeQuoteAudienceClass((input.record as any).audienceClass);
     const relevance01 = this.computeQuoteRelevance(input.record, input.context, reasons);
     const recency01 = recencyScore(input.record.createdAt, referenceNow, this.config.recencyWindowMs);
     if (recency01 > 0.66) {
@@ -660,7 +800,9 @@ export class MemorySalienceScorer {
     }
     const proof01 = this.computeQuoteProofScore(input.record, reasons);
     const relationship01 = this.computeRelationshipScore((input.record as any).context, input.context, reasons);
-    const witness01 = this.computeWitnessScore((input.record as any).context, reasons);
+    const rawWitness01 = this.computeWitnessScore((input.record as any).context, reasons);
+    const audienceWitnessFit01 = this.computeQuoteAudienceClassFit(audienceClass, input.context, reasons);
+    const witness01 = clamp01(average([rawWitness01, audienceWitnessFit01]));
     const dramaturgy01 = this.computeQuoteDramaturgyScore(input.record, input.context, reasons);
     const privacyFit01 = this.computePrivacyFit((input.record as any).context.privacyLevel, input.context.preferredPrivacy, reasons);
     const novelty01 = this.computeNoveltyScore((input.record as any).text, input.seenBodies, reasons);
@@ -711,7 +853,7 @@ export class MemorySalienceScorer {
         channelId: (input.record as any).context.channelId,
         roomId: (input.record as any).context.roomId,
         pressureTier: (input.record as any).context.pressureTier,
-        audienceClass: (input.record as any).audienceClass,
+        audienceClass,
         lifecycle: (input.record as any).lifecycle,
       }),
     };
@@ -722,6 +864,7 @@ export class MemorySalienceScorer {
     const reasons = new Set<MemorySalienceReasonCode>();
     const tags = uniqueStrings([...(input.record.tags ?? []), ...(input.event?.context.tags ?? []), ...(input.context.requiredTags ?? [])]);
 
+    const callbackPrivacyClass = this.normalizeCallbackPrivacyClass((input.record as any).privacyClass);
     const relevance01 = this.computeCallbackRelevance(input.record, input.context, reasons);
     const recency01 = recencyScore(input.record.createdAt, referenceNow, this.config.recencyWindowMs);
     if (recency01 > 0.66) {
@@ -731,7 +874,9 @@ export class MemorySalienceScorer {
     const relationship01 = this.computeRelationshipScore((input.record as any).context, input.context, reasons);
     const witness01 = this.computeWitnessScore((input.record as any).context, reasons);
     const dramaturgy01 = this.computeCallbackDramaturgyScore(input.record, input.context, reasons);
-    const privacyFit01 = this.computePrivacyFit((input.record as any).context.privacyLevel, input.context.preferredPrivacy, reasons);
+    const rawPrivacyFit01 = this.computePrivacyFit((input.record as any).context.privacyLevel, input.context.preferredPrivacy, reasons);
+    const callbackPrivacyFit01 = this.computeCallbackPrivacyClassFit(callbackPrivacyClass, input.context, reasons);
+    const privacyFit01 = clamp01(average([rawPrivacyFit01, callbackPrivacyFit01]));
     const novelty01 = this.computeNoveltyScore((input.record as any).text, input.seenBodies, reasons);
     const compressionRisk01 = this.computeCompressionRiskForCallback(input.record, reasons);
     const retrievalValue01 = this.computeCallbackRetrievalValue(input.record, input.context, reasons);
@@ -781,7 +926,7 @@ export class MemorySalienceScorer {
         trigger: input.record.trigger,
         channelId: (input.record as any).context.channelId,
         roomId: (input.record as any).context.roomId,
-        privacyClass: (input.record as any).privacyClass,
+        privacyClass: callbackPrivacyClass,
         lifecycle: (input.record as any).lifecycle,
       }),
     };
@@ -1467,7 +1612,7 @@ export class MemorySalienceScorer {
     const elapsed = Math.max(0, referenceTime - input.record.createdAt);
     if (elapsed <= 0) return base;
     const decayFactor = this.computeTemporalDecayFactor(elapsed, input.record);
-    return { ...base, score01: clamp01(base.score01 * decayFactor), reasons: [...base.reasons, 'temporal_decay'] as any };
+    return { ...base, score01: clamp01(base.score01 * decayFactor), reasons: [...base.reasons, 'temporal_decay'] };
   }
 
   /** Compute the temporal decay factor for an event based on its emotion profile. */
@@ -1599,7 +1744,7 @@ export class MemorySalienceScorer {
     const enhancedEvents = base.eventScores.map((score) => {
       let adjusted = score.score01;
       if (referenceTime) {
-        const elapsed = Math.max(0, rt - ((score as any).record?.createdAt ?? 0));
+        const elapsed = Math.max(0, rt - score.createdAt);
         if (elapsed > 0) adjusted *= Math.max(0.08, Math.pow(2, -(elapsed / (1000 * 60 * 60 * 48))));
       }
       return { ...score, score01: clamp01(adjusted) };
@@ -1640,6 +1785,692 @@ export class MemorySalienceScorer {
     const trend = this.computeSalienceTrend(store, context.playerId);
     lines.push(`trend=${trend.direction}|recent=${trend.recentAvg01.toFixed(3)}|older=${trend.olderAvg01.toFixed(3)}|delta=${trend.delta01.toFixed(3)}`);
     return lines;
+  }
+
+
+  private normalizeQuoteAudienceClass(value: unknown): ChatQuoteAudienceClass {
+    switch (value) {
+      case 'PUBLIC':
+      case 'PRIVATE':
+      case 'SYNDICATE':
+      case 'DEAL_ROOM':
+      case 'HELPER_ONLY':
+      case 'RIVAL_ONLY':
+      case 'SYSTEM_ONLY':
+      case 'SHADOW':
+        return value;
+      case 'TEAM':
+        return 'SYNDICATE';
+      case 'LEGEND':
+        return 'SYSTEM_ONLY';
+      case 'POST_RUN':
+        return 'DEAL_ROOM';
+      default:
+        return 'PUBLIC';
+    }
+  }
+
+  private normalizeCallbackPrivacyClass(value: unknown): ChatCallbackPrivacyClass {
+    switch (value) {
+      case 'PUBLIC':
+      case 'PRIVATE':
+      case 'HELPER_ONLY':
+      case 'RIVAL_ONLY':
+      case 'SYSTEM_ONLY':
+      case 'SHADOW':
+        return value;
+      case 'SYSTEM':
+      case 'LEGEND':
+      case 'POST_RUN':
+        return 'SYSTEM_ONLY';
+      case 'TEAM':
+      case 'SYNDICATE':
+      case 'DEAL_ROOM':
+        return 'PRIVATE';
+      default:
+        return 'PUBLIC';
+    }
+  }
+
+  private computeQuoteAudienceClassFit(
+    audienceClass: ChatQuoteAudienceClass,
+    context: MemorySalienceContext,
+    reasons: Set<MemorySalienceReasonCode>,
+  ): number {
+    const preferred = context.preferredAudienceClasses ?? [];
+    const contributions: number[] = [0.28];
+    if (preferred.length > 0 && preferred.includes(audienceClass)) {
+      contributions.push(0.22);
+      reasons.add('surface_alignment');
+    }
+    switch (audienceClass) {
+      case 'PUBLIC':
+        contributions.push(0.18);
+        reasons.add('public_witness');
+        break;
+      case 'SYNDICATE':
+        contributions.push(0.12);
+        reasons.add('room_witness_bonus');
+        break;
+      case 'DEAL_ROOM':
+        contributions.push(0.14);
+        reasons.add('surface_alignment');
+        break;
+      case 'SHADOW':
+      case 'PRIVATE':
+        contributions.push(0.1);
+        reasons.add('shadow_signal');
+        break;
+      case 'HELPER_ONLY':
+        contributions.push(0.12);
+        reasons.add('rescue_signal');
+        break;
+      case 'RIVAL_ONLY':
+        contributions.push(0.11);
+        reasons.add('rivalry_signal');
+        break;
+      case 'SYSTEM_ONLY':
+        contributions.push(Math.max(this.config.legendBoost, this.config.postRunBoost) * 0.9);
+        reasons.add('legend_value');
+        break;
+      default:
+        break;
+    }
+    return clamp01(contributions.reduce((sum, value) => sum + value, 0));
+  }
+
+  private computeCallbackPrivacyClassFit(
+    privacyClass: ChatCallbackPrivacyClass,
+    context: MemorySalienceContext,
+    reasons: Set<MemorySalienceReasonCode>,
+  ): number {
+    const preferred = context.preferredCallbackPrivacyClasses ?? [];
+    const contributions: number[] = [0.32];
+    if (preferred.length > 0 && preferred.includes(privacyClass)) {
+      contributions.push(0.24);
+      reasons.add('privacy_match');
+    }
+    if (context.preferredPrivacy) {
+      const normalizedPreferred = normalizePrivacy(context.preferredPrivacy);
+      if (normalizePrivacy(privacyClass) === normalizedPreferred) {
+        contributions.push(0.18);
+        reasons.add('privacy_match');
+      } else {
+        contributions.push(this.config.privacyMismatchPenalty * 0.75);
+        reasons.add('privacy_penalty');
+      }
+    }
+    if (privacyClass === 'SHADOW' || privacyClass === 'PRIVATE') {
+      contributions.push(this.config.shadowBoost * 0.6);
+      reasons.add('shadow_signal');
+    }
+    if (privacyClass === 'HELPER_ONLY') {
+      contributions.push(0.1);
+      reasons.add('rescue_signal');
+    }
+    if (privacyClass === 'RIVAL_ONLY') {
+      contributions.push(0.08);
+      reasons.add('rivalry_signal');
+    }
+    if (privacyClass === 'SYSTEM_ONLY') {
+      contributions.push(this.config.postRunBoost * 0.5);
+      reasons.add('surface_alignment');
+    }
+    return clamp01(contributions.reduce((sum, value) => sum + value, 0));
+  }
+
+  private buildDomainAggregate(
+    domain: MemorySalienceDomain,
+    scores: readonly MemorySalienceScore[],
+  ): MemorySalienceDomainAggregate {
+    const tiers = scores.map((score) => score.tier);
+    return {
+      domain,
+      count: scores.length,
+      averageScore01: average(scores.map((score) => score.score01)),
+      maxScore01: scores.reduce((max, score) => Math.max(max, score.score01), 0),
+      criticalCount: tiers.filter((tier) => tier === 'CRITICAL').length,
+      legendCount: tiers.filter((tier) => tier === 'LEGEND').length,
+      dormantCount: tiers.filter((tier) => tier === 'DORMANT').length,
+    };
+  }
+
+  private buildReasonHistogram(
+    scores: readonly MemorySalienceScore[],
+  ): readonly MemorySalienceReasonHistogramEntry[] {
+    const buckets = new Map<MemorySalienceReasonCode, { count: number; total: number; max: number }>();
+    for (const score of scores) {
+      for (const reason of score.reasons) {
+        const current = buckets.get(reason) ?? { count: 0, total: 0, max: 0 };
+        current.count += 1;
+        current.total += score.score01;
+        current.max = Math.max(current.max, score.score01);
+        buckets.set(reason, current);
+      }
+    }
+    const total = Math.max(1, scores.length);
+    return [...buckets.entries()]
+      .map(([reason, bucket]) => ({
+        reason,
+        count: bucket.count,
+        ratio01: clamp01(bucket.count / total),
+        topScore01: bucket.max,
+        averageScore01: bucket.total / Math.max(1, bucket.count),
+      }))
+      .sort((left, right) => {
+        if (right.count !== left.count) {
+          return right.count - left.count;
+        }
+        return right.averageScore01 - left.averageScore01;
+      });
+  }
+
+  private buildTagHistogram(
+    scores: readonly MemorySalienceScore[],
+  ): readonly MemorySalienceTagHistogramEntry[] {
+    const buckets = new Map<string, { count: number; total: number; max: number }>();
+    for (const score of scores) {
+      for (const tag of score.tags) {
+        const normalizedTag = normalizeText(tag);
+        if (!normalizedTag) {
+          continue;
+        }
+        const current = buckets.get(normalizedTag) ?? { count: 0, total: 0, max: 0 };
+        current.count += 1;
+        current.total += score.score01;
+        current.max = Math.max(current.max, score.score01);
+        buckets.set(normalizedTag, current);
+      }
+    }
+    const total = Math.max(1, scores.length);
+    return [...buckets.entries()]
+      .map(([tag, bucket]) => ({
+        tag,
+        count: bucket.count,
+        ratio01: clamp01(bucket.count / total),
+        averageScore01: bucket.total / Math.max(1, bucket.count),
+        maxScore01: bucket.max,
+      }))
+      .sort((left, right) => {
+        if (right.count !== left.count) {
+          return right.count - left.count;
+        }
+        return right.averageScore01 - left.averageScore01;
+      });
+  }
+
+  private buildActorBoard(
+    scores: readonly MemorySalienceScore[],
+  ): readonly MemorySalienceActorAggregate[] {
+    const buckets = new Map<string, MemorySalienceScore[]>();
+    for (const score of scores) {
+      if (!score.actorId) {
+        continue;
+      }
+      const bucket = buckets.get(score.actorId) ?? [];
+      bucket.push(score);
+      buckets.set(score.actorId, bucket);
+    }
+    return [...buckets.entries()].map(([actorId, actorScores]) => ({
+      actorId,
+      count: actorScores.length,
+      averageScore01: average(actorScores.map((score) => score.score01)),
+      maxScore01: actorScores.reduce((max, score) => Math.max(max, score.score01), 0),
+      criticalCount: actorScores.filter((score) => score.tier === 'CRITICAL').length,
+      legendCount: actorScores.filter((score) => score.tier === 'LEGEND').length,
+    })).sort((left, right) => {
+      if (right.averageScore01 !== left.averageScore01) {
+        return right.averageScore01 - left.averageScore01;
+      }
+      return right.count - left.count;
+    });
+  }
+
+  private buildCounterpartBoard(
+    scores: readonly MemorySalienceScore[],
+  ): readonly MemorySalienceCounterpartAggregate[] {
+    const buckets = new Map<string, MemorySalienceScore[]>();
+    for (const score of scores) {
+      if (!score.counterpartId) {
+        continue;
+      }
+      const bucket = buckets.get(score.counterpartId) ?? [];
+      bucket.push(score);
+      buckets.set(score.counterpartId, bucket);
+    }
+    return [...buckets.entries()].map(([counterpartId, bucket]) => ({
+      counterpartId,
+      count: bucket.length,
+      averageScore01: average(bucket.map((score) => score.score01)),
+      maxScore01: bucket.reduce((max, score) => Math.max(max, score.score01), 0),
+      unresolvedPressure01: average(bucket.map((score) => {
+        let pressure = 0;
+        if (score.reasons.includes('rivalry_pressure')) {
+          pressure += 0.35;
+        }
+        if (score.reasons.includes('rescue_pressure')) {
+          pressure += 0.3;
+        }
+        if (score.reasons.includes('deal_room_pressure')) {
+          pressure += 0.2;
+        }
+        if (score.reasons.includes('critical_event_type')) {
+          pressure += 0.15;
+        }
+        return clamp01(pressure);
+      })),
+    })).sort((left, right) => {
+      if (right.unresolvedPressure01 !== left.unresolvedPressure01) {
+        return right.unresolvedPressure01 - left.unresolvedPressure01;
+      }
+      return right.averageScore01 - left.averageScore01;
+    });
+  }
+
+  private buildChannelBoard(
+    scores: readonly MemorySalienceScore[],
+  ): readonly MemorySalienceChannelAggregate[] {
+    const buckets = new Map<string, MemorySalienceScore[]>();
+    for (const score of scores) {
+      if (!score.channelId) {
+        continue;
+      }
+      const bucket = buckets.get(score.channelId) ?? [];
+      bucket.push(score);
+      buckets.set(score.channelId, bucket);
+    }
+    return [...buckets.entries()].map(([channelId, bucket]) => ({
+      channelId,
+      count: bucket.length,
+      averageScore01: average(bucket.map((score) => score.score01)),
+      maxScore01: bucket.reduce((max, score) => Math.max(max, score.score01), 0),
+      topTier: bucket.slice().sort((left, right) => right.score01 - left.score01)[0]?.tier ?? 'DORMANT',
+    })).sort((left, right) => {
+      if (right.maxScore01 !== left.maxScore01) {
+        return right.maxScore01 - left.maxScore01;
+      }
+      return right.count - left.count;
+    });
+  }
+
+  private buildAudienceBoard(
+    batch: MemorySalienceBatch,
+  ): readonly MemorySalienceAudienceAggregate[] {
+    const buckets = new Map<ChatQuoteAudienceClass, number[]>();
+    for (const score of batch.quoteScores) {
+      const audienceClass = this.normalizeQuoteAudienceClass(score.snapshot['audienceClass']);
+      const bucket = buckets.get(audienceClass) ?? [];
+      bucket.push(score.score01);
+      buckets.set(audienceClass, bucket);
+    }
+    return [...buckets.entries()].map(([audienceClass, scores]) => ({
+      audienceClass,
+      count: scores.length,
+      averageScore01: average(scores),
+      maxScore01: scores.reduce((max, score) => Math.max(max, score), 0),
+    })).sort((left, right) => {
+      if (right.averageScore01 !== left.averageScore01) {
+        return right.averageScore01 - left.averageScore01;
+      }
+      return right.count - left.count;
+    });
+  }
+
+  private buildPrivacyBoard(
+    batch: MemorySalienceBatch,
+  ): readonly MemorySaliencePrivacyAggregate[] {
+    const buckets = new Map<ChatCallbackPrivacyClass, number[]>();
+    for (const score of batch.callbackScores) {
+      const privacyClass = this.normalizeCallbackPrivacyClass(score.snapshot['privacyClass']);
+      const bucket = buckets.get(privacyClass) ?? [];
+      bucket.push(score.score01);
+      buckets.set(privacyClass, bucket);
+    }
+    return [...buckets.entries()].map(([privacyClass, scores]) => ({
+      privacyClass,
+      count: scores.length,
+      averageScore01: average(scores),
+      maxScore01: scores.reduce((max, score) => Math.max(max, score), 0),
+    })).sort((left, right) => {
+      if (right.maxScore01 !== left.maxScore01) {
+        return right.maxScore01 - left.maxScore01;
+      }
+      return right.count - left.count;
+    });
+  }
+
+  private buildTimeline(
+    batch: MemorySalienceBatch,
+    limit: number = 48,
+  ): readonly MemorySalienceTimelinePoint[] {
+    return [...batch.eventScores, ...batch.quoteScores, ...batch.callbackScores]
+      .sort((left, right) => left.createdAt - right.createdAt)
+      .slice(-limit)
+      .map((score) => ({
+        id: score.id,
+        domain: score.domain,
+        createdAt: score.createdAt,
+        score01: score.score01,
+        tier: score.tier,
+        primaryReason: score.reasons[0],
+      }));
+  }
+
+  private buildRecommendations(
+    batch: MemorySalienceBatch,
+    context: MemorySalienceContext,
+  ): readonly MemorySalienceRecommendation[] {
+    const recommendations: MemorySalienceRecommendation[] = [];
+    const topEvent = batch.eventScores[0];
+    const topQuote = batch.quoteScores[0];
+    const topCallback = batch.callbackScores[0];
+
+    if (topQuote && topQuote.score01 >= 0.58) {
+      recommendations.push({
+        kind: 'RECALL_QUOTE',
+        id: topQuote.id,
+        domain: topQuote.domain,
+        score01: topQuote.score01,
+        tier: topQuote.tier,
+        rationale: topQuote.reasons.slice(0, 5),
+      });
+    }
+    if (topCallback && topCallback.score01 >= 0.56) {
+      recommendations.push({
+        kind: 'EMIT_CALLBACK',
+        id: topCallback.id,
+        domain: topCallback.domain,
+        score01: topCallback.score01,
+        tier: topCallback.tier,
+        rationale: topCallback.reasons.slice(0, 5),
+      });
+    }
+    if (topEvent && topEvent.score01 >= 0.62) {
+      recommendations.push({
+        kind: 'PRESERVE_EVENT',
+        id: topEvent.id,
+        domain: topEvent.domain,
+        score01: topEvent.score01,
+        tier: topEvent.tier,
+        rationale: topEvent.reasons.slice(0, 5),
+      });
+    }
+
+    const dormant = [...batch.eventScores, ...batch.quoteScores, ...batch.callbackScores]
+      .filter((score) => score.tier === 'DORMANT')
+      .sort((left, right) => left.score01 - right.score01)[0];
+    if (dormant) {
+      recommendations.push({
+        kind: 'COMPRESS_DORMANT',
+        id: dormant.id,
+        domain: dormant.domain,
+        score01: dormant.score01,
+        tier: dormant.tier,
+        rationale: dormant.reasons.slice(0, 4),
+      });
+    }
+
+    const counterpartSignal = [...batch.eventScores, ...batch.quoteScores, ...batch.callbackScores]
+      .filter((score) => score.counterpartId && score.counterpartId === context.counterpartId)
+      .sort((left, right) => right.score01 - left.score01)[0];
+    if (counterpartSignal) {
+      recommendations.push({
+        kind: 'ESCALATE_COUNTERPART',
+        id: counterpartSignal.id,
+        domain: counterpartSignal.domain,
+        score01: counterpartSignal.score01,
+        tier: counterpartSignal.tier,
+        rationale: counterpartSignal.reasons.slice(0, 5),
+      });
+    }
+
+    const postRunSignal = [...batch.quoteScores, ...batch.callbackScores]
+      .find((score) => score.reasons.includes('post_run_value') || score.reasons.includes('legend_value'));
+    if (postRunSignal) {
+      recommendations.push({
+        kind: 'PREPARE_POST_RUN',
+        id: postRunSignal.id,
+        domain: postRunSignal.domain,
+        score01: postRunSignal.score01,
+        tier: postRunSignal.tier,
+        rationale: postRunSignal.reasons.slice(0, 5),
+      });
+    }
+
+    return recommendations
+      .sort((left, right) => right.score01 - left.score01)
+      .slice(0, 8);
+  }
+
+  public buildSalienceReport(
+    store: ConversationMemoryStore,
+    context: MemorySalienceContext,
+  ): MemorySalienceReport {
+    const batch = this.scoreBatch(store, context);
+    const allScores = [...batch.eventScores, ...batch.quoteScores, ...batch.callbackScores];
+    return {
+      playerId: context.playerId,
+      createdAt: context.now ?? now(),
+      context,
+      batch,
+      domains: [
+        this.buildDomainAggregate('EVENT', batch.eventScores),
+        this.buildDomainAggregate('QUOTE', batch.quoteScores),
+        this.buildDomainAggregate('CALLBACK', batch.callbackScores),
+      ],
+      reasonHistogram: this.buildReasonHistogram(allScores),
+      tagHistogram: this.buildTagHistogram(allScores),
+      actorBoard: this.buildActorBoard(allScores).slice(0, 24),
+      counterpartBoard: this.buildCounterpartBoard(allScores).slice(0, 24),
+      channelBoard: this.buildChannelBoard(allScores).slice(0, 16),
+      audienceBoard: this.buildAudienceBoard(batch),
+      privacyBoard: this.buildPrivacyBoard(batch),
+      timeline: this.buildTimeline(batch),
+      recommendations: this.buildRecommendations(batch, context),
+    };
+  }
+
+  public summarizeSalienceReport(report: MemorySalienceReport): readonly string[] {
+    const lines: string[] = [];
+    lines.push(`memory_salience_report|player=${report.playerId}|at=${report.createdAt}`);
+    for (const domain of report.domains) {
+      lines.push(
+        `domain|name=${domain.domain}|count=${domain.count}|avg=${domain.averageScore01.toFixed(3)}|max=${domain.maxScore01.toFixed(3)}|critical=${domain.criticalCount}|legend=${domain.legendCount}`,
+      );
+    }
+    for (const recommendation of report.recommendations.slice(0, 5)) {
+      lines.push(
+        `recommendation|kind=${recommendation.kind}|domain=${recommendation.domain}|id=${recommendation.id}|score=${recommendation.score01.toFixed(3)}|tier=${recommendation.tier}`,
+      );
+    }
+    for (const reason of report.reasonHistogram.slice(0, 8)) {
+      lines.push(
+        `reason|name=${reason.reason}|count=${reason.count}|ratio=${reason.ratio01.toFixed(3)}|avg=${reason.averageScore01.toFixed(3)}`,
+      );
+    }
+    return lines;
+  }
+
+  public buildReplayFrames(
+    store: ConversationMemoryStore,
+    context: MemorySalienceContext,
+    limit: number = 12,
+  ): readonly MemorySalienceReplayFrame[] {
+    const batch = this.scoreBatch(store, context);
+    const sortedEvents = [...batch.eventScores].sort((left, right) => left.createdAt - right.createdAt).slice(-limit);
+    return sortedEvents.map((eventScore, index) => {
+      const quote = batch.quoteScores.find((score) => score.createdAt >= eventScore.createdAt - 30000 && score.createdAt <= eventScore.createdAt + 30000);
+      const callback = batch.callbackScores.find((score) => score.createdAt >= eventScore.createdAt - 60000 && score.createdAt <= eventScore.createdAt + 60000);
+      const momentum01 = clamp01(average([
+        eventScore.score01,
+        quote?.score01 ?? 0,
+        callback?.score01 ?? 0,
+      ]));
+      return {
+        ordinal: index,
+        at: eventScore.createdAt,
+        topEvent: eventScore,
+        topQuote: quote,
+        topCallback: callback,
+        momentum01,
+      };
+    });
+  }
+
+  public selectTopQuoteCandidates(
+    candidates: readonly ConversationQuoteCandidate[],
+    context: MemorySalienceContext,
+    limit: number = 5,
+  ): readonly MemorySalienceScore[] {
+    return candidates
+      .map((candidate) => this.scoreQuoteCandidate(candidate, context))
+      .sort((left, right) => right.score01 - left.score01)
+      .slice(0, Math.max(0, limit));
+  }
+
+  public selectTopCallbackCandidates(
+    candidates: readonly ConversationCallbackCandidate[],
+    context: MemorySalienceContext,
+    limit: number = 5,
+  ): readonly MemorySalienceScore[] {
+    return candidates
+      .map((candidate) => this.scoreCallbackCandidate(candidate, context))
+      .sort((left, right) => right.score01 - left.score01)
+      .slice(0, Math.max(0, limit));
+  }
+
+  public buildQuoteCandidateNarrative(
+    candidates: readonly ConversationQuoteCandidate[],
+    context: MemorySalienceContext,
+  ): MemorySalienceCandidateNarrative {
+    const scores = this.selectTopQuoteCandidates(candidates, context, 8);
+    return {
+      title: 'Quote Recall Surface',
+      domain: 'QUOTE',
+      ids: scores.map((score) => score.id),
+      counterpartIds: uniqueStrings(scores.map((score) => score.counterpartId)),
+      channels: uniqueStrings(scores.map((score) => score.channelId)),
+      topReasons: uniqueStrings(scores.flatMap((score) => score.reasons.slice(0, 3))),
+      averageScore01: average(scores.map((score) => score.score01)),
+    };
+  }
+
+  public buildCallbackCandidateNarrative(
+    candidates: readonly ConversationCallbackCandidate[],
+    context: MemorySalienceContext,
+  ): MemorySalienceCandidateNarrative {
+    const scores = this.selectTopCallbackCandidates(candidates, context, 8);
+    return {
+      title: 'Callback Emission Surface',
+      domain: 'CALLBACK',
+      ids: scores.map((score) => score.id),
+      counterpartIds: uniqueStrings(scores.map((score) => score.counterpartId)),
+      channels: uniqueStrings(scores.map((score) => score.channelId)),
+      topReasons: uniqueStrings(scores.flatMap((score) => score.reasons.slice(0, 3))),
+      averageScore01: average(scores.map((score) => score.score01)),
+    };
+  }
+
+  public filterScoresByChannels(
+    scores: readonly MemorySalienceScore[],
+    channels: readonly ConversationMemoryChannelId[],
+  ): readonly MemorySalienceScore[] {
+    const set = new Set(channels);
+    return scores.filter((score) => !!score.channelId && set.has(score.channelId as ConversationMemoryChannelId));
+  }
+
+  public filterScoresByActors(
+    scores: readonly MemorySalienceScore[],
+    actorIds: readonly string[],
+  ): readonly MemorySalienceScore[] {
+    const set = new Set(actorIds);
+    return scores.filter((score) => !!score.actorId && set.has(score.actorId));
+  }
+
+  public filterScoresByCounterparts(
+    scores: readonly MemorySalienceScore[],
+    counterpartIds: readonly string[],
+  ): readonly MemorySalienceScore[] {
+    const set = new Set(counterpartIds);
+    return scores.filter((score) => !!score.counterpartId && set.has(score.counterpartId));
+  }
+
+  public buildScoreMatrix(batch: MemorySalienceBatch): Readonly<Record<MemorySalienceDomain, readonly number[]>> {
+    return Object.freeze({
+      EVENT: batch.eventScores.map((score) => score.score01),
+      QUOTE: batch.quoteScores.map((score) => score.score01),
+      CALLBACK: batch.callbackScores.map((score) => score.score01),
+    });
+  }
+
+  public projectContextBoard(
+    batch: MemorySalienceBatch,
+    context: MemorySalienceContext,
+  ): readonly string[] {
+    const lines: string[] = [];
+    lines.push(`context|player=${context.playerId}|run=${context.runId ?? 'n/a'}|mode=${context.modeId ?? 'n/a'}|room=${context.roomId ?? 'n/a'}|channel=${context.channelId ?? 'n/a'}`);
+    lines.push(`context|actor=${context.actorId ?? 'n/a'}|counterpart=${context.counterpartId ?? 'n/a'}|pressure=${context.pressureTier ?? 'n/a'}|tick=${context.tick ?? -1}`);
+    const topEvent = batch.eventScores[0];
+    const topQuote = batch.quoteScores[0];
+    const topCallback = batch.callbackScores[0];
+    if (topEvent) {
+      lines.push(`top_event|id=${topEvent.id}|score=${topEvent.score01.toFixed(3)}|tier=${topEvent.tier}|reasons=${topEvent.reasons.slice(0, 4).join(',')}`);
+    }
+    if (topQuote) {
+      lines.push(`top_quote|id=${topQuote.id}|score=${topQuote.score01.toFixed(3)}|tier=${topQuote.tier}|reasons=${topQuote.reasons.slice(0, 4).join(',')}`);
+    }
+    if (topCallback) {
+      lines.push(`top_callback|id=${topCallback.id}|score=${topCallback.score01.toFixed(3)}|tier=${topCallback.tier}|reasons=${topCallback.reasons.slice(0, 4).join(',')}`);
+    }
+    return lines;
+  }
+
+  public buildLegendDeck(
+    batch: MemorySalienceBatch,
+    limit: number = 12,
+  ): readonly MemorySalienceScore[] {
+    return [...batch.eventScores, ...batch.quoteScores, ...batch.callbackScores]
+      .filter((score) => score.tier === 'LEGEND' || score.reasons.includes('legend_value'))
+      .sort((left, right) => right.score01 - left.score01)
+      .slice(0, Math.max(0, limit));
+  }
+
+  public buildCounterpartBoards(
+    batch: MemorySalienceBatch,
+  ): Readonly<Record<string, readonly MemorySalienceScore[]>> {
+    const boards: Record<string, MemorySalienceScore[]> = {};
+    for (const score of [...batch.eventScores, ...batch.quoteScores, ...batch.callbackScores]) {
+      const counterpartId = score.counterpartId ?? 'none';
+      if (!boards[counterpartId]) {
+        boards[counterpartId] = [];
+      }
+      boards[counterpartId]!.push(score);
+    }
+    for (const key of Object.keys(boards)) {
+      boards[key] = boards[key]!
+        .sort((left, right) => right.score01 - left.score01)
+        .slice(0, 12);
+    }
+    return Object.freeze(boards);
+  }
+
+  public buildRoomBoards(
+    batch: MemorySalienceBatch,
+  ): Readonly<Record<string, readonly MemorySalienceScore[]>> {
+    const boards: Record<string, MemorySalienceScore[]> = {};
+    for (const score of [...batch.eventScores, ...batch.quoteScores, ...batch.callbackScores]) {
+      const roomId = score.roomId ?? 'none';
+      if (!boards[roomId]) {
+        boards[roomId] = [];
+      }
+      boards[roomId]!.push(score);
+    }
+    for (const key of Object.keys(boards)) {
+      boards[key] = boards[key]!
+        .sort((left, right) => right.score01 - left.score01)
+        .slice(0, 12);
+    }
+    return Object.freeze(boards);
   }
 
 
@@ -1685,4 +2516,63 @@ export function filterScoresByTier(
   const order: readonly MemorySalienceTier[] = ['DORMANT', 'LOW', 'MEDIUM', 'HIGH', 'CRITICAL', 'LEGEND'];
   const minIndex = order.indexOf(minimumTier);
   return scores.filter((score) => order.indexOf(score.tier) >= minIndex);
+}
+
+
+export function buildMemorySalienceReport(
+  store: ConversationMemoryStore,
+  context: MemorySalienceContext,
+  config: Partial<MemorySalienceScorerConfig> = {},
+): MemorySalienceReport {
+  return new MemorySalienceScorer(config).buildSalienceReport(store, context);
+}
+
+export function summarizeMemorySalienceReport(
+  report: MemorySalienceReport,
+  config: Partial<MemorySalienceScorerConfig> = {},
+): readonly string[] {
+  return new MemorySalienceScorer(config).summarizeSalienceReport(report);
+}
+
+export function selectTopQuoteCandidatesBySalience(
+  candidates: readonly ConversationQuoteCandidate[],
+  context: MemorySalienceContext,
+  limit: number,
+  config: Partial<MemorySalienceScorerConfig> = {},
+): readonly MemorySalienceScore[] {
+  return new MemorySalienceScorer(config).selectTopQuoteCandidates(candidates, context, limit);
+}
+
+export function selectTopCallbackCandidatesBySalience(
+  candidates: readonly ConversationCallbackCandidate[],
+  context: MemorySalienceContext,
+  limit: number,
+  config: Partial<MemorySalienceScorerConfig> = {},
+): readonly MemorySalienceScore[] {
+  return new MemorySalienceScorer(config).selectTopCallbackCandidates(candidates, context, limit);
+}
+
+export function buildQuoteCandidateNarrative(
+  candidates: readonly ConversationQuoteCandidate[],
+  context: MemorySalienceContext,
+  config: Partial<MemorySalienceScorerConfig> = {},
+): MemorySalienceCandidateNarrative {
+  return new MemorySalienceScorer(config).buildQuoteCandidateNarrative(candidates, context);
+}
+
+export function buildCallbackCandidateNarrative(
+  candidates: readonly ConversationCallbackCandidate[],
+  context: MemorySalienceContext,
+  config: Partial<MemorySalienceScorerConfig> = {},
+): MemorySalienceCandidateNarrative {
+  return new MemorySalienceScorer(config).buildCallbackCandidateNarrative(candidates, context);
+}
+
+export function buildMemorySalienceReplayFrames(
+  store: ConversationMemoryStore,
+  context: MemorySalienceContext,
+  limit: number,
+  config: Partial<MemorySalienceScorerConfig> = {},
+): readonly MemorySalienceReplayFrame[] {
+  return new MemorySalienceScorer(config).buildReplayFrames(store, context, limit);
 }
