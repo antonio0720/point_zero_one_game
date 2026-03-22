@@ -1,9 +1,11 @@
 // /Users/mervinlarry/workspaces/adam/Projects/adam/point_zero_one_master/pzo-web/src/engines/chat/intelligence/index.ts
-
 /**
  * ============================================================================
  * POINT ZERO ONE — FRONTEND CHAT INTELLIGENCE BARREL
  * FILE: pzo-web/src/engines/chat/intelligence/index.ts
+ * VERSION: 2026.03.21-intelligence-barrel.v4-retrieval-lane
+ * AUTHORSHIP: Antonio T. Smith Jr.
+ * LICENSE: Internal / Proprietary / All Rights Reserved
  * ============================================================================
  *
  * Purpose
@@ -43,7 +45,6 @@
 import * as ChatLearningBridgeRuntime from './ChatLearningBridge';
 import * as ChatLearningProfileRuntime from './ChatLearningProfile';
 import * as ChatColdStartProfileRuntime from './ChatColdStartProfile';
-import * as ChatNoveltyLedgerRuntime from './ChatNoveltyLedger';
 
 // ── ML lane ──────────────────────────────────────────────────────────────────
 import * as ChatFeatureExtractorRuntime from './ml/FeatureExtractor';
@@ -74,7 +75,6 @@ import * as ChatSaliencePreviewRuntime from './dl/SaliencePreview';
 export * from './ChatLearningBridge';
 export * from './ChatLearningProfile';
 export * from './ChatColdStartProfile';
-export * from './ChatNoveltyLedger';
 export * from './ml/EmotionScorer';
 export * from './ml/SocialEmbarrassmentScorer';
 export * from './ml/ConfidenceSwingTracker';
@@ -89,7 +89,7 @@ export const CHAT_INTELLIGENCE_MODULE_NAME =
   'PZO_FRONTEND_CHAT_INTELLIGENCE' as const;
 
 export const CHAT_INTELLIGENCE_VERSION =
-  '2026.03.20-intelligence-barrel.v4-retrieval-lane' as const;
+  '2026.03.21-intelligence-barrel.v4-retrieval-lane' as const;
 
 export const CHAT_INTELLIGENCE_BARREL_LAWS = Object.freeze([
   'Export what is real now, not what is merely planned.',
@@ -99,7 +99,6 @@ export const CHAT_INTELLIGENCE_BARREL_LAWS = Object.freeze([
   'Emotion state is a signal surface, not a display flag.',
   'Retrieval is read-only from the frontend; writes flow through backend authority.',
   'Salience previews are ephemeral rendering hints, not ground truth.',
-  'Novelty ledgers should be imported from this barrel when local anti-repeat scoring is needed.',
   'Every memory retrieval result must carry a confidence bound.',
   'Do not collapse retrieval results into UI decisions without a policy gate.',
 ] as const);
@@ -113,7 +112,6 @@ export const CHAT_INTELLIGENCE_PHASE_EXPORTS = Object.freeze({
     'ChatLearningBridge.ts',
     'ChatLearningProfile.ts',
     'ChatColdStartProfile.ts',
-    'ChatNoveltyLedger.ts',
     'ml/FeatureExtractor.ts',
     'ml/EngagementScorer.ts',
     'ml/ColdStartPolicy.ts',
@@ -153,7 +151,6 @@ export const CHAT_INTELLIGENCE_COMPILE_SAFE_SURFACE = Object.freeze({
   hasBridgeRuntime: true,
   hasColdStartProfileRuntime: true,
   hasLearningProfileRuntime: true,
-  hasNoveltyLedgerRuntime: true,
   // ML lane
   hasFeatureExtractorRuntime: true,
   hasEngagementScorerRuntime: true,
@@ -180,7 +177,6 @@ export const CHAT_INTELLIGENCE_COMPILE_SAFE_SURFACE = Object.freeze({
   canInstantiateBridge: true,
   canHydrateColdStartProfile: true,
   canHydrateLearningProfile: true,
-  canInstantiateNoveltyLedger: true,
   canExtractFeatures: true,
   canScoreEngagement: true,
   canApplyColdStartPolicy: true,
@@ -229,12 +225,6 @@ export const CHAT_INTELLIGENCE_MODULE_MANIFESTS = Object.freeze({
     version: ChatLearningProfileRuntime.CHAT_LEARNING_PROFILE_VERSION,
     laws: ChatLearningProfileRuntime.CHAT_LEARNING_PROFILE_RUNTIME_LAWS,
     defaults: ChatLearningProfileRuntime.CHAT_LEARNING_PROFILE_DEFAULTS,
-  }),
-  noveltyLedger: Object.freeze({
-    moduleName: ChatNoveltyLedgerRuntime.CHAT_NOVELTY_LEDGER_MODULE_NAME,
-    version: ChatNoveltyLedgerRuntime.CHAT_NOVELTY_LEDGER_VERSION,
-    laws: ChatNoveltyLedgerRuntime.CHAT_NOVELTY_LEDGER_RUNTIME_LAWS,
-    defaults: ChatNoveltyLedgerRuntime.CHAT_NOVELTY_LEDGER_DEFAULTS,
   }),
   featureExtractor: Object.freeze({
     moduleName: ChatFeatureExtractorRuntime.CHAT_FEATURE_EXTRACTOR_MODULE_NAME,
@@ -330,18 +320,13 @@ export const CHAT_INTELLIGENCE_MODULE_MANIFESTS = Object.freeze({
     moduleName: ChatConfidenceSwingTrackerRuntime.CHAT_CONFIDENCE_SWING_TRACKER_MODULE_NAME,
     version: ChatConfidenceSwingTrackerRuntime.CHAT_CONFIDENCE_SWING_TRACKER_VERSION,
     laws: ChatConfidenceSwingTrackerRuntime.CHAT_CONFIDENCE_SWING_TRACKER_RUNTIME_LAWS,
-    defaults:
-      ChatConfidenceSwingTrackerRuntime.CHAT_CONFIDENCE_SWING_TRACKER_DEFAULTS,
+    defaults: ChatConfidenceSwingTrackerRuntime.CHAT_CONFIDENCE_SWING_TRACKER_DEFAULTS,
   }),
   memoryRetrieval: Object.freeze({
-    moduleName:
-      ChatMemoryRetrievalClientRuntime.CHAT_MEMORY_RETRIEVAL_CLIENT_MODULE_NAME,
-    version:
-      ChatMemoryRetrievalClientRuntime.CHAT_MEMORY_RETRIEVAL_CLIENT_VERSION,
-    laws:
-      ChatMemoryRetrievalClientRuntime.CHAT_MEMORY_RETRIEVAL_CLIENT_RUNTIME_LAWS,
-    defaults:
-      ChatMemoryRetrievalClientRuntime.CHAT_MEMORY_RETRIEVAL_CLIENT_DEFAULTS,
+    moduleName: ChatMemoryRetrievalClientRuntime.CHAT_MEMORY_RETRIEVAL_CLIENT_MODULE_NAME,
+    version: ChatMemoryRetrievalClientRuntime.CHAT_MEMORY_RETRIEVAL_CLIENT_VERSION,
+    laws: ChatMemoryRetrievalClientRuntime.CHAT_MEMORY_RETRIEVAL_CLIENT_RUNTIME_LAWS,
+    defaults: ChatMemoryRetrievalClientRuntime.CHAT_MEMORY_RETRIEVAL_CLIENT_DEFAULTS,
   }),
   saliencePreview: Object.freeze({
     moduleName: ChatSaliencePreviewRuntime.CHAT_SALIENCE_PREVIEW_MODULE_NAME,
@@ -355,32 +340,29 @@ export const CHAT_INTELLIGENCE_MODULE_MANIFESTS = Object.freeze({
 /* MARK: Frontend laws (aggregated)                                           */
 /* ========================================================================== */
 
-export const CHAT_INTELLIGENCE_FRONTEND_LAWS = Object.freeze(
-  [
-    ...ChatLearningBridgeRuntime.CHAT_LEARNING_BRIDGE_RUNTIME_LAWS,
-    ...ChatColdStartProfileRuntime.CHAT_COLD_START_PROFILE_RUNTIME_LAWS,
-    ...ChatLearningProfileRuntime.CHAT_LEARNING_PROFILE_RUNTIME_LAWS,
-    ...ChatNoveltyLedgerRuntime.CHAT_NOVELTY_LEDGER_RUNTIME_LAWS,
-    ...ChatFeatureExtractorRuntime.CHAT_FEATURE_EXTRACTOR_RUNTIME_LAWS,
-    ...ChatEngagementScorerRuntime.CHAT_ENGAGEMENT_SCORER_RUNTIME_LAWS,
-    ...ChatColdStartPolicyRuntime.CHAT_COLD_START_POLICY_RUNTIME_LAWS,
-    ...ChatHaterPersonaPolicyRuntime.CHAT_HATER_PERSONA_POLICY_RUNTIME_LAWS,
-    ...ChatHelperInterventionPolicyRuntime.CHAT_HELPER_INTERVENTION_POLICY_RUNTIME_LAWS,
-    ...ChatChannelRecommendationPolicyRuntime.CHAT_CHANNEL_RECOMMENDATION_POLICY_RUNTIME_LAWS,
-    ...ChatToxicityRiskScorerRuntime.CHAT_TOXICITY_RISK_SCORER_RUNTIME_LAWS,
-    ...ChatDropOffRiskScorerRuntime.CHAT_DROP_OFF_RISK_SCORER_RUNTIME_LAWS,
-    ...ChatMessageEmbeddingClientRuntime.CHAT_MESSAGE_EMBEDDING_CLIENT_RUNTIME_LAWS,
-    ...ChatDialogueIntentEncoderRuntime.CHAT_DIALOGUE_INTENT_ENCODER_RUNTIME_LAWS,
-    ...ChatConversationStateEncoderRuntime.CHAT_CONVERSATION_STATE_ENCODER_RUNTIME_LAWS,
-    ...ChatResponseRankerClientRuntime.CHAT_RESPONSE_RANKER_CLIENT_RUNTIME_LAWS,
-    ...ChatSequenceMemoryClientRuntime.CHAT_SEQUENCE_MEMORY_CLIENT_RUNTIME_LAWS,
-    ...ChatEmotionScorerRuntime.CHAT_EMOTION_SCORER_RUNTIME_LAWS,
-    ...ChatSocialEmbarrassmentScorerRuntime.CHAT_SOCIAL_EMBARRASSMENT_SCORER_RUNTIME_LAWS,
-    ...ChatConfidenceSwingTrackerRuntime.CHAT_CONFIDENCE_SWING_TRACKER_RUNTIME_LAWS,
-    ...ChatMemoryRetrievalClientRuntime.CHAT_MEMORY_RETRIEVAL_CLIENT_RUNTIME_LAWS,
-    ...ChatSaliencePreviewRuntime.CHAT_SALIENCE_PREVIEW_RUNTIME_LAWS,
-  ],
-);
+export const CHAT_INTELLIGENCE_FRONTEND_LAWS = Object.freeze([
+  ...ChatLearningBridgeRuntime.CHAT_LEARNING_BRIDGE_RUNTIME_LAWS,
+  ...ChatColdStartProfileRuntime.CHAT_COLD_START_PROFILE_RUNTIME_LAWS,
+  ...ChatLearningProfileRuntime.CHAT_LEARNING_PROFILE_RUNTIME_LAWS,
+  ...ChatFeatureExtractorRuntime.CHAT_FEATURE_EXTRACTOR_RUNTIME_LAWS,
+  ...ChatEngagementScorerRuntime.CHAT_ENGAGEMENT_SCORER_RUNTIME_LAWS,
+  ...ChatColdStartPolicyRuntime.CHAT_COLD_START_POLICY_RUNTIME_LAWS,
+  ...ChatHaterPersonaPolicyRuntime.CHAT_HATER_PERSONA_POLICY_RUNTIME_LAWS,
+  ...ChatHelperInterventionPolicyRuntime.CHAT_HELPER_INTERVENTION_POLICY_RUNTIME_LAWS,
+  ...ChatChannelRecommendationPolicyRuntime.CHAT_CHANNEL_RECOMMENDATION_POLICY_RUNTIME_LAWS,
+  ...ChatToxicityRiskScorerRuntime.CHAT_TOXICITY_RISK_SCORER_RUNTIME_LAWS,
+  ...ChatDropOffRiskScorerRuntime.CHAT_DROP_OFF_RISK_SCORER_RUNTIME_LAWS,
+  ...ChatMessageEmbeddingClientRuntime.CHAT_MESSAGE_EMBEDDING_CLIENT_RUNTIME_LAWS,
+  ...ChatDialogueIntentEncoderRuntime.CHAT_DIALOGUE_INTENT_ENCODER_RUNTIME_LAWS,
+  ...ChatConversationStateEncoderRuntime.CHAT_CONVERSATION_STATE_ENCODER_RUNTIME_LAWS,
+  ...ChatResponseRankerClientRuntime.CHAT_RESPONSE_RANKER_CLIENT_RUNTIME_LAWS,
+  ...ChatSequenceMemoryClientRuntime.CHAT_SEQUENCE_MEMORY_CLIENT_RUNTIME_LAWS,
+  ...ChatEmotionScorerRuntime.CHAT_EMOTION_SCORER_RUNTIME_LAWS,
+  ...ChatSocialEmbarrassmentScorerRuntime.CHAT_SOCIAL_EMBARRASSMENT_SCORER_RUNTIME_LAWS,
+  ...ChatConfidenceSwingTrackerRuntime.CHAT_CONFIDENCE_SWING_TRACKER_RUNTIME_LAWS,
+  ...ChatMemoryRetrievalClientRuntime.CHAT_MEMORY_RETRIEVAL_CLIENT_RUNTIME_LAWS,
+  ...ChatSaliencePreviewRuntime.CHAT_SALIENCE_PREVIEW_RUNTIME_LAWS,
+]);
 
 /* ========================================================================== */
 /* MARK: Public manifest                                                      */
@@ -431,17 +413,6 @@ export const CHAT_INTELLIGENCE_LEARNING_PROFILE_NAMESPACE = Object.freeze({
   mergeLearningProfileDelta: ChatLearningProfileRuntime.mergeLearningProfileDelta,
 } as const);
 
-export const CHAT_INTELLIGENCE_NOVELTY_LEDGER_NAMESPACE = Object.freeze({
-  moduleName: ChatNoveltyLedgerRuntime.CHAT_NOVELTY_LEDGER_MODULE_NAME,
-  version: ChatNoveltyLedgerRuntime.CHAT_NOVELTY_LEDGER_VERSION,
-  defaults: ChatNoveltyLedgerRuntime.CHAT_NOVELTY_LEDGER_DEFAULTS,
-  laws: ChatNoveltyLedgerRuntime.CHAT_NOVELTY_LEDGER_RUNTIME_LAWS,
-  ChatNoveltyLedger: ChatNoveltyLedgerRuntime.ChatNoveltyLedger,
-  createChatNoveltyLedger: ChatNoveltyLedgerRuntime.createChatNoveltyLedger,
-  restoreChatNoveltyLedger: ChatNoveltyLedgerRuntime.restoreChatNoveltyLedger,
-  describeChatNoveltyScore: ChatNoveltyLedgerRuntime.describeChatNoveltyScore,
-} as const);
-
 export const CHAT_INTELLIGENCE_EMOTION_SCORER_NAMESPACE = Object.freeze({
   moduleName: ChatEmotionScorerRuntime.CHAT_EMOTION_SCORER_MODULE_NAME,
   version: ChatEmotionScorerRuntime.CHAT_EMOTION_SCORER_VERSION,
@@ -480,17 +451,12 @@ export const CHAT_INTELLIGENCE_CONFIDENCE_SWING_NAMESPACE = Object.freeze({
 } as const);
 
 export const CHAT_INTELLIGENCE_MEMORY_RETRIEVAL_NAMESPACE = Object.freeze({
-  moduleName:
-    ChatMemoryRetrievalClientRuntime.CHAT_MEMORY_RETRIEVAL_CLIENT_MODULE_NAME,
-  version:
-    ChatMemoryRetrievalClientRuntime.CHAT_MEMORY_RETRIEVAL_CLIENT_VERSION,
-  defaults:
-    ChatMemoryRetrievalClientRuntime.CHAT_MEMORY_RETRIEVAL_CLIENT_DEFAULTS,
-  laws:
-    ChatMemoryRetrievalClientRuntime.CHAT_MEMORY_RETRIEVAL_CLIENT_RUNTIME_LAWS,
+  moduleName: ChatMemoryRetrievalClientRuntime.CHAT_MEMORY_RETRIEVAL_CLIENT_MODULE_NAME,
+  version: ChatMemoryRetrievalClientRuntime.CHAT_MEMORY_RETRIEVAL_CLIENT_VERSION,
+  defaults: ChatMemoryRetrievalClientRuntime.CHAT_MEMORY_RETRIEVAL_CLIENT_DEFAULTS,
+  laws: ChatMemoryRetrievalClientRuntime.CHAT_MEMORY_RETRIEVAL_CLIENT_RUNTIME_LAWS,
   MemoryRetrievalClient: ChatMemoryRetrievalClientRuntime.MemoryRetrievalClient,
-  createMemoryRetrievalClient:
-    ChatMemoryRetrievalClientRuntime.createMemoryRetrievalClient,
+  createMemoryRetrievalClient: ChatMemoryRetrievalClientRuntime.createMemoryRetrievalClient,
   retrieveChatMemory: ChatMemoryRetrievalClientRuntime.retrieveChatMemory,
   previewChatMemory: ChatMemoryRetrievalClientRuntime.previewChatMemory,
 } as const);
@@ -502,10 +468,8 @@ export const CHAT_INTELLIGENCE_SALIENCE_PREVIEW_NAMESPACE = Object.freeze({
   laws: ChatSaliencePreviewRuntime.CHAT_SALIENCE_PREVIEW_RUNTIME_LAWS,
   SaliencePreview: ChatSaliencePreviewRuntime.SaliencePreview,
   createSaliencePreview: ChatSaliencePreviewRuntime.createSaliencePreview,
-  buildChatSaliencePreview:
-    ChatSaliencePreviewRuntime.buildChatSaliencePreview,
-  summarizeChatSaliencePreview:
-    ChatSaliencePreviewRuntime.summarizeChatSaliencePreview,
+  buildChatSaliencePreview: ChatSaliencePreviewRuntime.buildChatSaliencePreview,
+  summarizeChatSaliencePreview: ChatSaliencePreviewRuntime.summarizeChatSaliencePreview,
 } as const);
 
 /* ========================================================================== */
@@ -519,13 +483,11 @@ export const CHAT_INTELLIGENCE_NAMESPACE = Object.freeze({
   bridge: CHAT_INTELLIGENCE_BRIDGE_NAMESPACE,
   coldStart: CHAT_INTELLIGENCE_COLD_START_NAMESPACE,
   learningProfile: CHAT_INTELLIGENCE_LEARNING_PROFILE_NAMESPACE,
-  noveltyLedger: CHAT_INTELLIGENCE_NOVELTY_LEDGER_NAMESPACE,
   emotionScorer: CHAT_INTELLIGENCE_EMOTION_SCORER_NAMESPACE,
   socialEmbarrassment: CHAT_INTELLIGENCE_SOCIAL_EMBARRASSMENT_NAMESPACE,
   confidenceSwing: CHAT_INTELLIGENCE_CONFIDENCE_SWING_NAMESPACE,
   memoryRetrieval: CHAT_INTELLIGENCE_MEMORY_RETRIEVAL_NAMESPACE,
   saliencePreview: CHAT_INTELLIGENCE_SALIENCE_PREVIEW_NAMESPACE,
-  compileSafeSurface: CHAT_INTELLIGENCE_COMPILE_SAFE_SURFACE,
 } as const);
 
 /* ========================================================================== */
@@ -536,48 +498,35 @@ export const CHAT_INTELLIGENCE_FULL_SURFACE = Object.freeze({
   manifest: CHAT_INTELLIGENCE_PUBLIC_MANIFEST,
   barrelLaws: CHAT_INTELLIGENCE_BARREL_LAWS,
   compileSafeSurface: CHAT_INTELLIGENCE_COMPILE_SAFE_SURFACE,
-
   bridge: CHAT_INTELLIGENCE_BRIDGE_NAMESPACE,
   coldStart: CHAT_INTELLIGENCE_COLD_START_NAMESPACE,
   learningProfile: CHAT_INTELLIGENCE_LEARNING_PROFILE_NAMESPACE,
-  noveltyLedger: CHAT_INTELLIGENCE_NOVELTY_LEDGER_NAMESPACE,
   emotionScorer: CHAT_INTELLIGENCE_EMOTION_SCORER_NAMESPACE,
   socialEmbarrassment: CHAT_INTELLIGENCE_SOCIAL_EMBARRASSMENT_NAMESPACE,
   confidenceSwing: CHAT_INTELLIGENCE_CONFIDENCE_SWING_NAMESPACE,
   memoryRetrieval: CHAT_INTELLIGENCE_MEMORY_RETRIEVAL_NAMESPACE,
   saliencePreview: CHAT_INTELLIGENCE_SALIENCE_PREVIEW_NAMESPACE,
-
   // flat runtime refs
   ChatLearningBridge: ChatLearningBridgeRuntime.ChatLearningBridge,
   createChatLearningBridge: ChatLearningBridgeRuntime.createChatLearningBridge,
   syncLearningBridge: ChatLearningBridgeRuntime.syncLearningBridge,
   flushLearningBridge: ChatLearningBridgeRuntime.flushLearningBridge,
-
   ChatColdStartProfile: ChatColdStartProfileRuntime.ChatColdStartProfile,
   createChatColdStartProfile: ChatColdStartProfileRuntime.createChatColdStartProfile,
   hydrateColdStartProfile: ChatColdStartProfileRuntime.hydrateColdStartProfile,
-
   ChatLearningProfile: ChatLearningProfileRuntime.ChatLearningProfile,
   createChatLearningProfile: ChatLearningProfileRuntime.createChatLearningProfile,
   hydrateLearningProfile: ChatLearningProfileRuntime.hydrateLearningProfile,
   mergeLearningProfileDelta: ChatLearningProfileRuntime.mergeLearningProfileDelta,
-
-  ChatNoveltyLedger: ChatNoveltyLedgerRuntime.ChatNoveltyLedger,
-  createChatNoveltyLedger: ChatNoveltyLedgerRuntime.createChatNoveltyLedger,
-  restoreChatNoveltyLedger: ChatNoveltyLedgerRuntime.restoreChatNoveltyLedger,
-  describeChatNoveltyScore: ChatNoveltyLedgerRuntime.describeChatNoveltyScore,
-
   EmotionScorer: ChatEmotionScorerRuntime.EmotionScorer,
   createEmotionScorer: ChatEmotionScorerRuntime.createEmotionScorer,
   scoreChatEmotion: ChatEmotionScorerRuntime.scoreChatEmotion,
   refineEmotionProfileState: ChatEmotionScorerRuntime.refineEmotionProfileState,
-
   SocialEmbarrassmentScorer: ChatSocialEmbarrassmentScorerRuntime.SocialEmbarrassmentScorer,
   createSocialEmbarrassmentScorer: ChatSocialEmbarrassmentScorerRuntime.createSocialEmbarrassmentScorer,
   scoreChatSocialEmbarrassment: ChatSocialEmbarrassmentScorerRuntime.scoreChatSocialEmbarrassment,
   refineEmbarrassmentProfileState:
     ChatSocialEmbarrassmentScorerRuntime.refineEmbarrassmentProfileState,
-
   ConfidenceSwingTracker: ChatConfidenceSwingTrackerRuntime.ConfidenceSwingTracker,
   createConfidenceSwingTracker: ChatConfidenceSwingTrackerRuntime.createConfidenceSwingTracker,
   trackChatConfidenceSwing: ChatConfidenceSwingTrackerRuntime.trackChatConfidenceSwing,
@@ -585,20 +534,14 @@ export const CHAT_INTELLIGENCE_FULL_SURFACE = Object.freeze({
     ChatConfidenceSwingTrackerRuntime.recommendConfidenceSwingAction,
   refineConfidenceSwingProfileState:
     ChatConfidenceSwingTrackerRuntime.refineConfidenceSwingProfileState,
-
-  MemoryRetrievalClient:
-    ChatMemoryRetrievalClientRuntime.MemoryRetrievalClient,
-  createMemoryRetrievalClient:
-    ChatMemoryRetrievalClientRuntime.createMemoryRetrievalClient,
+  MemoryRetrievalClient: ChatMemoryRetrievalClientRuntime.MemoryRetrievalClient,
+  createMemoryRetrievalClient: ChatMemoryRetrievalClientRuntime.createMemoryRetrievalClient,
   retrieveChatMemory: ChatMemoryRetrievalClientRuntime.retrieveChatMemory,
   previewChatMemory: ChatMemoryRetrievalClientRuntime.previewChatMemory,
-
   SaliencePreview: ChatSaliencePreviewRuntime.SaliencePreview,
   createSaliencePreview: ChatSaliencePreviewRuntime.createSaliencePreview,
-  buildChatSaliencePreview:
-    ChatSaliencePreviewRuntime.buildChatSaliencePreview,
-  summarizeChatSaliencePreview:
-    ChatSaliencePreviewRuntime.summarizeChatSaliencePreview,
+  buildChatSaliencePreview: ChatSaliencePreviewRuntime.buildChatSaliencePreview,
+  summarizeChatSaliencePreview: ChatSaliencePreviewRuntime.summarizeChatSaliencePreview,
 } as const);
 
 /* ========================================================================== */
@@ -629,16 +572,11 @@ export const CHAT_INTELLIGENCE_DEV_SURFACE = Object.freeze({
     conversationStateEncoder: '/pzo-web/src/engines/chat/intelligence/dl/ConversationStateEncoder',
     responseRankerClient: '/pzo-web/src/engines/chat/intelligence/dl/ResponseRankerClient',
     sequenceMemoryClient: '/pzo-web/src/engines/chat/intelligence/dl/SequenceMemoryClient',
-    emotionScorer:
-      '/pzo-web/src/engines/chat/intelligence/ml/EmotionScorer',
-    socialEmbarrassment:
-      '/pzo-web/src/engines/chat/intelligence/ml/SocialEmbarrassmentScorer',
-    confidenceSwing:
-      '/pzo-web/src/engines/chat/intelligence/ml/ConfidenceSwingTracker',
-    memoryRetrieval:
-      '/pzo-web/src/engines/chat/intelligence/dl/MemoryRetrievalClient',
-    saliencePreview:
-      '/pzo-web/src/engines/chat/intelligence/dl/SaliencePreview',
+    emotionScorer: '/pzo-web/src/engines/chat/intelligence/ml/EmotionScorer',
+    socialEmbarrassment: '/pzo-web/src/engines/chat/intelligence/ml/SocialEmbarrassmentScorer',
+    confidenceSwing: '/pzo-web/src/engines/chat/intelligence/ml/ConfidenceSwingTracker',
+    memoryRetrieval: '/pzo-web/src/engines/chat/intelligence/dl/MemoryRetrievalClient',
+    saliencePreview: '/pzo-web/src/engines/chat/intelligence/dl/SaliencePreview',
   }),
   recommendedConsumers: Object.freeze([
     'pzo-web/src/engines/chat/ChatEngine.ts',
@@ -684,7 +622,6 @@ export type ChatIntelligenceCompileSafeSurface = typeof CHAT_INTELLIGENCE_COMPIL
 export type ChatIntelligenceBridgeNamespace = typeof CHAT_INTELLIGENCE_BRIDGE_NAMESPACE;
 export type ChatIntelligenceColdStartNamespace = typeof CHAT_INTELLIGENCE_COLD_START_NAMESPACE;
 export type ChatIntelligenceLearningProfileNamespace = typeof CHAT_INTELLIGENCE_LEARNING_PROFILE_NAMESPACE;
-export type ChatIntelligenceNoveltyLedgerNamespace = typeof CHAT_INTELLIGENCE_NOVELTY_LEDGER_NAMESPACE;
 export type ChatIntelligenceEmotionScorerNamespace =
   typeof CHAT_INTELLIGENCE_EMOTION_SCORER_NAMESPACE;
 export type ChatIntelligenceSocialEmbarrassmentNamespace =
