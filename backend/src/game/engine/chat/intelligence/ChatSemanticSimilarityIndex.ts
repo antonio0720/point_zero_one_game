@@ -54,37 +54,50 @@
 // ── MARK: Shared contract imports ────────────────────────────────────────────
 
 import type {
+  ChatSemanticActorClass,
+  ChatSemanticChannelPolicy,
+  ChatSemanticDecayCurve,
+  ChatSemanticDocumentFlags,
   ChatSemanticDocumentInput,
+  ChatSemanticExplainabilityTerm,
+  ChatSemanticFederationScope,
   ChatSemanticIndexedDocument,
+  ChatSemanticIndexSnapshot,
+  ChatSemanticModePolicy,
+  ChatSemanticModeScope,
   ChatSemanticNeighbor,
   ChatSemanticNoveltyDecision,
   ChatSemanticNoveltyGuardConfig,
   ChatSemanticNoveltyGuardRequest,
+  ChatSemanticNoveltyWindowStats,
   ChatSemanticPressureBand,
   ChatSemanticPressureThresholds,
-  ChatSemanticModePolicy,
+  ChatSemanticProvenance,
   ChatSemanticQuery,
   ChatSemanticQueryResult,
+  ChatSemanticQueryStrategy,
+  ChatSemanticRhetoricalFamily,
   ChatSemanticRhetoricalForm,
   ChatSemanticSparseVectorEntry,
-  ChatSemanticIndexSnapshot,
-  ChatSemanticActorIndexSlot,
-  ChatSemanticDecayCurve,
-  ChatSemanticTrainingRow,
   ChatSemanticTelemetryRecord,
-  ChatSemanticFederationScope,
+  ChatSemanticTextRegister,
+  ChatSemanticCadenceClass,
+  ChatSemanticSourceKind,
+  ChatSemanticActorIndexSlot,
+  ChatSemanticTrainingRow,
 } from '../../../../../../shared/contracts/chat/semantic-similarity';
 
 import {
   DEFAULT_CHAT_SEMANTIC_NOVELTY_GUARD,
   DEFAULT_CHAT_SEMANTIC_DECAY_CURVE,
-  CHAT_SEMANTIC_PRESSURE_THRESHOLDS,
-  CHAT_SEMANTIC_MODE_POLICIES,
+  buildExplainabilityTermsForForm,
   clamp01,
-  isChatSemanticPressureBand,
-  resolvePressureThresholds,
+  createDefaultDocumentFlags,
+  createDefaultProvenance,
+  deriveRhetoricalFamily,
+  resolveChannelPolicy,
   resolveModePolicy,
-  CHAT_SEMANTIC_RHETORICAL_FORMS,
+  resolvePressureThresholds,
 } from '../../../../../../shared/contracts/chat/semantic-similarity';
 
 // ── MARK: Backend types ────────────────────────────────────────────────────
@@ -105,7 +118,7 @@ export const CHAT_SEMANTIC_SIMILARITY_INDEX_VERSION =
 // Local semantic mode scope is intentionally string-backed.
 // The semantic policy lane and backend mode lane are currently evolving at different speeds.
 // This index treats mode scope as an authored token, not a closed enum.
-type SemanticModeScope = string;
+type SemanticModeScope = ChatSemanticModeScope;
 
 function asDocumentModeScope(
   value: SemanticModeScope | undefined,
@@ -551,6 +564,152 @@ function buildDenseVector(
   };
 }
 
+function inferActorClass(
+  input: ChatSemanticDocumentInput,
+  rhetoricalForm: ChatSemanticRhetoricalForm,
+): ChatSemanticActorClass {
+  if (input.actorClass) return input.actorClass;
+  if (input.sourceKind === 'PLAYER_QUOTE') return 'PLAYER';
+  if (input.sourceKind === 'LIVEOPS_OVERLAY') return 'LIVEOPS';
+  if (
+    rhetoricalForm === 'SYSTEM_NOTICE' ||
+    rhetoricalForm === 'PROOF_STAMP'
+  ) {
+    return 'SYSTEM';
+  }
+  if (
+    rhetoricalForm === 'RESCUE_STABILIZER' ||
+    rhetoricalForm === 'TACTICAL_REDIRECT' ||
+    rhetoricalForm === 'SURVIVOR_TESTIMONY' ||
+    rhetoricalForm === 'INSIDER_SIGNAL' ||
+    rhetoricalForm === 'ARCHIVIST_RECORD' ||
+    rhetoricalForm === 'MENTOR_ANCHOR'
+  ) {
+    return 'HELPER';
+  }
+  if (
+    rhetoricalForm === 'CROWD_REACTION' ||
+    rhetoricalForm === 'LOBBY_RUMOR' ||
+    rhetoricalForm === 'MARKET_WITNESS_NOTE' ||
+    rhetoricalForm === 'WITNESS_JUDGMENT'
+  ) {
+    return 'AMBIENT';
+  }
+  if (input.actorId || input.npcId) return 'HATER';
+  return 'UNKNOWN';
+}
+
+function inferTextRegister(
+  input: ChatSemanticDocumentInput,
+  rhetoricalForm: ChatSemanticRhetoricalForm,
+): ChatSemanticTextRegister {
+  if (input.textRegister) return input.textRegister;
+  switch (rhetoricalForm) {
+    case 'PROCEDURAL_DELAY':
+      return 'BUREAUCRATIC';
+    case 'LEVERAGE_CLAIM':
+    case 'BLUFF_DEPLOY':
+    case 'THREAT_DECLARATIVE':
+    case 'REPRICING_DECLARATIVE':
+    case 'EXTRACTION_NOTICE':
+      return 'PREDATORY';
+    case 'DEAL_ROOM_LOG':
+    case 'PROOF_STAMP':
+    case 'MARKET_WITNESS_NOTE':
+    case 'ARCHIVIST_RECORD':
+      return 'LEDGER';
+    case 'RESCUE_STABILIZER':
+    case 'TACTICAL_REDIRECT':
+    case 'SURVIVOR_TESTIMONY':
+    case 'MENTOR_ANCHOR':
+      return 'MENTORIAL';
+    case 'CROWD_REACTION':
+    case 'LOBBY_RUMOR':
+    case 'WITNESS_JUDGMENT':
+      return 'SPECTATOR';
+    case 'SYSTEM_NOTICE':
+    case 'LIVEOPS_SIGNAL':
+      return 'SYSTEM';
+    default:
+      return 'UNKNOWN';
+  }
+}
+
+function inferCadenceClass(
+  input: ChatSemanticDocumentInput,
+  rhetoricalForm: ChatSemanticRhetoricalForm,
+): ChatSemanticCadenceClass {
+  if (input.cadenceClass) return input.cadenceClass;
+  switch (rhetoricalForm) {
+    case 'SILENCE_MARKER':
+    case 'SILENCE_WEAPON':
+      return 'DELAYED';
+    case 'CROWD_REACTION':
+    case 'LOBBY_RUMOR':
+      return 'RUMOR';
+    case 'RESCUE_STABILIZER':
+    case 'TACTICAL_REDIRECT':
+    case 'SURVIVOR_TESTIMONY':
+    case 'MENTOR_ANCHOR':
+      return 'RECOVERY';
+    case 'THREAT_DECLARATIVE':
+    case 'BLUFF_EXPOSURE':
+    case 'RIVALRY_PRESSURE':
+    case 'BLUFF_DEPLOY':
+      return 'CUTTING';
+    case 'LIVEOPS_SIGNAL':
+    case 'SYSTEM_NOTICE':
+    case 'PROOF_STAMP':
+      return 'SYSTEMIC';
+    default:
+      return 'MEASURED';
+  }
+}
+
+function explainabilityTermsFromNeighbor(
+  candidate: ChatSemanticIndexedDocument,
+  against: ChatSemanticIndexedDocument,
+  similarity01: Score01,
+): readonly ChatSemanticExplainabilityTerm[] {
+  return Object.freeze([
+    ...against.explainabilityTerms.slice(0, 2),
+    Object.freeze({
+      signal: 'TOKEN_OVERLAP',
+      label: 'semantic-overlap',
+      score01: similarity01,
+      supportingTokens: overlapTokens(candidate.tokens, against.tokens).slice(0, 6),
+      notes: Object.freeze([
+        candidate.semanticClusterId === against.semanticClusterId
+          ? 'same-cluster'
+          : 'cross-cluster',
+      ]),
+    }),
+  ]);
+}
+
+function buildDecisionExplainability(
+  candidate: ChatSemanticIndexedDocument,
+  neighbors: readonly ChatSemanticNeighbor[],
+  blockedReasons: readonly string[],
+  noveltyScore01: Score01,
+  fatigueScore01: Score01,
+): readonly ChatSemanticExplainabilityTerm[] {
+  const out: ChatSemanticExplainabilityTerm[] = [
+    ...candidate.explainabilityTerms.slice(0, 2),
+    Object.freeze({
+      signal: 'CLUSTER_COLLISION',
+      label: blockedReasons.length > 0 ? blockedReasons[0]! : 'novelty-clear',
+      score01: blockedReasons.length > 0 ? fatigueScore01 : noveltyScore01,
+      supportingTokens: neighbors[0]?.overlapTokens.slice(0, 6) ?? [],
+      notes: Object.freeze(blockedReasons.length > 0 ? [...blockedReasons] : ['allowed']),
+    }),
+  ];
+  if (neighbors[0]) {
+    out.push(...neighbors[0].explainability.slice(0, 2));
+  }
+  return Object.freeze(out);
+}
+
 // ============================================================================
 // MARK: Document factory
 // ============================================================================
@@ -564,6 +723,11 @@ function createDocument(
   const sceneRoles = Object.freeze([...(input.sceneRoles ?? [])]);
   const callbackSourceIds = Object.freeze([...(input.callbackSourceIds ?? [])]);
   const normalizedText = normalizeText(input.text);
+  const tokens = Object.freeze(tokenizeWords(normalizedText).slice(0, config.maxTokenCount));
+  const bigrams = Object.freeze(tokenizeBigrams(tokens).slice(0, config.maxTokenCount));
+  const charGrams = Object.freeze(
+    tokenizeCharGrams(normalizedText, config.charGramSize).slice(0, config.maxTokenCount * 2),
+  );
 
   const dense = buildDenseVector(
     normalizedText,
@@ -577,16 +741,39 @@ function createDocument(
     config,
   );
 
+  const rhetoricalForm = dense.rhetoricalForm;
+  const rhetoricalFamily = deriveRhetoricalFamily(rhetoricalForm);
+  const sourceKind: ChatSemanticSourceKind =
+    input.sourceKind ?? input.provenance?.sourceKind ?? 'AUTHORED_CANONICAL';
+  const actorClass = inferActorClass(input, rhetoricalForm);
+  const textRegister = inferTextRegister(input, rhetoricalForm);
+  const cadenceClass = inferCadenceClass(input, rhetoricalForm);
+  const flags: ChatSemanticDocumentFlags = createDefaultDocumentFlags(
+    input.flags,
+    input.channelId,
+    sourceKind,
+    rhetoricalForm,
+  );
+  const provenance: Readonly<ChatSemanticProvenance> = createDefaultProvenance(
+    input.provenance ?? { sourceKind },
+  );
+  const explainabilityTerms = buildExplainabilityTermsForForm(rhetoricalForm);
+
   return Object.freeze({
     documentId: input.documentId,
     canonicalLineId: input.canonicalLineId,
     actorId: input.actorId ?? null,
+    npcId: input.npcId,
     botId: input.botId ?? null,
+    actorClass,
     text: input.text,
     normalizedText,
-    tokens: dense.tokens,
+    tokens,
+    bigrams,
+    charGrams,
     weightedTerms: dense.weightedTerms,
-    rhetoricalForm: dense.rhetoricalForm,
+    rhetoricalForm,
+    rhetoricalFamily,
     rhetoricalFingerprint: dense.rhetoricalFingerprint,
     semanticClusterId: dense.semanticClusterId,
     sparseVector: dense.sparseVector,
@@ -598,6 +785,20 @@ function createDocument(
     pressureBand: input.pressureBand,
     channelId: input.channelId,
     modeScope: input.modeScope,
+    sourceKind,
+    cadenceClass,
+    textRegister,
+    flags,
+    provenance,
+    audienceHeat01: input.audienceHeat01,
+    trustScore01: input.trustScore01,
+    leverageScore01: input.leverageScore01,
+    proofWeight01: input.proofWeight01,
+    negotiationRisk01: input.negotiationRisk01,
+    lineageId: input.lineageId,
+    roomScopeId: input.roomScopeId,
+    channelScopeId: input.channelScopeId,
+    explainabilityTerms,
     createdAt: input.createdAt,
   });
 }
@@ -610,11 +811,13 @@ function neighborFromDocuments(
   candidate: ChatSemanticIndexedDocument,
   against: ChatSemanticIndexedDocument,
 ): ChatSemanticNeighbor {
-  const sim = cosineSimilarity(
-    candidate.sparseVector,
-    candidate.vectorNorm,
-    against.sparseVector,
-    against.vectorNorm,
+  const sim = clamp01(
+    cosineSimilarity(
+      candidate.sparseVector,
+      candidate.vectorNorm,
+      against.sparseVector,
+      against.vectorNorm,
+    ),
   );
   const notes: string[] = [];
   if (candidate.semanticClusterId === against.semanticClusterId)
@@ -633,12 +836,14 @@ function neighborFromDocuments(
   return Object.freeze({
     documentId: against.documentId,
     canonicalLineId: against.canonicalLineId,
-    similarity01: clamp01(sim),
+    similarity01: sim,
     semanticClusterId: against.semanticClusterId,
     rhetoricalForm: against.rhetoricalForm,
+    rhetoricalFamily: against.rhetoricalFamily,
     overlapTokens: overlapTokens(candidate.tokens, against.tokens),
     tags: against.tags,
     notes: Object.freeze(notes),
+    explainability: explainabilityTermsFromNeighbor(candidate, against, sim),
   });
 }
 
@@ -1308,8 +1513,13 @@ export class ChatSemanticSimilarityIndex {
     return {
       queryId: query.queryId,
       computedAt: query.now,
+      strategy: query.strategy ?? 'NEAREST_NEIGHBOR',
       queryDocument: queryDoc,
       neighbors,
+      explainability: Object.freeze([
+        ...queryDoc.explainabilityTerms.slice(0, 2),
+        ...(neighbors[0]?.explainability.slice(0, 2) ?? []),
+      ]),
     };
   }
 
@@ -1366,6 +1576,9 @@ export class ChatSemanticSimilarityIndex {
     );
     const effectiveRhetoricalPenalty = clamp01(
       baseConfig.rhetoricalPenalty01 * modePolicy.rhetoricalPenaltyMultiplier,
+    );
+    const channelPolicy = resolveChannelPolicy(
+      request.channelId ?? request.candidate.channelId,
     );
 
     // ── Build candidate document
@@ -1443,6 +1656,12 @@ export class ChatSemanticSimilarityIndex {
     const repeatedRhetoricalCount = recentDocs.filter(
       (d) => d.rhetoricalFingerprint === candidateDoc.rhetoricalFingerprint,
     ).length;
+    const repeatedActorCount = recentDocs.filter(
+      (d) => candidateDoc.actorId !== null && d.actorId === candidateDoc.actorId,
+    ).length;
+    const repeatedChannelCount = recentDocs.filter(
+      (d) => candidateDoc.channelId !== undefined && d.channelId === candidateDoc.channelId,
+    ).length;
 
     // ── Callback immunity: callback lines bypass cluster + rhetorical penalties
     const isCallbackLine =
@@ -1499,9 +1718,23 @@ export class ChatSemanticSimilarityIndex {
     const fatigueScore01 = clamp01(
       repeatedClusterCount * 0.18 +
         repeatedRhetoricalCount * 0.16 +
+        repeatedActorCount * Number(baseConfig.actorMonotonyPenalty01) +
+        repeatedChannelCount * Number(baseConfig.channelMonotonyPenalty01) +
         highestSimilarity01 * 0.52 +
         (exactTextRepeat ? 0.28 : 0),
     );
+
+    const windowStats: ChatSemanticNoveltyWindowStats = Object.freeze({
+      recentDocumentCount: recentDocs.length,
+      exactRepeatHits: exactTextRepeat ? 1 : 0,
+      clusterRepeatHits: repeatedClusterCount,
+      rhetoricalRepeatHits: repeatedRhetoricalCount,
+      actorRepeatHits: repeatedActorCount,
+      channelRepeatHits: repeatedChannelCount,
+      silenceRepeatHits: recentDocs.filter((d) => d.flags.isSilenceMove).length,
+      witnessRepeatHits: recentDocs.filter((d) => d.flags.isWitnessLine).length,
+      negotiationRepeatHits: recentDocs.filter((d) => d.flags.isNegotiationCritical).length,
+    });
 
     // ── Final decision
     const allowed =
@@ -1546,6 +1779,8 @@ export class ChatSemanticSimilarityIndex {
         modeScope: request.modeScope,
         channelId: request.channelId,
         tickNumber: this.currentTick || undefined,
+        actorClass: candidateDoc.actorClass,
+        rhetoricalForm: candidateDoc.rhetoricalForm,
         capturedAt: request.now,
       });
     }
@@ -1560,10 +1795,21 @@ export class ChatSemanticSimilarityIndex {
       highestSimilarity01: clamp01(highestSimilarity01),
       repeatedClusterCount,
       repeatedRhetoricalCount,
+      repeatedActorCount,
+      repeatedChannelCount,
       nearestNeighbors: neighbors,
       blockedReasons: Object.freeze(blockedReasons),
+      explainability: buildDecisionExplainability(
+        candidateDoc,
+        neighbors,
+        blockedReasons,
+        clamp01(noveltyScore01),
+        fatigueScore01,
+      ),
+      windowStats,
       appliedPressureThreshold: pressureThresholds,
       appliedModePolicy: modePolicy,
+      appliedChannelPolicy: channelPolicy,
     };
   }
 
@@ -1894,8 +2140,10 @@ export class ChatSemanticSimilarityIndex {
         const rebuilt = createDocument(
           {
             documentId: document.documentId,
+            canonicalLineId: document.canonicalLineId,
             text: document.text,
             actorId: document.actorId ?? undefined,
+            npcId: document.npcId,
             botId: document.botId ?? undefined,
             tags: document.tags,
             motifIds: document.motifIds,
@@ -1904,6 +2152,20 @@ export class ChatSemanticSimilarityIndex {
             pressureBand: document.pressureBand,
             channelId: document.channelId,
             modeScope: document.modeScope,
+            actorClass: document.actorClass,
+            sourceKind: document.sourceKind,
+            cadenceClass: document.cadenceClass,
+            textRegister: document.textRegister,
+            audienceHeat01: document.audienceHeat01,
+            trustScore01: document.trustScore01,
+            leverageScore01: document.leverageScore01,
+            proofWeight01: document.proofWeight01,
+            negotiationRisk01: document.negotiationRisk01,
+            flags: document.flags,
+            provenance: document.provenance,
+            lineageId: document.lineageId,
+            roomScopeId: document.roomScopeId,
+            channelScopeId: document.channelScopeId,
             createdAt: document.createdAt,
           },
           this.config,
