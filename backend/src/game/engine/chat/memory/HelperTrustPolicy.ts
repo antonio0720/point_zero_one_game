@@ -44,8 +44,8 @@ import type {
   ChatRelationshipNpcSignal,
   ChatRelationshipPressureBand,
   ChatRelationshipStance,
-} from '../../../../../shared/contracts/chat/relationship';
-import { clamp01 } from '../../../../../shared/contracts/chat/relationship';
+} from '../../../../../../shared/contracts/chat/relationship';
+import { clamp01 } from '../../../../../../shared/contracts/chat/relationship';
 
 import type {
   ChatAffectSnapshot,
@@ -259,19 +259,19 @@ const DEFAULT_TONE_BY_MOOD: Readonly<Record<ChatRoomStageMood, HelperTrustTone>>
   CALM: 'MENTOR',
   TENSE: 'TACTICAL',
   HOSTILE: 'BLUNT',
-  CHAOTIC: 'TACTICAL',
+  PREDATORY: 'TACTICAL',
+  CEREMONIAL: 'MENTOR',
   MOURNFUL: 'CALM',
-  ASCENDANT: 'MENTOR',
+  ECSTATIC: 'MENTOR',
 });
 
 const DEFAULT_KIND_PUBLIC_BIAS: Readonly<Record<ChatRoomKind, number>> = Object.freeze({
   GLOBAL: 0.84,
   SYNDICATE: 0.56,
   DEAL_ROOM: 0.22,
-  DIRECT: 0.08,
-  SPECTATOR: 0.91,
-  SYSTEM: 0.44,
   LOBBY: 0.47,
+  PRIVATE: 0.08,
+  SYSTEM: 0.44,
 });
 
 const DEFAULT_CHANNEL_BIASES: Readonly<Record<string, number>> = Object.freeze({
@@ -360,11 +360,16 @@ function pressureBandOr(request: HelperTrustRequest): ChatRelationshipPressureBa
   return request.sourceEvent?.pressureBand ?? 'MEDIUM';
 }
 
-function channelKey(request: HelperTrustRequest): string {
-  return (request.context.channelId
+function channelKey(request: HelperTrustRequest): HelperTrustChannelKey {
+  const raw = (request.context.channelId
     ?? request.room?.activeVisibleChannel
     ?? request.state.lastChannelId
+    ?? roomKindOr(request)
     ?? 'GLOBAL').toUpperCase();
+
+  if (isHelperTrustChannelId(raw)) return raw;
+  if (raw === 'PRIVATE' || raw === 'SYSTEM') return raw;
+  return 'GLOBAL';
 }
 
 function roomKindOr(request: HelperTrustRequest): ChatRoomKind {
@@ -377,6 +382,87 @@ function moodOr(request: HelperTrustRequest): ChatRoomStageMood {
 
 function boolScore(value: boolean, weight = 1): number {
   return value ? weight : 0;
+}
+
+
+type HelperTrustChannelKey = ChatChannelId | ChatRoomKind;
+
+const HELPER_TRUST_CHANNEL_REGISTRY: readonly ChatChannelId[] = Object.freeze([
+  'GLOBAL',
+  'SYNDICATE',
+  'DEAL_ROOM',
+  'LOBBY',
+  'SYSTEM_SHADOW',
+  'NPC_SHADOW',
+  'RIVALRY_SHADOW',
+  'RESCUE_SHADOW',
+  'LIVEOPS_SHADOW',
+]);
+
+const HELPER_TRUST_SUPPORTIVE_STANCES: readonly ChatRelationshipStance[] = Object.freeze([
+  'PROTECTIVE',
+  'RESPECTFUL',
+  'CURIOUS',
+  'WOUNDED',
+]);
+
+function score01(value: number): Score01 {
+  return clamp01(value) as Score01;
+}
+
+function isHelperTrustChannelId(value: string): value is ChatChannelId {
+  return (HELPER_TRUST_CHANNEL_REGISTRY as readonly string[]).includes(value);
+}
+
+function resolveVisibleChannelId(value: string | null | undefined): ChatVisibleChannel {
+  switch ((value ?? 'GLOBAL').toUpperCase()) {
+    case 'SYNDICATE':
+      return 'SYNDICATE';
+    case 'DEAL_ROOM':
+      return 'DEAL_ROOM';
+    case 'LOBBY':
+      return 'LOBBY';
+    default:
+      return 'GLOBAL';
+  }
+}
+
+function stanceOr(request: HelperTrustRequest): ChatRelationshipStance {
+  return request.signal.stance ?? request.state.stance;
+}
+
+function stanceSupportiveness01(request: HelperTrustRequest): number {
+  const stance = stanceOr(request);
+  if (HELPER_TRUST_SUPPORTIVE_STANCES.includes(stance)) {
+    switch (stance) {
+      case 'PROTECTIVE':
+        return 1;
+      case 'RESPECTFUL':
+        return 0.74;
+      case 'CURIOUS':
+        return 0.52;
+      case 'WOUNDED':
+        return 0.36;
+      default:
+        return 0.44;
+    }
+  }
+
+  switch (stance) {
+    case 'CLINICAL':
+      return 0.28;
+    case 'PROBING':
+      return 0.24;
+    case 'OBSESSED':
+      return 0.18;
+    case 'PREDATORY':
+    case 'HUNTING':
+      return 0.08;
+    case 'DISMISSIVE':
+      return 0.04;
+    default:
+      return 0.16;
+  }
 }
 
 function ratio(value: number, base = 100): number {
@@ -413,14 +499,12 @@ function learningReceptivityScore(request: HelperTrustRequest): number {
 
 function currentTrustFromBackend(request: HelperTrustRequest): number {
   return request.relationship?.trust01
-    ?? request.legacy.trust / 100
-    ?? 0;
+    ?? (request.legacy.trust / 100);
 }
 
 function currentRivalryFromBackend(request: HelperTrustRequest): number {
   return request.relationship?.rivalry01
-    ?? request.legacy.rivalryIntensity / 100
-    ?? 0;
+    ?? (request.legacy.rivalryIntensity / 100);
 }
 
 function rescueDebt01(request: HelperTrustRequest): number {
@@ -478,7 +562,7 @@ function curiosity01(request: HelperTrustRequest): number {
 }
 
 function channelAffinity01(request: HelperTrustRequest): number {
-  const channel = channelKey(request) as ChatVisibleChannel;
+  const channel = resolveVisibleChannelId(channelKey(request));
   return request.learning?.channelAffinity[channel]
     ?? request.inference?.channelAffinity[channel]
     ?? 0.44;
@@ -582,12 +666,13 @@ export function assessTrustScore01(request: HelperTrustRequest): number {
   const obedience = ratio(request.legacy.adviceObedience);
 
   return clamp01(
-    trust * 0.32 +
-    familiarity * 0.18 +
+    trust * 0.30 +
+    familiarity * 0.17 +
     respect * 0.16 +
-    debt * 0.14 +
+    debt * 0.13 +
     obedience * 0.14 +
-    attachment01(request) * 0.06 -
+    attachment01(request) * 0.06 +
+    stanceSupportiveness01(request) * 0.08 -
     learningAgePenalty01(request),
   );
 }
@@ -632,7 +717,7 @@ export function assessPrivateNeed01(request: HelperTrustRequest): number {
     intimidation * 0.16 +
     rivalry * 0.14 +
     dealDiscipline * 0.14 +
-    boolScore(channelKey(request) === 'DIRECT', 0.10),
+    boolScore(roomKindOr(request) === 'PRIVATE', 0.10),
   );
 }
 
@@ -660,7 +745,7 @@ export function assessEmbarrassmentRisk01(request: HelperTrustRequest): number {
     rivalry * 0.14 +
     contempt * 0.14 +
     overpay * 0.12 +
-    boolScore(channelKey(request) === 'GLOBAL' || channelKey(request) === 'SPECTATOR', 0.10),
+    boolScore(channelKey(request) === 'GLOBAL' || channelKey(request) === 'LOBBY', 0.10),
   );
 }
 
@@ -705,7 +790,7 @@ export function assessLearningReceptivity01(request: HelperTrustRequest): number
     learningReceptivityScore(request) * 0.54 +
     channelAffinity01(request) * 0.14 +
     assessAdviceObedience01(request) * 0.16 +
-    (1 - request.learning?.churnRisk01 ?? 0.56) * 0.08 +
+    (1 - (request.learning?.churnRisk01 ?? 0.56)) * 0.08 +
     relief01(request) * 0.08,
   );
 }
@@ -790,7 +875,7 @@ export function assessPrivateStageFit01(request: HelperTrustRequest): number {
     assessPrivateNeed01(request) * 0.42 +
     assessTrustScore01(request) * 0.18 +
     assessLearningReceptivity01(request) * 0.10 +
-    boolScore(channelKey(request) === 'DIRECT', 0.18) +
+    boolScore(roomKindOr(request) === 'PRIVATE', 0.18) +
     boolScore(roomKindOr(request) === 'DEAL_ROOM', 0.12),
   );
 }
@@ -853,27 +938,27 @@ export function assessHelperTrust(
   const trustStage = inferHelperTrustStage(request);
 
   return Object.freeze({
-    trustScore01,
-    rescueDebtWeight01,
-    familiarity01: familiarity,
-    adviceObedience01,
-    publicSafety01,
-    privateNeed01,
-    shadowNeed01,
-    embarrassmentRisk01,
-    frustrationReliefNeed01,
-    intimidationReliefNeed01,
-    timingConfidence01,
-    learningReceptivity01,
-    relationshipContinuity01,
-    silenceValue01,
-    followupValue01,
-    rescueReadiness01,
-    publicStageFit01,
-    privateStageFit01,
-    shadowStageFit01,
-    negotiationDiscipline01,
-    helperVulnerability01,
+    trustScore01: score01(trustScore01),
+    rescueDebtWeight01: score01(rescueDebtWeight01),
+    familiarity01: score01(familiarity),
+    adviceObedience01: score01(adviceObedience01),
+    publicSafety01: score01(publicSafety01),
+    privateNeed01: score01(privateNeed01),
+    shadowNeed01: score01(shadowNeed01),
+    embarrassmentRisk01: score01(embarrassmentRisk01),
+    frustrationReliefNeed01: score01(frustrationReliefNeed01),
+    intimidationReliefNeed01: score01(intimidationReliefNeed01),
+    timingConfidence01: score01(timingConfidence01),
+    learningReceptivity01: score01(learningReceptivity01),
+    relationshipContinuity01: score01(relationshipContinuity01),
+    silenceValue01: score01(silenceValue01),
+    followupValue01: score01(followupValue01),
+    rescueReadiness01: score01(rescueReadiness01),
+    publicStageFit01: score01(publicStageFit01),
+    privateStageFit01: score01(privateStageFit01),
+    shadowStageFit01: score01(shadowStageFit01),
+    negotiationDiscipline01: score01(negotiationDiscipline01),
+    helperVulnerability01: score01(helperVulnerability01),
     trustStage,
   });
 }
@@ -1002,16 +1087,12 @@ export function selectPreferredChannel(
   visibility: HelperTrustVisibility,
   request: HelperTrustRequest,
 ): ChatVisibleChannel | undefined {
-  if (visibility === 'SHADOW') return 'RESCUE_SHADOW' as ChatVisibleChannel;
-  if (visibility === 'PRIVATE') return 'DIRECT';
-  if (visibility === 'PUBLIC') {
-    const channel = channelKey(request);
-    if (channel === 'DEAL_ROOM') return 'DEAL_ROOM';
-    if (channel === 'SYNDICATE') return 'SYNDICATE';
-    if (channel === 'SPECTATOR') return 'SPECTATOR';
-    return 'GLOBAL';
-  }
-  return undefined;
+  if (visibility !== 'PUBLIC') return undefined;
+  const channel = channelKey(request);
+  if (channel === 'DEAL_ROOM') return 'DEAL_ROOM';
+  if (channel === 'SYNDICATE') return 'SYNDICATE';
+  if (channel === 'LOBBY') return 'LOBBY';
+  return 'GLOBAL';
 }
 
 // ============================================================================
@@ -1245,6 +1326,7 @@ function buildNotes(
   notes.push(`channel:${channelKey(request)}`);
   notes.push(`room_kind:${roomKindOr(request)}`);
   notes.push(`mood:${moodOr(request)}`);
+  notes.push(`stance:${stanceOr(request)}`);
 
   if (assessment.rescueReadiness01 >= 0.74) notes.push('high_rescue_readiness');
   if (assessment.embarrassmentRisk01 >= 0.58) notes.push('high_embarrassment_risk');
@@ -1277,6 +1359,7 @@ function buildTags(
   if (assessment.silenceValue01 >= 0.49) tags.add('silence_first');
   if (assessment.embarrassmentRisk01 >= 0.57) tags.add('protect_public_image');
   if (assessment.negotiationDiscipline01 >= 0.54) tags.add('dealroom_discipline');
+  if (stanceSupportiveness01(request) >= 0.7) tags.add('supportive_stance');
   if (callbackValue01(request) >= 0.51) tags.add('callback_available');
   if (request.context.rivalDominanceWindowOpen) tags.add('rival_pressure_active');
 
@@ -1400,7 +1483,7 @@ export class HelperTrustPolicy {
       selectedDisposition: disposition,
       selectedVisibility: visibility,
       selectedTone: tone,
-      selectedScore01,
+      selectedScore01: score01(selectedScore01),
       shouldIntervene,
       shouldSuppressRivals: shouldSuppressRivalsFlag,
       shouldOpenRecoveryWindow: openRecoveryWindow,
@@ -1443,9 +1526,9 @@ export class HelperTrustPolicy {
     const profile = this.getModeProfile(modeId);
     return {
       ...base,
-      publicSafety01: Math.max(base.publicSafety01, profile.publicSafetyFloor01),
-      shadowNeed01: clamp01(base.shadowNeed01 + profile.shadowPreference01 * 0.3),
-      timingConfidence01: clamp01(base.timingConfidence01 * (1 + profile.earlyInterventionBias01 * 0.2)),
+      publicSafety01: score01(Math.max(Number(base.publicSafety01), profile.publicSafetyFloor01)),
+      shadowNeed01: score01(Number(base.shadowNeed01) + profile.shadowPreference01 * 0.3),
+      timingConfidence01: score01(Number(base.timingConfidence01) * (1 + profile.earlyInterventionBias01 * 0.2)),
     };
   }
 
@@ -1467,7 +1550,7 @@ export class HelperTrustPolicy {
   public recordTrustSnapshot(playerId: string, counterpartId: string, assessment: HelperTrustAssessment, at: number): void {
     const key = `${playerId}:${counterpartId}`;
     const entries = this._trajectories.get(key) ?? [];
-    entries.push({ timestamp: at, trust01: assessment.trust01, stage: assessment.stage, publicSafety01: assessment.publicSafety01, rescueReadiness01: assessment.rescueReadiness01 });
+    entries.push({ timestamp: at, trust01: Number(assessment.trustScore01), stage: assessment.trustStage, publicSafety01: Number(assessment.publicSafety01), rescueReadiness01: Number(assessment.rescueReadiness01) });
     if (entries.length > 64) entries.splice(0, entries.length - 64);
     this._trajectories.set(key, entries);
   }
@@ -1538,20 +1621,28 @@ export class HelperTrustPolicy {
   /** Assess whether audience heat should delay helper intervention. */
   public assessAudienceAwareTimingValue01(request: HelperTrustRequest, audienceHeat01: number): number {
     if (audienceHeat01 <= 0.3) return 1.0;
-    const embarrassmentPenalty = request.embarrassment01 * 0.35;
+    const assessment = this.assess(request);
+    const embarrassmentPenalty = Number(assessment.embarrassmentRisk01) * 0.35;
     const publicRisk = audienceHeat01 * 0.45;
-    const helpNeed = request.rescueReadiness01 * 0.2;
+    const helpNeed = Number(assessment.rescueReadiness01) * 0.2;
     return clamp01(1.0 - publicRisk - embarrassmentPenalty + helpNeed);
   }
 
   /** Should the helper defer to let audience heat cool down before intervening? */
   public shouldDeferToAudienceCooldown(request: HelperTrustRequest, audienceHeat01: number): boolean {
-    return audienceHeat01 >= 0.65 && request.embarrassment01 >= 0.4 && request.rescueReadiness01 < 0.7;
+    const assessment = this.assess(request);
+    return audienceHeat01 >= 0.65 && Number(assessment.embarrassmentRisk01) >= 0.4 && Number(assessment.rescueReadiness01) < 0.7;
   }
 
   /** Public perception risk if the helper intervenes during high audience heat. */
   public publicPerceptionRisk01(request: HelperTrustRequest, audienceHeat01: number): number {
-    return clamp01(audienceHeat01 * 0.4 + request.embarrassment01 * 0.3 + (request.publicSafety01 < 0.5 ? 0.2 : 0) + (request.trust01 < 0.4 ? 0.1 : 0));
+    const assessment = this.assess(request);
+    return clamp01(
+      audienceHeat01 * 0.4
+      + Number(assessment.embarrassmentRisk01) * 0.3
+      + (Number(assessment.publicSafety01) < 0.5 ? 0.2 : 0)
+      + (Number(assessment.trustScore01) < 0.4 ? 0.1 : 0),
+    );
   }
 
   // ==========================================================================
@@ -1609,10 +1700,10 @@ export class HelperTrustPolicy {
     const trend = this.computeTrajectoryTrend(playerId, counterpartId);
     const lines: string[] = [];
     lines.push(`helper_diagnostic|player=${playerId}|counterpart=${counterpartId}|helper=${helperId}`);
-    lines.push(`stage=${assessment.stage}|trust=${assessment.trust01.toFixed(3)}|disposition=${decision.disposition}`);
-    lines.push(`visibility=${decision.visibility}|tone=${decision.tone}|channel=${decision.preferredChannel}`);
+    lines.push(`stage=${assessment.trustStage}|trust=${Number(assessment.trustScore01).toFixed(3)}|disposition=${decision.selectedDisposition}`);
+    lines.push(`visibility=${decision.selectedVisibility}|tone=${decision.selectedTone}|channel=${decision.preferredChannelId ?? 'NONE'}`);
     lines.push(`fatigue=${fatigue.fatigueLevel01.toFixed(3)}|interventions=${fatigue.interventionCount}|burnout=${fatigue.burnoutReached}`);
-    lines.push(`trajectory=${trend}|silent=${decision.shouldStaySilent}|suppress=${decision.shouldSuppressRivals}`);
+    lines.push(`trajectory=${trend}|silent=${decision.shouldStaySilentFirst}|suppress=${decision.shouldSuppressRivals}`);
     lines.push(`publicSafety=${assessment.publicSafety01.toFixed(3)}|rescueReady=${assessment.rescueReadiness01.toFixed(3)}|embarrassRisk=${assessment.embarrassmentRisk01.toFixed(3)}`);
     if (modeId) {
       const profile = this.getModeProfile(modeId);
@@ -1758,7 +1849,7 @@ export function exampleCriticalRescueRequest(now: UnixMs): HelperTrustRequest {
     escalationTier: 'MILD',
   };
 
-  return Object.freeze({
+  const request = Object.freeze({
     state,
     signal,
     legacy,
@@ -1786,15 +1877,14 @@ export function exampleCriticalRescueRequest(now: UnixMs): HelperTrustRequest {
       createdAt: now,
       lastActivityAt: now,
       activeVisibleChannel: 'GLOBAL',
-      allowedVisibleChannels: Object.freeze(['GLOBAL', 'DIRECT', 'RESCUE_SHADOW']),
+      allowedVisibleChannels: Object.freeze(['GLOBAL', 'SYNDICATE', 'DEAL_ROOM', 'LOBBY']),
       stageMood: 'HOSTILE',
       collapsed: false,
       unreadByChannel: Object.freeze({
         GLOBAL: 0,
         SYNDICATE: 0,
         DEAL_ROOM: 0,
-        DIRECT: 0,
-        SPECTATOR: 0,
+        LOBBY: 0,
       }),
       activeSceneId: null,
       activeMomentId: null,
@@ -1842,8 +1932,7 @@ export function exampleCriticalRescueRequest(now: UnixMs): HelperTrustRequest {
         GLOBAL: 0.62,
         SYNDICATE: 0.35,
         DEAL_ROOM: 0.22,
-        DIRECT: 0.71,
-        SPECTATOR: 0.18,
+        LOBBY: 0.18,
       }),
       rescueHistoryCount: 4,
       churnRisk01: 0.61,
@@ -1871,8 +1960,7 @@ export function exampleCriticalRescueRequest(now: UnixMs): HelperTrustRequest {
         GLOBAL: 0.61,
         SYNDICATE: 0.32,
         DEAL_ROOM: 0.22,
-        DIRECT: 0.76,
-        SPECTATOR: 0.18,
+        LOBBY: 0.18,
       }),
       toxicityRisk01: 0.23,
       churnRisk01: 0.61,
@@ -1923,12 +2011,13 @@ export function exampleCriticalRescueRequest(now: UnixMs): HelperTrustRequest {
       },
       metadata: Object.freeze({}),
     },
-  });
+  }) as unknown as HelperTrustRequest;
+  return request;
 }
 
 export function examplePostRunDebriefRequest(now: UnixMs): HelperTrustRequest {
   const req = exampleCriticalRescueRequest(now);
-  return Object.freeze({
+  const request = Object.freeze({
     ...req,
     context: {
       ...req.context,
@@ -1949,7 +2038,8 @@ export function examplePostRunDebriefRequest(now: UnixMs): HelperTrustRequest {
       pressureBand: 'LOW',
       summary: 'Run ended after a difficult collapse sequence.',
     },
-  });
+  }) as unknown as HelperTrustRequest;
+  return request;
 }
 
 
@@ -1963,11 +2053,24 @@ export function adjustDispositionForTrajectory(
   trend: TrustTrajectoryTrend,
 ): HelperTrustDisposition {
   switch (trend) {
-    case 'RISING': return disposition === 'CAUTIOUS' ? 'ENGAGED' : disposition === 'ENGAGED' ? 'PROTECTIVE' : disposition;
-    case 'FALLING': return disposition === 'PROTECTIVE' ? 'ENGAGED' : disposition === 'ENGAGED' ? 'CAUTIOUS' : disposition;
-    case 'OSCILLATING': return 'CAUTIOUS';
-    case 'ERUPTING': return 'PROTECTIVE';
-    default: return disposition;
+    case 'RISING':
+      if (disposition === 'WITHHOLD') return 'WATCH';
+      if (disposition === 'WATCH') return 'NUDGE';
+      if (disposition === 'NUDGE') return 'GUIDE';
+      if (disposition === 'GUIDE') return 'REASSURE';
+      return disposition;
+    case 'FALLING':
+      if (disposition === 'RESCUE') return 'TRIAGE';
+      if (disposition === 'TRIAGE') return 'REASSURE';
+      if (disposition === 'REASSURE') return 'GUIDE';
+      if (disposition === 'GUIDE') return 'NUDGE';
+      return disposition;
+    case 'OSCILLATING':
+      return disposition === 'RESCUE' ? 'TRIAGE' : disposition === 'TRIAGE' ? 'GUIDE' : disposition;
+    case 'ERUPTING':
+      return disposition === 'WITHHOLD' || disposition === 'WATCH' ? 'GUIDE' : disposition;
+    default:
+      return disposition;
   }
 }
 
@@ -1976,9 +2079,10 @@ export function adjustDispositionForFatigue(
   disposition: HelperTrustDisposition,
   fatigueLevel01: number,
 ): HelperTrustDisposition {
-  if (fatigueLevel01 >= 0.75) return 'DISTANT';
-  if (fatigueLevel01 >= 0.5 && disposition === 'PROTECTIVE') return 'ENGAGED';
-  if (fatigueLevel01 >= 0.5 && disposition === 'ENGAGED') return 'CAUTIOUS';
+  if (fatigueLevel01 >= 0.75) return 'WATCH';
+  if (fatigueLevel01 >= 0.5 && disposition === 'RESCUE') return 'TRIAGE';
+  if (fatigueLevel01 >= 0.5 && disposition === 'TRIAGE') return 'GUIDE';
+  if (fatigueLevel01 >= 0.5 && disposition === 'REASSURE') return 'NUDGE';
   return disposition;
 }
 
@@ -2011,11 +2115,11 @@ export function computeHelperReadinessScore01(
 /** Generate a human-readable explanation of a helper trust decision. */
 export function explainHelperTrustDecision(decision: HelperTrustDecision, assessment: HelperTrustAssessment): string {
   const parts: string[] = [];
-  parts.push(`Trust stage: ${assessment.stage} (${assessment.trust01.toFixed(2)})`);
-  parts.push(`Disposition: ${decision.disposition}`);
-  parts.push(`Visibility: ${decision.visibility}`);
-  if (decision.shouldStaySilent) parts.push('Decision: STAY SILENT');
-  else parts.push(`Tone: ${decision.tone}, Channel: ${decision.preferredChannel}`);
+  parts.push(`Trust stage: ${assessment.trustStage} (${Number(assessment.trustScore01).toFixed(2)})`);
+  parts.push(`Disposition: ${decision.selectedDisposition}`);
+  parts.push(`Visibility: ${decision.selectedVisibility}`);
+  if (decision.shouldStaySilentFirst) parts.push('Decision: STAY SILENT');
+  else parts.push(`Tone: ${decision.selectedTone}, Channel: ${decision.preferredChannelId ?? 'NONE'}`);
   if (decision.shouldSuppressRivals) parts.push('Suppressing rivals during intervention');
   if (assessment.rescueReadiness01 >= 0.6) parts.push(`Rescue readiness: ${assessment.rescueReadiness01.toFixed(2)}`);
   if (assessment.embarrassmentRisk01 >= 0.4) parts.push(`Embarrassment risk: ${assessment.embarrassmentRisk01.toFixed(2)}`);
@@ -2032,11 +2136,11 @@ export function buildHelperTrustDiagnostic(
   const assessment = modeId ? policy.assessWithMode(request, modeId) : policy.assess(request);
   const decision = modeId ? policy.decideWithMode(request, modeId) : policy.decide(request);
   const lines: string[] = [];
-  lines.push(`stage=${assessment.stage}|trust=${assessment.trust01.toFixed(3)}`);
-  lines.push(`disposition=${decision.disposition}|visibility=${decision.visibility}|tone=${decision.tone}`);
+  lines.push(`stage=${assessment.trustStage}|trust=${Number(assessment.trustScore01).toFixed(3)}`);
+  lines.push(`disposition=${decision.selectedDisposition}|visibility=${decision.selectedVisibility}|tone=${decision.selectedTone}`);
   lines.push(`publicSafety=${assessment.publicSafety01.toFixed(3)}|privateNeed=${assessment.privateNeed01.toFixed(3)}|shadowNeed=${assessment.shadowNeed01.toFixed(3)}`);
   lines.push(`embarrassmentRisk=${assessment.embarrassmentRisk01.toFixed(3)}|rescueReadiness=${assessment.rescueReadiness01.toFixed(3)}`);
-  lines.push(`silent=${decision.shouldStaySilent}|suppressRivals=${decision.shouldSuppressRivals}|delay=${decision.delayMs}ms`);
+  lines.push(`silent=${decision.shouldStaySilentFirst}|suppressRivals=${decision.shouldSuppressRivals}|delay=${decision.delayMs}ms`);
   if (modeId) {
     const profile = policy.getModeProfile(modeId);
     lines.push(`mode=${profile.label}|warmth=${profile.toneWarmth01.toFixed(2)}|shadow=${profile.shadowPreference01.toFixed(2)}`);
