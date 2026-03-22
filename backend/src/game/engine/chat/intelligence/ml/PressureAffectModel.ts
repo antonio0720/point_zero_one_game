@@ -1171,3 +1171,1693 @@ function buildResultMetadata(input: {
 function toPct(value: Score01 | number): string {
   return `${Math.round(Number(value) * 100)}`;
 }
+
+
+/* ========================================================================== *
+ * MARK: Extended public analysis surfaces
+ * ========================================================================== */
+
+export type PressureAffectModeId =
+  | 'EMPIRE'
+  | 'PREDATOR'
+  | 'SYNDICATE'
+  | 'PHANTOM'
+  | 'UNKNOWN';
+
+export type PressureExposureClass =
+  | 'PRIVATE_LOW'
+  | 'PRIVATE_HEATED'
+  | 'SEMI_PUBLIC'
+  | 'PUBLIC_WATCH'
+  | 'PUBLIC_HUMILIATION';
+
+export type PressureStabilizerClass =
+  | 'NONE'
+  | 'FRAGILE'
+  | 'RECOVERING'
+  | 'SUPPORTED'
+  | 'FORTIFIED';
+
+export type PressureCrowdClass =
+  | 'QUIET'
+  | 'OBSERVING'
+  | 'HEATED'
+  | 'PREDATORY'
+  | 'SWARMING';
+
+export type PressureDominantAxis =
+  | 'INTIMIDATION'
+  | 'FRUSTRATION'
+  | 'RELIEF'
+  | 'DESPERATION'
+  | 'CONFIDENCE'
+  | 'BALANCED';
+
+export type PressureAffectScenario =
+  | 'CEREMONIAL_RECOVERY'
+  | 'COMEBACK_WINDOW'
+  | 'CROWD_HUMILIATION'
+  | 'CROWD_PILE_ON'
+  | 'DEALROOM_PREDATION'
+  | 'HELPER_STABILIZATION'
+  | 'HUNTED_PUBLICLY'
+  | 'LOW_GRADE_TENSION'
+  | 'PREDATORY_QUIET'
+  | 'RESCUE_PRESSURE'
+  | 'SPIKE_WITHOUT_RECOVERY'
+  | 'STEADY_SURVEILLANCE'
+  | 'VOLATILE_COLLAPSE';
+
+export interface PressureAffectModeProfile {
+  readonly modeId: PressureAffectModeId;
+  readonly displayName: string;
+  readonly description: string;
+  readonly channelBias: Readonly<Record<ChatVisibleChannel, Score01>>;
+  readonly intimidationBias01: Score01;
+  readonly frustrationBias01: Score01;
+  readonly reliefBias01: Score01;
+  readonly desperationBias01: Score01;
+  readonly confidenceBias01: Score01;
+  readonly exposureBias01: Score01;
+  readonly crowdBias01: Score01;
+  readonly rescueBias01: Score01;
+  readonly silenceBias01: Score01;
+  readonly stabilizerBias01: Score01;
+  readonly notes: readonly string[];
+}
+
+export interface PressureAxisSnapshot {
+  readonly axis: ChatEmotionAxis;
+  readonly score01: Score01;
+  readonly rank: number;
+  readonly percentileLabel: string;
+  readonly confidenceBand: ChatEmotionConfidenceBand;
+  readonly operatingState: ChatEmotionOperatingState;
+  readonly descriptiveSummary: string;
+}
+
+export interface PressureAffectSignalDigest {
+  readonly modeId: PressureAffectModeId;
+  readonly exposureClass: PressureExposureClass;
+  readonly stabilizerClass: PressureStabilizerClass;
+  readonly crowdClass: PressureCrowdClass;
+  readonly dominantAxis: PressureDominantAxis;
+  readonly scenario: PressureAffectScenario;
+  readonly publicIntensity01: Score01;
+  readonly recoveryHeadroom01: Score01;
+  readonly collapseRisk01: Score01;
+  readonly silenceRisk01: Score01;
+  readonly negotiationRisk01: Score01;
+  readonly comebackStrength01: Score01;
+  readonly axisSnapshots: readonly PressureAxisSnapshot[];
+  readonly labels: readonly string[];
+}
+
+export interface PressureAffectRiskEnvelope {
+  readonly collapseRisk01: Score01;
+  readonly rescueRisk01: Score01;
+  readonly humiliationRisk01: Score01;
+  readonly silenceRisk01: Score01;
+  readonly negotiationRisk01: Score01;
+  readonly crowdEscalationRisk01: Score01;
+  readonly recoveryOpportunity01: Score01;
+  readonly overallRisk01: Score01;
+  readonly labels: readonly string[];
+}
+
+export interface PressureAffectPolicyTrace {
+  readonly shouldPreferSilence: boolean;
+  readonly shouldEscalateRescue: boolean;
+  readonly shouldPrimeComebackSpeech: boolean;
+  readonly shouldRestrainCelebration: boolean;
+  readonly shouldWarnCrowdPileOn: boolean;
+  readonly silenceReason: string;
+  readonly rescueReason: string;
+  readonly comebackReason: string;
+  readonly celebrationReason: string;
+  readonly crowdReason: string;
+}
+
+export interface PressureAffectDiagnosticReport {
+  readonly header: string;
+  readonly modeId: PressureAffectModeId;
+  readonly scenario: PressureAffectScenario;
+  readonly dominantAxis: PressureDominantAxis;
+  readonly stateLine: string;
+  readonly riskLine: string;
+  readonly policyLine: string;
+  readonly vectorLine: string;
+  readonly driverLines: readonly string[];
+  readonly labelLines: readonly string[];
+  readonly axisLines: readonly string[];
+  readonly notes: readonly string[];
+}
+
+export interface PressureAffectOperatorPacket {
+  readonly moduleName: typeof CHAT_PRESSURE_AFFECT_MODEL_MODULE_NAME;
+  readonly version: typeof CHAT_PRESSURE_AFFECT_MODEL_VERSION;
+  readonly modeId: PressureAffectModeId;
+  readonly scenario: PressureAffectScenario;
+  readonly dominantAxis: PressureDominantAxis;
+  readonly state: PressureNarrativeState;
+  readonly operatingState: ChatEmotionOperatingState;
+  readonly confidenceBand: ChatEmotionConfidenceBand;
+  readonly pressureSeverity01: Score01;
+  readonly publicExposure01: Score01;
+  readonly crowdThreat01: Score01;
+  readonly stabilizer01: Score01;
+  readonly collapseRisk01: Score01;
+  readonly recoveryOpportunity01: Score01;
+  readonly recommendation: PressureAffectRecommendation;
+  readonly policyTrace: PressureAffectPolicyTrace;
+  readonly labels: readonly string[];
+  readonly metadata: JsonObject;
+}
+
+export interface PressureAffectDetailedResult {
+  readonly result: PressureAffectResult;
+  readonly modeProfile: PressureAffectModeProfile;
+  readonly digest: PressureAffectSignalDigest;
+  readonly riskEnvelope: PressureAffectRiskEnvelope;
+  readonly policyTrace: PressureAffectPolicyTrace;
+  readonly diagnosticReport: PressureAffectDiagnosticReport;
+  readonly operatorPacket: PressureAffectOperatorPacket;
+}
+
+export interface PressureAffectBatchInput {
+  readonly inputs: readonly PressureAffectModelInput[];
+  readonly options?: PressureAffectModelOptions;
+  readonly modeHint?: PressureAffectModeId;
+  readonly batchLabel?: string;
+}
+
+export interface PressureAffectBatchAggregate {
+  readonly batchLabel: string;
+  readonly modeId: PressureAffectModeId;
+  readonly sampleCount: number;
+  readonly averagePressureSeverity01: Score01;
+  readonly averagePublicExposure01: Score01;
+  readonly averageCrowdThreat01: Score01;
+  readonly averageStabilizer01: Score01;
+  readonly averageCollapseRisk01: Score01;
+  readonly peakCollapseRisk01: Score01;
+  readonly peakCrowdEscalationRisk01: Score01;
+  readonly dominantScenario: PressureAffectScenario;
+  readonly dominantAxis: PressureDominantAxis;
+  readonly scenarioCounts: Readonly<Record<PressureAffectScenario, number>>;
+  readonly dominantState: PressureNarrativeState;
+  readonly dominantOperatingState: ChatEmotionOperatingState;
+  readonly labels: readonly string[];
+}
+
+export interface PressureAffectBatchResult {
+  readonly entries: readonly PressureAffectDetailedResult[];
+  readonly aggregate: PressureAffectBatchAggregate;
+  readonly reports: readonly PressureAffectDiagnosticReport[];
+}
+
+export interface PressureAffectComparison {
+  readonly previousState: PressureNarrativeState;
+  readonly nextState: PressureNarrativeState;
+  readonly previousOperatingState: ChatEmotionOperatingState;
+  readonly nextOperatingState: ChatEmotionOperatingState;
+  readonly pressureDelta01: number;
+  readonly exposureDelta01: number;
+  readonly crowdDelta01: number;
+  readonly stabilizerDelta01: number;
+  readonly intimidationDelta01: number;
+  readonly frustrationDelta01: number;
+  readonly reliefDelta01: number;
+  readonly desperationDelta01: number;
+  readonly confidenceRepairDelta01: number;
+  readonly summary: readonly string[];
+}
+
+export interface PressureAffectTrajectoryPoint {
+  readonly sequence: number;
+  readonly input: PressureAffectModelInput;
+  readonly detailed: PressureAffectDetailedResult;
+  readonly comparisonFromPrevious?: PressureAffectComparison;
+}
+
+export interface PressureAffectTrajectoryResult {
+  readonly points: readonly PressureAffectTrajectoryPoint[];
+  readonly aggregate: PressureAffectBatchAggregate;
+  readonly summary: readonly string[];
+}
+
+export interface PressureAffectReplayFrame {
+  readonly sequence: number;
+  readonly state: PressureNarrativeState;
+  readonly operatingState: ChatEmotionOperatingState;
+  readonly dominantAxis: PressureDominantAxis;
+  readonly scenario: PressureAffectScenario;
+  readonly pressureSeverity01: Score01;
+  readonly crowdThreat01: Score01;
+  readonly publicExposure01: Score01;
+  readonly stabilizer01: Score01;
+  readonly collapseRisk01: Score01;
+  readonly recommendation: PressureAffectRecommendation;
+  readonly label: string;
+}
+
+export interface PressureAffectSurfaceManifestEntry {
+  readonly name: string;
+  readonly kind:
+    | 'CONSTANT'
+    | 'TYPE'
+    | 'CLASS'
+    | 'HELPER'
+    | 'FACTORY'
+    | 'BATCH'
+    | 'DIAGNOSTIC';
+  readonly description: string;
+}
+
+/* ========================================================================== *
+ * MARK: Mode profiles and thresholds
+ * ========================================================================== */
+
+export const CHAT_PRESSURE_AFFECT_MODE_PROFILES = Object.freeze({
+  EMPIRE: Object.freeze({
+    modeId: 'EMPIRE',
+    displayName: 'Empire',
+    description:
+      'Empire treats public witness as sovereignty pressure. Exposure and posture matter more than private turbulence.',
+    channelBias: Object.freeze({
+      GLOBAL: 0.9,
+      SYNDICATE: 0.52,
+      DEAL_ROOM: 0.58,
+      LOBBY: 0.44,
+    }),
+    intimidationBias01: 0.09,
+    frustrationBias01: 0.05,
+    reliefBias01: 0.02,
+    desperationBias01: 0.06,
+    confidenceBias01: 0.04,
+    exposureBias01: 0.11,
+    crowdBias01: 0.09,
+    rescueBias01: 0.03,
+    silenceBias01: 0.07,
+    stabilizerBias01: 0.02,
+    notes: Object.freeze([
+      'Public witness matters more in Empire.',
+      'Status loss compounds intimidation quickly.',
+      'Relief should not over-repair without visible validation.',
+    ]),
+  } satisfies PressureAffectModeProfile),
+  PREDATOR: Object.freeze({
+    modeId: 'PREDATOR',
+    displayName: 'Predator',
+    description:
+      'Predator treats delay, leverage, and predatory quiet as pressure multipliers. Deal-room pressure is strategic rather than noisy.',
+    channelBias: Object.freeze({
+      GLOBAL: 0.48,
+      SYNDICATE: 0.42,
+      DEAL_ROOM: 0.93,
+      LOBBY: 0.31,
+    }),
+    intimidationBias01: 0.07,
+    frustrationBias01: 0.04,
+    reliefBias01: 0.01,
+    desperationBias01: 0.08,
+    confidenceBias01: 0.02,
+    exposureBias01: 0.06,
+    crowdBias01: 0.05,
+    rescueBias01: 0.02,
+    silenceBias01: 0.12,
+    stabilizerBias01: 0.01,
+    notes: Object.freeze([
+      'Deal-room silence can be predatory, not calm.',
+      'Negotiation risk should be elevated.',
+      'Confidence repair is slower unless leverage materially improves.',
+    ]),
+  } satisfies PressureAffectModeProfile),
+  SYNDICATE: Object.freeze({
+    modeId: 'SYNDICATE',
+    displayName: 'Syndicate',
+    description:
+      'Syndicate amplifies trust, rescue debt, and helper timing. Breakdown under peer witness is especially consequential.',
+    channelBias: Object.freeze({
+      GLOBAL: 0.45,
+      SYNDICATE: 0.94,
+      DEAL_ROOM: 0.51,
+      LOBBY: 0.33,
+    }),
+    intimidationBias01: 0.04,
+    frustrationBias01: 0.06,
+    reliefBias01: 0.07,
+    desperationBias01: 0.05,
+    confidenceBias01: 0.06,
+    exposureBias01: 0.05,
+    crowdBias01: 0.04,
+    rescueBias01: 0.09,
+    silenceBias01: 0.04,
+    stabilizerBias01: 0.08,
+    notes: Object.freeze([
+      'Helper intervention matters more in Syndicate.',
+      'Trust repair is a concrete stabilizer.',
+      'Crowd danger is lower than betrayal danger.',
+    ]),
+  } satisfies PressureAffectModeProfile),
+  PHANTOM: Object.freeze({
+    modeId: 'PHANTOM',
+    displayName: 'Phantom',
+    description:
+      'Phantom privileges dread, delayed witness, and haunted continuity. Quiet pressure and spectral observation matter.',
+    channelBias: Object.freeze({
+      GLOBAL: 0.56,
+      SYNDICATE: 0.47,
+      DEAL_ROOM: 0.63,
+      LOBBY: 0.39,
+    }),
+    intimidationBias01: 0.08,
+    frustrationBias01: 0.03,
+    reliefBias01: 0.01,
+    desperationBias01: 0.07,
+    confidenceBias01: 0.03,
+    exposureBias01: 0.07,
+    crowdBias01: 0.07,
+    rescueBias01: 0.02,
+    silenceBias01: 0.1,
+    stabilizerBias01: 0.03,
+    notes: Object.freeze([
+      'Quiet observation is pressure, not emptiness.',
+      'Recovery should feel earned, not automatic.',
+      'Phantom favors mood carryover and delayed repair.',
+    ]),
+  } satisfies PressureAffectModeProfile),
+  UNKNOWN: Object.freeze({
+    modeId: 'UNKNOWN',
+    displayName: 'Unknown',
+    description:
+      'Fallback profile when no strong mode hint exists.',
+    channelBias: Object.freeze({
+      GLOBAL: 0.5,
+      SYNDICATE: 0.5,
+      DEAL_ROOM: 0.5,
+      LOBBY: 0.5,
+    }),
+    intimidationBias01: 0.03,
+    frustrationBias01: 0.03,
+    reliefBias01: 0.03,
+    desperationBias01: 0.03,
+    confidenceBias01: 0.03,
+    exposureBias01: 0.03,
+    crowdBias01: 0.03,
+    rescueBias01: 0.03,
+    silenceBias01: 0.03,
+    stabilizerBias01: 0.03,
+    notes: Object.freeze([
+      'Fallback only.',
+      'Use channel + tags + metadata to resolve a stronger mode when possible.',
+    ]),
+  } satisfies PressureAffectModeProfile),
+} satisfies Readonly<Record<PressureAffectModeId, PressureAffectModeProfile>>);
+
+export const CHAT_PRESSURE_AFFECT_SURFACE_MANIFEST = Object.freeze([
+  Object.freeze({
+    name: 'CHAT_PRESSURE_AFFECT_MODEL_MODULE_NAME',
+    kind: 'CONSTANT',
+    description: 'Stable module identifier for audit and import discipline.',
+  }),
+  Object.freeze({
+    name: 'CHAT_PRESSURE_AFFECT_MODEL_VERSION',
+    kind: 'CONSTANT',
+    description: 'Stable version identifier for replay and cache discipline.',
+  }),
+  Object.freeze({
+    name: 'CHAT_PRESSURE_AFFECT_MODEL_DEFAULTS',
+    kind: 'CONSTANT',
+    description: 'Canonical thresholds and weights for the backend pressure model.',
+  }),
+  Object.freeze({
+    name: 'CHAT_PRESSURE_AFFECT_MODE_PROFILES',
+    kind: 'CONSTANT',
+    description: 'Mode-stratified bias profiles for Empire, Predator, Syndicate, and Phantom.',
+  }),
+  Object.freeze({
+    name: 'PressureAffectModel',
+    kind: 'CLASS',
+    description: 'Primary evaluator class for authoritative pressure and affect scoring.',
+  }),
+  Object.freeze({
+    name: 'createPressureAffectModel',
+    kind: 'FACTORY',
+    description: 'Creates the canonical runtime model instance.',
+  }),
+  Object.freeze({
+    name: 'evaluatePressureAffect',
+    kind: 'HELPER',
+    description: 'Standalone evaluation helper for one input.',
+  }),
+  Object.freeze({
+    name: 'summarizePressureAffect',
+    kind: 'HELPER',
+    description: 'Compact summary helper for one result.',
+  }),
+  Object.freeze({
+    name: 'evaluatePressureAffectDetailed',
+    kind: 'DIAGNOSTIC',
+    description: 'Evaluates one input and emits digest, risk, policy, and operator packet surfaces.',
+  }),
+  Object.freeze({
+    name: 'evaluatePressureAffectBatch',
+    kind: 'BATCH',
+    description: 'Evaluates many inputs and returns aggregate pressure analytics.',
+  }),
+  Object.freeze({
+    name: 'evaluatePressureAffectTrajectory',
+    kind: 'BATCH',
+    description: 'Evaluates a sequence of inputs and computes point-to-point drift.',
+  }),
+  Object.freeze({
+    name: 'buildPressureAffectDiagnosticReport',
+    kind: 'DIAGNOSTIC',
+    description: 'Builds a detailed audit report from one result.',
+  }),
+  Object.freeze({
+    name: 'buildPressureAffectOperatorPacket',
+    kind: 'DIAGNOSTIC',
+    description: 'Builds a compact operator-facing packet for downstream orchestration.',
+  }),
+  Object.freeze({
+    name: 'comparePressureAffectResults',
+    kind: 'HELPER',
+    description: 'Computes drift between two pressure results.',
+  }),
+  Object.freeze({
+    name: 'buildPressureAffectReplayFrames',
+    kind: 'HELPER',
+    description: 'Creates replay-friendly pressure frames from a trajectory.',
+  }),
+] satisfies readonly PressureAffectSurfaceManifestEntry[]);
+
+/* ========================================================================== *
+ * MARK: Extended public factories and reports
+ * ========================================================================== */
+
+export function resolvePressureAffectModeProfile(
+  input: Pick<PressureAffectModelInput, 'channel' | 'eventTags' | 'metadata'>,
+  explicitModeId?: PressureAffectModeId,
+): PressureAffectModeProfile {
+  if (explicitModeId) {
+    return CHAT_PRESSURE_AFFECT_MODE_PROFILES[explicitModeId];
+  }
+
+  const tags = new Set((input.eventTags ?? []).map((value) => value.toUpperCase()));
+  const metadataMode = readMetadataString(input.metadata, [
+    'modeId',
+    'mode',
+    'gameMode',
+    'screenMode',
+  ]);
+  const normalizedMetadataMode = normalizeModeId(metadataMode);
+
+  if (normalizedMetadataMode) {
+    return CHAT_PRESSURE_AFFECT_MODE_PROFILES[normalizedMetadataMode];
+  }
+
+  if (tags.has('EMPIRE')) {
+    return CHAT_PRESSURE_AFFECT_MODE_PROFILES.EMPIRE;
+  }
+  if (tags.has('PREDATOR') || input.channel === 'DEAL_ROOM') {
+    return CHAT_PRESSURE_AFFECT_MODE_PROFILES.PREDATOR;
+  }
+  if (tags.has('SYNDICATE') || input.channel === 'SYNDICATE') {
+    return CHAT_PRESSURE_AFFECT_MODE_PROFILES.SYNDICATE;
+  }
+  if (tags.has('PHANTOM')) {
+    return CHAT_PRESSURE_AFFECT_MODE_PROFILES.PHANTOM;
+  }
+  if (input.channel === 'GLOBAL') {
+    return CHAT_PRESSURE_AFFECT_MODE_PROFILES.EMPIRE;
+  }
+  if (input.channel === 'LOBBY') {
+    return CHAT_PRESSURE_AFFECT_MODE_PROFILES.UNKNOWN;
+  }
+  return CHAT_PRESSURE_AFFECT_MODE_PROFILES.UNKNOWN;
+}
+
+export function buildPressureAffectSignalDigest(
+  input: PressureAffectModelInput,
+  result: PressureAffectResult,
+  modeHint?: PressureAffectModeId,
+): PressureAffectSignalDigest {
+  const modeProfile = resolvePressureAffectModeProfile(input, modeHint);
+  const exposureClass = classifyPressureExposure(result.publicExposure01, result.channel);
+  const stabilizerClass = classifyPressureStabilizer(result.stabilizer01);
+  const crowdClass = classifyPressureCrowd(result.crowdThreat01, result.channel);
+  const dominantAxis = resolvePressureDominantAxis(result.breakdown);
+  const scenario = resolvePressureAffectScenario(result, modeProfile.modeId);
+  const collapseRisk01 = clampEmotionScalar(
+    result.breakdown.desperation01 * 0.37 +
+      result.breakdown.intimidation01 * 0.16 +
+      result.pressureSeverity01 * 0.18 +
+      result.publicExposure01 * 0.1 +
+      result.crowdThreat01 * 0.11 +
+      invert01(result.breakdown.confidenceRepair01) * 0.08,
+  );
+  const recoveryHeadroom01 = clampEmotionScalar(
+    result.breakdown.relief01 * 0.22 +
+      result.breakdown.confidenceRepair01 * 0.34 +
+      result.stabilizer01 * 0.18 +
+      invert01(result.breakdown.desperation01) * 0.14 +
+      invert01(result.crowdThreat01) * 0.12,
+  );
+  const silenceRisk01 = clampEmotionScalar(
+    result.recommendation.silenceSuitability01 * 0.41 +
+      result.crowdThreat01 * 0.14 +
+      result.publicExposure01 * 0.12 +
+      invert01(result.breakdown.relief01) * 0.17 +
+      invert01(result.stabilizer01) * 0.16,
+  );
+  const negotiationRisk01 = clampEmotionScalar(
+    modeProfile.modeId === 'PREDATOR'
+      ? result.breakdown.desperation01 * 0.28 +
+          result.breakdown.intimidation01 * 0.19 +
+          result.pressureSeverity01 * 0.2 +
+          result.publicExposure01 * 0.09 +
+          result.crowdThreat01 * 0.08 +
+          modeProfile.silenceBias01 * 0.16
+      : result.breakdown.desperation01 * 0.18 +
+          result.breakdown.frustration01 * 0.14 +
+          result.pressureSeverity01 * 0.18 +
+          result.crowdThreat01 * 0.08 +
+          modeProfile.silenceBias01 * 0.08,
+  );
+  const comebackStrength01 = clampEmotionScalar(
+    result.recommendation.comebackReadiness01 * 0.5 +
+      result.breakdown.confidenceRepair01 * 0.2 +
+      result.breakdown.relief01 * 0.13 +
+      invert01(result.breakdown.intimidation01) * 0.09 +
+      invert01(result.breakdown.desperation01) * 0.08,
+  );
+  const publicIntensity01 = clampEmotionScalar(
+    result.publicExposure01 * 0.46 +
+      result.crowdThreat01 * 0.26 +
+      result.pressureSeverity01 * 0.18 +
+      modeProfile.exposureBias01 * 0.1,
+  );
+  const axisSnapshots = Object.freeze(buildPressureAxisSnapshots(result));
+  const labels = Object.freeze(buildPressureDigestLabels({
+    modeProfile,
+    result,
+    exposureClass,
+    stabilizerClass,
+    crowdClass,
+    dominantAxis,
+    scenario,
+    collapseRisk01,
+    recoveryHeadroom01,
+    silenceRisk01,
+    negotiationRisk01,
+    comebackStrength01,
+    publicIntensity01,
+  }));
+
+  return Object.freeze({
+    modeId: modeProfile.modeId,
+    exposureClass,
+    stabilizerClass,
+    crowdClass,
+    dominantAxis,
+    scenario,
+    publicIntensity01,
+    recoveryHeadroom01,
+    collapseRisk01,
+    silenceRisk01,
+    negotiationRisk01,
+    comebackStrength01,
+    axisSnapshots,
+    labels,
+  });
+}
+
+export function buildPressureAffectRiskEnvelope(
+  result: PressureAffectResult,
+  digest: PressureAffectSignalDigest,
+): PressureAffectRiskEnvelope {
+  const collapseRisk01 = digest.collapseRisk01;
+  const rescueRisk01 = clampEmotionScalar(
+    result.recommendation.rescueUrgency01 * 0.48 +
+      result.breakdown.desperation01 * 0.17 +
+      result.breakdown.frustration01 * 0.11 +
+      result.pressureSeverity01 * 0.11 +
+      invert01(result.stabilizer01) * 0.13,
+  );
+  const humiliationRisk01 = clampEmotionScalar(
+    result.publicExposure01 * 0.41 +
+      result.crowdThreat01 * 0.24 +
+      result.breakdown.intimidation01 * 0.15 +
+      result.pressureSeverity01 * 0.1 +
+      result.recommendation.crowdPileOnRisk01 * 0.1,
+  );
+  const silenceRisk01 = digest.silenceRisk01;
+  const negotiationRisk01 = digest.negotiationRisk01;
+  const crowdEscalationRisk01 = clampEmotionScalar(
+    result.recommendation.crowdPileOnRisk01 * 0.49 +
+      result.crowdThreat01 * 0.19 +
+      result.publicExposure01 * 0.14 +
+      result.breakdown.frustration01 * 0.09 +
+      result.breakdown.intimidation01 * 0.09,
+  );
+  const recoveryOpportunity01 = clampEmotionScalar(
+    digest.recoveryHeadroom01 * 0.43 +
+      result.breakdown.confidenceRepair01 * 0.18 +
+      result.breakdown.relief01 * 0.15 +
+      result.stabilizer01 * 0.13 +
+      result.recommendation.comebackReadiness01 * 0.11,
+  );
+  const overallRisk01 = clampEmotionScalar(
+    collapseRisk01 * 0.22 +
+      rescueRisk01 * 0.14 +
+      humiliationRisk01 * 0.16 +
+      silenceRisk01 * 0.12 +
+      negotiationRisk01 * 0.12 +
+      crowdEscalationRisk01 * 0.14 +
+      invert01(recoveryOpportunity01) * 0.1,
+  );
+
+  return Object.freeze({
+    collapseRisk01,
+    rescueRisk01,
+    humiliationRisk01,
+    silenceRisk01,
+    negotiationRisk01,
+    crowdEscalationRisk01,
+    recoveryOpportunity01,
+    overallRisk01,
+    labels: Object.freeze(buildRiskEnvelopeLabels({
+      digest,
+      collapseRisk01,
+      rescueRisk01,
+      humiliationRisk01,
+      silenceRisk01,
+      negotiationRisk01,
+      crowdEscalationRisk01,
+      recoveryOpportunity01,
+      overallRisk01,
+    })),
+  });
+}
+
+export function buildPressureAffectPolicyTrace(
+  result: PressureAffectResult,
+  digest: PressureAffectSignalDigest,
+  riskEnvelope: PressureAffectRiskEnvelope,
+): PressureAffectPolicyTrace {
+  return Object.freeze({
+    shouldPreferSilence: result.recommendation.policyFlags.shouldPreferSilence,
+    shouldEscalateRescue: result.recommendation.policyFlags.shouldEscalateRescue,
+    shouldPrimeComebackSpeech:
+      result.recommendation.policyFlags.shouldPrimeComebackSpeech,
+    shouldRestrainCelebration:
+      result.recommendation.policyFlags.shouldRestrainCelebration,
+    shouldWarnCrowdPileOn: result.recommendation.policyFlags.shouldWarnCrowdPileOn,
+    silenceReason: resolveSilenceReason(result, digest, riskEnvelope),
+    rescueReason: resolveRescueReason(result, digest, riskEnvelope),
+    comebackReason: resolveComebackReason(result, digest, riskEnvelope),
+    celebrationReason: resolveCelebrationReason(result, digest),
+    crowdReason: resolveCrowdReason(result, digest, riskEnvelope),
+  });
+}
+
+export function buildPressureAffectDiagnosticReport(
+  result: PressureAffectResult,
+  input?: PressureAffectModelInput,
+  modeHint?: PressureAffectModeId,
+): PressureAffectDiagnosticReport {
+  const digest = buildPressureAffectSignalDigest(
+    input ?? {
+      userId: result.userId,
+      roomId: result.roomId,
+      channel: result.channel,
+      evaluatedAt: result.evaluatedAt,
+    },
+    result,
+    modeHint,
+  );
+  const riskEnvelope = buildPressureAffectRiskEnvelope(result, digest);
+  const policyTrace = buildPressureAffectPolicyTrace(result, digest, riskEnvelope);
+  const axisLines = Object.freeze(
+    digest.axisSnapshots.map(
+      (snapshot) =>
+        `${snapshot.rank}. ${snapshot.axis.toLowerCase()}=${toPct(snapshot.score01)} band=${snapshot.confidenceBand} ${snapshot.descriptiveSummary}`,
+    ),
+  );
+  const driverLines = Object.freeze(
+    result.drivers.map(
+      (driver) =>
+        `${driver.label} :: ${driver.driver} :: ${toPct(driver.sourceWeight)} :: ${String(driver.reason)}`,
+    ),
+  );
+  const labelLines = Object.freeze([
+    ...digest.labels,
+    ...riskEnvelope.labels,
+  ]);
+
+  return Object.freeze({
+    header: `${CHAT_PRESSURE_AFFECT_MODEL_MODULE_NAME}@${CHAT_PRESSURE_AFFECT_MODEL_VERSION}`,
+    modeId: digest.modeId,
+    scenario: digest.scenario,
+    dominantAxis: digest.dominantAxis,
+    stateLine: `state=${result.narrativeState} operating=${result.operatingState} band=${result.confidenceBand}`,
+    riskLine:
+      `collapse=${toPct(riskEnvelope.collapseRisk01)} rescue=${toPct(riskEnvelope.rescueRisk01)} ` +
+      `humiliation=${toPct(riskEnvelope.humiliationRisk01)} crowd=${toPct(riskEnvelope.crowdEscalationRisk01)} ` +
+      `overall=${toPct(riskEnvelope.overallRisk01)} recovery=${toPct(riskEnvelope.recoveryOpportunity01)}`,
+    policyLine:
+      `silence=${policyTrace.silenceReason} rescue=${policyTrace.rescueReason} ` +
+      `comeback=${policyTrace.comebackReason} celebration=${policyTrace.celebrationReason} ` +
+      `crowd=${policyTrace.crowdReason}`,
+    vectorLine: `vector=${result.pressureVectorSummary}`,
+    driverLines,
+    labelLines,
+    axisLines,
+    notes: Object.freeze([
+      ...(result.notes ?? []),
+      ...modeProfileNotes(resolvePressureAffectModeProfile(
+        input ?? {
+          userId: result.userId,
+          roomId: result.roomId,
+          channel: result.channel,
+          evaluatedAt: result.evaluatedAt,
+        },
+        modeHint,
+      )),
+    ]),
+  });
+}
+
+export function buildPressureAffectOperatorPacket(
+  result: PressureAffectResult,
+  input?: PressureAffectModelInput,
+  modeHint?: PressureAffectModeId,
+): PressureAffectOperatorPacket {
+  const digest = buildPressureAffectSignalDigest(
+    input ?? {
+      userId: result.userId,
+      roomId: result.roomId,
+      channel: result.channel,
+      evaluatedAt: result.evaluatedAt,
+    },
+    result,
+    modeHint,
+  );
+  const riskEnvelope = buildPressureAffectRiskEnvelope(result, digest);
+  const policyTrace = buildPressureAffectPolicyTrace(result, digest, riskEnvelope);
+
+  return Object.freeze({
+    moduleName: CHAT_PRESSURE_AFFECT_MODEL_MODULE_NAME,
+    version: CHAT_PRESSURE_AFFECT_MODEL_VERSION,
+    modeId: digest.modeId,
+    scenario: digest.scenario,
+    dominantAxis: digest.dominantAxis,
+    state: result.narrativeState,
+    operatingState: result.operatingState,
+    confidenceBand: result.confidenceBand,
+    pressureSeverity01: result.pressureSeverity01,
+    publicExposure01: result.publicExposure01,
+    crowdThreat01: result.crowdThreat01,
+    stabilizer01: result.stabilizer01,
+    collapseRisk01: riskEnvelope.collapseRisk01,
+    recoveryOpportunity01: riskEnvelope.recoveryOpportunity01,
+    recommendation: result.recommendation,
+    policyTrace,
+    labels: Object.freeze([...digest.labels, ...riskEnvelope.labels]),
+    metadata: Object.freeze({
+      roomId: result.roomId,
+      userId: result.userId,
+      channel: result.channel,
+      evaluatedAt: result.evaluatedAt,
+      narrativeState: result.narrativeState,
+      operatingState: result.operatingState,
+      dominantAxis: digest.dominantAxis,
+      scenario: digest.scenario,
+      exposureClass: digest.exposureClass,
+      crowdClass: digest.crowdClass,
+      stabilizerClass: digest.stabilizerClass,
+    }),
+  });
+}
+
+export function evaluatePressureAffectDetailed(
+  input: PressureAffectModelInput,
+  options: PressureAffectModelOptions = {},
+  modeHint?: PressureAffectModeId,
+): PressureAffectDetailedResult {
+  const result = evaluatePressureAffect(input, options);
+  const modeProfile = resolvePressureAffectModeProfile(input, modeHint);
+  const digest = buildPressureAffectSignalDigest(input, result, modeProfile.modeId);
+  const riskEnvelope = buildPressureAffectRiskEnvelope(result, digest);
+  const policyTrace = buildPressureAffectPolicyTrace(result, digest, riskEnvelope);
+  const diagnosticReport = buildPressureAffectDiagnosticReport(
+    result,
+    input,
+    modeProfile.modeId,
+  );
+  const operatorPacket = buildPressureAffectOperatorPacket(
+    result,
+    input,
+    modeProfile.modeId,
+  );
+  return Object.freeze({
+    result,
+    modeProfile,
+    digest,
+    riskEnvelope,
+    policyTrace,
+    diagnosticReport,
+    operatorPacket,
+  });
+}
+
+export function evaluatePressureAffectBatch(
+  input: PressureAffectBatchInput,
+): PressureAffectBatchResult {
+  const entries = Object.freeze(
+    input.inputs.map((value) =>
+      evaluatePressureAffectDetailed(value, input.options ?? {}, input.modeHint),
+    ),
+  );
+  const aggregate = buildPressureBatchAggregate(
+    entries,
+    input.batchLabel ?? 'PRESSURE_BATCH',
+    input.modeHint,
+  );
+  const reports = Object.freeze(entries.map((entry) => entry.diagnosticReport));
+  return Object.freeze({
+    entries,
+    aggregate,
+    reports,
+  });
+}
+
+export function comparePressureAffectResults(
+  previous: PressureAffectResult,
+  next: PressureAffectResult,
+): PressureAffectComparison {
+  const comparison = Object.freeze({
+    previousState: previous.narrativeState,
+    nextState: next.narrativeState,
+    previousOperatingState: previous.operatingState,
+    nextOperatingState: next.operatingState,
+    pressureDelta01: delta01(previous.pressureSeverity01, next.pressureSeverity01),
+    exposureDelta01: delta01(previous.publicExposure01, next.publicExposure01),
+    crowdDelta01: delta01(previous.crowdThreat01, next.crowdThreat01),
+    stabilizerDelta01: delta01(previous.stabilizer01, next.stabilizer01),
+    intimidationDelta01: delta01(
+      previous.breakdown.intimidation01,
+      next.breakdown.intimidation01,
+    ),
+    frustrationDelta01: delta01(
+      previous.breakdown.frustration01,
+      next.breakdown.frustration01,
+    ),
+    reliefDelta01: delta01(previous.breakdown.relief01, next.breakdown.relief01),
+    desperationDelta01: delta01(
+      previous.breakdown.desperation01,
+      next.breakdown.desperation01,
+    ),
+    confidenceRepairDelta01: delta01(
+      previous.breakdown.confidenceRepair01,
+      next.breakdown.confidenceRepair01,
+    ),
+    summary: Object.freeze([
+      `state:${previous.narrativeState}->${next.narrativeState}`,
+      `operating:${previous.operatingState}->${next.operatingState}`,
+      `pressureDelta=${formatSignedPct(delta01(previous.pressureSeverity01, next.pressureSeverity01))}`,
+      `exposureDelta=${formatSignedPct(delta01(previous.publicExposure01, next.publicExposure01))}`,
+      `crowdDelta=${formatSignedPct(delta01(previous.crowdThreat01, next.crowdThreat01))}`,
+      `stabilizerDelta=${formatSignedPct(delta01(previous.stabilizer01, next.stabilizer01))}`,
+      `intimidationDelta=${formatSignedPct(delta01(previous.breakdown.intimidation01, next.breakdown.intimidation01))}`,
+      `frustrationDelta=${formatSignedPct(delta01(previous.breakdown.frustration01, next.breakdown.frustration01))}`,
+      `reliefDelta=${formatSignedPct(delta01(previous.breakdown.relief01, next.breakdown.relief01))}`,
+      `desperationDelta=${formatSignedPct(delta01(previous.breakdown.desperation01, next.breakdown.desperation01))}`,
+      `confidenceRepairDelta=${formatSignedPct(delta01(previous.breakdown.confidenceRepair01, next.breakdown.confidenceRepair01))}`,
+    ]),
+  });
+
+  return comparison;
+}
+
+export function evaluatePressureAffectTrajectory(
+  inputs: readonly PressureAffectModelInput[],
+  options: PressureAffectModelOptions = {},
+  modeHint?: PressureAffectModeId,
+): PressureAffectTrajectoryResult {
+  const points: PressureAffectTrajectoryPoint[] = [];
+
+  for (let index = 0; index < inputs.length; index += 1) {
+    const detailed = evaluatePressureAffectDetailed(inputs[index], options, modeHint);
+    const previous = points[index - 1];
+    points.push(
+      Object.freeze({
+        sequence: index,
+        input: inputs[index],
+        detailed,
+        comparisonFromPrevious: previous
+          ? comparePressureAffectResults(previous.detailed.result, detailed.result)
+          : undefined,
+      }),
+    );
+  }
+
+  const aggregate = buildPressureBatchAggregate(
+    Object.freeze(points.map((point) => point.detailed)),
+    'PRESSURE_TRAJECTORY',
+    modeHint,
+  );
+
+  return Object.freeze({
+    points: Object.freeze(points),
+    aggregate,
+    summary: Object.freeze(buildTrajectorySummary(points, aggregate)),
+  });
+}
+
+export function buildPressureAffectReplayFrames(
+  trajectory: PressureAffectTrajectoryResult,
+): readonly PressureAffectReplayFrame[] {
+  return Object.freeze(
+    trajectory.points.map((point) =>
+      Object.freeze({
+        sequence: point.sequence,
+        state: point.detailed.result.narrativeState,
+        operatingState: point.detailed.result.operatingState,
+        dominantAxis: point.detailed.digest.dominantAxis,
+        scenario: point.detailed.digest.scenario,
+        pressureSeverity01: point.detailed.result.pressureSeverity01,
+        crowdThreat01: point.detailed.result.crowdThreat01,
+        publicExposure01: point.detailed.result.publicExposure01,
+        stabilizer01: point.detailed.result.stabilizer01,
+        collapseRisk01: point.detailed.riskEnvelope.collapseRisk01,
+        recommendation: point.detailed.result.recommendation,
+        label:
+          `#${point.sequence} ${point.detailed.digest.scenario} ` +
+          `${point.detailed.result.narrativeState} ` +
+          `pressure=${toPct(point.detailed.result.pressureSeverity01)}`,
+      }),
+    ),
+  );
+}
+
+export function listPressureAffectSurfaceManifest(): readonly PressureAffectSurfaceManifestEntry[] {
+  return CHAT_PRESSURE_AFFECT_SURFACE_MANIFEST;
+}
+
+/* ========================================================================== *
+ * MARK: Extended internal helpers
+ * ========================================================================== */
+
+function normalizeModeId(value: string | undefined): PressureAffectModeId | undefined {
+  switch (String(value ?? '').trim().toUpperCase()) {
+    case 'EMPIRE':
+      return 'EMPIRE';
+    case 'PREDATOR':
+      return 'PREDATOR';
+    case 'SYNDICATE':
+      return 'SYNDICATE';
+    case 'PHANTOM':
+      return 'PHANTOM';
+    case 'UNKNOWN':
+      return 'UNKNOWN';
+    default:
+      return undefined;
+  }
+}
+
+function readMetadataString(
+  metadata: JsonObject | undefined,
+  keys: readonly string[],
+): string | undefined {
+  const record = metadata as Record<string, unknown> | undefined;
+  if (!record) {
+    return undefined;
+  }
+
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === 'string' && value.trim()) {
+      return value;
+    }
+  }
+
+  return undefined;
+}
+
+function classifyPressureExposure(
+  exposure01: Score01,
+  channel: ChatVisibleChannel,
+): PressureExposureClass {
+  if (channel === 'GLOBAL' && exposure01 >= 0.72) {
+    return 'PUBLIC_HUMILIATION';
+  }
+  if (exposure01 >= 0.58) {
+    return 'PUBLIC_WATCH';
+  }
+  if (exposure01 >= 0.4) {
+    return 'SEMI_PUBLIC';
+  }
+  if (channel === 'DEAL_ROOM' && exposure01 >= 0.24) {
+    return 'PRIVATE_HEATED';
+  }
+  return 'PRIVATE_LOW';
+}
+
+function classifyPressureStabilizer(stabilizer01: Score01): PressureStabilizerClass {
+  if (stabilizer01 >= 0.76) {
+    return 'FORTIFIED';
+  }
+  if (stabilizer01 >= 0.56) {
+    return 'SUPPORTED';
+  }
+  if (stabilizer01 >= 0.38) {
+    return 'RECOVERING';
+  }
+  if (stabilizer01 >= 0.18) {
+    return 'FRAGILE';
+  }
+  return 'NONE';
+}
+
+function classifyPressureCrowd(
+  crowdThreat01: Score01,
+  channel: ChatVisibleChannel,
+): PressureCrowdClass {
+  if (crowdThreat01 >= 0.78) {
+    return 'SWARMING';
+  }
+  if (channel === 'DEAL_ROOM' && crowdThreat01 >= 0.58) {
+    return 'PREDATORY';
+  }
+  if (crowdThreat01 >= 0.56) {
+    return 'HEATED';
+  }
+  if (crowdThreat01 >= 0.28) {
+    return 'OBSERVING';
+  }
+  return 'QUIET';
+}
+
+function resolvePressureDominantAxis(
+  breakdown: PressureAxisBreakdown,
+): PressureDominantAxis {
+  const entries = [
+    ['INTIMIDATION', breakdown.intimidation01],
+    ['FRUSTRATION', breakdown.frustration01],
+    ['RELIEF', breakdown.relief01],
+    ['DESPERATION', breakdown.desperation01],
+    ['CONFIDENCE', breakdown.confidenceRepair01],
+  ] as const;
+
+  const sorted = [...entries].sort((a, b) => Number(b[1]) - Number(a[1]));
+  const [top, second] = sorted;
+  if (Math.abs(Number(top[1]) - Number(second[1])) <= 0.03) {
+    return 'BALANCED';
+  }
+  return top[0];
+}
+
+function resolvePressureAffectScenario(
+  result: PressureAffectResult,
+  modeId: PressureAffectModeId,
+): PressureAffectScenario {
+  if (
+    result.breakdown.relief01 >= 0.62 &&
+    result.breakdown.confidenceRepair01 >= 0.6 &&
+    result.pressureSeverity01 <= 0.36
+  ) {
+    return 'CEREMONIAL_RECOVERY';
+  }
+  if (
+    result.recommendation.comebackReadiness01 >= 0.64 &&
+    result.breakdown.confidenceRepair01 >= 0.58
+  ) {
+    return 'COMEBACK_WINDOW';
+  }
+  if (
+    result.publicExposure01 >= 0.68 &&
+    result.crowdThreat01 >= 0.62 &&
+    result.breakdown.intimidation01 >= 0.64
+  ) {
+    return 'CROWD_HUMILIATION';
+  }
+  if (
+    result.recommendation.crowdPileOnRisk01 >= 0.69 &&
+    result.breakdown.frustration01 >= 0.58
+  ) {
+    return 'CROWD_PILE_ON';
+  }
+  if (
+    modeId === 'PREDATOR' &&
+    result.channel === 'DEAL_ROOM' &&
+    result.breakdown.desperation01 >= 0.56
+  ) {
+    return 'DEALROOM_PREDATION';
+  }
+  if (
+    result.stabilizer01 >= 0.56 &&
+    result.breakdown.relief01 >= 0.48 &&
+    result.recommendation.policyFlags.shouldEscalateRescue
+  ) {
+    return 'HELPER_STABILIZATION';
+  }
+  if (
+    result.publicExposure01 >= 0.58 &&
+    result.breakdown.intimidation01 >= 0.66 &&
+    result.crowdThreat01 >= 0.48
+  ) {
+    return 'HUNTED_PUBLICLY';
+  }
+  if (
+    result.pressureSeverity01 <= 0.34 &&
+    result.crowdThreat01 <= 0.3 &&
+    result.breakdown.desperation01 <= 0.3
+  ) {
+    return 'LOW_GRADE_TENSION';
+  }
+  if (
+    modeId === 'PREDATOR' &&
+    result.channel === 'DEAL_ROOM' &&
+    result.recommendation.policyFlags.shouldPreferSilence
+  ) {
+    return 'PREDATORY_QUIET';
+  }
+  if (
+    result.recommendation.rescueUrgency01 >= 0.6 &&
+    result.breakdown.desperation01 >= 0.58
+  ) {
+    return 'RESCUE_PRESSURE';
+  }
+  if (
+    result.pressureSeverity01 >= 0.72 &&
+    result.breakdown.relief01 <= 0.26 &&
+    result.breakdown.confidenceRepair01 <= 0.34
+  ) {
+    return 'SPIKE_WITHOUT_RECOVERY';
+  }
+  if (
+    result.operatingState === 'VOLATILE' ||
+    (result.breakdown.intimidation01 >= 0.68 && result.breakdown.frustration01 >= 0.68)
+  ) {
+    return 'VOLATILE_COLLAPSE';
+  }
+  return 'STEADY_SURVEILLANCE';
+}
+
+function buildPressureAxisSnapshots(
+  result: PressureAffectResult,
+): readonly PressureAxisSnapshot[] {
+  const entries: readonly [ChatEmotionAxis, Score01][] = Object.freeze([
+    ['INTIMIDATION', result.breakdown.intimidation01],
+    ['FRUSTRATION', result.breakdown.frustration01],
+    ['RELIEF', result.breakdown.relief01],
+    ['DESPERATION', result.breakdown.desperation01],
+    ['CONFIDENCE', result.breakdown.confidenceRepair01],
+  ]);
+
+  const ordered = [...entries].sort((a, b) => Number(b[1]) - Number(a[1]));
+
+  return Object.freeze(
+    ordered.map(([axis, score01], index) =>
+      Object.freeze({
+        axis,
+        score01,
+        rank: index + 1,
+        percentileLabel: resolvePercentileLabel(score01),
+        confidenceBand: computeEmotionConfidenceBand(score01),
+        operatingState: resolveAxisOperatingState(axis, score01),
+        descriptiveSummary: buildAxisSummary(axis, score01),
+      }),
+    ),
+  );
+}
+
+function buildPressureDigestLabels(input: {
+  readonly modeProfile: PressureAffectModeProfile;
+  readonly result: PressureAffectResult;
+  readonly exposureClass: PressureExposureClass;
+  readonly stabilizerClass: PressureStabilizerClass;
+  readonly crowdClass: PressureCrowdClass;
+  readonly dominantAxis: PressureDominantAxis;
+  readonly scenario: PressureAffectScenario;
+  readonly collapseRisk01: Score01;
+  readonly recoveryHeadroom01: Score01;
+  readonly silenceRisk01: Score01;
+  readonly negotiationRisk01: Score01;
+  readonly comebackStrength01: Score01;
+  readonly publicIntensity01: Score01;
+}): readonly string[] {
+  const labels: string[] = [];
+  labels.push(`mode:${input.modeProfile.modeId.toLowerCase()}`);
+  labels.push(`scenario:${input.scenario.toLowerCase()}`);
+  labels.push(`dominantAxis:${input.dominantAxis.toLowerCase()}`);
+  labels.push(`exposure:${input.exposureClass.toLowerCase()}`);
+  labels.push(`stabilizer:${input.stabilizerClass.toLowerCase()}`);
+  labels.push(`crowd:${input.crowdClass.toLowerCase()}`);
+  labels.push(`state:${input.result.narrativeState.toLowerCase()}`);
+  labels.push(`operating:${input.result.operatingState.toLowerCase()}`);
+
+  if (input.collapseRisk01 >= 0.66) {
+    labels.push('risk:collapse_high');
+  }
+  if (input.recoveryHeadroom01 >= 0.58) {
+    labels.push('recovery:headroom_live');
+  }
+  if (input.silenceRisk01 >= 0.62) {
+    labels.push('policy:silence_sensitive');
+  }
+  if (input.negotiationRisk01 >= 0.6) {
+    labels.push('risk:negotiation_elevated');
+  }
+  if (input.comebackStrength01 >= 0.6) {
+    labels.push('opportunity:comeback_live');
+  }
+  if (input.publicIntensity01 >= 0.62) {
+    labels.push('stage:public_intense');
+  }
+  if (input.result.recommendation.policyFlags.shouldEscalateRescue) {
+    labels.push('policy:rescue_escalate');
+  }
+  if (input.result.recommendation.policyFlags.shouldWarnCrowdPileOn) {
+    labels.push('policy:crowd_warning');
+  }
+  return labels;
+}
+
+function buildRiskEnvelopeLabels(input: {
+  readonly digest: PressureAffectSignalDigest;
+  readonly collapseRisk01: Score01;
+  readonly rescueRisk01: Score01;
+  readonly humiliationRisk01: Score01;
+  readonly silenceRisk01: Score01;
+  readonly negotiationRisk01: Score01;
+  readonly crowdEscalationRisk01: Score01;
+  readonly recoveryOpportunity01: Score01;
+  readonly overallRisk01: Score01;
+}): readonly string[] {
+  const labels: string[] = [];
+  if (input.collapseRisk01 >= 0.72) {
+    labels.push('collapse:critical');
+  }
+  if (input.rescueRisk01 >= 0.64) {
+    labels.push('rescue:needed');
+  }
+  if (input.humiliationRisk01 >= 0.66) {
+    labels.push('humiliation:elevated');
+  }
+  if (input.silenceRisk01 >= 0.62) {
+    labels.push('silence:dangerous');
+  }
+  if (input.negotiationRisk01 >= 0.62) {
+    labels.push('negotiation:fragile');
+  }
+  if (input.crowdEscalationRisk01 >= 0.66) {
+    labels.push('crowd:escalation');
+  }
+  if (input.recoveryOpportunity01 >= 0.58) {
+    labels.push('recovery:available');
+  }
+  if (input.overallRisk01 >= 0.68) {
+    labels.push('overall:high_risk');
+  }
+  labels.push(`digest:${input.digest.scenario.toLowerCase()}`);
+  return labels;
+}
+
+function resolveSilenceReason(
+  result: PressureAffectResult,
+  digest: PressureAffectSignalDigest,
+  riskEnvelope: PressureAffectRiskEnvelope,
+): string {
+  if (!result.recommendation.policyFlags.shouldPreferSilence) {
+    return 'silence_not_preferred';
+  }
+  if (digest.modeId === 'PREDATOR' && result.channel === 'DEAL_ROOM') {
+    return 'predatory_quiet_preserved';
+  }
+  if (riskEnvelope.silenceRisk01 >= 0.7) {
+    return 'silence_lingers_but_is_dangerous';
+  }
+  return 'silence_used_to_hold_pressure';
+}
+
+function resolveRescueReason(
+  result: PressureAffectResult,
+  digest: PressureAffectSignalDigest,
+  riskEnvelope: PressureAffectRiskEnvelope,
+): string {
+  if (!result.recommendation.policyFlags.shouldEscalateRescue) {
+    return 'rescue_not_escalated';
+  }
+  if (riskEnvelope.rescueRisk01 >= 0.74) {
+    return 'rescue_critical';
+  }
+  if (digest.modeId === 'SYNDICATE') {
+    return 'syndicate_support_window';
+  }
+  return 'rescue_elevated';
+}
+
+function resolveComebackReason(
+  result: PressureAffectResult,
+  digest: PressureAffectSignalDigest,
+  riskEnvelope: PressureAffectRiskEnvelope,
+): string {
+  if (!result.recommendation.policyFlags.shouldPrimeComebackSpeech) {
+    return 'comeback_not_ready';
+  }
+  if (riskEnvelope.recoveryOpportunity01 >= 0.7) {
+    return 'comeback_window_live';
+  }
+  if (digest.dominantAxis === 'CONFIDENCE' || digest.dominantAxis === 'RELIEF') {
+    return 'confidence_repair_supports_reentry';
+  }
+  return 'comeback_possible_but_fragile';
+}
+
+function resolveCelebrationReason(
+  result: PressureAffectResult,
+  digest: PressureAffectSignalDigest,
+): string {
+  if (!result.recommendation.policyFlags.shouldRestrainCelebration) {
+    return 'celebration_allowed';
+  }
+  if (digest.modeId === 'EMPIRE' && result.publicExposure01 >= 0.54) {
+    return 'public_stage_still_hot';
+  }
+  if (result.pressureSeverity01 >= 0.5) {
+    return 'pressure_still_active';
+  }
+  return 'celebration_tolerance_insufficient';
+}
+
+function resolveCrowdReason(
+  result: PressureAffectResult,
+  digest: PressureAffectSignalDigest,
+  riskEnvelope: PressureAffectRiskEnvelope,
+): string {
+  if (!result.recommendation.policyFlags.shouldWarnCrowdPileOn) {
+    return 'crowd_warning_not_needed';
+  }
+  if (riskEnvelope.crowdEscalationRisk01 >= 0.74) {
+    return 'crowd_pile_on_imminent';
+  }
+  if (digest.crowdClass === 'PREDATORY' || digest.crowdClass === 'SWARMING') {
+    return 'crowd_behavior_predatory';
+  }
+  return 'crowd_heat_elevated';
+}
+
+function modeProfileNotes(profile: PressureAffectModeProfile): readonly string[] {
+  return profile.notes;
+}
+
+function buildPressureBatchAggregate(
+  entries: readonly PressureAffectDetailedResult[],
+  batchLabel: string,
+  modeHint?: PressureAffectModeId,
+): PressureAffectBatchAggregate {
+  const safeEntries = entries.length ? entries : [];
+  const modeId = modeHint ?? resolveDominantModeId(safeEntries);
+  const scenarioCounts = buildScenarioCounts(safeEntries);
+  const averagePressureSeverity01 = average(
+    safeEntries.map((entry) => entry.result.pressureSeverity01),
+    0,
+  );
+  const averagePublicExposure01 = average(
+    safeEntries.map((entry) => entry.result.publicExposure01),
+    0,
+  );
+  const averageCrowdThreat01 = average(
+    safeEntries.map((entry) => entry.result.crowdThreat01),
+    0,
+  );
+  const averageStabilizer01 = average(
+    safeEntries.map((entry) => entry.result.stabilizer01),
+    0,
+  );
+  const averageCollapseRisk01 = average(
+    safeEntries.map((entry) => entry.riskEnvelope.collapseRisk01),
+    0,
+  );
+  const peakCollapseRisk01 = clampEmotionScalar(
+    Math.max(0, ...safeEntries.map((entry) => Number(entry.riskEnvelope.collapseRisk01))),
+  );
+  const peakCrowdEscalationRisk01 = clampEmotionScalar(
+    Math.max(
+      0,
+      ...safeEntries.map((entry) => Number(entry.riskEnvelope.crowdEscalationRisk01)),
+    ),
+  );
+  const dominantScenario = resolveDominantScenarioFromCounts(scenarioCounts);
+  const dominantAxis = resolveDominantAxisFromEntries(safeEntries);
+  const dominantState = resolveDominantNarrativeState(safeEntries);
+  const dominantOperatingState = resolveDominantOperatingState(safeEntries);
+
+  return Object.freeze({
+    batchLabel,
+    modeId,
+    sampleCount: safeEntries.length,
+    averagePressureSeverity01,
+    averagePublicExposure01,
+    averageCrowdThreat01,
+    averageStabilizer01,
+    averageCollapseRisk01,
+    peakCollapseRisk01,
+    peakCrowdEscalationRisk01,
+    dominantScenario,
+    dominantAxis,
+    scenarioCounts,
+    dominantState,
+    dominantOperatingState,
+    labels: Object.freeze([
+      `mode:${modeId.toLowerCase()}`,
+      `samples:${safeEntries.length}`,
+      `dominantScenario:${dominantScenario.toLowerCase()}`,
+      `dominantAxis:${dominantAxis.toLowerCase()}`,
+      `dominantState:${dominantState.toLowerCase()}`,
+      `dominantOperating:${dominantOperatingState.toLowerCase()}`,
+      `avgPressure:${toPct(averagePressureSeverity01)}`,
+      `avgExposure:${toPct(averagePublicExposure01)}`,
+      `avgCrowd:${toPct(averageCrowdThreat01)}`,
+      `avgStabilizer:${toPct(averageStabilizer01)}`,
+      `avgCollapse:${toPct(averageCollapseRisk01)}`,
+      `peakCollapse:${toPct(peakCollapseRisk01)}`,
+      `peakCrowd:${toPct(peakCrowdEscalationRisk01)}`,
+    ]),
+  });
+}
+
+function resolveDominantModeId(
+  entries: readonly PressureAffectDetailedResult[],
+): PressureAffectModeId {
+  const counts = new Map<PressureAffectModeId, number>();
+  for (const entry of entries) {
+    counts.set(entry.modeProfile.modeId, (counts.get(entry.modeProfile.modeId) ?? 0) + 1);
+  }
+  return resolveMapWinner(counts, 'UNKNOWN');
+}
+
+function buildScenarioCounts(
+  entries: readonly PressureAffectDetailedResult[],
+): Readonly<Record<PressureAffectScenario, number>> {
+  const counts: Record<PressureAffectScenario, number> = {
+    CEREMONIAL_RECOVERY: 0,
+    COMEBACK_WINDOW: 0,
+    CROWD_HUMILIATION: 0,
+    CROWD_PILE_ON: 0,
+    DEALROOM_PREDATION: 0,
+    HELPER_STABILIZATION: 0,
+    HUNTED_PUBLICLY: 0,
+    LOW_GRADE_TENSION: 0,
+    PREDATORY_QUIET: 0,
+    RESCUE_PRESSURE: 0,
+    SPIKE_WITHOUT_RECOVERY: 0,
+    STEADY_SURVEILLANCE: 0,
+    VOLATILE_COLLAPSE: 0,
+  };
+
+  for (const entry of entries) {
+    counts[entry.digest.scenario] += 1;
+  }
+
+  return Object.freeze(counts);
+}
+
+function resolveDominantScenarioFromCounts(
+  counts: Readonly<Record<PressureAffectScenario, number>>,
+): PressureAffectScenario {
+  let winner: PressureAffectScenario = 'STEADY_SURVEILLANCE';
+  let winnerCount = -1;
+  for (const key of Object.keys(counts) as PressureAffectScenario[]) {
+    if (counts[key] > winnerCount) {
+      winner = key;
+      winnerCount = counts[key];
+    }
+  }
+  return winner;
+}
+
+function resolveDominantAxisFromEntries(
+  entries: readonly PressureAffectDetailedResult[],
+): PressureDominantAxis {
+  const counts = new Map<PressureDominantAxis, number>();
+  for (const entry of entries) {
+    counts.set(entry.digest.dominantAxis, (counts.get(entry.digest.dominantAxis) ?? 0) + 1);
+  }
+  return resolveMapWinner(counts, 'BALANCED');
+}
+
+function resolveDominantNarrativeState(
+  entries: readonly PressureAffectDetailedResult[],
+): PressureNarrativeState {
+  const counts = new Map<PressureNarrativeState, number>();
+  for (const entry of entries) {
+    counts.set(
+      entry.result.narrativeState,
+      (counts.get(entry.result.narrativeState) ?? 0) + 1,
+    );
+  }
+  return resolveMapWinner(counts, 'STEADY');
+}
+
+function resolveDominantOperatingState(
+  entries: readonly PressureAffectDetailedResult[],
+): ChatEmotionOperatingState {
+  const counts = new Map<ChatEmotionOperatingState, number>();
+  for (const entry of entries) {
+    counts.set(
+      entry.result.operatingState,
+      (counts.get(entry.result.operatingState) ?? 0) + 1,
+    );
+  }
+  return resolveMapWinner(counts, 'UNSET');
+}
+
+function resolveMapWinner<T>(map: Map<T, number>, fallback: T): T {
+  let winner = fallback;
+  let winnerCount = -1;
+  for (const [key, count] of map.entries()) {
+    if (count > winnerCount) {
+      winner = key;
+      winnerCount = count;
+    }
+  }
+  return winner;
+}
+
+function buildTrajectorySummary(
+  points: readonly PressureAffectTrajectoryPoint[],
+  aggregate: PressureAffectBatchAggregate,
+): readonly string[] {
+  const lines: string[] = [];
+  lines.push(`samples=${points.length}`);
+  lines.push(`mode=${aggregate.modeId}`);
+  lines.push(`dominantScenario=${aggregate.dominantScenario}`);
+  lines.push(`dominantAxis=${aggregate.dominantAxis}`);
+  lines.push(`avgPressure=${toPct(aggregate.averagePressureSeverity01)}`);
+  lines.push(`avgExposure=${toPct(aggregate.averagePublicExposure01)}`);
+  lines.push(`avgCrowd=${toPct(aggregate.averageCrowdThreat01)}`);
+  lines.push(`avgCollapse=${toPct(aggregate.averageCollapseRisk01)}`);
+  lines.push(`peakCollapse=${toPct(aggregate.peakCollapseRisk01)}`);
+  lines.push(`peakCrowd=${toPct(aggregate.peakCrowdEscalationRisk01)}`);
+
+  for (const point of points) {
+    const previous = point.comparisonFromPrevious;
+    lines.push(
+      `#${point.sequence} ${point.detailed.digest.scenario} ${point.detailed.result.narrativeState}` +
+        ` pressure=${toPct(point.detailed.result.pressureSeverity01)}` +
+        ` crowd=${toPct(point.detailed.result.crowdThreat01)}`,
+    );
+    if (previous) {
+      lines.push(
+        `#${point.sequence} drift pressure=${formatSignedPct(previous.pressureDelta01)}` +
+          ` exposure=${formatSignedPct(previous.exposureDelta01)}` +
+          ` crowd=${formatSignedPct(previous.crowdDelta01)}` +
+          ` stabilizer=${formatSignedPct(previous.stabilizerDelta01)}`,
+      );
+    }
+  }
+
+  return Object.freeze(lines);
+}
+
+function resolvePercentileLabel(score01: Score01): string {
+  const numeric = Number(score01);
+  if (numeric >= 0.9) {
+    return 'EXTREME';
+  }
+  if (numeric >= 0.75) {
+    return 'VERY_HIGH';
+  }
+  if (numeric >= 0.6) {
+    return 'HIGH';
+  }
+  if (numeric >= 0.4) {
+    return 'ELEVATED';
+  }
+  if (numeric >= 0.2) {
+    return 'LOW';
+  }
+  return 'QUIET';
+}
+
+function resolveAxisOperatingState(
+  axis: ChatEmotionAxis,
+  score01: Score01,
+): ChatEmotionOperatingState {
+  const numeric = Number(score01);
+  if (numeric >= 0.84) {
+    return ensureOperatingState('VOLATILE');
+  }
+  if (numeric >= 0.68) {
+    return ensureOperatingState(axis === 'RELIEF' ? 'CEREMONIAL' : 'SPIKED');
+  }
+  if (numeric >= 0.48) {
+    return ensureOperatingState('RISING');
+  }
+  if (numeric <= 0.18) {
+    return ensureOperatingState('STABLE');
+  }
+  return ensureOperatingState('COLD_START');
+}
+
+function buildAxisSummary(axis: ChatEmotionAxis, score01: Score01): string {
+  switch (axis) {
+    case 'INTIMIDATION':
+      return score01 >= 0.66
+        ? 'The room is exerting fear and stage pressure.'
+        : 'Fear pressure exists but has not fully captured the run.';
+    case 'FRUSTRATION':
+      return score01 >= 0.66
+        ? 'Counterplay failure is emotionally sticky.'
+        : 'Frustration exists but has not hardened into collapse.';
+    case 'RELIEF':
+      return score01 >= 0.58
+        ? 'Meaningful stabilization is present.'
+        : 'Relief is partial or still contested.';
+    case 'DESPERATION':
+      return score01 >= 0.66
+        ? 'The run is nearing rescue-or-collapse territory.'
+        : 'Desperation pressure is active but not yet terminal.';
+    case 'CONFIDENCE':
+      return score01 >= 0.58
+        ? 'Confidence repair is materially available.'
+        : 'Confidence repair remains fragile.';
+    default:
+      return 'Axis summary unavailable.';
+  }
+}
+
+function delta01(previous: Score01 | number, next: Score01 | number): number {
+  return Number(next) - Number(previous);
+}
+
+function formatSignedPct(value: number): string {
+  const percent = Math.round(value * 100);
+  return `${percent >= 0 ? '+' : ''}${percent}`;
+}
+
