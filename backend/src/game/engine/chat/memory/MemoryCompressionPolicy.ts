@@ -249,6 +249,40 @@ function isWarmTier(tier: MemorySalienceTier): boolean {
 }
 
 
+function average(values: readonly number[]): number {
+  if (values.length <= 0) {
+    return 0;
+  }
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function maxNumber(values: readonly number[]): number {
+  if (values.length <= 0) {
+    return 0;
+  }
+  return values.reduce((max, value) => (value > max ? value : max), values[0] ?? 0);
+}
+
+function minNumber(values: readonly number[]): number {
+  if (values.length <= 0) {
+    return 0;
+  }
+  return values.reduce((min, value) => (value < min ? value : min), values[0] ?? 0);
+}
+
+function histogramIncrement<K extends string>(map: Map<K, number>, key: K): void {
+  map.set(key, (map.get(key) ?? 0) + 1);
+}
+
+function sortDecisionsByCreatedAt<T extends { readonly createdAt: number }>(values: readonly T[]): readonly T[] {
+  return [...values].sort((left, right) => right.createdAt - left.createdAt);
+}
+
+function safeIncludes(values: readonly string[] | undefined, target: string): boolean {
+  return Array.isArray(values) && values.includes(target);
+}
+
+
 // ============================================================================
 // MARK: Semantic memory cluster types
 // ============================================================================
@@ -338,6 +372,187 @@ export interface CompressionUndoEntry {
 }
 
 
+// ============================================================================
+// MARK: Compression analytics, preview, and execution surfaces
+// ============================================================================
+
+export interface MemoryCompressionReasonHistogramEntry {
+  readonly reason: MemoryCompressionReasonCode;
+  readonly count: number;
+  readonly domains: readonly MemoryCompressionDomain[];
+  readonly actions: readonly MemoryCompressionAction[];
+}
+
+export interface MemoryCompressionActionHistogramEntry {
+  readonly action: MemoryCompressionAction;
+  readonly count: number;
+  readonly averageScore01: number;
+  readonly hottestId?: string;
+}
+
+export interface MemoryCompressionDomainSnapshot {
+  readonly domain: MemoryCompressionDomain;
+  readonly totalRecords: number;
+  readonly keepHotCount: number;
+  readonly keepWarmCount: number;
+  readonly archiveCount: number;
+  readonly summarizeCount: number;
+  readonly deleteCount: number;
+  readonly shadowOnlyCount: number;
+  readonly averageScore01: number;
+  readonly hottestId?: string;
+  readonly coldestId?: string;
+}
+
+export interface MemoryCompressionCounterpartDigest {
+  readonly counterpartId: string;
+  readonly totalCount: number;
+  readonly keepHotCount: number;
+  readonly keptCount: number;
+  readonly archivedCount: number;
+  readonly summarizedCount: number;
+  readonly deletedCount: number;
+  readonly hottestIds: readonly string[];
+}
+
+export interface MemoryCompressionChannelDigest {
+  readonly channelId: string;
+  readonly totalCount: number;
+  readonly keepHotCount: number;
+  readonly keepWarmCount: number;
+  readonly shadowOnlyCount: number;
+  readonly summarizeCount: number;
+  readonly deleteCount: number;
+  readonly averageScore01: number;
+}
+
+export interface MemoryCompressionRoomDigest {
+  readonly roomId: string;
+  readonly totalCount: number;
+  readonly domainMix: Readonly<Record<MemoryCompressionDomain, number>>;
+  readonly actionMix: Readonly<Record<MemoryCompressionAction, number>>;
+  readonly hottestIds: readonly string[];
+}
+
+export interface MemoryCompressionClusterDigest {
+  readonly clusterId: string;
+  readonly centroidEventId: string;
+  readonly eventCount: number;
+  readonly avgSalience01: number;
+  readonly maxHostility01: number;
+  readonly maxEmbarrassment01: number;
+  readonly protectedCount: number;
+  readonly summarizeCount: number;
+  readonly deleteCount: number;
+  readonly isNarrativeArc: boolean;
+}
+
+export interface MemoryCompressionWindowDigest {
+  readonly hotWindowCount: number;
+  readonly warmWindowCount: number;
+  readonly archiveWindowCount: number;
+  readonly olderThanArchiveWindowCount: number;
+}
+
+export interface MemoryCompressionBudgetAdvice {
+  readonly severity: 'NONE' | 'SOFT' | 'HARD' | 'EMERGENCY';
+  readonly recommendedAction: 'NONE' | 'TUNE_CONFIG' | 'RUN_PLAN' | 'RUN_EMERGENCY_PLAN';
+  readonly summary: string;
+  readonly utilization: MemoryBudgetUtilization;
+}
+
+export interface MemoryCompressionAuditEntry {
+  readonly id: string;
+  readonly domain: MemoryCompressionDomain;
+  readonly action: MemoryCompressionAction;
+  readonly score01: number;
+  readonly tier: MemorySalienceTier;
+  readonly reasonCount: number;
+  readonly primaryReason?: MemoryCompressionReasonCode;
+  readonly actorId?: string;
+  readonly counterpartId?: string;
+  readonly roomId?: string;
+  readonly channelId?: string;
+  readonly tags: readonly string[];
+}
+
+export interface MemoryCompressionAuditReport {
+  readonly playerId: string;
+  readonly createdAt: number;
+  readonly domains: readonly MemoryCompressionDomainSnapshot[];
+  readonly reasons: readonly MemoryCompressionReasonHistogramEntry[];
+  readonly actions: readonly MemoryCompressionActionHistogramEntry[];
+  readonly counterparts: readonly MemoryCompressionCounterpartDigest[];
+  readonly channels: readonly MemoryCompressionChannelDigest[];
+  readonly rooms: readonly MemoryCompressionRoomDigest[];
+  readonly clusters: readonly MemoryCompressionClusterDigest[];
+  readonly windows: MemoryCompressionWindowDigest;
+  readonly budgetAdvice: MemoryCompressionBudgetAdvice;
+  readonly auditTrail: readonly string[];
+}
+
+export interface MemoryCompressionPlanPreview {
+  readonly plan: MemoryCompressionPlan;
+  readonly diagnostics: MemoryCompressionAuditReport;
+  readonly summaryText: string;
+}
+
+export interface MemoryCompressionExecutionReceipt {
+  readonly playerId: string;
+  readonly createdAt: number;
+  readonly appliedIds: readonly string[];
+  readonly archivedIds: readonly string[];
+  readonly summarizedIds: readonly string[];
+  readonly deletedIds: readonly string[];
+  readonly shadowOnlyIds: readonly string[];
+  readonly rehydrationBudget: number;
+  readonly auditTrail: readonly string[];
+}
+
+export interface MemoryCompressionPlanComparison {
+  readonly leftCreatedAt: number;
+  readonly rightCreatedAt: number;
+  readonly changedIds: readonly string[];
+  readonly promotedIds: readonly string[];
+  readonly demotedIds: readonly string[];
+  readonly newlyDeletedIds: readonly string[];
+  readonly newlyProtectedIds: readonly string[];
+  readonly summary: string;
+}
+
+export interface MemoryCompressionNarrativePacket {
+  readonly title: string;
+  readonly summary: string;
+  readonly hotMoments: readonly string[];
+  readonly protectedArcs: readonly string[];
+  readonly shadowPreservationNotes: readonly string[];
+  readonly deletionWarnings: readonly string[];
+}
+
+export interface MemoryCompressionPreset {
+  readonly presetId: 'BALANCED' | 'AGGRESSIVE' | 'SHADOW_LOCKED' | 'PROOF_LOCKED' | 'POST_RUN';
+  readonly description: string;
+  readonly config: Partial<MemoryCompressionConfig>;
+}
+
+export interface MemoryCompressionSummaryLedgerEntry {
+  readonly summaryKey: string;
+  readonly domain: MemoryCompressionDomain;
+  readonly memberCount: number;
+  readonly latestAt: number;
+  readonly privacyCeiling: 'PUBLIC' | 'TEAM' | 'PRIVATE' | 'SHADOW';
+  readonly tags: readonly string[];
+}
+
+export interface MemoryCompressionRunBridge {
+  readonly runId: string;
+  readonly capsule: RunMemoryCapsule;
+  readonly hotIds: readonly string[];
+  readonly summaryIds: readonly string[];
+  readonly callbackIds: readonly string[];
+}
+
+
 export class MemoryCompressionPolicy {
   private readonly config: MemoryCompressionConfig;
   private readonly salienceScorer: MemorySalienceScorer;
@@ -384,22 +599,14 @@ export class MemoryCompressionPolicy {
       ...this.buildCallbackDecisions(snapshot.callbacks, callbackScores, createdAt, auditTrail),
     );
 
-    const budgeted = this.enforceBudgets(decisions, auditTrail);
+    const clustered = this.applyClusterProtections(snapshot, decisions, auditTrail);
+    const modeAdjusted = this.applyModePressureAdjustments(snapshot, clustered, auditTrail);
+    const supportAdjusted = this.applySummarySupportAdjustments(snapshot, modeAdjusted, auditTrail);
+    const privacyAdjusted = this.applyPrivacyAndShadowGuards(snapshot, supportAdjusted, auditTrail);
+    const budgeted = this.enforceBudgets(privacyAdjusted, auditTrail);
     const summaries = this.buildSummaryGroups(snapshot, budgeted, auditTrail, createdAt);
-
-    return {
-      playerId: context.playerId,
-      createdAt,
-      decisions: budgeted,
-      summaries,
-      keepHotIds: budgeted.filter((decision) => decision.action === 'KEEP_HOT').map((decision) => decision.id),
-      keepWarmIds: budgeted.filter((decision) => decision.action === 'KEEP_WARM').map((decision) => decision.id),
-      archiveIds: budgeted.filter((decision) => decision.action === 'ARCHIVE').map((decision) => decision.id),
-      summarizeIds: budgeted.filter((decision) => decision.action === 'SUMMARIZE').map((decision) => decision.id),
-      deleteIds: budgeted.filter((decision) => decision.action === 'DELETE').map((decision) => decision.id),
-      shadowOnlyIds: budgeted.filter((decision) => decision.action === 'SHADOW_ONLY').map((decision) => decision.id),
-      auditTrail,
-    };
+    const normalized = this.normalizeSummarySupportDecisions(budgeted, summaries, auditTrail);
+    return this.buildPlanResult(context.playerId, createdAt, normalized, summaries, auditTrail);
   }
 
   public applyPlan(store: ConversationMemoryStore, plan: MemoryCompressionPlan): void {
@@ -1161,22 +1368,6 @@ export class MemoryCompressionPolicy {
     })));
   }
 
-  /** Override compression decisions to protect narrative arc integrity. */
-  public preserveArcIntegrity(plan: MemoryCompressionPlan, arcs: readonly NarrativeArc[]): MemoryCompressionPlan {
-    const protectedIds = new Set<string>();
-    for (const arc of arcs) {
-      if (arc.isProtected) {
-        for (const id of arc.eventIds) protectedIds.add(id);
-      }
-    }
-    const adjusted = plan.decisions.map((d) => {
-      if (protectedIds.has((d as any).entityId) && (d.action === 'DELETE' || d.action === 'SUMMARIZE')) {
-        return { ...d, action: 'KEEP_HOT' as const, reasonCodes: [...(d as any).reasonCodes, 'arc_integrity_protection'] };
-      }
-      return d;
-    });
-    return { ...plan, decisions: adjusted };
-  }
 
   // ==========================================================================
   // MARK: Mode-specific compression rates
@@ -1211,33 +1402,6 @@ export class MemoryCompressionPolicy {
   // MARK: Real-time budget monitoring
   // ==========================================================================
 
-  /** Check current memory utilization and whether emergency compression is needed. */
-  public currentUtilization(store: ConversationMemoryStore, playerId: string): MemoryBudgetUtilization {
-    const snapshot = store.getSnapshot(playerId);
-    const eventUtil = snapshot.events.length / (this.config as any).eventBudget;
-    const quoteUtil = snapshot.quotes.length / (this.config as any).quoteBudget;
-    const callbackUtil = snapshot.callbacks.length / (this.config as any).callbackBudget;
-    const maxUtil = Math.max(eventUtil, quoteUtil, callbackUtil);
-    return {
-      eventUtilization01: Math.min(1, eventUtil),
-      quoteUtilization01: Math.min(1, quoteUtil),
-      callbackUtilization01: Math.min(1, callbackUtil),
-      overallUtilization01: Math.min(1, maxUtil),
-      needsEmergencyCompression: maxUtil >= 0.9,
-      needsSoftCompression: maxUtil >= 0.7,
-    };
-  }
-
-  /** Generate an emergency compression plan for when budgets are about to overflow. */
-  public emergencyCompressionPlan(store: ConversationMemoryStore, context: MemoryCompressionContext): MemoryCompressionPlan {
-    const plan = this.plan(store, context);
-    const aggressive = plan.decisions.map((d) => {
-      if (d.action === 'KEEP_WARM') return { ...d, action: 'ARCHIVE' as const, reasonCodes: [...(d as any).reasonCodes, 'emergency_compression'] };
-      if (d.action === 'ARCHIVE') return { ...d, action: 'SUMMARIZE' as const, reasonCodes: [...(d as any).reasonCodes, 'emergency_compression'] };
-      return d;
-    });
-    return { ...plan, decisions: aggressive };
-  }
 
   // ==========================================================================
   // MARK: Post-run compression ritual
@@ -1338,8 +1502,875 @@ export class MemoryCompressionPolicy {
     return lines;
   }
 
+  // ==========================================================================
+  // MARK: Deep plan shaping and orchestration
+  // ==========================================================================
+
+  private buildPlanResult(
+    playerId: string,
+    createdAt: number,
+    decisions: readonly MemoryCompressionDecision[],
+    summaries: readonly MemoryCompressionSummaryGroup[],
+    auditTrail: readonly string[],
+  ): MemoryCompressionPlan {
+    return {
+      playerId,
+      createdAt,
+      decisions,
+      summaries,
+      keepHotIds: decisions.filter((decision) => decision.action === 'KEEP_HOT').map((decision) => decision.id),
+      keepWarmIds: decisions.filter((decision) => decision.action === 'KEEP_WARM').map((decision) => decision.id),
+      archiveIds: decisions.filter((decision) => decision.action === 'ARCHIVE').map((decision) => decision.id),
+      summarizeIds: decisions.filter((decision) => decision.action === 'SUMMARIZE').map((decision) => decision.id),
+      deleteIds: decisions.filter((decision) => decision.action === 'DELETE').map((decision) => decision.id),
+      shadowOnlyIds: decisions.filter((decision) => decision.action === 'SHADOW_ONLY').map((decision) => decision.id),
+      auditTrail: [...auditTrail],
+    };
+  }
+
+  private normalizeSummarySupportDecisions(
+    decisions: readonly MemoryCompressionDecision[],
+    summaries: readonly MemoryCompressionSummaryGroup[],
+    auditTrail: string[],
+  ): readonly MemoryCompressionDecision[] {
+    const summaryMemberIds = new Set<string>();
+    const summaryReasonMap = new Map<string, Set<MemoryCompressionReasonCode>>();
+    for (const summary of summaries) {
+      for (const memberId of summary.memberIds) {
+        summaryMemberIds.add(memberId);
+        const next = summaryReasonMap.get(memberId) ?? new Set<MemoryCompressionReasonCode>();
+        next.add('summary_support');
+        for (const reason of summary.reasons) {
+          next.add(reason);
+        }
+        summaryReasonMap.set(memberId, next);
+      }
+    }
+    return decisions.map((decision) => {
+      if (!summaryMemberIds.has(decision.id)) {
+        return decision;
+      }
+      const reasons = new Set(decision.reasons);
+      for (const reason of summaryReasonMap.get(decision.id) ?? []) {
+        reasons.add(reason);
+      }
+      if (decision.action === 'DELETE') {
+        auditTrail.push(`summary_support:${decision.domain}:${decision.id}:DELETE->SUMMARIZE`);
+        return {
+          ...decision,
+          action: 'SUMMARIZE',
+          reasons: Array.from(reasons),
+        };
+      }
+      return {
+        ...decision,
+        reasons: Array.from(reasons),
+      };
+    });
+  }
+
+  private applyClusterProtections(
+    snapshot: ConversationMemorySnapshot,
+    decisions: readonly MemoryCompressionDecision[],
+    auditTrail: string[],
+  ): readonly MemoryCompressionDecision[] {
+    const clusters = this.clusterEventsForCompression(snapshot.events);
+    const protectedIds = new Set<string>();
+    const supportIds = new Set<string>();
+    for (const cluster of clusters) {
+      if (cluster.isNarrativeArc || cluster.avgSalience01 >= 0.62 || cluster.maxHostility01 >= 0.78) {
+        for (const event of cluster.events) {
+          protectedIds.add(event.memoryId);
+        }
+      } else if (cluster.eventCount >= this.config.minimumSummaryMembers) {
+        for (const event of cluster.events) {
+          supportIds.add(event.memoryId);
+        }
+      }
+    }
+    return decisions.map((decision) => {
+      if (decision.domain !== 'EVENT') {
+        return decision;
+      }
+      const reasons = new Set(decision.reasons);
+      if (protectedIds.has(decision.id)) {
+        reasons.add('collapse_preservation');
+        reasons.add('retention_floor');
+        const nextAction = this.promoteAction(decision.action, 'KEEP_WARM');
+        if (nextAction !== decision.action) {
+          auditTrail.push(`cluster_protect:${decision.id}:${decision.action}->${nextAction}`);
+        }
+        return { ...decision, action: nextAction, reasons: Array.from(reasons) };
+      }
+      if (supportIds.has(decision.id) && decision.action === 'DELETE') {
+        reasons.add('summary_support');
+        auditTrail.push(`cluster_support:${decision.id}:DELETE->SUMMARIZE`);
+        return { ...decision, action: 'SUMMARIZE', reasons: Array.from(reasons) };
+      }
+      return decision;
+    });
+  }
+
+  private applyModePressureAdjustments(
+    snapshot: ConversationMemorySnapshot,
+    decisions: readonly MemoryCompressionDecision[],
+    auditTrail: string[],
+  ): readonly MemoryCompressionDecision[] {
+    const modeWeights = new Map<string, ModeCompressionProfile>();
+    for (const event of snapshot.events) {
+      const modeId = String((event as any).context.modeId ?? 'GO_ALONE');
+      if (!modeWeights.has(modeId)) {
+        modeWeights.set(modeId, this.getModeCompressionProfile(modeId));
+      }
+    }
+    return decisions.map((decision) => {
+      const relatedEvent = snapshot.events.find((event) => event.memoryId === decision.id);
+      const modeId = String((relatedEvent as any)?.context?.modeId ?? 'GO_ALONE');
+      const profile = modeWeights.get(modeId) ?? this.getModeCompressionProfile(modeId);
+      const reasons = new Set(decision.reasons);
+      let nextAction = decision.action;
+      if (decision.domain === 'CALLBACK' && modeId === 'TEAM_UP' && profile.teamPreservation01 >= 0.9) {
+        nextAction = this.promoteAction(nextAction, 'KEEP_WARM');
+        reasons.add('retention_floor');
+      }
+      if (decision.domain === 'QUOTE' && modeId === 'HEAD_TO_HEAD' && profile.postRunAggressiveness01 >= 0.75 && safeIncludes(decision.tags, 'POST_RUN')) {
+        nextAction = this.promoteAction(nextAction, 'KEEP_WARM');
+        reasons.add('post_run_anchor');
+      }
+      if (decision.domain === 'EVENT' && profile.rescuePreservation01 >= 0.85 && safeIncludes(decision.tags, 'RESCUE')) {
+        nextAction = this.promoteAction(nextAction, 'KEEP_HOT');
+        reasons.add('rescue_anchor');
+      }
+      if (nextAction !== decision.action) {
+        auditTrail.push(`mode_adjust:${modeId}:${decision.id}:${decision.action}->${nextAction}`);
+        return { ...decision, action: nextAction, reasons: Array.from(reasons) };
+      }
+      return decision;
+    });
+  }
+
+  private applySummarySupportAdjustments(
+    snapshot: ConversationMemorySnapshot,
+    decisions: readonly MemoryCompressionDecision[],
+    auditTrail: string[],
+  ): readonly MemoryCompressionDecision[] {
+    const groupedBySummaryKey = new Map<string, MemoryCompressionDecision[]>();
+    for (const decision of decisions) {
+      if (!decision.summaryKey) {
+        continue;
+      }
+      const next = groupedBySummaryKey.get(decision.summaryKey) ?? [];
+      next.push(decision);
+      groupedBySummaryKey.set(decision.summaryKey, next);
+    }
+    const summarySupportIds = new Set<string>();
+    for (const [summaryKey, members] of groupedBySummaryKey.entries()) {
+      if (members.length < this.config.minimumSummaryMembers) {
+        continue;
+      }
+      const nonDeletedMembers = members.filter((member) => member.action !== 'DELETE');
+      if (nonDeletedMembers.length >= 1) {
+        for (const member of members) {
+          summarySupportIds.add(member.id);
+        }
+        auditTrail.push(`summary_support_group:${summaryKey}:members=${members.length}`);
+      }
+    }
+    return decisions.map((decision) => {
+      if (!summarySupportIds.has(decision.id)) {
+        return decision;
+      }
+      const reasons = new Set(decision.reasons);
+      reasons.add('summary_support');
+      if (decision.action === 'DELETE') {
+        auditTrail.push(`summary_promote:${decision.id}:DELETE->SUMMARIZE`);
+        return { ...decision, action: 'SUMMARIZE', reasons: Array.from(reasons) };
+      }
+      return { ...decision, reasons: Array.from(reasons) };
+    });
+  }
+
+  private applyPrivacyAndShadowGuards(
+    snapshot: ConversationMemorySnapshot,
+    decisions: readonly MemoryCompressionDecision[],
+    auditTrail: string[],
+  ): readonly MemoryCompressionDecision[] {
+    const eventMap = new Map(snapshot.events.map((record) => [record.memoryId, record]));
+    const quoteMap = new Map(snapshot.quotes.map((record) => [String((record as any).quoteId), record]));
+    const callbackMap = new Map(snapshot.callbacks.map((record) => [record.callbackId, record]));
+    return decisions.map((decision) => {
+      const reasons = new Set(decision.reasons);
+      let nextAction = decision.action;
+      const privacyLevel = decision.domain === 'EVENT'
+        ? String((eventMap.get(decision.id) as any)?.context?.privacyLevel ?? '')
+        : decision.domain === 'QUOTE'
+          ? String((quoteMap.get(decision.id) as any)?.context?.privacyLevel ?? '')
+          : String((callbackMap.get(decision.id) as any)?.context?.privacyLevel ?? '');
+      const channelId = String(decision.channelId ?? '');
+      if (privacyLevel === 'PRIVATE' || privacyLevel === 'SHADOW') {
+        reasons.add('privacy_lock');
+        nextAction = this.promoteAction(nextAction, 'SHADOW_ONLY');
+      }
+      if (channelId.includes('SHADOW') && this.config.preserveShadowSignals) {
+        reasons.add('shadow_only_anchor');
+        nextAction = this.promoteAction(nextAction, 'SHADOW_ONLY');
+      }
+      if (nextAction !== decision.action) {
+        auditTrail.push(`privacy_shadow:${decision.id}:${decision.action}->${nextAction}`);
+        return { ...decision, action: nextAction, reasons: Array.from(reasons) };
+      }
+      return decision;
+    });
+  }
+
+  public planWithDiagnostics(store: ConversationMemoryStore, context: MemoryCompressionContext): MemoryCompressionPlanPreview {
+    const plan = this.plan(store, context);
+    const diagnostics = this.buildAuditReport(store, plan);
+    return {
+      plan,
+      diagnostics,
+      summaryText: this.summarizePlan(plan),
+    };
+  }
+
+  public preview(store: ConversationMemoryStore, context: MemoryCompressionContext): MemoryCompressionPlanPreview {
+    return this.planWithDiagnostics(store, context);
+  }
+
+  public executePlan(store: ConversationMemoryStore, context: MemoryCompressionContext): MemoryCompressionExecutionReceipt {
+    const plan = this.plan(store, context);
+    return this.applyPlanWithReceipt(store, plan);
+  }
+
+  public applyPlanWithReceipt(store: ConversationMemoryStore, plan: MemoryCompressionPlan): MemoryCompressionExecutionReceipt {
+    const appliedIds: string[] = [];
+    const archivedIds: string[] = [];
+    const summarizedIds: string[] = [];
+    const deletedIds: string[] = [];
+    const shadowOnlyIds: string[] = [];
+    const before = store.getSnapshot(plan.playerId);
+    const eventMap = new Map(before.events.map((record) => [record.memoryId, record]));
+    const quoteMap = new Map(before.quotes.map((record) => [String((record as any).quoteId), record]));
+    const callbackMap = new Map(before.callbacks.map((record) => [record.callbackId, record]));
+    for (const decision of plan.decisions) {
+      appliedIds.push(decision.id);
+      const originalData = decision.domain === 'EVENT'
+        ? JSON.stringify(eventMap.get(decision.id) ?? null)
+        : decision.domain === 'QUOTE'
+          ? JSON.stringify(quoteMap.get(decision.id) ?? null)
+          : JSON.stringify(callbackMap.get(decision.id) ?? null);
+      if (decision.action === 'ARCHIVE' || decision.action === 'SUMMARIZE' || decision.action === 'SHADOW_ONLY' || decision.action === 'DELETE') {
+        this.logCompression(plan.playerId, decision.id, decision.action, originalData);
+      }
+      if (decision.action === 'ARCHIVE') {
+        archivedIds.push(decision.id);
+      }
+      if (decision.action === 'SUMMARIZE') {
+        summarizedIds.push(decision.id);
+      }
+      if (decision.action === 'DELETE') {
+        deletedIds.push(decision.id);
+      }
+      if (decision.action === 'SHADOW_ONLY') {
+        shadowOnlyIds.push(decision.id);
+      }
+    }
+    this.applyPlan(store, plan);
+    return {
+      playerId: plan.playerId,
+      createdAt: plan.createdAt,
+      appliedIds: Object.freeze(appliedIds),
+      archivedIds: Object.freeze(archivedIds),
+      summarizedIds: Object.freeze(summarizedIds),
+      deletedIds: Object.freeze(deletedIds),
+      shadowOnlyIds: Object.freeze(shadowOnlyIds),
+      rehydrationBudget: this.availableRehydrations(plan.playerId),
+      auditTrail: Object.freeze([...plan.auditTrail]),
+    };
+  }
+
+  public buildAuditReport(store: ConversationMemoryStore, plan: MemoryCompressionPlan): MemoryCompressionAuditReport {
+    const snapshot = store.getSnapshot(plan.playerId);
+    const domains = this.buildDomainSnapshots(plan.decisions);
+    const reasons = this.buildReasonHistogram(plan.decisions);
+    const actions = this.buildActionHistogram(plan.decisions);
+    const counterparts = this.buildCounterpartDigests(plan.decisions);
+    const channels = this.buildChannelDigests(plan.decisions);
+    const rooms = this.buildRoomDigests(plan.decisions);
+    const clusters = this.buildClusterDigests(snapshot, plan.decisions);
+    const windows = this.buildWindowDigest(snapshot, plan.createdAt);
+    const budgetAdvice = this.buildBudgetAdvice(store, plan.playerId);
+    return {
+      playerId: plan.playerId,
+      createdAt: plan.createdAt,
+      domains,
+      reasons,
+      actions,
+      counterparts,
+      channels,
+      rooms,
+      clusters,
+      windows,
+      budgetAdvice,
+      auditTrail: Object.freeze([...plan.auditTrail]),
+    };
+  }
+
+  public summarizePlan(plan: MemoryCompressionPlan): string {
+    return [
+      `hot=${plan.keepHotIds.length}`,
+      `warm=${plan.keepWarmIds.length}`,
+      `archive=${plan.archiveIds.length}`,
+      `summaries=${plan.summarizeIds.length}`,
+      `delete=${plan.deleteIds.length}`,
+      `shadow=${plan.shadowOnlyIds.length}`,
+    ].join(' | ');
+  }
+
+  public buildNarrativePacket(store: ConversationMemoryStore, plan: MemoryCompressionPlan): MemoryCompressionNarrativePacket {
+    const snapshot = store.getSnapshot(plan.playerId);
+    const hottest = sortDecisionsByCreatedAt(plan.decisions)
+      .filter((decision) => decision.action === 'KEEP_HOT')
+      .slice(0, 8)
+      .map((decision) => `${decision.domain}:${decision.id}:${decision.reasons[0] ?? 'none'}`);
+    const arcs = this.identifyNarrativeArcs(store, plan.playerId)
+      .filter((arc) => arc.isProtected)
+      .slice(0, 8)
+      .map((arc) => `${arc.arcId}:${arc.eventIds.length}:${arc.arcStrength01.toFixed(3)}`);
+    const shadowPreservationNotes = plan.decisions
+      .filter((decision) => decision.action === 'SHADOW_ONLY')
+      .slice(0, 8)
+      .map((decision) => `${decision.domain}:${decision.id}:${decision.channelId ?? 'unknown'}`);
+    const deletionWarnings = plan.decisions
+      .filter((decision) => decision.action === 'DELETE')
+      .slice(0, 8)
+      .map((decision) => `${decision.domain}:${decision.id}:${decision.score01.toFixed(3)}`);
+    return {
+      title: `compression:${plan.playerId}:${plan.createdAt}`,
+      summary: `${this.summarizePlan(plan)} | events=${snapshot.events.length} | quotes=${snapshot.quotes.length} | callbacks=${snapshot.callbacks.length}`,
+      hotMoments: Object.freeze(hottest),
+      protectedArcs: Object.freeze(arcs),
+      shadowPreservationNotes: Object.freeze(shadowPreservationNotes),
+      deletionWarnings: Object.freeze(deletionWarnings),
+    };
+  }
+
+  public buildSummaryLedger(plan: MemoryCompressionPlan, store: ConversationMemoryStore): readonly MemoryCompressionSummaryLedgerEntry[] {
+    const snapshot = store.getSnapshot(plan.playerId);
+    const eventMap = new Map(snapshot.events.map((record) => [record.memoryId, record]));
+    return Object.freeze(plan.summaries.map((summary) => ({
+      summaryKey: summary.summaryKey,
+      domain: summary.domain,
+      memberCount: summary.memberIds.length,
+      latestAt: summary.latestAt,
+      privacyCeiling: summary.domain === 'EVENT'
+        ? this.privacyCeilingForSummary(summary.memberIds.map((id) => eventMap.get(id)).filter(Boolean) as ConversationMemoryEventRecord[])
+        : 'PUBLIC',
+      tags: summary.tags,
+    })));
+  }
+
+  public buildRunBridge(store: ConversationMemoryStore, playerId: string, runId: string): MemoryCompressionRunBridge {
+    const capsule = this.generateRunCapsule(store, playerId, runId);
+    const plan = this.plan(store, { playerId });
+    return {
+      runId,
+      capsule,
+      hotIds: Object.freeze(plan.keepHotIds.filter((id) => capsule.legendEventIds.includes(id) || capsule.highEventIds.includes(id))),
+      summaryIds: Object.freeze(plan.summarizeIds.filter((id) => capsule.highEventIds.includes(id) || capsule.legendEventIds.includes(id))),
+      callbackIds: Object.freeze(plan.keepHotIds.filter((id) => capsule.unresolvedCallbackIds.includes(id))),
+    };
+  }
+
+  public comparePlans(left: MemoryCompressionPlan, right: MemoryCompressionPlan): MemoryCompressionPlanComparison {
+    const leftMap = new Map(left.decisions.map((decision) => [decision.id, decision]));
+    const rightMap = new Map(right.decisions.map((decision) => [decision.id, decision]));
+    const changedIds: string[] = [];
+    const promotedIds: string[] = [];
+    const demotedIds: string[] = [];
+    const newlyDeletedIds: string[] = [];
+    const newlyProtectedIds: string[] = [];
+    const order: readonly MemoryCompressionAction[] = ['DELETE', 'SUMMARIZE', 'ARCHIVE', 'DEFER', 'SHADOW_ONLY', 'KEEP_WARM', 'KEEP_HOT'];
+    for (const [id, next] of rightMap.entries()) {
+      const previous = leftMap.get(id);
+      if (!previous) {
+        changedIds.push(id);
+        if (next.action === 'DELETE') {
+          newlyDeletedIds.push(id);
+        }
+        if (next.action === 'KEEP_HOT' || next.action === 'KEEP_WARM') {
+          newlyProtectedIds.push(id);
+        }
+        continue;
+      }
+      if (previous.action !== next.action) {
+        changedIds.push(id);
+        if (order.indexOf(next.action) > order.indexOf(previous.action)) {
+          promotedIds.push(id);
+        }
+        if (order.indexOf(next.action) < order.indexOf(previous.action)) {
+          demotedIds.push(id);
+        }
+        if (next.action === 'DELETE' && previous.action !== 'DELETE') {
+          newlyDeletedIds.push(id);
+        }
+        if ((next.action === 'KEEP_HOT' || next.action === 'KEEP_WARM') && previous.action !== 'KEEP_HOT' && previous.action !== 'KEEP_WARM') {
+          newlyProtectedIds.push(id);
+        }
+      }
+    }
+    return {
+      leftCreatedAt: left.createdAt,
+      rightCreatedAt: right.createdAt,
+      changedIds: Object.freeze(changedIds),
+      promotedIds: Object.freeze(promotedIds),
+      demotedIds: Object.freeze(demotedIds),
+      newlyDeletedIds: Object.freeze(newlyDeletedIds),
+      newlyProtectedIds: Object.freeze(newlyProtectedIds),
+      summary: `changed=${changedIds.length}|promoted=${promotedIds.length}|demoted=${demotedIds.length}|newlyDeleted=${newlyDeletedIds.length}|newlyProtected=${newlyProtectedIds.length}`,
+    };
+  }
+
+  public buildBudgetAdvice(store: ConversationMemoryStore, playerId: string): MemoryCompressionBudgetAdvice {
+    const utilization = this.currentUtilization(store, playerId);
+    if (utilization.needsEmergencyCompression) {
+      return {
+        severity: 'EMERGENCY',
+        recommendedAction: 'RUN_EMERGENCY_PLAN',
+        summary: 'memory budgets are near or above the hard operating threshold',
+        utilization,
+      };
+    }
+    if (utilization.needsSoftCompression) {
+      return {
+        severity: 'SOFT',
+        recommendedAction: 'RUN_PLAN',
+        summary: 'memory budgets are above the preferred operating threshold',
+        utilization,
+      };
+    }
+    if (utilization.overallUtilization01 >= 0.55) {
+      return {
+        severity: 'HARD',
+        recommendedAction: 'TUNE_CONFIG',
+        summary: 'memory budgets are climbing and should be tuned before the next surge',
+        utilization,
+      };
+    }
+    return {
+      severity: 'NONE',
+      recommendedAction: 'NONE',
+      summary: 'memory budgets are healthy',
+      utilization,
+    };
+  }
+
+  public buildReasonHistogram(decisions: readonly MemoryCompressionDecision[]): readonly MemoryCompressionReasonHistogramEntry[] {
+    const counts = new Map<MemoryCompressionReasonCode, { count: number; domains: Set<MemoryCompressionDomain>; actions: Set<MemoryCompressionAction> }>();
+    for (const decision of decisions) {
+      for (const reason of decision.reasons) {
+        const next = counts.get(reason) ?? { count: 0, domains: new Set<MemoryCompressionDomain>(), actions: new Set<MemoryCompressionAction>() };
+        next.count += 1;
+        next.domains.add(decision.domain);
+        next.actions.add(decision.action);
+        counts.set(reason, next);
+      }
+    }
+    return Object.freeze(
+      [...counts.entries()]
+        .map(([reason, value]) => ({
+          reason,
+          count: value.count,
+          domains: Object.freeze([...value.domains].sort()),
+          actions: Object.freeze([...value.actions]),
+        }))
+        .sort((left, right) => right.count - left.count),
+    );
+  }
+
+  public buildActionHistogram(decisions: readonly MemoryCompressionDecision[]): readonly MemoryCompressionActionHistogramEntry[] {
+    const actions: MemoryCompressionAction[] = ['KEEP_HOT', 'KEEP_WARM', 'ARCHIVE', 'SUMMARIZE', 'DELETE', 'SHADOW_ONLY', 'DEFER'];
+    return Object.freeze(actions.map((action) => {
+      const members = decisions.filter((decision) => decision.action === action);
+      return {
+        action,
+        count: members.length,
+        averageScore01: average(members.map((member) => member.score01)),
+        hottestId: [...members].sort((left, right) => right.score01 - left.score01)[0]?.id,
+      };
+    }));
+  }
+
+  public buildDomainSnapshots(decisions: readonly MemoryCompressionDecision[]): readonly MemoryCompressionDomainSnapshot[] {
+    const domains: MemoryCompressionDomain[] = ['EVENT', 'QUOTE', 'CALLBACK'];
+    return Object.freeze(domains.map((domain) => {
+      const members = decisions.filter((decision) => decision.domain === domain);
+      const ordered = [...members].sort((left, right) => right.score01 - left.score01);
+      return {
+        domain,
+        totalRecords: members.length,
+        keepHotCount: members.filter((member) => member.action === 'KEEP_HOT').length,
+        keepWarmCount: members.filter((member) => member.action === 'KEEP_WARM').length,
+        archiveCount: members.filter((member) => member.action === 'ARCHIVE').length,
+        summarizeCount: members.filter((member) => member.action === 'SUMMARIZE').length,
+        deleteCount: members.filter((member) => member.action === 'DELETE').length,
+        shadowOnlyCount: members.filter((member) => member.action === 'SHADOW_ONLY').length,
+        averageScore01: average(members.map((member) => member.score01)),
+        hottestId: ordered[0]?.id,
+        coldestId: ordered[ordered.length - 1]?.id,
+      };
+    }));
+  }
+
+  public buildCounterpartDigests(decisions: readonly MemoryCompressionDecision[]): readonly MemoryCompressionCounterpartDigest[] {
+    const ids = uniqueStrings(decisions.map((decision) => decision.counterpartId));
+    return Object.freeze(ids.map((counterpartId) => {
+      const members = decisions.filter((decision) => decision.counterpartId === counterpartId);
+      return {
+        counterpartId,
+        totalCount: members.length,
+        keepHotCount: members.filter((member) => member.action === 'KEEP_HOT').length,
+        keptCount: members.filter((member) => member.action === 'KEEP_HOT' || member.action === 'KEEP_WARM').length,
+        archivedCount: members.filter((member) => member.action === 'ARCHIVE').length,
+        summarizedCount: members.filter((member) => member.action === 'SUMMARIZE').length,
+        deletedCount: members.filter((member) => member.action === 'DELETE').length,
+        hottestIds: Object.freeze([...members].sort((left, right) => right.score01 - left.score01).slice(0, 5).map((member) => member.id)),
+      };
+    }).sort((left, right) => right.totalCount - left.totalCount));
+  }
+
+  public buildChannelDigests(decisions: readonly MemoryCompressionDecision[]): readonly MemoryCompressionChannelDigest[] {
+    const ids = uniqueStrings(decisions.map((decision) => decision.channelId));
+    return Object.freeze(ids.map((channelId) => {
+      const members = decisions.filter((decision) => decision.channelId === channelId);
+      return {
+        channelId,
+        totalCount: members.length,
+        keepHotCount: members.filter((member) => member.action === 'KEEP_HOT').length,
+        keepWarmCount: members.filter((member) => member.action === 'KEEP_WARM').length,
+        shadowOnlyCount: members.filter((member) => member.action === 'SHADOW_ONLY').length,
+        summarizeCount: members.filter((member) => member.action === 'SUMMARIZE').length,
+        deleteCount: members.filter((member) => member.action === 'DELETE').length,
+        averageScore01: average(members.map((member) => member.score01)),
+      };
+    }).sort((left, right) => right.totalCount - left.totalCount));
+  }
+
+  public buildRoomDigests(decisions: readonly MemoryCompressionDecision[]): readonly MemoryCompressionRoomDigest[] {
+    const ids = uniqueStrings(decisions.map((decision) => decision.roomId));
+    const domains: MemoryCompressionDomain[] = ['EVENT', 'QUOTE', 'CALLBACK'];
+    const actions: MemoryCompressionAction[] = ['KEEP_HOT', 'KEEP_WARM', 'ARCHIVE', 'SUMMARIZE', 'DELETE', 'SHADOW_ONLY', 'DEFER'];
+    return Object.freeze(ids.map((roomId) => {
+      const members = decisions.filter((decision) => decision.roomId === roomId);
+      const domainMix = Object.fromEntries(domains.map((domain) => [domain, members.filter((member) => member.domain === domain).length])) as Readonly<Record<MemoryCompressionDomain, number>>;
+      const actionMix = Object.fromEntries(actions.map((action) => [action, members.filter((member) => member.action === action).length])) as Readonly<Record<MemoryCompressionAction, number>>;
+      return {
+        roomId,
+        totalCount: members.length,
+        domainMix,
+        actionMix,
+        hottestIds: Object.freeze([...members].sort((left, right) => right.score01 - left.score01).slice(0, 5).map((member) => member.id)),
+      };
+    }).sort((left, right) => right.totalCount - left.totalCount));
+  }
+
+  public buildClusterDigests(
+    snapshot: ConversationMemorySnapshot,
+    decisions: readonly MemoryCompressionDecision[],
+  ): readonly MemoryCompressionClusterDigest[] {
+    const decisionMap = new Map(decisions.map((decision) => [decision.id, decision]));
+    return Object.freeze(this.clusterEventsForCompression(snapshot.events).map((cluster) => {
+      const members = cluster.events.map((event) => decisionMap.get(event.memoryId)).filter(Boolean) as MemoryCompressionDecision[];
+      return {
+        clusterId: cluster.clusterId,
+        centroidEventId: cluster.centroidEventId,
+        eventCount: cluster.eventCount,
+        avgSalience01: cluster.avgSalience01,
+        maxHostility01: cluster.maxHostility01,
+        maxEmbarrassment01: cluster.maxEmbarrassment01,
+        protectedCount: members.filter((member) => member.action === 'KEEP_HOT' || member.action === 'KEEP_WARM').length,
+        summarizeCount: members.filter((member) => member.action === 'SUMMARIZE').length,
+        deleteCount: members.filter((member) => member.action === 'DELETE').length,
+        isNarrativeArc: cluster.isNarrativeArc,
+      };
+    }).sort((left, right) => right.eventCount - left.eventCount));
+  }
+
+  public buildWindowDigest(snapshot: ConversationMemorySnapshot, referenceNow: number): MemoryCompressionWindowDigest {
+    const allCreatedAt = [
+      ...snapshot.events.map((record) => record.createdAt),
+      ...snapshot.quotes.map((record) => record.createdAt),
+      ...snapshot.callbacks.map((record) => record.createdAt),
+    ];
+    let hotWindowCount = 0;
+    let warmWindowCount = 0;
+    let archiveWindowCount = 0;
+    let olderThanArchiveWindowCount = 0;
+    for (const createdAt of allCreatedAt) {
+      const ageMs = Math.max(0, referenceNow - createdAt);
+      if (ageMs <= this.config.hotWindowMs) {
+        hotWindowCount += 1;
+      }
+      if (ageMs <= this.config.warmWindowMs) {
+        warmWindowCount += 1;
+      }
+      if (ageMs <= this.config.archiveWindowMs) {
+        archiveWindowCount += 1;
+      } else {
+        olderThanArchiveWindowCount += 1;
+      }
+    }
+    return {
+      hotWindowCount,
+      warmWindowCount,
+      archiveWindowCount,
+      olderThanArchiveWindowCount,
+    };
+  }
+
+  public buildPresets(): readonly MemoryCompressionPreset[] {
+    return Object.freeze([
+      {
+        presetId: 'BALANCED',
+        description: 'Default balanced memory retention for mixed play.',
+        config: {},
+      },
+      {
+        presetId: 'AGGRESSIVE',
+        description: 'Favor compression and summary support when the room is saturated.',
+        config: {
+          hotRecordBudget: 180,
+          warmRecordBudget: 560,
+          archiveRecordBudget: 1600,
+          summarizeBelowScore01: 0.42,
+          deleteBelowScore01: 0.2,
+        },
+      },
+      {
+        presetId: 'SHADOW_LOCKED',
+        description: 'Preserve hidden and shadow narrative artifacts.',
+        config: {
+          preserveShadowSignals: true,
+          keepRelationshipAnchors: true,
+          keepLegendAnchors: true,
+        },
+      },
+      {
+        presetId: 'PROOF_LOCKED',
+        description: 'Preserve proof-carrying records for audit and replay.',
+        config: {
+          keepProofAnchors: true,
+          deleteBelowScore01: 0.08,
+          summarizeBelowScore01: 0.3,
+        },
+      },
+      {
+        presetId: 'POST_RUN',
+        description: 'Preserve comeback, collapse, and consequence after the run.',
+        config: {
+          keepLegendAnchors: true,
+          keepDealRoomAnchors: true,
+          keepWarmBelowScore01: 0.5,
+          warmWindowMs: 14 * 24 * 60 * 60 * 1000,
+        },
+      },
+    ]);
+  }
+
+  public resolvePreset(presetId: MemoryCompressionPreset['presetId']): MemoryCompressionPreset {
+    return this.buildPresets().find((preset) => preset.presetId === presetId) ?? this.buildPresets()[0]!;
+  }
+
+  public createConfiguredPolicy(presetId: MemoryCompressionPreset['presetId']): MemoryCompressionPolicy {
+    const preset = this.resolvePreset(presetId);
+    return new MemoryCompressionPolicy({ ...this.config, ...preset.config }, this.salienceScorer);
+  }
+
+  public buildHotsetDigest(plan: MemoryCompressionPlan): readonly string[] {
+    return Object.freeze(sortDecisionsByCreatedAt(plan.decisions)
+      .filter((decision) => decision.action === 'KEEP_HOT')
+      .slice(0, 12)
+      .map((decision) => `${decision.domain}:${decision.id}:${decision.score01.toFixed(3)}:${decision.reasons.slice(0, 3).join(',')}`));
+  }
+
+  public buildShadowDigest(plan: MemoryCompressionPlan): readonly string[] {
+    return Object.freeze(sortDecisionsByCreatedAt(plan.decisions)
+      .filter((decision) => decision.action === 'SHADOW_ONLY')
+      .slice(0, 12)
+      .map((decision) => `${decision.domain}:${decision.id}:${decision.channelId ?? 'unknown'}`));
+  }
+
+  public buildDeletionDigest(plan: MemoryCompressionPlan): readonly string[] {
+    return Object.freeze(sortDecisionsByCreatedAt(plan.decisions)
+      .filter((decision) => decision.action === 'DELETE')
+      .slice(0, 12)
+      .map((decision) => `${decision.domain}:${decision.id}:${decision.score01.toFixed(3)}`));
+  }
+
+  public buildSummarySupportDigest(plan: MemoryCompressionPlan): readonly string[] {
+    return Object.freeze(sortDecisionsByCreatedAt(plan.decisions)
+      .filter((decision) => decision.reasons.includes('summary_support'))
+      .slice(0, 12)
+      .map((decision) => `${decision.domain}:${decision.id}:${decision.summaryKey ?? 'none'}`));
+  }
+
+  public buildCompressionIndex(plan: MemoryCompressionPlan): Readonly<Record<string, MemoryCompressionDecision>> {
+    return Object.freeze(Object.fromEntries(plan.decisions.map((decision) => [decision.id, decision])));
+  }
+
+  public buildActionBuckets(plan: MemoryCompressionPlan): Readonly<Record<MemoryCompressionAction, readonly MemoryCompressionDecision[]>> {
+    const actions: MemoryCompressionAction[] = ['KEEP_HOT', 'KEEP_WARM', 'ARCHIVE', 'SUMMARIZE', 'DELETE', 'SHADOW_ONLY', 'DEFER'];
+    return Object.freeze(Object.fromEntries(actions.map((action) => [action, Object.freeze(plan.decisions.filter((decision) => decision.action === action))])) as Record<MemoryCompressionAction, readonly MemoryCompressionDecision[]>);
+  }
+
+  public buildDomainBuckets(plan: MemoryCompressionPlan): Readonly<Record<MemoryCompressionDomain, readonly MemoryCompressionDecision[]>> {
+    const domains: MemoryCompressionDomain[] = ['EVENT', 'QUOTE', 'CALLBACK'];
+    return Object.freeze(Object.fromEntries(domains.map((domain) => [domain, Object.freeze(plan.decisions.filter((decision) => decision.domain === domain))])) as Record<MemoryCompressionDomain, readonly MemoryCompressionDecision[]>);
+  }
+
+  public explainDecision(decision: MemoryCompressionDecision): string {
+    return [
+      `domain=${decision.domain}`,
+      `id=${decision.id}`,
+      `action=${decision.action}`,
+      `score=${decision.score01.toFixed(3)}`,
+      `tier=${decision.tier}`,
+      `reasons=${decision.reasons.join(',')}`,
+    ].join('|');
+  }
+
+  public explainPlan(plan: MemoryCompressionPlan): readonly string[] {
+    return Object.freeze(plan.decisions.map((decision) => this.explainDecision(decision)));
+  }
+
+  public recommendConfigTuning(store: ConversationMemoryStore, playerId: string): Partial<MemoryCompressionConfig> {
+    const utilization = this.currentUtilization(store, playerId);
+    if (utilization.needsEmergencyCompression) {
+      return {
+        hotRecordBudget: Math.max(96, Math.floor(this.config.hotRecordBudget * 0.82)),
+        warmRecordBudget: Math.max(240, Math.floor(this.config.warmRecordBudget * 0.8)),
+        archiveRecordBudget: Math.max(600, Math.floor(this.config.archiveRecordBudget * 0.85)),
+        summarizeBelowScore01: clamp01(this.config.summarizeBelowScore01 + 0.08),
+        deleteBelowScore01: clamp01(this.config.deleteBelowScore01 + 0.04),
+      };
+    }
+    if (utilization.needsSoftCompression) {
+      return {
+        warmRecordBudget: Math.max(360, Math.floor(this.config.warmRecordBudget * 0.9)),
+        archiveRecordBudget: Math.max(1200, Math.floor(this.config.archiveRecordBudget * 0.92)),
+      };
+    }
+    return {
+      hotRecordBudget: this.config.hotRecordBudget,
+      warmRecordBudget: this.config.warmRecordBudget,
+      archiveRecordBudget: this.config.archiveRecordBudget,
+    };
+  }
+
+  public buildPlanDeltaPreview(store: ConversationMemoryStore, context: MemoryCompressionContext, presetId: MemoryCompressionPreset['presetId']): MemoryCompressionPlanComparison {
+    const basePlan = this.plan(store, context);
+    const alternatePolicy = this.createConfiguredPolicy(presetId);
+    const alternatePlan = alternatePolicy.plan(store, context);
+    return this.comparePlans(basePlan, alternatePlan);
+  }
+
+  public listProtectedArcIds(store: ConversationMemoryStore, playerId: string): readonly string[] {
+    return Object.freeze(this.identifyNarrativeArcs(store, playerId).filter((arc) => arc.isProtected).map((arc) => arc.arcId));
+  }
+
+  public listProtectedEventIds(store: ConversationMemoryStore, playerId: string): readonly string[] {
+    const protectedIds = new Set<string>();
+    for (const arc of this.identifyNarrativeArcs(store, playerId)) {
+      if (!arc.isProtected) {
+        continue;
+      }
+      for (const id of arc.eventIds) {
+        protectedIds.add(id);
+      }
+    }
+    return Object.freeze([...protectedIds]);
+  }
+
+  public buildPreservationReport(store: ConversationMemoryStore, playerId: string): readonly string[] {
+    const plan = this.plan(store, { playerId });
+    const diagnostics = this.buildAuditReport(store, plan);
+    return Object.freeze([
+      `summary:${this.summarizePlan(plan)}`,
+      ...diagnostics.domains.map((domain) => `domain:${domain.domain}:count=${domain.totalRecords}:hot=${domain.keepHotCount}:delete=${domain.deleteCount}`),
+      ...this.buildHotsetDigest(plan).map((line) => `hot:${line}`),
+      ...this.buildShadowDigest(plan).map((line) => `shadow:${line}`),
+      ...this.buildDeletionDigest(plan).map((line) => `delete:${line}`),
+    ]);
+  }
+
+  public preserveArcIntegrity(plan: MemoryCompressionPlan, arcs: readonly NarrativeArc[]): MemoryCompressionPlan {
+    const protectedIds = new Set<string>();
+    for (const arc of arcs) {
+      if (arc.isProtected) {
+        for (const id of arc.eventIds) {
+          protectedIds.add(id);
+        }
+      }
+    }
+    const adjusted = plan.decisions.map((decision) => {
+      if (protectedIds.has(decision.id) && (decision.action === 'DELETE' || decision.action === 'SUMMARIZE' || decision.action === 'ARCHIVE')) {
+        const reasons = new Set(decision.reasons);
+        reasons.add('collapse_preservation');
+        reasons.add('retention_floor');
+        return {
+          ...decision,
+          action: 'KEEP_HOT' as const,
+          reasons: Array.from(reasons),
+        };
+      }
+      return decision;
+    });
+    return this.buildPlanResult(plan.playerId, plan.createdAt, adjusted, plan.summaries, [...plan.auditTrail, 'arc_integrity_applied']);
+  }
+
+  public currentUtilization(store: ConversationMemoryStore, playerId: string): MemoryBudgetUtilization {
+    const snapshot = store.getSnapshot(playerId);
+    const eventBudget = Math.max(1, this.config.hotRecordBudget + this.config.warmRecordBudget + this.config.archiveRecordBudget);
+    const quoteBudget = Math.max(1, Math.floor(this.config.warmRecordBudget * 0.75) + this.config.archiveRecordBudget);
+    const callbackBudget = Math.max(1, Math.floor(this.config.hotRecordBudget * 0.5) + Math.floor(this.config.warmRecordBudget * 0.5) + Math.floor(this.config.archiveRecordBudget * 0.75));
+    const eventUtil = snapshot.events.length / eventBudget;
+    const quoteUtil = snapshot.quotes.length / quoteBudget;
+    const callbackUtil = snapshot.callbacks.length / callbackBudget;
+    const maxUtil = Math.max(eventUtil, quoteUtil, callbackUtil);
+    return {
+      eventUtilization01: clamp01(eventUtil),
+      quoteUtilization01: clamp01(quoteUtil),
+      callbackUtilization01: clamp01(callbackUtil),
+      overallUtilization01: clamp01(maxUtil),
+      needsEmergencyCompression: maxUtil >= 0.9,
+      needsSoftCompression: maxUtil >= 0.7,
+    };
+  }
+
+  public emergencyCompressionPlan(store: ConversationMemoryStore, context: MemoryCompressionContext): MemoryCompressionPlan {
+    const plan = this.plan(store, context);
+    const aggressive = plan.decisions.map((decision) => {
+      const reasons = new Set(decision.reasons);
+      reasons.add('triggered_by_policy');
+      reasons.add('soft_budget');
+      if (decision.action === 'KEEP_WARM') {
+        return { ...decision, action: 'ARCHIVE' as const, reasons: Array.from(reasons) };
+      }
+      if (decision.action === 'ARCHIVE') {
+        return { ...decision, action: 'SUMMARIZE' as const, reasons: Array.from(reasons) };
+      }
+      if (decision.action === 'SUMMARIZE' && decision.score01 <= Math.max(this.config.deleteBelowScore01, 0.18)) {
+        reasons.add('hard_budget');
+        return { ...decision, action: 'DELETE' as const, reasons: Array.from(reasons) };
+      }
+      return { ...decision, reasons: Array.from(reasons) };
+    });
+    const rebuiltSummaries = this.buildSummaryGroups(store.getSnapshot(context.playerId), aggressive, [...plan.auditTrail], plan.createdAt);
+    return this.buildPlanResult(plan.playerId, plan.createdAt, aggressive, rebuiltSummaries, [...plan.auditTrail, 'emergency_policy_applied']);
+  }
 
 }
+
 
 export function createMemoryCompressionPolicy(
   config: Partial<MemoryCompressionConfig> = {},
@@ -1364,4 +2395,26 @@ export function applyConversationMemoryCompression(
   salienceScorer: MemorySalienceScorer = new MemorySalienceScorer(),
 ): void {
   new MemoryCompressionPolicy(config, salienceScorer).applyPlan(store, plan);
+}
+
+export function previewConversationMemoryCompression(
+  store: ConversationMemoryStore,
+  context: MemoryCompressionContext,
+  config: Partial<MemoryCompressionConfig> = {},
+  salienceScorer: MemorySalienceScorer = new MemorySalienceScorer(),
+): MemoryCompressionPlanPreview {
+  return new MemoryCompressionPolicy(config, salienceScorer).preview(store, context);
+}
+
+export function executeConversationMemoryCompression(
+  store: ConversationMemoryStore,
+  context: MemoryCompressionContext,
+  config: Partial<MemoryCompressionConfig> = {},
+  salienceScorer: MemorySalienceScorer = new MemorySalienceScorer(),
+): MemoryCompressionExecutionReceipt {
+  return new MemoryCompressionPolicy(config, salienceScorer).executePlan(store, context);
+}
+
+export function summarizeConversationCompressionPlan(plan: MemoryCompressionPlan): string {
+  return new MemoryCompressionPolicy().summarizePlan(plan);
 }

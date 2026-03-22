@@ -10,10 +10,15 @@
  */
 
 import type {
+  ChatCallbackKind,
   ChatCallbackPlan,
+  ChatCallbackPrivacyClass,
 } from '../../../../../../shared/contracts/chat/ChatCallback';
 import type {
+  ChatQuoteAudienceClass,
   ChatQuoteRecord,
+  ChatQuoteToneClass,
+  ChatQuoteUseIntent,
 } from '../../../../../../shared/contracts/chat/ChatQuote';
 
 // Local structural types that mirror removed contract types
@@ -150,6 +155,7 @@ export interface ConversationMemoryEventRecord {
   readonly intimacy01: number;
   readonly strategicWeight01: number;
   readonly salience01: number;
+  readonly toneClass: ChatQuoteToneClass;
   readonly unresolved: boolean;
   readonly quoteIds: readonly string[];
   readonly callbackIds: readonly string[];
@@ -180,6 +186,8 @@ export interface ConversationMemoryCallbackRecord {
   readonly usageCount: number;
   readonly lastUsedAt?: number;
   readonly tags: readonly string[];
+  readonly callbackKind: ChatCallbackKind;
+  readonly privacyClass: ChatCallbackPrivacyClass;
 }
 
 export interface ConversationMemoryQuoteRecord {
@@ -203,6 +211,9 @@ export interface ConversationMemoryQuoteRecord {
   readonly salience01: number;
   readonly strategicWeight01: number;
   readonly emotionalWeight01: number;
+  readonly toneClass: ChatQuoteToneClass;
+  readonly audienceClass: ChatQuoteAudienceClass;
+  readonly useIntent: ChatQuoteUseIntent;
   readonly recurrenceCount: number;
   readonly usageCount: number;
   readonly lastUsedAt?: number;
@@ -259,6 +270,9 @@ export interface ConversationQuoteQuery {
   readonly unresolvedOnly?: boolean;
   readonly minScore01?: number;
   readonly minSalience01?: number;
+  readonly toneClasses?: readonly ChatQuoteToneClass[];
+  readonly audienceClasses?: readonly ChatQuoteAudienceClass[];
+  readonly useIntents?: readonly ChatQuoteUseIntent[];
   readonly activeOnly?: boolean;
   readonly limit?: number;
 }
@@ -833,6 +847,7 @@ export function applyEmotionDecayToEvent(
   const elapsed = Math.max(0, referenceTime - record.createdAt);
   return {
     ...record,
+    toneClass: record.toneClass,
     hostility01: computeEmotionDecay(record.hostility01, elapsed, EMOTION_DECAY_PROFILES.HOSTILITY, revisitCount, wasWitnessed),
     embarrassment01: computeEmotionDecay(record.embarrassment01, elapsed, EMOTION_DECAY_PROFILES.EMBARRASSMENT, revisitCount, wasWitnessed),
     confidence01: computeEmotionDecay(record.confidence01, elapsed, EMOTION_DECAY_PROFILES.CONFIDENCE, revisitCount, wasWitnessed),
@@ -866,6 +881,47 @@ function scoreStrategicWeight(context: ConversationMemoryContext, normalizedBody
 function scoreSalience(body: string, sentiment01: number, hostility01: number, confidence01: number, embarrassment01: number, intimacy01: number, strategicWeight01: number): number { const lengthBoost = Math.min(body.length / 160, 0.16); return clamp01(hostility01 * 0.22 + confidence01 * 0.11 + embarrassment01 * 0.1 + intimacy01 * 0.11 + strategicWeight01 * 0.24 + Math.abs(sentiment01 - 0.5) * 0.18 + lengthBoost); }
 function extractQuotedStrings(body: string, config: ConversationMemoryStoreConfig): readonly string[] { const results: string[] = []; const quoted = body.match(/"([^"\n]{3,240})"/g) ?? []; for (const candidate of quoted) { const cleaned = candidate.replace(/^"|"$/g, '').trim(); if (cleaned.length >= config.quoteMinimumLength && cleaned.length <= config.quoteMaximumLength) results.push(cleaned); } if (results.length > 0) return unique(results); const clauses = body.split(/[.!?\n]+/).map((part) => part.trim()).filter((part) => part.length >= config.quoteMinimumLength && part.length <= config.quoteMaximumLength); return unique(clauses.slice(0, config.maxFragmentsPerMessage)); }
 function inferQuoteKind(body: string, role: ConversationMemorySpeakerRole, context: ConversationMemoryContext): ChatQuoteKind { const normalized = normalizeText(body); if (context.channelId === 'DEAL_ROOM' || normalized.includes('offer') || normalized.includes('counter')) return 'BLUFF'; if (normalized.includes('remember') || normalized.includes('last time')) return 'CALLBACK'; if (role === 'HELPER' && (normalized.includes('listen') || normalized.includes('trust me'))) return 'ADVICE'; if (normalized.includes('you said')) return 'RECEIPT'; if (normalized.includes('watch me') || normalized.includes('easy')) return 'BOAST'; if (normalized.includes('quit') || normalized.includes('fold')) return 'THREAT'; return 'STATEMENT'; }
+function inferToneClass(normalizedBody: string, hostility01: number, confidence01: number, embarrassment01: number, intimacy01: number): ChatQuoteToneClass {
+  if (hostility01 >= 0.65) return 'HOSTILE' as ChatQuoteToneClass;
+  if (hostility01 >= 0.40) return 'TAUNTING' as ChatQuoteToneClass;
+  if (embarrassment01 >= 0.50) return 'VULNERABLE' as ChatQuoteToneClass;
+  if (confidence01 >= 0.60) return 'CONFIDENT' as ChatQuoteToneClass;
+  if (intimacy01 >= 0.55) return 'SUPPORTIVE' as ChatQuoteToneClass;
+  if (normalizedBody.includes('please') || normalizedBody.includes('help') || normalizedBody.includes('need')) return 'DESPERATE' as ChatQuoteToneClass;
+  if (normalizedBody.includes('deal') || normalizedBody.includes('offer') || normalizedBody.includes('counter')) return 'CALCULATING' as ChatQuoteToneClass;
+  return 'NEUTRAL' as ChatQuoteToneClass;
+}
+function inferAudienceClass(context: ConversationMemoryContext): ChatQuoteAudienceClass {
+  if (context.privacyLevel === 'SHADOW' || context.channelId === 'SYSTEM_SHADOW' || context.channelId === 'NPC_SHADOW' || context.channelId === 'RIVALRY_SHADOW' || context.channelId === 'RESCUE_SHADOW') return 'SHADOW' as ChatQuoteAudienceClass;
+  if (context.privacyLevel === 'PRIVATE' || context.channelId === 'DIRECT') return 'PRIVATE' as ChatQuoteAudienceClass;
+  if (context.privacyLevel === 'TEAM' || context.channelId === 'SYNDICATE') return 'TEAM' as ChatQuoteAudienceClass;
+  if (context.channelId === 'SPECTATOR') return 'SPECTATOR' as ChatQuoteAudienceClass;
+  return 'PUBLIC' as ChatQuoteAudienceClass;
+}
+function inferUseIntent(kind: ChatQuoteKind, context: ConversationMemoryContext, hostility01: number, unresolved: boolean): ChatQuoteUseIntent {
+  if (kind === 'RECEIPT') return 'RECEIPT' as ChatQuoteUseIntent;
+  if (kind === 'CALLBACK') return 'CALLBACK' as ChatQuoteUseIntent;
+  if (kind === 'BLUFF' && context.channelId === 'DEAL_ROOM') return 'AMMUNITION' as ChatQuoteUseIntent;
+  if (kind === 'ADVICE') return 'BONDING' as ChatQuoteUseIntent;
+  if (kind === 'THREAT' || (hostility01 >= 0.55 && unresolved)) return 'ESCALATION' as ChatQuoteUseIntent;
+  if (kind === 'BOAST') return 'AMMUNITION' as ChatQuoteUseIntent;
+  return 'DEFENSE' as ChatQuoteUseIntent;
+}
+function inferCallbackKind(quoteKind: ChatQuoteKind, mode: ChatCallbackMode | string): ChatCallbackKind {
+  if (quoteKind === 'RECEIPT') return 'RECEIPT_DEPLOY' as ChatCallbackKind;
+  if (quoteKind === 'BOAST') return 'BOAST_CHECK' as ChatCallbackKind;
+  if (quoteKind === 'BLUFF') return 'BLUFF_CALL' as ChatCallbackKind;
+  if (quoteKind === 'THREAT') return 'THREAT_FOLLOW' as ChatCallbackKind;
+  if (quoteKind === 'ADVICE') return 'ADVICE_RECALL' as ChatCallbackKind;
+  if (mode === 'RIVALRY') return 'RIVALRY_ECHO' as ChatCallbackKind;
+  return 'GENERAL_RECALL' as ChatCallbackKind;
+}
+function inferPrivacyClass(context: ConversationMemoryContext): ChatCallbackPrivacyClass {
+  if (context.privacyLevel === 'SHADOW' || context.channelId === 'SYSTEM_SHADOW' || context.channelId === 'NPC_SHADOW' || context.channelId === 'RIVALRY_SHADOW') return 'SHADOW' as ChatCallbackPrivacyClass;
+  if (context.privacyLevel === 'PRIVATE' || context.channelId === 'DIRECT') return 'PRIVATE' as ChatCallbackPrivacyClass;
+  if (context.privacyLevel === 'TEAM' || context.channelId === 'SYNDICATE') return 'TEAM_ONLY' as ChatCallbackPrivacyClass;
+  return 'PUBLIC' as ChatCallbackPrivacyClass;
+}
 function makeQuoteProof(message: ConversationMemoryIngestMessage, memoryId: string, fragment: string, index: number): ChatQuoteProof { const proofId = `${memoryId}:proof:${index}`; const excerptStart = Math.max(0, message.body.indexOf(fragment)); return { proofId, proofChainId: message.context.proofChainId ?? `${memoryId}:chain`, messageId: memoryId, excerpt: fragment, excerptStart, excerptEnd: excerptStart + fragment.length, createdAt: message.createdAt }; }
 function makeQuoteEvidence(message: ConversationMemoryIngestMessage, memoryId: string, proof: ChatQuoteProof): ChatQuoteEvidence { return { evidenceId: `${memoryId}:evidence:${proof.proofId}`, messageId: memoryId, playerId: message.playerId, actorId: message.actor.actorId, counterpartId: message.counterpart?.actorId, runId: message.context.runId, modeId: message.context.modeId, channelId: message.context.channelId, roomId: message.context.roomId, createdAt: message.createdAt, proof }; }
 function makeCallbackEvidence(memory: ConversationMemoryEventRecord, quote: ConversationMemoryQuoteRecord): ChatCallbackEvidence { return { evidenceId: `${quote.quoteId}:callback-evidence`, kind: 'QUOTE', messageId: quote.messageId, quoteId: quote.quoteId, proofChainId: quote.proof.proofChainId, excerpt: quote.fragment.text, createdAt: quote.createdAt, tags: quote.tags, summary: `${memory.actor.displayName ?? memory.actor.actorId} said: ${quote.fragment.text}` }; }
@@ -972,6 +1028,7 @@ export class ConversationMemoryStore {
     const intimacy01 = scoreIntimacy(message.role, message.context.channelId, normalizedBody);
     const strategicWeight01 = scoreStrategicWeight(message.context, normalizedBody);
     const salience01 = scoreSalience(message.body, sentiment01, hostility01, confidence01, embarrassment01, intimacy01, strategicWeight01);
+    const toneClass = inferToneClass(normalizedBody, hostility01, confidence01, embarrassment01, intimacy01);
 
     const record: ConversationMemoryEventRecord = {
       memoryId,
@@ -994,6 +1051,7 @@ export class ConversationMemoryStore {
       intimacy01,
       strategicWeight01,
       salience01,
+      toneClass,
       unresolved: message.unresolved ?? (hostility01 >= 0.55 || embarrassment01 >= 0.5),
       quoteIds: previous?.quoteIds ?? [],
       callbackIds: previous?.callbackIds ?? [],
@@ -1040,7 +1098,10 @@ export class ConversationMemoryStore {
       const proof = makeQuoteProof(ingestMessage, event.memoryId, fragment.text, index);
       const evidence = makeQuoteEvidence(ingestMessage, event.memoryId, proof);
       const kind = inferQuoteKind(fragment.text, event.role, event.context);
-      const score01 = clamp01(event.salience01 * 0.46 + event.hostility01 * 0.16 + event.confidence01 * 0.12 + event.embarrassment01 * 0.12 + event.intimacy01 * 0.14);
+      const toneClass = event.toneClass ?? inferToneClass(normalizeText(fragment.text), event.hostility01, event.confidence01, event.embarrassment01, event.intimacy01);
+      const audienceClass = inferAudienceClass(event.context);
+      const useIntent = inferUseIntent(kind, event.context, event.hostility01, event.unresolved);
+      const score01 = clamp01(event.salience01 * 0.42 + event.hostility01 * 0.14 + event.confidence01 * 0.10 + event.embarrassment01 * 0.10 + event.intimacy01 * 0.12 + event.strategicWeight01 * 0.12);
 
       const quoteRecord: ConversationMemoryQuoteRecord = {
         quoteId,
@@ -1058,11 +1119,14 @@ export class ConversationMemoryStore {
         updatedAt: now(),
         status: pickStatus(event.createdAt, this.config),
         unresolved: event.unresolved,
-        tags: unique([...(event.context.tags ?? []), kind.toLowerCase(), String(event.context.channelId).toLowerCase()]),
+        tags: unique([...(event.context.tags ?? []), kind.toLowerCase(), String(event.context.channelId).toLowerCase(), String(toneClass).toLowerCase()]),
         score01,
         salience01: event.salience01,
         strategicWeight01: event.strategicWeight01,
         emotionalWeight01: clamp01(event.hostility01 * 0.42 + event.embarrassment01 * 0.24 + event.intimacy01 * 0.34),
+        toneClass,
+        audienceClass,
+        useIntent,
         recurrenceCount: previous ? previous.recurrenceCount + 1 : 1,
         usageCount: previous?.usageCount ?? 0,
         lastUsedAt: previous?.lastUsedAt,
@@ -1102,6 +1166,8 @@ export class ConversationMemoryStore {
       if (previous) this.unindexCallback(bucket, previous);
 
       const mode: ChatCallbackMode | string = quote.kind === 'BLUFF' ? 'NEGOTIATION' : quote.kind === 'ADVICE' ? 'HELPER_RECALL' : quote.kind === 'RECEIPT' ? 'RECEIPT' : 'RIVALRY';
+      const callbackKind = inferCallbackKind(quote.kind, mode);
+      const privacyClass = inferPrivacyClass(event.context);
       const emotionalWeight01 = clamp01(quote.emotionalWeight01 * 0.54 + event.hostility01 * 0.22 + event.embarrassment01 * 0.24);
       const noveltyPenalty01 = previous ? clamp01(previous.usageCount / 12) : 0;
       const salience01 = clamp01(quote.score01 * 0.5 + event.salience01 * 0.32 + (event.unresolved ? 0.18 : 0));
@@ -1158,7 +1224,9 @@ export class ConversationMemoryStore {
         noveltyPenalty01,
         usageCount: previous?.usageCount ?? 0,
         lastUsedAt: previous?.lastUsedAt,
-        tags: unique([String(mode).toLowerCase(), quote.kind.toLowerCase(), String(event.context.channelId).toLowerCase()]),
+        tags: unique([String(mode).toLowerCase(), quote.kind.toLowerCase(), String(event.context.channelId).toLowerCase(), String(callbackKind).toLowerCase()]),
+        callbackKind,
+        privacyClass,
       };
 
       bucket.callbacks.set(callbackId, callbackRecord);
@@ -1219,6 +1287,9 @@ export class ConversationMemoryStore {
       .filter((record) => (query.unresolvedOnly ? record.unresolved : true))
       .filter((record) => (query.minScore01 != null ? record.score01 >= query.minScore01 : true))
       .filter((record) => (query.minSalience01 != null ? record.salience01 >= query.minSalience01 : true))
+      .filter((record) => (query.toneClasses?.length ? query.toneClasses.includes(record.toneClass) : true))
+      .filter((record) => (query.audienceClasses?.length ? query.audienceClasses.includes(record.audienceClass) : true))
+      .filter((record) => (query.useIntents?.length ? query.useIntents.includes(record.useIntent) : true))
       .filter((record) => (query.activeOnly ? record.status === 'ACTIVE' || record.status === 'DORMANT' : true))
       .sort((left, right) => right.score01 - left.score01 || compareByRecency(left, right))
       .slice(0, query.limit ?? 64);
@@ -1321,7 +1392,7 @@ export class ConversationMemoryStore {
     this.unindexCallback(bucket, current); bucket.callbacks.delete(callbackId);
     this.pushMutation(bucket, { kind: 'DELETE_CALLBACK', playerId, entityId: callbackId, createdAt: now(), summary: current.anchor.sourceText, tags: current.tags });
   }
-  public selectQuoteCandidates(request: ConversationQuoteQuery & { readonly playerId: string; readonly actorId?: string; readonly counterpartId?: string; readonly runId?: string; readonly modeId?: string; readonly channelId?: ConversationMemoryChannelId; readonly limit?: number; }): readonly ConversationQuoteCandidate[] {
+  public selectQuoteCandidates(request: { readonly playerId: string; readonly actorId?: string; readonly counterpartId?: string; readonly runId?: string; readonly modeId?: string; readonly channelId?: ConversationMemoryChannelId; readonly toneClass?: ChatQuoteToneClass; readonly audienceClass?: ChatQuoteAudienceClass; readonly useIntent?: ChatQuoteUseIntent; readonly limit?: number; }): readonly ConversationQuoteCandidate[] {
     return this.queryQuotes({
       playerId: request.playerId,
       actorId: request.actorId,
@@ -1341,6 +1412,9 @@ export class ConversationMemoryStore {
         if (request.channelId && record.evidence.some((item) => item.channelId === request.channelId)) { score01 += 0.06; reasons.push('channel_match'); }
         if (record.unresolved) { score01 += 0.08; reasons.push('unresolved'); }
         if (record.kind === 'RECEIPT' || record.kind === 'CALLBACK') { score01 += 0.06; reasons.push('callback_kind'); }
+        if (request.toneClass && record.toneClass === request.toneClass) { score01 += 0.07; reasons.push('tone_match'); }
+        if (request.audienceClass && record.audienceClass === request.audienceClass) { score01 += 0.05; reasons.push('audience_match'); }
+        if (request.useIntent && record.useIntent === request.useIntent) { score01 += 0.06; reasons.push('intent_match'); }
         return { quoteId: record.quoteId, memoryId: record.memoryId, score01: clamp01(score01), reasons, record, contract: this.toChatQuoteRecord(record) };
       })
       .sort((left, right) => right.score01 - left.score01)
@@ -1366,6 +1440,8 @@ export class ConversationMemoryStore {
         if (request.channelId && record.context.channelId === request.channelId) { score01 += 0.06; reasons.push('channel_match'); }
         if (record.unresolved) { score01 += 0.09; reasons.push('unresolved'); }
         if (record.mode === 'RECEIPT' || record.mode === 'RIVALRY') { score01 += 0.05; reasons.push('pressure_mode'); }
+        if (record.callbackKind === 'RECEIPT_DEPLOY' as ChatCallbackKind || record.callbackKind === 'BLUFF_CALL' as ChatCallbackKind) { score01 += 0.06; reasons.push('high_impact_kind'); }
+        if (record.privacyClass === 'PUBLIC' as ChatCallbackPrivacyClass) { score01 += 0.03; reasons.push('public_leverage'); }
         return { callbackId: record.callbackId, memoryId: record.memoryId, score01: clamp01(score01), reasons, record };
       })
       .sort((left, right) => right.score01 - left.score01)
@@ -2005,6 +2081,9 @@ export class ConversationMemoryStore {
       salience01: record.salience01,
       strategicWeight01: record.strategicWeight01,
       emotionalWeight01: record.emotionalWeight01,
+      toneClass: record.toneClass,
+      audienceClass: record.audienceClass,
+      useIntent: record.useIntent,
       usageCount: record.usageCount,
       lastUsedAt: record.lastUsedAt,
       fragment: {
@@ -2600,6 +2679,83 @@ export function buildConversationMemoryAuditSlice30(store: ConversationMemorySto
   if (stats.playerCount > 0) {
     lines.push(`avg_events_per_player=${(stats.totalEvents / stats.playerCount).toFixed(1)}`);
     lines.push(`avg_quotes_per_player=${(stats.totalQuotes / stats.playerCount).toFixed(1)}`);
+  }
+  return lines;
+}
+/** Slice 31: Tone class distribution across quotes. */
+export function buildConversationMemoryAuditSlice31(store: ConversationMemoryStore, playerId: string): readonly string[] {
+  const snapshot = store.getSnapshot(playerId);
+  const lines: string[] = ['slice=31|tone_class_distribution'];
+  const toneCounts = new Map<string, number>();
+  for (const quote of snapshot.quotes) {
+    const tone = String((quote as any).toneClass ?? 'UNSET');
+    toneCounts.set(tone, (toneCounts.get(tone) ?? 0) + 1);
+  }
+  for (const [tone, count] of [...toneCounts.entries()].sort((a, b) => b[1] - a[1])) {
+    const pct = snapshot.quotes.length > 0 ? ((count / snapshot.quotes.length) * 100).toFixed(1) : '0.0';
+    lines.push(`${tone}=${count}|${pct}%`);
+  }
+  return lines;
+}
+
+/** Slice 32: Audience class distribution across quotes. */
+export function buildConversationMemoryAuditSlice32(store: ConversationMemoryStore, playerId: string): readonly string[] {
+  const snapshot = store.getSnapshot(playerId);
+  const lines: string[] = ['slice=32|audience_class_distribution'];
+  const audienceCounts = new Map<string, number>();
+  for (const quote of snapshot.quotes) {
+    const audience = String((quote as any).audienceClass ?? 'UNSET');
+    audienceCounts.set(audience, (audienceCounts.get(audience) ?? 0) + 1);
+  }
+  for (const [audience, count] of [...audienceCounts.entries()].sort((a, b) => b[1] - a[1])) {
+    const pct = snapshot.quotes.length > 0 ? ((count / snapshot.quotes.length) * 100).toFixed(1) : '0.0';
+    lines.push(`${audience}=${count}|${pct}%`);
+  }
+  return lines;
+}
+
+/** Slice 33: Use intent distribution across quotes. */
+export function buildConversationMemoryAuditSlice33(store: ConversationMemoryStore, playerId: string): readonly string[] {
+  const snapshot = store.getSnapshot(playerId);
+  const lines: string[] = ['slice=33|use_intent_distribution'];
+  const intentCounts = new Map<string, number>();
+  for (const quote of snapshot.quotes) {
+    const intent = String((quote as any).useIntent ?? 'UNSET');
+    intentCounts.set(intent, (intentCounts.get(intent) ?? 0) + 1);
+  }
+  for (const [intent, count] of [...intentCounts.entries()].sort((a, b) => b[1] - a[1])) {
+    const pct = snapshot.quotes.length > 0 ? ((count / snapshot.quotes.length) * 100).toFixed(1) : '0.0';
+    lines.push(`${intent}=${count}|${pct}%`);
+  }
+  return lines;
+}
+
+/** Slice 34: Callback kind distribution. */
+export function buildConversationMemoryAuditSlice34(store: ConversationMemoryStore, playerId: string): readonly string[] {
+  const snapshot = store.getSnapshot(playerId);
+  const lines: string[] = ['slice=34|callback_kind_distribution'];
+  const kindCounts = new Map<string, number>();
+  for (const cb of snapshot.callbacks) {
+    const kind = String((cb as any).callbackKind ?? 'UNSET');
+    kindCounts.set(kind, (kindCounts.get(kind) ?? 0) + 1);
+  }
+  for (const [kind, count] of [...kindCounts.entries()].sort((a, b) => b[1] - a[1])) {
+    lines.push(`${kind}=${count}`);
+  }
+  return lines;
+}
+
+/** Slice 35: Privacy class distribution across callbacks. */
+export function buildConversationMemoryAuditSlice35(store: ConversationMemoryStore, playerId: string): readonly string[] {
+  const snapshot = store.getSnapshot(playerId);
+  const lines: string[] = ['slice=35|callback_privacy_distribution'];
+  const privacyCounts = new Map<string, number>();
+  for (const cb of snapshot.callbacks) {
+    const priv = String((cb as any).privacyClass ?? 'UNSET');
+    privacyCounts.set(priv, (privacyCounts.get(priv) ?? 0) + 1);
+  }
+  for (const [priv, count] of [...privacyCounts.entries()].sort((a, b) => b[1] - a[1])) {
+    lines.push(`${priv}=${count}`);
   }
   return lines;
 }
