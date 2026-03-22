@@ -1,10 +1,19 @@
-
 /**
- * ============================================================================
- * POINT ZERO ONE — BACKEND CHAT RELATIONSHIP RESOLVER
- * FILE: backend/src/game/engine/chat/memory/RelationshipResolver.ts
- * VERSION: 2026.03.18
- * ============================================================================
+ * POINT ZERO ONE — BACKEND CHAT RELATIONSHIP LEDGER
+ * FILE: backend/src/game/engine/chat/memory/RelationshipLedger.ts
+ *
+ * Purpose:
+ * Durable ledger facade that canonizes relationship events, snapshots,
+ * callback recall, hot-counterpart ranking, channel focus continuity,
+ * archive-friendly export, and bridge-friendly read models on top of the
+ * backend ChatRelationshipService.
+ *
+ * Notes:
+ * - This file is intentionally additive to the existing backend relationship
+ *   service. It does not replace the service's vector evolution rules.
+ * - The ledger owns indexing, read models, projections, pruning, retention,
+ *   and high-throughput query helpers needed by drama, rescue, hater, helper,
+ *   scene, liveops, and memory lanes.
  */
 
 import type {
@@ -15,7 +24,6 @@ import type {
   ChatRelationshipEventType,
   ChatRelationshipLegacyProjection,
   ChatRelationshipNpcSignal,
-  ChatRelationshipObjective,
   ChatRelationshipPressureBand,
   ChatRelationshipSnapshot,
   ChatRelationshipStance,
@@ -23,1198 +31,2095 @@ import type {
 } from '../../../../../../shared/contracts/chat/relationship';
 import { clamp01 } from '../../../../../../shared/contracts/chat/relationship';
 import {
-  DEFAULT_RIVALRY_ESCALATION_POLICY_CONFIG,
-  type RivalryEscalationAssessment,
-  type RivalryEscalationDecision,
-  type RivalryEscalationPolicyConfig,
-  type RivalryEscalationRequest,
-  RivalryEscalationPolicy,
-} from './RivalryEscalationPolicy';
+  ChatRelationshipService,
+  DEFAULT_CHAT_RELATIONSHIP_SERVICE_CONFIG,
+  type ChatRelationshipServiceConfig,
+} from '../ChatRelationshipService';
 
-export type RelationshipResolverMode =
-  | 'DEFAULT'
-  | 'SCENE_COMPOSITION'
-  | 'LIVE_REPLY'
-  | 'REPLAY'
-  | 'POST_RUN'
-  | 'DEAL_ROOM'
-  | 'RESCUE'
-  | 'WORLD_EVENT';
+export interface RelationshipLedgerRetentionPolicy {
+  readonly maxEventsPerPlayer: number;
+  readonly maxEventsPerCounterpart: number;
+  readonly maxCallbacksPerCounterpart: number;
+  readonly maxExportsPerPlayer: number;
+  readonly maxSceneTail: number;
+  readonly pruneIfIdleMs: number;
+}
 
-export type RelationshipRole =
-  | 'PRIMARY_AGGRESSOR'
-  | 'PRIMARY_HELPER'
-  | 'PRIMARY_WITNESS'
-  | 'SECONDARY_WITNESS'
-  | 'DELAYED_CALLBACK'
-  | 'SILENT_PRESSURE'
-  | 'BACKGROUND_HEAT'
-  | 'OBSERVER';
+export interface RelationshipLedgerConfig {
+  readonly relationshipService: ChatRelationshipService;
+  readonly retention: RelationshipLedgerRetentionPolicy;
+  readonly highHeatThreshold01: number;
+  readonly rescueDebtThreshold01: number;
+  readonly rivalryThreshold01: number;
+  readonly trustThreshold01: number;
+  readonly callbackThreshold01: number;
+  readonly hotCounterpartWindowMs: number;
+}
 
-export type RelationshipVisibilityClass =
-  | 'PUBLIC_STAGE'
-  | 'PRIVATE_CHAMBER'
-  | 'BALANCED'
-  | 'SUPPRESSED';
+export interface RelationshipLedgerIndexEntry {
+  readonly playerId: string;
+  readonly counterpartId: string;
+  readonly counterpartKind: ChatRelationshipCounterpartKind;
+  readonly eventCount: number;
+  readonly firstTouchedAt: number;
+  readonly lastTouchedAt: number;
+  readonly lastEventId: string;
+  readonly lastEventType: ChatRelationshipEventType;
+  readonly lastSceneId?: string | null;
+  readonly lastChannelId?: string | null;
+  readonly lastPressureBand?: ChatRelationshipPressureBand | null;
+  readonly stance: ChatRelationshipStance;
+  readonly intensity01: number;
+  readonly volatility01: number;
+  readonly trust01: number;
+  readonly rivalry01: number;
+  readonly rescueDebt01: number;
+  readonly callbackReadiness01: number;
+  readonly dominantAxes: readonly ChatRelationshipAxisId[];
+  readonly tags: readonly string[];
+}
 
-export type RelationshipCallbackTier =
-  | 'NONE'
-  | 'LIGHT'
-  | 'MODERATE'
-  | 'HARD'
-  | 'RECEIPT';
+export interface RelationshipLedgerCallbackReceipt {
+  readonly callbackId: string;
+  readonly counterpartId: string;
+  readonly playerId: string;
+  readonly label: string;
+  readonly text: string;
+  readonly weight01: number;
+  readonly createdAt: number;
+  readonly sourceEventId: string;
+  readonly sourceEventType: ChatRelationshipEventType;
+  readonly sourceSceneId?: string | null;
+  readonly sourceChannelId?: string | null;
+}
 
-export interface RelationshipResolverContext {
-  readonly now: number;
-  readonly playerId?: string | null;
-  readonly roomId?: string | null;
-  readonly channelId?: string | null;
-  readonly mode?: RelationshipResolverMode;
-  readonly pressureBand?: ChatRelationshipPressureBand;
-  readonly sourceEvent?: ChatRelationshipEventDescriptor | null;
-  readonly requestedCounterpartId?: string | null;
-  readonly allowPublicSwarm?: boolean;
-  readonly allowHelperIntervention?: boolean;
-  readonly allowNegotiationLeakage?: boolean;
-  readonly allowDelayedReveal?: boolean;
-  readonly allowReceipts?: boolean;
-  readonly allowRescueSuppression?: boolean;
-  readonly allowCounterpartRotation?: boolean;
-  readonly rescueWindowOpen?: boolean;
-  readonly negotiationWindowOpen?: boolean;
-  readonly shadowOnly?: boolean;
-  readonly maxWitnessCount?: number;
-  readonly maxCandidates?: number;
+export interface RelationshipLedgerSceneSummary {
+  readonly sceneId: string;
+  readonly playerId: string;
+  readonly counterpartIds: readonly string[];
+  readonly eventIds: readonly string[];
+  readonly firstSeenAt: number;
+  readonly lastSeenAt: number;
+  readonly witnessCount: number;
+  readonly helperCount: number;
+  readonly rivalCount: number;
+  readonly publicHeat01: number;
+  readonly pressurePeak: ChatRelationshipPressureBand;
+}
+
+export interface RelationshipLedgerChannelSummary {
+  readonly channelId: string;
+  readonly playerId: string;
+  readonly focusedCounterpartId?: string;
+  readonly totalEvents: number;
+  readonly lastEventAt: number;
+  readonly publicWitnessEvents: number;
+  readonly privateWitnessEvents: number;
+  readonly helperRescueEvents: number;
+  readonly botTauntEvents: number;
+  readonly comebackEvents: number;
+  readonly collapseEvents: number;
+  readonly avgIntensity01: number;
+  readonly avgPublicWitness01: number;
+}
+
+export interface RelationshipLedgerPlayerExport {
+  readonly playerId: string;
+  readonly exportedAt: number;
+  readonly snapshot: ChatRelationshipSnapshot;
+  readonly summaries: readonly ChatRelationshipSummaryView[];
+  readonly indices: readonly RelationshipLedgerIndexEntry[];
+  readonly callbacks: readonly RelationshipLedgerCallbackReceipt[];
+  readonly channels: readonly RelationshipLedgerChannelSummary[];
+  readonly scenes: readonly RelationshipLedgerSceneSummary[];
+}
+
+export interface RelationshipLedgerStats {
+  readonly playersTracked: number;
+  readonly counterpartBucketsTracked: number;
+  readonly totalEventsStored: number;
+  readonly totalCallbacksStored: number;
+  readonly totalSceneSummariesStored: number;
+  readonly oldestActivityAt?: number;
+  readonly newestActivityAt?: number;
+}
+
+export interface RelationshipLedgerEventRecord {
+  readonly descriptor: ChatRelationshipEventDescriptor;
+  readonly counterpartState: ChatRelationshipCounterpartState;
+  readonly index: RelationshipLedgerIndexEntry;
+  readonly callbackReceipt?: RelationshipLedgerCallbackReceipt;
+  readonly channelSummary?: RelationshipLedgerChannelSummary;
+  readonly sceneSummary?: RelationshipLedgerSceneSummary;
+}
+
+export interface RelationshipLedgerHotCounterpart {
+  readonly counterpartId: string;
+  readonly counterpartKind: ChatRelationshipCounterpartKind;
+  readonly score01: number;
+  readonly trust01: number;
+  readonly rivalry01: number;
+  readonly rescueDebt01: number;
+  readonly callbackReadiness01: number;
+  readonly intensity01: number;
+  readonly volatility01: number;
+  readonly stance: ChatRelationshipStance;
+  readonly rationale: readonly string[];
+}
+
+export interface RelationshipLedgerQuery {
+  readonly playerId: string;
+  readonly counterpartIds?: readonly string[];
+  readonly kinds?: readonly ChatRelationshipCounterpartKind[];
+  readonly eventTypes?: readonly ChatRelationshipEventType[];
+  readonly since?: number;
+  readonly until?: number;
+  readonly sceneId?: string;
+  readonly channelId?: string;
   readonly minIntensity01?: number;
-  readonly tags?: readonly string[];
+  readonly maxResults?: number;
 }
 
-export interface RelationshipCallbackOpportunity {
-  readonly tier: RelationshipCallbackTier;
-  readonly callbackId?: string;
-  readonly label?: string;
-  readonly text?: string;
-  readonly suitability01: number;
-  readonly humiliationRisk01: number;
-  readonly witnessValue01: number;
-  readonly safeForPublic: boolean;
+export const DEFAULT_RELATIONSHIP_LEDGER_CONFIG: RelationshipLedgerConfig = Object.freeze({
+  relationshipService: new ChatRelationshipService(DEFAULT_CHAT_RELATIONSHIP_SERVICE_CONFIG),
+  retention: {
+    maxEventsPerPlayer: 1200,
+    maxEventsPerCounterpart: 180,
+    maxCallbacksPerCounterpart: 24,
+    maxExportsPerPlayer: 12,
+    maxSceneTail: 96,
+    pruneIfIdleMs: 1000 * 60 * 60 * 24 * 7,
+  },
+  highHeatThreshold01: 0.68,
+  rescueDebtThreshold01: 0.57,
+  rivalryThreshold01: 0.62,
+  trustThreshold01: 0.58,
+  callbackThreshold01: 0.46,
+  hotCounterpartWindowMs: 1000 * 60 * 12,
+});
+
+interface PlayerLedgerBucket {
+  readonly playerId: string;
+  updatedAt: number;
+  firstSeenAt: number;
+  totalEvents: number;
+  events: ChatRelationshipEventDescriptor[];
+  eventsByCounterpartId: Map<string, ChatRelationshipEventDescriptor[]>;
+  channelEventTails: Map<string, ChatRelationshipEventDescriptor[]>;
+  sceneEventTails: Map<string, ChatRelationshipEventDescriptor[]>;
+  indicesByCounterpartId: Map<string, RelationshipLedgerIndexEntry>;
+  callbacksByCounterpartId: Map<string, RelationshipLedgerCallbackReceipt[]>;
+  channels: Map<string, RelationshipLedgerChannelSummary>;
+  scenes: Map<string, RelationshipLedgerSceneSummary>;
+  exports: RelationshipLedgerPlayerExport[];
 }
 
-export interface RelationshipWitnessDecision {
-  readonly visibleWitnessCount: number;
-  readonly shadowWitnessCount: number;
-  readonly visibleCounterpartIds: readonly string[];
-  readonly shadowCounterpartIds: readonly string[];
-  readonly audienceHeatDelta01: number;
-  readonly recommendCrowdPileOn: boolean;
+function now(): number { return Date.now(); }
+
+function safeChannelId(event: ChatRelationshipEventDescriptor): string {
+  return event.channelId ?? 'GLOBAL';
 }
 
-export interface RelationshipRescueWindow {
-  readonly suppressHelpers: boolean;
-  readonly shouldRescue: boolean;
-  readonly urgency01: number;
-  readonly delayHelpersMs: number;
-  readonly helperUrgency01: number;
-  readonly rescueDebtPressure01: number;
-  readonly letPressureBreathe: boolean;
+function safeSceneId(event: ChatRelationshipEventDescriptor): string {
+  return event.sceneId ?? `scene:auto:${safeChannelId(event)}:${Math.floor(event.createdAt / 30_000)}`;
 }
 
-export interface RelationshipNegotiationAdvisory {
-  readonly shouldLeakToPublic: boolean;
-  readonly shouldPreferQuietPressure: boolean;
-  readonly shouldForceReprice: boolean;
-  readonly shouldDelayCounterOffer: boolean;
-  readonly urgency01: number;
-  readonly balanceOfPower01: number;
+function uniqStrings(values: readonly (string | undefined | null)[]): readonly string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const value of values) {
+    if (!value) continue;
+    if (seen.has(value)) continue;
+    seen.add(value);
+    out.push(value);
+  }
+  return out;
 }
 
-export interface RelationshipResolution {
+function trust01FromState(state: ChatRelationshipCounterpartState): number {
+  return clamp01(state.vector.familiarity01 * 0.54 + state.vector.patience01 * 0.18 + state.vector.respect01 * 0.28);
+}
+
+function rivalry01FromState(state: ChatRelationshipCounterpartState): number {
+  return clamp01(state.vector.contempt01 * 0.38 + state.vector.unfinishedBusiness01 * 0.32 + state.vector.obsession01 * 0.16 + state.publicPressureBias01 * 0.14);
+}
+
+function rescueDebt01FromState(state: ChatRelationshipCounterpartState): number {
+  return clamp01(state.vector.traumaDebt01 * 0.72 + state.privatePressureBias01 * 0.18 + state.vector.familiarity01 * 0.10);
+}
+
+function callbackReadiness01FromState(state: ChatRelationshipCounterpartState): number {
+  const topHint = state.callbackHints[0]?.weight01 ?? 0;
+  return clamp01(topHint * 0.40 + state.vector.unfinishedBusiness01 * 0.25 + state.vector.predictiveConfidence01 * 0.15 + state.vector.familiarity01 * 0.20);
+}
+
+function publicWitness01(event: ChatRelationshipEventDescriptor): number {
+  return clamp01(event.publicWitness01 ?? (
+    event.eventType === 'PUBLIC_WITNESS' ? 0.80 :
+    event.eventType === 'PRIVATE_WITNESS' ? 0.10 :
+    event.eventType === 'BOT_TAUNT_EMITTED' ? 0.62 :
+    event.eventType === 'RIVAL_WITNESS_EMITTED' ? 0.70 :
+    event.eventType === 'ARCHIVIST_WITNESS_EMITTED' ? 0.38 :
+    event.eventType === 'AMBIENT_WITNESS_EMITTED' ? 0.28 : 0.22
+  ));
+}
+
+function pressureScore01(band: ChatRelationshipPressureBand | undefined | null): number {
+  switch (band) {
+    case 'CRITICAL': return 1;
+    case 'HIGH': return 0.72;
+    case 'MEDIUM': return 0.44;
+    case 'LOW': return 0.18;
+    default: return 0.28;
+  }
+}
+
+function pressurePeak(a: ChatRelationshipPressureBand | undefined | null, b: ChatRelationshipPressureBand | undefined | null): ChatRelationshipPressureBand {
+  const ranking: Record<ChatRelationshipPressureBand, number> = { LOW: 1, MEDIUM: 2, HIGH: 3, CRITICAL: 4 };
+  const aa = a ?? 'LOW';
+  const bb = b ?? 'LOW';
+  return ranking[aa] >= ranking[bb] ? aa : bb;
+}
+
+function uniqueTags(event: ChatRelationshipEventDescriptor, state: ChatRelationshipCounterpartState): readonly string[] {
+  return uniqStrings([
+    ...(event.tags ?? []),
+    state.stance,
+    state.objective,
+    ...state.dominantAxes,
+    event.eventType,
+    event.pressureBand ?? undefined,
+  ]);
+}
+
+function matchesQueryEvent(event: ChatRelationshipEventDescriptor, query: RelationshipLedgerQuery): boolean {
+  if (query.counterpartIds && !query.counterpartIds.includes(event.counterpartId)) return false;
+  if (query.eventTypes && !query.eventTypes.includes(event.eventType)) return false;
+  if (query.since !== undefined && event.createdAt < query.since) return false;
+  if (query.until !== undefined && event.createdAt > query.until) return false;
+  if (query.sceneId && safeSceneId(event) !== query.sceneId) return false;
+  if (query.channelId && safeChannelId(event) !== query.channelId) return false;
+  return true;
+}
+
+function hotScore01(
+  state: ChatRelationshipCounterpartState,
+  entry: RelationshipLedgerIndexEntry,
+  updatedAt: number,
+  windowMs: number,
+): number {
+  const freshness01 = clamp01(1 - Math.max(0, updatedAt - entry.lastTouchedAt) / Math.max(1, windowMs));
+  return clamp01(
+    state.intensity01 * 0.30 +
+    rivalry01FromState(state) * 0.18 +
+    trust01FromState(state) * 0.12 +
+    rescueDebt01FromState(state) * 0.12 +
+    callbackReadiness01FromState(state) * 0.10 +
+    state.volatility01 * 0.08 +
+    freshness01 * 0.10
+  );
+}
+
+function hotRationale(
+  state: ChatRelationshipCounterpartState,
+  entry: RelationshipLedgerIndexEntry,
+  score01: number,
+): readonly string[] {
+  const reasons: string[] = [];
+  if (rivalry01FromState(state) > 0.60) reasons.push('rivalry_hot');
+  if (trust01FromState(state) > 0.58) reasons.push('trustworthy_helper_lane');
+  if (rescueDebt01FromState(state) > 0.56) reasons.push('rescue_debt_open');
+  if (callbackReadiness01FromState(state) > 0.48) reasons.push('callback_ready');
+  if (state.volatility01 > 0.45) reasons.push('volatile');
+  if (entry.lastPressureBand === 'HIGH' || entry.lastPressureBand === 'CRITICAL') reasons.push('pressure_recent');
+  if (score01 > 0.78) reasons.push('top_priority');
+  return reasons;
+}
+
+
+function eventIntensity01(event: ChatRelationshipEventDescriptor): number {
+  return clamp01(
+    event.intensity01 ?? (
+      pressureScore01(event.pressureBand) * 0.45 +
+      publicWitness01(event) * 0.20 +
+      (
+        event.eventType === 'PLAYER_ANGER' ||
+        event.eventType === 'PLAYER_COLLAPSE' ||
+        event.eventType === 'PLAYER_BREACH' ||
+        event.eventType === 'PLAYER_FAILED_GAMBLE' ||
+        event.eventType === 'BOT_TAUNT_EMITTED' ||
+        event.eventType === 'RIVAL_WITNESS_EMITTED'
+          ? 0.35
+          : event.eventType === 'PLAYER_COMEBACK' || event.eventType === 'PLAYER_PERFECT_DEFENSE'
+            ? 0.28
+            : 0.14
+      )
+    )
+  );
+}
+
+function eventDisruption01(event: ChatRelationshipEventDescriptor): number {
+  switch (event.eventType) {
+    case 'PLAYER_COLLAPSE':
+    case 'PLAYER_BREACH':
+    case 'PLAYER_FAILED_GAMBLE':
+      return 0.92;
+    case 'PLAYER_ANGER':
+    case 'BOT_TAUNT_EMITTED':
+    case 'RIVAL_WITNESS_EMITTED':
+      return 0.78;
+    case 'PLAYER_OVERCONFIDENCE':
+    case 'PLAYER_GREED':
+    case 'NEGOTIATION_WINDOW':
+      return 0.64;
+    case 'PLAYER_COMEBACK':
+    case 'PLAYER_PERFECT_DEFENSE':
+    case 'HELPER_RESCUE_EMITTED':
+      return 0.52;
+    default:
+      return 0.30;
+  }
+}
+
+function average(values: readonly number[]): number {
+  if (!values.length) return 0;
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function objectivePriority01(objective: string): number {
+  switch (objective) {
+    case 'RESCUE': return 0.95;
+    case 'NEGOTIATE': return 0.88;
+    case 'PRESSURE': return 0.82;
+    case 'CONTAIN': return 0.76;
+    case 'HUMILIATE': return 0.72;
+    case 'PROVOKE': return 0.70;
+    case 'REPRICE': return 0.68;
+    case 'WITNESS': return 0.58;
+    case 'TEST': return 0.52;
+    case 'STUDY': return 0.48;
+    case 'DELAY': return 0.42;
+    default: return 0.50;
+  }
+}
+
+function stanceThreat01(stance: ChatRelationshipStance): number {
+  switch (stance) {
+    case 'HUNTING': return 1;
+    case 'PREDATORY': return 0.92;
+    case 'OBSESSED': return 0.88;
+    case 'WOUNDED': return 0.74;
+    case 'PROBING': return 0.64;
+    case 'DISMISSIVE': return 0.56;
+    case 'CLINICAL': return 0.44;
+    case 'CURIOUS': return 0.40;
+    case 'PROTECTIVE': return 0.24;
+    case 'RESPECTFUL': return 0.18;
+    default: return 0.50;
+  }
+}
+
+function safeRatio(numerator: number, denominator: number): number {
+  if (denominator <= 0) return 0;
+  return numerator / denominator;
+}
+
+function normalizeWindowScore(lastTouchedAt: number, referenceNow: number, windowMs: number): number {
+  return clamp01(1 - Math.max(0, referenceNow - lastTouchedAt) / Math.max(1, windowMs));
+}
+
+function dominantObjectiveTags(entry: RelationshipLedgerIndexEntry): readonly string[] {
+  const objectiveTags = ['HUMILIATE', 'CONTAIN', 'PROVOKE', 'STUDY', 'PRESSURE', 'REPRICE', 'DELAY', 'WITNESS', 'RESCUE', 'TEST', 'NEGOTIATE'];
+  return entry.tags.filter((tag) => objectiveTags.includes(tag));
+}
+
+
+// ============================================================================
+// MARK: Trajectory tracking types
+// ============================================================================
+
+export interface RelationshipTrajectorySnapshot {
+  readonly timestamp: number;
+  readonly trust01: number;
+  readonly rivalry01: number;
+  readonly intensity01: number;
+  readonly volatility01: number;
+  readonly obsession01: number;
+  readonly stance: ChatRelationshipStance;
+}
+
+export type RelationshipTrajectoryTrend = 'RISING' | 'FALLING' | 'PLATEAUED' | 'OSCILLATING' | 'ERUPTING' | 'INSUFFICIENT_DATA';
+
+// ============================================================================
+// MARK: Counterpart cluster types
+// ============================================================================
+
+export interface CounterpartCluster {
+  readonly clusterId: string;
+  readonly memberIds: readonly string[];
+  readonly coOccurrenceStrength: 'WEAK' | 'MODERATE' | 'STRONG';
+  readonly clusterRole: 'PACK' | 'ALLIANCE' | 'ENTOURAGE' | 'ORBIT';
+  readonly memberCount: number;
+}
+
+// ============================================================================
+// MARK: Compacted relationship summary
+// ============================================================================
+
+export interface CompactedRelationshipSummary {
+  readonly counterpartId: string;
+  readonly counterpartKind: ChatRelationshipCounterpartKind;
+  readonly peakIntensity01: number;
+  readonly lastTouchedAt: number;
+  readonly eventCount: number;
+  readonly stance: ChatRelationshipStance;
+  readonly compactedAt: number;
+}
+
+
+
+// ============================================================================
+// MARK: Cross-player relationship view
+// ============================================================================
+
+export interface CrossPlayerRelationshipView {
+  readonly counterpartId: string;
+  readonly playerAId: string;
+  readonly playerBId: string;
+  readonly stanceA: ChatRelationshipStance;
+  readonly stanceB: ChatRelationshipStance;
+  readonly trustDelta01: number;
+  readonly rivalryDelta01: number;
+  readonly intensityDelta01: number;
+  readonly asymmetryScore01: number;
+  readonly shareRival: boolean;
+  readonly shareHelper: boolean;
+}
+
+// ============================================================================
+// MARK: Event pattern types
+// ============================================================================
+
+export interface EventPattern {
+  readonly patternId: string;
+  readonly triggerEventType: string;
+  readonly responseEventType: string;
+  readonly confidence01: number;
+  readonly recurrenceCount: number;
+  readonly description: string;
+}
+
+
+export type RelationshipLedgerActionLane = 'ESCALATE' | 'STABILIZE' | 'RECALL' | 'RESCUE' | 'OBSERVE' | 'ARCHIVE';
+
+export interface RelationshipLedgerCounterpartHealth {
   readonly counterpartId: string;
   readonly counterpartKind: ChatRelationshipCounterpartKind;
   readonly stance: ChatRelationshipStance;
-  readonly objective: ChatRelationshipObjective;
-  readonly role: RelationshipRole;
-  readonly visibility: RelationshipVisibilityClass;
-  readonly selectionScore01: number;
-  readonly aggression01: number;
-  readonly rescueBias01: number;
-  readonly trustLeverage01: number;
-  readonly embarrassmentRisk01: number;
-  readonly callback: RelationshipCallbackOpportunity;
-  readonly witnessWeight01: number;
-  readonly recommendedTags: readonly string[];
-  readonly notes: readonly string[];
-  readonly escalation: RivalryEscalationDecision;
-  readonly signal: ChatRelationshipNpcSignal;
-  readonly legacy: ChatRelationshipLegacyProjection;
-}
-
-export interface RelationshipResolutionEnvelope {
-  readonly createdAt: number;
-  readonly playerId?: string | null;
-  readonly roomId?: string | null;
-  readonly channelId?: string | null;
-  readonly mode: RelationshipResolverMode;
-  readonly pressureBand: ChatRelationshipPressureBand;
-  readonly primary?: RelationshipResolution;
-  readonly helpers: readonly RelationshipResolution[];
-  readonly rivals: readonly RelationshipResolution[];
-  readonly witnesses: readonly RelationshipResolution[];
-  readonly delayed: readonly RelationshipResolution[];
-  readonly suppressed: readonly RelationshipResolution[];
-  readonly witnessDecision: RelationshipWitnessDecision;
-  readonly rescueWindow: RelationshipRescueWindow;
-  readonly negotiation: RelationshipNegotiationAdvisory;
-  readonly recommendedCounterpartIds: readonly string[];
-  readonly summary: readonly string[];
-}
-
-export interface RelationshipResolverConfig {
-  readonly minCandidateIntensity01: number;
-  readonly maxCandidateCount: number;
-  readonly maxVisibleWitnessCount: number;
-  readonly maxShadowWitnessCount: number;
-  readonly publicWitnessFloor01: number;
-  readonly delayedRevealFloor01: number;
-  readonly helperDominanceFloor01: number;
-  readonly rivalryDominanceFloor01: number;
-  readonly rescueSuppressionFloor01: number;
-  readonly negotiationLeakFloor01: number;
-  readonly counterpartRotationPenalty01: number;
-  readonly staleCounterpartPenalty01: number;
-  readonly callbackRepeatPenalty01: number;
-  readonly callbackReceiptFloor01: number;
-  readonly obsessivenessPublicAmplifier01: number;
-  readonly confidenceEmbarrassmentAmplifier01: number;
-  readonly pressureAggressionAmplifier01: number;
-  readonly rescueDebtAmplifier01: number;
-  readonly channelBiases: Readonly<Record<string, number>>;
-  readonly modeBiases: Readonly<Record<RelationshipResolverMode, number>>;
-  readonly counterpartKindBiases: Readonly<Record<ChatRelationshipCounterpartKind, number>>;
-  readonly eventSeverity: Readonly<Record<ChatRelationshipEventType, number>>;
-}
-
-const DEFAULT_CHANNEL_BIASES: Readonly<Record<string, number>> = Object.freeze({
-  GLOBAL: 0.94,
-  SYNDICATE: 0.72,
-  DEAL_ROOM: 0.58,
-  DIRECT: 0.36,
-  SPECTATOR: 0.87,
-  SYSTEM: 0.51,
-});
-
-const DEFAULT_MODE_BIASES: Readonly<Record<RelationshipResolverMode, number>> = Object.freeze({
-  DEFAULT: 0.55,
-  SCENE_COMPOSITION: 0.88,
-  LIVE_REPLY: 0.74,
-  REPLAY: 0.45,
-  POST_RUN: 0.63,
-  DEAL_ROOM: 0.66,
-  RESCUE: 0.49,
-  WORLD_EVENT: 0.77,
-});
-
-const DEFAULT_COUNTERPART_KIND_BIASES: Readonly<Record<ChatRelationshipCounterpartKind, number>> = Object.freeze({
-  NPC: 0.54,
-  BOT: 0.67,
-  HELPER: 0.59,
-  RIVAL: 0.82,
-  ARCHIVIST: 0.31,
-  AMBIENT: 0.24,
-  SYSTEM: 0.21,
-});
-
-const DEFAULT_EVENT_SEVERITY: Readonly<Record<ChatRelationshipEventType, number>> = Object.freeze({
-  'PLAYER_MESSAGE': 0.26,
-  'PLAYER_QUESTION': 0.24,
-  'PLAYER_ANGER': 0.54,
-  'PLAYER_TROLL': 0.58,
-  'PLAYER_FLEX': 0.61,
-  'PLAYER_CALM': 0.19,
-  'PLAYER_HESITATION': 0.33,
-  'PLAYER_DISCIPLINE': 0.42,
-  'PLAYER_GREED': 0.57,
-  'PLAYER_BLUFF': 0.52,
-  'PLAYER_OVERCONFIDENCE': 0.68,
-  'PLAYER_COMEBACK': 0.76,
-  'PLAYER_COLLAPSE': 0.72,
-  'PLAYER_BREACH': 0.81,
-  'PLAYER_PERFECT_DEFENSE': 0.73,
-  'PLAYER_FAILED_GAMBLE': 0.66,
-  'PLAYER_NEAR_SOVEREIGNTY': 0.88,
-  'NEGOTIATION_WINDOW': 0.44,
-  'MARKET_ALERT': 0.39,
-  'BOT_TAUNT_EMITTED': 0.37,
-  'BOT_RETREAT_EMITTED': 0.41,
-  'HELPER_RESCUE_EMITTED': 0.63,
-  'RIVAL_WITNESS_EMITTED': 0.47,
-  'ARCHIVIST_WITNESS_EMITTED': 0.29,
-  'AMBIENT_WITNESS_EMITTED': 0.25,
-  'PUBLIC_WITNESS': 0.48,
-  'PRIVATE_WITNESS': 0.27,
-  'RUN_START': 0.22,
-  'RUN_END': 0.51,
-});
-const EVENT_PUBLICNESS: Readonly<Record<ChatRelationshipEventType, number>> = Object.freeze({
-  'PLAYER_MESSAGE': 0.42,
-  'PLAYER_QUESTION': 0.34,
-  'PLAYER_ANGER': 0.77,
-  'PLAYER_TROLL': 0.82,
-  'PLAYER_FLEX': 0.86,
-  'PLAYER_CALM': 0.31,
-  'PLAYER_HESITATION': 0.38,
-  'PLAYER_DISCIPLINE': 0.44,
-  'PLAYER_GREED': 0.66,
-  'PLAYER_BLUFF': 0.71,
-  'PLAYER_OVERCONFIDENCE': 0.85,
-  'PLAYER_COMEBACK': 0.93,
-  'PLAYER_COLLAPSE': 0.91,
-  'PLAYER_BREACH': 0.89,
-  'PLAYER_PERFECT_DEFENSE': 0.88,
-  'PLAYER_FAILED_GAMBLE': 0.79,
-  'PLAYER_NEAR_SOVEREIGNTY': 0.95,
-  'NEGOTIATION_WINDOW': 0.51,
-  'MARKET_ALERT': 0.57,
-  'BOT_TAUNT_EMITTED': 0.73,
-  'BOT_RETREAT_EMITTED': 0.49,
-  'HELPER_RESCUE_EMITTED': 0.58,
-  'RIVAL_WITNESS_EMITTED': 0.69,
-  'ARCHIVIST_WITNESS_EMITTED': 0.41,
-  'AMBIENT_WITNESS_EMITTED': 0.45,
-  'PUBLIC_WITNESS': 0.92,
-  'PRIVATE_WITNESS': 0.12,
-  'RUN_START': 0.54,
-  'RUN_END': 0.74,
-});
-const EVENT_HOSTILITY: Readonly<Record<ChatRelationshipEventType, number>> = Object.freeze({
-  'PLAYER_MESSAGE': 0.12,
-  'PLAYER_QUESTION': 0.07,
-  'PLAYER_ANGER': 0.63,
-  'PLAYER_TROLL': 0.79,
-  'PLAYER_FLEX': 0.74,
-  'PLAYER_CALM': 0.02,
-  'PLAYER_HESITATION': 0.1,
-  'PLAYER_DISCIPLINE': 0.11,
-  'PLAYER_GREED': 0.35,
-  'PLAYER_BLUFF': 0.29,
-  'PLAYER_OVERCONFIDENCE': 0.58,
-  'PLAYER_COMEBACK': 0.44,
-  'PLAYER_COLLAPSE': 0.18,
-  'PLAYER_BREACH': 0.5,
-  'PLAYER_PERFECT_DEFENSE': 0.31,
-  'PLAYER_FAILED_GAMBLE': 0.23,
-  'PLAYER_NEAR_SOVEREIGNTY': 0.69,
-  'NEGOTIATION_WINDOW': 0.17,
-  'MARKET_ALERT': 0.09,
-  'BOT_TAUNT_EMITTED': 0.46,
-  'BOT_RETREAT_EMITTED': 0.12,
-  'HELPER_RESCUE_EMITTED': 0.03,
-  'RIVAL_WITNESS_EMITTED': 0.26,
-  'ARCHIVIST_WITNESS_EMITTED': 0.0,
-  'AMBIENT_WITNESS_EMITTED': 0.05,
-  'PUBLIC_WITNESS': 0.21,
-  'PRIVATE_WITNESS': 0.04,
-  'RUN_START': 0.0,
-  'RUN_END': 0.14,
-});
-const EVENT_PRESTIGE: Readonly<Record<ChatRelationshipEventType, number>> = Object.freeze({
-  'PLAYER_MESSAGE': 0.16,
-  'PLAYER_QUESTION': 0.14,
-  'PLAYER_ANGER': 0.36,
-  'PLAYER_TROLL': 0.33,
-  'PLAYER_FLEX': 0.41,
-  'PLAYER_CALM': 0.11,
-  'PLAYER_HESITATION': 0.09,
-  'PLAYER_DISCIPLINE': 0.48,
-  'PLAYER_GREED': 0.18,
-  'PLAYER_BLUFF': 0.37,
-  'PLAYER_OVERCONFIDENCE': 0.34,
-  'PLAYER_COMEBACK': 0.86,
-  'PLAYER_COLLAPSE': 0.41,
-  'PLAYER_BREACH': 0.69,
-  'PLAYER_PERFECT_DEFENSE': 0.81,
-  'PLAYER_FAILED_GAMBLE': 0.22,
-  'PLAYER_NEAR_SOVEREIGNTY': 0.97,
-  'NEGOTIATION_WINDOW': 0.31,
-  'MARKET_ALERT': 0.17,
-  'BOT_TAUNT_EMITTED': 0.2,
-  'BOT_RETREAT_EMITTED': 0.42,
-  'HELPER_RESCUE_EMITTED': 0.63,
-  'RIVAL_WITNESS_EMITTED': 0.29,
-  'ARCHIVIST_WITNESS_EMITTED': 0.26,
-  'AMBIENT_WITNESS_EMITTED': 0.22,
-  'PUBLIC_WITNESS': 0.38,
-  'PRIVATE_WITNESS': 0.15,
-  'RUN_START': 0.12,
-  'RUN_END': 0.58,
-});
-
-const PRESSURE_AGGRESSION_BIAS: Readonly<Record<ChatRelationshipPressureBand, number>> = Object.freeze({
-  LOW: 0.14,
-  MEDIUM: 0.33,
-  HIGH: 0.61,
-  CRITICAL: 0.86,
-});
-
-const PRESSURE_RESCUE_BIAS: Readonly<Record<ChatRelationshipPressureBand, number>> = Object.freeze({
-  LOW: 0.18,
-  MEDIUM: 0.32,
-  HIGH: 0.58,
-  CRITICAL: 0.84,
-});
-
-export const DEFAULT_RELATIONSHIP_RESOLVER_CONFIG: RelationshipResolverConfig = Object.freeze({
-  minCandidateIntensity01: 0.08,
-  maxCandidateCount: 8,
-  maxVisibleWitnessCount: 3,
-  maxShadowWitnessCount: 6,
-  publicWitnessFloor01: 0.41,
-  delayedRevealFloor01: 0.53,
-  helperDominanceFloor01: 0.57,
-  rivalryDominanceFloor01: 0.49,
-  rescueSuppressionFloor01: 0.56,
-  negotiationLeakFloor01: 0.61,
-  counterpartRotationPenalty01: 0.08,
-  staleCounterpartPenalty01: 0.12,
-  callbackRepeatPenalty01: 0.07,
-  callbackReceiptFloor01: 0.66,
-  obsessivenessPublicAmplifier01: 0.16,
-  confidenceEmbarrassmentAmplifier01: 0.15,
-  pressureAggressionAmplifier01: 0.18,
-  rescueDebtAmplifier01: 0.17,
-  channelBiases: DEFAULT_CHANNEL_BIASES,
-  modeBiases: DEFAULT_MODE_BIASES,
-  counterpartKindBiases: DEFAULT_COUNTERPART_KIND_BIASES,
-  eventSeverity: DEFAULT_EVENT_SEVERITY,
-});
-
-function valueOr<T>(value: T | null | undefined, fallback: T): T { return value ?? fallback; }
-function pressureOr(value?: ChatRelationshipPressureBand): ChatRelationshipPressureBand { return value ?? 'MEDIUM'; }
-function modeOr(value?: RelationshipResolverMode): RelationshipResolverMode { return value ?? 'DEFAULT'; }
-function isHelper(kind: ChatRelationshipCounterpartKind): boolean { return kind === 'HELPER'; }
-function isRival(kind: ChatRelationshipCounterpartKind): boolean { return kind === 'RIVAL' || kind === 'BOT'; }
-function isWitnessLike(kind: ChatRelationshipCounterpartKind): boolean { return kind === 'ARCHIVIST' || kind === 'AMBIENT' || kind === 'SYSTEM'; }
-
-function agePenalty01(now: number, lastTouchedAt: number): number {
-  const ageMs = Math.max(0, now - lastTouchedAt);
-  if (ageMs <= 15_000) return 0;
-  if (ageMs <= 60_000) return 0.03;
-  if (ageMs <= 180_000) return 0.08;
-  if (ageMs <= 600_000) return 0.14;
-  if (ageMs <= 1_800_000) return 0.22;
-  return 0.30;
-}
-
-function legacyTrustLeverage01(legacy: ChatRelationshipLegacyProjection): number {
-  return clamp01((legacy.trust / 100) * 0.62 + (legacy.familiarity / 100) * 0.38);
-}
-
-function legacyEmbarrassmentRisk01(legacy: ChatRelationshipLegacyProjection): number {
-  return clamp01((legacy.rivalryIntensity / 100) * 0.46 + (legacy.contempt / 100) * 0.31 + (legacy.fascination / 100) * 0.23);
-}
-
-function dominantAxisBonus01(axes: readonly ChatRelationshipAxisId[]): number {
-  if (axes.includes('OBSESSION')) return 0.18;
-  if (axes.includes('UNFINISHED_BUSINESS')) return 0.15;
-  if (axes.includes('CONTEMPT')) return 0.12;
-  if (axes.includes('RESPECT')) return 0.08;
-  if (axes.includes('TRAUMA_DEBT')) return 0.10;
-  return 0.04;
-}
-
-function buildNpcSignalFromState(state: ChatRelationshipCounterpartState): ChatRelationshipNpcSignal {
-  const vector = state.vector;
-  return {
-    counterpartId: state.counterpartId,
-    stance: state.stance,
-    objective: state.objective,
-    intensity01: state.intensity01,
-    volatility01: state.volatility01,
-    selectionWeight01: clamp01(state.intensity01 * 0.46 + vector.fascination01 * 0.14 + vector.unfinishedBusiness01 * 0.18 + vector.obsession01 * 0.22),
-    publicPressureBias01: state.publicPressureBias01,
-    privatePressureBias01: state.privatePressureBias01,
-    predictiveConfidence01: vector.predictiveConfidence01,
-    obsession01: vector.obsession01,
-    unfinishedBusiness01: vector.unfinishedBusiness01,
-    respect01: vector.respect01,
-    fear01: vector.fear01,
-    contempt01: vector.contempt01,
-    familiarity01: vector.familiarity01,
-    callbackHint: state.callbackHints[0],
-    notes: state.dominantAxes,
-  };
-}
-
-function buildLegacyProjection(state: ChatRelationshipCounterpartState): ChatRelationshipLegacyProjection {
-  const vector = state.vector;
-  return {
-    counterpartId: state.counterpartId,
-    respect: Math.round(vector.respect01 * 100),
-    fear: Math.round(vector.fear01 * 100),
-    contempt: Math.round(vector.contempt01 * 100),
-    fascination: Math.round(vector.fascination01 * 100),
-    trust: Math.round(clamp01(vector.familiarity01 * 0.52 + vector.patience01 * 0.48) * 100),
-    familiarity: Math.round(vector.familiarity01 * 100),
-    rivalryIntensity: Math.round(clamp01(vector.contempt01 * 0.58 + vector.unfinishedBusiness01 * 0.42) * 100),
-    rescueDebt: Math.round(vector.traumaDebt01 * 100),
-    adviceObedience: Math.round(clamp01(vector.respect01 * 0.61 + vector.familiarity01 * 0.39) * 100),
-    escalationTier: state.intensity01 >= 0.82 ? 'OBSESSIVE' : state.intensity01 >= 0.58 ? 'ACTIVE' : state.intensity01 >= 0.30 ? 'MILD' : 'NONE',
-  };
-}
-
-function callbackOpportunity(state: ChatRelationshipCounterpartState, context: RelationshipResolverContext, config: RelationshipResolverConfig): RelationshipCallbackOpportunity {
-  const hint = state.callbackHints[0];
-  if (!hint || context.allowReceipts === false) {
-    return { tier: 'NONE', suitability01: 0, humiliationRisk01: 0, witnessValue01: 0, safeForPublic: false };
-  }
-  const embarrassment = clamp01(state.vector.contempt01 * 0.38 + state.vector.predictiveConfidence01 * config.confidenceEmbarrassmentAmplifier01 + state.vector.unfinishedBusiness01 * 0.19 + hint.weight01 * 0.18);
-  const suitability = clamp01(hint.weight01 * 0.28 + state.vector.fascination01 * 0.16 + state.vector.obsession01 * 0.16 + state.intensity01 * 0.14 + state.vector.predictiveConfidence01 * 0.12 + (context.sourceEvent ? EVENT_PRESTIGE[context.sourceEvent.eventType] * 0.14 : 0));
-  const safeForPublic = embarrassment < 0.84;
-  const tier = suitability >= config.callbackReceiptFloor01 && embarrassment >= 0.62 ? 'RECEIPT' : suitability >= 0.72 ? 'HARD' : suitability >= 0.54 ? 'MODERATE' : suitability >= 0.36 ? 'LIGHT' : 'NONE';
-  return { tier, callbackId: tier === 'NONE' ? undefined : hint.callbackId, label: tier === 'NONE' ? undefined : hint.label, text: tier === 'NONE' ? undefined : hint.text, suitability01: suitability, humiliationRisk01: embarrassment, witnessValue01: clamp01(suitability * 0.54 + embarrassment * 0.46), safeForPublic };
-}
-
-function publicStageBias01(state: ChatRelationshipCounterpartState, context: RelationshipResolverContext, config: RelationshipResolverConfig): number {
-  const channelBias = config.channelBiases[valueOr(context.channelId, 'GLOBAL')] ?? 0.55;
-  const eventType = context.sourceEvent?.eventType ?? 'PLAYER_MESSAGE';
-  return clamp01(state.publicPressureBias01 * 0.52 + channelBias * 0.21 + EVENT_PUBLICNESS[eventType] * 0.17 + state.vector.obsession01 * config.obsessivenessPublicAmplifier01 + (context.allowPublicSwarm === false ? -0.18 : 0));
-}
-
-function privateStageBias01(state: ChatRelationshipCounterpartState, context: RelationshipResolverContext): number {
-  const directBias = valueOr(context.channelId, '').toUpperCase() === 'DIRECT' ? 0.22 : 0;
-  const dealBias = valueOr(context.channelId, '').toUpperCase() === 'DEAL_ROOM' ? 0.11 : 0;
-  return clamp01(state.privatePressureBias01 * 0.68 + state.vector.familiarity01 * 0.18 + directBias + dealBias);
-}
-
-function helperRescueBias01(state: ChatRelationshipCounterpartState, context: RelationshipResolverContext, config: RelationshipResolverConfig): number {
-  return clamp01((isHelper(state.counterpartKind) ? 0.26 : 0) + state.vector.traumaDebt01 * config.rescueDebtAmplifier01 + state.vector.familiarity01 * 0.18 + state.vector.respect01 * 0.12 + PRESSURE_RESCUE_BIAS[pressureOr(context.pressureBand)] * 0.22 + (context.rescueWindowOpen ? 0.09 : 0));
-}
-
-function aggression01(state: ChatRelationshipCounterpartState, context: RelationshipResolverContext, config: RelationshipResolverConfig): number {
-  const eventType = context.sourceEvent?.eventType ?? 'PLAYER_MESSAGE';
-  return clamp01(state.vector.contempt01 * 0.31 + state.vector.obsession01 * 0.19 + state.vector.unfinishedBusiness01 * 0.17 + EVENT_HOSTILITY[eventType] * 0.11 + PRESSURE_AGGRESSION_BIAS[pressureOr(context.pressureBand)] * config.pressureAggressionAmplifier01 + (isRival(state.counterpartKind) ? 0.09 : 0));
-}
-
-function chooseVisibility(state: ChatRelationshipCounterpartState, context: RelationshipResolverContext, config: RelationshipResolverConfig, callback: RelationshipCallbackOpportunity): RelationshipVisibilityClass {
-  if (context.shadowOnly) return 'SUPPRESSED';
-  const publicBias = publicStageBias01(state, context, config);
-  const privateBias = privateStageBias01(state, context);
-  if (callback.tier === 'RECEIPT' && !callback.safeForPublic) return 'PRIVATE_CHAMBER';
-  if (publicBias >= 0.66 && publicBias > privateBias + 0.05) return 'PUBLIC_STAGE';
-  if (privateBias >= 0.61 && privateBias > publicBias + 0.05) return 'PRIVATE_CHAMBER';
-  if (publicBias < 0.24 && privateBias < 0.24) return 'SUPPRESSED';
-  return 'BALANCED';
-}
-
-function recommendedRole(state: ChatRelationshipCounterpartState, visibility: RelationshipVisibilityClass, agg01: number, rescue01: number, callback: RelationshipCallbackOpportunity): RelationshipRole {
-  if (visibility === 'SUPPRESSED' && callback.tier !== 'NONE') return 'DELAYED_CALLBACK';
-  if (visibility === 'SUPPRESSED') return 'SILENT_PRESSURE';
-  if (isHelper(state.counterpartKind) && rescue01 >= 0.56) return 'PRIMARY_HELPER';
-  if (isRival(state.counterpartKind) && agg01 >= 0.48) return 'PRIMARY_AGGRESSOR';
-  if (callback.tier === 'RECEIPT' || callback.tier === 'HARD') return 'PRIMARY_WITNESS';
-  if (isWitnessLike(state.counterpartKind)) return 'SECONDARY_WITNESS';
-  if (agg01 >= 0.34) return 'BACKGROUND_HEAT';
-  return 'OBSERVER';
-}
-
-function selectionScore01(state: ChatRelationshipCounterpartState, context: RelationshipResolverContext, config: RelationshipResolverConfig, agg01: number, rescue01: number, callback: RelationshipCallbackOpportunity): number {
-  const modeBias = config.modeBiases[modeOr(context.mode)] ?? 0.55;
-  const kindBias = config.counterpartKindBiases[state.counterpartKind] ?? 0.5;
-  const requestedBoost = context.requestedCounterpartId === state.counterpartId ? 0.17 : 0;
-  const stalePenalty = agePenalty01(context.now, state.lastTouchedAt) * config.staleCounterpartPenalty01 * 2.4;
-  return clamp01(state.intensity01 * 0.26 + agg01 * 0.18 + rescue01 * 0.13 + callback.suitability01 * 0.12 + state.vector.predictiveConfidence01 * 0.09 + state.vector.fascination01 * 0.08 + dominantAxisBonus01(state.dominantAxes) * 0.24 + modeBias * 0.07 + kindBias * 0.07 + PRESSURE_AGGRESSION_BIAS[pressureOr(context.pressureBand)] * 0.09 + requestedBoost - stalePenalty);
-}
-
-function recommendedTags(state: ChatRelationshipCounterpartState, callback: RelationshipCallbackOpportunity, role: RelationshipRole, visibility: RelationshipVisibilityClass, escalation: RivalryEscalationDecision): readonly string[] {
-  const tags = new Set<string>();
-  tags.add(`kind:${state.counterpartKind.toLowerCase()}`);
-  tags.add(`stance:${state.stance.toLowerCase()}`);
-  tags.add(`objective:${state.objective.toLowerCase()}`);
-  tags.add(`role:${role.toLowerCase()}`);
-  tags.add(`visibility:${visibility.toLowerCase()}`);
-  if (callback.tier !== 'NONE') tags.add(`callback:${callback.tier.toLowerCase()}`);
-  if (state.vector.obsession01 >= 0.62) tags.add('obsession:hot');
-  if (state.vector.unfinishedBusiness01 >= 0.58) tags.add('unfinished:open');
-  if (state.vector.traumaDebt01 >= 0.54) tags.add('rescue:debt');
-  if (state.vector.respect01 >= 0.64) tags.add('respect:elevated');
-  if (state.vector.contempt01 >= 0.64) tags.add('contempt:elevated');
-  if (escalation.selectedTier !== 'NONE') tags.add(`rivalry:${escalation.selectedTier.toLowerCase()}`);
-  return Object.freeze([...tags]);
-}
-
-function resolutionNotes(state: ChatRelationshipCounterpartState, context: RelationshipResolverContext, visibility: RelationshipVisibilityClass, role: RelationshipRole, callback: RelationshipCallbackOpportunity, agg01: number, rescue01: number): readonly string[] {
-  const notes = [
-    `dominant_axes=${state.dominantAxes.join(',') || 'none'}`,
-    `visibility=${visibility}`,
-    `role=${role}`,
-    `aggression=${agg01.toFixed(3)}`,
-    `rescue_bias=${rescue01.toFixed(3)}`,
-    `pressure=${pressureOr(context.pressureBand)}`,
-  ];
-  if (callback.tier !== 'NONE') notes.push(`callback=${callback.tier}:${callback.label ?? 'latest'}`);
-  if (context.sourceEvent) notes.push(`source_event=${context.sourceEvent.eventType}`, `event_publicness=${EVENT_PUBLICNESS[context.sourceEvent.eventType].toFixed(3)}`);
-  if (context.requestedCounterpartId === state.counterpartId) notes.push('requested_counterpart=true');
-  return Object.freeze(notes);
-}
-
-function witnessDecision(resolutions: readonly RelationshipResolution[], context: RelationshipResolverContext, config: RelationshipResolverConfig): RelationshipWitnessDecision {
-  const visible = resolutions.filter((item) => item.visibility !== 'SUPPRESSED' && item.witnessWeight01 >= config.publicWitnessFloor01).slice(0, context.maxWitnessCount ?? config.maxVisibleWitnessCount);
-  const shadow = resolutions.filter((item) => item.visibility === 'SUPPRESSED' || item.role === 'SILENT_PRESSURE' || item.role === 'DELAYED_CALLBACK').slice(0, config.maxShadowWitnessCount);
-  const audienceHeatDelta01 = clamp01(visible.reduce((sum, item) => sum + item.witnessWeight01, 0) / Math.max(1, visible.length) * 0.61 + shadow.reduce((sum, item) => sum + item.escalation.shadowHeat01, 0) / Math.max(1, shadow.length) * 0.39);
-  return { visibleWitnessCount: visible.length, shadowWitnessCount: shadow.length, visibleCounterpartIds: Object.freeze(visible.map((item) => item.counterpartId)), shadowCounterpartIds: Object.freeze(shadow.map((item) => item.counterpartId)), audienceHeatDelta01, recommendCrowdPileOn: context.allowPublicSwarm !== false && audienceHeatDelta01 >= 0.58 };
-}
-
-function rescueWindow(helpers: readonly RelationshipResolution[], rivals: readonly RelationshipResolution[], context: RelationshipResolverContext, config: RelationshipResolverConfig): RelationshipRescueWindow {
-  const topHelper = helpers[0];
-  const topRival = rivals[0];
-  const helperUrgency01 = topHelper ? topHelper.rescueBias01 : 0;
-  const rivalPressure01 = topRival ? topRival.aggression01 : 0;
-  const suppressHelpers = context.allowHelperIntervention === false ? true : context.allowRescueSuppression === false ? false : rivalPressure01 >= config.rescueSuppressionFloor01 && helperUrgency01 < rivalPressure01 + 0.08;
-  return { suppressHelpers, shouldRescue: !suppressHelpers && helperUrgency01 > 0, urgency01: helperUrgency01, delayHelpersMs: suppressHelpers ? Math.round(650 + rivalPressure01 * 950) : Math.round(120 + (1 - helperUrgency01) * 260), helperUrgency01, rescueDebtPressure01: clamp01((topHelper?.legacy.rescueDebt ?? 0) / 100), letPressureBreathe: suppressHelpers && rivalPressure01 >= 0.62 };
-}
-
-function negotiationAdvisory(resolutions: readonly RelationshipResolution[], context: RelationshipResolverContext, config: RelationshipResolverConfig): RelationshipNegotiationAdvisory {
-  const pressureActors = resolutions.filter((item) => item.visibility !== 'SUPPRESSED');
-  const leakPressure = pressureActors.length === 0 ? 0 : pressureActors.reduce((sum, item) => sum + item.embarrassmentRisk01, 0) / pressureActors.length;
-  const urgency = clamp01(leakPressure * 0.36 + (context.negotiationWindowOpen ? 0.25 : 0) + (valueOr(context.channelId, '').toUpperCase() === 'DEAL_ROOM' ? 0.21 : 0));
-  const totalAggression = resolutions.reduce((s, r) => s + r.aggression01, 0);
-  const totalRescue = resolutions.reduce((s, r) => s + r.rescueBias01, 0);
-  const balanceOfPower01 = totalAggression + totalRescue > 0 ? totalAggression / (totalAggression + totalRescue) : 0.5;
-  return { shouldLeakToPublic: context.allowNegotiationLeakage !== false && leakPressure >= config.negotiationLeakFloor01, shouldPreferQuietPressure: urgency >= 0.44 && leakPressure < config.negotiationLeakFloor01, shouldForceReprice: urgency >= 0.58, shouldDelayCounterOffer: urgency >= 0.52 && (context.tags ?? []).includes('stall'), urgency01: urgency, balanceOfPower01 };
-}
-
-function summarizeEnvelope(envelope: Omit<RelationshipResolutionEnvelope, 'summary'>): readonly string[] {
-  const summary: string[] = [];
-  if (envelope.primary) summary.push(`primary=${envelope.primary.counterpartId}:${envelope.primary.role}:${envelope.primary.visibility}:${envelope.primary.selectionScore01.toFixed(3)}`);
-  if (envelope.helpers[0]) summary.push(`helper=${envelope.helpers[0].counterpartId}:${envelope.helpers[0].rescueBias01.toFixed(3)}`);
-  if (envelope.rivals[0]) summary.push(`rival=${envelope.rivals[0].counterpartId}:${envelope.rivals[0].aggression01.toFixed(3)}`);
-  summary.push(`witnesses=${envelope.witnessDecision.visibleWitnessCount}/${envelope.witnessDecision.shadowWitnessCount}`);
-  summary.push(`crowd_pile_on=${String(envelope.witnessDecision.recommendCrowdPileOn)}`);
-  summary.push(`rescue_suppressed=${String(envelope.rescueWindow.suppressHelpers)}`);
-  summary.push(`negotiation_urgency=${envelope.negotiation.urgency01.toFixed(3)}`);
-  return Object.freeze(summary);
-}
-
-
-// ============================================================================
-// MARK: Scene composition types
-// ============================================================================
-
-export type ScenePhase = 'ENTRY' | 'ESCALATION' | 'CLIMAX' | 'INTERVENTION' | 'REACTION' | 'RESOLUTION' | 'DEFERRAL';
-export type SceneToneHint = 'HOSTILE' | 'AGGRESSIVE' | 'PEAK_PRESSURE' | 'SUPPORTIVE' | 'OBSERVATIONAL' | 'NEUTRAL' | 'COLD';
-
-export interface SceneBeat {
-  readonly beatIndex: number;
-  readonly counterpartId: string;
-  readonly role: RelationshipRole;
-  readonly phase: ScenePhase;
-  readonly delayMs: number;
-  readonly visibility: RelationshipVisibilityClass;
-  readonly toneHint: SceneToneHint;
-}
-
-export interface SceneComposition {
-  readonly sceneId: string;
-  readonly playerId: string | null;
-  readonly beats: readonly SceneBeat[];
-  readonly totalDurationMs: number;
-  readonly hasClimax: boolean;
-  readonly hasIntervention: boolean;
-  readonly witnessCount: number;
-  readonly envelope: RelationshipResolutionEnvelope;
-}
-
-// ============================================================================
-// MARK: Negotiation resolution types
-// ============================================================================
-
-export interface NegotiationResolution {
-  readonly balanceOfPower01: number;
-  readonly playerIsSqueezing: boolean;
-  readonly playerIsWinning: boolean;
-  readonly playerIsStalling: boolean;
-  readonly dominantCounterpartId?: string;
-  readonly recommendedPlayerBehavior: 'PRESS_ADVANTAGE' | 'HOLD_POSITION' | 'CONCEDE_OR_COUNTER' | 'WALK_AWAY';
-  readonly leverageCounterpartIds: readonly string[];
-  readonly supportCounterpartIds: readonly string[];
-}
-
-// ============================================================================
-// MARK: Post-run resolution types
-// ============================================================================
-
-export interface PostRunDebriefAssignment {
-  readonly counterpartId: string;
-  readonly role: RelationshipRole;
-  readonly shouldDebrief: boolean;
-  readonly debriefTone: 'COMPASSIONATE' | 'GRUDGING' | 'REFLECTIVE' | 'CEREMONIAL';
-}
-
-export interface PostRunResolution {
-  readonly debriefAssignments: readonly PostRunDebriefAssignment[];
-  readonly grudgeCarryIds: readonly string[];
-  readonly legendNominationIds: readonly string[];
-  readonly silenceCommitmentIds: readonly string[];
-  readonly unfinishedBusinessCount: number;
-}
-
-
-
-// ============================================================================
-// MARK: Mode resolution profile type
-// ============================================================================
-
-export interface ModeResolutionProfile {
-  readonly modeId: string;
-  readonly label: string;
-  readonly maxActiveCounterparts: number;
-  readonly silenceWeight01: number;
-  readonly encounterDepth01: number;
-  readonly lonelinessMechanic: boolean;
-  readonly teamDynamics: boolean;
-  readonly mysterySignals: boolean;
-  readonly escalationSpeed01: number;
-}
-
-// ============================================================================
-// MARK: Witness resolution types
-// ============================================================================
-
-export type WitnessReactionType = 'AWE' | 'HORROR' | 'GLEE' | 'INDIFFERENCE' | 'STRATEGIC_NOTE';
-
-export interface WitnessResolution {
-  readonly counterpartId: string;
-  readonly witnessRole: 'PRIMARY_WITNESS' | 'SECONDARY_WITNESS';
-  readonly reactionType: WitnessReactionType;
+  readonly trust01: number;
+  readonly rivalry01: number;
+  readonly rescueDebt01: number;
+  readonly callbackReadiness01: number;
   readonly intensity01: number;
-  readonly memoryCommitment: boolean;
-  readonly socialPropagation: boolean;
-  readonly delayMs: number;
-  readonly narrativeWeight01: number;
+  readonly volatility01: number;
+  readonly freshness01: number;
+  readonly decayAdjustedIntensity01: number;
+  readonly pressure01: number;
+  readonly witnessExposure01: number;
+  readonly stability01: number;
+  readonly dormancyRisk01: number;
+  readonly objectivePriority01: number;
+  readonly priorityScore01: number;
+  readonly recommendedAction: RelationshipLedgerActionLane;
+  readonly rationale: readonly string[];
 }
 
-// ============================================================================
-// MARK: Coordinated timing types
-// ============================================================================
-
-export interface CoordinatedTimingEntry {
+export interface RelationshipLedgerCounterpartWindow {
   readonly counterpartId: string;
-  readonly role: RelationshipRole;
-  readonly assignedBeat: number;
-  readonly delayMs: number;
-  readonly silenceWindowMs: number;
+  readonly totalEvents: number;
+  readonly windowEvents: readonly ChatRelationshipEventDescriptor[];
+  readonly firstEventAt?: number;
+  readonly lastEventAt?: number;
+  readonly publicWitnessShare01: number;
+  readonly avgEventIntensity01: number;
+  readonly disruption01: number;
 }
 
-// ============================================================================
-// MARK: Resolution history types
-// ============================================================================
+export interface RelationshipLedgerCounterpartDossier {
+  readonly counterpartId: string;
+  readonly counterpartKind: ChatRelationshipCounterpartKind;
+  readonly state: ChatRelationshipCounterpartState;
+  readonly index: RelationshipLedgerIndexEntry;
+  readonly health: RelationshipLedgerCounterpartHealth;
+  readonly legacy?: ChatRelationshipLegacyProjection;
+  readonly npcSignal?: ChatRelationshipNpcSignal;
+  readonly callbacks: readonly RelationshipLedgerCallbackReceipt[];
+  readonly recentEvents: readonly ChatRelationshipEventDescriptor[];
+  readonly scenes: readonly RelationshipLedgerSceneSummary[];
+  readonly channels: readonly RelationshipLedgerChannelSummary[];
+  readonly trajectory: readonly RelationshipTrajectorySnapshot[];
+  readonly trajectoryTrend: RelationshipTrajectoryTrend;
+  readonly eventPatterns: readonly EventPattern[];
+  readonly objectiveTags: readonly string[];
+}
 
-export interface ResolutionHistoryEntry {
-  readonly timestamp: number;
-  readonly primaryCounterpartId?: string;
-  readonly primaryRole?: RelationshipRole;
+export interface RelationshipLedgerChannelFocusContinuity {
+  readonly channelId: string;
+  readonly focusedCounterpartId?: string;
+  readonly continuity01: number;
+  readonly recency01: number;
+  readonly publicHeat01: number;
+  readonly pressure01: number;
+  readonly eventCount: number;
+  readonly lastEventAt: number;
+}
+
+export interface RelationshipLedgerScenePressureView {
+  readonly sceneId: string;
+  readonly playerId: string;
+  readonly counterpartIds: readonly string[];
+  readonly eventCount: number;
+  readonly firstSeenAt: number;
+  readonly lastSeenAt: number;
+  readonly pressure01: number;
+  readonly publicHeat01: number;
+  readonly witnessDensity01: number;
+  readonly disruption01: number;
+  readonly dominantPressureBand: ChatRelationshipPressureBand;
+}
+
+export interface RelationshipLedgerObjectiveScore {
+  readonly objective: string;
+  readonly counterpartCount: number;
+  readonly avgIntensity01: number;
+  readonly avgPriority01: number;
+}
+
+export interface RelationshipLedgerAxisScore {
+  readonly axis: ChatRelationshipAxisId;
+  readonly counterpartCount: number;
+  readonly avgIntensity01: number;
+}
+
+export interface RelationshipLedgerNarrativeState {
+  readonly playerId: string;
+  readonly hottestCounterpartId?: string;
+  readonly hottestSceneId?: string;
+  readonly hottestChannelId?: string;
+  readonly callbackPressure01: number;
+  readonly rescuePressure01: number;
+  readonly rivalryPressure01: number;
+  readonly trustSurface01: number;
+  readonly volatilitySurface01: number;
+  readonly publicExposure01: number;
+  readonly dominantActionLane: RelationshipLedgerActionLane;
+}
+
+export interface RelationshipLedgerNetworkSummary {
+  readonly playerId: string;
+  readonly counterpartCount: number;
   readonly helperCount: number;
   readonly rivalCount: number;
-  readonly witnessCount: number;
-  readonly hasRescue: boolean;
+  readonly hotCount: number;
+  readonly highHeatSceneCount: number;
+  readonly callbackReadyCount: number;
+  readonly averageIntensity01: number;
+  readonly averageTrust01: number;
+  readonly averageRivalry01: number;
+  readonly averageVolatility01: number;
+}
+
+export interface RelationshipLedgerAnomaly {
+  readonly anomalyId: string;
+  readonly severity01: number;
+  readonly kind: 'VOLATILITY_SPIKE' | 'PUBLIC_HEAT_SPIKE' | 'CALLBACK_OVERFLOW' | 'DORMANT_IMPORTANT' | 'RIVAL_RESCUE_COLLISION';
+  readonly counterpartId?: string;
+  readonly channelId?: string;
+  readonly sceneId?: string;
+  readonly message: string;
 }
 
 
-export class RelationshipResolver {
-  private readonly config: RelationshipResolverConfig;
-  private readonly rivalryEscalationPolicy: RivalryEscalationPolicy;
+export class RelationshipLedger {
+  private readonly config: RelationshipLedgerConfig;
+  private readonly players = new Map<string, PlayerLedgerBucket>();
 
-  public constructor(config: Partial<RelationshipResolverConfig> = {}, rivalryEscalationConfig: Partial<RivalryEscalationPolicyConfig> = {}) {
+  public constructor(config: Partial<Omit<RelationshipLedgerConfig, 'relationshipService'>> & {
+    relationshipService?: ChatRelationshipService;
+    relationshipServiceConfig?: Partial<ChatRelationshipServiceConfig>;
+  } = {}) {
+    const relationshipService =
+      config.relationshipService ??
+      new ChatRelationshipService(config.relationshipServiceConfig ?? DEFAULT_CHAT_RELATIONSHIP_SERVICE_CONFIG);
+
     this.config = Object.freeze({
-      ...DEFAULT_RELATIONSHIP_RESOLVER_CONFIG,
+      ...DEFAULT_RELATIONSHIP_LEDGER_CONFIG,
       ...config,
-      channelBiases: Object.freeze({ ...DEFAULT_RELATIONSHIP_RESOLVER_CONFIG.channelBiases, ...(config.channelBiases ?? {}) }),
-      modeBiases: Object.freeze({ ...DEFAULT_RELATIONSHIP_RESOLVER_CONFIG.modeBiases, ...(config.modeBiases ?? {}) }),
-      counterpartKindBiases: Object.freeze({ ...DEFAULT_RELATIONSHIP_RESOLVER_CONFIG.counterpartKindBiases, ...(config.counterpartKindBiases ?? {}) }),
-      eventSeverity: Object.freeze({ ...DEFAULT_RELATIONSHIP_RESOLVER_CONFIG.eventSeverity, ...(config.eventSeverity ?? {}) }),
+      relationshipService,
+      retention: {
+        ...DEFAULT_RELATIONSHIP_LEDGER_CONFIG.retention,
+        ...(config.retention ?? {}),
+      },
     });
-    this.rivalryEscalationPolicy = new RivalryEscalationPolicy({ ...DEFAULT_RIVALRY_ESCALATION_POLICY_CONFIG, ...rivalryEscalationConfig });
   }
 
-  public resolveSnapshot(snapshot: ChatRelationshipSnapshot, context: RelationshipResolverContext): RelationshipResolutionEnvelope {
-    const candidates = this.rankSnapshot(snapshot, context);
-    const helpers = candidates.filter((item) => item.role === 'PRIMARY_HELPER' || item.counterpartKind === 'HELPER');
-    const rivals = candidates.filter((item) => item.role === 'PRIMARY_AGGRESSOR' || isRival(item.counterpartKind));
-    const witnesses = candidates.filter((item) => item.role === 'PRIMARY_WITNESS' || item.role === 'SECONDARY_WITNESS');
-    const delayed = candidates.filter((item) => item.role === 'DELAYED_CALLBACK');
-    const suppressed = candidates.filter((item) => item.role === 'SILENT_PRESSURE' || item.visibility === 'SUPPRESSED');
-    const witness = witnessDecision(candidates, context, this.config);
-    const rescue = rescueWindow(helpers, rivals, context, this.config);
-    const negotiation = negotiationAdvisory(candidates, context, this.config);
-    const primary = candidates.find((item) => item.role === 'PRIMARY_AGGRESSOR') ?? candidates.find((item) => item.role === 'PRIMARY_HELPER') ?? candidates[0];
-    const core: Omit<RelationshipResolutionEnvelope, 'summary'> = { createdAt: context.now, playerId: snapshot.playerId ?? context.playerId ?? null, roomId: context.roomId ?? context.sourceEvent?.roomId ?? null, channelId: context.channelId ?? context.sourceEvent?.channelId ?? null, mode: modeOr(context.mode), pressureBand: pressureOr(context.pressureBand ?? context.sourceEvent?.pressureBand), primary, helpers: Object.freeze(helpers), rivals: Object.freeze(rivals), witnesses: Object.freeze(witnesses), delayed: Object.freeze(delayed), suppressed: Object.freeze(suppressed), witnessDecision: witness, rescueWindow: rescue, negotiation, recommendedCounterpartIds: Object.freeze(candidates.map((item) => item.counterpartId)) };
-    return Object.freeze({ ...core, summary: summarizeEnvelope(core) });
+  private ensure(playerId: string): PlayerLedgerBucket {
+    const existing = this.players.get(playerId);
+    if (existing) return existing;
+    const createdAt = now();
+    const next: PlayerLedgerBucket = {
+      playerId,
+      updatedAt: createdAt,
+      firstSeenAt: createdAt,
+      totalEvents: 0,
+      events: [],
+      eventsByCounterpartId: new Map(),
+      channelEventTails: new Map(),
+      sceneEventTails: new Map(),
+      indicesByCounterpartId: new Map(),
+      callbacksByCounterpartId: new Map(),
+      channels: new Map(),
+      scenes: new Map(),
+      exports: [],
+    };
+    this.players.set(playerId, next);
+    return next;
   }
 
-  public resolveCounterpart(state: ChatRelationshipCounterpartState, context: RelationshipResolverContext): RelationshipResolution {
-    const callback = callbackOpportunity(state, context, this.config);
-    const agg = aggression01(state, context, this.config);
-    const rescue = helperRescueBias01(state, context, this.config);
-    const visibility = chooseVisibility(state, context, this.config, callback);
-    const role = recommendedRole(state, visibility, agg, rescue, callback);
-    const signal = buildNpcSignalFromState(state);
-    const legacy = buildLegacyProjection(state);
-    const escalationRequest: RivalryEscalationRequest = { state, signal, legacy, context: { now: context.now, channelId: context.channelId ?? state.lastChannelId ?? null, roomId: context.roomId ?? context.sourceEvent?.roomId ?? null, pressureBand: pressureOr(context.pressureBand ?? context.sourceEvent?.pressureBand), mode: modeOr(context.mode), sourceEvent: context.sourceEvent ?? null, allowPublicSwarm: context.allowPublicSwarm !== false, rescueWindowOpen: !!context.rescueWindowOpen, negotiationWindowOpen: !!context.negotiationWindowOpen, allowDelayedReveal: context.allowDelayedReveal !== false, allowReceipts: context.allowReceipts !== false }, callback };
-    const escalation = this.rivalryEscalationPolicy.resolve(escalationRequest);
-    const trustLeverage = legacyTrustLeverage01(legacy);
-    const embarrassment = clamp01(legacyEmbarrassmentRisk01(legacy) * 0.64 + callback.humiliationRisk01 * 0.20 + escalation.publicEmbarrassment01 * 0.16);
-    const score = selectionScore01(state, context, this.config, agg, rescue, callback);
-    return Object.freeze({ counterpartId: state.counterpartId, counterpartKind: state.counterpartKind, stance: state.stance, objective: state.objective, role, visibility, selectionScore01: score, aggression01: agg, rescueBias01: rescue, trustLeverage01: trustLeverage, embarrassmentRisk01: embarrassment, callback, witnessWeight01: clamp01(score * 0.32 + callback.witnessValue01 * 0.24 + escalation.shadowHeat01 * 0.19 + publicStageBias01(state, context, this.config) * 0.25), recommendedTags: recommendedTags(state, callback, role, visibility, escalation), notes: resolutionNotes(state, context, visibility, role, callback, agg, rescue), escalation, signal, legacy });
+  private getPlayerId(event: ChatRelationshipEventDescriptor): string {
+    return event.playerId ?? 'GLOBAL';
   }
 
-  public rankSnapshot(snapshot: ChatRelationshipSnapshot, context: RelationshipResolverContext): readonly RelationshipResolution[] {
-    const minimum = context.minIntensity01 ?? this.config.minCandidateIntensity01;
-    const max = context.maxCandidates ?? this.config.maxCandidateCount;
-    return Object.freeze(snapshot.counterparts.filter((state) => state.intensity01 >= minimum || context.requestedCounterpartId === state.counterpartId).map((state) => this.resolveCounterpart(state, context)).sort((a, b) => { if (b.selectionScore01 !== a.selectionScore01) return b.selectionScore01 - a.selectionScore01; if (b.escalation.selectedScore01 !== a.escalation.selectedScore01) return b.escalation.selectedScore01 - a.escalation.selectedScore01; return a.counterpartId.localeCompare(b.counterpartId); }).slice(0, max));
+  private updateIndex(
+    bucket: PlayerLedgerBucket,
+    event: ChatRelationshipEventDescriptor,
+    state: ChatRelationshipCounterpartState,
+  ): RelationshipLedgerIndexEntry {
+    const existing = bucket.indicesByCounterpartId.get(event.counterpartId);
+    const next: RelationshipLedgerIndexEntry = {
+      playerId: bucket.playerId,
+      counterpartId: event.counterpartId,
+      counterpartKind: event.counterpartKind,
+      eventCount: (existing?.eventCount ?? 0) + 1,
+      firstTouchedAt: existing?.firstTouchedAt ?? event.createdAt,
+      lastTouchedAt: event.createdAt,
+      lastEventId: event.eventId,
+      lastEventType: event.eventType,
+      lastSceneId: event.sceneId ?? existing?.lastSceneId ?? null,
+      lastChannelId: event.channelId ?? existing?.lastChannelId ?? null,
+      lastPressureBand: event.pressureBand ?? existing?.lastPressureBand ?? null,
+      stance: state.stance,
+      intensity01: state.intensity01,
+      volatility01: state.volatility01,
+      trust01: trust01FromState(state),
+      rivalry01: rivalry01FromState(state),
+      rescueDebt01: rescueDebt01FromState(state),
+      callbackReadiness01: callbackReadiness01FromState(state),
+      dominantAxes: state.dominantAxes,
+      tags: uniqueTags(event, state),
+    };
+    bucket.indicesByCounterpartId.set(event.counterpartId, next);
+    return next;
   }
 
-  public pickFocusedCounterpart(snapshot: ChatRelationshipSnapshot, context: RelationshipResolverContext): RelationshipResolution | undefined {
-    const focusId = context.requestedCounterpartId ?? (context.channelId ? snapshot.focusedCounterpartByChannel[context.channelId] : undefined);
-    if (!focusId) return this.rankSnapshot(snapshot, context)[0];
-    const state = snapshot.counterparts.find((item) => item.counterpartId === focusId);
-    return state ? this.resolveCounterpart(state, context) : this.rankSnapshot(snapshot, context)[0];
+  private updateCallbacks(
+    bucket: PlayerLedgerBucket,
+    event: ChatRelationshipEventDescriptor,
+    state: ChatRelationshipCounterpartState,
+  ): RelationshipLedgerCallbackReceipt | undefined {
+    const best = state.callbackHints[0];
+    if (!best || best.weight01 < this.config.callbackThreshold01) return undefined;
+    const existing = bucket.callbacksByCounterpartId.get(event.counterpartId) ?? [];
+    const next: RelationshipLedgerCallbackReceipt = {
+      callbackId: best.callbackId,
+      counterpartId: event.counterpartId,
+      playerId: bucket.playerId,
+      label: best.label,
+      text: best.text,
+      weight01: best.weight01,
+      createdAt: event.createdAt,
+      sourceEventId: event.eventId,
+      sourceEventType: event.eventType,
+      sourceSceneId: event.sceneId ?? null,
+      sourceChannelId: event.channelId ?? null,
+    };
+    const updated = [next, ...existing.filter((item) => item.callbackId !== next.callbackId)]
+      .slice(0, this.config.retention.maxCallbacksPerCounterpart);
+    bucket.callbacksByCounterpartId.set(event.counterpartId, updated);
+    return next;
   }
 
-  public summarizeSnapshot(snapshot: ChatRelationshipSnapshot): readonly ChatRelationshipSummaryView[] {
-    return snapshot.counterparts.map((state) => ({ counterpartId: state.counterpartId, stance: state.stance, objective: state.objective, intensity01: state.intensity01, volatility01: state.volatility01, obsession01: state.vector.obsession01, predictiveConfidence01: state.vector.predictiveConfidence01, unfinishedBusiness01: state.vector.unfinishedBusiness01, respect01: state.vector.respect01, fear01: state.vector.fear01, contempt01: state.vector.contempt01, familiarity01: state.vector.familiarity01, callbackCount: state.callbackHints.length, legacy: buildLegacyProjection(state) })).sort((a, b) => b.intensity01 - a.intensity01 || a.counterpartId.localeCompare(b.counterpartId));
+  private updateChannelSummary(
+    bucket: PlayerLedgerBucket,
+    event: ChatRelationshipEventDescriptor,
+    state: ChatRelationshipCounterpartState,
+  ): RelationshipLedgerChannelSummary {
+    const channelId = safeChannelId(event);
+    const existing = bucket.channels.get(channelId);
+    const totalEvents = (existing?.totalEvents ?? 0) + 1;
+    const witness = publicWitness01(event);
+    const next: RelationshipLedgerChannelSummary = {
+      channelId,
+      playerId: bucket.playerId,
+      focusedCounterpartId: event.counterpartId,
+      totalEvents,
+      lastEventAt: event.createdAt,
+      publicWitnessEvents: (existing?.publicWitnessEvents ?? 0) + (event.eventType === 'PUBLIC_WITNESS' ? 1 : 0),
+      privateWitnessEvents: (existing?.privateWitnessEvents ?? 0) + (event.eventType === 'PRIVATE_WITNESS' ? 1 : 0),
+      helperRescueEvents: (existing?.helperRescueEvents ?? 0) + (event.eventType === 'HELPER_RESCUE_EMITTED' ? 1 : 0),
+      botTauntEvents: (existing?.botTauntEvents ?? 0) + (event.eventType === 'BOT_TAUNT_EMITTED' ? 1 : 0),
+      comebackEvents: (existing?.comebackEvents ?? 0) + (event.eventType === 'PLAYER_COMEBACK' ? 1 : 0),
+      collapseEvents: (existing?.collapseEvents ?? 0) + (event.eventType === 'PLAYER_COLLAPSE' ? 1 : 0),
+      avgIntensity01: clamp01((((existing?.avgIntensity01 ?? 0) * (totalEvents - 1)) + state.intensity01) / totalEvents),
+      avgPublicWitness01: clamp01((((existing?.avgPublicWitness01 ?? 0) * (totalEvents - 1)) + witness) / totalEvents),
+    };
+    bucket.channels.set(channelId, next);
+    return next;
   }
 
-  public inspectEscalation(state: ChatRelationshipCounterpartState, context: RelationshipResolverContext): RivalryEscalationAssessment {
-    return this.resolveCounterpart(state, context).escalation.assessment;
+  private updateSceneSummary(
+    bucket: PlayerLedgerBucket,
+    event: ChatRelationshipEventDescriptor,
+  ): RelationshipLedgerSceneSummary {
+    const sceneId = safeSceneId(event);
+    const existing = bucket.scenes.get(sceneId);
+    const publicHeat = publicWitness01(event);
+    const counterpartIds = uniqStrings([event.counterpartId, ...(existing?.counterpartIds ?? [])]);
+    const eventIds = uniqStrings([event.eventId, ...(existing?.eventIds ?? [])]).slice(0, this.config.retention.maxSceneTail);
+    const next: RelationshipLedgerSceneSummary = {
+      sceneId,
+      playerId: bucket.playerId,
+      counterpartIds,
+      eventIds,
+      firstSeenAt: existing?.firstSeenAt ?? event.createdAt,
+      lastSeenAt: event.createdAt,
+      witnessCount:
+        (existing?.witnessCount ?? 0) +
+        (event.eventType === 'PUBLIC_WITNESS' || event.eventType === 'PRIVATE_WITNESS' || event.eventType === 'RIVAL_WITNESS_EMITTED' || event.eventType === 'ARCHIVIST_WITNESS_EMITTED' || event.eventType === 'AMBIENT_WITNESS_EMITTED'
+          ? 1 : 0),
+      helperCount: (existing?.helperCount ?? 0) + (event.counterpartKind === 'HELPER' ? 1 : 0),
+      rivalCount: (existing?.rivalCount ?? 0) + (event.counterpartKind === 'RIVAL' || event.counterpartKind === 'BOT' ? 1 : 0),
+      publicHeat01: clamp01(Math.max(existing?.publicHeat01 ?? 0, publicHeat)),
+      pressurePeak: pressurePeak(existing?.pressurePeak, event.pressureBand),
+    };
+    bucket.scenes.set(sceneId, next);
+    return next;
   }
 
 
-  // ==========================================================================
-  // MARK: Scene composition engine
-  // ==========================================================================
+  private pushTail(
+    map: Map<string, ChatRelationshipEventDescriptor[]>,
+    key: string,
+    event: ChatRelationshipEventDescriptor,
+    limit: number,
+  ): readonly ChatRelationshipEventDescriptor[] {
+    const current = map.get(key) ?? [];
+    const next = [event, ...current.filter((item) => item.eventId !== event.eventId)]
+      .sort((a, b) => b.createdAt - a.createdAt)
+      .slice(0, limit);
+    map.set(key, next);
+    return next;
+  }
 
-  /** Compose a structured scene from a resolution envelope. */
-  public composeScene(snapshot: ChatRelationshipSnapshot, context: RelationshipResolverContext): SceneComposition {
-    const envelope = this.resolveSnapshot(snapshot, context);
-    const beats: SceneBeat[] = [];
-    let beatIndex = 0;
+  private updateEventTails(bucket: PlayerLedgerBucket, event: ChatRelationshipEventDescriptor): void {
+    this.pushTail(bucket.eventsByCounterpartId, event.counterpartId, event, this.config.retention.maxEventsPerCounterpart);
+    this.pushTail(bucket.channelEventTails, safeChannelId(event), event, this.config.retention.maxSceneTail);
+    this.pushTail(bucket.sceneEventTails, safeSceneId(event), event, this.config.retention.maxSceneTail);
+  }
 
-    if (envelope.primary) {
-      beats.push({ beatIndex: beatIndex++, counterpartId: envelope.primary.counterpartId, role: envelope.primary.role, phase: 'ENTRY', delayMs: 0, visibility: envelope.primary.visibility, toneHint: envelope.primary.role === 'PRIMARY_AGGRESSOR' ? 'HOSTILE' : 'NEUTRAL' });
+  private trimBucket(bucket: PlayerLedgerBucket): void {
+    if (bucket.events.length > this.config.retention.maxEventsPerPlayer) {
+      bucket.events = bucket.events
+        .sort((a, b) => b.createdAt - a.createdAt)
+        .slice(0, this.config.retention.maxEventsPerPlayer);
     }
-    for (const rival of envelope.rivals.slice(0, 2)) {
-      if (rival.counterpartId !== envelope.primary?.counterpartId) {
-        beats.push({ beatIndex: beatIndex++, counterpartId: rival.counterpartId, role: rival.role, phase: 'ESCALATION', delayMs: 2500 + beatIndex * 1200, visibility: rival.visibility, toneHint: 'AGGRESSIVE' });
+    for (const [counterpartId, callbacks] of bucket.callbacksByCounterpartId) {
+      if (callbacks.length <= this.config.retention.maxCallbacksPerCounterpart) continue;
+      bucket.callbacksByCounterpartId.set(counterpartId, callbacks.slice(0, this.config.retention.maxCallbacksPerCounterpart));
+    }
+    if (bucket.exports.length > this.config.retention.maxExportsPerPlayer) {
+      bucket.exports = bucket.exports.slice(0, this.config.retention.maxExportsPerPlayer);
+    }
+  }
+
+
+  private trimEventTailMap(
+    source: Map<string, ChatRelationshipEventDescriptor[]>,
+    limit: number,
+  ): void {
+    for (const [key, events] of source) {
+      if (events.length <= limit) continue;
+      source.set(key, events.slice(0, limit));
+    }
+  }
+
+  private stateFor(playerId: string, counterpartId: string): ChatRelationshipCounterpartState | undefined {
+    return this.config.relationshipService.getSnapshot(playerId).counterparts.find((item) => item.counterpartId === counterpartId);
+  }
+
+  public recordEvent(event: ChatRelationshipEventDescriptor): RelationshipLedgerEventRecord {
+    const playerId = this.getPlayerId(event);
+    const bucket = this.ensure(playerId);
+    const state = this.config.relationshipService.applyEvent({ ...event, playerId });
+    bucket.updatedAt = event.createdAt;
+    bucket.totalEvents += 1;
+    bucket.events = [event, ...bucket.events]
+      .filter((item, index, arr) => index === arr.findIndex((candidate) => candidate.eventId === item.eventId))
+      .sort((a, b) => b.createdAt - a.createdAt);
+    const index = this.updateIndex(bucket, event, state);
+    const callbackReceipt = this.updateCallbacks(bucket, event, state);
+    const channelSummary = this.updateChannelSummary(bucket, event, state);
+    const sceneSummary = this.updateSceneSummary(bucket, event);
+    this.updateEventTails(bucket, event);
+    this.recordTrajectorySnapshot(playerId, event.counterpartId, state, event.createdAt);
+    this.trimBucket(bucket);
+    this.trimEventTailMap(bucket.eventsByCounterpartId, this.config.retention.maxEventsPerCounterpart);
+    this.trimEventTailMap(bucket.channelEventTails, this.config.retention.maxSceneTail);
+    this.trimEventTailMap(bucket.sceneEventTails, this.config.retention.maxSceneTail);
+    return {
+      descriptor: event,
+      counterpartState: state,
+      index,
+      callbackReceipt,
+      channelSummary,
+      sceneSummary,
+    };
+  }
+
+  public recordEvents(events: readonly ChatRelationshipEventDescriptor[]): readonly RelationshipLedgerEventRecord[] {
+    return [...events]
+      .sort((a, b) => a.createdAt - b.createdAt || a.eventId.localeCompare(b.eventId))
+      .map((event) => this.recordEvent(event));
+  }
+
+  public getSnapshot(playerId: string): ChatRelationshipSnapshot {
+    return this.config.relationshipService.getSnapshot(playerId);
+  }
+
+  public getCounterpartState(playerId: string, counterpartId: string): ChatRelationshipCounterpartState | undefined {
+    return this.stateFor(playerId, counterpartId);
+  }
+
+  public getCounterpartLegacyProjection(playerId: string, counterpartId: string): ChatRelationshipLegacyProjection | undefined {
+    return this.config.relationshipService.getLegacyProjection(playerId, counterpartId);
+  }
+
+  public listCounterpartSummaries(playerId: string): readonly ChatRelationshipSummaryView[] {
+    return this.config.relationshipService.summarize(playerId);
+  }
+
+  public listCounterpartIndices(playerId: string): readonly RelationshipLedgerIndexEntry[] {
+    const bucket = this.ensure(playerId);
+    return [...bucket.indicesByCounterpartId.values()].sort((a, b) =>
+      b.intensity01 - a.intensity01 ||
+      b.lastTouchedAt - a.lastTouchedAt ||
+      a.counterpartId.localeCompare(b.counterpartId),
+    );
+  }
+
+  public listHotCounterparts(playerId: string, limit = 12): readonly RelationshipLedgerHotCounterpart[] {
+    const snapshot = this.getSnapshot(playerId);
+    const bucket = this.ensure(playerId);
+    return snapshot.counterparts
+      .map((state) => {
+        const entry = bucket.indicesByCounterpartId.get(state.counterpartId);
+        if (!entry) return undefined;
+        const score01 = hotScore01(state, entry, bucket.updatedAt, this.config.hotCounterpartWindowMs);
+        return {
+          counterpartId: state.counterpartId,
+          counterpartKind: state.counterpartKind,
+          score01,
+          trust01: trust01FromState(state),
+          rivalry01: rivalry01FromState(state),
+          rescueDebt01: rescueDebt01FromState(state),
+          callbackReadiness01: callbackReadiness01FromState(state),
+          intensity01: state.intensity01,
+          volatility01: state.volatility01,
+          stance: state.stance,
+          rationale: hotRationale(state, entry, score01),
+        } satisfies RelationshipLedgerHotCounterpart;
+      })
+      .filter((value): value is RelationshipLedgerHotCounterpart => !!value)
+      .sort((a, b) => b.score01 - a.score01 || b.intensity01 - a.intensity01 || a.counterpartId.localeCompare(b.counterpartId))
+      .slice(0, limit);
+  }
+
+  public listRecentEvents(query: RelationshipLedgerQuery): readonly ChatRelationshipEventDescriptor[] {
+    const bucket = this.ensure(query.playerId);
+    const maxResults = query.maxResults ?? 64;
+    return bucket.events
+      .filter((event) => matchesQueryEvent(event, query))
+      .filter((event) => {
+        if (!query.kinds) return true;
+        const entry = bucket.indicesByCounterpartId.get(event.counterpartId);
+        return !!entry && query.kinds.includes(entry.counterpartKind);
+      })
+      .filter((event) => {
+        if (query.minIntensity01 === undefined) return true;
+        const entry = bucket.indicesByCounterpartId.get(event.counterpartId);
+        return !!entry && entry.intensity01 >= query.minIntensity01;
+      })
+      .slice(0, maxResults);
+  }
+
+  public recallCallbacks(playerId: string, counterpartId?: string, minWeight01 = this.config.callbackThreshold01): readonly RelationshipLedgerCallbackReceipt[] {
+    const bucket = this.ensure(playerId);
+    const source = counterpartId
+      ? (bucket.callbacksByCounterpartId.get(counterpartId) ?? [])
+      : [...bucket.callbacksByCounterpartId.values()].flat();
+    return source
+      .filter((item) => item.weight01 >= minWeight01)
+      .sort((a, b) => b.weight01 - a.weight01 || b.createdAt - a.createdAt || a.callbackId.localeCompare(b.callbackId));
+  }
+
+  public listChannelSummaries(playerId: string): readonly RelationshipLedgerChannelSummary[] {
+    const bucket = this.ensure(playerId);
+    return [...bucket.channels.values()].sort((a, b) => b.lastEventAt - a.lastEventAt || a.channelId.localeCompare(b.channelId));
+  }
+
+  public listSceneSummaries(playerId: string): readonly RelationshipLedgerSceneSummary[] {
+    const bucket = this.ensure(playerId);
+    return [...bucket.scenes.values()].sort((a, b) => b.lastSeenAt - a.lastSeenAt || a.sceneId.localeCompare(b.sceneId));
+  }
+
+  public projectNpcSignal(playerId: string, counterpartId: string): ChatRelationshipNpcSignal | undefined {
+    return this.config.relationshipService.projectNpcSignal(playerId, counterpartId);
+  }
+
+  public exportPlayer(playerId: string): RelationshipLedgerPlayerExport {
+    const bucket = this.ensure(playerId);
+    const exportRecord: RelationshipLedgerPlayerExport = {
+      playerId,
+      exportedAt: now(),
+      snapshot: this.getSnapshot(playerId),
+      summaries: this.listCounterpartSummaries(playerId),
+      indices: this.listCounterpartIndices(playerId),
+      callbacks: this.recallCallbacks(playerId),
+      channels: this.listChannelSummaries(playerId),
+      scenes: this.listSceneSummaries(playerId),
+    };
+    bucket.exports = [exportRecord, ...bucket.exports].slice(0, this.config.retention.maxExportsPerPlayer);
+    return exportRecord;
+  }
+
+  public listExports(playerId: string): readonly RelationshipLedgerPlayerExport[] {
+    return [...this.ensure(playerId).exports];
+  }
+
+  public forgetPlayer(playerId: string): boolean {
+    return this.players.delete(playerId);
+  }
+
+  public pruneIdlePlayers(referenceNow = now()): readonly string[] {
+    const removed: string[] = [];
+    for (const [playerId, bucket] of this.players) {
+      if (referenceNow - bucket.updatedAt < this.config.retention.pruneIfIdleMs) continue;
+      this.players.delete(playerId);
+      removed.push(playerId);
+    }
+    return removed;
+  }
+
+  public stats(): RelationshipLedgerStats {
+    let counterpartBucketsTracked = 0;
+    let totalEventsStored = 0;
+    let totalCallbacksStored = 0;
+    let totalSceneSummariesStored = 0;
+    let oldestActivityAt: number | undefined;
+    let newestActivityAt: number | undefined;
+    for (const bucket of this.players.values()) {
+      counterpartBucketsTracked += bucket.indicesByCounterpartId.size;
+      totalEventsStored += bucket.events.length;
+      totalSceneSummariesStored += bucket.scenes.size;
+      for (const callbacks of bucket.callbacksByCounterpartId.values()) totalCallbacksStored += callbacks.length;
+      oldestActivityAt = oldestActivityAt === undefined ? bucket.firstSeenAt : Math.min(oldestActivityAt, bucket.firstSeenAt);
+      newestActivityAt = newestActivityAt === undefined ? bucket.updatedAt : Math.max(newestActivityAt, bucket.updatedAt);
+    }
+    return {
+      playersTracked: this.players.size,
+      counterpartBucketsTracked,
+      totalEventsStored,
+      totalCallbacksStored,
+      totalSceneSummariesStored,
+      oldestActivityAt,
+      newestActivityAt,
+    };
+  }
+
+  public listPlayerMessageEvents(playerId: string, maxResults = 32): readonly ChatRelationshipEventDescriptor[] {
+    return this.listRecentEvents({
+      playerId,
+      eventTypes: ['PLAYER_MESSAGE'],
+      maxResults,
+    });
+  }
+
+  public listPlayerQuestionEvents(playerId: string, maxResults = 32): readonly ChatRelationshipEventDescriptor[] {
+    return this.listRecentEvents({
+      playerId,
+      eventTypes: ['PLAYER_QUESTION'],
+      maxResults,
+    });
+  }
+
+  public listPlayerAngerEvents(playerId: string, maxResults = 32): readonly ChatRelationshipEventDescriptor[] {
+    return this.listRecentEvents({
+      playerId,
+      eventTypes: ['PLAYER_ANGER'],
+      maxResults,
+    });
+  }
+
+  public listPlayerTrollEvents(playerId: string, maxResults = 32): readonly ChatRelationshipEventDescriptor[] {
+    return this.listRecentEvents({
+      playerId,
+      eventTypes: ['PLAYER_TROLL'],
+      maxResults,
+    });
+  }
+
+  public listPlayerFlexEvents(playerId: string, maxResults = 32): readonly ChatRelationshipEventDescriptor[] {
+    return this.listRecentEvents({
+      playerId,
+      eventTypes: ['PLAYER_FLEX'],
+      maxResults,
+    });
+  }
+
+  public listPlayerCalmEvents(playerId: string, maxResults = 32): readonly ChatRelationshipEventDescriptor[] {
+    return this.listRecentEvents({
+      playerId,
+      eventTypes: ['PLAYER_CALM'],
+      maxResults,
+    });
+  }
+
+  public listPlayerHesitationEvents(playerId: string, maxResults = 32): readonly ChatRelationshipEventDescriptor[] {
+    return this.listRecentEvents({
+      playerId,
+      eventTypes: ['PLAYER_HESITATION'],
+      maxResults,
+    });
+  }
+
+  public listPlayerDisciplineEvents(playerId: string, maxResults = 32): readonly ChatRelationshipEventDescriptor[] {
+    return this.listRecentEvents({
+      playerId,
+      eventTypes: ['PLAYER_DISCIPLINE'],
+      maxResults,
+    });
+  }
+
+  public listPlayerGreedEvents(playerId: string, maxResults = 32): readonly ChatRelationshipEventDescriptor[] {
+    return this.listRecentEvents({
+      playerId,
+      eventTypes: ['PLAYER_GREED'],
+      maxResults,
+    });
+  }
+
+  public listPlayerBluffEvents(playerId: string, maxResults = 32): readonly ChatRelationshipEventDescriptor[] {
+    return this.listRecentEvents({
+      playerId,
+      eventTypes: ['PLAYER_BLUFF'],
+      maxResults,
+    });
+  }
+
+  public listPlayerOverconfidenceEvents(playerId: string, maxResults = 32): readonly ChatRelationshipEventDescriptor[] {
+    return this.listRecentEvents({
+      playerId,
+      eventTypes: ['PLAYER_OVERCONFIDENCE'],
+      maxResults,
+    });
+  }
+
+  public listPlayerComebackEvents(playerId: string, maxResults = 32): readonly ChatRelationshipEventDescriptor[] {
+    return this.listRecentEvents({
+      playerId,
+      eventTypes: ['PLAYER_COMEBACK'],
+      maxResults,
+    });
+  }
+
+  public listPlayerCollapseEvents(playerId: string, maxResults = 32): readonly ChatRelationshipEventDescriptor[] {
+    return this.listRecentEvents({
+      playerId,
+      eventTypes: ['PLAYER_COLLAPSE'],
+      maxResults,
+    });
+  }
+
+  public listPlayerBreachEvents(playerId: string, maxResults = 32): readonly ChatRelationshipEventDescriptor[] {
+    return this.listRecentEvents({
+      playerId,
+      eventTypes: ['PLAYER_BREACH'],
+      maxResults,
+    });
+  }
+
+  public listPlayerPerfectDefenseEvents(playerId: string, maxResults = 32): readonly ChatRelationshipEventDescriptor[] {
+    return this.listRecentEvents({
+      playerId,
+      eventTypes: ['PLAYER_PERFECT_DEFENSE'],
+      maxResults,
+    });
+  }
+
+  public listPlayerFailedGambleEvents(playerId: string, maxResults = 32): readonly ChatRelationshipEventDescriptor[] {
+    return this.listRecentEvents({
+      playerId,
+      eventTypes: ['PLAYER_FAILED_GAMBLE'],
+      maxResults,
+    });
+  }
+
+  public listPlayerNearSovereigntyEvents(playerId: string, maxResults = 32): readonly ChatRelationshipEventDescriptor[] {
+    return this.listRecentEvents({
+      playerId,
+      eventTypes: ['PLAYER_NEAR_SOVEREIGNTY'],
+      maxResults,
+    });
+  }
+
+  public listNegotiationWindowEvents(playerId: string, maxResults = 32): readonly ChatRelationshipEventDescriptor[] {
+    return this.listRecentEvents({
+      playerId,
+      eventTypes: ['NEGOTIATION_WINDOW'],
+      maxResults,
+    });
+  }
+
+  public listMarketAlertEvents(playerId: string, maxResults = 32): readonly ChatRelationshipEventDescriptor[] {
+    return this.listRecentEvents({
+      playerId,
+      eventTypes: ['MARKET_ALERT'],
+      maxResults,
+    });
+  }
+
+  public listBotTauntEmittedEvents(playerId: string, maxResults = 32): readonly ChatRelationshipEventDescriptor[] {
+    return this.listRecentEvents({
+      playerId,
+      eventTypes: ['BOT_TAUNT_EMITTED'],
+      maxResults,
+    });
+  }
+
+  public listBotRetreatEmittedEvents(playerId: string, maxResults = 32): readonly ChatRelationshipEventDescriptor[] {
+    return this.listRecentEvents({
+      playerId,
+      eventTypes: ['BOT_RETREAT_EMITTED'],
+      maxResults,
+    });
+  }
+
+  public listHelperRescueEmittedEvents(playerId: string, maxResults = 32): readonly ChatRelationshipEventDescriptor[] {
+    return this.listRecentEvents({
+      playerId,
+      eventTypes: ['HELPER_RESCUE_EMITTED'],
+      maxResults,
+    });
+  }
+
+  public listRivalWitnessEmittedEvents(playerId: string, maxResults = 32): readonly ChatRelationshipEventDescriptor[] {
+    return this.listRecentEvents({
+      playerId,
+      eventTypes: ['RIVAL_WITNESS_EMITTED'],
+      maxResults,
+    });
+  }
+
+  public listArchivistWitnessEmittedEvents(playerId: string, maxResults = 32): readonly ChatRelationshipEventDescriptor[] {
+    return this.listRecentEvents({
+      playerId,
+      eventTypes: ['ARCHIVIST_WITNESS_EMITTED'],
+      maxResults,
+    });
+  }
+
+  public listAmbientWitnessEmittedEvents(playerId: string, maxResults = 32): readonly ChatRelationshipEventDescriptor[] {
+    return this.listRecentEvents({
+      playerId,
+      eventTypes: ['AMBIENT_WITNESS_EMITTED'],
+      maxResults,
+    });
+  }
+
+  public listPublicWitnessEvents(playerId: string, maxResults = 32): readonly ChatRelationshipEventDescriptor[] {
+    return this.listRecentEvents({
+      playerId,
+      eventTypes: ['PUBLIC_WITNESS'],
+      maxResults,
+    });
+  }
+
+  public listPrivateWitnessEvents(playerId: string, maxResults = 32): readonly ChatRelationshipEventDescriptor[] {
+    return this.listRecentEvents({
+      playerId,
+      eventTypes: ['PRIVATE_WITNESS'],
+      maxResults,
+    });
+  }
+
+  public listRunStartEvents(playerId: string, maxResults = 32): readonly ChatRelationshipEventDescriptor[] {
+    return this.listRecentEvents({
+      playerId,
+      eventTypes: ['RUN_START'],
+      maxResults,
+    });
+  }
+
+  public listRunEndEvents(playerId: string, maxResults = 32): readonly ChatRelationshipEventDescriptor[] {
+    return this.listRecentEvents({
+      playerId,
+      eventTypes: ['RUN_END'],
+      maxResults,
+    });
+  }
+
+  public getTrustScore(playerId: string, counterpartId: string): number {
+    return this.listCounterpartIndices(playerId).find((item) => item.counterpartId === counterpartId)?.trust01 ?? 0;
+  }
+
+  public getRivalryScore(playerId: string, counterpartId: string): number {
+    return this.listCounterpartIndices(playerId).find((item) => item.counterpartId === counterpartId)?.rivalry01 ?? 0;
+  }
+
+  public getRescueDebtScore(playerId: string, counterpartId: string): number {
+    return this.listCounterpartIndices(playerId).find((item) => item.counterpartId === counterpartId)?.rescueDebt01 ?? 0;
+  }
+
+  public getCallbackReadinessScore(playerId: string, counterpartId: string): number {
+    return this.listCounterpartIndices(playerId).find((item) => item.counterpartId === counterpartId)?.callbackReadiness01 ?? 0;
+  }
+
+  public getIntensityScore(playerId: string, counterpartId: string): number {
+    return this.listCounterpartIndices(playerId).find((item) => item.counterpartId === counterpartId)?.intensity01 ?? 0;
+  }
+
+  public getVolatilityScore(playerId: string, counterpartId: string): number {
+    return this.listCounterpartIndices(playerId).find((item) => item.counterpartId === counterpartId)?.volatility01 ?? 0;
+  }
+
+  public listDismissiveCounterparts(playerId: string, limit = 16): readonly RelationshipLedgerIndexEntry[] {
+    return this.listCounterpartIndices(playerId)
+      .filter((item) => item.stance === 'DISMISSIVE')
+      .slice(0, limit);
+  }
+
+  public listClinicalCounterparts(playerId: string, limit = 16): readonly RelationshipLedgerIndexEntry[] {
+    return this.listCounterpartIndices(playerId)
+      .filter((item) => item.stance === 'CLINICAL')
+      .slice(0, limit);
+  }
+
+  public listProbingCounterparts(playerId: string, limit = 16): readonly RelationshipLedgerIndexEntry[] {
+    return this.listCounterpartIndices(playerId)
+      .filter((item) => item.stance === 'PROBING')
+      .slice(0, limit);
+  }
+
+  public listPredatoryCounterparts(playerId: string, limit = 16): readonly RelationshipLedgerIndexEntry[] {
+    return this.listCounterpartIndices(playerId)
+      .filter((item) => item.stance === 'PREDATORY')
+      .slice(0, limit);
+  }
+
+  public listHuntingCounterparts(playerId: string, limit = 16): readonly RelationshipLedgerIndexEntry[] {
+    return this.listCounterpartIndices(playerId)
+      .filter((item) => item.stance === 'HUNTING')
+      .slice(0, limit);
+  }
+
+  public listObsessedCounterparts(playerId: string, limit = 16): readonly RelationshipLedgerIndexEntry[] {
+    return this.listCounterpartIndices(playerId)
+      .filter((item) => item.stance === 'OBSESSED')
+      .slice(0, limit);
+  }
+
+  public listRespectfulCounterparts(playerId: string, limit = 16): readonly RelationshipLedgerIndexEntry[] {
+    return this.listCounterpartIndices(playerId)
+      .filter((item) => item.stance === 'RESPECTFUL')
+      .slice(0, limit);
+  }
+
+  public listWoundedCounterparts(playerId: string, limit = 16): readonly RelationshipLedgerIndexEntry[] {
+    return this.listCounterpartIndices(playerId)
+      .filter((item) => item.stance === 'WOUNDED')
+      .slice(0, limit);
+  }
+
+  public listProtectiveCounterparts(playerId: string, limit = 16): readonly RelationshipLedgerIndexEntry[] {
+    return this.listCounterpartIndices(playerId)
+      .filter((item) => item.stance === 'PROTECTIVE')
+      .slice(0, limit);
+  }
+
+  public listCuriousCounterparts(playerId: string, limit = 16): readonly RelationshipLedgerIndexEntry[] {
+    return this.listCounterpartIndices(playerId)
+      .filter((item) => item.stance === 'CURIOUS')
+      .slice(0, limit);
+  }
+
+  public listHumiliateObjectiveCounterparts(playerId: string, limit = 16): readonly RelationshipLedgerIndexEntry[] {
+    return this.listCounterpartIndices(playerId)
+      .filter((item) => item.tags.includes('HUMILIATE'))
+      .slice(0, limit);
+  }
+
+  public listContainObjectiveCounterparts(playerId: string, limit = 16): readonly RelationshipLedgerIndexEntry[] {
+    return this.listCounterpartIndices(playerId)
+      .filter((item) => item.tags.includes('CONTAIN'))
+      .slice(0, limit);
+  }
+
+  public listProvokeObjectiveCounterparts(playerId: string, limit = 16): readonly RelationshipLedgerIndexEntry[] {
+    return this.listCounterpartIndices(playerId)
+      .filter((item) => item.tags.includes('PROVOKE'))
+      .slice(0, limit);
+  }
+
+  public listStudyObjectiveCounterparts(playerId: string, limit = 16): readonly RelationshipLedgerIndexEntry[] {
+    return this.listCounterpartIndices(playerId)
+      .filter((item) => item.tags.includes('STUDY'))
+      .slice(0, limit);
+  }
+
+  public listPressureObjectiveCounterparts(playerId: string, limit = 16): readonly RelationshipLedgerIndexEntry[] {
+    return this.listCounterpartIndices(playerId)
+      .filter((item) => item.tags.includes('PRESSURE'))
+      .slice(0, limit);
+  }
+
+  public listRepriceObjectiveCounterparts(playerId: string, limit = 16): readonly RelationshipLedgerIndexEntry[] {
+    return this.listCounterpartIndices(playerId)
+      .filter((item) => item.tags.includes('REPRICE'))
+      .slice(0, limit);
+  }
+
+  public listDelayObjectiveCounterparts(playerId: string, limit = 16): readonly RelationshipLedgerIndexEntry[] {
+    return this.listCounterpartIndices(playerId)
+      .filter((item) => item.tags.includes('DELAY'))
+      .slice(0, limit);
+  }
+
+  public listWitnessObjectiveCounterparts(playerId: string, limit = 16): readonly RelationshipLedgerIndexEntry[] {
+    return this.listCounterpartIndices(playerId)
+      .filter((item) => item.tags.includes('WITNESS'))
+      .slice(0, limit);
+  }
+
+  public listRescueObjectiveCounterparts(playerId: string, limit = 16): readonly RelationshipLedgerIndexEntry[] {
+    return this.listCounterpartIndices(playerId)
+      .filter((item) => item.tags.includes('RESCUE'))
+      .slice(0, limit);
+  }
+
+  public listTestObjectiveCounterparts(playerId: string, limit = 16): readonly RelationshipLedgerIndexEntry[] {
+    return this.listCounterpartIndices(playerId)
+      .filter((item) => item.tags.includes('TEST'))
+      .slice(0, limit);
+  }
+
+  public listNegotiateObjectiveCounterparts(playerId: string, limit = 16): readonly RelationshipLedgerIndexEntry[] {
+    return this.listCounterpartIndices(playerId)
+      .filter((item) => item.tags.includes('NEGOTIATE'))
+      .slice(0, limit);
+  }
+
+  public getGlobalFocusedCounterpart(playerId: string): string | undefined {
+    return this.listChannelSummaries(playerId).find((item) => item.channelId === 'GLOBAL')?.focusedCounterpartId;
+  }
+
+  public getSyndicateFocusedCounterpart(playerId: string): string | undefined {
+    return this.listChannelSummaries(playerId).find((item) => item.channelId === 'SYNDICATE')?.focusedCounterpartId;
+  }
+
+  public getDealRoomFocusedCounterpart(playerId: string): string | undefined {
+    return this.listChannelSummaries(playerId).find((item) => item.channelId === 'DEAL_ROOM')?.focusedCounterpartId;
+  }
+
+  public getDirectFocusedCounterpart(playerId: string): string | undefined {
+    return this.listChannelSummaries(playerId).find((item) => item.channelId === 'DIRECT')?.focusedCounterpartId;
+  }
+
+  public getSpectatorFocusedCounterpart(playerId: string): string | undefined {
+    return this.listChannelSummaries(playerId).find((item) => item.channelId === 'SPECTATOR')?.focusedCounterpartId;
+  }
+
+  public listTrustworthyHelpers(playerId: string, limit = 8): readonly RelationshipLedgerHotCounterpart[] {
+    return this.listHotCounterparts(playerId, 48)
+      .filter((item) => item.trust01 >= this.config.trustThreshold01 && item.rescueDebt01 >= this.config.rescueDebtThreshold01)
+      .slice(0, limit);
+  }
+
+  public listEscalationRivals(playerId: string, limit = 8): readonly RelationshipLedgerHotCounterpart[] {
+    return this.listHotCounterparts(playerId, 48)
+      .filter((item) => item.rivalry01 >= this.config.rivalryThreshold01)
+      .slice(0, limit);
+  }
+
+  public listCallbackReadyCounterparts(playerId: string, limit = 8): readonly RelationshipLedgerHotCounterpart[] {
+    return this.listHotCounterparts(playerId, 48)
+      .filter((item) => item.callbackReadiness01 >= this.config.callbackThreshold01)
+      .slice(0, limit);
+  }
+
+  public getFocusedCounterpartByChannel(playerId: string, channelId: string): string | undefined {
+    return this.getSnapshot(playerId).focusedCounterpartByChannel[channelId];
+  }
+
+  public hasCounterpart(playerId: string, counterpartId: string): boolean {
+    return this.listCounterpartIndices(playerId).some((item) => item.counterpartId === counterpartId);
+  }
+
+  public hasScene(playerId: string, sceneId: string): boolean {
+    return this.ensure(playerId).scenes.has(sceneId);
+  }
+
+  public hasChannel(playerId: string, channelId: string): boolean {
+    return this.ensure(playerId).channels.has(channelId);
+  }
+
+  public totalEventsForCounterpart(playerId: string, counterpartId: string): number {
+    return this.listCounterpartIndices(playerId).find((item) => item.counterpartId === counterpartId)?.eventCount ?? 0;
+  }
+
+  public totalCallbacksForCounterpart(playerId: string, counterpartId: string): number {
+    return (this.ensure(playerId).callbacksByCounterpartId.get(counterpartId) ?? []).length;
+  }
+
+  public latestEventForCounterpart(playerId: string, counterpartId: string): ChatRelationshipEventDescriptor | undefined {
+    return this.listRecentEvents({ playerId, counterpartIds: [counterpartId], maxResults: 1 })[0];
+  }
+
+  public latestEventForChannel(playerId: string, channelId: string): ChatRelationshipEventDescriptor | undefined {
+    return this.listRecentEvents({ playerId, channelId, maxResults: 1 })[0];
+  }
+
+  public latestSceneEvent(playerId: string, sceneId: string): ChatRelationshipEventDescriptor | undefined {
+    return this.listRecentEvents({ playerId, sceneId, maxResults: 1 })[0];
+  }
+
+  public counterpartTags(playerId: string, counterpartId: string): readonly string[] {
+    return this.listCounterpartIndices(playerId).find((item) => item.counterpartId === counterpartId)?.tags ?? [];
+  }
+
+  public counterpartAxes(playerId: string, counterpartId: string): readonly ChatRelationshipAxisId[] {
+    return this.listCounterpartIndices(playerId).find((item) => item.counterpartId === counterpartId)?.dominantAxes ?? [];
+  }
+
+  public exportStats(playerId: string): RelationshipLedgerStats & { exportsStored: number } {
+    const stats = this.stats();
+    return {
+      ...stats,
+      exportsStored: this.listExports(playerId).length,
+    };
+  }
+
+
+
+  // ==========================================================================
+  // MARK: Relationship trajectory tracking
+  // ==========================================================================
+
+  private readonly _trajectories = new Map<string, RelationshipTrajectorySnapshot[]>();
+
+  /** Record a periodic trajectory snapshot for a counterpart relationship. */
+  public recordTrajectorySnapshot(playerId: string, counterpartId: string, state: ChatRelationshipCounterpartState, at: number): void {
+    const key = `${playerId}:${counterpartId}`;
+    const entries = this._trajectories.get(key) ?? [];
+    entries.push({
+      timestamp: at,
+      trust01: trust01FromState(state),
+      rivalry01: rivalry01FromState(state),
+      intensity01: state.intensity01,
+      volatility01: state.volatility01,
+      obsession01: state.vector?.obsession01 ?? 0,
+      stance: state.stance,
+    });
+    if (entries.length > 128) entries.splice(0, entries.length - 128);
+    this._trajectories.set(key, entries);
+  }
+
+  /** Get the trajectory history for a counterpart. */
+  public getTrajectory(playerId: string, counterpartId: string): readonly RelationshipTrajectorySnapshot[] {
+    return Object.freeze(this._trajectories.get(`${playerId}:${counterpartId}`) ?? []);
+  }
+
+  /** Compute trend direction of a relationship trajectory. */
+  public computeTrajectoryTrend(playerId: string, counterpartId: string): RelationshipTrajectoryTrend {
+    const entries = this.getTrajectory(playerId, counterpartId);
+    if (entries.length < 4) return 'INSUFFICIENT_DATA';
+    const recent = entries.slice(-8);
+    const intensityDeltas = recent.slice(1).map((e, i) => e.intensity01 - recent[i]!.intensity01);
+    const avg = intensityDeltas.reduce((s, d) => s + d, 0) / intensityDeltas.length;
+    const vol = Math.sqrt(intensityDeltas.reduce((s, d) => s + (d - avg) ** 2, 0) / intensityDeltas.length);
+    if (vol > 0.15) return 'OSCILLATING';
+    if (avg > 0.04) return 'RISING';
+    if (avg < -0.04) return 'FALLING';
+    if (recent[recent.length - 1]!.intensity01 >= 0.9) return 'ERUPTING';
+    return 'PLATEAUED';
+  }
+
+  // ==========================================================================
+  // MARK: Counterpart cluster detection
+  // ==========================================================================
+
+  /** Detect social clusters — groups of counterparts that interact with the player together. */
+  public detectCounterpartClusters(playerId: string): readonly CounterpartCluster[] {
+    const indices = this.listCounterpartIndices(playerId);
+    const clusters: CounterpartCluster[] = [];
+    const coOccurrence = new Map<string, Map<string, number>>();
+
+    for (const idx of indices) {
+      if (!coOccurrence.has(idx.counterpartId)) coOccurrence.set(idx.counterpartId, new Map());
+    }
+
+    const events = this.listRecentEvents({ playerId, maxResults: 256 });
+    for (let i = 0; i < events.length; i++) {
+      const a = events[i]!;
+      for (let j = i + 1; j < Math.min(i + 8, events.length); j++) {
+        const b = events[j]!;
+        if (!a.counterpartId || !b.counterpartId || a.counterpartId === b.counterpartId) continue;
+        if (Math.abs(a.createdAt - b.createdAt) > 60000) continue;
+        const mapA = coOccurrence.get(a.counterpartId);
+        if (mapA) mapA.set(b.counterpartId, (mapA.get(b.counterpartId) ?? 0) + 1);
+        const mapB = coOccurrence.get(b.counterpartId);
+        if (mapB) mapB.set(a.counterpartId, (mapB.get(a.counterpartId) ?? 0) + 1);
       }
     }
-    if (envelope.primary && envelope.primary.role === 'PRIMARY_AGGRESSOR') {
-      beats.push({ beatIndex: beatIndex++, counterpartId: envelope.primary.counterpartId, role: 'PRIMARY_AGGRESSOR', phase: 'CLIMAX', delayMs: 6000 + beatIndex * 800, visibility: envelope.primary.visibility, toneHint: 'PEAK_PRESSURE' });
+
+    const assigned = new Set<string>();
+    for (const [cpId, neighbors] of coOccurrence) {
+      if (assigned.has(cpId)) continue;
+      const strong = [...neighbors.entries()].filter(([_, count]) => count >= 3).map(([nId]) => nId).filter((nId) => !assigned.has(nId));
+      if (strong.length >= 1) {
+        const members = [cpId, ...strong];
+        for (const m of members) assigned.add(m);
+        const isRivalPack = members.every((m) => {
+          const idx = indices.find((i) => i.counterpartId === m);
+          return idx && idx.rivalry01 >= 0.4;
+        });
+        clusters.push({
+          clusterId: `cluster:${playerId}:${members.join(':')}`,
+          memberIds: Object.freeze(members),
+          coOccurrenceStrength: strong.length >= 3 ? 'STRONG' : strong.length >= 2 ? 'MODERATE' : 'WEAK',
+          clusterRole: isRivalPack ? 'PACK' : 'ENTOURAGE',
+          memberCount: members.length,
+        });
+      }
     }
-    for (const helper of envelope.helpers.slice(0, 1)) {
-      beats.push({ beatIndex: beatIndex++, counterpartId: helper.counterpartId, role: helper.role, phase: 'INTERVENTION', delayMs: 8000 + beatIndex * 600, visibility: helper.visibility, toneHint: 'SUPPORTIVE' });
-    }
-    for (const witness of envelope.witnesses.slice(0, 2)) {
-      beats.push({ beatIndex: beatIndex++, counterpartId: witness.counterpartId, role: witness.role, phase: 'REACTION', delayMs: 10000 + beatIndex * 400, visibility: witness.visibility, toneHint: 'OBSERVATIONAL' });
-    }
-
-    return Object.freeze({
-      sceneId: `scene:${context.now}:${snapshot.playerId ?? 'unknown'}`,
-      playerId: snapshot.playerId ?? context.playerId ?? null,
-      beats: Object.freeze(beats),
-      totalDurationMs: beats.length > 0 ? beats[beats.length - 1]!.delayMs + 3000 : 0,
-      hasClimax: beats.some((b) => b.phase === 'CLIMAX'),
-      hasIntervention: beats.some((b) => b.phase === 'INTERVENTION'),
-      witnessCount: envelope.witnesses.length,
-      envelope,
-    });
+    return Object.freeze(clusters);
   }
 
   // ==========================================================================
-  // MARK: Negotiation resolution
+  // MARK: Relationship decay and dormancy
   // ==========================================================================
 
-  /** Resolve the balance of power and recommended behaviors for a deal room. */
-  public resolveNegotiation(snapshot: ChatRelationshipSnapshot, context: RelationshipResolverContext): NegotiationResolution {
-    const candidates = this.rankSnapshot(snapshot, { ...context, mode: 'DEAL_ROOM' });
-    const aggressors = candidates.filter((c) => c.aggression01 >= 0.4);
-    const helpers = candidates.filter((c) => c.rescueBias01 >= 0.4);
-    const totalAggression = aggressors.reduce((s, c) => s + c.aggression01, 0);
-    const totalRescue = helpers.reduce((s, c) => s + c.rescueBias01, 0);
-    const balanceOfPower01 = totalAggression + totalRescue > 0 ? totalAggression / (totalAggression + totalRescue) : 0.5;
-    const playerIsSqueezing = balanceOfPower01 >= 0.65;
-    const playerIsWinning = balanceOfPower01 <= 0.35;
+  /** Compute decay for a relationship entry based on elapsed time since last interaction. */
+  public computeRelationshipDecay(entry: RelationshipLedgerIndexEntry, elapsedMs: number): number {
+    const baseHalfLife = entry.rivalry01 >= 0.5 ? 1000 * 60 * 60 * 96 : entry.trust01 >= 0.5 ? 1000 * 60 * 60 * 72 : 1000 * 60 * 60 * 24;
+    return Math.max(0.02, entry.intensity01 * Math.pow(2, -(elapsedMs / baseHalfLife)));
+  }
 
-    return Object.freeze({
-      balanceOfPower01,
-      playerIsSqueezing, playerIsWinning,
-      playerIsStalling: !playerIsSqueezing && !playerIsWinning && candidates.length >= 2,
-      dominantCounterpartId: aggressors[0]?.counterpartId,
-      recommendedPlayerBehavior: playerIsSqueezing ? 'CONCEDE_OR_COUNTER' : playerIsWinning ? 'PRESS_ADVANTAGE' : 'HOLD_POSITION',
-      leverageCounterpartIds: Object.freeze(aggressors.map((c) => c.counterpartId)),
-      supportCounterpartIds: Object.freeze(helpers.map((c) => c.counterpartId)),
-    });
+  /** Check if a relationship should be marked dormant. */
+  public shouldMarkDormant(entry: RelationshipLedgerIndexEntry, now: number): boolean {
+    const elapsed = now - entry.lastTouchedAt;
+    return elapsed > this.config.retention.pruneIfIdleMs && entry.intensity01 < 0.2;
   }
 
   // ==========================================================================
-  // MARK: Post-run resolution ritual
+  // MARK: Ledger compaction
   // ==========================================================================
 
-  /** Produce a post-run social resolution after a run ends. */
-  public resolvePostRun(snapshot: ChatRelationshipSnapshot, context: RelationshipResolverContext): PostRunResolution {
-    const candidates = this.rankSnapshot(snapshot, { ...context, mode: 'POST_RUN' });
-    const debriefAssignments = candidates.slice(0, 3).map((c) => ({
-      counterpartId: c.counterpartId, role: c.role, shouldDebrief: c.selectionScore01 >= 0.35,
-      debriefTone: c.role === 'PRIMARY_HELPER' ? 'COMPASSIONATE' as const : c.role === 'PRIMARY_AGGRESSOR' ? 'GRUDGING' as const : 'REFLECTIVE' as const,
-    }));
-    const grudgeCarries = candidates.filter((c) => c.escalation.selectedTier === 'HUNT' || c.escalation.selectedTier === 'PUBLIC_SWARM' || c.escalation.selectedTier === 'BOSS_WINDOW');
-    const legendNominations = candidates.filter((c) => c.witnessWeight01 >= 0.7);
-    const silenceCommitments = candidates.filter((c) => c.escalation.shouldPreferSilence);
-
-    return Object.freeze({
-      debriefAssignments: Object.freeze(debriefAssignments),
-      grudgeCarryIds: Object.freeze(grudgeCarries.map((c) => c.counterpartId)),
-      legendNominationIds: Object.freeze(legendNominations.map((c) => c.counterpartId)),
-      silenceCommitmentIds: Object.freeze(silenceCommitments.map((c) => c.counterpartId)),
-      unfinishedBusinessCount: candidates.filter((c) => c.callback.tier !== 'NONE').length,
-    });
-  }
-
-  // ==========================================================================
-  // MARK: Resolution explanation layer
-  // ==========================================================================
-
-  /** Generate a human-readable explanation for a resolution decision. */
-  public explainResolution(resolution: RelationshipResolution): string {
-    const parts: string[] = [];
-    parts.push(`Counterpart: ${resolution.counterpartId} (${resolution.counterpartKind})`);
-    parts.push(`Role: ${resolution.role}, Visibility: ${resolution.visibility}`);
-    parts.push(`Score: ${resolution.selectionScore01.toFixed(3)}, Aggression: ${resolution.aggression01.toFixed(2)}, Rescue: ${resolution.rescueBias01.toFixed(2)}`);
-    parts.push(`Escalation: ${resolution.escalation.selectedTier} (${resolution.escalation.selectedScore01.toFixed(2)})`);
-    if (resolution.callback.tier !== 'NONE') parts.push(`Callback: ${resolution.callback.tier}`);
-    if (resolution.escalation.shouldPreferSilence) parts.push('Prefers silence');
-    if (resolution.escalation.shouldForcePublicWitness) parts.push('Forces public witness');
-    return parts.join(' | ');
-  }
-
-
-
-
-  // ==========================================================================
-  // MARK: Mode-specific resolution profiles
-  // ==========================================================================
-
-  private static readonly MODE_RESOLUTION_PROFILES: Readonly<Record<string, ModeResolutionProfile>> = Object.freeze({
-    'GO_ALONE': { modeId: 'GO_ALONE', label: 'Empire', maxActiveCounterparts: 2, silenceWeight01: 0.65, encounterDepth01: 0.8, lonelinessMechanic: true, teamDynamics: false, mysterySignals: false, escalationSpeed01: 0.5 },
-    'HEAD_TO_HEAD': { modeId: 'HEAD_TO_HEAD', label: 'Predator', maxActiveCounterparts: 2, silenceWeight01: 0.35, encounterDepth01: 0.5, lonelinessMechanic: false, teamDynamics: false, mysterySignals: false, escalationSpeed01: 0.8 },
-    'TEAM_UP': { modeId: 'TEAM_UP', label: 'Syndicate', maxActiveCounterparts: 5, silenceWeight01: 0.2, encounterDepth01: 0.6, lonelinessMechanic: false, teamDynamics: true, mysterySignals: false, escalationSpeed01: 0.55 },
-    'CHASE_A_LEGEND': { modeId: 'CHASE_A_LEGEND', label: 'Phantom', maxActiveCounterparts: 3, silenceWeight01: 0.85, encounterDepth01: 0.4, lonelinessMechanic: false, teamDynamics: false, mysterySignals: true, escalationSpeed01: 0.3 },
-  });
-
-  /** Get mode-specific resolution profile. */
-  public getModeResolutionProfile(modeId: string | undefined): ModeResolutionProfile {
-    return RelationshipResolver.MODE_RESOLUTION_PROFILES[modeId ?? ''] ?? RelationshipResolver.MODE_RESOLUTION_PROFILES['GO_ALONE']!;
-  }
-
-  /** Resolve snapshot with mode-aware counterpart limits and behavior. */
-  public resolveSnapshotWithMode(snapshot: ChatRelationshipSnapshot, context: RelationshipResolverContext, modeId: string): RelationshipResolutionEnvelope {
-    const profile = this.getModeResolutionProfile(modeId);
-    const adjusted = { ...context, maxCandidates: Math.min(context.maxCandidates ?? 12, profile.maxActiveCounterparts * 2) };
-    return this.resolveSnapshot(snapshot, adjusted);
-  }
-
-  // ==========================================================================
-  // MARK: Witness resolution system
-  // ==========================================================================
-
-  /** Resolve witness behaviors for an event. */
-  public resolveWitnesses(candidates: readonly RelationshipResolution[], context: RelationshipResolverContext): readonly WitnessResolution[] {
-    const witnesses = candidates.filter((c) => c.role === 'PRIMARY_WITNESS' || c.role === 'SECONDARY_WITNESS');
-    return Object.freeze(witnesses.map((w) => {
-      const reactionType = this.inferWitnessReaction(w, context);
-      const memoryCommitment = w.witnessWeight01 >= 0.5;
-      const socialPropagation = w.visibility === 'PUBLIC_STAGE' && w.witnessWeight01 >= 0.6;
-      return {
-        counterpartId: w.counterpartId,
-        witnessRole: w.role as 'PRIMARY_WITNESS' | 'SECONDARY_WITNESS',
-        reactionType,
-        intensity01: w.witnessWeight01,
-        memoryCommitment,
-        socialPropagation,
-        delayMs: w.role === 'PRIMARY_WITNESS' ? 1500 : 3500,
-        narrativeWeight01: w.witnessWeight01 * (reactionType === 'AWE' ? 1.2 : reactionType === 'HORROR' ? 1.3 : 0.8),
-      };
-    }));
-  }
-
-  private inferWitnessReaction(witness: RelationshipResolution, context: RelationshipResolverContext): WitnessReactionType {
-    if (witness.aggression01 >= 0.5) return 'GLEE';
-    if (witness.rescueBias01 >= 0.5) return 'HORROR';
-    if (witness.witnessWeight01 >= 0.7) return 'AWE';
-    if (witness.embarrassmentRisk01 >= 0.5) return 'STRATEGIC_NOTE';
-    return 'INDIFFERENCE';
-  }
-
-  // ==========================================================================
-  // MARK: Multi-counterpart timing coordination
-  // ==========================================================================
-
-  /** Coordinate timing across multiple counterparts to prevent pile-on or awkward overlap. */
-  public coordinateCounterpartTiming(resolutions: readonly RelationshipResolution[]): readonly CoordinatedTimingEntry[] {
-    if (resolutions.length <= 1) {
-      return resolutions.map((r) => ({ counterpartId: r.counterpartId, role: r.role, assignedBeat: 0, delayMs: 0, silenceWindowMs: 0 }));
-    }
-    const sorted = [...resolutions].sort((a, b) => {
-      if (a.role === 'PRIMARY_AGGRESSOR') return -1;
-      if (b.role === 'PRIMARY_AGGRESSOR') return 1;
-      return b.selectionScore01 - a.selectionScore01;
-    });
-    return Object.freeze(sorted.map((r, i) => ({
-      counterpartId: r.counterpartId,
-      role: r.role,
-      assignedBeat: i,
-      delayMs: i * 2800 + (r.role === 'PRIMARY_HELPER' ? 6000 : 0) + (r.role === 'PRIMARY_WITNESS' ? 9000 : 0),
-      silenceWindowMs: i === 0 ? 0 : 1500,
+  /** Compact the ledger by summarizing least-relevant counterpart entries. */
+  public compactLedger(playerId: string, retainTop = 32): readonly CompactedRelationshipSummary[] {
+    const indices = this.listCounterpartIndices(playerId);
+    if (indices.length <= retainTop) return [];
+    const sorted = [...indices].sort((a, b) => b.intensity01 - a.intensity01);
+    const toCompact = sorted.slice(retainTop);
+    return Object.freeze(toCompact.map((idx) => ({
+      counterpartId: idx.counterpartId,
+      counterpartKind: idx.counterpartKind,
+      peakIntensity01: idx.intensity01,
+      lastTouchedAt: idx.lastTouchedAt,
+      eventCount: idx.eventCount,
+      stance: idx.stance,
+      compactedAt: Date.now(),
     })));
   }
 
+
+
+
   // ==========================================================================
-  // MARK: Resolution history and trajectory
+  // MARK: Cross-player relationship graph
   // ==========================================================================
 
-  private readonly _resolutionHistory = new Map<string, ResolutionHistoryEntry[]>();
-
-  /** Record a resolution decision for historical analysis. */
-  public recordResolution(playerId: string, envelope: RelationshipResolutionEnvelope, at: number): void {
-    const entries = this._resolutionHistory.get(playerId) ?? [];
-    entries.push({
-      timestamp: at,
-      primaryCounterpartId: envelope.primary?.counterpartId,
-      primaryRole: envelope.primary?.role,
-      helperCount: envelope.helpers.length,
-      rivalCount: envelope.rivals.length,
-      witnessCount: envelope.witnesses.length,
-      hasRescue: envelope.rescueWindow?.shouldRescue ?? false,
+  /** Compare how two players relate to the same counterpart. */
+  public projectCrossPlayerRelationship(playerA: string, playerB: string, counterpartId: string): CrossPlayerRelationshipView | undefined {
+    const stateA = this.getCounterpartState(playerA, counterpartId);
+    const stateB = this.getCounterpartState(playerB, counterpartId);
+    if (!stateA || !stateB) return undefined;
+    const trustDelta = Math.abs(trust01FromState(stateA) - trust01FromState(stateB));
+    const rivalryDelta = Math.abs(rivalry01FromState(stateA) - rivalry01FromState(stateB));
+    const intensityDelta = Math.abs(stateA.intensity01 - stateB.intensity01);
+    return Object.freeze({
+      counterpartId,
+      playerAId: playerA,
+      playerBId: playerB,
+      stanceA: stateA.stance,
+      stanceB: stateB.stance,
+      trustDelta01: trustDelta,
+      rivalryDelta01: rivalryDelta,
+      intensityDelta01: intensityDelta,
+      asymmetryScore01: clamp01((trustDelta + rivalryDelta + intensityDelta) / 3),
+      shareRival: rivalry01FromState(stateA) >= 0.4 && rivalry01FromState(stateB) >= 0.4,
+      shareHelper: trust01FromState(stateA) >= 0.4 && trust01FromState(stateB) >= 0.4,
     });
-    if (entries.length > 96) entries.splice(0, entries.length - 96);
-    this._resolutionHistory.set(playerId, entries);
-  }
-
-  /** Get resolution history for a player. */
-  public getResolutionHistory(playerId: string): readonly ResolutionHistoryEntry[] {
-    return Object.freeze(this._resolutionHistory.get(playerId) ?? []);
-  }
-
-  /** Compute the ratio of scenes with helpers vs rivals over recent history. */
-  public helperToRivalRatio(playerId: string): number {
-    const history = this.getResolutionHistory(playerId);
-    if (history.length === 0) return 0.5;
-    const totalHelpers = history.reduce((s, h) => s + h.helperCount, 0);
-    const totalRivals = history.reduce((s, h) => s + h.rivalCount, 0);
-    const total = totalHelpers + totalRivals;
-    return total > 0 ? totalHelpers / total : 0.5;
   }
 
   // ==========================================================================
-  // MARK: Resolution diagnostic
+  // MARK: Event pattern recognition
   // ==========================================================================
 
-  /** Generate a complete diagnostic for a resolution envelope. */
-  public generateResolutionDiagnostic(envelope: RelationshipResolutionEnvelope): readonly string[] {
+  /** Detect repeating event patterns for a player-counterpart pair. */
+  public detectEventPatterns(playerId: string, counterpartId: string): readonly EventPattern[] {
+    const events = this.listRecentEvents({ playerId, counterpartIds: [counterpartId], maxResults: 128 });
+    const patterns: EventPattern[] = [];
+    const typePairs = new Map<string, number>();
+    for (let i = 0; i < events.length - 1; i++) {
+      const pair = `${events[i]!.eventType}:${events[i + 1]!.eventType}`;
+      typePairs.set(pair, (typePairs.get(pair) ?? 0) + 1);
+    }
+    for (const [pair, count] of typePairs) {
+      if (count >= 3) {
+        const [trigger, response] = pair.split(':');
+        patterns.push({
+          patternId: `pattern:${playerId}:${counterpartId}:${pair}`,
+          triggerEventType: trigger!, responseEventType: response!,
+          confidence01: Math.min(1, count / 8), recurrenceCount: count,
+          description: `After ${trigger}, ${response} follows ${count} times`,
+        });
+      }
+    }
+    return Object.freeze(patterns);
+  }
+
+
+  // ==========================================================================
+  // MARK: Counterpart event tails
+  // ==========================================================================
+
+  public listCounterpartEventTail(playerId: string, counterpartId: string, maxResults = this.config.retention.maxEventsPerCounterpart): readonly ChatRelationshipEventDescriptor[] {
+    const bucket = this.ensure(playerId);
+    return (bucket.eventsByCounterpartId.get(counterpartId) ?? []).slice(0, maxResults);
+  }
+
+  public listChannelEventTail(playerId: string, channelId: string, maxResults = this.config.retention.maxSceneTail): readonly ChatRelationshipEventDescriptor[] {
+    const bucket = this.ensure(playerId);
+    return (bucket.channelEventTails.get(channelId) ?? []).slice(0, maxResults);
+  }
+
+  public listSceneEventTail(playerId: string, sceneId: string, maxResults = this.config.retention.maxSceneTail): readonly ChatRelationshipEventDescriptor[] {
+    const bucket = this.ensure(playerId);
+    return (bucket.sceneEventTails.get(sceneId) ?? []).slice(0, maxResults);
+  }
+
+  public summarizeCounterpartWindow(playerId: string, counterpartId: string, maxResults = 24): RelationshipLedgerCounterpartWindow | undefined {
+    const events = this.listCounterpartEventTail(playerId, counterpartId, maxResults);
+    if (!events.length) return undefined;
+    const publicWitnessEvents = events.filter((event) => publicWitness01(event) >= 0.5).length;
+    const eventIntensity = events.map((event) => eventIntensity01(event));
+    const disruption = average(events.map((event) => eventDisruption01(event)));
+    return {
+      counterpartId,
+      totalEvents: events.length,
+      windowEvents: events,
+      firstEventAt: events[events.length - 1]?.createdAt,
+      lastEventAt: events[0]?.createdAt,
+      publicWitnessShare01: clamp01(safeRatio(publicWitnessEvents, events.length)),
+      avgEventIntensity01: clamp01(average(eventIntensity)),
+      disruption01: clamp01(disruption),
+    };
+  }
+
+  // ==========================================================================
+  // MARK: Counterpart health and dossiers
+  // ==========================================================================
+
+  public computeCounterpartHealth(playerId: string, counterpartId: string): RelationshipLedgerCounterpartHealth | undefined {
+    const state = this.getCounterpartState(playerId, counterpartId);
+    const index = this.listCounterpartIndices(playerId).find((item) => item.counterpartId === counterpartId);
+    if (!state || !index) return undefined;
+    const window = this.summarizeCounterpartWindow(playerId, counterpartId, 24);
+    const freshness01 = normalizeWindowScore(index.lastTouchedAt, now(), this.config.hotCounterpartWindowMs);
+    const decayAdjustedIntensity01 = clamp01(this.computeRelationshipDecay(index, Math.max(0, now() - index.lastTouchedAt)));
+    const pressure01 = clamp01(pressureScore01(index.lastPressureBand) * 0.55 + (window?.disruption01 ?? 0) * 0.20 + (window?.publicWitnessShare01 ?? 0) * 0.25);
+    const witnessExposure01 = clamp01(window?.publicWitnessShare01 ?? 0);
+    const stability01 = clamp01(1 - state.volatility01 * 0.70 - pressure01 * 0.15 + trust01FromState(state) * 0.15);
+    const dormancyRisk01 = clamp01((1 - freshness01) * 0.75 + (1 - decayAdjustedIntensity01) * 0.25);
+    const objectiveScore = objectivePriority01(state.objective);
+    const priorityScore01 = clamp01(
+      state.intensity01 * 0.22 +
+      rivalry01FromState(state) * 0.16 +
+      rescueDebt01FromState(state) * 0.14 +
+      callbackReadiness01FromState(state) * 0.12 +
+      pressure01 * 0.12 +
+      objectiveScore * 0.10 +
+      stanceThreat01(state.stance) * 0.08 +
+      freshness01 * 0.06
+    );
+    const rationale: string[] = [];
+    if (rivalry01FromState(state) >= this.config.rivalryThreshold01) rationale.push('rivalry_above_threshold');
+    if (rescueDebt01FromState(state) >= this.config.rescueDebtThreshold01) rationale.push('rescue_debt_open');
+    if (callbackReadiness01FromState(state) >= this.config.callbackThreshold01) rationale.push('callback_available');
+    if (witnessExposure01 >= this.config.highHeatThreshold01) rationale.push('public_heat_high');
+    if (state.volatility01 >= 0.55) rationale.push('volatility_high');
+    if (freshness01 <= 0.20 && decayAdjustedIntensity01 >= 0.45) rationale.push('important_but_fading');
+    const recommendedAction: RelationshipLedgerActionLane =
+      rescueDebt01FromState(state) >= this.config.rescueDebtThreshold01 ? 'RESCUE' :
+      callbackReadiness01FromState(state) >= this.config.callbackThreshold01 && freshness01 < 0.45 ? 'RECALL' :
+      rivalry01FromState(state) >= this.config.rivalryThreshold01 || pressure01 >= 0.72 ? 'ESCALATE' :
+      stability01 < 0.38 ? 'STABILIZE' :
+      decayAdjustedIntensity01 < 0.16 ? 'ARCHIVE' : 'OBSERVE';
+
+    return {
+      counterpartId,
+      counterpartKind: state.counterpartKind,
+      stance: state.stance,
+      trust01: trust01FromState(state),
+      rivalry01: rivalry01FromState(state),
+      rescueDebt01: rescueDebt01FromState(state),
+      callbackReadiness01: callbackReadiness01FromState(state),
+      intensity01: state.intensity01,
+      volatility01: state.volatility01,
+      freshness01,
+      decayAdjustedIntensity01,
+      pressure01,
+      witnessExposure01,
+      stability01,
+      dormancyRisk01,
+      objectivePriority01: objectiveScore,
+      priorityScore01,
+      recommendedAction,
+      rationale,
+    };
+  }
+
+  public buildCounterpartDossier(playerId: string, counterpartId: string): RelationshipLedgerCounterpartDossier | undefined {
+    const state = this.getCounterpartState(playerId, counterpartId);
+    const index = this.listCounterpartIndices(playerId).find((item) => item.counterpartId === counterpartId);
+    const health = this.computeCounterpartHealth(playerId, counterpartId);
+    if (!state || !index || !health) return undefined;
+    const recentEvents = this.listCounterpartEventTail(playerId, counterpartId, 24);
+    const relatedSceneIds = uniqStrings(recentEvents.map((event) => safeSceneId(event)));
+    const relatedChannelIds = uniqStrings(recentEvents.map((event) => safeChannelId(event)));
+    return {
+      counterpartId,
+      counterpartKind: state.counterpartKind,
+      state,
+      index,
+      health,
+      legacy: this.getCounterpartLegacyProjection(playerId, counterpartId),
+      npcSignal: this.projectNpcSignal(playerId, counterpartId),
+      callbacks: this.recallCallbacks(playerId, counterpartId),
+      recentEvents,
+      scenes: relatedSceneIds.map((sceneId) => this.listSceneSummaries(playerId).find((scene) => scene.sceneId === sceneId)).filter((scene): scene is RelationshipLedgerSceneSummary => !!scene),
+      channels: relatedChannelIds.map((channelId) => this.listChannelSummaries(playerId).find((channel) => channel.channelId === channelId)).filter((channel): channel is RelationshipLedgerChannelSummary => !!channel),
+      trajectory: this.getTrajectory(playerId, counterpartId),
+      trajectoryTrend: this.computeTrajectoryTrend(playerId, counterpartId),
+      eventPatterns: this.detectEventPatterns(playerId, counterpartId),
+      objectiveTags: dominantObjectiveTags(index),
+    };
+  }
+
+  public buildCounterpartDossiers(playerId: string, limit = 64): readonly RelationshipLedgerCounterpartDossier[] {
+    return this.listCounterpartIndices(playerId)
+      .slice(0, limit)
+      .map((entry) => this.buildCounterpartDossier(playerId, entry.counterpartId))
+      .filter((value): value is RelationshipLedgerCounterpartDossier => !!value)
+      .sort((a, b) => b.health.priorityScore01 - a.health.priorityScore01 || b.health.intensity01 - a.health.intensity01);
+  }
+
+  public listPriorityCounterparts(playerId: string, limit = 16): readonly RelationshipLedgerCounterpartHealth[] {
+    return this.listCounterpartIndices(playerId)
+      .map((entry) => this.computeCounterpartHealth(playerId, entry.counterpartId))
+      .filter((value): value is RelationshipLedgerCounterpartHealth => !!value)
+      .sort((a, b) => b.priorityScore01 - a.priorityScore01 || b.intensity01 - a.intensity01)
+      .slice(0, limit);
+  }
+
+  public listHighHeatCounterparts(playerId: string, limit = 16): readonly RelationshipLedgerCounterpartHealth[] {
+    return this.listPriorityCounterparts(playerId, Math.max(limit * 4, 32))
+      .filter((item) => item.witnessExposure01 >= this.config.highHeatThreshold01 || item.pressure01 >= this.config.highHeatThreshold01)
+      .slice(0, limit);
+  }
+
+  public listDormantCounterparts(playerId: string, limit = 16): readonly RelationshipLedgerCounterpartHealth[] {
+    return this.listPriorityCounterparts(playerId, 128)
+      .filter((item) => this.shouldMarkDormant({
+        ...this.listCounterpartIndices(playerId).find((entry) => entry.counterpartId === item.counterpartId)!,
+      }, now()))
+      .slice(0, limit);
+  }
+
+  public listFreshCounterparts(playerId: string, limit = 16): readonly RelationshipLedgerCounterpartHealth[] {
+    return this.listPriorityCounterparts(playerId, 128)
+      .filter((item) => item.freshness01 >= 0.55)
+      .slice(0, limit);
+  }
+
+  public listCounterpartsByKind(playerId: string, kind: ChatRelationshipCounterpartKind, limit = 16): readonly RelationshipLedgerIndexEntry[] {
+    return this.listCounterpartIndices(playerId)
+      .filter((entry) => entry.counterpartKind === kind)
+      .slice(0, limit);
+  }
+
+  public listCounterpartsByObjective(playerId: string, objective: string, limit = 16): readonly RelationshipLedgerIndexEntry[] {
+    return this.listCounterpartIndices(playerId)
+      .filter((entry) => entry.tags.includes(objective))
+      .slice(0, limit);
+  }
+
+  public listCounterpartsByAxis(playerId: string, axis: ChatRelationshipAxisId, limit = 16): readonly RelationshipLedgerIndexEntry[] {
+    return this.listCounterpartIndices(playerId)
+      .filter((entry) => entry.dominantAxes.includes(axis))
+      .slice(0, limit);
+  }
+
+  // ==========================================================================
+  // MARK: Scene and channel views
+  // ==========================================================================
+
+  public buildScenePressureView(playerId: string, sceneId: string): RelationshipLedgerScenePressureView | undefined {
+    const summary = this.listSceneSummaries(playerId).find((item) => item.sceneId === sceneId);
+    if (!summary) return undefined;
+    const events = this.listSceneEventTail(playerId, sceneId, this.config.retention.maxSceneTail);
+    const witnessDensity01 = clamp01(safeRatio(summary.witnessCount, Math.max(1, events.length)));
+    const disruption01 = clamp01(average(events.map((event) => eventDisruption01(event))));
+    return {
+      sceneId,
+      playerId,
+      counterpartIds: summary.counterpartIds,
+      eventCount: events.length,
+      firstSeenAt: summary.firstSeenAt,
+      lastSeenAt: summary.lastSeenAt,
+      pressure01: clamp01(pressureScore01(summary.pressurePeak) * 0.60 + disruption01 * 0.20 + summary.publicHeat01 * 0.20),
+      publicHeat01: summary.publicHeat01,
+      witnessDensity01,
+      disruption01,
+      dominantPressureBand: summary.pressurePeak,
+    };
+  }
+
+  public listScenePressureViews(playerId: string, limit = 32): readonly RelationshipLedgerScenePressureView[] {
+    return this.listSceneSummaries(playerId)
+      .map((scene) => this.buildScenePressureView(playerId, scene.sceneId))
+      .filter((value): value is RelationshipLedgerScenePressureView => !!value)
+      .sort((a, b) => b.pressure01 - a.pressure01 || b.publicHeat01 - a.publicHeat01)
+      .slice(0, limit);
+  }
+
+  public listHighHeatScenes(playerId: string, limit = 16): readonly RelationshipLedgerScenePressureView[] {
+    return this.listScenePressureViews(playerId, Math.max(limit * 4, 32))
+      .filter((scene) => scene.publicHeat01 >= this.config.highHeatThreshold01 || scene.pressure01 >= this.config.highHeatThreshold01)
+      .slice(0, limit);
+  }
+
+  public buildChannelFocusContinuity(playerId: string, channelId: string): RelationshipLedgerChannelFocusContinuity | undefined {
+    const summary = this.listChannelSummaries(playerId).find((item) => item.channelId === channelId);
+    if (!summary) return undefined;
+    const events = this.listChannelEventTail(playerId, channelId, this.config.retention.maxSceneTail);
+    const uniqueFocusCount = uniqStrings(events.map((event) => event.counterpartId)).length;
+    const continuity01 = clamp01(1 - safeRatio(Math.max(0, uniqueFocusCount - 1), Math.max(1, events.length)));
+    const recency01 = normalizeWindowScore(summary.lastEventAt, now(), this.config.hotCounterpartWindowMs * 2);
+    const pressure01 = clamp01(average(events.map((event) => pressureScore01(event.pressureBand))));
+    return {
+      channelId,
+      focusedCounterpartId: summary.focusedCounterpartId,
+      continuity01,
+      recency01,
+      publicHeat01: summary.avgPublicWitness01,
+      pressure01,
+      eventCount: summary.totalEvents,
+      lastEventAt: summary.lastEventAt,
+    };
+  }
+
+  public listChannelFocusContinuity(playerId: string): readonly RelationshipLedgerChannelFocusContinuity[] {
+    return this.listChannelSummaries(playerId)
+      .map((channel) => this.buildChannelFocusContinuity(playerId, channel.channelId))
+      .filter((value): value is RelationshipLedgerChannelFocusContinuity => !!value)
+      .sort((a, b) => b.pressure01 - a.pressure01 || b.recency01 - a.recency01);
+  }
+
+  // ==========================================================================
+  // MARK: Narrative state and network summary
+  // ==========================================================================
+
+  public listObjectiveScores(playerId: string): readonly RelationshipLedgerObjectiveScore[] {
+    const grouped = new Map<string, RelationshipLedgerIndexEntry[]>();
+    for (const entry of this.listCounterpartIndices(playerId)) {
+      const objectives = dominantObjectiveTags(entry);
+      for (const objective of objectives.length ? objectives : ['PRESSURE']) {
+        const bucket = grouped.get(objective) ?? [];
+        bucket.push(entry);
+        grouped.set(objective, bucket);
+      }
+    }
+    return [...grouped.entries()]
+      .map(([objective, entries]) => ({
+        objective,
+        counterpartCount: entries.length,
+        avgIntensity01: clamp01(average(entries.map((entry) => entry.intensity01))),
+        avgPriority01: objectivePriority01(objective),
+      }))
+      .sort((a, b) => b.avgPriority01 - a.avgPriority01 || b.counterpartCount - a.counterpartCount);
+  }
+
+  public listAxisScores(playerId: string): readonly RelationshipLedgerAxisScore[] {
+    const grouped = new Map<ChatRelationshipAxisId, RelationshipLedgerIndexEntry[]>();
+    for (const entry of this.listCounterpartIndices(playerId)) {
+      for (const axis of entry.dominantAxes) {
+        const bucket = grouped.get(axis) ?? [];
+        bucket.push(entry);
+        grouped.set(axis, bucket);
+      }
+    }
+    return [...grouped.entries()]
+      .map(([axis, entries]) => ({
+        axis,
+        counterpartCount: entries.length,
+        avgIntensity01: clamp01(average(entries.map((entry) => entry.intensity01))),
+      }))
+      .sort((a, b) => b.avgIntensity01 - a.avgIntensity01 || b.counterpartCount - a.counterpartCount);
+  }
+
+  public summarizeNetwork(playerId: string): RelationshipLedgerNetworkSummary {
+    const indices = this.listCounterpartIndices(playerId);
+    const hot = this.listHighHeatCounterparts(playerId, 256);
+    const helpers = indices.filter((entry) => entry.counterpartKind === 'HELPER').length;
+    const rivals = indices.filter((entry) => entry.counterpartKind === 'RIVAL' || entry.counterpartKind === 'BOT').length;
+    return {
+      playerId,
+      counterpartCount: indices.length,
+      helperCount: helpers,
+      rivalCount: rivals,
+      hotCount: hot.length,
+      highHeatSceneCount: this.listHighHeatScenes(playerId, 256).length,
+      callbackReadyCount: this.listCallbackReadyCounterparts(playerId, 256).length,
+      averageIntensity01: clamp01(average(indices.map((entry) => entry.intensity01))),
+      averageTrust01: clamp01(average(indices.map((entry) => entry.trust01))),
+      averageRivalry01: clamp01(average(indices.map((entry) => entry.rivalry01))),
+      averageVolatility01: clamp01(average(indices.map((entry) => entry.volatility01))),
+    };
+  }
+
+  public buildNarrativeState(playerId: string): RelationshipLedgerNarrativeState {
+    const priority = this.listPriorityCounterparts(playerId, 1)[0];
+    const highHeatScene = this.listHighHeatScenes(playerId, 1)[0];
+    const hotChannel = this.listChannelFocusContinuity(playerId)[0];
+    const indices = this.listCounterpartIndices(playerId);
+    const dominantActionLane: RelationshipLedgerActionLane =
+      (priority?.recommendedAction ?? 'OBSERVE');
+    return {
+      playerId,
+      hottestCounterpartId: priority?.counterpartId,
+      hottestSceneId: highHeatScene?.sceneId,
+      hottestChannelId: hotChannel?.channelId,
+      callbackPressure01: clamp01(average(indices.map((entry) => entry.callbackReadiness01))),
+      rescuePressure01: clamp01(average(indices.map((entry) => entry.rescueDebt01))),
+      rivalryPressure01: clamp01(average(indices.map((entry) => entry.rivalry01))),
+      trustSurface01: clamp01(average(indices.map((entry) => entry.trust01))),
+      volatilitySurface01: clamp01(average(indices.map((entry) => entry.volatility01))),
+      publicExposure01: clamp01(average(this.listChannelSummaries(playerId).map((channel) => channel.avgPublicWitness01))),
+      dominantActionLane,
+    };
+  }
+
+  public scanLedgerAnomalies(playerId: string): readonly RelationshipLedgerAnomaly[] {
+    const anomalies: RelationshipLedgerAnomaly[] = [];
+    for (const health of this.listPriorityCounterparts(playerId, 256)) {
+      if (health.volatility01 >= 0.72 && health.intensity01 >= 0.60) {
+        anomalies.push({
+          anomalyId: `anomaly:${playerId}:volatility:${health.counterpartId}`,
+          severity01: clamp01(health.volatility01 * 0.65 + health.intensity01 * 0.35),
+          kind: 'VOLATILITY_SPIKE',
+          counterpartId: health.counterpartId,
+          message: `${health.counterpartId} is running a high-volatility lane under sustained intensity.`,
+        });
+      }
+      if (health.witnessExposure01 >= this.config.highHeatThreshold01 && health.pressure01 >= 0.60) {
+        anomalies.push({
+          anomalyId: `anomaly:${playerId}:heat:${health.counterpartId}`,
+          severity01: clamp01(health.witnessExposure01 * 0.55 + health.pressure01 * 0.45),
+          kind: 'PUBLIC_HEAT_SPIKE',
+          counterpartId: health.counterpartId,
+          message: `${health.counterpartId} is accumulating public heat and pressure at the same time.`,
+        });
+      }
+      const callbackCount = this.totalCallbacksForCounterpart(playerId, health.counterpartId);
+      if (callbackCount >= this.config.retention.maxCallbacksPerCounterpart) {
+        anomalies.push({
+          anomalyId: `anomaly:${playerId}:callback:${health.counterpartId}`,
+          severity01: 0.78,
+          kind: 'CALLBACK_OVERFLOW',
+          counterpartId: health.counterpartId,
+          message: `${health.counterpartId} has saturated callback retention and should be reviewed for pruning or export.`,
+        });
+      }
+      if (health.dormancyRisk01 >= 0.80 && health.priorityScore01 >= 0.55) {
+        anomalies.push({
+          anomalyId: `anomaly:${playerId}:dormant:${health.counterpartId}`,
+          severity01: clamp01(health.dormancyRisk01 * 0.50 + health.priorityScore01 * 0.50),
+          kind: 'DORMANT_IMPORTANT',
+          counterpartId: health.counterpartId,
+          message: `${health.counterpartId} is cooling off while still carrying priority-level narrative weight.`,
+        });
+      }
+      if (health.rivalry01 >= this.config.rivalryThreshold01 && health.rescueDebt01 >= this.config.rescueDebtThreshold01) {
+        anomalies.push({
+          anomalyId: `anomaly:${playerId}:collision:${health.counterpartId}`,
+          severity01: clamp01(health.rivalry01 * 0.5 + health.rescueDebt01 * 0.5),
+          kind: 'RIVAL_RESCUE_COLLISION',
+          counterpartId: health.counterpartId,
+          message: `${health.counterpartId} is simultaneously reading as rival-hot and rescue-open.`,
+        });
+      }
+    }
+    return anomalies.sort((a, b) => b.severity01 - a.severity01 || a.anomalyId.localeCompare(b.anomalyId));
+  }
+
+  // ==========================================================================
+  // MARK: Ledger diagnostic
+  // ==========================================================================
+
+  /** Build a comprehensive diagnostic of the ledger state for a player. */
+  public buildLedgerDiagnostic(playerId: string): readonly string[] {
+    const indices = this.listCounterpartIndices(playerId);
+    const hotCounterparts = this.listHotCounterparts(playerId);
+    const channels = this.listChannelSummaries(playerId);
+    const stats = this.stats();
+    const narrative = this.buildNarrativeState(playerId);
+    const network = this.summarizeNetwork(playerId);
+    const anomalies = this.scanLedgerAnomalies(playerId).slice(0, 8);
     const lines: string[] = [];
-    lines.push(`resolution_diagnostic|player=${envelope.playerId}|room=${envelope.roomId}|channel=${envelope.channelId}`);
-    lines.push(`mode=${envelope.mode}|pressure=${envelope.pressureBand}`);
-    if (envelope.primary) {
-      lines.push(`primary=${envelope.primary.counterpartId}|role=${envelope.primary.role}|score=${envelope.primary.selectionScore01.toFixed(3)}`);
+    lines.push(`ledger_diagnostic|player=${playerId}`);
+    lines.push(`counterparts=${indices.length}|hot=${hotCounterparts.length}|channels=${channels.length}`);
+    lines.push(`total_players=${stats.playersTracked}|total_events=${stats.totalEventsStored}|callback_total=${stats.totalCallbacksStored}`);
+    lines.push(`action_lane=${narrative.dominantActionLane}|hot_counterpart=${narrative.hottestCounterpartId ?? 'none'}|hot_scene=${narrative.hottestSceneId ?? 'none'}|hot_channel=${narrative.hottestChannelId ?? 'none'}`);
+    lines.push(`network=intensity:${network.averageIntensity01.toFixed(3)}|trust:${network.averageTrust01.toFixed(3)}|rivalry:${network.averageRivalry01.toFixed(3)}|volatility:${network.averageVolatility01.toFixed(3)}`);
+    for (const hot of this.listPriorityCounterparts(playerId, 6)) {
+      lines.push(`  priority=${hot.counterpartId}|score=${hot.priorityScore01.toFixed(3)}|intensity=${hot.intensity01.toFixed(3)}|action=${hot.recommendedAction}`);
     }
-    lines.push(`helpers=${envelope.helpers.length}|rivals=${envelope.rivals.length}|witnesses=${envelope.witnesses.length}|delayed=${envelope.delayed.length}`);
-    if (envelope.rescueWindow) {
-      lines.push(`rescue=${envelope.rescueWindow.shouldRescue}|urgency=${envelope.rescueWindow.urgency01?.toFixed(3) ?? 'n/a'}`);
-    }
-    if (envelope.negotiation) {
-      lines.push(`negotiation_active|balance=${envelope.negotiation.balanceOfPower01?.toFixed(3) ?? 'n/a'}`);
-    }
-    for (const r of envelope.rivals.slice(0, 3)) {
-      lines.push(`  rival=${r.counterpartId}|aggression=${r.aggression01.toFixed(3)}|tier=${r.escalation.selectedTier}`);
-    }
-    for (const h of envelope.helpers.slice(0, 2)) {
-      lines.push(`  helper=${h.counterpartId}|rescue=${h.rescueBias01.toFixed(3)}|trust=${h.trustLeverage01.toFixed(3)}`);
+    for (const anomaly of anomalies) {
+      lines.push(`  anomaly=${anomaly.kind}|severity=${anomaly.severity01.toFixed(3)}|target=${anomaly.counterpartId ?? anomaly.sceneId ?? anomaly.channelId ?? 'global'}`);
     }
     return lines;
   }
 
 
 }
-
-// MARK: Presets
-
-export const RELATIONSHIP_MODE_PRESET_DEFAULT = Object.freeze({
-  mode: 'DEFAULT' as const,
-  defaultWitnessCount: 1,
-  prefersPublicSwarm: false,
-  prefersDelayedReveal: false,
-  prefersReceipts: false,
-});
-
-export const RELATIONSHIP_MODE_PRESET_SCENE_COMPOSITION = Object.freeze({
-  mode: 'SCENE_COMPOSITION' as const,
-  defaultWitnessCount: 3,
-  prefersPublicSwarm: true,
-  prefersDelayedReveal: true,
-  prefersReceipts: true,
-});
-
-export const RELATIONSHIP_MODE_PRESET_LIVE_REPLY = Object.freeze({
-  mode: 'LIVE_REPLY' as const,
-  defaultWitnessCount: 2,
-  prefersPublicSwarm: false,
-  prefersDelayedReveal: false,
-  prefersReceipts: true,
-});
-
-export const RELATIONSHIP_MODE_PRESET_REPLAY = Object.freeze({
-  mode: 'REPLAY' as const,
-  defaultWitnessCount: 1,
-  prefersPublicSwarm: false,
-  prefersDelayedReveal: false,
-  prefersReceipts: false,
-});
-
-export const RELATIONSHIP_MODE_PRESET_POST_RUN = Object.freeze({
-  mode: 'POST_RUN' as const,
-  defaultWitnessCount: 3,
-  prefersPublicSwarm: true,
-  prefersDelayedReveal: true,
-  prefersReceipts: true,
-});
-
-export const RELATIONSHIP_MODE_PRESET_DEAL_ROOM = Object.freeze({
-  mode: 'DEAL_ROOM' as const,
-  defaultWitnessCount: 2,
-  prefersPublicSwarm: false,
-  prefersDelayedReveal: false,
-  prefersReceipts: false,
-});
-
-export const RELATIONSHIP_MODE_PRESET_RESCUE = Object.freeze({
-  mode: 'RESCUE' as const,
-  defaultWitnessCount: 1,
-  prefersPublicSwarm: false,
-  prefersDelayedReveal: false,
-  prefersReceipts: false,
-});
-
-export const RELATIONSHIP_MODE_PRESET_WORLD_EVENT = Object.freeze({
-  mode: 'WORLD_EVENT' as const,
-  defaultWitnessCount: 3,
-  prefersPublicSwarm: true,
-  prefersDelayedReveal: true,
-  prefersReceipts: false,
-});
-
-export const RELATIONSHIP_OBJECTIVE_NOTES: Readonly<Record<ChatRelationshipObjective, string>> = Object.freeze({
-  'HUMILIATE': 'Use public shame, receipts, and witnessed failure framing.',
-  'CONTAIN': 'Reduce volatility and keep the player boxed into narrow options.',
-  'PROVOKE': 'Invite a bad reply and convert it into transcript leverage.',
-  'STUDY': 'Prefer questions, read pressure, and predictive inference.',
-  'PRESSURE': 'Sustain heat without overcommitting the counterpart too early.',
-  'REPRICE': 'Turn recent player behavior into harsher negotiation terms.',
-  'DELAY': 'Use silence, typing theater, and deferred reveals.',
-  'WITNESS': 'Frame the moment as observed, archived, and socially meaningful.',
-  'RESCUE': 'Interrupt collapse without making the game feel soft.',
-  'TEST': 'Probe competence, nerve, or honesty under pressure.',
-  'NEGOTIATE': 'Use leverage, not noise, to move terms.',
-});
-
-export interface RelationshipEventSemanticProfile {
-  readonly eventType: ChatRelationshipEventType;
-  readonly prefersHelpers: boolean;
-  readonly prefersRivals: boolean;
-  readonly prefersWitnesses: boolean;
-  readonly suggestsCallback: boolean;
-  readonly suggestsSilence: boolean;
-}
-export const RELATIONSHIP_EVENT_SEMANTICS: Readonly<Record<ChatRelationshipEventType, RelationshipEventSemanticProfile>> = Object.freeze({
-  'PLAYER_MESSAGE': { eventType: 'PLAYER_MESSAGE', prefersHelpers: false, prefersRivals: false, prefersWitnesses: false, suggestsCallback: false, suggestsSilence: false },
-  'PLAYER_QUESTION': { eventType: 'PLAYER_QUESTION', prefersHelpers: false, prefersRivals: false, prefersWitnesses: false, suggestsCallback: false, suggestsSilence: false },
-  'PLAYER_ANGER': { eventType: 'PLAYER_ANGER', prefersHelpers: false, prefersRivals: false, prefersWitnesses: false, suggestsCallback: false, suggestsSilence: false },
-  'PLAYER_TROLL': { eventType: 'PLAYER_TROLL', prefersHelpers: false, prefersRivals: true, prefersWitnesses: false, suggestsCallback: false, suggestsSilence: false },
-  'PLAYER_FLEX': { eventType: 'PLAYER_FLEX', prefersHelpers: false, prefersRivals: true, prefersWitnesses: false, suggestsCallback: true, suggestsSilence: false },
-  'PLAYER_CALM': { eventType: 'PLAYER_CALM', prefersHelpers: false, prefersRivals: false, prefersWitnesses: false, suggestsCallback: false, suggestsSilence: false },
-  'PLAYER_HESITATION': { eventType: 'PLAYER_HESITATION', prefersHelpers: false, prefersRivals: false, prefersWitnesses: false, suggestsCallback: false, suggestsSilence: true },
-  'PLAYER_DISCIPLINE': { eventType: 'PLAYER_DISCIPLINE', prefersHelpers: false, prefersRivals: false, prefersWitnesses: false, suggestsCallback: false, suggestsSilence: false },
-  'PLAYER_GREED': { eventType: 'PLAYER_GREED', prefersHelpers: false, prefersRivals: true, prefersWitnesses: false, suggestsCallback: false, suggestsSilence: false },
-  'PLAYER_BLUFF': { eventType: 'PLAYER_BLUFF', prefersHelpers: false, prefersRivals: false, prefersWitnesses: false, suggestsCallback: false, suggestsSilence: false },
-  'PLAYER_OVERCONFIDENCE': { eventType: 'PLAYER_OVERCONFIDENCE', prefersHelpers: false, prefersRivals: true, prefersWitnesses: false, suggestsCallback: true, suggestsSilence: false },
-  'PLAYER_COMEBACK': { eventType: 'PLAYER_COMEBACK', prefersHelpers: false, prefersRivals: false, prefersWitnesses: true, suggestsCallback: true, suggestsSilence: false },
-  'PLAYER_COLLAPSE': { eventType: 'PLAYER_COLLAPSE', prefersHelpers: true, prefersRivals: false, prefersWitnesses: true, suggestsCallback: true, suggestsSilence: false },
-  'PLAYER_BREACH': { eventType: 'PLAYER_BREACH', prefersHelpers: true, prefersRivals: false, prefersWitnesses: true, suggestsCallback: true, suggestsSilence: false },
-  'PLAYER_PERFECT_DEFENSE': { eventType: 'PLAYER_PERFECT_DEFENSE', prefersHelpers: false, prefersRivals: false, prefersWitnesses: false, suggestsCallback: false, suggestsSilence: false },
-  'PLAYER_FAILED_GAMBLE': { eventType: 'PLAYER_FAILED_GAMBLE', prefersHelpers: false, prefersRivals: false, prefersWitnesses: false, suggestsCallback: false, suggestsSilence: false },
-  'PLAYER_NEAR_SOVEREIGNTY': { eventType: 'PLAYER_NEAR_SOVEREIGNTY', prefersHelpers: false, prefersRivals: true, prefersWitnesses: true, suggestsCallback: false, suggestsSilence: false },
-  'NEGOTIATION_WINDOW': { eventType: 'NEGOTIATION_WINDOW', prefersHelpers: false, prefersRivals: false, prefersWitnesses: false, suggestsCallback: false, suggestsSilence: false },
-  'MARKET_ALERT': { eventType: 'MARKET_ALERT', prefersHelpers: false, prefersRivals: false, prefersWitnesses: false, suggestsCallback: false, suggestsSilence: false },
-  'BOT_TAUNT_EMITTED': { eventType: 'BOT_TAUNT_EMITTED', prefersHelpers: false, prefersRivals: true, prefersWitnesses: false, suggestsCallback: false, suggestsSilence: false },
-  'BOT_RETREAT_EMITTED': { eventType: 'BOT_RETREAT_EMITTED', prefersHelpers: false, prefersRivals: false, prefersWitnesses: false, suggestsCallback: false, suggestsSilence: false },
-  'HELPER_RESCUE_EMITTED': { eventType: 'HELPER_RESCUE_EMITTED', prefersHelpers: true, prefersRivals: false, prefersWitnesses: false, suggestsCallback: false, suggestsSilence: false },
-  'RIVAL_WITNESS_EMITTED': { eventType: 'RIVAL_WITNESS_EMITTED', prefersHelpers: false, prefersRivals: false, prefersWitnesses: false, suggestsCallback: false, suggestsSilence: false },
-  'ARCHIVIST_WITNESS_EMITTED': { eventType: 'ARCHIVIST_WITNESS_EMITTED', prefersHelpers: false, prefersRivals: false, prefersWitnesses: false, suggestsCallback: false, suggestsSilence: false },
-  'AMBIENT_WITNESS_EMITTED': { eventType: 'AMBIENT_WITNESS_EMITTED', prefersHelpers: false, prefersRivals: false, prefersWitnesses: false, suggestsCallback: false, suggestsSilence: false },
-  'PUBLIC_WITNESS': { eventType: 'PUBLIC_WITNESS', prefersHelpers: false, prefersRivals: false, prefersWitnesses: true, suggestsCallback: false, suggestsSilence: false },
-  'PRIVATE_WITNESS': { eventType: 'PRIVATE_WITNESS', prefersHelpers: false, prefersRivals: false, prefersWitnesses: false, suggestsCallback: false, suggestsSilence: true },
-  'RUN_START': { eventType: 'RUN_START', prefersHelpers: false, prefersRivals: false, prefersWitnesses: false, suggestsCallback: false, suggestsSilence: true },
-  'RUN_END': { eventType: 'RUN_END', prefersHelpers: true, prefersRivals: false, prefersWitnesses: true, suggestsCallback: false, suggestsSilence: false },
-});
-
-
-// ============================================================================
-// MARK: Resolution utility functions
-// ============================================================================
-
-/** Compute the dramatic weight of a scene composition. */
-export function computeSceneDramaticWeight01(scene: SceneComposition): number {
-  const climaxBonus = scene.hasClimax ? 0.3 : 0;
-  const interventionBonus = scene.hasIntervention ? 0.2 : 0;
-  const witnessBonus = Math.min(scene.witnessCount / 4, 0.25);
-  const beatDensity = Math.min(scene.beats.length / 8, 0.25);
-  return Math.min(1, climaxBonus + interventionBonus + witnessBonus + beatDensity);
-}
-
-/** Determine if a scene should be saved as a memorable moment. */
-export function isMemorableScene(scene: SceneComposition, threshold01: number = 0.5): boolean {
-  return computeSceneDramaticWeight01(scene) >= threshold01;
-}
-
-/** Generate a natural-language summary of a scene. */
-export function summarizeScene(scene: SceneComposition): string {
-  const parts: string[] = [];
-  const entry = scene.beats.find((b) => b.phase === 'ENTRY');
-  if (entry) parts.push(`${entry.counterpartId} enters with ${entry.toneHint.toLowerCase()} posture.`);
-  const escalation = scene.beats.filter((b) => b.phase === 'ESCALATION');
-  if (escalation.length > 0) parts.push(`${escalation.length} escalation beat(s) follow.`);
-  if (scene.hasClimax) parts.push('The scene reaches a dramatic climax.');
-  if (scene.hasIntervention) {
-    const helper = scene.beats.find((b) => b.phase === 'INTERVENTION');
-    if (helper) parts.push(`${helper.counterpartId} intervenes.`);
-  }
-  if (scene.witnessCount > 0) parts.push(`${scene.witnessCount} witness(es) react.`);
-  return parts.join(' ');
-}
-
-/** Build a complete resolution audit for proof chain surfaces. */
-export function buildResolutionAuditReport(
-  resolver: RelationshipResolver,
-  snapshot: ChatRelationshipSnapshot,
-  context: RelationshipResolverContext,
-): readonly string[] {
-  const envelope = resolver.resolveSnapshot(snapshot, context);
-  const diagnostic = resolver.generateResolutionDiagnostic(envelope);
-  const history = resolver.getResolutionHistory(snapshot.playerId ?? context.playerId ?? '');
-  const ratio = resolver.helperToRivalRatio(snapshot.playerId ?? context.playerId ?? '');
-  return [
-    ...diagnostic,
-    `history_length=${history.length}|helper_to_rival_ratio=${ratio.toFixed(3)}`,
-    ...history.slice(-4).map((h) => `  primary=${h.primaryCounterpartId ?? 'none'}|helpers=${h.helperCount}|rivals=${h.rivalCount}|rescue=${h.hasRescue}`),
-  ];
-}
-
-
