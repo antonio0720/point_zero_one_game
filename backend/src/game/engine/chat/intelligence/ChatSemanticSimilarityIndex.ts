@@ -91,8 +91,6 @@ import {
 
 import type {
   ChatChannelId,
-  ChatModeScope,
-  ChatNpcId,
   Score01,
   UnixMs,
 } from '../types';
@@ -103,6 +101,24 @@ import type {
 
 export const CHAT_SEMANTIC_SIMILARITY_INDEX_VERSION =
   '2026.03.21-sovereign-depth.v2' as const;
+
+// Local semantic mode scope is intentionally string-backed.
+// The semantic policy lane and backend mode lane are currently evolving at different speeds.
+// This index treats mode scope as an authored token, not a closed enum.
+type SemanticModeScope = string;
+
+function asDocumentModeScope(
+  value: SemanticModeScope | undefined,
+): ChatSemanticDocumentInput['modeScope'] {
+  return value as ChatSemanticDocumentInput['modeScope'];
+}
+
+function modeScopeEquals(
+  value: ChatSemanticDocumentInput['modeScope'] | ChatSemanticIndexedDocument['modeScope'] | undefined,
+  expected: string,
+): boolean {
+  return String(value ?? '') === expected;
+}
 
 // ============================================================================
 // MARK: Config interface and defaults
@@ -459,7 +475,7 @@ function buildDenseVector(
   sceneRoles: readonly string[],
   callbackSourceIds: readonly string[],
   channelId: ChatChannelId | undefined,
-  modeScope: ChatModeScope | undefined,
+  modeScope: SemanticModeScope | undefined,
   pressureBand: ChatSemanticPressureBand | undefined,
   config: ChatSemanticSimilarityIndexConfig,
 ): DenseVectorBuild {
@@ -617,7 +633,7 @@ function neighborFromDocuments(
   return Object.freeze({
     documentId: against.documentId,
     canonicalLineId: against.canonicalLineId,
-    similarity01: sim,
+    similarity01: clamp01(sim),
     semanticClusterId: against.semanticClusterId,
     rhetoricalForm: against.rhetoricalForm,
     overlapTokens: overlapTokens(candidate.tokens, against.tokens),
@@ -1600,7 +1616,7 @@ export class ChatSemanticSimilarityIndex {
     candidates: readonly ChatSemanticDocumentInput[],
     context: {
       pressureBand?: ChatSemanticPressureBand;
-      modeScope?: ChatModeScope;
+      modeScope?: SemanticModeScope;
       channelId?: ChatChannelId;
       now: number;
     },
@@ -1621,7 +1637,7 @@ export class ChatSemanticSimilarityIndex {
         candidate,
         recentDocuments: [],
         pressureBand: context.pressureBand,
-        modeScope: context.modeScope,
+        modeScope: asDocumentModeScope(context.modeScope),
         channelId: context.channelId,
         now: context.now,
       });
@@ -1655,7 +1671,7 @@ export class ChatSemanticSimilarityIndex {
     actorId: string,
     context: {
       pressureBand?: ChatSemanticPressureBand;
-      modeScope?: ChatModeScope;
+      modeScope?: SemanticModeScope;
       channelId?: ChatChannelId;
       sceneRoles?: readonly string[];
       now: number;
@@ -1690,7 +1706,7 @@ export class ChatSemanticSimilarityIndex {
         callbackSourceIds: d.callbackSourceIds,
         pressureBand: context.pressureBand,
         channelId: context.channelId,
-        modeScope: context.modeScope,
+        modeScope: asDocumentModeScope(context.modeScope),
         createdAt: d.createdAt,
       })),
       context,
@@ -1727,7 +1743,7 @@ export class ChatSemanticSimilarityIndex {
     const candidates = context.actorId
       ? this.listActorDocuments(context.actorId)
       : this.listDocuments().filter(
-          (d) => d.modeScope === 'CHASE_A_LEGEND',
+          (d) => modeScopeEquals(d.modeScope, 'CHASE_A_LEGEND'),
         );
 
     return candidates
@@ -1772,7 +1788,7 @@ export class ChatSemanticSimilarityIndex {
       .map(([actorId, trust]) => {
         const freshest = this.queryFreshestLineForActor(actorId, {
           pressureBand: context.pressureBand,
-          modeScope: 'TEAM_UP',
+          modeScope: asDocumentModeScope('TEAM_UP'),
           channelId: context.channelId,
           now: context.now,
         });
@@ -1967,7 +1983,7 @@ export class ChatSemanticSimilarityIndex {
    */
   public buildDiagnosticReport(): Readonly<{
     version: string;
-    stats: ReturnType<typeof this.getStatistics>;
+    stats: ReturnType<ChatSemanticSimilarityIndex['getStatistics']>;
     topClusters: readonly { clusterId: string; memberCount: number }[];
     topActors: readonly { actorId: string; documentCount: number }[];
     recentWindowDepth: number;
@@ -2184,11 +2200,12 @@ export function buildDocumentVector(
 // ── MARK: Re-export shared contract helpers for callers that only import
 //   from this file
 // ─────────────────────────────────────────────────────────────────────────────
+export const inferRhetoricalFormFromText = inferLineRhetoricalForm;
+
 export {
   clamp01,
   resolvePressureThresholds,
   resolveModePolicy,
-  inferLineRhetoricalForm as inferRhetoricalFormFromText,
   CHAT_SEMANTIC_PRESSURE_THRESHOLDS,
   CHAT_SEMANTIC_MODE_POLICIES,
   DEFAULT_CHAT_SEMANTIC_NOVELTY_GUARD,
