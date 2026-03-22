@@ -24,7 +24,7 @@ import type {
   SharedChatRealizationContext,
   SharedChatRealizationResult,
   SharedChatRealizationTransform,
-} from '../../../../../../shared/contracts/chat/surface-realization';
+} from '../../../../../shared/contracts/chat/surface-realization';
 
 export const CHAT_SURFACE_REALIZER_VERSION = '2026.03.21-surface-realizer-depth.v16' as const;
 
@@ -1436,7 +1436,10 @@ function seededIndex(length: number, seed: number): number {
 }
 
 function chooseSeeded<T>(items: readonly T[], seed: number): T {
-  return items[seededIndex(items.length, seed)];
+  if (items.length === 0) {
+    throw new Error('chooseSeeded requires at least one item');
+  }
+  return items[seededIndex(items.length, seed)] as T;
 }
 
 function unique<T>(values: readonly T[]): T[] {
@@ -1799,19 +1802,23 @@ function inferTransforms(
   if (/post|after|aftermath|recovery|fallout/.test(scene.sceneArchetypeSlug)) {
     inferred.push('MORE_POST_EVENT');
   }
-  if ((line.sceneRoles ?? EMPTY_TAGS).some((role) => /witness|crowd|public|announcer/i.test(role))) {
+  if ((line.sceneRoles ?? EMPTY_TAGS).some((role: string) => /witness|crowd|public|announcer/i.test(role))) {
     inferred.push('MORE_PUBLIC');
   }
-  if ((line.tags ?? EMPTY_TAGS).some((tag) => /intimate|confessional|private/i.test(tag))) {
+  if ((line.tags ?? EMPTY_TAGS).some((tag: string) => /intimate|confessional|private/i.test(tag))) {
     inferred.push('MORE_INTIMATE');
   }
 
   return inferred;
 }
 
+function getTransformPriority(transform: SharedChatRealizationTransform): number {
+  return PRIORITY[transform] ?? Number.MAX_SAFE_INTEGER;
+}
+
 function sortTransforms(values: readonly SharedChatRealizationTransform[]): SharedChatRealizationTransform[] {
   return [...values].sort((left, right) => {
-    const byPriority = PRIORITY[left] - PRIORITY[right];
+    const byPriority = getTransformPriority(left) - getTransformPriority(right);
     if (byPriority !== 0) {
       return byPriority;
     }
@@ -1888,10 +1895,10 @@ function buildLeadCandidates(
   if (hasText(context.callbackAnchorId)) {
     leads.push(phraseFromBand(HISTORY_BRIDGES, signals.heatBand, seed ^ 204));
   }
-  if ((line.tags ?? EMPTY_TAGS).some((tag) => /warning|telegraph|setup|pre/i.test(tag))) {
+  if ((line.tags ?? EMPTY_TAGS).some((tag: string) => /warning|telegraph|setup|pre/i.test(tag))) {
     leads.push(phraseFromBand(PRE_EVENT_OPENERS, signals.heatBand, seed ^ 205));
   }
-  if ((line.tags ?? EMPTY_TAGS).some((tag) => /fallout|aftermath|post|witness|result/i.test(tag))) {
+  if ((line.tags ?? EMPTY_TAGS).some((tag: string) => /fallout|aftermath|post|witness|result/i.test(tag))) {
     leads.push(phraseFromBand(POST_EVENT_OPENERS, signals.heatBand, seed ^ 206));
   }
   leads.push(...scene.roleHints);
@@ -1938,7 +1945,7 @@ function computeClosingEcho(
   scene: SceneDigest,
   seed: number,
 ): string | null {
-  const forcedRecord = (line.tags ?? EMPTY_TAGS).some((tag) => /record|ledger|proof|witness/i.test(tag))
+  const forcedRecord = (line.tags ?? EMPTY_TAGS).some((tag: string) => /record|ledger|proof|witness/i.test(tag))
     || scene.sceneFlavor === 'PHANTOM'
     || scene.sceneFlavor === 'EMPIRE';
 
@@ -1982,7 +1989,7 @@ function styleFingerprint(
   scene: SceneDigest,
 ): string {
   return [
-    `bot:${toSlug(line.botId) || 'unknown'}`,
+    `bot:${hasText(line.botId) ? toSlug(line.botId) : 'unknown'}`,
     `flavor:${scene.sceneFlavor.toLowerCase()}`,
     `tone:${signals.tone.toLowerCase()}`,
     `heat:${signals.heatBand.toLowerCase()}`,
@@ -2142,11 +2149,18 @@ function realizeShorterColder(text: string, runtime: TransformRuntime): string {
     .map((fragment) => normalizeSpace(fragment))
     .filter(Boolean);
 
-  let selected = fragments;
+  let selected = [...fragments];
   if (fragments.length >= 3) {
-    selected = [fragments[0], fragments[fragments.length - 1]];
+    const first = fragments[0];
+    const last = fragments[fragments.length - 1];
+    if (typeof first === 'string' && typeof last === 'string') {
+      selected = [first, last];
+    }
   } else if (fragments.length === 2 && runtime.plan.signals.heatBand !== 'LOW') {
-    selected = [fragments[1]];
+    const second = fragments[1];
+    if (typeof second === 'string') {
+      selected = [second];
+    }
   }
 
   let output = normalizePunctuation(selected.join(' '));
@@ -2222,7 +2236,7 @@ function finalizeText(text: string, line: SharedCanonicalChatLine, plan: Realiza
       plan.signals.tone === 'RITUAL'
       || plan.signals.heatBand === 'HIGH'
       || plan.signals.heatBand === 'CRITICAL'
-      || (line.tags ?? EMPTY_TAGS).some((tag) => /record|ledger|proof|witness|legend/i.test(tag))
+      || (line.tags ?? EMPTY_TAGS).some((tag: string) => /record|ledger|proof|witness|legend/i.test(tag))
     );
 
   if (shouldClose && plan.closingEcho) {
@@ -2298,7 +2312,7 @@ function semanticIds(
     plan.motifCluster,
     hasText(context.sceneArchetype) ? context.sceneArchetype! : 'scene-generic',
     hasText(context.sceneRole) ? context.sceneRole! : 'role-generic',
-    `bot:${toSlug(line.botId) || 'unknown'}`,
+    `bot:${hasText(line.botId) ? toSlug(line.botId) : 'unknown'}`,
     `category:${toSlug(line.category) || 'generic'}`,
     `tone:${plan.signals.tone.toLowerCase()}`,
     `flavor:${plan.scene.sceneFlavor.toLowerCase()}`,
@@ -2317,8 +2331,11 @@ function semanticIds(
   if (hasText(line.botObjective)) {
     ids.push(`objective:${toSlug(line.botObjective ?? '')}`);
   }
-  if (hasText(line.emotionPayload)) {
-    ids.push(`emotion:${toSlug(line.emotionPayload ?? '')}`);
+  if (line.emotionPayload && typeof line.emotionPayload === 'object') {
+    const emotionKeys = Object.keys(line.emotionPayload).sort().slice(0, 6);
+    if (emotionKeys.length > 0) {
+      ids.push(`emotion:${toSlug(emotionKeys.join('-'))}`);
+    }
   }
 
   return uniqueStrings(ids);
