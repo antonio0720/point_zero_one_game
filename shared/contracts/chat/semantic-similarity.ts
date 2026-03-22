@@ -43,7 +43,7 @@
 import type {
   Brand,
   ChatChannelId,
-  ChatModeScope,
+  ChatNpcId,
   Score01,
   UnixMs,
 } from './ChatChannels';
@@ -52,8 +52,6 @@ import {
   CHAT_CONTRACT_AUTHORITIES,
   CHAT_CONTRACT_VERSION,
 } from './ChatChannels';
-
-import type { ChatNpcId } from './ChatEvents';
 
 // ============================================================================
 // MARK: Version and authority stamps
@@ -176,6 +174,35 @@ export type ChatSemanticPressureBand =
   (typeof CHAT_SEMANTIC_PRESSURE_BANDS)[number];
 
 // ============================================================================
+// MARK: Semantic party-mode scopes
+// ============================================================================
+
+/**
+ * ChatSemanticModeScope
+ *
+ * This semantic contract tracks authored gameplay party modes, not the broader
+ * chat scene/runtime mode union exported by ChatChannels.ts. Those runtime chat
+ * modes are values like LOBBY, RUN, PREDATOR, and PHANTOM. The semantic
+ * similarity layer instead reasons over authored party configurations such as
+ * GO_ALONE and TEAM_UP.
+ */
+export const CHAT_SEMANTIC_MODE_SCOPES = [
+  'GO_ALONE',
+  'HEAD_TO_HEAD',
+  'TEAM_UP',
+  'CHASE_A_LEGEND',
+] as const;
+
+export type ChatSemanticModeScope =
+  (typeof CHAT_SEMANTIC_MODE_SCOPES)[number];
+
+export function isChatSemanticModeScope(
+  value: string,
+): value is ChatSemanticModeScope {
+  return (CHAT_SEMANTIC_MODE_SCOPES as readonly string[]).includes(value);
+}
+
+// ============================================================================
 // MARK: Mode-aware novelty policy
 // ============================================================================
 
@@ -188,7 +215,7 @@ export type ChatSemanticPressureBand =
  * weighted NPC diversity. Empire requires isolation-consistent emotional range.
  */
 export interface ChatSemanticModePolicy {
-  readonly modeScope: ChatModeScope;
+  readonly modeScope: ChatSemanticModeScope;
   readonly maxSimilarityToRecent01: Score01;
   readonly maxRecentClusterReuses: number;
   readonly rhetoricalPenaltyMultiplier: number;
@@ -200,7 +227,7 @@ export interface ChatSemanticModePolicy {
   readonly recentWindowSize: number;
 }
 
-export const CHAT_SEMANTIC_MODE_POLICIES: Readonly<Record<ChatModeScope, ChatSemanticModePolicy>> =
+export const CHAT_SEMANTIC_MODE_POLICIES: Readonly<Record<ChatSemanticModeScope, ChatSemanticModePolicy>> =
   Object.freeze({
     GO_ALONE: Object.freeze<ChatSemanticModePolicy>({
       modeScope: 'GO_ALONE',
@@ -356,7 +383,7 @@ export interface ChatSemanticDocumentInput {
   /** Channel ID this line was authored for — enriches channel-aware filtering. */
   readonly channelId?: ChatChannelId;
   /** Mode scope this line was authored for — enriches mode-aware filtering. */
-  readonly modeScope?: ChatModeScope;
+  readonly modeScope?: ChatSemanticModeScope;
   /** Unix ms creation timestamp. */
   readonly createdAt: number;
 }
@@ -387,7 +414,7 @@ export interface ChatSemanticIndexedDocument {
   readonly callbackSourceIds: readonly string[];
   readonly pressureBand: ChatSemanticPressureBand | undefined;
   readonly channelId: ChatChannelId | undefined;
-  readonly modeScope: ChatModeScope | undefined;
+  readonly modeScope: ChatSemanticModeScope | undefined;
   readonly createdAt: number;
 }
 
@@ -412,7 +439,7 @@ export interface ChatSemanticQuery {
   readonly sceneRoles?: readonly string[];
   readonly pressureBand?: ChatSemanticPressureBand;
   readonly channelId?: ChatChannelId;
-  readonly modeScope?: ChatModeScope;
+  readonly modeScope?: ChatSemanticModeScope;
   readonly preferredTags?: readonly string[];
   readonly excludedDocumentIds?: readonly string[];
   readonly minSimilarity01?: Score01;
@@ -458,7 +485,7 @@ export interface ChatSemanticNoveltyGuardRequest {
   readonly recentDocuments: readonly ChatSemanticIndexedDocument[];
   readonly config?: Partial<ChatSemanticNoveltyGuardConfig>;
   readonly pressureBand?: ChatSemanticPressureBand;
-  readonly modeScope?: ChatModeScope;
+  readonly modeScope?: ChatSemanticModeScope;
   readonly channelId?: ChatChannelId;
   readonly now: number;
 }
@@ -590,7 +617,7 @@ export interface ChatSemanticTrainingRow {
   readonly allowed: boolean;
   readonly blockedReasons: readonly string[];
   readonly pressureBand: ChatSemanticPressureBand | undefined;
-  readonly modeScope: ChatModeScope | undefined;
+  readonly modeScope: ChatSemanticModeScope | undefined;
   readonly channelId: ChatChannelId | undefined;
   readonly tickNumber: number | undefined;
   readonly capturedAt: number;
@@ -619,7 +646,7 @@ export interface ChatSemanticTelemetryRecord {
   readonly noveltyScore01?: Score01;
   readonly fatigueScore01?: Score01;
   readonly pressureBand?: ChatSemanticPressureBand;
-  readonly modeScope?: ChatModeScope;
+  readonly modeScope?: ChatSemanticModeScope;
   readonly channelId?: ChatChannelId;
   readonly durationMs?: number;
   readonly capturedAt: number;
@@ -680,7 +707,7 @@ export function resolvePressureThresholds(
  * to GO_ALONE if the scope is unrecognized.
  */
 export function resolveModePolicy(
-  modeScope: ChatModeScope | undefined,
+  modeScope: ChatSemanticModeScope | undefined,
 ): ChatSemanticModePolicy {
   if (!modeScope || !(modeScope in CHAT_SEMANTIC_MODE_POLICIES)) {
     return CHAT_SEMANTIC_MODE_POLICIES.GO_ALONE;
@@ -696,6 +723,7 @@ export const CHAT_SEMANTIC_SIMILARITY_CONTRACT = Object.freeze({
   version: CHAT_SEMANTIC_SIMILARITY_CONTRACT_VERSION,
   authority: CHAT_SEMANTIC_SIMILARITY_CONTRACT_AUTHORITY,
   rhetoricalForms: CHAT_SEMANTIC_RHETORICAL_FORMS,
+  modeScopes: CHAT_SEMANTIC_MODE_SCOPES,
   pressureBands: CHAT_SEMANTIC_PRESSURE_BANDS,
   pressureThresholds: CHAT_SEMANTIC_PRESSURE_THRESHOLDS,
   modePolicies: CHAT_SEMANTIC_MODE_POLICIES,
