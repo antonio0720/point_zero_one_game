@@ -2,63 +2,31 @@
  * ============================================================================
  * POINT ZERO ONE — BACKEND CHAT DURABLE MEMORY ANCHOR STORE
  * FILE: backend/src/game/engine/chat/intelligence/dl/MemoryAnchorStore.ts
- * VERSION: 2026.03.21-sovereign-depth.v2
+ * VERSION: 2026.03.22-sovereign-depth.v3
  * AUTHORSHIP: Antonio T. Smith Jr.
  * LICENSE: Internal / Proprietary / All Rights Reserved
  * ============================================================================
  *
  * Purpose
  * -------
- * Authoritative backend store for retrieval-backed memory anchors. This is not
- * a cache layer. It is the durable truth surface for every social memory the
- * chat engine is permitted to act on. Every collapse, comeback, rescue moment,
- * rivalry evolution, quote, relationship delta, and emotional crescendo that
- * deserves to shape future social behavior is recorded and queried here.
+ * Durable, retrieval-backed memory anchor storage for the backend chat runtime.
+ * This module owns:
+ * - anchor persistence semantics across sessions, runs, scenes, and windows
+ * - indexed retrieval candidate gathering ahead of MemoryRankingPolicy scoring
+ * - window-scoped social continuity tracking
+ * - proof binding continuity across archive / reinstate / merge cycles
+ * - shadow-surface indexing for off-screen orchestration systems
+ * - salience decay and archival maintenance under large concurrency pressure
+ * - explainability receipts for every ranked query
  *
- * What this file owns
- * -------------------
- * - Durable anchor persistence semantics across sessions and runs
- * - Mode-aware retrieval (Empire / Predator / Syndicate / Phantom)
- * - Audience-heat-weighted salience decay — anchors that formed during peak
- *   crowd heat carry a heat bonus that decays on a configurable half-life
- * - Tick-integrated salience decay — registers with the Engine 0 tick clock
- *   to apply per-tick logarithmic decay to anchor salience
- * - Per-family cap enforcement with LRU eviction so the store never bloats
- *   into an unqueryable mass under 20M concurrent session load
- * - Cross-window relationship graph: co-appearance tracking that feeds the
- *   relationship continuity engine's strength score
- * - Batch upsert with conflict resolution policy (MERGE | REPLACE | SKIP)
- * - Proof-chain binding: anchors that formed at proof-verified events carry
- *   immutable proof references that survive archive/reinstate cycles
- * - Shadow-channel write-through: RIVALRY_SHADOW and RESCUE_SHADOW anchors
- *   are indexed in a parallel shadow index that the InvasionOrchestrator reads
- *   without polluting the visible retrieval surface
- * - Telemetry export: structured payload for the analytics pipeline, keyed to
- *   runId + userId + modeId for cross-session behavioural modelling
- * - Cold-start seeding: when the store is empty on first query, seeds from
- *   ColdStartDefaults so NPC behaviour is never uninformed
- * - Dry-run (probe) query: rank candidates without persisting a receipt,
- *   used by ChatScenePlanner for lookahead without state side-effects
- * - Anchor merge: merge two anchors that describe the same memory from
- *   different observer angles (e.g. player perspective vs crowd perspective)
- * - Callback deduplication registry: globally track used callback phrases so
- *   no phrase fires twice in a run regardless of which NPC triggers it
- *
- * Scale contract
- * --------------
- * Every index is O(1) for insert/lookup. The candidate-cap architecture
- * guarantees that no query ever iterates the full anchor corpus. Snapshot
- * serialisation is compact (JSON-serialisable plain objects). The persistence
- * adapter interface supports both in-process Map storage and out-of-process
- * adapters (Redis, Postgres JSONB) without changing call sites.
- *
- * Design laws
- * -----------
- * - The store is truth for durable anchor state, not a speculative cache.
- * - Ranking stays delegated to MemoryRankingPolicy — the store never scores.
- * - Query receipts are first-class for explainability and audit.
- * - Snapshot / restore is deterministic: same input → same output, always.
- * - No engine event is emitted inside the store. Callers decide what to emit.
+ * Design rules
+ * ------------
+ * - This store never replaces MemoryRankingPolicy. It prepares candidates and
+ *   delegates scoring and projection to the ranking policy.
+ * - Querying is index-first. Full scans are only used as the final fallback.
+ * - Snapshot export remains deterministic and JSON-serialisable.
+ * - All public surfaces remain aligned to shared/contracts/chat/learning/MemoryAnchors.ts.
+ * - Barrel compatibility is preserved for backend/src/game/engine/chat/intelligence/dl/index.ts.
  * ============================================================================
  */
 
@@ -77,8 +45,13 @@ import {
   type MemoryAnchorQuery,
   type MemoryAnchorQueryIntent,
   type MemoryAnchorReceipt,
+  type MemoryAnchorRetrievalPriority,
   type MemoryAnchorWindow,
 } from '../../../../../../../shared/contracts/chat/learning/MemoryAnchors';
+
+import type {
+  EmbeddingDocumentId,
+} from '../../../../../../../shared/contracts/chat/learning/ConversationEmbeddings';
 
 import {
   createMemoryRankingPolicy,
@@ -90,27 +63,34 @@ import {
   type RankedMemoryAnchor,
 } from './MemoryRankingPolicy';
 
-// ── VERSION & MODULE IDENTITY ─────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────────────────────
+// VERSION / CONSTANTS
+// ──────────────────────────────────────────────────────────────────────────────
 
 export const MEMORY_ANCHOR_STORE_VERSION =
-  '2026.03.21-sovereign-depth.v2' as const;
-
-// ── STORE-LEVEL DEFAULTS ──────────────────────────────────────────────────────
-// All limits are tuned for 20M concurrent session load. The candidate cap is the
-// single most important lever for query latency: never scan more than 160 anchors
-// per query even if the corpus is enormous.
+  '2026.03.22-sovereign-depth.v3' as const;
 
 export const MEMORY_ANCHOR_STORE_DEFAULTS = Object.freeze({
-  queryCandidateCap:         160,
-  maxReceipts:               64,
-  maxSnapshots:              8,
-  maxWindowsPerRun:          64,
-  maxWindowAnchors:          64,
-  maxAnchorsPerFamily:       24,    // LRU eviction kicks in above this
-  maxIndexesPerAnchor:       48,
-  pruneArchivedAfterMs:      1_000 * 60 * 60 * 24 * 14,   // 14 days
-  salienceDecayHalfLifeTicks: 48,   // anchors lose half salience bonus in 48 ticks
-  audienceHeatBonusCap:       0.25, // max salience bonus from audience heat at formation
+  queryCandidateCap: 192,
+  maxReceipts: 96,
+  maxSnapshots: 8,
+  maxWindowsPerRun: 64,
+  maxWindowAnchors: 96,
+  maxAnchorsPerFamily: 28,
+  maxIndexesPerAnchor: 64,
+  maxCandidateBuckets: 24,
+  maxCandidateExpansion: 384,
+  maxRelationshipEdges: 512,
+  maxUsedCallbacksPerRun: 512,
+  maxProofBindingsPerAnchor: 8,
+  maxAuditEntries: 2048,
+  maxDebugNotesPerReceipt: 24,
+  maxShadowMatchesPerQuery: 64,
+  pruneArchivedAfterMs: 1_000 * 60 * 60 * 24 * 14,
+  pruneClosedWindowsAfterMs: 1_000 * 60 * 60 * 24 * 7,
+  salienceDecayHalfLifeTicks: 48,
+  audienceHeatBonusCap: 0.25,
+  relationshipEdgeSaturationCount: 10,
   shadowFamilies: Object.freeze([
     'SYSTEM_SHADOW',
     'NPC_SHADOW',
@@ -118,14 +98,15 @@ export const MEMORY_ANCHOR_STORE_DEFAULTS = Object.freeze({
     'RESCUE_SHADOW',
     'LIVEOPS_SHADOW',
   ] as const),
-  maxUsedCallbacksPerRun:    512,   // global dedup registry cap
-  maxProofBindingsPerAnchor:   8,
-  maxRelationshipEdges:       256,   // relationship graph edge cap before LRU
+  decayEligibleStabilityClasses: Object.freeze([
+    'VOLATILE',
+    'RUN_STABLE',
+  ] as const),
 });
 
-// ── GAME MODE IDENTIFIER ──────────────────────────────────────────────────────
-// Mirrored from shared/contracts/chat/ChatMode.ts to avoid a circular import.
-// The store only needs the string discriminant — not the full mode contract.
+// ──────────────────────────────────────────────────────────────────────────────
+// MODE / POLICY / INTERNAL TYPES
+// ──────────────────────────────────────────────────────────────────────────────
 
 export type ChatModeId =
   | 'EMPIRE'
@@ -136,159 +117,150 @@ export type ChatModeId =
   | 'POST_RUN'
   | 'UNKNOWN';
 
-// ── CONFLICT RESOLUTION POLICY ────────────────────────────────────────────────
-
 export type AnchorConflictPolicy = 'MERGE' | 'REPLACE' | 'SKIP';
 
-// ── PROOF BINDING ─────────────────────────────────────────────────────────────
-// Anchors that formed at proof-verified events carry an immutable proof reference.
-
 export interface AnchorProofBinding {
-  readonly proofChainId: string;     // ChatProofChain instance that verified this event
-  readonly proofHash:    string;     // CRC32 / SHA-256 partial for the event
+  readonly proofChainId: string;
+  readonly proofHash: string;
   readonly verifiedAtMs: number;
-  readonly eventType:    string;     // e.g. 'SHIELD_BREACHED', 'COMEBACK_COMPLETED'
+  readonly eventType: string;
 }
-
-// ── RELATIONSHIP GRAPH EDGE ───────────────────────────────────────────────────
 
 export interface RelationshipEdge {
-  readonly anchorIdA:       MemoryAnchorId;
-  readonly anchorIdB:       MemoryAnchorId;
-  readonly coAppearances:   number;   // how many windows contained both
-  readonly strengthScore:   number;   // 0.0–1.0, fed to ChatRelationshipModel
-  readonly lastSeenAtMs:    number;
+  readonly anchorIdA: MemoryAnchorId;
+  readonly anchorIdB: MemoryAnchorId;
+  readonly coAppearances: number;
+  readonly strengthScore: number;
+  readonly lastSeenAtMs: number;
 }
 
-// ── ANCHOR TELEMETRY PAYLOAD ──────────────────────────────────────────────────
-
 export interface AnchorTelemetryPayload {
-  readonly storeVersion:   typeof MEMORY_ANCHOR_STORE_VERSION;
-  readonly exportedAtMs:   number;
-  readonly runId?:         string;
-  readonly userId?:        string;
-  readonly modeId?:        ChatModeId;
-  readonly totalAnchors:   number;
-  readonly archivedCount:  number;
-  readonly openWindows:    number;
-  readonly shadowCount:    number;
-  readonly topKindCounts:  Readonly<Record<string, number>>;
-  readonly avgSalience:    number;
-  readonly usedCallbacks:  number;
+  readonly storeVersion: typeof MEMORY_ANCHOR_STORE_VERSION;
+  readonly exportedAtMs: number;
+  readonly runId?: string;
+  readonly userId?: string;
+  readonly modeId?: ChatModeId;
+  readonly totalAnchors: number;
+  readonly archivedCount: number;
+  readonly openWindows: number;
+  readonly shadowCount: number;
+  readonly topKindCounts: Readonly<Record<string, number>>;
+  readonly avgSalience: number;
+  readonly usedCallbacks: number;
   readonly relationshipEdgeCount: number;
 }
 
-// ── BATCH UPSERT TYPES ────────────────────────────────────────────────────────
-
 export interface BatchUpsertRequest {
-  readonly anchors:         readonly MemoryAnchor[];
-  readonly conflictPolicy:  AnchorConflictPolicy;
-  readonly proofBindings?:  Readonly<Record<MemoryAnchorId, AnchorProofBinding>>;
+  readonly anchors: readonly MemoryAnchor[];
+  readonly conflictPolicy: AnchorConflictPolicy;
+  readonly proofBindings?: Readonly<Record<MemoryAnchorId, AnchorProofBinding>>;
 }
 
 export interface BatchUpsertResult {
-  readonly created:  number;
-  readonly updated:  number;
-  readonly skipped:  number;
-  readonly merged:   number;
-  readonly evicted:  number;
+  readonly created: number;
+  readonly updated: number;
+  readonly skipped: number;
+  readonly merged: number;
+  readonly evicted: number;
   readonly receipts: readonly MemoryAnchorMutationReceipt[];
 }
 
-// ── WINDOW SEED ───────────────────────────────────────────────────────────────
-
 export interface MemoryAnchorWindowSeed {
-  readonly runId?:          string;
-  readonly sceneId?:        string;
-  readonly momentId?:       string;
-  readonly roomId?:         string;
-  readonly channelId?:      string;
-  readonly modeId?:         ChatModeId;
-  readonly dominantKinds?:  readonly MemoryAnchorKind[];
-  readonly audienceHeat?:   number;  // 0.0–1.0 at window-open time
+  readonly runId?: string;
+  readonly sceneId?: string;
+  readonly momentId?: string;
+  readonly roomId?: string;
+  readonly channelId?: string;
+  readonly modeId?: ChatModeId;
+  readonly dominantKinds?: readonly MemoryAnchorKind[];
+  readonly audienceHeat?: number;
 }
 
-// ── MUTATION RECEIPT ──────────────────────────────────────────────────────────
-
 export interface MemoryAnchorMutationReceipt {
-  readonly ok:        boolean;
-  readonly operation: 'UPSERT' | 'BATCH_UPSERT' | 'MERGE' | 'ARCHIVE' | 'REINSTATE'
-                    | 'REAFFIRM' | 'LINK_SUCCESSOR' | 'WINDOW_OPEN' | 'WINDOW_APPEND'
-                    | 'WINDOW_CLOSE' | 'HYDRATE' | 'PRUNE' | 'TICK_DECAY'
-                    | 'PROMOTE' | 'DEMOTE' | 'PROOF_BIND' | 'SEED_COLD_START'
-                    | 'EVICT_LRU';
-  readonly anchorId?:  MemoryAnchorId;
-  readonly windowId?:  string;
-  readonly created:    boolean;
-  readonly updated:    boolean;
+  readonly ok: boolean;
+  readonly operation:
+    | 'UPSERT'
+    | 'BATCH_UPSERT'
+    | 'MERGE'
+    | 'ARCHIVE'
+    | 'REINSTATE'
+    | 'REAFFIRM'
+    | 'LINK_SUCCESSOR'
+    | 'WINDOW_OPEN'
+    | 'WINDOW_APPEND'
+    | 'WINDOW_CLOSE'
+    | 'HYDRATE'
+    | 'PRUNE'
+    | 'TICK_DECAY'
+    | 'PROMOTE'
+    | 'DEMOTE'
+    | 'PROOF_BIND'
+    | 'SEED_COLD_START'
+    | 'EVICT_LRU';
+  readonly anchorId?: MemoryAnchorId;
+  readonly windowId?: string;
+  readonly created: boolean;
+  readonly updated: boolean;
   readonly debugNotes: readonly string[];
 }
 
-// ── STORE QUERY REQUEST ───────────────────────────────────────────────────────
-
 export interface MemoryAnchorStoreQueryRequest {
-  readonly query?:                    Partial<MemoryAnchorQuery>;
-  readonly intent?:                   MemoryAnchorQueryIntent;
-  readonly queryText?:                string;
-  readonly actorId?:                  string;
-  readonly actorPersonaId?:           string;
-  readonly relationshipId?:           string;
-  readonly roomId?:                   string;
-  readonly channelId?:                string;
-  readonly runId?:                    string;
-  readonly sceneId?:                  string;
-  readonly momentId?:                 string;
-  readonly currentModeId?:            ChatModeId;
-  readonly currentTags?:              readonly string[];
-  readonly relationshipSignals?:      readonly string[];
-  readonly emotionSignals?:           readonly string[];
-  readonly embeddingMatches?:         readonly MemoryRankingEmbeddingMatch[];
-  readonly topK?:                     number;
-  readonly minimumScore?:             number;
-  readonly candidateCap?:             number;
-  readonly excludedAnchorIds?:        readonly MemoryAnchorId[];
-  readonly excludedFamilyIds?:        readonly string[];
+  readonly query?: Partial<MemoryAnchorQuery>;
+  readonly intent?: MemoryAnchorQueryIntent;
+  readonly queryText?: string;
+  readonly actorId?: string;
+  readonly actorPersonaId?: string;
+  readonly relationshipId?: string;
+  readonly roomId?: string;
+  readonly channelId?: string;
+  readonly runId?: string;
+  readonly sceneId?: string;
+  readonly momentId?: string;
+  readonly currentModeId?: ChatModeId;
+  readonly currentTags?: readonly string[];
+  readonly relationshipSignals?: readonly string[];
+  readonly emotionSignals?: readonly string[];
+  readonly embeddingMatches?: readonly MemoryRankingEmbeddingMatch[];
+  readonly topK?: number;
+  readonly minimumScore?: number;
+  readonly candidateCap?: number;
+  readonly excludedAnchorIds?: readonly MemoryAnchorId[];
+  readonly excludedFamilyIds?: readonly string[];
   readonly alreadyUsedCallbackPhrases?: readonly string[];
-  readonly includeArchived?:          boolean;
-  readonly includeShadow?:            boolean;   // default false — shadow anchors hidden from NPC directors
-  readonly probeOnly?:                boolean;   // dry-run: skip receipt persistence
-  readonly audienceHeat?:             number;    // current heat — modifies urgency score
+  readonly includeArchived?: boolean;
+  readonly includeShadow?: boolean;
+  readonly probeOnly?: boolean;
+  readonly audienceHeat?: number;
 }
-
-// ── STORE QUERY RESPONSE ──────────────────────────────────────────────────────
 
 export interface MemoryAnchorQueryResponse {
-  readonly query:          MemoryAnchorQuery;
-  readonly matches:        readonly MemoryAnchorMatch[];
-  readonly ranked:         ReadonlyArray<RankedMemoryAnchor>;
-  readonly previews:       readonly MemoryAnchorPreview[];
-  readonly receipt:        MemoryAnchorReceipt;
-  readonly candidateIds:   readonly MemoryAnchorId[];
-  readonly shadowMatches:  ReadonlyArray<MemoryAnchorId>;  // shadow anchors surfaced for InvasionOrchestrator
-  readonly debugNotes:     readonly string[];
+  readonly query: MemoryAnchorQuery;
+  readonly matches: readonly MemoryAnchorMatch[];
+  readonly ranked: ReadonlyArray<RankedMemoryAnchor>;
+  readonly previews: readonly MemoryAnchorPreview[];
+  readonly receipt: MemoryAnchorReceipt;
+  readonly candidateIds: readonly MemoryAnchorId[];
+  readonly shadowMatches: ReadonlyArray<MemoryAnchorId>;
+  readonly debugNotes: readonly string[];
 }
-
-// ── STORE METRICS ─────────────────────────────────────────────────────────────
 
 export interface MemoryAnchorStoreMetrics {
-  readonly totalAnchors:          number;
-  readonly archivedAnchors:       number;
-  readonly shadowAnchors:         number;
-  readonly openWindows:           number;
-  readonly totalWindows:          number;
-  readonly totalReceipts:         number;
-  readonly relationshipEdges:     number;
-  readonly usedCallbacksCount:    number;
-  readonly anchorsByKind:         Readonly<Record<string, number>>;
-  readonly anchorsByRoom:         Readonly<Record<string, number>>;
-  readonly anchorsByChannel:      Readonly<Record<string, number>>;
-  readonly anchorsByRun:          Readonly<Record<string, number>>;
-  readonly anchorsByMode:         Readonly<Record<string, number>>;
-  readonly avgFinalSalience:      number;
-  readonly proofBoundAnchors:     number;
+  readonly totalAnchors: number;
+  readonly archivedAnchors: number;
+  readonly shadowAnchors: number;
+  readonly openWindows: number;
+  readonly totalWindows: number;
+  readonly totalReceipts: number;
+  readonly relationshipEdges: number;
+  readonly usedCallbacksCount: number;
+  readonly anchorsByKind: Readonly<Record<string, number>>;
+  readonly anchorsByRoom: Readonly<Record<string, number>>;
+  readonly anchorsByChannel: Readonly<Record<string, number>>;
+  readonly anchorsByRun: Readonly<Record<string, number>>;
+  readonly anchorsByMode: Readonly<Record<string, number>>;
+  readonly avgFinalSalience: number;
+  readonly proofBoundAnchors: number;
 }
-
-// ── SNAPSHOT ──────────────────────────────────────────────────────────────────
 
 export type MemoryAnchorStoreProofBindingEntry = readonly [
   MemoryAnchorId,
@@ -301,233 +273,322 @@ export type MemoryAnchorStoreModeAnchorIndexEntry = readonly [
 ];
 
 export interface MemoryAnchorStoreSnapshot {
-  readonly version:              typeof MEMORY_ANCHOR_STORE_VERSION;
-  readonly exportedAtMs:         number;
-  readonly anchors:              readonly MemoryAnchor[];
-  readonly archivedAnchorIds:    readonly MemoryAnchorId[];
-  readonly windows:              readonly MemoryAnchorWindow[];
-  readonly receipts:             readonly MemoryAnchorReceipt[];
-  readonly proofBindings:        ReadonlyArray<MemoryAnchorStoreProofBindingEntry>;
-  readonly usedCallbackPhrases:  readonly string[];
-  readonly shadowAnchorIds:      readonly MemoryAnchorId[];
-  readonly relationshipEdges:    readonly RelationshipEdge[];
-  readonly modeAnchorIndex:      ReadonlyArray<MemoryAnchorStoreModeAnchorIndexEntry>;
+  readonly version: typeof MEMORY_ANCHOR_STORE_VERSION;
+  readonly exportedAtMs: number;
+  readonly anchors: readonly MemoryAnchor[];
+  readonly archivedAnchorIds: readonly MemoryAnchorId[];
+  readonly windows: readonly MemoryAnchorWindow[];
+  readonly receipts: readonly MemoryAnchorReceipt[];
+  readonly proofBindings: ReadonlyArray<MemoryAnchorStoreProofBindingEntry>;
+  readonly usedCallbackPhrases: readonly string[];
+  readonly shadowAnchorIds: readonly MemoryAnchorId[];
+  readonly relationshipEdges: readonly RelationshipEdge[];
+  readonly modeAnchorIndex: ReadonlyArray<MemoryAnchorStoreModeAnchorIndexEntry>;
 }
 
-// ── PERSISTENCE ADAPTER ───────────────────────────────────────────────────────
-
 export interface MemoryAnchorStorePersistenceAdapter {
-  load?(): Promise<MemoryAnchorStoreSnapshot | null> | MemoryAnchorStoreSnapshot | null;
+  load?():
+    | Promise<MemoryAnchorStoreSnapshot | null>
+    | MemoryAnchorStoreSnapshot
+    | null;
   save?(snapshot: MemoryAnchorStoreSnapshot): Promise<void> | void;
   appendReceipt?(receipt: MemoryAnchorReceipt): Promise<void> | void;
   appendTelemetry?(payload: AnchorTelemetryPayload): Promise<void> | void;
 }
 
-// ── STORE OPTIONS ─────────────────────────────────────────────────────────────
-
 export interface MemoryAnchorStoreOptions {
-  readonly rankingPolicy?:        MemoryRankingPolicyApi;
+  readonly rankingPolicy?: MemoryRankingPolicyApi;
   readonly rankingPolicyOptions?: MemoryRankingPolicyOptions;
-  readonly persistence?:          MemoryAnchorStorePersistenceAdapter;
-  readonly queryCandidateCap?:    number;
-  readonly now?:                  () => number;
-  readonly coldStartSeeds?:       readonly MemoryAnchor[];  // ColdStartDefaults integration
-  readonly enableShadowIndex?:    boolean;
+  readonly persistence?: MemoryAnchorStorePersistenceAdapter;
+  readonly queryCandidateCap?: number;
+  readonly now?: () => number;
+  readonly coldStartSeeds?: readonly MemoryAnchor[];
+  readonly enableShadowIndex?: boolean;
   readonly salienceDecayEnabled?: boolean;
-  readonly runId?:                string;
-  readonly userId?:               string;
-  readonly sessionModeId?:        ChatModeId;
+  readonly runId?: string;
+  readonly userId?: string;
+  readonly sessionModeId?: ChatModeId;
 }
 
-// ── STORE PUBLIC API ──────────────────────────────────────────────────────────
-
 export interface MemoryAnchorStoreApi {
-  readonly version:         typeof MEMORY_ANCHOR_STORE_VERSION;
-  readonly rankingPolicy:   MemoryRankingPolicyApi;
+  readonly version: typeof MEMORY_ANCHOR_STORE_VERSION;
+  readonly rankingPolicy: MemoryRankingPolicyApi;
 
-  // ── Hydration & persistence
   hydrate(snapshot: MemoryAnchorStoreSnapshot): MemoryAnchorMutationReceipt;
   exportSnapshot(): MemoryAnchorStoreSnapshot;
   save(): Promise<void>;
 
-  // ── Anchor CRUD
-  upsert(anchor: MemoryAnchor, proofBinding?: AnchorProofBinding): MemoryAnchorMutationReceipt;
+  upsert(
+    anchor: MemoryAnchor,
+    proofBinding?: AnchorProofBinding,
+  ): MemoryAnchorMutationReceipt;
+
   batchUpsert(request: BatchUpsertRequest): BatchUpsertResult;
-  merge(anchorIdA: MemoryAnchorId, anchorIdB: MemoryAnchorId): MemoryAnchorMutationReceipt;
+
+  merge(
+    anchorIdA: MemoryAnchorId,
+    anchorIdB: MemoryAnchorId,
+  ): MemoryAnchorMutationReceipt;
+
   get(anchorId: MemoryAnchorId): MemoryAnchor | null;
   has(anchorId: MemoryAnchorId): boolean;
   list(): readonly MemoryAnchor[];
   listShadow(): readonly MemoryAnchor[];
 
-  // ── Lifecycle mutations
   archive(anchorId: MemoryAnchorId): MemoryAnchorMutationReceipt;
   reinstate(anchorId: MemoryAnchorId): MemoryAnchorMutationReceipt;
-  reaffirm(anchorId: MemoryAnchorId, nowMs?: number): MemoryAnchorMutationReceipt;
+  reaffirm(
+    anchorId: MemoryAnchorId,
+    nowMs?: number,
+  ): MemoryAnchorMutationReceipt;
   promote(anchorId: MemoryAnchorId): MemoryAnchorMutationReceipt;
   demote(anchorId: MemoryAnchorId): MemoryAnchorMutationReceipt;
-  linkSuccessor(anchorId: MemoryAnchorId, successorId: MemoryAnchorId): MemoryAnchorMutationReceipt;
-  bindProof(anchorId: MemoryAnchorId, binding: AnchorProofBinding): MemoryAnchorMutationReceipt;
+  linkSuccessor(
+    anchorId: MemoryAnchorId,
+    successorId: MemoryAnchorId,
+  ): MemoryAnchorMutationReceipt;
+  bindProof(
+    anchorId: MemoryAnchorId,
+    binding: AnchorProofBinding,
+  ): MemoryAnchorMutationReceipt;
 
-  // ── Window management
   openWindow(seed?: MemoryAnchorWindowSeed): MemoryAnchorWindow;
-  appendToWindow(windowId: string, anchorId: MemoryAnchorId): MemoryAnchorMutationReceipt;
-  closeWindow(windowId: string, closedAtMs?: number): MemoryAnchorMutationReceipt;
+  appendToWindow(
+    windowId: string,
+    anchorId: MemoryAnchorId,
+  ): MemoryAnchorMutationReceipt;
+  closeWindow(
+    windowId: string,
+    closedAtMs?: number,
+  ): MemoryAnchorMutationReceipt;
   getWindow(windowId: string): MemoryAnchorWindow | null;
   listWindows(): readonly MemoryAnchorWindow[];
 
-  // ── Query
   query(request: MemoryAnchorStoreQueryRequest): MemoryAnchorQueryResponse;
 
-  // ── Callback dedup registry
   registerUsedCallback(phrase: string): void;
   isCallbackUsed(phrase: string): boolean;
   clearUsedCallbacks(): void;
 
-  // ── Tick integration (Engine 0 clock)
   tickDecay(tickIndex: number): MemoryAnchorMutationReceipt;
 
-  // ── Relationship graph
-  getRelationshipEdge(anchorIdA: MemoryAnchorId, anchorIdB: MemoryAnchorId): RelationshipEdge | null;
+  getRelationshipEdge(
+    anchorIdA: MemoryAnchorId,
+    anchorIdB: MemoryAnchorId,
+  ): RelationshipEdge | null;
   listRelationshipEdges(anchorId: MemoryAnchorId): readonly RelationshipEdge[];
 
-  // ── Cold start
   seedColdStart(seeds: readonly MemoryAnchor[]): MemoryAnchorMutationReceipt;
 
-  // ── Telemetry
   exportTelemetry(modeId?: ChatModeId): AnchorTelemetryPayload;
 
-  // ── Maintenance
   metrics(): MemoryAnchorStoreMetrics;
   prune(nowMs?: number): MemoryAnchorMutationReceipt;
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
+// ──────────────────────────────────────────────────────────────────────────────
+// INTERNAL EXPLAINABILITY / AUDIT TYPES
+// ──────────────────────────────────────────────────────────────────────────────
+
+interface AnchorAuditState {
+  readonly formedAtMs: number;
+  readonly lastTouchedAtMs: number;
+  readonly lastQueriedAtMs?: number;
+  readonly lastReceiptId?: string;
+  readonly lastRank?: number;
+  readonly lastScore?: number;
+  readonly lastWindowId?: string;
+  readonly modeId?: ChatModeId;
+  readonly audienceHeatAtFormation: number;
+  readonly formationTickIndex: number;
+  readonly retrievalCount: number;
+  readonly decayApplications: number;
+}
+
+interface SnapshotRingEntry {
+  readonly createdAtMs: number;
+  readonly snapshot: MemoryAnchorStoreSnapshot;
+}
+
+interface CandidateGatherContext {
+  readonly query: MemoryAnchorQuery;
+  readonly request: MemoryAnchorStoreQueryRequest;
+  readonly normalizedQueryTokens: readonly string[];
+  readonly excludedAnchorIds: ReadonlySet<MemoryAnchorId>;
+  readonly excludedFamilyIds: ReadonlySet<string>;
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
 // FACTORY
-// ═════════════════════════════════════════════════════════════════════════════
+// ──────────────────────────────────────────────────────────────────────────────
 
 export function createMemoryAnchorStore(
   options: MemoryAnchorStoreOptions = {},
 ): MemoryAnchorStoreApi {
-
-  // ── Core ranking delegate
   const rankingPolicy =
     options.rankingPolicy ??
     createMemoryRankingPolicy(options.rankingPolicyOptions);
 
-  // ── Primary corpus
-  const anchors      = new Map<MemoryAnchorId, MemoryAnchor>();
-  const archivedIds  = new Set<MemoryAnchorId>();
-  const shadowIds    = new Set<MemoryAnchorId>();   // shadow-channel anchors
+  const anchors = new Map<MemoryAnchorId, MemoryAnchor>();
+  const archivedIds = new Set<MemoryAnchorId>();
+  const shadowIds = new Set<MemoryAnchorId>();
 
-  // ── Window corpus
-  const windows      = new Map<string, MemoryAnchorWindow>();
+  const windows = new Map<string, MemoryAnchorWindow>();
+  const windowRunIndex = new Map<string, Set<string>>();
+  const windowRoomIndex = new Map<string, Set<string>>();
+  const windowChannelIndex = new Map<string, Set<string>>();
 
-  // ── Receipt log
   const receipts: MemoryAnchorReceipt[] = [];
+  const mutationReceipts: MemoryAnchorMutationReceipt[] = [];
+  const snapshots: SnapshotRingEntry[] = [];
 
-  // ── Proof binding map  — survives archive/reinstate cycles
   const proofBindings = new Map<MemoryAnchorId, AnchorProofBinding>();
+  const proofHistory = new Map<MemoryAnchorId, AnchorProofBinding[]>();
 
-  // ── Callback dedup registry
   const usedCallbackPhrases = new Set<string>();
-
-  // ── Relationship graph — key: sorted `${a}::${b}` string
   const relationshipEdges = new Map<string, RelationshipEdge>();
+  const anchorAudit = new Map<MemoryAnchorId, AnchorAuditState>();
 
-  // ── Primary indexes (O(1) lookup by field)
-  const familyIndex       = new Map<string, Set<MemoryAnchorId>>();
+  const familyIndex = new Map<string, Set<MemoryAnchorId>>();
   const relationshipIndex = new Map<string, Set<MemoryAnchorId>>();
-  const quoteIndex        = new Map<string, Set<MemoryAnchorId>>();
-  const roomIndex         = new Map<string, Set<MemoryAnchorId>>();
-  const channelIndex      = new Map<string, Set<MemoryAnchorId>>();
-  const runIndex          = new Map<string, Set<MemoryAnchorId>>();
-  const sceneIndex        = new Map<string, Set<MemoryAnchorId>>();
-  const momentIndex       = new Map<string, Set<MemoryAnchorId>>();
-  const actorIndex        = new Map<string, Set<MemoryAnchorId>>();
-  const personaIndex      = new Map<string, Set<MemoryAnchorId>>();
-  const kindIndex         = new Map<MemoryAnchorKind, Set<MemoryAnchorId>>();
-  const tagIndex          = new Map<string, Set<MemoryAnchorId>>();
-  const modeIndex         = new Map<ChatModeId, Set<MemoryAnchorId>>();
+  const quoteIndex = new Map<string, Set<MemoryAnchorId>>();
+  const relationshipRefIndex = new Map<string, Set<MemoryAnchorId>>();
+  const roomIndex = new Map<string, Set<MemoryAnchorId>>();
+  const channelIndex = new Map<string, Set<MemoryAnchorId>>();
+  const runIndex = new Map<string, Set<MemoryAnchorId>>();
+  const sceneIndex = new Map<string, Set<MemoryAnchorId>>();
+  const momentIndex = new Map<string, Set<MemoryAnchorId>>();
+  const actorIndex = new Map<string, Set<MemoryAnchorId>>();
+  const personaIndex = new Map<string, Set<MemoryAnchorId>>();
+  const kindIndex = new Map<MemoryAnchorKind, Set<MemoryAnchorId>>();
+  const tagIndex = new Map<string, Set<MemoryAnchorId>>();
+  const callbackPhraseIndex = new Map<string, Set<MemoryAnchorId>>();
+  const evidenceDocumentIndex = new Map<string, Set<MemoryAnchorId>>();
+  const modeIndex = new Map<ChatModeId, Set<MemoryAnchorId>>();
+  const shadowFamilyIndex = new Map<string, Set<MemoryAnchorId>>();
+
+  const enableShadowIndex = options.enableShadowIndex !== false;
+  const salienceDecayEnabled = options.salienceDecayEnabled !== false;
+
+  let coldStartSeeded = false;
+  let persistenceHydrated = false;
 
   const now = (): number => normalizeNow(options.now?.());
 
-  // ── Cold-start: if seeds provided, seed immediately (before persistence hydration)
   if (options.coldStartSeeds?.length) {
-    for (const seed of options.coldStartSeeds) {
-      anchors.set(seed.id, freezeAnchor(seed));
-      addToIndexes(seed);
-    }
+    applySeedSet(options.coldStartSeeds, true);
   }
-
-  // ── API surface
 
   const api: MemoryAnchorStoreApi = {
     version: MEMORY_ANCHOR_STORE_VERSION,
     rankingPolicy,
 
-    // ── HYDRATE ──────────────────────────────────────────────────────────────
     hydrate(snapshot: MemoryAnchorStoreSnapshot): MemoryAnchorMutationReceipt {
       anchors.clear();
       archivedIds.clear();
       shadowIds.clear();
       windows.clear();
+      windowRunIndex.clear();
+      windowRoomIndex.clear();
+      windowChannelIndex.clear();
       receipts.splice(0, receipts.length);
+      mutationReceipts.splice(0, mutationReceipts.length);
+      snapshots.splice(0, snapshots.length);
       proofBindings.clear();
+      proofHistory.clear();
       usedCallbackPhrases.clear();
       relationshipEdges.clear();
+      anchorAudit.clear();
       clearAllIndexes();
 
       for (const anchor of snapshot.anchors) {
-        anchors.set(anchor.id, freezeAnchor(anchor));
-        addToIndexes(anchor);
-      }
-      for (const id of snapshot.archivedAnchorIds) {
-        if (anchors.has(id)) archivedIds.add(id);
-      }
-      for (const id of (snapshot.shadowAnchorIds ?? [])) {
-        if (anchors.has(id)) shadowIds.add(id);
-      }
-      for (const w of snapshot.windows) {
-        windows.set(w.id, freezeWindow(w));
-      }
-      for (const r of snapshot.receipts.slice(-MEMORY_ANCHOR_STORE_DEFAULTS.maxReceipts)) {
-        receipts.push(freezeReceipt(r));
-      }
-      for (const [id, binding] of (snapshot.proofBindings ?? [])) {
-        proofBindings.set(id, Object.freeze({ ...binding }));
-      }
-      for (const phrase of (snapshot.usedCallbackPhrases ?? [])) {
-        usedCallbackPhrases.add(phrase);
-      }
-      for (const edge of (snapshot.relationshipEdges ?? [])) {
-        relationshipEdges.set(edgeKey(edge.anchorIdA, edge.anchorIdB), Object.freeze({ ...edge }));
-      }
-      for (const [modeId, ids] of (snapshot.modeAnchorIndex ?? [])) {
-        modeIndex.set(modeId, new Set(ids));
+        const frozen = freezeAnchor(anchor);
+        anchors.set(frozen.id, frozen);
+        addToIndexes(frozen);
+        classifyShadow(frozen);
+        upsertAuditForHydrate(frozen);
       }
 
-      return Object.freeze({
-        ok: true, operation: 'HYDRATE', created: false, updated: true,
-        debugNotes: Object.freeze([
-          `anchors=${snapshot.anchors.length}`,
-          `windows=${snapshot.windows.length}`,
-          `proofBindings=${snapshot.proofBindings?.length ?? 0}`,
-          `callbacks=${snapshot.usedCallbackPhrases?.length ?? 0}`,
-          `edges=${snapshot.relationshipEdges?.length ?? 0}`,
-        ]),
+      for (const id of snapshot.archivedAnchorIds) {
+        if (anchors.has(id)) {
+          archivedIds.add(id);
+        }
+      }
+
+      for (const id of snapshot.shadowAnchorIds) {
+        if (anchors.has(id)) {
+          shadowIds.add(id);
+        }
+      }
+
+      for (const window of snapshot.windows) {
+        const frozenWindow = freezeWindow(window);
+        windows.set(frozenWindow.id, frozenWindow);
+        indexWindow(frozenWindow);
+      }
+
+      for (const receipt of snapshot.receipts.slice(-MEMORY_ANCHOR_STORE_DEFAULTS.maxReceipts)) {
+        receipts.push(freezeReceipt(receipt));
+      }
+
+      for (const [anchorId, binding] of snapshot.proofBindings) {
+        if (!anchors.has(anchorId)) {
+          continue;
+        }
+        const frozenBinding = freezeProofBinding(binding);
+        proofBindings.set(anchorId, frozenBinding);
+        proofHistory.set(anchorId, [frozenBinding]);
+      }
+
+      for (const phrase of snapshot.usedCallbackPhrases) {
+        usedCallbackPhrases.add(normalizeToken(phrase));
+      }
+
+      for (const edge of snapshot.relationshipEdges) {
+        relationshipEdges.set(
+          edgeKey(edge.anchorIdA, edge.anchorIdB),
+          freezeRelationshipEdge(edge),
+        );
+      }
+
+      for (const [modeId, anchorIds] of snapshot.modeAnchorIndex) {
+        modeIndex.set(modeId, new Set(anchorIds.filter((id) => anchors.has(id))));
+      }
+
+      persistenceHydrated = true;
+      pushSnapshot('hydrate');
+
+      const receipt = createMutationReceipt({
+        ok: true,
+        operation: 'HYDRATE',
+        created: false,
+        updated: true,
+        debugNotes: [
+          `anchors=${anchors.size}`,
+          `windows=${windows.size}`,
+          `archived=${archivedIds.size}`,
+          `shadow=${shadowIds.size}`,
+          `proofBindings=${proofBindings.size}`,
+          `receipts=${receipts.length}`,
+        ],
       });
+      pushMutationReceipt(receipt);
+      return receipt;
     },
 
-    // ── EXPORT SNAPSHOT ──────────────────────────────────────────────────────
     exportSnapshot(): MemoryAnchorStoreSnapshot {
       const proofBindingEntries: MemoryAnchorStoreProofBindingEntry[] = [];
       for (const [anchorId, binding] of proofBindings.entries()) {
-        proofBindingEntries.push(freezeProofBindingEntry(anchorId, binding));
+        proofBindingEntries.push(
+          freezeProofBindingEntry(anchorId, binding),
+        );
       }
 
       const modeAnchorEntries: MemoryAnchorStoreModeAnchorIndexEntry[] = [];
       for (const [modeId, ids] of modeIndex.entries()) {
-        modeAnchorEntries.push(freezeModeAnchorIndexEntry(modeId, [...ids]));
+        modeAnchorEntries.push(
+          freezeModeAnchorIndexEntry(modeId, [...ids]),
+        );
       }
 
       return Object.freeze({
@@ -546,336 +607,819 @@ export function createMemoryAnchorStore(
     },
 
     async save(): Promise<void> {
-      await options.persistence?.save?.(api.exportSnapshot());
+      const snapshot = api.exportSnapshot();
+      pushSnapshot('save', snapshot);
+      await options.persistence?.save?.(snapshot);
     },
 
-    // ── UPSERT ───────────────────────────────────────────────────────────────
-    upsert(anchor: MemoryAnchor, proofBinding?: AnchorProofBinding): MemoryAnchorMutationReceipt {
-      const normalized = freezeAnchor(anchor);
-      const existed    = anchors.has(anchor.id);
+    upsert(
+      anchor: MemoryAnchor,
+      proofBinding?: AnchorProofBinding,
+    ): MemoryAnchorMutationReceipt {
+      const normalizedAnchor = freezeAnchor(anchor);
+      const existing = anchors.get(normalizedAnchor.id);
+      const existed = Boolean(existing);
 
-      if (existed) removeFromIndexes(anchors.get(anchor.id)!);
-
-      anchors.set(normalized.id, normalized);
-      addToIndexes(normalized);
-
-      // Shadow channel classification
-      classifyShadow(normalized);
-
-      // Mode index
-      const sessionMode = options.sessionModeId ?? 'UNKNOWN';
-      addIndexed(modeIndex as Map<string, Set<MemoryAnchorId>>, sessionMode, normalized.id);
-
-      // Proof binding
-      if (proofBinding) {
-        proofBindings.set(normalized.id, Object.freeze({ ...proofBinding }));
+      if (existing) {
+        removeFromIndexes(existing);
       }
 
-      // Family cap enforcement with LRU eviction
-      const evictReceipt = enforcePerFamilyCap(normalized.continuity.familyId);
-      const notes: string[] = [
-        `kind=${normalized.kind}`,
-        `priority=${normalized.retrieval.priority}`,
-        `family=${normalized.continuity.familyId ?? 'none'}`,
-        `proof=${proofBinding ? 'bound' : 'none'}`,
-        `shadow=${shadowIds.has(normalized.id)}`,
-      ];
-      if (evictReceipt) notes.push(`evicted=${evictReceipt.anchorId}`);
+      anchors.set(normalizedAnchor.id, normalizedAnchor);
+      addToIndexes(normalizedAnchor);
+      classifyShadow(normalizedAnchor);
+      recordModeForAnchor(normalizedAnchor, options.sessionModeId);
 
-      return Object.freeze({
-        ok: true, operation: 'UPSERT',
-        anchorId: normalized.id,
-        created: !existed, updated: existed,
-        debugNotes: Object.freeze(notes),
+      if (proofBinding) {
+        bindProofInternal(normalizedAnchor.id, proofBinding);
+      }
+
+      upsertAuditForWrite(normalizedAnchor, options.sessionModeId);
+
+      const evictReceipt = enforcePerFamilyCap(
+        normalizedAnchor.continuity.familyId,
+      );
+
+      const receipt = createMutationReceipt({
+        ok: true,
+        operation: 'UPSERT',
+        anchorId: normalizedAnchor.id,
+        created: !existed,
+        updated: existed,
+        debugNotes: [
+          `kind=${normalizedAnchor.kind}`,
+          `priority=${normalizedAnchor.retrieval.priority}`,
+          `family=${normalizedAnchor.continuity.familyId ?? 'none'}`,
+          `shadow=${shadowIds.has(normalizedAnchor.id)}`,
+          `proof=${proofBindings.has(normalizedAnchor.id)}`,
+          ...(evictReceipt ? [`evicted=${evictReceipt.anchorId ?? 'none'}`] : []),
+        ],
       });
+
+      pushMutationReceipt(receipt);
+      if (evictReceipt) {
+        pushMutationReceipt(evictReceipt);
+      }
+      return receipt;
     },
 
-    // ── BATCH UPSERT ─────────────────────────────────────────────────────────
     batchUpsert(request: BatchUpsertRequest): BatchUpsertResult {
-      let created = 0, updated = 0, skipped = 0, merged = 0, evicted = 0;
-      const receipts_: MemoryAnchorMutationReceipt[] = [];
+      let created = 0;
+      let updated = 0;
+      let skipped = 0;
+      let merged = 0;
+      let evicted = 0;
+      const resultReceipts: MemoryAnchorMutationReceipt[] = [];
 
       for (const anchor of request.anchors) {
-        const binding = request.proofBindings?.[anchor.id];
-        const existed = anchors.has(anchor.id);
+        const proofBinding = request.proofBindings?.[anchor.id];
+        const exists = anchors.has(anchor.id);
 
-        if (existed && request.conflictPolicy === 'SKIP') {
-          skipped++;
-          receipts_.push(Object.freeze({
-            ok: true, operation: 'UPSERT', anchorId: anchor.id,
-            created: false, updated: false,
-            debugNotes: Object.freeze(['conflict=SKIP']),
-          }));
+        if (exists && request.conflictPolicy === 'SKIP') {
+          skipped += 1;
+          const receipt = createMutationReceipt({
+            ok: true,
+            operation: 'BATCH_UPSERT',
+            anchorId: anchor.id,
+            created: false,
+            updated: false,
+            debugNotes: ['conflict=SKIP'],
+          });
+          resultReceipts.push(receipt);
+          pushMutationReceipt(receipt);
           continue;
         }
 
-        if (existed && request.conflictPolicy === 'MERGE') {
-          const existing = anchors.get(anchor.id)!;
-          const mergedAnchor = mergeAnchorRecords(existing, anchor, now());
-          const r = api.upsert(mergedAnchor, binding ?? proofBindings.get(anchor.id));
-          merged++;
-          if (r.debugNotes.some(n => n.startsWith('evicted='))) evicted++;
-          receipts_.push(Object.freeze({
-            ok: true, operation: 'BATCH_UPSERT', anchorId: anchor.id,
-            created: false, updated: true,
-            debugNotes: Object.freeze(['conflict=MERGE', `family=${mergedAnchor.continuity.familyId ?? 'none'}`]),
-          }));
+        if (exists && request.conflictPolicy === 'MERGE') {
+          const mergedAnchor = mergeAnchorRecords(
+            anchors.get(anchor.id)!,
+            anchor,
+            now(),
+          );
+          const receipt = api.upsert(
+            mergedAnchor,
+            proofBinding ?? proofBindings.get(anchor.id),
+          );
+          merged += 1;
+          if (receipt.debugNotes.some((note) => note.startsWith('evicted='))) {
+            evicted += 1;
+          }
+          resultReceipts.push(
+            createMutationReceipt({
+              ok: true,
+              operation: 'BATCH_UPSERT',
+              anchorId: anchor.id,
+              created: false,
+              updated: true,
+              debugNotes: ['conflict=MERGE'],
+            }),
+          );
           continue;
         }
 
-        // REPLACE (default) or new anchor
-        const r = api.upsert(anchor, binding);
-        if (r.created) created++; else updated++;
-        if (r.debugNotes.some(n => n.startsWith('evicted='))) evicted++;
-        receipts_.push(r);
+        const receipt = api.upsert(anchor, proofBinding);
+        if (receipt.created) {
+          created += 1;
+        } else {
+          updated += 1;
+        }
+        if (receipt.debugNotes.some((note) => note.startsWith('evicted='))) {
+          evicted += 1;
+        }
+        resultReceipts.push(receipt);
       }
-
-      return Object.freeze({ created, updated, skipped, merged, evicted, receipts: Object.freeze(receipts_) });
-    },
-
-    // ── MERGE ─────────────────────────────────────────────────────────────────
-    // Merges anchorB into anchorA: union tags, max salience, sum hit counts,
-    // union predecessor/successor chains. anchorB is archived after merge.
-    merge(anchorIdA: MemoryAnchorId, anchorIdB: MemoryAnchorId): MemoryAnchorMutationReceipt {
-      const a = anchors.get(anchorIdA);
-      const b = anchors.get(anchorIdB);
-      if (!a || !b || anchorIdA === anchorIdB) {
-        return Object.freeze({
-          ok: false, operation: 'MERGE', anchorId: anchorIdA,
-          created: false, updated: false,
-          debugNotes: Object.freeze([`aExists=${!!a}`, `bExists=${!!b}`, `sameId=${anchorIdA === anchorIdB}`]),
-        });
-      }
-
-      const merged = freezeAnchor({
-        ...a,
-        salience: Object.freeze({
-          ...a.salience,
-          final: Math.max(a.salience.final, b.salience.final),
-        }),
-        formation: Object.freeze({
-          ...a.formation,
-          hitCount:      a.formation.hitCount + b.formation.hitCount,
-          reaffirmCount: a.formation.reaffirmCount + b.formation.reaffirmCount,
-          updatedAtMs:   now(),
-        }),
-        payload: Object.freeze({
-          ...a.payload,
-          tags:            mergeUnique(a.payload.tags, b.payload.tags),
-          emotions:        mergeUnique(a.payload.emotions, b.payload.emotions),
-          callbackPhrases: mergeUnique(a.payload.callbackPhrases, b.payload.callbackPhrases),
-        }),
-        continuity: Object.freeze({
-          ...a.continuity,
-          predecessorAnchorIds: mergeUnique(a.continuity.predecessorAnchorIds, b.continuity.predecessorAnchorIds),
-          successorAnchorIds:   mergeUnique(a.continuity.successorAnchorIds, b.continuity.successorAnchorIds),
-        }),
-      });
-
-      removeFromIndexes(a);
-      anchors.set(anchorIdA, merged);
-      addToIndexes(merged);
-      archivedIds.add(anchorIdB); // archive the consumed anchor
 
       return Object.freeze({
-        ok: true, operation: 'MERGE', anchorId: anchorIdA,
-        created: false, updated: true,
-        debugNotes: Object.freeze([`mergedFrom=${anchorIdB}`, `newSalience=${round4(merged.salience.final)}`]),
+        created,
+        updated,
+        skipped,
+        merged,
+        evicted,
+        receipts: Object.freeze(resultReceipts),
       });
     },
 
-    get:  (id) => anchors.get(id) ?? null,
-    has:  (id) => anchors.has(id),
-    list: () => Object.freeze([...anchors.values()]),
-    listShadow: () => Object.freeze([...shadowIds].map(id => anchors.get(id)!).filter(Boolean)),
+    merge(
+      anchorIdA: MemoryAnchorId,
+      anchorIdB: MemoryAnchorId,
+    ): MemoryAnchorMutationReceipt {
+      if (anchorIdA === anchorIdB) {
+        const receipt = createMutationReceipt({
+          ok: false,
+          operation: 'MERGE',
+          anchorId: anchorIdA,
+          created: false,
+          updated: false,
+          debugNotes: ['sameAnchorId=true'],
+        });
+        pushMutationReceipt(receipt);
+        return receipt;
+      }
 
-    // ── ARCHIVE / REINSTATE ───────────────────────────────────────────────────
+      const anchorA = anchors.get(anchorIdA);
+      const anchorB = anchors.get(anchorIdB);
+
+      if (!anchorA || !anchorB) {
+        const receipt = createMutationReceipt({
+          ok: false,
+          operation: 'MERGE',
+          anchorId: anchorIdA,
+          created: false,
+          updated: false,
+          debugNotes: [
+            `anchorAExists=${Boolean(anchorA)}`,
+            `anchorBExists=${Boolean(anchorB)}`,
+          ],
+        });
+        pushMutationReceipt(receipt);
+        return receipt;
+      }
+
+      const mergedAnchor = mergeAnchorRecords(anchorA, anchorB, now());
+
+      removeFromIndexes(anchorA);
+      removeFromIndexes(anchorB);
+
+      anchors.set(anchorIdA, mergedAnchor);
+      addToIndexes(mergedAnchor);
+      classifyShadow(mergedAnchor);
+      bindProofAfterMerge(anchorIdA, anchorIdB);
+      archivedIds.add(anchorIdB);
+      recordModeForAnchor(mergedAnchor, modeForAnchor(anchorIdA));
+
+      const auditState = anchorAudit.get(anchorIdA);
+      const otherAuditState = anchorAudit.get(anchorIdB);
+      anchorAudit.set(anchorIdA, Object.freeze({
+        formedAtMs: Math.min(
+          auditState?.formedAtMs ?? now(),
+          otherAuditState?.formedAtMs ?? now(),
+        ),
+        lastTouchedAtMs: now(),
+        lastQueriedAtMs: auditState?.lastQueriedAtMs ?? otherAuditState?.lastQueriedAtMs,
+        lastReceiptId: auditState?.lastReceiptId ?? otherAuditState?.lastReceiptId,
+        lastRank: auditState?.lastRank ?? otherAuditState?.lastRank,
+        lastScore: maxDefined(auditState?.lastScore, otherAuditState?.lastScore),
+        lastWindowId: auditState?.lastWindowId ?? otherAuditState?.lastWindowId,
+        modeId: auditState?.modeId ?? otherAuditState?.modeId ?? options.sessionModeId,
+        audienceHeatAtFormation: Math.max(
+          auditState?.audienceHeatAtFormation ?? 0,
+          otherAuditState?.audienceHeatAtFormation ?? 0,
+        ),
+        formationTickIndex: Math.min(
+          auditState?.formationTickIndex ?? 0,
+          otherAuditState?.formationTickIndex ?? 0,
+        ),
+        retrievalCount:
+          (auditState?.retrievalCount ?? 0) + (otherAuditState?.retrievalCount ?? 0),
+        decayApplications:
+          Math.max(auditState?.decayApplications ?? 0, otherAuditState?.decayApplications ?? 0),
+      }));
+      anchorAudit.delete(anchorIdB);
+
+      const receipt = createMutationReceipt({
+        ok: true,
+        operation: 'MERGE',
+        anchorId: anchorIdA,
+        created: false,
+        updated: true,
+        debugNotes: [
+          `mergedFrom=${anchorIdB}`,
+          `shadow=${shadowIds.has(anchorIdA)}`,
+          `proof=${proofBindings.has(anchorIdA)}`,
+          `archived=${archivedIds.has(anchorIdB)}`,
+        ],
+      });
+      pushMutationReceipt(receipt);
+      return receipt;
+    },
+
+    get(anchorId: MemoryAnchorId): MemoryAnchor | null {
+      return anchors.get(anchorId) ?? null;
+    },
+
+    has(anchorId: MemoryAnchorId): boolean {
+      return anchors.has(anchorId);
+    },
+
+    list(): readonly MemoryAnchor[] {
+      return Object.freeze([...anchors.values()]);
+    },
+
+    listShadow(): readonly MemoryAnchor[] {
+      return Object.freeze(
+        [...shadowIds]
+          .map((id) => anchors.get(id))
+          .filter((anchor): anchor is MemoryAnchor => Boolean(anchor)),
+      );
+    },
+
     archive(anchorId: MemoryAnchorId): MemoryAnchorMutationReceipt {
-      if (!anchors.has(anchorId)) return missingReceipt('ARCHIVE', anchorId);
+      if (!anchors.has(anchorId)) {
+        const receipt = missingReceipt('ARCHIVE', anchorId);
+        pushMutationReceipt(receipt);
+        return receipt;
+      }
+
       archivedIds.add(anchorId);
-      return Object.freeze({ ok: true, operation: 'ARCHIVE', anchorId, created: false, updated: true, debugNotes: Object.freeze(['archived=true']) });
+      touchAudit(anchorId, { lastTouchedAtMs: now() });
+
+      const receipt = createMutationReceipt({
+        ok: true,
+        operation: 'ARCHIVE',
+        anchorId,
+        created: false,
+        updated: true,
+        debugNotes: ['archived=true'],
+      });
+      pushMutationReceipt(receipt);
+      return receipt;
     },
 
     reinstate(anchorId: MemoryAnchorId): MemoryAnchorMutationReceipt {
-      if (!anchors.has(anchorId)) return missingReceipt('REINSTATE', anchorId);
+      if (!anchors.has(anchorId)) {
+        const receipt = missingReceipt('REINSTATE', anchorId);
+        pushMutationReceipt(receipt);
+        return receipt;
+      }
+
       archivedIds.delete(anchorId);
-      return Object.freeze({ ok: true, operation: 'REINSTATE', anchorId, created: false, updated: true, debugNotes: Object.freeze(['archived=false']) });
+      touchAudit(anchorId, { lastTouchedAtMs: now() });
+
+      const receipt = createMutationReceipt({
+        ok: true,
+        operation: 'REINSTATE',
+        anchorId,
+        created: false,
+        updated: true,
+        debugNotes: ['archived=false'],
+      });
+      pushMutationReceipt(receipt);
+      return receipt;
     },
 
-    // ── REAFFIRM ─────────────────────────────────────────────────────────────
-    reaffirm(anchorId: MemoryAnchorId, explicitNowMs?: number): MemoryAnchorMutationReceipt {
-      const current = anchors.get(anchorId);
-      if (!current) return missingReceipt('REAFFIRM', anchorId);
+    reaffirm(
+      anchorId: MemoryAnchorId,
+      explicitNowMs?: number,
+    ): MemoryAnchorMutationReceipt {
+      const existing = anchors.get(anchorId);
+      if (!existing) {
+        const receipt = missingReceipt('REAFFIRM', anchorId);
+        pushMutationReceipt(receipt);
+        return receipt;
+      }
+
       const ts = normalizeNow(explicitNowMs ?? now());
-      const reaffirmed = freezeAnchor({
-        ...current,
+      const updatedAnchor = freezeAnchor({
+        ...existing,
         formation: Object.freeze({
-          ...current.formation,
-          updatedAtMs:   ts,
+          ...existing.formation,
+          updatedAtMs: ts,
           reaffirmedAtMs: ts,
-          hitCount:       current.formation.hitCount + 1,
-          reaffirmCount:  current.formation.reaffirmCount + 1,
+          hitCount: existing.formation.hitCount + 1,
+          reaffirmCount: existing.formation.reaffirmCount + 1,
         }),
       });
-      removeFromIndexes(current);
-      anchors.set(anchorId, reaffirmed);
-      addToIndexes(reaffirmed);
-      return Object.freeze({
-        ok: true, operation: 'REAFFIRM', anchorId, created: false, updated: true,
-        debugNotes: Object.freeze([`reaffirmCount=${reaffirmed.formation.reaffirmCount}`, `hitCount=${reaffirmed.formation.hitCount}`]),
+
+      removeFromIndexes(existing);
+      anchors.set(anchorId, updatedAnchor);
+      addToIndexes(updatedAnchor);
+
+      touchAudit(anchorId, { lastTouchedAtMs: ts });
+
+      const receipt = createMutationReceipt({
+        ok: true,
+        operation: 'REAFFIRM',
+        anchorId,
+        created: false,
+        updated: true,
+        debugNotes: [
+          `hitCount=${updatedAnchor.formation.hitCount}`,
+          `reaffirmCount=${updatedAnchor.formation.reaffirmCount}`,
+        ],
       });
+      pushMutationReceipt(receipt);
+      return receipt;
     },
 
-    // ── PROMOTE / DEMOTE ─────────────────────────────────────────────────────
-    // Promote bumps the anchor's retrieval priority one tier (LOW→NORMAL→HIGH→CRITICAL).
-    // Demote reverses. Used by InvasionOrchestrator and HaterResponseOrchestrator
-    // when a callback lands with exceptional impact.
-
     promote(anchorId: MemoryAnchorId): MemoryAnchorMutationReceipt {
-      const current = anchors.get(anchorId);
-      if (!current) return missingReceipt('PROMOTE', anchorId);
-      const newPriority = promotePriority(current.retrieval.priority);
-      if (newPriority === current.retrieval.priority) {
-        return Object.freeze({ ok: true, operation: 'PROMOTE', anchorId, created: false, updated: false, debugNotes: Object.freeze(['alreadyMax']) });
+      const existing = anchors.get(anchorId);
+      if (!existing) {
+        const receipt = missingReceipt('PROMOTE', anchorId);
+        pushMutationReceipt(receipt);
+        return receipt;
       }
-      const promoted = freezeAnchor({ ...current, retrieval: Object.freeze({ ...current.retrieval, priority: newPriority }) });
-      removeFromIndexes(current);
-      anchors.set(anchorId, promoted);
-      addToIndexes(promoted);
-      return Object.freeze({ ok: true, operation: 'PROMOTE', anchorId, created: false, updated: true, debugNotes: Object.freeze([`priority=${newPriority}`]) });
+
+      const promotedPriority = promotePriority(existing.retrieval.priority);
+      if (promotedPriority === existing.retrieval.priority) {
+        const receipt = createMutationReceipt({
+          ok: true,
+          operation: 'PROMOTE',
+          anchorId,
+          created: false,
+          updated: false,
+          debugNotes: ['alreadyMax=true'],
+        });
+        pushMutationReceipt(receipt);
+        return receipt;
+      }
+
+      const updatedAnchor = freezeAnchor({
+        ...existing,
+        retrieval: Object.freeze({
+          ...existing.retrieval,
+          priority: promotedPriority,
+        }),
+      });
+
+      removeFromIndexes(existing);
+      anchors.set(anchorId, updatedAnchor);
+      addToIndexes(updatedAnchor);
+      touchAudit(anchorId, { lastTouchedAtMs: now() });
+
+      const receipt = createMutationReceipt({
+        ok: true,
+        operation: 'PROMOTE',
+        anchorId,
+        created: false,
+        updated: true,
+        debugNotes: [`priority=${promotedPriority}`],
+      });
+      pushMutationReceipt(receipt);
+      return receipt;
     },
 
     demote(anchorId: MemoryAnchorId): MemoryAnchorMutationReceipt {
+      const existing = anchors.get(anchorId);
+      if (!existing) {
+        const receipt = missingReceipt('DEMOTE', anchorId);
+        pushMutationReceipt(receipt);
+        return receipt;
+      }
+
+      const demotedPriority = demotePriority(existing.retrieval.priority);
+      if (demotedPriority === existing.retrieval.priority) {
+        const receipt = createMutationReceipt({
+          ok: true,
+          operation: 'DEMOTE',
+          anchorId,
+          created: false,
+          updated: false,
+          debugNotes: ['alreadyMin=true'],
+        });
+        pushMutationReceipt(receipt);
+        return receipt;
+      }
+
+      const updatedAnchor = freezeAnchor({
+        ...existing,
+        retrieval: Object.freeze({
+          ...existing.retrieval,
+          priority: demotedPriority,
+        }),
+      });
+
+      removeFromIndexes(existing);
+      anchors.set(anchorId, updatedAnchor);
+      addToIndexes(updatedAnchor);
+      touchAudit(anchorId, { lastTouchedAtMs: now() });
+
+      const receipt = createMutationReceipt({
+        ok: true,
+        operation: 'DEMOTE',
+        anchorId,
+        created: false,
+        updated: true,
+        debugNotes: [`priority=${demotedPriority}`],
+      });
+      pushMutationReceipt(receipt);
+      return receipt;
+    },
+
+    linkSuccessor(
+      anchorId: MemoryAnchorId,
+      successorId: MemoryAnchorId,
+    ): MemoryAnchorMutationReceipt {
       const current = anchors.get(anchorId);
-      if (!current) return missingReceipt('DEMOTE', anchorId);
-      const newPriority = demotePriority(current.retrieval.priority);
-      if (newPriority === current.retrieval.priority) {
-        return Object.freeze({ ok: true, operation: 'DEMOTE', anchorId, created: false, updated: false, debugNotes: Object.freeze(['alreadyMin']) });
-      }
-      const demoted = freezeAnchor({ ...current, retrieval: Object.freeze({ ...current.retrieval, priority: newPriority }) });
-      removeFromIndexes(current);
-      anchors.set(anchorId, demoted);
-      addToIndexes(demoted);
-      return Object.freeze({ ok: true, operation: 'DEMOTE', anchorId, created: false, updated: true, debugNotes: Object.freeze([`priority=${newPriority}`]) });
-    },
+      const successor = anchors.get(successorId);
 
-    // ── LINK SUCCESSOR ────────────────────────────────────────────────────────
-    linkSuccessor(anchorId: MemoryAnchorId, successorAnchorId: MemoryAnchorId): MemoryAnchorMutationReceipt {
-      const current  = anchors.get(anchorId);
-      const successor = anchors.get(successorAnchorId);
       if (!current || !successor) {
-        return Object.freeze({ ok: false, operation: 'LINK_SUCCESSOR', anchorId, created: false, updated: false, debugNotes: Object.freeze([`aExists=${!!current}`, `bExists=${!!successor}`]) });
+        const receipt = createMutationReceipt({
+          ok: false,
+          operation: 'LINK_SUCCESSOR',
+          anchorId,
+          created: false,
+          updated: false,
+          debugNotes: [
+            `currentExists=${Boolean(current)}`,
+            `successorExists=${Boolean(successor)}`,
+          ],
+        });
+        pushMutationReceipt(receipt);
+        return receipt;
       }
-      const nextA = freezeAnchor({ ...current, continuity: Object.freeze({ ...current.continuity, successorAnchorIds: mergeUnique(current.continuity.successorAnchorIds, [successorAnchorId]) }) });
-      const nextB = freezeAnchor({ ...successor, continuity: Object.freeze({ ...successor.continuity, predecessorAnchorIds: mergeUnique(successor.continuity.predecessorAnchorIds, [anchorId]) }) });
-      removeFromIndexes(current); removeFromIndexes(successor);
-      anchors.set(nextA.id, nextA); anchors.set(nextB.id, nextB);
-      addToIndexes(nextA); addToIndexes(nextB);
-      return Object.freeze({ ok: true, operation: 'LINK_SUCCESSOR', anchorId, created: false, updated: true, debugNotes: Object.freeze([`successor=${successorAnchorId}`]) });
+
+      const nextCurrent = freezeAnchor({
+        ...current,
+        continuity: Object.freeze({
+          ...current.continuity,
+          successorAnchorIds: mergeUnique(
+            current.continuity.successorAnchorIds,
+            [successorId],
+          ),
+        }),
+      });
+
+      const nextSuccessor = freezeAnchor({
+        ...successor,
+        continuity: Object.freeze({
+          ...successor.continuity,
+          predecessorAnchorIds: mergeUnique(
+            successor.continuity.predecessorAnchorIds,
+            [anchorId],
+          ),
+        }),
+      });
+
+      removeFromIndexes(current);
+      removeFromIndexes(successor);
+
+      anchors.set(anchorId, nextCurrent);
+      anchors.set(successorId, nextSuccessor);
+
+      addToIndexes(nextCurrent);
+      addToIndexes(nextSuccessor);
+
+      touchAudit(anchorId, { lastTouchedAtMs: now() });
+      touchAudit(successorId, { lastTouchedAtMs: now() });
+
+      const receipt = createMutationReceipt({
+        ok: true,
+        operation: 'LINK_SUCCESSOR',
+        anchorId,
+        created: false,
+        updated: true,
+        debugNotes: [`successor=${successorId}`],
+      });
+      pushMutationReceipt(receipt);
+      return receipt;
     },
 
-    // ── PROOF BIND ────────────────────────────────────────────────────────────
-    bindProof(anchorId: MemoryAnchorId, binding: AnchorProofBinding): MemoryAnchorMutationReceipt {
-      if (!anchors.has(anchorId)) return missingReceipt('PROOF_BIND', anchorId);
-      const existing = proofBindings.get(anchorId);
-      const bindings = existing
-        ? [existing, binding].slice(-MEMORY_ANCHOR_STORE_DEFAULTS.maxProofBindingsPerAnchor)
-        : [binding];
-      proofBindings.set(anchorId, Object.freeze(bindings[bindings.length - 1]));
-      return Object.freeze({ ok: true, operation: 'PROOF_BIND', anchorId, created: !existing, updated: !!existing, debugNotes: Object.freeze([`proofHash=${binding.proofHash}`, `event=${binding.eventType}`]) });
+    bindProof(
+      anchorId: MemoryAnchorId,
+      binding: AnchorProofBinding,
+    ): MemoryAnchorMutationReceipt {
+      if (!anchors.has(anchorId)) {
+        const receipt = missingReceipt('PROOF_BIND', anchorId);
+        pushMutationReceipt(receipt);
+        return receipt;
+      }
+
+      const existed = proofBindings.has(anchorId);
+      bindProofInternal(anchorId, binding);
+      touchAudit(anchorId, { lastTouchedAtMs: now() });
+
+      const receipt = createMutationReceipt({
+        ok: true,
+        operation: 'PROOF_BIND',
+        anchorId,
+        created: !existed,
+        updated: existed,
+        debugNotes: [
+          `proofHash=${binding.proofHash}`,
+          `eventType=${binding.eventType}`,
+          `history=${proofHistory.get(anchorId)?.length ?? 0}`,
+        ],
+      });
+      pushMutationReceipt(receipt);
+      return receipt;
     },
 
-    // ── WINDOW MANAGEMENT ─────────────────────────────────────────────────────
     openWindow(seed: MemoryAnchorWindowSeed = {}): MemoryAnchorWindow {
-      const id = createMemoryAnchorWindowId(
-        [seed.runId, seed.sceneId, seed.momentId, seed.roomId, seed.channelId, now()]
-          .filter(Boolean).join('_')
-      );
+      const cappedRunWindows = getRunWindowIds(seed.runId);
+      if (seed.runId && cappedRunWindows.length >= MEMORY_ANCHOR_STORE_DEFAULTS.maxWindowsPerRun) {
+        evictOldestClosedWindow(seed.runId);
+      }
+
       const window = freezeWindow({
-        id,
-        openedAtMs:       now(),
-        closedAtMs:       undefined,
-        runId:            seed.runId,
-        sceneId:          seed.sceneId,
-        momentId:         seed.momentId,
-        roomId:           seed.roomId,
-        channelId:        seed.channelId,
-        anchorIds:        Object.freeze([]),
-        dominantKinds:    Object.freeze(seed.dominantKinds ?? []),
+        id: createMemoryAnchorWindowId(
+          [
+            seed.runId,
+            seed.sceneId,
+            seed.momentId,
+            seed.roomId,
+            seed.channelId,
+            now(),
+          ]
+            .filter(Boolean)
+            .join('_'),
+        ),
+        openedAtMs: now(),
+        closedAtMs: undefined,
+        runId: seed.runId,
+        sceneId: seed.sceneId,
+        momentId: seed.momentId,
+        roomId: seed.roomId,
+        channelId: seed.channelId,
+        anchorIds: Object.freeze([]),
+        dominantKinds: Object.freeze(seed.dominantKinds ?? []),
         totalFinalSalience: 0,
       });
+
       windows.set(window.id, window);
+      indexWindow(window);
+
+      const receipt = createMutationReceipt({
+        ok: true,
+        operation: 'WINDOW_OPEN',
+        windowId: window.id,
+        created: true,
+        updated: false,
+        debugNotes: [
+          `runId=${seed.runId ?? 'none'}`,
+          `roomId=${seed.roomId ?? 'none'}`,
+          `channelId=${seed.channelId ?? 'none'}`,
+          `modeId=${seed.modeId ?? 'UNKNOWN'}`,
+          `audienceHeat=${round4(clampUnit(seed.audienceHeat ?? 0))}`,
+        ],
+      });
+      pushMutationReceipt(receipt);
       return window;
     },
 
-    appendToWindow(windowId: string, anchorId: MemoryAnchorId): MemoryAnchorMutationReceipt {
+    appendToWindow(
+      windowId: string,
+      anchorId: MemoryAnchorId,
+    ): MemoryAnchorMutationReceipt {
       const window = windows.get(windowId);
       const anchor = anchors.get(anchorId);
+
       if (!window || !anchor) {
-        return Object.freeze({ ok: false, operation: 'WINDOW_APPEND', anchorId, windowId, created: false, updated: false, debugNotes: Object.freeze([`windowExists=${!!window}`, `anchorExists=${!!anchor}`]) });
+        const receipt = createMutationReceipt({
+          ok: false,
+          operation: 'WINDOW_APPEND',
+          anchorId,
+          windowId,
+          created: false,
+          updated: false,
+          debugNotes: [
+            `windowExists=${Boolean(window)}`,
+            `anchorExists=${Boolean(anchor)}`,
+          ],
+        });
+        pushMutationReceipt(receipt);
+        return receipt;
       }
-      const anchorIds = mergeUnique(window.anchorIds, [anchorId]).slice(-MEMORY_ANCHOR_STORE_DEFAULTS.maxWindowAnchors);
-      const dominant  = computeDominantKinds(anchorIds);
-      const updated   = freezeWindow({ ...window, anchorIds: Object.freeze(anchorIds), dominantKinds: Object.freeze(dominant), totalFinalSalience: round4(sumWindowSalience(anchorIds)) });
-      windows.set(windowId, updated);
 
-      // Update relationship graph for all pairs in this window
-      updateRelationshipGraph(anchorIds);
-
-      return Object.freeze({ ok: true, operation: 'WINDOW_APPEND', anchorId, windowId, created: false, updated: true, debugNotes: Object.freeze([`windowAnchors=${updated.anchorIds.length}`, `dominantKinds=${updated.dominantKinds.join('|') || 'none'}`]) });
-    },
-
-    closeWindow(windowId: string, explicitMs?: number): MemoryAnchorMutationReceipt {
-      const window = windows.get(windowId);
-      if (!window) return Object.freeze({ ok: false, operation: 'WINDOW_CLOSE', windowId, created: false, updated: false, debugNotes: Object.freeze(['windowMissing']) });
-      windows.set(windowId, freezeWindow({ ...window, closedAtMs: normalizeNow(explicitMs ?? now()) }));
-      return Object.freeze({ ok: true, operation: 'WINDOW_CLOSE', windowId, created: false, updated: true, debugNotes: Object.freeze([`closedAtMs=${windows.get(windowId)!.closedAtMs}`]) });
-    },
-
-    getWindow:   (id) => windows.get(id) ?? null,
-    listWindows: ()  => Object.freeze([...windows.values()]),
-
-    // ── QUERY ─────────────────────────────────────────────────────────────────
-    query(request: MemoryAnchorStoreQueryRequest): MemoryAnchorQueryResponse {
-      const query        = normalizeQuery(request, now());
-      const candidateIds = gatherCandidateIds(query, request);
-      const ranked       = rankingPolicy.rank(
-        candidateIds.map(id => toCandidate(id, request.embeddingMatches)),
-        buildRankingContext(query, request),
+      const nextAnchorIds = mergeUnique(window.anchorIds, [anchorId]).slice(
+        -MEMORY_ANCHOR_STORE_DEFAULTS.maxWindowAnchors,
       );
-
-      const matches  = Object.freeze(ranked.ranked.map(e => e.projection));
-      const previews = Object.freeze(ranked.ranked.map((e, i) => toPreview(e.anchor, e.score, i + 1)));
-
-      // Shadow matches surfaced for InvasionOrchestrator / HaterResponseOrchestrator
-      const shadowMatches = request.includeShadow
-        ? Object.freeze(candidateIds.filter(id => shadowIds.has(id)))
-        : Object.freeze([] as MemoryAnchorId[]);
-
-      const receipt = freezeReceipt({
-        id: createMemoryAnchorReceiptId(`${query.id}_${query.intent}_${ranked.returnedCount}_${ranked.totalCandidates}`),
-        queryId:        query.id,
-        createdAtMs:    ranked.nowMs,
-        candidateCount: ranked.totalCandidates,
-        returnedCount:  ranked.returnedCount,
-        topAnchorIds:   Object.freeze(ranked.ranked.map(e => e.anchor.id)),
-        debugNotes:     Object.freeze([`threshold=${round4(ranked.thresholdScore)}`, `matches=${ranked.returnedCount}`, `intent=${query.intent}`, `mode=${request.currentModeId ?? 'UNKNOWN'}`, `shadowMatches=${shadowMatches.length}`]),
+      const dominantKinds = computeDominantKinds(nextAnchorIds);
+      const nextWindow = freezeWindow({
+        ...window,
+        anchorIds: Object.freeze(nextAnchorIds),
+        dominantKinds: Object.freeze(dominantKinds),
+        totalFinalSalience: round4(sumWindowSalience(nextAnchorIds)),
       });
 
-      // Only persist receipt if this is not a probe query
-      if (!request.probeOnly) pushReceipt(receipt);
+      windows.set(windowId, nextWindow);
+      indexWindow(nextWindow);
+      updateRelationshipGraph(nextAnchorIds);
+      touchAudit(anchorId, {
+        lastTouchedAtMs: now(),
+        lastWindowId: windowId,
+      });
 
-      return Object.freeze({ query, matches, ranked: Object.freeze(ranked.ranked), previews, receipt, candidateIds: Object.freeze(candidateIds), shadowMatches, debugNotes: Object.freeze([`candidateIds=${candidateIds.length}`, `returned=${ranked.returnedCount}`, `probe=${!!request.probeOnly}`]) });
+      const receipt = createMutationReceipt({
+        ok: true,
+        operation: 'WINDOW_APPEND',
+        anchorId,
+        windowId,
+        created: false,
+        updated: true,
+        debugNotes: [
+          `windowAnchors=${nextWindow.anchorIds.length}`,
+          `dominantKinds=${nextWindow.dominantKinds.join('|') || 'none'}`,
+          `totalFinalSalience=${round4(nextWindow.totalFinalSalience)}`,
+        ],
+      });
+      pushMutationReceipt(receipt);
+      return receipt;
     },
 
-    // ── CALLBACK DEDUP REGISTRY ───────────────────────────────────────────────
-    registerUsedCallback(phrase: string): void {
-      if (usedCallbackPhrases.size >= MEMORY_ANCHOR_STORE_DEFAULTS.maxUsedCallbacksPerRun) {
-        // LRU: delete oldest entry (first item in insertion-order Set)
-        const first = usedCallbackPhrases.values().next().value;
-        if (first) usedCallbackPhrases.delete(first);
+    closeWindow(
+      windowId: string,
+      closedAtMs?: number,
+    ): MemoryAnchorMutationReceipt {
+      const window = windows.get(windowId);
+      if (!window) {
+        const receipt = createMutationReceipt({
+          ok: false,
+          operation: 'WINDOW_CLOSE',
+          windowId,
+          created: false,
+          updated: false,
+          debugNotes: ['windowMissing=true'],
+        });
+        pushMutationReceipt(receipt);
+        return receipt;
       }
-      usedCallbackPhrases.add(normalizeToken(phrase));
+
+      const nextWindow = freezeWindow({
+        ...window,
+        closedAtMs: normalizeNow(closedAtMs ?? now()),
+      });
+
+      windows.set(windowId, nextWindow);
+
+      const receipt = createMutationReceipt({
+        ok: true,
+        operation: 'WINDOW_CLOSE',
+        windowId,
+        created: false,
+        updated: true,
+        debugNotes: [
+          `closedAtMs=${nextWindow.closedAtMs}`,
+          `anchors=${nextWindow.anchorIds.length}`,
+        ],
+      });
+      pushMutationReceipt(receipt);
+      return receipt;
+    },
+
+    getWindow(windowId: string): MemoryAnchorWindow | null {
+      return windows.get(windowId) ?? null;
+    },
+
+    listWindows(): readonly MemoryAnchorWindow[] {
+      return Object.freeze([...windows.values()]);
+    },
+
+    query(request: MemoryAnchorStoreQueryRequest): MemoryAnchorQueryResponse {
+      ensureColdStartSeeded();
+
+      const query = normalizeQuery(request, now());
+      const normalizedQueryTokens = tokenizeForQuery(request.queryText);
+      const excludedAnchorIds = new Set(request.excludedAnchorIds ?? []);
+      const excludedFamilyIds = new Set(
+        normalizeStringList(request.excludedFamilyIds ?? []),
+      );
+
+      const candidateContext: CandidateGatherContext = Object.freeze({
+        query,
+        request,
+        normalizedQueryTokens,
+        excludedAnchorIds,
+        excludedFamilyIds,
+      });
+
+      const candidateIds = gatherCandidateIds(candidateContext);
+      const candidates = candidateIds.map((anchorId, index) =>
+        toCandidate(
+          anchorId,
+          request.embeddingMatches,
+          request.relationshipSignals,
+          request.emotionSignals,
+          request.currentTags,
+          request.currentModeId,
+          index,
+        ),
+      );
+
+      const rankingContext = buildRankingContext(
+        query,
+        request,
+        normalizedQueryTokens,
+      );
+
+      const rankedResult = rankingPolicy.rank(candidates, rankingContext);
+      const matches = Object.freeze(rankedResult.ranked.map((entry) => entry.projection));
+      const previews = Object.freeze(
+        rankedResult.ranked.map((entry, index) =>
+          toPreview(entry.anchor, entry.score, index + 1),
+        ),
+      );
+
+      const shadowMatches = Object.freeze(
+        request.includeShadow
+          ? candidateIds.filter((anchorId) => shadowIds.has(anchorId)).slice(
+              0,
+              MEMORY_ANCHOR_STORE_DEFAULTS.maxShadowMatchesPerQuery,
+            )
+          : [],
+      );
+
+      const receipt = freezeReceipt({
+        id: createMemoryAnchorReceiptId(
+          [
+            query.id,
+            query.intent,
+            rankedResult.returnedCount,
+            rankedResult.totalCandidates,
+          ].join('_'),
+        ),
+        queryId: query.id,
+        createdAtMs: rankedResult.nowMs,
+        candidateCount: rankedResult.totalCandidates,
+        returnedCount: rankedResult.returnedCount,
+        topAnchorIds: Object.freeze(
+          rankedResult.ranked.map((entry) => entry.anchor.id),
+        ),
+        debugNotes: Object.freeze(
+          trimDebugNotes([
+            `threshold=${round4(rankedResult.thresholdScore)}`,
+            `candidates=${rankedResult.totalCandidates}`,
+            `returned=${rankedResult.returnedCount}`,
+            `intent=${query.intent}`,
+            `mode=${request.currentModeId ?? 'UNKNOWN'}`,
+            `includeArchived=${Boolean(request.includeArchived)}`,
+            `includeShadow=${Boolean(request.includeShadow)}`,
+            `probeOnly=${Boolean(request.probeOnly)}`,
+            `queryTokens=${normalizedQueryTokens.length}`,
+            `shadowMatches=${shadowMatches.length}`,
+          ]),
+        ),
+      });
+
+      if (!request.probeOnly) {
+        pushReceipt(receipt);
+        updateAuditFromRanked(rankedResult.ranked, receipt.id);
+      }
+
+      return Object.freeze({
+        query,
+        matches,
+        ranked: Object.freeze(rankedResult.ranked),
+        previews,
+        receipt,
+        candidateIds: Object.freeze(candidateIds),
+        shadowMatches,
+        debugNotes: Object.freeze(
+          trimDebugNotes([
+            `candidateIds=${candidateIds.length}`,
+            `ranked=${rankedResult.ranked.length}`,
+            `probeOnly=${Boolean(request.probeOnly)}`,
+            `coldStartSeeded=${coldStartSeeded}`,
+          ]),
+        ),
+      });
+    },
+
+    registerUsedCallback(phrase: string): void {
+      const normalized = normalizeToken(phrase);
+      if (!normalized) {
+        return;
+      }
+
+      if (
+        usedCallbackPhrases.size >=
+        MEMORY_ANCHOR_STORE_DEFAULTS.maxUsedCallbacksPerRun
+      ) {
+        const first = usedCallbackPhrases.values().next().value;
+        if (first) {
+          usedCallbackPhrases.delete(first);
+        }
+      }
+
+      usedCallbackPhrases.add(normalized);
     },
 
     isCallbackUsed(phrase: string): boolean {
@@ -886,275 +1430,769 @@ export function createMemoryAnchorStore(
       usedCallbackPhrases.clear();
     },
 
-    // ── TICK DECAY ────────────────────────────────────────────────────────────
-    // Integrates with Engine 0's tick clock. On each tick, anchors with a
-    // formation-era audienceHeat bonus have that bonus decayed by the
-    // exponential half-life curve. Anchors whose final salience falls below
-    // the minimum are auto-archived (not deleted — still recoverable).
-
     tickDecay(tickIndex: number): MemoryAnchorMutationReceipt {
-      if (!options.salienceDecayEnabled) {
-        return Object.freeze({ ok: true, operation: 'TICK_DECAY', created: false, updated: false, debugNotes: Object.freeze(['decayDisabled']) });
+      if (!salienceDecayEnabled) {
+        const receipt = createMutationReceipt({
+          ok: true,
+          operation: 'TICK_DECAY',
+          created: false,
+          updated: false,
+          debugNotes: ['salienceDecayEnabled=false'],
+        });
+        pushMutationReceipt(receipt);
+        return receipt;
       }
-      const halfLife = MEMORY_ANCHOR_STORE_DEFAULTS.salienceDecayHalfLifeTicks;
-      let decayed = 0;
+
+      let decayedCount = 0;
       let autoArchived = 0;
 
-      for (const [id, anchor] of anchors) {
-        if (archivedIds.has(id)) continue;
-        // Only decay TRANSIENT and VOLATILE stability classes (cast to string for type safety)
-        const stabilityClass = String(anchor.stabilityClass);
-        if (stabilityClass !== 'TRANSIENT' && stabilityClass !== 'VOLATILE') continue;
+      for (const [anchorId, anchor] of anchors.entries()) {
+        if (archivedIds.has(anchorId)) {
+          continue;
+        }
 
-        const formationTick: number = (anchor.formation as any).formationTickIndex ?? 0;
-        const ticksElapsed = Math.max(0, tickIndex - formationTick);
-        const decayFactor  = Math.pow(0.5, ticksElapsed / halfLife);
-        const newFinal     = round4(anchor.salience.final * decayFactor);
+        if (
+          !(MEMORY_ANCHOR_STORE_DEFAULTS.decayEligibleStabilityClasses as readonly string[]).includes(
+            anchor.stabilityClass,
+          )
+        ) {
+          continue;
+        }
 
-        if (newFinal === anchor.salience.final) continue;
+        const audit = anchorAudit.get(anchorId);
+        const formationTickIndex = audit?.formationTickIndex ?? 0;
+        const ticksElapsed = Math.max(0, tickIndex - formationTickIndex);
 
-        const updated = freezeAnchor({
+        if (ticksElapsed <= 0) {
+          continue;
+        }
+
+        const halfLifeTicks =
+          anchor.retrieval.timeDecayHalfLifeMs && anchor.retrieval.timeDecayHalfLifeMs > 0
+            ? Math.max(
+                1,
+                Math.floor(anchor.retrieval.timeDecayHalfLifeMs / 1_000),
+              )
+            : MEMORY_ANCHOR_STORE_DEFAULTS.salienceDecayHalfLifeTicks;
+
+        const decayFactor = Math.pow(0.5, ticksElapsed / halfLifeTicks);
+        const heatBonus = clampUnit(audit?.audienceHeatAtFormation ?? 0) *
+          MEMORY_ANCHOR_STORE_DEFAULTS.audienceHeatBonusCap;
+        const nextFinal = round4(
+          Math.max(
+            0,
+            anchor.salience.final * decayFactor - heatBonus * (1 - decayFactor),
+          ),
+        );
+
+        if (nextFinal === anchor.salience.final) {
+          continue;
+        }
+
+        const nextAnchor = freezeAnchor({
           ...anchor,
-          salience: Object.freeze({ ...anchor.salience, final: newFinal }),
+          salience: Object.freeze({
+            ...anchor.salience,
+            final: nextFinal,
+            retrieval: round4(anchor.salience.retrieval * decayFactor),
+          }),
         });
-        removeFromIndexes(anchor);
-        anchors.set(id, updated);
-        addToIndexes(updated);
-        decayed++;
 
-        if (newFinal < MEMORY_ANCHOR_DEFAULT_MINIMUM_FINAL_SALIENCE) {
-          archivedIds.add(id);
-          autoArchived++;
+        removeFromIndexes(anchor);
+        anchors.set(anchorId, nextAnchor);
+        addToIndexes(nextAnchor);
+        decayedCount += 1;
+
+        touchAudit(anchorId, {
+          lastTouchedAtMs: now(),
+          decayApplications: (audit?.decayApplications ?? 0) + 1,
+        });
+
+        if (nextFinal < MEMORY_ANCHOR_DEFAULT_MINIMUM_FINAL_SALIENCE) {
+          archivedIds.add(anchorId);
+          autoArchived += 1;
         }
       }
 
-      return Object.freeze({
-        ok: true, operation: 'TICK_DECAY', created: false, updated: decayed > 0,
-        debugNotes: Object.freeze([`tickIndex=${tickIndex}`, `decayed=${decayed}`, `autoArchived=${autoArchived}`]),
+      const receipt = createMutationReceipt({
+        ok: true,
+        operation: 'TICK_DECAY',
+        created: false,
+        updated: decayedCount > 0 || autoArchived > 0,
+        debugNotes: [
+          `tickIndex=${tickIndex}`,
+          `decayed=${decayedCount}`,
+          `autoArchived=${autoArchived}`,
+        ],
       });
+      pushMutationReceipt(receipt);
+      return receipt;
     },
 
-    // ── RELATIONSHIP GRAPH ────────────────────────────────────────────────────
-    getRelationshipEdge(a: MemoryAnchorId, b: MemoryAnchorId): RelationshipEdge | null {
-      return relationshipEdges.get(edgeKey(a, b)) ?? null;
+    getRelationshipEdge(
+      anchorIdA: MemoryAnchorId,
+      anchorIdB: MemoryAnchorId,
+    ): RelationshipEdge | null {
+      return relationshipEdges.get(edgeKey(anchorIdA, anchorIdB)) ?? null;
     },
 
     listRelationshipEdges(anchorId: MemoryAnchorId): readonly RelationshipEdge[] {
       return Object.freeze(
-        [...relationshipEdges.values()].filter(e => e.anchorIdA === anchorId || e.anchorIdB === anchorId)
+        [...relationshipEdges.values()].filter(
+          (edge) => edge.anchorIdA === anchorId || edge.anchorIdB === anchorId,
+        ),
       );
     },
 
-    // ── COLD START SEED ───────────────────────────────────────────────────────
     seedColdStart(seeds: readonly MemoryAnchor[]): MemoryAnchorMutationReceipt {
       if (anchors.size > 0) {
-        return Object.freeze({ ok: false, operation: 'SEED_COLD_START', created: false, updated: false, debugNotes: Object.freeze(['storeNotEmpty']) });
+        const receipt = createMutationReceipt({
+          ok: false,
+          operation: 'SEED_COLD_START',
+          created: false,
+          updated: false,
+          debugNotes: ['storeNotEmpty=true'],
+        });
+        pushMutationReceipt(receipt);
+        return receipt;
       }
-      let seeded = 0;
-      for (const seed of seeds) {
-        anchors.set(seed.id, freezeAnchor(seed));
-        addToIndexes(seed);
-        seeded++;
-      }
-      return Object.freeze({ ok: true, operation: 'SEED_COLD_START', created: true, updated: false, debugNotes: Object.freeze([`seeded=${seeded}`]) });
+
+      applySeedSet(seeds, false);
+      coldStartSeeded = true;
+
+      const receipt = createMutationReceipt({
+        ok: true,
+        operation: 'SEED_COLD_START',
+        created: true,
+        updated: false,
+        debugNotes: [`seeded=${seeds.length}`],
+      });
+      pushMutationReceipt(receipt);
+      return receipt;
     },
 
-    // ── TELEMETRY EXPORT ──────────────────────────────────────────────────────
     exportTelemetry(modeId?: ChatModeId): AnchorTelemetryPayload {
       const allAnchors = [...anchors.values()];
       const avgSalience = allAnchors.length
-        ? round4(allAnchors.reduce((s, a) => s + a.salience.final, 0) / allAnchors.length)
+        ? round4(
+            allAnchors.reduce((sum, anchor) => sum + anchor.salience.final, 0) /
+              allAnchors.length,
+          )
         : 0;
-      const topKindCounts = countBy(allAnchors, a => a.kind);
+
       const payload: AnchorTelemetryPayload = Object.freeze({
-        storeVersion:         MEMORY_ANCHOR_STORE_VERSION,
-        exportedAtMs:         now(),
-        runId:                options.runId,
-        userId:               options.userId,
-        modeId:               modeId ?? options.sessionModeId,
-        totalAnchors:         anchors.size,
-        archivedCount:        archivedIds.size,
-        openWindows:          [...windows.values()].filter(w => !w.closedAtMs).length,
-        shadowCount:          shadowIds.size,
-        topKindCounts:        Object.freeze(topKindCounts),
+        storeVersion: MEMORY_ANCHOR_STORE_VERSION,
+        exportedAtMs: now(),
+        runId: options.runId,
+        userId: options.userId,
+        modeId: modeId ?? options.sessionModeId,
+        totalAnchors: anchors.size,
+        archivedCount: archivedIds.size,
+        openWindows: [...windows.values()].filter((window) => !window.closedAtMs).length,
+        shadowCount: shadowIds.size,
+        topKindCounts: Object.freeze(countBy(allAnchors, (anchor) => anchor.kind)),
         avgSalience,
-        usedCallbacks:        usedCallbackPhrases.size,
+        usedCallbacks: usedCallbackPhrases.size,
         relationshipEdgeCount: relationshipEdges.size,
       });
+
       void options.persistence?.appendTelemetry?.(payload);
       return payload;
     },
 
-    // ── METRICS ───────────────────────────────────────────────────────────────
     metrics(): MemoryAnchorStoreMetrics {
-      const all = [...anchors.values()];
-      const avgFinalSalience = all.length ? round4(all.reduce((s, a) => s + a.salience.final, 0) / all.length) : 0;
+      const allAnchors = [...anchors.values()];
+      const avgFinalSalience = allAnchors.length
+        ? round4(
+            allAnchors.reduce((sum, anchor) => sum + anchor.salience.final, 0) /
+              allAnchors.length,
+          )
+        : 0;
+
       return Object.freeze({
-        totalAnchors:      anchors.size,
-        archivedAnchors:   archivedIds.size,
-        shadowAnchors:     shadowIds.size,
-        openWindows:       [...windows.values()].filter(w => !w.closedAtMs).length,
-        totalWindows:      windows.size,
-        totalReceipts:     receipts.length,
+        totalAnchors: anchors.size,
+        archivedAnchors: archivedIds.size,
+        shadowAnchors: shadowIds.size,
+        openWindows: [...windows.values()].filter((window) => !window.closedAtMs).length,
+        totalWindows: windows.size,
+        totalReceipts: receipts.length,
         relationshipEdges: relationshipEdges.size,
         usedCallbacksCount: usedCallbackPhrases.size,
-        anchorsByKind:     Object.freeze(countBy(all, a => a.kind)),
-        anchorsByRoom:     Object.freeze(countBy(all, a => a.subject.roomId ?? 'UNSCOPED')),
-        anchorsByChannel:  Object.freeze(countBy(all, a => a.subject.channelId ?? 'UNSCOPED')),
-        anchorsByRun:      Object.freeze(countBy(all, a => a.subject.runId ?? 'UNSCOPED')),
-        anchorsByMode:     Object.freeze(countBy(all, a => (a.subject as any).modeId ?? 'UNKNOWN')),
+        anchorsByKind: Object.freeze(countBy(allAnchors, (anchor) => anchor.kind)),
+        anchorsByRoom: Object.freeze(
+          countBy(allAnchors, (anchor) => anchor.subject.roomId ?? 'UNSCOPED'),
+        ),
+        anchorsByChannel: Object.freeze(
+          countBy(allAnchors, (anchor) => anchor.subject.channelId ?? 'UNSCOPED'),
+        ),
+        anchorsByRun: Object.freeze(
+          countBy(allAnchors, (anchor) => anchor.subject.runId ?? 'UNSCOPED'),
+        ),
+        anchorsByMode: Object.freeze(
+          countBy(allAnchors, (anchor) => modeForAnchor(anchor.id) ?? 'UNKNOWN'),
+        ),
         avgFinalSalience,
         proofBoundAnchors: proofBindings.size,
       });
     },
 
-    // ── PRUNE ─────────────────────────────────────────────────────────────────
     prune(explicitNowMs?: number): MemoryAnchorMutationReceipt {
       const ts = normalizeNow(explicitNowMs ?? now());
       let removedArchived = 0;
+      let removedWindows = 0;
+      let removedEdges = 0;
 
-      for (const id of [...archivedIds]) {
-        const anchor = anchors.get(id);
-        if (!anchor) { archivedIds.delete(id); removedArchived++; continue; }
-        if (ts - anchor.formation.updatedAtMs > MEMORY_ANCHOR_STORE_DEFAULTS.pruneArchivedAfterMs) {
+      for (const anchorId of [...archivedIds]) {
+        const anchor = anchors.get(anchorId);
+        if (!anchor) {
+          archivedIds.delete(anchorId);
+          proofBindings.delete(anchorId);
+          proofHistory.delete(anchorId);
+          shadowIds.delete(anchorId);
+          anchorAudit.delete(anchorId);
+          removedArchived += 1;
+          continue;
+        }
+
+        if (
+          ts - anchor.formation.updatedAtMs >
+          MEMORY_ANCHOR_STORE_DEFAULTS.pruneArchivedAfterMs
+        ) {
           removeFromIndexes(anchor);
-          anchors.delete(id);
-          archivedIds.delete(id);
-          proofBindings.delete(id);
-          shadowIds.delete(id);
-          removedArchived++;
+          anchors.delete(anchorId);
+          archivedIds.delete(anchorId);
+          proofBindings.delete(anchorId);
+          proofHistory.delete(anchorId);
+          shadowIds.delete(anchorId);
+          anchorAudit.delete(anchorId);
+          removedArchived += 1;
         }
       }
 
-      // Prune stale relationship edges where both anchors are gone
-      for (const [key, edge] of [...relationshipEdges]) {
+      for (const [windowId, window] of [...windows.entries()]) {
+        if (
+          window.closedAtMs &&
+          ts - window.closedAtMs >
+            MEMORY_ANCHOR_STORE_DEFAULTS.pruneClosedWindowsAfterMs
+        ) {
+          unindexWindow(window);
+          windows.delete(windowId);
+          removedWindows += 1;
+        }
+      }
+
+      for (const [key, edge] of [...relationshipEdges.entries()]) {
         if (!anchors.has(edge.anchorIdA) || !anchors.has(edge.anchorIdB)) {
           relationshipEdges.delete(key);
+          removedEdges += 1;
         }
       }
 
-      while (receipts.length > MEMORY_ANCHOR_STORE_DEFAULTS.maxReceipts) receipts.shift();
+      while (receipts.length > MEMORY_ANCHOR_STORE_DEFAULTS.maxReceipts) {
+        receipts.shift();
+      }
 
-      return Object.freeze({
-        ok: true, operation: 'PRUNE', created: false, updated: removedArchived > 0,
-        debugNotes: Object.freeze([`removedArchived=${removedArchived}`, `receipts=${receipts.length}`, `edgesRemaining=${relationshipEdges.size}`]),
+      const receipt = createMutationReceipt({
+        ok: true,
+        operation: 'PRUNE',
+        created: false,
+        updated: removedArchived > 0 || removedWindows > 0 || removedEdges > 0,
+        debugNotes: [
+          `removedArchived=${removedArchived}`,
+          `removedWindows=${removedWindows}`,
+          `removedEdges=${removedEdges}`,
+          `receipts=${receipts.length}`,
+        ],
       });
+      pushMutationReceipt(receipt);
+      pushSnapshot('prune');
+      return receipt;
     },
   };
 
-  // ── BOOT: async persistence hydration ────────────────────────────────────────
   void hydrateFromPersistence();
   return Object.freeze(api);
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // INTERNAL HELPERS
-  // ═══════════════════════════════════════════════════════════════════════════
+  // ────────────────────────────────────────────────────────────────────────────
+  // PRIVATE FACTORY HELPERS
+  // ────────────────────────────────────────────────────────────────────────────
 
   async function hydrateFromPersistence(): Promise<void> {
+    if (persistenceHydrated) {
+      return;
+    }
     const snapshot = await options.persistence?.load?.();
-    if (snapshot) api.hydrate(snapshot);
+    if (snapshot) {
+      api.hydrate(snapshot);
+    } else {
+      persistenceHydrated = true;
+    }
   }
 
-  /** Classify whether an anchor belongs to a shadow family and register it. */
-  function classifyShadow(anchor: MemoryAnchor): void {
-    const familyId = anchor.continuity.familyId ?? '';
-    const isShadow = MEMORY_ANCHOR_STORE_DEFAULTS.shadowFamilies.some(sf => familyId.includes(sf));
-    if (isShadow) shadowIds.add(anchor.id);
-    else shadowIds.delete(anchor.id);
+  function ensureColdStartSeeded(): void {
+    if (coldStartSeeded || anchors.size > 0 || !options.coldStartSeeds?.length) {
+      return;
+    }
+    applySeedSet(options.coldStartSeeds, false);
+    coldStartSeeded = true;
   }
 
-  /** Enforce per-family anchor cap with LRU eviction. Returns eviction receipt or null. */
-  function enforcePerFamilyCap(familyId: string | undefined): MemoryAnchorMutationReceipt | null {
-    if (!familyId) return null;
-    const familySet = familyIndex.get(familyId);
-    if (!familySet || familySet.size <= MEMORY_ANCHOR_STORE_DEFAULTS.maxAnchorsPerFamily) return null;
-
-    // Evict the anchor with the lowest final salience that is NOT proof-bound
-    let evictId: MemoryAnchorId | null = null;
-    let lowestSalience = Infinity;
-    for (const id of familySet) {
-      const a = anchors.get(id);
-      if (!a || proofBindings.has(id)) continue;
-      if (a.salience.final < lowestSalience) { lowestSalience = a.salience.final; evictId = id; }
+  function applySeedSet(
+    seeds: readonly MemoryAnchor[],
+    markAsBootSeed: boolean,
+  ): void {
+    for (const seed of seeds) {
+      const frozen = freezeAnchor(seed);
+      anchors.set(frozen.id, frozen);
+      addToIndexes(frozen);
+      classifyShadow(frozen);
+      recordModeForAnchor(frozen, options.sessionModeId);
+      anchorAudit.set(
+        frozen.id,
+        Object.freeze({
+          formedAtMs: frozen.formation.createdAtMs,
+          lastTouchedAtMs: frozen.formation.updatedAtMs,
+          lastQueriedAtMs: undefined,
+          lastReceiptId: undefined,
+          lastRank: undefined,
+          lastScore: undefined,
+          lastWindowId: undefined,
+          modeId: options.sessionModeId,
+          audienceHeatAtFormation: 0,
+          formationTickIndex: 0,
+          retrievalCount: 0,
+          decayApplications: 0,
+        }),
+      );
     }
 
-    if (!evictId) return null;
-    const evicted = anchors.get(evictId)!;
-    removeFromIndexes(evicted);
-    anchors.delete(evictId);
-    archivedIds.delete(evictId);
-    shadowIds.delete(evictId);
-
-    return Object.freeze({ ok: true, operation: 'EVICT_LRU', anchorId: evictId, created: false, updated: false, debugNotes: Object.freeze([`family=${familyId}`, `salience=${round4(lowestSalience)}`]) });
+    if (markAsBootSeed) {
+      coldStartSeeded = true;
+    }
   }
 
-  /** Add anchor into all relevant secondary indexes. */
+  function bindProofInternal(
+    anchorId: MemoryAnchorId,
+    binding: AnchorProofBinding,
+  ): void {
+    const frozenBinding = freezeProofBinding(binding);
+    proofBindings.set(anchorId, frozenBinding);
+    const history = proofHistory.get(anchorId) ?? [];
+    const nextHistory = [...history, frozenBinding].slice(
+      -MEMORY_ANCHOR_STORE_DEFAULTS.maxProofBindingsPerAnchor,
+    );
+    proofHistory.set(anchorId, nextHistory);
+  }
+
+  function bindProofAfterMerge(
+    anchorIdA: MemoryAnchorId,
+    anchorIdB: MemoryAnchorId,
+  ): void {
+    const mergedHistory = mergeUnique(
+      proofHistory.get(anchorIdA) ?? [],
+      proofHistory.get(anchorIdB) ?? [],
+    ).slice(-MEMORY_ANCHOR_STORE_DEFAULTS.maxProofBindingsPerAnchor);
+
+    if (mergedHistory.length) {
+      proofHistory.set(anchorIdA, mergedHistory);
+      proofBindings.set(anchorIdA, mergedHistory[mergedHistory.length - 1]);
+    }
+
+    proofBindings.delete(anchorIdB);
+    proofHistory.delete(anchorIdB);
+  }
+
+  function upsertAuditForHydrate(anchor: MemoryAnchor): void {
+    anchorAudit.set(
+      anchor.id,
+      Object.freeze({
+        formedAtMs: anchor.formation.createdAtMs,
+        lastTouchedAtMs: anchor.formation.updatedAtMs,
+        lastQueriedAtMs: undefined,
+        lastReceiptId: undefined,
+        lastRank: undefined,
+        lastScore: undefined,
+        lastWindowId: undefined,
+        modeId: options.sessionModeId,
+        audienceHeatAtFormation: 0,
+        formationTickIndex: 0,
+        retrievalCount: 0,
+        decayApplications: 0,
+      }),
+    );
+  }
+
+  function upsertAuditForWrite(
+    anchor: MemoryAnchor,
+    modeId?: ChatModeId,
+  ): void {
+    const existing = anchorAudit.get(anchor.id);
+    anchorAudit.set(
+      anchor.id,
+      Object.freeze({
+        formedAtMs: existing?.formedAtMs ?? anchor.formation.createdAtMs,
+        lastTouchedAtMs: now(),
+        lastQueriedAtMs: existing?.lastQueriedAtMs,
+        lastReceiptId: existing?.lastReceiptId,
+        lastRank: existing?.lastRank,
+        lastScore: existing?.lastScore,
+        lastWindowId: existing?.lastWindowId,
+        modeId: existing?.modeId ?? modeId,
+        audienceHeatAtFormation: existing?.audienceHeatAtFormation ?? 0,
+        formationTickIndex: existing?.formationTickIndex ?? 0,
+        retrievalCount: existing?.retrievalCount ?? 0,
+        decayApplications: existing?.decayApplications ?? 0,
+      }),
+    );
+  }
+
+  function touchAudit(
+    anchorId: MemoryAnchorId,
+    patch: Partial<AnchorAuditState>,
+  ): void {
+    const existing = anchorAudit.get(anchorId);
+    if (!existing) {
+      return;
+    }
+    anchorAudit.set(
+      anchorId,
+      Object.freeze({
+        ...existing,
+        ...patch,
+      }),
+    );
+  }
+
+  function updateAuditFromRanked(
+    ranked: readonly RankedMemoryAnchor[],
+    receiptId: string,
+  ): void {
+    const ts = now();
+    for (const entry of ranked) {
+      const existing = anchorAudit.get(entry.anchor.id);
+      if (!existing) {
+        continue;
+      }
+      anchorAudit.set(
+        entry.anchor.id,
+        Object.freeze({
+          ...existing,
+          lastTouchedAtMs: ts,
+          lastQueriedAtMs: ts,
+          lastReceiptId: receiptId,
+          lastRank: entry.rank,
+          lastScore: round4(entry.finalScore ?? entry.score),
+          retrievalCount: existing.retrievalCount + 1,
+        }),
+      );
+    }
+  }
+
+  function recordModeForAnchor(
+    anchor: MemoryAnchor,
+    modeId?: ChatModeId,
+  ): void {
+    const resolvedModeId = modeId ?? modeForAnchor(anchor.id) ?? options.sessionModeId;
+    if (!resolvedModeId) {
+      return;
+    }
+    addIndexed(modeIndex, resolvedModeId, anchor.id);
+    touchAudit(anchor.id, { modeId: resolvedModeId });
+  }
+
+  function modeForAnchor(anchorId: MemoryAnchorId): ChatModeId | undefined {
+    for (const [modeId, ids] of modeIndex.entries()) {
+      if (ids.has(anchorId)) {
+        return modeId;
+      }
+    }
+    return undefined;
+  }
+
+  function classifyShadow(anchor: MemoryAnchor): void {
+    if (!enableShadowIndex) {
+      shadowIds.delete(anchor.id);
+      return;
+    }
+
+    const familyId = anchor.continuity.familyId ?? '';
+    const tagSet = new Set(collectTags(anchor));
+    const shadowFamily = [...MEMORY_ANCHOR_STORE_DEFAULTS.shadowFamilies].find(
+      (family) =>
+        familyId.includes(family) ||
+        tagSet.has(normalizeToken(family)) ||
+        tagSet.has(normalizeToken(family.replace('_SHADOW', ''))),
+    );
+
+    if (shadowFamily) {
+      shadowIds.add(anchor.id);
+      addIndexed(shadowFamilyIndex, shadowFamily, anchor.id);
+    } else {
+      shadowIds.delete(anchor.id);
+      for (const family of MEMORY_ANCHOR_STORE_DEFAULTS.shadowFamilies) {
+        removeIndexed(shadowFamilyIndex, family, anchor.id);
+      }
+    }
+  }
+
+  function indexWindow(window: MemoryAnchorWindow): void {
+    replaceWindowIndex(windowRunIndex, window.runId, window.id);
+    replaceWindowIndex(windowRoomIndex, window.roomId, window.id);
+    replaceWindowIndex(windowChannelIndex, window.channelId, window.id);
+  }
+
+  function unindexWindow(window: MemoryAnchorWindow): void {
+    removeWindowIndex(windowRunIndex, window.runId, window.id);
+    removeWindowIndex(windowRoomIndex, window.roomId, window.id);
+    removeWindowIndex(windowChannelIndex, window.channelId, window.id);
+  }
+
+  function getRunWindowIds(runId?: string): readonly string[] {
+    if (!runId) {
+      return Object.freeze([]);
+    }
+    return Object.freeze([...(windowRunIndex.get(runId) ?? new Set<string>())]);
+  }
+
+  function evictOldestClosedWindow(runId: string): void {
+    const windowIds = [...(windowRunIndex.get(runId) ?? new Set<string>())];
+    const candidates = windowIds
+      .map((windowId) => windows.get(windowId))
+      .filter((window): window is MemoryAnchorWindow => Boolean(window))
+      .filter((window) => Boolean(window.closedAtMs))
+      .sort(
+        (left, right) =>
+          (left.closedAtMs ?? left.openedAtMs) - (right.closedAtMs ?? right.openedAtMs),
+      );
+
+    const oldestClosed = candidates[0];
+    if (!oldestClosed) {
+      return;
+    }
+
+    unindexWindow(oldestClosed);
+    windows.delete(oldestClosed.id);
+  }
+
+  function enforcePerFamilyCap(
+    familyId: string | undefined,
+  ): MemoryAnchorMutationReceipt | null {
+    if (!familyId) {
+      return null;
+    }
+
+    const familyAnchors = familyIndex.get(familyId);
+    if (
+      !familyAnchors ||
+      familyAnchors.size <= MEMORY_ANCHOR_STORE_DEFAULTS.maxAnchorsPerFamily
+    ) {
+      return null;
+    }
+
+    const candidates = [...familyAnchors]
+      .map((anchorId) => anchors.get(anchorId))
+      .filter((anchor): anchor is MemoryAnchor => Boolean(anchor))
+      .filter((anchor) => !proofBindings.has(anchor.id))
+      .sort((left, right) => {
+        if (left.salience.final !== right.salience.final) {
+          return left.salience.final - right.salience.final;
+        }
+        return left.formation.updatedAtMs - right.formation.updatedAtMs;
+      });
+
+    const evictedAnchor = candidates[0];
+    if (!evictedAnchor) {
+      return null;
+    }
+
+    removeFromIndexes(evictedAnchor);
+    anchors.delete(evictedAnchor.id);
+    archivedIds.delete(evictedAnchor.id);
+    shadowIds.delete(evictedAnchor.id);
+    proofBindings.delete(evictedAnchor.id);
+    proofHistory.delete(evictedAnchor.id);
+    anchorAudit.delete(evictedAnchor.id);
+
+    return createMutationReceipt({
+      ok: true,
+      operation: 'EVICT_LRU',
+      anchorId: evictedAnchor.id,
+      created: false,
+      updated: false,
+      debugNotes: [
+        `family=${familyId}`,
+        `finalSalience=${round4(evictedAnchor.salience.final)}`,
+        `updatedAtMs=${evictedAnchor.formation.updatedAtMs}`,
+      ],
+    });
+  }
+
   function addToIndexes(anchor: MemoryAnchor): void {
-    addIndexed(familyIndex,       anchor.continuity.familyId,        anchor.id);
-    addIndexed(relationshipIndex, anchor.subject.relationshipId,     anchor.id);
-    addIndexed(roomIndex,         anchor.subject.roomId,             anchor.id);
-    addIndexed(channelIndex,      anchor.subject.channelId,          anchor.id);
-    addIndexed(runIndex,          anchor.subject.runId,              anchor.id);
-    addIndexed(sceneIndex,        anchor.subject.sceneId,            anchor.id);
-    addIndexed(momentIndex,       anchor.subject.momentId,           anchor.id);
-    addIndexed(actorIndex,        anchor.subject.actorId,            anchor.id);
-    addIndexed(personaIndex,      anchor.subject.actorPersonaId,     anchor.id);
-    for (const q of anchor.quoteRefs) addIndexed(quoteIndex, q, anchor.id);
-    if (!kindIndex.has(anchor.kind)) kindIndex.set(anchor.kind, new Set());
+    addIndexed(familyIndex, anchor.continuity.familyId, anchor.id);
+    addIndexed(relationshipIndex, anchor.subject.relationshipId, anchor.id);
+    addIndexed(roomIndex, anchor.subject.roomId, anchor.id);
+    addIndexed(channelIndex, anchor.subject.channelId, anchor.id);
+    addIndexed(runIndex, anchor.subject.runId, anchor.id);
+    addIndexed(sceneIndex, anchor.subject.sceneId, anchor.id);
+    addIndexed(momentIndex, anchor.subject.momentId, anchor.id);
+    addIndexed(actorIndex, anchor.subject.actorId, anchor.id);
+    addIndexed(personaIndex, anchor.subject.actorPersonaId, anchor.id);
+
+    if (!kindIndex.has(anchor.kind)) {
+      kindIndex.set(anchor.kind, new Set());
+    }
     kindIndex.get(anchor.kind)!.add(anchor.id);
-    for (const tag of collectTags(anchor).slice(0, MEMORY_ANCHOR_STORE_DEFAULTS.maxIndexesPerAnchor)) {
+
+    for (const quoteRef of anchor.quoteRefs) {
+      addIndexed(quoteIndex, quoteRef, anchor.id);
+    }
+
+    for (const relationshipRef of anchor.relationshipRefs) {
+      addIndexed(relationshipRefIndex, relationshipRef, anchor.id);
+    }
+
+    for (const evidence of anchor.evidence) {
+      if (evidence.documentId) {
+        addIndexed(evidenceDocumentIndex, evidence.documentId, anchor.id);
+      }
+    }
+
+    for (const callbackPhrase of anchor.payload.callbackPhrases) {
+      addIndexed(callbackPhraseIndex, normalizeToken(callbackPhrase), anchor.id);
+    }
+
+    for (const tag of collectTags(anchor).slice(
+      0,
+      MEMORY_ANCHOR_STORE_DEFAULTS.maxIndexesPerAnchor,
+    )) {
       addIndexed(tagIndex, tag, anchor.id);
     }
   }
 
   function removeFromIndexes(anchor: MemoryAnchor): void {
-    removeIndexed(familyIndex,       anchor.continuity.familyId,    anchor.id);
+    removeIndexed(familyIndex, anchor.continuity.familyId, anchor.id);
     removeIndexed(relationshipIndex, anchor.subject.relationshipId, anchor.id);
-    removeIndexed(roomIndex,         anchor.subject.roomId,         anchor.id);
-    removeIndexed(channelIndex,      anchor.subject.channelId,      anchor.id);
-    removeIndexed(runIndex,          anchor.subject.runId,          anchor.id);
-    removeIndexed(sceneIndex,        anchor.subject.sceneId,        anchor.id);
-    removeIndexed(momentIndex,       anchor.subject.momentId,       anchor.id);
-    removeIndexed(actorIndex,        anchor.subject.actorId,        anchor.id);
-    removeIndexed(personaIndex,      anchor.subject.actorPersonaId, anchor.id);
-    for (const q of anchor.quoteRefs) removeIndexed(quoteIndex, q, anchor.id);
+    removeIndexed(roomIndex, anchor.subject.roomId, anchor.id);
+    removeIndexed(channelIndex, anchor.subject.channelId, anchor.id);
+    removeIndexed(runIndex, anchor.subject.runId, anchor.id);
+    removeIndexed(sceneIndex, anchor.subject.sceneId, anchor.id);
+    removeIndexed(momentIndex, anchor.subject.momentId, anchor.id);
+    removeIndexed(actorIndex, anchor.subject.actorId, anchor.id);
+    removeIndexed(personaIndex, anchor.subject.actorPersonaId, anchor.id);
+
     kindIndex.get(anchor.kind)?.delete(anchor.id);
-    for (const tag of collectTags(anchor).slice(0, MEMORY_ANCHOR_STORE_DEFAULTS.maxIndexesPerAnchor)) {
+    if (!kindIndex.get(anchor.kind)?.size) {
+      kindIndex.delete(anchor.kind);
+    }
+
+    for (const quoteRef of anchor.quoteRefs) {
+      removeIndexed(quoteIndex, quoteRef, anchor.id);
+    }
+
+    for (const relationshipRef of anchor.relationshipRefs) {
+      removeIndexed(relationshipRefIndex, relationshipRef, anchor.id);
+    }
+
+    for (const evidence of anchor.evidence) {
+      if (evidence.documentId) {
+        removeIndexed(evidenceDocumentIndex, evidence.documentId, anchor.id);
+      }
+    }
+
+    for (const callbackPhrase of anchor.payload.callbackPhrases) {
+      removeIndexed(callbackPhraseIndex, normalizeToken(callbackPhrase), anchor.id);
+    }
+
+    for (const tag of collectTags(anchor).slice(
+      0,
+      MEMORY_ANCHOR_STORE_DEFAULTS.maxIndexesPerAnchor,
+    )) {
       removeIndexed(tagIndex, tag, anchor.id);
+    }
+
+    for (const modeIds of modeIndex.values()) {
+      modeIds.delete(anchor.id);
+    }
+
+    for (const family of MEMORY_ANCHOR_STORE_DEFAULTS.shadowFamilies) {
+      removeIndexed(shadowFamilyIndex, family, anchor.id);
     }
   }
 
   function clearAllIndexes(): void {
-    clearIndexes([familyIndex, relationshipIndex, quoteIndex, roomIndex, channelIndex,
-      runIndex, sceneIndex, momentIndex, actorIndex, personaIndex, kindIndex, tagIndex, modeIndex]);
+    clearIndexes([
+      familyIndex,
+      relationshipIndex,
+      quoteIndex,
+      relationshipRefIndex,
+      roomIndex,
+      channelIndex,
+      runIndex,
+      sceneIndex,
+      momentIndex,
+      actorIndex,
+      personaIndex,
+      kindIndex as Map<string, Set<string>>,
+      tagIndex,
+      callbackPhraseIndex,
+      evidenceDocumentIndex,
+      modeIndex as Map<string, Set<string>>,
+      shadowFamilyIndex,
+    ]);
   }
 
-  /** Update the relationship co-appearance graph after a window append. */
   function updateRelationshipGraph(anchorIds: readonly MemoryAnchorId[]): void {
-    if (anchorIds.length < 2) return;
-    const ts = now();
-    // Only update the new anchor's edges (last in the array) to keep O(n) not O(n²)
-    const newId = anchorIds[anchorIds.length - 1];
-    for (let i = 0; i < anchorIds.length - 1; i++) {
-      const otherId = anchorIds[i];
-      const key  = edgeKey(newId, otherId);
-      const existing = relationshipEdges.get(key);
-      const coApps = (existing?.coAppearances ?? 0) + 1;
-      const strength = round4(Math.min(1, coApps / 10)); // saturates at 10 co-appearances
-      const edge: RelationshipEdge = Object.freeze({ anchorIdA: newId, anchorIdB: otherId, coAppearances: coApps, strengthScore: strength, lastSeenAtMs: ts });
-      relationshipEdges.set(key, edge);
+    if (anchorIds.length < 2) {
+      return;
     }
-    // LRU eviction of relationship edges if cap exceeded
-    if (relationshipEdges.size > MEMORY_ANCHOR_STORE_DEFAULTS.maxRelationshipEdges) {
-      let oldest = Infinity, oldestKey = '';
-      for (const [k, e] of relationshipEdges) {
-        if (e.lastSeenAtMs < oldest) { oldest = e.lastSeenAtMs; oldestKey = k; }
+
+    const ts = now();
+    const newestId = anchorIds[anchorIds.length - 1];
+
+    for (let index = 0; index < anchorIds.length - 1; index += 1) {
+      const otherId = anchorIds[index];
+      const key = edgeKey(newestId, otherId);
+      const existing = relationshipEdges.get(key);
+      const coAppearances = (existing?.coAppearances ?? 0) + 1;
+
+      const [sortedA, sortedB] = sortIds(newestId, otherId);
+      relationshipEdges.set(
+        key,
+        Object.freeze({
+          anchorIdA: sortedA,
+          anchorIdB: sortedB,
+          coAppearances,
+          strengthScore: round4(
+            Math.min(
+              1,
+              coAppearances /
+                MEMORY_ANCHOR_STORE_DEFAULTS.relationshipEdgeSaturationCount,
+            ),
+          ),
+          lastSeenAtMs: ts,
+        }),
+      );
+    }
+
+    while (
+      relationshipEdges.size > MEMORY_ANCHOR_STORE_DEFAULTS.maxRelationshipEdges
+    ) {
+      const oldest = [...relationshipEdges.entries()].sort(
+        (left, right) => left[1].lastSeenAtMs - right[1].lastSeenAtMs,
+      )[0];
+      if (!oldest) {
+        break;
       }
-      if (oldestKey) relationshipEdges.delete(oldestKey);
+      relationshipEdges.delete(oldest[0]);
     }
   }
 
-  function gatherCandidateIds(query: MemoryAnchorQuery, request: MemoryAnchorStoreQueryRequest): readonly MemoryAnchorId[] {
+  function gatherCandidateIds(
+    context: CandidateGatherContext,
+  ): readonly MemoryAnchorId[] {
+    const { query, request, normalizedQueryTokens, excludedAnchorIds, excludedFamilyIds } =
+      context;
+
     const candidateSet = new Set<MemoryAnchorId>();
     const buckets: Array<readonly MemoryAnchorId[]> = [];
 
@@ -1164,118 +2202,457 @@ export function createMemoryAnchorStore(
     pushIndexedBucket(buckets, sceneIndex.get(query.sceneId ?? ''));
     pushIndexedBucket(buckets, momentIndex.get(query.momentId ?? ''));
     pushIndexedBucket(buckets, actorIndex.get(query.actorId ?? ''));
-    pushIndexedBucket(buckets, personaIndex.get(request.actorPersonaId ?? ''));
-    pushIndexedBucket(buckets, relationshipIndex.get(request.relationshipId ?? ''));
+    pushIndexedBucket(buckets, personaIndex.get(query.actorPersonaId ?? ''));
+    pushIndexedBucket(buckets, relationshipIndex.get(query.relationshipId ?? ''));
 
-    for (const kind of query.kinds) pushIndexedBucket(buckets, kindIndex.get(kind));
-    for (const tag of [...query.requiredTags, ...(request.currentTags ?? []), ...(request.emotionSignals ?? [])]) {
+    for (const kind of query.kinds) {
+      pushIndexedBucket(buckets, kindIndex.get(kind));
+    }
+
+    for (const token of normalizedQueryTokens) {
+      pushIndexedBucket(buckets, tagIndex.get(token));
+      pushIndexedBucket(buckets, callbackPhraseIndex.get(token));
+      pushIndexedBucket(buckets, quoteIndex.get(token));
+      pushIndexedBucket(buckets, relationshipRefIndex.get(token));
+      pushIndexedBucket(buckets, evidenceDocumentIndex.get(token));
+    }
+
+    for (const tag of [
+      ...query.requiredTags,
+      ...(request.currentTags ?? []),
+      ...(request.emotionSignals ?? []),
+      ...(request.relationshipSignals ?? []),
+    ]) {
       pushIndexedBucket(buckets, tagIndex.get(normalizeToken(tag)));
     }
 
-    // Mode-aware boost: anchors formed in the current mode are added first
+    for (const embeddingMatch of request.embeddingMatches ?? []) {
+      if (embeddingMatch.documentId) {
+        pushIndexedBucket(
+          buckets,
+          evidenceDocumentIndex.get(normalizeToken(embeddingMatch.documentId)),
+        );
+      }
+      for (const tag of embeddingMatch.tags ?? []) {
+        pushIndexedBucket(buckets, tagIndex.get(normalizeToken(tag)));
+      }
+    }
+
     if (request.currentModeId) {
       pushIndexedBucket(buckets, modeIndex.get(request.currentModeId));
     }
 
-    for (const bucket of buckets) {
-      for (const id of bucket) {
-        if (!request.includeArchived && archivedIds.has(id)) continue;
-        if (!request.includeShadow && shadowIds.has(id)) continue;
-        candidateSet.add(id);
+    if (request.includeShadow) {
+      for (const shadowFamily of MEMORY_ANCHOR_STORE_DEFAULTS.shadowFamilies) {
+        pushIndexedBucket(buckets, shadowFamilyIndex.get(shadowFamily));
       }
     }
 
-    // Fallback: all non-archived anchors if no indexed hits
+    const maxBuckets = MEMORY_ANCHOR_STORE_DEFAULTS.maxCandidateBuckets;
+    for (const bucket of buckets.slice(0, maxBuckets)) {
+      for (const anchorId of bucket) {
+        if (!passesCandidateFilters(anchorId, request, excludedAnchorIds, excludedFamilyIds)) {
+          continue;
+        }
+        candidateSet.add(anchorId);
+        if (
+          candidateSet.size >=
+          (request.candidateCap ??
+            options.queryCandidateCap ??
+            MEMORY_ANCHOR_STORE_DEFAULTS.queryCandidateCap)
+        ) {
+          break;
+        }
+      }
+    }
+
     if (!candidateSet.size) {
-      for (const [id] of anchors) {
-        if (!request.includeArchived && archivedIds.has(id)) continue;
-        if (!request.includeShadow && shadowIds.has(id)) continue;
-        candidateSet.add(id);
+      const fallback = [...anchors.values()]
+        .filter((anchor) =>
+          passesCandidateFilters(anchor.id, request, excludedAnchorIds, excludedFamilyIds),
+        )
+        .sort((left, right) => {
+          if (left.retrieval.priority !== right.retrieval.priority) {
+            return priorityOrdinal(right.retrieval.priority) - priorityOrdinal(left.retrieval.priority);
+          }
+          if (left.salience.final !== right.salience.final) {
+            return right.salience.final - left.salience.final;
+          }
+          return right.formation.updatedAtMs - left.formation.updatedAtMs;
+        })
+        .slice(0, MEMORY_ANCHOR_STORE_DEFAULTS.maxCandidateExpansion)
+        .map((anchor) => anchor.id);
+
+      for (const anchorId of fallback) {
+        candidateSet.add(anchorId);
       }
     }
 
-    const cap = Math.max(1, Math.floor(request.candidateCap ?? options.queryCandidateCap ?? MEMORY_ANCHOR_STORE_DEFAULTS.queryCandidateCap));
+    const cap = Math.max(
+      1,
+      Math.floor(
+        request.candidateCap ??
+          options.queryCandidateCap ??
+          MEMORY_ANCHOR_STORE_DEFAULTS.queryCandidateCap,
+      ),
+    );
+
     return Object.freeze([...candidateSet].slice(0, cap));
   }
 
-  function buildRankingContext(query: MemoryAnchorQuery, request: MemoryAnchorStoreQueryRequest): MemoryRankingContext {
+  function passesCandidateFilters(
+    anchorId: MemoryAnchorId,
+    request: MemoryAnchorStoreQueryRequest,
+    excludedAnchorIds: ReadonlySet<MemoryAnchorId>,
+    excludedFamilyIds: ReadonlySet<string>,
+  ): boolean {
+    const anchor = anchors.get(anchorId);
+    if (!anchor) {
+      return false;
+    }
+
+    if (excludedAnchorIds.has(anchorId)) {
+      return false;
+    }
+
+    if (!request.includeArchived && archivedIds.has(anchorId)) {
+      return false;
+    }
+
+    if (!request.includeShadow && shadowIds.has(anchorId)) {
+      return false;
+    }
+
+    const familyId = normalizeToken(anchor.continuity.familyId);
+    if (familyId && excludedFamilyIds.has(familyId)) {
+      return false;
+    }
+
+    return true;
+  }
+
+  function buildRankingContext(
+    query: MemoryAnchorQuery,
+    request: MemoryAnchorStoreQueryRequest,
+    normalizedQueryTokens: readonly string[],
+  ): MemoryRankingContext {
     return Object.freeze({
-      nowMs:                  now(),
-      intent:                 query.intent,
-      queryText:              request.queryText,
-      requiredTags:           query.requiredTags,
-      blockedTags:            query.blockedTags,
-      targetKinds:            query.kinds,
-      actorId:                query.actorId,
-      actorPersonaId:         request.actorPersonaId,
-      relationshipId:         request.relationshipId,
-      roomId:                 query.roomId,
-      channelId:              query.channelId,
-      runId:                  query.runId,
-      sceneId:                query.sceneId,
-      momentId:               query.momentId,
-      emotionSignals:         request.emotionSignals,
-      relationshipSignals:    request.relationshipSignals,
-      currentTags:            request.currentTags,
-      currentModeId:          request.currentModeId,
-      audienceHeat:           request.audienceHeat,
-      topK:                   query.topK,
-      minimumScore:           request.minimumScore ?? query.minimumFinalSalience,
-      excludedAnchorIds:      request.excludedAnchorIds,
-      excludedFamilyIds:      request.excludedFamilyIds,
-      alreadyUsedCallbackPhrases: request.alreadyUsedCallbackPhrases ?? [...usedCallbackPhrases],
+      nowMs: now(),
+      intent: query.intent,
+      queryText: request.queryText,
+      requiredTags: query.requiredTags,
+      blockedTags: query.blockedTags,
+      targetKinds: query.kinds,
+      actorId: query.actorId,
+      actorPersonaId: query.actorPersonaId,
+      relationshipId: query.relationshipId,
+      roomId: query.roomId,
+      channelId: query.channelId,
+      runId: query.runId,
+      sceneId: query.sceneId,
+      momentId: query.momentId,
+      emotionSignals: request.emotionSignals,
+      relationshipSignals: request.relationshipSignals,
+      currentTags: mergeUnique(request.currentTags ?? [], normalizedQueryTokens),
+      currentModeId: request.currentModeId,
+      topK: query.topK,
+      minimumScore: request.minimumScore ?? query.minimumFinalSalience,
+      excludedAnchorIds: request.excludedAnchorIds,
+      excludedFamilyIds: request.excludedFamilyIds,
+      alreadyUsedCallbackPhrases:
+        request.alreadyUsedCallbackPhrases ?? [...usedCallbackPhrases],
     });
   }
 
-  function toCandidate(anchorId: MemoryAnchorId, embeddingMatches?: readonly MemoryRankingEmbeddingMatch[]): MemoryRankingCandidate {
+  function toCandidate(
+    anchorId: MemoryAnchorId,
+    embeddingMatches?: readonly MemoryRankingEmbeddingMatch[],
+    relationshipSignals?: readonly string[],
+    emotionSignals?: readonly string[],
+    currentTags?: readonly string[],
+    currentModeId?: ChatModeId,
+    retrievalOrdinal?: number,
+  ): MemoryRankingCandidate {
     const anchor = anchors.get(anchorId);
-    if (!anchor) throw new Error(`MemoryAnchorStore: candidate missing anchor: ${anchorId}`);
+    if (!anchor) {
+      throw new Error(`MemoryAnchorStore: missing candidate anchor ${anchorId}`);
+    }
+
+    const hasVectorMatches = Boolean(
+      filterEmbeddingMatches(anchor, embeddingMatches).length,
+    );
+
     return Object.freeze({
       anchor,
       embeddingMatches: filterEmbeddingMatches(anchor, embeddingMatches),
-      retrievalSource:  embeddingMatches?.length ? 'HYBRID' : 'INDEX',
+      relationshipSignals: relationshipSignals
+        ? Object.freeze([...relationshipSignals])
+        : undefined,
+      emotionSignals: emotionSignals
+        ? Object.freeze([...emotionSignals])
+        : undefined,
+      currentTags: currentTags ? Object.freeze([...currentTags]) : undefined,
+      currentModeId,
+      retrievalOrdinal,
+      retrievalSource: hasVectorMatches ? 'HYBRID' : 'INDEX',
     });
   }
 
-  function filterEmbeddingMatches(anchor: MemoryAnchor, matches?: readonly MemoryRankingEmbeddingMatch[]): readonly MemoryRankingEmbeddingMatch[] {
-    if (!matches?.length) return Object.freeze([]);
-    return Object.freeze(matches.filter(m => m.documentId && anchor.embeddingDocumentIds.includes(m.documentId as import('../../../../../../../shared/contracts/chat/learning/ConversationEmbeddings').EmbeddingDocumentId)));
+  function filterEmbeddingMatches(
+    anchor: MemoryAnchor,
+    embeddingMatches?: readonly MemoryRankingEmbeddingMatch[],
+  ): readonly MemoryRankingEmbeddingMatch[] {
+    if (!embeddingMatches?.length) {
+      return Object.freeze([]);
+    }
+
+    const documentIds = new Set(
+      anchor.embeddingDocumentIds.map((documentId) => normalizeToken(documentId)),
+    );
+
+    return Object.freeze(
+      embeddingMatches.filter((match) => {
+        const normalizedDocumentId = normalizeToken(match.documentId);
+        if (normalizedDocumentId && documentIds.has(normalizedDocumentId)) {
+          return true;
+        }
+
+        return (match.tags ?? []).some((tag) =>
+          collectTags(anchor).includes(normalizeToken(tag)),
+        );
+      }),
+    );
   }
 
-  function toPreview(anchor: MemoryAnchor, score: number, rank: number): MemoryAnchorPreview {
+  function toPreview(
+    anchor: MemoryAnchor,
+    score: number,
+    rank: number,
+  ): MemoryAnchorPreview {
     return Object.freeze({
-      id:                createMemoryAnchorPreviewId(`${anchor.id}_${rank}`),
-      anchorId:          anchor.id,
-      title:             anchor.payload.headline,
-      subtitle:          `${anchor.kind} • ${anchor.retrieval.priority} • ${anchor.stabilityClass}`,
-      summary:           anchor.payload.summary,
-      tags:              Object.freeze(collectTags(anchor).slice(0, 8)),
-      finalSalience:     round4(anchor.salience.final),
+      id: createMemoryAnchorPreviewId(`${anchor.id}_${rank}_${round4(score)}`),
+      anchorId: anchor.id,
+      title: anchor.payload.headline,
+      subtitle: `${anchor.kind} • ${anchor.retrieval.priority} • ${anchor.stabilityClass}`,
+      summary: anchor.payload.summary,
+      tags: Object.freeze(collectTags(anchor).slice(0, 8)),
+      finalSalience: round4(anchor.salience.final),
       retrievalPriority: anchor.retrieval.priority,
-      stabilityClass:    anchor.stabilityClass,
-      proofBound:        proofBindings.has(anchor.id),
+      stabilityClass: anchor.stabilityClass,
     });
   }
 
   function pushReceipt(receipt: MemoryAnchorReceipt): void {
-    receipts.push(receipt);
-    while (receipts.length > MEMORY_ANCHOR_STORE_DEFAULTS.maxReceipts) receipts.shift();
+    receipts.push(freezeReceipt(receipt));
+    while (receipts.length > MEMORY_ANCHOR_STORE_DEFAULTS.maxReceipts) {
+      receipts.shift();
+    }
     void options.persistence?.appendReceipt?.(receipt);
   }
 
-  function computeDominantKinds(anchorIds: readonly MemoryAnchorId[]): readonly MemoryAnchorKind[] {
-    const counts = new Map<MemoryAnchorKind, number>();
-    for (const id of anchorIds) {
-      const a = anchors.get(id);
-      if (!a) continue;
-      counts.set(a.kind, (counts.get(a.kind) ?? 0) + 1);
+  function pushSnapshot(
+    reason: 'hydrate' | 'save' | 'prune',
+    providedSnapshot?: MemoryAnchorStoreSnapshot,
+  ): void {
+    const snapshot = providedSnapshot ?? api.exportSnapshot();
+    snapshots.push(
+      Object.freeze({
+        createdAtMs: now(),
+        snapshot,
+      }),
+    );
+    while (snapshots.length > MEMORY_ANCHOR_STORE_DEFAULTS.maxSnapshots) {
+      snapshots.shift();
     }
-    return Object.freeze([...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([k]) => k));
+
+    if (reason === 'prune') {
+      // keep snapshot ring warm after maintenance
+      void reason;
+    }
+  }
+
+  function pushMutationReceipt(receipt: MemoryAnchorMutationReceipt): void {
+    mutationReceipts.push(receipt);
+    while (mutationReceipts.length > MEMORY_ANCHOR_STORE_DEFAULTS.maxAuditEntries) {
+      mutationReceipts.shift();
+    }
+  }
+
+  function createMutationReceipt(
+    receipt: Omit<MemoryAnchorMutationReceipt, 'debugNotes'> & {
+      readonly debugNotes: readonly string[];
+    },
+  ): MemoryAnchorMutationReceipt {
+    return Object.freeze({
+      ...receipt,
+      debugNotes: Object.freeze(trimDebugNotes(receipt.debugNotes)),
+    });
+  }
+
+  function computeDominantKinds(
+    anchorIds: readonly MemoryAnchorId[],
+  ): readonly MemoryAnchorKind[] {
+    const counts = new Map<MemoryAnchorKind, number>();
+
+    for (const anchorId of anchorIds) {
+      const anchor = anchors.get(anchorId);
+      if (!anchor) {
+        continue;
+      }
+      counts.set(anchor.kind, (counts.get(anchor.kind) ?? 0) + 1);
+    }
+
+    return Object.freeze(
+      [...counts.entries()]
+        .sort((left, right) => right[1] - left[1])
+        .slice(0, 3)
+        .map(([kind]) => kind),
+    );
   }
 
   function sumWindowSalience(anchorIds: readonly MemoryAnchorId[]): number {
-    return anchorIds.reduce((sum, id) => sum + (anchors.get(id)?.salience.final ?? 0), 0);
+    return anchorIds.reduce(
+      (sum, anchorId) => sum + (anchors.get(anchorId)?.salience.final ?? 0),
+      0,
+    );
   }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// PURE HELPERS
+// ──────────────────────────────────────────────────────────────────────────────
+
+function normalizeQuery(
+  request: MemoryAnchorStoreQueryRequest,
+  nowMs: number,
+): MemoryAnchorQuery {
+  const query = request.query ?? {};
+
+  return Object.freeze({
+    id:
+      query.id ??
+      createMemoryAnchorQueryId(
+        [
+          request.intent ?? query.intent ?? 'CALLBACK',
+          request.runId ?? query.runId,
+          request.sceneId ?? query.sceneId,
+          request.momentId ?? query.momentId,
+          request.roomId ?? query.roomId,
+          request.channelId ?? query.channelId,
+          request.actorId ?? query.actorId,
+          nowMs,
+        ]
+          .filter(Boolean)
+          .join('_'),
+      ),
+    createdAtMs: query.createdAtMs ?? nowMs,
+    intent: request.intent ?? query.intent ?? 'CALLBACK',
+    roomId: request.roomId ?? query.roomId,
+    channelId: request.channelId ?? query.channelId,
+    runId: request.runId ?? query.runId,
+    sceneId: request.sceneId ?? query.sceneId,
+    momentId: request.momentId ?? query.momentId,
+    actorId: request.actorId ?? query.actorId,
+    actorPersonaId: request.actorPersonaId ?? query.actorPersonaId,
+    relationshipId: request.relationshipId ?? query.relationshipId,
+    kinds: Object.freeze(query.kinds ?? []),
+    requiredTags: Object.freeze(
+      normalizeStringList(query.requiredTags ?? request.currentTags ?? []),
+    ),
+    blockedTags: Object.freeze(
+      normalizeStringList(query.blockedTags ?? []),
+    ),
+    minimumFinalSalience: clampUnit(
+      request.minimumScore ??
+        query.minimumFinalSalience ??
+        MEMORY_ANCHOR_DEFAULT_MINIMUM_FINAL_SALIENCE,
+    ),
+    topK: Math.max(
+      1,
+      Math.floor(request.topK ?? query.topK ?? MEMORY_ANCHOR_DEFAULT_TOP_K),
+    ),
+  });
+}
+
+function freezeAnchor(anchor: MemoryAnchor): MemoryAnchor {
+  return Object.freeze({
+    ...anchor,
+    evidence: Object.freeze(anchor.evidence.map((evidence) => freezeEvidence(evidence))),
+    embeddingDocumentIds: Object.freeze([...anchor.embeddingDocumentIds]),
+    quoteRefs: Object.freeze([...anchor.quoteRefs]),
+    relationshipRefs: Object.freeze([...anchor.relationshipRefs]),
+    debugNotes: Object.freeze([...anchor.debugNotes]),
+    payload: Object.freeze({
+      ...anchor.payload,
+      tags: Object.freeze([...anchor.payload.tags]),
+      emotions: Object.freeze([...anchor.payload.emotions]),
+      relationshipTags: Object.freeze([...anchor.payload.relationshipTags]),
+      callbackPhrases: Object.freeze([...anchor.payload.callbackPhrases]),
+    }),
+    continuity: Object.freeze({
+      ...anchor.continuity,
+      predecessorAnchorIds: Object.freeze([...anchor.continuity.predecessorAnchorIds]),
+      successorAnchorIds: Object.freeze([...anchor.continuity.successorAnchorIds]),
+      followPersonaIds: Object.freeze([...anchor.continuity.followPersonaIds]),
+    }),
+    retrieval: Object.freeze({
+      ...anchor.retrieval,
+      queryIntents: Object.freeze([...anchor.retrieval.queryIntents]),
+      requiredTags: Object.freeze([...anchor.retrieval.requiredTags]),
+      blockedTags: Object.freeze([...anchor.retrieval.blockedTags]),
+      matchKinds: Object.freeze([...anchor.retrieval.matchKinds]),
+    }) as MemoryAnchor['retrieval'],
+  });
+}
+
+function freezeEvidence(
+  evidence: MemoryAnchor['evidence'][number],
+): MemoryAnchor['evidence'][number] {
+  return Object.freeze({ ...evidence });
+}
+
+function freezeWindow(window: MemoryAnchorWindow): MemoryAnchorWindow {
+  return Object.freeze({
+    ...window,
+    anchorIds: Object.freeze([...window.anchorIds]),
+    dominantKinds: Object.freeze([...window.dominantKinds]),
+  });
+}
+
+function freezeReceipt(receipt: MemoryAnchorReceipt): MemoryAnchorReceipt {
+  return Object.freeze({
+    ...receipt,
+    topAnchorIds: Object.freeze([...receipt.topAnchorIds]),
+    debugNotes: Object.freeze([...receipt.debugNotes]),
+  });
+}
+
+function freezeRelationshipEdge(edge: RelationshipEdge): RelationshipEdge {
+  return Object.freeze({ ...edge });
+}
+
+function freezeProofBinding(binding: AnchorProofBinding): AnchorProofBinding {
+  return Object.freeze({ ...binding });
+}
+
+function freezeProofBindingEntry(
+  anchorId: MemoryAnchorId,
+  binding: AnchorProofBinding,
+): MemoryAnchorStoreProofBindingEntry {
+  return Object.freeze([
+    anchorId,
+    freezeProofBinding(binding),
+  ]) as MemoryAnchorStoreProofBindingEntry;
+}
+
+function freezeModeAnchorIndexEntry(
+  modeId: ChatModeId,
+  anchorIds: readonly MemoryAnchorId[],
+): MemoryAnchorStoreModeAnchorIndexEntry {
+  return Object.freeze([
+    modeId,
+    Object.freeze([...anchorIds]),
+  ]) as MemoryAnchorStoreModeAnchorIndexEntry;
 }
 
 function mergeAnchorRecords(
@@ -1296,238 +2673,401 @@ function mergeAnchorRecords(
     formation: Object.freeze({
       ...primary.formation,
       ...incoming.formation,
-      createdAtMs: Math.min(primary.formation.createdAtMs, incoming.formation.createdAtMs),
-      firstSeenAtMs: Math.min(primary.formation.firstSeenAtMs, incoming.formation.firstSeenAtMs),
+      createdAtMs: Math.min(
+        primary.formation.createdAtMs,
+        incoming.formation.createdAtMs,
+      ),
       updatedAtMs: nowMs,
-      reaffirmedAtMs: Math.max(
-        primary.formation.reaffirmedAtMs ?? 0,
-        incoming.formation.reaffirmedAtMs ?? 0,
-      ) || undefined,
+      firstSeenAtMs: Math.min(
+        primary.formation.firstSeenAtMs,
+        incoming.formation.firstSeenAtMs,
+      ),
+      reaffirmedAtMs:
+        maxDefined(
+          primary.formation.reaffirmedAtMs,
+          incoming.formation.reaffirmedAtMs,
+        ) ?? undefined,
       hitCount: primary.formation.hitCount + incoming.formation.hitCount,
-      reaffirmCount: primary.formation.reaffirmCount + incoming.formation.reaffirmCount,
+      reaffirmCount:
+        primary.formation.reaffirmCount + incoming.formation.reaffirmCount,
     }),
     payload: Object.freeze({
       ...primary.payload,
       ...incoming.payload,
       headline: incoming.payload.headline || primary.payload.headline,
       summary: incoming.payload.summary || primary.payload.summary,
-      canonicalText: incoming.payload.canonicalText || primary.payload.canonicalText,
+      canonicalText:
+        incoming.payload.canonicalText || primary.payload.canonicalText,
       tags: mergeUnique(primary.payload.tags, incoming.payload.tags),
       emotions: mergeUnique(primary.payload.emotions, incoming.payload.emotions),
-      relationshipTags: mergeUnique(primary.payload.relationshipTags, incoming.payload.relationshipTags),
-      callbackPhrases: mergeUnique(primary.payload.callbackPhrases, incoming.payload.callbackPhrases),
+      relationshipTags: mergeUnique(
+        primary.payload.relationshipTags,
+        incoming.payload.relationshipTags,
+      ),
+      callbackPhrases: mergeUnique(
+        primary.payload.callbackPhrases,
+        incoming.payload.callbackPhrases,
+      ),
     }),
     salience: Object.freeze({
       ...primary.salience,
       ...incoming.salience,
+      immediate: Math.max(primary.salience.immediate, incoming.salience.immediate),
+      emotional: Math.max(primary.salience.emotional, incoming.salience.emotional),
+      narrative: Math.max(primary.salience.narrative, incoming.salience.narrative),
+      social: Math.max(primary.salience.social, incoming.salience.social),
+      relationship: Math.max(primary.salience.relationship, incoming.salience.relationship),
+      comeback: Math.max(primary.salience.comeback, incoming.salience.comeback),
+      collapse: Math.max(primary.salience.collapse, incoming.salience.collapse),
+      rescue: Math.max(primary.salience.rescue, incoming.salience.rescue),
+      prestige: Math.max(primary.salience.prestige, incoming.salience.prestige),
+      retrieval: Math.max(primary.salience.retrieval, incoming.salience.retrieval),
       final: Math.max(primary.salience.final, incoming.salience.final),
     }),
     evidence: mergeUnique(primary.evidence, incoming.evidence),
     continuity: Object.freeze({
       ...primary.continuity,
       ...incoming.continuity,
-      predecessorAnchorIds: mergeUnique(primary.continuity.predecessorAnchorIds, incoming.continuity.predecessorAnchorIds),
-      successorAnchorIds: mergeUnique(primary.continuity.successorAnchorIds, incoming.continuity.successorAnchorIds),
-      followPersonaIds: mergeUnique(primary.continuity.followPersonaIds, incoming.continuity.followPersonaIds),
+      predecessorAnchorIds: mergeUnique(
+        primary.continuity.predecessorAnchorIds,
+        incoming.continuity.predecessorAnchorIds,
+      ),
+      successorAnchorIds: mergeUnique(
+        primary.continuity.successorAnchorIds,
+        incoming.continuity.successorAnchorIds,
+      ),
+      followPersonaIds: mergeUnique(
+        primary.continuity.followPersonaIds,
+        incoming.continuity.followPersonaIds,
+      ),
       familyId: incoming.continuity.familyId ?? primary.continuity.familyId,
-      carriesAcrossModes: primary.continuity.carriesAcrossModes || incoming.continuity.carriesAcrossModes,
-      carriesAcrossRuns: primary.continuity.carriesAcrossRuns || incoming.continuity.carriesAcrossRuns,
-      unresolved: primary.continuity.unresolved || incoming.continuity.unresolved,
+      carriesAcrossModes:
+        primary.continuity.carriesAcrossModes ||
+        incoming.continuity.carriesAcrossModes,
+      carriesAcrossRuns:
+        primary.continuity.carriesAcrossRuns ||
+        incoming.continuity.carriesAcrossRuns,
+      unresolved:
+        primary.continuity.unresolved || incoming.continuity.unresolved,
     }),
     retrieval: Object.freeze({
       ...primary.retrieval,
       ...incoming.retrieval,
-      queryIntents: mergeUnique(primary.retrieval.queryIntents, incoming.retrieval.queryIntents),
-      requiredTags: mergeUnique(primary.retrieval.requiredTags, incoming.retrieval.requiredTags),
-      blockedTags: mergeUnique(primary.retrieval.blockedTags, incoming.retrieval.blockedTags),
-      matchKinds: mergeUnique(primary.retrieval.matchKinds, incoming.retrieval.matchKinds),
+      queryIntents: mergeUnique(
+        primary.retrieval.queryIntents,
+        incoming.retrieval.queryIntents,
+      ),
+      requiredTags: mergeUnique(
+        primary.retrieval.requiredTags,
+        incoming.retrieval.requiredTags,
+      ),
+      blockedTags: mergeUnique(
+        primary.retrieval.blockedTags,
+        incoming.retrieval.blockedTags,
+      ),
+      matchKinds: mergeUnique(
+        primary.retrieval.matchKinds,
+        incoming.retrieval.matchKinds,
+      ),
       weight: Math.max(primary.retrieval.weight, incoming.retrieval.weight),
-      minimumScore: Math.max(primary.retrieval.minimumScore, incoming.retrieval.minimumScore),
-      relationshipBoost: Math.max(primary.retrieval.relationshipBoost, incoming.retrieval.relationshipBoost),
-      emotionBoost: Math.max(primary.retrieval.emotionBoost, incoming.retrieval.emotionBoost),
-      continuityBoost: Math.max(primary.retrieval.continuityBoost, incoming.retrieval.continuityBoost),
-      timeDecayHalfLifeMs: incoming.retrieval.timeDecayHalfLifeMs ?? primary.retrieval.timeDecayHalfLifeMs,
-    }),
-    embeddingDocumentIds: mergeUnique(primary.embeddingDocumentIds, incoming.embeddingDocumentIds),
+      minimumScore: Math.max(
+        primary.retrieval.minimumScore,
+        incoming.retrieval.minimumScore,
+      ),
+      timeDecayHalfLifeMs:
+        maxDefined(
+          primary.retrieval.timeDecayHalfLifeMs,
+          incoming.retrieval.timeDecayHalfLifeMs,
+        ) ?? undefined,
+      relationshipBoost: Math.max(
+        primary.retrieval.relationshipBoost,
+        incoming.retrieval.relationshipBoost,
+      ),
+      emotionBoost: Math.max(
+        primary.retrieval.emotionBoost,
+        incoming.retrieval.emotionBoost,
+      ),
+      continuityBoost: Math.max(
+        primary.retrieval.continuityBoost,
+        incoming.retrieval.continuityBoost,
+      ),
+    }) as MemoryAnchor['retrieval'],
+    embeddingDocumentIds: mergeUnique(
+      primary.embeddingDocumentIds,
+      incoming.embeddingDocumentIds,
+    ),
     quoteRefs: mergeUnique(primary.quoteRefs, incoming.quoteRefs),
-    relationshipRefs: mergeUnique(primary.relationshipRefs, incoming.relationshipRefs),
+    relationshipRefs: mergeUnique(
+      primary.relationshipRefs,
+      incoming.relationshipRefs,
+    ),
     debugNotes: mergeUnique(primary.debugNotes, incoming.debugNotes),
   });
 }
 
-function freezeProofBindingEntry(
-  anchorId: MemoryAnchorId,
-  binding: AnchorProofBinding,
-): MemoryAnchorStoreProofBindingEntry {
-  return Object.freeze([
-    anchorId,
-    Object.freeze({ ...binding }),
-  ]) as MemoryAnchorStoreProofBindingEntry;
-}
-
-function freezeModeAnchorIndexEntry(
-  modeId: ChatModeId,
-  anchorIds: readonly MemoryAnchorId[],
-): MemoryAnchorStoreModeAnchorIndexEntry {
-  return Object.freeze([
-    modeId,
-    Object.freeze([...anchorIds]),
-  ]) as MemoryAnchorStoreModeAnchorIndexEntry;
-}
-
-// ═════════════════════════════════════════════════════════════════════════════
-// MODULE-LEVEL PURE HELPERS (no closure dependency)
-// ═════════════════════════════════════════════════════════════════════════════
-
-function normalizeQuery(request: MemoryAnchorStoreQueryRequest, nowMs: number): MemoryAnchorQuery {
-  const base = request.query ?? {};
-  return Object.freeze({
-    id: base.id ?? createMemoryAnchorQueryId(
-      [request.intent ?? base.intent ?? 'CALLBACK', request.runId ?? base.runId, request.sceneId ?? base.sceneId, request.momentId ?? base.momentId, request.roomId ?? base.roomId, request.channelId ?? base.channelId, request.actorId ?? base.actorId, nowMs].filter(Boolean).join('_')
-    ),
-    createdAtMs:          base.createdAtMs ?? nowMs,
-    intent:               request.intent ?? base.intent ?? 'CALLBACK',
-    roomId:               request.roomId ?? base.roomId,
-    channelId:            request.channelId ?? base.channelId,
-    runId:                request.runId ?? base.runId,
-    sceneId:              request.sceneId ?? base.sceneId,
-    momentId:             request.momentId ?? base.momentId,
-    actorId:              request.actorId ?? base.actorId,
-    actorPersonaId:       request.actorPersonaId ?? base.actorPersonaId,
-    relationshipId:       request.relationshipId ?? base.relationshipId,
-    kinds:                Object.freeze(base.kinds ?? []),
-    requiredTags:         Object.freeze(normalizeStringList(base.requiredTags ?? request.currentTags ?? [])),
-    blockedTags:          Object.freeze(normalizeStringList(base.blockedTags ?? [])),
-    minimumFinalSalience: clampUnit(request.minimumScore ?? base.minimumFinalSalience ?? MEMORY_ANCHOR_DEFAULT_MINIMUM_FINAL_SALIENCE),
-    topK:                 Math.max(1, Math.floor(request.topK ?? base.topK ?? MEMORY_ANCHOR_DEFAULT_TOP_K)),
-  });
-}
-
-function freezeAnchor(anchor: MemoryAnchor): MemoryAnchor {
-  return Object.freeze({
-    ...anchor,
-    evidence:              Object.freeze([...anchor.evidence]),
-    embeddingDocumentIds:  Object.freeze([...anchor.embeddingDocumentIds]),
-    quoteRefs:             Object.freeze([...anchor.quoteRefs]),
-    relationshipRefs:      Object.freeze([...anchor.relationshipRefs]),
-    debugNotes:            Object.freeze([...anchor.debugNotes]),
-    payload: Object.freeze({
-      ...anchor.payload,
-      tags:             Object.freeze([...anchor.payload.tags]),
-      emotions:         Object.freeze([...anchor.payload.emotions]),
-      relationshipTags: Object.freeze([...anchor.payload.relationshipTags]),
-      callbackPhrases:  Object.freeze([...anchor.payload.callbackPhrases]),
-    }),
-    continuity: Object.freeze({
-      ...anchor.continuity,
-      predecessorAnchorIds: Object.freeze([...anchor.continuity.predecessorAnchorIds]),
-      successorAnchorIds:   Object.freeze([...anchor.continuity.successorAnchorIds]),
-      followPersonaIds:     Object.freeze([...anchor.continuity.followPersonaIds]),
-    }),
-    retrieval: Object.freeze({
-      ...anchor.retrieval,
-      queryIntents:  Object.freeze([...anchor.retrieval.queryIntents]),
-      requiredTags:  Object.freeze([...anchor.retrieval.requiredTags]),
-      blockedTags:   Object.freeze([...anchor.retrieval.blockedTags]),
-      matchKinds:    Object.freeze([...anchor.retrieval.matchKinds]),
-    }),
-  });
-}
-
-function freezeWindow(w: MemoryAnchorWindow): MemoryAnchorWindow {
-  return Object.freeze({ ...w, anchorIds: Object.freeze([...w.anchorIds]), dominantKinds: Object.freeze([...w.dominantKinds]) });
-}
-
-function freezeReceipt(r: MemoryAnchorReceipt): MemoryAnchorReceipt {
-  return Object.freeze({ ...r, topAnchorIds: Object.freeze([...r.topAnchorIds]), debugNotes: Object.freeze([...r.debugNotes]) });
-}
-
 function collectTags(anchor: MemoryAnchor): readonly string[] {
   return normalizeStringList([
-    ...anchor.payload.tags, ...anchor.payload.emotions, ...anchor.payload.relationshipTags,
-    ...anchor.retrieval.requiredTags, ...anchor.quoteRefs, ...anchor.relationshipRefs,
-    anchor.kind, anchor.retrieval.priority, anchor.stabilityClass,
-    anchor.subject.roomId, anchor.subject.channelId, anchor.subject.runId,
-    anchor.subject.sceneId, anchor.subject.momentId, anchor.subject.actorId,
-    anchor.subject.actorPersonaId, anchor.subject.relationshipId, anchor.continuity.familyId,
-    (anchor.subject as any).modeId,
+    ...anchor.payload.tags,
+    ...anchor.payload.emotions,
+    ...anchor.payload.relationshipTags,
+    ...anchor.retrieval.requiredTags,
+    ...anchor.quoteRefs,
+    ...anchor.relationshipRefs,
+    ...anchor.payload.callbackPhrases.map((phrase) => normalizeToken(phrase)),
+    anchor.kind,
+    anchor.retrieval.priority,
+    anchor.stabilityClass,
+    anchor.subject.sourceKind,
+    anchor.subject.sourceId,
+    anchor.subject.actorId,
+    anchor.subject.actorPersonaId,
+    anchor.subject.relationshipId,
+    anchor.subject.quoteId,
+    anchor.subject.roomId,
+    anchor.subject.channelId,
+    anchor.subject.runId,
+    anchor.subject.sceneId,
+    anchor.subject.momentId,
+    anchor.continuity.familyId,
   ]);
 }
 
-function normalizeStringList(values: readonly (string | undefined | null)[]): readonly string[] {
-  return Object.freeze(Array.from(new Set(values.map(v => normalizeToken(v)).filter((v): v is string => !!v))));
+function tokenizeForQuery(queryText?: string): readonly string[] {
+  if (!queryText) {
+    return Object.freeze([]);
+  }
+
+  const tokens = normalizeStringList(
+    queryText
+      .split(/[\s,.;:!?()[\]{}"']+/g)
+      .map((token) => token.trim())
+      .filter(Boolean),
+  );
+
+  return Object.freeze(tokens);
+}
+
+function normalizeStringList(
+  values: readonly (string | undefined | null)[],
+): readonly string[] {
+  return Object.freeze(
+    [...new Set(values.map((value) => normalizeToken(value)).filter(Boolean))],
+  );
 }
 
 function normalizeToken(value: string | undefined | null): string {
-  return (value ?? '').trim().toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9:_-]/g, '');
+  return (value ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '_')
+    .replace(/[^a-z0-9:_-]/g, '');
 }
 
-function addIndexed<K extends string, V extends string>(index: Map<K, Set<V>>, key: K | undefined, value: V): void {
-  if (!key) return;
-  if (!index.has(key)) index.set(key, new Set());
+function mergeUnique<T>(
+  left: readonly T[] | undefined,
+  right: readonly T[] | undefined,
+): readonly T[] {
+  return Object.freeze([...(left ?? []), ...(right ?? [])].filter(uniqueFilter));
+}
+
+function uniqueFilter<T>(value: T, index: number, array: readonly T[]): boolean {
+  return array.findIndex((candidate) => Object.is(candidate, value)) === index;
+}
+
+function trimDebugNotes(notes: readonly string[]): readonly string[] {
+  return Object.freeze(
+    notes
+      .map((note) => note.trim())
+      .filter(Boolean)
+      .slice(0, MEMORY_ANCHOR_STORE_DEFAULTS.maxDebugNotesPerReceipt),
+  );
+}
+
+function addIndexed<K extends string, V extends string>(
+  index: Map<K, Set<V>>,
+  key: K | undefined,
+  value: V,
+): void {
+  if (!key) {
+    return;
+  }
+  if (!index.has(key)) {
+    index.set(key, new Set());
+  }
   index.get(key)!.add(value);
 }
 
-function removeIndexed<K extends string, V extends string>(index: Map<K, Set<V>>, key: K | undefined, value: V): void {
-  if (!key) return;
+function removeIndexed<K extends string, V extends string>(
+  index: Map<K, Set<V>>,
+  key: K | undefined,
+  value: V,
+): void {
+  if (!key) {
+    return;
+  }
   const bucket = index.get(key);
-  if (!bucket) return;
+  if (!bucket) {
+    return;
+  }
   bucket.delete(value);
-  if (!bucket.size) index.delete(key);
+  if (!bucket.size) {
+    index.delete(key);
+  }
 }
 
-function pushIndexedBucket<T extends string>(target: Array<readonly T[]>, bucket: Set<T> | undefined): void {
-  if (bucket?.size) target.push(Object.freeze([...bucket.values()]));
+function pushIndexedBucket<T extends string>(
+  target: Array<readonly T[]>,
+  bucket: Set<T> | undefined,
+): void {
+  if (!bucket?.size) {
+    return;
+  }
+  target.push(Object.freeze([...bucket]));
 }
 
-function countBy<T>(values: readonly T[], projector: (v: T) => string): Record<string, number> {
+function clearIndexes(
+  indexes: readonly Map<string, Set<string>>[],
+): void {
+  for (const index of indexes) {
+    index.clear();
+  }
+}
+
+function replaceWindowIndex(
+  index: Map<string, Set<string>>,
+  key: string | undefined,
+  windowId: string,
+): void {
+  if (!key) {
+    return;
+  }
+  if (!index.has(key)) {
+    index.set(key, new Set());
+  }
+  index.get(key)!.add(windowId);
+}
+
+function removeWindowIndex(
+  index: Map<string, Set<string>>,
+  key: string | undefined,
+  windowId: string,
+): void {
+  if (!key) {
+    return;
+  }
+  const bucket = index.get(key);
+  if (!bucket) {
+    return;
+  }
+  bucket.delete(windowId);
+  if (!bucket.size) {
+    index.delete(key);
+  }
+}
+
+function countBy<T>(
+  values: readonly T[],
+  projector: (value: T) => string,
+): Record<string, number> {
   const counts: Record<string, number> = {};
-  for (const v of values) { const k = projector(v); counts[k] = (counts[k] ?? 0) + 1; }
+  for (const value of values) {
+    const key = projector(value);
+    counts[key] = (counts[key] ?? 0) + 1;
+  }
   return counts;
 }
 
-function clearIndexes(indexes: readonly Map<any, Set<any>>[]): void {
-  for (const idx of indexes) idx.clear();
+function edgeKey(
+  anchorIdA: MemoryAnchorId,
+  anchorIdB: MemoryAnchorId,
+): string {
+  const [left, right] = sortIds(anchorIdA, anchorIdB);
+  return `${left}::${right}`;
 }
 
-function normalizeNow(value: number | undefined): number {
-  return Number.isFinite(value) ? Math.max(0, Math.floor(value as number)) : Date.now();
+function sortIds<T extends string>(left: T, right: T): readonly [T, T] {
+  return left <= right ? [left, right] : [right, left];
 }
 
-function missingReceipt(operation: MemoryAnchorMutationReceipt['operation'], anchorId?: MemoryAnchorId): MemoryAnchorMutationReceipt {
-  return Object.freeze({ ok: false, operation, anchorId, created: false, updated: false, debugNotes: Object.freeze(['anchorMissing']) });
+function missingReceipt(
+  operation: MemoryAnchorMutationReceipt['operation'],
+  anchorId?: MemoryAnchorId,
+): MemoryAnchorMutationReceipt {
+  return Object.freeze({
+    ok: false,
+    operation,
+    anchorId,
+    created: false,
+    updated: false,
+    debugNotes: Object.freeze(['missingAnchor=true']),
+  });
 }
 
-function mergeUnique<T>(existing: readonly T[], next: readonly T[]): readonly T[] {
-  return Object.freeze(Array.from(new Set([...existing, ...next])));
+function priorityOrdinal(priority: string): number {
+  switch (priority) {
+    case 'CRITICAL':
+      return 4;
+    case 'HIGH':
+      return 3;
+    case 'NORMAL':
+      return 2;
+    case 'LOW':
+      return 1;
+    default:
+      return 0;
+  }
+}
+
+function promotePriority(priority: MemoryAnchorRetrievalPriority): MemoryAnchorRetrievalPriority {
+  switch (priority) {
+    case 'LOW':
+      return 'MEDIUM';
+    case 'MEDIUM':
+      return 'HIGH';
+    case 'HIGH':
+      return 'CRITICAL';
+    default:
+      return priority;
+  }
+}
+
+function demotePriority(priority: MemoryAnchorRetrievalPriority): MemoryAnchorRetrievalPriority {
+  switch (priority) {
+    case 'CRITICAL':
+      return 'HIGH';
+    case 'HIGH':
+      return 'MEDIUM';
+    case 'MEDIUM':
+      return 'LOW';
+    default:
+      return priority;
+  }
 }
 
 function clampUnit(value: number): number {
-  if (!Number.isFinite(value)) return 0;
+  if (!Number.isFinite(value)) {
+    return 0;
+  }
   return Math.max(0, Math.min(1, value));
 }
 
 function round4(value: number): number {
-  return Math.round(value * 10000) / 10000;
+  return Math.round((Number.isFinite(value) ? value : 0) * 10_000) / 10_000;
 }
 
-/** Deterministic edge key: always sorts the two IDs so A::B === B::A. */
-function edgeKey(a: MemoryAnchorId, b: MemoryAnchorId): string {
-  return a < b ? `${a}::${b}` : `${b}::${a}`;
+function normalizeNow(value: number | undefined): number {
+  if (!Number.isFinite(value)) {
+    return Date.now();
+  }
+  return Math.max(0, Math.floor(value as number));
 }
 
-/** Priority tier ladder: LOW → MEDIUM → HIGH → CRITICAL */
-const PRIORITY_LADDER = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'] as const;
-type RetrievalPriority = typeof PRIORITY_LADDER[number];
-
-function promotePriority(p: RetrievalPriority | string): RetrievalPriority {
-  const idx = PRIORITY_LADDER.indexOf(p as RetrievalPriority);
-  if (idx === -1 || idx === PRIORITY_LADDER.length - 1) return p as RetrievalPriority;
-  return PRIORITY_LADDER[idx + 1];
-}
-
-function demotePriority(p: RetrievalPriority | string): RetrievalPriority {
-  const idx = PRIORITY_LADDER.indexOf(p as RetrievalPriority);
-  if (idx <= 0) return p as RetrievalPriority;
-  return PRIORITY_LADDER[idx - 1];
+function maxDefined(
+  left: number | undefined,
+  right: number | undefined,
+): number | undefined {
+  if (left === undefined && right === undefined) {
+    return undefined;
+  }
+  return Math.max(left ?? -Infinity, right ?? -Infinity);
 }
