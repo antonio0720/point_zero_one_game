@@ -1183,3 +1183,1540 @@ export function createGlobalEventScheduler(
 ): GlobalEventScheduler {
   return new GlobalEventScheduler(options);
 }
+
+
+/* eslint-disable max-lines */
+
+/**
+ * ============================================================================
+ * POINT ZERO ONE — GLOBAL EVENT SCHEDULER INSPECTION + CONTROL PLANE
+ * ============================================================================
+ *
+ * This extension layer keeps the canonical scheduler intact while surfacing
+ * the deeper operational, QA, replay, planning, and index-accessible helpers
+ * that the rest of the liveops lane needs.
+ */
+
+export type GlobalEventWindowSourceKind =
+  | 'FIXED_WINDOW'
+  | 'RECURRING_INTERVAL'
+  | 'RECURRING_DAILY_UTC'
+  | 'MATCH_STATE_TRIGGER'
+  | 'MANUAL';
+
+export type GlobalEventHealthBand = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+export type GlobalEventRoomPressureBand = 'CALM' | 'TENSE' | 'HOSTILE' | 'PREDATORY' | 'CEREMONIAL';
+
+export interface GlobalEventWindowPreview {
+  readonly eventId: string;
+  readonly displayName: string;
+  readonly family: GlobalEventFamily;
+  readonly visibility: GlobalEventVisibility;
+  readonly source: GlobalEventWindowSourceKind;
+  readonly startsAt: number;
+  readonly endsAt: number;
+  readonly durationMs: number;
+  readonly projectedForRoomIds?: readonly string[];
+  readonly notes: readonly string[];
+}
+
+export interface GlobalEventProjectionGroup {
+  readonly eventId: string;
+  readonly displayName: string;
+  readonly family: GlobalEventFamily;
+  readonly visibility: GlobalEventVisibility;
+  readonly intensity: ChatLiveOpsIntensityBand;
+  readonly projectionCount: number;
+  readonly earliestStartsAt: number;
+  readonly latestEndsAt: number;
+  readonly totalRemainingMs: number;
+  readonly channels: readonly ChatLiveOpsChannelId[];
+  readonly tags: readonly string[];
+  readonly notes: readonly string[];
+}
+
+export interface GlobalEventChannelLoad {
+  readonly channelId: ChatLiveOpsChannelId;
+  readonly activeCount: number;
+  readonly upcomingCount: number;
+  readonly combinedPriority: number;
+  readonly averagePriority: number;
+  readonly dominantFamilies: readonly GlobalEventFamily[];
+  readonly dominantEventIds: readonly string[];
+  readonly pressureWeight: number;
+  readonly heatBand: GlobalEventHealthBand;
+}
+
+export interface GlobalEventFamilyLoad {
+  readonly family: GlobalEventFamily;
+  readonly activeCount: number;
+  readonly upcomingCount: number;
+  readonly activeEventIds: readonly string[];
+  readonly visibilityMix: Readonly<Record<GlobalEventVisibility, number>>;
+  readonly pressureWeight: number;
+}
+
+export interface GlobalEventActivationDigest {
+  readonly activationId: string;
+  readonly eventId: string;
+  readonly family: GlobalEventFamily;
+  readonly displayName: string;
+  readonly source: GlobalEventActivation['source'];
+  readonly forced: boolean;
+  readonly startsAt: number;
+  readonly endsAt: number;
+  readonly durationMs: number;
+  readonly channels: readonly ChatLiveOpsChannelId[];
+  readonly tags: readonly string[];
+  readonly roomScopedRoomIds: readonly string[];
+  readonly notes: readonly string[];
+}
+
+export interface GlobalEventDefinitionAudit {
+  readonly eventId: string;
+  readonly displayName: string;
+  readonly family: GlobalEventFamily;
+  readonly definitionVersion: string;
+  readonly scheduleKind: GlobalEventScheduleKind;
+  readonly visibility: GlobalEventVisibility;
+  readonly intensity: ChatLiveOpsIntensityBand;
+  readonly channels: readonly ChatLiveOpsChannelId[];
+  readonly tags: readonly string[];
+  readonly windows: number;
+  readonly rules: number;
+  readonly requiredTags: readonly string[];
+  readonly excludedTags: readonly string[];
+  readonly scopeModeIds: readonly string[];
+  readonly issues: readonly string[];
+  readonly strengths: readonly string[];
+  readonly readinessScore: number;
+}
+
+export interface GlobalEventRoomProjection {
+  readonly roomId: string;
+  readonly eventId: string;
+  readonly activationId: string;
+  readonly displayName: string;
+  readonly family: GlobalEventFamily;
+  readonly visibility: GlobalEventVisibility;
+  readonly intensity: ChatLiveOpsIntensityBand;
+  readonly applicable: boolean;
+  readonly relevanceScore: number;
+  readonly preferredChannels: readonly ChatLiveOpsChannelId[];
+  readonly channelPriority: Readonly<Record<ChatLiveOpsChannelId, number>>;
+  readonly derivedTags: readonly string[];
+  readonly stageMood: GlobalEventRoomPressureBand;
+  readonly pressureWeight: number;
+  readonly rescueSuppressionWeight: number;
+  readonly whisperWeight: number;
+  readonly likelyFactionPressure: number;
+  readonly notes: readonly string[];
+}
+
+export interface GlobalEventRoomProjectionMatrixRow {
+  readonly roomId: string;
+  readonly mode: string | null;
+  readonly mountTarget: string | null;
+  readonly activeEventIds: readonly string[];
+  readonly upcomingEventIds: readonly string[];
+  readonly projectedChannels: readonly ChatLiveOpsChannelId[];
+  readonly cumulativePressureWeight: number;
+  readonly crowdHeat: number;
+  readonly panicLevel: number;
+  readonly notes: readonly string[];
+}
+
+export interface GlobalEventTimelineSlice {
+  readonly startsAt: number;
+  readonly endsAt: number;
+  readonly eventIds: readonly string[];
+  readonly families: readonly GlobalEventFamily[];
+  readonly channels: readonly ChatLiveOpsChannelId[];
+  readonly visibilityMix: Readonly<Record<GlobalEventVisibility, number>>;
+  readonly notes: readonly string[];
+}
+
+export interface GlobalEventDetailedDiagnostics {
+  readonly activationDigests: readonly GlobalEventActivationDigest[];
+  readonly channelLoads: readonly GlobalEventChannelLoad[];
+  readonly familyLoads: readonly GlobalEventFamilyLoad[];
+  readonly groups: readonly GlobalEventProjectionGroup[];
+  readonly healthBand: GlobalEventHealthBand;
+  readonly totalProjectedPressure: number;
+  readonly cancelledActivationCount: number;
+}
+
+export interface GlobalEventSchedulerDetailedSnapshot extends GlobalEventSchedulerSnapshot {
+  readonly roomProjections: readonly GlobalEventRoomProjection[];
+  readonly roomMatrix: readonly GlobalEventRoomProjectionMatrixRow[];
+  readonly timeline: readonly GlobalEventTimelineSlice[];
+  readonly audits: readonly GlobalEventDefinitionAudit[];
+  readonly detailedDiagnostics: GlobalEventDetailedDiagnostics;
+}
+
+export interface GlobalEventSchedulerManifest {
+  readonly generatedAt: number;
+  readonly version: string;
+  readonly definitionIds: readonly string[];
+  readonly activationIds: readonly string[];
+  readonly cancelledActivationIds: readonly string[];
+  readonly families: readonly GlobalEventFamily[];
+  readonly channelIds: readonly ChatLiveOpsChannelId[];
+  readonly eventCountByFamily: Readonly<Record<GlobalEventFamily, number>>;
+  readonly definitionAudits: readonly GlobalEventDefinitionAudit[];
+}
+
+export interface GlobalEventLibraryDiffEntry {
+  readonly eventId: string;
+  readonly status: 'ADDED' | 'REMOVED' | 'CHANGED' | 'UNCHANGED';
+  readonly previousVersion?: string | null;
+  readonly nextVersion?: string | null;
+  readonly changedFields: readonly string[];
+}
+
+export interface GlobalEventLibraryDiff {
+  readonly added: readonly string[];
+  readonly removed: readonly string[];
+  readonly changed: readonly GlobalEventLibraryDiffEntry[];
+  readonly unchanged: readonly string[];
+}
+
+export interface GlobalEventDefinitionBuilderInput {
+  readonly eventId: string;
+  readonly family: GlobalEventFamily;
+  readonly displayName: string;
+  readonly headline: string;
+  readonly summaryLines: readonly string[];
+  readonly scheduleKind: GlobalEventScheduleKind;
+  readonly visibility: GlobalEventVisibility;
+  readonly intensity: ChatLiveOpsIntensityBand;
+  readonly tags?: readonly string[];
+  readonly channels?: readonly ChatLiveOpsChannelId[];
+  readonly channelPriority?: Partial<Record<ChatLiveOpsChannelId, number>>;
+  readonly rules?: readonly ChatLiveOpsOverlayRule[];
+  readonly cooldownMs?: number;
+  readonly maxConcurrentGlobalInstances?: number;
+  readonly maxInstancesPerRoom?: number;
+  readonly repeatGranularity?: GlobalEventRepeatGranularity;
+  readonly priorityWeight?: number;
+  readonly definitionVersion?: string;
+  readonly seasonId?: string | null;
+  readonly scopeModeIds?: readonly string[];
+  readonly requiredTags?: readonly string[];
+  readonly excludedTags?: readonly string[];
+  readonly windows?: readonly GlobalEventWindowDefinition[];
+  readonly meta?: Readonly<Record<string, string | number | boolean | null>>;
+}
+
+export interface GlobalEventDefinitionPatch {
+  readonly displayName?: string;
+  readonly headline?: string;
+  readonly summaryLines?: readonly string[];
+  readonly scheduleKind?: GlobalEventScheduleKind;
+  readonly visibility?: GlobalEventVisibility;
+  readonly intensity?: ChatLiveOpsIntensityBand;
+  readonly tags?: readonly string[];
+  readonly channels?: readonly ChatLiveOpsChannelId[];
+  readonly channelPriority?: Partial<Record<ChatLiveOpsChannelId, number>>;
+  readonly rules?: readonly ChatLiveOpsOverlayRule[];
+  readonly cooldownMs?: number;
+  readonly maxConcurrentGlobalInstances?: number;
+  readonly maxInstancesPerRoom?: number;
+  readonly repeatGranularity?: GlobalEventRepeatGranularity;
+  readonly priorityWeight?: number;
+  readonly definitionVersion?: string;
+  readonly seasonId?: string | null;
+  readonly scopeModeIds?: readonly string[];
+  readonly requiredTags?: readonly string[];
+  readonly excludedTags?: readonly string[];
+  readonly windows?: readonly GlobalEventWindowDefinition[];
+  readonly meta?: Readonly<Record<string, string | number | boolean | null>>;
+}
+
+export interface PreviewWindowsInput {
+  readonly now?: number;
+  readonly horizonMs?: number;
+  readonly rooms?: readonly GlobalEventSchedulerRoomContext[];
+  readonly globalTags?: readonly string[];
+}
+
+function uniqueChannels(input: readonly ChatLiveOpsChannelId[]): ChatLiveOpsChannelId[] {
+  return uniqueStrings(input as readonly string[]) as ChatLiveOpsChannelId[];
+}
+
+function buildVisibilityMix(
+  projections: readonly GlobalEventProjection[],
+): Readonly<Record<GlobalEventVisibility, number>> {
+  return freeze({
+    VISIBLE: projections.filter((projection) => projection.visibility === 'VISIBLE').length,
+    SHADOW_ONLY: projections.filter((projection) => projection.visibility === 'SHADOW_ONLY').length,
+    HYBRID: projections.filter((projection) => projection.visibility === 'HYBRID').length,
+  });
+}
+
+export function computeIntensityWeight(intensity: ChatLiveOpsIntensityBand): number {
+  switch (intensity) {
+    case 'QUIET':
+      return 0.5;
+    case 'ACTIVE':
+      return 1.25;
+    case 'SEVERE':
+      return 2.1;
+    case 'WORLD_CLASS':
+      return 3.2;
+    default:
+      return 1;
+  }
+}
+
+export function computeVisibilityWeight(visibility: GlobalEventVisibility): number {
+  switch (visibility) {
+    case 'VISIBLE':
+      return 1.3;
+    case 'SHADOW_ONLY':
+      return 0.9;
+    case 'HYBRID':
+      return 1.6;
+    default:
+      return 1;
+  }
+}
+
+export function computeFamilyWeight(family: GlobalEventFamily): number {
+  switch (family) {
+    case 'SEASON':
+      return 1.1;
+    case 'WORLD_EVENT':
+      return 1.3;
+    case 'HELPER_BLACKOUT':
+      return 1.7;
+    case 'CHANNEL_MUTATOR':
+      return 1.6;
+    case 'WHISPER_WINDOW':
+      return 1.25;
+    case 'FACTION_SURGE':
+      return 1.55;
+    case 'COORDINATED_RAID':
+      return 2.0;
+    case 'RIVAL_SPOTLIGHT':
+      return 1.4;
+    default:
+      return 1;
+  }
+}
+
+export function computeChannelPriorityAverage(
+  channelPriority: Readonly<Record<ChatLiveOpsChannelId, number>>,
+): number {
+  const values = ALL_VISIBLE_CHANNELS.map((channelId) => channelPriority[channelId] ?? 0);
+  return values.length > 0 ? values.reduce((sum, value) => sum + value, 0) / values.length : 0;
+}
+
+export function inferPressureBandForRoom(
+  room: GlobalEventSchedulerRoomContext,
+  projection: GlobalEventProjection,
+): GlobalEventRoomPressureBand {
+  const panic = room.panicLevel ?? 0;
+  const heat = room.crowdHeat ?? 0;
+  if (projection.visibility === 'SHADOW_ONLY' && panic >= 4) {
+    return 'PREDATORY';
+  }
+  if (projection.family === 'WHISPER_WINDOW') {
+    return 'CEREMONIAL';
+  }
+  if (projection.family === 'COORDINATED_RAID' || heat >= 7 || panic >= 8) {
+    return 'HOSTILE';
+  }
+  if (projection.family === 'CHANNEL_MUTATOR' && projection.visibility !== 'SHADOW_ONLY') {
+    return 'PREDATORY';
+  }
+  if (panic >= 4 || heat >= 4) {
+    return 'TENSE';
+  }
+  return 'CALM';
+}
+
+export function inferPreferredChannelsForRoomProjection(
+  room: GlobalEventSchedulerRoomContext,
+  projection: GlobalEventProjection,
+): readonly ChatLiveOpsChannelId[] {
+  const preferred = new Set<ChatLiveOpsChannelId>();
+  for (const channelId of projection.channels) {
+    preferred.add(channelId);
+  }
+
+  const mode = room.mode ?? '';
+  if (mode.includes('PREDATOR')) {
+    preferred.add('DEAL_ROOM');
+  }
+  if (mode.includes('SYNDICATE')) {
+    preferred.add('SYNDICATE');
+  }
+  if (mode.includes('LOBBY')) {
+    preferred.add('LOBBY');
+  }
+  if (projection.visibility !== 'SHADOW_ONLY') {
+    preferred.add('GLOBAL');
+  }
+  return uniqueChannels([...preferred]);
+}
+
+export function projectChannelPriorityToRoom(
+  room: GlobalEventSchedulerRoomContext,
+  projection: GlobalEventProjection,
+): Readonly<Record<ChatLiveOpsChannelId, number>> {
+  const roomBias =
+    (room.panicLevel ?? 0) * 3 +
+    (room.crowdHeat ?? 0) * 2 +
+    Math.max((room.lowShieldPlayerCount ?? 0) - (room.activeHelperCount ?? 0), 0) * 4;
+
+  const dealRoomBias = (room.mode ?? '').includes('PREDATOR') ? 14 : 0;
+  const syndicateBias = (room.mode ?? '').includes('SYNDICATE') ? 12 : 0;
+  const lobbyBias = (room.mode ?? '').includes('LOBBY') ? 8 : 0;
+  const globalBias = projection.visibility === 'VISIBLE' ? 10 : projection.visibility === 'HYBRID' ? 6 : 1;
+
+  return freeze({
+    GLOBAL: (projection.channelPriority.GLOBAL ?? 0) + roomBias + globalBias,
+    SYNDICATE: (projection.channelPriority.SYNDICATE ?? 0) + roomBias + syndicateBias,
+    DEAL_ROOM: (projection.channelPriority.DEAL_ROOM ?? 0) + roomBias + dealRoomBias,
+    LOBBY: (projection.channelPriority.LOBBY ?? 0) + roomBias + lobbyBias,
+  });
+}
+
+export function computeRoomProjectionRelevance(
+  room: GlobalEventSchedulerRoomContext,
+  projection: GlobalEventProjection,
+): number {
+  let score = computeIntensityWeight(projection.intensity) * 20;
+  score += computeVisibilityWeight(projection.visibility) * 10;
+  score += computeFamilyWeight(projection.family) * 12;
+  score += (room.crowdHeat ?? 0) * 4;
+  score += (room.panicLevel ?? 0) * 5;
+  score += (room.lowShieldPlayerCount ?? 0) * 6;
+  score += Math.max((room.playerCount ?? 0) - (room.activeHelperCount ?? 0), 0) * 2;
+
+  if ((room.mode ?? '').includes('PREDATOR') && projection.channels.includes('DEAL_ROOM')) {
+    score += 18;
+  }
+  if ((room.mode ?? '').includes('SYNDICATE') && projection.channels.includes('SYNDICATE')) {
+    score += 16;
+  }
+  if ((room.mountTarget ?? '').includes('POST_RUN')) {
+    score *= 0.85;
+  }
+
+  const roomTags = new Set(room.tags ?? []);
+  for (const tag of projection.tags) {
+    if (roomTags.has(tag)) {
+      score += 5;
+    }
+  }
+
+  return Math.round(score * 100) / 100;
+}
+
+export function computeRoomProjectionPressureWeight(
+  room: GlobalEventSchedulerRoomContext,
+  projection: GlobalEventProjection,
+): number {
+  const helperDelta = Math.max((room.lowShieldPlayerCount ?? 0) - (room.activeHelperCount ?? 0), 0);
+  const heat = room.crowdHeat ?? 0;
+  const panic = room.panicLevel ?? 0;
+  return Math.round(
+    (computeIntensityWeight(projection.intensity) * 12 +
+      computeVisibilityWeight(projection.visibility) * 8 +
+      computeFamilyWeight(projection.family) * 10 +
+      helperDelta * 7 +
+      heat * 3 +
+      panic * 4) * 100,
+  ) / 100;
+}
+
+export function computeRoomProjectionRescueSuppressionWeight(
+  room: GlobalEventSchedulerRoomContext,
+  projection: GlobalEventProjection,
+): number {
+  let weight = 0;
+  if (projection.family === 'HELPER_BLACKOUT') {
+    weight += 40;
+  }
+  if (projection.family === 'COORDINATED_RAID') {
+    weight += 18;
+  }
+  if (projection.visibility === 'SHADOW_ONLY') {
+    weight += 8;
+  }
+  weight += Math.max((room.lowShieldPlayerCount ?? 0) - (room.activeHelperCount ?? 0), 0) * 6;
+  return Math.round(weight * 100) / 100;
+}
+
+export function computeRoomProjectionWhisperWeight(
+  room: GlobalEventSchedulerRoomContext,
+  projection: GlobalEventProjection,
+): number {
+  let weight = 0;
+  if (projection.family === 'WHISPER_WINDOW') {
+    weight += 35;
+  }
+  if (projection.visibility === 'SHADOW_ONLY' || projection.visibility === 'HYBRID') {
+    weight += 12;
+  }
+  if ((room.mode ?? '').includes('PHANTOM')) {
+    weight += 14;
+  }
+  if ((room.mode ?? '').includes('SYNDICATE')) {
+    weight += 10;
+  }
+  return Math.round(weight * 100) / 100;
+}
+
+export function computeRoomProjectionLikelyFactionPressure(
+  room: GlobalEventSchedulerRoomContext,
+  projection: GlobalEventProjection,
+): number {
+  const base = computeFamilyWeight(projection.family) * 15 + computeIntensityWeight(projection.intensity) * 11;
+  const crowd = (room.crowdHeat ?? 0) * 3.5;
+  const panic = (room.panicLevel ?? 0) * 4.5;
+  const factionBalance =
+    room.factionBalance != null
+      ? Object.values(room.factionBalance).reduce((sum, value) => sum + Math.abs(value), 0)
+      : 0;
+  return Math.round((base + crowd + panic + factionBalance) * 100) / 100;
+}
+
+export function projectGlobalEventToRoom(
+  room: GlobalEventSchedulerRoomContext,
+  projection: GlobalEventProjection,
+): GlobalEventRoomProjection {
+  const applicable =
+    projection.visibility !== 'VISIBLE' ||
+    projection.channels.some((channelId) => inferPreferredChannelsForRoomProjection(room, projection).includes(channelId));
+
+  const preferredChannels = inferPreferredChannelsForRoomProjection(room, projection);
+  const derivedTags = uniqueStrings([
+    ...projection.tags,
+    ...(room.tags ?? []),
+    `MODE:${room.mode ?? 'UNKNOWN'}`,
+    `MOUNT:${room.mountTarget ?? 'UNKNOWN'}`,
+    `VISIBILITY:${projection.visibility}`,
+    `FAMILY:${projection.family}`,
+  ]);
+  const channelPriority = projectChannelPriorityToRoom(room, projection);
+  const stageMood = inferPressureBandForRoom(room, projection);
+  const relevanceScore = computeRoomProjectionRelevance(room, projection);
+  const pressureWeight = computeRoomProjectionPressureWeight(room, projection);
+  const rescueSuppressionWeight = computeRoomProjectionRescueSuppressionWeight(room, projection);
+  const whisperWeight = computeRoomProjectionWhisperWeight(room, projection);
+  const likelyFactionPressure = computeRoomProjectionLikelyFactionPressure(room, projection);
+
+  const notes = uniqueStrings([
+    applicable ? 'ROOM_APPLICABLE' : 'ROOM_LOW_APPLICABILITY',
+    stageMood,
+    projection.visibility,
+    projection.family,
+    ...(room.lowShieldPlayerCount ?? 0) > 0 ? ['LOW_SHIELD_ROOM'] : [],
+    ...(room.activeHelperCount ?? 0) === 0 ? ['HELPER_THIN'] : [],
+  ]);
+
+  return freeze({
+    roomId: room.roomId,
+    eventId: projection.eventId,
+    activationId: projection.activationId,
+    displayName: projection.displayName,
+    family: projection.family,
+    visibility: projection.visibility,
+    intensity: projection.intensity,
+    applicable,
+    relevanceScore,
+    preferredChannels,
+    channelPriority,
+    derivedTags,
+    stageMood,
+    pressureWeight,
+    rescueSuppressionWeight,
+    whisperWeight,
+    likelyFactionPressure,
+    notes,
+  });
+}
+
+export function projectGlobalEventsToRooms(
+  rooms: readonly GlobalEventSchedulerRoomContext[],
+  projections: readonly GlobalEventProjection[],
+): readonly GlobalEventRoomProjection[] {
+  const output: GlobalEventRoomProjection[] = [];
+  for (const room of rooms) {
+    for (const projection of projections) {
+      output.push(projectGlobalEventToRoom(room, projection));
+    }
+  }
+  return output.sort((left, right) => right.relevanceScore - left.relevanceScore);
+}
+
+export function buildRoomProjectionMatrix(
+  rooms: readonly GlobalEventSchedulerRoomContext[],
+  active: readonly GlobalEventProjection[],
+  upcoming: readonly GlobalEventProjection[],
+): readonly GlobalEventRoomProjectionMatrixRow[] {
+  return rooms.map((room) => {
+    const activeForRoom = active.map((projection) => projectGlobalEventToRoom(room, projection));
+    const upcomingForRoom = upcoming.map((projection) => projectGlobalEventToRoom(room, projection));
+    const projectedChannels = uniqueChannels([
+      ...activeForRoom.flatMap((projection) => [...projection.preferredChannels]),
+      ...upcomingForRoom.flatMap((projection) => [...projection.preferredChannels]),
+    ]);
+    const notes = uniqueStrings([
+      ...(room.playerCount ?? 0) > 6 ? ['HIGH_POP_ROOM'] : [],
+      ...(room.crowdHeat ?? 0) > 6 ? ['CROWD_HEATED'] : [],
+      ...(room.panicLevel ?? 0) > 6 ? ['PANIC_ELEVATED'] : [],
+      ...(projectedChannels.length === 0 ? ['NO_CHANNEL_EXPRESSION'] : []),
+    ]);
+
+    return freeze({
+      roomId: room.roomId,
+      mode: room.mode ?? null,
+      mountTarget: room.mountTarget ?? null,
+      activeEventIds: uniqueStrings(activeForRoom.map((projection) => projection.eventId)),
+      upcomingEventIds: uniqueStrings(upcomingForRoom.map((projection) => projection.eventId)),
+      projectedChannels,
+      cumulativePressureWeight: Math.round(
+        [...activeForRoom, ...upcomingForRoom].reduce(
+          (sum, projection) => sum + projection.pressureWeight,
+          0,
+        ) * 100,
+      ) / 100,
+      crowdHeat: room.crowdHeat ?? 0,
+      panicLevel: room.panicLevel ?? 0,
+      notes,
+    });
+  });
+}
+
+export function buildProjectionGroups(
+  projections: readonly GlobalEventProjection[],
+): readonly GlobalEventProjectionGroup[] {
+  const byEventId = new Map<string, GlobalEventProjection[]>();
+  for (const projection of projections) {
+    const list = byEventId.get(projection.eventId) ?? [];
+    list.push(projection);
+    byEventId.set(projection.eventId, list);
+  }
+
+  const groups: GlobalEventProjectionGroup[] = [];
+  for (const [eventId, list] of byEventId.entries()) {
+    const first = list[0];
+    groups.push(
+      freeze({
+        eventId,
+        displayName: first.displayName,
+        family: first.family,
+        visibility: first.visibility,
+        intensity: first.intensity,
+        projectionCount: list.length,
+        earliestStartsAt: Math.min(...list.map((item) => item.startsAt)),
+        latestEndsAt: Math.max(...list.map((item) => item.endsAt)),
+        totalRemainingMs: list.reduce((sum, item) => sum + item.timeRemainingMs, 0),
+        channels: uniqueChannels(list.flatMap((item) => [...item.channels])),
+        tags: uniqueStrings(list.flatMap((item) => [...item.tags])),
+        notes: uniqueStrings(list.flatMap((item) => [...item.notes])),
+      }),
+    );
+  }
+
+  return groups.sort((left, right) => right.totalRemainingMs - left.totalRemainingMs);
+}
+
+export function buildActivationDigests(
+  state: GlobalEventSchedulerState,
+): readonly GlobalEventActivationDigest[] {
+  const byEventId = new Map<string, GlobalEventDefinition>();
+  for (const definition of state.definitions) {
+    byEventId.set(definition.eventId, definition);
+  }
+
+  const digests: GlobalEventActivationDigest[] = [];
+  for (const activation of state.activations) {
+    const definition = byEventId.get(activation.eventId);
+    if (!definition) {
+      continue;
+    }
+
+    digests.push(
+      freeze({
+        activationId: activation.activationId,
+        eventId: definition.eventId,
+        family: definition.family,
+        displayName: definition.displayName,
+        source: activation.source,
+        forced: activation.forced,
+        startsAt: activation.startsAt,
+        endsAt: activation.endsAt,
+        durationMs: activation.endsAt - activation.startsAt,
+        channels: freeze([...definition.channels]),
+        tags: freeze([...definition.tags]),
+        roomScopedRoomIds: freeze([...(activation.roomScopedRoomIds ?? [])]),
+        notes: freeze([...activation.notes]),
+      }),
+    );
+  }
+
+  return digests.sort((left, right) => left.startsAt - right.startsAt);
+}
+
+export function computeChannelLoads(
+  active: readonly GlobalEventProjection[],
+  upcoming: readonly GlobalEventProjection[],
+): readonly GlobalEventChannelLoad[] {
+  return ALL_VISIBLE_CHANNELS.map((channelId) => {
+    const activeForChannel = active.filter((projection) => projection.channels.includes(channelId));
+    const upcomingForChannel = upcoming.filter((projection) => projection.channels.includes(channelId));
+    const combinedPriority = [...activeForChannel, ...upcomingForChannel].reduce(
+      (sum, projection) => sum + (projection.channelPriority[channelId] ?? 0),
+      0,
+    );
+    const total = activeForChannel.length + upcomingForChannel.length;
+    const averagePriority = total > 0 ? combinedPriority / total : 0;
+    const dominantFamilies = uniqueStrings(
+      [...activeForChannel, ...upcomingForChannel]
+        .map((projection) => projection.family)
+        .sort(),
+    ) as GlobalEventFamily[];
+    const dominantEventIds = uniqueStrings(
+      [...activeForChannel, ...upcomingForChannel].map((projection) => projection.eventId),
+    );
+    const pressureWeight = [...activeForChannel, ...upcomingForChannel].reduce(
+      (sum, projection) =>
+        sum +
+        computeIntensityWeight(projection.intensity) * 10 +
+        computeVisibilityWeight(projection.visibility) * 5 +
+        (projection.channelPriority[channelId] ?? 0) / 5,
+      0,
+    );
+
+    const heatBand: GlobalEventHealthBand =
+      pressureWeight >= 300 ? 'CRITICAL' : pressureWeight >= 180 ? 'HIGH' : pressureWeight >= 80 ? 'MEDIUM' : 'LOW';
+
+    return freeze({
+      channelId,
+      activeCount: activeForChannel.length,
+      upcomingCount: upcomingForChannel.length,
+      combinedPriority,
+      averagePriority: Math.round(averagePriority * 100) / 100,
+      dominantFamilies,
+      dominantEventIds,
+      pressureWeight: Math.round(pressureWeight * 100) / 100,
+      heatBand,
+    });
+  });
+}
+
+export function computeFamilyLoads(
+  active: readonly GlobalEventProjection[],
+  upcoming: readonly GlobalEventProjection[],
+): readonly GlobalEventFamilyLoad[] {
+  const families: readonly GlobalEventFamily[] = [
+    'SEASON',
+    'WORLD_EVENT',
+    'HELPER_BLACKOUT',
+    'CHANNEL_MUTATOR',
+    'WHISPER_WINDOW',
+    'FACTION_SURGE',
+    'COORDINATED_RAID',
+    'RIVAL_SPOTLIGHT',
+  ] as const;
+
+  return families
+    .map((family) => {
+      const activeForFamily = active.filter((projection) => projection.family === family);
+      const upcomingForFamily = upcoming.filter((projection) => projection.family === family);
+      const all = [...activeForFamily, ...upcomingForFamily];
+      const pressureWeight = all.reduce(
+        (sum, projection) =>
+          sum +
+          computeIntensityWeight(projection.intensity) * 14 +
+          computeVisibilityWeight(projection.visibility) * 6,
+        0,
+      );
+      return freeze({
+        family,
+        activeCount: activeForFamily.length,
+        upcomingCount: upcomingForFamily.length,
+        activeEventIds: uniqueStrings(activeForFamily.map((projection) => projection.eventId)),
+        visibilityMix: buildVisibilityMix(all),
+        pressureWeight: Math.round(pressureWeight * 100) / 100,
+      });
+    })
+    .filter((entry) => entry.activeCount > 0 || entry.upcomingCount > 0);
+}
+
+export function buildTimelineSlices(
+  projections: readonly GlobalEventProjection[],
+): readonly GlobalEventTimelineSlice[] {
+  const markers = uniqueStrings(
+    projections.flatMap((projection) => [
+      String(projection.startsAt),
+      String(projection.endsAt),
+    ]),
+  )
+    .map((value) => Number(value))
+    .sort((left, right) => left - right);
+
+  const slices: GlobalEventTimelineSlice[] = [];
+  for (let index = 0; index < markers.length - 1; index += 1) {
+    const startsAt = markers[index];
+    const endsAt = markers[index + 1];
+    const overlapping = projections.filter(
+      (projection) => projection.startsAt < endsAt && projection.endsAt > startsAt,
+    );
+    if (overlapping.length === 0) {
+      continue;
+    }
+
+    slices.push(
+      freeze({
+        startsAt,
+        endsAt,
+        eventIds: uniqueStrings(overlapping.map((projection) => projection.eventId)),
+        families: uniqueStrings(overlapping.map((projection) => projection.family)) as GlobalEventFamily[],
+        channels: uniqueChannels(overlapping.flatMap((projection) => [...projection.channels])),
+        visibilityMix: buildVisibilityMix(overlapping),
+        notes: uniqueStrings(overlapping.flatMap((projection) => [...projection.notes])),
+      }),
+    );
+  }
+
+  return slices;
+}
+
+export function computeSchedulerHealthBand(
+  active: readonly GlobalEventProjection[],
+  upcoming: readonly GlobalEventProjection[],
+  channelLoads: readonly GlobalEventChannelLoad[],
+): GlobalEventHealthBand {
+  const activePressure = active.reduce(
+    (sum, projection) => sum + computeIntensityWeight(projection.intensity) * 10 + computeVisibilityWeight(projection.visibility) * 5,
+    0,
+  );
+  const upcomingPressure = upcoming.reduce(
+    (sum, projection) => sum + computeIntensityWeight(projection.intensity) * 6 + computeVisibilityWeight(projection.visibility) * 3,
+    0,
+  );
+  const channelPressure = channelLoads.reduce((sum, load) => sum + load.pressureWeight, 0);
+  const total = activePressure + upcomingPressure + channelPressure;
+
+  if (total >= 900) {
+    return 'CRITICAL';
+  }
+  if (total >= 500) {
+    return 'HIGH';
+  }
+  if (total >= 220) {
+    return 'MEDIUM';
+  }
+  return 'LOW';
+}
+
+export function auditGlobalEventDefinition(
+  definition: GlobalEventDefinition,
+): GlobalEventDefinitionAudit {
+  const issues: string[] = [];
+  const strengths: string[] = [];
+
+  if (definition.summaryLines.length === 0) {
+    issues.push('MISSING_SUMMARY_LINES');
+  } else {
+    strengths.push('SUMMARY_PRESENT');
+  }
+
+  if (definition.channels.length === 0) {
+    issues.push('NO_CHANNELS');
+  } else {
+    strengths.push('CHANNELS_DECLARED');
+  }
+
+  if (definition.rules.length === 0) {
+    issues.push('NO_OVERLAY_RULES');
+  } else {
+    strengths.push('OVERLAY_RULES_DECLARED');
+  }
+
+  if (definition.windows.length === 0 && definition.scheduleKind !== 'MANUAL') {
+    issues.push('NO_WINDOWS_FOR_NON_MANUAL_EVENT');
+  } else if (definition.windows.length > 0) {
+    strengths.push('WINDOWS_DECLARED');
+  }
+
+  if (definition.priorityWeight <= 0) {
+    issues.push('NON_POSITIVE_PRIORITY_WEIGHT');
+  } else {
+    strengths.push('PRIORITY_WEIGHT_VALID');
+  }
+
+  if (definition.maxConcurrentGlobalInstances < 1) {
+    issues.push('INVALID_MAX_CONCURRENCY');
+  } else {
+    strengths.push('CONCURRENCY_VALID');
+  }
+
+  if (definition.visibility === 'SHADOW_ONLY') {
+    strengths.push('SHADOW_SUPPORT_PRESENT');
+  }
+  if (definition.visibility === 'HYBRID') {
+    strengths.push('HYBRID_SUPPORT_PRESENT');
+  }
+
+  const readinessScore = Math.max(0, Math.min(100, 100 - issues.length * 12 + strengths.length * 4));
+
+  return freeze({
+    eventId: definition.eventId,
+    displayName: definition.displayName,
+    family: definition.family,
+    definitionVersion: definition.definitionVersion,
+    scheduleKind: definition.scheduleKind,
+    visibility: definition.visibility,
+    intensity: definition.intensity,
+    channels: [...definition.channels],
+    tags: [...definition.tags],
+    windows: definition.windows.length,
+    rules: definition.rules.length,
+    requiredTags: [...(definition.requiredTags ?? [])],
+    excludedTags: [...(definition.excludedTags ?? [])],
+    scopeModeIds: [...(definition.scopeModeIds ?? [])],
+    issues,
+    strengths,
+    readinessScore,
+  });
+}
+
+export function auditGlobalEventLibrary(
+  definitions: readonly GlobalEventDefinition[],
+): readonly GlobalEventDefinitionAudit[] {
+  return definitions
+    .map((definition) => auditGlobalEventDefinition(definition))
+    .sort((left, right) => right.readinessScore - left.readinessScore);
+}
+
+export function buildGlobalEventSchedulerManifest(
+  state: GlobalEventSchedulerState,
+  generatedAt: number = systemNow(),
+): GlobalEventSchedulerManifest {
+  const eventCountByFamily = freeze({
+    SEASON: state.definitions.filter((definition) => definition.family === 'SEASON').length,
+    WORLD_EVENT: state.definitions.filter((definition) => definition.family === 'WORLD_EVENT').length,
+    HELPER_BLACKOUT: state.definitions.filter((definition) => definition.family === 'HELPER_BLACKOUT').length,
+    CHANNEL_MUTATOR: state.definitions.filter((definition) => definition.family === 'CHANNEL_MUTATOR').length,
+    WHISPER_WINDOW: state.definitions.filter((definition) => definition.family === 'WHISPER_WINDOW').length,
+    FACTION_SURGE: state.definitions.filter((definition) => definition.family === 'FACTION_SURGE').length,
+    COORDINATED_RAID: state.definitions.filter((definition) => definition.family === 'COORDINATED_RAID').length,
+    RIVAL_SPOTLIGHT: state.definitions.filter((definition) => definition.family === 'RIVAL_SPOTLIGHT').length,
+  });
+
+  return freeze({
+    generatedAt,
+    version: state.version,
+    definitionIds: state.definitions.map((definition) => definition.eventId),
+    activationIds: state.activations.map((activation) => activation.activationId),
+    cancelledActivationIds: [...state.cancelledActivationIds],
+    families: uniqueStrings(state.definitions.map((definition) => definition.family)) as GlobalEventFamily[],
+    channelIds: uniqueChannels(
+      state.definitions.flatMap((definition) => [...definition.channels]),
+    ),
+    eventCountByFamily,
+    definitionAudits: auditGlobalEventLibrary(state.definitions),
+  });
+}
+
+export function diffGlobalEventLibraries(
+  previousDefinitions: readonly GlobalEventDefinition[],
+  nextDefinitions: readonly GlobalEventDefinition[],
+): GlobalEventLibraryDiff {
+  const previousMap = new Map(previousDefinitions.map((definition) => [definition.eventId, definition]));
+  const nextMap = new Map(nextDefinitions.map((definition) => [definition.eventId, definition]));
+
+  const added: string[] = [];
+  const removed: string[] = [];
+  const changed: GlobalEventLibraryDiffEntry[] = [];
+  const unchanged: string[] = [];
+
+  for (const [eventId, nextDefinition] of nextMap.entries()) {
+    const previousDefinition = previousMap.get(eventId);
+    if (!previousDefinition) {
+      added.push(eventId);
+      changed.push(
+        freeze({
+          eventId,
+          status: 'ADDED',
+          previousVersion: null,
+          nextVersion: nextDefinition.definitionVersion,
+          changedFields: ['ALL'],
+        }),
+      );
+      continue;
+    }
+
+    const changedFields: string[] = [];
+    const pairs: readonly [string, unknown, unknown][] = [
+      ['displayName', previousDefinition.displayName, nextDefinition.displayName],
+      ['headline', previousDefinition.headline, nextDefinition.headline],
+      ['summaryLines', JSON.stringify(previousDefinition.summaryLines), JSON.stringify(nextDefinition.summaryLines)],
+      ['visibility', previousDefinition.visibility, nextDefinition.visibility],
+      ['intensity', previousDefinition.intensity, nextDefinition.intensity],
+      ['tags', JSON.stringify(previousDefinition.tags), JSON.stringify(nextDefinition.tags)],
+      ['channels', JSON.stringify(previousDefinition.channels), JSON.stringify(nextDefinition.channels)],
+      ['rules', JSON.stringify(previousDefinition.rules), JSON.stringify(nextDefinition.rules)],
+      ['windows', JSON.stringify(previousDefinition.windows), JSON.stringify(nextDefinition.windows)],
+      ['priorityWeight', previousDefinition.priorityWeight, nextDefinition.priorityWeight],
+      ['cooldownMs', previousDefinition.cooldownMs, nextDefinition.cooldownMs],
+      ['scopeModeIds', JSON.stringify(previousDefinition.scopeModeIds ?? []), JSON.stringify(nextDefinition.scopeModeIds ?? [])],
+    ];
+
+    for (const [field, left, right] of pairs) {
+      if (left !== right) {
+        changedFields.push(field);
+      }
+    }
+
+    if (changedFields.length > 0) {
+      changed.push(
+        freeze({
+          eventId,
+          status: 'CHANGED',
+          previousVersion: previousDefinition.definitionVersion,
+          nextVersion: nextDefinition.definitionVersion,
+          changedFields,
+        }),
+      );
+    } else {
+      unchanged.push(eventId);
+    }
+  }
+
+  for (const eventId of previousMap.keys()) {
+    if (!nextMap.has(eventId)) {
+      removed.push(eventId);
+      changed.push(
+        freeze({
+          eventId,
+          status: 'REMOVED',
+          previousVersion: previousMap.get(eventId)?.definitionVersion ?? null,
+          nextVersion: null,
+          changedFields: ['ALL'],
+        }),
+      );
+    }
+  }
+
+  return freeze({
+    added,
+    removed,
+    changed,
+    unchanged,
+  });
+}
+
+export function createGlobalEventDefinition(
+  input: GlobalEventDefinitionBuilderInput,
+): GlobalEventDefinition {
+  return freeze({
+    eventId: input.eventId,
+    family: input.family,
+    displayName: input.displayName,
+    headline: input.headline,
+    summaryLines: freeze([...input.summaryLines]),
+    scheduleKind: input.scheduleKind,
+    visibility: input.visibility,
+    intensity: input.intensity,
+    tags: freeze(uniqueStrings([...(input.tags ?? [])])),
+    channels: freeze(uniqueChannels([...(input.channels ?? ALL_VISIBLE_CHANNELS)])),
+    channelPriority: clampChannelPriority(input.channelPriority, input.priorityWeight ?? 50),
+    rules: freeze(
+      (input.rules ?? []).map((rule) =>
+        freeze({
+          ...rule,
+          appliesToBots: rule.appliesToBots ? freeze([...rule.appliesToBots]) : undefined,
+          appliesToChannels: rule.appliesToChannels ? freeze([...rule.appliesToChannels]) : undefined,
+          requiredTags: rule.requiredTags ? freeze([...rule.requiredTags]) : undefined,
+          addedPlanningTags: freeze(uniqueStrings([...rule.addedPlanningTags])),
+          transformBiases: freeze(uniqueStrings([...rule.transformBiases])),
+        }),
+      ),
+    ),
+    cooldownMs: input.cooldownMs ?? ONE_HOUR_MS,
+    maxConcurrentGlobalInstances: input.maxConcurrentGlobalInstances ?? 1,
+    maxInstancesPerRoom: input.maxInstancesPerRoom,
+    repeatGranularity: input.repeatGranularity ?? 'NONE',
+    priorityWeight: input.priorityWeight ?? 50,
+    definitionVersion: input.definitionVersion ?? DEFAULT_DEFINITION_VERSION,
+    seasonId: input.seasonId ?? null,
+    scopeModeIds: input.scopeModeIds ? freeze([...input.scopeModeIds]) : undefined,
+    requiredTags: input.requiredTags ? freeze([...input.requiredTags]) : undefined,
+    excludedTags: input.excludedTags ? freeze([...input.excludedTags]) : undefined,
+    windows: freeze(
+      (input.windows ?? []).map((window) =>
+        freeze({
+          startsAt: window.startsAt,
+          endsAt: window.endsAt,
+          recurringDailyUtc: window.recurringDailyUtc ? freeze({ ...window.recurringDailyUtc }) : undefined,
+          recurringInterval: window.recurringInterval ? freeze({ ...window.recurringInterval }) : undefined,
+          matchState: window.matchState
+            ? freeze({
+                ...window.matchState,
+                requiredTags: window.matchState.requiredTags ? freeze([...window.matchState.requiredTags]) : undefined,
+                requiredModeIds: window.matchState.requiredModeIds ? freeze([...window.matchState.requiredModeIds]) : undefined,
+              })
+            : undefined,
+        }),
+      ),
+    ),
+    meta: input.meta ? freeze({ ...input.meta }) : undefined,
+  });
+}
+
+export function patchGlobalEventDefinition(
+  definition: GlobalEventDefinition,
+  patch: GlobalEventDefinitionPatch,
+): GlobalEventDefinition {
+  return createGlobalEventDefinition({
+    eventId: definition.eventId,
+    family: definition.family,
+    displayName: patch.displayName ?? definition.displayName,
+    headline: patch.headline ?? definition.headline,
+    summaryLines: patch.summaryLines ?? definition.summaryLines,
+    scheduleKind: patch.scheduleKind ?? definition.scheduleKind,
+    visibility: patch.visibility ?? definition.visibility,
+    intensity: patch.intensity ?? definition.intensity,
+    tags: patch.tags ?? definition.tags,
+    channels: patch.channels ?? definition.channels,
+    channelPriority: patch.channelPriority ?? definition.channelPriority,
+    rules: patch.rules ?? definition.rules,
+    cooldownMs: patch.cooldownMs ?? definition.cooldownMs,
+    maxConcurrentGlobalInstances: patch.maxConcurrentGlobalInstances ?? definition.maxConcurrentGlobalInstances,
+    maxInstancesPerRoom: patch.maxInstancesPerRoom ?? definition.maxInstancesPerRoom,
+    repeatGranularity: patch.repeatGranularity ?? definition.repeatGranularity,
+    priorityWeight: patch.priorityWeight ?? definition.priorityWeight,
+    definitionVersion: patch.definitionVersion ?? definition.definitionVersion,
+    seasonId: patch.seasonId ?? definition.seasonId,
+    scopeModeIds: patch.scopeModeIds ?? definition.scopeModeIds,
+    requiredTags: patch.requiredTags ?? definition.requiredTags,
+    excludedTags: patch.excludedTags ?? definition.excludedTags,
+    windows: patch.windows ?? definition.windows,
+    meta: patch.meta ?? definition.meta,
+  });
+}
+
+export function createFixedWindowDefinition(
+  input: Omit<GlobalEventDefinitionBuilderInput, 'windows'> & {
+    readonly startsAt: number;
+    readonly endsAt: number;
+  },
+): GlobalEventDefinition {
+  return createGlobalEventDefinition({
+    ...input,
+    windows: [
+      {
+        startsAt: input.startsAt,
+        endsAt: input.endsAt,
+      },
+    ],
+  });
+}
+
+export function createRecurringIntervalDefinition(
+  input: Omit<GlobalEventDefinitionBuilderInput, 'windows'> & {
+    readonly recurringInterval: GlobalEventRecurringIntervalRule;
+  },
+): GlobalEventDefinition {
+  return createGlobalEventDefinition({
+    ...input,
+    windows: [
+      {
+        recurringInterval: input.recurringInterval,
+      },
+    ],
+  });
+}
+
+export function createRecurringDailyDefinition(
+  input: Omit<GlobalEventDefinitionBuilderInput, 'windows'> & {
+    readonly recurringDailyUtc: GlobalEventRecurringDailyUtcRule;
+  },
+): GlobalEventDefinition {
+  return createGlobalEventDefinition({
+    ...input,
+    windows: [
+      {
+        recurringDailyUtc: input.recurringDailyUtc,
+      },
+    ],
+  });
+}
+
+export function createMatchStateTriggeredDefinition(
+  input: Omit<GlobalEventDefinitionBuilderInput, 'windows'> & {
+    readonly matchState: GlobalEventMatchStateRule;
+  },
+): GlobalEventDefinition {
+  return createGlobalEventDefinition({
+    ...input,
+    windows: [
+      {
+        matchState: input.matchState,
+      },
+    ],
+  });
+}
+
+export function previewDefinitionWindows(
+  definition: GlobalEventDefinition,
+  input: PreviewWindowsInput = {},
+): readonly GlobalEventWindowPreview[] {
+  const now = input.now ?? systemNow();
+  const horizonMs = input.horizonMs ?? DEFAULT_UPCOMING_HORIZON_MS;
+  const horizonEnd = now + horizonMs;
+  const previews: GlobalEventWindowPreview[] = [];
+
+  if (!matchesTags(input.globalTags ?? [], definition.requiredTags, definition.excludedTags)) {
+    return previews;
+  }
+
+  for (const window of definition.windows) {
+    if (window.startsAt != null && window.endsAt != null) {
+      previews.push(
+        freeze({
+          eventId: definition.eventId,
+          displayName: definition.displayName,
+          family: definition.family,
+          visibility: definition.visibility,
+          source: 'FIXED_WINDOW',
+          startsAt: window.startsAt,
+          endsAt: window.endsAt,
+          durationMs: window.endsAt - window.startsAt,
+          notes: freeze(['FIXED_WINDOW']),
+        }),
+      );
+    }
+
+    if (window.recurringDailyUtc) {
+      for (const start of nextDailyWindowStarts(now, horizonEnd, window.recurringDailyUtc)) {
+        previews.push(
+          freeze({
+            eventId: definition.eventId,
+            displayName: definition.displayName,
+            family: definition.family,
+            visibility: definition.visibility,
+            source: 'RECURRING_DAILY_UTC',
+            startsAt: start,
+            endsAt: start + window.recurringDailyUtc.durationMs,
+            durationMs: window.recurringDailyUtc.durationMs,
+            notes: freeze(['RECURRING_DAILY_UTC']),
+          }),
+        );
+      }
+    }
+
+    if (window.recurringInterval) {
+      for (const start of nextIntervalWindowStarts(now, horizonEnd, window.recurringInterval)) {
+        previews.push(
+          freeze({
+            eventId: definition.eventId,
+            displayName: definition.displayName,
+            family: definition.family,
+            visibility: definition.visibility,
+            source: 'RECURRING_INTERVAL',
+            startsAt: start,
+            endsAt: start + window.recurringInterval.durationMs,
+            durationMs: window.recurringInterval.durationMs,
+            notes: freeze(['RECURRING_INTERVAL']),
+          }),
+        );
+      }
+    }
+
+    if (window.matchState && input.rooms && input.rooms.length > 0) {
+      for (const room of input.rooms) {
+        const requiredModeIds = window.matchState.requiredModeIds ?? [];
+        const requiredTags = window.matchState.requiredTags ?? [];
+        const roomTags = room.tags ?? [];
+        if (requiredModeIds.length > 0 && !requiredModeIds.includes(room.mode ?? '')) {
+          continue;
+        }
+        if (!matchesTags(roomTags, requiredTags)) {
+          continue;
+        }
+        if (
+          window.matchState.minLowShieldPlayers != null &&
+          (room.lowShieldPlayerCount ?? 0) < window.matchState.minLowShieldPlayers
+        ) {
+          continue;
+        }
+        if (
+          window.matchState.minPanicLevel != null &&
+          (room.panicLevel ?? 0) < window.matchState.minPanicLevel
+        ) {
+          continue;
+        }
+
+        previews.push(
+          freeze({
+            eventId: definition.eventId,
+            displayName: definition.displayName,
+            family: definition.family,
+            visibility: definition.visibility,
+            source: 'MATCH_STATE_TRIGGER',
+            startsAt: now,
+            endsAt: now + window.matchState.durationMs,
+            durationMs: window.matchState.durationMs,
+            projectedForRoomIds: freeze([room.roomId]),
+            notes: freeze(['MATCH_STATE_TRIGGER', `ROOM:${room.roomId}`, `TRIGGER:${window.matchState.triggerId}`]),
+          }),
+        );
+      }
+    }
+  }
+
+  return previews.sort((left, right) => left.startsAt - right.startsAt);
+}
+
+export function previewLibraryWindows(
+  definitions: readonly GlobalEventDefinition[],
+  input: PreviewWindowsInput = {},
+): readonly GlobalEventWindowPreview[] {
+  return definitions
+    .flatMap((definition) => [...previewDefinitionWindows(definition, input)])
+    .sort((left, right) => left.startsAt - right.startsAt);
+}
+
+export class GlobalEventSchedulerInspector {
+  private readonly scheduler: GlobalEventScheduler;
+
+  public constructor(scheduler: GlobalEventScheduler) {
+    this.scheduler = scheduler;
+  }
+
+  public snapshot(context: GlobalEventSchedulerEvaluationContext = {}): GlobalEventSchedulerSnapshot {
+    return this.scheduler.evaluate(context);
+  }
+
+  public snapshotDetailed(
+    context: GlobalEventSchedulerEvaluationContext = {},
+  ): GlobalEventSchedulerDetailedSnapshot {
+    const snapshot = this.scheduler.evaluate(context);
+    const state = this.scheduler.serialize();
+    const roomProjections = projectGlobalEventsToRooms(
+      context.rooms ?? [],
+      [...snapshot.activeProjections, ...snapshot.upcomingProjections],
+    );
+    const roomMatrix = buildRoomProjectionMatrix(
+      context.rooms ?? [],
+      snapshot.activeProjections,
+      snapshot.upcomingProjections,
+    );
+    const channelLoads = computeChannelLoads(snapshot.activeProjections, snapshot.upcomingProjections);
+    const familyLoads = computeFamilyLoads(snapshot.activeProjections, snapshot.upcomingProjections);
+    const groups = buildProjectionGroups([
+      ...snapshot.activeProjections,
+      ...snapshot.upcomingProjections,
+    ]);
+    const audits = auditGlobalEventLibrary(state.definitions);
+    const timeline = buildTimelineSlices([
+      ...snapshot.activeProjections,
+      ...snapshot.upcomingProjections,
+    ]);
+    const activationDigests = buildActivationDigests(state);
+    const healthBand = computeSchedulerHealthBand(
+      snapshot.activeProjections,
+      snapshot.upcomingProjections,
+      channelLoads,
+    );
+    const totalProjectedPressure = Math.round(
+      roomProjections.reduce((sum, projection) => sum + projection.pressureWeight, 0) * 100,
+    ) / 100;
+
+    return freeze({
+      ...snapshot,
+      roomProjections,
+      roomMatrix,
+      timeline,
+      audits,
+      detailedDiagnostics: freeze({
+        activationDigests,
+        channelLoads,
+        familyLoads,
+        groups,
+        healthBand,
+        totalProjectedPressure,
+        cancelledActivationCount: state.cancelledActivationIds.length,
+      }),
+    });
+  }
+
+  public previewDefinitionWindows(
+    eventId: string,
+    input: PreviewWindowsInput = {},
+  ): readonly GlobalEventWindowPreview[] {
+    const definition = this.scheduler.getDefinition(eventId);
+    if (!definition) {
+      return [];
+    }
+    return previewDefinitionWindows(definition, input);
+  }
+
+  public previewLibraryWindows(
+    input: PreviewWindowsInput = {},
+  ): readonly GlobalEventWindowPreview[] {
+    return previewLibraryWindows(this.scheduler.listDefinitions(), input);
+  }
+
+  public auditDefinition(eventId: string): GlobalEventDefinitionAudit | null {
+    const definition = this.scheduler.getDefinition(eventId);
+    return definition ? auditGlobalEventDefinition(definition) : null;
+  }
+
+  public auditLibrary(): readonly GlobalEventDefinitionAudit[] {
+    return auditGlobalEventLibrary(this.scheduler.listDefinitions());
+  }
+
+  public buildManifest(): GlobalEventSchedulerManifest {
+    return buildGlobalEventSchedulerManifest(this.scheduler.serialize(), systemNow());
+  }
+
+  public diffManifest(
+    manifest: GlobalEventSchedulerManifest,
+  ): GlobalEventLibraryDiff {
+    const current = this.scheduler.serialize();
+    const manifestDefinitions = current.definitions.filter((definition) =>
+      manifest.definitionIds.includes(definition.eventId),
+    );
+    return diffGlobalEventLibraries(manifestDefinitions, current.definitions);
+  }
+
+  public listChannelLoads(
+    context: GlobalEventSchedulerEvaluationContext = {},
+  ): readonly GlobalEventChannelLoad[] {
+    const snapshot = this.scheduler.evaluate(context);
+    return computeChannelLoads(snapshot.activeProjections, snapshot.upcomingProjections);
+  }
+
+  public listFamilyLoads(
+    context: GlobalEventSchedulerEvaluationContext = {},
+  ): readonly GlobalEventFamilyLoad[] {
+    const snapshot = this.scheduler.evaluate(context);
+    return computeFamilyLoads(snapshot.activeProjections, snapshot.upcomingProjections);
+  }
+
+  public buildTimeline(
+    context: GlobalEventSchedulerEvaluationContext = {},
+  ): readonly GlobalEventTimelineSlice[] {
+    const snapshot = this.scheduler.evaluate(context);
+    return buildTimelineSlices([...snapshot.activeProjections, ...snapshot.upcomingProjections]);
+  }
+
+  public buildRoomMatrix(
+    context: GlobalEventSchedulerEvaluationContext = {},
+  ): readonly GlobalEventRoomProjectionMatrixRow[] {
+    const snapshot = this.scheduler.evaluate(context);
+    return buildRoomProjectionMatrix(
+      context.rooms ?? [],
+      snapshot.activeProjections,
+      snapshot.upcomingProjections,
+    );
+  }
+
+  public listActivationDigests(): readonly GlobalEventActivationDigest[] {
+    return buildActivationDigests(this.scheduler.serialize());
+  }
+
+  public cloneScheduler(): GlobalEventScheduler {
+    const clone = createGlobalEventScheduler({
+      definitionVersion: this.scheduler.serialize().version,
+      seedDefinitions: this.scheduler.serialize().definitions,
+    });
+    clone.hydrate(this.scheduler.serialize());
+    return clone;
+  }
+}
+
+export function createGlobalEventSchedulerInspector(
+  scheduler: GlobalEventScheduler,
+): GlobalEventSchedulerInspector {
+  return new GlobalEventSchedulerInspector(scheduler);
+}
+
+export function evaluateGlobalEventSchedulerDetailed(
+  scheduler: GlobalEventScheduler,
+  context: GlobalEventSchedulerEvaluationContext = {},
+): GlobalEventSchedulerDetailedSnapshot {
+  return createGlobalEventSchedulerInspector(scheduler).snapshotDetailed(context);
+}
+
+export function describeGlobalEventSchedulerState(
+  state: GlobalEventSchedulerState,
+): {
+  readonly version: string;
+  readonly definitions: number;
+  readonly activations: number;
+  readonly cancelledActivations: number;
+  readonly activeFamilies: readonly GlobalEventFamily[];
+  readonly channels: readonly ChatLiveOpsChannelId[];
+} {
+  const activeFamilies = uniqueStrings(
+    state.definitions.map((definition) => definition.family),
+  ) as GlobalEventFamily[];
+  const channels = uniqueChannels(state.definitions.flatMap((definition) => [...definition.channels]));
+  return freeze({
+    version: state.version,
+    definitions: state.definitions.length,
+    activations: state.activations.length,
+    cancelledActivations: state.cancelledActivationIds.length,
+    activeFamilies,
+    channels,
+  });
+}
+
+export function summarizeGlobalEventProjection(
+  projection: GlobalEventProjection,
+): string {
+  return `${projection.displayName} [${projection.family}] ${projection.visibility} ${projection.intensity} :: ${projection.startsAt}-${projection.endsAt}`;
+}
+
+export function summarizeGlobalEventRoomProjection(
+  projection: GlobalEventRoomProjection,
+): string {
+  return `${projection.roomId} :: ${projection.displayName} :: ${projection.stageMood} :: score=${projection.relevanceScore}`;
+}
+
+export function summarizeGlobalEventWindowPreview(
+  preview: GlobalEventWindowPreview,
+): string {
+  return `${preview.eventId}::${preview.source}::${preview.startsAt}->${preview.endsAt}`;
+}
+
+export function summarizeGlobalEventChannelLoad(
+  load: GlobalEventChannelLoad,
+): string {
+  return `${load.channelId} active=${load.activeCount} upcoming=${load.upcomingCount} heat=${load.heatBand}`;
+}
+
+export function summarizeGlobalEventFamilyLoad(
+  load: GlobalEventFamilyLoad,
+): string {
+  return `${load.family} active=${load.activeCount} upcoming=${load.upcomingCount} pressure=${load.pressureWeight}`;
+}
+
+export function summarizeGlobalEventDefinitionAudit(
+  audit: GlobalEventDefinitionAudit,
+): string {
+  return `${audit.eventId} readiness=${audit.readinessScore} issues=${audit.issues.length} strengths=${audit.strengths.length}`;
+}
+
+export function summarizeGlobalEventSchedulerDetailedSnapshot(
+  snapshot: GlobalEventSchedulerDetailedSnapshot,
+): readonly string[] {
+  return freeze([
+    `active=${snapshot.activeProjections.length}`,
+    `upcoming=${snapshot.upcomingProjections.length}`,
+    `rooms=${snapshot.roomMatrix.length}`,
+    `health=${snapshot.detailedDiagnostics.healthBand}`,
+    `pressure=${snapshot.detailedDiagnostics.totalProjectedPressure}`,
+  ]);
+}
