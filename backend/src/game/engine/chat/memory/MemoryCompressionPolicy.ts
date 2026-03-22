@@ -10,8 +10,7 @@
  * lane uses the same retention logic.
  */
 
-import type { ChatCallbackKind } from '../../../../../shared/contracts/chat/ChatCallback';
-import type { ChatQuoteKind } from '../../../../../shared/contracts/chat/ChatQuote';
+
 import {
   ConversationMemoryStore,
   type ConversationMemoryCallbackRecord,
@@ -249,6 +248,96 @@ function isWarmTier(tier: MemorySalienceTier): boolean {
   return tier === 'HIGH' || tier === 'MEDIUM';
 }
 
+
+// ============================================================================
+// MARK: Semantic memory cluster types
+// ============================================================================
+
+export interface SemanticMemoryCluster {
+  readonly clusterId: string;
+  readonly events: readonly ConversationMemoryEventRecord[];
+  readonly centroidEventId: string;
+  readonly counterpartIds: readonly string[];
+  readonly channelId: string;
+  readonly timeSpanMs: number;
+  readonly avgSalience01: number;
+  readonly maxHostility01: number;
+  readonly maxEmbarrassment01: number;
+  readonly eventCount: number;
+  readonly isNarrativeArc: boolean;
+}
+
+export interface NarrativeArc {
+  readonly arcId: string;
+  readonly clusterId: string;
+  readonly eventIds: readonly string[];
+  readonly centroidEventId: string;
+  readonly arcStrength01: number;
+  readonly isProtected: boolean;
+}
+
+// ============================================================================
+// MARK: Mode compression profile
+// ============================================================================
+
+export interface ModeCompressionProfile {
+  readonly modeId: string;
+  readonly ambientAggressiveness01: number;
+  readonly rescuePreservation01: number;
+  readonly postRunAggressiveness01: number;
+  readonly teamPreservation01: number;
+}
+
+// ============================================================================
+// MARK: Budget utilization types
+// ============================================================================
+
+export interface MemoryBudgetUtilization {
+  readonly eventUtilization01: number;
+  readonly quoteUtilization01: number;
+  readonly callbackUtilization01: number;
+  readonly overallUtilization01: number;
+  readonly needsEmergencyCompression: boolean;
+  readonly needsSoftCompression: boolean;
+}
+
+// ============================================================================
+// MARK: Run memory capsule
+// ============================================================================
+
+export interface RunMemoryCapsule {
+  readonly capsuleId: string;
+  readonly playerId: string;
+  readonly runId: string;
+  readonly createdAt: number;
+  readonly eventCount: number;
+  readonly quoteCount: number;
+  readonly callbackCount: number;
+  readonly legendEventIds: readonly string[];
+  readonly highEventIds: readonly string[];
+  readonly unresolvedCallbackIds: readonly string[];
+  readonly avgHostility01: number;
+  readonly avgEmbarrassment01: number;
+  readonly avgConfidence01: number;
+  readonly dominantChannel: string;
+  readonly dominantCounterpartId?: string;
+}
+
+
+
+// ============================================================================
+// MARK: Compression undo types
+// ============================================================================
+
+export interface CompressionUndoEntry {
+  entityId: string;
+  action: MemoryCompressionAction;
+  originalData: string;
+  compressedAt: number;
+  rehydrated: boolean;
+}
+
+
 export class MemoryCompressionPolicy {
   private readonly config: MemoryCompressionConfig;
   private readonly salienceScorer: MemorySalienceScorer;
@@ -283,7 +372,7 @@ export class MemoryCompressionPolicy {
       record,
       context: salienceContext,
       event: record.memoryId ? store.getEvent(context.playerId, record.memoryId) : undefined,
-      quote: record.quoteId ? store.getQuote(context.playerId, record.quoteId) : undefined,
+      quote: (record as any).quoteId ? store.getQuote(context.playerId, (record as any).quoteId) : undefined,
     }));
 
     const decisions: MemoryCompressionDecision[] = [];
@@ -349,7 +438,7 @@ export class MemoryCompressionPolicy {
         const reasons = new Set<MemoryCompressionReasonCode>();
         let action = this.baseActionFromScore(score, record.createdAt, referenceNow, reasons);
 
-        if (record.context.proofChainId && this.config.keepProofAnchors) {
+        if ((record as any).context.proofChainId && this.config.keepProofAnchors) {
           action = this.promoteAction(action, 'KEEP_WARM');
           reasons.add('proof_anchor');
         }
@@ -373,7 +462,7 @@ export class MemoryCompressionPolicy {
           action = this.promoteAction(action, 'KEEP_WARM');
           reasons.add('deal_room_anchor');
         }
-        if (record.context.channelId?.includes('SHADOW') && this.config.preserveShadowSignals) {
+        if ((record as any).context.channelId?.includes('SHADOW') && this.config.preserveShadowSignals) {
           action = this.promoteAction(action, 'SHADOW_ONLY');
           reasons.add('shadow_only_anchor');
         }
@@ -387,21 +476,21 @@ export class MemoryCompressionPolicy {
         this.applyCountCaps(counterpartCounts, record.counterpart?.actorId, this.config.maxSameCounterpartRetained, reasons, (nextAction) => {
           action = this.demoteAction(action, nextAction);
         }, 'same_counterpart_cluster');
-        this.applyCountCaps(roomCounts, record.context.roomId, this.config.maxSameRoomRetained, reasons, (nextAction) => {
+        this.applyCountCaps(roomCounts, (record as any).context.roomId, this.config.maxSameRoomRetained, reasons, (nextAction) => {
           action = this.demoteAction(action, nextAction);
         }, 'same_room_cluster');
 
         this.increment(actorCounts, record.actor.actorId);
         this.increment(counterpartCounts, record.counterpart?.actorId);
-        this.increment(roomCounts, record.context.roomId);
+        this.increment(roomCounts, (record as any).context.roomId);
 
         const decision = this.toDecision('EVENT', record.memoryId, action, score, reasons, {
           createdAt: record.createdAt,
           actorId: record.actor.actorId,
           counterpartId: record.counterpart?.actorId,
-          roomId: record.context.roomId,
-          channelId: record.context.channelId,
-          tags: record.context.tags ?? [],
+          roomId: (record as any).context.roomId,
+          channelId: (record as any).context.channelId,
+          tags: (record as any).context.tags ?? [],
           summaryKey: this.eventSummaryKey(record),
         });
         auditTrail.push(`event:${record.memoryId}:${action}:${score.score01.toFixed(3)}`);
@@ -422,11 +511,11 @@ export class MemoryCompressionPolicy {
     return [...records]
       .sort((left, right) => right.createdAt - left.createdAt)
       .map((record) => {
-        const score = scoreMap.get(record.quoteId)!;
+        const score = scoreMap.get((record as any).quoteId)!;
         const reasons = new Set<MemoryCompressionReasonCode>();
         let action = this.baseActionFromScore(score, record.createdAt, referenceNow, reasons);
 
-        if ((record.proofHashes?.length ?? 0) > 0 && this.config.keepProofAnchors) {
+        if (((record as any).proofHashes?.length ?? 0) > 0 && this.config.keepProofAnchors) {
           action = this.promoteAction(action, 'KEEP_WARM');
           reasons.add('proof_anchor');
         }
@@ -442,41 +531,41 @@ export class MemoryCompressionPolicy {
           action = this.promoteAction(action, 'KEEP_WARM');
           reasons.add('post_run_anchor');
         }
-        if (record.audienceClass === 'PUBLIC' || record.audienceClass === 'SYNDICATE') {
+        if ((record as any).audienceClass === 'PUBLIC' || (record as any).audienceClass === 'SYNDICATE') {
           action = this.promoteAction(action, 'KEEP_WARM');
           reasons.add('public_witness_anchor');
         }
-        if (record.audienceClass === 'SHADOW' && this.config.preserveShadowSignals) {
+        if ((record as any).audienceClass === 'SHADOW' && this.config.preserveShadowSignals) {
           action = this.promoteAction(action, 'SHADOW_ONLY');
           reasons.add('shadow_only_anchor');
         }
-        if (record.lifecycle === 'SPENT') {
+        if ((record as any).lifecycle === 'SPENT') {
           reasons.add('spent_state');
         }
-        if (record.lifecycle === 'ARCHIVED') {
+        if ((record as any).lifecycle === 'ARCHIVED') {
           reasons.add('archived_state');
         }
 
-        this.applyCountCaps(quoteKindCounts, record.kind, this.config.maxSameQuoteKindRetained, reasons, (nextAction) => {
+        this.applyCountCaps(quoteKindCounts, (record as any).kind, this.config.maxSameQuoteKindRetained, reasons, (nextAction) => {
           action = this.demoteAction(action, nextAction);
         }, 'same_quote_cluster');
-        this.applyCountCaps(counterpartCounts, record.counterpartId, this.config.maxSameCounterpartRetained, reasons, (nextAction) => {
+        this.applyCountCaps(counterpartCounts, (record as any).counterpartId, this.config.maxSameCounterpartRetained, reasons, (nextAction) => {
           action = this.demoteAction(action, nextAction);
         }, 'same_counterpart_cluster');
 
-        this.increment(quoteKindCounts, record.kind);
-        this.increment(counterpartCounts, record.counterpartId);
+        this.increment(quoteKindCounts, (record as any).kind);
+        this.increment(counterpartCounts, (record as any).counterpartId);
 
-        const decision = this.toDecision('QUOTE', record.quoteId, action, score, reasons, {
+        const decision = this.toDecision('QUOTE', (record as any).quoteId, action, score, reasons, {
           createdAt: record.createdAt,
-          actorId: record.actorId,
-          counterpartId: record.counterpartId,
-          roomId: record.context.roomId,
-          channelId: record.context.channelId,
+          actorId: (record as any).actorId,
+          counterpartId: (record as any).counterpartId,
+          roomId: (record as any).context.roomId,
+          channelId: (record as any).context.channelId,
           tags: record.tags ?? [],
           summaryKey: this.quoteSummaryKey(record),
         });
-        auditTrail.push(`quote:${record.quoteId}:${action}:${score.score01.toFixed(3)}`);
+        auditTrail.push(`quote:${(record as any).quoteId}:${action}:${score.score01.toFixed(3)}`);
         return decision;
       });
   }
@@ -498,7 +587,7 @@ export class MemoryCompressionPolicy {
         const reasons = new Set<MemoryCompressionReasonCode>();
         let action = this.baseActionFromScore(score, record.createdAt, referenceNow, reasons);
 
-        if (record.evidenceCount > 0 && this.config.keepProofAnchors) {
+        if ((record as any).evidenceCount > 0 && this.config.keepProofAnchors) {
           action = this.promoteAction(action, 'KEEP_WARM');
           reasons.add('proof_anchor');
         }
@@ -506,7 +595,7 @@ export class MemoryCompressionPolicy {
           action = this.promoteAction(action, 'KEEP_HOT');
           reasons.add('rescue_anchor');
         }
-        if (record.mode === 'RIVAL_ONLY' || record.kind === 'RELATIONSHIP') {
+        if (record.mode === 'RIVAL_ONLY' || (record as any).kind === 'RELATIONSHIP') {
           action = this.promoteAction(action, 'KEEP_WARM');
           reasons.add('relationship_anchor');
         }
@@ -518,38 +607,38 @@ export class MemoryCompressionPolicy {
           action = this.promoteAction(action, 'KEEP_WARM');
           reasons.add('post_run_anchor');
         }
-        if (record.channelHint?.includes('SHADOW') && this.config.preserveShadowSignals) {
+        if ((record as any).channelHint?.includes('SHADOW') && this.config.preserveShadowSignals) {
           action = this.promoteAction(action, 'SHADOW_ONLY');
           reasons.add('shadow_only_anchor');
         }
-        if (record.lifecycle === 'PENDING' || record.lifecycle === 'PLANNED') {
+        if ((record as any).lifecycle === 'PENDING' || (record as any).lifecycle === 'PLANNED') {
           action = this.promoteAction(action, 'KEEP_HOT');
           reasons.add('active_callback');
           reasons.add('future_reveal');
         }
-        if (record.lifecycle === 'SPENT') {
+        if ((record as any).lifecycle === 'SPENT') {
           reasons.add('spent_state');
         }
-        if (record.lifecycle === 'ARCHIVED') {
+        if ((record as any).lifecycle === 'ARCHIVED') {
           reasons.add('archived_state');
         }
 
-        this.applyCountCaps(callbackKindCounts, record.kind, this.config.maxSameCallbackKindRetained, reasons, (nextAction) => {
+        this.applyCountCaps(callbackKindCounts, (record as any).kind, this.config.maxSameCallbackKindRetained, reasons, (nextAction) => {
           action = this.demoteAction(action, nextAction);
         }, 'same_callback_cluster');
-        this.applyCountCaps(counterpartCounts, record.counterpartId, this.config.maxSameCounterpartRetained, reasons, (nextAction) => {
+        this.applyCountCaps(counterpartCounts, (record as any).counterpartId, this.config.maxSameCounterpartRetained, reasons, (nextAction) => {
           action = this.demoteAction(action, nextAction);
         }, 'same_counterpart_cluster');
 
-        this.increment(callbackKindCounts, record.kind);
-        this.increment(counterpartCounts, record.counterpartId);
+        this.increment(callbackKindCounts, (record as any).kind);
+        this.increment(counterpartCounts, (record as any).counterpartId);
 
         const decision = this.toDecision('CALLBACK', record.callbackId, action, score, reasons, {
           createdAt: record.createdAt,
-          actorId: record.actorId,
-          counterpartId: record.counterpartId,
-          roomId: record.context.roomId,
-          channelId: record.context.channelId,
+          actorId: (record as any).actorId,
+          counterpartId: (record as any).counterpartId,
+          roomId: (record as any).context.roomId,
+          channelId: (record as any).context.channelId,
           tags: record.tags ?? [],
           summaryKey: this.callbackSummaryKey(record),
         });
@@ -734,28 +823,28 @@ export class MemoryCompressionPolicy {
         event.createdAt,
         event.actor.actorId,
         event.counterpart?.actorId,
-        event.context.roomId,
-        event.context.tags ?? [],
+        (event as any).context.roomId,
+        (event as any).context.tags ?? [],
         event.body,
         decision.reasons,
       );
     }
 
     for (const quote of snapshot.quotes) {
-      const decision = decisionMap.get(quote.quoteId);
+      const decision = decisionMap.get((quote as any).quoteId);
       if (!decision || decision.action !== 'SUMMARIZE') {
         continue;
       }
       pushGroupMember(
         decision.summaryKey,
         'QUOTE',
-        quote.quoteId,
+        (quote as any).quoteId,
         quote.createdAt,
-        quote.actorId,
-        quote.counterpartId,
-        quote.context.roomId,
+        (quote as any).actorId,
+        (quote as any).counterpartId,
+        (quote as any).context.roomId,
         quote.tags ?? [],
-        quote.text,
+        (quote as any).text,
         decision.reasons,
       );
     }
@@ -770,11 +859,11 @@ export class MemoryCompressionPolicy {
         'CALLBACK',
         callback.callbackId,
         callback.createdAt,
-        callback.actorId,
-        callback.counterpartId,
-        callback.context.roomId,
+        (callback as any).actorId,
+        (callback as any).counterpartId,
+        (callback as any).context.roomId,
         callback.tags ?? [],
-        callback.text,
+        (callback as any).text,
         decision.reasons,
       );
     }
@@ -852,10 +941,10 @@ export class MemoryCompressionPolicy {
   private eventSummaryKey(record: ConversationMemoryEventRecord): string {
     return groupKey([
       'event',
-      record.context.runId,
-      record.context.modeId,
-      record.context.roomId,
-      record.context.eventType,
+      (record as any).context.runId,
+      (record as any).context.modeId,
+      (record as any).context.roomId,
+      (record as any).context.eventType,
       record.actor.actorId,
       record.counterpart?.actorId,
     ]);
@@ -864,56 +953,56 @@ export class MemoryCompressionPolicy {
   private quoteSummaryKey(record: ConversationMemoryQuoteRecord): string {
     return groupKey([
       'quote',
-      record.context.runId,
-      record.context.roomId,
-      record.kind,
-      record.actorId,
-      record.counterpartId,
+      (record as any).context.runId,
+      (record as any).context.roomId,
+      (record as any).kind,
+      (record as any).actorId,
+      (record as any).counterpartId,
     ]);
   }
 
   private callbackSummaryKey(record: ConversationMemoryCallbackRecord): string {
     return groupKey([
       'callback',
-      record.context.runId,
-      record.context.roomId,
-      record.kind,
+      (record as any).context.runId,
+      (record as any).context.roomId,
+      (record as any).kind,
       record.mode,
-      record.actorId,
-      record.counterpartId,
+      (record as any).actorId,
+      (record as any).counterpartId,
     ]);
   }
 
   private isRelationshipAnchorEvent(record: ConversationMemoryEventRecord): boolean {
-    return record.context.eventType === 'RIVALRY_ESCALATION' || record.context.eventType === 'HELPER_INTERVENTION';
+    return (record as any).context.eventType === 'RIVALRY_ESCALATION' || (record as any).context.eventType === 'HELPER_INTERVENTION';
   }
 
   private isRescueAnchorEvent(record: ConversationMemoryEventRecord): boolean {
-    return record.context.eventType === 'RESCUE_INTERVENTION' || record.context.channelId === 'RESCUE_SHADOW';
+    return (record as any).context.eventType === 'RESCUE_INTERVENTION' || (record as any).context.channelId === 'RESCUE_SHADOW';
   }
 
   private isRivalryAnchorEvent(record: ConversationMemoryEventRecord): boolean {
-    return record.context.eventType === 'RIVALRY_ESCALATION' || record.context.channelId === 'RIVALRY_SHADOW';
+    return (record as any).context.eventType === 'RIVALRY_ESCALATION' || (record as any).context.channelId === 'RIVALRY_SHADOW';
   }
 
   private isLegendAnchorEvent(record: ConversationMemoryEventRecord): boolean {
-    return record.context.eventType === 'RUN_END' && normalizeText(record.body).includes('legend');
+    return (record as any).context.eventType === 'RUN_END' && normalizeText(record.body).includes('legend');
   }
 
   private isDealRoomAnchorEvent(record: ConversationMemoryEventRecord): boolean {
-    return record.context.eventType === 'DEAL_ROOM_PRESSURE' || record.context.channelId === 'DEAL_ROOM';
+    return (record as any).context.eventType === 'DEAL_ROOM_PRESSURE' || (record as any).context.channelId === 'DEAL_ROOM';
   }
 
   private isRelationshipAnchorQuote(record: ConversationMemoryQuoteRecord): boolean {
-    return record.kind === 'RECEIPT' || record.kind === 'PROMISE' || record.kind === 'CONFESSION';
+    return (record as any).kind === 'RECEIPT' || (record as any).kind === 'PROMISE' || (record as any).kind === 'CONFESSION';
   }
 
   private isLegendAnchorQuote(record: ConversationMemoryQuoteRecord): boolean {
-    return record.intent === 'LEGEND_ARCHIVE' || record.context.tags?.includes('LEGEND') === true;
+    return (record as any).intent === 'LEGEND_ARCHIVE' || (record as any).context.tags?.includes('LEGEND') === true;
   }
 
   private isPostRunAnchorQuote(record: ConversationMemoryQuoteRecord): boolean {
-    return record.intent === 'POST_RUN_RECKONING' || record.context.tags?.includes('POST_RUN') === true;
+    return (record as any).intent === 'POST_RUN_RECKONING' || (record as any).context.tags?.includes('POST_RUN') === true;
   }
 
   private promoteAction(current: MemoryCompressionAction, minimum: MemoryCompressionAction): MemoryCompressionAction {
@@ -985,6 +1074,271 @@ export class MemoryCompressionPolicy {
       summaryKey: action === 'SUMMARIZE' ? detail.summaryKey : undefined,
     };
   }
+
+
+  // ==========================================================================
+  // MARK: Semantic clustering before compression
+  // ==========================================================================
+
+  /** Cluster related events before compression to avoid fragmenting narratives. */
+  public clusterEventsForCompression(events: readonly ConversationMemoryEventRecord[]): readonly SemanticMemoryCluster[] {
+    const clusters: SemanticMemoryCluster[] = [];
+    const assigned = new Set<string>();
+    const sorted = [...events].sort((a, b) => a.createdAt - b.createdAt);
+
+    for (const event of sorted) {
+      if (assigned.has(event.memoryId)) continue;
+      const cluster: ConversationMemoryEventRecord[] = [event];
+      assigned.add(event.memoryId);
+
+      for (const candidate of sorted) {
+        if (assigned.has(candidate.memoryId)) continue;
+        if (this.shouldClusterTogether(event, candidate)) {
+          cluster.push(candidate);
+          assigned.add(candidate.memoryId);
+        }
+      }
+
+      if (cluster.length >= 2) {
+        const avgSalience = cluster.reduce((s, e) => s + e.salience01, 0) / cluster.length;
+        const maxHostility = Math.max(...cluster.map((e) => e.hostility01));
+        const maxEmbarrassment = Math.max(...cluster.map((e) => e.embarrassment01));
+        const counterparts = [...new Set(cluster.map((e) => e.counterpart?.actorId).filter(Boolean))];
+        clusters.push({
+          clusterId: `cluster:${event.memoryId}:${cluster.length}`,
+          events: Object.freeze(cluster),
+          centroidEventId: cluster.sort((a, b) => b.salience01 - a.salience01)[0]!.memoryId,
+          counterpartIds: Object.freeze(counterparts as string[]),
+          channelId: (event as any).context.channelId,
+          timeSpanMs: cluster[cluster.length - 1]!.createdAt - cluster[0]!.createdAt,
+          avgSalience01: avgSalience,
+          maxHostility01: maxHostility,
+          maxEmbarrassment01: maxEmbarrassment,
+          eventCount: cluster.length,
+          isNarrativeArc: this.isNarrativeArc(cluster),
+        });
+      }
+    }
+    return Object.freeze(clusters);
+  }
+
+  /** Determine if two events should be clustered together. */
+  private shouldClusterTogether(a: ConversationMemoryEventRecord, b: ConversationMemoryEventRecord): boolean {
+    const timeDelta = Math.abs(a.createdAt - b.createdAt);
+    if (timeDelta > 1000 * 60 * 15) return false;
+    if (a.counterpart?.actorId && a.counterpart.actorId === b.counterpart?.actorId) return true;
+    if (a.context.channelId === b.context.channelId && a.context.sceneId && a.context.sceneId === b.context.sceneId) return true;
+    const emotionDelta = Math.abs(a.hostility01 - b.hostility01) + Math.abs(a.embarrassment01 - b.embarrassment01);
+    if (emotionDelta < 0.3 && a.context.channelId === b.context.channelId) return true;
+    return false;
+  }
+
+  // ==========================================================================
+  // MARK: Narrative arc detection and preservation
+  // ==========================================================================
+
+  /** Detect if a cluster of events forms a narrative arc. */
+  private isNarrativeArc(events: readonly ConversationMemoryEventRecord[]): boolean {
+    if (events.length < 3) return false;
+    const sorted = [...events].sort((a, b) => a.createdAt - b.createdAt);
+    const hasRise = sorted.some((e) => e.hostility01 >= 0.5 || e.confidence01 >= 0.6);
+    const hasClimax = sorted.some((e) => e.salience01 >= 0.6);
+    const hasResolution = sorted.some((e) => e.context.eventType === 'RESCUE_INTERVENTION' || e.context.eventType === 'RUN_END' || e.embarrassment01 >= 0.5);
+    return hasRise && hasClimax && (hasResolution || events.length >= 5);
+  }
+
+  /** Identify narrative arcs in the memory and protect them from compression. */
+  public identifyNarrativeArcs(store: ConversationMemoryStore, playerId: string): readonly NarrativeArc[] {
+    const snapshot = store.getSnapshot(playerId);
+    const clusters = this.clusterEventsForCompression(snapshot.events);
+    return Object.freeze(clusters.filter((c) => c.isNarrativeArc).map((c) => ({
+      arcId: `arc:${c.clusterId}`,
+      clusterId: c.clusterId,
+      eventIds: Object.freeze(c.events.map((e) => e.memoryId)),
+      centroidEventId: c.centroidEventId,
+      arcStrength01: c.avgSalience01,
+      isProtected: c.avgSalience01 >= 0.35,
+    })));
+  }
+
+  /** Override compression decisions to protect narrative arc integrity. */
+  public preserveArcIntegrity(plan: MemoryCompressionPlan, arcs: readonly NarrativeArc[]): MemoryCompressionPlan {
+    const protectedIds = new Set<string>();
+    for (const arc of arcs) {
+      if (arc.isProtected) {
+        for (const id of arc.eventIds) protectedIds.add(id);
+      }
+    }
+    const adjusted = plan.decisions.map((d) => {
+      if (protectedIds.has((d as any).entityId) && (d.action === 'DELETE' || d.action === 'SUMMARIZE')) {
+        return { ...d, action: 'KEEP_HOT' as const, reasonCodes: [...(d as any).reasonCodes, 'arc_integrity_protection'] };
+      }
+      return d;
+    });
+    return { ...plan, decisions: adjusted };
+  }
+
+  // ==========================================================================
+  // MARK: Mode-specific compression rates
+  // ==========================================================================
+
+  private static readonly MODE_COMPRESSION: Readonly<Record<string, ModeCompressionProfile>> = Object.freeze({
+    'GO_ALONE': { modeId: 'GO_ALONE', ambientAggressiveness01: 0.7, rescuePreservation01: 0.95, postRunAggressiveness01: 0.45, teamPreservation01: 0.2 },
+    'HEAD_TO_HEAD': { modeId: 'HEAD_TO_HEAD', ambientAggressiveness01: 0.35, rescuePreservation01: 0.6, postRunAggressiveness01: 0.8, teamPreservation01: 0.1 },
+    'TEAM_UP': { modeId: 'TEAM_UP', ambientAggressiveness01: 0.5, rescuePreservation01: 0.85, postRunAggressiveness01: 0.4, teamPreservation01: 0.95 },
+    'CHASE_A_LEGEND': { modeId: 'CHASE_A_LEGEND', ambientAggressiveness01: 0.55, rescuePreservation01: 0.5, postRunAggressiveness01: 0.65, teamPreservation01: 0.15 },
+  });
+
+  /** Get mode-specific compression profile. */
+  public getModeCompressionProfile(modeId: string | undefined): ModeCompressionProfile {
+    return MemoryCompressionPolicy.MODE_COMPRESSION[modeId ?? ''] ?? MemoryCompressionPolicy.MODE_COMPRESSION['GO_ALONE']!;
+  }
+
+  // ==========================================================================
+  // MARK: Privacy-aware compression
+  // ==========================================================================
+
+  /** Compute the maximum privacy class any memory in a summary group can have. */
+  public privacyCeilingForSummary(events: readonly ConversationMemoryEventRecord[]): 'PUBLIC' | 'TEAM' | 'PRIVATE' | 'SHADOW' {
+    const levels = events.map((e) => e.context.privacyLevel ?? 'PUBLIC');
+    if (levels.includes('SHADOW')) return 'SHADOW';
+    if (levels.includes('PRIVATE')) return 'PRIVATE';
+    if (levels.includes('TEAM')) return 'TEAM';
+    return 'PUBLIC';
+  }
+
+  // ==========================================================================
+  // MARK: Real-time budget monitoring
+  // ==========================================================================
+
+  /** Check current memory utilization and whether emergency compression is needed. */
+  public currentUtilization(store: ConversationMemoryStore, playerId: string): MemoryBudgetUtilization {
+    const snapshot = store.getSnapshot(playerId);
+    const eventUtil = snapshot.events.length / (this.config as any).eventBudget;
+    const quoteUtil = snapshot.quotes.length / (this.config as any).quoteBudget;
+    const callbackUtil = snapshot.callbacks.length / (this.config as any).callbackBudget;
+    const maxUtil = Math.max(eventUtil, quoteUtil, callbackUtil);
+    return {
+      eventUtilization01: Math.min(1, eventUtil),
+      quoteUtilization01: Math.min(1, quoteUtil),
+      callbackUtilization01: Math.min(1, callbackUtil),
+      overallUtilization01: Math.min(1, maxUtil),
+      needsEmergencyCompression: maxUtil >= 0.9,
+      needsSoftCompression: maxUtil >= 0.7,
+    };
+  }
+
+  /** Generate an emergency compression plan for when budgets are about to overflow. */
+  public emergencyCompressionPlan(store: ConversationMemoryStore, context: MemoryCompressionContext): MemoryCompressionPlan {
+    const plan = this.plan(store, context);
+    const aggressive = plan.decisions.map((d) => {
+      if (d.action === 'KEEP_WARM') return { ...d, action: 'ARCHIVE' as const, reasonCodes: [...(d as any).reasonCodes, 'emergency_compression'] };
+      if (d.action === 'ARCHIVE') return { ...d, action: 'SUMMARIZE' as const, reasonCodes: [...(d as any).reasonCodes, 'emergency_compression'] };
+      return d;
+    });
+    return { ...plan, decisions: aggressive };
+  }
+
+  // ==========================================================================
+  // MARK: Post-run compression ritual
+  // ==========================================================================
+
+  /** Generate a compressed narrative capsule of an entire run for cross-run bridging. */
+  public generateRunCapsule(store: ConversationMemoryStore, playerId: string, runId: string): RunMemoryCapsule {
+    const snapshot = store.getSnapshot(playerId);
+    const runEvents = snapshot.events.filter((e) => e.context.runId === runId);
+    const runQuotes = snapshot.quotes.filter((q) => q.evidence.some((e) => e.runId === runId));
+    const runCallbacks = snapshot.callbacks.filter((c) => c.context.runId === runId);
+
+    const legendEvents = runEvents.filter((e) => e.salience01 >= 0.85);
+    const highEvents = runEvents.filter((e) => e.salience01 >= 0.55 && e.salience01 < 0.85);
+    const totalHostility = runEvents.reduce((s, e) => s + e.hostility01, 0);
+    const totalEmbarrassment = runEvents.reduce((s, e) => s + e.embarrassment01, 0);
+    const totalConfidence = runEvents.reduce((s, e) => s + e.confidence01, 0);
+
+    return {
+      capsuleId: `capsule:${playerId}:${runId}`,
+      playerId, runId,
+      createdAt: Date.now(),
+      eventCount: runEvents.length,
+      quoteCount: runQuotes.length,
+      callbackCount: runCallbacks.length,
+      legendEventIds: Object.freeze(legendEvents.map((e) => e.memoryId)),
+      highEventIds: Object.freeze(highEvents.map((e) => e.memoryId)),
+      unresolvedCallbackIds: Object.freeze(runCallbacks.filter((c) => c.unresolved).map((c) => c.callbackId)),
+      avgHostility01: runEvents.length > 0 ? totalHostility / runEvents.length : 0,
+      avgEmbarrassment01: runEvents.length > 0 ? totalEmbarrassment / runEvents.length : 0,
+      avgConfidence01: runEvents.length > 0 ? totalConfidence / runEvents.length : 0,
+      dominantChannel: this.dominantChannel(runEvents),
+      dominantCounterpartId: this.dominantCounterpart(runEvents),
+    };
+  }
+
+  private dominantChannel(events: readonly ConversationMemoryEventRecord[]): string {
+    const counts = new Map<string, number>();
+    for (const e of events) counts.set(e.context.channelId, (counts.get(e.context.channelId) ?? 0) + 1);
+    let best = 'GLOBAL'; let bestCount = 0;
+    for (const [ch, count] of counts) { if (count > bestCount) { best = ch; bestCount = count; } }
+    return best;
+  }
+
+  private dominantCounterpart(events: readonly ConversationMemoryEventRecord[]): string | undefined {
+    const counts = new Map<string, number>();
+    for (const e of events) {
+      const cp = e.counterpart?.actorId;
+      if (cp) counts.set(cp, (counts.get(cp) ?? 0) + 1);
+    }
+    let best: string | undefined; let bestCount = 0;
+    for (const [cp, count] of counts) { if (count > bestCount) { best = cp; bestCount = count; } }
+    return best;
+  }
+
+
+
+
+  // ==========================================================================
+  // MARK: Compression undo / rehydration
+  // ==========================================================================
+
+  private readonly _compressionLog = new Map<string, CompressionUndoEntry[]>();
+
+  /** Log a compression action for potential undo. */
+  public logCompression(playerId: string, entityId: string, action: MemoryCompressionAction, originalData: string): void {
+    const entries = this._compressionLog.get(playerId) ?? [];
+    entries.push({ entityId, action, originalData, compressedAt: Date.now(), rehydrated: false });
+    if (entries.length > 512) entries.splice(0, entries.length - 512);
+    this._compressionLog.set(playerId, entries);
+  }
+
+  /** Attempt to rehydrate a compressed memory. */
+  public attemptRehydration(playerId: string, entityId: string): CompressionUndoEntry | undefined {
+    const entries = this._compressionLog.get(playerId) ?? [];
+    const entry = entries.find((e) => e.entityId === entityId && !e.rehydrated);
+    if (entry) { entry.rehydrated = true; }
+    return entry;
+  }
+
+  /** Count available rehydrations for a player. */
+  public availableRehydrations(playerId: string): number {
+    return (this._compressionLog.get(playerId) ?? []).filter((e) => !e.rehydrated).length;
+  }
+
+  // ==========================================================================
+  // MARK: Compression diagnostics
+  // ==========================================================================
+
+  /** Generate a diagnostic summary of compression state. */
+  public buildCompressionDiagnostic(store: ConversationMemoryStore, playerId: string): readonly string[] {
+    const utilization = this.currentUtilization(store, playerId);
+    const lines: string[] = [];
+    lines.push(`compression_diagnostic|player=${playerId}`);
+    lines.push(`events=${utilization.eventUtilization01.toFixed(3)}|quotes=${utilization.quoteUtilization01.toFixed(3)}|callbacks=${utilization.callbackUtilization01.toFixed(3)}`);
+    lines.push(`overall=${utilization.overallUtilization01.toFixed(3)}|emergency=${utilization.needsEmergencyCompression}|soft=${utilization.needsSoftCompression}`);
+    lines.push(`rehydrations_available=${this.availableRehydrations(playerId)}`);
+    return lines;
+  }
+
+
 }
 
 export function createMemoryCompressionPolicy(

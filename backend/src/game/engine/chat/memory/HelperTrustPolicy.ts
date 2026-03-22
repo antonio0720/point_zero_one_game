@@ -1287,6 +1287,51 @@ function buildTags(
 // MARK: Class
 // ============================================================================
 
+
+// ============================================================================
+// MARK: Mode-differentiated trust profile type
+// ============================================================================
+
+export interface HelperTrustModeProfile {
+  readonly modeId: string;
+  readonly label: string;
+  readonly earlyInterventionBias01: number;
+  readonly publicSafetyFloor01: number;
+  readonly shadowPreference01: number;
+  readonly silenceToleranceMs: number;
+  readonly toneWarmth01: number;
+  readonly rescueAggressiveness01: number;
+  readonly fatigueResistance01: number;
+  readonly coordinationPriority01: number;
+}
+
+// ============================================================================
+// MARK: Trust trajectory types
+// ============================================================================
+
+export interface TrustTrajectoryEntry {
+  readonly timestamp: number;
+  readonly trust01: number;
+  readonly stage: HelperTrustStage;
+  readonly publicSafety01: number;
+  readonly rescueReadiness01: number;
+}
+
+export type TrustTrajectoryTrend = 'RISING' | 'FALLING' | 'PLATEAUED' | 'OSCILLATING' | 'ERUPTING' | 'INSUFFICIENT_DATA';
+
+// ============================================================================
+// MARK: Helper fatigue types
+// ============================================================================
+
+export interface HelperFatigueState {
+  interventionCount: number;
+  improvementCount: number;
+  lastInterventionAt: number;
+  fatigueLevel01: number;
+  burnoutReached: boolean;
+}
+
+
 export class HelperTrustPolicy {
   public readonly config: HelperTrustPolicyConfig;
 
@@ -1374,6 +1419,209 @@ export class HelperTrustPolicy {
       assessment,
     });
   }
+
+
+  // ==========================================================================
+  // MARK: Mode-differentiated trust profiles
+  // ==========================================================================
+
+  private static readonly MODE_TRUST_PROFILES: Readonly<Record<string, HelperTrustModeProfile>> = Object.freeze({
+    'GO_ALONE': { modeId: 'GO_ALONE', label: 'Empire', earlyInterventionBias01: 0.72, publicSafetyFloor01: 0.55, shadowPreference01: 0.22, silenceToleranceMs: 8000, toneWarmth01: 0.78, rescueAggressiveness01: 0.65, fatigueResistance01: 0.5, coordinationPriority01: 0.2 },
+    'HEAD_TO_HEAD': { modeId: 'HEAD_TO_HEAD', label: 'Predator', earlyInterventionBias01: 0.28, publicSafetyFloor01: 0.82, shadowPreference01: 0.74, silenceToleranceMs: 14000, toneWarmth01: 0.35, rescueAggressiveness01: 0.38, fatigueResistance01: 0.7, coordinationPriority01: 0.15 },
+    'TEAM_UP': { modeId: 'TEAM_UP', label: 'Syndicate', earlyInterventionBias01: 0.55, publicSafetyFloor01: 0.48, shadowPreference01: 0.35, silenceToleranceMs: 6000, toneWarmth01: 0.62, rescueAggressiveness01: 0.58, fatigueResistance01: 0.45, coordinationPriority01: 0.85 },
+    'CHASE_A_LEGEND': { modeId: 'CHASE_A_LEGEND', label: 'Phantom', earlyInterventionBias01: 0.18, publicSafetyFloor01: 0.9, shadowPreference01: 0.88, silenceToleranceMs: 20000, toneWarmth01: 0.2, rescueAggressiveness01: 0.22, fatigueResistance01: 0.8, coordinationPriority01: 0.1 },
+  });
+
+  /** Get mode-specific trust tuning. Falls back to Empire profile. */
+  public getModeProfile(modeId: string | undefined): HelperTrustModeProfile {
+    return HelperTrustPolicy.MODE_TRUST_PROFILES[modeId ?? ''] ?? HelperTrustPolicy.MODE_TRUST_PROFILES['GO_ALONE']!;
+  }
+
+  /** Assess with mode-aware adjustments applied to the base assessment. */
+  public assessWithMode(request: HelperTrustRequest, modeId?: string): HelperTrustAssessment {
+    const base = this.assess(request);
+    const profile = this.getModeProfile(modeId);
+    return {
+      ...base,
+      publicSafety01: Math.max(base.publicSafety01, profile.publicSafetyFloor01),
+      shadowNeed01: clamp01(base.shadowNeed01 + profile.shadowPreference01 * 0.3),
+      timingConfidence01: clamp01(base.timingConfidence01 * (1 + profile.earlyInterventionBias01 * 0.2)),
+    };
+  }
+
+  /** Decide with mode-aware profile. */
+  public decideWithMode(request: HelperTrustRequest, modeId?: string): HelperTrustDecision {
+    const base = this.decide(request);
+    const profile = this.getModeProfile(modeId);
+    const adjustedDelay = Math.max(base.delayMs, profile.silenceToleranceMs * 0.3);
+    return { ...base, delayMs: adjustedDelay };
+  }
+
+  // ==========================================================================
+  // MARK: Trust trajectory tracking
+  // ==========================================================================
+
+  private readonly _trajectories = new Map<string, TrustTrajectoryEntry[]>();
+
+  /** Record a trust snapshot for trajectory tracking. Key = playerId:counterpartId. */
+  public recordTrustSnapshot(playerId: string, counterpartId: string, assessment: HelperTrustAssessment, at: number): void {
+    const key = `${playerId}:${counterpartId}`;
+    const entries = this._trajectories.get(key) ?? [];
+    entries.push({ timestamp: at, trust01: assessment.trust01, stage: assessment.stage, publicSafety01: assessment.publicSafety01, rescueReadiness01: assessment.rescueReadiness01 });
+    if (entries.length > 64) entries.splice(0, entries.length - 64);
+    this._trajectories.set(key, entries);
+  }
+
+  /** Get the trust trajectory for a counterpart. */
+  public getTrajectory(playerId: string, counterpartId: string): readonly TrustTrajectoryEntry[] {
+    return Object.freeze(this._trajectories.get(`${playerId}:${counterpartId}`) ?? []);
+  }
+
+  /** Compute the direction of trust change. */
+  public computeTrajectoryTrend(playerId: string, counterpartId: string): TrustTrajectoryTrend {
+    const entries = this.getTrajectory(playerId, counterpartId);
+    if (entries.length < 3) return 'INSUFFICIENT_DATA';
+    const recent = entries.slice(-5);
+    const deltas = recent.slice(1).map((e, i) => e.trust01 - recent[i]!.trust01);
+    const avgDelta = deltas.reduce((s, d) => s + d, 0) / deltas.length;
+    const volatility = Math.sqrt(deltas.reduce((s, d) => s + (d - avgDelta) ** 2, 0) / deltas.length);
+    if (volatility > 0.12) return 'OSCILLATING';
+    if (avgDelta > 0.03) return 'RISING';
+    if (avgDelta < -0.03) return 'FALLING';
+    if (recent[recent.length - 1]!.trust01 >= 0.85) return 'ERUPTING';
+    return 'PLATEAUED';
+  }
+
+  // ==========================================================================
+  // MARK: Helper fatigue and burnout modeling
+  // ==========================================================================
+
+  private readonly _fatigueCounters = new Map<string, HelperFatigueState>();
+
+  /** Record a helper intervention for fatigue tracking. */
+  public recordIntervention(playerId: string, counterpartId: string, helperId: string, at: number, playerImproved: boolean): void {
+    const key = `${playerId}:${counterpartId}:${helperId}`;
+    const state = this._fatigueCounters.get(key) ?? { interventionCount: 0, improvementCount: 0, lastInterventionAt: 0, fatigueLevel01: 0, burnoutReached: false };
+    state.interventionCount++;
+    if (playerImproved) state.improvementCount++;
+    state.lastInterventionAt = at;
+    const effectivenessRate = state.interventionCount > 0 ? state.improvementCount / state.interventionCount : 1;
+    state.fatigueLevel01 = clamp01(1 - effectivenessRate) * clamp01(state.interventionCount / 12);
+    state.burnoutReached = state.fatigueLevel01 >= 0.75 && state.interventionCount >= 8;
+    this._fatigueCounters.set(key, state);
+  }
+
+  /** Get fatigue state for a specific helper-player pair. */
+  public getFatigueState(playerId: string, counterpartId: string, helperId: string): HelperFatigueState {
+    return this._fatigueCounters.get(`${playerId}:${counterpartId}:${helperId}`) ?? { interventionCount: 0, improvementCount: 0, lastInterventionAt: 0, fatigueLevel01: 0, burnoutReached: false };
+  }
+
+  /** Assess helper fatigue level (0 = fresh, 1 = burned out). */
+  public assessHelperFatigue01(playerId: string, counterpartId: string, helperId: string): number {
+    return this.getFatigueState(playerId, counterpartId, helperId).fatigueLevel01;
+  }
+
+  /** Check if a helper has reached burnout and should step back. */
+  public isHelperBurnedOut(playerId: string, counterpartId: string, helperId: string): boolean {
+    return this.getFatigueState(playerId, counterpartId, helperId).burnoutReached;
+  }
+
+  /** Reset fatigue when conditions change (new run, player breakthrough, etc). */
+  public resetFatigue(playerId: string, counterpartId: string, helperId: string): void {
+    this._fatigueCounters.delete(`${playerId}:${counterpartId}:${helperId}`);
+  }
+
+  // ==========================================================================
+  // MARK: Audience-aware helper behavior
+  // ==========================================================================
+
+  /** Assess whether audience heat should delay helper intervention. */
+  public assessAudienceAwareTimingValue01(request: HelperTrustRequest, audienceHeat01: number): number {
+    if (audienceHeat01 <= 0.3) return 1.0;
+    const embarrassmentPenalty = request.embarrassment01 * 0.35;
+    const publicRisk = audienceHeat01 * 0.45;
+    const helpNeed = request.rescueReadiness01 * 0.2;
+    return clamp01(1.0 - publicRisk - embarrassmentPenalty + helpNeed);
+  }
+
+  /** Should the helper defer to let audience heat cool down before intervening? */
+  public shouldDeferToAudienceCooldown(request: HelperTrustRequest, audienceHeat01: number): boolean {
+    return audienceHeat01 >= 0.65 && request.embarrassment01 >= 0.4 && request.rescueReadiness01 < 0.7;
+  }
+
+  /** Public perception risk if the helper intervenes during high audience heat. */
+  public publicPerceptionRisk01(request: HelperTrustRequest, audienceHeat01: number): number {
+    return clamp01(audienceHeat01 * 0.4 + request.embarrassment01 * 0.3 + (request.publicSafety01 < 0.5 ? 0.2 : 0) + (request.trust01 < 0.4 ? 0.1 : 0));
+  }
+
+  // ==========================================================================
+  // MARK: Cross-helper coordination
+  // ==========================================================================
+
+  private readonly _helperCooldowns = new Map<string, number>();
+
+  /** Select which helper should speak when multiple are active. Returns the helperId that wins. */
+  public selectPrimaryHelper(playerId: string, helperIds: readonly string[], counterpartId: string, now: number): string | undefined {
+    if (helperIds.length === 0) return undefined;
+    if (helperIds.length === 1) return helperIds[0];
+    const scored = helperIds.map((hid) => {
+      const fatigue = this.assessHelperFatigue01(playerId, counterpartId, hid);
+      const lastSpoke = this._helperCooldowns.get(`${playerId}:${hid}`) ?? 0;
+      const cooldownMs = now - lastSpoke;
+      const cooldownBonus = clamp01(cooldownMs / 30000);
+      return { helperId: hid, score: clamp01((1 - fatigue) * 0.6 + cooldownBonus * 0.4) };
+    }).sort((a, b) => b.score - a.score);
+    return scored[0]?.helperId;
+  }
+
+  /** Should this helper defer to another helper who is better positioned? */
+  public shouldDeferToOtherHelper(playerId: string, helperId: string, otherHelperId: string, counterpartId: string): boolean {
+    const myFatigue = this.assessHelperFatigue01(playerId, counterpartId, helperId);
+    const theirFatigue = this.assessHelperFatigue01(playerId, counterpartId, otherHelperId);
+    return theirFatigue < myFatigue - 0.15;
+  }
+
+  /** Record that a helper spoke, establishing a cooldown for coordination. */
+  public recordHelperSpoke(playerId: string, helperId: string, at: number): void {
+    this._helperCooldowns.set(`${playerId}:${helperId}`, at);
+  }
+
+  /** Coordination cooldown: how long before this helper should speak again. */
+  public coordinationCooldownMs(playerId: string, helperId: string, now: number): number {
+    const lastSpoke = this._helperCooldowns.get(`${playerId}:${helperId}`) ?? 0;
+    const elapsed = now - lastSpoke;
+    const baseCooldown = 12000;
+    return Math.max(0, baseCooldown - elapsed);
+  }
+
+
+
+
+  // ==========================================================================
+  // MARK: Helper diagnostic system
+  // ==========================================================================
+
+  /** Generate a multi-line diagnostic of the full helper trust state. */
+  public buildFullDiagnostic(request: HelperTrustRequest, playerId: string, counterpartId: string, helperId: string, modeId?: string): readonly string[] {
+    const assessment = modeId ? this.assessWithMode(request, modeId) : this.assess(request);
+    const decision = modeId ? this.decideWithMode(request, modeId) : this.decide(request);
+    const fatigue = this.getFatigueState(playerId, counterpartId, helperId);
+    const trend = this.computeTrajectoryTrend(playerId, counterpartId);
+    const lines: string[] = [];
+    lines.push(`helper_diagnostic|player=${playerId}|counterpart=${counterpartId}|helper=${helperId}`);
+    lines.push(`stage=${assessment.stage}|trust=${assessment.trust01.toFixed(3)}|disposition=${decision.disposition}`);
+    lines.push(`visibility=${decision.visibility}|tone=${decision.tone}|channel=${decision.preferredChannel}`);
+    lines.push(`fatigue=${fatigue.fatigueLevel01.toFixed(3)}|interventions=${fatigue.interventionCount}|burnout=${fatigue.burnoutReached}`);
+    lines.push(`trajectory=${trend}|silent=${decision.shouldStaySilent}|suppress=${decision.shouldSuppressRivals}`);
+    lines.push(`publicSafety=${assessment.publicSafety01.toFixed(3)}|rescueReady=${assessment.rescueReadiness01.toFixed(3)}|embarrassRisk=${assessment.embarrassmentRisk01.toFixed(3)}`);
+    if (modeId) {
+      const profile = this.getModeProfile(modeId);
+      lines.push(`mode=${profile.label}|earlyBias=${profile.earlyInterventionBias01}|shadow=${profile.shadowPreference01}`);
+    }
+    return lines;
+  }
+
+
 }
 
 // ============================================================================
@@ -1703,3 +1951,97 @@ export function examplePostRunDebriefRequest(now: UnixMs): HelperTrustRequest {
     },
   });
 }
+
+
+// ============================================================================
+// MARK: Mode-aware assessment helpers
+// ============================================================================
+
+/** Compute combined trust-trajectory-aware disposition adjustment. */
+export function adjustDispositionForTrajectory(
+  disposition: HelperTrustDisposition,
+  trend: TrustTrajectoryTrend,
+): HelperTrustDisposition {
+  switch (trend) {
+    case 'RISING': return disposition === 'CAUTIOUS' ? 'ENGAGED' : disposition === 'ENGAGED' ? 'PROTECTIVE' : disposition;
+    case 'FALLING': return disposition === 'PROTECTIVE' ? 'ENGAGED' : disposition === 'ENGAGED' ? 'CAUTIOUS' : disposition;
+    case 'OSCILLATING': return 'CAUTIOUS';
+    case 'ERUPTING': return 'PROTECTIVE';
+    default: return disposition;
+  }
+}
+
+/** Compute the fatigue-adjusted disposition for a helper. */
+export function adjustDispositionForFatigue(
+  disposition: HelperTrustDisposition,
+  fatigueLevel01: number,
+): HelperTrustDisposition {
+  if (fatigueLevel01 >= 0.75) return 'DISTANT';
+  if (fatigueLevel01 >= 0.5 && disposition === 'PROTECTIVE') return 'ENGAGED';
+  if (fatigueLevel01 >= 0.5 && disposition === 'ENGAGED') return 'CAUTIOUS';
+  return disposition;
+}
+
+/** Conditions under which fatigue should reset. */
+export function shouldResetFatigue(
+  state: HelperFatigueState,
+  isNewRun: boolean,
+  playerBreakthrough: boolean,
+  elapsedSinceLastMs: number,
+): boolean {
+  if (isNewRun) return true;
+  if (playerBreakthrough) return true;
+  if (elapsedSinceLastMs > 1000 * 60 * 60 * 2) return true;
+  return false;
+}
+
+/** Compute a helper's overall readiness score combining trust, fatigue, and trajectory. */
+export function computeHelperReadinessScore01(
+  trust01: number,
+  fatigueLevel01: number,
+  trend: TrustTrajectoryTrend,
+  modeFatigueResistance01: number,
+): number {
+  const trustComponent = trust01 * 0.45;
+  const fatigueComponent = (1 - fatigueLevel01) * modeFatigueResistance01 * 0.3;
+  const trendBonus = trend === 'RISING' ? 0.15 : trend === 'ERUPTING' ? 0.2 : trend === 'FALLING' ? -0.1 : 0;
+  return clamp01(trustComponent + fatigueComponent + trendBonus + 0.1);
+}
+
+/** Generate a human-readable explanation of a helper trust decision. */
+export function explainHelperTrustDecision(decision: HelperTrustDecision, assessment: HelperTrustAssessment): string {
+  const parts: string[] = [];
+  parts.push(`Trust stage: ${assessment.stage} (${assessment.trust01.toFixed(2)})`);
+  parts.push(`Disposition: ${decision.disposition}`);
+  parts.push(`Visibility: ${decision.visibility}`);
+  if (decision.shouldStaySilent) parts.push('Decision: STAY SILENT');
+  else parts.push(`Tone: ${decision.tone}, Channel: ${decision.preferredChannel}`);
+  if (decision.shouldSuppressRivals) parts.push('Suppressing rivals during intervention');
+  if (assessment.rescueReadiness01 >= 0.6) parts.push(`Rescue readiness: ${assessment.rescueReadiness01.toFixed(2)}`);
+  if (assessment.embarrassmentRisk01 >= 0.4) parts.push(`Embarrassment risk: ${assessment.embarrassmentRisk01.toFixed(2)}`);
+  parts.push(`Delay: ${decision.delayMs}ms`);
+  return parts.join(' | ');
+}
+
+/** Build a diagnostic report for helper trust state. */
+export function buildHelperTrustDiagnostic(
+  policy: HelperTrustPolicy,
+  request: HelperTrustRequest,
+  modeId?: string,
+): readonly string[] {
+  const assessment = modeId ? policy.assessWithMode(request, modeId) : policy.assess(request);
+  const decision = modeId ? policy.decideWithMode(request, modeId) : policy.decide(request);
+  const lines: string[] = [];
+  lines.push(`stage=${assessment.stage}|trust=${assessment.trust01.toFixed(3)}`);
+  lines.push(`disposition=${decision.disposition}|visibility=${decision.visibility}|tone=${decision.tone}`);
+  lines.push(`publicSafety=${assessment.publicSafety01.toFixed(3)}|privateNeed=${assessment.privateNeed01.toFixed(3)}|shadowNeed=${assessment.shadowNeed01.toFixed(3)}`);
+  lines.push(`embarrassmentRisk=${assessment.embarrassmentRisk01.toFixed(3)}|rescueReadiness=${assessment.rescueReadiness01.toFixed(3)}`);
+  lines.push(`silent=${decision.shouldStaySilent}|suppressRivals=${decision.shouldSuppressRivals}|delay=${decision.delayMs}ms`);
+  if (modeId) {
+    const profile = policy.getModeProfile(modeId);
+    lines.push(`mode=${profile.label}|warmth=${profile.toneWarmth01.toFixed(2)}|shadow=${profile.shadowPreference01.toFixed(2)}`);
+  }
+  return lines;
+}
+
+

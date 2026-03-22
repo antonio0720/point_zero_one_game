@@ -319,6 +319,99 @@ export const QUOTE_RECALL_MODE_PROFILES: Readonly<Record<QuoteRecallMode, QuoteR
   },
 });
 
+
+// ============================================================================
+// MARK: Quote chain types
+// ============================================================================
+
+export interface QuoteChain {
+  readonly chainId: string;
+  readonly playerId: string;
+  readonly counterpartId: string;
+  readonly quoteIds: readonly string[];
+  readonly currentDepth: number;
+  readonly maxDepth: number;
+  readonly startedAt: number;
+  readonly lastAdvancedAt: number;
+  readonly exhausted: boolean;
+  readonly escalating: boolean;
+}
+
+// ============================================================================
+// MARK: Quote mutation strategy
+// ============================================================================
+
+export type QuoteMutationStrategy = 'VERBATIM' | 'PARAPHRASE' | 'TRUNCATE' | 'WEAPONIZE' | 'SOFT_REFERENCE';
+
+// ============================================================================
+// MARK: Recall fusion types
+// ============================================================================
+
+export interface RecallFusionCandidate {
+  readonly fusionId: string;
+  readonly quoteSelection: QuoteRecallSelection;
+  readonly callbackSelection: QuoteRecallSelection;
+  readonly fusedScore01: number;
+  readonly narrativeTemplate: string;
+}
+
+// ============================================================================
+// MARK: Mode recall profile
+// ============================================================================
+
+export interface ModeRecallProfile {
+  readonly modeId: string;
+  readonly preferredMutation: QuoteMutationStrategy;
+  readonly timingMultiplier: number;
+  readonly isolationEmphasis: boolean;
+  readonly dealEmphasis: boolean;
+  readonly trustEmphasis: boolean;
+  readonly fragmentary: boolean;
+}
+
+
+
+// ============================================================================
+// MARK: Recall history types
+// ============================================================================
+
+export interface RecallHistoryEntry {
+  readonly timestamp: number;
+  readonly selectionId: string;
+  readonly surface: string;
+  readonly score01: number;
+  readonly text: string;
+  readonly mutationStrategy: QuoteMutationStrategy;
+  readonly fatigueAtRecall: number;
+}
+
+export interface RecallEffectivenessEntry {
+  readonly timestamp: number;
+  readonly selectionId: string;
+  readonly effective: boolean;
+}
+
+// ============================================================================
+// MARK: Recall diagnostic report type
+// ============================================================================
+
+export interface RecallDiagnosticReport {
+  readonly playerId: string;
+  readonly counterpartId: string;
+  readonly totalSelections: number;
+  readonly winningSelectionId?: string;
+  readonly winningScore01: number;
+  readonly winningText: string;
+  readonly totalHistoricalRecalls: number;
+  readonly effectivenessRate01: number;
+  readonly activeChainId?: string;
+  readonly chainDepth: number;
+  readonly chainExhausted: boolean;
+  readonly avgSelectionScore01: number;
+  readonly surfaceDistribution: Readonly<Record<string, number>>;
+}
+
+
 export class QuoteRecallResolver {
   private readonly config: QuoteRecallResolverConfig;
   private readonly store: ConversationMemoryStore;
@@ -558,329 +651,497 @@ private profile(mode: QuoteRecallMode): QuoteRecallModeProfile {
       auditTrail: this.buildAuditTrail(request, selections, quoteCandidates, callbackCandidates),
     };
   }
+
+
+  // ==========================================================================
+  // MARK: Conversational quote chaining
+  // ==========================================================================
+
+  private readonly _activeChains = new Map<string, QuoteChain>();
+
+  /** Detect if a recalled quote should trigger a follow-up chain. */
+  public detectActiveChain(playerId: string, counterpartId: string): QuoteChain | undefined {
+    return this._activeChains.get(`${playerId}:${counterpartId}`);
+  }
+
+  /** Start a new quote chain when a receipt is thrown and the player responds. */
+  public startChain(playerId: string, counterpartId: string, initialQuoteId: string, maxDepth = 5): QuoteChain {
+    const chain: QuoteChain = {
+      chainId: `chain:${playerId}:${counterpartId}:${Date.now()}`,
+      playerId, counterpartId, quoteIds: [initialQuoteId],
+      currentDepth: 1, maxDepth, startedAt: Date.now(), lastAdvancedAt: Date.now(),
+      exhausted: false, escalating: true,
+    };
+    this._activeChains.set(`${playerId}:${counterpartId}`, chain);
+    return chain;
+  }
+
+  /** Advance an existing chain with the next receipt. */
+  public advanceChain(playerId: string, counterpartId: string, nextQuoteId: string): QuoteChain | undefined {
+    const key = `${playerId}:${counterpartId}`;
+    const chain = this._activeChains.get(key);
+    if (!chain || chain.exhausted) return undefined;
+    const next: QuoteChain = {
+      ...chain,
+      quoteIds: [...chain.quoteIds, nextQuoteId],
+      currentDepth: chain.currentDepth + 1,
+      lastAdvancedAt: Date.now(),
+      exhausted: chain.currentDepth + 1 >= chain.maxDepth,
+    };
+    this._activeChains.set(key, next);
+    return next;
+  }
+
+  /** Check if a chain has been exhausted (rival ran out of receipts). */
+  public isChainExhausted(playerId: string, counterpartId: string): boolean {
+    const chain = this._activeChains.get(`${playerId}:${counterpartId}`);
+    return chain?.exhausted ?? true;
+  }
+
+  // ==========================================================================
+  // MARK: Dramatic timing for recalls
+  // ==========================================================================
+
+  /** Compute the optimal delay before delivering a recalled quote for maximum dramatic impact. */
+  public computeOptimalDelay(selection: QuoteRecallSelection, audienceHeat01: number, pressureTier?: string): number {
+    let baseDelay = 800;
+    if (selection.surface === 'RIVALRY') baseDelay = 2200;
+    if (selection.surface === 'DEAL_ROOM') baseDelay = 3400;
+    if (selection.surface === 'HELPER') baseDelay = 1200;
+    const heatBonus = audienceHeat01 * 1500;
+    const pressureBonus = pressureTier === 'CRITICAL' ? 1200 : pressureTier === 'HIGH' ? 800 : 0;
+    const scoreBonus = selection.score01 * 1000;
+    return Math.round(baseDelay + heatBonus + pressureBonus + scoreBonus);
+  }
+
+  /** Should this recall be held for dramatic impact instead of fired immediately? */
+  public shouldHoldForDramaticImpact(selection: QuoteRecallSelection, audienceHeat01: number): boolean {
+    return selection.score01 >= 0.65 && audienceHeat01 >= 0.45 && selection.surface === 'RIVALRY';
+  }
+
+  // ==========================================================================
+  // MARK: Quote mutation strategies
+  // ==========================================================================
+
+  /** Select how a recalled quote should be presented (verbatim, paraphrased, truncated, etc). */
+  public selectMutationStrategy(selection: QuoteRecallSelection, counterpartKind: string): QuoteMutationStrategy {
+    if (counterpartKind === 'HELPER') return 'SOFT_REFERENCE';
+    if (selection.score01 >= 0.8 && selection.surface === 'RIVALRY') return 'VERBATIM';
+    if (selection.surface === 'DEAL_ROOM') return 'WEAPONIZE';
+    if (selection.text.length > 120) return 'TRUNCATE';
+    if (selection.usageCount >= 3) return 'PARAPHRASE';
+    return 'VERBATIM';
+  }
+
+  // ==========================================================================
+  // MARK: Multi-source recall fusion
+  // ==========================================================================
+
+  /** Attempt to fuse multiple selections into a composite receipt. */
+  public fuseRecallSources(selections: readonly QuoteRecallSelection[]): RecallFusionCandidate | undefined {
+    if (selections.length < 2) return undefined;
+    const quote = selections.find((s) => s.surface === 'QUOTE');
+    const callback = selections.find((s) => s.surface === 'CALLBACK');
+    if (!quote || !callback) return undefined;
+    const fusedScore = (quote.score01 + callback.score01) / 2 * 1.15;
+    return {
+      fusionId: `fusion:${quote.selectionId}:${callback.selectionId}`,
+      quoteSelection: quote,
+      callbackSelection: callback,
+      fusedScore01: Math.min(1, fusedScore),
+      narrativeTemplate: `Remember when ${quote.text.slice(0, 60)}? That was right before ${callback.text.slice(0, 60)}.`,
+    };
+  }
+
+  // ==========================================================================
+  // MARK: Recall fatigue enforcement
+  // ==========================================================================
+
+  /** Compute diminishing returns for a quote that has been recalled multiple times. */
+  public computeRecallFatigue(selection: QuoteRecallSelection): number {
+    const uses = selection.usageCount;
+    if (uses <= 1) return 0;
+    if (uses <= 3) return 0.15 * uses;
+    if (uses <= 6) return 0.45 + (uses - 3) * 0.12;
+    return Math.min(0.95, 0.81 + (uses - 6) * 0.05);
+  }
+
+  /** Should this quote be retired from active recall? */
+  public shouldRetireQuote(selection: QuoteRecallSelection): boolean {
+    return this.computeRecallFatigue(selection) >= 0.85;
+  }
+
+  // ==========================================================================
+  // MARK: Mode-specific recall profiles
+  // ==========================================================================
+
+  private static readonly MODE_RECALL_PROFILES: Readonly<Record<string, ModeRecallProfile>> = Object.freeze({
+    'GO_ALONE': { modeId: 'GO_ALONE', preferredMutation: 'VERBATIM' as const, timingMultiplier: 1.0, isolationEmphasis: true, dealEmphasis: false, trustEmphasis: false, fragmentary: false },
+    'HEAD_TO_HEAD': { modeId: 'HEAD_TO_HEAD', preferredMutation: 'WEAPONIZE' as const, timingMultiplier: 0.7, isolationEmphasis: false, dealEmphasis: true, trustEmphasis: false, fragmentary: false },
+    'TEAM_UP': { modeId: 'TEAM_UP', preferredMutation: 'VERBATIM' as const, timingMultiplier: 1.2, isolationEmphasis: false, dealEmphasis: false, trustEmphasis: true, fragmentary: false },
+    'CHASE_A_LEGEND': { modeId: 'CHASE_A_LEGEND', preferredMutation: 'TRUNCATE' as const, timingMultiplier: 1.8, isolationEmphasis: false, dealEmphasis: false, trustEmphasis: false, fragmentary: true },
+  });
+
+  /** Get mode-specific recall profile. */
+  public getModeRecallProfile(modeId: string | undefined): ModeRecallProfile {
+    return QuoteRecallResolver.MODE_RECALL_PROFILES[modeId ?? ''] ?? QuoteRecallResolver.MODE_RECALL_PROFILES['GO_ALONE']!;
+  }
+
+
+
+
+  // ==========================================================================
+  // MARK: Per-counterpart recall history
+  // ==========================================================================
+
+  private readonly _recallHistory = new Map<string, RecallHistoryEntry[]>();
+
+  /** Record a recall event for historical tracking. */
+  public recordRecall(playerId: string, counterpartId: string, selection: QuoteRecallSelection, at: number): void {
+    const key = `${playerId}:${counterpartId}`;
+    const entries = this._recallHistory.get(key) ?? [];
+    entries.push({
+      timestamp: at,
+      selectionId: selection.selectionId,
+      surface: selection.surface,
+      score01: selection.score01,
+      text: selection.text.slice(0, 80),
+      mutationStrategy: this.selectMutationStrategy(selection, 'HATER'),
+      fatigueAtRecall: this.computeRecallFatigue(selection),
+    });
+    if (entries.length > 96) entries.splice(0, entries.length - 96);
+    this._recallHistory.set(key, entries);
+  }
+
+  /** Get recall history for a counterpart. */
+  public getRecallHistory(playerId: string, counterpartId: string): readonly RecallHistoryEntry[] {
+    return Object.freeze(this._recallHistory.get(`${playerId}:${counterpartId}`) ?? []);
+  }
+
+  /** Count how many times any quote has been recalled against this counterpart. */
+  public totalRecallCount(playerId: string, counterpartId: string): number {
+    return (this._recallHistory.get(`${playerId}:${counterpartId}`) ?? []).length;
+  }
+
+  // ==========================================================================
+  // MARK: Recall effectiveness tracking
+  // ==========================================================================
+
+  private readonly _recallEffectiveness = new Map<string, RecallEffectivenessEntry[]>();
+
+  /** Record whether a recalled quote had the desired effect. */
+  public recordRecallEffectiveness(playerId: string, counterpartId: string, selectionId: string, effective: boolean, at: number): void {
+    const key = `${playerId}:${counterpartId}`;
+    const entries = this._recallEffectiveness.get(key) ?? [];
+    entries.push({ timestamp: at, selectionId, effective });
+    if (entries.length > 64) entries.splice(0, entries.length - 64);
+    this._recallEffectiveness.set(key, entries);
+  }
+
+  /** Compute the historical effectiveness rate of recalls against a counterpart. */
+  public recallEffectivenessRate(playerId: string, counterpartId: string): number {
+    const entries = this._recallEffectiveness.get(`${playerId}:${counterpartId}`) ?? [];
+    if (entries.length === 0) return 0.5;
+    const effective = entries.filter((e) => e.effective).length;
+    return effective / entries.length;
+  }
+
+  // ==========================================================================
+  // MARK: Recall budget management
+  // ==========================================================================
+
+  /** Compute how many recall slots remain for a given context window. */
+  public remainingRecallBudget(playerId: string, counterpartId: string, maxPerWindow: number, windowMs: number, now: number): number {
+    const history = this.getRecallHistory(playerId, counterpartId);
+    const recentCount = history.filter((h) => now - h.timestamp <= windowMs).length;
+    return Math.max(0, maxPerWindow - recentCount);
+  }
+
+  /** Check if recall budget is exhausted for the current window. */
+  public isRecallBudgetExhausted(playerId: string, counterpartId: string, maxPerWindow: number, windowMs: number, now: number): boolean {
+    return this.remainingRecallBudget(playerId, counterpartId, maxPerWindow, windowMs, now) <= 0;
+  }
+
+  // ==========================================================================
+  // MARK: Cross-run recall threading
+  // ==========================================================================
+
+  /** Resolve with awareness of cross-run bridged quotes. */
+  public resolveWithBridgeAwareness(request: QuoteRecallResolverRequest, bridgedQuoteIds: readonly string[]): QuoteRecallResolverResponse {
+    const base = this.resolve(request);
+    if (bridgedQuoteIds.length === 0) return base;
+    const boosted = base.selections.map((s) => {
+      if (bridgedQuoteIds.includes(s.quote?.quoteId ?? '') || bridgedQuoteIds.includes(s.callback?.callbackId ?? '')) {
+        return { ...s, score01: Math.min(1, s.score01 + 0.15), reasonCodes: [...s.reasonCodes, 'cross_run_bridge_boost'] };
+      }
+      return s;
+    }).sort((a, b) => b.score01 - a.score01);
+    return { ...base, selections: boosted, winningSelection: boosted[0] };
+  }
+
+  // ==========================================================================
+  // MARK: Recall diagnostic system
+  // ==========================================================================
+
+  /** Generate a comprehensive diagnostic for the recall state of a player-counterpart pair. */
+  public generateRecallDiagnostic(playerId: string, counterpartId: string, request: QuoteRecallResolverRequest): RecallDiagnosticReport {
+    const response = this.resolve(request);
+    const history = this.getRecallHistory(playerId, counterpartId);
+    const effectivenessRate = this.recallEffectivenessRate(playerId, counterpartId);
+    const chain = this.detectActiveChain(playerId, counterpartId);
+    const topSelection = response.winningSelection;
+
+    return Object.freeze({
+      playerId, counterpartId,
+      totalSelections: response.selections.length,
+      winningSelectionId: topSelection?.selectionId,
+      winningScore01: topSelection?.score01 ?? 0,
+      winningText: topSelection?.text.slice(0, 80) ?? '',
+      totalHistoricalRecalls: history.length,
+      effectivenessRate01: effectivenessRate,
+      activeChainId: chain?.chainId,
+      chainDepth: chain?.currentDepth ?? 0,
+      chainExhausted: chain?.exhausted ?? true,
+      avgSelectionScore01: response.selections.length > 0
+        ? response.selections.reduce((s, sel) => s + sel.score01, 0) / response.selections.length : 0,
+      surfaceDistribution: Object.freeze(
+        response.selections.reduce((acc, s) => {
+          acc[s.surface] = (acc[s.surface] ?? 0) + 1;
+          return acc;
+        }, {} as Record<string, number>)
+      ),
+    });
+  }
+
+  /** Build diagnostic lines for logging. */
+  public buildDiagnosticLines(playerId: string, counterpartId: string, request: QuoteRecallResolverRequest): readonly string[] {
+    const report = this.generateRecallDiagnostic(playerId, counterpartId, request);
+    const lines: string[] = [];
+    lines.push(`recall_diagnostic|player=${report.playerId}|counterpart=${report.counterpartId}`);
+    lines.push(`selections=${report.totalSelections}|winner=${report.winningSelectionId ?? 'none'}|winScore=${report.winningScore01.toFixed(3)}`);
+    lines.push(`history=${report.totalHistoricalRecalls}|effectiveness=${report.effectivenessRate01.toFixed(3)}`);
+    lines.push(`chain=${report.activeChainId ?? 'none'}|depth=${report.chainDepth}|exhausted=${report.chainExhausted}`);
+    lines.push(`avgScore=${report.avgSelectionScore01.toFixed(3)}`);
+    if (report.winningText) lines.push(`winText="${report.winningText}"`);
+    return lines;
+  }
+
+
 }
 
+
+
+// ============================================================================
+// MARK: Real audit slices — 25 unique diagnostic tools
+// ============================================================================
+
+/** Slice 1: Recall mode distribution — what modes are requesting recalls. */
 export function buildQuoteRecallAuditSlice1(resolver: QuoteRecallResolver, request: QuoteRecallResolverRequest): readonly string[] {
-  const response = resolver.resolve({ ...request, maxSelections: Math.min(request.maxSelections ?? 6, 6) });
-  const lines: string[] = [];
-  lines.push(`slice=1`);
-  lines.push(`mode=${response.mode}`);
-  lines.push(`selections=${response.selections.length}`);
-  if (response.winningSelection) lines.push(`winner=${response.winningSelection.selectionId}`);
-  for (const selection of response.selections.slice(0, 4)) {
-    lines.push(`${selection.surface}|${selection.score01.toFixed(3)}|${selection.reasonCodes.join(',')}|${selection.text.slice(0, 56)}`);
-  }
+  const response = resolver.resolve({ ...request, maxSelections: 8 });
+  const lines: string[] = ['slice=1|recall_mode_distribution'];
+  lines.push(`mode=${response.mode}|total_selections=${response.selections.length}`);
+  const bySurface = new Map<string, number>();
+  for (const s of response.selections) bySurface.set(s.surface, (bySurface.get(s.surface) ?? 0) + 1);
+  for (const [surface, count] of bySurface) lines.push(`${surface}=${count}`);
   return lines;
 }
 
+/** Slice 2: Score distribution of selections. */
 export function buildQuoteRecallAuditSlice2(resolver: QuoteRecallResolver, request: QuoteRecallResolverRequest): readonly string[] {
-  const response = resolver.resolve({ ...request, maxSelections: Math.min(request.maxSelections ?? 6, 6) });
-  const lines: string[] = [];
-  lines.push(`slice=2`);
-  lines.push(`mode=${response.mode}`);
-  lines.push(`selections=${response.selections.length}`);
-  if (response.winningSelection) lines.push(`winner=${response.winningSelection.selectionId}`);
-  for (const selection of response.selections.slice(0, 4)) {
-    lines.push(`${selection.surface}|${selection.score01.toFixed(3)}|${selection.reasonCodes.join(',')}|${selection.text.slice(0, 56)}`);
+  const response = resolver.resolve({ ...request, maxSelections: 8 });
+  const lines: string[] = ['slice=2|score_distribution'];
+  for (const s of response.selections) {
+    lines.push(`${s.selectionId}|score=${s.score01.toFixed(3)}|surface=${s.surface}|reasons=${s.reasonCodes.slice(0, 4).join(',')}`);
   }
   return lines;
 }
 
+/** Slice 3: Quote chain status. */
 export function buildQuoteRecallAuditSlice3(resolver: QuoteRecallResolver, request: QuoteRecallResolverRequest): readonly string[] {
-  const response = resolver.resolve({ ...request, maxSelections: Math.min(request.maxSelections ?? 6, 6) });
-  const lines: string[] = [];
-  lines.push(`slice=3`);
-  lines.push(`mode=${response.mode}`);
-  lines.push(`selections=${response.selections.length}`);
-  if (response.winningSelection) lines.push(`winner=${response.winningSelection.selectionId}`);
-  for (const selection of response.selections.slice(0, 4)) {
-    lines.push(`${selection.surface}|${selection.score01.toFixed(3)}|${selection.reasonCodes.join(',')}|${selection.text.slice(0, 56)}`);
+  const lines: string[] = ['slice=3|chain_status'];
+  const chain = resolver.detectActiveChain(request.playerId, request.counterpartId ?? '');
+  if (chain) {
+    lines.push(`chain=${chain.chainId}|depth=${chain.currentDepth}/${chain.maxDepth}|exhausted=${chain.exhausted}|quotes=${chain.quoteIds.length}`);
+  } else {
+    lines.push('no_active_chain');
   }
   return lines;
 }
 
+/** Slice 4: Recall fatigue analysis. */
 export function buildQuoteRecallAuditSlice4(resolver: QuoteRecallResolver, request: QuoteRecallResolverRequest): readonly string[] {
-  const response = resolver.resolve({ ...request, maxSelections: Math.min(request.maxSelections ?? 6, 6) });
-  const lines: string[] = [];
-  lines.push(`slice=4`);
-  lines.push(`mode=${response.mode}`);
-  lines.push(`selections=${response.selections.length}`);
-  if (response.winningSelection) lines.push(`winner=${response.winningSelection.selectionId}`);
-  for (const selection of response.selections.slice(0, 4)) {
-    lines.push(`${selection.surface}|${selection.score01.toFixed(3)}|${selection.reasonCodes.join(',')}|${selection.text.slice(0, 56)}`);
+  const response = resolver.resolve({ ...request, maxSelections: 12 });
+  const lines: string[] = ['slice=4|fatigue_analysis'];
+  for (const s of response.selections.slice(0, 8)) {
+    const fatigue = resolver.computeRecallFatigue(s);
+    const shouldRetire = resolver.shouldRetireQuote(s);
+    lines.push(`${s.selectionId}|uses=${s.usageCount}|fatigue=${fatigue.toFixed(3)}|retire=${shouldRetire}|"${s.text.slice(0, 40)}"`);
   }
   return lines;
 }
 
+/** Slice 5: Mutation strategy recommendations. */
 export function buildQuoteRecallAuditSlice5(resolver: QuoteRecallResolver, request: QuoteRecallResolverRequest): readonly string[] {
-  const response = resolver.resolve({ ...request, maxSelections: Math.min(request.maxSelections ?? 6, 6) });
-  const lines: string[] = [];
-  lines.push(`slice=5`);
-  lines.push(`mode=${response.mode}`);
-  lines.push(`selections=${response.selections.length}`);
-  if (response.winningSelection) lines.push(`winner=${response.winningSelection.selectionId}`);
-  for (const selection of response.selections.slice(0, 4)) {
-    lines.push(`${selection.surface}|${selection.score01.toFixed(3)}|${selection.reasonCodes.join(',')}|${selection.text.slice(0, 56)}`);
+  const response = resolver.resolve({ ...request, maxSelections: 8 });
+  const lines: string[] = ['slice=5|mutation_strategy'];
+  for (const s of response.selections.slice(0, 6)) {
+    const strategy = resolver.selectMutationStrategy(s, 'HATER');
+    lines.push(`${s.selectionId}|strategy=${strategy}|score=${s.score01.toFixed(3)}|"${s.text.slice(0, 40)}"`);
   }
   return lines;
 }
 
+/** Slice 6: Dramatic timing recommendations. */
 export function buildQuoteRecallAuditSlice6(resolver: QuoteRecallResolver, request: QuoteRecallResolverRequest): readonly string[] {
-  const response = resolver.resolve({ ...request, maxSelections: Math.min(request.maxSelections ?? 6, 6) });
-  const lines: string[] = [];
-  lines.push(`slice=6`);
-  lines.push(`mode=${response.mode}`);
-  lines.push(`selections=${response.selections.length}`);
-  if (response.winningSelection) lines.push(`winner=${response.winningSelection.selectionId}`);
-  for (const selection of response.selections.slice(0, 4)) {
-    lines.push(`${selection.surface}|${selection.score01.toFixed(3)}|${selection.reasonCodes.join(',')}|${selection.text.slice(0, 56)}`);
+  const response = resolver.resolve({ ...request, maxSelections: 6 });
+  const lines: string[] = ['slice=6|dramatic_timing'];
+  for (const s of response.selections.slice(0, 4)) {
+    const delay = resolver.computeOptimalDelay(s, 0.5, 'MEDIUM');
+    const hold = resolver.shouldHoldForDramaticImpact(s, 0.5);
+    lines.push(`${s.selectionId}|delay=${delay}ms|hold=${hold}|score=${s.score01.toFixed(3)}`);
   }
   return lines;
 }
 
+/** Slice 7: Fusion candidates. */
 export function buildQuoteRecallAuditSlice7(resolver: QuoteRecallResolver, request: QuoteRecallResolverRequest): readonly string[] {
-  const response = resolver.resolve({ ...request, maxSelections: Math.min(request.maxSelections ?? 6, 6) });
-  const lines: string[] = [];
-  lines.push(`slice=7`);
-  lines.push(`mode=${response.mode}`);
-  lines.push(`selections=${response.selections.length}`);
-  if (response.winningSelection) lines.push(`winner=${response.winningSelection.selectionId}`);
-  for (const selection of response.selections.slice(0, 4)) {
-    lines.push(`${selection.surface}|${selection.score01.toFixed(3)}|${selection.reasonCodes.join(',')}|${selection.text.slice(0, 56)}`);
+  const response = resolver.resolve({ ...request, maxSelections: 8 });
+  const lines: string[] = ['slice=7|fusion_candidates'];
+  const fusion = resolver.fuseRecallSources(response.selections);
+  if (fusion) {
+    lines.push(`fusion=${fusion.fusionId}|score=${fusion.fusedScore01.toFixed(3)}`);
+    lines.push(`template="${fusion.narrativeTemplate.slice(0, 80)}"`);
+  } else {
+    lines.push('no_fusion_possible');
   }
   return lines;
 }
 
+/** Slice 8: Winning selection deep inspection. */
 export function buildQuoteRecallAuditSlice8(resolver: QuoteRecallResolver, request: QuoteRecallResolverRequest): readonly string[] {
-  const response = resolver.resolve({ ...request, maxSelections: Math.min(request.maxSelections ?? 6, 6) });
-  const lines: string[] = [];
-  lines.push(`slice=8`);
-  lines.push(`mode=${response.mode}`);
-  lines.push(`selections=${response.selections.length}`);
-  if (response.winningSelection) lines.push(`winner=${response.winningSelection.selectionId}`);
-  for (const selection of response.selections.slice(0, 4)) {
-    lines.push(`${selection.surface}|${selection.score01.toFixed(3)}|${selection.reasonCodes.join(',')}|${selection.text.slice(0, 56)}`);
+  const response = resolver.resolve({ ...request, maxSelections: 6 });
+  const lines: string[] = ['slice=8|winning_selection'];
+  if (response.winningSelection) {
+    const w = response.winningSelection;
+    lines.push(`id=${w.selectionId}|score=${w.score01.toFixed(3)}|surface=${w.surface}`);
+    lines.push(`text="${w.text.slice(0, 80)}"`);
+    lines.push(`reasons=${w.reasonCodes.join(',')}`);
+    lines.push(`uses=${w.usageCount}|fatigue=${resolver.computeRecallFatigue(w).toFixed(3)}`);
+  } else {
+    lines.push('no_winning_selection');
   }
   return lines;
 }
 
+/** Slice 9-25: Per-mode recall profile diagnostics and additional analytics. */
 export function buildQuoteRecallAuditSlice9(resolver: QuoteRecallResolver, request: QuoteRecallResolverRequest): readonly string[] {
-  const response = resolver.resolve({ ...request, maxSelections: Math.min(request.maxSelections ?? 6, 6) });
-  const lines: string[] = [];
-  lines.push(`slice=9`);
-  lines.push(`mode=${response.mode}`);
-  lines.push(`selections=${response.selections.length}`);
-  if (response.winningSelection) lines.push(`winner=${response.winningSelection.selectionId}`);
-  for (const selection of response.selections.slice(0, 4)) {
-    lines.push(`${selection.surface}|${selection.score01.toFixed(3)}|${selection.reasonCodes.join(',')}|${selection.text.slice(0, 56)}`);
+  const lines: string[] = ['slice=9|mode_profiles'];
+  for (const modeId of ['GO_ALONE', 'HEAD_TO_HEAD', 'TEAM_UP', 'CHASE_A_LEGEND']) {
+    const p = resolver.getModeRecallProfile(modeId);
+    lines.push(`${modeId}|mutation=${p.preferredMutation}|timing=${p.timingMultiplier}|fragment=${p.fragmentary}`);
   }
   return lines;
 }
 
 export function buildQuoteRecallAuditSlice10(resolver: QuoteRecallResolver, request: QuoteRecallResolverRequest): readonly string[] {
-  const response = resolver.resolve({ ...request, maxSelections: Math.min(request.maxSelections ?? 6, 6) });
-  const lines: string[] = [];
-  lines.push(`slice=10`);
-  lines.push(`mode=${response.mode}`);
-  lines.push(`selections=${response.selections.length}`);
-  if (response.winningSelection) lines.push(`winner=${response.winningSelection.selectionId}`);
-  for (const selection of response.selections.slice(0, 4)) {
-    lines.push(`${selection.surface}|${selection.score01.toFixed(3)}|${selection.reasonCodes.join(',')}|${selection.text.slice(0, 56)}`);
-  }
+  const response = resolver.resolve({ ...request, maxSelections: 12, includeQuotes: true, includeCallbacks: false });
+  const lines: string[] = ['slice=10|quotes_only'];
+  lines.push(`total=${response.selections.length}`);
+  for (const s of response.selections.slice(0, 6)) lines.push(`${s.score01.toFixed(3)}|"${s.text.slice(0, 56)}"`);
   return lines;
 }
 
 export function buildQuoteRecallAuditSlice11(resolver: QuoteRecallResolver, request: QuoteRecallResolverRequest): readonly string[] {
-  const response = resolver.resolve({ ...request, maxSelections: Math.min(request.maxSelections ?? 6, 6) });
-  const lines: string[] = [];
-  lines.push(`slice=11`);
-  lines.push(`mode=${response.mode}`);
-  lines.push(`selections=${response.selections.length}`);
-  if (response.winningSelection) lines.push(`winner=${response.winningSelection.selectionId}`);
-  for (const selection of response.selections.slice(0, 4)) {
-    lines.push(`${selection.surface}|${selection.score01.toFixed(3)}|${selection.reasonCodes.join(',')}|${selection.text.slice(0, 56)}`);
-  }
+  const response = resolver.resolve({ ...request, maxSelections: 12, includeQuotes: false, includeCallbacks: true });
+  const lines: string[] = ['slice=11|callbacks_only'];
+  lines.push(`total=${response.selections.length}`);
+  for (const s of response.selections.slice(0, 6)) lines.push(`${s.score01.toFixed(3)}|"${s.text.slice(0, 56)}"`);
   return lines;
 }
 
 export function buildQuoteRecallAuditSlice12(resolver: QuoteRecallResolver, request: QuoteRecallResolverRequest): readonly string[] {
-  const response = resolver.resolve({ ...request, maxSelections: Math.min(request.maxSelections ?? 6, 6) });
-  const lines: string[] = [];
-  lines.push(`slice=12`);
-  lines.push(`mode=${response.mode}`);
-  lines.push(`selections=${response.selections.length}`);
-  if (response.winningSelection) lines.push(`winner=${response.winningSelection.selectionId}`);
-  for (const selection of response.selections.slice(0, 4)) {
-    lines.push(`${selection.surface}|${selection.score01.toFixed(3)}|${selection.reasonCodes.join(',')}|${selection.text.slice(0, 56)}`);
-  }
+  const response = resolver.resolve({ ...request, maxSelections: 8 });
+  const lines: string[] = ['slice=12|reason_code_frequency'];
+  const freq = new Map<string, number>();
+  for (const s of response.selections) for (const r of s.reasonCodes) freq.set(r, (freq.get(r) ?? 0) + 1);
+  for (const [code, count] of [...freq.entries()].sort((a, b) => b[1] - a[1])) lines.push(`${code}=${count}`);
   return lines;
 }
 
-export function buildQuoteRecallAuditSlice13(resolver: QuoteRecallResolver, request: QuoteRecallResolverRequest): readonly string[] {
-  const response = resolver.resolve({ ...request, maxSelections: Math.min(request.maxSelections ?? 6, 6) });
-  const lines: string[] = [];
-  lines.push(`slice=13`);
-  lines.push(`mode=${response.mode}`);
-  lines.push(`selections=${response.selections.length}`);
-  if (response.winningSelection) lines.push(`winner=${response.winningSelection.selectionId}`);
-  for (const selection of response.selections.slice(0, 4)) {
-    lines.push(`${selection.surface}|${selection.score01.toFixed(3)}|${selection.reasonCodes.join(',')}|${selection.text.slice(0, 56)}`);
-  }
-  return lines;
+export function buildQuoteRecallAuditSlice13(r: QuoteRecallResolver, req: QuoteRecallResolverRequest): readonly string[] { const resp = r.resolve({ ...req, maxSelections: 6 }); return ['slice=13|audit_trail', ...resp.auditTrail.slice(0, 10)]; }
+export function buildQuoteRecallAuditSlice14(r: QuoteRecallResolver, req: QuoteRecallResolverRequest): readonly string[] { const resp = r.resolve({ ...req, maxSelections: 6 }); return ['slice=14|resolution_quote', resp.quoteResolution ? `resolved|${resp.quoteResolution.outcome}` : 'none']; }
+export function buildQuoteRecallAuditSlice15(r: QuoteRecallResolver, req: QuoteRecallResolverRequest): readonly string[] { const resp = r.resolve({ ...req, maxSelections: 6 }); return ['slice=15|resolution_callback', resp.callbackResolution ? `resolved|${resp.callbackResolution.outcome}` : 'none']; }
+export function buildQuoteRecallAuditSlice16(r: QuoteRecallResolver, req: QuoteRecallResolverRequest): readonly string[] { return ['slice=16|request_params', `mode=${req.mode}|player=${req.playerId}|actor=${req.actorId ?? 'none'}|cp=${req.counterpartId ?? 'none'}|max=${req.maxSelections ?? 'default'}`]; }
+export function buildQuoteRecallAuditSlice17(r: QuoteRecallResolver, req: QuoteRecallResolverRequest): readonly string[] { const resp = r.resolve({ ...req, maxSelections: 4, mode: 'RIVALRY' }); return ['slice=17|rivalry_recall', `selections=${resp.selections.length}`, ...resp.selections.map(s => `${s.score01.toFixed(3)}|"${s.text.slice(0,48)}"`)]; }
+export function buildQuoteRecallAuditSlice18(r: QuoteRecallResolver, req: QuoteRecallResolverRequest): readonly string[] { const resp = r.resolve({ ...req, maxSelections: 4, mode: 'HELPER' }); return ['slice=18|helper_recall', `selections=${resp.selections.length}`, ...resp.selections.map(s => `${s.score01.toFixed(3)}|"${s.text.slice(0,48)}"`)]; }
+export function buildQuoteRecallAuditSlice19(r: QuoteRecallResolver, req: QuoteRecallResolverRequest): readonly string[] { const resp = r.resolve({ ...req, maxSelections: 4, mode: 'DEAL_ROOM' }); return ['slice=19|deal_room_recall', `selections=${resp.selections.length}`, ...resp.selections.map(s => `${s.score01.toFixed(3)}|"${s.text.slice(0,48)}"`)]; }
+export function buildQuoteRecallAuditSlice20(r: QuoteRecallResolver, req: QuoteRecallResolverRequest): readonly string[] { const resp = r.resolve({ ...req, maxSelections: 4, mode: 'AUDIENCE' }); return ['slice=20|audience_recall', `selections=${resp.selections.length}`, ...resp.selections.map(s => `${s.score01.toFixed(3)}|"${s.text.slice(0,48)}"`)]; }
+export function buildQuoteRecallAuditSlice21(r: QuoteRecallResolver, req: QuoteRecallResolverRequest): readonly string[] { const resp = r.resolve({ ...req, maxSelections: 4, mode: 'RESCUE' }); return ['slice=21|rescue_recall', `selections=${resp.selections.length}`, ...resp.selections.map(s => `${s.score01.toFixed(3)}|"${s.text.slice(0,48)}"`)]; }
+export function buildQuoteRecallAuditSlice22(r: QuoteRecallResolver, req: QuoteRecallResolverRequest): readonly string[] { const resp = r.resolve({ ...req, maxSelections: 4, mode: 'POSTRUN' }); return ['slice=22|postrun_recall', `selections=${resp.selections.length}`, ...resp.selections.map(s => `${s.score01.toFixed(3)}|"${s.text.slice(0,48)}"`)]; }
+export function buildQuoteRecallAuditSlice23(r: QuoteRecallResolver, req: QuoteRecallResolverRequest): readonly string[] { const resp = r.resolve({ ...req, maxSelections: 4, mode: 'SYSTEM' }); return ['slice=23|system_recall', `selections=${resp.selections.length}`, ...resp.selections.map(s => `${s.score01.toFixed(3)}|"${s.text.slice(0,48)}"`)]; }
+export function buildQuoteRecallAuditSlice24(r: QuoteRecallResolver, req: QuoteRecallResolverRequest): readonly string[] { const resp = r.resolve({ ...req, maxSelections: 8, allowReuse: true }); return ['slice=24|with_reuse', `selections=${resp.selections.length}`, ...resp.selections.slice(0,4).map(s => `${s.score01.toFixed(3)}|uses=${s.usageCount}|"${s.text.slice(0,40)}"`)]; }
+export function buildQuoteRecallAuditSlice25(r: QuoteRecallResolver, req: QuoteRecallResolverRequest): readonly string[] { const resp = r.resolve({ ...req, maxSelections: 8, proofRequired: true }); return ['slice=25|proof_required', `selections=${resp.selections.length}`, ...resp.selections.slice(0,4).map(s => `${s.score01.toFixed(3)}|"${s.text.slice(0,48)}"`)]; }
+
+
+// ============================================================================
+// MARK: Recall utility functions
+// ============================================================================
+
+/** Compute the narrative weight of a recall — how much story value it adds. */
+export function computeRecallNarrativeWeight01(
+  selection: QuoteRecallSelection,
+  audienceHeat01: number,
+  isFirstRecallInScene: boolean,
+): number {
+  const baseWeight = selection.score01 * 0.4;
+  const audienceBoost = audienceHeat01 * 0.25;
+  const firstBonus = isFirstRecallInScene ? 0.2 : 0;
+  const fatigueDiscount = selection.usageCount > 3 ? -0.15 : 0;
+  return Math.min(1, Math.max(0, baseWeight + audienceBoost + firstBonus + fatigueDiscount));
 }
 
-export function buildQuoteRecallAuditSlice14(resolver: QuoteRecallResolver, request: QuoteRecallResolverRequest): readonly string[] {
-  const response = resolver.resolve({ ...request, maxSelections: Math.min(request.maxSelections ?? 6, 6) });
-  const lines: string[] = [];
-  lines.push(`slice=14`);
-  lines.push(`mode=${response.mode}`);
-  lines.push(`selections=${response.selections.length}`);
-  if (response.winningSelection) lines.push(`winner=${response.winningSelection.selectionId}`);
-  for (const selection of response.selections.slice(0, 4)) {
-    lines.push(`${selection.surface}|${selection.score01.toFixed(3)}|${selection.reasonCodes.join(',')}|${selection.text.slice(0, 56)}`);
-  }
-  return lines;
+/** Determine if a recall should trigger a counter-recall opportunity for the player. */
+export function shouldOfferCounterRecall(
+  selection: QuoteRecallSelection,
+  playerConfidence01: number,
+  playerHasReceipts: boolean,
+): boolean {
+  if (!playerHasReceipts) return false;
+  if (selection.surface !== 'RIVALRY' && selection.surface !== 'DEAL_ROOM') return false;
+  return playerConfidence01 >= 0.5 && selection.score01 >= 0.4;
 }
 
-export function buildQuoteRecallAuditSlice15(resolver: QuoteRecallResolver, request: QuoteRecallResolverRequest): readonly string[] {
-  const response = resolver.resolve({ ...request, maxSelections: Math.min(request.maxSelections ?? 6, 6) });
-  const lines: string[] = [];
-  lines.push(`slice=15`);
-  lines.push(`mode=${response.mode}`);
-  lines.push(`selections=${response.selections.length}`);
-  if (response.winningSelection) lines.push(`winner=${response.winningSelection.selectionId}`);
-  for (const selection of response.selections.slice(0, 4)) {
-    lines.push(`${selection.surface}|${selection.score01.toFixed(3)}|${selection.reasonCodes.join(',')}|${selection.text.slice(0, 56)}`);
+/** Estimate how the audience will react to a specific recall. */
+export function estimateAudienceReaction(
+  selection: QuoteRecallSelection,
+  audienceHeat01: number,
+): { reactionType: 'HYPE' | 'SHOCK' | 'COLD' | 'INDIFFERENT'; intensity01: number } {
+  if (selection.score01 >= 0.8 && audienceHeat01 >= 0.6) {
+    return { reactionType: 'HYPE', intensity01: Math.min(1, selection.score01 * audienceHeat01 * 1.5) };
   }
-  return lines;
+  if (selection.score01 >= 0.6 && selection.surface === 'RIVALRY') {
+    return { reactionType: 'SHOCK', intensity01: selection.score01 * 0.8 };
+  }
+  if (audienceHeat01 < 0.2) {
+    return { reactionType: 'COLD', intensity01: 0.1 };
+  }
+  return { reactionType: 'INDIFFERENT', intensity01: 0.3 };
 }
 
-export function buildQuoteRecallAuditSlice16(resolver: QuoteRecallResolver, request: QuoteRecallResolverRequest): readonly string[] {
-  const response = resolver.resolve({ ...request, maxSelections: Math.min(request.maxSelections ?? 6, 6) });
-  const lines: string[] = [];
-  lines.push(`slice=16`);
-  lines.push(`mode=${response.mode}`);
-  lines.push(`selections=${response.selections.length}`);
-  if (response.winningSelection) lines.push(`winner=${response.winningSelection.selectionId}`);
-  for (const selection of response.selections.slice(0, 4)) {
-    lines.push(`${selection.surface}|${selection.score01.toFixed(3)}|${selection.reasonCodes.join(',')}|${selection.text.slice(0, 56)}`);
-  }
-  return lines;
+/** Build a complete recall audit report for proof chain surfaces. */
+export function buildRecallAuditReport(
+  resolver: QuoteRecallResolver,
+  playerId: string,
+  counterpartId: string,
+  request: QuoteRecallResolverRequest,
+): readonly string[] {
+  const diagLines = resolver.buildDiagnosticLines(playerId, counterpartId, request);
+  const history = resolver.getRecallHistory(playerId, counterpartId);
+  return [
+    ...diagLines,
+    `recent_recalls=${history.length}`,
+    ...history.slice(-6).map((h) => `  ${h.surface}|score=${h.score01.toFixed(3)}|mutation=${h.mutationStrategy}|fatigue=${h.fatigueAtRecall.toFixed(3)}|"${h.text.slice(0, 40)}"`),
+  ];
 }
 
-export function buildQuoteRecallAuditSlice17(resolver: QuoteRecallResolver, request: QuoteRecallResolverRequest): readonly string[] {
-  const response = resolver.resolve({ ...request, maxSelections: Math.min(request.maxSelections ?? 6, 6) });
-  const lines: string[] = [];
-  lines.push(`slice=17`);
-  lines.push(`mode=${response.mode}`);
-  lines.push(`selections=${response.selections.length}`);
-  if (response.winningSelection) lines.push(`winner=${response.winningSelection.selectionId}`);
-  for (const selection of response.selections.slice(0, 4)) {
-    lines.push(`${selection.surface}|${selection.score01.toFixed(3)}|${selection.reasonCodes.join(',')}|${selection.text.slice(0, 56)}`);
-  }
-  return lines;
-}
 
-export function buildQuoteRecallAuditSlice18(resolver: QuoteRecallResolver, request: QuoteRecallResolverRequest): readonly string[] {
-  const response = resolver.resolve({ ...request, maxSelections: Math.min(request.maxSelections ?? 6, 6) });
-  const lines: string[] = [];
-  lines.push(`slice=18`);
-  lines.push(`mode=${response.mode}`);
-  lines.push(`selections=${response.selections.length}`);
-  if (response.winningSelection) lines.push(`winner=${response.winningSelection.selectionId}`);
-  for (const selection of response.selections.slice(0, 4)) {
-    lines.push(`${selection.surface}|${selection.score01.toFixed(3)}|${selection.reasonCodes.join(',')}|${selection.text.slice(0, 56)}`);
-  }
-  return lines;
-}
-
-export function buildQuoteRecallAuditSlice19(resolver: QuoteRecallResolver, request: QuoteRecallResolverRequest): readonly string[] {
-  const response = resolver.resolve({ ...request, maxSelections: Math.min(request.maxSelections ?? 6, 6) });
-  const lines: string[] = [];
-  lines.push(`slice=19`);
-  lines.push(`mode=${response.mode}`);
-  lines.push(`selections=${response.selections.length}`);
-  if (response.winningSelection) lines.push(`winner=${response.winningSelection.selectionId}`);
-  for (const selection of response.selections.slice(0, 4)) {
-    lines.push(`${selection.surface}|${selection.score01.toFixed(3)}|${selection.reasonCodes.join(',')}|${selection.text.slice(0, 56)}`);
-  }
-  return lines;
-}
-
-export function buildQuoteRecallAuditSlice20(resolver: QuoteRecallResolver, request: QuoteRecallResolverRequest): readonly string[] {
-  const response = resolver.resolve({ ...request, maxSelections: Math.min(request.maxSelections ?? 6, 6) });
-  const lines: string[] = [];
-  lines.push(`slice=20`);
-  lines.push(`mode=${response.mode}`);
-  lines.push(`selections=${response.selections.length}`);
-  if (response.winningSelection) lines.push(`winner=${response.winningSelection.selectionId}`);
-  for (const selection of response.selections.slice(0, 4)) {
-    lines.push(`${selection.surface}|${selection.score01.toFixed(3)}|${selection.reasonCodes.join(',')}|${selection.text.slice(0, 56)}`);
-  }
-  return lines;
-}
-
-export function buildQuoteRecallAuditSlice21(resolver: QuoteRecallResolver, request: QuoteRecallResolverRequest): readonly string[] {
-  const response = resolver.resolve({ ...request, maxSelections: Math.min(request.maxSelections ?? 6, 6) });
-  const lines: string[] = [];
-  lines.push(`slice=21`);
-  lines.push(`mode=${response.mode}`);
-  lines.push(`selections=${response.selections.length}`);
-  if (response.winningSelection) lines.push(`winner=${response.winningSelection.selectionId}`);
-  for (const selection of response.selections.slice(0, 4)) {
-    lines.push(`${selection.surface}|${selection.score01.toFixed(3)}|${selection.reasonCodes.join(',')}|${selection.text.slice(0, 56)}`);
-  }
-  return lines;
-}
-
-export function buildQuoteRecallAuditSlice22(resolver: QuoteRecallResolver, request: QuoteRecallResolverRequest): readonly string[] {
-  const response = resolver.resolve({ ...request, maxSelections: Math.min(request.maxSelections ?? 6, 6) });
-  const lines: string[] = [];
-  lines.push(`slice=22`);
-  lines.push(`mode=${response.mode}`);
-  lines.push(`selections=${response.selections.length}`);
-  if (response.winningSelection) lines.push(`winner=${response.winningSelection.selectionId}`);
-  for (const selection of response.selections.slice(0, 4)) {
-    lines.push(`${selection.surface}|${selection.score01.toFixed(3)}|${selection.reasonCodes.join(',')}|${selection.text.slice(0, 56)}`);
-  }
-  return lines;
-}
-
-export function buildQuoteRecallAuditSlice23(resolver: QuoteRecallResolver, request: QuoteRecallResolverRequest): readonly string[] {
-  const response = resolver.resolve({ ...request, maxSelections: Math.min(request.maxSelections ?? 6, 6) });
-  const lines: string[] = [];
-  lines.push(`slice=23`);
-  lines.push(`mode=${response.mode}`);
-  lines.push(`selections=${response.selections.length}`);
-  if (response.winningSelection) lines.push(`winner=${response.winningSelection.selectionId}`);
-  for (const selection of response.selections.slice(0, 4)) {
-    lines.push(`${selection.surface}|${selection.score01.toFixed(3)}|${selection.reasonCodes.join(',')}|${selection.text.slice(0, 56)}`);
-  }
-  return lines;
-}
-
-export function buildQuoteRecallAuditSlice24(resolver: QuoteRecallResolver, request: QuoteRecallResolverRequest): readonly string[] {
-  const response = resolver.resolve({ ...request, maxSelections: Math.min(request.maxSelections ?? 6, 6) });
-  const lines: string[] = [];
-  lines.push(`slice=24`);
-  lines.push(`mode=${response.mode}`);
-  lines.push(`selections=${response.selections.length}`);
-  if (response.winningSelection) lines.push(`winner=${response.winningSelection.selectionId}`);
-  for (const selection of response.selections.slice(0, 4)) {
-    lines.push(`${selection.surface}|${selection.score01.toFixed(3)}|${selection.reasonCodes.join(',')}|${selection.text.slice(0, 56)}`);
-  }
-  return lines;
-}
-
-export function buildQuoteRecallAuditSlice25(resolver: QuoteRecallResolver, request: QuoteRecallResolverRequest): readonly string[] {
-  const response = resolver.resolve({ ...request, maxSelections: Math.min(request.maxSelections ?? 6, 6) });
-  const lines: string[] = [];
-  lines.push(`slice=25`);
-  lines.push(`mode=${response.mode}`);
-  lines.push(`selections=${response.selections.length}`);
-  if (response.winningSelection) lines.push(`winner=${response.winningSelection.selectionId}`);
-  for (const selection of response.selections.slice(0, 4)) {
-    lines.push(`${selection.surface}|${selection.score01.toFixed(3)}|${selection.reasonCodes.join(',')}|${selection.text.slice(0, 56)}`);
-  }
-  return lines;
-}

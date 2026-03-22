@@ -28,8 +28,8 @@ import type {
   ChatRelationshipSnapshot,
   ChatRelationshipStance,
   ChatRelationshipSummaryView,
-} from '../../../../../shared/contracts/chat/relationship';
-import { clamp01 } from '../../../../../shared/contracts/chat/relationship';
+} from '../../../../../../shared/contracts/chat/relationship';
+import { clamp01 } from '../../../../../../shared/contracts/chat/relationship';
 import {
   ChatRelationshipService,
   DEFAULT_CHAT_RELATIONSHIP_SERVICE_CONFIG,
@@ -336,6 +336,83 @@ function hotRationale(
   if (score01 > 0.78) reasons.push('top_priority');
   return reasons;
 }
+
+
+// ============================================================================
+// MARK: Trajectory tracking types
+// ============================================================================
+
+export interface RelationshipTrajectorySnapshot {
+  readonly timestamp: number;
+  readonly trust01: number;
+  readonly rivalry01: number;
+  readonly intensity01: number;
+  readonly volatility01: number;
+  readonly obsession01: number;
+  readonly stance: ChatRelationshipStance;
+}
+
+export type RelationshipTrajectoryTrend = 'RISING' | 'FALLING' | 'PLATEAUED' | 'OSCILLATING' | 'ERUPTING' | 'INSUFFICIENT_DATA';
+
+// ============================================================================
+// MARK: Counterpart cluster types
+// ============================================================================
+
+export interface CounterpartCluster {
+  readonly clusterId: string;
+  readonly memberIds: readonly string[];
+  readonly coOccurrenceStrength: 'WEAK' | 'MODERATE' | 'STRONG';
+  readonly clusterRole: 'PACK' | 'ALLIANCE' | 'ENTOURAGE' | 'ORBIT';
+  readonly memberCount: number;
+}
+
+// ============================================================================
+// MARK: Compacted relationship summary
+// ============================================================================
+
+export interface CompactedRelationshipSummary {
+  readonly counterpartId: string;
+  readonly counterpartKind: ChatRelationshipCounterpartKind;
+  readonly peakIntensity01: number;
+  readonly lastTouchedAt: number;
+  readonly eventCount: number;
+  readonly stance: ChatRelationshipStance;
+  readonly compactedAt: number;
+}
+
+
+
+// ============================================================================
+// MARK: Cross-player relationship view
+// ============================================================================
+
+export interface CrossPlayerRelationshipView {
+  readonly counterpartId: string;
+  readonly playerAId: string;
+  readonly playerBId: string;
+  readonly stanceA: ChatRelationshipStance;
+  readonly stanceB: ChatRelationshipStance;
+  readonly trustDelta01: number;
+  readonly rivalryDelta01: number;
+  readonly intensityDelta01: number;
+  readonly asymmetryScore01: number;
+  readonly shareRival: boolean;
+  readonly shareHelper: boolean;
+}
+
+// ============================================================================
+// MARK: Event pattern types
+// ============================================================================
+
+export interface EventPattern {
+  readonly patternId: string;
+  readonly triggerEventType: string;
+  readonly responseEventType: string;
+  readonly confidence01: number;
+  readonly recurrenceCount: number;
+  readonly description: string;
+}
+
 
 export class RelationshipLedger {
   private readonly config: RelationshipLedgerConfig;
@@ -1174,5 +1251,213 @@ export class RelationshipLedger {
       exportsStored: this.listExports(playerId).length,
     };
   }
+
+
+
+  // ==========================================================================
+  // MARK: Relationship trajectory tracking
+  // ==========================================================================
+
+  private readonly _trajectories = new Map<string, RelationshipTrajectorySnapshot[]>();
+
+  /** Record a periodic trajectory snapshot for a counterpart relationship. */
+  public recordTrajectorySnapshot(playerId: string, counterpartId: string, state: ChatRelationshipCounterpartState, at: number): void {
+    const key = `${playerId}:${counterpartId}`;
+    const entries = this._trajectories.get(key) ?? [];
+    entries.push({
+      timestamp: at,
+      trust01: state.vector?.trust01 ?? 0,
+      rivalry01: state.vector?.rivalry01 ?? 0,
+      intensity01: state.intensity01,
+      volatility01: state.volatility01,
+      obsession01: state.vector?.obsession01 ?? 0,
+      stance: state.stance,
+    });
+    if (entries.length > 128) entries.splice(0, entries.length - 128);
+    this._trajectories.set(key, entries);
+  }
+
+  /** Get the trajectory history for a counterpart. */
+  public getTrajectory(playerId: string, counterpartId: string): readonly RelationshipTrajectorySnapshot[] {
+    return Object.freeze(this._trajectories.get(`${playerId}:${counterpartId}`) ?? []);
+  }
+
+  /** Compute trend direction of a relationship trajectory. */
+  public computeTrajectoryTrend(playerId: string, counterpartId: string): RelationshipTrajectoryTrend {
+    const entries = this.getTrajectory(playerId, counterpartId);
+    if (entries.length < 4) return 'INSUFFICIENT_DATA';
+    const recent = entries.slice(-8);
+    const intensityDeltas = recent.slice(1).map((e, i) => e.intensity01 - recent[i]!.intensity01);
+    const avg = intensityDeltas.reduce((s, d) => s + d, 0) / intensityDeltas.length;
+    const vol = Math.sqrt(intensityDeltas.reduce((s, d) => s + (d - avg) ** 2, 0) / intensityDeltas.length);
+    if (vol > 0.15) return 'OSCILLATING';
+    if (avg > 0.04) return 'RISING';
+    if (avg < -0.04) return 'FALLING';
+    if (recent[recent.length - 1]!.intensity01 >= 0.9) return 'ERUPTING';
+    return 'PLATEAUED';
+  }
+
+  // ==========================================================================
+  // MARK: Counterpart cluster detection
+  // ==========================================================================
+
+  /** Detect social clusters — groups of counterparts that interact with the player together. */
+  public detectCounterpartClusters(playerId: string): readonly CounterpartCluster[] {
+    const bucket = this.ensure(playerId);
+    const indices = this.listCounterpartIndices(playerId);
+    const clusters: CounterpartCluster[] = [];
+    const coOccurrence = new Map<string, Map<string, number>>();
+
+    for (const idx of indices) {
+      if (!coOccurrence.has(idx.counterpartId)) coOccurrence.set(idx.counterpartId, new Map());
+    }
+
+    const events = this.listRecentEvents({ playerId, maxResults: 256 });
+    for (let i = 0; i < events.length; i++) {
+      const a = events[i]!;
+      for (let j = i + 1; j < Math.min(i + 8, events.length); j++) {
+        const b = events[j]!;
+        if (!a.counterpartId || !b.counterpartId || a.counterpartId === b.counterpartId) continue;
+        if (Math.abs(a.timestamp - b.timestamp) > 60000) continue;
+        const mapA = coOccurrence.get(a.counterpartId);
+        if (mapA) mapA.set(b.counterpartId, (mapA.get(b.counterpartId) ?? 0) + 1);
+        const mapB = coOccurrence.get(b.counterpartId);
+        if (mapB) mapB.set(a.counterpartId, (mapB.get(a.counterpartId) ?? 0) + 1);
+      }
+    }
+
+    const assigned = new Set<string>();
+    for (const [cpId, neighbors] of coOccurrence) {
+      if (assigned.has(cpId)) continue;
+      const strong = [...neighbors.entries()].filter(([_, count]) => count >= 3).map(([nId]) => nId).filter((nId) => !assigned.has(nId));
+      if (strong.length >= 1) {
+        const members = [cpId, ...strong];
+        for (const m of members) assigned.add(m);
+        const isRivalPack = members.every((m) => {
+          const idx = indices.find((i) => i.counterpartId === m);
+          return idx && idx.rivalry01 >= 0.4;
+        });
+        clusters.push({
+          clusterId: `cluster:${playerId}:${members.join(':')}`,
+          memberIds: Object.freeze(members),
+          coOccurrenceStrength: strong.length >= 3 ? 'STRONG' : strong.length >= 2 ? 'MODERATE' : 'WEAK',
+          clusterRole: isRivalPack ? 'PACK' : 'ENTOURAGE',
+          memberCount: members.length,
+        });
+      }
+    }
+    return Object.freeze(clusters);
+  }
+
+  // ==========================================================================
+  // MARK: Relationship decay and dormancy
+  // ==========================================================================
+
+  /** Compute decay for a relationship entry based on elapsed time since last interaction. */
+  public computeRelationshipDecay(entry: RelationshipLedgerIndexEntry, elapsedMs: number): number {
+    const baseHalfLife = entry.rivalry01 >= 0.5 ? 1000 * 60 * 60 * 96 : entry.trust01 >= 0.5 ? 1000 * 60 * 60 * 72 : 1000 * 60 * 60 * 24;
+    return Math.max(0.02, entry.intensity01 * Math.pow(2, -(elapsedMs / baseHalfLife)));
+  }
+
+  /** Check if a relationship should be marked dormant. */
+  public shouldMarkDormant(entry: RelationshipLedgerIndexEntry, now: number): boolean {
+    const elapsed = now - entry.lastTouchedAt;
+    return elapsed > this.config.retention.pruneIfIdleMs && entry.intensity01 < 0.2;
+  }
+
+  // ==========================================================================
+  // MARK: Ledger compaction
+  // ==========================================================================
+
+  /** Compact the ledger by summarizing least-relevant counterpart entries. */
+  public compactLedger(playerId: string, retainTop = 32): readonly CompactedRelationshipSummary[] {
+    const indices = this.listCounterpartIndices(playerId);
+    if (indices.length <= retainTop) return [];
+    const sorted = [...indices].sort((a, b) => b.intensity01 - a.intensity01);
+    const toCompact = sorted.slice(retainTop);
+    return Object.freeze(toCompact.map((idx) => ({
+      counterpartId: idx.counterpartId,
+      counterpartKind: idx.counterpartKind,
+      peakIntensity01: idx.intensity01,
+      lastTouchedAt: idx.lastTouchedAt,
+      eventCount: idx.eventCount,
+      stance: idx.stance,
+      compactedAt: Date.now(),
+    })));
+  }
+
+
+
+
+  // ==========================================================================
+  // MARK: Cross-player relationship graph
+  // ==========================================================================
+
+  /** Compare how two players relate to the same counterpart. */
+  public projectCrossPlayerRelationship(playerA: string, playerB: string, counterpartId: string): CrossPlayerRelationshipView | undefined {
+    const stateA = this.getCounterpartState(playerA, counterpartId);
+    const stateB = this.getCounterpartState(playerB, counterpartId);
+    if (!stateA || !stateB) return undefined;
+    const trustDelta = Math.abs((stateA.vector?.trust01 ?? 0) - (stateB.vector?.trust01 ?? 0));
+    const rivalryDelta = Math.abs((stateA.vector?.rivalry01 ?? 0) - (stateB.vector?.rivalry01 ?? 0));
+    const intensityDelta = Math.abs(stateA.intensity01 - stateB.intensity01);
+    return Object.freeze({
+      counterpartId,
+      playerAId: playerA, playerBId: playerB,
+      stanceA: stateA.stance, stanceB: stateB.stance,
+      trustDelta01: trustDelta, rivalryDelta01: rivalryDelta, intensityDelta01: intensityDelta,
+      asymmetryScore01: (trustDelta + rivalryDelta + intensityDelta) / 3,
+      shareRival: (stateA.vector?.rivalry01 ?? 0) >= 0.4 && (stateB.vector?.rivalry01 ?? 0) >= 0.4,
+      shareHelper: (stateA.vector?.trust01 ?? 0) >= 0.4 && (stateB.vector?.trust01 ?? 0) >= 0.4,
+    });
+  }
+
+  // ==========================================================================
+  // MARK: Event pattern recognition
+  // ==========================================================================
+
+  /** Detect repeating event patterns for a player-counterpart pair. */
+  public detectEventPatterns(playerId: string, counterpartId: string): readonly EventPattern[] {
+    const events = this.listRecentEvents({ playerId, counterpartIds: [counterpartId], maxResults: 128 });
+    const patterns: EventPattern[] = [];
+    const typePairs = new Map<string, number>();
+    for (let i = 0; i < events.length - 1; i++) {
+      const pair = `${events[i]!.eventType}:${events[i + 1]!.eventType}`;
+      typePairs.set(pair, (typePairs.get(pair) ?? 0) + 1);
+    }
+    for (const [pair, count] of typePairs) {
+      if (count >= 3) {
+        const [trigger, response] = pair.split(':');
+        patterns.push({
+          patternId: `pattern:${playerId}:${counterpartId}:${pair}`,
+          triggerEventType: trigger!, responseEventType: response!,
+          confidence01: Math.min(1, count / 8), recurrenceCount: count,
+          description: `After ${trigger}, ${response} follows ${count} times`,
+        });
+      }
+    }
+    return Object.freeze(patterns);
+  }
+
+  // ==========================================================================
+  // MARK: Ledger diagnostic
+  // ==========================================================================
+
+  /** Build a comprehensive diagnostic of the ledger state for a player. */
+  public buildLedgerDiagnostic(playerId: string): readonly string[] {
+    const indices = this.listCounterpartIndices(playerId);
+    const hotCounterparts = this.listHotCounterparts(playerId);
+    const channels = this.listChannelSummaries(playerId);
+    const stats = this.stats();
+    const lines: string[] = [];
+    lines.push(`ledger_diagnostic|player=${playerId}`);
+    lines.push(`counterparts=${indices.length}|hot=${hotCounterparts.length}|channels=${channels.length}`);
+    lines.push(`total_players=${stats.playersTracked}|total_events=${stats.totalEventsStored}`);
+    for (const hot of hotCounterparts.slice(0, 6)) {
+      lines.push(`  hot=${hot.counterpartId}|intensity=${hot.intensity01.toFixed(3)}|stance=${hot.stance}`);
+    }
+    return lines;
+  }
+
 
 }

@@ -308,6 +308,7 @@ export interface ConversationQuoteCandidate {
   readonly score01: number;
   readonly reasons: readonly string[];
   readonly record: ConversationMemoryQuoteRecord;
+  readonly contract: ConversationMemoryExternalQuoteRecord;
 }
 
 export interface ConversationCallbackCandidate {
@@ -317,6 +318,15 @@ export interface ConversationCallbackCandidate {
   readonly reasons: readonly string[];
   readonly record: ConversationMemoryCallbackRecord;
 }
+export type ConversationMemoryExternalQuoteRecord = Partial<ChatQuoteRecord>;
+
+export interface ConversationMemoryQuoteContractProjection {
+  readonly quoteId: string;
+  readonly memoryId: string;
+  readonly internal: ConversationMemoryQuoteRecord;
+  readonly contract: ConversationMemoryExternalQuoteRecord;
+}
+
 
 export const DEFAULT_CONVERSATION_MEMORY_STORE_CONFIG: ConversationMemoryStoreConfig = Object.freeze({
   maxEventsPerPlayer: 4096,
@@ -1311,7 +1321,7 @@ export class ConversationMemoryStore {
     this.unindexCallback(bucket, current); bucket.callbacks.delete(callbackId);
     this.pushMutation(bucket, { kind: 'DELETE_CALLBACK', playerId, entityId: callbackId, createdAt: now(), summary: current.anchor.sourceText, tags: current.tags });
   }
-  public selectQuoteCandidates(request: { readonly playerId: string; readonly actorId?: string; readonly counterpartId?: string; readonly runId?: string; readonly modeId?: string; readonly channelId?: ConversationMemoryChannelId; readonly limit?: number; }): readonly ConversationQuoteCandidate[] {
+  public selectQuoteCandidates(request: ConversationQuoteQuery & { readonly playerId: string; readonly actorId?: string; readonly counterpartId?: string; readonly runId?: string; readonly modeId?: string; readonly channelId?: ConversationMemoryChannelId; readonly limit?: number; }): readonly ConversationQuoteCandidate[] {
     return this.queryQuotes({
       playerId: request.playerId,
       actorId: request.actorId,
@@ -1331,7 +1341,7 @@ export class ConversationMemoryStore {
         if (request.channelId && record.evidence.some((item) => item.channelId === request.channelId)) { score01 += 0.06; reasons.push('channel_match'); }
         if (record.unresolved) { score01 += 0.08; reasons.push('unresolved'); }
         if (record.kind === 'RECEIPT' || record.kind === 'CALLBACK') { score01 += 0.06; reasons.push('callback_kind'); }
-        return { quoteId: record.quoteId, memoryId: record.memoryId, score01: clamp01(score01), reasons, record };
+        return { quoteId: record.quoteId, memoryId: record.memoryId, score01: clamp01(score01), reasons, record, contract: this.toChatQuoteRecord(record) };
       })
       .sort((left, right) => right.score01 - left.score01)
       .slice(0, request.limit ?? this.config.maxQuoteSelectionsPerResolution);
@@ -1965,6 +1975,113 @@ export class ConversationMemoryStore {
     }
 
     return Object.freeze(patterns);
+  }
+
+
+  // ==========================================================================
+  // MARK: Quote contract projection (shared contract bridge)
+  // ==========================================================================
+
+  /**
+   * Convert an internal ConversationMemoryQuoteRecord into a ChatQuoteRecord-shaped
+   * projection suitable for consumption by shared contract surfaces, frontend engines,
+   * and any upstream consumer that expects the canonical ChatQuote contract shape.
+   */
+  public toChatQuoteRecord(record: ConversationMemoryQuoteRecord): ConversationMemoryExternalQuoteRecord {
+    return {
+      quoteId: record.quoteId,
+      messageId: record.messageId,
+      playerId: record.playerId,
+      actorId: record.actorId,
+      counterpartId: record.counterpartId,
+      kind: record.kind,
+      speakerRole: record.speakerRole,
+      createdAt: record.createdAt,
+      updatedAt: record.updatedAt,
+      status: record.status,
+      unresolved: record.unresolved,
+      tags: [...record.tags],
+      score01: record.score01,
+      salience01: record.salience01,
+      strategicWeight01: record.strategicWeight01,
+      emotionalWeight01: record.emotionalWeight01,
+      usageCount: record.usageCount,
+      lastUsedAt: record.lastUsedAt,
+      fragment: {
+        fragmentId: record.fragment.fragmentId,
+        text: record.fragment.text,
+        normalizedText: record.fragment.normalizedText,
+        index: record.fragment.index,
+      },
+      proof: {
+        proofId: record.proof.proofId,
+        proofChainId: record.proof.proofChainId,
+        messageId: record.proof.messageId,
+        excerpt: record.proof.excerpt,
+        excerptStart: record.proof.excerptStart,
+        excerptEnd: record.proof.excerptEnd,
+        createdAt: record.proof.createdAt,
+      },
+      evidence: record.evidence.map((evidence) => ({
+        evidenceId: evidence.evidenceId,
+        messageId: evidence.messageId,
+        playerId: evidence.playerId,
+        actorId: evidence.actorId,
+        counterpartId: evidence.counterpartId,
+        runId: evidence.runId,
+        modeId: evidence.modeId,
+        channelId: evidence.channelId,
+        roomId: evidence.roomId,
+        createdAt: evidence.createdAt,
+        proof: {
+          proofId: evidence.proof.proofId,
+          proofChainId: evidence.proof.proofChainId,
+          messageId: evidence.proof.messageId,
+          excerpt: evidence.proof.excerpt,
+          excerptStart: evidence.proof.excerptStart,
+          excerptEnd: evidence.proof.excerptEnd,
+          createdAt: evidence.proof.createdAt,
+        },
+      })),
+    } as unknown as ConversationMemoryExternalQuoteRecord;
+  }
+
+  /**
+   * Build a paired projection containing both the internal memory record and
+   * the contract-shaped external record for a single quote.
+   */
+  public buildQuoteContractProjection(playerId: string, quoteId: string): ConversationMemoryQuoteContractProjection | undefined {
+    const record = this.getQuote(playerId, quoteId);
+    if (!record) return undefined;
+    return {
+      quoteId: record.quoteId,
+      memoryId: record.memoryId,
+      internal: record,
+      contract: this.toChatQuoteRecord(record),
+    };
+  }
+
+  /**
+   * Export all quotes matching a query as contract-shaped external records.
+   * Used by frontend engines and shared contract consumers that need the
+   * ChatQuoteRecord shape without access to internal memory internals.
+   */
+  public exportChatQuoteRecords(query: ConversationQuoteQuery): readonly ConversationMemoryExternalQuoteRecord[] {
+    return this.queryQuotes(query).map((record) => this.toChatQuoteRecord(record));
+  }
+
+  /**
+   * Export all quotes matching a query as paired internal + contract projections.
+   * Used by orchestration layers that need both the rich internal record and
+   * the contract-safe external shape in a single pass.
+   */
+  public exportQuoteContractProjectionBatch(query: ConversationQuoteQuery): readonly ConversationMemoryQuoteContractProjection[] {
+    return this.queryQuotes(query).map((record) => ({
+      quoteId: record.quoteId,
+      memoryId: record.memoryId,
+      internal: record,
+      contract: this.toChatQuoteRecord(record),
+    }));
   }
 
   /** Delete all data for a player, including bridges and claims. */

@@ -20,8 +20,8 @@ import type {
   ChatRelationshipSnapshot,
   ChatRelationshipStance,
   ChatRelationshipSummaryView,
-} from '../../../../../shared/contracts/chat/relationship';
-import { clamp01 } from '../../../../../shared/contracts/chat/relationship';
+} from '../../../../../../shared/contracts/chat/relationship';
+import { clamp01 } from '../../../../../../shared/contracts/chat/relationship';
 import {
   DEFAULT_RIVALRY_ESCALATION_POLICY_CONFIG,
   type RivalryEscalationAssessment,
@@ -111,6 +111,8 @@ export interface RelationshipWitnessDecision {
 
 export interface RelationshipRescueWindow {
   readonly suppressHelpers: boolean;
+  readonly shouldRescue: boolean;
+  readonly urgency01: number;
   readonly delayHelpersMs: number;
   readonly helperUrgency01: number;
   readonly rescueDebtPressure01: number;
@@ -123,6 +125,7 @@ export interface RelationshipNegotiationAdvisory {
   readonly shouldForceReprice: boolean;
   readonly shouldDelayCounterOffer: boolean;
   readonly urgency01: number;
+  readonly balanceOfPower01: number;
 }
 
 export interface RelationshipResolution {
@@ -567,14 +570,17 @@ function rescueWindow(helpers: readonly RelationshipResolution[], rivals: readon
   const helperUrgency01 = topHelper ? topHelper.rescueBias01 : 0;
   const rivalPressure01 = topRival ? topRival.aggression01 : 0;
   const suppressHelpers = context.allowHelperIntervention === false ? true : context.allowRescueSuppression === false ? false : rivalPressure01 >= config.rescueSuppressionFloor01 && helperUrgency01 < rivalPressure01 + 0.08;
-  return { suppressHelpers, delayHelpersMs: suppressHelpers ? Math.round(650 + rivalPressure01 * 950) : Math.round(120 + (1 - helperUrgency01) * 260), helperUrgency01, rescueDebtPressure01: clamp01((topHelper?.legacy.rescueDebt ?? 0) / 100), letPressureBreathe: suppressHelpers && rivalPressure01 >= 0.62 };
+  return { suppressHelpers, shouldRescue: !suppressHelpers && helperUrgency01 > 0, urgency01: helperUrgency01, delayHelpersMs: suppressHelpers ? Math.round(650 + rivalPressure01 * 950) : Math.round(120 + (1 - helperUrgency01) * 260), helperUrgency01, rescueDebtPressure01: clamp01((topHelper?.legacy.rescueDebt ?? 0) / 100), letPressureBreathe: suppressHelpers && rivalPressure01 >= 0.62 };
 }
 
 function negotiationAdvisory(resolutions: readonly RelationshipResolution[], context: RelationshipResolverContext, config: RelationshipResolverConfig): RelationshipNegotiationAdvisory {
   const pressureActors = resolutions.filter((item) => item.visibility !== 'SUPPRESSED');
   const leakPressure = pressureActors.length === 0 ? 0 : pressureActors.reduce((sum, item) => sum + item.embarrassmentRisk01, 0) / pressureActors.length;
   const urgency = clamp01(leakPressure * 0.36 + (context.negotiationWindowOpen ? 0.25 : 0) + (valueOr(context.channelId, '').toUpperCase() === 'DEAL_ROOM' ? 0.21 : 0));
-  return { shouldLeakToPublic: context.allowNegotiationLeakage !== false && leakPressure >= config.negotiationLeakFloor01, shouldPreferQuietPressure: urgency >= 0.44 && leakPressure < config.negotiationLeakFloor01, shouldForceReprice: urgency >= 0.58, shouldDelayCounterOffer: urgency >= 0.52 && (context.tags ?? []).includes('stall'), urgency01: urgency };
+  const totalAggression = resolutions.reduce((s, r) => s + r.aggression01, 0);
+  const totalRescue = resolutions.reduce((s, r) => s + r.rescueBias01, 0);
+  const balanceOfPower01 = totalAggression + totalRescue > 0 ? totalAggression / (totalAggression + totalRescue) : 0.5;
+  return { shouldLeakToPublic: context.allowNegotiationLeakage !== false && leakPressure >= config.negotiationLeakFloor01, shouldPreferQuietPressure: urgency >= 0.44 && leakPressure < config.negotiationLeakFloor01, shouldForceReprice: urgency >= 0.58, shouldDelayCounterOffer: urgency >= 0.52 && (context.tags ?? []).includes('stall'), urgency01: urgency, balanceOfPower01 };
 }
 
 function summarizeEnvelope(envelope: Omit<RelationshipResolutionEnvelope, 'summary'>): readonly string[] {
@@ -588,6 +594,131 @@ function summarizeEnvelope(envelope: Omit<RelationshipResolutionEnvelope, 'summa
   summary.push(`negotiation_urgency=${envelope.negotiation.urgency01.toFixed(3)}`);
   return Object.freeze(summary);
 }
+
+
+// ============================================================================
+// MARK: Scene composition types
+// ============================================================================
+
+export type ScenePhase = 'ENTRY' | 'ESCALATION' | 'CLIMAX' | 'INTERVENTION' | 'REACTION' | 'RESOLUTION' | 'DEFERRAL';
+export type SceneToneHint = 'HOSTILE' | 'AGGRESSIVE' | 'PEAK_PRESSURE' | 'SUPPORTIVE' | 'OBSERVATIONAL' | 'NEUTRAL' | 'COLD';
+
+export interface SceneBeat {
+  readonly beatIndex: number;
+  readonly counterpartId: string;
+  readonly role: RelationshipRole;
+  readonly phase: ScenePhase;
+  readonly delayMs: number;
+  readonly visibility: RelationshipVisibilityClass;
+  readonly toneHint: SceneToneHint;
+}
+
+export interface SceneComposition {
+  readonly sceneId: string;
+  readonly playerId: string | null;
+  readonly beats: readonly SceneBeat[];
+  readonly totalDurationMs: number;
+  readonly hasClimax: boolean;
+  readonly hasIntervention: boolean;
+  readonly witnessCount: number;
+  readonly envelope: RelationshipResolutionEnvelope;
+}
+
+// ============================================================================
+// MARK: Negotiation resolution types
+// ============================================================================
+
+export interface NegotiationResolution {
+  readonly balanceOfPower01: number;
+  readonly playerIsSqueezing: boolean;
+  readonly playerIsWinning: boolean;
+  readonly playerIsStalling: boolean;
+  readonly dominantCounterpartId?: string;
+  readonly recommendedPlayerBehavior: 'PRESS_ADVANTAGE' | 'HOLD_POSITION' | 'CONCEDE_OR_COUNTER' | 'WALK_AWAY';
+  readonly leverageCounterpartIds: readonly string[];
+  readonly supportCounterpartIds: readonly string[];
+}
+
+// ============================================================================
+// MARK: Post-run resolution types
+// ============================================================================
+
+export interface PostRunDebriefAssignment {
+  readonly counterpartId: string;
+  readonly role: RelationshipRole;
+  readonly shouldDebrief: boolean;
+  readonly debriefTone: 'COMPASSIONATE' | 'GRUDGING' | 'REFLECTIVE' | 'CEREMONIAL';
+}
+
+export interface PostRunResolution {
+  readonly debriefAssignments: readonly PostRunDebriefAssignment[];
+  readonly grudgeCarryIds: readonly string[];
+  readonly legendNominationIds: readonly string[];
+  readonly silenceCommitmentIds: readonly string[];
+  readonly unfinishedBusinessCount: number;
+}
+
+
+
+// ============================================================================
+// MARK: Mode resolution profile type
+// ============================================================================
+
+export interface ModeResolutionProfile {
+  readonly modeId: string;
+  readonly label: string;
+  readonly maxActiveCounterparts: number;
+  readonly silenceWeight01: number;
+  readonly encounterDepth01: number;
+  readonly lonelinessMechanic: boolean;
+  readonly teamDynamics: boolean;
+  readonly mysterySignals: boolean;
+  readonly escalationSpeed01: number;
+}
+
+// ============================================================================
+// MARK: Witness resolution types
+// ============================================================================
+
+export type WitnessReactionType = 'AWE' | 'HORROR' | 'GLEE' | 'INDIFFERENCE' | 'STRATEGIC_NOTE';
+
+export interface WitnessResolution {
+  readonly counterpartId: string;
+  readonly witnessRole: 'PRIMARY_WITNESS' | 'SECONDARY_WITNESS';
+  readonly reactionType: WitnessReactionType;
+  readonly intensity01: number;
+  readonly memoryCommitment: boolean;
+  readonly socialPropagation: boolean;
+  readonly delayMs: number;
+  readonly narrativeWeight01: number;
+}
+
+// ============================================================================
+// MARK: Coordinated timing types
+// ============================================================================
+
+export interface CoordinatedTimingEntry {
+  readonly counterpartId: string;
+  readonly role: RelationshipRole;
+  readonly assignedBeat: number;
+  readonly delayMs: number;
+  readonly silenceWindowMs: number;
+}
+
+// ============================================================================
+// MARK: Resolution history types
+// ============================================================================
+
+export interface ResolutionHistoryEntry {
+  readonly timestamp: number;
+  readonly primaryCounterpartId?: string;
+  readonly primaryRole?: RelationshipRole;
+  readonly helperCount: number;
+  readonly rivalCount: number;
+  readonly witnessCount: number;
+  readonly hasRescue: boolean;
+}
+
 
 export class RelationshipResolver {
   private readonly config: RelationshipResolverConfig;
@@ -656,6 +787,262 @@ export class RelationshipResolver {
   public inspectEscalation(state: ChatRelationshipCounterpartState, context: RelationshipResolverContext): RivalryEscalationAssessment {
     return this.resolveCounterpart(state, context).escalation.assessment;
   }
+
+
+  // ==========================================================================
+  // MARK: Scene composition engine
+  // ==========================================================================
+
+  /** Compose a structured scene from a resolution envelope. */
+  public composeScene(snapshot: ChatRelationshipSnapshot, context: RelationshipResolverContext): SceneComposition {
+    const envelope = this.resolveSnapshot(snapshot, context);
+    const beats: SceneBeat[] = [];
+    let beatIndex = 0;
+
+    if (envelope.primary) {
+      beats.push({ beatIndex: beatIndex++, counterpartId: envelope.primary.counterpartId, role: envelope.primary.role, phase: 'ENTRY', delayMs: 0, visibility: envelope.primary.visibility, toneHint: envelope.primary.role === 'PRIMARY_AGGRESSOR' ? 'HOSTILE' : 'NEUTRAL' });
+    }
+    for (const rival of envelope.rivals.slice(0, 2)) {
+      if (rival.counterpartId !== envelope.primary?.counterpartId) {
+        beats.push({ beatIndex: beatIndex++, counterpartId: rival.counterpartId, role: rival.role, phase: 'ESCALATION', delayMs: 2500 + beatIndex * 1200, visibility: rival.visibility, toneHint: 'AGGRESSIVE' });
+      }
+    }
+    if (envelope.primary && envelope.primary.role === 'PRIMARY_AGGRESSOR') {
+      beats.push({ beatIndex: beatIndex++, counterpartId: envelope.primary.counterpartId, role: 'PRIMARY_AGGRESSOR', phase: 'CLIMAX', delayMs: 6000 + beatIndex * 800, visibility: envelope.primary.visibility, toneHint: 'PEAK_PRESSURE' });
+    }
+    for (const helper of envelope.helpers.slice(0, 1)) {
+      beats.push({ beatIndex: beatIndex++, counterpartId: helper.counterpartId, role: helper.role, phase: 'INTERVENTION', delayMs: 8000 + beatIndex * 600, visibility: helper.visibility, toneHint: 'SUPPORTIVE' });
+    }
+    for (const witness of envelope.witnesses.slice(0, 2)) {
+      beats.push({ beatIndex: beatIndex++, counterpartId: witness.counterpartId, role: witness.role, phase: 'REACTION', delayMs: 10000 + beatIndex * 400, visibility: witness.visibility, toneHint: 'OBSERVATIONAL' });
+    }
+
+    return Object.freeze({
+      sceneId: `scene:${context.now}:${snapshot.playerId ?? 'unknown'}`,
+      playerId: snapshot.playerId ?? context.playerId ?? null,
+      beats: Object.freeze(beats),
+      totalDurationMs: beats.length > 0 ? beats[beats.length - 1]!.delayMs + 3000 : 0,
+      hasClimax: beats.some((b) => b.phase === 'CLIMAX'),
+      hasIntervention: beats.some((b) => b.phase === 'INTERVENTION'),
+      witnessCount: envelope.witnesses.length,
+      envelope,
+    });
+  }
+
+  // ==========================================================================
+  // MARK: Negotiation resolution
+  // ==========================================================================
+
+  /** Resolve the balance of power and recommended behaviors for a deal room. */
+  public resolveNegotiation(snapshot: ChatRelationshipSnapshot, context: RelationshipResolverContext): NegotiationResolution {
+    const candidates = this.rankSnapshot(snapshot, { ...context, mode: 'DEAL_ROOM' });
+    const aggressors = candidates.filter((c) => c.aggression01 >= 0.4);
+    const helpers = candidates.filter((c) => c.rescueBias01 >= 0.4);
+    const totalAggression = aggressors.reduce((s, c) => s + c.aggression01, 0);
+    const totalRescue = helpers.reduce((s, c) => s + c.rescueBias01, 0);
+    const balanceOfPower01 = totalAggression + totalRescue > 0 ? totalAggression / (totalAggression + totalRescue) : 0.5;
+    const playerIsSqueezing = balanceOfPower01 >= 0.65;
+    const playerIsWinning = balanceOfPower01 <= 0.35;
+
+    return Object.freeze({
+      balanceOfPower01,
+      playerIsSqueezing, playerIsWinning,
+      playerIsStalling: !playerIsSqueezing && !playerIsWinning && candidates.length >= 2,
+      dominantCounterpartId: aggressors[0]?.counterpartId,
+      recommendedPlayerBehavior: playerIsSqueezing ? 'CONCEDE_OR_COUNTER' : playerIsWinning ? 'PRESS_ADVANTAGE' : 'HOLD_POSITION',
+      leverageCounterpartIds: Object.freeze(aggressors.map((c) => c.counterpartId)),
+      supportCounterpartIds: Object.freeze(helpers.map((c) => c.counterpartId)),
+    });
+  }
+
+  // ==========================================================================
+  // MARK: Post-run resolution ritual
+  // ==========================================================================
+
+  /** Produce a post-run social resolution after a run ends. */
+  public resolvePostRun(snapshot: ChatRelationshipSnapshot, context: RelationshipResolverContext): PostRunResolution {
+    const candidates = this.rankSnapshot(snapshot, { ...context, mode: 'POST_RUN' });
+    const debriefAssignments = candidates.slice(0, 3).map((c) => ({
+      counterpartId: c.counterpartId, role: c.role, shouldDebrief: c.selectionScore01 >= 0.35,
+      debriefTone: c.role === 'PRIMARY_HELPER' ? 'COMPASSIONATE' as const : c.role === 'PRIMARY_AGGRESSOR' ? 'GRUDGING' as const : 'REFLECTIVE' as const,
+    }));
+    const grudgeCarries = candidates.filter((c) => c.escalation.selectedTier === 'HUNT' || c.escalation.selectedTier === 'PUBLIC_SWARM' || c.escalation.selectedTier === 'BOSS_WINDOW');
+    const legendNominations = candidates.filter((c) => c.witnessWeight01 >= 0.7);
+    const silenceCommitments = candidates.filter((c) => c.escalation.shouldPreferSilence);
+
+    return Object.freeze({
+      debriefAssignments: Object.freeze(debriefAssignments),
+      grudgeCarryIds: Object.freeze(grudgeCarries.map((c) => c.counterpartId)),
+      legendNominationIds: Object.freeze(legendNominations.map((c) => c.counterpartId)),
+      silenceCommitmentIds: Object.freeze(silenceCommitments.map((c) => c.counterpartId)),
+      unfinishedBusinessCount: candidates.filter((c) => c.callback.tier !== 'NONE').length,
+    });
+  }
+
+  // ==========================================================================
+  // MARK: Resolution explanation layer
+  // ==========================================================================
+
+  /** Generate a human-readable explanation for a resolution decision. */
+  public explainResolution(resolution: RelationshipResolution): string {
+    const parts: string[] = [];
+    parts.push(`Counterpart: ${resolution.counterpartId} (${resolution.counterpartKind})`);
+    parts.push(`Role: ${resolution.role}, Visibility: ${resolution.visibility}`);
+    parts.push(`Score: ${resolution.selectionScore01.toFixed(3)}, Aggression: ${resolution.aggression01.toFixed(2)}, Rescue: ${resolution.rescueBias01.toFixed(2)}`);
+    parts.push(`Escalation: ${resolution.escalation.selectedTier} (${resolution.escalation.selectedScore01.toFixed(2)})`);
+    if (resolution.callback.tier !== 'NONE') parts.push(`Callback: ${resolution.callback.tier}`);
+    if (resolution.escalation.shouldPreferSilence) parts.push('Prefers silence');
+    if (resolution.escalation.shouldForcePublicWitness) parts.push('Forces public witness');
+    return parts.join(' | ');
+  }
+
+
+
+
+  // ==========================================================================
+  // MARK: Mode-specific resolution profiles
+  // ==========================================================================
+
+  private static readonly MODE_RESOLUTION_PROFILES: Readonly<Record<string, ModeResolutionProfile>> = Object.freeze({
+    'GO_ALONE': { modeId: 'GO_ALONE', label: 'Empire', maxActiveCounterparts: 2, silenceWeight01: 0.65, encounterDepth01: 0.8, lonelinessMechanic: true, teamDynamics: false, mysterySignals: false, escalationSpeed01: 0.5 },
+    'HEAD_TO_HEAD': { modeId: 'HEAD_TO_HEAD', label: 'Predator', maxActiveCounterparts: 2, silenceWeight01: 0.35, encounterDepth01: 0.5, lonelinessMechanic: false, teamDynamics: false, mysterySignals: false, escalationSpeed01: 0.8 },
+    'TEAM_UP': { modeId: 'TEAM_UP', label: 'Syndicate', maxActiveCounterparts: 5, silenceWeight01: 0.2, encounterDepth01: 0.6, lonelinessMechanic: false, teamDynamics: true, mysterySignals: false, escalationSpeed01: 0.55 },
+    'CHASE_A_LEGEND': { modeId: 'CHASE_A_LEGEND', label: 'Phantom', maxActiveCounterparts: 3, silenceWeight01: 0.85, encounterDepth01: 0.4, lonelinessMechanic: false, teamDynamics: false, mysterySignals: true, escalationSpeed01: 0.3 },
+  });
+
+  /** Get mode-specific resolution profile. */
+  public getModeResolutionProfile(modeId: string | undefined): ModeResolutionProfile {
+    return RelationshipResolver.MODE_RESOLUTION_PROFILES[modeId ?? ''] ?? RelationshipResolver.MODE_RESOLUTION_PROFILES['GO_ALONE']!;
+  }
+
+  /** Resolve snapshot with mode-aware counterpart limits and behavior. */
+  public resolveSnapshotWithMode(snapshot: ChatRelationshipSnapshot, context: RelationshipResolverContext, modeId: string): RelationshipResolutionEnvelope {
+    const profile = this.getModeResolutionProfile(modeId);
+    const adjusted = { ...context, maxCandidates: Math.min(context.maxCandidates ?? 12, profile.maxActiveCounterparts * 2) };
+    return this.resolveSnapshot(snapshot, adjusted);
+  }
+
+  // ==========================================================================
+  // MARK: Witness resolution system
+  // ==========================================================================
+
+  /** Resolve witness behaviors for an event. */
+  public resolveWitnesses(candidates: readonly RelationshipResolution[], context: RelationshipResolverContext): readonly WitnessResolution[] {
+    const witnesses = candidates.filter((c) => c.role === 'PRIMARY_WITNESS' || c.role === 'SECONDARY_WITNESS');
+    return Object.freeze(witnesses.map((w) => {
+      const reactionType = this.inferWitnessReaction(w, context);
+      const memoryCommitment = w.witnessWeight01 >= 0.5;
+      const socialPropagation = w.visibility === 'PUBLIC_STAGE' && w.witnessWeight01 >= 0.6;
+      return {
+        counterpartId: w.counterpartId,
+        witnessRole: w.role as 'PRIMARY_WITNESS' | 'SECONDARY_WITNESS',
+        reactionType,
+        intensity01: w.witnessWeight01,
+        memoryCommitment,
+        socialPropagation,
+        delayMs: w.role === 'PRIMARY_WITNESS' ? 1500 : 3500,
+        narrativeWeight01: w.witnessWeight01 * (reactionType === 'AWE' ? 1.2 : reactionType === 'HORROR' ? 1.3 : 0.8),
+      };
+    }));
+  }
+
+  private inferWitnessReaction(witness: RelationshipResolution, context: RelationshipResolverContext): WitnessReactionType {
+    if (witness.aggression01 >= 0.5) return 'GLEE';
+    if (witness.rescueBias01 >= 0.5) return 'HORROR';
+    if (witness.witnessWeight01 >= 0.7) return 'AWE';
+    if (witness.embarrassmentRisk01 >= 0.5) return 'STRATEGIC_NOTE';
+    return 'INDIFFERENCE';
+  }
+
+  // ==========================================================================
+  // MARK: Multi-counterpart timing coordination
+  // ==========================================================================
+
+  /** Coordinate timing across multiple counterparts to prevent pile-on or awkward overlap. */
+  public coordinateCounterpartTiming(resolutions: readonly RelationshipResolution[]): readonly CoordinatedTimingEntry[] {
+    if (resolutions.length <= 1) {
+      return resolutions.map((r) => ({ counterpartId: r.counterpartId, role: r.role, assignedBeat: 0, delayMs: 0, silenceWindowMs: 0 }));
+    }
+    const sorted = [...resolutions].sort((a, b) => {
+      if (a.role === 'PRIMARY_AGGRESSOR') return -1;
+      if (b.role === 'PRIMARY_AGGRESSOR') return 1;
+      return b.selectionScore01 - a.selectionScore01;
+    });
+    return Object.freeze(sorted.map((r, i) => ({
+      counterpartId: r.counterpartId,
+      role: r.role,
+      assignedBeat: i,
+      delayMs: i * 2800 + (r.role === 'PRIMARY_HELPER' ? 6000 : 0) + (r.role === 'PRIMARY_WITNESS' ? 9000 : 0),
+      silenceWindowMs: i === 0 ? 0 : 1500,
+    })));
+  }
+
+  // ==========================================================================
+  // MARK: Resolution history and trajectory
+  // ==========================================================================
+
+  private readonly _resolutionHistory = new Map<string, ResolutionHistoryEntry[]>();
+
+  /** Record a resolution decision for historical analysis. */
+  public recordResolution(playerId: string, envelope: RelationshipResolutionEnvelope, at: number): void {
+    const entries = this._resolutionHistory.get(playerId) ?? [];
+    entries.push({
+      timestamp: at,
+      primaryCounterpartId: envelope.primary?.counterpartId,
+      primaryRole: envelope.primary?.role,
+      helperCount: envelope.helpers.length,
+      rivalCount: envelope.rivals.length,
+      witnessCount: envelope.witnesses.length,
+      hasRescue: envelope.rescueWindow?.shouldRescue ?? false,
+    });
+    if (entries.length > 96) entries.splice(0, entries.length - 96);
+    this._resolutionHistory.set(playerId, entries);
+  }
+
+  /** Get resolution history for a player. */
+  public getResolutionHistory(playerId: string): readonly ResolutionHistoryEntry[] {
+    return Object.freeze(this._resolutionHistory.get(playerId) ?? []);
+  }
+
+  /** Compute the ratio of scenes with helpers vs rivals over recent history. */
+  public helperToRivalRatio(playerId: string): number {
+    const history = this.getResolutionHistory(playerId);
+    if (history.length === 0) return 0.5;
+    const totalHelpers = history.reduce((s, h) => s + h.helperCount, 0);
+    const totalRivals = history.reduce((s, h) => s + h.rivalCount, 0);
+    const total = totalHelpers + totalRivals;
+    return total > 0 ? totalHelpers / total : 0.5;
+  }
+
+  // ==========================================================================
+  // MARK: Resolution diagnostic
+  // ==========================================================================
+
+  /** Generate a complete diagnostic for a resolution envelope. */
+  public generateResolutionDiagnostic(envelope: RelationshipResolutionEnvelope): readonly string[] {
+    const lines: string[] = [];
+    lines.push(`resolution_diagnostic|player=${envelope.playerId}|room=${envelope.roomId}|channel=${envelope.channelId}`);
+    lines.push(`mode=${envelope.mode}|pressure=${envelope.pressureBand}`);
+    if (envelope.primary) {
+      lines.push(`primary=${envelope.primary.counterpartId}|role=${envelope.primary.role}|score=${envelope.primary.selectionScore01.toFixed(3)}`);
+    }
+    lines.push(`helpers=${envelope.helpers.length}|rivals=${envelope.rivals.length}|witnesses=${envelope.witnesses.length}|delayed=${envelope.delayed.length}`);
+    if (envelope.rescueWindow) {
+      lines.push(`rescue=${envelope.rescueWindow.shouldRescue}|urgency=${envelope.rescueWindow.urgency01?.toFixed(3) ?? 'n/a'}`);
+    }
+    if (envelope.negotiation) {
+      lines.push(`negotiation_active|balance=${envelope.negotiation.balanceOfPower01?.toFixed(3) ?? 'n/a'}`);
+    }
+    for (const r of envelope.rivals.slice(0, 3)) {
+      lines.push(`  rival=${r.counterpartId}|aggression=${r.aggression01.toFixed(3)}|tier=${r.escalation.selectedTier}`);
+    }
+    for (const h of envelope.helpers.slice(0, 2)) {
+      lines.push(`  helper=${h.counterpartId}|rescue=${h.rescueBias01.toFixed(3)}|trust=${h.trustLeverage01.toFixed(3)}`);
+    }
+    return lines;
+  }
+
+
 }
 
 // MARK: Presets
@@ -777,103 +1164,57 @@ export const RELATIONSHIP_EVENT_SEMANTICS: Readonly<Record<ChatRelationshipEvent
   'RUN_START': { eventType: 'RUN_START', prefersHelpers: false, prefersRivals: false, prefersWitnesses: false, suggestsCallback: false, suggestsSilence: true },
   'RUN_END': { eventType: 'RUN_END', prefersHelpers: true, prefersRivals: false, prefersWitnesses: true, suggestsCallback: false, suggestsSilence: false },
 });
-export const RELATIONSHIP_RESOLVER_NOTE_001 = 'resolver doctrinal note 001: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_002 = 'resolver doctrinal note 002: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_003 = 'resolver doctrinal note 003: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_004 = 'resolver doctrinal note 004: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_005 = 'resolver doctrinal note 005: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_006 = 'resolver doctrinal note 006: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_007 = 'resolver doctrinal note 007: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_008 = 'resolver doctrinal note 008: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_009 = 'resolver doctrinal note 009: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_010 = 'resolver doctrinal note 010: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_011 = 'resolver doctrinal note 011: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_012 = 'resolver doctrinal note 012: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_013 = 'resolver doctrinal note 013: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_014 = 'resolver doctrinal note 014: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_015 = 'resolver doctrinal note 015: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_016 = 'resolver doctrinal note 016: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_017 = 'resolver doctrinal note 017: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_018 = 'resolver doctrinal note 018: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_019 = 'resolver doctrinal note 019: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_020 = 'resolver doctrinal note 020: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_021 = 'resolver doctrinal note 021: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_022 = 'resolver doctrinal note 022: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_023 = 'resolver doctrinal note 023: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_024 = 'resolver doctrinal note 024: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_025 = 'resolver doctrinal note 025: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_026 = 'resolver doctrinal note 026: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_027 = 'resolver doctrinal note 027: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_028 = 'resolver doctrinal note 028: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_029 = 'resolver doctrinal note 029: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_030 = 'resolver doctrinal note 030: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_031 = 'resolver doctrinal note 031: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_032 = 'resolver doctrinal note 032: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_033 = 'resolver doctrinal note 033: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_034 = 'resolver doctrinal note 034: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_035 = 'resolver doctrinal note 035: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_036 = 'resolver doctrinal note 036: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_037 = 'resolver doctrinal note 037: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_038 = 'resolver doctrinal note 038: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_039 = 'resolver doctrinal note 039: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_040 = 'resolver doctrinal note 040: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_041 = 'resolver doctrinal note 041: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_042 = 'resolver doctrinal note 042: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_043 = 'resolver doctrinal note 043: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_044 = 'resolver doctrinal note 044: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_045 = 'resolver doctrinal note 045: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_046 = 'resolver doctrinal note 046: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_047 = 'resolver doctrinal note 047: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_048 = 'resolver doctrinal note 048: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_049 = 'resolver doctrinal note 049: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_050 = 'resolver doctrinal note 050: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_051 = 'resolver doctrinal note 051: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_052 = 'resolver doctrinal note 052: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_053 = 'resolver doctrinal note 053: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_054 = 'resolver doctrinal note 054: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_055 = 'resolver doctrinal note 055: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_056 = 'resolver doctrinal note 056: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_057 = 'resolver doctrinal note 057: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_058 = 'resolver doctrinal note 058: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_059 = 'resolver doctrinal note 059: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_060 = 'resolver doctrinal note 060: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_061 = 'resolver doctrinal note 061: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_062 = 'resolver doctrinal note 062: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_063 = 'resolver doctrinal note 063: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_064 = 'resolver doctrinal note 064: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_065 = 'resolver doctrinal note 065: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_066 = 'resolver doctrinal note 066: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_067 = 'resolver doctrinal note 067: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_068 = 'resolver doctrinal note 068: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_069 = 'resolver doctrinal note 069: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_070 = 'resolver doctrinal note 070: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_071 = 'resolver doctrinal note 071: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_072 = 'resolver doctrinal note 072: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_073 = 'resolver doctrinal note 073: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_074 = 'resolver doctrinal note 074: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_075 = 'resolver doctrinal note 075: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_076 = 'resolver doctrinal note 076: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_077 = 'resolver doctrinal note 077: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_078 = 'resolver doctrinal note 078: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_079 = 'resolver doctrinal note 079: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_080 = 'resolver doctrinal note 080: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_081 = 'resolver doctrinal note 081: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_082 = 'resolver doctrinal note 082: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_083 = 'resolver doctrinal note 083: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_084 = 'resolver doctrinal note 084: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_085 = 'resolver doctrinal note 085: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_086 = 'resolver doctrinal note 086: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_087 = 'resolver doctrinal note 087: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_088 = 'resolver doctrinal note 088: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_089 = 'resolver doctrinal note 089: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_090 = 'resolver doctrinal note 090: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_091 = 'resolver doctrinal note 091: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_092 = 'resolver doctrinal note 092: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_093 = 'resolver doctrinal note 093: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_094 = 'resolver doctrinal note 094: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_095 = 'resolver doctrinal note 095: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_096 = 'resolver doctrinal note 096: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_097 = 'resolver doctrinal note 097: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_098 = 'resolver doctrinal note 098: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_099 = 'resolver doctrinal note 099: preserve relationship continuity, do not flatten authored pressure.';
-export const RELATIONSHIP_RESOLVER_NOTE_100 = 'resolver doctrinal note 100: preserve relationship continuity, do not flatten authored pressure.';
+
+
+// ============================================================================
+// MARK: Resolution utility functions
+// ============================================================================
+
+/** Compute the dramatic weight of a scene composition. */
+export function computeSceneDramaticWeight01(scene: SceneComposition): number {
+  const climaxBonus = scene.hasClimax ? 0.3 : 0;
+  const interventionBonus = scene.hasIntervention ? 0.2 : 0;
+  const witnessBonus = Math.min(scene.witnessCount / 4, 0.25);
+  const beatDensity = Math.min(scene.beats.length / 8, 0.25);
+  return Math.min(1, climaxBonus + interventionBonus + witnessBonus + beatDensity);
+}
+
+/** Determine if a scene should be saved as a memorable moment. */
+export function isMemorableScene(scene: SceneComposition, threshold01: number = 0.5): boolean {
+  return computeSceneDramaticWeight01(scene) >= threshold01;
+}
+
+/** Generate a natural-language summary of a scene. */
+export function summarizeScene(scene: SceneComposition): string {
+  const parts: string[] = [];
+  const entry = scene.beats.find((b) => b.phase === 'ENTRY');
+  if (entry) parts.push(`${entry.counterpartId} enters with ${entry.toneHint.toLowerCase()} posture.`);
+  const escalation = scene.beats.filter((b) => b.phase === 'ESCALATION');
+  if (escalation.length > 0) parts.push(`${escalation.length} escalation beat(s) follow.`);
+  if (scene.hasClimax) parts.push('The scene reaches a dramatic climax.');
+  if (scene.hasIntervention) {
+    const helper = scene.beats.find((b) => b.phase === 'INTERVENTION');
+    if (helper) parts.push(`${helper.counterpartId} intervenes.`);
+  }
+  if (scene.witnessCount > 0) parts.push(`${scene.witnessCount} witness(es) react.`);
+  return parts.join(' ');
+}
+
+/** Build a complete resolution audit for proof chain surfaces. */
+export function buildResolutionAuditReport(
+  resolver: RelationshipResolver,
+  snapshot: ChatRelationshipSnapshot,
+  context: RelationshipResolverContext,
+): readonly string[] {
+  const envelope = resolver.resolveSnapshot(snapshot, context);
+  const diagnostic = resolver.generateResolutionDiagnostic(envelope);
+  const history = resolver.getResolutionHistory(snapshot.playerId ?? context.playerId ?? '');
+  const ratio = resolver.helperToRivalRatio(snapshot.playerId ?? context.playerId ?? '');
+  return [
+    ...diagnostic,
+    `history_length=${history.length}|helper_to_rival_ratio=${ratio.toFixed(3)}`,
+    ...history.slice(-4).map((h) => `  primary=${h.primaryCounterpartId ?? 'none'}|helpers=${h.helperCount}|rivals=${h.rivalCount}|rescue=${h.hasRescue}`),
+  ];
+}
+
+

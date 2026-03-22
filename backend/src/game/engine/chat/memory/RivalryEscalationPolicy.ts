@@ -15,8 +15,8 @@ import type {
   ChatRelationshipNpcSignal,
   ChatRelationshipPressureBand,
   ChatRelationshipStance,
-} from '../../../../../shared/contracts/chat/relationship';
-import { clamp01 } from '../../../../../shared/contracts/chat/relationship';
+} from '../../../../../../shared/contracts/chat/relationship';
+import { clamp01 } from '../../../../../../shared/contracts/chat/relationship';
 
 export type RivalryEscalationTier = 'NONE' | 'GLARE' | 'PROBE' | 'PRESSURE' | 'HUNT' | 'PUBLIC_SWARM' | 'BOSS_WINDOW';
 export type RivalrySuppressionReason = 'HELPER_PROTECTION' | 'LOW_SIGNAL' | 'PRIVATE_CONTEXT' | 'NEGOTIATION_DECORUM' | 'POST_RUN_COOLDOWN' | 'REPLAY_ONLY' | 'NONE';
@@ -128,6 +128,8 @@ const DEFAULT_CHANNEL_BIASES: Readonly<Record<string, number>> = Object.freeze({
 const DEFAULT_PRESSURE_BIASES: Readonly<Record<ChatRelationshipPressureBand, number>> = Object.freeze({
   LOW: 0.12, MEDIUM: 0.33, HIGH: 0.63, CRITICAL: 0.91,
 });
+
+const DEFAULT_EVENT_HEAT: Readonly<Record<ChatRelationshipEventType, number>> = Object.freeze({} as Record<ChatRelationshipEventType, number>);
 
 const DEFAULT_EVENT_SEVERITY: Readonly<Record<ChatRelationshipEventType, number>> = Object.freeze({
   'PLAYER_MESSAGE': 0.26,
@@ -308,6 +310,189 @@ function notes(request: RivalryEscalationRequest, assessment: RivalryEscalationA
   return Object.freeze(lines);
 }
 
+
+// ============================================================================
+// MARK: Escalation state machine types
+// ============================================================================
+
+export interface RivalryStateMachineState {
+  readonly currentTier: RivalryEscalationTier;
+  readonly previousTier: RivalryEscalationTier;
+  readonly enteredAt: number;
+  readonly timeInTierMs: number;
+  readonly transitionCount: number;
+  readonly lastTransitionAt: number;
+  readonly isValidState: boolean;
+}
+
+export interface RivalryStateTransitionResult {
+  readonly success: boolean;
+  readonly fromTier: RivalryEscalationTier;
+  readonly toTier: RivalryEscalationTier;
+  readonly reason: string;
+  readonly timestamp: number;
+}
+
+// ============================================================================
+// MARK: Predictive escalation types
+// ============================================================================
+
+export interface RivalryEscalationPrediction {
+  readonly predictedTier: RivalryEscalationTier;
+  readonly estimatedTicksUntil: number;
+  readonly confidence01: number;
+  readonly triggerConditions: readonly string[];
+}
+
+// ============================================================================
+// MARK: Pack hunting types
+// ============================================================================
+
+export interface PackHuntRole {
+  readonly counterpartId: string;
+  readonly packRole: 'POINT' | 'PRESSURE' | 'FLANK' | 'RECEIPT_CLOSER';
+  readonly escalationScore01: number;
+}
+
+export interface PackHuntAssessment {
+  readonly canFormPack: boolean;
+  readonly reason: string;
+  readonly packSize: number;
+  readonly roles: readonly PackHuntRole[];
+}
+
+// ============================================================================
+// MARK: De-escalation types
+// ============================================================================
+
+export interface DeEscalationDecision {
+  readonly shouldRetreat: boolean;
+  readonly shouldRegroup: boolean;
+  readonly shouldConcede: boolean;
+  readonly retreatReason: string;
+  readonly suggestedCooldownMs: number;
+  readonly gracefulExitStyle: 'DIGNIFIED_WITHDRAWAL' | 'TACTICAL_RETREAT' | 'NONE';
+}
+
+// ============================================================================
+// MARK: Boss fight composition types
+// ============================================================================
+
+export interface BossFightComposition {
+  readonly bossFightId: string;
+  readonly counterpartId: string;
+  readonly entranceStyle: 'DRAMATIC_PUBLIC' | 'COLD_PRIVATE';
+  readonly openingMoveType: 'RECEIPT_BARRAGE' | 'PSYCHOLOGICAL_PROBE' | 'SILENCE_THEN_STRIKE';
+  readonly preferredWitnessCount: number;
+  readonly helperSuppressionDurationMs: number;
+  readonly resolutionConditions: readonly string[];
+  readonly estimatedDurationMs: number;
+  readonly maxEscalationBudget: number;
+}
+
+// ============================================================================
+// MARK: Escalation audit types
+// ============================================================================
+
+export interface RivalryEscalationAuditEntry {
+  readonly auditId: string;
+  readonly counterpartId: string;
+  readonly inputHostility01: number;
+  readonly inputRivalry01: number;
+  readonly inputIntensity01: number;
+  readonly selectedTier: RivalryEscalationTier;
+  readonly selectedScore01: number;
+  readonly suppressionReason: RivalrySuppressionReason;
+  readonly shouldUseCallback: boolean;
+  readonly shouldQuotePlayerBack: boolean;
+  readonly shouldPreferSilence: boolean;
+  readonly attackWindowOpen: boolean;
+  readonly timestamp: number;
+  readonly contextMode: string;
+  readonly contextPressureBand: string;
+}
+
+
+
+// ============================================================================
+// MARK: Rival personality escalation profile types
+// ============================================================================
+
+export interface RivalPersonalityEscalationProfile {
+  readonly personaId: string;
+  readonly label: string;
+  readonly preferredTierProgression: readonly RivalryEscalationTier[];
+  readonly skipsTiers: boolean;
+  readonly prefersSilenceBeforeStrike: boolean;
+  readonly attackTimingBias01: number;
+  readonly receiptPreference01: number;
+  readonly humiliationPreference01: number;
+  readonly psychologicalPreference01: number;
+  readonly deEscalationResistance01: number;
+  readonly publicStageBias01: number;
+  readonly signatureOpeningStyle: string;
+  readonly retreatCondition: string;
+  readonly escalationPaceMs: number;
+}
+
+// ============================================================================
+// MARK: Mode escalation profile types
+// ============================================================================
+
+export interface ModeEscalationProfile {
+  readonly modeId: string;
+  readonly label: string;
+  readonly maxSimultaneousRivals: number;
+  readonly publicSwarmAllowed: boolean;
+  readonly escalationPaceMultiplier: number;
+  readonly silenceEmphasis01: number;
+  readonly dealRoomEscalation: boolean;
+  readonly teamCoordination: boolean;
+  readonly preferredTierCeiling: RivalryEscalationTier;
+  readonly witnessAmplification01: number;
+}
+
+// ============================================================================
+// MARK: Escalation history types
+// ============================================================================
+
+export interface RivalryEscalationHistoryEntry {
+  readonly timestamp: number;
+  readonly tier: RivalryEscalationTier;
+  readonly score01: number;
+  readonly suppressed: boolean;
+  readonly usedCallback: boolean;
+  readonly publicEmbarrassment01: number;
+}
+
+// ============================================================================
+// MARK: Diagnostic report type
+// ============================================================================
+
+export interface RivalryDiagnosticReport {
+  readonly counterpartId: string;
+  readonly currentStateMachineTier: RivalryEscalationTier;
+  readonly decisionTier: RivalryEscalationTier;
+  readonly decisionScore01: number;
+  readonly assessmentHostility01: number;
+  readonly assessmentRivalry01: number;
+  readonly assessmentObsessionHeat01: number;
+  readonly assessmentBossFightReadiness01: number;
+  readonly suppressionReason: RivalrySuppressionReason;
+  readonly attackWindowOpen: boolean;
+  readonly shouldUseCallback: boolean;
+  readonly shouldQuotePlayerBack: boolean;
+  readonly deEscalationAdvised: boolean;
+  readonly deEscalationReason: string;
+  readonly personaId?: string;
+  readonly personaLabel?: string;
+  readonly personaReceiptPreference01?: number;
+  readonly transitionCount: number;
+  readonly contextMode: string;
+  readonly contextPressureBand: string;
+}
+
+
 export class RivalryEscalationPolicy {
   private readonly config: RivalryEscalationPolicyConfig;
 
@@ -354,6 +539,399 @@ export class RivalryEscalationPolicy {
       assessment,
     });
   }
+
+
+  // ==========================================================================
+  // MARK: Escalation state machine
+  // ==========================================================================
+
+  private readonly _escalationStates = new Map<string, RivalryStateMachineState>();
+
+  private static readonly VALID_TRANSITIONS: Readonly<Record<RivalryEscalationTier, readonly RivalryEscalationTier[]>> = Object.freeze({
+    'NONE': ['GLARE', 'PROBE'],
+    'GLARE': ['NONE', 'PROBE', 'PRESSURE'],
+    'PROBE': ['GLARE', 'PRESSURE', 'HUNT'],
+    'PRESSURE': ['PROBE', 'HUNT', 'PUBLIC_SWARM'],
+    'HUNT': ['PRESSURE', 'PUBLIC_SWARM', 'BOSS_WINDOW'],
+    'PUBLIC_SWARM': ['HUNT', 'BOSS_WINDOW', 'NONE'],
+    'BOSS_WINDOW': ['NONE', 'HUNT'],
+  });
+
+  /** Get the current escalation state for a counterpart. */
+  public getEscalationState(playerId: string, counterpartId: string): RivalryStateMachineState {
+    return this._escalationStates.get(`${playerId}:${counterpartId}`) ?? {
+      currentTier: 'NONE', previousTier: 'NONE', enteredAt: 0, timeInTierMs: 0,
+      transitionCount: 0, lastTransitionAt: 0, isValidState: true,
+    };
+  }
+
+  /** Transition the escalation state machine to a new tier with validation. */
+  public transitionEscalation(playerId: string, counterpartId: string, targetTier: RivalryEscalationTier, at: number): RivalryStateTransitionResult {
+    const key = `${playerId}:${counterpartId}`;
+    const current = this.getEscalationState(playerId, counterpartId);
+    const allowed = RivalryEscalationPolicy.VALID_TRANSITIONS[current.currentTier] ?? [];
+
+    if (!allowed.includes(targetTier)) {
+      return { success: false, fromTier: current.currentTier, toTier: targetTier, reason: `invalid_transition_${current.currentTier}_to_${targetTier}`, timestamp: at };
+    }
+
+    const next: RivalryStateMachineState = {
+      currentTier: targetTier, previousTier: current.currentTier,
+      enteredAt: at, timeInTierMs: 0,
+      transitionCount: current.transitionCount + 1, lastTransitionAt: at, isValidState: true,
+    };
+    this._escalationStates.set(key, next);
+    return { success: true, fromTier: current.currentTier, toTier: targetTier, reason: 'valid_transition', timestamp: at };
+  }
+
+  // ==========================================================================
+  // MARK: Predictive escalation modeling
+  // ==========================================================================
+
+  /** Predict when the next escalation is likely based on historical pattern. */
+  public predictNextEscalation(playerId: string, counterpartId: string, history: readonly RivalryEscalationDecision[]): RivalryEscalationPrediction {
+    const current = this.getEscalationState(playerId, counterpartId);
+    if (history.length < 2) {
+      return { predictedTier: current.currentTier, estimatedTicksUntil: -1, confidence01: 0.1, triggerConditions: ['insufficient_history'] };
+    }
+    const recentTiers = history.slice(-6).map((h) => h.selectedTier);
+    const escalationRate = recentTiers.filter((t, i) => i > 0 && this.tierOrdinal(t) > this.tierOrdinal(recentTiers[i - 1]!)).length / Math.max(1, recentTiers.length - 1);
+    const allowed = RivalryEscalationPolicy.VALID_TRANSITIONS[current.currentTier] ?? [];
+    const nextUp = allowed.find((t) => this.tierOrdinal(t) > this.tierOrdinal(current.currentTier));
+
+    return {
+      predictedTier: nextUp ?? current.currentTier,
+      estimatedTicksUntil: escalationRate > 0.5 ? 3 : escalationRate > 0.25 ? 8 : 20,
+      confidence01: clamp01(escalationRate * 0.7 + (history.length / 20) * 0.3),
+      triggerConditions: escalationRate > 0.5 ? ['high_escalation_rate', 'recent_momentum'] : ['moderate_pattern'],
+    };
+  }
+
+  private tierOrdinal(tier: RivalryEscalationTier): number {
+    const order: RivalryEscalationTier[] = ['NONE', 'GLARE', 'PROBE', 'PRESSURE', 'HUNT', 'PUBLIC_SWARM', 'BOSS_WINDOW'];
+    return order.indexOf(tier);
+  }
+
+  // ==========================================================================
+  // MARK: Pack hunting logic
+  // ==========================================================================
+
+  /** Assess whether multiple rivals should coordinate a pack hunt. */
+  public assessPackFormation(rivals: readonly { counterpartId: string; escalation: RivalryEscalationDecision }[], context: RivalryEscalationContext): PackHuntAssessment {
+    if (rivals.length < 2) return { canFormPack: false, reason: 'insufficient_rivals', packSize: 0, roles: [] };
+    const huntReady = rivals.filter((r) => r.escalation.selectedTier === 'HUNT' || r.escalation.selectedTier === 'PUBLIC_SWARM' || r.escalation.selectedTier === 'BOSS_WINDOW');
+    if (huntReady.length < 2) return { canFormPack: false, reason: 'insufficient_hunt_ready', packSize: 0, roles: [] };
+
+    const sorted = [...huntReady].sort((a, b) => b.escalation.selectedScore01 - a.escalation.selectedScore01);
+    const roles: PackHuntRole[] = sorted.slice(0, 4).map((r, i) => ({
+      counterpartId: r.counterpartId,
+      packRole: i === 0 ? 'POINT' as const : i === 1 ? 'PRESSURE' as const : i === 2 ? 'FLANK' as const : 'RECEIPT_CLOSER' as const,
+      escalationScore01: r.escalation.selectedScore01,
+    }));
+
+    return { canFormPack: true, reason: 'pack_ready', packSize: roles.length, roles: Object.freeze(roles) };
+  }
+
+  // ==========================================================================
+  // MARK: De-escalation and retreat logic
+  // ==========================================================================
+
+  /** Assess whether a rival should de-escalate. */
+  public assessDeEscalation(request: RivalryEscalationRequest): DeEscalationDecision {
+    const assessment = this.assess(request);
+    const shouldRetreat = assessment.rescueCounterweight01 >= 0.6 || (assessment.cooldown01 >= 0.5 && assessment.hostility01 < 0.4);
+    const shouldRegroup = assessment.hostility01 >= 0.5 && assessment.cooldown01 >= 0.3 && !shouldRetreat;
+    const shouldConcede = assessment.negotiationDiscipline01 >= 0.7 && assessment.publicStageFit01 < 0.3;
+
+    return Object.freeze({
+      shouldRetreat, shouldRegroup, shouldConcede,
+      retreatReason: shouldRetreat ? (assessment.rescueCounterweight01 >= 0.6 ? 'helper_intervention' : 'cooldown_period') : 'none',
+      suggestedCooldownMs: shouldRetreat ? 15000 : shouldRegroup ? 8000 : 0,
+      gracefulExitStyle: shouldConcede ? 'DIGNIFIED_WITHDRAWAL' as const : shouldRetreat ? 'TACTICAL_RETREAT' as const : 'NONE' as const,
+    });
+  }
+
+  // ==========================================================================
+  // MARK: Boss fight composition
+  // ==========================================================================
+
+  /** Compose a boss-fight sequence when escalation reaches BOSS_WINDOW. */
+  public composeBossFight(request: RivalryEscalationRequest, decision: RivalryEscalationDecision): BossFightComposition {
+    const assessment = decision.assessment;
+    return Object.freeze({
+      bossFightId: `bossfight:${request.state.counterpartId}:${Date.now()}`,
+      counterpartId: request.state.counterpartId,
+      entranceStyle: assessment.witnessMagnet01 >= 0.7 ? 'DRAMATIC_PUBLIC' as const : 'COLD_PRIVATE' as const,
+      openingMoveType: assessment.humiliationValue01 >= 0.6 ? 'RECEIPT_BARRAGE' as const : 'PSYCHOLOGICAL_PROBE' as const,
+      preferredWitnessCount: decision.preferredWitnessCount,
+      helperSuppressionDurationMs: decision.shouldSuppressHelpers ? 12000 : 0,
+      resolutionConditions: Object.freeze(['PLAYER_CAPITULATES', 'PLAYER_COUNTER_WINS', 'MUTUAL_DESTRUCTION', 'STALEMATE_TIMEOUT']),
+      estimatedDurationMs: 25000,
+      maxEscalationBudget: 5,
+    });
+  }
+
+  // ==========================================================================
+  // MARK: Escalation audit and replay
+  // ==========================================================================
+
+  /** Generate an audit entry for proof-chain and replay surfaces. */
+  public generateAuditEntry(request: RivalryEscalationRequest, decision: RivalryEscalationDecision): RivalryEscalationAuditEntry {
+    return Object.freeze({
+      auditId: `audit:escalation:${request.state.counterpartId}:${Date.now()}`,
+      counterpartId: request.state.counterpartId,
+      inputHostility01: (request.state.vector as any)?.hostility01 ?? 0,
+      inputRivalry01: (request.state.vector as any)?.rivalry01 ?? 0,
+      inputIntensity01: request.state.intensity01,
+      selectedTier: decision.selectedTier,
+      selectedScore01: decision.selectedScore01,
+      suppressionReason: decision.suppressionReason,
+      shouldUseCallback: decision.shouldUseCallback,
+      shouldQuotePlayerBack: decision.shouldQuotePlayerBack,
+      shouldPreferSilence: decision.shouldPreferSilence,
+      attackWindowOpen: decision.attackWindow.open,
+      timestamp: Date.now(),
+      contextMode: request.context.mode,
+      contextPressureBand: request.context.pressureBand,
+    });
+  }
+
+
+
+
+  // ==========================================================================
+  // MARK: Rival personality escalation profiles
+  // ==========================================================================
+
+  private static readonly PERSONA_PROFILES: Readonly<Record<string, RivalPersonalityEscalationProfile>> = Object.freeze({
+    'THE_LIQUIDATOR': {
+      personaId: 'THE_LIQUIDATOR', label: 'The Liquidator',
+      preferredTierProgression: ['GLARE', 'PROBE', 'PRESSURE', 'HUNT', 'PUBLIC_SWARM', 'BOSS_WINDOW'] as RivalryEscalationTier[],
+      skipsTiers: false, prefersSilenceBeforeStrike: true,
+      attackTimingBias01: 0.45, receiptPreference01: 0.82,
+      humiliationPreference01: 0.68, psychologicalPreference01: 0.55,
+      deEscalationResistance01: 0.72, publicStageBias01: 0.6,
+      signatureOpeningStyle: 'METHODICAL_APPROACH',
+      retreatCondition: 'NEVER_UNLESS_FORCED',
+      escalationPaceMs: 8000,
+    },
+    'THE_BUREAUCRAT': {
+      personaId: 'THE_BUREAUCRAT', label: 'The Bureaucrat',
+      preferredTierProgression: ['GLARE', 'PROBE', 'PROBE', 'PRESSURE', 'PRESSURE', 'HUNT'] as RivalryEscalationTier[],
+      skipsTiers: false, prefersSilenceBeforeStrike: false,
+      attackTimingBias01: 0.3, receiptPreference01: 0.92,
+      humiliationPreference01: 0.45, psychologicalPreference01: 0.78,
+      deEscalationResistance01: 0.5, publicStageBias01: 0.4,
+      signatureOpeningStyle: 'PROCEDURAL_CITATION',
+      retreatCondition: 'WHEN_OUTPROCEDURED',
+      escalationPaceMs: 12000,
+    },
+    'THE_MANIPULATOR': {
+      personaId: 'THE_MANIPULATOR', label: 'The Manipulator',
+      preferredTierProgression: ['PROBE', 'PRESSURE', 'HUNT', 'BOSS_WINDOW'] as RivalryEscalationTier[],
+      skipsTiers: true, prefersSilenceBeforeStrike: true,
+      attackTimingBias01: 0.72, receiptPreference01: 0.58,
+      humiliationPreference01: 0.85, psychologicalPreference01: 0.92,
+      deEscalationResistance01: 0.35, publicStageBias01: 0.75,
+      signatureOpeningStyle: 'PSYCHOLOGICAL_TRAP',
+      retreatCondition: 'WHEN_EXPOSED',
+      escalationPaceMs: 5000,
+    },
+    'CRASH_PROPHET': {
+      personaId: 'CRASH_PROPHET', label: 'Crash Prophet',
+      preferredTierProgression: ['PRESSURE', 'PUBLIC_SWARM', 'BOSS_WINDOW'] as RivalryEscalationTier[],
+      skipsTiers: true, prefersSilenceBeforeStrike: false,
+      attackTimingBias01: 0.88, receiptPreference01: 0.42,
+      humiliationPreference01: 0.72, psychologicalPreference01: 0.38,
+      deEscalationResistance01: 0.25, publicStageBias01: 0.92,
+      signatureOpeningStyle: 'DRAMATIC_PROPHECY',
+      retreatCondition: 'WHEN_PROVEN_WRONG',
+      escalationPaceMs: 3000,
+    },
+    'LEGACY_HEIR': {
+      personaId: 'LEGACY_HEIR', label: 'Legacy Heir',
+      preferredTierProgression: ['GLARE', 'GLARE', 'PROBE', 'PRESSURE', 'HUNT', 'PUBLIC_SWARM'] as RivalryEscalationTier[],
+      skipsTiers: false, prefersSilenceBeforeStrike: true,
+      attackTimingBias01: 0.35, receiptPreference01: 0.75,
+      humiliationPreference01: 0.58, psychologicalPreference01: 0.62,
+      deEscalationResistance01: 0.82, publicStageBias01: 0.55,
+      signatureOpeningStyle: 'INHERITED_CONTEMPT',
+      retreatCondition: 'WHEN_OUTCLASSED',
+      escalationPaceMs: 10000,
+    },
+  });
+
+  /** Get escalation profile for a specific rival persona. */
+  public getPersonaProfile(personaId: string): RivalPersonalityEscalationProfile | undefined {
+    return RivalryEscalationPolicy.PERSONA_PROFILES[personaId];
+  }
+
+  /** Resolve escalation with persona-aware adjustments. */
+  public resolveWithPersona(request: RivalryEscalationRequest, personaId: string): RivalryEscalationDecision {
+    const base = this.resolve(request);
+    const persona = this.getPersonaProfile(personaId);
+    if (!persona) return base;
+    const adjustedScore = clamp01(base.selectedScore01 * (0.7 + persona.attackTimingBias01 * 0.3));
+    const shouldUseCallback = base.shouldUseCallback || persona.receiptPreference01 >= 0.7;
+    const shouldPreferSilence = persona.prefersSilenceBeforeStrike && base.selectedTier === 'GLARE';
+    return { ...base, selectedScore01: adjustedScore, shouldUseCallback, shouldPreferSilence: shouldPreferSilence || base.shouldPreferSilence };
+  }
+
+  // ==========================================================================
+  // MARK: Mode-specific escalation profiles
+  // ==========================================================================
+
+  private static readonly MODE_ESCALATION_PROFILES: Readonly<Record<string, ModeEscalationProfile>> = Object.freeze({
+    'GO_ALONE': {
+      modeId: 'GO_ALONE', label: 'Empire',
+      maxSimultaneousRivals: 1, publicSwarmAllowed: false,
+      escalationPaceMultiplier: 1.3, silenceEmphasis01: 0.65,
+      dealRoomEscalation: false, teamCoordination: false,
+      preferredTierCeiling: 'HUNT' as RivalryEscalationTier,
+      witnessAmplification01: 0.4,
+    },
+    'HEAD_TO_HEAD': {
+      modeId: 'HEAD_TO_HEAD', label: 'Predator',
+      maxSimultaneousRivals: 1, publicSwarmAllowed: false,
+      escalationPaceMultiplier: 0.8, silenceEmphasis01: 0.35,
+      dealRoomEscalation: true, teamCoordination: false,
+      preferredTierCeiling: 'BOSS_WINDOW' as RivalryEscalationTier,
+      witnessAmplification01: 0.6,
+    },
+    'TEAM_UP': {
+      modeId: 'TEAM_UP', label: 'Syndicate',
+      maxSimultaneousRivals: 3, publicSwarmAllowed: true,
+      escalationPaceMultiplier: 1.0, silenceEmphasis01: 0.25,
+      dealRoomEscalation: false, teamCoordination: true,
+      preferredTierCeiling: 'PUBLIC_SWARM' as RivalryEscalationTier,
+      witnessAmplification01: 0.85,
+    },
+    'CHASE_A_LEGEND': {
+      modeId: 'CHASE_A_LEGEND', label: 'Phantom',
+      maxSimultaneousRivals: 2, publicSwarmAllowed: false,
+      escalationPaceMultiplier: 1.6, silenceEmphasis01: 0.88,
+      dealRoomEscalation: false, teamCoordination: false,
+      preferredTierCeiling: 'HUNT' as RivalryEscalationTier,
+      witnessAmplification01: 0.2,
+    },
+  });
+
+  /** Get mode-specific escalation profile. */
+  public getModeEscalationProfile(modeId: string | undefined): ModeEscalationProfile {
+    return RivalryEscalationPolicy.MODE_ESCALATION_PROFILES[modeId ?? ''] ?? RivalryEscalationPolicy.MODE_ESCALATION_PROFILES['GO_ALONE']!;
+  }
+
+  /** Resolve with mode-aware ceiling enforcement. */
+  public resolveWithMode(request: RivalryEscalationRequest, modeId: string): RivalryEscalationDecision {
+    const base = this.resolve(request);
+    const profile = this.getModeEscalationProfile(modeId);
+    const tierOrder: RivalryEscalationTier[] = ['NONE', 'GLARE', 'PROBE', 'PRESSURE', 'HUNT', 'PUBLIC_SWARM', 'BOSS_WINDOW'];
+    const ceilingIdx = tierOrder.indexOf(profile.preferredTierCeiling);
+    const currentIdx = tierOrder.indexOf(base.selectedTier);
+    if (currentIdx > ceilingIdx) {
+      return { ...base, selectedTier: profile.preferredTierCeiling, notes: [...base.notes, `mode_ceiling_enforced_${profile.label}`] };
+    }
+    return base;
+  }
+
+  // ==========================================================================
+  // MARK: Escalation history tracking
+  // ==========================================================================
+
+  private readonly _escalationHistory = new Map<string, RivalryEscalationHistoryEntry[]>();
+
+  /** Record an escalation decision for historical analysis. */
+  public recordEscalationDecision(playerId: string, counterpartId: string, decision: RivalryEscalationDecision, at: number): void {
+    const key = `${playerId}:${counterpartId}`;
+    const entries = this._escalationHistory.get(key) ?? [];
+    entries.push({
+      timestamp: at,
+      tier: decision.selectedTier,
+      score01: decision.selectedScore01,
+      suppressed: decision.suppressionReason !== 'NONE',
+      usedCallback: decision.shouldUseCallback,
+      publicEmbarrassment01: decision.publicEmbarrassment01,
+    });
+    if (entries.length > 128) entries.splice(0, entries.length - 128);
+    this._escalationHistory.set(key, entries);
+  }
+
+  /** Get escalation history for a counterpart. */
+  public getEscalationHistory(playerId: string, counterpartId: string): readonly RivalryEscalationHistoryEntry[] {
+    return Object.freeze(this._escalationHistory.get(`${playerId}:${counterpartId}`) ?? []);
+  }
+
+  /** Compute average escalation tier over recent history. */
+  public averageEscalationIntensity(playerId: string, counterpartId: string): number {
+    const history = this.getEscalationHistory(playerId, counterpartId);
+    if (history.length === 0) return 0;
+    const tierOrder: RivalryEscalationTier[] = ['NONE', 'GLARE', 'PROBE', 'PRESSURE', 'HUNT', 'PUBLIC_SWARM', 'BOSS_WINDOW'];
+    const total = history.reduce((s, h) => s + tierOrder.indexOf(h.tier), 0);
+    return total / history.length / (tierOrder.length - 1);
+  }
+
+  /** Detect if escalation is accelerating (getting worse faster). */
+  public isEscalationAccelerating(playerId: string, counterpartId: string): boolean {
+    const history = this.getEscalationHistory(playerId, counterpartId);
+    if (history.length < 4) return false;
+    const recent = history.slice(-4);
+    const tierOrder: RivalryEscalationTier[] = ['NONE', 'GLARE', 'PROBE', 'PRESSURE', 'HUNT', 'PUBLIC_SWARM', 'BOSS_WINDOW'];
+    const deltas = recent.slice(1).map((h, i) => tierOrder.indexOf(h.tier) - tierOrder.indexOf(recent[i]!.tier));
+    return deltas.every((d) => d > 0);
+  }
+
+  // ==========================================================================
+  // MARK: Escalation diagnostic reports
+  // ==========================================================================
+
+  /** Generate a comprehensive diagnostic for a rivalry state. */
+  public generateDiagnostic(request: RivalryEscalationRequest, personaId?: string): RivalryDiagnosticReport {
+    const assessment = this.assess(request);
+    const decision = personaId ? this.resolveWithPersona(request, personaId) : this.resolve(request);
+    const state = this.getEscalationState(request.state.playerId ?? '', request.state.counterpartId);
+    const deEsc = this.assessDeEscalation(request);
+    const persona = personaId ? this.getPersonaProfile(personaId) : undefined;
+
+    return Object.freeze({
+      counterpartId: request.state.counterpartId,
+      currentStateMachineTier: state.currentTier,
+      decisionTier: decision.selectedTier,
+      decisionScore01: decision.selectedScore01,
+      assessmentHostility01: assessment.hostility01,
+      assessmentRivalry01: assessment.rivalry01,
+      assessmentObsessionHeat01: assessment.obsessionHeat01,
+      assessmentBossFightReadiness01: assessment.bossFightReadiness01,
+      suppressionReason: decision.suppressionReason,
+      attackWindowOpen: decision.attackWindow.open,
+      shouldUseCallback: decision.shouldUseCallback,
+      shouldQuotePlayerBack: decision.shouldQuotePlayerBack,
+      deEscalationAdvised: deEsc.shouldRetreat || deEsc.shouldConcede,
+      deEscalationReason: deEsc.retreatReason,
+      personaId: persona?.personaId,
+      personaLabel: persona?.label,
+      personaReceiptPreference01: persona?.receiptPreference01,
+      transitionCount: state.transitionCount,
+      contextMode: request.context.mode,
+      contextPressureBand: request.context.pressureBand,
+    });
+  }
+
+  /** Build a multi-line diagnostic string array. */
+  public buildDiagnosticLines(request: RivalryEscalationRequest, personaId?: string): readonly string[] {
+    const report = this.generateDiagnostic(request, personaId);
+    const lines: string[] = [];
+    lines.push(`counterpart=${report.counterpartId}|tier=${report.decisionTier}|score=${report.decisionScore01.toFixed(3)}`);
+    lines.push(`hostility=${report.assessmentHostility01.toFixed(3)}|rivalry=${report.assessmentRivalry01.toFixed(3)}|obsession=${report.assessmentObsessionHeat01.toFixed(3)}`);
+    lines.push(`bossFightReady=${report.assessmentBossFightReadiness01.toFixed(3)}|suppression=${report.suppressionReason}`);
+    lines.push(`attackWindow=${report.attackWindowOpen}|callback=${report.shouldUseCallback}|quoteBack=${report.shouldQuotePlayerBack}`);
+    lines.push(`deEscAdvised=${report.deEscalationAdvised}|reason=${report.deEscalationReason}`);
+    if (report.personaId) lines.push(`persona=${report.personaLabel}|receiptPref=${report.personaReceiptPreference01?.toFixed(2)}`);
+    lines.push(`stateMachine=${report.currentStateMachineTier}|transitions=${report.transitionCount}`);
+    lines.push(`mode=${report.contextMode}|pressure=${report.contextPressureBand}`);
+    return lines;
+  }
+
+
 }
 
 export interface RivalryEventPreset { readonly eventType: ChatRelationshipEventType; readonly severity01: number; readonly publicness01: number; readonly hostility01: number; readonly prestige01: number; }
@@ -567,303 +1145,125 @@ export const RIVALRY_TIER_NOTES: Readonly<Record<RivalryEscalationTier, RivalryT
   'PUBLIC_SWARM': { tier: 'PUBLIC_SWARM', note: 'The moment becomes social and witnessed.' },
   'BOSS_WINDOW': { tier: 'BOSS_WINDOW', note: 'Language itself becomes a combat window.' },
 });
-export const RIVALRY_POLICY_GUIDE_001 = 'policy guide 001: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_002 = 'policy guide 002: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_003 = 'policy guide 003: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_004 = 'policy guide 004: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_005 = 'policy guide 005: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_006 = 'policy guide 006: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_007 = 'policy guide 007: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_008 = 'policy guide 008: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_009 = 'policy guide 009: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_010 = 'policy guide 010: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_011 = 'policy guide 011: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_012 = 'policy guide 012: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_013 = 'policy guide 013: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_014 = 'policy guide 014: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_015 = 'policy guide 015: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_016 = 'policy guide 016: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_017 = 'policy guide 017: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_018 = 'policy guide 018: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_019 = 'policy guide 019: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_020 = 'policy guide 020: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_021 = 'policy guide 021: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_022 = 'policy guide 022: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_023 = 'policy guide 023: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_024 = 'policy guide 024: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_025 = 'policy guide 025: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_026 = 'policy guide 026: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_027 = 'policy guide 027: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_028 = 'policy guide 028: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_029 = 'policy guide 029: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_030 = 'policy guide 030: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_031 = 'policy guide 031: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_032 = 'policy guide 032: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_033 = 'policy guide 033: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_034 = 'policy guide 034: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_035 = 'policy guide 035: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_036 = 'policy guide 036: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_037 = 'policy guide 037: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_038 = 'policy guide 038: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_039 = 'policy guide 039: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_040 = 'policy guide 040: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_041 = 'policy guide 041: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_042 = 'policy guide 042: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_043 = 'policy guide 043: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_044 = 'policy guide 044: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_045 = 'policy guide 045: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_046 = 'policy guide 046: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_047 = 'policy guide 047: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_048 = 'policy guide 048: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_049 = 'policy guide 049: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_050 = 'policy guide 050: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_051 = 'policy guide 051: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_052 = 'policy guide 052: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_053 = 'policy guide 053: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_054 = 'policy guide 054: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_055 = 'policy guide 055: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_056 = 'policy guide 056: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_057 = 'policy guide 057: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_058 = 'policy guide 058: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_059 = 'policy guide 059: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_060 = 'policy guide 060: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_061 = 'policy guide 061: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_062 = 'policy guide 062: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_063 = 'policy guide 063: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_064 = 'policy guide 064: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_065 = 'policy guide 065: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_066 = 'policy guide 066: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_067 = 'policy guide 067: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_068 = 'policy guide 068: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_069 = 'policy guide 069: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_070 = 'policy guide 070: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_071 = 'policy guide 071: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_072 = 'policy guide 072: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_073 = 'policy guide 073: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_074 = 'policy guide 074: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_075 = 'policy guide 075: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_076 = 'policy guide 076: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_077 = 'policy guide 077: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_078 = 'policy guide 078: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_079 = 'policy guide 079: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_080 = 'policy guide 080: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_081 = 'policy guide 081: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_082 = 'policy guide 082: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_083 = 'policy guide 083: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_084 = 'policy guide 084: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_085 = 'policy guide 085: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_086 = 'policy guide 086: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_087 = 'policy guide 087: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_088 = 'policy guide 088: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_089 = 'policy guide 089: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_090 = 'policy guide 090: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_091 = 'policy guide 091: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_092 = 'policy guide 092: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_093 = 'policy guide 093: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_094 = 'policy guide 094: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_095 = 'policy guide 095: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_096 = 'policy guide 096: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_097 = 'policy guide 097: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_098 = 'policy guide 098: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_099 = 'policy guide 099: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_100 = 'policy guide 100: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_101 = 'policy guide 101: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_102 = 'policy guide 102: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_103 = 'policy guide 103: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_104 = 'policy guide 104: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_105 = 'policy guide 105: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_106 = 'policy guide 106: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_107 = 'policy guide 107: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_108 = 'policy guide 108: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_109 = 'policy guide 109: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_110 = 'policy guide 110: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_111 = 'policy guide 111: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_112 = 'policy guide 112: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_113 = 'policy guide 113: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_114 = 'policy guide 114: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_115 = 'policy guide 115: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_116 = 'policy guide 116: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_117 = 'policy guide 117: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_118 = 'policy guide 118: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_119 = 'policy guide 119: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_120 = 'policy guide 120: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_121 = 'policy guide 121: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_122 = 'policy guide 122: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_123 = 'policy guide 123: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_124 = 'policy guide 124: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_125 = 'policy guide 125: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_126 = 'policy guide 126: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_127 = 'policy guide 127: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_128 = 'policy guide 128: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_129 = 'policy guide 129: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_130 = 'policy guide 130: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_131 = 'policy guide 131: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_132 = 'policy guide 132: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_133 = 'policy guide 133: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_134 = 'policy guide 134: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_135 = 'policy guide 135: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_136 = 'policy guide 136: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_137 = 'policy guide 137: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_138 = 'policy guide 138: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_139 = 'policy guide 139: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_140 = 'policy guide 140: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_141 = 'policy guide 141: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_142 = 'policy guide 142: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_143 = 'policy guide 143: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_144 = 'policy guide 144: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_145 = 'policy guide 145: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_146 = 'policy guide 146: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_147 = 'policy guide 147: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_148 = 'policy guide 148: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_149 = 'policy guide 149: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_150 = 'policy guide 150: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_151 = 'policy guide 151: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_152 = 'policy guide 152: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_153 = 'policy guide 153: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_154 = 'policy guide 154: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_155 = 'policy guide 155: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_156 = 'policy guide 156: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_157 = 'policy guide 157: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_158 = 'policy guide 158: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_159 = 'policy guide 159: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_160 = 'policy guide 160: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_161 = 'policy guide 161: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_162 = 'policy guide 162: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_163 = 'policy guide 163: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_164 = 'policy guide 164: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_165 = 'policy guide 165: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_166 = 'policy guide 166: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_167 = 'policy guide 167: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_168 = 'policy guide 168: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_169 = 'policy guide 169: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_170 = 'policy guide 170: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_171 = 'policy guide 171: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_172 = 'policy guide 172: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_173 = 'policy guide 173: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_174 = 'policy guide 174: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_175 = 'policy guide 175: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_176 = 'policy guide 176: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_177 = 'policy guide 177: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_178 = 'policy guide 178: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_179 = 'policy guide 179: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_180 = 'policy guide 180: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_181 = 'policy guide 181: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_182 = 'policy guide 182: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_183 = 'policy guide 183: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_184 = 'policy guide 184: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_185 = 'policy guide 185: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_186 = 'policy guide 186: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_187 = 'policy guide 187: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_188 = 'policy guide 188: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_189 = 'policy guide 189: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_190 = 'policy guide 190: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_191 = 'policy guide 191: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_192 = 'policy guide 192: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_193 = 'policy guide 193: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_194 = 'policy guide 194: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_195 = 'policy guide 195: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_196 = 'policy guide 196: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_197 = 'policy guide 197: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_198 = 'policy guide 198: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_199 = 'policy guide 199: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_200 = 'policy guide 200: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_201 = 'policy guide 201: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_202 = 'policy guide 202: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_203 = 'policy guide 203: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_204 = 'policy guide 204: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_205 = 'policy guide 205: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_206 = 'policy guide 206: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_207 = 'policy guide 207: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_208 = 'policy guide 208: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_209 = 'policy guide 209: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_210 = 'policy guide 210: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_211 = 'policy guide 211: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_212 = 'policy guide 212: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_213 = 'policy guide 213: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_214 = 'policy guide 214: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_215 = 'policy guide 215: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_216 = 'policy guide 216: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_217 = 'policy guide 217: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_218 = 'policy guide 218: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_219 = 'policy guide 219: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_220 = 'policy guide 220: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_221 = 'policy guide 221: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_222 = 'policy guide 222: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_223 = 'policy guide 223: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_224 = 'policy guide 224: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_225 = 'policy guide 225: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_226 = 'policy guide 226: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_227 = 'policy guide 227: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_228 = 'policy guide 228: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_229 = 'policy guide 229: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_230 = 'policy guide 230: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_231 = 'policy guide 231: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_232 = 'policy guide 232: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_233 = 'policy guide 233: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_234 = 'policy guide 234: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_235 = 'policy guide 235: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_236 = 'policy guide 236: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_237 = 'policy guide 237: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_238 = 'policy guide 238: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_239 = 'policy guide 239: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_240 = 'policy guide 240: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_241 = 'policy guide 241: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_242 = 'policy guide 242: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_243 = 'policy guide 243: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_244 = 'policy guide 244: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_245 = 'policy guide 245: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_246 = 'policy guide 246: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_247 = 'policy guide 247: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_248 = 'policy guide 248: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_249 = 'policy guide 249: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_250 = 'policy guide 250: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_251 = 'policy guide 251: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_252 = 'policy guide 252: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_253 = 'policy guide 253: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_254 = 'policy guide 254: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_255 = 'policy guide 255: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_256 = 'policy guide 256: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_257 = 'policy guide 257: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_258 = 'policy guide 258: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_259 = 'policy guide 259: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_260 = 'policy guide 260: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_261 = 'policy guide 261: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_262 = 'policy guide 262: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_263 = 'policy guide 263: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_264 = 'policy guide 264: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_265 = 'policy guide 265: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_266 = 'policy guide 266: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_267 = 'policy guide 267: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_268 = 'policy guide 268: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_269 = 'policy guide 269: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_270 = 'policy guide 270: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_271 = 'policy guide 271: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_272 = 'policy guide 272: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_273 = 'policy guide 273: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_274 = 'policy guide 274: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_275 = 'policy guide 275: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_276 = 'policy guide 276: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_277 = 'policy guide 277: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_278 = 'policy guide 278: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_279 = 'policy guide 279: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_280 = 'policy guide 280: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_281 = 'policy guide 281: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_282 = 'policy guide 282: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_283 = 'policy guide 283: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_284 = 'policy guide 284: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_285 = 'policy guide 285: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_286 = 'policy guide 286: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_287 = 'policy guide 287: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_288 = 'policy guide 288: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_289 = 'policy guide 289: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_290 = 'policy guide 290: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_291 = 'policy guide 291: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_292 = 'policy guide 292: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_293 = 'policy guide 293: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_294 = 'policy guide 294: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_295 = 'policy guide 295: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_296 = 'policy guide 296: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_297 = 'policy guide 297: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_298 = 'policy guide 298: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_299 = 'policy guide 299: escalation should feel personal, timely, and reconstructible.';
-export const RIVALRY_POLICY_GUIDE_300 = 'policy guide 300: escalation should feel personal, timely, and reconstructible.';
+
+
+// ============================================================================
+// MARK: Escalation helper functions
+// ============================================================================
+
+/** Compute the optimal moment to deploy a receipt based on rival persona timing. */
+export function computeReceiptDeploymentWindow(
+  personaProfile: RivalPersonalityEscalationProfile,
+  currentTier: RivalryEscalationTier,
+  audienceHeat01: number,
+): { shouldDeploy: boolean; optimalDelayMs: number; reason: string } {
+  if (personaProfile.receiptPreference01 < 0.4) {
+    return { shouldDeploy: false, optimalDelayMs: 0, reason: 'persona_low_receipt_preference' };
+  }
+  const tierOrder: RivalryEscalationTier[] = ['NONE', 'GLARE', 'PROBE', 'PRESSURE', 'HUNT', 'PUBLIC_SWARM', 'BOSS_WINDOW'];
+  const tierIdx = tierOrder.indexOf(currentTier);
+  if (tierIdx < 3) {
+    return { shouldDeploy: false, optimalDelayMs: 0, reason: 'too_early_in_escalation' };
+  }
+  const baseDelay = personaProfile.escalationPaceMs;
+  const audienceBonus = audienceHeat01 * 2000;
+  const optimalDelayMs = Math.round(baseDelay + audienceBonus);
+  return { shouldDeploy: true, optimalDelayMs, reason: `tier_${currentTier}_receipt_ready` };
+}
+
+/** Determine if a pack hunt should dissolve based on current conditions. */
+export function shouldDissolvePackHunt(
+  assessment: PackHuntAssessment,
+  helperInterventionActive: boolean,
+  playerIsRecovering: boolean,
+): boolean {
+  if (!assessment.canFormPack) return true;
+  if (helperInterventionActive && assessment.packSize <= 2) return true;
+  if (playerIsRecovering && assessment.packSize <= 3) return true;
+  return false;
+}
+
+/** Estimate the social cost of a rivalry escalation for the rival. */
+export function estimateRivalSocialCost01(
+  tier: RivalryEscalationTier,
+  audienceHeat01: number,
+  helperPresent: boolean,
+): number {
+  const tierCost: Record<RivalryEscalationTier, number> = {
+    'NONE': 0, 'GLARE': 0.02, 'PROBE': 0.05, 'PRESSURE': 0.12,
+    'HUNT': 0.22, 'PUBLIC_SWARM': 0.38, 'BOSS_WINDOW': 0.55,
+  };
+  const base = tierCost[tier] ?? 0;
+  const audienceAmplification = audienceHeat01 * 0.25;
+  const helperCounterweight = helperPresent ? 0.15 : 0;
+  return Math.min(1, base + audienceAmplification + helperCounterweight);
+}
+
+/** Generate a narrative description of the current escalation state. */
+export function describeEscalationState(
+  state: RivalryStateMachineState,
+  counterpartId: string,
+  personaLabel?: string,
+): string {
+  const persona = personaLabel ? ` (${personaLabel})` : '';
+  switch (state.currentTier) {
+    case 'NONE': return `${counterpartId}${persona} is dormant. No active escalation.`;
+    case 'GLARE': return `${counterpartId}${persona} is watching. Low-grade menace detected.`;
+    case 'PROBE': return `${counterpartId}${persona} is probing. Testing for weaknesses.`;
+    case 'PRESSURE': return `${counterpartId}${persona} is applying pressure. Active language cornering.`;
+    case 'HUNT': return `${counterpartId}${persona} is hunting. Multi-step persecution in progress.`;
+    case 'PUBLIC_SWARM': return `${counterpartId}${persona} has gone public. Social swarming active.`;
+    case 'BOSS_WINDOW': return `${counterpartId}${persona} has opened the boss window. Language combat active.`;
+    default: return `${counterpartId}${persona} is in an unknown escalation state.`;
+  }
+}
+
+/** Compute how long a rival should hold at the current tier before advancing. */
+export function computeTierHoldDuration(
+  tier: RivalryEscalationTier,
+  personaProfile: RivalPersonalityEscalationProfile,
+  audienceHeat01: number,
+): number {
+  const baseDurations: Record<RivalryEscalationTier, number> = {
+    'NONE': 0, 'GLARE': 6000, 'PROBE': 10000, 'PRESSURE': 14000,
+    'HUNT': 18000, 'PUBLIC_SWARM': 8000, 'BOSS_WINDOW': 25000,
+  };
+  const base = baseDurations[tier] ?? 10000;
+  const paceMultiplier = personaProfile.escalationPaceMs / 8000;
+  const audienceCompression = 1 - audienceHeat01 * 0.3;
+  return Math.round(base * paceMultiplier * audienceCompression);
+}
+
+/** Score how effective a specific callback would be at the current escalation tier. */
+export function scoreCallbackEffectiveness01(
+  callbackTier: 'NONE' | 'LIGHT' | 'MODERATE' | 'HARD' | 'RECEIPT',
+  escalationTier: RivalryEscalationTier,
+  personaReceiptPreference01: number,
+): number {
+  const callbackWeight: Record<string, number> = { 'NONE': 0, 'LIGHT': 0.15, 'MODERATE': 0.35, 'HARD': 0.6, 'RECEIPT': 0.85 };
+  const tierMultiplier: Record<RivalryEscalationTier, number> = {
+    'NONE': 0.1, 'GLARE': 0.3, 'PROBE': 0.5, 'PRESSURE': 0.7,
+    'HUNT': 0.85, 'PUBLIC_SWARM': 0.95, 'BOSS_WINDOW': 1.0,
+  };
+  const base = (callbackWeight[callbackTier] ?? 0) * (tierMultiplier[escalationTier] ?? 0.5);
+  return Math.min(1, base * (0.6 + personaReceiptPreference01 * 0.4));
+}
+
+/** Build a complete rivalry audit report for proof chain surfaces. */
+export function buildRivalryAuditReport(
+  policy: RivalryEscalationPolicy,
+  request: RivalryEscalationRequest,
+  personaId?: string,
+): readonly string[] {
+  const lines = policy.buildDiagnosticLines(request, personaId);
+  const history = policy.getEscalationHistory(request.state.playerId ?? '', request.state.counterpartId);
+  const avgIntensity = policy.averageEscalationIntensity(request.state.playerId ?? '', request.state.counterpartId);
+  const accelerating = policy.isEscalationAccelerating(request.state.playerId ?? '', request.state.counterpartId);
+  return [
+    ...lines,
+    `history_length=${history.length}|avg_intensity=${avgIntensity.toFixed(3)}|accelerating=${accelerating}`,
+    ...history.slice(-5).map((h) => `  ${h.tier}|score=${h.score01.toFixed(3)}|suppressed=${h.suppressed}|callback=${h.usedCallback}`),
+  ];
+}
+
+
