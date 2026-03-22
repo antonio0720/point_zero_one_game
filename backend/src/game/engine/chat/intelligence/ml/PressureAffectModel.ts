@@ -1438,8 +1438,63 @@ export interface PressureAffectSurfaceManifestEntry {
  * MARK: Mode profiles and thresholds
  * ========================================================================== */
 
+type PressureAffectModeProfileSeed = Readonly<{
+  modeId: PressureAffectModeId;
+  displayName: string;
+  description: string;
+  channelBias: Readonly<Record<ChatVisibleChannel, number>>;
+  intimidationBias01: number;
+  frustrationBias01: number;
+  reliefBias01: number;
+  desperationBias01: number;
+  confidenceBias01: number;
+  exposureBias01: number;
+  crowdBias01: number;
+  rescueBias01: number;
+  silenceBias01: number;
+  stabilizerBias01: number;
+  notes: readonly string[];
+}>;
+
+function score01Literal(value: number): Score01 {
+  return safe01(value);
+}
+
+function createPressureAffectChannelBias(
+  input: Readonly<Record<ChatVisibleChannel, number>>,
+): Readonly<Record<ChatVisibleChannel, Score01>> {
+  return Object.freeze({
+    GLOBAL: score01Literal(input.GLOBAL),
+    SYNDICATE: score01Literal(input.SYNDICATE),
+    DEAL_ROOM: score01Literal(input.DEAL_ROOM),
+    LOBBY: score01Literal(input.LOBBY),
+  });
+}
+
+function createPressureAffectModeProfile(
+  seed: PressureAffectModeProfileSeed,
+): PressureAffectModeProfile {
+  return Object.freeze({
+    modeId: seed.modeId,
+    displayName: seed.displayName,
+    description: seed.description,
+    channelBias: createPressureAffectChannelBias(seed.channelBias),
+    intimidationBias01: score01Literal(seed.intimidationBias01),
+    frustrationBias01: score01Literal(seed.frustrationBias01),
+    reliefBias01: score01Literal(seed.reliefBias01),
+    desperationBias01: score01Literal(seed.desperationBias01),
+    confidenceBias01: score01Literal(seed.confidenceBias01),
+    exposureBias01: score01Literal(seed.exposureBias01),
+    crowdBias01: score01Literal(seed.crowdBias01),
+    rescueBias01: score01Literal(seed.rescueBias01),
+    silenceBias01: score01Literal(seed.silenceBias01),
+    stabilizerBias01: score01Literal(seed.stabilizerBias01),
+    notes: Object.freeze([...seed.notes]),
+  });
+}
+
 export const CHAT_PRESSURE_AFFECT_MODE_PROFILES = Object.freeze({
-  EMPIRE: Object.freeze({
+  EMPIRE: createPressureAffectModeProfile({
     modeId: 'EMPIRE',
     displayName: 'Empire',
     description:
@@ -1465,8 +1520,8 @@ export const CHAT_PRESSURE_AFFECT_MODE_PROFILES = Object.freeze({
       'Status loss compounds intimidation quickly.',
       'Relief should not over-repair without visible validation.',
     ]),
-  } satisfies PressureAffectModeProfile),
-  PREDATOR: Object.freeze({
+  }),
+  PREDATOR: createPressureAffectModeProfile({
     modeId: 'PREDATOR',
     displayName: 'Predator',
     description:
@@ -1492,8 +1547,8 @@ export const CHAT_PRESSURE_AFFECT_MODE_PROFILES = Object.freeze({
       'Negotiation risk should be elevated.',
       'Confidence repair is slower unless leverage materially improves.',
     ]),
-  } satisfies PressureAffectModeProfile),
-  SYNDICATE: Object.freeze({
+  }),
+  SYNDICATE: createPressureAffectModeProfile({
     modeId: 'SYNDICATE',
     displayName: 'Syndicate',
     description:
@@ -1519,8 +1574,8 @@ export const CHAT_PRESSURE_AFFECT_MODE_PROFILES = Object.freeze({
       'Trust repair is a concrete stabilizer.',
       'Crowd danger is lower than betrayal danger.',
     ]),
-  } satisfies PressureAffectModeProfile),
-  PHANTOM: Object.freeze({
+  }),
+  PHANTOM: createPressureAffectModeProfile({
     modeId: 'PHANTOM',
     displayName: 'Phantom',
     description:
@@ -1546,8 +1601,8 @@ export const CHAT_PRESSURE_AFFECT_MODE_PROFILES = Object.freeze({
       'Recovery should feel earned, not automatic.',
       'Phantom favors mood carryover and delayed repair.',
     ]),
-  } satisfies PressureAffectModeProfile),
-  UNKNOWN: Object.freeze({
+  }),
+  UNKNOWN: createPressureAffectModeProfile({
     modeId: 'UNKNOWN',
     displayName: 'Unknown',
     description:
@@ -1572,7 +1627,7 @@ export const CHAT_PRESSURE_AFFECT_MODE_PROFILES = Object.freeze({
       'Fallback only.',
       'Use channel + tags + metadata to resolve a stronger mode when possible.',
     ]),
-  } satisfies PressureAffectModeProfile),
+  }),
 } satisfies Readonly<Record<PressureAffectModeId, PressureAffectModeProfile>>);
 
 export const CHAT_PRESSURE_AFFECT_SURFACE_MANIFEST = Object.freeze([
