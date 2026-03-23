@@ -309,6 +309,19 @@ export const CHAT_ROOM_STAGE_MOODS = [
 
 export type ChatRoomStageMood = (typeof CHAT_ROOM_STAGE_MOODS)[number];
 
+export const CHAT_CHANNEL_MOODS = [
+  'CALM',
+  'WATCHFUL',
+  'HEATED',
+  'HOSTILE',
+  'PANIC',
+  'PREDATORY',
+  'CEREMONIAL',
+] as const;
+
+/** Real-time crowd mood signal consumed by social planners (SwarmReactionPlanner, etc.). */
+export type ChatChannelMood = (typeof CHAT_CHANNEL_MOODS)[number];
+
 export const CHAT_SIGNAL_TYPES = [
   'BATTLE',
   'RUN',

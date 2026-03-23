@@ -469,6 +469,27 @@ export const CHAT_AUDIENCE_HEAT_BUDGET_DEFAULT: ChatAudienceHeatBudget = Object.
   shadowReserve: 25,
 });
 
+/** Audience band — witness density alias used by social planners. */
+export type ChatAudienceBand = ChatAudienceWitnessDensityBand;
+
+/** Swarm risk band — alias for ChatAudienceSwarmRisk used by social planners. */
+export type ChatSwarmRiskBand = ChatAudienceSwarmRisk;
+
+/**
+ * Channel heat profile shape for real-time social planner consumption.
+ * Build via buildChannelHeatProfileFromSummary() from a ChatAudienceHeatSummary.
+ */
+export interface ChatChannelHeatProfile {
+  readonly totalHeat: number;
+  readonly witnessDensity: number;
+  readonly predationShare: number;
+  readonly volatilityScore: number;
+  readonly intensityBand: 'QUIET' | 'BUILDING' | 'ELEVATED' | 'INTENSE' | 'MYTHIC';
+  readonly audienceBand: ChatAudienceBand;
+  readonly swarmRiskBand: ChatSwarmRiskBand;
+  readonly mood: ChatAudienceMood;
+}
+
 export function clampAudienceUnit(value: number): number {
   if (!Number.isFinite(value)) return 0;
   if (value <= 0) return 0;

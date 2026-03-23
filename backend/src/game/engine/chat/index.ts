@@ -58,6 +58,7 @@ import * as Hater from './HaterResponseOrchestrator';
 import * as Helper from './HelperResponseOrchestrator';
 import * as Npc from './ChatNpcOrchestrator';
 import * as Engine from './ChatEngine';
+import * as Social from './social';
 
 import * as Phase4 from './phase4_index';
 
@@ -262,6 +263,7 @@ export {
   EmotionModelRuntime as ChatEmotionModelModule,
   PressureAffectModelRuntime as ChatPressureAffectModelModule,
   AttachmentModelRuntime as ChatAttachmentModelModule,
+  Social as ChatSocialModule,
 };
 
 export const ChatEngineClass = Engine.ChatEngine;

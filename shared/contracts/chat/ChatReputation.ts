@@ -83,6 +83,9 @@ export type ChatReputationBand =
   | 'REVERED'
   | 'LEGENDARY';
 
+/** Reputation tier — alias for ChatReputationBand used by social planners. */
+export type ChatReputationTier = ChatReputationBand;
+
 export type ChatReputationDriver =
   | 'NONE'
   | 'PERFORMANCE'

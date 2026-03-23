@@ -871,6 +871,571 @@ export function createAudienceHeatLedger(options: AudienceHeatLedgerOptions = {}
   return new AudienceHeatLedger(options);
 }
 
+// ============================================================================
+// MARK: Temporal window analysis
+// ============================================================================
+
+export interface AudienceHeatTemporalWindow {
+  readonly windowStartMs: LedgerUnixMs;
+  readonly windowEndMs: LedgerUnixMs;
+  readonly roomId: LedgerRoomId;
+  readonly channelId: AudienceChannelId;
+  readonly entryCount: number;
+  readonly averageScore: number;
+  readonly peakScore: number;
+  readonly averageVector: AudienceHeatVector;
+  readonly dominantTransitionReason: AudienceTransitionReason;
+  readonly witnessWindowCount: number;
+  readonly bandAtPeak: AudienceHeatBand;
+}
+
+export function buildAudienceHeatTemporalWindows(
+  entries: readonly AudienceHeatEntry[],
+  windowMs: number = 30_000,
+): readonly AudienceHeatTemporalWindow[] {
+  if (!entries.length) return Object.freeze([]);
+  const minTs = Math.min(...entries.map((e) => e.occurredAt));
+  const maxTs = Math.max(...entries.map((e) => e.occurredAt));
+  const results: AudienceHeatTemporalWindow[] = [];
+
+  const byChannel = new Map<string, AudienceHeatEntry[]>();
+  for (const e of entries) {
+    const key = `${e.roomId}:${e.channelId}`;
+    const existing = byChannel.get(key) ?? [];
+    existing.push(e);
+    byChannel.set(key, existing);
+  }
+
+  for (const [key, channelEntries] of byChannel.entries()) {
+    const [roomId, channelId] = key.split(':') as [LedgerRoomId, AudienceChannelId];
+    for (let start = minTs; start <= maxTs; start += windowMs) {
+      const end = start + windowMs;
+      const window = channelEntries.filter((e) => e.occurredAt >= start && e.occurredAt < end);
+      if (!window.length) continue;
+
+      const scores = window.map((e) => e.nextState.score);
+      const peakScore = Math.max(...scores);
+      const averageScore = safeRound(scores.reduce((a, b) => a + b, 0) / scores.length, 4);
+
+      const vectorKeys: (keyof AudienceHeatVector)[] = ['hype', 'ridicule', 'fear', 'pressure', 'suspicion', 'conspiracy', 'predation', 'sympathy', 'legend', 'chaos'];
+      const avgVector: AudienceHeatVector = Object.freeze(
+        Object.fromEntries(
+          vectorKeys.map((k) => [
+            k,
+            safeRound(window.reduce((acc, e) => acc + e.nextState.vector[k], 0) / window.length, 4),
+          ]),
+        ) as unknown as AudienceHeatVector,
+      );
+
+      const reasonCounts = new Map<AudienceTransitionReason, number>();
+      for (const e of window) {
+        reasonCounts.set(e.nextState.lastTransitionReason, (reasonCounts.get(e.nextState.lastTransitionReason) ?? 0) + 1);
+      }
+      let dominantTransitionReason: AudienceTransitionReason = 'ROLLUP';
+      let dominantCount = 0;
+      for (const [reason, count] of reasonCounts.entries()) {
+        if (count > dominantCount) { dominantCount = count; dominantTransitionReason = reason; }
+      }
+
+      const peakEntry = window.find((e) => e.nextState.score === peakScore)!;
+      results.push(Object.freeze({
+        windowStartMs: asUnixMs(start),
+        windowEndMs: asUnixMs(end),
+        roomId,
+        channelId,
+        entryCount: window.length,
+        averageScore,
+        peakScore,
+        averageVector: avgVector,
+        dominantTransitionReason,
+        witnessWindowCount: window.reduce((acc, e) => acc + e.nextState.witnessWindows.length, 0),
+        bandAtPeak: peakEntry.nextState.band,
+      }));
+    }
+  }
+
+  return Object.freeze(results.sort((a, b) => a.windowStartMs - b.windowStartMs));
+}
+
+export function peakHeatWindowForChannel(
+  roomId: LedgerRoomId,
+  channelId: AudienceChannelId,
+  windows: readonly AudienceHeatTemporalWindow[],
+): AudienceHeatTemporalWindow | null {
+  const channelWindows = windows.filter((w) => w.roomId === roomId && w.channelId === channelId);
+  if (!channelWindows.length) return null;
+  return channelWindows.reduce((best, w) => w.peakScore > best.peakScore ? w : best);
+}
+
+// ============================================================================
+// MARK: Momentum state
+// ============================================================================
+
+export interface AudienceHeatMomentumState {
+  readonly roomId: LedgerRoomId;
+  readonly channelId: AudienceChannelId;
+  readonly currentScore: number;
+  readonly scoreDelta: number;
+  readonly velocityTrend: 'ACCELERATING' | 'DECELERATING' | 'STABLE' | 'REVERSING';
+  readonly predictedScoreIn30s: number;
+  readonly predictedBandIn30s: AudienceHeatBand;
+  readonly isEscalating: boolean;
+  readonly isCooling: boolean;
+  readonly sampledAt: LedgerUnixMs;
+}
+
+export function computeAudienceHeatMomentum(
+  state: AudienceHeatState,
+  priorEntries: readonly AudienceHeatEntry[],
+  thresholds: AudienceThresholds = DEFAULT_THRESHOLDS,
+): AudienceHeatMomentumState {
+  const channelEntries = priorEntries
+    .filter((e) => e.channelId === state.channelId && e.roomId === state.roomId)
+    .slice(-5);
+
+  const scoreDelta = channelEntries.length >= 2
+    ? state.score - channelEntries[channelEntries.length - 2].nextState.score
+    : 0;
+
+  const velocities = channelEntries.slice(1).map((e, i) =>
+    e.nextState.score - channelEntries[i].nextState.score,
+  );
+
+  const avgVelocity = velocities.length > 0
+    ? velocities.reduce((a, b) => a + b, 0) / velocities.length
+    : 0;
+
+  const velocityTrend: AudienceHeatMomentumState['velocityTrend'] =
+    Math.abs(avgVelocity) < 0.5 ? 'STABLE' :
+    scoreDelta > 0 && avgVelocity > 0 ? 'ACCELERATING' :
+    scoreDelta < 0 && avgVelocity < 0 ? 'DECELERATING' : 'REVERSING';
+
+  const predictedScore = safeRound(clamp(state.score + avgVelocity * 3, 0, 100), 4);
+  const predictedBand = bandFromScore(predictedScore, thresholds);
+
+  return Object.freeze({
+    roomId: state.roomId,
+    channelId: state.channelId,
+    currentScore: state.score,
+    scoreDelta: safeRound(scoreDelta, 4),
+    velocityTrend,
+    predictedScoreIn30s: predictedScore,
+    predictedBandIn30s: predictedBand,
+    isEscalating: velocityTrend === 'ACCELERATING' && state.score >= thresholds.warm,
+    isCooling: velocityTrend === 'DECELERATING' && state.score < thresholds.hot,
+    sampledAt: state.lastUpdatedAt,
+  });
+}
+
+// ============================================================================
+// MARK: Diff
+// ============================================================================
+
+export interface AudienceHeatLedgerDiff {
+  readonly roomId: LedgerRoomId;
+  readonly channelId: AudienceChannelId;
+  readonly scoreDelta: number;
+  readonly bandChanged: boolean;
+  readonly presenceChanged: boolean;
+  readonly beforeBand: AudienceHeatBand;
+  readonly afterBand: AudienceHeatBand;
+  readonly beforePresence: AudiencePresenceState;
+  readonly afterPresence: AudiencePresenceState;
+  readonly vectorDeltas: Partial<Record<AudienceHeatVectorKey, number>>;
+  readonly witnessWindowCountDelta: number;
+  readonly velocityDelta: number;
+  readonly transitionReason: AudienceTransitionReason;
+}
+
+export function diffAudienceHeatStates(
+  before: AudienceHeatState,
+  after: AudienceHeatState,
+): AudienceHeatLedgerDiff {
+  const vectorKeys: AudienceHeatVectorKey[] = ['hype', 'ridicule', 'fear', 'pressure', 'suspicion', 'conspiracy', 'predation', 'sympathy', 'legend', 'chaos'];
+  const vectorDeltas: Partial<Record<AudienceHeatVectorKey, number>> = {};
+  for (const key of vectorKeys) {
+    const delta = safeRound(after.vector[key] - before.vector[key], 4);
+    if (delta !== 0) vectorDeltas[key] = delta;
+  }
+
+  return Object.freeze({
+    roomId: after.roomId,
+    channelId: after.channelId,
+    scoreDelta: safeRound(after.score - before.score, 4),
+    bandChanged: after.band !== before.band,
+    presenceChanged: after.presence !== before.presence,
+    beforeBand: before.band,
+    afterBand: after.band,
+    beforePresence: before.presence,
+    afterPresence: after.presence,
+    vectorDeltas: Object.freeze(vectorDeltas),
+    witnessWindowCountDelta: after.witnessWindows.length - before.witnessWindows.length,
+    velocityDelta: safeRound(after.crowdVelocity - before.crowdVelocity, 4),
+    transitionReason: after.lastTransitionReason,
+  });
+}
+
+export function diffAudienceRoomSnapshots(
+  before: AudienceRoomSnapshot,
+  after: AudienceRoomSnapshot,
+): readonly AudienceHeatLedgerDiff[] {
+  const diffs: AudienceHeatLedgerDiff[] = [];
+  for (const channelId of Object.keys(after.channels) as AudienceChannelId[]) {
+    const beforeState = before.channels[channelId];
+    const afterState = after.channels[channelId];
+    if (beforeState && afterState) {
+      diffs.push(diffAudienceHeatStates(beforeState, afterState));
+    }
+  }
+  return Object.freeze(diffs.sort((a, b) => Math.abs(b.scoreDelta) - Math.abs(a.scoreDelta)));
+}
+
+// ============================================================================
+// MARK: Cross-room summary
+// ============================================================================
+
+export interface AudienceHeatCrossRoomEntry {
+  readonly roomId: LedgerRoomId;
+  readonly averageScore: number;
+  readonly hottestChannel: AudienceChannelId;
+  readonly hottestScore: number;
+  readonly dominantBand: AudienceHeatBand;
+  readonly totalWitnessWindows: number;
+  readonly exportedAt: LedgerUnixMs;
+}
+
+export interface AudienceHeatCrossRoomSummary {
+  readonly rooms: readonly AudienceHeatCrossRoomEntry[];
+  readonly globalHottestRoomId: LedgerRoomId | null;
+  readonly globalAverageScore: number;
+  readonly generatedAt: LedgerUnixMs;
+}
+
+export function buildAudienceCrossRoomSummary(
+  snapshots: readonly AudienceRoomSnapshot[],
+  now: LedgerUnixMs = asUnixMs(Date.now()),
+): AudienceHeatCrossRoomSummary {
+  const rooms: AudienceHeatCrossRoomEntry[] = snapshots.map((snap) => {
+    const states = Object.values(snap.channels);
+    const sorted = [...states].sort((a, b) => b.score - a.score);
+    const hottest = sorted[0];
+    const avgScore = safeRound(states.reduce((acc, s) => acc + s.score, 0) / Math.max(states.length, 1), 4);
+    const bandCounts = new Map<AudienceHeatBand, number>();
+    for (const s of states) { bandCounts.set(s.band, (bandCounts.get(s.band) ?? 0) + 1); }
+    let dominantBand: AudienceHeatBand = 'FROZEN';
+    let dominantCount = 0;
+    for (const [band, count] of bandCounts.entries()) {
+      if (count > dominantCount) { dominantCount = count; dominantBand = band; }
+    }
+    return Object.freeze({
+      roomId: snap.roomId,
+      averageScore: avgScore,
+      hottestChannel: hottest?.channelId ?? 'GLOBAL',
+      hottestScore: hottest?.score ?? 0,
+      dominantBand,
+      totalWitnessWindows: states.reduce((acc, s) => acc + s.witnessWindows.length, 0),
+      exportedAt: snap.exportedAt,
+    });
+  });
+
+  const sortedRooms = [...rooms].sort((a, b) => b.hottestScore - a.hottestScore);
+  const globalAverageScore = safeRound(
+    rooms.reduce((acc, r) => acc + r.averageScore, 0) / Math.max(rooms.length, 1),
+    4,
+  );
+
+  return Object.freeze({
+    rooms: Object.freeze(sortedRooms),
+    globalHottestRoomId: sortedRooms[0]?.roomId ?? null,
+    globalAverageScore,
+    generatedAt: now,
+  });
+}
+
+// ============================================================================
+// MARK: Decay report
+// ============================================================================
+
+export interface AudienceHeatDecayReport {
+  readonly roomId: LedgerRoomId;
+  readonly channelId: AudienceChannelId;
+  readonly currentScore: number;
+  readonly projectedScoreAfterDecay: number;
+  readonly ticksUntilFrozen: number;
+  readonly isInGraceWindow: boolean;
+  readonly isLocked: boolean;
+  readonly reportedAt: LedgerUnixMs;
+}
+
+export function buildAudienceHeatDecayReport(
+  state: AudienceHeatState,
+  decayPolicy: AudienceDecayPolicy = DEFAULT_DECAY_POLICY,
+  thresholds: AudienceThresholds = DEFAULT_THRESHOLDS,
+  now: LedgerUnixMs = asUnixMs(Date.now()),
+): AudienceHeatDecayReport {
+  const isLocked = !!(state.lockUntil && state.lockUntil > now);
+  const isInGraceWindow = (now - state.lastNonDecayAt) <= decayPolicy.postSceneGraceMs;
+  const perTick = isInGraceWindow
+    ? decayPolicy.activeDecayPerTick
+    : decayPolicy.passiveDecayPerTick;
+
+  let projected = state.score;
+  let ticks = 0;
+  while (projected > 0 && ticks < 10_000) {
+    projected = Math.max(0, projected - perTick);
+    ticks += 1;
+    if (bandFromScore(projected, thresholds) === 'FROZEN') break;
+  }
+
+  return Object.freeze({
+    roomId: state.roomId,
+    channelId: state.channelId,
+    currentScore: state.score,
+    projectedScoreAfterDecay: safeRound(projected, 4),
+    ticksUntilFrozen: ticks,
+    isInGraceWindow,
+    isLocked,
+    reportedAt: now,
+  });
+}
+
+// ============================================================================
+// MARK: Ledger stats
+// ============================================================================
+
+export interface AudienceHeatLedgerStats {
+  readonly roomId: LedgerRoomId;
+  readonly entryCount: number;
+  readonly channelCount: number;
+  readonly averageScoreAcrossChannels: number;
+  readonly hottestChannelId: AudienceChannelId;
+  readonly hottestScore: number;
+  readonly coldestChannelId: AudienceChannelId;
+  readonly coldestScore: number;
+  readonly totalWitnessWindows: number;
+  readonly lockedChannelCount: number;
+  readonly shadowChannelCount: number;
+  readonly visibleChannelCount: number;
+  readonly bandDistribution: Readonly<Record<string, number>>;
+  readonly generatedAt: LedgerUnixMs;
+}
+
+export function buildAudienceHeatLedgerStats(
+  snapshot: AudienceRoomSnapshot,
+  entries: readonly AudienceHeatEntry[],
+  now: LedgerUnixMs = asUnixMs(Date.now()),
+): AudienceHeatLedgerStats {
+  const states = Object.values(snapshot.channels);
+  const sorted = [...states].sort((a, b) => b.score - a.score);
+  const hottest = sorted[0];
+  const coldest = sorted[sorted.length - 1];
+
+  const bandDist: Record<string, number> = {};
+  for (const s of states) { bandDist[s.band] = (bandDist[s.band] ?? 0) + 1; }
+
+  const avgScore = safeRound(states.reduce((acc, s) => acc + s.score, 0) / Math.max(states.length, 1), 4);
+  const lockedCount = states.filter((s) => s.lockUntil && s.lockUntil > now).length;
+  const shadowCount = states.filter((s) => isShadowChannel(s.channelId)).length;
+  const visibleCount = states.length - shadowCount;
+
+  return Object.freeze({
+    roomId: snapshot.roomId,
+    entryCount: entries.filter((e) => e.roomId === snapshot.roomId).length,
+    channelCount: states.length,
+    averageScoreAcrossChannels: avgScore,
+    hottestChannelId: hottest?.channelId ?? 'GLOBAL',
+    hottestScore: hottest?.score ?? 0,
+    coldestChannelId: coldest?.channelId ?? 'SYSTEM_SHADOW',
+    coldestScore: coldest?.score ?? 0,
+    totalWitnessWindows: states.reduce((acc, s) => acc + s.witnessWindows.length, 0),
+    lockedChannelCount: lockedCount,
+    shadowChannelCount: shadowCount,
+    visibleChannelCount: visibleCount,
+    bandDistribution: Object.freeze(bandDist),
+    generatedAt: now,
+  });
+}
+
+// ============================================================================
+// MARK: Policy violation detection
+// ============================================================================
+
+export interface AudienceHeatPolicyViolation {
+  readonly roomId: LedgerRoomId;
+  readonly channelId: AudienceChannelId;
+  readonly violationType: 'SCORE_OVERFLOW' | 'VECTOR_OVERFLOW' | 'STALE_LOCK' | 'WITNESS_OVERFLOW' | 'METADATA_OVERFLOW';
+  readonly severity: 'LOW' | 'MEDIUM' | 'HIGH';
+  readonly description: string;
+}
+
+export function detectAudienceHeatPolicyViolations(
+  snapshot: AudienceRoomSnapshot,
+  options: { maxWitnessWindows?: number; maxMetadataKeys?: number; maxLockAgeMs?: number } = {},
+  now: LedgerUnixMs = asUnixMs(Date.now()),
+): readonly AudienceHeatPolicyViolation[] {
+  const maxWitnessWindows = options.maxWitnessWindows ?? DEFAULT_MAX_WITNESS_WINDOWS_PER_CHANNEL;
+  const maxMetadataKeys = options.maxMetadataKeys ?? DEFAULT_MAX_METADATA_KEYS;
+  const maxLockAgeMs = options.maxLockAgeMs ?? 120_000;
+  const violations: AudienceHeatPolicyViolation[] = [];
+
+  for (const state of Object.values(snapshot.channels)) {
+    if (state.score > 100) {
+      violations.push(Object.freeze({ roomId: state.roomId, channelId: state.channelId, violationType: 'SCORE_OVERFLOW', severity: 'HIGH', description: `Score ${state.score} exceeds maximum 100` }));
+    }
+    for (const key of Object.keys(state.vector) as AudienceHeatVectorKey[]) {
+      if (state.vector[key] > 100) {
+        violations.push(Object.freeze({ roomId: state.roomId, channelId: state.channelId, violationType: 'VECTOR_OVERFLOW', severity: 'MEDIUM', description: `Vector key '${key}' is ${state.vector[key]}` }));
+      }
+    }
+    if (state.lockUntil && state.lockUntil < now && (now - state.lockUntil) > maxLockAgeMs) {
+      violations.push(Object.freeze({ roomId: state.roomId, channelId: state.channelId, violationType: 'STALE_LOCK', severity: 'LOW', description: `Lock expired ${now - state.lockUntil}ms ago` }));
+    }
+    if (state.witnessWindows.length > maxWitnessWindows) {
+      violations.push(Object.freeze({ roomId: state.roomId, channelId: state.channelId, violationType: 'WITNESS_OVERFLOW', severity: 'MEDIUM', description: `${state.witnessWindows.length} witness windows exceeds max ${maxWitnessWindows}` }));
+    }
+    if (Object.keys(state.metadata).length > maxMetadataKeys) {
+      violations.push(Object.freeze({ roomId: state.roomId, channelId: state.channelId, violationType: 'METADATA_OVERFLOW', severity: 'LOW', description: `Metadata has ${Object.keys(state.metadata).length} keys` }));
+    }
+  }
+
+  return Object.freeze(violations);
+}
+
+// ============================================================================
+// MARK: Batch admit
+// ============================================================================
+
+export interface AudienceHeatBatchAdmitResult {
+  readonly processedCount: number;
+  readonly entries: readonly AudienceHeatEntry[];
+  readonly errors: readonly string[];
+  readonly snapshot: AudienceRoomSnapshot;
+}
+
+export function cloneAudienceHeatMetadata(metadata?: Readonly<JsonObject>): Readonly<JsonObject> {
+  return shallowCloneObject(metadata);
+}
+
+export function batchAdmitAudienceHeatInputs(
+  ledger: AudienceHeatLedger,
+  inputs: readonly AudienceHeatInput[],
+): AudienceHeatBatchAdmitResult {
+  const entries: AudienceHeatEntry[] = [];
+  const errors: string[] = [];
+  let lastRoomId: LedgerRoomId | null = null;
+
+  for (const input of inputs) {
+    try {
+      entries.push(ledger.ingest(input));
+      lastRoomId = input.roomId;
+    } catch (err) {
+      errors.push(`Failed to ingest ${input.channelId}@${input.occurredAt}: ${String(err)}`);
+    }
+  }
+
+  const roomId = lastRoomId ?? (inputs[0]?.roomId ?? 'UNKNOWN' as LedgerRoomId);
+  const snapshot = ledger.getSnapshot(roomId);
+
+  return Object.freeze({
+    processedCount: entries.length,
+    entries: Object.freeze(entries),
+    errors: Object.freeze(errors),
+    snapshot,
+  });
+}
+
+// ============================================================================
+// MARK: Profile system
+// ============================================================================
+
+export type AudienceHeatLedgerProfile = 'STANDARD' | 'COMPACT' | 'FORENSIC' | 'HIGH_VOLUME' | 'WORLD_EVENT';
+
+export interface AudienceHeatLedgerProfileDescriptor {
+  readonly name: AudienceHeatLedgerProfile;
+  readonly description: string;
+  readonly options: AudienceHeatLedgerOptions;
+}
+
+const AUDIENCE_HEAT_LEDGER_PROFILE_DESCRIPTORS: readonly AudienceHeatLedgerProfileDescriptor[] = [
+  {
+    name: 'STANDARD',
+    description: 'Balanced heat tracking for general room events.',
+    options: {},
+  },
+  {
+    name: 'COMPACT',
+    description: 'Reduced retention windows for performance-sensitive contexts.',
+    options: { maxEntriesPerRoom: 2_048, maxWitnessWindowsPerChannel: 32 },
+  },
+  {
+    name: 'FORENSIC',
+    description: 'Maximum retention and witness density for audit and replay.',
+    options: { maxEntriesPerRoom: 16_384, maxWitnessWindowsPerChannel: 192, enableShadowMirrors: true },
+  },
+  {
+    name: 'HIGH_VOLUME',
+    description: 'Optimized for high-frequency event ingestion.',
+    options: { maxEntriesPerRoom: 4_096, maxWitnessWindowsPerChannel: 48, enableShadowMirrors: false },
+  },
+  {
+    name: 'WORLD_EVENT',
+    description: 'Extended locks and amplified witness windows for world event contexts.',
+    options: {
+      maxEntriesPerRoom: 8_192,
+      maxWitnessWindowsPerChannel: 128,
+      enableShadowMirrors: true,
+      decayPolicy: { worldEventLockMs: 60_000, passiveDecayPerTick: 0.3, activeDecayPerTick: 0.12 },
+    },
+  },
+] as const;
+
+export const AUDIENCE_HEAT_LEDGER_DOCTRINE = Object.freeze({
+  authority: 'BACKEND' as const,
+  version: '2026.03.23-audience-heat-ledger-doctrine.v1',
+  maxScore: 100,
+  maxVector: 100,
+  shadowMirrorRatio: 0.42,
+  defaultDecayTick: 5_000,
+  supportedProfiles: ['STANDARD', 'COMPACT', 'FORENSIC', 'HIGH_VOLUME', 'WORLD_EVENT'] as const,
+});
+
+// ============================================================================
+// MARK: Module objects
+// ============================================================================
+
+export const ChatAudienceHeatLedgerModule = Object.freeze({
+  create: (options?: AudienceHeatLedgerOptions): AudienceHeatLedger => new AudienceHeatLedger(options),
+  createCompact: (): AudienceHeatLedger => new AudienceHeatLedger(AUDIENCE_HEAT_LEDGER_PROFILE_DESCRIPTORS.find((p) => p.name === 'COMPACT')!.options),
+  createForensic: (): AudienceHeatLedger => new AudienceHeatLedger(AUDIENCE_HEAT_LEDGER_PROFILE_DESCRIPTORS.find((p) => p.name === 'FORENSIC')!.options),
+  createHighVolume: (): AudienceHeatLedger => new AudienceHeatLedger(AUDIENCE_HEAT_LEDGER_PROFILE_DESCRIPTORS.find((p) => p.name === 'HIGH_VOLUME')!.options),
+  createWorldEvent: (): AudienceHeatLedger => new AudienceHeatLedger(AUDIENCE_HEAT_LEDGER_PROFILE_DESCRIPTORS.find((p) => p.name === 'WORLD_EVENT')!.options),
+  batchAdmit: batchAdmitAudienceHeatInputs,
+  buildTemporalWindows: buildAudienceHeatTemporalWindows,
+  peakWindowForChannel: peakHeatWindowForChannel,
+  computeMomentum: computeAudienceHeatMomentum,
+  diffStates: diffAudienceHeatStates,
+  diffSnapshots: diffAudienceRoomSnapshots,
+  buildCrossRoomSummary: buildAudienceCrossRoomSummary,
+  buildDecayReport: buildAudienceHeatDecayReport,
+  buildLedgerStats: buildAudienceHeatLedgerStats,
+  detectViolations: detectAudienceHeatPolicyViolations,
+  doctrine: AUDIENCE_HEAT_LEDGER_DOCTRINE,
+  deriveFromMessage: deriveAudienceHeatDeltaFromMessage,
+  deriveFromProof: deriveAudienceHeatDeltaFromProof,
+  deriveFromWorldEvent: deriveAudienceHeatDeltaFromWorldEvent,
+} as const);
+
+export const ChatAudienceHeatLedgerProfileModule = Object.freeze({
+  all: (): readonly AudienceHeatLedgerProfileDescriptor[] => AUDIENCE_HEAT_LEDGER_PROFILE_DESCRIPTORS,
+  byName: (name: AudienceHeatLedgerProfile): AudienceHeatLedgerProfileDescriptor | undefined =>
+    AUDIENCE_HEAT_LEDGER_PROFILE_DESCRIPTORS.find((p) => p.name === name),
+  STANDARD: AUDIENCE_HEAT_LEDGER_PROFILE_DESCRIPTORS[0],
+  COMPACT: AUDIENCE_HEAT_LEDGER_PROFILE_DESCRIPTORS[1],
+  FORENSIC: AUDIENCE_HEAT_LEDGER_PROFILE_DESCRIPTORS[2],
+  HIGH_VOLUME: AUDIENCE_HEAT_LEDGER_PROFILE_DESCRIPTORS[3],
+  WORLD_EVENT: AUDIENCE_HEAT_LEDGER_PROFILE_DESCRIPTORS[4],
+} as const);
+
 export function deriveAudienceHeatDeltaFromMessage(input: {
   readonly body: string;
   readonly channelId: AudienceChannelId;
@@ -986,4 +1551,459 @@ export function deriveAudienceHeatDeltaFromWorldEvent(input: {
       eventName: input.eventName,
     }),
   });
+}
+
+// ============================================================================
+// MARK: Forecast
+// ============================================================================
+
+export interface AudienceHeatForecast {
+  readonly roomId: LedgerRoomId;
+  readonly channelId: AudienceChannelId;
+  readonly forecastWindowMs: number;
+  readonly predictedScore: number;
+  readonly predictedBand: AudienceHeatBand;
+  readonly predictedPresence: AudiencePresenceState;
+  readonly swarmRisk: 'NONE' | 'LOW' | 'ELEVATED' | 'HIGH' | 'CRITICAL';
+  readonly confidence: number;
+  readonly generatedAt: LedgerUnixMs;
+}
+
+export function forecastAudienceHeat(
+  state: AudienceHeatState,
+  priorEntries: readonly AudienceHeatEntry[],
+  forecastWindowMs: number = 30_000,
+  thresholds: AudienceThresholds = DEFAULT_THRESHOLDS,
+  now: LedgerUnixMs = asUnixMs(Date.now()),
+): AudienceHeatForecast {
+  const channelEntries = priorEntries
+    .filter((e) => e.channelId === state.channelId && e.roomId === state.roomId)
+    .slice(-8);
+
+  const n = channelEntries.length;
+  const weights = channelEntries.map((_, i) => (i + 1) / Math.max(n, 1));
+  const weightSum = weights.reduce((a, b) => a + b, 0) || 1;
+
+  const weightedScore = n > 0
+    ? channelEntries.reduce((acc, e, i) => acc + e.nextState.score * weights[i], 0) / weightSum
+    : state.score;
+
+  const velocities = channelEntries.slice(1).map((e, i) =>
+    e.nextState.score - channelEntries[i].nextState.score,
+  );
+  const avgVelocity = velocities.length > 0
+    ? velocities.reduce((a, b) => a + b, 0) / velocities.length
+    : 0;
+
+  const forecastSteps = forecastWindowMs / (5_000);
+  const predictedScore = safeRound(clamp(weightedScore + avgVelocity * forecastSteps, 0, 100), 4);
+  const predictedBand = bandFromScore(predictedScore, thresholds);
+  const predictedPresence = presenceFromScore(predictedScore, predictedBand);
+
+  const swarmRisk: AudienceHeatForecast['swarmRisk'] =
+    predictedScore >= 90 ? 'CRITICAL' :
+    predictedScore >= 72 ? 'HIGH' :
+    predictedScore >= 48 ? 'ELEVATED' :
+    predictedScore >= 28 ? 'LOW' : 'NONE';
+
+  const confidence = safeRound(clamp(n / 8, 0, 1), 4);
+
+  return Object.freeze({
+    roomId: state.roomId,
+    channelId: state.channelId,
+    forecastWindowMs,
+    predictedScore,
+    predictedBand,
+    predictedPresence,
+    swarmRisk,
+    confidence,
+    generatedAt: now,
+  });
+}
+
+// ============================================================================
+// MARK: Hotspot detection
+// ============================================================================
+
+export interface AudienceHeatHotspot {
+  readonly roomId: LedgerRoomId;
+  readonly channelId: AudienceChannelId;
+  readonly peakScore: number;
+  readonly peakBand: AudienceHeatBand;
+  readonly peakAt: LedgerUnixMs;
+  readonly sustained: boolean;
+  readonly entryCountAboveThreshold: number;
+}
+
+export function detectAudienceHeatHotspots(
+  entries: readonly AudienceHeatEntry[],
+  scoreThreshold: number = 48,
+): readonly AudienceHeatHotspot[] {
+  const byChannel = new Map<string, AudienceHeatEntry[]>();
+  for (const e of entries) {
+    const key = `${e.roomId}:${e.channelId}`;
+    const existing = byChannel.get(key) ?? [];
+    existing.push(e);
+    byChannel.set(key, existing);
+  }
+
+  const hotspots: AudienceHeatHotspot[] = [];
+  for (const [key, channelEntries] of byChannel.entries()) {
+    const [roomId, channelId] = key.split(':') as [LedgerRoomId, AudienceChannelId];
+    const hot = channelEntries.filter((e) => e.nextState.score >= scoreThreshold);
+    if (!hot.length) continue;
+    const peak = hot.reduce((best, e) => e.nextState.score > best.nextState.score ? e : best);
+    hotspots.push(Object.freeze({
+      roomId,
+      channelId,
+      peakScore: peak.nextState.score,
+      peakBand: peak.nextState.band,
+      peakAt: peak.occurredAt,
+      sustained: hot.length >= 3,
+      entryCountAboveThreshold: hot.length,
+    }));
+  }
+
+  return Object.freeze(hotspots.sort((a, b) => b.peakScore - a.peakScore));
+}
+
+// ============================================================================
+// MARK: Export envelope
+// ============================================================================
+
+export interface AudienceHeatExportEnvelope {
+  readonly snapshot: AudienceRoomSnapshot;
+  readonly entries: readonly AudienceHeatEntry[];
+  readonly summary: AudienceHeatSummary;
+  readonly diagnostics: AudienceHeatDiagnostics;
+  readonly stats: AudienceHeatLedgerStats;
+  readonly hotspots: readonly AudienceHeatHotspot[];
+  readonly exportedAt: LedgerUnixMs;
+}
+
+export function exportAudienceHeatEnvelope(
+  ledger: AudienceHeatLedger,
+  roomId: LedgerRoomId,
+  now: LedgerUnixMs = asUnixMs(Date.now()),
+): AudienceHeatExportEnvelope {
+  const snapshot = ledger.getSnapshot(roomId, now);
+  const entries = ledger.getEntries(roomId);
+  const summary = ledger.getSummary(roomId, now);
+  const diagnostics = ledger.getDiagnostics(roomId, now);
+  const stats = buildAudienceHeatLedgerStats(snapshot, entries, now);
+  const hotspots = detectAudienceHeatHotspots(entries);
+
+  return Object.freeze({ snapshot, entries, summary, diagnostics, stats, hotspots, exportedAt: now });
+}
+
+// ============================================================================
+// MARK: Annotation
+// ============================================================================
+
+export interface AudienceHeatAnnotation {
+  readonly roomId: LedgerRoomId;
+  readonly channelId: AudienceChannelId;
+  readonly annotatedAtMs: LedgerUnixMs;
+  readonly label: string;
+  readonly notes: string;
+  readonly tags: readonly string[];
+  readonly flagged: boolean;
+}
+
+const _heatAnnotationMap = new Map<string, AudienceHeatAnnotation>();
+
+export function annotateAudienceHeatState(
+  state: AudienceHeatState,
+  annotation: Omit<AudienceHeatAnnotation, 'roomId' | 'channelId' | 'annotatedAtMs'>,
+): AudienceHeatAnnotation {
+  const key = `${state.roomId}:${state.channelId}`;
+  const record = Object.freeze({
+    roomId: state.roomId,
+    channelId: state.channelId,
+    annotatedAtMs: asUnixMs(Date.now()),
+    ...annotation,
+  });
+  _heatAnnotationMap.set(key, record);
+  return record;
+}
+
+export function getAudienceHeatAnnotation(
+  roomId: LedgerRoomId,
+  channelId: AudienceChannelId,
+): AudienceHeatAnnotation | null {
+  return _heatAnnotationMap.get(`${roomId}:${channelId}`) ?? null;
+}
+
+export function listAudienceHeatAnnotations(): readonly AudienceHeatAnnotation[] {
+  return Object.freeze([..._heatAnnotationMap.values()]);
+}
+
+export function listFlaggedAudienceHeatAnnotations(): readonly AudienceHeatAnnotation[] {
+  return Object.freeze([..._heatAnnotationMap.values()].filter((a) => a.flagged));
+}
+
+// ============================================================================
+// MARK: Rebuild audit
+// ============================================================================
+
+export interface AudienceHeatRebuildResult {
+  readonly roomId: LedgerRoomId;
+  readonly processedChannelCount: number;
+  readonly violationCount: number;
+  readonly violations: readonly AudienceHeatPolicyViolation[];
+  readonly hotspots: readonly AudienceHeatHotspot[];
+  readonly stats: AudienceHeatLedgerStats;
+  readonly rebuiltAtMs: LedgerUnixMs;
+}
+
+export function rebuildAndAuditAudienceHeat(
+  ledger: AudienceHeatLedger,
+  roomId: LedgerRoomId,
+  now: LedgerUnixMs = asUnixMs(Date.now()),
+): AudienceHeatRebuildResult {
+  const snapshot = ledger.getSnapshot(roomId, now);
+  const entries = ledger.getEntries(roomId);
+  const violations = detectAudienceHeatPolicyViolations(snapshot, {}, now);
+  const hotspots = detectAudienceHeatHotspots(entries);
+  const stats = buildAudienceHeatLedgerStats(snapshot, entries, now);
+
+  return Object.freeze({
+    roomId,
+    processedChannelCount: Object.keys(snapshot.channels).length,
+    violationCount: violations.length,
+    violations,
+    hotspots,
+    stats,
+    rebuiltAtMs: now,
+  });
+}
+
+// ============================================================================
+// MARK: Channel heat ranking
+// ============================================================================
+
+export interface AudienceHeatRankingRow {
+  readonly channelId: AudienceChannelId;
+  readonly score: number;
+  readonly band: AudienceHeatBand;
+  readonly presence: AudiencePresenceState;
+  readonly witnessDensity: number;
+  readonly crowdVelocity: number;
+  readonly dominantVector: AudienceHeatVectorKey;
+  readonly isShadow: boolean;
+}
+
+export function buildAudienceHeatRanking(
+  snapshot: AudienceRoomSnapshot,
+): readonly AudienceHeatRankingRow[] {
+  const rows: AudienceHeatRankingRow[] = Object.values(snapshot.channels).map((state) => {
+    const vectorKeys: AudienceHeatVectorKey[] = ['hype', 'ridicule', 'fear', 'pressure', 'suspicion', 'conspiracy', 'predation', 'sympathy', 'legend', 'chaos'];
+    let dominantVector: AudienceHeatVectorKey = 'pressure';
+    let dominantValue = 0;
+    for (const key of vectorKeys) {
+      if (state.vector[key] > dominantValue) { dominantValue = state.vector[key]; dominantVector = key; }
+    }
+    return Object.freeze({
+      channelId: state.channelId,
+      score: state.score,
+      band: state.band,
+      presence: state.presence,
+      witnessDensity: state.witnessDensity,
+      crowdVelocity: state.crowdVelocity,
+      dominantVector,
+      isShadow: isShadowChannel(state.channelId),
+    });
+  });
+  return Object.freeze(rows.sort((a, b) => b.score - a.score));
+}
+
+// ============================================================================
+// MARK: Witness window analysis
+// ============================================================================
+
+export interface AudienceWitnessWindowSummary {
+  readonly channelId: AudienceChannelId;
+  readonly totalWindows: number;
+  readonly activeWindows: number;
+  readonly averageWeight: number;
+  readonly heaviestKind: AudienceWitnessKind;
+  readonly publicCount: number;
+  readonly privateCount: number;
+  readonly shadowOnlyCount: number;
+}
+
+export function summarizeWitnessWindows(
+  state: AudienceHeatState,
+  now: LedgerUnixMs = asUnixMs(Date.now()),
+): AudienceWitnessWindowSummary {
+  const active = state.witnessWindows.filter((w) => w.closesAt > now);
+  const kindCounts = new Map<AudienceWitnessKind, number>();
+  for (const w of active) { kindCounts.set(w.kind, (kindCounts.get(w.kind) ?? 0) + 1); }
+  let heaviestKind: AudienceWitnessKind = 'CROWD';
+  let heaviestCount = 0;
+  for (const [kind, count] of kindCounts.entries()) {
+    if (count > heaviestCount) { heaviestCount = count; heaviestKind = kind; }
+  }
+  const avgWeight = active.length > 0
+    ? safeRound(active.reduce((acc, w) => acc + w.weight, 0) / active.length, 4)
+    : 0;
+
+  return Object.freeze({
+    channelId: state.channelId,
+    totalWindows: state.witnessWindows.length,
+    activeWindows: active.length,
+    averageWeight: avgWeight,
+    heaviestKind,
+    publicCount: active.filter((w) => w.visibility === 'PUBLIC').length,
+    privateCount: active.filter((w) => w.visibility === 'PRIVATE').length,
+    shadowOnlyCount: active.filter((w) => w.visibility === 'SHADOW_ONLY').length,
+  });
+}
+
+// ============================================================================
+// MARK: Volatility index
+// ============================================================================
+
+export interface AudienceHeatVolatilityIndex {
+  readonly roomId: LedgerRoomId;
+  readonly channelId: AudienceChannelId;
+  readonly scoreVariance: number;
+  readonly velocityVariance: number;
+  readonly volatilityTier: 'STABLE' | 'FLUCTUATING' | 'VOLATILE' | 'CHAOTIC';
+  readonly isVolatile: boolean;
+  readonly sampledEntryCount: number;
+}
+
+export function computeAudienceHeatVolatility(
+  entries: readonly AudienceHeatEntry[],
+): readonly AudienceHeatVolatilityIndex[] {
+  const byChannel = new Map<string, AudienceHeatEntry[]>();
+  for (const e of entries) {
+    const key = `${e.roomId}:${e.channelId}`;
+    const existing = byChannel.get(key) ?? [];
+    existing.push(e);
+    byChannel.set(key, existing);
+  }
+
+  const results: AudienceHeatVolatilityIndex[] = [];
+  for (const [key, channelEntries] of byChannel.entries()) {
+    const [roomId, channelId] = key.split(':') as [LedgerRoomId, AudienceChannelId];
+    if (channelEntries.length < 2) {
+      results.push(Object.freeze({ roomId, channelId, scoreVariance: 0, velocityVariance: 0, volatilityTier: 'STABLE', isVolatile: false, sampledEntryCount: channelEntries.length }));
+      continue;
+    }
+    const scores = channelEntries.map((e) => e.nextState.score);
+    const velocities = channelEntries.map((e) => e.nextState.crowdVelocity);
+    const scoreMean = scores.reduce((a, b) => a + b, 0) / scores.length;
+    const scoreVariance = safeRound(scores.reduce((acc, s) => acc + (s - scoreMean) ** 2, 0) / scores.length, 4);
+    const velMean = velocities.reduce((a, b) => a + b, 0) / velocities.length;
+    const velocityVariance = safeRound(velocities.reduce((acc, v) => acc + (v - velMean) ** 2, 0) / velocities.length, 4);
+    const composite = scoreVariance * 0.7 + velocityVariance * 0.3;
+    const volatilityTier: AudienceHeatVolatilityIndex['volatilityTier'] =
+      composite >= 500 ? 'CHAOTIC' :
+      composite >= 200 ? 'VOLATILE' :
+      composite >= 60 ? 'FLUCTUATING' : 'STABLE';
+    results.push(Object.freeze({ roomId, channelId, scoreVariance, velocityVariance, volatilityTier, isVolatile: composite >= 200, sampledEntryCount: channelEntries.length }));
+  }
+
+  return Object.freeze(results.sort((a, b) => b.scoreVariance - a.scoreVariance));
+}
+
+// ============================================================================
+// MARK: Derive from rescue event
+// ============================================================================
+
+export function deriveAudienceHeatDeltaFromRescue(input: {
+  readonly severity: number;
+  readonly wasHeeded: boolean;
+  readonly helperId?: LedgerParticipantId;
+  readonly rescuedId?: LedgerParticipantId;
+  readonly sceneId?: LedgerSceneId;
+}): AudienceHeatDelta {
+  const sympathy = safeRound(input.severity * 0.6 + (input.wasHeeded ? 4.5 : 1.2), 4);
+  const pressure = safeRound(input.severity * 0.35, 4);
+  const legend = input.wasHeeded ? safeRound(input.severity * 0.18, 4) : 0;
+  const fear = safeRound(input.severity * 0.12, 4);
+
+  return Object.freeze({
+    scoreDelta: safeRound(sympathy * 0.5 + pressure * 0.35 + legend * 0.25, 4),
+    vectorDelta: Object.freeze({ sympathy, pressure, legend, fear }),
+    crowdVelocityDelta: safeRound(sympathy * 0.3 + pressure * 0.2, 4),
+    witnessDensityDelta: input.wasHeeded ? 0.8 : 0.3,
+    reason: 'RESCUE_INTERVENTION',
+    sourceKind: 'RESCUE',
+    sceneId: input.sceneId,
+    actorId: input.helperId,
+    targetId: input.rescuedId,
+    metadata: Object.freeze({ severity: input.severity, wasHeeded: input.wasHeeded }),
+  });
+}
+
+export function deriveAudienceHeatDeltaFromNegotiation(input: {
+  readonly leakSeverity: number;
+  readonly provedBluff: boolean;
+  readonly dealerId?: LedgerParticipantId;
+  readonly targetId?: LedgerParticipantId;
+}): AudienceHeatDelta {
+  const predation = safeRound(input.leakSeverity * 0.7 + (input.provedBluff ? 5.4 : 2.1), 4);
+  const suspicion = safeRound(input.leakSeverity * 0.4 + (input.provedBluff ? 3.2 : 1.0), 4);
+  const ridicule = input.provedBluff ? safeRound(input.leakSeverity * 0.5, 4) : 0;
+  const fear = safeRound(input.leakSeverity * 0.22, 4);
+
+  return Object.freeze({
+    scoreDelta: safeRound(predation * 0.55 + suspicion * 0.3 + ridicule * 0.25, 4),
+    vectorDelta: Object.freeze({ predation, suspicion, ridicule, fear }),
+    crowdVelocityDelta: safeRound(predation * 0.35, 4),
+    witnessDensityDelta: safeRound(input.leakSeverity * 0.15, 4),
+    reason: 'NEGOTIATION_LEAK',
+    sourceKind: 'NEGOTIATION',
+    actorId: input.dealerId,
+    targetId: input.targetId,
+    metadata: Object.freeze({ leakSeverity: input.leakSeverity, provedBluff: input.provedBluff }),
+  });
+}
+
+export function filterEntriesByReason(
+  entries: readonly AudienceHeatEntry[],
+  reason: AudienceTransitionReason,
+): readonly AudienceHeatEntry[] {
+  return Object.freeze(entries.filter((e) => e.nextState.lastTransitionReason === reason));
+}
+
+export function filterEntriesByBand(
+  entries: readonly AudienceHeatEntry[],
+  band: AudienceHeatBand,
+): readonly AudienceHeatEntry[] {
+  return Object.freeze(entries.filter((e) => e.nextState.band === band));
+}
+
+export function sortEntriesByScore(
+  entries: readonly AudienceHeatEntry[],
+  descending = true,
+): readonly AudienceHeatEntry[] {
+  return Object.freeze(
+    [...entries].sort((a, b) =>
+      descending ? b.nextState.score - a.nextState.score : a.nextState.score - b.nextState.score,
+    ),
+  );
+}
+
+export function countEntriesByBand(
+  entries: readonly AudienceHeatEntry[],
+): Readonly<Record<AudienceHeatBand, number>> {
+  const counts: Partial<Record<AudienceHeatBand, number>> = {};
+  for (const e of entries) {
+    counts[e.nextState.band] = (counts[e.nextState.band] ?? 0) + 1;
+  }
+  return Object.freeze(counts as Record<AudienceHeatBand, number>);
+}
+
+export function countEntriesByPresence(
+  entries: readonly AudienceHeatEntry[],
+): Readonly<Record<AudiencePresenceState, number>> {
+  const counts: Partial<Record<AudiencePresenceState, number>> = {};
+  for (const e of entries) {
+    counts[e.nextState.presence] = (counts[e.nextState.presence] ?? 0) + 1;
+  }
+  return Object.freeze(counts as Record<AudiencePresenceState, number>);
 }
