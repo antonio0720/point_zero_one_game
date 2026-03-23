@@ -85,7 +85,7 @@ const HOT_BAND_THRESHOLD = 0.55 as const;
 const WARM_BAND_THRESHOLD = 0.28 as const;
 
 /** Minimum time-between-touch (ms) before a counterpart is considered dormant. */
-const DORMANCY_THRESHOLD_MS = 1000 * 60 * 18 as const;
+const DORMANCY_THRESHOLD_MS = 1000 * 60 * 18;
 
 /** Escalation risk threshold above which a counterpart is flagged as high risk. */
 const HIGH_ESCALATION_THRESHOLD = 0.66 as const;
