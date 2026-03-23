@@ -39,7 +39,6 @@
 
 import type {
   ChatAnyNpcDescriptor,
-  ChatNpcCadenceBand,
   ChatNpcDescriptor,
   ChatNpcEntryStyle,
   ChatNpcExitStyle,
@@ -723,6 +722,14 @@ function addEllipsisCadence(
   return `${text}…`;
 }
 
+function stripTrailingThreatCadence(text: string): string {
+  return text
+    .replace(/\s*[.…]+\s*(you('re| are) (finished|done|over))\s*[.…!]*$/i, '')
+    .replace(/\s*—\s*(watch yourself|mark my words|this isn'?t over)\s*[.…!]*$/i, '')
+    .replace(/[.…]{2,}$/, '.')
+    .trim();
+}
+
 function softenTerminalPunctuation(text: string): string {
   return text.replace(/!+$/g, '.').replace(/\?+$/g, '.');
 }
@@ -859,3 +866,778 @@ function clamp01(value: number | null | undefined): Score01 | number {
   if (value >= 1) return 1;
   return Number(value.toFixed(6));
 }
+
+// ============================================================================
+// MARK: Extended contracts
+// ============================================================================
+
+export interface BackendVoiceprintCompositionBundle {
+  readonly primary: BackendVoiceprintPolicyResolution;
+  readonly sharper?: BackendVoiceprintPolicyResolution;
+  readonly softer?: BackendVoiceprintPolicyResolution;
+  readonly aggressionScore01: number;
+  readonly clarityScore01: number;
+  readonly intent: BackendVoiceprintIntent;
+  readonly npcClass: string;
+  readonly notes: readonly string[];
+}
+
+export interface BackendVoiceprintBatchEntry {
+  readonly entry: BackendPersonaRegistryEntry;
+  readonly intent: BackendVoiceprintIntent;
+  readonly sourceText: string;
+  readonly context?: BackendVoiceprintContext | BackendPersonaSelectionContext | null;
+  readonly seed?: string | null;
+}
+
+export interface BackendVoiceprintBatchResult {
+  readonly resolutions: readonly BackendVoiceprintPolicyResolution[];
+  readonly totalInputs: number;
+  readonly successCount: number;
+  readonly failureCount: number;
+  readonly lowercaseCount: number;
+  readonly openerCount: number;
+  readonly closerCount: number;
+}
+
+export interface BackendVoiceprintDiagnostic {
+  readonly npcId: string;
+  readonly personaId: string;
+  readonly npcClass: string;
+  readonly intent: BackendVoiceprintIntent;
+  readonly aggressionBand: BackendVoiceprintAggressionBand;
+  readonly clarityBand: BackendVoiceprintClarityBand;
+  readonly preferredEntryStyle: ChatNpcEntryStyle;
+  readonly preferredExitStyle: ChatNpcExitStyle;
+  readonly transformationFlags: readonly string[];
+  readonly openerUsed?: string;
+  readonly closerUsed?: string;
+  readonly shouldUseSparseEmoji: boolean;
+  readonly shouldUseTypingReveal: boolean;
+  readonly shouldTrailOff: boolean;
+  readonly shouldLowercase: boolean;
+  readonly notes: readonly string[];
+}
+
+export interface BackendVoiceprintCompositionStats {
+  readonly count: number;
+  readonly aggressionDistribution: Readonly<Record<BackendVoiceprintAggressionBand, number>>;
+  readonly clarityDistribution: Readonly<Record<BackendVoiceprintClarityBand, number>>;
+  readonly lowercaseRate01: number;
+  readonly openerRate01: number;
+  readonly closerRate01: number;
+  readonly typingRevealRate01: number;
+  readonly trailOffRate01: number;
+  readonly sparseEmojiRate01: number;
+  readonly averageTransformFlagCount: number;
+}
+
+export interface BackendVoiceprintResolutionDiff {
+  readonly aggressionChanged: boolean;
+  readonly clarityChanged: boolean;
+  readonly entryStyleChanged: boolean;
+  readonly exitStyleChanged: boolean;
+  readonly lowercaseChanged: boolean;
+  readonly typingRevealChanged: boolean;
+  readonly trailOffChanged: boolean;
+  readonly textChanged: boolean;
+  readonly textLengthDelta: number;
+  readonly openerChanged: boolean;
+  readonly closerChanged: boolean;
+  readonly summary: string;
+}
+
+export interface BackendPersonaVoiceprintProfile {
+  readonly npcId: string;
+  readonly personaId: string;
+  readonly npcClass: string;
+  readonly displayName: string;
+  readonly punctuationStyle: ChatNpcVoiceprint['punctuationStyle'];
+  readonly averageSentenceLength: ChatNpcVoiceprint['averageSentenceLength'];
+  readonly prefersLowercase: boolean;
+  readonly prefersSparseEmoji: boolean;
+  readonly signatureOpenerCount: number;
+  readonly signatureCloserCount: number;
+  readonly lexiconTagCount: number;
+  readonly defaultAggressionBand: BackendVoiceprintAggressionBand;
+  readonly defaultClarityBand: BackendVoiceprintClarityBand;
+  readonly defaultEntryStyle: ChatNpcEntryStyle;
+  readonly defaultExitStyle: ChatNpcExitStyle;
+}
+
+// ============================================================================
+// MARK: Safe and batch resolution
+// ============================================================================
+
+export function resolveVoiceprintPolicySafe(
+  input: BackendVoiceprintPolicyInput,
+): BackendVoiceprintPolicyResolution | null {
+  try {
+    return resolveVoiceprintPolicy(input);
+  } catch {
+    return null;
+  }
+}
+
+export function resolveVoiceprintBatch(
+  inputs: readonly BackendVoiceprintBatchEntry[],
+): BackendVoiceprintBatchResult {
+  const resolutions: BackendVoiceprintPolicyResolution[] = [];
+  let successCount = 0;
+  let failureCount = 0;
+  let lowercaseCount = 0;
+  let openerCount = 0;
+  let closerCount = 0;
+
+  for (const item of inputs) {
+    const result = resolveVoiceprintPolicySafe({
+      entry: item.entry,
+      intent: item.intent,
+      sourceText: item.sourceText,
+      context: item.context,
+      seed: item.seed,
+    });
+    if (!result) {
+      failureCount += 1;
+      continue;
+    }
+    resolutions.push(result);
+    successCount += 1;
+    if (result.shouldLowercase) lowercaseCount += 1;
+    if (result.openerUsed) openerCount += 1;
+    if (result.closerUsed) closerCount += 1;
+  }
+
+  return Object.freeze({
+    resolutions: Object.freeze(resolutions),
+    totalInputs: inputs.length,
+    successCount,
+    failureCount,
+    lowercaseCount,
+    openerCount,
+    closerCount,
+  });
+}
+
+export function batchComposeLines(
+  entry: BackendPersonaRegistryEntry,
+  lines: readonly string[],
+  intent: BackendVoiceprintIntent,
+  context?: BackendVoiceprintContext | BackendPersonaSelectionContext | null,
+): readonly string[] {
+  return lines.map((sourceText, index) =>
+    composePersonaLine(entry, sourceText, intent, context, `batch::${index}`),
+  );
+}
+
+// ============================================================================
+// MARK: Aggression and clarity scoring
+// ============================================================================
+
+export function computeAggressionScore(band: BackendVoiceprintAggressionBand): number {
+  switch (band) {
+    case 'PREDATORY': return 1.0;
+    case 'CUTTING': return 0.80;
+    case 'SHARP': return 0.60;
+    case 'TEMPERED': return 0.38;
+    case 'SOFT': return 0.12;
+    default: return 0;
+  }
+}
+
+export function computeClarityScore(band: BackendVoiceprintClarityBand): number {
+  switch (band) {
+    case 'EXPLICIT': return 1.0;
+    case 'BALANCED': return 0.55;
+    case 'MINIMAL': return 0.15;
+    default: return 0;
+  }
+}
+
+export function aggressionScoreToBand(score01: number): BackendVoiceprintAggressionBand {
+  if (score01 >= 0.90) return 'PREDATORY';
+  if (score01 >= 0.70) return 'CUTTING';
+  if (score01 >= 0.50) return 'SHARP';
+  if (score01 >= 0.25) return 'TEMPERED';
+  return 'SOFT';
+}
+
+export function clarityScoreToBand(score01: number): BackendVoiceprintClarityBand {
+  if (score01 >= 0.75) return 'EXPLICIT';
+  if (score01 >= 0.35) return 'BALANCED';
+  return 'MINIMAL';
+}
+
+export function compareAggressionBands(
+  a: BackendVoiceprintAggressionBand,
+  b: BackendVoiceprintAggressionBand,
+): number {
+  return computeAggressionScore(a) - computeAggressionScore(b);
+}
+
+export function compareClarityBands(
+  a: BackendVoiceprintClarityBand,
+  b: BackendVoiceprintClarityBand,
+): number {
+  return computeClarityScore(a) - computeClarityScore(b);
+}
+
+// ============================================================================
+// MARK: Diagnostics
+// ============================================================================
+
+export function buildVoiceprintDiagnostic(
+  input: BackendVoiceprintPolicyInput,
+  resolution?: BackendVoiceprintPolicyResolution | null,
+): BackendVoiceprintDiagnostic {
+  const resolved = resolution ?? resolveVoiceprintPolicy(input);
+  const descriptor = input.entry.descriptor;
+  const notes: string[] = [];
+
+  if (resolved.shouldLowercase) notes.push('Lowercase policy applied — voiceprint prefers lowercase.');
+  if (resolved.openerUsed) notes.push(`Signature opener attached: "${resolved.openerUsed}".`);
+  if (resolved.closerUsed) notes.push(`Signature closer attached: "${resolved.closerUsed}".`);
+  if (resolved.shouldUseSparseEmoji) notes.push('Sparse emoji preference active.');
+  if (resolved.shouldUseTypingReveal) notes.push('Typing reveal entry active for this resolution.');
+  if (resolved.shouldTrailOff) notes.push('Trail-off exit style active.');
+  if (resolved.aggressionBand === 'PREDATORY') notes.push('Predatory aggression — threat cadence enabled.');
+  if (resolved.clarityBand === 'EXPLICIT') notes.push('Explicit clarity — directive enforcement active.');
+
+  return Object.freeze({
+    npcId: descriptor.npcId,
+    personaId: descriptor.personaId,
+    npcClass: descriptor.npcClass,
+    intent: input.intent,
+    aggressionBand: resolved.aggressionBand,
+    clarityBand: resolved.clarityBand,
+    preferredEntryStyle: resolved.preferredEntryStyle,
+    preferredExitStyle: resolved.preferredExitStyle,
+    transformationFlags: resolved.transformationFlags,
+    openerUsed: resolved.openerUsed,
+    closerUsed: resolved.closerUsed,
+    shouldUseSparseEmoji: resolved.shouldUseSparseEmoji,
+    shouldUseTypingReveal: resolved.shouldUseTypingReveal,
+    shouldTrailOff: resolved.shouldTrailOff,
+    shouldLowercase: resolved.shouldLowercase,
+    notes: Object.freeze(notes),
+  });
+}
+
+export function describeAggressionBand(band: BackendVoiceprintAggressionBand): string {
+  switch (band) {
+    case 'SOFT': return 'Soft — supportive, non-threatening delivery';
+    case 'TEMPERED': return 'Tempered — measured, controlled tension';
+    case 'SHARP': return 'Sharp — direct, pointed delivery';
+    case 'CUTTING': return 'Cutting — high-pressure, receipt-oriented delivery';
+    case 'PREDATORY': return 'Predatory — maximum threat posture, zero-tolerance cadence';
+    default: return 'Unknown aggression band';
+  }
+}
+
+export function describeClarityBand(band: BackendVoiceprintClarityBand): string {
+  switch (band) {
+    case 'MINIMAL': return 'Minimal — spare phrasing, implied over stated';
+    case 'BALANCED': return 'Balanced — standard clarity, no forced directness';
+    case 'EXPLICIT': return 'Explicit — directive, unambiguous, action-oriented';
+    default: return 'Unknown clarity band';
+  }
+}
+
+export function describeTransformationFlags(flags: readonly string[]): string {
+  if (!flags.length) return 'no transformations applied';
+  return flags.map((f) => f.replace(/_/g, ' ').toLowerCase()).join(', ');
+}
+
+export function describeVoiceprintResolution(resolution: BackendVoiceprintPolicyResolution): string {
+  const parts: string[] = [
+    `aggression=${resolution.aggressionBand}`,
+    `clarity=${resolution.clarityBand}`,
+    `entry=${resolution.preferredEntryStyle}`,
+    `exit=${resolution.preferredExitStyle}`,
+  ];
+  if (resolution.shouldLowercase) parts.push('lowercase');
+  if (resolution.shouldUseTypingReveal) parts.push('typing_reveal');
+  if (resolution.shouldTrailOff) parts.push('trail_off');
+  if (resolution.openerUsed) parts.push(`opener="${resolution.openerUsed}"`);
+  if (resolution.closerUsed) parts.push(`closer="${resolution.closerUsed}"`);
+  return parts.join(' | ');
+}
+
+// ============================================================================
+// MARK: Intent classification
+// ============================================================================
+
+export function isHostileIntent(intent: BackendVoiceprintIntent): boolean {
+  return HOSTILE_INTENTS.has(intent);
+}
+
+export function isReflectiveIntent(intent: BackendVoiceprintIntent): boolean {
+  return REFLECTIVE_INTENTS.has(intent);
+}
+
+export function isRescueIntent(intent: BackendVoiceprintIntent): boolean {
+  return RESCUE_INTENTS.has(intent);
+}
+
+export function classifyIntent(intent: BackendVoiceprintIntent): 'HOSTILE' | 'REFLECTIVE' | 'RESCUE' | 'NEUTRAL' {
+  if (RESCUE_INTENTS.has(intent)) return 'RESCUE';
+  if (HOSTILE_INTENTS.has(intent)) return 'HOSTILE';
+  if (REFLECTIVE_INTENTS.has(intent)) return 'REFLECTIVE';
+  return 'NEUTRAL';
+}
+
+export function intentRequiresClarityEscalation(
+  intent: BackendVoiceprintIntent,
+  npcClass: string,
+): boolean {
+  if (npcClass === 'HELPER' && RESCUE_INTENTS.has(intent)) return true;
+  if (intent === 'NEGOTIATION') return true;
+  return false;
+}
+
+// ============================================================================
+// MARK: Entry / exit style classification
+// ============================================================================
+
+export function classifyEntryStyle(style: ChatNpcEntryStyle): string {
+  switch (style) {
+    case 'TYPING_REVEAL': return 'Typing reveal — visible composing before message appears';
+    case 'INSTANT_DROP': return 'Instant drop — message arrives without typing indicator';
+    case 'LURK_THEN_STRIKE': return 'Lurk then strike — shadow presence before sudden delivery';
+    case 'CROWD_SWELL': return 'Crowd swell — multiple ambient voices rising together';
+    case 'WHISPER_REVEAL': return 'Whisper reveal — quiet appearance, low-profile entry';
+    case 'SYSTEM_CARD': return 'System card — structured system-style card format';
+    default: return `Unknown entry style: ${String(style)}`;
+  }
+}
+
+export function classifyExitStyle(style: ChatNpcExitStyle): string {
+  switch (style) {
+    case 'READ_AND_LEAVE': return 'Read and leave — delivers then exits cleanly';
+    case 'TRAIL_OFF': return 'Trail off — message fades out gradually';
+    case 'SHADOW_PERSIST': return 'Shadow persist — NPC lingers in shadow after delivery';
+    case 'HARD_STOP': return 'Hard stop — abrupt exit, no lingering';
+    case 'QUEUE_NEXT_SPEAKER': return 'Queue next speaker — hands off to the next voice';
+    default: return `Unknown exit style: ${String(style)}`;
+  }
+}
+
+// ============================================================================
+// MARK: Diff and comparison
+// ============================================================================
+
+export function diffPolicyResolutions(
+  baseline: BackendVoiceprintPolicyResolution,
+  updated: BackendVoiceprintPolicyResolution,
+): BackendVoiceprintResolutionDiff {
+  const aggressionChanged = updated.aggressionBand !== baseline.aggressionBand;
+  const clarityChanged = updated.clarityBand !== baseline.clarityBand;
+  const entryStyleChanged = updated.preferredEntryStyle !== baseline.preferredEntryStyle;
+  const exitStyleChanged = updated.preferredExitStyle !== baseline.preferredExitStyle;
+  const lowercaseChanged = updated.shouldLowercase !== baseline.shouldLowercase;
+  const typingRevealChanged = updated.shouldUseTypingReveal !== baseline.shouldUseTypingReveal;
+  const trailOffChanged = updated.shouldTrailOff !== baseline.shouldTrailOff;
+  const textChanged = updated.text !== baseline.text;
+  const textLengthDelta = updated.text.length - baseline.text.length;
+  const openerChanged = updated.openerUsed !== baseline.openerUsed;
+  const closerChanged = updated.closerUsed !== baseline.closerUsed;
+
+  const changes: string[] = [];
+  if (aggressionChanged) changes.push(`aggression:${baseline.aggressionBand}→${updated.aggressionBand}`);
+  if (clarityChanged) changes.push(`clarity:${baseline.clarityBand}→${updated.clarityBand}`);
+  if (entryStyleChanged) changes.push(`entry:${baseline.preferredEntryStyle}→${updated.preferredEntryStyle}`);
+  if (exitStyleChanged) changes.push(`exit:${baseline.preferredExitStyle}→${updated.preferredExitStyle}`);
+  if (lowercaseChanged) changes.push(`lowercase:${String(baseline.shouldLowercase)}→${String(updated.shouldLowercase)}`);
+  if (typingRevealChanged) changes.push(`typingReveal:${String(baseline.shouldUseTypingReveal)}→${String(updated.shouldUseTypingReveal)}`);
+  if (textLengthDelta !== 0) changes.push(`textLen${textLengthDelta > 0 ? '+' : ''}${textLengthDelta}`);
+  if (openerChanged) changes.push(`opener changed`);
+  if (closerChanged) changes.push(`closer changed`);
+
+  return Object.freeze({
+    aggressionChanged,
+    clarityChanged,
+    entryStyleChanged,
+    exitStyleChanged,
+    lowercaseChanged,
+    typingRevealChanged,
+    trailOffChanged,
+    textChanged,
+    textLengthDelta,
+    openerChanged,
+    closerChanged,
+    summary: changes.length > 0 ? changes.join(', ') : 'no change',
+  });
+}
+
+// ============================================================================
+// MARK: Stats and aggregation
+// ============================================================================
+
+export function buildVoiceprintCompositionStats(
+  resolutions: readonly BackendVoiceprintPolicyResolution[],
+): BackendVoiceprintCompositionStats {
+  if (!resolutions.length) {
+    return Object.freeze({
+      count: 0,
+      aggressionDistribution: Object.freeze({ SOFT: 0, TEMPERED: 0, SHARP: 0, CUTTING: 0, PREDATORY: 0 }),
+      clarityDistribution: Object.freeze({ MINIMAL: 0, BALANCED: 0, EXPLICIT: 0 }),
+      lowercaseRate01: 0,
+      openerRate01: 0,
+      closerRate01: 0,
+      typingRevealRate01: 0,
+      trailOffRate01: 0,
+      sparseEmojiRate01: 0,
+      averageTransformFlagCount: 0,
+    });
+  }
+
+  const aggrDist: Record<BackendVoiceprintAggressionBand, number> = {
+    SOFT: 0, TEMPERED: 0, SHARP: 0, CUTTING: 0, PREDATORY: 0,
+  };
+  const clarDist: Record<BackendVoiceprintClarityBand, number> = {
+    MINIMAL: 0, BALANCED: 0, EXPLICIT: 0,
+  };
+
+  let lowercaseCount = 0;
+  let openerCount = 0;
+  let closerCount = 0;
+  let typingRevealCount = 0;
+  let trailOffCount = 0;
+  let sparseEmojiCount = 0;
+  let totalFlags = 0;
+
+  for (const r of resolutions) {
+    aggrDist[r.aggressionBand] = (aggrDist[r.aggressionBand] ?? 0) + 1;
+    clarDist[r.clarityBand] = (clarDist[r.clarityBand] ?? 0) + 1;
+    if (r.shouldLowercase) lowercaseCount += 1;
+    if (r.openerUsed) openerCount += 1;
+    if (r.closerUsed) closerCount += 1;
+    if (r.shouldUseTypingReveal) typingRevealCount += 1;
+    if (r.shouldTrailOff) trailOffCount += 1;
+    if (r.shouldUseSparseEmoji) sparseEmojiCount += 1;
+    totalFlags += r.transformationFlags.length;
+  }
+
+  const n = resolutions.length;
+  return Object.freeze({
+    count: n,
+    aggressionDistribution: Object.freeze(aggrDist),
+    clarityDistribution: Object.freeze(clarDist),
+    lowercaseRate01: clamp01(lowercaseCount / n) as number,
+    openerRate01: clamp01(openerCount / n) as number,
+    closerRate01: clamp01(closerCount / n) as number,
+    typingRevealRate01: clamp01(typingRevealCount / n) as number,
+    trailOffRate01: clamp01(trailOffCount / n) as number,
+    sparseEmojiRate01: clamp01(sparseEmojiCount / n) as number,
+    averageTransformFlagCount: Number((totalFlags / n).toFixed(2)),
+  });
+}
+
+// ============================================================================
+// MARK: Intent-first API
+// ============================================================================
+
+export function resolveVoiceprintForIntent(
+  entry: BackendPersonaRegistryEntry,
+  intent: BackendVoiceprintIntent,
+  sourceText: string,
+  context?: BackendVoiceprintContext | BackendPersonaSelectionContext | null,
+  seed?: string | null,
+): BackendVoiceprintPolicyResolution {
+  return resolveVoiceprintPolicy({ entry, intent, sourceText, context, seed });
+}
+
+export function buildCompositionBundle(
+  entry: BackendPersonaRegistryEntry,
+  intent: BackendVoiceprintIntent,
+  sourceText: string,
+  context?: BackendVoiceprintContext | BackendPersonaSelectionContext | null,
+  seed?: string | null,
+): BackendVoiceprintCompositionBundle {
+  const preview = previewVoiceprintPolicy({ entry, intent, sourceText, context, seed });
+  const primary = preview.primary;
+  const notes: string[] = [];
+
+  const aggressionScore01 = computeAggressionScore(primary.aggressionBand);
+  const clarityScore01 = computeClarityScore(primary.clarityBand);
+
+  if (aggressionScore01 >= 0.8) notes.push('High aggression: delivery will be confrontational.');
+  if (clarityScore01 >= 0.9) notes.push('Explicit clarity: directive enforcement enabled.');
+  if (primary.shouldTrailOff) notes.push('Trail-off exit creates lingering tension.');
+  if (primary.shouldUseTypingReveal) notes.push('Typing theater active for this bundle.');
+
+  return Object.freeze({
+    primary,
+    sharper: preview.alternateSharper,
+    softer: preview.alternateSofter,
+    aggressionScore01,
+    clarityScore01,
+    intent,
+    npcClass: entry.descriptor.npcClass,
+    notes: Object.freeze(notes),
+  });
+}
+
+// ============================================================================
+// MARK: Persona voiceprint profile
+// ============================================================================
+
+export function buildPersonaVoiceprintProfile(
+  entry: BackendPersonaRegistryEntry,
+  context?: BackendVoiceprintContext | null,
+): BackendPersonaVoiceprintProfile {
+  const descriptor = entry.descriptor;
+  const voiceprint = descriptor.voiceprint;
+  const defaultIntent: BackendVoiceprintIntent =
+    descriptor.npcClass === 'HELPER' ? 'RESCUE' :
+    descriptor.npcClass === 'HATER' ? 'TAUNT' : 'AMBIENT';
+
+  const aggrBand = resolveAggressionBand(entry, defaultIntent, context);
+  const clarBand = resolveClarityBand(entry, defaultIntent, context);
+  const entryStyle = resolvePreferredEntryStyle(descriptor, defaultIntent, aggrBand, context);
+  const exitStyle = resolvePreferredExitStyle(descriptor, defaultIntent, aggrBand, context);
+
+  return Object.freeze({
+    npcId: descriptor.npcId,
+    personaId: descriptor.personaId,
+    npcClass: descriptor.npcClass,
+    displayName: descriptor.displayName,
+    punctuationStyle: voiceprint.punctuationStyle,
+    averageSentenceLength: voiceprint.averageSentenceLength,
+    prefersLowercase: Boolean(voiceprint.prefersLowercase),
+    prefersSparseEmoji: Boolean(voiceprint.prefersSparseEmoji),
+    signatureOpenerCount: (voiceprint.signatureOpeners ?? []).length,
+    signatureCloserCount: (voiceprint.signatureClosers ?? []).length,
+    lexiconTagCount: voiceprint.lexiconTags.length,
+    defaultAggressionBand: aggrBand,
+    defaultClarityBand: clarBand,
+    defaultEntryStyle: entryStyle,
+    defaultExitStyle: exitStyle,
+  });
+}
+
+export function buildVoiceprintSummary(
+  entry: BackendPersonaRegistryEntry,
+  intent: BackendVoiceprintIntent,
+  context?: BackendVoiceprintContext | null,
+): string {
+  const aggrBand = resolveAggressionBand(entry, intent, context);
+  const clarBand = resolveClarityBand(entry, intent, context);
+  const entryStyle = resolvePreferredEntryStyle(entry.descriptor, intent, aggrBand, context);
+  const exitStyle = resolvePreferredExitStyle(entry.descriptor, intent, aggrBand, context);
+  return [
+    `[${entry.descriptor.npcClass}:${entry.runtime.runtimeDisplayName}]`,
+    `intent=${intent}`,
+    `aggression=${aggrBand}`,
+    `clarity=${clarBand}`,
+    `entry=${entryStyle}`,
+    `exit=${exitStyle}`,
+  ].join(' | ');
+}
+
+// ============================================================================
+// MARK: Line selection with voiceprint shaping
+// ============================================================================
+
+export function selectBestLine(
+  entry: BackendPersonaRegistryEntry,
+  candidates: readonly string[],
+  intent: BackendVoiceprintIntent,
+  context?: BackendVoiceprintContext | BackendPersonaSelectionContext | null,
+  seed?: string | null,
+): string | null {
+  if (!candidates.length) return null;
+  const resolvedSeed = seed ?? `select::${entry.sharedKey}::${intent}`;
+  const idx = positiveHash(resolvedSeed) % candidates.length;
+  const chosen = candidates[idx];
+  if (!chosen) return null;
+  return composePersonaLine(entry, chosen, intent, context, resolvedSeed);
+}
+
+export function selectAndComposeLines(
+  entry: BackendPersonaRegistryEntry,
+  candidates: readonly string[],
+  intent: BackendVoiceprintIntent,
+  count: number,
+  context?: BackendVoiceprintContext | BackendPersonaSelectionContext | null,
+  seed?: string | null,
+): readonly string[] {
+  if (!candidates.length || count <= 0) return [];
+  const results: string[] = [];
+  const used = new Set<number>();
+  for (let attempt = 0; attempt < Math.min(count * 3, candidates.length * 2); attempt += 1) {
+    if (results.length >= count) break;
+    const resolvedSeed = seed ?? `selectmulti::${entry.sharedKey}::${intent}`;
+    const idx = positiveHash(`${resolvedSeed}::${attempt}`) % candidates.length;
+    if (used.has(idx)) continue;
+    used.add(idx);
+    const chosen = candidates[idx];
+    if (!chosen) continue;
+    results.push(composePersonaLine(entry, chosen, intent, context, `${resolvedSeed}::${attempt}`));
+  }
+  return Object.freeze(results);
+}
+
+// ============================================================================
+// MARK: Scoring helpers
+// ============================================================================
+
+export function scoreLineForAggression(
+  text: string,
+  aggressionBand: BackendVoiceprintAggressionBand,
+): number {
+  const words = text.split(/\s+/).length;
+  const base = computeAggressionScore(aggressionBand);
+
+  // Predatory lines should be shorter and denser
+  if (aggressionBand === 'PREDATORY') {
+    return base * (words <= 12 ? 1.0 : words <= 20 ? 0.85 : 0.7);
+  }
+  // Soft lines can be longer
+  if (aggressionBand === 'SOFT') {
+    return base * (words >= 6 ? 1.0 : 0.8);
+  }
+  return base;
+}
+
+export function scoreLineForClarity(
+  text: string,
+  clarityBand: BackendVoiceprintClarityBand,
+): number {
+  const hasDirective = /\b(stay|hold|breathe|cut|leave|wait|reset|step back|take the exit|stop|go|move)\b/i.test(text);
+  const base = computeClarityScore(clarityBand);
+  if (clarityBand === 'EXPLICIT' && hasDirective) return Math.min(1.0, base + 0.12);
+  if (clarityBand === 'MINIMAL' && !hasDirective) return Math.min(1.0, base + 0.08);
+  return base;
+}
+
+export function rankLinesByFit(
+  candidates: readonly string[],
+  aggressionBand: BackendVoiceprintAggressionBand,
+  clarityBand: BackendVoiceprintClarityBand,
+): readonly string[] {
+  return [...candidates]
+    .map((text) => ({
+      text,
+      score: scoreLineForAggression(text, aggressionBand) + scoreLineForClarity(text, clarityBand),
+    }))
+    .sort((a, b) => b.score - a.score)
+    .map((item) => item.text);
+}
+
+// ============================================================================
+// MARK: Filtering
+// ============================================================================
+
+export function filterResolutionsByAggression(
+  resolutions: readonly BackendVoiceprintPolicyResolution[],
+  minBand: BackendVoiceprintAggressionBand,
+): readonly BackendVoiceprintPolicyResolution[] {
+  const threshold = computeAggressionScore(minBand);
+  return resolutions.filter((r) => computeAggressionScore(r.aggressionBand) >= threshold);
+}
+
+export function filterResolutionsByClarity(
+  resolutions: readonly BackendVoiceprintPolicyResolution[],
+  minBand: BackendVoiceprintClarityBand,
+): readonly BackendVoiceprintPolicyResolution[] {
+  const threshold = computeClarityScore(minBand);
+  return resolutions.filter((r) => computeClarityScore(r.clarityBand) >= threshold);
+}
+
+export function filterResolutionsByFlag(
+  resolutions: readonly BackendVoiceprintPolicyResolution[],
+  flag: string,
+): readonly BackendVoiceprintPolicyResolution[] {
+  return resolutions.filter((r) => r.transformationFlags.includes(flag));
+}
+
+export function groupResolutionsByAggression(
+  resolutions: readonly BackendVoiceprintPolicyResolution[],
+): Readonly<Partial<Record<BackendVoiceprintAggressionBand, readonly BackendVoiceprintPolicyResolution[]>>> {
+  const grouped: Partial<Record<BackendVoiceprintAggressionBand, BackendVoiceprintPolicyResolution[]>> = {};
+  for (const r of resolutions) {
+    if (!grouped[r.aggressionBand]) grouped[r.aggressionBand] = [];
+    grouped[r.aggressionBand]!.push(r);
+  }
+  return Object.freeze(grouped);
+}
+
+// ============================================================================
+// MARK: Namespace export
+// ============================================================================
+
+export const VoiceprintPolicyNS = Object.freeze({
+  // Core API
+  resolveVoiceprintPolicy,
+  previewVoiceprintPolicy,
+  composePersonaLine,
+
+  // Aggression / clarity resolution
+  resolveAggressionBand,
+  resolveClarityBand,
+  computeAggressionScore,
+  computeClarityScore,
+  aggressionScoreToBand,
+  clarityScoreToBand,
+  compareAggressionBands,
+  compareClarityBands,
+
+  // Entry / exit style resolution
+  resolvePreferredEntryStyle,
+  resolvePreferredExitStyle,
+  classifyEntryStyle,
+  classifyExitStyle,
+
+  // Signature selection
+  selectSignatureOpener,
+  selectSignatureCloser,
+
+  // Safe and batch resolution
+  resolveVoiceprintPolicySafe,
+  resolveVoiceprintBatch,
+  batchComposeLines,
+
+  // Intent-first API
+  resolveVoiceprintForIntent,
+  buildCompositionBundle,
+
+  // Intent classification
+  isHostileIntent,
+  isReflectiveIntent,
+  isRescueIntent,
+  classifyIntent,
+  intentRequiresClarityEscalation,
+
+  // Diagnostics
+  buildVoiceprintDiagnostic,
+  describeAggressionBand,
+  describeClarityBand,
+  describeTransformationFlags,
+  describeVoiceprintResolution,
+
+  // Diff and comparison
+  diffPolicyResolutions,
+
+  // Stats and aggregation
+  buildVoiceprintCompositionStats,
+
+  // Persona voiceprint profile
+  buildPersonaVoiceprintProfile,
+  buildVoiceprintSummary,
+
+  // Line selection with voiceprint shaping
+  selectBestLine,
+  selectAndComposeLines,
+
+  // Scoring helpers
+  scoreLineForAggression,
+  scoreLineForClarity,
+  rankLinesByFit,
+
+  // Filtering and grouping
+  filterResolutionsByAggression,
+  filterResolutionsByClarity,
+  filterResolutionsByFlag,
+  groupResolutionsByAggression,
+});

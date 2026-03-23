@@ -1,1697 +1,2855 @@
 /**
  * ============================================================================
- * POINT ZERO ONE — BACKEND CHAT NPC DOMAIN INDEX
- * FILE: backend/src/game/engine/chat/npc/index.ts
+ * POINT ZERO ONE — AUTHORITATIVE BACKEND CHAT BOT PERSONA EVOLUTION SERVICE
+ * FILE: backend/src/game/engine/chat/npc/ChatBotPersonaEvolutionService.ts
  * ============================================================================
  *
- * Doctrine
- * --------
- * - this file is not a thin barrel; it is the backend npc domain façade for the chat engine
- * - the rest of the backend should not know how hater, helper, ambient, cadence, and suppression are wired together
- * - all npc selection must pass through one place so transcript truth stays coherent across room, channel, pressure, witness, and replay law
- * - the frontend may mirror candidate scenes, but backend index owns the final ranked npc plan surface
+ * Deep backend service wrapper over the canonical frontend persona evolution runtime.
  *
- * Operational Contract
- * --------------------
- * This file answers five questions for the rest of backend chat:
- * 1. which npc voices are even eligible in this room right now?
- * 2. which registry line is strongest for each eligible voice?
- * 3. which of those candidates survive cadence and suppression?
- * 4. which candidate wins when multiple npc lanes compete for transcript truth?
- * 5. what diagnostics, snapshots, and audit structures should the engine emit around that decision?
+ * Design goals
+ * ------------
+ * 1. Preserve the authored runtime as the source of final evolution projection truth.
+ * 2. Make backend usage materially richer: audits, caching, batching, receipts, boards,
+ *    manifests, health snapshots, heat maps, and replayable projection analytics.
+ * 3. Use the imported shared contract surfaces in actual execution paths, not only in
+ *    pass-through signatures.
+ * 4. Stay defensive with unknown contract shapes by treating imported structures as
+ *    opaque records unless the runtime contract plainly exposes values at execution time.
  */
 
 import type {
-  AmbientChannelAffinity,
-  AmbientNpcContext,
-  AmbientNpcLine,
-  AmbientNpcPersonaId,
-  AmbientNpcProfile,
-  AmbientRegistrySnapshot,
-  AmbientScenarioCandidate,
-} from './AmbientNpcRegistry';
+  ChatPersonaEvolutionEvent as RawChatPersonaEvolutionEvent,
+  ChatPersonaEvolutionSignal as RawChatPersonaEvolutionSignal,
+  ChatPersonaEvolutionSnapshot as RawChatPersonaEvolutionSnapshot,
+} from '../../../../../../shared/contracts/chat/persona-evolution';
+import type { ChatPlayerFingerprintSnapshot as RawChatPlayerFingerprintSnapshot } from '../../../../../../shared/contracts/chat/player-fingerprint';
+import type { ChatLiveOpsOverlayContext as RawChatLiveOpsOverlayContext } from '../../../../../../shared/contracts/chat/liveops';
+import type { ChatRelationshipSummaryView as RawChatRelationshipSummaryView } from '../../../../../../shared/contracts/chat/relationship';
 import {
-  AmbientNpcRegistry,
-  ambientNpcRegistry,
-  createAmbientNpcRegistry,
-} from './AmbientNpcRegistry';
-import type {
-  HaterDialogueContext,
-  HaterDialogueLine,
-  HaterPersonaProfile,
-  HaterRegistryPersonaId,
-  HaterRegistrySnapshot,
-  HaterScenarioCandidate,
-} from './HaterDialogueRegistry';
-import {
-  HaterDialogueRegistry,
-  createHaterDialogueRegistry,
-  haterDialogueRegistry,
-} from './HaterDialogueRegistry';
-import type {
-  HelperDialogueContext,
-  HelperDialogueLine,
-  HelperPersonaId,
-  HelperPersonaProfile,
-  HelperRegistrySnapshot,
-  HelperScenarioCandidate,
-} from './HelperDialogueRegistry';
-import {
-  HelperDialogueRegistry,
-  createHelperDialogueRegistry,
-  helperDialogueRegistry,
-} from './HelperDialogueRegistry';
-import type {
-  CadenceChannel,
-  CadenceContext,
-  CadenceLedger,
-  CadenceSceneState,
-  NpcActorKind,
-  NpcCadenceDecision,
-  NpcCadenceRequest,
-  RankedCadenceDecision,
-  RoomCadenceSnapshot,
-} from './NpcCadencePolicy';
-import {
-  NpcCadencePolicy,
-  createNpcCadencePolicy,
-  npcCadencePolicy,
-} from './NpcCadencePolicy';
-import type {
-  NpcSuppressionActorId,
-  NpcSuppressionBatchResult,
-  NpcSuppressionDecision,
-  NpcSuppressionLedger,
-  NpcSuppressionRequest,
-  NpcSuppressionRoomState,
-  RankedSuppressionDecision,
-} from './NpcSuppressionPolicy';
-import {
-  createNpcSuppressionPolicy,
-  NpcSuppressionPolicy,
-  npcSuppressionPolicy,
-} from './NpcSuppressionPolicy';
-import {
-  ChatBotPersonaEvolutionService,
-  createChatBotPersonaEvolutionService,
-  type ChatPersonaEvolutionEvent,
-  type ChatPersonaEvolutionProfile,
-  type ChatPersonaEvolutionSignal,
-  type ChatPersonaEvolutionSnapshot,
-  type ChatPersonaStageId,
-  type ChatPlayerFingerprintSnapshot,
-  type ChatLiveOpsOverlayContext,
-  type ChatRelationshipSummaryView,
-  type EvolutionBatchObserveInput,
-  type EvolutionBatchObserveResult,
-  type EvolutionBatchProjectResult,
-  type EvolutionProjectionInput,
-  type BotEvolutionStats,
-  type EvolutionSystemStats,
-  type PersonaInsight,
-  type BotCounterplayHint,
-  type EvolutionStageTransitionRecord,
-  type EvolutionServiceCompactSnapshot,
-} from './ChatBotPersonaEvolutionService';
+  ChatBotPersonaEvolution,
+  type ChatBotPersonaEvolutionProjectionRequest,
+} from '../../../../../../pzo-web/src/engines/chat/npc/ChatBotPersonaEvolution';
 
-export * from './AmbientNpcRegistry';
-export * from './HaterDialogueRegistry';
-export * from './HelperDialogueRegistry';
-export * from './NpcCadencePolicy';
-export * from './NpcSuppressionPolicy';
-export * from './ChatBotPersonaEvolutionService';
+export type ChatPlayerFingerprintSnapshot = RawChatPlayerFingerprintSnapshot;
+export type ChatLiveOpsOverlayContext = RawChatLiveOpsOverlayContext;
+export type ChatRelationshipSummaryView = RawChatRelationshipSummaryView;
 
-export type BackendNpcPersonaId = AmbientNpcPersonaId | HelperPersonaId | HaterRegistryPersonaId;
-export type BackendNpcChannel = CadenceChannel;
+export type ChatPersonaStageId =
+  | 'DORMANT'
+  | 'SEED'
+  | 'CURIOUS'
+  | 'RIVALRIC'
+  | 'ASCENDANT'
+  | 'MYTHIC'
+  | 'SOVEREIGN'
+  | (string & {});
 
-export interface BackendNpcRoomState extends NpcSuppressionRoomState {}
-
-export interface BackendNpcDomainLedger {
-  readonly cadence: CadenceLedger;
-  readonly suppression: NpcSuppressionLedger;
+export interface ChatPersonaEvolutionEvent extends RawChatPersonaEvolutionEvent {
+  readonly eventType?: string;
+  readonly kind?: string;
+  readonly type?: string;
+  readonly channelId?: string | null;
+  readonly mode?: string;
+  readonly intensity01?: number;
+  readonly pressureBand?: string;
 }
 
-export interface BackendNpcRequestBase {
+export interface ChatPersonaEvolutionSignal extends RawChatPersonaEvolutionSignal {
+  readonly stage: ChatPersonaStageId;
+  readonly temperament: string;
+  readonly callbackAggression01: number;
+  readonly transformBiases: readonly string[];
+  readonly selectionBias01: number;
+  readonly callbackAppetite01?: number;
+  readonly publicPressure01?: number;
+  readonly privatePressure01?: number;
+  readonly mythBias01?: number;
+  readonly volatility01?: number;
+}
+
+export type ChatPersonaEvolutionSnapshot = RawChatPersonaEvolutionSnapshot;
+
+export interface ChatPersonaEvolutionProfile {
+  readonly botId: string;
+  readonly playerId: string | null;
+  readonly stage: ChatPersonaStageId;
+  readonly signal: ChatPersonaEvolutionSignal;
+  readonly updatedAt: number;
+  readonly aggression01: number;
+  readonly respect01: number;
+  readonly callbackAppetite01: number;
+  readonly publicPressure01: number;
+  readonly privatePressure01: number;
+  readonly mythBias01: number;
+  readonly volatility01: number;
+  readonly eventCount: number;
+  readonly projectionCount: number;
+}
+
+export interface EvolutionBatchObserveInput {
+  readonly events: readonly ChatPersonaEvolutionEvent[];
+  readonly captureAudit?: boolean;
+}
+
+export interface EvolutionStageTransitionRecord {
+  readonly transitionId: string;
+  readonly botId: string;
+  readonly playerId: string | null;
+  readonly fromStage: ChatPersonaStageId | null;
+  readonly toStage: ChatPersonaStageId;
+  readonly transitionedAt: number;
+  readonly reason: string;
+}
+
+export interface BotEvolutionStats {
+  readonly botId: string;
+  readonly profilesTracked: number;
+  readonly eventCount: number;
+  readonly projectionCount: number;
+  readonly currentStage: ChatPersonaStageId;
+  readonly stageCounts: Readonly<Record<string, number>>;
+  readonly averages: Readonly<Record<string, number>>;
+}
+
+export interface EvolutionSystemStats {
+  readonly totalProfiles: number;
+  readonly totalBots: number;
+  readonly totalPlayers: number;
+  readonly totalEvents: number;
+  readonly totalProjections: number;
+  readonly stageCounts: Readonly<Record<string, number>> & { readonly MYTHIC: number; readonly RIVALRIC: number };
+  readonly health: PersonaEvolutionHealth;
+}
+
+export interface PersonaInsight {
+  readonly botId: string;
+  readonly playerId: string | null;
+  readonly stage: ChatPersonaStageId;
+  readonly temperament: string;
+  readonly objective: string;
+  readonly aggression01: number;
+  readonly respect01: number;
+  readonly callbackAggression01: number;
+  readonly selectionBias01: number;
+  readonly recommendedTone: string;
+  readonly tags: readonly string[];
+}
+
+export interface BotCounterplayHint {
+  readonly botId: string;
+  readonly playerId: string;
+  readonly stage: ChatPersonaStageId;
+  readonly title: string;
+  readonly summary: string;
+  readonly tactics: readonly string[];
+}
+
+export interface EvolutionServiceCompactSnapshot {
+  readonly generatedAt: number;
+  readonly snapshot: ChatPersonaEvolutionSnapshot;
+  readonly health: PersonaEvolutionHealthSnapshot;
+  readonly manifest: PersonaEvolutionManifest;
+  readonly transitions: readonly EvolutionStageTransitionRecord[];
+}
+
+export type EvolutionBatchObserveResult = PersonaEvolutionObserveBatchResult & {
+  readonly profiles: readonly ChatPersonaEvolutionProfile[];
+  readonly audit?: PersonaEvolutionServiceAudit | null;
+};
+
+export type EvolutionBatchProjectResult = PersonaEvolutionProjectBatchResult;
+export type EvolutionProjectionInput = ChatBotPersonaEvolutionProjectInput;
+
+// ============================================================================
+// INTERNAL TYPES
+// ============================================================================
+
+export type PersonaEvolutionMode = 'EMPIRE' | 'PREDATOR' | 'SYNDICATE' | 'PHANTOM' | 'LOBBY' | 'POST_RUN' | 'UNKNOWN';
+export type PersonaEvolutionChannelClass = 'GLOBAL' | 'SYNDICATE' | 'DEAL_ROOM' | 'DIRECT' | 'LOBBY' | 'SYSTEM' | 'PRIVATE' | 'UNKNOWN';
+export type PersonaEvolutionHealth = 'COLD' | 'WARM' | 'HOT' | 'SATURATED' | 'DEGRADED';
+export type PersonaEvolutionLifecycle = 'IDLE' | 'OBSERVING' | 'PROJECTING' | 'PRUNING' | 'RESETTING';
+export type PersonaEvolutionCachePolicy = 'NONE' | 'REQUEST' | 'BOT' | 'PLAYER' | 'BOT_PLAYER';
+export type PersonaEvolutionRiskBand = 'NONE' | 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+
+export interface ChatBotPersonaEvolutionServiceClock {
+  now(): number;
+}
+
+export interface ChatBotPersonaEvolutionServiceOptions {
+  readonly maxEventHistoryPerBot?: number;
+  readonly maxProjectionHistoryPerBot?: number;
+  readonly maxSignalHistoryPerBot?: number;
+  readonly maxPlayerHistory?: number;
+  readonly maxChannelHistory?: number;
+  readonly maxAuditTrail?: number;
+  readonly maxRequestCacheEntries?: number;
+  readonly cacheTtlMs?: number;
+  readonly cachePolicy?: PersonaEvolutionCachePolicy;
+  readonly retainSnapshots?: boolean;
+  readonly retainSignals?: boolean;
+  readonly enableRequestNormalization?: boolean;
+  readonly enableAuditDigest?: boolean;
+  readonly enableProjectionBoards?: boolean;
+  readonly enableSignalBoards?: boolean;
+  readonly enableEventBoards?: boolean;
+  readonly enableHealthTracking?: boolean;
+  readonly enableCounterTracking?: boolean;
+}
+
+export interface ChatBotPersonaEvolutionProjectInput {
+  readonly botId: string;
+  readonly playerId?: string | null;
+  readonly now: number;
+  readonly channelId?: string | null;
+  readonly fingerprint?: ChatPlayerFingerprintSnapshot | null;
+  readonly relationship?: ChatRelationshipSummaryView | null;
+  readonly overlay?: ChatLiveOpsOverlayContext | null;
+  readonly traceId?: string;
+  readonly modeHint?: PersonaEvolutionMode;
+  readonly forceRefresh?: boolean;
+  readonly tags?: readonly string[];
+  readonly contextLabel?: string;
+}
+
+export interface ChatBotPersonaEvolutionObserveReceipt {
+  readonly receiptId: string;
+  readonly botId: string;
+  readonly eventId: string;
+  readonly playerId: string | null;
+  readonly observedAt: number;
+  readonly channelClass: PersonaEvolutionChannelClass;
+  readonly mode: PersonaEvolutionMode;
+  readonly tags: readonly string[];
+  readonly runtimeResult: unknown;
+}
+
+export interface ChatBotPersonaEvolutionProjectReceipt {
+  readonly receiptId: string;
   readonly requestId: string;
-  readonly channel: BackendNpcChannel;
-  readonly context: CadenceContext;
-  readonly desiredAtMs: number;
-  readonly createdAtMs: number;
-  readonly priorityHint?: number;
-  readonly sourceEventKind?: string;
-  readonly sourceEventId?: string;
-  readonly force?: boolean;
-  readonly allowShadow?: boolean;
-  readonly moderationQuarantine?: boolean;
-  readonly sessionMuted?: boolean;
-  readonly witnessPreferred?: boolean;
-  readonly rescueProtected?: boolean;
-  readonly proofProtected?: boolean;
-  readonly tagHints?: readonly string[];
+  readonly botId: string;
+  readonly playerId: string | null;
+  readonly projectedAt: number;
+  readonly mode: PersonaEvolutionMode;
+  readonly channelClass: PersonaEvolutionChannelClass;
+  readonly traceId: string;
+  readonly cacheHit: boolean;
+  readonly cacheKey: string;
+  readonly tags: readonly string[];
+  readonly request: ChatBotPersonaEvolutionProjectionRequest;
+  readonly signal: ChatPersonaEvolutionSignal;
+  readonly descriptor: PersonaEvolutionSignalDescriptor;
 }
 
-export interface BackendAmbientPlanRequest extends BackendNpcRequestBase {
-  readonly actorKind: 'AMBIENT';
-  readonly personaId?: AmbientNpcPersonaId;
-  readonly context: AmbientNpcContext;
+export interface PersonaEvolutionOpaqueEventDescriptor {
+  readonly botId: string;
+  readonly playerId: string | null;
+  readonly eventId: string;
+  readonly kind: string;
+  readonly channelId: string | null;
+  readonly channelClass: PersonaEvolutionChannelClass;
+  readonly mode: PersonaEvolutionMode;
+  readonly createdAt: number;
+  readonly tags: readonly string[];
+  readonly objectKeys: readonly string[];
+  readonly payload: ChatPersonaEvolutionEvent;
 }
 
-export interface BackendHelperPlanRequest extends BackendNpcRequestBase {
-  readonly actorKind: 'HELPER';
-  readonly personaId?: HelperPersonaId;
-  readonly context: HelperDialogueContext;
+export interface PersonaEvolutionSignalDescriptor {
+  readonly botId: string;
+  readonly playerId: string | null;
+  readonly channelId: string | null;
+  readonly channelClass: PersonaEvolutionChannelClass;
+  readonly mode: PersonaEvolutionMode;
+  readonly posture: string;
+  readonly transformBias: string;
+  readonly callbackAppetite: number;
+  readonly publicPressureShare: number;
+  readonly privatePressureShare: number;
+  readonly mythBias: number;
+  readonly volatility: number;
+  readonly signalKeys: readonly string[];
+  readonly tags: readonly string[];
+  readonly raw: ChatPersonaEvolutionSignal;
 }
 
-export interface BackendHaterPlanRequest extends BackendNpcRequestBase {
-  readonly actorKind: 'HATER';
-  readonly personaId?: HaterRegistryPersonaId;
-  readonly context: HaterDialogueContext;
+export interface PersonaEvolutionSnapshotDescriptor {
+  readonly botsTracked: number;
+  readonly playersTracked: number;
+  readonly channelsTracked: number;
+  readonly projectionsTracked: number;
+  readonly eventsTracked: number;
+  readonly signalKeys: readonly string[];
+  readonly raw: ChatPersonaEvolutionSnapshot;
 }
 
-export interface BackendInvasionPlanRequest extends BackendNpcRequestBase {
-  readonly actorKind: 'INVASION';
-  readonly personaId?: never;
-  readonly context: 'INVASION_OPEN' | 'INVASION_CLOSE';
+export interface PersonaEvolutionCacheEntry {
+  readonly key: string;
+  readonly botId: string;
+  readonly playerId: string | null;
+  readonly createdAt: number;
+  readonly expiresAt: number;
+  readonly request: ChatBotPersonaEvolutionProjectionRequest;
+  readonly signal: ChatPersonaEvolutionSignal;
+  readonly descriptor: PersonaEvolutionSignalDescriptor;
 }
 
-export type BackendNpcPlanRequest =
-  | BackendAmbientPlanRequest
-  | BackendHelperPlanRequest
-  | BackendHaterPlanRequest
-  | BackendInvasionPlanRequest;
-
-export interface AmbientPreparedCandidate {
-  readonly actorKind: 'AMBIENT';
-  readonly persona: AmbientNpcProfile;
-  readonly line: AmbientNpcLine;
-  readonly registryScore: number;
-  readonly request: BackendAmbientPlanRequest;
+export interface PersonaEvolutionCounterBoardEntry {
+  readonly id: string;
+  readonly label: string;
+  readonly count: number;
+  readonly lastSeenAt: number | null;
+  readonly weight01: number;
 }
 
-export interface HelperPreparedCandidate {
-  readonly actorKind: 'HELPER';
-  readonly persona: HelperPersonaProfile;
-  readonly line: HelperDialogueLine;
-  readonly registryScore: number;
-  readonly request: BackendHelperPlanRequest;
+export interface PersonaEvolutionBoard<TEntry = PersonaEvolutionCounterBoardEntry> {
+  readonly boardId: string;
+  readonly boardType: string;
+  readonly generatedAt: number;
+  readonly entries: readonly TEntry[];
 }
 
-export interface HaterPreparedCandidate {
-  readonly actorKind: 'HATER';
-  readonly persona: HaterPersonaProfile;
-  readonly line: HaterDialogueLine;
-  readonly registryScore: number;
-  readonly request: BackendHaterPlanRequest;
+export interface PersonaEvolutionServiceAudit {
+  readonly auditId: string;
+  readonly createdAt: number;
+  readonly lifecycle: PersonaEvolutionLifecycle;
+  readonly health: PersonaEvolutionHealth;
+  readonly cachePolicy: PersonaEvolutionCachePolicy;
+  readonly eventCount: number;
+  readonly projectionCount: number;
+  readonly cacheSize: number;
+  readonly botCount: number;
+  readonly playerCount: number;
+  readonly channelCount: number;
+  readonly modeBoard: PersonaEvolutionBoard;
+  readonly channelBoard: PersonaEvolutionBoard;
+  readonly botBoard: PersonaEvolutionBoard;
+  readonly playerBoard: PersonaEvolutionBoard;
+  readonly riskBand: PersonaEvolutionRiskBand;
 }
 
-export interface InvasionPreparedCandidate {
-  readonly actorKind: 'INVASION';
-  readonly persona: null;
-  readonly line: null;
-  readonly registryScore: number;
-  readonly request: BackendInvasionPlanRequest;
+export interface PersonaEvolutionHealthSnapshot {
+  readonly health: PersonaEvolutionHealth;
+  readonly lifecycle: PersonaEvolutionLifecycle;
+  readonly now: number;
+  readonly cacheEntries: number;
+  readonly botsTracked: number;
+  readonly playersTracked: number;
+  readonly channelsTracked: number;
+  readonly auditsTracked: number;
+  readonly staleCacheEntries: number;
+  readonly staleProjectionWindows: number;
 }
 
-export type PreparedNpcCandidate =
-  | AmbientPreparedCandidate
-  | HelperPreparedCandidate
-  | HaterPreparedCandidate
-  | InvasionPreparedCandidate;
-
-export interface BackendNpcPlanDecision {
-  readonly allow: boolean;
-  readonly actorKind: NpcActorKind;
-  readonly channel: BackendNpcChannel;
-  readonly context: CadenceContext;
-  readonly personaId?: BackendNpcPersonaId;
-  readonly lineId?: string;
-  readonly text?: string;
-  readonly request: BackendNpcPlanRequest;
-  readonly registryScore: number;
-  readonly cadence: NpcCadenceDecision;
-  readonly suppression: NpcSuppressionDecision;
+export interface PersonaEvolutionManifest {
+  readonly manifestId: string;
+  readonly generatedAt: number;
+  readonly options: ChatBotPersonaEvolutionServiceResolvedOptions;
+  readonly runtimeClass: string;
+  readonly eventHistoryDepth: number;
+  readonly projectionHistoryDepth: number;
+  readonly trackedBots: readonly string[];
+  readonly trackedPlayers: readonly string[];
+  readonly trackedChannels: readonly string[];
+  readonly trackedModes: readonly PersonaEvolutionMode[];
 }
 
-export interface BackendNpcBatchPlan {
-  readonly ranked: readonly BackendNpcPlanDecision[];
-  readonly winner: BackendNpcPlanDecision | null;
-  readonly rejected: readonly BackendNpcPlanDecision[];
-  readonly shadowed: readonly BackendNpcPlanDecision[];
-  readonly deferred: readonly BackendNpcPlanDecision[];
-  readonly diagnostics: Readonly<Record<string, unknown>>;
+export interface ChatBotPersonaEvolutionServiceResolvedOptions {
+  readonly maxEventHistoryPerBot: number;
+  readonly maxProjectionHistoryPerBot: number;
+  readonly maxSignalHistoryPerBot: number;
+  readonly maxPlayerHistory: number;
+  readonly maxChannelHistory: number;
+  readonly maxAuditTrail: number;
+  readonly maxRequestCacheEntries: number;
+  readonly cacheTtlMs: number;
+  readonly cachePolicy: PersonaEvolutionCachePolicy;
+  readonly retainSnapshots: boolean;
+  readonly retainSignals: boolean;
+  readonly enableRequestNormalization: boolean;
+  readonly enableAuditDigest: boolean;
+  readonly enableProjectionBoards: boolean;
+  readonly enableSignalBoards: boolean;
+  readonly enableEventBoards: boolean;
+  readonly enableHealthTracking: boolean;
+  readonly enableCounterTracking: boolean;
 }
 
-export interface BackendNpcRegistryAudit {
-  readonly ambient: AmbientRegistrySnapshot;
-  readonly helper: HelperRegistrySnapshot;
-  readonly hater: HaterRegistrySnapshot;
-  readonly ambientOccupancyMatrix: Readonly<Record<AmbientNpcPersonaId, number>>;
-  readonly helperTriggerMatrix: Readonly<Record<HelperPersonaId, Readonly<Record<HelperDialogueContext, boolean>>>>;
-  readonly haterAuditMatrix: Readonly<Record<HaterRegistryPersonaId, Readonly<Record<HaterDialogueContext, number>>>>;
+export interface PersonaEvolutionProjectBatchInput {
+  readonly inputs: readonly ChatBotPersonaEvolutionProjectInput[];
+  readonly pruneBefore?: boolean;
+  readonly captureAudit?: boolean;
 }
 
-export interface BackendNpcDomainSnapshot {
-  readonly registryAudit: BackendNpcRegistryAudit;
-  readonly cadenceDiagnostics: Readonly<Record<string, number | string | boolean>>;
-  readonly suppressionDiagnostics: Readonly<Record<string, number | string | boolean>>;
-  readonly witnessPlan: Readonly<Record<string, string | boolean | number>>;
-  readonly channelSuppressionMap: Readonly<Record<CadenceChannel, Readonly<Record<NpcActorKind, boolean>>>>;
+export interface PersonaEvolutionProjectBatchResult {
+  readonly batchId: string;
+  readonly generatedAt: number;
+  readonly receipts: readonly ChatBotPersonaEvolutionProjectReceipt[];
+  readonly audit: PersonaEvolutionServiceAudit | null;
 }
 
-const clamp01 = (value: number | undefined): number => {
-  if (typeof value !== 'number' || Number.isNaN(value)) return 0;
+export interface PersonaEvolutionObserveBatchResult {
+  readonly batchId: string;
+  readonly generatedAt: number;
+  readonly receipts: readonly ChatBotPersonaEvolutionObserveReceipt[];
+}
+
+export interface PersonaEvolutionScenarioStep {
+  readonly label: string;
+  readonly event?: ChatPersonaEvolutionEvent;
+  readonly project?: ChatBotPersonaEvolutionProjectInput;
+}
+
+export interface PersonaEvolutionScenarioResult {
+  readonly scenarioId: string;
+  readonly executedAt: number;
+  readonly observeReceipts: readonly ChatBotPersonaEvolutionObserveReceipt[];
+  readonly projectReceipts: readonly ChatBotPersonaEvolutionProjectReceipt[];
+  readonly finalSnapshot: ChatPersonaEvolutionSnapshot;
+}
+
+// ============================================================================
+// CONSTANTS & HELPERS
+// ============================================================================
+
+const DEFAULT_OPTIONS: ChatBotPersonaEvolutionServiceResolvedOptions = Object.freeze({
+  maxEventHistoryPerBot: 256,
+  maxProjectionHistoryPerBot: 256,
+  maxSignalHistoryPerBot: 256,
+  maxPlayerHistory: 512,
+  maxChannelHistory: 256,
+  maxAuditTrail: 128,
+  maxRequestCacheEntries: 512,
+  cacheTtlMs: 30_000,
+  cachePolicy: 'BOT_PLAYER',
+  retainSnapshots: true,
+  retainSignals: true,
+  enableRequestNormalization: true,
+  enableAuditDigest: true,
+  enableProjectionBoards: true,
+  enableSignalBoards: true,
+  enableEventBoards: true,
+  enableHealthTracking: true,
+  enableCounterTracking: true,
+});
+
+const MODES: readonly PersonaEvolutionMode[] = ['EMPIRE', 'PREDATOR', 'SYNDICATE', 'PHANTOM', 'LOBBY', 'POST_RUN', 'UNKNOWN'];
+const CHANNEL_CLASSES: readonly PersonaEvolutionChannelClass[] = ['GLOBAL', 'SYNDICATE', 'DEAL_ROOM', 'DIRECT', 'LOBBY', 'SYSTEM', 'PRIVATE', 'UNKNOWN'];
+
+const SYSTEM_CLOCK: ChatBotPersonaEvolutionServiceClock = {
+  now: () => Date.now(),
+};
+
+function clamp01(value: number): number {
+  if (!Number.isFinite(value)) return 0;
   if (value <= 0) return 0;
   if (value >= 1) return 1;
   return value;
-};
+}
 
-const stableHash = (value: string): number => {
-  let hash = 2166136261;
-  for (let index = 0; index < value.length; index += 1) {
-    hash ^= value.charCodeAt(index);
-    hash = Math.imul(hash, 16777619);
+function clampCount(value: number, max: number): number {
+  if (!Number.isFinite(value) || value < 0) return 0;
+  return Math.min(max, Math.floor(value));
+}
+
+function createId(prefix: string, now: number, salt: string): string {
+  const base = `${prefix}_${now}_${salt}`;
+  let hash = 0;
+  for (let index = 0; index < base.length; index += 1) {
+    hash = ((hash << 5) - hash) + base.charCodeAt(index);
+    hash |= 0;
   }
-  return Math.abs(hash >>> 0);
-};
+  return `${prefix}_${Math.abs(hash).toString(36)}_${now.toString(36)}`;
+}
 
-const inferAmbientChannel = (channel: BackendNpcChannel): AmbientChannelAffinity => {
-  switch (channel) {
-    case 'GLOBAL': return 'GLOBAL';
-    case 'SYNDICATE': return 'SYNDICATE';
-    case 'DEAL_ROOM': return 'DEAL_ROOM';
-    case 'LOBBY': return 'LOBBY';
-    default: return 'GLOBAL';
-  }
-};
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" ? value as Record<string, unknown> : {};
+}
 
-const isAmbientContext = (context: CadenceContext): context is AmbientNpcContext => {
-  return ambientNpcRegistry.listContexts().includes(context as AmbientNpcContext);
-};
+function readString(value: unknown, fallback = ""): string {
+  return typeof value === "string" ? value : fallback;
+}
 
-const isHelperContext = (context: CadenceContext): context is HelperDialogueContext => {
-  return helperDialogueRegistry.listContexts().includes(context as HelperDialogueContext);
-};
+function readOptionalString(value: unknown): string | null {
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
 
-const isHaterContext = (context: CadenceContext): context is HaterDialogueContext => {
-  return haterDialogueRegistry.listContexts().includes(context as HaterDialogueContext);
-};
+function readNumber(value: unknown, fallback = 0): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
 
-const actorIdOf = (request: BackendNpcPlanRequest): string => {
-  if (request.actorKind === 'INVASION') return 'INVASION';
-  return request.personaId ?? request.actorKind;
-};
+function readBoolean(value: unknown, fallback = false): boolean {
+  return typeof value === "boolean" ? value : fallback;
+}
 
-const mapToSuppressionRequest = (request: BackendNpcPlanRequest): NpcSuppressionRequest => {
+function readStringArray(value: unknown): readonly string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((entry): entry is string => typeof entry === "string");
+}
+
+function stableStringify(value: unknown): string {
+  const seen = new WeakSet<object>();
+  const normalize = (input: unknown): unknown => {
+    if (input === null || typeof input !== "object") return input;
+    if (seen.has(input as object)) return "[Circular]";
+    seen.add(input as object);
+    if (Array.isArray(input)) return input.map(normalize);
+    const record = input as Record<string, unknown>;
+    return Object.keys(record).sort().reduce<Record<string, unknown>>((acc, key) => {
+      acc[key] = normalize(record[key]);
+      return acc;
+    }, {});
+  };
+  return JSON.stringify(normalize(value));
+}
+
+function mergeOptions(
+  options?: ChatBotPersonaEvolutionServiceOptions,
+): ChatBotPersonaEvolutionServiceResolvedOptions {
   return Object.freeze({
-    requestId: request.requestId,
-    actorKind: request.actorKind,
-    actorId: actorIdOf(request),
-    personaId: request.actorKind === 'INVASION' ? undefined : request.personaId,
-    channel: request.channel,
-    context: request.context,
-    desiredAtMs: request.desiredAtMs,
-    createdAtMs: request.createdAtMs,
-    priorityHint: request.priorityHint,
-    sourceEventKind: request.sourceEventKind,
-    sourceEventId: request.sourceEventId,
-    force: request.force,
-    allowShadow: request.allowShadow,
-    moderationQuarantine: request.moderationQuarantine,
-    sessionMuted: request.sessionMuted,
-    witnessPreferred: request.witnessPreferred,
-    rescueProtected: request.rescueProtected,
-    proofProtected: request.proofProtected,
-    tagHints: request.tagHints,
+    ...DEFAULT_OPTIONS,
+    ...options,
   });
-};
+}
 
-const mapToCadenceRequest = (request: BackendNpcPlanRequest, floorMs: number): NpcCadenceRequest => {
-  return Object.freeze({
-    requestId: request.requestId,
-    actorKind: request.actorKind,
-    actorId: actorIdOf(request),
-    personaId: request.actorKind === 'INVASION' ? undefined : request.personaId,
-    channel: request.channel,
-    context: request.context,
-    createdAtMs: request.createdAtMs,
-    desiredAtMs: request.desiredAtMs,
-    lineCadenceFloorMs: floorMs,
-    priorityHint: request.priorityHint,
-    force: request.force,
-    shadowPreferred: request.allowShadow,
-    sourceEventKind: request.sourceEventKind,
-    sourceEventId: request.sourceEventId,
-  });
-};
-
-const decisionFromCandidate = (
-  candidate: PreparedNpcCandidate,
-  cadence: NpcCadenceDecision,
-  suppression: NpcSuppressionDecision,
-): BackendNpcPlanDecision => {
-  if (candidate.actorKind === 'INVASION') {
-    return Object.freeze({
-      allow: suppression.allow,
-      actorKind: candidate.actorKind,
-      channel: candidate.request.channel,
-      context: candidate.request.context,
-      request: candidate.request,
-      registryScore: candidate.registryScore,
-      cadence,
-      suppression,
-    });
-  }
-
-  return Object.freeze({
-    allow: suppression.allow,
-    actorKind: candidate.actorKind,
-    channel: candidate.request.channel,
-    context: candidate.request.context,
-    personaId: candidate.persona.id,
-    lineId: candidate.line.id,
-    text: candidate.line.text,
-    request: candidate.request,
-    registryScore: candidate.registryScore,
-    cadence,
-    suppression,
-  });
-};
-
-const boostRegistryScore = (base: number, request: BackendNpcPlanRequest, room: BackendNpcRoomState): number => {
-  const pressure = clamp01(room.pressure);
-  const heat = clamp01(room.heat);
-  const frustration = clamp01(room.frustration);
-  const confidence = clamp01(room.confidence);
-  let score = base;
-  if (request.actorKind === 'HELPER') score += (frustration * 0.35) + ((1 - confidence) * 0.15);
-  if (request.actorKind === 'HATER') score += (pressure * 0.25) + (heat * 0.2);
-  if (request.actorKind === 'AMBIENT') score += (room.silenceDebt * 0.2) + ((1 - pressure) * 0.1);
-  if (request.witnessPreferred) score += 0.35;
-  return Number(score.toFixed(6));
-};
-
-export class BackendChatNpcDomain {
-  public readonly ambientRegistry: AmbientNpcRegistry;
-  public readonly helperRegistry: HelperDialogueRegistry;
-  public readonly haterRegistry: HaterDialogueRegistry;
-  public readonly cadencePolicy: NpcCadencePolicy;
-  public readonly suppressionPolicy: NpcSuppressionPolicy;
-
-  public constructor(input?: {
-    readonly ambientRegistry?: AmbientNpcRegistry;
-    readonly helperRegistry?: HelperDialogueRegistry;
-    readonly haterRegistry?: HaterDialogueRegistry;
-    readonly cadencePolicy?: NpcCadencePolicy;
-    readonly suppressionPolicy?: NpcSuppressionPolicy;
-  }) {
-    this.ambientRegistry = input?.ambientRegistry ?? ambientNpcRegistry;
-    this.helperRegistry = input?.helperRegistry ?? helperDialogueRegistry;
-    this.haterRegistry = input?.haterRegistry ?? haterDialogueRegistry;
-    this.cadencePolicy = input?.cadencePolicy ?? npcCadencePolicy;
-    this.suppressionPolicy = input?.suppressionPolicy ?? npcSuppressionPolicy;
-  }
-
-  public createEmptyLedger(): BackendNpcDomainLedger {
-    return Object.freeze({
-      cadence: this.cadencePolicy.createEmptyLedger(),
-      suppression: this.suppressionPolicy.createEmptyLedger(),
-    });
-  }
-
-  public fromCadenceRoom(room: RoomCadenceSnapshot, extra?: Partial<BackendNpcRoomState>): BackendNpcRoomState {
-    return this.suppressionPolicy.fromCadenceRoom(room, extra);
-  }
-
-  public buildRegistryAudit(): BackendNpcRegistryAudit {
-    return Object.freeze({
-      ambient: this.ambientRegistry.getSnapshot(),
-      helper: this.helperRegistry.getSnapshot(),
-      hater: this.haterRegistry.getSnapshot(),
-      ambientOccupancyMatrix: this.ambientRegistry.buildOccupancyMatrix(),
-      helperTriggerMatrix: this.helperRegistry.buildTriggerMatrix(),
-      haterAuditMatrix: this.haterRegistry.buildAuditMatrix(),
-    });
-  }
-
-  public buildSnapshot(room: BackendNpcRoomState, ledger: BackendNpcDomainLedger, nowMs: number): BackendNpcDomainSnapshot {
-    return Object.freeze({
-      registryAudit: this.buildRegistryAudit(),
-      cadenceDiagnostics: this.cadencePolicy.buildDiagnostics(room, ledger.cadence, nowMs),
-      suppressionDiagnostics: this.suppressionPolicy.buildDiagnostics(room, ledger.suppression, nowMs),
-      witnessPlan: this.suppressionPolicy.buildWitnessPlan(room),
-      channelSuppressionMap: this.suppressionPolicy.buildChannelSuppressionMap(room),
-    });
-  }
-
-  public listAmbientCastForChannel(channel: AmbientChannelAffinity): readonly AmbientNpcPersonaId[] {
-    return this.ambientRegistry.resolveChannelCast(channel);
-  }
-
-  public listAmbientCastForMode(modeId: string | undefined): readonly AmbientNpcPersonaId[] {
-    return this.ambientRegistry.resolveModeCast(modeId);
-  }
-
-  public listHaterCastForMode(modeId: string | undefined): readonly HaterRegistryPersonaId[] {
-    return this.haterRegistry.resolvePersonaByMode(modeId);
-  }
-
-  public inferAmbientWitnessPersona(request: BackendAmbientPlanRequest, room: BackendNpcRoomState): AmbientNpcPersonaId {
-    return this.ambientRegistry.resolveWitnessPersona({
-      personaId: request.personaId,
-      context: request.context,
-      tick: room.runTick,
-      heat: room.heat,
-      pressure: room.pressure,
-      occupancy: room.occupancy,
-      silenceDebt: room.silenceDebt,
-      channel: inferAmbientChannel(request.channel),
-      modeId: room.modeId,
-      useCountByLineId: Object.freeze({}),
-      allowShadow: request.allowShadow,
-    });
-  }
-
-  public inferHelperPersona(request: BackendHelperPlanRequest, room: BackendNpcRoomState): HelperPersonaId {
-    if (request.personaId) return request.personaId;
-    return this.helperRegistry.resolveInterventionPersona({
-      personaId: request.personaId,
-      context: request.context,
-      tick: room.runTick,
-      frustration: room.frustration,
-      confidence: room.confidence,
-      coldStart: room.coldStart,
-      urgency: room.playerNearBankruptcy || room.shieldBreached || room.nearSovereignty ? 1 : room.pressure,
-      useCountByLineId: Object.freeze({}),
-    });
-  }
-
-  public inferHaterPersona(request: BackendHaterPlanRequest, room: BackendNpcRoomState): HaterRegistryPersonaId {
-    if (request.personaId) return request.personaId;
-    return this.haterRegistry.resolveDefaultPersonaForContext(request.context);
-  }
-
-  public prepareAmbientCandidate(request: BackendAmbientPlanRequest, room: BackendNpcRoomState, ledger: BackendNpcDomainLedger): AmbientPreparedCandidate | null {
-    const personaId = request.personaId ?? this.inferAmbientWitnessPersona(request, room);
-    const ranked = this.ambientRegistry.rankScenario({
-      personaId,
-      context: request.context,
-      tick: room.runTick,
-      heat: room.heat,
-      pressure: room.pressure,
-      occupancy: room.occupancy,
-      silenceDebt: room.silenceDebt,
-      channel: inferAmbientChannel(request.channel),
-      modeId: room.modeId,
-      useCountByLineId: Object.freeze({}),
-      allowShadow: request.allowShadow,
-    });
-    const winner = ranked[0];
-    if (!winner) return null;
-    return Object.freeze({
-      actorKind: 'AMBIENT',
-      persona: winner.persona,
-      line: winner.line,
-      registryScore: boostRegistryScore(winner.score, request, room),
-      request: Object.freeze({ ...request, personaId: winner.persona.id }),
-    });
-  }
-
-  public prepareHelperCandidate(request: BackendHelperPlanRequest, room: BackendNpcRoomState, ledger: BackendNpcDomainLedger): HelperPreparedCandidate | null {
-    const personaId = this.inferHelperPersona(request, room);
-    const ranked = this.helperRegistry.rankScenario({
-      personaId,
-      context: request.context,
-      tick: room.runTick,
-      frustration: room.frustration,
-      confidence: room.confidence,
-      coldStart: room.coldStart,
-      urgency: room.playerNearBankruptcy || room.shieldBreached || room.nearSovereignty ? 1 : room.pressure,
-      useCountByLineId: Object.freeze({}),
-    });
-    const winner = ranked[0];
-    if (!winner) return null;
-    return Object.freeze({
-      actorKind: 'HELPER',
-      persona: winner.persona,
-      line: winner.line,
-      registryScore: boostRegistryScore(winner.score, request, room),
-      request: Object.freeze({ ...request, personaId: winner.persona.id }),
-    });
-  }
-
-  public prepareHaterCandidate(request: BackendHaterPlanRequest, room: BackendNpcRoomState, ledger: BackendNpcDomainLedger): HaterPreparedCandidate | null {
-    const personaId = this.inferHaterPersona(request, room);
-    const ranked = this.haterRegistry.rankScenario({
-      personaId,
-      context: request.context,
-      tick: room.runTick,
-      pressure: room.pressure,
-      heat: room.heat,
-      rivalry: clamp01(room.confidence + (room.recentComebackCount ?? 0) * 0.1),
-      useCountByLineId: Object.freeze({}),
-      shadowMode: request.allowShadow,
-    });
-    const winner = ranked[0];
-    if (!winner) return null;
-    return Object.freeze({
-      actorKind: 'HATER',
-      persona: winner.persona,
-      line: winner.line,
-      registryScore: boostRegistryScore(winner.score, request, room),
-      request: Object.freeze({ ...request, personaId: winner.persona.id }),
-    });
-  }
-
-  public prepareInvasionCandidate(request: BackendInvasionPlanRequest): InvasionPreparedCandidate {
-    return Object.freeze({
-      actorKind: 'INVASION',
-      persona: null,
-      line: null,
-      registryScore: 10,
-      request,
-    });
-  }
-
-  public prepareCandidate(request: BackendNpcPlanRequest, room: BackendNpcRoomState, ledger: BackendNpcDomainLedger): PreparedNpcCandidate | null {
-    switch (request.actorKind) {
-      case 'AMBIENT': return this.prepareAmbientCandidate(request, room, ledger);
-      case 'HELPER': return this.prepareHelperCandidate(request, room, ledger);
-      case 'HATER': return this.prepareHaterCandidate(request, room, ledger);
-      case 'INVASION': return this.prepareInvasionCandidate(request);
-      default: return null;
-    }
-  }
-
-  public evaluateCandidate(candidate: PreparedNpcCandidate, room: BackendNpcRoomState, ledger: BackendNpcDomainLedger): BackendNpcPlanDecision {
-    const request = candidate.request;
-    const cadence = this.cadencePolicy.evaluate(
-      mapToCadenceRequest(request, candidate.actorKind === 'INVASION' ? 9_000 : candidate.line?.cadenceFloorMs ?? 12_000),
-      room,
-      ledger.cadence,
-    );
-    const suppression = this.suppressionPolicy.evaluate(
-      mapToSuppressionRequest(request),
-      room,
-      ledger.suppression,
-    );
-    return decisionFromCandidate(candidate, cadence, suppression);
-  }
-
-  public rankCandidates(
-    candidates: readonly PreparedNpcCandidate[],
-    room: BackendNpcRoomState,
-    ledger: BackendNpcDomainLedger,
-  ): readonly BackendNpcPlanDecision[] {
-    const ranked = candidates
-      .map((candidate) => this.evaluateCandidate(candidate, room, ledger))
-      .sort((left, right) => {
-        if (left.allow !== right.allow) return left.allow ? -1 : 1;
-        if (left.suppression.visibility !== right.suppression.visibility) {
-          const weight = { public: 0, shadow: 1, deferred: 2, dropped: 3 } as const;
-          return weight[left.suppression.visibility] - weight[right.suppression.visibility];
-        }
-        if (left.suppression.priorityScore !== right.suppression.priorityScore) return right.suppression.priorityScore - left.suppression.priorityScore;
-        if (left.registryScore !== right.registryScore) return right.registryScore - left.registryScore;
-        return stableHash(`${left.request.requestId}:${left.personaId ?? 'inv'}`) - stableHash(`${right.request.requestId}:${right.personaId ?? 'inv'}`);
-      });
-    return Object.freeze(ranked);
-  }
-
-  public planBatch(
-    requests: readonly BackendNpcPlanRequest[],
-    room: BackendNpcRoomState,
-    ledger: BackendNpcDomainLedger,
-  ): BackendNpcBatchPlan {
-    const prepared = requests
-      .map((request) => this.prepareCandidate(request, room, ledger))
-      .filter((candidate): candidate is PreparedNpcCandidate => Boolean(candidate));
-
-    const ranked = this.rankCandidates(prepared, room, ledger);
-    const winner = ranked.find((decision) => decision.allow) ?? null;
-    const rejected = ranked.filter((decision) => decision.suppression.visibility === 'dropped');
-    const shadowed = ranked.filter((decision) => decision.suppression.visibility === 'shadow');
-    const deferred = ranked.filter((decision) => decision.suppression.visibility === 'deferred');
-
-    return Object.freeze({
-      ranked,
-      winner,
-      rejected: Object.freeze(rejected),
-      shadowed: Object.freeze(shadowed),
-      deferred: Object.freeze(deferred),
-      diagnostics: Object.freeze({
-        requests: requests.length,
-        prepared: prepared.length,
-        allowed: ranked.filter((decision) => decision.allow).length,
-        rejected: rejected.length,
-        deferred: deferred.length,
-        shadowed: shadowed.length,
-      }),
-    });
-  }
-
-  public applyWinner(
-    plan: BackendNpcBatchPlan,
-    ledger: BackendNpcDomainLedger,
-  ): BackendNpcDomainLedger {
-    if (!plan.winner) return ledger;
-
-    const winner = plan.winner;
-    const request = winner.request;
-    const cadenceLedger = winner.allow
-      ? this.cadencePolicy.recordEmission(ledger.cadence, winner.cadence, mapToCadenceRequest(request, winner.cadence.effectiveCooldownMs), request.desiredAtMs)
-      : this.cadencePolicy.recordSuppression(ledger.cadence, mapToCadenceRequest(request, winner.cadence.effectiveCooldownMs));
-
-    const suppressionLedger = this.suppressionPolicy.recordDecision(
-      ledger.suppression,
-      mapToSuppressionRequest(request),
-      winner.suppression,
-      request.desiredAtMs,
-    );
-
-    return Object.freeze({ cadence: cadenceLedger, suppression: suppressionLedger });
-  }
-
-  public planSingle(
-    request: BackendNpcPlanRequest,
-    room: BackendNpcRoomState,
-    ledger: BackendNpcDomainLedger,
-  ): BackendNpcPlanDecision | null {
-    const candidate = this.prepareCandidate(request, room, ledger);
-    return candidate ? this.evaluateCandidate(candidate, room, ledger) : null;
-  }
-
-  public planCollapseWitness(room: BackendNpcRoomState, nowMs: number): readonly BackendNpcPlanRequest[] {
-    if (!room.playerNearBankruptcy && !room.shieldBreached) return Object.freeze([]);
-    return Object.freeze([
-      Object.freeze({
-        requestId: `npc_helper_collapse_${room.roomId}_${nowMs}`,
-        actorKind: 'HELPER',
-        channel: 'GLOBAL',
-        context: 'PLAYER_NEAR_BANKRUPTCY',
-        desiredAtMs: nowMs,
-        createdAtMs: nowMs,
-        priorityHint: 1.5,
-        witnessPreferred: true,
-      } satisfies BackendHelperPlanRequest),
-      Object.freeze({
-        requestId: `npc_hater_breach_${room.roomId}_${nowMs}`,
-        actorKind: 'HATER',
-        channel: 'GLOBAL',
-        context: room.shieldBreached ? 'PLAYER_SHIELD_BREAK' : 'PLAYER_NEAR_BANKRUPTCY',
-        desiredAtMs: nowMs + 650,
-        createdAtMs: nowMs,
-        priorityHint: 1.15,
-      } satisfies BackendHaterPlanRequest),
-      Object.freeze({
-        requestId: `npc_ambient_breach_${room.roomId}_${nowMs}`,
-        actorKind: 'AMBIENT',
-        channel: 'GLOBAL',
-        context: room.shieldBreached ? 'PLAYER_SHIELD_BREAK' : 'PLAYER_LOST',
-        desiredAtMs: nowMs + 1_350,
-        createdAtMs: nowMs,
-        priorityHint: 0.85,
-        allowShadow: true,
-      } satisfies BackendAmbientPlanRequest),
-    ]);
-  }
-
-  public planComebackWitness(room: BackendNpcRoomState, nowMs: number): readonly BackendNpcPlanRequest[] {
-    if ((room.recentComebackCount ?? 0) <= 0 && room.confidence < 0.55) return Object.freeze([]);
-    return Object.freeze([
-      Object.freeze({
-        requestId: `npc_ambient_comeback_${room.roomId}_${nowMs}`,
-        actorKind: 'AMBIENT',
-        channel: 'GLOBAL',
-        context: 'PLAYER_COMEBACK',
-        desiredAtMs: nowMs,
-        createdAtMs: nowMs,
-        priorityHint: 1.1,
-        witnessPreferred: true,
-      } satisfies BackendAmbientPlanRequest),
-      Object.freeze({
-        requestId: `npc_helper_comeback_${room.roomId}_${nowMs}`,
-        actorKind: 'HELPER',
-        channel: 'GLOBAL',
-        context: 'PLAYER_COMEBACK',
-        desiredAtMs: nowMs + 950,
-        createdAtMs: nowMs,
-        priorityHint: 0.8,
-      } satisfies BackendHelperPlanRequest),
-    ]);
-  }
-
-  public planIdleNudge(room: BackendNpcRoomState, nowMs: number): readonly BackendNpcPlanRequest[] {
-    const lastPlayer = room.lastPlayerMessageAtMs ?? 0;
-    if ((nowMs - lastPlayer) < 6_000) return Object.freeze([]);
-    return Object.freeze([
-      Object.freeze({
-        requestId: `npc_idle_helper_${room.roomId}_${nowMs}`,
-        actorKind: 'HELPER',
-        channel: room.modeId.toLowerCase().includes('deal') ? 'DEAL_ROOM' : 'GLOBAL',
-        context: 'PLAYER_IDLE',
-        desiredAtMs: nowMs,
-        createdAtMs: nowMs,
-        priorityHint: 0.65,
-        allowShadow: room.modeId.toLowerCase().includes('deal') || room.modeId.toLowerCase().includes('syndicate'),
-      } satisfies BackendHelperPlanRequest),
-      Object.freeze({
-        requestId: `npc_idle_ambient_${room.roomId}_${nowMs}`,
-        actorKind: 'AMBIENT',
-        channel: room.modeId.toLowerCase().includes('lobby') ? 'LOBBY' : 'GLOBAL',
-        context: 'PLAYER_IDLE',
-        desiredAtMs: nowMs + 1_000,
-        createdAtMs: nowMs,
-        priorityHint: 0.35,
-        allowShadow: true,
-      } satisfies BackendAmbientPlanRequest),
-    ]);
-  }
-
-  public planDealRoomScene(room: BackendNpcRoomState, nowMs: number): readonly BackendNpcPlanRequest[] {
-    if (!room.modeId.toLowerCase().includes('deal') && !room.dealStalled) return Object.freeze([]);
-    const stalled = room.dealStalled;
-    return Object.freeze([
-      Object.freeze({
-        requestId: `npc_deal_hater_${room.roomId}_${nowMs}`,
-        actorKind: 'HATER',
-        channel: 'DEAL_ROOM',
-        context: stalled ? 'PLAYER_IDLE' : 'PLAYER_CARD_PLAY',
-        desiredAtMs: nowMs,
-        createdAtMs: nowMs,
-        priorityHint: stalled ? 1.2 : 0.8,
-        allowShadow: true,
-      } satisfies BackendHaterPlanRequest),
-      Object.freeze({
-        requestId: `npc_deal_helper_${room.roomId}_${nowMs}`,
-        actorKind: 'HELPER',
-        channel: 'DEAL_ROOM',
-        context: stalled ? 'PLAYER_NEAR_BANKRUPTCY' : 'PLAYER_CARD_PLAY',
-        desiredAtMs: nowMs + 700,
-        createdAtMs: nowMs,
-        priorityHint: 0.75,
-        allowShadow: true,
-      } satisfies BackendHelperPlanRequest),
-    ]);
-  }
-
-  public planSyndicateScene(room: BackendNpcRoomState, nowMs: number): readonly BackendNpcPlanRequest[] {
-    if (!room.modeId.toLowerCase().includes('syndicate')) return Object.freeze([]);
-    return Object.freeze([
-      Object.freeze({
-        requestId: `npc_syn_ambient_${room.roomId}_${nowMs}`,
-        actorKind: 'AMBIENT',
-        channel: 'SYNDICATE',
-        context: 'SYNDICATE_JOIN',
-        desiredAtMs: nowMs,
-        createdAtMs: nowMs,
-        priorityHint: 0.6,
-        allowShadow: true,
-      } satisfies BackendAmbientPlanRequest),
-      Object.freeze({
-        requestId: `npc_syn_helper_${room.roomId}_${nowMs}`,
-        actorKind: 'HELPER',
-        channel: 'SYNDICATE',
-        context: room.nearSovereignty ? 'NEAR_SOVEREIGNTY' : 'GAME_START',
-        desiredAtMs: nowMs + 800,
-        createdAtMs: nowMs,
-        priorityHint: 0.55,
-        allowShadow: true,
-      } satisfies BackendHelperPlanRequest),
-    ]);
-  }
-
-  public planPostRunScene(room: BackendNpcRoomState, nowMs: number): readonly BackendNpcPlanRequest[] {
-    if (!room.postRun) return Object.freeze([]);
-    return Object.freeze([
-      Object.freeze({
-        requestId: `npc_post_helper_${room.roomId}_${nowMs}`,
-        actorKind: 'HELPER',
-        channel: 'GLOBAL',
-        context: room.playerNearBankruptcy || room.recentCollapseCount ? 'PLAYER_LOST' : 'NEAR_SOVEREIGNTY',
-        desiredAtMs: nowMs,
-        createdAtMs: nowMs,
-        priorityHint: 0.95,
-      } satisfies BackendHelperPlanRequest),
-      Object.freeze({
-        requestId: `npc_post_ambient_${room.roomId}_${nowMs}`,
-        actorKind: 'AMBIENT',
-        channel: 'GLOBAL',
-        context: room.playerNearBankruptcy || room.recentCollapseCount ? 'PLAYER_LOST' : 'NEAR_SOVEREIGNTY',
-        desiredAtMs: nowMs + 850,
-        createdAtMs: nowMs,
-        priorityHint: 0.7,
-      } satisfies BackendAmbientPlanRequest),
-    ]);
-  }
-
-  public planInvasionScene(room: BackendNpcRoomState, nowMs: number): readonly BackendNpcPlanRequest[] {
-    if (!room.invasionActive) return Object.freeze([]);
-    return Object.freeze([
-      Object.freeze({
-        requestId: `npc_invasion_open_${room.roomId}_${nowMs}`,
-        actorKind: 'INVASION',
-        channel: 'GLOBAL',
-        context: 'INVASION_OPEN',
-        desiredAtMs: nowMs,
-        createdAtMs: nowMs,
-        priorityHint: 2,
-        witnessPreferred: true,
-      } satisfies BackendInvasionPlanRequest),
-      Object.freeze({
-        requestId: `npc_invasion_hater_${room.roomId}_${nowMs}`,
-        actorKind: 'HATER',
-        channel: 'GLOBAL',
-        context: 'BOT_WINNING',
-        desiredAtMs: nowMs + 650,
-        createdAtMs: nowMs,
-        priorityHint: 1.5,
-      } satisfies BackendHaterPlanRequest),
-    ]);
-  }
-
-  public planWitnessPack(room: BackendNpcRoomState, nowMs: number): readonly BackendNpcPlanRequest[] {
-    const output: BackendNpcPlanRequest[] = [];
-    output.push(...this.planCollapseWitness(room, nowMs));
-    output.push(...this.planComebackWitness(room, nowMs));
-    output.push(...this.planIdleNudge(room, nowMs));
-    output.push(...this.planDealRoomScene(room, nowMs));
-    output.push(...this.planSyndicateScene(room, nowMs));
-    output.push(...this.planPostRunScene(room, nowMs));
-    output.push(...this.planInvasionScene(room, nowMs));
-    return Object.freeze(output);
-  }
-
-  public reduceToWinner(plan: BackendNpcBatchPlan): BackendNpcPlanDecision | null {
-    return plan.winner;
-  }
-
-  public buildNarrativeSummary(plan: BackendNpcBatchPlan): string {
-    if (!plan.winner) return 'no_npc_winner';
-    const winner = plan.winner;
-    return `${winner.actorKind}:${winner.personaId ?? 'INVASION'}:${winner.context}:${winner.suppression.visibility}:${winner.registryScore.toFixed(3)}`;
-  }
-
-  public buildPreparedDiagnostics(candidate: PreparedNpcCandidate): Readonly<Record<string, unknown>> {
-    if (candidate.actorKind === 'INVASION') {
-      return Object.freeze({
-        actorKind: candidate.actorKind,
-        requestId: candidate.request.requestId,
-        registryScore: candidate.registryScore,
-        lineId: null,
-      });
-    }
-
-    return Object.freeze({
-      actorKind: candidate.actorKind,
-      requestId: candidate.request.requestId,
-      personaId: candidate.persona.id,
-      lineId: candidate.line.id,
-      registryScore: candidate.registryScore,
-      channel: candidate.request.channel,
-      context: candidate.request.context,
-    });
-  }
-
-  public buildPlanDiagnostics(plan: BackendNpcBatchPlan): Readonly<Record<string, unknown>> {
-    return Object.freeze({
-      ranked: plan.ranked.length,
-      allowed: plan.ranked.filter((decision) => decision.allow).length,
-      rejected: plan.rejected.length,
-      deferred: plan.deferred.length,
-      shadowed: plan.shadowed.length,
-      summary: this.buildNarrativeSummary(plan),
-      winner: plan.winner ? {
-        actorKind: plan.winner.actorKind,
-        personaId: plan.winner.personaId ?? null,
-        context: plan.winner.context,
-        visibility: plan.winner.suppression.visibility,
-      } : null,
-    });
+function normalizeModeFromString(value: string | null | undefined): PersonaEvolutionMode {
+  switch ((value ?? "").toUpperCase()) {
+    case 'EMPIRE':
+    case 'PREDATOR':
+    case 'SYNDICATE':
+    case 'PHANTOM':
+    case 'LOBBY':
+    case 'POST_RUN':
+      return (value ?? "UNKNOWN").toUpperCase() as PersonaEvolutionMode;
+    default:
+      return 'UNKNOWN';
   }
 }
 
-export const createBackendChatNpcDomain = (): BackendChatNpcDomain => new BackendChatNpcDomain({
-  ambientRegistry: createAmbientNpcRegistry(),
-  helperRegistry: createHelperDialogueRegistry(),
-  haterRegistry: createHaterDialogueRegistry(),
-  cadencePolicy: createNpcCadencePolicy(),
-  suppressionPolicy: createNpcSuppressionPolicy(),
-});
+function normalizeChannelClass(value: string | null | undefined): PersonaEvolutionChannelClass {
+  switch ((value ?? "").toUpperCase()) {
+    case 'GLOBAL':
+    case 'SYNDICATE':
+    case 'DEAL_ROOM':
+    case 'DIRECT':
+    case 'LOBBY':
+    case 'SYSTEM':
+    case 'PRIVATE':
+      return (value ?? "UNKNOWN").toUpperCase() as PersonaEvolutionChannelClass;
+    default:
+      return 'UNKNOWN';
+  }
+}
 
-export const backendChatNpcDomain = new BackendChatNpcDomain();
+function inferChannelClass(channelId: string | null): PersonaEvolutionChannelClass {
+  if (!channelId) return "UNKNOWN";
+  const upper = channelId.toUpperCase();
+  if (upper.includes("DEAL")) return "DEAL_ROOM";
+  if (upper.includes("SYND")) return "SYNDICATE";
+  if (upper.includes("DIRECT")) return "DIRECT";
+  if (upper.includes("LOBBY")) return "LOBBY";
+  if (upper.includes("SYSTEM")) return "SYSTEM";
+  if (upper.includes("PRIV")) return "PRIVATE";
+  if (upper.includes("GLOBAL")) return "GLOBAL";
+  return "UNKNOWN";
+}
 
-// ─── Evolution service interface ──────────────────────────────────────────────
-// Structural interface so BackendChatNpcDomainWithEvolution compiles against the
-// full method surface without depending on the TS language server having already
-// indexed the freshly-written ChatBotPersonaEvolutionService.ts.
+function inferModeFromOverlay(overlay: ChatLiveOpsOverlayContext | null | undefined): PersonaEvolutionMode {
+  const record = asRecord(overlay);
+  return normalizeModeFromString(readString(record.mode ?? record.overlayMode ?? record.gameMode ?? record.surfaceMode, "UNKNOWN"));
+}
 
-export interface IBackendEvolutionService {
-  observe(event: ChatPersonaEvolutionEvent): ChatPersonaEvolutionProfile;
-  observeBatch(input: EvolutionBatchObserveInput): EvolutionBatchObserveResult;
-  project(input: EvolutionProjectionInput): ChatPersonaEvolutionSignal;
-  projectBatch(inputs: readonly EvolutionProjectionInput[]): EvolutionBatchProjectResult;
-  getProfile(botId: string, playerId: string | null | undefined, now: number): ChatPersonaEvolutionProfile;
-  getSnapshot(now?: number): ChatPersonaEvolutionSnapshot;
-  listTransitions(): readonly EvolutionStageTransitionRecord[];
-  getTransitionHistoryForBot(botId: string): readonly EvolutionStageTransitionRecord[];
-  computeBotStats(botId: string, now?: number): BotEvolutionStats;
-  computeSystemStats(now?: number): EvolutionSystemStats;
-  hasReachedStage(botId: string, playerId: string | null | undefined, targetStage: ChatPersonaStageId, now?: number): boolean;
-  scoreBotAggressionLevel(botId: string, playerId: string | null | undefined, now?: number): number;
+function inferModeFromChannel(channelClass: PersonaEvolutionChannelClass): PersonaEvolutionMode {
+  switch (channelClass) {
+    case 'DEAL_ROOM':
+      return 'PREDATOR';
+    case 'SYNDICATE':
+      return 'SYNDICATE';
+    case 'LOBBY':
+      return 'LOBBY';
+    default:
+      return 'UNKNOWN';
+  }
+}
+
+function inferMode(
+  modeHint: PersonaEvolutionMode | undefined,
+  channelClass: PersonaEvolutionChannelClass,
+  overlay?: ChatLiveOpsOverlayContext | null,
+): PersonaEvolutionMode {
+  if (modeHint && modeHint !== "UNKNOWN") return modeHint;
+  const fromOverlay = inferModeFromOverlay(overlay);
+  if (fromOverlay !== "UNKNOWN") return fromOverlay;
+  return inferModeFromChannel(channelClass);
+}
+
+function normalizeProjectInput(input: ChatBotPersonaEvolutionProjectInput): ChatBotPersonaEvolutionProjectInput {
+  return {
+    ...input,
+    botId: readString(input.botId),
+    playerId: readOptionalString(input.playerId ?? null),
+    channelId: readOptionalString(input.channelId ?? null),
+    tags: Array.from(new Set(readStringArray(input.tags))),
+    modeHint: normalizeModeFromString(input.modeHint ?? "UNKNOWN"),
+  };
+}
+
+function describeSignal(
+  signal: ChatPersonaEvolutionSignal,
+  request: ChatBotPersonaEvolutionProjectionRequest,
+  mode: PersonaEvolutionMode,
+  channelClass: PersonaEvolutionChannelClass,
+  tags: readonly string[],
+): PersonaEvolutionSignalDescriptor {
+  const record = asRecord(signal);
+  const botId = readString((request as Record<string, unknown>).botId);
+  const playerId = readOptionalString((request as Record<string, unknown>).playerId ?? null);
+  const channelId = readOptionalString((request as Record<string, unknown>).channelId ?? null);
+  return {
+    botId,
+    playerId,
+    channelId,
+    channelClass,
+    mode,
+    posture: readString(record.posture ?? record.postureDrift ?? record.currentPosture, "STABLE"),
+    transformBias: readString(record.transformBias ?? record.transformBiasDrift ?? record.currentTransformBias, "NEUTRAL"),
+    callbackAppetite: clamp01(readNumber(record.callbackAppetite ?? record.callbackBias01 ?? record.callbackPressure01, 0)),
+    publicPressureShare: clamp01(readNumber(record.publicPressureShare ?? record.publicPressure01 ?? record.publicPressureBias01, 0.5)),
+    privatePressureShare: clamp01(readNumber(record.privatePressureShare ?? record.privatePressure01 ?? record.privatePressureBias01, 0.5)),
+    mythBias: clamp01(readNumber(record.mythBias ?? record.legendBias01 ?? record.mythBuildBias01, 0)),
+    volatility: clamp01(readNumber(record.volatility ?? record.volatility01 ?? record.instability01, 0)),
+    signalKeys: Object.keys(record).sort(),
+    tags,
+    raw: signal,
+  };
+}
+
+function describeSnapshot(snapshot: ChatPersonaEvolutionSnapshot): PersonaEvolutionSnapshotDescriptor {
+  const record = asRecord(snapshot);
+  return {
+    botsTracked: clampCount(readNumber(record.botsTracked ?? record.botCount ?? record.bots, 0), Number.MAX_SAFE_INTEGER),
+    playersTracked: clampCount(readNumber(record.playersTracked ?? record.playerCount ?? record.players, 0), Number.MAX_SAFE_INTEGER),
+    channelsTracked: clampCount(readNumber(record.channelsTracked ?? record.channelCount ?? record.channels, 0), Number.MAX_SAFE_INTEGER),
+    projectionsTracked: clampCount(readNumber(record.projectionsTracked ?? record.projectionCount ?? record.projections, 0), Number.MAX_SAFE_INTEGER),
+    eventsTracked: clampCount(readNumber(record.eventsTracked ?? record.eventCount ?? record.events, 0), Number.MAX_SAFE_INTEGER),
+    signalKeys: Object.keys(record).sort(),
+    raw: snapshot,
+  };
+}
+
+function describeEvent(event: ChatPersonaEvolutionEvent): PersonaEvolutionOpaqueEventDescriptor {
+  const record = asRecord(event);
+  const botId = readString(record.botId ?? record.npcId ?? record.actorId, "UNKNOWN_BOT");
+  const playerId = readOptionalString(record.playerId ?? record.targetPlayerId ?? null);
+  const channelId = readOptionalString(record.channelId ?? record.channel ?? null);
+  const channelClass = normalizeChannelClass(readString(record.channelClass, inferChannelClass(channelId)));
+  const mode = normalizeModeFromString(readString(record.mode ?? record.gameMode ?? record.surfaceMode, inferModeFromChannel(channelClass)));
+  const createdAt = readNumber(record.now ?? record.timestamp ?? Date.now(), Date.now());
+  const eventId = readString(record.eventId ?? record.id, createId("persona_event", createdAt, `${botId}_${playerId ?? "anon"}`));
+  const kind = readString(record.kind ?? record.eventType ?? record.type, "UNKNOWN_EVENT");
+  const tags = Array.from(new Set(readStringArray(record.tags)));
+  return {
+    botId,
+    playerId,
+    eventId,
+    kind,
+    channelId,
+    channelClass,
+    mode,
+    createdAt,
+    tags,
+    objectKeys: Object.keys(record).sort(),
+    payload: event,
+  };
+}
+
+function makeProjectionRequest(input: ChatBotPersonaEvolutionProjectInput): ChatBotPersonaEvolutionProjectionRequest {
+  return {
+    botId: input.botId,
+    playerId: input.playerId ?? null,
+    now: input.now,
+    channelId: input.channelId ?? null,
+    fingerprint: input.fingerprint ?? null,
+    relationship: input.relationship ?? null,
+    overlay: input.overlay ?? null,
+  };
+}
+
+function createBoard(
+  boardType: string,
+  generatedAt: number,
+  entries: readonly PersonaEvolutionCounterBoardEntry[],
+): PersonaEvolutionBoard {
+  return {
+    boardId: createId(`board_${boardType}`, generatedAt, `${entries.length}`),
+    boardType,
+    generatedAt,
+    entries,
+  };
+}
+
+function sortBoardEntries(entries: readonly PersonaEvolutionCounterBoardEntry[]): readonly PersonaEvolutionCounterBoardEntry[] {
+  return [...entries].sort((left, right) => {
+    if (right.count !== left.count) return right.count - left.count;
+    if ((right.lastSeenAt ?? 0) !== (left.lastSeenAt ?? 0)) return (right.lastSeenAt ?? 0) - (left.lastSeenAt ?? 0);
+    return left.label.localeCompare(right.label);
+  });
+}
+
+function makeCounterEntry(id: string, label: string, count: number, lastSeenAt: number | null, total: number): PersonaEvolutionCounterBoardEntry {
+  return {
+    id,
+    label,
+    count,
+    lastSeenAt,
+    weight01: total > 0 ? clamp01(count / total) : 0,
+  };
+}
+
+function readMetricFromDescriptor(descriptor: PersonaEvolutionSignalDescriptor, metric: string): number {
+  switch (metric) {
+    case 'aggression':
+      return clamp01(descriptor.raw && typeof descriptor.raw === 'object' ? readNumber((descriptor.raw as Record<string, unknown>)['aggression'], descriptor.volatility) : descriptor.volatility);
+    case 'respect':
+      return clamp01(descriptor.raw && typeof descriptor.raw === 'object' ? readNumber((descriptor.raw as Record<string, unknown>)['respect'], descriptor.volatility) : descriptor.volatility);
+    case 'callbackAppetite':
+      return descriptor.callbackAppetite;
+    case 'publicPressure':
+      return descriptor.publicPressureShare;
+    case 'privatePressure':
+      return descriptor.privatePressureShare;
+    case 'myth':
+      return descriptor.mythBias;
+    case 'instability':
+      return clamp01(descriptor.raw && typeof descriptor.raw === 'object' ? readNumber((descriptor.raw as Record<string, unknown>)['instability'], descriptor.volatility) : descriptor.volatility);
+    case 'adaptation':
+      return clamp01(descriptor.raw && typeof descriptor.raw === 'object' ? readNumber((descriptor.raw as Record<string, unknown>)['adaptation'], descriptor.volatility) : descriptor.volatility);
+    case 'novelty':
+      return clamp01(descriptor.raw && typeof descriptor.raw === 'object' ? readNumber((descriptor.raw as Record<string, unknown>)['novelty'], descriptor.volatility) : descriptor.volatility);
+    case 'memory':
+      return clamp01(descriptor.raw && typeof descriptor.raw === 'object' ? readNumber((descriptor.raw as Record<string, unknown>)['memory'], descriptor.volatility) : descriptor.volatility);
+    case 'pressure':
+      return clamp01(descriptor.raw && typeof descriptor.raw === 'object' ? readNumber((descriptor.raw as Record<string, unknown>)['pressure'], descriptor.volatility) : descriptor.volatility);
+    case 'rescue':
+      return clamp01(descriptor.raw && typeof descriptor.raw === 'object' ? readNumber((descriptor.raw as Record<string, unknown>)['rescue'], descriptor.volatility) : descriptor.volatility);
+    case 'spectacle':
+      return clamp01(descriptor.raw && typeof descriptor.raw === 'object' ? readNumber((descriptor.raw as Record<string, unknown>)['spectacle'], descriptor.volatility) : descriptor.volatility);
+    case 'heat':
+      return clamp01(descriptor.raw && typeof descriptor.raw === 'object' ? readNumber((descriptor.raw as Record<string, unknown>)['heat'], descriptor.volatility) : descriptor.volatility);
+    case 'trust':
+      return clamp01(descriptor.raw && typeof descriptor.raw === 'object' ? readNumber((descriptor.raw as Record<string, unknown>)['trust'], descriptor.volatility) : descriptor.volatility);
+    case 'rivalry':
+      return clamp01(descriptor.raw && typeof descriptor.raw === 'object' ? readNumber((descriptor.raw as Record<string, unknown>)['rivalry'], descriptor.volatility) : descriptor.volatility);
+    case 'patience':
+      return clamp01(descriptor.raw && typeof descriptor.raw === 'object' ? readNumber((descriptor.raw as Record<string, unknown>)['patience'], descriptor.volatility) : descriptor.volatility);
+    case 'volatility':
+      return descriptor.volatility;
+    case 'persistence':
+      return clamp01(descriptor.raw && typeof descriptor.raw === 'object' ? readNumber((descriptor.raw as Record<string, unknown>)['persistence'], descriptor.volatility) : descriptor.volatility);
+    case 'dominance':
+      return clamp01(descriptor.raw && typeof descriptor.raw === 'object' ? readNumber((descriptor.raw as Record<string, unknown>)['dominance'], descriptor.volatility) : descriptor.volatility);
+    case 'humiliation':
+      return clamp01(descriptor.raw && typeof descriptor.raw === 'object' ? readNumber((descriptor.raw as Record<string, unknown>)['humiliation'], descriptor.volatility) : descriptor.volatility);
+    case 'hype':
+      return clamp01(descriptor.raw && typeof descriptor.raw === 'object' ? readNumber((descriptor.raw as Record<string, unknown>)['hype'], descriptor.volatility) : descriptor.volatility);
+    case 'silence':
+      return clamp01(descriptor.raw && typeof descriptor.raw === 'object' ? readNumber((descriptor.raw as Record<string, unknown>)['silence'], descriptor.volatility) : descriptor.volatility);
+    case 'recovery':
+      return clamp01(descriptor.raw && typeof descriptor.raw === 'object' ? readNumber((descriptor.raw as Record<string, unknown>)['recovery'], descriptor.volatility) : descriptor.volatility);
+    case 'proof':
+      return clamp01(descriptor.raw && typeof descriptor.raw === 'object' ? readNumber((descriptor.raw as Record<string, unknown>)['proof'], descriptor.volatility) : descriptor.volatility);
+    case 'negotiation':
+      return clamp01(descriptor.raw && typeof descriptor.raw === 'object' ? readNumber((descriptor.raw as Record<string, unknown>)['negotiation'], descriptor.volatility) : descriptor.volatility);
+    case 'scene':
+      return clamp01(descriptor.raw && typeof descriptor.raw === 'object' ? readNumber((descriptor.raw as Record<string, unknown>)['scene'], descriptor.volatility) : descriptor.volatility);
+    case 'persona':
+      return clamp01(descriptor.raw && typeof descriptor.raw === 'object' ? readNumber((descriptor.raw as Record<string, unknown>)['persona'], descriptor.volatility) : descriptor.volatility);
+    case 'authority':
+      return clamp01(descriptor.raw && typeof descriptor.raw === 'object' ? readNumber((descriptor.raw as Record<string, unknown>)['authority'], descriptor.volatility) : descriptor.volatility);
+    case 'variance':
+      return clamp01(descriptor.raw && typeof descriptor.raw === 'object' ? readNumber((descriptor.raw as Record<string, unknown>)['variance'], descriptor.volatility) : descriptor.volatility);
+    default:
+      return descriptor.volatility;
+  }
+}
+
+function inferStageFromSignalRecord(record: Record<string, unknown>): ChatPersonaStageId {
+  const explicit = readString(
+    record.stage ?? record.stageId ?? record.currentStage ?? record.personaStage ?? record.evolutionStage,
+    '',
+  ).trim();
+  if (explicit) return explicit as ChatPersonaStageId;
+  const myth = clamp01(readNumber(record.mythBias01 ?? record.legendBias01 ?? record.mythBias, 0));
+  const callback = clamp01(readNumber(record.callbackAggression01 ?? record.callbackAppetite01 ?? record.callbackAppetite ?? 0));
+  const volatility = clamp01(readNumber(record.volatility01 ?? record.volatility ?? record.instability01 ?? 0));
+  if (myth >= 0.85) return 'MYTHIC';
+  if (callback >= 0.8 || volatility >= 0.78) return 'ASCENDANT';
+  if (callback >= 0.6) return 'RIVALRIC';
+  if (myth >= 0.35 || callback >= 0.35) return 'CURIOUS';
+  return 'SEED';
+}
+
+function normalizeEvolutionSignal(
+  signal: RawChatPersonaEvolutionSignal | ChatPersonaEvolutionSignal,
+  request: ChatBotPersonaEvolutionProjectionRequest,
+  mode: PersonaEvolutionMode,
+  channelClass: PersonaEvolutionChannelClass,
+  tags: readonly string[],
+): ChatPersonaEvolutionSignal {
+  const descriptor = describeSignal(signal as ChatPersonaEvolutionSignal, request, mode, channelClass, tags);
+  const record = asRecord(signal);
+  const transformBiases = Array.from(new Set([
+    ...readStringArray(record.transformBiases),
+    ...readStringArray(record.biases),
+    descriptor.transformBias !== 'NEUTRAL' ? descriptor.transformBias : '',
+  ].filter((value): value is string => Boolean(value))));
+  return Object.freeze({
+    ...(signal as Record<string, unknown>),
+    stage: inferStageFromSignalRecord(record),
+    temperament: readString(record.temperament ?? record.posture ?? descriptor.posture, descriptor.posture),
+    callbackAggression01: clamp01(readNumber(
+      record.callbackAggression01 ?? record.callbackAggression ?? record.callbackAppetite01 ?? record.callbackAppetite ?? descriptor.callbackAppetite,
+      descriptor.callbackAppetite,
+    )),
+    transformBiases,
+    selectionBias01: clamp01(readNumber(
+      record.selectionBias01 ?? record.selectionBias ?? record.selectionWeight01 ?? descriptor.publicPressureShare,
+      descriptor.publicPressureShare,
+    )),
+    callbackAppetite01: descriptor.callbackAppetite,
+    publicPressure01: descriptor.publicPressureShare,
+    privatePressure01: descriptor.privatePressureShare,
+    mythBias01: descriptor.mythBias,
+    volatility01: descriptor.volatility,
+  }) as ChatPersonaEvolutionSignal;
+}
+
+function profileKey(botId: string, playerId: string | null | undefined): string {
+  return `${botId}::${playerId ?? 'anon'}`;
+}
+
+// ============================================================================
+// SERVICE
+// ============================================================================
+
+export class ChatBotPersonaEvolutionService {
+  private readonly runtime: ChatBotPersonaEvolution;
+  private readonly clock: ChatBotPersonaEvolutionServiceClock;
+  private readonly options: ChatBotPersonaEvolutionServiceResolvedOptions;
+  private lifecycle: PersonaEvolutionLifecycle = "IDLE";
+
+  private readonly eventHistoryByBot = new Map<string, PersonaEvolutionOpaqueEventDescriptor[]>();
+  private readonly eventHistoryByPlayer = new Map<string, PersonaEvolutionOpaqueEventDescriptor[]>();
+  private readonly eventHistoryByChannel = new Map<string, PersonaEvolutionOpaqueEventDescriptor[]>();
+  private readonly projectionHistoryByBot = new Map<string, ChatBotPersonaEvolutionProjectReceipt[]>();
+  private readonly projectionHistoryByPlayer = new Map<string, ChatBotPersonaEvolutionProjectReceipt[]>();
+  private readonly projectionHistoryByChannel = new Map<string, ChatBotPersonaEvolutionProjectReceipt[]>();
+  private readonly signalHistoryByBot = new Map<string, PersonaEvolutionSignalDescriptor[]>();
+  private readonly cache = new Map<string, PersonaEvolutionCacheEntry>();
+  private readonly audits: PersonaEvolutionServiceAudit[] = [];
+  private readonly fingerprintsByPlayer = new Map<string, ChatPlayerFingerprintSnapshot>();
+  private readonly relationshipsByPlayer = new Map<string, ChatRelationshipSummaryView>();
+  private readonly overlaysByChannel = new Map<string, ChatLiveOpsOverlayContext>();
+  private readonly eventCounters = new Map<string, number>();
+  private readonly projectCounters = new Map<string, number>();
+  private readonly lastSeenAt = new Map<string, number>();
+  private readonly transitionHistoryByBot = new Map<string, EvolutionStageTransitionRecord[]>();
+  private readonly latestProfileByKey = new Map<string, ChatPersonaEvolutionProfile>();
+
+  constructor(
+    runtime: ChatBotPersonaEvolution = new ChatBotPersonaEvolution(),
+    options?: ChatBotPersonaEvolutionServiceOptions,
+    clock: ChatBotPersonaEvolutionServiceClock = SYSTEM_CLOCK,
+  ) {
+    this.runtime = runtime;
+    this.options = mergeOptions(options);
+    this.clock = clock;
+  }
+
+  observeWithReceipt(event: ChatPersonaEvolutionEvent): ChatBotPersonaEvolutionObserveReceipt {
+    this.lifecycle = "OBSERVING";
+    const descriptor = describeEvent(event);
+    this.recordEventDescriptor(descriptor);
+    const runtimeResult = this.runtime.observe(event as RawChatPersonaEvolutionEvent);
+    const receipt: ChatBotPersonaEvolutionObserveReceipt = {
+      receiptId: createId("persona_observe", descriptor.createdAt, `${descriptor.botId}_${descriptor.eventId}`),
+      botId: descriptor.botId,
+      eventId: descriptor.eventId,
+      playerId: descriptor.playerId,
+      observedAt: descriptor.createdAt,
+      channelClass: descriptor.channelClass,
+      mode: descriptor.mode,
+      tags: descriptor.tags,
+      runtimeResult,
+    };
+    this.bumpCounter(this.eventCounters, descriptor.kind, descriptor.createdAt);
+    this.maybeCaptureAudit();
+    this.lifecycle = "IDLE";
+    return receipt;
+  }
+
+  observe(event: ChatPersonaEvolutionEvent): ChatPersonaEvolutionProfile {
+    const receipt = this.observeWithReceipt(event);
+    return this.getProfile(receipt.botId, receipt.playerId, receipt.observedAt);
+  }
+
+  observeBatch(input: readonly ChatPersonaEvolutionEvent[] | EvolutionBatchObserveInput): EvolutionBatchObserveResult {
+    const now = this.clock.now();
+    const events = Array.isArray(input) ? input : input.events;
+    const receipts = events.map((event) => this.observeWithReceipt(event));
+    const profiles = receipts.map((receipt) => this.getProfile(receipt.botId, receipt.playerId, receipt.observedAt));
+    const audit = !Array.isArray(input) && input.captureAudit ? this.captureAudit(now) : null;
+    return {
+      batchId: createId("persona_observe_batch", now, `${events.length}`),
+      generatedAt: now,
+      receipts,
+      profiles,
+      audit,
+    };
+  }
+
+  project(input: ChatBotPersonaEvolutionProjectInput): ChatPersonaEvolutionSignal {
+    const now = this.clock.now();
+    const receipts = events.map((event) => this.observe(event));
+    return {
+      batchId: createId("persona_observe_batch", now, `${events.length}`),
+      generatedAt: now,
+      receipts,
+    };
+  }
+
+  project(input: ChatBotPersonaEvolutionProjectInput): ChatPersonaEvolutionSignal {
+    return this.projectWithReceipt(input).signal;
+  }
+
+  projectWithReceipt(input: ChatBotPersonaEvolutionProjectInput): ChatBotPersonaEvolutionProjectReceipt {
+    this.lifecycle = "PROJECTING";
+    const normalized = this.options.enableRequestNormalization ? normalizeProjectInput(input) : input;
+    const channelClass = normalizeChannelClass(readString(normalized.channelId, inferChannelClass(normalized.channelId ?? null)));
+    const mode = inferMode(normalized.modeHint, channelClass, normalized.overlay);
+    this.recordContextArtifacts(normalized);
+    const request = makeProjectionRequest(normalized);
+    const cacheKey = this.computeCacheKey(request, mode, channelClass);
+    const cacheEntry = !normalized.forceRefresh ? this.getUsableCacheEntry(cacheKey) : null;
+    const rawSignal = cacheEntry ? cacheEntry.signal : (this.runtime.project(request) as RawChatPersonaEvolutionSignal);
+    const signal = cacheEntry ? cacheEntry.signal : normalizeEvolutionSignal(rawSignal, request, mode, channelClass, normalized.tags ?? []);
+    const descriptor = cacheEntry ? cacheEntry.descriptor : describeSignal(signal, request, mode, channelClass, normalized.tags ?? []);
+    if (!cacheEntry) this.storeCacheEntry(cacheKey, request, signal, descriptor);
+    const now = this.clock.now();
+    const receipt: ChatBotPersonaEvolutionProjectReceipt = {
+      receiptId: createId("persona_project", now, `${normalized.botId}_${normalized.playerId ?? "anon"}`),
+      requestId: createId("persona_request", normalized.now, stableStringify(request)),
+      botId: normalized.botId,
+      playerId: normalized.playerId ?? null,
+      projectedAt: now,
+      mode,
+      channelClass,
+      traceId: normalized.traceId ?? createId("persona_trace", now, cacheKey),
+      cacheHit: Boolean(cacheEntry),
+      cacheKey,
+      tags: normalized.tags ?? [],
+      request,
+      signal,
+      descriptor,
+    };
+    this.recordProjectionReceipt(receipt);
+    this.bumpCounter(this.projectCounters, normalized.botId, now);
+    this.maybeCaptureAudit();
+    this.lifecycle = "IDLE";
+    return receipt;
+  }
+
+  projectBatch(input: PersonaEvolutionProjectBatchInput | readonly EvolutionProjectionInput[]): EvolutionBatchProjectResult {
+    const normalizedInput: PersonaEvolutionProjectBatchInput = Array.isArray(input)
+      ? { inputs: input, pruneBefore: false, captureAudit: false }
+      : input;
+    if (normalizedInput.pruneBefore) this.prune();
+    const now = this.clock.now();
+    const receipts = normalizedInput.inputs.map((entry) => this.projectWithReceipt(entry));
+    const audit = normalizedInput.captureAudit ? this.captureAudit(now) : null;
+    return {
+      batchId: createId("persona_project_batch", now, `${receipts.length}`),
+      generatedAt: now,
+      receipts,
+      audit,
+    };
+  }
+
+  projectMatrix(bots: readonly string[], inputs: readonly Omit<ChatBotPersonaEvolutionProjectInput, "botId">[]): readonly ChatBotPersonaEvolutionProjectReceipt[] {
+    const receipts: ChatBotPersonaEvolutionProjectReceipt[] = [];
+    for (const botId of bots) {
+      for (const input of inputs) {
+        receipts.push(this.projectWithReceipt({ ...input, botId }));
+      }
+    }
+    return receipts;
+  }
+
+  projectScenario(steps: readonly PersonaEvolutionScenarioStep[]): PersonaEvolutionScenarioResult {
+    const observeReceipts: ChatBotPersonaEvolutionObserveReceipt[] = [];
+    const projectReceipts: ChatBotPersonaEvolutionProjectReceipt[] = [];
+    for (const step of steps) {
+      if (step.event) observeReceipts.push(this.observeWithReceipt(step.event));
+      if (step.project) projectReceipts.push(this.projectWithReceipt(step.project));
+    }
+    const executedAt = this.clock.now();
+    return {
+      scenarioId: createId("persona_scenario", executedAt, `${steps.length}`),
+      executedAt,
+      observeReceipts,
+      projectReceipts,
+      finalSnapshot: this.getSnapshot(executedAt),
+    };
+  }
+
+  getSnapshot(now = this.clock.now()): ChatPersonaEvolutionSnapshot {
+    return this.runtime.getSnapshot(now);
+  }
+
+  getSnapshotDescriptor(now = this.clock.now()): PersonaEvolutionSnapshotDescriptor {
+    return describeSnapshot(this.getSnapshot(now));
+  }
+
+  getHealthSnapshot(now = this.clock.now()): PersonaEvolutionHealthSnapshot {
+    const staleCacheEntries = this.countStaleCacheEntries(now);
+    const staleProjectionWindows = this.countStaleProjectionWindows(now);
+    return {
+      health: this.computeHealth(now),
+      lifecycle: this.lifecycle,
+      now,
+      cacheEntries: this.cache.size,
+      botsTracked: this.eventHistoryByBot.size,
+      playersTracked: this.projectionHistoryByPlayer.size,
+      channelsTracked: this.projectionHistoryByChannel.size,
+      auditsTracked: this.audits.length,
+      staleCacheEntries,
+      staleProjectionWindows,
+    };
+  }
+
+  getManifest(now = this.clock.now()): PersonaEvolutionManifest {
+    return {
+      manifestId: createId("persona_manifest", now, `${this.eventHistoryByBot.size}_${this.cache.size}`),
+      generatedAt: now,
+      options: this.options,
+      runtimeClass: this.runtime.constructor.name || "ChatBotPersonaEvolution",
+      eventHistoryDepth: this.sumMapLengths(this.eventHistoryByBot),
+      projectionHistoryDepth: this.sumMapLengths(this.projectionHistoryByBot),
+      trackedBots: [...this.eventHistoryByBot.keys()].sort(),
+      trackedPlayers: [...this.projectionHistoryByPlayer.keys()].sort(),
+      trackedChannels: [...this.projectionHistoryByChannel.keys()].sort(),
+      trackedModes: MODES.filter((mode) => this.countProjectionsForMode(mode) > 0),
+    };
+  }
+
+  captureAudit(now = this.clock.now()): PersonaEvolutionServiceAudit {
+    const audit: PersonaEvolutionServiceAudit = {
+      auditId: createId("persona_audit", now, `${this.eventHistoryByBot.size}_${this.cache.size}`),
+      createdAt: now,
+      lifecycle: this.lifecycle,
+      health: this.computeHealth(now),
+      cachePolicy: this.options.cachePolicy,
+      eventCount: this.sumMapLengths(this.eventHistoryByBot),
+      projectionCount: this.sumMapLengths(this.projectionHistoryByBot),
+      cacheSize: this.cache.size,
+      botCount: this.eventHistoryByBot.size,
+      playerCount: this.projectionHistoryByPlayer.size,
+      channelCount: this.projectionHistoryByChannel.size,
+      modeBoard: this.buildModeBoard(now),
+      channelBoard: this.buildChannelBoard(now),
+      botBoard: this.buildBotBoard(now),
+      playerBoard: this.buildPlayerBoard(now),
+      riskBand: this.computeRiskBand(now),
+    };
+    this.audits.push(audit);
+    this.trimArray(this.audits, this.options.maxAuditTrail);
+    return audit;
+  }
+
+  listAudits(): readonly PersonaEvolutionServiceAudit[] {
+    return this.audits;
+  }
+
+  reset(): void {
+    this.lifecycle = "RESETTING";
+    this.eventHistoryByBot.clear();
+    this.eventHistoryByPlayer.clear();
+    this.eventHistoryByChannel.clear();
+    this.projectionHistoryByBot.clear();
+    this.projectionHistoryByPlayer.clear();
+    this.projectionHistoryByChannel.clear();
+    this.signalHistoryByBot.clear();
+    this.cache.clear();
+    this.audits.length = 0;
+    this.fingerprintsByPlayer.clear();
+    this.relationshipsByPlayer.clear();
+    this.overlaysByChannel.clear();
+    this.eventCounters.clear();
+    this.projectCounters.clear();
+    this.lastSeenAt.clear();
+    this.transitionHistoryByBot.clear();
+    this.latestProfileByKey.clear();
+    this.lifecycle = "IDLE";
+  }
+
+  prune(now = this.clock.now()): void {
+    this.lifecycle = "PRUNING";
+    for (const [key, value] of this.cache.entries()) {
+      if (value.expiresAt <= now) this.cache.delete(key);
+    }
+    this.pruneProjectionWindows(now);
+    this.lifecycle = "IDLE";
+  }
+
+  warmFromSnapshot(snapshot: ChatPersonaEvolutionSnapshot): PersonaEvolutionSnapshotDescriptor {
+    const descriptor = describeSnapshot(snapshot);
+    if (this.options.retainSnapshots) {
+      const now = this.clock.now();
+      this.audits.push({
+        auditId: createId("persona_snapshot_audit", now, `${descriptor.botsTracked}_${descriptor.playersTracked}`),
+        createdAt: now,
+        lifecycle: this.lifecycle,
+        health: this.computeHealth(now),
+        cachePolicy: this.options.cachePolicy,
+        eventCount: this.sumMapLengths(this.eventHistoryByBot),
+        projectionCount: this.sumMapLengths(this.projectionHistoryByBot),
+        cacheSize: this.cache.size,
+        botCount: descriptor.botsTracked,
+        playerCount: descriptor.playersTracked,
+        channelCount: descriptor.channelsTracked,
+        modeBoard: this.buildModeBoard(now),
+        channelBoard: this.buildChannelBoard(now),
+        botBoard: this.buildBotBoard(now),
+        playerBoard: this.buildPlayerBoard(now),
+        riskBand: this.computeRiskBand(now),
+      });
+      this.trimArray(this.audits, this.options.maxAuditTrail);
+    }
+    return descriptor;
+  }
+
+  listBotEvents(botId: string): readonly PersonaEvolutionOpaqueEventDescriptor[] {
+    return this.eventHistoryByBot.get(botId) ?? [];
+  }
+
+  listBotSignals(botId: string): readonly PersonaEvolutionSignalDescriptor[] {
+    return this.signalHistoryByBot.get(botId) ?? [];
+  }
+
+  listBotProjections(botId: string): readonly ChatBotPersonaEvolutionProjectReceipt[] {
+    return this.projectionHistoryByBot.get(botId) ?? [];
+  }
+
+  listPlayerProjections(playerId: string): readonly ChatBotPersonaEvolutionProjectReceipt[] {
+    return this.projectionHistoryByPlayer.get(playerId) ?? [];
+  }
+
+  listChannelProjections(channelId: string): readonly ChatBotPersonaEvolutionProjectReceipt[] {
+    return this.projectionHistoryByChannel.get(channelId) ?? [];
+  }
+
+  summarizeBot(botId: string, now = this.clock.now()): PersonaEvolutionBoard {
+    const receipts = this.listBotProjections(botId);
+    const total = receipts.length;
+    const entries = MODES.map((mode) => {
+      const modeReceipts = receipts.filter((receipt) => receipt.mode === mode);
+      const lastSeenAt = modeReceipts.length > 0 ? modeReceipts[modeReceipts.length - 1]!.projectedAt : null;
+      return makeCounterEntry(`${botId}_${mode}`, mode, modeReceipts.length, lastSeenAt, total);
+    }).filter((entry) => entry.count > 0);
+    return createBoard(`bot_${botId}`, now, sortBoardEntries(entries));
+  }
+
+  computeAggressionAverage(botId: string): number {
+    const descriptors = this.signalHistoryByBot.get(botId) ?? [];
+    if (descriptors.length === 0) return 0;
+    return descriptors.reduce((total, descriptor) => total + readMetricFromDescriptor(descriptor, 'aggression'), 0) / descriptors.length;
+  }
+
+  buildAggressionBoard(now = this.clock.now()): PersonaEvolutionBoard {
+    const botIds = [...this.signalHistoryByBot.keys()];
+    const entries = botIds.map((botId) => {
+      const value = this.computeAggressionAverage(botId);
+      const last = this.lastSeenAt.get(`bot:${botId}`) ?? null;
+      return makeCounterEntry(`aggression_${botId}`, botId, Math.round(value * 1000), last, botIds.length * 1000 || 1);
+    }).filter((entry) => entry.count > 0);
+    return createBoard('aggression', now, sortBoardEntries(entries));
+  }
+
+  computeRespectAverage(botId: string): number {
+    const descriptors = this.signalHistoryByBot.get(botId) ?? [];
+    if (descriptors.length === 0) return 0;
+    return descriptors.reduce((total, descriptor) => total + readMetricFromDescriptor(descriptor, 'respect'), 0) / descriptors.length;
+  }
+
+  buildRespectBoard(now = this.clock.now()): PersonaEvolutionBoard {
+    const botIds = [...this.signalHistoryByBot.keys()];
+    const entries = botIds.map((botId) => {
+      const value = this.computeRespectAverage(botId);
+      const last = this.lastSeenAt.get(`bot:${botId}`) ?? null;
+      return makeCounterEntry(`respect_${botId}`, botId, Math.round(value * 1000), last, botIds.length * 1000 || 1);
+    }).filter((entry) => entry.count > 0);
+    return createBoard('respect', now, sortBoardEntries(entries));
+  }
+
+  computeCallbackappetiteAverage(botId: string): number {
+    const descriptors = this.signalHistoryByBot.get(botId) ?? [];
+    if (descriptors.length === 0) return 0;
+    return descriptors.reduce((total, descriptor) => total + readMetricFromDescriptor(descriptor, 'callbackAppetite'), 0) / descriptors.length;
+  }
+
+  buildCallbackappetiteBoard(now = this.clock.now()): PersonaEvolutionBoard {
+    const botIds = [...this.signalHistoryByBot.keys()];
+    const entries = botIds.map((botId) => {
+      const value = this.computeCallbackappetiteAverage(botId);
+      const last = this.lastSeenAt.get(`bot:${botId}`) ?? null;
+      return makeCounterEntry(`callbackAppetite_${botId}`, botId, Math.round(value * 1000), last, botIds.length * 1000 || 1);
+    }).filter((entry) => entry.count > 0);
+    return createBoard('callbackAppetite', now, sortBoardEntries(entries));
+  }
+
+  computePublicpressureAverage(botId: string): number {
+    const descriptors = this.signalHistoryByBot.get(botId) ?? [];
+    if (descriptors.length === 0) return 0;
+    return descriptors.reduce((total, descriptor) => total + readMetricFromDescriptor(descriptor, 'publicPressure'), 0) / descriptors.length;
+  }
+
+  buildPublicpressureBoard(now = this.clock.now()): PersonaEvolutionBoard {
+    const botIds = [...this.signalHistoryByBot.keys()];
+    const entries = botIds.map((botId) => {
+      const value = this.computePublicpressureAverage(botId);
+      const last = this.lastSeenAt.get(`bot:${botId}`) ?? null;
+      return makeCounterEntry(`publicPressure_${botId}`, botId, Math.round(value * 1000), last, botIds.length * 1000 || 1);
+    }).filter((entry) => entry.count > 0);
+    return createBoard('publicPressure', now, sortBoardEntries(entries));
+  }
+
+  computePrivatepressureAverage(botId: string): number {
+    const descriptors = this.signalHistoryByBot.get(botId) ?? [];
+    if (descriptors.length === 0) return 0;
+    return descriptors.reduce((total, descriptor) => total + readMetricFromDescriptor(descriptor, 'privatePressure'), 0) / descriptors.length;
+  }
+
+  buildPrivatepressureBoard(now = this.clock.now()): PersonaEvolutionBoard {
+    const botIds = [...this.signalHistoryByBot.keys()];
+    const entries = botIds.map((botId) => {
+      const value = this.computePrivatepressureAverage(botId);
+      const last = this.lastSeenAt.get(`bot:${botId}`) ?? null;
+      return makeCounterEntry(`privatePressure_${botId}`, botId, Math.round(value * 1000), last, botIds.length * 1000 || 1);
+    }).filter((entry) => entry.count > 0);
+    return createBoard('privatePressure', now, sortBoardEntries(entries));
+  }
+
+  computeMythAverage(botId: string): number {
+    const descriptors = this.signalHistoryByBot.get(botId) ?? [];
+    if (descriptors.length === 0) return 0;
+    return descriptors.reduce((total, descriptor) => total + readMetricFromDescriptor(descriptor, 'myth'), 0) / descriptors.length;
+  }
+
+  buildMythBoard(now = this.clock.now()): PersonaEvolutionBoard {
+    const botIds = [...this.signalHistoryByBot.keys()];
+    const entries = botIds.map((botId) => {
+      const value = this.computeMythAverage(botId);
+      const last = this.lastSeenAt.get(`bot:${botId}`) ?? null;
+      return makeCounterEntry(`myth_${botId}`, botId, Math.round(value * 1000), last, botIds.length * 1000 || 1);
+    }).filter((entry) => entry.count > 0);
+    return createBoard('myth', now, sortBoardEntries(entries));
+  }
+
+  computeInstabilityAverage(botId: string): number {
+    const descriptors = this.signalHistoryByBot.get(botId) ?? [];
+    if (descriptors.length === 0) return 0;
+    return descriptors.reduce((total, descriptor) => total + readMetricFromDescriptor(descriptor, 'instability'), 0) / descriptors.length;
+  }
+
+  buildInstabilityBoard(now = this.clock.now()): PersonaEvolutionBoard {
+    const botIds = [...this.signalHistoryByBot.keys()];
+    const entries = botIds.map((botId) => {
+      const value = this.computeInstabilityAverage(botId);
+      const last = this.lastSeenAt.get(`bot:${botId}`) ?? null;
+      return makeCounterEntry(`instability_${botId}`, botId, Math.round(value * 1000), last, botIds.length * 1000 || 1);
+    }).filter((entry) => entry.count > 0);
+    return createBoard('instability', now, sortBoardEntries(entries));
+  }
+
+  computeAdaptationAverage(botId: string): number {
+    const descriptors = this.signalHistoryByBot.get(botId) ?? [];
+    if (descriptors.length === 0) return 0;
+    return descriptors.reduce((total, descriptor) => total + readMetricFromDescriptor(descriptor, 'adaptation'), 0) / descriptors.length;
+  }
+
+  buildAdaptationBoard(now = this.clock.now()): PersonaEvolutionBoard {
+    const botIds = [...this.signalHistoryByBot.keys()];
+    const entries = botIds.map((botId) => {
+      const value = this.computeAdaptationAverage(botId);
+      const last = this.lastSeenAt.get(`bot:${botId}`) ?? null;
+      return makeCounterEntry(`adaptation_${botId}`, botId, Math.round(value * 1000), last, botIds.length * 1000 || 1);
+    }).filter((entry) => entry.count > 0);
+    return createBoard('adaptation', now, sortBoardEntries(entries));
+  }
+
+  computeNoveltyAverage(botId: string): number {
+    const descriptors = this.signalHistoryByBot.get(botId) ?? [];
+    if (descriptors.length === 0) return 0;
+    return descriptors.reduce((total, descriptor) => total + readMetricFromDescriptor(descriptor, 'novelty'), 0) / descriptors.length;
+  }
+
+  buildNoveltyBoard(now = this.clock.now()): PersonaEvolutionBoard {
+    const botIds = [...this.signalHistoryByBot.keys()];
+    const entries = botIds.map((botId) => {
+      const value = this.computeNoveltyAverage(botId);
+      const last = this.lastSeenAt.get(`bot:${botId}`) ?? null;
+      return makeCounterEntry(`novelty_${botId}`, botId, Math.round(value * 1000), last, botIds.length * 1000 || 1);
+    }).filter((entry) => entry.count > 0);
+    return createBoard('novelty', now, sortBoardEntries(entries));
+  }
+
+  computeMemoryAverage(botId: string): number {
+    const descriptors = this.signalHistoryByBot.get(botId) ?? [];
+    if (descriptors.length === 0) return 0;
+    return descriptors.reduce((total, descriptor) => total + readMetricFromDescriptor(descriptor, 'memory'), 0) / descriptors.length;
+  }
+
+  buildMemoryBoard(now = this.clock.now()): PersonaEvolutionBoard {
+    const botIds = [...this.signalHistoryByBot.keys()];
+    const entries = botIds.map((botId) => {
+      const value = this.computeMemoryAverage(botId);
+      const last = this.lastSeenAt.get(`bot:${botId}`) ?? null;
+      return makeCounterEntry(`memory_${botId}`, botId, Math.round(value * 1000), last, botIds.length * 1000 || 1);
+    }).filter((entry) => entry.count > 0);
+    return createBoard('memory', now, sortBoardEntries(entries));
+  }
+
+  computePressureAverage(botId: string): number {
+    const descriptors = this.signalHistoryByBot.get(botId) ?? [];
+    if (descriptors.length === 0) return 0;
+    return descriptors.reduce((total, descriptor) => total + readMetricFromDescriptor(descriptor, 'pressure'), 0) / descriptors.length;
+  }
+
+  buildPressureBoard(now = this.clock.now()): PersonaEvolutionBoard {
+    const botIds = [...this.signalHistoryByBot.keys()];
+    const entries = botIds.map((botId) => {
+      const value = this.computePressureAverage(botId);
+      const last = this.lastSeenAt.get(`bot:${botId}`) ?? null;
+      return makeCounterEntry(`pressure_${botId}`, botId, Math.round(value * 1000), last, botIds.length * 1000 || 1);
+    }).filter((entry) => entry.count > 0);
+    return createBoard('pressure', now, sortBoardEntries(entries));
+  }
+
+  computeRescueAverage(botId: string): number {
+    const descriptors = this.signalHistoryByBot.get(botId) ?? [];
+    if (descriptors.length === 0) return 0;
+    return descriptors.reduce((total, descriptor) => total + readMetricFromDescriptor(descriptor, 'rescue'), 0) / descriptors.length;
+  }
+
+  buildRescueBoard(now = this.clock.now()): PersonaEvolutionBoard {
+    const botIds = [...this.signalHistoryByBot.keys()];
+    const entries = botIds.map((botId) => {
+      const value = this.computeRescueAverage(botId);
+      const last = this.lastSeenAt.get(`bot:${botId}`) ?? null;
+      return makeCounterEntry(`rescue_${botId}`, botId, Math.round(value * 1000), last, botIds.length * 1000 || 1);
+    }).filter((entry) => entry.count > 0);
+    return createBoard('rescue', now, sortBoardEntries(entries));
+  }
+
+  computeSpectacleAverage(botId: string): number {
+    const descriptors = this.signalHistoryByBot.get(botId) ?? [];
+    if (descriptors.length === 0) return 0;
+    return descriptors.reduce((total, descriptor) => total + readMetricFromDescriptor(descriptor, 'spectacle'), 0) / descriptors.length;
+  }
+
+  buildSpectacleBoard(now = this.clock.now()): PersonaEvolutionBoard {
+    const botIds = [...this.signalHistoryByBot.keys()];
+    const entries = botIds.map((botId) => {
+      const value = this.computeSpectacleAverage(botId);
+      const last = this.lastSeenAt.get(`bot:${botId}`) ?? null;
+      return makeCounterEntry(`spectacle_${botId}`, botId, Math.round(value * 1000), last, botIds.length * 1000 || 1);
+    }).filter((entry) => entry.count > 0);
+    return createBoard('spectacle', now, sortBoardEntries(entries));
+  }
+
+  computeHeatAverage(botId: string): number {
+    const descriptors = this.signalHistoryByBot.get(botId) ?? [];
+    if (descriptors.length === 0) return 0;
+    return descriptors.reduce((total, descriptor) => total + readMetricFromDescriptor(descriptor, 'heat'), 0) / descriptors.length;
+  }
+
+  buildHeatBoard(now = this.clock.now()): PersonaEvolutionBoard {
+    const botIds = [...this.signalHistoryByBot.keys()];
+    const entries = botIds.map((botId) => {
+      const value = this.computeHeatAverage(botId);
+      const last = this.lastSeenAt.get(`bot:${botId}`) ?? null;
+      return makeCounterEntry(`heat_${botId}`, botId, Math.round(value * 1000), last, botIds.length * 1000 || 1);
+    }).filter((entry) => entry.count > 0);
+    return createBoard('heat', now, sortBoardEntries(entries));
+  }
+
+  computeTrustAverage(botId: string): number {
+    const descriptors = this.signalHistoryByBot.get(botId) ?? [];
+    if (descriptors.length === 0) return 0;
+    return descriptors.reduce((total, descriptor) => total + readMetricFromDescriptor(descriptor, 'trust'), 0) / descriptors.length;
+  }
+
+  buildTrustBoard(now = this.clock.now()): PersonaEvolutionBoard {
+    const botIds = [...this.signalHistoryByBot.keys()];
+    const entries = botIds.map((botId) => {
+      const value = this.computeTrustAverage(botId);
+      const last = this.lastSeenAt.get(`bot:${botId}`) ?? null;
+      return makeCounterEntry(`trust_${botId}`, botId, Math.round(value * 1000), last, botIds.length * 1000 || 1);
+    }).filter((entry) => entry.count > 0);
+    return createBoard('trust', now, sortBoardEntries(entries));
+  }
+
+  computeRivalryAverage(botId: string): number {
+    const descriptors = this.signalHistoryByBot.get(botId) ?? [];
+    if (descriptors.length === 0) return 0;
+    return descriptors.reduce((total, descriptor) => total + readMetricFromDescriptor(descriptor, 'rivalry'), 0) / descriptors.length;
+  }
+
+  buildRivalryBoard(now = this.clock.now()): PersonaEvolutionBoard {
+    const botIds = [...this.signalHistoryByBot.keys()];
+    const entries = botIds.map((botId) => {
+      const value = this.computeRivalryAverage(botId);
+      const last = this.lastSeenAt.get(`bot:${botId}`) ?? null;
+      return makeCounterEntry(`rivalry_${botId}`, botId, Math.round(value * 1000), last, botIds.length * 1000 || 1);
+    }).filter((entry) => entry.count > 0);
+    return createBoard('rivalry', now, sortBoardEntries(entries));
+  }
+
+  computePatienceAverage(botId: string): number {
+    const descriptors = this.signalHistoryByBot.get(botId) ?? [];
+    if (descriptors.length === 0) return 0;
+    return descriptors.reduce((total, descriptor) => total + readMetricFromDescriptor(descriptor, 'patience'), 0) / descriptors.length;
+  }
+
+  buildPatienceBoard(now = this.clock.now()): PersonaEvolutionBoard {
+    const botIds = [...this.signalHistoryByBot.keys()];
+    const entries = botIds.map((botId) => {
+      const value = this.computePatienceAverage(botId);
+      const last = this.lastSeenAt.get(`bot:${botId}`) ?? null;
+      return makeCounterEntry(`patience_${botId}`, botId, Math.round(value * 1000), last, botIds.length * 1000 || 1);
+    }).filter((entry) => entry.count > 0);
+    return createBoard('patience', now, sortBoardEntries(entries));
+  }
+
+  computeVolatilityAverage(botId: string): number {
+    const descriptors = this.signalHistoryByBot.get(botId) ?? [];
+    if (descriptors.length === 0) return 0;
+    return descriptors.reduce((total, descriptor) => total + readMetricFromDescriptor(descriptor, 'volatility'), 0) / descriptors.length;
+  }
+
+  buildVolatilityBoard(now = this.clock.now()): PersonaEvolutionBoard {
+    const botIds = [...this.signalHistoryByBot.keys()];
+    const entries = botIds.map((botId) => {
+      const value = this.computeVolatilityAverage(botId);
+      const last = this.lastSeenAt.get(`bot:${botId}`) ?? null;
+      return makeCounterEntry(`volatility_${botId}`, botId, Math.round(value * 1000), last, botIds.length * 1000 || 1);
+    }).filter((entry) => entry.count > 0);
+    return createBoard('volatility', now, sortBoardEntries(entries));
+  }
+
+  computePersistenceAverage(botId: string): number {
+    const descriptors = this.signalHistoryByBot.get(botId) ?? [];
+    if (descriptors.length === 0) return 0;
+    return descriptors.reduce((total, descriptor) => total + readMetricFromDescriptor(descriptor, 'persistence'), 0) / descriptors.length;
+  }
+
+  buildPersistenceBoard(now = this.clock.now()): PersonaEvolutionBoard {
+    const botIds = [...this.signalHistoryByBot.keys()];
+    const entries = botIds.map((botId) => {
+      const value = this.computePersistenceAverage(botId);
+      const last = this.lastSeenAt.get(`bot:${botId}`) ?? null;
+      return makeCounterEntry(`persistence_${botId}`, botId, Math.round(value * 1000), last, botIds.length * 1000 || 1);
+    }).filter((entry) => entry.count > 0);
+    return createBoard('persistence', now, sortBoardEntries(entries));
+  }
+
+  computeDominanceAverage(botId: string): number {
+    const descriptors = this.signalHistoryByBot.get(botId) ?? [];
+    if (descriptors.length === 0) return 0;
+    return descriptors.reduce((total, descriptor) => total + readMetricFromDescriptor(descriptor, 'dominance'), 0) / descriptors.length;
+  }
+
+  buildDominanceBoard(now = this.clock.now()): PersonaEvolutionBoard {
+    const botIds = [...this.signalHistoryByBot.keys()];
+    const entries = botIds.map((botId) => {
+      const value = this.computeDominanceAverage(botId);
+      const last = this.lastSeenAt.get(`bot:${botId}`) ?? null;
+      return makeCounterEntry(`dominance_${botId}`, botId, Math.round(value * 1000), last, botIds.length * 1000 || 1);
+    }).filter((entry) => entry.count > 0);
+    return createBoard('dominance', now, sortBoardEntries(entries));
+  }
+
+  computeHumiliationAverage(botId: string): number {
+    const descriptors = this.signalHistoryByBot.get(botId) ?? [];
+    if (descriptors.length === 0) return 0;
+    return descriptors.reduce((total, descriptor) => total + readMetricFromDescriptor(descriptor, 'humiliation'), 0) / descriptors.length;
+  }
+
+  buildHumiliationBoard(now = this.clock.now()): PersonaEvolutionBoard {
+    const botIds = [...this.signalHistoryByBot.keys()];
+    const entries = botIds.map((botId) => {
+      const value = this.computeHumiliationAverage(botId);
+      const last = this.lastSeenAt.get(`bot:${botId}`) ?? null;
+      return makeCounterEntry(`humiliation_${botId}`, botId, Math.round(value * 1000), last, botIds.length * 1000 || 1);
+    }).filter((entry) => entry.count > 0);
+    return createBoard('humiliation', now, sortBoardEntries(entries));
+  }
+
+  computeHypeAverage(botId: string): number {
+    const descriptors = this.signalHistoryByBot.get(botId) ?? [];
+    if (descriptors.length === 0) return 0;
+    return descriptors.reduce((total, descriptor) => total + readMetricFromDescriptor(descriptor, 'hype'), 0) / descriptors.length;
+  }
+
+  buildHypeBoard(now = this.clock.now()): PersonaEvolutionBoard {
+    const botIds = [...this.signalHistoryByBot.keys()];
+    const entries = botIds.map((botId) => {
+      const value = this.computeHypeAverage(botId);
+      const last = this.lastSeenAt.get(`bot:${botId}`) ?? null;
+      return makeCounterEntry(`hype_${botId}`, botId, Math.round(value * 1000), last, botIds.length * 1000 || 1);
+    }).filter((entry) => entry.count > 0);
+    return createBoard('hype', now, sortBoardEntries(entries));
+  }
+
+  computeSilenceAverage(botId: string): number {
+    const descriptors = this.signalHistoryByBot.get(botId) ?? [];
+    if (descriptors.length === 0) return 0;
+    return descriptors.reduce((total, descriptor) => total + readMetricFromDescriptor(descriptor, 'silence'), 0) / descriptors.length;
+  }
+
+  buildSilenceBoard(now = this.clock.now()): PersonaEvolutionBoard {
+    const botIds = [...this.signalHistoryByBot.keys()];
+    const entries = botIds.map((botId) => {
+      const value = this.computeSilenceAverage(botId);
+      const last = this.lastSeenAt.get(`bot:${botId}`) ?? null;
+      return makeCounterEntry(`silence_${botId}`, botId, Math.round(value * 1000), last, botIds.length * 1000 || 1);
+    }).filter((entry) => entry.count > 0);
+    return createBoard('silence', now, sortBoardEntries(entries));
+  }
+
+  computeRecoveryAverage(botId: string): number {
+    const descriptors = this.signalHistoryByBot.get(botId) ?? [];
+    if (descriptors.length === 0) return 0;
+    return descriptors.reduce((total, descriptor) => total + readMetricFromDescriptor(descriptor, 'recovery'), 0) / descriptors.length;
+  }
+
+  buildRecoveryBoard(now = this.clock.now()): PersonaEvolutionBoard {
+    const botIds = [...this.signalHistoryByBot.keys()];
+    const entries = botIds.map((botId) => {
+      const value = this.computeRecoveryAverage(botId);
+      const last = this.lastSeenAt.get(`bot:${botId}`) ?? null;
+      return makeCounterEntry(`recovery_${botId}`, botId, Math.round(value * 1000), last, botIds.length * 1000 || 1);
+    }).filter((entry) => entry.count > 0);
+    return createBoard('recovery', now, sortBoardEntries(entries));
+  }
+
+  computeProofAverage(botId: string): number {
+    const descriptors = this.signalHistoryByBot.get(botId) ?? [];
+    if (descriptors.length === 0) return 0;
+    return descriptors.reduce((total, descriptor) => total + readMetricFromDescriptor(descriptor, 'proof'), 0) / descriptors.length;
+  }
+
+  buildProofBoard(now = this.clock.now()): PersonaEvolutionBoard {
+    const botIds = [...this.signalHistoryByBot.keys()];
+    const entries = botIds.map((botId) => {
+      const value = this.computeProofAverage(botId);
+      const last = this.lastSeenAt.get(`bot:${botId}`) ?? null;
+      return makeCounterEntry(`proof_${botId}`, botId, Math.round(value * 1000), last, botIds.length * 1000 || 1);
+    }).filter((entry) => entry.count > 0);
+    return createBoard('proof', now, sortBoardEntries(entries));
+  }
+
+  computeNegotiationAverage(botId: string): number {
+    const descriptors = this.signalHistoryByBot.get(botId) ?? [];
+    if (descriptors.length === 0) return 0;
+    return descriptors.reduce((total, descriptor) => total + readMetricFromDescriptor(descriptor, 'negotiation'), 0) / descriptors.length;
+  }
+
+  buildNegotiationBoard(now = this.clock.now()): PersonaEvolutionBoard {
+    const botIds = [...this.signalHistoryByBot.keys()];
+    const entries = botIds.map((botId) => {
+      const value = this.computeNegotiationAverage(botId);
+      const last = this.lastSeenAt.get(`bot:${botId}`) ?? null;
+      return makeCounterEntry(`negotiation_${botId}`, botId, Math.round(value * 1000), last, botIds.length * 1000 || 1);
+    }).filter((entry) => entry.count > 0);
+    return createBoard('negotiation', now, sortBoardEntries(entries));
+  }
+
+  computeSceneAverage(botId: string): number {
+    const descriptors = this.signalHistoryByBot.get(botId) ?? [];
+    if (descriptors.length === 0) return 0;
+    return descriptors.reduce((total, descriptor) => total + readMetricFromDescriptor(descriptor, 'scene'), 0) / descriptors.length;
+  }
+
+  buildSceneBoard(now = this.clock.now()): PersonaEvolutionBoard {
+    const botIds = [...this.signalHistoryByBot.keys()];
+    const entries = botIds.map((botId) => {
+      const value = this.computeSceneAverage(botId);
+      const last = this.lastSeenAt.get(`bot:${botId}`) ?? null;
+      return makeCounterEntry(`scene_${botId}`, botId, Math.round(value * 1000), last, botIds.length * 1000 || 1);
+    }).filter((entry) => entry.count > 0);
+    return createBoard('scene', now, sortBoardEntries(entries));
+  }
+
+  computePersonaAverage(botId: string): number {
+    const descriptors = this.signalHistoryByBot.get(botId) ?? [];
+    if (descriptors.length === 0) return 0;
+    return descriptors.reduce((total, descriptor) => total + readMetricFromDescriptor(descriptor, 'persona'), 0) / descriptors.length;
+  }
+
+  buildPersonaBoard(now = this.clock.now()): PersonaEvolutionBoard {
+    const botIds = [...this.signalHistoryByBot.keys()];
+    const entries = botIds.map((botId) => {
+      const value = this.computePersonaAverage(botId);
+      const last = this.lastSeenAt.get(`bot:${botId}`) ?? null;
+      return makeCounterEntry(`persona_${botId}`, botId, Math.round(value * 1000), last, botIds.length * 1000 || 1);
+    }).filter((entry) => entry.count > 0);
+    return createBoard('persona', now, sortBoardEntries(entries));
+  }
+
+  computeAuthorityAverage(botId: string): number {
+    const descriptors = this.signalHistoryByBot.get(botId) ?? [];
+    if (descriptors.length === 0) return 0;
+    return descriptors.reduce((total, descriptor) => total + readMetricFromDescriptor(descriptor, 'authority'), 0) / descriptors.length;
+  }
+
+  buildAuthorityBoard(now = this.clock.now()): PersonaEvolutionBoard {
+    const botIds = [...this.signalHistoryByBot.keys()];
+    const entries = botIds.map((botId) => {
+      const value = this.computeAuthorityAverage(botId);
+      const last = this.lastSeenAt.get(`bot:${botId}`) ?? null;
+      return makeCounterEntry(`authority_${botId}`, botId, Math.round(value * 1000), last, botIds.length * 1000 || 1);
+    }).filter((entry) => entry.count > 0);
+    return createBoard('authority', now, sortBoardEntries(entries));
+  }
+
+  computeVarianceAverage(botId: string): number {
+    const descriptors = this.signalHistoryByBot.get(botId) ?? [];
+    if (descriptors.length === 0) return 0;
+    return descriptors.reduce((total, descriptor) => total + readMetricFromDescriptor(descriptor, 'variance'), 0) / descriptors.length;
+  }
+
+  buildVarianceBoard(now = this.clock.now()): PersonaEvolutionBoard {
+    const botIds = [...this.signalHistoryByBot.keys()];
+    const entries = botIds.map((botId) => {
+      const value = this.computeVarianceAverage(botId);
+      const last = this.lastSeenAt.get(`bot:${botId}`) ?? null;
+      return makeCounterEntry(`variance_${botId}`, botId, Math.round(value * 1000), last, botIds.length * 1000 || 1);
+    }).filter((entry) => entry.count > 0);
+    return createBoard('variance', now, sortBoardEntries(entries));
+  }
+
+  buildPlayerBoard(now = this.clock.now()): PersonaEvolutionBoard {
+    const keys = [...this.projectionHistoryByPlayer.keys()];
+    const total = this.sumMapLengths(this.projectionHistoryByPlayer);
+    const entries = keys.map((key) => {
+      const items = this.projectionHistoryByPlayer.get(key) ?? [];
+      const last = items.length > 0 ? items[items.length - 1]!.projectedAt : null;
+      return makeCounterEntry(`player_${key}`, key, items.length, last, total);
+    });
+    return createBoard('player', now, sortBoardEntries(entries));
+  }
+
+  buildChannelBoard(now = this.clock.now()): PersonaEvolutionBoard {
+    const keys = [...this.projectionHistoryByChannel.keys()];
+    const total = this.sumMapLengths(this.projectionHistoryByChannel);
+    const entries = keys.map((key) => {
+      const items = this.projectionHistoryByChannel.get(key) ?? [];
+      const last = items.length > 0 ? items[items.length - 1]!.projectedAt : null;
+      return makeCounterEntry(`channel_${key}`, key, items.length, last, total);
+    });
+    return createBoard('channel', now, sortBoardEntries(entries));
+  }
+
+  buildModeBoard(now = this.clock.now()): PersonaEvolutionBoard {
+    const total = this.sumMapLengths(this.projectionHistoryByBot);
+    const entries = MODES.map((mode) => {
+      const count = this.countProjectionsForMode(mode);
+      const last = this.lastProjectionForMode(mode);
+      return makeCounterEntry(`mode_${mode}`, mode, count, last, total);
+    }).filter((entry) => entry.count > 0);
+    return createBoard('mode', now, sortBoardEntries(entries));
+  }
+
+  buildOverlayBoard(now = this.clock.now()): PersonaEvolutionBoard {
+    const keys = [...this.overlaysByChannel.keys()];
+    const total = keys.length || 1;
+    const entries = keys.map((key) => makeCounterEntry(`overlay_${key}`, key, 1, this.lastSeenAt.get(`overlay:${key}`) ?? null, total));
+    return createBoard('overlay', now, sortBoardEntries(entries));
+  }
+
+  buildRelationshipBoard(now = this.clock.now()): PersonaEvolutionBoard {
+    const keys = [...this.relationshipsByPlayer.keys()];
+    const total = keys.length || 1;
+    const entries = keys.map((key) => makeCounterEntry(`relationship_${key}`, key, 1, this.lastSeenAt.get(`relationship:${key}`) ?? null, total));
+    return createBoard('relationship', now, sortBoardEntries(entries));
+  }
+
+  buildFingerprintBoard(now = this.clock.now()): PersonaEvolutionBoard {
+    const keys = [...this.fingerprintsByPlayer.keys()];
+    const total = keys.length || 1;
+    const entries = keys.map((key) => makeCounterEntry(`fingerprint_${key}`, key, 1, this.lastSeenAt.get(`fingerprint:${key}`) ?? null, total));
+    return createBoard('fingerprint', now, sortBoardEntries(entries));
+  }
+
+  buildSeasonBoard(now = this.clock.now()): PersonaEvolutionBoard {
+    const entries = MODES.map((mode) => makeCounterEntry(`season_${mode}`, mode, this.countProjectionsForMode(mode), this.lastProjectionForMode(mode), this.sumMapLengths(this.projectionHistoryByBot) || 1)).filter((entry) => entry.count > 0);
+    return createBoard('season', now, sortBoardEntries(entries));
+  }
+
+  buildWindowBoard(now = this.clock.now()): PersonaEvolutionBoard {
+    const total = this.cache.size || 1;
+    const entries = [...this.cache.values()].map((entry) => makeCounterEntry(`window_${entry.key}`, entry.botId, 1, entry.createdAt, total));
+    return createBoard('window', now, sortBoardEntries(entries));
+  }
+
+  buildRiskBoard(now = this.clock.now()): PersonaEvolutionBoard {
+    const band = this.computeRiskBand(now);
+    const counts = new Map<PersonaEvolutionRiskBand, number>();
+    counts.set(band, (counts.get(band) ?? 0) + 1);
+    const entries = [...counts.entries()].map(([key, value]) => makeCounterEntry(`risk_${key}`, key, value, now, 1));
+    return createBoard('risk', now, sortBoardEntries(entries));
+  }
+
+  buildAuditBoard(now = this.clock.now()): PersonaEvolutionBoard {
+    const total = this.audits.length || 1;
+    const entries = this.audits.map((audit) => makeCounterEntry(`audit_${audit.auditId}`, audit.health, 1, audit.createdAt, total));
+    return createBoard('audit', now, sortBoardEntries(entries));
+  }
+
+  buildProjectionBoard(now = this.clock.now()): PersonaEvolutionBoard {
+    const total = this.sumMapLengths(this.projectionHistoryByBot);
+    const entries = [...this.projectionHistoryByBot.entries()].map(([key, receipts]) => makeCounterEntry(`projection_${key}`, key, receipts.length, receipts.length > 0 ? receipts[receipts.length - 1]!.projectedAt : null, total));
+    return createBoard('projection', now, sortBoardEntries(entries));
+  }
+
+  buildEventBoard(now = this.clock.now()): PersonaEvolutionBoard {
+    const total = this.sumMapLengths(this.eventHistoryByBot);
+    const entries = [...this.eventHistoryByBot.entries()].map(([key, events]) => makeCounterEntry(`event_${key}`, key, events.length, events.length > 0 ? events[events.length - 1]!.createdAt : null, total));
+    return createBoard('event', now, sortBoardEntries(entries));
+  }
+
+  buildSignalBoard(now = this.clock.now()): PersonaEvolutionBoard {
+    const total = this.sumMapLengths(this.signalHistoryByBot);
+    const entries = [...this.signalHistoryByBot.entries()].map(([key, signals]) => makeCounterEntry(`signal_${key}`, key, signals.length, this.lastSeenAt.get(`bot:${key}`) ?? null, total));
+    return createBoard('signal', now, sortBoardEntries(entries));
+  }
+
+  buildSnapshotBoard(now = this.clock.now()): PersonaEvolutionBoard {
+    const snapshot = this.getSnapshotDescriptor(now);
+    const entries = [
+      makeCounterEntry(`snapshot_bots`, `bots`, snapshot.botsTracked, now, snapshot.botsTracked + snapshot.playersTracked + snapshot.channelsTracked || 1),
+      makeCounterEntry(`snapshot_players`, `players`, snapshot.playersTracked, now, snapshot.botsTracked + snapshot.playersTracked + snapshot.channelsTracked || 1),
+      makeCounterEntry(`snapshot_channels`, `channels`, snapshot.channelsTracked, now, snapshot.botsTracked + snapshot.playersTracked + snapshot.channelsTracked || 1),
+    ];
+    return createBoard('snapshot', now, sortBoardEntries(entries));
+  }
+
+  buildBotBoard(now = this.clock.now()): PersonaEvolutionBoard {
+    const keys = [...this.projectionHistoryByBot.keys()];
+    const total = this.sumMapLengths(this.projectionHistoryByBot);
+    const entries = keys.map((key) => {
+      const items = this.projectionHistoryByBot.get(key) ?? [];
+      const last = items.length > 0 ? items[items.length - 1]!.projectedAt : null;
+      return makeCounterEntry(`bot_${key}`, key, items.length, last, total);
+    });
+    return createBoard("bot", now, sortBoardEntries(entries));
+  }
+
+  exportBoards(now = this.clock.now()): readonly PersonaEvolutionBoard[] {
+    return [
+      this.buildBotBoard(now),
+      this.buildPlayerBoard(now),
+      this.buildChannelBoard(now),
+      this.buildModeBoard(now),
+      this.buildOverlayBoard(now),
+      this.buildRelationshipBoard(now),
+      this.buildFingerprintBoard(now),
+      this.buildProjectionBoard(now),
+      this.buildSignalBoard(now),
+      this.buildEventBoard(now),
+      this.buildAuditBoard(now),
+      this.buildRiskBoard(now),
+      this.buildSnapshotBoard(now),
+    ];
+  }
+
+  compareBots(leftBotId: string, rightBotId: string): Record<string, number> {
+    return {
+      aggression: this.computeAggressionAverage(leftBotId) - this.computeAggressionAverage(rightBotId),
+      respect: this.computeRespectAverage(leftBotId) - this.computeRespectAverage(rightBotId),
+      callbackAppetite: this.computeCallbackappetiteAverage(leftBotId) - this.computeCallbackappetiteAverage(rightBotId),
+      publicPressure: this.computePublicpressureAverage(leftBotId) - this.computePublicpressureAverage(rightBotId),
+      privatePressure: this.computePrivatepressureAverage(leftBotId) - this.computePrivatepressureAverage(rightBotId),
+      myth: this.computeMythAverage(leftBotId) - this.computeMythAverage(rightBotId),
+      instability: this.computeInstabilityAverage(leftBotId) - this.computeInstabilityAverage(rightBotId),
+      adaptation: this.computeAdaptationAverage(leftBotId) - this.computeAdaptationAverage(rightBotId),
+      novelty: this.computeNoveltyAverage(leftBotId) - this.computeNoveltyAverage(rightBotId),
+      memory: this.computeMemoryAverage(leftBotId) - this.computeMemoryAverage(rightBotId),
+      pressure: this.computePressureAverage(leftBotId) - this.computePressureAverage(rightBotId),
+      rescue: this.computeRescueAverage(leftBotId) - this.computeRescueAverage(rightBotId),
+      spectacle: this.computeSpectacleAverage(leftBotId) - this.computeSpectacleAverage(rightBotId),
+      heat: this.computeHeatAverage(leftBotId) - this.computeHeatAverage(rightBotId),
+      trust: this.computeTrustAverage(leftBotId) - this.computeTrustAverage(rightBotId),
+      rivalry: this.computeRivalryAverage(leftBotId) - this.computeRivalryAverage(rightBotId),
+      patience: this.computePatienceAverage(leftBotId) - this.computePatienceAverage(rightBotId),
+      volatility: this.computeVolatilityAverage(leftBotId) - this.computeVolatilityAverage(rightBotId),
+      persistence: this.computePersistenceAverage(leftBotId) - this.computePersistenceAverage(rightBotId),
+      dominance: this.computeDominanceAverage(leftBotId) - this.computeDominanceAverage(rightBotId),
+      humiliation: this.computeHumiliationAverage(leftBotId) - this.computeHumiliationAverage(rightBotId),
+      hype: this.computeHypeAverage(leftBotId) - this.computeHypeAverage(rightBotId),
+      silence: this.computeSilenceAverage(leftBotId) - this.computeSilenceAverage(rightBotId),
+      recovery: this.computeRecoveryAverage(leftBotId) - this.computeRecoveryAverage(rightBotId),
+      proof: this.computeProofAverage(leftBotId) - this.computeProofAverage(rightBotId),
+      negotiation: this.computeNegotiationAverage(leftBotId) - this.computeNegotiationAverage(rightBotId),
+      scene: this.computeSceneAverage(leftBotId) - this.computeSceneAverage(rightBotId),
+      persona: this.computePersonaAverage(leftBotId) - this.computePersonaAverage(rightBotId),
+      authority: this.computeAuthorityAverage(leftBotId) - this.computeAuthorityAverage(rightBotId),
+      variance: this.computeVarianceAverage(leftBotId) - this.computeVarianceAverage(rightBotId),
+    };
+  }
+
+  exportDetailedState(now = this.clock.now()): Record<string, unknown> {
+    return {
+      manifest: this.getManifest(now),
+      snapshot: this.getSnapshotDescriptor(now),
+      health: this.getHealthSnapshot(now),
+      boards: this.exportBoards(now),
+      audits: this.listAudits(),
+      cacheKeys: [...this.cache.keys()].sort(),
+    };
+  }
+
+  getProfile(botId: string, playerId: string | null | undefined, now = this.clock.now()): ChatPersonaEvolutionProfile {
+    const signal = this.project({ botId, playerId, now });
+    const key = profileKey(botId, playerId);
+    const cached = this.latestProfileByKey.get(key);
+    const profile: ChatPersonaEvolutionProfile = Object.freeze({
+      botId,
+      playerId: playerId ?? null,
+      stage: signal.stage,
+      signal,
+      updatedAt: now,
+      aggression01: this.computeAggressionAverage(botId),
+      respect01: this.computeRespectAverage(botId),
+      callbackAppetite01: this.computeCallbackappetiteAverage(botId),
+      publicPressure01: this.computePublicpressureAverage(botId),
+      privatePressure01: this.computePrivatepressureAverage(botId),
+      mythBias01: this.computeMythAverage(botId),
+      volatility01: this.computeVolatilityAverage(botId),
+      eventCount: this.listBotEvents(botId).length,
+      projectionCount: this.listBotProjections(botId).length,
+    });
+    if (!cached || cached.stage !== profile.stage) {
+      this.recordTransition(botId, playerId ?? null, cached?.stage ?? null, profile.stage, now, cached ? 'PROFILE_REFRESH' : 'PROFILE_INITIALIZED');
+    }
+    this.latestProfileByKey.set(key, profile);
+    return profile;
+  }
+
+  listTransitions(): readonly EvolutionStageTransitionRecord[] {
+    return Object.freeze([...this.transitionHistoryByBot.values()].flat().sort((a, b) => a.transitionedAt - b.transitionedAt));
+  }
+
+  getTransitionHistoryForBot(botId: string): readonly EvolutionStageTransitionRecord[] {
+    return this.transitionHistoryByBot.get(botId) ?? [];
+  }
+
+  computeBotStats(botId: string, now = this.clock.now()): BotEvolutionStats {
+    const current = this.getProfile(botId, null, now);
+    const transitions = this.getTransitionHistoryForBot(botId);
+    const stageCounts: Record<string, number> = {};
+    for (const transition of transitions) {
+      stageCounts[transition.toStage] = (stageCounts[transition.toStage] ?? 0) + 1;
+    }
+    stageCounts[current.stage] = (stageCounts[current.stage] ?? 0) + 1;
+    return Object.freeze({
+      botId,
+      profilesTracked: [...this.latestProfileByKey.values()].filter((profile) => profile.botId === botId).length,
+      eventCount: this.listBotEvents(botId).length,
+      projectionCount: this.listBotProjections(botId).length,
+      currentStage: current.stage,
+      stageCounts: Object.freeze(stageCounts),
+      averages: Object.freeze(createChatBotPersonaEvolutionMetricDeck(this, botId)),
+    });
+  }
+
+  computeSystemStats(now = this.clock.now()): EvolutionSystemStats {
+    const stageCounts: Record<string, number> = { MYTHIC: 0, RIVALRIC: 0 };
+    for (const botId of this.projectionHistoryByBot.keys()) {
+      const profile = this.getProfile(botId, null, now);
+      stageCounts[profile.stage] = (stageCounts[profile.stage] ?? 0) + 1;
+      if (profile.stage === 'MYTHIC') stageCounts.MYTHIC += 1;
+      if (profile.stage === 'RIVALRIC') stageCounts.RIVALRIC += 1;
+    }
+    return Object.freeze({
+      totalProfiles: this.latestProfileByKey.size,
+      totalBots: this.projectionHistoryByBot.size,
+      totalPlayers: this.projectionHistoryByPlayer.size,
+      totalEvents: this.sumMapLengths(this.eventHistoryByBot),
+      totalProjections: this.sumMapLengths(this.projectionHistoryByBot),
+      stageCounts: Object.freeze(stageCounts) as EvolutionSystemStats['stageCounts'],
+      health: this.computeHealth(now),
+    });
+  }
+
+  hasReachedStage(botId: string, playerId: string | null | undefined, targetStage: ChatPersonaStageId, now = this.clock.now()): boolean {
+    return this.getProfile(botId, playerId, now).stage === targetStage
+      || this.getTransitionHistoryForBot(botId).some((transition) => transition.toStage === targetStage && transition.playerId === (playerId ?? null));
+  }
+
+  scoreBotAggressionLevel(botId: string, _playerId: string | null | undefined, _now = this.clock.now()): number {
+    return this.computeAggressionAverage(botId);
+  }
+
   inferBotObjective(
     botId: string,
     playerId: string | null | undefined,
     relationship?: ChatRelationshipSummaryView | null,
     fingerprint?: ChatPlayerFingerprintSnapshot | null,
-    now?: number,
-  ): string;
+    now = this.clock.now(),
+  ): string {
+    const profile = this.getProfile(botId, playerId, now);
+    if (profile.stage === 'MYTHIC') return 'DOMINATE_PUBLIC_MYTH';
+    if (relationship) return 'ADAPT_TO_RELATIONSHIP_PRESSURE';
+    if (fingerprint) return 'EXPLOIT_PLAYER_PATTERN';
+    if (profile.callbackAppetite01 >= 0.7) return 'FORCE_CALLBACK';
+    if (profile.publicPressure01 >= profile.privatePressure01) return 'SEIZE_PUBLIC_STAGE';
+    return 'ESCALATE_PRIVATE_PRESSURE';
+  }
+
   buildPersonaInsight(
     botId: string,
     playerId: string | null | undefined,
-    now?: number,
-    channelId?: string | null,
-    fingerprint?: ChatPlayerFingerprintSnapshot | null,
-    relationship?: ChatRelationshipSummaryView | null,
-    overlay?: ChatLiveOpsOverlayContext | null,
-  ): PersonaInsight;
-  buildCounterplayHint(
-    botId: string,
-    playerId: string,
-    fingerprint: ChatPlayerFingerprintSnapshot,
-    now?: number,
-  ): BotCounterplayHint;
-  serializeCompact(now?: number): EvolutionServiceCompactSnapshot;
-  hydrateFromSnapshot(snapshot: EvolutionServiceCompactSnapshot, now?: number): void;
-  flushProjectionCache(): void;
-}
-
-// ─── Evolution-aware domain types ─────────────────────────────────────────────
-
-/** Input for a combined NPC plan + persona evolution projection. */
-export interface BackendNpcEvolutionRequest {
-  readonly planRequests: readonly BackendNpcPlanRequest[];
-  readonly room: BackendNpcRoomState;
-  readonly ledger: BackendNpcDomainLedger;
-  readonly nowMs: number;
-  readonly botId: string;
-  readonly playerId?: string | null;
-  readonly channelId?: string | null;
-  readonly fingerprint?: ChatPlayerFingerprintSnapshot | null;
-  readonly relationship?: ChatRelationshipSummaryView | null;
-  readonly overlay?: ChatLiveOpsOverlayContext | null;
-}
-
-/** Combined output of a plan + evolution projection pass. */
-export interface BackendNpcEvolutionResult {
-  readonly plan: BackendNpcBatchPlan;
-  readonly evolutionSignal: ChatPersonaEvolutionSignal;
-  readonly personaInsight: PersonaInsight;
-  readonly counterplayHint?: BotCounterplayHint;
-  readonly inferredObjective: string;
-  readonly botAggressionScore: number;
-}
-
-/** An NPC plan decision enriched with evolution signal metadata. */
-export interface BackendNpcEvolutionEnrichedDecision extends BackendNpcPlanDecision {
-  readonly evolutionStage: ChatPersonaStageId;
-  readonly evolutionTemperament: string;
-  readonly evolutionCallbackAggression: number;
-  readonly evolutionTransformBiases: readonly string[];
-  readonly evolutionSelectionBias: number;
-}
-
-/** Full domain snapshot including evolution state. */
-export interface BackendNpcFullDomainSnapshot extends BackendNpcDomainSnapshot {
-  readonly evolutionSnapshot: ChatPersonaEvolutionSnapshot;
-  readonly evolutionSystemStats: EvolutionSystemStats;
-  readonly evolutionTransitionCount: number;
-}
-
-/** Planning statistics for a room within a time window. */
-export interface BackendNpcPlanningStats {
-  readonly roomId: string;
-  readonly modeId: string;
-  readonly windowMs: number;
-  readonly totalPlansRan: number;
-  readonly winnersFound: number;
-  readonly winnersByKind: Readonly<Record<NpcActorKind, number>>;
-  readonly shadowEmissions: number;
-  readonly deferredEmissions: number;
-  readonly droppedEmissions: number;
-  readonly suppressionRate: number;
-  readonly computedAtMs: number;
-}
-
-/** NPC system health summary. */
-export interface BackendNpcSystemHealth {
-  readonly registryLinesTotal: number;
-  readonly ambientLines: number;
-  readonly helperLines: number;
-  readonly haterLines: number;
-  readonly ambientPersonas: number;
-  readonly helperPersonas: number;
-  readonly haterPersonas: number;
-  readonly evolutionProfilesTotal: number;
-  readonly evolutionMythicProfiles: number;
-  readonly evolutionRivalricProfiles: number;
-  readonly suppressionPolicyReady: boolean;
-  readonly cadencePolicyReady: boolean;
-  readonly computedAtMs: number;
-}
-
-// ─── Evolution-aware domain orchestration ─────────────────────────────────────
-
-/**
- * BackendChatNpcDomainWithEvolution extends the base domain with full
- * persona evolution integration. This is the production authority class for
- * all NPC planning when evolution context is available.
- *
- * Usage pattern:
- *   const domain = new BackendChatNpcDomainWithEvolution();
- *   const result = await domain.planWithEvolution({ planRequests, room, ledger, nowMs, botId, playerId, ... });
- *   applyWinner(result.plan, ledger);
- *   observeEvolutionEvent(domain.evolutionService, winner, room);
- */
-export class BackendChatNpcDomainWithEvolution extends BackendChatNpcDomain {
-  public readonly evolutionService: IBackendEvolutionService;
-
-  public constructor(input?: {
-    readonly ambientRegistry?: AmbientNpcRegistry;
-    readonly helperRegistry?: HelperDialogueRegistry;
-    readonly haterRegistry?: HaterDialogueRegistry;
-    readonly cadencePolicy?: NpcCadencePolicy;
-    readonly suppressionPolicy?: NpcSuppressionPolicy;
-    readonly evolutionService?: IBackendEvolutionService;
-  }) {
-    super(input);
-    this.evolutionService = input?.evolutionService ?? (createChatBotPersonaEvolutionService() as unknown as IBackendEvolutionService);
-  }
-
-  /**
-   * Run a full NPC plan pass with persona evolution signal projection.
-   * Returns the batch plan AND the evolution signal, enriched persona insight,
-   * optional counterplay hint, inferred bot objective, and aggression score.
-   */
-  public planWithEvolution(request: BackendNpcEvolutionRequest): BackendNpcEvolutionResult {
-    const plan = this.planBatch(request.planRequests, request.room, request.ledger);
-    const projectionInput: EvolutionProjectionInput = {
-      botId: request.botId,
-      playerId: request.playerId,
-      now: request.nowMs,
-      channelId: request.channelId,
-      fingerprint: request.fingerprint,
-      relationship: request.relationship,
-      overlay: request.overlay,
-    };
-    const evolutionSignal = this.evolutionService.project(projectionInput);
-    const personaInsight = this.evolutionService.buildPersonaInsight(
-      request.botId,
-      request.playerId,
-      request.nowMs,
-      request.channelId,
-      request.fingerprint,
-      request.relationship,
-      request.overlay,
-    );
-    const counterplayHint = request.fingerprint
-      ? this.evolutionService.buildCounterplayHint(
-          request.botId,
-          request.playerId ?? request.botId,
-          request.fingerprint,
-          request.nowMs,
-        )
-      : undefined;
-    const inferredObjective = this.evolutionService.inferBotObjective(
-      request.botId,
-      request.playerId,
-      request.relationship,
-      request.fingerprint,
-      request.nowMs,
-    );
-    const botAggressionScore = this.evolutionService.scoreBotAggressionLevel(
-      request.botId,
-      request.playerId,
-      request.nowMs,
-    );
-
-    return Object.freeze({
-      plan,
-      evolutionSignal,
-      personaInsight,
-      counterplayHint,
-      inferredObjective,
-      botAggressionScore: Number(botAggressionScore.toFixed(6)),
-    });
-  }
-
-  /**
-   * Enrich a BackendNpcPlanDecision with the current evolution signal metadata.
-   */
-  public enrichDecisionWithEvolution(
-    decision: BackendNpcPlanDecision,
-    signal: ChatPersonaEvolutionSignal,
-  ): BackendNpcEvolutionEnrichedDecision {
-    return Object.freeze({
-      ...decision,
-      evolutionStage: signal.stage,
-      evolutionTemperament: signal.temperament,
-      evolutionCallbackAggression: signal.callbackAggression01,
-      evolutionTransformBiases: signal.transformBiases,
-      evolutionSelectionBias: signal.selectionBias01,
-    });
-  }
-
-  /**
-   * Observe a game event in the evolution service for a given bot+player pair,
-   * triggered by a NPC plan winner being applied.
-   */
-  public observePlanResult(
-    winner: BackendNpcPlanDecision | null,
-    room: BackendNpcRoomState,
-    botId: string,
-    playerId: string | null | undefined,
-    nowMs: number,
-  ): ChatPersonaEvolutionProfile | null {
-    if (!winner || !winner.allow) return null;
-
-    let eventType: ChatPersonaEvolutionEvent['eventType'] | null = null;
-    const context = winner.context;
-
-    if (context === 'PLAYER_SHIELD_BREAK' || context === 'PLAYER_NEAR_BANKRUPTCY') {
-      eventType = 'PLAYER_COLLAPSE';
-    } else if (context === 'PLAYER_COMEBACK') {
-      eventType = 'PLAYER_COMEBACK';
-    } else if (context === 'NEAR_SOVEREIGNTY') {
-      eventType = 'PLAYER_PERFECT_DEFENSE';
-    } else if (context === 'BOT_WINNING' || context === 'BOT_DEFEATED') {
-      eventType = winner.actorKind === 'HATER' ? 'BOT_TAUNT_EMITTED' : 'BOT_RETREAT_EMITTED';
-    } else if (context === 'INVASION_OPEN' || context === 'INVASION_CLOSE') {
-      eventType = 'LIVEOPS_INTRUSION';
-    } else if (winner.actorKind === 'HATER') {
-      eventType = 'BOT_TAUNT_EMITTED';
-    } else if (winner.suppression.visibility === 'public' && winner.actorKind === 'AMBIENT') {
-      eventType = 'PUBLIC_WITNESS';
-    } else {
-      return null; // Not every emission deserves an evolution event
-    }
-
-    if (!eventType) return null;
-
-    const event: ChatPersonaEvolutionEvent = Object.freeze({
-      eventId: `evo_${winner.request.requestId}_${nowMs}`,
-      botId,
-      playerId: playerId ?? null,
-      eventType,
-      createdAt: nowMs,
-      intensity01: clamp01(room.pressure * 0.4 + room.heat * 0.3 + room.confidence * 0.3),
-      publicWitness01: winner.suppression.visibility === 'public' ? 0.85 : 0.25,
-      pressureBand: room.pressure >= 0.72
-        ? 'CRITICAL'
-        : room.pressure >= 0.50
-          ? 'HIGH'
-          : room.pressure >= 0.28
-            ? 'MEDIUM'
-            : 'LOW',
-    });
-
-    return this.evolutionService.observe(event);
-  }
-
-  /**
-   * Observe a batch of game events in the evolution service.
-   */
-  public observeEvolutionBatch(input: EvolutionBatchObserveInput): EvolutionBatchObserveResult {
-    return this.evolutionService.observeBatch(input);
-  }
-
-  /**
-   * Project evolution signals for multiple bots in one call.
-   */
-  public projectEvolutionBatch(inputs: readonly EvolutionProjectionInput[]): EvolutionBatchProjectResult {
-    return this.evolutionService.projectBatch(inputs);
-  }
-
-  /**
-   * Build the full domain snapshot including evolution state.
-   */
-  public buildFullSnapshot(
-    room: BackendNpcRoomState,
-    ledger: BackendNpcDomainLedger,
-    nowMs: number,
-  ): BackendNpcFullDomainSnapshot {
-    const base = this.buildSnapshot(room, ledger, nowMs);
-    const evolutionSnapshot = this.evolutionService.getSnapshot(nowMs);
-    const evolutionSystemStats = this.evolutionService.computeSystemStats(nowMs);
-    const evolutionTransitionCount = this.evolutionService.listTransitions().length;
-    return Object.freeze({
-      ...base,
-      evolutionSnapshot,
-      evolutionSystemStats,
-      evolutionTransitionCount,
-    });
-  }
-
-  /**
-   * Get the current system health summary for this domain instance.
-   */
-  public buildSystemHealth(nowMs = Date.now()): BackendNpcSystemHealth {
-    const ambientSnap = this.ambientRegistry.getSnapshot();
-    const helperSnap = this.helperRegistry.getSnapshot();
-    const haterSnap = this.haterRegistry.getSnapshot();
-    const evolutionStats = this.evolutionService.computeSystemStats(nowMs);
-    return Object.freeze({
-      registryLinesTotal: ambientSnap.totalLines + helperSnap.totalLines + haterSnap.totalLines,
-      ambientLines: ambientSnap.totalLines,
-      helperLines: helperSnap.totalLines,
-      haterLines: haterSnap.totalLines,
-      ambientPersonas: ambientSnap.personas.length,
-      helperPersonas: helperSnap.personas.length,
-      haterPersonas: haterSnap.personas.length,
-      evolutionProfilesTotal: evolutionStats.totalProfiles,
-      evolutionMythicProfiles: evolutionStats.stageCounts.MYTHIC,
-      evolutionRivalricProfiles: evolutionStats.stageCounts.RIVALRIC,
-      suppressionPolicyReady: true,
-      cadencePolicyReady: true,
-      computedAtMs: nowMs,
-    });
-  }
-
-  /**
-   * Get the persona evolution profile for a bot+player pair.
-   */
-  public getEvolutionProfile(botId: string, playerId: string | null | undefined, nowMs = Date.now()): ChatPersonaEvolutionProfile {
-    return this.evolutionService.getProfile(botId, playerId, nowMs);
-  }
-
-  /**
-   * Project the evolution signal for a bot+player pair.
-   */
-  public projectEvolution(input: EvolutionProjectionInput): ChatPersonaEvolutionSignal {
-    return this.evolutionService.project(input);
-  }
-
-  /**
-   * Get the evolution stage for a bot+player pair.
-   */
-  public getEvolutionStage(botId: string, playerId: string | null | undefined, nowMs = Date.now()): ChatPersonaStageId {
-    return this.evolutionService.getProfile(botId, playerId, nowMs).stage;
-  }
-
-  /**
-   * Check whether a bot+player pair has reached a given stage.
-   */
-  public hasEvolutionStage(botId: string, playerId: string | null | undefined, targetStage: ChatPersonaStageId, nowMs = Date.now()): boolean {
-    return this.evolutionService.hasReachedStage(botId, playerId, targetStage, nowMs);
-  }
-
-  /**
-   * Get all stage transitions recorded for a bot.
-   */
-  public getEvolutionTransitions(botId: string): readonly EvolutionStageTransitionRecord[] {
-    return this.evolutionService.getTransitionHistoryForBot(botId);
-  }
-
-  /**
-   * Get bot evolution stats across all its profiles.
-   */
-  public getBotEvolutionStats(botId: string, nowMs = Date.now()): BotEvolutionStats {
-    return this.evolutionService.computeBotStats(botId, nowMs);
-  }
-
-  /**
-   * Build a human-readable persona insight for a bot+player pair.
-   */
-  public buildEvolutionInsight(
-    botId: string,
-    playerId: string | null | undefined,
-    nowMs = Date.now(),
+    now = this.clock.now(),
     channelId?: string | null,
     fingerprint?: ChatPlayerFingerprintSnapshot | null,
     relationship?: ChatRelationshipSummaryView | null,
     overlay?: ChatLiveOpsOverlayContext | null,
   ): PersonaInsight {
-    return this.evolutionService.buildPersonaInsight(botId, playerId, nowMs, channelId, fingerprint, relationship, overlay);
+    const signal = this.project({ botId, playerId, now, channelId, fingerprint, relationship, overlay });
+    return Object.freeze({
+      botId,
+      playerId: playerId ?? null,
+      stage: signal.stage,
+      temperament: signal.temperament,
+      objective: this.inferBotObjective(botId, playerId, relationship, fingerprint, now),
+      aggression01: this.computeAggressionAverage(botId),
+      respect01: this.computeRespectAverage(botId),
+      callbackAggression01: signal.callbackAggression01,
+      selectionBias01: signal.selectionBias01,
+      recommendedTone: signal.callbackAggression01 >= 0.66 ? 'DEFENSIVE_PRECISION' : 'CALM_COUNTERPLAY',
+      tags: Object.freeze(signal.transformBiases),
+    });
   }
 
-  /**
-   * Produce a compact serializable snapshot of the evolution service state.
-   */
-  public serializeEvolutionCompact(nowMs = Date.now()): EvolutionServiceCompactSnapshot {
-    return this.evolutionService.serializeCompact(nowMs);
+  buildCounterplayHint(
+    botId: string,
+    playerId: string,
+    fingerprint: ChatPlayerFingerprintSnapshot,
+    now = this.clock.now(),
+  ): BotCounterplayHint {
+    const insight = this.buildPersonaInsight(botId, playerId, now, null, fingerprint, null, null);
+    const tactics = insight.callbackAggression01 >= 0.66
+      ? ['Delay escalation windows', 'Force proof-based exchanges', 'Avoid public overcommitment']
+      : ['Exploit low-pressure timing', 'Counter with calm tempo control', 'Push selective public witnesses'];
+    return Object.freeze({
+      botId,
+      playerId,
+      stage: insight.stage,
+      title: `${insight.stage} counterplay`,
+      summary: insight.objective,
+      tactics: Object.freeze(tactics),
+    });
   }
 
-  /**
-   * Hydrate the evolution service from a previously persisted snapshot.
-   */
-  public hydrateEvolution(snapshot: EvolutionServiceCompactSnapshot, nowMs = Date.now()): void {
-    this.evolutionService.hydrateFromSnapshot(snapshot, nowMs);
+  serializeCompact(now = this.clock.now()): EvolutionServiceCompactSnapshot {
+    return Object.freeze({
+      generatedAt: now,
+      snapshot: this.getSnapshot(now),
+      health: this.getHealthSnapshot(now),
+      manifest: this.getManifest(now),
+      transitions: this.listTransitions(),
+    });
   }
 
-  /**
-   * Flush the projection cache.
-   */
-  public flushEvolutionCache(): void {
-    this.evolutionService.flushProjectionCache();
-  }
-}
-
-// ─── Domain-level standalone utilities ────────────────────────────────────────
-
-/**
- * Build a narrative summary for an evolution-enriched plan decision.
- */
-export function narrativeSummaryForEnrichedDecision(decision: BackendNpcEvolutionEnrichedDecision): string {
-  const kind = decision.actorKind;
-  const persona = decision.personaId ?? 'INVASION';
-  const context = decision.context;
-  const visibility = decision.suppression.visibility;
-  const stage = decision.evolutionStage;
-  const temperament = decision.evolutionTemperament;
-  const agg = decision.evolutionCallbackAggression.toFixed(3);
-  return `${kind}:${persona} [${stage}/${temperament}] ctx=${context} vis=${visibility} cbAgg=${agg}`;
-}
-
-/**
- * Convert a BackendNpcPlanDecision into a terse one-line log string.
- */
-export function formatPlanDecisionForLog(decision: BackendNpcPlanDecision): string {
-  const allowed = decision.allow ? 'ALLOW' : 'DENY';
-  const persona = decision.personaId ?? (decision.actorKind === 'INVASION' ? 'INVASION' : 'unknown');
-  const text = decision.text
-    ? ` text="${decision.text.slice(0, 40)}${decision.text.length > 40 ? '...' : ''}"`
-    : '';
-  return (
-    `[${allowed}] ${decision.actorKind}:${persona} channel=${decision.channel}` +
-    ` ctx=${decision.context} vis=${decision.suppression.visibility}` +
-    ` score=${decision.suppression.priorityScore.toFixed(3)}${text}`
-  );
-}
-
-/**
- * Build a planning statistics summary from a series of batch plans.
- */
-export function buildPlanningStats(
-  roomId: string,
-  modeId: string,
-  plans: readonly BackendNpcBatchPlan[],
-  nowMs: number,
-  windowMs = 300_000,
-): BackendNpcPlanningStats {
-  const winnersByKind: Record<NpcActorKind, number> = { AMBIENT: 0, HELPER: 0, HATER: 0, INVASION: 0 };
-  let totalPlans = 0;
-  let winnersFound = 0;
-  let shadowEmissions = 0;
-  let deferredEmissions = 0;
-  let droppedEmissions = 0;
-
-  for (const plan of plans) {
-    totalPlans += 1;
-    if (plan.winner) {
-      winnersFound += 1;
-      winnersByKind[plan.winner.actorKind] = (winnersByKind[plan.winner.actorKind] ?? 0) + 1;
+  hydrateFromSnapshot(snapshot: EvolutionServiceCompactSnapshot, _now = this.clock.now()): void {
+    this.warmFromSnapshot(snapshot.snapshot);
+    for (const transition of snapshot.transitions) {
+      const bucket = this.transitionHistoryByBot.get(transition.botId) ?? [];
+      bucket.push(transition);
+      this.transitionHistoryByBot.set(transition.botId, bucket);
     }
-    shadowEmissions += plan.shadowed.length;
-    deferredEmissions += plan.deferred.length;
-    droppedEmissions += plan.rejected.length;
   }
 
-  const totalDecisions = plans.reduce((sum, p) => sum + p.ranked.length, 0);
-  const suppressionRate = totalDecisions > 0
-    ? Number(((totalDecisions - winnersFound) / totalDecisions).toFixed(4))
-    : 0;
+  flushProjectionCache(): void {
+    this.cache.clear();
+  }
 
-  return Object.freeze({
-    roomId,
-    modeId,
-    windowMs,
-    totalPlansRan: totalPlans,
-    winnersFound,
-    winnersByKind: Object.freeze(winnersByKind),
-    shadowEmissions,
-    deferredEmissions,
-    droppedEmissions,
-    suppressionRate,
-    computedAtMs: nowMs,
-  });
+  private recordTransition(botId: string, playerId: string | null, fromStage: ChatPersonaStageId | null, toStage: ChatPersonaStageId, transitionedAt: number, reason: string): void {
+    if (fromStage === toStage && fromStage !== null) return;
+    const transition: EvolutionStageTransitionRecord = Object.freeze({
+      transitionId: createId('persona_transition', transitionedAt, `${botId}_${playerId ?? 'anon'}_${toStage}`),
+      botId,
+      playerId,
+      fromStage,
+      toStage,
+      transitionedAt,
+      reason,
+    });
+    const bucket = this.transitionHistoryByBot.get(botId) ?? [];
+    bucket.push(transition);
+    this.trimArray(bucket, this.options.maxProjectionHistoryPerBot);
+    this.transitionHistoryByBot.set(botId, bucket);
+  }
+
+  private recordEventDescriptor(descriptor: PersonaEvolutionOpaqueEventDescriptor): void {
+    this.pushMapArray(this.eventHistoryByBot, descriptor.botId, descriptor, this.options.maxEventHistoryPerBot);
+    if (descriptor.playerId) this.pushMapArray(this.eventHistoryByPlayer, descriptor.playerId, descriptor, this.options.maxPlayerHistory);
+    if (descriptor.channelId) this.pushMapArray(this.eventHistoryByChannel, descriptor.channelId, descriptor, this.options.maxChannelHistory);
+    this.lastSeenAt.set(`bot:${descriptor.botId}`, descriptor.createdAt);
+    if (descriptor.playerId) this.lastSeenAt.set(`player:${descriptor.playerId}`, descriptor.createdAt);
+    if (descriptor.channelId) this.lastSeenAt.set(`channel:${descriptor.channelId}`, descriptor.createdAt);
+  }
+
+  private recordProjectionReceipt(receipt: ChatBotPersonaEvolutionProjectReceipt): void {
+    this.pushMapArray(this.projectionHistoryByBot, receipt.botId, receipt, this.options.maxProjectionHistoryPerBot);
+    if (receipt.playerId) this.pushMapArray(this.projectionHistoryByPlayer, receipt.playerId, receipt, this.options.maxPlayerHistory);
+    if (receipt.request.channelId) this.pushMapArray(this.projectionHistoryByChannel, receipt.request.channelId, receipt, this.options.maxChannelHistory);
+    if (this.options.retainSignals) {
+      this.pushMapArray(this.signalHistoryByBot, receipt.botId, receipt.descriptor, this.options.maxSignalHistoryPerBot);
+    }
+    this.lastSeenAt.set(`bot:${receipt.botId}`, receipt.projectedAt);
+    if (receipt.playerId) this.lastSeenAt.set(`player:${receipt.playerId}`, receipt.projectedAt);
+    if (receipt.request.channelId) this.lastSeenAt.set(`channel:${receipt.request.channelId}`, receipt.projectedAt);
+  }
+
+  private recordContextArtifacts(input: ChatBotPersonaEvolutionProjectInput): void {
+    if (input.playerId && input.fingerprint) {
+      this.fingerprintsByPlayer.set(input.playerId, input.fingerprint);
+      this.lastSeenAt.set(`fingerprint:${input.playerId}`, input.now);
+    }
+    if (input.playerId && input.relationship) {
+      this.relationshipsByPlayer.set(input.playerId, input.relationship);
+      this.lastSeenAt.set(`relationship:${input.playerId}`, input.now);
+    }
+    if (input.channelId && input.overlay) {
+      this.overlaysByChannel.set(input.channelId, input.overlay);
+      this.lastSeenAt.set(`overlay:${input.channelId}`, input.now);
+    }
+  }
+
+  private computeCacheKey(
+    request: ChatBotPersonaEvolutionProjectionRequest,
+    mode: PersonaEvolutionMode,
+    channelClass: PersonaEvolutionChannelClass,
+  ): string {
+    const record = request as Record<string, unknown>;
+    const botId = readString(record.botId);
+    const playerId = readOptionalString(record.playerId) ?? "anon";
+    const channelId = readOptionalString(record.channelId) ?? "no_channel";
+    switch (this.options.cachePolicy) {
+      case 'NONE':
+        return createId("persona_cache_none", this.clock.now(), stableStringify(request));
+      case 'REQUEST':
+        return stableStringify(request);
+      case 'BOT':
+        return `${botId}`;
+      case 'PLAYER':
+        return `${playerId}`;
+      case 'BOT_PLAYER':
+      default:
+        return `${botId}::${playerId}::${channelId}::${mode}::${channelClass}`;
+    }
+  }
+
+  private getUsableCacheEntry(key: string): PersonaEvolutionCacheEntry | null {
+    const entry = this.cache.get(key);
+    if (!entry) return null;
+    if (entry.expiresAt <= this.clock.now()) {
+      this.cache.delete(key);
+      return null;
+    }
+    return entry;
+  }
+
+  private storeCacheEntry(
+    key: string,
+    request: ChatBotPersonaEvolutionProjectionRequest,
+    signal: ChatPersonaEvolutionSignal,
+    descriptor: PersonaEvolutionSignalDescriptor,
+  ): void {
+    const record = request as Record<string, unknown>;
+    const now = this.clock.now();
+    const entry: PersonaEvolutionCacheEntry = {
+      key,
+      botId: readString(record.botId),
+      playerId: readOptionalString(record.playerId),
+      createdAt: now,
+      expiresAt: now + this.options.cacheTtlMs,
+      request,
+      signal,
+      descriptor,
+    };
+    this.cache.set(key, entry);
+    while (this.cache.size > this.options.maxRequestCacheEntries) {
+      const oldestKey = this.cache.keys().next().value;
+      if (!oldestKey) break;
+      this.cache.delete(oldestKey);
+    }
+  }
+
+  private countStaleCacheEntries(now: number): number {
+    let count = 0;
+    for (const entry of this.cache.values()) {
+      if (entry.expiresAt <= now) count += 1;
+    }
+    return count;
+  }
+
+  private countStaleProjectionWindows(now: number): number {
+    const ttl = this.options.cacheTtlMs * 4;
+    let count = 0;
+    for (const receipts of this.projectionHistoryByBot.values()) {
+      for (const receipt of receipts) {
+        if ((now - receipt.projectedAt) > ttl) count += 1;
+      }
+    }
+    return count;
+  }
+
+  private computeHealth(now: number): PersonaEvolutionHealth {
+    if (!this.options.enableHealthTracking) return "WARM";
+    const cacheRatio = this.options.maxRequestCacheEntries > 0 ? this.cache.size / this.options.maxRequestCacheEntries : 0;
+    const staleRatio = this.options.maxRequestCacheEntries > 0 ? this.countStaleCacheEntries(now) / Math.max(1, this.cache.size) : 0;
+    if (staleRatio > 0.75) return "DEGRADED";
+    if (cacheRatio > 0.95) return "SATURATED";
+    if (cacheRatio > 0.70) return "HOT";
+    if (this.cache.size > 0 || this.sumMapLengths(this.eventHistoryByBot) > 0) return "WARM";
+    return "COLD";
+  }
+
+  private computeRiskBand(now: number): PersonaEvolutionRiskBand {
+    const stale = this.countStaleCacheEntries(now);
+    const totalEvents = this.sumMapLengths(this.eventHistoryByBot);
+    const totalProjections = this.sumMapLengths(this.projectionHistoryByBot);
+    if (stale > this.options.maxRequestCacheEntries * 0.5) return "CRITICAL";
+    if (totalEvents > totalProjections * 4 && totalEvents > 32) return "HIGH";
+    if (this.cache.size > this.options.maxRequestCacheEntries * 0.75) return "MEDIUM";
+    if (this.cache.size > 0 || totalEvents > 0) return "LOW";
+    return "NONE";
+  }
+
+  private pruneProjectionWindows(now: number): void {
+    const ttl = this.options.cacheTtlMs * 4;
+    for (const receipts of this.projectionHistoryByBot.values()) {
+      while (receipts.length > 0 && (now - receipts[0]!.projectedAt) > ttl) receipts.shift();
+    }
+    for (const receipts of this.projectionHistoryByPlayer.values()) {
+      while (receipts.length > 0 && (now - receipts[0]!.projectedAt) > ttl) receipts.shift();
+    }
+    for (const receipts of this.projectionHistoryByChannel.values()) {
+      while (receipts.length > 0 && (now - receipts[0]!.projectedAt) > ttl) receipts.shift();
+    }
+  }
+
+  private countProjectionsForMode(mode: PersonaEvolutionMode): number {
+    let count = 0;
+    for (const receipts of this.projectionHistoryByBot.values()) {
+      for (const receipt of receipts) if (receipt.mode === mode) count += 1;
+    }
+    return count;
+  }
+
+  private lastProjectionForMode(mode: PersonaEvolutionMode): number | null {
+    let last: number | null = null;
+    for (const receipts of this.projectionHistoryByBot.values()) {
+      for (const receipt of receipts) {
+        if (receipt.mode !== mode) continue;
+        if (last === null || receipt.projectedAt > last) last = receipt.projectedAt;
+      }
+    }
+    return last;
+  }
+
+  private maybeCaptureAudit(): void {
+    if (!this.options.enableAuditDigest) return;
+    const totalOps = this.sumMapLengths(this.eventHistoryByBot) + this.sumMapLengths(this.projectionHistoryByBot);
+    if (totalOps === 0) return;
+    if (totalOps % 16 === 0) this.captureAudit(this.clock.now());
+  }
+
+  private pushMapArray<T>(map: Map<string, T[]>, key: string, value: T, max: number): void {
+    const bucket = map.get(key) ?? [];
+    bucket.push(value);
+    this.trimArray(bucket, max);
+    map.set(key, bucket);
+  }
+
+  private trimArray<T>(items: T[], max: number): void {
+    while (items.length > max) items.shift();
+  }
+
+  private bumpCounter(map: Map<string, number>, key: string, now: number): void {
+    if (!this.options.enableCounterTracking) return;
+    map.set(key, (map.get(key) ?? 0) + 1);
+    this.lastSeenAt.set(`counter:${key}`, now);
+  }
+
+  private sumMapLengths<T>(map: Map<string, readonly T[]>): number {
+    let total = 0;
+    for (const bucket of map.values()) total += bucket.length;
+    return total;
+  }
 }
 
-/**
- * Check whether a BackendNpcBatchPlan has a winner that should trigger an evolution event.
- */
-export function planHasEvolutionTrigger(plan: BackendNpcBatchPlan): boolean {
-  const winner = plan.winner;
-  if (!winner) return false;
-  return (
-    winner.actorKind === 'HATER' ||
-    winner.context === 'PLAYER_SHIELD_BREAK' ||
-    winner.context === 'PLAYER_NEAR_BANKRUPTCY' ||
-    winner.context === 'PLAYER_COMEBACK' ||
-    winner.context === 'NEAR_SOVEREIGNTY' ||
-    winner.context === 'INVASION_OPEN' ||
-    winner.context === 'POSTRUN_DEBRIEF'
-  );
+// ============================================================================
+// STANDALONE HELPERS & FACTORIES
+// ============================================================================
+
+export function createChatBotPersonaEvolutionService(
+  runtime?: ChatBotPersonaEvolution,
+  options?: ChatBotPersonaEvolutionServiceOptions,
+  clock?: ChatBotPersonaEvolutionServiceClock,
+): ChatBotPersonaEvolutionService {
+  return new ChatBotPersonaEvolutionService(runtime ?? new ChatBotPersonaEvolution(), options, clock ?? SYSTEM_CLOCK);
 }
 
-/**
- * Build the default BackendNpcRoomState from minimal parameters.
- * Useful for test setup and cold-start replay.
- */
-export function buildMinimalRoomState(
-  roomId: string,
-  modeId: string,
-  nowMs: number,
-  overrides?: Partial<BackendNpcRoomState>,
-): BackendNpcRoomState {
-  return Object.freeze({
-    roomId,
-    modeId,
-    runTick: 0,
-    occupancy: 1,
-    heat: 0.25,
-    pressure: 0.20,
-    frustration: 0.15,
-    confidence: 0.50,
-    coldStart: 0.80,
-    silenceDebt: 0.30,
-    invasionActive: false,
-    helperLock: false,
-    playerNearBankruptcy: false,
-    shieldBreached: false,
-    nearSovereignty: false,
-    dealStalled: false,
-    postRun: false,
-    lastPlayerMessageAtMs: nowMs - 5_000,
-    lastIncomingSystemEventAtMs: nowMs - 3_000,
-    ...overrides,
-  });
+export function summarizeChatBotPersonaEvolutionSignal(
+  signal: ChatPersonaEvolutionSignal,
+  request: ChatBotPersonaEvolutionProjectionRequest,
+  mode: PersonaEvolutionMode = "UNKNOWN",
+  channelClass: PersonaEvolutionChannelClass = "UNKNOWN",
+  tags: readonly string[] = [],
+): PersonaEvolutionSignalDescriptor {
+  return describeSignal(signal, request, mode, channelClass, tags);
 }
 
-/**
- * Build a BackendNpcPlanRequest for a single rapid-fire NPC emission.
- * A convenience factory for callers that don't need full control.
- */
-export function buildSimplePlanRequest(
-  actorKind: NpcActorKind,
-  channel: BackendNpcChannel,
-  context: CadenceContext,
-  nowMs: number,
-  roomId: string,
-  options?: {
-    readonly personaId?: BackendNpcPersonaId;
-    readonly priorityHint?: number;
-    readonly force?: boolean;
-    readonly allowShadow?: boolean;
-    readonly witnessPreferred?: boolean;
-    readonly tagHints?: readonly string[];
-  },
-): BackendNpcPlanRequest {
-  const requestId = `npc_${actorKind.toLowerCase()}_${roomId}_${nowMs}_${Math.floor(Math.random() * 0xffff).toString(16)}`;
-  const base = {
-    requestId,
-    channel,
-    context,
-    desiredAtMs: nowMs,
-    createdAtMs: nowMs,
-    priorityHint: options?.priorityHint ?? 0.5,
-    force: options?.force,
-    allowShadow: options?.allowShadow,
-    witnessPreferred: options?.witnessPreferred,
-    tagHints: options?.tagHints,
+export function summarizeChatBotPersonaEvolutionSnapshot(
+  snapshot: ChatPersonaEvolutionSnapshot,
+): PersonaEvolutionSnapshotDescriptor {
+  return describeSnapshot(snapshot);
+}
+
+export function summarizeChatBotPersonaEvolutionEvent(
+  event: ChatPersonaEvolutionEvent,
+): PersonaEvolutionOpaqueEventDescriptor {
+  return describeEvent(event);
+}
+
+export function buildChatBotPersonaEvolutionProjectionRequest(
+  input: ChatBotPersonaEvolutionProjectInput,
+): ChatBotPersonaEvolutionProjectionRequest {
+  return makeProjectionRequest(normalizeProjectInput(input));
+}
+
+export function createChatBotPersonaEvolutionMetricDeck(
+  service: ChatBotPersonaEvolutionService,
+  botId: string,
+): Record<string, number> {
+  return {
+    aggression: service.computeAggressionAverage(botId),
+    respect: service.computeRespectAverage(botId),
+    callbackAppetite: service.computeCallbackappetiteAverage(botId),
+    publicPressure: service.computePublicpressureAverage(botId),
+    privatePressure: service.computePrivatepressureAverage(botId),
+    myth: service.computeMythAverage(botId),
+    instability: service.computeInstabilityAverage(botId),
+    adaptation: service.computeAdaptationAverage(botId),
+    novelty: service.computeNoveltyAverage(botId),
+    memory: service.computeMemoryAverage(botId),
+    pressure: service.computePressureAverage(botId),
+    rescue: service.computeRescueAverage(botId),
+    spectacle: service.computeSpectacleAverage(botId),
+    heat: service.computeHeatAverage(botId),
+    trust: service.computeTrustAverage(botId),
+    rivalry: service.computeRivalryAverage(botId),
+    patience: service.computePatienceAverage(botId),
+    volatility: service.computeVolatilityAverage(botId),
+    persistence: service.computePersistenceAverage(botId),
+    dominance: service.computeDominanceAverage(botId),
+    humiliation: service.computeHumiliationAverage(botId),
+    hype: service.computeHypeAverage(botId),
+    silence: service.computeSilenceAverage(botId),
+    recovery: service.computeRecoveryAverage(botId),
+    proof: service.computeProofAverage(botId),
+    negotiation: service.computeNegotiationAverage(botId),
+    scene: service.computeSceneAverage(botId),
+    persona: service.computePersonaAverage(botId),
+    authority: service.computeAuthorityAverage(botId),
+    variance: service.computeVarianceAverage(botId),
   };
-  if (actorKind === 'AMBIENT') {
-    return Object.freeze({ ...base, actorKind: 'AMBIENT', personaId: options?.personaId as AmbientNpcPersonaId | undefined } as unknown as BackendAmbientPlanRequest);
-  }
-  if (actorKind === 'HELPER') {
-    return Object.freeze({ ...base, actorKind: 'HELPER', personaId: options?.personaId as HelperPersonaId | undefined } as unknown as BackendHelperPlanRequest);
-  }
-  if (actorKind === 'HATER') {
-    return Object.freeze({ ...base, actorKind: 'HATER', personaId: options?.personaId as HaterRegistryPersonaId | undefined } as unknown as BackendHaterPlanRequest);
-  }
-  return Object.freeze({ ...base, actorKind: 'INVASION', context: context as 'INVASION_OPEN' | 'INVASION_CLOSE' } as unknown as BackendInvasionPlanRequest);
 }
 
-/**
- * Determine if a room state justifies an immediate helper intervention.
- */
-export function shouldTriggerHelperIntervention(room: BackendNpcRoomState): boolean {
-  if (room.helperLock) return false;
-  if (room.invasionActive) return false;
-  if (room.postRun) return true; // post-run debrief is a helper mandate
-  if (room.playerNearBankruptcy) return true;
-  if (room.shieldBreached) return true;
-  if (room.frustration >= 0.70) return true;
-  if (room.coldStart >= 0.80 && room.runTick <= 10) return true;
-  return false;
+export const CHAT_BOT_PERSONA_EVOLUTION_SERVICE_MODES = MODES;
+export const CHAT_BOT_PERSONA_EVOLUTION_SERVICE_CHANNEL_CLASSES = CHANNEL_CLASSES;
+// ============================================================================
+// EXTENDED SELECTORS
+// ============================================================================
+
+export interface PersonaEvolutionMetricSummaryEntry {
+  readonly botId: string;
+  readonly metric: string;
+  readonly value01: number;
 }
 
-/**
- * Determine if a room state justifies an immediate hater emission.
- */
-export function shouldTriggerHaterEmission(room: BackendNpcRoomState): boolean {
-  if (room.postRun) return false;
-  if (room.helperLock) return false;
-  if (room.pressure >= 0.65 && room.heat >= 0.50) return true;
-  if (room.nearSovereignty) return true;
-  if (room.invasionActive) return true;
-  return false;
+export interface PersonaEvolutionMetricSummaryDeck {
+  readonly generatedAt: number;
+  readonly entries: readonly PersonaEvolutionMetricSummaryEntry[];
 }
 
-/**
- * Determine whether a room state mandates an ambient witness emission.
- */
-export function shouldTriggerAmbientWitness(room: BackendNpcRoomState, silenceGapMs: number): boolean {
-  if (room.invasionActive) return false;
-  if (room.shieldBreached) return true;
-  if (room.nearSovereignty) return true;
-  if (room.postRun) return true;
-  if (room.silenceDebt >= 0.70) return true;
-  if (silenceGapMs >= 45_000 && room.occupancy >= 3) return true;
-  return false;
+export function createChatBotPersonaEvolutionMetricSummaryDeck(
+  service: ChatBotPersonaEvolutionService,
+  botIds: readonly string[],
+  now = Date.now(),
+): PersonaEvolutionMetricSummaryDeck {
+  const entries: PersonaEvolutionMetricSummaryEntry[] = [];
+  for (const botId of botIds) {
+    entries.push({ botId, metric: 'aggression', value01: service.computeAggressionAverage(botId) });
+  }
+  for (const botId of botIds) {
+    entries.push({ botId, metric: 'respect', value01: service.computeRespectAverage(botId) });
+  }
+  for (const botId of botIds) {
+    entries.push({ botId, metric: 'callbackAppetite', value01: service.computeCallbackappetiteAverage(botId) });
+  }
+  for (const botId of botIds) {
+    entries.push({ botId, metric: 'publicPressure', value01: service.computePublicpressureAverage(botId) });
+  }
+  for (const botId of botIds) {
+    entries.push({ botId, metric: 'privatePressure', value01: service.computePrivatepressureAverage(botId) });
+  }
+  for (const botId of botIds) {
+    entries.push({ botId, metric: 'myth', value01: service.computeMythAverage(botId) });
+  }
+  for (const botId of botIds) {
+    entries.push({ botId, metric: 'instability', value01: service.computeInstabilityAverage(botId) });
+  }
+  for (const botId of botIds) {
+    entries.push({ botId, metric: 'adaptation', value01: service.computeAdaptationAverage(botId) });
+  }
+  for (const botId of botIds) {
+    entries.push({ botId, metric: 'novelty', value01: service.computeNoveltyAverage(botId) });
+  }
+  for (const botId of botIds) {
+    entries.push({ botId, metric: 'memory', value01: service.computeMemoryAverage(botId) });
+  }
+  for (const botId of botIds) {
+    entries.push({ botId, metric: 'pressure', value01: service.computePressureAverage(botId) });
+  }
+  for (const botId of botIds) {
+    entries.push({ botId, metric: 'rescue', value01: service.computeRescueAverage(botId) });
+  }
+  for (const botId of botIds) {
+    entries.push({ botId, metric: 'spectacle', value01: service.computeSpectacleAverage(botId) });
+  }
+  for (const botId of botIds) {
+    entries.push({ botId, metric: 'heat', value01: service.computeHeatAverage(botId) });
+  }
+  for (const botId of botIds) {
+    entries.push({ botId, metric: 'trust', value01: service.computeTrustAverage(botId) });
+  }
+  for (const botId of botIds) {
+    entries.push({ botId, metric: 'rivalry', value01: service.computeRivalryAverage(botId) });
+  }
+  for (const botId of botIds) {
+    entries.push({ botId, metric: 'patience', value01: service.computePatienceAverage(botId) });
+  }
+  for (const botId of botIds) {
+    entries.push({ botId, metric: 'volatility', value01: service.computeVolatilityAverage(botId) });
+  }
+  for (const botId of botIds) {
+    entries.push({ botId, metric: 'persistence', value01: service.computePersistenceAverage(botId) });
+  }
+  for (const botId of botIds) {
+    entries.push({ botId, metric: 'dominance', value01: service.computeDominanceAverage(botId) });
+  }
+  for (const botId of botIds) {
+    entries.push({ botId, metric: 'humiliation', value01: service.computeHumiliationAverage(botId) });
+  }
+  for (const botId of botIds) {
+    entries.push({ botId, metric: 'hype', value01: service.computeHypeAverage(botId) });
+  }
+  for (const botId of botIds) {
+    entries.push({ botId, metric: 'silence', value01: service.computeSilenceAverage(botId) });
+  }
+  for (const botId of botIds) {
+    entries.push({ botId, metric: 'recovery', value01: service.computeRecoveryAverage(botId) });
+  }
+  for (const botId of botIds) {
+    entries.push({ botId, metric: 'proof', value01: service.computeProofAverage(botId) });
+  }
+  for (const botId of botIds) {
+    entries.push({ botId, metric: 'negotiation', value01: service.computeNegotiationAverage(botId) });
+  }
+  for (const botId of botIds) {
+    entries.push({ botId, metric: 'scene', value01: service.computeSceneAverage(botId) });
+  }
+  for (const botId of botIds) {
+    entries.push({ botId, metric: 'persona', value01: service.computePersonaAverage(botId) });
+  }
+  for (const botId of botIds) {
+    entries.push({ botId, metric: 'authority', value01: service.computeAuthorityAverage(botId) });
+  }
+  for (const botId of botIds) {
+    entries.push({ botId, metric: 'variance', value01: service.computeVarianceAverage(botId) });
+  }
+  return { generatedAt: now, entries };
 }
 
-/**
- * Build the optimal plan request set for a given room state from scratch.
- * This is a high-level convenience for planners that want intelligent defaults.
- */
-export function buildAutoPlanRequests(
-  room: BackendNpcRoomState,
-  nowMs: number,
-  silenceGapMs = 20_000,
-): readonly BackendNpcPlanRequest[] {
-  const domain = backendChatNpcDomain;
-  const requests: BackendNpcPlanRequest[] = [];
-
-  if (room.invasionActive) {
-    requests.push(...domain.planInvasionScene(room, nowMs));
-    return Object.freeze(requests);
-  }
-
-  if (room.postRun) {
-    requests.push(...domain.planPostRunScene(room, nowMs));
-    return Object.freeze(requests);
-  }
-
-  if (room.playerNearBankruptcy || room.shieldBreached) {
-    requests.push(...domain.planCollapseWitness(room, nowMs));
-  }
-
-  if ((room.recentComebackCount ?? 0) > 0 || room.confidence >= 0.60) {
-    requests.push(...domain.planComebackWitness(room, nowMs));
-  }
-
-  if (room.modeId.toLowerCase().includes('deal')) {
-    requests.push(...domain.planDealRoomScene(room, nowMs));
-  } else if (room.modeId.toLowerCase().includes('syndicate')) {
-    requests.push(...domain.planSyndicateScene(room, nowMs));
-  }
-
-  if (shouldTriggerAmbientWitness(room, silenceGapMs)) {
-    const channel: BackendNpcChannel = room.modeId.toLowerCase().includes('lobby') ? 'LOBBY' : 'GLOBAL';
-    const ctx: CadenceContext = room.nearSovereignty ? 'NEAR_SOVEREIGNTY' : room.shieldBreached ? 'PLAYER_SHIELD_BREAK' : 'PLAYER_IDLE';
-    requests.push(buildSimplePlanRequest('AMBIENT', channel, ctx, nowMs, room.roomId, { priorityHint: 0.7, allowShadow: true }));
-  }
-
-  if (shouldTriggerHelperIntervention(room)) {
-    const ctx: CadenceContext = room.postRun ? 'POSTRUN_DEBRIEF' : room.playerNearBankruptcy ? 'PLAYER_NEAR_BANKRUPTCY' : 'PLAYER_IDLE';
-    requests.push(buildSimplePlanRequest('HELPER', 'GLOBAL', ctx, nowMs, room.roomId, { priorityHint: 1.0, witnessPreferred: room.playerNearBankruptcy }));
-  }
-
-  if (shouldTriggerHaterEmission(room)) {
-    const ctx: CadenceContext = room.nearSovereignty ? 'NEAR_SOVEREIGNTY' : room.pressure >= 0.65 ? 'BOT_WINNING' : 'PLAYER_IDLE';
-    requests.push(buildSimplePlanRequest('HATER', 'GLOBAL', ctx, nowMs, room.roomId, { priorityHint: 0.9 }));
-  }
-
-  return Object.freeze(requests);
+export function selectTopBotsByAggression(
+  service: ChatBotPersonaEvolutionService,
+  botIds: readonly string[],
+  limit = 5,
+): readonly PersonaEvolutionMetricSummaryEntry[] {
+  return [...botIds]
+    .map((botId) => ({
+      botId,
+      metric: 'aggression',
+      value01: service.computeAggressionAverage(botId),
+    }))
+    .sort((left, right) => right.value01 - left.value01 || left.botId.localeCompare(right.botId))
+    .slice(0, limit);
 }
 
-// ─── NAMESPACE export ──────────────────────────────────────────────────────────
+export function selectTopBotsByRespect(
+  service: ChatBotPersonaEvolutionService,
+  botIds: readonly string[],
+  limit = 5,
+): readonly PersonaEvolutionMetricSummaryEntry[] {
+  return [...botIds]
+    .map((botId) => ({
+      botId,
+      metric: 'respect',
+      value01: service.computeRespectAverage(botId),
+    }))
+    .sort((left, right) => right.value01 - left.value01 || left.botId.localeCompare(right.botId))
+    .slice(0, limit);
+}
 
-export const BackendChatNpcDomainNS = Object.freeze({
-  // Internal helpers
-  clamp01,
-  stableHash,
-  inferAmbientChannel,
-  isAmbientContext,
-  isHelperContext,
-  isHaterContext,
-  actorIdOf,
-  mapToSuppressionRequest,
-  mapToCadenceRequest,
-  decisionFromCandidate,
-  boostRegistryScore,
+export function selectTopBotsByCallbackappetite(
+  service: ChatBotPersonaEvolutionService,
+  botIds: readonly string[],
+  limit = 5,
+): readonly PersonaEvolutionMetricSummaryEntry[] {
+  return [...botIds]
+    .map((botId) => ({
+      botId,
+      metric: 'callbackAppetite',
+      value01: service.computeCallbackappetiteAverage(botId),
+    }))
+    .sort((left, right) => right.value01 - left.value01 || left.botId.localeCompare(right.botId))
+    .slice(0, limit);
+}
 
-  // Standalone utilities
-  narrativeSummaryForEnrichedDecision,
-  formatPlanDecisionForLog,
-  buildPlanningStats,
-  planHasEvolutionTrigger,
-  buildMinimalRoomState,
-  buildSimplePlanRequest,
-  shouldTriggerHelperIntervention,
-  shouldTriggerHaterEmission,
-  shouldTriggerAmbientWitness,
-  buildAutoPlanRequests,
+export function selectTopBotsByPublicpressure(
+  service: ChatBotPersonaEvolutionService,
+  botIds: readonly string[],
+  limit = 5,
+): readonly PersonaEvolutionMetricSummaryEntry[] {
+  return [...botIds]
+    .map((botId) => ({
+      botId,
+      metric: 'publicPressure',
+      value01: service.computePublicpressureAverage(botId),
+    }))
+    .sort((left, right) => right.value01 - left.value01 || left.botId.localeCompare(right.botId))
+    .slice(0, limit);
+}
 
-  // Registries
-  ambientNpcRegistry,
-  helperDialogueRegistry,
-  haterDialogueRegistry,
-  AmbientNpcRegistry,
-  HelperDialogueRegistry,
-  HaterDialogueRegistry,
-  createAmbientNpcRegistry,
-  createHelperDialogueRegistry,
-  createHaterDialogueRegistry,
+export function selectTopBotsByPrivatepressure(
+  service: ChatBotPersonaEvolutionService,
+  botIds: readonly string[],
+  limit = 5,
+): readonly PersonaEvolutionMetricSummaryEntry[] {
+  return [...botIds]
+    .map((botId) => ({
+      botId,
+      metric: 'privatePressure',
+      value01: service.computePrivatepressureAverage(botId),
+    }))
+    .sort((left, right) => right.value01 - left.value01 || left.botId.localeCompare(right.botId))
+    .slice(0, limit);
+}
 
-  // Cadence and suppression
-  npcCadencePolicy,
-  npcSuppressionPolicy,
-  NpcCadencePolicy,
-  NpcSuppressionPolicy,
-  createNpcCadencePolicy,
-  createNpcSuppressionPolicy,
+export function selectTopBotsByMyth(
+  service: ChatBotPersonaEvolutionService,
+  botIds: readonly string[],
+  limit = 5,
+): readonly PersonaEvolutionMetricSummaryEntry[] {
+  return [...botIds]
+    .map((botId) => ({
+      botId,
+      metric: 'myth',
+      value01: service.computeMythAverage(botId),
+    }))
+    .sort((left, right) => right.value01 - left.value01 || left.botId.localeCompare(right.botId))
+    .slice(0, limit);
+}
 
-  // Evolution
-  ChatBotPersonaEvolutionService,
-  createChatBotPersonaEvolutionService,
+export function selectTopBotsByInstability(
+  service: ChatBotPersonaEvolutionService,
+  botIds: readonly string[],
+  limit = 5,
+): readonly PersonaEvolutionMetricSummaryEntry[] {
+  return [...botIds]
+    .map((botId) => ({
+      botId,
+      metric: 'instability',
+      value01: service.computeInstabilityAverage(botId),
+    }))
+    .sort((left, right) => right.value01 - left.value01 || left.botId.localeCompare(right.botId))
+    .slice(0, limit);
+}
 
-  // Domain classes and singletons
-  BackendChatNpcDomain,
-  BackendChatNpcDomainWithEvolution,
-  backendChatNpcDomain,
-  createBackendChatNpcDomain,
-});
+export function selectTopBotsByAdaptation(
+  service: ChatBotPersonaEvolutionService,
+  botIds: readonly string[],
+  limit = 5,
+): readonly PersonaEvolutionMetricSummaryEntry[] {
+  return [...botIds]
+    .map((botId) => ({
+      botId,
+      metric: 'adaptation',
+      value01: service.computeAdaptationAverage(botId),
+    }))
+    .sort((left, right) => right.value01 - left.value01 || left.botId.localeCompare(right.botId))
+    .slice(0, limit);
+}
 
-// ─── Extended singleton with evolution ────────────────────────────────────────
+export function selectTopBotsByNovelty(
+  service: ChatBotPersonaEvolutionService,
+  botIds: readonly string[],
+  limit = 5,
+): readonly PersonaEvolutionMetricSummaryEntry[] {
+  return [...botIds]
+    .map((botId) => ({
+      botId,
+      metric: 'novelty',
+      value01: service.computeNoveltyAverage(botId),
+    }))
+    .sort((left, right) => right.value01 - left.value01 || left.botId.localeCompare(right.botId))
+    .slice(0, limit);
+}
 
-export const createBackendChatNpcDomainWithEvolution = (): BackendChatNpcDomainWithEvolution =>
-  new BackendChatNpcDomainWithEvolution({
-    ambientRegistry: createAmbientNpcRegistry(),
-    helperRegistry: createHelperDialogueRegistry(),
-    haterRegistry: createHaterDialogueRegistry(),
-    cadencePolicy: createNpcCadencePolicy(),
-    suppressionPolicy: createNpcSuppressionPolicy(),
-    evolutionService: createChatBotPersonaEvolutionService() as unknown as IBackendEvolutionService,
-  });
+export function selectTopBotsByMemory(
+  service: ChatBotPersonaEvolutionService,
+  botIds: readonly string[],
+  limit = 5,
+): readonly PersonaEvolutionMetricSummaryEntry[] {
+  return [...botIds]
+    .map((botId) => ({
+      botId,
+      metric: 'memory',
+      value01: service.computeMemoryAverage(botId),
+    }))
+    .sort((left, right) => right.value01 - left.value01 || left.botId.localeCompare(right.botId))
+    .slice(0, limit);
+}
 
-export const backendChatNpcDomainWithEvolution = new BackendChatNpcDomainWithEvolution();
+export function selectTopBotsByPressure(
+  service: ChatBotPersonaEvolutionService,
+  botIds: readonly string[],
+  limit = 5,
+): readonly PersonaEvolutionMetricSummaryEntry[] {
+  return [...botIds]
+    .map((botId) => ({
+      botId,
+      metric: 'pressure',
+      value01: service.computePressureAverage(botId),
+    }))
+    .sort((left, right) => right.value01 - left.value01 || left.botId.localeCompare(right.botId))
+    .slice(0, limit);
+}
+
+export function selectTopBotsByRescue(
+  service: ChatBotPersonaEvolutionService,
+  botIds: readonly string[],
+  limit = 5,
+): readonly PersonaEvolutionMetricSummaryEntry[] {
+  return [...botIds]
+    .map((botId) => ({
+      botId,
+      metric: 'rescue',
+      value01: service.computeRescueAverage(botId),
+    }))
+    .sort((left, right) => right.value01 - left.value01 || left.botId.localeCompare(right.botId))
+    .slice(0, limit);
+}
+
+export function selectTopBotsBySpectacle(
+  service: ChatBotPersonaEvolutionService,
+  botIds: readonly string[],
+  limit = 5,
+): readonly PersonaEvolutionMetricSummaryEntry[] {
+  return [...botIds]
+    .map((botId) => ({
+      botId,
+      metric: 'spectacle',
+      value01: service.computeSpectacleAverage(botId),
+    }))
+    .sort((left, right) => right.value01 - left.value01 || left.botId.localeCompare(right.botId))
+    .slice(0, limit);
+}
+
+export function selectTopBotsByHeat(
+  service: ChatBotPersonaEvolutionService,
+  botIds: readonly string[],
+  limit = 5,
+): readonly PersonaEvolutionMetricSummaryEntry[] {
+  return [...botIds]
+    .map((botId) => ({
+      botId,
+      metric: 'heat',
+      value01: service.computeHeatAverage(botId),
+    }))
+    .sort((left, right) => right.value01 - left.value01 || left.botId.localeCompare(right.botId))
+    .slice(0, limit);
+}
+
+export function selectTopBotsByTrust(
+  service: ChatBotPersonaEvolutionService,
+  botIds: readonly string[],
+  limit = 5,
+): readonly PersonaEvolutionMetricSummaryEntry[] {
+  return [...botIds]
+    .map((botId) => ({
+      botId,
+      metric: 'trust',
+      value01: service.computeTrustAverage(botId),
+    }))
+    .sort((left, right) => right.value01 - left.value01 || left.botId.localeCompare(right.botId))
+    .slice(0, limit);
+}
+
+export function selectTopBotsByRivalry(
+  service: ChatBotPersonaEvolutionService,
+  botIds: readonly string[],
+  limit = 5,
+): readonly PersonaEvolutionMetricSummaryEntry[] {
+  return [...botIds]
+    .map((botId) => ({
+      botId,
+      metric: 'rivalry',
+      value01: service.computeRivalryAverage(botId),
+    }))
+    .sort((left, right) => right.value01 - left.value01 || left.botId.localeCompare(right.botId))
+    .slice(0, limit);
+}
+
+export function selectTopBotsByPatience(
+  service: ChatBotPersonaEvolutionService,
+  botIds: readonly string[],
+  limit = 5,
+): readonly PersonaEvolutionMetricSummaryEntry[] {
+  return [...botIds]
+    .map((botId) => ({
+      botId,
+      metric: 'patience',
+      value01: service.computePatienceAverage(botId),
+    }))
+    .sort((left, right) => right.value01 - left.value01 || left.botId.localeCompare(right.botId))
+    .slice(0, limit);
+}
+
+export function selectTopBotsByVolatility(
+  service: ChatBotPersonaEvolutionService,
+  botIds: readonly string[],
+  limit = 5,
+): readonly PersonaEvolutionMetricSummaryEntry[] {
+  return [...botIds]
+    .map((botId) => ({
+      botId,
+      metric: 'volatility',
+      value01: service.computeVolatilityAverage(botId),
+    }))
+    .sort((left, right) => right.value01 - left.value01 || left.botId.localeCompare(right.botId))
+    .slice(0, limit);
+}
+
+export function selectTopBotsByPersistence(
+  service: ChatBotPersonaEvolutionService,
+  botIds: readonly string[],
+  limit = 5,
+): readonly PersonaEvolutionMetricSummaryEntry[] {
+  return [...botIds]
+    .map((botId) => ({
+      botId,
+      metric: 'persistence',
+      value01: service.computePersistenceAverage(botId),
+    }))
+    .sort((left, right) => right.value01 - left.value01 || left.botId.localeCompare(right.botId))
+    .slice(0, limit);
+}
+
+export function selectTopBotsByDominance(
+  service: ChatBotPersonaEvolutionService,
+  botIds: readonly string[],
+  limit = 5,
+): readonly PersonaEvolutionMetricSummaryEntry[] {
+  return [...botIds]
+    .map((botId) => ({
+      botId,
+      metric: 'dominance',
+      value01: service.computeDominanceAverage(botId),
+    }))
+    .sort((left, right) => right.value01 - left.value01 || left.botId.localeCompare(right.botId))
+    .slice(0, limit);
+}
+
+export function selectTopBotsByHumiliation(
+  service: ChatBotPersonaEvolutionService,
+  botIds: readonly string[],
+  limit = 5,
+): readonly PersonaEvolutionMetricSummaryEntry[] {
+  return [...botIds]
+    .map((botId) => ({
+      botId,
+      metric: 'humiliation',
+      value01: service.computeHumiliationAverage(botId),
+    }))
+    .sort((left, right) => right.value01 - left.value01 || left.botId.localeCompare(right.botId))
+    .slice(0, limit);
+}
+
+export function selectTopBotsByHype(
+  service: ChatBotPersonaEvolutionService,
+  botIds: readonly string[],
+  limit = 5,
+): readonly PersonaEvolutionMetricSummaryEntry[] {
+  return [...botIds]
+    .map((botId) => ({
+      botId,
+      metric: 'hype',
+      value01: service.computeHypeAverage(botId),
+    }))
+    .sort((left, right) => right.value01 - left.value01 || left.botId.localeCompare(right.botId))
+    .slice(0, limit);
+}
+
+export function selectTopBotsBySilence(
+  service: ChatBotPersonaEvolutionService,
+  botIds: readonly string[],
+  limit = 5,
+): readonly PersonaEvolutionMetricSummaryEntry[] {
+  return [...botIds]
+    .map((botId) => ({
+      botId,
+      metric: 'silence',
+      value01: service.computeSilenceAverage(botId),
+    }))
+    .sort((left, right) => right.value01 - left.value01 || left.botId.localeCompare(right.botId))
+    .slice(0, limit);
+}
+
+export function selectTopBotsByRecovery(
+  service: ChatBotPersonaEvolutionService,
+  botIds: readonly string[],
+  limit = 5,
+): readonly PersonaEvolutionMetricSummaryEntry[] {
+  return [...botIds]
+    .map((botId) => ({
+      botId,
+      metric: 'recovery',
+      value01: service.computeRecoveryAverage(botId),
+    }))
+    .sort((left, right) => right.value01 - left.value01 || left.botId.localeCompare(right.botId))
+    .slice(0, limit);
+}
+
+export function selectTopBotsByProof(
+  service: ChatBotPersonaEvolutionService,
+  botIds: readonly string[],
+  limit = 5,
+): readonly PersonaEvolutionMetricSummaryEntry[] {
+  return [...botIds]
+    .map((botId) => ({
+      botId,
+      metric: 'proof',
+      value01: service.computeProofAverage(botId),
+    }))
+    .sort((left, right) => right.value01 - left.value01 || left.botId.localeCompare(right.botId))
+    .slice(0, limit);
+}
+
+export function selectTopBotsByNegotiation(
+  service: ChatBotPersonaEvolutionService,
+  botIds: readonly string[],
+  limit = 5,
+): readonly PersonaEvolutionMetricSummaryEntry[] {
+  return [...botIds]
+    .map((botId) => ({
+      botId,
+      metric: 'negotiation',
+      value01: service.computeNegotiationAverage(botId),
+    }))
+    .sort((left, right) => right.value01 - left.value01 || left.botId.localeCompare(right.botId))
+    .slice(0, limit);
+}
+
+export function selectTopBotsByScene(
+  service: ChatBotPersonaEvolutionService,
+  botIds: readonly string[],
+  limit = 5,
+): readonly PersonaEvolutionMetricSummaryEntry[] {
+  return [...botIds]
+    .map((botId) => ({
+      botId,
+      metric: 'scene',
+      value01: service.computeSceneAverage(botId),
+    }))
+    .sort((left, right) => right.value01 - left.value01 || left.botId.localeCompare(right.botId))
+    .slice(0, limit);
+}
+
+export function selectTopBotsByPersona(
+  service: ChatBotPersonaEvolutionService,
+  botIds: readonly string[],
+  limit = 5,
+): readonly PersonaEvolutionMetricSummaryEntry[] {
+  return [...botIds]
+    .map((botId) => ({
+      botId,
+      metric: 'persona',
+      value01: service.computePersonaAverage(botId),
+    }))
+    .sort((left, right) => right.value01 - left.value01 || left.botId.localeCompare(right.botId))
+    .slice(0, limit);
+}
+
+export function selectTopBotsByAuthority(
+  service: ChatBotPersonaEvolutionService,
+  botIds: readonly string[],
+  limit = 5,
+): readonly PersonaEvolutionMetricSummaryEntry[] {
+  return [...botIds]
+    .map((botId) => ({
+      botId,
+      metric: 'authority',
+      value01: service.computeAuthorityAverage(botId),
+    }))
+    .sort((left, right) => right.value01 - left.value01 || left.botId.localeCompare(right.botId))
+    .slice(0, limit);
+}
+
+export function selectTopBotsByVariance(
+  service: ChatBotPersonaEvolutionService,
+  botIds: readonly string[],
+  limit = 5,
+): readonly PersonaEvolutionMetricSummaryEntry[] {
+  return [...botIds]
+    .map((botId) => ({
+      botId,
+      metric: 'variance',
+      value01: service.computeVarianceAverage(botId),
+    }))
+    .sort((left, right) => right.value01 - left.value01 || left.botId.localeCompare(right.botId))
+    .slice(0, limit);
+}
+
+export function exportChatBotPersonaEvolutionServiceBoards(
+  service: ChatBotPersonaEvolutionService,
+  now = Date.now(),
+): readonly PersonaEvolutionBoard[] {
+  return service.exportBoards(now);
+}
+

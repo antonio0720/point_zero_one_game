@@ -333,13 +333,14 @@ function createDefaultPreferredPressureBands(descriptor: ChatAnyNpcDescriptor): 
 
 function deriveTypingAssignments(descriptor: ChatAnyNpcDescriptor): readonly ChatTypingStyleAssignment[] {
   return CHAT_TYPING_STYLE_ASSIGNMENTS.filter((assignment) => {
+    const kind = String(assignment.actorKind);
     if (descriptor.npcClass === 'HATER') {
-      return assignment.actorKind === 'HATER' || assignment.actorKind === 'NPC';
+      return kind === 'HATER' || kind === 'NPC';
     }
     if (descriptor.npcClass === 'HELPER') {
-      return assignment.actorKind === 'HELPER';
+      return kind === 'HELPER';
     }
-    return assignment.actorKind === 'NPC';
+    return kind === 'NPC';
   });
 }
 
@@ -381,7 +382,7 @@ function buildDefaultLineBank(descriptor: ChatAnyNpcDescriptor): BackendPersonaL
 // MARK: Repo-specific runtime overrides lifted from backend ChatEngine.ts
 // ============================================================================
 
-const RUNTIME_OVERRIDES: Readonly<Record<ChatKnownNpcKey, Partial<BackendPersonaRuntimePresentation>>> = Object.freeze({
+const RUNTIME_OVERRIDES: Readonly<Partial<Record<ChatKnownNpcKey, Partial<BackendPersonaRuntimePresentation>>>> = Object.freeze({
   LIQUIDATOR: {
     runtimePersonaId: 'persona:hater:liquidator',
     runtimeActorId: 'npc:hater:liquidator',
@@ -960,4 +961,708 @@ export const PERSONA_REGISTRY_PUBLIC_SURFACE = Object.freeze({
   getPersonaLineCategory,
   pickPersonaLine,
   buildPersonaRegistrySnapshot,
+});
+
+// ============================================================================
+// MARK: Extended contracts
+// ============================================================================
+
+export interface BackendPersonaContextScore {
+  readonly sharedKey: ChatKnownNpcKey;
+  readonly totalScore: number;
+  readonly roomMoodBonus: number;
+  readonly pressureBandBonus: number;
+  readonly classSpecificBonus: number;
+  readonly selectionWeightBonus: number;
+  readonly npcClass: string;
+}
+
+export interface BackendPersonaSelectionResult {
+  readonly entry: BackendPersonaRegistryEntry;
+  readonly score: BackendPersonaContextScore;
+  readonly rank: number;
+}
+
+export interface BackendPersonaHealthReport {
+  readonly version: string;
+  readonly totalPersonas: number;
+  readonly haterCount: number;
+  readonly helperCount: number;
+  readonly ambientCount: number;
+  readonly totalLines: number;
+  readonly personasWithBotBinding: number;
+  readonly personasWithCallbacks: number;
+  readonly personasWithPostrun: number;
+  readonly averageLinesPerPersona: number;
+  readonly emptyLineBankCount: number;
+  readonly notes: readonly string[];
+}
+
+export interface BackendPersonaRankSummary {
+  readonly context: BackendPersonaSelectionContext;
+  readonly haterRanking: readonly string[];
+  readonly helperRanking: readonly string[];
+  readonly ambientRanking: readonly string[];
+  readonly topOverall: string | null;
+}
+
+export interface BackendPersonaLineSummary {
+  readonly sharedKey: ChatKnownNpcKey;
+  readonly npcClass: string;
+  readonly displayName: string;
+  readonly telegraphCount: number;
+  readonly tauntCount: number;
+  readonly retreatCount: number;
+  readonly rescueCount: number;
+  readonly ambientCount: number;
+  readonly witnessCount: number;
+  readonly callbackCount: number;
+  readonly postrunCount: number;
+  readonly totalLines: number;
+}
+
+// ============================================================================
+// MARK: Detailed context scoring
+// ============================================================================
+
+export function buildPersonaContextScore(
+  entry: BackendPersonaRegistryEntry,
+  context: BackendPersonaSelectionContext,
+): BackendPersonaContextScore {
+  const roomMood = context.roomMood ?? null;
+  const pressureBand = context.pressureBand ?? null;
+  const embarrassment01 = clamp01(context.embarrassment01);
+  const desperation01 = clamp01(context.desperation01);
+  const confidence01 = clamp01(context.confidence01);
+  const callbackDemand01 = clamp01(context.callbackDemand01);
+  const negotiationDemand01 = clamp01(context.negotiationDemand01);
+
+  const roomMoodBonus = roomMood && entry.preferredRoomMoods.includes(roomMood) ? 0.28 : 0;
+  const pressureBandBonus = pressureBand && entry.preferredPressureBands.includes(pressureBand) ? 0.18 : 0;
+
+  let classSpecificBonus = 0;
+  let selectionWeightBonus = 0;
+  const desc = entry.descriptor;
+
+  if (desc.npcClass === 'HATER') {
+    classSpecificBonus = confidence01 * 0.12 + (1 - embarrassment01) * 0.08;
+    selectionWeightBonus =
+      entry.selectionWeights.publicPressure01 * 0.20 +
+      callbackDemand01 * entry.selectionWeights.callbackBias01 * 0.22 +
+      negotiationDemand01 * entry.selectionWeights.negotiationBias01 * 0.18;
+  } else if (desc.npcClass === 'HELPER') {
+    classSpecificBonus = embarrassment01 * 0.18 + desperation01 * 0.20 + (1 - confidence01) * 0.12;
+    selectionWeightBonus =
+      entry.selectionWeights.rescueBias01 * 0.24 +
+      callbackDemand01 * 0.08;
+  } else {
+    classSpecificBonus = callbackDemand01 * 0.06 + negotiationDemand01 * 0.10;
+    selectionWeightBonus = entry.selectionWeights.witnessBias01 * 0.18;
+  }
+
+  const totalScore = Number(
+    (0.2 + roomMoodBonus + pressureBandBonus + classSpecificBonus + selectionWeightBonus).toFixed(6),
+  );
+
+  return Object.freeze({
+    sharedKey: entry.sharedKey,
+    totalScore,
+    roomMoodBonus,
+    pressureBandBonus,
+    classSpecificBonus,
+    selectionWeightBonus,
+    npcClass: desc.npcClass,
+  });
+}
+
+export function scoreEntryBreakdown(
+  entry: BackendPersonaRegistryEntry,
+  context: BackendPersonaSelectionContext,
+): BackendPersonaContextScore {
+  return buildPersonaContextScore(entry, context);
+}
+
+// ============================================================================
+// MARK: Selection helpers
+// ============================================================================
+
+export function selectBestPersona(
+  context: BackendPersonaSelectionContext = {},
+): BackendPersonaSelectionResult | null {
+  const entries = Object.values(BACKEND_PERSONA_REGISTRY);
+  if (!entries.length) return null;
+
+  let bestEntry: BackendPersonaRegistryEntry | null = null;
+  let bestScore: BackendPersonaContextScore | null = null;
+
+  for (const entry of entries) {
+    const score = buildPersonaContextScore(entry, context);
+    if (!bestScore || score.totalScore > bestScore.totalScore) {
+      bestEntry = entry;
+      bestScore = score;
+    }
+  }
+
+  if (!bestEntry || !bestScore) return null;
+  return Object.freeze({ entry: bestEntry, score: bestScore, rank: 1 });
+}
+
+export function selectPersonaForIntent(
+  intent: BackendPersonaLineCategory,
+  context: BackendPersonaSelectionContext = {},
+  seed?: string,
+): BackendPersonaRegistryEntry | null {
+  const npcClassForIntent: Record<BackendPersonaLineCategory, string> = {
+    telegraphs: 'HATER',
+    taunts: 'HATER',
+    retreats: 'HATER',
+    rescues: 'HELPER',
+    ambient: 'AMBIENT',
+    witness: 'AMBIENT',
+    callbacks: 'HATER',
+    postrun: 'HATER',
+  };
+
+  const targetClass = npcClassForIntent[intent];
+  const entries = Object.values(BACKEND_PERSONA_REGISTRY).filter(
+    (e) => e.descriptor.npcClass === targetClass,
+  );
+  if (!entries.length) return null;
+
+  const ranked = rankPersonaEntries(entries, context);
+  if (seed) {
+    const idx = positiveHash(seed) % ranked.length;
+    return ranked[idx] ?? ranked[0] ?? null;
+  }
+  return ranked[0] ?? null;
+}
+
+export function selectPersonasByRankedScore(
+  context: BackendPersonaSelectionContext,
+  limit?: number,
+): readonly BackendPersonaSelectionResult[] {
+  const entries = Object.values(BACKEND_PERSONA_REGISTRY);
+  const scored = entries
+    .map((entry) => ({
+      entry,
+      score: buildPersonaContextScore(entry, context),
+    }))
+    .sort((a, b) => b.score.totalScore - a.score.totalScore);
+
+  const limited = limit != null ? scored.slice(0, limit) : scored;
+  return Object.freeze(
+    limited.map((item, index) =>
+      Object.freeze({ entry: item.entry, score: item.score, rank: index + 1 }),
+    ),
+  );
+}
+
+// ============================================================================
+// MARK: Filtering
+// ============================================================================
+
+export function filterPersonasByNpcClass(
+  npcClass: ChatNpcClass,
+): readonly BackendPersonaRegistryEntry[] {
+  return Object.values(BACKEND_PERSONA_REGISTRY).filter(
+    (entry) => entry.descriptor.npcClass === npcClass,
+  );
+}
+
+export function filterPersonasByRoomMood(
+  mood: BackendPersonaRoomMood,
+): readonly BackendPersonaRegistryEntry[] {
+  return Object.values(BACKEND_PERSONA_REGISTRY).filter(
+    (entry) => entry.preferredRoomMoods.includes(mood),
+  );
+}
+
+export function filterPersonasByPressureBand(
+  band: string,
+): readonly BackendPersonaRegistryEntry[] {
+  return Object.values(BACKEND_PERSONA_REGISTRY).filter(
+    (entry) => entry.preferredPressureBands.includes(band),
+  );
+}
+
+export function filterPersonasByAliasKey(
+  alias: string,
+): readonly BackendPersonaRegistryEntry[] {
+  const normalizedAlias = alias.toLowerCase();
+  return Object.values(BACKEND_PERSONA_REGISTRY).filter(
+    (entry) => entry.runtime.aliasKeys.some((k) => k.toLowerCase() === normalizedAlias),
+  );
+}
+
+export function filterPersonasByBotId(
+  botId: string,
+): readonly BackendPersonaRegistryEntry[] {
+  const normalized = botId.toLowerCase();
+  return Object.values(BACKEND_PERSONA_REGISTRY).filter(
+    (entry) => entry.runtime.runtimeBotId?.toLowerCase() === normalized,
+  );
+}
+
+export function filterPersonasByTag(
+  tag: string,
+): readonly BackendPersonaRegistryEntry[] {
+  const normalized = tag.toLowerCase();
+  return Object.values(BACKEND_PERSONA_REGISTRY).filter(
+    (entry) => entry.canonicalTags.some((t) => t.toLowerCase() === normalized),
+  );
+}
+
+// ============================================================================
+// MARK: Boolean checks
+// ============================================================================
+
+export function personaHasAlias(
+  entry: BackendPersonaRegistryEntry,
+  alias: string,
+): boolean {
+  const normalized = alias.toLowerCase();
+  return entry.runtime.aliasKeys.some((k) => k.toLowerCase() === normalized);
+}
+
+export function personaHasTag(
+  entry: BackendPersonaRegistryEntry,
+  tag: string,
+): boolean {
+  const normalized = tag.toLowerCase();
+  return entry.canonicalTags.some((t) => t.toLowerCase() === normalized);
+}
+
+export function personaHasBotBinding(entry: BackendPersonaRegistryEntry): boolean {
+  return Boolean(entry.runtime.runtimeBotId);
+}
+
+export function personaHasLineCategory(
+  entry: BackendPersonaRegistryEntry,
+  category: BackendPersonaLineCategory,
+): boolean {
+  return entry.lineBank[category].length > 0;
+}
+
+// ============================================================================
+// MARK: Line counts and summaries
+// ============================================================================
+
+export function countLinesForEntry(entry: BackendPersonaRegistryEntry): number {
+  const lb = entry.lineBank;
+  return (
+    lb.telegraphs.length +
+    lb.taunts.length +
+    lb.retreats.length +
+    lb.rescues.length +
+    lb.ambient.length +
+    lb.witness.length +
+    lb.callbacks.length +
+    lb.postrun.length
+  );
+}
+
+export function countPersonaLines(identity: string | ChatKnownNpcKey): number {
+  const entry = resolvePersonaEntry(identity);
+  if (!entry) return 0;
+  return countLinesForEntry(entry);
+}
+
+export function totalRegistryLines(): number {
+  return Object.values(BACKEND_PERSONA_REGISTRY).reduce(
+    (sum, entry) => sum + countLinesForEntry(entry),
+    0,
+  );
+}
+
+export function buildPersonaLineSummary(
+  entry: BackendPersonaRegistryEntry,
+): BackendPersonaLineSummary {
+  const lb = entry.lineBank;
+  const totalLines = countLinesForEntry(entry);
+  return Object.freeze({
+    sharedKey: entry.sharedKey,
+    npcClass: entry.descriptor.npcClass,
+    displayName: entry.runtime.runtimeDisplayName,
+    telegraphCount: lb.telegraphs.length,
+    tauntCount: lb.taunts.length,
+    retreatCount: lb.retreats.length,
+    rescueCount: lb.rescues.length,
+    ambientCount: lb.ambient.length,
+    witnessCount: lb.witness.length,
+    callbackCount: lb.callbacks.length,
+    postrunCount: lb.postrun.length,
+    totalLines,
+  });
+}
+
+export function listPersonaLineSummaries(): readonly BackendPersonaLineSummary[] {
+  return Object.values(BACKEND_PERSONA_REGISTRY).map(buildPersonaLineSummary);
+}
+
+// ============================================================================
+// MARK: Intent to category mapping
+// ============================================================================
+
+export function resolveIntentToCategory(
+  intent: string,
+): BackendPersonaLineCategory {
+  switch (intent) {
+    case 'TELEGRAPH': return 'telegraphs';
+    case 'TAUNT': return 'taunts';
+    case 'RETREAT': return 'retreats';
+    case 'RESCUE': return 'rescues';
+    case 'AMBIENT': return 'ambient';
+    case 'WITNESS': return 'witness';
+    case 'CALLBACK': return 'callbacks';
+    case 'POSTRUN': return 'postrun';
+    case 'NEGOTIATION': return 'taunts';
+    case 'SYSTEM_ECHO': return 'ambient';
+    default: return 'ambient';
+  }
+}
+
+export function pickBestPersonaLine(
+  identity: string | ChatKnownNpcKey,
+  intent: string,
+  seed: string,
+): string | null {
+  const category = resolveIntentToCategory(intent);
+  return pickPersonaLine(identity, category, seed);
+}
+
+// ============================================================================
+// MARK: Display and description
+// ============================================================================
+
+export function getPersonaDisplayInfo(
+  entry: BackendPersonaRegistryEntry,
+): Readonly<{
+  sharedKey: ChatKnownNpcKey;
+  displayName: string;
+  npcClass: string;
+  runtimePersonaId: string;
+  runtimeActorId: string;
+  runtimeBotId: string | null;
+  aliasKeys: readonly string[];
+  canonicalTags: readonly string[];
+  totalLines: number;
+  stage: string;
+  temperament: string;
+}> {
+  return Object.freeze({
+    sharedKey: entry.sharedKey,
+    displayName: entry.runtime.runtimeDisplayName,
+    npcClass: entry.descriptor.npcClass,
+    runtimePersonaId: entry.runtime.runtimePersonaId,
+    runtimeActorId: entry.runtime.runtimeActorId,
+    runtimeBotId: entry.runtime.runtimeBotId,
+    aliasKeys: entry.runtime.aliasKeys,
+    canonicalTags: entry.canonicalTags,
+    totalLines: countLinesForEntry(entry),
+    stage: entry.evolutionSeed.stage,
+    temperament: entry.evolutionSeed.temperament,
+  });
+}
+
+export function describePersona(entry: BackendPersonaRegistryEntry): string {
+  const lb = entry.lineBank;
+  const totalLines = countLinesForEntry(entry);
+  const parts: string[] = [
+    `[${entry.descriptor.npcClass}] ${entry.runtime.runtimeDisplayName}`,
+    `key=${entry.sharedKey}`,
+    `lines=${totalLines}`,
+    `stage=${entry.evolutionSeed.stage}`,
+    `temperament=${entry.evolutionSeed.temperament}`,
+  ];
+  if (entry.runtime.runtimeBotId) parts.push(`botId=${entry.runtime.runtimeBotId}`);
+  if (lb.callbacks.length > 0) parts.push(`callbacks=${lb.callbacks.length}`);
+  if (lb.postrun.length > 0) parts.push(`postrun=${lb.postrun.length}`);
+  return parts.join(' | ');
+}
+
+export function describeLineBank(lb: BackendPersonaLineBank): string {
+  const parts: string[] = [];
+  if (lb.telegraphs.length > 0) parts.push(`telegraphs:${lb.telegraphs.length}`);
+  if (lb.taunts.length > 0) parts.push(`taunts:${lb.taunts.length}`);
+  if (lb.retreats.length > 0) parts.push(`retreats:${lb.retreats.length}`);
+  if (lb.rescues.length > 0) parts.push(`rescues:${lb.rescues.length}`);
+  if (lb.ambient.length > 0) parts.push(`ambient:${lb.ambient.length}`);
+  if (lb.witness.length > 0) parts.push(`witness:${lb.witness.length}`);
+  if (lb.callbacks.length > 0) parts.push(`callbacks:${lb.callbacks.length}`);
+  if (lb.postrun.length > 0) parts.push(`postrun:${lb.postrun.length}`);
+  return parts.length > 0 ? parts.join(', ') : 'empty';
+}
+
+// ============================================================================
+// MARK: Registry health
+// ============================================================================
+
+export function buildPersonaHealthReport(): BackendPersonaHealthReport {
+  const entries = Object.values(BACKEND_PERSONA_REGISTRY);
+  const notes: string[] = [];
+
+  let haterCount = 0;
+  let helperCount = 0;
+  let ambientCount = 0;
+  let totalLines = 0;
+  let personasWithBotBinding = 0;
+  let personasWithCallbacks = 0;
+  let personasWithPostrun = 0;
+  let emptyLineBankCount = 0;
+
+  for (const entry of entries) {
+    const lb = entry.lineBank;
+    const lineCount = countLinesForEntry(entry);
+
+    if (entry.descriptor.npcClass === 'HATER') haterCount += 1;
+    else if (entry.descriptor.npcClass === 'HELPER') helperCount += 1;
+    else ambientCount += 1;
+
+    totalLines += lineCount;
+    if (entry.runtime.runtimeBotId) personasWithBotBinding += 1;
+    if (lb.callbacks.length > 0) personasWithCallbacks += 1;
+    if (lb.postrun.length > 0) personasWithPostrun += 1;
+    if (lineCount === 0) emptyLineBankCount += 1;
+  }
+
+  if (emptyLineBankCount > 0) {
+    notes.push(`${emptyLineBankCount} persona(s) have empty line banks — review corpus.`);
+  }
+  if (personasWithCallbacks < haterCount) {
+    notes.push('Some hater personas are missing callback lines.');
+  }
+  if (personasWithPostrun < entries.length) {
+    notes.push('Some personas are missing post-run lines — postrun corpus is incomplete.');
+  }
+
+  return Object.freeze({
+    version: BACKEND_PERSONA_REGISTRY_VERSION,
+    totalPersonas: entries.length,
+    haterCount,
+    helperCount,
+    ambientCount,
+    totalLines,
+    personasWithBotBinding,
+    personasWithCallbacks,
+    personasWithPostrun,
+    averageLinesPerPersona: entries.length > 0 ? Math.round(totalLines / entries.length) : 0,
+    emptyLineBankCount,
+    notes: Object.freeze(notes),
+  });
+}
+
+// ============================================================================
+// MARK: Rank summary
+// ============================================================================
+
+export function buildPersonaRankSummary(
+  context: BackendPersonaSelectionContext = {},
+): BackendPersonaRankSummary {
+  const haters = listHaterCandidates(context);
+  const helpers = listHelperCandidates(context);
+  const ambient = listAmbientCandidates(context);
+
+  const allRanked = rankPersonaEntries(Object.values(BACKEND_PERSONA_REGISTRY), context);
+  const topOverall = allRanked[0]?.runtime.runtimeDisplayName ?? null;
+
+  return Object.freeze({
+    context,
+    haterRanking: Object.freeze(haters.map((e) => e.runtime.runtimeDisplayName)),
+    helperRanking: Object.freeze(helpers.map((e) => e.runtime.runtimeDisplayName)),
+    ambientRanking: Object.freeze(ambient.map((e) => e.runtime.runtimeDisplayName)),
+    topOverall,
+  });
+}
+
+// ============================================================================
+// MARK: Evolution helpers
+// ============================================================================
+
+export function getPersonaEvolutionStage(
+  identity: string | ChatKnownNpcKey,
+): string | null {
+  return resolvePersonaEntry(identity)?.evolutionSeed.stage ?? null;
+}
+
+export function getPersonaTemperament(
+  identity: string | ChatKnownNpcKey,
+): string | null {
+  return resolvePersonaEntry(identity)?.evolutionSeed.temperament ?? null;
+}
+
+export function getPersonaTransformBiases(
+  identity: string | ChatKnownNpcKey,
+): readonly string[] {
+  return resolvePersonaEntry(identity)?.evolutionSeed.activeTransformBiases ?? [];
+}
+
+export function getPersonaEvolutionSeed(
+  identity: string | ChatKnownNpcKey,
+): ChatPersonaEvolutionProfile | null {
+  return resolvePersonaEntry(identity)?.evolutionSeed ?? null;
+}
+
+// ============================================================================
+// MARK: Bot binding helpers
+// ============================================================================
+
+export function listPersonasWithBotBinding(): readonly BackendPersonaRegistryEntry[] {
+  return Object.values(BACKEND_PERSONA_REGISTRY).filter(
+    (entry) => Boolean(entry.runtime.runtimeBotId),
+  );
+}
+
+export function getBotIdForPersona(
+  identity: string | ChatKnownNpcKey,
+): string | null {
+  return resolvePersonaEntry(identity)?.runtime.runtimeBotId ?? null;
+}
+
+export function resolveBotIdToSharedKey(
+  botId: string,
+): ChatKnownNpcKey | null {
+  return getPersonaByBotId(botId)?.sharedKey ?? null;
+}
+
+// ============================================================================
+// MARK: Multi-pick utilities
+// ============================================================================
+
+export function pickPersonaLines(
+  identity: string | ChatKnownNpcKey,
+  category: BackendPersonaLineCategory,
+  count: number,
+  seed: string,
+): readonly string[] {
+  const lines = getPersonaLineCategory(identity, category);
+  if (!lines.length || count <= 0) return [];
+  const results: string[] = [];
+  const used = new Set<number>();
+  for (let attempt = 0; attempt < Math.min(count * 3, lines.length * 2); attempt += 1) {
+    if (results.length >= count) break;
+    const idx = positiveHash(`${String(identity)}|${category}|${seed}|${attempt}`) % lines.length;
+    if (used.has(idx)) continue;
+    used.add(idx);
+    const line = lines[idx];
+    if (line) results.push(line);
+  }
+  return Object.freeze(results);
+}
+
+export function pickLineAcrossPersonas(
+  entries: readonly BackendPersonaRegistryEntry[],
+  category: BackendPersonaLineCategory,
+  seed: string,
+): string | null {
+  const allLines: string[] = [];
+  for (const entry of entries) {
+    allLines.push(...entry.lineBank[category]);
+  }
+  if (!allLines.length) return null;
+  const idx = positiveHash(seed) % allLines.length;
+  return allLines[idx] ?? null;
+}
+
+export function sampleLineBankCoverage(
+  entry: BackendPersonaRegistryEntry,
+  seed: string,
+): Readonly<Record<BackendPersonaLineCategory, string | null>> {
+  const categories: BackendPersonaLineCategory[] = [
+    'telegraphs', 'taunts', 'retreats', 'rescues',
+    'ambient', 'witness', 'callbacks', 'postrun',
+  ];
+  const result: Record<BackendPersonaLineCategory, string | null> = {} as Record<BackendPersonaLineCategory, string | null>;
+  for (const cat of categories) {
+    result[cat] = pickDeterministic(entry.lineBank[cat], `${seed}::${cat}`);
+  }
+  return Object.freeze(result);
+}
+
+// ============================================================================
+// MARK: Namespace export
+// ============================================================================
+
+export const PersonaRegistryNS = Object.freeze({
+  // Registry constants
+  BACKEND_PERSONA_REGISTRY_VERSION,
+  BACKEND_PERSONA_REGISTRY,
+
+  // Core lookup
+  listPersonaEntries,
+  listPersonaKeys,
+  getPersonaEntry,
+  resolvePersonaLookup,
+  resolvePersonaEntry,
+  getPersonaByRuntimePersonaId,
+  getPersonaByRuntimeActorId,
+  getPersonaByBotId,
+
+  // Candidate ordering
+  rankPersonaEntries,
+  listHelperCandidates,
+  listHaterCandidates,
+  listAmbientCandidates,
+
+  // Line-bank access
+  getPersonaLineBank,
+  getPersonaLineCategory,
+  pickPersonaLine,
+  pickPersonaLines,
+  pickLineAcrossPersonas,
+  sampleLineBankCoverage,
+  resolveIntentToCategory,
+  pickBestPersonaLine,
+
+  // Snapshot
+  buildPersonaRegistrySnapshot,
+
+  // Extended contracts (scoring, selection)
+  buildPersonaContextScore,
+  scoreEntryBreakdown,
+  selectBestPersona,
+  selectPersonaForIntent,
+  selectPersonasByRankedScore,
+
+  // Filtering
+  filterPersonasByNpcClass,
+  filterPersonasByRoomMood,
+  filterPersonasByPressureBand,
+  filterPersonasByAliasKey,
+  filterPersonasByBotId,
+  filterPersonasByTag,
+
+  // Boolean checks
+  personaHasAlias,
+  personaHasTag,
+  personaHasBotBinding,
+  personaHasLineCategory,
+
+  // Line counts and summaries
+  countLinesForEntry,
+  countPersonaLines,
+  totalRegistryLines,
+  buildPersonaLineSummary,
+  listPersonaLineSummaries,
+
+  // Display and description
+  getPersonaDisplayInfo,
+  describePersona,
+  describeLineBank,
+
+  // Registry health
+  buildPersonaHealthReport,
+
+  // Rank summary
+  buildPersonaRankSummary,
+
+  // Evolution helpers
+  getPersonaEvolutionStage,
+  getPersonaTemperament,
+  getPersonaTransformBiases,
+  getPersonaEvolutionSeed,
+
+  // Bot binding helpers
+  listPersonasWithBotBinding,
+  getBotIdForPersona,
+  resolveBotIdToSharedKey,
 });
