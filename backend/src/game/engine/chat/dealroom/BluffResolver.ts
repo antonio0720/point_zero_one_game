@@ -119,6 +119,8 @@ export type BluffFamily =
   | 'ANCHOR_TRAP'
   | 'FACE_SAVE_MASK'
   | 'PROOF_MASK'
+  | 'WINDOW_MASK'
+  | 'GUARANTEE_MASK'
   | 'MULTI_LAYER';
 
 export type BluffSignalCode =
@@ -128,6 +130,10 @@ export type BluffSignalCode =
   | 'PUBLIC_CONFIDENCE_PRIVATE_FEAR'
   | 'CONCESSION_COUNT_OUT_OF_CHARACTER'
   | 'WINDOW_MISMATCH'
+  | 'WINDOW_FALSE_EXPIRY'
+  | 'WINDOW_GRACE_THEATER'
+  | 'WINDOW_RESCUE_MASK'
+  | 'WINDOW_LEAK_MASK'
   | 'LEAK_POSTURE_OVERPLAY'
   | 'RESCUE_SIGNAL_OVERPLAY'
   | 'TRUST_LANGUAGE_LOW_TRUST_OFFER'
@@ -137,6 +143,10 @@ export type BluffSignalCode =
   | 'DOMINANCE_LANGUAGE_SOFT_TERMS'
   | 'SOFT_LANGUAGE_PREDATORY_TERMS'
   | 'GUARANTEE_LANGUAGE_WEAK_GUARANTEE'
+  | 'GUARANTEE_STACK_OVERPLAY'
+  | 'GUARANTEE_PROOF_GAP'
+  | 'GUARANTEE_TYPE_MISMATCH'
+  | 'GUARANTEE_PUBLICITY_MASK'
   | 'AUDIENCE_HEAT_PERFORMANCE'
   | 'REPEATED_NONANSWER'
   | 'REVISION_BACKTRACK'
@@ -225,6 +235,31 @@ export interface BluffConcessionRead {
   readonly concessionMask01: Score0To1;
 }
 
+export interface BluffGuaranteeRead {
+  readonly guarantees: readonly ChatOfferGuarantee[];
+  readonly count: number;
+  readonly avgStrength01: Score0To1;
+  readonly proofBackedCount: number;
+  readonly publicityMask01: Score0To1;
+  readonly typeDiversity: number;
+  readonly dominantGuaranteeType: string;
+  readonly guaranteeMask01: Score0To1;
+}
+
+export interface BluffWindowRead {
+  readonly window: ChatOfferWindow | null;
+  readonly isOpen: boolean;
+  readonly isExpired: boolean;
+  readonly hasGrace: boolean;
+  readonly hasRescueEligibility: boolean;
+  readonly hasLeakEligibility: boolean;
+  readonly closesInMs: number | null;
+  readonly rescueInMs: number | null;
+  readonly leakInMs: number | null;
+  readonly readPreferredBy: UnixMs | null;
+  readonly windowMask01: Score0To1;
+}
+
 export interface BluffIntentRead {
   readonly intent: NegotiationIntent | null;
   readonly envelope: NegotiationOfferEnvelope | null;
@@ -249,6 +284,8 @@ export interface BluffAnalysis {
   readonly anchorManipulation01: Score0To1;
   readonly helperBait01: Score0To1;
   readonly proofMask01: Score0To1;
+  readonly guaranteeMask01: Score0To1;
+  readonly windowMask01: Score0To1;
   readonly visibilityMask01: Score0To1;
   readonly concessionMask01: Score0To1;
   readonly intentMismatch01: Score0To1;
@@ -262,6 +299,8 @@ export interface BluffAnalysis {
   readonly actorRead: BluffActorRead;
   readonly visibilityRead: BluffVisibilityRead;
   readonly concessionRead: BluffConcessionRead;
+  readonly guaranteeRead: BluffGuaranteeRead;
+  readonly windowRead: BluffWindowRead;
   readonly intentRead: BluffIntentRead;
   readonly signals: readonly BluffSignal[];
   readonly exploitWindows: readonly BluffExploitWindow[];
@@ -341,6 +380,8 @@ export class BluffResolver {
     const actorRead = buildActorRead(actorRef, actorState);
     const visibilityRead = buildVisibilityRead(offer, negotiation, actorState);
     const concessionRead = buildConcessionRead(offer, negotiation, actorState);
+    const guaranteeRead = buildGuaranteeRead(offer, negotiation, actorState);
+    const windowRead = buildWindowRead(offer, negotiation, now);
     const intentRead = buildIntentRead(negotiation, activeEnvelope, actorState, offer);
 
     const textSignals = this.scoreTextSignals(body, negotiation, actorState, priorOffer, request.priorBodies);
@@ -349,6 +390,8 @@ export class BluffResolver {
     const evidenceSignals = this.scoreEvidenceSignals(request.evidence ?? [], negotiation, actorState);
     const visibilitySignals = this.scoreVisibilitySignals(visibilityRead, negotiation, actorState);
     const concessionSignals = this.scoreConcessionSignals(concessionRead, negotiation, actorState, offer);
+    const guaranteeSignals = this.scoreGuaranteeSignals(guaranteeRead, negotiation, actorState, offer);
+    const windowSignals = this.scoreWindowSignals(windowRead, negotiation, actorState, offer);
     const intentSignals = this.scoreIntentSignals(intentRead, negotiation, actorState, offer);
 
     signals.push(
@@ -358,6 +401,8 @@ export class BluffResolver {
       ...evidenceSignals,
       ...visibilitySignals,
       ...concessionSignals,
+      ...guaranteeSignals,
+      ...windowSignals,
       ...intentSignals,
     );
 
@@ -427,7 +472,28 @@ export class BluffResolver {
     const proofMask01 = weightedAverage01(
       signals.filter((signal) =>
         signal.code === 'PROOF_LANGUAGE_LOW_PROOF_STATE' ||
-        signal.code === 'GUARANTEE_LANGUAGE_WEAK_GUARANTEE',
+        signal.code === 'GUARANTEE_LANGUAGE_WEAK_GUARANTEE' ||
+        signal.code === 'GUARANTEE_PROOF_GAP',
+      ),
+    );
+
+    const guaranteeMask01 = weightedAverage01(
+      signals.filter((signal) =>
+        signal.code === 'GUARANTEE_LANGUAGE_WEAK_GUARANTEE' ||
+        signal.code === 'GUARANTEE_STACK_OVERPLAY' ||
+        signal.code === 'GUARANTEE_PROOF_GAP' ||
+        signal.code === 'GUARANTEE_TYPE_MISMATCH' ||
+        signal.code === 'GUARANTEE_PUBLICITY_MASK',
+      ),
+    );
+
+    const windowMask01 = weightedAverage01(
+      signals.filter((signal) =>
+        signal.code === 'WINDOW_MISMATCH' ||
+        signal.code === 'WINDOW_FALSE_EXPIRY' ||
+        signal.code === 'WINDOW_GRACE_THEATER' ||
+        signal.code === 'WINDOW_RESCUE_MASK' ||
+        signal.code === 'WINDOW_LEAK_MASK',
       ),
     );
 
@@ -464,9 +530,11 @@ export class BluffResolver {
           confidenceMask01 * 0.09 +
           anchorManipulation01 * 0.1 +
           helperBait01 * 0.06 +
-          proofMask01 * 0.07 +
-          visibilityMask01 * 0.08 +
-          concessionMask01 * 0.08 +
+          proofMask01 * 0.06 +
+          guaranteeMask01 * 0.05 +
+          windowMask01 * 0.05 +
+          visibilityMask01 * 0.07 +
+          concessionMask01 * 0.07 +
           intentMismatch01 * 0.08 +
           actorRead.authorityMask01 * 0.04 +
           normalizedSignalDensity(signals) * 0.06,
@@ -481,9 +549,11 @@ export class BluffResolver {
           leakTheater01 * 0.11 +
           urgencyMask01 * 0.1 +
           helperBait01 * 0.06 +
-          proofMask01 * 0.07 +
+          proofMask01 * 0.06 +
+          guaranteeMask01 * 0.06 +
+          windowMask01 * 0.06 +
           visibilityMask01 * 0.07 +
-          concessionMask01 * 0.09 +
+          concessionMask01 * 0.08 +
           intentMismatch01 * 0.08 +
           softFailureSignal01(actorState) * 0.07,
       ),
@@ -503,6 +573,8 @@ export class BluffResolver {
       anchorManipulation01,
       helperBait01,
       proofMask01,
+      guaranteeMask01,
+      windowMask01,
       visibilityMask01,
       concessionMask01,
       intentMismatch01,
@@ -519,6 +591,8 @@ export class BluffResolver {
       rescueMask01,
       leakTheater01,
       exploitability01,
+      guaranteeMask01,
+      windowMask01,
       visibilityMask01,
       concessionMask01,
       intentMismatch01,
@@ -545,6 +619,8 @@ export class BluffResolver {
       anchorManipulation01: asScore0To1(anchorManipulation01),
       helperBait01: asScore0To1(helperBait01),
       proofMask01: asScore0To1(proofMask01),
+      guaranteeMask01: asScore0To1(guaranteeMask01),
+      windowMask01: asScore0To1(windowMask01),
       visibilityMask01: asScore0To1(visibilityMask01),
       concessionMask01: asScore0To1(concessionMask01),
       intentMismatch01: asScore0To1(intentMismatch01),
@@ -558,6 +634,8 @@ export class BluffResolver {
       actorRead,
       visibilityRead,
       concessionRead,
+      guaranteeRead,
+      windowRead,
       intentRead,
       signals,
       exploitWindows,
@@ -576,6 +654,10 @@ export class BluffResolver {
         witnessCount: visibilityRead.witnessCount,
         helperVisible: visibilityRead.helperVisible,
         concessionCount: concessionRead.count,
+        guaranteeCount: guaranteeRead.count,
+        guaranteeDominantType: guaranteeRead.dominantGuaranteeType,
+        windowOpen: windowRead.isOpen,
+        windowExpired: windowRead.isExpired,
         activeEnvelopeOfferId: intentRead.envelope?.vector.offerId ?? null,
         traceLabel: request.traceLabel ?? null,
       },
@@ -594,6 +676,8 @@ export class BluffResolver {
       urgencyMask01,
       leakTheater01,
       rescueMask01,
+      guaranteeMask01,
+      windowMask01,
       visibilityMask01,
       concessionMask01,
       intentMismatch01,
@@ -1159,6 +1243,133 @@ export class BluffResolver {
     return signals;
   }
 
+
+  private scoreGuaranteeSignals(
+    guaranteeRead: BluffGuaranteeRead,
+    negotiation: ChatNegotiation,
+    actorState: NegotiationActorState | null,
+    offer: ChatOffer | null,
+  ): BluffSignal[] {
+    const signals: BluffSignal[] = [];
+    if (!guaranteeRead.count) {
+      return signals;
+    }
+
+    if (guaranteeRead.count >= 3 && Number(guaranteeRead.avgStrength01) < 0.52) {
+      signals.push(signal(
+        'GUARANTEE_STACK_OVERPLAY',
+        asScore0To1(clamp01(0.28 + guaranteeRead.count / 8)),
+        'Offer stacks multiple guarantees whose average strength is too soft for the surface certainty.',
+        {
+          count: guaranteeRead.count,
+          avgStrength01: Number(guaranteeRead.avgStrength01),
+          dominantGuaranteeType: guaranteeRead.dominantGuaranteeType,
+        },
+      ));
+    }
+
+    if (guaranteeRead.proofBackedCount === 0 && Number(guaranteeRead.avgStrength01) > 0.34) {
+      signals.push(signal(
+        'GUARANTEE_PROOF_GAP',
+        asScore0To1(clamp01(0.35 + Number(guaranteeRead.avgStrength01) * 0.45)),
+        'Guarantee language is not matched by proof-backed guarantee structure.',
+      ));
+    }
+
+    if (guaranteeRead.publicityMask01 > 0.34 && negotiationHasAudiencePressure(negotiation)) {
+      signals.push(signal(
+        'GUARANTEE_PUBLICITY_MASK',
+        asScore0To1(clamp01(Number(guaranteeRead.publicityMask01) * 0.92)),
+        'Guarantee posture appears tailored for witness consumption rather than contractual substance.',
+      ));
+    }
+
+    if (
+      actorState &&
+      guaranteeRead.dominantGuaranteeType === 'WITNESS_BACKED' &&
+      Number(actorState.reputation.witnessHeat ?? asScore0To1(0)) < 0.22
+    ) {
+      signals.push(signal(
+        'GUARANTEE_TYPE_MISMATCH',
+        asScore0To1(0.43),
+        'Witness-backed guarantee posture exceeds the actor’s actual witness leverage.',
+      ));
+    }
+
+    if (
+      offer &&
+      guaranteeRead.dominantGuaranteeType === 'REFUND_FULL' &&
+      Number(chatOfferProjectedHostility(offer)) > 0.68
+    ) {
+      signals.push(signal(
+        'GUARANTEE_TYPE_MISMATCH',
+        asScore0To1(0.47),
+        'Full-refund posture conflicts with a hostile underlying offer projection.',
+      ));
+    }
+
+    return signals;
+  }
+
+  private scoreWindowSignals(
+    windowRead: BluffWindowRead,
+    negotiation: ChatNegotiation,
+    actorState: NegotiationActorState | null,
+    offer: ChatOffer | null,
+  ): BluffSignal[] {
+    const signals: BluffSignal[] = [];
+    if (!windowRead.window) {
+      return signals;
+    }
+
+    const urgencyProjection = offer?.currentVersion?.analytics?.urgency
+      ? normalizedOfferScore(offer.currentVersion.analytics.urgency)
+      : Number(actorState?.urgencySignal ?? asScore0To1(0));
+
+    if (!windowRead.isExpired && windowRead.closesInMs != null && windowRead.closesInMs > 15 * 60 * 1000 && urgencyProjection > 0.62) {
+      signals.push(signal(
+        'WINDOW_FALSE_EXPIRY',
+        asScore0To1(clamp01(0.28 + urgencyProjection * 0.5)),
+        'Expiry rhetoric appears stronger than the actual remaining offer window.',
+        { closesInMs: windowRead.closesInMs },
+      ));
+    }
+
+    if (windowRead.hasGrace && urgencyProjection > 0.55) {
+      signals.push(signal(
+        'WINDOW_GRACE_THEATER',
+        asScore0To1(clamp01(0.24 + urgencyProjection * 0.45)),
+        'Offer advertises time pressure while a grace period still exists behind the surface window.',
+      ));
+    }
+
+    if (windowRead.hasRescueEligibility && !negotiationSupportsRescue(negotiation)) {
+      signals.push(signal(
+        'WINDOW_RESCUE_MASK',
+        asScore0To1(0.48),
+        'Window timing exposes rescue eligibility without negotiation-level rescue support.',
+      ));
+    }
+
+    if (windowRead.hasLeakEligibility && !negotiationHasLeakThreat(negotiation)) {
+      signals.push(signal(
+        'WINDOW_LEAK_MASK',
+        asScore0To1(0.46),
+        'Window timing includes leak eligibility beyond the negotiation’s active leak posture.',
+      ));
+    }
+
+    if (windowRead.readPreferredBy && windowRead.closesInMs != null && windowRead.closesInMs < 0) {
+      signals.push(signal(
+        'WINDOW_MISMATCH',
+        asScore0To1(0.41),
+        'Read-preference timing outlives the window itself, suggesting theatrical timing geometry.',
+      ));
+    }
+
+    return signals;
+  }
+
   private buildExploitWindows(input: {
     readonly family: BluffFamily;
     readonly bluffConfidence01: Score0To1;
@@ -1167,6 +1378,8 @@ export class BluffResolver {
     readonly rescueMask01: number;
     readonly leakTheater01: number;
     readonly exploitability01: Score0To1;
+    readonly guaranteeMask01: number;
+    readonly windowMask01: number;
     readonly visibilityMask01: number;
     readonly concessionMask01: number;
     readonly intentMismatch01: number;
@@ -1219,6 +1432,24 @@ export class BluffResolver {
         clamp01(input.urgencyMask01 * 0.87),
         900,
         'Urgency theater becomes easier to punish if the actor is forced to wait.',
+      ));
+    }
+
+    if (input.windowMask01 > 0.38) {
+      windows.push(exploitWindow(
+        'WAIT_AND_WITNESS',
+        clamp01(input.windowMask01 * 0.9),
+        700,
+        'Window theater can be stress-tested by letting the claimed clock keep running.',
+      ));
+    }
+
+    if (input.guaranteeMask01 > 0.4) {
+      windows.push(exploitWindow(
+        'PROOF_CHALLENGE',
+        clamp01(input.guaranteeMask01 * 0.92),
+        0,
+        'Guarantee posture appears overextended and can be challenged at the proof layer.',
       ));
     }
 
@@ -1634,6 +1865,113 @@ function buildConcessionRead(
   };
 }
 
+
+function buildGuaranteeRead(
+  offer: ChatOffer | null,
+  negotiation: ChatNegotiation,
+  actorState: NegotiationActorState | null,
+): BluffGuaranteeRead {
+  const guarantees = extractOfferGuarantees(offer);
+  const count = guarantees.length;
+  const avgStrength = count
+    ? guarantees.reduce((sum, entry) => sum + normalizedOfferScore(entry.strength), 0) / count
+    : Number(offer ? chatOfferGuaranteeStrength(offer) : asScore0To1(0));
+  const proofBackedCount = guarantees.filter((entry) => guaranteeHasProof(entry)).length;
+  const typeCounts = new Map<string, number>();
+  for (const entry of guarantees) {
+    typeCounts.set(String(entry.type), (typeCounts.get(String(entry.type)) ?? 0) + 1);
+  }
+  const dominantGuaranteeType = count
+    ? [...typeCounts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? 'NONE'
+    : 'NONE';
+  const typeDiversity = typeCounts.size;
+  const publicityMask01 = clamp01(
+    (count >= 2 ? 0.18 : 0) +
+    clamp01((count - proofBackedCount) / Math.max(1, count)) * 0.42 +
+    (negotiationHasAudiencePressure(negotiation) ? 0.12 : 0) +
+    (actorState && Number(actorState.reputation.witnessHeat) > 0.55 ? 0.1 : 0) +
+    (dominantGuaranteeType === 'WITNESS_BACKED' ? 0.12 : 0),
+  );
+  const guaranteeMask01 = clamp01(
+    clamp01(count / 4) * 0.2 +
+    clamp01(1 - avgStrength) * 0.28 +
+    clamp01((count - proofBackedCount) / Math.max(1, count)) * 0.28 +
+    publicityMask01 * 0.24,
+  );
+
+  return {
+    guarantees,
+    count,
+    avgStrength01: asScore0To1(clamp01(avgStrength)),
+    proofBackedCount,
+    publicityMask01: asScore0To1(publicityMask01),
+    typeDiversity,
+    dominantGuaranteeType,
+    guaranteeMask01: asScore0To1(guaranteeMask01),
+  };
+}
+
+function buildWindowRead(
+  offer: ChatOffer | null,
+  negotiation: ChatNegotiation,
+  now: UnixMs,
+): BluffWindowRead {
+  const window = resolveOfferWindow(offer);
+  if (!window) {
+    return {
+      window: null,
+      isOpen: false,
+      isExpired: false,
+      hasGrace: false,
+      hasRescueEligibility: false,
+      hasLeakEligibility: false,
+      closesInMs: null,
+      rescueInMs: null,
+      leakInMs: null,
+      readPreferredBy: null,
+      windowMask01: asScore0To1(0),
+    };
+  }
+
+  const nowMs = Number(now);
+  const opensAt = Number(window.opensAt ?? asOfferUnixMs(0));
+  const closesAt = Number(window.closesAt ?? asOfferUnixMs(0));
+  const graceUntil = Number(window.graceUntil ?? asOfferUnixMs(0));
+  const rescueEligibleAt = Number(window.rescueEligibleAt ?? asOfferUnixMs(0));
+  const leakEligibleAt = Number(window.leakEligibleAt ?? asOfferUnixMs(0));
+  const readPreferredBy = window.readPreferredBy ?? null;
+  const isOpen = opensAt <= nowMs && closesAt > nowMs;
+  const isExpired = closesAt <= nowMs;
+  const hasGrace = windowContainsGrace(window);
+  const hasRescueEligibility = rescueEligibleAt > 0;
+  const hasLeakEligibility = leakEligibleAt > 0;
+  const closesInMs = closesAt > 0 ? closesAt - nowMs : null;
+  const rescueInMs = rescueEligibleAt > 0 ? rescueEligibleAt - nowMs : null;
+  const leakInMs = leakEligibleAt > 0 ? leakEligibleAt - nowMs : null;
+  const windowMask01 = clamp01(
+    (isExpired ? 0.12 : 0) +
+    (hasGrace ? 0.18 : 0) +
+    (hasRescueEligibility && !negotiationSupportsRescue(negotiation) ? 0.22 : 0) +
+    (hasLeakEligibility && !negotiationHasLeakThreat(negotiation) ? 0.2 : 0) +
+    (closesInMs != null && closesInMs > 15 * 60 * 1000 ? 0.08 : 0) +
+    (readPreferredBy && closesAt > 0 && Number(readPreferredBy) > closesAt ? 0.14 : 0),
+  );
+
+  return {
+    window,
+    isOpen,
+    isExpired,
+    hasGrace,
+    hasRescueEligibility,
+    hasLeakEligibility,
+    closesInMs,
+    rescueInMs,
+    leakInMs,
+    readPreferredBy,
+    windowMask01: asScore0To1(windowMask01),
+  };
+}
+
 function buildIntentRead(
   negotiation: ChatNegotiation,
   envelope: NegotiationOfferEnvelope | null,
@@ -1673,10 +2011,22 @@ function resolveOfferVisibilityEnvelope(
   return offer?.visibility ?? null;
 }
 
+function resolveOfferWindow(
+  offer: ChatOffer | null,
+): ChatOfferWindow | null {
+  return offer?.window ?? null;
+}
+
 function extractOfferConcessions(
   offer: ChatOffer | null,
 ): readonly ChatOfferConcession[] {
   return offer?.currentVersion?.concessions ?? [];
+}
+
+function extractOfferGuarantees(
+  offer: ChatOffer | null,
+): readonly ChatOfferGuarantee[] {
+  return offer?.currentVersion?.guarantees ?? [];
 }
 
 function roleAuthorityBias(actorRef: NegotiationActorRef): number {
@@ -1912,6 +2262,8 @@ function determineBluffFamily(input: {
   readonly anchorManipulation01: number;
   readonly helperBait01: number;
   readonly proofMask01: number;
+  readonly guaranteeMask01: number;
+  readonly windowMask01: number;
   readonly visibilityMask01: number;
   readonly concessionMask01: number;
   readonly intentMismatch01: number;
@@ -1928,6 +2280,8 @@ function determineBluffFamily(input: {
     input.anchorManipulation01,
     input.helperBait01,
     input.proofMask01,
+    input.guaranteeMask01,
+    input.windowMask01,
     input.visibilityMask01,
     input.concessionMask01,
     input.intentMismatch01,
@@ -1935,6 +2289,8 @@ function determineBluffFamily(input: {
   );
   if (maxSignal < 0.24) return 'NONE';
   if (input.visibilityMask01 >= maxSignal && input.visibilityMask01 > 0.38) return 'VISIBILITY_FAKE';
+  if (input.windowMask01 >= maxSignal && input.windowMask01 > 0.38) return 'WINDOW_MASK';
+  if (input.guaranteeMask01 >= maxSignal && input.guaranteeMask01 > 0.38) return 'GUARANTEE_MASK';
   if (input.leakTheater01 >= maxSignal && input.leakTheater01 > 0.42) return 'LEAK_BAIT';
   if (input.rescueMask01 >= maxSignal && input.helperBait01 > 0.32) return 'RESCUE_BAIT';
   if (input.helperBait01 >= maxSignal) return 'HELPER_BAIT';
@@ -1962,6 +2318,15 @@ function dedupeExploitWindows(windows: readonly BluffExploitWindow[]): readonly 
     }
   }
   return result.sort((a, b) => Number(b.confidence01) - Number(a.confidence01));
+}
+
+
+function guaranteeHasProof(guarantee: ChatOfferGuarantee): boolean {
+  return Boolean(guarantee.proof?.proofId && guarantee.proof.proofHash);
+}
+
+function windowContainsGrace(window: ChatOfferWindow): boolean {
+  return Number(window.graceUntil ?? asOfferUnixMs(0)) > Number(window.closesAt ?? asOfferUnixMs(0));
 }
 
 function createAnalysisId(negotiationId: unknown, actorId: unknown, now: UnixMs): string {
