@@ -1266,8 +1266,8 @@ export class RelationshipLedger {
     const entries = this._trajectories.get(key) ?? [];
     entries.push({
       timestamp: at,
-      trust01: state.vector?.trust01 ?? 0,
-      rivalry01: state.vector?.rivalry01 ?? 0,
+      trust01: state.vector?.respect01 ?? 0,
+      rivalry01: state.vector?.contempt01 ?? 0,
       intensity01: state.intensity01,
       volatility01: state.volatility01,
       obsession01: state.vector?.obsession01 ?? 0,
@@ -1318,7 +1318,7 @@ export class RelationshipLedger {
       for (let j = i + 1; j < Math.min(i + 8, events.length); j++) {
         const b = events[j]!;
         if (!a.counterpartId || !b.counterpartId || a.counterpartId === b.counterpartId) continue;
-        if (Math.abs(a.timestamp - b.timestamp) > 60000) continue;
+        if (Math.abs(a.createdAt - b.createdAt) > 60000) continue;
         const mapA = coOccurrence.get(a.counterpartId);
         if (mapA) mapA.set(b.counterpartId, (mapA.get(b.counterpartId) ?? 0) + 1);
         const mapB = coOccurrence.get(b.counterpartId);
@@ -1398,8 +1398,8 @@ export class RelationshipLedger {
     const stateA = this.getCounterpartState(playerA, counterpartId);
     const stateB = this.getCounterpartState(playerB, counterpartId);
     if (!stateA || !stateB) return undefined;
-    const trustDelta = Math.abs((stateA.vector?.trust01 ?? 0) - (stateB.vector?.trust01 ?? 0));
-    const rivalryDelta = Math.abs((stateA.vector?.rivalry01 ?? 0) - (stateB.vector?.rivalry01 ?? 0));
+    const trustDelta = Math.abs((stateA.vector?.respect01 ?? 0) - (stateB.vector?.respect01 ?? 0));
+    const rivalryDelta = Math.abs((stateA.vector?.contempt01 ?? 0) - (stateB.vector?.contempt01 ?? 0));
     const intensityDelta = Math.abs(stateA.intensity01 - stateB.intensity01);
     return Object.freeze({
       counterpartId,
@@ -1407,8 +1407,8 @@ export class RelationshipLedger {
       stanceA: stateA.stance, stanceB: stateB.stance,
       trustDelta01: trustDelta, rivalryDelta01: rivalryDelta, intensityDelta01: intensityDelta,
       asymmetryScore01: (trustDelta + rivalryDelta + intensityDelta) / 3,
-      shareRival: (stateA.vector?.rivalry01 ?? 0) >= 0.4 && (stateB.vector?.rivalry01 ?? 0) >= 0.4,
-      shareHelper: (stateA.vector?.trust01 ?? 0) >= 0.4 && (stateB.vector?.trust01 ?? 0) >= 0.4,
+      shareRival: (stateA.vector?.contempt01 ?? 0) >= 0.4 && (stateB.vector?.contempt01 ?? 0) >= 0.4,
+      shareHelper: (stateA.vector?.respect01 ?? 0) >= 0.4 && (stateB.vector?.respect01 ?? 0) >= 0.4,
     });
   }
 

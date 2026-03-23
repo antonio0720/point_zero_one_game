@@ -1807,3 +1807,293 @@ export function deriveReducerReplayAnchorSequence(
   const latest = selectLatestMessage(state, roomId);
   return latest?.sequenceNumber ?? selectCurrentSequence(state, roomId) ?? asSequenceNumber(0);
 }
+
+// ============================================================================
+// MARK: Watch bus
+// ============================================================================
+
+export interface ChatReducerWatchEvent {
+  readonly kind: 'message_appended' | 'message_deleted' | 'session_joined' | 'session_left' | 'invasion_opened' | 'invasion_closed';
+  readonly roomId: ChatRoomId;
+  readonly at: UnixMs;
+  readonly payload: Readonly<Record<string, unknown>>;
+}
+
+export type ChatReducerWatchHandler = (event: ChatReducerWatchEvent) => void;
+
+export class ChatReducerWatchBus {
+  private readonly handlers: ChatReducerWatchHandler[] = [];
+
+  subscribe(handler: ChatReducerWatchHandler): () => void {
+    this.handlers.push(handler);
+    return () => {
+      const idx = this.handlers.indexOf(handler);
+      if (idx >= 0) this.handlers.splice(idx, 1);
+    };
+  }
+
+  emit(event: ChatReducerWatchEvent): void {
+    for (const h of this.handlers) {
+      try { h(event); } catch { /* isolated */ }
+    }
+  }
+
+  get listenerCount(): number {
+    return this.handlers.length;
+  }
+}
+
+// ============================================================================
+// MARK: Reducer fingerprint
+// ============================================================================
+
+export interface ChatReducerFingerprint {
+  readonly roomId: ChatRoomId;
+  readonly lastSequence: number;
+  readonly appendedCount: number;
+  readonly deletedCount: number;
+  readonly invasionChange: boolean;
+  readonly computedAt: UnixMs;
+}
+
+export function computeReducerFingerprint(
+  roomId: ChatRoomId,
+  result: ChatReducerResult,
+  state: ChatState,
+  now: UnixMs,
+): ChatReducerFingerprint {
+  const lastSeq = deriveReducerReplayAnchorSequence(state, roomId);
+  return Object.freeze({
+    roomId,
+    lastSequence: lastSeq as unknown as number,
+    appendedCount: result.appendedMessages.length,
+    deletedCount: result.deletedMessageIds.length,
+    invasionChange: reducerOpenedOrClosedInvasion(result),
+    computedAt: now,
+  });
+}
+
+// ============================================================================
+// MARK: Epoch tracker
+// ============================================================================
+
+export interface ChatReducerEpochEntry {
+  readonly roomId: ChatRoomId;
+  readonly fingerprint: ChatReducerFingerprint;
+  readonly at: UnixMs;
+}
+
+export class ChatReducerEpochTracker {
+  private readonly epochs = new Map<ChatRoomId, ChatReducerEpochEntry[]>();
+
+  record(roomId: ChatRoomId, fp: ChatReducerFingerprint, at: UnixMs): void {
+    if (!this.epochs.has(roomId)) this.epochs.set(roomId, []);
+    this.epochs.get(roomId)!.push({ roomId, fingerprint: fp, at });
+  }
+
+  getHistory(roomId: ChatRoomId): readonly ChatReducerEpochEntry[] {
+    return this.epochs.get(roomId) ?? [];
+  }
+
+  getLastEntry(roomId: ChatRoomId): ChatReducerEpochEntry | null {
+    const arr = this.epochs.get(roomId);
+    return arr?.[arr.length - 1] ?? null;
+  }
+
+  listRoomIds(): readonly ChatRoomId[] {
+    return Object.freeze([...this.epochs.keys()]);
+  }
+
+  clear(roomId: ChatRoomId): void {
+    this.epochs.delete(roomId);
+  }
+}
+
+// ============================================================================
+// MARK: Result inspection utilities
+// ============================================================================
+
+export function reducerResultHasNewMessages(result: ChatReducerResult): boolean {
+  return result.appendedMessages.length > 0;
+}
+
+export function reducerResultHasDeletions(result: ChatReducerResult): boolean {
+  return result.deletedMessageIds.length > 0;
+}
+
+export function reducerResultHasSessionChanges(result: ChatReducerResult): boolean {
+  return result.touchedSessionIds.length > 0;
+}
+
+export function reducerResultHasInvasionChanges(result: ChatReducerResult): boolean {
+  return reducerOpenedOrClosedInvasion(result);
+}
+
+export function reducerResultMessageIds(result: ChatReducerResult): readonly ChatMessageId[] {
+  return result.appendedMessages.map((m) => m.id);
+}
+
+export function reducerResultTouchedSessionIds(result: ChatReducerResult): readonly ChatSessionId[] {
+  return result.touchedSessionIds;
+}
+
+export function reducerResultOpenedInvasionIds(result: ChatReducerResult): readonly ChatInvasionId[] {
+  return result.openedInvasionIds;
+}
+
+export function reducerResultClosedInvasionIds(result: ChatReducerResult): readonly ChatInvasionId[] {
+  return result.closedInvasionIds;
+}
+
+// ============================================================================
+// MARK: Module descriptor
+// ============================================================================
+
+export const CHAT_REDUCER_MODULE_ID = 'chat_reducer' as const;
+export const CHAT_REDUCER_MODULE_VERSION = '2026.03.14' as const;
+
+export const CHAT_REDUCER_MODULE_DESCRIPTOR = Object.freeze({
+  moduleId: CHAT_REDUCER_MODULE_ID,
+  version: CHAT_REDUCER_MODULE_VERSION,
+  capabilities: Object.freeze([
+    'message_append',
+    'message_delete',
+    'session_join',
+    'session_leave',
+    'invasion_open',
+    'invasion_close',
+    'proof_append',
+    'replay_append',
+    'learning_update',
+    'heat_update',
+    'epoch_tracking',
+    'fingerprinting',
+    'watch_bus',
+  ]),
+});
+
+// ============================================================================
+// MARK: Extended module namespace
+// ============================================================================
+
+export namespace ChatReducerModuleExtended {
+  export type WatchBus = ChatReducerWatchBus;
+  export type WatchEvent = ChatReducerWatchEvent;
+  export type Fingerprint = ChatReducerFingerprint;
+  export type EpochTracker = ChatReducerEpochTracker;
+
+  export function createWatchBus(): ChatReducerWatchBus {
+    return new ChatReducerWatchBus();
+  }
+
+  export function createEpochTracker(): ChatReducerEpochTracker {
+    return new ChatReducerEpochTracker();
+  }
+
+  export function describe(): string {
+    return `${CHAT_REDUCER_MODULE_ID}@${CHAT_REDUCER_MODULE_VERSION}`;
+  }
+}
+
+// ============================================================================
+// MARK: State inspection helpers exposed for consumers
+// ============================================================================
+
+export function reducerGetRoomAudienceHeat(state: ChatState, roomId: ChatRoomId): ChatAudienceHeat | null {
+  return state.audienceHeatByRoom[roomId] ?? null;
+}
+
+export function reducerGetInvasionState(state: ChatState, invasionId: ChatInvasionId): ChatInvasionState | null {
+  return state.activeInvasions[invasionId] ?? null;
+}
+
+export function reducerGetRoomSilenceDecision(state: ChatState, roomId: ChatRoomId): ChatSilenceDecision | null {
+  return state.silencesByRoom[roomId] ?? null;
+}
+
+export function reducerGetRoomSessionCount(state: ChatState, roomId: ChatRoomId): number {
+  return state.roomSessions.byRoom[roomId]?.length ?? 0;
+}
+
+export function reducerGetRoomMessageCount(state: ChatState, roomId: ChatRoomId): number {
+  return state.transcript.byRoom[roomId]?.length ?? 0;
+}
+
+export function reducerGetInferenceSnapshots(state: ChatState, roomId: ChatRoomId, userId: string): readonly ChatInferenceSnapshot[] {
+  return Object.values(state.inferenceSnapshots).filter(
+    (s) => s.userId === (userId as ChatUserId) && s.roomId === roomId,
+  );
+}
+
+export function reducerGetLearningProfile(state: ChatState, _roomId: ChatRoomId, userId: string): ChatLearningProfile | null {
+  return state.learningProfiles[userId as ChatUserId] ?? null;
+}
+
+export function reducerGetPresenceSnapshot(state: ChatState, roomId: ChatRoomId, sessionId: ChatSessionId): ChatPresenceSnapshot | null {
+  return state.presence.byRoom[roomId]?.[sessionId] ?? null;
+}
+
+export function reducerGetTypingSnapshot(state: ChatState, roomId: ChatRoomId, sessionId: ChatSessionId): ChatTypingSnapshot | null {
+  return state.typing.byRoom[roomId]?.find((s) => s.sessionId === sessionId) ?? null;
+}
+
+export function reducerGetRelationshipState(state: ChatState, relationshipId: ChatRelationshipId): ChatRelationshipState | null {
+  return state.relationships[relationshipId] ?? null;
+}
+
+export function reducerGetReplayArtifact(state: ChatState, roomId: ChatRoomId, index: number): ChatReplayArtifact | null {
+  return state.replay.byRoom[roomId]?.[index] ?? null;
+}
+
+export function reducerGetPendingRequestState(state: ChatState, _roomId: ChatRoomId, requestId: ChatRequestId): ChatPendingRequestState | null {
+  return state.pendingRequests[requestId] ?? null;
+}
+
+export function reducerGetPendingReveal(state: ChatState, _roomId: ChatRoomId, messageId: ChatMessageId): ChatPendingReveal | null {
+  return state.pendingReveals.find((r) => r.message.id === messageId) ?? null;
+}
+
+export function reducerGetProofEdge(state: ChatState, roomId: ChatRoomId, edgeId: string): ChatProofEdge | null {
+  const edges = state.proofChain.byRoom[roomId] ?? [];
+  return edges.find((e) => (e.id as string) === edgeId) ?? null;
+}
+
+export function reducerGetTelemetryEnvelope(state: ChatState, _roomId: ChatRoomId, index: number): ChatTelemetryEnvelope | null {
+  return state.telemetryQueue[index] ?? null;
+}
+
+export function reducerGetRoomState(state: ChatState, roomId: ChatRoomId): ChatRoomState | null {
+  return state.rooms[roomId] ?? null;
+}
+
+export function reducerGetSessionState(state: ChatState, _roomId: ChatRoomId, sessionId: ChatSessionId): ChatSessionState | null {
+  return state.sessions[sessionId] ?? null;
+}
+
+export function reducerGetJoinRequest(_state: ChatState, _roomId: ChatRoomId, _sessionId: ChatSessionId): ChatJoinRequest | null {
+  return null;
+}
+
+export function reducerGetLeaveRequest(_state: ChatState, _roomId: ChatRoomId, _sessionId: ChatSessionId): ChatLeaveRequest | null {
+  return null;
+}
+
+export function reducerGetVisibleChannelUnread(state: ChatState, roomId: ChatRoomId, channel: ChatVisibleChannel): number {
+  return state.rooms[roomId]?.unreadByChannel?.[channel] ?? 0;
+}
+
+export function reducerSequenceAsNumber(seq: SequenceNumber): number {
+  return seq as unknown as number;
+}
+
+export const CHAT_REDUCER_FULL_MODULE = Object.freeze({
+  descriptor: CHAT_REDUCER_MODULE_DESCRIPTOR,
+  createWatchBus: () => new ChatReducerWatchBus(),
+  createEpochTracker: () => new ChatReducerEpochTracker(),
+  computeFingerprint: computeReducerFingerprint,
+  resultHasNewMessages: reducerResultHasNewMessages,
+  resultHasDeletions: reducerResultHasDeletions,
+  resultHasSessionChanges: reducerResultHasSessionChanges,
+  resultHasInvasionChanges: reducerResultHasInvasionChanges,
+});
+

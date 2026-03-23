@@ -1617,3 +1617,374 @@ export function createMountOverride(mountTarget: ChatMountPolicy['mountTarget'])
 // ============================================================================
 
 export const DEFAULT_BACKEND_CHAT_RUNTIME: ChatRuntimeConfig = createDefaultRuntimeConfig();
+
+// ============================================================================
+// MARK: Runtime config watch bus
+// ============================================================================
+
+export type RuntimeConfigWatchEvent =
+  | { kind: 'CONFIG_MERGED'; resultKey: string }
+  | { kind: 'OVERRIDE_APPLIED'; overrideKey: string };
+
+export type RuntimeConfigWatchCallback = (event: RuntimeConfigWatchEvent) => void;
+
+export class RuntimeConfigWatchBus {
+  private readonly subscribers = new Set<RuntimeConfigWatchCallback>();
+
+  subscribe(cb: RuntimeConfigWatchCallback): () => void {
+    this.subscribers.add(cb);
+    return () => this.subscribers.delete(cb);
+  }
+
+  emit(event: RuntimeConfigWatchEvent): void {
+    for (const cb of this.subscribers) {
+      try { cb(event); } catch { /* isolate */ }
+    }
+  }
+
+  size(): number { return this.subscribers.size; }
+}
+
+// ============================================================================
+// MARK: Runtime config fingerprint
+// ============================================================================
+
+export interface RuntimeConfigFingerprint {
+  readonly allowedRoomKinds: readonly string[];
+  readonly allowedVisibleChannels: readonly string[];
+  readonly maxMessageLength: number;
+  readonly hash: string;
+}
+
+export function computeRuntimeConfigFingerprint(config: ChatRuntimeConfig): RuntimeConfigFingerprint {
+  const hash = [
+    (config.allowedRoomKinds ?? []).join(','),
+    (config.allowVisibleChannels ?? []).join(','),
+    config.maxMessageLength ?? 0,
+  ].join('|');
+
+  return Object.freeze({
+    allowedRoomKinds: Object.freeze([...(config.allowedRoomKinds ?? [])]),
+    allowedVisibleChannels: Object.freeze([...(config.allowVisibleChannels ?? [])]),
+    maxMessageLength: config.maxMessageLength ?? 0,
+    hash,
+  });
+}
+
+// ============================================================================
+// MARK: Runtime config diff
+// ============================================================================
+
+export interface RuntimeConfigDiff {
+  readonly changedKeys: readonly string[];
+  readonly addedChannels: readonly string[];
+  readonly removedChannels: readonly string[];
+  readonly addedRoomKinds: readonly string[];
+  readonly removedRoomKinds: readonly string[];
+}
+
+export function diffRuntimeConfigs(
+  before: ChatRuntimeConfig,
+  after: ChatRuntimeConfig,
+): RuntimeConfigDiff {
+  const beforeChannels = new Set(before.allowVisibleChannels ?? []);
+  const afterChannels = new Set(after.allowVisibleChannels ?? []);
+  const beforeRooms = new Set(before.allowedRoomKinds ?? []);
+  const afterRooms = new Set(after.allowedRoomKinds ?? []);
+
+  const addedChannels = [...afterChannels].filter((c) => !beforeChannels.has(c));
+  const removedChannels = [...beforeChannels].filter((c) => !afterChannels.has(c));
+  const addedRoomKinds = [...afterRooms].filter((r) => !beforeRooms.has(r));
+  const removedRoomKinds = [...beforeRooms].filter((r) => !afterRooms.has(r));
+
+  const changedKeys: string[] = [];
+  if (before.maxMessageLength !== after.maxMessageLength) changedKeys.push('maxMessageLength');
+  if (before.typingTimeoutMs !== after.typingTimeoutMs) changedKeys.push('typingTimeoutMs');
+  if (addedChannels.length || removedChannels.length) changedKeys.push('allowVisibleChannels');
+  if (addedRoomKinds.length || removedRoomKinds.length) changedKeys.push('allowedRoomKinds');
+
+  return Object.freeze({
+    changedKeys: Object.freeze(changedKeys),
+    addedChannels: Object.freeze(addedChannels),
+    removedChannels: Object.freeze(removedChannels),
+    addedRoomKinds: Object.freeze(addedRoomKinds),
+    removedRoomKinds: Object.freeze(removedRoomKinds),
+  });
+}
+
+// ============================================================================
+// MARK: Runtime config validator
+// ============================================================================
+
+export interface RuntimeConfigValidationResult {
+  readonly valid: boolean;
+  readonly violations: readonly string[];
+}
+
+export function validateRuntimeConfig(config: ChatRuntimeConfig): RuntimeConfigValidationResult {
+  const violations: string[] = [];
+
+  if (config.maxMessageLength !== undefined && config.maxMessageLength <= 0) {
+    violations.push('maxMessageLength_must_be_positive');
+  }
+  if (config.typingTimeoutMs !== undefined && config.typingTimeoutMs <= 0) {
+    violations.push('typingTimeoutMs_must_be_positive');
+  }
+  if (config.allowVisibleChannels !== undefined && config.allowVisibleChannels.length === 0) {
+    violations.push('allowVisibleChannels_must_not_be_empty');
+  }
+
+  return Object.freeze({
+    valid: violations.length === 0,
+    violations: Object.freeze(violations),
+  });
+}
+
+// ============================================================================
+// MARK: Room kind override builder
+// ============================================================================
+
+export function buildRoomKindRuntimeOverride(
+  roomKind: ChatRoomKind,
+  base: ChatRuntimeConfig = DEFAULT_BACKEND_CHAT_RUNTIME,
+): ChatRuntimeConfig {
+  const kindOverride = createRoomKindOverride(roomKind);
+  return mergeRuntimeConfig({ ...base, ...kindOverride });
+}
+
+// ============================================================================
+// MARK: Config preset library
+// ============================================================================
+
+export const RUNTIME_CONFIG_PRESETS = Object.freeze({
+  DEFAULT: DEFAULT_BACKEND_CHAT_RUNTIME,
+  GLOBAL_ONLY: mergeRuntimeConfig({ allowVisibleChannels: ['GLOBAL'] as ChatVisibleChannel[] }),
+  DEAL_ROOM: mergeRuntimeConfig({ allowVisibleChannels: ['DEAL_ROOM', 'GLOBAL'] as ChatVisibleChannel[] }),
+  SYNDICATE: mergeRuntimeConfig({ allowVisibleChannels: ['SYNDICATE', 'GLOBAL'] as ChatVisibleChannel[] }),
+  LOBBY: mergeRuntimeConfig({ allowVisibleChannels: ['LOBBY', 'GLOBAL'] as ChatVisibleChannel[] }),
+  FULL: mergeRuntimeConfig({ allowVisibleChannels: ['GLOBAL', 'SYNDICATE', 'DEAL_ROOM', 'LOBBY'] as ChatVisibleChannel[] }),
+} as const);
+
+// ============================================================================
+// MARK: Module constants
+// ============================================================================
+
+export const CHAT_RUNTIME_CONFIG_MODULE_NAME = 'ChatRuntimeConfig' as const;
+export const CHAT_RUNTIME_CONFIG_MODULE_VERSION = '2026.03.14.2' as const;
+
+export const CHAT_RUNTIME_CONFIG_MODULE_LAWS = Object.freeze([
+  'Runtime config is always frozen before use.',
+  'Channel allow lists are validated against mount policy.',
+  'Merge is additive — unknown keys are dropped, not forwarded.',
+  'Default config is computed once and exported as DEFAULT_BACKEND_CHAT_RUNTIME.',
+  'Preset configs are frozen at module load time.',
+]);
+
+export const CHAT_RUNTIME_CONFIG_MODULE_DESCRIPTOR = Object.freeze({
+  name: CHAT_RUNTIME_CONFIG_MODULE_NAME,
+  version: CHAT_RUNTIME_CONFIG_MODULE_VERSION,
+  laws: CHAT_RUNTIME_CONFIG_MODULE_LAWS,
+  presets: Object.keys(RUNTIME_CONFIG_PRESETS),
+});
+
+export function createRuntimeConfigWatchBus(): RuntimeConfigWatchBus {
+  return new RuntimeConfigWatchBus();
+}
+
+// ============================================================================
+// MARK: Config chain merger (multiple sources)
+// ============================================================================
+
+export function mergeRuntimeConfigChain(
+  ...configs: Partial<ChatRuntimeConfig>[]
+): ChatRuntimeConfig {
+  return configs.reduce(
+    (acc, cfg) => mergeRuntimeConfig({ ...acc, ...cfg }),
+    createDefaultRuntimeConfig(),
+  );
+}
+
+// ============================================================================
+// MARK: Config audit report
+// ============================================================================
+
+export interface RuntimeConfigAuditReport {
+  readonly allowedRoomKindCount: number;
+  readonly allowedVisibleChannelCount: number;
+  readonly shadowChannelCount: number;
+  readonly maxMessageLength: number;
+  readonly typingTimeoutMs: number;
+  readonly validationResult: RuntimeConfigValidationResult;
+}
+
+export function buildRuntimeConfigAuditReport(
+  config: ChatRuntimeConfig,
+): RuntimeConfigAuditReport {
+  return Object.freeze({
+    allowedRoomKindCount: config.allowedRoomKinds?.length ?? 0,
+    allowedVisibleChannelCount: config.allowVisibleChannels?.length ?? 0,
+    shadowChannelCount: config.allowShadowChannels?.length ?? 0,
+    maxMessageLength: config.maxMessageLength ?? 0,
+    typingTimeoutMs: config.typingTimeoutMs ?? 0,
+    validationResult: validateRuntimeConfig(config),
+  });
+}
+
+// ============================================================================
+// MARK: Room-kind config resolver
+// ============================================================================
+
+export interface RoomKindConfigResolution {
+  readonly roomKind: ChatRoomKind;
+  readonly config: ChatRuntimeConfig;
+  readonly channelCount: number;
+  readonly hasNpcSupport: boolean;
+}
+
+export function resolveRoomKindConfig(roomKind: ChatRoomKind): RoomKindConfigResolution {
+  const config = buildRoomKindRuntimeOverride(roomKind);
+  const channelCount = config.allowVisibleChannels?.length ?? 0;
+  const hasNpcSupport = config.allowedRoomKinds?.includes(roomKind) ?? false;
+
+  return Object.freeze({
+    roomKind,
+    config,
+    channelCount,
+    hasNpcSupport,
+  });
+}
+
+// ============================================================================
+// MARK: Config equality checker
+// ============================================================================
+
+export function runtimeConfigsAreEqual(a: ChatRuntimeConfig, b: ChatRuntimeConfig): boolean {
+  const diff = diffRuntimeConfigs(a, b);
+  return diff.changedKeys.length === 0 &&
+    diff.addedChannels.length === 0 &&
+    diff.removedChannels.length === 0 &&
+    diff.addedRoomKinds.length === 0 &&
+    diff.removedRoomKinds.length === 0;
+}
+
+// ============================================================================
+// MARK: Extended module namespace
+// ============================================================================
+
+export const ChatRuntimeConfigModuleExtended = Object.freeze({
+  createRuntimeConfigWatchBus,
+  computeRuntimeConfigFingerprint,
+  diffRuntimeConfigs,
+  validateRuntimeConfig,
+  buildRoomKindRuntimeOverride,
+  mergeRuntimeConfigChain,
+  buildRuntimeConfigAuditReport,
+  resolveRoomKindConfig,
+  runtimeConfigsAreEqual,
+  RUNTIME_CONFIG_PRESETS,
+  CHAT_RUNTIME_CONFIG_MODULE_DESCRIPTOR,
+  CHAT_RUNTIME_CONFIG_MODULE_LAWS,
+  DEFAULT_BACKEND_CHAT_RUNTIME,
+} as const);
+
+// ============================================================================
+// MARK: Config snapshot store
+// ============================================================================
+
+export class RuntimeConfigSnapshotStore {
+  private readonly snapshots: Array<{ config: ChatRuntimeConfig; recordedAt: UnixMs }> = [];
+
+  record(config: ChatRuntimeConfig, now: UnixMs): void {
+    this.snapshots.push(Object.freeze({ config, recordedAt: now }));
+  }
+
+  latest(): ChatRuntimeConfig | null {
+    return this.snapshots.length > 0 ? this.snapshots[this.snapshots.length - 1]!.config : null;
+  }
+
+  history(): readonly { config: ChatRuntimeConfig; recordedAt: UnixMs }[] {
+    return this.snapshots;
+  }
+
+  count(): number { return this.snapshots.length; }
+  reset(): void { this.snapshots.length = 0; }
+}
+
+// ============================================================================
+// MARK: Source-type channel override
+// ============================================================================
+
+export function getChannelOverridesForSourceType(sourceType: string): Partial<ChatRuntimeConfig> {
+  const overrides: Record<string, Partial<ChatRuntimeConfig>> = {
+    PLAYER: { allowVisibleChannels: ['GLOBAL', 'SYNDICATE', 'DEAL_ROOM', 'LOBBY'] as ChatVisibleChannel[] },
+    NPC: { allowVisibleChannels: ['GLOBAL', 'SYNDICATE'] as ChatVisibleChannel[] },
+    SYSTEM: { allowVisibleChannels: ['GLOBAL'] as ChatVisibleChannel[] },
+    OPERATOR: { allowVisibleChannels: ['GLOBAL', 'SYNDICATE', 'DEAL_ROOM', 'LOBBY'] as ChatVisibleChannel[] },
+  };
+  return overrides[sourceType] ?? {};
+}
+
+// ============================================================================
+// MARK: Config equality summary
+// ============================================================================
+
+export function runtimeConfigSummary(config: ChatRuntimeConfig): string {
+  return [
+    `rooms:${(config.allowedRoomKinds ?? []).join(',')}`,
+    `channels:${(config.allowVisibleChannels ?? []).join(',')}`,
+    `maxLen:${config.maxMessageLength ?? 'default'}`,
+    `typing:${config.typingTimeoutMs ?? 'default'}ms`,
+  ].join(' ');
+}
+
+export function createRuntimeConfigSnapshotStore(): RuntimeConfigSnapshotStore {
+  return new RuntimeConfigSnapshotStore();
+}
+
+// ============================================================================
+// MARK: Runtime config enabled features report
+// ============================================================================
+
+export interface RuntimeConfigEnabledFeatures {
+  readonly npcEnabled: boolean;
+  readonly replayEnabled: boolean;
+  readonly presenceEnabled: boolean;
+  readonly typingEnabled: boolean;
+  readonly readReceiptsEnabled: boolean;
+  readonly shadowWritesEnabled: boolean;
+}
+
+export function getEnabledFeaturesFromConfig(
+  config: ChatRuntimeConfig,
+): RuntimeConfigEnabledFeatures {
+  return Object.freeze({
+    npcEnabled: config.npcEnabled ?? true,
+    replayEnabled: config.replayEnabled ?? true,
+    presenceEnabled: config.presenceEnabled ?? true,
+    typingEnabled: config.typingEnabled ?? true,
+    readReceiptsEnabled: config.readReceiptsEnabled ?? true,
+    shadowWritesEnabled: config.shadowWritesEnabled ?? true,
+  });
+}
+
+export const CHAT_RUNTIME_CONFIG_MODULE_VERSION_EXTENDED = '2026.03.14.2' as const;
+
+export function isChannelAllowedByConfig(config: ChatRuntimeConfig, channel: ChatVisibleChannel): boolean {
+  return runtimeAllowsVisibleChannel(config, channel);
+}
+
+export function isRoomKindAllowedByConfig(config: ChatRuntimeConfig, roomKind: ChatRoomKind): boolean {
+  return runtimeAllowsRoomKind(config, roomKind);
+}
+
+export function getAllowedChannelList(config: ChatRuntimeConfig): readonly ChatVisibleChannel[] {
+  return config.allowVisibleChannels ?? [];
+}
+
+export function getAllowedRoomKindList(config: ChatRuntimeConfig): readonly ChatRoomKind[] {
+  return config.allowedRoomKinds ?? [];
+}
+
+export function configHasChannel(config: ChatRuntimeConfig, channel: ChatVisibleChannel): boolean {
+  return (config.allowVisibleChannels ?? []).includes(channel);
+}

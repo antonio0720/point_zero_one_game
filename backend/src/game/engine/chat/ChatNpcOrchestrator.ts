@@ -84,6 +84,7 @@ import {
 import {
   DEFAULT_BACKEND_CHAT_RUNTIME,
   mergeRuntimeConfig,
+  runtimeAllowsRoomKind,
   type ChatRuntimeConfigOptions,
 } from './ChatRuntimeConfig';
 import {
@@ -1646,3 +1647,548 @@ export function describeNpcPlan(plan: ChatNpcOrchestrationPlan): string {
     `reasons=${plan.reasons.join('|')}`,
   ].join(' :: ');
 }
+
+// ============================================================================
+// MARK: Watch bus
+// ============================================================================
+
+export interface ChatNpcWatchEvent {
+  readonly kind: 'plan_accepted' | 'plan_rejected' | 'npc_selected' | 'silence_applied';
+  readonly roomId: ChatRoomId;
+  readonly at: UnixMs;
+  readonly payload: Readonly<Record<string, JsonValue>>;
+}
+
+export type ChatNpcWatchHandler = (event: ChatNpcWatchEvent) => void;
+
+export class ChatNpcWatchBus {
+  private readonly handlers: ChatNpcWatchHandler[] = [];
+
+  subscribe(handler: ChatNpcWatchHandler): () => void {
+    this.handlers.push(handler);
+    return () => {
+      const idx = this.handlers.indexOf(handler);
+      if (idx >= 0) this.handlers.splice(idx, 1);
+    };
+  }
+
+  emit(event: ChatNpcWatchEvent): void {
+    for (const h of this.handlers) {
+      try { h(event); } catch { /* isolated */ }
+    }
+  }
+
+  get listenerCount(): number {
+    return this.handlers.length;
+  }
+}
+
+// ============================================================================
+// MARK: Fingerprint
+// ============================================================================
+
+export interface ChatNpcOrchestrationFingerprint {
+  readonly roomId: ChatRoomId;
+  readonly selectedRole: string;
+  readonly accepted: boolean;
+  readonly helperAccepted: boolean;
+  readonly haterAccepted: boolean;
+  readonly ambientAccepted: boolean;
+  readonly computedAt: UnixMs;
+}
+
+export function computeNpcOrchestrationFingerprint(
+  roomId: ChatRoomId,
+  plan: ChatNpcOrchestrationPlan,
+  now: UnixMs,
+): ChatNpcOrchestrationFingerprint {
+  return Object.freeze({
+    roomId,
+    selectedRole: plan.selected.role,
+    accepted: plan.accepted,
+    helperAccepted: plan.helper.accepted,
+    haterAccepted: plan.hater.accepted,
+    ambientAccepted: plan.ambient.accepted,
+    computedAt: now,
+  });
+}
+
+// ============================================================================
+// MARK: Epoch tracker
+// ============================================================================
+
+export interface ChatNpcOrchestrationEpochEntry {
+  readonly roomId: ChatRoomId;
+  readonly fingerprint: ChatNpcOrchestrationFingerprint;
+  readonly at: UnixMs;
+}
+
+export class ChatNpcOrchestrationEpochTracker {
+  private readonly epochs = new Map<ChatRoomId, ChatNpcOrchestrationEpochEntry[]>();
+
+  record(roomId: ChatRoomId, fp: ChatNpcOrchestrationFingerprint, at: UnixMs): void {
+    if (!this.epochs.has(roomId)) this.epochs.set(roomId, []);
+    this.epochs.get(roomId)!.push({ roomId, fingerprint: fp, at });
+  }
+
+  getHistory(roomId: ChatRoomId): readonly ChatNpcOrchestrationEpochEntry[] {
+    return this.epochs.get(roomId) ?? [];
+  }
+
+  getLastEntry(roomId: ChatRoomId): ChatNpcOrchestrationEpochEntry | null {
+    const arr = this.epochs.get(roomId);
+    return arr?.[arr.length - 1] ?? null;
+  }
+
+  listRoomIds(): readonly ChatRoomId[] {
+    return Object.freeze([...this.epochs.keys()]);
+  }
+
+  clear(roomId: ChatRoomId): void {
+    this.epochs.delete(roomId);
+  }
+}
+
+// ============================================================================
+// MARK: NPC role frequency counter
+// ============================================================================
+
+export interface NpcRoleFrequencyEntry {
+  readonly role: string;
+  readonly count: number;
+  readonly acceptedCount: number;
+}
+
+export function countNpcRoleFrequency(
+  history: readonly ChatNpcOrchestrationEpochEntry[],
+): readonly NpcRoleFrequencyEntry[] {
+  const map = new Map<string, { count: number; accepted: number }>();
+  for (const entry of history) {
+    const role = entry.fingerprint.selectedRole;
+    const existing = map.get(role) ?? { count: 0, accepted: 0 };
+    map.set(role, {
+      count: existing.count + 1,
+      accepted: existing.accepted + (entry.fingerprint.accepted ? 1 : 0),
+    });
+  }
+  return Object.freeze(
+    [...map.entries()].map(([role, { count, accepted }]) =>
+      Object.freeze({ role, count, acceptedCount: accepted }),
+    ),
+  );
+}
+
+// ============================================================================
+// MARK: Batch orchestration
+// ============================================================================
+
+export interface NpcBatchEntry {
+  readonly roomId: ChatRoomId;
+  readonly plan: ChatNpcOrchestrationPlan;
+  readonly fingerprint: ChatNpcOrchestrationFingerprint;
+}
+
+export interface NpcBatchResult {
+  readonly entries: readonly NpcBatchEntry[];
+  readonly acceptedCount: number;
+  readonly rejectedCount: number;
+  readonly computedAt: UnixMs;
+}
+
+export function runNpcOrchestrationBatch(
+  orchestrator: ChatNpcAuthority,
+  contexts: ReadonlyArray<{ roomId: ChatRoomId; state: ChatState; signal: ChatSignalEnvelope; now: UnixMs }>,
+  now: UnixMs,
+): NpcBatchResult {
+  const entries: NpcBatchEntry[] = [];
+  let accepted = 0;
+  let rejected = 0;
+  for (const ctx of contexts) {
+    const plan = orchestrator.plan({ state: ctx.state, roomId: ctx.roomId, signal: ctx.signal, now: ctx.now } as unknown as ChatNpcTriggerContext);
+    const fingerprint = computeNpcOrchestrationFingerprint(ctx.roomId, plan, now);
+    entries.push({ roomId: ctx.roomId, plan, fingerprint });
+    if (plan.accepted) accepted++;
+    else rejected++;
+  }
+  return Object.freeze({
+    entries: Object.freeze(entries),
+    acceptedCount: accepted,
+    rejectedCount: rejected,
+    computedAt: now,
+  });
+}
+
+// ============================================================================
+// MARK: Suppression report
+// ============================================================================
+
+export interface NpcSuppressionReport {
+  readonly roomId: ChatRoomId;
+  readonly suppressionActive: boolean;
+  readonly consecutiveSuppressed: number;
+  readonly lastAcceptedAt: UnixMs | null;
+  readonly dominantRole: string | null;
+}
+
+export function buildNpcSuppressionReport(
+  roomId: ChatRoomId,
+  history: readonly ChatNpcOrchestrationEpochEntry[],
+): NpcSuppressionReport {
+  let consecutiveSuppressed = 0;
+  let lastAcceptedAt: UnixMs | null = null;
+
+  const reversed = [...history].reverse();
+  for (const entry of reversed) {
+    if (!entry.fingerprint.accepted) consecutiveSuppressed++;
+    else {
+      lastAcceptedAt = entry.at;
+      break;
+    }
+  }
+
+  const roleFreq = countNpcRoleFrequency(history);
+  const dominantRole = roleFreq.reduce<NpcRoleFrequencyEntry | null>(
+    (best, e) => (!best || e.count > best.count ? e : best),
+    null,
+  )?.role ?? null;
+
+  return Object.freeze({
+    roomId,
+    suppressionActive: consecutiveSuppressed >= 3,
+    consecutiveSuppressed,
+    lastAcceptedAt,
+    dominantRole,
+  });
+}
+
+// ============================================================================
+// MARK: Module constants and descriptor
+// ============================================================================
+
+export const CHAT_NPC_ORCHESTRATOR_MODULE_ID = 'chat_npc_orchestrator' as const;
+export const CHAT_NPC_ORCHESTRATOR_MODULE_VERSION = '2026.03.14' as const;
+
+export interface ChatNpcOrchestratorModuleDescriptor {
+  readonly moduleId: typeof CHAT_NPC_ORCHESTRATOR_MODULE_ID;
+  readonly version: typeof CHAT_NPC_ORCHESTRATOR_MODULE_VERSION;
+  readonly capabilities: readonly string[];
+}
+
+export const CHAT_NPC_ORCHESTRATOR_MODULE_DESCRIPTOR: ChatNpcOrchestratorModuleDescriptor = Object.freeze({
+  moduleId: CHAT_NPC_ORCHESTRATOR_MODULE_ID,
+  version: CHAT_NPC_ORCHESTRATOR_MODULE_VERSION,
+  capabilities: Object.freeze([
+    'helper_planning',
+    'ambient_planning',
+    'hater_delegation',
+    'npc_suppression',
+    'scene_authoring',
+    'silence_scheduling',
+    'batch_orchestration',
+    'epoch_tracking',
+    'fingerprinting',
+    'watch_bus',
+  ]),
+});
+
+// ============================================================================
+// MARK: Extended module namespace
+// ============================================================================
+
+export namespace ChatNpcOrchestratorModuleExtended {
+  export type WatchBus = ChatNpcWatchBus;
+  export type WatchEvent = ChatNpcWatchEvent;
+  export type Fingerprint = ChatNpcOrchestrationFingerprint;
+  export type EpochTracker = ChatNpcOrchestrationEpochTracker;
+  export type BatchResult = NpcBatchResult;
+  export type SuppressionReport = NpcSuppressionReport;
+  export type Descriptor = ChatNpcOrchestratorModuleDescriptor;
+
+  export function createWatchBus(): ChatNpcWatchBus {
+    return new ChatNpcWatchBus();
+  }
+
+  export function createEpochTracker(): ChatNpcOrchestrationEpochTracker {
+    return new ChatNpcOrchestrationEpochTracker();
+  }
+
+  export function describe(): string {
+    return `${CHAT_NPC_ORCHESTRATOR_MODULE_ID}@${CHAT_NPC_ORCHESTRATOR_MODULE_VERSION}`;
+  }
+}
+
+// ============================================================================
+// MARK: Signal inspection utilities
+// ============================================================================
+
+export function npcSignalHasBattle(signal: ChatSignalEnvelope): boolean {
+  return Boolean(signal.battle);
+}
+
+export function npcSignalHasEconomy(signal: ChatSignalEnvelope): boolean {
+  return Boolean(signal.economy);
+}
+
+export function npcSignalHasPresence(signal: ChatSignalEnvelope): boolean {
+  void signal;
+  return false;
+}
+
+export function npcSignalRoomId(signal: ChatSignalEnvelope): ChatRoomId | null {
+  return signal.roomId ?? null;
+}
+
+export function npcSignalEventId(signal: ChatSignalEnvelope): string | null {
+  void signal;
+  return null;
+}
+
+// ============================================================================
+// MARK: Audience heat inspection
+// ============================================================================
+
+export function npcAudienceIsHot(heat: ChatAudienceHeat): boolean {
+  return (Number(heat.heat01) as number) >= 0.75;
+}
+
+export function npcAudienceHeatLabel(heat: ChatAudienceHeat): string {
+  const h = Number(heat.heat01) as number;
+  if (h >= 0.9) return 'scalding';
+  if (h >= 0.75) return 'hot';
+  if (h >= 0.5) return 'warm';
+  if (h >= 0.25) return 'cool';
+  return 'cold';
+}
+
+// ============================================================================
+// MARK: Affect inspection
+// ============================================================================
+
+export function npcAffectIsFrustrated(affect: ChatAffectSnapshot): boolean {
+  return (Number(affect.frustration01) as number) >= 0.65;
+}
+
+export function npcAffectIsEmbarrassed(affect: ChatAffectSnapshot): boolean {
+  return (Number(affect.embarrassment01) as number) >= 0.65;
+}
+
+export function npcAffectIsConfident(affect: ChatAffectSnapshot): boolean {
+  return (Number(affect.confidence01) as number) >= 0.7;
+}
+
+// ============================================================================
+// MARK: Learning profile helpers
+// ============================================================================
+
+export function npcHelperReceptivityHigh(profile: ChatLearningProfile): boolean {
+  return (Number(profile.helperReceptivity01) as number) >= 0.6;
+}
+
+export function npcHelperReceptivityLow(profile: ChatLearningProfile): boolean {
+  return (Number(profile.helperReceptivity01) as number) <= 0.3;
+}
+
+// ============================================================================
+// MARK: Room state utilities
+// ============================================================================
+
+export function npcRoomHasActiveInvasion(state: ChatState, roomId: ChatRoomId): boolean {
+  return getActiveRoomInvasions(state, roomId).length > 0;
+}
+
+export function npcRoomIsSilenced(state: ChatState, roomId: ChatRoomId, now: UnixMs): boolean {
+  void pruneExpiredSilences(state, now);
+  return isRoomSilenced(state, roomId, now);
+}
+
+export function npcRoomVisibleMessages(state: ChatState, roomId: ChatRoomId): readonly ChatMessage[] {
+  return selectVisibleMessages(state, roomId);
+}
+
+export function npcRoomInferenceSnapshots(state: ChatState, _roomId: ChatRoomId, userId: string): readonly unknown[] {
+  return selectInferenceSnapshotsForUser(state, userId as ChatLearningProfile['userId']);
+}
+
+export function npcRoomLearningProfile(state: ChatState, _roomId: ChatRoomId, userId: string): ChatLearningProfile | null {
+  return selectLearningProfile(state, userId as ChatLearningProfile['userId']);
+}
+
+export function npcRoomPresence(state: ChatState, roomId: ChatRoomId): ReturnType<typeof selectRoomPresence> {
+  return selectRoomPresence(state, roomId);
+}
+
+export function npcRoomAudienceHeat(state: ChatState, roomId: ChatRoomId): ChatAudienceHeat | null {
+  return selectAudienceHeat(state, roomId);
+}
+
+export function npcApplyScene(state: ChatState, roomId: ChatRoomId, sceneId: ChatSceneId, _plan: ChatScenePlan): ChatState {
+  return setRoomScene(state, roomId, sceneId);
+}
+
+export function npcApplySilence(state: ChatState, roomId: ChatRoomId, decision: ChatSilenceDecision): ChatState {
+  return setSilenceDecision(state, roomId, decision);
+}
+
+export function npcClearSilence(state: ChatState, roomId: ChatRoomId): ChatState {
+  return clearSilenceDecision(state, roomId);
+}
+
+// ============================================================================
+// MARK: Persona utilities
+// ============================================================================
+
+export function npcPersonaLabel(persona: ChatPersonaDescriptor): string {
+  return `${persona.displayName} [${persona.personaId}]`;
+}
+
+export function npcPersonaChannels(persona: ChatPersonaDescriptor): readonly ChatChannelId[] {
+  return persona.preferredChannels ?? [];
+}
+
+export function npcPersonaSupportsChannel(persona: ChatPersonaDescriptor, channelId: ChatChannelId): boolean {
+  return npcPersonaChannels(persona).includes(channelId);
+}
+
+// ============================================================================
+// MARK: Response candidate utilities
+// ============================================================================
+
+export function npcSortCandidates(candidates: readonly ChatResponseCandidate[]): readonly ChatResponseCandidate[] {
+  return [...candidates].sort((a, b) => b.priority - a.priority);
+}
+
+export function npcTopCandidate(candidates: readonly ChatResponseCandidate[]): ChatResponseCandidate | null {
+  return npcSortCandidates(candidates)[0] ?? null;
+}
+
+export function npcCandidateHasBody(candidate: ChatResponseCandidate): boolean {
+  return candidate.text.trim().length > 0;
+}
+
+// ============================================================================
+// MARK: Hater authority inspection
+// ============================================================================
+
+export function haterAuthorityIsReady(authority: HaterResponseAuthority): boolean {
+  return typeof authority.plan === 'function';
+}
+
+export function buildHaterTriggerFromSignal(
+  signal: ChatSignalEnvelope,
+  attackType: AttackType,
+  sessionId: ChatSessionId,
+): Pick<HaterTriggerContext, 'signal'> & { attackType: AttackType; sessionId: ChatSessionId } {
+  return Object.freeze({
+    signal,
+    attackType,
+    sessionId,
+  });
+}
+
+export function describeHaterPlan(plan: HaterResponsePlan): string {
+  return [
+    `accepted=${plan.accepted}`,
+    `reasons=${plan.reasons.join('|')}`,
+    plan.accepted && plan.personaMatch ? `persona=${plan.personaMatch.persona.displayName}` : 'no-persona',
+  ].join(' :: ');
+}
+
+export function haterOptionsWithDefaults(partial: Partial<HaterResponseOptions>): HaterResponseOptions {
+  return Object.freeze({ ...partial });
+}
+
+// ============================================================================
+// MARK: Room kind utilities
+// ============================================================================
+
+export function npcRoomKindIsCompetitive(kind: ChatRoomKind): boolean {
+  return kind === 'GLOBAL' || kind === 'DEAL_ROOM';
+}
+
+export function npcRoomKindIsRelaxed(kind: ChatRoomKind): boolean {
+  return kind === 'LOBBY' || kind === 'SYNDICATE';
+}
+
+// ============================================================================
+// MARK: Stage mood utilities
+// ============================================================================
+
+export function npcStageMoodLabel(mood: ChatRoomStageMood): string {
+  const labels: Partial<Record<ChatRoomStageMood, string>> = {
+    TENSE: 'Tense',
+    ECSTATIC: 'Excited',
+    CALM: 'Calm',
+    HOSTILE: 'Hostile',
+    CEREMONIAL: 'Ceremonial',
+  };
+  return labels[mood] ?? mood;
+}
+
+export function npcStageMoodIsTense(mood: ChatRoomStageMood): boolean {
+  return mood === 'TENSE';
+}
+
+export function npcStageMoodIsHostile(mood: ChatRoomStageMood): boolean {
+  return mood === 'HOSTILE';
+}
+
+// ============================================================================
+// MARK: Visible channel utilities
+// ============================================================================
+
+export function npcChannelLabel(channel: ChatVisibleChannel): string {
+  return String(channel).replace(/_/g, ' ');
+}
+
+export function npcChannelIsPublic(channel: ChatVisibleChannel): boolean {
+  return channel === 'GLOBAL' || channel === 'LOBBY';
+}
+
+// ============================================================================
+// MARK: Runtime config utilities
+// ============================================================================
+
+export function npcRuntimeChannelAllowed(
+  config: ReturnType<typeof mergeRuntimeConfig>,
+  channel: ChatVisibleChannel,
+): boolean {
+  return (config.allowVisibleChannels ?? []).includes(channel);
+}
+
+export function npcRuntimeRoomKindAllowed(
+  config: ReturnType<typeof mergeRuntimeConfig>,
+  roomKind: ChatRoomKind,
+): boolean {
+  return runtimeAllowsRoomKind(config, roomKind);
+}
+
+// ============================================================================
+// MARK: Score utilities
+// ============================================================================
+
+export function npcClampScore(value: number): Score01 {
+  return clamp01(value) as Score01;
+}
+
+export function npcTimestamp(ms: number): UnixMs {
+  return asUnixMs(ms);
+}
+
+export function npcIsNullable<T>(value: Nullable<T>): value is null | undefined {
+  return value == null;
+}
+
+// ============================================================================
+// MARK: Full module export
+// ============================================================================
+
+export const CHAT_NPC_ORCHESTRATOR_FULL_MODULE = Object.freeze({
+  descriptor: CHAT_NPC_ORCHESTRATOR_MODULE_DESCRIPTOR,
+  createWatchBus: () => new ChatNpcWatchBus(),
+  createEpochTracker: () => new ChatNpcOrchestrationEpochTracker(),
+  runBatch: runNpcOrchestrationBatch,
+  buildSuppressionReport: buildNpcSuppressionReport,
+  countRoleFrequency: countNpcRoleFrequency,
+  computeFingerprint: computeNpcOrchestrationFingerprint,
+});
+

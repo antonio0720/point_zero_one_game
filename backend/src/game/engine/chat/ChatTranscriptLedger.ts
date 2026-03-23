@@ -1047,3 +1047,983 @@ function mergeRuntime(runtime: Partial<ChatRuntimeConfig> | undefined): ChatRunt
     },
   };
 }
+
+// ============================================================================
+// MARK: Transcript watch bus
+// ============================================================================
+
+export type TranscriptWatchEventKind =
+  | 'MESSAGE_APPENDED'
+  | 'MESSAGE_REDACTED'
+  | 'MESSAGE_SOFT_DELETED'
+  | 'MESSAGE_HARD_DELETED'
+  | 'MESSAGE_REPLACED'
+  | 'REVEAL_PROMOTED'
+  | 'SEQUENCE_GAP_DETECTED'
+  | 'COMPACTION_RAN';
+
+export interface TranscriptWatchEvent {
+  readonly kind: TranscriptWatchEventKind;
+  readonly roomId: ChatRoomId;
+  readonly messageId: ChatMessageId | null;
+  readonly channelId: ChatChannelId | null;
+  readonly detail: string;
+  readonly occurredAt: UnixMs;
+}
+
+export class TranscriptWatchBus {
+  private readonly handlers: Array<(evt: TranscriptWatchEvent) => void> = [];
+
+  subscribe(handler: (evt: TranscriptWatchEvent) => void): () => void {
+    this.handlers.push(handler);
+    return () => {
+      const idx = this.handlers.indexOf(handler);
+      if (idx !== -1) this.handlers.splice(idx, 1);
+    };
+  }
+
+  emit(evt: TranscriptWatchEvent): void {
+    for (const h of this.handlers) {
+      try { h(evt); } catch { /* noop */ }
+    }
+  }
+
+  emitAppend(roomId: ChatRoomId, messageId: ChatMessageId, channelId: ChatChannelId): void {
+    this.emit({ kind: 'MESSAGE_APPENDED', roomId, messageId, channelId, detail: `msg ${messageId} appended`, occurredAt: asUnixMs(Date.now()) });
+  }
+
+  emitRedact(roomId: ChatRoomId, messageId: ChatMessageId): void {
+    this.emit({ kind: 'MESSAGE_REDACTED', roomId, messageId, channelId: null, detail: `msg ${messageId} redacted`, occurredAt: asUnixMs(Date.now()) });
+  }
+
+  emitSequenceGap(roomId: ChatRoomId, expected: number, got: number): void {
+    this.emit({ kind: 'SEQUENCE_GAP_DETECTED', roomId, messageId: null, channelId: null, detail: `gap: expected ${expected}, got ${got}`, occurredAt: asUnixMs(Date.now()) });
+  }
+}
+
+// ============================================================================
+// MARK: Transcript fingerprint
+// ============================================================================
+
+export interface TranscriptFingerprint {
+  readonly roomId: ChatRoomId;
+  readonly channelId: ChatChannelId;
+  readonly hash: string;
+  readonly messageCount: number;
+  readonly computedAt: UnixMs;
+}
+
+export function computeTranscriptFingerprint(
+  roomId: ChatRoomId,
+  channelId: ChatChannelId,
+  entries: readonly ChatTranscriptEntry[],
+): TranscriptFingerprint {
+  const channelEntries = entries.filter((e) => e.message.channelId === channelId);
+  const parts = channelEntries.map((e) => `${e.sequence}:${e.message.id}:${e.message.authorId}`);
+  let h = 5381;
+  for (const p of parts) {
+    for (let i = 0; i < p.length; i++) {
+      h = ((h << 5) + h + p.charCodeAt(i)) >>> 0;
+    }
+  }
+  return Object.freeze({
+    roomId,
+    channelId,
+    hash: h.toString(16).padStart(8, '0'),
+    messageCount: channelEntries.length,
+    computedAt: asUnixMs(Date.now()),
+  });
+}
+
+// ============================================================================
+// MARK: Transcript analytics
+// ============================================================================
+
+export interface TranscriptAuthorStat {
+  readonly authorId: string;
+  readonly messageCount: number;
+  readonly firstMessageAt: UnixMs;
+  readonly lastMessageAt: UnixMs;
+  readonly channelBreakdown: Record<string, number>;
+}
+
+export interface TranscriptAnalytics {
+  readonly roomId: ChatRoomId;
+  readonly totalMessages: number;
+  readonly visibleMessages: number;
+  readonly redactedMessages: number;
+  readonly deletedMessages: number;
+  readonly authorStats: readonly TranscriptAuthorStat[];
+  readonly channelMessageCounts: Record<string, number>;
+  readonly sequenceMin: number;
+  readonly sequenceMax: number;
+  readonly generatedAt: UnixMs;
+}
+
+export function buildTranscriptAnalytics(
+  roomId: ChatRoomId,
+  entries: readonly ChatTranscriptEntry[],
+): TranscriptAnalytics {
+  let visible = 0, redacted = 0, deleted = 0;
+  const authorMap = new Map<string, { count: number; first: UnixMs; last: UnixMs; channels: Record<string, number> }>();
+  const channelCounts: Record<string, number> = {};
+  let seqMin = Infinity, seqMax = -Infinity;
+
+  for (const entry of entries) {
+    const msg = entry.message;
+    if (entry.redacted) redacted++;
+    else if (entry.softDeleted) deleted++;
+    else visible++;
+
+    const ch = msg.channelId ?? 'UNKNOWN';
+    channelCounts[ch] = (channelCounts[ch] ?? 0) + 1;
+
+    const seq = entry.sequence as unknown as number;
+    if (seq < seqMin) seqMin = seq;
+    if (seq > seqMax) seqMax = seq;
+
+    const authorId = msg.authorId ?? 'SYSTEM';
+    const existing = authorMap.get(authorId);
+    if (!existing) {
+      authorMap.set(authorId, { count: 1, first: msg.createdAt, last: msg.createdAt, channels: { [ch]: 1 } });
+    } else {
+      existing.count++;
+      if (msg.createdAt < existing.first) existing.first = msg.createdAt;
+      if (msg.createdAt > existing.last) existing.last = msg.createdAt;
+      existing.channels[ch] = (existing.channels[ch] ?? 0) + 1;
+    }
+  }
+
+  const authorStats: TranscriptAuthorStat[] = [];
+  for (const [authorId, data] of authorMap) {
+    authorStats.push(Object.freeze({ authorId, messageCount: data.count, firstMessageAt: data.first, lastMessageAt: data.last, channelBreakdown: data.channels }));
+  }
+  authorStats.sort((a, b) => b.messageCount - a.messageCount);
+
+  return Object.freeze({
+    roomId,
+    totalMessages: entries.length,
+    visibleMessages: visible,
+    redactedMessages: redacted,
+    deletedMessages: deleted,
+    authorStats: Object.freeze(authorStats),
+    channelMessageCounts: channelCounts,
+    sequenceMin: seqMin === Infinity ? 0 : seqMin,
+    sequenceMax: seqMax === -Infinity ? 0 : seqMax,
+    generatedAt: asUnixMs(Date.now()),
+  });
+}
+
+// ============================================================================
+// MARK: Transcript replay window builder
+// ============================================================================
+
+export interface TranscriptReplayWindow {
+  readonly roomId: ChatRoomId;
+  readonly channelId: ChatChannelId;
+  readonly fromSequence: SequenceNumber;
+  readonly toSequence: SequenceNumber;
+  readonly entries: readonly ChatTranscriptEntry[];
+  readonly hasGaps: boolean;
+  readonly gapPositions: readonly number[];
+}
+
+export function buildTranscriptReplayWindow(
+  roomId: ChatRoomId,
+  channelId: ChatChannelId,
+  allEntries: readonly ChatTranscriptEntry[],
+  fromSequence: SequenceNumber,
+  toSequence: SequenceNumber,
+): TranscriptReplayWindow {
+  const filtered = allEntries.filter((e) => {
+    const seq = e.sequence as unknown as number;
+    const from = fromSequence as unknown as number;
+    const to = toSequence as unknown as number;
+    return e.message.channelId === channelId && seq >= from && seq <= to;
+  }).sort((a, b) => (a.sequence as unknown as number) - (b.sequence as unknown as number));
+
+  const gapPositions: number[] = [];
+  let hasGaps = false;
+  for (let i = 1; i < filtered.length; i++) {
+    const prev = filtered[i - 1].sequence as unknown as number;
+    const curr = filtered[i].sequence as unknown as number;
+    if (curr - prev > 1) {
+      hasGaps = true;
+      gapPositions.push(prev + 1);
+    }
+  }
+
+  return Object.freeze({ roomId, channelId, fromSequence, toSequence, entries: Object.freeze(filtered), hasGaps, gapPositions: Object.freeze(gapPositions) });
+}
+
+// ============================================================================
+// MARK: Transcript pending reveal tracker
+// ============================================================================
+
+export interface PendingRevealTracker {
+  add(reveal: ChatPendingReveal): void;
+  getAll(roomId: ChatRoomId): readonly ChatPendingReveal[];
+  remove(roomId: ChatRoomId, messageId: ChatMessageId): void;
+  promote(roomId: ChatRoomId, messageId: ChatMessageId, nowMs?: number): ChatPendingReveal | null;
+  countPending(roomId: ChatRoomId): number;
+  getExpired(roomId: ChatRoomId, nowMs?: number): readonly ChatPendingReveal[];
+  clearRoom(roomId: ChatRoomId): void;
+}
+
+export function createPendingRevealTracker(): PendingRevealTracker {
+  const store = new Map<string, ChatPendingReveal[]>();
+
+  return {
+    add(reveal: ChatPendingReveal): void {
+      const list = store.get(reveal.roomId) ?? [];
+      list.push(reveal);
+      store.set(reveal.roomId, list);
+    },
+    getAll(roomId: ChatRoomId): readonly ChatPendingReveal[] {
+      return Object.freeze(store.get(roomId) ?? []);
+    },
+    remove(roomId: ChatRoomId, messageId: ChatMessageId): void {
+      const list = store.get(roomId) ?? [];
+      store.set(roomId, list.filter((r) => r.messageId !== messageId));
+    },
+    promote(roomId: ChatRoomId, messageId: ChatMessageId, nowMs: number = Date.now()): ChatPendingReveal | null {
+      const list = store.get(roomId) ?? [];
+      const idx = list.findIndex((r) => r.messageId === messageId && r.revealAt <= asUnixMs(nowMs));
+      if (idx === -1) return null;
+      const [promoted] = list.splice(idx, 1);
+      store.set(roomId, list);
+      return promoted;
+    },
+    countPending(roomId: ChatRoomId): number {
+      return (store.get(roomId) ?? []).length;
+    },
+    getExpired(roomId: ChatRoomId, nowMs: number = Date.now()): readonly ChatPendingReveal[] {
+      const list = store.get(roomId) ?? [];
+      return Object.freeze(list.filter((r) => r.revealAt <= asUnixMs(nowMs)));
+    },
+    clearRoom(roomId: ChatRoomId): void {
+      store.delete(roomId);
+    },
+  };
+}
+
+// ============================================================================
+// MARK: Transcript sequence gap audit
+// ============================================================================
+
+export interface SequenceGapAuditResult {
+  readonly roomId: ChatRoomId;
+  readonly channelId: ChatChannelId;
+  readonly hasGaps: boolean;
+  readonly gaps: readonly { readonly from: number; readonly to: number; readonly missing: number }[];
+  readonly totalMissing: number;
+  readonly auditedAt: UnixMs;
+}
+
+export function auditTranscriptSequenceGaps(
+  roomId: ChatRoomId,
+  channelId: ChatChannelId,
+  entries: readonly ChatTranscriptEntry[],
+): SequenceGapAuditResult {
+  const channelEntries = entries
+    .filter((e) => e.message.channelId === channelId)
+    .sort((a, b) => (a.sequence as unknown as number) - (b.sequence as unknown as number));
+
+  const gaps: { from: number; to: number; missing: number }[] = [];
+  let totalMissing = 0;
+
+  for (let i = 1; i < channelEntries.length; i++) {
+    const prev = channelEntries[i - 1].sequence as unknown as number;
+    const curr = channelEntries[i].sequence as unknown as number;
+    if (curr - prev > 1) {
+      const missing = curr - prev - 1;
+      totalMissing += missing;
+      gaps.push({ from: prev + 1, to: curr - 1, missing });
+    }
+  }
+
+  return Object.freeze({
+    roomId,
+    channelId,
+    hasGaps: gaps.length > 0,
+    gaps: Object.freeze(gaps),
+    totalMissing,
+    auditedAt: asUnixMs(Date.now()),
+  });
+}
+
+// ============================================================================
+// MARK: Transcript callback memory query
+// ============================================================================
+
+export interface CallbackMessageQuery {
+  readonly roomId: ChatRoomId;
+  readonly authorId?: string;
+  readonly channelId?: ChatChannelId;
+  readonly tags?: readonly string[];
+  readonly sinceSequence?: SequenceNumber;
+  readonly limit?: number;
+}
+
+export interface CallbackMessageResult {
+  readonly messages: readonly ChatMessage[];
+  readonly totalFound: number;
+  readonly queryAppliedAt: UnixMs;
+}
+
+export function queryCallbackMessages(
+  entries: readonly ChatTranscriptEntry[],
+  query: CallbackMessageQuery,
+): CallbackMessageResult {
+  let filtered = entries.filter((e) => {
+    if (e.redacted || e.softDeleted) return false;
+    if (query.authorId && e.message.authorId !== query.authorId) return false;
+    if (query.channelId && e.message.channelId !== query.channelId) return false;
+    if (query.sinceSequence && (e.sequence as unknown as number) < (query.sinceSequence as unknown as number)) return false;
+    if (query.tags && query.tags.length > 0) {
+      const msgTags = (e.message as unknown as { tags?: string[] }).tags ?? [];
+      if (!query.tags.some((t) => msgTags.includes(t))) return false;
+    }
+    return true;
+  });
+
+  filtered.sort((a, b) => (b.sequence as unknown as number) - (a.sequence as unknown as number));
+  const limit = query.limit ?? 50;
+  const limited = filtered.slice(0, limit);
+
+  return Object.freeze({
+    messages: Object.freeze(limited.map((e) => e.message)),
+    totalFound: filtered.length,
+    queryAppliedAt: asUnixMs(Date.now()),
+  });
+}
+
+// ============================================================================
+// MARK: Transcript compaction result
+// ============================================================================
+
+export interface TranscriptCompactionResult {
+  readonly roomId: ChatRoomId;
+  readonly entriesBeforeCompaction: number;
+  readonly entriesAfterCompaction: number;
+  readonly entriesRemoved: number;
+  readonly compactedAt: UnixMs;
+}
+
+export function buildTranscriptCompactionResult(
+  roomId: ChatRoomId,
+  before: number,
+  after: number,
+): TranscriptCompactionResult {
+  return Object.freeze({
+    roomId,
+    entriesBeforeCompaction: before,
+    entriesAfterCompaction: after,
+    entriesRemoved: before - after,
+    compactedAt: asUnixMs(Date.now()),
+  });
+}
+
+// ============================================================================
+// MARK: Transcript ledger extended class
+// ============================================================================
+
+export class ChatTranscriptLedgerExtended {
+  private readonly ledger: ChatTranscriptLedgerApi;
+  private readonly watchBus = new TranscriptWatchBus();
+  private readonly revealTracker = createPendingRevealTracker();
+
+  constructor(options: ChatTranscriptLedgerOptions = {}) {
+    this.ledger = createChatTranscriptLedger(options);
+  }
+
+  getLedger(): ChatTranscriptLedgerApi { return this.ledger; }
+  getWatchBus(): TranscriptWatchBus { return this.watchBus; }
+  getRevealTracker(): PendingRevealTracker { return this.revealTracker; }
+
+  appendWithWatch(state: ChatState, message: ChatMessage): ChatTranscriptWriteResult {
+    const result = this.ledger.append(state, message);
+    if (result.entry) {
+      this.watchBus.emitAppend(
+        message.roomId as ChatRoomId,
+        result.entry.message.id as ChatMessageId,
+        result.entry.message.channelId as ChatChannelId,
+      );
+    }
+    if (result.sequenceGapDetected) {
+      this.watchBus.emitSequenceGap(message.roomId as ChatRoomId, 0, 0);
+    }
+    return result;
+  }
+
+  redactWithWatch(state: ChatState, messageId: ChatMessageId, roomId: ChatRoomId, now?: UnixMs): ChatTranscriptRevisionResult {
+    const result = this.ledger.redact(state, messageId, now);
+    this.watchBus.emitRedact(roomId, messageId);
+    return result;
+  }
+
+  buildAnalytics(state: ChatState, roomId: ChatRoomId): TranscriptAnalytics {
+    const entries = selectRoomTranscript(state, roomId);
+    return buildTranscriptAnalytics(roomId, entries);
+  }
+
+  auditGaps(state: ChatState, roomId: ChatRoomId, channelId: ChatChannelId): SequenceGapAuditResult {
+    const entries = selectRoomTranscript(state, roomId);
+    return auditTranscriptSequenceGaps(roomId, channelId, entries);
+  }
+
+  computeFingerprint(state: ChatState, roomId: ChatRoomId, channelId: ChatChannelId): TranscriptFingerprint {
+    const entries = selectRoomTranscript(state, roomId);
+    return computeTranscriptFingerprint(roomId, channelId, entries);
+  }
+
+  queryCallbacks(state: ChatState, query: CallbackMessageQuery): CallbackMessageResult {
+    const entries = selectRoomTranscript(state, query.roomId);
+    return queryCallbackMessages(entries, query);
+  }
+}
+
+// ============================================================================
+// MARK: Transcript module constants
+// ============================================================================
+
+export const CHAT_TRANSCRIPT_MODULE_NAME = 'ChatTranscriptLedger' as const;
+export const CHAT_TRANSCRIPT_MODULE_VERSION = '3.0.0' as const;
+
+export const CHAT_TRANSCRIPT_LAWS = Object.freeze([
+  'The ledger only accepts canonical ChatMessage values — no raw client input.',
+  'Redacted messages are preserved with a placeholder — never deleted from sequence.',
+  'Soft-deleted messages are excluded from public views but retained for moderation.',
+  'Hard-deleted messages must leave a tombstone entry for audit continuity.',
+  'Sequence gaps must be detected and emitted as watch events.',
+  'Pending reveals are promoted atomically — no partial reveals.',
+  'Compaction must not remove entries within the replay anchor window.',
+  'Callback queries are always read-only and never mutate state.',
+]);
+
+export const CHAT_TRANSCRIPT_MODULE_DESCRIPTOR = Object.freeze({
+  name: CHAT_TRANSCRIPT_MODULE_NAME,
+  version: CHAT_TRANSCRIPT_MODULE_VERSION,
+  laws: CHAT_TRANSCRIPT_LAWS,
+  supportedChannelDescriptors: Object.keys(CHAT_CHANNEL_DESCRIPTORS),
+  supportedOperations: ['write', 'redact', 'softDelete', 'hardDelete', 'replace', 'reveal', 'compact'] as const,
+});
+
+// ============================================================================
+// MARK: Transcript channel activity report
+// ============================================================================
+
+export interface ChannelActivityReport {
+  readonly roomId: ChatRoomId;
+  readonly channelId: ChatChannelId;
+  readonly messageCount: number;
+  readonly firstMessageAt: UnixMs | null;
+  readonly lastMessageAt: UnixMs | null;
+  readonly uniqueAuthors: number;
+  readonly avgMessagesPerAuthor: number;
+  readonly generatedAt: UnixMs;
+}
+
+export function buildChannelActivityReport(
+  roomId: ChatRoomId,
+  channelId: ChatChannelId,
+  entries: readonly ChatTranscriptEntry[],
+): ChannelActivityReport {
+  const channelEntries = entries.filter((e) => e.message.channelId === channelId && !e.redacted && !e.softDeleted);
+  const authors = new Set(channelEntries.map((e) => e.message.authorId ?? 'SYSTEM'));
+  const timestamps = channelEntries.map((e) => e.message.createdAt as unknown as number);
+  const first = timestamps.length > 0 ? asUnixMs(Math.min(...timestamps)) : null;
+  const last = timestamps.length > 0 ? asUnixMs(Math.max(...timestamps)) : null;
+
+  return Object.freeze({
+    roomId,
+    channelId,
+    messageCount: channelEntries.length,
+    firstMessageAt: first,
+    lastMessageAt: last,
+    uniqueAuthors: authors.size,
+    avgMessagesPerAuthor: authors.size > 0 ? channelEntries.length / authors.size : 0,
+    generatedAt: asUnixMs(Date.now()),
+  });
+}
+
+// ============================================================================
+// MARK: Transcript message velocity
+// ============================================================================
+
+export interface TranscriptMessageVelocity {
+  readonly roomId: ChatRoomId;
+  readonly channelId: ChatChannelId;
+  readonly windowMs: number;
+  readonly messagesInWindow: number;
+  readonly messagesPerMinute: number;
+  readonly generatedAt: UnixMs;
+}
+
+export function computeTranscriptMessageVelocity(
+  roomId: ChatRoomId,
+  channelId: ChatChannelId,
+  entries: readonly ChatTranscriptEntry[],
+  windowMs: number = 60_000,
+  nowMs: number = Date.now(),
+): TranscriptMessageVelocity {
+  const cutoff = asUnixMs(nowMs - windowMs);
+  const inWindow = entries.filter((e) => e.message.channelId === channelId && e.message.createdAt >= cutoff && !e.redacted && !e.softDeleted);
+  const perMinute = windowMs > 0 ? (inWindow.length / windowMs) * 60_000 : 0;
+  return Object.freeze({ roomId, channelId, windowMs, messagesInWindow: inWindow.length, messagesPerMinute: perMinute, generatedAt: asUnixMs(nowMs) });
+}
+
+// ============================================================================
+// MARK: Transcript redaction audit
+// ============================================================================
+
+export interface RedactionAuditEntry {
+  readonly messageId: ChatMessageId;
+  readonly roomId: ChatRoomId;
+  readonly channelId: ChatChannelId | null;
+  readonly redactedAt: UnixMs | null;
+  readonly authorId: string | null;
+}
+
+export interface RedactionAuditReport {
+  readonly roomId: ChatRoomId;
+  readonly entries: readonly RedactionAuditEntry[];
+  readonly redactionCount: number;
+  readonly softDeleteCount: number;
+  readonly generatedAt: UnixMs;
+}
+
+export function buildRedactionAuditReport(
+  roomId: ChatRoomId,
+  entries: readonly ChatTranscriptEntry[],
+): RedactionAuditReport {
+  const redacted: RedactionAuditEntry[] = [];
+  let softDeleteCount = 0;
+
+  for (const entry of entries) {
+    if (entry.redacted) {
+      redacted.push(Object.freeze({
+        messageId: entry.message.id as ChatMessageId,
+        roomId,
+        channelId: entry.message.channelId as ChatChannelId ?? null,
+        redactedAt: entry.redactedAt ?? null,
+        authorId: entry.message.authorId ?? null,
+      }));
+    }
+    if (entry.softDeleted) softDeleteCount++;
+  }
+
+  return Object.freeze({ roomId, entries: Object.freeze(redacted), redactionCount: redacted.length, softDeleteCount, generatedAt: asUnixMs(Date.now()) });
+}
+
+// ============================================================================
+// MARK: Transcript author leaderboard
+// ============================================================================
+
+export interface AuthorLeaderboardEntry {
+  readonly authorId: string;
+  readonly messageCount: number;
+  readonly rank: number;
+  readonly firstMessageAt: UnixMs | null;
+  readonly lastMessageAt: UnixMs | null;
+}
+
+export interface TranscriptAuthorLeaderboard {
+  readonly roomId: ChatRoomId;
+  readonly entries: readonly AuthorLeaderboardEntry[];
+  readonly generatedAt: UnixMs;
+}
+
+export function buildAuthorLeaderboard(
+  roomId: ChatRoomId,
+  entries: readonly ChatTranscriptEntry[],
+  limit: number = 20,
+): TranscriptAuthorLeaderboard {
+  const authorMap = new Map<string, { count: number; first: number; last: number }>();
+
+  for (const e of entries) {
+    if (e.redacted || e.softDeleted) continue;
+    const authorId = e.message.authorId ?? 'SYSTEM';
+    const ts = e.message.createdAt as unknown as number;
+    const existing = authorMap.get(authorId);
+    if (!existing) {
+      authorMap.set(authorId, { count: 1, first: ts, last: ts });
+    } else {
+      existing.count++;
+      if (ts < existing.first) existing.first = ts;
+      if (ts > existing.last) existing.last = ts;
+    }
+  }
+
+  const sorted = Array.from(authorMap.entries())
+    .sort(([, a], [, b]) => b.count - a.count)
+    .slice(0, limit)
+    .map(([authorId, data], idx) => Object.freeze({
+      authorId,
+      messageCount: data.count,
+      rank: idx + 1,
+      firstMessageAt: asUnixMs(data.first),
+      lastMessageAt: asUnixMs(data.last),
+    }));
+
+  return Object.freeze({ roomId, entries: Object.freeze(sorted), generatedAt: asUnixMs(Date.now()) });
+}
+
+// ============================================================================
+// MARK: Transcript proof edge collector
+// ============================================================================
+
+export interface TranscriptProofEdgeReport {
+  readonly roomId: ChatRoomId;
+  readonly totalEdges: number;
+  readonly edgesByKind: Record<string, number>;
+  readonly strongestEdgePair: { readonly from: ChatEventId; readonly to: ChatEventId; readonly weight: number } | null;
+  readonly generatedAt: UnixMs;
+}
+
+export function buildTranscriptProofEdgeReport(
+  roomId: ChatRoomId,
+  proofEdges: readonly ChatProofEdge[],
+): TranscriptProofEdgeReport {
+  const byKind: Record<string, number> = {};
+  let strongest: { from: ChatEventId; to: ChatEventId; weight: number } | null = null;
+
+  for (const edge of proofEdges) {
+    const kind = edge.kind ?? 'UNKNOWN';
+    byKind[kind] = (byKind[kind] ?? 0) + 1;
+    const weight = edge.weight ?? 0;
+    if (!strongest || weight > strongest.weight) {
+      strongest = { from: edge.fromEventId, to: edge.toEventId, weight };
+    }
+  }
+
+  return Object.freeze({
+    roomId,
+    totalEdges: proofEdges.length,
+    edgesByKind: byKind,
+    strongestEdgePair: strongest ? Object.freeze(strongest) : null,
+    generatedAt: asUnixMs(Date.now()),
+  });
+}
+
+// ============================================================================
+// MARK: Transcript replay artifact collector
+// ============================================================================
+
+export interface ReplayArtifactSummary {
+  readonly roomId: ChatRoomId;
+  readonly artifactCount: number;
+  readonly latestArtifactAt: UnixMs | null;
+  readonly artifacts: readonly ChatReplayArtifact[];
+  readonly generatedAt: UnixMs;
+}
+
+export function buildReplayArtifactSummary(
+  roomId: ChatRoomId,
+  state: ChatState,
+): ReplayArtifactSummary {
+  const artifacts = selectRoomReplayArtifacts(state, roomId);
+  const timestamps = artifacts.map((a) => a.createdAt as unknown as number);
+  const latest = timestamps.length > 0 ? asUnixMs(Math.max(...timestamps)) : null;
+
+  return Object.freeze({
+    roomId,
+    artifactCount: artifacts.length,
+    latestArtifactAt: latest,
+    artifacts: Object.freeze(artifacts),
+    generatedAt: asUnixMs(Date.now()),
+  });
+}
+
+// ============================================================================
+// MARK: Transcript proof edge summary
+// ============================================================================
+
+export function buildRoomProofEdgeSummary(
+  roomId: ChatRoomId,
+  state: ChatState,
+): TranscriptProofEdgeReport {
+  const edges = selectRoomProofEdges(state, roomId);
+  return buildTranscriptProofEdgeReport(roomId, edges);
+}
+
+// ============================================================================
+// MARK: Transcript most recent replay builder
+// ============================================================================
+
+export interface RecentReplayEntry {
+  readonly roomId: ChatRoomId;
+  readonly replayId: ChatReplayId;
+  readonly messageId: ChatMessageId;
+  readonly createdAt: UnixMs;
+}
+
+export function collectRecentReplayEntries(
+  state: ChatState,
+  roomId: ChatRoomId,
+  limit: number = 10,
+): readonly RecentReplayEntry[] {
+  const artifacts = selectRoomReplayArtifacts(state, roomId);
+  const sorted = [...artifacts].sort((a, b) => (b.createdAt as unknown as number) - (a.createdAt as unknown as number));
+  return Object.freeze(
+    sorted.slice(0, limit).map((a) => Object.freeze({
+      roomId,
+      replayId: a.replayId,
+      messageId: a.messageId,
+      createdAt: a.createdAt,
+    })),
+  );
+}
+
+// ============================================================================
+// MARK: Transcript typing snapshot summary
+// ============================================================================
+
+export interface TypingSnapshotSummary {
+  readonly roomId: ChatRoomId;
+  readonly activeTyperCount: number;
+  readonly typerIds: readonly string[];
+  readonly generatedAt: UnixMs;
+}
+
+export function buildTypingSnapshotSummary(
+  roomId: ChatRoomId,
+  typingSnapshots: ReadonlyMap<string, ChatTypingSnapshot>,
+  nowMs: number = Date.now(),
+  staleThresholdMs: number = 5_000,
+): TypingSnapshotSummary {
+  const cutoff = nowMs - staleThresholdMs;
+  const activeTypers: string[] = [];
+
+  for (const [sessionId, snap] of typingSnapshots) {
+    if (snap.roomId === roomId && (snap.updatedAt as unknown as number) >= cutoff && snap.isTyping) {
+      activeTypers.push(sessionId);
+    }
+  }
+
+  return Object.freeze({ roomId, activeTyperCount: activeTypers.length, typerIds: Object.freeze(activeTypers), generatedAt: asUnixMs(nowMs) });
+}
+
+// ============================================================================
+// MARK: Transcript room window report
+// ============================================================================
+
+export interface RoomWindowReport {
+  readonly roomId: ChatRoomId;
+  readonly windowSize: number;
+  readonly firstSequence: SequenceNumber | null;
+  readonly lastSequence: SequenceNumber | null;
+  readonly visibleCount: number;
+  readonly shadowCount: number;
+  readonly generatedAt: UnixMs;
+}
+
+export function buildRoomWindowReport(
+  state: ChatState,
+  roomId: ChatRoomId,
+  windowSize: number = 100,
+): RoomWindowReport {
+  const window = getRoomWindow(state, roomId, 0, windowSize);
+  const entries = window.entries ?? [];
+  let visible = 0, shadow = 0;
+  let firstSeq: SequenceNumber | null = null;
+  let lastSeq: SequenceNumber | null = null;
+
+  for (const e of entries) {
+    if (e.message.channelId === 'VISIBLE') visible++;
+    else shadow++;
+    const seq = e.sequence;
+    if (firstSeq === null) firstSeq = seq;
+    lastSeq = seq;
+  }
+
+  return Object.freeze({
+    roomId,
+    windowSize,
+    firstSequence: firstSeq,
+    lastSequence: lastSeq,
+    visibleCount: visible,
+    shadowCount: shadow,
+    generatedAt: asUnixMs(Date.now()),
+  });
+}
+
+// ============================================================================
+// MARK: Transcript most recent visible message
+// ============================================================================
+
+export function getMostRecentVisibleMessage(
+  state: ChatState,
+  roomId: ChatRoomId,
+): ChatMessage | null {
+  const transcript = selectRoomTranscript(state, roomId);
+  const visible = transcript.filter((e) => e.message.channelId === 'VISIBLE' && !e.redacted && !e.softDeleted);
+  if (visible.length === 0) return null;
+  visible.sort((a, b) => (b.sequence as unknown as number) - (a.sequence as unknown as number));
+  return visible[0].message;
+}
+
+// ============================================================================
+// MARK: Transcript replay artifact fingerprint
+// ============================================================================
+
+export interface ReplayArtifactFingerprint {
+  readonly roomId: ChatRoomId;
+  readonly hash: string;
+  readonly artifactCount: number;
+  readonly computedAt: UnixMs;
+}
+
+export function computeReplayArtifactFingerprint(
+  roomId: ChatRoomId,
+  artifacts: readonly ChatReplayArtifact[],
+): ReplayArtifactFingerprint {
+  const sorted = [...artifacts].sort((a, b) => String(a.replayId).localeCompare(String(b.replayId)));
+  const parts = sorted.map((a) => `${a.replayId}:${a.messageId}`);
+  let h = 5381;
+  for (const p of parts) {
+    for (let i = 0; i < p.length; i++) {
+      h = ((h << 5) + h + p.charCodeAt(i)) >>> 0;
+    }
+  }
+  return Object.freeze({ roomId, hash: h.toString(16).padStart(8, '0'), artifactCount: artifacts.length, computedAt: asUnixMs(Date.now()) });
+}
+
+// ============================================================================
+// MARK: Transcript most relevant message for callback
+// ============================================================================
+
+export function getMostRelevantCallbackMessage(
+  state: ChatState,
+  roomId: ChatRoomId,
+  anchorSequence: SequenceNumber,
+  radius: number = 5,
+): ChatMessage | null {
+  return getMostRelevantReplayForMessage(state, roomId, anchorSequence, radius);
+}
+
+// ============================================================================
+// MARK: Transcript request ID index
+// ============================================================================
+
+export interface RequestIdIndex {
+  readonly index: ReadonlyMap<ChatRequestId, ChatMessageId>;
+  readonly count: number;
+  readonly builtAt: UnixMs;
+}
+
+export function buildRequestIdIndex(
+  entries: readonly ChatTranscriptEntry[],
+): RequestIdIndex {
+  const index = new Map<ChatRequestId, ChatMessageId>();
+  for (const e of entries) {
+    const reqId = (e.message as unknown as { requestId?: string }).requestId;
+    if (reqId) index.set(reqId as ChatRequestId, e.message.id as ChatMessageId);
+  }
+  return Object.freeze({ index: index as ReadonlyMap<ChatRequestId, ChatMessageId>, count: index.size, builtAt: asUnixMs(Date.now()) });
+}
+
+// ============================================================================
+// MARK: Transcript sequence continuity validator
+// ============================================================================
+
+export interface SequenceContinuityValidation {
+  readonly roomId: ChatRoomId;
+  readonly channelId: ChatChannelId;
+  readonly isContinuous: boolean;
+  readonly firstSequence: number;
+  readonly lastSequence: number;
+  readonly expectedCount: number;
+  readonly actualCount: number;
+  readonly missingSequences: readonly number[];
+  readonly validatedAt: UnixMs;
+}
+
+export function validateSequenceContinuity(
+  roomId: ChatRoomId,
+  channelId: ChatChannelId,
+  entries: readonly ChatTranscriptEntry[],
+): SequenceContinuityValidation {
+  const channelEntries = entries
+    .filter((e) => e.message.channelId === channelId)
+    .map((e) => e.sequence as unknown as number)
+    .sort((a, b) => a - b);
+
+  if (channelEntries.length === 0) {
+    return Object.freeze({ roomId, channelId, isContinuous: true, firstSequence: 0, lastSequence: 0, expectedCount: 0, actualCount: 0, missingSequences: Object.freeze([]), validatedAt: asUnixMs(Date.now()) });
+  }
+
+  const first = channelEntries[0];
+  const last = channelEntries[channelEntries.length - 1];
+  const expectedCount = last - first + 1;
+  const actualCount = channelEntries.length;
+  const seqSet = new Set(channelEntries);
+  const missing: number[] = [];
+  for (let i = first; i <= last; i++) {
+    if (!seqSet.has(i)) missing.push(i);
+  }
+
+  return Object.freeze({
+    roomId,
+    channelId,
+    isContinuous: missing.length === 0,
+    firstSequence: first,
+    lastSequence: last,
+    expectedCount,
+    actualCount,
+    missingSequences: Object.freeze(missing),
+    validatedAt: asUnixMs(Date.now()),
+  });
+}
+
+// ============================================================================
+// MARK: Transcript latest message per channel
+// ============================================================================
+
+export interface LatestMessagePerChannel {
+  readonly roomId: ChatRoomId;
+  readonly channels: readonly { readonly channelId: ChatChannelId; readonly message: ChatMessage; readonly sequence: number }[];
+  readonly generatedAt: UnixMs;
+}
+
+export function getLatestMessagePerChannel(
+  roomId: ChatRoomId,
+  entries: readonly ChatTranscriptEntry[],
+): LatestMessagePerChannel {
+  const latestByChannel = new Map<string, { message: ChatMessage; sequence: number }>();
+
+  for (const e of entries) {
+    if (e.redacted || e.softDeleted) continue;
+    const ch = e.message.channelId ?? 'UNKNOWN';
+    const seq = e.sequence as unknown as number;
+    const existing = latestByChannel.get(ch);
+    if (!existing || seq > existing.sequence) {
+      latestByChannel.set(ch, { message: e.message, sequence: seq });
+    }
+  }
+
+  const channels = Array.from(latestByChannel.entries()).map(([channelId, data]) => Object.freeze({
+    channelId: channelId as ChatChannelId,
+    message: data.message,
+    sequence: data.sequence,
+  }));
+
+  return Object.freeze({ roomId, channels: Object.freeze(channels), generatedAt: asUnixMs(Date.now()) });
+}
+
+// ============================================================================
+// MARK: Transcript room proof chain summary
+// ============================================================================
+
+export function buildRoomProofChainSummary(state: ChatState, roomId: ChatRoomId): {
+  readonly edgeCount: number;
+  readonly replayArtifactCount: number;
+  readonly latestProofAt: UnixMs | null;
+} {
+  const edges = selectRoomProofEdges(state, roomId);
+  const artifacts = selectRoomReplayArtifacts(state, roomId);
+  const latestProof = artifacts.length > 0
+    ? asUnixMs(Math.max(...artifacts.map((a) => a.createdAt as unknown as number)))
+    : null;
+  return Object.freeze({ edgeCount: edges.length, replayArtifactCount: artifacts.length, latestProofAt: latestProof });
+}

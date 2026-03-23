@@ -529,7 +529,7 @@ export function buildDealroomBluffExploitDecision(
     : confidence01 * 0.3;
 
   const recommendedCounterStrategy: DealroomCounterStrategy | null = shouldExploit
-    ? 'EXPOSE_BLUFF'
+    ? 'HARD_COUNTER'
     : null;
 
   return Object.freeze({
@@ -717,7 +717,7 @@ export function buildDealroomReputationImpact(
   const magnitude01 = dealroomOfferOutcomeTierScore(outcomeTier) * (witnessDensity01 > 0.5 ? 1.3 : 1.0);
 
   const affectedSurfaces: DealroomReputationSurface[] = ['GLOBAL'];
-  if (witnessDensity01 >= 0.6) affectedSurfaces.push('PUBLIC');
+  if (witnessDensity01 >= 0.6) affectedSurfaces.push('AUDIENCE_MEMORY');
   if (outcomeTier === 'SWEEP') affectedSurfaces.push('SYNDICATE');
 
   return Object.freeze({
@@ -1926,9 +1926,6 @@ export type AnyDealroomContinuityIntegration = DealroomContinuityIntegration;
 // MARK: Dealroom lane authority constants
 // ============================================================================
 
-export const DEALROOM_LANE_IS_AUTHORITY = true as const;
-export const DEALROOM_LANE_SCOPE = 'BACKEND' as const;
-
 export const DEALROOM_LANE_FULL_CONSTANTS = Object.freeze({
   ...DEALROOM_LANE_CONSTANTS,
   bluffConfidenceTierCount: DEALROOM_BLUFF_CONFIDENCE_TIERS.length,
@@ -1962,9 +1959,6 @@ export const DEALROOM_LANE_COMBINED_META = Object.freeze({
   isAuthority: DEALROOM_LANE_IS_AUTHORITY,
   scope: DEALROOM_LANE_SCOPE,
 } as const);
-
-/** Dealroom lane fully assembled module count. */
-export const DEALROOM_LANE_MODULE_COUNT = CHAT_DEALROOM_MODULE_DESCRIPTORS.length;
 
 // ============================================================================
 // MARK: Dealroom lane barrel final shorthand type bundle

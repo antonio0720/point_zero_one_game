@@ -1799,3 +1799,354 @@ export function describeHaterPlan(plan: HaterResponsePlan): string {
     describeHostilityVector(plan.hostility),
   ].join(' :: ');
 }
+
+// ============================================================================
+// MARK: Watch bus
+// ============================================================================
+
+export interface HaterResponseWatchEvent {
+  readonly kind: 'plan_accepted' | 'plan_rejected' | 'hostility_computed' | 'persona_selected';
+  readonly roomId: ChatRoomId;
+  readonly at: UnixMs;
+  readonly payload: Readonly<Record<string, JsonValue>>;
+}
+
+export type HaterResponseWatchHandler = (event: HaterResponseWatchEvent) => void;
+
+export class HaterResponseWatchBus {
+  private readonly handlers: HaterResponseWatchHandler[] = [];
+
+  subscribe(handler: HaterResponseWatchHandler): () => void {
+    this.handlers.push(handler);
+    return () => {
+      const idx = this.handlers.indexOf(handler);
+      if (idx >= 0) this.handlers.splice(idx, 1);
+    };
+  }
+
+  emit(event: HaterResponseWatchEvent): void {
+    for (const h of this.handlers) {
+      try { h(event); } catch { /* isolated */ }
+    }
+  }
+
+  get listenerCount(): number {
+    return this.handlers.length;
+  }
+}
+
+// ============================================================================
+// MARK: Fingerprint
+// ============================================================================
+
+export interface HaterResponseFingerprint {
+  readonly roomId: ChatRoomId;
+  readonly escalationBand: string;
+  readonly tactic: string;
+  readonly accepted: boolean;
+  readonly finalHostility: number;
+  readonly computedAt: UnixMs;
+}
+
+export function computeHaterResponseFingerprint(
+  roomId: ChatRoomId,
+  plan: HaterResponsePlan,
+  now: UnixMs,
+): HaterResponseFingerprint {
+  return Object.freeze({
+    roomId,
+    escalationBand: plan.hostility?.escalationBand ?? 'none',
+    tactic: plan.tactic ?? 'none',
+    accepted: plan.accepted,
+    finalHostility: plan.hostility ? (Number(plan.hostility.finalHostility01) as number) : 0,
+    computedAt: now,
+  });
+}
+
+// ============================================================================
+// MARK: Epoch tracker
+// ============================================================================
+
+export interface HaterResponseEpochEntry {
+  readonly roomId: ChatRoomId;
+  readonly fingerprint: HaterResponseFingerprint;
+  readonly at: UnixMs;
+}
+
+export class HaterResponseEpochTracker {
+  private readonly epochs = new Map<ChatRoomId, HaterResponseEpochEntry[]>();
+
+  record(roomId: ChatRoomId, fp: HaterResponseFingerprint, at: UnixMs): void {
+    if (!this.epochs.has(roomId)) this.epochs.set(roomId, []);
+    this.epochs.get(roomId)!.push({ roomId, fingerprint: fp, at });
+  }
+
+  getHistory(roomId: ChatRoomId): readonly HaterResponseEpochEntry[] {
+    return this.epochs.get(roomId) ?? [];
+  }
+
+  getLastEntry(roomId: ChatRoomId): HaterResponseEpochEntry | null {
+    const arr = this.epochs.get(roomId);
+    return arr?.[arr.length - 1] ?? null;
+  }
+
+  listRoomIds(): readonly ChatRoomId[] {
+    return Object.freeze([...this.epochs.keys()]);
+  }
+
+  clear(roomId: ChatRoomId): void {
+    this.epochs.delete(roomId);
+  }
+}
+
+// ============================================================================
+// MARK: Batch planning
+// ============================================================================
+
+export interface HaterBatchEntry {
+  readonly roomId: ChatRoomId;
+  readonly plan: HaterResponsePlan;
+  readonly fingerprint: HaterResponseFingerprint;
+}
+
+export interface HaterBatchResult {
+  readonly entries: readonly HaterBatchEntry[];
+  readonly acceptedCount: number;
+  readonly rejectedCount: number;
+  readonly computedAt: UnixMs;
+}
+
+export function runHaterBatchPlanning(
+  authority: HaterResponseAuthority,
+  contexts: ReadonlyArray<{ roomId: ChatRoomId; state: ChatState; signal: ChatSignalEnvelope; now: UnixMs }>,
+  now: UnixMs,
+): HaterBatchResult {
+  const entries: HaterBatchEntry[] = [];
+  let accepted = 0;
+  let rejected = 0;
+  for (const ctx of contexts) {
+    const plan = authority.plan(ctx.state, ctx.roomId, ctx.signal, ctx.now);
+    const fingerprint = computeHaterResponseFingerprint(ctx.roomId, plan, now);
+    entries.push({ roomId: ctx.roomId, plan, fingerprint });
+    if (plan.accepted) accepted++;
+    else rejected++;
+  }
+  return Object.freeze({ entries: Object.freeze(entries), acceptedCount: accepted, rejectedCount: rejected, computedAt: now });
+}
+
+// ============================================================================
+// MARK: Hostility statistics
+// ============================================================================
+
+export interface HaterHostilityStats {
+  readonly roomId: ChatRoomId;
+  readonly maxHostility: number;
+  readonly avgHostility: number;
+  readonly acceptedRatio: number;
+  readonly sampleCount: number;
+}
+
+export function buildHaterHostilityStats(
+  roomId: ChatRoomId,
+  history: readonly HaterResponseEpochEntry[],
+): HaterHostilityStats {
+  if (history.length === 0) {
+    return Object.freeze({ roomId, maxHostility: 0, avgHostility: 0, acceptedRatio: 0, sampleCount: 0 });
+  }
+  let max = 0, sum = 0, acceptedCount = 0;
+  for (const entry of history) {
+    const h = entry.fingerprint.finalHostility;
+    if (h > max) max = h;
+    sum += h;
+    if (entry.fingerprint.accepted) acceptedCount++;
+  }
+  return Object.freeze({
+    roomId,
+    maxHostility: max,
+    avgHostility: sum / history.length,
+    acceptedRatio: acceptedCount / history.length,
+    sampleCount: history.length,
+  });
+}
+
+// ============================================================================
+// MARK: Module descriptor
+// ============================================================================
+
+export const HATER_RESPONSE_MODULE_ID = 'hater_response_orchestrator' as const;
+export const HATER_RESPONSE_MODULE_VERSION = '2026.03.14' as const;
+
+export interface HaterResponseModuleDescriptor {
+  readonly moduleId: typeof HATER_RESPONSE_MODULE_ID;
+  readonly version: typeof HATER_RESPONSE_MODULE_VERSION;
+  readonly capabilities: readonly string[];
+}
+
+export const HATER_RESPONSE_MODULE_DESCRIPTOR: HaterResponseModuleDescriptor = Object.freeze({
+  moduleId: HATER_RESPONSE_MODULE_ID,
+  version: HATER_RESPONSE_MODULE_VERSION,
+  capabilities: Object.freeze([
+    'hostility_computation',
+    'persona_selection',
+    'channel_selection',
+    'scene_authoring',
+    'batch_planning',
+    'epoch_tracking',
+    'fingerprinting',
+    'watch_bus',
+  ]),
+});
+
+// ============================================================================
+// MARK: Extended module namespace
+// ============================================================================
+
+export namespace ChatHaterResponseOrchestratorModuleExtended {
+  export type WatchBus = HaterResponseWatchBus;
+  export type WatchEvent = HaterResponseWatchEvent;
+  export type Fingerprint = HaterResponseFingerprint;
+  export type EpochTracker = HaterResponseEpochTracker;
+  export type BatchResult = HaterBatchResult;
+  export type HostilityStats = HaterHostilityStats;
+  export type Descriptor = HaterResponseModuleDescriptor;
+
+  export function createWatchBus(): HaterResponseWatchBus {
+    return new HaterResponseWatchBus();
+  }
+
+  export function createEpochTracker(): HaterResponseEpochTracker {
+    return new HaterResponseEpochTracker();
+  }
+
+  export function describe(): string {
+    return `${HATER_RESPONSE_MODULE_ID}@${HATER_RESPONSE_MODULE_VERSION}`;
+  }
+}
+
+// ============================================================================
+// MARK: Inspection utilities
+// ============================================================================
+
+export function haterPlanIsHighHostility(plan: HaterResponsePlan): boolean {
+  return plan.accepted && plan.hostility ? (Number(plan.hostility.finalHostility01) as number) >= 0.75 : false;
+}
+
+export function haterPlanEscalationBand(plan: HaterResponsePlan): string {
+  return plan.hostility?.escalationBand ?? 'none';
+}
+
+export function haterAudienceIsHot(heat: ChatAudienceHeat): boolean {
+  return (Number(heat.heat01) as number) >= 0.75;
+}
+
+export function haterAffectIsFrustrated(affect: ChatAffectSnapshot): boolean {
+  return (Number(affect.frustration01) as number) >= 0.65;
+}
+
+export function haterBattleIsActive(battle: ChatBattleSnapshot): boolean {
+  return battle.isActive ?? false;
+}
+
+export function haterInferenceIsHighConfidence(snapshot: ChatInferenceSnapshot): boolean {
+  return (Number(snapshot.confidence01) as number) >= 0.7;
+}
+
+export function haterLearningIsReceptive(profile: ChatLearningProfile): boolean {
+  return (Number(profile.helperReceptivity01) as number) >= 0.5;
+}
+
+export function haterRelationshipIsHostile(relationship: ChatRelationshipState): boolean {
+  return (Number(relationship.trust01) as number) <= 0.3;
+}
+
+export function haterRoomVisibleMessages(state: ChatState, roomId: ChatRoomId): readonly ChatMessage[] {
+  return selectVisibleMessages(state, roomId);
+}
+
+export function haterRoomAudienceHeat(state: ChatState, roomId: ChatRoomId): ChatAudienceHeat | null {
+  return selectAudienceHeat(state, roomId);
+}
+
+export function haterRoomLatestMessage(state: ChatState, roomId: ChatRoomId): ChatMessage | null {
+  return selectLatestMessage(state, roomId);
+}
+
+export function haterRoomPresence(state: ChatState, roomId: ChatRoomId): ReturnType<typeof selectRoomPresence> {
+  return selectRoomPresence(state, roomId);
+}
+
+export function haterPersonaLabel(persona: ChatPersonaDescriptor): string {
+  return `${persona.displayName} [${persona.id}]`;
+}
+
+export function haterCandidateHasBody(candidate: ChatResponseCandidate): boolean {
+  return candidate.text.trim().length > 0;
+}
+
+export function haterSortCandidates(candidates: readonly ChatResponseCandidate[]): readonly ChatResponseCandidate[] {
+  return [...candidates].sort((a, b) => b.priority - a.priority);
+}
+
+export function haterTopCandidate(candidates: readonly ChatResponseCandidate[]): ChatResponseCandidate | null {
+  return haterSortCandidates(candidates)[0] ?? null;
+}
+
+export function haterChannelIsAllowed(
+  config: ReturnType<typeof mergeRuntimeConfig>,
+  channel: ChatVisibleChannel,
+): boolean {
+  return (config.allowVisibleChannels ?? []).includes(channel);
+}
+
+export function haterRoomKindIsAllowed(
+  config: ReturnType<typeof mergeRuntimeConfig>,
+  roomKind: ChatRoomKind,
+): boolean {
+  return (config.allowRoomKinds ?? []).includes(roomKind);
+}
+
+export function haterStageMoodIsHostile(mood: ChatRoomStageMood): boolean {
+  return mood === 'hostile';
+}
+
+export function haterRoomHasInvasion(state: ChatState, roomId: ChatRoomId): boolean {
+  return getActiveRoomInvasions(state, roomId).length > 0;
+}
+
+export function haterRoomIsSilenced(state: ChatState, roomId: ChatRoomId, now: UnixMs): boolean {
+  return isRoomSilenced(state, roomId, now);
+}
+
+export function haterRoomInferenceSnapshots(state: ChatState, roomId: ChatRoomId, userId: string): readonly ChatInferenceSnapshot[] {
+  return selectInferenceSnapshotsForUser(state, roomId, userId);
+}
+
+export function haterRoomLearningProfile(state: ChatState, roomId: ChatRoomId, userId: string): ChatLearningProfile | null {
+  return selectLearningProfile(state, roomId, userId);
+}
+
+export function haterRoomRelationship(state: ChatState, roomId: ChatRoomId, actorId: string): ChatRelationshipState | null {
+  return selectRelationshipForActor(state, roomId, actorId);
+}
+
+export function haterIsNullable<T>(value: Nullable<T>): value is null | undefined {
+  return value == null;
+}
+
+export function haterClampScore(value: number): Score01 {
+  return clamp01(value) as Score01;
+}
+
+export function haterPersonaChannels(persona: ChatPersonaDescriptor): readonly ChatChannelId[] {
+  return persona.preferredChannels ?? [];
+}
+
+export const CHAT_HATER_RESPONSE_FULL_MODULE = Object.freeze({
+  descriptor: HATER_RESPONSE_MODULE_DESCRIPTOR,
+  createWatchBus: () => new HaterResponseWatchBus(),
+  createEpochTracker: () => new HaterResponseEpochTracker(),
+  runBatch: runHaterBatchPlanning,
+  buildHostilityStats: buildHaterHostilityStats,
+  computeFingerprint: computeHaterResponseFingerprint,
+});
+

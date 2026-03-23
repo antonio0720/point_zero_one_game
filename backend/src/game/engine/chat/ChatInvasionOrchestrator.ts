@@ -1285,3 +1285,886 @@ function randomBase36(length: number): string {
   }
   return output.slice(0, length);
 }
+
+// ============================================================================
+// MARK: Invasion watch bus
+// ============================================================================
+
+export type InvasionWatchEventKind =
+  | 'INVASION_OPENED'
+  | 'INVASION_PRIMED'
+  | 'INVASION_CLOSED'
+  | 'INVASION_EXPIRED'
+  | 'SILENCE_SET'
+  | 'SILENCE_CLEARED'
+  | 'COOLDOWN_STARTED'
+  | 'CANDIDATE_RANKED';
+
+export interface InvasionWatchEvent {
+  readonly kind: InvasionWatchEventKind;
+  readonly roomId: ChatRoomId;
+  readonly invasionId: ChatInvasionId | null;
+  readonly detail: string;
+  readonly occurredAt: UnixMs;
+}
+
+export class InvasionWatchBus {
+  private readonly handlers: Array<(evt: InvasionWatchEvent) => void> = [];
+
+  subscribe(handler: (evt: InvasionWatchEvent) => void): () => void {
+    this.handlers.push(handler);
+    return () => {
+      const idx = this.handlers.indexOf(handler);
+      if (idx !== -1) this.handlers.splice(idx, 1);
+    };
+  }
+
+  emit(evt: InvasionWatchEvent): void {
+    for (const h of this.handlers) {
+      try { h(evt); } catch { /* noop */ }
+    }
+  }
+
+  emitOpen(roomId: ChatRoomId, invasionId: ChatInvasionId): void {
+    this.emit({ kind: 'INVASION_OPENED', roomId, invasionId, detail: `invasion ${invasionId} opened`, occurredAt: asUnixMs(Date.now()) });
+  }
+
+  emitClose(roomId: ChatRoomId, invasionId: ChatInvasionId): void {
+    this.emit({ kind: 'INVASION_CLOSED', roomId, invasionId, detail: `invasion ${invasionId} closed`, occurredAt: asUnixMs(Date.now()) });
+  }
+
+  emitSilenceSet(roomId: ChatRoomId, reason: string): void {
+    this.emit({ kind: 'SILENCE_SET', roomId, invasionId: null, detail: `silence set: ${reason}`, occurredAt: asUnixMs(Date.now()) });
+  }
+
+  emitCooldownStarted(roomId: ChatRoomId): void {
+    this.emit({ kind: 'COOLDOWN_STARTED', roomId, invasionId: null, detail: 'cooldown started', occurredAt: asUnixMs(Date.now()) });
+  }
+}
+
+// ============================================================================
+// MARK: Invasion analytics
+// ============================================================================
+
+export interface InvasionRecord {
+  readonly invasionId: ChatInvasionId;
+  readonly roomId: ChatRoomId;
+  readonly kind: ChatInvasionState['kind'];
+  readonly openedAt: UnixMs;
+  readonly closedAt: UnixMs | null;
+  readonly durationMs: number | null;
+  readonly primedInShadow: boolean;
+}
+
+export interface InvasionAnalytics {
+  readonly totalInvasions: number;
+  readonly byKind: Record<string, number>;
+  readonly avgDurationMs: number;
+  readonly shadowPrimedRatio: number;
+  readonly roomInvasionCounts: Record<string, number>;
+  readonly generatedAt: UnixMs;
+}
+
+export function buildInvasionAnalytics(records: readonly InvasionRecord[]): InvasionAnalytics {
+  const byKind: Record<string, number> = {};
+  const roomCounts: Record<string, number> = {};
+  let totalDuration = 0;
+  let durationCount = 0;
+  let shadowPrimedCount = 0;
+
+  for (const rec of records) {
+    byKind[rec.kind] = (byKind[rec.kind] ?? 0) + 1;
+    roomCounts[rec.roomId] = (roomCounts[rec.roomId] ?? 0) + 1;
+    if (rec.primedInShadow) shadowPrimedCount++;
+    if (rec.durationMs !== null) { totalDuration += rec.durationMs; durationCount++; }
+  }
+
+  return Object.freeze({
+    totalInvasions: records.length,
+    byKind,
+    avgDurationMs: durationCount > 0 ? totalDuration / durationCount : 0,
+    shadowPrimedRatio: records.length > 0 ? shadowPrimedCount / records.length : 0,
+    roomInvasionCounts: roomCounts,
+    generatedAt: asUnixMs(Date.now()),
+  });
+}
+
+// ============================================================================
+// MARK: Invasion fingerprint
+// ============================================================================
+
+export interface InvasionFingerprint {
+  readonly invasionId: ChatInvasionId;
+  readonly hash: string;
+  readonly computedAt: UnixMs;
+}
+
+export function computeInvasionFingerprint(invasion: ChatInvasionState): InvasionFingerprint {
+  const parts = [invasion.invasionId, invasion.roomId, invasion.channelId, invasion.status, invasion.kind, String(invasion.openedAt)];
+  let h = 5381;
+  for (const p of parts) {
+    for (let i = 0; i < p.length; i++) {
+      h = ((h << 5) + h + p.charCodeAt(i)) >>> 0;
+    }
+  }
+  return Object.freeze({ invasionId: invasion.invasionId, hash: h.toString(16).padStart(8, '0'), computedAt: asUnixMs(Date.now()) });
+}
+
+// ============================================================================
+// MARK: Invasion severity scorer
+// ============================================================================
+
+export interface InvasionSeverityScore {
+  readonly invasionId: ChatInvasionId;
+  readonly severityScore: number;
+  readonly severityBand: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+  readonly factors: readonly string[];
+}
+
+export function scoreInvasionSeverity(
+  invasion: ChatInvasionState,
+  heat: ChatAudienceHeat | null,
+): InvasionSeverityScore {
+  let score = 0;
+  const factors: string[] = [];
+
+  if (invasion.kind === 'HATER_RAID') { score += 0.4; factors.push('hater_raid_base'); }
+  else if (invasion.kind === 'LIQUIDATOR_SWEEP') { score += 0.5; factors.push('liquidator_base'); }
+  else if (invasion.kind === 'SYSTEM_SHOCK') { score += 0.6; factors.push('system_shock_base'); }
+  else if (invasion.kind === 'HELPER_BLACKOUT') { score += 0.3; factors.push('helper_blackout_base'); }
+  else { score += 0.2; factors.push('rumor_burst_base'); }
+
+  if (!invasion.primedInShadow) { score += 0.2; factors.push('no_shadow_prime'); }
+
+  if (heat) {
+    const heatVal = heat.heat01 as unknown as number;
+    if (heatVal > 0.7) { score += 0.2; factors.push('high_audience_heat'); }
+  }
+
+  const severityScore = clamp01(score);
+  const band: InvasionSeverityScore['severityBand'] =
+    severityScore >= 0.8 ? 'CRITICAL'
+    : severityScore >= 0.6 ? 'HIGH'
+    : severityScore >= 0.4 ? 'MEDIUM'
+    : 'LOW';
+
+  return Object.freeze({ invasionId: invasion.invasionId, severityScore, severityBand: band, factors: Object.freeze(factors) });
+}
+
+// ============================================================================
+// MARK: Invasion timing policy
+// ============================================================================
+
+export interface InvasionTimingPolicy {
+  readonly kind: ChatInvasionState['kind'];
+  readonly minDurationMs: number;
+  readonly maxDurationMs: number;
+  readonly cooldownMs: number;
+  readonly shadowPrimeDurationMs: number;
+}
+
+export const INVASION_TIMING_POLICIES: Record<ChatInvasionState['kind'], InvasionTimingPolicy> = Object.freeze({
+  HATER_RAID: Object.freeze({ kind: 'HATER_RAID', minDurationMs: 30_000, maxDurationMs: 120_000, cooldownMs: 300_000, shadowPrimeDurationMs: 5_000 }),
+  RUMOR_BURST: Object.freeze({ kind: 'RUMOR_BURST', minDurationMs: 15_000, maxDurationMs: 60_000, cooldownMs: 180_000, shadowPrimeDurationMs: 3_000 }),
+  HELPER_BLACKOUT: Object.freeze({ kind: 'HELPER_BLACKOUT', minDurationMs: 20_000, maxDurationMs: 90_000, cooldownMs: 240_000, shadowPrimeDurationMs: 4_000 }),
+  LIQUIDATOR_SWEEP: Object.freeze({ kind: 'LIQUIDATOR_SWEEP', minDurationMs: 45_000, maxDurationMs: 180_000, cooldownMs: 360_000, shadowPrimeDurationMs: 8_000 }),
+  SYSTEM_SHOCK: Object.freeze({ kind: 'SYSTEM_SHOCK', minDurationMs: 10_000, maxDurationMs: 30_000, cooldownMs: 600_000, shadowPrimeDurationMs: 2_000 }),
+}) as Record<ChatInvasionState['kind'], InvasionTimingPolicy>;
+
+export function getInvasionTimingPolicy(kind: ChatInvasionState['kind']): InvasionTimingPolicy {
+  return INVASION_TIMING_POLICIES[kind];
+}
+
+// ============================================================================
+// MARK: Invasion channel validator
+// ============================================================================
+
+export interface InvasionChannelValidation {
+  readonly channelId: ChatChannelId;
+  readonly isValid: boolean;
+  readonly reason: string;
+}
+
+export function validateInvasionChannel(channelId: ChatChannelId): InvasionChannelValidation {
+  const desc = CHAT_CHANNEL_DESCRIPTORS[channelId];
+  if (!desc) return Object.freeze({ channelId, isValid: false, reason: 'unknown_channel' });
+  if (!desc.supportsNpcInjection) return Object.freeze({ channelId, isValid: false, reason: 'no_npc_injection' });
+  return Object.freeze({ channelId, isValid: true, reason: 'valid_for_invasion' });
+}
+
+// ============================================================================
+// MARK: Invasion room state snapshot
+// ============================================================================
+
+export interface InvasionRoomSnapshot {
+  readonly roomId: ChatRoomId;
+  readonly roomKind: ChatRoomKind;
+  readonly activeInvasionIds: readonly ChatInvasionId[];
+  readonly hasSilence: boolean;
+  readonly audienceHeat01: number;
+  readonly snapshotAt: UnixMs;
+}
+
+export function buildInvasionRoomSnapshot(
+  room: ChatRoomState,
+  state: ChatState,
+  heat: ChatAudienceHeat | null,
+): InvasionRoomSnapshot {
+  const activeInvasions = getActiveRoomInvasions(state, room.roomId);
+  const hasSilence = !!(state as unknown as { silenceByRoom?: Record<string, unknown> }).silenceByRoom?.[room.roomId];
+  const heatVal = heat ? (heat.heat01 as unknown as number) : 0;
+
+  return Object.freeze({
+    roomId: room.roomId,
+    roomKind: room.roomKind,
+    activeInvasionIds: Object.freeze(activeInvasions.map((inv) => inv.invasionId)),
+    hasSilence,
+    audienceHeat01: heatVal,
+    snapshotAt: asUnixMs(Date.now()),
+  });
+}
+
+// ============================================================================
+// MARK: Invasion eligibility matrix
+// ============================================================================
+
+export interface InvasionEligibilityMatrix {
+  readonly roomId: ChatRoomId;
+  readonly eligibleKinds: readonly ChatInvasionState['kind'][];
+  readonly ineligibleKinds: readonly ChatInvasionState['kind'][];
+  readonly blockingReasons: Record<string, string>;
+  readonly generatedAt: UnixMs;
+}
+
+export function buildInvasionEligibilityMatrix(
+  roomId: ChatRoomId,
+  state: ChatState,
+  heat: ChatAudienceHeat | null,
+): InvasionEligibilityMatrix {
+  const ALL_KINDS: ChatInvasionState['kind'][] = ['HATER_RAID', 'RUMOR_BURST', 'HELPER_BLACKOUT', 'LIQUIDATOR_SWEEP', 'SYSTEM_SHOCK'];
+  const eligible: ChatInvasionState['kind'][] = [];
+  const ineligible: ChatInvasionState['kind'][] = [];
+  const blockingReasons: Record<string, string> = {};
+  const hasActive = hasActiveInvasion(state, roomId);
+  const heatVal = heat ? (heat.heat01 as unknown as number) : 0;
+
+  for (const kind of ALL_KINDS) {
+    if (hasActive) {
+      ineligible.push(kind);
+      blockingReasons[kind] = 'invasion_already_active';
+      continue;
+    }
+    if (kind === 'LIQUIDATOR_SWEEP' && heatVal < 0.4) {
+      ineligible.push(kind);
+      blockingReasons[kind] = 'liquidator_requires_heat_above_0.4';
+      continue;
+    }
+    if (kind === 'SYSTEM_SHOCK' && heatVal > 0.8) {
+      ineligible.push(kind);
+      blockingReasons[kind] = 'system_shock_blocked_at_high_heat';
+      continue;
+    }
+    eligible.push(kind);
+  }
+
+  return Object.freeze({ roomId, eligibleKinds: Object.freeze(eligible), ineligibleKinds: Object.freeze(ineligible), blockingReasons, generatedAt: asUnixMs(Date.now()) });
+}
+
+// ============================================================================
+// MARK: Invasion silence policy
+// ============================================================================
+
+export interface InvasionSilencePolicy {
+  readonly shouldSilence: boolean;
+  readonly silenceDurationMs: number;
+  readonly reason: string;
+}
+
+export function computeInvasionSilencePolicy(
+  kind: ChatInvasionState['kind'],
+  heat: ChatAudienceHeat | null,
+): InvasionSilencePolicy {
+  const heatVal = heat ? (heat.heat01 as unknown as number) : 0;
+
+  if (kind === 'HELPER_BLACKOUT') {
+    return Object.freeze({ shouldSilence: true, silenceDurationMs: 30_000, reason: 'helper_blackout_requires_silence' });
+  }
+  if (kind === 'SYSTEM_SHOCK' && heatVal > 0.6) {
+    return Object.freeze({ shouldSilence: true, silenceDurationMs: 10_000, reason: 'system_shock_high_heat_silence' });
+  }
+  return Object.freeze({ shouldSilence: false, silenceDurationMs: 0, reason: 'no_silence_required' });
+}
+
+// ============================================================================
+// MARK: Invasion module constants
+// ============================================================================
+
+export const CHAT_INVASION_MODULE_NAME = 'ChatInvasionOrchestrator' as const;
+export const CHAT_INVASION_MODULE_VERSION = '3.0.0' as const;
+
+export const CHAT_INVASION_LAWS = Object.freeze([
+  'Invasions are backend orchestration — no direct client trigger.',
+  'Only one active invasion per room at a time.',
+  'Shadow-primed invasions must complete priming before going active.',
+  'Cooldown periods are strictly enforced after invasion close.',
+  'Silence decisions follow invasion kind rules — not configurable at runtime.',
+  'All invasion IDs are generated server-side and are non-predictable.',
+  'Invasion analytics are read-only and never mutate state.',
+]);
+
+export const CHAT_INVASION_MODULE_DESCRIPTOR = Object.freeze({
+  name: CHAT_INVASION_MODULE_NAME,
+  version: CHAT_INVASION_MODULE_VERSION,
+  laws: CHAT_INVASION_LAWS,
+  supportedKinds: ['HATER_RAID', 'RUMOR_BURST', 'HELPER_BLACKOUT', 'LIQUIDATOR_SWEEP', 'SYSTEM_SHOCK'] as const,
+  timingPolicies: INVASION_TIMING_POLICIES,
+});
+
+// ============================================================================
+// MARK: Invasion exported utilities
+// ============================================================================
+
+export { clampThreshold, uniqueInvasionIds, randomBase36 };
+
+// ============================================================================
+// MARK: Invasion decision trace
+// ============================================================================
+
+/** Full record of the decision trail that led to opening (or refusing) an invasion. */
+export interface InvasionDecisionTrace {
+  readonly traceId: string;
+  readonly roomId: ChatRoomId;
+  readonly evaluatedAt: UnixMs;
+  readonly signalType: ChatSignalEnvelope['type'];
+  readonly eligibilityResult: ChatInvasionEligibility;
+  readonly derivedKind: Nullable<ChatInvasionState['kind']>;
+  readonly derivedChannelId: Nullable<ChatChannelId>;
+  readonly silencePolicy: InvasionSilencePolicy;
+  readonly severityScore: InvasionSeverityScore;
+  readonly opened: boolean;
+  readonly openedInvasionId: Nullable<ChatInvasionId>;
+  readonly refusalReasons: readonly string[];
+}
+
+export function buildInvasionDecisionTrace(
+  roomId: ChatRoomId,
+  signal: ChatSignalEnvelope,
+  eligibility: ChatInvasionEligibility,
+  severityScore: InvasionSeverityScore,
+  silencePolicy: InvasionSilencePolicy,
+  opened: boolean,
+  openedInvasionId: Nullable<ChatInvasionId>,
+  now: UnixMs,
+): InvasionDecisionTrace {
+  return Object.freeze({
+    traceId: `trace:${roomId}:${now}`,
+    roomId,
+    evaluatedAt: now,
+    signalType: signal.type,
+    eligibilityResult: eligibility,
+    derivedKind: eligibility.derivedKind,
+    derivedChannelId: eligibility.derivedChannelId,
+    silencePolicy,
+    severityScore,
+    opened,
+    openedInvasionId: opened ? openedInvasionId : null,
+    refusalReasons: opened ? [] : eligibility.blockingReasons,
+  });
+}
+
+// ============================================================================
+// MARK: Invasion batch statistics
+// ============================================================================
+
+/** Aggregate statistics computed across multiple invasions in a room or session. */
+export interface InvasionBatchReport {
+  readonly roomId: ChatRoomId;
+  readonly computedAt: UnixMs;
+  readonly totalInvasions: number;
+  readonly activeCount: number;
+  readonly primingCount: number;
+  readonly resolvedCount: number;
+  readonly byKind: Readonly<Record<string, number>>;
+  readonly averageSeverity01: number;
+  readonly maxSeverity01: number;
+  readonly averageDurationMs: number;
+  readonly maxDurationMs: number;
+  readonly invasionIds: readonly ChatInvasionId[];
+}
+
+export function buildInvasionBatchReport(
+  roomId: ChatRoomId,
+  invasions: readonly ChatInvasionState[],
+  now: UnixMs,
+): InvasionBatchReport {
+  const byKind: Record<string, number> = {};
+  let totalSeverity = 0;
+  let maxSeverity = 0;
+  let totalDuration = 0;
+  let maxDuration = 0;
+  let active = 0;
+  let priming = 0;
+  let resolved = 0;
+
+  for (const inv of invasions) {
+    byKind[inv.kind] = (byKind[inv.kind] ?? 0) + 1;
+    const sev = scoreInvasionSeverity(inv, null).severityScore as unknown as number;
+    totalSeverity += sev;
+    if (sev > maxSeverity) maxSeverity = sev;
+    const dur = ((inv.closesAt as unknown as number) - (inv.openedAt as unknown as number)) || 0;
+    totalDuration += dur;
+    if (dur > maxDuration) maxDuration = dur;
+    if (inv.status === 'ACTIVE') active++;
+    else if (inv.status === 'PRIMING') priming++;
+    else resolved++;
+  }
+
+  const n = invasions.length || 1;
+  return Object.freeze({
+    roomId,
+    computedAt: now,
+    totalInvasions: invasions.length,
+    activeCount: active,
+    primingCount: priming,
+    resolvedCount: resolved,
+    byKind: Object.freeze(byKind),
+    averageSeverity01: totalSeverity / n,
+    maxSeverity01: maxSeverity,
+    averageDurationMs: totalDuration / n,
+    maxDurationMs: maxDuration,
+    invasionIds: Object.freeze(invasions.map((i) => i.invasionId)),
+  });
+}
+
+// ============================================================================
+// MARK: Invasion cooldown tracker
+// ============================================================================
+
+export interface InvasionCooldownEntry {
+  readonly roomId: ChatRoomId;
+  readonly kind: ChatInvasionState['kind'];
+  readonly closedAt: UnixMs;
+  readonly cooldownMs: number;
+  readonly expiresAt: UnixMs;
+}
+
+export function isInvasionCooldown(entry: InvasionCooldownEntry, now: UnixMs): boolean {
+  return (now as unknown as number) < (entry.expiresAt as unknown as number);
+}
+
+export function remainingCooldownMs(entry: InvasionCooldownEntry, now: UnixMs): number {
+  const remaining = (entry.expiresAt as unknown as number) - (now as unknown as number);
+  return remaining > 0 ? remaining : 0;
+}
+
+/** In-memory per-room cooldown tracker. Does not persist across restarts. */
+export class InvasionCooldownTracker {
+  private readonly entries: Map<string, InvasionCooldownEntry> = new Map();
+
+  key(roomId: ChatRoomId, kind: ChatInvasionState['kind']): string {
+    return `${roomId}:${kind}`;
+  }
+
+  record(
+    roomId: ChatRoomId,
+    kind: ChatInvasionState['kind'],
+    closedAt: UnixMs,
+    cooldownMs: number,
+  ): void {
+    const entry: InvasionCooldownEntry = {
+      roomId,
+      kind,
+      closedAt,
+      cooldownMs,
+      expiresAt: asUnixMs((closedAt as unknown as number) + cooldownMs),
+    };
+    this.entries.set(this.key(roomId, kind), entry);
+  }
+
+  check(roomId: ChatRoomId, kind: ChatInvasionState['kind'], now: UnixMs): boolean {
+    const entry = this.entries.get(this.key(roomId, kind));
+    if (!entry) return false;
+    return isInvasionCooldown(entry, now);
+  }
+
+  remaining(roomId: ChatRoomId, kind: ChatInvasionState['kind'], now: UnixMs): number {
+    const entry = this.entries.get(this.key(roomId, kind));
+    if (!entry) return 0;
+    return remainingCooldownMs(entry, now);
+  }
+
+  purgeExpired(now: UnixMs): void {
+    for (const [k, entry] of this.entries) {
+      if (!isInvasionCooldown(entry, now)) this.entries.delete(k);
+    }
+  }
+
+  allEntries(): readonly InvasionCooldownEntry[] {
+    return Array.from(this.entries.values());
+  }
+
+  size(): number {
+    return this.entries.size;
+  }
+}
+
+// ============================================================================
+// MARK: Room invasion history summary
+// ============================================================================
+
+export interface RoomInvasionHistorySummary {
+  readonly roomId: ChatRoomId;
+  readonly computedAt: UnixMs;
+  readonly totalEverSeen: number;
+  readonly kindsEverSeen: readonly ChatInvasionState['kind'][];
+  readonly lastInvasionAt: Nullable<UnixMs>;
+  readonly lastKind: Nullable<ChatInvasionState['kind']>;
+  readonly lastChannelId: Nullable<ChatChannelId>;
+  readonly peakSeverity01: number;
+  readonly avgSeverity01: number;
+}
+
+export function buildRoomInvasionHistorySummary(
+  roomId: ChatRoomId,
+  invasions: readonly ChatInvasionState[],
+  now: UnixMs,
+): RoomInvasionHistorySummary {
+  const kindsSet = new Set<ChatInvasionState['kind']>();
+  let peakSev = 0;
+  let totalSev = 0;
+  let lastAt: Nullable<UnixMs> = null;
+  let lastKind: Nullable<ChatInvasionState['kind']> = null;
+  let lastChannel: Nullable<ChatChannelId> = null;
+
+  for (const inv of invasions) {
+    kindsSet.add(inv.kind);
+    const sev = scoreInvasionSeverity(inv, null).severityScore as unknown as number;
+    if (sev > peakSev) peakSev = sev;
+    totalSev += sev;
+    const openedAt = inv.openedAt as unknown as number;
+    if (lastAt === null || openedAt > (lastAt as unknown as number)) {
+      lastAt = inv.openedAt;
+      lastKind = inv.kind;
+      lastChannel = inv.channelId;
+    }
+  }
+
+  const n = invasions.length || 1;
+  return Object.freeze({
+    roomId,
+    computedAt: now,
+    totalEverSeen: invasions.length,
+    kindsEverSeen: Object.freeze(Array.from(kindsSet)),
+    lastInvasionAt: lastAt,
+    lastKind,
+    lastChannelId: lastChannel,
+    peakSeverity01: peakSev,
+    avgSeverity01: totalSev / n,
+  });
+}
+
+// ============================================================================
+// MARK: Invasion phase report
+// ============================================================================
+
+export type InvasionPhase = 'PRE_INVASION' | 'PRIMING' | 'ACTIVE' | 'COOLDOWN' | 'IDLE';
+
+export interface InvasionPhaseReport {
+  readonly roomId: ChatRoomId;
+  readonly phase: InvasionPhase;
+  readonly activeInvasionId: Nullable<ChatInvasionId>;
+  readonly activeKind: Nullable<ChatInvasionState['kind']>;
+  readonly activeChannelId: Nullable<ChatChannelId>;
+  readonly primingCount: number;
+  readonly remainingCooldownMs: number;
+  readonly computedAt: UnixMs;
+}
+
+export function computeInvasionPhaseReport(
+  roomId: ChatRoomId,
+  state: ChatState,
+  cooldownTracker: InvasionCooldownTracker,
+  now: UnixMs,
+): InvasionPhaseReport {
+  const active = getActiveRoomInvasions(state, roomId);
+  const priming = active.filter((i) => i.status === 'PRIMING');
+  const running = active.filter((i) => i.status === 'ACTIVE');
+
+  if (running.length > 0) {
+    const inv = running[0]!;
+    return Object.freeze({
+      roomId,
+      phase: 'ACTIVE',
+      activeInvasionId: inv.invasionId,
+      activeKind: inv.kind,
+      activeChannelId: inv.channelId,
+      primingCount: priming.length,
+      remainingCooldownMs: 0,
+      computedAt: now,
+    });
+  }
+
+  if (priming.length > 0) {
+    const inv = priming[0]!;
+    return Object.freeze({
+      roomId,
+      phase: 'PRIMING',
+      activeInvasionId: inv.invasionId,
+      activeKind: inv.kind,
+      activeChannelId: inv.channelId,
+      primingCount: priming.length,
+      remainingCooldownMs: 0,
+      computedAt: now,
+    });
+  }
+
+  // Check cooldown for any kind
+  const allEntries = cooldownTracker.allEntries().filter((e) => e.roomId === roomId);
+  const maxRemaining = allEntries.reduce(
+    (acc, e) => Math.max(acc, remainingCooldownMs(e, now)),
+    0,
+  );
+
+  if (maxRemaining > 0) {
+    return Object.freeze({
+      roomId,
+      phase: 'COOLDOWN',
+      activeInvasionId: null,
+      activeKind: null,
+      activeChannelId: null,
+      primingCount: 0,
+      remainingCooldownMs: maxRemaining,
+      computedAt: now,
+    });
+  }
+
+  return Object.freeze({
+    roomId,
+    phase: 'IDLE',
+    activeInvasionId: null,
+    activeKind: null,
+    activeChannelId: null,
+    primingCount: 0,
+    remainingCooldownMs: 0,
+    computedAt: now,
+  });
+}
+
+// ============================================================================
+// MARK: Invasion quality grader
+// ============================================================================
+
+export type InvasionQualityGrade = 'S' | 'A' | 'B' | 'C' | 'D' | 'F';
+
+export interface InvasionQualityReport {
+  readonly invasionId: ChatInvasionId;
+  readonly grade: InvasionQualityGrade;
+  readonly score01: number;
+  readonly reasons: readonly string[];
+}
+
+export function gradeInvasionQuality(
+  invasion: ChatInvasionState,
+  heat: ChatAudienceHeat | null,
+): InvasionQualityReport {
+  const sev = scoreInvasionSeverity(invasion, heat);
+  const sevNum = sev.severityScore as unknown as number;
+  const reasons: string[] = [];
+
+  let score = sevNum;
+
+  // Penalize PRIMING state that never went active
+  if (invasion.status === 'PRIMING') {
+    score -= 0.2;
+    reasons.push('invasion_never_activated');
+  }
+
+  // Reward channel match
+  const desc = CHAT_CHANNEL_DESCRIPTORS[invasion.channelId];
+  if (desc && desc.supportsNpcInjection) {
+    score += 0.05;
+    reasons.push('channel_supports_npc_injection');
+  }
+  if (desc && desc.supportsNegotiation) {
+    score += 0.03;
+    reasons.push('channel_supports_negotiation');
+  }
+
+  // Clamp
+  score = clamp01(score as unknown as Score01) as unknown as number;
+
+  let grade: InvasionQualityGrade;
+  if (score >= 0.9) grade = 'S';
+  else if (score >= 0.75) grade = 'A';
+  else if (score >= 0.6) grade = 'B';
+  else if (score >= 0.45) grade = 'C';
+  else if (score >= 0.3) grade = 'D';
+  else grade = 'F';
+
+  return Object.freeze({
+    invasionId: invasion.invasionId,
+    grade,
+    score01: score,
+    reasons: Object.freeze(reasons),
+  });
+}
+
+// ============================================================================
+// MARK: Invasion signal classifier
+// ============================================================================
+
+export type InvasionSignalClass =
+  | 'BATTLE_TRIGGER'
+  | 'ECONOMY_TRIGGER'
+  | 'LIVEOPS_TRIGGER'
+  | 'MULTIPLAYER_TRIGGER'
+  | 'RUN_TRIGGER'
+  | 'UNKNOWN';
+
+export function classifyInvasionSignal(signal: ChatSignalEnvelope): InvasionSignalClass {
+  if (signal.battle) return 'BATTLE_TRIGGER';
+  if (signal.economy) return 'ECONOMY_TRIGGER';
+  if (signal.liveops) return 'LIVEOPS_TRIGGER';
+  if (signal.multiplayer) return 'MULTIPLAYER_TRIGGER';
+  if (signal.run) return 'RUN_TRIGGER';
+  return 'UNKNOWN';
+}
+
+// ============================================================================
+// MARK: Invasion batch decision runner
+// ============================================================================
+
+export interface InvasionBatchDecision {
+  readonly roomId: ChatRoomId;
+  readonly eligible: boolean;
+  readonly trace: InvasionDecisionTrace;
+}
+
+export function runInvasionBatchDecisions(
+  rooms: readonly ChatRoomState[],
+  signal: ChatSignalEnvelope,
+  state: ChatState,
+  heat: ChatAudienceHeat | null,
+  now: UnixMs,
+): readonly InvasionBatchDecision[] {
+  return rooms.map((room) => {
+    const elig = buildInvasionEligibilityMatrix(room.roomId, state, heat);
+    const kind = elig.eligibleKinds[0] ?? null;
+    const silPolicy = kind ? computeInvasionSilencePolicy(kind, heat) : { shouldSilence: false, silenceDurationMs: 0, reason: 'no_kind' };
+    const activeInvasions = getActiveRoomInvasions(state, room.roomId);
+    const hasActive = activeInvasions.some((i) => i.status === 'ACTIVE');
+    const firstActive = activeInvasions.find((i) => i.status === 'ACTIVE') ?? null;
+    const sevScore: InvasionSeverityScore = firstActive
+      ? scoreInvasionSeverity(firstActive, heat)
+      : { invasionId: 'none' as ChatInvasionId, severityScore: 0, severityBand: 'LOW', factors: [] };
+
+    const trace = buildInvasionDecisionTrace(
+      room.roomId,
+      signal,
+      {
+        eligible: !hasActive && kind !== null,
+        reasons: [],
+        blockingReasons: hasActive ? ['already_active'] : [],
+        derivedKind: kind,
+        derivedChannelId: elig.eligibleKinds.length > 0
+          ? (Object.keys(CHAT_CHANNEL_DESCRIPTORS).find((ch) => CHAT_CHANNEL_DESCRIPTORS[ch as ChatChannelId]?.supportsNpcInjection) as ChatChannelId ?? null)
+          : null,
+      },
+      sevScore,
+      silPolicy as InvasionSilencePolicy,
+      false,
+      null,
+      now,
+    );
+
+    return Object.freeze({
+      roomId: room.roomId,
+      eligible: trace.eligibilityResult.eligible,
+      trace,
+    });
+  });
+}
+
+// ============================================================================
+// MARK: Invasion room comparison
+// ============================================================================
+
+export interface InvasionRoomComparison {
+  readonly roomA: ChatRoomId;
+  readonly roomB: ChatRoomId;
+  readonly roomAHasActive: boolean;
+  readonly roomBHasActive: boolean;
+  readonly roomASeverity01: number;
+  readonly roomBSeverity01: number;
+  readonly higherSeverityRoom: ChatRoomId | null;
+  readonly computedAt: UnixMs;
+}
+
+export function compareInvasionRooms(
+  roomAId: ChatRoomId,
+  roomBId: ChatRoomId,
+  state: ChatState,
+  heat: ChatAudienceHeat | null,
+  now: UnixMs,
+): InvasionRoomComparison {
+  const aInvasions = getActiveRoomInvasions(state, roomAId);
+  const bInvasions = getActiveRoomInvasions(state, roomBId);
+
+  const aActive = aInvasions.some((i) => i.status === 'ACTIVE');
+  const bActive = bInvasions.some((i) => i.status === 'ACTIVE');
+
+  const aRunning = aInvasions.find((i) => i.status === 'ACTIVE');
+  const bRunning = bInvasions.find((i) => i.status === 'ACTIVE');
+
+  const aSev = aRunning ? (scoreInvasionSeverity(aRunning, heat).severityScore as unknown as number) : 0;
+  const bSev = bRunning ? (scoreInvasionSeverity(bRunning, heat).severityScore as unknown as number) : 0;
+
+  const higherSeverityRoom: ChatRoomId | null =
+    aSev > bSev ? roomAId : bSev > aSev ? roomBId : null;
+
+  return Object.freeze({
+    roomA: roomAId,
+    roomB: roomBId,
+    roomAHasActive: aActive,
+    roomBHasActive: bActive,
+    roomASeverity01: aSev,
+    roomBSeverity01: bSev,
+    higherSeverityRoom,
+    computedAt: now,
+  });
+}
+
+// ============================================================================
+// MARK: Invasion kind transition validator
+// ============================================================================
+
+/** Rules for which invasion kinds may follow each other without cooldown violation. */
+export const INVASION_KIND_TRANSITION_RULES: Readonly<
+  Record<ChatInvasionState['kind'], readonly ChatInvasionState['kind'][]>
+> = Object.freeze({
+  HATER_RAID: ['RUMOR_BURST', 'SYSTEM_SHOCK'],
+  RUMOR_BURST: ['HATER_RAID', 'LIQUIDATOR_SWEEP'],
+  HELPER_BLACKOUT: ['SYSTEM_SHOCK'],
+  LIQUIDATOR_SWEEP: ['RUMOR_BURST', 'HATER_RAID'],
+  SYSTEM_SHOCK: ['HELPER_BLACKOUT', 'LIQUIDATOR_SWEEP'],
+});
+
+export function isInvasionKindTransitionAllowed(
+  fromKind: ChatInvasionState['kind'],
+  toKind: ChatInvasionState['kind'],
+): boolean {
+  const allowed = INVASION_KIND_TRANSITION_RULES[fromKind];
+  return allowed ? allowed.includes(toKind) : false;
+}
+
+// ============================================================================
+// MARK: Export global invasion cooldown tracker singleton factory
+// ============================================================================
+
+export function createInvasionCooldownTracker(): InvasionCooldownTracker {
+  return new InvasionCooldownTracker();
+}
+
+export function createInvasionWatchBus(): InvasionWatchBus {
+  return new InvasionWatchBus();
+}

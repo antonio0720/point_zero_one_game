@@ -1475,3 +1475,523 @@ function randomBase36(length: number): string {
   }
   return output.slice(0, length);
 }
+
+// ============================================================================
+// MARK: Proof watch bus
+// ============================================================================
+
+export type ProofWatchEvent =
+  | { kind: 'EDGE_APPENDED'; edgeId: ChatProofEdgeId; roomId: ChatRoomId }
+  | { kind: 'CHAIN_VALIDATED'; roomId: ChatRoomId; valid: boolean }
+  | { kind: 'HASH_MISMATCH'; roomId: ChatRoomId; messageId: ChatMessageId };
+
+export type ProofWatchCallback = (event: ProofWatchEvent) => void;
+
+export class ProofWatchBus {
+  private readonly subscribers = new Set<ProofWatchCallback>();
+
+  subscribe(cb: ProofWatchCallback): () => void {
+    this.subscribers.add(cb);
+    return () => this.subscribers.delete(cb);
+  }
+
+  emit(event: ProofWatchEvent): void {
+    for (const cb of this.subscribers) {
+      try { cb(event); } catch { /* isolate */ }
+    }
+  }
+
+  emitEdgeAppended(edgeId: ChatProofEdgeId, roomId: ChatRoomId): void {
+    this.emit({ kind: 'EDGE_APPENDED', edgeId, roomId });
+  }
+
+  emitChainValidated(roomId: ChatRoomId, valid: boolean): void {
+    this.emit({ kind: 'CHAIN_VALIDATED', roomId, valid });
+  }
+
+  emitHashMismatch(roomId: ChatRoomId, messageId: ChatMessageId): void {
+    this.emit({ kind: 'HASH_MISMATCH', roomId, messageId });
+  }
+
+  size(): number { return this.subscribers.size; }
+}
+
+// ============================================================================
+// MARK: Proof edge fingerprint
+// ============================================================================
+
+export interface ProofEdgeFingerprint {
+  readonly edgeId: ChatProofEdgeId;
+  readonly roomId: ChatRoomId;
+  readonly messageId: ChatMessageId;
+  readonly edgeKind: string;
+  readonly hash: string;
+}
+
+export function computeProofEdgeFingerprint(
+  edge: ChatProofEdge,
+  roomId: ChatRoomId,
+): ProofEdgeFingerprint {
+  const hash = [
+    edge.id,
+    roomId,
+    edge.toMessageId,
+    edge.edgeType,
+    edge.hash,
+  ].join('|');
+
+  return Object.freeze({
+    edgeId: edge.id,
+    roomId,
+    messageId: edge.toMessageId,
+    edgeKind: edge.edgeType,
+    hash,
+  });
+}
+
+// ============================================================================
+// MARK: Proof chain integrity report
+// ============================================================================
+
+export interface ProofChainIntegrityReport {
+  readonly roomId: ChatRoomId;
+  readonly totalEdges: number;
+  readonly validEdges: number;
+  readonly invalidEdges: number;
+  readonly missingEdges: number;
+  readonly integrityScore01: number;
+  readonly computedAt: UnixMs;
+}
+
+export function buildProofChainIntegrityReport(
+  state: ChatState,
+  roomId: ChatRoomId,
+  hashPort: ChatHashPort,
+  now: UnixMs,
+): ProofChainIntegrityReport {
+  const edges = selectRoomProofEdges(state, roomId);
+  const transcript = selectRoomTranscript(state, roomId);
+
+  let valid = 0;
+  let invalid = 0;
+
+  for (const edge of edges) {
+    const msg = transcript.find((e) => e.message.id === edge.toMessageId);
+    if (!msg) { invalid++; continue; }
+    const computed = hashPort.hash(msg.message.plainText);
+    if (computed === edge.hash) valid++;
+    else invalid++;
+  }
+
+  const missing = Math.max(0, transcript.length - edges.length);
+  const total = edges.length;
+
+  return Object.freeze({
+    roomId,
+    totalEdges: total,
+    validEdges: valid,
+    invalidEdges: invalid,
+    missingEdges: missing,
+    integrityScore01: total > 0 ? valid / total : 1,
+    computedAt: now,
+  });
+}
+
+// ============================================================================
+// MARK: Proof chain diff
+// ============================================================================
+
+export interface ProofChainDiff {
+  readonly roomId: ChatRoomId;
+  readonly addedEdges: readonly ChatProofEdgeId[];
+  readonly removedEdges: readonly ChatProofEdgeId[];
+  readonly computedAt: UnixMs;
+}
+
+export function diffProofChains(
+  roomId: ChatRoomId,
+  before: readonly ChatProofEdge[],
+  after: readonly ChatProofEdge[],
+  now: UnixMs,
+): ProofChainDiff {
+  const beforeIds = new Set(before.map((e) => e.id));
+  const afterIds = new Set(after.map((e) => e.id));
+
+  const added = after.filter((e) => !beforeIds.has(e.id)).map((e) => e.id);
+  const removed = before.filter((e) => !afterIds.has(e.id)).map((e) => e.id);
+
+  return Object.freeze({
+    roomId,
+    addedEdges: Object.freeze(added),
+    removedEdges: Object.freeze(removed),
+    computedAt: now,
+  });
+}
+
+// ============================================================================
+// MARK: Proof edge ledger (in-memory)
+// ============================================================================
+
+export class ProofEdgeLedger {
+  private readonly edges = new Map<ChatRoomId, ChatProofEdge[]>();
+
+  append(roomId: ChatRoomId, edge: ChatProofEdge): void {
+    if (!this.edges.has(roomId)) this.edges.set(roomId, []);
+    this.edges.get(roomId)!.push(edge);
+  }
+
+  getEdges(roomId: ChatRoomId): readonly ChatProofEdge[] {
+    return this.edges.get(roomId) ?? [];
+  }
+
+  countEdges(roomId: ChatRoomId): number {
+    return this.edges.get(roomId)?.length ?? 0;
+  }
+
+  allRooms(): readonly ChatRoomId[] {
+    return Array.from(this.edges.keys());
+  }
+
+  purgeRoom(roomId: ChatRoomId): void {
+    this.edges.delete(roomId);
+  }
+
+  latestEdge(roomId: ChatRoomId): ChatProofEdge | null {
+    const list = this.edges.get(roomId);
+    return list && list.length > 0 ? list[list.length - 1]! : null;
+  }
+}
+
+// ============================================================================
+// MARK: Replay artifact proof linker
+// ============================================================================
+
+export interface ReplayProofLink {
+  readonly replayId: ChatReplayId;
+  readonly linkedEdgeIds: readonly ChatProofEdgeId[];
+  readonly linkedMessageIds: readonly ChatMessageId[];
+}
+
+export function buildReplayProofLink(
+  replayArtifact: ChatReplayArtifact,
+  edges: readonly ChatProofEdge[],
+): ReplayProofLink {
+  const linked = edges.filter((e) => e.toReplayId === replayArtifact.id);
+
+  return Object.freeze({
+    replayId: replayArtifact.id,
+    linkedEdgeIds: Object.freeze(linked.map((e) => e.id)),
+    linkedMessageIds: Object.freeze(linked.map((e) => e.toMessageId)),
+  });
+}
+
+// ============================================================================
+// MARK: Inference ID proof linker
+// ============================================================================
+
+export interface InferenceProofLink {
+  readonly inferenceId: ChatInferenceId;
+  readonly linkedEdgeCount: number;
+  readonly linkedEdgeIds: readonly ChatProofEdgeId[];
+}
+
+export function buildInferenceProofLink(
+  inferenceId: ChatInferenceId,
+  edges: readonly ChatProofEdge[],
+): InferenceProofLink {
+  const linked = edges.filter((e) => e.toInferenceId === inferenceId);
+  return Object.freeze({
+    inferenceId,
+    linkedEdgeCount: linked.length,
+    linkedEdgeIds: Object.freeze(linked.map((e) => e.id)),
+  });
+}
+
+// ============================================================================
+// MARK: Telemetry proof linker
+// ============================================================================
+
+export interface TelemetryProofLink {
+  readonly telemetryId: ChatTelemetryId;
+  readonly linkedEdgeIds: readonly ChatProofEdgeId[];
+}
+
+export function buildTelemetryProofLink(
+  telemetry: ChatTelemetryEnvelope,
+  edges: readonly ChatProofEdge[],
+): TelemetryProofLink {
+  const linked = edges.filter((e) => e.toTelemetryId === telemetry.telemetryId);
+  return Object.freeze({
+    telemetryId: telemetry.telemetryId,
+    linkedEdgeIds: Object.freeze(linked.map((e) => e.id)),
+  });
+}
+
+// ============================================================================
+// MARK: Module constants
+// ============================================================================
+
+export const CHAT_PROOF_CHAIN_MODULE_NAME = 'ChatProofChain' as const;
+export const CHAT_PROOF_CHAIN_MODULE_VERSION = '2026.03.14.2' as const;
+
+export const CHAT_PROOF_CHAIN_MODULE_LAWS = Object.freeze([
+  'Proof chain never mutates transcript text.',
+  'Proof edges are append-only — no editing.',
+  'Hash mismatches are flagged, not silently ignored.',
+  'Replay, inference, and telemetry links are derived from existing edges.',
+  'All proof objects are frozen before export.',
+]);
+
+export const CHAT_PROOF_CHAIN_MODULE_DESCRIPTOR = Object.freeze({
+  name: CHAT_PROOF_CHAIN_MODULE_NAME,
+  version: CHAT_PROOF_CHAIN_MODULE_VERSION,
+  laws: CHAT_PROOF_CHAIN_MODULE_LAWS,
+});
+
+export function createProofWatchBus(): ProofWatchBus {
+  return new ProofWatchBus();
+}
+
+export function createProofEdgeLedger(): ProofEdgeLedger {
+  return new ProofEdgeLedger();
+}
+
+// Re-export state helpers for convenience
+export { appendProofEdgeToState, selectRoomProofEdges, selectRoomTranscript };
+
+// ============================================================================
+// MARK: Proof chain snapshot builder
+// ============================================================================
+
+export interface ProofChainSnapshot {
+  readonly roomId: ChatRoomId;
+  readonly edgeCount: number;
+  readonly latestEdgeId: ChatProofEdgeId | null;
+  readonly latestHash: ChatProofHash | null;
+  readonly computedAt: UnixMs;
+}
+
+export function buildProofChainSnapshot(
+  state: ChatState,
+  roomId: ChatRoomId,
+  now: UnixMs,
+): ProofChainSnapshot {
+  const edges = selectRoomProofEdges(state, roomId);
+  const latest = edges.length > 0 ? edges[edges.length - 1]! : null;
+  return Object.freeze({
+    roomId,
+    edgeCount: edges.length,
+    latestEdgeId: latest?.id ?? null,
+    latestHash: latest?.hash ?? null,
+    computedAt: now,
+  });
+}
+
+// ============================================================================
+// MARK: Proof coverage report
+// ============================================================================
+
+export interface ProofCoverageReport {
+  readonly roomId: ChatRoomId;
+  readonly totalMessages: number;
+  readonly coveredMessages: number;
+  readonly uncoveredMessages: number;
+  readonly coverageRate01: number;
+}
+
+export function buildProofCoverageReport(
+  state: ChatState,
+  roomId: ChatRoomId,
+): ProofCoverageReport {
+  const transcript = selectRoomTranscript(state, roomId);
+  const edges = selectRoomProofEdges(state, roomId);
+  const coveredIds = new Set(edges.map((e) => e.toMessageId));
+  const covered = transcript.filter((e) => coveredIds.has(e.message.id)).length;
+
+  return Object.freeze({
+    roomId,
+    totalMessages: transcript.length,
+    coveredMessages: covered,
+    uncoveredMessages: transcript.length - covered,
+    coverageRate01: transcript.length > 0 ? covered / transcript.length : 1,
+  });
+}
+
+// ============================================================================
+// MARK: Proof edge search helpers
+// ============================================================================
+
+export function findEdgeByMessageId(
+  edges: readonly ChatProofEdge[],
+  messageId: ChatMessageId,
+): ChatProofEdge | null {
+  return edges.find((e) => e.toMessageId === messageId) ?? null;
+}
+
+export function findEdgesByEventId(
+  edges: readonly ChatProofEdge[],
+  eventId: ChatEventId,
+): readonly ChatProofEdge[] {
+  return edges.filter((e) => e.fromEventId === eventId);
+}
+
+export function findEdgesByKind(
+  edges: readonly ChatProofEdge[],
+  kind: string,
+): readonly ChatProofEdge[] {
+  return edges.filter((e) => e.edgeType === kind);
+}
+
+// ============================================================================
+// MARK: Proof chain age report
+// ============================================================================
+
+export interface ProofChainAgeReport {
+  readonly roomId: ChatRoomId;
+  readonly oldestEdgeAt: UnixMs | null;
+  readonly newestEdgeAt: UnixMs | null;
+  readonly spanMs: number;
+}
+
+export function buildProofChainAgeReport(
+  state: ChatState,
+  roomId: ChatRoomId,
+): ProofChainAgeReport {
+  const edges = selectRoomProofEdges(state, roomId);
+  if (edges.length === 0) {
+    return Object.freeze({ roomId, oldestEdgeAt: null, newestEdgeAt: null, spanMs: 0 });
+  }
+
+  const times = edges.map((e) => e.createdAt as unknown as number);
+  const oldest = asUnixMs(Math.min(...times));
+  const newest = asUnixMs(Math.max(...times));
+  const spanMs = (newest as unknown as number) - (oldest as unknown as number);
+
+  return Object.freeze({ roomId, oldestEdgeAt: oldest, newestEdgeAt: newest, spanMs });
+}
+
+// ============================================================================
+// MARK: Message body hash verifier
+// ============================================================================
+
+export interface MessageHashVerificationResult {
+  readonly messageId: ChatMessageId;
+  readonly expected: ChatProofHash;
+  readonly computed: ChatProofHash;
+  readonly valid: boolean;
+}
+
+export function verifyMessageBodyHash(
+  message: ChatMessage,
+  edge: ChatProofEdge,
+  hashPort: ChatHashPort,
+): MessageHashVerificationResult {
+  const computed = hashPort.hash(message.plainText);
+  return Object.freeze({
+    messageId: message.id,
+    expected: edge.hash,
+    computed,
+    valid: computed === edge.hash,
+  });
+}
+
+// ============================================================================
+// MARK: Extended module namespace
+// ============================================================================
+
+export const ChatProofChainModuleExtended = Object.freeze({
+  createProofWatchBus,
+  createProofEdgeLedger,
+  computeProofEdgeFingerprint,
+  buildProofChainIntegrityReport,
+  diffProofChains,
+  buildReplayProofLink,
+  buildInferenceProofLink,
+  buildTelemetryProofLink,
+  buildProofChainSnapshot,
+  buildProofCoverageReport,
+  findEdgeByMessageId,
+  findEdgesByEventId,
+  findEdgesByKind,
+  buildProofChainAgeReport,
+  verifyMessageBodyHash,
+  CHAT_PROOF_CHAIN_MODULE_DESCRIPTOR,
+  CHAT_PROOF_CHAIN_MODULE_LAWS,
+} as const);
+
+// ============================================================================
+// MARK: Proof edge kind frequency counter
+// ============================================================================
+
+export class ProofEdgeKindCounter {
+  private readonly counts = new Map<string, number>();
+
+  record(kind: string): void {
+    this.counts.set(kind, (this.counts.get(kind) ?? 0) + 1);
+  }
+
+  count(kind: string): number { return this.counts.get(kind) ?? 0; }
+  total(): number { let s = 0; for (const n of this.counts.values()) s += n; return s; }
+
+  mostFrequent(): string | null {
+    let max = 0; let best: string | null = null;
+    for (const [k, n] of this.counts) if (n > max) { max = n; best = k; }
+    return best;
+  }
+
+  distribution(): Readonly<Record<string, number>> {
+    const result: Record<string, number> = {};
+    for (const [k, n] of this.counts) result[k] = n;
+    return Object.freeze(result);
+  }
+
+  reset(): void { this.counts.clear(); }
+}
+
+// ============================================================================
+// MARK: Proof chain summary exporter
+// ============================================================================
+
+export interface ProofChainSummaryExport {
+  readonly roomId: ChatRoomId;
+  readonly edgeCount: number;
+  readonly coverage: ProofCoverageReport;
+  readonly age: ProofChainAgeReport;
+}
+
+export function exportProofChainSummary(
+  state: ChatState,
+  roomId: ChatRoomId,
+): ProofChainSummaryExport {
+  return Object.freeze({
+    roomId,
+    edgeCount: selectRoomProofEdges(state, roomId).length,
+    coverage: buildProofCoverageReport(state, roomId),
+    age: buildProofChainAgeReport(state, roomId),
+  });
+}
+
+export function createProofEdgeKindCounter(): ProofEdgeKindCounter {
+  return new ProofEdgeKindCounter();
+}
+
+export const CHAT_PROOF_CHAIN_MODULE_VERSION_EXTENDED = '2026.03.14.2' as const;
+
+export function countProofEdgesForRoom(state: ChatState, roomId: ChatRoomId): number {
+  return selectRoomProofEdges(state, roomId).length;
+}
+
+export function isProofChainEmpty(state: ChatState, roomId: ChatRoomId): boolean {
+  return selectRoomProofEdges(state, roomId).length === 0;
+}
+
+export function getProofHashForMessage(state: ChatState, roomId: ChatRoomId, messageId: ChatMessageId): ChatProofHash | null {
+  const edges = selectRoomProofEdges(state, roomId);
+  return edges.find((e) => e.toMessageId === messageId)?.hash ?? null;
+}
+
+export function countUncoveredMessages(state: ChatState, roomId: ChatRoomId): number {
+  return buildProofCoverageReport(state, roomId).uncoveredMessages;
+}
+
+export const PROOF_CHAIN_INTEGRITY_THRESHOLD = 0.95 as const;

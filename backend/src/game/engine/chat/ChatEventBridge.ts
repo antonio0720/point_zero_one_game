@@ -1356,3 +1356,670 @@ export function createDefaultIdFactory(): ChatEventBridgeIdFactoryPort {
     },
   };
 }
+
+// ============================================================================
+// MARK: Event bridge watch bus
+// ============================================================================
+
+export type EventBridgeWatchEvent =
+  | { kind: 'INPUT_NORMALIZED'; eventId: ChatEventId; roomId: ChatRoomId }
+  | { kind: 'BATCH_NORMALIZED'; count: number; roomId: ChatRoomId }
+  | { kind: 'SIGNAL_EMITTED'; signalType: ChatSignalType; roomId: ChatRoomId }
+  | { kind: 'DEDUPE_HIT'; eventId: ChatEventId; roomId: ChatRoomId };
+
+export type EventBridgeWatchCallback = (event: EventBridgeWatchEvent) => void;
+
+export class EventBridgeWatchBus {
+  private readonly subscribers = new Set<EventBridgeWatchCallback>();
+
+  subscribe(cb: EventBridgeWatchCallback): () => void {
+    this.subscribers.add(cb);
+    return () => this.subscribers.delete(cb);
+  }
+
+  emit(event: EventBridgeWatchEvent): void {
+    for (const cb of this.subscribers) {
+      try { cb(event); } catch { /* isolate */ }
+    }
+  }
+
+  emitInputNormalized(eventId: ChatEventId, roomId: ChatRoomId): void {
+    this.emit({ kind: 'INPUT_NORMALIZED', eventId, roomId });
+  }
+
+  emitBatchNormalized(count: number, roomId: ChatRoomId): void {
+    this.emit({ kind: 'BATCH_NORMALIZED', count, roomId });
+  }
+
+  emitSignalEmitted(signalType: ChatSignalType, roomId: ChatRoomId): void {
+    this.emit({ kind: 'SIGNAL_EMITTED', signalType, roomId });
+  }
+
+  emitDedupeHit(eventId: ChatEventId, roomId: ChatRoomId): void {
+    this.emit({ kind: 'DEDUPE_HIT', eventId, roomId });
+  }
+
+  size(): number { return this.subscribers.size; }
+}
+
+// ============================================================================
+// MARK: Normalization fingerprint
+// ============================================================================
+
+export interface NormalizedInputFingerprint {
+  readonly eventId: ChatEventId;
+  readonly roomId: ChatRoomId;
+  readonly sessionId: ChatSessionId;
+  readonly userId: ChatUserId;
+  readonly kind: ChatEventKind;
+  readonly normalizedAt: UnixMs;
+  readonly hash: string;
+}
+
+export function computeNormalizedInputFingerprint(
+  input: ChatNormalizedInput,
+  now: UnixMs,
+): NormalizedInputFingerprint {
+  const hash = [
+    input.eventId,
+    input.roomId,
+    input.sessionId,
+    input.userId,
+    input.kind,
+    now,
+  ].join('|');
+
+  return Object.freeze({
+    eventId: input.eventId,
+    roomId: input.roomId,
+    sessionId: input.sessionId,
+    userId: input.userId,
+    kind: input.kind,
+    normalizedAt: now,
+    hash,
+  });
+}
+
+// ============================================================================
+// MARK: Event kind statistics counter
+// ============================================================================
+
+export class EventKindCounter {
+  private readonly counts = new Map<ChatEventKind, number>();
+
+  record(kind: ChatEventKind): void {
+    this.counts.set(kind, (this.counts.get(kind) ?? 0) + 1);
+  }
+
+  count(kind: ChatEventKind): number {
+    return this.counts.get(kind) ?? 0;
+  }
+
+  total(): number {
+    let sum = 0;
+    for (const n of this.counts.values()) sum += n;
+    return sum;
+  }
+
+  mostFrequent(): ChatEventKind | null {
+    let max = 0;
+    let best: ChatEventKind | null = null;
+    for (const [kind, n] of this.counts) {
+      if (n > max) { max = n; best = kind; }
+    }
+    return best;
+  }
+
+  distribution(): Readonly<Record<string, number>> {
+    const result: Record<string, number> = {};
+    for (const [kind, n] of this.counts) result[kind] = n;
+    return Object.freeze(result);
+  }
+
+  reset(): void { this.counts.clear(); }
+}
+
+// ============================================================================
+// MARK: Room event summary
+// ============================================================================
+
+export interface RoomEventSummary {
+  readonly roomId: ChatRoomId;
+  readonly totalEvents: number;
+  readonly uniqueKinds: readonly ChatEventKind[];
+  readonly dominantKind: ChatEventKind | null;
+  readonly computedAt: UnixMs;
+}
+
+export function buildRoomEventSummary(
+  roomId: ChatRoomId,
+  events: readonly ChatNormalizedEvent[],
+  now: UnixMs,
+): RoomEventSummary {
+  const counter = new EventKindCounter();
+  for (const evt of events) counter.record(evt.kind);
+
+  const kindsSet = new Set(events.map((e) => e.kind));
+
+  return Object.freeze({
+    roomId,
+    totalEvents: events.length,
+    uniqueKinds: Object.freeze(Array.from(kindsSet)),
+    dominantKind: counter.mostFrequent(),
+    computedAt: now,
+  });
+}
+
+// ============================================================================
+// MARK: Batch normalization report
+// ============================================================================
+
+export interface BatchNormalizationReport {
+  readonly roomId: ChatRoomId;
+  readonly normalizedCount: number;
+  readonly skippedCount: number;
+  readonly dedupeHits: number;
+  readonly normalizedAt: UnixMs;
+  readonly eventIds: readonly ChatEventId[];
+}
+
+export function buildBatchNormalizationReport(
+  roomId: ChatRoomId,
+  normalized: readonly ChatNormalizedInput[],
+  skipped: number,
+  dedupeHits: number,
+  now: UnixMs,
+): BatchNormalizationReport {
+  return Object.freeze({
+    roomId,
+    normalizedCount: normalized.length,
+    skippedCount: skipped,
+    dedupeHits,
+    normalizedAt: now,
+    eventIds: Object.freeze(normalized.map((n) => n.eventId)),
+  });
+}
+
+// ============================================================================
+// MARK: Signal envelope validator
+// ============================================================================
+
+export interface SignalEnvelopeValidationResult {
+  readonly valid: boolean;
+  readonly violations: readonly string[];
+  readonly signalType: ChatSignalType;
+}
+
+export function validateSignalEnvelope(
+  signal: ChatSignalEnvelope,
+): SignalEnvelopeValidationResult {
+  const violations: string[] = [];
+
+  if (!signal.type) violations.push('signal.type is required');
+  if (!signal.emittedAt) violations.push('signal.emittedAt is required');
+  if (!signal.roomId) violations.push('signal.roomId is required');
+
+  if (signal.battle && !signal.battle.activeAttackType) {
+    // battle signals should have context — warn but don't block
+  }
+
+  return Object.freeze({
+    valid: violations.length === 0,
+    violations: Object.freeze(violations),
+    signalType: signal.type,
+  });
+}
+
+// ============================================================================
+// MARK: Input envelope normalizer helpers
+// ============================================================================
+
+export function extractRoomIdFromEnvelope(envelope: ChatInputEnvelope): ChatRoomId | null {
+  if (envelope.kind === 'PLAYER_MESSAGE_SUBMIT') return envelope.payload.roomId;
+  if (envelope.kind === 'TYPING_UPDATED') return envelope.payload.roomId;
+  if (envelope.kind === 'PRESENCE_UPDATED') return envelope.payload.roomId;
+  if (envelope.kind === 'SESSION_JOIN_REQUEST') return envelope.payload.roomId;
+  return null;
+}
+
+export function extractSessionIdFromEnvelope(envelope: ChatInputEnvelope): ChatSessionId | null {
+  if (envelope.kind === 'PLAYER_MESSAGE_SUBMIT') return envelope.payload.sessionId;
+  if (envelope.kind === 'TYPING_UPDATED') return envelope.payload.sessionId;
+  if (envelope.kind === 'PRESENCE_UPDATED') return envelope.payload.sessionId;
+  if (envelope.kind === 'SESSION_JOIN_REQUEST') return envelope.payload.session.sessionId;
+  return null;
+}
+
+export function getEnvelopeKindLabel(envelope: ChatInputEnvelope): string {
+  switch (envelope.kind) {
+    case 'PLAYER_MESSAGE_SUBMIT': return 'player-message';
+    case 'TYPING_UPDATED': return 'typing';
+    case 'PRESENCE_UPDATED': return 'presence';
+    case 'SESSION_JOIN_REQUEST': return 'join';
+    default: return 'unknown';
+  }
+}
+
+// ============================================================================
+// MARK: Signal kind classifier
+// ============================================================================
+
+export type SignalKindClass =
+  | 'BATTLE'
+  | 'RUN'
+  | 'MULTIPLAYER'
+  | 'ECONOMY'
+  | 'LIVEOPS'
+  | 'META'
+  | 'UNKNOWN';
+
+export function classifySignalKind(signal: ChatSignalEnvelope): SignalKindClass {
+  if (signal.battle) return 'BATTLE';
+  if (signal.run) return 'RUN';
+  if (signal.multiplayer) return 'MULTIPLAYER';
+  if (signal.economy) return 'ECONOMY';
+  if (signal.liveops) return 'LIVEOPS';
+  if (signal.metadata) return 'META';
+  return 'UNKNOWN';
+}
+
+// ============================================================================
+// MARK: Normalization epoch tracker
+// ============================================================================
+
+export interface NormalizationEpoch {
+  readonly epochId: string;
+  readonly roomId: ChatRoomId;
+  readonly normalizedAt: UnixMs;
+  readonly eventCount: number;
+  readonly dominantKind: ChatEventKind | null;
+}
+
+export class NormalizationEpochTracker {
+  private readonly epochs = new Map<ChatRoomId, NormalizationEpoch[]>();
+
+  record(roomId: ChatRoomId, events: readonly ChatNormalizedEvent[], now: UnixMs): void {
+    if (!this.epochs.has(roomId)) this.epochs.set(roomId, []);
+    const counter = new EventKindCounter();
+    for (const e of events) counter.record(e.kind);
+    this.epochs.get(roomId)!.push(Object.freeze({
+      epochId: `epoch:${roomId}:${now}`,
+      roomId,
+      normalizedAt: now,
+      eventCount: events.length,
+      dominantKind: counter.mostFrequent(),
+    }));
+  }
+
+  getEpochs(roomId: ChatRoomId): readonly NormalizationEpoch[] {
+    return this.epochs.get(roomId) ?? [];
+  }
+
+  latestEpoch(roomId: ChatRoomId): NormalizationEpoch | null {
+    const list = this.epochs.get(roomId);
+    return list && list.length > 0 ? list[list.length - 1]! : null;
+  }
+
+  totalEventCount(roomId: ChatRoomId): number {
+    return (this.epochs.get(roomId) ?? []).reduce((sum, e) => sum + e.eventCount, 0);
+  }
+
+  allRooms(): readonly ChatRoomId[] { return Array.from(this.epochs.keys()); }
+  purgeRoom(roomId: ChatRoomId): void { this.epochs.delete(roomId); }
+}
+
+// ============================================================================
+// MARK: Module runtime config helpers
+// ============================================================================
+
+export function buildBridgeRuntimeConfig(
+  options?: ChatRuntimeConfigOptions,
+): ReturnType<typeof mergeRuntimeConfig> {
+  return mergeRuntimeConfig(undefined, options);
+}
+
+export function isBridgeRoomAllowed(
+  roomKind: ChatRoomKind,
+  options?: ChatRuntimeConfigOptions,
+): boolean {
+  const runtime = mergeRuntimeConfig(undefined, options);
+  return runtimeAllowsRoomKind(runtime, roomKind);
+}
+
+export function isBridgeChannelAllowed(
+  channelId: ChatVisibleChannel,
+  options?: ChatRuntimeConfigOptions,
+): boolean {
+  const runtime = mergeRuntimeConfig(undefined, options);
+  return runtimeAllowsVisibleChannel(runtime, channelId);
+}
+
+// ============================================================================
+// MARK: Stage mood signal mapper
+// ============================================================================
+
+export interface StageMoodSignalMapping {
+  readonly mood: ChatRoomStageMood;
+  readonly recommendedSignalType: ChatSignalType;
+  readonly urgency01: number;
+}
+
+export const STAGE_MOOD_SIGNAL_MAP: Readonly<Record<ChatRoomStageMood, StageMoodSignalMapping>> =
+  Object.freeze({
+    CALM: Object.freeze({ mood: 'CALM', recommendedSignalType: 'LIVEOPS', urgency01: 0.1 }),
+    TENSE: Object.freeze({ mood: 'TENSE', recommendedSignalType: 'BATTLE', urgency01: 0.55 }),
+    HOSTILE: Object.freeze({ mood: 'HOSTILE', recommendedSignalType: 'BATTLE', urgency01: 0.72 }),
+    PREDATORY: Object.freeze({ mood: 'PREDATORY', recommendedSignalType: 'BATTLE', urgency01: 0.85 }),
+    CEREMONIAL: Object.freeze({ mood: 'CEREMONIAL', recommendedSignalType: 'RUN', urgency01: 0.3 }),
+    MOURNFUL: Object.freeze({ mood: 'MOURNFUL', recommendedSignalType: 'RUN', urgency01: 0.2 }),
+    ECSTATIC: Object.freeze({ mood: 'ECSTATIC', recommendedSignalType: 'LIVEOPS', urgency01: 0.4 }),
+  } as const);
+
+export function getSignalMappingForMood(mood: ChatRoomStageMood): StageMoodSignalMapping {
+  return STAGE_MOOD_SIGNAL_MAP[mood];
+}
+
+// ============================================================================
+// MARK: Event bridge module constants
+// ============================================================================
+
+export const CHAT_EVENT_BRIDGE_MODULE_NAME = 'ChatEventBridge' as const;
+export const CHAT_EVENT_BRIDGE_MODULE_VERSION = '2026.03.14.2' as const;
+
+export const CHAT_EVENT_BRIDGE_MODULE_LAWS = Object.freeze([
+  'Translation is deterministic and replayable.',
+  'Translation is not moderation, rate control, or mutation.',
+  'All room/session/user coordinates are resolved before downstream gates.',
+  'Dedupe windows are time-bounded and never expand to full session scope.',
+  'Signal canonicalization preserves upstream sovereignty.',
+  'Room kind and channel checks use runtime config — not hardcoded values.',
+]);
+
+export const CHAT_EVENT_BRIDGE_MODULE_DESCRIPTOR = Object.freeze({
+  name: CHAT_EVENT_BRIDGE_MODULE_NAME,
+  version: CHAT_EVENT_BRIDGE_MODULE_VERSION,
+  laws: CHAT_EVENT_BRIDGE_MODULE_LAWS,
+});
+
+export function createEventBridgeWatchBus(): EventBridgeWatchBus {
+  return new EventBridgeWatchBus();
+}
+
+export function createNormalizationEpochTracker(): NormalizationEpochTracker {
+  return new NormalizationEpochTracker();
+}
+
+export function createEventKindCounter(): EventKindCounter {
+  return new EventKindCounter();
+}
+
+// ============================================================================
+// MARK: Channel descriptor access helpers
+// ============================================================================
+
+export function isSupportedBridgeChannel(channelId: ChatVisibleChannel): boolean {
+  return isVisibleChannelId(channelId) && channelId in CHAT_CHANNEL_DESCRIPTORS;
+}
+
+export function getBridgeChannelPresenceSupport(channelId: ChatVisibleChannel): boolean {
+  const desc = CHAT_CHANNEL_DESCRIPTORS[channelId as import('./types').ChatChannelId];
+  return desc?.supportsPresence ?? false;
+}
+
+export function getBridgeChannelTypingSupport(channelId: ChatVisibleChannel): boolean {
+  const desc = CHAT_CHANNEL_DESCRIPTORS[channelId as import('./types').ChatChannelId];
+  return desc?.supportsTyping ?? false;
+}
+
+export function getRoomKindOverride(
+  roomKind: ChatRoomKind,
+  options?: ChatRuntimeConfigOptions,
+): ReturnType<typeof createRoomKindOverride> {
+  void options;
+  return createRoomKindOverride(roomKind);
+}
+
+// ============================================================================
+// MARK: Bridge heat snapshot adapter
+// ============================================================================
+
+export interface BridgeHeatSnapshot {
+  readonly roomId: ChatRoomId;
+  readonly pressureTier: PressureTier;
+  readonly tickTier: TickTier;
+  readonly runOutcome: RunOutcome | null;
+  readonly computedAt: UnixMs;
+}
+
+export function buildBridgeHeatSnapshot(
+  roomId: ChatRoomId,
+  battle: ChatBattleSnapshot | null,
+  run: ChatRunSnapshot | null,
+  now: UnixMs,
+): BridgeHeatSnapshot {
+  return Object.freeze({
+    roomId,
+    pressureTier: battle?.pressureTier ?? 'NONE',
+    tickTier: run?.tickTier ?? 'SETUP',
+    runOutcome: run?.outcome ?? null,
+    computedAt: now,
+  });
+}
+
+// ============================================================================
+// MARK: Economy snapshot adapter
+// ============================================================================
+
+export interface BridgeEconomySnapshot {
+  readonly roomId: ChatRoomId;
+  readonly botId: BotId | null;
+  readonly attackType: AttackType | null;
+  readonly liveopsEventId: string | null;
+  readonly multiplayerSessionId: string | null;
+  readonly computedAt: UnixMs;
+}
+
+export function buildBridgeEconomySnapshot(
+  roomId: ChatRoomId,
+  economy: ChatEconomySnapshot | null,
+  liveops: ChatLiveOpsSnapshot | null,
+  multiplayer: ChatMultiplayerSnapshot | null,
+  bot: BotId | null,
+  attackType: AttackType | null,
+  now: UnixMs,
+): BridgeEconomySnapshot {
+  void economy; void liveops; void multiplayer;
+  return Object.freeze({
+    roomId,
+    botId: bot,
+    attackType,
+    liveopsEventId: liveops?.worldEventName ?? null,
+    multiplayerSessionId: multiplayer ? `party:${multiplayer.partySize}` : null,
+    computedAt: now,
+  });
+}
+
+// ============================================================================
+// MARK: Presence mode classifier
+// ============================================================================
+
+export function classifyPresenceMode(mode: ChatPresenceMode): 'ACTIVE' | 'PASSIVE' | 'INVISIBLE' {
+  switch (mode) {
+    case 'ONLINE': return 'ACTIVE';
+    case 'AWAY': return 'PASSIVE';
+    case 'HIDDEN': return 'INVISIBLE';
+    case 'SPECTATING': return 'PASSIVE';
+    case 'DISCONNECTED': return 'PASSIVE';
+    case 'RECONNECTING': return 'PASSIVE';
+    default: return 'PASSIVE';
+  }
+}
+
+export function isActivePresenceMode(mode: ChatPresenceMode): boolean {
+  return classifyPresenceMode(mode) === 'ACTIVE';
+}
+
+export function clampPresenceScore(score: number): number {
+  return clamp01(clamp100(score) / 100);
+}
+
+// ============================================================================
+// MARK: Extended module namespace
+// ============================================================================
+
+export const ChatEventBridgeModuleExtended = Object.freeze({
+  // Watch bus
+  createEventBridgeWatchBus,
+
+  // Epoch tracker
+  createNormalizationEpochTracker,
+
+  // Event kind counter
+  createEventKindCounter,
+
+  // Fingerprint
+  computeNormalizedInputFingerprint,
+
+  // Room summary
+  buildRoomEventSummary,
+
+  // Batch report
+  buildBatchNormalizationReport,
+
+  // Signal validation
+  validateSignalEnvelope,
+
+  // Envelope helpers
+  extractRoomIdFromEnvelope,
+  extractSessionIdFromEnvelope,
+  getEnvelopeKindLabel,
+
+  // Signal classifier
+  classifySignalKind,
+
+  // Runtime helpers
+  buildBridgeRuntimeConfig,
+  isBridgeRoomAllowed,
+  isBridgeChannelAllowed,
+  getRoomKindOverride,
+
+  // Stage mood map
+  STAGE_MOOD_SIGNAL_MAP,
+  getSignalMappingForMood,
+
+  // Heat snapshot
+  buildBridgeHeatSnapshot,
+
+  // Economy snapshot
+  buildBridgeEconomySnapshot,
+
+  // Presence mode
+  classifyPresenceMode,
+  isActivePresenceMode,
+  clampPresenceScore,
+
+  // Channel descriptor helpers
+  isSupportedBridgeChannel,
+  getBridgeChannelPresenceSupport,
+  getBridgeChannelTypingSupport,
+
+  // Module descriptor
+  CHAT_EVENT_BRIDGE_MODULE_DESCRIPTOR,
+  CHAT_EVENT_BRIDGE_MODULE_LAWS,
+  CHAT_EVENT_BRIDGE_MODULE_NAME,
+  CHAT_EVENT_BRIDGE_MODULE_VERSION,
+
+  // Defaults
+  createDefaultLogger,
+  createDefaultIdFactory,
+} as const);
+
+// ============================================================================
+// MARK: Typing update classifier
+// ============================================================================
+
+export interface TypingUpdateClassification {
+  readonly mode: ChatTypingMode;
+  readonly isStarting: boolean;
+  readonly isStopping: boolean;
+  readonly isComposing: boolean;
+}
+
+export function classifyTypingUpdate(
+  request: ChatTypingUpdateRequest,
+): TypingUpdateClassification {
+  return Object.freeze({
+    mode: request.mode,
+    isStarting: request.mode === 'TYPING',
+    isStopping: request.mode === 'IDLE',
+    isComposing: request.mode === 'TYPING' || request.mode === 'PAUSED',
+  });
+}
+
+// ============================================================================
+// MARK: Join request validator
+// ============================================================================
+
+export interface JoinRequestValidation {
+  readonly valid: boolean;
+  readonly roomId: ChatRoomId;
+  readonly sessionId: ChatSessionId;
+  readonly userId: ChatUserId;
+  readonly violations: readonly string[];
+}
+
+export function validateJoinRequest(
+  request: ChatJoinRequest,
+): JoinRequestValidation {
+  const violations: string[] = [];
+  if (!request.roomId) violations.push('roomId_required');
+  if (!request.session?.sessionId) violations.push('sessionId_required');
+  if (!request.session?.userId) violations.push('userId_required');
+
+  return Object.freeze({
+    valid: violations.length === 0,
+    roomId: request.roomId,
+    sessionId: request.session.sessionId,
+    userId: request.session.userId,
+    violations: Object.freeze(violations),
+  });
+}
+
+// ============================================================================
+// MARK: Presence update classifier
+// ============================================================================
+
+export function isSignificantPresenceChange(
+  from: ChatPresenceMode,
+  to: ChatPresenceMode,
+): boolean {
+  const fromClass = classifyPresenceMode(from);
+  const toClass = classifyPresenceMode(to);
+  return fromClass !== toClass;
+}
+
+export function presenceModeTransitionLabel(from: ChatPresenceMode, to: ChatPresenceMode): string {
+  return `${from}_to_${to}`;
+}
+
+// ============================================================================
+// MARK: Module descriptor full export
+// ============================================================================
+
+export const CHAT_EVENT_BRIDGE_FULL_MODULE = Object.freeze({
+  name: CHAT_EVENT_BRIDGE_MODULE_NAME,
+  version: CHAT_EVENT_BRIDGE_MODULE_VERSION,
+  laws: CHAT_EVENT_BRIDGE_MODULE_LAWS,
+  exports: [
+    'ChatEventBridge',
+    'EventBridgeWatchBus',
+    'EventKindCounter',
+    'NormalizationEpochTracker',
+    'buildRoomEventSummary',
+    'buildBatchNormalizationReport',
+    'validateSignalEnvelope',
+    'classifySignalKind',
+    'buildBridgeHeatSnapshot',
+    'buildBridgeEconomySnapshot',
+  ],
+});

@@ -873,6 +873,23 @@ export class TurningPointResolver {
     this.byRoom.clear();
   }
 
+  /** Return a frozen snapshot of all resolved rooms. */
+  public snapshot(): TurningPointResolverSnapshot {
+    const byRoom: Record<ChatRoomId, TurningPointResolution> = {};
+    for (const [roomId, resolution] of this.byRoom) {
+      byRoom[roomId] = resolution;
+    }
+    return Object.freeze({
+      updatedAt: nowMs(),
+      byRoom: Object.freeze(byRoom),
+    });
+  }
+
+  /** Import a previously resolved resolution directly into the internal map. */
+  public importResolution(roomId: ChatRoomId, resolution: TurningPointResolution): void {
+    this.byRoom.set(roomId, resolution);
+  }
+
   public getDiagnostics(roomId: ChatRoomId): TurningPointResolutionDiagnostics | null {
     const resolution = this.byRoom.get(roomId);
     if (!resolution) return null;
@@ -1191,4 +1208,822 @@ export const ChatTurningPointResolverModule = Object.freeze({
 
   // Weight profile constants
   TURNING_POINT_WEIGHT_PROFILES,
+} as const);
+
+// ============================================================================
+// MARK: Resolution watch bus
+// ============================================================================
+
+export type TurningPointWatchEvent =
+  | { kind: 'RESOLVED'; roomId: ChatRoomId; resolution: TurningPointResolution }
+  | { kind: 'CLEARED'; roomId: ChatRoomId }
+  | { kind: 'DIFF'; roomId: ChatRoomId; diff: TurningPointResolutionDiff };
+
+export type TurningPointWatchCallback = (event: TurningPointWatchEvent) => void;
+
+export class TurningPointWatchBus {
+  private readonly subscribers = new Set<TurningPointWatchCallback>();
+
+  subscribe(cb: TurningPointWatchCallback): () => void {
+    this.subscribers.add(cb);
+    return () => this.subscribers.delete(cb);
+  }
+
+  emit(event: TurningPointWatchEvent): void {
+    for (const cb of this.subscribers) {
+      try { cb(event); } catch { /* isolate subscriber errors */ }
+    }
+  }
+
+  emitResolved(roomId: ChatRoomId, resolution: TurningPointResolution): void {
+    this.emit({ kind: 'RESOLVED', roomId, resolution });
+  }
+
+  emitCleared(roomId: ChatRoomId): void {
+    this.emit({ kind: 'CLEARED', roomId });
+  }
+
+  emitDiff(roomId: ChatRoomId, diff: TurningPointResolutionDiff): void {
+    this.emit({ kind: 'DIFF', roomId, diff });
+  }
+
+  size(): number {
+    return this.subscribers.size;
+  }
+}
+
+// ============================================================================
+// MARK: Resolution diff builder
+// ============================================================================
+
+export function buildTurningPointResolutionDiff(
+  roomId: ChatRoomId,
+  before: TurningPointResolution | null,
+  after: TurningPointResolution,
+  now: UnixMs,
+): TurningPointResolutionDiff {
+  const beforeKind = before?.primary?.kind ?? null;
+  const afterKind = after.primary?.kind ?? null;
+
+  const beforeScore = before?.ranked[0]?.finalScore01 ?? 0;
+  const afterScore = after.ranked[0]?.finalScore01 ?? 0;
+
+  const beforeKinds = new Set((before?.candidates ?? []).map((c) => c.kind));
+  const afterKinds = new Set(after.candidates.map((c) => c.kind));
+
+  const added: ChatTurningPointKind[] = [];
+  for (const k of afterKinds) if (!beforeKinds.has(k)) added.push(k);
+
+  const removed: ChatTurningPointKind[] = [];
+  for (const k of beforeKinds) if (!afterKinds.has(k)) removed.push(k);
+
+  return Object.freeze({
+    roomId,
+    computedAt: now,
+    primaryChanged: beforeKind !== afterKind,
+    primaryKindBefore: beforeKind,
+    primaryKindAfter: afterKind,
+    primaryScoreDelta: afterScore - beforeScore,
+    candidateCountDelta: after.candidates.length - (before?.candidates.length ?? 0),
+    addedCandidateKinds: Object.freeze(added),
+    removedCandidateKinds: Object.freeze(removed),
+  });
+}
+
+// ============================================================================
+// MARK: Resolution fingerprint
+// ============================================================================
+
+export interface TurningPointResolutionFingerprint {
+  readonly roomId: ChatRoomId;
+  readonly primaryKind: ChatTurningPointKind | null;
+  readonly primaryScore01: number;
+  readonly candidateCount: number;
+  readonly weightProfile: TurningPointResolverWeightProfile | 'CUSTOM';
+  readonly fallbackUsed: boolean;
+  readonly legendLiftPresent: boolean;
+  readonly replayLinked: boolean;
+  readonly hash: string;
+}
+
+export function computeResolutionFingerprint(
+  resolution: TurningPointResolution,
+): TurningPointResolutionFingerprint {
+  const primaryKind = resolution.primary?.kind ?? null;
+  const primaryScore = resolution.ranked[0]?.finalScore01 ?? 0;
+  const legendLiftPresent = resolution.candidates.some(
+    (c) => (c.legendLift01 as unknown as number) >= 0.5,
+  );
+  const replayLinked = resolution.candidates.some(
+    (c) => !!c.sourceSceneId,
+  );
+  const hash = [
+    resolution.roomId,
+    primaryKind ?? 'NULL',
+    primaryScore.toFixed(4),
+    resolution.candidates.length,
+    resolution.reasoning.weightProfile,
+  ].join('|');
+
+  return Object.freeze({
+    roomId: resolution.roomId,
+    primaryKind,
+    primaryScore01: primaryScore,
+    candidateCount: resolution.candidates.length,
+    weightProfile: resolution.reasoning.weightProfile,
+    fallbackUsed: resolution.reasoning.fallbackUsed,
+    legendLiftPresent,
+    replayLinked,
+    hash,
+  });
+}
+
+// ============================================================================
+// MARK: Aggregate stats builder
+// ============================================================================
+
+export function buildTurningPointResolverStatsSummary(
+  snapshot: TurningPointResolverSnapshot,
+): TurningPointResolverStatsSummary {
+  const rooms = Object.values(snapshot.byRoom);
+  let totalCandidates = 0;
+  let fallbackUsed = 0;
+  let sovereigntySpikes = 0;
+  let bankruptcyLocks = 0;
+  let rescueMisses = 0;
+  let rescueAccepts = 0;
+  let crowdSwarms = 0;
+  let emotionalTilts = 0;
+  let totalPrimaryScore = 0;
+  let primaryCount = 0;
+
+  for (const resolution of rooms) {
+    totalCandidates += resolution.candidates.length;
+    if (resolution.reasoning.fallbackUsed) fallbackUsed++;
+
+    if (resolution.primary) {
+      primaryCount++;
+      totalPrimaryScore += resolution.ranked[0]?.finalScore01 ?? 0;
+      const k = resolution.primary.kind;
+      if (k === 'SOVEREIGNTY_SPIKE') sovereigntySpikes++;
+      if (k === 'BANKRUPTCY_LOCK') bankruptcyLocks++;
+      if (k === 'RESCUE_MISS') rescueMisses++;
+      if (k === 'RESCUE_ACCEPT') rescueAccepts++;
+      if (k === 'CROWD_SWARM') crowdSwarms++;
+      if (k === 'EMOTIONAL_TILT') emotionalTilts++;
+    }
+  }
+
+  const roomCount = rooms.length || 1;
+  return Object.freeze({
+    roomCount: rooms.length,
+    totalCandidatesEvaluated: totalCandidates,
+    fallbackUsedCount: fallbackUsed,
+    sovereigntySpikes,
+    bankruptcyLocks,
+    rescueMisses,
+    rescueAccepts,
+    crowdSwarms,
+    emotionalTilts,
+    averageCandidatesPerRoom: totalCandidates / roomCount,
+    averagePrimaryScore: primaryCount > 0 ? totalPrimaryScore / primaryCount : 0,
+  });
+}
+
+// ============================================================================
+// MARK: Serialization / hydration
+// ============================================================================
+
+export function serializeTurningPointResolverState(
+  resolver: TurningPointResolver,
+): TurningPointResolverSerializedState {
+  const snapshot = resolver.snapshot();
+  return Object.freeze({
+    version: '2026-03-22.1',
+    byRoom: snapshot.byRoom,
+    serializedAt: nowMs(),
+    roomCount: Object.keys(snapshot.byRoom).length,
+  });
+}
+
+export function hydrateTurningPointResolver(
+  serialized: TurningPointResolverSerializedState,
+  options?: TurningPointResolverOptions,
+): TurningPointResolver {
+  const resolver = createTurningPointResolver(options);
+  for (const [roomId, resolution] of Object.entries(serialized.byRoom)) {
+    resolver.importResolution(roomId as ChatRoomId, resolution);
+  }
+  return resolver;
+}
+
+// ============================================================================
+// MARK: Multi-room resolution runner
+// ============================================================================
+
+export interface MultiRoomResolutionResult {
+  readonly resolvedRooms: readonly ChatRoomId[];
+  readonly skippedRooms: readonly ChatRoomId[];
+  readonly totalCandidatesEvaluated: number;
+  readonly byRoom: Readonly<Record<ChatRoomId, TurningPointResolution>>;
+  readonly computedAt: UnixMs;
+}
+
+export function runMultiRoomTurningPointResolution(
+  resolver: TurningPointResolver,
+  contexts: readonly TurningPointResolverContext[],
+): MultiRoomResolutionResult {
+  const now = nowMs();
+  const resolvedRooms: ChatRoomId[] = [];
+  const skippedRooms: ChatRoomId[] = [];
+  const byRoom: Record<ChatRoomId, TurningPointResolution> = {};
+  let totalCandidates = 0;
+
+  for (const ctx of contexts) {
+    try {
+      const resolution = resolver.resolve(ctx);
+      byRoom[ctx.roomId] = resolution;
+      resolvedRooms.push(ctx.roomId);
+      totalCandidates += resolution.candidates.length;
+    } catch {
+      skippedRooms.push(ctx.roomId);
+    }
+  }
+
+  return Object.freeze({
+    resolvedRooms: Object.freeze(resolvedRooms),
+    skippedRooms: Object.freeze(skippedRooms),
+    totalCandidatesEvaluated: totalCandidates,
+    byRoom: Object.freeze(byRoom),
+    computedAt: now,
+  });
+}
+
+// ============================================================================
+// MARK: Candidate ranking comparator helpers
+// ============================================================================
+
+/** Compare two resolution candidates by final score (descending). */
+export function compareCandidatesByScore(
+  a: TurningPointResolutionCandidate,
+  b: TurningPointResolutionCandidate,
+): number {
+  return b.finalScore01 - a.finalScore01;
+}
+
+/** Compare two resolution candidates by kind alphabet (ascending). */
+export function compareCandidatesByKind(
+  a: TurningPointResolutionCandidate,
+  b: TurningPointResolutionCandidate,
+): number {
+  return a.candidate.kind.localeCompare(b.candidate.kind);
+}
+
+/** Sort candidates: primary by descending score, secondary by kind. */
+export function sortResolutionCandidates(
+  candidates: readonly TurningPointResolutionCandidate[],
+): TurningPointResolutionCandidate[] {
+  return [...candidates].sort((a, b) => {
+    const delta = compareCandidatesByScore(a, b);
+    if (delta !== 0) return delta;
+    return compareCandidatesByKind(a, b);
+  });
+}
+
+// ============================================================================
+// MARK: Kind categorisation helpers
+// ============================================================================
+
+const NEGATIVE_TURNING_POINT_KINDS = new Set<ChatTurningPointKind>([
+  'SHIELD_BREAK',
+  'BANKRUPTCY_LOCK',
+  'COUNTERPLAY_MISS',
+  'RESCUE_MISS',
+  'DEAL_ROOM_FOLD',
+  'EMOTIONAL_TILT',
+]);
+
+const POSITIVE_TURNING_POINT_KINDS = new Set<ChatTurningPointKind>([
+  'RESCUE_ACCEPT',
+  'MIRACLE_SAVE',
+  'SOVEREIGNTY_SPIKE',
+  'LEGEND_REVERSAL',
+]);
+
+const NEUTRAL_TURNING_POINT_KINDS = new Set<ChatTurningPointKind>([
+  'CROWD_SWARM',
+  'WORLD_EVENT_IMPACT',
+  'CUSTOM',
+]);
+
+export function turningPointKindValence(kind: ChatTurningPointKind): 'POSITIVE' | 'NEGATIVE' | 'NEUTRAL' {
+  if (POSITIVE_TURNING_POINT_KINDS.has(kind)) return 'POSITIVE';
+  if (NEGATIVE_TURNING_POINT_KINDS.has(kind)) return 'NEGATIVE';
+  if (NEUTRAL_TURNING_POINT_KINDS.has(kind)) return 'NEUTRAL';
+  return 'NEUTRAL';
+}
+
+export function filterCandidatesByValence(
+  candidates: readonly TurningPointResolutionCandidate[],
+  valence: 'POSITIVE' | 'NEGATIVE' | 'NEUTRAL',
+): TurningPointResolutionCandidate[] {
+  return candidates.filter(
+    (c) => turningPointKindValence(c.candidate.kind) === valence,
+  );
+}
+
+// ============================================================================
+// MARK: Candidate explanation builder
+// ============================================================================
+
+export interface CandidateExplanationReport {
+  readonly turningPointId: string;
+  readonly kind: ChatTurningPointKind;
+  readonly valence: 'POSITIVE' | 'NEGATIVE' | 'NEUTRAL';
+  readonly finalScore01: number;
+  readonly top3Reasons: readonly string[];
+  readonly visibility: string;
+  readonly legendLift01: number;
+  readonly rescueDebt01: number;
+  readonly sourceNpcId: ChatNpcId | null;
+}
+
+export function buildCandidateExplanationReport(
+  candidate: TurningPointResolutionCandidate,
+): CandidateExplanationReport {
+  return Object.freeze({
+    turningPointId: String(candidate.candidate.turningPointId),
+    kind: candidate.candidate.kind,
+    valence: turningPointKindValence(candidate.candidate.kind),
+    finalScore01: candidate.finalScore01,
+    top3Reasons: Object.freeze(candidate.reasons.slice(0, 3)),
+    visibility: candidate.candidate.visibility ?? 'UNKNOWN',
+    legendLift01: candidate.candidate.legendLift01 as unknown as number,
+    rescueDebt01: candidate.candidate.rescueDebt01 as unknown as number,
+    sourceNpcId: candidate.candidate.sourceNpcId ?? null,
+  });
+}
+
+// ============================================================================
+// MARK: Resolution quality grader
+// ============================================================================
+
+export type TurningPointResolutionGrade = 'S' | 'A' | 'B' | 'C' | 'D' | 'F';
+
+export interface TurningPointResolutionQualityReport {
+  readonly roomId: ChatRoomId;
+  readonly grade: TurningPointResolutionGrade;
+  readonly score01: number;
+  readonly reasons: readonly string[];
+}
+
+export function gradeResolutionQuality(
+  resolution: TurningPointResolution,
+): TurningPointResolutionQualityReport {
+  const reasons: string[] = [];
+  let score = 0;
+
+  if (resolution.primary !== null) {
+    score += 0.3;
+    reasons.push('primary_present');
+  } else {
+    reasons.push('no_primary_resolved');
+  }
+
+  if (resolution.reasoning.fallbackUsed) {
+    score -= 0.1;
+    reasons.push('fallback_used');
+  }
+
+  const topScore = resolution.ranked[0]?.finalScore01 ?? 0;
+  score += topScore * 0.4;
+
+  if (resolution.candidates.length >= 3) {
+    score += 0.15;
+    reasons.push('multiple_candidates');
+  }
+
+  if (resolution.candidates.some((c) => (c.legendLift01 as unknown as number) >= 0.5)) {
+    score += 0.1;
+    reasons.push('legend_lift_present');
+  }
+
+  if (resolution.ranked[0]?.reasons.includes('related_message') || resolution.candidates.some((c) => !!c.sourceSceneId)) {
+    score += 0.05;
+    reasons.push('replay_linked');
+  }
+
+  score = Math.max(0, Math.min(1, score));
+
+  let grade: TurningPointResolutionGrade;
+  if (score >= 0.9) grade = 'S';
+  else if (score >= 0.75) grade = 'A';
+  else if (score >= 0.6) grade = 'B';
+  else if (score >= 0.45) grade = 'C';
+  else if (score >= 0.3) grade = 'D';
+  else grade = 'F';
+
+  return Object.freeze({
+    roomId: resolution.roomId,
+    grade,
+    score01: score,
+    reasons: Object.freeze(reasons),
+  });
+}
+
+// ============================================================================
+// MARK: Room coherence validator
+// ============================================================================
+
+export interface TurningPointCoherenceViolation {
+  readonly roomId: ChatRoomId;
+  readonly code: string;
+  readonly message: string;
+}
+
+export function validateResolutionCoherence(
+  resolution: TurningPointResolution,
+): readonly TurningPointCoherenceViolation[] {
+  const violations: TurningPointCoherenceViolation[] = [];
+  const { roomId } = resolution;
+
+  if (resolution.candidates.length === 0 && !resolution.reasoning.fallbackUsed) {
+    violations.push({ roomId, code: 'NO_CANDIDATES_NO_FALLBACK', message: 'Zero candidates but fallback was not used.' });
+  }
+
+  if (resolution.primary === null && resolution.candidates.length > 0) {
+    violations.push({ roomId, code: 'PRIMARY_MISSING_WITH_CANDIDATES', message: 'Candidates exist but no primary was selected.' });
+  }
+
+  if (resolution.ranked.length > 0 && resolution.primary !== null) {
+    const topRanked = resolution.ranked[0]!;
+    if (topRanked.candidate.kind !== resolution.primary.kind) {
+      violations.push({ roomId, code: 'PRIMARY_KIND_MISMATCH', message: 'Primary kind does not match top-ranked candidate kind.' });
+    }
+  }
+
+  return Object.freeze(violations);
+}
+
+// ============================================================================
+// MARK: Resolution epoch tracker
+// ============================================================================
+
+export interface TurningPointResolutionEpoch {
+  readonly epochId: string;
+  readonly roomId: ChatRoomId;
+  readonly resolvedAt: UnixMs;
+  readonly primaryKind: ChatTurningPointKind | null;
+  readonly candidateCount: number;
+}
+
+export class TurningPointResolutionEpochTracker {
+  private readonly epochs = new Map<ChatRoomId, TurningPointResolutionEpoch[]>();
+
+  record(resolution: TurningPointResolution): void {
+    const roomId = resolution.roomId;
+    if (!this.epochs.has(roomId)) this.epochs.set(roomId, []);
+    this.epochs.get(roomId)!.push(Object.freeze({
+      epochId: `epoch:${roomId}:${resolution.resolvedAt}`,
+      roomId,
+      resolvedAt: resolution.resolvedAt,
+      primaryKind: resolution.primary?.kind ?? null,
+      candidateCount: resolution.candidates.length,
+    }));
+  }
+
+  getEpochs(roomId: ChatRoomId): readonly TurningPointResolutionEpoch[] {
+    return this.epochs.get(roomId) ?? [];
+  }
+
+  latestEpoch(roomId: ChatRoomId): TurningPointResolutionEpoch | null {
+    const list = this.epochs.get(roomId);
+    return list && list.length > 0 ? list[list.length - 1]! : null;
+  }
+
+  epochCount(roomId: ChatRoomId): number {
+    return this.epochs.get(roomId)?.length ?? 0;
+  }
+
+  allRooms(): readonly ChatRoomId[] {
+    return Array.from(this.epochs.keys());
+  }
+
+  purgeRoom(roomId: ChatRoomId): void {
+    this.epochs.delete(roomId);
+  }
+}
+
+// ============================================================================
+// MARK: Turning-point kind frequency counter
+// ============================================================================
+
+export class TurningPointKindFrequencyCounter {
+  private readonly counts = new Map<ChatTurningPointKind, number>();
+
+  record(kind: ChatTurningPointKind): void {
+    this.counts.set(kind, (this.counts.get(kind) ?? 0) + 1);
+  }
+
+  count(kind: ChatTurningPointKind): number {
+    return this.counts.get(kind) ?? 0;
+  }
+
+  mostFrequent(): ChatTurningPointKind | null {
+    let max = 0;
+    let best: ChatTurningPointKind | null = null;
+    for (const [kind, count] of this.counts) {
+      if (count > max) { max = count; best = kind; }
+    }
+    return best;
+  }
+
+  distribution(): Readonly<Record<string, number>> {
+    const result: Record<string, number> = {};
+    for (const [kind, count] of this.counts) result[kind] = count;
+    return Object.freeze(result);
+  }
+
+  total(): number {
+    let sum = 0;
+    for (const count of this.counts.values()) sum += count;
+    return sum;
+  }
+
+  reset(): void {
+    this.counts.clear();
+  }
+}
+
+// ============================================================================
+// MARK: Module-level factory helpers
+// ============================================================================
+
+export function createTurningPointWatchBus(): TurningPointWatchBus {
+  return new TurningPointWatchBus();
+}
+
+export function createEpochTracker(): TurningPointResolutionEpochTracker {
+  return new TurningPointResolutionEpochTracker();
+}
+
+export function createKindFrequencyCounter(): TurningPointKindFrequencyCounter {
+  return new TurningPointKindFrequencyCounter();
+}
+
+// ============================================================================
+// MARK: Resolution context validator
+// ============================================================================
+
+export interface TurningPointContextValidationResult {
+  readonly valid: boolean;
+  readonly violations: readonly string[];
+}
+
+export function validateResolverContext(
+  context: TurningPointResolverContext,
+): TurningPointContextValidationResult {
+  const violations: string[] = [];
+
+  if (!context.roomId) violations.push('roomId is required');
+  if (!context.evidence) violations.push('evidence is required');
+  if (!context.evidence.roomId) violations.push('evidence.roomId is required');
+  if (!context.evidence.endedAt) violations.push('evidence.endedAt is required');
+
+  if (
+    context.turningPointCandidates !== undefined &&
+    context.turningPointCandidates.length > 100
+  ) {
+    violations.push('turningPointCandidates exceeds maximum of 100');
+  }
+
+  return Object.freeze({
+    valid: violations.length === 0,
+    violations: Object.freeze(violations),
+  });
+}
+
+// ============================================================================
+// MARK: Module constants
+// ============================================================================
+
+export const CHAT_TURNING_POINT_MODULE_NAME = 'TurningPointResolver' as const;
+export const CHAT_TURNING_POINT_MODULE_VERSION = '2026.03.22.2' as const;
+
+export const CHAT_TURNING_POINT_MODULE_LAWS = Object.freeze([
+  'Turning-point resolution is deterministic given the same inputs.',
+  'No mutation of transcript or replay state happens here.',
+  'Weight profiles are named and versioned — runtime overrides are explicit.',
+  'Fallback candidates are only injected when no scored candidates exist.',
+  'The primary turning point is always the top-ranked scored candidate.',
+  'All exported resolution objects are frozen.',
+]);
+
+export const CHAT_TURNING_POINT_MODULE_DESCRIPTOR = Object.freeze({
+  name: CHAT_TURNING_POINT_MODULE_NAME,
+  version: CHAT_TURNING_POINT_MODULE_VERSION,
+  laws: CHAT_TURNING_POINT_MODULE_LAWS,
+  supportedProfiles: Object.keys(TURNING_POINT_WEIGHT_PROFILES) as TurningPointResolverWeightProfile[],
+});
+
+// ============================================================================
+// MARK: Resolution batch quality sweep
+// ============================================================================
+
+export interface BatchQualitySweeepResult {
+  readonly total: number;
+  readonly graded: Readonly<Record<TurningPointResolutionGrade, number>>;
+  readonly averageScore01: number;
+  readonly worstRoomId: ChatRoomId | null;
+  readonly bestRoomId: ChatRoomId | null;
+}
+
+export function runBatchQualitySweep(
+  snapshot: TurningPointResolverSnapshot,
+): BatchQualitySweeepResult {
+  const rooms = Object.entries(snapshot.byRoom) as [ChatRoomId, TurningPointResolution][];
+  const graded: Record<TurningPointResolutionGrade, number> = { S: 0, A: 0, B: 0, C: 0, D: 0, F: 0 };
+  let totalScore = 0;
+  let worstScore = Infinity;
+  let bestScore = -1;
+  let worstRoomId: ChatRoomId | null = null;
+  let bestRoomId: ChatRoomId | null = null;
+
+  for (const [roomId, resolution] of rooms) {
+    const report = gradeResolutionQuality(resolution);
+    graded[report.grade]++;
+    totalScore += report.score01;
+    if (report.score01 < worstScore) { worstScore = report.score01; worstRoomId = roomId; }
+    if (report.score01 > bestScore) { bestScore = report.score01; bestRoomId = roomId; }
+  }
+
+  return Object.freeze({
+    total: rooms.length,
+    graded: Object.freeze(graded),
+    averageScore01: rooms.length > 0 ? totalScore / rooms.length : 0,
+    worstRoomId,
+    bestRoomId,
+  });
+}
+
+// ============================================================================
+// MARK: Resolution-to-plain-object export
+// ============================================================================
+
+export interface TurningPointResolutionExport {
+  readonly roomId: ChatRoomId;
+  readonly resolvedAt: UnixMs;
+  readonly primaryKind: ChatTurningPointKind | null;
+  readonly primaryLabel: string | null;
+  readonly primaryScore01: number | null;
+  readonly candidateCount: number;
+  readonly weightProfile: TurningPointResolverWeightProfile | 'CUSTOM';
+  readonly fallbackUsed: boolean;
+}
+
+export function exportResolution(resolution: TurningPointResolution): TurningPointResolutionExport {
+  return Object.freeze({
+    roomId: resolution.roomId,
+    resolvedAt: resolution.resolvedAt,
+    primaryKind: resolution.primary?.kind ?? null,
+    primaryLabel: resolution.primary?.label ?? null,
+    primaryScore01: resolution.ranked[0]?.finalScore01 ?? null,
+    candidateCount: resolution.candidates.length,
+    weightProfile: resolution.reasoning.weightProfile,
+    fallbackUsed: resolution.reasoning.fallbackUsed,
+  });
+}
+
+export function exportAllResolutions(
+  snapshot: TurningPointResolverSnapshot,
+): readonly TurningPointResolutionExport[] {
+  return Object.values(snapshot.byRoom).map(exportResolution);
+}
+
+// ============================================================================
+// MARK: Resolver session binder
+// ============================================================================
+
+/** Binds a resolver instance to a single room for ergonomic per-room use. */
+export class TurningPointResolverRoomBinder {
+  private readonly resolver: TurningPointResolver;
+  private readonly roomId: ChatRoomId;
+
+  constructor(resolver: TurningPointResolver, roomId: ChatRoomId) {
+    this.resolver = resolver;
+    this.roomId = roomId;
+  }
+
+  resolve(context: Omit<TurningPointResolverContext, 'roomId'>): TurningPointResolution {
+    return this.resolver.resolve({ ...context, roomId: this.roomId });
+  }
+
+  getLastResolution(): TurningPointResolution | null {
+    return this.resolver.getLastResolution(this.roomId);
+  }
+
+  getDiagnostics(): TurningPointResolutionDiagnostics | null {
+    return this.resolver.getDiagnostics(this.roomId);
+  }
+
+  buildAuditReport(): TurningPointResolutionAuditReport {
+    return this.resolver.buildAuditReport(this.roomId);
+  }
+
+  clear(): void {
+    this.resolver.clear(this.roomId);
+  }
+
+  listCandidates(): readonly TurningPointResolutionCandidate[] {
+    return this.resolver.listRoomCandidates(this.roomId);
+  }
+}
+
+export function bindResolverToRoom(
+  resolver: TurningPointResolver,
+  roomId: ChatRoomId,
+): TurningPointResolverRoomBinder {
+  return new TurningPointResolverRoomBinder(resolver, roomId);
+}
+
+// ============================================================================
+// MARK: Kind-to-valence lookup table export
+// ============================================================================
+
+export const TURNING_POINT_KIND_VALENCE_TABLE: Readonly<
+  Record<ChatTurningPointKind, 'POSITIVE' | 'NEGATIVE' | 'NEUTRAL'>
+> = Object.freeze({
+  SHIELD_BREAK: 'NEGATIVE',
+  COUNTERPLAY_MISS: 'NEGATIVE',
+  BANKRUPTCY_LOCK: 'NEGATIVE',
+  RESCUE_MISS: 'NEGATIVE',
+  DEAL_ROOM_FOLD: 'NEGATIVE',
+  EMOTIONAL_TILT: 'NEGATIVE',
+  MIRACLE_SAVE: 'POSITIVE',
+  LEGEND_REVERSAL: 'POSITIVE',
+  RESCUE_ACCEPT: 'POSITIVE',
+  SOVEREIGNTY_SPIKE: 'POSITIVE',
+  CROWD_SWARM: 'NEUTRAL',
+  WORLD_EVENT_IMPACT: 'NEUTRAL',
+  CUSTOM: 'NEUTRAL',
+});
+
+// ============================================================================
+// MARK: Extended ChatTurningPointResolverModule
+// ============================================================================
+
+export const ChatTurningPointResolverModuleExtended = Object.freeze({
+  ...ChatTurningPointResolverModule,
+
+  // Diff and fingerprint
+  buildTurningPointResolutionDiff,
+  computeResolutionFingerprint,
+
+  // Serialization
+  serializeTurningPointResolverState,
+  hydrateTurningPointResolver,
+
+  // Multi-room
+  runMultiRoomTurningPointResolution,
+
+  // Quality
+  gradeResolutionQuality,
+  runBatchQualitySweep,
+
+  // Coherence
+  validateResolutionCoherence,
+  validateResolverContext,
+
+  // Stats
+  buildTurningPointResolverStatsSummary,
+
+  // Export
+  exportResolution,
+  exportAllResolutions,
+
+  // Watch bus
+  createTurningPointWatchBus,
+
+  // Epoch / frequency
+  createEpochTracker,
+  createKindFrequencyCounter,
+
+  // Binder
+  bindResolverToRoom,
+
+  // Valence
+  turningPointKindValence,
+  filterCandidatesByValence,
+  TURNING_POINT_KIND_VALENCE_TABLE,
+
+  // Comparators
+  compareCandidatesByScore,
+  compareCandidatesByKind,
+  sortResolutionCandidates,
+
+  // Explanation
+  buildCandidateExplanationReport,
+
+  // Candidate materialize
+  materializeTurningPoint,
 } as const);

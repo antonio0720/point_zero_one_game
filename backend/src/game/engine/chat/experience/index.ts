@@ -488,7 +488,7 @@ export function scenePlanShouldForceSilence(
 export function scenePlanPrimaryChannel(
   plan: ExperienceSceneDecision,
 ): string | null {
-  return plan.speakerOrder?.[0] ?? null;
+  return plan.plan?.speakerOrder?.[0] ?? null;
 }
 
 /** Returns whether a scene plan validation report has any blocking issues. */
@@ -513,7 +513,7 @@ export function sceneHasHighDramaticPotential(telemetry: ExperienceSceneTelemetr
 
 /** Returns whether a scene should trigger a witness escalation. */
 export function sceneRequiresWitnessEscalation(telemetry: ExperienceSceneTelemetry): boolean {
-  return telemetry.witnessPressure01 >= 0.75 || telemetry.witnessNeed01 >= 0.8;
+  return telemetry.witnessNeed01 >= 0.75;
 }
 
 /** Returns a drama score (0–1) from scene telemetry. */
@@ -521,7 +521,7 @@ export function deriveDramaScore(telemetry: ExperienceSceneTelemetry): number {
   return Math.min(1, (
     telemetry.pressure01 * 0.35 +
     telemetry.crowdHeat01 * 0.2 +
-    telemetry.witnessPressure01 * 0.2 +
+    telemetry.witnessNeed01 * 0.2 +
     telemetry.legendHeat01 * 0.15 +
     telemetry.revealNeed01 * 0.1
   ));
@@ -631,7 +631,7 @@ export function mergeDramaTelemetryDigests(
 
 /** Returns whether a moment is currently active (not resolved/cancelled). */
 export function momentIsActive(record: ExperienceMomentRecord): boolean {
-  return record.status === 'ACTIVE' || record.status === 'PLANNING';
+  return record.status === 'EMITTING' || record.status === 'PLANNED';
 }
 
 /** Returns whether a moment has pending reveal reservations. */
@@ -696,7 +696,7 @@ export function silencePlanHasAuthoredSilence(
   plan: ExperienceSceneSilencePlan,
 ): boolean {
   return plan.windows.some(
-    (w) => w.purpose === 'AUTHORED' || w.purpose === 'CEREMONY',
+    (w) => w.purpose === 'TYPING_THEATER' || w.purpose === 'LEGEND_BREATH',
   );
 }
 
@@ -735,12 +735,12 @@ export function silenceWindowIsInterruptible(
 
 /** Returns whether an interrupt assessment permits the interrupt. */
 export function interruptIsPermitted(assessment: ExperienceInterruptAssessment): boolean {
-  return assessment.disposition === 'ALLOW' || assessment.disposition === 'DEFER';
+  return assessment.disposition === 'ALLOW' || assessment.disposition === 'ALLOW_SHADOW_ONLY';
 }
 
 /** Returns whether an interrupt assessment blocks. */
 export function interruptIsBlocked(assessment: ExperienceInterruptAssessment): boolean {
-  return assessment.disposition === 'BLOCK';
+  return assessment.disposition === 'DENY';
 }
 
 // ============================================================================
@@ -964,7 +964,7 @@ export function buildSceneAuditEntry(
     summary: `archetype=${decision.telemetry.archetype} pressure=${decision.telemetry.pressure01.toFixed(2)}`,
     pressure01: decision.telemetry.pressure01,
     timestampMs: nowMs,
-    tags: decision.planningTags ?? [],
+    tags: decision.plan?.planningTags ?? [],
   });
 }
 
@@ -1246,8 +1246,8 @@ export function buildExperienceRunState(
     pressure01,
     escalationTier: escalationTierFrom01(pressure01),
     pressureTier: pressureTierFrom01(pressure01),
-    activeMomentCount: ledgerStats.activeMoments,
-    pendingRevealCount: ledgerStats.pendingReveals,
+    activeMomentCount: ledgerStats.registeredMoments - ledgerStats.resolvedMoments - ledgerStats.cancelledMoments - ledgerStats.timedOutMoments,
+    pendingRevealCount: ledgerStats.activeRevealReservations,
     activeSilenceWindowCount: ledgerStats.activeSilenceWindows,
     lastArchetype: (lastSceneTelemetry?.archetype as ExperienceSceneArchetype) ?? null,
     lastSilenceKind: lastSilenceDecision?.kind ?? null,
@@ -1587,7 +1587,7 @@ export function buildMomentSummaryTable(
 }
 
 export function momentTableActiveCount(table: readonly ExperienceMomentSummaryRow[]): number {
-  return table.filter((r) => r.status === 'ACTIVE' || r.status === 'PLANNING').length;
+  return table.filter((r) => r.status === 'EMITTING' || r.status === 'PLANNED').length;
 }
 
 export function momentTablePendingRevealCount(table: readonly ExperienceMomentSummaryRow[]): number {
@@ -1787,8 +1787,8 @@ export function buildExtendedDiagnostics(
 ): ChatExperienceLaneExtendedDiagnostics {
   return Object.freeze({
     ...base,
-    activeMomentCount: ledgerStats.activeMoments,
-    pendingRevealCount: ledgerStats.pendingReveals,
+    activeMomentCount: ledgerStats.registeredMoments - ledgerStats.resolvedMoments - ledgerStats.cancelledMoments - ledgerStats.timedOutMoments,
+    pendingRevealCount: ledgerStats.activeRevealReservations,
     escalationTier: escalationTierFrom01(pressure01),
     pressureTierStr: pressureTierFrom01(pressure01),
     coverageReport: buildExperienceCoverageReport(),
@@ -1922,7 +1922,7 @@ export function buildTelemetryDigestChain(
       stageMood: t.stageMood ?? 'NEUTRAL',
       archetype: t.archetype,
       reasons: t.reasons ?? [],
-      witnessPressure01: t.witnessPressure01,
+      witnessPressure01: t.witnessNeed01,
     }),
   );
 }

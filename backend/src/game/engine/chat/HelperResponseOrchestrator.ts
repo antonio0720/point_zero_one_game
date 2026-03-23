@@ -1627,3 +1627,561 @@ export function describeHelperPlan(plan: HelperResponsePlan): string {
     describeHelperUrgency(plan.urgency),
   ].join(' :: ');
 }
+
+// ============================================================================
+// MARK: Watch bus
+// ============================================================================
+
+export interface HelperResponseWatchEvent {
+  readonly kind: 'plan_accepted' | 'plan_rejected' | 'urgency_computed' | 'persona_selected';
+  readonly roomId: ChatRoomId;
+  readonly at: UnixMs;
+  readonly payload: Readonly<Record<string, JsonValue>>;
+}
+
+export type HelperResponseWatchHandler = (event: HelperResponseWatchEvent) => void;
+
+export class HelperResponseWatchBus {
+  private readonly handlers: HelperResponseWatchHandler[] = [];
+
+  subscribe(handler: HelperResponseWatchHandler): () => void {
+    this.handlers.push(handler);
+    return () => {
+      const idx = this.handlers.indexOf(handler);
+      if (idx >= 0) this.handlers.splice(idx, 1);
+    };
+  }
+
+  emit(event: HelperResponseWatchEvent): void {
+    for (const h of this.handlers) {
+      try { h(event); } catch { /* isolated */ }
+    }
+  }
+
+  get listenerCount(): number {
+    return this.handlers.length;
+  }
+}
+
+// ============================================================================
+// MARK: Fingerprint
+// ============================================================================
+
+export interface HelperResponseFingerprint {
+  readonly roomId: ChatRoomId;
+  readonly urgencyHash: string;
+  readonly tactic: string;
+  readonly accepted: boolean;
+  readonly computedAt: UnixMs;
+}
+
+export function computeHelperResponseFingerprint(
+  roomId: ChatRoomId,
+  plan: HelperResponsePlan,
+  now: UnixMs,
+): HelperResponseFingerprint {
+  const urgencyHash = plan.urgency
+    ? [
+        Number(plan.urgency.finalUrgency01).toFixed(3),
+        plan.urgency.tactic,
+        Number(plan.urgency.rescueWindow01).toFixed(2),
+      ].join(':')
+    : 'no-urgency';
+  return Object.freeze({
+    roomId,
+    urgencyHash,
+    tactic: plan.urgency?.tactic ?? 'none',
+    accepted: plan.accepted,
+    computedAt: now,
+  });
+}
+
+// ============================================================================
+// MARK: Epoch tracker
+// ============================================================================
+
+export interface HelperResponseEpochEntry {
+  readonly roomId: ChatRoomId;
+  readonly fingerprint: HelperResponseFingerprint;
+  readonly at: UnixMs;
+}
+
+export class HelperResponseEpochTracker {
+  private readonly epochs = new Map<ChatRoomId, HelperResponseEpochEntry[]>();
+
+  record(roomId: ChatRoomId, fp: HelperResponseFingerprint, at: UnixMs): void {
+    if (!this.epochs.has(roomId)) this.epochs.set(roomId, []);
+    this.epochs.get(roomId)!.push({ roomId, fingerprint: fp, at });
+  }
+
+  getHistory(roomId: ChatRoomId): readonly HelperResponseEpochEntry[] {
+    return this.epochs.get(roomId) ?? [];
+  }
+
+  getLastEntry(roomId: ChatRoomId): HelperResponseEpochEntry | null {
+    const arr = this.epochs.get(roomId);
+    return arr?.[arr.length - 1] ?? null;
+  }
+
+  listRoomIds(): readonly ChatRoomId[] {
+    return Object.freeze([...this.epochs.keys()]);
+  }
+
+  clear(roomId: ChatRoomId): void {
+    this.epochs.delete(roomId);
+  }
+}
+
+// ============================================================================
+// MARK: Batch planner
+// ============================================================================
+
+export interface HelperBatchEntry {
+  readonly roomId: ChatRoomId;
+  readonly plan: HelperResponsePlan;
+  readonly fingerprint: HelperResponseFingerprint;
+}
+
+export interface HelperBatchResult {
+  readonly entries: readonly HelperBatchEntry[];
+  readonly acceptedCount: number;
+  readonly rejectedCount: number;
+  readonly computedAt: UnixMs;
+}
+
+export function runHelperBatchPlanning(
+  authority: HelperResponseAuthority,
+  contexts: ReadonlyArray<{ roomId: ChatRoomId; state: ChatState; signal: ChatSignalEnvelope; now: UnixMs }>,
+  now: UnixMs,
+): HelperBatchResult {
+  const entries: HelperBatchEntry[] = [];
+  let accepted = 0;
+  let rejected = 0;
+  for (const ctx of contexts) {
+    const plan = authority.plan(ctx.state, ctx.roomId, ctx.signal, ctx.now);
+    const fingerprint = computeHelperResponseFingerprint(ctx.roomId, plan, now);
+    entries.push({ roomId: ctx.roomId, plan, fingerprint });
+    if (plan.accepted) accepted++;
+    else rejected++;
+  }
+  return Object.freeze({ entries: Object.freeze(entries), acceptedCount: accepted, rejectedCount: rejected, computedAt: now });
+}
+
+// ============================================================================
+// MARK: Urgency statistics
+// ============================================================================
+
+export interface HelperUrgencyStats {
+  readonly roomId: ChatRoomId;
+  readonly maxFinalUrgency: number;
+  readonly minFinalUrgency: number;
+  readonly avgFinalUrgency: number;
+  readonly acceptedRatio: number;
+  readonly sampleCount: number;
+}
+
+export function buildHelperUrgencyStats(
+  roomId: ChatRoomId,
+  history: readonly HelperResponseEpochEntry[],
+): HelperUrgencyStats {
+  if (history.length === 0) {
+    return Object.freeze({ roomId, maxFinalUrgency: 0, minFinalUrgency: 0, avgFinalUrgency: 0, acceptedRatio: 0, sampleCount: 0 });
+  }
+  let max = 0, min = 1, sum = 0, acceptedCount = 0;
+  for (const entry of history) {
+    const u = entry.fingerprint.tactic !== 'none' ? 0.5 : 0;
+    if (u > max) max = u;
+    if (u < min) min = u;
+    sum += u;
+    if (entry.fingerprint.accepted) acceptedCount++;
+  }
+  return Object.freeze({
+    roomId,
+    maxFinalUrgency: max,
+    minFinalUrgency: min,
+    avgFinalUrgency: sum / history.length,
+    acceptedRatio: acceptedCount / history.length,
+    sampleCount: history.length,
+  });
+}
+
+// ============================================================================
+// MARK: Persona frequency counter
+// ============================================================================
+
+export interface HelperPersonaFrequencyEntry {
+  readonly personaId: ChatPersonaId;
+  readonly count: number;
+  readonly acceptedCount: number;
+}
+
+export function countPersonaFrequency(
+  plans: readonly HelperResponsePlan[],
+): readonly HelperPersonaFrequencyEntry[] {
+  const map = new Map<ChatPersonaId, { count: number; accepted: number }>();
+  for (const plan of plans) {
+    const id = plan.personaMatch?.persona.personaId;
+    if (!id) continue;
+    const entry = map.get(id) ?? { count: 0, accepted: 0 };
+    map.set(id, { count: entry.count + 1, accepted: entry.accepted + (plan.accepted ? 1 : 0) });
+  }
+  return Object.freeze(
+    [...map.entries()].map(([personaId, { count, accepted }]) =>
+      Object.freeze({ personaId, count, acceptedCount: accepted }),
+    ),
+  );
+}
+
+// ============================================================================
+// MARK: Room helper pressure report
+// ============================================================================
+
+export interface HelperPressureReport {
+  readonly roomId: ChatRoomId;
+  readonly latestTactic: string;
+  readonly consecutiveAccepted: number;
+  readonly consecutiveRejected: number;
+  readonly lastAcceptedAt: UnixMs | null;
+  readonly urgencyTrend: 'rising' | 'falling' | 'stable';
+}
+
+export function buildHelperPressureReport(
+  roomId: ChatRoomId,
+  history: readonly HelperResponseEpochEntry[],
+  now: UnixMs,
+): HelperPressureReport {
+  void now;
+  let consecutiveAccepted = 0;
+  let consecutiveRejected = 0;
+  let lastAcceptedAt: UnixMs | null = null;
+  let latestTactic = 'none';
+
+  const reversed = [...history].reverse();
+  for (const entry of reversed) {
+    if (entry.fingerprint.accepted) {
+      if (consecutiveRejected === 0) consecutiveAccepted++;
+      if (!lastAcceptedAt) lastAcceptedAt = entry.at;
+    } else {
+      if (consecutiveAccepted === 0) consecutiveRejected++;
+    }
+    latestTactic = entry.fingerprint.tactic;
+    break;
+  }
+
+  const urgencyTrend: 'rising' | 'falling' | 'stable' =
+    consecutiveAccepted > 2 ? 'rising' : consecutiveRejected > 2 ? 'falling' : 'stable';
+
+  return Object.freeze({ roomId, latestTactic, consecutiveAccepted, consecutiveRejected, lastAcceptedAt, urgencyTrend });
+}
+
+// ============================================================================
+// MARK: Module constants and descriptor
+// ============================================================================
+
+export const HELPER_RESPONSE_MODULE_ID = 'helper_response_orchestrator' as const;
+export const HELPER_RESPONSE_MODULE_VERSION = '2026.03.14' as const;
+
+export interface HelperResponseModuleDescriptor {
+  readonly moduleId: typeof HELPER_RESPONSE_MODULE_ID;
+  readonly version: typeof HELPER_RESPONSE_MODULE_VERSION;
+  readonly capabilities: readonly string[];
+}
+
+export const HELPER_RESPONSE_MODULE_DESCRIPTOR: HelperResponseModuleDescriptor = Object.freeze({
+  moduleId: HELPER_RESPONSE_MODULE_ID,
+  version: HELPER_RESPONSE_MODULE_VERSION,
+  capabilities: Object.freeze([
+    'urgency_computation',
+    'persona_selection',
+    'channel_selection',
+    'scene_authoring',
+    'rescue_planning',
+    'batch_planning',
+    'epoch_tracking',
+    'fingerprinting',
+    'watch_bus',
+  ]),
+});
+
+// ============================================================================
+// MARK: Extended module namespace
+// ============================================================================
+
+export namespace ChatHelperResponseOrchestratorModuleExtended {
+  export type WatchBus = HelperResponseWatchBus;
+  export type WatchEvent = HelperResponseWatchEvent;
+  export type Fingerprint = HelperResponseFingerprint;
+  export type EpochTracker = HelperResponseEpochTracker;
+  export type BatchResult = HelperBatchResult;
+  export type PressureReport = HelperPressureReport;
+  export type UrgencyStats = HelperUrgencyStats;
+  export type Descriptor = HelperResponseModuleDescriptor;
+
+  export function createWatchBus(): HelperResponseWatchBus {
+    return new HelperResponseWatchBus();
+  }
+
+  export function createEpochTracker(): HelperResponseEpochTracker {
+    return new HelperResponseEpochTracker();
+  }
+
+  export function describe(): string {
+    return `${HELPER_RESPONSE_MODULE_ID}@${HELPER_RESPONSE_MODULE_VERSION}`;
+  }
+}
+
+// ============================================================================
+// MARK: Tactic label utilities
+// ============================================================================
+
+export function helperTacticLabel(tactic: HelperUrgencyVector['tactic']): string {
+  const map: Record<HelperUrgencyVector['tactic'], string> = {
+    rescue: 'Rescue Intervention',
+    encourage: 'Encouragement',
+    redirect: 'Redirect Support',
+    whisper: 'Quiet Whisper',
+    none: 'No Intervention',
+  };
+  return map[tactic] ?? tactic;
+}
+
+export function isHighPriorityTactic(tactic: HelperUrgencyVector['tactic']): boolean {
+  return tactic === 'rescue';
+}
+
+export function isSilentTactic(tactic: HelperUrgencyVector['tactic']): boolean {
+  return tactic === 'whisper' || tactic === 'none';
+}
+
+// ============================================================================
+// MARK: Relationship helpers
+// ============================================================================
+
+export function isHighTrustRelationship(relationship: ChatRelationshipState): boolean {
+  return (Number(relationship.trust01) as number) >= 0.7;
+}
+
+export function isLowTrustRelationship(relationship: ChatRelationshipState): boolean {
+  return (Number(relationship.trust01) as number) <= 0.3;
+}
+
+export function hasSignificantDebt(relationship: ChatRelationshipState): boolean {
+  return (Number(relationship.rescueDebt01) as number) >= 0.5;
+}
+
+// ============================================================================
+// MARK: Signal inspection utilities
+// ============================================================================
+
+export function signalHasBattleContext(signal: ChatSignalEnvelope): boolean {
+  return Boolean(signal.battle);
+}
+
+export function signalHasEconomyContext(signal: ChatSignalEnvelope): boolean {
+  return Boolean(signal.economy);
+}
+
+export function signalHasPresenceContext(signal: ChatSignalEnvelope): boolean {
+  return Boolean(signal.presence);
+}
+
+export function getSignalRoomId(signal: ChatSignalEnvelope): ChatRoomId | null {
+  return signal.roomId ?? null;
+}
+
+export function getSignalEventId(signal: ChatSignalEnvelope): ChatEventId | null {
+  return signal.eventId ?? null;
+}
+
+// ============================================================================
+// MARK: Runtime config inspection
+// ============================================================================
+
+export function helperChannelIsAllowed(
+  config: ReturnType<typeof mergeRuntimeConfig>,
+  channel: ChatVisibleChannel,
+): boolean {
+  return (config.allowVisibleChannels ?? []).includes(channel);
+}
+
+export function helperRoomKindIsAllowed(
+  config: ReturnType<typeof mergeRuntimeConfig>,
+  roomKind: ChatRoomKind,
+): boolean {
+  return (config.allowRoomKinds ?? []).includes(roomKind);
+}
+
+// ============================================================================
+// MARK: Affect inspection utilities
+// ============================================================================
+
+export function isHighEmbarrassmentAffect(affect: ChatAffectSnapshot): boolean {
+  return (Number(affect.embarrassment01) as number) >= 0.65;
+}
+
+export function isHighFrustrationAffect(affect: ChatAffectSnapshot): boolean {
+  return (Number(affect.frustration01) as number) >= 0.65;
+}
+
+export function isHighConfidenceAffect(affect: ChatAffectSnapshot): boolean {
+  return (Number(affect.confidence01) as number) >= 0.7;
+}
+
+// ============================================================================
+// MARK: Audience heat inspection
+// ============================================================================
+
+export function audienceIsHot(heat: ChatAudienceHeat): boolean {
+  return (Number(heat.heat01) as number) >= 0.75;
+}
+
+export function audienceIsVeryHot(heat: ChatAudienceHeat): boolean {
+  return (Number(heat.heat01) as number) >= 0.9;
+}
+
+export function audienceHeatLabel(heat: ChatAudienceHeat): string {
+  const h = Number(heat.heat01) as number;
+  if (h >= 0.9) return 'scalding';
+  if (h >= 0.75) return 'hot';
+  if (h >= 0.5) return 'warm';
+  if (h >= 0.25) return 'cool';
+  return 'cold';
+}
+
+// ============================================================================
+// MARK: Learning profile inspection
+// ============================================================================
+
+export function hasHighHelperReceptivity(profile: ChatLearningProfile): boolean {
+  return (Number(profile.helperReceptivity01) as number) >= 0.6;
+}
+
+export function hasLowHelperReceptivity(profile: ChatLearningProfile): boolean {
+  return (Number(profile.helperReceptivity01) as number) <= 0.3;
+}
+
+// ============================================================================
+// MARK: Room state inspection
+// ============================================================================
+
+export function roomHasActiveInvasion(state: ChatState, roomId: ChatRoomId): boolean {
+  return getActiveRoomInvasions(state, roomId).length > 0;
+}
+
+export function roomIsCurrentlySilenced(state: ChatState, roomId: ChatRoomId, now: UnixMs): boolean {
+  void pruneExpiredSilences(state, roomId, now);
+  return isRoomSilenced(state, roomId, now);
+}
+
+export function getLatestRoomMessage(state: ChatState, roomId: ChatRoomId): ChatMessage | null {
+  return selectLatestMessage(state, roomId);
+}
+
+export function getRoomAudienceHeat(state: ChatState, roomId: ChatRoomId): ChatAudienceHeat | null {
+  return selectAudienceHeat(state, roomId);
+}
+
+export function getRoomLearningProfile(state: ChatState, roomId: ChatRoomId, userId: string): ChatLearningProfile | null {
+  return selectLearningProfile(state, roomId, userId);
+}
+
+export function getRoomInferenceSnapshots(state: ChatState, roomId: ChatRoomId, userId: string): readonly ChatInferenceSnapshot[] {
+  return selectInferenceSnapshotsForUser(state, roomId, userId);
+}
+
+export function getRoomRelationship(state: ChatState, roomId: ChatRoomId, actorId: string): ChatRelationshipState | null {
+  return selectRelationshipForActor(state, roomId, actorId);
+}
+
+export function getRoomPresence(state: ChatState, roomId: ChatRoomId): ReturnType<typeof selectRoomPresence> {
+  return selectRoomPresence(state, roomId);
+}
+
+export function getRoomVisibleMessages(state: ChatState, roomId: ChatRoomId): readonly ChatMessage[] {
+  return selectVisibleMessages(state, roomId);
+}
+
+export function applyHelperScenePlan(state: ChatState, roomId: ChatRoomId, sceneId: ChatSceneId, plan: ChatScenePlan): ChatState {
+  return setRoomScene(state, roomId, sceneId, plan);
+}
+
+export function applyHelperSilenceDecision(state: ChatState, roomId: ChatRoomId, decision: ChatSilenceDecision): ChatState {
+  return setSilenceDecision(state, roomId, decision);
+}
+
+// ============================================================================
+// MARK: Persona utilities
+// ============================================================================
+
+export function personaChannelIds(persona: ChatPersonaDescriptor): readonly ChatChannelId[] {
+  return persona.preferredChannels ?? [];
+}
+
+export function personaSupportsChannel(persona: ChatPersonaDescriptor, channelId: ChatChannelId): boolean {
+  return personaChannelIds(persona).includes(channelId);
+}
+
+export function personaDisplayLabel(persona: ChatPersonaDescriptor): string {
+  return `${persona.displayName} [${persona.id}]`;
+}
+
+// ============================================================================
+// MARK: Inference snapshot helpers
+// ============================================================================
+
+export function latestInference(snapshots: readonly ChatInferenceSnapshot[]): ChatInferenceSnapshot | null {
+  if (snapshots.length === 0) return null;
+  return snapshots.reduce((best, s) => (Number(s.generatedAt) > Number(best.generatedAt) ? s : best));
+}
+
+export function inferenceEngagementAbove(snapshot: ChatInferenceSnapshot, threshold: number): boolean {
+  return (Number(snapshot.engagement01) as number) >= threshold;
+}
+
+// ============================================================================
+// MARK: Response candidate utilities
+// ============================================================================
+
+export function candidateHasBody(candidate: ChatResponseCandidate): boolean {
+  return candidate.text.trim().length > 0;
+}
+
+export function candidateBodyLength(candidate: ChatResponseCandidate): number {
+  return candidate.body.length;
+}
+
+export function sortCandidatesByScore(candidates: readonly ChatResponseCandidate[]): readonly ChatResponseCandidate[] {
+  return [...candidates].sort((a, b) => b.priority - a.priority);
+}
+
+export function topCandidate(candidates: readonly ChatResponseCandidate[]): ChatResponseCandidate | null {
+  return sortCandidatesByScore(candidates)[0] ?? null;
+}
+
+// ============================================================================
+// MARK: Nullable utilities re-exported for helper consumers
+// ============================================================================
+
+export function isNullable<T>(value: Nullable<T>): value is null | undefined {
+  return value == null;
+}
+
+export function unwrapNullable<T>(value: Nullable<T>, fallback: T): T {
+  return value ?? fallback;
+}
+
+// ============================================================================
+// MARK: Helper module full export
+// ============================================================================
+
+export const CHAT_HELPER_RESPONSE_FULL_MODULE = Object.freeze({
+  descriptor: HELPER_RESPONSE_MODULE_DESCRIPTOR,
+  createWatchBus: () => new HelperResponseWatchBus(),
+  createEpochTracker: () => new HelperResponseEpochTracker(),
+  runBatch: runHelperBatchPlanning,
+  buildPressureReport: buildHelperPressureReport,
+  buildUrgencyStats: buildHelperUrgencyStats,
+  countPersonaFrequency,
+  computeFingerprint: computeHelperResponseFingerprint,
+});
+

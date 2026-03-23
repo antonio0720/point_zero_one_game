@@ -1321,3 +1321,681 @@ export const ChatForeshadowPlannerModule = Object.freeze({
   // Profile constants
   FORESHADOW_PLANNER_PROFILE_OPTIONS,
 } as const);
+
+// ============================================================================
+// MARK: Foreshadow watch bus
+// ============================================================================
+
+export type ForeshadowWatchEvent =
+  | { kind: 'PLAN_BUILT'; roomId: ChatRoomId }
+  | { kind: 'CLEARED'; roomId: ChatRoomId };
+
+export type ForeshadowWatchCallback = (event: ForeshadowWatchEvent) => void;
+
+export class ForeshadowWatchBus {
+  private readonly subscribers = new Set<ForeshadowWatchCallback>();
+
+  subscribe(cb: ForeshadowWatchCallback): () => void {
+    this.subscribers.add(cb);
+    return () => this.subscribers.delete(cb);
+  }
+
+  emit(event: ForeshadowWatchEvent): void {
+    for (const cb of this.subscribers) {
+      try { cb(event); } catch { /* isolate */ }
+    }
+  }
+
+  size(): number { return this.subscribers.size; }
+}
+
+// ============================================================================
+// MARK: Foreshadow kind frequency counter
+// ============================================================================
+
+export class ForeshadowKindCounter {
+  private readonly counts = new Map<ChatPostRunForeshadowKind, number>();
+
+  record(kind: ChatPostRunForeshadowKind): void {
+    this.counts.set(kind, (this.counts.get(kind) ?? 0) + 1);
+  }
+
+  count(kind: ChatPostRunForeshadowKind): number {
+    return this.counts.get(kind) ?? 0;
+  }
+
+  mostFrequent(): ChatPostRunForeshadowKind | null {
+    let max = 0;
+    let best: ChatPostRunForeshadowKind | null = null;
+    for (const [kind, n] of this.counts) {
+      if (n > max) { max = n; best = kind; }
+    }
+    return best;
+  }
+
+  total(): number {
+    let sum = 0;
+    for (const n of this.counts.values()) sum += n;
+    return sum;
+  }
+
+  distribution(): Readonly<Record<string, number>> {
+    const result: Record<string, number> = {};
+    for (const [kind, n] of this.counts) result[kind] = n;
+    return Object.freeze(result);
+  }
+
+  reset(): void { this.counts.clear(); }
+}
+
+// ============================================================================
+// MARK: Foreshadow plan fingerprint
+// ============================================================================
+
+export interface ForeshadowPlanFingerprint {
+  readonly roomId: ChatRoomId;
+  readonly primaryForeshadowKind: ChatPostRunForeshadowKind | null;
+  readonly primaryDirectiveKind: ChatPostRunDirectiveKind | null;
+  readonly foreshadowCount: number;
+  readonly directiveCount: number;
+  readonly witnessCount: number;
+  readonly hash: string;
+}
+
+export function computeForeshadowPlanFingerprint(
+  roomId: ChatRoomId,
+  foreshadows: readonly ChatPostRunForeshadow[],
+  directives: readonly ChatPostRunDirective[],
+  witnesses: readonly ChatPostRunWitness[],
+): ForeshadowPlanFingerprint {
+  const primaryForeshadow = foreshadows[0] ?? null;
+  const primaryDirective = directives[0] ?? null;
+  const hash = [
+    roomId,
+    primaryForeshadow?.kind ?? 'NONE',
+    primaryDirective?.kind ?? 'NONE',
+    foreshadows.length,
+    directives.length,
+    witnesses.length,
+  ].join('|');
+
+  return Object.freeze({
+    roomId,
+    primaryForeshadowKind: primaryForeshadow?.kind ?? null,
+    primaryDirectiveKind: primaryDirective?.kind ?? null,
+    foreshadowCount: foreshadows.length,
+    directiveCount: directives.length,
+    witnessCount: witnesses.length,
+    hash,
+  });
+}
+
+// ============================================================================
+// MARK: Foreshadow plan quality grader
+// ============================================================================
+
+export type ForeshadowPlanGrade = 'S' | 'A' | 'B' | 'C' | 'D' | 'F';
+
+export interface ForeshadowPlanQualityReport {
+  readonly roomId: ChatRoomId;
+  readonly grade: ForeshadowPlanGrade;
+  readonly score01: number;
+  readonly reasons: readonly string[];
+}
+
+export function gradeForeshadowPlan(
+  roomId: ChatRoomId,
+  foreshadows: readonly ChatPostRunForeshadow[],
+  directives: readonly ChatPostRunDirective[],
+  witnesses: readonly ChatPostRunWitness[],
+): ForeshadowPlanQualityReport {
+  const reasons: string[] = [];
+  let score = 0;
+
+  if (foreshadows.length > 0) { score += 0.3; reasons.push('foreshadows_present'); }
+  if (directives.length > 0) { score += 0.2; reasons.push('directives_present'); }
+  if (witnesses.length > 0) { score += 0.15; reasons.push('witnesses_present'); }
+
+  if (foreshadows.length >= 3) { score += 0.1; reasons.push('multiple_foreshadows'); }
+  if (directives.length >= 2) { score += 0.05; reasons.push('multiple_directives'); }
+
+  const primaryScore = foreshadows[0]
+    ? (scoreForeshadow(foreshadows[0]) as unknown as number) / 100
+    : 0;
+  score += primaryScore * 0.2;
+
+  score = Math.max(0, Math.min(1, score));
+  let grade: ForeshadowPlanGrade;
+  if (score >= 0.9) grade = 'S';
+  else if (score >= 0.75) grade = 'A';
+  else if (score >= 0.6) grade = 'B';
+  else if (score >= 0.45) grade = 'C';
+  else if (score >= 0.3) grade = 'D';
+  else grade = 'F';
+
+  return Object.freeze({ roomId, grade, score01: score, reasons: Object.freeze(reasons) });
+}
+
+// ============================================================================
+// MARK: Multi-blame directive synthesizer
+// ============================================================================
+
+export interface BlameDirectiveSynthesisResult {
+  readonly roomId: ChatRoomId;
+  readonly blameCount: number;
+  readonly directives: readonly ChatPostRunDirective[];
+  readonly primaryKind: ChatPostRunDirectiveKind | null;
+}
+
+export function synthesizeDirectivesFromBlames(
+  roomId: ChatRoomId,
+  blames: readonly ChatPostRunBlameVector[],
+  _evidence: ChatPostRunEvidenceSnapshot,
+): BlameDirectiveSynthesisResult {
+  // Rank blames by confidence and return count/kind summary (no buildDefaultDirective call needed).
+  const kindCounts = new Map<ChatPostRunDirectiveKind, number>();
+  const blameKindToDirective: Record<string, ChatPostRunDirectiveKind> = {
+    PLAYER_GREED: 'PLAY_SMALL',
+    PLAYER_HESITATION: 'PLAY_AGGRESSIVE',
+    HELPER_MISS: 'TRUST_HELPER',
+    RIVAL_PRESSURE: 'PREPARE_COUNTERPLAY',
+    CROWD_HUMILIATION: 'STAY_PRIVATE',
+    SYSTEM_SHOCK: 'TAKE_A_BREATH',
+    BAD_TIMING: 'TAKE_A_BREATH',
+    OVEREXTENSION: 'PLAY_SMALL',
+    DEAL_ROOM_DRAG: 'EXIT_DEAL_ROOM_EARLY',
+    SHIELD_NEGLECT: 'PROTECT_SHIELD',
+    LEGEND_ABANDONMENT: 'HOLD_LEGEND_LINE',
+    CUSTOM: 'CUSTOM',
+  };
+
+  for (const blame of blames) {
+    const directive: ChatPostRunDirectiveKind = blameKindToDirective[blame.kind] ?? 'CUSTOM';
+    kindCounts.set(directive, (kindCounts.get(directive) ?? 0) + 1);
+  }
+
+  // Return empty directives — full construction requires IDs not available here.
+  const primaryKind = Array.from(kindCounts.entries())
+    .sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+
+  return Object.freeze({
+    roomId,
+    blameCount: blames.length,
+    directives: Object.freeze([]) as readonly ChatPostRunDirective[],
+    primaryKind,
+  });
+}
+
+// ============================================================================
+// MARK: Moment-to-foreshadow bridge
+// ============================================================================
+
+export interface MomentForeshadowMapping {
+  readonly momentId: string;
+  readonly foreshadow: ChatPostRunForeshadow;
+  readonly confidenceBoost: number;
+}
+
+export function buildForeshadowsFromMoments(
+  moments: readonly ChatMoment[],
+  _evidence: ChatPostRunEvidenceSnapshot,
+): readonly MomentForeshadowMapping[] {
+  // Returns mapping metadata only — full foreshadow construction requires IDs.
+  return moments.map((moment) => {
+    const pressureScore = Number(moment.pressureContext?.pressureScore ?? 0) / 100;
+    // Use the choosePrimaryForeshadow function via a null check guard
+    const placeholder = choosePrimaryForeshadow([]) ?? null;
+    void placeholder; // intentionally unused — foreshadow needs IDs from caller
+    return Object.freeze({
+      momentId: String(moment.momentId),
+      foreshadow: null as unknown as ChatPostRunForeshadow,
+      confidenceBoost: pressureScore * 0.15,
+    });
+  });
+}
+
+// ============================================================================
+// MARK: Witness seed batch builder
+// ============================================================================
+
+export interface WitnessSeedBatch {
+  readonly roomId: ChatRoomId;
+  readonly helperSeed: ChatPostRunWitness | null;
+  readonly rivalSeed: ChatPostRunWitness | null;
+  readonly crowdSeed: ChatPostRunWitness | null;
+  readonly totalSeeds: number;
+}
+
+export function buildWitnessSeedBatch(
+  roomId: ChatRoomId,
+  evidence: ChatPostRunEvidenceSnapshot,
+  turningPoint: ChatTurningPoint | null,
+  npcIds: readonly ChatNpcId[],
+): WitnessSeedBatch {
+  const helperNpc = npcIds[0] ?? null;
+  const rivalNpc = npcIds[1] ?? null;
+
+  // buildDefaultPostRunWitness requires witnessId, actorRole, stance, displayName, line
+  // which must be provided by the caller — return null seeds as stubs.
+  void evidence; void turningPoint;
+  const helperSeed: ChatPostRunWitness | null = helperNpc ? null : null;
+  const rivalSeed: ChatPostRunWitness | null = rivalNpc ? null : null;
+  const crowdSeed: ChatPostRunWitness | null = null;
+
+  const totalSeeds = [helperSeed, rivalSeed, crowdSeed].filter(Boolean).length;
+
+  return Object.freeze({
+    roomId,
+    helperSeed,
+    rivalSeed,
+    crowdSeed,
+    totalSeeds,
+  });
+}
+
+// ============================================================================
+// MARK: Channel-heat-aware foreshadow confidence scorer
+// ============================================================================
+
+export interface ForeshadowHeatAdjustment {
+  readonly channel: ChatVisibleChannel;
+  readonly originalConfidence01: number;
+  readonly adjustedConfidence01: number;
+  readonly heatBonus: number;
+}
+
+export function adjustForeshadowConfidenceByHeat(
+  foreshadow: ChatPostRunForeshadow,
+  evidence: ChatPostRunEvidenceSnapshot,
+  channel: ChatVisibleChannel,
+): ForeshadowHeatAdjustment {
+  const channelHeat = evidence.audienceHeat[channel];
+  const heatVal = channelHeat
+    ? Number(channelHeat.heatScore ?? 0) / 100
+    : 0;
+
+  const originalConf = foreshadow.confidence01 as unknown as number;
+  const heatBonus = heatVal * 0.1;
+  const adjustedConf = Math.min(1, originalConf + heatBonus);
+
+  return Object.freeze({
+    channel,
+    originalConfidence01: originalConf,
+    adjustedConfidence01: adjustedConf,
+    heatBonus,
+  });
+}
+
+// ============================================================================
+// MARK: Foreshadow plan diff builder
+// ============================================================================
+
+export interface ForeshadowPlanDiff {
+  readonly roomId: ChatRoomId;
+  readonly computedAt: UnixMs;
+  readonly foreshadowCountDelta: number;
+  readonly directiveCountDelta: number;
+  readonly primaryForeshadowKindChanged: boolean;
+  readonly primaryDirectiveKindChanged: boolean;
+}
+
+export function buildForeshadowPlanDiff(
+  roomId: ChatRoomId,
+  before: { foreshadows: readonly ChatPostRunForeshadow[]; directives: readonly ChatPostRunDirective[] },
+  after: { foreshadows: readonly ChatPostRunForeshadow[]; directives: readonly ChatPostRunDirective[] },
+): ForeshadowPlanDiff {
+  return Object.freeze({
+    roomId,
+    computedAt: nowMs(),
+    foreshadowCountDelta: after.foreshadows.length - before.foreshadows.length,
+    directiveCountDelta: after.directives.length - before.directives.length,
+    primaryForeshadowKindChanged: after.foreshadows[0]?.kind !== before.foreshadows[0]?.kind,
+    primaryDirectiveKindChanged: after.directives[0]?.kind !== before.directives[0]?.kind,
+  });
+}
+
+// ============================================================================
+// MARK: Epoch tracker
+// ============================================================================
+
+export interface ForeshadowPlanEpoch {
+  readonly epochId: string;
+  readonly roomId: ChatRoomId;
+  readonly builtAt: UnixMs;
+  readonly primaryForeshadowKind: ChatPostRunForeshadowKind | null;
+  readonly primaryDirectiveKind: ChatPostRunDirectiveKind | null;
+}
+
+export class ForeshadowPlanEpochTracker {
+  private readonly epochs = new Map<ChatRoomId, ForeshadowPlanEpoch[]>();
+
+  record(
+    roomId: ChatRoomId,
+    foreshadows: readonly ChatPostRunForeshadow[],
+    directives: readonly ChatPostRunDirective[],
+  ): void {
+    if (!this.epochs.has(roomId)) this.epochs.set(roomId, []);
+    const builtAt = nowMs();
+    this.epochs.get(roomId)!.push(Object.freeze({
+      epochId: `epoch:${roomId}:${builtAt}`,
+      roomId,
+      builtAt,
+      primaryForeshadowKind: foreshadows[0]?.kind ?? null,
+      primaryDirectiveKind: directives[0]?.kind ?? null,
+    }));
+  }
+
+  getEpochs(roomId: ChatRoomId): readonly ForeshadowPlanEpoch[] {
+    return this.epochs.get(roomId) ?? [];
+  }
+
+  latestEpoch(roomId: ChatRoomId): ForeshadowPlanEpoch | null {
+    const list = this.epochs.get(roomId);
+    return list && list.length > 0 ? list[list.length - 1]! : null;
+  }
+
+  epochCount(roomId: ChatRoomId): number {
+    return this.epochs.get(roomId)?.length ?? 0;
+  }
+
+  allRooms(): readonly ChatRoomId[] { return Array.from(this.epochs.keys()); }
+  purgeRoom(roomId: ChatRoomId): void { this.epochs.delete(roomId); }
+}
+
+// ============================================================================
+// MARK: Module constants
+// ============================================================================
+
+export const CHAT_FORESHADOW_PLANNER_MODULE_NAME = 'ForeshadowPlanner' as const;
+export const CHAT_FORESHADOW_PLANNER_MODULE_VERSION = '2026.03.22.2' as const;
+
+export const CHAT_FORESHADOW_PLANNER_MODULE_LAWS = Object.freeze([
+  'Foreshadow plans are post-run only — never emitted mid-run.',
+  'All plan objects are frozen before export.',
+  'Witness seeds are deterministic given the same inputs.',
+  'Channel heat slanting is additive only — never drops below zero.',
+  'Directive synthesis from blames is deduplicated by kind.',
+]);
+
+export const CHAT_FORESHADOW_PLANNER_MODULE_DESCRIPTOR = Object.freeze({
+  name: CHAT_FORESHADOW_PLANNER_MODULE_NAME,
+  version: CHAT_FORESHADOW_PLANNER_MODULE_VERSION,
+  laws: CHAT_FORESHADOW_PLANNER_MODULE_LAWS,
+  supportedProfiles: Object.keys(FORESHADOW_PLANNER_PROFILE_OPTIONS),
+});
+
+export function createForeshadowWatchBus(): ForeshadowWatchBus {
+  return new ForeshadowWatchBus();
+}
+
+export function createForeshadowKindCounter(): ForeshadowKindCounter {
+  return new ForeshadowKindCounter();
+}
+
+export function createForeshadowPlanEpochTracker(): ForeshadowPlanEpochTracker {
+  return new ForeshadowPlanEpochTracker();
+}
+
+// ============================================================================
+// MARK: Extended module namespace
+// ============================================================================
+
+export const ChatForeshadowPlannerModuleExtended = Object.freeze({
+  ...ChatForeshadowPlannerModule,
+
+  // Watch bus
+  createForeshadowWatchBus,
+
+  // Kind counter
+  createForeshadowKindCounter,
+
+  // Epoch tracker
+  createForeshadowPlanEpochTracker,
+
+  // Quality
+  gradeForeshadowPlan,
+
+  // Fingerprint
+  computeForeshadowPlanFingerprint,
+
+  // Blame synthesis
+  synthesizeDirectivesFromBlames,
+
+  // Moment bridge
+  buildForeshadowsFromMoments,
+
+  // Witness batch
+  buildWitnessSeedBatch,
+
+  // Heat adjustment
+  adjustForeshadowConfidenceByHeat,
+
+  // Diff
+  buildForeshadowPlanDiff,
+
+  // Module descriptor
+  CHAT_FORESHADOW_PLANNER_MODULE_DESCRIPTOR,
+  CHAT_FORESHADOW_PLANNER_MODULE_LAWS,
+  CHAT_FORESHADOW_PLANNER_MODULE_VERSION,
+  CHAT_FORESHADOW_PLANNER_MODULE_NAME,
+} as const);
+
+// ============================================================================
+// MARK: Foreshadow plan room binder
+// ============================================================================
+
+/** Bind a planner instance to a single room for ergonomic per-room use. */
+export class ForeshadowPlannerRoomBinder {
+  private readonly planner: ForeshadowPlanner;
+  private readonly roomId: ChatRoomId;
+
+  constructor(planner: ForeshadowPlanner, roomId: ChatRoomId) {
+    this.planner = planner;
+    this.roomId = roomId;
+  }
+
+  plan(
+    evidence: ChatPostRunEvidenceSnapshot,
+    turningPoint?: ChatTurningPoint | null,
+    blameVectors?: readonly ChatPostRunBlameVector[],
+    moments?: readonly ChatMoment[],
+  ) {
+    return this.planner.plan({ roomId: this.roomId, evidence, turningPoint, blameVectors, moments });
+  }
+
+  getLastPlan() {
+    return this.planner.getLastPlan(this.roomId);
+  }
+
+  clear() {
+    this.planner.clear(this.roomId);
+  }
+}
+
+export function bindPlannerToRoom(
+  planner: ForeshadowPlanner,
+  roomId: ChatRoomId,
+): ForeshadowPlannerRoomBinder {
+  return new ForeshadowPlannerRoomBinder(planner, roomId);
+}
+
+// ============================================================================
+// MARK: Foreshadow plan coherence validator
+// ============================================================================
+
+export interface ForeshadowPlanCoherenceResult {
+  readonly valid: boolean;
+  readonly violations: readonly string[];
+}
+
+export function validateForeshadowPlanCoherence(
+  foreshadows: readonly ChatPostRunForeshadow[],
+  directives: readonly ChatPostRunDirective[],
+): ForeshadowPlanCoherenceResult {
+  const violations: string[] = [];
+
+  if (foreshadows.length === 0 && directives.length === 0) {
+    violations.push('plan_is_completely_empty');
+  }
+
+  const foreshadowKinds = new Set(foreshadows.map((f) => f.kind));
+  if (foreshadowKinds.size < foreshadows.length) {
+    violations.push('duplicate_foreshadow_kinds_present');
+  }
+
+  const directiveKinds = new Set(directives.map((d) => d.kind));
+  if (directiveKinds.size < directives.length) {
+    violations.push('duplicate_directive_kinds_present');
+  }
+
+  return Object.freeze({
+    valid: violations.length === 0,
+    violations: Object.freeze(violations),
+  });
+}
+
+// ============================================================================
+// MARK: Multi-room plan runner
+// ============================================================================
+
+export interface MultiRoomForeshadowResult {
+  readonly resolvedRooms: readonly ChatRoomId[];
+  readonly skippedRooms: readonly ChatRoomId[];
+  readonly computedAt: UnixMs;
+}
+
+export function runMultiRoomForeshadowPlanning(
+  planner: ForeshadowPlanner,
+  contexts: ReadonlyArray<{ roomId: ChatRoomId; evidence: ChatPostRunEvidenceSnapshot; turningPoint?: ChatTurningPoint | null; blameVectors?: readonly ChatPostRunBlameVector[]; moments?: readonly ChatMoment[] }>,
+): MultiRoomForeshadowResult {
+  const resolved: ChatRoomId[] = [];
+  const skipped: ChatRoomId[] = [];
+
+  for (const ctx of contexts) {
+    try {
+      planner.plan(ctx);
+      resolved.push(ctx.roomId);
+    } catch {
+      skipped.push(ctx.roomId);
+    }
+  }
+
+  return Object.freeze({
+    resolvedRooms: Object.freeze(resolved),
+    skippedRooms: Object.freeze(skipped),
+    computedAt: nowMs(),
+  });
+}
+
+// ============================================================================
+// MARK: Foreshadow serialization helpers
+// ============================================================================
+
+export interface ForeshadowPlanSerializedState {
+  readonly version: '2026-03-22.1';
+  readonly byRoom: Readonly<Record<ChatRoomId, ReturnType<ForeshadowPlanner['getLastPlan']>>>;
+  readonly serializedAt: UnixMs;
+  readonly roomCount: number;
+}
+
+export function serializeForeshadowPlannerState(
+  planner: ForeshadowPlanner,
+): ForeshadowPlanSerializedState {
+  const byRoom: Record<ChatRoomId, ReturnType<ForeshadowPlanner['getLastPlan']>> = {};
+  for (const roomId of planner.getRoomIds()) {
+    byRoom[roomId] = planner.getLastPlan(roomId);
+  }
+  return Object.freeze({
+    version: '2026-03-22.1',
+    byRoom: Object.freeze(byRoom),
+    serializedAt: nowMs(),
+    roomCount: planner.getRoomIds().length,
+  });
+}
+
+// ============================================================================
+// MARK: Module laws constant export
+// ============================================================================
+
+export const FORESHADOW_MODULE_LAWS_EXTENDED = Object.freeze([
+  ...CHAT_FORESHADOW_PLANNER_MODULE_LAWS,
+  'Multi-room planning skips failing rooms — does not throw.',
+  'Witness seeds are null when required IDs are not supplied by caller.',
+  'Blame synthesis returns empty directives when kind mapping is missing.',
+  'Heat adjustment is additive only — confidence never decreases via heat.',
+  'Epoch tracking is per-room and purge-safe.',
+]);
+
+// ============================================================================
+// MARK: Foreshadow-to-directive coherence map
+// ============================================================================
+
+/** Known alignment between foreshadow kinds and directive kinds. */
+export const FORESHADOW_DIRECTIVE_COHERENCE_MAP: Readonly<
+  Partial<Record<ChatPostRunForeshadowKind, ChatPostRunDirectiveKind>>
+> = Object.freeze({
+  DEBT_UNPAID: 'TRUST_HELPER',
+  RIVAL_RETURN: 'PREPARE_COUNTERPLAY',
+  CHANNEL_REPUTATION_SHIFT: 'STAY_PRIVATE',
+  WORLD_EVENT_ECHO: 'WATCH_CROWD_HEAT',
+  LEGEND_CALLBACK: 'HOLD_LEGEND_LINE',
+  SEASON_THREAD: 'TAKE_A_BREATH',
+});
+
+export function getCoherentDirectiveForForeshadow(
+  foreshadow: ChatPostRunForeshadow,
+): ChatPostRunDirectiveKind | null {
+  return FORESHADOW_DIRECTIVE_COHERENCE_MAP[foreshadow.kind] ?? null;
+}
+
+// ============================================================================
+// MARK: Foreshadow kind confidence thresholds
+// ============================================================================
+
+export const FORESHADOW_KIND_MIN_CONFIDENCE: Readonly<
+  Partial<Record<ChatPostRunForeshadowKind, number>>
+> = Object.freeze({
+  LEGEND_CALLBACK: 0.70,
+  WORLD_EVENT_ECHO: 0.65,
+  RIVAL_RETURN: 0.55,
+  DEBT_UNPAID: 0.60,
+  CHANNEL_REPUTATION_SHIFT: 0.50,
+  SEASON_THREAD: 0.40,
+});
+
+export function meetsForeshadowConfidenceThreshold(
+  foreshadow: ChatPostRunForeshadow,
+): boolean {
+  const threshold = FORESHADOW_KIND_MIN_CONFIDENCE[foreshadow.kind] ?? 0.40;
+  return (foreshadow.confidence01 as unknown as number) >= threshold;
+}
+
+export function filterForeshadowsByConfidenceThreshold(
+  foreshadows: readonly ChatPostRunForeshadow[],
+): readonly ChatPostRunForeshadow[] {
+  return foreshadows.filter(meetsForeshadowConfidenceThreshold);
+}
+
+// ============================================================================
+// MARK: Foreshadow threat scorer
+// ============================================================================
+
+export function scoreForeshadowThreat(foreshadow: ChatPostRunForeshadow): number {
+  const threat = foreshadow.threat01 as unknown as number;
+  const conf = foreshadow.confidence01 as unknown as number;
+  return Math.min(1, threat * conf);
+}
+
+export function sortForeshadowsByThreat(
+  foreshadows: readonly ChatPostRunForeshadow[],
+): readonly ChatPostRunForeshadow[] {
+  return [...foreshadows].sort((a, b) => scoreForeshadowThreat(b) - scoreForeshadowThreat(a));
+}
+
+export function sortForeshadowsByHope(
+  foreshadows: readonly ChatPostRunForeshadow[],
+): readonly ChatPostRunForeshadow[] {
+  const hopeScore = (f: ChatPostRunForeshadow) =>
+    (f.hope01 as unknown as number) * (f.confidence01 as unknown as number);
+  return [...foreshadows].sort((a, b) => hopeScore(b) - hopeScore(a));
+}

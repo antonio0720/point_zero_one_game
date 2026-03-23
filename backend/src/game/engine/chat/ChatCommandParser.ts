@@ -59,6 +59,7 @@ import {
   type ChatRoomKind,
   type ChatRoomStageMood,
   type ChatRoomState,
+  type ChatMountPolicy,
   type ChatRuntimeConfig,
   type ChatSessionRole,
   type ChatSessionState,
@@ -1363,3 +1364,665 @@ export function listAllowedCommandsForRoomKind(kind: ChatRoomKind): readonly str
 export const DEFAULT_BACKEND_CHAT_COMMAND_PARSER = new ChatCommandParser({
   runtime: DEFAULT_BACKEND_CHAT_RUNTIME,
 });
+
+// ============================================================================
+// MARK: Command parse watch bus
+// ============================================================================
+
+export type CommandParseWatchEvent =
+  | { kind: 'ACCEPTED'; commandName: string; roomId: ChatRoomId; sessionId: string }
+  | { kind: 'REJECTED'; commandName: string; reason: string; roomId: ChatRoomId }
+  | { kind: 'UNKNOWN'; raw: string; roomId: ChatRoomId };
+
+export type CommandParseWatchCallback = (event: CommandParseWatchEvent) => void;
+
+export class CommandParseWatchBus {
+  private readonly subscribers = new Set<CommandParseWatchCallback>();
+
+  subscribe(cb: CommandParseWatchCallback): () => void {
+    this.subscribers.add(cb);
+    return () => this.subscribers.delete(cb);
+  }
+
+  emit(event: CommandParseWatchEvent): void {
+    for (const cb of this.subscribers) {
+      try { cb(event); } catch { /* isolate */ }
+    }
+  }
+
+  emitAccepted(commandName: string, roomId: ChatRoomId, sessionId: string): void {
+    this.emit({ kind: 'ACCEPTED', commandName, roomId, sessionId });
+  }
+
+  emitRejected(commandName: string, reason: string, roomId: ChatRoomId): void {
+    this.emit({ kind: 'REJECTED', commandName, reason, roomId });
+  }
+
+  emitUnknown(raw: string, roomId: ChatRoomId): void {
+    this.emit({ kind: 'UNKNOWN', raw, roomId });
+  }
+
+  size(): number { return this.subscribers.size; }
+}
+
+// ============================================================================
+// MARK: Command frequency counter
+// ============================================================================
+
+export class CommandFrequencyCounter {
+  private readonly counts = new Map<string, number>();
+
+  record(commandName: string): void {
+    this.counts.set(commandName, (this.counts.get(commandName) ?? 0) + 1);
+  }
+
+  count(commandName: string): number {
+    return this.counts.get(commandName) ?? 0;
+  }
+
+  total(): number {
+    let sum = 0;
+    for (const n of this.counts.values()) sum += n;
+    return sum;
+  }
+
+  mostFrequent(): string | null {
+    let max = 0;
+    let best: string | null = null;
+    for (const [name, n] of this.counts) {
+      if (n > max) { max = n; best = name; }
+    }
+    return best;
+  }
+
+  distribution(): Readonly<Record<string, number>> {
+    const result: Record<string, number> = {};
+    for (const [name, n] of this.counts) result[name] = n;
+    return Object.freeze(result);
+  }
+
+  reset(): void { this.counts.clear(); }
+}
+
+// ============================================================================
+// MARK: Command parse result fingerprint
+// ============================================================================
+
+export interface CommandParseFingerprint {
+  readonly commandName: string;
+  readonly accepted: boolean;
+  readonly roomId: ChatRoomId;
+  readonly roomKind: ChatRoomKind;
+  readonly sessionRole: ChatSessionRole;
+  readonly requestedChannelSwitch: ChatVisibleChannel | null;
+  readonly hash: string;
+}
+
+export function computeCommandParseFingerprint(
+  envelope: ChatCommandExecutionEnvelope,
+  room: ChatRoomState,
+  session: ChatSessionState,
+): CommandParseFingerprint {
+  const name = envelope.parsed?.name ?? 'unknown';
+  const hash = [
+    name,
+    envelope.execution.accepted ? 'Y' : 'N',
+    room.roomId,
+    room.roomKind,
+    session.identity.role,
+    envelope.requestedChannelSwitch ?? 'NONE',
+  ].join('|');
+
+  return Object.freeze({
+    commandName: name,
+    accepted: envelope.execution.accepted,
+    roomId: room.roomId,
+    roomKind: room.roomKind,
+    sessionRole: session.identity.role,
+    requestedChannelSwitch: envelope.requestedChannelSwitch,
+    hash,
+  });
+}
+
+// ============================================================================
+// MARK: Session command history tracker
+// ============================================================================
+
+export interface SessionCommandRecord {
+  readonly commandName: string;
+  readonly accepted: boolean;
+  readonly reasons: readonly string[];
+  readonly recordedAt: UnixMs;
+}
+
+export class SessionCommandHistoryTracker {
+  private readonly history = new Map<string, SessionCommandRecord[]>();
+
+  private keyFor(roomId: ChatRoomId, sessionId: string): string {
+    return `${roomId}:${sessionId}`;
+  }
+
+  record(
+    roomId: ChatRoomId,
+    sessionId: string,
+    envelope: ChatCommandExecutionEnvelope,
+    now: UnixMs,
+  ): void {
+    const key = this.keyFor(roomId, sessionId);
+    if (!this.history.has(key)) this.history.set(key, []);
+    this.history.get(key)!.push(Object.freeze({
+      commandName: envelope.parsed?.name ?? 'unknown',
+      accepted: envelope.execution.accepted,
+      reasons: Object.freeze([...envelope.execution.reasons]),
+      recordedAt: now,
+    }));
+  }
+
+  getHistory(roomId: ChatRoomId, sessionId: string): readonly SessionCommandRecord[] {
+    return this.history.get(this.keyFor(roomId, sessionId)) ?? [];
+  }
+
+  lastCommand(roomId: ChatRoomId, sessionId: string): SessionCommandRecord | null {
+    const list = this.history.get(this.keyFor(roomId, sessionId));
+    return list && list.length > 0 ? list[list.length - 1]! : null;
+  }
+
+  acceptedCount(roomId: ChatRoomId, sessionId: string): number {
+    return this.getHistory(roomId, sessionId).filter((r) => r.accepted).length;
+  }
+
+  rejectedCount(roomId: ChatRoomId, sessionId: string): number {
+    return this.getHistory(roomId, sessionId).filter((r) => !r.accepted).length;
+  }
+
+  purge(roomId: ChatRoomId, sessionId: string): void {
+    this.history.delete(this.keyFor(roomId, sessionId));
+  }
+}
+
+// ============================================================================
+// MARK: Command legality matrix
+// ============================================================================
+
+export interface CommandLegalityEntry {
+  readonly commandName: string;
+  readonly allowedRoomKinds: readonly ChatRoomKind[];
+  readonly allowedRoles: readonly ChatSessionRole[];
+  readonly requiresChannel: ChatVisibleChannel | null;
+  readonly blockedInMoods: readonly ChatRoomStageMood[];
+}
+
+export const COMMAND_LEGALITY_MATRIX: readonly CommandLegalityEntry[] = (Object.freeze([
+  Object.freeze({
+    commandName: 'help',
+    allowedRoomKinds: ['GLOBAL', 'LOBBY', 'SYNDICATE', 'DEAL_ROOM'],
+    allowedRoles: ['PLAYER', 'MODERATOR', 'SPECTATOR', 'NPC', 'SYSTEM'] as readonly ChatSessionRole[],
+    requiresChannel: null,
+    blockedInMoods: [],
+  }),
+  Object.freeze({
+    commandName: 'channel',
+    allowedRoomKinds: ['GLOBAL', 'LOBBY', 'SYNDICATE'],
+    allowedRoles: ['PLAYER', 'MODERATOR'] as readonly ChatSessionRole[],
+    requiresChannel: null,
+    blockedInMoods: ['HOSTILE', 'PREDATORY'],
+  }),
+  Object.freeze({
+    commandName: 'quiet',
+    allowedRoomKinds: ['GLOBAL', 'LOBBY', 'SYNDICATE', 'DEAL_ROOM'],
+    allowedRoles: ['PLAYER', 'MODERATOR'] as readonly ChatSessionRole[],
+    requiresChannel: null,
+    blockedInMoods: [],
+  }),
+  Object.freeze({
+    commandName: 'replay',
+    allowedRoomKinds: ['GLOBAL', 'LOBBY', 'SYNDICATE'],
+    allowedRoles: ['PLAYER', 'MODERATOR', 'SPECTATOR'] as readonly ChatSessionRole[],
+    requiresChannel: null,
+    blockedInMoods: ['HOSTILE', 'PREDATORY'],
+  }),
+  Object.freeze({
+    commandName: 'proof',
+    allowedRoomKinds: ['GLOBAL', 'LOBBY', 'SYNDICATE', 'DEAL_ROOM'],
+    allowedRoles: ['PLAYER', 'MODERATOR'] as readonly ChatSessionRole[],
+    requiresChannel: null,
+    blockedInMoods: [],
+  }),
+  Object.freeze({
+    commandName: 'focus',
+    allowedRoomKinds: ['DEAL_ROOM', 'SYNDICATE'],
+    allowedRoles: ['PLAYER', 'MODERATOR'] as readonly ChatSessionRole[],
+    requiresChannel: null,
+    blockedInMoods: [],
+  }),
+  Object.freeze({
+    commandName: 'status',
+    allowedRoomKinds: ['GLOBAL', 'LOBBY', 'SYNDICATE', 'DEAL_ROOM'],
+    allowedRoles: ['PLAYER', 'MODERATOR', 'SPECTATOR', 'NPC', 'SYSTEM'] as readonly ChatSessionRole[],
+    requiresChannel: null,
+    blockedInMoods: [],
+  }),
+]) as unknown) as readonly CommandLegalityEntry[];
+
+export function isCommandLegalInContext(
+  commandName: string,
+  roomKind: ChatRoomKind,
+  role: ChatSessionRole,
+  mood: ChatRoomStageMood,
+): boolean {
+  const entry = COMMAND_LEGALITY_MATRIX.find((e) => e.commandName === commandName);
+  if (!entry) return false;
+  if (!entry.allowedRoomKinds.includes(roomKind)) return false;
+  if (!entry.allowedRoles.includes(role)) return false;
+  if (entry.blockedInMoods.includes(mood)) return false;
+  return true;
+}
+
+// ============================================================================
+// MARK: Channel switch validator
+// ============================================================================
+
+export function validateChannelSwitch(
+  fromChannel: ChatVisibleChannel,
+  toChannel: ChatVisibleChannel,
+  session: ChatSessionState,
+  runtime: ChatRuntimeConfig,
+): { valid: boolean; reason: string | null } {
+  if (!runtimeAllowsVisibleChannel(runtime, toChannel)) {
+    return { valid: false, reason: `channel_${toChannel}_not_allowed_in_runtime` };
+  }
+
+  const mountKey = session.transportMetadata['mountKey'] as ChatMountPolicy['mountTarget'] | undefined;
+  const policy = mountKey ? CHAT_MOUNT_POLICIES[mountKey] : undefined;
+  if (!policy) return { valid: false, reason: 'no_mount_policy' };
+
+  if (!policy.allowedVisibleChannels.includes(toChannel)) {
+    return { valid: false, reason: `channel_${toChannel}_not_in_mount_policy` };
+  }
+
+  if (fromChannel === toChannel) {
+    return { valid: false, reason: 'already_on_requested_channel' };
+  }
+
+  const desc = CHAT_CHANNEL_DESCRIPTORS[toChannel as ChatChannelId];
+  if (desc && !desc.supportsComposer) {
+    return { valid: false, reason: 'target_channel_does_not_support_composer' };
+  }
+
+  return { valid: true, reason: null };
+}
+
+// ============================================================================
+// MARK: Command parse batch runner
+// ============================================================================
+
+export interface BatchCommandParseResult {
+  readonly total: number;
+  readonly accepted: number;
+  readonly rejected: number;
+  readonly unknown: number;
+  readonly byCommand: Readonly<Record<string, number>>;
+}
+
+export function runBatchCommandParse(
+  parser: ChatCommandParser,
+  requests: readonly ChatCommandParseRequest[],
+): BatchCommandParseResult {
+  let accepted = 0;
+  let rejected = 0;
+  let unknown = 0;
+  const byCommand: Record<string, number> = {};
+
+  for (const req of requests) {
+    const envelope = parser.execute(req);
+    const name = envelope.parsed?.name ?? '__unknown__';
+    byCommand[name] = (byCommand[name] ?? 0) + 1;
+    if (envelope.parsed === null) {
+      unknown++;
+    } else if (envelope.execution.accepted) {
+      accepted++;
+    } else {
+      rejected++;
+    }
+  }
+
+  return Object.freeze({
+    total: requests.length,
+    accepted,
+    rejected,
+    unknown,
+    byCommand: Object.freeze(byCommand),
+  });
+}
+
+// ============================================================================
+// MARK: Command audit report
+// ============================================================================
+
+export interface CommandAuditReport {
+  readonly roomId: ChatRoomId;
+  readonly sessionId: string;
+  readonly totalCommands: number;
+  readonly acceptedCommands: number;
+  readonly rejectedCommands: number;
+  readonly mostFrequentCommand: string | null;
+  readonly lastCommandName: string | null;
+  readonly lastCommandAccepted: boolean | null;
+}
+
+export function buildCommandAuditReport(
+  roomId: ChatRoomId,
+  sessionId: string,
+  tracker: SessionCommandHistoryTracker,
+): CommandAuditReport {
+  const history = tracker.getHistory(roomId, sessionId);
+  const counter = new CommandFrequencyCounter();
+  for (const record of history) counter.record(record.commandName);
+  const last = tracker.lastCommand(roomId, sessionId);
+
+  return Object.freeze({
+    roomId,
+    sessionId,
+    totalCommands: history.length,
+    acceptedCommands: tracker.acceptedCount(roomId, sessionId),
+    rejectedCommands: tracker.rejectedCount(roomId, sessionId),
+    mostFrequentCommand: counter.mostFrequent(),
+    lastCommandName: last?.commandName ?? null,
+    lastCommandAccepted: last?.accepted ?? null,
+  });
+}
+
+// ============================================================================
+// MARK: Command state snapshot
+// ============================================================================
+
+export interface CommandParserStateSnapshot {
+  readonly activeRoomCount: number;
+  readonly totalCommandsParsed: number;
+  readonly acceptanceRate01: number;
+  readonly computedAt: UnixMs;
+}
+
+export function buildCommandParserStateSnapshot(
+  historyTracker: SessionCommandHistoryTracker,
+  roomIds: readonly ChatRoomId[],
+  sessionIds: readonly string[],
+  now: UnixMs,
+): CommandParserStateSnapshot {
+  let total = 0;
+  let accepted = 0;
+
+  for (const roomId of roomIds) {
+    for (const sessionId of sessionIds) {
+      const history = historyTracker.getHistory(roomId, sessionId);
+      total += history.length;
+      accepted += history.filter((r) => r.accepted).length;
+    }
+  }
+
+  return Object.freeze({
+    activeRoomCount: roomIds.length,
+    totalCommandsParsed: total,
+    acceptanceRate01: total > 0 ? accepted / total : 0,
+    computedAt: now,
+  });
+}
+
+// ============================================================================
+// MARK: Module constants
+// ============================================================================
+
+export const CHAT_COMMAND_PARSER_MODULE_NAME = 'ChatCommandParser' as const;
+export const CHAT_COMMAND_PARSER_MODULE_VERSION = '2026.03.14.2' as const;
+
+export const CHAT_COMMAND_PARSER_MODULE_LAWS = Object.freeze([
+  'Commands are parsed before any transcript mutation.',
+  'Unknown commands produce a rejected execution, never a throw.',
+  'Channel switch targets are validated against mount policy and runtime.',
+  'Legality checks are deterministic — same inputs always produce same outcome.',
+  'System messages for accepted commands are produced here, not downstream.',
+  'All parse results are frozen before export.',
+]);
+
+export const CHAT_COMMAND_PARSER_MODULE_DESCRIPTOR = Object.freeze({
+  name: CHAT_COMMAND_PARSER_MODULE_NAME,
+  version: CHAT_COMMAND_PARSER_MODULE_VERSION,
+  laws: CHAT_COMMAND_PARSER_MODULE_LAWS,
+});
+
+export function createCommandParseWatchBus(): CommandParseWatchBus {
+  return new CommandParseWatchBus();
+}
+
+export function createCommandFrequencyCounter(): CommandFrequencyCounter {
+  return new CommandFrequencyCounter();
+}
+
+export function createSessionCommandHistoryTracker(): SessionCommandHistoryTracker {
+  return new SessionCommandHistoryTracker();
+}
+
+// ============================================================================
+// MARK: Command parser state snapshot
+// ============================================================================
+
+export interface CommandRoomSummary {
+  readonly roomId: ChatRoomId;
+  readonly roomKind: ChatRoomKind;
+  readonly stageMood: ChatRoomStageMood;
+  readonly allowedCommands: readonly string[];
+}
+
+export function buildCommandRoomSummary(room: ChatRoomState): CommandRoomSummary {
+  return Object.freeze({
+    roomId: room.roomId,
+    roomKind: room.roomKind,
+    stageMood: room.stageMood,
+    allowedCommands: listAllowedCommandsForRoomKind(room.roomKind),
+  });
+}
+
+// ============================================================================
+// MARK: Command source type classifier
+// ============================================================================
+
+export function classifyCommandSourceType(sourceType: ChatSourceType): 'PLAYER' | 'SYSTEM' | 'NPC' | 'UNKNOWN' {
+  if (sourceType === 'PLAYER') return 'PLAYER';
+  if (sourceType === 'SYSTEM') return 'SYSTEM';
+  if (sourceType === 'NPC_HATER' || sourceType === 'NPC_HELPER' || sourceType === 'NPC_AMBIENT') return 'NPC';
+  return 'UNKNOWN';
+}
+
+// ============================================================================
+// MARK: Execution envelope validator
+// ============================================================================
+
+export interface ExecutionEnvelopeValidation {
+  readonly valid: boolean;
+  readonly violations: readonly string[];
+}
+
+export function validateExecutionEnvelope(
+  envelope: ChatCommandExecutionEnvelope,
+): ExecutionEnvelopeValidation {
+  const violations: string[] = [];
+
+  if (!envelope.execution) violations.push('execution_required');
+  if (envelope.requestedChannelSwitch && envelope.requestedPresenceMode) {
+    violations.push('cannot_request_both_channel_switch_and_presence_mode');
+  }
+
+  return Object.freeze({
+    valid: violations.length === 0,
+    violations: Object.freeze(violations),
+  });
+}
+
+// ============================================================================
+// MARK: Extended module namespace
+// ============================================================================
+
+export const ChatCommandParserModuleExtended = Object.freeze({
+  // Parser class
+  ChatCommandParser,
+  DEFAULT_BACKEND_CHAT_COMMAND_PARSER,
+
+  // Watch bus
+  createCommandParseWatchBus,
+
+  // Frequency counter
+  createCommandFrequencyCounter,
+
+  // History tracker
+  createSessionCommandHistoryTracker,
+
+  // Fingerprint
+  computeCommandParseFingerprint,
+
+  // Legality
+  COMMAND_LEGALITY_MATRIX,
+  isCommandLegalInContext,
+
+  // Channel switch
+  validateChannelSwitch,
+
+  // Batch
+  runBatchCommandParse,
+
+  // Audit
+  buildCommandAuditReport,
+
+  // Room summary
+  buildCommandRoomSummary,
+
+  // State snapshot
+  buildCommandParserStateSnapshot,
+
+  // Source type
+  classifyCommandSourceType,
+
+  // Envelope validation
+  validateExecutionEnvelope,
+
+  // Envelope formatter
+  formatExecutionEnvelopeSummary: formatCommandExecutionSummary,
+
+  // Room kind allowed commands
+  listAllowedCommandsForRoomKind,
+
+  // Module constants
+  CHAT_COMMAND_PARSER_MODULE_DESCRIPTOR,
+  CHAT_COMMAND_PARSER_MODULE_LAWS,
+  CHAT_COMMAND_PARSER_MODULE_NAME,
+  CHAT_COMMAND_PARSER_MODULE_VERSION,
+} as const);
+
+// ============================================================================
+// MARK: Command prefix detector
+// ============================================================================
+
+export function detectCommandPrefix(text: string, prefix: string): boolean {
+  return text.trim().startsWith(prefix);
+}
+
+export function stripCommandPrefix(text: string, prefix: string): string {
+  const trimmed = text.trim();
+  if (trimmed.startsWith(prefix)) return trimmed.slice(prefix.length);
+  return trimmed;
+}
+
+// ============================================================================
+// MARK: Command name normalizer
+// ============================================================================
+
+export function normalizeCommandName(name: string): string {
+  return name.toLowerCase().trim().replace(/[^a-z0-9_-]/g, '');
+}
+
+// ============================================================================
+// MARK: Command execution summary formatter
+// ============================================================================
+
+export function formatCommandExecutionSummary(envelope: ChatCommandExecutionEnvelope): string {
+  const parts: string[] = [
+    `command=${envelope.parsed?.name ?? 'unknown'}`,
+    `accepted=${envelope.execution.accepted ? 'yes' : 'no'}`,
+  ];
+  if (envelope.requestedChannelSwitch) parts.push(`channel=${envelope.requestedChannelSwitch}`);
+  if (envelope.requestedPresenceMode) parts.push(`presence=${envelope.requestedPresenceMode}`);
+  if (envelope.execution.reasons.length > 0) parts.push(`reasons=${envelope.execution.reasons.join('|')}`);
+  return parts.join(' ');
+}
+
+// ============================================================================
+// MARK: Session role command gate
+// ============================================================================
+
+export const ROLE_COMMAND_ALLOWLIST: Readonly<Record<ChatSessionRole, readonly string[]>> =
+  Object.freeze({
+    PLAYER: ['help', 'channel', 'quiet', 'replay', 'proof', 'focus', 'status'],
+    SYSTEM: ['help', 'channel', 'quiet', 'replay', 'proof', 'focus', 'status'],
+    SPECTATOR: ['help', 'replay', 'status'],
+    NPC: ['help', 'status'],
+    MODERATOR: ['help', 'channel', 'quiet', 'replay', 'proof', 'status'],
+  } as const);
+
+export function isCommandAllowedForRole(
+  commandName: string,
+  role: ChatSessionRole,
+): boolean {
+  return ROLE_COMMAND_ALLOWLIST[role]?.includes(commandName) ?? false;
+}
+
+// ============================================================================
+// MARK: State-aware parse context builder
+// ============================================================================
+
+export function buildParseRequestFromState(
+  request: ChatPlayerMessageSubmitRequest,
+  state: ChatState,
+  now: UnixMs,
+): ChatCommandParseRequest | null {
+  const room = state.rooms[request.roomId as ChatRoomId];
+  if (!room) return null;
+
+  const session = state.sessions[request.sessionId];
+  if (!session) return null;
+
+  return Object.freeze({
+    request,
+    room,
+    session,
+    state,
+    now,
+  });
+}
+
+// ============================================================================
+// MARK: Command parse epoch tracker
+// ============================================================================
+
+export class CommandParseEpochTracker {
+  private readonly epochs: Array<{ roomId: ChatRoomId; commandName: string; accepted: boolean; recordedAt: UnixMs }> = [];
+
+  record(roomId: ChatRoomId, commandName: string, accepted: boolean, now: UnixMs): void {
+    this.epochs.push(Object.freeze({ roomId, commandName, accepted, recordedAt: now }));
+  }
+
+  total(): number { return this.epochs.length; }
+
+  acceptedRate(): number {
+    if (this.epochs.length === 0) return 0;
+    return this.epochs.filter((e) => e.accepted).length / this.epochs.length;
+  }
+
+  recentEpochs(limit: number): readonly typeof this.epochs[0][] {
+    return this.epochs.slice(-limit);
+  }
+
+  reset(): void { this.epochs.length = 0; }
+}
+
+export function createCommandParseEpochTracker(): CommandParseEpochTracker {
+  return new CommandParseEpochTracker();
+}

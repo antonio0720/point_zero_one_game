@@ -134,8 +134,6 @@ export const CHAT_COMBAT_BARREL_META: ChatCombatBarrelMeta = Object.freeze({
 // ============================================================================
 
 // Boss fight engine types
-export type CombatBossFightPlan = BossFightEngine.ChatBossFightPlan;
-export type CombatBossFightLedger = BossFightEngine.ChatBossFightLedger;
 export type CombatBossFightOpenRequest = BossFightEngine.ChatBossFightOpenRequest;
 export type CombatBossFightAdvanceRequest = BossFightEngine.ChatBossFightAdvanceRequest;
 export type CombatBossFightSweepRequest = BossFightEngine.ChatBossFightSweepRequest;
@@ -607,7 +605,7 @@ export const CHAT_COMBAT_DOCTRINE = Object.freeze({
     'Silence inside a fight is as intentional as silence outside one.',
     'Public witness, embarrassment exposure, and quote leverage are battle variables.',
     'Helper-assisted counters must stay visible in the ledger.',
-    'Rescue saves the run, not the player's record. Accountability remains.',
+    "Rescue saves the run, not the player's record. Accountability remains.",
     'Every opened fight must be replayable from the returned ledger.',
     'Backend owns authority; frontend may preview but not finalize outcomes.',
     'No transcript mutation, no socket fanout, no frontend rendering decisions here.',

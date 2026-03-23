@@ -1368,3 +1368,72 @@ export const CHAT_TELEGRAPH_WINDOW_NOTES = Object.freeze([
   'HELPER_TEST: A telegraph that intentionally leaves rescue space without killing pressure.',
   'LAST_STAND: High-drama final-turn telegraph for comeback or humiliation endings.',
 ] as const);
+
+// ============================================================================
+// MARK: Fight-kind aware telegraph helpers
+// ============================================================================
+
+/** Returns the dominant threat tag label appropriate for a given boss fight kind. */
+export function telegraphThreatTagForFightKind(kind: ChatBossFightKind): string {
+  switch (kind) {
+    case 'DEAL_ROOM_AMBUSH': return 'negotiation';
+    case 'RIVAL_ASCENSION': return 'rivalry';
+    case 'PUBLIC_HUMILIATION': return 'humiliation';
+    case 'CROWD_SWARM_HUNT': return 'crowd';
+    case 'ARCHIVIST_RECKONING': return 'proof';
+    case 'SHIELD_SIEGE': return 'shield';
+    case 'PRESSURE_TRIAL': return 'pressure';
+    case 'HELPER_BLACKOUT': return 'blackout';
+    case 'WORLD_EVENT_HUNT': return 'world';
+    case 'FINAL_WORD_DUEL': return 'finisher';
+  }
+}
+
+/** Returns whether a boss fight kind warrants elevated witness density in the telegraph. */
+export function fightKindElevatesWitnessDensity(kind: ChatBossFightKind): boolean {
+  return kind === 'PUBLIC_HUMILIATION' || kind === 'RIVAL_ASCENSION' || kind === 'CROWD_SWARM_HUNT';
+}
+
+// ============================================================================
+// MARK: Audience-heat-aware telegraph helpers
+// ============================================================================
+
+/** Returns whether the audience heat makes a visible telegraph mandatory. */
+export function audienceHeatForcesVisibility(heat: ChatAudienceHeat): boolean {
+  return (heat.heat01 as unknown as number) >= 0.8;
+}
+
+/** Returns the lead-in multiplier suggested by current audience heat. */
+export function audienceHeatLeadInMultiplier(heat: ChatAudienceHeat): number {
+  const h = heat.heat01 as unknown as number;
+  if (h >= 0.85) return 0.6;
+  if (h >= 0.65) return 0.8;
+  if (h >= 0.4) return 1.0;
+  return 1.2;
+}
+
+/** Returns the witness bias contribution from audience heat. */
+export function audienceHeatWitnessBias(heat: ChatAudienceHeat): Score01 {
+  return clamp01((heat.heat01 as unknown as number) * 0.5);
+}
+
+// ============================================================================
+// MARK: Nullable-safe telegraph utilities
+// ============================================================================
+
+/** Resolves a nullable binding to a string label. */
+export function bindingLabel(binding: Nullable<ChatBossCounterWindowBinding>): string {
+  if (binding == null) return 'no-binding';
+  return `window:${String(binding.windowId ?? 'unknown')}`;
+}
+
+/** Returns whether the optional source message provides a quote cue. */
+export function sourceMessageHasQuoteCue(msg: Nullable<ChatMessage>): boolean {
+  if (msg == null) return false;
+  return msg.bodyParts.some((p) => p.type === 'QUOTE');
+}
+
+/** Resolves the optional cause event id to a label. */
+export function causeEventLabel(id: Nullable<ChatEventId>): string {
+  return id != null ? `event:${String(id)}` : 'no-cause';
+}

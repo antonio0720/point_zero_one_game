@@ -1877,3 +1877,190 @@ export function normalizeHeat(value: number): Score01 {
 export function stampNow(now: number): UnixMs {
   return asUnixMs(now);
 }
+
+// ============================================================================
+// MARK: State watch bus
+// ============================================================================
+
+export interface ChatStateWatchEvent {
+  readonly kind: 'room_created' | 'room_removed' | 'session_attached' | 'session_detached' | 'transcript_mutated' | 'heat_updated';
+  readonly roomId: ChatRoomId;
+  readonly at: UnixMs;
+  readonly payload: Readonly<Record<string, unknown>>;
+}
+
+export type ChatStateWatchHandler = (event: ChatStateWatchEvent) => void;
+
+export class ChatStateWatchBus {
+  private readonly handlers: ChatStateWatchHandler[] = [];
+
+  subscribe(handler: ChatStateWatchHandler): () => void {
+    this.handlers.push(handler);
+    return () => {
+      const idx = this.handlers.indexOf(handler);
+      if (idx >= 0) this.handlers.splice(idx, 1);
+    };
+  }
+
+  emit(event: ChatStateWatchEvent): void {
+    for (const h of this.handlers) {
+      try { h(event); } catch { /* isolated */ }
+    }
+  }
+
+  get listenerCount(): number {
+    return this.handlers.length;
+  }
+}
+
+// ============================================================================
+// MARK: State fingerprint
+// ============================================================================
+
+export interface ChatStateFingerprint {
+  readonly roomCount: number;
+  readonly totalSessionCount: number;
+  readonly totalMessageCount: number;
+  readonly activeInvasionCount: number;
+  readonly computedAt: UnixMs;
+}
+
+export function computeChatStateFingerprint(state: ChatState, now: UnixMs): ChatStateFingerprint {
+  const rooms = Object.values(state.rooms);
+  const totalSessionCount = rooms.reduce((sum, r) => sum + Object.keys(r.sessions ?? {}).length, 0);
+  const totalMessageCount = rooms.reduce((sum, r) => sum + (r.transcript?.messageIds?.length ?? 0), 0);
+  return Object.freeze({
+    roomCount: rooms.length,
+    totalSessionCount,
+    totalMessageCount,
+    activeInvasionCount: Object.keys(state.activeInvasions ?? {}).length,
+    computedAt: now,
+  });
+}
+
+// ============================================================================
+// MARK: Room presence summary
+// ============================================================================
+
+export function buildRoomPresenceSummary(state: ChatState, roomId: ChatRoomId): {
+  readonly sessionCount: number;
+  readonly onlineCount: number;
+  readonly awayCount: number;
+  readonly disconnectedCount: number;
+} {
+  if (!state.rooms[roomId]) return Object.freeze({ sessionCount: 0, onlineCount: 0, awayCount: 0, disconnectedCount: 0 });
+  const presences = Object.values(state.presence.byRoom[roomId] ?? {});
+  return Object.freeze({
+    sessionCount: presences.length,
+    onlineCount: presences.filter((p) => p.mode === 'ONLINE').length,
+    awayCount: presences.filter((p) => p.mode === 'AWAY').length,
+    disconnectedCount: presences.filter((p) => p.mode === 'DISCONNECTED').length,
+  });
+}
+
+// ============================================================================
+// MARK: Room typing summary
+// ============================================================================
+
+export function buildRoomTypingSummary(state: ChatState, roomId: ChatRoomId): {
+  readonly typingCount: number;
+  readonly typingSessionIds: readonly ChatSessionId[];
+} {
+  if (!state.rooms[roomId]) return Object.freeze({ typingCount: 0, typingSessionIds: Object.freeze([]) });
+  const typingEntries = (state.typing.byRoom[roomId] ?? [])
+    .filter((snap) => snap.mode === 'TYPING')
+    .map((snap) => snap.sessionId);
+  return Object.freeze({ typingCount: typingEntries.length, typingSessionIds: Object.freeze(typingEntries) });
+}
+
+// ============================================================================
+// MARK: Invasion summary
+// ============================================================================
+
+export function buildActiveInvasionSummary(state: ChatState): {
+  readonly count: number;
+  readonly roomIds: readonly ChatRoomId[];
+} {
+  const invasions = Object.values(state.activeInvasions ?? {});
+  const roomIds = [...new Set(invasions.map((inv) => inv.roomId))];
+  return Object.freeze({ count: invasions.length, roomIds: Object.freeze(roomIds) });
+}
+
+// ============================================================================
+// MARK: Transcript helpers
+// ============================================================================
+
+export function countTranscriptMessages(state: ChatState, roomId: ChatRoomId): number {
+  return state.transcript.byRoom[roomId]?.length ?? 0;
+}
+
+export function countVisibleMessages(state: ChatState, roomId: ChatRoomId): number {
+  return selectVisibleMessages(state, roomId).length;
+}
+
+export function getFirstMessage(state: ChatState, roomId: ChatRoomId): ChatMessage | null {
+  const entries = state.transcript.byRoom[roomId];
+  return entries?.[0]?.message ?? null;
+}
+
+// ============================================================================
+// MARK: Module descriptor
+// ============================================================================
+
+export const CHAT_STATE_MODULE_ID = 'chat_state' as const;
+export const CHAT_STATE_MODULE_VERSION = '2026.03.14' as const;
+
+export const CHAT_STATE_MODULE_DESCRIPTOR = Object.freeze({
+  moduleId: CHAT_STATE_MODULE_ID,
+  version: CHAT_STATE_MODULE_VERSION,
+  capabilities: Object.freeze([
+    'room_management',
+    'session_management',
+    'transcript_management',
+    'presence_management',
+    'typing_management',
+    'proof_chain',
+    'replay_artifacts',
+    'learning_profiles',
+    'inference_snapshots',
+    'relationship_management',
+    'invasion_management',
+    'silence_management',
+    'telemetry',
+    'pending_requests',
+    'pending_reveals',
+    'state_fingerprint',
+    'watch_bus',
+  ]),
+});
+
+export namespace ChatStateModuleExtended {
+  export type WatchBus = ChatStateWatchBus;
+  export type WatchEvent = ChatStateWatchEvent;
+  export type Fingerprint = ChatStateFingerprint;
+
+  export function createWatchBus(): ChatStateWatchBus {
+    return new ChatStateWatchBus();
+  }
+
+  export function describe(): string {
+    return `${CHAT_STATE_MODULE_ID}@${CHAT_STATE_MODULE_VERSION}`;
+  }
+}
+
+export const CHAT_STATE_FULL_MODULE = Object.freeze({
+  descriptor: CHAT_STATE_MODULE_DESCRIPTOR,
+  createWatchBus: () => new ChatStateWatchBus(),
+  computeFingerprint: computeChatStateFingerprint,
+  buildRoomPresenceSummary,
+  buildRoomTypingSummary,
+  buildActiveInvasionSummary,
+  countTranscriptMessages,
+  countVisibleMessages,
+  normalizeHeat,
+  stampNow,
+  uniqueBy,
+  sumUnread,
+  incrementUnread,
+});
+

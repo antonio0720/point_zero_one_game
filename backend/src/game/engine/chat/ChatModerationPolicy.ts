@@ -1849,3 +1849,242 @@ function findActiveInvasionForRoom(state: ChatState, roomId: ChatRoomId): ChatIn
   }
   return null;
 }
+
+// ============================================================================
+// MARK: Watch bus
+// ============================================================================
+
+export interface ChatModerationWatchEvent {
+  readonly kind: 'message_approved' | 'message_rejected' | 'message_quarantined' | 'shadow_applied';
+  readonly roomId: ChatRoomId;
+  readonly sessionId: ChatSessionId;
+  readonly at: UnixMs;
+  readonly payload: Readonly<Record<string, JsonValue>>;
+}
+
+export type ChatModerationWatchHandler = (event: ChatModerationWatchEvent) => void;
+
+export class ChatModerationWatchBus {
+  private readonly handlers: ChatModerationWatchHandler[] = [];
+
+  subscribe(handler: ChatModerationWatchHandler): () => void {
+    this.handlers.push(handler);
+    return () => {
+      const idx = this.handlers.indexOf(handler);
+      if (idx >= 0) this.handlers.splice(idx, 1);
+    };
+  }
+
+  emit(event: ChatModerationWatchEvent): void {
+    for (const h of this.handlers) {
+      try { h(event); } catch { /* isolated */ }
+    }
+  }
+
+  get listenerCount(): number {
+    return this.handlers.length;
+  }
+}
+
+// ============================================================================
+// MARK: Moderation fingerprint
+// ============================================================================
+
+export interface ChatModerationFingerprint {
+  readonly roomId: ChatRoomId;
+  readonly sessionId: ChatSessionId;
+  readonly outcome: ChatModerationOutcome;
+  readonly shadowOnly: boolean;
+  readonly aggregateRisk: number;
+  readonly computedAt: UnixMs;
+}
+
+export function computeModerationFingerprint(
+  roomId: ChatRoomId,
+  sessionId: ChatSessionId,
+  decision: ChatModerationDecision,
+  now: UnixMs,
+): ChatModerationFingerprint {
+  return Object.freeze({
+    roomId,
+    sessionId,
+    outcome: decision.outcome,
+    shadowOnly: decision.shadowOnly,
+    aggregateRisk: 0,
+    computedAt: now,
+  });
+}
+
+// ============================================================================
+// MARK: Moderation epoch tracker
+// ============================================================================
+
+export interface ChatModerationEpochEntry {
+  readonly roomId: ChatRoomId;
+  readonly fingerprint: ChatModerationFingerprint;
+  readonly at: UnixMs;
+}
+
+export class ChatModerationEpochTracker {
+  private readonly epochs = new Map<ChatRoomId, ChatModerationEpochEntry[]>();
+
+  record(roomId: ChatRoomId, fp: ChatModerationFingerprint, at: UnixMs): void {
+    if (!this.epochs.has(roomId)) this.epochs.set(roomId, []);
+    this.epochs.get(roomId)!.push({ roomId, fingerprint: fp, at });
+  }
+
+  getHistory(roomId: ChatRoomId): readonly ChatModerationEpochEntry[] {
+    return this.epochs.get(roomId) ?? [];
+  }
+
+  getLastEntry(roomId: ChatRoomId): ChatModerationEpochEntry | null {
+    const arr = this.epochs.get(roomId);
+    return arr?.[arr.length - 1] ?? null;
+  }
+
+  listRoomIds(): readonly ChatRoomId[] {
+    return Object.freeze([...this.epochs.keys()]);
+  }
+
+  clear(roomId: ChatRoomId): void {
+    this.epochs.delete(roomId);
+  }
+}
+
+// ============================================================================
+// MARK: Moderation decision inspection utilities
+// ============================================================================
+
+export function moderationOutcomeIsPermissive(outcome: ChatModerationOutcome): boolean {
+  return outcome === 'ALLOW' || outcome === 'SHADOW_ONLY';
+}
+
+export function moderationOutcomeIsBlocking(outcome: ChatModerationOutcome): boolean {
+  return outcome === 'REJECT' || outcome === 'QUARANTINE';
+}
+
+export function moderationDecisionIsHighRisk(decision: ChatModerationDecision): boolean {
+  return decision.outcome === 'REJECT' || decision.outcome === 'QUARANTINE';
+}
+
+export function moderationDecisionIsShadowOnly(decision: ChatModerationDecision): boolean {
+  return decision.shadowOnly === true;
+}
+
+export function moderationSignalHasBattle(signal: ChatSignalEnvelope): boolean {
+  return Boolean(signal.battle);
+}
+
+export function moderationSignalHasEconomy(signal: ChatSignalEnvelope): boolean {
+  return Boolean(signal.economy);
+}
+
+export function moderationAffectIsHighFrustration(affect: ChatAffectSnapshot): boolean {
+  return (Number(affect.frustration01) as number) >= 0.75;
+}
+
+export function moderationRoomKindIsCompetitive(kind: ChatRoomKind): boolean {
+  return kind === 'GLOBAL' || kind === 'DEAL_ROOM';
+}
+
+export function moderationStageMoodIsTense(mood: ChatRoomStageMood): boolean {
+  return mood === 'TENSE' || mood === 'HOSTILE';
+}
+
+export function moderationSessionIsOperator(session: ChatSessionState): boolean {
+  return session.identity.role === 'MODERATOR';
+}
+
+export function moderationSessionIsBot(session: ChatSessionState): boolean {
+  return session.identity.role === 'NPC';
+}
+
+export function moderationChannelSupportsComposer(channelId: ChatChannelId): boolean {
+  return CHAT_CHANNEL_DESCRIPTORS[channelId]?.supportsComposer ?? false;
+}
+
+export function moderationRoomIsOverPressureTier(tier: PressureTier, threshold: number): boolean {
+  return (Number(tier) as number) >= threshold;
+}
+
+export function moderationLiveOpsIsActive(liveOps: ChatLiveOpsSnapshot): boolean {
+  return liveOps.haterRaidActive || liveOps.helperBlackout;
+}
+
+export function moderationEconomyHasSignificantBalance(economy: ChatEconomySnapshot): boolean {
+  return (economy.activeDealCount as number) >= 1;
+}
+
+export function moderationInvasionKind(invasion: ChatInvasionState): ChatInvasionState['kind'] {
+  return invasion.kind;
+}
+
+export function moderationBotIdLabel(botId: BotId): string {
+  return `bot:${String(botId)}`;
+}
+
+export function moderationAttackTypeLabel(attackType: AttackType): string {
+  return String(attackType);
+}
+
+export function moderationInferenceSourceLabel(source: ChatInferenceSource): string {
+  return String(source);
+}
+
+export function moderationUserIdLabel(userId: ChatUserId): string {
+  return `user:${String(userId)}`;
+}
+
+// ============================================================================
+// MARK: Module descriptor
+// ============================================================================
+
+export const CHAT_MODERATION_POLICY_MODULE_ID = 'chat_moderation_policy' as const;
+export const CHAT_MODERATION_POLICY_MODULE_VERSION = '2026.03.14' as const;
+
+export const CHAT_MODERATION_POLICY_MODULE_DESCRIPTOR = Object.freeze({
+  moduleId: CHAT_MODERATION_POLICY_MODULE_ID,
+  version: CHAT_MODERATION_POLICY_MODULE_VERSION,
+  capabilities: Object.freeze([
+    'player_moderation',
+    'npc_moderation',
+    'bot_moderation',
+    'liveops_moderation',
+    'shadow_moderation',
+    'invasion_aware_moderation',
+    'rate_aware_moderation',
+    'epoch_tracking',
+    'fingerprinting',
+    'watch_bus',
+  ]),
+});
+
+export namespace ChatModerationPolicyModuleExtended {
+  export type WatchBus = ChatModerationWatchBus;
+  export type WatchEvent = ChatModerationWatchEvent;
+  export type Fingerprint = ChatModerationFingerprint;
+  export type EpochTracker = ChatModerationEpochTracker;
+
+  export function createWatchBus(): ChatModerationWatchBus {
+    return new ChatModerationWatchBus();
+  }
+
+  export function createEpochTracker(): ChatModerationEpochTracker {
+    return new ChatModerationEpochTracker();
+  }
+
+  export function describe(): string {
+    return `${CHAT_MODERATION_POLICY_MODULE_ID}@${CHAT_MODERATION_POLICY_MODULE_VERSION}`;
+  }
+}
+
+export const CHAT_MODERATION_POLICY_FULL_MODULE = Object.freeze({
+  descriptor: CHAT_MODERATION_POLICY_MODULE_DESCRIPTOR,
+  createWatchBus: () => new ChatModerationWatchBus(),
+  createEpochTracker: () => new ChatModerationEpochTracker(),
+  computeFingerprint: computeModerationFingerprint,
+  outcomeIsPermissive: moderationOutcomeIsPermissive,
+  outcomeIsBlocking: moderationOutcomeIsBlocking,
+  decisionIsHighRisk: moderationDecisionIsHighRisk,
+});
+

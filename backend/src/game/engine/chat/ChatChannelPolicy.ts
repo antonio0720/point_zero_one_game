@@ -1278,3 +1278,773 @@ function replayChannelId(artifact: ChatReplayArtifact): ChatChannelId | null {
   }
   return null;
 }
+
+// ============================================================================
+// MARK: Channel descriptor helpers (using actual ChatChannelDescriptor shape)
+// ============================================================================
+
+export function isChannelVisibleToPlayer(channelId: ChatChannelId): boolean {
+  return (CHAT_CHANNEL_DESCRIPTORS[channelId]?.visibleToPlayer) ?? false;
+}
+
+export function isChannelShadowChannel(channelId: ChatChannelId): boolean {
+  // Shadow channels are those not visible to player
+  return !(CHAT_CHANNEL_DESCRIPTORS[channelId]?.visibleToPlayer ?? true);
+}
+
+export function doesChannelSupportComposer(channelId: ChatChannelId): boolean {
+  return (CHAT_CHANNEL_DESCRIPTORS[channelId]?.supportsComposer) ?? false;
+}
+
+export function doesChannelSupportReplay(channelId: ChatChannelId): boolean {
+  return (CHAT_CHANNEL_DESCRIPTORS[channelId]?.supportsReplay) ?? false;
+}
+
+export function doesChannelSupportNpcInjection(channelId: ChatChannelId): boolean {
+  return (CHAT_CHANNEL_DESCRIPTORS[channelId]?.supportsNpcInjection) ?? false;
+}
+
+export function doesChannelSupportShadowWrites(channelId: ChatChannelId): boolean {
+  return (CHAT_CHANNEL_DESCRIPTORS[channelId]?.supportsShadowWrites) ?? false;
+}
+
+export function doesChannelSupportNegotiation(channelId: ChatChannelId): boolean {
+  return (CHAT_CHANNEL_DESCRIPTORS[channelId]?.supportsNegotiation) ?? false;
+}
+
+export function doesChannelSupportRescue(channelId: ChatChannelId): boolean {
+  return (CHAT_CHANNEL_DESCRIPTORS[channelId]?.supportsRescue) ?? false;
+}
+
+// ============================================================================
+// MARK: Channel policy watch bus
+// ============================================================================
+
+export type ChannelPolicyWatchEventKind =
+  | 'CHANNEL_DECISION_MADE'
+  | 'SWITCH_BLOCKED'
+  | 'COMPOSE_BLOCKED'
+  | 'MUTE_APPLIED'
+  | 'SHADOW_ROUTED'
+  | 'REPLAY_BLOCKED';
+
+export interface ChannelPolicyWatchEvent {
+  readonly kind: ChannelPolicyWatchEventKind;
+  readonly roomId: ChatRoomId;
+  readonly sessionId: ChatSessionId;
+  readonly channelId: ChatChannelId | null;
+  readonly reason: string;
+  readonly occurredAt: UnixMs;
+}
+
+export class ChannelPolicyWatchBus {
+  private readonly handlers: Array<(evt: ChannelPolicyWatchEvent) => void> = [];
+
+  subscribe(handler: (evt: ChannelPolicyWatchEvent) => void): () => void {
+    this.handlers.push(handler);
+    return () => {
+      const idx = this.handlers.indexOf(handler);
+      if (idx !== -1) this.handlers.splice(idx, 1);
+    };
+  }
+
+  emit(evt: ChannelPolicyWatchEvent): void {
+    for (const h of this.handlers) {
+      try { h(evt); } catch { /* noop */ }
+    }
+  }
+
+  emitDecision(roomId: ChatRoomId, sessionId: ChatSessionId, channelId: ChatChannelId, reason: string): void {
+    this.emit({ kind: 'CHANNEL_DECISION_MADE', roomId, sessionId, channelId, reason, occurredAt: Date.now() as unknown as UnixMs });
+  }
+
+  emitShadowRoute(roomId: ChatRoomId, sessionId: ChatSessionId, reason: string): void {
+    this.emit({ kind: 'SHADOW_ROUTED', roomId, sessionId, channelId: 'SHADOW' as ChatChannelId, reason, occurredAt: Date.now() as unknown as UnixMs });
+  }
+
+  emitComposeBlock(roomId: ChatRoomId, sessionId: ChatSessionId, reason: string): void {
+    this.emit({ kind: 'COMPOSE_BLOCKED', roomId, sessionId, channelId: null, reason, occurredAt: Date.now() as unknown as UnixMs });
+  }
+}
+
+// ============================================================================
+// MARK: Channel policy analytics
+// ============================================================================
+
+export interface ChannelPolicyDecisionRecord {
+  readonly sessionId: ChatSessionId;
+  readonly roomId: ChatRoomId;
+  readonly channelId: ChatChannelId;
+  readonly decidedAt: UnixMs;
+  readonly wasShadow: boolean;
+  readonly wasBlocked: boolean;
+}
+
+export interface ChannelPolicyAnalytics {
+  readonly totalDecisions: number;
+  readonly shadowRoutedCount: number;
+  readonly blockedCount: number;
+  readonly shadowRoutedRatio: number;
+  readonly blockedRatio: number;
+  readonly channelDistribution: Record<string, number>;
+  readonly generatedAt: UnixMs;
+}
+
+export function buildChannelPolicyAnalytics(
+  records: readonly ChannelPolicyDecisionRecord[],
+): ChannelPolicyAnalytics {
+  const channelDist: Record<string, number> = {};
+  let shadowCount = 0, blockedCount = 0;
+
+  for (const rec of records) {
+    channelDist[rec.channelId] = (channelDist[rec.channelId] ?? 0) + 1;
+    if (rec.wasShadow) shadowCount++;
+    if (rec.wasBlocked) blockedCount++;
+  }
+
+  const total = records.length;
+  return Object.freeze({
+    totalDecisions: total,
+    shadowRoutedCount: shadowCount,
+    blockedCount,
+    shadowRoutedRatio: total > 0 ? shadowCount / total : 0,
+    blockedRatio: total > 0 ? blockedCount / total : 0,
+    channelDistribution: channelDist,
+    generatedAt: Date.now() as unknown as UnixMs,
+  });
+}
+
+// ============================================================================
+// MARK: Channel descriptor lookup (correct ChatChannelDescriptor shape)
+// ============================================================================
+
+export function getChannelDescriptor(channelId: ChatChannelId): ChatChannelDescriptor | null {
+  return CHAT_CHANNEL_DESCRIPTORS[channelId] ?? null;
+}
+
+export function getChannelPersistenceClass(channelId: ChatChannelId): string {
+  return CHAT_CHANNEL_DESCRIPTORS[channelId]?.persistenceClass ?? 'TRANSIENT';
+}
+
+export function isChannelVisibleToPlayerById(channelId: ChatChannelId): boolean {
+  return CHAT_CHANNEL_DESCRIPTORS[channelId]?.visibleToPlayer ?? false;
+}
+
+export function doesChannelSupportCompose(channelId: ChatChannelId): boolean {
+  return CHAT_CHANNEL_DESCRIPTORS[channelId]?.supportsComposer ?? false;
+}
+
+export function doesChannelSupportReplayById(channelId: ChatChannelId): boolean {
+  return CHAT_CHANNEL_DESCRIPTORS[channelId]?.supportsReplay ?? false;
+}
+
+export function isShadowChannelById(channelId: ChatChannelId): boolean {
+  // Shadow channels are those not visible to player and supporting shadow writes
+  const desc = CHAT_CHANNEL_DESCRIPTORS[channelId];
+  return desc ? (!desc.visibleToPlayer && desc.supportsShadowWrites) : false;
+}
+
+// ============================================================================
+// MARK: Channel mount policy resolver (correct ChatMountPolicy shape)
+// ============================================================================
+
+export interface MountPolicyResolution {
+  readonly mountTarget: ChatMountPolicy['mountTarget'];
+  readonly policy: ChatMountPolicy;
+  readonly defaultVisibleChannel: ChatVisibleChannel;
+  readonly allowedVisibleChannels: readonly ChatVisibleChannel[];
+  readonly stageMood: ChatRoomStageMood;
+}
+
+export function resolveMountPolicy(
+  mountTarget: ChatMountPolicy['mountTarget'],
+): MountPolicyResolution {
+  const policy = CHAT_MOUNT_POLICIES[mountTarget];
+  return Object.freeze({
+    mountTarget,
+    policy,
+    defaultVisibleChannel: policy.defaultVisibleChannel,
+    allowedVisibleChannels: policy.allowedVisibleChannels,
+    stageMood: policy.stageMood,
+  });
+}
+
+export function findMountPoliciesForChannel(channelId: ChatVisibleChannel): readonly MountPolicyResolution[] {
+  const results: MountPolicyResolution[] = [];
+  for (const [target, policy] of Object.entries(CHAT_MOUNT_POLICIES) as [ChatMountPolicy['mountTarget'], ChatMountPolicy][]) {
+    if ((policy.allowedVisibleChannels as readonly string[]).includes(channelId)) {
+      results.push(Object.freeze({
+        mountTarget: target,
+        policy,
+        defaultVisibleChannel: policy.defaultVisibleChannel,
+        allowedVisibleChannels: policy.allowedVisibleChannels,
+        stageMood: policy.stageMood,
+      }));
+    }
+  }
+  return Object.freeze(results);
+}
+
+// ============================================================================
+// MARK: Channel compose permission matrix (correct types)
+// ============================================================================
+
+export interface ComposePermissionMatrix {
+  readonly sessionId: ChatSessionId;
+  readonly roomId: ChatRoomId;
+  readonly permittedChannels: readonly ChatChannelId[];
+  readonly blockedChannels: readonly ChatChannelId[];
+  readonly shadowOnly: boolean;
+  readonly fullyBlocked: boolean;
+  readonly generatedAt: UnixMs;
+}
+
+export function buildComposePermissionMatrix(
+  session: ChatSessionState,
+  room: ChatRoomState,
+): ComposePermissionMatrix {
+  const allChannels = Object.keys(CHAT_CHANNEL_DESCRIPTORS) as ChatChannelId[];
+  const muted = isSessionTemporarilyMuted(session) || session.shadowMuted;
+
+  const permitted: ChatChannelId[] = [];
+  const blocked: ChatChannelId[] = [];
+
+  for (const ch of allChannels) {
+    const desc = CHAT_CHANNEL_DESCRIPTORS[ch];
+    if (!desc) continue;
+    // Non-composer channels are always blocked for compose
+    if (!desc.supportsComposer) { blocked.push(ch); continue; }
+    // If muted, only channels that support shadow writes are permitted
+    if (muted && !desc.supportsShadowWrites) { blocked.push(ch); continue; }
+    // Check if visible channel is in room's allowed list
+    const visibleCh = ch as unknown as ChatVisibleChannel;
+    if (desc.visibleToPlayer && !(room.allowedVisibleChannels as readonly string[]).includes(visibleCh)) {
+      blocked.push(ch);
+      continue;
+    }
+    permitted.push(ch);
+  }
+
+  const shadowOnly = muted && permitted.every((ch) => !CHAT_CHANNEL_DESCRIPTORS[ch]?.visibleToPlayer);
+  const fullyBlocked = permitted.length === 0;
+
+  return Object.freeze({
+    sessionId: session.identity.sessionId,
+    roomId: room.roomId,
+    permittedChannels: Object.freeze(permitted),
+    blockedChannels: Object.freeze(blocked),
+    shadowOnly,
+    fullyBlocked,
+    generatedAt: Date.now() as unknown as UnixMs,
+  });
+}
+
+// ============================================================================
+// MARK: Channel rate decision context (correct ChatRateDecision shape)
+// ============================================================================
+
+export interface ChannelRateDecisionContext {
+  readonly sessionId: ChatSessionId;
+  readonly roomId: ChatRoomId;
+  readonly channelId: ChatChannelId;
+  readonly rateDecision: ChatRateDecision;
+  readonly isRateLimited: boolean;
+  readonly retryAfterMs: number;
+  readonly reason: string;
+}
+
+export function buildChannelRateDecisionContext(
+  sessionId: ChatSessionId,
+  roomId: ChatRoomId,
+  channelId: ChatChannelId,
+  rateDecision: ChatRateDecision,
+): ChannelRateDecisionContext {
+  const isRateLimited = rateDecision.outcome !== 'ALLOW';
+  const reason = isRateLimited ? (rateDecision.reasons[0] ?? 'rate_limited') : 'allowed';
+  return Object.freeze({ sessionId, roomId, channelId, rateDecision, isRateLimited, retryAfterMs: rateDecision.retryAfterMs, reason });
+}
+
+// ============================================================================
+// MARK: NPC channel visibility (correct ChatNpcRole: HATER|HELPER|AMBIENT|NARRATOR)
+// ============================================================================
+
+export interface NpcChannelVisibility {
+  readonly npcRole: ChatNpcRole;
+  readonly allowedVisibleChannels: readonly ChatVisibleChannel[];
+  readonly canComposeShadow: boolean;
+  readonly canReadShadow: boolean;
+}
+
+export function buildNpcChannelVisibility(npcRole: ChatNpcRole): NpcChannelVisibility {
+  const base: NpcChannelVisibility = {
+    npcRole,
+    allowedVisibleChannels: Object.freeze(['GLOBAL'] as ChatVisibleChannel[]),
+    canComposeShadow: false,
+    canReadShadow: false,
+  };
+
+  switch (npcRole) {
+    case 'HATER': return Object.freeze({ ...base, canComposeShadow: true, allowedVisibleChannels: Object.freeze(['GLOBAL', 'SYNDICATE'] as ChatVisibleChannel[]) });
+    case 'HELPER': return Object.freeze({ ...base, canComposeShadow: true, canReadShadow: true, allowedVisibleChannels: Object.freeze(['GLOBAL', 'DEAL_ROOM'] as ChatVisibleChannel[]) });
+    case 'AMBIENT': return Object.freeze({ ...base, allowedVisibleChannels: Object.freeze(['GLOBAL', 'LOBBY'] as ChatVisibleChannel[]) });
+    case 'NARRATOR': return Object.freeze({ ...base, canReadShadow: true });
+    default: return Object.freeze(base);
+  }
+}
+
+// ============================================================================
+// MARK: Channel typing eligibility (correct ChatTypingSnapshot shape)
+// ============================================================================
+
+export interface TypingEligibility {
+  readonly sessionId: ChatSessionId;
+  readonly isEligible: boolean;
+  readonly channelId: ChatVisibleChannel | null;
+  readonly reason: string;
+}
+
+export function checkTypingEligibility(
+  session: ChatSessionState,
+  typingSnapshot: ChatTypingSnapshot | null,
+): TypingEligibility {
+  const sessionId = session.identity.sessionId;
+
+  if (session.shadowMuted) {
+    return Object.freeze({ sessionId, isEligible: false, channelId: null, reason: 'shadow_muted' });
+  }
+  if (isSessionTemporarilyMuted(session)) {
+    return Object.freeze({ sessionId, isEligible: false, channelId: null, reason: 'temporarily_muted' });
+  }
+  if (session.connectionState === 'DISCONNECTED') {
+    return Object.freeze({ sessionId, isEligible: false, channelId: null, reason: 'disconnected' });
+  }
+
+  const channelId = typingSnapshot?.channelId ?? null;
+  return Object.freeze({ sessionId, isEligible: true, channelId, reason: 'eligible' });
+}
+
+// ============================================================================
+// MARK: Channel signal routing (correct ChatSignalEnvelope / ChatInvasionState)
+// ============================================================================
+
+export interface SignalRoutingResult {
+  readonly signalType: string;
+  readonly targetChannelId: ChatChannelId;
+  readonly shouldShadow: boolean;
+  readonly reason: string;
+}
+
+export function routeSignalToChannel(
+  signal: ChatSignalEnvelope,
+  invasionState: ChatInvasionState | null,
+): SignalRoutingResult {
+  const signalType = signal.type;
+  let targetChannel: ChatChannelId = 'GLOBAL' as ChatChannelId;
+  let shouldShadow = false;
+  let reason = 'default_global_routing';
+
+  if (invasionState?.status === 'ACTIVE') {
+    targetChannel = invasionState.channelId;
+    reason = 'invasion_active';
+  } else if (signal.liveops) {
+    targetChannel = 'LIVEOPS_SHADOW' as ChatChannelId;
+    shouldShadow = true;
+    reason = 'liveops_signal_shadow';
+  } else if (signal.battle) {
+    reason = 'battle_signal_global';
+  }
+
+  return Object.freeze({ signalType, targetChannelId: targetChannel, shouldShadow, reason });
+}
+
+// ============================================================================
+// MARK: Channel audience heat routing (correct ChatAudienceHeat: heat01, channelId)
+// ============================================================================
+
+export interface AudienceHeatChannelRoute {
+  readonly heat01: number;
+  readonly channelId: ChatVisibleChannel;
+  readonly boostApplied: boolean;
+  readonly suppressApplied: boolean;
+  readonly swarmDirection: ChatAudienceHeat['swarmDirection'];
+  readonly reason: string;
+}
+
+export function routeAudienceHeatToChannel(heat: ChatAudienceHeat): AudienceHeatChannelRoute {
+  const heat01 = heat.heat01 as unknown as number;
+  const channelId = heat.channelId;
+  let boost = false, suppress = false;
+  let reason = 'standard';
+
+  if (heat01 >= 0.9) { boost = true; reason = 'extreme_heat_boost'; }
+  else if (heat01 <= 0.1) { suppress = true; reason = 'low_heat_suppress'; }
+
+  return Object.freeze({ heat01, channelId, boostApplied: boost, suppressApplied: suppress, swarmDirection: heat.swarmDirection, reason });
+}
+
+// ============================================================================
+// MARK: Channel input envelope enrichment (correct ChatInputEnvelope union type)
+// ============================================================================
+
+export interface EnrichedInputEnvelope {
+  readonly original: ChatInputEnvelope;
+  readonly resolvedChannelId: ChatChannelId | null;
+  readonly isPlayerMessage: boolean;
+  readonly enrichedAt: UnixMs;
+}
+
+export function enrichInputEnvelope(envelope: ChatInputEnvelope): EnrichedInputEnvelope {
+  let resolvedChannelId: ChatChannelId | null = null;
+  let isPlayerMessage = false;
+
+  if (envelope.kind === 'PLAYER_MESSAGE_SUBMIT') {
+    const payload = (envelope as { kind: string; emittedAt: UnixMs; payload: { channelId: ChatChannelId } }).payload;
+    resolvedChannelId = payload.channelId ?? null;
+    isPlayerMessage = true;
+  } else if (envelope.kind === 'TYPING_UPDATED') {
+    const payload = (envelope as { kind: string; emittedAt: UnixMs; payload: { channelId: ChatChannelId } }).payload;
+    resolvedChannelId = payload.channelId ?? null;
+  }
+
+  return Object.freeze({ original: envelope, resolvedChannelId, isPlayerMessage, enrichedAt: Date.now() as unknown as UnixMs });
+}
+
+// ============================================================================
+// MARK: Channel policy module descriptor
+// ============================================================================
+
+export const CHAT_CHANNEL_POLICY_MODULE_NAME = 'ChatChannelPolicy' as const;
+export const CHAT_CHANNEL_POLICY_MODULE_VERSION = '3.1.0' as const;
+
+export const CHAT_CHANNEL_POLICY_LAWS = Object.freeze([
+  'Channel decisions are backend authority — transport and UI cannot override.',
+  'Shadow-muted sessions are always shadow-routed; no exceptions.',
+  'System channels are compose-blocked for all non-system roles.',
+  'Invasion-active rooms always route primary compose to the invasion channel.',
+  'Typing eligibility is independently gated from compose eligibility.',
+  'Mount policy is resolved once per room-join; changes require re-evaluation.',
+  'NPC and Bot visibility rules are role-specific and non-configurable at runtime.',
+]);
+
+export const CHAT_CHANNEL_POLICY_MODULE_DESCRIPTOR = Object.freeze({
+  name: CHAT_CHANNEL_POLICY_MODULE_NAME,
+  version: CHAT_CHANNEL_POLICY_MODULE_VERSION,
+  laws: CHAT_CHANNEL_POLICY_LAWS,
+  channelDescriptorKeys: Object.keys(CHAT_CHANNEL_DESCRIPTORS),
+  mountPolicyKeys: Object.keys(CHAT_MOUNT_POLICIES),
+});
+
+// ============================================================================
+// MARK: Channel room stage mood resolver
+// ============================================================================
+
+export interface RoomStageMoodPolicy {
+  readonly stageMood: ChatRoomStageMood;
+  readonly defaultComposerPlaceholder: string;
+  readonly allowedVisibleChannels: readonly ChatVisibleChannel[];
+  readonly composerEnabled: boolean;
+}
+
+export function buildRoomStageMoodPolicy(room: ChatRoomState): RoomStageMoodPolicy {
+  const mood = room.stageMood;
+  const channels = room.allowedVisibleChannels;
+
+  const composerEnabled = channels.length > 0;
+  let placeholder = 'Type a message…';
+
+  switch (mood) {
+    case 'HOSTILE': placeholder = 'Push back or go silent…'; break;
+    case 'TENSE': placeholder = 'Choose your words carefully…'; break;
+    case 'CALM': placeholder = 'Type a message…'; break;
+    case 'PREDATORY': placeholder = 'Move carefully…'; break;
+    case 'CEREMONIAL': placeholder = 'Speak with intent…'; break;
+    case 'MOURNFUL': placeholder = 'Say what needs to be said…'; break;
+    case 'ECSTATIC': placeholder = 'Let them know you\'re here…'; break;
+    default: break;
+  }
+
+  return Object.freeze({ stageMood: mood, defaultComposerPlaceholder: placeholder, allowedVisibleChannels: channels, composerEnabled });
+}
+
+// ============================================================================
+// MARK: Channel room read receipt policy
+// ============================================================================
+
+export interface ReadReceiptPolicy {
+  readonly channelId: ChatChannelId;
+  readonly supportsReadReceipts: boolean;
+  readonly supportsPresence: boolean;
+  readonly supportsTyping: boolean;
+}
+
+export function getReadReceiptPolicy(channelId: ChatChannelId): ReadReceiptPolicy {
+  const desc = CHAT_CHANNEL_DESCRIPTORS[channelId];
+  return Object.freeze({
+    channelId,
+    supportsReadReceipts: desc?.supportsReadReceipts ?? false,
+    supportsPresence: desc?.supportsPresence ?? false,
+    supportsTyping: desc?.supportsTyping ?? false,
+  });
+}
+
+export function buildReadReceiptPolicies(): ReadonlyMap<ChatChannelId, ReadReceiptPolicy> {
+  const map = new Map<ChatChannelId, ReadReceiptPolicy>();
+  for (const [channelId, desc] of Object.entries(CHAT_CHANNEL_DESCRIPTORS) as [ChatChannelId, ChatChannelDescriptor][]) {
+    map.set(channelId, Object.freeze({
+      channelId,
+      supportsReadReceipts: desc.supportsReadReceipts,
+      supportsPresence: desc.supportsPresence,
+      supportsTyping: desc.supportsTyping,
+    }));
+  }
+  return map;
+}
+
+// ============================================================================
+// MARK: Channel crowd heat eligibility
+// ============================================================================
+
+export interface CrowdHeatEligibility {
+  readonly channelId: ChatChannelId;
+  readonly isEligible: boolean;
+  readonly reason: string;
+}
+
+export function checkCrowdHeatEligibility(channelId: ChatChannelId): CrowdHeatEligibility {
+  const desc = CHAT_CHANNEL_DESCRIPTORS[channelId];
+  if (!desc) return Object.freeze({ channelId, isEligible: false, reason: 'unknown_channel' });
+  if (!desc.supportsCrowdHeat) return Object.freeze({ channelId, isEligible: false, reason: 'crowd_heat_not_supported' });
+  return Object.freeze({ channelId, isEligible: true, reason: 'eligible' });
+}
+
+export function getChannelsEligibleForCrowdHeat(): readonly ChatChannelId[] {
+  return Object.freeze(
+    (Object.entries(CHAT_CHANNEL_DESCRIPTORS) as [ChatChannelId, ChatChannelDescriptor][])
+      .filter(([, desc]) => desc.supportsCrowdHeat)
+      .map(([id]) => id),
+  );
+}
+
+// ============================================================================
+// MARK: Channel NPC injection matrix
+// ============================================================================
+
+export interface NpcInjectionMatrix {
+  readonly channelId: ChatChannelId;
+  readonly supportsNpcInjection: boolean;
+  readonly supportsRescue: boolean;
+  readonly supportsNegotiation: boolean;
+}
+
+export function buildNpcInjectionMatrix(): ReadonlyMap<ChatChannelId, NpcInjectionMatrix> {
+  const map = new Map<ChatChannelId, NpcInjectionMatrix>();
+  for (const [ch, desc] of Object.entries(CHAT_CHANNEL_DESCRIPTORS) as [ChatChannelId, ChatChannelDescriptor][]) {
+    map.set(ch, Object.freeze({
+      channelId: ch,
+      supportsNpcInjection: desc.supportsNpcInjection,
+      supportsRescue: desc.supportsRescue,
+      supportsNegotiation: desc.supportsNegotiation,
+    }));
+  }
+  return map;
+}
+
+export function getChannelsForNpcInjection(): readonly ChatChannelId[] {
+  return Object.freeze(
+    (Object.entries(CHAT_CHANNEL_DESCRIPTORS) as [ChatChannelId, ChatChannelDescriptor][])
+      .filter(([, desc]) => desc.supportsNpcInjection)
+      .map(([id]) => id),
+  );
+}
+
+// ============================================================================
+// MARK: Channel source type routing
+// ============================================================================
+
+export interface SourceTypeChannelRoute {
+  readonly sourceType: ChatSourceType;
+  readonly defaultChannelId: ChatChannelId;
+  readonly shadowChannelId: ChatChannelId | null;
+  readonly reason: string;
+}
+
+const _sourceTypeRouteMap: Record<string, SourceTypeChannelRoute> = {
+  PLAYER: Object.freeze({ sourceType: 'PLAYER' as ChatSourceType, defaultChannelId: 'GLOBAL' as ChatChannelId, shadowChannelId: null, reason: 'player_to_global' }),
+  NPC_HATER: Object.freeze({ sourceType: 'NPC_HATER' as ChatSourceType, defaultChannelId: 'GLOBAL' as ChatChannelId, shadowChannelId: 'NPC_SHADOW' as ChatChannelId, reason: 'npc_hater_global' }),
+  NPC_HELPER: Object.freeze({ sourceType: 'NPC_HELPER' as ChatSourceType, defaultChannelId: 'GLOBAL' as ChatChannelId, shadowChannelId: 'NPC_SHADOW' as ChatChannelId, reason: 'npc_helper_global' }),
+  NPC_AMBIENT: Object.freeze({ sourceType: 'NPC_AMBIENT' as ChatSourceType, defaultChannelId: 'GLOBAL' as ChatChannelId, shadowChannelId: 'NPC_SHADOW' as ChatChannelId, reason: 'npc_ambient_global' }),
+  SYSTEM: Object.freeze({ sourceType: 'SYSTEM' as ChatSourceType, defaultChannelId: 'SYSTEM_SHADOW' as ChatChannelId, shadowChannelId: 'SYSTEM_SHADOW' as ChatChannelId, reason: 'system_to_shadow' }),
+  SERVER: Object.freeze({ sourceType: 'SERVER' as ChatSourceType, defaultChannelId: 'SYSTEM_SHADOW' as ChatChannelId, shadowChannelId: 'SYSTEM_SHADOW' as ChatChannelId, reason: 'server_to_shadow' }),
+  MODERATION: Object.freeze({ sourceType: 'MODERATION' as ChatSourceType, defaultChannelId: 'SYSTEM_SHADOW' as ChatChannelId, shadowChannelId: 'SYSTEM_SHADOW' as ChatChannelId, reason: 'moderation_shadow' }),
+  LIVEOPS: Object.freeze({ sourceType: 'LIVEOPS' as ChatSourceType, defaultChannelId: 'LIVEOPS_SHADOW' as ChatChannelId, shadowChannelId: 'LIVEOPS_SHADOW' as ChatChannelId, reason: 'liveops_shadow' }),
+};
+
+export function getChannelRouteForSourceType(sourceType: ChatSourceType): SourceTypeChannelRoute | null {
+  return (_sourceTypeRouteMap[sourceType as string] ?? null) as SourceTypeChannelRoute | null;
+}
+
+// ============================================================================
+// MARK: Channel persistence class report
+// ============================================================================
+
+export interface ChannelPersistenceReport {
+  readonly transientChannels: readonly ChatChannelId[];
+  readonly runScopedChannels: readonly ChatChannelId[];
+  readonly accountScopedChannels: readonly ChatChannelId[];
+  readonly generatedAt: UnixMs;
+}
+
+export function buildChannelPersistenceReport(): ChannelPersistenceReport {
+  const transient: ChatChannelId[] = [];
+  const runScoped: ChatChannelId[] = [];
+  const accountScoped: ChatChannelId[] = [];
+
+  for (const [ch, desc] of Object.entries(CHAT_CHANNEL_DESCRIPTORS) as [ChatChannelId, ChatChannelDescriptor][]) {
+    if (desc.persistenceClass === 'TRANSIENT') transient.push(ch);
+    else if (desc.persistenceClass === 'RUN_SCOPED') runScoped.push(ch);
+    else if (desc.persistenceClass === 'ACCOUNT_SCOPED') accountScoped.push(ch);
+  }
+
+  return Object.freeze({
+    transientChannels: Object.freeze(transient),
+    runScopedChannels: Object.freeze(runScoped),
+    accountScopedChannels: Object.freeze(accountScoped),
+    generatedAt: Date.now() as unknown as UnixMs,
+  });
+}
+
+// ============================================================================
+// MARK: Channel room switch request validator
+// ============================================================================
+
+export interface ChannelSwitchRequest {
+  readonly sessionId: ChatSessionId;
+  readonly roomId: ChatRoomId;
+  readonly fromChannel: ChatVisibleChannel;
+  readonly toChannel: ChatVisibleChannel;
+  readonly requestedAt: UnixMs;
+}
+
+export interface ChannelSwitchValidation {
+  readonly allowed: boolean;
+  readonly reasons: readonly string[];
+  readonly effectiveChannel: ChatVisibleChannel;
+}
+
+export function validateChannelSwitchRequest(
+  request: ChannelSwitchRequest,
+  session: ChatSessionState,
+  room: ChatRoomState,
+): ChannelSwitchValidation {
+  const reasons: string[] = [];
+
+  if (session.shadowMuted) {
+    return Object.freeze({ allowed: false, reasons: Object.freeze(['shadow_muted']), effectiveChannel: request.fromChannel });
+  }
+
+  if (!(room.allowedVisibleChannels as readonly string[]).includes(request.toChannel)) {
+    reasons.push(`channel_${request.toChannel}_not_allowed_in_room`);
+  }
+
+  if (isSessionTemporarilyMuted(session) && !doesChannelSupportShadowWrites(request.toChannel as unknown as ChatChannelId)) {
+    reasons.push('muted_cannot_switch_to_non_shadow');
+  }
+
+  const allowed = reasons.length === 0;
+  return Object.freeze({
+    allowed,
+    reasons: Object.freeze(reasons),
+    effectiveChannel: allowed ? request.toChannel : request.fromChannel,
+  });
+}
+
+// ============================================================================
+// MARK: Channel unread count reporter
+// ============================================================================
+
+export interface ChannelUnreadReport {
+  readonly roomId: ChatRoomId;
+  readonly unreadByChannel: Readonly<Record<ChatVisibleChannel, number>>;
+  readonly totalUnread: number;
+  readonly hasUnread: boolean;
+  readonly mostUnreadChannel: ChatVisibleChannel | null;
+  readonly generatedAt: UnixMs;
+}
+
+export function buildChannelUnreadReport(room: ChatRoomState): ChannelUnreadReport {
+  const unread = room.unreadByChannel;
+  let total = 0;
+  let mostUnread: ChatVisibleChannel | null = null;
+  let maxCount = 0;
+
+  for (const [ch, count] of Object.entries(unread) as [ChatVisibleChannel, number][]) {
+    total += count;
+    if (count > maxCount) { maxCount = count; mostUnread = ch; }
+  }
+
+  return Object.freeze({
+    roomId: room.roomId,
+    unreadByChannel: unread,
+    totalUnread: total,
+    hasUnread: total > 0,
+    mostUnreadChannel: mostUnread,
+    generatedAt: Date.now() as unknown as UnixMs,
+  });
+}
+
+// ============================================================================
+// MARK: Channel active scene context
+// ============================================================================
+
+export interface ChannelActiveSceneContext {
+  readonly roomId: ChatRoomId;
+  readonly activeSceneId: string | null;
+  readonly activeMomentId: string | null;
+  readonly activeChannel: ChatVisibleChannel;
+  readonly sceneLocked: boolean;
+}
+
+export function buildChannelActiveSceneContext(room: ChatRoomState): ChannelActiveSceneContext {
+  return Object.freeze({
+    roomId: room.roomId,
+    activeSceneId: room.activeSceneId,
+    activeMomentId: room.activeMomentId,
+    activeChannel: room.activeVisibleChannel,
+    sceneLocked: room.activeSceneId !== null,
+  });
+}
+
+// ============================================================================
+// MARK: Channel policy replay window validator
+// ============================================================================
+
+export interface ReplayWindowChannelValidation {
+  readonly channelId: ChatChannelId;
+  readonly supportsReplay: boolean;
+  readonly persistenceClass: string;
+  readonly isReplayEligible: boolean;
+  readonly reason: string;
+}
+
+export function validateChannelForReplay(channelId: ChatChannelId): ReplayWindowChannelValidation {
+  const desc = CHAT_CHANNEL_DESCRIPTORS[channelId];
+  if (!desc) {
+    return Object.freeze({ channelId, supportsReplay: false, persistenceClass: 'UNKNOWN', isReplayEligible: false, reason: 'unknown_channel' });
+  }
+  const isEligible = desc.supportsReplay && desc.persistenceClass !== 'TRANSIENT';
+  return Object.freeze({
+    channelId,
+    supportsReplay: desc.supportsReplay,
+    persistenceClass: desc.persistenceClass,
+    isReplayEligible: isEligible,
+    reason: isEligible ? 'eligible_for_replay' : !desc.supportsReplay ? 'replay_not_supported' : 'transient_channel_not_persisted',
+  });
+}
+
+export function getAllReplayEligibleChannels(): readonly ChatChannelId[] {
+  return Object.freeze(
+    (Object.entries(CHAT_CHANNEL_DESCRIPTORS) as [ChatChannelId, ChatChannelDescriptor][])
+      .filter(([, desc]) => desc.supportsReplay && desc.persistenceClass !== 'TRANSIENT')
+      .map(([id]) => id),
+  );
+}

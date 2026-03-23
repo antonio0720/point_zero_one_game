@@ -1501,3 +1501,488 @@ export function countMessagesByNpcRoleInWindow(
     );
   }).length;
 }
+
+// ============================================================================
+// MARK: Rate watch bus
+// ============================================================================
+
+export type RateWatchEvent =
+  | { kind: 'ALLOWED'; sessionId: ChatSessionId; roomId: ChatRoomId }
+  | { kind: 'THROTTLED'; sessionId: ChatSessionId; roomId: ChatRoomId; reason: string }
+  | { kind: 'LOCKED'; sessionId: ChatSessionId; roomId: ChatRoomId; reason: string }
+  | { kind: 'DEFERRED'; sessionId: ChatSessionId; roomId: ChatRoomId };
+
+export type RateWatchCallback = (event: RateWatchEvent) => void;
+
+export class RateWatchBus {
+  private readonly subscribers = new Set<RateWatchCallback>();
+
+  subscribe(cb: RateWatchCallback): () => void {
+    this.subscribers.add(cb);
+    return () => this.subscribers.delete(cb);
+  }
+
+  emit(event: RateWatchEvent): void {
+    for (const cb of this.subscribers) {
+      try { cb(event); } catch { /* isolate */ }
+    }
+  }
+
+  emitAllowed(sessionId: ChatSessionId, roomId: ChatRoomId): void {
+    this.emit({ kind: 'ALLOWED', sessionId, roomId });
+  }
+
+  emitThrottled(sessionId: ChatSessionId, roomId: ChatRoomId, reason: string): void {
+    this.emit({ kind: 'THROTTLED', sessionId, roomId, reason });
+  }
+
+  emitLocked(sessionId: ChatSessionId, roomId: ChatRoomId, reason: string): void {
+    this.emit({ kind: 'LOCKED', sessionId, roomId, reason });
+  }
+
+  emitDeferred(sessionId: ChatSessionId, roomId: ChatRoomId): void {
+    this.emit({ kind: 'DEFERRED', sessionId, roomId });
+  }
+
+  size(): number { return this.subscribers.size; }
+}
+
+// ============================================================================
+// MARK: Rate decision fingerprint
+// ============================================================================
+
+export interface RateDecisionFingerprint {
+  readonly sessionId: ChatSessionId;
+  readonly roomId: ChatRoomId;
+  readonly outcome: ChatRateOutcome;
+  readonly channel: ChatVisibleChannel;
+  readonly hash: string;
+}
+
+export function computeRateDecisionFingerprint(
+  decision: ChatRateDecision,
+  session: ChatSessionState,
+  channel: ChatVisibleChannel,
+): RateDecisionFingerprint {
+  const hash = [
+    session.identity.sessionId,
+    session.roomId,
+    decision.outcome,
+    channel,
+    decision.decidedAt,
+  ].join('|');
+
+  return Object.freeze({
+    sessionId: session.identity.sessionId,
+    roomId: session.roomId,
+    outcome: decision.outcome,
+    channel,
+    hash,
+  });
+}
+
+// ============================================================================
+// MARK: Rate decision statistics
+// ============================================================================
+
+export interface RateDecisionStats {
+  readonly total: number;
+  readonly allowCount: number;
+  readonly throttleCount: number;
+  readonly lockCount: number;
+  readonly deferCount: number;
+  readonly allowRate01: number;
+}
+
+export function buildRateDecisionStats(
+  decisions: readonly ChatRateDecision[],
+): RateDecisionStats {
+  let allow = 0, throttle = 0, lock = 0, defer = 0;
+  for (const d of decisions) {
+    if (d.outcome === 'ALLOW') allow++;
+    else if (d.outcome === 'THROTTLE') throttle++;
+    else if (d.outcome === 'LOCK') lock++;
+    else if (d.outcome === 'DEFER') defer++;
+  }
+  const total = decisions.length || 1;
+  return Object.freeze({
+    total: decisions.length,
+    allowCount: allow,
+    throttleCount: throttle,
+    lockCount: lock,
+    deferCount: defer,
+    allowRate01: allow / total,
+  });
+}
+
+// ============================================================================
+// MARK: Rate decision epoch tracker
+// ============================================================================
+
+export interface RateDecisionEpoch {
+  readonly epochId: string;
+  readonly sessionId: ChatSessionId;
+  readonly roomId: ChatRoomId;
+  readonly outcome: ChatRateOutcome;
+  readonly recordedAt: UnixMs;
+}
+
+export class RateDecisionEpochTracker {
+  private readonly epochs = new Map<ChatSessionId, RateDecisionEpoch[]>();
+
+  record(
+    sessionId: ChatSessionId,
+    roomId: ChatRoomId,
+    decision: ChatRateDecision,
+    now: UnixMs,
+  ): void {
+    if (!this.epochs.has(sessionId)) this.epochs.set(sessionId, []);
+    this.epochs.get(sessionId)!.push(Object.freeze({
+      epochId: `epoch:${sessionId}:${now}`,
+      sessionId,
+      roomId,
+      outcome: decision.outcome,
+      recordedAt: now,
+    }));
+  }
+
+  getEpochs(sessionId: ChatSessionId): readonly RateDecisionEpoch[] {
+    return this.epochs.get(sessionId) ?? [];
+  }
+
+  latestEpoch(sessionId: ChatSessionId): RateDecisionEpoch | null {
+    const list = this.epochs.get(sessionId);
+    return list && list.length > 0 ? list[list.length - 1]! : null;
+  }
+
+  allowRate(sessionId: ChatSessionId): number {
+    const epochs = this.getEpochs(sessionId);
+    if (epochs.length === 0) return 1;
+    return epochs.filter((e) => e.outcome === 'ALLOW').length / epochs.length;
+  }
+
+  purge(sessionId: ChatSessionId): void { this.epochs.delete(sessionId); }
+  allSessions(): readonly ChatSessionId[] { return Array.from(this.epochs.keys()); }
+}
+
+// ============================================================================
+// MARK: Rate pressure scorer
+// ============================================================================
+
+export interface RatePressureScore {
+  readonly sessionId: ChatSessionId;
+  readonly roomId: ChatRoomId;
+  readonly pressure01: number;
+  readonly recentThrottleCount: number;
+  readonly recentLockCount: number;
+}
+
+export function scoreRatePressure(
+  sessionId: ChatSessionId,
+  roomId: ChatRoomId,
+  tracker: RateDecisionEpochTracker,
+  windowMs: number,
+  now: UnixMs,
+): RatePressureScore {
+  const epochs = tracker.getEpochs(sessionId).filter(
+    (e) => (now as unknown as number) - (e.recordedAt as unknown as number) <= windowMs,
+  );
+
+  const throttles = epochs.filter((e) => e.outcome === 'THROTTLE').length;
+  const locks = epochs.filter((e) => e.outcome === 'LOCK').length;
+  const total = epochs.length || 1;
+  const pressure = Math.min(1, (throttles * 0.3 + locks * 0.7) / total);
+
+  return Object.freeze({ sessionId, roomId, pressure01: pressure, recentThrottleCount: throttles, recentLockCount: locks });
+}
+
+// ============================================================================
+// MARK: Invasion rate impact reporter
+// ============================================================================
+
+export interface InvasionRateImpactReport {
+  readonly roomId: ChatRoomId;
+  readonly invasionActive: boolean;
+  readonly invasionKind: ChatInvasionState['kind'] | null;
+  readonly ratePenalty01: number;
+}
+
+export function buildInvasionRateImpactReport(
+  state: ChatState,
+  roomId: ChatRoomId,
+): InvasionRateImpactReport {
+  const invasions = getActiveRoomInvasions(state, roomId);
+  const active = invasions.find((i) => i.status === 'ACTIVE');
+
+  const penalty = active ? (active.kind === 'SYSTEM_SHOCK' ? 0.8 : active.kind === 'HATER_RAID' ? 0.5 : 0.3) : 0;
+
+  return Object.freeze({
+    roomId,
+    invasionActive: !!active,
+    invasionKind: active?.kind ?? null,
+    ratePenalty01: penalty,
+  });
+}
+
+// ============================================================================
+// MARK: Module constants
+// ============================================================================
+
+export const CHAT_RATE_POLICY_MODULE_NAME = 'ChatRatePolicy' as const;
+export const CHAT_RATE_POLICY_MODULE_VERSION = '2026.03.14.2' as const;
+
+export const CHAT_RATE_POLICY_MODULE_LAWS = Object.freeze([
+  'Rate decisions are backend truth — transport forwards, backend decides.',
+  'Silence during invasions is enforced here, not in transport.',
+  'Mute locks are checked against server time only.',
+  'NPC role rate limiting is separate from player rate limiting.',
+  'DEFER outcomes allow downstream retry — LOCK outcomes do not.',
+  'All rate decision objects are frozen before export.',
+]);
+
+export const CHAT_RATE_POLICY_MODULE_DESCRIPTOR = Object.freeze({
+  name: CHAT_RATE_POLICY_MODULE_NAME,
+  version: CHAT_RATE_POLICY_MODULE_VERSION,
+  laws: CHAT_RATE_POLICY_MODULE_LAWS,
+});
+
+export function createRateWatchBus(): RateWatchBus {
+  return new RateWatchBus();
+}
+
+export function createRateDecisionEpochTracker(): RateDecisionEpochTracker {
+  return new RateDecisionEpochTracker();
+}
+
+// Re-export ChatState helpers used in this module
+export {
+  getActiveRoomInvasions,
+  isRoomSilenced,
+  isSessionInRoom,
+  selectLatestMessage,
+  selectRoom,
+  selectRoomPresence,
+  selectRoomTranscript,
+  selectRoomTyping,
+  selectSession,
+};
+
+// ============================================================================
+// MARK: Rate decision window aggregator
+// ============================================================================
+
+export interface RateWindowAggregate {
+  readonly sessionId: ChatSessionId;
+  readonly roomId: ChatRoomId;
+  readonly windowMs: number;
+  readonly total: number;
+  readonly allowed: number;
+  readonly throttled: number;
+  readonly locked: number;
+  readonly deferred: number;
+}
+
+export function aggregateRateWindowDecisions(
+  sessionId: ChatSessionId,
+  roomId: ChatRoomId,
+  tracker: RateDecisionEpochTracker,
+  windowMs: number,
+  now: UnixMs,
+): RateWindowAggregate {
+  const epochs = tracker.getEpochs(sessionId).filter(
+    (e) => (now as unknown as number) - (e.recordedAt as unknown as number) <= windowMs,
+  );
+
+  let allowed = 0, throttled = 0, locked = 0, deferred = 0;
+  for (const e of epochs) {
+    if (e.outcome === 'ALLOW') allowed++;
+    else if (e.outcome === 'THROTTLE') throttled++;
+    else if (e.outcome === 'LOCK') locked++;
+    else if (e.outcome === 'DEFER') deferred++;
+  }
+
+  return Object.freeze({ sessionId, roomId, windowMs, total: epochs.length, allowed, throttled, locked, deferred });
+}
+
+// ============================================================================
+// MARK: Typing mode rate impact classifier
+// ============================================================================
+
+export function typingModeRateImpact(mode: ChatTypingMode): number {
+  switch (mode) {
+    case 'COMPOSING': return 0.0;  // no penalty while composing
+    case 'PAUSED': return 0.05;
+    case 'IDLE': return 0.1;
+    default: return 0.0;
+  }
+}
+
+// ============================================================================
+// MARK: Presence snapshot rate checker
+// ============================================================================
+
+export function isPresenceSnapshotRateLimited(
+  presence: ChatPresenceSnapshot,
+  nowMs: number,
+  minGapMs: number,
+): boolean {
+  const lastSeen = presence.lastSeenAt as unknown as number;
+  return nowMs - lastSeen < minGapMs;
+}
+
+// ============================================================================
+// MARK: Bot rate limiter
+// ============================================================================
+
+export interface BotRateProfile {
+  readonly botId: BotId;
+  readonly maxMessagesPerMinute: number;
+  readonly burstAllowance: number;
+}
+
+export const DEFAULT_BOT_RATE_PROFILES: readonly BotRateProfile[] = Object.freeze([
+  Object.freeze({ botId: 'bot:ambient:001' as BotId, maxMessagesPerMinute: 6, burstAllowance: 2 }),
+  Object.freeze({ botId: 'bot:hater:001' as BotId, maxMessagesPerMinute: 4, burstAllowance: 1 }),
+  Object.freeze({ botId: 'bot:helper:001' as BotId, maxMessagesPerMinute: 8, burstAllowance: 3 }),
+]);
+
+export function getBotRateProfile(botId: BotId): BotRateProfile {
+  return DEFAULT_BOT_RATE_PROFILES.find((p) => p.botId === botId) ?? Object.freeze({
+    botId,
+    maxMessagesPerMinute: 4,
+    burstAllowance: 1,
+  });
+}
+
+// ============================================================================
+// MARK: Channel-scoped rate report
+// ============================================================================
+
+export interface ChannelRateReport {
+  readonly roomId: ChatRoomId;
+  readonly channel: ChatVisibleChannel;
+  readonly messagesInLastMinute: number;
+  readonly isSilenced: boolean;
+  readonly hasActiveInvasion: boolean;
+}
+
+export function buildChannelRateReport(
+  state: ChatState,
+  roomId: ChatRoomId,
+  channel: ChatVisibleChannel,
+  now: UnixMs,
+): ChannelRateReport {
+  const windowMs = 60_000;
+  const transcript = selectRoomTranscript(state, roomId);
+  const recent = transcript.filter(
+    (e) =>
+      e.message.attribution.channel === channel &&
+      (now as unknown as number) - (e.message.createdAt as unknown as number) <= windowMs,
+  ).length;
+
+  const silenced = isRoomSilenced(state, roomId);
+  const invasions = getActiveRoomInvasions(state, roomId);
+  const hasInvasion = invasions.some((i) => i.status === 'ACTIVE');
+
+  return Object.freeze({
+    roomId,
+    channel,
+    messagesInLastMinute: recent,
+    isSilenced: silenced,
+    hasActiveInvasion: hasInvasion,
+  });
+}
+
+// ============================================================================
+// MARK: Extended module namespace
+// ============================================================================
+
+export const ChatRatePolicyModuleExtended = Object.freeze({
+  createRateWatchBus,
+  createRateDecisionEpochTracker,
+  computeRateDecisionFingerprint,
+  buildRateDecisionStats,
+  scoreRatePressure,
+  buildInvasionRateImpactReport,
+  aggregateRateWindowDecisions,
+  typingModeRateImpact,
+  isPresenceSnapshotRateLimited,
+  getBotRateProfile,
+  DEFAULT_BOT_RATE_PROFILES,
+  buildChannelRateReport,
+  CHAT_RATE_POLICY_MODULE_DESCRIPTOR,
+  CHAT_RATE_POLICY_MODULE_LAWS,
+} as const);
+
+// ============================================================================
+// MARK: NPC role rate budget
+// ============================================================================
+
+export interface NpcRoleRateBudget {
+  readonly role: ChatNpcRole;
+  readonly maxPerMinute: number;
+  readonly burstAllowance: number;
+  readonly cooldownMs: number;
+}
+
+export const NPC_ROLE_RATE_BUDGETS: Readonly<Record<ChatNpcRole, NpcRoleRateBudget>> =
+  Object.freeze({
+    HATER: Object.freeze({ role: 'HATER', maxPerMinute: 4, burstAllowance: 1, cooldownMs: 15_000 }),
+    HELPER: Object.freeze({ role: 'HELPER', maxPerMinute: 8, burstAllowance: 2, cooldownMs: 8_000 }),
+    AMBIENT: Object.freeze({ role: 'AMBIENT', maxPerMinute: 6, burstAllowance: 2, cooldownMs: 10_000 }),
+    NARRATOR: Object.freeze({ role: 'NARRATOR', maxPerMinute: 3, burstAllowance: 1, cooldownMs: 20_000 }),
+  } as const);
+
+export function getNpcRoleBudget(role: ChatNpcRole): NpcRoleRateBudget {
+  return NPC_ROLE_RATE_BUDGETS[role];
+}
+
+// ============================================================================
+// MARK: Rate decision outcome label
+// ============================================================================
+
+export function rateOutcomeLabel(outcome: ChatRateOutcome): string {
+  switch (outcome) {
+    case 'ALLOW': return 'allowed';
+    case 'THROTTLE': return 'throttled';
+    case 'LOCK': return 'locked';
+    case 'DEFER': return 'deferred';
+    default: return 'unknown';
+  }
+}
+
+export function isBlockingOutcome(outcome: ChatRateOutcome): boolean {
+  return outcome === 'LOCK' || outcome === 'THROTTLE';
+}
+
+export function isPermissiveOutcome(outcome: ChatRateOutcome): boolean {
+  return outcome === 'ALLOW' || outcome === 'DEFER';
+}
+
+export function rateOutcomeSeverity(outcome: ChatRateOutcome): number {
+  switch (outcome) {
+    case 'ALLOW': return 0;
+    case 'DEFER': return 0.25;
+    case 'THROTTLE': return 0.65;
+    case 'LOCK': return 1.0;
+    default: return 0;
+  }
+}
+
+export const CHAT_RATE_POLICY_MODULE_VERSION_EXTENDED = '2026.03.14.2' as const;
+
+export function shouldRateGateNpcRole(role: ChatNpcRole, state: ChatState, roomId: ChatRoomId, windowMs: number, now: UnixMs): boolean {
+  const budget = getNpcRoleBudget(role);
+  const recent = countMessagesByNpcRoleInWindow(state, roomId, role, windowMs, now);
+  return recent >= budget.maxPerMinute;
+}
+
+export function isInvasionBasedLockActive(state: ChatState, roomId: ChatRoomId): boolean {
+  return buildInvasionRateImpactReport(state, roomId).ratePenalty01 >= 0.75;
+}
+
+export function computeEffectiveRateLimitForSignal(signal: ChatSignalEnvelope, baseLimit: number): number {
+  if (signal.battle) return Math.min(baseLimit, 4);
+  if (signal.economy) return Math.min(baseLimit, 6);
+  return baseLimit;
+}

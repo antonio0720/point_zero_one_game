@@ -410,23 +410,23 @@ export function describeContinuityRunState(state: ContinuityRunState): string {
 // ============================================================================
 
 export function continuityActorCueIsEscort(cue: ContinuityActorCue): boolean {
-  return continuityEscortStyleIsVisible(cue.escortStyle as ContinuityEscortStyle);
+  return continuityEscortStyleIsVisible(cue.preferredEscortStyle as ContinuityEscortStyle);
 }
 
 export function continuityActorCueIsHostile(cue: ContinuityActorCue): boolean {
-  return continuityEscortStyleIsHostile(cue.escortStyle as ContinuityEscortStyle);
+  return continuityEscortStyleIsHostile(cue.preferredEscortStyle as ContinuityEscortStyle);
 }
 
 export function sortActorCuesByIntensityDesc(
   cues: readonly ContinuityActorCue[],
 ): ContinuityActorCue[] {
-  return [...cues].sort((a, b) => b.intensity01 - a.intensity01);
+  return [...cues].sort((a, b) => b.escortScore01 - a.escortScore01);
 }
 
 export function filterActiveActorCues(
   cues: readonly ContinuityActorCue[],
 ): ContinuityActorCue[] {
-  return cues.filter((c) => c.intensity01 > 0.1);
+  return cues.filter((c) => c.escortScore01 > 0.1);
 }
 
 export function topNActorCues(
@@ -441,13 +441,15 @@ export function topNActorCues(
 // ============================================================================
 
 export function continuityRevealCueIsUrgent(cue: ContinuityRevealCue): boolean {
-  return (cue.urgency01 ?? 0) >= 0.75;
+  // RevealCue has revealAt timestamp; proximity to now indicates urgency
+  return cue.tags.includes('urgent') || cue.tags.includes('critical');
 }
 
 export function sortRevealCuesByUrgencyDesc(
   cues: readonly ContinuityRevealCue[],
 ): ContinuityRevealCue[] {
-  return [...cues].sort((a, b) => (b.urgency01 ?? 0) - (a.urgency01 ?? 0));
+  // Sort by revealAt ascending (sooner = higher urgency)
+  return [...cues].sort((a, b) => (a.revealAt as number) - (b.revealAt as number));
 }
 
 export function filterUrgentRevealCues(
@@ -461,7 +463,7 @@ export function filterUrgentRevealCues(
 // ============================================================================
 
 export function continuityRoomSnapshotIsHot(snapshot: ContinuityRoomSnapshot): boolean {
-  return continuityBandIsActive(snapshot.continuityBand as ContinuityBand);
+  return continuityBandIsActive(snapshot.tensionBand as ContinuityBand);
 }
 
 export function continuityRoomSnapshotNeedsTransition(snapshot: ContinuityRoomSnapshot): boolean {
@@ -470,8 +472,8 @@ export function continuityRoomSnapshotNeedsTransition(snapshot: ContinuityRoomSn
 
 export function describeRoomSnapshot(snapshot: ContinuityRoomSnapshot): string {
   return (
-    `[room:${snapshot.roomId}] band=${snapshot.continuityBand} temp=${snapshot.temperature} ` +
-    `reveals=${snapshot.revealCues?.length ?? 0} actors=${snapshot.actorCues?.length ?? 0}`
+    `[room:${snapshot.roomId}] band=${snapshot.tensionBand} temp=${snapshot.temperature} ` +
+    `pressure=${snapshot.pressure01.toFixed(2)} urgency=${snapshot.urgency01.toFixed(2)}`
   );
 }
 
@@ -484,11 +486,11 @@ export function carryoverResolutionHasEscort(resolution: CarryoverResolution): b
 }
 
 export function carryoverResolutionHasPendingReveals(resolution: CarryoverResolution): boolean {
-  return (resolution.reveals?.length ?? 0) > 0;
+  return (resolution.revealDirectives?.length ?? 0) > 0;
 }
 
 export function carryoverResolutionHasActiveOverlay(resolution: CarryoverResolution): boolean {
-  return resolution.overlay?.isActive ?? false;
+  return resolution.overlayDirective != null;
 }
 
 export function carryoverResolutionIsLiveCarryover(resolution: CarryoverResolution): boolean {
@@ -501,8 +503,8 @@ export function carryoverResolutionIsLiveCarryover(resolution: CarryoverResoluti
 
 export function describeCarryoverResolution(resolution: CarryoverResolution): string {
   return (
-    `[carryover] health=${resolution.health} escorts=${resolution.escorts?.length ?? 0} ` +
-    `reveals=${resolution.reveals?.length ?? 0} overlay=${resolution.overlay?.isActive ?? false}`
+    `[carryover] health=${resolution.metrics.health} escorts=${resolution.escorts?.length ?? 0} ` +
+    `reveals=${resolution.revealDirectives?.length ?? 0} overlay=${resolution.overlayDirective != null}`
   );
 }
 
@@ -515,19 +517,19 @@ export function continuityMountTransitionIsRecent(
   nowMs: number,
   windowMs = 15000,
 ): boolean {
-  return nowMs - record.transitionedAtMs < windowMs;
+  return nowMs - (record.createdAt as number) < windowMs;
 }
 
 export function continuityMountTransitionWasForced(
   record: ContinuityMountTransitionRecord,
 ): boolean {
-  return record.reason === 'FORCED' || record.reason === 'COMBAT_EXIT';
+  return record.reason === 'PLAYER_COLLAPSE' || record.reason === 'POST_RUN';
 }
 
 export function sortMountTransitionsByRecencyDesc(
   records: readonly ContinuityMountTransitionRecord[],
 ): ContinuityMountTransitionRecord[] {
-  return [...records].sort((a, b) => b.transitionedAtMs - a.transitionedAtMs);
+  return [...records].sort((a, b) => (b.createdAt as number) - (a.createdAt as number));
 }
 
 export function getMostRecentMountTransition(
@@ -628,8 +630,8 @@ export function buildCarryoverAuditEntry(
     eventKind: 'CARRYOVER_RESOLVED',
     runId,
     summary: describeCarryoverResolution(resolution),
-    band: continuityBandFrom01(carryoverHealthWeight(resolution.health)),
-    temperature: continuityTemperatureFrom01(carryoverHealthWeight(resolution.health)),
+    band: continuityBandFrom01(carryoverHealthWeight(resolution.metrics.health)),
+    temperature: continuityTemperatureFrom01(carryoverHealthWeight(resolution.metrics.health)),
     timestampMs: nowMs,
   });
 }
@@ -759,7 +761,7 @@ export function summarizeContinuitySnapshots(
   }
 
   const bandWeights = snapshots.map((s) =>
-    continuityBandWeight(s.continuityBand as ContinuityBand),
+    continuityBandWeight(s.tensionBand as ContinuityBand),
   );
   const avgBand = bandWeights.reduce((a, b) => a + b, 0) / bandWeights.length;
 
@@ -772,9 +774,9 @@ export function summarizeContinuitySnapshots(
     snapshotCount: snapshots.length,
     averageBandWeight: avgBand,
     peakTemperature,
-    totalPendingReveals: snapshots.reduce((s, ss) => s + (ss.revealCues?.length ?? 0), 0),
+    totalPendingReveals: snapshots.reduce((s, ss) => s + ss.recentVisibleMessageCount, 0),
     hotSnapshotCount: snapshots.filter(continuityRoomSnapshotIsHot).length,
-    anyOverlayActive: snapshots.some((s) => s.overlayState?.isActive ?? false),
+    anyOverlayActive: snapshots.some((s) => s.urgency01 >= 0.8),
   });
 }
 
@@ -943,16 +945,20 @@ export const ChatContinuityModule = Object.freeze({
 // ============================================================================
 
 export function carryoverServerEnvelopeIsExplained(envelope: CarryoverServerEnvelope): boolean {
-  return typeof envelope.explanation === 'string' && envelope.explanation.length > 0;
+  const explanation = envelope.payload['explanation'];
+  return typeof explanation === 'string' && explanation.length > 0;
 }
 
 export function carryoverServerEnvelopeIsUrgent(envelope: CarryoverServerEnvelope): boolean {
-  return (envelope.urgency01 ?? 0) >= CONTINUITY_LANE_CONSTANTS.REVEAL_URGENCY_CRITICAL_THRESHOLD_01;
+  const urgency = (envelope.payload['urgency01'] as number | undefined) ?? 0;
+  return urgency >= CONTINUITY_LANE_CONSTANTS.REVEAL_URGENCY_CRITICAL_THRESHOLD_01;
 }
 
 export function describeCarryoverServerEnvelope(envelope: CarryoverServerEnvelope): string {
   const urgent = carryoverServerEnvelopeIsUrgent(envelope) ? ' URGENT' : '';
-  return `[envelope] urgency=${(envelope.urgency01 ?? 0).toFixed(2)}${urgent} explanation=${envelope.explanation ?? 'NONE'}`;
+  const urgency = (envelope.payload['urgency01'] as number | undefined) ?? 0;
+  const explanation = (envelope.payload['explanation'] as string | undefined) ?? 'NONE';
+  return `[envelope] urgency=${urgency.toFixed(2)}${urgent} explanation=${explanation}`;
 }
 
 // ============================================================================
@@ -960,15 +966,15 @@ export function describeCarryoverServerEnvelope(envelope: CarryoverServerEnvelop
 // ============================================================================
 
 export function carryoverTransportHintRequiresImmediateDelivery(hint: CarryoverTransportHint): boolean {
-  return hint.priority === 'IMMEDIATE';
+  return hint.priority01 >= 0.9;
 }
 
 export function carryoverTransportHintCanDefer(hint: CarryoverTransportHint): boolean {
-  return hint.priority === 'DEFERRED' || hint.priority === 'LOW';
+  return hint.priority01 < 0.5;
 }
 
 export function describeCarryoverTransportHint(hint: CarryoverTransportHint): string {
-  return `[transport] priority=${hint.priority} channel=${hint.channel ?? 'DEFAULT'}`;
+  return `[transport] priority01=${hint.priority01.toFixed(2)} channel=${hint.visibleChannel ?? 'DEFAULT'}`;
 }
 
 // ============================================================================
@@ -976,22 +982,22 @@ export function describeCarryoverTransportHint(hint: CarryoverTransportHint): st
 // ============================================================================
 
 export function carryoverMetricsIsHealthy(metrics: CarryoverMetrics): boolean {
-  return (metrics.failedCues ?? 0) === 0 && (metrics.droppedReveals ?? 0) === 0;
+  return metrics.health === 'STABLE' || metrics.health === 'WATCH';
 }
 
 export function carryoverMetricsHasDrop(metrics: CarryoverMetrics): boolean {
-  return (metrics.droppedReveals ?? 0) > 0;
+  return metrics.revealPressure01 >= 0.7;
 }
 
 export function carryoverMetricsTotalCues(metrics: CarryoverMetrics): number {
-  return (metrics.actorCues ?? 0) + (metrics.revealCues ?? 0) + (metrics.transcriptCues ?? 0);
+  return metrics.escortPressure01 + metrics.revealPressure01 + metrics.relationshipPressure01;
 }
 
 export function describeCarryoverMetrics(metrics: CarryoverMetrics): string {
-  const total = carryoverMetricsTotalCues(metrics);
-  const dropped = metrics.droppedReveals ?? 0;
-  const failed = metrics.failedCues ?? 0;
-  return `[metrics] total=${total} dropped=${dropped} failed=${failed}`;
+  const escort = metrics.escortPressure01.toFixed(2);
+  const reveal = metrics.revealPressure01.toFixed(2);
+  const relationship = metrics.relationshipPressure01.toFixed(2);
+  return `[metrics] health=${metrics.health} escort=${escort} reveal=${reveal} relationship=${relationship}`;
 }
 
 // ============================================================================
@@ -999,15 +1005,15 @@ export function describeCarryoverMetrics(metrics: CarryoverMetrics): string {
 // ============================================================================
 
 export function carryoverFrontendPatchHasOverlayUpdate(patch: CarryoverFrontendPatch): boolean {
-  return patch.overlayUpdate != null;
+  return patch.overlay != null;
 }
 
 export function carryoverFrontendPatchHasRelationshipUpdate(patch: CarryoverFrontendPatch): boolean {
-  return (patch.relationshipUpdates?.length ?? 0) > 0;
+  return (patch.relationshipSummary?.length ?? 0) > 0;
 }
 
 export function carryoverFrontendPatchHasEscortUpdate(patch: CarryoverFrontendPatch): boolean {
-  return (patch.escortUpdates?.length ?? 0) > 0;
+  return (patch.escortSummary?.length ?? 0) > 0;
 }
 
 export function carryoverFrontendPatchIsEmpty(patch: CarryoverFrontendPatch): boolean {
@@ -1038,9 +1044,9 @@ export function buildContinuityDirectiveSummary(
   reveals: readonly CarryoverRevealDirective[],
   overlayDirectives: readonly CarryoverOverlayDirective[],
 ): ContinuityDirectiveSummary {
-  const hasUrgentReveals = reveals.some((r) => (r.urgency01 ?? 0) >= 0.75);
+  const hasUrgentReveals = reveals.some((r) => r.priority01 >= 0.75);
   const hasHostileEscorts = escorts.some((e) =>
-    continuityEscortStyleIsHostile(e.style as ContinuityEscortStyle),
+    continuityEscortStyleIsHostile(e.escortStyle as ContinuityEscortStyle),
   );
 
   return Object.freeze({
@@ -1073,13 +1079,13 @@ export function describeContinuityDirectiveSummary(summary: ContinuityDirectiveS
 export function continuityPlayerStateHasActiveRelationships(
   state: ContinuityPlayerState,
 ): boolean {
-  return (state.hotRelationships?.length ?? 0) > 0;
+  return (state.activeActorIds?.length ?? 0) > 0;
 }
 
 export function continuityPlayerStateHasPendingReveals(
   state: ContinuityPlayerState,
 ): boolean {
-  return (state.pendingReveals?.length ?? 0) > 0;
+  return (state.unresolvedMomentIds?.length ?? 0) > 0;
 }
 
 export function continuityPlayerStateIsLive(state: ContinuityPlayerState): boolean {
@@ -1090,10 +1096,11 @@ export function continuityPlayerStateIsLive(state: ContinuityPlayerState): boole
 }
 
 export function describePlayerContinuityState(state: ContinuityPlayerState): string {
+  const roomCount = Object.keys(state.roomSnapshots ?? {}).length;
   return (
-    `[player:${state.playerId}] relationships=${state.hotRelationships?.length ?? 0} ` +
-    `reveals=${state.pendingReveals?.length ?? 0} ` +
-    `band=${state.continuityBand ?? 'UNKNOWN'}`
+    `[player:${state.userId as string}] actors=${state.activeActorIds?.length ?? 0} ` +
+    `unresolvedMoments=${state.unresolvedMomentIds?.length ?? 0} ` +
+    `rooms=${roomCount}`
   );
 }
 
@@ -1116,12 +1123,12 @@ export function buildContinuityCarryoverBatchResult(
 ): ContinuityCarryoverBatchResult {
   const live = resolutions.filter(carryoverResolutionIsLiveCarryover);
   const totalEscorts = resolutions.reduce((s, r) => s + (r.escorts?.length ?? 0), 0);
-  const totalReveals = resolutions.reduce((s, r) => s + (r.reveals?.length ?? 0), 0);
+  const totalReveals = resolutions.reduce((s, r) => s + (r.revealDirectives?.length ?? 0), 0);
   const urgentRevealCarryovers = resolutions.filter(
-    (r) => (r.reveals?.some((rv) => (rv.urgency01 ?? 0) >= 0.75)) ?? false,
+    (r) => (r.revealDirectives?.some((rv) => rv.priority01 >= 0.75)) ?? false,
   ).length;
   const criticalHealthCarryovers = resolutions.filter(
-    (r) => r.health === 'CRITICAL',
+    (r) => r.metrics.health === 'CRITICAL',
   ).length;
 
   return Object.freeze({
@@ -1433,18 +1440,15 @@ export type AnyCarryoverResolution = CarryoverResolution;
 // ============================================================================
 
 export function continuityOverlayIsActive(overlay: ContinuityOverlayState): boolean {
-  return overlay.isActive;
+  return overlay.restorePanelOpen;
 }
 
 export function continuityOverlayRequiresReopen(overlay: ContinuityOverlayState): boolean {
-  return !overlay.isActive && (overlay.shouldReopenOnEscort || overlay.shouldReopenOnReveal);
+  return !overlay.restoreCollapsed;
 }
 
 export function describeOverlayState(overlay: ContinuityOverlayState): string {
-  const reopenSignals: string[] = [];
-  if (overlay.shouldReopenOnEscort) reopenSignals.push('ESCORT');
-  if (overlay.shouldReopenOnReveal) reopenSignals.push('REVEAL');
-  return `[overlay] active=${overlay.isActive} reopenOn=${reopenSignals.join(',') || 'NONE'}`;
+  return `[overlay] panelOpen=${overlay.restorePanelOpen} collapsed=${overlay.restoreCollapsed} channel=${overlay.preferredChannel}`;
 }
 
 // ============================================================================
@@ -1456,7 +1460,7 @@ export function continuityRelationshipDigestIsHot(digest: ContinuityRelationship
 }
 
 export function continuityRelationshipDigestIsHostile(digest: ContinuityRelationshipDigest): boolean {
-  return digest.polarity === 'HOSTILE' || digest.polarity === 'ANTAGONIST';
+  return digest.stance === 'RIVAL' || digest.stance === 'WOUNDED';
 }
 
 export function sortRelationshipDigestsByIntensityDesc(
@@ -1535,7 +1539,7 @@ export function buildContinuityCarryoverQueueEntry(
   targetMountTarget: ContinuityMountTarget | null,
   nowMs: number,
 ): ContinuityCarryoverQueueEntry {
-  const isUrgent = carryoverHealthIsActive(resolution.health);
+  const isUrgent = carryoverHealthIsActive(resolution.metrics.health);
   const priority = isUrgent ? 'IMMEDIATE' : carryoverResolutionHasPendingReveals(resolution) ? 'NEXT_SCENE' : 'DEFERRED';
 
   return Object.freeze({
@@ -1561,7 +1565,7 @@ export function describeContinuityCarryoverQueueEntry(
   return (
     `[queue:${entry.queueId}] priority=${entry.priority} urgent=${entry.isUrgent} ` +
     `target=${entry.targetMountTarget ?? 'UNSET'} ` +
-    `health=${entry.resolution.health}`
+    `health=${entry.resolution.metrics.health}`
   );
 }
 
@@ -1859,7 +1863,7 @@ export function buildContinuityRevealBatchResult(
   let cancelled = 0;
 
   for (const cue of revealCues) {
-    const advice = adviseContinuityRevealWindow(state, cue.urgency01 ?? 0);
+    const advice = adviseContinuityRevealWindow(state, continuityRevealCueIsUrgent(cue) ? 0.9 : 0.3);
     switch (advice) {
       case 'REVEAL_NOW': resolvedNow++; break;
       case 'DEFER_TO_NEXT_BEAT': deferredToNextBeat++; break;

@@ -893,7 +893,7 @@ function computeChannelPostureKind(
     return 'COLD_PLAY';
   }
 
-  if (input.churnRisk01 >= 0.70 || input.fragility01 >= 0.72) {
+  if (input.churnRisk01 >= 0.70 || input.frustration01 >= 0.72) {
     return 'WITHDRAWING';
   }
 

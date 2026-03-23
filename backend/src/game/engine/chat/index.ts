@@ -1312,3 +1312,689 @@ function uniqueCategories(
 
   return Object.freeze(categories);
 }
+
+// ============================================================================
+// MARK: Barrel watch bus
+// ============================================================================
+
+export interface BackendChatBarrelWatchEvent {
+  readonly kind:
+    | 'engine_booted'
+    | 'engine_shutdown'
+    | 'module_initialized'
+    | 'module_error'
+    | 'state_updated'
+    | 'postrun_completed';
+  readonly moduleId: string;
+  readonly at: number;
+  readonly payload: Readonly<Record<string, JsonValue>>;
+}
+
+export type BackendChatBarrelWatchHandler = (event: BackendChatBarrelWatchEvent) => void;
+
+export class BackendChatBarrelWatchBus {
+  private readonly handlers: BackendChatBarrelWatchHandler[] = [];
+
+  subscribe(handler: BackendChatBarrelWatchHandler): () => void {
+    this.handlers.push(handler);
+    return () => {
+      const idx = this.handlers.indexOf(handler);
+      if (idx >= 0) this.handlers.splice(idx, 1);
+    };
+  }
+
+  emit(event: BackendChatBarrelWatchEvent): void {
+    for (const h of this.handlers) {
+      try { h(event); } catch { /* isolated */ }
+    }
+  }
+
+  get listenerCount(): number {
+    return this.handlers.length;
+  }
+}
+
+// ============================================================================
+// MARK: Barrel version constants
+// ============================================================================
+
+export const BACKEND_CHAT_BARREL_ID = 'backend_chat_root' as const;
+export const BACKEND_CHAT_BARREL_VERSION = BACKEND_CHAT_ENGINE_VERSION;
+export const BACKEND_CHAT_BARREL_API_VERSION = BACKEND_CHAT_ENGINE_PUBLIC_API_VERSION;
+
+export const BACKEND_CHAT_AUTHORITY_ROOT = CHAT_AUTHORITY_ROOTS.backendEngineRoot;
+
+// ============================================================================
+// MARK: Barrel-level module inventory
+// ============================================================================
+
+export const BACKEND_CHAT_CORE_MODULE_IDS = Object.freeze([
+  'chat_types',
+  'chat_runtime_config',
+  'chat_state',
+  'chat_reducer',
+  'chat_message_factory',
+  'chat_transcript_ledger',
+  'chat_proof_chain',
+  'chat_rate_policy',
+  'chat_moderation_policy',
+  'chat_channel_policy',
+  'chat_command_parser',
+  'chat_event_bridge',
+  'chat_presence_state',
+  'chat_session_state',
+  'chat_invasion_orchestrator',
+  'hater_response_orchestrator',
+  'helper_response_orchestrator',
+  'chat_npc_orchestrator',
+  'chat_engine',
+] as const);
+
+export type BackendChatCoreModuleId = (typeof BACKEND_CHAT_CORE_MODULE_IDS)[number];
+
+export const BACKEND_CHAT_POSTRUN_MODULE_IDS = Object.freeze([
+  'post_run_narrative_engine',
+  'turning_point_resolver',
+  'foreshadow_planner',
+] as const);
+
+export const BACKEND_CHAT_EXPERIENCE_MODULE_IDS = Object.freeze([
+  'chat_drama_orchestrator',
+  'chat_scene_planner',
+  'chat_moment_ledger',
+  'chat_silence_policy',
+] as const);
+
+export const BACKEND_CHAT_INTELLIGENCE_MODULE_IDS = Object.freeze([
+  'emotion_model',
+  'pressure_affect_model',
+  'attachment_model',
+] as const);
+
+export const BACKEND_CHAT_ALL_MODULE_IDS = Object.freeze([
+  ...BACKEND_CHAT_CORE_MODULE_IDS,
+  ...BACKEND_CHAT_POSTRUN_MODULE_IDS,
+  ...BACKEND_CHAT_EXPERIENCE_MODULE_IDS,
+  ...BACKEND_CHAT_INTELLIGENCE_MODULE_IDS,
+]);
+
+export function isCoreModuleId(id: string): id is BackendChatCoreModuleId {
+  return (BACKEND_CHAT_CORE_MODULE_IDS as readonly string[]).includes(id);
+}
+
+// ============================================================================
+// MARK: Barrel descriptor
+// ============================================================================
+
+export const BACKEND_CHAT_BARREL_DESCRIPTOR = Object.freeze({
+  barrelId: BACKEND_CHAT_BARREL_ID,
+  version: BACKEND_CHAT_BARREL_VERSION,
+  apiVersion: BACKEND_CHAT_BARREL_API_VERSION,
+  authorityRoot: BACKEND_CHAT_AUTHORITY_ROOT,
+  coreModuleCount: BACKEND_CHAT_CORE_MODULE_IDS.length,
+  postrunModuleCount: BACKEND_CHAT_POSTRUN_MODULE_IDS.length,
+  experienceModuleCount: BACKEND_CHAT_EXPERIENCE_MODULE_IDS.length,
+  intelligenceModuleCount: BACKEND_CHAT_INTELLIGENCE_MODULE_IDS.length,
+  totalModuleCount: BACKEND_CHAT_ALL_MODULE_IDS.length,
+});
+
+// ============================================================================
+// MARK: Namespace convenience re-exports
+// ============================================================================
+
+export { Types as ChatTypes };
+export { State as ChatStateHelpers };
+export { Reducer as ChatReducerHelpers };
+export { MessageFactory as ChatMessageFactoryHelpers };
+export { ProofChain as ChatProofChainHelpers };
+export { RatePolicy as ChatRatePolicyHelpers };
+export { ModerationPolicy as ChatModerationPolicyHelpers };
+export { CommandParser as ChatCommandParserHelpers };
+export { EventBridge as ChatEventBridgeHelpers };
+export { SessionState as ChatSessionStateHelpers };
+export { Invasion as ChatInvasionOrchestratorHelpers };
+export { Hater as HaterResponseOrchestratorHelpers };
+export { Helper as HelperResponseOrchestratorHelpers };
+export { Npc as ChatNpcOrchestratorHelpers };
+export { PostRun as ChatPostRunHelpers };
+
+// ============================================================================
+// MARK: Module group namespaces
+// ============================================================================
+
+export const BackendChatCoreModules = Object.freeze({
+  Types,
+  Runtime,
+  State,
+  Reducer,
+  MessageFactory,
+  TranscriptLedger,
+  ProofChain,
+  RatePolicy,
+  ModerationPolicy,
+  ChannelPolicy,
+  CommandParser,
+  EventBridge,
+  SessionState,
+  Invasion,
+  Hater,
+  Helper,
+  Npc,
+  Engine,
+});
+
+export const BackendChatPostRunModules = Object.freeze({
+  PostRunNarrativeEngineRuntime,
+  TurningPointResolverRuntime,
+  ForeshadowPlannerRuntime,
+  PostRun,
+});
+
+export const BackendChatExperienceModules = Object.freeze({
+  DramaOrchestrator,
+  ScenePlanner,
+  MomentLedger,
+  SilencePolicy,
+});
+
+export const BackendChatIntelligenceModules = Object.freeze({
+  Intelligence,
+  EmotionModelRuntime,
+  PressureAffectModelRuntime,
+  AttachmentModelRuntime,
+});
+
+export const BackendChatSocialModules = Object.freeze({
+  Social,
+  Telemetry,
+  Presence,
+  PresenceState,
+});
+
+export const BackendChatCombatModules = Object.freeze({
+  Combat,
+  BossFightEngine,
+  CounterResolver,
+  TelegraphPolicy,
+  AttackWindowPolicy,
+});
+
+export const BackendChatContinuityModules = Object.freeze({
+  Continuity,
+  CrossModeContinuityLedger,
+  CarryoverResolver,
+});
+
+export const BackendChatRewardModules = Object.freeze({
+  Rewards,
+  LegendMomentLedger,
+  RewardGrantResolver,
+  ReplayMomentIndexer,
+});
+
+export const BackendChatRescueModules = Object.freeze({
+  Rescue,
+  RescueInterventionPlanner,
+  ChurnRescuePolicy,
+  RecoveryOutcomeTracker,
+});
+
+export const BackendChatTrainingModules = Object.freeze({
+  Training,
+  Dealroom,
+});
+
+export const BackendChatReplayModules = Object.freeze({
+  Replay,
+});
+
+export const BackendChatPhaseModules = Object.freeze({
+  Phase4,
+  Phase1,
+  Phase2,
+});
+
+export const BackendChatNegotiationModules = Object.freeze({
+  ChatNegotiationEngineModule,
+  ChatOfferCounterEngineModule,
+});
+
+// ============================================================================
+// MARK: Full module registry
+// ============================================================================
+
+export const BackendChatFullModuleRegistry = Object.freeze({
+  core: BackendChatCoreModules,
+  postrun: BackendChatPostRunModules,
+  experience: BackendChatExperienceModules,
+  intelligence: BackendChatIntelligenceModules,
+  social: BackendChatSocialModules,
+  combat: BackendChatCombatModules,
+  continuity: BackendChatContinuityModules,
+  rewards: BackendChatRewardModules,
+  rescue: BackendChatRescueModules,
+  training: BackendChatTrainingModules,
+  replay: BackendChatReplayModules,
+  phases: BackendChatPhaseModules,
+  negotiation: BackendChatNegotiationModules,
+});
+
+// ============================================================================
+// MARK: Barrel-level namespace
+// ============================================================================
+
+export namespace BackendChatBarrel {
+  export type WatchBus = BackendChatBarrelWatchBus;
+  export type WatchEvent = BackendChatBarrelWatchEvent;
+  export type Descriptor = typeof BACKEND_CHAT_BARREL_DESCRIPTOR;
+  export type CoreModuleId = BackendChatCoreModuleId;
+
+  export function createWatchBus(): BackendChatBarrelWatchBus {
+    return new BackendChatBarrelWatchBus();
+  }
+
+  export function describe(): string {
+    return `${BACKEND_CHAT_BARREL_ID}@${BACKEND_CHAT_BARREL_VERSION} [api=${BACKEND_CHAT_BARREL_API_VERSION}]`;
+  }
+
+  export function getDescriptor(): typeof BACKEND_CHAT_BARREL_DESCRIPTOR {
+    return BACKEND_CHAT_BARREL_DESCRIPTOR;
+  }
+
+  export function getCoreModuleIds(): typeof BACKEND_CHAT_CORE_MODULE_IDS {
+    return BACKEND_CHAT_CORE_MODULE_IDS;
+  }
+
+  export function getPostRunModuleIds(): typeof BACKEND_CHAT_POSTRUN_MODULE_IDS {
+    return BACKEND_CHAT_POSTRUN_MODULE_IDS;
+  }
+
+  export function getAllModuleIds(): typeof BACKEND_CHAT_ALL_MODULE_IDS {
+    return BACKEND_CHAT_ALL_MODULE_IDS;
+  }
+
+  export function isCoreModule(id: string): id is BackendChatCoreModuleId {
+    return isCoreModuleId(id);
+  }
+}
+
+// ============================================================================
+// MARK: Runtime health check utilities
+// ============================================================================
+
+export interface BackendChatBarrelHealthReport {
+  readonly barrelId: typeof BACKEND_CHAT_BARREL_ID;
+  readonly version: typeof BACKEND_CHAT_BARREL_VERSION;
+  readonly coreModulesReady: boolean;
+  readonly postrunModulesReady: boolean;
+  readonly experienceModulesReady: boolean;
+  readonly intelligenceModulesReady: boolean;
+  readonly allModulesReady: boolean;
+  readonly checkedAt: number;
+}
+
+export function buildBarrelHealthReport(now: number): BackendChatBarrelHealthReport {
+  const coreReady = Boolean(State) && Boolean(Reducer) && Boolean(Engine);
+  const postrunReady = Boolean(PostRun) && Boolean(PostRunNarrativeEngineRuntime);
+  const experienceReady = Boolean(DramaOrchestrator) && Boolean(ScenePlanner);
+  const intelligenceReady = Boolean(Intelligence) && Boolean(EmotionModelRuntime);
+  return Object.freeze({
+    barrelId: BACKEND_CHAT_BARREL_ID,
+    version: BACKEND_CHAT_BARREL_VERSION,
+    coreModulesReady: coreReady,
+    postrunModulesReady: postrunReady,
+    experienceModulesReady: experienceReady,
+    intelligenceModulesReady: intelligenceReady,
+    allModulesReady: coreReady && postrunReady && experienceReady && intelligenceReady,
+    checkedAt: now,
+  });
+}
+
+// ============================================================================
+// MARK: Module category query helpers
+// ============================================================================
+
+export function getModulesByCategory(
+  modules: readonly BackendChatCanonicalModuleDescriptor[],
+  category: BackendChatCanonicalModuleCategory,
+): readonly BackendChatCanonicalModuleDescriptor[] {
+  return modules.filter((m) => m.category === category);
+}
+
+export function getPendingModules(
+  modules: readonly BackendChatCanonicalModuleDescriptor[],
+): readonly BackendChatCanonicalModuleDescriptor[] {
+  return modules.filter((m) => m.readiness === 'PENDING');
+}
+
+export function getGeneratedModules(
+  modules: readonly BackendChatCanonicalModuleDescriptor[],
+): readonly BackendChatCanonicalModuleDescriptor[] {
+  return modules.filter((m) => m.readiness === 'GENERATED');
+}
+
+export function countModulesByReadiness(
+  modules: readonly BackendChatCanonicalModuleDescriptor[],
+  readiness: BackendChatCanonicalModuleDescriptor['readiness'],
+): number {
+  return modules.filter((m) => m.readiness === readiness).length;
+}
+
+export function allModulesGenerated(
+  modules: readonly BackendChatCanonicalModuleDescriptor[],
+): boolean {
+  return modules.every((m) => m.readiness === 'GENERATED');
+}
+
+// ============================================================================
+// MARK: Ownership matrix query helpers
+// ============================================================================
+
+export function getOwnershipRowByConcern(
+  matrix: readonly BackendChatOwnershipMatrixRow[],
+  concern: string,
+): BackendChatOwnershipMatrixRow | null {
+  return matrix.find((row) => row.concern === concern) ?? null;
+}
+
+export function isConcernOwnedByBackend(
+  matrix: readonly BackendChatOwnershipMatrixRow[],
+  concern: string,
+  moduleId: string,
+): boolean {
+  const row = getOwnershipRowByConcern(matrix, concern);
+  return row?.backendOwner.includes(moduleId) ?? false;
+}
+
+export function isConcernForbiddenFor(
+  matrix: readonly BackendChatOwnershipMatrixRow[],
+  concern: string,
+  owner: string,
+): boolean {
+  const row = getOwnershipRowByConcern(matrix, concern);
+  return row?.forbiddenOwners.includes(owner) ?? false;
+}
+
+// ============================================================================
+// MARK: Generated surface helpers
+// ============================================================================
+
+export function getGeneratedSurfaceById(
+  surfaces: readonly BackendChatGeneratedSurfaceDescriptor[],
+  id: string,
+): BackendChatGeneratedSurfaceDescriptor | null {
+  return surfaces.find((s) => s.id === id) ?? null;
+}
+
+export function listGeneratedSurfaceIds(
+  surfaces: readonly BackendChatGeneratedSurfaceDescriptor[],
+): readonly string[] {
+  return Object.freeze(surfaces.map((s) => s.id));
+}
+
+// ============================================================================
+// MARK: Movement descriptor helpers
+// ============================================================================
+
+export function getMovementById(
+  movements: readonly BackendChatMovementDescriptor[],
+  id: BackendChatMovementId,
+): BackendChatMovementDescriptor | null {
+  return movements.find((m) => m.id === id) ?? null;
+}
+
+export function listMovementIds(
+  movements: readonly BackendChatMovementDescriptor[],
+): readonly BackendChatMovementId[] {
+  return Object.freeze(movements.map((m) => m.id));
+}
+
+export function movementInvolvesModule(
+  movement: BackendChatMovementDescriptor,
+  moduleId: string,
+): boolean {
+  return movement.primaryModuleIds.includes(moduleId) || movement.secondaryModuleIds.includes(moduleId);
+}
+
+// ============================================================================
+// MARK: Barrel-level extended namespace
+// ============================================================================
+
+export namespace BackendChatRootBarrelExtended {
+  export const barrelId = BACKEND_CHAT_BARREL_ID;
+  export const version = BACKEND_CHAT_BARREL_VERSION;
+  export const apiVersion = BACKEND_CHAT_BARREL_API_VERSION;
+
+  export function createWatchBus(): BackendChatBarrelWatchBus {
+    return new BackendChatBarrelWatchBus();
+  }
+
+  export function describeBarrel(): string {
+    return BackendChatBarrel.describe();
+  }
+
+  export function allCoreModules(): typeof BackendChatCoreModules {
+    return BackendChatCoreModules;
+  }
+
+  export function allPostRunModules(): typeof BackendChatPostRunModules {
+    return BackendChatPostRunModules;
+  }
+
+  export function allModules(): typeof BackendChatFullModuleRegistry {
+    return BackendChatFullModuleRegistry;
+  }
+
+  export function getBarrelDescriptor(): typeof BACKEND_CHAT_BARREL_DESCRIPTOR {
+    return BACKEND_CHAT_BARREL_DESCRIPTOR;
+  }
+
+  export function checkHealth(now: number): BackendChatBarrelHealthReport {
+    return buildBarrelHealthReport(now);
+  }
+}
+
+// ============================================================================
+// MARK: Full root module export
+// ============================================================================
+
+export const BACKEND_CHAT_ROOT_MODULE = Object.freeze({
+  descriptor: BACKEND_CHAT_BARREL_DESCRIPTOR,
+  modules: BackendChatFullModuleRegistry,
+  createWatchBus: () => new BackendChatBarrelWatchBus(),
+  checkHealth: buildBarrelHealthReport,
+  isCoreModule: isCoreModuleId,
+  uniqueCategories,
+  getModulesByCategory,
+  getPendingModules,
+  getGeneratedModules,
+  countModulesByReadiness,
+  allModulesGenerated,
+  getOwnershipRowByConcern,
+  isConcernOwnedByBackend,
+  getGeneratedSurfaceById,
+  getMovementById,
+});
+
+// ============================================================================
+// MARK: Version utilities
+// ============================================================================
+
+export function backendChatEngineVersionString(): string {
+  return `${BACKEND_CHAT_BARREL_ID}@${BACKEND_CHAT_BARREL_VERSION} (api=${BACKEND_CHAT_BARREL_API_VERSION})`;
+}
+
+export function backendChatVersionIsAtLeast(version: string): boolean {
+  return BACKEND_CHAT_BARREL_VERSION >= version;
+}
+
+export function backendChatApiVersionIsAtLeast(apiVersion: string): boolean {
+  return BACKEND_CHAT_BARREL_API_VERSION >= apiVersion;
+}
+
+// ============================================================================
+// MARK: Module count summary
+// ============================================================================
+
+export interface BackendChatModuleCountSummary {
+  readonly coreCount: number;
+  readonly postrunCount: number;
+  readonly experienceCount: number;
+  readonly intelligenceCount: number;
+  readonly totalCount: number;
+}
+
+export function buildModuleCountSummary(): BackendChatModuleCountSummary {
+  return Object.freeze({
+    coreCount: BACKEND_CHAT_CORE_MODULE_IDS.length,
+    postrunCount: BACKEND_CHAT_POSTRUN_MODULE_IDS.length,
+    experienceCount: BACKEND_CHAT_EXPERIENCE_MODULE_IDS.length,
+    intelligenceCount: BACKEND_CHAT_INTELLIGENCE_MODULE_IDS.length,
+    totalCount: BACKEND_CHAT_ALL_MODULE_IDS.length,
+  });
+}
+
+// ============================================================================
+// MARK: Authority root helpers
+// ============================================================================
+
+export function getBackendChatEngineRoot(): string {
+  return CHAT_AUTHORITY_ROOTS.backendEngineRoot;
+}
+
+export function getBackendChatLearningRoot(): string {
+  return CHAT_AUTHORITY_ROOTS.backendLearningRoot;
+}
+
+export function getSharedContractsRoot(): string {
+  return CHAT_AUTHORITY_ROOTS.sharedContractsRoot;
+}
+
+export function getSharedLearningRoot(): string {
+  return CHAT_AUTHORITY_ROOTS.sharedLearningRoot;
+}
+
+export function getFrontendEngineRoot(): string {
+  return CHAT_AUTHORITY_ROOTS.frontendEngineRoot;
+}
+
+export function getFrontendUiRoot(): string {
+  return CHAT_AUTHORITY_ROOTS.frontendUiRoot;
+}
+
+export function getServerTransportRoot(): string {
+  return CHAT_AUTHORITY_ROOTS.serverTransportRoot;
+}
+
+// ============================================================================
+// MARK: Design doctrine helpers
+// ============================================================================
+
+export const BACKEND_CHAT_OWNERSHIP_PROHIBITIONS = Object.freeze([
+  'Frontend chat does not own backend transcript truth.',
+  'Transport does not own moderation or rate decisions.',
+  'Backend chat does not own socket fanout.',
+  'Backend chat does not own frontend rendering.',
+  'Other engine lanes remain sovereign over their own domains.',
+  'Online inference may recommend; policy and orchestration still decide.',
+  'Every message that enters transcript truth must be reconstructible.',
+] as const);
+
+export type BackendChatOwnershipProhibition = (typeof BACKEND_CHAT_OWNERSHIP_PROHIBITIONS)[number];
+
+export function prohibitionIsViolatedByOwner(
+  prohibition: BackendChatOwnershipProhibition,
+  ownerKeyword: string,
+): boolean {
+  return prohibition.toLowerCase().includes(ownerKeyword.toLowerCase());
+}
+
+// ============================================================================
+// MARK: Barrel export completeness verifiers
+// ============================================================================
+
+export function coreModulesArePresent(): boolean {
+  return (
+    Boolean(State) &&
+    Boolean(Reducer) &&
+    Boolean(MessageFactory) &&
+    Boolean(ProofChain) &&
+    Boolean(RatePolicy) &&
+    Boolean(ModerationPolicy) &&
+    Boolean(CommandParser) &&
+    Boolean(EventBridge) &&
+    Boolean(SessionState) &&
+    Boolean(Invasion) &&
+    Boolean(Hater) &&
+    Boolean(Helper) &&
+    Boolean(Npc) &&
+    Boolean(Engine)
+  );
+}
+
+export function postRunModulesArePresent(): boolean {
+  return (
+    Boolean(PostRun) &&
+    Boolean(PostRunNarrativeEngineRuntime) &&
+    Boolean(TurningPointResolverRuntime) &&
+    Boolean(ForeshadowPlannerRuntime)
+  );
+}
+
+export function experienceModulesArePresent(): boolean {
+  return (
+    Boolean(DramaOrchestrator) &&
+    Boolean(ScenePlanner) &&
+    Boolean(MomentLedger) &&
+    Boolean(SilencePolicy)
+  );
+}
+
+export function intelligenceModulesArePresent(): boolean {
+  return (
+    Boolean(Intelligence) &&
+    Boolean(EmotionModelRuntime) &&
+    Boolean(PressureAffectModelRuntime) &&
+    Boolean(AttachmentModelRuntime)
+  );
+}
+
+export function allBarrelModulesPresent(): boolean {
+  return (
+    coreModulesArePresent() &&
+    postRunModulesArePresent() &&
+    experienceModulesArePresent() &&
+    intelligenceModulesArePresent()
+  );
+}
+
+// ============================================================================
+// MARK: Terminal barrel identity assertion
+// ============================================================================
+
+export const BACKEND_CHAT_LANE_IDENTITY = Object.freeze({
+  laneId: BACKEND_CHAT_BARREL_ID,
+  version: BACKEND_CHAT_BARREL_VERSION,
+  apiVersion: BACKEND_CHAT_BARREL_API_VERSION,
+  authorityRoot: CHAT_AUTHORITY_ROOTS.backendEngineRoot,
+  prohibitions: BACKEND_CHAT_OWNERSHIP_PROHIBITIONS,
+  coreModuleIds: BACKEND_CHAT_CORE_MODULE_IDS,
+  postrunModuleIds: BACKEND_CHAT_POSTRUN_MODULE_IDS,
+  experienceModuleIds: BACKEND_CHAT_EXPERIENCE_MODULE_IDS,
+  intelligenceModuleIds: BACKEND_CHAT_INTELLIGENCE_MODULE_IDS,
+  totalModuleCount: BACKEND_CHAT_ALL_MODULE_IDS.length,
+  allModulesPresent: allBarrelModulesPresent(),
+} as const);
+
+// ── End of backend chat root barrel ─────────────────────────────────────────
+// This file is the authoritative entry surface for the backend chat lane.
+// All consumers MUST import from this barrel or from named sub-module paths.
+// Direct deep imports into sub-folders without this barrel are not supported.
+// Version: BACKEND_CHAT_BARREL_VERSION / API: BACKEND_CHAT_BARREL_API_VERSION
+//
+// Module groups: core | postrun | experience | intelligence | social | combat
+//                continuity | rewards | rescue | training | replay | phases
+// Total modules: see BACKEND_CHAT_BARREL_DESCRIPTOR.totalModuleCount
+// ────────────────────────────────────────────────────────────────────────────
+
+

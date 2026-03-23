@@ -527,10 +527,10 @@ function collectResponseIntervals(
 }
 
 function computeMessageLengthVolatility01(messages: readonly ChatMessage[]): Score01 {
-  if (messages.length < 2) return 0;
+  if (messages.length < 2) return asScore(0);
   const lengths = messages.map((m) => m.plainText.length);
   const avg = mean(lengths);
-  if (avg <= 0) return 0;
+  if (avg <= 0) return asScore(0);
   return asScore(stddev(lengths) / Math.max(avg, 1));
 }
 
@@ -539,7 +539,7 @@ function computeCapsAggression01(
   userId: Nullable<ChatUserId>,
 ): Score01 {
   const authored = messages.filter((m) => m.attribution.authorUserId === userId);
-  if (!authored.length) return 0;
+  if (!authored.length) return asScore(0);
   const capsCount = authored.filter((m) => {
     const upper = m.plainText.replace(/[^A-Za-z]/g, '');
     if (!upper.length) return false;
@@ -554,11 +554,11 @@ function computeRepetitionPressure01(
   userId: Nullable<ChatUserId>,
   window: number,
 ): Score01 {
-  if (!userId) return 0;
+  if (!userId) return asScore(0);
   const authored = messages
     .filter((m) => m.attribution.authorUserId === userId)
     .slice(-window);
-  if (authored.length < 2) return 0;
+  if (authored.length < 2) return asScore(0);
   const texts = authored.map((m) => m.plainText.trim().toLowerCase().slice(0, 64));
   const dupes = texts.filter((t, i) => texts.slice(0, i).includes(t)).length;
   return asScore(ratio(dupes, authored.length));
@@ -570,7 +570,7 @@ function computeSpamVelocity01(
   burstWindowMs: number,
   now: UnixMs,
 ): Score01 {
-  if (!userId) return 0;
+  if (!userId) return asScore(0);
   const cutoff = (now as number) - burstWindowMs;
   const burst = entries.filter(
     (e) =>
@@ -585,12 +585,12 @@ function computeTargetFixation01(
   targetUserId: Nullable<ChatUserId>,
   windowCount: number,
 ): Score01 {
-  if (!targetUserId) return 0;
+  if (!targetUserId) return asScore(0);
   const recent = entries.slice(-Math.max(windowCount * 3, 12));
   const haterMessages = recent.filter((e) => e.message.attribution.npcRole === 'HATER');
-  if (!haterMessages.length) return 0;
+  if (!haterMessages.length) return asScore(0);
   const mentionsTarget = haterMessages.filter(
-    (e) => e.message.attribution.targetUserId === targetUserId,
+    (e) => (e.message.metadata['targetUserId'] as string | undefined) === (targetUserId as string),
   ).length;
   return asScore(ratio(mentionsTarget, haterMessages.length));
 }
@@ -600,11 +600,11 @@ function computePileOnExposure01(
   targetUserId: Nullable<ChatUserId>,
   windowCount: number,
 ): Score01 {
-  if (!targetUserId) return 0;
+  if (!targetUserId) return asScore(0);
   const recent = entries.slice(-Math.max(windowCount * 2, 8));
   const hostile = recent.filter(
     (e) =>
-      e.message.attribution.targetUserId === targetUserId &&
+      (e.message.metadata['targetUserId'] as string | undefined) === (targetUserId as string) &&
       (e.message.tags.includes('attack') || e.message.tags.includes('negative')),
   );
   const uniqueAttackers = new Set(hostile.map((e) => e.message.attribution.actorId)).size;
@@ -628,10 +628,10 @@ function computeInsultDensity01(
   entries: readonly ChatTranscriptEntry[],
   targetUserId: Nullable<ChatUserId>,
 ): Score01 {
-  if (!targetUserId) return 0;
+  if (!targetUserId) return asScore(0);
   const targeted = entries.filter(
     (e) =>
-      e.message.attribution.targetUserId === targetUserId &&
+      (e.message.metadata['targetUserId'] as string | undefined) === (targetUserId as string) &&
       (e.message.tags.includes('insult') || e.message.tags.includes('mockery') || e.message.tags.includes('slur')),
   );
   return asScore(ratio(targeted.length, Math.max(entries.length, 1)));
@@ -641,10 +641,10 @@ function computeThreatLanguage01(
   entries: readonly ChatTranscriptEntry[],
   targetUserId: Nullable<ChatUserId>,
 ): Score01 {
-  if (!targetUserId) return 0;
+  if (!targetUserId) return asScore(0);
   const threat = entries.filter(
     (e) =>
-      e.message.attribution.targetUserId === targetUserId &&
+      (e.message.metadata['targetUserId'] as string | undefined) === (targetUserId as string) &&
       e.message.tags.includes('threat'),
   );
   return asScore(ratio(threat.length, Math.max(entries.length, 1)));
@@ -654,10 +654,10 @@ function computeRidiculeExposure01(
   entries: readonly ChatTranscriptEntry[],
   targetUserId: Nullable<ChatUserId>,
 ): Score01 {
-  if (!targetUserId) return 0;
+  if (!targetUserId) return asScore(0);
   const ridicule = entries.filter(
     (e) =>
-      e.message.attribution.targetUserId === targetUserId &&
+      (e.message.metadata['targetUserId'] as string | undefined) === (targetUserId as string) &&
       (e.message.tags.includes('ridicule') || e.message.tags.includes('humiliation')),
   );
   return asScore(ratio(ridicule.length, Math.max(entries.length, 1)));
@@ -753,7 +753,7 @@ function computeSovereigntyComposure01(
   defaults: typeof CHAT_FEATURE_INGESTOR_DEFAULTS,
 ): Score01 {
   const nearSovereignty = signal?.run?.nearSovereignty ? 1 : 0;
-  if (!nearSovereignty) return 0;
+  if (!nearSovereignty) return asScore(0);
   const confidence = affect.confidence01 as number;
   const composure = confidence >= defaults.sovereigntyComposureHighStake ? confidence : confidence * 0.44;
   return asScore(composure * 0.72 + (1 - (affect.frustration01 as number)) * 0.28);
@@ -765,7 +765,7 @@ function computeComebackPotential01(
   defaults: typeof CHAT_FEATURE_INGESTOR_DEFAULTS,
 ): Score01 {
   const engagement = affect.attachment01 as number;
-  if (engagement < defaults.comingbackPotentialMinEngagement) return 0;
+  if (engagement < defaults.comingbackPotentialMinEngagement) return asScore(0);
   const relief = affect.relief01 as number;
   const confidence = affect.confidence01 as number;
   const rescueOpen = signal?.battle?.rescueWindowOpen ? 0.18 : 0;
@@ -784,19 +784,19 @@ function computeSilenceAfterProvocation01(
   now: UnixMs,
   windowMs: number,
 ): Score01 {
-  if (!userId) return 0;
+  if (!userId) return asScore(0);
   const cutoff = (now as number) - windowMs;
   const recentEntries = entries.filter((e) => (e.appendedAt as number) >= cutoff);
   const lastHaterAt = recentEntries
     .filter((e) => e.message.attribution.npcRole === 'HATER')
     .reduce((max, e) => Math.max(max, e.message.createdAt as number), 0);
-  if (!lastHaterAt) return 0;
+  if (!lastHaterAt) return asScore(0);
   const playerResponseAfterHater = recentEntries.some(
     (e) =>
       e.message.attribution.authorUserId === userId &&
       (e.message.createdAt as number) > lastHaterAt,
   );
-  return playerResponseAfterHater ? 0 : asScore(Math.min(1, ((now as number) - lastHaterAt) / 15_000));
+  return playerResponseAfterHater ? asScore(0) : asScore(Math.min(1, ((now as number) - lastHaterAt) / 15_000));
 }
 
 function computeAffect(

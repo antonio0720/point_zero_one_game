@@ -1447,3 +1447,551 @@ function stringifySessionId(sessionId: ChatSessionId): string {
 function stringifyUserId(userId: unknown): string {
   return String(userId);
 }
+
+// ============================================================================
+// MARK: Session watch bus
+// ============================================================================
+
+export type SessionWatchEvent =
+  | { kind: 'ADMITTED'; sessionId: ChatSessionId; roomId: ChatRoomId }
+  | { kind: 'REMOVED'; sessionId: ChatSessionId; roomId: ChatRoomId }
+  | { kind: 'MUTED'; sessionId: ChatSessionId; until: UnixMs }
+  | { kind: 'INVISIBLE_SET'; sessionId: ChatSessionId; invisible: boolean }
+  | { kind: 'CONNECTION_CHANGED'; sessionId: ChatSessionId; state: ChatConnectionState };
+
+export type SessionWatchCallback = (event: SessionWatchEvent) => void;
+
+export class SessionWatchBus {
+  private readonly subscribers = new Set<SessionWatchCallback>();
+
+  subscribe(cb: SessionWatchCallback): () => void {
+    this.subscribers.add(cb);
+    return () => this.subscribers.delete(cb);
+  }
+
+  emit(event: SessionWatchEvent): void {
+    for (const cb of this.subscribers) {
+      try { cb(event); } catch { /* isolate */ }
+    }
+  }
+
+  emitAdmitted(sessionId: ChatSessionId, roomId: ChatRoomId): void {
+    this.emit({ kind: 'ADMITTED', sessionId, roomId });
+  }
+
+  emitRemoved(sessionId: ChatSessionId, roomId: ChatRoomId): void {
+    this.emit({ kind: 'REMOVED', sessionId, roomId });
+  }
+
+  emitMuted(sessionId: ChatSessionId, until: UnixMs): void {
+    this.emit({ kind: 'MUTED', sessionId, until });
+  }
+
+  emitInvisibleSet(sessionId: ChatSessionId, invisible: boolean): void {
+    this.emit({ kind: 'INVISIBLE_SET', sessionId, invisible });
+  }
+
+  emitConnectionChanged(sessionId: ChatSessionId, state: ChatConnectionState): void {
+    this.emit({ kind: 'CONNECTION_CHANGED', sessionId, state });
+  }
+
+  size(): number { return this.subscribers.size; }
+}
+
+// ============================================================================
+// MARK: Session fingerprint
+// ============================================================================
+
+export interface SessionFingerprint {
+  readonly sessionId: ChatSessionId;
+  readonly roomId: ChatRoomId;
+  readonly role: ChatSessionRole;
+  readonly connectionState: ChatConnectionState;
+  readonly invisible: boolean;
+  readonly shadowMuted: boolean;
+  readonly hash: string;
+}
+
+export function computeSessionFingerprint(session: ChatSessionModel): SessionFingerprint {
+  const hash = [
+    session.identity.sessionId,
+    session.roomId,
+    session.role,
+    session.connectionState,
+    session.invisible,
+    session.shadowMuted,
+  ].join('|');
+
+  return Object.freeze({
+    sessionId: session.identity.sessionId,
+    roomId: session.roomId,
+    role: session.role,
+    connectionState: session.connectionState,
+    invisible: session.invisible,
+    shadowMuted: session.shadowMuted,
+    hash,
+  });
+}
+
+// ============================================================================
+// MARK: Session admission policy
+// ============================================================================
+
+export interface SessionAdmissionPolicy {
+  readonly maxSessionsPerRoom: number;
+  readonly maxReconnectWindowMs: number;
+  readonly allowInvisiblePlayers: boolean;
+  readonly allowShadowMutedPlayers: boolean;
+}
+
+export const DEFAULT_SESSION_ADMISSION_POLICY: SessionAdmissionPolicy = Object.freeze({
+  maxSessionsPerRoom: 500,
+  maxReconnectWindowMs: 60_000,
+  allowInvisiblePlayers: true,
+  allowShadowMutedPlayers: true,
+});
+
+export function isSessionAdmissible(
+  session: ChatSessionModel,
+  roomSessionCount: number,
+  policy: SessionAdmissionPolicy = DEFAULT_SESSION_ADMISSION_POLICY,
+): boolean {
+  if (roomSessionCount >= policy.maxSessionsPerRoom) return false;
+  if (!policy.allowInvisiblePlayers && session.invisible) return false;
+  if (!policy.allowShadowMutedPlayers && session.shadowMuted) return false;
+  return true;
+}
+
+// ============================================================================
+// MARK: Session role capability gate
+// ============================================================================
+
+export type SessionCapability =
+  | 'CAN_SEND_MESSAGES'
+  | 'CAN_CHANGE_CHANNEL'
+  | 'CAN_USE_COMMANDS'
+  | 'CAN_SEE_SHADOW_CHANNEL'
+  | 'CAN_TRIGGER_REPLAY'
+  | 'CAN_KICK_SESSIONS';
+
+export const ROLE_CAPABILITY_MAP: Readonly<Record<ChatSessionRole, readonly SessionCapability[]>> =
+  Object.freeze({
+    PLAYER: ['CAN_SEND_MESSAGES', 'CAN_CHANGE_CHANNEL', 'CAN_USE_COMMANDS', 'CAN_TRIGGER_REPLAY'],
+    OPERATOR: ['CAN_SEND_MESSAGES', 'CAN_CHANGE_CHANNEL', 'CAN_USE_COMMANDS', 'CAN_SEE_SHADOW_CHANNEL', 'CAN_TRIGGER_REPLAY', 'CAN_KICK_SESSIONS'],
+    SPECTATOR: ['CAN_TRIGGER_REPLAY'],
+    NARRATOR: ['CAN_SEND_MESSAGES', 'CAN_SEE_SHADOW_CHANNEL'],
+    OBSERVER: [],
+  } as const);
+
+export function sessionHasCapability(role: ChatSessionRole, cap: SessionCapability): boolean {
+  return ROLE_CAPABILITY_MAP[role]?.includes(cap) ?? false;
+}
+
+// ============================================================================
+// MARK: Session batch query helpers
+// ============================================================================
+
+export function querySessionsByRoom(
+  state: ChatState,
+  roomId: ChatRoomId,
+): readonly ChatSessionModel[] {
+  return Object.values(state.sessions).filter(
+    (s): s is ChatSessionModel => s !== undefined && s.roomId === roomId,
+  );
+}
+
+export function queryActiveSessionsByRoom(
+  state: ChatState,
+  roomId: ChatRoomId,
+): readonly ChatSessionModel[] {
+  return querySessionsByRoom(state, roomId).filter(
+    (s) => s.connectionState === 'CONNECTED',
+  );
+}
+
+export function queryInvisibleSessionsByRoom(
+  state: ChatState,
+  roomId: ChatRoomId,
+): readonly ChatSessionModel[] {
+  return querySessionsByRoom(state, roomId).filter((s) => s.invisible);
+}
+
+export function queryShadowMutedSessions(
+  state: ChatState,
+  roomId: ChatRoomId,
+): readonly ChatSessionModel[] {
+  return querySessionsByRoom(state, roomId).filter((s) => s.shadowMuted);
+}
+
+// ============================================================================
+// MARK: Session state diff
+// ============================================================================
+
+export interface SessionStateDiff {
+  readonly sessionId: ChatSessionId;
+  readonly connectionChanged: boolean;
+  readonly invisibilityChanged: boolean;
+  readonly shadowMuteChanged: boolean;
+  readonly roleChanged: boolean;
+  readonly roomChanged: boolean;
+}
+
+export function diffSessionStates(
+  before: ChatSessionModel,
+  after: ChatSessionModel,
+): SessionStateDiff {
+  return Object.freeze({
+    sessionId: before.identity.sessionId,
+    connectionChanged: before.connectionState !== after.connectionState,
+    invisibilityChanged: before.invisible !== after.invisible,
+    shadowMuteChanged: before.shadowMuted !== after.shadowMuted,
+    roleChanged: before.role !== after.role,
+    roomChanged: before.roomId !== after.roomId,
+  });
+}
+
+// ============================================================================
+// MARK: Session mute window helper
+// ============================================================================
+
+export function isSessionCurrentlyMuted(session: ChatSessionModel, now: UnixMs): boolean {
+  if (!session.mutedUntil) return false;
+  return (session.mutedUntil as unknown as number) > (now as unknown as number);
+}
+
+export function remainingMuteDurationMs(session: ChatSessionModel, now: UnixMs): number {
+  if (!session.mutedUntil) return 0;
+  const remaining = (session.mutedUntil as unknown as number) - (now as unknown as number);
+  return remaining > 0 ? remaining : 0;
+}
+
+// ============================================================================
+// MARK: Session statistics summary
+// ============================================================================
+
+export interface SessionRoomStats {
+  readonly roomId: ChatRoomId;
+  readonly totalSessions: number;
+  readonly activeSessions: number;
+  readonly invisibleSessions: number;
+  readonly shadowMutedSessions: number;
+  readonly mutedSessions: number;
+  readonly computedAt: UnixMs;
+}
+
+export function buildSessionRoomStats(
+  state: ChatState,
+  roomId: ChatRoomId,
+  now: UnixMs,
+): SessionRoomStats {
+  const all = querySessionsByRoom(state, roomId);
+  return Object.freeze({
+    roomId,
+    totalSessions: all.length,
+    activeSessions: all.filter((s) => s.connectionState === 'CONNECTED').length,
+    invisibleSessions: all.filter((s) => s.invisible).length,
+    shadowMutedSessions: all.filter((s) => s.shadowMuted).length,
+    mutedSessions: all.filter((s) => isSessionCurrentlyMuted(s, now)).length,
+    computedAt: now,
+  });
+}
+
+// ============================================================================
+// MARK: Session epoch tracker
+// ============================================================================
+
+export interface SessionEpoch {
+  readonly epochId: string;
+  readonly sessionId: ChatSessionId;
+  readonly roomId: ChatRoomId;
+  readonly recordedAt: UnixMs;
+  readonly connectionState: ChatConnectionState;
+}
+
+export class SessionEpochTracker {
+  private readonly epochs = new Map<ChatSessionId, SessionEpoch[]>();
+
+  record(session: ChatSessionModel, now: UnixMs): void {
+    const id = session.identity.sessionId;
+    if (!this.epochs.has(id)) this.epochs.set(id, []);
+    this.epochs.get(id)!.push(Object.freeze({
+      epochId: `epoch:${id}:${now}`,
+      sessionId: id,
+      roomId: session.roomId,
+      recordedAt: now,
+      connectionState: session.connectionState,
+    }));
+  }
+
+  getEpochs(sessionId: ChatSessionId): readonly SessionEpoch[] {
+    return this.epochs.get(sessionId) ?? [];
+  }
+
+  latestEpoch(sessionId: ChatSessionId): SessionEpoch | null {
+    const list = this.epochs.get(sessionId);
+    return list && list.length > 0 ? list[list.length - 1]! : null;
+  }
+
+  purge(sessionId: ChatSessionId): void { this.epochs.delete(sessionId); }
+  allSessions(): readonly ChatSessionId[] { return Array.from(this.epochs.keys()); }
+}
+
+// ============================================================================
+// MARK: Session lifecycle helpers
+// ============================================================================
+
+export function buildSessionAdmissionRecord(
+  session: ChatSessionModel,
+  now: UnixMs,
+): Readonly<Record<string, string>> {
+  return Object.freeze({
+    sessionId: stringifySessionId(session.identity.sessionId),
+    roomId: stringifyRoomId(session.roomId),
+    userId: stringifyUserId(session.identity.userId),
+    role: session.role,
+    connectionState: session.connectionState,
+    admittedAt: String(now),
+  });
+}
+
+// ============================================================================
+// MARK: Module constants
+// ============================================================================
+
+export const CHAT_SESSION_STATE_MODULE_NAME = 'ChatSessionState' as const;
+export const CHAT_SESSION_STATE_MODULE_VERSION = '2026.03.14.2' as const;
+
+export const CHAT_SESSION_STATE_MODULE_LAWS = Object.freeze([
+  'Session admission is backend truth — transport proposes, backend decides.',
+  'Invisible sessions are backend-tracked; frontend mirrors only.',
+  'Shadow mute state is backend-only — not propagated to client.',
+  'Reconnect windows are time-bounded and enforced here.',
+  'Mute expiry is checked against server clock, not client time.',
+  'All session state mutations are state-copy-safe — no in-place edits.',
+]);
+
+export const CHAT_SESSION_STATE_MODULE_DESCRIPTOR = Object.freeze({
+  name: CHAT_SESSION_STATE_MODULE_NAME,
+  version: CHAT_SESSION_STATE_MODULE_VERSION,
+  laws: CHAT_SESSION_STATE_MODULE_LAWS,
+});
+
+export function createSessionWatchBus(): SessionWatchBus {
+  return new SessionWatchBus();
+}
+
+export function createSessionEpochTracker(): SessionEpochTracker {
+  return new SessionEpochTracker();
+}
+
+// Re-export used ChatState mutation helpers for external convenience
+export {
+  attachSessionToRoom,
+  createChatSessionState,
+  detachSessionFromRoom,
+  removeSession,
+  setSessionConnectionState,
+  setSessionInvisible,
+  setSessionMutedUntil,
+  setSessionShadowMuted,
+  upsertSession,
+};
+
+// ============================================================================
+// MARK: Session reconnect window checker
+// ============================================================================
+
+export function isWithinReconnectWindow(
+  session: ChatSessionModel,
+  now: UnixMs,
+  windowMs: number = DEFAULT_SESSION_ADMISSION_POLICY.maxReconnectWindowMs,
+): boolean {
+  if (session.connectionState !== 'RECONNECTING') return false;
+  if (!session.disconnectedAt) return false;
+  const elapsed = (now as unknown as number) - (session.disconnectedAt as unknown as number);
+  return elapsed <= windowMs;
+}
+
+// ============================================================================
+// MARK: Session projection builder
+// ============================================================================
+
+export interface SessionProjection {
+  readonly sessionId: ChatSessionId;
+  readonly roomId: ChatRoomId;
+  readonly userId: string;
+  readonly role: ChatSessionRole;
+  readonly isActive: boolean;
+  readonly isMuted: boolean;
+  readonly isInvisible: boolean;
+  readonly isShadowMuted: boolean;
+  readonly isReconnecting: boolean;
+}
+
+export function buildSessionProjection(
+  session: ChatSessionModel,
+  now: UnixMs,
+): SessionProjection {
+  return Object.freeze({
+    sessionId: session.identity.sessionId,
+    roomId: session.roomId,
+    userId: stringifyUserId(session.identity.userId),
+    role: session.role,
+    isActive: session.connectionState === 'CONNECTED',
+    isMuted: isSessionCurrentlyMuted(session, now),
+    isInvisible: session.invisible,
+    isShadowMuted: session.shadowMuted,
+    isReconnecting: session.connectionState === 'RECONNECTING',
+  });
+}
+
+export function buildRoomSessionProjections(
+  state: ChatState,
+  roomId: ChatRoomId,
+  now: UnixMs,
+): readonly SessionProjection[] {
+  return querySessionsByRoom(state, roomId).map((s) => buildSessionProjection(s, now));
+}
+
+// ============================================================================
+// MARK: Session batch mute report
+// ============================================================================
+
+export interface SessionMuteReport {
+  readonly roomId: ChatRoomId;
+  readonly mutedSessionIds: readonly ChatSessionId[];
+  readonly totalMuted: number;
+  readonly computedAt: UnixMs;
+}
+
+export function buildSessionMuteReport(
+  state: ChatState,
+  roomId: ChatRoomId,
+  now: UnixMs,
+): SessionMuteReport {
+  const muted = querySessionsByRoom(state, roomId)
+    .filter((s) => isSessionCurrentlyMuted(s, now))
+    .map((s) => s.identity.sessionId);
+
+  return Object.freeze({
+    roomId,
+    mutedSessionIds: Object.freeze(muted),
+    totalMuted: muted.length,
+    computedAt: now,
+  });
+}
+
+// ============================================================================
+// MARK: Extended module namespace
+// ============================================================================
+
+export const ChatSessionStateModuleExtended = Object.freeze({
+  createSessionWatchBus,
+  createSessionEpochTracker,
+  computeSessionFingerprint,
+  isSessionAdmissible,
+  sessionHasCapability,
+  querySessionsByRoom,
+  queryActiveSessionsByRoom,
+  queryInvisibleSessionsByRoom,
+  queryShadowMutedSessions,
+  diffSessionStates,
+  isSessionCurrentlyMuted,
+  remainingMuteDurationMs,
+  buildSessionRoomStats,
+  buildSessionAdmissionRecord,
+  buildSessionProjection,
+  buildRoomSessionProjections,
+  buildSessionMuteReport,
+  isWithinReconnectWindow,
+  ROLE_CAPABILITY_MAP,
+  DEFAULT_SESSION_ADMISSION_POLICY,
+  CHAT_SESSION_STATE_MODULE_DESCRIPTOR,
+  CHAT_SESSION_STATE_MODULE_LAWS,
+} as const);
+
+// ============================================================================
+// MARK: Session role distributor
+// ============================================================================
+
+export interface RoomRoleDistribution {
+  readonly roomId: ChatRoomId;
+  readonly playerCount: number;
+  readonly operatorCount: number;
+  readonly spectatorCount: number;
+  readonly narratorCount: number;
+  readonly observerCount: number;
+}
+
+export function buildRoomRoleDistribution(
+  state: ChatState,
+  roomId: ChatRoomId,
+): RoomRoleDistribution {
+  const sessions = querySessionsByRoom(state, roomId);
+  let players = 0, operators = 0, spectators = 0, narrators = 0, observers = 0;
+  for (const s of sessions) {
+    if (s.role === 'PLAYER') players++;
+    else if (s.role === 'OPERATOR') operators++;
+    else if (s.role === 'SPECTATOR') spectators++;
+    else if (s.role === 'NARRATOR') narrators++;
+    else if (s.role === 'OBSERVER') observers++;
+  }
+  return Object.freeze({ roomId, playerCount: players, operatorCount: operators, spectatorCount: spectators, narratorCount: narrators, observerCount: observers });
+}
+
+// ============================================================================
+// MARK: Session identity lookup helpers
+// ============================================================================
+
+export function findSessionByUserId(
+  state: ChatState,
+  roomId: ChatRoomId,
+  userId: string,
+): ChatSessionModel | null {
+  return querySessionsByRoom(state, roomId).find(
+    (s) => stringifyUserId(s.identity.userId) === userId,
+  ) ?? null;
+}
+
+export function getSessionRoomKind(
+  state: ChatState,
+  session: ChatSessionModel,
+): ChatRoomKind | null {
+  const room = state.rooms[session.roomId];
+  return room?.roomKind ?? null;
+}
+
+export function countActiveSessionsInState(state: ChatState): number {
+  return Object.values(state.sessions).filter(
+    (s) => s !== undefined && s.connectionState === 'CONNECTED',
+  ).length;
+}
+
+export function countTotalSessionsInState(state: ChatState): number {
+  return Object.keys(state.sessions).length;
+}
+
+export function getOperatorSessionsInRoom(state: ChatState, roomId: ChatRoomId): readonly ChatSessionModel[] {
+  return querySessionsByRoom(state, roomId).filter((s) => s.role === 'OPERATOR');
+}
+export function getPlayerSessionsInRoom(state: ChatState, roomId: ChatRoomId): readonly ChatSessionModel[] {
+  return querySessionsByRoom(state, roomId).filter((s) => s.role === 'PLAYER');
+}
+export function getSpectatorSessionsInRoom(state: ChatState, roomId: ChatRoomId): readonly ChatSessionModel[] {
+  return querySessionsByRoom(state, roomId).filter((s) => s.role === 'SPECTATOR');
+}
+export function hasSession(state: ChatState, sessionId: ChatSessionId): boolean {
+  return sessionId in state.sessions;
+}
+export function getRoomSessionCount(state: ChatState, roomId: ChatRoomId): number {
+  return querySessionsByRoom(state, roomId).length;
+}
+export function isRoomEmpty(state: ChatState, roomId: ChatRoomId): boolean {
+  return getRoomSessionCount(state, roomId) === 0;
+}
+export function isRoomOverCapacity(state: ChatState, roomId: ChatRoomId, max: number): boolean {
+  return getRoomSessionCount(state, roomId) > max;
+}
+export function listAllRoomIds(state: ChatState): readonly ChatRoomId[] {
+  return Object.freeze(Object.keys(state.rooms) as ChatRoomId[]);
+}

@@ -1635,3 +1635,429 @@ export function asUnixMs(value: number): UnixMs {
 export function asSequenceNumber(value: number): SequenceNumber {
   return Math.max(0, Math.floor(value)) as SequenceNumber;
 }
+
+// ============================================================================
+// MARK: Branded type cast helpers
+// ============================================================================
+
+export function asChatRoomId(value: string): ChatRoomId {
+  return value as ChatRoomId;
+}
+
+export function asChatSessionId(value: string): ChatSessionId {
+  return value as ChatSessionId;
+}
+
+export function asChatUserId(value: string): ChatUserId {
+  return value as ChatUserId;
+}
+
+export function asChatMessageId(value: string): ChatMessageId {
+  return value as ChatMessageId;
+}
+
+export function asChatEventId(value: string): ChatEventId {
+  return value as ChatEventId;
+}
+
+export function asChatInvasionId(value: string): ChatInvasionId {
+  return value as ChatInvasionId;
+}
+
+export function asChatPersonaId(value: string): ChatPersonaId {
+  return value as ChatPersonaId;
+}
+
+export function asChatSceneId(value: string): ChatSceneId {
+  return value as ChatSceneId;
+}
+
+export function asChatProofHash(value: string): ChatProofHash {
+  return value as ChatProofHash;
+}
+
+export function asChatRelationshipId(value: string): ChatRelationshipId {
+  return value as ChatRelationshipId;
+}
+
+export function asChatRequestId(value: string): ChatRequestId {
+  return value as ChatRequestId;
+}
+
+export function asChatReplayId(value: string): ChatReplayId {
+  return value as ChatReplayId;
+}
+
+export function asChatTelemetryId(value: string): ChatTelemetryId {
+  return value as ChatTelemetryId;
+}
+
+export function asChatInferenceId(value: string): ChatInferenceId {
+  return value as ChatInferenceId;
+}
+
+export function asChatMomentId(value: string): ChatMomentId {
+  return value as ChatMomentId;
+}
+
+export function asChatLegendId(value: string): ChatLegendId {
+  return value as ChatLegendId;
+}
+
+export function asChatMemoryAnchorId(value: string): ChatMemoryAnchorId {
+  return value as ChatMemoryAnchorId;
+}
+
+export function asChatProofEdgeId(value: string): ChatProofEdgeId {
+  return value as ChatProofEdgeId;
+}
+
+export function asChatTypingToken(value: string): ChatTypingToken {
+  return value as ChatTypingToken;
+}
+
+// ============================================================================
+// MARK: Type guard helpers
+// ============================================================================
+
+export function isChatRoomId(value: string): value is ChatRoomId {
+  return typeof value === 'string' && value.length > 0;
+}
+
+export function isChatSessionId(value: string): value is ChatSessionId {
+  return typeof value === 'string' && value.length > 0;
+}
+
+export function isChatUserId(value: string): value is ChatUserId {
+  return typeof value === 'string' && value.length > 0;
+}
+
+export function isChatMessageId(value: string): value is ChatMessageId {
+  return typeof value === 'string' && value.length > 0;
+}
+
+export function isChatEventKind(value: string): value is ChatEventKind {
+  return (CHAT_EVENT_KINDS as readonly string[]).includes(value);
+}
+
+export function isChatConnectionState(value: string): value is ChatConnectionState {
+  return (CHAT_CONNECTION_STATES as readonly string[]).includes(value);
+}
+
+export function isChatPresenceMode(value: string): value is ChatPresenceMode {
+  return (CHAT_PRESENCE_STATES as readonly string[]).includes(value);
+}
+
+export function isChatTypingMode(value: string): value is ChatTypingMode {
+  return (CHAT_TYPING_STATES as readonly string[]).includes(value);
+}
+
+export function isChatModerationOutcome(value: string): value is ChatModerationOutcome {
+  return (CHAT_MODERATION_OUTCOMES as readonly string[]).includes(value);
+}
+
+export function isChatSourceType(value: string): value is ChatSourceType {
+  return (CHAT_SOURCE_TYPES as readonly string[]).includes(value);
+}
+
+// ============================================================================
+// MARK: Null/undefined helpers
+// ============================================================================
+
+export function isNullable<T>(value: T | null | undefined): value is null | undefined {
+  return value == null;
+}
+
+export function unwrapNullable<T>(value: T | null | undefined, fallback: T): T {
+  return value ?? fallback;
+}
+
+export function assertDefined<T>(value: T | null | undefined, label?: string): T {
+  if (value == null) throw new Error(`Expected defined value${label ? ` for ${label}` : ''}`);
+  return value;
+}
+
+// ============================================================================
+// MARK: JSON helpers
+// ============================================================================
+
+export function isJsonPrimitive(value: JsonValue): value is JsonPrimitive {
+  return value === null || typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean';
+}
+
+export function isJsonObject(value: JsonValue): value is JsonObject {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+export function isJsonArray(value: JsonValue): value is JsonArray {
+  return Array.isArray(value);
+}
+
+export function jsonValueToString(value: JsonValue): string {
+  if (value === null) return 'null';
+  if (typeof value === 'string') return value;
+  return JSON.stringify(value);
+}
+
+// ============================================================================
+// MARK: ChatState field accessors
+// ============================================================================
+
+export function chatStateRoomIds(state: ChatState): readonly ChatRoomId[] {
+  return Object.freeze(Object.keys(state.rooms) as ChatRoomId[]);
+}
+
+export function chatStateSessionIds(state: ChatState): readonly ChatSessionId[] {
+  return Object.freeze(Object.keys(state.sessions) as ChatSessionId[]);
+}
+
+export function chatStateActiveInvasionIds(state: ChatState): readonly ChatInvasionId[] {
+  return Object.freeze(Object.keys(state.activeInvasions) as ChatInvasionId[]);
+}
+
+export function chatStateHasRoom(state: ChatState, roomId: ChatRoomId): boolean {
+  return Object.prototype.hasOwnProperty.call(state.rooms, roomId);
+}
+
+export function chatStateHasSession(state: ChatState, sessionId: ChatSessionId): boolean {
+  return Object.prototype.hasOwnProperty.call(state.sessions, sessionId);
+}
+
+export function chatStateRoomCount(state: ChatState): number {
+  return Object.keys(state.rooms).length;
+}
+
+export function chatStateSessionCount(state: ChatState): number {
+  return Object.keys(state.sessions).length;
+}
+
+export function chatStateActiveInvasionCount(state: ChatState): number {
+  return Object.keys(state.activeInvasions).length;
+}
+
+export function chatStateGetRoom(state: ChatState, roomId: ChatRoomId): ChatRoomState | null {
+  return state.rooms[roomId] ?? null;
+}
+
+export function chatStateGetSession(state: ChatState, sessionId: ChatSessionId): ChatSessionState | null {
+  return state.sessions[sessionId] ?? null;
+}
+
+export function chatStateGetAudienceHeat(state: ChatState, roomId: ChatRoomId): ChatAudienceHeat | null {
+  return state.audienceHeatByRoom[roomId] ?? null;
+}
+
+export function chatStateGetSilence(state: ChatState, roomId: ChatRoomId): ChatSilenceDecision | null {
+  return state.silencesByRoom[roomId] ?? null;
+}
+
+export function chatStateGetLastEventId(state: ChatState, roomId: ChatRoomId): ChatEventId | null {
+  return state.lastEventByRoom[roomId] ?? null;
+}
+
+export function chatStateGetLastEventAt(state: ChatState, roomId: ChatRoomId): UnixMs | null {
+  return state.lastEventAtByRoom[roomId] ?? null;
+}
+
+export function chatStateGetInvasion(state: ChatState, invasionId: ChatInvasionId): ChatInvasionState | null {
+  return state.activeInvasions[invasionId] ?? null;
+}
+
+export function chatStateGetLearningProfile(state: ChatState, userId: ChatUserId): ChatLearningProfile | null {
+  return state.learningProfiles[userId] ?? null;
+}
+
+export function chatStateGetRelationship(state: ChatState, relId: ChatRelationshipId): ChatRelationshipState | null {
+  return state.relationships[relId] ?? null;
+}
+
+export function chatStateGetPresence(state: ChatState, roomId: ChatRoomId, sessionId: ChatSessionId): ChatPresenceSnapshot | null {
+  return state.presence.byRoom[roomId]?.[sessionId] ?? null;
+}
+
+export function chatStateGetTyping(state: ChatState, roomId: ChatRoomId): readonly ChatTypingSnapshot[] {
+  return state.typing.byRoom[roomId] ?? [];
+}
+
+export function chatStateGetProofEdges(state: ChatState, roomId: ChatRoomId): readonly ChatProofEdge[] {
+  return state.proofChain.byRoom[roomId] ?? [];
+}
+
+export function chatStateGetReplayArtifacts(state: ChatState, roomId: ChatRoomId): readonly ChatReplayArtifact[] {
+  return state.replay.byRoom[roomId] ?? [];
+}
+
+export function chatStateGetSessionsForRoom(state: ChatState, roomId: ChatRoomId): readonly ChatSessionId[] {
+  return state.roomSessions.byRoom[roomId] ?? [];
+}
+
+export function chatStateGetRoomsForSession(state: ChatState, sessionId: ChatSessionId): readonly ChatRoomId[] {
+  return state.roomSessions.bySession[sessionId] ?? [];
+}
+
+// ============================================================================
+// MARK: Score comparison helpers
+// ============================================================================
+
+export function scoreAbove(score: Score01, threshold: number): boolean {
+  return (score as unknown as number) >= threshold;
+}
+
+export function scoreBelow(score: Score01, threshold: number): boolean {
+  return (score as unknown as number) <= threshold;
+}
+
+export function scoreToPercent(score: Score01): number {
+  return Math.round((score as unknown as number) * 100);
+}
+
+// ============================================================================
+// MARK: UnixMs helpers
+// ============================================================================
+
+export function unixMsToDate(ms: UnixMs): Date {
+  return new Date(ms as unknown as number);
+}
+
+export function unixMsAge(ms: UnixMs, now: UnixMs): number {
+  return (now as unknown as number) - (ms as unknown as number);
+}
+
+export function unixMsIsExpired(ms: UnixMs, now: UnixMs): boolean {
+  return (ms as unknown as number) <= (now as unknown as number);
+}
+
+export function unixMsIsInFuture(ms: UnixMs, now: UnixMs): boolean {
+  return (ms as unknown as number) > (now as unknown as number);
+}
+
+export function unixMsAdd(ms: UnixMs, deltaMs: number): UnixMs {
+  return asUnixMs((ms as unknown as number) + deltaMs);
+}
+
+export function unixMsSub(ms: UnixMs, deltaMs: number): UnixMs {
+  return asUnixMs(Math.max(0, (ms as unknown as number) - deltaMs));
+}
+
+// ============================================================================
+// MARK: Presence and connection state helpers
+// ============================================================================
+
+export function presenceModeIsActive(mode: ChatPresenceMode): boolean {
+  return mode === 'ONLINE' || mode === 'SPECTATING';
+}
+
+export function presenceModeIsOffline(mode: ChatPresenceMode): boolean {
+  return mode === 'DISCONNECTED' || mode === 'RECONNECTING';
+}
+
+export function connectionStateIsLive(state: ChatConnectionState): boolean {
+  return state === 'ATTACHED';
+}
+
+export function connectionStateIsDetached(state: ChatConnectionState): boolean {
+  return state === 'DETACHED' || state === 'DISCONNECTED';
+}
+
+// ============================================================================
+// MARK: Channel helpers
+// ============================================================================
+
+export function channelIsVisible(channelId: ChatChannelId): boolean {
+  return isVisibleChannelId(channelId);
+}
+
+export function channelIsShadow(channelId: ChatChannelId): boolean {
+  return isShadowChannelId(channelId);
+}
+
+export function visibleChannelIndex(channel: ChatVisibleChannel): number {
+  return CHAT_VISIBLE_CHANNELS.indexOf(channel);
+}
+
+// ============================================================================
+// MARK: Room kind helpers
+// ============================================================================
+
+export function roomKindIsGlobal(kind: ChatRoomKind): boolean {
+  return kind === 'GLOBAL';
+}
+
+export function roomKindIsPrivate(kind: ChatRoomKind): boolean {
+  return kind === 'PRIVATE';
+}
+
+export function roomKindIsSystem(kind: ChatRoomKind): boolean {
+  return kind === 'SYSTEM';
+}
+
+// ============================================================================
+// MARK: Invasion kind helpers
+// ============================================================================
+
+export function invasionKindIsHaterRaid(kind: ChatInvasionState['kind']): boolean {
+  return kind === 'HATER_RAID';
+}
+
+export function invasionKindIsHelperBlackout(kind: ChatInvasionState['kind']): boolean {
+  return kind === 'HELPER_BLACKOUT';
+}
+
+export function invasionKindIsSystemShock(kind: ChatInvasionState['kind']): boolean {
+  return kind === 'SYSTEM_SHOCK';
+}
+
+export function invasionStatusIsActive(status: ChatInvasionState['status']): boolean {
+  return status === 'ACTIVE';
+}
+
+export function invasionStatusIsResolved(status: ChatInvasionState['status']): boolean {
+  return status === 'RESOLVED';
+}
+
+// ============================================================================
+// MARK: Moderation outcome helpers
+// ============================================================================
+
+export function moderationOutcomeAllows(outcome: ChatModerationOutcome): boolean {
+  return outcome === 'ALLOW' || outcome === 'MASK' || outcome === 'REWRITE' || outcome === 'SHADOW_ONLY';
+}
+
+export function moderationOutcomeBlocks(outcome: ChatModerationOutcome): boolean {
+  return outcome === 'REJECT' || outcome === 'QUARANTINE' || outcome === 'THROTTLE';
+}
+
+// ============================================================================
+// MARK: Rate outcome helpers
+// ============================================================================
+
+export function rateOutcomeAllows(outcome: ChatRateOutcome): boolean {
+  return outcome === 'ALLOW';
+}
+
+export function rateOutcomeBlocks(outcome: ChatRateOutcome): boolean {
+  return outcome === 'BLOCK' || outcome === 'THROTTLE';
+}
+
+// ============================================================================
+// MARK: Module constants
+// ============================================================================
+
+export const CHAT_TYPES_MODULE_ID = 'chat_types' as const;
+export const CHAT_TYPES_MODULE_VERSION = BACKEND_CHAT_ENGINE_VERSION;
+
+export const CHAT_TYPES_MODULE_DESCRIPTOR = Object.freeze({
+  moduleId: CHAT_TYPES_MODULE_ID,
+  version: CHAT_TYPES_MODULE_VERSION,
+  visibleChannelCount: CHAT_VISIBLE_CHANNELS.length,
+  shadowChannelCount: CHAT_SHADOW_CHANNELS.length,
+  allChannelCount: CHAT_ALL_CHANNELS.length,
+  roomKindCount: CHAT_ROOM_KINDS.length,
+  sourceTypeCount: CHAT_SOURCE_TYPES.length,
+  eventKindCount: CHAT_EVENT_KINDS.length,
+  connectionStateCount: CHAT_CONNECTION_STATES.length,
+  presenceModeCount: CHAT_PRESENCE_STATES.length,
+  typingModeCount: CHAT_TYPING_STATES.length,
+  moderationOutcomeCount: CHAT_MODERATION_OUTCOMES.length,
+});
+

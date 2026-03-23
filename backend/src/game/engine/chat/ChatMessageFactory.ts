@@ -86,6 +86,7 @@ import {
   type ChatSceneId,
   type ChatSessionId,
   type ChatSessionState,
+  type ChatUserId,
   type ChatSignalEnvelope,
   type ChatSourceType,
   type ChatVisibleChannel,
@@ -1845,3 +1846,297 @@ function exhaustiveSourceType(value: never): never {
 function exhaustiveSystemSourceType(value: never): never {
   throw new Error(`Unhandled system ChatSourceType: ${String(value)}`);
 }
+
+// ============================================================================
+// MARK: Factory watch bus
+// ============================================================================
+
+export interface ChatMessageFactoryWatchEvent {
+  readonly kind: 'message_created' | 'attribution_resolved' | 'proof_stamped' | 'body_composed';
+  readonly roomId: ChatRoomId;
+  readonly messageId: ChatMessageId;
+  readonly at: UnixMs;
+  readonly payload: Readonly<Record<string, JsonValue>>;
+}
+
+export type ChatMessageFactoryWatchHandler = (event: ChatMessageFactoryWatchEvent) => void;
+
+export class ChatMessageFactoryWatchBus {
+  private readonly handlers: ChatMessageFactoryWatchHandler[] = [];
+
+  subscribe(handler: ChatMessageFactoryWatchHandler): () => void {
+    this.handlers.push(handler);
+    return () => {
+      const idx = this.handlers.indexOf(handler);
+      if (idx >= 0) this.handlers.splice(idx, 1);
+    };
+  }
+
+  emit(event: ChatMessageFactoryWatchEvent): void {
+    for (const h of this.handlers) {
+      try { h(event); } catch { /* isolated */ }
+    }
+  }
+
+  get listenerCount(): number {
+    return this.handlers.length;
+  }
+}
+
+// ============================================================================
+// MARK: Factory fingerprint
+// ============================================================================
+
+export interface ChatMessageFactoryFingerprint {
+  readonly roomId: ChatRoomId;
+  readonly messageId: ChatMessageId;
+  readonly sourceType: ChatSourceType;
+  readonly channel: ChatChannelId;
+  readonly sequenceNumber: number;
+  readonly computedAt: UnixMs;
+}
+
+export function computeMessageFactoryFingerprint(message: ChatMessage, now: UnixMs): ChatMessageFactoryFingerprint {
+  return Object.freeze({
+    roomId: message.roomId,
+    messageId: message.id,
+    sourceType: message.attribution.sourceType,
+    channel: message.channelId,
+    sequenceNumber: message.sequenceNumber as unknown as number,
+    computedAt: now,
+  });
+}
+
+// ============================================================================
+// MARK: Message inspection utilities
+// ============================================================================
+
+export function messageIsVisible(message: ChatMessage): boolean {
+  return message.deletedAt == null && message.redactedAt == null;
+}
+
+export function messageIsFromPlayer(message: ChatMessage): boolean {
+  return message.attribution.sourceType === 'PLAYER';
+}
+
+export function messageIsFromNpc(message: ChatMessage): boolean {
+  const t = message.attribution.sourceType;
+  return t === 'NPC_HATER' || t === 'NPC_HELPER' || t === 'NPC_AMBIENT';
+}
+
+export function messageIsFromSystem(message: ChatMessage): boolean {
+  return message.attribution.sourceType === 'SYSTEM';
+}
+
+export function messageBodyLength(message: ChatMessage): number {
+  return message.plainText.length;
+}
+
+export function messageHasProof(message: ChatMessage): boolean {
+  return message.proof.proofHash != null;
+}
+
+export function messageHasReplay(message: ChatMessage): boolean {
+  return message.replay.replayId != null;
+}
+
+export function messageHasLearningMetadata(message: ChatMessage): boolean {
+  return Boolean(message.learning);
+}
+
+export function messageChannelIsVisible(message: ChatMessage): boolean {
+  return isVisibleChannelId(message.channelId);
+}
+
+export function messageHasPolicyMetadata(message: ChatMessage): boolean {
+  return Boolean(message.policy);
+}
+
+export function messageIsFromPersona(message: ChatMessage, personaId: ChatPersonaId): boolean {
+  return message.attribution.actorId === String(personaId);
+}
+
+export function messageIsInRoom(message: ChatMessage, roomId: ChatRoomId): boolean {
+  return message.roomId === roomId;
+}
+
+export function messageIsInChannel(message: ChatMessage, channelId: ChatChannelId): boolean {
+  return message.channelId === channelId;
+}
+
+export function messageIsFromSession(message: ChatMessage, sessionId: ChatSessionId): boolean {
+  return message.attribution.authorSessionId === sessionId;
+}
+
+// ============================================================================
+// MARK: Attribution utilities
+// ============================================================================
+
+export function attributionLabel(attr: ChatMessageAttribution): string {
+  switch (attr.sourceType) {
+    case 'PLAYER': return `player:${attr.authorSessionId ?? 'unknown'}`;
+    case 'NPC_HATER':
+    case 'NPC_HELPER':
+    case 'NPC_AMBIENT': return `npc:${attr.npcRole ?? 'unknown'}`;
+    case 'SYSTEM': return `system`;
+    case 'LIVEOPS': return `liveops`;
+    default: return `unknown`;
+  }
+}
+
+export function attributionIsAnonymous(attr: ChatMessageAttribution): boolean {
+  return !attr.authorSessionId && !attr.actorId;
+}
+
+// ============================================================================
+// MARK: Body part utilities
+// ============================================================================
+
+export function bodyPartsToPlainText(parts: readonly ChatMessageBodyPart[]): string {
+  return parts
+    .filter((p) => p.type === 'TEXT')
+    .map((p) => (p as { type: 'TEXT'; text: string }).text)
+    .join(' ');
+}
+
+export function bodyPartCount(parts: readonly ChatMessageBodyPart[]): number {
+  return parts.length;
+}
+
+// ============================================================================
+// MARK: Proof metadata utilities
+// ============================================================================
+
+export function proofMetadataLabel(proof: ChatMessageProofMetadata): string {
+  return `${proof.proofHash}`;
+}
+
+export function replayMetadataLabel(replay: ChatMessageReplayMetadata): string {
+  return `replay:${replay.replayId ?? 'none'}`;
+}
+
+export function learningMetadataLabel(learning: ChatMessageLearningMetadata): string {
+  return `triggered:${learning.learningTriggered}`;
+}
+
+export function policyMetadataLabel(policy: ChatMessagePolicyMetadata): string {
+  return `outcome:${policy.moderationOutcome}`;
+}
+
+// ============================================================================
+// MARK: State query helpers
+// ============================================================================
+
+export function factoryGetLatestMessage(state: ChatState, roomId: ChatRoomId): ChatMessage | null {
+  return selectLatestMessage(state, roomId);
+}
+
+export function factoryGetNextSequence(state: ChatState, roomId: ChatRoomId): SequenceNumber {
+  return nextSequenceForRoom(state, roomId);
+}
+
+export function factoryGetRelationship(state: ChatState, roomId: ChatRoomId, actorId: string, userId: ChatUserId): ReturnType<typeof selectRelationshipForActor> {
+  return selectRelationshipForActor(state, roomId, actorId, userId);
+}
+
+export function factoryGetRoom(state: ChatState, roomId: ChatRoomId): ChatRoomState | null {
+  return selectRoom(state, roomId);
+}
+
+export function factoryGetSession(state: ChatState, sessionId: ChatSessionId): ChatSessionState | null {
+  return selectSession(state, sessionId);
+}
+
+export function factoryGetTranscript(state: ChatState, roomId: ChatRoomId): ReturnType<typeof selectRoomTranscript> {
+  return selectRoomTranscript(state, roomId);
+}
+
+// ============================================================================
+// MARK: Runtime config utilities
+// ============================================================================
+
+export function factoryChannelDescriptor(channelId: ChatChannelId): typeof CHAT_CHANNEL_DESCRIPTORS[ChatChannelId] {
+  return CHAT_CHANNEL_DESCRIPTORS[channelId];
+}
+
+export function factoryRuntimeDefault(key: keyof typeof CHAT_RUNTIME_DEFAULTS): typeof CHAT_RUNTIME_DEFAULTS[keyof typeof CHAT_RUNTIME_DEFAULTS] {
+  return CHAT_RUNTIME_DEFAULTS[key];
+}
+
+// ============================================================================
+// MARK: Pending request/reveal helpers
+// ============================================================================
+
+export function pendingRequestLabel(req: ChatPendingRequestState): string {
+  return `req:${req.requestId}:${req.messageId}`;
+}
+
+export function pendingRevealLabel(reveal: ChatPendingReveal): string {
+  return `reveal:${reveal.message.id}`;
+}
+
+// ============================================================================
+// MARK: Signal and affect helpers
+// ============================================================================
+
+export function factorySignalHasBattle(signal: ChatSignalEnvelope): boolean {
+  return Boolean(signal.battle);
+}
+
+export function factoryAffectLabel(affect: ChatAffectSnapshot): string {
+  return `confidence=${Number(affect.confidence01).toFixed(2)},frustration=${Number(affect.frustration01).toFixed(2)}`;
+}
+
+// ============================================================================
+// MARK: Module descriptor
+// ============================================================================
+
+export const CHAT_MESSAGE_FACTORY_MODULE_ID = 'chat_message_factory' as const;
+export const CHAT_MESSAGE_FACTORY_MODULE_VERSION = '2026.03.14' as const;
+
+export const CHAT_MESSAGE_FACTORY_MODULE_DESCRIPTOR = Object.freeze({
+  moduleId: CHAT_MESSAGE_FACTORY_MODULE_ID,
+  version: CHAT_MESSAGE_FACTORY_MODULE_VERSION,
+  capabilities: Object.freeze([
+    'player_message_creation',
+    'npc_message_creation',
+    'system_message_creation',
+    'liveops_message_creation',
+    'shadow_message_creation',
+    'proof_stamping',
+    'replay_stamping',
+    'learning_stamping',
+    'policy_stamping',
+    'watch_bus',
+    'fingerprinting',
+  ]),
+});
+
+export namespace ChatMessageFactoryModuleExtended {
+  export type WatchBus = ChatMessageFactoryWatchBus;
+  export type WatchEvent = ChatMessageFactoryWatchEvent;
+  export type Fingerprint = ChatMessageFactoryFingerprint;
+
+  export function createWatchBus(): ChatMessageFactoryWatchBus {
+    return new ChatMessageFactoryWatchBus();
+  }
+
+  export function describe(): string {
+    return `${CHAT_MESSAGE_FACTORY_MODULE_ID}@${CHAT_MESSAGE_FACTORY_MODULE_VERSION}`;
+  }
+}
+
+export const CHAT_MESSAGE_FACTORY_FULL_MODULE = Object.freeze({
+  descriptor: CHAT_MESSAGE_FACTORY_MODULE_DESCRIPTOR,
+  createWatchBus: () => new ChatMessageFactoryWatchBus(),
+  computeFingerprint: computeMessageFactoryFingerprint,
+  messageIsVisible,
+  messageIsFromPlayer,
+  messageIsFromNpc,
+  messageIsFromSystem,
+  messageHasProof,
+  messageHasReplay,
+  attributionLabel,
+  bodyPartsToPlainText,
+});
+
