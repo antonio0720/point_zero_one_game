@@ -79,6 +79,7 @@ import * as ReplayMomentIndexer from './rewards/ReplayMomentIndexer';
 import * as PresenceStyleResolver from './presence/PresenceStyleResolver';
 import * as TypingSimulationEngine from './presence/TypingSimulationEngine';
 import * as ReadReceiptPolicy from './presence/ReadReceiptPolicy';
+import * as Presence from './presence';
 import * as CrossModeContinuityLedger from './continuity/CrossModeContinuityLedger';
 import * as CarryoverResolver from './continuity/CarryoverResolver';
 import * as PostRunNarrativeEngineRuntime from './postrun/PostRunNarrativeEngine';
@@ -139,9 +140,7 @@ export * from './rescue/RecoveryOutcomeTracker';
 export * from './rewards/LegendMomentLedger';
 export * from './rewards/RewardGrantResolver';
 export * from './rewards/ReplayMomentIndexer';
-export * from './presence/PresenceStyleResolver';
-export * from './presence/TypingSimulationEngine';
-export * from './presence/ReadReceiptPolicy';
+export * from './presence';
 export * from './continuity/CrossModeContinuityLedger';
 export * from './continuity/CarryoverResolver';
 export * from './postrun';
@@ -245,6 +244,7 @@ export {
   PresenceStyleResolver as ChatPresenceStyleResolverModule,
   TypingSimulationEngine as ChatTypingSimulationEngineModule,
   ReadReceiptPolicy as ChatReadReceiptPolicyModule,
+  Presence as ChatPresenceBarrelModule,
   CrossModeContinuityLedger as ChatCrossModeContinuityLedgerModule,
   CarryoverResolver as ChatCarryoverResolverModule,
   PostRunNarrativeEngineRuntime as ChatPostRunNarrativeEngineModule,

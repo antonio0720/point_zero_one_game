@@ -2,7 +2,7 @@
  * ============================================================================
  * POINT ZERO ONE — BACKEND CHAT PRESENCE STYLE RESOLVER
  * FILE: backend/src/game/engine/chat/presence/PresenceStyleResolver.ts
- * VERSION: 2026.03.19
+ * VERSION: 2026.03.23-presence-resolver.v2
  * AUTHORSHIP: Antonio T. Smith Jr.
  * LICENSE: Internal / Proprietary / All Rights Reserved
  * ============================================================================
@@ -38,6 +38,16 @@
  * 4. Presence theater must respect channel family, actor role, pressure,
  *    relationship intensity, audience heat, and silence windows.
  * 5. Shadow channels remain first-class.
+ *
+ * Subsystem surface
+ * -----------------
+ * - 14 presence style variants across 4 channel families
+ * - 6 configuration profiles (BALANCED, HATER_HEAVY, HELPER_PRIORITY,
+ *   NEGOTIATION_FOCUS, LIVEOPS_RESPONSIVE, SHADOW_HEAVY)
+ * - Full signal vector: 13 behavioral axes
+ * - Behavior flags: 10 behavioral flags derived from variant + signal
+ * - Diagnostics, audit reports, diff, stats, serialization
+ * - Batch and room-level resolution
  * ============================================================================
  */
 
@@ -64,7 +74,6 @@ import {
   deriveDefaultPresenceStyle,
   deriveDefaultReadPolicy,
   type ChatPresenceStyleId,
-  type ChatPresenceStyleKind,
   type ChatPresenceStyleProfile,
   type ChatPresenceVisibilityClass,
   type ChatReadDelayPolicyKind,
@@ -104,7 +113,7 @@ function round(value: number): number {
   return Math.round(value);
 }
 
-function average(...values: readonly Array<number | null | undefined>): number {
+function average(...values: ReadonlyArray<number | null | undefined>): number {
   const filtered = values.filter((value): value is number => value != null && Number.isFinite(value));
   if (!filtered.length) return 0;
   return filtered.reduce((total, value) => total + value, 0) / filtered.length;
@@ -183,6 +192,11 @@ function isShadowChannel(value: ChatChannelId): value is ChatShadowChannel {
   }
 }
 
+/* ============================================================================
+ * MARK: Channel family
+ * ============================================================================
+ */
+
 export type PresenceStyleChannelFamily =
   | 'PUBLIC'
   | 'NEGOTIATION'
@@ -226,6 +240,16 @@ export type PresenceStyleVariantKey =
   | 'SYSTEM_BANNER'
   | 'LIVEOPS_PULSE'
   | 'SHADOW_VEIL';
+
+export type PresenceStyleVariantClass =
+  | 'LURKING'
+  | 'HOSTILE'
+  | 'HELPER'
+  | 'NEGOTIATION'
+  | 'AMBIENT'
+  | 'PLAYER'
+  | 'SYSTEM'
+  | 'SHADOW';
 
 export interface PresenceStyleSignalVector {
   readonly pressure01: number;
@@ -337,7 +361,7 @@ export interface PresenceStyleResolverConfig {
 }
 
 const DEFAULT_CONFIG: PresenceStyleResolverConfig = Object.freeze({
-  version: '2026.03.19',
+  version: '2026.03.23',
   helperUrgencyThreshold01: 0.72,
   haterStrikeThreshold01: 0.78,
   dealPressureThreshold01: 0.64,
@@ -352,6 +376,242 @@ const DEFAULT_CONFIG: PresenceStyleResolverConfig = Object.freeze({
   shadowConfidenceBoost01: 0.18,
   instantStrikeLatencyThresholdMs: 520,
 });
+
+/* ============================================================================
+ * MARK: Configuration profiles
+ * ============================================================================
+ */
+
+export type PresenceStyleResolverProfile =
+  | 'BALANCED'
+  | 'HATER_HEAVY'
+  | 'HELPER_PRIORITY'
+  | 'NEGOTIATION_FOCUS'
+  | 'LIVEOPS_RESPONSIVE'
+  | 'SHADOW_HEAVY';
+
+export interface PresenceStyleResolverProfileDescriptor {
+  readonly profile: PresenceStyleResolverProfile;
+  readonly config: PresenceStyleResolverConfig;
+  readonly description: string;
+}
+
+export const PRESENCE_STYLE_RESOLVER_PROFILE_OPTIONS: Readonly<
+  Record<PresenceStyleResolverProfile, PresenceStyleResolverProfileDescriptor>
+> = Object.freeze({
+  BALANCED: Object.freeze({
+    profile: 'BALANCED',
+    config: DEFAULT_CONFIG,
+    description: 'Default balanced variant selection. All NPC types equally weighted. No amplifiers.',
+  }),
+  HATER_HEAVY: Object.freeze({
+    profile: 'HATER_HEAVY',
+    config: Object.freeze({
+      ...DEFAULT_CONFIG,
+      haterStrikeThreshold01: 0.66,
+      obsessionStrikeWeight: 1.0,
+      embarrassmentStrikeWeight: 0.96,
+      callbackStrikeWeight: 0.82,
+      instantStrikeLatencyThresholdMs: 700,
+    }),
+    description: 'Raises aggression ceiling — haters escalate earlier with more ferocity. Use in rivalry-heavy runs.',
+  }),
+  HELPER_PRIORITY: Object.freeze({
+    profile: 'HELPER_PRIORITY',
+    config: Object.freeze({
+      ...DEFAULT_CONFIG,
+      helperUrgencyThreshold01: 0.56,
+      helperNeedSoftenWeight: 0.64,
+      respectSoftenWeight: 0.30,
+    }),
+    description: 'Helpers surge more readily. Lower frustration is enough to trigger a surge. Use in rescue-heavy sessions.',
+  }),
+  NEGOTIATION_FOCUS: Object.freeze({
+    profile: 'NEGOTIATION_FOCUS',
+    config: Object.freeze({
+      ...DEFAULT_CONFIG,
+      dealPressureThreshold01: 0.48,
+      negotiationDelayAmplifier: 1.52,
+      silenceLurkThreshold01: 0.44,
+    }),
+    description: 'Deal-room presence becomes oppressive. Rivals linger longer before arriving. Silent rooms amplify.',
+  }),
+  LIVEOPS_RESPONSIVE: Object.freeze({
+    profile: 'LIVEOPS_RESPONSIVE',
+    config: Object.freeze({
+      ...DEFAULT_CONFIG,
+      ambientAudienceThreshold01: 0.40,
+    }),
+    description: 'World events immediately shift audience behavior. Crowd swells at lower heat thresholds.',
+  }),
+  SHADOW_HEAVY: Object.freeze({
+    profile: 'SHADOW_HEAVY',
+    config: Object.freeze({
+      ...DEFAULT_CONFIG,
+      shadowConfidenceBoost01: 0.34,
+      silenceLurkThreshold01: 0.38,
+    }),
+    description: 'Shadow channel actors earn higher confidence. Heavy backstage staging. Wide silence tolerance.',
+  }),
+} as const);
+
+/* ============================================================================
+ * MARK: Analytics and diagnostics types
+ * ============================================================================
+ */
+
+export interface PresenceStyleDiagnostics {
+  readonly actorId: string;
+  readonly actorKind: ChatActorKind;
+  readonly channelId: ChatChannelId;
+  readonly channelFamily: PresenceStyleChannelFamily;
+  readonly resolvedVariant: PresenceStyleVariantKey;
+  readonly variantClass: PresenceStyleVariantClass;
+  readonly confidence01: number;
+  readonly signalVector: PresenceStyleSignalVector;
+  readonly behaviorFlags: PresenceStyleBehaviorFlags;
+  readonly instantStrikeEligible: boolean;
+  readonly shadowMirrorEligible: boolean;
+  readonly lurking: boolean;
+  readonly weaponizedDelay: boolean;
+  readonly styleId: string;
+  readonly typingTheater: ChatTypingTheaterKind;
+  readonly readDelayPolicy: ChatReadDelayPolicyKind;
+  readonly playerVisibleReceipt: boolean;
+  readonly reasons: readonly string[];
+  readonly tags: readonly string[];
+  readonly derivedAt: number;
+}
+
+export interface PresenceStyleAuditEntry {
+  readonly actorId: string;
+  readonly actorKind: ChatActorKind;
+  readonly channelId: ChatChannelId;
+  readonly resolvedVariant: PresenceStyleVariantKey;
+  readonly confidence01: number;
+  readonly durationSinceLastMs: number;
+  readonly topReasons: readonly string[];
+  readonly derivedAt: number;
+}
+
+export interface PresenceStyleAuditReport {
+  readonly generatedAt: number;
+  readonly entryCount: number;
+  readonly variantDistribution: Readonly<Partial<Record<PresenceStyleVariantKey, number>>>;
+  readonly channelDistribution: Readonly<Partial<Record<PresenceStyleChannelFamily, number>>>;
+  readonly actorKindDistribution: Readonly<Partial<Record<string, number>>>;
+  readonly averageConfidence01: number;
+  readonly lurkingRate01: number;
+  readonly shadowRate01: number;
+  readonly instantStrikeRate01: number;
+  readonly helperSurgeRate01: number;
+  readonly entries: readonly PresenceStyleAuditEntry[];
+  readonly topVariant: PresenceStyleVariantKey | null;
+  readonly dominantChannelFamily: PresenceStyleChannelFamily | null;
+  readonly diagnosticFlags: readonly string[];
+}
+
+export interface PresenceStyleDiff {
+  readonly beforeVariant: PresenceStyleVariantKey;
+  readonly afterVariant: PresenceStyleVariantKey;
+  readonly variantChanged: boolean;
+  readonly channelFamilyChanged: boolean;
+  readonly confidenceDelta: number;
+  readonly behaviorChanges: readonly string[];
+  readonly signalDeltas: Readonly<Partial<Record<keyof PresenceStyleSignalVector, number>>>;
+  readonly lurkingChanged: boolean;
+  readonly shadowChanged: boolean;
+  readonly instantStrikeChanged: boolean;
+  readonly readPolicyChanged: boolean;
+  readonly derivedAt: number;
+}
+
+export interface PresenceStyleStatsSummary {
+  readonly totalResolutions: number;
+  readonly variantCounts: Readonly<Partial<Record<PresenceStyleVariantKey, number>>>;
+  readonly averageConfidence01: number;
+  readonly minConfidence01: number;
+  readonly maxConfidence01: number;
+  readonly lurkingCount: number;
+  readonly shadowCount: number;
+  readonly instantStrikeCount: number;
+  readonly helperSurgeCount: number;
+  readonly haterStrikeCount: number;
+  readonly negotiationCount: number;
+  readonly pressureDistribution: { readonly low: number; readonly mid: number; readonly high: number };
+}
+
+export interface PresenceStyleSerializedState {
+  readonly version: string;
+  readonly config: PresenceStyleResolverConfig;
+  readonly profile?: PresenceStyleResolverProfile;
+  readonly serializedAt: number;
+}
+
+export interface PresenceStyleBatchResult {
+  readonly generatedAt: number;
+  readonly totalCount: number;
+  readonly results: readonly PresenceStyleResolution[];
+  readonly stats: PresenceStyleStatsSummary;
+}
+
+export interface PresenceStyleRoomInput {
+  readonly roomId: string;
+  readonly channelId: ChatChannelId;
+  readonly now?: UnixMs | number | null;
+  readonly actors: readonly {
+    readonly actorId: string;
+    readonly actorKind: ChatActorKind;
+    readonly intent?: PresenceStyleResolutionInput['intent'];
+    readonly pressure01?: number | null;
+    readonly helperNeed01?: number | null;
+    readonly negotiationPressure01?: number | null;
+    readonly relationshipObsession01?: number | null;
+    readonly relationshipIntensity01?: number | null;
+    readonly embarrassment01?: number | null;
+    readonly urgency?: BackendLatencyUrgencyBand | null;
+    readonly allowInstantStrike?: boolean;
+    readonly shouldShadowPrime?: boolean;
+    readonly metadata?: Readonly<Record<string, JsonValue>> | null;
+  }[];
+  readonly audienceHeat01?: number | null;
+  readonly worldEventActive?: boolean;
+  readonly silenceDecision?: ChatSilenceDecision | null;
+}
+
+export interface PresenceStyleRoomResult {
+  readonly roomId: string;
+  readonly channelId: ChatChannelId;
+  readonly family: PresenceStyleChannelFamily;
+  readonly generatedAt: number;
+  readonly resolutions: readonly PresenceStyleResolution[];
+  readonly primaryActor: PresenceStyleResolution | null;
+  readonly dominantVariant: PresenceStyleVariantKey | null;
+  readonly hasActiveHater: boolean;
+  readonly hasHelperSurge: boolean;
+  readonly hasNegotiationPressure: boolean;
+  readonly hasShadowPresence: boolean;
+}
+
+export interface PresenceStyleNpcTurnInput {
+  readonly actorId: string;
+  readonly actorKind: ChatActorKind;
+  readonly roomId: string;
+  readonly channelId: ChatChannelId;
+  readonly turnIndex: number;
+  readonly turnCount: number;
+  readonly now?: UnixMs | number | null;
+  readonly intent?: PresenceStyleResolutionInput['intent'];
+  readonly pressure01?: number | null;
+  readonly helperNeed01?: number | null;
+  readonly negotiationPressure01?: number | null;
+  readonly embarrassment01?: number | null;
+  readonly audienceHeat01?: number | null;
+  readonly allowInstantStrike?: boolean;
+  readonly seed?: string | null;
+  readonly silenceDecision?: ChatSilenceDecision | null;
+  readonly latency?: BackendLatencyResolution | null;
+}
 
 /* ============================================================================
  * MARK: Runtime style builders
@@ -591,7 +851,7 @@ function buildVariantReadPolicy(
     case 'HATER_STALK':
       return cloneReadPolicy(DEFAULT_PUBLIC_READ_POLICY, {
         policyId: `${styleProfile.styleId}-read` as ChatReadPolicyId,
-        visibilityMode: input.shouldSuppressVisibleReceipt ? 'AUTHOR_ONLY' : 'PUBLIC',
+        visibilityMode: input.shouldSuppressVisibleReceipt ? 'SENDER_ONLY' : 'PUBLIC',
         minDelayMs: round(850 + vector.pressure01 * 1300),
         maxDelayMs: round(2200 + vector.pressure01 * 2600),
         playerVisible: !input.shouldSuppressVisibleReceipt,
@@ -600,7 +860,7 @@ function buildVariantReadPolicy(
     case 'HATER_STRIKE':
       return cloneReadPolicy(DEFAULT_PUBLIC_READ_POLICY, {
         policyId: `${styleProfile.styleId}-read` as ChatReadPolicyId,
-        visibilityMode: input.allowInstantStrike ? 'PUBLIC' : 'AUTHOR_ONLY',
+        visibilityMode: input.allowInstantStrike ? 'PUBLIC' : 'SENDER_ONLY',
         minDelayMs: input.allowInstantStrike ? 0 : 280,
         maxDelayMs: input.allowInstantStrike ? 120 : 900,
         playerVisible: Boolean(input.allowInstantStrike),
@@ -806,12 +1066,6 @@ function chooseVariant(
   );
 
   if (family === 'SHADOW' || input.shouldShadowPrime) {
-    if (input.actorKind === 'SYSTEM' || input.actorKind === 'LIVEOPS') {
-      return 'SHADOW_VEIL';
-    }
-    if (input.actorKind === 'HELPER' && vector.helperNeed01 >= 0.7) {
-      return 'SHADOW_VEIL';
-    }
     return 'SHADOW_VEIL';
   }
 
@@ -868,7 +1122,7 @@ function chooseVariant(
     return 'HATER_STALK';
   }
 
-  if (input.actorKind === 'NPC') {
+  if (['AMBIENT_NPC', 'CROWD', 'DEAL_AGENT'].includes(String(input.actorKind))) {
     if (
       input.intent === 'AMBIENT' ||
       vector.audienceHeat01 >= config.ambientAudienceThreshold01 ||
@@ -889,7 +1143,7 @@ function chooseVariant(
   }
 
   if (input.actorKind === 'PLAYER') {
-    return family === 'NEGOTIATION' ? 'PLAYER_NEGOTIATION' : 'PLAYER_BASELINE';
+    return channelFamily(input.channelId) === 'NEGOTIATION' ? 'PLAYER_NEGOTIATION' : 'PLAYER_BASELINE';
   }
 
   return 'PLAYER_BASELINE';
@@ -917,35 +1171,343 @@ function buildBehavior(
     );
 
   const shouldReadBeforeReply =
-    readPolicy.allowReadReceipts &&
-    (styleProfile.readDelayPolicy === 'NEGOTIATION_PRESSURE' ||
-      styleProfile.readDelayPolicy === 'HATER_STARE' ||
-      styleProfile.readDelayPolicy === 'HELPER_SOFTEN');
+    key === 'HELPER_OBSERVE' ||
+    key === 'HATER_STALK' ||
+    key === 'DEAL_PREDATOR' ||
+    key === 'DEAL_SILENT';
+
+  const shouldFakeTypingStart =
+    shouldLurk &&
+    (styleProfile.typingTheater === 'WEAPONIZED_DELAY' || styleProfile.typingTheater === 'HESITANT');
+
+  const shouldFakeTypingStop =
+    shouldLurk &&
+    styleProfile.typingTheater === 'WEAPONIZED_DELAY' &&
+    vector.silenceWeight01 >= 0.42;
+
+  const shouldDelayReceipt =
+    readPolicy.minDelayMs > 0 &&
+    (styleProfile.readDelayPolicy !== 'INSTANT' || Boolean(input.shouldWeaponizeDelay));
+
+  const shouldSuppressVisibleReceipt =
+    input.shouldSuppressVisibleReceipt === true || !readPolicy.playerVisible;
+
+  const shouldMirrorShadow =
+    Boolean(input.shouldShadowPrime || input.latency?.shadowPrimed || isShadowChannel(input.channelId));
+
+  const readDelay = String(styleProfile.readDelayPolicy);
+
+  const shouldHoldUnreadPressure =
+    readDelay === 'NEGOTIATION_PRESSURE' ||
+    readDelay === 'HATER_STARE' ||
+    (readPolicy.allowReadReceipts &&
+      (readDelay === 'NEGOTIATION_PRESSURE' ||
+        readDelay === 'HATER_STARE' ||
+        readDelay === 'HELPER_SOFTEN'));
 
   return Object.freeze({
     shouldLurk,
     shouldReadBeforeReply,
-    shouldFakeTypingStart:
-      shouldLurk &&
-      (styleProfile.typingTheater === 'WEAPONIZED_DELAY' || styleProfile.typingTheater === 'HESITANT'),
-    shouldFakeTypingStop:
-      shouldLurk &&
-      styleProfile.typingTheater === 'WEAPONIZED_DELAY' &&
-      vector.silenceWeight01 >= 0.42,
-    shouldDelayReceipt:
-      readPolicy.minDelayMs > 0 &&
-      (styleProfile.readDelayPolicy !== 'INSTANT' || Boolean(input.shouldWeaponizeDelay)),
-    shouldSuppressVisibleReceipt:
-      input.shouldSuppressVisibleReceipt === true || !readPolicy.playerVisible,
-    shouldMirrorShadow:
-      Boolean(input.shouldShadowPrime || input.latency?.shadowPrimed || isShadowChannel(input.channelId)),
-    shouldHoldUnreadPressure:
-      styleProfile.readDelayPolicy === 'NEGOTIATION_PRESSURE' ||
-      styleProfile.readDelayPolicy === 'HATER_STARE',
+    shouldFakeTypingStart,
+    shouldFakeTypingStop,
+    shouldDelayReceipt,
+    shouldSuppressVisibleReceipt,
+    shouldMirrorShadow,
+    shouldHoldUnreadPressure,
     shouldEscalateToInstantStrike,
     shouldAppearAsAudience:
       key === 'NPC_AMBIENT' ||
       (key === 'LIVEOPS_PULSE' && channelFamily(input.channelId) === 'PUBLIC'),
+  });
+}
+
+/* ============================================================================
+ * MARK: Variant classification helpers
+ * ============================================================================
+ */
+
+/**
+ * Returns the class of the variant for analytics and routing.
+ */
+export function classifyPresenceVariant(key: PresenceStyleVariantKey): PresenceStyleVariantClass {
+  switch (key) {
+    case 'NPC_LURK':
+    case 'HATER_STALK':
+    case 'DEAL_PREDATOR':
+      return 'LURKING';
+    case 'HATER_STRIKE':
+      return 'HOSTILE';
+    case 'HELPER_OBSERVE':
+    case 'HELPER_SURGE':
+      return 'HELPER';
+    case 'DEAL_SILENT':
+    case 'PLAYER_NEGOTIATION':
+      return 'NEGOTIATION';
+    case 'NPC_AMBIENT':
+    case 'NPC_DIRECT':
+      return 'AMBIENT';
+    case 'PLAYER_BASELINE':
+      return 'PLAYER';
+    case 'SYSTEM_BANNER':
+      return 'SYSTEM';
+    case 'LIVEOPS_PULSE':
+    case 'SHADOW_VEIL':
+    default:
+      return 'SHADOW';
+  }
+}
+
+/** Returns true if the variant is fundamentally a lurking/silent entry. */
+export function isLurkingVariant(key: PresenceStyleVariantKey): boolean {
+  return key === 'NPC_LURK' || key === 'HATER_STALK' || key === 'DEAL_PREDATOR';
+}
+
+/** Returns true if the variant operates on a shadow channel. */
+export function isShadowVariant(key: PresenceStyleVariantKey): boolean {
+  return key === 'SHADOW_VEIL';
+}
+
+/** Returns true if the variant represents a hostile NPC actor. */
+export function isHostileVariant(key: PresenceStyleVariantKey): boolean {
+  return key === 'HATER_STALK' || key === 'HATER_STRIKE' || key === 'DEAL_PREDATOR';
+}
+
+/** Returns true if the variant is a helper-class actor. */
+export function isHelperVariant(key: PresenceStyleVariantKey): boolean {
+  return key === 'HELPER_OBSERVE' || key === 'HELPER_SURGE';
+}
+
+/** Returns true if the variant is in a deal-room / negotiation family. */
+export function isNegotiationVariant(key: PresenceStyleVariantKey): boolean {
+  return key === 'DEAL_SILENT' || key === 'DEAL_PREDATOR' || key === 'PLAYER_NEGOTIATION';
+}
+
+/** Returns true if the variant is capable of instant strike delivery. */
+export function isInstantStrikeCapableVariant(key: PresenceStyleVariantKey): boolean {
+  return key === 'HATER_STRIKE' || key === 'HELPER_SURGE' || key === 'LIVEOPS_PULSE';
+}
+
+/** Returns true if the variant produces visible read receipts for the player. */
+export function isPlayerVisibleReceiptVariant(key: PresenceStyleVariantKey): boolean {
+  return key === 'HELPER_SURGE' || key === 'HELPER_OBSERVE' || key === 'NPC_AMBIENT';
+}
+
+/* ============================================================================
+ * MARK: Diagnostics and analytics builders
+ * ============================================================================
+ */
+
+function buildPresenceDiagnostics(
+  input: PresenceStyleResolutionInput,
+  result: PresenceStyleResolution,
+): PresenceStyleDiagnostics {
+  return Object.freeze({
+    actorId: result.actorId,
+    actorKind: result.actorKind,
+    channelId: result.channelId,
+    channelFamily: result.channelFamily,
+    resolvedVariant: result.variantKey,
+    variantClass: classifyPresenceVariant(result.variantKey),
+    confidence01: result.confidence01,
+    signalVector: result.signalVector,
+    behaviorFlags: result.behavior,
+    instantStrikeEligible: result.behavior.shouldEscalateToInstantStrike || Boolean(input.allowInstantStrike),
+    shadowMirrorEligible: result.behavior.shouldMirrorShadow,
+    lurking: result.behavior.shouldLurk,
+    weaponizedDelay: result.styleProfile.typingTheater === 'WEAPONIZED_DELAY',
+    styleId: result.styleProfile.styleId as string,
+    typingTheater: result.styleProfile.typingTheater,
+    readDelayPolicy: result.styleProfile.readDelayPolicy,
+    playerVisibleReceipt: result.readPolicy.playerVisible,
+    reasons: result.reasons,
+    tags: result.tags,
+    derivedAt: result.derivedAt,
+  });
+}
+
+function computePresenceDiff(
+  before: PresenceStyleResolution,
+  after: PresenceStyleResolution,
+): PresenceStyleDiff {
+  const behaviorChanges: string[] = [];
+
+  const flagKeys: (keyof PresenceStyleBehaviorFlags)[] = [
+    'shouldLurk', 'shouldReadBeforeReply', 'shouldFakeTypingStart', 'shouldFakeTypingStop',
+    'shouldDelayReceipt', 'shouldSuppressVisibleReceipt', 'shouldMirrorShadow',
+    'shouldHoldUnreadPressure', 'shouldEscalateToInstantStrike', 'shouldAppearAsAudience',
+  ];
+
+  for (const flag of flagKeys) {
+    if (before.behavior[flag] !== after.behavior[flag]) {
+      behaviorChanges.push(`${flag}:${String(before.behavior[flag])}→${String(after.behavior[flag])}`);
+    }
+  }
+
+  const signalKeys: (keyof PresenceStyleSignalVector)[] = [
+    'pressure01', 'audienceHeat01', 'negotiationPressure01', 'helperNeed01',
+    'obsession01', 'embarrassment01', 'urgency01', 'silenceWeight01', 'callbackOpportunity01',
+    'relationshipIntensity01', 'respect01', 'fear01', 'contempt01',
+  ];
+
+  const signalDeltas: Partial<Record<keyof PresenceStyleSignalVector, number>> = {};
+  for (const key of signalKeys) {
+    const delta = after.signalVector[key] - before.signalVector[key];
+    if (Math.abs(delta) > 0.001) {
+      signalDeltas[key] = Number(delta.toFixed(4));
+    }
+  }
+
+  return Object.freeze({
+    beforeVariant: before.variantKey,
+    afterVariant: after.variantKey,
+    variantChanged: before.variantKey !== after.variantKey,
+    channelFamilyChanged: before.channelFamily !== after.channelFamily,
+    confidenceDelta: Number((after.confidence01 - before.confidence01).toFixed(4)),
+    behaviorChanges: Object.freeze(behaviorChanges),
+    signalDeltas: Object.freeze(signalDeltas),
+    lurkingChanged: before.behavior.shouldLurk !== after.behavior.shouldLurk,
+    shadowChanged: before.behavior.shouldMirrorShadow !== after.behavior.shouldMirrorShadow,
+    instantStrikeChanged: before.behavior.shouldEscalateToInstantStrike !== after.behavior.shouldEscalateToInstantStrike,
+    readPolicyChanged:
+      before.readPolicy.policyId !== after.readPolicy.policyId ||
+      before.readPolicy.visibilityMode !== after.readPolicy.visibilityMode,
+    derivedAt: nowMs(),
+  });
+}
+
+function buildPresenceStatsSummary(
+  results: readonly PresenceStyleResolution[],
+): PresenceStyleStatsSummary {
+  if (!results.length) {
+    return Object.freeze({
+      totalResolutions: 0,
+      variantCounts: Object.freeze({}),
+      averageConfidence01: 0,
+      minConfidence01: 0,
+      maxConfidence01: 0,
+      lurkingCount: 0,
+      shadowCount: 0,
+      instantStrikeCount: 0,
+      helperSurgeCount: 0,
+      haterStrikeCount: 0,
+      negotiationCount: 0,
+      pressureDistribution: Object.freeze({ low: 0, mid: 0, high: 0 }),
+    });
+  }
+
+  const variantCounts: Partial<Record<PresenceStyleVariantKey, number>> = {};
+  let confidenceSum = 0;
+  let minConfidence = 1;
+  let maxConfidence = 0;
+  let lurkingCount = 0;
+  let shadowCount = 0;
+  let instantStrikeCount = 0;
+  let helperSurgeCount = 0;
+  let haterStrikeCount = 0;
+  let negotiationCount = 0;
+  let pressureLow = 0;
+  let pressureMid = 0;
+  let pressureHigh = 0;
+
+  for (const result of results) {
+    variantCounts[result.variantKey] = (variantCounts[result.variantKey] ?? 0) + 1;
+    confidenceSum += result.confidence01;
+    if (result.confidence01 < minConfidence) minConfidence = result.confidence01;
+    if (result.confidence01 > maxConfidence) maxConfidence = result.confidence01;
+    if (result.behavior.shouldLurk) lurkingCount += 1;
+    if (result.behavior.shouldMirrorShadow) shadowCount += 1;
+    if (result.behavior.shouldEscalateToInstantStrike) instantStrikeCount += 1;
+    if (result.variantKey === 'HELPER_SURGE') helperSurgeCount += 1;
+    if (result.variantKey === 'HATER_STRIKE') haterStrikeCount += 1;
+    if (isNegotiationVariant(result.variantKey)) negotiationCount += 1;
+    const p = result.signalVector.pressure01;
+    if (p < 0.33) pressureLow += 1;
+    else if (p < 0.66) pressureMid += 1;
+    else pressureHigh += 1;
+  }
+
+  return Object.freeze({
+    totalResolutions: results.length,
+    variantCounts: Object.freeze(variantCounts),
+    averageConfidence01: Number((confidenceSum / results.length).toFixed(4)),
+    minConfidence01: minConfidence,
+    maxConfidence01: maxConfidence,
+    lurkingCount,
+    shadowCount,
+    instantStrikeCount,
+    helperSurgeCount,
+    haterStrikeCount,
+    negotiationCount,
+    pressureDistribution: Object.freeze({ low: pressureLow, mid: pressureMid, high: pressureHigh }),
+  });
+}
+
+function buildAuditReport(
+  entries: readonly {
+    readonly input: PresenceStyleResolutionInput;
+    readonly result: PresenceStyleResolution;
+    readonly durationSinceLastMs?: number;
+  }[],
+): PresenceStyleAuditReport {
+  const variantDist: Partial<Record<PresenceStyleVariantKey, number>> = {};
+  const channelDist: Partial<Record<PresenceStyleChannelFamily, number>> = {};
+  const actorKindDist: Partial<Record<string, number>> = {};
+  let confidenceSum = 0;
+  let lurkingCount = 0;
+  let shadowCount = 0;
+  let instantStrikeCount = 0;
+  let helperSurgeCount = 0;
+
+  const auditEntries: PresenceStyleAuditEntry[] = [];
+
+  for (const entry of entries) {
+    const { result, input, durationSinceLastMs = 0 } = entry;
+    variantDist[result.variantKey] = (variantDist[result.variantKey] ?? 0) + 1;
+    channelDist[result.channelFamily] = (channelDist[result.channelFamily] ?? 0) + 1;
+    actorKindDist[result.actorKind] = (actorKindDist[result.actorKind] ?? 0) + 1;
+    confidenceSum += result.confidence01;
+    if (result.behavior.shouldLurk) lurkingCount += 1;
+    if (result.behavior.shouldMirrorShadow) shadowCount += 1;
+    if (result.behavior.shouldEscalateToInstantStrike) instantStrikeCount += 1;
+    if (result.variantKey === 'HELPER_SURGE') helperSurgeCount += 1;
+
+    auditEntries.push(Object.freeze({
+      actorId: result.actorId,
+      actorKind: result.actorKind,
+      channelId: input.channelId,
+      resolvedVariant: result.variantKey,
+      confidence01: result.confidence01,
+      durationSinceLastMs,
+      topReasons: result.reasons.slice(0, 4),
+      derivedAt: result.derivedAt,
+    }));
+  }
+
+  const count = entries.length || 1;
+  const topVariantEntry = Object.entries(variantDist).sort(([, a], [, b]) => (b ?? 0) - (a ?? 0))[0];
+  const topChannelEntry = Object.entries(channelDist).sort(([, a], [, b]) => (b ?? 0) - (a ?? 0))[0];
+
+  const diagnosticFlags: string[] = [];
+  if (lurkingCount / count > 0.5) diagnosticFlags.push('majority-lurking');
+  if (shadowCount / count > 0.3) diagnosticFlags.push('heavy-shadow-traffic');
+  if (helperSurgeCount / count > 0.4) diagnosticFlags.push('high-helper-surge-rate');
+  if (instantStrikeCount / count > 0.3) diagnosticFlags.push('high-instant-strike-rate');
+
+  return Object.freeze({
+    generatedAt: nowMs(),
+    entryCount: entries.length,
+    variantDistribution: Object.freeze(variantDist),
+    channelDistribution: Object.freeze(channelDist),
+    actorKindDistribution: Object.freeze(actorKindDist),
+    averageConfidence01: Number((confidenceSum / count).toFixed(4)),
+    lurkingRate01: Number((lurkingCount / count).toFixed(4)),
+    shadowRate01: Number((shadowCount / count).toFixed(4)),
+    instantStrikeRate01: Number((instantStrikeCount / count).toFixed(4)),
+    helperSurgeRate01: Number((helperSurgeCount / count).toFixed(4)),
+    entries: Object.freeze(auditEntries),
+    topVariant: (topVariantEntry?.[0] ?? null) as PresenceStyleVariantKey | null,
+    dominantChannelFamily: (topChannelEntry?.[0] ?? null) as PresenceStyleChannelFamily | null,
+    diagnosticFlags: Object.freeze(diagnosticFlags),
   });
 }
 
@@ -990,6 +1552,98 @@ export class PresenceStyleResolver {
       reasons,
       tags,
       derivedAt,
+    });
+  }
+
+  public resolveBatch(inputs: readonly PresenceStyleResolutionInput[]): PresenceStyleBatchResult {
+    const generatedAt = nowMs();
+    const results = inputs.map((input) => this.resolve(input));
+    const stats = buildPresenceStatsSummary(results);
+
+    return Object.freeze({
+      generatedAt,
+      totalCount: results.length,
+      results: Object.freeze(results),
+      stats,
+    });
+  }
+
+  public resolveForRoom(roomInput: PresenceStyleRoomInput): PresenceStyleRoomResult {
+    const generatedAt = nowMs(roomInput.now);
+    const family = channelFamily(roomInput.channelId);
+
+    const resolutions = roomInput.actors.map((actor) =>
+      this.resolve({
+        actorId: actor.actorId,
+        actorKind: actor.actorKind,
+        roomId: roomInput.roomId,
+        channelId: roomInput.channelId,
+        now: generatedAt,
+        intent: actor.intent,
+        pressure01: actor.pressure01,
+        helperNeed01: actor.helperNeed01,
+        negotiationPressure01: actor.negotiationPressure01,
+        audienceHeat01: roomInput.audienceHeat01,
+        relationshipObsession01: actor.relationshipObsession01,
+        relationshipIntensity01: actor.relationshipIntensity01,
+        embarrassment01: actor.embarrassment01,
+        worldEventActive: roomInput.worldEventActive,
+        urgency: actor.urgency,
+        allowInstantStrike: actor.allowInstantStrike,
+        shouldShadowPrime: actor.shouldShadowPrime,
+        silenceDecision: roomInput.silenceDecision,
+        metadata: actor.metadata,
+      }),
+    );
+
+    const primaryActor = resolutions.reduce<PresenceStyleResolution | null>(
+      (best, current) => (!best || current.confidence01 > best.confidence01 ? current : best),
+      null,
+    );
+
+    const dominantVariant = primaryActor?.variantKey ?? null;
+    const hasActiveHater = resolutions.some((resolution) => isHostileVariant(resolution.variantKey));
+    const hasHelperSurge = resolutions.some((resolution) => resolution.variantKey === 'HELPER_SURGE');
+    const hasNegotiationPressure = resolutions.some((resolution) => isNegotiationVariant(resolution.variantKey));
+    const hasShadowPresence = resolutions.some((resolution) => isShadowVariant(resolution.variantKey));
+
+    return Object.freeze({
+      roomId: roomInput.roomId,
+      channelId: roomInput.channelId,
+      family,
+      generatedAt,
+      resolutions: Object.freeze(resolutions),
+      primaryActor,
+      dominantVariant,
+      hasActiveHater,
+      hasHelperSurge,
+      hasNegotiationPressure,
+      hasShadowPresence,
+    });
+  }
+
+  public resolveForNpcTurn(turnInput: PresenceStyleNpcTurnInput): PresenceStyleResolution {
+    const turnFactor = turnInput.turnIndex / Math.max(1, turnInput.turnCount - 1);
+    const escalatedPressure = clamp01((turnInput.pressure01 ?? 0) + turnFactor * 0.18);
+
+    return this.resolve({
+      actorId: turnInput.actorId,
+      actorKind: turnInput.actorKind,
+      roomId: turnInput.roomId,
+      channelId: turnInput.channelId,
+      now: turnInput.now,
+      intent: turnInput.intent,
+      seed: turnInput.seed,
+      pressure01: escalatedPressure,
+      helperNeed01: turnInput.helperNeed01,
+      negotiationPressure01: turnInput.negotiationPressure01,
+      embarrassment01: turnInput.embarrassment01,
+      audienceHeat01: turnInput.audienceHeat01,
+      allowInstantStrike:
+        turnInput.allowInstantStrike ||
+        (turnInput.turnIndex === turnInput.turnCount - 1 && escalatedPressure >= 0.72),
+      silenceDecision: turnInput.silenceDecision,
+      latency: turnInput.latency,
     });
   }
 
@@ -1081,6 +1735,73 @@ export class PresenceStyleResolver {
     return this.resolve(input).styleProfile.readDelayPolicy;
   }
 
+  public getDiagnostics(input: PresenceStyleResolutionInput): PresenceStyleDiagnostics {
+    const result = this.resolve(input);
+    return buildPresenceDiagnostics(input, result);
+  }
+
+  public computeDiff(
+    before: PresenceStyleResolution,
+    after: PresenceStyleResolution,
+  ): PresenceStyleDiff {
+    return computePresenceDiff(before, after);
+  }
+
+  public getStatsSummary(results: readonly PresenceStyleResolution[]): PresenceStyleStatsSummary {
+    return buildPresenceStatsSummary(results);
+  }
+
+  public buildAuditReport(
+    entries: readonly {
+      readonly input: PresenceStyleResolutionInput;
+      readonly result: PresenceStyleResolution;
+      readonly durationSinceLastMs?: number;
+    }[],
+  ): PresenceStyleAuditReport {
+    return buildAuditReport(entries);
+  }
+
+  public canInstantStrike(input: PresenceStyleResolutionInput): boolean {
+    if (input.allowInstantStrike) return true;
+    if (input.latency?.urgency === 'IMMEDIATE') return true;
+    const latencyMs = input.latency?.delayMs ?? input.latency?.typing.typingDurationMs ?? 0;
+    if (latencyMs <= this.config.instantStrikeLatencyThresholdMs) return true;
+    if (input.urgency === 'IMMEDIATE' || input.urgency === 'CRITICAL') return true;
+    return false;
+  }
+
+  public isLurkingVariant(key: PresenceStyleVariantKey): boolean {
+    return isLurkingVariant(key);
+  }
+
+  public isShadowVariant(key: PresenceStyleVariantKey): boolean {
+    return isShadowVariant(key);
+  }
+
+  public isHostileVariant(key: PresenceStyleVariantKey): boolean {
+    return isHostileVariant(key);
+  }
+
+  public isHelperVariant(key: PresenceStyleVariantKey): boolean {
+    return isHelperVariant(key);
+  }
+
+  public isNegotiationVariant(key: PresenceStyleVariantKey): boolean {
+    return isNegotiationVariant(key);
+  }
+
+  public toJSON(): PresenceStyleSerializedState {
+    return Object.freeze({
+      version: this.config.version,
+      config: this.config,
+      serializedAt: nowMs(),
+    });
+  }
+
+  public clone(overrides: Partial<PresenceStyleResolverConfig> = {}): PresenceStyleResolver {
+    return new PresenceStyleResolver({ ...this.config, ...overrides });
+  }
+
   public buildPresenceMetadata(
     input: PresenceStyleResolutionInput,
   ): Readonly<Record<string, JsonValue>> {
@@ -1101,7 +1822,7 @@ export class PresenceStyleResolver {
       visibleChannel,
       shadowChannel,
       variantKey: resolved.variantKey,
-      styleId: resolved.styleProfile.styleId,
+      styleId: resolved.styleProfile.styleId as string,
       styleKind: resolved.styleProfile.styleKind,
       typingTheater: resolved.styleProfile.typingTheater,
       readDelayPolicy: resolved.styleProfile.readDelayPolicy,
@@ -1140,13 +1861,123 @@ export class PresenceStyleResolver {
   }
 }
 
+/* ============================================================================
+ * MARK: Profile factory functions
+ * ============================================================================
+ */
+
 export function createPresenceStyleResolver(
   config: Partial<PresenceStyleResolverConfig> = {},
 ): PresenceStyleResolver {
   return new PresenceStyleResolver(config);
 }
 
+export function createPresenceStyleResolverFromProfile(
+  profile: PresenceStyleResolverProfile,
+  overrides: Partial<PresenceStyleResolverConfig> = {},
+): PresenceStyleResolver {
+  const profileConfig = PRESENCE_STYLE_RESOLVER_PROFILE_OPTIONS[profile].config;
+  return new PresenceStyleResolver({ ...profileConfig, ...overrides });
+}
+
+export function createBalancedPresenceStyleResolver(): PresenceStyleResolver {
+  return createPresenceStyleResolverFromProfile('BALANCED');
+}
+
+export function createHaterHeavyPresenceStyleResolver(): PresenceStyleResolver {
+  return createPresenceStyleResolverFromProfile('HATER_HEAVY');
+}
+
+export function createHelperPriorityPresenceStyleResolver(): PresenceStyleResolver {
+  return createPresenceStyleResolverFromProfile('HELPER_PRIORITY');
+}
+
+export function createNegotiationFocusPresenceStyleResolver(): PresenceStyleResolver {
+  return createPresenceStyleResolverFromProfile('NEGOTIATION_FOCUS');
+}
+
+export function createLiveopsResponsivePresenceStyleResolver(): PresenceStyleResolver {
+  return createPresenceStyleResolverFromProfile('LIVEOPS_RESPONSIVE');
+}
+
+export function createShadowHeavyPresenceStyleResolver(): PresenceStyleResolver {
+  return createPresenceStyleResolverFromProfile('SHADOW_HEAVY');
+}
+
+/** Standalone variant classification helper — does not require a resolver instance. */
+export function resolvePresenceVariantClass(
+  actorKind: ChatActorKind,
+  channelId: ChatChannelId,
+  signals: Partial<PresenceStyleSignalVector>,
+): PresenceStyleVariantClass {
+  const resolver = new PresenceStyleResolver();
+  const result = resolver.resolve({
+    actorId: 'classification-probe',
+    actorKind,
+    roomId: 'classification-probe-room',
+    channelId,
+    pressure01: signals.pressure01,
+    audienceHeat01: signals.audienceHeat01,
+    negotiationPressure01: signals.negotiationPressure01,
+    helperNeed01: signals.helperNeed01,
+    relationshipObsession01: signals.obsession01,
+    embarrassment01: signals.embarrassment01,
+    callbackOpportunity01: signals.callbackOpportunity01,
+  });
+  return classifyPresenceVariant(result.variantKey);
+}
+
+/** Returns true if the given signal vector is likely to trigger a lurking variant. */
+export function signalVectorFavorsLurk(
+  vector: PresenceStyleSignalVector,
+  config: Partial<PresenceStyleResolverConfig> = {},
+): boolean {
+  const threshold = config.silenceLurkThreshold01 ?? DEFAULT_CONFIG.silenceLurkThreshold01;
+  return (
+    vector.silenceWeight01 >= threshold ||
+    vector.obsession01 >= 0.6 ||
+    vector.negotiationPressure01 >= 0.55
+  );
+}
+
+/** Deterministically selects a presence seed from actorId + roomId + now bucket. */
+export function derivePresenceSeed(actorId: string, roomId: string, now: number): string {
+  const bucket = Math.floor(now / 30_000);
+  return `${actorId}::${roomId}::${bucket}`;
+}
+
+/* ============================================================================
+ * MARK: Module export
+ * ============================================================================
+ */
+
 export const ChatPresenceStyleResolverModule = Object.freeze({
+  // Class
   PresenceStyleResolver,
+
+  // Factories
   createPresenceStyleResolver,
-});
+  createPresenceStyleResolverFromProfile,
+  createBalancedPresenceStyleResolver,
+  createHaterHeavyPresenceStyleResolver,
+  createHelperPriorityPresenceStyleResolver,
+  createNegotiationFocusPresenceStyleResolver,
+  createLiveopsResponsivePresenceStyleResolver,
+  createShadowHeavyPresenceStyleResolver,
+
+  // Profile constants
+  PRESENCE_STYLE_RESOLVER_PROFILE_OPTIONS,
+
+  // Standalone helpers
+  classifyPresenceVariant,
+  isLurkingVariant,
+  isShadowVariant,
+  isHostileVariant,
+  isHelperVariant,
+  isNegotiationVariant,
+  isInstantStrikeCapableVariant,
+  isPlayerVisibleReceiptVariant,
+  resolvePresenceVariantClass,
+  signalVectorFavorsLurk,
+  derivePresenceSeed,
+} as const);

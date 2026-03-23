@@ -2,7 +2,7 @@
  * ============================================================================
  * POINT ZERO ONE — BACKEND CHAT TYPING SIMULATION ENGINE
  * FILE: backend/src/game/engine/chat/presence/TypingSimulationEngine.ts
- * VERSION: 2026.03.19
+ * VERSION: 2026.03.23-typing-engine.v2
  * AUTHORSHIP: Antonio T. Smith Jr.
  * LICENSE: Internal / Proprietary / All Rights Reserved
  * ============================================================================
@@ -20,7 +20,10 @@
  * - deal-room unread pressure,
  * - rival weaponized delay,
  * - shadow mirrored staging,
- * - instant strike exceptions.
+ * - instant strike exceptions,
+ * - scene-wide turn sequencing,
+ * - diagnostics and audit trails,
+ * - profile-driven configuration.
  *
  * Design laws
  * -----------
@@ -29,6 +32,8 @@
  * 3. Silence policy may delay or compress the window.
  * 4. Read policy may mirror into unread pressure.
  * 5. The backend decides the plan; transport and UI merely display it.
+ * 6. Scenes are sequenced deterministically; each turn can be previewed.
+ * 7. Profiles tune emotional posture across the full engine surface.
  * ============================================================================
  */
 
@@ -43,10 +48,6 @@ import type {
 
 import type { ChatActorKind } from '../../../../../../shared/contracts/chat/ChatChannels';
 import type { ChatAuthority } from '../../../../../../shared/contracts/chat/ChatEvents';
-
-import {
-  type ChatPresenceStyleProfile,
-} from '../../../../../../shared/contracts/chat/ChatPresence';
 
 import {
   CHAT_TYPING_STYLE_PROFILES,
@@ -78,7 +79,6 @@ import {
 import {
   ReadReceiptPolicy,
   type ReadReceiptResolution,
-  type ReadReceiptResolutionInput,
 } from './ReadReceiptPolicy';
 
 import {
@@ -184,7 +184,7 @@ function resolveSource(actorKind: ChatActorKind, family: ReturnType<typeof chann
       return 'HELPER_POLICY';
     case 'HATER':
       return family === 'NEGOTIATION' ? 'NEGOTIATION_POLICY' : 'HATER_POLICY';
-    case 'NPC':
+    case 'AMBIENT_NPC':
       return 'NPC_PERSONA';
     case 'LIVEOPS':
       return 'LIVEOPS_POLICY';
@@ -211,6 +211,25 @@ function resolveTrigger(
 }
 
 /* ============================================================================
+ * MARK: Profile system
+ * ============================================================================
+ */
+
+/**
+ * Named configuration profiles for the TypingSimulationEngine.
+ * Each profile tunes the timing windows, burst structure, and scene
+ * sequencing to produce a different emotional register.
+ */
+export type TypingSimulationEngineProfile =
+  | 'STANDARD'
+  | 'AGGRESSIVE_HATER'
+  | 'PATIENT_HELPER'
+  | 'NEGOTIATION_STALL'
+  | 'SHADOW_MINIMAL'
+  | 'LIVEOPS_RAPID'
+  | 'CINEMATIC';
+
+/* ============================================================================
  * MARK: Engine contracts
  * ============================================================================
  */
@@ -229,10 +248,18 @@ export interface TypingSimulationEngineConfig {
   readonly idleTailCeilingMs: number;
   readonly companionShadowEnabled: boolean;
   readonly respectSilenceNotBefore: boolean;
+  readonly sceneTurnGapFloorMs: number;
+  readonly sceneTurnGapCeilingMs: number;
+  readonly sceneLingerMultiplier: number;
+  readonly haterBurstBoost: number;
+  readonly helperPauseBoost: number;
+  readonly negotiationStallMultiplier: number;
+  readonly shadowTypingDurationMs: number;
+  readonly liveopsRapidBurstMs: number;
 }
 
 const DEFAULT_CONFIG: TypingSimulationEngineConfig = Object.freeze({
-  version: '2026.03.19',
+  version: '2026.03.23',
   minBurstCount: 1,
   maxBurstCount: 4,
   minPauseCount: 0,
@@ -245,6 +272,101 @@ const DEFAULT_CONFIG: TypingSimulationEngineConfig = Object.freeze({
   idleTailCeilingMs: 900,
   companionShadowEnabled: true,
   respectSilenceNotBefore: true,
+  sceneTurnGapFloorMs: 340,
+  sceneTurnGapCeilingMs: 1100,
+  sceneLingerMultiplier: 1.0,
+  haterBurstBoost: 1.4,
+  helperPauseBoost: 1.3,
+  negotiationStallMultiplier: 1.6,
+  shadowTypingDurationMs: 0,
+  liveopsRapidBurstMs: 220,
+});
+
+/**
+ * Tuned profile configurations.
+ */
+export const TYPING_ENGINE_PROFILE_OPTIONS: Readonly<
+  Record<TypingSimulationEngineProfile, Partial<TypingSimulationEngineConfig>>
+> = Object.freeze({
+  STANDARD: {},
+
+  AGGRESSIVE_HATER: Object.freeze({
+    minBurstCount: 2,
+    maxBurstCount: 5,
+    fakeStartWindowFloorMs: 180,
+    fakeStartWindowCeilingMs: 900,
+    fakeStopWindowFloorMs: 80,
+    fakeStopWindowCeilingMs: 640,
+    haterBurstBoost: 2.0,
+    sceneTurnGapFloorMs: 240,
+    sceneTurnGapCeilingMs: 720,
+  }),
+
+  PATIENT_HELPER: Object.freeze({
+    minBurstCount: 1,
+    maxBurstCount: 2,
+    minPauseCount: 1,
+    maxPauseCount: 4,
+    fakeStartWindowFloorMs: 480,
+    fakeStartWindowCeilingMs: 1800,
+    helperPauseBoost: 2.0,
+    idleTailFloorMs: 280,
+    idleTailCeilingMs: 1400,
+    sceneLingerMultiplier: 1.4,
+  }),
+
+  NEGOTIATION_STALL: Object.freeze({
+    minBurstCount: 1,
+    maxBurstCount: 3,
+    minPauseCount: 1,
+    maxPauseCount: 5,
+    negotiationStallMultiplier: 2.4,
+    fakeStopWindowFloorMs: 200,
+    fakeStopWindowCeilingMs: 1400,
+    sceneTurnGapFloorMs: 600,
+    sceneTurnGapCeilingMs: 2400,
+    sceneLingerMultiplier: 1.8,
+  }),
+
+  SHADOW_MINIMAL: Object.freeze({
+    companionShadowEnabled: false,
+    shadowTypingDurationMs: 0,
+    minBurstCount: 1,
+    maxBurstCount: 1,
+    minPauseCount: 0,
+    maxPauseCount: 0,
+    idleTailFloorMs: 60,
+    idleTailCeilingMs: 180,
+  }),
+
+  LIVEOPS_RAPID: Object.freeze({
+    minBurstCount: 1,
+    maxBurstCount: 2,
+    fakeStartWindowFloorMs: 80,
+    fakeStartWindowCeilingMs: 360,
+    liveopsRapidBurstMs: 120,
+    sceneTurnGapFloorMs: 160,
+    sceneTurnGapCeilingMs: 480,
+    sceneLingerMultiplier: 0.6,
+  }),
+
+  CINEMATIC: Object.freeze({
+    minBurstCount: 2,
+    maxBurstCount: 6,
+    minPauseCount: 1,
+    maxPauseCount: 4,
+    fakeStartWindowFloorMs: 400,
+    fakeStartWindowCeilingMs: 1600,
+    fakeStopWindowFloorMs: 200,
+    fakeStopWindowCeilingMs: 1200,
+    idleTailFloorMs: 240,
+    idleTailCeilingMs: 1200,
+    sceneTurnGapFloorMs: 480,
+    sceneTurnGapCeilingMs: 1600,
+    sceneLingerMultiplier: 1.6,
+    haterBurstBoost: 1.8,
+    helperPauseBoost: 1.6,
+  }),
 });
 
 export interface TypingSimulationRequest {
@@ -327,6 +449,171 @@ export interface TypingSimulationBatchResult {
   readonly turns: readonly TypingSimulationResult[];
 }
 
+/**
+ * Detailed diagnostic breakdown of what drove a single simulation result.
+ */
+export interface TypingSimulationDiagnostics {
+  readonly actorId: string;
+  readonly actorKind: ChatActorKind;
+  readonly channelId: ChatChannelId;
+  readonly channelFamily: 'PUBLIC' | 'NEGOTIATION' | 'LOBBY' | 'SHADOW';
+  readonly variantKey: PresenceStyleResolution['variantKey'];
+  readonly typingStyleKind: ChatTypingStyleProfile['styleKind'];
+  readonly visibilityClass: ChatTypingVisibilityClass;
+  readonly signalVector: {
+    readonly pressure01: number;
+    readonly audienceHeat01: number;
+    readonly negotiationPressure01: number;
+    readonly helperNeed01: number;
+    readonly embarrassment01: number;
+    readonly relationshipObsession01: number;
+  };
+  readonly timingBreakdown: {
+    readonly startupDelayMs: number;
+    readonly opensAt: number;
+    readonly closesAt: number;
+    readonly maxVisibleDurationMs: number;
+    readonly burstCount: number;
+    readonly pauseCount: number;
+    readonly idleTailMs: number;
+    readonly activeTailMs: number;
+    readonly fakeStartsAt: number | undefined;
+    readonly fakeStopsAt: number | undefined;
+    readonly revealAt: number;
+  };
+  readonly behaviorFlags: {
+    readonly shouldLurk: boolean;
+    readonly shouldFakeTypingStart: boolean;
+    readonly shouldFakeTypingStop: boolean;
+    readonly shouldReadBeforeReply: boolean;
+    readonly shouldMirrorShadow: boolean;
+    readonly shouldEscalateToInstantStrike: boolean;
+  };
+  readonly latencyBreakdown: {
+    readonly urgency: BackendLatencyResolution['urgency'];
+    readonly reason: BackendLatencyResolution['reason'];
+    readonly delayMs: number;
+    readonly typingDurationMs: number;
+    readonly lingerMs: number;
+    readonly silenceWindowBeforeMs: number;
+    readonly silenceWindowAfterMs: number;
+  };
+  readonly readReceiptMode: ReadReceiptResolution['decision']['mode'];
+  readonly configSnapshot: TypingSimulationEngineConfig;
+  readonly computedAt: number;
+}
+
+/**
+ * A single audit entry for a simulation turn.
+ */
+export interface TypingSimulationAuditEntry {
+  readonly auditId: string;
+  readonly actorId: string;
+  readonly actorKind: ChatActorKind;
+  readonly channelId: ChatChannelId;
+  readonly variantKey: PresenceStyleResolution['variantKey'];
+  readonly typingStyleKind: ChatTypingStyleProfile['styleKind'];
+  readonly visibilityClass: ChatTypingVisibilityClass;
+  readonly revealAt: number;
+  readonly delayMs: number;
+  readonly burstCount: number;
+  readonly fakeStartEmitted: boolean;
+  readonly fakeStopEmitted: boolean;
+  readonly shadowMirrored: boolean;
+  readonly readMode: ReadReceiptResolution['decision']['mode'];
+  readonly reasons: readonly string[];
+  readonly capturedAt: number;
+}
+
+/**
+ * Aggregate audit report across a batch of simulation turns.
+ */
+export interface TypingSimulationAuditReport {
+  readonly reportId: string;
+  readonly generatedAt: number;
+  readonly entryCount: number;
+  readonly entries: readonly TypingSimulationAuditEntry[];
+  readonly totalDelayMs: number;
+  readonly averageDelayMs: number;
+  readonly averageBurstCount: number;
+  readonly fakeStartCount: number;
+  readonly fakeStopCount: number;
+  readonly shadowMirroredCount: number;
+  readonly visibleCount: number;
+  readonly hiddenCount: number;
+  readonly dominantVariant: PresenceStyleResolution['variantKey'] | undefined;
+  readonly dominantTypingStyle: ChatTypingStyleProfile['styleKind'] | undefined;
+}
+
+/**
+ * Diff between two consecutive simulation results for the same actor.
+ */
+export interface TypingSimulationDiff {
+  readonly changedVariant: boolean;
+  readonly changedTypingStyle: boolean;
+  readonly changedVisibility: boolean;
+  readonly changedFamily: boolean;
+  readonly revealDeltaMs: number;
+  readonly delayDeltaMs: number;
+  readonly burstCountDelta: number;
+  readonly previousVariant: PresenceStyleResolution['variantKey'];
+  readonly nextVariant: PresenceStyleResolution['variantKey'];
+  readonly previousTypingStyle: ChatTypingStyleProfile['styleKind'];
+  readonly nextTypingStyle: ChatTypingStyleProfile['styleKind'];
+  readonly escalated: boolean;
+  readonly deescalated: boolean;
+}
+
+/**
+ * Stats summary across a batch of simulation results.
+ */
+export interface TypingSimulationStatsSummary {
+  readonly sampleCount: number;
+  readonly totalDelayMs: number;
+  readonly averageDelayMs: number;
+  readonly maxDelayMs: number;
+  readonly minDelayMs: number | undefined;
+  readonly medianDelayMs: number | undefined;
+  readonly averageBurstCount: number;
+  readonly fakeStartRate: number;
+  readonly fakeStopRate: number;
+  readonly shadowMirroredRate: number;
+  readonly visibleRate: number;
+  readonly variantFrequency: Readonly<Partial<Record<PresenceStyleResolution['variantKey'], number>>>;
+  readonly typingStyleFrequency: Readonly<Partial<Record<ChatTypingStyleProfile['styleKind'], number>>>;
+  readonly channelFamilyFrequency: Readonly<Record<string, number>>;
+  readonly sceneDurationMs: number;
+}
+
+/**
+ * Plan for a single turn within a scene — a lightweight preview
+ * before full simulation is needed.
+ */
+export interface TypingSceneTurnPlan {
+  readonly turnIndex: number;
+  readonly actorId: string;
+  readonly actorKind: ChatActorKind;
+  readonly channelId: ChatChannelId;
+  readonly estimatedRevealAt: number;
+  readonly estimatedDelayMs: number;
+  readonly estimatedBurstCount: number;
+  readonly estimatedDurationMs: number;
+  readonly expectedVariantKey: PresenceStyleResolution['variantKey'] | undefined;
+  readonly shadowMirrored: boolean;
+}
+
+/**
+ * Full scene plan — a lightweight sequence of turn plans before simulation.
+ */
+export interface TypingScenePlan {
+  readonly sceneId: string;
+  readonly generatedAt: number;
+  readonly turnCount: number;
+  readonly turns: readonly TypingSceneTurnPlan[];
+  readonly totalSceneDurationMs: number;
+  readonly finalRevealAt: number;
+}
+
 /* ============================================================================
  * MARK: Window and segment builders
  * ============================================================================
@@ -398,7 +685,17 @@ function buildBurstCount(
         ? 3
         : 1;
   const jitter = deterministicRange(0, 2, `${seed}::burst-count`);
-  return clamp(base + jitter, config.minBurstCount, config.maxBurstCount);
+
+  let effective = clamp(base + jitter, config.minBurstCount, config.maxBurstCount);
+
+  if (
+    (input.actorKind === 'HATER' || presence.variantKey === 'HATER_STRIKE') &&
+    config.haterBurstBoost > 1.0
+  ) {
+    effective = clamp(Math.round(effective * config.haterBurstBoost), config.minBurstCount, config.maxBurstCount + 2);
+  }
+
+  return effective;
 }
 
 function buildPauseCount(
@@ -415,7 +712,16 @@ function buildPauseCount(
         ? 1
         : 0;
   const jitter = deterministicRange(0, 2, `${seed}::pause-count`);
-  return clamp(base + jitter, config.minPauseCount, config.maxPauseCount);
+
+  let effective = clamp(base + jitter, config.minPauseCount, config.maxPauseCount);
+
+  if (presence.variantKey === 'HELPER_OBSERVE' || presence.variantKey === 'HELPER_SURGE') {
+    if (config.helperPauseBoost > 1.0) {
+      effective = clamp(Math.round(effective * config.helperPauseBoost), config.minPauseCount, config.maxPauseCount + 2);
+    }
+  }
+
+  return effective;
 }
 
 function buildBursts(
@@ -611,12 +917,19 @@ function buildCue(
   });
 }
 
+function typingStyleFamily(
+  family: ReturnType<typeof channelFamily>,
+): 'PUBLIC' | 'NEGOTIATION' | 'SHADOW' | 'PRIVATE' | 'PRE_RUN' {
+  if (family === 'LOBBY') return 'PUBLIC';
+  return family;
+}
+
 function deriveTypingStyle(
   input: TypingSimulationRequest,
   presence: PresenceStyleResolution,
 ): ChatTypingStyleProfile {
   const family = channelFamily(input.channelId);
-  let typingStyle = resolveTypingStyleForActor(input.actorKind, family);
+  let typingStyle = resolveTypingStyleForActor(input.actorKind, typingStyleFamily(family));
 
   if (presence.variantKey === 'HATER_STRIKE' && (input.allowInstantStrike || presence.behavior.shouldEscalateToInstantStrike)) {
     typingStyle = CHAT_TYPING_STYLE_PROFILES.HATER_BAIT;
@@ -657,6 +970,14 @@ function deriveTypingStyle(
   return typingStyle;
 }
 
+/**
+ * Build a fallback latency resolution when no external latency input is
+ * provided. Uses presence signal vector as the timing source.
+ *
+ * Bug fixes applied (v2):
+ *  - entryStyle 'DIRECT' → 'TYPING_REVEAL' (valid ChatNpcEntryStyle)
+ *  - exitStyle 'CLEAN_EXIT' → 'HARD_STOP' (valid ChatNpcExitStyle)
+ */
 function buildFallbackLatency(
   input: TypingSimulationRequest,
   presence: PresenceStyleResolution,
@@ -696,8 +1017,8 @@ function buildFallbackLatency(
             : 'DEFAULT_CADENCE',
     delayMs,
     revealAt,
-    entryStyle: presence.behavior.shouldLurk ? 'LURK_THEN_STRIKE' : 'DIRECT',
-    exitStyle: 'CLEAN_EXIT',
+    entryStyle: presence.behavior.shouldLurk ? 'LURK_THEN_STRIKE' : 'TYPING_REVEAL',
+    exitStyle: 'HARD_STOP',
     typing: Object.freeze({
       shouldType: presence.styleProfile.typingTheater !== 'NONE',
       typingStartAt: Math.max(now, revealAt - Math.floor(typingDurationMs * 0.7)),
@@ -712,6 +1033,398 @@ function buildFallbackLatency(
     silenceWindowBeforeMs: input.silenceDecision?.holdMs ?? 0,
     silenceWindowAfterMs: 120,
     queueCooldownMs: Math.max(0, Math.floor((input.queueDepth ?? 0) * 80)),
+  });
+}
+
+/* ============================================================================
+ * MARK: Analytics builders
+ * ============================================================================
+ */
+
+function buildDiagnostics(
+  input: TypingSimulationRequest,
+  result: TypingSimulationResult,
+  config: TypingSimulationEngineConfig,
+): TypingSimulationDiagnostics {
+  const family = channelFamily(input.channelId);
+  const presence = result.presence;
+  const latency = result.latency;
+  const plan = result.typingPlan;
+
+  const activeTailMs = Math.max(
+    (plan.bursts[plan.bursts.length - 1]?.offsetMs ?? 0) +
+    (plan.bursts[plan.bursts.length - 1]?.durationMs ?? latency.typing.typingDurationMs),
+    (plan.pauses[plan.pauses.length - 1]?.offsetMs ?? 0) +
+    (plan.pauses[plan.pauses.length - 1]?.durationMs ?? 0),
+  );
+
+  return Object.freeze({
+    actorId: input.actorId,
+    actorKind: input.actorKind,
+    channelId: input.channelId,
+    channelFamily: family,
+    variantKey: presence.variantKey,
+    typingStyleKind: result.typingStyle.styleKind,
+    visibilityClass: plan.visibilityClass,
+    signalVector: Object.freeze({
+      pressure01: clamp01(input.pressure01),
+      audienceHeat01: clamp01(input.audienceHeat01),
+      negotiationPressure01: clamp01(input.negotiationPressure01),
+      helperNeed01: clamp01(input.helperNeed01),
+      embarrassment01: clamp01(input.embarrassment01),
+      relationshipObsession01: clamp01(input.relationshipObsession01),
+    }),
+    timingBreakdown: Object.freeze({
+      startupDelayMs: plan.window.startupDelayMs,
+      opensAt: plan.window.opensAt,
+      closesAt: plan.window.closesAt,
+      maxVisibleDurationMs: plan.window.maxVisibleDurationMs,
+      burstCount: plan.bursts.length,
+      pauseCount: plan.pauses.length,
+      idleTailMs: config.idleTailFloorMs,
+      activeTailMs,
+      fakeStartsAt: result.fakeStartsAt,
+      fakeStopsAt: result.fakeStopsAt,
+      revealAt: result.revealAt,
+    }),
+    behaviorFlags: Object.freeze({
+      shouldLurk: presence.behavior.shouldLurk,
+      shouldFakeTypingStart: presence.behavior.shouldFakeTypingStart,
+      shouldFakeTypingStop: presence.behavior.shouldFakeTypingStop,
+      shouldReadBeforeReply: presence.behavior.shouldReadBeforeReply,
+      shouldMirrorShadow: presence.behavior.shouldMirrorShadow,
+      shouldEscalateToInstantStrike: presence.behavior.shouldEscalateToInstantStrike,
+    }),
+    latencyBreakdown: Object.freeze({
+      urgency: latency.urgency,
+      reason: latency.reason,
+      delayMs: latency.delayMs,
+      typingDurationMs: latency.typing.typingDurationMs,
+      lingerMs: latency.typing.lingerMs,
+      silenceWindowBeforeMs: latency.silenceWindowBeforeMs,
+      silenceWindowAfterMs: latency.silenceWindowAfterMs,
+    }),
+    readReceiptMode: result.readResolution.decision.mode,
+    configSnapshot: config,
+    computedAt: result.generatedAt,
+  });
+}
+
+function buildAuditEntry(
+  result: TypingSimulationResult,
+  now: number,
+): TypingSimulationAuditEntry {
+  const seed = [result.actorId, result.channelId, String(now)].join('::');
+  return Object.freeze({
+    auditId: `audit:${positiveHash(seed).toString(16)}`,
+    actorId: result.actorId,
+    actorKind: result.actorKind,
+    channelId: result.channelId,
+    variantKey: result.presence.variantKey,
+    typingStyleKind: result.typingStyle.styleKind,
+    visibilityClass: result.typingPlan.visibilityClass,
+    revealAt: result.revealAt,
+    delayMs: result.latency.delayMs,
+    burstCount: result.typingPlan.bursts.length,
+    fakeStartEmitted: result.fakeStartsAt != null,
+    fakeStopEmitted: result.fakeStopsAt != null,
+    shadowMirrored: result.typingPlan.shadowCompanionChannel != null,
+    readMode: result.readResolution.decision.mode,
+    reasons: result.reasons,
+    capturedAt: now,
+  });
+}
+
+function buildAuditReport(
+  entries: readonly TypingSimulationAuditEntry[],
+  now: number,
+): TypingSimulationAuditReport {
+  const reportSeed = entries.map((e) => e.auditId).join(':');
+  const reportId = `report:${positiveHash(reportSeed).toString(16)}`;
+
+  let totalDelayMs = 0;
+  let totalBurstCount = 0;
+  let fakeStartCount = 0;
+  let fakeStopCount = 0;
+  let shadowMirroredCount = 0;
+  let visibleCount = 0;
+  let hiddenCount = 0;
+
+  const variantFreq: Partial<Record<PresenceStyleResolution['variantKey'], number>> = {};
+  const styleFreq: Partial<Record<ChatTypingStyleProfile['styleKind'], number>> = {};
+
+  for (const entry of entries) {
+    totalDelayMs += entry.delayMs;
+    totalBurstCount += entry.burstCount;
+    if (entry.fakeStartEmitted) fakeStartCount += 1;
+    if (entry.fakeStopEmitted) fakeStopCount += 1;
+    if (entry.shadowMirrored) shadowMirroredCount += 1;
+    if (entry.visibilityClass === 'VISIBLE') visibleCount += 1;
+    else hiddenCount += 1;
+
+    variantFreq[entry.variantKey] = (variantFreq[entry.variantKey] ?? 0) + 1;
+    styleFreq[entry.typingStyleKind] = (styleFreq[entry.typingStyleKind] ?? 0) + 1;
+  }
+
+  const count = entries.length;
+  const averageDelayMs = count > 0 ? Math.round(totalDelayMs / count) : 0;
+  const averageBurstCount = count > 0 ? Math.round((totalBurstCount / count) * 10) / 10 : 0;
+
+  let dominantVariant: PresenceStyleResolution['variantKey'] | undefined;
+  let dominantVariantCount = 0;
+  for (const [k, v] of Object.entries(variantFreq)) {
+    if ((v ?? 0) > dominantVariantCount) {
+      dominantVariantCount = v ?? 0;
+      dominantVariant = k as PresenceStyleResolution['variantKey'];
+    }
+  }
+
+  let dominantTypingStyle: ChatTypingStyleProfile['styleKind'] | undefined;
+  let dominantStyleCount = 0;
+  for (const [k, v] of Object.entries(styleFreq)) {
+    if ((v ?? 0) > dominantStyleCount) {
+      dominantStyleCount = v ?? 0;
+      dominantTypingStyle = k as ChatTypingStyleProfile['styleKind'];
+    }
+  }
+
+  return Object.freeze({
+    reportId,
+    generatedAt: now,
+    entryCount: count,
+    entries,
+    totalDelayMs,
+    averageDelayMs,
+    averageBurstCount,
+    fakeStartCount,
+    fakeStopCount,
+    shadowMirroredCount,
+    visibleCount,
+    hiddenCount,
+    dominantVariant,
+    dominantTypingStyle,
+  });
+}
+
+function buildStatsSummary(
+  results: readonly TypingSimulationResult[],
+): TypingSimulationStatsSummary {
+  const count = results.length;
+  if (count === 0) {
+    return Object.freeze({
+      sampleCount: 0,
+      totalDelayMs: 0,
+      averageDelayMs: 0,
+      maxDelayMs: 0,
+      minDelayMs: undefined,
+      medianDelayMs: undefined,
+      averageBurstCount: 0,
+      fakeStartRate: 0,
+      fakeStopRate: 0,
+      shadowMirroredRate: 0,
+      visibleRate: 0,
+      variantFrequency: Object.freeze({}),
+      typingStyleFrequency: Object.freeze({}),
+      channelFamilyFrequency: Object.freeze({}),
+      sceneDurationMs: 0,
+    });
+  }
+
+  let totalDelayMs = 0;
+  let maxDelayMs = 0;
+  let minDelayMs: number | undefined;
+  let totalBurstCount = 0;
+  let fakeStartCount = 0;
+  let fakeStopCount = 0;
+  let shadowCount = 0;
+  let visibleCount = 0;
+  const delayValues: number[] = [];
+  const variantFreq: Partial<Record<PresenceStyleResolution['variantKey'], number>> = {};
+  const styleFreq: Partial<Record<ChatTypingStyleProfile['styleKind'], number>> = {};
+  const familyFreq: Record<string, number> = {};
+
+  for (const result of results) {
+    totalDelayMs += result.latency.delayMs;
+    maxDelayMs = Math.max(maxDelayMs, result.latency.delayMs);
+    if (minDelayMs === undefined || result.latency.delayMs < minDelayMs) {
+      minDelayMs = result.latency.delayMs;
+    }
+    delayValues.push(result.latency.delayMs);
+    totalBurstCount += result.typingPlan.bursts.length;
+    if (result.fakeStartsAt != null) fakeStartCount += 1;
+    if (result.fakeStopsAt != null) fakeStopCount += 1;
+    if (result.typingPlan.shadowCompanionChannel != null) shadowCount += 1;
+    if (result.typingPlan.visibilityClass === 'VISIBLE') visibleCount += 1;
+
+    const vk = result.presence.variantKey;
+    variantFreq[vk] = (variantFreq[vk] ?? 0) + 1;
+
+    const sk = result.typingStyle.styleKind;
+    styleFreq[sk] = (styleFreq[sk] ?? 0) + 1;
+
+    const fam = result.family;
+    familyFreq[fam] = (familyFreq[fam] ?? 0) + 1;
+  }
+
+  const averageDelayMs = Math.round(totalDelayMs / count);
+  const averageBurstCount = Math.round((totalBurstCount / count) * 10) / 10;
+
+  const sorted = [...delayValues].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  const medianDelayMs = sorted.length % 2 === 0
+    ? Math.round(((sorted[mid - 1] ?? 0) + (sorted[mid] ?? 0)) / 2)
+    : sorted[mid];
+
+  const sceneDurationMs = results.length > 0
+    ? Math.max(...results.map((r) => r.revealAt + r.latency.typing.lingerMs + r.latency.silenceWindowAfterMs)) -
+      (results[0]?.generatedAt ?? 0)
+    : 0;
+
+  return Object.freeze({
+    sampleCount: count,
+    totalDelayMs,
+    averageDelayMs,
+    maxDelayMs,
+    minDelayMs,
+    medianDelayMs,
+    averageBurstCount,
+    fakeStartRate: count > 0 ? fakeStartCount / count : 0,
+    fakeStopRate: count > 0 ? fakeStopCount / count : 0,
+    shadowMirroredRate: count > 0 ? shadowCount / count : 0,
+    visibleRate: count > 0 ? visibleCount / count : 0,
+    variantFrequency: Object.freeze(variantFreq),
+    typingStyleFrequency: Object.freeze(styleFreq),
+    channelFamilyFrequency: Object.freeze(familyFreq),
+    sceneDurationMs: Math.max(0, sceneDurationMs),
+  });
+}
+
+function computeDiff(
+  resultA: TypingSimulationResult,
+  resultB: TypingSimulationResult,
+): TypingSimulationDiff {
+  const changedVariant = resultA.presence.variantKey !== resultB.presence.variantKey;
+  const changedTypingStyle = resultA.typingStyle.styleKind !== resultB.typingStyle.styleKind;
+  const changedVisibility = resultA.typingPlan.visibilityClass !== resultB.typingPlan.visibilityClass;
+  const changedFamily = resultA.family !== resultB.family;
+
+  const revealDeltaMs = resultB.revealAt - resultA.revealAt;
+  const delayDeltaMs = resultB.latency.delayMs - resultA.latency.delayMs;
+  const burstCountDelta = resultB.typingPlan.bursts.length - resultA.typingPlan.bursts.length;
+
+  const urgencyOrder = ['LOW', 'MEDIUM', 'HIGH', 'IMMEDIATE'];
+  const urgencyA = urgencyOrder.indexOf(resultA.latency.urgency);
+  const urgencyB = urgencyOrder.indexOf(resultB.latency.urgency);
+  const escalated = urgencyB > urgencyA;
+  const deescalated = urgencyB < urgencyA;
+
+  return Object.freeze({
+    changedVariant,
+    changedTypingStyle,
+    changedVisibility,
+    changedFamily,
+    revealDeltaMs,
+    delayDeltaMs,
+    burstCountDelta,
+    previousVariant: resultA.presence.variantKey,
+    nextVariant: resultB.presence.variantKey,
+    previousTypingStyle: resultA.typingStyle.styleKind,
+    nextTypingStyle: resultB.typingStyle.styleKind,
+    escalated,
+    deescalated,
+  });
+}
+
+/* ============================================================================
+ * MARK: Scene planner
+ * ============================================================================
+ */
+
+function buildScenePlan(
+  requests: readonly TypingSimulationRequest[],
+  config: TypingSimulationEngineConfig,
+): TypingScenePlan {
+  if (requests.length === 0) {
+    const now = Date.now();
+    return Object.freeze({
+      sceneId: `scene:${now}`,
+      generatedAt: now,
+      turnCount: 0,
+      turns: Object.freeze([]),
+      totalSceneDurationMs: 0,
+      finalRevealAt: now,
+    });
+  }
+
+  const now = nowMs(requests[0]?.now);
+  const sceneSeed = [requests[0]?.actorId, requests[0]?.channelId, String(now)].join('::');
+  const sceneId = `scene:${positiveHash(sceneSeed).toString(16)}`;
+
+  const turns: TypingSceneTurnPlan[] = [];
+  let cursor = now;
+
+  for (let index = 0; index < requests.length; index += 1) {
+    const request = requests[index];
+    if (!request) continue;
+
+    const family = channelFamily(request.channelId);
+    const pressure01 = clamp01(request.pressure01);
+    const negotiationPressure01 = clamp01(request.negotiationPressure01);
+
+    let baseDelayMs = 600;
+    if (family === 'NEGOTIATION') {
+      baseDelayMs = Math.round(baseDelayMs * config.negotiationStallMultiplier);
+      baseDelayMs += Math.round(negotiationPressure01 * 800);
+    }
+
+    const turnSeed = `scene-turn:${sceneSeed}:${index}`;
+    const estimatedDelayMs = deterministicRange(
+      Math.max(200, baseDelayMs - 200),
+      baseDelayMs + 600 + Math.round(pressure01 * 400),
+      turnSeed,
+    );
+
+    const estimatedBurstCount = deterministicRange(
+      config.minBurstCount,
+      config.maxBurstCount,
+      `${turnSeed}::bursts`,
+    );
+
+    const estimatedDurationMs = estimatedDelayMs + estimatedBurstCount * deterministicRange(
+      200, 900, `${turnSeed}::duration`,
+    );
+
+    const gapMs = deterministicRange(
+      config.sceneTurnGapFloorMs,
+      config.sceneTurnGapCeilingMs,
+      `${turnSeed}::gap`,
+    );
+
+    const estimatedRevealAt = cursor + estimatedDelayMs;
+
+    turns.push(Object.freeze({
+      turnIndex: index,
+      actorId: request.actorId,
+      actorKind: request.actorKind,
+      channelId: request.channelId,
+      estimatedRevealAt,
+      estimatedDelayMs,
+      estimatedBurstCount,
+      estimatedDurationMs,
+      expectedVariantKey: undefined,
+      shadowMirrored: Boolean(request.shouldShadowPrime),
+    }));
+
+    cursor = estimatedRevealAt + Math.round(estimatedDurationMs * config.sceneLingerMultiplier) + gapMs;
+  }
+
+  return Object.freeze({
+    sceneId,
+    generatedAt: now,
+    turnCount: turns.length,
+    turns: Object.freeze(turns),
+    totalSceneDurationMs: Math.max(0, cursor - now),
+    finalRevealAt: turns[turns.length - 1]?.estimatedRevealAt ?? now,
   });
 }
 
@@ -741,6 +1454,10 @@ export class TypingSimulationEngine {
     this.silencePolicy = args.silencePolicy ?? new ChatSilencePolicy();
   }
 
+  /**
+   * Simulate a single typing turn. Returns a complete result including
+   * presence resolution, latency plan, typing plan, cue, and read receipt.
+   */
   public simulate(input: TypingSimulationRequest): TypingSimulationResult {
     const generatedAt = nowMs(input.now);
     const authority = asAuthority(input.authority);
@@ -879,6 +1596,10 @@ export class TypingSimulationEngine {
     });
   }
 
+  /**
+   * Simulate a batch of turns in sequence. Advances time cursor between turns
+   * using the linger and silence windows from each result.
+   */
   public simulateBatch(
     requests: readonly TypingSimulationRequest[],
   ): TypingSimulationBatchResult {
@@ -931,7 +1652,129 @@ export class TypingSimulationEngine {
       turns: Object.freeze(turns),
     });
   }
+
+  /**
+   * Preview a scene plan without full simulation. Returns estimated timing
+   * for each turn. Useful for pre-loading or scheduling upstream.
+   */
+  public previewScenePlan(requests: readonly TypingSimulationRequest[]): TypingScenePlan {
+    return buildScenePlan(requests, this.config);
+  }
+
+  /**
+   * Get a full diagnostic breakdown for a single simulation result.
+   */
+  public getDiagnostics(
+    input: TypingSimulationRequest,
+    result: TypingSimulationResult,
+  ): TypingSimulationDiagnostics {
+    return buildDiagnostics(input, result, this.config);
+  }
+
+  /**
+   * Build an audit report from a batch result.
+   */
+  public buildAuditReport(batch: TypingSimulationBatchResult): TypingSimulationAuditReport {
+    const now = batch.generatedAt;
+    const entries = batch.turns.map((turn) => buildAuditEntry(turn, now));
+    return buildAuditReport(Object.freeze(entries), now);
+  }
+
+  /**
+   * Compute a diff between two sequential simulation results.
+   */
+  public computeDiff(
+    resultA: TypingSimulationResult,
+    resultB: TypingSimulationResult,
+  ): TypingSimulationDiff {
+    return computeDiff(resultA, resultB);
+  }
+
+  /**
+   * Aggregate stats across a batch of results.
+   */
+  public getStatsSummary(results: readonly TypingSimulationResult[]): TypingSimulationStatsSummary {
+    return buildStatsSummary(results);
+  }
+
+  /**
+   * Serialize the engine configuration for transport or debug.
+   */
+  public toJSON(): TypingSimulationEngineConfig {
+    return this.config;
+  }
+
+  /**
+   * Clone this engine with optional config overrides applied.
+   */
+  public clone(overrides: Partial<TypingSimulationEngineConfig> = {}): TypingSimulationEngine {
+    return new TypingSimulationEngine({
+      config: { ...this.config, ...overrides },
+      presenceResolver: this.presenceResolver,
+      readPolicy: this.readPolicy,
+      silencePolicy: this.silencePolicy,
+    });
+  }
 }
+
+/* ============================================================================
+ * MARK: Standalone helpers
+ * ============================================================================
+ */
+
+/**
+ * Quick check: will this request produce a shadow typing window?
+ */
+export function willProduceShadowTyping(request: TypingSimulationRequest): boolean {
+  return (
+    channelFamily(request.channelId) === 'SHADOW' ||
+    Boolean(request.shouldShadowPrime)
+  );
+}
+
+/**
+ * Quick check: will this request likely produce fake typing start behavior?
+ * Based on variant signals without a full simulation pass.
+ */
+export function likelyFakeTypingStart(request: TypingSimulationRequest): boolean {
+  return (
+    request.actorKind === 'HATER' ||
+    (request.actorKind === 'AMBIENT_NPC' && clamp01(request.pressure01) >= 0.6) ||
+    Boolean(request.shouldWeaponizeDelay)
+  );
+}
+
+/**
+ * Derive the expected urgency class from a request without full simulation.
+ */
+export function estimateUrgencyClass(
+  request: TypingSimulationRequest,
+): BackendLatencyResolution['urgency'] {
+  if (request.actorKind === 'HELPER' && clamp01(request.helperNeed01) >= 0.8) return 'IMMEDIATE';
+  if (clamp01(request.pressure01) >= 0.72) return 'HIGH';
+  if (clamp01(request.negotiationPressure01) >= 0.5) return 'MEDIUM';
+  if (clamp01(request.pressure01) >= 0.4) return 'MEDIUM';
+  return 'LOW';
+}
+
+/**
+ * Estimate the channel family's expected delay multiplier.
+ * Used for upstream budget scheduling.
+ */
+export function channelFamilyDelayMultiplier(channelId: ChatChannelId): number {
+  const family = channelFamily(channelId);
+  switch (family) {
+    case 'NEGOTIATION': return 1.8;
+    case 'SHADOW': return 0.0;
+    case 'LOBBY': return 0.7;
+    default: return 1.0;
+  }
+}
+
+/* ============================================================================
+ * MARK: Factory functions
+ * ============================================================================
+ */
 
 export function createTypingSimulationEngine(args: {
   config?: Partial<TypingSimulationEngineConfig>;
@@ -942,7 +1785,85 @@ export function createTypingSimulationEngine(args: {
   return new TypingSimulationEngine(args);
 }
 
+export function createTypingSimulationEngineFromProfile(
+  profile: TypingSimulationEngineProfile,
+  args: {
+    overrides?: Partial<TypingSimulationEngineConfig>;
+    presenceResolver?: PresenceStyleResolver;
+    readPolicy?: ReadReceiptPolicy;
+    silencePolicy?: ChatSilencePolicy;
+  } = {},
+): TypingSimulationEngine {
+  const profileConfig = TYPING_ENGINE_PROFILE_OPTIONS[profile];
+  return new TypingSimulationEngine({
+    config: { ...profileConfig, ...(args.overrides ?? {}) },
+    presenceResolver: args.presenceResolver,
+    readPolicy: args.readPolicy,
+    silencePolicy: args.silencePolicy,
+  });
+}
+
+export function createStandardTypingEngine(
+  overrides: Partial<TypingSimulationEngineConfig> = {},
+): TypingSimulationEngine {
+  return createTypingSimulationEngineFromProfile('STANDARD', { overrides });
+}
+
+export function createAggressiveHaterTypingEngine(
+  overrides: Partial<TypingSimulationEngineConfig> = {},
+): TypingSimulationEngine {
+  return createTypingSimulationEngineFromProfile('AGGRESSIVE_HATER', { overrides });
+}
+
+export function createPatientHelperTypingEngine(
+  overrides: Partial<TypingSimulationEngineConfig> = {},
+): TypingSimulationEngine {
+  return createTypingSimulationEngineFromProfile('PATIENT_HELPER', { overrides });
+}
+
+export function createNegotiationStallTypingEngine(
+  overrides: Partial<TypingSimulationEngineConfig> = {},
+): TypingSimulationEngine {
+  return createTypingSimulationEngineFromProfile('NEGOTIATION_STALL', { overrides });
+}
+
+export function createShadowMinimalTypingEngine(
+  overrides: Partial<TypingSimulationEngineConfig> = {},
+): TypingSimulationEngine {
+  return createTypingSimulationEngineFromProfile('SHADOW_MINIMAL', { overrides });
+}
+
+export function createLiveopsRapidTypingEngine(
+  overrides: Partial<TypingSimulationEngineConfig> = {},
+): TypingSimulationEngine {
+  return createTypingSimulationEngineFromProfile('LIVEOPS_RAPID', { overrides });
+}
+
+export function createCinematicTypingEngine(
+  overrides: Partial<TypingSimulationEngineConfig> = {},
+): TypingSimulationEngine {
+  return createTypingSimulationEngineFromProfile('CINEMATIC', { overrides });
+}
+
+/* ============================================================================
+ * MARK: Module bundle
+ * ============================================================================
+ */
+
 export const ChatTypingSimulationEngineModule = Object.freeze({
   TypingSimulationEngine,
   createTypingSimulationEngine,
+  createTypingSimulationEngineFromProfile,
+  createStandardTypingEngine,
+  createAggressiveHaterTypingEngine,
+  createPatientHelperTypingEngine,
+  createNegotiationStallTypingEngine,
+  createShadowMinimalTypingEngine,
+  createLiveopsRapidTypingEngine,
+  createCinematicTypingEngine,
+  willProduceShadowTyping,
+  likelyFakeTypingStart,
+  estimateUrgencyClass,
+  channelFamilyDelayMultiplier,
+  TYPING_ENGINE_PROFILE_OPTIONS,
 });
