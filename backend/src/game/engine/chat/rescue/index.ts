@@ -63,7 +63,7 @@
 
 export * from './ChurnRescuePolicy';
 export * from './RescueInterventionPlanner';
-export * from './RecoveryOutcomeTracker';
+export { RecoveryOutcomeTrackerNS };
 
 // ============================================================================
 // MARK: Namespace imports for combined module bundle
