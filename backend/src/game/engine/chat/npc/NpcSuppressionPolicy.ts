@@ -1352,3 +1352,555 @@ export class NpcSuppressionPolicy {
 
 export const createNpcSuppressionPolicy = (): NpcSuppressionPolicy => new NpcSuppressionPolicy();
 export const npcSuppressionPolicy = new NpcSuppressionPolicy();
+
+// ─── Extended types ────────────────────────────────────────────────────────────
+
+/** Qualitative suppression heat level for a room. */
+export type NpcSuppressionHeatLevel = 'OPEN' | 'WARM' | 'RESTRICTED' | 'LOCKED';
+
+/** Full suppression state report for a room at a point in time. */
+export interface NpcSuppressionStateReport {
+  readonly roomId: string;
+  readonly modeId: string;
+  readonly sceneState: CadenceSceneState;
+  readonly suppressionHeatLevel: NpcSuppressionHeatLevel;
+  readonly ambientLocked: boolean;
+  readonly helperLocked: boolean;
+  readonly haterLocked: boolean;
+  readonly witnessNeeded: boolean;
+  readonly collapseWitnessOpen: boolean;
+  readonly comebackWitnessOpen: boolean;
+  readonly sovereigntyWitnessOpen: boolean;
+  readonly totalSuppressedLastMinute: number;
+  readonly totalAllowedLastMinute: number;
+  readonly suppressionRateByKind: Readonly<Record<NpcActorKind, number>>;
+  readonly witnessGapByChannel: Readonly<Partial<Record<CadenceChannel, number>>>;
+  readonly headline: string;
+  readonly notes: readonly string[];
+  readonly computedAtMs: number;
+}
+
+/** Audit summary for suppression decisions. */
+export interface NpcSuppressionAuditSummary {
+  readonly totalDecisions: number;
+  readonly totalAllowed: number;
+  readonly totalSuppressed: number;
+  readonly suppressionRate: number;
+  readonly topSuppressionReasons: readonly { readonly reason: NpcSuppressionReason; readonly count: number }[];
+  readonly topSuppressedActors: readonly { readonly actorKey: string; readonly count: number }[];
+  readonly shadowCount: number;
+  readonly deferredCount: number;
+  readonly droppedCount: number;
+  readonly publicCount: number;
+  readonly witnessAllowedCount: number;
+  readonly computedAtMs: number;
+}
+
+/** Per-actor suppression status. */
+export interface ActorSuppressionStatus {
+  readonly actorKey: string;
+  readonly totalSuppressed: number;
+  readonly lastSuppressedAtMs: number;
+  readonly lastAllowedAtMs: number;
+  readonly suppressionRate: number;
+  readonly isCurrentlyQuarantined: boolean;
+}
+
+// ─── Standalone suppression utilities ─────────────────────────────────────────
+
+/** Describe a NpcSuppressionReason in plain language. */
+export function describeSuppressionDecisionReason(reason: NpcSuppressionReason): string {
+  const MAP: Readonly<Record<NpcSuppressionReason, string>> = Object.freeze({
+    NONE: 'No suppression — actor is allowed.',
+    CHANNEL_DISABLED: 'Channel is disabled by suppression policy.',
+    CHANNEL_POLICY_MISMATCH: 'Channel policy forbids this actor kind.',
+    MODE_POLICY_MISMATCH: 'Room mode forbids this actor kind.',
+    SCENE_POLICY_MISMATCH: 'Scene state forbids this actor kind.',
+    ROOM_TOO_EMPTY: 'Room occupancy is below the minimum threshold.',
+    ROOM_TOO_HOT: 'Room heat is above the suppression ceiling.',
+    ROOM_TOO_PRIVATE: 'Room is too private for this emission type.',
+    AMBIENT_DISALLOWED: 'Ambient NPCs are not allowed in this channel or scene.',
+    AMBIENT_NEEDS_OCCUPANCY: 'Ambient NPC requires a minimum occupancy count.',
+    AMBIENT_TOO_MUCH_HEAT: 'Room heat exceeds the ambient heat cap.',
+    AMBIENT_TOO_MUCH_PRESSURE: 'Room pressure exceeds the ambient pressure cap.',
+    AMBIENT_TOO_MUCH_FRUSTRATION: 'Room frustration level blocks ambient emission.',
+    HELPER_LOCK_ACTIVE: 'Helper lock is active — helper emissions are frozen.',
+    HELPER_NOT_NEEDED: 'Helper is not needed given current room state.',
+    HELPER_TOO_EARLY: 'Helper intervention is too early in the session.',
+    HELPER_TOO_LATE: 'Helper intervention window has passed.',
+    HELPER_DUPLICATE_AXIS: 'This helper axis was recently emitted in this channel.',
+    HELPER_WINDOW_RESERVED: 'Helper window is reserved; other kinds are blocked.',
+    HATER_NOT_EARNED: 'Hater has not earned the right to speak — room state is too low.',
+    HATER_TOO_NOISY: 'Hater has been too active recently — suppressed for quality.',
+    HATER_NEEDS_TARGET_SIGNAL: 'Hater requires a heat or pressure signal to justify emission.',
+    HATER_WINDOW_RESERVED: 'Hater window is reserved by another active hater.',
+    HATER_CONTEXT_ILLEGAL: 'Hater is forbidden in this context by suppression law.',
+    WITNESS_REQUIRED_BY_OTHER_KIND: 'A different kind holds the witness mandate right now.',
+    COLLAPSE_REQUIRES_WITNESS: 'Collapse event requires a designated witness NPC.',
+    COMEBACK_REQUIRES_WITNESS: 'Comeback event requires a designated witness NPC.',
+    SOVEREIGNTY_REQUIRES_WITNESS: 'Near-sovereignty requires a designated witness NPC.',
+    DEAL_ROOM_RESTRAINT: 'Deal room restraint policy is in effect.',
+    SYNDICATE_RESTRAINT: 'Syndicate restraint policy is in effect.',
+    LOBBY_RESTRAINT: 'Lobby restraint policy is in effect.',
+    POSTRUN_RESTRAINT: 'Post-run restraint policy is in effect.',
+    INVASION_LOCK: 'Invasion lock — only invasion-tier actors are allowed.',
+    PRIORITY_PREEMPTED: 'A higher-priority actor claimed this emission window.',
+    SHADOW_ONLY: 'Actor is permitted in shadow lane only.',
+    SHADOW_ONLY_AND_DEFER: 'Actor is permitted in shadow lane only, and emission is deferred.',
+    MODERATION_QUARANTINE: 'Actor is under active moderation quarantine.',
+    SESSION_MUTED: 'Session is muted — all NPC emission is suppressed.',
+    RECENT_DUPLICATE: 'Same line or context was recently emitted.',
+    REPETITION_OVERHEAT: 'Actor has exceeded the repetition limit for this channel.',
+    PROOF_PROTECTION: 'Proof-protection lock prevents emission during this window.',
+    RECOVERY_PROTECTION: 'Recovery protection lock is active — only helpers may speak.',
+    MANUAL_DISABLE: 'Actor has been manually disabled by a game operator.',
+    UNKNOWN_PERSONA: 'Actor persona is not registered in any canonical registry.',
+    UNKNOWN_KIND: 'Actor kind is not recognized by the suppression policy.',
+  });
+  return MAP[reason] ?? `Unknown suppression reason: ${reason}`;
+}
+
+/** Describe a NpcSuppressionDecision in one sentence. */
+export function describeNpcSuppressionDecision(decision: NpcSuppressionDecision): string {
+  const actor = `${decision.actorKind}:${decision.personaId ?? 'unknown'}`;
+  if (decision.allow) {
+    return `${actor} allowed as ${decision.visibility} in ${decision.channel} scene=${decision.sceneState} score=${decision.priorityScore.toFixed(3)}`;
+  }
+  return `${actor} suppressed (${decision.reason}) in ${decision.channel} as ${decision.visibility} until=${decision.suppressUntilMs}`;
+}
+
+/** Classify the current room heat for suppression decision-making. */
+export function classifySuppressionHeatLevel(room: NpcSuppressionRoomState): NpcSuppressionHeatLevel {
+  if (room.invasionActive || (room.shieldBreached && room.pressure >= 0.75)) return 'LOCKED';
+  if (room.helperLock || room.postRun) return 'RESTRICTED';
+  if (room.heat >= 0.55 || room.pressure >= 0.55) return 'WARM';
+  return 'OPEN';
+}
+
+/**
+ * Build a full suppression state report for a room at a given moment.
+ */
+export function buildSuppressionStateReport(
+  room: NpcSuppressionRoomState,
+  ledger: NpcSuppressionLedger,
+  nowMs: number,
+): NpcSuppressionStateReport {
+  const sceneState = inferSceneState(room);
+  const heatLevel = classifySuppressionHeatLevel(room);
+  const pressureLock = npcSuppressionPolicy.buildRoomPressureLock(room);
+  const witnessNeeded = !!(pressureLock.witnessNeeded);
+  const ambientLocked = !!(pressureLock.ambientLocked);
+  const helperLocked = !!(pressureLock.helperLocked);
+  const haterLocked = !!(pressureLock.haterLocked);
+
+  const recentHistory = ledger.recentHistory.filter((r) => nowMs - r.createdAtMs <= 60_000);
+  const allowed = recentHistory.filter((r) => r.reason === 'NONE').length;
+  const suppressed = recentHistory.filter((r) => r.reason !== 'NONE').length;
+
+  const suppressionRateByKind: Record<NpcActorKind, number> = { AMBIENT: 0, HELPER: 0, HATER: 0, INVASION: 0 };
+  for (const kind of ['AMBIENT', 'HELPER', 'HATER', 'INVASION'] as const) {
+    const kindHistory = recentHistory.filter((r) => r.actorKind === kind);
+    const kindSuppressed = kindHistory.filter((r) => r.reason !== 'NONE').length;
+    suppressionRateByKind[kind] = kindHistory.length > 0
+      ? Number((kindSuppressed / kindHistory.length).toFixed(3))
+      : 0;
+  }
+
+  const witnessGapByChannel: Partial<Record<CadenceChannel, number>> = {};
+  for (const [channel, lastAt] of Object.entries(ledger.lastWitnessAtByChannel)) {
+    witnessGapByChannel[channel as CadenceChannel] = Math.max(0, nowMs - (lastAt ?? 0));
+  }
+
+  const notes: string[] = [];
+  if (ambientLocked) notes.push('Ambient lane is locked.');
+  if (helperLocked) notes.push('Helper lane is locked.');
+  if (haterLocked) notes.push('Hater lane is locked.');
+  if (witnessNeeded) notes.push('Witness mandate is active.');
+  if (room.invasionActive) notes.push('Invasion active — matrix is narrowed.');
+  if (room.postRun) notes.push('Post-run state — haters suppressed.');
+  if (suppressed > 0) notes.push(`${suppressed} suppressions in last 60s.`);
+
+  const headline = [
+    `Room ${room.roomId} suppression:`,
+    `heat=${heatLevel}`,
+    `scene=${sceneState}`,
+    `witness=${witnessNeeded}`,
+    `allowed=${allowed} suppressed=${suppressed}`,
+  ].join(' ');
+
+  return Object.freeze({
+    roomId: room.roomId,
+    modeId: room.modeId,
+    sceneState,
+    suppressionHeatLevel: heatLevel,
+    ambientLocked,
+    helperLocked,
+    haterLocked,
+    witnessNeeded,
+    collapseWitnessOpen: room.shieldBreached && !room.invasionActive,
+    comebackWitnessOpen: !!(room.recentComebackCount && room.recentComebackCount > 0),
+    sovereigntyWitnessOpen: room.nearSovereignty,
+    totalSuppressedLastMinute: suppressed,
+    totalAllowedLastMinute: allowed,
+    suppressionRateByKind: Object.freeze(suppressionRateByKind),
+    witnessGapByChannel: Object.freeze(witnessGapByChannel),
+    headline,
+    notes: Object.freeze(notes),
+    computedAtMs: nowMs,
+  });
+}
+
+/**
+ * Build an audit summary from a suppression ledger.
+ */
+export function buildSuppressionAuditSummary(
+  ledger: NpcSuppressionLedger,
+  nowMs: number,
+): NpcSuppressionAuditSummary {
+  const history = ledger.recentHistory;
+  const allowed = history.filter((r) => r.reason === 'NONE').length;
+  const suppressed = history.filter((r) => r.reason !== 'NONE').length;
+  const total = history.length;
+  const suppressionRate = total > 0 ? Number((suppressed / total).toFixed(4)) : 0;
+
+  // Top suppression reasons
+  const reasonCounts: Record<string, number> = {};
+  for (const record of history) {
+    if (record.reason !== 'NONE') {
+      reasonCounts[record.reason] = (reasonCounts[record.reason] ?? 0) + 1;
+    }
+  }
+  const topSuppressionReasons = Object.entries(reasonCounts)
+    .sort(([, a], [, b]) => b - a)
+    .slice(0, 8)
+    .map(([reason, count]) => Object.freeze({ reason: reason as NpcSuppressionReason, count }));
+
+  // Top suppressed actors
+  const actorSuppressionCounts: Record<string, number> = { ...ledger.suppressionCountsByActor };
+  const topSuppressedActors = Object.entries(actorSuppressionCounts)
+    .sort(([, a], [, b]) => b - a)
+    .slice(0, 8)
+    .map(([actorKey, count]) => Object.freeze({ actorKey, count }));
+
+  const shadowCount = history.filter((r) => r.visibility === 'shadow').length;
+  const deferredCount = history.filter((r) => r.visibility === 'deferred').length;
+  const droppedCount = history.filter((r) => r.visibility === 'dropped').length;
+  const publicCount = history.filter((r) => r.visibility === 'public').length;
+  const witnessAllowedCount = history.filter((r) => r.witnessRequired && r.reason === 'NONE').length;
+
+  return Object.freeze({
+    totalDecisions: total,
+    totalAllowed: allowed,
+    totalSuppressed: suppressed,
+    suppressionRate,
+    topSuppressionReasons: Object.freeze(topSuppressionReasons),
+    topSuppressedActors: Object.freeze(topSuppressedActors),
+    shadowCount,
+    deferredCount,
+    droppedCount,
+    publicCount,
+    witnessAllowedCount,
+    computedAtMs: nowMs,
+  });
+}
+
+/**
+ * Build per-actor suppression status from a ledger.
+ */
+export function buildActorSuppressionStatus(
+  actorKey: string,
+  ledger: NpcSuppressionLedger,
+  nowMs: number,
+): ActorSuppressionStatus {
+  const total = ledger.suppressionCountsByActor[actorKey] ?? 0;
+  const lastSuppressedAtMs = ledger.lastSuppressedAtByActor[actorKey] ?? 0;
+  const lastAllowedAtMs = ledger.lastAllowedAtByActor[actorKey] ?? 0;
+  const totalDecisionsForActor = ledger.recentHistory.filter((r) => r.actorKey === actorKey).length;
+  const rate = totalDecisionsForActor > 0 ? Number((total / totalDecisionsForActor).toFixed(4)) : 0;
+  const recentlyQuarantined = ledger.recentHistory.some(
+    (r) => r.actorKey === actorKey && r.reason === 'MODERATION_QUARANTINE' && nowMs - r.createdAtMs < 120_000,
+  );
+
+  return Object.freeze({
+    actorKey,
+    totalSuppressed: total,
+    lastSuppressedAtMs,
+    lastAllowedAtMs,
+    suppressionRate: rate,
+    isCurrentlyQuarantined: recentlyQuarantined,
+  });
+}
+
+/**
+ * Determine whether a given actor has been suppressed enough recently to warrant
+ * a quality investigation (repetition overheat detection).
+ */
+export function isActorOverheated(
+  actorKey: string,
+  ledger: NpcSuppressionLedger,
+  nowMs: number,
+  windowMs = 120_000,
+  threshold = 8,
+): boolean {
+  let count = 0;
+  for (const record of ledger.recentHistory) {
+    if (record.actorKey !== actorKey) continue;
+    if (nowMs - record.createdAtMs > windowMs) continue;
+    if (record.reason !== 'NONE') count += 1;
+  }
+  return count >= threshold;
+}
+
+/**
+ * List all actors that have been recently suppressed.
+ */
+export function listRecentlySuppressedActors(
+  ledger: NpcSuppressionLedger,
+  nowMs: number,
+  windowMs = 60_000,
+): readonly string[] {
+  const seen = new Set<string>();
+  for (const record of ledger.recentHistory) {
+    if (nowMs - record.createdAtMs > windowMs) continue;
+    if (record.reason !== 'NONE') seen.add(record.actorKey);
+  }
+  return Object.freeze([...seen]);
+}
+
+/**
+ * List all actors that have been recently allowed (in public lane).
+ */
+export function listRecentlyAllowedActors(
+  ledger: NpcSuppressionLedger,
+  nowMs: number,
+  windowMs = 60_000,
+): readonly string[] {
+  const seen = new Set<string>();
+  for (const record of ledger.recentHistory) {
+    if (nowMs - record.createdAtMs > windowMs) continue;
+    if (record.reason === 'NONE' && record.visibility === 'public') seen.add(record.actorKey);
+  }
+  return Object.freeze([...seen]);
+}
+
+/**
+ * Check whether a witness has been emitted on a channel recently.
+ */
+export function wasWitnessRecentlyEmitted(
+  channel: CadenceChannel,
+  ledger: NpcSuppressionLedger,
+  nowMs: number,
+  windowMs = 10_000,
+): boolean {
+  const lastWitness = ledger.lastWitnessAtByChannel[channel] ?? 0;
+  return nowMs - lastWitness <= windowMs;
+}
+
+/**
+ * Get the time since the last witness emission for a channel. Returns Infinity if never.
+ */
+export function timeSinceLastWitness(
+  channel: CadenceChannel,
+  ledger: NpcSuppressionLedger,
+  nowMs: number,
+): number {
+  const lastWitness = ledger.lastWitnessAtByChannel[channel];
+  if (lastWitness === undefined) return Infinity;
+  return Math.max(0, nowMs - lastWitness);
+}
+
+/**
+ * Check whether a helper axis was recently emitted in a channel.
+ */
+export function wasHelperAxisRecentlyEmitted(
+  channel: CadenceChannel,
+  personaId: string,
+  ledger: NpcSuppressionLedger,
+  nowMs: number,
+  windowMs = 20_000,
+): boolean {
+  const key = `${channel}:${personaId}`;
+  const lastAt = ledger.lastHelperAxisAtByChannel[key] ?? 0;
+  return nowMs - lastAt <= windowMs;
+}
+
+/**
+ * Create an empty suppression ledger.
+ */
+export function createEmptySuppressionLedger(): NpcSuppressionLedger {
+  return Object.freeze({
+    lastAllowedAtByActor: Object.freeze({}),
+    lastSuppressedAtByActor: Object.freeze({}),
+    suppressionCountsByActor: Object.freeze({}),
+    suppressionCountsByReason: Object.freeze({} as Record<NpcSuppressionReason, number>),
+    recentHistory: Object.freeze([]),
+    lastWitnessAtByChannel: Object.freeze({}),
+    lastHelperAxisAtByChannel: Object.freeze({}),
+  });
+}
+
+/**
+ * Merge two ledgers — used when coalescing room state from replays or reconnects.
+ * The returned ledger uses the most recent values for actor timestamps and sums counts.
+ */
+export function mergeSuppresssionLedgers(
+  primary: NpcSuppressionLedger,
+  secondary: NpcSuppressionLedger,
+): NpcSuppressionLedger {
+  const lastAllowedAtByActor: Record<string, number> = { ...secondary.lastAllowedAtByActor };
+  for (const [key, val] of Object.entries(primary.lastAllowedAtByActor)) {
+    lastAllowedAtByActor[key] = Math.max(lastAllowedAtByActor[key] ?? 0, val);
+  }
+
+  const lastSuppressedAtByActor: Record<string, number> = { ...secondary.lastSuppressedAtByActor };
+  for (const [key, val] of Object.entries(primary.lastSuppressedAtByActor)) {
+    lastSuppressedAtByActor[key] = Math.max(lastSuppressedAtByActor[key] ?? 0, val);
+  }
+
+  const suppressionCountsByActor: Record<string, number> = { ...secondary.suppressionCountsByActor };
+  for (const [key, val] of Object.entries(primary.suppressionCountsByActor)) {
+    suppressionCountsByActor[key] = (suppressionCountsByActor[key] ?? 0) + val;
+  }
+
+  const suppressionCountsByReason: Record<string, number> = {
+    ...(secondary.suppressionCountsByReason as Record<string, number>),
+  };
+  for (const [key, val] of Object.entries(primary.suppressionCountsByReason as Record<string, number>)) {
+    suppressionCountsByReason[key] = (suppressionCountsByReason[key] ?? 0) + val;
+  }
+
+  const combined = [
+    ...secondary.recentHistory,
+    ...primary.recentHistory,
+  ].sort((a, b) => a.createdAtMs - b.createdAtMs);
+
+  const lastWitnessAtByChannel: Record<string, number> = { ...secondary.lastWitnessAtByChannel };
+  for (const [key, val] of Object.entries(primary.lastWitnessAtByChannel)) {
+    lastWitnessAtByChannel[key] = Math.max(lastWitnessAtByChannel[key] ?? 0, val ?? 0);
+  }
+
+  const lastHelperAxisAtByChannel: Record<string, number> = { ...secondary.lastHelperAxisAtByChannel };
+  for (const [key, val] of Object.entries(primary.lastHelperAxisAtByChannel)) {
+    lastHelperAxisAtByChannel[key] = Math.max(lastHelperAxisAtByChannel[key] ?? 0, val);
+  }
+
+  return Object.freeze({
+    lastAllowedAtByActor: Object.freeze(lastAllowedAtByActor),
+    lastSuppressedAtByActor: Object.freeze(lastSuppressedAtByActor),
+    suppressionCountsByActor: Object.freeze(suppressionCountsByActor),
+    suppressionCountsByReason: Object.freeze(suppressionCountsByReason as Record<NpcSuppressionReason, number>),
+    recentHistory: Object.freeze(combined),
+    lastWitnessAtByChannel: Object.freeze(lastWitnessAtByChannel as Partial<Record<CadenceChannel, number>>),
+    lastHelperAxisAtByChannel: Object.freeze(lastHelperAxisAtByChannel),
+  });
+}
+
+/**
+ * Serialize a suppression ledger as a compact audit-friendly object.
+ */
+export function serializeSuppressionLedgerCompact(
+  ledger: NpcSuppressionLedger,
+): Readonly<Record<string, unknown>> {
+  const topReasons = Object.entries(ledger.suppressionCountsByReason as Record<string, number>)
+    .sort(([, a], [, b]) => b - a)
+    .slice(0, 5)
+    .map(([reason, count]) => `${reason}:${count}`)
+    .join(', ');
+
+  return Object.freeze({
+    trackedActors: Object.keys(ledger.lastAllowedAtByActor).length,
+    suppressedActors: Object.keys(ledger.suppressionCountsByActor).length,
+    recentHistoryCount: ledger.recentHistory.length,
+    totalSuppressionsRecorded: Object.values(ledger.suppressionCountsByActor as Record<string, number>)
+      .reduce((sum, v) => sum + v, 0),
+    topReasons,
+    lastGlobalWitness: ledger.lastWitnessAtByChannel.GLOBAL ?? 0,
+    lastSyndicateWitness: ledger.lastWitnessAtByChannel.SYNDICATE ?? 0,
+    helperAxisesTracked: Object.keys(ledger.lastHelperAxisAtByChannel).length,
+  });
+}
+
+/**
+ * Count the number of NPC emissions in the last N ms from the suppression history.
+ */
+export function countAllowedEmissionsInWindow(
+  ledger: NpcSuppressionLedger,
+  nowMs: number,
+  windowMs = 60_000,
+): number {
+  let count = 0;
+  for (const record of ledger.recentHistory) {
+    if (nowMs - record.createdAtMs > windowMs) continue;
+    if (record.reason === 'NONE') count += 1;
+  }
+  return count;
+}
+
+/**
+ * Count the number of dropped decisions in the last N ms.
+ */
+export function countDroppedInWindow(
+  ledger: NpcSuppressionLedger,
+  nowMs: number,
+  windowMs = 60_000,
+): number {
+  let count = 0;
+  for (const record of ledger.recentHistory) {
+    if (nowMs - record.createdAtMs > windowMs) continue;
+    if (record.visibility === 'dropped') count += 1;
+  }
+  return count;
+}
+
+/**
+ * Infer the overall emission quality for a room from recent suppression history.
+ * Returns a 0-1 score where 1 = no suppressions, 0 = entirely suppressed.
+ */
+export function inferEmissionQualityScore(
+  ledger: NpcSuppressionLedger,
+  nowMs: number,
+  windowMs = 60_000,
+): number {
+  const history = ledger.recentHistory.filter((r) => nowMs - r.createdAtMs <= windowMs);
+  if (history.length === 0) return 1;
+  const allowed = history.filter((r) => r.reason === 'NONE').length;
+  return Number((allowed / history.length).toFixed(4));
+}
+
+// ─── NAMESPACE export ──────────────────────────────────────────────────────────
+
+export const NpcSuppressionPolicyNS = Object.freeze({
+  // Internal helpers exposed for cross-module utility and testing
+  clamp01,
+  clampNonNegative,
+  stableHash,
+  inferSceneState,
+  actorKeyOf,
+  determineModeProfile,
+  freezeRecord,
+
+  // Standalone utilities
+  describeSuppressionDecisionReason,
+  describeNpcSuppressionDecision,
+  classifySuppressionHeatLevel,
+  buildSuppressionStateReport,
+  buildSuppressionAuditSummary,
+  buildActorSuppressionStatus,
+  isActorOverheated,
+  listRecentlySuppressedActors,
+  listRecentlyAllowedActors,
+  wasWitnessRecentlyEmitted,
+  timeSinceLastWitness,
+  wasHelperAxisRecentlyEmitted,
+  createEmptySuppressionLedger,
+  mergeSuppresssionLedgers,
+  serializeSuppressionLedgerCompact,
+  countAllowedEmissionsInWindow,
+  countDroppedInWindow,
+  inferEmissionQualityScore,
+
+  // Class and singleton
+  NpcSuppressionPolicy,
+  npcSuppressionPolicy,
+  createNpcSuppressionPolicy,
+});

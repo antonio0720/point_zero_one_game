@@ -1563,3 +1563,614 @@ export class NpcCadencePolicy {
 
 export const createNpcCadencePolicy = (): NpcCadencePolicy => new NpcCadencePolicy();
 export const npcCadencePolicy = new NpcCadencePolicy();
+
+// ─── Extended types ────────────────────────────────────────────────────────────
+
+/** Full budget snapshot across all channels for a room at a point in time. */
+export interface CadenceBudgetSnapshot {
+  readonly roomId: string;
+  readonly modeId: string;
+  readonly nowMs: number;
+  readonly budgetByChannel: Readonly<Record<CadenceChannel, number>>;
+  readonly ambientGapByChannel: Readonly<Record<CadenceChannel, number>>;
+  readonly helperOpportunity: number;
+  readonly haterOpportunity: number;
+  readonly totalRecentEmissions: number;
+  readonly invasionActive: boolean;
+  readonly silenceDebtLevel: CadenceSilenceDebtLevel;
+}
+
+/** Opportunity matrix for all actor kinds across all channels. */
+export interface CadenceKindOpportunityMatrix {
+  readonly computedAtMs: number;
+  readonly modeId: string;
+  readonly ambient: Readonly<Record<CadenceChannel, number>>;
+  readonly helper: Readonly<Record<CadenceChannel, number>>;
+  readonly hater: Readonly<Record<CadenceChannel, number>>;
+  readonly invasion: Readonly<Record<CadenceChannel, number>>;
+}
+
+/** Readiness report for a specific request in the current room state. */
+export interface CadenceReadinessReport {
+  readonly requestId: string;
+  readonly actorKey: string;
+  readonly actorKind: NpcActorKind;
+  readonly channel: CadenceChannel;
+  readonly context: CadenceContext;
+  readonly sceneState: CadenceSceneState;
+  readonly ready: boolean;
+  readonly shadowRecommended: boolean;
+  readonly cooldownRemainingMs: number;
+  readonly priorityScore: number;
+  readonly budgetCost: number;
+  readonly witnessRequired: boolean;
+  readonly identityScore: number;
+  readonly suppressionReasonIfBlocked?: CadenceSuppressionReason;
+  readonly notes: readonly string[];
+}
+
+/** Qualitative silence debt level. */
+export type CadenceSilenceDebtLevel = 'NONE' | 'LOW' | 'MODERATE' | 'HIGH' | 'CRITICAL';
+
+/** Ranked channel recommendation for a given actor kind in a room. */
+export interface CadenceChannelRecommendation {
+  readonly actorKind: NpcActorKind;
+  readonly channel: CadenceChannel;
+  readonly score: number;
+  readonly reason: string;
+}
+
+/** Per-channel suppression reasons and counts for a room snapshot. */
+export interface CadenceChannelPressureMap {
+  readonly modeId: string;
+  readonly computedAtMs: number;
+  readonly byChannel: Readonly<Record<CadenceChannel, {
+    readonly identityBias: number;
+    readonly minGapMs: number;
+    readonly burstCapPerMinute: number;
+    readonly prefersSilence: boolean;
+    readonly ambientScale: number;
+    readonly helperScale: number;
+    readonly haterScale: number;
+    readonly recentEmissions: number;
+    readonly remainingBudget: number;
+  }>>;
+}
+
+/** Summary sentence for a room's cadence state. */
+export interface RoomCadenceSummary {
+  readonly roomId: string;
+  readonly modeId: string;
+  readonly sceneState: CadenceSceneState;
+  readonly silenceDebtLevel: CadenceSilenceDebtLevel;
+  readonly helperOpportunity: number;
+  readonly haterOpportunity: number;
+  readonly invasionActive: boolean;
+  readonly helperLock: boolean;
+  readonly postRun: boolean;
+  readonly totalBudgetConsumedLastMinute: number;
+  readonly headline: string;
+  readonly notes: readonly string[];
+}
+
+// ─── Standalone cadence utilities ─────────────────────────────────────────────
+
+/** Convert a raw silenceDebt score to a qualitative label. */
+export function classifySilenceDebtLevel(silenceDebt: number): CadenceSilenceDebtLevel {
+  if (silenceDebt >= 0.80) return 'CRITICAL';
+  if (silenceDebt >= 0.58) return 'HIGH';
+  if (silenceDebt >= 0.36) return 'MODERATE';
+  if (silenceDebt >= 0.14) return 'LOW';
+  return 'NONE';
+}
+
+/** Describe a CadenceSuppressionReason in human-readable form. */
+export function describeSuppressionReason(reason: CadenceSuppressionReason): string {
+  const MAP: Readonly<Record<CadenceSuppressionReason, string>> = Object.freeze({
+    UNKNOWN_ACTOR: 'Actor is not registered in any canonical NPC registry.',
+    UNKNOWN_CHANNEL: 'Channel is not recognized by the cadence policy profile table.',
+    CHANNEL_DISABLED: 'Channel has been disabled by runtime policy.',
+    CHANNEL_IDENTITY_MISMATCH: 'Actor does not meet the channel identity threshold.',
+    ACTOR_COOLDOWN: 'Actor-specific cooldown has not elapsed.',
+    CHANNEL_COOLDOWN: 'Channel-level cooldown has not elapsed.',
+    KIND_COOLDOWN: 'Actor kind cooldown has not elapsed.',
+    BURST_LIMIT: 'Channel or kind burst cap reached for this 60-second window.',
+    ROOM_TOO_EMPTY: 'Room occupancy is too low to justify NPC emission.',
+    ROOM_TOO_HOT_FOR_AMBIENT: 'Room heat is too high for ambient lines to land correctly.',
+    SILENCE_PREFERRED: 'Room silence preference exceeds emission threshold.',
+    HELPER_WINDOW_RESERVED: 'Helper window is reserved; other kinds are held back.',
+    HATER_WINDOW_RESERVED: 'Hater window is reserved; other kinds are held back.',
+    INCOMPATIBLE_SCENE: 'Context profile excludes this actor kind from the current scene.',
+    INCOMPATIBLE_MODE: 'Room mode excludes this actor kind by mode modifier rule.',
+    INVASION_LOCK: 'Invasion is active; only invasion-tier actors may proceed.',
+    DEAL_ROOM_RESTRAINT: 'Deal room restraint policy limits emission volume.',
+    SYNDICATE_RESTRAINT: 'Syndicate restraint policy limits emission volume.',
+    LOBBY_RESTRAINT: 'Lobby restraint policy limits NPC volume.',
+    AMBIENT_RESTRAINT: 'Ambient restraint policy is in effect.',
+    SHADOW_ONLY: 'Emission is permitted in shadow lane only; not public.',
+    SUPPRESSED_BY_PRIORITY: 'A higher-priority actor claimed the emission window.',
+    SUPPRESSED_BY_WITNESS_RULE: 'Witness rule requires a specific actor kind; this one is excluded.',
+    FORCED_DISABLED: 'Cadence was force-disabled for this actor by system override.',
+  });
+  return MAP[reason] ?? `Unknown suppression reason: ${reason}`;
+}
+
+/** Describe a NpcCadenceDecision in one sentence. */
+export function describeCadenceDecision(decision: NpcCadenceDecision): string {
+  if (decision.allow) {
+    const shadow = decision.shadowOnly ? ' (shadow)' : '';
+    const witness = decision.witnessRequired ? ' [witness required]' : '';
+    return (
+      `${decision.actorKind}:${decision.actorKey} allowed${shadow} in ${decision.channel}` +
+      ` scene=${decision.sceneState} priority=${decision.priorityScore.toFixed(3)}${witness}`
+    );
+  }
+  const reason = decision.suppressionReason ?? 'UNKNOWN';
+  return (
+    `${decision.actorKind}:${decision.actorKey} suppressed by ${reason}` +
+    ` in ${decision.channel} (next allowed at ${decision.nextAllowedAtMs})`
+  );
+}
+
+/** Describe a scene state in human-readable form. */
+export function describeSceneState(sceneState: CadenceSceneState): string {
+  const MAP: Readonly<Record<CadenceSceneState, string>> = Object.freeze({
+    OPENING: 'Session is opening — first impressions matter, NPC density should be low',
+    QUEUE: 'Player is in queue — lobby ambient is appropriate, signal NPCs are paused',
+    NEGOTIATION: 'Negotiation is active — deal room lane is live, helper/hater are restrained',
+    MIDRUN: 'Mid-run — full NPC matrix is eligible, standard cooldowns apply',
+    PRESSURE: 'High-pressure moment — hater and helper opportunity is elevated',
+    BREACH: 'Shield or commitment breach — witness NPCs should fire immediately',
+    RECOVERY: 'Recovery moment — helpers are prioritized, haters are restrained',
+    ENDGAME: 'Sovereignty is near — all cadence prioritizes witness and ceremony',
+    POSTRUN: 'Post-run — helpers lead debrief; haters are suppressed',
+    INVASION: 'Invasion active — only invasion-tier actors and their support may proceed',
+  });
+  return MAP[sceneState] ?? `Unknown scene state: ${sceneState}`;
+}
+
+/** Describe a context profile's cadence personality. */
+export function describeContextCadence(context: CadenceContext): string {
+  const profile = CONTEXT_PROFILES[context];
+  if (!profile) return `Context '${context}' has no registered profile — fallback MIDRUN behavior applies.`;
+  const sceneLabel = describeSceneState(profile.sceneState);
+  const friendlyKinds = [
+    profile.ambientFriendly ? 'AMBIENT' : null,
+    profile.helperFriendly ? 'HELPER' : null,
+    profile.haterFriendly ? 'HATER' : null,
+  ].filter(Boolean).join(', ');
+  return (
+    `Context '${context}': scene=${profile.sceneState}, cooldownFactor=${profile.cooldownFactor}, ` +
+    `priority=${profile.priorityBias.toFixed(2)}, witness=${profile.witnessRequired}, ` +
+    `friendlyKinds=[${friendlyKinds}] — ${sceneLabel}`
+  );
+}
+
+/**
+ * Build a full budget snapshot for a room, showing remaining capacity per channel
+ * and opportunity scores for all NPC kinds.
+ */
+export function buildCadenceBudgetSnapshot(
+  room: RoomCadenceSnapshot,
+  ledger: CadenceLedger,
+  nowMs: number,
+): CadenceBudgetSnapshot {
+  const policy = npcCadencePolicy;
+  const budgetByChannel = Object.freeze({
+    GLOBAL: policy.computeChannelBudget(room, ledger, nowMs, 'GLOBAL'),
+    SYNDICATE: policy.computeChannelBudget(room, ledger, nowMs, 'SYNDICATE'),
+    DEAL_ROOM: policy.computeChannelBudget(room, ledger, nowMs, 'DEAL_ROOM'),
+    LOBBY: policy.computeChannelBudget(room, ledger, nowMs, 'LOBBY'),
+    SYSTEM_SHADOW: policy.computeChannelBudget(room, ledger, nowMs, 'SYSTEM_SHADOW'),
+    NPC_SHADOW: policy.computeChannelBudget(room, ledger, nowMs, 'NPC_SHADOW'),
+  } as const);
+
+  const ambientGapByChannel = Object.freeze({
+    GLOBAL: policy.computeAmbientGap(room, ledger, nowMs, 'GLOBAL'),
+    SYNDICATE: policy.computeAmbientGap(room, ledger, nowMs, 'SYNDICATE'),
+    DEAL_ROOM: policy.computeAmbientGap(room, ledger, nowMs, 'DEAL_ROOM'),
+    LOBBY: policy.computeAmbientGap(room, ledger, nowMs, 'LOBBY'),
+    SYSTEM_SHADOW: policy.computeAmbientGap(room, ledger, nowMs, 'SYSTEM_SHADOW'),
+    NPC_SHADOW: policy.computeAmbientGap(room, ledger, nowMs, 'NPC_SHADOW'),
+  } as const);
+
+  return Object.freeze({
+    roomId: room.roomId,
+    modeId: room.modeId,
+    nowMs,
+    budgetByChannel,
+    ambientGapByChannel,
+    helperOpportunity: policy.computeHelperOpportunity(room, ledger, nowMs),
+    haterOpportunity: policy.computeHaterOpportunity(room, ledger, nowMs),
+    totalRecentEmissions: ledger.recentEmissionLog.length,
+    invasionActive: room.invasionActive,
+    silenceDebtLevel: classifySilenceDebtLevel(room.silenceDebt),
+  });
+}
+
+/**
+ * Build a pressure map showing per-channel cadence constraints.
+ */
+export function buildCadenceChannelPressureMap(
+  room: RoomCadenceSnapshot,
+  ledger: CadenceLedger,
+  nowMs: number,
+): CadenceChannelPressureMap {
+  const channels: readonly CadenceChannel[] = ['GLOBAL', 'SYNDICATE', 'DEAL_ROOM', 'LOBBY', 'SYSTEM_SHADOW', 'NPC_SHADOW'];
+  const byChannel: Record<string, {
+    identityBias: number;
+    minGapMs: number;
+    burstCapPerMinute: number;
+    prefersSilence: boolean;
+    ambientScale: number;
+    helperScale: number;
+    haterScale: number;
+    recentEmissions: number;
+    remainingBudget: number;
+  }> = {};
+
+  for (const channel of channels) {
+    const profile = CHANNEL_PROFILES[channel];
+    const recentEmissions = ledger.recentEmissionLog.filter(
+      (r) => r.channel === channel && nowMs - r.emittedAtMs <= 60_000,
+    ).length;
+    byChannel[channel] = {
+      identityBias: profile.identityBias,
+      minGapMs: profile.minGapMs,
+      burstCapPerMinute: profile.hardBurstCapPerMinute,
+      prefersSilence: profile.prefersSilence,
+      ambientScale: profile.ambientScale,
+      helperScale: profile.helperScale,
+      haterScale: profile.haterScale,
+      recentEmissions,
+      remainingBudget: Math.max(0, profile.hardBurstCapPerMinute - recentEmissions),
+    };
+  }
+
+  return Object.freeze({
+    modeId: room.modeId,
+    computedAtMs: nowMs,
+    byChannel: Object.freeze(byChannel as CadenceChannelPressureMap['byChannel']),
+  });
+}
+
+/**
+ * Build an opportunity matrix showing raw opportunity scores for each NPC kind
+ * across all channels. Values are not clamped; they are raw opportunity scores
+ * that planners may normalize.
+ */
+export function buildCadenceKindOpportunityMatrix(
+  room: RoomCadenceSnapshot,
+  ledger: CadenceLedger,
+  nowMs: number,
+): CadenceKindOpportunityMatrix {
+  const channels: readonly CadenceChannel[] = ['GLOBAL', 'SYNDICATE', 'DEAL_ROOM', 'LOBBY', 'SYSTEM_SHADOW', 'NPC_SHADOW'];
+  const helperOpp = npcCadencePolicy.computeHelperOpportunity(room, ledger, nowMs);
+  const haterOpp = npcCadencePolicy.computeHaterOpportunity(room, ledger, nowMs);
+
+  const ambient: Record<string, number> = {};
+  const helper: Record<string, number> = {};
+  const hater: Record<string, number> = {};
+  const invasion: Record<string, number> = {};
+
+  for (const channel of channels) {
+    const channelProfile = CHANNEL_PROFILES[channel];
+    const budget = npcCadencePolicy.computeChannelBudget(room, ledger, nowMs, channel);
+    const budgetFactor = Math.min(1, budget / Math.max(1, channelProfile.hardBurstCapPerMinute));
+
+    const gapMs = npcCadencePolicy.computeAmbientGap(room, ledger, nowMs, channel);
+    ambient[channel] = Number(
+      (channelProfile.ambientScale * budgetFactor * (gapMs / Math.max(1, CHANNEL_PROFILES[channel].minGapMs))).toFixed(4)
+    );
+    helper[channel] = Number((channelProfile.helperScale * helperOpp * budgetFactor).toFixed(4));
+    hater[channel] = Number((channelProfile.haterScale * haterOpp * budgetFactor).toFixed(4));
+    invasion[channel] = room.invasionActive ? Number((budgetFactor * 2.0).toFixed(4)) : 0;
+  }
+
+  return Object.freeze({
+    computedAtMs: nowMs,
+    modeId: room.modeId,
+    ambient: Object.freeze(ambient as Record<CadenceChannel, number>),
+    helper: Object.freeze(helper as Record<CadenceChannel, number>),
+    hater: Object.freeze(hater as Record<CadenceChannel, number>),
+    invasion: Object.freeze(invasion as Record<CadenceChannel, number>),
+  });
+}
+
+/**
+ * Recommend the best channel for an NPC kind given the current room state.
+ * Returns a ranked list from most to least appropriate.
+ */
+export function rankChannelsForKind(
+  kind: NpcActorKind,
+  room: RoomCadenceSnapshot,
+  ledger: CadenceLedger,
+  nowMs: number,
+): readonly CadenceChannelRecommendation[] {
+  const matrix = buildCadenceKindOpportunityMatrix(room, ledger, nowMs);
+  const scores = matrix[kind === 'AMBIENT' ? 'ambient' : kind === 'HELPER' ? 'helper' : kind === 'HATER' ? 'hater' : 'invasion'];
+  const ranked: CadenceChannelRecommendation[] = [];
+
+  for (const [channel, score] of Object.entries(scores)) {
+    const ch = channel as CadenceChannel;
+    const profile = CHANNEL_PROFILES[ch];
+    let reason: string;
+    if (!profile.enabled) {
+      reason = 'Channel disabled';
+    } else if (profile.prefersSilence && kind === 'AMBIENT') {
+      reason = 'Channel prefers silence — ambient should be shadow-only here';
+    } else if (score >= 1.2) {
+      reason = 'Excellent fit — high budget and channel scale';
+    } else if (score >= 0.7) {
+      reason = 'Good fit — within normal operating range';
+    } else if (score >= 0.3) {
+      reason = 'Marginal fit — consider shadow-only emission';
+    } else {
+      reason = 'Poor fit — low budget or channel restraint active';
+    }
+    ranked.push(Object.freeze({ actorKind: kind, channel: ch, score: Number(score), reason }));
+  }
+
+  ranked.sort((a, b) => b.score - a.score);
+  return Object.freeze(ranked);
+}
+
+/**
+ * Build a human-readable room cadence summary.
+ */
+export function buildRoomCadenceSummary(
+  room: RoomCadenceSnapshot,
+  ledger: CadenceLedger,
+  nowMs: number,
+): RoomCadenceSummary {
+  const silenceDebtLevel = classifySilenceDebtLevel(room.silenceDebt);
+  const helperOpportunity = npcCadencePolicy.computeHelperOpportunity(room, ledger, nowMs);
+  const haterOpportunity = npcCadencePolicy.computeHaterOpportunity(room, ledger, nowMs);
+  const totalBudgetConsumedLastMinute = ledger.recentEmissionLog.filter(
+    (r) => nowMs - r.emittedAtMs <= 60_000,
+  ).length;
+
+  const notes: string[] = [];
+  if (room.invasionActive) notes.push('Invasion active — NPC matrix narrowed to invasion-tier.');
+  if (room.helperLock) notes.push('Helper lock active — helper emissions suppressed.');
+  if (room.postRun) notes.push('Post-run state — haters suppressed, helpers prioritized.');
+  if (room.nearSovereignty) notes.push('Near sovereignty — witness pressure is maximum.');
+  if (room.shieldBreached) notes.push('Shield breached — collapse witness lane is open.');
+  if (room.playerNearBankruptcy) notes.push('Near bankruptcy — helper rescue window is critical.');
+  if (silenceDebtLevel === 'CRITICAL') notes.push('Silence debt is critical — NPC emission is urgently needed.');
+  if (silenceDebtLevel === 'HIGH') notes.push('Silence debt is high — emission cadence should accelerate.');
+
+  let sceneState: CadenceSceneState = 'MIDRUN';
+  if (room.invasionActive) sceneState = 'INVASION';
+  else if (room.postRun) sceneState = 'POSTRUN';
+  else if (room.nearSovereignty) sceneState = 'ENDGAME';
+  else if (room.shieldBreached) sceneState = 'BREACH';
+  else if (room.pressure >= 0.72) sceneState = 'PRESSURE';
+  else if (room.frustration >= 0.55) sceneState = 'RECOVERY';
+  else if (room.runTick <= 50) sceneState = 'OPENING';
+
+  const headline = [
+    `Room ${room.roomId} (mode=${room.modeId})`,
+    `scene=${sceneState}`,
+    `silence=${silenceDebtLevel}`,
+    `helperOpp=${helperOpportunity.toFixed(2)}`,
+    `haterOpp=${haterOpportunity.toFixed(2)}`,
+    `emissions=${totalBudgetConsumedLastMinute}/min`,
+  ].join(' | ');
+
+  return Object.freeze({
+    roomId: room.roomId,
+    modeId: room.modeId,
+    sceneState,
+    silenceDebtLevel,
+    helperOpportunity: Number(helperOpportunity.toFixed(6)),
+    haterOpportunity: Number(haterOpportunity.toFixed(6)),
+    invasionActive: room.invasionActive,
+    helperLock: room.helperLock,
+    postRun: room.postRun,
+    totalBudgetConsumedLastMinute,
+    headline,
+    notes: Object.freeze(notes),
+  });
+}
+
+/**
+ * Determine whether a room's current state strongly recommends silence over emission.
+ * Returns true if silence is the dominant editorial signal right now.
+ */
+export function isRoomSilencePreferred(room: RoomCadenceSnapshot, nowMs: number): boolean {
+  const silenceDebt = room.silenceDebt;
+  const timeSincePlayer = nowMs - (room.lastPlayerMessageAtMs ?? nowMs - 60_000);
+  const veryRecentPlayer = timeSincePlayer <= 2_000;
+  const dealRoomActive = room.modeId.toLowerCase().includes('deal');
+  const syndicateActive = room.modeId.toLowerCase().includes('syndicate');
+
+  if (room.invasionActive) return false; // invasions are never silent
+  if (room.shieldBreached) return false; // breach demands witness
+  if (room.nearSovereignty) return false; // sovereignty demands witness
+
+  if (dealRoomActive && silenceDebt < 0.30) return true;
+  if (syndicateActive && silenceDebt < 0.20) return true;
+  if (veryRecentPlayer && !room.helperLock && silenceDebt < 0.50) return true;
+  if (room.pressure < 0.25 && room.heat < 0.25 && silenceDebt < 0.15) return true;
+
+  return false;
+}
+
+/**
+ * Check whether a cooldown has elapsed for a given actor in the ledger.
+ */
+export function hasCooldownElapsed(
+  actorKey: string,
+  cooldownMs: number,
+  ledger: CadenceLedger,
+  nowMs: number,
+): boolean {
+  const lastAt = ledger.lastEmissionAtByActor[actorKey] ?? 0;
+  return nowMs - lastAt >= cooldownMs;
+}
+
+/**
+ * Compute the remaining cooldown in ms for an actor. Returns 0 if elapsed.
+ */
+export function remainingCooldownMs(
+  actorKey: string,
+  cooldownMs: number,
+  ledger: CadenceLedger,
+  nowMs: number,
+): number {
+  const lastAt = ledger.lastEmissionAtByActor[actorKey] ?? 0;
+  return Math.max(0, cooldownMs - (nowMs - lastAt));
+}
+
+/**
+ * Count how many emissions a specific actor key has made in the last N milliseconds.
+ */
+export function countRecentActorEmissions(
+  actorKey: string,
+  ledger: CadenceLedger,
+  nowMs: number,
+  windowMs = 60_000,
+): number {
+  let count = 0;
+  for (const record of ledger.recentEmissionLog) {
+    if (nowMs - record.emittedAtMs > windowMs) continue;
+    if (record.actorKey === actorKey) count += 1;
+  }
+  return count;
+}
+
+/**
+ * Count total emissions per kind in the last N milliseconds.
+ */
+export function emissionsPerKindInWindow(
+  ledger: CadenceLedger,
+  nowMs: number,
+  windowMs = 60_000,
+): Readonly<Record<NpcActorKind, number>> {
+  const counts: Record<NpcActorKind, number> = { AMBIENT: 0, HELPER: 0, HATER: 0, INVASION: 0 };
+  for (const record of ledger.recentEmissionLog) {
+    if (nowMs - record.emittedAtMs > windowMs) continue;
+    counts[record.actorKind] = (counts[record.actorKind] ?? 0) + 1;
+  }
+  return Object.freeze(counts);
+}
+
+/**
+ * Count total shadow-only emissions vs public emissions in the recent log.
+ */
+export function countShadowVsPublicEmissions(
+  ledger: CadenceLedger,
+  nowMs: number,
+  windowMs = 60_000,
+): { readonly shadow: number; readonly public: number } {
+  let shadow = 0;
+  let publicCount = 0;
+  for (const record of ledger.recentEmissionLog) {
+    if (nowMs - record.emittedAtMs > windowMs) continue;
+    if (record.shadowOnly) shadow += 1;
+    else publicCount += 1;
+  }
+  return Object.freeze({ shadow, public: publicCount });
+}
+
+/**
+ * Identify all actor keys that are currently on cooldown.
+ */
+export function listActorsOnCooldown(
+  ledger: CadenceLedger,
+  nowMs: number,
+  defaultCooldownMs = 8_500,
+): readonly string[] {
+  return Object.freeze(
+    Object.entries(ledger.lastEmissionAtByActor)
+      .filter(([_, lastAt]) => nowMs - lastAt < defaultCooldownMs)
+      .map(([key]) => key),
+  );
+}
+
+/**
+ * Compare two priority scores and return which actor should be preferred.
+ */
+export function compareByPriority(a: NpcCadenceDecision, b: NpcCadenceDecision): NpcCadenceDecision {
+  if (!a.allow) return b;
+  if (!b.allow) return a;
+  if (a.witnessRequired && !b.witnessRequired) return a;
+  if (!a.witnessRequired && b.witnessRequired) return b;
+  return a.priorityScore >= b.priorityScore ? a : b;
+}
+
+/**
+ * Format a cadence ledger as a compact JSON-safe diagnostic object.
+ */
+export function serializeLedgerCompact(ledger: CadenceLedger): Readonly<Record<string, unknown>> {
+  return Object.freeze({
+    actorCount: Object.keys(ledger.lastEmissionAtByActor).length,
+    recentEmissions: ledger.recentEmissionLog.length,
+    suppressionCount: Object.values(ledger.suppressionCountsByActor).reduce((s, v) => s + v, 0),
+    lastGlobal: ledger.lastEmissionAtByChannel.GLOBAL ?? 0,
+    lastSyndicate: ledger.lastEmissionAtByChannel.SYNDICATE ?? 0,
+    lastDealRoom: ledger.lastEmissionAtByChannel.DEAL_ROOM ?? 0,
+    lastLobby: ledger.lastEmissionAtByChannel.LOBBY ?? 0,
+    lastAmbient: ledger.lastEmissionAtByKind.AMBIENT ?? 0,
+    lastHelper: ledger.lastEmissionAtByKind.HELPER ?? 0,
+    lastHater: ledger.lastEmissionAtByKind.HATER ?? 0,
+    lastInvasion: ledger.lastEmissionAtByKind.INVASION ?? 0,
+  });
+}
+
+// ─── NAMESPACE export ──────────────────────────────────────────────────────────
+
+export const NpcCadencePolicyNS = Object.freeze({
+  // Constants
+  CHANNEL_PROFILES,
+  KIND_BASELINES,
+  CONTEXT_PROFILES,
+  MODE_MODIFIERS,
+  PRIORITY_CLASS,
+  CHANNELS,
+  KINDS,
+
+  // Private helpers exposed for testing and cross-module utility
+  clamp01,
+  coalesce,
+  actorKeyOf,
+  recordCountWithinWindow,
+  resolveModeModifier,
+  resolveContextProfile,
+  createEmptyLedger,
+  deriveSceneState,
+  resolveActorExists,
+  actorChannelIdentityScore,
+  derivePriorityClass,
+  isContextAllowedForKind,
+  computeSilencePreference,
+  computeEffectiveCooldownMs,
+  trimRecentLog,
+
+  // Standalone utilities
+  classifySilenceDebtLevel,
+  describeSuppressionReason,
+  describeCadenceDecision,
+  describeSceneState,
+  describeContextCadence,
+  buildCadenceBudgetSnapshot,
+  buildCadenceChannelPressureMap,
+  buildCadenceKindOpportunityMatrix,
+  rankChannelsForKind,
+  buildRoomCadenceSummary,
+  isRoomSilencePreferred,
+  hasCooldownElapsed,
+  remainingCooldownMs,
+  countRecentActorEmissions,
+  emissionsPerKindInWindow,
+  countShadowVsPublicEmissions,
+  listActorsOnCooldown,
+  compareByPriority,
+  serializeLedgerCompact,
+
+  // Class and singleton
+  NpcCadencePolicy,
+  npcCadencePolicy,
+  createNpcCadencePolicy,
+});
