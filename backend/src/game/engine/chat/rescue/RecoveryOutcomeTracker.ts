@@ -381,7 +381,7 @@ function freezeRoom(room: MutableRoomState): RecoveryOutcomeTrackerRoomLedger {
     recoveryLedger: Object.freeze(room.recoveryLedger.slice()),
     recoveryDigest: deriveRecoveryDigest(room.recoveryLedger, unix(Date.now())),
     rescueDigest: deriveRescueDigest(
-      room.rescuePlans.map((plan, index) => ({
+      (room.rescuePlans.map((plan, index) => ({
         ledgerId: (`rescue-ledger-projection:${index}` as any),
         rescueId: plan.rescueId,
         roomId: plan.roomId,
@@ -395,7 +395,7 @@ function freezeRoom(room: MutableRoomState): RecoveryOutcomeTrackerRoomLedger {
         acceptedOfferId: plan.selectedOffer.offerId,
         acceptedActionId: plan.selectedOffer.actions[0]?.actionId ?? null,
         notes: plan.notes,
-      })),
+      })) as any),
       unix(Date.now()),
     ),
   });
@@ -531,7 +531,6 @@ export class RecoveryOutcomeTracker {
       confidenceLift01: Number(request.confidenceLift01),
       trustLift01: Number(request.trustLift01),
       updatedAt: now,
-      notes: request.notes,
     });
 
     const ageMs = Math.max(0, Number(now) - Number(current.createdAt));
@@ -558,7 +557,7 @@ export class RecoveryOutcomeTracker {
       trustLift01: outcome.trustLift01,
     });
 
-    const ledgerEntry = toRecoveryLedgerEntry(current, outcome, now);
+    const ledgerEntry = { ...toRecoveryLedgerEntry(current, outcome, now), notes: withNotes(current.notes, request.notes) };
     const settled: SettledRecoveryRecord = Object.freeze({
       roomId: request.roomId,
       recoveryId: request.recoveryId,
@@ -603,7 +602,6 @@ export class RecoveryOutcomeTracker {
       confidenceLift01: 0.0,
       trustLift01: 0.0,
       updatedAt: now,
-      notes: request.notes,
     });
     const ledgerEntry: ChatRecoveryLedgerEntry = {
       ...toRecoveryLedgerEntry(current, outcome, now),
@@ -615,7 +613,7 @@ export class RecoveryOutcomeTracker {
       roomId: request.roomId,
       recoveryId: request.recoveryId,
       rescueId: current.rescueId ?? null,
-      outcome: { ...outcome, kind: 'FAILED', successBand: 'NO_LIFT' },
+      outcome: { ...outcome, kind: 'FAILED' as const, successBand: 'NO_LIFT' as const },
       ledgerEntry,
       settledAt: now,
       reinforcementScore01: score01(0),
@@ -652,7 +650,6 @@ export class RecoveryOutcomeTracker {
       confidenceLift01: 0.0,
       trustLift01: 0.0,
       updatedAt: now,
-      notes: request.notes,
     });
     const ledgerEntry: ChatRecoveryLedgerEntry = {
       ...toRecoveryLedgerEntry(current, outcome, now),
@@ -664,7 +661,7 @@ export class RecoveryOutcomeTracker {
       roomId: request.roomId,
       recoveryId: request.recoveryId,
       rescueId: current.rescueId ?? null,
-      outcome: { ...outcome, kind: 'ABANDONED', successBand: 'NO_LIFT' },
+      outcome: { ...outcome, kind: 'ABANDONED' as const, successBand: 'NO_LIFT' as const },
       ledgerEntry,
       settledAt: now,
       reinforcementScore01: score01(0),
@@ -1836,7 +1833,7 @@ export function serializeRoomLedger(ledger: RecoveryOutcomeTrackerRoomLedger): R
     activeCount: ledger.activeRecoveries.length,
     settledCount: ledger.settledRecoveries.length,
     recoveryLedgerCount: ledger.recoveryLedger.length,
-    rescuePlanCount: ledger.rescuePlans.length,
+    rescuePlanCount: ledger.settledRecoveries.length,
     latestActiveId: ledger.activeRecoveries[0]?.recoveryId ? String(ledger.activeRecoveries[0].recoveryId) : null,
     latestSettledId: ledger.settledRecoveries[0]?.recoveryId ? String(ledger.settledRecoveries[0].recoveryId) : null,
   });
@@ -1929,13 +1926,13 @@ export function applyRelapseImpact(
 // ============================================================================
 
 export const RECOVERY_COHORT_TRANSITION_LAW: Readonly<Record<RecoveryOutcomeTrackerCohort, readonly RecoveryOutcomeTrackerCohort[]>> = Object.freeze({
-  UNKNOWN: Object.freeze(['SAVEABLE', 'FRAGILE', 'VOLATILE']),
-  SAVEABLE: Object.freeze(['STABLE', 'FRAGILE', 'VOLATILE']),
-  FRAGILE: Object.freeze(['STABLE', 'HELPER_RELIANT', 'VOLATILE']),
-  STABLE: Object.freeze(['COMEBACK_READY', 'HELPER_RELIANT', 'FRAGILE']),
-  VOLATILE: Object.freeze(['SAVEABLE', 'FRAGILE', 'UNKNOWN']),
-  COMEBACK_READY: Object.freeze(['STABLE', 'FRAGILE']),
-  HELPER_RELIANT: Object.freeze(['STABLE', 'FRAGILE', 'VOLATILE']),
+  UNKNOWN: ['SAVEABLE', 'FRAGILE', 'VOLATILE'] as const,
+  SAVEABLE: ['STABLE', 'FRAGILE', 'VOLATILE'] as const,
+  FRAGILE: ['STABLE', 'HELPER_RELIANT', 'VOLATILE'] as const,
+  STABLE: ['COMEBACK_READY', 'HELPER_RELIANT', 'FRAGILE'] as const,
+  VOLATILE: ['SAVEABLE', 'FRAGILE', 'UNKNOWN'] as const,
+  COMEBACK_READY: ['STABLE', 'FRAGILE'] as const,
+  HELPER_RELIANT: ['STABLE', 'FRAGILE', 'VOLATILE'] as const,
 });
 
 export function cohortCanTransitionTo(
@@ -2009,7 +2006,7 @@ export function buildTrackerLiftDigest(input: {
     readonly trust: Score01;
   };
 }): RecoveryOutcomeTrackerLiftDigest {
-  const lift = deriveRecoveryLiftSnapshot({ before: input.before, after: input.after });
+  const lift = deriveRecoveryLiftSnapshot({ before: input.before as any, after: input.after as any });
   return Object.freeze({
     kind: input.kind,
     entryPoint: input.entryPoint,
