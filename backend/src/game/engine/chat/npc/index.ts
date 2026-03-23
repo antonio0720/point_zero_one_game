@@ -44,17 +44,17 @@ export type ChatPersonaStageId =
   | 'SOVEREIGN'
   | (string & {});
 
-export interface ChatPersonaEvolutionEvent extends RawChatPersonaEvolutionEvent {
+export interface ChatPersonaEvolutionEvent extends Omit<RawChatPersonaEvolutionEvent, 'eventType'> {
   readonly eventType?: string;
   readonly kind?: string;
   readonly type?: string;
   readonly channelId?: string | null;
   readonly mode?: string;
   readonly intensity01?: number;
-  readonly pressureBand?: string;
+  readonly pressureBand?: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
 }
 
-export interface ChatPersonaEvolutionSignal extends RawChatPersonaEvolutionSignal {
+export interface ChatPersonaEvolutionSignal extends Omit<RawChatPersonaEvolutionSignal, 'stage' | 'temperament' | 'transformBiases'> {
   readonly stage: ChatPersonaStageId;
   readonly temperament: string;
   readonly callbackAggression01: number;
@@ -601,9 +601,9 @@ function describeSignal(
   tags: readonly string[],
 ): PersonaEvolutionSignalDescriptor {
   const record = asRecord(signal);
-  const botId = readString((request as Record<string, unknown>).botId);
-  const playerId = readOptionalString((request as Record<string, unknown>).playerId ?? null);
-  const channelId = readOptionalString((request as Record<string, unknown>).channelId ?? null);
+  const botId = readString((request as unknown as Record<string, unknown>).botId);
+  const playerId = readOptionalString((request as unknown as Record<string, unknown>).playerId ?? null);
+  const channelId = readOptionalString((request as unknown as Record<string, unknown>).channelId ?? null);
   return {
     botId,
     playerId,
@@ -708,9 +708,9 @@ function makeCounterEntry(id: string, label: string, count: number, lastSeenAt: 
 function readMetricFromDescriptor(descriptor: PersonaEvolutionSignalDescriptor, metric: string): number {
   switch (metric) {
     case 'aggression':
-      return clamp01(descriptor.raw && typeof descriptor.raw === 'object' ? readNumber((descriptor.raw as Record<string, unknown>)['aggression'], descriptor.volatility) : descriptor.volatility);
+      return clamp01(descriptor.raw && typeof descriptor.raw === 'object' ? readNumber((descriptor.raw as unknown as Record<string, unknown>)['aggression'], descriptor.volatility) : descriptor.volatility);
     case 'respect':
-      return clamp01(descriptor.raw && typeof descriptor.raw === 'object' ? readNumber((descriptor.raw as Record<string, unknown>)['respect'], descriptor.volatility) : descriptor.volatility);
+      return clamp01(descriptor.raw && typeof descriptor.raw === 'object' ? readNumber((descriptor.raw as unknown as Record<string, unknown>)['respect'], descriptor.volatility) : descriptor.volatility);
     case 'callbackAppetite':
       return descriptor.callbackAppetite;
     case 'publicPressure':
@@ -720,53 +720,53 @@ function readMetricFromDescriptor(descriptor: PersonaEvolutionSignalDescriptor, 
     case 'myth':
       return descriptor.mythBias;
     case 'instability':
-      return clamp01(descriptor.raw && typeof descriptor.raw === 'object' ? readNumber((descriptor.raw as Record<string, unknown>)['instability'], descriptor.volatility) : descriptor.volatility);
+      return clamp01(descriptor.raw && typeof descriptor.raw === 'object' ? readNumber((descriptor.raw as unknown as Record<string, unknown>)['instability'], descriptor.volatility) : descriptor.volatility);
     case 'adaptation':
-      return clamp01(descriptor.raw && typeof descriptor.raw === 'object' ? readNumber((descriptor.raw as Record<string, unknown>)['adaptation'], descriptor.volatility) : descriptor.volatility);
+      return clamp01(descriptor.raw && typeof descriptor.raw === 'object' ? readNumber((descriptor.raw as unknown as Record<string, unknown>)['adaptation'], descriptor.volatility) : descriptor.volatility);
     case 'novelty':
-      return clamp01(descriptor.raw && typeof descriptor.raw === 'object' ? readNumber((descriptor.raw as Record<string, unknown>)['novelty'], descriptor.volatility) : descriptor.volatility);
+      return clamp01(descriptor.raw && typeof descriptor.raw === 'object' ? readNumber((descriptor.raw as unknown as Record<string, unknown>)['novelty'], descriptor.volatility) : descriptor.volatility);
     case 'memory':
-      return clamp01(descriptor.raw && typeof descriptor.raw === 'object' ? readNumber((descriptor.raw as Record<string, unknown>)['memory'], descriptor.volatility) : descriptor.volatility);
+      return clamp01(descriptor.raw && typeof descriptor.raw === 'object' ? readNumber((descriptor.raw as unknown as Record<string, unknown>)['memory'], descriptor.volatility) : descriptor.volatility);
     case 'pressure':
-      return clamp01(descriptor.raw && typeof descriptor.raw === 'object' ? readNumber((descriptor.raw as Record<string, unknown>)['pressure'], descriptor.volatility) : descriptor.volatility);
+      return clamp01(descriptor.raw && typeof descriptor.raw === 'object' ? readNumber((descriptor.raw as unknown as Record<string, unknown>)['pressure'], descriptor.volatility) : descriptor.volatility);
     case 'rescue':
-      return clamp01(descriptor.raw && typeof descriptor.raw === 'object' ? readNumber((descriptor.raw as Record<string, unknown>)['rescue'], descriptor.volatility) : descriptor.volatility);
+      return clamp01(descriptor.raw && typeof descriptor.raw === 'object' ? readNumber((descriptor.raw as unknown as Record<string, unknown>)['rescue'], descriptor.volatility) : descriptor.volatility);
     case 'spectacle':
-      return clamp01(descriptor.raw && typeof descriptor.raw === 'object' ? readNumber((descriptor.raw as Record<string, unknown>)['spectacle'], descriptor.volatility) : descriptor.volatility);
+      return clamp01(descriptor.raw && typeof descriptor.raw === 'object' ? readNumber((descriptor.raw as unknown as Record<string, unknown>)['spectacle'], descriptor.volatility) : descriptor.volatility);
     case 'heat':
-      return clamp01(descriptor.raw && typeof descriptor.raw === 'object' ? readNumber((descriptor.raw as Record<string, unknown>)['heat'], descriptor.volatility) : descriptor.volatility);
+      return clamp01(descriptor.raw && typeof descriptor.raw === 'object' ? readNumber((descriptor.raw as unknown as Record<string, unknown>)['heat'], descriptor.volatility) : descriptor.volatility);
     case 'trust':
-      return clamp01(descriptor.raw && typeof descriptor.raw === 'object' ? readNumber((descriptor.raw as Record<string, unknown>)['trust'], descriptor.volatility) : descriptor.volatility);
+      return clamp01(descriptor.raw && typeof descriptor.raw === 'object' ? readNumber((descriptor.raw as unknown as Record<string, unknown>)['trust'], descriptor.volatility) : descriptor.volatility);
     case 'rivalry':
-      return clamp01(descriptor.raw && typeof descriptor.raw === 'object' ? readNumber((descriptor.raw as Record<string, unknown>)['rivalry'], descriptor.volatility) : descriptor.volatility);
+      return clamp01(descriptor.raw && typeof descriptor.raw === 'object' ? readNumber((descriptor.raw as unknown as Record<string, unknown>)['rivalry'], descriptor.volatility) : descriptor.volatility);
     case 'patience':
-      return clamp01(descriptor.raw && typeof descriptor.raw === 'object' ? readNumber((descriptor.raw as Record<string, unknown>)['patience'], descriptor.volatility) : descriptor.volatility);
+      return clamp01(descriptor.raw && typeof descriptor.raw === 'object' ? readNumber((descriptor.raw as unknown as Record<string, unknown>)['patience'], descriptor.volatility) : descriptor.volatility);
     case 'volatility':
       return descriptor.volatility;
     case 'persistence':
-      return clamp01(descriptor.raw && typeof descriptor.raw === 'object' ? readNumber((descriptor.raw as Record<string, unknown>)['persistence'], descriptor.volatility) : descriptor.volatility);
+      return clamp01(descriptor.raw && typeof descriptor.raw === 'object' ? readNumber((descriptor.raw as unknown as Record<string, unknown>)['persistence'], descriptor.volatility) : descriptor.volatility);
     case 'dominance':
-      return clamp01(descriptor.raw && typeof descriptor.raw === 'object' ? readNumber((descriptor.raw as Record<string, unknown>)['dominance'], descriptor.volatility) : descriptor.volatility);
+      return clamp01(descriptor.raw && typeof descriptor.raw === 'object' ? readNumber((descriptor.raw as unknown as Record<string, unknown>)['dominance'], descriptor.volatility) : descriptor.volatility);
     case 'humiliation':
-      return clamp01(descriptor.raw && typeof descriptor.raw === 'object' ? readNumber((descriptor.raw as Record<string, unknown>)['humiliation'], descriptor.volatility) : descriptor.volatility);
+      return clamp01(descriptor.raw && typeof descriptor.raw === 'object' ? readNumber((descriptor.raw as unknown as Record<string, unknown>)['humiliation'], descriptor.volatility) : descriptor.volatility);
     case 'hype':
-      return clamp01(descriptor.raw && typeof descriptor.raw === 'object' ? readNumber((descriptor.raw as Record<string, unknown>)['hype'], descriptor.volatility) : descriptor.volatility);
+      return clamp01(descriptor.raw && typeof descriptor.raw === 'object' ? readNumber((descriptor.raw as unknown as Record<string, unknown>)['hype'], descriptor.volatility) : descriptor.volatility);
     case 'silence':
-      return clamp01(descriptor.raw && typeof descriptor.raw === 'object' ? readNumber((descriptor.raw as Record<string, unknown>)['silence'], descriptor.volatility) : descriptor.volatility);
+      return clamp01(descriptor.raw && typeof descriptor.raw === 'object' ? readNumber((descriptor.raw as unknown as Record<string, unknown>)['silence'], descriptor.volatility) : descriptor.volatility);
     case 'recovery':
-      return clamp01(descriptor.raw && typeof descriptor.raw === 'object' ? readNumber((descriptor.raw as Record<string, unknown>)['recovery'], descriptor.volatility) : descriptor.volatility);
+      return clamp01(descriptor.raw && typeof descriptor.raw === 'object' ? readNumber((descriptor.raw as unknown as Record<string, unknown>)['recovery'], descriptor.volatility) : descriptor.volatility);
     case 'proof':
-      return clamp01(descriptor.raw && typeof descriptor.raw === 'object' ? readNumber((descriptor.raw as Record<string, unknown>)['proof'], descriptor.volatility) : descriptor.volatility);
+      return clamp01(descriptor.raw && typeof descriptor.raw === 'object' ? readNumber((descriptor.raw as unknown as Record<string, unknown>)['proof'], descriptor.volatility) : descriptor.volatility);
     case 'negotiation':
-      return clamp01(descriptor.raw && typeof descriptor.raw === 'object' ? readNumber((descriptor.raw as Record<string, unknown>)['negotiation'], descriptor.volatility) : descriptor.volatility);
+      return clamp01(descriptor.raw && typeof descriptor.raw === 'object' ? readNumber((descriptor.raw as unknown as Record<string, unknown>)['negotiation'], descriptor.volatility) : descriptor.volatility);
     case 'scene':
-      return clamp01(descriptor.raw && typeof descriptor.raw === 'object' ? readNumber((descriptor.raw as Record<string, unknown>)['scene'], descriptor.volatility) : descriptor.volatility);
+      return clamp01(descriptor.raw && typeof descriptor.raw === 'object' ? readNumber((descriptor.raw as unknown as Record<string, unknown>)['scene'], descriptor.volatility) : descriptor.volatility);
     case 'persona':
-      return clamp01(descriptor.raw && typeof descriptor.raw === 'object' ? readNumber((descriptor.raw as Record<string, unknown>)['persona'], descriptor.volatility) : descriptor.volatility);
+      return clamp01(descriptor.raw && typeof descriptor.raw === 'object' ? readNumber((descriptor.raw as unknown as Record<string, unknown>)['persona'], descriptor.volatility) : descriptor.volatility);
     case 'authority':
-      return clamp01(descriptor.raw && typeof descriptor.raw === 'object' ? readNumber((descriptor.raw as Record<string, unknown>)['authority'], descriptor.volatility) : descriptor.volatility);
+      return clamp01(descriptor.raw && typeof descriptor.raw === 'object' ? readNumber((descriptor.raw as unknown as Record<string, unknown>)['authority'], descriptor.volatility) : descriptor.volatility);
     case 'variance':
-      return clamp01(descriptor.raw && typeof descriptor.raw === 'object' ? readNumber((descriptor.raw as Record<string, unknown>)['variance'], descriptor.volatility) : descriptor.volatility);
+      return clamp01(descriptor.raw && typeof descriptor.raw === 'object' ? readNumber((descriptor.raw as unknown as Record<string, unknown>)['variance'], descriptor.volatility) : descriptor.volatility);
     default:
       return descriptor.volatility;
   }
@@ -803,7 +803,7 @@ function normalizeEvolutionSignal(
     descriptor.transformBias !== 'NEUTRAL' ? descriptor.transformBias : '',
   ].filter((value): value is string => Boolean(value))));
   return Object.freeze({
-    ...(signal as Record<string, unknown>),
+    ...(signal as unknown as Record<string, unknown>),
     stage: inferStageFromSignalRecord(record),
     temperament: readString(record.temperament ?? record.posture ?? descriptor.posture, descriptor.posture),
     callbackAggression01: clamp01(readNumber(
@@ -820,7 +820,7 @@ function normalizeEvolutionSignal(
     privatePressure01: descriptor.privatePressureShare,
     mythBias01: descriptor.mythBias,
     volatility01: descriptor.volatility,
-  }) as ChatPersonaEvolutionSignal;
+  }) as unknown as ChatPersonaEvolutionSignal;
 }
 
 function profileKey(botId: string, playerId: string | null | undefined): string {
@@ -894,26 +894,20 @@ export class ChatBotPersonaEvolutionService {
 
   observeBatch(input: readonly ChatPersonaEvolutionEvent[] | EvolutionBatchObserveInput): EvolutionBatchObserveResult {
     const now = this.clock.now();
-    const events = Array.isArray(input) ? input : input.events;
+    const events = Array.isArray(input)
+      ? (input as readonly ChatPersonaEvolutionEvent[])
+      : (input as EvolutionBatchObserveInput).events;
     const receipts = events.map((event) => this.observeWithReceipt(event));
     const profiles = receipts.map((receipt) => this.getProfile(receipt.botId, receipt.playerId, receipt.observedAt));
-    const audit = !Array.isArray(input) && input.captureAudit ? this.captureAudit(now) : null;
+    const audit = !Array.isArray(input) && (input as EvolutionBatchObserveInput).captureAudit
+      ? this.captureAudit(now)
+      : null;
     return {
       batchId: createId("persona_observe_batch", now, `${events.length}`),
       generatedAt: now,
       receipts,
       profiles,
       audit,
-    };
-  }
-
-  project(input: ChatBotPersonaEvolutionProjectInput): ChatPersonaEvolutionSignal {
-    const now = this.clock.now();
-    const receipts = events.map((event) => this.observe(event));
-    return {
-      batchId: createId("persona_observe_batch", now, `${events.length}`),
-      generatedAt: now,
-      receipts,
     };
   }
 
@@ -960,8 +954,8 @@ export class ChatBotPersonaEvolutionService {
 
   projectBatch(input: PersonaEvolutionProjectBatchInput | readonly EvolutionProjectionInput[]): EvolutionBatchProjectResult {
     const normalizedInput: PersonaEvolutionProjectBatchInput = Array.isArray(input)
-      ? { inputs: input, pruneBefore: false, captureAudit: false }
-      : input;
+      ? { inputs: input as readonly ChatBotPersonaEvolutionProjectInput[], pruneBefore: false, captureAudit: false }
+      : (input as PersonaEvolutionProjectBatchInput);
     if (normalizedInput.pruneBefore) this.prune();
     const now = this.clock.now();
     const receipts = normalizedInput.inputs.map((entry) => this.projectWithReceipt(entry));
@@ -2043,7 +2037,7 @@ export class ChatBotPersonaEvolutionService {
     mode: PersonaEvolutionMode,
     channelClass: PersonaEvolutionChannelClass,
   ): string {
-    const record = request as Record<string, unknown>;
+    const record = request as unknown as Record<string, unknown>;
     const botId = readString(record.botId);
     const playerId = readOptionalString(record.playerId) ?? "anon";
     const channelId = readOptionalString(record.channelId) ?? "no_channel";
@@ -2078,7 +2072,7 @@ export class ChatBotPersonaEvolutionService {
     signal: ChatPersonaEvolutionSignal,
     descriptor: PersonaEvolutionSignalDescriptor,
   ): void {
-    const record = request as Record<string, unknown>;
+    const record = request as unknown as Record<string, unknown>;
     const now = this.clock.now();
     const entry: PersonaEvolutionCacheEntry = {
       key,
@@ -2852,4 +2846,3 @@ export function exportChatBotPersonaEvolutionServiceBoards(
 ): readonly PersonaEvolutionBoard[] {
   return service.exportBoards(now);
 }
-
