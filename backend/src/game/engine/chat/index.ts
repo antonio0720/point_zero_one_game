@@ -84,6 +84,9 @@ import * as CarryoverResolver from './continuity/CarryoverResolver';
 import * as PostRunNarrativeEngineRuntime from './postrun/PostRunNarrativeEngine';
 import * as TurningPointResolverRuntime from './postrun/TurningPointResolver';
 import * as ForeshadowPlannerRuntime from './postrun/ForeshadowPlanner';
+import * as PostRun from './postrun';
+import * as Phase1 from './phase1';
+import * as Phase2 from './phase2';
 import * as Intelligence from './intelligence';
 import * as EmotionModelRuntime from './intelligence/ml/EmotionModel';
 import * as PressureAffectModelRuntime from './intelligence/ml/PressureAffectModel';
@@ -141,9 +144,9 @@ export * from './presence/TypingSimulationEngine';
 export * from './presence/ReadReceiptPolicy';
 export * from './continuity/CrossModeContinuityLedger';
 export * from './continuity/CarryoverResolver';
-export * from './postrun/PostRunNarrativeEngine';
-export * from './postrun/TurningPointResolver';
-export * from './postrun/ForeshadowPlanner';
+export * from './postrun';
+export * from './phase1';
+export * from './phase2';
 export * from './intelligence';
 export * from './intelligence/ml/EmotionModel';
 export * from './intelligence/ml/PressureAffectModel';
@@ -247,6 +250,9 @@ export {
   PostRunNarrativeEngineRuntime as ChatPostRunNarrativeEngineModule,
   TurningPointResolverRuntime as ChatTurningPointResolverModule,
   ForeshadowPlannerRuntime as ChatForeshadowPlannerModule,
+  PostRun as ChatPostRunBarrelModule,
+  Phase1 as ChatPhase1Module,
+  Phase2 as ChatPhase2Module,
   Intelligence as ChatIntelligenceModule,
   EmotionModelRuntime as ChatEmotionModelModule,
   PressureAffectModelRuntime as ChatPressureAffectModelModule,
@@ -311,6 +317,8 @@ export type BackendChatCanonicalModuleCategory =
   | 'CONTINUITY'
   | 'COMBAT'
   | 'POSTRUN'
+  | 'PHASE1'
+  | 'PHASE2'
   | 'INTELLIGENCE'
   | 'INTELLIGENCE_ML'
   | 'INTELLIGENCE_DL'
@@ -373,6 +381,8 @@ export interface BackendChatAuthorityBundle {
     readonly npc: typeof Npc;
     readonly engine: typeof Engine;
     readonly phase4: typeof Phase4;
+    readonly phase1: typeof Phase1;
+    readonly phase2: typeof Phase2;
     readonly experience: {
       readonly dramaOrchestrator: typeof DramaOrchestrator;
       readonly scenePlanner: typeof ScenePlanner;
@@ -533,9 +543,20 @@ export const BACKEND_CHAT_CANONICAL_MODULES = Object.freeze([
   descriptor('combat.ChatAttackWindowPolicy', 'combat/ChatAttackWindowPolicy.ts', 'COMBAT', 'GENERATED', true, 'Attack-window timing law.'),
 
   // Post-run ritual
+  descriptor('postrun.index', 'postrun/index.ts', 'POSTRUN', 'GENERATED', false, 'Post-run ritual barrel — engine, resolver, and planner.'),
   descriptor('postrun.PostRunNarrativeEngine', 'postrun/PostRunNarrativeEngine.ts', 'POSTRUN', 'GENERATED', true, 'Post-run authored narrative and debrief.'),
   descriptor('postrun.TurningPointResolver', 'postrun/TurningPointResolver.ts', 'POSTRUN', 'GENERATED', true, 'Turning-point selection authority.'),
   descriptor('postrun.ForeshadowPlanner', 'postrun/ForeshadowPlanner.ts', 'POSTRUN', 'GENERATED', true, 'Foreshadow and next-run pressure planning.'),
+
+  // Phase 1 — novelty and episodic memory intelligence
+  descriptor('phase1.index', 'phase1/index.ts', 'PHASE1', 'GENERATED', false, 'Phase 1 barrel — state slice and intelligence bridge.'),
+  descriptor('phase1.ChatStatePhaseOne', 'phase1/ChatStatePhaseOne.ts', 'PHASE1', 'GENERATED', true, 'Phase 1 state slice: conversational fingerprint, novelty ledger, episodic memory.'),
+  descriptor('phase1.ChatEnginePhaseOneBridge', 'phase1/ChatEnginePhaseOneBridge.ts', 'PHASE1', 'GENERATED', true, 'Phase 1 intelligence bridge: novelty, episodic memory, callback, carryover.'),
+
+  // Phase 2 — relationship evolution
+  descriptor('phase2.index', 'phase2/index.ts', 'PHASE2', 'GENERATED', false, 'Phase 2 barrel — state slice and relationship bridge.'),
+  descriptor('phase2.ChatStatePhaseTwo', 'phase2/ChatStatePhaseTwo.ts', 'PHASE2', 'GENERATED', true, 'Phase 2 state slice: counterpart projections, channel heat, escalation risk.'),
+  descriptor('phase2.ChatEnginePhaseTwoBridge', 'phase2/ChatEnginePhaseTwoBridge.ts', 'PHASE2', 'GENERATED', true, 'Phase 2 relationship evolution bridge: NPC signals, heat decay, sync, audit.'),
 
   // Intelligence root
   descriptor('intelligence.index', 'intelligence/index.ts', 'INTELLIGENCE', 'GENERATED', false, 'Intelligence barrel.'),
@@ -599,6 +620,8 @@ export function createBackendChatAuthorityBundle(): BackendChatAuthorityBundle {
       npc: Npc,
       engine: Engine,
       phase4: Phase4,
+      phase1: Phase1,
+      phase2: Phase2,
       experience: Object.freeze({
         dramaOrchestrator: DramaOrchestrator,
         scenePlanner: ScenePlanner,
