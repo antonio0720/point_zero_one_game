@@ -114,7 +114,7 @@ import {
 import {
   type ChatConversationalFingerprint,
   type ChatPhaseOneStateSlice,
-  type ChatStateWithPhaseOne,
+  type ChatEngineStateWithPhaseOne as ChatStateWithPhaseOne,
   applyConversationalFingerprintDeltaInState,
   getPhaseOneState,
   notePhaseOneCarryoverSummaryInState,
