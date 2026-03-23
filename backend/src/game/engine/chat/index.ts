@@ -80,6 +80,7 @@ import * as PresenceStyleResolver from './presence/PresenceStyleResolver';
 import * as TypingSimulationEngine from './presence/TypingSimulationEngine';
 import * as ReadReceiptPolicy from './presence/ReadReceiptPolicy';
 import * as Presence from './presence';
+import * as Replay from './replay';
 import * as CrossModeContinuityLedger from './continuity/CrossModeContinuityLedger';
 import * as CarryoverResolver from './continuity/CarryoverResolver';
 import * as PostRunNarrativeEngineRuntime from './postrun/PostRunNarrativeEngine';
@@ -141,6 +142,7 @@ export * from './rewards/LegendMomentLedger';
 export * from './rewards/RewardGrantResolver';
 export * from './rewards/ReplayMomentIndexer';
 export * from './presence';
+export * from './replay';
 export * from './continuity/CrossModeContinuityLedger';
 export * from './continuity/CarryoverResolver';
 export * from './postrun';
@@ -245,6 +247,7 @@ export {
   TypingSimulationEngine as ChatTypingSimulationEngineModule,
   ReadReceiptPolicy as ChatReadReceiptPolicyModule,
   Presence as ChatPresenceBarrelModule,
+  Replay as ChatReplayBarrelModule,
   CrossModeContinuityLedger as ChatCrossModeContinuityLedgerModule,
   CarryoverResolver as ChatCarryoverResolverModule,
   PostRunNarrativeEngineRuntime as ChatPostRunNarrativeEngineModule,
@@ -465,9 +468,9 @@ export const BACKEND_CHAT_CANONICAL_MODULES = Object.freeze([
   descriptor('NpcSuppressionPolicy', 'npc/NpcSuppressionPolicy.ts', 'NPC', 'PENDING', true, 'NPC suppression law.'),
 
   // Replay
-  descriptor('replay.index', 'replay/index.ts', 'REPLAY', 'PENDING', false, 'Replay barrel.'),
-  descriptor('ChatReplayAssembler', 'replay/ChatReplayAssembler.ts', 'REPLAY', 'PENDING', true, 'Replay assembly from authoritative chat state and events.'),
-  descriptor('ChatReplayIndex', 'replay/ChatReplayIndex.ts', 'REPLAY', 'PENDING', true, 'Replay lookup and transcript correlation.'),
+  descriptor('replay.index', 'replay/index.ts', 'REPLAY', 'GENERATED', false, 'Replay lane barrel: assembler + index + authority runtime + profiles.'),
+  descriptor('ChatReplayAssembler', 'replay/ChatReplayAssembler.ts', 'REPLAY', 'GENERATED', true, 'Replay artifact assembly, batch ops, scene beats, witness lines, and bundle scoring.'),
+  descriptor('ChatReplayIndex', 'replay/ChatReplayIndex.ts', 'REPLAY', 'GENERATED', true, 'Replay lookup, global/room indexing, search, scene frequency, label taxonomy, proof coverage scoring.'),
 
   // Telemetry
   descriptor('telemetry.index', 'telemetry/index.ts', 'TELEMETRY', 'PENDING', false, 'Telemetry barrel.'),

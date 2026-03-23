@@ -82,27 +82,39 @@
  */
 
 import {
-  appendReplayArtifactEnvelope,
-  assembleBundleByReplayId,
-  assembleReplayArtifactEnvelope,
-  assembleReplayBundle,
+  batchAssembleAndAppend,
+  batchMultiRoom,
+  buildAssemblerAuditReport,
+  buildAssemblerStatsSummary,
   buildSceneBeats,
   buildWitnessLines,
-  compactReplayRoom,
+  bundleContainsLegendMoment,
+  bundleExposureClass,
+  classifyAnchorQuality,
+  computeAssemblerDiff,
   createChatReplayAssembler,
+  createChatReplayAssemblerFromProfile,
   createReplayArtifact,
-  rebuildReplayRoom,
-  repairReplayCoverage,
-  resolveReplayAnchor,
-  verifyReplayCoverage,
+  estimateBundleDensity,
+  scoreBundleRelevance,
+  summarizeBundleWitnesses,
+  ChatReplayAssemblerModule,
   type ChatReplayAppendResult,
   type ChatReplayArtifactEnvelope,
   type ChatReplayAssemblerApi,
+  type ChatReplayAssemblerDiff,
   type ChatReplayAssemblerOptions,
+  type ChatReplayAssemblerProfile,
+  type ChatReplayAssemblerStatsSummary,
   type ChatReplayAssemblyReason,
   type ChatReplayAssemblyRequest,
+  type ChatReplayBatchAssemblyRequest,
+  type ChatReplayBatchAssemblyResult,
   type ChatReplayBundle,
+  type ChatReplayBundleScore,
   type ChatReplayCoverageReport,
+  type ChatReplayMultiRoomBatchRequest,
+  type ChatReplayMultiRoomBatchResult,
   type ChatReplayResolvedAnchor,
   type ChatReplayRoomCompactionResult,
   type ChatReplayRoomRebuildResult,
@@ -110,21 +122,40 @@ import {
   type ChatReplayWitnessLine,
 } from './ChatReplayAssembler';
 import {
+  batchSearchReplayIndex,
+  buildIndexAuditReport,
+  buildIndexStatsSummary,
   buildReplayDiagnostics,
   buildReplayGlobalIndex,
+  buildReplayLabelTaxonomy,
   buildReplayRoomIndex,
+  buildSceneFrequencyReport,
+  computeIndexDiff,
   createChatReplayIndex,
-  findNearestSequenceEntry,
-  queryReplayRange,
-  searchReplayIndex,
+  createChatReplayIndexFromProfile,
+  filterIndexByLegend,
+  filterIndexByProofCoverage,
+  filterIndexBySceneClass,
+  scoreRoomProofCoverage,
+  sortIndexByRelevance,
+  ChatReplayIndexModule,
+  type ChatReplayBatchSearchRequest,
+  type ChatReplayBatchSearchResult,
   type ChatReplayGlobalIndex,
   type ChatReplayIndexApi,
+  type ChatReplayIndexAuditReport,
   type ChatReplayIndexBuildOptions,
   type ChatReplayIndexConfig,
   type ChatReplayIndexDiagnostics,
+  type ChatReplayIndexDiff,
+  type ChatReplayIndexProfile,
+  type ChatReplayIndexStatsSummary,
+  type ChatReplayLabelTaxonomy,
+  type ChatReplayProofCoverageScore,
   type ChatReplayRangeQuery,
   type ChatReplayRoomIndex,
   type ChatReplayRoomIndexEntry,
+  type ChatReplaySceneFrequency,
   type ChatReplaySearchHit,
   type ChatReplaySearchRequest,
 } from './ChatReplayIndex';
@@ -569,38 +600,27 @@ function makeSyntheticAssemblyRequestFromBundle(
   bundle: ChatReplayBundle,
   reason: ChatReplayAssemblyReason = 'MANUAL_REQUEST',
 ): ChatReplayAssemblyRequest {
+  const shadowCount = Number(bundle.artifact.metadata.shadowCount ?? bundle.shadowEntries.length);
+  const strategy: ChatReplayAssemblyRequest['strategy'] =
+    bundle.anchor.anchorMessageId ? 'MESSAGE_ID' : 'EXPLICIT_RANGE';
+
   return {
     roomId: bundle.artifact.roomId,
     label: bundle.artifact.label,
     reason,
-    strategy: 'MESSAGE_ID',
-    anchorMessageId:
-      bundle.anchor.anchorMessageId ??
-      bundle.artifact.anchor.anchorMessageId ??
-      null,
-    anchorSequence:
-      bundle.anchor.anchorSequence ??
-      bundle.artifact.anchor.anchorSequence ??
-      null,
-    anchorEventId:
-      bundle.anchor.anchorEventId ??
-      bundle.artifact.anchor.anchorEventId ??
-      null,
-    lookBehind: bundle.artifact.window.lookBehind,
-    lookAhead: bundle.artifact.window.lookAhead,
-    maxMessages: bundle.artifact.window.maxMessages,
-    includeShadow: bundle.artifact.visibility.shadowCount > 0,
-    includeSystem: bundle.artifact.messageClasses.systemCount > 0,
-    includeNpc: bundle.artifact.messageClasses.npcCount > 0,
-    includePlayer: bundle.artifact.messageClasses.playerCount > 0,
-    allowOverlap: true,
+    strategy,
+    eventId: bundle.anchor.eventId ?? null,
+    anchorMessageId: bundle.anchor.anchorMessageId ?? null,
+    anchorSequence: bundle.anchor.anchorSequence ?? null,
+    anchorTimestamp: bundle.anchor.anchorTimestamp ?? null,
+    explicitRange: bundle.artifact.range,
+    includeShadow: shadowCount > 0,
     dedupeByAnchorKey: false,
-    minimumVisibleMessages: Math.max(1, bundle.artifact.visibility.visibleCount),
-    minimumTotalMessages: Math.max(
-      1,
-      bundle.artifact.visibility.visibleCount + bundle.artifact.visibility.shadowCount,
-    ),
-    minimumProofEdges: Math.max(0, bundle.proofEdges.length),
+    metadata: {
+      syntheticReassembly: true,
+      originalReplayId: String(bundle.artifact.id),
+      originalAnchorKey: bundle.artifact.anchorKey,
+    },
   };
 }
 
@@ -1473,3 +1493,482 @@ export function assertChatReplayLaneReady(): ChatReplayLaneManifest {
   }
   return CHAT_REPLAY_LANE_MANIFEST;
 }
+
+// ============================================================================
+// MARK: Profile-driven lane construction
+// ============================================================================
+
+export interface ChatReplayProfileLaneConfig {
+  readonly assemblerProfile?: ChatReplayAssemblerProfile;
+  readonly indexProfile?: ChatReplayIndexProfile;
+  readonly laneConfig?: ChatReplayLaneConfig;
+}
+
+export function createProfiledChatReplayLane(
+  profileConfig: ChatReplayProfileLaneConfig = {},
+): ChatReplayLaneApi {
+  const assemblerProfile = profileConfig.assemblerProfile ?? 'STANDARD';
+  const indexProfile = profileConfig.indexProfile ?? 'STANDARD';
+  const laneConfig = profileConfig.laneConfig ?? {};
+
+  const assembler = createChatReplayAssemblerFromProfile(assemblerProfile, laneConfig.assembler ?? {});
+  const indexApi = createChatReplayIndexFromProfile(indexProfile, assembler);
+
+  const runtimeConfig = {
+    includeTranscriptMaterialByDefault:
+      laneConfig.includeTranscriptMaterialByDefault ??
+      laneConfig.defaultBuildOptions?.includeTranscriptMaterial ??
+      true,
+    includeProofMaterialByDefault:
+      laneConfig.includeProofMaterialByDefault ??
+      laneConfig.defaultBuildOptions?.includeProofMaterial ??
+      true,
+    eagerGlobalDiagnostics: laneConfig.eagerGlobalDiagnostics ?? false,
+    defaultBuildOptions: mergeReplayLaneBuildOptions(laneConfig, undefined),
+    indexConfig: laneConfig.index ?? {},
+  } as const;
+
+  return {
+    manifest: CHAT_REPLAY_LANE_MANIFEST,
+    assembler,
+    index: indexApi,
+    config: runtimeConfig,
+
+    summarizeState(state: ChatReplayLaneState): ChatReplayLaneStateSummary {
+      return summarizeReplayState(state);
+    },
+    snapshot(state: ChatReplayLaneState): ChatReplayLaneSnapshot {
+      return buildSnapshot(CHAT_REPLAY_LANE_MANIFEST, laneConfig, assembler, indexApi, state);
+    },
+    buildGlobalIndex(state: ChatReplayLaneState, options: ChatReplayIndexBuildOptions = {}): ChatReplayGlobalIndex {
+      return buildLaneGlobalIndex(laneConfig, assembler, indexApi, state, options);
+    },
+    buildRoomIndex(state: ChatReplayLaneState, roomId: ChatReplayLaneRoomId, options: ChatReplayIndexBuildOptions = {}): ChatReplayRoomIndex {
+      return buildLaneRoomIndex(laneConfig, assembler, indexApi, state, roomId, options);
+    },
+    diagnostics(state: ChatReplayLaneState): ChatReplayIndexDiagnostics {
+      return buildReplayDiagnostics(indexApi.config, assembler, state);
+    },
+    resolveAnchor(state: ChatReplayLaneState, request: ChatReplayAssemblyRequest): ChatReplayResolvedAnchor {
+      return assembler.resolveAnchor(state, request);
+    },
+    assemble(state: ChatReplayLaneState, request: ChatReplayAssemblyRequest): ChatReplayArtifactEnvelope | null {
+      return assembler.assemble(state, request);
+    },
+    append(state: ChatReplayLaneState, envelope: ChatReplayArtifactEnvelope): ChatReplayAppendResult {
+      return assembler.append(state, envelope);
+    },
+    assembleAndAppend(state: ChatReplayLaneState, request: ChatReplayAssemblyRequest): ChatReplayAppendResult | null {
+      return assembler.assembleAndAppend(state, request);
+    },
+    assembleAppendAndIndex(state: ChatReplayLaneState, request: ChatReplayAssemblyRequest): ChatReplayAssemblyAndIndexResult {
+      const append = assembler.assembleAndAppend(state, request);
+      const nextState = append?.state ?? state;
+      const roomIndex = append?.artifact?.roomId
+        ? buildLaneRoomIndex(laneConfig, assembler, indexApi, nextState, append.artifact.roomId)
+        : null;
+      const globalIndex = rebuildGlobalIndexAfterStateMutation(laneConfig, assembler, indexApi, nextState, append?.artifact?.roomId);
+      return { append, roomIndex, globalIndex };
+    },
+    assembleBundleByReplayId(state: ChatReplayLaneState, roomId: ChatReplayLaneRoomId, replayId: ChatReplayLaneReplayId): ChatReplayBundle | null {
+      return assembler.assembleBundleByReplayId(state, roomId, replayId);
+    },
+    assembleBundleAroundMessage(state: ChatReplayLaneState, roomId: ChatReplayLaneRoomId, messageId: ChatReplayLaneMessageId, label = 'Replay Window'): ChatReplayBundle | null {
+      return assembler.assembleBundleAroundMessage(state, roomId, messageId, label);
+    },
+    assembleBundleAroundSequence(state: ChatReplayLaneState, roomId: ChatReplayLaneRoomId, sequenceNumber: ChatReplayLaneSequenceNumber, label = 'Replay Window'): ChatReplayBundle | null {
+      return assembler.assembleBundleAroundSequence(state, roomId, sequenceNumber, label);
+    },
+    createArtifact(state: ChatReplayLaneState, request: ChatReplayAssemblyRequest): ReturnType<typeof createReplayArtifact> | null {
+      return assembler.assemble(state, request)?.artifact ?? null;
+    },
+    buildSceneBeatsForBundle(bundle: ChatReplayBundle): readonly ChatReplaySceneBeat[] {
+      return buildSceneBeats(bundle.artifact.roomId, bundle.entries);
+    },
+    buildWitnessLinesForBundle(bundle: ChatReplayBundle): readonly ChatReplayWitnessLine[] {
+      return buildWitnessLines(bundle.entries, bundle.anchor.anchorMessageId ?? null);
+    },
+    verifyRoom(state: ChatReplayLaneState, roomId: ChatReplayLaneRoomId): ChatReplayCoverageReport {
+      return assembler.verifyRoom(state, roomId);
+    },
+    repairRoom(state: ChatReplayLaneState, roomId: ChatReplayLaneRoomId): ChatReplayRoomRebuildResult {
+      return assembler.repairRoom(state, roomId);
+    },
+    rebuildRoom(state: ChatReplayLaneState, roomId: ChatReplayLaneRoomId): ChatReplayRoomRebuildResult {
+      return assembler.rebuildRoom(state, roomId);
+    },
+    compactRoom(state: ChatReplayLaneState, roomId: ChatReplayLaneRoomId): ChatReplayRoomCompactionResult {
+      return assembler.compactRoom(state, roomId);
+    },
+    repairRoomAndIndex(state: ChatReplayLaneState, roomId: ChatReplayLaneRoomId): ChatReplayRepairAndIndexResult {
+      const rebuild = assembler.repairRoom(state, roomId);
+      const roomIndex = buildLaneRoomIndex(laneConfig, assembler, indexApi, rebuild.state, roomId);
+      const globalIndex = rebuildGlobalIndexAfterStateMutation(laneConfig, assembler, indexApi, rebuild.state, roomId);
+      return { rebuild, roomIndex, globalIndex };
+    },
+    rebuildRoomAndIndex(state: ChatReplayLaneState, roomId: ChatReplayLaneRoomId): ChatReplayRepairAndIndexResult {
+      const rebuild = assembler.rebuildRoom(state, roomId);
+      const roomIndex = buildLaneRoomIndex(laneConfig, assembler, indexApi, rebuild.state, roomId);
+      const globalIndex = rebuildGlobalIndexAfterStateMutation(laneConfig, assembler, indexApi, rebuild.state, roomId);
+      return { rebuild, roomIndex, globalIndex };
+    },
+    compactRoomAndIndex(state: ChatReplayLaneState, roomId: ChatReplayLaneRoomId): ChatReplayCompactionAndIndexResult {
+      const compaction = assembler.compactRoom(state, roomId);
+      const roomIndex = buildLaneRoomIndex(laneConfig, assembler, indexApi, compaction.state, roomId);
+      const globalIndex = rebuildGlobalIndexAfterStateMutation(laneConfig, assembler, indexApi, compaction.state, roomId);
+      return { compaction, roomIndex, globalIndex };
+    },
+    findReplay(state: ChatReplayLaneState, roomId: ChatReplayLaneRoomId, replayId: ChatReplayLaneReplayId): ChatReplayRoomIndexEntry | null {
+      return indexApi.findReplay(state, roomId, replayId);
+    },
+    findByAnchorKey(state: ChatReplayLaneState, roomId: ChatReplayLaneRoomId, anchorKey: ChatReplayLaneAnchorKey): readonly ChatReplayRoomIndexEntry[] {
+      return indexApi.findByAnchorKey(state, roomId, anchorKey);
+    },
+    findByEventId(state: ChatReplayLaneState, roomId: ChatReplayLaneRoomId, eventId: ChatReplayLaneEventId): readonly ChatReplayRoomIndexEntry[] {
+      return indexApi.findByEventId(state, roomId, eventId);
+    },
+    findContainingMessage(state: ChatReplayLaneState, roomId: ChatReplayLaneRoomId, messageId: ChatReplayLaneMessageId): readonly ChatReplayRoomIndexEntry[] {
+      return indexApi.findContainingMessage(state, roomId, messageId);
+    },
+    findNearestSequence(state: ChatReplayLaneState, roomId: ChatReplayLaneRoomId, sequenceNumber: ChatReplayLaneSequenceNumber): ChatReplayRoomIndexEntry | null {
+      return indexApi.findNearestSequence(state, roomId, sequenceNumber);
+    },
+    queryRange(state: ChatReplayLaneState, request: ChatReplayRangeQuery): readonly ChatReplayRoomIndexEntry[] {
+      return indexApi.queryRange(state, request);
+    },
+    search(state: ChatReplayLaneState, request: ChatReplaySearchRequest): readonly ChatReplaySearchHit[] {
+      return indexApi.search(state, request);
+    },
+  };
+}
+
+// ============================================================================
+// MARK: Extended batch flows
+// ============================================================================
+
+export function batchAssembleAndAppendWithLane(
+  state: ChatReplayLaneState,
+  batch: ChatReplayBatchAssemblyRequest,
+  config: ChatReplayLaneConfig = {},
+): ChatReplayBatchAssemblyResult {
+  const lane = createChatReplayLane(config);
+  return batchAssembleAndAppend(lane.assembler.ports, lane.assembler.proofContext, state, batch);
+}
+
+export function batchMultiRoomWithLane(
+  state: ChatReplayLaneState,
+  batch: ChatReplayMultiRoomBatchRequest,
+  config: ChatReplayLaneConfig = {},
+): ChatReplayMultiRoomBatchResult {
+  const lane = createChatReplayLane(config);
+  return batchMultiRoom(lane.assembler.ports, lane.assembler.proofContext, state, batch);
+}
+
+export function batchSearchWithLane(
+  state: ChatReplayLaneState,
+  batch: ChatReplayBatchSearchRequest,
+  config: ChatReplayLaneConfig = {},
+): ChatReplayBatchSearchResult {
+  const lane = createChatReplayLane(config);
+  return batchSearchReplayIndex(lane.index.config, lane.assembler, state, batch);
+}
+
+// ============================================================================
+// MARK: Extended diagnostic flows
+// ============================================================================
+
+export function buildLaneAssemblerAuditReport(
+  state: ChatReplayLaneState,
+  roomId: ChatReplayLaneRoomId,
+  config: ChatReplayLaneConfig = {},
+) {
+  const lane = createChatReplayLane(config);
+  return buildAssemblerAuditReport(lane.assembler.ports, lane.assembler.proofContext, state, roomId);
+}
+
+export function buildLaneIndexAuditReport(
+  state: ChatReplayLaneState,
+  config: ChatReplayLaneConfig = {},
+): ChatReplayIndexAuditReport {
+  const lane = createChatReplayLane(config);
+  return buildIndexAuditReport(lane.index.config, lane.assembler, state);
+}
+
+export function buildLaneAssemblerStats(
+  state: ChatReplayLaneState,
+  roomId: ChatReplayLaneRoomId,
+  config: ChatReplayLaneConfig = {},
+): ChatReplayAssemblerStatsSummary {
+  const lane = createChatReplayLane(config);
+  return buildAssemblerStatsSummary(lane.assembler.ports, lane.assembler.proofContext, state, roomId);
+}
+
+export function buildLaneIndexStats(
+  state: ChatReplayLaneState,
+  config: ChatReplayLaneConfig = {},
+): ChatReplayIndexStatsSummary {
+  const lane = createChatReplayLane(config);
+  return buildIndexStatsSummary(lane.index.config, lane.assembler, state);
+}
+
+export function computeLaneAssemblerDiff(
+  stateBefore: ChatReplayLaneState,
+  stateAfter: ChatReplayLaneState,
+  roomId: ChatReplayLaneRoomId,
+  _config: ChatReplayLaneConfig = {},
+): ChatReplayAssemblerDiff {
+  return computeAssemblerDiff(stateBefore, stateAfter, roomId);
+}
+
+export function computeLaneIndexDiff(
+  stateBefore: ChatReplayLaneState,
+  stateAfter: ChatReplayLaneState,
+  config: ChatReplayLaneConfig = {},
+): ChatReplayIndexDiff {
+  const lane = createChatReplayLane(config);
+  return computeIndexDiff(lane.index.config, lane.assembler, stateBefore, stateAfter);
+}
+
+export function scoreBundleWithLane(
+  bundle: ChatReplayBundle,
+  _config: ChatReplayLaneConfig = {},
+): ChatReplayBundleScore {
+  return scoreBundleRelevance(bundle);
+}
+
+export function buildLaneSceneFrequency(
+  state: ChatReplayLaneState,
+  config: ChatReplayLaneConfig = {},
+): readonly ChatReplaySceneFrequency[] {
+  const lane = createChatReplayLane(config);
+  return buildSceneFrequencyReport(lane.index.config, lane.assembler, state);
+}
+
+export function buildLaneLabelTaxonomy(
+  state: ChatReplayLaneState,
+  config: ChatReplayLaneConfig = {},
+): ChatReplayLabelTaxonomy {
+  const lane = createChatReplayLane(config);
+  return buildReplayLabelTaxonomy(lane.index.config, lane.assembler, state);
+}
+
+export function scoreLaneProofCoverage(
+  state: ChatReplayLaneState,
+  roomId: ChatReplayLaneRoomId,
+  config: ChatReplayLaneConfig = {},
+): readonly ChatReplayProofCoverageScore[] {
+  const lane = createChatReplayLane(config);
+  return scoreRoomProofCoverage(lane.index.config, lane.assembler, state, roomId);
+}
+
+// ============================================================================
+// MARK: Bundle analysis helpers
+// ============================================================================
+
+export function bundleAnalysis(bundle: ChatReplayBundle): Readonly<{
+  containsLegend: boolean;
+  exposureClass: ReturnType<typeof bundleExposureClass>;
+  anchorQuality: ReturnType<typeof classifyAnchorQuality>;
+  density: number;
+  score: ChatReplayBundleScore;
+  witnesses: readonly string[];
+}> {
+  return Object.freeze({
+    containsLegend: bundleContainsLegendMoment(bundle),
+    exposureClass: bundleExposureClass(bundle),
+    anchorQuality: classifyAnchorQuality(bundle),
+    density: estimateBundleDensity(bundle),
+    score: scoreBundleRelevance(bundle),
+    witnesses: summarizeBundleWitnesses(bundle),
+  });
+}
+
+export function filterBundlesByLegend(
+  bundles: readonly ChatReplayBundle[],
+): readonly ChatReplayBundle[] {
+  return bundles.filter((bundle) => bundleContainsLegendMoment(bundle));
+}
+
+export function sortBundlesByRelevance(
+  bundles: readonly ChatReplayBundle[],
+): readonly ChatReplayBundle[] {
+  return [...bundles].sort((left, right) => {
+    const leftScore = scoreBundleRelevance(left).compositeScore;
+    const rightScore = scoreBundleRelevance(right).compositeScore;
+    return rightScore - leftScore;
+  });
+}
+
+export function groupBundlesByExposure(
+  bundles: readonly ChatReplayBundle[],
+): Readonly<{
+  visibleOnly: readonly ChatReplayBundle[];
+  shadowHeavy: readonly ChatReplayBundle[];
+  mixed: readonly ChatReplayBundle[];
+  empty: readonly ChatReplayBundle[];
+}> {
+  return Object.freeze({
+    visibleOnly: bundles.filter((b) => bundleExposureClass(b) === 'VISIBLE_ONLY'),
+    shadowHeavy: bundles.filter((b) => bundleExposureClass(b) === 'SHADOW_HEAVY'),
+    mixed: bundles.filter((b) => bundleExposureClass(b) === 'MIXED'),
+    empty: bundles.filter((b) => bundleExposureClass(b) === 'EMPTY'),
+  });
+}
+
+// ============================================================================
+// MARK: Index filtering re-exports (lane-scoped)
+// ============================================================================
+
+export function filterRoomIndexBySceneClass(
+  state: ChatReplayLaneState,
+  roomId: ChatReplayLaneRoomId,
+  sceneClass: string,
+  config: ChatReplayLaneConfig = {},
+): readonly ChatReplayRoomIndexEntry[] {
+  const lane = createChatReplayLane(config);
+  const roomIndex = lane.buildRoomIndex(state, roomId);
+  return filterIndexBySceneClass(roomIndex, sceneClass);
+}
+
+export function filterRoomIndexByLegend(
+  state: ChatReplayLaneState,
+  roomId: ChatReplayLaneRoomId,
+  config: ChatReplayLaneConfig = {},
+): readonly ChatReplayRoomIndexEntry[] {
+  const lane = createChatReplayLane(config);
+  const roomIndex = lane.buildRoomIndex(state, roomId);
+  return filterIndexByLegend(roomIndex);
+}
+
+export function filterRoomIndexByProofCoverage(
+  state: ChatReplayLaneState,
+  roomId: ChatReplayLaneRoomId,
+  minEdges = 1,
+  config: ChatReplayLaneConfig = {},
+): readonly ChatReplayRoomIndexEntry[] {
+  const lane = createChatReplayLane(config);
+  const roomIndex = lane.buildRoomIndex(state, roomId);
+  return filterIndexByProofCoverage(roomIndex, minEdges);
+}
+
+export function sortRoomIndexByRelevance(
+  state: ChatReplayLaneState,
+  roomId: ChatReplayLaneRoomId,
+  config: ChatReplayLaneConfig = {},
+): readonly ChatReplayRoomIndexEntry[] {
+  const lane = createChatReplayLane(config);
+  const roomIndex = lane.buildRoomIndex(state, roomId);
+  return sortIndexByRelevance(roomIndex.entries);
+}
+
+// ============================================================================
+// MARK: Named factory aliases for downstream clarity
+// ============================================================================
+
+export const createCinematicReplayLane = (config?: ChatReplayLaneConfig) =>
+  createProfiledChatReplayLane({ assemblerProfile: 'CINEMATIC', indexProfile: 'EXHAUSTIVE', laneConfig: config });
+
+export const createRapidReplayLane = (config?: ChatReplayLaneConfig) =>
+  createProfiledChatReplayLane({ assemblerProfile: 'RAPID', indexProfile: 'RAPID', laneConfig: config });
+
+export const createForensicReplayLane = (config?: ChatReplayLaneConfig) =>
+  createProfiledChatReplayLane({ assemblerProfile: 'FORENSIC', indexProfile: 'FORENSIC', laneConfig: config });
+
+export const createLegendReplayLane = (config?: ChatReplayLaneConfig) =>
+  createProfiledChatReplayLane({ assemblerProfile: 'LEGEND_FOCUS', indexProfile: 'LEGEND_AUDIT', laneConfig: config });
+
+export const createShadowAwareReplayLane = (config?: ChatReplayLaneConfig) =>
+  createProfiledChatReplayLane({ assemblerProfile: 'SHADOW_AWARE', indexProfile: 'PROOF_FOCUS', laneConfig: config });
+
+// ============================================================================
+// MARK: Combined module object
+// ============================================================================
+
+/**
+ * Combined namespace object for the full backend chat replay lane:
+ *
+ *   import { ChatReplayModule } from './replay';
+ *   ChatReplayModule.createLane();
+ *   ChatReplayModule.createLegendLane();
+ *   ChatReplayModule.assembler.createCinematic();
+ *   ChatReplayModule.index.createLegendAudit();
+ */
+export const ChatReplayModule = Object.freeze({
+  // Lane construction
+  createLane: createChatReplayLane,
+  createProfiledLane: createProfiledChatReplayLane,
+  createCinematicLane: createCinematicReplayLane,
+  createRapidLane: createRapidReplayLane,
+  createForensicLane: createForensicReplayLane,
+  createLegendLane: createLegendReplayLane,
+  createShadowAwareLane: createShadowAwareReplayLane,
+
+  // Assembler subsystem
+  assembler: ChatReplayAssemblerModule,
+
+  // Index subsystem
+  index: ChatReplayIndexModule,
+
+  // Manifest
+  manifest: CHAT_REPLAY_LANE_MANIFEST,
+  canonicalTree: CHAT_REPLAY_LANE_CANONICAL_TREE,
+  modules: CHAT_REPLAY_LANE_MODULES,
+  doctrine: CHAT_REPLAY_LANE_DOCTRINE,
+
+  // Convenience flows
+  buildSnapshot: buildChatReplayLaneSnapshot,
+  buildDiagnostics: buildChatReplayLaneDiagnostics,
+  assembleAndBuildRoomIndex: assembleReplayAndBuildRoomIndex,
+  appendAndBuildRoomIndex: appendReplayAndBuildRoomIndex,
+  assembleAppendRepairAndSearch,
+  recoverBundleFromSearchHit: recoverReplayBundleFromSearchHit,
+  recoverBundleFromIndexEntry: recoverReplayBundleFromIndexEntry,
+  buildRoomIndexFromBundle: buildReplayRoomIndexFromBundle,
+  rebuildRoomFromBundle: rebuildReplayRoomFromBundle,
+  compactRoomFromBundle: compactReplayRoomFromBundle,
+  reassembleBundle: reassembleBundleWithSyntheticRequest,
+
+  // Integrated with index
+  createEnvelopeWithIndex: createReplayArtifactEnvelopeWithIndex,
+  repairWithIndex: repairReplayRoomCoverageWithIndex,
+  rebuildWithIndex: rebuildReplayRoomWithIndex,
+  compactWithIndex: compactReplayRoomWithIndex,
+  verifyWithDiagnostics: verifyReplayRoomCoverageWithDiagnostics,
+  searchAfterRepair: searchReplayRoomAfterRepair,
+  findNearestAfterAppend: findReplayNearSequenceAfterAppend,
+
+  // Batch flows
+  batchAssemble: batchAssembleAndAppendWithLane,
+  batchMultiRoom: batchMultiRoomWithLane,
+  batchSearch: batchSearchWithLane,
+
+  // Audit and diagnostic flows
+  buildAssemblerAudit: buildLaneAssemblerAuditReport,
+  buildIndexAudit: buildLaneIndexAuditReport,
+  buildAssemblerStats: buildLaneAssemblerStats,
+  buildIndexStats: buildLaneIndexStats,
+  computeAssemblerDiff: computeLaneAssemblerDiff,
+  computeIndexDiff: computeLaneIndexDiff,
+  scoreBundle: scoreBundleWithLane,
+  buildSceneFrequency: buildLaneSceneFrequency,
+  buildLabelTaxonomy: buildLaneLabelTaxonomy,
+  scoreProofCoverage: scoreLaneProofCoverage,
+
+  // Bundle analysis
+  analyzBundle: bundleAnalysis,
+  filterByLegend: filterBundlesByLegend,
+  sortByRelevance: sortBundlesByRelevance,
+  groupByExposure: groupBundlesByExposure,
+
+  // Room index filtering
+  filterRoomBySceneClass: filterRoomIndexBySceneClass,
+  filterRoomByLegend: filterRoomIndexByLegend,
+  filterRoomByProofCoverage: filterRoomIndexByProofCoverage,
+  sortRoomByRelevance: sortRoomIndexByRelevance,
+
+  // Assertion helpers
+  assertModuleGenerated: assertChatReplayLaneModuleGenerated,
+  assertLaneReady: assertChatReplayLaneReady,
+  getManifest: getChatReplayLaneManifest,
+  getModule: getChatReplayLaneModule,
+} as const);

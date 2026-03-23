@@ -59,47 +59,29 @@ import {
   type ChatReplayId,
   type ChatRoomId,
   type ChatState,
-  type ChatTranscriptEntry,
   type JsonValue,
   type SequenceNumber,
   type UnixMs,
 } from '../types';
 import {
-  selectCurrentSequence,
-  selectMostRecentReplayAroundSequence,
-  selectRoomProofEdges,
   selectRoomReplayArtifacts,
-  selectRoomTranscript,
 } from '../ChatState';
 import {
-  collectConversationWindowForMessage,
-  getAroundSequence,
-  getMostRelevantReplayForMessage,
-  getReplayWindow,
-  getRoomWindow,
-  searchTranscript,
   type ChatTranscriptRoomWindow,
 } from '../ChatTranscriptLedger';
 import {
   buildMessageCausalClosure,
   buildRoomProofTimeline,
-  selectProofEdgesForMessage,
   selectProofEdgesToReplay,
-  verifyRoomProofChain,
   type ChatMessageCausalClosure,
   type ChatProofVerificationReport,
   type ChatRoomProofTimeline,
 } from '../ChatProofChain';
 import {
-  assembleReplayBundle,
   createChatReplayAssembler,
-  resolveReplayAnchor,
   type ChatReplayAssemblerApi,
-  type ChatReplayAssemblyReason,
-  type ChatReplayAssemblyRequest,
   type ChatReplayBundle,
   type ChatReplayCoverageIssue,
-  type ChatReplayCoverageReport,
   type ChatReplayMessageRole,
   type ChatReplaySceneBeat,
   type ChatReplayWitnessLine,
@@ -397,7 +379,7 @@ export function buildReplayRoomIndex(
   assembler: ChatReplayAssemblerApi,
   state: ChatState,
   roomId: ChatRoomId,
-  options: ChatReplayIndexBuildOptions,
+  _options: ChatReplayIndexBuildOptions,
 ): ChatReplayRoomIndex {
   const builtAt = asUnixMs(assembler.ports.clock.now());
   const artifacts = [...selectRoomReplayArtifacts(state, roomId)].sort((left, right) => {
@@ -1015,3 +997,813 @@ function looksLikeEventId(value: string): boolean {
 function looksLikeMessageId(value: string): boolean {
   return /^msg[_:]/i.test(value.trim());
 }
+
+// ============================================================================
+// MARK: Index profiles
+// ============================================================================
+
+export type ChatReplayIndexProfile =
+  | 'STANDARD'
+  | 'LIGHTWEIGHT'
+  | 'EXHAUSTIVE'
+  | 'FORENSIC'
+  | 'RAPID'
+  | 'LEGEND_AUDIT'
+  | 'PROOF_FOCUS';
+
+export interface ChatReplayIndexProfileConfig {
+  readonly maxSearchResults: number;
+  readonly maxRecentLookups: number;
+  readonly tokenMinLength: number;
+  readonly retainMessageCoverage: boolean;
+  readonly retainProofCoverage: boolean;
+  readonly retainSequenceTables: boolean;
+  readonly retainTimeTables: boolean;
+  readonly scoreLegendBonus: number;
+  readonly scoreRescueBonus: number;
+  readonly scoreEscalationBonus: number;
+  readonly includeCausalClosure: boolean;
+}
+
+export const INDEX_PROFILE_OPTIONS: Readonly<
+  Record<ChatReplayIndexProfile, ChatReplayIndexProfileConfig>
+> = Object.freeze({
+  STANDARD: Object.freeze({
+    maxSearchResults: 24,
+    maxRecentLookups: 256,
+    tokenMinLength: 2,
+    retainMessageCoverage: true,
+    retainProofCoverage: true,
+    retainSequenceTables: true,
+    retainTimeTables: true,
+    scoreLegendBonus: 1,
+    scoreRescueBonus: 1,
+    scoreEscalationBonus: 1,
+    includeCausalClosure: true,
+  }),
+  LIGHTWEIGHT: Object.freeze({
+    maxSearchResults: 12,
+    maxRecentLookups: 64,
+    tokenMinLength: 3,
+    retainMessageCoverage: false,
+    retainProofCoverage: false,
+    retainSequenceTables: false,
+    retainTimeTables: false,
+    scoreLegendBonus: 0,
+    scoreRescueBonus: 0,
+    scoreEscalationBonus: 0,
+    includeCausalClosure: false,
+  }),
+  EXHAUSTIVE: Object.freeze({
+    maxSearchResults: 128,
+    maxRecentLookups: 1024,
+    tokenMinLength: 1,
+    retainMessageCoverage: true,
+    retainProofCoverage: true,
+    retainSequenceTables: true,
+    retainTimeTables: true,
+    scoreLegendBonus: 2,
+    scoreRescueBonus: 2,
+    scoreEscalationBonus: 2,
+    includeCausalClosure: true,
+  }),
+  FORENSIC: Object.freeze({
+    maxSearchResults: 256,
+    maxRecentLookups: 2048,
+    tokenMinLength: 1,
+    retainMessageCoverage: true,
+    retainProofCoverage: true,
+    retainSequenceTables: true,
+    retainTimeTables: true,
+    scoreLegendBonus: 3,
+    scoreRescueBonus: 3,
+    scoreEscalationBonus: 3,
+    includeCausalClosure: true,
+  }),
+  RAPID: Object.freeze({
+    maxSearchResults: 8,
+    maxRecentLookups: 32,
+    tokenMinLength: 3,
+    retainMessageCoverage: false,
+    retainProofCoverage: false,
+    retainSequenceTables: true,
+    retainTimeTables: false,
+    scoreLegendBonus: 0,
+    scoreRescueBonus: 0,
+    scoreEscalationBonus: 0,
+    includeCausalClosure: false,
+  }),
+  LEGEND_AUDIT: Object.freeze({
+    maxSearchResults: 64,
+    maxRecentLookups: 512,
+    tokenMinLength: 2,
+    retainMessageCoverage: true,
+    retainProofCoverage: true,
+    retainSequenceTables: true,
+    retainTimeTables: true,
+    scoreLegendBonus: 10,
+    scoreRescueBonus: 2,
+    scoreEscalationBonus: 1,
+    includeCausalClosure: true,
+  }),
+  PROOF_FOCUS: Object.freeze({
+    maxSearchResults: 32,
+    maxRecentLookups: 256,
+    tokenMinLength: 2,
+    retainMessageCoverage: true,
+    retainProofCoverage: true,
+    retainSequenceTables: true,
+    retainTimeTables: true,
+    scoreLegendBonus: 1,
+    scoreRescueBonus: 3,
+    scoreEscalationBonus: 2,
+    includeCausalClosure: true,
+  }),
+} as const);
+
+// ============================================================================
+// MARK: Extended index interfaces
+// ============================================================================
+
+export interface ChatReplayIndexAuditEntry {
+  readonly replayId: ChatReplayId;
+  readonly roomId: ChatRoomId;
+  readonly label: string;
+  readonly messageCount: number;
+  readonly visibleCount: number;
+  readonly shadowCount: number;
+  readonly sceneCount: number;
+  readonly proofEdgeCount: number;
+  readonly hasAnchor: boolean;
+  readonly hasCausalClosure: boolean;
+  readonly searchTokenCount: number;
+  readonly issues: readonly string[];
+}
+
+export interface ChatReplayIndexAuditReport {
+  readonly generatedAt: UnixMs;
+  readonly roomCount: number;
+  readonly replayCount: number;
+  readonly entries: readonly ChatReplayIndexAuditEntry[];
+  readonly orphanCount: number;
+  readonly duplicateAnchorCount: number;
+  readonly totalSearchTokens: number;
+  readonly issues: readonly string[];
+}
+
+export interface ChatReplayIndexDiff {
+  readonly addedReplayIds: readonly ChatReplayId[];
+  readonly removedReplayIds: readonly ChatReplayId[];
+  readonly roomsAffected: readonly ChatRoomId[];
+  readonly totalBefore: number;
+  readonly totalAfter: number;
+}
+
+export interface ChatReplayIndexStatsSummary {
+  readonly builtAt: UnixMs;
+  readonly roomCount: number;
+  readonly replayCount: number;
+  readonly totalMessageCoverage: number;
+  readonly totalSearchTokens: number;
+  readonly averageReplayRangeSpan: number;
+  readonly legendReplayCount: number;
+  readonly proofCoveredCount: number;
+  readonly mostActiveRoomId: ChatRoomId | null;
+  readonly orphanCount: number;
+}
+
+export interface ChatReplayBatchSearchRequest {
+  readonly queries: readonly ChatReplaySearchRequest[];
+  readonly mergeResults?: boolean;
+  readonly dedupeResults?: boolean;
+}
+
+export interface ChatReplayBatchSearchResult {
+  readonly queries: readonly ChatReplaySearchRequest[];
+  readonly results: readonly (readonly ChatReplaySearchHit[])[];
+  readonly merged: readonly ChatReplaySearchHit[];
+}
+
+export interface ChatReplaySceneFrequency {
+  readonly sceneClass: string;
+  readonly count: number;
+  readonly fraction: number;
+  readonly roomIds: readonly ChatRoomId[];
+}
+
+export interface ChatReplayLabelTaxonomy {
+  readonly labels: readonly string[];
+  readonly byToken: Readonly<Record<string, readonly ChatReplayId[]>>;
+  readonly topTokens: readonly { readonly token: string; readonly count: number }[];
+}
+
+export interface ChatReplayProofCoverageScore {
+  readonly replayId: ChatReplayId;
+  readonly roomId: ChatRoomId;
+  readonly edgeCount: number;
+  readonly coverageRatio: number;
+  readonly grade: 'FULL' | 'PARTIAL' | 'MINIMAL' | 'NONE';
+}
+
+// ============================================================================
+// MARK: Profile-aware index factory
+// ============================================================================
+
+export function createChatReplayIndexFromProfile(
+  profile: ChatReplayIndexProfile,
+  assembler: ChatReplayAssemblerApi = createChatReplayAssembler(),
+) {
+  const profileConfig = INDEX_PROFILE_OPTIONS[profile];
+  const resolvedConfig: Required<ChatReplayIndexConfig> = {
+    maxSearchResults: profileConfig.maxSearchResults,
+    maxRecentLookups: profileConfig.maxRecentLookups,
+    tokenMinLength: profileConfig.tokenMinLength,
+    retainMessageCoverage: profileConfig.retainMessageCoverage,
+    retainProofCoverage: profileConfig.retainProofCoverage,
+    retainSequenceTables: profileConfig.retainSequenceTables,
+    retainTimeTables: profileConfig.retainTimeTables,
+  };
+  const base = createChatReplayIndex(resolvedConfig, assembler);
+
+  return {
+    ...base,
+    profile,
+    profileConfig,
+
+    buildWithProfile(
+      state: ChatState,
+      options: ChatReplayIndexBuildOptions = {},
+    ): ChatReplayGlobalIndex {
+      return buildReplayGlobalIndex(resolvedConfig, assembler, state, options);
+    },
+
+    buildRoomWithProfile(state: ChatState, roomId: ChatRoomId): ChatReplayRoomIndex {
+      return buildReplayRoomIndex(resolvedConfig, assembler, state, roomId, {
+        includeTranscriptMaterial: true,
+        includeProofMaterial: profileConfig.retainProofCoverage,
+      });
+    },
+
+    batchSearch(
+      state: ChatState,
+      batch: ChatReplayBatchSearchRequest,
+    ): ChatReplayBatchSearchResult {
+      return batchSearchReplayIndex(resolvedConfig, assembler, state, batch);
+    },
+
+    buildAuditReport(state: ChatState): ChatReplayIndexAuditReport {
+      return buildIndexAuditReport(resolvedConfig, assembler, state);
+    },
+
+    computeDiff(
+      stateBefore: ChatState,
+      stateAfter: ChatState,
+    ): ChatReplayIndexDiff {
+      return computeIndexDiff(resolvedConfig, assembler, stateBefore, stateAfter);
+    },
+
+    getStatsSummary(state: ChatState): ChatReplayIndexStatsSummary {
+      return buildIndexStatsSummary(resolvedConfig, assembler, state);
+    },
+
+    buildSceneFrequency(state: ChatState): readonly ChatReplaySceneFrequency[] {
+      return buildSceneFrequencyReport(resolvedConfig, assembler, state);
+    },
+
+    buildLabelTaxonomy(state: ChatState): ChatReplayLabelTaxonomy {
+      return buildReplayLabelTaxonomy(resolvedConfig, assembler, state);
+    },
+
+    scoreProofCoverage(
+      state: ChatState,
+      roomId: ChatRoomId,
+    ): readonly ChatReplayProofCoverageScore[] {
+      return scoreRoomProofCoverage(resolvedConfig, assembler, state, roomId);
+    },
+
+    toJSON(): Readonly<{ profile: ChatReplayIndexProfile; config: ChatReplayIndexProfileConfig }> {
+      return Object.freeze({ profile, config: profileConfig });
+    },
+  };
+}
+
+export type ChatReplayProfileIndexApi = ReturnType<typeof createChatReplayIndexFromProfile>;
+
+// ============================================================================
+// MARK: Batch search
+// ============================================================================
+
+export function batchSearchReplayIndex(
+  config: Required<ChatReplayIndexConfig>,
+  assembler: ChatReplayAssemblerApi,
+  state: ChatState,
+  batch: ChatReplayBatchSearchRequest,
+): ChatReplayBatchSearchResult {
+  const results: (readonly ChatReplaySearchHit[])[] = [];
+
+  for (const query of batch.queries) {
+    const global = buildReplayGlobalIndex(config, assembler, state, {
+      roomIds: query.roomId ? [query.roomId] : undefined,
+      includeTranscriptMaterial: true,
+      includeProofMaterial: true,
+    });
+    results.push(searchReplayIndex(config, global, query));
+  }
+
+  let merged: ChatReplaySearchHit[] = [];
+  if (batch.mergeResults) {
+    const seen = new Set<ChatReplayId>();
+    for (const hits of results) {
+      for (const hit of hits) {
+        if (batch.dedupeResults && seen.has(hit.replayId)) {
+          continue;
+        }
+        seen.add(hit.replayId);
+        merged.push(hit);
+      }
+    }
+    merged.sort((left, right) => right.score - left.score);
+  }
+
+  return {
+    queries: batch.queries,
+    results,
+    merged,
+  };
+}
+
+// ============================================================================
+// MARK: Audit report
+// ============================================================================
+
+export function buildIndexAuditReport(
+  config: Required<ChatReplayIndexConfig>,
+  assembler: ChatReplayAssemblerApi,
+  state: ChatState,
+): ChatReplayIndexAuditReport {
+  const now = asUnixMs(assembler.ports.clock.now());
+  const global = buildReplayGlobalIndex(config, assembler, state, {
+    includeTranscriptMaterial: true,
+    includeProofMaterial: true,
+  });
+
+  const entries: ChatReplayIndexAuditEntry[] = [];
+  const issues: string[] = [];
+  const duplicateAnchorKeys = new Map<string, ChatReplayId[]>();
+  let orphanCount = 0;
+  let totalSearchTokens = 0;
+
+  for (const roomIndex of Object.values(global.rooms)) {
+    for (const entry of roomIndex.entries) {
+      const entryIssues: string[] = [];
+
+      if (entry.messageIds.length === 0) {
+        entryIssues.push('No message coverage.');
+        orphanCount += 1;
+      }
+
+      if (entry.proofEdges.length === 0) {
+        entryIssues.push('No proof edge coverage.');
+      }
+
+      const prior = duplicateAnchorKeys.get(entry.anchorKey);
+      if (prior) {
+        prior.push(entry.replayId);
+        entryIssues.push(`Duplicate anchor key shared with ${prior[0]}.`);
+      } else {
+        duplicateAnchorKeys.set(entry.anchorKey, [entry.replayId]);
+      }
+
+      const tokenCount = tokenize(entry.fullTextSearchText, config.tokenMinLength).length;
+      totalSearchTokens += tokenCount;
+
+      entries.push({
+        replayId: entry.replayId,
+        roomId: entry.roomId,
+        label: entry.label,
+        messageCount: entry.messageIds.length,
+        visibleCount: entry.visibleMessageIds.length,
+        shadowCount: entry.shadowMessageIds.length,
+        sceneCount: entry.scenes.length,
+        proofEdgeCount: entry.proofEdges.length,
+        hasAnchor: entry.anchorMessageId !== null,
+        hasCausalClosure: entry.causalClosure !== null,
+        searchTokenCount: tokenCount,
+        issues: entryIssues,
+      });
+    }
+
+    for (const issue of roomIndex.issues) {
+      issues.push(`[${String(roomIndex.roomId)}] ${issue.detail}`);
+    }
+  }
+
+  const duplicateAnchorCount = [...duplicateAnchorKeys.values()].filter((list) => list.length > 1).length;
+
+  return {
+    generatedAt: now,
+    roomCount: global.roomIds.length,
+    replayCount: entries.length,
+    entries,
+    orphanCount,
+    duplicateAnchorCount,
+    totalSearchTokens,
+    issues,
+  };
+}
+
+// ============================================================================
+// MARK: Index diff
+// ============================================================================
+
+export function computeIndexDiff(
+  config: Required<ChatReplayIndexConfig>,
+  assembler: ChatReplayAssemblerApi,
+  stateBefore: ChatState,
+  stateAfter: ChatState,
+): ChatReplayIndexDiff {
+  const before = buildReplayGlobalIndex(config, assembler, stateBefore, {
+    includeTranscriptMaterial: false,
+    includeProofMaterial: false,
+  });
+  const after = buildReplayGlobalIndex(config, assembler, stateAfter, {
+    includeTranscriptMaterial: false,
+    includeProofMaterial: false,
+  });
+
+  const beforeIds = new Set(Object.keys(before.byReplayId) as ChatReplayId[]);
+  const afterIds = new Set(Object.keys(after.byReplayId) as ChatReplayId[]);
+  const addedReplayIds: ChatReplayId[] = [];
+  const removedReplayIds: ChatReplayId[] = [];
+  const roomsAffected = new Set<ChatRoomId>();
+
+  for (const replayId of afterIds) {
+    if (!beforeIds.has(replayId)) {
+      addedReplayIds.push(replayId);
+      const entry = after.byReplayId[replayId];
+      if (entry) {
+        roomsAffected.add(entry.roomId);
+      }
+    }
+  }
+
+  for (const replayId of beforeIds) {
+    if (!afterIds.has(replayId)) {
+      removedReplayIds.push(replayId);
+      const entry = before.byReplayId[replayId];
+      if (entry) {
+        roomsAffected.add(entry.roomId);
+      }
+    }
+  }
+
+  return {
+    addedReplayIds,
+    removedReplayIds,
+    roomsAffected: [...roomsAffected],
+    totalBefore: beforeIds.size,
+    totalAfter: afterIds.size,
+  };
+}
+
+// ============================================================================
+// MARK: Stats summary
+// ============================================================================
+
+export function buildIndexStatsSummary(
+  config: Required<ChatReplayIndexConfig>,
+  assembler: ChatReplayAssemblerApi,
+  state: ChatState,
+): ChatReplayIndexStatsSummary {
+  const global = buildReplayGlobalIndex(config, assembler, state, {
+    includeTranscriptMaterial: true,
+    includeProofMaterial: true,
+  });
+
+  let totalMessageCoverage = 0;
+  let totalSearchTokens = 0;
+  let totalRangeSpan = 0;
+  let legendReplayCount = 0;
+  let proofCoveredCount = 0;
+  let orphanCount = 0;
+  let mostActiveRoomId: ChatRoomId | null = null;
+  let mostActiveCount = -1;
+
+  for (const roomIndex of Object.values(global.rooms)) {
+    const count = roomIndex.artifactCount;
+    if (count > mostActiveCount) {
+      mostActiveCount = count;
+      mostActiveRoomId = roomIndex.roomId;
+    }
+
+    for (const entry of roomIndex.entries) {
+      totalMessageCoverage += entry.messageIds.length;
+      totalSearchTokens += tokenize(entry.fullTextSearchText, config.tokenMinLength).length;
+      totalRangeSpan += entry.rangeEnd - entry.rangeStart + 1;
+
+      if (entry.label.toLowerCase().includes('legend')) {
+        legendReplayCount += 1;
+      }
+
+      if (entry.proofEdges.length > 0) {
+        proofCoveredCount += 1;
+      }
+
+      if (entry.messageIds.length === 0) {
+        orphanCount += 1;
+      }
+    }
+  }
+
+  const replayCount = Object.keys(global.byReplayId).length;
+
+  return {
+    builtAt: global.builtAt,
+    roomCount: global.roomIds.length,
+    replayCount,
+    totalMessageCoverage,
+    totalSearchTokens,
+    averageReplayRangeSpan: replayCount > 0 ? totalRangeSpan / replayCount : 0,
+    legendReplayCount,
+    proofCoveredCount,
+    mostActiveRoomId,
+    orphanCount,
+  };
+}
+
+// ============================================================================
+// MARK: Scene frequency analysis
+// ============================================================================
+
+export function buildSceneFrequencyReport(
+  config: Required<ChatReplayIndexConfig>,
+  assembler: ChatReplayAssemblerApi,
+  state: ChatState,
+): readonly ChatReplaySceneFrequency[] {
+  const global = buildReplayGlobalIndex(config, assembler, state, {
+    includeTranscriptMaterial: true,
+    includeProofMaterial: false,
+  });
+
+  const classCounts = new Map<string, { count: number; roomIds: Set<ChatRoomId> }>();
+
+  for (const roomIndex of Object.values(global.rooms)) {
+    for (const entry of roomIndex.entries) {
+      for (const scene of entry.scenes) {
+        const key = scene.sceneClass;
+        const existing = classCounts.get(key) ?? { count: 0, roomIds: new Set<ChatRoomId>() };
+        existing.count += 1;
+        existing.roomIds.add(entry.roomId);
+        classCounts.set(key, existing);
+      }
+    }
+  }
+
+  const totalScenes = [...classCounts.values()].reduce((sum, entry) => sum + entry.count, 0);
+
+  return [...classCounts.entries()]
+    .map(([sceneClass, data]) => ({
+      sceneClass,
+      count: data.count,
+      fraction: totalScenes > 0 ? data.count / totalScenes : 0,
+      roomIds: [...data.roomIds],
+    }))
+    .sort((left, right) => right.count - left.count);
+}
+
+// ============================================================================
+// MARK: Label taxonomy
+// ============================================================================
+
+export function buildReplayLabelTaxonomy(
+  config: Required<ChatReplayIndexConfig>,
+  assembler: ChatReplayAssemblerApi,
+  state: ChatState,
+): ChatReplayLabelTaxonomy {
+  const global = buildReplayGlobalIndex(config, assembler, state, {
+    includeTranscriptMaterial: false,
+    includeProofMaterial: false,
+  });
+
+  const labels: string[] = [];
+  const byToken: Record<string, ChatReplayId[]> = {};
+  const tokenFreq = new Map<string, number>();
+
+  for (const roomIndex of Object.values(global.rooms)) {
+    for (const entry of roomIndex.entries) {
+      if (!labels.includes(entry.label)) {
+        labels.push(entry.label);
+      }
+
+      for (const token of tokenize(entry.normalizedLabel, config.tokenMinLength)) {
+        const bucket = byToken[token] ?? [];
+        if (!bucket.includes(entry.replayId)) {
+          bucket.push(entry.replayId);
+        }
+        byToken[token] = bucket;
+        tokenFreq.set(token, (tokenFreq.get(token) ?? 0) + 1);
+      }
+    }
+  }
+
+  const topTokens = [...tokenFreq.entries()]
+    .map(([token, count]) => ({ token, count }))
+    .sort((left, right) => right.count - left.count)
+    .slice(0, 20);
+
+  const frozenByToken: Readonly<Record<string, readonly ChatReplayId[]>> = {};
+  for (const [key, value] of Object.entries(byToken)) {
+    (frozenByToken as Record<string, readonly ChatReplayId[]>)[key] = value;
+  }
+
+  return {
+    labels,
+    byToken: frozenByToken,
+    topTokens,
+  };
+}
+
+// ============================================================================
+// MARK: Proof coverage scoring
+// ============================================================================
+
+export function scoreRoomProofCoverage(
+  config: Required<ChatReplayIndexConfig>,
+  assembler: ChatReplayAssemblerApi,
+  state: ChatState,
+  roomId: ChatRoomId,
+): readonly ChatReplayProofCoverageScore[] {
+  const roomIndex = buildReplayRoomIndex(config, assembler, state, roomId, {
+    includeTranscriptMaterial: true,
+    includeProofMaterial: true,
+  });
+
+  return roomIndex.entries.map((entry) => {
+    const edgeCount = entry.proofEdges.length;
+    const messageCount = Math.max(1, entry.messageIds.length);
+    const coverageRatio = Math.min(1, edgeCount / messageCount);
+    const grade: ChatReplayProofCoverageScore['grade'] =
+      edgeCount === 0 ? 'NONE' :
+      coverageRatio >= 0.9 ? 'FULL' :
+      coverageRatio >= 0.5 ? 'PARTIAL' :
+      'MINIMAL';
+
+    return {
+      replayId: entry.replayId,
+      roomId: entry.roomId,
+      edgeCount,
+      coverageRatio,
+      grade,
+    };
+  });
+}
+
+// ============================================================================
+// MARK: Incremental index helpers
+// ============================================================================
+
+export function incrementalUpdateRoomIndex(
+  config: Required<ChatReplayIndexConfig>,
+  assembler: ChatReplayAssemblerApi,
+  existingIndex: ChatReplayRoomIndex,
+  state: ChatState,
+  changedReplayIds: readonly ChatReplayId[],
+): ChatReplayRoomIndex {
+  if (changedReplayIds.length === 0) {
+    return existingIndex;
+  }
+  return buildReplayRoomIndex(config, assembler, state, existingIndex.roomId, {
+    includeTranscriptMaterial: true,
+    includeProofMaterial: config.retainProofCoverage,
+  });
+}
+
+export function filterIndexBySceneClass(
+  roomIndex: ChatReplayRoomIndex,
+  sceneClass: string,
+): readonly ChatReplayRoomIndexEntry[] {
+  return roomIndex.entries.filter((entry) =>
+    entry.scenes.some((scene) => scene.sceneClass === sceneClass),
+  );
+}
+
+export function filterIndexByLegend(
+  roomIndex: ChatReplayRoomIndex,
+): readonly ChatReplayRoomIndexEntry[] {
+  return roomIndex.entries.filter((entry) =>
+    entry.label.toLowerCase().includes('legend') ||
+    entry.scenes.some((scene) => scene.tags.includes('legend')),
+  );
+}
+
+export function filterIndexByProofCoverage(
+  roomIndex: ChatReplayRoomIndex,
+  minEdges = 1,
+): readonly ChatReplayRoomIndexEntry[] {
+  return roomIndex.entries.filter((entry) => entry.proofEdges.length >= minEdges);
+}
+
+export function sortIndexByRelevance(
+  entries: readonly ChatReplayRoomIndexEntry[],
+): readonly ChatReplayRoomIndexEntry[] {
+  return [...entries].sort((left, right) => {
+    const leftScore =
+      left.proofEdges.length * 2 +
+      left.scenes.length +
+      (left.label.toLowerCase().includes('legend') ? 5 : 0);
+    const rightScore =
+      right.proofEdges.length * 2 +
+      right.scenes.length +
+      (right.label.toLowerCase().includes('legend') ? 5 : 0);
+    return rightScore - leftScore;
+  });
+}
+
+// ============================================================================
+// MARK: Factory functions
+// ============================================================================
+
+export function createStandardReplayIndex(
+  assembler: ChatReplayAssemblerApi = createChatReplayAssembler(),
+): ChatReplayProfileIndexApi {
+  return createChatReplayIndexFromProfile('STANDARD', assembler);
+}
+
+export function createLightweightReplayIndex(
+  assembler: ChatReplayAssemblerApi = createChatReplayAssembler(),
+): ChatReplayProfileIndexApi {
+  return createChatReplayIndexFromProfile('LIGHTWEIGHT', assembler);
+}
+
+export function createExhaustiveReplayIndex(
+  assembler: ChatReplayAssemblerApi = createChatReplayAssembler(),
+): ChatReplayProfileIndexApi {
+  return createChatReplayIndexFromProfile('EXHAUSTIVE', assembler);
+}
+
+export function createForensicReplayIndex(
+  assembler: ChatReplayAssemblerApi = createChatReplayAssembler(),
+): ChatReplayProfileIndexApi {
+  return createChatReplayIndexFromProfile('FORENSIC', assembler);
+}
+
+export function createRapidReplayIndex(
+  assembler: ChatReplayAssemblerApi = createChatReplayAssembler(),
+): ChatReplayProfileIndexApi {
+  return createChatReplayIndexFromProfile('RAPID', assembler);
+}
+
+export function createLegendAuditReplayIndex(
+  assembler: ChatReplayAssemblerApi = createChatReplayAssembler(),
+): ChatReplayProfileIndexApi {
+  return createChatReplayIndexFromProfile('LEGEND_AUDIT', assembler);
+}
+
+export function createProofFocusReplayIndex(
+  assembler: ChatReplayAssemblerApi = createChatReplayAssembler(),
+): ChatReplayProfileIndexApi {
+  return createChatReplayIndexFromProfile('PROOF_FOCUS', assembler);
+}
+
+// ============================================================================
+// MARK: Combined module object
+// ============================================================================
+
+/**
+ * Combined namespace object for the chat replay index subsystem.
+ *
+ *   import { ChatReplayIndexModule } from './ChatReplayIndex';
+ *   ChatReplayIndexModule.create();
+ *   ChatReplayIndexModule.createLegendAudit();
+ *   ChatReplayIndexModule.buildGlobalIndex(config, assembler, state, {});
+ */
+export const ChatReplayIndexModule = Object.freeze({
+  create: createChatReplayIndex,
+  createFromProfile: createChatReplayIndexFromProfile,
+  createStandard: createStandardReplayIndex,
+  createLightweight: createLightweightReplayIndex,
+  createExhaustive: createExhaustiveReplayIndex,
+  createForensic: createForensicReplayIndex,
+  createRapid: createRapidReplayIndex,
+  createLegendAudit: createLegendAuditReplayIndex,
+  createProofFocus: createProofFocusReplayIndex,
+  buildGlobalIndex: buildReplayGlobalIndex,
+  buildRoomIndex: buildReplayRoomIndex,
+  search: searchReplayIndex,
+  queryRange: queryReplayRange,
+  findNearestSequence: findNearestSequenceEntry,
+  buildDiagnostics: buildReplayDiagnostics,
+  batchSearch: batchSearchReplayIndex,
+  buildAuditReport: buildIndexAuditReport,
+  computeDiff: computeIndexDiff,
+  buildStats: buildIndexStatsSummary,
+  buildSceneFrequency: buildSceneFrequencyReport,
+  buildLabelTaxonomy: buildReplayLabelTaxonomy,
+  scoreProofCoverage: scoreRoomProofCoverage,
+  incrementalUpdate: incrementalUpdateRoomIndex,
+  filterBySceneClass: filterIndexBySceneClass,
+  filterByLegend: filterIndexByLegend,
+  filterByProofCoverage: filterIndexByProofCoverage,
+  sortByRelevance: sortIndexByRelevance,
+  profiles: INDEX_PROFILE_OPTIONS,
+} as const);

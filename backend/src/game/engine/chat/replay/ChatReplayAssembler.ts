@@ -1530,3 +1530,945 @@ function fnv1a32(input: string): string {
   }
   return `fnv1a32_${(hash >>> 0).toString(16).padStart(8, '0')}`;
 }
+
+function computeRelevanceScore(bundle: ChatReplayBundle): number {
+  let score = 0;
+  const total = bundle.entries.length;
+  if (total === 0) {
+    return 0;
+  }
+  score += Math.min(0.3, bundle.witnessLines.filter((line) => line.role === 'ANCHOR').length * 0.3);
+  score += Math.min(0.2, bundle.witnessLines.filter((line) => line.role === 'RESCUE').length * 0.1);
+  score += Math.min(0.15, bundle.witnessLines.filter((line) => line.role === 'ESCALATION').length * 0.075);
+  score += Math.min(0.15, bundle.scenes.length * 0.05);
+  score += Math.min(0.1, bundle.replayProofEdges.length * 0.033);
+  if (bundle.anchorCausalClosure && Object.keys(bundle.anchorCausalClosure).length > 0) {
+    score += 0.1;
+  }
+  return Math.min(1, score);
+}
+
+function maxByCount<T>(counts: Map<T, number>): T | null {
+  let winner: T | null = null;
+  let best = -1;
+  for (const [key, count] of counts.entries()) {
+    if (count > best) {
+      best = count;
+      winner = key;
+    }
+  }
+  return winner;
+}
+
+// ============================================================================
+// MARK: Assembly profiles
+// ============================================================================
+
+export type ChatReplayAssemblerProfile =
+  | 'STANDARD'
+  | 'CINEMATIC'
+  | 'RAPID'
+  | 'FORENSIC'
+  | 'LEGEND_FOCUS'
+  | 'SHADOW_AWARE'
+  | 'MINIMAL';
+
+export interface ChatReplayAssemblerProfileConfig {
+  readonly radiusBefore: number;
+  readonly radiusAfter: number;
+  readonly includeShadow: boolean;
+  readonly dedupeByAnchorKey: boolean;
+  readonly forceCreateWhenEmpty: boolean;
+  readonly defaultStrategy: ChatReplayAnchorStrategy;
+  readonly defaultReason: ChatReplayAssemblyReason;
+  readonly sceneBoundaryGapMs: number;
+  readonly legendRadiusBoost: number;
+  readonly proofyRadiusBoost: number;
+  readonly maxEntriesPerScene: number;
+}
+
+export const ASSEMBLER_PROFILE_OPTIONS: Readonly<
+  Record<ChatReplayAssemblerProfile, ChatReplayAssemblerProfileConfig>
+> = Object.freeze({
+  STANDARD: Object.freeze({
+    radiusBefore: 4,
+    radiusAfter: 4,
+    includeShadow: false,
+    dedupeByAnchorKey: true,
+    forceCreateWhenEmpty: false,
+    defaultStrategy: 'LATEST_VISIBLE' as ChatReplayAnchorStrategy,
+    defaultReason: 'PLAYER_MESSAGE_ACCEPTED' as ChatReplayAssemblyReason,
+    sceneBoundaryGapMs: 15_000,
+    legendRadiusBoost: 2,
+    proofyRadiusBoost: 1,
+    maxEntriesPerScene: 12,
+  }),
+  CINEMATIC: Object.freeze({
+    radiusBefore: 8,
+    radiusAfter: 8,
+    includeShadow: true,
+    dedupeByAnchorKey: true,
+    forceCreateWhenEmpty: false,
+    defaultStrategy: 'LATEST_ANY' as ChatReplayAnchorStrategy,
+    defaultReason: 'LEGEND_MOMENT' as ChatReplayAssemblyReason,
+    sceneBoundaryGapMs: 30_000,
+    legendRadiusBoost: 5,
+    proofyRadiusBoost: 3,
+    maxEntriesPerScene: 32,
+  }),
+  RAPID: Object.freeze({
+    radiusBefore: 2,
+    radiusAfter: 2,
+    includeShadow: false,
+    dedupeByAnchorKey: true,
+    forceCreateWhenEmpty: false,
+    defaultStrategy: 'LATEST_VISIBLE' as ChatReplayAnchorStrategy,
+    defaultReason: 'NPC_MESSAGE_EMITTED' as ChatReplayAssemblyReason,
+    sceneBoundaryGapMs: 6_000,
+    legendRadiusBoost: 1,
+    proofyRadiusBoost: 1,
+    maxEntriesPerScene: 6,
+  }),
+  FORENSIC: Object.freeze({
+    radiusBefore: 10,
+    radiusAfter: 10,
+    includeShadow: true,
+    dedupeByAnchorKey: false,
+    forceCreateWhenEmpty: true,
+    defaultStrategy: 'EXPLICIT_RANGE' as ChatReplayAnchorStrategy,
+    defaultReason: 'RECOVERY_REPAIR' as ChatReplayAssemblyReason,
+    sceneBoundaryGapMs: 60_000,
+    legendRadiusBoost: 5,
+    proofyRadiusBoost: 5,
+    maxEntriesPerScene: 64,
+  }),
+  LEGEND_FOCUS: Object.freeze({
+    radiusBefore: 6,
+    radiusAfter: 6,
+    includeShadow: false,
+    dedupeByAnchorKey: true,
+    forceCreateWhenEmpty: false,
+    defaultStrategy: 'LATEST_VISIBLE' as ChatReplayAnchorStrategy,
+    defaultReason: 'LEGEND_MOMENT' as ChatReplayAssemblyReason,
+    sceneBoundaryGapMs: 20_000,
+    legendRadiusBoost: 8,
+    proofyRadiusBoost: 2,
+    maxEntriesPerScene: 20,
+  }),
+  SHADOW_AWARE: Object.freeze({
+    radiusBefore: 5,
+    radiusAfter: 5,
+    includeShadow: true,
+    dedupeByAnchorKey: true,
+    forceCreateWhenEmpty: false,
+    defaultStrategy: 'LATEST_ANY' as ChatReplayAnchorStrategy,
+    defaultReason: 'NPC_MESSAGE_EMITTED' as ChatReplayAssemblyReason,
+    sceneBoundaryGapMs: 15_000,
+    legendRadiusBoost: 2,
+    proofyRadiusBoost: 2,
+    maxEntriesPerScene: 16,
+  }),
+  MINIMAL: Object.freeze({
+    radiusBefore: 1,
+    radiusAfter: 1,
+    includeShadow: false,
+    dedupeByAnchorKey: true,
+    forceCreateWhenEmpty: false,
+    defaultStrategy: 'LATEST_VISIBLE' as ChatReplayAnchorStrategy,
+    defaultReason: 'MANUAL_REQUEST' as ChatReplayAssemblyReason,
+    sceneBoundaryGapMs: 5_000,
+    legendRadiusBoost: 0,
+    proofyRadiusBoost: 0,
+    maxEntriesPerScene: 4,
+  }),
+} as const);
+
+// ============================================================================
+// MARK: Diagnostics and audit interfaces
+// ============================================================================
+
+export interface ChatReplayAssemblerDiagnostics {
+  readonly profile: ChatReplayAssemblerProfile | null;
+  readonly config: ChatReplayAssemblerProfileConfig | null;
+  readonly supportedProfiles: readonly ChatReplayAssemblerProfile[];
+  readonly assemblyCountEstimate: number;
+  readonly portIdentifiers: Readonly<{
+    hasClock: boolean;
+    hasIds: boolean;
+    hasHash: boolean;
+    hasLogger: boolean;
+  }>;
+}
+
+export interface ChatReplayAssemblerAuditEntry {
+  readonly roomId: ChatRoomId;
+  readonly replayId: ChatReplayId;
+  readonly label: string;
+  readonly reason: ChatReplayAssemblyReason;
+  readonly anchorStrategy: ChatReplayAnchorStrategy;
+  readonly entryCount: number;
+  readonly visibleCount: number;
+  readonly shadowCount: number;
+  readonly sceneBeatCount: number;
+  readonly witnessLineCount: number;
+  readonly replayProofEdgeCount: number;
+  readonly anchorMessageId: ChatMessageId | null;
+  readonly anchorSequence: number;
+  readonly rangeStart: number;
+  readonly rangeEnd: number;
+  readonly createdAt: UnixMs;
+  readonly warnings: readonly string[];
+}
+
+export interface ChatReplayAssemblerAuditReport {
+  readonly roomId: ChatRoomId;
+  readonly generatedAt: UnixMs;
+  readonly artifactCount: number;
+  readonly totalEntries: number;
+  readonly totalVisibleEntries: number;
+  readonly totalShadowEntries: number;
+  readonly totalSceneBeats: number;
+  readonly totalWitnessLines: number;
+  readonly totalProofEdges: number;
+  readonly entries: readonly ChatReplayAssemblerAuditEntry[];
+  readonly issues: readonly string[];
+}
+
+export interface ChatReplayAssemblerDiff {
+  readonly roomId: ChatRoomId;
+  readonly addedReplayIds: readonly ChatReplayId[];
+  readonly removedReplayIds: readonly ChatReplayId[];
+  readonly modifiedReplayIds: readonly ChatReplayId[];
+  readonly unchangedReplayIds: readonly ChatReplayId[];
+  readonly totalBefore: number;
+  readonly totalAfter: number;
+}
+
+export interface ChatReplayAssemblerStatsSummary {
+  readonly roomId: ChatRoomId;
+  readonly artifactCount: number;
+  readonly totalEntries: number;
+  readonly averageEntriesPerArtifact: number;
+  readonly averageRangeSpan: number;
+  readonly visibleFraction: number;
+  readonly shadowFraction: number;
+  readonly mostCommonReason: ChatReplayAssemblyReason | null;
+  readonly mostCommonStrategy: ChatReplayAnchorStrategy | null;
+  readonly legendArtifactCount: number;
+  readonly proofCoveredCount: number;
+}
+
+// ============================================================================
+// MARK: Bundle scoring interfaces
+// ============================================================================
+
+export interface ChatReplayBundleScore {
+  readonly replayId: ChatReplayId;
+  readonly roomId: ChatRoomId;
+  readonly relevanceScore: number;
+  readonly densityScore: number;
+  readonly legendScore: number;
+  readonly proofScore: number;
+  readonly compositeScore: number;
+  readonly anchorQuality: 'STRONG' | 'MODERATE' | 'WEAK' | 'EMPTY';
+  readonly exposureClass: 'VISIBLE_ONLY' | 'SHADOW_HEAVY' | 'MIXED' | 'EMPTY';
+}
+
+// ============================================================================
+// MARK: Batch assembly interfaces
+// ============================================================================
+
+export interface ChatReplayBatchAssemblyRequest {
+  readonly roomId: ChatRoomId;
+  readonly requests: readonly ChatReplayAssemblyRequest[];
+  readonly stopOnFirstFailure?: boolean;
+  readonly dedupeAcrossRequests?: boolean;
+}
+
+export interface ChatReplayBatchAssemblyResult {
+  readonly roomId: ChatRoomId;
+  readonly state: ChatState;
+  readonly assembled: readonly ChatReplayAppendResult[];
+  readonly skipped: number;
+  readonly failed: number;
+}
+
+export interface ChatReplayMultiRoomBatchRequest {
+  readonly rooms: readonly ChatReplayBatchAssemblyRequest[];
+}
+
+export interface ChatReplayMultiRoomBatchResult {
+  readonly results: readonly ChatReplayBatchAssemblyResult[];
+  readonly totalAssembled: number;
+  readonly totalSkipped: number;
+  readonly totalFailed: number;
+  readonly finalState: ChatState;
+}
+
+// ============================================================================
+// MARK: Profile-aware assembler factory
+// ============================================================================
+
+export function createChatReplayAssemblerFromProfile(
+  profile: ChatReplayAssemblerProfile,
+  options: ChatReplayAssemblerOptions = {},
+) {
+  const profileConfig = ASSEMBLER_PROFILE_OPTIONS[profile];
+  const base = createChatReplayAssembler(options);
+
+  return {
+    ...base,
+    profile,
+    profileConfig,
+
+    assembleWithProfile(
+      state: ChatState,
+      partial: Omit<ChatReplayAssemblyRequest, 'roomId'> & { readonly roomId: ChatRoomId },
+    ): ChatReplayArtifactEnvelope | null {
+      const merged: ChatReplayAssemblyRequest = {
+        radiusBefore: profileConfig.radiusBefore,
+        radiusAfter: profileConfig.radiusAfter,
+        includeShadow: profileConfig.includeShadow,
+        dedupeByAnchorKey: profileConfig.dedupeByAnchorKey,
+        forceCreateWhenEmpty: profileConfig.forceCreateWhenEmpty,
+        strategy: profileConfig.defaultStrategy,
+        reason: profileConfig.defaultReason,
+        ...partial,
+      };
+      return assembleReplayArtifactEnvelope(base.ports, base.proofContext, state, merged);
+    },
+
+    assembleAndAppendWithProfile(
+      state: ChatState,
+      partial: Omit<ChatReplayAssemblyRequest, 'roomId'> & { readonly roomId: ChatRoomId },
+    ): ChatReplayAppendResult | null {
+      const merged: ChatReplayAssemblyRequest = {
+        radiusBefore: profileConfig.radiusBefore,
+        radiusAfter: profileConfig.radiusAfter,
+        includeShadow: profileConfig.includeShadow,
+        dedupeByAnchorKey: profileConfig.dedupeByAnchorKey,
+        forceCreateWhenEmpty: profileConfig.forceCreateWhenEmpty,
+        strategy: profileConfig.defaultStrategy,
+        reason: profileConfig.defaultReason,
+        ...partial,
+      };
+      const envelope = assembleReplayArtifactEnvelope(base.ports, base.proofContext, state, merged);
+      if (!envelope) {
+        return null;
+      }
+      return appendReplayArtifactEnvelope(state, envelope);
+    },
+
+    batchAssembleAndAppend(
+      state: ChatState,
+      batch: ChatReplayBatchAssemblyRequest,
+    ): ChatReplayBatchAssemblyResult {
+      return batchAssembleAndAppend(base.ports, base.proofContext, state, batch);
+    },
+
+    batchMultiRoom(
+      state: ChatState,
+      batch: ChatReplayMultiRoomBatchRequest,
+    ): ChatReplayMultiRoomBatchResult {
+      return batchMultiRoom(base.ports, base.proofContext, state, batch);
+    },
+
+    getDiagnostics(): ChatReplayAssemblerDiagnostics {
+      return {
+        profile,
+        config: profileConfig,
+        supportedProfiles: Object.keys(ASSEMBLER_PROFILE_OPTIONS) as ChatReplayAssemblerProfile[],
+        assemblyCountEstimate: 0,
+        portIdentifiers: {
+          hasClock: Boolean(base.ports.clock),
+          hasIds: Boolean(base.ports.ids),
+          hasHash: Boolean(base.ports.hash),
+          hasLogger: Boolean(base.ports.logger),
+        },
+      };
+    },
+
+    buildAuditReport(state: ChatState, roomId: ChatRoomId): ChatReplayAssemblerAuditReport {
+      return buildAssemblerAuditReport(base.ports, base.proofContext, state, roomId);
+    },
+
+    computeDiff(
+      stateBefore: ChatState,
+      stateAfter: ChatState,
+      roomId: ChatRoomId,
+    ): ChatReplayAssemblerDiff {
+      return computeAssemblerDiff(stateBefore, stateAfter, roomId);
+    },
+
+    getStatsSummary(state: ChatState, roomId: ChatRoomId): ChatReplayAssemblerStatsSummary {
+      return buildAssemblerStatsSummary(base.ports, base.proofContext, state, roomId);
+    },
+
+    scoreBundle(bundle: ChatReplayBundle): ChatReplayBundleScore {
+      return scoreBundleRelevance(bundle);
+    },
+
+    serializeBundle(bundle: ChatReplayBundle): string {
+      return JSON.stringify(bundle, null, 0);
+    },
+
+    clone() {
+      return createChatReplayAssemblerFromProfile(profile, options);
+    },
+
+    toJSON(): Readonly<{ profile: ChatReplayAssemblerProfile; config: ChatReplayAssemblerProfileConfig }> {
+      return Object.freeze({ profile, config: profileConfig });
+    },
+  };
+}
+
+export type ChatReplayProfileAssemblerApi = ReturnType<typeof createChatReplayAssemblerFromProfile>;
+
+// ============================================================================
+// MARK: Standalone extended assembler
+// ============================================================================
+
+export function extendChatReplayAssembler(base: ChatReplayAssemblerApi) {
+  return {
+    ...base,
+
+    getDiagnostics(): ChatReplayAssemblerDiagnostics {
+      return {
+        profile: null,
+        config: null,
+        supportedProfiles: Object.keys(ASSEMBLER_PROFILE_OPTIONS) as ChatReplayAssemblerProfile[],
+        assemblyCountEstimate: 0,
+        portIdentifiers: {
+          hasClock: Boolean(base.ports.clock),
+          hasIds: Boolean(base.ports.ids),
+          hasHash: Boolean(base.ports.hash),
+          hasLogger: Boolean(base.ports.logger),
+        },
+      };
+    },
+
+    buildAuditReport(state: ChatState, roomId: ChatRoomId): ChatReplayAssemblerAuditReport {
+      return buildAssemblerAuditReport(base.ports, base.proofContext, state, roomId);
+    },
+
+    computeDiff(
+      stateBefore: ChatState,
+      stateAfter: ChatState,
+      roomId: ChatRoomId,
+    ): ChatReplayAssemblerDiff {
+      return computeAssemblerDiff(stateBefore, stateAfter, roomId);
+    },
+
+    getStatsSummary(state: ChatState, roomId: ChatRoomId): ChatReplayAssemblerStatsSummary {
+      return buildAssemblerStatsSummary(base.ports, base.proofContext, state, roomId);
+    },
+
+    batchAssembleAndAppend(
+      state: ChatState,
+      batch: ChatReplayBatchAssemblyRequest,
+    ): ChatReplayBatchAssemblyResult {
+      return batchAssembleAndAppend(base.ports, base.proofContext, state, batch);
+    },
+
+    batchMultiRoom(
+      state: ChatState,
+      batch: ChatReplayMultiRoomBatchRequest,
+    ): ChatReplayMultiRoomBatchResult {
+      return batchMultiRoom(base.ports, base.proofContext, state, batch);
+    },
+
+    scoreBundle(bundle: ChatReplayBundle): ChatReplayBundleScore {
+      return scoreBundleRelevance(bundle);
+    },
+
+    toJSON(): Readonly<{ profile: null }> {
+      return Object.freeze({ profile: null });
+    },
+  };
+}
+
+// ============================================================================
+// MARK: Batch assembly functions
+// ============================================================================
+
+export function batchAssembleAndAppend(
+  ports: ChatReplayAssemblerPorts,
+  proofContext: ChatProofChainContext,
+  state: ChatState,
+  batch: ChatReplayBatchAssemblyRequest,
+): ChatReplayBatchAssemblyResult {
+  let next = state;
+  const assembled: ChatReplayAppendResult[] = [];
+  const seenAnchorKeys = new Set<string>();
+  let skipped = 0;
+  let failed = 0;
+
+  for (const request of batch.requests) {
+    if (request.roomId !== batch.roomId) {
+      failed += 1;
+      continue;
+    }
+
+    const envelope = assembleReplayArtifactEnvelope(ports, proofContext, next, request);
+
+    if (!envelope) {
+      skipped += 1;
+      if (batch.stopOnFirstFailure) {
+        break;
+      }
+      continue;
+    }
+
+    if (batch.dedupeAcrossRequests && seenAnchorKeys.has(envelope.artifact.anchorKey)) {
+      skipped += 1;
+      continue;
+    }
+
+    seenAnchorKeys.add(envelope.artifact.anchorKey);
+    const result = appendReplayArtifactEnvelope(next, envelope);
+    next = result.state;
+    assembled.push(result);
+  }
+
+  return {
+    roomId: batch.roomId,
+    state: next,
+    assembled,
+    skipped,
+    failed,
+  };
+}
+
+export function batchMultiRoom(
+  ports: ChatReplayAssemblerPorts,
+  proofContext: ChatProofChainContext,
+  state: ChatState,
+  batch: ChatReplayMultiRoomBatchRequest,
+): ChatReplayMultiRoomBatchResult {
+  let next = state;
+  const results: ChatReplayBatchAssemblyResult[] = [];
+  let totalAssembled = 0;
+  let totalSkipped = 0;
+  let totalFailed = 0;
+
+  for (const roomBatch of batch.rooms) {
+    const result = batchAssembleAndAppend(ports, proofContext, next, roomBatch);
+    next = result.state;
+    results.push(result);
+    totalAssembled += result.assembled.length;
+    totalSkipped += result.skipped;
+    totalFailed += result.failed;
+  }
+
+  return {
+    results,
+    totalAssembled,
+    totalSkipped,
+    totalFailed,
+    finalState: next,
+  };
+}
+
+// ============================================================================
+// MARK: Audit report
+// ============================================================================
+
+export function buildAssemblerAuditReport(
+  ports: ChatReplayAssemblerPorts,
+  proofContext: ChatProofChainContext,
+  state: ChatState,
+  roomId: ChatRoomId,
+): ChatReplayAssemblerAuditReport {
+  const now = asUnixMs(ports.clock.now());
+  const artifacts = selectRoomReplayArtifacts(state, roomId);
+  const entries: ChatReplayAssemblerAuditEntry[] = [];
+  const issues: string[] = [];
+  let totalEntries = 0;
+  let totalVisible = 0;
+  let totalShadow = 0;
+  let totalSceneBeats = 0;
+  let totalWitnesses = 0;
+  let totalProofEdges = 0;
+
+  for (const artifact of artifacts) {
+    const bundle = assembleBundleByReplayId(ports, proofContext, state, roomId, artifact.id);
+
+    if (!bundle) {
+      issues.push(`Artifact ${String(artifact.id)} could not produce a bundle.`);
+      continue;
+    }
+
+    const replayProofEdges = selectProofEdgesToReplay(state.proofChain, roomId, artifact.id);
+    const warnings: string[] = [...bundle.transcriptAuditWarnings];
+
+    if (replayProofEdges.length === 0) {
+      warnings.push('No proof edge coverage.');
+    }
+
+    if (bundle.entries.length === 0) {
+      warnings.push('Bundle has no entries.');
+    }
+
+    const auditEntry: ChatReplayAssemblerAuditEntry = {
+      roomId,
+      replayId: artifact.id,
+      label: artifact.label,
+      reason: (artifact.metadata.reason as ChatReplayAssemblyReason) ?? 'MANUAL_REQUEST',
+      anchorStrategy: (artifact.metadata.anchorStrategy as ChatReplayAnchorStrategy) ?? 'LATEST_VISIBLE',
+      entryCount: bundle.entries.length,
+      visibleCount: bundle.visibleEntries.length,
+      shadowCount: bundle.shadowEntries.length,
+      sceneBeatCount: bundle.scenes.length,
+      witnessLineCount: bundle.witnessLines.length,
+      replayProofEdgeCount: replayProofEdges.length,
+      anchorMessageId: bundle.anchor.anchorMessageId,
+      anchorSequence: Number(bundle.anchor.anchorSequence),
+      rangeStart: artifact.range.start,
+      rangeEnd: artifact.range.end,
+      createdAt: artifact.createdAt,
+      warnings,
+    };
+
+    entries.push(auditEntry);
+    totalEntries += bundle.entries.length;
+    totalVisible += bundle.visibleEntries.length;
+    totalShadow += bundle.shadowEntries.length;
+    totalSceneBeats += bundle.scenes.length;
+    totalWitnesses += bundle.witnessLines.length;
+    totalProofEdges += replayProofEdges.length;
+  }
+
+  return {
+    roomId,
+    generatedAt: now,
+    artifactCount: artifacts.length,
+    totalEntries,
+    totalVisibleEntries: totalVisible,
+    totalShadowEntries: totalShadow,
+    totalSceneBeats,
+    totalWitnessLines: totalWitnesses,
+    totalProofEdges,
+    entries,
+    issues,
+  };
+}
+
+// ============================================================================
+// MARK: Diff
+// ============================================================================
+
+export function computeAssemblerDiff(
+  stateBefore: ChatState,
+  stateAfter: ChatState,
+  roomId: ChatRoomId,
+): ChatReplayAssemblerDiff {
+  const beforeMap = new Map(
+    selectRoomReplayArtifacts(stateBefore, roomId).map((artifact) => [artifact.id, artifact]),
+  );
+  const afterMap = new Map(
+    selectRoomReplayArtifacts(stateAfter, roomId).map((artifact) => [artifact.id, artifact]),
+  );
+  const addedReplayIds: ChatReplayId[] = [];
+  const removedReplayIds: ChatReplayId[] = [];
+  const modifiedReplayIds: ChatReplayId[] = [];
+  const unchangedReplayIds: ChatReplayId[] = [];
+
+  for (const [replayId, after] of afterMap.entries()) {
+    const before = beforeMap.get(replayId);
+    if (!before) {
+      addedReplayIds.push(replayId);
+    } else if (before.anchorKey !== after.anchorKey || before.label !== after.label) {
+      modifiedReplayIds.push(replayId);
+    } else {
+      unchangedReplayIds.push(replayId);
+    }
+  }
+
+  for (const replayId of beforeMap.keys()) {
+    if (!afterMap.has(replayId)) {
+      removedReplayIds.push(replayId);
+    }
+  }
+
+  return {
+    roomId,
+    addedReplayIds,
+    removedReplayIds,
+    modifiedReplayIds,
+    unchangedReplayIds,
+    totalBefore: beforeMap.size,
+    totalAfter: afterMap.size,
+  };
+}
+
+// ============================================================================
+// MARK: Stats summary
+// ============================================================================
+
+export function buildAssemblerStatsSummary(
+  ports: ChatReplayAssemblerPorts,
+  proofContext: ChatProofChainContext,
+  state: ChatState,
+  roomId: ChatRoomId,
+): ChatReplayAssemblerStatsSummary {
+  const artifacts = selectRoomReplayArtifacts(state, roomId);
+
+  if (artifacts.length === 0) {
+    return {
+      roomId,
+      artifactCount: 0,
+      totalEntries: 0,
+      averageEntriesPerArtifact: 0,
+      averageRangeSpan: 0,
+      visibleFraction: 0,
+      shadowFraction: 0,
+      mostCommonReason: null,
+      mostCommonStrategy: null,
+      legendArtifactCount: 0,
+      proofCoveredCount: 0,
+    };
+  }
+
+  const reasonCounts = new Map<ChatReplayAssemblyReason, number>();
+  const strategyCounts = new Map<ChatReplayAnchorStrategy, number>();
+  let totalEntries = 0;
+  let totalVisible = 0;
+  let totalShadow = 0;
+  let totalRangeSpan = 0;
+  let legendCount = 0;
+  let proofCoveredCount = 0;
+
+  for (const artifact of artifacts) {
+    const bundle = assembleBundleByReplayId(ports, proofContext, state, roomId, artifact.id);
+    if (!bundle) {
+      continue;
+    }
+
+    totalEntries += bundle.entries.length;
+    totalVisible += bundle.visibleEntries.length;
+    totalShadow += bundle.shadowEntries.length;
+    totalRangeSpan += artifact.range.end - artifact.range.start + 1;
+
+    const reason = artifact.metadata.reason as ChatReplayAssemblyReason | undefined;
+    if (reason) {
+      reasonCounts.set(reason, (reasonCounts.get(reason) ?? 0) + 1);
+    }
+
+    const strategy = artifact.metadata.anchorStrategy as ChatReplayAnchorStrategy | undefined;
+    if (strategy) {
+      strategyCounts.set(strategy, (strategyCounts.get(strategy) ?? 0) + 1);
+    }
+
+    if (artifact.label.toLowerCase().includes('legend')) {
+      legendCount += 1;
+    }
+
+    const edges = selectProofEdgesToReplay(state.proofChain, roomId, artifact.id);
+    if (edges.length > 0) {
+      proofCoveredCount += 1;
+    }
+  }
+
+  return {
+    roomId,
+    artifactCount: artifacts.length,
+    totalEntries,
+    averageEntriesPerArtifact: totalEntries / artifacts.length,
+    averageRangeSpan: totalRangeSpan / artifacts.length,
+    visibleFraction: totalEntries > 0 ? totalVisible / totalEntries : 0,
+    shadowFraction: totalEntries > 0 ? totalShadow / totalEntries : 0,
+    mostCommonReason: maxByCount(reasonCounts),
+    mostCommonStrategy: maxByCount(strategyCounts),
+    legendArtifactCount: legendCount,
+    proofCoveredCount,
+  };
+}
+
+// ============================================================================
+// MARK: Bundle scoring and classification
+// ============================================================================
+
+export function scoreBundleRelevance(bundle: ChatReplayBundle): ChatReplayBundleScore {
+  const totalEntries = bundle.entries.length;
+  const visibleEntries = bundle.visibleEntries.length;
+  const shadowEntries = bundle.shadowEntries.length;
+  const hasLegend = bundleContainsLegendMoment(bundle);
+  const hasProof = bundle.replayProofEdges.length > 0;
+  const hasAnchor = bundle.anchor.anchorMessageId !== null;
+
+  const relevanceScore = computeRelevanceScore(bundle);
+  const densityScore = totalEntries > 0
+    ? Math.min(1, bundle.scenes.length / Math.max(1, totalEntries / 4))
+    : 0;
+  const legendScore = hasLegend ? 1 : 0;
+  const proofScore = hasProof ? Math.min(1, bundle.replayProofEdges.length / 3) : 0;
+  const compositeScore = relevanceScore * 0.4 + densityScore * 0.2 + legendScore * 0.25 + proofScore * 0.15;
+
+  const anchorQuality: ChatReplayBundleScore['anchorQuality'] =
+    totalEntries === 0 ? 'EMPTY' :
+    !hasAnchor ? 'WEAK' :
+    (bundle.anchorCausalClosure && Object.keys(bundle.anchorCausalClosure).length > 0) ? 'STRONG' :
+    'MODERATE';
+
+  const exposureClass: ChatReplayBundleScore['exposureClass'] = bundleExposureClass(bundle);
+
+  return {
+    replayId: bundle.artifact.id,
+    roomId: bundle.artifact.roomId,
+    relevanceScore,
+    densityScore,
+    legendScore,
+    proofScore,
+    compositeScore,
+    anchorQuality,
+    exposureClass,
+  };
+}
+
+export function summarizeBundleWitnesses(bundle: ChatReplayBundle): readonly string[] {
+  return bundle.witnessLines.map(
+    (line) => `${line.role}:${line.displayName}:seq${Number(line.sequenceNumber)}`,
+  );
+}
+
+export function bundleContainsLegendMoment(bundle: ChatReplayBundle): boolean {
+  return (
+    bundle.witnessLines.some((line) => line.tags.includes('legend')) ||
+    bundle.artifact.label.toLowerCase().includes('legend') ||
+    bundle.entries.some((entry) => entry.message.replay.legendId !== null)
+  );
+}
+
+export function bundleExposureClass(
+  bundle: ChatReplayBundle,
+): 'VISIBLE_ONLY' | 'SHADOW_HEAVY' | 'MIXED' | 'EMPTY' {
+  const visible = bundle.visibleEntries.length;
+  const shadow = bundle.shadowEntries.length;
+  if (visible === 0 && shadow === 0) {
+    return 'EMPTY';
+  }
+  if (shadow === 0) {
+    return 'VISIBLE_ONLY';
+  }
+  if (visible === 0 || shadow > visible) {
+    return 'SHADOW_HEAVY';
+  }
+  return 'MIXED';
+}
+
+export function classifyAnchorQuality(
+  bundle: ChatReplayBundle,
+): 'STRONG' | 'MODERATE' | 'WEAK' | 'EMPTY' {
+  if (bundle.entries.length === 0) {
+    return 'EMPTY';
+  }
+  if (!bundle.anchor.anchorMessageId) {
+    return 'WEAK';
+  }
+  if (bundle.anchorCausalClosure && Object.keys(bundle.anchorCausalClosure).length > 0) {
+    return 'STRONG';
+  }
+  return 'MODERATE';
+}
+
+export function estimateBundleDensity(bundle: ChatReplayBundle): number {
+  if (bundle.entries.length === 0 || bundle.scenes.length === 0) {
+    return 0;
+  }
+  return bundle.scenes.length / bundle.entries.length;
+}
+
+// ============================================================================
+// MARK: Factory functions
+// ============================================================================
+
+export function createStandardReplayAssembler(
+  options: ChatReplayAssemblerOptions = {},
+): ChatReplayProfileAssemblerApi {
+  return createChatReplayAssemblerFromProfile('STANDARD', options);
+}
+
+export function createCinematicReplayAssembler(
+  options: ChatReplayAssemblerOptions = {},
+): ChatReplayProfileAssemblerApi {
+  return createChatReplayAssemblerFromProfile('CINEMATIC', options);
+}
+
+export function createRapidReplayAssembler(
+  options: ChatReplayAssemblerOptions = {},
+): ChatReplayProfileAssemblerApi {
+  return createChatReplayAssemblerFromProfile('RAPID', options);
+}
+
+export function createForensicReplayAssembler(
+  options: ChatReplayAssemblerOptions = {},
+): ChatReplayProfileAssemblerApi {
+  return createChatReplayAssemblerFromProfile('FORENSIC', options);
+}
+
+export function createLegendFocusReplayAssembler(
+  options: ChatReplayAssemblerOptions = {},
+): ChatReplayProfileAssemblerApi {
+  return createChatReplayAssemblerFromProfile('LEGEND_FOCUS', options);
+}
+
+export function createShadowAwareReplayAssembler(
+  options: ChatReplayAssemblerOptions = {},
+): ChatReplayProfileAssemblerApi {
+  return createChatReplayAssemblerFromProfile('SHADOW_AWARE', options);
+}
+
+export function createMinimalReplayAssembler(
+  options: ChatReplayAssemblerOptions = {},
+): ChatReplayProfileAssemblerApi {
+  return createChatReplayAssemblerFromProfile('MINIMAL', options);
+}
+
+// ============================================================================
+// MARK: Combined module object
+// ============================================================================
+
+/**
+ * Combined namespace object for the chat replay assembler subsystem.
+ *
+ *   import { ChatReplayAssemblerModule } from './ChatReplayAssembler';
+ *   ChatReplayAssemblerModule.create();
+ *   ChatReplayAssemblerModule.createCinematic();
+ *   ChatReplayAssemblerModule.batchAssemble(ports, proofCtx, state, batch);
+ */
+export const ChatReplayAssemblerModule = Object.freeze({
+  create: createChatReplayAssembler,
+  createFromProfile: createChatReplayAssemblerFromProfile,
+  extend: extendChatReplayAssembler,
+  createStandard: createStandardReplayAssembler,
+  createCinematic: createCinematicReplayAssembler,
+  createRapid: createRapidReplayAssembler,
+  createForensic: createForensicReplayAssembler,
+  createLegendFocus: createLegendFocusReplayAssembler,
+  createShadowAware: createShadowAwareReplayAssembler,
+  createMinimal: createMinimalReplayAssembler,
+  assembleEnvelope: assembleReplayArtifactEnvelope,
+  appendEnvelope: appendReplayArtifactEnvelope,
+  assembleBundleByReplayId,
+  assembleBundle: assembleReplayBundle,
+  resolveAnchor: resolveReplayAnchor,
+  createArtifact: createReplayArtifact,
+  verifyCoverage: verifyReplayCoverage,
+  repairCoverage: repairReplayCoverage,
+  rebuildRoom: rebuildReplayRoom,
+  compactRoom: compactReplayRoom,
+  buildSceneBeats,
+  buildWitnessLines,
+  batchAssemble: batchAssembleAndAppend,
+  batchMultiRoom,
+  buildAuditReport: buildAssemblerAuditReport,
+  computeDiff: computeAssemblerDiff,
+  buildStats: buildAssemblerStatsSummary,
+  scoreBundle: scoreBundleRelevance,
+  summarizeWitnesses: summarizeBundleWitnesses,
+  bundleContainsLegend: bundleContainsLegendMoment,
+  bundleExposureClass,
+  classifyAnchorQuality,
+  estimateDensity: estimateBundleDensity,
+  profiles: ASSEMBLER_PROFILE_OPTIONS,
+} as const);
