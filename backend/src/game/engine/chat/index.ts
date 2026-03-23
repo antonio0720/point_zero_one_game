@@ -59,6 +59,9 @@ import * as Helper from './HelperResponseOrchestrator';
 import * as Npc from './ChatNpcOrchestrator';
 import * as Engine from './ChatEngine';
 import * as Social from './social';
+import * as Combat from './combat';
+import * as Continuity from './continuity';
+import * as Dealroom from './dealroom';
 
 import * as Phase4 from './phase4_index';
 
@@ -110,30 +113,34 @@ import {
 // MARK: Root barrel export surface
 // ============================================================================
 
+// ── Authoritative flat re-exports (no name conflicts) ───────────────────────
+// Modules that share function/type names with siblings are exported ONLY as
+// namespace objects in the named module block below. This prevents TS2308
+// ambiguous-re-export errors while keeping 100% of the surface accessible.
 export * from './types';
 export * from './ChatRuntimeConfig';
 export * from './ChatState';
 export * from './ChatReducer';
 export * from './ChatMessageFactory';
 export * from './ChatTranscriptLedger';
-export * from './ChatProofChain';
+// ChatProofChain: namespace-only (appendProofEdge conflicts with ChatState)
 export * from './ChatRatePolicy';
 export * from './ChatModerationPolicy';
-export * from './ChatChannelPolicy';
+// ChatChannelPolicy: namespace-only (selectRoomSessions/selectVisibleOccupants/roomHasActiveInvasion conflict)
 export * from './ChatCommandParser';
 export * from './ChatEventBridge';
-export * from './ChatPresenceState';
-export * from './ChatSessionState';
+// ChatPresenceState: namespace-only (removePresenceSnapshot/upsertPresenceSnapshot conflict with ChatState)
+// ChatSessionState: namespace-only (normalizeSessionRole/isSessionMuted/hasSession conflict)
 export * from './ChatInvasionOrchestrator';
-export * from './HaterResponseOrchestrator';
-export * from './HelperResponseOrchestrator';
-export * from './ChatNpcOrchestrator';
+// HaterResponseOrchestrator: namespace-only (createDefaultLogger conflicts with ChatEventBridge)
+// HelperResponseOrchestrator: namespace-only (multiple conflicts with HaterResponseOrchestrator)
+// ChatNpcOrchestrator: namespace-only (multiple conflicts with HelperResponseOrchestrator)
 export * from './ChatEngine';
-export * from './phase4_index';
+// phase4_index: namespace-only (BotId/ChatFeatureSnapshot/ChatScenePlan conflict with types)
 export * from './experience/ChatDramaOrchestrator';
 export * from './experience/ChatScenePlanner';
 export * from './experience/ChatMomentLedger';
-export * from './experience/ChatSilencePolicy';
+// ChatSilencePolicy: namespace-only (ChatSilenceDecision conflicts with ./types)
 export * from './combat/ChatBossFightEngine';
 export * from './combat/ChatCounterResolver';
 export * from './combat/ChatTelegraphPolicy';
@@ -149,7 +156,7 @@ export * from './continuity/CarryoverResolver';
 export * from './postrun';
 export * from './phase1';
 export * from './phase2';
-export * from './intelligence';
+// intelligence barrel: namespace-only (ChatScenePlanner/BotId/ChatFeatureSnapshot conflict with phase4_index+types)
 export * from './intelligence/ml/EmotionModel';
 export * from './intelligence/ml/PressureAffectModel';
 export * from './intelligence/ml/AttachmentModel';
@@ -264,6 +271,9 @@ export {
   PressureAffectModelRuntime as ChatPressureAffectModelModule,
   AttachmentModelRuntime as ChatAttachmentModelModule,
   Social as ChatSocialModule,
+  Combat as ChatCombatBarrelModule,
+  Continuity as ChatContinuityBarrelModule,
+  Dealroom as ChatDealroomBarrelModule,
 };
 
 export const ChatEngineClass = Engine.ChatEngine;
