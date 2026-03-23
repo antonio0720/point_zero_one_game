@@ -1880,3 +1880,173 @@ function normalizeTrainerOptions(options: PolicyTrainerOptions): NormalizedPolic
     ignoreSequenceTokens: Object.freeze([...(options.ignoreSequenceTokens ?? DEFAULT_POLICY_TRAINER_OPTIONS.ignoreSequenceTokens)]),
   });
 }
+
+// ============================================================================
+// MARK: Label decision integration surface (uses LabelDecision + LabelValue)
+// ============================================================================
+
+export interface PolicyLabelDecisionSummary {
+  readonly task: TrainingTaskKey;
+  readonly primaryLabel: string;
+  readonly confidence01: number;
+  readonly conflictingEvidence: boolean;
+  readonly scalarTargetCount: number;
+  readonly booleanTargetCount: number;
+  readonly categoricalTargetCount: number;
+  readonly dominantScalarValue: LabelValue;
+  readonly rationaleCount: number;
+  readonly evidenceCount: number;
+}
+
+export function summarizeLabelDecision(decision: LabelDecision): PolicyLabelDecisionSummary {
+  const scalarKeys = Object.keys(decision.scalarTargets);
+  const boolKeys = Object.keys(decision.booleanTargets);
+  const catKeys = Object.keys(decision.categoricalTargets);
+
+  let dominantScalar: LabelValue = null;
+  if (scalarKeys.length > 0) {
+    const key = scalarKeys[0];
+    dominantScalar = decision.scalarTargets[key] ?? null;
+  }
+
+  return Object.freeze({
+    task: decision.task,
+    primaryLabel: decision.primaryLabel,
+    confidence01: decision.confidence01,
+    conflictingEvidence: decision.conflictingEvidence,
+    scalarTargetCount: scalarKeys.length,
+    booleanTargetCount: boolKeys.length,
+    categoricalTargetCount: catKeys.length,
+    dominantScalarValue: dominantScalar,
+    rationaleCount: decision.rationale.length,
+    evidenceCount: decision.evidence.length,
+  });
+}
+
+export function batchSummarizeLabelDecisions(
+  decisions: readonly LabelDecision[],
+): readonly PolicyLabelDecisionSummary[] {
+  return Object.freeze(decisions.map(summarizeLabelDecision));
+}
+
+// ============================================================================
+// MARK: Evidence ref audit (uses TrainingEvidenceRef)
+// ============================================================================
+
+export interface PolicyEvidenceRefAudit {
+  readonly totalRefs: number;
+  readonly byKind: Readonly<Record<string, number>>;
+  readonly uniqueIds: number;
+  readonly withTimestamp: number;
+  readonly withoutTimestamp: number;
+  readonly dominantKind: string | null;
+}
+
+export function auditEvidenceRefs(
+  refs: readonly TrainingEvidenceRef[],
+): PolicyEvidenceRefAudit {
+  if (refs.length === 0) {
+    return Object.freeze({
+      totalRefs: 0,
+      byKind: Object.freeze({}),
+      uniqueIds: 0,
+      withTimestamp: 0,
+      withoutTimestamp: 0,
+      dominantKind: null,
+    });
+  }
+
+  const byKind: Record<string, number> = {};
+  let withTimestamp = 0;
+  let withoutTimestamp = 0;
+  const ids = new Set<string>();
+
+  for (const ref of refs) {
+    byKind[ref.kind] = (byKind[ref.kind] ?? 0) + 1;
+    ids.add(ref.id);
+    if (ref.at !== null) {
+      withTimestamp += 1;
+    } else {
+      withoutTimestamp += 1;
+    }
+  }
+
+  const dominantKind = Object.entries(byKind)
+    .sort((a, b) => b[1] - a[1])
+    .map((entry) => entry[0])[0] ?? null;
+
+  return Object.freeze({
+    totalRefs: refs.length,
+    byKind: Object.freeze(byKind),
+    uniqueIds: ids.size,
+    withTimestamp,
+    withoutTimestamp,
+    dominantKind,
+  });
+}
+
+// ============================================================================
+// MARK: Dataset training-readiness check (uses TrainingTaskDataset)
+// ============================================================================
+
+export interface PolicyDatasetReadinessCheck {
+  readonly task: TrainingTaskKey;
+  readonly totalExamples: number;
+  readonly trainExamples: number;
+  readonly validationExamples: number;
+  readonly testExamples: number;
+  readonly hasMinimumTrainExamples: boolean;
+  readonly hasValidationSplit: boolean;
+  readonly hasTestSplit: boolean;
+  readonly splitBalanced: boolean;
+  readonly readinessVerdict: 'READY' | 'INSUFFICIENT_DATA' | 'MISSING_SPLITS';
+}
+
+export function checkDatasetReadiness(
+  dataset: TrainingTaskDataset,
+  minimumTrainExamples = 20,
+): PolicyDatasetReadinessCheck {
+  const trainCount = dataset.bySplit['TRAIN']?.length ?? 0;
+  const valCount = dataset.bySplit['VALIDATION']?.length ?? 0;
+  const testCount = dataset.bySplit['TEST']?.length ?? 0;
+  const total = dataset.examples.length;
+
+  const hasMin = trainCount >= minimumTrainExamples;
+  const hasVal = valCount > 0;
+  const hasTest = testCount > 0;
+
+  const splitRatio = total > 0 ? trainCount / total : 0;
+  const splitBalanced = splitRatio >= 0.5 && splitRatio <= 0.85;
+
+  let verdict: 'READY' | 'INSUFFICIENT_DATA' | 'MISSING_SPLITS';
+  if (!hasMin) {
+    verdict = 'INSUFFICIENT_DATA';
+  } else if (!hasVal || !hasTest) {
+    verdict = 'MISSING_SPLITS';
+  } else {
+    verdict = 'READY';
+  }
+
+  return Object.freeze({
+    task: dataset.task,
+    totalExamples: total,
+    trainExamples: trainCount,
+    validationExamples: valCount,
+    testExamples: testCount,
+    hasMinimumTrainExamples: hasMin,
+    hasValidationSplit: hasVal,
+    hasTestSplit: hasTest,
+    splitBalanced,
+    readinessVerdict: verdict,
+  });
+}
+
+// ============================================================================
+// MARK: Version sentinel
+// ============================================================================
+
+export const CHAT_POLICY_TRAINER_MODULE_VERSION = '2026.03.14.extended' as const;
+
+export const CHAT_POLICY_TRAINER_MODULE_ID =
+  'backend/src/game/engine/chat/training/PolicyTrainer#v' +
+  CHAT_POLICY_TRAINER_MODULE_VERSION as string;

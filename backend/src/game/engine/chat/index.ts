@@ -63,6 +63,7 @@ import * as Combat from './combat';
 import * as Continuity from './continuity';
 import * as Dealroom from './dealroom';
 import * as Telemetry from './telemetry';
+import * as Training from './training';
 
 import * as Phase4 from './phase4_index';
 
@@ -276,6 +277,7 @@ export {
   Continuity as ChatContinuityBarrelModule,
   Dealroom as ChatDealroomBarrelModule,
   Telemetry as ChatTelemetryBarrelModule,
+  Training as ChatTrainingBarrelModule,
 };
 
 export const ChatEngineClass = Engine.ChatEngine;

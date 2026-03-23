@@ -984,3 +984,1036 @@ function conflictingReplyVsRage(replyCount: number, rageCount: number): boolean 
 function boolean_to_int(value: boolean): number {
   return value ? 1 : 0;
 }
+
+// ============================================================================
+// MARK: Inference snapshot label helpers
+// ============================================================================
+
+export interface InferenceLabelDecision {
+  readonly snapshotId: string;
+  readonly inferredAt: number;
+  readonly source: string;
+  readonly task: string;
+  readonly predictedLabel: string | null;
+  readonly score01: number;
+  readonly acceptedByPolicy: boolean;
+  readonly evidenceRefs: readonly TrainingEvidenceRef[];
+  readonly metadata: Readonly<Record<string, JsonValue>>;
+}
+
+export function buildInferenceLabelDecision(
+  snapshot: TrainingInferenceSnapshot,
+  window: TrainingWindow,
+): InferenceLabelDecision {
+  const score01 = clamp01(snapshot.score01 ?? 0);
+  const acceptedByPolicy = score01 >= 0.5 && snapshot.label !== null;
+
+  const evidenceRefs: TrainingEvidenceRef[] = [];
+  for (const entry of window.anchorMessages.slice(0, 3)) {
+    evidenceRefs.push(Object.freeze({
+      kind: 'MESSAGE',
+      id: entry.message.id,
+      at: entry.message.createdAt,
+      role: entry.message.attribution.sourceType,
+    }));
+  }
+
+  return Object.freeze({
+    snapshotId: snapshot.id,
+    inferredAt: snapshot.inferredAt,
+    source: snapshot.source,
+    task: String(snapshot.task),
+    predictedLabel: snapshot.label,
+    score01,
+    acceptedByPolicy,
+    evidenceRefs: Object.freeze(evidenceRefs),
+    metadata: Object.freeze({
+      room_id: snapshot.roomId,
+      session_id: snapshot.sessionId ?? null,
+      message_id: snapshot.messageId ?? null,
+      event_id: snapshot.eventId ?? null,
+      accepted_int: boolean_to_int(acceptedByPolicy),
+    }),
+  });
+}
+
+export function batchBuildInferenceLabelDecisions(
+  snapshots: readonly TrainingInferenceSnapshot[],
+  window: TrainingWindow,
+): readonly InferenceLabelDecision[] {
+  return Object.freeze(snapshots.map((snapshot) => buildInferenceLabelDecision(snapshot, window)));
+}
+
+export function inferenceAcceptanceRate01(decisions: readonly InferenceLabelDecision[]): number {
+  if (decisions.length === 0) return 0;
+  return decisions.filter((d) => d.acceptedByPolicy).length / decisions.length;
+}
+
+export function inferenceAverageScore01(decisions: readonly InferenceLabelDecision[]): number {
+  return average(decisions.map((d) => d.score01));
+}
+
+// ============================================================================
+// MARK: Label quality report
+// ============================================================================
+
+export interface LabelFrequencyEntry {
+  readonly label: string;
+  readonly count: number;
+  readonly proportion01: number;
+}
+
+export interface LabelQualityReport {
+  readonly task: TrainingTaskKey;
+  readonly totalExamples: number;
+  readonly averageConfidence01: number;
+  readonly conflictingEvidenceRate01: number;
+  readonly weakEvidenceRate01: number;
+  readonly labelEntropy01: number;
+  readonly coverageRate01: number;
+  readonly topLabels: readonly LabelFrequencyEntry[];
+  readonly lowConfidenceExamples: readonly string[];
+  readonly conflictingExamples: readonly string[];
+  readonly qualityScore01: number;
+  readonly findings: readonly string[];
+  readonly recommendations: readonly string[];
+}
+
+export function assessLabelQuality(
+  dataset: LabeledTaskDataset,
+  options: LabelAssemblyOptions = {},
+): LabelQualityReport {
+  const opts: NormalizedLabelAssemblyOptions = Object.freeze({ ...DEFAULT_OPTIONS, ...options });
+  const examples = dataset.examples;
+  const totalExamples = examples.length;
+
+  if (totalExamples === 0) {
+    return Object.freeze({
+      task: dataset.task,
+      totalExamples: 0,
+      averageConfidence01: 0,
+      conflictingEvidenceRate01: 0,
+      weakEvidenceRate01: 0,
+      labelEntropy01: 0,
+      coverageRate01: 0,
+      topLabels: Object.freeze([]),
+      lowConfidenceExamples: Object.freeze([]),
+      conflictingExamples: Object.freeze([]),
+      qualityScore01: 0,
+      findings: Object.freeze(['No examples in dataset.']),
+      recommendations: Object.freeze(['Collect authoritative examples before assessing quality.']),
+    });
+  }
+
+  const averageConfidence01 = average(examples.map((ex) => ex.labels.confidence01));
+  const conflictingCount = examples.filter((ex) => ex.labels.conflictingEvidence).length;
+  const conflictingEvidenceRate01 = conflictingCount / totalExamples;
+  const weakCount = examples.filter(
+    (ex) => scoreEvidenceWeight(ex.labels.evidence) < opts.minimumEvidenceWeight,
+  ).length;
+  const weakEvidenceRate01 = weakCount / totalExamples;
+
+  const labelCounts = new Map<string, number>();
+  for (const ex of examples) {
+    labelCounts.set(ex.labels.primaryLabel, (labelCounts.get(ex.labels.primaryLabel) ?? 0) + 1);
+  }
+  const topLabels: LabelFrequencyEntry[] = [...labelCounts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([label, count]) => Object.freeze({ label, count, proportion01: count / totalExamples }));
+
+  const labelEntropy01 = shannonEntropy(topLabels.map((entry) => entry.proportion01));
+  const coverageRate01 = clamp01(topLabels.length / 10);
+
+  const lowConfidenceExamples = examples
+    .filter((ex) => ex.labels.confidence01 < opts.minimumConfidence01 + 0.1)
+    .slice(0, 10)
+    .map((ex) => ex.id);
+
+  const conflictingExamples = examples
+    .filter((ex) => ex.labels.conflictingEvidence)
+    .slice(0, 10)
+    .map((ex) => ex.id);
+
+  const qualityScore01 = clamp01(
+    (averageConfidence01 * 0.35)
+    + (labelEntropy01 * 0.2)
+    + (coverageRate01 * 0.15)
+    + ((1 - conflictingEvidenceRate01) * 0.15)
+    + ((1 - weakEvidenceRate01) * 0.15),
+  );
+
+  const findings: string[] = [];
+  const recommendations: string[] = [];
+
+  if (averageConfidence01 < 0.5) {
+    findings.push(`Average label confidence is low at ${averageConfidence01.toFixed(3)}.`);
+    recommendations.push('Review post-anchor evidence windows and improve evidence chain depth.');
+  }
+  if (conflictingEvidenceRate01 > 0.2) {
+    findings.push(`${(conflictingEvidenceRate01 * 100).toFixed(1)}% of examples have conflicting evidence.`);
+    recommendations.push('Audit anchor selection logic and evidence window boundaries.');
+  }
+  if (weakEvidenceRate01 > 0.3) {
+    findings.push(`${(weakEvidenceRate01 * 100).toFixed(1)}% of examples have weak evidence.`);
+    recommendations.push('Increase post-anchor window size or enrich telemetry coverage.');
+  }
+  if (labelEntropy01 < 0.3) {
+    findings.push(`Label distribution is imbalanced (entropy=${labelEntropy01.toFixed(3)}).`);
+    recommendations.push('Ensure sampling covers all label classes equally.');
+  }
+  if (findings.length === 0) {
+    findings.push('Label quality is within expected bounds.');
+    recommendations.push('Continue monitoring across subsequent training cycles.');
+  }
+
+  return Object.freeze({
+    task: dataset.task,
+    totalExamples,
+    averageConfidence01,
+    conflictingEvidenceRate01,
+    weakEvidenceRate01,
+    labelEntropy01,
+    coverageRate01,
+    topLabels: Object.freeze(topLabels),
+    lowConfidenceExamples: Object.freeze(lowConfidenceExamples),
+    conflictingExamples: Object.freeze(conflictingExamples),
+    qualityScore01,
+    findings: Object.freeze(uniqueStrings(findings)),
+    recommendations: Object.freeze(uniqueStrings(recommendations)),
+  });
+}
+
+// ============================================================================
+// MARK: Label audit record
+// ============================================================================
+
+export interface LabelAuditRecord {
+  readonly exampleId: string;
+  readonly task: TrainingTaskKey;
+  readonly split: TrainingSplit;
+  readonly primaryLabel: string;
+  readonly secondaryLabels: readonly string[];
+  readonly confidence01: number;
+  readonly evidenceWeight01: number;
+  readonly conflictingEvidence: boolean;
+  readonly evidenceCount: number;
+  readonly scalarTargetCount: number;
+  readonly booleanTargetCount: number;
+  readonly categoricalTargetCount: number;
+  readonly rationaleLines: number;
+  readonly inferenceCount: number;
+  readonly replayCount: number;
+  readonly auditedAt: number;
+}
+
+export function buildLabelAuditRecord(example: LabeledTrainingExample): LabelAuditRecord {
+  return Object.freeze({
+    exampleId: example.id,
+    task: example.task,
+    split: example.split,
+    primaryLabel: example.labels.primaryLabel,
+    secondaryLabels: example.labels.secondaryLabels,
+    confidence01: example.labels.confidence01,
+    evidenceWeight01: scoreEvidenceWeight(example.labels.evidence),
+    conflictingEvidence: example.labels.conflictingEvidence,
+    evidenceCount: example.labels.evidence.length,
+    scalarTargetCount: Object.keys(example.labels.scalarTargets).length,
+    booleanTargetCount: Object.keys(example.labels.booleanTargets).length,
+    categoricalTargetCount: Object.keys(example.labels.categoricalTargets).length,
+    rationaleLines: example.labels.rationale.length,
+    inferenceCount: example.window.inferenceSnapshots.length,
+    replayCount: example.window.replayArtifacts.length,
+    auditedAt: Date.now(),
+  });
+}
+
+export function buildLabelAuditRecords(dataset: LabeledTaskDataset): readonly LabelAuditRecord[] {
+  return Object.freeze(dataset.examples.map(buildLabelAuditRecord));
+}
+
+export function exportLabelAuditNdjson(records: readonly LabelAuditRecord[]): string {
+  return records.map((record) => JSON.stringify(record)).join('\n');
+}
+
+// ============================================================================
+// MARK: Label calibration profile
+// ============================================================================
+
+export interface LabelCalibrationBucket {
+  readonly minConfidence01: number;
+  readonly maxConfidence01: number;
+  readonly exampleCount: number;
+  readonly empiricalAccuracy01: number;
+  readonly predictedMeanConfidence01: number;
+  readonly calibrationError01: number;
+}
+
+export interface LabelCalibrationProfile {
+  readonly task: TrainingTaskKey;
+  readonly buckets: readonly LabelCalibrationBucket[];
+  readonly overallCalibrationError01: number;
+  readonly overallAccuracy01: number;
+  readonly isWellCalibrated: boolean;
+}
+
+export function buildLabelCalibrationProfile(
+  dataset: LabeledTaskDataset,
+  predictFn: (example: LabeledTrainingExample) => { readonly predictedLabel: string; readonly confidence01: number },
+  bucketCount = 10,
+): LabelCalibrationProfile {
+  const examples = dataset.examples;
+  const bucketsAcc = Array.from(
+    { length: bucketCount },
+    () => ({ count: 0, confidenceSum: 0, correctCount: 0 }),
+  );
+
+  let overallCorrect = 0;
+  for (const example of examples) {
+    const prediction = predictFn(example);
+    const bucketIndex = Math.min(bucketCount - 1, Math.floor(clamp01(prediction.confidence01) * bucketCount));
+    bucketsAcc[bucketIndex].count += 1;
+    bucketsAcc[bucketIndex].confidenceSum += prediction.confidence01;
+    if (prediction.predictedLabel === example.labels.primaryLabel) {
+      bucketsAcc[bucketIndex].correctCount += 1;
+      overallCorrect += 1;
+    }
+  }
+
+  const buckets: LabelCalibrationBucket[] = bucketsAcc.map((bucket, index) => {
+    const minConfidence01 = index / bucketCount;
+    const maxConfidence01 = (index + 1) / bucketCount;
+    const empiricalAccuracy01 = bucket.count > 0 ? bucket.correctCount / bucket.count : 0;
+    const predictedMeanConfidence01 = bucket.count > 0
+      ? bucket.confidenceSum / bucket.count
+      : (minConfidence01 + maxConfidence01) / 2;
+    return Object.freeze({
+      minConfidence01,
+      maxConfidence01,
+      exampleCount: bucket.count,
+      empiricalAccuracy01,
+      predictedMeanConfidence01,
+      calibrationError01: Math.abs(predictedMeanConfidence01 - empiricalAccuracy01),
+    });
+  });
+
+  const filledBuckets = buckets.filter((b) => b.exampleCount > 0);
+  const overallCalibrationError01 = average(filledBuckets.map((b) => b.calibrationError01));
+  const overallAccuracy01 = examples.length > 0 ? overallCorrect / examples.length : 0;
+
+  return Object.freeze({
+    task: dataset.task,
+    buckets: Object.freeze(buckets),
+    overallCalibrationError01,
+    overallAccuracy01,
+    isWellCalibrated: overallCalibrationError01 < 0.1,
+  });
+}
+
+// ============================================================================
+// MARK: Label batch processor
+// ============================================================================
+
+export interface LabelBatchSummary {
+  readonly taskCount: number;
+  readonly totalExamples: number;
+  readonly qualityReports: Readonly<Record<TrainingTaskKey, LabelQualityReport>>;
+  readonly auditCounts: Readonly<Record<TrainingTaskKey, number>>;
+  readonly overallQualityScore01: number;
+  readonly overallAverageConfidence01: number;
+  readonly taskReadiness: Readonly<Record<TrainingTaskKey, boolean>>;
+  readonly summary: readonly string[];
+}
+
+export class LabelBatchProcessor {
+  private readonly assembler: LabelAssembler;
+
+  public constructor(options: LabelAssemblyOptions = {}) {
+    this.assembler = new LabelAssembler(options);
+  }
+
+  public assembleAndAssess(corpus: TrainingCorpus): {
+    readonly labeled: LabeledTrainingCorpus;
+    readonly summary: LabelBatchSummary;
+  } {
+    const labeled = this.assembler.assembleCorpus(corpus);
+    const summary = this.buildBatchSummary(labeled);
+    return Object.freeze({ labeled, summary });
+  }
+
+  public buildBatchSummary(labeled: LabeledTrainingCorpus): LabelBatchSummary {
+    const tasks = Object.keys(labeled.tasks) as TrainingTaskKey[];
+    const qualityReports = {} as Record<TrainingTaskKey, LabelQualityReport>;
+    const auditCounts = {} as Record<TrainingTaskKey, number>;
+    const taskReadiness = {} as Record<TrainingTaskKey, boolean>;
+    const allQualityScores: number[] = [];
+    const allConfidences: number[] = [];
+    let totalExamples = 0;
+
+    for (const task of tasks) {
+      const dataset = labeled.tasks[task];
+      qualityReports[task] = assessLabelQuality(dataset);
+      auditCounts[task] = dataset.examples.length;
+      taskReadiness[task] =
+        qualityReports[task].qualityScore01 >= 0.55 && dataset.examples.length >= 10;
+      totalExamples += dataset.examples.length;
+      allQualityScores.push(qualityReports[task].qualityScore01);
+      allConfidences.push(qualityReports[task].averageConfidence01);
+    }
+
+    const overallQualityScore01 = average(allQualityScores);
+    const overallAverageConfidence01 = average(allConfidences);
+    const summary: string[] = [];
+    const readyCount = Object.values(taskReadiness).filter(Boolean).length;
+    summary.push(`${readyCount}/${tasks.length} tasks meet labeling readiness threshold.`);
+    if (overallQualityScore01 < 0.55) {
+      summary.push('Overall label quality is below target — review evidence chain depth.');
+    }
+    if (overallAverageConfidence01 < 0.5) {
+      summary.push('Average confidence is low — consider widening the post-anchor evidence window.');
+    }
+
+    return Object.freeze({
+      taskCount: tasks.length,
+      totalExamples,
+      qualityReports: Object.freeze(qualityReports),
+      auditCounts: Object.freeze(auditCounts),
+      overallQualityScore01,
+      overallAverageConfidence01,
+      taskReadiness: Object.freeze(taskReadiness),
+      summary: Object.freeze(uniqueStrings(summary)),
+    });
+  }
+
+  public exportBatchAuditNdjson(labeled: LabeledTrainingCorpus, task: TrainingTaskKey): string {
+    const records = buildLabelAuditRecords(labeled.tasks[task]);
+    return exportLabelAuditNdjson(records);
+  }
+}
+
+// ============================================================================
+// MARK: Label continuity bridge
+// ============================================================================
+
+export interface LabelContinuityRecord {
+  readonly exampleId: string;
+  readonly task: TrainingTaskKey;
+  readonly primaryLabel: string;
+  readonly inferenceDecisions: readonly InferenceLabelDecision[];
+  readonly inferenceAcceptanceRate01: number;
+  readonly continuityScore01: number;
+  readonly replayCount: number;
+  readonly proofCount: number;
+}
+
+export function buildLabelContinuityRecord(
+  example: LabeledTrainingExample,
+): LabelContinuityRecord {
+  const inferenceDecisions = batchBuildInferenceLabelDecisions(
+    example.window.inferenceSnapshots,
+    example.window,
+  );
+  const acceptance = inferenceAcceptanceRate01(inferenceDecisions);
+  const continuityScore01 = clamp01(
+    (example.labels.confidence01 * 0.45)
+    + (inferenceDecisions.length > 0 ? acceptance * 0.2 : 0)
+    + (example.window.replayArtifacts.length > 0 ? 0.2 : 0)
+    + (example.window.proofEdges.length > 0 ? 0.15 : 0),
+  );
+
+  return Object.freeze({
+    exampleId: example.id,
+    task: example.task,
+    primaryLabel: example.labels.primaryLabel,
+    inferenceDecisions,
+    inferenceAcceptanceRate01: acceptance,
+    continuityScore01,
+    replayCount: example.window.replayArtifacts.length,
+    proofCount: example.window.proofEdges.length,
+  });
+}
+
+export function buildLabelContinuityRecords(
+  dataset: LabeledTaskDataset,
+): readonly LabelContinuityRecord[] {
+  return Object.freeze(dataset.examples.map(buildLabelContinuityRecord));
+}
+
+// ============================================================================
+// MARK: Label signal bundle — runtime integration point
+// ============================================================================
+
+export interface LabelSignalBundle {
+  readonly task: TrainingTaskKey;
+  readonly primaryLabel: string;
+  readonly confidence01: number;
+  readonly scalarTargets: Readonly<Record<string, number>>;
+  readonly booleanTargets: Readonly<Record<string, boolean>>;
+  readonly categoricalTargets: Readonly<Record<string, string | null>>;
+  readonly evidenceWeight01: number;
+  readonly qualityScore01: number;
+  readonly continuityScore01: number;
+  readonly inferenceCount: number;
+  readonly replayCount: number;
+  readonly proofCount: number;
+  readonly builtAt: number;
+}
+
+export function buildLabelSignalBundle(example: LabeledTrainingExample): LabelSignalBundle {
+  const continuity = buildLabelContinuityRecord(example);
+  const evidenceWeight01 = scoreEvidenceWeight(example.labels.evidence);
+  const qualityScore01 = clamp01(
+    (example.labels.confidence01 * 0.4)
+    + (evidenceWeight01 * 0.35)
+    + (continuity.continuityScore01 * 0.25),
+  );
+  return Object.freeze({
+    task: example.task,
+    primaryLabel: example.labels.primaryLabel,
+    confidence01: example.labels.confidence01,
+    scalarTargets: example.labels.scalarTargets,
+    booleanTargets: example.labels.booleanTargets,
+    categoricalTargets: example.labels.categoricalTargets,
+    evidenceWeight01,
+    qualityScore01,
+    continuityScore01: continuity.continuityScore01,
+    inferenceCount: example.window.inferenceSnapshots.length,
+    replayCount: example.window.replayArtifacts.length,
+    proofCount: example.window.proofEdges.length,
+    builtAt: Date.now(),
+  });
+}
+
+// ============================================================================
+// MARK: Label corpus diff
+// ============================================================================
+
+export interface LabelCorpusDiffEntry {
+  readonly task: TrainingTaskKey;
+  readonly priorExampleCount: number;
+  readonly currentExampleCount: number;
+  readonly deltaExamples: number;
+  readonly priorAverageConfidence01: number;
+  readonly currentAverageConfidence01: number;
+  readonly deltaConfidence01: number;
+  readonly priorTopLabel: string | null;
+  readonly currentTopLabel: string | null;
+  readonly topLabelChanged: boolean;
+}
+
+export interface LabelCorpusDiff {
+  readonly diffedAt: number;
+  readonly tasks: Readonly<Record<TrainingTaskKey, LabelCorpusDiffEntry>>;
+  readonly overallExampleDelta: number;
+  readonly overallConfidenceDelta01: number;
+  readonly tasksWithLabelShift: readonly TrainingTaskKey[];
+}
+
+export function diffLabeledCorpora(
+  prior: LabeledTrainingCorpus,
+  current: LabeledTrainingCorpus,
+): LabelCorpusDiff {
+  const allTasks = [
+    ...new Set([
+      ...Object.keys(prior.tasks) as TrainingTaskKey[],
+      ...Object.keys(current.tasks) as TrainingTaskKey[],
+    ]),
+  ];
+
+  const tasks = {} as Record<TrainingTaskKey, LabelCorpusDiffEntry>;
+  const tasksWithLabelShift: TrainingTaskKey[] = [];
+  let overallExampleDelta = 0;
+  let overallConfidenceDelta01 = 0;
+  let taskCount = 0;
+
+  for (const task of allTasks) {
+    const priorDataset = prior.tasks[task];
+    const currentDataset = current.tasks[task];
+    const priorExampleCount = priorDataset?.examples.length ?? 0;
+    const currentExampleCount = currentDataset?.examples.length ?? 0;
+    const priorAverageConfidence01 = average(priorDataset?.examples.map((ex) => ex.labels.confidence01) ?? []);
+    const currentAverageConfidence01 = average(currentDataset?.examples.map((ex) => ex.labels.confidence01) ?? []);
+    const priorTopLabel = resolveTopLabel(priorDataset?.examples ?? []);
+    const currentTopLabel = resolveTopLabel(currentDataset?.examples ?? []);
+    const topLabelChanged = priorTopLabel !== currentTopLabel;
+    if (topLabelChanged) tasksWithLabelShift.push(task);
+
+    tasks[task] = Object.freeze({
+      task,
+      priorExampleCount,
+      currentExampleCount,
+      deltaExamples: currentExampleCount - priorExampleCount,
+      priorAverageConfidence01,
+      currentAverageConfidence01,
+      deltaConfidence01: currentAverageConfidence01 - priorAverageConfidence01,
+      priorTopLabel,
+      currentTopLabel,
+      topLabelChanged,
+    });
+
+    overallExampleDelta += currentExampleCount - priorExampleCount;
+    overallConfidenceDelta01 += currentAverageConfidence01 - priorAverageConfidence01;
+    taskCount += 1;
+  }
+
+  return Object.freeze({
+    diffedAt: Date.now(),
+    tasks: Object.freeze(tasks),
+    overallExampleDelta,
+    overallConfidenceDelta01: taskCount > 0 ? overallConfidenceDelta01 / taskCount : 0,
+    tasksWithLabelShift: Object.freeze(tasksWithLabelShift),
+  });
+}
+
+// ============================================================================
+// MARK: Label export utilities
+// ============================================================================
+
+export interface LabelExportRow {
+  readonly id: string;
+  readonly task: TrainingTaskKey;
+  readonly split: TrainingSplit;
+  readonly primaryLabel: string;
+  readonly confidence01: number;
+  readonly evidenceWeight01: number;
+  readonly conflictingEvidence: boolean;
+  readonly scalarSummary: string;
+  readonly booleanSummary: string;
+  readonly categoricalSummary: string;
+}
+
+export function buildLabelExportRow(example: LabeledTrainingExample): LabelExportRow {
+  const scalarSummary = Object.entries(example.labels.scalarTargets)
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([key, value]) => `${key}=${value.toFixed(3)}`)
+    .join(',');
+
+  const booleanSummary = Object.entries(example.labels.booleanTargets)
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([key, value]) => `${key}=${boolean_to_int(value)}`)
+    .join(',');
+
+  const categoricalSummary = Object.entries(example.labels.categoricalTargets)
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([key, value]) => `${key}=${value ?? 'null'}`)
+    .join(',');
+
+  return Object.freeze({
+    id: example.id,
+    task: example.task,
+    split: example.split,
+    primaryLabel: example.labels.primaryLabel,
+    confidence01: example.labels.confidence01,
+    evidenceWeight01: scoreEvidenceWeight(example.labels.evidence),
+    conflictingEvidence: example.labels.conflictingEvidence,
+    scalarSummary,
+    booleanSummary,
+    categoricalSummary,
+  });
+}
+
+export function exportLabeledDatasetCsv(dataset: LabeledTaskDataset): string {
+  const header = 'id,task,split,primaryLabel,confidence01,evidenceWeight01,conflictingEvidence';
+  const rows = dataset.examples.map((example) => {
+    const row = buildLabelExportRow(example);
+    return [
+      row.id, row.task, row.split, row.primaryLabel,
+      row.confidence01.toFixed(4),
+      row.evidenceWeight01.toFixed(4),
+      String(row.conflictingEvidence),
+    ].join(',');
+  });
+  return [header, ...rows].join('\n');
+}
+
+export function exportLabeledCorpusManifestJson(corpus: LabeledTrainingCorpus): string {
+  const tasks = Object.keys(corpus.tasks) as TrainingTaskKey[];
+  const manifest = {
+    ...corpus.manifest,
+    tasks: tasks.map((task) => ({
+      task,
+      exampleCount: corpus.tasks[task].examples.length,
+      bySplit: {
+        TRAIN: corpus.tasks[task].bySplit.TRAIN.length,
+        VALIDATION: corpus.tasks[task].bySplit.VALIDATION.length,
+        TEST: corpus.tasks[task].bySplit.TEST.length,
+      },
+      stats: corpus.tasks[task].stats,
+    })),
+  };
+  return JSON.stringify(manifest, null, 2);
+}
+
+// ============================================================================
+// MARK: Label pressure projection
+// ============================================================================
+
+export interface LabelPressureProjection {
+  readonly task: TrainingTaskKey;
+  readonly pressureScore01: number;
+  readonly dominantLabelPressure01: number;
+  readonly conflictPressure01: number;
+  readonly weaknessPressure01: number;
+  readonly signalStrength01: number;
+  readonly pressureBand: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+  readonly projectedDriftRisk01: number;
+}
+
+export function projectLabelPressure(dataset: LabeledTaskDataset): LabelPressureProjection {
+  const examples = dataset.examples;
+  if (examples.length === 0) {
+    return Object.freeze({
+      task: dataset.task,
+      pressureScore01: 0,
+      dominantLabelPressure01: 0,
+      conflictPressure01: 0,
+      weaknessPressure01: 0,
+      signalStrength01: 0,
+      pressureBand: 'LOW',
+      projectedDriftRisk01: 0,
+    });
+  }
+
+  const labelCounts = new Map<string, number>();
+  for (const ex of examples) {
+    labelCounts.set(ex.labels.primaryLabel, (labelCounts.get(ex.labels.primaryLabel) ?? 0) + 1);
+  }
+  const sorted = [...labelCounts.values()].sort((a, b) => b - a);
+  const dominantProportion = sorted[0] / examples.length;
+  const dominantLabelPressure01 = clamp01((dominantProportion - 0.5) * 2);
+
+  const conflictPressure01 = examples.filter((ex) => ex.labels.conflictingEvidence).length / examples.length;
+  const weaknessPressure01 = examples.filter(
+    (ex) => scoreEvidenceWeight(ex.labels.evidence) < 0.4,
+  ).length / examples.length;
+  const signalStrength01 = average(examples.map((ex) => ex.labels.confidence01));
+
+  const pressureScore01 = clamp01(
+    (dominantLabelPressure01 * 0.3)
+    + (conflictPressure01 * 0.3)
+    + (weaknessPressure01 * 0.25)
+    + ((1 - signalStrength01) * 0.15),
+  );
+
+  const pressureBand: LabelPressureProjection['pressureBand'] =
+    pressureScore01 >= 0.75 ? 'CRITICAL'
+    : pressureScore01 >= 0.5 ? 'HIGH'
+    : pressureScore01 >= 0.25 ? 'MEDIUM'
+    : 'LOW';
+
+  return Object.freeze({
+    task: dataset.task,
+    pressureScore01,
+    dominantLabelPressure01,
+    conflictPressure01,
+    weaknessPressure01,
+    signalStrength01,
+    pressureBand,
+    projectedDriftRisk01: clamp01(pressureScore01 * 0.7 + (1 - signalStrength01) * 0.3),
+  });
+}
+
+export function projectLabelPressureAll(
+  corpus: LabeledTrainingCorpus,
+): Readonly<Record<TrainingTaskKey, LabelPressureProjection>> {
+  const result = {} as Record<TrainingTaskKey, LabelPressureProjection>;
+  for (const task of Object.keys(corpus.tasks) as TrainingTaskKey[]) {
+    result[task] = projectLabelPressure(corpus.tasks[task]);
+  }
+  return Object.freeze(result);
+}
+
+// ============================================================================
+// MARK: Label window quality
+// ============================================================================
+
+export interface LabelWindowQuality {
+  readonly exampleId: string;
+  readonly task: TrainingTaskKey;
+  readonly preMessageCount: number;
+  readonly anchorMessageCount: number;
+  readonly postMessageCount: number;
+  readonly telemetryCount: number;
+  readonly replayCount: number;
+  readonly inferenceCount: number;
+  readonly proofCount: number;
+  readonly evidenceCount: number;
+  readonly windowDepthScore01: number;
+  readonly isWindowSufficient: boolean;
+}
+
+export function assessWindowQuality(example: LabeledTrainingExample): LabelWindowQuality {
+  const pre = example.window.preMessages.length;
+  const anchor = example.window.anchorMessages.length;
+  const post = example.window.postMessages.length;
+  const telemetry = example.window.telemetry.length;
+  const replay = example.window.replayArtifacts.length;
+  const inference = example.window.inferenceSnapshots.length;
+  const proof = example.window.proofEdges.length;
+  const evidence = example.window.evidence.length;
+
+  const windowDepthScore01 = clamp01(
+    (Math.min(pre, 5) / 5) * 0.1
+    + (anchor > 0 ? 0.15 : 0)
+    + (Math.min(post, 5) / 5) * 0.2
+    + (Math.min(telemetry, 4) / 4) * 0.2
+    + (replay > 0 ? 0.15 : 0)
+    + (inference > 0 ? 0.1 : 0)
+    + (proof > 0 ? 0.05 : 0)
+    + (Math.min(evidence, 3) / 3) * 0.05,
+  );
+
+  return Object.freeze({
+    exampleId: example.id,
+    task: example.task,
+    preMessageCount: pre,
+    anchorMessageCount: anchor,
+    postMessageCount: post,
+    telemetryCount: telemetry,
+    replayCount: replay,
+    inferenceCount: inference,
+    proofCount: proof,
+    evidenceCount: evidence,
+    windowDepthScore01,
+    isWindowSufficient: windowDepthScore01 >= 0.35 && anchor > 0,
+  });
+}
+
+export function assessWindowQualityAll(
+  dataset: LabeledTaskDataset,
+): readonly LabelWindowQuality[] {
+  return Object.freeze(dataset.examples.map(assessWindowQuality));
+}
+
+export function windowQualityRate01(dataset: LabeledTaskDataset): number {
+  const quals = assessWindowQualityAll(dataset);
+  if (quals.length === 0) return 0;
+  return quals.filter((q) => q.isWindowSufficient).length / quals.length;
+}
+
+// ============================================================================
+// MARK: Cross-task label analysis
+// ============================================================================
+
+export interface LabelCrossTaskSummary {
+  readonly analyzedAt: number;
+  readonly taskCount: number;
+  readonly tasks: readonly TrainingTaskKey[];
+  readonly totalExamples: number;
+  readonly averageQualityScore01: number;
+  readonly averageConfidence01: number;
+  readonly averageWindowDepthScore01: number;
+  readonly tasksAboveQualityThreshold: readonly TrainingTaskKey[];
+  readonly tasksBelowQualityThreshold: readonly TrainingTaskKey[];
+  readonly pressureProfiles: Readonly<Record<TrainingTaskKey, LabelPressureProjection>>;
+}
+
+export function buildLabelCrossTaskSummary(corpus: LabeledTrainingCorpus): LabelCrossTaskSummary {
+  const tasks = Object.keys(corpus.tasks) as TrainingTaskKey[];
+  const qualityScores: number[] = [];
+  const confidences: number[] = [];
+  const windowScores: number[] = [];
+  const above: TrainingTaskKey[] = [];
+  const below: TrainingTaskKey[] = [];
+  let totalExamples = 0;
+
+  for (const task of tasks) {
+    const dataset = corpus.tasks[task];
+    const quality = assessLabelQuality(dataset);
+    const windowQuals = assessWindowQualityAll(dataset);
+
+    qualityScores.push(quality.qualityScore01);
+    confidences.push(quality.averageConfidence01);
+    windowScores.push(average(windowQuals.map((q) => q.windowDepthScore01)));
+    totalExamples += dataset.examples.length;
+
+    if (quality.qualityScore01 >= 0.55) {
+      above.push(task);
+    } else {
+      below.push(task);
+    }
+  }
+
+  return Object.freeze({
+    analyzedAt: Date.now(),
+    taskCount: tasks.length,
+    tasks: Object.freeze(tasks),
+    totalExamples,
+    averageQualityScore01: average(qualityScores),
+    averageConfidence01: average(confidences),
+    averageWindowDepthScore01: average(windowScores),
+    tasksAboveQualityThreshold: Object.freeze(above),
+    tasksBelowQualityThreshold: Object.freeze(below),
+    pressureProfiles: projectLabelPressureAll(corpus),
+  });
+}
+
+// ============================================================================
+// MARK: Additional private utilities
+// ============================================================================
+
+function shannonEntropy(probabilities: readonly number[]): number {
+  const filtered = probabilities.filter((p) => p > 0);
+  if (filtered.length === 0) return 0;
+  const total = filtered.reduce((sum, p) => sum + p, 0);
+  if (total <= 0) return 0;
+  const normalized = filtered.map((p) => p / total);
+  const maxEntropy = Math.log2(normalized.length);
+  if (maxEntropy <= 0) return 0;
+  const entropy = -normalized.reduce((sum, p) => sum + p * Math.log2(Math.max(p, 1e-9)), 0);
+  return clamp01(entropy / maxEntropy);
+}
+
+function resolveTopLabel(examples: readonly LabeledTrainingExample[]): string | null {
+  if (examples.length === 0) return null;
+  const counts = new Map<string, number>();
+  for (const ex of examples) {
+    counts.set(ex.labels.primaryLabel, (counts.get(ex.labels.primaryLabel) ?? 0) + 1);
+  }
+  let topLbl = '';
+  let topCount = 0;
+  for (const [label, count] of counts.entries()) {
+    if (count > topCount) { topLbl = label; topCount = count; }
+  }
+  return topLbl || null;
+}
+
+// ============================================================================
+// MARK: Label readiness gate
+// ============================================================================
+
+export type LabelReadinessGate =
+  | 'READY_FOR_TRAINING'
+  | 'READY_GUARDED'
+  | 'NEEDS_MORE_DATA'
+  | 'NEEDS_QUALITY_IMPROVEMENT'
+  | 'NOT_READY';
+
+export interface LabelReadinessDecision {
+  readonly task: TrainingTaskKey;
+  readonly gate: LabelReadinessGate;
+  readonly exampleCount: number;
+  readonly qualityScore01: number;
+  readonly windowDepthScore01: number;
+  readonly pressureScore01: number;
+  readonly reasons: readonly string[];
+  readonly actions: readonly string[];
+}
+
+export function decideLabelReadiness(
+  dataset: LabeledTaskDataset,
+  minExamples = 30,
+): LabelReadinessDecision {
+  const quality = assessLabelQuality(dataset);
+  const windowQuals = assessWindowQualityAll(dataset);
+  const windowDepthScore01 = average(windowQuals.map((q) => q.windowDepthScore01));
+  const pressure = projectLabelPressure(dataset);
+  const exampleCount = dataset.examples.length;
+
+  const reasons: string[] = [];
+  const actions: string[] = [];
+
+  if (exampleCount < minExamples) {
+    reasons.push(`Only ${exampleCount} examples — minimum is ${minExamples}.`);
+    actions.push('Register more authoritative room artifacts and rebuild corpus.');
+  }
+  if (quality.qualityScore01 < 0.45) {
+    reasons.push(`Quality score ${quality.qualityScore01.toFixed(3)} is below acceptable floor.`);
+    actions.push('Improve evidence chain depth and anchor selection quality.');
+  }
+  if (windowDepthScore01 < 0.3) {
+    reasons.push(`Window depth score ${windowDepthScore01.toFixed(3)} indicates shallow context.`);
+    actions.push('Widen post-anchor window and include telemetry + replay artifacts.');
+  }
+  if (pressure.pressureBand === 'CRITICAL' || pressure.pressureBand === 'HIGH') {
+    reasons.push(`Label pressure is ${pressure.pressureBand}.`);
+    actions.push('Balance label distribution and reduce dominant-class concentration.');
+  }
+
+  let gate: LabelReadinessGate;
+  if (exampleCount < minExamples || quality.qualityScore01 < 0.35) {
+    gate = exampleCount < minExamples ? 'NEEDS_MORE_DATA' : 'NEEDS_QUALITY_IMPROVEMENT';
+  } else if (quality.qualityScore01 >= 0.65 && windowDepthScore01 >= 0.4 && pressure.pressureScore01 < 0.4) {
+    gate = 'READY_FOR_TRAINING';
+  } else if (quality.qualityScore01 >= 0.5 && exampleCount >= minExamples) {
+    gate = 'READY_GUARDED';
+  } else {
+    gate = 'NOT_READY';
+  }
+
+  if (reasons.length === 0) {
+    reasons.push('All quality gates cleared.');
+    actions.push('Proceed to policy training.');
+  }
+
+  return Object.freeze({
+    task: dataset.task,
+    gate,
+    exampleCount,
+    qualityScore01: quality.qualityScore01,
+    windowDepthScore01,
+    pressureScore01: pressure.pressureScore01,
+    reasons: Object.freeze(uniqueStrings(reasons)),
+    actions: Object.freeze(uniqueStrings(actions)),
+  });
+}
+
+export function decideLabelReadinessAll(
+  corpus: LabeledTrainingCorpus,
+  minExamples = 30,
+): Readonly<Record<TrainingTaskKey, LabelReadinessDecision>> {
+  const result = {} as Record<TrainingTaskKey, LabelReadinessDecision>;
+  for (const task of Object.keys(corpus.tasks) as TrainingTaskKey[]) {
+    result[task] = decideLabelReadiness(corpus.tasks[task], minExamples);
+  }
+  return Object.freeze(result);
+}
+
+// ============================================================================
+// MARK: Module authority object
+// ============================================================================
+
+export const CHAT_LABEL_ASSEMBLER_VERSION = '2026.03.14' as const;
+
+export const LABEL_TASK_KEYS: readonly TrainingTaskKey[] = Object.freeze([
+  'ENGAGEMENT',
+  'HATER_TARGETING',
+  'HELPER_TIMING',
+  'CHANNEL_AFFINITY',
+  'TOXICITY_RISK',
+  'CHURN_RISK',
+  'INTERVENTION_POLICY',
+  'RESPONSE_RANKING',
+  'SEQUENCE_MEMORY',
+  'MODERATION_OUTCOME',
+]);
+
+export const ChatLabelAssemblerModule = Object.freeze({
+  version: CHAT_LABEL_ASSEMBLER_VERSION,
+  taskKeys: LABEL_TASK_KEYS,
+  LabelAssembler,
+  LabelBatchProcessor,
+  assessLabelQuality,
+  buildLabelAuditRecord,
+  buildLabelAuditRecords,
+  buildLabelCalibrationProfile,
+  buildLabelContinuityRecord,
+  buildLabelContinuityRecords,
+  buildLabelSignalBundle,
+  buildLabelExportRow,
+  exportLabeledDatasetCsv,
+  exportLabeledCorpusManifestJson,
+  exportLabelAuditNdjson,
+  diffLabeledCorpora,
+  projectLabelPressure,
+  projectLabelPressureAll,
+  assessWindowQuality,
+  assessWindowQualityAll,
+  windowQualityRate01,
+  buildLabelCrossTaskSummary,
+  decideLabelReadiness,
+  decideLabelReadinessAll,
+  buildInferenceLabelDecision,
+  batchBuildInferenceLabelDecisions,
+  inferenceAcceptanceRate01,
+  inferenceAverageScore01,
+});

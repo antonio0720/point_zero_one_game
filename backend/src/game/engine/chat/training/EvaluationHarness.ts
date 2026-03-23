@@ -1579,3 +1579,426 @@ function formatPercent(value: number): string {
 function escapeLine(value: string): string {
   return value.replace(/[\r\n]+/g, ' ').trim();
 }
+
+// ============================================================================
+// MARK: Raw-example inspection surface (uses TrainingExample + TrainingTaskDataset)
+// ============================================================================
+
+export interface HarnessExampleInspection {
+  readonly task: TrainingTaskKey;
+  readonly exampleId: string;
+  readonly split: string;
+  readonly scalarFeatureCount: number;
+  readonly booleanFeatureCount: number;
+  readonly categoricalFeatureCount: number;
+  readonly sequenceFeatureCount: number;
+  readonly windowPreCount: number;
+  readonly windowAnchorCount: number;
+  readonly windowPostCount: number;
+  readonly hasReplayCount: boolean;
+  readonly hasProofCount: boolean;
+  readonly hasInferenceCount: boolean;
+  readonly totalFeatureDensity01: number;
+}
+
+export function inspectTrainingExample(
+  example: TrainingExample,
+  task: TrainingTaskKey,
+): HarnessExampleInspection {
+  const features = example.features;
+  const scalarCount = Object.keys(features.scalar).length;
+  const boolCount = Object.keys(features.boolean).length;
+  const catCount = Object.keys(features.categorical).length;
+  const seqCount = Object.keys(features.sequence).length;
+  const totalSlots = scalarCount + boolCount + catCount + seqCount;
+  const density = totalSlots > 0 ? clamp01((scalarCount + boolCount) / totalSlots) : 0;
+
+  return Object.freeze({
+    task,
+    exampleId: example.id,
+    split: example.split,
+    scalarFeatureCount: scalarCount,
+    booleanFeatureCount: boolCount,
+    categoricalFeatureCount: catCount,
+    sequenceFeatureCount: seqCount,
+    windowPreCount: example.window.preMessages.length,
+    windowAnchorCount: example.window.anchorMessages.length,
+    windowPostCount: example.window.postMessages.length,
+    hasReplayCount: example.window.replayArtifacts.length > 0,
+    hasProofCount: example.window.proofEdges.length > 0,
+    hasInferenceCount: example.window.inferenceSnapshots.length > 0,
+    totalFeatureDensity01: round4(density),
+  });
+}
+
+export interface HarnessDatasetInspectionSummary {
+  readonly task: TrainingTaskKey;
+  readonly exampleCount: number;
+  readonly trainCount: number;
+  readonly validationCount: number;
+  readonly testCount: number;
+  readonly averageScalarFeatures: number;
+  readonly averageBooleanFeatures: number;
+  readonly averageCategoricalFeatures: number;
+  readonly averageSequenceFeatures: number;
+  readonly averageWindowDepth: number;
+  readonly replayRatio01: number;
+  readonly proofRatio01: number;
+  readonly inferenceRatio01: number;
+  readonly averageFeatureDensity01: number;
+}
+
+export function inspectTrainingTaskDataset(
+  dataset: TrainingTaskDataset,
+): HarnessDatasetInspectionSummary {
+  const examples = dataset.examples;
+  const n = examples.length;
+  if (n === 0) {
+    return Object.freeze({
+      task: dataset.task,
+      exampleCount: 0,
+      trainCount: 0,
+      validationCount: 0,
+      testCount: 0,
+      averageScalarFeatures: 0,
+      averageBooleanFeatures: 0,
+      averageCategoricalFeatures: 0,
+      averageSequenceFeatures: 0,
+      averageWindowDepth: 0,
+      replayRatio01: 0,
+      proofRatio01: 0,
+      inferenceRatio01: 0,
+      averageFeatureDensity01: 0,
+    });
+  }
+
+  const avg = (nums: readonly number[]) => nums.length > 0 ? nums.reduce((a, b) => a + b, 0) / nums.length : 0;
+
+  const inspections = examples.map((e) => inspectTrainingExample(e, dataset.task));
+  const trainCount = examples.filter((e) => e.split === 'TRAIN').length;
+  const valCount = examples.filter((e) => e.split === 'VALIDATION').length;
+  const testCount = examples.filter((e) => e.split === 'TEST').length;
+
+  return Object.freeze({
+    task: dataset.task,
+    exampleCount: n,
+    trainCount,
+    validationCount: valCount,
+    testCount,
+    averageScalarFeatures: round4(avg(inspections.map((i) => i.scalarFeatureCount))),
+    averageBooleanFeatures: round4(avg(inspections.map((i) => i.booleanFeatureCount))),
+    averageCategoricalFeatures: round4(avg(inspections.map((i) => i.categoricalFeatureCount))),
+    averageSequenceFeatures: round4(avg(inspections.map((i) => i.sequenceFeatureCount))),
+    averageWindowDepth: round4(avg(inspections.map((i) => i.windowPreCount + i.windowAnchorCount + i.windowPostCount))),
+    replayRatio01: round4(avg(inspections.map((i) => i.hasReplayCount ? 1 : 0))),
+    proofRatio01: round4(avg(inspections.map((i) => i.hasProofCount ? 1 : 0))),
+    inferenceRatio01: round4(avg(inspections.map((i) => i.hasInferenceCount ? 1 : 0))),
+    averageFeatureDensity01: round4(avg(inspections.map((i) => i.totalFeatureDensity01))),
+  });
+}
+
+function round4(value: number): number {
+  return Math.round(value * 10000) / 10000;
+}
+
+// ============================================================================
+// MARK: Drift disposition narrative (uses DriftDisposition + DriftSeverity)
+// ============================================================================
+
+export interface HarnessDriftDispositionAnnotation {
+  readonly task: TrainingTaskKey;
+  readonly disposition: DriftDisposition;
+  readonly severity: DriftSeverity;
+  readonly driftScore01: number;
+  readonly annotation: string;
+  readonly blocksRelease: boolean;
+  readonly requiresRetraining: boolean;
+  readonly warrantsShadowDeployment: boolean;
+}
+
+export function annotateDriftDisposition(
+  task: TrainingTaskKey,
+  disposition: DriftDisposition,
+  severity: DriftSeverity,
+  driftScore01: number,
+): HarnessDriftDispositionAnnotation {
+  const score = clamp01(driftScore01);
+
+  const annotation = buildDispositionAnnotationText(disposition, severity, score);
+  const blocksRelease = disposition === 'BLOCK_DEPLOY';
+  const requiresRetraining = disposition === 'RETRAIN' || disposition === 'BLOCK_DEPLOY';
+  const warrantsShadowDeployment =
+    disposition === 'WATCH' || disposition === 'REVIEW' || severity === 'MEDIUM';
+
+  return Object.freeze({
+    task,
+    disposition,
+    severity,
+    driftScore01: round4(score),
+    annotation,
+    blocksRelease,
+    requiresRetraining,
+    warrantsShadowDeployment,
+  });
+}
+
+function buildDispositionAnnotationText(
+  disposition: DriftDisposition,
+  severity: DriftSeverity,
+  score: number,
+): string {
+  switch (disposition) {
+    case 'STABLE':
+      return `Drift stable (${(score * 100).toFixed(1)}%) — no action required.`;
+    case 'WATCH':
+      return `Drift at watch threshold (${(score * 100).toFixed(1)}%, severity=${severity}) — monitor closely.`;
+    case 'REVIEW':
+      return `Drift under review (${(score * 100).toFixed(1)}%, severity=${severity}) — investigate before release.`;
+    case 'RETRAIN':
+      return `Retraining required (${(score * 100).toFixed(1)}%, severity=${severity}) — do not deploy current candidate.`;
+    case 'BLOCK_DEPLOY':
+      return `Deployment blocked (${(score * 100).toFixed(1)}%, severity=${severity}) — critical drift detected.`;
+    default:
+      return `Unknown drift disposition (${(score * 100).toFixed(1)}%).`;
+  }
+}
+
+export function buildDriftDispositionAnnotations(
+  driftReport: DriftReport,
+): Readonly<Record<TrainingTaskKey, HarnessDriftDispositionAnnotation>> {
+  const result: Record<string, HarnessDriftDispositionAnnotation> = {};
+  for (const [task, taskReport] of Object.entries(driftReport.tasks)) {
+    result[task] = annotateDriftDisposition(
+      task as TrainingTaskKey,
+      (taskReport as { disposition: DriftDisposition }).disposition,
+      (taskReport as { severity: DriftSeverity }).severity,
+      (taskReport as { driftScore01: number }).driftScore01,
+    );
+  }
+  return Object.freeze(result) as Readonly<Record<TrainingTaskKey, HarnessDriftDispositionAnnotation>>;
+}
+
+// ============================================================================
+// MARK: Harness release card
+// ============================================================================
+
+export interface HarnessReleaseCard {
+  readonly generatedAt: number;
+  readonly verdict: HarnessVerdict;
+  readonly risk: HarnessRiskLevel;
+  readonly deployScore01: number;
+  readonly taskCount: number;
+  readonly readyTaskCount: number;
+  readonly driftAnnotations: Readonly<Record<TrainingTaskKey, HarnessDriftDispositionAnnotation>>;
+  readonly datasetSummaries: readonly HarnessDatasetInspectionSummary[];
+  readonly overallFindings: readonly string[];
+  readonly overallActions: readonly string[];
+  readonly releaseNote: string;
+}
+
+export function buildHarnessReleaseCard(
+  report: EvaluationHarnessReport,
+): HarnessReleaseCard {
+  const driftAnnotations = report.driftReport
+    ? buildDriftDispositionAnnotations(report.driftReport)
+    : ({} as Readonly<Record<TrainingTaskKey, HarnessDriftDispositionAnnotation>>);
+
+  const datasetSummaries = Object.values(report.corpus.tasks).map(
+    (dataset) => inspectTrainingTaskDataset(dataset as TrainingTaskDataset),
+  );
+
+  const readyCount = Object.values(report.tasks).filter(
+    (t) => (t as TaskHarnessReport).verdict === 'DEPLOY' ||
+            (t as TaskHarnessReport).verdict === 'DEPLOY_GUARDED',
+  ).length;
+
+  const releaseNote = buildReleaseNoteText(
+    report.overall.verdict,
+    report.overall.deployScore01,
+    report.overall.taskCount,
+    readyCount,
+  );
+
+  return Object.freeze({
+    generatedAt: Date.now(),
+    verdict: report.overall.verdict,
+    risk: report.overall.risk,
+    deployScore01: round4(report.overall.deployScore01),
+    taskCount: report.overall.taskCount,
+    readyTaskCount: readyCount,
+    driftAnnotations,
+    datasetSummaries: Object.freeze(datasetSummaries),
+    overallFindings: report.overall.findings,
+    overallActions: report.overall.actions,
+    releaseNote,
+  });
+}
+
+function buildReleaseNoteText(
+  verdict: HarnessVerdict,
+  deployScore01: number,
+  totalTasks: number,
+  readyTasks: number,
+): string {
+  const pct = (deployScore01 * 100).toFixed(1);
+  switch (verdict) {
+    case 'DEPLOY':
+      return `All ${totalTasks} task(s) cleared for deployment (deploy score ${pct}%).`;
+    case 'DEPLOY_GUARDED':
+      return `${readyTasks}/${totalTasks} task(s) cleared with guardrails (deploy score ${pct}%). Monitor closely post-deploy.`;
+    case 'HOLD':
+      return `Release held. ${totalTasks - readyTasks} task(s) not ready (deploy score ${pct}%). Resolve findings before re-evaluating.`;
+    case 'RETRAIN':
+      return `Retraining required. Deploy score ${pct}% below threshold. Gather more authoritative data and retrain.`;
+    case 'BLOCK':
+      return `Deployment blocked. Critical issues detected across ${totalTasks - readyTasks} task(s). Do not ship.`;
+    default:
+      return `Evaluation complete. Deploy score ${pct}%.`;
+  }
+}
+
+// ============================================================================
+// MARK: Canonical module object
+// ============================================================================
+
+export const ChatEvaluationHarnessModule = Object.freeze({
+  CHAT_TRAINING_EVALUATION_HARNESS_VERSION,
+  inspectTrainingExample,
+  inspectTrainingTaskDataset,
+  annotateDriftDisposition,
+  buildDriftDispositionAnnotations,
+  buildHarnessReleaseCard,
+});
+
+// ============================================================================
+// MARK: Version sentinel
+// ============================================================================
+
+export const CHAT_EVALUATION_HARNESS_MODULE_ID =
+  'backend/src/game/engine/chat/training/EvaluationHarness#v' +
+  CHAT_TRAINING_EVALUATION_HARNESS_VERSION as string;
+
+// ============================================================================
+// MARK: Cross-task harness comparison
+// ============================================================================
+
+export interface HarnessCycleComparison {
+  readonly comparedAt: number;
+  readonly priorVerdict: HarnessVerdict;
+  readonly currentVerdict: HarnessVerdict;
+  readonly verdictImproved: boolean;
+  readonly verdictDegraded: boolean;
+  readonly priorDeployScore01: number;
+  readonly currentDeployScore01: number;
+  readonly deployScoreDelta: number;
+  readonly priorRisk: HarnessRiskLevel;
+  readonly currentRisk: HarnessRiskLevel;
+  readonly riskDelta: 'IMPROVED' | 'STABLE' | 'DEGRADED';
+  readonly taskCountDelta: number;
+  readonly summary: string;
+}
+
+const VERDICT_RANK: Record<HarnessVerdict, number> = {
+  DEPLOY: 5,
+  DEPLOY_GUARDED: 4,
+  HOLD: 3,
+  RETRAIN: 2,
+  BLOCK: 1,
+};
+
+const RISK_RANK: Record<HarnessRiskLevel, number> = {
+  LOW: 4,
+  MODERATE: 3,
+  HIGH: 2,
+  CRITICAL: 1,
+};
+
+export function compareHarnessCycles(
+  prior: EvaluationHarnessReport,
+  current: EvaluationHarnessReport,
+): HarnessCycleComparison {
+  const priorVerdict = prior.overall.verdict;
+  const currentVerdict = current.overall.verdict;
+  const priorScore = prior.overall.deployScore01;
+  const currentScore = current.overall.deployScore01;
+  const delta = round4(currentScore - priorScore);
+
+  const verdictImproved = VERDICT_RANK[currentVerdict] > VERDICT_RANK[priorVerdict];
+  const verdictDegraded = VERDICT_RANK[currentVerdict] < VERDICT_RANK[priorVerdict];
+
+  const priorRisk = prior.overall.risk;
+  const currentRisk = current.overall.risk;
+  let riskDelta: 'IMPROVED' | 'STABLE' | 'DEGRADED';
+  if (RISK_RANK[currentRisk] > RISK_RANK[priorRisk]) {
+    riskDelta = 'IMPROVED';
+  } else if (RISK_RANK[currentRisk] < RISK_RANK[priorRisk]) {
+    riskDelta = 'DEGRADED';
+  } else {
+    riskDelta = 'STABLE';
+  }
+
+  const taskCountDelta = current.overall.taskCount - prior.overall.taskCount;
+
+  const summary =
+    `Verdict: ${priorVerdict} → ${currentVerdict}. ` +
+    `Deploy score: ${(priorScore * 100).toFixed(1)}% → ${(currentScore * 100).toFixed(1)}% (${delta >= 0 ? '+' : ''}${(delta * 100).toFixed(1)}%). ` +
+    `Risk: ${priorRisk} → ${currentRisk} (${riskDelta}).`;
+
+  return Object.freeze({
+    comparedAt: Date.now(),
+    priorVerdict,
+    currentVerdict,
+    verdictImproved,
+    verdictDegraded,
+    priorDeployScore01: round4(priorScore),
+    currentDeployScore01: round4(currentScore),
+    deployScoreDelta: delta,
+    priorRisk,
+    currentRisk,
+    riskDelta,
+    taskCountDelta,
+    summary,
+  });
+}
+
+// ============================================================================
+// MARK: Harness NDJSON export
+// ============================================================================
+
+export function exportHarnessTaskReportsNdjson(report: EvaluationHarnessReport): string {
+  return Object.entries(report.tasks)
+    .map(([task, taskReport]) => JSON.stringify({ task, ...(taskReport as object) }))
+    .join('\n');
+}
+
+// ============================================================================
+// MARK: Harness readiness gate
+// ============================================================================
+
+export type HarnessReadinessGate =
+  | 'READY_FOR_DEPLOY'
+  | 'READY_GUARDED'
+  | 'NOT_READY_HOLD'
+  | 'NOT_READY_RETRAIN'
+  | 'BLOCKED';
+
+export function resolveHarnessReadinessGate(verdict: HarnessVerdict): HarnessReadinessGate {
+  switch (verdict) {
+    case 'DEPLOY':
+      return 'READY_FOR_DEPLOY';
+    case 'DEPLOY_GUARDED':
+      return 'READY_GUARDED';
+    case 'HOLD':
+      return 'NOT_READY_HOLD';
+    case 'RETRAIN':
+      return 'NOT_READY_RETRAIN';
+    case 'BLOCK':
+      return 'BLOCKED';
+    default:
+      return 'NOT_READY_HOLD';
+  }
+}
+
+/** Semantic version of the EvaluationHarness module. */
+export const CHAT_EVALUATION_HARNESS_MODULE_VERSION =
+  CHAT_TRAINING_EVALUATION_HARNESS_VERSION;

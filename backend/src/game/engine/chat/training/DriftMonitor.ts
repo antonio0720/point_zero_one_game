@@ -1075,3 +1075,930 @@ function round(value: number, digits: number): number {
   const factor = 10 ** digits;
   return Math.round(value * factor) / factor;
 }
+
+// ============================================================================
+// MARK: Drift trend tracking
+// ============================================================================
+
+export interface DriftTrendPoint {
+  readonly analyzedAt: number;
+  readonly task: TrainingTaskKey;
+  readonly driftScore01: number;
+  readonly severity: DriftSeverity;
+  readonly disposition: DriftDisposition;
+  readonly exampleCount: number;
+  readonly labelJsDivergence01: number;
+  readonly scalarAggregratePsi01: number;
+  readonly sequenceNovelty01: number;
+}
+
+export interface DriftTrendReport {
+  readonly task: TrainingTaskKey;
+  readonly points: readonly DriftTrendPoint[];
+  readonly latestDrift01: number;
+  readonly peakDrift01: number;
+  readonly averageDrift01: number;
+  readonly trend: 'IMPROVING' | 'STABLE' | 'WORSENING' | 'INSUFFICIENT_DATA';
+  readonly velocityPerCycle: number;
+  readonly recommendation: string;
+}
+
+export function buildDriftTrendReport(
+  task: TrainingTaskKey,
+  history: readonly TaskDriftReport[],
+): DriftTrendReport {
+  if (history.length === 0) {
+    return Object.freeze({
+      task,
+      points: Object.freeze([]),
+      latestDrift01: 0,
+      peakDrift01: 0,
+      averageDrift01: 0,
+      trend: 'INSUFFICIENT_DATA',
+      velocityPerCycle: 0,
+      recommendation: 'No drift history available — run first drift analysis.',
+    });
+  }
+
+  const points: DriftTrendPoint[] = history.map((report, index) => Object.freeze({
+    analyzedAt: Date.now() - (history.length - index) * 86_400_000,
+    task: report.task,
+    driftScore01: report.driftScore01,
+    severity: report.severity,
+    disposition: report.disposition,
+    exampleCount: report.exampleCount,
+    labelJsDivergence01: report.labelDrift.jsDivergence01,
+    scalarAggregratePsi01: report.scalarDrift.aggregatePsi01,
+    sequenceNovelty01: report.sequenceDrift.aggregateNovelty01,
+  }));
+
+  const scores = points.map((p) => p.driftScore01);
+  const latestDrift01 = scores[scores.length - 1] ?? 0;
+  const peakDrift01 = Math.max(...scores);
+  const averageDrift01 = mean(scores);
+
+  let trend: DriftTrendReport['trend'] = 'STABLE';
+  let velocityPerCycle = 0;
+  if (scores.length >= 2) {
+    const recent = mean(scores.slice(-3));
+    const older = mean(scores.slice(0, Math.max(1, scores.length - 3)));
+    velocityPerCycle = recent - older;
+    if (velocityPerCycle > 0.04) trend = 'WORSENING';
+    else if (velocityPerCycle < -0.04) trend = 'IMPROVING';
+  } else {
+    trend = 'INSUFFICIENT_DATA';
+  }
+
+  const recommendation =
+    trend === 'WORSENING' ? 'Drift is accelerating — schedule retraining before next release cycle.'
+    : trend === 'IMPROVING' ? 'Drift is decreasing — current policy is adapting well to current behavior.'
+    : 'Drift is stable — continue monitoring on schedule.';
+
+  return Object.freeze({
+    task,
+    points: Object.freeze(points),
+    latestDrift01,
+    peakDrift01,
+    averageDrift01,
+    trend,
+    velocityPerCycle: round(velocityPerCycle, 4),
+    recommendation,
+  });
+}
+
+export function buildAllDriftTrendReports(
+  historyByTask: Readonly<Record<TrainingTaskKey, readonly TaskDriftReport[]>>,
+): Readonly<Record<TrainingTaskKey, DriftTrendReport>> {
+  const result = {} as Record<TrainingTaskKey, DriftTrendReport>;
+  for (const task of Object.keys(historyByTask) as TrainingTaskKey[]) {
+    result[task] = buildDriftTrendReport(task, historyByTask[task]);
+  }
+  return Object.freeze(result);
+}
+
+// ============================================================================
+// MARK: Drift alert policy
+// ============================================================================
+
+export interface DriftAlertThresholds {
+  readonly warnDrift01: number;
+  readonly criticalDrift01: number;
+  readonly warnVelocityPerCycle: number;
+  readonly criticalVelocityPerCycle: number;
+  readonly warnLabelJs01: number;
+  readonly criticalLabelJs01: number;
+  readonly minimumPointsForVelocity: number;
+}
+
+export type DriftAlertLevel = 'NONE' | 'WARN' | 'CRITICAL';
+
+export interface DriftAlertEvent {
+  readonly task: TrainingTaskKey;
+  readonly alertLevel: DriftAlertLevel;
+  readonly triggeredAt: number;
+  readonly driftScore01: number;
+  readonly severity: DriftSeverity;
+  readonly velocity: number;
+  readonly labelJs01: number;
+  readonly reasons: readonly string[];
+}
+
+export const DEFAULT_DRIFT_ALERT_THRESHOLDS: DriftAlertThresholds = Object.freeze({
+  warnDrift01: 0.35,
+  criticalDrift01: 0.65,
+  warnVelocityPerCycle: 0.04,
+  criticalVelocityPerCycle: 0.1,
+  warnLabelJs01: 0.08,
+  criticalLabelJs01: 0.18,
+  minimumPointsForVelocity: 2,
+});
+
+export function evaluateDriftAlert(
+  trend: DriftTrendReport,
+  thresholds: DriftAlertThresholds = DEFAULT_DRIFT_ALERT_THRESHOLDS,
+): DriftAlertEvent {
+  const reasons: string[] = [];
+  let alertLevel: DriftAlertLevel = 'NONE';
+
+  if (trend.latestDrift01 >= thresholds.criticalDrift01) {
+    alertLevel = 'CRITICAL';
+    reasons.push(`Drift score ${round(trend.latestDrift01, 3)} exceeds critical threshold.`);
+  } else if (trend.latestDrift01 >= thresholds.warnDrift01) {
+    alertLevel = 'WARN';
+    reasons.push(`Drift score ${round(trend.latestDrift01, 3)} exceeds warning threshold.`);
+  }
+
+  if (trend.points.length >= thresholds.minimumPointsForVelocity) {
+    if (trend.velocityPerCycle >= thresholds.criticalVelocityPerCycle) {
+      alertLevel = 'CRITICAL';
+      reasons.push(`Drift velocity ${round(trend.velocityPerCycle, 4)}/cycle exceeds critical threshold.`);
+    } else if (trend.velocityPerCycle >= thresholds.warnVelocityPerCycle) {
+      if (alertLevel !== 'CRITICAL') alertLevel = 'WARN';
+      reasons.push(`Drift velocity ${round(trend.velocityPerCycle, 4)}/cycle is elevated.`);
+    }
+  }
+
+  const latestLabel = trend.points[trend.points.length - 1]?.labelJsDivergence01 ?? 0;
+  if (latestLabel >= thresholds.criticalLabelJs01) {
+    alertLevel = 'CRITICAL';
+    reasons.push(`Label JS divergence ${round(latestLabel, 3)} exceeds critical threshold.`);
+  } else if (latestLabel >= thresholds.warnLabelJs01) {
+    if (alertLevel !== 'CRITICAL') alertLevel = 'WARN';
+    reasons.push(`Label JS divergence ${round(latestLabel, 3)} is elevated.`);
+  }
+
+  const latestPoint = trend.points[trend.points.length - 1];
+  return Object.freeze({
+    task: trend.task,
+    alertLevel,
+    triggeredAt: Date.now(),
+    driftScore01: trend.latestDrift01,
+    severity: latestPoint?.severity ?? 'NONE',
+    velocity: trend.velocityPerCycle,
+    labelJs01: latestLabel,
+    reasons: Object.freeze(reasons),
+  });
+}
+
+// ============================================================================
+// MARK: Drift budget state — uses TrainingTaskDatasetStats
+// ============================================================================
+
+export interface DriftBudgetEntry {
+  readonly task: TrainingTaskKey;
+  readonly allowedDrift01: number;
+  readonly currentDrift01: number;
+  readonly remainingBudget01: number;
+  readonly budgetConsumed01: number;
+  readonly isOverBudget: boolean;
+  readonly datasetExampleCount: number;
+  readonly datasetAverageConfidence01: number;
+}
+
+export interface DriftBudgetState {
+  readonly evaluatedAt: number;
+  readonly tasks: Readonly<Record<TrainingTaskKey, DriftBudgetEntry>>;
+  readonly overBudgetTasks: readonly TrainingTaskKey[];
+  readonly overallBudgetConsumed01: number;
+}
+
+export function buildDriftBudgetState(
+  driftReport: DriftReport,
+  datasetStats: Readonly<Record<TrainingTaskKey, TrainingTaskDatasetStats>>,
+  allowedDriftPerTask: Readonly<Record<TrainingTaskKey, number>> = {} as Readonly<Record<TrainingTaskKey, number>>,
+): DriftBudgetState {
+  const tasks = Object.keys(driftReport.tasks) as TrainingTaskKey[];
+  const entries = {} as Record<TrainingTaskKey, DriftBudgetEntry>;
+  const overBudgetTasks: TrainingTaskKey[] = [];
+  let totalBudgetConsumed = 0;
+
+  for (const task of tasks) {
+    const taskReport = driftReport.tasks[task];
+    const stats = datasetStats[task];
+    const allowed = allowedDriftPerTask[task] ?? 0.5;
+    const current = taskReport.driftScore01;
+    const budgetConsumed01 = clamp01(current / Math.max(allowed, 0.0001));
+    const isOverBudget = current > allowed;
+
+    if (isOverBudget) overBudgetTasks.push(task);
+
+    entries[task] = Object.freeze({
+      task,
+      allowedDrift01: allowed,
+      currentDrift01: current,
+      remainingBudget01: Math.max(0, allowed - current),
+      budgetConsumed01,
+      isOverBudget,
+      datasetExampleCount: stats?.totalExamples ?? taskReport.exampleCount,
+      datasetAverageConfidence01: 0,
+    });
+
+    totalBudgetConsumed += budgetConsumed01;
+  }
+
+  return Object.freeze({
+    evaluatedAt: Date.now(),
+    tasks: Object.freeze(entries),
+    overBudgetTasks: Object.freeze(overBudgetTasks),
+    overallBudgetConsumed01: tasks.length > 0 ? totalBudgetConsumed / tasks.length : 0,
+  });
+}
+
+// ============================================================================
+// MARK: Drift reconciliation — uses TrainingExample
+// ============================================================================
+
+export interface DriftReconciliationEntry {
+  readonly task: TrainingTaskKey;
+  readonly baselineLabelCount: number;
+  readonly currentLabelCount: number;
+  readonly newLabels: readonly string[];
+  readonly vanishedLabels: readonly string[];
+  readonly shiftedLabelCount: number;
+  readonly recommendBaselineUpdate: boolean;
+  readonly reason: string;
+}
+
+export interface DriftReconciliationReport {
+  readonly reconciledAt: number;
+  readonly tasks: Readonly<Record<TrainingTaskKey, DriftReconciliationEntry>>;
+  readonly tasksRequiringBaselineUpdate: readonly TrainingTaskKey[];
+}
+
+export function buildDriftReconciliationReport(
+  driftReport: DriftReport,
+  rawExamplesByTask: Readonly<Record<TrainingTaskKey, readonly TrainingExample[]>>,
+): DriftReconciliationReport {
+  const tasks = Object.keys(driftReport.tasks) as TrainingTaskKey[];
+  const entries = {} as Record<TrainingTaskKey, DriftReconciliationEntry>;
+  const requiresUpdate: TrainingTaskKey[] = [];
+
+  for (const task of tasks) {
+    const taskDrift = driftReport.tasks[task];
+    const baseline = taskDrift.labelDrift.baselineHistogram;
+    const current = taskDrift.labelDrift.currentHistogram;
+    const rawExamples = rawExamplesByTask[task] ?? [];
+
+    const baselineLabels = new Set(Object.keys(baseline));
+    const currentLabels = new Set(Object.keys(current));
+    const newLabels = [...currentLabels].filter((l) => !baselineLabels.has(l));
+    const vanishedLabels = [...baselineLabels].filter((l) => !currentLabels.has(l));
+    const shiftedCount = taskDrift.labelDrift.changedLabels.filter(
+      (shift) => shift.absoluteDelta01 >= 0.05,
+    ).length;
+
+    const recommendUpdate = (
+      newLabels.length > 0
+      || vanishedLabels.length > 0
+      || taskDrift.driftScore01 >= 0.55
+      || rawExamples.length > (taskDrift.exampleCount * 2)
+    );
+    if (recommendUpdate) requiresUpdate.push(task);
+
+    const reason = newLabels.length > 0
+      ? `New labels detected: ${newLabels.slice(0, 3).join(', ')}.`
+      : vanishedLabels.length > 0
+        ? `Labels vanished: ${vanishedLabels.slice(0, 3).join(', ')}.`
+        : taskDrift.driftScore01 >= 0.55
+          ? `Drift score ${round(taskDrift.driftScore01, 3)} warrants baseline refresh.`
+          : 'Baseline is current.';
+
+    entries[task] = Object.freeze({
+      task,
+      baselineLabelCount: baselineLabels.size,
+      currentLabelCount: currentLabels.size,
+      newLabels: Object.freeze(newLabels),
+      vanishedLabels: Object.freeze(vanishedLabels),
+      shiftedLabelCount: shiftedCount,
+      recommendBaselineUpdate: recommendUpdate,
+      reason,
+    });
+  }
+
+  return Object.freeze({
+    reconciledAt: Date.now(),
+    tasks: Object.freeze(entries),
+    tasksRequiringBaselineUpdate: Object.freeze(requiresUpdate),
+  });
+}
+
+// ============================================================================
+// MARK: Drift signal bundle — runtime integration payload
+// ============================================================================
+
+export interface DriftSignalBundle {
+  readonly task: TrainingTaskKey;
+  readonly driftScore01: number;
+  readonly severity: DriftSeverity;
+  readonly disposition: DriftDisposition;
+  readonly labelJsDivergence01: number;
+  readonly scalarPsi01: number;
+  readonly booleanDelta01: number;
+  readonly categoricalJs01: number;
+  readonly sequenceNovelty01: number;
+  readonly shapeDelta01: number;
+  readonly triggeredReasonCount: number;
+  readonly topTriggeredReason: string | null;
+  readonly isActionable: boolean;
+  readonly builtAt: number;
+}
+
+export function buildDriftSignalBundle(report: TaskDriftReport): DriftSignalBundle {
+  return Object.freeze({
+    task: report.task,
+    driftScore01: report.driftScore01,
+    severity: report.severity,
+    disposition: report.disposition,
+    labelJsDivergence01: report.labelDrift.jsDivergence01,
+    scalarPsi01: report.scalarDrift.aggregatePsi01,
+    booleanDelta01: report.booleanDrift.aggregateDelta01,
+    categoricalJs01: report.categoricalDrift.aggregateJs01,
+    sequenceNovelty01: report.sequenceDrift.aggregateNovelty01,
+    shapeDelta01: report.shapeDrift.aggregateDelta01,
+    triggeredReasonCount: report.triggeredReasons.length,
+    topTriggeredReason: report.triggeredReasons[0] ?? null,
+    isActionable: report.disposition !== 'STABLE',
+    builtAt: Date.now(),
+  });
+}
+
+export function buildAllDriftSignalBundles(
+  driftReport: DriftReport,
+): Readonly<Record<TrainingTaskKey, DriftSignalBundle>> {
+  const result = {} as Record<TrainingTaskKey, DriftSignalBundle>;
+  for (const task of Object.keys(driftReport.tasks) as TrainingTaskKey[]) {
+    result[task] = buildDriftSignalBundle(driftReport.tasks[task]);
+  }
+  return Object.freeze(result);
+}
+
+// ============================================================================
+// MARK: Drift monitor session
+// ============================================================================
+
+export interface DriftSessionEntry {
+  readonly cycleIndex: number;
+  readonly report: DriftReport;
+  readonly signalBundles: Readonly<Record<TrainingTaskKey, DriftSignalBundle>>;
+  readonly recordedAt: number;
+}
+
+export interface DriftSessionSummary {
+  readonly cycleCount: number;
+  readonly firstCycleAt: number | null;
+  readonly lastCycleAt: number | null;
+  readonly averageDrift01: number;
+  readonly peakDrift01: number;
+  readonly currentDisposition: DriftDisposition;
+  readonly trendsByTask: Readonly<Record<TrainingTaskKey, DriftTrendReport>>;
+  readonly alertsByTask: Readonly<Record<TrainingTaskKey, DriftAlertEvent>>;
+}
+
+export class DriftMonitorSession {
+  private readonly monitor: DriftMonitor;
+  private readonly entries: DriftSessionEntry[] = [];
+  private readonly historyByTask: Map<TrainingTaskKey, TaskDriftReport[]> = new Map();
+
+  public constructor(options: DriftMonitorOptions = {}) {
+    this.monitor = new DriftMonitor(options);
+  }
+
+  public addCycle(bundle: TrainedPolicyBundle, corpus: LabeledTrainingCorpus): DriftReport {
+    const report = this.monitor.analyzeAgainstBundle(bundle, corpus);
+    const signalBundles = buildAllDriftSignalBundles(report);
+
+    for (const task of Object.keys(report.tasks) as TrainingTaskKey[]) {
+      if (!this.historyByTask.has(task)) this.historyByTask.set(task, []);
+      this.historyByTask.get(task)!.push(report.tasks[task]);
+    }
+
+    this.entries.push(Object.freeze({
+      cycleIndex: this.entries.length,
+      report,
+      signalBundles,
+      recordedAt: Date.now(),
+    }));
+    return report;
+  }
+
+  public summarize(alertThresholds: DriftAlertThresholds = DEFAULT_DRIFT_ALERT_THRESHOLDS): DriftSessionSummary {
+    if (this.entries.length === 0) {
+      return Object.freeze({
+        cycleCount: 0,
+        firstCycleAt: null,
+        lastCycleAt: null,
+        averageDrift01: 0,
+        peakDrift01: 0,
+        currentDisposition: 'STABLE',
+        trendsByTask: Object.freeze({}) as Readonly<Record<TrainingTaskKey, DriftTrendReport>>,
+        alertsByTask: Object.freeze({}) as Readonly<Record<TrainingTaskKey, DriftAlertEvent>>,
+      });
+    }
+
+    const allDriftScores = this.entries.flatMap((entry) =>
+      Object.values(entry.report.tasks).map((t) => t.driftScore01),
+    );
+    const latest = this.entries[this.entries.length - 1];
+    const historyObj = {} as Record<TrainingTaskKey, readonly TaskDriftReport[]>;
+    for (const [task, history] of this.historyByTask.entries()) {
+      historyObj[task] = Object.freeze([...history]);
+    }
+
+    const trendsByTask = {} as Record<TrainingTaskKey, DriftTrendReport>;
+    const alertsByTask = {} as Record<TrainingTaskKey, DriftAlertEvent>;
+    for (const task of Object.keys(historyObj) as TrainingTaskKey[]) {
+      trendsByTask[task] = buildDriftTrendReport(task, historyObj[task]);
+      alertsByTask[task] = evaluateDriftAlert(trendsByTask[task], alertThresholds);
+    }
+
+    return Object.freeze({
+      cycleCount: this.entries.length,
+      firstCycleAt: this.entries[0].recordedAt,
+      lastCycleAt: latest.recordedAt,
+      averageDrift01: mean(allDriftScores),
+      peakDrift01: Math.max(...allDriftScores),
+      currentDisposition: latest.report.overall.disposition,
+      trendsByTask: Object.freeze(trendsByTask),
+      alertsByTask: Object.freeze(alertsByTask),
+    });
+  }
+
+  public getCycleCount(): number {
+    return this.entries.length;
+  }
+
+  public getLatestReport(): DriftReport | null {
+    return this.entries[this.entries.length - 1]?.report ?? null;
+  }
+}
+
+// ============================================================================
+// MARK: Module authority object
+// ============================================================================
+
+export const CHAT_DRIFT_MONITOR_VERSION = '2026.03.14' as const;
+
+export const ChatDriftMonitorModule = Object.freeze({
+  version: CHAT_DRIFT_MONITOR_VERSION,
+  DriftMonitor,
+  DriftMonitorSession,
+  buildDriftTrendReport,
+  buildAllDriftTrendReports,
+  evaluateDriftAlert,
+  buildDriftBudgetState,
+  buildDriftReconciliationReport,
+  buildDriftSignalBundle,
+  buildAllDriftSignalBundles,
+  DEFAULT_DRIFT_ALERT_THRESHOLDS,
+});
+
+// ============================================================================
+// MARK: Drift cross-bundle comparison
+// ============================================================================
+
+export interface DriftBundleComparison {
+  readonly task: TrainingTaskKey;
+  readonly priorDriftScore01: number;
+  readonly currentDriftScore01: number;
+  readonly driftDelta: number;
+  readonly priorDisposition: DriftDisposition;
+  readonly currentDisposition: DriftDisposition;
+  readonly dispositionChanged: boolean;
+  readonly improved: boolean;
+  readonly worsened: boolean;
+  readonly deltaLabelJs01: number;
+  readonly deltaScalarPsi01: number;
+  readonly deltaSequenceNovelty01: number;
+}
+
+export interface DriftBundleComparisonReport {
+  readonly comparedAt: number;
+  readonly tasks: Readonly<Record<TrainingTaskKey, DriftBundleComparison>>;
+  readonly improvedTaskCount: number;
+  readonly worsenedTaskCount: number;
+  readonly stableTaskCount: number;
+  readonly overallDriftDelta: number;
+  readonly summary: readonly string[];
+}
+
+export function compareDriftReports(
+  prior: DriftReport,
+  current: DriftReport,
+): DriftBundleComparisonReport {
+  const tasks = [...new Set([
+    ...Object.keys(prior.tasks) as TrainingTaskKey[],
+    ...Object.keys(current.tasks) as TrainingTaskKey[],
+  ])];
+
+  const comparisons = {} as Record<TrainingTaskKey, DriftBundleComparison>;
+  let improvedCount = 0;
+  let worsenedCount = 0;
+  let stableCount = 0;
+  let totalDelta = 0;
+
+  for (const task of tasks) {
+    const p = prior.tasks[task];
+    const c = current.tasks[task];
+    const priorScore = p?.driftScore01 ?? 0;
+    const currentScore = c?.driftScore01 ?? 0;
+    const delta = currentScore - priorScore;
+    const improved = delta < -0.03;
+    const worsened = delta > 0.03;
+
+    if (improved) improvedCount += 1;
+    else if (worsened) worsenedCount += 1;
+    else stableCount += 1;
+
+    totalDelta += delta;
+
+    comparisons[task] = Object.freeze({
+      task,
+      priorDriftScore01: priorScore,
+      currentDriftScore01: currentScore,
+      driftDelta: round(delta, 4),
+      priorDisposition: p?.disposition ?? 'STABLE',
+      currentDisposition: c?.disposition ?? 'STABLE',
+      dispositionChanged: p?.disposition !== c?.disposition,
+      improved,
+      worsened,
+      deltaLabelJs01: round((c?.labelDrift.jsDivergence01 ?? 0) - (p?.labelDrift.jsDivergence01 ?? 0), 4),
+      deltaScalarPsi01: round((c?.scalarDrift.aggregatePsi01 ?? 0) - (p?.scalarDrift.aggregatePsi01 ?? 0), 4),
+      deltaSequenceNovelty01: round((c?.sequenceDrift.aggregateNovelty01 ?? 0) - (p?.sequenceDrift.aggregateNovelty01 ?? 0), 4),
+    });
+  }
+
+  const summary: string[] = [];
+  if (improvedCount > 0) summary.push(`${improvedCount} tasks improved drift posture.`);
+  if (worsenedCount > 0) summary.push(`${worsenedCount} tasks worsened drift posture.`);
+  if (stableCount > 0) summary.push(`${stableCount} tasks remain stable.`);
+  const avgDelta = tasks.length > 0 ? totalDelta / tasks.length : 0;
+  summary.push(`Overall drift delta=${round(avgDelta, 4)}.`);
+
+  return Object.freeze({
+    comparedAt: Date.now(),
+    tasks: Object.freeze(comparisons),
+    improvedTaskCount: improvedCount,
+    worsenedTaskCount: worsenedCount,
+    stableTaskCount: stableCount,
+    overallDriftDelta: round(avgDelta, 4),
+    summary: Object.freeze(summary),
+  });
+}
+
+// ============================================================================
+// MARK: Drift export utilities
+// ============================================================================
+
+export interface DriftExportRow {
+  readonly task: TrainingTaskKey;
+  readonly driftScore01: number;
+  readonly severity: DriftSeverity;
+  readonly disposition: DriftDisposition;
+  readonly exampleCount: number;
+  readonly labelJs01: number;
+  readonly scalarPsi01: number;
+  readonly booleanDelta01: number;
+  readonly categoricalJs01: number;
+  readonly sequenceNovelty01: number;
+  readonly shapeDelta01: number;
+  readonly triggeredReasonCount: number;
+  readonly topReason: string;
+}
+
+export function buildDriftExportRows(driftReport: DriftReport): readonly DriftExportRow[] {
+  return Object.freeze(
+    (Object.keys(driftReport.tasks) as TrainingTaskKey[]).map((task) => {
+      const t = driftReport.tasks[task];
+      return Object.freeze({
+        task,
+        driftScore01: round(t.driftScore01, 4),
+        severity: t.severity,
+        disposition: t.disposition,
+        exampleCount: t.exampleCount,
+        labelJs01: round(t.labelDrift.jsDivergence01, 4),
+        scalarPsi01: round(t.scalarDrift.aggregatePsi01, 4),
+        booleanDelta01: round(t.booleanDrift.aggregateDelta01, 4),
+        categoricalJs01: round(t.categoricalDrift.aggregateJs01, 4),
+        sequenceNovelty01: round(t.sequenceDrift.aggregateNovelty01, 4),
+        shapeDelta01: round(t.shapeDrift.aggregateDelta01, 4),
+        triggeredReasonCount: t.triggeredReasons.length,
+        topReason: t.triggeredReasons[0] ?? 'none',
+      });
+    }),
+  );
+}
+
+export function exportDriftReportCsv(driftReport: DriftReport): string {
+  const header = 'task,driftScore01,severity,disposition,exampleCount,labelJs01,scalarPsi01,booleanDelta01,categoricalJs01,sequenceNovelty01,shapeDelta01,triggeredReasonCount';
+  const rows = buildDriftExportRows(driftReport).map((row) => [
+    row.task, row.driftScore01, row.severity, row.disposition, row.exampleCount,
+    row.labelJs01, row.scalarPsi01, row.booleanDelta01, row.categoricalJs01,
+    row.sequenceNovelty01, row.shapeDelta01, row.triggeredReasonCount,
+  ].join(','));
+  return [header, ...rows].join('\n');
+}
+
+export function exportDriftReportJson(driftReport: DriftReport, pretty = true): string {
+  return JSON.stringify(driftReport, null, pretty ? 2 : 0);
+}
+
+// ============================================================================
+// MARK: Drift diagnostics dashboard
+// ============================================================================
+
+export interface DriftDiagnosticsDashboard {
+  readonly generatedAt: number;
+  readonly overallDisposition: DriftDisposition;
+  readonly overallSeverity: DriftSeverity;
+  readonly taskCount: number;
+  readonly stableCount: number;
+  readonly watchCount: number;
+  readonly retrainCount: number;
+  readonly blockCount: number;
+  readonly averageDrift01: number;
+  readonly highestDriftTask: TrainingTaskKey | null;
+  readonly highestDrift01: number;
+  readonly topRecommendations: readonly string[];
+  readonly signalBundles: Readonly<Record<TrainingTaskKey, DriftSignalBundle>>;
+  readonly exportRows: readonly DriftExportRow[];
+}
+
+export function buildDriftDiagnosticsDashboard(driftReport: DriftReport): DriftDiagnosticsDashboard {
+  const tasks = Object.values(driftReport.tasks);
+  const stableCount = tasks.filter((t) => t.disposition === 'STABLE').length;
+  const watchCount = tasks.filter((t) => t.disposition === 'WATCH' || t.disposition === 'REVIEW').length;
+  const retrainCount = tasks.filter((t) => t.disposition === 'RETRAIN').length;
+  const blockCount = tasks.filter((t) => t.disposition === 'BLOCK_DEPLOY').length;
+  const averageDrift01 = mean(tasks.map((t) => t.driftScore01));
+
+  const highestTask = tasks.reduce<TaskDriftReport | null>(
+    (best, t) => (!best || t.driftScore01 > best.driftScore01) ? t : best,
+    null,
+  );
+
+  const allRecs = tasks.flatMap((t) => t.recommendations.slice(0, 2));
+  const topRecommendations = [...new Set(allRecs)].slice(0, 6);
+
+  return Object.freeze({
+    generatedAt: Date.now(),
+    overallDisposition: driftReport.overall.disposition,
+    overallSeverity: driftReport.overall.severity,
+    taskCount: tasks.length,
+    stableCount,
+    watchCount,
+    retrainCount,
+    blockCount,
+    averageDrift01: round(averageDrift01, 4),
+    highestDriftTask: highestTask?.task ?? null,
+    highestDrift01: round(highestTask?.driftScore01 ?? 0, 4),
+    topRecommendations: Object.freeze(topRecommendations),
+    signalBundles: buildAllDriftSignalBundles(driftReport),
+    exportRows: buildDriftExportRows(driftReport),
+  });
+}
+
+// ============================================================================
+// MARK: Drift health summary
+// ============================================================================
+
+export type DriftHealthBand = 'HEALTHY' | 'MARGINAL' | 'DEGRADED' | 'CRITICAL';
+
+export interface DriftHealthSummary {
+  readonly evaluatedAt: number;
+  readonly healthBand: DriftHealthBand;
+  readonly overallDrift01: number;
+  readonly stableTaskRatio01: number;
+  readonly blockingTaskCount: number;
+  readonly retrainingRequiredCount: number;
+  readonly watchTaskCount: number;
+  readonly signalStrength01: number;
+  readonly topIssues: readonly string[];
+  readonly actionRequired: boolean;
+}
+
+export function buildDriftHealthSummary(driftReport: DriftReport): DriftHealthSummary {
+  const tasks = Object.values(driftReport.tasks);
+  const n = tasks.length;
+  const stableCount = tasks.filter((t) => t.disposition === 'STABLE').length;
+  const blockingCount = tasks.filter((t) => t.disposition === 'BLOCK_DEPLOY').length;
+  const retrainCount = tasks.filter((t) => t.disposition === 'RETRAIN').length;
+  const watchCount = tasks.filter((t) => t.disposition === 'WATCH' || t.disposition === 'REVIEW').length;
+
+  const stableRatio = n > 0 ? stableCount / n : 1;
+  const overall = round(driftReport.overall.averageTaskDrift01, 4);
+
+  const signalStrength = n > 0
+    ? round(mean(tasks.map((t) => t.triggeredReasons.length > 0 ? 1 : 0)), 4)
+    : 0;
+
+  let band: DriftHealthBand;
+  if (blockingCount > 0 || overall >= 0.8) {
+    band = 'CRITICAL';
+  } else if (retrainCount > 0 || overall >= 0.55) {
+    band = 'DEGRADED';
+  } else if (watchCount > 0 || overall >= 0.3) {
+    band = 'MARGINAL';
+  } else {
+    band = 'HEALTHY';
+  }
+
+  const topIssues = tasks
+    .filter((t) => t.disposition !== 'STABLE')
+    .flatMap((t) => t.triggeredReasons.slice(0, 2))
+    .filter((r, i, arr) => arr.indexOf(r) === i)
+    .slice(0, 5);
+
+  return Object.freeze({
+    evaluatedAt: Date.now(),
+    healthBand: band,
+    overallDrift01: overall,
+    stableTaskRatio01: round(stableRatio, 4),
+    blockingTaskCount: blockingCount,
+    retrainingRequiredCount: retrainCount,
+    watchTaskCount: watchCount,
+    signalStrength01: signalStrength,
+    topIssues: Object.freeze(topIssues),
+    actionRequired: band === 'DEGRADED' || band === 'CRITICAL',
+  });
+}
+
+// ============================================================================
+// MARK: Drift gate decision
+// ============================================================================
+
+export type DriftGateVerdict = 'PASS' | 'PASS_GUARDED' | 'HOLD' | 'BLOCK';
+
+export interface DriftGateDecision {
+  readonly decidedAt: number;
+  readonly verdict: DriftGateVerdict;
+  readonly overallDrift01: number;
+  readonly healthBand: DriftHealthBand;
+  readonly blockingTasks: readonly TrainingTaskKey[];
+  readonly retrainTasks: readonly TrainingTaskKey[];
+  readonly reasons: readonly string[];
+  readonly gatePassedAt: number | null;
+}
+
+export function makeDriftGateDecision(
+  driftReport: DriftReport,
+  maxAllowedDrift01 = 0.45,
+): DriftGateDecision {
+  const tasks = Object.values(driftReport.tasks);
+  const blockingTasks = tasks
+    .filter((t) => t.disposition === 'BLOCK_DEPLOY')
+    .map((t) => t.task);
+  const retrainTasks = tasks
+    .filter((t) => t.disposition === 'RETRAIN')
+    .map((t) => t.task);
+
+  const health = buildDriftHealthSummary(driftReport);
+  const overall = round(driftReport.overall.averageTaskDrift01, 4);
+
+  const reasons: string[] = [];
+  let verdict: DriftGateVerdict;
+
+  if (blockingTasks.length > 0) {
+    reasons.push(`${blockingTasks.length} task(s) in BLOCK_DEPLOY disposition: ${blockingTasks.join(', ')}`);
+    verdict = 'BLOCK';
+  } else if (overall > maxAllowedDrift01) {
+    reasons.push(`Overall drift ${overall.toFixed(4)} exceeds threshold ${maxAllowedDrift01.toFixed(4)}`);
+    verdict = 'HOLD';
+  } else if (retrainTasks.length > 0) {
+    reasons.push(`${retrainTasks.length} task(s) require retraining: ${retrainTasks.join(', ')}`);
+    verdict = 'HOLD';
+  } else if (health.healthBand === 'MARGINAL') {
+    reasons.push(`Health band is MARGINAL — proceed with monitoring`);
+    verdict = 'PASS_GUARDED';
+  } else {
+    reasons.push(`Drift within acceptable range (${overall.toFixed(4)} ≤ ${maxAllowedDrift01.toFixed(4)})`);
+    verdict = 'PASS';
+  }
+
+  const now = Date.now();
+  return Object.freeze({
+    decidedAt: now,
+    verdict,
+    overallDrift01: overall,
+    healthBand: health.healthBand,
+    blockingTasks: Object.freeze(blockingTasks),
+    retrainTasks: Object.freeze(retrainTasks),
+    reasons: Object.freeze(reasons),
+    gatePassedAt: verdict === 'PASS' || verdict === 'PASS_GUARDED' ? now : null,
+  });
+}
+
+// ============================================================================
+// MARK: Per-task drift narrative
+// ============================================================================
+
+export interface DriftTaskNarrative {
+  readonly task: TrainingTaskKey;
+  readonly driftScore01: number;
+  readonly severity: DriftSeverity;
+  readonly disposition: DriftDisposition;
+  readonly narrative: string;
+  readonly bulletPoints: readonly string[];
+}
+
+export function buildDriftTaskNarrative(report: TaskDriftReport): DriftTaskNarrative {
+  const bullets: string[] = [];
+
+  if (report.labelDrift.jsDivergence01 > 0.05) {
+    bullets.push(`Label distribution shifted (JS divergence ${report.labelDrift.jsDivergence01.toFixed(4)})`);
+  }
+  if (report.scalarDrift.aggregatePsi01 > 0.1) {
+    bullets.push(`Scalar features drifted (PSI ${report.scalarDrift.aggregatePsi01.toFixed(4)})`);
+  }
+  if (report.booleanDrift.aggregateDelta01 > 0.08) {
+    bullets.push(`Boolean signal rates changed by ${(report.booleanDrift.aggregateDelta01 * 100).toFixed(1)}%`);
+  }
+  if (report.sequenceDrift.aggregateNovelty01 > 0.15) {
+    bullets.push(`Sequence vocabulary novelty ${(report.sequenceDrift.aggregateNovelty01 * 100).toFixed(1)}%`);
+  }
+  if (report.shapeDrift.aggregateDelta01 > 0.1) {
+    bullets.push(`Feature shape delta ${report.shapeDrift.aggregateDelta01.toFixed(4)}`);
+  }
+  if (bullets.length === 0) {
+    bullets.push(`No significant drift signals detected`);
+  }
+
+  const narrative =
+    `Task "${report.task}" is ${report.disposition} (severity=${report.severity}, ` +
+    `score=${report.driftScore01.toFixed(4)}). ` +
+    bullets.join('. ') + '.';
+
+  return Object.freeze({
+    task: report.task,
+    driftScore01: round(report.driftScore01, 4),
+    severity: report.severity,
+    disposition: report.disposition,
+    narrative,
+    bulletPoints: Object.freeze(bullets),
+  });
+}
+
+export function buildAllDriftTaskNarratives(
+  driftReport: DriftReport,
+): Readonly<Record<TrainingTaskKey, DriftTaskNarrative>> {
+  const result: Record<string, DriftTaskNarrative> = {};
+  for (const [task, report] of Object.entries(driftReport.tasks)) {
+    result[task] = buildDriftTaskNarrative(report as TaskDriftReport);
+  }
+  return Object.freeze(result) as Readonly<Record<TrainingTaskKey, DriftTaskNarrative>>;
+}
+
+// ============================================================================
+// MARK: Canonical module object
+// ============================================================================
+
+export const ChatDriftMonitorModuleExtended = Object.freeze({
+  buildDriftHealthSummary,
+  makeDriftGateDecision,
+  buildDriftTaskNarrative,
+  buildAllDriftTaskNarratives,
+  buildDriftDiagnosticsDashboard,
+  buildDriftExportRows,
+  exportDriftReportCsv,
+  exportDriftReportJson,
+  compareDriftReports,
+  buildDriftBudgetState,
+  buildDriftReconciliationReport,
+  buildDriftSignalBundle,
+  buildAllDriftSignalBundles,
+  buildDriftTrendReport,
+  buildAllDriftTrendReports,
+  evaluateDriftAlert,
+  DEFAULT_DRIFT_ALERT_THRESHOLDS,
+});
+
+// ============================================================================
+// MARK: Version sentinel
+// ============================================================================
+
+/** Semantic version of the DriftMonitor module. Increment on breaking changes. */
+export const CHAT_DRIFT_MONITOR_MODULE_VERSION = '2026.03.14.extended' as const;
+
+/** Human-readable module identity string for logging and telemetry. */
+export const CHAT_DRIFT_MONITOR_MODULE_ID =
+  'backend/src/game/engine/chat/training/DriftMonitor#v' +
+  CHAT_DRIFT_MONITOR_MODULE_VERSION as string;
