@@ -2,7 +2,7 @@
  * ============================================================================
  * POINT ZERO ONE — AUTHORITATIVE BACKEND CHAT ML BARREL + STACK
  * FILE: backend/src/game/engine/chat/ml/index.ts
- * VERSION: 2026.03.14
+ * VERSION: 2026.03.21
  * AUTHORSHIP: Antonio T. Smith Jr.
  * LICENSE: Internal / Proprietary / All Rights Reserved
  * ============================================================================
@@ -11,16 +11,42 @@
  * -------
  * Single public entry surface for the backend authoritative chat ML lane.
  *
- * This index does two jobs:
- * 1. it re-exports every model/store/ingestor contract in the lane, and
+ * This index does three jobs:
+ * 1. it re-exports every model/store/ingestor contract in the lane (via
+ *    wildcard re-exports so all public types, classes, consts, and helpers
+ *    from each module are available at this path),
  * 2. it exposes one coordinated stack that can score the full chain in the
  *    repo-true order:
  *
  *    FeatureIngestor → OnlineFeatureStore → Engagement → Hater → Helper
  *    → Channel → Toxicity → Churn → InterventionPolicy
  *
+ * 3. it exposes a single NAMESPACE object that references every model
+ *    NAMESPACE, every model class, and the coordinated stack factory — so
+ *    callers can import from one path and traverse the full symbol graph.
+ *
+ * Module layout
+ * -------------
+ * - FeatureIngestor        — ingest, validate, hash, quality-grade raw rows
+ * - OnlineFeatureStore     — in-memory store, aggregate, inference window
+ * - EngagementModel        — vitality, continuity, fragility, response likelihood
+ * - HaterTargetingModel    — attack opportunity, shadow priming, suppression
+ * - HelperTimingModel      — helper speak-now timing, style, urgency
+ * - ChannelAffinityModel   — channel fit, migration pressure, privacy needs
+ * - ToxicityRiskModel      — harm, escalation, blast radius, shadow-route
+ * - ChurnRiskModel         — withdrawal, rage-quit, rescue urgency, recovery
+ * - InterventionPolicyModel — final advisory coordination, action recommendation
+ *
  * The stack does not become transcript truth and does not bypass policy. It is
  * a composition helper for backend chat authority.
+ *
+ * v2 additions (2026.03.21)
+ * -------------------------
+ * - All models upgraded to v2 with prior-state blending, ratchet logic,
+ *   liveops amplification, trend direction, audit logs, and health reports.
+ * - priorsFromScores now uses derivePriorState* helpers from each model
+ *   instead of inline construction (avoids missing fields as interfaces grow).
+ * - CHAT_BACKEND_ML_STACK_NAMESPACE now includes every per-model NAMESPACE.
  * ============================================================================
  */
 
@@ -40,6 +66,7 @@ import {
   type ChatFeatureRow,
   ChatFeatureIngestor,
   type ChatFeatureIngestorOptions,
+  CHAT_FEATURE_INGESTOR_NAMESPACE,
 } from './FeatureIngestor';
 import {
   OnlineFeatureStore,
@@ -47,55 +74,65 @@ import {
   type ChatOnlineFeatureStoreOptions,
   type ChatOnlineFeatureStoreQuery,
   type ChatOnlineInferenceWindow,
+  CHAT_ONLINE_FEATURE_STORE_NAMESPACE,
 } from './OnlineFeatureStore';
 import {
   EngagementModel,
   type EngagementModelOptions,
   type EngagementModelPriorState,
   type EngagementModelScore,
+  CHAT_ENGAGEMENT_MODEL_NAMESPACE,
 } from './EngagementModel';
 import {
   HaterTargetingModel,
   type HaterTargetingModelOptions,
   type HaterTargetingPriorState,
   type HaterTargetingScore,
+  CHAT_HATER_TARGETING_MODEL_NAMESPACE,
 } from './HaterTargetingModel';
 import {
   HelperTimingModel,
   type HelperTimingModelOptions,
   type HelperTimingPriorState,
   type HelperTimingScore,
+  CHAT_HELPER_TIMING_MODEL_NAMESPACE,
 } from './HelperTimingModel';
 import {
   ChannelAffinityModel,
   type ChannelAffinityModelOptions,
   type ChannelAffinityPriorState,
   type ChannelAffinityScore,
+  CHAT_CHANNEL_AFFINITY_MODEL_NAMESPACE,
 } from './ChannelAffinityModel';
 import {
   ToxicityRiskModel,
   type ToxicityRiskModelOptions,
   type ToxicityRiskPriorState,
   type ToxicityRiskScore,
+  derivePriorStateToxicity,
+  CHAT_TOXICITY_RISK_MODEL_NAMESPACE,
 } from './ToxicityRiskModel';
 import {
   ChurnRiskModel,
   type ChurnRiskModelOptions,
   type ChurnRiskPriorState,
   type ChurnRiskScore,
+  derivePriorStateChurn,
+  CHAT_CHURN_RISK_MODEL_NAMESPACE,
 } from './ChurnRiskModel';
 import {
   InterventionPolicyModel,
   type InterventionPolicyModelOptions,
   type InterventionPolicyPriorState,
   type InterventionPolicyScore,
+  CHAT_INTERVENTION_POLICY_MODEL_NAMESPACE,
 } from './InterventionPolicyModel';
 
 export const CHAT_BACKEND_ML_STACK_MODULE_NAME =
   'PZO_BACKEND_CHAT_ML_STACK' as const;
 
 export const CHAT_BACKEND_ML_STACK_VERSION =
-  '2026.03.14-backend-chat-ml-stack.v1' as const;
+  '2026.03.21-backend-chat-ml-stack.v2' as const;
 
 export interface ChatMlStackLoggerPort {
   debug(message: string, payload?: Readonly<Record<string, JsonValue>>): void;
@@ -491,18 +528,8 @@ export class ChatMlModelStack {
       hater: this.hater.toPriorState(scores.hater),
       helper: this.helper.toPriorState(scores.helper),
       channel: this.channel.toPriorState(scores.channel),
-      toxicity: {
-        generatedAt: scores.toxicity.generatedAt,
-        toxicity01: scores.toxicity.toxicity01,
-        escalation01: scores.toxicity.escalation01,
-        moderationSensitivity01: scores.toxicity.moderationSensitivity01,
-      },
-      churn: {
-        generatedAt: scores.churn.generatedAt,
-        churnRisk01: scores.churn.churnRisk01,
-        withdrawalRisk01: scores.churn.withdrawalRisk01,
-        rageQuitRisk01: scores.churn.rageQuitRisk01,
-      },
+      toxicity: derivePriorStateToxicity(scores.toxicity),
+      churn: derivePriorStateChurn(scores.churn),
       intervention: this.intervention.toPriorState(scores.intervention),
     });
   }
@@ -517,7 +544,11 @@ export function createChatMlModelStack(
 export const CHAT_BACKEND_ML_STACK_NAMESPACE = Object.freeze({
   moduleName: CHAT_BACKEND_ML_STACK_MODULE_NAME,
   moduleVersion: CHAT_BACKEND_ML_STACK_VERSION,
+
+  // ── Stack factory ────────────────────────────────────────────────────────
   createChatMlModelStack,
+
+  // ── Model classes ────────────────────────────────────────────────────────
   ChatFeatureIngestor,
   OnlineFeatureStore,
   EngagementModel,
@@ -527,6 +558,17 @@ export const CHAT_BACKEND_ML_STACK_NAMESPACE = Object.freeze({
   ToxicityRiskModel,
   ChurnRiskModel,
   InterventionPolicyModel,
+
+  // ── Per-model NAMESPACE objects (full helper graphs) ─────────────────────
+  CHAT_FEATURE_INGESTOR_NAMESPACE,
+  CHAT_ONLINE_FEATURE_STORE_NAMESPACE,
+  CHAT_ENGAGEMENT_MODEL_NAMESPACE,
+  CHAT_HATER_TARGETING_MODEL_NAMESPACE,
+  CHAT_HELPER_TIMING_MODEL_NAMESPACE,
+  CHAT_CHANNEL_AFFINITY_MODEL_NAMESPACE,
+  CHAT_TOXICITY_RISK_MODEL_NAMESPACE,
+  CHAT_CHURN_RISK_MODEL_NAMESPACE,
+  CHAT_INTERVENTION_POLICY_MODEL_NAMESPACE,
 });
 
-export default ChatMlModelStack;
+export default CHAT_BACKEND_ML_STACK_NAMESPACE;

@@ -169,6 +169,24 @@ export const CHAT_INTERVENTION_POLICY_MODEL_RUNTIME_LAWS = Object.freeze([
 export const CHAT_INTERVENTION_POLICY_MODEL_DEFAULTS = Object.freeze({
   baselineBlend01: 0.10,
   confidenceFloor01: 0.18,
+  // v2 additions — prior state blending and trend detection
+  priorStateMaxAgeMs: 180_000,
+  priorBlendIntervention01: 0.14,
+  priorBlendModeration01: 0.12,
+  priorBlendRescue01: 0.16,
+  // v2 additions — intervention ratchet (prevents premature de-escalation)
+  interventionRatchetThreshold01: 0.72,
+  interventionRatchetBonus01: 0.08,
+  // v2 additions — liveops amplifiers
+  liveopsInvasionInterventionBonus01: 0.10,
+  liveopsHaterRaidInterventionBonus01: 0.12,
+  liveopsWorldEventInterventionBonus01: 0.06,
+  // v2 additions — sibling conflict resolution
+  siblingConflictModerationFloor01: 0.55,
+  siblingConflictRescueFloor01: 0.50,
+  // v2 additions — observability
+  auditTrailEnabled: false,
+  batchScoreEmitStats: true,
   lowEvidenceFallback01: 0.28,
   hardBlockThreshold01: 0.90,
   quarantineThreshold01: 0.78,
@@ -383,6 +401,10 @@ export interface InterventionPolicyScore {
   readonly shouldUseTeachingTone: boolean;
   readonly shouldUseNegotiationCounterplay: boolean;
   readonly shouldUsePostRunDebrief: boolean;
+  // v2 additions
+  readonly liveopsBoost01: Score01;
+  readonly trendDirection: InterventionTrendDirection;
+  readonly hasSiblingConflict: boolean;
   readonly recommendedChannel: Nullable<ChatVisibleChannel>;
   readonly preferredHelperId: Nullable<string>;
   readonly preferredHaterBotId: Nullable<string>;
@@ -406,6 +428,63 @@ export interface InterventionPolicyScore {
 export interface InterventionPolicyBatchResult {
   readonly input: InterventionPolicyInput;
   readonly score: InterventionPolicyScore;
+  readonly stats?: InterventionBatchStats;
+}
+
+export type InterventionTrendDirection =
+  | 'ESCALATING'
+  | 'WORSENING'
+  | 'STABLE'
+  | 'DE_ESCALATING'
+  | 'RESOLVED';
+
+export interface InterventionTrendSignal {
+  readonly direction: InterventionTrendDirection;
+  readonly deltaPerWindow: number;
+  readonly priorPressure01: Score01;
+  readonly currentPressure01: Score01;
+}
+
+export interface InterventionBatchStats {
+  readonly count: number;
+  readonly hardBlockCount: number;
+  readonly quarantineCount: number;
+  readonly moderationReviewCount: number;
+  readonly rescueCount: number;
+  readonly teachingCount: number;
+  readonly silenceCount: number;
+  readonly meanInterventionPressure01: number;
+  readonly maxInterventionPressure01: number;
+  readonly meanModerationPressure01: number;
+  readonly meanRescuePressure01: number;
+}
+
+export interface InterventionAuditEntry {
+  readonly timestamp: UnixMs;
+  readonly sessionId: Nullable<ChatSessionId>;
+  readonly userId: Nullable<ChatUserId>;
+  readonly roomId: Nullable<ChatRoomId>;
+  readonly recommendation: InterventionRecommendation;
+  readonly urgencyBand: InterventionUrgencyBand;
+  readonly severityBand: InterventionSeverityBand;
+  readonly interventionPressure01: Score01;
+  readonly moderationPressure01: Score01;
+  readonly rescuePressure01: Score01;
+  readonly trendDirection: InterventionTrendDirection;
+  readonly hasSiblingConflict: boolean;
+  readonly topFactor: string;
+  readonly channel: ChatVisibleChannel;
+}
+
+export interface InterventionHealthReport {
+  readonly totalScoredLifetime: number;
+  readonly totalHardBlockCount: number;
+  readonly totalQuarantineCount: number;
+  readonly totalModerationReviewCount: number;
+  readonly totalRescueCount: number;
+  readonly auditLogSize: number;
+  readonly meanInterventionPressure01: number;
+  readonly maxInterventionPressure01Lifetime: number;
 }
 
 // ============================================================================
@@ -467,17 +546,30 @@ function scoreFromSnapshot(snapshot: Nullable<ChatFeatureSnapshot>, key: string,
   return asScore(safeNumber(snapshot[key], fallback));
 }
 
+function signalRecord(signal: ChatSignalEnvelope): Record<string, unknown> {
+  return signal as unknown as Record<string, unknown>;
+}
+
 function signalString(signal: ChatSignalEnvelope, key: string, fallback = ''): string {
-  const value = signal?.[key];
+  const value = signalRecord(signal)?.[key];
   return typeof value === 'string' ? value : fallback;
 }
 
 function signalNumber(signal: ChatSignalEnvelope, key: string, fallback = 0): number {
-  return safeNumber(signal?.[key], fallback);
+  return safeNumber(signalRecord(signal)?.[key], fallback);
 }
 
 function signalBoolean(signal: ChatSignalEnvelope, key: string, fallback = false): boolean {
-  return safeBoolean(signal?.[key], fallback);
+  return safeBoolean(signalRecord(signal)?.[key], fallback);
+}
+
+function signalNested(signal: ChatSignalEnvelope, ...keys: string[]): unknown {
+  let node: unknown = signalRecord(signal);
+  for (const key of keys) {
+    if (!node || typeof node !== 'object') return undefined;
+    node = (node as Record<string, unknown>)[key];
+  }
+  return node;
 }
 
 function boolToScore(value: boolean, whenTrue = 1, whenFalse = 0): Score01 {
@@ -535,10 +627,10 @@ function pickActiveChannel(
 }
 
 function inferPressureTier(snapshot: Nullable<ChatFeatureSnapshot>, signals: readonly ChatSignalEnvelope[]): PressureTier {
-  const fromSnapshot = categoryString(snapshot, 'pressureTier', 'LOW');
+  const fromSnapshot = categoryString(snapshot, 'pressureTier', '');
   if (fromSnapshot) return fromSnapshot as PressureTier;
   const signalTier = signals.map((signal) => signalString(signal, 'pressureTier')).find(Boolean);
-  return (signalTier || 'LOW') as PressureTier;
+  return (signalTier || 'BUILDING') as PressureTier;
 }
 
 function deriveTags(
@@ -763,7 +855,7 @@ function detectNegotiationIntent(signals: readonly ChatSignalEnvelope[], roomKin
 }
 
 function detectHighPressure(pressureTier: PressureTier): boolean {
-  return tierEquals(pressureTier, ['HIGH', 'MAX', 'EXTREME']);
+  return tierEquals(pressureTier, ['HIGH', 'CRITICAL']);
 }
 
 function computeModerationPressure(
@@ -778,7 +870,7 @@ function computeModerationPressure(
   const review = toxicity?.shouldReview ? 0.14 : 0;
   const quarantine = toxicity?.shouldQuarantine ? 0.18 : 0;
   const hardBlock = toxicity?.shouldHardBlock ? 0.28 : 0;
-  const rage = churn?.shouldEmergencyRecovery ? 0.14 : 0;
+  const rage = churn?.isEmergency ? 0.14 : 0;
   const publicLeak = hater ? safeNumber(hater.publicLeak01) * 0.10 : 0;
   const misfit = channel ? safeNumber(channel.migrationPressure01) * context.defaults.channelMisfitAmplifier01 : 0;
   const blast = toxicity ? safeNumber(toxicity.blastRadius01) * 0.18 : 0;
@@ -822,7 +914,7 @@ function computeRescuePressure(
 
   const helperNow = helper?.shouldInterveneNow ? 0.08 : 0;
   const publicWitness = churn?.shouldPublicWitness ? 0.08 : 0;
-  const emergency = churn?.shouldEmergencyRecovery ? context.defaults.rageQuitEmergencyAmplifier01 : 0;
+  const emergency = churn?.isEmergency ? context.defaults.rageQuitEmergencyAmplifier01 : 0;
   const toxicityPenalty = safeNumber(toxicity?.toxicity01) * 0.05;
   const pressureDiscount = highPressure ? context.defaults.highPressureHelperDiscount01 : 0;
   return asScore(rescueBase + helperNow + publicWitness + emergency + toxicityPenalty - pressureDiscount);
@@ -914,7 +1006,7 @@ function computeNarrativePressure(
     weightedBlend(
       [
         { value: safeNumber(engagement?.crowdReadiness01), weight: 0.18 },
-        { value: safeNumber(engagement?.theatricalReadiness01), weight: 0.18 },
+        { value: safeNumber(engagement?.quality01), weight: 0.18 },
         { value: safeNumber(helper?.teachingWindow01), weight: 0.14 },
         { value: boolToScore(churn?.shouldPublicWitness ?? false), weight: 0.14 },
         { value: boolToScore(postRunIntent), weight: 0.18 },
@@ -1274,11 +1366,124 @@ function interventionMetadata(input: InterventionPolicyInput, recommendation: In
 }
 
 // ============================================================================
+// MARK: v2 scoring helpers — liveops, prior state, trend, conflict detection
+// ============================================================================
+
+/**
+ * Detects liveops-driven amplifiers from source signals.
+ * Uses the nested liveops property on signal envelopes.
+ */
+function computeLiveopsInterventionBoost01(
+  input: InterventionPolicyInput,
+  defaults: typeof CHAT_INTERVENTION_POLICY_MODEL_DEFAULTS,
+): Score01 {
+  let bonus = clamp01(0);
+  for (const signal of input.sourceSignals) {
+    const invasion = safeBoolean(signalNested(signal, 'liveops', 'invasionActive'));
+    const raid = safeBoolean(signalNested(signal, 'liveops', 'haterRaidActive'));
+    const worldEvent = safeBoolean(signalNested(signal, 'liveops', 'worldEventActive'));
+    if (invasion) {
+      bonus = clamp01(
+        bonus +
+          safeNumber(input.toxicityScore?.toxicity01) * defaults.liveopsInvasionInterventionBonus01 * 0.7 +
+          safeNumber(input.churnScore?.rageQuitRisk01) * defaults.liveopsInvasionInterventionBonus01 * 0.5,
+      );
+    }
+    if (raid) {
+      bonus = clamp01(
+        bonus +
+          safeNumber(input.haterScore?.targeting01) * defaults.liveopsHaterRaidInterventionBonus01 * 0.9 +
+          safeNumber(input.toxicityScore?.blastRadius01) * defaults.liveopsHaterRaidInterventionBonus01 * 0.4,
+      );
+    }
+    if (worldEvent) {
+      bonus = clamp01(bonus + safeNumber(input.engagementScore?.engagement01) * defaults.liveopsWorldEventInterventionBonus01 * 0.3);
+    }
+  }
+  return bonus;
+}
+
+/**
+ * Detects when moderation and rescue lanes are simultaneously elevated,
+ * creating a conflict that the orchestration layer must resolve.
+ */
+function detectSiblingConflict(
+  moderationPressure01: Score01,
+  rescuePressure01: Score01,
+  defaults: typeof CHAT_INTERVENTION_POLICY_MODEL_DEFAULTS,
+): boolean {
+  return (
+    moderationPressure01 >= defaults.siblingConflictModerationFloor01 &&
+    rescuePressure01 >= defaults.siblingConflictRescueFloor01
+  );
+}
+
+/**
+ * Intervention ratchet: when prior intervention pressure was already above threshold,
+ * prevent premature score recovery unless concrete positive evidence exists.
+ */
+function computeInterventionRatchet01(
+  current: Score01,
+  prior: Nullable<InterventionPolicyPriorState>,
+  defaults: typeof CHAT_INTERVENTION_POLICY_MODEL_DEFAULTS,
+): Score01 {
+  if (!prior) return clamp01(0);
+  if (prior.interventionPressure01 < defaults.interventionRatchetThreshold01) return clamp01(0);
+  const delta = prior.interventionPressure01 - current;
+  return clamp01(Math.max(0, delta) * defaults.interventionRatchetBonus01);
+}
+
+/**
+ * Blends current intervention pressure with prior state to prevent oscillation.
+ */
+function blendInterventionWithPrior(
+  current: Score01,
+  priorValue: Score01,
+  blendWeight: number,
+  priorAgeMs: number,
+  maxAgeMs: number,
+): Score01 {
+  if (priorAgeMs > maxAgeMs) return current;
+  const decay = Math.max(0, 1 - priorAgeMs / maxAgeMs);
+  return clamp01(current * (1 - blendWeight * decay) + priorValue * blendWeight * decay);
+}
+
+/**
+ * Derives a trend direction by comparing current intervention pressure to prior state.
+ */
+function computeInterventionTrend(
+  currentPressure01: Score01,
+  prior: Nullable<InterventionPolicyPriorState>,
+  nowMs: UnixMs,
+  defaults: typeof CHAT_INTERVENTION_POLICY_MODEL_DEFAULTS,
+): InterventionTrendDirection {
+  if (!prior) return 'STABLE';
+  const ageMs = Math.max(0, (nowMs as number) - (prior.generatedAt as number));
+  if (ageMs > defaults.priorStateMaxAgeMs) return 'STABLE';
+  const delta = currentPressure01 - prior.interventionPressure01;
+  if (delta >= 0.16) return 'ESCALATING';
+  if (delta >= 0.08) return 'WORSENING';
+  if (delta <= -0.16) return 'RESOLVED';
+  if (delta <= -0.08) return 'DE_ESCALATING';
+  return 'STABLE';
+}
+
+// ============================================================================
 // MARK: Core class
 // ============================================================================
 
 export class InterventionPolicyModel {
   private readonly context: InterventionPolicyModelContext;
+
+  // Health counters — lifetime totals for observability dashboards
+  private totalScoredLifetime = 0;
+  private totalInterventionPressureSum = 0;
+  private maxInterventionPressureLifetime = 0;
+  private totalHardBlockCount = 0;
+  private totalQuarantineCount = 0;
+  private totalModerationReviewCount = 0;
+  private totalRescueCount = 0;
+  private readonly auditLog: InterventionAuditEntry[] = [];
 
   public constructor(options: InterventionPolicyModelOptions = {}) {
     this.context = Object.freeze({
@@ -1288,14 +1493,17 @@ export class InterventionPolicyModel {
         ...CHAT_INTERVENTION_POLICY_MODEL_DEFAULTS,
         ...(options.defaults ?? {}),
       }),
-      runtime: mergeRuntimeConfig(DEFAULT_BACKEND_CHAT_RUNTIME, options.runtimeOverride ?? {}),
+      runtime: mergeRuntimeConfig(options.runtimeOverride),
     });
   }
 
   public score(input: InterventionPolicyInput, prior: Nullable<InterventionPolicyPriorState> = null): InterventionPolicyScore {
     const context = this.context;
-    const moderationPressure01 = computeModerationPressure(input, context);
-    const rescuePressure01 = computeRescuePressure(input, context);
+    const nowMs = context.clock.now();
+    const defaults = context.defaults;
+
+    const moderationPressure01Raw = computeModerationPressure(input, context);
+    const rescuePressure01Raw = computeRescuePressure(input, context);
     const haterOpportunity01 = computeHaterOpportunity(input, context);
     const helperOpportunity01 = computeHelperOpportunity(input, context);
     const redirectPressure01 = computeRedirectPressure(input, context);
@@ -1306,21 +1514,48 @@ export class InterventionPolicyModel {
     const shadowStabilize01 = computeShadowStabilize(input, context);
     const confidence01 = computeConfidence(input, context);
 
-    const interventionPressure01 = asScore(
+    // v2: liveops amplification
+    const liveopsBoost01 = computeLiveopsInterventionBoost01(input, defaults);
+
+    // v2: sibling conflict detection
+    const hasSiblingConflict = detectSiblingConflict(moderationPressure01Raw, rescuePressure01Raw, defaults);
+
+    // v2: prior-state blending prevents score oscillation
+    const priorAgeMs = prior ? Math.max(0, (nowMs as number) - (prior.generatedAt as number)) : Infinity;
+    const moderationPressure01 = prior
+      ? blendInterventionWithPrior(moderationPressure01Raw, prior.moderationPressure01, defaults.priorBlendModeration01, priorAgeMs, defaults.priorStateMaxAgeMs)
+      : moderationPressure01Raw;
+    const rescuePressure01 = prior
+      ? blendInterventionWithPrior(rescuePressure01Raw, prior.rescuePressure01, defaults.priorBlendRescue01, priorAgeMs, defaults.priorStateMaxAgeMs)
+      : rescuePressure01Raw;
+
+    const interventionPressure01Raw = asScore(
       weightedBlend(
         [
-          { value: moderationPressure01, weight: context.defaults.moderationWeight01 },
-          { value: rescuePressure01, weight: context.defaults.churnOverrideWeight01 },
-          { value: helperOpportunity01, weight: context.defaults.helperWeight01 },
-          { value: haterOpportunity01, weight: context.defaults.haterWeight01 },
-          { value: redirectPressure01, weight: context.defaults.channelWeight01 },
-          { value: narrativePressure01, weight: context.defaults.narrativeWeight01 },
+          { value: moderationPressure01, weight: defaults.moderationWeight01 },
+          { value: rescuePressure01, weight: defaults.churnOverrideWeight01 },
+          { value: helperOpportunity01, weight: defaults.helperWeight01 },
+          { value: haterOpportunity01, weight: defaults.haterWeight01 },
+          { value: redirectPressure01, weight: defaults.channelWeight01 },
+          { value: narrativePressure01, weight: defaults.narrativeWeight01 },
           { value: shadowStabilize01, weight: 0.08 },
-          { value: prior?.interventionPressure01 ?? context.defaults.lowEvidenceFallback01, weight: context.defaults.baselineBlend01 },
+          { value: prior?.interventionPressure01 ?? defaults.lowEvidenceFallback01, weight: defaults.baselineBlend01 },
         ],
-        context.defaults.lowEvidenceFallback01,
+        defaults.lowEvidenceFallback01,
       ),
     );
+
+    // v2: ratchet + liveops applied to final pressure
+    const ratchet01 = computeInterventionRatchet01(interventionPressure01Raw, prior, defaults);
+    const interventionPressure01 = prior
+      ? blendInterventionWithPrior(
+          clamp01(interventionPressure01Raw + liveopsBoost01 * 0.6 + ratchet01),
+          prior.interventionPressure01,
+          defaults.priorBlendIntervention01,
+          priorAgeMs,
+          defaults.priorStateMaxAgeMs,
+        )
+      : clamp01(interventionPressure01Raw + liveopsBoost01 * 0.6);
 
     const recommendation = chooseRecommendation({
       input,
@@ -1363,8 +1598,11 @@ export class InterventionPolicyModel {
       defaults: context.defaults,
     });
 
-    const urgency = urgencyBand(interventionPressure01, context.defaults);
-    const severity = severityBand(Math.max(interventionPressure01, moderationPressure01, rescuePressure01), context.defaults);
+    // v2: trend direction and final semantic flags
+    const trendDirection = computeInterventionTrend(interventionPressure01, prior, nowMs, defaults);
+
+    const urgency = urgencyBand(interventionPressure01, defaults);
+    const severity = severityBand(asScore(Math.max(interventionPressure01, moderationPressure01, rescuePressure01)), defaults);
     const recommendedChannel = deriveRecommendedChannel(input, recommendation);
     const shouldHardBlock = recommendation === 'HARD_BLOCK_AND_RESCUE';
     const shouldQuarantine = recommendation === 'MODERATION_QUARANTINE';
@@ -1443,6 +1681,9 @@ export class InterventionPolicyModel {
       shouldUseTeachingTone,
       shouldUseNegotiationCounterplay,
       shouldUsePostRunDebrief,
+      liveopsBoost01,
+      trendDirection,
+      hasSiblingConflict,
       recommendedChannel,
       preferredHelperId: input.helperScore?.preferredHelperId ?? null,
       preferredHaterBotId: input.haterScore?.personaAffinities?.[0]?.botId ?? null,
@@ -1454,7 +1695,7 @@ export class InterventionPolicyModel {
       diagnostics: Object.freeze({
         rowCount: input.rowCount,
         freshnessMs: input.freshnessMs,
-        lowEvidence: input.rowCount <= context.defaults.lowEvidenceRowCount,
+        lowEvidence: input.rowCount <= defaults.lowEvidenceRowCount,
         highPressure: detectHighPressure(input.pressureTier),
         toxicityOverride01: asScore(safeNumber(input.toxicityScore?.toxicity01)),
         churnOverride01: asScore(safeNumber(input.churnScore?.churnRisk01)),
@@ -1462,6 +1703,37 @@ export class InterventionPolicyModel {
       }),
       metadata: interventionMetadata(input, recommendation),
     }) satisfies InterventionPolicyScore;
+
+    // Update health counters
+    this.totalScoredLifetime += 1;
+    this.totalInterventionPressureSum += interventionPressure01;
+    if (interventionPressure01 > this.maxInterventionPressureLifetime) {
+      this.maxInterventionPressureLifetime = interventionPressure01;
+    }
+    if (shouldHardBlock) this.totalHardBlockCount += 1;
+    if (shouldQuarantine) this.totalQuarantineCount += 1;
+    if (shouldRequestModerationReview) this.totalModerationReviewCount += 1;
+    if (shouldForceRecovery || shouldAllowHelper) this.totalRescueCount += 1;
+
+    // Audit trail
+    if (defaults.auditTrailEnabled) {
+      this.auditLog.push({
+        timestamp: nowMs,
+        sessionId: input.sessionId,
+        userId: input.userId,
+        roomId: input.roomId,
+        recommendation,
+        urgencyBand: urgency,
+        severityBand: severity,
+        interventionPressure01,
+        moderationPressure01,
+        rescuePressure01,
+        trendDirection,
+        hasSiblingConflict,
+        topFactor: explanationFactors[0]?.key ?? 'none',
+        channel: input.activeVisibleChannel,
+      });
+    }
 
     context.logger.debug('intervention_policy_model_scored', {
       roomId: score.roomId,
@@ -1473,6 +1745,8 @@ export class InterventionPolicyModel {
       haterOpportunity01: score.haterOpportunity01,
       helperOpportunity01: score.helperOpportunity01,
       redirectPressure01: score.redirectPressure01,
+      trendDirection: score.trendDirection,
+      hasSiblingConflict: score.hasSiblingConflict,
     });
 
     return score;
@@ -1637,6 +1911,113 @@ export class InterventionPolicyModel {
       recommendation: score.recommendation,
     });
   }
+
+  /**
+   * Scores a batch of inputs with optional prior state maps keyed by sessionId.
+   * Emits aggregate batch statistics when `batchScoreEmitStats` is enabled.
+   */
+  public scoreBatch(
+    inputs: readonly InterventionPolicyInput[],
+    priorMap?: ReadonlyMap<string, InterventionPolicyPriorState>,
+  ): InterventionPolicyBatchResult[] {
+    const defaults = this.context.defaults;
+    const results: InterventionPolicyBatchResult[] = [];
+    const statsEnabled = defaults.batchScoreEmitStats && inputs.length > 0;
+
+    let hardBlockCount = 0;
+    let quarantineCount = 0;
+    let moderationReviewCount = 0;
+    let rescueCount = 0;
+    let teachingCount = 0;
+    let silenceCount = 0;
+    let pressureSum = 0;
+    let maxPressure = 0;
+    let moderationSum = 0;
+    let rescueSum = 0;
+
+    for (const input of inputs) {
+      const priorKey = input.sessionId ?? input.userId ?? null;
+      const prior = priorKey ? (priorMap?.get(priorKey) ?? null) : null;
+      const score = this.score(input, prior);
+      results.push({ input, score });
+
+      if (!statsEnabled) continue;
+      if (score.shouldHardBlock) hardBlockCount += 1;
+      if (score.shouldQuarantine) quarantineCount += 1;
+      if (score.shouldRequestModerationReview) moderationReviewCount += 1;
+      if (score.shouldForceRecovery || score.shouldAllowHelper) rescueCount += 1;
+      if (score.shouldUseTeachingTone) teachingCount += 1;
+      if (score.shouldHoldSilence) silenceCount += 1;
+      pressureSum += score.interventionPressure01;
+      if (score.interventionPressure01 > maxPressure) maxPressure = score.interventionPressure01;
+      moderationSum += score.moderationPressure01;
+      rescueSum += score.rescuePressure01;
+    }
+
+    if (statsEnabled && results.length > 0) {
+      const n = results.length;
+      const stats: InterventionBatchStats = {
+        count: n,
+        hardBlockCount,
+        quarantineCount,
+        moderationReviewCount,
+        rescueCount,
+        teachingCount,
+        silenceCount,
+        meanInterventionPressure01: pressureSum / n,
+        maxInterventionPressure01: maxPressure,
+        meanModerationPressure01: moderationSum / n,
+        meanRescuePressure01: rescueSum / n,
+      };
+      results[results.length - 1] = { ...results[results.length - 1], stats };
+    }
+
+    return results;
+  }
+
+  /**
+   * Returns the intervention trend signal comparing current pressure to a prior state.
+   */
+  public interventionTrendFor(
+    currentPressure01: Score01,
+    prior: Nullable<InterventionPolicyPriorState>,
+  ): InterventionTrendSignal {
+    const nowMs = this.context.clock.now();
+    const defaults = this.context.defaults;
+    const direction = computeInterventionTrend(currentPressure01, prior, nowMs, defaults);
+    const priorValue = prior?.interventionPressure01 ?? clamp01(0);
+    return {
+      direction,
+      deltaPerWindow: currentPressure01 - priorValue,
+      priorPressure01: priorValue,
+      currentPressure01,
+    };
+  }
+
+  /** Returns a lifetime health snapshot for dashboard observability. */
+  public getHealthReport(): InterventionHealthReport {
+    const n = this.totalScoredLifetime;
+    return {
+      totalScoredLifetime: n,
+      totalHardBlockCount: this.totalHardBlockCount,
+      totalQuarantineCount: this.totalQuarantineCount,
+      totalModerationReviewCount: this.totalModerationReviewCount,
+      totalRescueCount: this.totalRescueCount,
+      auditLogSize: this.auditLog.length,
+      meanInterventionPressure01: n > 0 ? this.totalInterventionPressureSum / n : 0,
+      maxInterventionPressure01Lifetime: this.maxInterventionPressureLifetime,
+    };
+  }
+
+  /** Returns a copy of the internal audit log. Requires `auditTrailEnabled: true`. */
+  public getAuditLog(): readonly InterventionAuditEntry[] {
+    return [...this.auditLog];
+  }
+
+  /** Clears the internal audit log, reclaiming memory. */
+  public clearAuditLog(): void {
+    this.auditLog.length = 0;
+  }
 }
 
 // ============================================================================
@@ -1703,6 +2084,9 @@ export function serializeInterventionPolicyScore(score: InterventionPolicyScore)
     shouldUseNegotiationCounterplay: score.shouldUseNegotiationCounterplay,
     shouldUsePostRunDebrief: score.shouldUsePostRunDebrief,
     evidenceRowIds: [...score.evidenceRowIds],
+    liveopsBoost01: score.liveopsBoost01,
+    trendDirection: score.trendDirection,
+    hasSiblingConflict: score.hasSiblingConflict,
     laneDecisions: score.laneDecisions.map((entry) => ({
       lane: entry.lane,
       score01: entry.score01,
@@ -1714,7 +2098,13 @@ export function serializeInterventionPolicyScore(score: InterventionPolicyScore)
       signedDelta01: entry.signedDelta01,
       reason: entry.reason,
     })),
-    diagnostics: score.diagnostics,
+    diagnosticsRowCount: score.diagnostics.rowCount,
+    diagnosticsFreshnessMs: score.diagnostics.freshnessMs,
+    diagnosticsLowEvidence: score.diagnostics.lowEvidence,
+    diagnosticsHighPressure: score.diagnostics.highPressure,
+    diagnosticsToxicityOverride01: score.diagnostics.toxicityOverride01,
+    diagnosticsChurnOverride01: score.diagnostics.churnOverride01,
+    diagnosticsChannelMisfit01: score.diagnostics.channelMisfit01,
     metadata: score.metadata,
   });
 }
@@ -1763,6 +2153,181 @@ export function interventionPolicyAllowsHater(score: InterventionPolicyScore): b
   return score.shouldAllowHater && !score.shouldHardBlock && !score.shouldQuarantine;
 }
 
+// ============================================================================
+// MARK: Extended public helpers — predicates, labels, sorting, telemetry
+// ============================================================================
+
+/** True when the score is HARD_BLOCK_AND_RESCUE. */
+export function interventionIsHardBlock(score: InterventionPolicyScore): boolean {
+  return score.shouldHardBlock;
+}
+
+/** True when the score calls for any quarantine action. */
+export function interventionIsQuarantine(score: InterventionPolicyScore): boolean {
+  return score.shouldQuarantine;
+}
+
+/** True when moderation and rescue lanes are simultaneously elevated. */
+export function interventionHasSiblingConflict(score: InterventionPolicyScore): boolean {
+  return score.hasSiblingConflict;
+}
+
+/** True when liveops is amplifying the intervention pressure. */
+export function interventionIsLiveopsAmplified(score: InterventionPolicyScore): boolean {
+  return score.liveopsBoost01 >= 0.05;
+}
+
+/** True when the trend is escalating or worsening. */
+export function interventionIsEscalating(score: InterventionPolicyScore): boolean {
+  return score.trendDirection === 'ESCALATING' || score.trendDirection === 'WORSENING';
+}
+
+/** True when the trend is de-escalating or resolved. */
+export function interventionIsDeescalating(score: InterventionPolicyScore): boolean {
+  return score.trendDirection === 'DE_ESCALATING' || score.trendDirection === 'RESOLVED';
+}
+
+/** True when the recommendation should open any helper lane (public or private). */
+export function interventionNeedsHelper(score: InterventionPolicyScore): boolean {
+  return score.shouldAllowHelper;
+}
+
+/** True when the recommendation requires public visibility recovery. */
+export function interventionNeedsPublicWitness(score: InterventionPolicyScore): boolean {
+  return score.recommendation === 'PUBLIC_WITNESS_RECOVERY';
+}
+
+/** True when the recommendation is to hold silence without NPC interference. */
+export function interventionIsHoldSilence(score: InterventionPolicyScore): boolean {
+  return score.shouldHoldSilence;
+}
+
+/** True when the recommendation involves teaching the player. */
+export function interventionIsTeaching(score: InterventionPolicyScore): boolean {
+  return score.shouldUseTeachingTone;
+}
+
+/** True when negotiation counterplay is recommended. */
+export function interventionIsNegotiation(score: InterventionPolicyScore): boolean {
+  return score.shouldUseNegotiationCounterplay;
+}
+
+/** True when the recommendation routes a hater via shadow (non-public) action. */
+export function interventionIsShadowHater(score: InterventionPolicyScore): boolean {
+  return score.shouldShadowPrimeHater;
+}
+
+/** Returns a human-readable recommendation label. */
+export function interventionRecommendationLabel(score: InterventionPolicyScore): string {
+  switch (score.recommendation) {
+    case 'HARD_BLOCK_AND_RESCUE': return 'Hard Block + Rescue';
+    case 'MODERATION_QUARANTINE': return 'Moderation Quarantine';
+    case 'MODERATION_REVIEW': return 'Moderation Review';
+    case 'PUBLIC_WITNESS_RECOVERY': return 'Public Witness Recovery';
+    case 'HELPER_PUBLIC_RECOVERY': return 'Helper Public Recovery';
+    case 'HELPER_PRIVATE_RECOVERY': return 'Helper Private Recovery';
+    case 'SOFT_HELPER_PRIVATE': return 'Soft Helper (Private)';
+    case 'TEACHING_WINDOW': return 'Teaching Window';
+    case 'CHANNEL_REDIRECT': return 'Channel Redirect';
+    case 'NEGOTIATION_COUNTERPLAY': return 'Negotiation Counterplay';
+    case 'HATER_PUBLIC_STRIKE': return 'Hater Public Strike';
+    case 'HATER_SHADOW_PRIME': return 'Hater Shadow Prime';
+    case 'HOLD_SILENCE': return 'Hold Silence';
+    case 'SHADOW_STABILIZE': return 'Shadow Stabilize';
+    case 'POST_RUN_DEBRIEF': return 'Post-Run Debrief';
+    case 'SUPPRESS_ALL_NPC': return 'Suppress All NPC';
+  }
+}
+
+/** Returns a human-readable urgency band label. */
+export function interventionUrgencyLabel(score: InterventionPolicyScore): string {
+  switch (score.urgencyBand) {
+    case 'CRITICAL': return 'Critical';
+    case 'HIGH': return 'High';
+    case 'MEDIUM': return 'Medium';
+    case 'LOW': return 'Low';
+  }
+}
+
+/** Returns a human-readable trend label. */
+export function interventionTrendLabel(direction: InterventionTrendDirection): string {
+  switch (direction) {
+    case 'ESCALATING': return 'Escalating (severe)';
+    case 'WORSENING': return 'Worsening';
+    case 'STABLE': return 'Stable';
+    case 'DE_ESCALATING': return 'De-escalating';
+    case 'RESOLVED': return 'Resolved';
+  }
+}
+
+/** Returns a brief natural-language summary of the top explanation factors. */
+export function interventionExplanationSummary(score: InterventionPolicyScore): string {
+  const top3 = score.explanationFactors.slice(0, 3);
+  if (!top3.length) return 'No significant intervention signals.';
+  const factors = top3
+    .map((f) => `${f.key}(${f.signedDelta01 >= 0 ? '+' : ''}${f.signedDelta01.toFixed(2)})`)
+    .join(', ');
+  return `${interventionRecommendationLabel(score)} — top factors: ${factors}`;
+}
+
+/** Returns a machine-readable telemetry payload for event pipelines. */
+export function interventionScoreToTelemetry(
+  score: InterventionPolicyScore,
+): Readonly<Record<string, string | number | boolean>> {
+  return Object.freeze({
+    recommendation: score.recommendation,
+    urgencyBand: score.urgencyBand,
+    severityBand: score.severityBand,
+    interventionPressure01: score.interventionPressure01,
+    moderationPressure01: score.moderationPressure01,
+    rescuePressure01: score.rescuePressure01,
+    liveopsBoost01: score.liveopsBoost01,
+    trendDirection: score.trendDirection,
+    hasSiblingConflict: score.hasSiblingConflict,
+    shouldHardBlock: score.shouldHardBlock,
+    shouldQuarantine: score.shouldQuarantine,
+    shouldAllowHelper: score.shouldAllowHelper,
+    shouldHoldSilence: score.shouldHoldSilence,
+    confidence01: score.confidence01,
+    channel: score.activeVisibleChannel,
+    modelVersion: score.modelVersion,
+  });
+}
+
+/** Comparator for sorting scores descending by interventionPressure01. */
+export function interventionScoreCompare(a: InterventionPolicyScore, b: InterventionPolicyScore): number {
+  return b.interventionPressure01 - a.interventionPressure01;
+}
+
+/** Sorts an array of scores descending by intervention pressure. Non-mutating. */
+export function sortInterventionScoresDescending(scores: readonly InterventionPolicyScore[]): InterventionPolicyScore[] {
+  return [...scores].sort(interventionScoreCompare);
+}
+
+/** Filters to scores that need any active intervention (not silence or suppress). */
+export function interventionScoresNeedingAction(scores: readonly InterventionPolicyScore[]): InterventionPolicyScore[] {
+  return scores.filter((s) =>
+    s.recommendation !== 'SUPPRESS_ALL_NPC' &&
+    s.recommendation !== 'HOLD_SILENCE' &&
+    s.recommendation !== 'SHADOW_STABILIZE',
+  );
+}
+
+/** Filters to hard-block scores only. */
+export function interventionScoresHardBlock(scores: readonly InterventionPolicyScore[]): InterventionPolicyScore[] {
+  return scores.filter(interventionIsHardBlock);
+}
+
+/** Filters to escalating-trend scores only. */
+export function interventionScoresEscalating(scores: readonly InterventionPolicyScore[]): InterventionPolicyScore[] {
+  return scores.filter(interventionIsEscalating);
+}
+
+/** Returns confidence as a 0–100 integer for display. */
+export function interventionConfidence100(score: InterventionPolicyScore): number {
+  return Math.round(score.confidence01 * 100);
+}
+
 export const CHAT_INTERVENTION_POLICY_MODEL_NAMESPACE = Object.freeze({
   moduleName: CHAT_INTERVENTION_POLICY_MODEL_MODULE_NAME,
   moduleVersion: CHAT_INTERVENTION_POLICY_MODEL_VERSION,
@@ -1781,6 +2346,29 @@ export const CHAT_INTERVENTION_POLICY_MODEL_NAMESPACE = Object.freeze({
   interventionPolicyNeedsRecovery,
   interventionPolicyNeedsRedirect,
   interventionPolicyAllowsHater,
+  interventionIsHardBlock,
+  interventionIsQuarantine,
+  interventionHasSiblingConflict,
+  interventionIsLiveopsAmplified,
+  interventionIsEscalating,
+  interventionIsDeescalating,
+  interventionNeedsHelper,
+  interventionNeedsPublicWitness,
+  interventionIsHoldSilence,
+  interventionIsTeaching,
+  interventionIsNegotiation,
+  interventionIsShadowHater,
+  interventionRecommendationLabel,
+  interventionUrgencyLabel,
+  interventionTrendLabel,
+  interventionExplanationSummary,
+  interventionScoreToTelemetry,
+  interventionScoreCompare,
+  sortInterventionScoresDescending,
+  interventionScoresNeedingAction,
+  interventionScoresHardBlock,
+  interventionScoresEscalating,
+  interventionConfidence100,
 });
 
-export default InterventionPolicyModel;
+export default CHAT_INTERVENTION_POLICY_MODEL_NAMESPACE;

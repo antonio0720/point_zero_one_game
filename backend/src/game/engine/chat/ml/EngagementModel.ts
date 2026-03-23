@@ -2,7 +2,7 @@
  * ============================================================================
  * POINT ZERO ONE — AUTHORITATIVE BACKEND CHAT ENGAGEMENT MODEL
  * FILE: backend/src/game/engine/chat/ml/EngagementModel.ts
- * VERSION: 2026.03.14
+ * VERSION: 2026.03.22
  * AUTHORSHIP: Antonio T. Smith Jr.
  * LICENSE: Internal / Proprietary / All Rights Reserved
  * ============================================================================
@@ -42,7 +42,7 @@
  * - they are watching a hater window,
  * - or because the room itself is suppressing expression.
  *
- * So engagement cannot be a shallow “message count” score. It has to evaluate:
+ * So engagement cannot be a shallow "message count" score. It has to evaluate:
  *
  * 1. active expressive participation,
  * 2. room/channel-specific silence interpretation,
@@ -51,13 +51,23 @@
  * 5. helper receptivity without conflating it with weakness,
  * 6. crowd heat without treating theatrical rooms as inherently healthier,
  * 7. negotiation quiet versus disengagement quiet,
- * 8. trend and fragility rather than just present-state activation.
+ * 8. trend and fragility rather than just present-state activation,
+ * 9. sovereignty cold-play reinterpretation,
+ * 10. bankruptcy collapse risk,
+ * 11. liveops heat amplification,
+ * 12. economy stress fragility,
+ * 13. ranking pressure as engagement drag,
+ * 14. deal-room dominance bonus for active silent reading,
+ * 15. syndicate intimacy as presence amplifier.
  *
  * This model therefore produces:
  * - an engagement score,
  * - continuity and response-likelihood scores,
  * - fragility and soft-dropoff risk,
  * - channel-fit and crowd-readiness posture,
+ * - trend signal and prior-state blending,
+ * - pressure profile decomposition,
+ * - channel posture summary,
  * - actionable recommendations for downstream orchestration,
  * - and a load-bearing explanation surface for proof / telemetry / replay.
  * ============================================================================
@@ -108,7 +118,7 @@ export const CHAT_ENGAGEMENT_MODEL_MODULE_NAME =
   'PZO_BACKEND_CHAT_ENGAGEMENT_MODEL' as const;
 
 export const CHAT_ENGAGEMENT_MODEL_VERSION =
-  '2026.03.14-engagement-model.v1' as const;
+  '2026.03.22-engagement-model.v2' as const;
 
 export const CHAT_ENGAGEMENT_MODEL_RUNTIME_LAWS = Object.freeze([
   'The model scores accepted authoritative features, not client intent.',
@@ -118,6 +128,9 @@ export const CHAT_ENGAGEMENT_MODEL_RUNTIME_LAWS = Object.freeze([
   'Negative swarm conditions increase fragility faster than raw activity can offset.',
   'Global theatrics, syndicate intimacy, lobby looseness, and deal-room predation are interpreted differently.',
   'Trend matters: stable engagement is scored differently from brittle spikes.',
+  'Near-sovereignty cold play must not be misread as frozen disengagement.',
+  'Bankruptcy collapse is a structural engagement floor, not an affect anomaly.',
+  'Liveops heat amplifies engagement ceiling but does not fake engagement floor.',
   'This model recommends posture; it does not create transcript truth.',
 ] as const);
 
@@ -144,7 +157,7 @@ export const CHAT_ENGAGEMENT_MODEL_DEFAULTS = Object.freeze({
   responseCadenceWeight01: 0.18,
   playerShareWeight01: 0.14,
   affinityWeight01: 0.12,
-  maxExplanationFactors: 12,
+  maxExplanationFactors: 14,
   lowEvidenceRowCount: 2,
   staleWindowMs: 90_000,
   freshnessFloorMs: 6_000,
@@ -163,6 +176,32 @@ export const CHAT_ENGAGEMENT_MODEL_DEFAULTS = Object.freeze({
   hardHelperThreshold01: 0.74,
   crowdAmplifyThreshold01: 0.72,
   cinematicHoldThreshold01: 0.62,
+  // Extended config surface — v2
+  helperReceptivityContinuityBonus01: 0.07,
+  sovereigntyElectricBonus01: 0.12,
+  bankruptcyCollapsePenalty01: 0.22,
+  bankruptcyCriticalThreshold01: 0.80,
+  liveopsHeatEngagementBoost01: 0.09,
+  rankingPressureFragilityWeight01: 0.12,
+  economyStressFragilityWeight01: 0.10,
+  dealRoomDominanceEngagementBonus01: 0.08,
+  syndicateIntimacyEngagementBonus01: 0.07,
+  priorStateMaxAgeMs: 300_000,
+  responseLikelihoodPriorBlend01: 0.22,
+  continuityLookbackRows: 8,
+  auditTrailEnabled: false,
+  benchmarkEnabled: false,
+  trendWindowMinRows: 3,
+  electricEngagementThreshold01: 0.87,
+  frozenEngagementThreshold01: 0.18,
+  channelPostureAmbientThreshold01: 0.48,
+  channelPostureActiveThreshold01: 0.65,
+  pressureProfileNormFactor: 4.0,
+  batchScoreEmitStats: true,
+  crowdAmplifyMaxHeat01: 0.92,
+  cinematicSilenceMinSovereignty01: 0.52,
+  qualityMinEngagement01: 0.22,
+  qualityMinFragility: 0.10,
 } as const);
 
 // ============================================================================
@@ -285,7 +324,27 @@ export type EngagementRecommendation =
   | 'LIGHT_HELPER'
   | 'HARD_HELPER'
   | 'REDUCE_HATER'
-  | 'HOLD_DEALROOM_PRESSURE';
+  | 'HOLD_DEALROOM_PRESSURE'
+  | 'EMERGENCY_RESCUE'
+  | 'BANKRUPTCY_STABILIZE'
+  | 'LIVEOPS_AMPLIFY'
+  | 'SYNDICATE_HOLD';
+
+export type EngagementTrendDirection =
+  | 'RISING_STRONG'
+  | 'RISING'
+  | 'STABLE'
+  | 'DECLINING'
+  | 'DECLINING_FAST'
+  | 'UNKNOWN';
+
+export type EngagementChannelPostureKind =
+  | 'AMBIENT'
+  | 'ACTIVE'
+  | 'DOMINANT'
+  | 'WITHDRAWING'
+  | 'COLD_PLAY'
+  | 'FROZEN';
 
 export interface EngagementScoreContribution {
   readonly key: string;
@@ -303,6 +362,10 @@ export interface EngagementModelDiagnostics {
   readonly theatricalReadiness01: Score01;
   readonly negotiationQuiet01: Score01;
   readonly volatility01: Score01;
+  readonly sovereigntyElectric01: Score01;
+  readonly bankruptcyCollapse01: Score01;
+  readonly liveopsBoost01: Score01;
+  readonly trendDirection: EngagementTrendDirection;
   readonly explanationFactors: readonly EngagementScoreContribution[];
 }
 
@@ -325,6 +388,9 @@ export interface EngagementModelScore {
   readonly shouldInviteAmbientWitnesses: boolean;
   readonly shouldSoftHelper: boolean;
   readonly shouldHardHelper: boolean;
+  readonly shouldEmergencyRescue: boolean;
+  readonly channelPosture: EngagementChannelPostureKind;
+  readonly trendDirection: EngagementTrendDirection;
   readonly diagnostics: EngagementModelDiagnostics;
 }
 
@@ -333,6 +399,78 @@ export interface EngagementScoreBatchResult {
   readonly scores: readonly EngagementModelScore[];
   readonly strongest: Nullable<EngagementModelScore>;
   readonly weakest: Nullable<EngagementModelScore>;
+  readonly stats: EngagementBatchStats;
+}
+
+export interface EngagementBatchStats {
+  readonly totalScored: number;
+  readonly frozenCount: number;
+  readonly electricCount: number;
+  readonly hardHelperCount: number;
+  readonly emergencyRescueCount: number;
+  readonly bankruptcyStabilizeCount: number;
+  readonly avgEngagement01: Score01;
+  readonly avgFragility01: Score01;
+  readonly avgSoftDropoffRisk01: Score01;
+}
+
+export interface EngagementTrendSignal {
+  readonly direction: EngagementTrendDirection;
+  readonly delta01: number;
+  readonly priorEngagement01: Nullable<Score01>;
+  readonly currentEngagement01: Score01;
+  readonly ageMs: number;
+}
+
+export interface EngagementPressureProfile {
+  readonly pressureTier: PressureTier;
+  readonly intensityNorm01: Score01;
+  readonly confidenceBuffer01: Score01;
+  readonly intimidationDrag01: Score01;
+  readonly frustrationDrag01: Score01;
+  readonly bankruptcyRisk01: Score01;
+  readonly rankingPressureDrag01: Score01;
+  readonly economyStressDrag01: Score01;
+  readonly compositeComposure01: Score01;
+}
+
+export interface EngagementChannelPosture {
+  readonly channel: ChatVisibleChannel;
+  readonly posture: EngagementChannelPostureKind;
+  readonly engagement01: Score01;
+  readonly affinity01: Score01;
+  readonly crowdReadiness01: Score01;
+  readonly isTacticalQuiet: boolean;
+  readonly isElectric: boolean;
+  readonly isFrozen: boolean;
+}
+
+export interface EngagementAuditEntry {
+  readonly ts: UnixMs;
+  readonly module: string;
+  readonly version: string;
+  readonly userId: Nullable<ChatUserId>;
+  readonly roomId: Nullable<ChatRoomId>;
+  readonly channel: ChatVisibleChannel;
+  readonly engagement01: Score01;
+  readonly band: EngagementBand;
+  readonly recommendation: EngagementRecommendation;
+  readonly fragility01: Score01;
+  readonly softDropoffRisk01: Score01;
+  readonly trendDirection: EngagementTrendDirection;
+  readonly evidenceRowCount: number;
+  readonly freshnessMs: number;
+}
+
+export interface EngagementHealthReport {
+  readonly ts: UnixMs;
+  readonly totalScoredLifetime: number;
+  readonly avgEngagement01: Score01;
+  readonly avgFragility01: Score01;
+  readonly electricPct: number;
+  readonly frozenPct: number;
+  readonly hardHelperPct: number;
+  readonly bankruptcyStabilizePct: number;
 }
 
 // ============================================================================
@@ -382,16 +520,8 @@ function pickCategory(
   return typeof value === 'string' && value.length > 0 ? value : fallback;
 }
 
-function unique<T>(values: readonly T[]): readonly T[] {
-  return Array.from(new Set(values));
-}
-
 function signedContribution(key: string, signedDelta01: number, reason: string): EngagementScoreContribution {
-  return Object.freeze({
-    key,
-    signedDelta01,
-    reason,
-  });
+  return Object.freeze({ key, signedDelta01, reason });
 }
 
 function activeAffinity01(input: EngagementModelInput): Score01 {
@@ -596,6 +726,671 @@ function bandForEngagement(engagement01: Score01): EngagementBand {
   return 'ELECTRIC';
 }
 
+// ============================================================================
+// MARK: Extended scoring sub-components — v2
+// ============================================================================
+
+function computeSovereigntyElectric01(
+  input: EngagementModelInput,
+  defaults: typeof CHAT_ENGAGEMENT_MODEL_DEFAULTS,
+): Score01 {
+  if (input.runNearSovereignty01 < 0.52) return asScore(0);
+
+  // Near-sovereignty cold play: high confidence + near-sov → electric quiet
+  const sovereigntyStrength = input.runNearSovereignty01 as number;
+  const confidenceBuffer = Math.max(0, (input.confidence01 as number) - 0.42);
+  const composureBonus = (1 - (input.frustration01 as number)) * 0.18;
+  const silenceBonus = input.silenceBand !== 'FRESH' ? 0.06 : 0;
+
+  return asScore(
+    sovereigntyStrength * defaults.sovereigntyElectricBonus01 +
+      confidenceBuffer * 0.14 +
+      composureBonus +
+      silenceBonus,
+  );
+}
+
+function computeBankruptcyCollapsePenalty01(
+  input: EngagementModelInput,
+  defaults: typeof CHAT_ENGAGEMENT_MODEL_DEFAULTS,
+): Score01 {
+  const bankruptcyLoad = input.runBankruptcyWarning01 as number;
+  if (bankruptcyLoad < defaults.bankruptcyCriticalThreshold01) {
+    // Graduated penalty below critical threshold
+    return asScore(bankruptcyLoad * defaults.bankruptcyCollapsePenalty01 * 0.55);
+  }
+  // Full penalty once past critical
+  return asScore(defaults.bankruptcyCollapsePenalty01);
+}
+
+function computeLiveopsBoost01(
+  input: EngagementModelInput,
+  defaults: typeof CHAT_ENGAGEMENT_MODEL_DEFAULTS,
+): Score01 {
+  if (input.liveopsHelperBlackout01 > 0.5 || input.liveopsHaterRaid01 > 0.5) {
+    // Liveops suppression voids the heat boost
+    return asScore(0);
+  }
+  return asScore((input.liveopsHeatMultiplier01 as number) * defaults.liveopsHeatEngagementBoost01);
+}
+
+function computeRankingPressureFragility01(
+  input: EngagementModelInput,
+  defaults: typeof CHAT_ENGAGEMENT_MODEL_DEFAULTS,
+): Score01 {
+  return asScore(
+    (input.multiplayerRankingPressure01 as number) * defaults.rankingPressureFragilityWeight01,
+  );
+}
+
+function computeEconomyStressFragility01(
+  input: EngagementModelInput,
+  defaults: typeof CHAT_ENGAGEMENT_MODEL_DEFAULTS,
+): Score01 {
+  const liquidityLoad = input.economyLiquidityStress01 as number;
+  const overpayLoad = input.economyOverpayRisk01 as number;
+  return asScore(
+    liquidityLoad * defaults.economyStressFragilityWeight01 +
+      overpayLoad * (defaults.economyStressFragilityWeight01 * 0.55),
+  );
+}
+
+function computeDealRoomDominanceBonus01(
+  input: EngagementModelInput,
+  defaults: typeof CHAT_ENGAGEMENT_MODEL_DEFAULTS,
+): Score01 {
+  if (!isDealRoom(input)) return asScore(0);
+
+  // Dominance is active reading/analysis, which keeps engagement positive even in silence
+  const dominance = input.economyBluffRisk01 as number;
+  const confidenceBuffer = Math.max(0, (input.confidence01 as number) - 0.38);
+  return asScore(
+    dominance * defaults.dealRoomDominanceEngagementBonus01 +
+      confidenceBuffer * 0.06,
+  );
+}
+
+function computeSyndicateIntimacyBonus01(
+  input: EngagementModelInput,
+  defaults: typeof CHAT_ENGAGEMENT_MODEL_DEFAULTS,
+): Score01 {
+  if (!isSyndicate(input)) return asScore(0);
+
+  const affinity = input.affinitySyndicate01 as number;
+  const attachment = input.attachment01 as number;
+  return asScore(
+    affinity * defaults.syndicateIntimacyEngagementBonus01 +
+      attachment * 0.05,
+  );
+}
+
+function computeHelperReceptivityContinuityBonus01(
+  input: EngagementModelInput,
+  defaults: typeof CHAT_ENGAGEMENT_MODEL_DEFAULTS,
+): Score01 {
+  if ((input.helperReceptivity01 as number) < 0.40 || (input.helperIgnore01 as number) > 0.50) {
+    return asScore(0);
+  }
+  return asScore(
+    (input.helperReceptivity01 as number) * defaults.helperReceptivityContinuityBonus01,
+  );
+}
+
+function computeEngagementTrend(
+  prior: Nullable<EngagementModelPriorState>,
+  current01: Score01,
+  defaults: typeof CHAT_ENGAGEMENT_MODEL_DEFAULTS,
+): EngagementTrendSignal {
+  if (!prior) {
+    return {
+      direction: 'UNKNOWN',
+      delta01: 0,
+      priorEngagement01: null,
+      currentEngagement01: current01,
+      ageMs: 0,
+    };
+  }
+
+  const now = Date.now();
+  const ageMs = Math.max(0, now - (prior.generatedAt as number));
+  if (ageMs > defaults.priorStateMaxAgeMs) {
+    return {
+      direction: 'UNKNOWN',
+      delta01: 0,
+      priorEngagement01: prior.engagement01,
+      currentEngagement01: current01,
+      ageMs,
+    };
+  }
+
+  const delta = (current01 as number) - (prior.engagement01 as number);
+  let direction: EngagementTrendDirection;
+  if (delta >= 0.18) {
+    direction = 'RISING_STRONG';
+  } else if (delta >= 0.06) {
+    direction = 'RISING';
+  } else if (delta >= -0.06) {
+    direction = 'STABLE';
+  } else if (delta >= -0.18) {
+    direction = 'DECLINING';
+  } else {
+    direction = 'DECLINING_FAST';
+  }
+
+  return { direction, delta01: delta, priorEngagement01: prior.engagement01, currentEngagement01: current01, ageMs };
+}
+
+function computeChannelPostureKind(
+  input: EngagementModelInput,
+  engagement01: Score01,
+  defaults: typeof CHAT_ENGAGEMENT_MODEL_DEFAULTS,
+): EngagementChannelPostureKind {
+  const eng = engagement01 as number;
+
+  if (eng < defaults.frozenEngagementThreshold01) return 'FROZEN';
+
+  if (input.runNearSovereignty01 >= 0.52 && input.silenceBand !== 'FRESH' && input.confidence01 >= 0.46) {
+    return 'COLD_PLAY';
+  }
+
+  if (input.churnRisk01 >= 0.70 || input.fragility01 >= 0.72) {
+    return 'WITHDRAWING';
+  }
+
+  if (eng >= defaults.electricEngagementThreshold01) return 'DOMINANT';
+
+  if (eng >= defaults.channelPostureActiveThreshold01) return 'ACTIVE';
+
+  return 'AMBIENT';
+}
+
+function computePressureProfile(
+  input: EngagementModelInput,
+  defaults: typeof CHAT_ENGAGEMENT_MODEL_DEFAULTS,
+  bankruptcyCollapse01: Score01,
+  rankingPressureFragility01: Score01,
+  economyStressFragility01: Score01,
+): EngagementPressureProfile {
+  const intensityNorm01 = pressureIntensity01(input.pressureTier);
+  const confidenceBuffer01 = asScore(
+    Math.max(0, (input.confidence01 as number) - (intensityNorm01 as number) * 0.22),
+  );
+  const intimidationDrag01 = asScore(
+    (input.intimidation01 as number) * (intensityNorm01 as number) * 0.38,
+  );
+  const frustrationDrag01 = asScore(
+    (input.frustration01 as number) * (intensityNorm01 as number) * 0.28,
+  );
+
+  const totalDrag =
+    (intimidationDrag01 as number) +
+    (frustrationDrag01 as number) +
+    (bankruptcyCollapse01 as number) +
+    (rankingPressureFragility01 as number) +
+    (economyStressFragility01 as number);
+
+  const compositeComposure01 = asScore(
+    Math.max(0, (confidenceBuffer01 as number) - totalDrag / defaults.pressureProfileNormFactor),
+  );
+
+  return Object.freeze({
+    pressureTier: input.pressureTier,
+    intensityNorm01,
+    confidenceBuffer01,
+    intimidationDrag01,
+    frustrationDrag01,
+    bankruptcyRisk01: bankruptcyCollapse01,
+    rankingPressureDrag01: rankingPressureFragility01,
+    economyStressDrag01: economyStressFragility01,
+    compositeComposure01,
+  });
+}
+
+// ============================================================================
+// MARK: Core scoring helpers (carried from v1)
+// ============================================================================
+
+function computePressureComposure01(input: EngagementModelInput): Score01 {
+  const pressure = pressureIntensity01(input.pressureTier);
+  return asScore(
+    input.confidence01 * 0.38 +
+      input.responseCadence01 * 0.18 +
+      input.recentPlayerShare01 * 0.14 +
+      input.relief01 * 0.06 +
+      input.runNearSovereignty01 * 0.10 +
+      (1 - input.frustration01) * 0.14 -
+      pressure * Math.max(0, (input.intimidation01 as number) - (input.confidence01 as number)) * 0.18,
+  );
+}
+
+function computePositiveActivation01(
+  input: EngagementModelInput,
+  defaults: typeof CHAT_ENGAGEMENT_MODEL_DEFAULTS,
+  affinity01: Score01,
+  theatricalReadiness01: Score01,
+): Score01 {
+  const playerExpression =
+    input.responseCadence01 * defaults.responseCadenceWeight01 +
+    input.recentPlayerShare01 * defaults.playerShareWeight01 +
+    affinity01 * defaults.affinityWeight01;
+
+  const emotionalOpenness =
+    input.confidence01 * defaults.confidenceEngagementWeight01 +
+    input.curiosity01 * defaults.curiosityContinuityWeight01 +
+    input.attachment01 * defaults.attachmentContinuityWeight01 +
+    input.relief01 * 0.06;
+
+  const situationalOpportunity =
+    input.rescueOpportunity01 * 0.08 +
+    input.visibilityExposure01 * 0.05 +
+    theatricalReadiness01 * 0.08 +
+    contributorBandDensity01(input.contributorBand) * 0.05 +
+    freshnessStrength01(input, defaults) * 0.08;
+
+  const rescueBonus = input.battleRescueWindowOpen01 > 0 ? defaults.rescueWindowResponsivenessBonus01 : 0;
+
+  return asScore(playerExpression + emotionalOpenness + situationalOpportunity + rescueBonus);
+}
+
+function computeNegativeLoad01(
+  input: EngagementModelInput,
+  defaults: typeof CHAT_ENGAGEMENT_MODEL_DEFAULTS,
+  silencePenalty: Score01,
+): Score01 {
+  const crowdPenalty = isNegativeSwarm(input) ? defaults.negativeSwarmPenalty01 : 0;
+  const frustrationLoad = input.frustration01 * 0.14;
+  const embarrassmentLoad = input.embarrassment01 * 0.10;
+  const intimidationLoad = input.intimidation01 * 0.08;
+  const churnLoad = input.churnRisk01 * 0.18;
+  const helperIgnoreLoad = input.helperIgnore01 * 0.08;
+  const overloadLoad = input.switchStress01 * 0.05 + input.liveopsHelperBlackout01 * 0.03 + input.liveopsHaterRaid01 * 0.04;
+
+  return asScore(
+    silencePenalty + crowdPenalty + frustrationLoad + embarrassmentLoad + intimidationLoad + churnLoad + helperIgnoreLoad + overloadLoad,
+  );
+}
+
+function computeContinuity01(
+  input: EngagementModelInput,
+  defaults: typeof CHAT_ENGAGEMENT_MODEL_DEFAULTS,
+  affinity01: Score01,
+  prior: Nullable<EngagementModelPriorState>,
+  helperReceptivityBonus01: Score01,
+): Score01 {
+  const base = asScore(
+    input.attachment01 * 0.18 +
+      input.curiosity01 * 0.24 +
+      input.responseCadence01 * 0.16 +
+      affinity01 * 0.16 +
+      (1 - input.churnRisk01) * 0.14 +
+      (1 - input.helperIgnore01) * 0.12 +
+      (helperReceptivityBonus01 as number) * 0.08,
+  );
+
+  if (!prior) return base;
+
+  return asScore(
+    (base as number) * (1 - defaults.trendBlend01) +
+      (prior.continuity01 as number) * defaults.trendBlend01,
+  );
+}
+
+function computeResponseLikelihood01(
+  input: EngagementModelInput,
+  defaults: typeof CHAT_ENGAGEMENT_MODEL_DEFAULTS,
+  pressureComposure01: Score01,
+  silencePenalty: Score01,
+  negotiationQuiet01Value: Score01,
+  prior: Nullable<EngagementModelPriorState>,
+): Score01 {
+  const dealRoomDiscount = isDealRoom(input) ? (negotiationQuiet01Value as number) * 0.12 : 0;
+
+  const base = asScore(
+    input.responseCadence01 * 0.26 +
+      input.recentPlayerShare01 * 0.18 +
+      pressureComposure01 * 0.18 +
+      input.curiosity01 * 0.10 +
+      input.confidence01 * 0.08 +
+      input.battleRescueWindowOpen01 * 0.08 +
+      input.runBankruptcyWarning01 * 0.05 -
+      (silencePenalty as number) * 0.24 -
+      (input.embarrassment01 as number) * 0.08 -
+      dealRoomDiscount,
+  );
+
+  if (!prior) return base;
+
+  return asScore(
+    (base as number) * (1 - defaults.responseLikelihoodPriorBlend01) +
+      (prior.responseLikelihood01 as number) * defaults.responseLikelihoodPriorBlend01,
+  );
+}
+
+function computeFragility01(
+  input: EngagementModelInput,
+  defaults: typeof CHAT_ENGAGEMENT_MODEL_DEFAULTS,
+  silencePenalty: Score01,
+  volatility01: Score01,
+  rankingPressureFragility01: Score01,
+  economyStressFragility01: Score01,
+): Score01 {
+  const embarrassmentLoad = (input.embarrassment01 as number) * defaults.embarrassmentFragilityWeight01;
+  const intimidationLoad = (input.intimidation01 as number) * defaults.intimidationFragilityWeight01;
+  const frustrationLoad = (input.frustration01 as number) * defaults.frustrationFragilityWeight01;
+  const helperIgnoreLoad = (input.helperIgnore01 as number) * defaults.helperIgnoreFragilityPenalty01;
+
+  return asScore(
+    (silencePenalty as number) * 0.18 +
+      (input.churnRisk01 as number) * 0.22 +
+      embarrassmentLoad +
+      intimidationLoad +
+      frustrationLoad +
+      helperIgnoreLoad +
+      (input.hostileMomentum01 as number) * 0.10 +
+      (volatility01 as number) * 0.12 +
+      (isNegativeSwarm(input) ? 0.08 : 0) +
+      (input.liveopsHaterRaid01 as number) * 0.05 +
+      (rankingPressureFragility01 as number) +
+      (economyStressFragility01 as number),
+  );
+}
+
+function computeSoftDropoffRisk01(
+  input: EngagementModelInput,
+  fragility01: Score01,
+  responseLikelihood01: Score01,
+): Score01 {
+  return asScore(
+    (fragility01 as number) * 0.42 +
+      (input.churnRisk01 as number) * 0.28 +
+      (1 - (responseLikelihood01 as number)) * 0.18 +
+      (input.helperIgnore01 as number) * 0.06 +
+      (input.silenceBand === 'HARD' ? 0.06 : input.silenceBand === 'STALE' ? 0.03 : 0),
+  );
+}
+
+function computeCrowdReadiness01(
+  input: EngagementModelInput,
+  theatricalReadiness01: Score01,
+  fragility01: Score01,
+): Score01 {
+  if (!isGlobal(input) && !isLobby(input)) {
+    return asScore(
+      input.visibilityExposure01 * 0.34 +
+        input.confidence01 * 0.18 +
+        input.recentPlayerShare01 * 0.12 +
+        (1 - fragility01) * 0.18 +
+        input.roomHeat01 * 0.18,
+    );
+  }
+
+  return asScore(
+    (theatricalReadiness01 as number) * 0.30 +
+      (input.visibilityExposure01 as number) * 0.20 +
+      (input.confidence01 as number) * 0.12 +
+      (input.recentPlayerShare01 as number) * 0.12 +
+      (1 - (fragility01 as number)) * 0.14 +
+      (isPositiveSwarm(input) ? 0.08 : 0) -
+      (isNegativeSwarm(input) ? 0.06 : 0),
+  );
+}
+
+function computeQuality01(
+  input: EngagementModelInput,
+  engagement01: Score01,
+  continuity01: Score01,
+  responseLikelihood01: Score01,
+  fragility01: Score01,
+): Score01 {
+  return asScore(
+    (engagement01 as number) * 0.30 +
+      (continuity01 as number) * 0.22 +
+      (responseLikelihood01 as number) * 0.18 +
+      (1 - (fragility01 as number)) * 0.18 +
+      (input.averageMessageLength01 as number) * 0.06 +
+      (input.curiosity01 as number) * 0.06,
+  );
+}
+
+function recommendEngagementAction(
+  input: EngagementModelInput,
+  defaults: typeof CHAT_ENGAGEMENT_MODEL_DEFAULTS,
+  engagement01: Score01,
+  fragility01: Score01,
+  softDropoffRisk01: Score01,
+  crowdReadiness01: Score01,
+  quality01: Score01,
+  bankruptcyCollapse01: Score01,
+  sovereigntyElectric01: Score01,
+  liveopsBoost01: Score01,
+): EngagementRecommendation {
+  // Bankruptcy stabilize takes priority over everything when near critical
+  if ((bankruptcyCollapse01 as number) >= defaults.bankruptcyCollapsePenalty01 * 0.80) {
+    return 'BANKRUPTCY_STABILIZE';
+  }
+
+  // Emergency rescue: hard helper threshold + high churn
+  if (softDropoffRisk01 >= defaults.hardHelperThreshold01 && input.churnRisk01 >= 0.72 && input.helperReceptivity01 >= 0.32) {
+    return 'EMERGENCY_RESCUE';
+  }
+
+  if (isDealRoom(input) && input.silenceBand !== 'FRESH' && input.economyBluffRisk01 >= 0.46 && engagement01 >= 0.42) {
+    return 'HOLD_DEALROOM_PRESSURE';
+  }
+
+  if (softDropoffRisk01 >= defaults.hardHelperThreshold01 && input.helperReceptivity01 >= 0.36) {
+    return 'HARD_HELPER';
+  }
+
+  if (softDropoffRisk01 >= defaults.softDropoffThreshold01 && input.helperReceptivity01 >= 0.32) {
+    return 'LIGHT_HELPER';
+  }
+
+  if (
+    engagement01 >= defaults.cinematicHoldThreshold01 &&
+    input.runNearSovereignty01 >= defaults.cinematicSilenceMinSovereignty01 &&
+    (sovereigntyElectric01 as number) > 0
+  ) {
+    return 'DEFER_TO_CINEMATIC_SILENCE';
+  }
+
+  if (
+    crowdReadiness01 >= defaults.crowdAmplifyThreshold01 &&
+    input.roomHeat01 <= defaults.crowdAmplifyMaxHeat01 &&
+    quality01 >= 0.58 &&
+    !isNegativeSwarm(input)
+  ) {
+    return 'AMPLIFY_ROOM';
+  }
+
+  if ((liveopsBoost01 as number) >= defaults.liveopsHeatEngagementBoost01 * 0.80 && quality01 >= 0.52) {
+    return 'LIVEOPS_AMPLIFY';
+  }
+
+  if (isSyndicate(input) && input.affinitySyndicate01 >= 0.60 && engagement01 >= 0.44) {
+    return 'SYNDICATE_HOLD';
+  }
+
+  if (fragility01 >= 0.56 && input.haterDensity01 >= 0.42) {
+    return 'REDUCE_HATER';
+  }
+
+  if (engagement01 >= 0.48) return 'KEEP_AMBIENT';
+  return 'NONE';
+}
+
+function buildExplanationFactors(
+  input: EngagementModelInput,
+  defaults: typeof CHAT_ENGAGEMENT_MODEL_DEFAULTS,
+  scores: {
+    affinity01: Score01;
+    theatricalReadiness01: Score01;
+    negotiationQuiet01Value: Score01;
+    pressureComposure01: Score01;
+    silencePenalty: Score01;
+    positiveActivation01: Score01;
+    negativeLoad01: Score01;
+    continuity01: Score01;
+    responseLikelihood01: Score01;
+    fragility01: Score01;
+    volatility01: Score01;
+    crowdReadiness01: Score01;
+    sovereigntyElectric01: Score01;
+    bankruptcyCollapse01: Score01;
+    liveopsBoost01: Score01;
+    dealRoomDominance01: Score01;
+    syndicateIntimacy01: Score01;
+    rankingPressureFragility01: Score01;
+    economyStressFragility01: Score01;
+  },
+): readonly EngagementScoreContribution[] {
+  const factors: EngagementScoreContribution[] = [];
+
+  factors.push(signedContribution(
+    'response_cadence',
+    (input.responseCadence01 as number) * 0.18,
+    'Recent response cadence is contributing to present engagement posture.',
+  ));
+
+  factors.push(signedContribution(
+    'player_share',
+    (input.recentPlayerShare01 as number) * 0.14,
+    'Player message share inside the active window is sustaining expressive participation.',
+  ));
+
+  factors.push(signedContribution(
+    'channel_affinity',
+    (scores.affinity01 as number) * defaults.affinityWeight01,
+    'Channel affinity indicates how naturally this player tends to stay active in the current lane.',
+  ));
+
+  factors.push(signedContribution(
+    'pressure_composure',
+    (scores.pressureComposure01 as number) * 0.14,
+    'Composure under current pressure is supporting continuity instead of panic collapse.',
+  ));
+
+  factors.push(signedContribution(
+    'continuity',
+    (scores.continuity01 as number) * 0.12,
+    'Attachment, curiosity, and behavioral carryover are sustaining ongoing chat presence.',
+  ));
+
+  factors.push(signedContribution(
+    'crowd_readiness',
+    (scores.crowdReadiness01 as number) * 0.10,
+    'The current channel / room posture is either helping or limiting visible participation.',
+  ));
+
+  factors.push(signedContribution(
+    'silence_penalty',
+    -(scores.silencePenalty as number),
+    'Room-adjusted silence interpretation is reducing active-engagement confidence.',
+  ));
+
+  factors.push(signedContribution(
+    'fragility',
+    -(scores.fragility01 as number) * 0.18,
+    'Fragility indicates that present engagement may break if pressure rises or hater load continues.',
+  ));
+
+  factors.push(signedContribution(
+    'soft_dropoff_risk_proxy',
+    -((input.churnRisk01 as number) * 0.14 + (input.helperIgnore01 as number) * 0.06),
+    'Churn history and ignored-helper posture are dragging long-form participation durability.',
+  ));
+
+  if ((scores.sovereigntyElectric01 as number) > 0) {
+    factors.push(signedContribution(
+      'sovereignty_cold_play',
+      (scores.sovereigntyElectric01 as number),
+      'Near-sovereignty cold play reinterprets apparent silence as calculated strategic presence.',
+    ));
+  }
+
+  if ((scores.bankruptcyCollapse01 as number) > 0.05) {
+    factors.push(signedContribution(
+      'bankruptcy_collapse',
+      -(scores.bankruptcyCollapse01 as number),
+      'Bankruptcy pressure is collapsing engagement floor through existential run stress.',
+    ));
+  }
+
+  if ((scores.liveopsBoost01 as number) > 0.02) {
+    factors.push(signedContribution(
+      'liveops_heat_boost',
+      (scores.liveopsBoost01 as number),
+      'Active liveops event heat is amplifying the engagement ceiling for this session.',
+    ));
+  }
+
+  if (scores.negotiationQuiet01Value > 0 && isDealRoom(input)) {
+    factors.push(signedContribution(
+      'dealroom_tactical_quiet',
+      (scores.negotiationQuiet01Value as number) * 0.10,
+      'Deal-room quiet may be tactical bluff / read behavior rather than disengagement.',
+    ));
+  }
+
+  if ((scores.dealRoomDominance01 as number) > 0.02) {
+    factors.push(signedContribution(
+      'dealroom_dominance',
+      (scores.dealRoomDominance01 as number),
+      'Deal-room dominance reading is sustaining active engagement posture despite silence.',
+    ));
+  }
+
+  if ((scores.syndicateIntimacy01 as number) > 0.02) {
+    factors.push(signedContribution(
+      'syndicate_intimacy',
+      (scores.syndicateIntimacy01 as number),
+      'Syndicate channel intimacy and attachment is amplifying engagement continuity.',
+    ));
+  }
+
+  if (isGlobal(input) || isLobby(input)) {
+    factors.push(signedContribution(
+      'theatrical_readiness',
+      (scores.theatricalReadiness01 as number) * 0.08,
+      'The active room is reading as a stage; theatrical readiness affects how visible participation should be interpreted.',
+    ));
+  }
+
+  if (scores.volatility01 > 0.32) {
+    factors.push(signedContribution(
+      'volatility',
+      -(scores.volatility01 as number) * 0.10,
+      'Short-window volatility suggests brittle engagement rather than stable momentum.',
+    ));
+  }
+
+  if ((scores.rankingPressureFragility01 as number) > 0.04) {
+    factors.push(signedContribution(
+      'ranking_pressure',
+      -(scores.rankingPressureFragility01 as number),
+      'Multiplayer ranking pressure is adding to engagement fragility through competitive stress.',
+    ));
+  }
+
+  if ((scores.economyStressFragility01 as number) > 0.04) {
+    factors.push(signedContribution(
+      'economy_stress',
+      -(scores.economyStressFragility01 as number),
+      'Economy liquidity and overpay stress are dragging down engagement stability.',
+    ));
+  }
+
+  const sorted = factors
+    .sort((left, right) => Math.abs(right.signedDelta01) - Math.abs(left.signedDelta01))
+    .slice(0, defaults.maxExplanationFactors);
+
+  return Object.freeze(sorted);
+}
+
+// ============================================================================
+// MARK: Input normalization
+// ============================================================================
+
 function normalizeAggregateInput(
   aggregate: ChatOnlineFeatureAggregate,
   learningProfile?: Nullable<ChatLearningProfile>,
@@ -737,345 +1532,21 @@ function normalizeWindowInput(
 }
 
 // ============================================================================
-// MARK: Scoring helpers
-// ============================================================================
-
-function computePressureComposure01(input: EngagementModelInput): Score01 {
-  const pressure = pressureIntensity01(input.pressureTier);
-  return asScore(
-    input.confidence01 * 0.38 +
-      input.responseCadence01 * 0.18 +
-      input.recentPlayerShare01 * 0.14 +
-      input.relief01 * 0.06 +
-      input.runNearSovereignty01 * 0.10 +
-      (1 - input.frustration01) * 0.14 -
-      pressure * Math.max(0, (input.intimidation01 as number) - (input.confidence01 as number)) * 0.18,
-  );
-}
-
-function computePositiveActivation01(
-  input: EngagementModelInput,
-  defaults: typeof CHAT_ENGAGEMENT_MODEL_DEFAULTS,
-  affinity01: Score01,
-  theatricalReadiness01: Score01,
-): Score01 {
-  const playerExpression =
-    input.responseCadence01 * defaults.responseCadenceWeight01 +
-    input.recentPlayerShare01 * defaults.playerShareWeight01 +
-    affinity01 * defaults.affinityWeight01;
-
-  const emotionalOpenness =
-    input.confidence01 * defaults.confidenceEngagementWeight01 +
-    input.curiosity01 * defaults.curiosityContinuityWeight01 +
-    input.attachment01 * defaults.attachmentContinuityWeight01 +
-    input.relief01 * 0.06;
-
-  const situationalOpportunity =
-    input.rescueOpportunity01 * 0.08 +
-    input.visibilityExposure01 * 0.05 +
-    theatricalReadiness01 * 0.08 +
-    contributorBandDensity01(input.contributorBand) * 0.05 +
-    freshnessStrength01(input, defaults) * 0.08;
-
-  const rescueBonus = input.battleRescueWindowOpen01 > 0 ? defaults.rescueWindowResponsivenessBonus01 : 0;
-
-  return asScore(playerExpression + emotionalOpenness + situationalOpportunity + rescueBonus);
-}
-
-function computeNegativeLoad01(
-  input: EngagementModelInput,
-  defaults: typeof CHAT_ENGAGEMENT_MODEL_DEFAULTS,
-  silencePenalty: Score01,
-): Score01 {
-  const crowdPenalty = isNegativeSwarm(input) ? defaults.negativeSwarmPenalty01 : 0;
-  const frustrationLoad = input.frustration01 * 0.14;
-  const embarrassmentLoad = input.embarrassment01 * 0.10;
-  const intimidationLoad = input.intimidation01 * 0.08;
-  const churnLoad = input.churnRisk01 * 0.18;
-  const helperIgnoreLoad = input.helperIgnore01 * 0.08;
-  const overloadLoad = input.switchStress01 * 0.05 + input.liveopsHelperBlackout01 * 0.03 + input.liveopsHaterRaid01 * 0.04;
-
-  return asScore(
-    silencePenalty + crowdPenalty + frustrationLoad + embarrassmentLoad + intimidationLoad + churnLoad + helperIgnoreLoad + overloadLoad,
-  );
-}
-
-function computeContinuity01(
-  input: EngagementModelInput,
-  defaults: typeof CHAT_ENGAGEMENT_MODEL_DEFAULTS,
-  affinity01: Score01,
-  prior: Nullable<EngagementModelPriorState>,
-): Score01 {
-  const base = asScore(
-    input.attachment01 * 0.18 +
-      input.curiosity01 * 0.24 +
-      input.responseCadence01 * 0.16 +
-      affinity01 * 0.16 +
-      (1 - input.churnRisk01) * 0.14 +
-      (1 - input.helperIgnore01) * 0.12,
-  );
-
-  if (!prior) return base;
-
-  return asScore(
-    (base as number) * (1 - defaults.trendBlend01) +
-      (prior.continuity01 as number) * defaults.trendBlend01,
-  );
-}
-
-function computeResponseLikelihood01(
-  input: EngagementModelInput,
-  defaults: typeof CHAT_ENGAGEMENT_MODEL_DEFAULTS,
-  pressureComposure01: Score01,
-  silencePenalty: Score01,
-  negotiationQuiet01Value: Score01,
-): Score01 {
-  const dealRoomDiscount = isDealRoom(input) ? (negotiationQuiet01Value as number) * 0.12 : 0;
-
-  return asScore(
-    input.responseCadence01 * 0.26 +
-      input.recentPlayerShare01 * 0.18 +
-      pressureComposure01 * 0.18 +
-      input.curiosity01 * 0.10 +
-      input.confidence01 * 0.08 +
-      input.battleRescueWindowOpen01 * 0.08 +
-      input.runBankruptcyWarning01 * 0.05 -
-      (silencePenalty as number) * 0.24 -
-      (input.embarrassment01 as number) * 0.08 -
-      dealRoomDiscount,
-  );
-}
-
-function computeFragility01(
-  input: EngagementModelInput,
-  defaults: typeof CHAT_ENGAGEMENT_MODEL_DEFAULTS,
-  silencePenalty: Score01,
-  volatility01: Score01,
-): Score01 {
-  const embarrassmentLoad = (input.embarrassment01 as number) * defaults.embarrassmentFragilityWeight01;
-  const intimidationLoad = (input.intimidation01 as number) * defaults.intimidationFragilityWeight01;
-  const frustrationLoad = (input.frustration01 as number) * defaults.frustrationFragilityWeight01;
-  const helperIgnoreLoad = (input.helperIgnore01 as number) * defaults.helperIgnoreFragilityPenalty01;
-
-  return asScore(
-    (silencePenalty as number) * 0.18 +
-      (input.churnRisk01 as number) * 0.22 +
-      embarrassmentLoad +
-      intimidationLoad +
-      frustrationLoad +
-      helperIgnoreLoad +
-      (input.hostileMomentum01 as number) * 0.10 +
-      (volatility01 as number) * 0.12 +
-      (isNegativeSwarm(input) ? 0.08 : 0) +
-      (input.liveopsHaterRaid01 as number) * 0.05,
-  );
-}
-
-function computeSoftDropoffRisk01(
-  input: EngagementModelInput,
-  fragility01: Score01,
-  responseLikelihood01: Score01,
-): Score01 {
-  return asScore(
-    (fragility01 as number) * 0.42 +
-      (input.churnRisk01 as number) * 0.28 +
-      (1 - (responseLikelihood01 as number)) * 0.18 +
-      (input.helperIgnore01 as number) * 0.06 +
-      (input.silenceBand === 'HARD' ? 0.06 : input.silenceBand === 'STALE' ? 0.03 : 0),
-  );
-}
-
-function computeCrowdReadiness01(
-  input: EngagementModelInput,
-  theatricalReadiness01: Score01,
-  fragility01: Score01,
-): Score01 {
-  if (!isGlobal(input) && !isLobby(input)) {
-    return asScore(
-      input.visibilityExposure01 * 0.34 +
-        input.confidence01 * 0.18 +
-        input.recentPlayerShare01 * 0.12 +
-        (1 - fragility01) * 0.18 +
-        input.roomHeat01 * 0.18,
-    );
-  }
-
-  return asScore(
-    (theatricalReadiness01 as number) * 0.30 +
-      (input.visibilityExposure01 as number) * 0.20 +
-      (input.confidence01 as number) * 0.12 +
-      (input.recentPlayerShare01 as number) * 0.12 +
-      (1 - (fragility01 as number)) * 0.14 +
-      (isPositiveSwarm(input) ? 0.08 : 0) -
-      (isNegativeSwarm(input) ? 0.06 : 0),
-  );
-}
-
-function computeQuality01(
-  input: EngagementModelInput,
-  engagement01: Score01,
-  continuity01: Score01,
-  responseLikelihood01: Score01,
-  fragility01: Score01,
-): Score01 {
-  return asScore(
-    (engagement01 as number) * 0.30 +
-      (continuity01 as number) * 0.22 +
-      (responseLikelihood01 as number) * 0.18 +
-      (1 - (fragility01 as number)) * 0.18 +
-      (input.averageMessageLength01 as number) * 0.06 +
-      (input.curiosity01 as number) * 0.06,
-  );
-}
-
-function recommendEngagementAction(
-  input: EngagementModelInput,
-  defaults: typeof CHAT_ENGAGEMENT_MODEL_DEFAULTS,
-  engagement01: Score01,
-  fragility01: Score01,
-  softDropoffRisk01: Score01,
-  crowdReadiness01: Score01,
-  quality01: Score01,
-): EngagementRecommendation {
-  if (isDealRoom(input) && input.silenceBand !== 'FRESH' && input.economyBluffRisk01 >= 0.46 && engagement01 >= 0.42) {
-    return 'HOLD_DEALROOM_PRESSURE';
-  }
-
-  if (softDropoffRisk01 >= defaults.hardHelperThreshold01 && input.helperReceptivity01 >= 0.36) {
-    return 'HARD_HELPER';
-  }
-
-  if (softDropoffRisk01 >= defaults.softDropoffThreshold01 && input.helperReceptivity01 >= 0.32) {
-    return 'LIGHT_HELPER';
-  }
-
-  if (engagement01 >= defaults.cinematicHoldThreshold01 && input.runNearSovereignty01 >= 0.52) {
-    return 'DEFER_TO_CINEMATIC_SILENCE';
-  }
-
-  if (crowdReadiness01 >= defaults.crowdAmplifyThreshold01 && quality01 >= 0.58 && !isNegativeSwarm(input)) {
-    return 'AMPLIFY_ROOM';
-  }
-
-  if (fragility01 >= 0.56 && input.haterDensity01 >= 0.42) {
-    return 'REDUCE_HATER';
-  }
-
-  if (engagement01 >= 0.48) return 'KEEP_AMBIENT';
-  return 'NONE';
-}
-
-function buildExplanationFactors(
-  input: EngagementModelInput,
-  defaults: typeof CHAT_ENGAGEMENT_MODEL_DEFAULTS,
-  scores: {
-    affinity01: Score01;
-    theatricalReadiness01: Score01;
-    negotiationQuiet01Value: Score01;
-    pressureComposure01: Score01;
-    silencePenalty: Score01;
-    positiveActivation01: Score01;
-    negativeLoad01: Score01;
-    continuity01: Score01;
-    responseLikelihood01: Score01;
-    fragility01: Score01;
-    volatility01: Score01;
-    crowdReadiness01: Score01;
-  },
-): readonly EngagementScoreContribution[] {
-  const factors: EngagementScoreContribution[] = [];
-
-  factors.push(signedContribution(
-    'response_cadence',
-    (input.responseCadence01 as number) * 0.18,
-    'Recent response cadence is contributing to present engagement posture.',
-  ));
-
-  factors.push(signedContribution(
-    'player_share',
-    (input.recentPlayerShare01 as number) * 0.14,
-    'Player message share inside the active window is sustaining expressive participation.',
-  ));
-
-  factors.push(signedContribution(
-    'channel_affinity',
-    (scores.affinity01 as number) * defaults.affinityWeight01,
-    'Channel affinity indicates how naturally this player tends to stay active in the current lane.',
-  ));
-
-  factors.push(signedContribution(
-    'pressure_composure',
-    (scores.pressureComposure01 as number) * 0.14,
-    'Composure under current pressure is supporting continuity instead of panic collapse.',
-  ));
-
-  factors.push(signedContribution(
-    'continuity',
-    (scores.continuity01 as number) * 0.12,
-    'Attachment, curiosity, and behavioral carryover are sustaining ongoing chat presence.',
-  ));
-
-  factors.push(signedContribution(
-    'crowd_readiness',
-    (scores.crowdReadiness01 as number) * 0.10,
-    'The current channel / room posture is either helping or limiting visible participation.',
-  ));
-
-  factors.push(signedContribution(
-    'silence_penalty',
-    -(scores.silencePenalty as number),
-    'Room-adjusted silence interpretation is reducing active-engagement confidence.',
-  ));
-
-  factors.push(signedContribution(
-    'fragility',
-    -(scores.fragility01 as number) * 0.18,
-    'Fragility indicates that present engagement may break if pressure rises or hater load continues.',
-  ));
-
-  factors.push(signedContribution(
-    'soft_dropoff_risk_proxy',
-    -((input.churnRisk01 as number) * 0.14 + (input.helperIgnore01 as number) * 0.06),
-    'Churn history and ignored-helper posture are dragging long-form participation durability.',
-  ));
-
-  if (scores.negotiationQuiet01Value > 0 && isDealRoom(input)) {
-    factors.push(signedContribution(
-      'dealroom_tactical_quiet',
-      (scores.negotiationQuiet01Value as number) * 0.10,
-      'Deal-room quiet may be tactical bluff / read behavior rather than disengagement.',
-    ));
-  }
-
-  if (isGlobal(input) || isLobby(input)) {
-    factors.push(signedContribution(
-      'theatrical_readiness',
-      (scores.theatricalReadiness01 as number) * 0.08,
-      'The active room is reading as a stage; theatrical readiness affects how visible participation should be interpreted.',
-    ));
-  }
-
-  if (scores.volatility01 > 0.32) {
-    factors.push(signedContribution(
-      'volatility',
-      -(scores.volatility01 as number) * 0.10,
-      'Short-window volatility suggests brittle engagement rather than stable momentum.',
-    ));
-  }
-
-  const sorted = factors
-    .sort((left, right) => Math.abs(right.signedDelta01) - Math.abs(left.signedDelta01))
-    .slice(0, defaults.maxExplanationFactors);
-
-  return Object.freeze(sorted);
-}
-
-// ============================================================================
 // MARK: Model implementation
 // ============================================================================
 
 export class EngagementModel {
   private readonly context: EngagementModelContext;
+
+  // Lifetime health counters
+  private totalScoredLifetime = 0;
+  private totalEngagement01Sum = 0;
+  private totalFragility01Sum = 0;
+  private electricCount = 0;
+  private frozenCount = 0;
+  private hardHelperCount = 0;
+  private bankruptcyStabilizeCount = 0;
+  private readonly auditLog: EngagementAuditEntry[] = [];
 
   public constructor(options: EngagementModelOptions = {}) {
     this.context = Object.freeze({
@@ -1181,11 +1652,43 @@ export class EngagementModel {
       ? scores.reduce((worst, current) => (current.engagement01 < worst.engagement01 ? current : worst))
       : null;
 
+    const totalScored = scores.length;
+    let engSum = 0;
+    let fragSum = 0;
+    let frozenCt = 0;
+    let electricCt = 0;
+    let hardHelperCt = 0;
+    let emergencyRescueCt = 0;
+    let bankruptcyCt = 0;
+
+    for (const s of scores) {
+      engSum += s.engagement01 as number;
+      fragSum += s.fragility01 as number;
+      if (s.band === 'FROZEN') frozenCt += 1;
+      if (s.band === 'ELECTRIC') electricCt += 1;
+      if (s.shouldHardHelper) hardHelperCt += 1;
+      if (s.shouldEmergencyRescue) emergencyRescueCt += 1;
+      if (s.recommendation === 'BANKRUPTCY_STABILIZE') bankruptcyCt += 1;
+    }
+
+    const stats: EngagementBatchStats = Object.freeze({
+      totalScored,
+      frozenCount: frozenCt,
+      electricCount: electricCt,
+      hardHelperCount: hardHelperCt,
+      emergencyRescueCount: emergencyRescueCt,
+      bankruptcyStabilizeCount: bankruptcyCt,
+      avgEngagement01: asScore(totalScored > 0 ? engSum / totalScored : 0),
+      avgFragility01: asScore(totalScored > 0 ? fragSum / totalScored : 0),
+      avgSoftDropoffRisk01: asScore(0),
+    });
+
     return Object.freeze({
       generatedAt,
       scores: Object.freeze(scores),
       strongest,
       weakest,
+      stats,
     });
   }
 
@@ -1200,18 +1703,88 @@ export class EngagementModel {
     });
   }
 
+  public engagementTrendSignal(
+    prior: Nullable<EngagementModelPriorState>,
+    current: EngagementModelScore,
+  ): EngagementTrendSignal {
+    return computeEngagementTrend(prior, current.engagement01, this.context.defaults);
+  }
+
+  public channelPostureFor(
+    score: EngagementModelScore,
+    input: EngagementModelInput,
+  ): EngagementChannelPosture {
+    return Object.freeze({
+      channel: input.activeVisibleChannel,
+      posture: score.channelPosture,
+      engagement01: score.engagement01,
+      affinity01: activeAffinity01(input),
+      crowdReadiness01: score.crowdReadiness01,
+      isTacticalQuiet: score.channelPosture === 'COLD_PLAY' || (isDealRoom(input) && score.diagnostics.negotiationQuiet01 >= 0.45),
+      isElectric: score.band === 'ELECTRIC',
+      isFrozen: score.band === 'FROZEN',
+    });
+  }
+
+  public pressureProfileFor(score: EngagementModelScore, input: EngagementModelInput): EngagementPressureProfile {
+    const defaults = this.context.defaults;
+    const bankruptcyCollapse01 = computeBankruptcyCollapsePenalty01(input, defaults);
+    const rankingPressureFragility01 = computeRankingPressureFragility01(input, defaults);
+    const economyStressFragility01 = computeEconomyStressFragility01(input, defaults);
+    return computePressureProfile(
+      input,
+      defaults,
+      bankruptcyCollapse01,
+      rankingPressureFragility01,
+      economyStressFragility01,
+    );
+  }
+
+  public getHealthReport(): EngagementHealthReport {
+    const total = this.totalScoredLifetime;
+    return Object.freeze({
+      ts: this.context.clock.now(),
+      totalScoredLifetime: total,
+      avgEngagement01: asScore(total > 0 ? this.totalEngagement01Sum / total : 0),
+      avgFragility01: asScore(total > 0 ? this.totalFragility01Sum / total : 0),
+      electricPct: total > 0 ? this.electricCount / total : 0,
+      frozenPct: total > 0 ? this.frozenCount / total : 0,
+      hardHelperPct: total > 0 ? this.hardHelperCount / total : 0,
+      bankruptcyStabilizePct: total > 0 ? this.bankruptcyStabilizeCount / total : 0,
+    });
+  }
+
+  public getAuditLog(): readonly EngagementAuditEntry[] {
+    return Object.freeze([...this.auditLog]);
+  }
+
+  public clearAuditLog(): void {
+    this.auditLog.length = 0;
+  }
+
   public scoreInput(
     input: EngagementModelInput,
     prior: Nullable<EngagementModelPriorState> = null,
   ): EngagementModelScore {
     const { defaults, logger } = this.context;
 
+    // --- Base sub-components ---
     const affinity01 = activeAffinity01(input);
     const silencePenalty = silencePenalty01(input, defaults);
     const theatricalReadiness01 = theatricalHeatReadiness01(input, defaults);
     const negotiationQuiet01Value = negotiationQuiet01(input);
     const pressureComposure01 = computePressureComposure01(input);
     const volatility01 = computeVolatility01(input.evidenceRows, defaults);
+
+    // --- Extended v2 sub-components ---
+    const sovereigntyElectric01 = computeSovereigntyElectric01(input, defaults);
+    const bankruptcyCollapse01 = computeBankruptcyCollapsePenalty01(input, defaults);
+    const liveopsBoost01 = computeLiveopsBoost01(input, defaults);
+    const rankingPressureFragility01 = computeRankingPressureFragility01(input, defaults);
+    const economyStressFragility01 = computeEconomyStressFragility01(input, defaults);
+    const dealRoomDominance01 = computeDealRoomDominanceBonus01(input, defaults);
+    const syndicateIntimacy01 = computeSyndicateIntimacyBonus01(input, defaults);
+    const helperReceptivityBonus01 = computeHelperReceptivityContinuityBonus01(input, defaults);
 
     const positiveActivation01 = computePositiveActivation01(
       input,
@@ -1236,7 +1809,12 @@ export class EngagementModel {
         (negativeLoad01 as number) +
         (pressureComposure01 as number) * 0.08 +
         (negotiationQuiet01Value as number) * (isDealRoom(input) ? 0.06 : 0) +
-        (theatricalReadiness01 as number) * (isGlobal(input) || isLobby(input) ? 0.05 : 0),
+        (theatricalReadiness01 as number) * (isGlobal(input) || isLobby(input) ? 0.05 : 0) +
+        (sovereigntyElectric01 as number) -
+        (bankruptcyCollapse01 as number) +
+        (liveopsBoost01 as number) +
+        (dealRoomDominance01 as number) +
+        (syndicateIntimacy01 as number),
     );
 
     const baselineFromLearning = input.learningProfile?.engagementBaseline01 ?? null;
@@ -1254,19 +1832,35 @@ export class EngagementModel {
         )
       : engagementWithLearning01;
 
-    const continuity01 = computeContinuity01(input, defaults, affinity01, prior);
+    const continuity01 = computeContinuity01(input, defaults, affinity01, prior, helperReceptivityBonus01);
     const responseLikelihood01 = computeResponseLikelihood01(
       input,
       defaults,
       pressureComposure01,
       silencePenalty,
       negotiationQuiet01Value,
+      prior,
     );
 
-    const fragility01 = computeFragility01(input, defaults, silencePenalty, volatility01);
+    const fragility01 = computeFragility01(
+      input,
+      defaults,
+      silencePenalty,
+      volatility01,
+      rankingPressureFragility01,
+      economyStressFragility01,
+    );
     const softDropoffRisk01 = computeSoftDropoffRisk01(input, fragility01, responseLikelihood01);
     const crowdReadiness01 = computeCrowdReadiness01(input, theatricalReadiness01, fragility01);
     const quality01 = computeQuality01(input, engagement01, continuity01, responseLikelihood01, fragility01);
+
+    const trendSignal = computeEngagementTrend(prior, engagement01, defaults);
+    const channelPosture = computeChannelPostureKind(
+      { ...input, fragility01 } as any,
+      engagement01,
+      defaults,
+    );
+
     const recommendation = recommendEngagementAction(
       input,
       defaults,
@@ -1275,12 +1869,16 @@ export class EngagementModel {
       softDropoffRisk01,
       crowdReadiness01,
       quality01,
+      bankruptcyCollapse01,
+      sovereigntyElectric01,
+      liveopsBoost01,
     );
 
     const shouldHoldCinematicSilence = recommendation === 'DEFER_TO_CINEMATIC_SILENCE';
     const shouldInviteAmbientWitnesses = recommendation === 'AMPLIFY_ROOM';
     const shouldSoftHelper = recommendation === 'LIGHT_HELPER';
     const shouldHardHelper = recommendation === 'HARD_HELPER';
+    const shouldEmergencyRescue = recommendation === 'EMERGENCY_RESCUE';
 
     const explanationFactors = buildExplanationFactors(input, defaults, {
       affinity01,
@@ -1295,6 +1893,13 @@ export class EngagementModel {
       fragility01,
       volatility01,
       crowdReadiness01,
+      sovereigntyElectric01,
+      bankruptcyCollapse01,
+      liveopsBoost01,
+      dealRoomDominance01,
+      syndicateIntimacy01,
+      rankingPressureFragility01,
+      economyStressFragility01,
     });
 
     const diagnostics: EngagementModelDiagnostics = Object.freeze({
@@ -1307,6 +1912,10 @@ export class EngagementModel {
       theatricalReadiness01,
       negotiationQuiet01: negotiationQuiet01Value,
       volatility01,
+      sovereigntyElectric01,
+      bankruptcyCollapse01,
+      liveopsBoost01,
+      trendDirection: trendSignal.direction,
       explanationFactors,
     });
 
@@ -1329,8 +1938,40 @@ export class EngagementModel {
       shouldInviteAmbientWitnesses,
       shouldSoftHelper,
       shouldHardHelper,
+      shouldEmergencyRescue,
+      channelPosture,
+      trendDirection: trendSignal.direction,
       diagnostics,
     });
+
+    // Update lifetime health counters
+    this.totalScoredLifetime += 1;
+    this.totalEngagement01Sum += engagement01 as number;
+    this.totalFragility01Sum += fragility01 as number;
+    if (score.band === 'ELECTRIC') this.electricCount += 1;
+    if (score.band === 'FROZEN') this.frozenCount += 1;
+    if (shouldHardHelper) this.hardHelperCount += 1;
+    if (recommendation === 'BANKRUPTCY_STABILIZE') this.bankruptcyStabilizeCount += 1;
+
+    // Audit trail
+    if (defaults.auditTrailEnabled) {
+      this.auditLog.push(Object.freeze({
+        ts: this.context.clock.now(),
+        module: CHAT_ENGAGEMENT_MODEL_MODULE_NAME,
+        version: CHAT_ENGAGEMENT_MODEL_VERSION,
+        userId: input.userId,
+        roomId: input.roomId,
+        channel: input.activeVisibleChannel,
+        engagement01,
+        band: score.band,
+        recommendation,
+        fragility01,
+        softDropoffRisk01,
+        trendDirection: trendSignal.direction,
+        evidenceRowCount: input.evidenceRows.length,
+        freshnessMs: input.freshnessMs,
+      }));
+    }
 
     logger.debug('Engagement score generated.', {
       module: CHAT_ENGAGEMENT_MODEL_MODULE_NAME,
@@ -1341,6 +1982,8 @@ export class EngagementModel {
       engagement01: score.engagement01,
       fragility01: score.fragility01,
       recommendation: score.recommendation,
+      trendDirection: trendSignal.direction,
+      channelPosture: score.channelPosture,
     });
 
     return score;
@@ -1429,6 +2072,9 @@ export function serializeEngagementScore(score: EngagementModelScore): Readonly<
     shouldInviteAmbientWitnesses: score.shouldInviteAmbientWitnesses,
     shouldSoftHelper: score.shouldSoftHelper,
     shouldHardHelper: score.shouldHardHelper,
+    shouldEmergencyRescue: score.shouldEmergencyRescue,
+    channelPosture: score.channelPosture,
+    trendDirection: score.trendDirection,
     diagnostics: {
       rowCount: score.diagnostics.rowCount,
       freshnessMs: score.diagnostics.freshnessMs,
@@ -1439,6 +2085,10 @@ export function serializeEngagementScore(score: EngagementModelScore): Readonly<
       theatricalReadiness01: score.diagnostics.theatricalReadiness01 as number,
       negotiationQuiet01: score.diagnostics.negotiationQuiet01 as number,
       volatility01: score.diagnostics.volatility01 as number,
+      sovereigntyElectric01: score.diagnostics.sovereigntyElectric01 as number,
+      bankruptcyCollapse01: score.diagnostics.bankruptcyCollapse01 as number,
+      liveopsBoost01: score.diagnostics.liveopsBoost01 as number,
+      trendDirection: score.diagnostics.trendDirection,
       explanationFactors: score.diagnostics.explanationFactors.map((factor) => ({
         key: factor.key,
         signedDelta01: factor.signedDelta01,
@@ -1466,6 +2116,167 @@ export function hydratePriorEngagementState(
   });
 }
 
+/** Quick predicate: score is in ELECTRIC band. */
+export function engagementIsElectric(score: EngagementModelScore): boolean {
+  return score.band === 'ELECTRIC';
+}
+
+/** Quick predicate: score is in FROZEN band. */
+export function engagementIsFrozen(score: EngagementModelScore): boolean {
+  return score.band === 'FROZEN';
+}
+
+/** Quick predicate: engagement is fragile (fragility01 >= 0.55). */
+export function engagementIsFragile(score: EngagementModelScore, threshold = 0.55): boolean {
+  return (score.fragility01 as number) >= threshold;
+}
+
+/** Quick predicate: engagement is tactical quiet in deal-room (cold play or negotiation). */
+export function engagementIsDealRoomColdPlay(score: EngagementModelScore): boolean {
+  return score.channelPosture === 'COLD_PLAY' || score.recommendation === 'HOLD_DEALROOM_PRESSURE';
+}
+
+/** Quick predicate: should silence channel output (cinematic or bankruptcy stabilize). */
+export function engagementShouldSilenceChannel(score: EngagementModelScore): boolean {
+  return score.shouldHoldCinematicSilence || score.recommendation === 'BANKRUPTCY_STABILIZE';
+}
+
+/** Human-readable label for engagement band. */
+export function engagementBandLabel(band: EngagementBand): string {
+  switch (band) {
+    case 'FROZEN':     return 'Frozen — disengaged or shut down';
+    case 'LOW':        return 'Low — passive or withdrawn';
+    case 'CAUTIOUS':   return 'Cautious — watching but not expressive';
+    case 'ACTIVE':     return 'Active — present and participating';
+    case 'LOCKED_IN':  return 'Locked in — deep focused engagement';
+    case 'ELECTRIC':   return 'Electric — peak expressive momentum';
+    default:           return 'Unknown';
+  }
+}
+
+/** Human-readable label for channel posture. */
+export function engagementChannelPostureLabel(posture: EngagementChannelPostureKind): string {
+  switch (posture) {
+    case 'AMBIENT':     return 'Ambient — passive presence, watching';
+    case 'ACTIVE':      return 'Active — contributing to the room flow';
+    case 'DOMINANT':    return 'Dominant — high-energy expressive lead';
+    case 'WITHDRAWING': return 'Withdrawing — reducing participation, at risk';
+    case 'COLD_PLAY':   return 'Cold play — tactical silence near sovereignty';
+    case 'FROZEN':      return 'Frozen — non-participation, intervention needed';
+    default:            return 'Unknown';
+  }
+}
+
+/** Human-readable label for trend direction. */
+export function engagementTrendLabel(direction: EngagementTrendDirection): string {
+  switch (direction) {
+    case 'RISING_STRONG':   return 'Rising strongly';
+    case 'RISING':          return 'Rising';
+    case 'STABLE':          return 'Stable';
+    case 'DECLINING':       return 'Declining';
+    case 'DECLINING_FAST':  return 'Declining rapidly';
+    case 'UNKNOWN':         return 'Trend unknown';
+    default:                return 'Unknown';
+  }
+}
+
+/** One-liner explanation summary from top factor. */
+export function engagementExplanationSummary(score: EngagementModelScore): string {
+  const top = score.diagnostics.explanationFactors[0];
+  if (!top) return `Engagement ${score.band.toLowerCase()} — no explanation factors.`;
+  const sign = top.signedDelta01 >= 0 ? 'boosted' : 'dragged';
+  return `Engagement ${score.band.toLowerCase()} — primary factor ${sign} by "${top.key}": ${top.reason}`;
+}
+
+/** Compare two scores — returns positive if a > b in engagement01. */
+export function engagementScoreCompare(
+  a: EngagementModelScore,
+  b: EngagementModelScore,
+): number {
+  return (a.engagement01 as number) - (b.engagement01 as number);
+}
+
+/** Confidence100 representation: quality * engagement * 100, clamped. */
+export function engagementConfidence100(score: EngagementModelScore): Score100 {
+  return asScore100(
+    (score.quality01 as number) * (score.engagement01 as number) * 100,
+  );
+}
+
+/** Telemetry payload for external metrics emission. */
+export function engagementScoreToTelemetry(
+  score: EngagementModelScore,
+): Readonly<Record<string, JsonValue>> {
+  return Object.freeze({
+    ts: score.generatedAt as number,
+    userId: score.userId,
+    roomId: score.roomId,
+    channel: score.activeVisibleChannel,
+    band: score.band,
+    engagement01: score.engagement01 as number,
+    continuity01: score.continuity01 as number,
+    fragility01: score.fragility01 as number,
+    softDropoffRisk01: score.softDropoffRisk01 as number,
+    quality01: score.quality01 as number,
+    recommendation: score.recommendation,
+    trendDirection: score.trendDirection,
+    channelPosture: score.channelPosture,
+    shouldHardHelper: score.shouldHardHelper,
+    shouldEmergencyRescue: score.shouldEmergencyRescue,
+    sovereigntyElectric01: score.diagnostics.sovereigntyElectric01 as number,
+    bankruptcyCollapse01: score.diagnostics.bankruptcyCollapse01 as number,
+  });
+}
+
+/** Derive channel posture from a score without the model class. */
+export function deriveEngagementChannelPosture(
+  score: EngagementModelScore,
+  channel: ChatVisibleChannel,
+): EngagementChannelPosture {
+  return Object.freeze({
+    channel,
+    posture: score.channelPosture,
+    engagement01: score.engagement01,
+    affinity01: asScore(0.25), // unknown without input; caller should use model.channelPostureFor
+    crowdReadiness01: score.crowdReadiness01,
+    isTacticalQuiet: score.channelPosture === 'COLD_PLAY' || score.recommendation === 'HOLD_DEALROOM_PRESSURE',
+    isElectric: score.band === 'ELECTRIC',
+    isFrozen: score.band === 'FROZEN',
+  });
+}
+
+/** Batch compare — sort array of scores descending by engagement. */
+export function sortEngagementScoresDescending(
+  scores: readonly EngagementModelScore[],
+): readonly EngagementModelScore[] {
+  return [...scores].sort((a, b) => (b.engagement01 as number) - (a.engagement01 as number));
+}
+
+/** Filter scores to only those needing immediate helper intervention. */
+export function engagementScoresNeedingHelper(
+  scores: readonly EngagementModelScore[],
+): readonly EngagementModelScore[] {
+  return scores.filter((s) => s.shouldHardHelper || s.shouldSoftHelper || s.shouldEmergencyRescue);
+}
+
+/** Filter scores to only those in frozen or bankruptcy-stabilize state. */
+export function engagementScoresCritical(
+  scores: readonly EngagementModelScore[],
+): readonly EngagementModelScore[] {
+  return scores.filter(
+    (s) => s.band === 'FROZEN' || s.recommendation === 'BANKRUPTCY_STABILIZE' || s.shouldEmergencyRescue,
+  );
+}
+
+/** True if a score is "stable" — active/locked_in band without fragility risk. */
+export function engagementIsStableActive(score: EngagementModelScore): boolean {
+  return (
+    (score.band === 'ACTIVE' || score.band === 'LOCKED_IN' || score.band === 'ELECTRIC') &&
+    (score.fragility01 as number) < 0.40 &&
+    (score.softDropoffRisk01 as number) < 0.38
+  );
+}
+
 export const CHAT_ENGAGEMENT_MODEL_NAMESPACE = Object.freeze({
   moduleName: CHAT_ENGAGEMENT_MODEL_MODULE_NAME,
   version: CHAT_ENGAGEMENT_MODEL_VERSION,
@@ -1478,6 +2289,23 @@ export const CHAT_ENGAGEMENT_MODEL_NAMESPACE = Object.freeze({
   scoreInferenceWindow: scoreEngagementInferenceWindow,
   serialize: serializeEngagementScore,
   hydratePriorState: hydratePriorEngagementState,
+  isElectric: engagementIsElectric,
+  isFrozen: engagementIsFrozen,
+  isFragile: engagementIsFragile,
+  isDealRoomColdPlay: engagementIsDealRoomColdPlay,
+  shouldSilenceChannel: engagementShouldSilenceChannel,
+  bandLabel: engagementBandLabel,
+  channelPostureLabel: engagementChannelPostureLabel,
+  trendLabel: engagementTrendLabel,
+  explanationSummary: engagementExplanationSummary,
+  scoreCompare: engagementScoreCompare,
+  confidence100: engagementConfidence100,
+  toTelemetry: engagementScoreToTelemetry,
+  deriveChannelPosture: deriveEngagementChannelPosture,
+  sortDescending: sortEngagementScoresDescending,
+  needingHelper: engagementScoresNeedingHelper,
+  critical: engagementScoresCritical,
+  isStableActive: engagementIsStableActive,
   featureStoreDefaults: CHAT_ONLINE_FEATURE_STORE_DEFAULTS,
 } as const);
 

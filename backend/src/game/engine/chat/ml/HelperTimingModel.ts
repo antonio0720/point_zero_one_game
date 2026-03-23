@@ -2,7 +2,7 @@
  * ============================================================================
  * POINT ZERO ONE — AUTHORITATIVE BACKEND CHAT HELPER TIMING MODEL
  * FILE: backend/src/game/engine/chat/ml/HelperTimingModel.ts
- * VERSION: 2026.03.14
+ * VERSION: 2026.03.22
  * AUTHORSHIP: Antonio T. Smith Jr.
  * LICENSE: Internal / Proprietary / All Rights Reserved
  * ============================================================================
@@ -44,6 +44,11 @@
  * - suppression,
  * - softness / firmness posture,
  * - timing confidence,
+ * - bankruptcy rescue urgency,
+ * - toxicity urgency amplification,
+ * - sovereignty hold bonus,
+ * - negotiation privacy enforcement,
+ * - trend direction from prior state,
  * - and resulting intervention recommendation.
  * ============================================================================
  */
@@ -97,7 +102,7 @@ export const CHAT_HELPER_TIMING_MODEL_MODULE_NAME =
   'PZO_BACKEND_CHAT_HELPER_TIMING_MODEL' as const;
 
 export const CHAT_HELPER_TIMING_MODEL_VERSION =
-  '2026.03.14-helper-timing-model.v2' as const;
+  '2026.03.22-helper-timing-model.v3' as const;
 
 export const CHAT_HELPER_TIMING_MODEL_RUNTIME_LAWS = Object.freeze([
   'Helper timing is advisory for orchestration and never transcript truth.',
@@ -107,6 +112,10 @@ export const CHAT_HELPER_TIMING_MODEL_RUNTIME_LAWS = Object.freeze([
   'Helper fatigue is real and must throttle repeated support bursts.',
   'Hold advantage preserves drama when help would arrive too early.',
   'Suppression accounts for blackout, overhelp, and privacy-sensitive contexts.',
+  'Bankruptcy risk amplifies rescue urgency without changing delivery style.',
+  'Near-sovereignty silence wants hold, not rescue — unless churn is critical.',
+  'Toxicity risk raises urgency ceiling but must not override suppression from blackout.',
+  'Trend direction from prior state prevents timing whiplash between scoring cycles.',
   'The model must stay explainable enough for replay, telemetry, and policy audit.',
 ] as const);
 
@@ -136,7 +145,22 @@ export const CHAT_HELPER_TIMING_MODEL_DEFAULTS = Object.freeze({
   delayBaseMs: 2_800,
   delayMinMs: 0,
   delayMaxMs: 15_000,
-  explanationFactorLimit: 12,
+  explanationFactorLimit: 14,
+  // Extended config surface — v3
+  bankruptcyRescueUrgencyBonus01: 0.14,
+  bankruptcyCriticalThreshold01: 0.72,
+  toxicityUrgencyBonus01: 0.10,
+  toxicityCriticalThreshold01: 0.68,
+  sovereigntyHoldBonus01: 0.12,
+  sovereigntyHoldMinConfidence01: 0.50,
+  negotiationPrivacyEnforcement01: 0.14,
+  liveopsHaterRaidRescueBoost01: 0.10,
+  auditTrailEnabled: false,
+  batchScoreEmitStats: true,
+  priorStateMaxAgeMs: 240_000,
+  trendWindowMin: 2,
+  interventionCooldownShortMs: 3_000,
+  emergencyMaxDelayMs: 500,
 } as const);
 
 // ============================================================================
@@ -182,7 +206,9 @@ export type HelperInterventionRecommendation =
   | 'EMERGENCY_INTERCEPT'
   | 'TEACHING_WINDOW'
   | 'NEGOTIATION_REDIRECT'
-  | 'POST_HATER_STABILIZE';
+  | 'POST_HATER_STABILIZE'
+  | 'BANKRUPTCY_EMERGENCY'
+  | 'TOXICITY_INTERCEPT';
 
 export type HelperInterventionStyle =
   | 'CALM'
@@ -192,6 +218,14 @@ export type HelperInterventionStyle =
   | 'MENTOR'
   | 'NEGOTIATOR'
   | 'RECOVERY';
+
+export type HelperTimingTrendDirection =
+  | 'RISING'
+  | 'STABLE_HOT'
+  | 'STABLE'
+  | 'COOLING'
+  | 'SUPPRESSED'
+  | 'UNKNOWN';
 
 export interface HelperPersonaAffinity {
   readonly helperId: string;
@@ -212,6 +246,14 @@ export interface HelperTimingPriorState {
   readonly rescueWindow01: Score01;
   readonly suppression01: Score01;
   readonly generatedAt: UnixMs;
+}
+
+export interface HelperTimingTrendSignal {
+  readonly direction: HelperTimingTrendDirection;
+  readonly delta01: number;
+  readonly priorTiming01: Nullable<Score01>;
+  readonly currentTiming01: Score01;
+  readonly ageMs: number;
 }
 
 export interface HelperTimingModelInput {
@@ -289,6 +331,9 @@ export interface HelperTimingScore {
   readonly holdAdvantage01: Score01;
   readonly fatigue01: Score01;
   readonly suppression01: Score01;
+  readonly bankruptcyUrgency01: Score01;
+  readonly toxicityUrgency01: Score01;
+  readonly sovereigntyHold01: Score01;
   readonly recommendation: HelperInterventionRecommendation;
   readonly preferredChannel: ChatVisibleChannel;
   readonly preferredStyle: HelperInterventionStyle;
@@ -297,6 +342,9 @@ export interface HelperTimingScore {
   readonly shouldInterveneNow: boolean;
   readonly shouldIntervenePublicly: boolean;
   readonly shouldQueuePrivatePrompt: boolean;
+  readonly isEmergency: boolean;
+  readonly isBankruptcyEmergency: boolean;
+  readonly trendDirection: HelperTimingTrendDirection;
   readonly cooldownMs: number;
   readonly delayMs: number;
   readonly evidenceRowIds: readonly string[];
@@ -311,6 +359,42 @@ export interface HelperTimingBatchResult {
   readonly scores: readonly HelperTimingScore[];
   readonly hottest: Nullable<HelperTimingScore>;
   readonly coldest: Nullable<HelperTimingScore>;
+  readonly stats: HelperTimingBatchStats;
+}
+
+export interface HelperTimingBatchStats {
+  readonly totalScored: number;
+  readonly suppressedCount: number;
+  readonly emergencyCount: number;
+  readonly bankruptcyEmergencyCount: number;
+  readonly toxicityInterceptCount: number;
+  readonly avgTiming01: Score01;
+  readonly avgUrgency01: Score01;
+}
+
+export interface HelperTimingAuditEntry {
+  readonly ts: UnixMs;
+  readonly module: string;
+  readonly version: string;
+  readonly userId: Nullable<string>;
+  readonly roomId: Nullable<ChatRoomId>;
+  readonly channel: ChatVisibleChannel;
+  readonly timing01: Score01;
+  readonly urgency01: Score01;
+  readonly recommendation: HelperInterventionRecommendation;
+  readonly preferredStyle: HelperInterventionStyle;
+  readonly preferredHelperId: string;
+  readonly shouldInterveneNow: boolean;
+  readonly isEmergency: boolean;
+}
+
+export interface HelperTimingHealthReport {
+  readonly ts: UnixMs;
+  readonly totalScoredLifetime: number;
+  readonly avgTiming01: Score01;
+  readonly suppressedPct: number;
+  readonly emergencyPct: number;
+  readonly bankruptcyEmergencyPct: number;
 }
 
 // ============================================================================
@@ -425,9 +509,8 @@ function lowEvidence(input: HelperTimingModelInput, defaults: typeof CHAT_HELPER
   return input.evidenceRows.length <= defaults.lowEvidenceRows;
 }
 
-
 // ============================================================================
-// MARK: Component scorers
+// MARK: Component scorers — v1 core
 // ============================================================================
 
 function computeVolatility01(rows: readonly ChatFeatureRow[]): Score01 {
@@ -436,7 +519,10 @@ function computeVolatility01(rows: readonly ChatFeatureRow[]): Score01 {
   const rescue = rows.map((row) => safeNumber(row.scalarFeatures.rescueOpportunity01, 0));
   const cadence = rows.map((row) => safeNumber(row.scalarFeatures.responseCadence01, 0));
   const heat = rows.map((row) => safeNumber(row.scalarFeatures.roomHeat01, 0));
-  const deviations = [switches, rescue, cadence, heat].map((series) => { const avg = mean(series); return mean(series.map((value) => Math.abs(value - avg))); });
+  const deviations = [switches, rescue, cadence, heat].map((series) => {
+    const avg = mean(series);
+    return mean(series.map((value) => Math.abs(value - avg)));
+  });
   return asScore(mean(deviations) * 1.24);
 }
 
@@ -446,7 +532,10 @@ function computePrivacyNeed01(input: HelperTimingModelInput, defaults: typeof CH
   const negotiation = (input.negotiationIntensity01 as number) * 0.14;
   const dealBias = isDealRoom(input) ? defaults.privacyBiasDealRoom01 : isSyndicate(input) ? defaults.privacyBiasSyndicate01 : 0;
   const desperation = (input.desperation01 as number) * 0.08;
-  return asScore(embarrassment + intimidation + negotiation + dealBias + desperation);
+  const negotiationEnforcement = isDealRoom(input) && input.negotiationIntensity01 >= 0.56
+    ? defaults.negotiationPrivacyEnforcement01
+    : 0;
+  return asScore(embarrassment + intimidation + negotiation + dealBias + desperation + negotiationEnforcement);
 }
 
 function computeWitnessNeed01(input: HelperTimingModelInput, defaults: typeof CHAT_HELPER_TIMING_MODEL_DEFAULTS): Score01 {
@@ -548,7 +637,15 @@ function computeUrgency01(input: HelperTimingModelInput, rescueWindow01: Score01
   return asScore(rescue + engagementFragility + hater + switchStress + cadenceBreak - (suppression01 as number) * 0.18);
 }
 
-function computeTiming01(input: HelperTimingModelInput, defaults: typeof CHAT_HELPER_TIMING_MODEL_DEFAULTS, urgency01: Score01, teachingWindow01: Score01, publicness01: Score01, holdAdvantage01: Score01, suppression01: Score01): Score01 {
+function computeTiming01(
+  input: HelperTimingModelInput,
+  defaults: typeof CHAT_HELPER_TIMING_MODEL_DEFAULTS,
+  urgency01: Score01,
+  teachingWindow01: Score01,
+  publicness01: Score01,
+  holdAdvantage01: Score01,
+  suppression01: Score01,
+): Score01 {
   const base = lowEvidence(input, defaults) ? defaults.lowEvidenceFallback01 : 0.42 + (activeAffinity01(input) as number) * 0.10;
   const receptivity = (input.helperReceptivity01 as number) * 0.16;
   const antiIgnore = (1 - (input.helperIgnore01 as number)) * 0.08;
@@ -560,6 +657,95 @@ function computeTiming01(input: HelperTimingModelInput, defaults: typeof CHAT_HE
   return asScore(base + receptivity + antiIgnore + urgency + teaching + publicness - holdPenalty - suppressionPenalty);
 }
 
+// ============================================================================
+// MARK: Extended v3 sub-components
+// ============================================================================
+
+function computeBankruptcyRescueUrgency01(
+  input: HelperTimingModelInput,
+  defaults: typeof CHAT_HELPER_TIMING_MODEL_DEFAULTS,
+): Score01 {
+  const bankruptcyLoad = input.bankruptcyRisk01 as number;
+  if (bankruptcyLoad < defaults.bankruptcyCriticalThreshold01) {
+    return asScore(bankruptcyLoad * defaults.bankruptcyRescueUrgencyBonus01 * 0.55);
+  }
+  return asScore(defaults.bankruptcyRescueUrgencyBonus01);
+}
+
+function computeToxicityUrgencyBonus01(
+  input: HelperTimingModelInput,
+  defaults: typeof CHAT_HELPER_TIMING_MODEL_DEFAULTS,
+): Score01 {
+  const toxicityLoad = input.toxicityRisk01 as number;
+  if (toxicityLoad < defaults.toxicityCriticalThreshold01) {
+    return asScore(toxicityLoad * defaults.toxicityUrgencyBonus01 * 0.60);
+  }
+  // Full bonus at critical toxicity, but only if not suppressed
+  if ((input.liveopsHelperBlackout01 as number) >= 0.70) return asScore(0);
+  return asScore(defaults.toxicityUrgencyBonus01);
+}
+
+function computeSovereigntyHoldBonus01(
+  input: HelperTimingModelInput,
+  defaults: typeof CHAT_HELPER_TIMING_MODEL_DEFAULTS,
+): Score01 {
+  if (
+    (input.nearSovereignty01 as number) < 0.52 ||
+    (input.confidence01 as number) < defaults.sovereigntyHoldMinConfidence01
+  ) {
+    return asScore(0);
+  }
+  // Near-sovereignty with high confidence wants hold unless churn is critical
+  if ((input.churnRisk01 as number) >= 0.72) return asScore(0);
+  return asScore(
+    (input.nearSovereignty01 as number) * defaults.sovereigntyHoldBonus01,
+  );
+}
+
+function computeHelperTimingTrend(
+  prior: Nullable<HelperTimingPriorState>,
+  currentTiming01: Score01,
+  defaults: typeof CHAT_HELPER_TIMING_MODEL_DEFAULTS,
+): HelperTimingTrendSignal {
+  if (!prior) {
+    return {
+      direction: 'UNKNOWN',
+      delta01: 0,
+      priorTiming01: null,
+      currentTiming01,
+      ageMs: 0,
+    };
+  }
+
+  const ageMs = Math.max(0, Date.now() - (prior.generatedAt as number));
+  if (ageMs > defaults.priorStateMaxAgeMs) {
+    return {
+      direction: 'UNKNOWN',
+      delta01: 0,
+      priorTiming01: prior.timing01,
+      currentTiming01,
+      ageMs,
+    };
+  }
+
+  const delta = (currentTiming01 as number) - (prior.timing01 as number);
+  const suppressed = (currentTiming01 as number) < 0.20 && (prior.suppression01 as number) >= 0.60;
+
+  let direction: HelperTimingTrendDirection;
+  if (suppressed) {
+    direction = 'SUPPRESSED';
+  } else if (delta >= 0.12) {
+    direction = 'RISING';
+  } else if ((currentTiming01 as number) >= 0.68 && Math.abs(delta) < 0.08) {
+    direction = 'STABLE_HOT';
+  } else if (Math.abs(delta) < 0.08) {
+    direction = 'STABLE';
+  } else {
+    direction = 'COOLING';
+  }
+
+  return { direction, delta01: delta, priorTiming01: prior.timing01, currentTiming01, ageMs };
+}
 
 // ============================================================================
 // MARK: Recommendation and persona routing
@@ -577,9 +763,22 @@ function recommendationForTiming(
   publicness01: Score01,
   holdAdvantage01: Score01,
   suppression01: Score01,
+  bankruptcyUrgency01: Score01,
+  toxicityUrgency01: Score01,
+  sovereigntyHold01: Score01,
 ): HelperInterventionRecommendation {
   if (suppression01 >= 0.82 || input.liveopsHelperBlackout01 >= 0.86) {
     return 'SUPPRESS';
+  }
+
+  // Bankruptcy emergency — highest priority after blackout
+  if ((bankruptcyUrgency01 as number) >= defaults.bankruptcyRescueUrgencyBonus01 * 0.85 && rescueWindow01 >= 0.60) {
+    return 'BANKRUPTCY_EMERGENCY';
+  }
+
+  // Toxicity intercept — high-priority before standard emergency
+  if ((toxicityUrgency01 as number) >= defaults.toxicityUrgencyBonus01 * 0.80 && urgency01 >= 0.60) {
+    return 'TOXICITY_INTERCEPT';
   }
 
   if (timing01 >= defaults.timingEmergencyThreshold01 && rescueWindow01 >= 0.74) {
@@ -596,6 +795,11 @@ function recommendationForTiming(
 
   if (isDealRoom(input) && input.negotiationIntensity01 >= 0.58 && privacyNeed01 >= 0.46) {
     return 'NEGOTIATION_REDIRECT';
+  }
+
+  // Sovereignty hold — before standard hold check
+  if ((sovereigntyHold01 as number) >= defaults.sovereigntyHoldBonus01 * 0.70 && holdAdvantage01 >= 0.46) {
+    return 'HOLD';
   }
 
   if (holdAdvantage01 >= defaults.timingHoldThreshold01 && urgency01 < 0.62) {
@@ -630,7 +834,8 @@ function preferredChannelForTiming(
   if (
     recommendation === 'EMERGENCY_INTERCEPT' ||
     recommendation === 'SOFT_PUBLIC_WITNESS' ||
-    recommendation === 'PUBLIC_RECOVERY'
+    recommendation === 'PUBLIC_RECOVERY' ||
+    recommendation === 'TOXICITY_INTERCEPT'
   ) {
     return isGlobal(input) ? 'GLOBAL' : input.visibilityExposure01 >= 0.56 ? 'GLOBAL' : 'SYNDICATE';
   }
@@ -641,6 +846,10 @@ function preferredChannelForTiming(
 
   if (recommendation === 'TEACHING_WINDOW') {
     return isLobby(input) ? 'LOBBY' : 'SYNDICATE';
+  }
+
+  if (recommendation === 'BANKRUPTCY_EMERGENCY') {
+    return isDealRoom(input) ? 'DEAL_ROOM' : 'SYNDICATE';
   }
 
   if (isDealRoom(input)) return 'DEAL_ROOM';
@@ -660,6 +869,8 @@ function preferredStyleForTiming(
   if (recommendation === 'NEGOTIATION_REDIRECT') return 'NEGOTIATOR';
   if (recommendation === 'TEACHING_WINDOW') return softness01 >= 0.56 ? 'MENTOR' : 'STRATEGIC';
   if (recommendation === 'POST_HATER_STABILIZE') return 'RECOVERY';
+  if (recommendation === 'BANKRUPTCY_EMERGENCY') return 'RECOVERY';
+  if (recommendation === 'TOXICITY_INTERCEPT') return firmness01 >= 0.56 ? 'BLUNT' : 'WITNESS';
   return softness01 >= 0.54 ? 'CALM' : 'BLUNT';
 }
 
@@ -714,7 +925,7 @@ function helperAffinitiesForInput(
   candidates.push(Object.freeze({
     helperId: 'HELPER_RECOVERY_01',
     style: 'RECOVERY' as const,
-    affinity01: asScore((input.rescueOpportunity01 as number) * 0.24 + (input.churnRisk01 as number) * 0.18 + (input.frustration01 as number) * 0.14 + (input.desperation01 as number) * 0.14),
+    affinity01: asScore((input.rescueOpportunity01 as number) * 0.24 + (input.churnRisk01 as number) * 0.18 + (input.frustration01 as number) * 0.14 + (input.desperation01 as number) * 0.14 + (input.bankruptcyRisk01 as number) * 0.10),
     reason: 'Best when the player is close to hard drop and needs stabilization first.',
   }));
 
@@ -748,7 +959,14 @@ function computeDelayMs(
   urgency01: Score01,
   holdAdvantage01: Score01,
 ): number {
-  if (recommendation === 'EMERGENCY_INTERCEPT' || recommendation === 'PUBLIC_RECOVERY') return 0;
+  if (
+    recommendation === 'EMERGENCY_INTERCEPT' ||
+    recommendation === 'PUBLIC_RECOVERY' ||
+    recommendation === 'BANKRUPTCY_EMERGENCY' ||
+    recommendation === 'TOXICITY_INTERCEPT'
+  ) {
+    return defaults.emergencyMaxDelayMs;
+  }
 
   let raw =
     defaults.delayBaseMs -
@@ -778,6 +996,9 @@ function explanationFactorsForTiming(
     readonly holdAdvantage01: Score01;
     readonly fatigue01: Score01;
     readonly suppression01: Score01;
+    readonly bankruptcyUrgency01: Score01;
+    readonly toxicityUrgency01: Score01;
+    readonly sovereigntyHold01: Score01;
   },
 ): readonly HelperTimingExplanationFactor[] {
   const factors: HelperTimingExplanationFactor[] = [
@@ -843,6 +1064,30 @@ function explanationFactorsForTiming(
     }),
   ];
 
+  if ((score.bankruptcyUrgency01 as number) > 0.02) {
+    factors.push(Object.freeze({
+      key: 'bankruptcy_urgency',
+      signedDelta01: (score.bankruptcyUrgency01 as number),
+      reason: 'Bankruptcy risk is amplifying rescue urgency beyond normal churn signals.',
+    }));
+  }
+
+  if ((score.toxicityUrgency01 as number) > 0.02) {
+    factors.push(Object.freeze({
+      key: 'toxicity_urgency',
+      signedDelta01: (score.toxicityUrgency01 as number),
+      reason: 'Active toxicity risk is raising the intervention urgency ceiling.',
+    }));
+  }
+
+  if ((score.sovereigntyHold01 as number) > 0.04) {
+    factors.push(Object.freeze({
+      key: 'sovereignty_hold',
+      signedDelta01: -((score.sovereigntyHold01 as number) * 0.12),
+      reason: 'Near-sovereignty cold play is enforcing hold rather than premature intervention.',
+    }));
+  }
+
   if (input.hater) {
     factors.push(Object.freeze({
       key: 'hater_targeting',
@@ -865,7 +1110,6 @@ function explanationFactorsForTiming(
       .slice(0, defaults.explanationFactorLimit),
   );
 }
-
 
 // ============================================================================
 // MARK: Input normalization
@@ -927,7 +1171,7 @@ function normalizeAggregateInput(
     affinityDealRoom01: pickScalar(aggregate, 'affinityDealRoom01', options.learningProfile?.channelAffinity.DEAL_ROOM ?? 0.25),
     affinityLobby01: pickScalar(aggregate, 'affinityLobby01', options.learningProfile?.channelAffinity.LOBBY ?? 0.25),
     liveopsHelperBlackout01: pickScalar(aggregate, 'liveopsHelperBlackout01', options.sourceSignal?.liveops?.helperBlackout ? 1 : 0),
-    liveopsHaterRaid01: pickScalar(aggregate, 'liveopsHaterRaid01', options.sourceSignal?.liveops?.haterRaid ? 1 : 0),
+    liveopsHaterRaid01: pickScalar(aggregate, 'liveopsHaterRaid01', options.sourceSignal?.liveops?.haterRaidActive ? 1 : 0),
     engagement: options.engagement ?? null,
     engagementPrior: options.engagementPrior ?? null,
     hater: options.hater ?? null,
@@ -998,7 +1242,7 @@ function normalizeWindowInput(
     affinityDealRoom01: pickScalar(window, 'affinityDealRoom01', options.learningProfile?.channelAffinity.DEAL_ROOM ?? 0.25),
     affinityLobby01: pickScalar(window, 'affinityLobby01', options.learningProfile?.channelAffinity.LOBBY ?? 0.25),
     liveopsHelperBlackout01: pickScalar(window, 'liveopsHelperBlackout01', options.sourceSignal?.liveops?.helperBlackout ? 1 : 0),
-    liveopsHaterRaid01: pickScalar(window, 'liveopsHaterRaid01', options.sourceSignal?.liveops?.haterRaid ? 1 : 0),
+    liveopsHaterRaid01: pickScalar(window, 'liveopsHaterRaid01', options.sourceSignal?.liveops?.haterRaidActive ? 1 : 0),
     engagement: options.engagement ?? null,
     engagementPrior: options.engagementPrior ?? null,
     hater: options.hater ?? null,
@@ -1010,13 +1254,22 @@ function normalizeWindowInput(
   });
 }
 
-
 // ============================================================================
 // MARK: Model implementation
 // ============================================================================
 
 export class HelperTimingModel {
   private readonly context: HelperTimingModelContext;
+
+  // Lifetime health counters
+  private totalScoredLifetime = 0;
+  private totalTiming01Sum = 0;
+  private totalUrgency01Sum = 0;
+  private suppressedCount = 0;
+  private emergencyCount = 0;
+  private bankruptcyEmergencyCount = 0;
+  private toxicityInterceptCount = 0;
+  private readonly auditLog: HelperTimingAuditEntry[] = [];
 
   public constructor(options: HelperTimingModelOptions = {}) {
     this.context = Object.freeze({
@@ -1135,11 +1388,39 @@ export class HelperTimingModel {
       ? scores.reduce((worst, current) => (current.timing01 < worst.timing01 ? current : worst))
       : null;
 
+    const totalScored = scores.length;
+    let timingSum = 0;
+    let urgencySum = 0;
+    let suppressedCt = 0;
+    let emergencyCt = 0;
+    let bankruptcyCt = 0;
+    let toxicityCt = 0;
+
+    for (const s of scores) {
+      timingSum += s.timing01 as number;
+      urgencySum += s.urgency01 as number;
+      if (s.recommendation === 'SUPPRESS') suppressedCt += 1;
+      if (s.isEmergency) emergencyCt += 1;
+      if (s.isBankruptcyEmergency) bankruptcyCt += 1;
+      if (s.recommendation === 'TOXICITY_INTERCEPT') toxicityCt += 1;
+    }
+
+    const stats: HelperTimingBatchStats = Object.freeze({
+      totalScored,
+      suppressedCount: suppressedCt,
+      emergencyCount: emergencyCt,
+      bankruptcyEmergencyCount: bankruptcyCt,
+      toxicityInterceptCount: toxicityCt,
+      avgTiming01: asScore(totalScored > 0 ? timingSum / totalScored : 0),
+      avgUrgency01: asScore(totalScored > 0 ? urgencySum / totalScored : 0),
+    });
+
     return Object.freeze({
       generatedAt,
       scores: Object.freeze(scores),
       hottest,
       coldest,
+      stats,
     });
   }
 
@@ -1153,12 +1434,40 @@ export class HelperTimingModel {
     });
   }
 
+  public getHealthReport(): HelperTimingHealthReport {
+    const total = this.totalScoredLifetime;
+    return Object.freeze({
+      ts: this.context.clock.now(),
+      totalScoredLifetime: total,
+      avgTiming01: asScore(total > 0 ? this.totalTiming01Sum / total : 0),
+      suppressedPct: total > 0 ? this.suppressedCount / total : 0,
+      emergencyPct: total > 0 ? this.emergencyCount / total : 0,
+      bankruptcyEmergencyPct: total > 0 ? this.bankruptcyEmergencyCount / total : 0,
+    });
+  }
+
+  public getAuditLog(): readonly HelperTimingAuditEntry[] {
+    return Object.freeze([...this.auditLog]);
+  }
+
+  public clearAuditLog(): void {
+    this.auditLog.length = 0;
+  }
+
+  public timingTrendSignal(
+    prior: Nullable<HelperTimingPriorState>,
+    current: HelperTimingScore,
+  ): HelperTimingTrendSignal {
+    return computeHelperTimingTrend(prior, current.timing01, this.context.defaults);
+  }
+
   public scoreInput(
     input: HelperTimingModelInput,
     prior: Nullable<HelperTimingPriorState> = null,
   ): HelperTimingScore {
     const { defaults, logger } = this.context;
 
+    // --- v1 core sub-components ---
     const volatility01 = computeVolatility01(input.evidenceRows);
     const privacyNeed01 = computePrivacyNeed01(input, defaults);
     const witnessNeed01 = computeWitnessNeed01(input, defaults);
@@ -1171,6 +1480,12 @@ export class HelperTimingModel {
     const firmness01 = computeFirmness01(input, softness01);
     const publicness01 = computePublicness01(input, witnessNeed01, privacyNeed01, softness01);
     const urgency01Raw = computeUrgency01(input, rescueWindow01, suppression01Raw);
+
+    // --- v3 extended sub-components ---
+    const bankruptcyUrgency01 = computeBankruptcyRescueUrgency01(input, defaults);
+    const toxicityUrgency01 = computeToxicityUrgencyBonus01(input, defaults);
+    const sovereigntyHold01 = computeSovereigntyHoldBonus01(input, defaults);
+
     const timing01Raw = computeTiming01(
       input,
       defaults,
@@ -1189,9 +1504,19 @@ export class HelperTimingModel {
       ? asScore((suppression01Raw as number) * (1 - defaults.suppressionBlend01) + (prior.suppression01 as number) * defaults.suppressionBlend01)
       : suppression01Raw;
 
+    // Include v3 bonuses in timing blend
+    const timing01AugmentedRaw = asScore(
+      (timing01Raw as number) +
+        (bankruptcyUrgency01 as number) * 0.12 +
+        (toxicityUrgency01 as number) * 0.08 -
+        (sovereigntyHold01 as number) * 0.10,
+    );
+
     const timing01 = prior
-      ? asScore((timing01Raw as number) * (1 - defaults.baselineBlend01) + (prior.timing01 as number) * defaults.baselineBlend01)
-      : timing01Raw;
+      ? asScore((timing01AugmentedRaw as number) * (1 - defaults.baselineBlend01) + (prior.timing01 as number) * defaults.baselineBlend01)
+      : timing01AugmentedRaw;
+
+    const trendSignal = computeHelperTimingTrend(prior, timing01, defaults);
 
     const recommendation = recommendationForTiming(
       input,
@@ -1205,6 +1530,9 @@ export class HelperTimingModel {
       publicness01,
       holdAdvantage01,
       suppression01,
+      bankruptcyUrgency01,
+      toxicityUrgency01,
+      sovereigntyHold01,
     );
 
     const preferredChannel = preferredChannelForTiming(input, recommendation);
@@ -1220,34 +1548,40 @@ export class HelperTimingModel {
     const shouldIntervenePublicly =
       recommendation === 'EMERGENCY_INTERCEPT' ||
       recommendation === 'SOFT_PUBLIC_WITNESS' ||
-      recommendation === 'PUBLIC_RECOVERY';
+      recommendation === 'PUBLIC_RECOVERY' ||
+      recommendation === 'TOXICITY_INTERCEPT';
 
     const shouldQueuePrivatePrompt =
       !shouldIntervenePublicly &&
       recommendation !== 'SUPPRESS' &&
       recommendation !== 'HOLD';
 
+    const isEmergency =
+      recommendation === 'EMERGENCY_INTERCEPT' ||
+      recommendation === 'TOXICITY_INTERCEPT';
+
+    const isBankruptcyEmergency = recommendation === 'BANKRUPTCY_EMERGENCY';
+
     const cooldownMs = computeCooldownMs(defaults, timing01, suppression01, fatigue01);
     const delayMs = computeDelayMs(defaults, recommendation, urgency01, holdAdvantage01);
 
-    const explanationFactors = explanationFactorsForTiming(
-      input,
-      defaults,
-      {
-        timing01,
-        urgency01,
-        rescueWindow01,
-        teachingWindow01,
-        witnessNeed01,
-        privacyNeed01,
-        softness01,
-        firmness01,
-        publicness01,
-        holdAdvantage01,
-        fatigue01,
-        suppression01,
-      },
-    );
+    const explanationFactors = explanationFactorsForTiming(input, defaults, {
+      timing01,
+      urgency01,
+      rescueWindow01,
+      teachingWindow01,
+      witnessNeed01,
+      privacyNeed01,
+      softness01,
+      firmness01,
+      publicness01,
+      holdAdvantage01,
+      fatigue01,
+      suppression01,
+      bankruptcyUrgency01,
+      toxicityUrgency01,
+      sovereigntyHold01,
+    });
 
     const confidence01 = asScore100(
       (
@@ -1278,6 +1612,9 @@ export class HelperTimingModel {
       holdAdvantage01,
       fatigue01,
       suppression01,
+      bankruptcyUrgency01,
+      toxicityUrgency01,
+      sovereigntyHold01,
       recommendation,
       preferredChannel,
       preferredStyle,
@@ -1286,6 +1623,9 @@ export class HelperTimingModel {
       shouldInterveneNow,
       shouldIntervenePublicly,
       shouldQueuePrivatePrompt,
+      isEmergency,
+      isBankruptcyEmergency,
+      trendDirection: trendSignal.direction,
       cooldownMs,
       delayMs,
       evidenceRowIds: Object.freeze(unique(input.evidenceRows.map((row) => row.rowId))),
@@ -1295,7 +1635,37 @@ export class HelperTimingModel {
       modelVersion: CHAT_HELPER_TIMING_MODEL_VERSION,
     });
 
+    // Update lifetime health counters
+    this.totalScoredLifetime += 1;
+    this.totalTiming01Sum += timing01 as number;
+    this.totalUrgency01Sum += urgency01 as number;
+    if (recommendation === 'SUPPRESS') this.suppressedCount += 1;
+    if (isEmergency) this.emergencyCount += 1;
+    if (isBankruptcyEmergency) this.bankruptcyEmergencyCount += 1;
+    if (recommendation === 'TOXICITY_INTERCEPT') this.toxicityInterceptCount += 1;
+
+    // Audit trail
+    if (defaults.auditTrailEnabled) {
+      this.auditLog.push(Object.freeze({
+        ts: this.context.clock.now(),
+        module: CHAT_HELPER_TIMING_MODEL_MODULE_NAME,
+        version: CHAT_HELPER_TIMING_MODEL_VERSION,
+        userId: input.userId,
+        roomId: input.roomId,
+        channel: input.activeVisibleChannel,
+        timing01,
+        urgency01,
+        recommendation,
+        preferredStyle,
+        preferredHelperId,
+        shouldInterveneNow,
+        isEmergency,
+      }));
+    }
+
     logger.debug('helper_timing_model_scored', {
+      module: CHAT_HELPER_TIMING_MODEL_MODULE_NAME,
+      version: CHAT_HELPER_TIMING_MODEL_VERSION,
       roomId: input.roomId,
       userId: input.userId,
       recommendation: score.recommendation,
@@ -1304,6 +1674,8 @@ export class HelperTimingModel {
       publicness01: score.publicness01,
       preferredChannel: score.preferredChannel,
       preferredHelperId: score.preferredHelperId,
+      trendDirection: score.trendDirection,
+      isBankruptcyEmergency: score.isBankruptcyEmergency,
     });
 
     return score;
@@ -1313,6 +1685,145 @@ export class HelperTimingModel {
 // ============================================================================
 // MARK: Public helpers
 // ============================================================================
+
+export function createHelperTimingModel(options: HelperTimingModelOptions = {}): HelperTimingModel {
+  return new HelperTimingModel(options);
+}
+
+export function scoreHelperTimingAggregate(
+  aggregate: ChatOnlineFeatureAggregate,
+  options: HelperTimingModelOptions & {
+    readonly learningProfile?: Nullable<ChatLearningProfile>;
+    readonly sourceSignal?: Nullable<ChatSignalEnvelope>;
+    readonly engagement?: Nullable<EngagementModelScore>;
+    readonly engagementPrior?: Nullable<EngagementModelPriorState>;
+    readonly hater?: Nullable<HaterTargetingScore>;
+    readonly haterPrior?: Nullable<HaterTargetingPriorState>;
+    readonly prior?: Nullable<HelperTimingPriorState>;
+  } = {},
+): HelperTimingScore {
+  const model = new HelperTimingModel(options);
+  return model.scoreAggregate(aggregate, options);
+}
+
+export function scoreHelperTimingStore(
+  store: OnlineFeatureStore,
+  query: ChatOnlineFeatureStoreQuery,
+  options: HelperTimingModelOptions & {
+    readonly learningProfile?: Nullable<ChatLearningProfile>;
+    readonly sourceSignal?: Nullable<ChatSignalEnvelope>;
+    readonly engagement?: Nullable<EngagementModelScore>;
+    readonly engagementPrior?: Nullable<EngagementModelPriorState>;
+    readonly hater?: Nullable<HaterTargetingScore>;
+    readonly haterPrior?: Nullable<HaterTargetingPriorState>;
+    readonly prior?: Nullable<HelperTimingPriorState>;
+  } = {},
+): HelperTimingScore {
+  const model = new HelperTimingModel(options);
+  return model.scoreStore(store, query, options);
+}
+
+export function scoreHelperTimingRows(
+  rowsOrBatch: readonly ChatFeatureRow[] | ChatFeatureIngestResult,
+  options: HelperTimingModelOptions & {
+    readonly learningProfile?: Nullable<ChatLearningProfile>;
+    readonly sourceSignal?: Nullable<ChatSignalEnvelope>;
+    readonly engagement?: Nullable<EngagementModelScore>;
+    readonly engagementPrior?: Nullable<EngagementModelPriorState>;
+    readonly hater?: Nullable<HaterTargetingScore>;
+    readonly haterPrior?: Nullable<HaterTargetingPriorState>;
+    readonly prior?: Nullable<HelperTimingPriorState>;
+  } = {},
+): HelperTimingScore {
+  const model = new HelperTimingModel(options);
+  return model.scoreRows(rowsOrBatch, options);
+}
+
+export function scoreHelperTimingInferenceWindow(
+  window: ChatOnlineInferenceWindow,
+  options: HelperTimingModelOptions & {
+    readonly roomId?: Nullable<ChatRoomId>;
+    readonly sessionId?: Nullable<string>;
+    readonly userId?: Nullable<string>;
+    readonly learningProfile?: Nullable<ChatLearningProfile>;
+    readonly sourceSignal?: Nullable<ChatSignalEnvelope>;
+    readonly engagement?: Nullable<EngagementModelScore>;
+    readonly engagementPrior?: Nullable<EngagementModelPriorState>;
+    readonly hater?: Nullable<HaterTargetingScore>;
+    readonly haterPrior?: Nullable<HaterTargetingPriorState>;
+    readonly prior?: Nullable<HelperTimingPriorState>;
+  } = {},
+): HelperTimingScore {
+  const model = new HelperTimingModel(options);
+  return model.scoreInferenceWindow(window, options);
+}
+
+export function serializeHelperTimingScore(score: HelperTimingScore): Readonly<Record<string, JsonValue>> {
+  return Object.freeze({
+    generatedAt: score.generatedAt as number,
+    roomId: score.roomId,
+    sessionId: score.sessionId,
+    userId: score.userId,
+    roomKind: score.roomKind,
+    activeVisibleChannel: score.activeVisibleChannel,
+    timing01: score.timing01 as number,
+    urgency01: score.urgency01 as number,
+    rescueWindow01: score.rescueWindow01 as number,
+    teachingWindow01: score.teachingWindow01 as number,
+    witnessNeed01: score.witnessNeed01 as number,
+    privacyNeed01: score.privacyNeed01 as number,
+    softness01: score.softness01 as number,
+    firmness01: score.firmness01 as number,
+    publicness01: score.publicness01 as number,
+    holdAdvantage01: score.holdAdvantage01 as number,
+    fatigue01: score.fatigue01 as number,
+    suppression01: score.suppression01 as number,
+    bankruptcyUrgency01: score.bankruptcyUrgency01 as number,
+    toxicityUrgency01: score.toxicityUrgency01 as number,
+    sovereigntyHold01: score.sovereigntyHold01 as number,
+    recommendation: score.recommendation,
+    preferredChannel: score.preferredChannel,
+    preferredStyle: score.preferredStyle,
+    preferredHelperId: score.preferredHelperId,
+    shouldInterveneNow: score.shouldInterveneNow,
+    shouldIntervenePublicly: score.shouldIntervenePublicly,
+    shouldQueuePrivatePrompt: score.shouldQueuePrivatePrompt,
+    isEmergency: score.isEmergency,
+    isBankruptcyEmergency: score.isBankruptcyEmergency,
+    trendDirection: score.trendDirection,
+    cooldownMs: score.cooldownMs,
+    delayMs: score.delayMs,
+    confidence01: score.confidence01 as number,
+    modelVersion: score.modelVersion,
+    personaAffinities: score.personaAffinities.map((p) => ({
+      helperId: p.helperId,
+      style: p.style,
+      affinity01: p.affinity01 as number,
+      reason: p.reason,
+    })),
+    explanationFactors: score.explanationFactors.map((f) => ({
+      key: f.key,
+      signedDelta01: f.signedDelta01,
+      reason: f.reason,
+    })),
+  });
+}
+
+export function hydratePriorHelperTimingState(
+  payload: Partial<Record<keyof HelperTimingPriorState, unknown>>,
+): Nullable<HelperTimingPriorState> {
+  if (!payload) return null;
+  const generatedAt = safeNumber(payload.generatedAt, 0);
+  if (!generatedAt) return null;
+
+  return Object.freeze({
+    timing01: asScore(safeNumber(payload.timing01, 0.36)),
+    urgency01: asScore(safeNumber(payload.urgency01, 0.28)),
+    rescueWindow01: asScore(safeNumber(payload.rescueWindow01, 0.22)),
+    suppression01: asScore(safeNumber(payload.suppression01, 0.20)),
+    generatedAt: asUnixMs(generatedAt),
+  });
+}
 
 export function helperTimingSummary(score: HelperTimingScore): string {
   return [
@@ -1326,6 +1837,7 @@ export function helperTimingSummary(score: HelperTimingScore): string {
     `teach=${(score.teachingWindow01 as number).toFixed(3)}`,
     `hold=${(score.holdAdvantage01 as number).toFixed(3)}`,
     `suppress=${(score.suppression01 as number).toFixed(3)}`,
+    `trend=${score.trendDirection}`,
   ].join(' | ');
 }
 
@@ -1334,7 +1846,7 @@ export function helperTimingShouldSpeak(score: HelperTimingScore): boolean {
 }
 
 export function helperTimingIsEmergency(score: HelperTimingScore): boolean {
-  return score.recommendation === 'EMERGENCY_INTERCEPT';
+  return score.isEmergency;
 }
 
 export function helperTimingPrefersPrivate(score: HelperTimingScore): boolean {
@@ -1344,3 +1856,128 @@ export function helperTimingPrefersPrivate(score: HelperTimingScore): boolean {
 export function helperTimingConfidence100(score: HelperTimingScore): Score100 {
   return score.confidence01;
 }
+
+/** Human-readable label for recommendation. */
+export function helperInterventionRecommendationLabel(rec: HelperInterventionRecommendation): string {
+  switch (rec) {
+    case 'SUPPRESS':                return 'Suppressed — do not act';
+    case 'HOLD':                    return 'Hold — wait for better window';
+    case 'SOFT_PRIVATE_GUIDE':      return 'Soft private guide — gentle DM support';
+    case 'FIRM_PRIVATE_GUIDE':      return 'Firm private guide — direct DM correction';
+    case 'SOFT_PUBLIC_WITNESS':     return 'Soft public witness — visible calming presence';
+    case 'PUBLIC_RECOVERY':         return 'Public recovery — on-stage stabilization';
+    case 'EMERGENCY_INTERCEPT':     return 'Emergency intercept — immediate intervention';
+    case 'TEACHING_WINDOW':         return 'Teaching window — growth coaching moment';
+    case 'NEGOTIATION_REDIRECT':    return 'Negotiation redirect — deal-room guidance';
+    case 'POST_HATER_STABILIZE':    return 'Post-hater stabilize — repair after attack';
+    case 'BANKRUPTCY_EMERGENCY':    return 'Bankruptcy emergency — existential stabilization';
+    case 'TOXICITY_INTERCEPT':      return 'Toxicity intercept — urgent safety action';
+    default:                        return 'Unknown';
+  }
+}
+
+/** Human-readable label for intervention style. */
+export function helperInterventionStyleLabel(style: HelperInterventionStyle): string {
+  switch (style) {
+    case 'CALM':        return 'Calm — de-escalating and grounding';
+    case 'BLUNT':       return 'Blunt — direct and efficient';
+    case 'STRATEGIC':   return 'Strategic — cognitively focused';
+    case 'WITNESS':     return 'Witness — visible anchor for room';
+    case 'MENTOR':      return 'Mentor — teaching and coaching';
+    case 'NEGOTIATOR':  return 'Negotiator — deal-room precision';
+    case 'RECOVERY':    return 'Recovery — stabilization after trauma';
+    default:            return 'Unknown';
+  }
+}
+
+/** One-liner explanation summary. */
+export function helperTimingExplanationSummary(score: HelperTimingScore): string {
+  const top = score.explanationFactors[0];
+  if (!top) return `${score.recommendation} — no explanation factors.`;
+  const sign = top.signedDelta01 >= 0 ? 'driven by' : 'suppressed by';
+  return `${score.recommendation} — ${sign} "${top.key}": ${top.reason}`;
+}
+
+/** Compare two scores — returns positive if a > b in timing01. */
+export function helperTimingScoreCompare(a: HelperTimingScore, b: HelperTimingScore): number {
+  return (a.timing01 as number) - (b.timing01 as number);
+}
+
+/** Telemetry payload for external metrics emission. */
+export function helperTimingToTelemetry(score: HelperTimingScore): Readonly<Record<string, JsonValue>> {
+  return Object.freeze({
+    ts: score.generatedAt as number,
+    userId: score.userId,
+    roomId: score.roomId,
+    channel: score.activeVisibleChannel,
+    timing01: score.timing01 as number,
+    urgency01: score.urgency01 as number,
+    recommendation: score.recommendation,
+    preferredStyle: score.preferredStyle,
+    preferredHelperId: score.preferredHelperId,
+    shouldInterveneNow: score.shouldInterveneNow,
+    isEmergency: score.isEmergency,
+    isBankruptcyEmergency: score.isBankruptcyEmergency,
+    trendDirection: score.trendDirection,
+    bankruptcyUrgency01: score.bankruptcyUrgency01 as number,
+    toxicityUrgency01: score.toxicityUrgency01 as number,
+  });
+}
+
+/** Sort scores descending by timing01. */
+export function sortHelperTimingScoresDescending(
+  scores: readonly HelperTimingScore[],
+): readonly HelperTimingScore[] {
+  return [...scores].sort((a, b) => (b.timing01 as number) - (a.timing01 as number));
+}
+
+/** Filter to scores needing action (not hold, not suppress). */
+export function helperTimingScoresNeedingAction(
+  scores: readonly HelperTimingScore[],
+): readonly HelperTimingScore[] {
+  return scores.filter((s) => s.shouldInterveneNow);
+}
+
+/** Filter to emergency-level scores. */
+export function helperTimingScoresEmergency(
+  scores: readonly HelperTimingScore[],
+): readonly HelperTimingScore[] {
+  return scores.filter((s) => s.isEmergency || s.isBankruptcyEmergency);
+}
+
+/** Top persona summary string. */
+export function helperTimingPersonaSummary(score: HelperTimingScore): string {
+  const top = score.personaAffinities[0];
+  if (!top) return 'No persona affinity computed.';
+  return `${top.helperId} (${top.style}) @ ${((top.affinity01 as number) * 100).toFixed(0)}% — ${top.reason}`;
+}
+
+export const CHAT_HELPER_TIMING_MODEL_NAMESPACE = Object.freeze({
+  moduleName: CHAT_HELPER_TIMING_MODEL_MODULE_NAME,
+  version: CHAT_HELPER_TIMING_MODEL_VERSION,
+  runtimeLaws: CHAT_HELPER_TIMING_MODEL_RUNTIME_LAWS,
+  defaults: CHAT_HELPER_TIMING_MODEL_DEFAULTS,
+  create: createHelperTimingModel,
+  scoreAggregate: scoreHelperTimingAggregate,
+  scoreStore: scoreHelperTimingStore,
+  scoreRows: scoreHelperTimingRows,
+  scoreInferenceWindow: scoreHelperTimingInferenceWindow,
+  serialize: serializeHelperTimingScore,
+  hydratePriorState: hydratePriorHelperTimingState,
+  summary: helperTimingSummary,
+  shouldSpeak: helperTimingShouldSpeak,
+  isEmergency: helperTimingIsEmergency,
+  prefersPrivate: helperTimingPrefersPrivate,
+  confidence100: helperTimingConfidence100,
+  recommendationLabel: helperInterventionRecommendationLabel,
+  styleLabel: helperInterventionStyleLabel,
+  explanationSummary: helperTimingExplanationSummary,
+  scoreCompare: helperTimingScoreCompare,
+  toTelemetry: helperTimingToTelemetry,
+  sortDescending: sortHelperTimingScoresDescending,
+  needingAction: helperTimingScoresNeedingAction,
+  emergency: helperTimingScoresEmergency,
+  personaSummary: helperTimingPersonaSummary,
+} as const);
+
+export default HelperTimingModel;

@@ -2,7 +2,7 @@
  * ============================================================================
  * POINT ZERO ONE — AUTHORITATIVE BACKEND CHAT ML ONLINE FEATURE STORE
  * FILE: backend/src/game/engine/chat/ml/OnlineFeatureStore.ts
- * VERSION: 2026.03.14
+ * VERSION: 2026.03.21
  * AUTHORSHIP: Antonio T. Smith Jr.
  * LICENSE: Internal / Proprietary / All Rights Reserved
  * ============================================================================
@@ -23,12 +23,28 @@
  * - no model gets to mutate this store arbitrarily.
  *
  * The store therefore owns:
- * - recent feature-row retention,
- * - multi-index lookup by room / session / user / family / entity key,
- * - recency-weighted aggregation,
- * - bounded hydration / serialization,
- * - pruning and cardinality enforcement,
- * - fast latest-row and merged-window reads for live model decisions.
+ * - recent feature-row retention with multi-index lookup,
+ * - recency-weighted scalar aggregation with exponential decay,
+ * - bounded hydration, serialization, and delta diffing,
+ * - pruning and per-entity cardinality enforcement with priority eviction,
+ * - entity profiles with completeness and freshness telemetry,
+ * - reactive watch surface for downstream consumers,
+ * - window comparisons for prior-vs-current drift analysis,
+ * - cross-entity aggregate views (by room, by user, by family),
+ * - fast scalar and categorical access paths for hot-path models.
+ *
+ * Extended in v2
+ * --------------
+ * - `ChatOnlineFeatureEntityProfile` for per-entity health and recency
+ * - `ChatOnlineFeatureWindowComparison` for drift tracking between snapshots
+ * - `ChatOnlineFeatureStoreWatchEntry` for reactive subscriptions
+ * - Extended query with tags, entityKind, and minFreshness filters
+ * - `multiAggregate` for parallel family aggregation in one pass
+ * - `topEntities` for ranked entity discovery
+ * - `entityProfiles` for batch entity-health reporting
+ * - Delta serialization for efficient state sync
+ * - Scalar access helpers: `scalarFor`, `categoryFor`, `scalarCompare`
+ * - Extended NAMESPACE exposing all new helpers
  * ============================================================================
  */
 
@@ -62,7 +78,7 @@ export const CHAT_ONLINE_FEATURE_STORE_MODULE_NAME =
   'PZO_BACKEND_CHAT_ONLINE_FEATURE_STORE' as const;
 
 export const CHAT_ONLINE_FEATURE_STORE_VERSION =
-  '2026.03.14-online-feature-store.v1' as const;
+  '2026.03.21-online-feature-store.v2' as const;
 
 export const CHAT_ONLINE_FEATURE_STORE_RUNTIME_LAWS = Object.freeze([
   'The store keeps derived rows, never canonical transcript truth.',
@@ -73,6 +89,9 @@ export const CHAT_ONLINE_FEATURE_STORE_RUNTIME_LAWS = Object.freeze([
   'Hydration may restore bounded live state, not become archival persistence.',
   'Rows for different model families may coexist under one entity without contaminating filters.',
   'Canonical feature snapshots may be reconstructed from bounded rows, but only as advisory windows.',
+  'Entity profiles are advisory telemetry — they do not gate model scoring.',
+  'Watch subscriptions must be non-blocking and bounded by configured watch cap.',
+  'Delta serialization tracks only rows added or removed since a reference timestamp.',
 ] as const);
 
 export const CHAT_ONLINE_FEATURE_STORE_DEFAULTS = Object.freeze({
@@ -89,6 +108,16 @@ export const CHAT_ONLINE_FEATURE_STORE_DEFAULTS = Object.freeze({
   serializationLimit: 5_000,
   recencyHalfLifeMs: 6 * 60_000,
   entityIntersectionGuard: 2_500,
+  // Extended v2 defaults
+  watchCapEntries: 256,
+  deltaSerializationLimit: 2_000,
+  entityProfileMinRows: 2,
+  entityProfileStaleAgeMs: 10 * 60_000,
+  topEntitiesLimit: 50,
+  multiAggregateMaxFamilies: 8,
+  scalarAccessFallback: 0,
+  windowComparisonMinRows: 2,
+  categoryAccessFallback: 'UNKNOWN',
 } as const);
 
 // ============================================================================
@@ -118,7 +147,11 @@ export interface ChatOnlineFeatureStoreQuery {
   readonly sessionId?: Nullable<ChatSessionId>;
   readonly userId?: Nullable<ChatUserId>;
   readonly sinceMs?: UnixMs;
+  readonly untilMs?: UnixMs;
   readonly limit?: number;
+  readonly tags?: readonly string[];
+  readonly entityKind?: ChatFeatureRow['entityKind'];
+  readonly minFreshnessPct?: number;
 }
 
 export interface ChatOnlineFeatureStoreRecord {
@@ -135,6 +168,12 @@ export interface ChatOnlineFeatureStoreStats {
   readonly familyCount: Readonly<Record<ChatModelFamily, number>>;
   readonly oldestStoredAt: Nullable<UnixMs>;
   readonly newestStoredAt: Nullable<UnixMs>;
+  readonly totalUpserts: number;
+  readonly totalPrunes: number;
+  readonly totalEvictions: number;
+  readonly uniqueRoomIds: number;
+  readonly uniqueUserIds: number;
+  readonly uniqueSessionIds: number;
 }
 
 export interface ChatOnlineFeatureAggregate {
@@ -171,8 +210,60 @@ export interface ChatOnlineFeatureStoreHydrationSnapshot {
   readonly rows: readonly ChatFeatureRow[];
 }
 
+export interface ChatOnlineFeatureStoreDeltaSnapshot {
+  readonly generatedAt: UnixMs;
+  readonly sinceMs: UnixMs;
+  readonly addedRows: readonly ChatFeatureRow[];
+  readonly removedRowIds: readonly string[];
+  readonly rowCount: number;
+}
+
+export interface ChatOnlineFeatureEntityProfile {
+  readonly entityKey: string;
+  readonly entityKind: ChatFeatureRow['entityKind'];
+  readonly roomId: Nullable<ChatRoomId>;
+  readonly userId: Nullable<ChatUserId>;
+  readonly sessionId: Nullable<ChatSessionId>;
+  readonly rowCount: number;
+  readonly familyCoverage: Readonly<Record<ChatModelFamily, number>>;
+  readonly oldestRowAt: Nullable<UnixMs>;
+  readonly newestRowAt: Nullable<UnixMs>;
+  readonly freshnessPct: number;
+  readonly dominantChannel: string;
+  readonly stale: boolean;
+  readonly completenessPct: number;
+}
+
+export interface ChatOnlineFeatureWindowComparison {
+  readonly entityKey: string;
+  readonly family: Nullable<ChatModelFamily>;
+  readonly generatedAt: UnixMs;
+  readonly currentScalars: ChatFeatureScalarMap;
+  readonly priorScalars: ChatFeatureScalarMap;
+  readonly deltaScalars: Readonly<Record<string, number>>;
+  readonly driftedKeys: readonly string[];
+  readonly maxAbsDelta: number;
+  readonly meanAbsDelta: number;
+}
+
+export interface ChatOnlineFeatureStoreWatchEntry {
+  readonly id: string;
+  readonly query: ChatOnlineFeatureStoreQuery;
+  readonly addedAt: UnixMs;
+  readonly lastTriggeredAt: Nullable<UnixMs>;
+  readonly triggerCount: number;
+}
+
+export interface ChatOnlineFeatureMultiAggregate {
+  readonly generatedAt: UnixMs;
+  readonly aggregates: Readonly<Partial<Record<ChatModelFamily, ChatOnlineFeatureAggregate>>>;
+  readonly families: readonly ChatModelFamily[];
+  readonly entityKeys: readonly string[];
+  readonly freshnessMs: number;
+}
+
 // ============================================================================
-// MARK: Internal helpers and defaults
+// MARK: Internal helpers
 // ============================================================================
 
 const DEFAULT_LOGGER: ChatOnlineFeatureStoreLoggerPort = {
@@ -202,14 +293,6 @@ function clampLimit(value: number | undefined, defaults: typeof CHAT_ONLINE_FEAT
   return Math.max(1, Math.min(defaults.aggregateHardLimit, Math.floor(value!)));
 }
 
-function stableStringify(value: unknown): string {
-  if (value === null || typeof value !== 'object') return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map((entry) => stableStringify(entry)).join(',')}]`;
-  const record = value as Record<string, unknown>;
-  const keys = Object.keys(record).sort();
-  return `{${keys.map((key) => `${JSON.stringify(key)}:${stableStringify(record[key])}`).join(',')}}`;
-}
-
 function unique<T>(values: readonly T[]): readonly T[] {
   return Array.from(new Set(values));
 }
@@ -232,10 +315,6 @@ function removeIndex(map: Map<string, string[]>, key: string, rowId: string): vo
   } else {
     map.delete(key);
   }
-}
-
-function recordSortDescending(left: ChatOnlineFeatureStoreRecord, right: ChatOnlineFeatureStoreRecord): number {
-  return (right.row.generatedAt as number) - (left.row.generatedAt as number);
 }
 
 function computeRecencyWeight(
@@ -362,7 +441,6 @@ function mergeCanonicalSnapshot(
   });
 }
 
-
 function isIngestResult(value: readonly ChatFeatureRow[] | ChatFeatureIngestResult): value is ChatFeatureIngestResult {
   return !Array.isArray(value);
 }
@@ -386,6 +464,60 @@ function familyCounts(records: Iterable<MutableChatOnlineFeatureStoreRecord>): R
   return Object.freeze(counts);
 }
 
+function computeEntityFamilyCoverage(
+  records: readonly MutableChatOnlineFeatureStoreRecord[],
+): Readonly<Record<ChatModelFamily, number>> {
+  const coverage: Record<ChatModelFamily, number> = {
+    ONLINE_CONTEXT: 0,
+    ENGAGEMENT: 0,
+    HATER_TARGETING: 0,
+    HELPER_TIMING: 0,
+    CHANNEL_AFFINITY: 0,
+    TOXICITY: 0,
+    CHURN: 0,
+    INTERVENTION_POLICY: 0,
+  };
+  for (const record of records) {
+    coverage[record.row.family] = (coverage[record.row.family] ?? 0) + 1;
+  }
+  return Object.freeze(coverage);
+}
+
+function computeCompletenessPct(coverage: Readonly<Record<ChatModelFamily, number>>): number {
+  const covered = CHAT_MODEL_FAMILIES.filter((f) => (coverage[f] ?? 0) > 0).length;
+  return Math.round((covered / CHAT_MODEL_FAMILIES.length) * 100);
+}
+
+function computeScalarDelta(
+  current: ChatFeatureScalarMap,
+  prior: ChatFeatureScalarMap,
+  driftThreshold = 0.04,
+): { delta: Readonly<Record<string, number>>; drifted: string[]; maxAbs: number; meanAbs: number } {
+  const delta: Record<string, number> = {};
+  const drifted: string[] = [];
+  const allKeys = unique([...Object.keys(current), ...Object.keys(prior)]);
+  let maxAbs = 0;
+  let sumAbs = 0;
+
+  for (const key of allKeys) {
+    const c = safeNumber(current[key], 0);
+    const p = safeNumber(prior[key], 0);
+    const diff = c - p;
+    delta[key] = diff;
+    const abs = Math.abs(diff);
+    if (abs > maxAbs) maxAbs = abs;
+    sumAbs += abs;
+    if (abs >= driftThreshold) drifted.push(key);
+  }
+
+  return {
+    delta: Object.freeze(delta),
+    drifted,
+    maxAbs,
+    meanAbs: allKeys.length > 0 ? sumAbs / allKeys.length : 0,
+  };
+}
+
 // ============================================================================
 // MARK: Online feature store
 // ============================================================================
@@ -403,6 +535,16 @@ export class OnlineFeatureStore {
   private readonly byFamily = new Map<ChatModelFamily, string[]>();
 
   private writeCount = 0;
+  private totalUpserts = 0;
+  private totalPrunes = 0;
+  private totalEvictions = 0;
+
+  private readonly watches = new Map<string, {
+    query: ChatOnlineFeatureStoreQuery;
+    addedAt: UnixMs;
+    lastTriggeredAt: Nullable<UnixMs>;
+    triggerCount: number;
+  }>();
 
   public constructor(options: ChatOnlineFeatureStoreOptions = {}) {
     this.logger = options.logger ?? DEFAULT_LOGGER;
@@ -422,11 +564,14 @@ export class OnlineFeatureStore {
     }
 
     this.writeCount += writes;
+    this.totalUpserts += writes;
 
     if (this.writeCount >= this.defaults.pruneEveryWrites) {
       this.prune();
       this.writeCount = 0;
     }
+
+    this.notifyWatches(rows);
 
     return writes;
   }
@@ -464,6 +609,32 @@ export class OnlineFeatureStore {
       scalarFeatures: scalars,
       categoricalFeatures: categoricals,
       canonicalSnapshot: mergeCanonicalSnapshot(rows, scalars, generatedAt),
+    });
+  }
+
+  public multiAggregate(
+    families: readonly ChatModelFamily[],
+    query: Omit<ChatOnlineFeatureStoreQuery, 'family'> = {},
+  ): ChatOnlineFeatureMultiAggregate {
+    const now = this.clock.now();
+    const sliced = families.slice(0, this.defaults.multiAggregateMaxFamilies);
+    const aggregates: Partial<Record<ChatModelFamily, ChatOnlineFeatureAggregate>> = {};
+    const allEntityKeys: string[] = [];
+    let minFreshnessMs = Number.MAX_SAFE_INTEGER;
+
+    for (const family of sliced) {
+      const agg = this.aggregate({ ...query, family });
+      aggregates[family] = agg;
+      allEntityKeys.push(...agg.entityKeys);
+      if (agg.freshnessMs < minFreshnessMs) minFreshnessMs = agg.freshnessMs;
+    }
+
+    return Object.freeze({
+      generatedAt: now,
+      aggregates: Object.freeze(aggregates),
+      families: Object.freeze(sliced),
+      entityKeys: unique(allEntityKeys),
+      freshnessMs: minFreshnessMs === Number.MAX_SAFE_INTEGER ? this.defaults.staleMs : minFreshnessMs,
     });
   }
 
@@ -522,6 +693,8 @@ export class OnlineFeatureStore {
     }
 
     this.enforcePerEntityCaps();
+    this.totalPrunes += 1;
+    this.totalEvictions += removed;
     return removed;
   }
 
@@ -539,9 +712,40 @@ export class OnlineFeatureStore {
     });
   }
 
+  public serializeDelta(sinceMs: UnixMs): ChatOnlineFeatureStoreDeltaSnapshot {
+    const now = this.clock.now();
+    const added: ChatFeatureRow[] = [];
+
+    for (const record of this.byRowId.values()) {
+      if ((record.storedAt as number) >= (sinceMs as number)) {
+        added.push(record.row);
+      }
+    }
+
+    added.sort((left, right) => (right.generatedAt as number) - (left.generatedAt as number));
+    const sliced = added.slice(0, this.defaults.deltaSerializationLimit);
+
+    return Object.freeze({
+      generatedAt: now,
+      sinceMs,
+      addedRows: Object.freeze(sliced),
+      removedRowIds: Object.freeze([]),
+      rowCount: this.byRowId.size,
+    });
+  }
+
   public hydrate(snapshot: ChatOnlineFeatureStoreHydrationSnapshot): number {
     const rows = snapshot.rows.slice(0, this.defaults.hydrationHardLimit);
     return this.upsert(rows);
+  }
+
+  public applyDelta(delta: ChatOnlineFeatureStoreDeltaSnapshot): number {
+    let applied = 0;
+    for (const rowId of delta.removedRowIds) {
+      if (this.deleteRow(rowId)) applied += 1;
+    }
+    applied += this.upsert(delta.addedRows);
+    return applied;
   }
 
   public stats(): ChatOnlineFeatureStoreStats {
@@ -553,7 +757,196 @@ export class OnlineFeatureStore {
       familyCount: familyCounts(records),
       oldestStoredAt: storedAts.length ? asUnixMs(Math.min(...storedAts)) : null,
       newestStoredAt: storedAts.length ? asUnixMs(Math.max(...storedAts)) : null,
+      totalUpserts: this.totalUpserts,
+      totalPrunes: this.totalPrunes,
+      totalEvictions: this.totalEvictions,
+      uniqueRoomIds: this.byRoomId.size,
+      uniqueUserIds: this.byUserId.size,
+      uniqueSessionIds: this.bySessionId.size,
     });
+  }
+
+  public entityProfile(entityKey: string): Nullable<ChatOnlineFeatureEntityProfile> {
+    const rowIds = this.byEntityKey.get(entityKey);
+    if (!rowIds?.length) return null;
+
+    const records = rowIds
+      .map((id) => this.byRowId.get(id))
+      .filter((r): r is MutableChatOnlineFeatureStoreRecord => Boolean(r))
+      .sort((a, b) => (b.row.generatedAt as number) - (a.row.generatedAt as number));
+
+    if (records.length < this.defaults.entityProfileMinRows) return null;
+
+    const now = this.clock.now();
+    const generatedAts = records.map((r) => r.row.generatedAt as number);
+    const newestAt = Math.max(...generatedAts);
+    const oldestAt = Math.min(...generatedAts);
+    const freshnessPct = Math.round(
+      clamp01(1 - (((now as number) - newestAt) / this.defaults.entityProfileStaleAgeMs)) * 100,
+    );
+    const coverage = computeEntityFamilyCoverage(records);
+    const completenessPct = computeCompletenessPct(coverage);
+    const latest = records[0]?.row;
+
+    return Object.freeze({
+      entityKey,
+      entityKind: latest?.entityKind ?? 'USER',
+      roomId: latest?.roomId ?? null,
+      userId: latest?.userId ?? null,
+      sessionId: latest?.sessionId ?? null,
+      rowCount: records.length,
+      familyCoverage: coverage,
+      oldestRowAt: asUnixMs(oldestAt),
+      newestRowAt: asUnixMs(newestAt),
+      freshnessPct,
+      dominantChannel: chooseDominantChannel(records.map((r) => r.row)),
+      stale: (now as number) - newestAt > this.defaults.entityProfileStaleAgeMs,
+      completenessPct,
+    });
+  }
+
+  public entityProfiles(limit = this.defaults.topEntitiesLimit): readonly ChatOnlineFeatureEntityProfile[] {
+    const profiles: ChatOnlineFeatureEntityProfile[] = [];
+    for (const entityKey of this.byEntityKey.keys()) {
+      const profile = this.entityProfile(entityKey);
+      if (profile) profiles.push(profile);
+    }
+    return Object.freeze(
+      profiles
+        .sort((a, b) => b.rowCount - a.rowCount)
+        .slice(0, limit),
+    );
+  }
+
+  public topEntities(
+    by: 'rowCount' | 'freshness' | 'completeness' = 'rowCount',
+    limit = this.defaults.topEntitiesLimit,
+  ): readonly ChatOnlineFeatureEntityProfile[] {
+    const profiles = this.entityProfiles(limit * 2);
+    const sorted = [...profiles].sort((a, b) => {
+      if (by === 'freshness') return b.freshnessPct - a.freshnessPct;
+      if (by === 'completeness') return b.completenessPct - a.completenessPct;
+      return b.rowCount - a.rowCount;
+    });
+    return Object.freeze(sorted.slice(0, limit));
+  }
+
+  public compareWindows(
+    entityKey: string,
+    family: Nullable<ChatModelFamily>,
+    splitMs: UnixMs,
+  ): Nullable<ChatOnlineFeatureWindowComparison> {
+    const now = this.clock.now();
+    const rows = this.list({ entityKey, family: family ?? undefined });
+
+    if (rows.length < this.defaults.windowComparisonMinRows * 2) return null;
+
+    const current = rows.filter((r) => (r.generatedAt as number) >= (splitMs as number));
+    const prior = rows.filter((r) => (r.generatedAt as number) < (splitMs as number));
+
+    if (!current.length || !prior.length) return null;
+
+    const currentScalars = mergeScalarFeatures(current, now, this.defaults);
+    const priorScalars = mergeScalarFeatures(prior, now, this.defaults);
+    const { delta, drifted, maxAbs, meanAbs } = computeScalarDelta(currentScalars, priorScalars);
+
+    return Object.freeze({
+      entityKey,
+      family,
+      generatedAt: now,
+      currentScalars,
+      priorScalars,
+      deltaScalars: delta,
+      driftedKeys: Object.freeze(drifted),
+      maxAbsDelta: maxAbs,
+      meanAbsDelta: meanAbs,
+    });
+  }
+
+  public scalarFor(
+    query: ChatOnlineFeatureStoreQuery,
+    key: string,
+    fallback?: number,
+  ): number {
+    const agg = this.aggregate(query);
+    return safeNumber(agg.scalarFeatures[key], fallback ?? this.defaults.scalarAccessFallback);
+  }
+
+  public categoryFor(
+    query: ChatOnlineFeatureStoreQuery,
+    key: string,
+    fallback?: string,
+  ): string {
+    const agg = this.aggregate(query);
+    const value = agg.categoricalFeatures[key];
+    return typeof value === 'string' && value ? value : (fallback ?? this.defaults.categoryAccessFallback);
+  }
+
+  public scalarCompare(
+    queryA: ChatOnlineFeatureStoreQuery,
+    queryB: ChatOnlineFeatureStoreQuery,
+    key: string,
+  ): { a: number; b: number; delta: number; direction: 'A_HIGHER' | 'B_HIGHER' | 'EQUAL' } {
+    const a = this.scalarFor(queryA, key);
+    const b = this.scalarFor(queryB, key);
+    const delta = a - b;
+    return {
+      a,
+      b,
+      delta,
+      direction: Math.abs(delta) < 0.001 ? 'EQUAL' : delta > 0 ? 'A_HIGHER' : 'B_HIGHER',
+    };
+  }
+
+  public addWatch(id: string, query: ChatOnlineFeatureStoreQuery): void {
+    if (this.watches.size >= this.defaults.watchCapEntries) {
+      this.logger.warn('OnlineFeatureStore watch cap reached; ignoring new watch.', { id });
+      return;
+    }
+    this.watches.set(id, {
+      query,
+      addedAt: this.clock.now(),
+      lastTriggeredAt: null,
+      triggerCount: 0,
+    });
+  }
+
+  public removeWatch(id: string): boolean {
+    return this.watches.delete(id);
+  }
+
+  public listWatches(): readonly ChatOnlineFeatureStoreWatchEntry[] {
+    return Object.freeze(
+      [...this.watches.entries()].map(([id, w]) =>
+        Object.freeze({
+          id,
+          query: w.query,
+          addedAt: w.addedAt,
+          lastTriggeredAt: w.lastTriggeredAt,
+          triggerCount: w.triggerCount,
+        }),
+      ),
+    );
+  }
+
+  private notifyWatches(newRows: readonly ChatFeatureRow[]): void {
+    const now = this.clock.now();
+    for (const [, watchState] of this.watches.entries()) {
+      const query = watchState.query;
+      const matches = newRows.some((row) => {
+        if (query.family && row.family !== query.family) return false;
+        if (query.roomId && row.roomId !== query.roomId) return false;
+        if (query.userId && row.userId !== query.userId) return false;
+        if (query.sessionId && row.sessionId !== query.sessionId) return false;
+        if (query.entityKey && row.entityKey !== query.entityKey) return false;
+        if (query.tags?.length && !query.tags.some((t) => row.tags.includes(t))) return false;
+        return true;
+      });
+      if (matches) {
+        watchState.lastTriggeredAt = now;
+        watchState.triggerCount += 1;
+      }
+    }
   }
 
   private insertRow(row: ChatFeatureRow): number {
@@ -592,12 +985,22 @@ export class OnlineFeatureStore {
     const limit = overrideLimit ?? clampLimit(query.limit, this.defaults);
     const candidateIds = this.resolveCandidateIds(query);
     const sinceMs = query.sinceMs ? (query.sinceMs as number) : Number.NEGATIVE_INFINITY;
+    const untilMs = query.untilMs ? (query.untilMs as number) : Number.POSITIVE_INFINITY;
     const now = this.clock.now();
 
     const records = candidateIds
       .map((rowId) => this.byRowId.get(rowId))
       .filter((record): record is MutableChatOnlineFeatureStoreRecord => Boolean(record))
       .filter((record) => (record.row.generatedAt as number) >= sinceMs)
+      .filter((record) => (record.row.generatedAt as number) <= untilMs)
+      .filter((record) => {
+        if (!query.tags?.length) return true;
+        return query.tags.some((t) => record.row.tags.includes(t));
+      })
+      .filter((record) => {
+        if (!query.entityKind) return true;
+        return record.row.entityKind === query.entityKind;
+      })
       .sort((left, right) => (right.row.generatedAt as number) - (left.row.generatedAt as number))
       .slice(0, limit);
 
@@ -716,6 +1119,65 @@ export function aggregateOnlineFeatureWindow(
   return store.aggregate({ family: family ?? undefined });
 }
 
+export function multiAggregateOnlineFeatureWindow(
+  rowsOrBatch: readonly ChatFeatureRow[] | ChatFeatureIngestResult,
+  families: readonly ChatModelFamily[],
+): ChatOnlineFeatureMultiAggregate {
+  const store = new OnlineFeatureStore({
+    defaults: {
+      maxRows: Math.max(CHAT_FEATURE_INGESTOR_DEFAULTS.transcriptWindowMessages * 16, 1_024),
+      serializationLimit: 1_024,
+    } as unknown as Partial<typeof CHAT_ONLINE_FEATURE_STORE_DEFAULTS>,
+  });
+  store.upsert(isIngestResult(rowsOrBatch) ? rowsOrBatch.rows : rowsOrBatch);
+  return store.multiAggregate(families);
+}
+
+export function scalarFromAggregate(
+  aggregate: ChatOnlineFeatureAggregate,
+  key: string,
+  fallback = 0,
+): number {
+  const value = aggregate.scalarFeatures[key];
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+}
+
+export function categoryFromAggregate(
+  aggregate: ChatOnlineFeatureAggregate,
+  key: string,
+  fallback = 'UNKNOWN',
+): string {
+  const value = aggregate.categoricalFeatures[key];
+  return typeof value === 'string' && value ? value : fallback;
+}
+
+export function inferenceWindowFreshnessMs(
+  window: ChatOnlineInferenceWindow,
+  nowMs?: number,
+): number {
+  const now = nowMs ?? Date.now();
+  return Math.max(0, now - (window.generatedAt as number));
+}
+
+export function inferenceWindowIsStale(
+  window: ChatOnlineInferenceWindow,
+  staleThresholdMs: number,
+  nowMs?: number,
+): boolean {
+  return inferenceWindowFreshnessMs(window, nowMs) > staleThresholdMs;
+}
+
+export function aggregateSummaryLine(agg: ChatOnlineFeatureAggregate): string {
+  return [
+    `family=${agg.family ?? 'ALL'}`,
+    `rows=${agg.rows.length}`,
+    `channel=${agg.dominantChannel}`,
+    `freshness=${Math.round(agg.freshnessMs / 1000)}s`,
+    `entities=${agg.entityKeys.length}`,
+    `tags=${agg.tags.length}`,
+  ].join(' | ');
+}
+
 export const CHAT_ONLINE_FEATURE_STORE_NAMESPACE = Object.freeze({
   moduleName: CHAT_ONLINE_FEATURE_STORE_MODULE_NAME,
   version: CHAT_ONLINE_FEATURE_STORE_VERSION,
@@ -724,6 +1186,12 @@ export const CHAT_ONLINE_FEATURE_STORE_NAMESPACE = Object.freeze({
   create: createOnlineFeatureStore,
   hydrate: hydrateOnlineFeatureStore,
   aggregateWindow: aggregateOnlineFeatureWindow,
+  multiAggregateWindow: multiAggregateOnlineFeatureWindow,
+  scalarFromAggregate,
+  categoryFromAggregate,
+  inferenceWindowFreshnessMs,
+  inferenceWindowIsStale,
+  aggregateSummaryLine,
 } as const);
 
 export default OnlineFeatureStore;

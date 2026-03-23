@@ -165,6 +165,35 @@ export const CHAT_CHURN_RISK_MODEL_DEFAULTS = Object.freeze({
   syndicateSilenceDiscount01: 0.08,
   globalHumiliationAmplifier01: 0.12,
   maxExplanationFactors: 14,
+  // v2 additions — liveops amplifiers
+  liveopsInvasionChurnBonus01: 0.10,
+  liveopsHaterRaidChurnBonus01: 0.12,
+  liveopsWorldEventChurnBonus01: 0.06,
+  invasionChaosRageBonus01: 0.08,
+  // v2 additions — channel-specific
+  syndicateAbandonmentSilenceBonus01: 0.08,
+  dealRoomSilentChurnBonus01: 0.10,
+  globalHumiliationRageBonus01: 0.10,
+  lobbyPublicWithdrawalBonus01: 0.06,
+  // v2 additions — bankruptcy / extreme-pressure escalation
+  bankruptcySilenceAmplifier01: 0.12,
+  bankruptcyRageAmplifier01: 0.14,
+  bankruptcyChurnThreshold01: 0.70,
+  // v2 additions — prior state blending (prevents scoring whiplash)
+  priorStateMaxAgeMs: 180_000,
+  priorBlendChurn01: 0.18,
+  priorBlendWithdrawal01: 0.16,
+  priorBlendRage01: 0.14,
+  // v2 additions — trend / rage ratchet
+  trendWindowMin: 3,
+  rageRatchetThreshold01: 0.58,
+  rageRatchetBonus01: 0.10,
+  // v2 additions — recovery bonuses
+  highComebackBonus01: 0.10,
+  helperSuccessRecoveryBonus01: 0.08,
+  // v2 additions — audit and observability
+  auditTrailEnabled: false,
+  batchScoreEmitStats: true,
 } as const);
 
 // ============================================================================
@@ -199,6 +228,61 @@ export interface ChurnRiskModelContext {
 // ============================================================================
 // MARK: Public contracts
 // ============================================================================
+
+export type ChurnTrendDirection =
+  | 'ACCELERATING'
+  | 'WORSENING'
+  | 'STABLE'
+  | 'RECOVERING'
+  | 'RESOLVED';
+
+export interface ChurnTrendSignal {
+  readonly direction: ChurnTrendDirection;
+  readonly deltaPerWindow: number;
+  readonly priorChurnRisk01: Score01;
+  readonly currentChurnRisk01: Score01;
+}
+
+export interface ChurnBatchStats {
+  readonly count: number;
+  readonly criticalCount: number;
+  readonly emergencyCount: number;
+  readonly rescueCount: number;
+  readonly publicWitnessCount: number;
+  readonly holdDramaCount: number;
+  readonly meanChurnRisk01: number;
+  readonly maxChurnRisk01: number;
+  readonly meanWithdrawalRisk01: number;
+  readonly meanRageQuitRisk01: number;
+  readonly meanRecoveryPotential01: number;
+}
+
+export interface ChurnAuditEntry {
+  readonly timestamp: UnixMs;
+  readonly sessionId: Nullable<ChatSessionId>;
+  readonly userId: Nullable<ChatUserId>;
+  readonly roomId: Nullable<ChatRoomId>;
+  readonly band: ChurnBand;
+  readonly recommendation: ChurnRecommendation;
+  readonly churnRisk01: Score01;
+  readonly withdrawalRisk01: Score01;
+  readonly rageQuitRisk01: Score01;
+  readonly rescueUrgency01: Score01;
+  readonly trendDirection: ChurnTrendDirection;
+  readonly topFactor: string;
+  readonly channel: ChatVisibleChannel;
+}
+
+export interface ChurnHealthReport {
+  readonly totalScoredLifetime: number;
+  readonly totalCriticalCount: number;
+  readonly totalEmergencyCount: number;
+  readonly totalRescueCount: number;
+  readonly auditLogSize: number;
+  readonly meanChurnRisk01: number;
+  readonly maxChurnRisk01Lifetime: number;
+  readonly meanRageQuitRisk01: number;
+}
 
 export type ChurnBand =
   | 'STABLE'
@@ -307,6 +391,13 @@ export interface ChurnRiskScore {
   readonly churnRisk100: Score100;
   readonly withdrawalRisk100: Score100;
   readonly rageQuitRisk100: Score100;
+  // v2 additions
+  readonly liveopsBoost01: Score01;
+  readonly rageRatchet01: Score01;
+  readonly trendDirection: ChurnTrendDirection;
+  readonly isEmergency: boolean;
+  readonly isBankruptcyRage: boolean;
+  // flags
   readonly shouldRescue: boolean;
   readonly shouldPublicWitness: boolean;
   readonly shouldHoldDrama: boolean;
@@ -318,12 +409,14 @@ export interface ChurnRiskScore {
 export interface ChurnRiskBatchResult {
   readonly input: ChurnRiskModelInput;
   readonly score: ChurnRiskScore;
+  readonly stats?: ChurnBatchStats;
 }
 
 export interface ChurnRiskPriorState {
   readonly churnRisk01: Score01;
   readonly withdrawalRisk01: Score01;
   readonly rageQuitRisk01: Score01;
+  readonly rescueUrgency01: Score01;
   readonly generatedAt: UnixMs;
 }
 
@@ -376,7 +469,7 @@ function pickRoomKind(value: unknown): ChatRoomKind | 'UNKNOWN' {
 
 function pickPressureTier(value: unknown): PressureTier {
   if (typeof value !== 'string' || value.length === 0) {
-    return 'MEDIUM' as PressureTier;
+    return 'BUILDING' as PressureTier;
   }
   return value as PressureTier;
 }
@@ -393,12 +486,12 @@ function rowCategory(row: ChatFeatureRow | null | undefined, key: string, fallba
 }
 
 function normalizeFreshness01(freshnessMs: number, defaults: typeof CHAT_CHURN_RISK_MODEL_DEFAULTS): Score01 {
-  if (freshnessMs <= defaults.freshnessFloorMs) return 1;
+  if (freshnessMs <= defaults.freshnessFloorMs) return clamp01(1);
   return clamp01(1 - freshnessMs / Math.max(defaults.staleWindowMs, 1));
 }
 
 function evidencePenalty(evidenceRows: number, defaults: typeof CHAT_CHURN_RISK_MODEL_DEFAULTS): Score01 {
-  if (evidenceRows >= defaults.lowEvidenceRowCount) return 0;
+  if (evidenceRows >= defaults.lowEvidenceRowCount) return clamp01(0);
   return clamp01((defaults.lowEvidenceRowCount - evidenceRows) / Math.max(defaults.lowEvidenceRowCount, 1));
 }
 
@@ -455,7 +548,7 @@ function featureSnapshotFromRows(rows: readonly ChatFeatureRow[]): Nullable<Chat
 
 function affectSnapshotFromSignals(signals: readonly ChatSignalEnvelope[]): Nullable<ChatAffectSnapshot> {
   for (let index = signals.length - 1; index >= 0; index -= 1) {
-    const signal = signals[index] as Record<string, unknown> | undefined;
+    const signal = signals[index] as unknown as Record<string, unknown> | undefined;
     const maybe = signal?.affectSnapshot;
     if (maybe && typeof maybe === 'object') return maybe as ChatAffectSnapshot;
   }
@@ -464,7 +557,7 @@ function affectSnapshotFromSignals(signals: readonly ChatSignalEnvelope[]): Null
 
 function learningProfileFromSignals(signals: readonly ChatSignalEnvelope[]): Nullable<ChatLearningProfile> {
   for (let index = signals.length - 1; index >= 0; index -= 1) {
-    const signal = signals[index] as Record<string, unknown> | undefined;
+    const signal = signals[index] as unknown as Record<string, unknown> | undefined;
     const maybe = signal?.learningProfile;
     if (maybe && typeof maybe === 'object') return maybe as ChatLearningProfile;
   }
@@ -472,7 +565,7 @@ function learningProfileFromSignals(signals: readonly ChatSignalEnvelope[]): Nul
 }
 
 function channelBestScore(channelScore: Nullable<ChannelAffinityScore>): Score01 {
-  if (!channelScore) return 0.5;
+  if (!channelScore) return clamp01(0.5);
   const key = channelScore.recommendedPrimaryChannel;
   const fromRank = safeNumber(channelScore.scores?.[key], NaN);
   if (Number.isFinite(fromRank)) return clamp01(fromRank);
@@ -480,7 +573,7 @@ function channelBestScore(channelScore: Nullable<ChannelAffinityScore>): Score01
 }
 
 function haterEscalationScore(haterScore: Nullable<HaterTargetingScore>): Score01 {
-  if (!haterScore) return 0;
+  if (!haterScore) return clamp01(0);
   return clamp01(
     haterScore.targeting01 * 0.38 +
       haterScore.publicLeak01 * 0.24 +
@@ -490,7 +583,7 @@ function haterEscalationScore(haterScore: Nullable<HaterTargetingScore>): Score0
 }
 
 function helperDeEscalationScore(helperScore: Nullable<HelperTimingScore>): Score01 {
-  if (!helperScore) return 0;
+  if (!helperScore) return clamp01(0);
   return clamp01(
     helperScore.rescueWindow01 * 0.42 +
       helperScore.softness01 * 0.18 +
@@ -502,7 +595,7 @@ function helperDeEscalationScore(helperScore: Nullable<HelperTimingScore>): Scor
 }
 
 function engagementConfidenceScore(engagementScore: Nullable<EngagementModelScore>): Score01 {
-  if (!engagementScore) return 0.5;
+  if (!engagementScore) return clamp01(0.5);
   return clamp01(
     engagementScore.continuity01 * 0.34 +
       engagementScore.quality01 * 0.34 +
@@ -557,7 +650,7 @@ function deriveChurnInputFromRows(params: {
   const userId = latest?.userId ?? null;
   const roomKind = pickRoomKind(rowCategory(online, 'roomKind', 'UNKNOWN'));
   const activeVisibleChannel = pickVisibleChannel(rowCategory(online, 'activeVisibleChannel', latest?.channelId ?? 'GLOBAL'));
-  const pressureTier = pickPressureTier(rowCategory(online, 'pressureTier', 'MEDIUM'));
+  const pressureTier = pickPressureTier(rowCategory(online, 'pressureTier', 'BUILDING'));
   const freshnessMs = Math.max(0, safeNumber(params.generatedAt) - safeNumber(latest?.generatedAt, params.generatedAt));
 
   return {
@@ -762,7 +855,7 @@ function scoreChurnCore(
   const sovereigntyDiscount = input.sovereigntyComposure01 * defaults.sovereigntyComposureDiscount01;
   const globalHumiliationAmplifier =
     input.activeVisibleChannel === ('GLOBAL' as ChatVisibleChannel)
-      ? average([input.embarrassment01, input.ridiculeExposure01]) * defaults.globalHumiliationAmplifier01
+      ? maxOf([input.embarrassment01, input.ridiculeExposure01]) * defaults.globalHumiliationAmplifier01
       : 0;
   const rescuePenalty = input.rescueHistory01 * defaults.rescueHistoryPenalty01;
   const helperFatiguePenalty = input.helperSuppression01 * defaults.helperFatiguePenalty01;
@@ -880,11 +973,201 @@ function buildExplanation(
 }
 
 // ============================================================================
+// MARK: v2 scoring helpers — liveops, bankruptcy, channel, ratchet, trend
+// ============================================================================
+
+/**
+ * Computes a liveops-driven churn amplification bonus.
+ * Invasion creates cover for mass-abandonment; hater raids create pile-on rage-quit spikes.
+ */
+function computeLiveopsChurnBoost01(
+  input: ChurnRiskModelInput,
+  defaults: typeof CHAT_CHURN_RISK_MODEL_DEFAULTS,
+): Score01 {
+  const hasInvasion = input.sourceSignals.some(
+    (s) => (s as unknown as Record<string, unknown>)?.liveops &&
+      ((s as unknown as Record<string, unknown>).liveops as Record<string, unknown>)?.invasionActive,
+  );
+  const hasRaid = input.sourceSignals.some(
+    (s) => (s as unknown as Record<string, unknown>)?.liveops &&
+      ((s as unknown as Record<string, unknown>).liveops as Record<string, unknown>)?.haterRaidActive,
+  );
+  const hasWorldEvent = input.sourceSignals.some(
+    (s) => (s as unknown as Record<string, unknown>)?.liveops &&
+      ((s as unknown as Record<string, unknown>).liveops as Record<string, unknown>)?.worldEventActive,
+  );
+  let bonus = clamp01(0);
+  if (hasInvasion) {
+    bonus = clamp01(
+      bonus +
+        input.hostileMomentum01 * defaults.liveopsInvasionChurnBonus01 * 0.6 +
+        input.frustration01 * defaults.invasionChaosRageBonus01 * 0.5,
+    );
+  }
+  if (hasRaid) {
+    bonus = clamp01(
+      bonus +
+        input.haterPressure01 * defaults.liveopsHaterRaidChurnBonus01 * 0.8 +
+        input.negativeSwarm01 * defaults.liveopsHaterRaidChurnBonus01 * 0.5,
+    );
+  }
+  if (hasWorldEvent) {
+    bonus = clamp01(bonus + input.roomHeat01 * defaults.liveopsWorldEventChurnBonus01 * 0.4);
+  }
+  return bonus;
+}
+
+/**
+ * Computes channel-specific churn amplifiers. DEAL_ROOM silent churn is different
+ * from GLOBAL public humiliation. Syndicate abandonment is quiet but has high
+ * trust-damage multipliers.
+ */
+function computeChannelChurnAmplifier01(
+  input: ChurnRiskModelInput,
+  defaults: typeof CHAT_CHURN_RISK_MODEL_DEFAULTS,
+): Score01 {
+  switch (input.activeVisibleChannel as string) {
+    case 'DEAL_ROOM':
+      return clamp01(
+        input.silence01 * defaults.dealRoomSilentChurnBonus01 +
+          input.negotiationStrain01 * 0.08,
+      );
+    case 'SYNDICATE':
+      return clamp01(
+        input.silence01 * defaults.syndicateAbandonmentSilenceBonus01 +
+          input.ignoredHelper01 * 0.06,
+      );
+    case 'GLOBAL':
+      return clamp01(
+        maxOf([input.embarrassment01, input.ridiculeExposure01]) * defaults.globalHumiliationRageBonus01,
+      );
+    case 'LOBBY':
+      return clamp01(input.negativeSwarm01 * defaults.lobbyPublicWithdrawalBonus01);
+    default:
+      return clamp01(0);
+  }
+}
+
+/**
+ * Bankruptcy amplifier: when the player is in a bankruptcy economic state,
+ * both silence (withdrawal) and frustration (rage) are amplified because the
+ * stakes are highest and cognitive load prevents re-engagement.
+ */
+function computeBankruptcyChurnAmplifier01(
+  input: ChurnRiskModelInput,
+  defaults: typeof CHAT_CHURN_RISK_MODEL_DEFAULTS,
+): Score01 {
+  const hasBankruptcy = input.sourceSignals.some(
+    (s) => {
+      const economy = ((s as unknown as Record<string, unknown>).economy) as Record<string, unknown> | undefined;
+      return economy?.bankruptcyRisk !== undefined && (economy.bankruptcyRisk as number) >= 0.7;
+    },
+  );
+  if (!hasBankruptcy) return clamp01(0);
+  return clamp01(
+    input.silence01 * defaults.bankruptcySilenceAmplifier01 +
+      input.frustration01 * defaults.bankruptcyRageAmplifier01,
+  );
+}
+
+/**
+ * Rage ratchet: if the prior state was already above the rage threshold,
+ * a self-reinforcing ratchet prevents premature score recovery unless
+ * there is genuine positive evidence.
+ */
+function computeRageRatchet01(
+  rageQuitRisk01: Score01,
+  prior: Nullable<ChurnRiskPriorState>,
+  defaults: typeof CHAT_CHURN_RISK_MODEL_DEFAULTS,
+): Score01 {
+  if (!prior) return clamp01(0);
+  const priorRage = prior.rageQuitRisk01;
+  if (priorRage < defaults.rageRatchetThreshold01) return clamp01(0);
+  const ratchet = (priorRage - rageQuitRisk01) * defaults.rageRatchetBonus01;
+  return clamp01(Math.max(0, ratchet));
+}
+
+/**
+ * Prior state blending: mixes current churn risk with prior to prevent
+ * whiplash. Stale priors (older than priorStateMaxAgeMs) are ignored.
+ */
+function blendWithPriorChurn(
+  current: Score01,
+  priorValue: Score01,
+  blendWeight: number,
+  priorAge: number,
+  maxAge: number,
+): Score01 {
+  if (priorAge > maxAge) return current;
+  const decay = Math.max(0, 1 - priorAge / maxAge);
+  return clamp01(current * (1 - blendWeight * decay) + priorValue * blendWeight * decay);
+}
+
+/**
+ * Derives a trend direction from current churn risk vs prior state.
+ */
+function computeChurnTrend(
+  currentChurnRisk01: Score01,
+  prior: Nullable<ChurnRiskPriorState>,
+  nowMs: UnixMs,
+  defaults: typeof CHAT_CHURN_RISK_MODEL_DEFAULTS,
+): ChurnTrendDirection {
+  if (!prior) return 'STABLE';
+  const ageMs = Math.max(0, nowMs - prior.generatedAt);
+  if (ageMs > defaults.priorStateMaxAgeMs) return 'STABLE';
+  const delta = currentChurnRisk01 - prior.churnRisk01;
+  if (delta >= 0.14) return 'ACCELERATING';
+  if (delta >= 0.07) return 'WORSENING';
+  if (delta <= -0.14) return 'RESOLVED';
+  if (delta <= -0.07) return 'RECOVERING';
+  return 'STABLE';
+}
+
+/**
+ * High-comeback recovery bonus: if comeback potential is high and helper
+ * de-escalation value is strong, the recovery score receives a meaningful
+ * additive boost — this is what separates "dramatic hold" from pure churn.
+ */
+function computeHighComebackBonus01(
+  input: ChurnRiskModelInput,
+  defaults: typeof CHAT_CHURN_RISK_MODEL_DEFAULTS,
+): Score01 {
+  if (input.comebackPotential01 < 0.6 || input.helperDeEscalationValue01 < 0.4) return clamp01(0);
+  return clamp01(
+    input.comebackPotential01 * defaults.highComebackBonus01 +
+      input.helperDeEscalationValue01 * defaults.helperSuccessRecoveryBonus01,
+  );
+}
+
+/**
+ * Uses `aggregateOnlineFeatureWindow` to build an aggregate from a raw inference
+ * window slice, enabling the model to accept window data directly in batch paths.
+ */
+function churnInputFromWindow(
+  inferenceWindow: ChatOnlineInferenceWindow,
+  params: Omit<Parameters<typeof deriveChurnInputFromRows>[0], 'rows' | 'generatedAt'>,
+): ChurnRiskModelInput {
+  const synthetic = inferenceWindow.latestRow ? [inferenceWindow.latestRow] : [];
+  const aggregate = aggregateOnlineFeatureWindow(synthetic);
+  return deriveChurnInputFromAggregate({ aggregate, ...params });
+}
+
+// ============================================================================
 // MARK: Model implementation
 // ============================================================================
 
 export class ChurnRiskModel {
   private readonly context: ChurnRiskModelContext;
+
+  // Health counters — lifetime totals for observability dashboards
+  private totalScoredLifetime = 0;
+  private totalChurnRisk01Sum = 0;
+  private maxChurnRisk01Lifetime = 0;
+  private totalRageQuitRisk01Sum = 0;
+  private totalCriticalCount = 0;
+  private totalEmergencyCount = 0;
+  private totalRescueCount = 0;
+  private readonly auditLog: ChurnAuditEntry[] = [];
 
   public constructor(options: ChurnRiskModelOptions = {}) {
     this.context = {
@@ -894,7 +1177,7 @@ export class ChurnRiskModel {
         ...CHAT_CHURN_RISK_MODEL_DEFAULTS,
         ...(options.defaults ?? {}),
       }),
-      runtime: mergeRuntimeConfig(DEFAULT_BACKEND_CHAT_RUNTIME, options.runtimeOverride ?? {}),
+      runtime: mergeRuntimeConfig(options.runtimeOverride),
     };
   }
 
@@ -902,35 +1185,76 @@ export class ChurnRiskModel {
     return this.context;
   }
 
-  public score(input: ChurnRiskModelInput): ChurnRiskScore {
+  public score(input: ChurnRiskModelInput, prior?: Nullable<ChurnRiskPriorState>): ChurnRiskScore {
     const defaults = this.context.defaults;
+    const nowMs = this.context.clock.now();
     const lowEvidence01 = evidencePenalty(input.evidenceRows, defaults);
     const freshness01 = normalizeFreshness01(input.freshnessMs, defaults);
 
-    const withdrawalRisk01 = scoreWithdrawalRisk(input, defaults);
-    const rageQuitRisk01 = scoreRageQuitRisk(input);
-    const rescueUrgency01 = scoreRescueUrgency(withdrawalRisk01, rageQuitRisk01, input, defaults);
-    const recoveryPotential01 = scoreRecoveryPotential(input);
+    const withdrawalRisk01Raw = scoreWithdrawalRisk(input, defaults);
+    const rageQuitRisk01Raw = scoreRageQuitRisk(input);
+    const rescueUrgency01Raw = scoreRescueUrgency(withdrawalRisk01Raw, rageQuitRisk01Raw, input, defaults);
+    const recoveryPotential01Raw = scoreRecoveryPotential(input);
+
+    // v2: liveops, channel, bankruptcy amplifiers
+    const liveopsBoost01 = computeLiveopsChurnBoost01(input, defaults);
+    const channelAmplifier01 = computeChannelChurnAmplifier01(input, defaults);
+    const bankruptcyAmplifier01 = computeBankruptcyChurnAmplifier01(input, defaults);
+    const comebackBonus01 = computeHighComebackBonus01(input, defaults);
 
     const rawChurnRisk01 = scoreChurnCore(
-      withdrawalRisk01,
-      rageQuitRisk01,
-      rescueUrgency01,
-      recoveryPotential01,
+      withdrawalRisk01Raw,
+      rageQuitRisk01Raw,
+      rescueUrgency01Raw,
+      recoveryPotential01Raw,
       input,
       defaults,
     );
 
-    const churnRisk01 = clamp01(
-      rawChurnRisk01 * freshness01 + defaults.lowEvidenceFallback01 * lowEvidence01 * 0.28,
+    // Apply all amplifiers and freshness
+    const amplifiedChurnRisk01 = clamp01(
+      rawChurnRisk01 * freshness01 +
+        defaults.lowEvidenceFallback01 * lowEvidence01 * 0.28 +
+        liveopsBoost01 * 0.7 +
+        channelAmplifier01 * 0.8 +
+        bankruptcyAmplifier01 * 0.6,
     );
+
+    // v2: prior-state blending prevents scoring whiplash
+    const priorAgeMs = prior ? Math.max(0, nowMs - prior.generatedAt) : Infinity;
+    const churnRisk01 = prior
+      ? blendWithPriorChurn(amplifiedChurnRisk01, prior.churnRisk01, defaults.priorBlendChurn01, priorAgeMs, defaults.priorStateMaxAgeMs)
+      : amplifiedChurnRisk01;
+    const withdrawalRisk01 = prior
+      ? blendWithPriorChurn(withdrawalRisk01Raw, prior.withdrawalRisk01, defaults.priorBlendWithdrawal01, priorAgeMs, defaults.priorStateMaxAgeMs)
+      : withdrawalRisk01Raw;
+    const rageQuitRisk01 = prior
+      ? blendWithPriorChurn(rageQuitRisk01Raw, prior.rageQuitRisk01, defaults.priorBlendRage01, priorAgeMs, defaults.priorStateMaxAgeMs)
+      : rageQuitRisk01Raw;
+
+    // v2: rage ratchet prevents premature rage recovery
+    const rageRatchet01 = computeRageRatchet01(rageQuitRisk01, prior ?? null, defaults);
+    const rageQuitRisk01Final = clamp01(rageQuitRisk01 + rageRatchet01);
+
+    // v2: recovery adjusted by comeback bonus
+    const recoveryPotential01 = clamp01(recoveryPotential01Raw + comebackBonus01);
+    const rescueUrgency01 = clamp01(rescueUrgency01Raw + rageRatchet01 * 0.4);
+
     const confidence01 = computeConfidence01(input, defaults);
+
+    // v2: trend direction from prior state
+    const trendDirection = computeChurnTrend(churnRisk01, prior ?? null, nowMs, defaults);
+
+    // v2: semantic flags
+    const isEmergency = rescueUrgency01 >= defaults.emergencyThreshold01 || rageQuitRisk01Final >= defaults.emergencyThreshold01;
+    const isBankruptcyRage = bankruptcyAmplifier01 > 0 && rageQuitRisk01Final >= defaults.rageRatchetThreshold01;
+
     const recommendation = pickRecommendation({
       churnRisk01,
       rescueUrgency01,
       recoveryPotential01,
       withdrawalRisk01,
-      rageQuitRisk01,
+      rageQuitRisk01: rageQuitRisk01Final,
       input,
       defaults,
     });
@@ -940,7 +1264,7 @@ export class ChurnRiskModel {
       {
         churnRisk01,
         withdrawalRisk01,
-        rageQuitRisk01,
+        rageQuitRisk01: rageQuitRisk01Final,
         rescueUrgency01,
         recoveryPotential01,
       },
@@ -962,7 +1286,7 @@ export class ChurnRiskModel {
     const shouldPublicWitness = recommendation === 'PUBLIC_WITNESS_RESCUE';
     const shouldHoldDrama = recommendation === 'HOLD_DRAMA';
 
-    return {
+    const score: ChurnRiskScore = {
       generatedAt: input.generatedAt,
       roomId: input.roomId,
       sessionId: input.sessionId,
@@ -971,13 +1295,18 @@ export class ChurnRiskModel {
       recommendation,
       churnRisk01,
       withdrawalRisk01,
-      rageQuitRisk01,
+      rageQuitRisk01: rageQuitRisk01Final,
       rescueUrgency01,
       recoveryPotential01,
       confidence01,
       churnRisk100: clamp100(churnRisk01 * 100),
       withdrawalRisk100: clamp100(withdrawalRisk01 * 100),
-      rageQuitRisk100: clamp100(rageQuitRisk01 * 100),
+      rageQuitRisk100: clamp100(rageQuitRisk01Final * 100),
+      liveopsBoost01,
+      rageRatchet01,
+      trendDirection,
+      isEmergency,
+      isBankruptcyRage,
       shouldRescue,
       shouldPublicWitness,
       shouldHoldDrama,
@@ -994,6 +1323,36 @@ export class ChurnRiskModel {
         bestChannelScore01: input.bestChannelScore01,
       }),
     };
+
+    // Update health counters
+    this.totalScoredLifetime += 1;
+    this.totalChurnRisk01Sum += churnRisk01;
+    if (churnRisk01 > this.maxChurnRisk01Lifetime) this.maxChurnRisk01Lifetime = churnRisk01;
+    this.totalRageQuitRisk01Sum += rageQuitRisk01Final;
+    if (band === 'CRITICAL') this.totalCriticalCount += 1;
+    if (isEmergency) this.totalEmergencyCount += 1;
+    if (shouldRescue) this.totalRescueCount += 1;
+
+    // Audit trail
+    if (defaults.auditTrailEnabled) {
+      this.auditLog.push({
+        timestamp: nowMs,
+        sessionId: input.sessionId,
+        userId: input.userId,
+        roomId: input.roomId,
+        band,
+        recommendation,
+        churnRisk01,
+        withdrawalRisk01,
+        rageQuitRisk01: rageQuitRisk01Final,
+        rescueUrgency01,
+        trendDirection,
+        topFactor: explanation[0]?.key ?? 'none',
+        channel: input.activeVisibleChannel,
+      });
+    }
+
+    return score;
   }
 
   public scoreRows(params: {
@@ -1082,21 +1441,37 @@ export class ChurnRiskModel {
     toxicityPriorState?: Nullable<ToxicityRiskPriorState>;
     signals?: readonly ChatSignalEnvelope[];
   }): ChurnRiskBatchResult {
-    const input = deriveChurnInputFromInferenceWindow({
-      window: params.window,
-      rows: params.rows,
-      engagementScore: params.engagementScore,
-      engagementPriorState: params.engagementPriorState,
-      haterScore: params.haterScore,
-      haterPriorState: params.haterPriorState,
-      helperScore: params.helperScore,
-      helperPriorState: params.helperPriorState,
-      channelScore: params.channelScore,
-      channelPriorState: params.channelPriorState,
-      toxicityScore: params.toxicityScore,
-      toxicityPriorState: params.toxicityPriorState,
-      signals: params.signals,
-    });
+    // When no explicit rows slice is provided, use the window-based aggregate path
+    // so that `aggregateOnlineFeatureWindow` participates in the inference pipeline.
+    const input = params.rows?.length
+      ? deriveChurnInputFromInferenceWindow({
+          window: params.window,
+          rows: params.rows,
+          engagementScore: params.engagementScore,
+          engagementPriorState: params.engagementPriorState,
+          haterScore: params.haterScore,
+          haterPriorState: params.haterPriorState,
+          helperScore: params.helperScore,
+          helperPriorState: params.helperPriorState,
+          channelScore: params.channelScore,
+          channelPriorState: params.channelPriorState,
+          toxicityScore: params.toxicityScore,
+          toxicityPriorState: params.toxicityPriorState,
+          signals: params.signals,
+        })
+      : churnInputFromWindow(params.window, {
+          engagementScore: params.engagementScore,
+          engagementPriorState: params.engagementPriorState,
+          haterScore: params.haterScore,
+          haterPriorState: params.haterPriorState,
+          helperScore: params.helperScore,
+          helperPriorState: params.helperPriorState,
+          channelScore: params.channelScore,
+          channelPriorState: params.channelPriorState,
+          toxicityScore: params.toxicityScore,
+          toxicityPriorState: params.toxicityPriorState,
+          signals: params.signals,
+        });
     return {
       input,
       score: this.score(input),
@@ -1164,6 +1539,134 @@ export class ChurnRiskModel {
       toxicityPriorState: params.toxicityPriorState,
       signals: params.signals,
     });
+  }
+
+  /**
+   * Derives a serializable prior state from the most recent score.
+   * Callers persist this between inference cycles to enable prior-state blending.
+   */
+  public toPriorState(score: ChurnRiskScore): ChurnRiskPriorState {
+    return {
+      generatedAt: score.generatedAt,
+      churnRisk01: score.churnRisk01,
+      withdrawalRisk01: score.withdrawalRisk01,
+      rageQuitRisk01: score.rageQuitRisk01,
+      rescueUrgency01: score.rescueUrgency01,
+    };
+  }
+
+  /**
+   * Scores a batch of inputs; optionally emits aggregate statistics when
+   * `batchScoreEmitStats` is enabled in defaults.
+   */
+  public scoreBatch(
+    inputs: readonly ChurnRiskModelInput[],
+    priorMap?: ReadonlyMap<string, ChurnRiskPriorState>,
+  ): ChurnRiskBatchResult[] {
+    const defaults = this.context.defaults;
+    const results: ChurnRiskBatchResult[] = [];
+    const statsEnabled = defaults.batchScoreEmitStats && inputs.length > 0;
+
+    let criticalCount = 0;
+    let emergencyCount = 0;
+    let rescueCount = 0;
+    let publicWitnessCount = 0;
+    let holdDramaCount = 0;
+    let churnSum = 0;
+    let maxChurn = 0;
+    let withdrawalSum = 0;
+    let rageSum = 0;
+    let recoverySum = 0;
+
+    for (const input of inputs) {
+      const priorKey = input.sessionId ?? input.userId ?? null;
+      const prior = priorKey ? (priorMap?.get(priorKey) ?? null) : null;
+      const score = this.score(input, prior);
+      const result: ChurnRiskBatchResult = { input, score };
+      results.push(result);
+
+      if (!statsEnabled) continue;
+      if (score.band === 'CRITICAL') criticalCount += 1;
+      if (score.isEmergency) emergencyCount += 1;
+      if (score.shouldRescue) rescueCount += 1;
+      if (score.shouldPublicWitness) publicWitnessCount += 1;
+      if (score.shouldHoldDrama) holdDramaCount += 1;
+      churnSum += score.churnRisk01;
+      if (score.churnRisk01 > maxChurn) maxChurn = score.churnRisk01;
+      withdrawalSum += score.withdrawalRisk01;
+      rageSum += score.rageQuitRisk01;
+      recoverySum += score.recoveryPotential01;
+    }
+
+    if (statsEnabled && results.length > 0) {
+      const n = results.length;
+      const stats: ChurnBatchStats = {
+        count: n,
+        criticalCount,
+        emergencyCount,
+        rescueCount,
+        publicWitnessCount,
+        holdDramaCount,
+        meanChurnRisk01: churnSum / n,
+        maxChurnRisk01: maxChurn,
+        meanWithdrawalRisk01: withdrawalSum / n,
+        meanRageQuitRisk01: rageSum / n,
+        meanRecoveryPotential01: recoverySum / n,
+      };
+      // Attach stats to last result for downstream aggregation
+      results[results.length - 1] = { ...results[results.length - 1], stats };
+    }
+
+    return results;
+  }
+
+  /**
+   * Returns the trend signal comparing currentChurnRisk01 against a prior state.
+   * Useful for building trend sparklines at the orchestration layer.
+   */
+  public churnTrendFor(
+    currentChurnRisk01: Score01,
+    prior: Nullable<ChurnRiskPriorState>,
+  ): ChurnTrendSignal {
+    const nowMs = this.context.clock.now();
+    const defaults = this.context.defaults;
+    const direction = computeChurnTrend(currentChurnRisk01, prior, nowMs, defaults);
+    const priorRisk = prior?.churnRisk01 ?? clamp01(0);
+    const delta = currentChurnRisk01 - priorRisk;
+    return {
+      direction,
+      deltaPerWindow: delta,
+      priorChurnRisk01: priorRisk,
+      currentChurnRisk01,
+    };
+  }
+
+  /**
+   * Returns a snapshot of the model's lifetime health counters.
+   * Wire this into your metrics/dashboard pipeline.
+   */
+  public getHealthReport(): ChurnHealthReport {
+    const n = this.totalScoredLifetime;
+    return {
+      totalScoredLifetime: n,
+      totalCriticalCount: this.totalCriticalCount,
+      totalEmergencyCount: this.totalEmergencyCount,
+      totalRescueCount: this.totalRescueCount,
+      auditLogSize: this.auditLog.length,
+      meanChurnRisk01: n > 0 ? this.totalChurnRisk01Sum / n : 0,
+      maxChurnRisk01Lifetime: this.maxChurnRisk01Lifetime,
+      meanRageQuitRisk01: n > 0 ? this.totalRageQuitRisk01Sum / n : 0,
+    };
+  }
+
+  /** Returns a copy of the internal audit log. Requires `auditTrailEnabled: true`. */
+  public getAuditLog(): readonly ChurnAuditEntry[] {
+    return [...this.auditLog];
+  }
+
+  /** Clears the internal audit log, reclaiming memory. */
+  public clearAuditLog(): void {
+    this.auditLog.length = 0;
   }
 }
 
@@ -1267,12 +1770,24 @@ export function serializeChurnRiskScore(score: ChurnRiskScore): Readonly<Record<
     shouldRescue: score.shouldRescue,
     shouldPublicWitness: score.shouldPublicWitness,
     shouldHoldDrama: score.shouldHoldDrama,
+    liveopsBoost01: score.liveopsBoost01,
+    rageRatchet01: score.rageRatchet01,
+    trendDirection: score.trendDirection,
+    isEmergency: score.isEmergency,
+    isBankruptcyRage: score.isBankruptcyRage,
     explanation: score.explanation.map((entry) => ({
       key: entry.key,
       signedDelta01: entry.signedDelta01,
       reason: entry.reason,
     })),
-    diagnostics: score.diagnostics,
+    diagnosticsEvidenceRows: score.diagnostics.evidenceRows,
+    diagnosticsLowEvidence: score.diagnostics.lowEvidence,
+    diagnosticsStaleSignal: score.diagnostics.staleSignal,
+    diagnosticsRoomKind: score.diagnostics.roomKind,
+    diagnosticsActiveVisibleChannel: score.diagnostics.activeVisibleChannel,
+    diagnosticsPressureTier: score.diagnostics.pressureTier,
+    diagnosticsFeatureFreshnessMs: score.diagnostics.featureFreshnessMs,
+    diagnosticsModelVersion: score.diagnostics.modelVersion,
     metadata: score.metadata,
   });
 }
@@ -1286,6 +1801,7 @@ export function hydratePriorChurnRiskState(
     churnRisk01: clamp01(safeNumber(payload.churnRisk01)),
     withdrawalRisk01: clamp01(safeNumber(payload.withdrawalRisk01)),
     rageQuitRisk01: clamp01(safeNumber(payload.rageQuitRisk01)),
+    rescueUrgency01: clamp01(safeNumber(payload.rescueUrgency01)),
   };
 }
 
@@ -1311,6 +1827,187 @@ export function churnRiskShouldHold(score: ChurnRiskScore): boolean {
   return score.shouldHoldDrama;
 }
 
+// ============================================================================
+// MARK: Extended public helpers — predicates, labels, sorting, telemetry
+// ============================================================================
+
+/** True when the score is in the CRITICAL band. */
+export function churnIsCritical(score: ChurnRiskScore): boolean {
+  return score.band === 'CRITICAL';
+}
+
+/** True when the model recommends an emergency save. */
+export function churnIsEmergency(score: ChurnRiskScore): boolean {
+  return score.isEmergency;
+}
+
+/** True when the player's silence is in a deal-room context and the churn risk is elevated. */
+export function churnIsDealRoomSilent(score: ChurnRiskScore): boolean {
+  return (
+    score.diagnostics.activeVisibleChannel === ('DEAL_ROOM' as typeof score.diagnostics.activeVisibleChannel) &&
+    score.withdrawalRisk01 >= 0.44
+  );
+}
+
+/** True when the churn is being driven primarily by hater-side rage escalation. */
+export function churnIsRageDriven(score: ChurnRiskScore): boolean {
+  return score.rageQuitRisk01 >= 0.60 && score.rageQuitRisk01 > score.withdrawalRisk01;
+}
+
+/** True when the churn is primarily a quiet withdrawal, not an acute rage event. */
+export function churnIsQuietWithdrawal(score: ChurnRiskScore): boolean {
+  return score.withdrawalRisk01 >= 0.52 && score.withdrawalRisk01 > score.rageQuitRisk01;
+}
+
+/** True when liveops is actively amplifying the churn risk. */
+export function churnIsLiveopsAmplified(score: ChurnRiskScore): boolean {
+  return score.liveopsBoost01 >= 0.05;
+}
+
+/** True when the score trend is getting worse this window. */
+export function churnIsWorsening(score: ChurnRiskScore): boolean {
+  return score.trendDirection === 'WORSENING' || score.trendDirection === 'ACCELERATING';
+}
+
+/** True when the score trend is recovering or fully resolved. */
+export function churnIsRecovering(score: ChurnRiskScore): boolean {
+  return score.trendDirection === 'RECOVERING' || score.trendDirection === 'RESOLVED';
+}
+
+/** True when the player is in a bankruptcy-related rage state. */
+export function churnIsBankruptcyRage(score: ChurnRiskScore): boolean {
+  return score.isBankruptcyRage;
+}
+
+/** True when recovery potential is high enough to justify a dramatic hold instead of immediate rescue. */
+export function churnHasHighRecovery(score: ChurnRiskScore): boolean {
+  return score.recoveryPotential01 >= 0.54;
+}
+
+/** Returns a human-readable band label. */
+export function churnBandLabel(score: ChurnRiskScore): string {
+  switch (score.band) {
+    case 'CRITICAL': return 'Critical Churn Risk';
+    case 'HIGH': return 'High Churn Risk';
+    case 'ELEVATED': return 'Elevated Churn Risk';
+    case 'WATCH': return 'Watching for Churn';
+    case 'STABLE': return 'Stable';
+  }
+}
+
+/** Returns a human-readable recommendation label. */
+export function churnRecommendationLabel(score: ChurnRiskScore): string {
+  switch (score.recommendation) {
+    case 'EMERGENCY_SAVE': return 'Emergency Save Required';
+    case 'PUBLIC_WITNESS_RESCUE': return 'Public Witness Rescue';
+    case 'PRIVATE_RECOVERY': return 'Private Recovery Needed';
+    case 'HOLD_DRAMA': return 'Hold — Dramatic Tension';
+    case 'SOFT_NUDGE': return 'Soft Nudge';
+    case 'POST_COLLAPSE_DEBRIEF': return 'Post-Collapse Debrief';
+    case 'STABLE_OBSERVE': return 'Stable — Observe';
+  }
+}
+
+/** Returns a human-readable trend label. */
+export function churnTrendLabel(direction: ChurnTrendDirection): string {
+  switch (direction) {
+    case 'ACCELERATING': return 'Accelerating (severe)';
+    case 'WORSENING': return 'Worsening';
+    case 'STABLE': return 'Stable';
+    case 'RECOVERING': return 'Recovering';
+    case 'RESOLVED': return 'Resolved';
+  }
+}
+
+/** Returns a brief natural-language summary of the most important churn factors. */
+export function churnExplanationSummary(score: ChurnRiskScore): string {
+  const top3 = score.explanation.slice(0, 3);
+  if (!top3.length) return 'No significant churn signals.';
+  const factors = top3
+    .map((f) => `${f.key}(${f.signedDelta01 >= 0 ? '+' : ''}${f.signedDelta01.toFixed(2)})`)
+    .join(', ');
+  return `${churnBandLabel(score)} — top factors: ${factors}`;
+}
+
+/** Returns a machine-readable telemetry payload for event pipelines. */
+export function churnScoreToTelemetry(score: ChurnRiskScore): Readonly<Record<string, string | number | boolean>> {
+  return Object.freeze({
+    band: score.band,
+    recommendation: score.recommendation,
+    churnRisk01: score.churnRisk01,
+    withdrawalRisk01: score.withdrawalRisk01,
+    rageQuitRisk01: score.rageQuitRisk01,
+    rescueUrgency01: score.rescueUrgency01,
+    recoveryPotential01: score.recoveryPotential01,
+    liveopsBoost01: score.liveopsBoost01,
+    rageRatchet01: score.rageRatchet01,
+    trendDirection: score.trendDirection,
+    isEmergency: score.isEmergency,
+    isBankruptcyRage: score.isBankruptcyRage,
+    shouldRescue: score.shouldRescue,
+    shouldHoldDrama: score.shouldHoldDrama,
+    confidence01: score.confidence01,
+    channel: score.diagnostics.activeVisibleChannel,
+    pressureTier: score.diagnostics.pressureTier,
+    modelVersion: score.diagnostics.modelVersion,
+  });
+}
+
+/** Comparator for sorting scores descending by churnRisk01. */
+export function churnScoreCompare(a: ChurnRiskScore, b: ChurnRiskScore): number {
+  return b.churnRisk01 - a.churnRisk01;
+}
+
+/** Sorts an array of scores descending by churn risk. Non-mutating. */
+export function sortChurnScoresDescending(scores: readonly ChurnRiskScore[]): ChurnRiskScore[] {
+  return [...scores].sort(churnScoreCompare);
+}
+
+/** Filters to scores that need any active intervention (non-stable, non-hold). */
+export function churnScoresNeedingAction(scores: readonly ChurnRiskScore[]): ChurnRiskScore[] {
+  return scores.filter((s) => s.shouldRescue);
+}
+
+/** Filters to CRITICAL band scores only. */
+export function churnScoresCritical(scores: readonly ChurnRiskScore[]): ChurnRiskScore[] {
+  return scores.filter(churnIsCritical);
+}
+
+/** Filters to emergency scores only. */
+export function churnScoresEmergency(scores: readonly ChurnRiskScore[]): ChurnRiskScore[] {
+  return scores.filter(churnIsEmergency);
+}
+
+/** Returns churnRisk mapped to a 0–100 integer for display. */
+export function churnConfidence100(score: ChurnRiskScore): number {
+  return Math.round(score.confidence01 * 100);
+}
+
+/**
+ * Derives a prior state from a serialized score payload.
+ * Safe for use with Nullable hydration results from persistence layers.
+ */
+export function derivePriorStateChurn(
+  payload: Nullable<Readonly<Record<string, JsonValue>>>,
+): Nullable<ChurnRiskPriorState> {
+  return hydratePriorChurnRiskState(payload);
+}
+
+/**
+ * Batch-scores a window slice with a single ephemeral model instance.
+ * Suitable for offline replay paths and audit pipelines.
+ */
+export function scoreWindowBatch(
+  windows: readonly ChatOnlineInferenceWindow[],
+  options: ChurnRiskModelOptions = {},
+): ChurnRiskBatchResult[] {
+  const model = createChurnRiskModel(options);
+  return windows.map((w) => {
+    const input = deriveChurnInputFromInferenceWindow({ window: w });
+    return { input, score: model.score(input) };
+  });
+}
+
 export const CHAT_CHURN_RISK_MODEL_NAMESPACE = Object.freeze({
   moduleName: CHAT_CHURN_RISK_MODEL_MODULE_NAME,
   moduleVersion: CHAT_CHURN_RISK_MODEL_VERSION,
@@ -1327,4 +2024,29 @@ export const CHAT_CHURN_RISK_MODEL_NAMESPACE = Object.freeze({
   churnRiskNeedsRescue,
   churnRiskNeedsPublicWitness,
   churnRiskShouldHold,
+  churnIsCritical,
+  churnIsEmergency,
+  churnIsDealRoomSilent,
+  churnIsRageDriven,
+  churnIsQuietWithdrawal,
+  churnIsLiveopsAmplified,
+  churnIsWorsening,
+  churnIsRecovering,
+  churnIsBankruptcyRage,
+  churnHasHighRecovery,
+  churnBandLabel,
+  churnRecommendationLabel,
+  churnTrendLabel,
+  churnExplanationSummary,
+  churnScoreToTelemetry,
+  churnScoreCompare,
+  sortChurnScoresDescending,
+  churnScoresNeedingAction,
+  churnScoresCritical,
+  churnScoresEmergency,
+  churnConfidence100,
+  derivePriorStateChurn,
+  scoreWindowBatch,
 });
+
+export default CHAT_CHURN_RISK_MODEL_NAMESPACE;
