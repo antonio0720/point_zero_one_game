@@ -2,7 +2,7 @@
  * ============================================================================
  * POINT ZERO ONE — BACKEND CHAT PHASE 1 BARREL INDEX
  * FILE: backend/src/game/engine/chat/phase1/index.ts
- * VERSION: 2026.03.22-phase1-index.v1
+ * VERSION: 2026.03.22-phase1-index.v2
  * AUTHORSHIP: Antonio T. Smith Jr.
  * LICENSE: Internal / Proprietary / All Rights Reserved
  * ============================================================================
@@ -24,7 +24,7 @@
  *      Authoritative backend bridge between ChatEngine and the Phase 1
  *      novelty / episodic memory intelligence stack. Stateful in its
  *      intelligence objects; stateless with respect to ChatState ownership.
- *      All state mutations return immutable ChatStateWithPhaseOne values.
+ *      All state mutations return immutable ChatEngineStateWithPhaseOne values.
  *
  * Architecture seams (ChatEngine calls into bridge at these points):
  * ──────────────────────────────────────────────────────────────────
@@ -32,16 +32,16 @@
  *     → bridge.hydrateFromState(state) | bridge.ensureHydrated(state)
  *
  *   Seam 2: committed message append
- *     → bridge.noteCommittedMessage(state, message, now) → ChatStateWithPhaseOne
- *     → bridge.noteCommittedMessages(state, messages, now) → ChatStateWithPhaseOne
+ *     → bridge.noteCommittedMessage(state, message, now) → ChatEngineStateWithPhaseOne
+ *     → bridge.noteCommittedMessages(state, messages, now) → ChatEngineStateWithPhaseOne
  *
  *   Seam 3: scene plan ingestion
- *     → bridge.noteScene(state, scene, summary, now) → ChatStateWithPhaseOne
- *     → bridge.noteScenes(state, entries, now) → ChatStateWithPhaseOne
+ *     → bridge.noteScene(state, scene, summary, now) → ChatEngineStateWithPhaseOne
+ *     → bridge.noteScenes(state, entries, now) → ChatEngineStateWithPhaseOne
  *
  *   Seam 4: upstream signal normalization
- *     → bridge.noteSignal(state, envelope, now) → ChatStateWithPhaseOne
- *     → bridge.noteSignals(state, envelopes, now) → ChatStateWithPhaseOne
+ *     → bridge.noteSignal(state, envelope, now) → ChatEngineStateWithPhaseOne
+ *     → bridge.noteSignals(state, envelopes, now) → ChatEngineStateWithPhaseOne
  *
  *   Seam 5a: NPC candidate ranking (phase-enriched candidates)
  *     → bridge.rankResponseCandidates(state, candidates, channelId, sceneRole, now)
@@ -50,7 +50,7 @@
  *     → bridge.rankSceneCandidates(state, candidates, now)
  *
  *   Seam 6: periodic / authoritative sync
- *     → bridge.syncIntoState(state, recommendedCandidateId, now) → ChatStateWithPhaseOne
+ *     → bridge.syncIntoState(state, recommendedCandidateId, now) → ChatEngineStateWithPhaseOne
  *
  *   Seam 7: rehydration after persistence restore
  *     → bridge.forceRehydrate(state)
@@ -60,7 +60,8 @@
  * Types:
  * - ChatConversationalFingerprint  — 13-axis behavioral fingerprint
  * - ChatPhaseOneStateSlice         — immutable Phase 1 state slice shape
- * - ChatStateWithPhaseOne          — union: ChatState + optional phaseOne slice
+ * - ChatEngineStateWithPhaseOne    — union: ChatState + optional phaseOne slice
+ *   (also exported as ChatStateWithPhaseOne for backward compatibility)
  *
  * Default creators:
  * - createDefaultConversationalFingerprint(now?)
@@ -107,24 +108,24 @@
  *   - forceRehydrate(state)
  *
  *   Ingestion seams:
- *   - noteCommittedMessage(state, message, now?) → ChatStateWithPhaseOne
- *   - noteCommittedMessages(state, messages, now?) → ChatStateWithPhaseOne
- *   - noteScene(state, scene, summary, now?) → ChatStateWithPhaseOne
- *   - noteScenes(state, entries, now?) → ChatStateWithPhaseOne
- *   - noteSignal(state, signal, now?) → ChatStateWithPhaseOne
- *   - noteSignals(state, signals, now?) → ChatStateWithPhaseOne
+ *   - noteCommittedMessage(state, message, now?) → ChatEngineStateWithPhaseOne
+ *   - noteCommittedMessages(state, messages, now?) → ChatEngineStateWithPhaseOne
+ *   - noteScene(state, scene, summary, now?) → ChatEngineStateWithPhaseOne
+ *   - noteScenes(state, entries, now?) → ChatEngineStateWithPhaseOne
+ *   - noteSignal(state, signal, now?) → ChatEngineStateWithPhaseOne
+ *   - noteSignals(state, signals, now?) → ChatEngineStateWithPhaseOne
  *
  *   Ranking seam:
  *   - rankResponseCandidates(state, candidates, channelId, sceneRole, now) → ranked[]
  *   - rankSceneCandidates(state, candidates, now) → scores[]
  *
  *   Sync seam:
- *   - syncIntoState(state, recommendedCandidateId, now) → ChatStateWithPhaseOne
+ *   - syncIntoState(state, recommendedCandidateId, now) → ChatEngineStateWithPhaseOne
  *   - buildSyncReport(state, recommendedCandidateId, now) → ChatPhaseOneBridgeSyncReport
  *
  *   Callback management:
- *   - markCallbackUsed(state, memoryId, callbackId?, now) → ChatStateWithPhaseOne
- *   - markCallbacksUsed(state, entries, now) → ChatStateWithPhaseOne
+ *   - markCallbackUsed(state, memoryId, callbackId?, now) → ChatEngineStateWithPhaseOne
+ *   - markCallbacksUsed(state, entries, now) → ChatEngineStateWithPhaseOne
  *   - queryCallbacks(state, request) → ChatEpisodicCallbackCandidate[]
  *   - queryCallbacksByEventType(state, eventType, channelId?, maxResults?) → []
  *   - getUnresolvedCallbackIds(state) → string[]
@@ -132,7 +133,7 @@
  *   - buildCarryoverItems(state) → ChatEpisodicCarryoverItem[]
  *
  *   Feature snapshot:
- *   - applyFeatureSnapshot(state, snapshot, now?) → ChatStateWithPhaseOne
+ *   - applyFeatureSnapshot(state, snapshot, now?) → ChatEngineStateWithPhaseOne
  *
  *   Director hints and diagnostics:
  *   - getDirectorHints(state, channelId, now?) → ChatNoveltyLedgerDirectorHints
@@ -144,12 +145,12 @@
  *   Maintenance:
  *   - decay(state, now?) → { decayed, next }
  *   - archiveExpired(state, now?) → { archived, next }
- *   - resolveMemory(state, memoryId, reason?, summary?, now?) → ChatStateWithPhaseOne
- *   - strengthenMemory(state, memoryId, delta01, now?) → ChatStateWithPhaseOne
+ *   - resolveMemory(state, memoryId, reason?, summary?, now?) → ChatEngineStateWithPhaseOne
+ *   - strengthenMemory(state, memoryId, delta01, now?) → ChatEngineStateWithPhaseOne
  *
  *   Serialization:
  *   - serializeState(state) → ChatPhaseOneStateSlice | undefined
- *   - deserializeIntoState(state, raw, now?) → ChatStateWithPhaseOne
+ *   - deserializeIntoState(state, raw, now?) → ChatEngineStateWithPhaseOne
  *
  *   Context accessors (read-only):
  *   - getLastBattleContext() → ChatPhaseOneBattleContext | null
@@ -164,9 +165,9 @@
  * - getDefaultChatEnginePhaseOneBridge() → ChatEnginePhaseOneBridge (singleton)
  * - setDefaultChatEnginePhaseOneBridge(bridge)
  * - resetDefaultChatEnginePhaseOneBridge()
- * - applyMessageToPhaseOne(state, message, now?, options?) → ChatStateWithPhaseOne
- * - applySceneToPhaseOne(state, scene, summary, now?, options?) → ChatStateWithPhaseOne
- * - applySignalToPhaseOne(state, signal, now?, options?) → ChatStateWithPhaseOne
+ * - applyMessageToPhaseOne(state, message, now?, options?) → ChatEngineStateWithPhaseOne
+ * - applySceneToPhaseOne(state, scene, summary, now?, options?) → ChatEngineStateWithPhaseOne
+ * - applySignalToPhaseOne(state, signal, now?, options?) → ChatEngineStateWithPhaseOne
  *
  * NAMESPACE MODULE OBJECTS
  * ─────────────────────────
@@ -201,10 +202,12 @@ import * as PhaseOneBridge from './ChatEnginePhaseOneBridge';
 // ============================================================================
 
 export {
-  // Types
+  // Types — use the canonical name; alias preserves backward compatibility
   type ChatConversationalFingerprint,
   type ChatPhaseOneStateSlice,
-  type ChatStateWithPhaseOne,
+  type ChatEngineStateWithPhaseOne,
+  // Backward-compat alias: callers that imported ChatStateWithPhaseOne still compile
+  type ChatEngineStateWithPhaseOne as ChatStateWithPhaseOne,
 
   // Default creators
   createDefaultConversationalFingerprint,
@@ -336,7 +339,7 @@ export const ChatEnginePhaseOneBridgeClass = PhaseOneBridge.ChatEnginePhaseOneBr
  */
 export function isChatStateWithPhaseOne(
   state: unknown,
-): state is PhaseOneState.ChatStateWithPhaseOne {
+): state is PhaseOneState.ChatEngineStateWithPhaseOne {
   return (
     state !== null &&
     typeof state === 'object' &&
@@ -359,7 +362,7 @@ export function isPhaseOneBridgeHealthy(
  * embedded in its Phase 1 slice.
  */
 export function hasPhaseOneNoveltyLedger(
-  state: PhaseOneState.ChatStateWithPhaseOne,
+  state: PhaseOneState.ChatEngineStateWithPhaseOne,
 ): boolean {
   return PhaseOneState.getPhaseOneState(state).noveltyLedger !== undefined;
 }
@@ -369,7 +372,7 @@ export function hasPhaseOneNoveltyLedger(
  * embedded in its Phase 1 slice.
  */
 export function hasPhaseOneEpisodicMemory(
-  state: PhaseOneState.ChatStateWithPhaseOne,
+  state: PhaseOneState.ChatEngineStateWithPhaseOne,
 ): boolean {
   return PhaseOneState.getPhaseOneState(state).episodicMemory !== undefined;
 }
@@ -382,7 +385,7 @@ export function hasPhaseOneEpisodicMemory(
  * semantically saturated.
  */
 export function isHighSemanticFatigue(
-  state: PhaseOneState.ChatStateWithPhaseOne,
+  state: PhaseOneState.ChatEngineStateWithPhaseOne,
   channelId: 'GLOBAL' | 'SYNDICATE' | 'DEAL_ROOM' | 'LOBBY',
   threshold = 0.65,
 ): boolean {
@@ -395,7 +398,7 @@ export function isHighSemanticFatigue(
  * Used by the NPC director to know whether callback debt exists.
  */
 export function hasPhaseOneUnresolvedCallbacks(
-  state: PhaseOneState.ChatStateWithPhaseOne,
+  state: PhaseOneState.ChatEngineStateWithPhaseOne,
 ): boolean {
   return PhaseOneState.getPhaseOneState(state).unresolvedCallbackIds.length > 0;
 }
@@ -406,7 +409,7 @@ export function hasPhaseOneUnresolvedCallbacks(
  * meaningfully from neutral.
  */
 export function isPhaseOneFingerprintNeutral(
-  state: PhaseOneState.ChatStateWithPhaseOne,
+  state: PhaseOneState.ChatEngineStateWithPhaseOne,
   driftThreshold = 0.08,
 ): boolean {
   const defaults = PhaseOneState.createDefaultConversationalFingerprint();
@@ -432,7 +435,7 @@ export function isPhaseOneFingerprintNeutral(
  * to restore novelty ledger and episodic memory from persistence.
  */
 export function createAndHydratePhaseOneBridge(
-  state: PhaseOneState.ChatStateWithPhaseOne,
+  state: PhaseOneState.ChatEngineStateWithPhaseOne,
   options: PhaseOneBridge.ChatPhaseOneBridgeOptions = {},
 ): PhaseOneBridge.ChatEnginePhaseOneBridge {
   const bridge = PhaseOneBridge.createChatEnginePhaseOneBridge(options);
@@ -461,10 +464,13 @@ export function bootPhaseOneLayer(
  * snapshots.
  */
 export function syncAndHydratePhaseOneBridge(
-  state: PhaseOneState.ChatStateWithPhaseOne,
+  state: PhaseOneState.ChatEngineStateWithPhaseOne,
   options: PhaseOneBridge.ChatPhaseOneBridgeOptions = {},
   recommendedCandidateId?: string,
-): { readonly bridge: PhaseOneBridge.ChatEnginePhaseOneBridge; readonly state: PhaseOneState.ChatStateWithPhaseOne } {
+): {
+  readonly bridge: PhaseOneBridge.ChatEnginePhaseOneBridge;
+  readonly state: PhaseOneState.ChatEngineStateWithPhaseOne;
+} {
   const bridge = PhaseOneBridge.createChatEnginePhaseOneBridge(options);
   bridge.hydrateFromState(state);
   const now = Date.now() as import('../types').UnixMs;
@@ -479,7 +485,7 @@ export function syncAndHydratePhaseOneBridge(
  * Useful for replaying historical session data into a fresh bridge.
  */
 export function replaySessionDataIntoPhaseOne(
-  state: PhaseOneState.ChatStateWithPhaseOne,
+  state: PhaseOneState.ChatEngineStateWithPhaseOne,
   data: {
     readonly messages?: readonly import('../types').ChatMessage[];
     readonly scenes?: readonly {
@@ -489,7 +495,10 @@ export function replaySessionDataIntoPhaseOne(
     readonly signals?: readonly import('../types').ChatSignalEnvelope[];
   },
   options: PhaseOneBridge.ChatPhaseOneBridgeOptions = {},
-): { readonly bridge: PhaseOneBridge.ChatEnginePhaseOneBridge; readonly state: PhaseOneState.ChatStateWithPhaseOne } {
+): {
+  readonly bridge: PhaseOneBridge.ChatEnginePhaseOneBridge;
+  readonly state: PhaseOneState.ChatEngineStateWithPhaseOne;
+} {
   const bridge = PhaseOneBridge.createChatEnginePhaseOneBridge(options);
   bridge.hydrateFromState(state);
 
