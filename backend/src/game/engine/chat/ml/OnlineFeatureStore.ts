@@ -805,7 +805,7 @@ export class OnlineFeatureStore {
     });
   }
 
-  public entityProfiles(limit = this.defaults.topEntitiesLimit): readonly ChatOnlineFeatureEntityProfile[] {
+  public entityProfiles(limit: number = Number(this.defaults.topEntitiesLimit)): readonly ChatOnlineFeatureEntityProfile[] {
     const profiles: ChatOnlineFeatureEntityProfile[] = [];
     for (const entityKey of this.byEntityKey.keys()) {
       const profile = this.entityProfile(entityKey);
