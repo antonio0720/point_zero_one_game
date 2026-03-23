@@ -77,6 +77,7 @@ import * as Rescue from './rescue';
 import * as LegendMomentLedger from './rewards/LegendMomentLedger';
 import * as RewardGrantResolver from './rewards/RewardGrantResolver';
 import * as ReplayMomentIndexer from './rewards/ReplayMomentIndexer';
+import * as Rewards from './rewards';
 import * as PresenceStyleResolver from './presence/PresenceStyleResolver';
 import * as TypingSimulationEngine from './presence/TypingSimulationEngine';
 import * as ReadReceiptPolicy from './presence/ReadReceiptPolicy';
@@ -243,6 +244,7 @@ export {
   LegendMomentLedger as ChatLegendMomentLedgerModule,
   RewardGrantResolver as ChatRewardGrantResolverModule,
   ReplayMomentIndexer as ChatReplayMomentIndexerModule,
+  Rewards as ChatRewardsBarrelModule,
   PresenceStyleResolver as ChatPresenceStyleResolverModule,
   TypingSimulationEngine as ChatTypingSimulationEngineModule,
   ReadReceiptPolicy as ChatReadReceiptPolicyModule,

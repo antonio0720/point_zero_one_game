@@ -907,7 +907,7 @@ export class LegendMomentLedger {
       merged = true;
     } else {
       const legendId = stableLegendIdForEvent(event, input.sourceEventId ?? null);
-      const initialStatus: LegendMomentLedgerStatus = extractLegendVisibility(event) === 'VISIBLE' ? 'CONFIRMED' : 'PROVISIONAL';
+      const initialStatus: LegendMomentLedgerStatus = extractLegendVisibility(event) === 'PUBLIC' ? 'CONFIRMED' : 'PROVISIONAL';
       record = buildLegendRecord(legendId, event, input, initialStatus);
       created = true;
     }
@@ -1378,4 +1378,574 @@ export const ChatLegendMomentLedgerModule = Object.freeze({
   createLegendMomentLedger,
   buildLegendMomentLedgerSnapshot,
   LegendMomentLedger,
+} as const);
+
+// ============================================================================
+// MARK: Prestige scoring
+// ============================================================================
+
+export type LegendPrestigeBand =
+  | 'APEX'
+  | 'ELITE'
+  | 'DISTINGUISHED'
+  | 'NOTABLE'
+  | 'EMERGING'
+  | 'PROVISIONAL';
+
+export interface LegendPrestigeScore {
+  readonly legendId: ChatLegendId;
+  readonly roomId: ChatRoomId;
+  readonly rawScore: number;
+  readonly normalizedScore01: number;
+  readonly band: LegendPrestigeBand;
+  readonly tierWeight: number;
+  readonly severityWeight: number;
+  readonly replayBonus: number;
+  readonly rewardBonus: number;
+  readonly witnessBonus: number;
+}
+
+const TIER_WEIGHTS: Readonly<Record<string, number>> = Object.freeze({
+  PLATINUM: 1.0,
+  GOLD: 0.82,
+  SILVER: 0.62,
+  BRONZE: 0.42,
+  SIGNATURE: 0.72,
+  ICON: 0.90,
+});
+
+const SEVERITY_WEIGHTS: Readonly<Record<string, number>> = Object.freeze({
+  CRITICAL: 1.0,
+  MAJOR: 0.75,
+  MODERATE: 0.52,
+  MINOR: 0.28,
+});
+
+function derivePrestigeBand(score01: number): LegendPrestigeBand {
+  if (score01 >= 0.90) return 'APEX';
+  if (score01 >= 0.72) return 'ELITE';
+  if (score01 >= 0.52) return 'DISTINGUISHED';
+  if (score01 >= 0.34) return 'NOTABLE';
+  if (score01 >= 0.16) return 'EMERGING';
+  return 'PROVISIONAL';
+}
+
+export function scoreLegendMoment(record: LegendMomentRecord): LegendPrestigeScore {
+  const tierWeight = TIER_WEIGHTS[String(record.tier)] ?? 0.5;
+  const severityWeight = SEVERITY_WEIGHTS[String(record.severity)] ?? 0.5;
+  const replayBonus = Math.min(0.20, record.replay.replayIds.length * 0.06);
+  const rewardBonus = record.reward.granted ? 0.18 : record.reward.eligible ? 0.08 : 0;
+  const witnessBonus = Math.min(0.12, record.witnessCount * 0.03);
+  const proofBonus = record.proof.causalClosureComplete ? 0.06 : 0;
+  const rawScore = (tierWeight * 0.40) + (severityWeight * 0.30) + replayBonus + rewardBonus + witnessBonus + proofBonus;
+  const normalizedScore01 = Math.max(0, Math.min(1, rawScore));
+  return Object.freeze({
+    legendId: record.legendId,
+    roomId: record.roomId,
+    rawScore,
+    normalizedScore01,
+    band: derivePrestigeBand(normalizedScore01),
+    tierWeight,
+    severityWeight,
+    replayBonus,
+    rewardBonus,
+    witnessBonus,
+  });
+}
+
+export function scoreAllLegendsInRoom(
+  ledger: LegendMomentLedger,
+  roomId: ChatRoomId,
+): readonly LegendPrestigeScore[] {
+  return freezeArray(
+    ledger.listByRoom(roomId, false).map(scoreLegendMoment).sort((a, b) => b.normalizedScore01 - a.normalizedScore01),
+  );
+}
+
+export function topScoredLegendsInRoom(
+  ledger: LegendMomentLedger,
+  roomId: ChatRoomId,
+  topN: number,
+): readonly LegendPrestigeScore[] {
+  return freezeArray(scoreAllLegendsInRoom(ledger, roomId).slice(0, topN));
+}
+
+// ============================================================================
+// MARK: Snapshot diff and comparison
+// ============================================================================
+
+export interface LegendMomentLedgerDiff {
+  readonly addedLegendIds: readonly ChatLegendId[];
+  readonly removedLegendIds: readonly ChatLegendId[];
+  readonly upgradedLegendIds: readonly ChatLegendId[];
+  readonly grantedLegendIds: readonly ChatLegendId[];
+  readonly revokedLegendIds: readonly ChatLegendId[];
+  readonly roomPrestigeChanged: readonly ChatRoomId[];
+}
+
+export function diffLegendMomentLedgerSnapshots(
+  before: LegendMomentLedgerSnapshot,
+  after: LegendMomentLedgerSnapshot,
+): LegendMomentLedgerDiff {
+  const beforeIds = new Set(Object.keys(before.byId) as ChatLegendId[]);
+  const afterIds = new Set(Object.keys(after.byId) as ChatLegendId[]);
+
+  const addedLegendIds = [...afterIds].filter((id) => !beforeIds.has(id)) as ChatLegendId[];
+  const removedLegendIds = [...beforeIds].filter((id) => !afterIds.has(id)) as ChatLegendId[];
+
+  const upgradedLegendIds: ChatLegendId[] = [];
+  const grantedLegendIds: ChatLegendId[] = [];
+  const revokedLegendIds: ChatLegendId[] = [];
+
+  for (const id of afterIds) {
+    if (!beforeIds.has(id)) continue;
+    const b = before.byId[id];
+    const a = after.byId[id];
+    if (!b || !a) continue;
+    if (b.status === 'PROVISIONAL' && a.status === 'CONFIRMED') upgradedLegendIds.push(id);
+    if (!b.reward.granted && a.reward.granted) grantedLegendIds.push(id);
+    if (b.status !== 'REVOKED' && a.status === 'REVOKED') revokedLegendIds.push(id);
+  }
+
+  const allRoomIds = new Set([
+    ...Object.keys(before.roomPrestige),
+    ...Object.keys(after.roomPrestige),
+  ] as ChatRoomId[]);
+  const roomPrestigeChanged: ChatRoomId[] = [];
+  for (const roomId of allRoomIds) {
+    const bp = before.roomPrestige[roomId];
+    const ap = after.roomPrestige[roomId];
+    if (!bp || !ap) { roomPrestigeChanged.push(roomId); continue; }
+    if (bp.confirmedCount !== ap.confirmedCount || bp.grantedCount !== ap.grantedCount) {
+      roomPrestigeChanged.push(roomId);
+    }
+  }
+
+  return Object.freeze({
+    addedLegendIds: freezeArray(addedLegendIds),
+    removedLegendIds: freezeArray(removedLegendIds),
+    upgradedLegendIds: freezeArray(upgradedLegendIds),
+    grantedLegendIds: freezeArray(grantedLegendIds),
+    revokedLegendIds: freezeArray(revokedLegendIds),
+    roomPrestigeChanged: freezeArray(roomPrestigeChanged),
+  });
+}
+
+// ============================================================================
+// MARK: Temporal density analysis
+// ============================================================================
+
+export interface LegendMomentTemporalWindow {
+  readonly windowId: string;
+  readonly roomId: ChatRoomId;
+  readonly startAt: UnixMs;
+  readonly endAt: UnixMs;
+  readonly legendCount: number;
+  readonly confirmedCount: number;
+  readonly grantedCount: number;
+  readonly legendIds: readonly ChatLegendId[];
+  readonly densityScore01: number;
+}
+
+export function buildLegendTemporalDensityWindows(
+  ledger: LegendMomentLedger,
+  roomId: ChatRoomId,
+  windowDurationMs = 1000 * 60 * 5,
+): readonly LegendMomentTemporalWindow[] {
+  const records = ledger.listByRoom(roomId);
+  if (records.length === 0) return Object.freeze([]);
+
+  const sorted = [...records].sort((a, b) => Number(a.createdAt) - Number(b.createdAt));
+  const firstAt = Number(sorted[0].createdAt);
+  const lastAt = Number(sorted[sorted.length - 1].createdAt) + windowDurationMs;
+
+  const windows: LegendMomentTemporalWindow[] = [];
+  for (let start = firstAt; start < lastAt; start += windowDurationMs) {
+    const end = start + windowDurationMs;
+    const inWindow = sorted.filter((r) => Number(r.createdAt) >= start && Number(r.createdAt) < end);
+    if (inWindow.length === 0) continue;
+    const confirmedCount = inWindow.filter((r) => r.status === 'CONFIRMED' || r.status === 'GRANTED').length;
+    const grantedCount = inWindow.filter((r) => r.reward.granted).length;
+    windows.push(Object.freeze({
+      windowId: `temporal:${roomId}:${start}`,
+      roomId,
+      startAt: asUnixMs(start),
+      endAt: asUnixMs(end),
+      legendCount: inWindow.length,
+      confirmedCount,
+      grantedCount,
+      legendIds: freezeArray(inWindow.map((r) => r.legendId)),
+      densityScore01: Math.min(1, inWindow.length / 6),
+    }));
+  }
+  return freezeArray(windows);
+}
+
+export function peakPrestigeWindowForRoom(
+  ledger: LegendMomentLedger,
+  roomId: ChatRoomId,
+  windowDurationMs = 1000 * 60 * 5,
+): LegendMomentTemporalWindow | null {
+  const windows = buildLegendTemporalDensityWindows(ledger, roomId, windowDurationMs);
+  if (windows.length === 0) return null;
+  return windows.reduce((best, w) => w.densityScore01 > best.densityScore01 ? w : best);
+}
+
+// ============================================================================
+// MARK: Prestige momentum
+// ============================================================================
+
+export interface LegendMomentumState {
+  readonly roomId: ChatRoomId;
+  readonly momentumScore01: number;
+  readonly recentLegendCount: number;
+  readonly recentConfirmedCount: number;
+  readonly recentGrantedCount: number;
+  readonly accelerating: boolean;
+  readonly decelerating: boolean;
+  readonly lastLegendAt: UnixMs | null;
+  readonly windowMs: number;
+}
+
+export function computeLegendMomentum(
+  ledger: LegendMomentLedger,
+  roomId: ChatRoomId,
+  now: UnixMs = asUnixMs(Date.now()),
+  windowMs = 1000 * 60 * 10,
+  comparisonWindowMs = 1000 * 60 * 20,
+): LegendMomentumState {
+  const all = ledger.listByRoom(roomId);
+  const recent = all.filter((r) => Number(now) - Number(r.createdAt) <= windowMs);
+  const previous = all.filter((r) => {
+    const age = Number(now) - Number(r.createdAt);
+    return age > windowMs && age <= comparisonWindowMs;
+  });
+  const recentConfirmedCount = recent.filter((r) => r.status === 'CONFIRMED' || r.status === 'GRANTED').length;
+  const recentGrantedCount = recent.filter((r) => r.reward.granted).length;
+  const momentumScore01 = Math.min(1, recent.length / 5);
+  const previousRate = previous.length / Math.max(1, comparisonWindowMs - windowMs);
+  const recentRate = recent.length / Math.max(1, windowMs);
+  return Object.freeze({
+    roomId,
+    momentumScore01,
+    recentLegendCount: recent.length,
+    recentConfirmedCount,
+    recentGrantedCount,
+    accelerating: recentRate > previousRate * 1.2,
+    decelerating: recentRate < previousRate * 0.8,
+    lastLegendAt: all.length > 0 ? all[all.length - 1].createdAt : null,
+    windowMs,
+  });
+}
+
+// ============================================================================
+// MARK: Cross-room summary
+// ============================================================================
+
+export interface LegendMomentCrossRoomSummary {
+  readonly roomCount: number;
+  readonly totalLegendCount: number;
+  readonly totalGrantedCount: number;
+  readonly totalConfirmedCount: number;
+  readonly topRoomId: ChatRoomId | null;
+  readonly topRoomLegendCount: number;
+  readonly classDistribution: Readonly<Record<string, number>>;
+  readonly tierDistribution: Readonly<Record<string, number>>;
+}
+
+export function buildCrossRoomLegendSummary(ledger: LegendMomentLedger): LegendMomentCrossRoomSummary {
+  const snapshot = ledger.buildSnapshot();
+  const roomIds = Object.keys(snapshot.byRoom) as ChatRoomId[];
+  let topRoomId: ChatRoomId | null = null;
+  let topRoomLegendCount = 0;
+  let totalLegendCount = 0;
+  let totalGrantedCount = 0;
+  let totalConfirmedCount = 0;
+  const classDistribution: Record<string, number> = {};
+  const tierDistribution: Record<string, number> = {};
+
+  for (const roomId of roomIds) {
+    const records = snapshot.byRoom[roomId] ?? [];
+    totalLegendCount += records.length;
+    if (records.length > topRoomLegendCount) { topRoomLegendCount = records.length; topRoomId = roomId; }
+    for (const r of records) {
+      if (r.reward.granted) totalGrantedCount += 1;
+      if (r.status === 'CONFIRMED' || r.status === 'GRANTED') totalConfirmedCount += 1;
+      classDistribution[String(r.legendClass)] = (classDistribution[String(r.legendClass)] ?? 0) + 1;
+      tierDistribution[String(r.tier)] = (tierDistribution[String(r.tier)] ?? 0) + 1;
+    }
+  }
+
+  return Object.freeze({
+    roomCount: roomIds.length,
+    totalLegendCount,
+    totalGrantedCount,
+    totalConfirmedCount,
+    topRoomId,
+    topRoomLegendCount,
+    classDistribution: freezeRecord(classDistribution),
+    tierDistribution: freezeRecord(tierDistribution),
+  });
+}
+
+// ============================================================================
+// MARK: Batch admit API
+// ============================================================================
+
+export interface LegendMomentBatchAdmitResult {
+  readonly results: readonly LegendMomentAdmitResult[];
+  readonly createdCount: number;
+  readonly mergedCount: number;
+  readonly failedCount: number;
+  readonly affectedRoomIds: readonly ChatRoomId[];
+}
+
+export function batchAdmitLegends(
+  ledger: LegendMomentLedger,
+  inputs: readonly LegendMomentAdmitInput[],
+): LegendMomentBatchAdmitResult {
+  const results: LegendMomentAdmitResult[] = [];
+  let createdCount = 0;
+  let mergedCount = 0;
+  let failedCount = 0;
+  const affectedRoomIds = new Set<ChatRoomId>();
+
+  for (const input of inputs) {
+    try {
+      const result = ledger.admitLegend(input);
+      results.push(result);
+      if (result.created) createdCount += 1;
+      if (result.merged) mergedCount += 1;
+      affectedRoomIds.add(result.record.roomId);
+    } catch {
+      failedCount += 1;
+    }
+  }
+
+  return Object.freeze({
+    results: freezeArray(results),
+    createdCount,
+    mergedCount,
+    failedCount,
+    affectedRoomIds: freezeArray([...affectedRoomIds]),
+  });
+}
+
+// ============================================================================
+// MARK: Profile system
+// ============================================================================
+
+export type LegendMomentLedgerProfile =
+  | 'STANDARD'
+  | 'COMPACT'
+  | 'CINEMATIC'
+  | 'FORENSIC'
+  | 'HIGH_VOLUME';
+
+export const LEGEND_MOMENT_LEDGER_PROFILES: Readonly<Record<LegendMomentLedgerProfile, Partial<LegendMomentLedgerConfig>>> = Object.freeze({
+  STANDARD: Object.freeze({}),
+  COMPACT: Object.freeze({
+    maxReasonsPerLegend: 16,
+    maxLegendsPerRoom: 500,
+    maxWitnessIdsPerLegend: 8,
+    maxReplayLinksPerLegend: 4,
+    maxProofHashesPerLegend: 8,
+    dedupeWindowMs: 30_000,
+    archiveAfterMs: 1000 * 60 * 60 * 24 * 3,
+  }),
+  CINEMATIC: Object.freeze({
+    maxReasonsPerLegend: 128,
+    maxLegendsPerRoom: 10_000,
+    maxWitnessIdsPerLegend: 64,
+    maxReplayLinksPerLegend: 32,
+    maxProofHashesPerLegend: 64,
+    dedupeWindowMs: 120_000,
+    archiveAfterMs: 1000 * 60 * 60 * 24 * 60,
+    allowProvisionalUpgrade: true,
+  }),
+  FORENSIC: Object.freeze({
+    maxReasonsPerLegend: 256,
+    maxLegendsPerRoom: 50_000,
+    maxWitnessIdsPerLegend: 128,
+    maxReplayLinksPerLegend: 64,
+    maxProofHashesPerLegend: 128,
+    dedupeWindowMs: 300_000,
+    archiveAfterMs: 1000 * 60 * 60 * 24 * 365,
+    allowProvisionalUpgrade: false,
+  }),
+  HIGH_VOLUME: Object.freeze({
+    maxReasonsPerLegend: 32,
+    maxLegendsPerRoom: 100_000,
+    maxWitnessIdsPerLegend: 12,
+    maxReplayLinksPerLegend: 6,
+    maxProofHashesPerLegend: 16,
+    dedupeWindowMs: 45_000,
+    archiveAfterMs: 1000 * 60 * 60 * 24 * 7,
+  }),
+});
+
+export function createLegendMomentLedgerFromProfile(
+  profile: LegendMomentLedgerProfile,
+  overrides: Partial<LegendMomentLedgerConfig> = {},
+): LegendMomentLedger {
+  const profileConfig = LEGEND_MOMENT_LEDGER_PROFILES[profile] ?? {};
+  return createLegendMomentLedger({ ...profileConfig, ...overrides });
+}
+
+export function createCompactLegendMomentLedger(overrides: Partial<LegendMomentLedgerConfig> = {}): LegendMomentLedger {
+  return createLegendMomentLedgerFromProfile('COMPACT', overrides);
+}
+
+export function createCinematicLegendMomentLedger(overrides: Partial<LegendMomentLedgerConfig> = {}): LegendMomentLedger {
+  return createLegendMomentLedgerFromProfile('CINEMATIC', overrides);
+}
+
+export function createForensicLegendMomentLedger(overrides: Partial<LegendMomentLedgerConfig> = {}): LegendMomentLedger {
+  return createLegendMomentLedgerFromProfile('FORENSIC', overrides);
+}
+
+export function createHighVolumeLegendMomentLedger(overrides: Partial<LegendMomentLedgerConfig> = {}): LegendMomentLedger {
+  return createLegendMomentLedgerFromProfile('HIGH_VOLUME', overrides);
+}
+
+// ============================================================================
+// MARK: Legend drift detection
+// ============================================================================
+
+export interface LegendDriftReport {
+  readonly totalIssues: number;
+  readonly byCode: Readonly<Record<string, number>>;
+  readonly issues: readonly LegendMomentIntegrityIssue[];
+  readonly repaired: boolean;
+}
+
+export function auditAndRepairLedger(ledger: LegendMomentLedger, repair = false): LegendDriftReport {
+  const issues = repair ? ledger.repairIntegrity() : ledger.auditIntegrity();
+  const byCode: Record<string, number> = {};
+  for (const issue of issues) {
+    byCode[issue.code] = (byCode[issue.code] ?? 0) + 1;
+  }
+  return Object.freeze({
+    totalIssues: issues.length,
+    byCode: freezeRecord(byCode),
+    issues,
+    repaired: repair,
+  });
+}
+
+// ============================================================================
+// MARK: Reward queue summary
+// ============================================================================
+
+export interface LegendRewardQueueSummary {
+  readonly eligibleCount: number;
+  readonly queuedCount: number;
+  readonly grantedCount: number;
+  readonly eligibleLegendIds: readonly ChatLegendId[];
+  readonly queuedLegendIds: readonly ChatLegendId[];
+  readonly pendingRewardClasses: readonly string[];
+}
+
+export function buildRewardQueueSummary(
+  ledger: LegendMomentLedger,
+  roomId?: ChatRoomId,
+): LegendRewardQueueSummary {
+  const eligible = ledger.listEligibleForRewardGrant(roomId);
+  const all = roomId ? ledger.listByRoom(roomId) : [];
+  const queued = all.filter((r) => r.reward.queued && !r.reward.granted);
+  const granted = all.filter((r) => r.reward.granted);
+  const pendingClasses = uniqueStrings(
+    eligible.flatMap((r) => r.reward.rewardClasses.map((c) => String(c))),
+  );
+  return Object.freeze({
+    eligibleCount: eligible.length,
+    queuedCount: queued.length,
+    grantedCount: granted.length,
+    eligibleLegendIds: freezeArray(eligible.map((r) => r.legendId)),
+    queuedLegendIds: freezeArray(queued.map((r) => r.legendId)),
+    pendingRewardClasses: pendingClasses,
+  });
+}
+
+// ============================================================================
+// MARK: Ledger statistics
+// ============================================================================
+
+export interface LegendMomentLedgerStats {
+  readonly totalLegends: number;
+  readonly provisional: number;
+  readonly confirmed: number;
+  readonly grantQueued: number;
+  readonly granted: number;
+  readonly archived: number;
+  readonly revoked: number;
+  readonly totalRooms: number;
+  readonly avgLegendsPerRoom: number;
+  readonly totalWitnessLinks: number;
+  readonly totalReplayLinks: number;
+  readonly totalProofHashes: number;
+}
+
+export function buildLegendMomentLedgerStats(ledger: LegendMomentLedger): LegendMomentLedgerStats {
+  const snapshot = ledger.buildSnapshot();
+  const all = Object.values(snapshot.byId);
+  const rooms = Object.keys(snapshot.byRoom);
+  return Object.freeze({
+    totalLegends: all.length,
+    provisional: all.filter((r) => r.status === 'PROVISIONAL').length,
+    confirmed: all.filter((r) => r.status === 'CONFIRMED').length,
+    grantQueued: all.filter((r) => r.status === 'GRANT_QUEUED').length,
+    granted: all.filter((r) => r.status === 'GRANTED').length,
+    archived: all.filter((r) => r.status === 'ARCHIVED').length,
+    revoked: all.filter((r) => r.status === 'REVOKED').length,
+    totalRooms: rooms.length,
+    avgLegendsPerRoom: rooms.length > 0 ? all.length / rooms.length : 0,
+    totalWitnessLinks: all.reduce((acc, r) => acc + r.messages.witnessMessageIds.length, 0),
+    totalReplayLinks: all.reduce((acc, r) => acc + r.replay.replayIds.length, 0),
+    totalProofHashes: all.reduce((acc, r) => acc + r.proof.hashes.length, 0),
+  });
+}
+
+// ============================================================================
+// MARK: Doctrine notes
+// ============================================================================
+
+export const LEGEND_MOMENT_LEDGER_DOCTRINE: Readonly<Record<string, readonly string[]>> = Object.freeze({
+  ADMISSION: Object.freeze([
+    'Every legend event admitted here becomes an authoritative prestige record for the session.',
+    'Provisional records are admitted when visibility is not VISIBLE; they upgrade on merge.',
+    'Duplicate detection is time-windowed and key-matched — not payload-matched.',
+  ]),
+  REWARD_LIFECYCLE: Object.freeze([
+    'Reward eligibility is set on admit if reward hints are present.',
+    'Queuing is a staging state — it does not guarantee a grant.',
+    'Grant attachment is the terminal reward state; revocation is always permitted.',
+  ]),
+  INTEGRITY: Object.freeze([
+    'auditIntegrity() is non-destructive. It only reports, never writes.',
+    'repairIntegrity() recomputes room prestige caches — safe to call at any time.',
+    'Index drift should be investigated before archival or transport fanout.',
+  ]),
+  PROFILES: Object.freeze([
+    'STANDARD: default for live sessions.',
+    'COMPACT: minimal retention, suitable for low-memory environments.',
+    'CINEMATIC: high-retention, ideal for post-run and replay authoring.',
+    'FORENSIC: maximum retention with no auto-upgrade, for audit pipelines.',
+    'HIGH_VOLUME: large legend counts with bounded reason lists.',
+  ]),
+});
+
+export const ChatLegendMomentLedgerProfileModule = Object.freeze({
+  profiles: LEGEND_MOMENT_LEDGER_PROFILES,
+  createFromProfile: createLegendMomentLedgerFromProfile,
+  createCompact: createCompactLegendMomentLedger,
+  createCinematic: createCinematicLegendMomentLedger,
+  createForensic: createForensicLegendMomentLedger,
+  createHighVolume: createHighVolumeLegendMomentLedger,
+  score: scoreLegendMoment,
+  diff: diffLegendMomentLedgerSnapshots,
+  momentum: computeLegendMomentum,
+  stats: buildLegendMomentLedgerStats,
+  batchAdmit: batchAdmitLegends,
+  doctrine: LEGEND_MOMENT_LEDGER_DOCTRINE,
 } as const);

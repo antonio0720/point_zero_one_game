@@ -801,3 +801,865 @@ export function countActiveRewardGrants(resolver: RewardGrantResolver): number {
   return resolver.listAllGrantRecords().filter((value) => value.revokedAt === null && !value.previewOnly).length;
 }
 
+// ============================================================================
+// MARK: Reward scoring and value bands
+// ============================================================================
+
+export type RewardGrantValueBand =
+  | 'LEGENDARY'
+  | 'EPIC'
+  | 'RARE'
+  | 'UNCOMMON'
+  | 'COMMON'
+  | 'MINIMAL';
+
+export interface RewardGrantScore {
+  readonly grantId: string;
+  readonly userId: ChatUserId;
+  readonly rewardClass: ChatRewardClass;
+  readonly rawScore: number;
+  readonly normalizedScore01: number;
+  readonly valueBand: RewardGrantValueBand;
+  readonly ageMs: number;
+  readonly factors: Readonly<Record<string, number>>;
+}
+
+export interface RewardGrantScoreConfig {
+  readonly classWeights: Readonly<Record<string, number>>;
+  readonly freshnessBonusMs: number;
+  readonly freshnessWeight: number;
+  readonly legendaryThreshold: number;
+  readonly epicThreshold: number;
+  readonly rareThreshold: number;
+  readonly uncommonThreshold: number;
+  readonly commonThreshold: number;
+}
+
+const DEFAULT_REWARD_GRANT_SCORE_CONFIG: RewardGrantScoreConfig = Object.freeze({
+  classWeights: Object.freeze({
+    TITLE: 1.0,
+    AURA: 0.82,
+    BADGE: 0.55,
+    PHRASE: 0.42,
+    EMOJI: 0.28,
+  }),
+  freshnessBonusMs: 1000 * 60 * 60 * 6,
+  freshnessWeight: 0.18,
+  legendaryThreshold: 0.88,
+  epicThreshold: 0.72,
+  rareThreshold: 0.52,
+  uncommonThreshold: 0.34,
+  commonThreshold: 0.16,
+});
+
+function deriveValueBand(score01: number, config: RewardGrantScoreConfig): RewardGrantValueBand {
+  if (score01 >= config.legendaryThreshold) return 'LEGENDARY';
+  if (score01 >= config.epicThreshold) return 'EPIC';
+  if (score01 >= config.rareThreshold) return 'RARE';
+  if (score01 >= config.uncommonThreshold) return 'UNCOMMON';
+  if (score01 >= config.commonThreshold) return 'COMMON';
+  return 'MINIMAL';
+}
+
+export function scoreRewardGrant(
+  record: RewardGrantRecord,
+  now: UnixMs = nowUnixMs(),
+  config: Partial<RewardGrantScoreConfig> = {},
+): RewardGrantScore {
+  const cfg: RewardGrantScoreConfig = Object.freeze({ ...DEFAULT_REWARD_GRANT_SCORE_CONFIG, ...config });
+  const classWeight = cfg.classWeights[String(record.rewardClass)] ?? 0.2;
+  const ageMs = Math.max(0, Number(now) - Number(record.createdAt));
+  const freshnessFactor = ageMs < cfg.freshnessBonusMs
+    ? 1 - (ageMs / cfg.freshnessBonusMs) * cfg.freshnessWeight
+    : 1 - cfg.freshnessWeight;
+  const revocationPenalty = record.revokedAt ? 0.0 : 1.0;
+  const previewPenalty = record.previewOnly ? 0.12 : 1.0;
+  const rawScore = classWeight * freshnessFactor * revocationPenalty * previewPenalty;
+  const normalizedScore01 = Math.max(0, Math.min(1, rawScore));
+  return Object.freeze({
+    grantId: record.grantId,
+    userId: record.userId,
+    rewardClass: record.rewardClass,
+    rawScore,
+    normalizedScore01,
+    valueBand: deriveValueBand(normalizedScore01, cfg),
+    ageMs,
+    factors: Object.freeze({
+      classWeight,
+      freshnessFactor,
+      revocationPenalty,
+      previewPenalty,
+    }),
+  });
+}
+
+export function scoreAllGrantsForUser(
+  resolver: RewardGrantResolver,
+  userId: ChatUserId,
+  now: UnixMs = nowUnixMs(),
+  config: Partial<RewardGrantScoreConfig> = {},
+): readonly RewardGrantScore[] {
+  return freezeArray(
+    resolver.listActiveGrantsByUser(userId).map((record) => scoreRewardGrant(record, now, config)),
+  );
+}
+
+export function topScoredGrantsForUser(
+  resolver: RewardGrantResolver,
+  userId: ChatUserId,
+  topN: number,
+  now: UnixMs = nowUnixMs(),
+): readonly RewardGrantScore[] {
+  const scores = scoreAllGrantsForUser(resolver, userId, now);
+  return freezeArray([...scores].sort((a, b) => b.normalizedScore01 - a.normalizedScore01).slice(0, topN));
+}
+
+// ============================================================================
+// MARK: Grant timeline and history
+// ============================================================================
+
+export interface RewardGrantTimelineSlice {
+  readonly at: UnixMs;
+  readonly grantId: string;
+  readonly legendId: ChatLegendId;
+  readonly userId: ChatUserId;
+  readonly rewardClass: ChatRewardClass;
+  readonly event: 'CREATED' | 'REVOKED' | 'PREVIEWED';
+  readonly scopeKey: string;
+}
+
+export interface RewardGrantTimeline {
+  readonly userId: ChatUserId;
+  readonly slices: readonly RewardGrantTimelineSlice[];
+  readonly firstGrantAt: UnixMs | null;
+  readonly lastGrantAt: UnixMs | null;
+  readonly totalCreatedEvents: number;
+  readonly totalRevokedEvents: number;
+}
+
+export function buildRewardGrantTimeline(
+  resolver: RewardGrantResolver,
+  userId: ChatUserId,
+): RewardGrantTimeline {
+  const records = resolver.listAllGrantRecords().filter((r) => r.userId === userId);
+  const slices: RewardGrantTimelineSlice[] = [];
+
+  for (const record of records) {
+    slices.push(Object.freeze({
+      at: record.createdAt,
+      grantId: record.grantId,
+      legendId: record.legendId,
+      userId: record.userId,
+      rewardClass: record.rewardClass,
+      event: record.previewOnly ? 'PREVIEWED' : 'CREATED',
+      scopeKey: record.scopeKey,
+    }));
+    if (record.revokedAt) {
+      slices.push(Object.freeze({
+        at: record.revokedAt,
+        grantId: record.grantId,
+        legendId: record.legendId,
+        userId: record.userId,
+        rewardClass: record.rewardClass,
+        event: 'REVOKED',
+        scopeKey: record.scopeKey,
+      }));
+    }
+  }
+
+  const sorted = [...slices].sort((a, b) => Number(a.at) - Number(b.at));
+  const createdEvents = sorted.filter((s) => s.event === 'CREATED');
+
+  return Object.freeze({
+    userId,
+    slices: freezeArray(sorted),
+    firstGrantAt: createdEvents[0]?.at ?? null,
+    lastGrantAt: createdEvents[createdEvents.length - 1]?.at ?? null,
+    totalCreatedEvents: createdEvents.length,
+    totalRevokedEvents: sorted.filter((s) => s.event === 'REVOKED').length,
+  });
+}
+
+export function buildRewardGrantTimelineWindow(
+  resolver: RewardGrantResolver,
+  userId: ChatUserId,
+  startAt: UnixMs,
+  endAt: UnixMs,
+): readonly RewardGrantTimelineSlice[] {
+  const timeline = buildRewardGrantTimeline(resolver, userId);
+  return freezeArray(
+    timeline.slices.filter((s) => Number(s.at) >= Number(startAt) && Number(s.at) <= Number(endAt)),
+  );
+}
+
+// ============================================================================
+// MARK: Cooldown calendar
+// ============================================================================
+
+export interface RewardGrantCooldownState {
+  readonly userId: ChatUserId;
+  readonly rewardClass: ChatRewardClass;
+  readonly lastGrantedAt: UnixMs | null;
+  readonly cooldownMs: number;
+  readonly cooldownExpiresAt: UnixMs | null;
+  readonly isActive: boolean;
+  readonly remainingMs: number;
+}
+
+export function buildCooldownCalendar(
+  resolver: RewardGrantResolver,
+  userId: ChatUserId,
+  now: UnixMs = nowUnixMs(),
+): readonly RewardGrantCooldownState[] {
+  const config = resolver.getConfig();
+  const inventory = resolver.buildInventorySnapshot(userId);
+  const classes = Object.keys(config.cooldownMsByRewardClass) as ChatRewardClass[];
+
+  return freezeArray(classes.map((rewardClass) => {
+    const cooldownMs = config.cooldownMsByRewardClass[String(rewardClass)] ?? 0;
+    const lastGrantedAt = inventory.lastGrantedAtByRewardClass[String(rewardClass)] ?? null;
+    const cooldownExpiresAt = lastGrantedAt
+      ? (Number(lastGrantedAt) + cooldownMs as UnixMs)
+      : null;
+    const isActive = cooldownExpiresAt !== null && Number(now) < Number(cooldownExpiresAt);
+    const remainingMs = isActive ? Number(cooldownExpiresAt) - Number(now) : 0;
+
+    return Object.freeze({
+      userId,
+      rewardClass,
+      lastGrantedAt,
+      cooldownMs,
+      cooldownExpiresAt,
+      isActive,
+      remainingMs,
+    });
+  }));
+}
+
+export function activeCooldownsForUser(
+  resolver: RewardGrantResolver,
+  userId: ChatUserId,
+  now: UnixMs = nowUnixMs(),
+): readonly RewardGrantCooldownState[] {
+  return freezeArray(buildCooldownCalendar(resolver, userId, now).filter((c) => c.isActive));
+}
+
+// ============================================================================
+// MARK: Cross-user deduplication surface
+// ============================================================================
+
+export interface RewardGrantScopeDuplicate {
+  readonly scopeKey: string;
+  readonly grantIds: readonly string[];
+  readonly affectedUsers: readonly ChatUserId[];
+  readonly affectedLegendIds: readonly ChatLegendId[];
+}
+
+export function detectCrossUserScopeDuplicates(
+  resolver: RewardGrantResolver,
+): readonly RewardGrantScopeDuplicate[] {
+  const records = resolver.listAllGrantRecords().filter((r) => !r.previewOnly && r.revokedAt === null);
+  const byScopeBase = new Map<string, RewardGrantRecord[]>();
+
+  for (const record of records) {
+    const baseScope = record.scopeKey.replace(`:${String(record.userId)}:`, ':__any__:');
+    const bucket = byScopeBase.get(baseScope) ?? [];
+    bucket.push(record);
+    byScopeBase.set(baseScope, bucket);
+  }
+
+  const duplicates: RewardGrantScopeDuplicate[] = [];
+  for (const [, bucket] of byScopeBase) {
+    const uniqueUsers = uniqueStrings(bucket.map((r) => r.userId));
+    if (uniqueUsers.length > 1) {
+      duplicates.push(Object.freeze({
+        scopeKey: bucket[0].scopeKey,
+        grantIds: freezeArray(bucket.map((r) => r.grantId)),
+        affectedUsers: uniqueUsers,
+        affectedLegendIds: uniqueStrings(bucket.map((r) => r.legendId)),
+      }));
+    }
+  }
+  return freezeArray(duplicates);
+}
+
+// ============================================================================
+// MARK: Policy profiles
+// ============================================================================
+
+export type RewardGrantResolverProfile =
+  | 'BALANCED'
+  | 'CONSERVATIVE'
+  | 'AGGRESSIVE'
+  | 'PRESTIGE_FIRST'
+  | 'PREVIEW_DOMINANT'
+  | 'MINIMAL';
+
+export const REWARD_GRANT_RESOLVER_PROFILES: Readonly<Record<RewardGrantResolverProfile, Partial<RewardGrantResolverConfig>>> = Object.freeze({
+  BALANCED: Object.freeze({}),
+  CONSERVATIVE: Object.freeze({
+    cooldownMsByRewardClass: Object.freeze({
+      TITLE: 1000 * 60 * 60 * 48,
+      AURA: 1000 * 60 * 120,
+      BADGE: 1000 * 60 * 30,
+      PHRASE: 1000 * 60 * 30,
+      EMOJI: 1000 * 60 * 30,
+    }),
+    maxActiveRewardsPerUser: 128,
+    maxRewardsPerRoomLegendBurst: 8,
+    previewWhenBlocked: false,
+  }),
+  AGGRESSIVE: Object.freeze({
+    cooldownMsByRewardClass: Object.freeze({
+      TITLE: 1000 * 60 * 30,
+      AURA: 1000 * 60 * 5,
+      BADGE: 0,
+      PHRASE: 0,
+      EMOJI: 0,
+    }),
+    maxActiveRewardsPerUser: 2048,
+    maxRewardsPerRoomLegendBurst: 64,
+    previewWhenBlocked: true,
+  }),
+  PRESTIGE_FIRST: Object.freeze({
+    maxActivePerRewardClass: Object.freeze({
+      TITLE: 32,
+      AURA: 32,
+      BADGE: 256,
+      PHRASE: 256,
+      EMOJI: 256,
+    }),
+    maxRewardsPerRoomLegendBurst: 32,
+    previewWhenBlocked: true,
+  }),
+  PREVIEW_DOMINANT: Object.freeze({
+    previewWhenBlocked: true,
+    maxRewardsPerRoomLegendBurst: 4,
+    maxActiveRewardsPerUser: 64,
+  }),
+  MINIMAL: Object.freeze({
+    maxActiveRewardsPerUser: 32,
+    maxRewardsPerRoomLegendBurst: 4,
+    previewWhenBlocked: false,
+    cooldownMsByRewardClass: Object.freeze({
+      TITLE: 1000 * 60 * 60 * 72,
+      AURA: 1000 * 60 * 60 * 24,
+      BADGE: 1000 * 60 * 60 * 12,
+      PHRASE: 1000 * 60 * 60 * 12,
+      EMOJI: 1000 * 60 * 60 * 12,
+    }),
+  }),
+});
+
+export function createRewardGrantResolverFromProfile(
+  profile: RewardGrantResolverProfile,
+  overrides: Partial<RewardGrantResolverConfig> = {},
+): RewardGrantResolver {
+  const profileConfig = REWARD_GRANT_RESOLVER_PROFILES[profile] ?? {};
+  return createRewardGrantResolver({
+    ...profileConfig,
+    ...overrides,
+    cooldownMsByRewardClass: Object.freeze({
+      ...(profileConfig.cooldownMsByRewardClass ?? {}),
+      ...(overrides.cooldownMsByRewardClass ?? {}),
+    }),
+    maxActivePerRewardClass: Object.freeze({
+      ...(profileConfig.maxActivePerRewardClass ?? {}),
+      ...(overrides.maxActivePerRewardClass ?? {}),
+    }),
+  });
+}
+
+// ============================================================================
+// MARK: Reward decay analysis
+// ============================================================================
+
+export interface RewardGrantDecayState {
+  readonly grantId: string;
+  readonly userId: ChatUserId;
+  readonly rewardClass: ChatRewardClass;
+  readonly ageMs: number;
+  readonly decayScore01: number;
+  readonly isStale: boolean;
+  readonly staleSinceMs: number | null;
+}
+
+const REWARD_STALE_THRESHOLD_MS: Readonly<Record<string, number>> = Object.freeze({
+  TITLE: 1000 * 60 * 60 * 24 * 90,
+  AURA: 1000 * 60 * 60 * 24 * 30,
+  BADGE: 1000 * 60 * 60 * 24 * 60,
+  PHRASE: 1000 * 60 * 60 * 24 * 60,
+  EMOJI: 1000 * 60 * 60 * 24 * 120,
+});
+
+export function computeGrantDecayState(
+  record: RewardGrantRecord,
+  now: UnixMs = nowUnixMs(),
+): RewardGrantDecayState {
+  const ageMs = Math.max(0, Number(now) - Number(record.createdAt));
+  const staleThresholdMs = REWARD_STALE_THRESHOLD_MS[String(record.rewardClass)] ?? 1000 * 60 * 60 * 24 * 60;
+  const decayScore01 = Math.max(0, 1 - ageMs / staleThresholdMs);
+  const isStale = ageMs >= staleThresholdMs;
+  return Object.freeze({
+    grantId: record.grantId,
+    userId: record.userId,
+    rewardClass: record.rewardClass,
+    ageMs,
+    decayScore01,
+    isStale,
+    staleSinceMs: isStale ? ageMs - staleThresholdMs : null,
+  });
+}
+
+export function listStaleGrantsForUser(
+  resolver: RewardGrantResolver,
+  userId: ChatUserId,
+  now: UnixMs = nowUnixMs(),
+): readonly RewardGrantDecayState[] {
+  return freezeArray(
+    resolver
+      .listActiveGrantsByUser(userId)
+      .map((r) => computeGrantDecayState(r, now))
+      .filter((s) => s.isStale),
+  );
+}
+
+export function computeDecayHeatForUser(
+  resolver: RewardGrantResolver,
+  userId: ChatUserId,
+  now: UnixMs = nowUnixMs(),
+): number {
+  const grants = resolver.listActiveGrantsByUser(userId);
+  if (grants.length === 0) return 0;
+  const totalDecay = grants.reduce((acc, r) => acc + (1 - computeGrantDecayState(r, now).decayScore01), 0);
+  return Math.min(1, totalDecay / grants.length);
+}
+
+// ============================================================================
+// MARK: Grant forecast / simulation
+// ============================================================================
+
+export interface RewardGrantForecast {
+  readonly userId: ChatUserId;
+  readonly rewardClass: ChatRewardClass;
+  readonly eligibleAt: UnixMs | null;
+  readonly blockerCode: RewardGrantResolverReasonCode | null;
+  readonly blockerDetail: string | null;
+  readonly currentCooldownRemainingMs: number;
+  readonly currentActiveCount: number;
+  readonly maxActiveForClass: number;
+  readonly canGrantNow: boolean;
+}
+
+export function forecastGrantEligibility(
+  resolver: RewardGrantResolver,
+  userId: ChatUserId,
+  rewardClass: ChatRewardClass,
+  now: UnixMs = nowUnixMs(),
+): RewardGrantForecast {
+  const config = resolver.getConfig();
+  const inventory = resolver.buildInventorySnapshot(userId);
+  const cooldownMs = config.cooldownMsByRewardClass[String(rewardClass)] ?? 0;
+  const maxActive = config.maxActivePerRewardClass[String(rewardClass)] ?? Number.MAX_SAFE_INTEGER;
+  const lastGrantedAt = inventory.lastGrantedAtByRewardClass[String(rewardClass)] ?? null;
+  const activeForClass = (inventory.activeByRewardClass[String(rewardClass)] ?? []).length;
+  const cooldownExpiresAt = lastGrantedAt ? (Number(lastGrantedAt) + cooldownMs as UnixMs) : null;
+  const cooldownActive = cooldownExpiresAt !== null && Number(now) < Number(cooldownExpiresAt);
+  const cooldownRemainingMs = cooldownActive ? Number(cooldownExpiresAt) - Number(now) : 0;
+  const overUserCap = inventory.totalGrantedCount >= config.maxActiveRewardsPerUser;
+  const overClassCap = activeForClass >= maxActive;
+
+  let blockerCode: RewardGrantResolverReasonCode | null = null;
+  let blockerDetail: string | null = null;
+  let eligibleAt: UnixMs | null = null;
+
+  if (overUserCap) {
+    blockerCode = 'USER_CAP_REACHED';
+    blockerDetail = `User has ${inventory.totalGrantedCount} active grants; cap is ${config.maxActiveRewardsPerUser}.`;
+  } else if (overClassCap) {
+    blockerCode = 'USER_CAP_REACHED';
+    blockerDetail = `User has ${activeForClass} active ${String(rewardClass)} grants; cap is ${maxActive}.`;
+  } else if (cooldownActive && cooldownExpiresAt !== null) {
+    blockerCode = 'COOLDOWN_ACTIVE';
+    blockerDetail = `Cooldown expires in ${cooldownRemainingMs}ms.`;
+    eligibleAt = cooldownExpiresAt;
+  }
+
+  return Object.freeze({
+    userId,
+    rewardClass,
+    eligibleAt: blockerCode === null ? now : eligibleAt,
+    blockerCode,
+    blockerDetail,
+    currentCooldownRemainingMs: cooldownRemainingMs,
+    currentActiveCount: activeForClass,
+    maxActiveForClass: maxActive,
+    canGrantNow: blockerCode === null,
+  });
+}
+
+export function forecastAllClassEligibility(
+  resolver: RewardGrantResolver,
+  userId: ChatUserId,
+  now: UnixMs = nowUnixMs(),
+): Readonly<Record<string, RewardGrantForecast>> {
+  const config = resolver.getConfig();
+  const classes = Object.keys(config.cooldownMsByRewardClass) as ChatRewardClass[];
+  return freezeRecord(
+    Object.fromEntries(
+      classes.map((rewardClass) => [
+        String(rewardClass),
+        forecastGrantEligibility(resolver, userId, rewardClass, now),
+      ]),
+    ) as Record<string, RewardGrantForecast>,
+  );
+}
+
+// ============================================================================
+// MARK: Batch revocation
+// ============================================================================
+
+export interface RewardGrantBatchRevocationResult {
+  readonly revokedIds: readonly string[];
+  readonly skippedIds: readonly string[];
+  readonly revokedAt: UnixMs;
+}
+
+export function revokeAllGrantsForUser(
+  resolver: RewardGrantResolver,
+  userId: ChatUserId,
+  revokedAt: UnixMs = nowUnixMs(),
+): RewardGrantBatchRevocationResult {
+  const active = resolver.listActiveGrantsByUser(userId);
+  const revokedIds: string[] = [];
+  const skippedIds: string[] = [];
+
+  for (const record of active) {
+    const revoked = resolver.revokeLegendRewards(record.legendId, revokedAt);
+    if (revoked.some((r) => r.grantId === record.grantId)) {
+      revokedIds.push(record.grantId);
+    } else {
+      skippedIds.push(record.grantId);
+    }
+  }
+
+  return Object.freeze({
+    revokedIds: freezeArray(revokedIds),
+    skippedIds: freezeArray(skippedIds),
+    revokedAt,
+  });
+}
+
+export function revokeGrantsByRewardClass(
+  resolver: RewardGrantResolver,
+  userId: ChatUserId,
+  rewardClass: ChatRewardClass,
+  revokedAt: UnixMs = nowUnixMs(),
+): RewardGrantBatchRevocationResult {
+  const active = resolver.listActiveGrantsByUser(userId).filter((r) => r.rewardClass === rewardClass);
+  const revokedIds: string[] = [];
+  const skippedIds: string[] = [];
+
+  for (const record of active) {
+    const revoked = resolver.revokeLegendRewards(record.legendId, revokedAt);
+    if (revoked.some((r) => r.grantId === record.grantId)) {
+      revokedIds.push(record.grantId);
+    } else {
+      skippedIds.push(record.grantId);
+    }
+  }
+
+  return Object.freeze({
+    revokedIds: freezeArray(revokedIds),
+    skippedIds: freezeArray(skippedIds),
+    revokedAt,
+  });
+}
+
+// ============================================================================
+// MARK: Grant annotation
+// ============================================================================
+
+export interface RewardGrantAnnotation {
+  readonly grantId: string;
+  readonly tags: readonly string[];
+  readonly notes: string;
+  readonly annotatedAt: UnixMs;
+}
+
+const ANNOTATION_STORE = new Map<string, RewardGrantAnnotation>();
+
+export function annotateRewardGrant(
+  grantId: string,
+  tags: readonly string[],
+  notes: string,
+  annotatedAt: UnixMs = nowUnixMs(),
+): RewardGrantAnnotation {
+  const annotation = Object.freeze({ grantId, tags: freezeArray(tags), notes, annotatedAt });
+  ANNOTATION_STORE.set(grantId, annotation);
+  return annotation;
+}
+
+export function getRewardGrantAnnotation(grantId: string): RewardGrantAnnotation | null {
+  return ANNOTATION_STORE.get(grantId) ?? null;
+}
+
+export function listAnnotatedGrants(resolver: RewardGrantResolver): readonly RewardGrantRecord[] {
+  return freezeArray(
+    resolver.listAllGrantRecords().filter((r) => ANNOTATION_STORE.has(r.grantId)),
+  );
+}
+
+// ============================================================================
+// MARK: Grant diff / comparison
+// ============================================================================
+
+export interface RewardGrantResolverDiff {
+  readonly addedGrantIds: readonly string[];
+  readonly revokedGrantIds: readonly string[];
+  readonly newPreviewIds: readonly string[];
+  readonly clearedPreviewIds: readonly string[];
+  readonly userCapChanged: boolean;
+  readonly classCapChangedFor: readonly string[];
+}
+
+export function diffRewardResolverSnapshots(
+  before: RewardGrantResolverSnapshot,
+  after: RewardGrantResolverSnapshot,
+): RewardGrantResolverDiff {
+  const beforeActiveIds = new Set<string>();
+  const afterActiveIds = new Set<string>();
+  const beforePreviewIds = new Set<string>();
+  const afterPreviewIds = new Set<string>();
+
+  for (const records of Object.values(before.byLegend)) {
+    for (const r of records) {
+      if (!r.previewOnly && r.revokedAt === null) beforeActiveIds.add(r.grantId);
+      if (r.previewOnly) beforePreviewIds.add(r.grantId);
+    }
+  }
+  for (const records of Object.values(after.byLegend)) {
+    for (const r of records) {
+      if (!r.previewOnly && r.revokedAt === null) afterActiveIds.add(r.grantId);
+      if (r.previewOnly) afterPreviewIds.add(r.grantId);
+    }
+  }
+
+  const classCapChangedFor: string[] = [];
+  const allClasses = new Set([
+    ...Object.keys(Object.values(before.byUser)[0]?.activeByRewardClass ?? {}),
+    ...Object.keys(Object.values(after.byUser)[0]?.activeByRewardClass ?? {}),
+  ]);
+  for (const cls of allClasses) {
+    const bTotal = Object.values(before.byUser).reduce((acc, u) => acc + (u.activeByRewardClass[cls] ?? 0), 0);
+    const aTotal = Object.values(after.byUser).reduce((acc, u) => acc + (u.activeByRewardClass[cls] ?? 0), 0);
+    if (bTotal !== aTotal) classCapChangedFor.push(cls);
+  }
+
+  return Object.freeze({
+    addedGrantIds: freezeArray([...afterActiveIds].filter((id) => !beforeActiveIds.has(id))),
+    revokedGrantIds: freezeArray([...beforeActiveIds].filter((id) => !afterActiveIds.has(id))),
+    newPreviewIds: freezeArray([...afterPreviewIds].filter((id) => !beforePreviewIds.has(id))),
+    clearedPreviewIds: freezeArray([...beforePreviewIds].filter((id) => !afterPreviewIds.has(id))),
+    userCapChanged: before.totalActiveGrantCount !== after.totalActiveGrantCount,
+    classCapChangedFor: freezeArray(classCapChangedFor),
+  });
+}
+
+// ============================================================================
+// MARK: Policy violation log
+// ============================================================================
+
+export type RewardGrantPolicyViolationCode =
+  | 'SCOPE_COLLISION'
+  | 'CAP_EXCEEDED'
+  | 'COOLDOWN_BYPASS'
+  | 'BURST_OVERFLOW'
+  | 'PREVIEW_LEAKED_AS_ACTIVE';
+
+export interface RewardGrantPolicyViolation {
+  readonly code: RewardGrantPolicyViolationCode;
+  readonly grantId: string | null;
+  readonly userId: ChatUserId | null;
+  readonly legendId: ChatLegendId | null;
+  readonly detail: string;
+  readonly detectedAt: UnixMs;
+}
+
+export function detectPolicyViolations(
+  resolver: RewardGrantResolver,
+  now: UnixMs = nowUnixMs(),
+): readonly RewardGrantPolicyViolation[] {
+  const issues: RewardGrantPolicyViolation[] = [];
+  const records = resolver.listAllGrantRecords();
+  const config = resolver.getConfig();
+  const scopeSeen = new Map<string, string>();
+
+  for (const record of records) {
+    if (record.revokedAt !== null || record.previewOnly) continue;
+
+    const existing = scopeSeen.get(record.scopeKey);
+    if (existing) {
+      issues.push({
+        code: 'SCOPE_COLLISION',
+        grantId: record.grantId,
+        userId: record.userId,
+        legendId: record.legendId,
+        detail: `Scope key ${record.scopeKey} has multiple active grants (collision with ${existing}).`,
+        detectedAt: now,
+      });
+    } else {
+      scopeSeen.set(record.scopeKey, record.grantId);
+    }
+
+    const inventory = resolver.buildInventorySnapshot(record.userId);
+    if (inventory.totalGrantedCount > config.maxActiveRewardsPerUser) {
+      issues.push({
+        code: 'CAP_EXCEEDED',
+        grantId: record.grantId,
+        userId: record.userId,
+        legendId: record.legendId,
+        detail: `User has ${inventory.totalGrantedCount} active grants, exceeding cap of ${config.maxActiveRewardsPerUser}.`,
+        detectedAt: now,
+      });
+    }
+  }
+
+  for (const record of records.filter((r) => r.previewOnly && r.revokedAt === null)) {
+    const nonPreview = records.find((r) => r.scopeKey === record.scopeKey && !r.previewOnly && r.revokedAt === null);
+    if (nonPreview) {
+      issues.push({
+        code: 'PREVIEW_LEAKED_AS_ACTIVE',
+        grantId: record.grantId,
+        userId: record.userId,
+        legendId: record.legendId,
+        detail: `Preview grant ${record.grantId} coexists with active grant ${nonPreview.grantId} on same scope.`,
+        detectedAt: now,
+      });
+    }
+  }
+
+  return freezeArray(issues);
+}
+
+// ============================================================================
+// MARK: Grant ledger statistics
+// ============================================================================
+
+export interface RewardGrantLedgerStats {
+  readonly totalRecords: number;
+  readonly totalActive: number;
+  readonly totalRevoked: number;
+  readonly totalPreviews: number;
+  readonly uniqueUsers: number;
+  readonly uniqueLegends: number;
+  readonly byClass: Readonly<Record<string, number>>;
+  readonly oldestActiveGrantAt: UnixMs | null;
+  readonly newestActiveGrantAt: UnixMs | null;
+  readonly averageAgeMs: number;
+}
+
+export function buildRewardGrantLedgerStats(
+  resolver: RewardGrantResolver,
+  now: UnixMs = nowUnixMs(),
+): RewardGrantLedgerStats {
+  const records = resolver.listAllGrantRecords();
+  const active = records.filter((r) => r.revokedAt === null && !r.previewOnly);
+  const byClass: Record<string, number> = {};
+
+  for (const r of active) {
+    byClass[String(r.rewardClass)] = (byClass[String(r.rewardClass)] ?? 0) + 1;
+  }
+
+  const ages = active.map((r) => Math.max(0, Number(now) - Number(r.createdAt)));
+  const totalAgeMs = ages.reduce((acc, a) => acc + a, 0);
+  const sorted = [...active].sort((a, b) => Number(a.createdAt) - Number(b.createdAt));
+
+  return Object.freeze({
+    totalRecords: records.length,
+    totalActive: active.length,
+    totalRevoked: records.filter((r) => r.revokedAt !== null).length,
+    totalPreviews: records.filter((r) => r.previewOnly).length,
+    uniqueUsers: new Set(records.map((r) => r.userId)).size,
+    uniqueLegends: new Set(records.map((r) => r.legendId)).size,
+    byClass: freezeRecord(byClass),
+    oldestActiveGrantAt: sorted[0]?.createdAt ?? null,
+    newestActiveGrantAt: sorted[sorted.length - 1]?.createdAt ?? null,
+    averageAgeMs: active.length > 0 ? totalAgeMs / active.length : 0,
+  });
+}
+
+// ============================================================================
+// MARK: Named profile factories
+// ============================================================================
+
+export function createBalancedRewardGrantResolver(
+  overrides: Partial<RewardGrantResolverConfig> = {},
+): RewardGrantResolver {
+  return createRewardGrantResolverFromProfile('BALANCED', overrides);
+}
+
+export function createConservativeRewardGrantResolver(
+  overrides: Partial<RewardGrantResolverConfig> = {},
+): RewardGrantResolver {
+  return createRewardGrantResolverFromProfile('CONSERVATIVE', overrides);
+}
+
+export function createAggressiveRewardGrantResolver(
+  overrides: Partial<RewardGrantResolverConfig> = {},
+): RewardGrantResolver {
+  return createRewardGrantResolverFromProfile('AGGRESSIVE', overrides);
+}
+
+export function createPrestigeFirstRewardGrantResolver(
+  overrides: Partial<RewardGrantResolverConfig> = {},
+): RewardGrantResolver {
+  return createRewardGrantResolverFromProfile('PRESTIGE_FIRST', overrides);
+}
+
+// ============================================================================
+// MARK: Doctrine notes
+// ============================================================================
+
+export const REWARD_GRANT_RESOLVER_DOCTRINE: Readonly<Record<string, readonly string[]>> = Object.freeze({
+  DEDUPLICATION: Object.freeze([
+    'Scope keys are the canonical deduplication surface. Two grants on the same scope key will never coexist.',
+    'Scope keys encode: userId + roomId + legendId + rewardClass.',
+    'Preview grants are not counted toward active caps but are tracked separately.',
+  ]),
+  COOLDOWNS: Object.freeze([
+    'Cooldowns are per user, per reward class. They do not cross users.',
+    'Cooldown state survives in the in-memory resolver for the duration of the session.',
+    'A grant that is revoked does not reset cooldown — the grant timestamp is permanent.',
+  ]),
+  CAPS: Object.freeze([
+    'User cap applies to total active (non-preview, non-revoked) grants.',
+    'Class cap applies per user, per reward class.',
+    'Room burst cap applies to a single legend batch, not the full resolver state.',
+  ]),
+  PROFILES: Object.freeze([
+    'BALANCED: default policy for standard live sessions.',
+    'CONSERVATIVE: used during test periods, pilot rooms, or sensitive contexts.',
+    'AGGRESSIVE: maximum yield, minimal restriction, ideal for prestige events.',
+    'PRESTIGE_FIRST: maximises TITLE and AURA density, suitable for legend-heavy rooms.',
+    'PREVIEW_DOMINANT: holds most grants as previews, suitable for staged reveal workflows.',
+    'MINIMAL: used in replay-only or audit-only contexts.',
+  ]),
+});
+
+export const ChatRewardGrantResolverProfileModule = Object.freeze({
+  profiles: REWARD_GRANT_RESOLVER_PROFILES,
+  createFromProfile: createRewardGrantResolverFromProfile,
+  createBalanced: createBalancedRewardGrantResolver,
+  createConservative: createConservativeRewardGrantResolver,
+  createAggressive: createAggressiveRewardGrantResolver,
+  createPrestigeFirst: createPrestigeFirstRewardGrantResolver,
+  score: scoreRewardGrant,
+  timeline: buildRewardGrantTimeline,
+  cooldowns: buildCooldownCalendar,
+  forecast: forecastGrantEligibility,
+  stats: buildRewardGrantLedgerStats,
+  detectViolations: detectPolicyViolations,
+  doctrine: REWARD_GRANT_RESOLVER_DOCTRINE,
+} as const);
+
