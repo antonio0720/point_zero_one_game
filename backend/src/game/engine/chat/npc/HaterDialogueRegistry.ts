@@ -6865,3 +6865,97 @@ export class HaterDialogueRegistry {
 export const createHaterDialogueRegistry = (): HaterDialogueRegistry => new HaterDialogueRegistry();
 
 export const haterDialogueRegistry = new HaterDialogueRegistry();
+
+// ─── Standalone hater registry utilities ──────────────────────────────────────
+
+/** Describe a HaterDialogueContext in plain language. */
+export function describeHaterContext(context: HaterDialogueContext): string {
+  const MAP: Record<string, string> = {
+    PLAYER_NEAR_BANKRUPTCY: 'Player is near bankruptcy — the hater presses the wound',
+    PLAYER_SHIELD_BREAK: 'Player shield has been breached — the hater names the collapse',
+    PLAYER_IDLE: 'Player is idle — the hater baits with contempt',
+    PLAYER_INCOME_UP: 'Player income is rising — the hater discredits the gain',
+    PLAYER_COMEBACK: 'Player is making a comeback — the hater denies the narrative',
+    NEAR_SOVEREIGNTY: 'Player is near sovereignty — the hater escalates to existential pressure',
+    BOT_WINNING: 'Bot has momentum — the hater speaks from a position of power',
+    BOT_DEFEATED: 'Bot was defeated — the hater recalibrates with cold acknowledgment',
+    PLAYER_RESPONSE_ANGRY: 'Player responded with anger — the hater escalates or pivots to mockery',
+    PLAYER_RESPONSE_TROLL: 'Player is trolling — the hater locks into predatory dismissal',
+    PLAYER_CARD_PLAY: 'Player has made a card play — the hater evaluates and pressures',
+    PLAYER_RESPONSE_FLEX: 'Player is flexing — the hater reframes the flex as weakness',
+    PLAYER_HESITATION: 'Player is hesitating — the hater names the hesitation as fear',
+    PLAYER_BREACH: 'Player has breached a commitment — the hater witnesses the failure',
+    CASCADE_CHAIN: 'A cascade is active — the hater speaks from the eye of the storm',
+    TIME_PRESSURE: 'Timer is running — the hater counts the seconds',
+    DEAL_ROOM_OFFER: 'A deal is on the table — the hater probes the offer',
+    DEAL_ROOM_STALL: 'The deal has stalled — the hater applies closing pressure',
+    SYNDICATE_JOIN: 'Player joined the syndicate — the hater marks their entry',
+    GAME_START: 'Game is starting — the hater establishes dominance early',
+    LOBBY_QUEUE: 'Player is in queue — the hater primes the room',
+    ATTACK_DEFLECTED: 'Player deflected the attack — the hater pivots strategy',
+    INVASION_OPEN: 'Invasion has opened — the hater speaks for the invading force',
+    INVASION_CLOSE: 'Invasion has resolved — the hater draws the conclusion',
+    POSTRUN_DEBRIEF: 'Post-run debrief — the hater renders verdict on the run',
+    POSTRUN_MOURN: 'Player is mourning the loss — the hater shows its teeth',
+    POSTRUN_CELEBRATE: 'Player is celebrating — the hater undercuts the win',
+  };
+  return MAP[context] ?? `Hater context '${context}': no description registered.`;
+}
+
+/** Get the channels a hater persona is eligible to appear in. */
+export function getHaterEligibleChannels(personaId: HaterRegistryPersonaId): readonly HaterChannelAffinity[] {
+  const profile = haterDialogueRegistry.getProfile(personaId);
+  const channels: HaterChannelAffinity[] = ['GLOBAL'];
+  if (profile.channelAffinity !== 'GLOBAL') channels.push(profile.channelAffinity);
+  return Object.freeze(channels);
+}
+
+/** Count total authored lines across all personas and contexts. */
+export function countTotalHaterLines(): number {
+  const snapshot = haterDialogueRegistry.getSnapshot();
+  return snapshot.totalLines;
+}
+
+/** Get the top N haters by total authored line count. */
+export function rankHatersByLineCount(topN = 5): readonly { readonly personaId: HaterRegistryPersonaId; readonly lineCount: number }[] {
+  const snapshot = haterDialogueRegistry.getSnapshot();
+  return Object.freeze(
+    Object.entries(snapshot.linesByPersona)
+      .sort(([, a], [, b]) => (b as number) - (a as number))
+      .slice(0, topN)
+      .map(([personaId, lineCount]) => Object.freeze({ personaId: personaId as HaterRegistryPersonaId, lineCount: lineCount as number })),
+  );
+}
+
+/** Check whether a hater persona fits a given context. */
+export function haterPersonaFitsContext(
+  personaId: HaterRegistryPersonaId,
+  context: HaterDialogueContext,
+): boolean {
+  const lines = haterDialogueRegistry.getLines(personaId, context);
+  return lines.length > 0;
+}
+
+/** Get all persona IDs that have at least one line for a given context. */
+export function haterPersonasForContext(context: HaterDialogueContext): readonly HaterRegistryPersonaId[] {
+  return Object.freeze(
+    haterDialogueRegistry.listPersonaIds().filter((id) => haterPersonaFitsContext(id, context)),
+  );
+}
+
+// ─── NAMESPACE export ──────────────────────────────────────────────────────────
+
+export const HaterDialogueRegistryNS = Object.freeze({
+  // Standalone utilities
+  describeHaterContext,
+  getHaterEligibleChannels,
+  countTotalHaterLines,
+  rankHatersByLineCount,
+  haterPersonaFitsContext,
+  haterPersonasForContext,
+
+  // Class and singleton
+  HaterDialogueRegistry,
+  haterDialogueRegistry,
+  createHaterDialogueRegistry,
+});

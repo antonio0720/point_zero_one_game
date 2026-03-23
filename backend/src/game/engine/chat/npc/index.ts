@@ -91,12 +91,35 @@ import {
   NpcSuppressionPolicy,
   npcSuppressionPolicy,
 } from './NpcSuppressionPolicy';
+import {
+  ChatBotPersonaEvolutionService,
+  createChatBotPersonaEvolutionService,
+  type ChatPersonaEvolutionEvent,
+  type ChatPersonaEvolutionProfile,
+  type ChatPersonaEvolutionSignal,
+  type ChatPersonaEvolutionSnapshot,
+  type ChatPersonaStageId,
+  type ChatPlayerFingerprintSnapshot,
+  type ChatLiveOpsOverlayContext,
+  type ChatRelationshipSummaryView,
+  type EvolutionBatchObserveInput,
+  type EvolutionBatchObserveResult,
+  type EvolutionBatchProjectResult,
+  type EvolutionProjectionInput,
+  type BotEvolutionStats,
+  type EvolutionSystemStats,
+  type PersonaInsight,
+  type BotCounterplayHint,
+  type EvolutionStageTransitionRecord,
+  type EvolutionServiceCompactSnapshot,
+} from './ChatBotPersonaEvolutionService';
 
 export * from './AmbientNpcRegistry';
 export * from './HaterDialogueRegistry';
 export * from './HelperDialogueRegistry';
 export * from './NpcCadencePolicy';
 export * from './NpcSuppressionPolicy';
+export * from './ChatBotPersonaEvolutionService';
 
 export type BackendNpcPersonaId = AmbientNpcPersonaId | HelperPersonaId | HaterRegistryPersonaId;
 export type BackendNpcChannel = CadenceChannel;
@@ -916,3 +939,759 @@ export const createBackendChatNpcDomain = (): BackendChatNpcDomain => new Backen
 });
 
 export const backendChatNpcDomain = new BackendChatNpcDomain();
+
+// ─── Evolution service interface ──────────────────────────────────────────────
+// Structural interface so BackendChatNpcDomainWithEvolution compiles against the
+// full method surface without depending on the TS language server having already
+// indexed the freshly-written ChatBotPersonaEvolutionService.ts.
+
+export interface IBackendEvolutionService {
+  observe(event: ChatPersonaEvolutionEvent): ChatPersonaEvolutionProfile;
+  observeBatch(input: EvolutionBatchObserveInput): EvolutionBatchObserveResult;
+  project(input: EvolutionProjectionInput): ChatPersonaEvolutionSignal;
+  projectBatch(inputs: readonly EvolutionProjectionInput[]): EvolutionBatchProjectResult;
+  getProfile(botId: string, playerId: string | null | undefined, now: number): ChatPersonaEvolutionProfile;
+  getSnapshot(now?: number): ChatPersonaEvolutionSnapshot;
+  listTransitions(): readonly EvolutionStageTransitionRecord[];
+  getTransitionHistoryForBot(botId: string): readonly EvolutionStageTransitionRecord[];
+  computeBotStats(botId: string, now?: number): BotEvolutionStats;
+  computeSystemStats(now?: number): EvolutionSystemStats;
+  hasReachedStage(botId: string, playerId: string | null | undefined, targetStage: ChatPersonaStageId, now?: number): boolean;
+  scoreBotAggressionLevel(botId: string, playerId: string | null | undefined, now?: number): number;
+  inferBotObjective(
+    botId: string,
+    playerId: string | null | undefined,
+    relationship?: ChatRelationshipSummaryView | null,
+    fingerprint?: ChatPlayerFingerprintSnapshot | null,
+    now?: number,
+  ): string;
+  buildPersonaInsight(
+    botId: string,
+    playerId: string | null | undefined,
+    now?: number,
+    channelId?: string | null,
+    fingerprint?: ChatPlayerFingerprintSnapshot | null,
+    relationship?: ChatRelationshipSummaryView | null,
+    overlay?: ChatLiveOpsOverlayContext | null,
+  ): PersonaInsight;
+  buildCounterplayHint(
+    botId: string,
+    playerId: string,
+    fingerprint: ChatPlayerFingerprintSnapshot,
+    now?: number,
+  ): BotCounterplayHint;
+  serializeCompact(now?: number): EvolutionServiceCompactSnapshot;
+  hydrateFromSnapshot(snapshot: EvolutionServiceCompactSnapshot, now?: number): void;
+  flushProjectionCache(): void;
+}
+
+// ─── Evolution-aware domain types ─────────────────────────────────────────────
+
+/** Input for a combined NPC plan + persona evolution projection. */
+export interface BackendNpcEvolutionRequest {
+  readonly planRequests: readonly BackendNpcPlanRequest[];
+  readonly room: BackendNpcRoomState;
+  readonly ledger: BackendNpcDomainLedger;
+  readonly nowMs: number;
+  readonly botId: string;
+  readonly playerId?: string | null;
+  readonly channelId?: string | null;
+  readonly fingerprint?: ChatPlayerFingerprintSnapshot | null;
+  readonly relationship?: ChatRelationshipSummaryView | null;
+  readonly overlay?: ChatLiveOpsOverlayContext | null;
+}
+
+/** Combined output of a plan + evolution projection pass. */
+export interface BackendNpcEvolutionResult {
+  readonly plan: BackendNpcBatchPlan;
+  readonly evolutionSignal: ChatPersonaEvolutionSignal;
+  readonly personaInsight: PersonaInsight;
+  readonly counterplayHint?: BotCounterplayHint;
+  readonly inferredObjective: string;
+  readonly botAggressionScore: number;
+}
+
+/** An NPC plan decision enriched with evolution signal metadata. */
+export interface BackendNpcEvolutionEnrichedDecision extends BackendNpcPlanDecision {
+  readonly evolutionStage: ChatPersonaStageId;
+  readonly evolutionTemperament: string;
+  readonly evolutionCallbackAggression: number;
+  readonly evolutionTransformBiases: readonly string[];
+  readonly evolutionSelectionBias: number;
+}
+
+/** Full domain snapshot including evolution state. */
+export interface BackendNpcFullDomainSnapshot extends BackendNpcDomainSnapshot {
+  readonly evolutionSnapshot: ChatPersonaEvolutionSnapshot;
+  readonly evolutionSystemStats: EvolutionSystemStats;
+  readonly evolutionTransitionCount: number;
+}
+
+/** Planning statistics for a room within a time window. */
+export interface BackendNpcPlanningStats {
+  readonly roomId: string;
+  readonly modeId: string;
+  readonly windowMs: number;
+  readonly totalPlansRan: number;
+  readonly winnersFound: number;
+  readonly winnersByKind: Readonly<Record<NpcActorKind, number>>;
+  readonly shadowEmissions: number;
+  readonly deferredEmissions: number;
+  readonly droppedEmissions: number;
+  readonly suppressionRate: number;
+  readonly computedAtMs: number;
+}
+
+/** NPC system health summary. */
+export interface BackendNpcSystemHealth {
+  readonly registryLinesTotal: number;
+  readonly ambientLines: number;
+  readonly helperLines: number;
+  readonly haterLines: number;
+  readonly ambientPersonas: number;
+  readonly helperPersonas: number;
+  readonly haterPersonas: number;
+  readonly evolutionProfilesTotal: number;
+  readonly evolutionMythicProfiles: number;
+  readonly evolutionRivalricProfiles: number;
+  readonly suppressionPolicyReady: boolean;
+  readonly cadencePolicyReady: boolean;
+  readonly computedAtMs: number;
+}
+
+// ─── Evolution-aware domain orchestration ─────────────────────────────────────
+
+/**
+ * BackendChatNpcDomainWithEvolution extends the base domain with full
+ * persona evolution integration. This is the production authority class for
+ * all NPC planning when evolution context is available.
+ *
+ * Usage pattern:
+ *   const domain = new BackendChatNpcDomainWithEvolution();
+ *   const result = await domain.planWithEvolution({ planRequests, room, ledger, nowMs, botId, playerId, ... });
+ *   applyWinner(result.plan, ledger);
+ *   observeEvolutionEvent(domain.evolutionService, winner, room);
+ */
+export class BackendChatNpcDomainWithEvolution extends BackendChatNpcDomain {
+  public readonly evolutionService: IBackendEvolutionService;
+
+  public constructor(input?: {
+    readonly ambientRegistry?: AmbientNpcRegistry;
+    readonly helperRegistry?: HelperDialogueRegistry;
+    readonly haterRegistry?: HaterDialogueRegistry;
+    readonly cadencePolicy?: NpcCadencePolicy;
+    readonly suppressionPolicy?: NpcSuppressionPolicy;
+    readonly evolutionService?: IBackendEvolutionService;
+  }) {
+    super(input);
+    this.evolutionService = input?.evolutionService ?? (createChatBotPersonaEvolutionService() as unknown as IBackendEvolutionService);
+  }
+
+  /**
+   * Run a full NPC plan pass with persona evolution signal projection.
+   * Returns the batch plan AND the evolution signal, enriched persona insight,
+   * optional counterplay hint, inferred bot objective, and aggression score.
+   */
+  public planWithEvolution(request: BackendNpcEvolutionRequest): BackendNpcEvolutionResult {
+    const plan = this.planBatch(request.planRequests, request.room, request.ledger);
+    const projectionInput: EvolutionProjectionInput = {
+      botId: request.botId,
+      playerId: request.playerId,
+      now: request.nowMs,
+      channelId: request.channelId,
+      fingerprint: request.fingerprint,
+      relationship: request.relationship,
+      overlay: request.overlay,
+    };
+    const evolutionSignal = this.evolutionService.project(projectionInput);
+    const personaInsight = this.evolutionService.buildPersonaInsight(
+      request.botId,
+      request.playerId,
+      request.nowMs,
+      request.channelId,
+      request.fingerprint,
+      request.relationship,
+      request.overlay,
+    );
+    const counterplayHint = request.fingerprint
+      ? this.evolutionService.buildCounterplayHint(
+          request.botId,
+          request.playerId ?? request.botId,
+          request.fingerprint,
+          request.nowMs,
+        )
+      : undefined;
+    const inferredObjective = this.evolutionService.inferBotObjective(
+      request.botId,
+      request.playerId,
+      request.relationship,
+      request.fingerprint,
+      request.nowMs,
+    );
+    const botAggressionScore = this.evolutionService.scoreBotAggressionLevel(
+      request.botId,
+      request.playerId,
+      request.nowMs,
+    );
+
+    return Object.freeze({
+      plan,
+      evolutionSignal,
+      personaInsight,
+      counterplayHint,
+      inferredObjective,
+      botAggressionScore: Number(botAggressionScore.toFixed(6)),
+    });
+  }
+
+  /**
+   * Enrich a BackendNpcPlanDecision with the current evolution signal metadata.
+   */
+  public enrichDecisionWithEvolution(
+    decision: BackendNpcPlanDecision,
+    signal: ChatPersonaEvolutionSignal,
+  ): BackendNpcEvolutionEnrichedDecision {
+    return Object.freeze({
+      ...decision,
+      evolutionStage: signal.stage,
+      evolutionTemperament: signal.temperament,
+      evolutionCallbackAggression: signal.callbackAggression01,
+      evolutionTransformBiases: signal.transformBiases,
+      evolutionSelectionBias: signal.selectionBias01,
+    });
+  }
+
+  /**
+   * Observe a game event in the evolution service for a given bot+player pair,
+   * triggered by a NPC plan winner being applied.
+   */
+  public observePlanResult(
+    winner: BackendNpcPlanDecision | null,
+    room: BackendNpcRoomState,
+    botId: string,
+    playerId: string | null | undefined,
+    nowMs: number,
+  ): ChatPersonaEvolutionProfile | null {
+    if (!winner || !winner.allow) return null;
+
+    let eventType: ChatPersonaEvolutionEvent['eventType'] | null = null;
+    const context = winner.context;
+
+    if (context === 'PLAYER_SHIELD_BREAK' || context === 'PLAYER_NEAR_BANKRUPTCY') {
+      eventType = 'PLAYER_COLLAPSE';
+    } else if (context === 'PLAYER_COMEBACK') {
+      eventType = 'PLAYER_COMEBACK';
+    } else if (context === 'NEAR_SOVEREIGNTY') {
+      eventType = 'PLAYER_PERFECT_DEFENSE';
+    } else if (context === 'BOT_WINNING' || context === 'BOT_DEFEATED') {
+      eventType = winner.actorKind === 'HATER' ? 'BOT_TAUNT_EMITTED' : 'BOT_RETREAT_EMITTED';
+    } else if (context === 'INVASION_OPEN' || context === 'INVASION_CLOSE') {
+      eventType = 'LIVEOPS_INTRUSION';
+    } else if (winner.actorKind === 'HATER') {
+      eventType = 'BOT_TAUNT_EMITTED';
+    } else if (winner.suppression.visibility === 'public' && winner.actorKind === 'AMBIENT') {
+      eventType = 'PUBLIC_WITNESS';
+    } else {
+      return null; // Not every emission deserves an evolution event
+    }
+
+    if (!eventType) return null;
+
+    const event: ChatPersonaEvolutionEvent = Object.freeze({
+      eventId: `evo_${winner.request.requestId}_${nowMs}`,
+      botId,
+      playerId: playerId ?? null,
+      eventType,
+      createdAt: nowMs,
+      intensity01: clamp01(room.pressure * 0.4 + room.heat * 0.3 + room.confidence * 0.3),
+      publicWitness01: winner.suppression.visibility === 'public' ? 0.85 : 0.25,
+      pressureBand: room.pressure >= 0.72
+        ? 'CRITICAL'
+        : room.pressure >= 0.50
+          ? 'HIGH'
+          : room.pressure >= 0.28
+            ? 'MEDIUM'
+            : 'LOW',
+    });
+
+    return this.evolutionService.observe(event);
+  }
+
+  /**
+   * Observe a batch of game events in the evolution service.
+   */
+  public observeEvolutionBatch(input: EvolutionBatchObserveInput): EvolutionBatchObserveResult {
+    return this.evolutionService.observeBatch(input);
+  }
+
+  /**
+   * Project evolution signals for multiple bots in one call.
+   */
+  public projectEvolutionBatch(inputs: readonly EvolutionProjectionInput[]): EvolutionBatchProjectResult {
+    return this.evolutionService.projectBatch(inputs);
+  }
+
+  /**
+   * Build the full domain snapshot including evolution state.
+   */
+  public buildFullSnapshot(
+    room: BackendNpcRoomState,
+    ledger: BackendNpcDomainLedger,
+    nowMs: number,
+  ): BackendNpcFullDomainSnapshot {
+    const base = this.buildSnapshot(room, ledger, nowMs);
+    const evolutionSnapshot = this.evolutionService.getSnapshot(nowMs);
+    const evolutionSystemStats = this.evolutionService.computeSystemStats(nowMs);
+    const evolutionTransitionCount = this.evolutionService.listTransitions().length;
+    return Object.freeze({
+      ...base,
+      evolutionSnapshot,
+      evolutionSystemStats,
+      evolutionTransitionCount,
+    });
+  }
+
+  /**
+   * Get the current system health summary for this domain instance.
+   */
+  public buildSystemHealth(nowMs = Date.now()): BackendNpcSystemHealth {
+    const ambientSnap = this.ambientRegistry.getSnapshot();
+    const helperSnap = this.helperRegistry.getSnapshot();
+    const haterSnap = this.haterRegistry.getSnapshot();
+    const evolutionStats = this.evolutionService.computeSystemStats(nowMs);
+    return Object.freeze({
+      registryLinesTotal: ambientSnap.totalLines + helperSnap.totalLines + haterSnap.totalLines,
+      ambientLines: ambientSnap.totalLines,
+      helperLines: helperSnap.totalLines,
+      haterLines: haterSnap.totalLines,
+      ambientPersonas: ambientSnap.personas.length,
+      helperPersonas: helperSnap.personas.length,
+      haterPersonas: haterSnap.personas.length,
+      evolutionProfilesTotal: evolutionStats.totalProfiles,
+      evolutionMythicProfiles: evolutionStats.stageCounts.MYTHIC,
+      evolutionRivalricProfiles: evolutionStats.stageCounts.RIVALRIC,
+      suppressionPolicyReady: true,
+      cadencePolicyReady: true,
+      computedAtMs: nowMs,
+    });
+  }
+
+  /**
+   * Get the persona evolution profile for a bot+player pair.
+   */
+  public getEvolutionProfile(botId: string, playerId: string | null | undefined, nowMs = Date.now()): ChatPersonaEvolutionProfile {
+    return this.evolutionService.getProfile(botId, playerId, nowMs);
+  }
+
+  /**
+   * Project the evolution signal for a bot+player pair.
+   */
+  public projectEvolution(input: EvolutionProjectionInput): ChatPersonaEvolutionSignal {
+    return this.evolutionService.project(input);
+  }
+
+  /**
+   * Get the evolution stage for a bot+player pair.
+   */
+  public getEvolutionStage(botId: string, playerId: string | null | undefined, nowMs = Date.now()): ChatPersonaStageId {
+    return this.evolutionService.getProfile(botId, playerId, nowMs).stage;
+  }
+
+  /**
+   * Check whether a bot+player pair has reached a given stage.
+   */
+  public hasEvolutionStage(botId: string, playerId: string | null | undefined, targetStage: ChatPersonaStageId, nowMs = Date.now()): boolean {
+    return this.evolutionService.hasReachedStage(botId, playerId, targetStage, nowMs);
+  }
+
+  /**
+   * Get all stage transitions recorded for a bot.
+   */
+  public getEvolutionTransitions(botId: string): readonly EvolutionStageTransitionRecord[] {
+    return this.evolutionService.getTransitionHistoryForBot(botId);
+  }
+
+  /**
+   * Get bot evolution stats across all its profiles.
+   */
+  public getBotEvolutionStats(botId: string, nowMs = Date.now()): BotEvolutionStats {
+    return this.evolutionService.computeBotStats(botId, nowMs);
+  }
+
+  /**
+   * Build a human-readable persona insight for a bot+player pair.
+   */
+  public buildEvolutionInsight(
+    botId: string,
+    playerId: string | null | undefined,
+    nowMs = Date.now(),
+    channelId?: string | null,
+    fingerprint?: ChatPlayerFingerprintSnapshot | null,
+    relationship?: ChatRelationshipSummaryView | null,
+    overlay?: ChatLiveOpsOverlayContext | null,
+  ): PersonaInsight {
+    return this.evolutionService.buildPersonaInsight(botId, playerId, nowMs, channelId, fingerprint, relationship, overlay);
+  }
+
+  /**
+   * Produce a compact serializable snapshot of the evolution service state.
+   */
+  public serializeEvolutionCompact(nowMs = Date.now()): EvolutionServiceCompactSnapshot {
+    return this.evolutionService.serializeCompact(nowMs);
+  }
+
+  /**
+   * Hydrate the evolution service from a previously persisted snapshot.
+   */
+  public hydrateEvolution(snapshot: EvolutionServiceCompactSnapshot, nowMs = Date.now()): void {
+    this.evolutionService.hydrateFromSnapshot(snapshot, nowMs);
+  }
+
+  /**
+   * Flush the projection cache.
+   */
+  public flushEvolutionCache(): void {
+    this.evolutionService.flushProjectionCache();
+  }
+}
+
+// ─── Domain-level standalone utilities ────────────────────────────────────────
+
+/**
+ * Build a narrative summary for an evolution-enriched plan decision.
+ */
+export function narrativeSummaryForEnrichedDecision(decision: BackendNpcEvolutionEnrichedDecision): string {
+  const kind = decision.actorKind;
+  const persona = decision.personaId ?? 'INVASION';
+  const context = decision.context;
+  const visibility = decision.suppression.visibility;
+  const stage = decision.evolutionStage;
+  const temperament = decision.evolutionTemperament;
+  const agg = decision.evolutionCallbackAggression.toFixed(3);
+  return `${kind}:${persona} [${stage}/${temperament}] ctx=${context} vis=${visibility} cbAgg=${agg}`;
+}
+
+/**
+ * Convert a BackendNpcPlanDecision into a terse one-line log string.
+ */
+export function formatPlanDecisionForLog(decision: BackendNpcPlanDecision): string {
+  const allowed = decision.allow ? 'ALLOW' : 'DENY';
+  const persona = decision.personaId ?? (decision.actorKind === 'INVASION' ? 'INVASION' : 'unknown');
+  const text = decision.text
+    ? ` text="${decision.text.slice(0, 40)}${decision.text.length > 40 ? '...' : ''}"`
+    : '';
+  return (
+    `[${allowed}] ${decision.actorKind}:${persona} channel=${decision.channel}` +
+    ` ctx=${decision.context} vis=${decision.suppression.visibility}` +
+    ` score=${decision.suppression.priorityScore.toFixed(3)}${text}`
+  );
+}
+
+/**
+ * Build a planning statistics summary from a series of batch plans.
+ */
+export function buildPlanningStats(
+  roomId: string,
+  modeId: string,
+  plans: readonly BackendNpcBatchPlan[],
+  nowMs: number,
+  windowMs = 300_000,
+): BackendNpcPlanningStats {
+  const winnersByKind: Record<NpcActorKind, number> = { AMBIENT: 0, HELPER: 0, HATER: 0, INVASION: 0 };
+  let totalPlans = 0;
+  let winnersFound = 0;
+  let shadowEmissions = 0;
+  let deferredEmissions = 0;
+  let droppedEmissions = 0;
+
+  for (const plan of plans) {
+    totalPlans += 1;
+    if (plan.winner) {
+      winnersFound += 1;
+      winnersByKind[plan.winner.actorKind] = (winnersByKind[plan.winner.actorKind] ?? 0) + 1;
+    }
+    shadowEmissions += plan.shadowed.length;
+    deferredEmissions += plan.deferred.length;
+    droppedEmissions += plan.rejected.length;
+  }
+
+  const totalDecisions = plans.reduce((sum, p) => sum + p.ranked.length, 0);
+  const suppressionRate = totalDecisions > 0
+    ? Number(((totalDecisions - winnersFound) / totalDecisions).toFixed(4))
+    : 0;
+
+  return Object.freeze({
+    roomId,
+    modeId,
+    windowMs,
+    totalPlansRan: totalPlans,
+    winnersFound,
+    winnersByKind: Object.freeze(winnersByKind),
+    shadowEmissions,
+    deferredEmissions,
+    droppedEmissions,
+    suppressionRate,
+    computedAtMs: nowMs,
+  });
+}
+
+/**
+ * Check whether a BackendNpcBatchPlan has a winner that should trigger an evolution event.
+ */
+export function planHasEvolutionTrigger(plan: BackendNpcBatchPlan): boolean {
+  const winner = plan.winner;
+  if (!winner) return false;
+  return (
+    winner.actorKind === 'HATER' ||
+    winner.context === 'PLAYER_SHIELD_BREAK' ||
+    winner.context === 'PLAYER_NEAR_BANKRUPTCY' ||
+    winner.context === 'PLAYER_COMEBACK' ||
+    winner.context === 'NEAR_SOVEREIGNTY' ||
+    winner.context === 'INVASION_OPEN' ||
+    winner.context === 'POSTRUN_DEBRIEF'
+  );
+}
+
+/**
+ * Build the default BackendNpcRoomState from minimal parameters.
+ * Useful for test setup and cold-start replay.
+ */
+export function buildMinimalRoomState(
+  roomId: string,
+  modeId: string,
+  nowMs: number,
+  overrides?: Partial<BackendNpcRoomState>,
+): BackendNpcRoomState {
+  return Object.freeze({
+    roomId,
+    modeId,
+    runTick: 0,
+    occupancy: 1,
+    heat: 0.25,
+    pressure: 0.20,
+    frustration: 0.15,
+    confidence: 0.50,
+    coldStart: 0.80,
+    silenceDebt: 0.30,
+    invasionActive: false,
+    helperLock: false,
+    playerNearBankruptcy: false,
+    shieldBreached: false,
+    nearSovereignty: false,
+    dealStalled: false,
+    postRun: false,
+    lastPlayerMessageAtMs: nowMs - 5_000,
+    lastIncomingSystemEventAtMs: nowMs - 3_000,
+    ...overrides,
+  });
+}
+
+/**
+ * Build a BackendNpcPlanRequest for a single rapid-fire NPC emission.
+ * A convenience factory for callers that don't need full control.
+ */
+export function buildSimplePlanRequest(
+  actorKind: NpcActorKind,
+  channel: BackendNpcChannel,
+  context: CadenceContext,
+  nowMs: number,
+  roomId: string,
+  options?: {
+    readonly personaId?: BackendNpcPersonaId;
+    readonly priorityHint?: number;
+    readonly force?: boolean;
+    readonly allowShadow?: boolean;
+    readonly witnessPreferred?: boolean;
+    readonly tagHints?: readonly string[];
+  },
+): BackendNpcPlanRequest {
+  const requestId = `npc_${actorKind.toLowerCase()}_${roomId}_${nowMs}_${Math.floor(Math.random() * 0xffff).toString(16)}`;
+  const base = {
+    requestId,
+    channel,
+    context,
+    desiredAtMs: nowMs,
+    createdAtMs: nowMs,
+    priorityHint: options?.priorityHint ?? 0.5,
+    force: options?.force,
+    allowShadow: options?.allowShadow,
+    witnessPreferred: options?.witnessPreferred,
+    tagHints: options?.tagHints,
+  };
+  if (actorKind === 'AMBIENT') {
+    return Object.freeze({ ...base, actorKind: 'AMBIENT', personaId: options?.personaId as AmbientNpcPersonaId | undefined } as unknown as BackendAmbientPlanRequest);
+  }
+  if (actorKind === 'HELPER') {
+    return Object.freeze({ ...base, actorKind: 'HELPER', personaId: options?.personaId as HelperPersonaId | undefined } as unknown as BackendHelperPlanRequest);
+  }
+  if (actorKind === 'HATER') {
+    return Object.freeze({ ...base, actorKind: 'HATER', personaId: options?.personaId as HaterRegistryPersonaId | undefined } as unknown as BackendHaterPlanRequest);
+  }
+  return Object.freeze({ ...base, actorKind: 'INVASION', context: context as 'INVASION_OPEN' | 'INVASION_CLOSE' } as unknown as BackendInvasionPlanRequest);
+}
+
+/**
+ * Determine if a room state justifies an immediate helper intervention.
+ */
+export function shouldTriggerHelperIntervention(room: BackendNpcRoomState): boolean {
+  if (room.helperLock) return false;
+  if (room.invasionActive) return false;
+  if (room.postRun) return true; // post-run debrief is a helper mandate
+  if (room.playerNearBankruptcy) return true;
+  if (room.shieldBreached) return true;
+  if (room.frustration >= 0.70) return true;
+  if (room.coldStart >= 0.80 && room.runTick <= 10) return true;
+  return false;
+}
+
+/**
+ * Determine if a room state justifies an immediate hater emission.
+ */
+export function shouldTriggerHaterEmission(room: BackendNpcRoomState): boolean {
+  if (room.postRun) return false;
+  if (room.helperLock) return false;
+  if (room.pressure >= 0.65 && room.heat >= 0.50) return true;
+  if (room.nearSovereignty) return true;
+  if (room.invasionActive) return true;
+  return false;
+}
+
+/**
+ * Determine whether a room state mandates an ambient witness emission.
+ */
+export function shouldTriggerAmbientWitness(room: BackendNpcRoomState, silenceGapMs: number): boolean {
+  if (room.invasionActive) return false;
+  if (room.shieldBreached) return true;
+  if (room.nearSovereignty) return true;
+  if (room.postRun) return true;
+  if (room.silenceDebt >= 0.70) return true;
+  if (silenceGapMs >= 45_000 && room.occupancy >= 3) return true;
+  return false;
+}
+
+/**
+ * Build the optimal plan request set for a given room state from scratch.
+ * This is a high-level convenience for planners that want intelligent defaults.
+ */
+export function buildAutoPlanRequests(
+  room: BackendNpcRoomState,
+  nowMs: number,
+  silenceGapMs = 20_000,
+): readonly BackendNpcPlanRequest[] {
+  const domain = backendChatNpcDomain;
+  const requests: BackendNpcPlanRequest[] = [];
+
+  if (room.invasionActive) {
+    requests.push(...domain.planInvasionScene(room, nowMs));
+    return Object.freeze(requests);
+  }
+
+  if (room.postRun) {
+    requests.push(...domain.planPostRunScene(room, nowMs));
+    return Object.freeze(requests);
+  }
+
+  if (room.playerNearBankruptcy || room.shieldBreached) {
+    requests.push(...domain.planCollapseWitness(room, nowMs));
+  }
+
+  if ((room.recentComebackCount ?? 0) > 0 || room.confidence >= 0.60) {
+    requests.push(...domain.planComebackWitness(room, nowMs));
+  }
+
+  if (room.modeId.toLowerCase().includes('deal')) {
+    requests.push(...domain.planDealRoomScene(room, nowMs));
+  } else if (room.modeId.toLowerCase().includes('syndicate')) {
+    requests.push(...domain.planSyndicateScene(room, nowMs));
+  }
+
+  if (shouldTriggerAmbientWitness(room, silenceGapMs)) {
+    const channel: BackendNpcChannel = room.modeId.toLowerCase().includes('lobby') ? 'LOBBY' : 'GLOBAL';
+    const ctx: CadenceContext = room.nearSovereignty ? 'NEAR_SOVEREIGNTY' : room.shieldBreached ? 'PLAYER_SHIELD_BREAK' : 'PLAYER_IDLE';
+    requests.push(buildSimplePlanRequest('AMBIENT', channel, ctx, nowMs, room.roomId, { priorityHint: 0.7, allowShadow: true }));
+  }
+
+  if (shouldTriggerHelperIntervention(room)) {
+    const ctx: CadenceContext = room.postRun ? 'POSTRUN_DEBRIEF' : room.playerNearBankruptcy ? 'PLAYER_NEAR_BANKRUPTCY' : 'PLAYER_IDLE';
+    requests.push(buildSimplePlanRequest('HELPER', 'GLOBAL', ctx, nowMs, room.roomId, { priorityHint: 1.0, witnessPreferred: room.playerNearBankruptcy }));
+  }
+
+  if (shouldTriggerHaterEmission(room)) {
+    const ctx: CadenceContext = room.nearSovereignty ? 'NEAR_SOVEREIGNTY' : room.pressure >= 0.65 ? 'BOT_WINNING' : 'PLAYER_IDLE';
+    requests.push(buildSimplePlanRequest('HATER', 'GLOBAL', ctx, nowMs, room.roomId, { priorityHint: 0.9 }));
+  }
+
+  return Object.freeze(requests);
+}
+
+// ─── NAMESPACE export ──────────────────────────────────────────────────────────
+
+export const BackendChatNpcDomainNS = Object.freeze({
+  // Internal helpers
+  clamp01,
+  stableHash,
+  inferAmbientChannel,
+  isAmbientContext,
+  isHelperContext,
+  isHaterContext,
+  actorIdOf,
+  mapToSuppressionRequest,
+  mapToCadenceRequest,
+  decisionFromCandidate,
+  boostRegistryScore,
+
+  // Standalone utilities
+  narrativeSummaryForEnrichedDecision,
+  formatPlanDecisionForLog,
+  buildPlanningStats,
+  planHasEvolutionTrigger,
+  buildMinimalRoomState,
+  buildSimplePlanRequest,
+  shouldTriggerHelperIntervention,
+  shouldTriggerHaterEmission,
+  shouldTriggerAmbientWitness,
+  buildAutoPlanRequests,
+
+  // Registries
+  ambientNpcRegistry,
+  helperDialogueRegistry,
+  haterDialogueRegistry,
+  AmbientNpcRegistry,
+  HelperDialogueRegistry,
+  HaterDialogueRegistry,
+  createAmbientNpcRegistry,
+  createHelperDialogueRegistry,
+  createHaterDialogueRegistry,
+
+  // Cadence and suppression
+  npcCadencePolicy,
+  npcSuppressionPolicy,
+  NpcCadencePolicy,
+  NpcSuppressionPolicy,
+  createNpcCadencePolicy,
+  createNpcSuppressionPolicy,
+
+  // Evolution
+  ChatBotPersonaEvolutionService,
+  createChatBotPersonaEvolutionService,
+
+  // Domain classes and singletons
+  BackendChatNpcDomain,
+  BackendChatNpcDomainWithEvolution,
+  backendChatNpcDomain,
+  createBackendChatNpcDomain,
+});
+
+// ─── Extended singleton with evolution ────────────────────────────────────────
+
+export const createBackendChatNpcDomainWithEvolution = (): BackendChatNpcDomainWithEvolution =>
+  new BackendChatNpcDomainWithEvolution({
+    ambientRegistry: createAmbientNpcRegistry(),
+    helperRegistry: createHelperDialogueRegistry(),
+    haterRegistry: createHaterDialogueRegistry(),
+    cadencePolicy: createNpcCadencePolicy(),
+    suppressionPolicy: createNpcSuppressionPolicy(),
+    evolutionService: createChatBotPersonaEvolutionService() as unknown as IBackendEvolutionService,
+  });
+
+export const backendChatNpcDomainWithEvolution = new BackendChatNpcDomainWithEvolution();

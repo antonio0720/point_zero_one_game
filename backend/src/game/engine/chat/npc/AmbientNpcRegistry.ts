@@ -5377,3 +5377,96 @@ export class AmbientNpcRegistry {
 
 export const createAmbientNpcRegistry = (): AmbientNpcRegistry => new AmbientNpcRegistry();
 export const ambientNpcRegistry = new AmbientNpcRegistry();
+
+// ─── Standalone ambient registry utilities ────────────────────────────────────
+
+/** Describe an AmbientNpcContext in plain language. */
+export function describeAmbientContext(context: AmbientNpcContext): string {
+  const MAP: Partial<Record<string, string>> = {
+    GAME_START: 'Game is starting — ambient sets the atmosphere of the opening',
+    LOBBY_QUEUE: 'Player is in queue — ambient fills the lobby with world texture',
+    PLAYER_IDLE: 'Player is idle — ambient applies subtle pressure or interest',
+    PLAYER_INCOME_UP: 'Player income is rising — ambient reflects the world noticing',
+    PLAYER_SHIELD_BREAK: 'Shield has been breached — ambient witnesses the collapse',
+    PLAYER_COMEBACK: 'Player is making a comeback — ambient witnesses the recovery',
+    PLAYER_LOST: 'Player has lost — ambient reflects the weight of the ending',
+    NEAR_SOVEREIGNTY: 'Sovereignty is near — ambient escalates to ceremonial register',
+    TIME_PRESSURE: 'Timer is running — ambient creates urgency without intervening',
+    CASCADE_CHAIN: 'Cascade is active — ambient reflects the chaos of the moment',
+    DEAL_ROOM_OFFER: 'Deal is on the table — ambient marks the gravity of negotiation',
+    DEAL_ROOM_STALL: 'Deal has stalled — ambient marks the silence as meaningful',
+    SYNDICATE_JOIN: 'Player joined the syndicate — ambient welcomes with understatement',
+    ATTACK_DEFLECTED: 'Attack was deflected — ambient acknowledges the deflection',
+    BOT_WINNING: 'Bot has momentum — ambient reflects the world leaning against the player',
+    BOT_DEFEATED: 'Bot was defeated — ambient marks the shift of power',
+    PLAYER_RESPONSE_ANGRY: 'Player responded with anger — ambient watches without comment',
+    PLAYER_RESPONSE_TROLL: 'Player is trolling — ambient ignores or recontextualizes',
+    PLAYER_RESPONSE_FLEX: 'Player is flexing — ambient registers the performance',
+    INVASION_OPEN: 'Invasion opened — ambient signals a rupture in the normal order',
+    INVASION_CLOSE: 'Invasion resolved — ambient registers the aftermath',
+    POSTRUN_DEBRIEF: 'Post-run debrief — ambient marks the transition between runs',
+    POSTRUN_MOURN: 'Post-run mourning — ambient holds the silence of the loss',
+    POSTRUN_CELEBRATE: 'Post-run celebration — ambient amplifies the win',
+  };
+  return MAP[context] ?? `Ambient context '${context}': no description registered.`;
+}
+
+/** Count total authored ambient lines. */
+export function countTotalAmbientLines(): number {
+  return ambientNpcRegistry.getSnapshot().totalLines;
+}
+
+/** Get ambient persona IDs for a given channel affinity. */
+export function ambientPersonasForChannel(channel: AmbientChannelAffinity): readonly AmbientNpcPersonaId[] {
+  return ambientNpcRegistry.resolveChannelCast(channel);
+}
+
+/** Check whether an ambient persona has any lines for a given context. */
+export function ambientPersonaFitsContext(personaId: AmbientNpcPersonaId, context: AmbientNpcContext): boolean {
+  return ambientNpcRegistry.getLines(personaId, context).length > 0;
+}
+
+/** Get all ambient persona IDs that have lines for a given context. */
+export function ambientPersonasForContext(context: AmbientNpcContext): readonly AmbientNpcPersonaId[] {
+  return Object.freeze(
+    ambientNpcRegistry.listPersonaIds().filter((id) => ambientPersonaFitsContext(id, context)),
+  );
+}
+
+/** Rank ambient personas by total authored line count. */
+export function rankAmbientByLineCount(topN = 5): readonly { readonly personaId: AmbientNpcPersonaId; readonly lineCount: number }[] {
+  const snapshot = ambientNpcRegistry.getSnapshot();
+  return Object.freeze(
+    Object.entries(snapshot.linesByPersona)
+      .sort(([, a], [, b]) => (b as number) - (a as number))
+      .slice(0, topN)
+      .map(([personaId, lineCount]) => Object.freeze({ personaId: personaId as AmbientNpcPersonaId, lineCount: lineCount as number })),
+  );
+}
+
+/** Build a context coverage map: for each context, which personas have lines? */
+export function buildAmbientContextCoverageMap(): Readonly<Record<AmbientNpcContext, readonly AmbientNpcPersonaId[]>> {
+  const output: Partial<Record<AmbientNpcContext, readonly AmbientNpcPersonaId[]>> = {};
+  for (const context of ambientNpcRegistry.listContexts()) {
+    output[context] = ambientPersonasForContext(context);
+  }
+  return Object.freeze(output as Record<AmbientNpcContext, readonly AmbientNpcPersonaId[]>);
+}
+
+// ─── NAMESPACE export ──────────────────────────────────────────────────────────
+
+export const AmbientNpcRegistryNS = Object.freeze({
+  // Standalone utilities
+  describeAmbientContext,
+  countTotalAmbientLines,
+  ambientPersonasForChannel,
+  ambientPersonaFitsContext,
+  ambientPersonasForContext,
+  rankAmbientByLineCount,
+  buildAmbientContextCoverageMap,
+
+  // Class and singleton
+  AmbientNpcRegistry,
+  ambientNpcRegistry,
+  createAmbientNpcRegistry,
+});

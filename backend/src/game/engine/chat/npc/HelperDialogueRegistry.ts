@@ -2677,3 +2677,94 @@ export class HelperDialogueRegistry {
 
 export const createHelperDialogueRegistry = (): HelperDialogueRegistry => new HelperDialogueRegistry();
 export const helperDialogueRegistry = new HelperDialogueRegistry();
+
+// ─── Standalone helper registry utilities ─────────────────────────────────────
+
+/** Describe a HelperDialogueContext in plain language. */
+export function describeHelperContext(context: HelperDialogueContext): string {
+  const MAP: Readonly<Record<string, string>> = {
+    PLAYER_NEAR_BANKRUPTCY: 'Player is near bankruptcy — helper provides triage and resilience',
+    PLAYER_SHIELD_BREAK: 'Player shield has been breached — helper steps in with mechanics and grounding',
+    PLAYER_IDLE: 'Player is idle — helper nudges with a low-pressure reminder or question',
+    PLAYER_INCOME_UP: 'Player income is rising — helper reinforces momentum and strategy',
+    PLAYER_COMEBACK: 'Player is making a comeback — helper witnesses and encourages',
+    NEAR_SOVEREIGNTY: 'Player is near sovereignty — helper shifts to endgame coaching',
+    BOT_WINNING: 'Bot has momentum — helper informs player of threat profile',
+    BOT_DEFEATED: 'Bot was defeated — helper acknowledges and redirects',
+    PLAYER_RESPONSE_ANGRY: 'Player is angry — helper provides calm, grounding, or redirect',
+    PLAYER_RESPONSE_FLEX: 'Player is flexing — helper validates while reinforcing focus',
+    PLAYER_CARD_PLAY: 'Player has made a card play — helper evaluates or supports the choice',
+    PLAYER_HESITATION: 'Player is hesitating — helper reduces anxiety and clarifies options',
+    PLAYER_BREACH: 'Player has breached a commitment — helper frames the recovery path',
+    CASCADE_CHAIN: 'A cascade is active — helper explains mechanics and steadies the player',
+    TIME_PRESSURE: 'Timer is running — helper focuses the player on the highest-value move',
+    DEAL_ROOM_OFFER: 'A deal is on the table — helper explains the offer and stakes',
+    DEAL_ROOM_STALL: 'The deal has stalled — helper suggests patience or alternatives',
+    SYNDICATE_JOIN: 'Player joined the syndicate — helper orients them to the new dynamic',
+    GAME_START: 'Game is starting — helper establishes safety and initial strategy',
+    LOBBY_QUEUE: 'Player is in queue — helper uses the window to review or prepare',
+    ATTACK_DEFLECTED: 'Player deflected the attack — helper confirms and reorients',
+    PLAYER_LOST: 'Player has lost — helper provides closure and perspective',
+    POSTRUN_DEBRIEF: 'Post-run debrief — helper processes the run with the player',
+    POSTRUN_MOURN: 'Player is mourning the loss — helper provides compassionate witness',
+    POSTRUN_CELEBRATE: 'Player is celebrating — helper affirms and anchors the learning',
+  };
+  return MAP[context] ?? `Helper context '${context}': no description registered.`;
+}
+
+/** Count total authored lines across all helper personas. */
+export function countTotalHelperLines(): number {
+  return helperDialogueRegistry.getSnapshot().totalLines;
+}
+
+/** Get the intervention axis for a helper persona, if known. */
+export function describeHelperInterventionAxis(axis: HelperInterventionAxis): string {
+  const MAP: Readonly<Record<HelperInterventionAxis, string>> = Object.freeze({
+    grounding: 'Grounds the player emotionally and cognitively; reduces tilt',
+    mechanics: 'Explains or reinforces game mechanics; reduces uncertainty',
+    resilience: 'Builds psychological resilience; affirms recovery as possible',
+    competitive_motivation: 'Sharpens competitive focus; reframes adversity as fuel',
+    memory: 'Invokes prior success or pattern; anchors the player in earned history',
+  });
+  return MAP[axis] ?? `Unknown intervention axis: ${axis}`;
+}
+
+/** Check whether a helper persona is triggered by a given context. */
+export function helperPersonaFitsContext(personaId: HelperPersonaId, context: HelperDialogueContext): boolean {
+  return helperDialogueRegistry.getLines(personaId, context).length > 0;
+}
+
+/** Get all helper persona IDs that are eligible for a given context. */
+export function helperPersonasForContext(context: HelperDialogueContext): readonly HelperPersonaId[] {
+  return Object.freeze(
+    helperDialogueRegistry.listPersonaIds().filter((id) => helperPersonaFitsContext(id, context)),
+  );
+}
+
+/** Rank helpers by total authored line count. */
+export function rankHelpersByLineCount(topN = 5): readonly { readonly personaId: HelperPersonaId; readonly lineCount: number }[] {
+  const snapshot = helperDialogueRegistry.getSnapshot();
+  return Object.freeze(
+    Object.entries(snapshot.linesByPersona)
+      .sort(([, a], [, b]) => (b as number) - (a as number))
+      .slice(0, topN)
+      .map(([personaId, lineCount]) => Object.freeze({ personaId: personaId as HelperPersonaId, lineCount: lineCount as number })),
+  );
+}
+
+// ─── NAMESPACE export ──────────────────────────────────────────────────────────
+
+export const HelperDialogueRegistryNS = Object.freeze({
+  // Standalone utilities
+  describeHelperContext,
+  countTotalHelperLines,
+  describeHelperInterventionAxis,
+  helperPersonaFitsContext,
+  helperPersonasForContext,
+  rankHelpersByLineCount,
+
+  // Class and singleton
+  HelperDialogueRegistry,
+  helperDialogueRegistry,
+  createHelperDialogueRegistry,
+});
