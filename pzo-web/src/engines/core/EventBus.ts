@@ -123,4 +123,49 @@ if (!sharedEventBus.handlers) {
   (sharedEventBus as unknown as Record<string, unknown>).handlers = new Map();
 }
 
+// ── Event name constants ──────────────────────────────────────────────────────
+// Exported as typed string literals so test files and engine consumers can
+// import the canonical name instead of inlining raw strings.
+
+export const TICK_TIER_CHANGED        = 'TICK_TIER_CHANGED'        as const;
+export const TIME_TIER_CHANGED        = 'TIME_TIER_CHANGED'        as const;
+export const TICK_START               = 'TICK_START'               as const;
+export const TICK_COMPLETE            = 'TICK_COMPLETE'            as const;
+export const TICK_STEP_ERROR          = 'TICK_STEP_ERROR'          as const;
+export const RUN_STARTED              = 'RUN_STARTED'              as const;
+export const RUN_ENDED                = 'RUN_ENDED'                as const;
+export const TIME_ENGINE_START        = 'TIME_ENGINE_START'        as const;
+export const TIME_ENGINE_TICK         = 'TIME_ENGINE_TICK'         as const;
+export const TIME_ENGINE_COMPLETE     = 'TIME_ENGINE_COMPLETE'     as const;
+export const TIME_TICK_ADVANCED       = 'TIME_TICK_ADVANCED'       as const;
+export const TIME_BUDGET_WARNING      = 'TIME_BUDGET_WARNING'      as const;
+export const SEASON_TIMEOUT           = 'SEASON_TIMEOUT'           as const;
+export const TENSION_SCORE_UPDATED    = 'TENSION_SCORE_UPDATED'    as const;
+export const TENSION_VISIBILITY_CHANGED = 'TENSION_VISIBILITY_CHANGED' as const;
+export const TENSION_PULSE_FIRED      = 'TENSION_PULSE_FIRED'      as const;
+export const THREAT_ARRIVED           = 'THREAT_ARRIVED'           as const;
+export const THREAT_EXPIRED           = 'THREAT_EXPIRED'           as const;
+export const THREAT_MITIGATED         = 'THREAT_MITIGATED'         as const;
+
+export type EngineEventConstant =
+  | typeof TICK_TIER_CHANGED
+  | typeof TIME_TIER_CHANGED
+  | typeof TICK_START
+  | typeof TICK_COMPLETE
+  | typeof TICK_STEP_ERROR
+  | typeof RUN_STARTED
+  | typeof RUN_ENDED
+  | typeof TIME_ENGINE_START
+  | typeof TIME_ENGINE_TICK
+  | typeof TIME_ENGINE_COMPLETE
+  | typeof TIME_TICK_ADVANCED
+  | typeof TIME_BUDGET_WARNING
+  | typeof SEASON_TIMEOUT
+  | typeof TENSION_SCORE_UPDATED
+  | typeof TENSION_VISIBILITY_CHANGED
+  | typeof TENSION_PULSE_FIRED
+  | typeof THREAT_ARRIVED
+  | typeof THREAT_EXPIRED
+  | typeof THREAT_MITIGATED;
+
 export default EventBus;

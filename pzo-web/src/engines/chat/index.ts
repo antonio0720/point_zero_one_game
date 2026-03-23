@@ -121,6 +121,7 @@ import * as PostRunSceneBuilderModule from './postrun/PostRunSceneBuilder';
 import * as PostRunSummaryPolicyModule from './postrun/PostRunSummaryPolicy';
 import * as ChatMlCompatibilityModule from './ml/ml_index';
 import * as ChatDlCompatibilityModule from './dl/dl_index';
+import * as CoreEngineModule from '../core';
 
 export * from './types';
 
@@ -230,6 +231,13 @@ export { CarryoverSceneStateModule };
 export { CompanionContinuityModule };
 export { ChatMlCompatibilityModule };
 export { ChatDlCompatibilityModule };
+
+// ── Core engine infrastructure ───────────────────────────────────────────────
+// Provides EventBus, types, ClockSource, RunStateSnapshot, OrchestratorDiagnostics,
+// and EngineOrchestrator to any consumer that imports from this chat barrel.
+// Note: EngineEventBindings is excluded from CoreEngineModule to prevent circular
+// store → core → store imports (import it directly from '../core/EngineEventBindings').
+export { CoreEngineModule };
 
 /* ============================================================================
  * MODULE IDENTITY
@@ -727,6 +735,7 @@ export const CHAT_ENGINE_PUBLIC_EXPORTS = Object.freeze({
     './combat/ChatAttackTelegraph',
     './postrun/PostRunSceneBuilder',
     './postrun/PostRunSummaryPolicy',
+    '../core',
   ] as const),
   trees: Object.freeze([
     './adapters',
@@ -781,6 +790,7 @@ export const CHAT_ENGINE_PUBLIC_EXPORTS = Object.freeze({
     'PostRunSummaryPolicyModule',
     'ChatMlCompatibilityModule',
     'ChatDlCompatibilityModule',
+    'CoreEngineModule',
   ] as const),
 } as const);
 
@@ -828,6 +838,7 @@ export const CHAT_ENGINE_RUNTIME_MODULES = Object.freeze({
   CompanionContinuity: CompanionContinuityModule,
   PostRunSceneBuilder: PostRunSceneBuilderModule,
   PostRunSummaryPolicy: PostRunSummaryPolicyModule,
+  CoreEngine: CoreEngineModule,
 } as const);
 
 export const CHAT_ENGINE_SUBTREE_MODULES = Object.freeze({
@@ -862,6 +873,7 @@ export const CHAT_ENGINE_SUBTREE_MODULES = Object.freeze({
   } as const),
   mlCompatibility: ChatMlCompatibilityModule,
   dlCompatibility: ChatDlCompatibilityModule,
+  coreEngine: CoreEngineModule,
 } as const);
 
 export const CHAT_ENGINE_NAMESPACE = Object.freeze({
@@ -899,6 +911,7 @@ export const CHAT_ENGINE_NAMESPACE = Object.freeze({
     compatibilityDl: ChatDlCompatibilityModule,
   } as const),
   types: CHAT_TYPES_NAMESPACE,
+  coreEngine: CoreEngineModule,
 } as const);
 
 /* ============================================================================
@@ -953,6 +966,7 @@ export const CHAT_ENGINE_LAZY_LOADERS = Object.freeze({
   PostRunSummaryPolicy: () => import('./postrun/PostRunSummaryPolicy'),
   mlCompatibility: () => import('./ml/ml_index'),
   dlCompatibility: () => import('./dl/dl_index'),
+  coreEngine: () => import('../core'),
 } as const);
 
 export const CHAT_BACKEND_SHADOW_RUNTIME_MODULES = {

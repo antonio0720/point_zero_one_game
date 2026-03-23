@@ -2,7 +2,7 @@
  * ============================================================================
  * POINT ZERO ONE — AUTHORITATIVE BACKEND CHAT TELEGRAPH POLICY
  * FILE: backend/src/game/engine/chat/combat/ChatTelegraphPolicy.ts
- * VERSION: 2026.03.19
+ * VERSION: 2026.03.23
  * AUTHORSHIP: Antonio T. Smith Jr.
  * LICENSE: Internal / Proprietary / All Rights Reserved
  * ============================================================================
@@ -108,1120 +108,506 @@ export interface ChatTelegraphPolicyLogger {
   warn(event: string, payload?: Readonly<Record<string, JsonValue>>): void;
 }
 
-export interface ChatTelegraphPolicyTuning {
-  readonly minimumLeadInMs: number;
-  readonly maximumLeadInMs: number;
-  readonly minimumRevealDelayMs: number;
-  readonly maximumRevealDelayMs: number;
-  readonly maximumBeats: number;
-  readonly quietChannelVisibilityPenalty01: Score01;
-  readonly publicWitnessBias01: Score01;
-  readonly helperForeshadowBias01: Score01;
-  readonly fakeOutTolerance01: Score01;
-  readonly minimumThreatReadability01: Score01;
-  readonly maximumThreatReadability01: Score01;
-  readonly threatRadarEscalationThreshold01: Score01;
-  readonly momentFlashThreshold01: Score01;
-  readonly rescueBannerThreshold01: Score01;
-  readonly proofHintThreshold01: Score01;
-  readonly quoteHintThreshold01: Score01;
-}
-
 export interface ChatTelegraphPolicyOptions {
   readonly clock?: ChatTelegraphPolicyClock;
   readonly logger?: ChatTelegraphPolicyLogger;
-  readonly tuning?: Partial<ChatTelegraphPolicyTuning>;
+  readonly strongVisibilityFloor01?: number;
+  readonly helperHauntFloor01?: number;
+  readonly witnessEscalationFloor01?: number;
+  readonly maintainPerRoomHistory?: number;
+  readonly publicWitnessWeight01?: number;
+  readonly dealRoomWitnessWeight01?: number;
+  readonly silenceBiasWeight01?: number;
+  readonly pressureBiasWeight01?: number;
 }
+
+export type ChatTelegraphVisibilityClass =
+  | 'VISIBLE'
+  | 'FELT'
+  | 'INFERRED'
+  | 'SHADOWED';
+
+export type ChatTelegraphBeatKind =
+  | 'PRELOAD'
+  | 'SILENCE'
+  | 'READ_GHOST'
+  | 'TYPING'
+  | 'PUBLIC_TILT'
+  | 'PRIVATE_TILT'
+  | 'REVEAL'
+  | 'PROOF_TELL'
+  | 'HELPER_HAUNT'
+  | 'COUNTER_WINDOW'
+  | 'AFTERMATH_HINT';
+
+export type ChatTelegraphOverlayCode =
+  | 'THREAT_RADAR'
+  | 'MOMENT_FLASH'
+  | 'PROOF_CUE'
+  | 'RESCUE_BANNER'
+  | 'COUNTERPLAY_PROMPT'
+  | 'WITNESS_PRESSURE'
+  | 'DEALROOM_SQUEEZE'
+  | 'QUOTE_RISK'
+  | 'SILENCE_TENSION';
 
 export interface ChatTelegraphBeat {
   readonly beatId: string;
-  readonly kind:
-    | 'SILENCE'
-    | 'TYPING'
-    | 'WHISPER'
-    | 'RADAR'
-    | 'VISIBLE_WARNING'
-    | 'HELPER_GHOST'
-    | 'CROWD_SHIFT'
-    | 'WINDOW_OPEN'
-    | 'ATTACK_REVEAL';
-  readonly label: string;
-  readonly startsAt: UnixMs;
-  readonly endsAt: UnixMs;
+  readonly kind: ChatTelegraphBeatKind;
+  readonly order: number;
+  readonly atMs: UnixMs;
   readonly visibleToPlayer: boolean;
-  readonly recommendedChannelId: ChatChannelId;
   readonly emphasis01: Score01;
-  readonly notes: readonly string[];
-}
-
-export interface ChatTelegraphWitnessPlan {
-  readonly audienceExposure01: Score01;
-  readonly ridiculeRisk01: Score01;
-  readonly hypeRisk01: Score01;
-  readonly whisperRisk01: Score01;
-  readonly syndicateLeakRisk01: Score01;
-  readonly recommendedCrowdLineCount: number;
-  readonly notes: readonly string[];
-}
-
-export interface ChatTelegraphOverlayPlan {
-  readonly threatRadarVisible: boolean;
-  readonly threatRadarThreatTag: string;
-  readonly threatRadarSeverityScore: Score100;
-  readonly momentFlashVisible: boolean;
-  readonly momentFlashLabel: string;
-  readonly counterplayPromptVisible: boolean;
-  readonly proofCueVisible: boolean;
-  readonly quoteCueVisible: boolean;
-  readonly rescueBannerVisible: boolean;
-  readonly rescueTone: 'NONE' | 'WATCHFUL' | 'STEADY' | 'URGENT';
-  readonly notes: readonly string[];
-}
-
-export interface ChatTelegraphCounterHint {
-  readonly demand: ChatBossCounterDemand;
+  readonly witnessWeight01: Score01;
+  readonly helperWeight01: Score01;
   readonly label: string;
-  readonly explanation: string;
+  readonly body: string;
+  readonly metadata?: JsonValue;
+}
+
+export interface ChatTelegraphOverlayCue {
+  readonly code: ChatTelegraphOverlayCode;
+  readonly active: boolean;
+  readonly confidence01: Score01;
+  readonly priority100: Score100;
+  readonly title: string;
+  readonly subtitle: string;
+  readonly payload?: JsonValue;
+}
+
+export interface ChatTelegraphDemandCue {
+  readonly demand: ChatBossCounterDemand;
+  readonly timing: ChatCounterTimingClass;
   readonly urgency01: Score01;
-  readonly relevance01: Score01;
-  readonly recommendedTiming: ChatCounterTimingClass;
-  readonly notes: readonly string[];
+  readonly readableLabel: string;
+  readonly rationale: string;
+}
+
+export interface ChatTelegraphWitnessProjection {
+  readonly visibleWitnessCount: number;
+  readonly latentWitnessCount: number;
+  readonly witnessDensity01: Score01;
+  readonly crowdLean: 'HOSTILE' | 'CURIOUS' | 'NEUTRAL' | 'SUPPORTIVE';
+  readonly roomWatching: boolean;
+  readonly reputationExposure100: Score100;
+}
+
+export interface ChatTelegraphHelperProjection {
+  readonly helperHaunt01: Score01;
+  readonly helperInterventionRisk01: Score01;
+  readonly helperShadowing: boolean;
+  readonly readableLabel: string;
+  readonly rationale: string;
+}
+
+export interface ChatTelegraphTimingProjection {
+  readonly visibleToPlayer: boolean;
+  readonly visibilityClass: ChatTelegraphVisibilityClass;
+  readonly revealDelayMs: number;
+  readonly silenceLeadInMs: number;
+  readonly typingLeadInMs: number;
+  readonly beatCount: number;
+  readonly readableThreat01: Score01;
+  readonly theatricality100: Score100;
 }
 
 export interface ChatTelegraphProjection {
+  readonly projectionId: string;
   readonly roomId: ChatRoomId;
-  readonly sessionId: ChatSessionId;
-  readonly fightId: string;
-  readonly roundId: string;
+  readonly sessionId?: ChatSessionId;
+  readonly causeEventId?: ChatEventId | null;
+  readonly fightKind: ChatBossFightKind;
   readonly attackId: string;
+  readonly roundId?: string;
+  readonly channelId: ChatChannelId;
+  readonly visibleChannelId: ChatVisibleChannel;
+  readonly pressureTier: PressureTier;
   readonly telegraph: ChatBossTelegraph;
-  readonly visibleChannel: ChatVisibleChannel;
-  readonly leadInMs: number;
-  readonly revealDelayMs: number;
-  readonly beatSchedule: readonly ChatTelegraphBeat[];
-  readonly witnessPlan: ChatTelegraphWitnessPlan;
-  readonly overlayPlan: ChatTelegraphOverlayPlan;
-  readonly counterHints: readonly ChatTelegraphCounterHint[];
-  readonly threatReadability01: Score01;
-  readonly dreadScore01: Score01;
-  readonly fakeOutRisk01: Score01;
-  readonly helperForeshadow01: Score01;
-  readonly shouldSimulateTyping: boolean;
-  readonly shouldPrimeSilence: boolean;
-  readonly shouldEchoToThreatRadar: boolean;
-  readonly dominantThreatTag: string;
-  readonly debug: Readonly<Record<string, JsonValue>>;
+  readonly timing: ChatTelegraphTimingProjection;
+  readonly witness: ChatTelegraphWitnessProjection;
+  readonly helper: ChatTelegraphHelperProjection;
+  readonly counterplay: readonly ChatTelegraphDemandCue[];
+  readonly overlays: readonly ChatTelegraphOverlayCue[];
+  readonly beats: readonly ChatTelegraphBeat[];
+  readonly authoredSummary: string;
+  readonly authoredHint: string;
+  readonly debug: JsonValue;
+  readonly projectedAt: UnixMs;
 }
 
-export interface ChatTelegraphProjectionRequest {
+export interface ChatTelegraphPolicyRequest {
   readonly state: ChatState;
-  readonly room: ChatRoomState;
-  readonly session: ChatSessionState;
-  readonly fight: ChatBossFightPlan;
-  readonly round: ChatBossRound;
-  readonly attack: ChatBossAttack;
-  readonly binding?: ChatBossCounterWindowBinding | null;
-  readonly signal?: ChatSignalEnvelope | null;
-  readonly sourceMessage?: ChatMessage | null;
+  readonly roomId: ChatRoomId;
+  readonly sessionId?: ChatSessionId;
   readonly causeEventId?: ChatEventId | null;
+  readonly fightPlan?: ChatBossFightPlan | null;
+  readonly round?: ChatBossRound | null;
+  readonly attack: ChatBossAttack;
+  readonly counterWindow?: ChatBossCounterWindowBinding | null;
+  readonly sourceMessage?: ChatMessage | null;
+  readonly signal?: ChatSignalEnvelope | null;
+  readonly preferredChannelId?: ChatChannelId | null;
+  readonly affect?: ChatAffectSnapshot | null;
+  readonly audienceHeat?: ChatAudienceHeat | null;
   readonly now?: UnixMs;
-  readonly notes?: readonly string[];
+  readonly traceLabel?: string;
+}
+
+export interface ChatTelegraphPolicyLedger {
+  readonly roomId: ChatRoomId;
+  readonly projections: readonly ChatTelegraphProjection[];
+  readonly byAttackId: Readonly<Record<string, readonly ChatTelegraphProjection[]>>;
+  readonly lastProjectedAt?: UnixMs;
 }
 
 // ============================================================================
 // MARK: Defaults
 // ============================================================================
 
-const DEFAULT_CLOCK: ChatTelegraphPolicyClock = Object.freeze({
+const DEFAULT_CLOCK: ChatTelegraphPolicyClock = {
   now: () => Date.now(),
+};
+
+const NOOP_LOGGER: ChatTelegraphPolicyLogger = {
+  debug() {},
+  info() {},
+  warn() {},
+};
+
+const DEFAULT_OPTIONS: Required<Omit<ChatTelegraphPolicyOptions, 'clock' | 'logger'>> = {
+  strongVisibilityFloor01: 0.62,
+  helperHauntFloor01: 0.36,
+  witnessEscalationFloor01: 0.52,
+  maintainPerRoomHistory: 180,
+  publicWitnessWeight01: 0.68,
+  dealRoomWitnessWeight01: 0.52,
+  silenceBiasWeight01: 0.58,
+  pressureBiasWeight01: 0.64,
+};
+
+const NEUTRAL_AFFECT: ChatAffectSnapshot = {
+  confidence01: clamp01(0.5),
+  frustration01: clamp01(0.18),
+  intimidation01: clamp01(0.2),
+  attachment01: clamp01(0.12),
+  curiosity01: clamp01(0.25),
+  embarrassment01: clamp01(0.1),
+  relief01: clamp01(0.08),
+};
+
+const CHANNEL_WEIGHT_TABLE: Readonly<Record<ChatVisibleChannel, number>> = Object.freeze({
+  GLOBAL: 1.0,
+  DEAL_ROOM: 0.92,
+  SYNDICATE: 0.66,
+  LOBBY: 0.5,
 });
 
-const DEFAULT_LOGGER: ChatTelegraphPolicyLogger = Object.freeze({
-  debug: () => undefined,
-  info: () => undefined,
-  warn: () => undefined,
+const ROOM_WITNESS_FLOOR: Readonly<Record<ChatRoomState['roomKind'], number>> = Object.freeze({
+  GLOBAL: 0.88,
+  SYNDICATE: 0.56,
+  DEAL_ROOM: 0.42,
+  LOBBY: 0.5,
+  PRIVATE: 0.22,
+  SYSTEM: 0.08,
 });
 
-export const DEFAULT_CHAT_TELEGRAPH_POLICY_TUNING: ChatTelegraphPolicyTuning = Object.freeze({
-  minimumLeadInMs: 120,
-  maximumLeadInMs: 4200,
-  minimumRevealDelayMs: 40,
-  maximumRevealDelayMs: 3800,
-  maximumBeats: 8,
-  quietChannelVisibilityPenalty01: clamp01(0.18),
-  publicWitnessBias01: clamp01(0.61),
-  helperForeshadowBias01: clamp01(0.44),
-  fakeOutTolerance01: clamp01(0.37),
-  minimumThreatReadability01: clamp01(0.21),
-  maximumThreatReadability01: clamp01(0.96),
-  threatRadarEscalationThreshold01: clamp01(0.46),
-  momentFlashThreshold01: clamp01(0.63),
-  rescueBannerThreshold01: clamp01(0.72),
-  proofHintThreshold01: clamp01(0.42),
-  quoteHintThreshold01: clamp01(0.39),
+const ATTACK_TEXT_HINTS: Readonly<Record<ChatBossAttackClass, { readonly summary: string; readonly hint: string }>> = Object.freeze({
+  PUBLIC_SHAME: {
+    summary: 'The attack wants witnesses before it wants damage.',
+    hint: 'Answer cleanly or the room will answer for you.',
+  },
+  QUOTE_TRAP: {
+    summary: 'The attack is waiting to weaponize memory.',
+    hint: 'A loose reply becomes a future receipt.',
+  },
+  PROOF_CHALLENGE: {
+    summary: 'The attack is narrowing the lane to verifiable proof.',
+    hint: 'Pressure does not care what you meant. It cares what you can prove.',
+  },
+  SILENCE_BAIT: {
+    summary: 'The attack is making delay itself feel incriminating.',
+    hint: 'The silence is part of the move.',
+  },
+  DEAL_ROOM_SQUEEZE: {
+    summary: 'The attack is compressing terms, time, and leverage together.',
+    hint: 'Predatory timing is trying to do half the work.',
+  },
+  CROWD_SIGNAL: {
+    summary: 'The attack is delegating pressure to the room.',
+    hint: 'Witness energy is the amplifier, not the attack text alone.',
+  },
+  CASCADE_TRIGGER: {
+    summary: 'The attack is trying to make one failure echo into several.',
+    hint: 'A rushed reply can widen the blast radius.',
+  },
+  TAUNT_SPIKE: {
+    summary: 'The attack is a sharp insult intended to provoke immediate reaction.',
+    hint: 'Short, biting replies escalate fast — consider defusing or ignoring.',
+  },
+  FALSE_RESPECT: {
+    summary: 'The attack masquerades as deference while pressuring for concession.',
+    hint: 'Don\'t mistake politeness for safety; check the terms and keep distance.',
+  },
+  TIMEBOXED_DEMAND: {
+    summary: 'The attack imposes an artificial deadline to force rushed choices.',
+    hint: 'Slow the pace and verify terms before answering under pressure.',
+  },
+  SHIELD_CRACKER: {
+    summary: 'The attack probes for a weakness in posture or prior claims.',
+    hint: 'Guard credentials and avoid volunteering details that widen the lane.',
+  },
+  HELPER_DENIAL: {
+    summary: 'The attack tries to sever or intimidate potential helpers before they act.',
+    hint: 'Look for ways to re-enable aid or document the exchange to attract witnesses.',
+  },
 });
-
-const TELEGRAPH_CHANNEL_PROFILES = Object.freeze({
-  GLOBAL: Object.freeze({
-    label: 'GLOBAL',
-    visibilityBonus01: clamp01(0.22),
-    witnessBonus01: clamp01(0.28),
-    whisperBias01: clamp01(0.16),
-    hypeBias01: clamp01(0.34),
-    ridiculeBias01: clamp01(0.33),
-    baseLeadInMs: 540,
-    baseRevealDelayMs: 620,
-  }),
-  SYNDICATE: Object.freeze({
-    label: 'SYNDICATE',
-    visibilityBonus01: clamp01(0.1),
-    witnessBonus01: clamp01(0.18),
-    whisperBias01: clamp01(0.31),
-    hypeBias01: clamp01(0.18),
-    ridiculeBias01: clamp01(0.14),
-    baseLeadInMs: 460,
-    baseRevealDelayMs: 540,
-  }),
-  DEAL_ROOM: Object.freeze({
-    label: 'DEAL_ROOM',
-    visibilityBonus01: clamp01(0.04),
-    witnessBonus01: clamp01(0.06),
-    whisperBias01: clamp01(0.37),
-    hypeBias01: clamp01(0.04),
-    ridiculeBias01: clamp01(0.09),
-    baseLeadInMs: 820,
-    baseRevealDelayMs: 930,
-  }),
-  DIRECT: Object.freeze({
-    label: 'DIRECT',
-    visibilityBonus01: clamp01(0.08),
-    witnessBonus01: clamp01(0.05),
-    whisperBias01: clamp01(0.12),
-    hypeBias01: clamp01(0.02),
-    ridiculeBias01: clamp01(0.04),
-    baseLeadInMs: 360,
-    baseRevealDelayMs: 420,
-  }),
-  SPECTATOR: Object.freeze({
-    label: 'SPECTATOR',
-    visibilityBonus01: clamp01(0.19),
-    witnessBonus01: clamp01(0.22),
-    whisperBias01: clamp01(0.19),
-    hypeBias01: clamp01(0.29),
-    ridiculeBias01: clamp01(0.24),
-    baseLeadInMs: 480,
-    baseRevealDelayMs: 590,
-  }),
-} as const);
-
-const TELEGRAPH_ATTACK_CLASS_PROFILE = Object.freeze({
-  HUMILIATION: Object.freeze({
-    readabilityBonus01: clamp01(0.14),
-    dreadBonus01: clamp01(0.22),
-    radarBias01: clamp01(0.27),
-    silenceBias01: clamp01(0.09),
-    helperForeshadow01: clamp01(0.33),
-  }),
-  TRAP: Object.freeze({
-    readabilityBonus01: clamp01(0.08),
-    dreadBonus01: clamp01(0.16),
-    radarBias01: clamp01(0.21),
-    silenceBias01: clamp01(0.18),
-    helperForeshadow01: clamp01(0.26),
-  }),
-  NEGOTIATION: Object.freeze({
-    readabilityBonus01: clamp01(0.09),
-    dreadBonus01: clamp01(0.13),
-    radarBias01: clamp01(0.12),
-    silenceBias01: clamp01(0.24),
-    helperForeshadow01: clamp01(0.21),
-  }),
-  SOCIAL: Object.freeze({
-    readabilityBonus01: clamp01(0.12),
-    dreadBonus01: clamp01(0.18),
-    radarBias01: clamp01(0.18),
-    silenceBias01: clamp01(0.11),
-    helperForeshadow01: clamp01(0.22),
-  }),
-  PROOF: Object.freeze({
-    readabilityBonus01: clamp01(0.18),
-    dreadBonus01: clamp01(0.1),
-    radarBias01: clamp01(0.19),
-    silenceBias01: clamp01(0.06),
-    helperForeshadow01: clamp01(0.17),
-  }),
-  DOMINANCE: Object.freeze({
-    readabilityBonus01: clamp01(0.1),
-    dreadBonus01: clamp01(0.2),
-    radarBias01: clamp01(0.23),
-    silenceBias01: clamp01(0.14),
-    helperForeshadow01: clamp01(0.24),
-  }),
-} as const);
-
-const TELEGRAPH_OPENING_MODE_PROFILE = Object.freeze({
-  VISIBLE: Object.freeze({
-    leadInMultiplier: 0.86,
-    revealDelayMultiplier: 0.88,
-    visibilityBias01: clamp01(0.22),
-    fakeOutBias01: clamp01(0.08),
-    typingBias01: clamp01(0.31),
-    silenceBias01: clamp01(0.19),
-  }),
-  QUIET: Object.freeze({
-    leadInMultiplier: 1.22,
-    revealDelayMultiplier: 1.27,
-    visibilityBias01: clamp01(0.04),
-    fakeOutBias01: clamp01(0.18),
-    typingBias01: clamp01(0.13),
-    silenceBias01: clamp01(0.37),
-  }),
-  SHADOW: Object.freeze({
-    leadInMultiplier: 1.14,
-    revealDelayMultiplier: 1.19,
-    visibilityBias01: clamp01(0.02),
-    fakeOutBias01: clamp01(0.23),
-    typingBias01: clamp01(0.09),
-    silenceBias01: clamp01(0.41),
-  }),
-  CROWD_SURGE: Object.freeze({
-    leadInMultiplier: 0.74,
-    revealDelayMultiplier: 0.82,
-    visibilityBias01: clamp01(0.27),
-    fakeOutBias01: clamp01(0.11),
-    typingBias01: clamp01(0.22),
-    silenceBias01: clamp01(0.08),
-  }),
-  BAIT: Object.freeze({
-    leadInMultiplier: 0.97,
-    revealDelayMultiplier: 1.06,
-    visibilityBias01: clamp01(0.14),
-    fakeOutBias01: clamp01(0.31),
-    typingBias01: clamp01(0.18),
-    silenceBias01: clamp01(0.21),
-  }),
-} as const);
-
-const TELEGRAPH_SEVERITY_PROFILE = Object.freeze({
-  LOW: Object.freeze({
-    leadInMultiplier: 0.84,
-    revealDelayMultiplier: 0.76,
-    dreadBonus01: clamp01(0.38),
-    fakeOutRisk01: clamp01(0.24),
-  }),
-  MEDIUM: Object.freeze({
-    leadInMultiplier: 1.0,
-    revealDelayMultiplier: 1.0,
-    dreadBonus01: clamp01(0.52),
-    fakeOutRisk01: clamp01(0.41),
-  }),
-  HIGH: Object.freeze({
-    leadInMultiplier: 1.18,
-    revealDelayMultiplier: 1.24,
-    dreadBonus01: clamp01(0.68),
-    fakeOutRisk01: clamp01(0.56),
-  }),
-  SEVERE: Object.freeze({
-    leadInMultiplier: 1.38,
-    revealDelayMultiplier: 1.52,
-    dreadBonus01: clamp01(0.84),
-    fakeOutRisk01: clamp01(0.72),
-  }),
-} as const);
-
-export const CHAT_TELEGRAPH_SCENE_SIGNATURES = Object.freeze([
-  Object.freeze({
-    signatureId: 'BANKRUPTCY_EXPOSURE',
-    label: 'Bankruptcy Exposure',
-    dominantThreatTag: 'HUMILIATION',
-    openingHint: 'VISIBLE',
-    severityHint: 'SEVERE',
-    description: 'Humiliation-heavy visible read before a public collapse strike.',
-  }),
-  Object.freeze({
-    signatureId: 'SHIELD_BREAK_SWARM',
-    label: 'Shield Break Swarm',
-    dominantThreatTag: 'SWARM',
-    openingHint: 'VISIBLE',
-    severityHint: 'HIGH',
-    description: 'Crowd-forward shield fracture telegraph with watcher amplification.',
-  }),
-  Object.freeze({
-    signatureId: 'DEAL_ROOM_SQUEEZE',
-    label: 'Deal Room Squeeze',
-    dominantThreatTag: 'SQUEEZE',
-    openingHint: 'QUIET',
-    severityHint: 'HIGH',
-    description: 'Quiet predatory negotiation squeeze with silence before reveal.',
-  }),
-  Object.freeze({
-    signatureId: 'PROOF_TRAP',
-    label: 'Proof Trap',
-    dominantThreatTag: 'PROOF',
-    openingHint: 'VISIBLE',
-    severityHint: 'HIGH',
-    description: 'Receipts-first trap that rewards evidence or quote defense.',
-  }),
-  Object.freeze({
-    signatureId: 'QUOTE_AMBUSH',
-    label: 'Quote Ambush',
-    dominantThreatTag: 'QUOTE',
-    openingHint: 'VISIBLE',
-    severityHint: 'MEDIUM',
-    description: 'Callback ambush built around prior boasts and fast reversal windows.',
-  }),
-  Object.freeze({
-    signatureId: 'RIVALRY_ESCALATION',
-    label: 'Rivalry Escalation',
-    dominantThreatTag: 'RIVALRY',
-    openingHint: 'VISIBLE',
-    severityHint: 'MEDIUM',
-    description: 'Relationship-colored boss pressure that personalizes the opening.',
-  }),
-  Object.freeze({
-    signatureId: 'PANIC_MISDIRECT',
-    label: 'Panic Misdirect',
-    dominantThreatTag: 'MISDIRECT',
-    openingHint: 'FAKEOUT',
-    severityHint: 'MEDIUM',
-    description: 'Fast fake-out lane that simulates certainty before a pivot.',
-  }),
-  Object.freeze({
-    signatureId: 'SHADOW_PULL',
-    label: 'Shadow Pull',
-    dominantThreatTag: 'SHADOW',
-    openingHint: 'QUIET',
-    severityHint: 'LOW',
-    description: 'Low-visibility shadow setup that should still feel dangerous.',
-  }),
-  Object.freeze({
-    signatureId: 'HELPER_TEST',
-    label: 'Helper Test',
-    dominantThreatTag: 'RESCUE',
-    openingHint: 'VISIBLE',
-    severityHint: 'MEDIUM',
-    description: 'A telegraph that intentionally leaves rescue space without killing pressure.',
-  }),
-  Object.freeze({
-    signatureId: 'LAST_STAND',
-    label: 'Last Stand',
-    dominantThreatTag: 'FINISHER',
-    openingHint: 'VISIBLE',
-    severityHint: 'SEVERE',
-    description: 'High-drama final-turn telegraph for comeback or humiliation endings.',
-  }),
-] as const);
-
-export const CHAT_TELEGRAPH_DEMAND_LABELS = Object.freeze({
-  PROOF: 'Bring receipts or materially demonstrable truth.',
-  QUOTE: 'Use a prior statement, callback, or exact language reversal.',
-  TIMING: 'Respond in the intended beat window rather than after it fully settles.',
-  SILENCE: 'Hold or delay visibly enough to invert the pressure.',
-  DOMINANCE: 'Project command rather than defense.',
-  DEFLECTION: 'Refuse the frame and move the threat elsewhere.',
-  NEGOTIATION: 'Change price, terms, or exit conditions instead of trading insults.',
-  HELPER: 'Use an ally or helper surface without surrendering authorship.',
-  EXIT: 'Convert survival into controlled disengagement.',
-} as const);
 
 // ============================================================================
-// MARK: Implementation
+// MARK: Mutable ledgers
+// ============================================================================
+
+interface MutableTelegraphLedger {
+  projections: ChatTelegraphProjection[];
+  byAttackId: Map<string, ChatTelegraphProjection[]>;
+  lastProjectedAt?: UnixMs;
+}
+
+// ============================================================================
+// MARK: Policy
 // ============================================================================
 
 export class ChatTelegraphPolicy {
   private readonly clock: ChatTelegraphPolicyClock;
   private readonly logger: ChatTelegraphPolicyLogger;
-  private readonly tuning: ChatTelegraphPolicyTuning;
+  private readonly options: Required<Omit<ChatTelegraphPolicyOptions, 'clock' | 'logger'>>;
+  private readonly roomLedgers = new Map<string, MutableTelegraphLedger>();
 
   public constructor(options: ChatTelegraphPolicyOptions = {}) {
-    this.clock = options.clock ?? DEFAULT_CLOCK;
-    this.logger = options.logger ?? DEFAULT_LOGGER;
-    this.tuning = Object.freeze({
-      ...DEFAULT_CHAT_TELEGRAPH_POLICY_TUNING,
-      ...(options.tuning ?? {}),
-    });
+    const { clock = DEFAULT_CLOCK, logger = NOOP_LOGGER, ...rest } = options;
+    this.clock = clock;
+    this.logger = logger;
+    this.options = {
+      ...DEFAULT_OPTIONS,
+      ...rest,
+    };
   }
 
-  public deriveProjection(request: ChatTelegraphProjectionRequest): ChatTelegraphProjection {
-    const now = asUnixMs(request.now ?? this.clock.now());
-    const visibleChannel = this.resolveVisibleChannel(request.fight.visibleChannel, request.fight.channelId);
-    const telegraph = request.attack.telegraph;
-    const channelProfile = this.getChannelProfile(visibleChannel);
-    const openingProfile = this.getOpeningProfile(telegraph.openingMode);
-    const severityProfile = this.getSeverityProfile(request.attack.severity);
-    const classProfile = this.getAttackClassProfile(request.attack.attackClass);
+  public project(request: ChatTelegraphPolicyRequest): ChatTelegraphProjection {
+    const now = request.now ?? asUnixMs(this.clock.now());
+    const room = resolveRoomState(request.state, request.roomId);
+    const session = resolveSessionState(request.state, request.sessionId);
+    const fightKind = resolveFightKind(request, room);
+    const channelId = resolveChannelId(request, room, request.attack);
+    const visibleChannelId = resolveVisibleChannelId(channelId, room);
+    const pressureTier = derivePressureTier(request.signal, request.attack, request.round, request.fightPlan);
+    const affect = resolveAffect(request);
+    const audienceHeat = resolveAudienceHeat(request.state, request.roomId, request.audienceHeat, visibleChannelId, now);
+    const baseTelegraph = deriveBaseTelegraph(request.attack, request.fightPlan, fightKind);
+    const witness = buildWitnessProjection({
+      state: request.state,
+      room,
+      session,
+      visibleChannelId,
+      attack: request.attack,
+      fightKind,
+      fightPlan: request.fightPlan,
+      audienceHeat,
+    }, this.options);
+    const helper = buildHelperProjection({
+      affect,
+      attack: request.attack,
+      fightPlan: request.fightPlan,
+      round: request.round,
+      signal: request.signal,
+      session,
+      witness,
+      pressureTier,
+    }, this.options);
 
-    const publicExposure01 = this.derivePublicExposure01(request, channelProfile);
-    const humiliationRisk01 = this.deriveHumiliationRisk01(request, publicExposure01);
-    const pressureStress01 = this.derivePressureStress01(request);
-    const rescueNeed01 = this.deriveRescueNeed01(request, humiliationRisk01, pressureStress01);
-    const witnessPlan = this.buildWitnessPlan(request, channelProfile, publicExposure01, humiliationRisk01);
+    const telegraph = authorTelegraph({
+      attack: request.attack,
+      fightKind,
+      baseTelegraph,
+      room,
+      session,
+      visibleChannelId,
+      witness,
+      helper,
+      affect,
+      pressureTier,
+      fightPlan: request.fightPlan,
+      round: request.round,
+      counterWindow: request.counterWindow,
+      sourceMessage: request.sourceMessage,
+    }, now, this.options);
 
-    const threatReadability01 = clamp01(
-      this.tuning.minimumThreatReadability01
-      + classProfile.readabilityBonus01
-      + openingProfile.visibilityBias01
-      + publicExposure01 * 0.22
-      + pressureStress01 * 0.12
-      - this.visibilityPenaltyForQuietChannel(visibleChannel),
+    const counterplay = buildCounterplayDemandCues(
+      request.attack,
+      request.counterWindow ?? request.round?.counterWindow ?? null,
+      affect,
+      pressureTier,
+      witness,
     );
 
-    const dreadScore01 = clamp01(
-      severityProfile.dreadBonus01
-      + classProfile.dreadBonus01
-      + humiliationRisk01 * 0.28
-      + pressureStress01 * 0.14
-      + witnessPlan.ridiculeRisk01 * 0.1,
-    );
+    const timing = buildTimingProjection({
+      telegraph,
+      attack: request.attack,
+      fightKind,
+      visibleChannelId,
+      room,
+      affect,
+      witness,
+      helper,
+      pressureTier,
+      counterplay,
+    }, this.options);
 
-    const fakeOutRisk01 = clamp01(
-      severityProfile.fakeOutRisk01
-      + openingProfile.fakeOutBias01
-      + Number(telegraph.canFakeOut) * 0.14
-      + Number(request.attack.opensCounterWindow) * 0.04
-      - threatReadability01 * 0.08,
-    );
-
-    const helperForeshadow01 = clamp01(
-      classProfile.helperForeshadow01
-      + this.tuning.helperForeshadowBias01 * 0.33
-      + rescueNeed01 * 0.22
-      + Number(request.attack.allowsHelperAssistance) * 0.16,
-    );
-
-    const leadInMs = this.clampLeadInMs(
-      Math.round(
-        (channelProfile.baseLeadInMs + telegraph.silenceLeadInMs)
-        * openingProfile.leadInMultiplier
-        * severityProfile.leadInMultiplier
-        * (1 + pressureStress01 * 0.22),
-      ),
-    );
-
-    const revealDelayMs = this.clampRevealDelayMs(
-      Math.round(
-        (channelProfile.baseRevealDelayMs + telegraph.revealDelayMs)
-        * openingProfile.revealDelayMultiplier
-        * severityProfile.revealDelayMultiplier
-        * (1 + fakeOutRisk01 * 0.18),
-      ),
-    );
-
-    const shouldSimulateTyping = telegraph.typingTheaterRecommended || openingProfile.typingBias01 > 0.15;
-    const shouldPrimeSilence = openingProfile.silenceBias01 > 0.14 || telegraph.silenceLeadInMs > 0;
-    const shouldEchoToThreatRadar = dreadScore01 >= this.tuning.threatRadarEscalationThreshold01;
-
-    const counterHints = this.buildCounterHints(request.attack, request.binding, threatReadability01, dreadScore01);
-    const beatSchedule = this.buildBeatSchedule({
+    const beats = buildBeatPlan({
       now,
-      request,
       telegraph,
-      visibleChannel,
-      leadInMs,
-      revealDelayMs,
-      shouldSimulateTyping,
-      shouldPrimeSilence,
-      helperForeshadow01,
-      threatReadability01,
-      dreadScore01,
-      shouldEchoToThreatRadar,
+      attack: request.attack,
+      fightKind,
+      visibleChannelId,
+      pressureTier,
+      timing,
+      witness,
+      helper,
+      counterplay,
+      sourceMessage: request.sourceMessage,
+      causeEventId: request.causeEventId,
+      room,
+      session,
     });
 
-    const dominantThreatTag = this.deriveDominantThreatTag(request, telegraph, witnessPlan, counterHints);
-    const overlayPlan = this.buildOverlayPlan({
-      request,
+    const overlays = buildOverlayCues({
       telegraph,
-      threatReadability01,
-      dreadScore01,
-      fakeOutRisk01,
-      rescueNeed01,
-      dominantThreatTag,
-      counterHints,
-      shouldEchoToThreatRadar,
+      attack: request.attack,
+      fightKind,
+      room,
+      visibleChannelId,
+      pressureTier,
+      witness,
+      helper,
+      affect,
+      counterplay,
+      timing,
+      sourceMessage: request.sourceMessage,
+      counterWindow: request.counterWindow ?? request.round?.counterWindow ?? null,
     });
 
-    const debug = Object.freeze({
+    const authoredSummary = authorSummary(request.attack, fightKind, timing, witness, helper);
+    const authoredHint = authorHint(request.attack, fightKind, counterplay, helper, timing);
+
+    const projection: ChatTelegraphProjection = {
+      projectionId: createProjectionId(request.attack.attackId, request.round?.roundId, now),
+      roomId: request.roomId,
+      sessionId: request.sessionId,
       causeEventId: request.causeEventId ?? null,
-      channelId: request.fight.channelId,
-      visibleChannel,
-      telegraphId: telegraph.telegraphId,
-      publicExposure01,
-      humiliationRisk01,
-      pressureStress01,
-      rescueNeed01,
-      threatReadability01,
-      dreadScore01,
-      fakeOutRisk01,
-      helperForeshadow01,
-      beatCount: beatSchedule.length,
-      dominantThreatTag,
-      notes: Object.freeze([...(request.notes ?? []), ...(request.attack.notes ?? [])]),
-    } satisfies Record<string, JsonValue>);
-
-    this.logger.debug('chat.telegraph.derived', debug);
-
-    return Object.freeze({
-      roomId: request.room.roomId,
-      sessionId: request.session.identity.sessionId,
-      fightId: String(request.fight.bossFightId),
-      roundId: String(request.round.roundId),
+      fightKind,
       attackId: String(request.attack.attackId),
+      roundId: request.round ? String(request.round.roundId) : undefined,
+      channelId,
+      visibleChannelId,
+      pressureTier,
       telegraph,
-      visibleChannel,
-      leadInMs,
-      revealDelayMs,
-      beatSchedule,
-      witnessPlan,
-      overlayPlan,
-      counterHints,
-      threatReadability01,
-      dreadScore01,
-      fakeOutRisk01,
-      helperForeshadow01,
-      shouldSimulateTyping,
-      shouldPrimeSilence,
-      shouldEchoToThreatRadar,
-      dominantThreatTag,
-      debug,
-    });
-  }
-
-  public deriveOverlayPlan(request: ChatTelegraphProjectionRequest): ChatTelegraphOverlayPlan {
-    return this.deriveProjection(request).overlayPlan;
-  }
-
-  public deriveBeatSchedule(request: ChatTelegraphProjectionRequest): readonly ChatTelegraphBeat[] {
-    return this.deriveProjection(request).beatSchedule;
-  }
-
-  private buildBeatSchedule(input: {
-    readonly now: UnixMs;
-    readonly request: ChatTelegraphProjectionRequest;
-    readonly telegraph: ChatBossTelegraph;
-    readonly visibleChannel: ChatVisibleChannel;
-    readonly leadInMs: number;
-    readonly revealDelayMs: number;
-    readonly shouldSimulateTyping: boolean;
-    readonly shouldPrimeSilence: boolean;
-    readonly helperForeshadow01: Score01;
-    readonly threatReadability01: Score01;
-    readonly dreadScore01: Score01;
-    readonly shouldEchoToThreatRadar: boolean;
-  }): readonly ChatTelegraphBeat[] {
-    const beats: ChatTelegraphBeat[] = [];
-    const baseStart = input.now;
-    let cursor = baseStart;
-
-    if (input.shouldPrimeSilence) {
-      const silenceDuration = Math.max(80, Math.round(input.leadInMs * 0.34));
-      beats.push(
-        this.createBeat(
-          'SILENCE',
-          'Pressure hangs without text.',
-          cursor,
-          cursor + silenceDuration,
-          false,
-          input.request.fight.channelId,
-          clamp01(0.31 + input.dreadScore01 * 0.25),
-          ['Silence intentionally primes the player before visible language appears.'],
-        ),
-      );
-      cursor = asUnixMs(cursor + silenceDuration);
-    }
-
-    if (input.shouldSimulateTyping) {
-      const typingDuration = Math.max(120, Math.round(input.leadInMs * 0.28));
-      beats.push(
-        this.createBeat(
-          'TYPING',
-          'A rival presence flickers into intent.',
-          cursor,
-          cursor + typingDuration,
-          true,
-          input.request.fight.channelId,
-          clamp01(0.28 + input.threatReadability01 * 0.32),
-          ['Typing theater implies active authorship and sharpens the coming reveal.'],
-        ),
-      );
-      cursor = asUnixMs(cursor + typingDuration);
-    }
-
-    if (input.shouldEchoToThreatRadar) {
-      const radarDuration = Math.max(60, Math.round(input.revealDelayMs * 0.16));
-      beats.push(
-        this.createBeat(
-          'RADAR',
-          'Threat radar spikes before the line lands.',
-          cursor,
-          cursor + radarDuration,
-          true,
-          input.request.fight.channelId,
-          clamp01(0.22 + input.dreadScore01 * 0.28),
-          ['Threat radar should not replace the telegraph; it should corroborate it.'],
-        ),
-      );
-      cursor = asUnixMs(cursor + radarDuration);
-    }
-
-    if (input.helperForeshadow01 >= this.tuning.helperForeshadowBias01) {
-      const helperDuration = Math.max(70, Math.round(input.leadInMs * 0.14));
-      beats.push(
-        this.createBeat(
-          'HELPER_GHOST',
-          'A helper presence hovers but does not yet intervene.',
-          cursor,
-          cursor + helperDuration,
-          false,
-          input.request.fight.channelId,
-          clamp01(0.19 + input.helperForeshadow01 * 0.41),
-          ['Helper foreshadowing signals care without collapsing pressure.'],
-        ),
-      );
-      cursor = asUnixMs(cursor + helperDuration);
-    }
-
-    const crowdDuration = Math.max(60, Math.round(input.revealDelayMs * 0.12));
-    beats.push(
-      this.createBeat(
-        'CROWD_SHIFT',
-        this.describeCrowdShift(input.visibleChannel, input.dreadScore01),
-        cursor,
-        cursor + crowdDuration,
-        (input.visibleChannel as string) !== 'DIRECT',
-        input.request.fight.channelId,
-        clamp01(0.18 + input.dreadScore01 * 0.29),
-        ['Crowd shift expresses witness behavior before the attack text resolves.'],
-      ),
-    );
-    cursor = asUnixMs(cursor + crowdDuration);
-
-    const warningDuration = Math.max(90, Math.round(input.revealDelayMs * 0.23));
-    beats.push(
-      this.createBeat(
-        'VISIBLE_WARNING',
-        this.describeWarningLabel(input.telegraph, input.visibleChannel),
-        cursor,
-        cursor + warningDuration,
-        input.telegraph.visibleToPlayer,
-        input.request.fight.channelId,
-        clamp01(0.33 + input.threatReadability01 * 0.34),
-        ['Visible warnings should feel like mounting inevitability, not UI spam.'],
-      ),
-    );
-    cursor = asUnixMs(cursor + warningDuration);
-
-    if (input.request.binding) {
-      const windowDuration = Math.max(50, Math.round(input.revealDelayMs * 0.08));
-      beats.push(
-        this.createBeat(
-          'WINDOW_OPEN',
-          'The counter window is about to become live.',
-          cursor,
-          cursor + windowDuration,
-          true,
-          input.request.fight.channelId,
-          clamp01(0.29 + input.threatReadability01 * 0.31),
-          ['Window-open beats communicate agency without giving away the entire attack.'],
-        ),
-      );
-      cursor = asUnixMs(cursor + windowDuration);
-    }
-
-    beats.push(
-      this.createBeat(
-        'ATTACK_REVEAL',
-        `Attack reveals: ${input.request.attack.label}`,
-        cursor,
-        cursor + Math.max(45, Math.round(input.revealDelayMs * 0.06)),
-        true,
-        input.request.fight.channelId,
-        clamp01(0.44 + input.dreadScore01 * 0.34),
-        ['Final beat collapses suspense into actionable threat recognition.'],
-      ),
-    );
-
-    return Object.freeze(beats.slice(0, this.tuning.maximumBeats));
-  }
-
-  private buildWitnessPlan(
-    request: ChatTelegraphProjectionRequest,
-    channelProfile: ReturnType<ChatTelegraphPolicy['getChannelProfile']>,
-    publicExposure01: Score01,
-    humiliationRisk01: Score01,
-  ): ChatTelegraphWitnessPlan {
-    const whisperRisk01 = clamp01(channelProfile.whisperBias01 + publicExposure01 * 0.18);
-    const hypeRisk01 = clamp01(channelProfile.hypeBias01 + publicExposure01 * 0.21);
-    const ridiculeRisk01 = clamp01(channelProfile.ridiculeBias01 + humiliationRisk01 * 0.33);
-    const syndicateLeakRisk01 = clamp01(
-      Number(request.fight.visibleChannel === 'SYNDICATE') * 0.18
-      + Number((request.attack.attackClass as string) === 'NEGOTIATION') * 0.16
-      + publicExposure01 * 0.09,
-    );
-    const recommendedCrowdLineCount = Math.max(
-      0,
-      Math.min(
-        4,
-        Math.round(
-          publicExposure01 * 2.7
-          + ridiculeRisk01 * 1.4
-          + hypeRisk01 * 0.8,
-        ),
-      ),
-    );
-
-    return Object.freeze({
-      audienceExposure01: publicExposure01,
-      ridiculeRisk01,
-      hypeRisk01,
-      whisperRisk01,
-      syndicateLeakRisk01,
-      recommendedCrowdLineCount,
-      notes: Object.freeze([
-        'Witness density determines whether the telegraph should feel private, intimate, or stage-like.',
-        request.fight.visibleChannel === 'DEAL_ROOM'
-          ? 'Deal-room witnesses should feel quiet and predatory.'
-          : 'Public witnesses should feel reactive and reputational.',
-      ]),
-    });
-  }
-
-  private buildOverlayPlan(input: {
-    readonly request: ChatTelegraphProjectionRequest;
-    readonly telegraph: ChatBossTelegraph;
-    readonly threatReadability01: Score01;
-    readonly dreadScore01: Score01;
-    readonly fakeOutRisk01: Score01;
-    readonly rescueNeed01: Score01;
-    readonly dominantThreatTag: string;
-    readonly counterHints: readonly ChatTelegraphCounterHint[];
-    readonly shouldEchoToThreatRadar: boolean;
-  }): ChatTelegraphOverlayPlan {
-    const topHint = input.counterHints[0] ?? null;
-    const proofCueVisible = input.counterHints.some((hint) => hint.demand === 'PROOF_REPLY')
-      && input.threatReadability01 >= this.tuning.proofHintThreshold01;
-    const quoteCueVisible = input.counterHints.some((hint) => hint.demand === 'QUOTE_REPLY')
-      && input.threatReadability01 >= this.tuning.quoteHintThreshold01;
-    const rescueTone = input.rescueNeed01 >= this.tuning.rescueBannerThreshold01
-      ? 'URGENT'
-      : input.rescueNeed01 >= clamp01(0.51)
-        ? 'STEADY'
-        : input.rescueNeed01 >= clamp01(0.34)
-          ? 'WATCHFUL'
-          : 'NONE';
-
-    return Object.freeze({
-      threatRadarVisible: input.shouldEchoToThreatRadar,
-      threatRadarThreatTag: input.dominantThreatTag,
-      threatRadarSeverityScore: clamp100(42 + input.dreadScore01 * 58),
-      momentFlashVisible: input.dreadScore01 >= this.tuning.momentFlashThreshold01,
-      momentFlashLabel: this.buildMomentFlashLabel(input.request.attack, input.telegraph),
-      counterplayPromptVisible: topHint !== null && input.fakeOutRisk01 < clamp01(0.81),
-      proofCueVisible,
-      quoteCueVisible,
-      rescueBannerVisible: rescueTone !== 'NONE',
-      rescueTone,
-      notes: Object.freeze([
-        'Overlay visibility is a projection recommendation, not a UI command.',
-        input.request.fight.visibleChannel === 'DEAL_ROOM'
-          ? 'Deal-room overlays should remain quieter than global panic surfacing.'
-          : 'Public overlays may be bolder because spectators are part of the scene.',
-      ]),
-    });
-  }
-
-  private buildCounterHints(
-    attack: ChatBossAttack,
-    binding: ChatBossCounterWindowBinding | null | undefined,
-    threatReadability01: Score01,
-    dreadScore01: Score01,
-  ): readonly ChatTelegraphCounterHint[] {
-    const demands = binding?.requiredDemands?.length
-      ? binding.requiredDemands
-      : attack.counterDemands;
-
-    const hints = demands.map((demand, index) =>
-      Object.freeze({
-        demand,
-        label: this.labelForDemand(demand),
-        explanation: this.explanationForDemand(demand, attack),
-        urgency01: clamp01(dreadScore01 + (index === 0 ? 0.12 : 0.02) - index * 0.06),
-        relevance01: clamp01(threatReadability01 + (attack.counterDemands.includes(demand) ? 0.09 : 0.01)),
-        recommendedTiming: binding?.idealTiming ?? attack.preferredCounterTiming,
-        notes: Object.freeze([
-          'Hints explain what the attack is asking of the defender without prescribing exact text.',
-        ]),
-      } satisfies ChatTelegraphCounterHint),
-    );
-
-    return Object.freeze(
-      hints.sort((a, b) => {
-        if (b.relevance01 !== a.relevance01) return Number(b.relevance01) - Number(a.relevance01);
-        return Number(b.urgency01) - Number(a.urgency01);
-      }),
-    );
-  }
-
-  private resolveVisibleChannel(
-    preferred: ChatVisibleChannel,
-    fallbackChannelId: ChatChannelId,
-  ): ChatVisibleChannel {
-    if (preferred && isVisibleChannelId(preferred)) return preferred;
-    if (isVisibleChannelId(fallbackChannelId)) return fallbackChannelId;
-    return 'GLOBAL';
-  }
-
-  private derivePublicExposure01(
-    request: ChatTelegraphProjectionRequest,
-    channelProfile: ReturnType<ChatTelegraphPolicy['getChannelProfile']>,
-  ): Score01 {
-    const base =
-      Number(request.fight.visibleChannel === 'GLOBAL') * 0.42
-      + Number((request.fight.visibleChannel as string) === 'SPECTATOR') * 0.31
-      + Number(request.fight.visibleChannel === 'SYNDICATE') * 0.19
-      + channelProfile.witnessBonus01 * 0.66;
-
-    const signalBoost = request.signal ? this.estimateSignalPublicity01(request.signal) * 0.21 : 0;
-    const roomBoost = this.estimateRoomPublicity01(request.room) * 0.2;
-    return clamp01(base + signalBoost + roomBoost + this.tuning.publicWitnessBias01 * 0.1);
-  }
-
-  private deriveHumiliationRisk01(
-    request: ChatTelegraphProjectionRequest,
-    publicExposure01: Score01,
-  ): Score01 {
-    const base =
-      Number((request.attack.attackClass as string) === 'HUMILIATION') * 0.28
-      + Number((request.attack.attackClass as string) === 'DOMINANCE') * 0.18
-      + Number(request.attack.crowdAmplified) * 0.11
-      + Number((request.attack.primaryPunishment as string) === 'PUBLIC_MARK') * 0.15
-      + Number((request.attack.primaryPunishment as string) === 'REPUTATION_BLEED') * 0.13;
-
-    return clamp01(base + publicExposure01 * 0.29 + this.estimateAffectFragility01(request.signal) * 0.14);
-  }
-
-  private derivePressureStress01(request: ChatTelegraphProjectionRequest): Score01 {
-    const pressureTier = this.estimatePressureTier(request.signal);
-    switch (pressureTier) {
-      case 'CRITICAL':
-        return clamp01(0.91);
-      case 'HIGH':
-        return clamp01(0.76);
-      case 'ELEVATED':
-        return clamp01(0.58);
-      case 'BUILDING':
-        return clamp01(0.32);
-      case 'NONE':
-      default:
-        return clamp01(0.18);
-    }
-  }
-
-  private deriveRescueNeed01(
-    request: ChatTelegraphProjectionRequest,
-    humiliationRisk01: Score01,
-    pressureStress01: Score01,
-  ): Score01 {
-    return clamp01(
-      Number(request.attack.allowsHelperAssistance) * 0.18
-      + humiliationRisk01 * 0.31
-      + pressureStress01 * 0.23
-      + this.estimateAffectFragility01(request.signal) * 0.16,
-    );
-  }
-
-  private visibilityPenaltyForQuietChannel(visibleChannel: ChatVisibleChannel): number {
-    if (visibleChannel === 'DEAL_ROOM' || (visibleChannel as string) === 'DIRECT') {
-      return this.tuning.quietChannelVisibilityPenalty01;
-    }
-    return 0;
-  }
-
-  private buildMomentFlashLabel(attack: ChatBossAttack, telegraph: ChatBossTelegraph): string {
-    const severity = attack.severity.toLowerCase();
-    const klass = attack.attackClass.toLowerCase();
-    return `${telegraph.label} / ${klass} / ${severity}`;
-  }
-
-  private deriveDominantThreatTag(
-    request: ChatTelegraphProjectionRequest,
-    telegraph: ChatBossTelegraph,
-    witnessPlan: ChatTelegraphWitnessPlan,
-    counterHints: readonly ChatTelegraphCounterHint[],
-  ): string {
-    const leadHint = counterHints[0]?.demand ?? 'TIMING';
-    const sceneTag = request.attack.attackClass.toLowerCase();
-    if (witnessPlan.ridiculeRisk01 >= clamp01(0.62)) return `ridicule/${sceneTag}/${String(leadHint).toLowerCase()}`;
-    if (request.fight.visibleChannel === 'DEAL_ROOM') return `predation/${sceneTag}/${String(leadHint).toLowerCase()}`;
-    if (telegraph.canFakeOut) return `misdirect/${sceneTag}/${String(leadHint).toLowerCase()}`;
-    return `${sceneTag}/${String(leadHint).toLowerCase()}`;
-  }
-
-  private labelForDemand(demand: ChatBossCounterDemand): string {
-    return String(demand)
-      .replace(/_/g, ' ')
-      .toLowerCase()
-      .replace(/(^\w|\s\w)/g, (value) => value.toUpperCase());
-  }
-
-  private explanationForDemand(demand: ChatBossCounterDemand, attack: ChatBossAttack): string {
-    const fromRegistry = (CHAT_TELEGRAPH_DEMAND_LABELS as Record<string, string>)[String(demand)];
-    const contextual =
-      demand === 'PROOF_REPLY' && attack.proofWeighted
-        ? 'This attack is weighted toward evidence. Unsupported swagger will underperform.'
-        : demand === 'QUOTE_REPLY' && attack.quoteWeighted
-          ? 'This boss lane rewards callbacks and direct reversals of prior language.'
-          : demand === 'SILENCE_REPLY' && attack.allowsSilenceOutplay
-            ? 'Deliberate timing may be stronger than instant speech here.'
-            : demand === 'NEGOTIATION_REPLY' && attack.allowsNegotiationEscape
-              ? 'Terms can be changed; you do not have to accept the hostile frame.'
-              : 'Meet the demand with timing, clarity, and authored intent.';
-    return `${fromRegistry ?? 'Readable counter demand.'} ${contextual}`;
-  }
-
-  private describeCrowdShift(visibleChannel: ChatVisibleChannel, dreadScore01: Score01): string {
-    if (visibleChannel === 'DEAL_ROOM') {
-      return dreadScore01 >= clamp01(0.6)
-        ? 'The room goes quiet in a predatory way.'
-        : 'A quiet read passes across the table.';
-    }
-    if (visibleChannel === 'SYNDICATE') {
-      return dreadScore01 >= clamp01(0.58)
-        ? 'Insiders lean in as tension tightens.'
-        : 'Trusted watchers notice the angle.';
-    }
-    return dreadScore01 >= clamp01(0.61)
-      ? 'The crowd senses blood before the line drops.'
-      : 'Spectators catch the incoming pressure.';
-  }
-
-  private describeWarningLabel(telegraph: ChatBossTelegraph, visibleChannel: ChatVisibleChannel): string {
-    if (visibleChannel === 'DEAL_ROOM') return `${telegraph.label} — terms are shifting.`;
-    if ((visibleChannel as string) === 'DIRECT') return `${telegraph.label} — direct pressure incoming.`;
-    return `${telegraph.label} — the room can see it forming.`;
-  }
-
-  private createBeat(
-    kind: ChatTelegraphBeat['kind'],
-    label: string,
-    startsAt: number,
-    endsAt: number,
-    visibleToPlayer: boolean,
-    recommendedChannelId: ChatChannelId,
-    emphasis01: Score01,
-    notes: readonly string[],
-  ): ChatTelegraphBeat {
-    return Object.freeze({
-      beatId: `${kind}:${startsAt}:${endsAt}`,
-      kind,
-      label,
-      startsAt: asUnixMs(startsAt),
-      endsAt: asUnixMs(Math.max(endsAt, startsAt + 1)),
-      visibleToPlayer,
-      recommendedChannelId,
-      emphasis01,
-      notes: Object.freeze([...notes]),
-    });
-  }
-
-  private clampLeadInMs(value: number): number {
-    return Math.max(this.tuning.minimumLeadInMs, Math.min(this.tuning.maximumLeadInMs, value));
-  }
-
-  private clampRevealDelayMs(value: number): number {
-    return Math.max(this.tuning.minimumRevealDelayMs, Math.min(this.tuning.maximumRevealDelayMs, value));
-  }
-
-  private getChannelProfile(channel: ChatVisibleChannel) {
-    return TELEGRAPH_CHANNEL_PROFILES[channel] ?? TELEGRAPH_CHANNEL_PROFILES.GLOBAL;
-  }
-
-  private getOpeningProfile(mode: ChatBossOpeningMode) {
-    return TELEGRAPH_OPENING_MODE_PROFILE[mode] ?? TELEGRAPH_OPENING_MODE_PROFILE.VISIBLE;
-  }
-
-  private getSeverityProfile(severity: ChatBossAttackSeverity) {
-    return TELEGRAPH_SEVERITY_PROFILE[severity] ?? TELEGRAPH_SEVERITY_PROFILE.MEDIUM;
-  }
-
-  private getAttackClassProfile(attackClass: ChatBossAttackClass) {
-    return TELEGRAPH_ATTACK_CLASS_PROFILE[attackClass] ?? TELEGRAPH_ATTACK_CLASS_PROFILE.SOCIAL;
-  }
-
-  private estimateSignalPublicity01(signal: ChatSignalEnvelope): Score01 {
-    const data = signal as unknown as {
-      channelId?: string;
-      metadata?: Record<string, unknown>;
+      timing,
+      witness,
+      helper,
+      counterplay,
+      overlays,
+      beats,
+      authoredSummary,
+      authoredHint,
+      debug: {
+        traceLabel: request.traceLabel ?? null,
+        roomKind: room?.roomKind ?? null,
+        pressureTier,
+        audienceHeat01: audienceHeat ? Number(audienceHeat.heat01) : null,
+        witnessVisible: witness.visibleWitnessCount,
+        witnessLatent: witness.latentWitnessCount,
+        helperHaunt01: Number(helper.helperHaunt01),
+        readableThreat01: Number(timing.readableThreat01),
+        visibilityClass: timing.visibilityClass,
+        channelId,
+        visibleChannelId,
+        sourceMessageId: request.sourceMessage ? String(request.sourceMessage.id) : null,
+        causeEventId: request.causeEventId ?? null,
+        counterDemandCount: counterplay.length,
+        beatCount: beats.length,
+        overlayCount: overlays.filter((entry) => entry.active).length,
+      },
+      projectedAt: now,
     };
 
-    const fromChannel =
-      data.channelId === 'GLOBAL' ? 0.26 :
-      data.channelId === 'SPECTATOR' ? 0.22 :
-      data.channelId === 'SYNDICATE' ? 0.15 :
-      data.channelId === 'DEAL_ROOM' ? 0.08 : 0.05;
+    this.recordProjection(projection);
 
-    const metadata = data.metadata ?? {};
-    const fromFlags =
-      Number(Boolean(metadata['publicWitness'])) * 0.18
-      + Number(Boolean(metadata['globalLeak'])) * 0.12
-      + Number(Boolean(metadata['proofVisible'])) * 0.07;
+    this.logger.debug('chat.combat.telegraph.projected', {
+      roomId: request.roomId as unknown as string,
+      sessionId: request.sessionId ? (request.sessionId as unknown as string) : null,
+      attackId: String(request.attack.attackId),
+      fightKind,
+      visibilityClass: timing.visibilityClass,
+      readableThreat01: Number(timing.readableThreat01),
+      helperHaunt01: Number(helper.helperHaunt01),
+      witnessDensity01: Number(witness.witnessDensity01),
+      pressureTier,
+      visibleChannelId,
+    });
 
-    return clamp01(fromChannel + fromFlags);
+    return projection;
   }
 
-  private estimateRoomPublicity01(room: ChatRoomState): Score01 {
-    const candidate = room as unknown as {
-      channelId?: string;
-      roomType?: string;
-      metadata?: Record<string, unknown>;
-    };
-    const channelBias =
-      candidate.channelId === 'GLOBAL' ? 0.31 :
-      candidate.channelId === 'SPECTATOR' ? 0.27 :
-      candidate.channelId === 'SYNDICATE' ? 0.14 :
-      candidate.channelId === 'DEAL_ROOM' ? 0.06 : 0.08;
-    const metadataBias =
-      Number(Boolean(candidate.metadata?.['featured'])) * 0.11
-      + Number(Boolean(candidate.metadata?.['highTraffic'])) * 0.09;
-    return clamp01(channelBias + metadataBias);
+  public getRoomLedger(roomId: ChatRoomId): ChatTelegraphPolicyLedger {
+    const ledger = this.roomLedgers.get(String(roomId));
+    if (!ledger) {
+      return {
+        roomId,
+        projections: [],
+        byAttackId: {},
+        lastProjectedAt: undefined,
+      };
+    }
+    return freezeLedger(roomId, ledger);
   }
 
-  private estimateAffectFragility01(signal: ChatSignalEnvelope | null | undefined): Score01 {
-    if (!signal) return clamp01(0.18);
-    const payload = signal as unknown as {
-      affect?: ChatAffectSnapshot | null;
-      metadata?: Record<string, unknown>;
-    };
-    const affect = payload.affect;
-    const metadata = payload.metadata ?? {};
-    const affectBias = affect ? this.extractAffectNumerics(affect) : 0.16;
-    const metadataBias =
-      Number(Boolean(metadata['frustrated'])) * 0.11
-      + Number(Boolean(metadata['recentFailure'])) * 0.14
-      + Number(Boolean(metadata['tilted'])) * 0.13;
-    return clamp01(affectBias + metadataBias);
+  public clearRoom(roomId: ChatRoomId): void {
+    this.roomLedgers.delete(String(roomId));
   }
 
-  private extractAffectNumerics(affect: ChatAffectSnapshot): number {
-    const probe = affect as unknown as Record<string, unknown>;
-    const values = ['frustration01', 'desperation01', 'confidence01', 'embarrassment01']
-      .map((key) => Number(probe[key] ?? 0))
-      .filter((value) => Number.isFinite(value));
-    if (!values.length) return 0.16;
-    const frustration = Number(probe['frustration01'] ?? 0);
-    const desperation = Number(probe['desperation01'] ?? 0);
-    const embarrassment = Number(probe['embarrassment01'] ?? 0);
-    const confidence = Number(probe['confidence01'] ?? 0);
-    return clamp01(frustration * 0.34 + desperation * 0.24 + embarrassment * 0.29 + (1 - confidence) * 0.18);
+  public reset(): void {
+    this.roomLedgers.clear();
   }
 
-  private estimatePressureTier(signal: ChatSignalEnvelope | null | undefined): PressureTier {
-    const probe = signal as unknown as { pressureTier?: PressureTier | null; metadata?: Record<string, unknown> } | null;
-    if (probe?.pressureTier) return probe.pressureTier;
-    const metadataTier = probe?.metadata?.['pressureTier'];
-    if (typeof metadataTier === 'string') return metadataTier as PressureTier;
-    return 'BUILDING';
+  private recordProjection(projection: ChatTelegraphProjection): void {
+    const key = String(projection.roomId);
+    const ledger = this.ensureRoomLedger(key);
+    ledger.projections.push(projection);
+    trimMutableList(ledger.projections, this.options.maintainPerRoomHistory);
+
+    const byAttack = ledger.byAttackId.get(projection.attackId) ?? [];
+    byAttack.push(projection);
+    trimMutableList(byAttack, this.options.maintainPerRoomHistory);
+    ledger.byAttackId.set(projection.attackId, byAttack);
+    ledger.lastProjectedAt = projection.projectedAt;
+  }
+
+  private ensureRoomLedger(roomKey: string): MutableTelegraphLedger {
+    let ledger = this.roomLedgers.get(roomKey);
+    if (!ledger) {
+      ledger = {
+        projections: [],
+        byAttackId: new Map(),
+        lastProjectedAt: undefined,
+      };
+      this.roomLedgers.set(roomKey, ledger);
+    }
+    return ledger;
   }
 }
+
+// ============================================================================
+// MARK: Factories + module
+// ============================================================================
 
 export function createChatTelegraphPolicy(
   options: ChatTelegraphPolicyOptions = {},
@@ -1229,211 +615,1543 @@ export function createChatTelegraphPolicy(
   return new ChatTelegraphPolicy(options);
 }
 
-// ============================================================================
-// MARK: Policy registries
-// ============================================================================
-
-export const CHAT_TELEGRAPH_WINDOW_SIGNATURES = Object.freeze([
-  Object.freeze({
-    ordinal: 1,
-    signatureId: 'BANKRUPTCY_EXPOSURE',
-    dominantThreatTag: 'humiliation',
-    openingMode: 'VISIBLE',
-    severityHint: 'SEVERE',
-    recommendedUse: 'Humiliation-heavy visible read before a public collapse strike.',
-    notes: Object.freeze([
-      'Use this signature when the telegraph should feel authored rather than generic.',
-      'This registry is deterministic and suitable for backend selection and replay.',
-    ]),
-  }),
-  Object.freeze({
-    ordinal: 2,
-    signatureId: 'SHIELD_BREAK_SWARM',
-    dominantThreatTag: 'swarm',
-    openingMode: 'VISIBLE',
-    severityHint: 'HIGH',
-    recommendedUse: 'Crowd-forward shield fracture telegraph with watcher amplification.',
-    notes: Object.freeze([
-      'Use this signature when the telegraph should feel authored rather than generic.',
-      'This registry is deterministic and suitable for backend selection and replay.',
-    ]),
-  }),
-  Object.freeze({
-    ordinal: 3,
-    signatureId: 'DEAL_ROOM_SQUEEZE',
-    dominantThreatTag: 'squeeze',
-    openingMode: 'QUIET',
-    severityHint: 'HIGH',
-    recommendedUse: 'Quiet predatory negotiation squeeze with silence before reveal.',
-    notes: Object.freeze([
-      'Use this signature when the telegraph should feel authored rather than generic.',
-      'This registry is deterministic and suitable for backend selection and replay.',
-    ]),
-  }),
-  Object.freeze({
-    ordinal: 4,
-    signatureId: 'PROOF_TRAP',
-    dominantThreatTag: 'proof',
-    openingMode: 'VISIBLE',
-    severityHint: 'HIGH',
-    recommendedUse: 'Receipts-first trap that rewards evidence or quote defense.',
-    notes: Object.freeze([
-      'Use this signature when the telegraph should feel authored rather than generic.',
-      'This registry is deterministic and suitable for backend selection and replay.',
-    ]),
-  }),
-  Object.freeze({
-    ordinal: 5,
-    signatureId: 'QUOTE_AMBUSH',
-    dominantThreatTag: 'quote',
-    openingMode: 'VISIBLE',
-    severityHint: 'MEDIUM',
-    recommendedUse: 'Callback ambush built around prior boasts and fast reversal windows.',
-    notes: Object.freeze([
-      'Use this signature when the telegraph should feel authored rather than generic.',
-      'This registry is deterministic and suitable for backend selection and replay.',
-    ]),
-  }),
-  Object.freeze({
-    ordinal: 6,
-    signatureId: 'RIVALRY_ESCALATION',
-    dominantThreatTag: 'rivalry',
-    openingMode: 'VISIBLE',
-    severityHint: 'MEDIUM',
-    recommendedUse: 'Relationship-colored boss pressure that personalizes the opening.',
-    notes: Object.freeze([
-      'Use this signature when the telegraph should feel authored rather than generic.',
-      'This registry is deterministic and suitable for backend selection and replay.',
-    ]),
-  }),
-  Object.freeze({
-    ordinal: 7,
-    signatureId: 'PANIC_MISDIRECT',
-    dominantThreatTag: 'misdirect',
-    openingMode: 'FAKEOUT',
-    severityHint: 'MEDIUM',
-    recommendedUse: 'Fast fake-out lane that simulates certainty before a pivot.',
-    notes: Object.freeze([
-      'Use this signature when the telegraph should feel authored rather than generic.',
-      'This registry is deterministic and suitable for backend selection and replay.',
-    ]),
-  }),
-  Object.freeze({
-    ordinal: 8,
-    signatureId: 'SHADOW_PULL',
-    dominantThreatTag: 'shadow',
-    openingMode: 'QUIET',
-    severityHint: 'LOW',
-    recommendedUse: 'Low-visibility shadow setup that should still feel dangerous.',
-    notes: Object.freeze([
-      'Use this signature when the telegraph should feel authored rather than generic.',
-      'This registry is deterministic and suitable for backend selection and replay.',
-    ]),
-  }),
-  Object.freeze({
-    ordinal: 9,
-    signatureId: 'HELPER_TEST',
-    dominantThreatTag: 'rescue',
-    openingMode: 'VISIBLE',
-    severityHint: 'MEDIUM',
-    recommendedUse: 'A telegraph that intentionally leaves rescue space without killing pressure.',
-    notes: Object.freeze([
-      'Use this signature when the telegraph should feel authored rather than generic.',
-      'This registry is deterministic and suitable for backend selection and replay.',
-    ]),
-  }),
-  Object.freeze({
-    ordinal: 10,
-    signatureId: 'LAST_STAND',
-    dominantThreatTag: 'finisher',
-    openingMode: 'VISIBLE',
-    severityHint: 'SEVERE',
-    recommendedUse: 'High-drama final-turn telegraph for comeback or humiliation endings.',
-    notes: Object.freeze([
-      'Use this signature when the telegraph should feel authored rather than generic.',
-      'This registry is deterministic and suitable for backend selection and replay.',
-    ]),
-  }),
-] as const);
-
-export const CHAT_TELEGRAPH_WINDOW_NOTES = Object.freeze([
-  'BANKRUPTCY_EXPOSURE: Humiliation-heavy visible read before a public collapse strike.',
-  'SHIELD_BREAK_SWARM: Crowd-forward shield fracture telegraph with watcher amplification.',
-  'DEAL_ROOM_SQUEEZE: Quiet predatory negotiation squeeze with silence before reveal.',
-  'PROOF_TRAP: Receipts-first trap that rewards evidence or quote defense.',
-  'QUOTE_AMBUSH: Callback ambush built around prior boasts and fast reversal windows.',
-  'RIVALRY_ESCALATION: Relationship-colored boss pressure that personalizes the opening.',
-  'PANIC_MISDIRECT: Fast fake-out lane that simulates certainty before a pivot.',
-  'SHADOW_PULL: Low-visibility shadow setup that should still feel dangerous.',
-  'HELPER_TEST: A telegraph that intentionally leaves rescue space without killing pressure.',
-  'LAST_STAND: High-drama final-turn telegraph for comeback or humiliation endings.',
-] as const);
+export const ChatTelegraphPolicyModule = {
+  moduleId: 'backend.chat.combat.ChatTelegraphPolicy',
+  create: createChatTelegraphPolicy,
+  ChatTelegraphPolicy,
+} as const;
 
 // ============================================================================
-// MARK: Fight-kind aware telegraph helpers
+// MARK: Resolution helpers
 // ============================================================================
 
-/** Returns the dominant threat tag label appropriate for a given boss fight kind. */
-export function telegraphThreatTagForFightKind(kind: ChatBossFightKind): string {
-  switch (kind) {
-    case 'DEAL_ROOM_AMBUSH': return 'negotiation';
-    case 'RIVAL_ASCENSION': return 'rivalry';
-    case 'PUBLIC_HUMILIATION': return 'humiliation';
-    case 'CROWD_SWARM_HUNT': return 'crowd';
-    case 'ARCHIVIST_RECKONING': return 'proof';
-    case 'SHIELD_SIEGE': return 'shield';
-    case 'PRESSURE_TRIAL': return 'pressure';
-    case 'HELPER_BLACKOUT': return 'blackout';
-    case 'WORLD_EVENT_HUNT': return 'world';
-    case 'FINAL_WORD_DUEL': return 'finisher';
+function resolveRoomState(
+  state: ChatState,
+  roomId: ChatRoomId,
+): ChatRoomState | null {
+  return state.rooms[roomId] ?? null;
+}
+
+function resolveSessionState(
+  state: ChatState,
+  sessionId?: ChatSessionId,
+): ChatSessionState | null {
+  if (!sessionId) {
+    return null;
+  }
+  return state.sessions[sessionId] ?? null;
+}
+
+function resolveFightKind(
+  request: ChatTelegraphPolicyRequest,
+  room: ChatRoomState | null,
+): ChatBossFightKind {
+  if (request.fightPlan?.kind) {
+    return request.fightPlan.kind;
+  }
+  if (request.round?.attack.attackType === 'LIQUIDITY_STRIKE') {
+    return 'DEAL_ROOM_AMBUSH';
+  }
+  if (room?.roomKind === 'DEAL_ROOM') {
+    return 'DEAL_ROOM_AMBUSH';
+  }
+  if (request.attack.attackClass === 'QUOTE_TRAP') {
+    return 'PUBLIC_HUMILIATION';
+  }
+  if (request.attack.attackClass === 'PROOF_CHALLENGE') {
+    return 'ARCHIVIST_RECKONING';
+  }
+  if (request.attack.attackClass === 'SILENCE_BAIT') {
+    return 'FINAL_WORD_DUEL';
+  }
+  return 'PUBLIC_HUMILIATION';
+}
+
+function resolveChannelId(
+  request: ChatTelegraphPolicyRequest,
+  room: ChatRoomState | null,
+  attack: ChatBossAttack,
+): ChatChannelId {
+  const preferred = request.preferredChannelId;
+  if (preferred) {
+    return preferred;
+  }
+  if (request.fightPlan?.channelId) {
+    return request.fightPlan.channelId;
+  }
+  if (room) {
+    return room.activeVisibleChannel;
+  }
+  if (attack.attackType === 'LIQUIDITY_STRIKE') {
+    return 'DEAL_ROOM';
+  }
+  if (attack.attackClass === 'SILENCE_BAIT') {
+    return 'NPC_SHADOW';
+  }
+  return 'LOBBY';
+}
+
+function resolveVisibleChannelId(
+  channelId: ChatChannelId,
+  room: ChatRoomState | null,
+): ChatVisibleChannel {
+  if (isVisibleChannelId(channelId)) {
+    return channelId;
+  }
+  if (room) {
+    return room.activeVisibleChannel;
+  }
+  return 'LOBBY';
+}
+
+function resolveAffect(
+  request: ChatTelegraphPolicyRequest,
+): ChatAffectSnapshot {
+  if (request.affect) {
+    return request.affect;
+  }
+  const fromMessage = request.sourceMessage?.learning.affectAfterMessage;
+  if (fromMessage) {
+    return fromMessage;
+  }
+  return NEUTRAL_AFFECT;
+}
+
+function resolveAudienceHeat(
+  state: ChatState,
+  roomId: ChatRoomId,
+  provided: ChatAudienceHeat | null | undefined,
+  visibleChannelId: ChatVisibleChannel,
+  now: UnixMs,
+): ChatAudienceHeat {
+  if (provided) {
+    return provided;
+  }
+  const fromState = state.audienceHeatByRoom[roomId];
+  if (fromState) {
+    return fromState;
+  }
+  return {
+    roomId,
+    channelId: visibleChannelId,
+    heat01: clamp01(0.24),
+    swarmDirection: 'NEUTRAL',
+    updatedAt: now,
+  };
+}
+
+function deriveBaseTelegraph(
+  attack: ChatBossAttack,
+  fightPlan: ChatBossFightPlan | null | undefined,
+  fightKind: ChatBossFightKind,
+): ChatBossTelegraph {
+  const openingMode = resolveOpeningMode(attack, fightPlan, fightKind);
+  const baseline = deriveBossTelegraph(attack.attackClass, openingMode);
+  return {
+    ...baseline,
+    demandHints: dedupeDemands([...
+      baseline.demandHints,
+      ...attack.counterDemands,
+    ]),
+    beatCount: Math.max(baseline.beatCount, suggestedBeatCount(attack, openingMode, fightKind)),
+  };
+}
+
+function resolveOpeningMode(
+  attack: ChatBossAttack,
+  fightPlan: ChatBossFightPlan | null | undefined,
+  fightKind: ChatBossFightKind,
+): ChatBossOpeningMode {
+  const fromPattern = fightPlan?.pattern.openingMode;
+  if (fromPattern) {
+    return fromPattern;
+  }
+  if (attack.attackType === 'LIQUIDITY_STRIKE') {
+    return 'NEGOTIATION_READ_DELAYED';
+  }
+  if (attack.attackClass === 'SILENCE_BAIT') {
+    return 'SILENCE_LURE';
+  }
+  if (fightKind === 'PUBLIC_HUMILIATION' || attack.crowdAmplified) {
+    return 'CROWD_PRIMED';
+  }
+  if (attack.attackClass === 'QUOTE_TRAP') {
+    return 'STAGGERED';
+  }
+  return attack.telegraph.openingMode;
+}
+
+function suggestedBeatCount(
+  attack: ChatBossAttack,
+  openingMode: ChatBossOpeningMode,
+  fightKind: ChatBossFightKind,
+): number {
+  let beats = Number(attack.telegraph.beatCount ?? 1);
+  if (openingMode === 'SILENCE_LURE') {
+    beats += 1;
+  }
+  if (fightKind === 'DEAL_ROOM_AMBUSH') {
+    beats += 1;
+  }
+  if (attack.crowdAmplified) {
+    beats += 1;
+  }
+  if (attack.proofWeighted || attack.quoteWeighted) {
+    beats += 1;
+  }
+  return Math.max(1, Math.min(5, beats));
+}
+
+function derivePressureTier(
+  signal: Nullable<ChatSignalEnvelope> | undefined,
+  attack: ChatBossAttack,
+  round: ChatBossRound | null | undefined,
+  fightPlan: ChatBossFightPlan | null | undefined,
+): PressureTier {
+  const hostileMomentum = Number(signal?.battle?.hostileMomentum ?? 0);
+  const planExposure = Number(fightPlan?.publicExposure01 ?? toBossScore01(0.2));
+  const severityWeight = severityScalar(attack.severity);
+  const crowdBias = attack.crowdAmplified ? 0.08 : 0;
+  const roundWeight = round ? Math.min(0.16, round.order * 0.04) : 0;
+  const total = clamp01(
+    hostileMomentum / 100 * 0.42 +
+      severityWeight * 0.36 +
+      planExposure * 0.16 +
+      crowdBias +
+      roundWeight,
+  );
+  if (total >= 0.84) return 'CRITICAL';
+  if (total >= 0.64) return 'HIGH';
+  if (total >= 0.44) return 'ELEVATED';
+  if (total >= 0.18) return 'BUILDING';
+  return 'NONE';
+}
+
+function buildWitnessProjection(
+  input: {
+    readonly state: ChatState;
+    readonly room: ChatRoomState | null;
+    readonly session: ChatSessionState | null;
+    readonly visibleChannelId: ChatVisibleChannel;
+    readonly attack: ChatBossAttack;
+    readonly fightKind: ChatBossFightKind;
+    readonly fightPlan?: ChatBossFightPlan | null;
+    readonly audienceHeat: ChatAudienceHeat;
+  },
+  options: Required<Omit<ChatTelegraphPolicyOptions, 'clock' | 'logger'>>,
+): ChatTelegraphWitnessProjection {
+  const audienceHeat01 = Number(input.audienceHeat.heat01);
+  const roomFloor = input.room ? ROOM_WITNESS_FLOOR[input.room.roomKind] : 0.35;
+  const channelWeight = CHANNEL_WEIGHT_TABLE[input.visibleChannelId];
+  const publicWeight = input.fightPlan?.pattern.publicEncounter
+    ? options.publicWitnessWeight01
+    : input.fightKind === 'DEAL_ROOM_AMBUSH'
+      ? options.dealRoomWitnessWeight01
+      : 0.44;
+  const sessionInvisibilityPenalty = input.session?.invisible ? 0.08 : 0;
+  const visibleWitnessCount = inferVisibleWitnessCount(input.state, input.room?.roomId ?? input.audienceHeat.roomId, input.visibleChannelId);
+  const latentWitnessCount = inferLatentWitnessCount(input, roomFloor, audienceHeat01, publicWeight);
+  const roomWatching = audienceHeat01 >= options.witnessEscalationFloor01 || visibleWitnessCount >= 3;
+  const witnessDensity01 = clamp01(
+    roomFloor * 0.25 +
+      audienceHeat01 * 0.3 +
+      channelWeight * 0.2 +
+      publicWeight * 0.2 +
+      Math.min(0.25, visibleWitnessCount / 10) +
+      Math.min(0.18, latentWitnessCount / 14) -
+      sessionInvisibilityPenalty,
+  );
+
+  return {
+    visibleWitnessCount,
+    latentWitnessCount,
+    witnessDensity01: toBossScore01(witnessDensity01),
+    crowdLean: deriveCrowdLean(input.attack, input.audienceHeat),
+    roomWatching,
+    reputationExposure100: toBossScore100(clamp100(witnessDensity01 * 100)),
+  };
+}
+
+function buildHelperProjection(
+  input: {
+    readonly affect: ChatAffectSnapshot;
+    readonly attack: ChatBossAttack;
+    readonly fightPlan?: ChatBossFightPlan | null;
+    readonly round?: ChatBossRound | null;
+    readonly signal?: ChatSignalEnvelope | null;
+    readonly session: ChatSessionState | null;
+    readonly witness: ChatTelegraphWitnessProjection;
+    readonly pressureTier: PressureTier;
+  },
+  options: Required<Omit<ChatTelegraphPolicyOptions, 'clock' | 'logger'>>,
+): ChatTelegraphHelperProjection {
+  const frustration = Number(input.affect.frustration01);
+  const intimidation = Number(input.affect.intimidation01);
+  const embarrassment = Number(input.affect.embarrassment01);
+  const rescueAllowed = Boolean(input.fightPlan?.rescueAllowed ?? input.attack.allowsHelperAssistance);
+  const signalPressure = Number(input.signal?.battle?.hostileMomentum ?? 0) / 100;
+  const helperBias = rescueAllowed ? 0.18 : 0.02;
+  const roundRisk = input.round ? Math.min(0.18, input.round.order * 0.05) : 0;
+  const invisibilityPenalty = input.session?.invisible ? 0.06 : 0;
+  const pressureBias = input.pressureTier === 'CRITICAL'
+    ? 0.24
+    : input.pressureTier === 'HIGH'
+      ? 0.16
+      : input.pressureTier === 'ELEVATED'
+        ? 0.08
+        : 0;
+
+  const helperHaunt01 = clamp01(
+    helperBias +
+      frustration * 0.16 +
+      intimidation * 0.18 +
+      embarrassment * 0.14 +
+      signalPressure * 0.12 +
+      roundRisk +
+      Number(input.witness.witnessDensity01) * 0.12 +
+      pressureBias -
+      invisibilityPenalty,
+  );
+
+  const helperInterventionRisk01 = clamp01(
+    helperHaunt01 * 0.68 +
+      (rescueAllowed ? 0.18 : 0) +
+      (input.attack.allowsHelperAssistance ? 0.1 : -0.08),
+  );
+
+  return {
+    helperHaunt01: toBossScore01(helperHaunt01),
+    helperInterventionRisk01: toBossScore01(helperInterventionRisk01),
+    helperShadowing: helperHaunt01 >= options.helperHauntFloor01,
+    readableLabel: helperHaunt01 >= 0.6
+      ? 'Helper presence is near the edge of intervention.'
+      : helperHaunt01 >= 0.38
+        ? 'A helper may already be reading the field.'
+        : 'Helper intervention is possible but not foregrounded.',
+    rationale: buildHelperRationale(helperHaunt01, helperInterventionRisk01, rescueAllowed, input.pressureTier),
+  };
+}
+
+function authorTelegraph(
+  input: {
+    readonly attack: ChatBossAttack;
+    readonly fightKind: ChatBossFightKind;
+    readonly baseTelegraph: ChatBossTelegraph;
+    readonly room: ChatRoomState | null;
+    readonly session: ChatSessionState | null;
+    readonly visibleChannelId: ChatVisibleChannel;
+    readonly witness: ChatTelegraphWitnessProjection;
+    readonly helper: ChatTelegraphHelperProjection;
+    readonly affect: ChatAffectSnapshot;
+    readonly pressureTier: PressureTier;
+    readonly fightPlan?: ChatBossFightPlan | null;
+    readonly round?: ChatBossRound | null;
+    readonly counterWindow?: ChatBossCounterWindowBinding | null;
+    readonly sourceMessage?: ChatMessage | null;
+  },
+  now: UnixMs,
+  options: Required<Omit<ChatTelegraphPolicyOptions, 'clock' | 'logger'>>,
+): ChatBossTelegraph {
+  const visibleToPlayer = resolvePlayerVisibility(input);
+  const canFakeOut = resolveFakeOutAllowance(input, visibleToPlayer);
+  const revealDelayMs = resolveRevealDelayMs(input, options);
+  const silenceLeadInMs = resolveSilenceLeadInMs(input, options);
+  const beatCount = resolveBeatCount(input, visibleToPlayer);
+  const typingTheaterRecommended = shouldRecommendTypingTheater(input, visibleToPlayer, options);
+  const label = authorTelegraphLabel(input, visibleToPlayer);
+  const notes = buildTelegraphNotes(input, visibleToPlayer, canFakeOut, revealDelayMs, silenceLeadInMs);
+
+  return {
+    telegraphId: (`telegraph:${String(now)}:${String(input.attack.attackId)}`) as ChatBossTelegraph['telegraphId'],
+    label,
+    attackClass: input.attack.attackClass,
+    openingMode: input.baseTelegraph.openingMode,
+    visibleToPlayer,
+    canFakeOut,
+    typingTheaterRecommended,
+    silenceLeadInMs,
+    revealDelayMs,
+    beatCount,
+    demandHints: dedupeDemands([
+      ...input.baseTelegraph.demandHints,
+      ...input.attack.counterDemands,
+      ...(input.counterWindow?.requiredDemands ?? []),
+    ]),
+    notes,
+  };
+}
+
+function buildCounterplayDemandCues(
+  attack: ChatBossAttack,
+  counterWindow: ChatBossCounterWindowBinding | null,
+  affect: ChatAffectSnapshot,
+  pressureTier: PressureTier,
+  witness: ChatTelegraphWitnessProjection,
+): readonly ChatTelegraphDemandCue[] {
+  const timing = counterWindow?.idealTiming ?? attack.preferredCounterTiming;
+  const demands = dedupeDemands([
+    ...attack.counterDemands,
+    ...(counterWindow?.requiredDemands ?? []),
+  ]);
+
+  return demands.map((demand, index) => {
+    const urgency01 = clamp01(
+      demandUrgencyBase(demand) +
+        timingUrgencyBonus(timing) +
+        pressureTierUrgencyBonus(pressureTier) +
+        Number(affect.embarrassment01) * 0.08 +
+        Number(witness.witnessDensity01) * 0.1 +
+        index * 0.02,
+    );
+    return {
+      demand,
+      timing,
+      urgency01: toBossScore01(urgency01),
+      readableLabel: demandReadableLabel(demand),
+      rationale: demandRationale(demand, timing, attack),
+    };
+  });
+}
+
+function buildTimingProjection(
+  input: {
+    readonly telegraph: ChatBossTelegraph;
+    readonly attack: ChatBossAttack;
+    readonly fightKind: ChatBossFightKind;
+    readonly visibleChannelId: ChatVisibleChannel;
+    readonly room: ChatRoomState | null;
+    readonly affect: ChatAffectSnapshot;
+    readonly witness: ChatTelegraphWitnessProjection;
+    readonly helper: ChatTelegraphHelperProjection;
+    readonly pressureTier: PressureTier;
+    readonly counterplay: readonly ChatTelegraphDemandCue[];
+  },
+  options: Required<Omit<ChatTelegraphPolicyOptions, 'clock' | 'logger'>>,
+): ChatTelegraphTimingProjection {
+  const visibilityClass = resolveVisibilityClass(input.telegraph, input.visibleChannelId, input.room, input.witness, input.attack, options);
+  const typingLeadInMs = resolveTypingLeadInMs(input.telegraph, input.attack, input.helper, visibilityClass);
+  const readableThreat01 = clamp01(
+    Number(input.witness.witnessDensity01) * 0.2 +
+      Number(input.helper.helperHaunt01) * 0.1 +
+      Number(input.affect.intimidation01) * 0.12 +
+      Number(input.affect.embarrassment01) * 0.1 +
+      severityScalar(input.attack.severity) * 0.25 +
+      pressureTierScalar(input.pressureTier) * 0.15 +
+      Math.min(0.12, input.counterplay.length * 0.03) +
+      (visibilityClass === 'VISIBLE' ? 0.08 : visibilityClass === 'FELT' ? 0.05 : 0.02),
+  );
+
+  const theatricality100 = clamp100(
+    input.telegraph.silenceLeadInMs / 30 +
+      input.telegraph.revealDelayMs / 26 +
+      typingLeadInMs / 28 +
+      Number(input.witness.reputationExposure100) * 0.18 +
+      Number(input.helper.helperInterventionRisk01) * 18,
+  );
+
+  return {
+    visibleToPlayer: input.telegraph.visibleToPlayer,
+    visibilityClass,
+    revealDelayMs: input.telegraph.revealDelayMs,
+    silenceLeadInMs: input.telegraph.silenceLeadInMs,
+    typingLeadInMs,
+    beatCount: input.telegraph.beatCount,
+    readableThreat01: toBossScore01(readableThreat01),
+    theatricality100: toBossScore100(theatricality100),
+  };
+}
+
+function buildBeatPlan(
+  input: {
+    readonly now: UnixMs;
+    readonly telegraph: ChatBossTelegraph;
+    readonly attack: ChatBossAttack;
+    readonly fightKind: ChatBossFightKind;
+    readonly visibleChannelId: ChatVisibleChannel;
+    readonly pressureTier: PressureTier;
+    readonly timing: ChatTelegraphTimingProjection;
+    readonly witness: ChatTelegraphWitnessProjection;
+    readonly helper: ChatTelegraphHelperProjection;
+    readonly counterplay: readonly ChatTelegraphDemandCue[];
+    readonly sourceMessage?: ChatMessage | null;
+    readonly causeEventId?: ChatEventId | null;
+    readonly room: ChatRoomState | null;
+    readonly session: ChatSessionState | null;
+  },
+): readonly ChatTelegraphBeat[] {
+  const beats: ChatTelegraphBeat[] = [];
+  let order = 0;
+  let cursor = Number(input.now);
+
+  beats.push(createBeat({
+    attack: input.attack,
+    kind: 'PRELOAD',
+    order: order++,
+    atMs: asUnixMs(cursor),
+    visibleToPlayer: input.timing.visibilityClass !== 'SHADOWED',
+    emphasis01: 0.28,
+    witnessWeight01: Number(input.witness.witnessDensity01) * 0.4,
+    helperWeight01: 0,
+    label: 'Threat posture loads.',
+    body: preloadBody(input.attack, input.fightKind, input.visibleChannelId),
+    metadata: {
+      causeEventId: input.causeEventId ?? null,
+      sourceMessageId: input.sourceMessage ? String(input.sourceMessage.id) : null,
+    },
+  }));
+
+  cursor += Math.max(60, Math.floor(input.timing.silenceLeadInMs * 0.32));
+
+  if (input.telegraph.silenceLeadInMs > 0) {
+    beats.push(createBeat({
+      attack: input.attack,
+      kind: 'SILENCE',
+      order: order++,
+      atMs: asUnixMs(cursor),
+      visibleToPlayer: input.timing.visibilityClass !== 'VISIBLE' ? false : true,
+      emphasis01: Math.min(0.86, input.telegraph.silenceLeadInMs / 1800),
+      witnessWeight01: Number(input.witness.witnessDensity01) * 0.38,
+      helperWeight01: Number(input.helper.helperHaunt01) * 0.12,
+      label: 'Silence takes the lane.',
+      body: silenceBeatBody(input.attack, input.pressureTier, input.telegraph),
+      metadata: {
+        silenceLeadInMs: input.telegraph.silenceLeadInMs,
+        visibilityClass: input.timing.visibilityClass,
+      },
+    }));
+    cursor += input.telegraph.silenceLeadInMs;
+  }
+
+  if (input.telegraph.typingTheaterRecommended) {
+    beats.push(createBeat({
+      attack: input.attack,
+      kind: 'TYPING',
+      order: order++,
+      atMs: asUnixMs(cursor),
+      visibleToPlayer: input.timing.visibilityClass === 'SHADOWED' ? false : true,
+      emphasis01: Math.min(0.92, input.timing.typingLeadInMs / 1400),
+      witnessWeight01: Number(input.witness.witnessDensity01) * 0.2,
+      helperWeight01: Number(input.helper.helperHaunt01) * 0.1,
+      label: 'Presence theater begins.',
+      body: typingBeatBody(input.attack, input.visibleChannelId, input.witness),
+      metadata: {
+        typingLeadInMs: input.timing.typingLeadInMs,
+        channel: input.visibleChannelId,
+      },
+    }));
+    cursor += input.timing.typingLeadInMs;
+  } else {
+    beats.push(createBeat({
+      attack: input.attack,
+      kind: input.visibleChannelId === 'DEAL_ROOM' ? 'PRIVATE_TILT' : 'PUBLIC_TILT',
+      order: order++,
+      atMs: asUnixMs(cursor),
+      visibleToPlayer: input.timing.visibilityClass !== 'SHADOWED',
+      emphasis01: 0.42,
+      witnessWeight01: Number(input.witness.witnessDensity01) * 0.3,
+      helperWeight01: 0.04,
+      label: input.visibleChannelId === 'DEAL_ROOM' ? 'Terms tighten.' : 'The room tilts.',
+      body: tiltBeatBody(input.attack, input.visibleChannelId, input.witness),
+      metadata: {
+        roomKind: input.room?.roomKind ?? null,
+        sessionInvisible: input.session?.invisible ?? false,
+      },
+    }));
+    cursor += Math.max(120, Math.floor(input.telegraph.revealDelayMs * 0.25));
+  }
+
+  if (input.attack.proofWeighted) {
+    beats.push(createBeat({
+      attack: input.attack,
+      kind: 'PROOF_TELL',
+      order: order++,
+      atMs: asUnixMs(cursor),
+      visibleToPlayer: true,
+      emphasis01: 0.68,
+      witnessWeight01: Number(input.witness.witnessDensity01) * 0.22,
+      helperWeight01: Number(input.helper.helperInterventionRisk01) * 0.08,
+      label: 'Proof demand becomes legible.',
+      body: 'The telegraph narrows toward receipts, hashes, or evidence-backed reply lanes.',
+      metadata: {
+        proofWeighted: true,
+      },
+    }));
+    cursor += 110;
+  }
+
+  if (input.helper.helperShadowing) {
+    beats.push(createBeat({
+      attack: input.attack,
+      kind: 'HELPER_HAUNT',
+      order: order++,
+      atMs: asUnixMs(cursor),
+      visibleToPlayer: input.timing.visibilityClass !== 'SHADOWED',
+      emphasis01: Number(input.helper.helperHaunt01),
+      witnessWeight01: Number(input.witness.witnessDensity01) * 0.16,
+      helperWeight01: Number(input.helper.helperInterventionRisk01),
+      label: 'Helper shadow enters the edge of frame.',
+      body: input.helper.readableLabel,
+      metadata: {
+        rationale: input.helper.rationale,
+      },
+    }));
+    cursor += 90;
+  }
+
+  beats.push(createBeat({
+    attack: input.attack,
+    kind: 'REVEAL',
+    order: order++,
+    atMs: asUnixMs(Number(input.now) + input.timing.revealDelayMs),
+    visibleToPlayer: input.timing.visibilityClass !== 'SHADOWED',
+    emphasis01: Number(input.timing.readableThreat01),
+    witnessWeight01: Number(input.witness.witnessDensity01),
+    helperWeight01: Number(input.helper.helperHaunt01) * 0.4,
+    label: input.telegraph.label,
+    body: revealBeatBody(input.attack, input.timing.visibilityClass, input.witness, input.pressureTier),
+    metadata: {
+      revealDelayMs: input.timing.revealDelayMs,
+      visibilityClass: input.timing.visibilityClass,
+    },
+  }));
+
+  if (input.counterplay.length > 0) {
+    beats.push(createBeat({
+      attack: input.attack,
+      kind: 'COUNTER_WINDOW',
+      order: order++,
+      atMs: asUnixMs(Number(input.now) + input.timing.revealDelayMs + 40),
+      visibleToPlayer: true,
+      emphasis01: 0.72,
+      witnessWeight01: Number(input.witness.witnessDensity01) * 0.22,
+      helperWeight01: Number(input.helper.helperInterventionRisk01) * 0.18,
+      label: 'Counter lane opens.',
+      body: input.counterplay.map((entry) => entry.readableLabel).join(' · '),
+      metadata: {
+        demands: input.counterplay.map((entry) => entry.demand),
+      },
+    }));
+  }
+
+  beats.push(createBeat({
+    attack: input.attack,
+    kind: 'AFTERMATH_HINT',
+    order: order++,
+    atMs: asUnixMs(Number(input.now) + input.timing.revealDelayMs + 220),
+    visibleToPlayer: input.timing.visibilityClass !== 'SHADOWED',
+    emphasis01: 0.34,
+    witnessWeight01: Number(input.witness.witnessDensity01) * 0.26,
+    helperWeight01: Number(input.helper.helperHaunt01) * 0.12,
+    label: 'The pressure keeps moving.',
+    body: aftermathHintBody(input.attack, input.fightKind, input.witness, input.helper),
+    metadata: {
+      roundPressure: input.pressureTier,
+    },
+  }));
+
+  return beats;
+}
+
+function buildOverlayCues(
+  input: {
+    readonly telegraph: ChatBossTelegraph;
+    readonly attack: ChatBossAttack;
+    readonly fightKind: ChatBossFightKind;
+    readonly room: ChatRoomState | null;
+    readonly visibleChannelId: ChatVisibleChannel;
+    readonly pressureTier: PressureTier;
+    readonly witness: ChatTelegraphWitnessProjection;
+    readonly helper: ChatTelegraphHelperProjection;
+    readonly affect: ChatAffectSnapshot;
+    readonly counterplay: readonly ChatTelegraphDemandCue[];
+    readonly timing: ChatTelegraphTimingProjection;
+    readonly sourceMessage?: ChatMessage | null;
+    readonly counterWindow?: ChatBossCounterWindowBinding | null;
+  },
+): readonly ChatTelegraphOverlayCue[] {
+  const overlays: ChatTelegraphOverlayCue[] = [];
+
+  overlays.push(overlayCue(
+    'THREAT_RADAR',
+    true,
+    input.timing.readableThreat01,
+    input.timing.theatricality100,
+    'Threat radar rises.',
+    `${input.attack.label} is staging as ${input.timing.visibilityClass.toLowerCase()} pressure.`,
+    {
+      severity: input.attack.severity,
+      pressureTier: input.pressureTier,
+    },
+  ));
+
+  overlays.push(overlayCue(
+    'MOMENT_FLASH',
+    input.attack.crowdAmplified || input.witness.roomWatching,
+    toBossScore01(clamp01(Number(input.witness.witnessDensity01) * 0.9)),
+    input.witness.reputationExposure100,
+    'Witness pressure spikes.',
+    `${input.witness.visibleWitnessCount} visible witness lanes and ${input.witness.latentWitnessCount} latent lanes shape the read.`,
+    {
+      crowdLean: input.witness.crowdLean,
+    },
+  ));
+
+  overlays.push(overlayCue(
+    'PROOF_CUE',
+    input.attack.proofWeighted,
+    toBossScore01(input.attack.proofWeighted ? 0.74 : 0.1),
+    toBossScore100(input.attack.proofWeighted ? 82 : 10),
+    'Proof lane highlighted.',
+    input.attack.proofWeighted
+      ? 'This telegraph is explicitly biasing toward evidence-backed reply shapes.'
+      : 'Proof is not the primary read on this telegraph.',
+    {
+      sourceMessageId: input.sourceMessage ? String(input.sourceMessage.id) : null,
+      proofHash: input.sourceMessage?.proof.proofHash ?? null,
+    },
+  ));
+
+  overlays.push(overlayCue(
+    'RESCUE_BANNER',
+    Number(input.helper.helperInterventionRisk01) >= 0.55,
+    input.helper.helperInterventionRisk01,
+    toBossScore100(Number(input.helper.helperInterventionRisk01) * 100),
+    'Helper lane warming.',
+    input.helper.rationale,
+    {
+      helperShadowing: input.helper.helperShadowing,
+    },
+  ));
+
+  overlays.push(overlayCue(
+    'COUNTERPLAY_PROMPT',
+    input.counterplay.length > 0,
+    toBossScore01(Math.min(1, input.counterplay.length * 0.24 + 0.18)),
+    toBossScore100(Math.min(100, 34 + input.counterplay.length * 16)),
+    'Counter window is readable.',
+    input.counterplay.length > 0
+      ? input.counterplay.map((entry) => entry.readableLabel).join(' • ')
+      : 'No explicit counter demand is foregrounded.',
+    {
+      timing: input.counterWindow?.idealTiming ?? input.attack.preferredCounterTiming,
+    },
+  ));
+
+  overlays.push(overlayCue(
+    'WITNESS_PRESSURE',
+    input.witness.roomWatching,
+    toBossScore01(clamp01(Number(input.witness.witnessDensity01) * 0.86)),
+    input.witness.reputationExposure100,
+    'Reputation exposure is active.',
+    input.witness.crowdLean === 'HOSTILE'
+      ? 'The room is leaning hostile. Delay compounds the read.'
+      : 'Witness density is high enough to influence how the threat lands.',
+  ));
+
+  overlays.push(overlayCue(
+    'DEALROOM_SQUEEZE',
+    input.fightKind === 'DEAL_ROOM_AMBUSH' || input.visibleChannelId === 'DEAL_ROOM',
+    toBossScore01(input.visibleChannelId === 'DEAL_ROOM' ? 0.82 : 0.14),
+    toBossScore100(input.visibleChannelId === 'DEAL_ROOM' ? 90 : 12),
+    'Term compression detected.',
+    input.visibleChannelId === 'DEAL_ROOM'
+      ? 'The telegraph is making timing and leverage feel like the same weapon.'
+      : 'This is not primarily a deal-room squeeze.',
+  ));
+
+  overlays.push(overlayCue(
+    'QUOTE_RISK',
+    input.attack.quoteWeighted,
+    toBossScore01(input.attack.quoteWeighted ? 0.76 : 0.08),
+    toBossScore100(input.attack.quoteWeighted ? 84 : 8),
+    'Quote trap risk rises.',
+    input.attack.quoteWeighted
+      ? 'Language itself may be harvested as the next attack surface.'
+      : 'Quote leverage is not the main weapon on this telegraph.',
+  ));
+
+  overlays.push(overlayCue(
+    'SILENCE_TENSION',
+    input.telegraph.silenceLeadInMs >= 500,
+    toBossScore01(clamp01(input.telegraph.silenceLeadInMs / 1400)),
+    toBossScore100(clamp100(input.telegraph.silenceLeadInMs / 12)),
+    'Silence is being used as force.',
+    input.telegraph.silenceLeadInMs >= 500
+      ? 'The quiet before reveal is a measurable part of the attack.'
+      : 'Silence is present but not dominant.',
+    {
+      silenceLeadInMs: input.telegraph.silenceLeadInMs,
+      affectEmbarrassment01: Number(input.affect.embarrassment01),
+    },
+  ));
+
+  return overlays.sort((a, b) => Number(b.priority100) - Number(a.priority100));
+}
+
+function authorSummary(
+  attack: ChatBossAttack,
+  fightKind: ChatBossFightKind,
+  timing: ChatTelegraphTimingProjection,
+  witness: ChatTelegraphWitnessProjection,
+  helper: ChatTelegraphHelperProjection,
+): string {
+  const contractSummary = ATTACK_TEXT_HINTS[attack.attackClass]?.summary ?? 'The attack is shaping the room before it resolves.';
+  const visibilitySummary =
+    timing.visibilityClass === 'VISIBLE'
+      ? 'The player should be able to read the danger directly.'
+      : timing.visibilityClass === 'FELT'
+        ? 'The player should feel the danger before the text fully arrives.'
+        : timing.visibilityClass === 'INFERRED'
+          ? 'The player must infer the threat from posture, delay, and witness movement.'
+          : 'The threat is intentionally withheld from direct presentation.';
+  const witnessSummary = witness.roomWatching
+    ? 'Witness pressure is part of the attack payload.'
+    : 'Witness pressure is present but not dominant.';
+  const helperSummary = helper.helperShadowing
+    ? 'Helper shadowing is legible in the read.'
+    : 'Helper presence stays peripheral.';
+
+  return [
+    `${fightKind} telegraph.`,
+    contractSummary,
+    visibilitySummary,
+    witnessSummary,
+    helperSummary,
+  ].join(' ');
+}
+
+function authorHint(
+  attack: ChatBossAttack,
+  fightKind: ChatBossFightKind,
+  counterplay: readonly ChatTelegraphDemandCue[],
+  helper: ChatTelegraphHelperProjection,
+  timing: ChatTelegraphTimingProjection,
+): string {
+  const contractHint = ATTACK_TEXT_HINTS[attack.attackClass]?.hint ?? 'Respond for the field you are actually in, not the text you wish it were.';
+  const counterHint = counterplay.length > 0
+    ? `Primary readable reply: ${counterplay[0].readableLabel}.`
+    : 'No explicit reply lane is foregrounded yet.';
+  const helperHint = Number(helper.helperInterventionRisk01) >= 0.55
+    ? 'A helper may arrive if the player posture collapses.'
+    : 'Do not assume helper cover.';
+  const timingHint = timing.visibilityClass === 'INFERRED' || timing.visibilityClass === 'SHADOWED'
+    ? 'Read the pacing as carefully as the words.'
+    : 'The telegraph is readable enough to punish a rushed answer.';
+
+  return [
+    `${fightKind} hint.`,
+    contractHint,
+    counterHint,
+    helperHint,
+    timingHint,
+  ].join(' ');
+}
+
+// ============================================================================
+// MARK: Visibility, timing, and authorship heuristics
+// ============================================================================
+
+function resolvePlayerVisibility(input: {
+  readonly attack: ChatBossAttack;
+  readonly fightKind: ChatBossFightKind;
+  readonly baseTelegraph: ChatBossTelegraph;
+  readonly room: ChatRoomState | null;
+  readonly session: ChatSessionState | null;
+  readonly visibleChannelId: ChatVisibleChannel;
+  readonly witness: ChatTelegraphWitnessProjection;
+  readonly helper: ChatTelegraphHelperProjection;
+  readonly affect: ChatAffectSnapshot;
+  readonly pressureTier: PressureTier;
+  readonly fightPlan?: ChatBossFightPlan | null;
+}): boolean {
+  if (!input.baseTelegraph.visibleToPlayer) {
+    if (input.fightKind === 'FINAL_WORD_DUEL' || input.attack.attackClass === 'SILENCE_BAIT') {
+      return false;
+    }
+  }
+
+  const dealRoomLift = input.visibleChannelId === 'DEAL_ROOM' ? 0.1 : 0;
+  const helperLift = Number(input.helper.helperHaunt01) * 0.12;
+  const witnessLift = Number(input.witness.witnessDensity01) * 0.14;
+  const confidencePenalty = (1 - Number(input.affect.confidence01)) * 0.08;
+  const pressurePenalty = pressureTierScalar(input.pressureTier) * -0.04;
+  const invisiblePenalty = input.session?.invisible ? 0.12 : 0;
+  const total = clamp01(
+    Number(input.baseTelegraph.visibleToPlayer ? toBossScore01(0.58) : toBossScore01(0.18)) +
+      dealRoomLift +
+      helperLift +
+      witnessLift +
+      confidencePenalty +
+      pressurePenalty -
+      invisiblePenalty,
+  );
+  return total >= 0.34;
+}
+
+function resolveFakeOutAllowance(
+  input: {
+    readonly attack: ChatBossAttack;
+    readonly fightKind: ChatBossFightKind;
+    readonly baseTelegraph: ChatBossTelegraph;
+    readonly room: ChatRoomState | null;
+    readonly session: ChatSessionState | null;
+    readonly visibleChannelId: ChatVisibleChannel;
+    readonly witness: ChatTelegraphWitnessProjection;
+    readonly helper: ChatTelegraphHelperProjection;
+    readonly affect: ChatAffectSnapshot;
+    readonly pressureTier: PressureTier;
+    readonly fightPlan?: ChatBossFightPlan | null;
+    readonly round?: ChatBossRound | null;
+    readonly counterWindow?: ChatBossCounterWindowBinding | null;
+    readonly sourceMessage?: ChatMessage | null;
+  },
+  visibleToPlayer: boolean,
+): boolean {
+  if (!input.baseTelegraph.canFakeOut) {
+    return false;
+  }
+  if (input.attack.proofWeighted) {
+    return false;
+  }
+  if (input.counterWindow?.requiredDemands.includes('PROOF_REPLY')) {
+    return false;
+  }
+  if (!visibleToPlayer && input.attack.attackClass === 'SILENCE_BAIT') {
+    return true;
+  }
+  if (input.visibleChannelId === 'GLOBAL' || input.attack.crowdAmplified) {
+    return true;
+  }
+  return Number(input.witness.witnessDensity01) >= 0.45;
+}
+
+function resolveRevealDelayMs(
+  input: {
+    readonly attack: ChatBossAttack;
+    readonly fightKind: ChatBossFightKind;
+    readonly baseTelegraph: ChatBossTelegraph;
+    readonly room: ChatRoomState | null;
+    readonly session: ChatSessionState | null;
+    readonly visibleChannelId: ChatVisibleChannel;
+    readonly witness: ChatTelegraphWitnessProjection;
+    readonly helper: ChatTelegraphHelperProjection;
+    readonly affect: ChatAffectSnapshot;
+    readonly pressureTier: PressureTier;
+    readonly fightPlan?: ChatBossFightPlan | null;
+    readonly round?: ChatBossRound | null;
+    readonly counterWindow?: ChatBossCounterWindowBinding | null;
+    readonly sourceMessage?: ChatMessage | null;
+  },
+  options: Required<Omit<ChatTelegraphPolicyOptions, 'clock' | 'logger'>>,
+): number {
+  const base = input.baseTelegraph.revealDelayMs;
+  const silenceBias = input.attack.attackClass === 'SILENCE_BAIT'
+    ? options.silenceBiasWeight01 * 400
+    : 0;
+  const dealRoomBias = input.visibleChannelId === 'DEAL_ROOM' ? 110 : 0;
+  const publicWitnessBias = Number(input.witness.witnessDensity01) >= options.strongVisibilityFloor01 ? 80 : 0;
+  const criticalCompression = input.pressureTier === 'CRITICAL' ? -160 : input.pressureTier === 'HIGH' ? -80 : 0;
+  const helperDrag = input.helper.helperShadowing ? 70 : 0;
+  const sourceProofCompression = input.sourceMessage?.proof.proofHash && input.attack.proofWeighted ? -120 : 0;
+  return Math.max(120, Math.round(base + silenceBias + dealRoomBias + publicWitnessBias + helperDrag + criticalCompression + sourceProofCompression));
+}
+
+function resolveSilenceLeadInMs(
+  input: {
+    readonly attack: ChatBossAttack;
+    readonly fightKind: ChatBossFightKind;
+    readonly baseTelegraph: ChatBossTelegraph;
+    readonly room: ChatRoomState | null;
+    readonly session: ChatSessionState | null;
+    readonly visibleChannelId: ChatVisibleChannel;
+    readonly witness: ChatTelegraphWitnessProjection;
+    readonly helper: ChatTelegraphHelperProjection;
+    readonly affect: ChatAffectSnapshot;
+    readonly pressureTier: PressureTier;
+    readonly fightPlan?: ChatBossFightPlan | null;
+    readonly round?: ChatBossRound | null;
+    readonly counterWindow?: ChatBossCounterWindowBinding | null;
+    readonly sourceMessage?: ChatMessage | null;
+  },
+  options: Required<Omit<ChatTelegraphPolicyOptions, 'clock' | 'logger'>>,
+): number {
+  const base = input.baseTelegraph.silenceLeadInMs;
+  const attackBias = input.attack.allowsSilenceOutplay ? 140 : -90;
+  const quoteBias = input.attack.quoteWeighted ? 110 : 0;
+  const helperBias = input.helper.helperShadowing ? 80 : 0;
+  const pressureCompression = input.pressureTier === 'CRITICAL' ? -220 : input.pressureTier === 'HIGH' ? -110 : 0;
+  const curiosityLift = Number(input.affect.curiosity01) * 100;
+  const witnessBias = Number(input.witness.witnessDensity01) >= options.witnessEscalationFloor01 ? 60 : 0;
+  return Math.max(0, Math.round(base + attackBias + quoteBias + helperBias + curiosityLift + witnessBias + pressureCompression));
+}
+
+function resolveBeatCount(
+  input: {
+    readonly attack: ChatBossAttack;
+    readonly fightKind: ChatBossFightKind;
+    readonly baseTelegraph: ChatBossTelegraph;
+    readonly room: ChatRoomState | null;
+    readonly session: ChatSessionState | null;
+    readonly visibleChannelId: ChatVisibleChannel;
+    readonly witness: ChatTelegraphWitnessProjection;
+    readonly helper: ChatTelegraphHelperProjection;
+    readonly affect: ChatAffectSnapshot;
+    readonly pressureTier: PressureTier;
+    readonly fightPlan?: ChatBossFightPlan | null;
+    readonly round?: ChatBossRound | null;
+    readonly counterWindow?: ChatBossCounterWindowBinding | null;
+    readonly sourceMessage?: ChatMessage | null;
+  },
+  visibleToPlayer: boolean,
+): number {
+  let count = input.baseTelegraph.beatCount;
+  if (input.attack.proofWeighted) count += 1;
+  if (input.attack.quoteWeighted) count += 1;
+  if (input.helper.helperShadowing) count += 1;
+  if (input.counterWindow) count += 1;
+  if (!visibleToPlayer) count = Math.max(1, count - 1);
+  return Math.max(1, Math.min(7, count));
+}
+
+function shouldRecommendTypingTheater(
+  input: {
+    readonly attack: ChatBossAttack;
+    readonly fightKind: ChatBossFightKind;
+    readonly baseTelegraph: ChatBossTelegraph;
+    readonly room: ChatRoomState | null;
+    readonly session: ChatSessionState | null;
+    readonly visibleChannelId: ChatVisibleChannel;
+    readonly witness: ChatTelegraphWitnessProjection;
+    readonly helper: ChatTelegraphHelperProjection;
+    readonly affect: ChatAffectSnapshot;
+    readonly pressureTier: PressureTier;
+    readonly fightPlan?: ChatBossFightPlan | null;
+    readonly round?: ChatBossRound | null;
+    readonly counterWindow?: ChatBossCounterWindowBinding | null;
+    readonly sourceMessage?: ChatMessage | null;
+  },
+  visibleToPlayer: boolean,
+  options: Required<Omit<ChatTelegraphPolicyOptions, 'clock' | 'logger'>>,
+): boolean {
+  if (!visibleToPlayer) {
+    return input.attack.attackClass === 'SILENCE_BAIT';
+  }
+  if (input.attack.proofWeighted) {
+    return false;
+  }
+  const score = clamp01(
+    Number(input.baseTelegraph.typingTheaterRecommended ? toBossScore01(0.5) : toBossScore01(0.18)) +
+      Number(input.witness.witnessDensity01) * 0.15 +
+      Number(input.helper.helperHaunt01) * 0.1 +
+      (input.visibleChannelId === 'GLOBAL' ? 0.1 : 0) +
+      options.pressureBiasWeight01 * pressureTierScalar(input.pressureTier) * 0.14,
+  );
+  return score >= 0.42;
+}
+
+function authorTelegraphLabel(
+  input: {
+    readonly attack: ChatBossAttack;
+    readonly fightKind: ChatBossFightKind;
+    readonly baseTelegraph: ChatBossTelegraph;
+    readonly room: ChatRoomState | null;
+    readonly session: ChatSessionState | null;
+    readonly visibleChannelId: ChatVisibleChannel;
+    readonly witness: ChatTelegraphWitnessProjection;
+    readonly helper: ChatTelegraphHelperProjection;
+    readonly affect: ChatAffectSnapshot;
+    readonly pressureTier: PressureTier;
+    readonly fightPlan?: ChatBossFightPlan | null;
+    readonly round?: ChatBossRound | null;
+    readonly counterWindow?: ChatBossCounterWindowBinding | null;
+    readonly sourceMessage?: ChatMessage | null;
+  },
+  visibleToPlayer: boolean,
+): string {
+  if (!visibleToPlayer && input.attack.attackClass === 'SILENCE_BAIT') {
+    return 'Pressure gathers off-screen.';
+  }
+  if (input.visibleChannelId === 'DEAL_ROOM' && input.attack.attackType === 'LIQUIDITY_STRIKE') {
+    return 'Terms tighten.';
+  }
+  if (input.attack.proofWeighted) {
+    return 'Receipts requested.';
+  }
+  if (input.attack.quoteWeighted) {
+    return 'History stirs.';
+  }
+  if (input.attack.crowdAmplified && Number(input.witness.witnessDensity01) >= 0.58) {
+    return 'The room turns.';
+  }
+  if (input.pressureTier === 'CRITICAL') {
+    return 'Pressure spikes.';
+  }
+  return input.baseTelegraph.label;
+}
+
+function buildTelegraphNotes(
+  input: {
+    readonly attack: ChatBossAttack;
+    readonly fightKind: ChatBossFightKind;
+    readonly baseTelegraph: ChatBossTelegraph;
+    readonly room: ChatRoomState | null;
+    readonly session: ChatSessionState | null;
+    readonly visibleChannelId: ChatVisibleChannel;
+    readonly witness: ChatTelegraphWitnessProjection;
+    readonly helper: ChatTelegraphHelperProjection;
+    readonly affect: ChatAffectSnapshot;
+    readonly pressureTier: PressureTier;
+    readonly fightPlan?: ChatBossFightPlan | null;
+    readonly round?: ChatBossRound | null;
+    readonly counterWindow?: ChatBossCounterWindowBinding | null;
+    readonly sourceMessage?: ChatMessage | null;
+  },
+  visibleToPlayer: boolean,
+  canFakeOut: boolean,
+  revealDelayMs: number,
+  silenceLeadInMs: number,
+): readonly string[] {
+  const notes: string[] = [
+    `fightKind=${input.fightKind}`,
+    `pressureTier=${input.pressureTier}`,
+    `visibleChannel=${input.visibleChannelId}`,
+    `visibleToPlayer=${String(visibleToPlayer)}`,
+    `witnessDensity01=${Number(input.witness.witnessDensity01).toFixed(3)}`,
+    `helperHaunt01=${Number(input.helper.helperHaunt01).toFixed(3)}`,
+    `revealDelayMs=${String(revealDelayMs)}`,
+    `silenceLeadInMs=${String(silenceLeadInMs)}`,
+  ];
+  if (canFakeOut) notes.push('Fake-out legally allowed under current witness/proof state.');
+  if (input.attack.proofWeighted) notes.push('Proof-weighted attack compresses theater and foregrounds evidence.');
+  if (input.attack.quoteWeighted) notes.push('Quote leverage increases memory pressure inside the telegraph.');
+  if (input.helper.helperShadowing) notes.push(input.helper.rationale);
+  if (input.counterWindow) notes.push(`Counter window ideal timing=${input.counterWindow.idealTiming}`);
+  if (input.room?.roomKind === 'DEAL_ROOM') notes.push('Deal room posture favors predatory squeeze aesthetics over theatrical crowd flourish.');
+  return notes;
+}
+
+function resolveVisibilityClass(
+  telegraph: ChatBossTelegraph,
+  visibleChannelId: ChatVisibleChannel,
+  room: ChatRoomState | null,
+  witness: ChatTelegraphWitnessProjection,
+  attack: ChatBossAttack,
+  options: Required<Omit<ChatTelegraphPolicyOptions, 'clock' | 'logger'>>,
+): ChatTelegraphVisibilityClass {
+  if (!telegraph.visibleToPlayer) {
+    return attack.attackClass === 'SILENCE_BAIT' ? 'SHADOWED' : 'INFERRED';
+  }
+  const density = Number(witness.witnessDensity01);
+  if (visibleChannelId === 'DEAL_ROOM' && density < options.strongVisibilityFloor01) {
+    return 'FELT';
+  }
+  if (room?.roomKind === 'PRIVATE' && attack.quoteWeighted) {
+    return 'INFERRED';
+  }
+  if (density >= options.strongVisibilityFloor01 || attack.proofWeighted) {
+    return 'VISIBLE';
+  }
+  if (attack.attackClass === 'SILENCE_BAIT') {
+    return 'FELT';
+  }
+  return 'FELT';
+}
+
+function resolveTypingLeadInMs(
+  telegraph: ChatBossTelegraph,
+  attack: ChatBossAttack,
+  helper: ChatTelegraphHelperProjection,
+  visibilityClass: ChatTelegraphVisibilityClass,
+): number {
+  if (!telegraph.typingTheaterRecommended) {
+    return 0;
+  }
+  const base =
+    visibilityClass === 'VISIBLE' ? 160 :
+    visibilityClass === 'FELT' ? 240 :
+    visibilityClass === 'INFERRED' ? 320 :
+    420;
+  const quoteLift = attack.quoteWeighted ? 140 : 0;
+  const helperLift = helper.helperShadowing ? 90 : 0;
+  const proofCompression = attack.proofWeighted ? -120 : 0;
+  return Math.max(0, Math.round(base + quoteLift + helperLift + proofCompression));
+}
+
+// ============================================================================
+// MARK: Demand helpers
+// ============================================================================
+
+function demandUrgencyBase(demand: ChatBossCounterDemand): number {
+  switch (demand) {
+    case 'PROOF_REPLY':
+      return 0.58;
+    case 'QUOTE_REPLY':
+      return 0.52;
+    case 'NEGOTIATION_REPLY':
+      return 0.56;
+    case 'SILENCE_REPLY':
+      return 0.34;
+    case 'TIMED_REPLY':
+      return 0.48;
+    case 'VISIBLE_REPLY':
+    default:
+      return 0.4;
   }
 }
 
-/** Returns whether a boss fight kind warrants elevated witness density in the telegraph. */
-export function fightKindElevatesWitnessDensity(kind: ChatBossFightKind): boolean {
-  return kind === 'PUBLIC_HUMILIATION' || kind === 'RIVAL_ASCENSION' || kind === 'CROWD_SWARM_HUNT';
+function timingUrgencyBonus(timing: ChatCounterTimingClass): number {
+  switch (timing) {
+    case 'INSTANT':
+      return 0.24;
+    case 'FAST':
+      return 0.18;
+    case 'BEAT_LOCKED':
+      return 0.14;
+    case 'READ_PRESSURE_DELAYED':
+      return 0.12;
+    case 'LATE_BUT_VALID':
+      return 0.08;
+    case 'POST_SCENE':
+      return 0.03;
+    case 'SHADOW_ONLY':
+      return 0.02;
+    default:
+      return 0;
+  }
+}
+
+function pressureTierUrgencyBonus(tier: PressureTier): number {
+  switch (tier) {
+    case 'CRITICAL':
+      return 0.22;
+    case 'HIGH':
+      return 0.16;
+    case 'ELEVATED':
+      return 0.1;
+    case 'BUILDING':
+      return 0.05;
+    case 'NONE':
+    default:
+      return 0;
+  }
+}
+
+function demandReadableLabel(demand: ChatBossCounterDemand): string {
+  switch (demand) {
+    case 'PROOF_REPLY':
+      return 'Answer with proof, not posture.';
+    case 'QUOTE_REPLY':
+      return 'Answer with the quote lane in mind.';
+    case 'NEGOTIATION_REPLY':
+      return 'Answer by repricing or reframing the deal.';
+    case 'SILENCE_REPLY':
+      return 'The legal answer may be a disciplined non-reply.';
+    case 'TIMED_REPLY':
+      return 'Timing is part of the counter, not only wording.';
+    case 'VISIBLE_REPLY':
+    default:
+      return 'A visible answer is expected.';
+  }
+}
+
+function demandRationale(
+  demand: ChatBossCounterDemand,
+  timing: ChatCounterTimingClass,
+  attack: ChatBossAttack,
+): string {
+  switch (demand) {
+    case 'PROOF_REPLY':
+      return `This ${attack.attackClass} attack is narrowing the lane to proof, ideally on ${timing}.`;
+    case 'QUOTE_REPLY':
+      return `This ${attack.attackClass} attack is memory-shaped; careless language becomes ammunition.`;
+    case 'NEGOTIATION_REPLY':
+      return `This ${attack.attackType} attack wants the player trapped in hostile terms unless they reprice the scene.`;
+    case 'SILENCE_REPLY':
+      return `This ${attack.attackClass} attack is using response compulsion as pressure.`;
+    case 'TIMED_REPLY':
+      return `The counter window is timing-sensitive under ${timing}.`;
+    case 'VISIBLE_REPLY':
+    default:
+      return `The attack is socially legible enough that a visible answer matters.`;
+  }
+}
+
+function dedupeDemands(
+  demands: readonly ChatBossCounterDemand[],
+): readonly ChatBossCounterDemand[] {
+  const seen = new Set<ChatBossCounterDemand>();
+  const result: ChatBossCounterDemand[] = [];
+  for (const demand of demands) {
+    if (!seen.has(demand)) {
+      seen.add(demand);
+      result.push(demand);
+    }
+  }
+  return result;
 }
 
 // ============================================================================
-// MARK: Audience-heat-aware telegraph helpers
+// MARK: Beat authoring bodies
 // ============================================================================
 
-/** Returns whether the audience heat makes a visible telegraph mandatory. */
-export function audienceHeatForcesVisibility(heat: ChatAudienceHeat): boolean {
-  return (heat.heat01 as unknown as number) >= 0.8;
+function preloadBody(
+  attack: ChatBossAttack,
+  fightKind: ChatBossFightKind,
+  visibleChannelId: ChatVisibleChannel,
+): string {
+  if (visibleChannelId === 'DEAL_ROOM') {
+    return `Deal-room posture loads for ${attack.attackType} inside ${fightKind}.`;
+  }
+  return `Pressure posture loads for ${attack.attackClass} inside ${fightKind}.`;
 }
 
-/** Returns the lead-in multiplier suggested by current audience heat. */
-export function audienceHeatLeadInMultiplier(heat: ChatAudienceHeat): number {
-  const h = heat.heat01 as unknown as number;
-  if (h >= 0.85) return 0.6;
-  if (h >= 0.65) return 0.8;
-  if (h >= 0.4) return 1.0;
-  return 1.2;
+function silenceBeatBody(
+  attack: ChatBossAttack,
+  pressureTier: PressureTier,
+  telegraph: ChatBossTelegraph,
+): string {
+  return [
+    `Silence lead-in: ${telegraph.silenceLeadInMs}ms.`,
+    `${attack.attackClass} is using quiet as pressure instead of empty space.`,
+    `Current tier: ${pressureTier}.`,
+  ].join(' ');
 }
 
-/** Returns the witness bias contribution from audience heat. */
-export function audienceHeatWitnessBias(heat: ChatAudienceHeat): Score01 {
-  return clamp01((heat.heat01 as unknown as number) * 0.5);
+function typingBeatBody(
+  attack: ChatBossAttack,
+  visibleChannelId: ChatVisibleChannel,
+  witness: ChatTelegraphWitnessProjection,
+): string {
+  return [
+    `${attack.attackClass} recommends typing theater on ${visibleChannelId}.`,
+    `Witness density=${Number(witness.witnessDensity01).toFixed(2)}.`,
+  ].join(' ');
+}
+
+function tiltBeatBody(
+  attack: ChatBossAttack,
+  visibleChannelId: ChatVisibleChannel,
+  witness: ChatTelegraphWitnessProjection,
+): string {
+  return visibleChannelId === 'DEAL_ROOM'
+    ? `The negotiation lane narrows while ${witness.visibleWitnessCount} visible witness lanes remain in play.`
+    : `${attack.attackClass} starts shifting witness posture before direct reveal.`;
+}
+
+function revealBeatBody(
+  attack: ChatBossAttack,
+  visibilityClass: ChatTelegraphVisibilityClass,
+  witness: ChatTelegraphWitnessProjection,
+  pressureTier: PressureTier,
+): string {
+  return [
+    `${attack.label} resolves into ${visibilityClass.toLowerCase()} threat readability.`,
+    `Pressure tier=${pressureTier}.`,
+    `Crowd lean=${witness.crowdLean}.`,
+  ].join(' ');
+}
+
+function aftermathHintBody(
+  attack: ChatBossAttack,
+  fightKind: ChatBossFightKind,
+  witness: ChatTelegraphWitnessProjection,
+  helper: ChatTelegraphHelperProjection,
+): string {
+  return [
+    `${fightKind} aftermath hint for ${attack.attackClass}.`,
+    witness.roomWatching ? 'Witness memory will matter.' : 'Witness memory is limited.',
+    helper.helperShadowing ? 'Helper scrutiny remains active.' : 'Helper scrutiny stays backgrounded.',
+  ].join(' ');
+}
+
+function createBeat(input: {
+  readonly attack: ChatBossAttack;
+  readonly kind: ChatTelegraphBeatKind;
+  readonly order: number;
+  readonly atMs: UnixMs;
+  readonly visibleToPlayer: boolean;
+  readonly emphasis01: number;
+  readonly witnessWeight01: number;
+  readonly helperWeight01: number;
+  readonly label: string;
+  readonly body: string;
+  readonly metadata?: JsonValue;
+}): ChatTelegraphBeat {
+  return {
+    beatId: `beat:${String(input.attack.attackId)}:${input.kind}:${String(input.order)}:${String(input.atMs)}`,
+    kind: input.kind,
+    order: input.order,
+    atMs: input.atMs,
+    visibleToPlayer: input.visibleToPlayer,
+    emphasis01: toBossScore01(clamp01(input.emphasis01)),
+    witnessWeight01: toBossScore01(clamp01(input.witnessWeight01)),
+    helperWeight01: toBossScore01(clamp01(input.helperWeight01)),
+    label: input.label,
+    body: input.body,
+    metadata: input.metadata,
+  };
+}
+
+function overlayCue(
+  code: ChatTelegraphOverlayCode,
+  active: boolean,
+  confidence01: Score01,
+  priority100: Score100,
+  title: string,
+  subtitle: string,
+  payload?: JsonValue,
+): ChatTelegraphOverlayCue {
+  return {
+    code,
+    active,
+    confidence01,
+    priority100,
+    title,
+    subtitle,
+    payload,
+  };
 }
 
 // ============================================================================
-// MARK: Nullable-safe telegraph utilities
+// MARK: Lower-level scalar helpers
 // ============================================================================
 
-/** Resolves a nullable binding to a string label. */
-export function bindingLabel(binding: Nullable<ChatBossCounterWindowBinding>): string {
-  if (binding == null) return 'no-binding';
-  return `window:${String(binding.windowId ?? 'unknown')}`;
+function inferVisibleWitnessCount(
+  state: ChatState,
+  roomId: ChatRoomId,
+  visibleChannelId: ChatVisibleChannel,
+): number {
+  const roomPresence = state.presence.byRoom[roomId] ?? {};
+  let count = 0;
+  for (const presence of Object.values(roomPresence)) {
+    if (presence.visibleToRoom && !presence.spectating) {
+      count += 1;
+    }
+  }
+  if (visibleChannelId === 'GLOBAL') {
+    count += 2;
+  }
+  return Math.max(0, count);
 }
 
-/** Returns whether the optional source message provides a quote cue. */
-export function sourceMessageHasQuoteCue(msg: Nullable<ChatMessage>): boolean {
-  if (msg == null) return false;
-  return msg.bodyParts.some((p) => p.type === 'QUOTE');
+function inferLatentWitnessCount(
+  input: {
+    readonly state: ChatState;
+    readonly room: ChatRoomState | null;
+    readonly session: ChatSessionState | null;
+    readonly visibleChannelId: ChatVisibleChannel;
+    readonly attack: ChatBossAttack;
+    readonly fightKind: ChatBossFightKind;
+    readonly fightPlan?: ChatBossFightPlan | null;
+    readonly audienceHeat: ChatAudienceHeat;
+  },
+  roomFloor: number,
+  audienceHeat01: number,
+  publicWeight: number,
+): number {
+  const transcriptCount = input.room
+    ? (input.state.transcript.byRoom[input.room.roomId]?.length ?? 0)
+    : 0;
+  const transcriptWitnessBias = Math.min(6, Math.floor(transcriptCount / 14));
+  const crowdBias = Math.floor(audienceHeat01 * 7);
+  const publicBias = Math.floor(publicWeight * 5);
+  const fightBias = input.fightKind === 'DEAL_ROOM_AMBUSH' ? 1 : input.attack.crowdAmplified ? 3 : 2;
+  return Math.max(0, Math.floor(roomFloor * 4) + transcriptWitnessBias + crowdBias + publicBias + fightBias);
 }
 
-/** Resolves the optional cause event id to a label. */
-export function causeEventLabel(id: Nullable<ChatEventId>): string {
-  return id != null ? `event:${String(id)}` : 'no-cause';
+function deriveCrowdLean(
+  attack: ChatBossAttack,
+  audienceHeat: ChatAudienceHeat,
+): ChatTelegraphWitnessProjection['crowdLean'] {
+  if (audienceHeat.swarmDirection === 'POSITIVE') {
+    return attack.crowdAmplified ? 'CURIOUS' : 'SUPPORTIVE';
+  }
+  if (audienceHeat.swarmDirection === 'NEGATIVE') {
+    return 'HOSTILE';
+  }
+  if (attack.crowdAmplified) {
+    return 'CURIOUS';
+  }
+  return 'NEUTRAL';
+}
+
+function buildHelperRationale(
+  helperHaunt01: number,
+  helperInterventionRisk01: number,
+  rescueAllowed: boolean,
+  pressureTier: PressureTier,
+): string {
+  const posture = rescueAllowed ? 'Rescue is legally on the board.' : 'Rescue is not formally enabled.';
+  const visibility = helperHaunt01 >= 0.6
+    ? 'Helper posture is near-surface.'
+    : helperHaunt01 >= 0.38
+      ? 'Helper posture is ghosting the lane.'
+      : 'Helper posture remains dim.';
+  const timing = helperInterventionRisk01 >= 0.66
+    ? 'Intervention risk is high.'
+    : helperInterventionRisk01 >= 0.42
+      ? 'Intervention risk is moderate.'
+      : 'Intervention risk is low.';
+  return [posture, visibility, timing, `Pressure tier=${pressureTier}.`].join(' ');
+}
+
+function severityScalar(severity: ChatBossAttackSeverity): number {
+  switch (severity) {
+    case 'EXECUTION':
+      return 1;
+    case 'CRITICAL':
+      return 0.82;
+    case 'HEAVY':
+      return 0.62;
+    case 'PROBING':
+    default:
+      return 0.38;
+  }
+}
+
+function pressureTierScalar(tier: PressureTier): number {
+  switch (tier) {
+    case 'CRITICAL':
+      return 1;
+    case 'HIGH':
+      return 0.76;
+    case 'ELEVATED':
+      return 0.52;
+    case 'BUILDING':
+      return 0.28;
+    case 'NONE':
+    default:
+      return 0.1;
+  }
+}
+
+function createProjectionId(
+  attackId: unknown,
+  roundId: unknown,
+  now: UnixMs,
+): string {
+  return `telegraph:${String(attackId)}:${String(roundId ?? 'roundless')}:${String(now)}`;
+}
+
+function trimMutableList<T>(list: T[], max: number): void {
+  if (list.length <= max) {
+    return;
+  }
+  list.splice(0, list.length - max);
+}
+
+function freezeLedger(
+  roomId: ChatRoomId,
+  ledger: MutableTelegraphLedger,
+): ChatTelegraphPolicyLedger {
+  const byAttackId: Record<string, readonly ChatTelegraphProjection[]> = {};
+  for (const [key, value] of ledger.byAttackId.entries()) {
+    byAttackId[key] = [...value];
+  }
+  return {
+    roomId,
+    projections: [...ledger.projections],
+    byAttackId,
+    lastProjectedAt: ledger.lastProjectedAt,
+  };
 }
