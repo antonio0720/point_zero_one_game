@@ -1045,3 +1045,1006 @@ export function recoveryTrackerNeedsHelperCover(
   const projection = tracker.project(roomId);
   return projection.cohort === 'HELPER_RELIANT' || projection.cohort === 'FRAGILE';
 }
+
+// ============================================================================
+// MARK: Profile system
+// ============================================================================
+
+export type RecoveryOutcomeTrackerProfile =
+  | 'STANDARD'
+  | 'CINEMATIC'
+  | 'AGGRESSIVE'
+  | 'PATIENT'
+  | 'ANALYTICS'
+  | 'MINIMAL';
+
+export interface RecoveryOutcomeTrackerProfileConfig {
+  readonly profile: RecoveryOutcomeTrackerProfile;
+  readonly options: Partial<RecoveryOutcomeTrackerOptions>;
+  readonly description: string;
+  readonly useCases: readonly string[];
+}
+
+export const RECOVERY_OUTCOME_TRACKER_PROFILE_CONFIGS: Readonly<Record<RecoveryOutcomeTrackerProfile, RecoveryOutcomeTrackerProfileConfig>> = Object.freeze({
+  STANDARD: Object.freeze({
+    profile: 'STANDARD',
+    options: {},
+    description: 'Default tracking behavior for standard game rooms.',
+    useCases: Object.freeze(['General narrative rooms', 'Default session tracking']),
+  }),
+  CINEMATIC: Object.freeze({
+    profile: 'CINEMATIC',
+    options: Object.freeze({
+      retainLedgerEntriesPerRoom: 72,
+      retainActiveRecordsPerRoom: 8,
+      relapseWindowMs: 45_000,
+      reinforcementDecayHalfLifeMs: 240_000,
+    }),
+    description: 'Extended retention and slow decay for cinematic story beats.',
+    useCases: Object.freeze(['Legend runs', 'Authored narrative chambers', 'Boss fight sequences']),
+  }),
+  AGGRESSIVE: Object.freeze({
+    profile: 'AGGRESSIVE',
+    options: Object.freeze({
+      retainLedgerEntriesPerRoom: 36,
+      retainActiveRecordsPerRoom: 6,
+      relapseWindowMs: 8_000,
+      reinforcementDecayHalfLifeMs: 45_000,
+    }),
+    description: 'Short windows and fast decay for high-churn rooms.',
+    useCases: Object.freeze(['Hater-heavy syndicate rooms', 'Rapid escalation sequences']),
+  }),
+  PATIENT: Object.freeze({
+    profile: 'PATIENT',
+    options: Object.freeze({
+      retainLedgerEntriesPerRoom: 48,
+      retainActiveRecordsPerRoom: 6,
+      relapseWindowMs: 60_000,
+      reinforcementDecayHalfLifeMs: 360_000,
+    }),
+    description: 'Extended relapse window and slow decay for helper-focused rooms.',
+    useCases: Object.freeze(['Onboarding rooms', 'Helper-assigned sessions', 'Low-pressure contexts']),
+  }),
+  ANALYTICS: Object.freeze({
+    profile: 'ANALYTICS',
+    options: Object.freeze({
+      retainLedgerEntriesPerRoom: 200,
+      retainActiveRecordsPerRoom: 12,
+      relapseWindowMs: 90_000,
+      reinforcementDecayHalfLifeMs: 600_000,
+    }),
+    description: 'Maximum retention for analytics, audit, and replay review.',
+    useCases: Object.freeze(['Offline analytics pipelines', 'QA and replay review sessions']),
+  }),
+  MINIMAL: Object.freeze({
+    profile: 'MINIMAL',
+    options: Object.freeze({
+      retainLedgerEntriesPerRoom: 24,
+      retainActiveRecordsPerRoom: 4,
+      relapseWindowMs: 5_000,
+      reinforcementDecayHalfLifeMs: 30_000,
+    }),
+    description: 'Minimum retention footprint for lightweight runtime contexts.',
+    useCases: Object.freeze(['Edge contexts', 'Memory-constrained environments']),
+  }),
+});
+
+// ============================================================================
+// MARK: Extended audit and diagnostic contracts
+// ============================================================================
+
+export interface RecoveryOutcomeTrackerAuditEntry {
+  readonly roomId: string;
+  readonly recoveryId: string;
+  readonly rescueId: string | null;
+  readonly eventKind: 'BEGIN' | 'ACCEPT' | 'RESOLVE' | 'TIMEOUT' | 'ABANDON' | 'RELAPSE';
+  readonly recordedAt: UnixMs;
+  readonly outcomeKind: ChatRecoveryOutcomeKind | null;
+  readonly successBand: ChatRecoverySuccessBand | null;
+  readonly cohort: RecoveryOutcomeTrackerCohort;
+  readonly reinforcementScore01: Score01;
+  readonly relapseRisk01: Score01;
+  readonly notes: readonly string[];
+}
+
+export interface RecoveryOutcomeTrackerAuditReport {
+  readonly generatedAt: UnixMs;
+  readonly roomCount: number;
+  readonly totalEntries: number;
+  readonly beginCount: number;
+  readonly resolveCount: number;
+  readonly timeoutCount: number;
+  readonly abandonCount: number;
+  readonly relapseCount: number;
+  readonly cohortBreakdown: Readonly<Record<RecoveryOutcomeTrackerCohort, number>>;
+  readonly successBandBreakdown: Readonly<Record<ChatRecoverySuccessBand, number>>;
+  readonly averageReinforcement01: Score01;
+  readonly averageRelapseRisk01: Score01;
+  readonly entries: readonly RecoveryOutcomeTrackerAuditEntry[];
+}
+
+export interface RecoveryOutcomeTrackerDiff {
+  readonly roomId: string;
+  readonly before: RecoveryOutcomeTrackerSummary;
+  readonly after: RecoveryOutcomeTrackerSummary;
+  readonly activeCountDelta: number;
+  readonly settledCountDelta: number;
+  readonly recoveredCountDelta: number;
+  readonly reinforcementDelta: number;
+  readonly relapseRiskDelta: number;
+  readonly notes: readonly string[];
+}
+
+export interface RecoveryOutcomeTrackerStatsSummary {
+  readonly snapshotAt: UnixMs;
+  readonly rooms: readonly string[];
+  readonly totalActiveRecoveries: number;
+  readonly totalSettledRecoveries: number;
+  readonly globalAverageReinforcement01: Score01;
+  readonly globalAverageRelapseRisk01: Score01;
+  readonly cohortBreakdown: Readonly<Record<RecoveryOutcomeTrackerCohort, number>>;
+  readonly successBandBreakdown: Readonly<Record<ChatRecoverySuccessBand, number>>;
+  readonly highRiskRooms: readonly string[];
+  readonly stableRooms: readonly string[];
+}
+
+export interface RecoveryOutcomeBatchIngestResult {
+  readonly processed: number;
+  readonly errors: number;
+  readonly ledgers: readonly RecoveryOutcomeTrackerRoomLedger[];
+  readonly errorMessages: readonly string[];
+}
+
+// ============================================================================
+// MARK: Cross-room analytics
+// ============================================================================
+
+export function buildCrossRoomTrackerStats(
+  tracker: RecoveryOutcomeTracker,
+  roomIds: readonly ChatRoomId[],
+  now: UnixMs,
+): RecoveryOutcomeTrackerStatsSummary {
+  const cohortBreakdown: Record<RecoveryOutcomeTrackerCohort, number> = {
+    UNKNOWN: 0, SAVEABLE: 0, FRAGILE: 0, STABLE: 0,
+    VOLATILE: 0, COMEBACK_READY: 0, HELPER_RELIANT: 0,
+  };
+  const successBandBreakdown: Record<ChatRecoverySuccessBand, number> = {
+    NO_LIFT: 0, SMALL_LIFT: 0, CLEAR_LIFT: 0, STRONG_LIFT: 0, RUN_SAVED: 0,
+  };
+  let totalActive = 0;
+  let totalSettled = 0;
+  let totalReinforcement = 0;
+  let totalRelapseRisk = 0;
+  let reinforcementCount = 0;
+  const highRiskRooms: string[] = [];
+  const stableRooms: string[] = [];
+
+  for (const roomId of roomIds) {
+    const summary = tracker.buildSummary(roomId);
+    const ledger = tracker.getRoomLedger(roomId);
+    totalActive += summary.activeCount;
+    totalSettled += summary.settledCount;
+
+    const projection = tracker.project(roomId);
+    const cohort = projection.cohort as RecoveryOutcomeTrackerCohort;
+    cohortBreakdown[cohort] = (cohortBreakdown[cohort] ?? 0) + 1;
+
+    if (Number(summary.averageRelapseRisk01) > 0.58) highRiskRooms.push(String(roomId));
+    if (projection.cohort === 'STABLE' || projection.cohort === 'COMEBACK_READY') stableRooms.push(String(roomId));
+
+    for (const settled of ledger.settledRecoveries) {
+      const band = settled.outcome.successBand;
+      successBandBreakdown[band] = (successBandBreakdown[band] ?? 0) + 1;
+      totalReinforcement += Number(settled.reinforcementScore01);
+      totalRelapseRisk += Number(settled.relapseRisk01);
+      reinforcementCount++;
+    }
+  }
+
+  return Object.freeze({
+    snapshotAt: now,
+    rooms: Object.freeze(roomIds.map(String)),
+    totalActiveRecoveries: totalActive,
+    totalSettledRecoveries: totalSettled,
+    globalAverageReinforcement01: (reinforcementCount > 0 ? totalReinforcement / reinforcementCount : 0) as Score01,
+    globalAverageRelapseRisk01: (reinforcementCount > 0 ? totalRelapseRisk / reinforcementCount : 0) as Score01,
+    cohortBreakdown: Object.freeze(cohortBreakdown),
+    successBandBreakdown: Object.freeze(successBandBreakdown),
+    highRiskRooms: Object.freeze(highRiskRooms),
+    stableRooms: Object.freeze(stableRooms),
+  });
+}
+
+export function buildGlobalCohortMap(
+  tracker: RecoveryOutcomeTracker,
+  roomIds: readonly ChatRoomId[],
+): Readonly<Record<string, RecoveryOutcomeTrackerCohort>> {
+  const map: Record<string, RecoveryOutcomeTrackerCohort> = {};
+  for (const roomId of roomIds) {
+    const projection = tracker.project(roomId);
+    map[String(roomId)] = projection.cohort as RecoveryOutcomeTrackerCohort;
+  }
+  return Object.freeze(map);
+}
+
+export function buildTrackerAuditReport(
+  tracker: RecoveryOutcomeTracker,
+  roomIds: readonly ChatRoomId[],
+  now: UnixMs,
+): RecoveryOutcomeTrackerAuditReport {
+  const cohortBreakdown: Record<RecoveryOutcomeTrackerCohort, number> = {
+    UNKNOWN: 0, SAVEABLE: 0, FRAGILE: 0, STABLE: 0,
+    VOLATILE: 0, COMEBACK_READY: 0, HELPER_RELIANT: 0,
+  };
+  const successBandBreakdown: Record<ChatRecoverySuccessBand, number> = {
+    NO_LIFT: 0, SMALL_LIFT: 0, CLEAR_LIFT: 0, STRONG_LIFT: 0, RUN_SAVED: 0,
+  };
+  const entries: RecoveryOutcomeTrackerAuditEntry[] = [];
+  let totalReinforcement = 0;
+  let totalRelapseRisk = 0;
+  let entryCount = 0;
+  let beginCount = 0;
+  let resolveCount = 0;
+  let timeoutCount = 0;
+  let abandonCount = 0;
+  let relapseCount = 0;
+
+  for (const roomId of roomIds) {
+    const ledger = tracker.getRoomLedger(roomId);
+
+    for (const active of ledger.activeRecoveries) {
+      beginCount++;
+      const cohort = active.cohort as RecoveryOutcomeTrackerCohort;
+      cohortBreakdown[cohort] = (cohortBreakdown[cohort] ?? 0) + 1;
+      entries.push(Object.freeze({
+        roomId: String(roomId),
+        recoveryId: String(active.recoveryId),
+        rescueId: active.rescueId ? String(active.rescueId) : null,
+        eventKind: 'BEGIN',
+        recordedAt: active.createdAt,
+        outcomeKind: null,
+        successBand: null,
+        cohort,
+        reinforcementScore01: active.reinforcementScore01,
+        relapseRisk01: active.relapseRisk01,
+        notes: active.notes,
+      }));
+    }
+
+    for (const settled of ledger.settledRecoveries) {
+      const band = settled.outcome.successBand;
+      successBandBreakdown[band] = (successBandBreakdown[band] ?? 0) + 1;
+      const cohort = settled.cohort as RecoveryOutcomeTrackerCohort;
+      cohortBreakdown[cohort] = (cohortBreakdown[cohort] ?? 0) + 1;
+      totalReinforcement += Number(settled.reinforcementScore01);
+      totalRelapseRisk += Number(settled.relapseRisk01);
+      entryCount++;
+
+      const isTimeout = settled.notes.includes('timed-out');
+      const isAbandon = settled.notes.includes('abandoned');
+      const isRelapse = settled.notes.includes('relapsed');
+      if (isRelapse) relapseCount++;
+      else if (isTimeout) timeoutCount++;
+      else if (isAbandon) abandonCount++;
+      else resolveCount++;
+
+      const eventKind: RecoveryOutcomeTrackerAuditEntry['eventKind'] = isRelapse ? 'RELAPSE'
+        : isTimeout ? 'TIMEOUT'
+        : isAbandon ? 'ABANDON'
+        : 'RESOLVE';
+
+      entries.push(Object.freeze({
+        roomId: String(roomId),
+        recoveryId: String(settled.recoveryId),
+        rescueId: settled.rescueId ? String(settled.rescueId) : null,
+        eventKind,
+        recordedAt: settled.settledAt,
+        outcomeKind: settled.outcome.kind,
+        successBand: band,
+        cohort,
+        reinforcementScore01: settled.reinforcementScore01,
+        relapseRisk01: settled.relapseRisk01,
+        notes: settled.notes,
+      }));
+    }
+  }
+
+  return Object.freeze({
+    generatedAt: now,
+    roomCount: roomIds.length,
+    totalEntries: entries.length,
+    beginCount,
+    resolveCount,
+    timeoutCount,
+    abandonCount,
+    relapseCount,
+    cohortBreakdown: Object.freeze(cohortBreakdown),
+    successBandBreakdown: Object.freeze(successBandBreakdown),
+    averageReinforcement01: (entryCount > 0 ? totalReinforcement / entryCount : 0) as Score01,
+    averageRelapseRisk01: (entryCount > 0 ? totalRelapseRisk / entryCount : 0) as Score01,
+    entries: Object.freeze(entries),
+  });
+}
+
+export function computeTrackerDiff(
+  tracker: RecoveryOutcomeTracker,
+  roomId: ChatRoomId,
+  before: RecoveryOutcomeTrackerSummary,
+  now: UnixMs,
+): RecoveryOutcomeTrackerDiff {
+  const after = tracker.buildSummary(roomId);
+  const notes: string[] = [];
+  if (after.recoveredCount > before.recoveredCount) {
+    notes.push(`+${after.recoveredCount - before.recoveredCount} recovered`);
+  }
+  if (after.settledCount > before.settledCount) {
+    notes.push(`+${after.settledCount - before.settledCount} settled`);
+  }
+  return Object.freeze({
+    roomId: String(roomId),
+    before,
+    after,
+    activeCountDelta: after.activeCount - before.activeCount,
+    settledCountDelta: after.settledCount - before.settledCount,
+    recoveredCountDelta: after.recoveredCount - before.recoveredCount,
+    reinforcementDelta: Number(after.averageReinforcement01) - Number(before.averageReinforcement01),
+    relapseRiskDelta: Number(after.averageRelapseRisk01) - Number(before.averageRelapseRisk01),
+    notes: Object.freeze(notes),
+  });
+}
+
+// ============================================================================
+// MARK: Batch ingest with result tracking
+// ============================================================================
+
+export function batchIngestRecoveryOutcomeRecords(
+  tracker: RecoveryOutcomeTracker,
+  records: readonly RecoveryOutcomeIngestRecord[],
+): RecoveryOutcomeBatchIngestResult {
+  const ledgers: RecoveryOutcomeTrackerRoomLedger[] = [];
+  const errorMessages: string[] = [];
+  let errors = 0;
+
+  for (const record of records) {
+    try {
+      const result = ingestRecoveryOutcomeRecords(tracker, [record]);
+      ledgers.push(...result);
+    } catch (err) {
+      errors++;
+      errorMessages.push(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  return Object.freeze({
+    processed: records.length - errors,
+    errors,
+    ledgers: Object.freeze(ledgers),
+    errorMessages: Object.freeze(errorMessages),
+  });
+}
+
+// ============================================================================
+// MARK: Reinforcement and relapse scoring helpers
+// ============================================================================
+
+export function scoreRecoveryHealth(ledger: RecoveryOutcomeTrackerRoomLedger): Score01 {
+  const settled = ledger.settledRecoveries;
+  if (settled.length === 0) return 0 as Score01;
+  const avgReinforcement = settled.reduce((s, r) => s + Number(r.reinforcementScore01), 0) / settled.length;
+  const avgRelapseRisk = settled.reduce((s, r) => s + Number(r.relapseRisk01), 0) / settled.length;
+  return Math.max(0, Math.min(1, avgReinforcement * (1 - avgRelapseRisk * 0.5))) as Score01;
+}
+
+export function labelCohortStrength(cohort: RecoveryOutcomeTrackerCohort): 'STRONG' | 'MODERATE' | 'WEAK' | 'UNKNOWN' {
+  switch (cohort) {
+    case 'STABLE': return 'STRONG';
+    case 'COMEBACK_READY': return 'STRONG';
+    case 'SAVEABLE': return 'MODERATE';
+    case 'HELPER_RELIANT': return 'MODERATE';
+    case 'FRAGILE': return 'WEAK';
+    case 'VOLATILE': return 'WEAK';
+    case 'UNKNOWN': return 'UNKNOWN';
+  }
+}
+
+export function cohortNeedsMonitoring(cohort: RecoveryOutcomeTrackerCohort): boolean {
+  return cohort === 'VOLATILE' || cohort === 'FRAGILE' || cohort === 'HELPER_RELIANT';
+}
+
+export function projectCohortTrend(
+  tracker: RecoveryOutcomeTracker,
+  roomId: ChatRoomId,
+): 'IMPROVING' | 'STABLE' | 'DETERIORATING' | 'UNKNOWN' {
+  const summary = tracker.buildSummary(roomId);
+  if (summary.settledCount < 2) return 'UNKNOWN';
+  const recoveredRate = summary.recoveredCount / Math.max(1, summary.settledCount);
+  const failureRate = (summary.failedCount + summary.timedOutCount + summary.abandonedCount) / Math.max(1, summary.settledCount);
+  if (recoveredRate >= 0.50 && failureRate <= 0.20) return 'IMPROVING';
+  if (failureRate >= 0.55 || summary.timedOutCount >= 3) return 'DETERIORATING';
+  return 'STABLE';
+}
+
+export function buildTrackerNarrativeSummary(
+  tracker: RecoveryOutcomeTracker,
+  roomId: ChatRoomId,
+): string {
+  const summary = tracker.buildSummary(roomId);
+  const projection = tracker.project(roomId);
+  const trend = projectCohortTrend(tracker, roomId);
+  return [
+    `cohort=${projection.cohort}`,
+    `trend=${trend}`,
+    `active=${summary.activeCount}`,
+    `settled=${summary.settledCount}`,
+    `recovered=${summary.recoveredCount}`,
+    `failed=${summary.failedCount}`,
+    `reinforcement=${Number(summary.averageReinforcement01).toFixed(2)}`,
+    `relapseRisk=${Number(summary.averageRelapseRisk01).toFixed(2)}`,
+    `band=${summary.strongestSuccessBand ?? 'NONE'}`,
+  ].join(' | ');
+}
+
+// ============================================================================
+// MARK: Serialization helpers
+// ============================================================================
+
+export function serializeTrackerProjection(projection: RecoveryOutcomeTrackerProjection): Readonly<Record<string, unknown>> {
+  return Object.freeze({
+    roomId: String(projection.roomId),
+    cohort: projection.cohort,
+    activeRecoveryId: projection.activeRecoveryId ? String(projection.activeRecoveryId) : null,
+    acceptedOptionId: projection.acceptedOptionId ? String(projection.acceptedOptionId) : null,
+    reinforcementScore01: Number(projection.reinforcementScore01).toFixed(3),
+    relapseRisk01: Number(projection.relapseRisk01).toFixed(3),
+    strongestSuccessBand: projection.strongestSuccessBand ?? null,
+    strongestOutcomeKind: projection.strongestOutcomeKind ?? null,
+    noteCount: projection.notes.length,
+    firstNote: projection.notes[0] ?? null,
+  });
+}
+
+export function buildSettledSliceSummary(settled: readonly SettledRecoveryRecord[]): string {
+  if (settled.length === 0) return 'no-settled-records';
+  const recovered = settled.filter((s) => s.outcome.kind === 'RECOVERED').length;
+  const stabilized = settled.filter((s) => s.outcome.kind === 'STABILIZED').length;
+  const failed = settled.filter((s) => s.outcome.kind === 'FAILED').length;
+  const abandoned = settled.filter((s) => s.outcome.kind === 'ABANDONED').length;
+  return `total=${settled.length} recovered=${recovered} stabilized=${stabilized} failed=${failed} abandoned=${abandoned}`;
+}
+
+// ============================================================================
+// MARK: Profile-aware extended factory
+// ============================================================================
+
+export interface RecoveryOutcomeTrackerExtended {
+  readonly tracker: RecoveryOutcomeTracker;
+  readonly profile: RecoveryOutcomeTrackerProfile;
+  begin(request: RecoveryOutcomeTrackerBeginRequest): RecoveryOutcomeTrackerRoomLedger;
+  acceptOption(request: RecoveryOutcomeTrackerAcceptRequest): RecoveryOutcomeTrackerRoomLedger;
+  resolve(request: RecoveryOutcomeTrackerResolutionRequest): RecoveryOutcomeTrackerRoomLedger;
+  timeout(request: RecoveryOutcomeTrackerTimeoutRequest): RecoveryOutcomeTrackerRoomLedger;
+  abandon(request: RecoveryOutcomeTrackerAbandonRequest): RecoveryOutcomeTrackerRoomLedger;
+  relapse(request: RecoveryOutcomeTrackerRelapseRequest): RecoveryOutcomeTrackerRoomLedger;
+  project(roomId: ChatRoomId): RecoveryOutcomeTrackerProjection;
+  buildSummary(roomId: ChatRoomId): RecoveryOutcomeTrackerSummary;
+  buildAuditReport(roomIds: readonly ChatRoomId[], now: UnixMs): RecoveryOutcomeTrackerAuditReport;
+  buildCrossRoomStats(roomIds: readonly ChatRoomId[], now: UnixMs): RecoveryOutcomeTrackerStatsSummary;
+  computeDiff(roomId: ChatRoomId, before: RecoveryOutcomeTrackerSummary, now: UnixMs): RecoveryOutcomeTrackerDiff;
+  batchIngest(records: readonly RecoveryOutcomeIngestRecord[]): RecoveryOutcomeBatchIngestResult;
+  scoreHealth(roomId: ChatRoomId): Score01;
+  projectTrend(roomId: ChatRoomId): ReturnType<typeof projectCohortTrend>;
+  narrativeSummary(roomId: ChatRoomId): string;
+  toJSON(): Readonly<{ profile: RecoveryOutcomeTrackerProfile; profileConfig: RecoveryOutcomeTrackerProfileConfig }>;
+}
+
+export function createRecoveryOutcomeTrackerFromProfile(
+  profile: RecoveryOutcomeTrackerProfile,
+  extraOptions: Omit<RecoveryOutcomeTrackerOptions, keyof RecoveryOutcomeTrackerProfileConfig['options']> = {},
+): RecoveryOutcomeTrackerExtended {
+  const profileConfig = RECOVERY_OUTCOME_TRACKER_PROFILE_CONFIGS[profile];
+  const tracker = createRecoveryOutcomeTracker({ ...extraOptions, ...profileConfig.options });
+  return Object.freeze({
+    tracker,
+    profile,
+    begin: (r) => tracker.begin(r),
+    acceptOption: (r) => tracker.acceptOption(r),
+    resolve: (r) => tracker.resolve(r),
+    timeout: (r) => tracker.timeout(r),
+    abandon: (r) => tracker.abandon(r),
+    relapse: (r) => tracker.relapse(r),
+    project: (roomId) => tracker.project(roomId),
+    buildSummary: (roomId) => tracker.buildSummary(roomId),
+    buildAuditReport: (roomIds, now) => buildTrackerAuditReport(tracker, roomIds, now),
+    buildCrossRoomStats: (roomIds, now) => buildCrossRoomTrackerStats(tracker, roomIds, now),
+    computeDiff: (roomId, before, now) => computeTrackerDiff(tracker, roomId, before, now),
+    batchIngest: (records) => batchIngestRecoveryOutcomeRecords(tracker, records),
+    scoreHealth: (roomId) => scoreRecoveryHealth(tracker.getRoomLedger(roomId)),
+    projectTrend: (roomId) => projectCohortTrend(tracker, roomId),
+    narrativeSummary: (roomId) => buildTrackerNarrativeSummary(tracker, roomId),
+    toJSON: () => Object.freeze({ profile, profileConfig }),
+  });
+}
+
+// ============================================================================
+// MARK: Named profile factories
+// ============================================================================
+
+export function createStandardRecoveryOutcomeTracker(options: RecoveryOutcomeTrackerOptions = {}): RecoveryOutcomeTrackerExtended {
+  return createRecoveryOutcomeTrackerFromProfile('STANDARD', options);
+}
+
+export function createCinematicRecoveryOutcomeTracker(options: RecoveryOutcomeTrackerOptions = {}): RecoveryOutcomeTrackerExtended {
+  return createRecoveryOutcomeTrackerFromProfile('CINEMATIC', options);
+}
+
+export function createAggressiveRecoveryOutcomeTracker(options: RecoveryOutcomeTrackerOptions = {}): RecoveryOutcomeTrackerExtended {
+  return createRecoveryOutcomeTrackerFromProfile('AGGRESSIVE', options);
+}
+
+export function createPatientRecoveryOutcomeTracker(options: RecoveryOutcomeTrackerOptions = {}): RecoveryOutcomeTrackerExtended {
+  return createRecoveryOutcomeTrackerFromProfile('PATIENT', options);
+}
+
+export function createAnalyticsRecoveryOutcomeTracker(options: RecoveryOutcomeTrackerOptions = {}): RecoveryOutcomeTrackerExtended {
+  return createRecoveryOutcomeTrackerFromProfile('ANALYTICS', options);
+}
+
+export function createMinimalRecoveryOutcomeTracker(options: RecoveryOutcomeTrackerOptions = {}): RecoveryOutcomeTrackerExtended {
+  return createRecoveryOutcomeTrackerFromProfile('MINIMAL', options);
+}
+
+// ============================================================================
+// MARK: Outcome filtering and ranking
+// ============================================================================
+
+export function filterSettledByCohort(
+  tracker: RecoveryOutcomeTracker,
+  roomId: ChatRoomId,
+  cohort: RecoveryOutcomeTrackerCohort,
+): readonly SettledRecoveryRecord[] {
+  return Object.freeze(tracker.getRoomLedger(roomId).settledRecoveries.filter((s) => s.cohort === cohort));
+}
+
+export function filterSettledBySuccessBand(
+  tracker: RecoveryOutcomeTracker,
+  roomId: ChatRoomId,
+  band: ChatRecoverySuccessBand,
+): readonly SettledRecoveryRecord[] {
+  return Object.freeze(tracker.getRoomLedger(roomId).settledRecoveries.filter((s) => s.outcome.successBand === band));
+}
+
+export function sortSettledByReinforcement(
+  records: readonly SettledRecoveryRecord[],
+  direction: 'ASC' | 'DESC' = 'DESC',
+): readonly SettledRecoveryRecord[] {
+  return Object.freeze([...records].sort((a, b) => {
+    const delta = Number(b.reinforcementScore01) - Number(a.reinforcementScore01);
+    return direction === 'DESC' ? delta : -delta;
+  }));
+}
+
+export function sortSettledByRelapseRisk(
+  records: readonly SettledRecoveryRecord[],
+  direction: 'DESC' | 'ASC' = 'DESC',
+): readonly SettledRecoveryRecord[] {
+  return Object.freeze([...records].sort((a, b) => {
+    const delta = Number(b.relapseRisk01) - Number(a.relapseRisk01);
+    return direction === 'DESC' ? delta : -delta;
+  }));
+}
+
+export function findMostRecentSettled(
+  tracker: RecoveryOutcomeTracker,
+  roomId: ChatRoomId,
+): SettledRecoveryRecord | null {
+  const settled = tracker.getRoomLedger(roomId).settledRecoveries;
+  if (settled.length === 0) return null;
+  return [...settled].sort((a, b) => Number(b.settledAt) - Number(a.settledAt))[0] ?? null;
+}
+
+export function findStrongestOutcome(
+  tracker: RecoveryOutcomeTracker,
+  roomId: ChatRoomId,
+): SettledRecoveryRecord | null {
+  const settled = tracker.getRoomLedger(roomId).settledRecoveries;
+  const bandRank: Record<ChatRecoverySuccessBand, number> = {
+    NO_LIFT: 0, SMALL_LIFT: 1, CLEAR_LIFT: 2, STRONG_LIFT: 3, RUN_SAVED: 4,
+  };
+  let best: SettledRecoveryRecord | null = null;
+  for (const s of settled) {
+    if (!best || bandRank[s.outcome.successBand] > bandRank[best.outcome.successBand]) {
+      best = s;
+    }
+  }
+  return best;
+}
+
+// ============================================================================
+// MARK: RecoveryOutcomeTrackerModule — combined barrel export
+// ============================================================================
+
+export const RecoveryOutcomeTrackerModule = Object.freeze({
+  // Core class + factory
+  RecoveryOutcomeTracker,
+  createRecoveryOutcomeTracker,
+
+  // Profile system
+  createFromProfile: createRecoveryOutcomeTrackerFromProfile,
+  createStandard: createStandardRecoveryOutcomeTracker,
+  createCinematic: createCinematicRecoveryOutcomeTracker,
+  createAggressive: createAggressiveRecoveryOutcomeTracker,
+  createPatient: createPatientRecoveryOutcomeTracker,
+  createAnalytics: createAnalyticsRecoveryOutcomeTracker,
+  createMinimal: createMinimalRecoveryOutcomeTracker,
+
+  // Analytics
+  RecoveryOutcomeAnalytics,
+  createRecoveryOutcomeAnalytics,
+
+  // Batch ops
+  batchIngest: batchIngestRecoveryOutcomeRecords,
+  ingestRecords: ingestRecoveryOutcomeRecords,
+
+  // Audit + stats
+  buildAuditReport: buildTrackerAuditReport,
+  buildCrossRoomStats: buildCrossRoomTrackerStats,
+  computeDiff: computeTrackerDiff,
+
+  // Cohort + projection
+  buildGlobalCohortMap,
+  projectCohortTrend,
+  cohortNeedsMonitoring,
+  labelCohortStrength,
+
+  // Scoring
+  scoreHealth: scoreRecoveryHealth,
+  projectHealth: projectRecoveryTrackerHealth,
+  wouldPermitEscalation: recoveryTrackerWouldPermitEscalation,
+  needsHelperCover: recoveryTrackerNeedsHelperCover,
+
+  // Filtering and ranking
+  filterSettledByCohort,
+  filterSettledBySuccessBand,
+  sortSettledByReinforcement,
+  sortSettledByRelapseRisk,
+  filterReplaySlices: filterRecoveryReplaySlices,
+  settledToReplaySlice,
+  findMostRecentSettled,
+  findStrongestOutcome,
+
+  // Serialization
+  serializeProjection: serializeTrackerProjection,
+  buildSettledSliceSummary,
+  buildNarrativeSummary: buildTrackerNarrativeSummary,
+
+  // Data tables
+  PROFILES: RECOVERY_OUTCOME_TRACKER_PROFILE_CONFIGS,
+  NOTES: RECOVERY_OUTCOME_TRACKER_NOTES,
+  COHORT_GUIDE: RECOVERY_OUTCOME_TRACKER_COHORT_GUIDE,
+  COHORTS: RECOVERY_TRACKER_COHORTS,
+  STATUSES: RECOVERY_TRACKER_STATUS,
+} as const);
+
+// ============================================================================
+// MARK: Room health monitoring
+// ============================================================================
+
+export interface RecoveryRoomHealthSnapshot {
+  readonly roomId: string;
+  readonly health01: Score01;
+  readonly cohort: RecoveryOutcomeTrackerCohort;
+  readonly trend: 'IMPROVING' | 'STABLE' | 'DETERIORATING' | 'UNKNOWN';
+  readonly needsMonitoring: boolean;
+  readonly cohortStrength: 'STRONG' | 'MODERATE' | 'WEAK' | 'UNKNOWN';
+  readonly reinforcementScore01: Score01;
+  readonly relapseRisk01: Score01;
+  readonly activeCount: number;
+  readonly settledCount: number;
+}
+
+export function buildRoomHealthSnapshot(
+  tracker: RecoveryOutcomeTracker,
+  roomId: ChatRoomId,
+): RecoveryRoomHealthSnapshot {
+  const ledger = tracker.getRoomLedger(roomId);
+  const projection = tracker.project(roomId);
+  const summary = tracker.buildSummary(roomId);
+  const trend = projectCohortTrend(tracker, roomId);
+  const health01 = scoreRecoveryHealth(ledger);
+  const cohort = projection.cohort as RecoveryOutcomeTrackerCohort;
+  return Object.freeze({
+    roomId: String(roomId),
+    health01,
+    cohort,
+    trend,
+    needsMonitoring: cohortNeedsMonitoring(cohort),
+    cohortStrength: labelCohortStrength(cohort),
+    reinforcementScore01: projection.reinforcementScore01,
+    relapseRisk01: projection.relapseRisk01,
+    activeCount: summary.activeCount,
+    settledCount: summary.settledCount,
+  });
+}
+
+export function buildMultiRoomHealthMap(
+  tracker: RecoveryOutcomeTracker,
+  roomIds: readonly ChatRoomId[],
+): readonly RecoveryRoomHealthSnapshot[] {
+  return Object.freeze(roomIds.map((roomId) => buildRoomHealthSnapshot(tracker, roomId)));
+}
+
+export function findHighestRiskRoom(
+  tracker: RecoveryOutcomeTracker,
+  roomIds: readonly ChatRoomId[],
+): ChatRoomId | null {
+  let highestRisk: Score01 = 0 as Score01;
+  let highestRoomId: ChatRoomId | null = null;
+  for (const roomId of roomIds) {
+    const projection = tracker.project(roomId);
+    if (Number(projection.relapseRisk01) > Number(highestRisk)) {
+      highestRisk = projection.relapseRisk01;
+      highestRoomId = roomId;
+    }
+  }
+  return highestRoomId;
+}
+
+export function findStrongestRecoveryRoom(
+  tracker: RecoveryOutcomeTracker,
+  roomIds: readonly ChatRoomId[],
+): ChatRoomId | null {
+  const bandRank: Record<ChatRecoverySuccessBand, number> = {
+    NO_LIFT: 0, SMALL_LIFT: 1, CLEAR_LIFT: 2, STRONG_LIFT: 3, RUN_SAVED: 4,
+  };
+  let bestRank = -1;
+  let bestRoomId: ChatRoomId | null = null;
+  for (const roomId of roomIds) {
+    const projection = tracker.project(roomId);
+    const band = projection.strongestSuccessBand;
+    const rank = band ? (bandRank[band] ?? 0) : -1;
+    if (rank > bestRank) {
+      bestRank = rank;
+      bestRoomId = roomId;
+    }
+  }
+  return bestRoomId;
+}
+
+// ============================================================================
+// MARK: Recovery ledger serialization
+// ============================================================================
+
+export function serializeLedgerEntry(entry: ChatRecoveryLedgerEntry): Readonly<Record<string, unknown>> {
+  return Object.freeze({
+    ledgerId: String(entry.ledgerId),
+    recoveryId: String(entry.recoveryId),
+    recoveryPlanId: String(entry.recoveryPlanId),
+    visibleChannel: entry.visibleChannel,
+    entryPoint: entry.entryPoint,
+    outcomeKind: entry.outcomeKind,
+    successBand: entry.successBand,
+    createdAt: Number(entry.createdAt),
+    updatedAt: Number(entry.updatedAt),
+    acceptedOptionId: entry.acceptedOptionId ? String(entry.acceptedOptionId) : null,
+    noteCount: entry.notes?.length ?? 0,
+  });
+}
+
+export function serializeRoomLedger(ledger: RecoveryOutcomeTrackerRoomLedger): Readonly<Record<string, unknown>> {
+  return Object.freeze({
+    roomId: String(ledger.roomId),
+    activeCount: ledger.activeRecoveries.length,
+    settledCount: ledger.settledRecoveries.length,
+    recoveryLedgerCount: ledger.recoveryLedger.length,
+    rescuePlanCount: ledger.rescuePlans.length,
+    latestActiveId: ledger.activeRecoveries[0]?.recoveryId ? String(ledger.activeRecoveries[0].recoveryId) : null,
+    latestSettledId: ledger.settledRecoveries[0]?.recoveryId ? String(ledger.settledRecoveries[0].recoveryId) : null,
+  });
+}
+
+// ============================================================================
+// MARK: Outcome prediction helpers
+// ============================================================================
+
+export function predictReinforcement(
+  stabilityLift01: Score01,
+  confidenceLift01: Score01,
+  trustLift01: Score01,
+  embarrassmentReduction01: Score01,
+  ageMs: number = 0,
+  halfLifeMs: number = 180_000,
+): Score01 {
+  return deriveReinforcementScore({
+    stabilityLift01,
+    confidenceLift01,
+    trustLift01,
+    embarrassmentReduction01,
+    ageMs,
+    halfLifeMs,
+  });
+}
+
+export function estimateCohortFromLifts(
+  stabilityLift01: Score01,
+  confidenceLift01: Score01,
+  trustLift01: Score01,
+  relapseRisk01: Score01,
+): RecoveryOutcomeTrackerCohort {
+  const total = (Number(stabilityLift01) + Number(confidenceLift01) + Number(trustLift01)) / 3;
+  if (total >= 0.62 && Number(relapseRisk01) <= 0.24) return 'COMEBACK_READY';
+  if (total >= 0.48 && Number(relapseRisk01) <= 0.34) return 'STABLE';
+  if (total >= 0.34 && Number(trustLift01) >= 0.28) return 'HELPER_RELIANT';
+  if (total >= 0.22) return 'FRAGILE';
+  if (Number(relapseRisk01) >= 0.58) return 'VOLATILE';
+  return 'SAVEABLE';
+}
+
+// ============================================================================
+// MARK: Validation helpers
+// ============================================================================
+
+export function validateTrackerBeginRequest(request: RecoveryOutcomeTrackerBeginRequest): readonly string[] {
+  const errors: string[] = [];
+  if (!request.roomId) errors.push('roomId is required');
+  if (!request.recoveryPlan) errors.push('recoveryPlan is required');
+  if (!request.recoveryPlan?.recoveryId) errors.push('recoveryPlan.recoveryId is required');
+  return Object.freeze(errors);
+}
+
+export function validateTrackerResolutionRequest(request: RecoveryOutcomeTrackerResolutionRequest): readonly string[] {
+  const errors: string[] = [];
+  if (!request.roomId) errors.push('roomId is required');
+  if (!request.recoveryId) errors.push('recoveryId is required');
+  const s01 = Number(request.stabilityLift01);
+  if (s01 < 0 || s01 > 1) errors.push(`stabilityLift01 out of range: ${s01}`);
+  return Object.freeze(errors);
+}
+
+// ============================================================================
+// MARK: Reinforcement decay utility
+// ============================================================================
+
+export function decayReinforcementScore(
+  score01: Score01,
+  elapsedMs: number,
+  halfLifeMs: number,
+): Score01 {
+  if (halfLifeMs <= 0 || elapsedMs <= 0) return score01;
+  const decayFactor = Math.pow(0.5, elapsedMs / halfLifeMs);
+  return Math.max(0, Math.min(1, Number(score01) * decayFactor)) as Score01;
+}
+
+export function applyRelapseImpact(
+  reinforcementScore01: Score01,
+  relapseRisk01: Score01,
+  relapseSeverity01: Score01,
+): { reinforcement: Score01; relapseRisk: Score01 } {
+  const newReinforcement = Math.max(0, Number(reinforcementScore01) - Number(relapseSeverity01) * 0.62) as Score01;
+  const newRelapseRisk = Math.min(1, Number(relapseRisk01) + Number(relapseSeverity01) * 0.72) as Score01;
+  return { reinforcement: newReinforcement, relapseRisk: newRelapseRisk };
+}
+
+// ============================================================================
+// MARK: Cohort transition law
+// ============================================================================
+
+export const RECOVERY_COHORT_TRANSITION_LAW: Readonly<Record<RecoveryOutcomeTrackerCohort, readonly RecoveryOutcomeTrackerCohort[]>> = Object.freeze({
+  UNKNOWN: Object.freeze(['SAVEABLE', 'FRAGILE', 'VOLATILE']),
+  SAVEABLE: Object.freeze(['STABLE', 'FRAGILE', 'VOLATILE']),
+  FRAGILE: Object.freeze(['STABLE', 'HELPER_RELIANT', 'VOLATILE']),
+  STABLE: Object.freeze(['COMEBACK_READY', 'HELPER_RELIANT', 'FRAGILE']),
+  VOLATILE: Object.freeze(['SAVEABLE', 'FRAGILE', 'UNKNOWN']),
+  COMEBACK_READY: Object.freeze(['STABLE', 'FRAGILE']),
+  HELPER_RELIANT: Object.freeze(['STABLE', 'FRAGILE', 'VOLATILE']),
+});
+
+export function cohortCanTransitionTo(
+  from: RecoveryOutcomeTrackerCohort,
+  to: RecoveryOutcomeTrackerCohort,
+): boolean {
+  const allowed = RECOVERY_COHORT_TRANSITION_LAW[from] ?? [];
+  return (allowed as readonly string[]).includes(to);
+}
+
+export function describeSettledPath(settled: SettledRecoveryRecord): string {
+  const parts = [
+    `id=${String(settled.recoveryId).slice(0, 8)}`,
+    `kind=${settled.outcome.kind}`,
+    `band=${settled.outcome.successBand}`,
+    `cohort=${settled.cohort}`,
+    `reinf=${Number(settled.reinforcementScore01).toFixed(2)}`,
+    `relapse=${Number(settled.relapseRisk01).toFixed(2)}`,
+  ];
+  return parts.join(' | ');
+}
+
+export function buildSettledPathLog(tracker: RecoveryOutcomeTracker, roomId: ChatRoomId): readonly string[] {
+  return Object.freeze(tracker.getRoomLedger(roomId).settledRecoveries.map(describeSettledPath));
+}
+
+export function activeRecoveryNeedsHelperCover(active: ActiveRecoveryRecord): boolean {
+  return active.cohort === 'FRAGILE' || active.cohort === 'HELPER_RELIANT' ||
+    Number(active.relapseRisk01) >= 0.52;
+}
+
+export function activeRecoveryIsAtRisk(active: ActiveRecoveryRecord): boolean {
+  return Number(active.relapseRisk01) >= 0.65 || active.cohort === 'VOLATILE';
+}
+
+// ============================================================================
+// MARK: Lift digest — computed from affect deltas
+// ============================================================================
+
+/**
+ * Typed lift digest produced from before/after affect snapshots.
+ * Stamped with the recovery kind and entry point for downstream ledger use.
+ */
+export interface RecoveryOutcomeTrackerLiftDigest {
+  readonly kind: ChatRecoveryKind;
+  readonly entryPoint: ChatRecoveryEntryPoint;
+  readonly stabilityLift01: Score01;
+  readonly embarrassmentReduction01: Score01;
+  readonly confidenceLift01: Score01;
+  readonly trustLift01: Score01;
+}
+
+/**
+ * Compute a typed lift digest from before/after affect snapshots.
+ * Uses `deriveRecoveryLiftSnapshot` from the shared recovery contract to
+ * produce canonical lift metrics stamped with kind and entry point.
+ */
+export function buildTrackerLiftDigest(input: {
+  readonly kind: ChatRecoveryKind;
+  readonly entryPoint: ChatRecoveryEntryPoint;
+  readonly before: {
+    readonly confidence: Score01;
+    readonly frustration: Score01;
+    readonly socialEmbarrassment: Score01;
+    readonly trust: Score01;
+  };
+  readonly after: {
+    readonly confidence: Score01;
+    readonly frustration: Score01;
+    readonly socialEmbarrassment: Score01;
+    readonly trust: Score01;
+  };
+}): RecoveryOutcomeTrackerLiftDigest {
+  const lift = deriveRecoveryLiftSnapshot({ before: input.before, after: input.after });
+  return Object.freeze({
+    kind: input.kind,
+    entryPoint: input.entryPoint,
+    stabilityLift01: lift.stabilityLift01 as Score01,
+    embarrassmentReduction01: lift.embarrassmentReduction01 as Score01,
+    confidenceLift01: lift.confidenceLift01 as Score01,
+    trustLift01: lift.trustLift01 as Score01,
+  });
+}
+
+// ============================================================================
+// MARK: Tracker doctrine notes
+// ============================================================================
+
+export const RECOVERY_OUTCOME_TRACKER_DEFAULT_OPTIONS: Readonly<RecoveryOutcomeTrackerOptions> = Object.freeze({
+  retainLedgerEntriesPerRoom: 24,
+  retainActiveRecordsPerRoom: 4,
+  relapseWindowMs: 30_000,
+  reinforcementDecayHalfLifeMs: 180_000,
+});
+
+export const RECOVERY_OUTCOME_TRACKER_DOCTRINE: Readonly<Record<string, readonly string[]>> = Object.freeze({
+  TRACKING_BOUNDARY: Object.freeze([
+    'The tracker owns outcome state from the moment a recovery plan exists.',
+    'It does not own the rescue decision — that belongs to ChurnRescuePolicy.',
+    'It does not own the window — that belongs to RescueInterventionPlanner.',
+  ]),
+  COHORT_ASSIGNMENT: Object.freeze([
+    'Cohorts are assigned from backend lift vectors, not player self-assessment.',
+    'A player can be STABLE on paper but VOLATILE by the next signal update.',
+    'Cohort transitions should be audited for replay accuracy.',
+  ]),
+  REINFORCEMENT: Object.freeze([
+    'Reinforcement is not permanent; it decays over time by design.',
+    'Decay is calibrated per profile to match the authored pressure curve.',
+    'High reinforcement with high relapse risk is an unstable equilibrium.',
+  ]),
+});

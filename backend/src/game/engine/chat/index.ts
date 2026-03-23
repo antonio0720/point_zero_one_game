@@ -73,6 +73,7 @@ import * as AttackWindowPolicy from './combat/ChatAttackWindowPolicy';
 import * as RescueInterventionPlanner from './rescue/RescueInterventionPlanner';
 import * as ChurnRescuePolicy from './rescue/ChurnRescuePolicy';
 import * as RecoveryOutcomeTracker from './rescue/RecoveryOutcomeTracker';
+import * as Rescue from './rescue';
 import * as LegendMomentLedger from './rewards/LegendMomentLedger';
 import * as RewardGrantResolver from './rewards/RewardGrantResolver';
 import * as ReplayMomentIndexer from './rewards/ReplayMomentIndexer';
@@ -135,9 +136,7 @@ export * from './combat/ChatBossFightEngine';
 export * from './combat/ChatCounterResolver';
 export * from './combat/ChatTelegraphPolicy';
 export * from './combat/ChatAttackWindowPolicy';
-export * from './rescue/RescueInterventionPlanner';
-export * from './rescue/ChurnRescuePolicy';
-export * from './rescue/RecoveryOutcomeTracker';
+export * from './rescue';
 export * from './rewards/LegendMomentLedger';
 export * from './rewards/RewardGrantResolver';
 export * from './rewards/ReplayMomentIndexer';
@@ -240,6 +239,7 @@ export {
   RescueInterventionPlanner as ChatRescueInterventionPlannerModule,
   ChurnRescuePolicy as ChatChurnRescuePolicyModule,
   RecoveryOutcomeTracker as ChatRecoveryOutcomeTrackerModule,
+  Rescue as ChatRescueBarrelModule,
   LegendMomentLedger as ChatLegendMomentLedgerModule,
   RewardGrantResolver as ChatRewardGrantResolverModule,
   ReplayMomentIndexer as ChatReplayMomentIndexerModule,
@@ -505,9 +505,10 @@ export const BACKEND_CHAT_CANONICAL_MODULES = Object.freeze([
   descriptor('persona.LatencyStyleResolver', 'persona/LatencyStyleResolver.ts', 'PERSONA', 'PENDING', true, 'Persona-specific typing/reveal latency policy.'),
 
   // Rescue
-  descriptor('rescue.RescueInterventionPlanner', 'rescue/RescueInterventionPlanner.ts', 'RESCUE', 'GENERATED', true, 'Rage-quit and overwhelm rescue planning.'),
-  descriptor('rescue.ChurnRescuePolicy', 'rescue/ChurnRescuePolicy.ts', 'RESCUE', 'GENERATED', true, 'Churn-risk rescue law.'),
-  descriptor('rescue.RecoveryOutcomeTracker', 'rescue/RecoveryOutcomeTracker.ts', 'RESCUE', 'GENERATED', true, 'Rescue outcome tracking and reinforcement.'),
+  descriptor('rescue.index', 'rescue/index.ts', 'RESCUE', 'GENERATED', false, 'Rescue lane barrel: churn policy, intervention planner, outcome tracker.'),
+  descriptor('rescue.RescueInterventionPlanner', 'rescue/RescueInterventionPlanner.ts', 'RESCUE', 'GENERATED', true, 'Rescue window orchestration, active intervention, expire/resolve flows, profiles, batch ops.'),
+  descriptor('rescue.ChurnRescuePolicy', 'rescue/ChurnRescuePolicy.ts', 'RESCUE', 'GENERATED', true, 'Churn-risk scoring, suppression law, urgency/style selection, profile system, batch evaluation.'),
+  descriptor('rescue.RecoveryOutcomeTracker', 'rescue/RecoveryOutcomeTracker.ts', 'RESCUE', 'GENERATED', true, 'Recovery state durability, reinforcement, cohort analysis, relapse tracking, profile system.'),
 
   // Deal room
   descriptor('dealroom.NegotiationEngine', 'dealroom/NegotiationEngine.ts', 'DEALROOM', 'PENDING', true, 'Deal-room negotiation state and response authority.'),

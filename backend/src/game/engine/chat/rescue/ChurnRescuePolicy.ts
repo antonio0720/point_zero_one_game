@@ -450,16 +450,16 @@ function mergeFeature(input: Partial<ChatFeatureSnapshot> | null | undefined, te
   return {
     ...EMPTY_FEATURE,
     ...(input ?? {}),
-    silenceMs: safeNumber(input?.silenceMs, safeNumber(telemetry?.silenceMs)),
-    panelFlapCount: safeNumber(input?.panelFlapCount, safeNumber(telemetry?.panelFlapCount)),
-    channelHopCount: safeNumber(input?.channelHopCount, safeNumber(telemetry?.channelHopCount)),
-    abortedComposeCount: safeNumber(input?.abortedComposeCount, safeNumber(telemetry?.composerAbortStreak)),
-    failedActionCount: safeNumber(input?.failedActionCount, safeNumber(telemetry?.failedActionChain)),
-    negativeBurstCount: safeNumber(input?.negativeBurstCount, safeNumber(telemetry?.negativeSendFailures)),
-    crowdHostility01: score01(safeNumber(input?.crowdHostility01, safeNumber(telemetry?.crowdHostility01))),
-    unreadPressure01: score01(safeNumber(input?.unreadPressure01, safeNumber(telemetry?.unreadPressure01))),
-    directPressure01: score01(safeNumber(input?.directPressure01, safeBoolean(telemetry?.counterWindowOpen) ? 0.65 : 0)),
-    publicExposure01: score01(safeNumber(input?.publicExposure01, safeNumber(telemetry?.dealRoomExposure01))),
+    silenceMs: safeNumber((input as any)?.silenceMs, safeNumber(telemetry?.silenceMs)),
+    panelFlapCount: safeNumber((input as any)?.panelFlapCount, safeNumber(telemetry?.panelFlapCount)),
+    channelHopCount: safeNumber((input as any)?.channelHopCount, safeNumber(telemetry?.channelHopCount)),
+    abortedComposeCount: safeNumber((input as any)?.abortedComposeCount, safeNumber(telemetry?.composerAbortStreak)),
+    failedActionCount: safeNumber((input as any)?.failedActionCount, safeNumber(telemetry?.failedActionChain)),
+    negativeBurstCount: safeNumber((input as any)?.negativeBurstCount, safeNumber(telemetry?.negativeSendFailures)),
+    crowdHostility01: score01(safeNumber((input as any)?.crowdHostility01, safeNumber(telemetry?.crowdHostility01))),
+    unreadPressure01: score01(safeNumber((input as any)?.unreadPressure01, safeNumber(telemetry?.unreadPressure01))),
+    directPressure01: score01(safeNumber((input as any)?.directPressure01, safeBoolean(telemetry?.counterWindowOpen) ? 0.65 : 0)),
+    publicExposure01: score01(safeNumber((input as any)?.publicExposure01, safeNumber(telemetry?.dealRoomExposure01))),
   } as ChatFeatureSnapshot;
 }
 
@@ -518,11 +518,11 @@ function computeHelperReadiness(learning: ChatLearningProfile, affect: ChatAffec
 
 function computeChurnRisk(feature: ChatFeatureSnapshot, affect: ChatAffectSnapshot, reputation: ChatReputationState, telemetry: ChurnRescueTelemetryFrame | null | undefined): Score01 {
   const risk = weightedAverage([
-    [safeNumber(feature.silenceMs) >= 12000 ? 1 : safeNumber(feature.silenceMs) / 12000, 0.15],
-    [safeNumber(feature.abortedComposeCount) / 5, 0.12],
-    [safeNumber(feature.failedActionCount) / 5, 0.12],
-    [safeNumber(feature.panelFlapCount) / 8, 0.08],
-    [safeNumber(feature.channelHopCount) / 6, 0.08],
+    [safeNumber((feature as any).silenceMs) >= 12000 ? 1 : safeNumber((feature as any).silenceMs) / 12000, 0.15],
+    [safeNumber((feature as any).abortedComposeCount) / 5, 0.12],
+    [safeNumber((feature as any).failedActionCount) / 5, 0.12],
+    [safeNumber((feature as any).panelFlapCount) / 8, 0.08],
+    [safeNumber((feature as any).channelHopCount) / 6, 0.08],
     [safeNumber(affect.frustration) / 100, 0.12],
     [safeNumber(affect.socialEmbarrassment) / 100, 0.12],
     [safeNumber(affect.desperation) / 100, 0.10],
@@ -537,11 +537,11 @@ function computeChurnRisk(feature: ChatFeatureSnapshot, affect: ChatAffectSnapsh
 function classifyReasonCode(feature: ChatFeatureSnapshot, affect: ChatAffectSnapshot, telemetry: ChurnRescueTelemetryFrame | null | undefined): ChatRescueReasonCode {
   if (safeBoolean(telemetry?.counterWindowOpen) || telemetry?.bossFightState) return 'BOSS_WINDOW_LOCK';
   if (safeBoolean(telemetry?.recentCollapse)) return 'POST_COLLAPSE_DISORIENTATION';
-  if (safeNumber(feature.publicExposure01) >= 0.55 || safeNumber(affect.socialEmbarrassment) >= 72) return 'EMBARRASSMENT_OVERLOAD';
-  if (safeNumber(feature.failedActionCount) >= 3 || safeNumber(feature.abortedComposeCount) >= 3) return 'COGNITIVE_OVERLOAD';
-  if (safeNumber(feature.channelHopCount) >= 3 && safeNumber(feature.publicExposure01) >= 0.4) return 'NEGOTIATION_PANIC';
-  if (safeNumber(feature.crowdHostility01) >= 0.72) return 'CROWD_HOSTILITY_SURGE';
-  if (safeNumber(feature.silenceMs) >= 9000) return 'PLAYER_STOPPED_ACTING';
+  if (safeNumber((feature as any).publicExposure01) >= 0.55 || safeNumber(affect.socialEmbarrassment) >= 72) return 'EMBARRASSMENT_OVERLOAD';
+  if (safeNumber((feature as any).failedActionCount) >= 3 || safeNumber((feature as any).abortedComposeCount) >= 3) return 'COGNITIVE_OVERLOAD';
+  if (safeNumber((feature as any).channelHopCount) >= 3 && safeNumber((feature as any).publicExposure01) >= 0.4) return 'NEGOTIATION_PANIC';
+  if (safeNumber((feature as any).crowdHostility01) >= 0.72) return 'CROWD_HOSTILITY_SURGE';
+  if (safeNumber((feature as any).silenceMs) >= 9000) return 'PLAYER_STOPPED_ACTING';
   return 'RETENTION_RISK';
 }
 
@@ -565,7 +565,7 @@ function deriveUrgency(churnRisk01: Score01, affect: ChatAffectSnapshot, feature
   const embarrassment01 = safeNumber(affect.socialEmbarrassment) / 100;
   const frustration01 = safeNumber(affect.frustration) / 100;
   const desperation01 = safeNumber(affect.desperation) / 100;
-  const silenceMs = safeNumber(feature.silenceMs);
+  const silenceMs = safeNumber((feature as any).silenceMs);
 
   if (
     Number(churnRisk01) >= 0.83 ||
@@ -611,7 +611,7 @@ function deriveStyle(reasonCode: ChatRescueReasonCode, urgency: ChatRescueUrgenc
 
 function deriveVisibleChannel(base: ChatVisibleChannel, feature: ChatFeatureSnapshot, reputation: ChatReputationState, affect: ChatAffectSnapshot, helperReadiness01: Score01): ChatVisibleChannel {
   const embarrassment01 = safeNumber(affect.socialEmbarrassment) / 100;
-  const publicExposure01 = safeNumber(feature.publicExposure01);
+  const publicExposure01 = safeNumber((feature as any).publicExposure01);
   const crowdRisk01 = safeNumber((reputation as any).crowdTargetingRisk, 0) / 100;
   const helperReady = Number(helperReadiness01) >= 0.35;
 
@@ -724,7 +724,7 @@ export class ChurnRescuePolicy {
     } as any);
     const confidenceDebt01 = score01(1 - safeNumber(affect.confidence) / 100);
     const tilt01 = deriveRescueTilt01(affect);
-    const humiliationHazard01 = max01(Number(publicRisk01), safeNumber(affect.socialEmbarrassment) / 100, safeNumber(feature.crowdHostility01));
+    const humiliationHazard01 = max01(Number(publicRisk01), safeNumber(affect.socialEmbarrassment) / 100, safeNumber((feature as any).crowdHostility01));
     const urgency = deriveUrgency(churnRisk01, affect, feature, this.tuning);
     const reasonCode = classifyReasonCode(feature, affect, request.telemetry);
     const style = deriveStyle(reasonCode, urgency, affect);
@@ -928,38 +928,38 @@ export class ChurnRescuePolicy {
     const reasons: string[] = [];
     const tags: string[] = [];
 
-    if (safeNumber(feature.silenceMs) > 0) {
-      reasons.push(`silence=${safeNumber(feature.silenceMs)}ms`);
-      if (safeNumber(feature.silenceMs) >= this.tuning.silenceReadyMs) tags.push('silence-heavy');
+    if (safeNumber((feature as any).silenceMs) > 0) {
+      reasons.push(`silence=${safeNumber((feature as any).silenceMs)}ms`);
+      if (safeNumber((feature as any).silenceMs) >= this.tuning.silenceReadyMs) tags.push('silence-heavy');
     }
-    if (safeNumber(feature.abortedComposeCount) > 0) {
-      reasons.push(`abort-streak=${safeNumber(feature.abortedComposeCount)}`);
-      if (safeNumber(feature.abortedComposeCount) >= this.tuning.abortReadyCount) tags.push('compose-break');
+    if (safeNumber((feature as any).abortedComposeCount) > 0) {
+      reasons.push(`abort-streak=${safeNumber((feature as any).abortedComposeCount)}`);
+      if (safeNumber((feature as any).abortedComposeCount) >= this.tuning.abortReadyCount) tags.push('compose-break');
     }
-    if (safeNumber(feature.failedActionCount) > 0) {
-      reasons.push(`fail-chain=${safeNumber(feature.failedActionCount)}`);
-      if (safeNumber(feature.failedActionCount) >= this.tuning.failureReadyCount) tags.push('fail-chain');
+    if (safeNumber((feature as any).failedActionCount) > 0) {
+      reasons.push(`fail-chain=${safeNumber((feature as any).failedActionCount)}`);
+      if (safeNumber((feature as any).failedActionCount) >= this.tuning.failureReadyCount) tags.push('fail-chain');
     }
-    if (safeNumber(feature.panelFlapCount) > 0) {
-      reasons.push(`panel-flap=${safeNumber(feature.panelFlapCount)}`);
-      if (safeNumber(feature.panelFlapCount) >= this.tuning.panelFlapReadyCount) tags.push('panel-flap');
+    if (safeNumber((feature as any).panelFlapCount) > 0) {
+      reasons.push(`panel-flap=${safeNumber((feature as any).panelFlapCount)}`);
+      if (safeNumber((feature as any).panelFlapCount) >= this.tuning.panelFlapReadyCount) tags.push('panel-flap');
     }
-    if (safeNumber(feature.channelHopCount) > 0) {
-      reasons.push(`channel-hop=${safeNumber(feature.channelHopCount)}`);
-      if (safeNumber(feature.channelHopCount) >= this.tuning.channelHopReadyCount) tags.push('channel-hop');
+    if (safeNumber((feature as any).channelHopCount) > 0) {
+      reasons.push(`channel-hop=${safeNumber((feature as any).channelHopCount)}`);
+      if (safeNumber((feature as any).channelHopCount) >= this.tuning.channelHopReadyCount) tags.push('channel-hop');
     }
 
     reasons.push(`embarrassment=${Number(affect.socialEmbarrassment)}`);
     reasons.push(`frustration=${Number(affect.frustration)}`);
     reasons.push(`desperation=${Number(affect.desperation)}`);
     reasons.push(`confidence=${Number(affect.confidence)}`);
-    reasons.push(`crowdHostility01=${Number(feature.crowdHostility01).toFixed(2)}`);
-    reasons.push(`publicExposure01=${Number(feature.publicExposure01).toFixed(2)}`);
+    reasons.push(`crowdHostility01=${Number((feature as any).crowdHostility01).toFixed(2)}`);
+    reasons.push(`publicExposure01=${Number((feature as any).publicExposure01).toFixed(2)}`);
     reasons.push(`reasonCode=${reasonCode}`);
 
     if (telemetry.recentCollapse) tags.push('recent-collapse');
     if (telemetry.bossFightState) tags.push('boss-fight');
-    if (telemetry.helperIgnoredThenReturned) tags.push('helper-return');
+    if ((telemetry as any).helperIgnoredThenReturned) tags.push('helper-return');
     if (suppressionReason) reasons.push(`suppressed=${suppressionReason}`);
 
     return Object.freeze({
@@ -985,8 +985,8 @@ function deriveRescuePublicRisk01Fallback(
   reputation: ChatReputationState,
 ): Score01 {
   return score01(weightedAverage([
-    [safeNumber(feature.publicExposure01), 0.34],
-    [safeNumber(feature.crowdHostility01), 0.24],
+    [safeNumber((feature as any).publicExposure01), 0.34],
+    [safeNumber((feature as any).crowdHostility01), 0.24],
     [safeNumber(affect.socialEmbarrassment) / 100, 0.24],
     [safeNumber((reputation as any).crowdTargetingRisk, 0) / 100, 0.18],
   ], 0));
@@ -1031,6 +1031,10 @@ export const CHURN_RESCUE_CHANNEL_LAW: Readonly<Record<ChatVisibleChannel, reado
     'Spectator rescue should rarely become public story.',
     'Default to quiet containment.',
   ]),
+  LOBBY: Object.freeze([
+    'Lobby rescue must not escalate before the game context is established.',
+    'Prefer silent or ambient containment until the player commits to a room.',
+  ]),
 });
 
 export const CHURN_RESCUE_STYLE_NOTES: Readonly<Record<ChatRescueStyle, readonly string[]>> = Object.freeze({
@@ -1040,4 +1044,979 @@ export const CHURN_RESCUE_STYLE_NOTES: Readonly<Record<ChatRescueStyle, readonly
   QUIET: Object.freeze(['Use when humiliation cost is high.']),
   TACTICAL: Object.freeze(['Use when the move must preserve face and tempo.']),
   PROTECTIVE: Object.freeze(['Use when the system must reduce witness pressure.']),
+});
+
+// ============================================================================
+// MARK: Profile system
+// ============================================================================
+
+export type ChurnRescuePolicyProfile =
+  | 'BALANCED'
+  | 'HATER_HEAVY'
+  | 'HELPER_PRIORITY'
+  | 'NEGOTIATION_FOCUS'
+  | 'LIVEOPS_RESPONSIVE'
+  | 'SHADOW_HEAVY';
+
+export interface ChurnRescuePolicyProfileConfig {
+  readonly profile: ChurnRescuePolicyProfile;
+  readonly tuning: Partial<ChurnRescuePolicyTuning>;
+  readonly description: string;
+  readonly useCases: readonly string[];
+}
+
+export const CHURN_RESCUE_POLICY_PROFILE_CONFIGS: Readonly<Record<ChurnRescuePolicyProfile, ChurnRescuePolicyProfileConfig>> = Object.freeze({
+  BALANCED: Object.freeze({
+    profile: 'BALANCED',
+    tuning: {},
+    description: 'Standard balanced thresholds for general game flow.',
+    useCases: Object.freeze([
+      'Default main loop rooms',
+      'General narrative chambers',
+      'Spectator-light areas',
+    ]),
+  }),
+  HATER_HEAVY: Object.freeze({
+    profile: 'HATER_HEAVY',
+    tuning: Object.freeze({
+      crowdHostilityReady01: 0.42 as Score01,
+      crowdHostilityCritical01: 0.64 as Score01,
+      embarrassmentReady01: 0.38 as Score01,
+      embarrassmentCritical01: 0.60 as Score01,
+      shadowOnlyCutoff01: 0.58 as Score01,
+      criticalWindowMs: 2800,
+      immediateWindowMs: 4200,
+    }),
+    description: 'Lower crowd-hostility and embarrassment thresholds for hater-dense environments.',
+    useCases: Object.freeze([
+      'Syndicate rooms with active crowd aggression',
+      'Global channels with active pile-on dynamics',
+    ]),
+  }),
+  HELPER_PRIORITY: Object.freeze({
+    profile: 'HELPER_PRIORITY',
+    tuning: Object.freeze({
+      helperReceptivityFloor01: 0.18 as Score01,
+      helperTrustFloor01: 0.16 as Score01,
+      readyWindowMs: 10200,
+      watchWindowMs: 14800,
+    }),
+    description: 'Extended windows to give helpers maximum time to act before escalation.',
+    useCases: Object.freeze([
+      'Helper-assigned rooms',
+      'Onboarding chambers',
+      'Low-pressure tutorial contexts',
+    ]),
+  }),
+  NEGOTIATION_FOCUS: Object.freeze({
+    profile: 'NEGOTIATION_FOCUS',
+    tuning: Object.freeze({
+      silenceReadyMs: 6500,
+      silenceCriticalMs: 11000,
+      abortReadyCount: 3,
+      abortCriticalCount: 5,
+      criticalWindowMs: 4200,
+      immediateWindowMs: 6400,
+      publicRiskCutoff01: 0.78 as Score01,
+    }),
+    description: 'Tuned for deal-room negotiation panic and high-stakes offer stalls.',
+    useCases: Object.freeze([
+      'Deal room chambers',
+      'Counter-offer cycles',
+      'High-pressure negotiation beats',
+    ]),
+  }),
+  LIVEOPS_RESPONSIVE: Object.freeze({
+    profile: 'LIVEOPS_RESPONSIVE',
+    tuning: Object.freeze({
+      silenceWatchMs: 3000,
+      silenceReadyMs: 5500,
+      criticalWindowMs: 2200,
+      immediateWindowMs: 3600,
+      readyWindowMs: 5800,
+      watchWindowMs: 8400,
+      rescueCooldownMs: 5500,
+    }),
+    description: 'Shortened silence and window thresholds for live event contexts with condensed time.',
+    useCases: Object.freeze([
+      'LiveOps world event rooms',
+      'Faction surge beats',
+      'Time-limited challenge sequences',
+    ]),
+  }),
+  SHADOW_HEAVY: Object.freeze({
+    profile: 'SHADOW_HEAVY',
+    tuning: Object.freeze({
+      shadowOnlyCutoff01: 0.38 as Score01,
+      publicRiskCutoff01: 0.62 as Score01,
+      embarrassmentCritical01: 0.52 as Score01,
+    }),
+    description: 'Aggressive shadow-only escalation. Public rescue is near-prohibited.',
+    useCases: Object.freeze([
+      'High-visibility public rooms where rescue must never surface',
+      'Spectator-heavy events',
+      'Boss fight arenas with humiliation sensitivity',
+    ]),
+  }),
+});
+
+// ============================================================================
+// MARK: Extended diagnostic contracts
+// ============================================================================
+
+export interface ChurnRescuePolicyAuditEntry {
+  readonly evaluatedAt: UnixMs;
+  readonly roomId: string | null;
+  readonly sessionId: string | null;
+  readonly shouldIntervene: boolean;
+  readonly churnRisk01: Score01;
+  readonly urgency: ChatRescueUrgencyBand;
+  readonly reasonCode: ChatRescueReasonCode;
+  readonly suppressionReason: ChatRescueSuppressionReason | null;
+  readonly rescueKind: ChatRescueKind | null;
+  readonly successBand: ChatRecoverySuccessBand | null;
+  readonly notes: readonly string[];
+}
+
+export interface ChurnRescuePolicyAuditReport {
+  readonly generatedAt: UnixMs;
+  readonly totalEvaluations: number;
+  readonly interventionCount: number;
+  readonly suppressionCount: number;
+  readonly urgencyBreakdown: Readonly<Record<ChatRescueUrgencyBand, number>>;
+  readonly reasonCodeBreakdown: Readonly<Record<string, number>>;
+  readonly suppressionBreakdown: Readonly<Record<string, number>>;
+  readonly averageChurnRisk01: Score01;
+  readonly peakChurnRisk01: Score01;
+  readonly interventionRate01: Score01;
+  readonly entries: readonly ChurnRescuePolicyAuditEntry[];
+}
+
+export interface ChurnRescuePolicyDiff {
+  readonly before: ChurnRescueRiskSnapshot;
+  readonly after: ChurnRescueRiskSnapshot;
+  readonly churnRiskDelta: number;
+  readonly urgencyChanged: boolean;
+  readonly reasonCodeChanged: boolean;
+  readonly shouldInterveneBefore: boolean;
+  readonly shouldInterveneAfter: boolean;
+  readonly notes: readonly string[];
+}
+
+export interface ChurnRescuePolicyStatsSummary {
+  readonly roomId: string | null;
+  readonly snapshotAt: UnixMs;
+  readonly evaluationCount: number;
+  readonly interventionCount: number;
+  readonly suppressionCount: number;
+  readonly averageChurnRisk01: Score01;
+  readonly peakChurnRisk01: Score01;
+  readonly mostCommonUrgency: ChatRescueUrgencyBand | null;
+  readonly mostCommonReasonCode: string | null;
+  readonly mostCommonSuppressionReason: string | null;
+}
+
+export interface ChurnRescuePolicyBatchRequest {
+  readonly requests: readonly ChurnRescuePolicyRequest[];
+  readonly stopOnFirstIntervention?: boolean;
+}
+
+export interface ChurnRescuePolicyBatchResult {
+  readonly decisions: readonly ChurnRescuePolicyDecision[];
+  readonly interventionCount: number;
+  readonly firstInterventionIndex: number | null;
+  readonly allSuppressed: boolean;
+  readonly highestUrgencyIndex: number | null;
+  readonly highestChurnRisk01: Score01;
+}
+
+export interface ChurnRescuePolicyRiskComparison {
+  readonly aIsHigherRisk: boolean;
+  readonly bIsHigherRisk: boolean;
+  readonly delta: number;
+  readonly dominantDimension: 'CHURN' | 'HUMILIATION' | 'RECOVERABILITY' | 'HELPER' | 'TILT' | 'TIED';
+  readonly urgencyMatch: boolean;
+  readonly reasonCodeMatch: boolean;
+}
+
+export interface ChurnRescuePolicyRankedRequest {
+  readonly index: number;
+  readonly request: ChurnRescuePolicyRequest;
+  readonly decision: ChurnRescuePolicyDecision;
+  readonly urgencyRank: number;
+  readonly churnRisk01: Score01;
+}
+
+// ============================================================================
+// MARK: Batch evaluation
+// ============================================================================
+
+export function batchEvaluateChurnPolicy(
+  policy: ChurnRescuePolicy,
+  batch: ChurnRescuePolicyBatchRequest,
+): ChurnRescuePolicyBatchResult {
+  const decisions: ChurnRescuePolicyDecision[] = [];
+  let interventionCount = 0;
+  let firstInterventionIndex: number | null = null;
+  let highestChurnRisk01: Score01 = 0 as Score01;
+  let highestUrgencyIndex: number | null = null;
+  const urgencyRank: Readonly<Record<ChatRescueUrgencyBand, number>> = {
+    WATCH: 1,
+    READY: 2,
+    IMMEDIATE: 3,
+    CRITICAL: 4,
+  };
+  let peakUrgencyRank = 0;
+
+  for (let i = 0; i < batch.requests.length; i++) {
+    const decision = policy.evaluate(batch.requests[i]);
+    decisions.push(decision);
+
+    if (Number(decision.risk.churnRisk01) > Number(highestChurnRisk01)) {
+      highestChurnRisk01 = decision.risk.churnRisk01;
+    }
+    const rank = urgencyRank[decision.risk.urgency] ?? 0;
+    if (rank > peakUrgencyRank) {
+      peakUrgencyRank = rank;
+      highestUrgencyIndex = i;
+    }
+    if (decision.shouldIntervene) {
+      interventionCount++;
+      if (firstInterventionIndex === null) firstInterventionIndex = i;
+      if (batch.stopOnFirstIntervention) break;
+    }
+  }
+
+  return Object.freeze({
+    decisions: Object.freeze(decisions),
+    interventionCount,
+    firstInterventionIndex,
+    allSuppressed: interventionCount === 0,
+    highestUrgencyIndex,
+    highestChurnRisk01,
+  });
+}
+
+// ============================================================================
+// MARK: Audit and stats
+// ============================================================================
+
+export function buildChurnPolicyAuditReport(
+  decisions: readonly ChurnRescuePolicyDecision[],
+  now: UnixMs,
+): ChurnRescuePolicyAuditReport {
+  const urgencyBreakdown: Record<ChatRescueUrgencyBand, number> = {
+    WATCH: 0,
+    READY: 0,
+    IMMEDIATE: 0,
+    CRITICAL: 0,
+  };
+  const reasonCodeBreakdown: Record<string, number> = {};
+  const suppressionBreakdown: Record<string, number> = {};
+  let totalChurnRisk = 0;
+  let peakChurnRisk01: Score01 = 0 as Score01;
+  let interventionCount = 0;
+  let suppressionCount = 0;
+  const entries: ChurnRescuePolicyAuditEntry[] = [];
+
+  for (const decision of decisions) {
+    const rc = decision.risk.reasonTrail.reasonCode;
+    const sr = decision.risk.reasonTrail.suppressionReason;
+    const urgency = decision.risk.urgency;
+
+    urgencyBreakdown[urgency] = (urgencyBreakdown[urgency] ?? 0) + 1;
+    reasonCodeBreakdown[rc] = (reasonCodeBreakdown[rc] ?? 0) + 1;
+    if (sr) suppressionBreakdown[sr] = (suppressionBreakdown[sr] ?? 0) + 1;
+
+    const risk01 = Number(decision.risk.churnRisk01);
+    totalChurnRisk += risk01;
+    if (risk01 > Number(peakChurnRisk01)) peakChurnRisk01 = decision.risk.churnRisk01;
+
+    if (decision.shouldIntervene) interventionCount++;
+    else suppressionCount++;
+
+    entries.push(Object.freeze({
+      evaluatedAt: now,
+      roomId: null,
+      sessionId: null,
+      shouldIntervene: decision.shouldIntervene,
+      churnRisk01: decision.risk.churnRisk01,
+      urgency,
+      reasonCode: rc,
+      suppressionReason: sr ?? null,
+      rescueKind: decision.rescuePlan?.kind ?? null,
+      successBand: decision.predictedOutcome?.successBand ?? null,
+      notes: decision.notes,
+    }));
+  }
+
+  const count = decisions.length;
+  return Object.freeze({
+    generatedAt: now,
+    totalEvaluations: count,
+    interventionCount,
+    suppressionCount,
+    urgencyBreakdown: Object.freeze(urgencyBreakdown),
+    reasonCodeBreakdown: Object.freeze(reasonCodeBreakdown),
+    suppressionBreakdown: Object.freeze(suppressionBreakdown),
+    averageChurnRisk01: (count > 0 ? totalChurnRisk / count : 0) as Score01,
+    peakChurnRisk01,
+    interventionRate01: (count > 0 ? interventionCount / count : 0) as Score01,
+    entries: Object.freeze(entries),
+  });
+}
+
+export function buildChurnPolicyStatsSummary(
+  decisions: readonly ChurnRescuePolicyDecision[],
+  roomId: string | null,
+  now: UnixMs,
+): ChurnRescuePolicyStatsSummary {
+  if (decisions.length === 0) {
+    return Object.freeze({
+      roomId,
+      snapshotAt: now,
+      evaluationCount: 0,
+      interventionCount: 0,
+      suppressionCount: 0,
+      averageChurnRisk01: 0 as Score01,
+      peakChurnRisk01: 0 as Score01,
+      mostCommonUrgency: null,
+      mostCommonReasonCode: null,
+      mostCommonSuppressionReason: null,
+    });
+  }
+
+  const urgencyCount: Record<string, number> = {};
+  const rcCount: Record<string, number> = {};
+  const srCount: Record<string, number> = {};
+  let totalRisk = 0;
+  let peakRisk: Score01 = 0 as Score01;
+  let interventionCount = 0;
+
+  for (const d of decisions) {
+    const urg = d.risk.urgency;
+    urgencyCount[urg] = (urgencyCount[urg] ?? 0) + 1;
+    const rc = d.risk.reasonTrail.reasonCode;
+    rcCount[rc] = (rcCount[rc] ?? 0) + 1;
+    const sr = d.risk.reasonTrail.suppressionReason;
+    if (sr) srCount[sr] = (srCount[sr] ?? 0) + 1;
+    const r = Number(d.risk.churnRisk01);
+    totalRisk += r;
+    if (r > Number(peakRisk)) peakRisk = d.risk.churnRisk01;
+    if (d.shouldIntervene) interventionCount++;
+  }
+
+  const mostCommonUrgency = (Object.entries(urgencyCount).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null) as ChatRescueUrgencyBand | null;
+  const mostCommonReasonCode = Object.entries(rcCount).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+  const mostCommonSuppressionReason = Object.entries(srCount).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+
+  return Object.freeze({
+    roomId,
+    snapshotAt: now,
+    evaluationCount: decisions.length,
+    interventionCount,
+    suppressionCount: decisions.length - interventionCount,
+    averageChurnRisk01: (totalRisk / decisions.length) as Score01,
+    peakChurnRisk01: peakRisk,
+    mostCommonUrgency,
+    mostCommonReasonCode,
+    mostCommonSuppressionReason,
+  });
+}
+
+// ============================================================================
+// MARK: Risk comparison and ranking
+// ============================================================================
+
+export function compareRiskSnapshots(
+  a: ChurnRescueRiskSnapshot,
+  b: ChurnRescueRiskSnapshot,
+): ChurnRescuePolicyRiskComparison {
+  const churnDelta = Number(a.churnRisk01) - Number(b.churnRisk01);
+  const humiliationDelta = Number(a.humiliationHazard01) - Number(b.humiliationHazard01);
+  const recoverabilityDelta = Number(a.recoverability01) - Number(b.recoverability01);
+  const helperDelta = Number(a.helperReadiness01) - Number(b.helperReadiness01);
+  const tiltDelta = Number(a.tilt01) - Number(b.tilt01);
+
+  const absDeltas: Array<[string, number]> = [
+    ['CHURN', Math.abs(churnDelta)],
+    ['HUMILIATION', Math.abs(humiliationDelta)],
+    ['RECOVERABILITY', Math.abs(recoverabilityDelta)],
+    ['HELPER', Math.abs(helperDelta)],
+    ['TILT', Math.abs(tiltDelta)],
+  ];
+  absDeltas.sort((x, y) => y[1] - x[1]);
+  const dominantDimension = (absDeltas[0][1] < 0.02 ? 'TIED' : absDeltas[0][0]) as ChurnRescuePolicyRiskComparison['dominantDimension'];
+
+  const urgencyRank: Record<string, number> = { WATCH: 1, READY: 2, IMMEDIATE: 3, CRITICAL: 4 };
+  const aRank = urgencyRank[a.urgency] ?? 0;
+  const bRank = urgencyRank[b.urgency] ?? 0;
+  const aIsHigherRisk = aRank > bRank || (aRank === bRank && Number(a.churnRisk01) > Number(b.churnRisk01));
+
+  return Object.freeze({
+    aIsHigherRisk,
+    bIsHigherRisk: !aIsHigherRisk && (bRank > aRank || Number(b.churnRisk01) > Number(a.churnRisk01)),
+    delta: churnDelta,
+    dominantDimension,
+    urgencyMatch: a.urgency === b.urgency,
+    reasonCodeMatch: a.reasonTrail.reasonCode === b.reasonTrail.reasonCode,
+  });
+}
+
+export function computeChurnPolicyDiff(
+  before: ChurnRescuePolicyDecision,
+  after: ChurnRescuePolicyDecision,
+): ChurnRescuePolicyDiff {
+  const notes: string[] = [];
+  if (before.risk.urgency !== after.risk.urgency) {
+    notes.push(`urgency-changed: ${before.risk.urgency} → ${after.risk.urgency}`);
+  }
+  if (before.risk.reasonTrail.reasonCode !== after.risk.reasonTrail.reasonCode) {
+    notes.push(`reason-code-changed: ${before.risk.reasonTrail.reasonCode} → ${after.risk.reasonTrail.reasonCode}`);
+  }
+  if (before.shouldIntervene !== after.shouldIntervene) {
+    notes.push(`intervention-changed: ${before.shouldIntervene} → ${after.shouldIntervene}`);
+  }
+  return Object.freeze({
+    before: before.risk,
+    after: after.risk,
+    churnRiskDelta: Number(after.risk.churnRisk01) - Number(before.risk.churnRisk01),
+    urgencyChanged: before.risk.urgency !== after.risk.urgency,
+    reasonCodeChanged: before.risk.reasonTrail.reasonCode !== after.risk.reasonTrail.reasonCode,
+    shouldInterveneBefore: before.shouldIntervene,
+    shouldInterveneAfter: after.shouldIntervene,
+    notes: Object.freeze(notes),
+  });
+}
+
+export function rankRequestsByUrgency(
+  policy: ChurnRescuePolicy,
+  requests: readonly ChurnRescuePolicyRequest[],
+): readonly ChurnRescuePolicyRankedRequest[] {
+  const urgencyRank: Record<string, number> = { WATCH: 1, READY: 2, IMMEDIATE: 3, CRITICAL: 4 };
+  const ranked: ChurnRescuePolicyRankedRequest[] = requests.map((request, index) => {
+    const decision = policy.evaluate(request);
+    return {
+      index,
+      request,
+      decision,
+      urgencyRank: urgencyRank[decision.risk.urgency] ?? 0,
+      churnRisk01: decision.risk.churnRisk01,
+    };
+  });
+  ranked.sort((a, b) => b.urgencyRank - a.urgencyRank || Number(b.churnRisk01) - Number(a.churnRisk01));
+  return Object.freeze(ranked);
+}
+
+export function analyzeRiskSnapshot(snapshot: ChurnRescueRiskSnapshot): {
+  readonly riskLabel: string;
+  readonly isHighRisk: boolean;
+  readonly isCritical: boolean;
+  readonly rescueNecessityLabel: string;
+  readonly helperReady: boolean;
+  readonly recommendShadowOnly: boolean;
+} {
+  const necessity = Number(snapshot.rescueNecessity01);
+  const riskLabel = necessity >= 0.8 ? 'EXTREME'
+    : necessity >= 0.6 ? 'HIGH'
+    : necessity >= 0.4 ? 'MODERATE'
+    : necessity >= 0.2 ? 'LOW'
+    : 'MINIMAL';
+  return Object.freeze({
+    riskLabel,
+    isHighRisk: necessity >= 0.6,
+    isCritical: snapshot.urgency === 'CRITICAL',
+    rescueNecessityLabel: riskLabel,
+    helperReady: Number(snapshot.helperReadiness01) >= 0.35,
+    recommendShadowOnly: Number(snapshot.humiliationHazard01) >= 0.62 || Number(snapshot.publicRisk01) >= 0.74,
+  });
+}
+
+// ============================================================================
+// MARK: Profile-aware extended factory
+// ============================================================================
+
+export interface ChurnRescuePolicyExtended {
+  readonly policy: ChurnRescuePolicy;
+  readonly profile: ChurnRescuePolicyProfile;
+  evaluate(request: ChurnRescuePolicyRequest): ChurnRescuePolicyDecision;
+  evaluateWithProfile(request: ChurnRescuePolicyRequest): ChurnRescuePolicyDecision & { readonly profile: ChurnRescuePolicyProfile };
+  batchEvaluate(batch: ChurnRescuePolicyBatchRequest): ChurnRescuePolicyBatchResult;
+  buildAuditReport(decisions: readonly ChurnRescuePolicyDecision[], now: UnixMs): ChurnRescuePolicyAuditReport;
+  buildStatsSummary(decisions: readonly ChurnRescuePolicyDecision[], roomId: string | null, now: UnixMs): ChurnRescuePolicyStatsSummary;
+  computeDiff(before: ChurnRescuePolicyDecision, after: ChurnRescuePolicyDecision): ChurnRescuePolicyDiff;
+  rankRequests(requests: readonly ChurnRescuePolicyRequest[]): readonly ChurnRescuePolicyRankedRequest[];
+  analyzeRisk(snapshot: ChurnRescueRiskSnapshot): ReturnType<typeof analyzeRiskSnapshot>;
+  compareRisks(a: ChurnRescueRiskSnapshot, b: ChurnRescueRiskSnapshot): ChurnRescuePolicyRiskComparison;
+  toJSON(): Readonly<{ profile: ChurnRescuePolicyProfile; profileConfig: ChurnRescuePolicyProfileConfig }>;
+}
+
+export function createChurnRescuePolicyFromProfile(
+  profile: ChurnRescuePolicyProfile,
+  extraOptions: Omit<ChurnRescuePolicyOptions, 'tuning'> = {},
+): ChurnRescuePolicyExtended {
+  const profileConfig = CHURN_RESCUE_POLICY_PROFILE_CONFIGS[profile];
+  const policy = createChurnRescuePolicy({
+    ...extraOptions,
+    tuning: profileConfig.tuning,
+  });
+  return Object.freeze({
+    policy,
+    profile,
+    evaluate: (request) => policy.evaluate(request),
+    evaluateWithProfile: (request) => {
+      const decision = policy.evaluate(request);
+      return Object.freeze({ ...decision, profile });
+    },
+    batchEvaluate: (batch) => batchEvaluateChurnPolicy(policy, batch),
+    buildAuditReport: (decisions, now) => buildChurnPolicyAuditReport(decisions, now),
+    buildStatsSummary: (decisions, roomId, now) => buildChurnPolicyStatsSummary(decisions, roomId, now),
+    computeDiff: (before, after) => computeChurnPolicyDiff(before, after),
+    rankRequests: (requests) => rankRequestsByUrgency(policy, requests),
+    analyzeRisk: (snapshot) => analyzeRiskSnapshot(snapshot),
+    compareRisks: (a, b) => compareRiskSnapshots(a, b),
+    toJSON: () => Object.freeze({ profile, profileConfig }),
+  });
+}
+
+// ============================================================================
+// MARK: Named profile factories
+// ============================================================================
+
+export function createBalancedChurnRescuePolicy(options: Omit<ChurnRescuePolicyOptions, 'tuning'> = {}): ChurnRescuePolicyExtended {
+  return createChurnRescuePolicyFromProfile('BALANCED', options);
+}
+
+export function createHaterHeavyChurnRescuePolicy(options: Omit<ChurnRescuePolicyOptions, 'tuning'> = {}): ChurnRescuePolicyExtended {
+  return createChurnRescuePolicyFromProfile('HATER_HEAVY', options);
+}
+
+export function createHelperPriorityChurnRescuePolicy(options: Omit<ChurnRescuePolicyOptions, 'tuning'> = {}): ChurnRescuePolicyExtended {
+  return createChurnRescuePolicyFromProfile('HELPER_PRIORITY', options);
+}
+
+export function createNegotiationFocusChurnRescuePolicy(options: Omit<ChurnRescuePolicyOptions, 'tuning'> = {}): ChurnRescuePolicyExtended {
+  return createChurnRescuePolicyFromProfile('NEGOTIATION_FOCUS', options);
+}
+
+export function createLiveopsResponsiveChurnRescuePolicy(options: Omit<ChurnRescuePolicyOptions, 'tuning'> = {}): ChurnRescuePolicyExtended {
+  return createChurnRescuePolicyFromProfile('LIVEOPS_RESPONSIVE', options);
+}
+
+export function createShadowHeavyChurnRescuePolicy(options: Omit<ChurnRescuePolicyOptions, 'tuning'> = {}): ChurnRescuePolicyExtended {
+  return createChurnRescuePolicyFromProfile('SHADOW_HEAVY', options);
+}
+
+// ============================================================================
+// MARK: Urgency window helpers
+// ============================================================================
+
+export function urgencyToWindowMs(urgency: ChatRescueUrgencyBand, tuning?: Partial<ChurnRescuePolicyTuning>): number {
+  const t = { ...DEFAULT_TUNING, ...(tuning ?? {}) };
+  switch (urgency) {
+    case 'CRITICAL': return t.criticalWindowMs;
+    case 'IMMEDIATE': return t.immediateWindowMs;
+    case 'READY': return t.readyWindowMs;
+    case 'WATCH': return t.watchWindowMs;
+  }
+}
+
+export function urgencyLabel(urgency: ChatRescueUrgencyBand): string {
+  switch (urgency) {
+    case 'CRITICAL': return 'Crisis — act immediately or lose the run';
+    case 'IMMEDIATE': return 'High pressure — window closing fast';
+    case 'READY': return 'Opportunity open — helper can engage';
+    case 'WATCH': return 'Monitor — not yet intervention-ready';
+  }
+}
+
+export function rescueKindForReasonCode(reasonCode: ChatRescueReasonCode): ChatRescueKind {
+  switch (reasonCode) {
+    case 'NEGOTIATION_PANIC': return 'DEAL_ROOM_BAILOUT';
+    case 'BOSS_WINDOW_LOCK': return 'ONE_CARD_RECOVERY';
+    case 'CROWD_HOSTILITY_SURGE': return 'CROWD_SHIELD';
+    case 'EMBARRASSMENT_OVERLOAD': return 'CROWD_SHIELD';
+    case 'POST_COLLAPSE_DISORIENTATION': return 'POST_COLLAPSE_GUIDE';
+    case 'COGNITIVE_OVERLOAD': return 'BREATH_WINDOW';
+    case 'HELPER_RECEPTIVE_WINDOW': return 'HELPER_HANDOFF';
+    case 'PLAYER_STOPPED_ACTING': return 'HELPER_HANDOFF';
+    case 'STAGED_DEESCALATION': return 'HELPER_HANDOFF';
+    case 'RETENTION_RISK': return 'HELPER_HANDOFF';
+    default: return 'HELPER_HANDOFF';
+  }
+}
+
+export function buildRescueNotesSummary(decision: ChurnRescuePolicyDecision): string {
+  const risk = decision.risk;
+  const parts: string[] = [
+    `risk=${Number(risk.churnRisk01).toFixed(2)}`,
+    `urgency=${risk.urgency}`,
+    `code=${risk.reasonTrail.reasonCode}`,
+    `intervene=${decision.shouldIntervene}`,
+  ];
+  if (decision.rescuePlan) parts.push(`kind=${decision.rescuePlan.kind}`);
+  if (decision.predictedOutcome) parts.push(`band=${decision.predictedOutcome.successBand}`);
+  if (risk.reasonTrail.suppressionReason) parts.push(`suppressed=${risk.reasonTrail.suppressionReason}`);
+  return parts.join(' | ');
+}
+
+// ============================================================================
+// MARK: Risk threshold validators
+// ============================================================================
+
+export function isHighChurnRisk(snapshot: ChurnRescueRiskSnapshot, cutoff01: Score01 = 0.55 as Score01): boolean {
+  return Number(snapshot.churnRisk01) >= Number(cutoff01);
+}
+
+export function isHumiliationDanger(snapshot: ChurnRescueRiskSnapshot, cutoff01: Score01 = 0.60 as Score01): boolean {
+  return Number(snapshot.humiliationHazard01) >= Number(cutoff01);
+}
+
+export function isHelperReady(snapshot: ChurnRescueRiskSnapshot, floor01: Score01 = 0.30 as Score01): boolean {
+  return Number(snapshot.helperReadiness01) >= Number(floor01);
+}
+
+export function wouldBenefitFromShieldKind(snapshot: ChurnRescueRiskSnapshot): boolean {
+  return Number(snapshot.publicRisk01) >= 0.58 || Number(snapshot.humiliationHazard01) >= 0.56;
+}
+
+export function wouldBenefitFromDirectHandoff(snapshot: ChurnRescueRiskSnapshot): boolean {
+  return Number(snapshot.helperReadiness01) >= 0.38 && Number(snapshot.churnRisk01) >= 0.44;
+}
+
+export function urgencyRankOf(urgency: ChatRescueUrgencyBand): number {
+  switch (urgency) {
+    case 'CRITICAL': return 4;
+    case 'IMMEDIATE': return 3;
+    case 'READY': return 2;
+    case 'WATCH': return 1;
+  }
+}
+
+export function rescueShouldEscalate(before: ChurnRescueRiskSnapshot, after: ChurnRescueRiskSnapshot): boolean {
+  return urgencyRankOf(after.urgency) > urgencyRankOf(before.urgency) ||
+    Number(after.churnRisk01) - Number(before.churnRisk01) >= 0.12;
+}
+
+export function rescueShouldDeescalate(before: ChurnRescueRiskSnapshot, after: ChurnRescueRiskSnapshot): boolean {
+  return urgencyRankOf(after.urgency) < urgencyRankOf(before.urgency) ||
+    Number(before.churnRisk01) - Number(after.churnRisk01) >= 0.18;
+}
+
+// ============================================================================
+// MARK: Rescue feasibility pre-checks
+// ============================================================================
+
+export interface ChurnRescueFeasibilityCheck {
+  readonly feasible: boolean;
+  readonly blockers: readonly string[];
+  readonly warnings: readonly string[];
+  readonly recommendedProfile: ChurnRescuePolicyProfile;
+}
+
+export function checkRescueFeasibility(request: ChurnRescuePolicyRequest): ChurnRescueFeasibilityCheck {
+  const blockers: string[] = [];
+  const warnings: string[] = [];
+
+  if (!request.roomId) blockers.push('roomId is required');
+  if (!request.sessionId) blockers.push('sessionId is required');
+  if (!request.channelId) blockers.push('channelId is required');
+  if (!request.playerId) blockers.push('playerId is required');
+  if (!request.state) blockers.push('ChatState is required');
+  if (!request.room) blockers.push('ChatRoomState is required');
+  if (!request.session) blockers.push('ChatSessionState is required');
+
+  const telemetry = request.telemetry;
+  if (telemetry?.helperAlreadyActive) warnings.push('helper already active — suppression likely');
+  if (telemetry?.activeRescueId) warnings.push('rescue already open — cooldown may suppress');
+  if (!request.affect) warnings.push('affect not provided — fallback affect will be used');
+  if (!request.feature) warnings.push('feature not provided — fallback feature will be used');
+
+  const affect = request.affect;
+  const crowdHostility01 = Number((request.feature as any)?.crowdHostility01 ?? 0);
+  const embarrassment = Number(affect?.socialEmbarrassment ?? 0) / 100;
+
+  let recommendedProfile: ChurnRescuePolicyProfile = 'BALANCED';
+  if (crowdHostility01 >= 0.52 || embarrassment >= 0.52) {
+    recommendedProfile = 'HATER_HEAVY';
+  } else if (request.visibleChannel === 'DEAL_ROOM') {
+    recommendedProfile = 'NEGOTIATION_FOCUS';
+  } else if (embarrassment >= 0.68) {
+    recommendedProfile = 'SHADOW_HEAVY';
+  }
+
+  return Object.freeze({
+    feasible: blockers.length === 0,
+    blockers: Object.freeze(blockers),
+    warnings: Object.freeze(warnings),
+    recommendedProfile,
+  });
+}
+
+// ============================================================================
+// MARK: Rescue decision serialization
+// ============================================================================
+
+export function serializeRescueDecision(decision: ChurnRescuePolicyDecision): Readonly<Record<string, unknown>> {
+  return Object.freeze({
+    shouldIntervene: decision.shouldIntervene,
+    churnRisk01: Number(decision.risk.churnRisk01).toFixed(3),
+    tilt01: Number(decision.risk.tilt01).toFixed(3),
+    publicRisk01: Number(decision.risk.publicRisk01).toFixed(3),
+    recoverability01: Number(decision.risk.recoverability01).toFixed(3),
+    helperReadiness01: Number(decision.risk.helperReadiness01).toFixed(3),
+    rescueNecessity01: Number(decision.risk.rescueNecessity01).toFixed(3),
+    humiliationHazard01: Number(decision.risk.humiliationHazard01).toFixed(3),
+    urgency: decision.risk.urgency,
+    style: decision.risk.style,
+    bestVisibleChannel: decision.risk.bestVisibleChannel,
+    reasonCode: decision.risk.reasonTrail.reasonCode,
+    suppressionReason: decision.risk.reasonTrail.suppressionReason ?? null,
+    rescueKind: decision.rescuePlan?.kind ?? null,
+    successBand: decision.predictedOutcome?.successBand ?? null,
+    noteCount: decision.notes.length,
+    firstNote: decision.notes[0] ?? null,
+  });
+}
+
+export function deserializeRescueDecisionPartial(raw: Readonly<Record<string, unknown>>): Partial<ChurnRescuePolicyDecision> {
+  return {
+    shouldIntervene: Boolean(raw.shouldIntervene),
+    notes: Array.isArray(raw.notes) ? raw.notes.filter((n): n is string => typeof n === 'string') : [],
+  };
+}
+
+// ============================================================================
+// MARK: ChurnRescuePolicyModule — combined barrel export
+// ============================================================================
+
+export const ChurnRescuePolicyModule = Object.freeze({
+  // Core class + factory
+  ChurnRescuePolicy,
+  createChurnRescuePolicy,
+
+  // Profile system
+  createFromProfile: createChurnRescuePolicyFromProfile,
+  createBalanced: createBalancedChurnRescuePolicy,
+  createHaterHeavy: createHaterHeavyChurnRescuePolicy,
+  createHelperPriority: createHelperPriorityChurnRescuePolicy,
+  createNegotiationFocus: createNegotiationFocusChurnRescuePolicy,
+  createLiveopsResponsive: createLiveopsResponsiveChurnRescuePolicy,
+  createShadowHeavy: createShadowHeavyChurnRescuePolicy,
+
+  // Batch ops
+  batchEvaluate: batchEvaluateChurnPolicy,
+
+  // Audit + stats
+  buildAuditReport: buildChurnPolicyAuditReport,
+  buildStatsSummary: buildChurnPolicyStatsSummary,
+
+  // Diff + comparison
+  computeDiff: computeChurnPolicyDiff,
+  compareRisks: compareRiskSnapshots,
+  rankRequests: rankRequestsByUrgency,
+
+  // Analysis helpers
+  analyzeRisk: analyzeRiskSnapshot,
+  checkFeasibility: checkRescueFeasibility,
+  buildNotesSummary: buildRescueNotesSummary,
+  serializeDecision: serializeRescueDecision,
+
+  // Scoring utilities
+  urgencyToWindowMs,
+  urgencyLabel,
+  urgencyRankOf,
+  rescueKindForReasonCode,
+  isHighChurnRisk,
+  isHumiliationDanger,
+  isHelperReady,
+  wouldBenefitFromShieldKind,
+  wouldBenefitFromDirectHandoff,
+  rescueShouldEscalate,
+  rescueShouldDeescalate,
+
+  // Data tables
+  PROFILES: CHURN_RESCUE_POLICY_PROFILE_CONFIGS,
+  REASON_PRIORITY: CHURN_RESCUE_REASON_PRIORITY,
+  CHANNEL_LAW: CHURN_RESCUE_CHANNEL_LAW,
+  STYLE_NOTES: CHURN_RESCUE_STYLE_NOTES,
+} as const);
+
+// ============================================================================
+// MARK: Decision validation and contract checks
+// ============================================================================
+
+export function validateChurnPolicyDecision(decision: ChurnRescuePolicyDecision): readonly string[] {
+  const errors: string[] = [];
+  if (decision.shouldIntervene) {
+    if (!decision.rescuePlan) errors.push('shouldIntervene=true but rescuePlan is null');
+    if (!decision.rescueWindow) errors.push('shouldIntervene=true but rescueWindow is null');
+    if (!decision.recoveryPlan) errors.push('shouldIntervene=true but recoveryPlan is null');
+    if (!decision.rescueState) errors.push('shouldIntervene=true but rescueState is null');
+    if (!decision.rescueDigest) errors.push('shouldIntervene=true but rescueDigest is null');
+    if (!decision.recoveryDigest) errors.push('shouldIntervene=true but recoveryDigest is null');
+  } else {
+    if (decision.rescuePlan) errors.push('shouldIntervene=false but rescuePlan is set');
+    if (decision.rescueWindow) errors.push('shouldIntervene=false but rescueWindow is set');
+  }
+  const churnRisk = Number(decision.risk.churnRisk01);
+  if (churnRisk < 0 || churnRisk > 1) errors.push(`churnRisk01 out of range: ${churnRisk}`);
+  const necessity = Number(decision.risk.rescueNecessity01);
+  if (necessity < 0 || necessity > 1) errors.push(`rescueNecessity01 out of range: ${necessity}`);
+  return Object.freeze(errors);
+}
+
+export function assertValidDecision(decision: ChurnRescuePolicyDecision): void {
+  const errors = validateChurnPolicyDecision(decision);
+  if (errors.length > 0) {
+    throw new Error(`ChurnRescuePolicyDecision contract violation: ${errors.join('; ')}`);
+  }
+}
+
+// ============================================================================
+// MARK: Reason code signal classification
+// ============================================================================
+
+export function reasonCodeSignalClass(code: ChatRescueReasonCode): 'PANIC' | 'SOCIAL' | 'FATIGUE' | 'COMBAT' | 'BEHAVIORAL' | 'OPPORTUNITY' {
+  switch (code) {
+    case 'NEGOTIATION_PANIC': return 'PANIC';
+    case 'POST_COLLAPSE_DISORIENTATION': return 'PANIC';
+    case 'EMBARRASSMENT_OVERLOAD': return 'SOCIAL';
+    case 'CROWD_HOSTILITY_SURGE': return 'SOCIAL';
+    case 'COGNITIVE_OVERLOAD': return 'FATIGUE';
+    case 'PLAYER_STOPPED_ACTING': return 'FATIGUE';
+    case 'BOSS_WINDOW_LOCK': return 'COMBAT';
+    case 'RETENTION_RISK': return 'BEHAVIORAL';
+    case 'STAGED_DEESCALATION': return 'BEHAVIORAL';
+    case 'HELPER_RECEPTIVE_WINDOW': return 'OPPORTUNITY';
+    default: return 'BEHAVIORAL';
+  }
+}
+
+export function urgencyBandIsActionable(urgency: ChatRescueUrgencyBand): boolean {
+  return urgency === 'READY' || urgency === 'IMMEDIATE' || urgency === 'CRITICAL';
+}
+
+export function decisionShouldShowHelper(decision: ChurnRescuePolicyDecision): boolean {
+  if (!decision.shouldIntervene) return false;
+  return Number(decision.risk.helperReadiness01) >= 0.32 &&
+    decision.risk.bestVisibleChannel !== 'SPECTATOR' as ChatVisibleChannel;
+}
+
+export function decisionShouldUseShieldPattern(decision: ChurnRescuePolicyDecision): boolean {
+  if (!decision.shouldIntervene) return false;
+  const code = decision.risk.reasonTrail.reasonCode;
+  return code === 'CROWD_HOSTILITY_SURGE' || code === 'EMBARRASSMENT_OVERLOAD' ||
+    Number(decision.risk.publicRisk01) >= 0.58;
+}
+
+export function estimateRescueSuccessProbability(decision: ChurnRescuePolicyDecision): Score01 {
+  if (!decision.shouldIntervene || !decision.predictedOutcome) return 0 as Score01;
+  const band = decision.predictedOutcome.successBand;
+  switch (band) {
+    case 'RUN_SAVED': return 0.92 as Score01;
+    case 'STRONG_LIFT': return 0.78 as Score01;
+    case 'CLEAR_LIFT': return 0.58 as Score01;
+    case 'SMALL_LIFT': return 0.34 as Score01;
+    case 'NO_LIFT': return 0.08 as Score01;
+  }
+}
+
+// ============================================================================
+// MARK: Cooldown and deduplication helpers
+// ============================================================================
+
+export function isInCooldown(
+  lastRescueAt: UnixMs | null | undefined,
+  now: UnixMs,
+  tuning?: Partial<ChurnRescuePolicyTuning>,
+): boolean {
+  if (!lastRescueAt) return false;
+  const cooldownMs = tuning?.rescueCooldownMs ?? DEFAULT_TUNING.rescueCooldownMs;
+  return Number(now) - Number(lastRescueAt) < cooldownMs;
+}
+
+export function timeUntilCooldownExpires(
+  lastRescueAt: UnixMs | null | undefined,
+  now: UnixMs,
+  tuning?: Partial<ChurnRescuePolicyTuning>,
+): number {
+  if (!lastRescueAt) return 0;
+  const cooldownMs = tuning?.rescueCooldownMs ?? DEFAULT_TUNING.rescueCooldownMs;
+  return Math.max(0, cooldownMs - (Number(now) - Number(lastRescueAt)));
+}
+
+export function dedupeDecisions(
+  decisions: readonly ChurnRescuePolicyDecision[],
+): readonly ChurnRescuePolicyDecision[] {
+  const seen = new Set<string>();
+  return Object.freeze(decisions.filter((d) => {
+    const key = `${d.risk.urgency}:${d.risk.reasonTrail.reasonCode}:${d.shouldIntervene}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }));
+}
+
+// ============================================================================
+// MARK: Tuning diff and migration helpers
+// ============================================================================
+
+export interface ChurnRescuePolicyTuningDiff {
+  readonly changed: readonly string[];
+  readonly before: Partial<ChurnRescuePolicyTuning>;
+  readonly after: Partial<ChurnRescuePolicyTuning>;
+}
+
+export function diffTuning(
+  before: Partial<ChurnRescuePolicyTuning>,
+  after: Partial<ChurnRescuePolicyTuning>,
+): ChurnRescuePolicyTuningDiff {
+  const keys = new Set([...Object.keys(before), ...Object.keys(after)]) as Set<keyof ChurnRescuePolicyTuning>;
+  const changed: string[] = [];
+  for (const key of keys) {
+    if (before[key] !== after[key]) changed.push(key);
+  }
+  return Object.freeze({ changed: Object.freeze(changed), before: Object.freeze(before), after: Object.freeze(after) });
+}
+
+export function mergeTuningWithProfile(
+  base: Partial<ChurnRescuePolicyTuning>,
+  profile: ChurnRescuePolicyProfile,
+): Partial<ChurnRescuePolicyTuning> {
+  const profileTuning = CHURN_RESCUE_POLICY_PROFILE_CONFIGS[profile].tuning;
+  return Object.freeze({ ...base, ...profileTuning });
+}
+
+// ============================================================================
+// MARK: Authored rescue doctrine notes
+// ============================================================================
+
+export const CHURN_RESCUE_DOCTRINE: Readonly<Record<string, readonly string[]>> = Object.freeze({
+  TIMING: Object.freeze([
+    'Rescue timing is authored truth, not a UI heuristic.',
+    'Too early and you undermine the pressure.',
+    'Too late and the player has already left in their head.',
+    'Window law enforces timing budget — not urgency alone.',
+  ]),
+  HUMILIATION: Object.freeze([
+    'Public humiliation cost is always factored before channel assignment.',
+    'A rescue that embarrasses the player in front of witnesses may cause more churn than no rescue.',
+    'Shadow-first is not failure; it is restraint.',
+  ]),
+  HELPER_TRUST: Object.freeze([
+    'Helper trust is not the same as helper presence.',
+    'A helper who appears before trust is established can escalate panic.',
+    'Helper receptivity is the gate. Readiness is the signal.',
+  ]),
+  SUPPRESSION: Object.freeze([
+    'Suppression is not silence.',
+    'A suppressed rescue is a deliberate authored choice, not a missed event.',
+    'Suppression reasons must be explainable in replay.',
+  ]),
+  REASON_CODES: Object.freeze([
+    'Reason codes classify the dominant churn vector, not the full picture.',
+    'Multiple signals can be true simultaneously.',
+    'Policy resolves to the highest-priority code; reason trail captures all signals.',
+  ]),
 });
