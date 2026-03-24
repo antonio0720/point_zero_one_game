@@ -542,13 +542,13 @@ export class ChatInvasionDirector {
       ...DEFAULT_CONFIG,
       ...(options.config ?? {}),
     };
-    this.log = options.config?.log;
-    this.warn = options.config?.warn;
-    this.error = options.config?.error;
+    if (options.config?.log !== undefined) this.log = options.config.log;
+    if (options.config?.warn !== undefined) this.warn = options.config.warn;
+    if (options.config?.error !== undefined) this.error = options.config.error;
     this.runtime = {
       ...DEFAULT_RUNTIME,
       ...(options.initialRuntime ?? {}),
-      metadata: options.initialRuntime?.metadata ? { ...options.initialRuntime.metadata } : undefined,
+      ...(options.initialRuntime?.metadata ? { metadata: { ...options.initialRuntime.metadata } } : {}),
     };
   }
 
@@ -600,9 +600,11 @@ export class ChatInvasionDirector {
     this.runtime = {
       ...this.runtime,
       ...next,
-      metadata: next.metadata
-        ? { ...(this.runtime.metadata ?? {}), ...next.metadata }
-        : this.runtime.metadata ? { ...this.runtime.metadata } : undefined,
+      ...(next.metadata
+        ? { metadata: { ...(this.runtime.metadata ?? {}), ...next.metadata } }
+        : this.runtime.metadata
+          ? { metadata: { ...this.runtime.metadata } }
+          : {}),
     };
     this.emitSnapshot();
   }
@@ -632,9 +634,9 @@ export class ChatInvasionDirector {
       trigger: 'game_event',
       archetype,
       eventName: event,
-      payload: input.payload,
+      ...(input.payload !== undefined ? { payload: input.payload } : {}),
       severity,
-      preferredChannels: input.preferredChannels,
+      ...(input.preferredChannels !== undefined ? { preferredChannels: input.preferredChannels } : {}),
     });
   }
 
@@ -690,7 +692,7 @@ export class ChatInvasionDirector {
         metadata: input.metadata,
       },
       severity: input.severity ?? 'MEDIUM',
-      preferredChannels: input.preferredChannels,
+      ...(input.preferredChannels !== undefined ? { preferredChannels: input.preferredChannels } : {}),
     });
   }
 
@@ -740,7 +742,7 @@ export class ChatInvasionDirector {
     if (this.isArchetypeCoolingDown(input.archetype)) return null;
 
     const route = this.channelPolicy.evaluateInvasionRoute({
-      preferredChannels: input.preferredChannels,
+      ...(input.preferredChannels !== undefined ? { preferredChannels: input.preferredChannels } : {}),
       severity: input.severity,
       metadata: { eventName: input.eventName },
     });
@@ -777,7 +779,7 @@ export class ChatInvasionDirector {
         channel: route.resolvedChannel,
         severity: input.severity,
         source,
-        payload: input.payload,
+        ...(input.payload !== undefined ? { payload: input.payload } : {}),
       }),
       metadata: {
         routeReason: route.reason,
@@ -1006,7 +1008,7 @@ export class ChatInvasionDirector {
     source: PersonaVoice;
     payload?: Record<string, unknown>;
   }): ChatInvasionBeat | null {
-    const mentor = PERSONAS.THE_MENTOR;
+    const mentor = PERSONAS.THE_MENTOR!;
     const line = pick(mentor.helperIntercepts ?? []) ?? 'Slow down. Choose sequence over panic.';
     return {
       id: this.nextId('beat'),
@@ -1034,9 +1036,9 @@ export class ChatInvasionDirector {
       senderId: beat.actorId,
       senderName: beat.actorName,
       body,
-      emoji: beat.emoji,
+      ...(beat.emoji !== undefined ? { emoji: beat.emoji } : {}),
       ts: now(),
-      immutable: beat.immutable,
+      ...(beat.immutable !== undefined ? { immutable: beat.immutable } : {}),
       metadata: {
         invasionId: plan.id,
         invasionArchetype: plan.archetype,
@@ -1127,19 +1129,19 @@ export class ChatInvasionDirector {
     payload?: Record<string, unknown>,
   ): PersonaVoice {
     const byName = normalizeText(String(payload?.botName ?? '')).toUpperCase();
-    if (byName.includes('LIQUIDATOR')) return PERSONAS.THE_LIQUIDATOR;
-    if (byName.includes('BUREAUCRAT')) return PERSONAS.THE_BUREAUCRAT;
-    if (byName.includes('MANIPULATOR')) return PERSONAS.THE_MANIPULATOR;
-    if (byName.includes('CRASH')) return PERSONAS.THE_CRASH_PROPHET;
-    if (byName.includes('LEGACY')) return PERSONAS.THE_LEGACY_HEIR;
+    if (byName.includes('LIQUIDATOR')) return PERSONAS.THE_LIQUIDATOR!;
+    if (byName.includes('BUREAUCRAT')) return PERSONAS.THE_BUREAUCRAT!;
+    if (byName.includes('MANIPULATOR')) return PERSONAS.THE_MANIPULATOR!;
+    if (byName.includes('CRASH')) return PERSONAS.THE_CRASH_PROPHET!;
+    if (byName.includes('LEGACY')) return PERSONAS.THE_LEGACY_HEIR!;
 
     switch (archetype) {
-      case 'DEALROOM_AMBUSH': return PERSONAS.THE_MANIPULATOR;
-      case 'PRESSURE_SURGE': return PERSONAS.THE_CRASH_PROPHET;
-      case 'BANKRUPTCY_SHADOW': return PERSONAS.THE_LIQUIDATOR;
-      case 'SYNDICATE_BREACH': return PERSONAS.THE_BUREAUCRAT;
-      case 'SOVEREIGNTY_DENIAL': return PERSONAS.THE_LEGACY_HEIR;
-      default: return PERSONAS.THE_LIQUIDATOR;
+      case 'DEALROOM_AMBUSH': return PERSONAS.THE_MANIPULATOR!;
+      case 'PRESSURE_SURGE': return PERSONAS.THE_CRASH_PROPHET!;
+      case 'BANKRUPTCY_SHADOW': return PERSONAS.THE_LIQUIDATOR!;
+      case 'SYNDICATE_BREACH': return PERSONAS.THE_BUREAUCRAT!;
+      case 'SOVEREIGNTY_DENIAL': return PERSONAS.THE_LEGACY_HEIR!;
+      default: return PERSONAS.THE_LIQUIDATOR!;
     }
   }
 
@@ -1306,7 +1308,7 @@ export class ChatInvasionDirector {
         delayBeforeStartMs: Math.max(0, Math.floor(beat.delayMs * 0.4)),
         mood: beat.channel === 'DEAL_ROOM' ? 'PREDATORY' : beat.channel === 'SYNDICATE' ? 'INTIMATE' : 'SWARMING',
         textHint: beat.body.slice(0, 90),
-        metadata: beat.metadata,
+        ...(beat.metadata !== undefined ? { metadata: beat.metadata } : {}),
       });
     } catch (error) {
       this.emitError(createError('Failed to stage invasion typing theater.', error), {
@@ -1325,7 +1327,7 @@ export class ChatInvasionDirector {
       ts: plan.createdAt,
       sourceId: plan.sourceId,
       severity: plan.severity,
-      metadata: plan.metadata,
+      ...(plan.metadata !== undefined ? { metadata: plan.metadata } : {}),
     };
     this.notificationController.noteInvasion(event);
   }
@@ -1335,7 +1337,7 @@ export class ChatInvasionDirector {
     this.socketClient.queueGameEvent({
       event,
       channel: plan.channel,
-      roomId: this.runtime.roomId,
+      ...(this.runtime.roomId !== undefined ? { roomId: this.runtime.roomId } : {}),
       metadata: {
         invasionId: plan.id,
         archetype: plan.archetype,
@@ -1478,7 +1480,7 @@ function pick<T>(items: T[]): T | undefined {
 function cloneRuntime(runtime: ChatInvasionRuntimeState): ChatInvasionRuntimeState {
   return {
     ...runtime,
-    metadata: runtime.metadata ? { ...runtime.metadata } : undefined,
+    ...(runtime.metadata ? { metadata: { ...runtime.metadata } } : {}),
   };
 }
 

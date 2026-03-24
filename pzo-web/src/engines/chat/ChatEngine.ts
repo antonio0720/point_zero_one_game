@@ -28,6 +28,8 @@
 // MARK: Imports — all used, none dead
 // ============================================================================
 
+import type { ClockSource as CoreClockSource } from '../core';
+
 import {
   CHAT_CHANNEL_DESCRIPTORS,
   CHAT_ENGINE_CONSTANTS,
@@ -162,8 +164,15 @@ export interface ChatPersistencePort {
   remove?(key: string): void;
 }
 
-export interface ChatClockPort {
-  now(): number;
+/**
+ * Clock port for the chat engine.
+ * Extends CoreClockSource so that any ClockSource (WallClockSource,
+ * FixedClockSource, ManualClockSource) can be injected directly without
+ * a wrapper. The timer methods extend the minimal `now()` contract with
+ * the scheduling primitives chat needs for typing timeouts and silence
+ * detection.
+ */
+export interface ChatClockPort extends CoreClockSource {
   setTimeout(handler: () => void, ms: number): unknown;
   clearTimeout(token: unknown): void;
   setInterval(handler: () => void, ms: number): unknown;

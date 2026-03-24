@@ -3446,7 +3446,7 @@ export class ChatBotResponseDirector {
     });
 
     const offset = Math.abs(now) % ranked.length;
-    return ranked[offset];
+    return ranked[offset]!;
   }
 }
 

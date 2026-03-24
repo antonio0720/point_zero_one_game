@@ -580,7 +580,6 @@ function makeBadge(channel: ChatChannel): InternalChannelBadgeState {
     criticalCount: 0,
     tacticalCount: 0,
     lastEventAt: null,
-    titlePreview: undefined,
     muted: false,
   };
 }
@@ -647,9 +646,9 @@ export class ChatNotificationController {
       ...DEFAULT_CONFIG,
       ...options.config,
     };
-    this.log = options.config?.log;
-    this.warn = options.config?.warn;
-    this.error = options.config?.error;
+    if (options.config?.log !== undefined) this.log = options.config.log;
+    if (options.config?.warn !== undefined) this.warn = options.config.warn;
+    if (options.config?.error !== undefined) this.error = options.config.error;
 
     for (const channel of CHANNELS) {
       this.badges.set(channel, makeBadge(channel));
@@ -692,7 +691,7 @@ export class ChatNotificationController {
         criticalCount: badge.criticalCount,
         tacticalCount: badge.tacticalCount,
         lastEventAt: badge.lastEventAt,
-        titlePreview: badge.titlePreview,
+        ...(badge.titlePreview !== undefined ? { titlePreview: badge.titlePreview } : {}),
       };
     });
 
@@ -731,7 +730,7 @@ export class ChatNotificationController {
       criticalCount: badge.criticalCount,
       tacticalCount: badge.tacticalCount,
       lastEventAt: badge.lastEventAt,
-      titlePreview: badge.titlePreview,
+      ...(badge.titlePreview !== undefined ? { titlePreview: badge.titlePreview } : {}),
     };
   }
 
@@ -942,7 +941,7 @@ export class ChatNotificationController {
       soundCue: input.severity === 'CRITICAL' ? 'THREAT' : 'SOFT_TICK',
       surfaces: [],
       suppressionReason: 'none',
-      metadata: input.metadata,
+      ...(input.metadata !== undefined ? { metadata: input.metadata } : {}),
     };
 
     return this.enqueue(record, 'system');
@@ -1094,7 +1093,7 @@ export class ChatNotificationController {
       soundCue: inferMessageSoundCue(message),
       surfaces: [],
       suppressionReason: 'none',
-      metadata: message.metadata,
+      ...(message.metadata !== undefined ? { metadata: message.metadata } : {}),
       linkedMessageId: message.id,
     };
   }
@@ -1123,7 +1122,7 @@ export class ChatNotificationController {
       soundCue: inferSoundCueForServerNotification(notification),
       surfaces: [],
       suppressionReason: 'none',
-      metadata: notification.metadata,
+      ...(notification.metadata !== undefined ? { metadata: notification.metadata } : {}),
       linkedServerNotificationId: notification.id,
     };
   }
@@ -1146,7 +1145,7 @@ export class ChatNotificationController {
       soundCue: inferSoundCueForInvasion(event),
       surfaces: [],
       suppressionReason: 'none',
-      metadata: event.metadata,
+      ...(event.metadata !== undefined ? { metadata: event.metadata } : {}),
     };
   }
 
@@ -1173,7 +1172,7 @@ export class ChatNotificationController {
       soundCue: inferSoundCueForModeration(event),
       surfaces: [],
       suppressionReason: 'none',
-      metadata: event.metadata,
+      ...(event.metadata !== undefined ? { metadata: event.metadata } : {}),
     };
   }
 
@@ -1390,7 +1389,7 @@ export class ChatNotificationController {
       if (!badge.lastEventAt) continue;
       if (timestamp - badge.lastEventAt < this.config.idleUnreadCollapseMs) continue;
       if (badge.unreadCount === 0) {
-        badge.titlePreview = undefined;
+        delete (badge as { titlePreview?: string }).titlePreview;
       }
     }
   }
@@ -1507,7 +1506,7 @@ export class ChatNotificationController {
     }
 
     while (this.browserWindowHistory.length > 0) {
-      const oldest = this.browserWindowHistory[0];
+      const oldest = this.browserWindowHistory[0]!;
       if (timestamp - oldest <= 60_000) break;
       this.browserWindowHistory.shift();
     }

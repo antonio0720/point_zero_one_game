@@ -557,14 +557,14 @@ function defaultFallback(channel: ChatChannel): ChatChannel {
 function cloneModeSnapshot(mode: ChatModeSnapshot): ChatModeSnapshot {
   return {
     ...mode,
-    metadata: mode.metadata ? { ...mode.metadata } : undefined,
+    ...(mode.metadata ? { metadata: { ...mode.metadata } } : {}),
   };
 }
 
 function cloneCapability(capability: ChatChannelCapabilitySet): ChatChannelCapabilitySet {
   return {
     ...capability,
-    metadata: capability.metadata ? { ...capability.metadata } : undefined,
+    ...(capability.metadata ? { metadata: { ...capability.metadata } } : {}),
   };
 }
 
@@ -645,14 +645,14 @@ export class ChatChannelPolicy {
       ...DEFAULT_CONFIG,
       ...(options.config ?? {}),
     };
-    this.log = options.config?.log;
-    this.warn = options.config?.warn;
-    this.error = options.config?.error;
+    if (options.config?.log !== undefined) this.log = options.config.log;
+    if (options.config?.warn !== undefined) this.warn = options.config.warn;
+    if (options.config?.error !== undefined) this.error = options.config.error;
 
     this.mode = {
       ...DEFAULT_MODE,
       ...(options.initialMode ?? {}),
-      metadata: options.initialMode?.metadata ? { ...options.initialMode.metadata } : undefined,
+      ...(options.initialMode?.metadata ? { metadata: { ...options.initialMode.metadata } } : {}),
     };
 
     this.activeChannel = options.initialChannel ?? this.chooseBootChannel();
@@ -713,9 +713,11 @@ export class ChatChannelPolicy {
     this.mode = {
       ...this.mode,
       ...next,
-      metadata: next.metadata
-        ? { ...(this.mode.metadata ?? {}), ...next.metadata }
-        : this.mode.metadata ? { ...this.mode.metadata } : undefined,
+      ...(next.metadata
+        ? { metadata: { ...(this.mode.metadata ?? {}), ...next.metadata } }
+        : this.mode.metadata
+          ? { metadata: { ...this.mode.metadata } }
+          : {}),
     };
 
     this.recomputeAll('manual_override');
@@ -878,7 +880,7 @@ export class ChatChannelPolicy {
       draftBody: normalizedBody,
       privacyDecision,
       allowFallback: true,
-      metadata: input.metadata,
+      ...(input.metadata !== undefined ? { metadata: input.metadata } : {}),
     });
 
     const resolvedChannel = direct.rerouteChannel ?? direct.fallbackChannel;
@@ -897,8 +899,8 @@ export class ChatChannelPolicy {
       reason: direct.reason,
       rerouted: Boolean(direct.rerouteChannel && direct.rerouteChannel !== input.preferredChannel),
       shouldWarn,
-      warningTitle: shouldWarn ? this.buildWarningTitle(direct, privacyDecision) : undefined,
-      warningBody: shouldWarn ? this.buildWarningBody(direct, privacyDecision) : undefined,
+      ...(shouldWarn ? { warningTitle: this.buildWarningTitle(direct, privacyDecision) } : {}),
+      ...(shouldWarn ? { warningBody: this.buildWarningBody(direct, privacyDecision) } : {}),
       privacyDecision,
       evaluation: direct,
     };
@@ -919,10 +921,10 @@ export class ChatChannelPolicy {
       : this.rankInvasionChannels(input.severity);
 
     let chosen = this.evaluateChannel({
-      channel: order[0],
+      channel: order[0]!,
       intent: 'invasion',
       allowFallback: true,
-      metadata: input.metadata,
+      ...(input.metadata !== undefined ? { metadata: input.metadata } : {}),
     });
 
     for (const channel of order) {
@@ -930,7 +932,7 @@ export class ChatChannelPolicy {
         channel,
         intent: 'invasion',
         allowFallback: true,
-        metadata: input.metadata,
+        ...(input.metadata !== undefined ? { metadata: input.metadata } : {}),
       });
       if (candidate.allowed) {
         chosen = candidate;
@@ -1003,7 +1005,7 @@ export class ChatChannelPolicy {
         bannerTone: cap.bannerTone,
         heat: Math.round(state.activityHeat),
         unreadHint: state.unreadHint,
-        lockCode: cap.lockCode,
+        ...(cap.lockCode !== undefined ? { lockCode: cap.lockCode } : {}),
         reason: cap.reason,
       });
     }
@@ -1215,7 +1217,7 @@ export class ChatChannelPolicy {
       readable,
       supportsAmbientNpc,
       fallbackChannel: defaultFallback(channel),
-      lockCode,
+      ...(lockCode !== undefined ? { lockCode } : {}),
       metadata: {
         heat,
         lastInboundAt,
@@ -1289,13 +1291,13 @@ export class ChatChannelPolicy {
       visibilityMode: capability.visibilityMode,
       notificationMode: capability.notificationMode,
       fallbackChannel: capability.fallbackChannel,
-      rerouteChannel,
+      ...(rerouteChannel !== undefined ? { rerouteChannel } : {}),
       deliveryIntent: capability.deliveryIntent,
       bannerTone: capability.bannerTone,
-      privacyAction: privacyDecision?.action,
-      privacyFindings: privacyDecision?.findings,
-      lockCode,
-      metadata: input.metadata,
+      ...(privacyDecision?.action !== undefined ? { privacyAction: privacyDecision.action } : {}),
+      ...(privacyDecision?.findings !== undefined ? { privacyFindings: privacyDecision.findings } : {}),
+      ...(lockCode !== undefined ? { lockCode } : {}),
+      ...(input.metadata !== undefined ? { metadata: input.metadata } : {}),
     };
   }
 

@@ -490,9 +490,9 @@ export class ChatEventBridge {
     this.handleEvent({
       eventType,
       payload,
-      tickIndex: meta.tickIndex,
-      timestamp: meta.timestamp,
-      sourceEngine: meta.sourceEngine,
+      ...(meta.tickIndex !== undefined ? { tickIndex: meta.tickIndex } : {}),
+      ...(meta.timestamp !== undefined ? { timestamp: meta.timestamp } : {}),
+      ...(meta.sourceEngine !== undefined ? { sourceEngine: meta.sourceEngine } : {}),
     });
   }
 
@@ -782,8 +782,8 @@ export class ChatEventBridge {
         timestamp,
         tickIndex,
         {
-          pressureTier: snapshot.pressureTier,
-          tickTier: snapshot.tickTier,
+          ...(snapshot.pressureTier !== undefined ? { pressureTier: snapshot.pressureTier } : {}),
+          ...(snapshot.tickTier !== undefined ? { tickTier: snapshot.tickTier } : {}),
           tags: ['run', 'start'],
         },
       ),
@@ -825,7 +825,7 @@ export class ChatEventBridge {
         timestamp,
         tickIndex,
         {
-          proofHash,
+          ...(proofHash !== undefined ? { proofHash } : {}),
           runOutcome: outcome,
           tags: ['run', 'ended'],
         },
@@ -901,7 +901,7 @@ export class ChatEventBridge {
         timestamp,
         tickIndex,
         {
-          tickTier: to,
+          ...(to !== undefined ? { tickTier: to } : {}),
           tags: ['tick', 'tier-change'],
         },
       ),
@@ -1179,8 +1179,8 @@ export class ChatEventBridge {
         timestamp,
         tickIndex,
         {
-          botId,
-          attackType: typeof attackType === 'string' ? (attackType as AttackType) : undefined,
+          ...(botId !== undefined ? { botId } : {}),
+          ...(typeof attackType === 'string' ? { attackType: attackType as AttackType } : {}),
           targetLayerId: layer,
           tags: ['bot', 'attack'],
         },
@@ -1194,7 +1194,7 @@ export class ChatEventBridge {
         timestamp + 180,
         tickIndex,
         {
-          attackType: typeof attackType === 'string' ? (attackType as AttackType) : undefined,
+          ...(typeof attackType === 'string' ? { attackType: attackType as AttackType } : {}),
           targetLayerId: layer,
           tags: ['bot', 'taunt', 'attack'],
         },
@@ -1229,7 +1229,7 @@ export class ChatEventBridge {
         timestamp,
         tickIndex,
         {
-          botId: payload.botId,
+          ...(payload.botId !== undefined ? { botId: payload.botId } : {}),
           tags: ['bot', 'neutralized'],
         },
       ),
@@ -1256,7 +1256,7 @@ export class ChatEventBridge {
         timestamp,
         tickIndex,
         {
-          targetLayerId: payload.sourceLayerId,
+          ...(payload.sourceLayerId !== undefined ? { targetLayerId: payload.sourceLayerId } : {}),
           tags: ['cascade', 'triggered'],
         },
       ),
@@ -1548,7 +1548,7 @@ export class ChatEventBridge {
       severity,
       tickIndex,
       triggeredByEventType,
-      botId,
+      ...(botId !== undefined ? { botId } : {}),
       ...extras,
     };
   }
