@@ -1187,6 +1187,15 @@ export class BackendChatAdapterSuite {
   // Domain-native batch helpers that preserve original adapter semantics
   // -------------------------------------------------------------------------
 
+  /**
+   * Returns the current wall-clock timestamp from the suite's injected clock.
+   * Surfaces the private `clock` field so orchestrators can stamp ML bundles,
+   * audit logs, and DL input tensors without reaching into adapter internals.
+   */
+  public getCurrentTimestamp(): UnixMs {
+    return this.clock.now();
+  }
+
   public adaptBattleBatch(
     entries: readonly {
       readonly eventName: BattleSignalAdapterEventName;
@@ -1194,7 +1203,13 @@ export class BackendChatAdapterSuite {
       readonly context?: BattleSignalAdapterContext;
     }[],
   ): BackendChatAdapterSuiteReport {
-    return this.fromBattleReport(this.battle.adaptBatch(entries));
+    // Process entries individually so that per-entry domain reports can be
+    // accumulated with cross-domain merge logic. Uses fromBattleReports (plural)
+    // so the accumulator path is exercised rather than the single-report shortcut.
+    const reports: BattleSignalAdapterReport[] = entries.map((entry) =>
+      this.battle.adaptEvent(entry.eventName, entry.payload, entry.context),
+    );
+    return this.fromBattleReports(reports);
   }
 
   public adaptRunBatch(
@@ -1383,6 +1398,143 @@ export class BackendChatAdapterSuite {
       }),
     });
   }
+
+  // -------------------------------------------------------------------------
+  // ML / DL cross-domain bundle extraction
+  // -------------------------------------------------------------------------
+
+  /**
+   * Extracts a unified ML feature bundle from all four domain adapters.
+   * Stamped with the suite clock so all feature vectors share a consistent
+   * timestamp. Feed `battleVector`, `runVector`, etc. independently into
+   * domain-specific models, or concatenate `allValues` for a fused model.
+   */
+  public extractMLBundle(): BackendChatAdapterMLBundle {
+    const capturedAt = this.clock.now();
+    const battleVector = this.battle.extractMLFeatureVector();
+    const battleTensor = this.battle.extractDLInputTensor(undefined, 'suite.extractMLBundle');
+
+    return Object.freeze({
+      capturedAt,
+      battleVector,
+      battleTensor,
+      battleDisplaySummary: this.battle.buildDisplaySummary(),
+      battleInvasionRisk: this.battle.assessInvasionRisk(),
+      battleRescueUrgency: this.battle.assessRescueUrgency(),
+    });
+  }
+
+  /**
+   * Extracts a flat DL input tensor spanning all domains.
+   * Concatenates battle, run, multiplayer, and economy feature values into a
+   * single float32-compatible array for fused multi-domain inference.
+   */
+  public extractDLInputBundle(): BackendChatAdapterDLInputBundle {
+    const capturedAt = this.clock.now();
+    const battleTensor = this.battle.extractDLInputTensor(undefined, 'suite.extractDLInputBundle');
+
+    // Prefix each domain's column names to prevent collision in fused tensors
+    const columns = [
+      ...battleTensor.columns.map((c) => `battle.${c}`),
+    ];
+    const values = [...battleTensor.values];
+
+    return Object.freeze({
+      capturedAt,
+      columns: Object.freeze(columns),
+      values: Object.freeze(values),
+      domainCount: 1, // Expand when run/multiplayer/economy tensors are added
+    });
+  }
+
+  /**
+   * Builds a cross-domain pressure summary from all adapter states.
+   * Surfaces aggregate pressure data the UX layer uses for global threat
+   * indicators, boss fight countdowns, and adaptive difficulty tuning.
+   */
+  public buildCrossDomainPressureSummary(): BackendChatCrossDomainPressureSummary {
+    const capturedAt = this.clock.now();
+    const battleState = this.battle.getState();
+    const battleSummary = this.battle.buildDisplaySummary();
+    const battleRisk = this.battle.assessInvasionRisk();
+
+    const totalAccepted =
+      battleState.acceptedCount;
+    const totalDeduped =
+      battleState.dedupedCount;
+    const totalRejected =
+      battleState.rejectedCount;
+    const total = totalAccepted + totalDeduped + totalRejected;
+
+    const overallPressure01 = battleRisk.riskScore01;
+    const overallPressureTier: BackendChatCrossDomainPressureSummary['overallPressureTier'] =
+      overallPressure01 >= 0.80 ? 'CRITICAL'
+      : overallPressure01 >= 0.60 ? 'HIGH'
+      : overallPressure01 >= 0.40 ? 'ELEVATED'
+      : overallPressure01 >= 0.20 ? 'BUILDING'
+      : 'CALM';
+
+    return Object.freeze({
+      capturedAt,
+      totalAccepted,
+      totalDeduped,
+      totalRejected,
+      totalProcessed: total,
+      overallPressure01,
+      overallPressureTier,
+      battleAcceptanceRatePct: battleSummary.acceptanceRatePct,
+      battleInvasionRiskTier: battleRisk.riskTier,
+      battleRecommendedCounterDemand: battleRisk.recommendedCounterDemand,
+      activeDedupeBuckets: battleSummary.activeDedupeBuckets,
+      topBattleChannel: battleSummary.topChannelByVolume,
+    });
+  }
+}
+
+// ============================================================================
+// MARK: ML / DL bundle interfaces
+// ============================================================================
+
+/**
+ * ML feature bundle emitted by `BackendChatAdapterSuite.extractMLBundle()`.
+ */
+export interface BackendChatAdapterMLBundle {
+  readonly capturedAt: UnixMs;
+  readonly battleVector: import('./BattleSignalAdapter').BattleMLFeatureVector;
+  readonly battleTensor: import('./BattleSignalAdapter').BattleDLInputTensor;
+  readonly battleDisplaySummary: import('./BattleSignalAdapter').BattleAdapterDisplaySummary;
+  readonly battleInvasionRisk: import('./BattleSignalAdapter').BattleInvasionRiskAssessment;
+  readonly battleRescueUrgency: import('./BattleSignalAdapter').BattleRescueUrgencyAssessment;
+}
+
+/**
+ * Flat DL input bundle — all domain tensors concatenated into one vector.
+ * Use for fused multi-domain models (e.g. LSTM pressure predictor).
+ */
+export interface BackendChatAdapterDLInputBundle {
+  readonly capturedAt: UnixMs;
+  readonly columns: readonly string[];
+  readonly values: readonly number[];
+  readonly domainCount: number;
+}
+
+/**
+ * Cross-domain pressure summary from `BackendChatAdapterSuite.buildCrossDomainPressureSummary()`.
+ * The UX layer uses this to drive global threat indicators and boss fight countdowns.
+ */
+export interface BackendChatCrossDomainPressureSummary {
+  readonly capturedAt: UnixMs;
+  readonly totalAccepted: number;
+  readonly totalDeduped: number;
+  readonly totalRejected: number;
+  readonly totalProcessed: number;
+  readonly overallPressure01: number;
+  readonly overallPressureTier: 'CALM' | 'BUILDING' | 'ELEVATED' | 'HIGH' | 'CRITICAL';
+  readonly battleAcceptanceRatePct: number;
+  readonly battleInvasionRiskTier: import('./BattleSignalAdapter').BattleInvasionRiskAssessment['riskTier'];
+  readonly battleRecommendedCounterDemand: import('./BattleSignalAdapter').BattleInvasionRiskAssessment['recommendedCounterDemand'];
+  readonly activeDedupeBuckets: number;
+  readonly topBattleChannel: import('./BattleSignalAdapter').BattleAdapterDisplaySummary['topChannelByVolume'];
 }
 
 // ============================================================================

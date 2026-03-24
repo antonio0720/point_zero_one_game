@@ -268,6 +268,23 @@ export interface RunSignalAdapterState {
   readonly rejectedCount: number;
   readonly lastPressure100: Score100;
   readonly lastTickNumber: number;
+  /** Normalised pressure score 0–1 derived from the 0–100 pressure reading. */
+  readonly lastPressureScore01: Score01;
+}
+
+/**
+ * Breakdown of the normalized pressure score derivation.
+ * Used by ML feature vectors to express run-health as a 0–1 signal.
+ */
+export interface RunPressureScoreBreakdown {
+  /** Raw pressure on 0–100 scale. */
+  readonly raw100: Score100;
+  /** Normalised pressure on 0–1 scale (raw100 / 100, clamped). */
+  readonly score01: Score01;
+  /** Human-readable pressure tier label. */
+  readonly pressureTier: 'SAFE' | 'ELEVATED' | 'HIGH' | 'CRITICAL';
+  /** Whether bankruptcy warning threshold is crossed. */
+  readonly nearBankruptcy: boolean;
 }
 
 
@@ -345,8 +362,11 @@ interface RunThresholdProfile {
   readonly comebackPercentGain01: number;
   readonly recoveryCashflowFloor: number;
   readonly drawdownWarnPercent01: number;
+  /** Pressure score 0–1 threshold at which state is considered CRITICAL. */
   readonly pressureCriticalScore01: number;
+  /** Pressure score 0–1 threshold at which state is considered HIGH. */
   readonly pressureHighScore01: number;
+  /** Pressure score 0–1 threshold at which state is considered ELEVATED. */
   readonly pressureElevatedScore01: number;
 }
 
@@ -601,7 +621,40 @@ export class RunSignalAdapter {
       rejectedCount: this.rejectedCount,
       lastPressure100: this.lastPressure100,
       lastTickNumber: this.lastTickNumber,
+      lastPressureScore01: this.computePressureScore01().score01,
     });
+  }
+
+  /**
+   * Compute the normalised pressure score 0–1 from the current 0–100 reading.
+   *
+   * This is the authoritative run-health signal for ML feature vectors
+   * and DL input tensors. It expresses run pressure as a 0–1 float so
+   * downstream models work in a uniform feature space.
+   *
+   * Thresholds are sourced from `RUN_THRESHOLDS` (the project's authoritative
+   * run threshold profile), which uses `Score01`-typed fields.
+   *
+   * @param overridePressure100 - optional override; uses `lastPressure100` if omitted
+   * @param overrideNetWorth    - optional net worth for bankruptcy proximity check
+   */
+  public computePressureScore01(
+    overridePressure100?: Score100,
+    overrideNetWorth?: number,
+  ): RunPressureScoreBreakdown {
+    const raw100 = overridePressure100 ?? this.lastPressure100;
+    const score01: Score01 = clamp01(Number(raw100) / 100);
+    const nearBankruptcy = typeof overrideNetWorth === 'number'
+      ? overrideNetWorth <= RUN_THRESHOLDS.bankruptcyWarningNetWorth
+      : false;
+
+    let pressureTier: RunPressureScoreBreakdown['pressureTier'];
+    if (score01 >= RUN_THRESHOLDS.pressureCriticalScore01) pressureTier = 'CRITICAL';
+    else if (score01 >= RUN_THRESHOLDS.pressureHighScore01) pressureTier = 'HIGH';
+    else if (score01 >= RUN_THRESHOLDS.pressureElevatedScore01) pressureTier = 'ELEVATED';
+    else pressureTier = 'SAFE';
+
+    return Object.freeze({ raw100, score01, pressureTier, nearBankruptcy });
   }
 
   public adaptRuntimeEvent(

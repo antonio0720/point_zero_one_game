@@ -31,7 +31,18 @@ import type {
   RunStateSnapshot,
   ShieldLayerState,
 } from '../core/RunStateSnapshot';
-import type { CascadeTemplate, RecoveryCondition } from './types';
+import {
+  EMPTY_RECOVERY_EVALUATIONS,
+  RECOVERY_CONDITION_COMPARATOR_BY_KIND,
+  RECOVERY_CONDITION_STATUSES,
+} from './types';
+import type {
+  CascadeTemplate,
+  RecoveryCondition,
+  RecoveryConditionComparator,
+  RecoveryConditionKind,
+  RecoveryConditionStatus as CanonicalRecoveryStatus,
+} from './types';
 
 /**
  * Internal source families used for explainability and safe diagnostics.
@@ -1390,5 +1401,634 @@ export class RecoveryConditionChecker {
         explanation: evaluation.explanation,
       }),
     );
+  }
+
+  // ---------------------------------------------------------------------------
+  // ML Analytics & Deep Recovery Scoring
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Returns the canonical empty evaluations reference from the types module.
+   *
+   * This is the authoritative frozen-empty array of `types.RecoveryConditionEvaluation`
+   * objects used by tooling, read models, and replay descriptors when a template
+   * authors no structured conditions or is positively-polarized. Consumers that
+   * build evaluation bundles from types.ts factory functions should use this as
+   * their baseline empty state rather than constructing a new `[]` each call.
+   */
+  public getCanonicalEmptyEvaluations(): typeof EMPTY_RECOVERY_EVALUATIONS {
+    return EMPTY_RECOVERY_EVALUATIONS;
+  }
+
+  /**
+   * Returns the canonical vocabulary of recovery condition statuses as exported
+   * by the types module. This is the authoritative status registry for tooling,
+   * chat narration, and audit systems.
+   *
+   * Covers: MATCHED, UNMATCHED, NOT_APPLICABLE, EMPTY_INPUT, INVALID
+   */
+  public listCanonicalRecoveryStatuses(): readonly CanonicalRecoveryStatus[] {
+    return RECOVERY_CONDITION_STATUSES;
+  }
+
+  /**
+   * Maps canonical status labels from types.ts to the checker's internal
+   * evaluation status vocabulary. Bridges the two separate status systems:
+   * - types.ts: MATCHED / UNMATCHED / NOT_APPLICABLE / EMPTY_INPUT / INVALID
+   * - checker: PASSED / FAILED / SKIPPED / NOT_APPLICABLE
+   */
+  public mapToCanonicalStatus(
+    localStatus: RecoveryConditionStatus,
+  ): CanonicalRecoveryStatus {
+    switch (localStatus) {
+      case 'PASSED':
+        return 'MATCHED';
+      case 'FAILED':
+        return 'UNMATCHED';
+      case 'SKIPPED':
+        return 'NOT_APPLICABLE';
+      case 'NOT_APPLICABLE':
+        return 'NOT_APPLICABLE';
+      default: {
+        const _exhaustive: never = localStatus;
+        void _exhaustive;
+        return 'INVALID';
+      }
+    }
+  }
+
+  /**
+   * Lists the comparator type for each recovery condition in a template.
+   *
+   * Comparators describe the logical operator applied to evaluate the condition:
+   * - ANY_IN_SET: passes if any token in the input set matches (CARD_TAG_ANY, LAST_PLAYED_TAG_ANY)
+   * - NUMERIC_AT_LEAST: passes if actual >= required threshold (CASH_MIN, shield ratios, trust)
+   * - NUMERIC_AT_MOST: passes if actual <= required ceiling (HEAT_MAX)
+   * - TIER_AT_MOST: passes if pressure tier rank <= required tier rank (PRESSURE_NOT_ABOVE)
+   */
+  public listConditionComparators(
+    template: CascadeTemplate,
+  ): readonly Readonly<{
+    readonly conditionIndex: number;
+    readonly kind: RecoveryConditionKind;
+    readonly comparator: RecoveryConditionComparator;
+  }>[] {
+    return Object.freeze(
+      template.recovery.map((condition, index) => ({
+        conditionIndex: index,
+        kind: condition.kind as RecoveryConditionKind,
+        comparator: RECOVERY_CONDITION_COMPARATOR_BY_KIND[condition.kind as RecoveryConditionKind],
+      })),
+    );
+  }
+
+  /**
+   * Returns a comparator for a single condition kind.
+   * Uses RECOVERY_CONDITION_COMPARATOR_BY_KIND from the types module.
+   */
+  public getComparatorForKind(kind: RecoveryConditionKind): RecoveryConditionComparator {
+    return RECOVERY_CONDITION_COMPARATOR_BY_KIND[kind];
+  }
+
+  /**
+   * Computes a 0–1 proximity score for each authored structured recovery
+   * condition against the current snapshot.
+   *
+   * A score of 1.0 means the condition is currently passing or exactly at
+   * threshold. A score of 0.0 means the condition is maximally far from
+   * passing.
+   *
+   * Proximity is comparator-aware:
+   * - ANY_IN_SET: fraction of required tokens present
+   * - NUMERIC_AT_LEAST: actual / required (clamped to 1)
+   * - NUMERIC_AT_MOST: 1 - max(actual - required, 0) / max(actual + 1, 1)
+   * - TIER_AT_MOST: 1 if passing, 0 if failing (discrete)
+   */
+  public computeConditionProximities(
+    template: CascadeTemplate,
+    snapshot: RunStateSnapshot,
+  ): readonly Readonly<{
+    readonly conditionIndex: number;
+    readonly kind: RecoveryConditionKind;
+    readonly comparator: RecoveryConditionComparator;
+    readonly proximity: number;
+    readonly status: RecoveryConditionStatus;
+    readonly explanation: string;
+  }>[] {
+    return Object.freeze(
+      template.recovery.map((condition, index) => {
+        const kind = condition.kind as RecoveryConditionKind;
+        const comparator = RECOVERY_CONDITION_COMPARATOR_BY_KIND[kind];
+        const evaluation = this.evaluateCondition(condition, snapshot);
+        const proximity = this.computeSingleConditionProximity(condition, snapshot, evaluation);
+
+        return {
+          conditionIndex: index,
+          kind,
+          comparator,
+          proximity,
+          status: evaluation.status,
+          explanation: evaluation.explanation,
+        };
+      }),
+    );
+  }
+
+  /**
+   * Computes a scalar proximity score [0, 1] for a single condition relative
+   * to the current snapshot. Used internally by `computeConditionProximities`
+   * and the ML feature vector builder.
+   */
+  private computeSingleConditionProximity(
+    condition: RecoveryCondition,
+    snapshot: RunStateSnapshot,
+    evaluation: RecoveryConditionEvaluation,
+  ): number {
+    if (evaluation.status === 'PASSED') {
+      return 1.0;
+    }
+
+    const comparator = RECOVERY_CONDITION_COMPARATOR_BY_KIND[condition.kind as RecoveryConditionKind];
+
+    switch (condition.kind) {
+      case 'CARD_TAG_ANY':
+      case 'LAST_PLAYED_TAG_ANY': {
+        if (condition.tags.length === 0) {
+          return 0;
+        }
+        const required = this.normalizeList(condition.tags);
+        const bag = this.buildConditionTokenBag(condition, snapshot);
+        const matched = required.filter((tag) => bag.has(tag)).length;
+        return matched / required.length;
+      }
+
+      case 'CASH_MIN': {
+        const actual = snapshot.economy.cash;
+        if (condition.amount <= 0) {
+          return 1.0;
+        }
+        return Math.min(1, Math.max(0, actual / condition.amount));
+      }
+
+      case 'WEAKEST_SHIELD_RATIO_MIN': {
+        const actual = snapshot.shield.weakestLayerRatio;
+        if (condition.ratio <= 0) {
+          return 1.0;
+        }
+        return Math.min(1, Math.max(0, actual / condition.ratio));
+      }
+
+      case 'ALL_SHIELDS_RATIO_MIN': {
+        if (snapshot.shield.layers.length === 0) {
+          return 0;
+        }
+        const totalProximity = snapshot.shield.layers.reduce(
+          (sum, layer) => sum + Math.min(1, Math.max(0, layer.integrityRatio / condition.ratio)),
+          0,
+        );
+        return totalProximity / snapshot.shield.layers.length;
+      }
+
+      case 'TRUST_ANY_MIN': {
+        const entries = Object.values(snapshot.modeState.trustScores);
+        if (entries.length === 0 || condition.score <= 0) {
+          return 0;
+        }
+        const bestProximity = Math.max(...entries.map((v) => Math.min(1, Math.max(0, v / condition.score))));
+        return bestProximity;
+      }
+
+      case 'HEAT_MAX': {
+        const actual = snapshot.economy.haterHeat;
+        if (actual <= condition.amount) {
+          return 1.0;
+        }
+        const excess = actual - condition.amount;
+        const scale = Math.max(actual, 1);
+        return Math.max(0, 1 - excess / scale);
+      }
+
+      case 'PRESSURE_NOT_ABOVE': {
+        return this.tierRank(snapshot.pressure.tier) <= this.tierRank(condition.tier) ? 1.0 : 0.0;
+      }
+
+      default: {
+        void comparator;
+        return 0;
+      }
+    }
+  }
+
+  /**
+   * Builds a token set for ANY_IN_SET condition proximity scoring.
+   */
+  private buildConditionTokenBag(
+    condition: RecoveryCondition,
+    snapshot: RunStateSnapshot,
+  ): Set<string> {
+    const bag = new Set<string>();
+
+    if (condition.kind === 'CARD_TAG_ANY') {
+      for (const card of snapshot.cards.hand) {
+        for (const token of this.describeCard(card).allSearchTokens) {
+          bag.add(token);
+        }
+      }
+    } else if (condition.kind === 'LAST_PLAYED_TAG_ANY') {
+      for (const token of this.normalizeList(snapshot.cards.lastPlayed)) {
+        bag.add(token);
+      }
+    }
+
+    return bag;
+  }
+
+  /**
+   * Computes an ML-oriented recovery readiness score for a given chain.
+   *
+   * Score composition:
+   * - Structured condition proximity average (weighted 0.7)
+   * - Legacy tag coverage ratio (weighted 0.3)
+   * - Output clamped to [0, 1]
+   *
+   * A score of 1.0 means the chain is fully recovered or recovery conditions
+   * are maximally satisfied. A score near 0 means recovery is far off.
+   *
+   * For positive chains, always returns 0 (positive chains never recover).
+   */
+  public computeRecoveryReadinessScore(
+    chain: CascadeChainInstance,
+    snapshot: RunStateSnapshot,
+    template: CascadeTemplate,
+  ): number {
+    if (chain.positive) {
+      return 0;
+    }
+
+    const proximities = this.computeConditionProximities(template, snapshot);
+    const avgStructuredProximity =
+      proximities.length > 0
+        ? proximities.reduce((sum, p) => sum + p.proximity, 0) / proximities.length
+        : 0;
+
+    const normalizedRecoveryTags = this.getNormalizedRecoveryTags(chain, template);
+    const legacyBag = this.buildLegacyTokenBag(snapshot);
+    const indexed = this.indexLegacyTokenBag(legacyBag);
+    const legacyCoverage =
+      normalizedRecoveryTags.length > 0
+        ? normalizedRecoveryTags.filter((tag) => indexed.has(tag)).length /
+          normalizedRecoveryTags.length
+        : 0;
+
+    const hasStructured = template.recovery.length > 0;
+    const hasLegacy = normalizedRecoveryTags.length > 0;
+
+    if (!hasStructured && !hasLegacy) {
+      return 0;
+    }
+
+    if (hasStructured && !hasLegacy) {
+      return Math.min(1, avgStructuredProximity);
+    }
+
+    if (!hasStructured && hasLegacy) {
+      return Math.min(1, legacyCoverage);
+    }
+
+    return Math.min(1, avgStructuredProximity * 0.7 + legacyCoverage * 0.3);
+  }
+
+  /**
+   * Computes a fixed-length 12-element ML feature vector for recovery analysis.
+   *
+   * Dimension layout:
+   *   [0]  cash proximity (CASH_MIN conditions averaged; 0 if none authored)
+   *   [1]  weakest shield proximity (WEAKEST_SHIELD_RATIO_MIN; 0 if not authored)
+   *   [2]  all shields avg proximity (ALL_SHIELDS_RATIO_MIN; 0 if not authored)
+   *   [3]  trust any proximity (TRUST_ANY_MIN; 0 if not authored)
+   *   [4]  heat proximity (HEAT_MAX; 0 if not authored)
+   *   [5]  pressure proximity (PRESSURE_NOT_ABOVE; 0 if not authored)
+   *   [6]  hand tag any proximity (CARD_TAG_ANY; 0 if not authored)
+   *   [7]  last played tag proximity (LAST_PLAYED_TAG_ANY; 0 if not authored)
+   *   [8]  overall readiness score
+   *   [9]  structured condition count normalized to [0, 1] over max 8 kinds
+   *   [10] legacy recovery tag count normalized to [0, 1] over max 16 tags
+   *   [11] has any recovery route (0 or 1)
+   *
+   * All values are in [0, 1]. Safe for direct use as neural network input.
+   */
+  public computeMLRecoveryFeatureVector(
+    chain: CascadeChainInstance,
+    snapshot: RunStateSnapshot,
+    template: CascadeTemplate,
+  ): readonly number[] {
+    if (chain.positive) {
+      return Object.freeze(new Array(12).fill(0) as number[]);
+    }
+
+    const proximities = this.computeConditionProximities(template, snapshot);
+
+    const pickProximity = (kind: RecoveryConditionKind): number => {
+      const entries = proximities.filter((p) => p.kind === kind);
+      if (entries.length === 0) {
+        return 0;
+      }
+      return entries.reduce((sum, p) => sum + p.proximity, 0) / entries.length;
+    };
+
+    const readiness = this.computeRecoveryReadinessScore(chain, snapshot, template);
+    const normalizedTags = this.getNormalizedRecoveryTags(chain, template);
+    const hasAny = this.hasAnyRecoveryRoute(chain, template) ? 1 : 0;
+
+    return Object.freeze([
+      pickProximity('CASH_MIN'),
+      pickProximity('WEAKEST_SHIELD_RATIO_MIN'),
+      pickProximity('ALL_SHIELDS_RATIO_MIN'),
+      pickProximity('TRUST_ANY_MIN'),
+      pickProximity('HEAT_MAX'),
+      pickProximity('PRESSURE_NOT_ABOVE'),
+      pickProximity('CARD_TAG_ANY'),
+      pickProximity('LAST_PLAYED_TAG_ANY'),
+      readiness,
+      Math.min(1, template.recovery.length / 8),
+      Math.min(1, normalizedTags.length / 16),
+      hasAny,
+    ]);
+  }
+
+  /**
+   * Evaluates a batch of (chain, template) pairs against a single snapshot.
+   *
+   * Returns one `RecoveryEvaluationReport` per entry. The reports are ordered
+   * to match the input array order.
+   *
+   * Useful for:
+   * - Dashboard rendering of all active chains at once
+   * - ML batch inference
+   * - Replay tooling that needs recovery state for every active chain
+   */
+  public getBatchEvaluations(
+    entries: readonly Readonly<{
+      readonly chain: CascadeChainInstance;
+      readonly template: CascadeTemplate;
+    }>[],
+    snapshot: RunStateSnapshot,
+  ): readonly RecoveryEvaluationReport[] {
+    return Object.freeze(
+      entries.map(({ chain, template }) => this.evaluate(chain, snapshot, template)),
+    );
+  }
+
+  /**
+   * Evaluates whether recovery readiness has improved between two snapshots.
+   *
+   * Returns `true` if the readiness score in `after` is higher than in `before`.
+   * Safe to use in tight tick loops.
+   */
+  public hasRecoveryImproved(
+    chain: CascadeChainInstance,
+    before: RunStateSnapshot,
+    after: RunStateSnapshot,
+    template: CascadeTemplate,
+  ): boolean {
+    const scoreBefore = this.computeRecoveryReadinessScore(chain, before, template);
+    const scoreAfter = this.computeRecoveryReadinessScore(chain, after, template);
+    return scoreAfter > scoreBefore;
+  }
+
+  /**
+   * Computes a per-condition trend analysis between two consecutive snapshots.
+   *
+   * Uses RECOVERY_CONDITION_COMPARATOR_BY_KIND to determine the delta direction
+   * for each condition. Returns a trend entry per authored condition.
+   *
+   * Trend values:
+   * - IMPROVING: proximity increased by > 0.02
+   * - STABLE: proximity change is within ±0.02
+   * - WORSENING: proximity decreased by > 0.02
+   */
+  public computeRecoveryTrend(
+    chain: CascadeChainInstance,
+    before: RunStateSnapshot,
+    after: RunStateSnapshot,
+    template: CascadeTemplate,
+  ): readonly Readonly<{
+    readonly conditionIndex: number;
+    readonly kind: RecoveryConditionKind;
+    readonly comparator: RecoveryConditionComparator;
+    readonly proximityBefore: number;
+    readonly proximityAfter: number;
+    readonly delta: number;
+    readonly trend: 'IMPROVING' | 'STABLE' | 'WORSENING';
+  }>[] {
+    if (chain.positive) {
+      return Object.freeze([]);
+    }
+
+    const beforeProximities = this.computeConditionProximities(template, before);
+    const afterProximities = this.computeConditionProximities(template, after);
+
+    return Object.freeze(
+      template.recovery.map((condition, index) => {
+        const kind = condition.kind as RecoveryConditionKind;
+        const comparator = RECOVERY_CONDITION_COMPARATOR_BY_KIND[kind];
+        const proximityBefore = beforeProximities[index]?.proximity ?? 0;
+        const proximityAfter = afterProximities[index]?.proximity ?? 0;
+        const delta = proximityAfter - proximityBefore;
+
+        const TREND_THRESHOLD = 0.02;
+        const trend: 'IMPROVING' | 'STABLE' | 'WORSENING' =
+          delta > TREND_THRESHOLD
+            ? 'IMPROVING'
+            : delta < -TREND_THRESHOLD
+            ? 'WORSENING'
+            : 'STABLE';
+
+        return {
+          conditionIndex: index,
+          kind,
+          comparator,
+          proximityBefore,
+          proximityAfter,
+          delta,
+          trend,
+        };
+      }),
+    );
+  }
+
+  /**
+   * Returns a human-readable gap summary describing how far the snapshot is
+   * from satisfying each authored recovery condition.
+   *
+   * Useful for:
+   * - Chat layer "what would help recover this chain" narration
+   * - Debug tooling / operator dashboards
+   * - Hint systems that guide player action toward recovery
+   */
+  public getRecoveryGapSummary(
+    template: CascadeTemplate,
+    snapshot: RunStateSnapshot,
+  ): string {
+    if (template.recovery.length === 0) {
+      return 'No structured recovery conditions authored.';
+    }
+
+    const proximities = this.computeConditionProximities(template, snapshot);
+    const gaps = proximities
+      .filter((p) => p.proximity < 1.0)
+      .map((p) => {
+        const pct = Math.round(p.proximity * 100);
+        return `${p.kind} [${pct}% satisfied] — ${p.explanation}`;
+      });
+
+    if (gaps.length === 0) {
+      return 'All structured conditions satisfied.';
+    }
+
+    return `${gaps.length} condition(s) not yet satisfied:\n${gaps.join('\n')}`;
+  }
+
+  /**
+   * Computes the canonical recovery condition status for a single condition
+   * evaluated against the given snapshot.
+   *
+   * Maps the internal evaluation status to the types.ts canonical vocabulary:
+   * MATCHED / UNMATCHED / NOT_APPLICABLE / EMPTY_INPUT / INVALID
+   */
+  public getCanonicalConditionStatus(
+    condition: RecoveryCondition,
+    snapshot: RunStateSnapshot,
+  ): CanonicalRecoveryStatus {
+    const evaluation = this.evaluateCondition(condition, snapshot);
+    return this.mapToCanonicalStatus(evaluation.status);
+  }
+
+  /**
+   * Returns a full structured recovery audit for a template against a snapshot.
+   *
+   * Each entry includes:
+   * - condition kind and index
+   * - local status (PASSED/FAILED)
+   * - canonical status (MATCHED/UNMATCHED)
+   * - comparator type from RECOVERY_CONDITION_COMPARATOR_BY_KIND
+   * - proximity score
+   * - explanation text
+   *
+   * Suitable for:
+   * - Full audit trail in proof generation
+   * - Operator dashboards
+   * - Replay annotation
+   */
+  public getFullRecoveryAudit(
+    template: CascadeTemplate,
+    snapshot: RunStateSnapshot,
+  ): readonly Readonly<{
+    readonly conditionIndex: number;
+    readonly kind: RecoveryConditionKind;
+    readonly comparator: RecoveryConditionComparator;
+    readonly localStatus: RecoveryConditionStatus;
+    readonly canonicalStatus: CanonicalRecoveryStatus;
+    readonly proximity: number;
+    readonly explanation: string;
+  }>[] {
+    return Object.freeze(
+      template.recovery.map((condition, index) => {
+        const kind = condition.kind as RecoveryConditionKind;
+        const comparator = RECOVERY_CONDITION_COMPARATOR_BY_KIND[kind];
+        const evaluation = this.evaluateCondition(condition, snapshot);
+        const proximity = this.computeSingleConditionProximity(condition, snapshot, evaluation);
+        const canonicalStatus = this.mapToCanonicalStatus(evaluation.status);
+
+        return {
+          conditionIndex: index,
+          kind,
+          comparator,
+          localStatus: evaluation.status,
+          canonicalStatus,
+          proximity,
+          explanation: evaluation.explanation,
+        };
+      }),
+    );
+  }
+
+  /**
+   * Returns whether the snapshot state is sufficient to satisfy at least one
+   * NUMERIC_AT_LEAST condition in the template. Used to quickly gate recovery
+   * hint generation without evaluating the full condition set.
+   */
+  public hasAnyNumericAtLeastConditionMet(
+    template: CascadeTemplate,
+    snapshot: RunStateSnapshot,
+  ): boolean {
+    const numericKinds: readonly RecoveryConditionKind[] = [
+      'CASH_MIN',
+      'WEAKEST_SHIELD_RATIO_MIN',
+      'ALL_SHIELDS_RATIO_MIN',
+      'TRUST_ANY_MIN',
+    ];
+
+    return template.recovery.some((condition) => {
+      if (!numericKinds.includes(condition.kind as RecoveryConditionKind)) {
+        return false;
+      }
+      const comparator = RECOVERY_CONDITION_COMPARATOR_BY_KIND[condition.kind as RecoveryConditionKind];
+      if (comparator !== 'NUMERIC_AT_LEAST') {
+        return false;
+      }
+      const evaluation = this.evaluateCondition(condition, snapshot);
+      return evaluation.status === 'PASSED';
+    });
+  }
+
+  /**
+   * Returns a count breakdown of how many conditions are passing, failing, and
+   * at each proximity tier (<25%, 25-75%, >75%) for the given template.
+   *
+   * Useful for dashboard metrics and ML reward shaping inputs.
+   */
+  public getRecoveryProgressionStats(
+    template: CascadeTemplate,
+    snapshot: RunStateSnapshot,
+  ): Readonly<{
+    readonly totalConditions: number;
+    readonly passingCount: number;
+    readonly failingCount: number;
+    readonly nearMissCount: number;
+    readonly lowProximityCount: number;
+    readonly averageProximity: number;
+    readonly allPassing: boolean;
+  }> {
+    const proximities = this.computeConditionProximities(template, snapshot);
+
+    if (proximities.length === 0) {
+      return Object.freeze({
+        totalConditions: 0,
+        passingCount: 0,
+        failingCount: 0,
+        nearMissCount: 0,
+        lowProximityCount: 0,
+        averageProximity: 0,
+        allPassing: false,
+      });
+    }
+
+    const passingCount = proximities.filter((p) => p.proximity >= 1.0).length;
+    const nearMissCount = proximities.filter((p) => p.proximity >= 0.75 && p.proximity < 1.0).length;
+    const lowProximityCount = proximities.filter((p) => p.proximity < 0.25).length;
+    const failingCount = proximities.length - passingCount;
+    const averageProximity =
+      proximities.reduce((sum, p) => sum + p.proximity, 0) / proximities.length;
+
+    return Object.freeze({
+      totalConditions: proximities.length,
+      passingCount,
+      failingCount,
+      nearMissCount,
+      lowProximityCount,
+      averageProximity,
+      allPassing: passingCount === proximities.length,
+    });
   }
 }

@@ -53,3 +53,33 @@ export * as ChaseALegendMode from '../modes/chase_a_legend_mode';
  *   const service  = new Cards.CardLegalityService(registry);
  */
 export * as Cards from './cards';
+
+/**
+ * Cascade subsystem — chain registry, queue manager, recovery checker,
+ * positive tracker, template validator, and the CascadeSubsystem wiring hub.
+ *
+ * Namespaced to prevent TS2308 collisions with any future top-level barrel
+ * additions. All ML/DL entry points are available under this namespace:
+ *
+ *   import { Cascade } from '../../engine';
+ *   const sub = new Cascade.CascadeSubsystem();
+ *   const bundle = sub.extractMLBundle(snapshot, templates);
+ *   const tensor = sub.extractDLInputTensor(snapshot, templates);
+ */
+export * as Cascade from './cascade';
+
+/**
+ * Chat subsystem — the authoritative backend chat lane.
+ *
+ * Covers: adapters (battle/run/multiplayer/economy), combat (boss fights,
+ * attack windows, telegraphs, counter resolution), transcript authority,
+ * rate policy, moderation, proof chain, memory, intelligence, continuity,
+ * experience, and rewards.
+ *
+ * All ML/DL entry points for the chat lane are available under this namespace:
+ *
+ *   import { Chat } from '../../engine';
+ *   const suite = new Chat.Adapters.AdapterSuite(opts);
+ *   const projection = policy.project(request);
+ */
+export * as Chat from './chat';

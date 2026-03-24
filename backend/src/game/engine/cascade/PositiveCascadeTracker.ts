@@ -15,7 +15,13 @@ import type {
   DecisionRecord,
   RunStateSnapshot,
 } from '../core/RunStateSnapshot';
-import type { CascadeTemplateId } from './types';
+import {
+  POSITIVE_CASCADE_EVALUATION_STATES,
+} from './types';
+import type {
+  CascadeTemplateId,
+  PositiveCascadeEvaluationState,
+} from './types';
 
 type PositiveCascadeId = Extract<CascadeTemplateId, 'MOMENTUM_ENGINE' | 'COMEBACK_SURGE'>;
 type ModeCode = RunStateSnapshot['mode'];
@@ -1625,5 +1631,375 @@ export class PositiveCascadeTracker {
 
   private isPositiveCascadeId(templateId: string): templateId is PositiveCascadeId {
     return templateId === 'MOMENTUM_ENGINE' || templateId === 'COMEBACK_SURGE';
+  }
+
+  // ---------------------------------------------------------------------------
+  // ML Momentum Projection & Canonical State Analytics
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Returns the canonical vocabulary of positive cascade evaluation states as
+   * exported by the types module.
+   *
+   * Covers: ELIGIBLE, INELIGIBLE, ALREADY_ACTIVE, ALREADY_UNLOCKED, NOT_APPLICABLE
+   *
+   * Use to validate authored state references or enumerate all valid UI states.
+   */
+  public listSupportedEvaluationStates(): readonly PositiveCascadeEvaluationState[] {
+    return POSITIVE_CASCADE_EVALUATION_STATES;
+  }
+
+  /**
+   * Returns the canonical `PositiveCascadeEvaluationState` for a given template
+   * based on the current snapshot.
+   *
+   * Maps to canonical states from `POSITIVE_CASCADE_EVALUATION_STATES`:
+   * - ALREADY_ACTIVE: an active positive chain of this template already exists
+   * - ALREADY_UNLOCKED: tracked in positiveTrackers (one-shot consumed)
+   * - ELIGIBLE: inference says this would unlock
+   * - INELIGIBLE: score is below threshold or hard gate failed
+   * - NOT_APPLICABLE: templateId is not a known positive cascade id
+   */
+  public getEvaluationState(
+    snapshot: RunStateSnapshot,
+    templateId: string,
+  ): PositiveCascadeEvaluationState {
+    if (!this.isPositiveCascadeId(templateId)) {
+      return 'NOT_APPLICABLE';
+    }
+
+    const report = this.inferDetailed(snapshot);
+    const evaluation = report.templateEvaluations.find(
+      (entry) => entry.templateId === templateId,
+    );
+
+    if (!evaluation) {
+      return 'NOT_APPLICABLE';
+    }
+
+    if (evaluation.alreadyActive) {
+      return 'ALREADY_ACTIVE';
+    }
+
+    if (evaluation.alreadyUnlocked) {
+      return 'ALREADY_UNLOCKED';
+    }
+
+    if (evaluation.eligible) {
+      return 'ELIGIBLE';
+    }
+
+    return 'INELIGIBLE';
+  }
+
+  /**
+   * Returns a map of canonical evaluation states for all known positive cascade
+   * template IDs in a single pass.
+   */
+  public getAllEvaluationStates(
+    snapshot: RunStateSnapshot,
+  ): Readonly<Record<PositiveCascadeId, PositiveCascadeEvaluationState>> {
+    const report = this.inferDetailed(snapshot);
+
+    const result = {} as Record<PositiveCascadeId, PositiveCascadeEvaluationState>;
+    for (const templateId of POSITIVE_TEMPLATE_ORDER) {
+      const evaluation = report.templateEvaluations.find(
+        (entry) => entry.templateId === templateId,
+      );
+
+      if (!evaluation) {
+        result[templateId] = 'NOT_APPLICABLE';
+        continue;
+      }
+
+      if (evaluation.alreadyActive) {
+        result[templateId] = 'ALREADY_ACTIVE';
+      } else if (evaluation.alreadyUnlocked) {
+        result[templateId] = 'ALREADY_UNLOCKED';
+      } else if (evaluation.eligible) {
+        result[templateId] = 'ELIGIBLE';
+      } else {
+        result[templateId] = 'INELIGIBLE';
+      }
+    }
+
+    return Object.freeze(result);
+  }
+
+  /**
+   * Computes an ML feature vector for MOMENTUM_ENGINE unlock probability.
+   *
+   * Dimension layout (16 elements, all in [0, 1]):
+   *   [0]  incomeBuffer proximity (normalized over [0, 200])
+   *   [1]  cashBufferTicks proximity (normalized over [0, 6])
+   *   [2]  avgShieldRatio
+   *   [3]  weakestShieldRatio
+   *   [4]  netWorthRatio (normalized over [-0.5, 1.5])
+   *   [5]  heat gate proximity (inverted over [0, 100])
+   *   [6]  tension gate proximity (inverted over [0, 1])
+   *   [7]  pendingAttacks gate proximity (inverted over [0, 5])
+   *   [8]  negativeActiveChains gate proximity (inverted, 0 if any)
+   *   [9]  decisionAcceptanceRatio
+   *   [10] disciplineScore
+   *   [11] neutralizedBotRatio
+   *   [12] warnings gate proximity (inverted over [0, 5])
+   *   [13] score relative to threshold (score / threshold, clamped to 1)
+   *   [14] hardGatePassed (1 if all hard gates passed, 0 otherwise)
+   *   [15] already active or unlocked (1 if consumed, 0 if available)
+   */
+  public computeMomentumMLFeatureVector(snapshot: RunStateSnapshot): readonly number[] {
+    const report = this.inferDetailed(snapshot);
+    const m = report.metrics;
+    const evaluation = report.templateEvaluations.find(
+      (entry) => entry.templateId === 'MOMENTUM_ENGINE',
+    );
+
+    const clamp = (v: number): number => Math.max(0, Math.min(1, v));
+
+    return Object.freeze([
+      clamp(m.incomeBuffer / 200),
+      clamp(m.cashBufferTicks / 6),
+      clamp(m.avgShieldRatio),
+      clamp(m.weakestShieldRatio),
+      clamp((m.netWorthRatio + 0.5) / 2.0),
+      clamp(1 - m.heatNormalized),
+      clamp(1 - m.tension),
+      clamp(1 - m.pendingAttacks / 5),
+      m.negativeActiveChains === 0 ? 1 : 0,
+      clamp(m.decisionAcceptanceRatio),
+      clamp(m.disciplineScore),
+      clamp(m.neutralizedBotRatio),
+      clamp(1 - m.warnings / 5),
+      evaluation
+        ? clamp(evaluation.threshold > 0 ? evaluation.score / evaluation.threshold : 0)
+        : 0,
+      evaluation?.hardGatePassed ? 1 : 0,
+      evaluation && (evaluation.alreadyActive || evaluation.alreadyUnlocked) ? 1 : 0,
+    ]);
+  }
+
+  /**
+   * Computes an ML feature vector for COMEBACK_SURGE unlock probability.
+   *
+   * Dimension layout (16 elements, all in [0, 1]):
+   *   [0]  highPressureEvidenceScore
+   *   [1]  recoverySignalScore
+   *   [2]  avgShieldRatio (post-recovery)
+   *   [3]  weakestShieldRatio (post-recovery)
+   *   [4]  cashBufferTicks proximity
+   *   [5]  heat post-recovery gate proximity (inverted)
+   *   [6]  pendingAttacks gate proximity (inverted)
+   *   [7]  warnings gate proximity (inverted)
+   *   [8]  brokenOrCompletedChains proximity (normalized over [0, 4])
+   *   [9]  disciplineScore
+   *   [10] trustAverage proxy
+   *   [11] escalationRecencyTicks recency (inverted over [0, 20])
+   *   [12] resolvedChainRecencyTicks recency (inverted over [0, 20])
+   *   [13] score relative to threshold (score / threshold, clamped to 1)
+   *   [14] hardGatePassed (1 if all hard gates passed, 0 otherwise)
+   *   [15] already active or unlocked (1 if consumed, 0 if available)
+   */
+  public computeComebackMLFeatureVector(snapshot: RunStateSnapshot): readonly number[] {
+    const report = this.inferDetailed(snapshot);
+    const m = report.metrics;
+    const evaluation = report.templateEvaluations.find(
+      (entry) => entry.templateId === 'COMEBACK_SURGE',
+    );
+
+    const clamp = (v: number): number => Math.max(0, Math.min(1, v));
+    const recencyScore = (ticks: number | null, window: number): number =>
+      ticks === null ? 0 : clamp(1 - ticks / Math.max(window, 1));
+
+    return Object.freeze([
+      clamp(m.highPressureEvidenceScore),
+      clamp(m.recoverySignalScore),
+      clamp(m.avgShieldRatio),
+      clamp(m.weakestShieldRatio),
+      clamp(m.cashBufferTicks / 6),
+      clamp(1 - m.heatNormalized),
+      clamp(1 - m.pendingAttacks / 5),
+      clamp(1 - m.warnings / 5),
+      clamp((m.brokenChains + m.completedChains) / 4),
+      clamp(m.disciplineScore),
+      clamp(m.trustAverage),
+      recencyScore(m.escalationRecencyTicks, 20),
+      recencyScore(m.resolvedChainRecencyTicks, 20),
+      evaluation
+        ? clamp(evaluation.threshold > 0 ? evaluation.score / evaluation.threshold : 0)
+        : 0,
+      evaluation?.hardGatePassed ? 1 : 0,
+      evaluation && (evaluation.alreadyActive || evaluation.alreadyUnlocked) ? 1 : 0,
+    ]);
+  }
+
+  /**
+   * Projects unlock probability for all positive cascade templates as a
+   * [0, 1] score derived from the score/threshold ratio.
+   *
+   * A value of 1.0 means the template is eligible this tick.
+   * A value close to 1.0 means it's very close to the threshold.
+   * A value of 0 means either far below or already consumed.
+   */
+  public getUnlockProbabilityProjection(
+    snapshot: RunStateSnapshot,
+  ): Readonly<Record<PositiveCascadeId, number>> {
+    const report = this.inferDetailed(snapshot);
+
+    const result = {} as Record<PositiveCascadeId, number>;
+    for (const templateId of POSITIVE_TEMPLATE_ORDER) {
+      const evaluation = report.templateEvaluations.find(
+        (entry) => entry.templateId === templateId,
+      );
+
+      if (!evaluation) {
+        result[templateId] = 0;
+        continue;
+      }
+
+      if (evaluation.alreadyActive || evaluation.alreadyUnlocked) {
+        result[templateId] = 0;
+        continue;
+      }
+
+      if (!evaluation.hardGatePassed) {
+        result[templateId] = 0;
+        continue;
+      }
+
+      const probability =
+        evaluation.threshold > 0
+          ? Math.min(1, evaluation.score / evaluation.threshold)
+          : 0;
+
+      result[templateId] = probability;
+    }
+
+    return Object.freeze(result);
+  }
+
+  /**
+   * Evaluates multiple snapshots in batch and returns one inference report per
+   * entry. Useful for replay analysis, ML dataset generation, and
+   * multi-frame dashboards.
+   */
+  public getBatchInferenceReports(
+    snapshots: readonly RunStateSnapshot[],
+  ): readonly PositiveCascadeInferenceReport[] {
+    return Object.freeze(
+      snapshots.map((snapshot) => this.inferDetailed(snapshot)),
+    );
+  }
+
+  /**
+   * Detects whether unlock probability improved between two snapshots for each
+   * template. Returns a boolean map keyed by template ID.
+   *
+   * Useful for:
+   * - ML reward shaping (positive progress toward unlock)
+   * - UI hints ("your momentum is building")
+   * - Replay annotation
+   */
+  public hasUnlockImproved(
+    before: RunStateSnapshot,
+    after: RunStateSnapshot,
+  ): Readonly<Record<PositiveCascadeId, boolean>> {
+    const projectionBefore = this.getUnlockProbabilityProjection(before);
+    const projectionAfter = this.getUnlockProbabilityProjection(after);
+
+    const result = {} as Record<PositiveCascadeId, boolean>;
+    for (const templateId of POSITIVE_TEMPLATE_ORDER) {
+      result[templateId] = (projectionAfter[templateId] ?? 0) > (projectionBefore[templateId] ?? 0);
+    }
+
+    return Object.freeze(result);
+  }
+
+  /**
+   * Computes the score delta between two snapshots for each positive cascade
+   * template. A positive delta means progress toward unlock; negative means
+   * regression.
+   *
+   * Uses POSITIVE_CASCADE_EVALUATION_STATES to validate that the template is
+   * still in a state where delta tracking makes sense (ELIGIBLE or INELIGIBLE).
+   */
+  /**
+   * Returns a normalized [0, 1] representation of the core positive cascade
+   * metrics for a given snapshot. Suitable for ML pipelines that consume
+   * all metrics at once as a single input tensor.
+   *
+   * The metrics are the same fields from `PositiveCascadeMetrics`, normalized
+   * to the expected operational range. Fields that are already in [0, 1] are
+   * passed through directly.
+   */
+  public computeNormalizedMetrics(
+    snapshot: RunStateSnapshot,
+  ): Readonly<Record<string, number>> {
+    const report = this.inferDetailed(snapshot);
+    const m = report.metrics;
+    const clamp = (v: number): number => Math.max(0, Math.min(1, v));
+
+    return Object.freeze({
+      incomeBuffer: clamp(m.incomeBuffer / 200),
+      cashBufferTicks: clamp(m.cashBufferTicks / 6),
+      expenseCoverageTicks: clamp(m.expenseCoverageTicks / 8),
+      avgShieldRatio: clamp(m.avgShieldRatio),
+      weakestShieldRatio: clamp(m.weakestShieldRatio),
+      strongestShieldRatio: clamp(m.strongestShieldRatio),
+      stableShieldCount: clamp(m.stableShieldCount / 4),
+      recoveredShieldCount: clamp(m.recoveredShieldCount / 4),
+      breachedShieldCount: clamp(1 - m.breachedShieldCount / 4),
+      heat: clamp(1 - m.heatNormalized),
+      tension: clamp(1 - m.tension),
+      pendingAttacks: clamp(1 - m.pendingAttacks / 5),
+      negativeActiveChains: clamp(1 - m.negativeActiveChains / 4),
+      positiveActiveChains: clamp(m.positiveActiveChains / 2),
+      brokenChains: clamp(m.brokenChains / 4),
+      completedChains: clamp(m.completedChains / 4),
+      warnings: clamp(1 - m.warnings / 5),
+      decisionAcceptanceRatio: clamp(m.decisionAcceptanceRatio),
+      disciplineScore: clamp(m.disciplineScore),
+      trustPeak: clamp(m.trustPeak),
+      trustAverage: clamp(m.trustAverage),
+      neutralizedBotRatio: clamp(m.neutralizedBotRatio),
+      battleBudgetRatio: clamp(m.battleBudgetRatio),
+      highPressureEvidenceScore: clamp(m.highPressureEvidenceScore),
+      recoverySignalScore: clamp(m.recoverySignalScore),
+    });
+  }
+
+  public computeScoreDelta(
+    before: RunStateSnapshot,
+    after: RunStateSnapshot,
+  ): Readonly<Record<PositiveCascadeId, number>> {
+    const reportBefore = this.inferDetailed(before);
+    const reportAfter = this.inferDetailed(after);
+
+    const result = {} as Record<PositiveCascadeId, number>;
+
+    for (const templateId of POSITIVE_TEMPLATE_ORDER) {
+      const evalBefore = reportBefore.templateEvaluations.find(
+        (e) => e.templateId === templateId,
+      );
+      const evalAfter = reportAfter.templateEvaluations.find(
+        (e) => e.templateId === templateId,
+      );
+
+      const trackableStates: readonly PositiveCascadeEvaluationState[] =
+        POSITIVE_CASCADE_EVALUATION_STATES.filter(
+          (state) => state === 'ELIGIBLE' || state === 'INELIGIBLE',
+        );
+
+      const stateAfter = this.getEvaluationState(after, templateId);
+      const isTrackable = trackableStates.includes(stateAfter);
+
+      if (!isTrackable) {
+        result[templateId] = 0;
+        continue;
+      }
+
+      result[templateId] = (evalAfter?.score ?? 0) - (evalBefore?.score ?? 0);
+    }
+
+    return Object.freeze(result);
   }
 }

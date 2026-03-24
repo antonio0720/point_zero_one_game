@@ -2498,8 +2498,8 @@ export function getTimingOrder(): readonly TimingClass[] {
   return TIMING_ORDER;
 }
 
-/** Returns all mode timing doctrine entries. */
-export function getModeDoctrine(mode: string): readonly TimingClass[] {
+/** Returns all timing classes in the mode timing doctrine for a given mode. */
+export function getModeTimingDoctrine(mode: string): readonly TimingClass[] {
   return MODE_TIMING_DOCTRINE[mode] ?? (EMPTY_TIMINGS as readonly TimingClass[]);
 }
 
@@ -2533,7 +2533,7 @@ export const CARD_TIMING_VALIDATOR_MODULE_AUTHORITY = Object.freeze({
     'getCounterableAttackCategories',
     'getNegativeAttackCategories',
     'getTimingOrder',
-    'getModeDoctrine',
+    'getModeTimingDoctrine',
     'CARD_TIMING_VALIDATOR_MODULE_AUTHORITY',
   ] as const),
 });

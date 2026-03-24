@@ -2331,3 +2331,982 @@ export function explainCardsToMap(
 
   return Object.freeze(output);
 }
+
+/* ──────────────────────────────────────────────────────────────────────────────
+ * UX-focused scoring insight interfaces
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * A human-readable score tier label — what the user sees instead of a raw number.
+ */
+export type ScoreTierLabel =
+  | 'SIGNATURE'    // Top 5% for this mode — core doctrine card
+  | 'PREMIUM'      // Top 20% — strong mode fit
+  | 'SOLID'        // Top 50% — reliable pick
+  | 'AVERAGE'      // Middle tier — playable but not optimal
+  | 'WEAK'         // Below average — situational at best
+  | 'SUPPRESSED';  // Doctrine penalty makes this card a liability
+
+/**
+ * A detailed UX card insight row used for tooltips, hand state overlays,
+ * and narration surfaces.
+ */
+export interface CardModeInsight {
+  readonly definitionId: string;
+  readonly name: string;
+  readonly mode: ModeCode;
+  readonly scoreTier: ScoreTierLabel;
+  readonly finalScore: number;
+  readonly isPrimaryDeck: boolean;
+  readonly isSuppressedDeck: boolean;
+  readonly matchedPremiumTags: readonly CardTag[];
+  readonly matchedCautionTags: readonly CardTag[];
+  readonly isReactionCard: boolean;
+  readonly isPreferredTargeting: boolean;
+  readonly isPreferredDivergence: boolean;
+  readonly isPreferredCounterability: boolean;
+  readonly hasTimingBonus: boolean;
+  readonly hasCostPenalty: boolean;
+  readonly hasDecayPenalty: boolean;
+  readonly hasOverlayMutation: boolean;
+  readonly effectiveCost: number;
+  readonly narrativeLabel: string;
+  readonly tacticalHint: string;
+}
+
+/**
+ * Hand-level scoring summary used for the UX hand state header and chat narration.
+ */
+export interface HandScoringProfile {
+  readonly mode: ModeCode;
+  readonly totalCards: number;
+  readonly averageScore: number;
+  readonly scoreTierCounts: Readonly<Record<ScoreTierLabel, number>>;
+  readonly topCardId: string | null;
+  readonly topCardScore: number;
+  readonly weakestCardId: string | null;
+  readonly weakestCardScore: number;
+  readonly primaryDeckCount: number;
+  readonly suppressedDeckCount: number;
+  readonly premiumTagMatches: readonly CardTag[];
+  readonly cautionTagMatches: readonly CardTag[];
+  readonly overallHandStrength: 'STRONG' | 'BALANCED' | 'WEAK' | 'EMPTY';
+  readonly narrativeLabel: string;
+}
+
+/**
+ * Deck-level scoring health report — used for composition review and chat narrator.
+ */
+export interface DeckScoringHealthReport {
+  readonly mode: ModeCode;
+  readonly totalCards: number;
+  readonly scoreTierDistribution: Readonly<Record<ScoreTierLabel, number>>;
+  readonly averageScore: number;
+  readonly scoreSpread: { readonly min: number; readonly max: number; readonly mean: number; readonly median: number };
+  readonly primaryDeckCoverage: number;
+  readonly suppressedDeckLeakage: number;
+  readonly premiumTagCoverage: Readonly<Record<CardTag, number>>;
+  readonly reactionTimingCoverage: Readonly<Record<TimingClass, number>>;
+  readonly missingPrimaryDecks: readonly DeckType[];
+  readonly weaknessSummary: readonly string[];
+  readonly strengthSummary: readonly string[];
+  readonly overallGrade: 'A' | 'B' | 'C' | 'D' | 'F';
+}
+
+/**
+ * Per-scoring-axis contribution breakdown for detailed UX breakdown panels.
+ */
+export interface ScoringAxisContribution {
+  readonly axis: ScoringAxis;
+  readonly rawContribution: number;
+  readonly percentOfTotal: number;
+  readonly label: string;
+  readonly impactDirection: 'POSITIVE' | 'NEGATIVE' | 'NEUTRAL';
+}
+
+/**
+ * Complete scoring explanation with per-axis contributions and UX labels.
+ */
+export interface DetailedScoringExplanation {
+  readonly definitionId: string;
+  readonly mode: ModeCode;
+  readonly finalScore: number;
+  readonly scoreTier: ScoreTierLabel;
+  readonly axisContributions: readonly ScoringAxisContribution[];
+  readonly topContributors: readonly ScoringAxis[];
+  readonly topPenalties: readonly ScoringAxis[];
+  readonly narrativeSummary: string;
+}
+
+/* ──────────────────────────────────────────────────────────────────────────────
+ * Score tier classification
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+/** Score thresholds for tier classification by mode. */
+export const SCORE_TIER_THRESHOLDS: Readonly<Record<ModeCode, Readonly<Record<ScoreTierLabel, number>>>> =
+  Object.freeze({
+    solo: Object.freeze({
+      SIGNATURE: 420,
+      PREMIUM: 340,
+      SOLID: 260,
+      AVERAGE: 180,
+      WEAK: 100,
+      SUPPRESSED: -Infinity,
+    }),
+    pvp: Object.freeze({
+      SIGNATURE: 430,
+      PREMIUM: 350,
+      SOLID: 265,
+      AVERAGE: 185,
+      WEAK: 100,
+      SUPPRESSED: -Infinity,
+    }),
+    coop: Object.freeze({
+      SIGNATURE: 425,
+      PREMIUM: 345,
+      SOLID: 262,
+      AVERAGE: 182,
+      WEAK: 100,
+      SUPPRESSED: -Infinity,
+    }),
+    ghost: Object.freeze({
+      SIGNATURE: 435,
+      PREMIUM: 355,
+      SOLID: 270,
+      AVERAGE: 190,
+      WEAK: 105,
+      SUPPRESSED: -Infinity,
+    }),
+  });
+
+/**
+ * Classifies a card's final score into a human-readable tier label.
+ *
+ * Consumed by:
+ * - UX card frame tinting (SIGNATURE = gold, PREMIUM = silver, etc.)
+ * - AI planner tier-based filtering ("only consider PREMIUM+ cards for opening")
+ * - Chat narrator ("This is a Signature card for Ghost mode.")
+ */
+export function classifyScoreTier(
+  score: number,
+  mode: ModeCode,
+): ScoreTierLabel {
+  if (score < 0) {
+    return 'SUPPRESSED';
+  }
+  const thresholds = SCORE_TIER_THRESHOLDS[mode];
+  if (score >= thresholds.SIGNATURE) return 'SIGNATURE';
+  if (score >= thresholds.PREMIUM) return 'PREMIUM';
+  if (score >= thresholds.SOLID) return 'SOLID';
+  if (score >= thresholds.AVERAGE) return 'AVERAGE';
+  if (score >= thresholds.WEAK) return 'WEAK';
+  return 'SUPPRESSED';
+}
+
+/**
+ * Returns all cards in `SIGNATURE` or `PREMIUM` tier for a given mode.
+ * These are the "must-haves" for mode-native deck construction.
+ */
+export function listSignatureAndPremiumCards(
+  cards: readonly CardDefinition[],
+  mode: ModeCode,
+): readonly CardDefinition[] {
+  return freezeArray(
+    cards.filter((card) => {
+      const tier = classifyScoreTier(scoreCardForMode(card, mode), mode);
+      return tier === 'SIGNATURE' || tier === 'PREMIUM';
+    }),
+  );
+}
+
+/**
+ * Returns all cards in `SUPPRESSED` tier — cards the doctrine considers
+ * a net liability in the given mode. Useful for deck health warnings.
+ */
+export function listSuppressedCards(
+  cards: readonly CardDefinition[],
+  mode: ModeCode,
+): readonly CardDefinition[] {
+  return freezeArray(
+    cards.filter(
+      (card) => classifyScoreTier(scoreCardForMode(card, mode), mode) === 'SUPPRESSED',
+    ),
+  );
+}
+
+/* ──────────────────────────────────────────────────────────────────────────────
+ * Card mode insight builder
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * Builds a complete UX insight object for a single card in a given mode.
+ * This is the canonical "explain this card to the player" function.
+ *
+ * Consumed by:
+ * - Card tooltip / hover overlay
+ * - Hand state card row detail
+ * - Chat narrator ("Your Syndicate hand has 2 Signature cards right now.")
+ * - AI hand planner card-by-card scoring
+ */
+export function buildCardModeInsight(
+  card: CardDefinition,
+  mode: ModeCode,
+): CardModeInsight {
+  const breakdown = explainCardScoreForMode(card, mode);
+  const overlay = resolveModeOverlay(card, mode);
+  const effectiveTargeting = getEffectiveTargetingForMode(card, mode);
+  const effectiveDivergence = getEffectiveDivergencePotentialForMode(card, mode);
+  const scoreTier = classifyScoreTier(breakdown.finalScore, mode);
+  const doctrine = getModeDoctrine(mode);
+  const isPrimaryDeck = isPrimaryDeckForMode(mode, card.deckType);
+  const isSuppressedDeck = isSuppressedDeckForMode(mode, card.deckType);
+  const isPreferredTargetingFlag = isPreferredTargetingForMode(mode, effectiveTargeting);
+  const isPreferredDivergenceFlag = isPreferredDivergencePotentialForMode(mode, effectiveDivergence);
+  const isPreferredCounterabilityFlag = isPreferredCounterabilityForMode(mode, card.counterability);
+
+  const isReactionCard = getEffectiveTimingClassesForMode(card, mode)
+    .some((timing) => doctrine.reactionTimings.includes(timing));
+
+  const hasTimingBonus = breakdown.timingScore > 5;
+  const hasCostPenalty = breakdown.costPenalty > 3;
+  const hasDecayPenalty = breakdown.decayPenalty > 1;
+  const hasOverlayMutation =
+    overlay.costModifier !== 1 ||
+    overlay.effectModifier !== 1 ||
+    overlay.timingLock.length > 0 ||
+    overlay.targetingOverride !== undefined ||
+    overlay.divergencePotential !== undefined ||
+    Object.keys(overlay.tagWeights).length > 0;
+
+  const narrativeLabel = buildCardNarrativeLabel(card, mode, scoreTier, isPrimaryDeck, isSuppressedDeck);
+  const tacticalHint = buildCardTacticalHint(card, mode, breakdown, isReactionCard, isSuppressedDeck);
+
+  return Object.freeze({
+    definitionId: card.id,
+    name: card.name,
+    mode,
+    scoreTier,
+    finalScore: breakdown.finalScore,
+    isPrimaryDeck,
+    isSuppressedDeck,
+    matchedPremiumTags: breakdown.tagBreakdown.matchedPremiumTags,
+    matchedCautionTags: breakdown.tagBreakdown.matchedCautionTags,
+    isReactionCard,
+    isPreferredTargeting: isPreferredTargetingFlag,
+    isPreferredDivergence: isPreferredDivergenceFlag,
+    isPreferredCounterability: isPreferredCounterabilityFlag,
+    hasTimingBonus,
+    hasCostPenalty,
+    hasDecayPenalty,
+    hasOverlayMutation,
+    effectiveCost: getEffectiveCostForMode(card, mode),
+    narrativeLabel,
+    tacticalHint,
+  });
+}
+
+function buildCardNarrativeLabel(
+  card: CardDefinition,
+  mode: ModeCode,
+  tier: ScoreTierLabel,
+  isPrimary: boolean,
+  isSuppressed: boolean,
+): string {
+  const modeName = MODE_DOCTRINE_PROFILES[mode].codename;
+  if (tier === 'SIGNATURE' && isPrimary) {
+    return `${card.name} is a Signature ${modeName} card.`;
+  }
+  if (tier === 'PREMIUM') {
+    return `${card.name} is a strong pick for ${modeName}.`;
+  }
+  if (isSuppressed) {
+    return `${card.name} is suppressed in ${modeName} — consider benching it.`;
+  }
+  if (tier === 'SOLID') {
+    return `${card.name} is a solid ${modeName} choice.`;
+  }
+  if (tier === 'WEAK') {
+    return `${card.name} is below average for ${modeName}.`;
+  }
+  return `${card.name} is playable but not optimal in ${modeName}.`;
+}
+
+function buildCardTacticalHint(
+  card: CardDefinition,
+  mode: ModeCode,
+  breakdown: ModeCardScoreBreakdown,
+  isReactionCard: boolean,
+  isSuppressed: boolean,
+): string {
+  if (isSuppressed) {
+    return `${card.name} loses most of its value in the current mode — hold for a mode switch.`;
+  }
+  if (isReactionCard && breakdown.timingScore > 10) {
+    return `${card.name}: best played during a live reaction window for maximum impact.`;
+  }
+  if (breakdown.tagScore > breakdown.timingScore * 2) {
+    return `${card.name}: tag synergy is the primary value driver — combine with matching cards.`;
+  }
+  if (breakdown.overlayScore > 5) {
+    return `${card.name}: mode overlay enhances this card — its power scales with the current mode context.`;
+  }
+  if (breakdown.costPenalty > breakdown.tagScore) {
+    return `${card.name}: high cost relative to tag value — consider the budget impact before playing.`;
+  }
+  if (breakdown.modeBonus > 5) {
+    return `${card.name}: doctrine bonus active in ${mode} — punches above its base value here.`;
+  }
+  return `${card.name}: standard play — best used when the timing window naturally aligns.`;
+}
+
+/* ──────────────────────────────────────────────────────────────────────────────
+ * Hand scoring profile builder
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * Builds the full scoring profile for a hand of cards in a given mode.
+ *
+ * Consumed by:
+ * - UX hand header ("Your hand is STRONG right now — 3 Signature cards.")
+ * - AI planning: understand the full hand value before making moves
+ * - Chat narrator: summarize the hand state before each decision
+ */
+export function buildHandScoringProfile(
+  hand: readonly CardDefinition[],
+  mode: ModeCode,
+): HandScoringProfile {
+  if (hand.length === 0) {
+    return Object.freeze({
+      mode,
+      totalCards: 0,
+      averageScore: 0,
+      scoreTierCounts: Object.freeze({
+        SIGNATURE: 0,
+        PREMIUM: 0,
+        SOLID: 0,
+        AVERAGE: 0,
+        WEAK: 0,
+        SUPPRESSED: 0,
+      }),
+      topCardId: null,
+      topCardScore: 0,
+      weakestCardId: null,
+      weakestCardScore: 0,
+      primaryDeckCount: 0,
+      suppressedDeckCount: 0,
+      premiumTagMatches: Object.freeze([]),
+      cautionTagMatches: Object.freeze([]),
+      overallHandStrength: 'EMPTY',
+      narrativeLabel: 'Your hand is empty.',
+    });
+  }
+
+  const ranked = rankCardsForMode(hand, mode);
+  const tierCounts: Record<ScoreTierLabel, number> = {
+    SIGNATURE: 0,
+    PREMIUM: 0,
+    SOLID: 0,
+    AVERAGE: 0,
+    WEAK: 0,
+    SUPPRESSED: 0,
+  };
+
+  let totalScore = 0;
+  let primaryDeckCount = 0;
+  let suppressedDeckCount = 0;
+  const premiumTagSet = new Set<CardTag>();
+  const cautionTagSet = new Set<CardTag>();
+
+  for (const row of ranked) {
+    const tier = classifyScoreTier(row.breakdown.finalScore, mode);
+    tierCounts[tier] += 1;
+    totalScore += row.breakdown.finalScore;
+    if (isPrimaryDeckForMode(mode, row.definition.deckType)) primaryDeckCount++;
+    if (isSuppressedDeckForMode(mode, row.definition.deckType)) suppressedDeckCount++;
+    for (const tag of row.breakdown.tagBreakdown.matchedPremiumTags) premiumTagSet.add(tag);
+    for (const tag of row.breakdown.tagBreakdown.matchedCautionTags) cautionTagSet.add(tag);
+  }
+
+  const averageScore = round4(totalScore / ranked.length);
+  const topCard = ranked[0];
+  const weakestCard = ranked[ranked.length - 1];
+
+  const signatureCount = tierCounts.SIGNATURE + tierCounts.PREMIUM;
+  const weakCount = tierCounts.WEAK + tierCounts.SUPPRESSED;
+
+  let overallHandStrength: 'STRONG' | 'BALANCED' | 'WEAK' | 'EMPTY';
+  if (signatureCount >= Math.ceil(hand.length * 0.4)) {
+    overallHandStrength = 'STRONG';
+  } else if (weakCount >= Math.ceil(hand.length * 0.5)) {
+    overallHandStrength = 'WEAK';
+  } else {
+    overallHandStrength = 'BALANCED';
+  }
+
+  const modeName = MODE_DOCTRINE_PROFILES[mode].codename;
+  const narrativeLabel =
+    overallHandStrength === 'STRONG'
+      ? `Strong ${modeName} hand — ${signatureCount} high-value card${signatureCount !== 1 ? 's' : ''} in play.`
+      : overallHandStrength === 'WEAK'
+        ? `Weak ${modeName} hand — consider holding for a better window.`
+        : `Balanced ${modeName} hand — ${hand.length} cards across ${Object.keys(tierCounts).filter((k) => tierCounts[k as ScoreTierLabel] > 0).length} tiers.`;
+
+  return Object.freeze({
+    mode,
+    totalCards: hand.length,
+    averageScore,
+    scoreTierCounts: Object.freeze(tierCounts),
+    topCardId: topCard?.definition.id ?? null,
+    topCardScore: topCard?.breakdown.finalScore ?? 0,
+    weakestCardId: weakestCard?.definition.id ?? null,
+    weakestCardScore: weakestCard?.breakdown.finalScore ?? 0,
+    primaryDeckCount,
+    suppressedDeckCount,
+    premiumTagMatches: freezeArray([...premiumTagSet]),
+    cautionTagMatches: freezeArray([...cautionTagSet]),
+    overallHandStrength,
+    narrativeLabel,
+  });
+}
+
+/* ──────────────────────────────────────────────────────────────────────────────
+ * Deck scoring health report
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * Builds a deck health report grading the scoring quality of an entire deck
+ * against a given mode's doctrine.
+ *
+ * Consumed by:
+ * - Deck builder review panel
+ * - Liveops deck quality alerts
+ * - AI planner deck assessment before composition starts
+ */
+export function buildDeckScoringHealthReport(
+  cards: readonly CardDefinition[],
+  mode: ModeCode,
+): DeckScoringHealthReport {
+  const ranked = rankCardsForMode(cards, mode);
+  const spread = estimateModeScoreSpread(cards, mode);
+  const balance = diagnoseModeBalance(cards, mode);
+  const tierDist: Record<ScoreTierLabel, number> = {
+    SIGNATURE: 0,
+    PREMIUM: 0,
+    SOLID: 0,
+    AVERAGE: 0,
+    WEAK: 0,
+    SUPPRESSED: 0,
+  };
+  const tagCoverage: Partial<Record<CardTag, number>> = {};
+  const timingCoverage = buildEmptyTimingRecord(0);
+
+  for (const row of ranked) {
+    const tier = classifyScoreTier(row.breakdown.finalScore, mode);
+    tierDist[tier] += 1;
+    for (const tag of row.breakdown.tagBreakdown.matchedPremiumTags) {
+      tagCoverage[tag] = (tagCoverage[tag] ?? 0) + 1;
+    }
+    for (const timing of getEffectiveTimingClassesForMode(row.definition, mode)) {
+      timingCoverage[timing] += 1;
+    }
+  }
+
+  const doctrine = getModeDoctrine(mode);
+  const primaryDeckCoverage = doctrine.primaryDecks.filter(
+    (dt) => (balance.missingPrimaryDecks as readonly DeckType[]).indexOf(dt) === -1,
+  ).length;
+  const suppressedLeakage = (balance.suppressedDeckLeakage as readonly DeckType[]).length;
+
+  const weaknessSummary: string[] = [];
+  const strengthSummary: string[] = [];
+
+  if (balance.missingPrimaryDecks.length > 0) {
+    weaknessSummary.push(
+      `Missing primary decks: ${balance.missingPrimaryDecks.join(', ')}`,
+    );
+  }
+  if (suppressedLeakage > 0) {
+    weaknessSummary.push(
+      `${suppressedLeakage} suppressed deck type${suppressedLeakage > 1 ? 's' : ''} present — net liability.`,
+    );
+  }
+  if (balance.premiumTagGaps.length > 0) {
+    weaknessSummary.push(
+      `Missing premium tags: ${balance.premiumTagGaps.join(', ')}`,
+    );
+  }
+  if (tierDist.SUPPRESSED > cards.length * 0.15) {
+    weaknessSummary.push(
+      `${tierDist.SUPPRESSED} suppressed-tier cards (>${Math.round(tierDist.SUPPRESSED / cards.length * 100)}%) — trim doctrine liabilities.`,
+    );
+  }
+
+  if (tierDist.SIGNATURE + tierDist.PREMIUM > cards.length * 0.35) {
+    strengthSummary.push(
+      `${tierDist.SIGNATURE + tierDist.PREMIUM} Signature/Premium cards — strong doctrine alignment.`,
+    );
+  }
+  if (primaryDeckCoverage === doctrine.primaryDecks.length) {
+    strengthSummary.push('Full primary deck coverage — doctrine complete.');
+  }
+  if (balance.premiumTagGaps.length === 0) {
+    strengthSummary.push('All premium tags covered — tag synergy is complete.');
+  }
+
+  const signatureAndPremiumRatio = (tierDist.SIGNATURE + tierDist.PREMIUM) / Math.max(cards.length, 1);
+  const suppressedRatio = (tierDist.SUPPRESSED + tierDist.WEAK) / Math.max(cards.length, 1);
+
+  let overallGrade: 'A' | 'B' | 'C' | 'D' | 'F';
+  if (signatureAndPremiumRatio >= 0.4 && suppressedRatio < 0.1 && weaknessSummary.length === 0) {
+    overallGrade = 'A';
+  } else if (signatureAndPremiumRatio >= 0.3 && suppressedRatio < 0.2) {
+    overallGrade = 'B';
+  } else if (signatureAndPremiumRatio >= 0.2 && suppressedRatio < 0.3) {
+    overallGrade = 'C';
+  } else if (signatureAndPremiumRatio >= 0.1) {
+    overallGrade = 'D';
+  } else {
+    overallGrade = 'F';
+  }
+
+  const premiumCoverage: Partial<Record<CardTag, number>> = {};
+  for (const tag of doctrine.premiumTags) {
+    premiumCoverage[tag] = tagCoverage[tag] ?? 0;
+  }
+
+  return Object.freeze({
+    mode,
+    totalCards: cards.length,
+    scoreTierDistribution: Object.freeze(tierDist),
+    averageScore: round4(spread.mean),
+    scoreSpread: spread,
+    primaryDeckCoverage,
+    suppressedDeckLeakage: suppressedLeakage,
+    premiumTagCoverage: Object.freeze(premiumCoverage) as Readonly<Record<CardTag, number>>,
+    reactionTimingCoverage: Object.freeze(
+      Object.fromEntries(
+        doctrine.reactionTimings.map((t) => [t, timingCoverage[t]]),
+      ),
+    ) as Readonly<Record<TimingClass, number>>,
+    missingPrimaryDecks: balance.missingPrimaryDecks,
+    weaknessSummary: freezeArray(weaknessSummary),
+    strengthSummary: freezeArray(strengthSummary),
+    overallGrade,
+  });
+}
+
+/* ──────────────────────────────────────────────────────────────────────────────
+ * Detailed per-axis scoring explanation
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+/** Returns a human-readable label for a scoring axis. */
+export function getScoringAxisLabel(axis: ScoringAxis): string {
+  const LABELS: Readonly<Record<ScoringAxis, string>> = Object.freeze({
+    LEGALITY: 'Mode Legality',
+    RARITY: 'Card Rarity',
+    DECK: 'Deck Type',
+    DECK_FAMILY: 'Deck Family',
+    TAG: 'Tag Synergy',
+    OVERLAY: 'Mode Overlay',
+    TIMING: 'Timing Class',
+    TARGETING: 'Targeting',
+    COUNTERABILITY: 'Counterability',
+    DIVERGENCE_POTENTIAL: 'Divergence Potential',
+    EFFECT: 'Effect Magnitude',
+    AUTO_RESOLVE: 'Auto-Resolve',
+    DECAY: 'Decay Penalty',
+    COST: 'Cost Penalty',
+    MODE_BONUS: 'Mode Bonus',
+    MODE_PENALTY: 'Mode Penalty',
+  });
+  return LABELS[axis];
+}
+
+/**
+ * Builds a detailed per-axis scoring explanation for a card in a given mode.
+ * Each axis shows its raw contribution, percentage of the total, and direction.
+ *
+ * Consumed by:
+ * - Advanced card detail panel ("What makes this card score well here?")
+ * - AI planner feature importance ("which axis is driving the score?")
+ * - Dev/ops diagnostics
+ */
+export function buildDetailedScoringExplanation(
+  card: CardDefinition,
+  mode: ModeCode,
+): DetailedScoringExplanation {
+  const breakdown = explainCardScoreForMode(card, mode);
+  const scoreTier = classifyScoreTier(breakdown.finalScore, mode);
+
+  const axes: Array<{ axis: ScoringAxis; value: number }> = [
+    { axis: 'LEGALITY', value: breakdown.legalityScore },
+    { axis: 'RARITY', value: breakdown.rarityScore },
+    { axis: 'DECK', value: breakdown.deckPriorityScore },
+    { axis: 'DECK_FAMILY', value: breakdown.deckFamilyScore },
+    { axis: 'TAG', value: breakdown.tagScore },
+    { axis: 'OVERLAY', value: breakdown.overlayScore },
+    { axis: 'TIMING', value: breakdown.timingScore },
+    { axis: 'TARGETING', value: breakdown.targetingScore },
+    { axis: 'COUNTERABILITY', value: breakdown.counterabilityScore },
+    { axis: 'DIVERGENCE_POTENTIAL', value: breakdown.divergencePotentialScore },
+    { axis: 'EFFECT', value: breakdown.effectScore },
+    { axis: 'AUTO_RESOLVE', value: breakdown.autoResolveScore },
+    { axis: 'DECAY', value: -breakdown.decayPenalty },
+    { axis: 'COST', value: -breakdown.costPenalty },
+    { axis: 'MODE_BONUS', value: breakdown.modeBonus },
+    { axis: 'MODE_PENALTY', value: -breakdown.modePenalty },
+  ];
+
+  const totalAbsolute = axes.reduce((sum, a) => sum + Math.abs(a.value), 0);
+
+  const contributions: ScoringAxisContribution[] = axes.map((a) => ({
+    axis: a.axis,
+    rawContribution: round4(a.value),
+    percentOfTotal: totalAbsolute > 0 ? round2((Math.abs(a.value) / totalAbsolute) * 100) : 0,
+    label: getScoringAxisLabel(a.axis),
+    impactDirection: a.value > 0.01 ? 'POSITIVE' : a.value < -0.01 ? 'NEGATIVE' : 'NEUTRAL',
+  }));
+
+  const sorted = [...contributions].sort((a, b) => b.rawContribution - a.rawContribution);
+  const topContributors = sorted
+    .filter((c) => c.impactDirection === 'POSITIVE')
+    .slice(0, 3)
+    .map((c) => c.axis);
+  const topPenalties = sorted
+    .filter((c) => c.impactDirection === 'NEGATIVE')
+    .sort((a, b) => a.rawContribution - b.rawContribution)
+    .slice(0, 3)
+    .map((c) => c.axis);
+
+  const narrativeParts: string[] = [
+    `${card.name} scores ${round2(breakdown.finalScore)} in ${mode} (${scoreTier}).`,
+  ];
+  if (topContributors.length > 0) {
+    narrativeParts.push(
+      `Primary value from: ${topContributors.map(getScoringAxisLabel).join(', ')}.`,
+    );
+  }
+  if (topPenalties.length > 0) {
+    narrativeParts.push(
+      `Top penalties: ${topPenalties.map(getScoringAxisLabel).join(', ')}.`,
+    );
+  }
+
+  return Object.freeze({
+    definitionId: card.id,
+    mode,
+    finalScore: breakdown.finalScore,
+    scoreTier,
+    axisContributions: freezeArray(contributions),
+    topContributors: freezeArray(topContributors),
+    topPenalties: freezeArray(topPenalties),
+    narrativeSummary: narrativeParts.join(' '),
+  });
+}
+
+/* ──────────────────────────────────────────────────────────────────────────────
+ * Cross-mode comparison utilities
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * Scores a card in ALL four modes and returns a comparative map.
+ * Useful for showing "this card is best in Ghost, weak in PvP" at a glance.
+ */
+export function scoreCardAcrossAllModes(
+  card: CardDefinition,
+): Readonly<Record<ModeCode, number>> {
+  return Object.freeze({
+    solo: scoreCardForMode(card, 'solo'),
+    pvp: scoreCardForMode(card, 'pvp'),
+    coop: scoreCardForMode(card, 'coop'),
+    ghost: scoreCardForMode(card, 'ghost'),
+  });
+}
+
+/**
+ * Returns the mode in which a card scores highest.
+ * Used for "best mode" badge on card detail screens.
+ */
+export function getBestModeForCard(card: CardDefinition): ModeCode {
+  const scores = scoreCardAcrossAllModes(card);
+  let bestMode: ModeCode = 'solo';
+  let bestScore = scores.solo;
+
+  for (const mode of ['pvp', 'coop', 'ghost'] as ModeCode[]) {
+    if (scores[mode] > bestScore) {
+      bestScore = scores[mode];
+      bestMode = mode;
+    }
+  }
+
+  return bestMode;
+}
+
+/**
+ * Returns the mode in which a card scores lowest (most suppressed).
+ * Used for "avoid in" warning badges.
+ */
+export function getWorstModeForCard(card: CardDefinition): ModeCode {
+  const scores = scoreCardAcrossAllModes(card);
+  let worstMode: ModeCode = 'solo';
+  let worstScore = scores.solo;
+
+  for (const mode of ['pvp', 'coop', 'ghost'] as ModeCode[]) {
+    if (scores[mode] < worstScore) {
+      worstScore = scores[mode];
+      worstMode = mode;
+    }
+  }
+
+  return worstMode;
+}
+
+/**
+ * Returns the cross-mode score range (max - min) for a card.
+ * High range = mode-sensitive card. Low range = mode-agnostic.
+ */
+export function getCrossModeScoreRange(card: CardDefinition): number {
+  const scores = scoreCardAcrossAllModes(card);
+  const values = Object.values(scores);
+  return round4(Math.max(...values) - Math.min(...values));
+}
+
+/**
+ * Returns whether a card is "mode-versatile" — scores SOLID or above in all modes.
+ * Used for "all-modes" indicator in deck builder UI.
+ */
+export function isCardModeVersatile(card: CardDefinition): boolean {
+  for (const mode of ['solo', 'pvp', 'coop', 'ghost'] as ModeCode[]) {
+    const tier = classifyScoreTier(scoreCardForMode(card, mode), mode);
+    if (tier === 'WEAK' || tier === 'SUPPRESSED') {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Returns the cross-mode score ranking for a list of cards:
+ * sorted by average score across all four modes descending.
+ */
+export function rankCardsByCrossModeAverage(
+  cards: readonly CardDefinition[],
+): readonly RankedCardResult[] {
+  return freezeArray(
+    cards
+      .map((card) => {
+        const scores = scoreCardAcrossAllModes(card);
+        const avgScore = round4(
+          (scores.solo + scores.pvp + scores.coop + scores.ghost) / 4,
+        );
+        return {
+          definition: card,
+          breakdown: explainCardScoreForMode(card, 'solo'),
+          avgScore,
+        };
+      })
+      .sort((a, b) => b.avgScore - a.avgScore)
+      .map(({ definition, breakdown }) => ({ definition, breakdown })),
+  );
+}
+
+/* ──────────────────────────────────────────────────────────────────────────────
+ * Effect payload UX utilities
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * Returns a concise human-readable label describing a card's primary economic
+ * effect for use in tooltips and chat narration.
+ */
+export function describeEffectPayload(effect: EffectPayload, mode: ModeCode): string {
+  const parts: string[] = [];
+
+  if ((effect.cashDelta ?? 0) > 0) parts.push(`+$${effect.cashDelta} cash`);
+  if ((effect.cashDelta ?? 0) < 0) parts.push(`$${effect.cashDelta} cash`);
+  if ((effect.incomeDelta ?? 0) > 0) parts.push(`+$${effect.incomeDelta}/tick income`);
+  if ((effect.incomeDelta ?? 0) < 0) parts.push(`${effect.incomeDelta}/tick income`);
+  if ((effect.debtDelta ?? 0) !== 0) parts.push(`${(effect.debtDelta ?? 0) > 0 ? '+' : ''}${effect.debtDelta} debt`);
+  if ((effect.heatDelta ?? 0) !== 0) parts.push(`${(effect.heatDelta ?? 0) > 0 ? '+' : ''}${effect.heatDelta} heat`);
+  if ((effect.shieldDelta ?? 0) !== 0) parts.push(`${(effect.shieldDelta ?? 0) > 0 ? '+' : ''}${effect.shieldDelta} shield`);
+  if ((effect.trustDelta ?? 0) !== 0 && mode === 'coop') parts.push(`${(effect.trustDelta ?? 0) > 0 ? '+' : ''}${effect.trustDelta} trust`);
+  if ((effect.treasuryDelta ?? 0) !== 0 && mode === 'coop') parts.push(`${(effect.treasuryDelta ?? 0) > 0 ? '+' : ''}$${effect.treasuryDelta} treasury`);
+  if ((effect.battleBudgetDelta ?? 0) !== 0) parts.push(`${(effect.battleBudgetDelta ?? 0) > 0 ? '+' : ''}${effect.battleBudgetDelta} BB`);
+  if ((effect.divergenceDelta ?? 0) !== 0 && mode === 'ghost') parts.push(`${(effect.divergenceDelta ?? 0) > 0 ? '+' : ''}${round3(effect.divergenceDelta ?? 0)} divergence`);
+  if ((effect.counterIntelDelta ?? 0) !== 0) parts.push(`${(effect.counterIntelDelta ?? 0) > 0 ? '+' : ''}${effect.counterIntelDelta} CTI`);
+  if ((effect.injectCards?.length ?? 0) > 0) parts.push(`inject ${effect.injectCards?.length} card${(effect.injectCards?.length ?? 0) > 1 ? 's' : ''}`);
+  if ((effect.grantBadges?.length ?? 0) > 0) parts.push(`grant ${effect.grantBadges?.length} badge${(effect.grantBadges?.length ?? 0) > 1 ? 's' : ''}`);
+  if (effect.namedActionId) parts.push(`trigger ${effect.namedActionId}`);
+
+  if (parts.length === 0) {
+    return 'No primary economic effect.';
+  }
+
+  return parts.join(', ') + '.';
+}
+
+/**
+ * Returns a net wealth impact number for an effect payload — the signed sum
+ * of all economy-affecting fields weighted by their mode multipliers.
+ */
+export function computeNetWealthImpact(effect: EffectPayload, mode: ModeCode): number {
+  const breakdown = scoreEffectPayloadForMode(effect, mode);
+  const positiveFields: EffectFieldKey[] = ['cashDelta', 'incomeDelta', 'treasuryDelta', 'holdChargeDelta'];
+  const negativeFields: EffectFieldKey[] = ['debtDelta', 'expenseDelta'];
+  let net = 0;
+  for (const key of positiveFields) {
+    if ((effect[key] as number | undefined) !== undefined) {
+      net += breakdown.numericFields[key];
+    }
+  }
+  for (const key of negativeFields) {
+    if ((effect[key] as number | undefined) !== undefined) {
+      net -= breakdown.numericFields[key];
+    }
+  }
+  return round4(net);
+}
+
+/* ──────────────────────────────────────────────────────────────────────────────
+ * Deck type + tag coverage matrix
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * Returns a compact coverage matrix showing how many cards in a pool
+ * cover each (DeckType × CardTag) intersection.
+ * Used by deck builder health visualizations and AI composition review.
+ */
+export function buildDeckTagCoverageMatrix(
+  cards: readonly CardDefinition[],
+): Readonly<Record<DeckType, Readonly<Record<CardTag, number>>>> {
+  const matrix: Partial<Record<DeckType, Record<CardTag, number>>> = {};
+
+  for (const deckType of ALL_DECK_TYPES) {
+    matrix[deckType] = buildEmptyTagRecord(0);
+  }
+
+  for (const card of cards) {
+    const bucket = matrix[card.deckType];
+    if (!bucket) continue;
+    for (const tag of getKnownTagsForCard(card)) {
+      bucket[tag] += 1;
+    }
+  }
+
+  const frozen: Partial<Record<DeckType, Readonly<Record<CardTag, number>>>> = {};
+  for (const deckType of ALL_DECK_TYPES) {
+    frozen[deckType] = Object.freeze(matrix[deckType] ?? buildEmptyTagRecord(0));
+  }
+
+  return Object.freeze(frozen) as Readonly<Record<DeckType, Readonly<Record<CardTag, number>>>>;
+}
+
+/**
+ * Returns which scoring axes contribute the most value for a given mode.
+ * Useful for "what matters most in this mode?" AI coaching surface.
+ */
+export function getRankedScoringAxesForMode(mode: ModeCode): readonly ScoringAxis[] {
+  const tuning = getModeScoringTuning(mode);
+
+  const axisWeights: Array<{ axis: ScoringAxis; weight: number }> = [
+    { axis: 'TAG', weight: tuning.tagFactor },
+    { axis: 'TIMING', weight: tuning.timingFactor },
+    { axis: 'OVERLAY', weight: tuning.overlayFactor },
+    { axis: 'DECK_FAMILY', weight: tuning.deckFamilyFactor },
+    { axis: 'DIVERGENCE_POTENTIAL', weight: tuning.divergenceFactor },
+    { axis: 'TARGETING', weight: tuning.targetingFactor },
+    { axis: 'COUNTERABILITY', weight: tuning.counterabilityFactor },
+    { axis: 'RARITY', weight: tuning.rarityFactor / 20 },
+    { axis: 'DECK', weight: tuning.deckPriorityFactor },
+    { axis: 'EFFECT', weight: tuning.effectFactor },
+    { axis: 'AUTO_RESOLVE', weight: tuning.autoResolveFactor },
+  ];
+
+  return freezeArray(
+    axisWeights
+      .sort((a, b) => b.weight - a.weight)
+      .map((entry) => entry.axis),
+  );
+}
+
+/* ──────────────────────────────────────────────────────────────────────────────
+ * Module authority object
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+export const TYPES_MODULE_AUTHORITY = Object.freeze({
+  module: 'types',
+  version: '2.0.0',
+  surface: 'engine/cards/scoring-doctrine',
+  exports: Object.freeze([
+    'CardTag',
+    'DeckFamily',
+    'ScoringAxis',
+    'EffectFieldKey',
+    'ScoreTierLabel',
+    'ModeDoctrineProfile',
+    'ModeScoringTuning',
+    'ModeScoreSnapshot',
+    'EffectScoreBreakdown',
+    'TagScoreBreakdown',
+    'TimingScoreBreakdown',
+    'OverlayScoreBreakdown',
+    'ModeCardScoreBreakdown',
+    'ModeCardAuditRow',
+    'ModeDeckTypeSummary',
+    'ModeTagSummary',
+    'ModeBalanceDiagnostics',
+    'RankedCardResult',
+    'CardModeInsight',
+    'HandScoringProfile',
+    'DeckScoringHealthReport',
+    'ScoringAxisContribution',
+    'DetailedScoringExplanation',
+    'SCORE_TIER_THRESHOLDS',
+    'ALL_DECK_TYPES',
+    'ALL_CARD_TAGS',
+    'ALL_EFFECT_FIELD_KEYS',
+    'ALL_TIMING_CLASSES',
+    'ALL_TARGETING',
+    'ALL_COUNTERABILITIES',
+    'ALL_DIVERGENCE_POTENTIALS',
+    'MODE_TAG_WEIGHTS',
+    'RARITY_WEIGHTS',
+    'MODE_RARITY_WEIGHTS',
+    'MODE_DECK_PRIORITIES',
+    'MODE_TIMING_WEIGHTS',
+    'MODE_TARGETING_WEIGHTS',
+    'MODE_COUNTERABILITY_WEIGHTS',
+    'MODE_DIVERGENCE_WEIGHTS',
+    'EFFECT_FIELD_BASE_COEFFICIENTS',
+    'MODE_EFFECT_FIELD_MULTIPLIERS',
+    'MODE_SCORING_TUNING',
+    'MODE_DOCTRINE_PROFILES',
+    'DECK_FAMILY_BY_DECK_TYPE',
+    'DECK_TYPES_BY_FAMILY',
+    'round4',
+    'round3',
+    'round2',
+    'classifyScoreTier',
+    'scoreCardForMode',
+    'explainCardScoreForMode',
+    'compareCardsForMode',
+    'rankCardsForMode',
+    'buildCardModeInsight',
+    'buildHandScoringProfile',
+    'buildDeckScoringHealthReport',
+    'buildDetailedScoringExplanation',
+    'scoreCardAcrossAllModes',
+    'getBestModeForCard',
+    'getWorstModeForCard',
+    'getCrossModeScoreRange',
+    'isCardModeVersatile',
+    'rankCardsByCrossModeAverage',
+    'describeEffectPayload',
+    'computeNetWealthImpact',
+    'buildDeckTagCoverageMatrix',
+    'getRankedScoringAxesForMode',
+    'getScoringAxisLabel',
+    'listSignatureAndPremiumCards',
+    'listSuppressedCards',
+    'TYPES_MODULE_AUTHORITY',
+  ] as const),
+});

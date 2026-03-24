@@ -622,6 +622,246 @@ export const ChatTelegraphPolicyModule = {
 } as const;
 
 // ============================================================================
+// MARK: Type aliases — combat barrel compatibility
+// ============================================================================
+
+/** Alias: the "tuning" surface for the telegraph policy (same shape as options). */
+export type ChatTelegraphPolicyTuning = ChatTelegraphPolicyOptions;
+
+/** Alias: the request contract under the barrel-preferred name. */
+export type ChatTelegraphProjectionRequest = ChatTelegraphPolicyRequest;
+
+/** Alias: the witness projection under the barrel-preferred name. */
+export type ChatTelegraphWitnessPlan = ChatTelegraphWitnessProjection;
+
+/** Alias: the overlay cue under the barrel-preferred name. */
+export type ChatTelegraphOverlayPlan = ChatTelegraphOverlayCue;
+
+/**
+ * A counter hint surfaced in the telegraph projection.
+ * Tells the player which counter demand is relevant, at what urgency, and why.
+ */
+export interface ChatTelegraphCounterHint {
+  /** The attack id this hint is associated with. */
+  readonly attackId: string;
+  /** The counter demand the player should fulfill. */
+  readonly demand: ChatBossCounterDemand;
+  /** Urgency 0–1: how pressing this demand is right now. */
+  readonly urgency01: Score01;
+  /** Human-readable label for the demand (e.g. "Prove your claim"). */
+  readonly readableLabel: string;
+  /** Why this demand applies in the current context. */
+  readonly rationale: string;
+  /** The timing class (INSTANT, DELAYED, WINDOW_BOUND, etc.). */
+  readonly timing: ChatCounterTimingClass;
+  /** Priority 0–100 for ordering multiple simultaneous hints. */
+  readonly priority100: Score100;
+}
+
+// ============================================================================
+// MARK: Named constants — combat barrel compatibility
+// ============================================================================
+
+/**
+ * Default tuning values for the ChatTelegraphPolicy.
+ * Mirrors DEFAULT_OPTIONS but is exported for barrel consumers.
+ */
+export const DEFAULT_CHAT_TELEGRAPH_POLICY_TUNING: Required<
+  Omit<ChatTelegraphPolicyOptions, 'clock' | 'logger'>
+> = Object.freeze({
+  strongVisibilityFloor01: 0.62,
+  helperHauntFloor01: 0.36,
+  witnessEscalationFloor01: 0.52,
+  maintainPerRoomHistory: 180,
+  publicWitnessWeight01: 0.68,
+  dealRoomWitnessWeight01: 0.52,
+  silenceBiasWeight01: 0.58,
+  pressureBiasWeight01: 0.64,
+});
+
+/**
+ * Scene signatures for each attack class.
+ * Each entry carries a signatureId (the attack class), a description,
+ * and drama and pressure metadata for overlay and replay rendering.
+ */
+export const CHAT_TELEGRAPH_SCENE_SIGNATURES = Object.freeze([
+  Object.freeze({
+    signatureId: 'PUBLIC_SHAME' as ChatBossAttackClass,
+    sceneCode: 'PUBLIC_WITNESS_SURGE',
+    description: 'Witnesses flood in before the damage lands. The room is the amplifier.',
+    dramaWeight01: 0.88,
+    pressureMultiplier: 1.15,
+    notes: Object.freeze(['Best countered with a clean, visible reply that reclaims the frame.']),
+  }),
+  Object.freeze({
+    signatureId: 'QUOTE_TRAP' as ChatBossAttackClass,
+    sceneCode: 'MEMORY_WEAPON_PRIMED',
+    description: 'A prior statement is about to become a receipt. Every word is on record.',
+    dramaWeight01: 0.72,
+    pressureMultiplier: 1.08,
+    notes: Object.freeze(['Anchor replies to verified facts; loose words widen the lane.']),
+  }),
+  Object.freeze({
+    signatureId: 'PROOF_CHALLENGE' as ChatBossAttackClass,
+    sceneCode: 'PROOF_LANE_NARROWED',
+    description: 'The attack is narrowing acceptable replies to verifiable proof only.',
+    dramaWeight01: 0.76,
+    pressureMultiplier: 1.12,
+    notes: Object.freeze(['Proof-based counters resolve cleanly; everything else costs pressure.']),
+  }),
+  Object.freeze({
+    signatureId: 'SILENCE_BAIT' as ChatBossAttackClass,
+    sceneCode: 'SILENCE_AS_PRESSURE',
+    description: 'Delay itself is the incriminating move. Silence is authored as guilt.',
+    dramaWeight01: 0.68,
+    pressureMultiplier: 1.06,
+    notes: Object.freeze(['Sometimes the counter is to not reply at all — read the window class.']),
+  }),
+  Object.freeze({
+    signatureId: 'DEAL_ROOM_SQUEEZE' as ChatBossAttackClass,
+    sceneCode: 'PREDATORY_TIMING_ACTIVE',
+    description: 'Terms, time, and leverage are compressed together into a single snap window.',
+    dramaWeight01: 0.81,
+    pressureMultiplier: 1.22,
+    notes: Object.freeze(['Slow the pace. Predatory timing does half the work for the attacker.']),
+  }),
+  Object.freeze({
+    signatureId: 'CROWD_SIGNAL' as ChatBossAttackClass,
+    sceneCode: 'ROOM_ENERGY_DELEGATED',
+    description: 'Witness energy is the attack vector. The crowd is the weapon, not the words.',
+    dramaWeight01: 0.78,
+    pressureMultiplier: 1.10,
+    notes: Object.freeze(['Audience heat compounds on each missed beat — address the room, not just the attacker.']),
+  }),
+  Object.freeze({
+    signatureId: 'CASCADE_TRIGGER' as ChatBossAttackClass,
+    sceneCode: 'CASCADE_ECHO_RISK',
+    description: 'One failure can echo into several if the counter window is rushed.',
+    dramaWeight01: 0.90,
+    pressureMultiplier: 1.28,
+    notes: Object.freeze(['A measured reply that absorbs the first blow costs less than stopping the cascade later.']),
+  }),
+  Object.freeze({
+    signatureId: 'TAUNT_SPIKE' as ChatBossAttackClass,
+    sceneCode: 'SHARP_TILT_INCOMING',
+    description: 'A short, biting insult designed to force an immediate emotional reaction.',
+    dramaWeight01: 0.64,
+    pressureMultiplier: 1.04,
+    notes: Object.freeze(['Defuse or ignore; short reactive replies escalate the pressure cycle.']),
+  }),
+  Object.freeze({
+    signatureId: 'FALSE_RESPECT' as ChatBossAttackClass,
+    sceneCode: 'DEFERENCE_MASK_DETECTED',
+    description: 'Politeness is the mask. The attack is pressuring for concession behind courtesy.',
+    dramaWeight01: 0.58,
+    pressureMultiplier: 1.03,
+    notes: Object.freeze(['Check terms carefully; do not mistake polite framing for safety.']),
+  }),
+  Object.freeze({
+    signatureId: 'TIMEBOXED_DEMAND' as ChatBossAttackClass,
+    sceneCode: 'ARTIFICIAL_DEADLINE_SET',
+    description: 'An artificial deadline is imposed to force rushed choices under pressure.',
+    dramaWeight01: 0.70,
+    pressureMultiplier: 1.14,
+    notes: Object.freeze(['Verify terms before replying; the deadline is the tactic, not the reality.']),
+  }),
+  Object.freeze({
+    signatureId: 'SHIELD_CRACKER' as ChatBossAttackClass,
+    sceneCode: 'POSTURE_PROBE_ACTIVE',
+    description: 'The attack probes posture and prior claims for exploitable gaps.',
+    dramaWeight01: 0.74,
+    pressureMultiplier: 1.09,
+    notes: Object.freeze(['Guard credentials; avoid volunteering detail that widens the lane.']),
+  }),
+  Object.freeze({
+    signatureId: 'HELPER_DENIAL' as ChatBossAttackClass,
+    sceneCode: 'AID_SEVERANCE_ATTEMPT',
+    description: 'Potential helpers are being intimidated or isolated before they can act.',
+    dramaWeight01: 0.82,
+    pressureMultiplier: 1.18,
+    notes: Object.freeze(['Document the exchange to attract witnesses; re-enable aid channels when possible.']),
+  }),
+] as const);
+
+export type ChatTelegraphSceneSignatureId =
+  (typeof CHAT_TELEGRAPH_SCENE_SIGNATURES)[number]['signatureId'];
+
+/**
+ * Human-readable labels for each counter demand.
+ * Consumed by overlay UI and transcript annotations.
+ */
+export const CHAT_TELEGRAPH_DEMAND_LABELS: Readonly<
+  Record<ChatBossCounterDemand, string>
+> = Object.freeze({
+  VISIBLE_REPLY: 'Reply visibly — let the room see your response',
+  PROOF_REPLY: 'Prove your claim — attach receipts or verifiable proof',
+  QUOTE_REPLY: 'Quote back — anchor your reply to a prior statement',
+  TIMED_REPLY: 'Reply within the window — deadline is active',
+  SILENCE_REPLY: 'Hold silence — do not respond to this attack',
+  HELPER_REPLY: 'Invoke a helper — bring in a witness or ally',
+  NEGOTIATION_REPLY: 'Open negotiation — propose terms before commitment',
+});
+
+/**
+ * Signature descriptors for each telegraph window state.
+ * Carries signatureId, label, and hint for replay, analytics, and overlay rendering.
+ */
+export const CHAT_TELEGRAPH_WINDOW_SIGNATURES = Object.freeze([
+  Object.freeze({
+    signatureId: 'OPEN' as const,
+    label: 'WINDOW_OPEN',
+    description: 'Counter window is active and accepting replies.',
+    urgencyHint: 'Act now — the window is live.',
+    isTerminal: false,
+  }),
+  Object.freeze({
+    signatureId: 'GRACE' as const,
+    label: 'WINDOW_GRACE',
+    description: 'Window is near expiry but still valid. Grace period is active.',
+    urgencyHint: 'Near the edge — reply immediately or lose the window.',
+    isTerminal: false,
+  }),
+  Object.freeze({
+    signatureId: 'EXTENDED' as const,
+    label: 'WINDOW_EXTENDED',
+    description: 'Grace period was extended due to helper intercept or policy.',
+    urgencyHint: 'Extension granted — still valid but cost pressure may apply.',
+    isTerminal: false,
+  }),
+  Object.freeze({
+    signatureId: 'CLOSED' as const,
+    label: 'WINDOW_CLOSED',
+    description: 'Counter window has closed. No reply is accepted.',
+    urgencyHint: 'Too late — the window has shut.',
+    isTerminal: true,
+  }),
+  Object.freeze({
+    signatureId: 'RESOLVED' as const,
+    label: 'WINDOW_RESOLVED',
+    description: 'Outcome has been locked. Window is resolved.',
+    urgencyHint: 'Outcome locked — replay is authoritative.',
+    isTerminal: true,
+  }),
+  Object.freeze({
+    signatureId: 'EXPIRED' as const,
+    label: 'WINDOW_EXPIRED',
+    description: 'Player did not act within the window. Punishment applies.',
+    urgencyHint: 'Expired with no counter — pressure consequence incoming.',
+    isTerminal: true,
+  }),
+  Object.freeze({
+    signatureId: 'BYPASSED' as const,
+    label: 'WINDOW_BYPASSED',
+    description: 'Boss skipped the counter window — attack resolved directly.',
+    urgencyHint: 'No counter was offered for this attack.',
+    isTerminal: true,
+  }),
+] as const);
+
+export type ChatTelegraphWindowSignatureId =
+  (typeof CHAT_TELEGRAPH_WINDOW_SIGNATURES)[number]['signatureId'];
+
+// ============================================================================
 // MARK: Resolution helpers
 // ============================================================================
 

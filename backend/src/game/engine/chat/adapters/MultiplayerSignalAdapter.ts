@@ -336,6 +336,26 @@ export interface MultiplayerSignalAdapterState {
   readonly rejectedCount: number;
   readonly lastRankingPressure100: Score100;
   readonly lastMemberCount: number;
+  /** Social cohesion index 0–1. Derived from party size, spectating count, and member churn. */
+  readonly socialCohesion01: Score01;
+}
+
+/**
+ * Breakdown of the social cohesion computation.
+ * Cohesion measures how unified the room feels: large parties,
+ * low churn, and high spectator engagement push cohesion toward 1.
+ */
+export interface MultiplayerSocialCohesionBreakdown {
+  /** Party formation strength (0–1): proportion of members in a party. */
+  readonly partyFormation01: Score01;
+  /** Spectator engagement (0–1): spectators as a share of total presence. */
+  readonly spectatorEngagement01: Score01;
+  /** Stability factor (0–1): inversely proportional to recent event churn. */
+  readonly stabilityFactor01: Score01;
+  /** Composite social cohesion score (0–1). */
+  readonly cohesion01: Score01;
+  /** Readable cohesion tier. */
+  readonly cohesionLabel: 'FRAGMENTED' | 'LOOSE' | 'COHESIVE' | 'UNIFIED';
 }
 
 export interface MultiplayerSignalAdapterReport {
@@ -735,6 +755,60 @@ export class MultiplayerSignalAdapter {
       rejectedCount: this.rejectedCount,
       lastRankingPressure100: this.lastRankingPressure100,
       lastMemberCount: this.lastMemberCount,
+      socialCohesion01: this.computeSocialCohesion({ memberCount: this.lastMemberCount }).cohesion01,
+    });
+  }
+
+  /**
+   * Compute the social cohesion index for the current room state.
+   *
+   * Cohesion 0–1 measures how unified the social layer feels:
+   * - High party formation → higher cohesion
+   * - High spectating share → moderate engagement lift
+   * - Low recent event churn → higher stability
+   *
+   * Used by ML feature vectors to describe room social temperature
+   * and by DL input tensors to predict escalation likelihood.
+   *
+   * @param args - optional overrides for member count, party size, spectator count
+   */
+  public computeSocialCohesion(args: {
+    memberCount?: number;
+    partySize?: number;
+    spectatingCount?: number;
+  } = {}): MultiplayerSocialCohesionBreakdown {
+    const memberCount = Math.max(1, args.memberCount ?? this.lastMemberCount);
+    const partySize = Math.max(0, args.partySize ?? 0);
+    const spectatingCount = Math.max(0, args.spectatingCount ?? 0);
+    const totalPresence = memberCount + spectatingCount;
+
+    // Party formation: what fraction of members are in a party
+    const partyFormation01 = clamp01(partySize / memberCount);
+
+    // Spectator engagement: spectators as share of total presence
+    const spectatorEngagement01 = clamp01(spectatingCount / Math.max(1, totalPresence));
+
+    // Stability factor: inversely proportional to event churn
+    // High accepted count relative to history cap → more churn → less stable
+    const churnRate = this.acceptedCount / Math.max(1, this.maxHistory);
+    const stabilityFactor01 = clamp01(1 - Math.min(1, churnRate * 1.5));
+
+    // Composite: party formation is the strongest signal
+    const raw = partyFormation01 * 0.55 + spectatorEngagement01 * 0.25 + stabilityFactor01 * 0.20;
+    const cohesion01: Score01 = clamp01(raw);
+
+    let cohesionLabel: MultiplayerSocialCohesionBreakdown['cohesionLabel'];
+    if (cohesion01 >= 0.75) cohesionLabel = 'UNIFIED';
+    else if (cohesion01 >= 0.50) cohesionLabel = 'COHESIVE';
+    else if (cohesion01 >= 0.25) cohesionLabel = 'LOOSE';
+    else cohesionLabel = 'FRAGMENTED';
+
+    return Object.freeze({
+      partyFormation01,
+      spectatorEngagement01,
+      stabilityFactor01,
+      cohesion01,
+      cohesionLabel,
     });
   }
 

@@ -3186,3 +3186,28 @@ export class DeckComposer {
     return resolveModeOverlay(card, mode).legal;
   }
 }
+
+/* ──────────────────────────────────────────────────────────────────────────────
+ * Module authority object
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+export const DECK_COMPOSER_MODULE_AUTHORITY = Object.freeze({
+  module: 'DeckComposer',
+  version: '2.0.0',
+  surface: 'engine/cards/deck-composition',
+  exports: Object.freeze([
+    'DeckComposer',
+    'DeckComposerFilters',
+    'DeckComposerPreferences',
+    'DeckComposerArchetype',
+    'DeckComposerRole',
+    'ComposeLimitedDeckInput',
+    'ModeCardScoreBreakdown',
+    'DeckComposerCardEvaluation',
+    'DeckComposerCatalogReport',
+    'DeckComposerSelectionSummary',
+    'DeckCompositionResult',
+    'EffectMagnitudeProfile',
+    'DECK_COMPOSER_MODULE_AUTHORITY',
+  ] as const),
+});

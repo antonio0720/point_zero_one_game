@@ -61,6 +61,8 @@ import * as Engine from './ChatEngine';
 import * as Social from './social';
 import * as Combat from './combat';
 import * as Continuity from './continuity';
+import * as Channels from './channels';
+import * as Adapters from './adapters';
 import * as Dealroom from './dealroom';
 import * as Telemetry from './telemetry';
 import * as Training from './training';
@@ -298,6 +300,10 @@ export {
   Dealroom as ChatDealroomBarrelModule,
   Telemetry as ChatTelemetryBarrelModule,
   Training as ChatTrainingBarrelModule,
+  // Channel-policy suite — all four channel-law authorities under one namespace
+  Channels as ChatChannelsModule,
+  // Signal-adapter suite — battle, run, multiplayer, economy signal normalisation
+  Adapters as ChatAdaptersModule,
 };
 
 export const ChatEngineClass = Engine.ChatEngine;
@@ -449,6 +455,10 @@ export interface BackendChatAuthorityBundle {
       readonly pressureAffectModel: typeof PressureAffectModelRuntime;
       readonly attachmentModel: typeof AttachmentModelRuntime;
     };
+    /** Channel-policy suite: GLOBAL, SYNDICATE, DEAL_ROOM, LOBBY law */
+    readonly channels: typeof Channels;
+    /** Signal-adapter suite: battle, run, multiplayer, economy normalization */
+    readonly adapters: typeof Adapters;
   };
   readonly readiness: BackendChatLaneReadinessReport;
 }
@@ -482,19 +492,19 @@ export const BACKEND_CHAT_CANONICAL_MODULES = Object.freeze([
   descriptor('HelperResponseOrchestrator', 'HelperResponseOrchestrator.ts', 'ROOT', 'GENERATED', true, 'Backend helper response authority.'),
 
   // Adapters
-  descriptor('adapters.index', 'adapters/index.ts', 'ADAPTERS', 'PENDING', false, 'Signal adapter barrel.'),
-  descriptor('BattleSignalAdapter', 'adapters/BattleSignalAdapter.ts', 'ADAPTERS', 'PENDING', true, 'Battle engine to chat signal normalization.'),
-  descriptor('RunSignalAdapter', 'adapters/RunSignalAdapter.ts', 'ADAPTERS', 'PENDING', true, 'Run lifecycle to chat signal normalization.'),
-  descriptor('MultiplayerSignalAdapter', 'adapters/MultiplayerSignalAdapter.ts', 'ADAPTERS', 'PENDING', true, 'Multiplayer/session signal normalization.'),
-  descriptor('EconomySignalAdapter', 'adapters/EconomySignalAdapter.ts', 'ADAPTERS', 'PENDING', true, 'Economy/deal-room signal normalization.'),
+  descriptor('adapters.index', 'adapters/index.ts', 'ADAPTERS', 'GENERATED', false, 'Signal adapter barrel — BackendChatAdapterSuite, ML/DL bundles, cross-domain pressure.'),
+  descriptor('BattleSignalAdapter', 'adapters/BattleSignalAdapter.ts', 'ADAPTERS', 'GENERATED', true, 'Battle engine to chat signal normalization with ML feature extraction.'),
+  descriptor('RunSignalAdapter', 'adapters/RunSignalAdapter.ts', 'ADAPTERS', 'GENERATED', true, 'Run lifecycle to chat signal normalization.'),
+  descriptor('MultiplayerSignalAdapter', 'adapters/MultiplayerSignalAdapter.ts', 'ADAPTERS', 'GENERATED', true, 'Multiplayer/session signal normalization.'),
+  descriptor('EconomySignalAdapter', 'adapters/EconomySignalAdapter.ts', 'ADAPTERS', 'GENERATED', true, 'Economy/deal-room signal normalization.'),
   descriptor('LiveOpsSignalAdapter', 'adapters/LiveOpsSignalAdapter.ts', 'ADAPTERS', 'PLANNED', true, 'World-event to chat signal normalization.'),
 
   // Channels
-  descriptor('channels.index', 'channels/index.ts', 'CHANNELS', 'PENDING', false, 'Channel policy barrel.'),
-  descriptor('GlobalChannelPolicy', 'channels/GlobalChannelPolicy.ts', 'CHANNELS', 'PENDING', true, 'Global crowd-theater channel law.'),
-  descriptor('SyndicateChannelPolicy', 'channels/SyndicateChannelPolicy.ts', 'CHANNELS', 'PENDING', true, 'Syndicate trust/reputation channel law.'),
-  descriptor('DealRoomChannelPolicy', 'channels/DealRoomChannelPolicy.ts', 'CHANNELS', 'PENDING', true, 'Deal-room negotiation channel law.'),
-  descriptor('LobbyChannelPolicy', 'channels/LobbyChannelPolicy.ts', 'CHANNELS', 'PENDING', true, 'Lobby pre-run channel law.'),
+  descriptor('channels.index', 'channels/index.ts', 'CHANNELS', 'GENERATED', false, 'Channel policy barrel — GLOBAL, SYNDICATE, DEAL_ROOM, LOBBY suite.'),
+  descriptor('GlobalChannelPolicy', 'channels/GlobalChannelPolicy.ts', 'CHANNELS', 'GENERATED', true, 'Global crowd-theater channel law.'),
+  descriptor('SyndicateChannelPolicy', 'channels/SyndicateChannelPolicy.ts', 'CHANNELS', 'GENERATED', true, 'Syndicate trust/reputation channel law.'),
+  descriptor('DealRoomChannelPolicy', 'channels/DealRoomChannelPolicy.ts', 'CHANNELS', 'GENERATED', true, 'Deal-room negotiation channel law.'),
+  descriptor('LobbyChannelPolicy', 'channels/LobbyChannelPolicy.ts', 'CHANNELS', 'GENERATED', true, 'Lobby pre-run channel law.'),
   descriptor('ShadowChannelPolicy', 'channels/ShadowChannelPolicy.ts', 'CHANNELS', 'PLANNED', true, 'Backend-only shadow channel law.'),
 
   // NPC
@@ -700,6 +710,8 @@ export function createBackendChatAuthorityBundle(): BackendChatAuthorityBundle {
         pressureAffectModel: PressureAffectModelRuntime,
         attachmentModel: AttachmentModelRuntime,
       }),
+      channels: Channels,
+      adapters: Adapters,
     }),
     readiness: buildBackendChatLaneReadinessReport(),
   });

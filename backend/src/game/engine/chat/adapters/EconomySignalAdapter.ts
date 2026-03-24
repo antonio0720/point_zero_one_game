@@ -69,6 +69,7 @@ import {
   type JsonValue,
   type Nullable,
   type Score01,
+  type Score100,
   type UnixMs,
 } from '../types';
 
@@ -290,6 +291,25 @@ export interface EconomySignalAdapterState {
   readonly rejectedCount: number;
   readonly lastLiquidityStress01: Score01;
   readonly lastDealCount: number;
+  /** Aggregate market pressure on the 0–100 scale. Derived from liquidity stress and deal count. */
+  readonly marketPressure100: Score100;
+}
+
+/**
+ * Breakdown of the composite market pressure computation.
+ * Useful for explainability overlays and deal-room diagnostics.
+ */
+export interface EconomyMarketPressureBreakdown {
+  /** Liquidity stress contribution (0–50 range) mapped to 0–100. */
+  readonly liquidityComponent100: Score100;
+  /** Active deal count contribution (0–30 range) mapped to 0–100. */
+  readonly dealCountComponent100: Score100;
+  /** Hater heat contribution (0–20 range) mapped to 0–100. */
+  readonly haterHeatComponent100: Score100;
+  /** Composite total, clamped to 0–100. */
+  readonly total100: Score100;
+  /** Human-readable pressure tier label. */
+  readonly pressureLabel: 'CALM' | 'BUILDING' | 'ELEVATED' | 'CRITICAL';
 }
 
 export interface EconomySignalAdapterReport {
@@ -365,6 +385,17 @@ function stableKey(record: Readonly<Record<string, JsonValue>>): string {
 
 function score01(value: unknown, fallback = 0): Score01 {
   return clamp01(toFiniteNumber(value, fallback));
+}
+
+/**
+ * Clamp an arbitrary numeric value into the 0–100 range using `clamp100`.
+ * Mirrors `score01` but for the 0–100 pressure surface.
+ *
+ * @param value   - raw number (may be NaN, Infinity, or undefined)
+ * @param fallback - value to use when `value` is not finite (default 0)
+ */
+function score100(value: unknown, fallback = 0): Score100 {
+  return clamp100(toFiniteNumber(value, fallback));
 }
 
 function resolveVisibleChannel(
@@ -657,6 +688,53 @@ export class EconomySignalAdapter {
       rejectedCount: this.rejectedCount,
       lastLiquidityStress01: this.lastLiquidityStress01,
       lastDealCount: this.lastDealCount,
+      marketPressure100: this.computeMarketPressure100().total100,
+    });
+  }
+
+  /**
+   * Compute a composite market pressure score on the 0–100 scale.
+   *
+   * The score combines:
+   * - Liquidity stress (0–1 → contributes up to 50 points)
+   * - Active deal count (each deal adds ~4 points, capped at 30)
+   * - Implicit hater-heat proxy (derived from history saturation, capped at 20)
+   *
+   * This is the authoritative deal-room pressure surface for overlay
+   * diagnostics, ML feature extraction, and DL input tensors.
+   *
+   * @param overrideStress01  - optional external stress override (skips stored state)
+   * @param overrideDealCount - optional external deal count override
+   */
+  public computeMarketPressure100(
+    overrideStress01?: Score01,
+    overrideDealCount?: number,
+  ): EconomyMarketPressureBreakdown {
+    const stress01 = overrideStress01 ?? this.lastLiquidityStress01;
+    const dealCount = overrideDealCount ?? this.lastDealCount;
+
+    const liquidityRaw = stress01 * 50;
+    const dealCountRaw = Math.min(30, dealCount * 4);
+    // Proxy: history saturation (high accepted count = persistent pressure)
+    const saturationRaw = Math.min(20, (this.acceptedCount / Math.max(1, this.maxHistory)) * 20);
+
+    const liquidityComponent100 = score100(liquidityRaw);
+    const dealCountComponent100 = score100(dealCountRaw);
+    const haterHeatComponent100 = score100(saturationRaw);
+    const total100 = score100(liquidityRaw + dealCountRaw + saturationRaw);
+
+    let pressureLabel: EconomyMarketPressureBreakdown['pressureLabel'];
+    if (total100 >= 75) pressureLabel = 'CRITICAL';
+    else if (total100 >= 50) pressureLabel = 'ELEVATED';
+    else if (total100 >= 25) pressureLabel = 'BUILDING';
+    else pressureLabel = 'CALM';
+
+    return Object.freeze({
+      liquidityComponent100,
+      dealCountComponent100,
+      haterHeatComponent100,
+      total100,
+      pressureLabel,
     });
   }
 

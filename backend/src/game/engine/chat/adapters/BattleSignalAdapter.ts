@@ -849,6 +849,110 @@ function sortByChannelPriority(left: ChatVisibleChannel, right: ChatVisibleChann
 }
 
 
+// ---------------------------------------------------------------------------
+// ML / DL Surface Types
+// ---------------------------------------------------------------------------
+
+/**
+ * Feature vector emitted per battle tick for ML pressure-prediction models.
+ * All values are in [0, 1] unless otherwise noted.
+ */
+export interface BattleMLFeatureVector {
+  /** Normalised momentum [0, 1] */
+  readonly momentum01: number;
+  /** Ratio of accepted events to total batch entries [0, 1] */
+  readonly acceptanceRate01: number;
+  /** Ratio of deduped events to total batch entries [0, 1] */
+  readonly dedupeRate01: number;
+  /** Channel priority score normalised to [0, 1] (GLOBAL=1, LOBBY=0.25) */
+  readonly channelPriority01: number;
+  /** Whether a rescue window is currently open (1 = open, 0 = closed) */
+  readonly rescueWindowOpen: 0 | 1;
+  /** Invasion/first-blood flag (1 = first blood claimed) */
+  readonly firstBloodClaimed: 0 | 1;
+  /** Normalised battle budget utilisation [0, 1] */
+  readonly budgetUtilisation01: number;
+  /** Normalised extraction cooldown ticks (capped at 100 ticks → 1.0) */
+  readonly extractionCooldown01: number;
+  /** Pressure tier encoded as ordinal [0=NONE, 0.25=BUILDING, 0.5=ELEVATED, 0.75=HIGH, 1=CRITICAL] */
+  readonly pressureTierOrdinal: number;
+  /** Weakest layer ratio [0, 1] — 0 means layer is intact */
+  readonly weakestLayerRatio01: number;
+  /** Attack type one-hot: crowd (0), taunt (1), sabotage (2), compliance (3), other (4) — encoded as 0–4 / 4 */
+  readonly attackTypeOrdinal: number;
+  /** Narrative weight ordinal [0=FILLER, 0.33=LOW, 0.66=MEDIUM, 1=HIGH] */
+  readonly narrativeWeightOrdinal: number;
+  /** Hater heat normalised [0, 1] (capped at 100) */
+  readonly haterHeat01: number;
+  /** Rivalry heat carry normalised [0, 1] */
+  readonly rivalryHeatCarry01: number;
+  /** Tick counter as a decay signal exp(-tick / 200) */
+  readonly tickDecay: number;
+  /** Adapter lifetime accepted count, log-normalised */
+  readonly logAcceptedCount: number;
+}
+
+/**
+ * Deep-learning input tensor — flat float32 array representation of
+ * `BattleMLFeatureVector` in a deterministic column order.
+ * Use `BattleSignalAdapter.extractDLInputTensor()` to get this.
+ */
+export interface BattleDLInputTensor {
+  /** Ordered feature names matching `values` positions */
+  readonly columns: readonly string[];
+  /** Float32-compatible values in column order */
+  readonly values: readonly number[];
+  /** Timestamp of snapshot or event that produced this tensor */
+  readonly capturedAt: UnixMs;
+  /** Source adapter event or 'snapshot' */
+  readonly source: string;
+}
+
+/**
+ * Invasion risk assessment derived from a snapshot or event stream.
+ * Helps the UX surface pre-emptive warnings before an attack escalates.
+ */
+export interface BattleInvasionRiskAssessment {
+  readonly riskScore01: number;
+  readonly riskTier: 'MINIMAL' | 'LOW' | 'MODERATE' | 'HIGH' | 'IMMINENT';
+  readonly primaryDriver: string;
+  readonly supportingFactors: readonly string[];
+  readonly recommendedCounterDemand: 'VISIBLE_REPLY' | 'PROOF_REPLY' | 'SILENCE_REPLY' | 'HELPER_REPLY' | 'NEGOTIATION_REPLY' | 'NONE';
+  readonly assessedAt: UnixMs;
+}
+
+/**
+ * Rescue urgency assessment — guides UX in surfacing rescue prompts to
+ * players who are in danger of elimination.
+ */
+export interface BattleRescueUrgencyAssessment {
+  readonly urgency01: number;
+  readonly urgencyTier: 'STABLE' | 'WATCH' | 'URGENT' | 'CRITICAL';
+  readonly rescueWindowOpen: boolean;
+  readonly ticksUntilTimeout: number | null;
+  readonly recommendedAction: string;
+  readonly assessedAt: UnixMs;
+}
+
+/**
+ * Human-readable display summary for a BattleSignalAdapter session.
+ * Surfaced in debug UIs, operator dashboards, and replay viewers.
+ */
+export interface BattleAdapterDisplaySummary {
+  readonly totalProcessed: number;
+  readonly acceptedCount: number;
+  readonly dedupedCount: number;
+  readonly rejectedCount: number;
+  readonly acceptanceRatePct: number;
+  readonly dedupeRatePct: number;
+  readonly lastMomentum100: Score100;
+  readonly lastTickNumber: number;
+  readonly activeDedupeBuckets: number;
+  readonly historyDepth: number;
+  readonly topChannelByVolume: ChatVisibleChannel | null;
+  readonly pressureSummary: string;
+}
+
 export class BattleSignalAdapter {
   private readonly logger: BattleSignalAdapterLogger;
   private readonly clock: BattleSignalAdapterClock;
@@ -900,7 +1004,7 @@ export class BattleSignalAdapter {
 
   public getState(): BattleSignalAdapterState {
     const lastAcceptedAtByKey: Record<string, UnixMs> = {};
-    for (const [key, at] of this.dedupeMap.entries()) {
+    for (const [key, at] of Array.from(this.dedupeMap.entries())) {
       lastAcceptedAtByKey[key] = at;
     }
     return Object.freeze({
@@ -1130,9 +1234,9 @@ export class BattleSignalAdapter {
         pressureTier,
         haterHeat,
         rivalryHeatCarry,
-        battleBudget: snapshot.battleBudget ?? null,
-        battleBudgetCap: snapshot.battleBudgetCap ?? null,
-        extractionCooldownTicks: snapshot.extractionCooldownTicks ?? null,
+        battleBudget: toNullableFiniteNumber(snapshot.battleBudget),
+        battleBudgetCap: toNullableFiniteNumber(snapshot.battleBudgetCap),
+        extractionCooldownTicks: toNullableFiniteNumber(snapshot.extractionCooldownTicks),
         rescueWindowOpen,
         weakestLayerRatio,
         pendingAttackCount: pendingAttacks.length,
@@ -1198,11 +1302,37 @@ export class BattleSignalAdapter {
       rejected.push(...report.rejected);
     }
 
+    // Sort accepted artifacts by channel priority so higher-priority channels surface first.
+    accepted.sort((a, b) =>
+      sortByChannelPriority(
+        a.routeChannel,
+        b.routeChannel,
+      ),
+    );
+
     return Object.freeze({
       accepted,
       deduped,
       rejected,
     });
+  }
+
+  /**
+   * Re-orders an array of artifacts by their visible channel priority.
+   * GLOBAL (4) > SYNDICATE (3) > DEAL_ROOM (2) > LOBBY (1).
+   * Returns a new sorted array — does not mutate the input.
+   */
+  public sortArtifactsByChannelPriority(
+    artifacts: readonly BattleSignalAdapterArtifact[],
+  ): BattleSignalAdapterArtifact[] {
+    return artifacts
+      .slice()
+      .sort((a, b) =>
+        sortByChannelPriority(
+          a.visibleChannel as ChatVisibleChannel,
+          b.visibleChannel as ChatVisibleChannel,
+        ),
+      );
   }
 
   private adaptBotStateChanged(
@@ -1930,6 +2060,291 @@ export class BattleSignalAdapter {
     }
   }
 
+  // -------------------------------------------------------------------------
+  // ML / DL Feature Extraction
+  // -------------------------------------------------------------------------
+
+  /**
+   * Extracts a normalised ML feature vector from the current adapter state.
+   * Safe to call after any `adaptEvent` / `adaptSnapshot` call.
+   *
+   * @param snapshotHints  Optional snapshot data to enrich the vector
+   *                       (budget utilisation, pressure tier, etc.)
+   */
+  public extractMLFeatureVector(
+    snapshotHints?: Partial<BattleSnapshotCompat>,
+  ): BattleMLFeatureVector {
+    const state = this.getState();
+    const total = state.acceptedCount + state.dedupedCount + state.rejectedCount;
+    const acceptanceRate01 = total > 0 ? state.acceptedCount / total : 0;
+    const dedupeRate01     = total > 0 ? state.dedupedCount  / total : 0;
+
+    // Channel priority from most recent history entry
+    const lastEntry = state.history[state.history.length - 1] ?? null;
+    const channelRaw = lastEntry ? CHANNEL_PRIORITY[lastEntry.routeChannel] : 1;
+    const channelPriority01 = channelRaw / 4; // max priority is 4 (GLOBAL)
+
+    // Snapshot-driven fields
+    const budget    = toFiniteNumber(snapshotHints?.battleBudget, 0);
+    const budgetCap = Math.max(1, toFiniteNumber(snapshotHints?.battleBudgetCap, 1));
+    const budgetUtilisation01 = Math.min(1, budget / budgetCap);
+
+    const cooldown = toFiniteNumber(snapshotHints?.extractionCooldownTicks, 0);
+    const extractionCooldown01 = Math.min(1, cooldown / 100);
+
+    const rescueWindowOpen: 0 | 1 = snapshotHints?.rescueWindowOpen ? 1 : 0;
+    const firstBloodClaimed: 0 | 1 = snapshotHints?.firstBloodClaimed ? 1 : 0;
+    const weakestLayerRatio01 = Math.min(1, Math.max(0, toFiniteNumber(snapshotHints?.weakestLayerRatio, 0)));
+    const haterHeat01 = Math.min(1, toFiniteNumber(snapshotHints?.haterHeat, 0) / 100);
+    const rivalryHeatCarry01 = Math.min(1, toFiniteNumber(snapshotHints?.rivalryHeatCarry, 0) / 100);
+
+    const pressureTierOrdinal = ((): number => {
+      const tier = normalizePressureTier(snapshotHints?.pressureTier ?? '');
+      switch (tier) {
+        case 'NONE':     return 0;
+        case 'BUILDING': return 0.25;
+        case 'ELEVATED': return 0.5;
+        case 'HIGH':     return 0.75;
+        case 'CRITICAL': return 1;
+      }
+    })();
+
+    // Attack type from most recent history entry
+    const attackTypeOrdinal = ((): number => {
+      const at = lastEntry?.attackType ?? null;
+      if (!at) return 0.5;
+      switch (at) {
+        case 'CROWD_SWARM': return 0;
+        case 'TAUNT':       return 0.25;
+        case 'SABOTAGE':    return 0.5;
+        case 'COMPLIANCE':  return 0.75;
+        default:            return 1;
+      }
+    })();
+
+    // Narrative weight from most recent history entry
+    const narrativeWeightOrdinal = ((): number => {
+      const nw = lastEntry?.narrativeWeight ?? 'AMBIENT';
+      switch (nw) {
+        case 'AMBIENT':   return 0;
+        case 'TACTICAL':  return 0.33;
+        case 'PREDATORY': return 0.66;
+        case 'INVASION':  return 1;
+        default:          return 0;
+      }
+    })();
+
+    const tickDecay = Math.exp(-state.lastTickNumber / 200);
+    const logAcceptedCount = state.acceptedCount > 0
+      ? Math.log1p(state.acceptedCount) / Math.log1p(10000)
+      : 0;
+
+    return Object.freeze({
+      momentum01: Number(state.lastMomentum100) / 100,
+      acceptanceRate01,
+      dedupeRate01,
+      channelPriority01,
+      rescueWindowOpen,
+      firstBloodClaimed,
+      budgetUtilisation01,
+      extractionCooldown01,
+      pressureTierOrdinal,
+      weakestLayerRatio01,
+      attackTypeOrdinal,
+      narrativeWeightOrdinal,
+      haterHeat01,
+      rivalryHeatCarry01,
+      tickDecay,
+      logAcceptedCount,
+    });
+  }
+
+  /**
+   * Extracts a flat DL input tensor (column-ordered float32 values) from the
+   * current adapter state. Feed directly into an ONNX or TF.js model.
+   */
+  public extractDLInputTensor(
+    snapshotHints?: Partial<BattleSnapshotCompat>,
+    source = 'BattleSignalAdapter.state',
+  ): BattleDLInputTensor {
+    const fv = this.extractMLFeatureVector(snapshotHints);
+    const columns: readonly string[] = Object.freeze([
+      'momentum01',
+      'acceptanceRate01',
+      'dedupeRate01',
+      'channelPriority01',
+      'rescueWindowOpen',
+      'firstBloodClaimed',
+      'budgetUtilisation01',
+      'extractionCooldown01',
+      'pressureTierOrdinal',
+      'weakestLayerRatio01',
+      'attackTypeOrdinal',
+      'narrativeWeightOrdinal',
+      'haterHeat01',
+      'rivalryHeatCarry01',
+      'tickDecay',
+      'logAcceptedCount',
+    ]);
+    const values: readonly number[] = Object.freeze(
+      columns.map((col) => (fv as unknown as Record<string, number>)[col] ?? 0),
+    );
+    return Object.freeze({
+      columns,
+      values,
+      capturedAt: this.clock.now(),
+      source,
+    });
+  }
+
+  /**
+   * Assesses invasion risk from current adapter state + optional snapshot hints.
+   * Returns a structured risk report the UX layer can use to display pre-emptive
+   * warnings and surface counter-demand recommendations before an attack peaks.
+   */
+  public assessInvasionRisk(
+    snapshotHints?: Partial<BattleSnapshotCompat>,
+  ): BattleInvasionRiskAssessment {
+    const fv = this.extractMLFeatureVector(snapshotHints);
+    const state = this.getState();
+
+    const drivers: { label: string; weight: number }[] = [
+      { label: 'high momentum',         weight: fv.momentum01 * 0.30 },
+      { label: 'pressure tier elevated', weight: fv.pressureTierOrdinal * 0.25 },
+      { label: 'hater heat rising',      weight: fv.haterHeat01 * 0.20 },
+      { label: 'weakest layer exposed',  weight: fv.weakestLayerRatio01 * 0.15 },
+      { label: 'rivalry heat carry',     weight: fv.rivalryHeatCarry01 * 0.10 },
+    ];
+    const riskScore01 = Math.min(
+      1,
+      drivers.reduce((sum, d) => sum + d.weight, 0),
+    );
+
+    const primaryDriver =
+      drivers.sort((a, b) => b.weight - a.weight)[0]?.label ?? 'unknown';
+    const supportingFactors = drivers
+      .filter((d) => d.weight > 0.02)
+      .map((d) => d.label)
+      .slice(1, 4);
+
+    const riskTier: BattleInvasionRiskAssessment['riskTier'] =
+      riskScore01 >= 0.80 ? 'IMMINENT'
+      : riskScore01 >= 0.60 ? 'HIGH'
+      : riskScore01 >= 0.40 ? 'MODERATE'
+      : riskScore01 >= 0.20 ? 'LOW'
+      : 'MINIMAL';
+
+    const lastEntry = state.history[state.history.length - 1] ?? null;
+    const attackType = lastEntry?.attackType ?? null;
+    const recommendedCounterDemand: BattleInvasionRiskAssessment['recommendedCounterDemand'] =
+      attackType === 'SABOTAGE'    ? 'PROOF_REPLY'
+      : attackType === 'COMPLIANCE'  ? 'SILENCE_REPLY'
+      : attackType === 'CROWD_SWARM' ? 'VISIBLE_REPLY'
+      : attackType === 'LIQUIDATION' ? 'NEGOTIATION_REPLY'
+      : riskTier === 'IMMINENT'      ? 'HELPER_REPLY'
+      : 'NONE';
+
+    return Object.freeze({
+      riskScore01,
+      riskTier,
+      primaryDriver,
+      supportingFactors: Object.freeze(supportingFactors),
+      recommendedCounterDemand,
+      assessedAt: this.clock.now(),
+    });
+  }
+
+  /**
+   * Assesses rescue urgency for the local player.
+   * Returns structured urgency data the UX layer surfaces as a rescue prompt,
+   * countdown timer, or ally-request CTA.
+   */
+  public assessRescueUrgency(
+    snapshotHints?: Partial<BattleSnapshotCompat>,
+  ): BattleRescueUrgencyAssessment {
+    const fv = this.extractMLFeatureVector(snapshotHints);
+    const rescueWindowOpen = fv.rescueWindowOpen === 1;
+
+    const urgency01 = Math.min(
+      1,
+      fv.momentum01 * 0.35 +
+      fv.weakestLayerRatio01 * 0.25 +
+      fv.pressureTierOrdinal * 0.25 +
+      (fv.budgetUtilisation01 > 0.85 ? 0.15 : 0),
+    );
+
+    const urgencyTier: BattleRescueUrgencyAssessment['urgencyTier'] =
+      urgency01 >= 0.75 ? 'CRITICAL'
+      : urgency01 >= 0.50 ? 'URGENT'
+      : urgency01 >= 0.25 ? 'WATCH'
+      : 'STABLE';
+
+    const cooldownTicks = toNullableFiniteNumber(snapshotHints?.extractionCooldownTicks);
+    const ticksUntilTimeout = rescueWindowOpen && cooldownTicks !== null
+      ? Math.max(0, cooldownTicks)
+      : null;
+
+    const recommendedAction =
+      urgencyTier === 'CRITICAL' ? 'Call a helper immediately — elimination imminent'
+      : urgencyTier === 'URGENT'   ? 'Open rescue window and signal allies'
+      : urgencyTier === 'WATCH'    ? 'Monitor situation — prepare helper request'
+      : 'No rescue action required';
+
+    return Object.freeze({
+      urgency01,
+      urgencyTier,
+      rescueWindowOpen,
+      ticksUntilTimeout,
+      recommendedAction,
+      assessedAt: this.clock.now(),
+    });
+  }
+
+  /**
+   * Builds a human-readable display summary for the adapter session.
+   * Suitable for operator dashboards, debug overlays, and replay viewers.
+   */
+  public buildDisplaySummary(): BattleAdapterDisplaySummary {
+    const state = this.getState();
+    const total = state.acceptedCount + state.dedupedCount + state.rejectedCount;
+    const acceptanceRatePct = total > 0 ? Math.round((state.acceptedCount / total) * 100) : 0;
+    const dedupeRatePct     = total > 0 ? Math.round((state.dedupedCount  / total) * 100) : 0;
+
+    // Tally history entries by channel to find top channel
+    const channelCounts: Partial<Record<ChatVisibleChannel, number>> = {};
+    for (const entry of state.history) {
+      channelCounts[entry.routeChannel] = (channelCounts[entry.routeChannel] ?? 0) + 1;
+    }
+    let topChannelByVolume: ChatVisibleChannel | null = null;
+    let topCount = 0;
+    for (const [ch, count] of Object.entries(channelCounts) as [ChatVisibleChannel, number][]) {
+      if (count > topCount) {
+        topCount = count;
+        topChannelByVolume = ch;
+      }
+    }
+
+    const lastEntry = state.history[state.history.length - 1] ?? null;
+    const pressureSummary = lastEntry
+      ? `tick=${state.lastTickNumber} momentum=${Number(state.lastMomentum100).toFixed(1)} channel=${lastEntry.routeChannel}`
+      : `tick=${state.lastTickNumber} momentum=${Number(state.lastMomentum100).toFixed(1)} no-history`;
+
+    return Object.freeze({
+      totalProcessed: total,
+      acceptedCount: state.acceptedCount,
+      dedupedCount: state.dedupedCount,
+      rejectedCount: state.rejectedCount,
+      acceptanceRatePct,
+      dedupeRatePct,
+      lastMomentum100: state.lastMomentum100,
+      lastTickNumber: state.lastTickNumber,
+      activeDedupeBuckets: this.dedupeMap.size,
+      historyDepth: state.history.length,
+      topChannelByVolume,
+      pressureSummary,
+    });
+  }
+
   private resolveRoomId(value: Nullable<ChatRoomId | string | null | undefined>): ChatRoomId {
     if (typeof value === 'string' && value.trim().length > 0) {
       return value.trim() as ChatRoomId;
@@ -1946,7 +2361,7 @@ export class BattleSignalAdapter {
 
   private evictExpiredDedupe(): void {
     const now = this.clock.now();
-    for (const [key, at] of this.dedupeMap.entries()) {
+    for (const [key, at] of Array.from(this.dedupeMap.entries())) {
       if (Number(now) - Number(at) >= this.dedupeWindowMs * 3) {
         this.dedupeMap.delete(key);
       }

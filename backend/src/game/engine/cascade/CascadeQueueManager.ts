@@ -22,35 +22,29 @@ import type {
   ShieldLayerId,
 } from '../core/GamePrimitives';
 import type { RunStateSnapshot } from '../core/RunStateSnapshot';
+import {
+  NUMERIC_EFFECT_FIELDS,
+} from './types';
 import type {
   CascadeSeverity,
   CascadeTemplate,
   CascadeTemplateId,
+  CreationDiagnostics as RichCreationDiagnostics,
+  CreationScalarBundle,
+  MutableEffectPayload,
+  NumericEffectField,
+  QueueDecision,
+  QueueDecisionResult,
+  QueueLinkEffectBreakdown,
+  QueuePolicyContextShape,
   RecoveryCondition,
+  ScheduledLinkPlan,
+  TimingAccelerationBundle,
 } from './types';
 
 // -----------------------------------------------------------------------------
 // Internal Types
 // -----------------------------------------------------------------------------
-
-type NumericEffectField =
-  | 'cashDelta'
-  | 'debtDelta'
-  | 'incomeDelta'
-  | 'expenseDelta'
-  | 'shieldDelta'
-  | 'heatDelta'
-  | 'trustDelta'
-  | 'treasuryDelta'
-  | 'battleBudgetDelta'
-  | 'holdChargeDelta'
-  | 'counterIntelDelta'
-  | 'timeDeltaMs'
-  | 'divergenceDelta';
-
-type MutableEffectPayload = {
-  [K in keyof EffectPayload]: EffectPayload[K];
-};
 
 interface QueuePolicyContext {
   readonly snapshot: RunStateSnapshot;
@@ -70,53 +64,18 @@ interface QueuePolicyContext {
   readonly pendingChains: readonly CascadeChainInstance[];
 }
 
-interface CreationScalarBundle {
-  readonly pressureScalar: number;
-  readonly repeatScalar: number;
-  readonly severityScalar: number;
-  readonly phaseScalar: number;
-  readonly modeScalar: number;
-  readonly heatScalar: number;
-  readonly tensionScalar: number;
-  readonly shieldScalar: number;
-  readonly economyScalar: number;
-  readonly telemetryScalar: number;
-  readonly triggerScalar: number;
-  readonly positiveNegativeScalar: number;
-  readonly chainDensityScalar: number;
-  readonly combinedScalar: number;
-}
-
-interface TimingAccelerationBundle {
-  readonly templateModeAcceleration: number;
-  readonly bleedAcceleration: number;
-  readonly ghostAcceleration: number;
-  readonly pressureAcceleration: number;
-  readonly phaseAcceleration: number;
-  readonly heatAcceleration: number;
-  readonly eventCongestionAcceleration: number;
-  readonly positiveBrake: number;
-  readonly totalAcceleration: number;
-}
-
 interface OffsetPlanningContext {
   readonly policy: QueuePolicyContext;
   readonly scalars: CreationScalarBundle;
   readonly acceleration: TimingAccelerationBundle;
 }
 
-interface ScheduledLinkPlan {
-  readonly linkIndex: number;
-  readonly linkId: string;
-  readonly baseOffset: number;
-  readonly acceleratedOffset: number;
-  readonly normalizedOffset: number;
-  readonly scheduledTick: number;
-  readonly summary: string;
-  readonly effect: EffectPayload;
-}
-
-interface CreationDiagnostics {
+/**
+ * Internal-only policy gate result. The richer `RichCreationDiagnostics`
+ * (exported from types.ts as `CreationDiagnostics`) is exposed via the
+ * public `diagnose()` surface.
+ */
+interface InternalPolicyCheck {
   readonly reasons: readonly string[];
   readonly wouldCreate: boolean;
 }
@@ -130,22 +89,6 @@ interface TriggerParsingResult {
 // -----------------------------------------------------------------------------
 // Deterministic Policy Tables
 // -----------------------------------------------------------------------------
-
-const NUMERIC_EFFECT_FIELDS: readonly NumericEffectField[] = Object.freeze([
-  'cashDelta',
-  'debtDelta',
-  'incomeDelta',
-  'expenseDelta',
-  'shieldDelta',
-  'heatDelta',
-  'trustDelta',
-  'treasuryDelta',
-  'battleBudgetDelta',
-  'holdChargeDelta',
-  'counterIntelDelta',
-  'timeDeltaMs',
-  'divergenceDelta',
-]);
 
 const MODE_CREATION_SCALAR: Readonly<Record<ModeCode, number>> = Object.freeze({
   solo: 1.0,
@@ -568,7 +511,7 @@ export class CascadeQueueManager {
   private evaluateCreationPolicy(
     policy: QueuePolicyContext,
     pendingTriggerCount: number,
-  ): CreationDiagnostics {
+  ): InternalPolicyCheck {
     const reasons: string[] = [];
 
     this.checkTemplateShapeGuards(policy, reasons);
@@ -1097,7 +1040,13 @@ export class CascadeQueueManager {
     return densityBrake + scalarBrake;
   }
 
-  private planLinks(context: OffsetPlanningContext): readonly CascadeLink[] {
+  /**
+   * Full link planning surface — builds `ScheduledLinkPlan[]` with all
+   * scheduling metadata (offsets, accelerations, indices). This is the
+   * authoritative internal representation consumed by `diagnose()`,
+   * `breakdownLinkEffects()`, and `planLinks()`.
+   */
+  private planLinksDetailed(context: OffsetPlanningContext): readonly ScheduledLinkPlan[] {
     const normalizedOffsets = this.normalizeBaseOffsets(context.policy.template.baseOffsets);
     const acceleratedOffsets = this.applyAccelerationToOffsets(normalizedOffsets, context);
     const monotonicOffsets = this.applyMonotonicSpacing(acceleratedOffsets, context.policy.template.severity);
@@ -1106,26 +1055,30 @@ export class CascadeQueueManager {
     const scheduledTicks = this.materializeScheduledTicks(smoothedOffsets, context);
     const effects = this.planEffects(context, scheduledTicks.length);
 
-    const links: ScheduledLinkPlan[] = scheduledTicks.map((scheduledTick, index) => {
-      const effect = effects[index] ?? {};
-      const baseOffset = normalizedOffsets[index] ?? index;
-      const acceleratedOffset = acceleratedOffsets[index] ?? baseOffset;
-      const normalizedOffset = smoothedOffsets[index] ?? acceleratedOffset;
-
-      return {
-        linkIndex: index,
-        linkId: this.composeLinkId(context.policy, index),
-        baseOffset,
-        acceleratedOffset,
-        normalizedOffset,
-        scheduledTick,
-        summary: this.composeLinkSummary(context.policy, index, scheduledTick, effect),
-        effect,
-      };
-    });
-
     return Object.freeze(
-      links.map((plan) => ({
+      scheduledTicks.map((scheduledTick, index): ScheduledLinkPlan => {
+        const effect = effects[index] ?? {};
+        const baseOffset = normalizedOffsets[index] ?? index;
+        const acceleratedOffset = acceleratedOffsets[index] ?? baseOffset;
+        const normalizedOffset = smoothedOffsets[index] ?? acceleratedOffset;
+
+        return {
+          linkIndex: index,
+          linkId: this.composeLinkId(context.policy, index),
+          baseOffset,
+          acceleratedOffset,
+          normalizedOffset,
+          scheduledTick,
+          summary: this.composeLinkSummary(context.policy, index, scheduledTick, effect),
+          effect,
+        };
+      }),
+    );
+  }
+
+  private planLinks(context: OffsetPlanningContext): readonly CascadeLink[] {
+    return Object.freeze(
+      this.planLinksDetailed(context).map((plan) => ({
         linkId: plan.linkId,
         scheduledTick: plan.scheduledTick,
         effect: plan.effect,
@@ -1870,5 +1823,368 @@ export class CascadeQueueManager {
     ];
 
     return fragments.join('::');
+  }
+
+  // ---------------------------------------------------------------------------
+  // Public Analytics, Diagnostics & ML Surfaces
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Returns a rich creation diagnostics report for a potential cascade chain.
+   *
+   * This is the external-facing version of the internal policy check, exposing
+   * scalar bundles, acceleration bundles, and per-link schedules for tooling,
+   * replay playback, ML pressure models, and proof narration.
+   *
+   * Does NOT create a chain. Safe to call speculatively without side effects.
+   */
+  public diagnose(
+    snapshot: RunStateSnapshot,
+    template: CascadeTemplate,
+    trigger: string,
+    pendingChains: readonly CascadeChainInstance[] = [],
+  ): RichCreationDiagnostics {
+    const policy = this.buildPolicyContext(snapshot, template, trigger, pendingChains);
+    const policyCheck = this.evaluateCreationPolicy(policy, 0);
+    const scalars = this.resolveCreationScalars(policy);
+    const acceleration = this.resolveTimingAcceleration(policy, scalars);
+    const offsetContext: OffsetPlanningContext = { policy, scalars, acceleration };
+    const plannedLinks = policyCheck.wouldCreate ? this.planLinksDetailed(offsetContext) : [];
+
+    const warnings: string[] = [];
+
+    if (scalars.combinedScalar > 1.7) {
+      warnings.push('combined_scalar_critically_high');
+    }
+
+    if (acceleration.totalAcceleration >= HARD_MAX_ACCELERATION) {
+      warnings.push('acceleration_at_hard_maximum');
+    }
+
+    if (plannedLinks.length > 8) {
+      warnings.push('chain_density_high_link_count');
+    }
+
+    if (!policyCheck.wouldCreate && policyCheck.reasons.length === 0) {
+      warnings.push('policy_denied_with_no_reason_recorded');
+    }
+
+    return {
+      reasons: policyCheck.reasons,
+      warnings: Object.freeze(warnings),
+      telemetryTags: Object.freeze([...(template.telemetryTags ?? [])]),
+      scalarBundle: scalars,
+      accelerationBundle: acceleration,
+      plannedLinks: Object.freeze(plannedLinks),
+    };
+  }
+
+  /**
+   * Resolves a typed queue decision result for a potential chain creation.
+   *
+   * Maps internal gate reason strings to a canonical `QueueDecision` enum and
+   * a structured `QueueDecisionResult` for downstream consumers:
+   * - UI overlays and cascade event streams
+   * - Chat-layer narration of rejections
+   * - Proof generation and audit trails
+   * - ML reward shaping for decision acceptance/rejection
+   */
+  public getQueueDecision(
+    snapshot: RunStateSnapshot,
+    template: CascadeTemplate,
+    trigger: string,
+    pendingChains: readonly CascadeChainInstance[] = [],
+    pendingTriggerCount = 0,
+  ): QueueDecisionResult {
+    const policy = this.buildPolicyContext(snapshot, template, trigger, pendingChains);
+    const check = this.evaluateCreationPolicy(policy, pendingTriggerCount);
+    const decision: QueueDecision = check.wouldCreate ? 'ALLOW' : 'DENY';
+    const reasonCode = this.classifyQueueReasonCode(check.reasons);
+
+    return {
+      decision,
+      allowed: check.wouldCreate,
+      reasonCode,
+      reasons: check.reasons,
+    };
+  }
+
+  /**
+   * Classifies the primary failure reason code from a list of gate failure
+   * strings. Ordered from most-specific to least-specific so the dominant
+   * failure mode is always surfaced as the `reasonCode`.
+   */
+  private classifyQueueReasonCode(
+    reasons: readonly string[],
+  ): QueueDecisionResult['reasonCode'] {
+    if (reasons.length === 0) {
+      return 'OK';
+    }
+
+    for (const reason of reasons) {
+      if (
+        reason === 'template_concurrency_exceeded' ||
+        reason === 'same_trigger_template_already_active'
+      ) {
+        return 'MAX_CONCURRENT';
+      }
+      if (reason === 'trigger_budget_exhausted') {
+        return 'MAX_TRIGGER_LIMIT';
+      }
+      if (reason === 'pending_duplicate_signature' || reason === 'same_tick_duplicate') {
+        return 'DUPLICATE_SEMANTIC_TRIGGER';
+      }
+      if (reason === 'positive_tracker_already_recorded') {
+        return 'POSITIVE_ALREADY_UNLOCKED';
+      }
+      if (
+        reason === 'early_foundation_critical_guard' ||
+        reason === 'positive_rejected_after_outcome'
+      ) {
+        return 'PHASE_GATED';
+      }
+      if (
+        reason.includes('mode') ||
+        reason === 'network_lockdown_requires_l4_bias' ||
+        reason === 'calm_pressure_trigger_rejected'
+      ) {
+        return 'MODE_GATED';
+      }
+      if (
+        reason === 'template_offset_effect_length_mismatch' ||
+        reason === 'template_has_no_offsets' ||
+        reason === 'template_has_too_many_links' ||
+        reason === 'maxConcurrent_out_of_bounds' ||
+        reason === 'maxTriggersPerRun_out_of_bounds' ||
+        reason === 'empty_trigger'
+      ) {
+        return 'MANIFEST_INVALID';
+      }
+    }
+
+    return 'UNKNOWN';
+  }
+
+  /**
+   * Returns a per-link effect breakdown for a potential cascade chain creation.
+   *
+   * Each entry in the returned array maps to a single scheduled link and
+   * includes the field-keyed numeric impact, non-numeric effect payloads, and
+   * any cascade/named action tags.
+   *
+   * Returns an empty array when the chain would be rejected by queue policy.
+   *
+   * Used by:
+   * - Diagnostics dashboards
+   * - Chat narration of cascade impact
+   * - Replay tooling and proof generation
+   * - ML reward decomposition
+   */
+  public breakdownLinkEffects(
+    snapshot: RunStateSnapshot,
+    template: CascadeTemplate,
+    trigger: string,
+    pendingChains: readonly CascadeChainInstance[] = [],
+  ): readonly QueueLinkEffectBreakdown[] {
+    const policy = this.buildPolicyContext(snapshot, template, trigger, pendingChains);
+    const check = this.evaluateCreationPolicy(policy, 0);
+
+    if (!check.wouldCreate) {
+      return Object.freeze([]);
+    }
+
+    const scalars = this.resolveCreationScalars(policy);
+    const acceleration = this.resolveTimingAcceleration(policy, scalars);
+    const offsetContext: OffsetPlanningContext = { policy, scalars, acceleration };
+    const planned = this.planLinksDetailed(offsetContext);
+
+    return Object.freeze(
+      planned.map((plan): QueueLinkEffectBreakdown => {
+        const fieldImpacts = {} as Record<NumericEffectField, number | undefined>;
+        for (const field of NUMERIC_EFFECT_FIELDS) {
+          const val = plan.effect[field];
+          fieldImpacts[field] = val !== undefined && val !== 0 ? val : undefined;
+        }
+
+        return {
+          linkIndex: plan.linkIndex,
+          fieldImpacts: Object.freeze(fieldImpacts) as Readonly<
+            Record<NumericEffectField, number | undefined>
+          >,
+          cascadeTag: plan.effect.cascadeTag ?? null,
+          injectCards: Object.freeze([...(plan.effect.injectCards ?? [])]),
+          exhaustCards: Object.freeze([...(plan.effect.exhaustCards ?? [])]),
+          grantBadges: Object.freeze([...(plan.effect.grantBadges ?? [])]),
+          namedActionId: plan.effect.namedActionId ?? null,
+        };
+      }),
+    );
+  }
+
+  /**
+   * Projects the stable queue-visible policy shape for a given creation request.
+   *
+   * Returns a serializable, replay-safe snapshot of the scheduling context
+   * at the point of evaluation. This is consumed by replay tooling and
+   * chat-layer rendering to describe the effective scheduling context without
+   * re-running full scalar resolution.
+   */
+  public composePolicyShape(
+    snapshot: RunStateSnapshot,
+    template: CascadeTemplate,
+    trigger: string,
+    pendingChains: readonly CascadeChainInstance[] = [],
+  ): QueuePolicyContextShape {
+    const policy = this.buildPolicyContext(snapshot, template, trigger, pendingChains);
+
+    return {
+      snapshotSeed: snapshot.seed,
+      snapshotTick: snapshot.tick,
+      mode: snapshot.mode,
+      pressureTier: snapshot.pressure.tier,
+      templateId: template.templateId,
+      normalizedTrigger: policy.normalizedTrigger,
+      triggerFamily: policy.triggerFamily,
+      triggerFacet: policy.triggerFacet,
+      instanceOrdinal: policy.instanceOrdinal,
+      activeOfTemplate: policy.activeOfTemplate,
+      pendingOfTemplate: policy.pendingOfTemplate,
+      triggerCount: policy.triggerCount,
+    };
+  }
+
+  /**
+   * Computes an aggregate numeric effect total across all planned links for a
+   * potential chain. Returns a field-keyed map of total deltas summed across
+   * all scheduled links.
+   *
+   * Positive values indicate a net beneficial impact on that field.
+   * Negative values indicate net depletion.
+   *
+   * Returns null when the chain is rejected by policy (no links would be planned).
+   *
+   * Used by:
+   * - Pre-flight impact assessments in difficulty scaling
+   * - ML reward shaping
+   * - Cascade weight scoring in CascadeChainRegistry
+   */
+  public computeChainEffectTotals(
+    snapshot: RunStateSnapshot,
+    template: CascadeTemplate,
+    trigger: string,
+    pendingChains: readonly CascadeChainInstance[] = [],
+  ): Readonly<Record<NumericEffectField, number>> | null {
+    const breakdown = this.breakdownLinkEffects(snapshot, template, trigger, pendingChains);
+
+    if (breakdown.length === 0) {
+      return null;
+    }
+
+    const totals = {} as Record<NumericEffectField, number>;
+    for (const field of NUMERIC_EFFECT_FIELDS) {
+      totals[field] = 0;
+    }
+
+    for (const link of breakdown) {
+      for (const field of NUMERIC_EFFECT_FIELDS) {
+        const val = link.fieldImpacts[field];
+        if (val !== undefined) {
+          totals[field] += val;
+        }
+      }
+    }
+
+    return Object.freeze(totals);
+  }
+
+  /**
+   * Returns the scalar footprint for a given snapshot+template combination as
+   * a fixed-length 14-element feature vector for ML pressure models.
+   *
+   * Dimension layout:
+   *   [0]  pressureScalar
+   *   [1]  repeatScalar
+   *   [2]  severityScalar
+   *   [3]  phaseScalar
+   *   [4]  modeScalar
+   *   [5]  heatScalar
+   *   [6]  tensionScalar
+   *   [7]  shieldScalar
+   *   [8]  economyScalar
+   *   [9]  telemetryScalar
+   *   [10] triggerScalar
+   *   [11] positiveNegativeScalar
+   *   [12] chainDensityScalar
+   *   [13] combinedScalar
+   *
+   * Suitable for use as input to pressure-adaptive scheduling ML models.
+   * All values are bounded scalars in the range [0.82, 2.1].
+   */
+  public computeScalarFeatureVector(
+    snapshot: RunStateSnapshot,
+    template: CascadeTemplate,
+    trigger: string,
+    pendingChains: readonly CascadeChainInstance[] = [],
+  ): readonly number[] {
+    const policy = this.buildPolicyContext(snapshot, template, trigger, pendingChains);
+    const scalars = this.resolveCreationScalars(policy);
+
+    return Object.freeze([
+      scalars.pressureScalar,
+      scalars.repeatScalar,
+      scalars.severityScalar,
+      scalars.phaseScalar,
+      scalars.modeScalar,
+      scalars.heatScalar,
+      scalars.tensionScalar,
+      scalars.shieldScalar,
+      scalars.economyScalar,
+      scalars.telemetryScalar,
+      scalars.triggerScalar,
+      scalars.positiveNegativeScalar,
+      scalars.chainDensityScalar,
+      scalars.combinedScalar,
+    ]);
+  }
+
+  /**
+   * Returns the timing acceleration footprint for a given snapshot+template
+   * combination as a fixed-length 9-element feature vector.
+   *
+   * Dimension layout:
+   *   [0] templateModeAcceleration
+   *   [1] bleedAcceleration
+   *   [2] ghostAcceleration
+   *   [3] pressureAcceleration
+   *   [4] phaseAcceleration
+   *   [5] heatAcceleration
+   *   [6] eventCongestionAcceleration
+   *   [7] positiveBrake
+   *   [8] totalAcceleration
+   *
+   * Suitable for use in queue scheduling and pacing ML models that predict
+   * cascade timing compression under pressure escalation.
+   */
+  public computeAccelerationFeatureVector(
+    snapshot: RunStateSnapshot,
+    template: CascadeTemplate,
+    trigger: string,
+    pendingChains: readonly CascadeChainInstance[] = [],
+  ): readonly number[] {
+    const policy = this.buildPolicyContext(snapshot, template, trigger, pendingChains);
+    const scalars = this.resolveCreationScalars(policy);
+    const acceleration = this.resolveTimingAcceleration(policy, scalars);
+
+    return Object.freeze([
+      acceleration.templateModeAcceleration,
+      acceleration.bleedAcceleration,
+      acceleration.ghostAcceleration,
+      acceleration.pressureAcceleration,
+      acceleration.phaseAcceleration,
+      acceleration.heatAcceleration,
+      acceleration.eventCongestionAcceleration,
+      acceleration.positiveBrake,
+      acceleration.totalAcceleration,
+    ]);
   }
 }
