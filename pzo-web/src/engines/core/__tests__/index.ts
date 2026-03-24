@@ -604,7 +604,7 @@ export function buildOrchestrator(options: BuildOrchestratorOptions = {}): Orche
     eventBus,
     autoBindStore: false,
     autoStart:     false,
-    engines:       bundle,
+    ...(bundle !== undefined ? { engines: bundle } : {}),
     ...config,
   };
 
@@ -875,7 +875,7 @@ export type CanonicalEventConstantKey = keyof typeof CANONICAL_EVENT_CONSTANTS;
  * Returns true if the provided string is a recognized EngineEventConstant.
  */
 export function isCanonicalEventConstant(name: string): name is EngineEventConstant {
-  return Object.values(CANONICAL_EVENT_CONSTANTS).includes(name as EngineEventConstant);
+  return (Object.values(CANONICAL_EVENT_CONSTANTS) as string[]).includes(name);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -986,7 +986,7 @@ export function buildFreshTensionContainer(): TensionSliceContainer {
   // Touch resetTensionSliceDraft — called here to ensure it stays non-dead
   const setter: TensionSliceSet<TensionSliceContainer> = (recipe) => { recipe(container); };
   setter((draft) => {
-    resetTensionSliceDraft(draft as never);
+    resetTensionSliceDraft(draft as never, false);
   });
   return container;
 }
@@ -996,21 +996,25 @@ export function buildFreshTensionContainer(): TensionSliceContainer {
  * Uses applyTensionSnapshotDraft for compile-time coverage.
  */
 export function applyMinimalSnapshot(container: TensionSliceContainer): TensionState {
-  applyTensionSnapshotDraft(container.tension, {
-    score:            0,
-    rawScore:         0,
-    visibilityState:  VisibilityState.SHADOWED,
-    isPulseActive:    false,
-    isSustainedPulse: false,
-    pulseTicksActive: 0,
-    queueLength:      0,
-    arrivedCount:     0,
-    queuedCount:      0,
-    expiredCount:     0,
-    mitigatedCount:   0,
-    nullifiedCount:   0,
-    currentTick:      0,
-  } as TensionSnapshot);
+  const minimalSnap: TensionSnapshot = {
+    score:                 0,
+    rawScore:              0,
+    amplifiedScore:        0,
+    visibilityState:       VisibilityState.SHADOWED,
+    isPulseActive:         false,
+    pulseTicksActive:      0,
+    queueLength:           0,
+    arrivedCount:          0,
+    queuedCount:           0,
+    expiredCount:          0,
+    scoreHistory:          [],
+    isEscalating:          false,
+    dominantEntryId:       null,
+    pressureTierAtCompute: PressureTier.CALM,
+    tickNumber:            0,
+    timestamp:             0,
+  };
+  applyTensionSnapshotDraft(container, minimalSnap, []);
   return container.tension;
 }
 

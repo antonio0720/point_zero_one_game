@@ -81,6 +81,7 @@ import {
   type StartRunOptions,
   type EngineOrchestratorConfig,
   type EngineBundle,
+  type PressureEngineLike,
 } from '../EngineOrchestrator';
 
 import { WallClockSource, FixedClockSource } from '../ClockSource';
@@ -136,7 +137,7 @@ function collectEmits(bus: EventBus, eventName: string): unknown[] {
  * Counts total `emit` calls for a specific event name across all recorded calls.
  */
 function countEmitCalls(spy: ReturnType<typeof vi.spyOn>, eventName: string): number {
-  return spy.mock.calls.filter(([name]) => name === eventName).length;
+  return (spy.mock.calls as [string, ...unknown[]][]).filter(([name]) => name === eventName).length;
 }
 
 /**
@@ -146,7 +147,7 @@ function firstEmitPayload(
   spy: ReturnType<typeof vi.spyOn>,
   eventName: string,
 ): Record<string, unknown> | undefined {
-  const call = spy.mock.calls.find(([name]) => name === eventName);
+  const call = (spy.mock.calls as [string, ...unknown[]][]).find(([name]) => name === eventName);
   return call?.[1] as Record<string, unknown> | undefined;
 }
 
@@ -157,7 +158,7 @@ function allEmitPayloads(
   spy: ReturnType<typeof vi.spyOn>,
   eventName: string,
 ): Array<Record<string, unknown>> {
-  return spy.mock.calls
+  return (spy.mock.calls as [string, unknown][])
     .filter(([name]) => name === eventName)
     .map(([, payload]) => payload as Record<string, unknown>);
 }
@@ -330,7 +331,7 @@ describe('TimeEngine — direct API contract', () => {
     timeEngine.completeRun('RUN_ENDED');
     timeEngine.completeRun('RUN_ENDED');
 
-    const completedCalls = emitSpy.mock.calls.filter(([name]) => name === TIME_ENGINE_COMPLETE);
+    const completedCalls = (emitSpy.mock.calls as [string, ...unknown[]][]).filter(([name]) => name === TIME_ENGINE_COMPLETE);
     expect(completedCalls).toHaveLength(1);
   });
 });
@@ -796,7 +797,7 @@ describe('TimeEngine — telemetry envelope integrity', () => {
 
   it('TierTransitionRecord contains fromTier, toTier, pressureScore, and timestamps', () => {
     timeEngine.setTierFromPressure(0.65);
-    const record: TierTransitionRecord = timeEngine.getTelemetry().tierTransitions[0];
+    const record: TierTransitionRecord = timeEngine.getTelemetry().tierTransitions[0]!;
     expect(record.fromTier).toBe(TickTier.STABLE);
     expect(record.toTier).toBe(TickTier.CRISIS);
     expect(record.pressureScore).toBe(0.65);
@@ -1122,7 +1123,7 @@ describe('EngineOrchestrator — EngineBundle hook pass-through', () => {
 
   it('pressure.computeScore() is called during STEP_02_PRESSURE_COMPUTE', () => {
     const computeScore = vi.fn().mockReturnValue(0.5);
-    const bundle: EngineBundle = { pressure: { computeScore } };
+    const bundle: EngineBundle = { pressure: { computeScore } as unknown as PressureEngineLike };
     const { orchestrator } = buildOrchestrator({ engines: bundle });
     orchestrator.startRun();
     orchestrator.executeTick();
@@ -1131,7 +1132,7 @@ describe('EngineOrchestrator — EngineBundle hook pass-through', () => {
 
   it('pressure.recomputePostActions() is called during STEP_10_PRESSURE_RECOMPUTE', () => {
     const recomputePostActions = vi.fn().mockReturnValue(0.3);
-    const bundle: EngineBundle = { pressure: { recomputePostActions } };
+    const bundle: EngineBundle = { pressure: { recomputePostActions } as unknown as PressureEngineLike };
     const { orchestrator } = buildOrchestrator({ engines: bundle });
     orchestrator.startRun();
     orchestrator.executeTick();
@@ -1551,12 +1552,12 @@ describe('TimeEngine — telemetry under load', () => {
     timeEngine.setTierFromPressure(0.90); // T3→T4
     const { tierTransitions } = timeEngine.getTelemetry();
     expect(tierTransitions).toHaveLength(3);
-    expect(tierTransitions[0].fromTier).toBe(TickTier.STABLE);
-    expect(tierTransitions[0].toTier).toBe(TickTier.COMPRESSED);
-    expect(tierTransitions[1].fromTier).toBe(TickTier.COMPRESSED);
-    expect(tierTransitions[1].toTier).toBe(TickTier.CRISIS);
-    expect(tierTransitions[2].fromTier).toBe(TickTier.CRISIS);
-    expect(tierTransitions[2].toTier).toBe(TickTier.COLLAPSE_IMMINENT);
+    expect(tierTransitions[0]!.fromTier).toBe(TickTier.STABLE);
+    expect(tierTransitions[0]!.toTier).toBe(TickTier.COMPRESSED);
+    expect(tierTransitions[1]!.fromTier).toBe(TickTier.COMPRESSED);
+    expect(tierTransitions[1]!.toTier).toBe(TickTier.CRISIS);
+    expect(tierTransitions[2]!.fromTier).toBe(TickTier.CRISIS);
+    expect(tierTransitions[2]!.toTier).toBe(TickTier.COLLAPSE_IMMINENT);
   });
 
   it('TierTransitionRecord multiplier increases at higher tiers', () => {
@@ -1564,7 +1565,7 @@ describe('TimeEngine — telemetry under load', () => {
     timeEngine.setTierFromPressure(0.65); // T2→T3
     timeEngine.setTierFromPressure(0.90); // T3→T4
     const { tierTransitions } = timeEngine.getTelemetry();
-    const [t12, t23, t34] = tierTransitions;
+    const [t12, t23, t34] = tierTransitions as [TierTransitionRecord, TierTransitionRecord, TierTransitionRecord];
     expect(t12.multiplier).toBeLessThan(t23.multiplier);
     expect(t23.multiplier).toBeLessThan(t34.multiplier);
   });
@@ -1605,8 +1606,8 @@ describe('TimeEngine — telemetry under load', () => {
     timeEngine.setTierFromPressure(0.90);
     const { tierTransitions } = timeEngine.getTelemetry();
     for (let i = 1; i < tierTransitions.length; i++) {
-      expect(tierTransitions[i].timestamp).toBeGreaterThanOrEqual(
-        tierTransitions[i - 1].timestamp,
+      expect(tierTransitions[i]!.timestamp).toBeGreaterThanOrEqual(
+        tierTransitions[i - 1]!.timestamp,
       );
     }
   });
@@ -1684,7 +1685,7 @@ describe('EngineOrchestrator — PressureReader injection', () => {
     orchestrator.startRun();
     orchestrator.executeTick();
 
-    expect(capturedSnapshot?.pressureTier).toBe('HIGH');
+    expect((capturedSnapshot as OrchestratorSnapshot | null)?.pressureTier).toBe('HIGH');
   });
 
   it('PressureReader.getCurrentScore() is called during each tick', () => {
@@ -1716,7 +1717,7 @@ describe('EngineOrchestrator — PressureReader injection', () => {
   it('postActionPressure reflects recomputePostActions() when provided', () => {
     const recomputePostActions = vi.fn().mockReturnValue(0.75);
     const { orchestrator } = buildOrchestrator({
-      engines: { pressure: { recomputePostActions } },
+      engines: { pressure: { recomputePostActions } as unknown as PressureEngineLike },
     });
     orchestrator.startRun();
     const record = orchestrator.executeTick();
@@ -1772,8 +1773,9 @@ describe('EngineOrchestrator — snapshotProvider runtime field', () => {
     orchestrator.startRun();
     orchestrator.executeTick();
 
-    expect(capturedRuntime?.customField).toBe('sentinel');
-    expect(capturedRuntime?.phase).toBe(42);
+    const rt = capturedRuntime as unknown as Record<string, unknown>;
+    expect(rt['customField']).toBe('sentinel');
+    expect(rt['phase']).toBe(42);
   });
 
   it('snapshotProvider is called at least once per executeTick()', () => {
@@ -1880,7 +1882,7 @@ describe('EngineOrchestrator — decision window stress test', () => {
       orchestrator.onForcedCardEntersPlay(id, 4000, 2);
     }
     for (let i = 0; i < ids.length; i++) {
-      orchestrator.resolveDecisionWindow(ids[i], i);
+      orchestrator.resolveDecisionWindow(ids[i]!, i);
     }
     expect(orchestrator.getDecisionTimer().getActiveWindows()).toHaveLength(0);
   });
@@ -1974,7 +1976,7 @@ describe('Constants, TickTier, and type system invariants', () => {
   it('TICK_DURATION_MS_BY_TIER values strictly decrease as tier index increases', () => {
     const durations = TICK_TIER_IDS.map((id) => TICK_DURATION_MS_BY_TIER[id]);
     for (let i = 1; i < durations.length; i++) {
-      expect(durations[i]).toBeLessThan(durations[i - 1]);
+      expect(durations[i]!).toBeLessThan(durations[i - 1]!);
     }
   });
 
@@ -2018,8 +2020,8 @@ describe('Constants, TickTier, and type system invariants', () => {
     bus.emit('EVT_B' as never, { n: 3 } as never);
     const payloads = allEmitPayloads(spy, 'EVT_A');
     expect(payloads).toHaveLength(2);
-    expect(payloads[0].n).toBe(1);
-    expect(payloads[1].n).toBe(2);
+    expect(payloads[0]!['n']).toBe(1);
+    expect(payloads[1]!['n']).toBe(2);
   });
 });
 
@@ -2407,7 +2409,7 @@ describe('Harness barrel — buildOrchestratorFromHarness parity', () => {
     const inlinePayload  = firstEmitPayload(emitSpy, TICK_COMPLETE);
     const harnessPayload = firstEmitPayloadFromHarness(emitSpy, TICK_COMPLETE);
     expect(harnessPayload).toEqual(inlinePayload);
-    expect(typeof harnessPayload?.tickIndex).toBe('number');
+    expect(typeof (harnessPayload as Record<string, unknown> | undefined)?.['tickIndex']).toBe('number');
   });
 
   it('makeTickSnapshotFromHarness produces the same shape as inline makeTickSnapshot', () => {
