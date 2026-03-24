@@ -647,6 +647,9 @@ const isAmbientPersona = (value: string | undefined): value is AmbientNpcPersona
 const isHelperPersona = (value: string | undefined): value is HelperPersonaId => Boolean(value && helperDialogueRegistry.hasPersona(value));
 const isHaterPersona = (value: string | undefined): value is HaterRegistryPersonaId => Boolean(value && haterDialogueRegistry.hasPersona(value));
 
+const isAmbientChannelAffinity = (channel: CadenceChannel): channel is AmbientChannelAffinity =>
+  channel === 'GLOBAL' || channel === 'SYNDICATE' || channel === 'DEAL_ROOM' || channel === 'LOBBY';
+
 const ambientContexts = new Set<AmbientNpcContext>(ambientNpcRegistry.listContexts());
 const helperContexts = new Set<HelperDialogueContext>(helperDialogueRegistry.listContexts());
 const haterContexts = new Set<HaterDialogueContext>(haterDialogueRegistry.listContexts());
@@ -824,6 +827,78 @@ export class NpcSuppressionPolicy {
     });
   }
 
+  private toCadenceLedger(ledger: NpcSuppressionLedger): CadenceLedger {
+    return Object.freeze({
+      lastEmissionAtByActor: ledger.lastAllowedAtByActor,
+      lastEmissionAtByChannel: Object.freeze({
+        GLOBAL: 0,
+        SYNDICATE: 0,
+        DEAL_ROOM: 0,
+        LOBBY: 0,
+        SYSTEM_SHADOW: 0,
+        NPC_SHADOW: 0,
+        ...Object.fromEntries(
+          (['GLOBAL', 'SYNDICATE', 'DEAL_ROOM', 'LOBBY', 'SYSTEM_SHADOW', 'NPC_SHADOW'] as const)
+            .map((ch) => [ch, lastHistoryTime(ledger.recentHistory, (r) => r.channel === ch && r.visibility === 'public')]),
+        ),
+      }),
+      lastEmissionAtByKind: Object.freeze({
+        AMBIENT: lastHistoryTime(ledger.recentHistory, (r) => r.actorKind === 'AMBIENT' && r.visibility === 'public'),
+        HELPER: lastHistoryTime(ledger.recentHistory, (r) => r.actorKind === 'HELPER' && r.visibility === 'public'),
+        HATER: lastHistoryTime(ledger.recentHistory, (r) => r.actorKind === 'HATER' && r.visibility === 'public'),
+        INVASION: lastHistoryTime(ledger.recentHistory, (r) => r.actorKind === 'INVASION' && r.visibility === 'public'),
+      }),
+      recentEmissionLog: Object.freeze(
+        ledger.recentHistory
+          .filter((r) => r.visibility === 'public')
+          .map((r) => Object.freeze({
+            requestId: r.requestId,
+            actorKey: r.actorKey,
+            actorKind: r.actorKind,
+            channel: r.channel,
+            context: r.context,
+            emittedAtMs: r.createdAtMs,
+            sceneState: r.sceneState,
+            priorityScore: r.priorityScore,
+            shadowOnly: false,
+          }))
+          .slice(-160),
+      ),
+      suppressionCountsByActor: ledger.suppressionCountsByActor,
+    });
+  }
+
+  public getCadenceRankings(
+    requests: readonly NpcSuppressionRequest[],
+    room: NpcSuppressionRoomState,
+    ledger: NpcSuppressionLedger,
+  ): readonly RankedCadenceDecision[] {
+    const cadenceLedger = this.toCadenceLedger(ledger);
+    return Object.freeze(
+      requests.map((request) => {
+        const actorProfile = ACTOR_PROFILES[request.actorKind];
+        const cadenceRequest: NpcCadenceRequest = Object.freeze({
+          requestId: request.requestId,
+          actorKind: request.actorKind,
+          actorId: request.actorId,
+          personaId: request.personaId,
+          channel: request.channel,
+          context: request.context,
+          createdAtMs: request.createdAtMs,
+          desiredAtMs: request.desiredAtMs,
+          lineCadenceFloorMs: actorProfile?.repeatGapMs ?? 12_000,
+          priorityHint: request.priorityHint,
+          force: request.force,
+          shadowPreferred: request.allowShadow,
+          sourceEventKind: request.sourceEventKind,
+          sourceEventId: request.sourceEventId,
+        });
+        const decision = npcCadencePolicy.evaluate(cadenceRequest, room, cadenceLedger);
+        return Object.freeze({ request: cadenceRequest, decision });
+      }),
+    );
+  }
+
   public evaluate(request: NpcSuppressionRequest, room: NpcSuppressionRoomState, ledger: NpcSuppressionLedger): NpcSuppressionDecision {
     const diagnostics: string[] = [];
     const actorKey = actorKeyOf(request);
@@ -880,44 +955,7 @@ export class NpcSuppressionPolicy {
       sourceEventId: request.sourceEventId,
     });
 
-    const cadence = npcCadencePolicy.evaluate(cadenceRequest, room, {
-      lastEmissionAtByActor: ledger.lastAllowedAtByActor,
-      lastEmissionAtByChannel: Object.freeze({
-        GLOBAL: 0,
-        SYNDICATE: 0,
-        DEAL_ROOM: 0,
-        LOBBY: 0,
-        SYSTEM_SHADOW: 0,
-        NPC_SHADOW: 0,
-        ...Object.fromEntries(
-          (['GLOBAL','SYNDICATE','DEAL_ROOM','LOBBY','SYSTEM_SHADOW','NPC_SHADOW'] as const)
-            .map((channel) => [channel, lastHistoryTime(ledger.recentHistory, (record) => record.channel === channel && record.visibility === 'public')]),
-        ),
-      }),
-      lastEmissionAtByKind: Object.freeze({
-        AMBIENT: lastHistoryTime(ledger.recentHistory, (record) => record.actorKind === 'AMBIENT' && record.visibility === 'public'),
-        HELPER: lastHistoryTime(ledger.recentHistory, (record) => record.actorKind === 'HELPER' && record.visibility === 'public'),
-        HATER: lastHistoryTime(ledger.recentHistory, (record) => record.actorKind === 'HATER' && record.visibility === 'public'),
-        INVASION: lastHistoryTime(ledger.recentHistory, (record) => record.actorKind === 'INVASION' && record.visibility === 'public'),
-      }),
-      recentEmissionLog: Object.freeze(
-        ledger.recentHistory
-          .filter((record) => record.visibility === 'public')
-          .map((record) => Object.freeze({
-            requestId: record.requestId,
-            actorKey: record.actorKey,
-            actorKind: record.actorKind,
-            channel: record.channel,
-            context: record.context,
-            emittedAtMs: record.createdAtMs,
-            sceneState: record.sceneState,
-            priorityScore: record.priorityScore,
-            shadowOnly: false,
-          }))
-          .slice(-160),
-      ),
-      suppressionCountsByActor: ledger.suppressionCountsByActor,
-    });
+    const cadence = npcCadencePolicy.evaluate(cadenceRequest, room, this.toCadenceLedger(ledger));
 
     diagnostics.push(...cadence.diagnostics.map((item) => `cadence:${item}`));
 
@@ -1267,7 +1305,7 @@ export class NpcSuppressionPolicy {
           perKind[kind] = false;
           continue;
         }
-        if (kind === 'AMBIENT') perKind[kind] = profile.ambientAllowed && sceneProfile.ambientAllowed;
+        if (kind === 'AMBIENT') perKind[kind] = profile.ambientAllowed && sceneProfile.ambientAllowed && isAmbientChannelAffinity(channel);
         else if (kind === 'HELPER') perKind[kind] = profile.helperAllowed;
         else if (kind === 'HATER') perKind[kind] = profile.haterAllowed;
         else perKind[kind] = true;

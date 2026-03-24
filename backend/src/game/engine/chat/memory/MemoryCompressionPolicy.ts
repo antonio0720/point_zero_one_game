@@ -687,7 +687,7 @@ export class MemoryCompressionPolicy {
           action = this.demoteAction(action, nextAction);
         }, 'same_room_cluster');
 
-        this.increment(actorCounts, record.actor.actorId);
+        histogramIncrement(actorCounts, record.actor.actorId);
         this.increment(counterpartCounts, record.counterpart?.actorId);
         this.increment(roomCounts, (record as any).context.roomId);
 
@@ -862,19 +862,15 @@ export class MemoryCompressionPolicy {
   ): MemoryCompressionAction {
     const ageMs = Math.max(0, referenceNow - createdAt);
 
-    if (score.tier === 'LEGEND') {
-      reasons.add('legend_salience');
-      return 'KEEP_HOT';
-    }
-    if (score.tier === 'CRITICAL') {
-      reasons.add('critical_salience');
+    if (isHotTier(score.tier)) {
+      reasons.add(score.tier === 'LEGEND' ? 'legend_salience' : 'critical_salience');
       return 'KEEP_HOT';
     }
     if (ageMs <= this.config.hotWindowMs || score.score01 >= this.config.keepHotBelowScore01) {
       reasons.add('hot_window');
       return 'KEEP_HOT';
     }
-    if (ageMs <= this.config.warmWindowMs || score.score01 >= this.config.keepWarmBelowScore01) {
+    if (ageMs <= this.config.warmWindowMs || score.score01 >= this.config.keepWarmBelowScore01 || isWarmTier(score.tier)) {
       reasons.add('warm_window');
       return 'KEEP_WARM';
     }
@@ -1308,8 +1304,8 @@ export class MemoryCompressionPolicy {
 
       if (cluster.length >= 2) {
         const avgSalience = cluster.reduce((s, e) => s + e.salience01, 0) / cluster.length;
-        const maxHostility = Math.max(...cluster.map((e) => e.hostility01));
-        const maxEmbarrassment = Math.max(...cluster.map((e) => e.embarrassment01));
+        const maxHostility = maxNumber(cluster.map((e) => e.hostility01));
+        const maxEmbarrassment = maxNumber(cluster.map((e) => e.embarrassment01));
         const counterparts = [...new Set(cluster.map((e) => e.counterpart?.actorId).filter(Boolean))];
         clusters.push({
           clusterId: `cluster:${event.memoryId}:${cluster.length}`,
@@ -1440,7 +1436,7 @@ export class MemoryCompressionPolicy {
 
   private dominantChannel(events: readonly ConversationMemoryEventRecord[]): string {
     const counts = new Map<string, number>();
-    for (const e of events) counts.set(e.context.channelId, (counts.get(e.context.channelId) ?? 0) + 1);
+    for (const e of events) histogramIncrement(counts, e.context.channelId);
     let best = 'GLOBAL'; let bestCount = 0;
     for (const [ch, count] of counts) { if (count > bestCount) { best = ch; bestCount = count; } }
     return best;
@@ -1450,7 +1446,7 @@ export class MemoryCompressionPolicy {
     const counts = new Map<string, number>();
     for (const e of events) {
       const cp = e.counterpart?.actorId;
-      if (cp) counts.set(cp, (counts.get(cp) ?? 0) + 1);
+      if (cp) histogramIncrement(counts, cp);
     }
     let best: string | undefined; let bestCount = 0;
     for (const [cp, count] of counts) { if (count > bestCount) { best = cp; bestCount = count; } }
@@ -1497,7 +1493,7 @@ export class MemoryCompressionPolicy {
     const lines: string[] = [];
     lines.push(`compression_diagnostic|player=${playerId}`);
     lines.push(`events=${utilization.eventUtilization01.toFixed(3)}|quotes=${utilization.quoteUtilization01.toFixed(3)}|callbacks=${utilization.callbackUtilization01.toFixed(3)}`);
-    lines.push(`overall=${utilization.overallUtilization01.toFixed(3)}|emergency=${utilization.needsEmergencyCompression}|soft=${utilization.needsSoftCompression}`);
+    lines.push(`overall=${utilization.overallUtilization01.toFixed(3)}|min_domain=${minNumber([utilization.eventUtilization01, utilization.quoteUtilization01, utilization.callbackUtilization01]).toFixed(3)}|emergency=${utilization.needsEmergencyCompression}|soft=${utilization.needsSoftCompression}`);
     lines.push(`rehydrations_available=${this.availableRehydrations(playerId)}`);
     return lines;
   }
@@ -2336,7 +2332,7 @@ export class MemoryCompressionPolicy {
     const eventUtil = snapshot.events.length / eventBudget;
     const quoteUtil = snapshot.quotes.length / quoteBudget;
     const callbackUtil = snapshot.callbacks.length / callbackBudget;
-    const maxUtil = Math.max(eventUtil, quoteUtil, callbackUtil);
+    const maxUtil = maxNumber([eventUtil, quoteUtil, callbackUtil]);
     return {
       eventUtilization01: clamp01(eventUtil),
       quoteUtilization01: clamp01(quoteUtil),
