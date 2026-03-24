@@ -103,6 +103,9 @@ import {
   getPhaseTwoState,
   getPhaseTwoCrossChannelSummary,
   getPhaseTwoCounterpartsBySelectionWeight,
+  getPhaseTwoMomentumView,
+  getPhaseTwoAxisDominanceMap,
+  selectPhaseTwoFocusedCounterpart,
   setPhaseTwoCounterpartProjectionsInState,
   setPhaseTwoDiagnosticsSnapshotInState,
   setPhaseTwoFocusedCounterpartInState,
@@ -237,6 +240,7 @@ export interface ChatEnginePhaseTwoBridgeNpcMessageInput {
   readonly channelId?: string | null;
   readonly roomId?: string | null;
   readonly severity?: ChatRelationshipPressureBand;
+  readonly responseClass?: ChatRelationshipResponseClass;
   readonly body: string;
   readonly tags?: readonly string[];
   readonly context?: string | null;
@@ -380,6 +384,15 @@ export class ChatEnginePhaseTwoBridge {
       tags: input.tags,
     };
     this.relationshipModel.noteNpcUtterance(utteranceInput);
+    if (input.responseClass != null) {
+      this.relationshipModel.noteGameEvent({
+        eventType: `NPC_RESPONSE:${input.responseClass}`,
+        counterpartId: input.counterpartId,
+        channelId: input.channelId,
+        createdAt: now,
+        summary: `NPC response class: ${input.responseClass}`,
+      });
+    }
   }
 
   /**
@@ -849,6 +862,48 @@ export class ChatEnginePhaseTwoBridge {
     return this.computeSyncDiffFromSlices(prevSlice, nextSlice);
   }
 
+  // ── Extended query surface ─────────────────────────────────────────────────
+
+  /**
+   * Returns the top counterpart projections ranked by selection weight.
+   * Delegates to the Phase 2 state module's weighted selection helper.
+   */
+  public getCounterpartsBySelectionWeight(
+    state: ChatStateWithPhaseTwo,
+  ): readonly ChatPhaseTwoCounterpartProjection[] {
+    return getPhaseTwoCounterpartsBySelectionWeight(state);
+  }
+
+  /**
+   * Returns the momentum view for a single counterpart from state.
+   * Useful for rising/falling threat detection in the NPC director.
+   */
+  public getMomentumView(
+    state: ChatStateWithPhaseTwo,
+    counterpartId: string,
+  ): ChatPhaseTwoMomentumView | undefined {
+    return getPhaseTwoMomentumView(state, counterpartId);
+  }
+
+  /**
+   * Returns the axis dominance map — which counterpart(s) dominate each
+   * relationship axis across the full tracked set.
+   */
+  public getAxisDominanceMap(state: ChatStateWithPhaseTwo): ChatPhaseTwoAxisDominanceMap {
+    return getPhaseTwoAxisDominanceMap(state);
+  }
+
+  /**
+   * Selects the best counterpart for a given channel + intent context.
+   * Returns the selection result including the selected ID, score, and basis.
+   */
+  public selectCounterpartForContext(
+    state: ChatStateWithPhaseTwo,
+    context: ChatPhaseTwoSelectionContext,
+  ): ChatPhaseTwoSelectionResult {
+    return selectPhaseTwoFocusedCounterpart(state, context);
+  }
+
   // ── Private helpers ───────────────────────────────────────────────────────
 
   /**
@@ -892,7 +947,7 @@ export class ChatEnginePhaseTwoBridge {
     prev: ChatPhaseTwoStateSlice,
     next: ChatPhaseTwoStateSlice,
   ): ChatEnginePhaseTwoBridgeSyncDiff {
-    const stateDiff = computePhaseTwoRelationshipDiff(prev, next);
+    const stateDiff: ChatPhaseTwoRelationshipDiff = computePhaseTwoRelationshipDiff(prev, next);
     return {
       addedCounterpartIds: stateDiff.addedCounterpartIds,
       removedCounterpartIds: stateDiff.removedCounterpartIds,
@@ -923,6 +978,14 @@ export function createChatEnginePhaseTwoBridge(
 }
 
 /**
+ * Builds a fresh default Phase 2 state slice.
+ * Useful for initializing a new session's Phase 2 state without a live bridge.
+ */
+export function buildDefaultPhaseTwoStateSlice(): ChatPhaseTwoStateSlice {
+  return createDefaultChatPhaseTwoStateSlice();
+}
+
+/**
  * Creates a bridge pre-hydrated from a persisted snapshot.
  * Convenience wrapper around createChatEnginePhaseTwoBridge.
  */
@@ -945,6 +1008,7 @@ export const ChatEnginePhaseTwoBridgeModule = Object.freeze({
   Bridge: ChatEnginePhaseTwoBridge,
   create: createChatEnginePhaseTwoBridge,
   createFromSnapshot: createChatEnginePhaseTwoBridgeFromSnapshot,
+  buildDefaultStateSlice: buildDefaultPhaseTwoStateSlice,
 } as const);
 
 // ============================================================================

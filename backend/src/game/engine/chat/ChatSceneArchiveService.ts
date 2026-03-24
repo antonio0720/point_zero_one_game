@@ -30,8 +30,17 @@ import type {
   SharedChatSceneCarryoverSummary,
   SharedChatSceneOutcome,
   SharedChatScenePlan,
+  SharedChatSceneArchetype,
+  SharedChatSceneOutcomeKind,
+  SharedChatMomentType,
 } from '../../../../../shared/contracts/chat/scene';
-import type {
+
+export type {
+  SharedChatSceneArchiveQuery,
+  SharedChatSceneArchiveRecord,
+  SharedChatSceneCarryoverSummary,
+  SharedChatSceneOutcome,
+  SharedChatScenePlan,
   SharedChatSceneArchetype,
   SharedChatSceneOutcomeKind,
   SharedChatMomentType,
@@ -45,12 +54,12 @@ export const DEFAULT_CHAT_SCENE_ARCHIVE_SERVICE_CONFIG: ChatSceneArchiveServiceC
   maxScenesPerPlayer: 2048,
 });
 
-interface PlayerSceneBucket {
+export interface PlayerSceneBucket {
   playerId: string;
   scenes: Map<string, SharedChatSceneArchiveRecord>;
 }
 
-function now(): number { return Date.now(); }
+export function now(): number { return Date.now(); }
 
 export class ChatSceneArchiveService {
   private readonly config: ChatSceneArchiveServiceConfig;
@@ -1159,7 +1168,7 @@ export interface SceneNarrativeWeight {
   readonly label: string;
 }
 
-const ARCHETYPE_BASE_WEIGHT: Record<SharedChatSceneArchetype, number> = {
+export const ARCHETYPE_BASE_WEIGHT: Readonly<Record<SharedChatSceneArchetype, number>> = Object.freeze({
   'BREACH_SCENE': 0.80,
   'TRAP_SCENE': 0.75,
   'RESCUE_SCENE': 0.70,
@@ -1170,15 +1179,15 @@ const ARCHETYPE_BASE_WEIGHT: Record<SharedChatSceneArchetype, number> = {
   'END_OF_RUN_RECKONING_SCENE': 0.95,
   'LONG_ARC_CALLBACK_SCENE': 0.88,
   'SEASON_EVENT_INTRUSION_SCENE': 0.72,
-};
+} as const);
 
-const OUTCOME_WEIGHT: Record<SharedChatSceneOutcomeKind, number> = {
+export const OUTCOME_WEIGHT: Readonly<Record<SharedChatSceneOutcomeKind, number>> = Object.freeze({
   'COMPLETED': 1.0,
   'INTERRUPTED': 0.65,
   'CANCELLED': 0.20,
   'TIMED_OUT': 0.30,
   'OVERRIDDEN': 0.50,
-};
+} as const);
 
 export function computeSceneNarrativeWeight(
   record: SharedChatSceneArchiveRecord,
@@ -1423,7 +1432,7 @@ export function buildContinuityBridgeEntries(
   return Object.freeze(entries.sort((a, b) => b.carryoverPressure01 - a.carryoverPressure01));
 }
 
-function computeCarryoverPressure(rec: SharedChatSceneArchiveRecord, nowMs: number): number {
+export function computeCarryoverPressure(rec: SharedChatSceneArchiveRecord, nowMs: number): number {
   let pressure = 0;
   if (!rec.outcome) pressure += 0.40;
   pressure += Math.min(rec.callbackAnchorIds.length * 0.08, 0.32);
@@ -2011,6 +2020,76 @@ export interface SceneArchiveQuerySummary {
   readonly totalCounterparts: number;
 }
 
+/** Get the human-readable label for a scene archetype. */
+export function getArchetypeLabel(archetype: SharedChatSceneArchetype): string {
+  return CHAT_SCENE_ARCHIVE_ARCHETYPE_LABELS[archetype] ?? archetype;
+}
+
+/** Get the human-readable label for a scene outcome kind. */
+export function getOutcomeLabel(kind: SharedChatSceneOutcomeKind): string {
+  return CHAT_SCENE_ARCHIVE_OUTCOME_LABELS[kind] ?? kind;
+}
+
+/** Build a display-ready scene title combining archetype label and outcome. */
+export function buildSceneDisplayTitle(record: SharedChatSceneArchiveRecord): string {
+  const arch = getArchetypeLabel(record.scene.archetype);
+  const outcome = record.outcome ? getOutcomeLabel(record.outcome.outcomeKind) : 'Unresolved';
+  return `${arch} — ${outcome}`;
+}
+
+/** Build an outcome breakdown with labels for UI rendering. */
+export function buildOutcomeBreakdownWithLabels(
+  records: readonly SharedChatSceneArchiveRecord[],
+): readonly { kind: SharedChatSceneOutcomeKind | 'UNRESOLVED'; label: string; count: number; ratio01: number }[] {
+  const counts: Record<string, number> = { UNRESOLVED: 0 };
+  for (const r of records) {
+    const key = r.outcome?.outcomeKind ?? 'UNRESOLVED';
+    counts[key] = (counts[key] ?? 0) + 1;
+  }
+  const total = Math.max(records.length, 1);
+  return Object.freeze(
+    Object.entries(counts)
+      .filter(([, count]) => count > 0)
+      .map(([key, count]) => Object.freeze({
+        kind: key as SharedChatSceneOutcomeKind | 'UNRESOLVED',
+        label: key === 'UNRESOLVED' ? 'Unresolved' : getOutcomeLabel(key as SharedChatSceneOutcomeKind),
+        count,
+        ratio01: count / total,
+      }))
+      .sort((a, b) => b.count - a.count),
+  );
+}
+
+/** Build an archetype breakdown with labels for UI rendering. */
+export function buildArchetypeBreakdownWithLabels(
+  records: readonly SharedChatSceneArchiveRecord[],
+): readonly { archetype: SharedChatSceneArchetype; label: string; count: number; ratio01: number }[] {
+  const counts = new Map<SharedChatSceneArchetype, number>();
+  for (const r of records) {
+    counts.set(r.scene.archetype, (counts.get(r.scene.archetype) ?? 0) + 1);
+  }
+  const total = Math.max(records.length, 1);
+  return Object.freeze(
+    [...counts.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .map(([archetype, count]) => Object.freeze({
+        archetype,
+        label: getArchetypeLabel(archetype),
+        count,
+        ratio01: count / total,
+      })),
+  );
+}
+
+/** Summarize the archive laws and defaults for diagnostics/display. */
+export function describeArchiveModule(): string {
+  const laws = CHAT_SCENE_ARCHIVE_LAWS.map((law, i) => `  ${i + 1}. ${law}`).join('\n');
+  const defaults = Object.entries(CHAT_SCENE_ARCHIVE_DEFAULTS)
+    .map(([k, v]) => `  ${k}=${v}`)
+    .join('\n');
+  return `[${CHAT_SCENE_ARCHIVE_MODULE_NAME} v${CHAT_SCENE_ARCHIVE_MODULE_VERSION}]\nLaws:\n${laws}\nDefaults:\n${defaults}`;
+}
+
 export function summarizeQueryResults(
   records: readonly SharedChatSceneArchiveRecord[],
   nowMs: number = Date.now(),
@@ -2052,3 +2131,87 @@ export function summarizeQueryResults(
     totalCounterparts,
   });
 }
+
+// ============================================================================
+// CHAT SCENE ARCHIVE SERVICE MODULE — Comprehensive authority object
+// ============================================================================
+
+export const ChatSceneArchiveServiceModule = Object.freeze({
+  // ── Module identity ────────────────────────────────────────────────────────
+  name: CHAT_SCENE_ARCHIVE_MODULE_NAME,
+  version: CHAT_SCENE_ARCHIVE_MODULE_VERSION,
+  laws: CHAT_SCENE_ARCHIVE_MODULE_LAWS,
+  extendedLaws: CHAT_SCENE_ARCHIVE_LAWS,
+  defaults: CHAT_SCENE_ARCHIVE_DEFAULTS,
+  descriptor: CHAT_SCENE_ARCHIVE_MODULE_DESCRIPTOR,
+
+  // ── Label maps ─────────────────────────────────────────────────────────────
+  archetypeLabels: CHAT_SCENE_ARCHIVE_ARCHETYPE_LABELS,
+  outcomeLabels: CHAT_SCENE_ARCHIVE_OUTCOME_LABELS,
+  archetypeBaseWeight: ARCHETYPE_BASE_WEIGHT,
+  outcomeWeight: OUTCOME_WEIGHT,
+
+  // ── Config ─────────────────────────────────────────────────────────────────
+  DEFAULT_CHAT_SCENE_ARCHIVE_SERVICE_CONFIG,
+
+  // ── Core service class ─────────────────────────────────────────────────────
+  ChatSceneArchiveService,
+
+  // ── Supporting classes ────────────────────────────────────────────────────
+  ScenePlaybackCursor,
+  SceneArchiveReplayLog,
+  SceneArchiveWatchBus,
+
+  // ── Factories ──────────────────────────────────────────────────────────────
+  createChatSceneArchiveService,
+  buildPlayerSceneBundle,
+
+  // ── Standalone query/filter ────────────────────────────────────────────────
+  querySceneArchive,
+  summarizeQueryResults,
+
+  // ── Narrative weight + thread graph ───────────────────────────────────────
+  computeSceneNarrativeWeight,
+  buildSceneThreadGraph,
+  computeSceneMomentumDecay,
+  buildContinuityBridgeEntries,
+  computeCarryoverPressure,
+  captureArchiveSnapshot,
+  compressOldResolvedScenes,
+  rankScenesByNarrativePressure,
+
+  // ── Label / display helpers ────────────────────────────────────────────────
+  getArchetypeLabel,
+  getOutcomeLabel,
+  buildSceneDisplayTitle,
+  buildOutcomeBreakdownWithLabels,
+  buildArchetypeBreakdownWithLabels,
+  describeArchiveModule,
+
+  // ── Record utilities ───────────────────────────────────────────────────────
+  isStaleUnresolvedScene,
+  describeSceneRecord,
+  sortScenesByCarryoverPressure,
+  findScenesWithSharedCallbacks,
+  computeSceneOverlap,
+  filterScenesByCounterpartCount,
+  aggregateArchetypeCounts,
+  getUniqueMomentTypes,
+  findLongestExpectedScene,
+  partitionScenesByResolution,
+  buildSceneSummaryLine,
+  sceneRevealPriority01,
+  buildMomentTypeFrequencyTable,
+  extractScenePlan,
+  buildCarryoverSummary,
+  computeArchiveFingerprint,
+  traceSceneRecord,
+  isHighFidelityScene,
+  buildSceneAnalyticsPayload,
+  computeArchetypeCoverageRatio,
+  findSharedCounterpartScenes,
+  detectCircularCallbackRisk,
+
+  // ── Primitive helpers ──────────────────────────────────────────────────────
+  now,
+} as const);

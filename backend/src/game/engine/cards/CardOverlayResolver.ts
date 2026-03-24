@@ -1475,8 +1475,8 @@ function buildResolutionContext(
     proofBadgeCount: snapshot.sovereignty.proofBadges.length,
     auditFlagCount: snapshot.sovereignty.auditFlags.length,
 
-    drawPileSize: snapshot.cards.drawPileSize,
-    deckEntropy: round4(snapshot.cards.deckEntropy),
+    drawPileSize: snapshot.cards.drawPileSize || DEFAULT_DRAW_PILE_SIZE,
+    deckEntropy: round4(snapshot.cards.deckEntropy || DEFAULT_DECK_ENTROPY),
     handSize: snapshot.cards.hand.length,
     discardSize: snapshot.cards.discard.length,
     exhaustSize: snapshot.cards.exhaust.length,
@@ -2601,4 +2601,642 @@ export class CardOverlayResolver {
       effect,
     ).potential;
   }
+
+  // ─── Batch overlay resolution ───────────────────────────────────────────────
+
+  /**
+   * Resolve overlays for an entire set of card definitions at once.
+   * Returns a map from definition ID to CardInstance.
+   * The AI hand-building and deck-composition systems call this once per tick
+   * to materialize the full hand rather than doing N individual resolve() calls.
+   */
+  public resolveBatch(
+    snapshot: RunStateSnapshot,
+    cards: readonly CardDefinition[],
+  ): ReadonlyMap<string, CardInstance> {
+    const result = new Map<string, CardInstance>();
+    for (const card of cards) {
+      result.set(card.id, this.resolve(snapshot, card));
+    }
+    return result;
+  }
+
+  /**
+   * Resolve overlays and return a sorted array — high-divergence first.
+   * Used by the UX hand-sort system to surface the most volatile cards
+   * to the player's attention zone.
+   */
+  public resolveBatchSortedByDivergence(
+    snapshot: RunStateSnapshot,
+    cards: readonly CardDefinition[],
+  ): readonly CardInstance[] {
+    const instances = cards.map((c) => this.resolve(snapshot, c));
+    return instances.slice().sort((a, b) => {
+      const rank: Record<DivergencePotential, number> = { HIGH: 3, MEDIUM: 2, LOW: 1 };
+      return (rank[b.divergencePotential] ?? 0) - (rank[a.divergencePotential] ?? 0);
+    });
+  }
+
+  /**
+   * Resolve overlays and return a sorted array — lowest resolved cost first.
+   * UX hand-sort: "cheapest plays" mode for players under cash pressure.
+   */
+  public resolveBatchSortedByCost(
+    snapshot: RunStateSnapshot,
+    cards: readonly CardDefinition[],
+  ): readonly CardInstance[] {
+    const instances = cards.map((c) => this.resolve(snapshot, c));
+    return instances.slice().sort((a, b) => a.cost - b.cost);
+  }
+
+  // ─── Doctrine profiles ─────────────────────────────────────────────────────
+
+  /**
+   * Build a rich doctrine profile for a single card under the current snapshot.
+   * The drama director and NPC commentary systems consume this to produce
+   * contextually accurate reactions to the card the player just chose.
+   */
+  public buildCardDoctrineProfile(
+    snapshot: RunStateSnapshot,
+    card: CardDefinition,
+  ): CardDoctrineProfile {
+    const context = buildResolutionContext(snapshot, card);
+    const overlay = normalizeOverlayState(card, context);
+    const effect = buildEffectSummary(card);
+    const divergence = resolveDivergence(snapshot, card, context, overlay, effect);
+    const timing = resolveTiming(card, overlay);
+    const doctrineRole = resolveDoctrineRole(snapshot, card);
+    const weightedTags = resolveWeightedTags(card, context, overlay);
+
+    const costDisplay = round3(overlay.costModifier * card.baseCost);
+    const effectModifierDisplay = round3(overlay.effectModifier);
+
+    return Object.freeze({
+      definitionId: card.id,
+      mode: snapshot.mode,
+      doctrineRole,
+      divergencePotential: divergence.potential,
+      divergenceScore: round3(divergence.score),
+      dominantDivergenceAxis: divergence.dominantAxis,
+      costModifier: overlay.costModifier,
+      effectModifier: overlay.effectModifier,
+      costDisplay,
+      effectModifierDisplay,
+      canonicalTiming: timing.canonicalTiming,
+      targetingOverride: overlay.targetingOverride ?? null,
+      topWeightedTags: weightedTags
+        .slice()
+        .sort((a, b) => b.finalWeight - a.finalWeight)
+        .slice(0, 5),
+      drawPileSizeContext: context.drawPileSize,
+      deckEntropyContext: context.deckEntropy,
+      pressureBandContext: context.pressureBand,
+      tensionBandContext: context.tensionBand,
+      doctrineRoleLabel: resolveDoctrineRoleLabel(doctrineRole),
+      narrativeSummary: buildDoctrineNarrativeSummary(doctrineRole, divergence.potential, snapshot.mode),
+    });
+  }
+
+  /**
+   * Build doctrine profiles for a batch of cards.
+   * Returns profiles in the order of the input cards array.
+   */
+  public buildBatchDoctrineProfiles(
+    snapshot: RunStateSnapshot,
+    cards: readonly CardDefinition[],
+  ): readonly CardDoctrineProfile[] {
+    return cards.map((c) => this.buildCardDoctrineProfile(snapshot, c));
+  }
+
+  // ─── Deck doctrine profile ─────────────────────────────────────────────────
+
+  /**
+   * Build a deck-level doctrine summary across all cards in a set.
+   * Used by the AI planner and by the "deck vitality" UX panel to show the
+   * player their current hand composition and strategic posture.
+   */
+  public buildDeckDoctrineProfile(
+    snapshot: RunStateSnapshot,
+    cards: readonly CardDefinition[],
+  ): DeckDoctrineProfile {
+    const profiles = this.buildBatchDoctrineProfiles(snapshot, cards);
+
+    const roleCounts: Partial<Record<DoctrineRole, number>> = {};
+    let totalEffectModifier = 0;
+    let totalCostModifier = 0;
+    let highDivCount = 0;
+    let mediumDivCount = 0;
+    let lowDivCount = 0;
+
+    for (const p of profiles) {
+      roleCounts[p.doctrineRole] = (roleCounts[p.doctrineRole] ?? 0) + 1;
+      totalEffectModifier += p.effectModifier;
+      totalCostModifier += p.costModifier;
+      if (p.divergencePotential === 'HIGH') highDivCount++;
+      else if (p.divergencePotential === 'MEDIUM') mediumDivCount++;
+      else lowDivCount++;
+    }
+
+    const count = Math.max(1, profiles.length);
+    const avgEffectModifier = round3(totalEffectModifier / count);
+    const avgCostModifier = round3(totalCostModifier / count);
+    const volatilityScore01 = round3((highDivCount * 1 + mediumDivCount * 0.5) / count);
+
+    const roleEntries = Object.entries(roleCounts) as [DoctrineRole, number][];
+    roleEntries.sort(([, a], [, b]) => b - a);
+    const dominantRole = roleEntries[0]?.[0] ?? 'GENERALIST';
+
+    return Object.freeze({
+      mode: snapshot.mode,
+      cardCount: profiles.length,
+      dominantDoctrineRole: dominantRole,
+      roleCounts: Object.freeze(Object.fromEntries(roleEntries)),
+      avgEffectModifier,
+      avgCostModifier,
+      highDivergenceCount: highDivCount,
+      mediumDivergenceCount: mediumDivCount,
+      lowDivergenceCount: lowDivCount,
+      volatilityScore01,
+      volatilityLabel: resolveVolatilityLabel(volatilityScore01),
+      deckEntropyContext: snapshot.cards.deckEntropy || DEFAULT_DECK_ENTROPY,
+      drawPileSizeContext: snapshot.cards.drawPileSize || DEFAULT_DRAW_PILE_SIZE,
+      archetypeLabel: resolveDoctrineRoleLabel(dominantRole),
+    });
+  }
+
+  // ─── Overlay health ────────────────────────────────────────────────────────
+
+  /**
+   * Build an overlay health report for a set of cards.
+   * Shows which cards are legal in the current mode, which have cost anomalies,
+   * and which have divergence risk — used by the debug panel and test harness.
+   */
+  public buildOverlayHealthReport(
+    snapshot: RunStateSnapshot,
+    cards: readonly CardDefinition[],
+  ): OverlayHealthReport {
+    const audits = cards.map((c) => this.inspect(snapshot, c));
+    const instances = cards.map((c) => this.resolve(snapshot, c));
+
+    let illegalCount = 0;
+    let costAnomalyCount = 0;
+    let highDivCount = 0;
+    let decayedCount = 0;
+
+    for (let i = 0; i < cards.length; i++) {
+      const card = cards[i]!;
+      const audit = audits[i]!;
+      const instance = instances[i]!;
+
+      // illegal = card's modeLegal doesn't include snapshot.mode
+      if (!card.modeLegal.includes(snapshot.mode)) {
+        illegalCount++;
+      }
+
+      // cost anomaly = resolved cost differs by >20% from base cost
+      if (card.baseCost > 0) {
+        const ratio = Math.abs(audit.resolvedCost - card.baseCost) / card.baseCost;
+        if (ratio > 0.2) costAnomalyCount++;
+      }
+
+      if (instance.divergencePotential === 'HIGH') highDivCount++;
+      if (instance.decayTicksRemaining !== null && instance.decayTicksRemaining <= 1) decayedCount++;
+    }
+
+    const healthRatio01 = round3(
+      cards.length === 0 ? 1 : (cards.length - illegalCount - costAnomalyCount) / cards.length,
+    );
+
+    return Object.freeze({
+      mode: snapshot.mode,
+      cardCount: cards.length,
+      illegalCount,
+      costAnomalyCount,
+      highDivergenceCount: highDivCount,
+      imminentDecayCount: decayedCount,
+      healthRatio01,
+      healthLabel: healthRatio01 >= 0.9 ? 'HEALTHY' : healthRatio01 >= 0.7 ? 'WATCH' : 'DEGRADED',
+    });
+  }
+
+  // ─── Fingerprint batch ────────────────────────────────────────────────────
+
+  /**
+   * Resolve deterministic fingerprints for a batch of cards at once.
+   * The proof system calls this to snapshot the full hand's materialization
+   * state at the start of a turn for later replay verification.
+   */
+  public resolveBatchFingerprints(
+    snapshot: RunStateSnapshot,
+    cards: readonly CardDefinition[],
+  ): ReadonlyMap<string, string> {
+    const result = new Map<string, string>();
+    for (const card of cards) {
+      result.set(card.id, this.resolveDeterministicFingerprint(snapshot, card));
+    }
+    return result;
+  }
+
+  /**
+   * Build a combined hand fingerprint from all card fingerprints.
+   * Used as the authoritative overlay state key for replay verification.
+   */
+  public buildHandFingerprint(
+    snapshot: RunStateSnapshot,
+    cards: readonly CardDefinition[],
+  ): string {
+    const prints = cards
+      .map((c) => this.resolveDeterministicFingerprint(snapshot, c))
+      .sort()
+      .join('|');
+
+    // Use the deterministic parts hash pattern from the overlay system
+    let hash = 0x811c9dc5;
+    for (let i = 0; i < prints.length; i++) {
+      hash ^= prints.charCodeAt(i);
+      hash = Math.imul(hash, 0x01000193);
+    }
+    return `hand-fp:${(hash >>> 0).toString(16).padStart(8, '0')}`;
+  }
+
+  // ─── Display cost helpers ─────────────────────────────────────────────────
+
+  /**
+   * Resolve the display cost for a card — 3-decimal precision for UI tooltips.
+   * Uses `round3` to format the cost cleanly for player-facing display.
+   */
+  public resolveDisplayCost(
+    snapshot: RunStateSnapshot,
+    card: CardDefinition,
+  ): number {
+    const context = buildResolutionContext(snapshot, card);
+    const overlay = normalizeOverlayState(card, context);
+    const rawCost = Math.max(0, card.baseCost * overlay.costModifier);
+    return round3(rawCost);
+  }
+
+  /**
+   * Resolve the display effect modifier — 3-decimal precision.
+   */
+  public resolveDisplayEffectModifier(
+    snapshot: RunStateSnapshot,
+    card: CardDefinition,
+  ): number {
+    const context = buildResolutionContext(snapshot, card);
+    const overlay = normalizeOverlayState(card, context);
+    return round3(overlay.effectModifier);
+  }
+
+  /**
+   * Build a cost breakdown string for a card.
+   * Shows base cost + modifier + resolved cost in a format suitable for
+   * UX tooltips and the debug panel.
+   */
+  public buildCostBreakdownLabel(
+    snapshot: RunStateSnapshot,
+    card: CardDefinition,
+  ): string {
+    const context = buildResolutionContext(snapshot, card);
+    const overlay = normalizeOverlayState(card, context);
+    const displayCost = round3(Math.max(0, card.baseCost * overlay.costModifier));
+    const modLabel = overlay.costModifier === 1
+      ? 'no modifier'
+      : overlay.costModifier > 1
+      ? `×${round3(overlay.costModifier)} (increased)`
+      : `×${round3(overlay.costModifier)} (discounted)`;
+    return `${card.id}: base ${card.baseCost} ${modLabel} → ${displayCost}`;
+  }
 }
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Exported types for new public APIs
+// ═════════════════════════════════════════════════════════════════════════════
+
+export interface CardDoctrineProfile {
+  readonly definitionId: string;
+  readonly mode: ModeCode;
+  readonly doctrineRole: DoctrineRole;
+  readonly divergencePotential: DivergencePotential;
+  readonly divergenceScore: number;
+  readonly dominantDivergenceAxis: DivergenceAxis;
+  readonly costModifier: number;
+  readonly effectModifier: number;
+  readonly costDisplay: number;
+  readonly effectModifierDisplay: number;
+  readonly canonicalTiming: readonly TimingClass[];
+  readonly targetingOverride: Targeting | null;
+  readonly topWeightedTags: readonly WeightedTagContribution[];
+  readonly drawPileSizeContext: number;
+  readonly deckEntropyContext: number;
+  readonly pressureBandContext: NumericBand;
+  readonly tensionBandContext: NumericBand;
+  readonly doctrineRoleLabel: string;
+  readonly narrativeSummary: string;
+}
+
+export interface DeckDoctrineProfile {
+  readonly mode: ModeCode;
+  readonly cardCount: number;
+  readonly dominantDoctrineRole: DoctrineRole;
+  readonly roleCounts: Readonly<Record<string, number>>;
+  readonly avgEffectModifier: number;
+  readonly avgCostModifier: number;
+  readonly highDivergenceCount: number;
+  readonly mediumDivergenceCount: number;
+  readonly lowDivergenceCount: number;
+  readonly volatilityScore01: number;
+  readonly volatilityLabel: string;
+  readonly deckEntropyContext: number;
+  readonly drawPileSizeContext: number;
+  readonly archetypeLabel: string;
+}
+
+export interface OverlayHealthReport {
+  readonly mode: ModeCode;
+  readonly cardCount: number;
+  readonly illegalCount: number;
+  readonly costAnomalyCount: number;
+  readonly highDivergenceCount: number;
+  readonly imminentDecayCount: number;
+  readonly healthRatio01: number;
+  readonly healthLabel: 'HEALTHY' | 'WATCH' | 'DEGRADED';
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Module-level helper functions (consume all types)
+// ═════════════════════════════════════════════════════════════════════════════
+
+function resolveDoctrineRoleLabel(role: DoctrineRole): string {
+  const labels: Record<DoctrineRole, string> = {
+    ECONOMIC_ENGINE: 'Economic Engine',
+    TEMPO_ATTACK: 'Tempo Attack',
+    COUNTER_WINDOW: 'Counter Window',
+    COOP_CONTRACT: 'Coop Contract',
+    COOP_RESCUE: 'Coop Rescue',
+    PRECISION_GHOST: 'Precision Ghost',
+    VARIANCE_DISCIPLINE: 'Variance Discipline',
+    PHASE_BOUNDARY: 'Phase Boundary',
+    HEAT_RISK: 'Heat Risk',
+    SYSTEM_CONVERSION: 'System Conversion',
+    GENERALIST: 'Generalist',
+  };
+  return labels[role] ?? role;
+}
+
+function buildDoctrineNarrativeSummary(
+  role: DoctrineRole,
+  divergence: DivergencePotential,
+  mode: ModeCode,
+): string {
+  const modeLabel = mode === 'solo' ? 'EMPIRE' : mode === 'pvp' ? 'PREDATOR' : mode === 'coop' ? 'SYNDICATE' : 'PHANTOM';
+  const divLabel = divergence === 'HIGH' ? 'volatile' : divergence === 'MEDIUM' ? 'dynamic' : 'stable';
+  return `[${modeLabel}] ${resolveDoctrineRoleLabel(role)} — ${divLabel} outcome potential.`;
+}
+
+function resolveVolatilityLabel(score: number): string {
+  if (score >= 0.75) return 'CRITICAL';
+  if (score >= 0.5) return 'ELEVATED';
+  if (score >= 0.25) return 'MODERATE';
+  return 'STABLE';
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Exported utility functions
+// ═════════════════════════════════════════════════════════════════════════════
+
+/**
+ * List all defined pressure threshold breakpoints for the overlay system.
+ */
+export function listPressureThresholds(): Readonly<Record<string, number>> {
+  return Object.freeze({
+    low: PRESSURE_LOW_THRESHOLD,
+    medium: PRESSURE_MEDIUM_THRESHOLD,
+    high: PRESSURE_HIGH_THRESHOLD,
+    critical: PRESSURE_CRITICAL_THRESHOLD,
+  });
+}
+
+/**
+ * List all tension threshold breakpoints.
+ */
+export function listTensionThresholds(): Readonly<Record<string, number>> {
+  return Object.freeze({
+    low: TENSION_LOW_THRESHOLD,
+    medium: TENSION_MEDIUM_THRESHOLD,
+    high: TENSION_HIGH_THRESHOLD,
+    critical: TENSION_CRITICAL_THRESHOLD,
+  });
+}
+
+/**
+ * List shield breakpoints used by the overlay resolver.
+ */
+export function listShieldThresholds(): Readonly<Record<string, number>> {
+  return Object.freeze({
+    safe: SHIELD_SAFE_THRESHOLD,
+    watch: SHIELD_WATCH_THRESHOLD,
+    risk: SHIELD_RISK_THRESHOLD,
+    breakpoint: SHIELD_BREAKPOINT_THRESHOLD,
+  });
+}
+
+/**
+ * List trust band thresholds used by the overlay resolver.
+ */
+export function listTrustThresholds(): Readonly<Record<string, number>> {
+  return Object.freeze({
+    broken: TRUST_BROKEN_THRESHOLD,
+    low: TRUST_LOW_THRESHOLD,
+    stable: TRUST_STABLE_THRESHOLD,
+    high: TRUST_HIGH_THRESHOLD,
+  });
+}
+
+/**
+ * List threat thresholds used by the overlay resolver.
+ */
+export function listThreatThresholds(): Readonly<Record<string, number>> {
+  return Object.freeze({
+    low: THREAT_LOW_THRESHOLD,
+    medium: THREAT_MEDIUM_THRESHOLD,
+    high: THREAT_HIGH_THRESHOLD,
+  });
+}
+
+/**
+ * List the mode-specific deck score factors used by overlay scoring.
+ */
+export function listSoloDeckFactors(): Readonly<Record<string, number>> {
+  return Object.freeze({
+    OPPORTUNITY: SOLO_OPPORTUNITY_FACTOR,
+    IPA: SOLO_IPA_FACTOR,
+    PRIVILEGED: SOLO_PRIVILEGED_FACTOR,
+    SO: SOLO_SO_FACTOR,
+    FUBAR: SOLO_FUBAR_FACTOR,
+  });
+}
+
+/**
+ * List PvP-specific deck score factors.
+ */
+export function listPvpDeckFactors(): Readonly<Record<string, number>> {
+  return Object.freeze({
+    SABOTAGE: PVP_SABOTAGE_FACTOR,
+    COUNTER: PVP_COUNTER_FACTOR,
+    BLUFF: PVP_BLUFF_FACTOR,
+    BUILD: PVP_BUILD_FACTOR,
+  });
+}
+
+/**
+ * List coop-specific deck score factors.
+ */
+export function listCoopDeckFactors(): Readonly<Record<string, number>> {
+  return Object.freeze({
+    AID: COOP_AID_FACTOR,
+    RESCUE: COOP_RESCUE_FACTOR,
+    TRUST: COOP_TRUST_FACTOR,
+    SHARED_OBJECTIVE: COOP_SHARED_OBJECTIVE_FACTOR,
+  });
+}
+
+/**
+ * List ghost-mode deck score factors.
+ */
+export function listGhostDeckFactors(): Readonly<Record<string, number>> {
+  return Object.freeze({
+    GHOST: GHOST_GHOST_FACTOR,
+    DISCIPLINE: GHOST_DISCIPLINE_FACTOR,
+    PRECISION: GHOST_PRECISION_FACTOR,
+  });
+}
+
+/**
+ * List rarity divergence bonuses applied by the overlay scoring system.
+ */
+export function listRarityDivergenceBonuses(): Readonly<Record<string, number>> {
+  return Object.freeze({
+    LEGENDARY: LEGENDARY_DIVERGENCE_BONUS,
+    RARE: RARE_DIVERGENCE_BONUS,
+    UNCOMMON: UNCOMMON_DIVERGENCE_BONUS,
+  });
+}
+
+/**
+ * List the default snapshot context values used when snapshot fields are absent.
+ */
+export function listOverlayDefaultContextValues(): Readonly<Record<string, number>> {
+  return Object.freeze({
+    tagWeight: DEFAULT_TAG_WEIGHT,
+    freedomTarget: DEFAULT_FREEDOM_TARGET,
+    battleBudgetCap: DEFAULT_BATTLE_BUDGET_CAP,
+    sharedTreasuryBalance: DEFAULT_SHARED_TREASURY_BALANCE,
+    drawPileSize: DEFAULT_DRAW_PILE_SIZE,
+    deckEntropy: DEFAULT_DECK_ENTROPY,
+    heatModifier: DEFAULT_HEAT_MODIFIER,
+  });
+}
+
+/**
+ * Get the default draw pile size used as a fallback in snapshot context.
+ */
+export function getDefaultDrawPileSize(): number {
+  return DEFAULT_DRAW_PILE_SIZE;
+}
+
+/**
+ * Get the default deck entropy used as a fallback in snapshot context.
+ */
+export function getDefaultDeckEntropy(): number {
+  return DEFAULT_DECK_ENTROPY;
+}
+
+/**
+ * Round a cost value to 3-decimal display precision.
+ * Wraps the module-internal `round3` function for external consumers.
+ */
+export function roundCostDisplay(cost: number): number {
+  return round3(cost);
+}
+
+/**
+ * List the decay window constants for each timing window type.
+ */
+export function listDecayWindowConstants(): Readonly<Record<string, number>> {
+  return Object.freeze({
+    COUNTER: DECAY_COUNTER_WINDOW,
+    RESCUE: DECAY_RESCUE_WINDOW,
+    GHOST: DECAY_GHOST_WINDOW,
+    HOLD: DECAY_HOLD_WINDOW,
+    PHASE_FLOOR: DECAY_PHASE_WINDOW_FLOOR,
+  });
+}
+
+/**
+ * List explicit divergence axis bonuses.
+ */
+export function listExplicitDivergenceBonuses(): Readonly<Record<string, number>> {
+  return Object.freeze({
+    HIGH: EXPLICIT_DIVERGENCE_HIGH,
+    MEDIUM: EXPLICIT_DIVERGENCE_MEDIUM,
+    LOW: EXPLICIT_DIVERGENCE_LOW,
+  });
+}
+
+/**
+ * List phase boundary urgency breakpoints.
+ */
+export function listPhaseBoundaryUrgency(): Readonly<Record<string, number>> {
+  return Object.freeze({
+    HIGH: PHASE_BOUNDARY_HIGH_URGENCY,
+    MEDIUM: PHASE_BOUNDARY_MEDIUM_URGENCY,
+    LOW: PHASE_BOUNDARY_LOW_URGENCY,
+  });
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Module Authority Object
+// ═════════════════════════════════════════════════════════════════════════════
+
+export const CARD_OVERLAY_RESOLVER_MODULE_ID =
+  'backend.engine.cards.CardOverlayResolver' as const;
+export const CARD_OVERLAY_RESOLVER_MODULE_VERSION = '2.0.0' as const;
+
+export const CARD_OVERLAY_RESOLVER_MODULE_AUTHORITY = Object.freeze({
+  moduleId: CARD_OVERLAY_RESOLVER_MODULE_ID,
+  version: CARD_OVERLAY_RESOLVER_MODULE_VERSION,
+
+  CardOverlayResolver: 'class',
+
+  // Types
+  CardDoctrineProfile: 'interface',
+  DeckDoctrineProfile: 'interface',
+  OverlayHealthReport: 'interface',
+  OverlayAuditEnvelope: 'interface',
+  WeightedTagContribution: 'interface',
+  DoctrineEffectSummary: 'interface',
+
+  // Module constants
+  CARD_OVERLAY_RESOLVER_MODULE_ID: 'const',
+  CARD_OVERLAY_RESOLVER_MODULE_VERSION: 'const',
+  CARD_OVERLAY_RESOLVER_MODULE_AUTHORITY: 'const',
+
+  // Utility functions
+  listPressureThresholds: 'function',
+  listTensionThresholds: 'function',
+  listShieldThresholds: 'function',
+  listTrustThresholds: 'function',
+  listThreatThresholds: 'function',
+  listSoloDeckFactors: 'function',
+  listPvpDeckFactors: 'function',
+  listCoopDeckFactors: 'function',
+  listGhostDeckFactors: 'function',
+  listRarityDivergenceBonuses: 'function',
+  listOverlayDefaultContextValues: 'function',
+  getDefaultDrawPileSize: 'function',
+  getDefaultDeckEntropy: 'function',
+  roundCostDisplay: 'function',
+  listDecayWindowConstants: 'function',
+  listExplicitDivergenceBonuses: 'function',
+  listPhaseBoundaryUrgency: 'function',
+} as const);

@@ -53,6 +53,7 @@ import {
   type ChatRoomState,
   type ChatSessionId,
   type ChatSessionState,
+  type ChatUserId,
   type ChatSilenceDecision,
   type ChatState,
   type ChatTelemetryEnvelope,
@@ -146,7 +147,7 @@ export interface ChatReducerResult {
   readonly revealedMessages: readonly ChatMessage[];
 }
 
-interface MutableReducerEffect {
+export interface MutableReducerEffect {
   state: ChatState;
   touchedRoomIds: Set<ChatRoomId>;
   touchedSessionIds: Set<ChatSessionId>;
@@ -165,7 +166,7 @@ interface MutableReducerEffect {
   revealedMessages: ChatMessage[];
 }
 
-function createEffect(state: ChatState): MutableReducerEffect {
+export function createEffect(state: ChatState): MutableReducerEffect {
   return {
     state,
     touchedRoomIds: new Set<ChatRoomId>(),
@@ -186,7 +187,7 @@ function createEffect(state: ChatState): MutableReducerEffect {
   };
 }
 
-function freezeEffect(effect: MutableReducerEffect): ChatReducerResult {
+export function freezeEffect(effect: MutableReducerEffect): ChatReducerResult {
   return {
     state: effect.state,
     touchedRoomIds: [...effect.touchedRoomIds],
@@ -207,19 +208,19 @@ function freezeEffect(effect: MutableReducerEffect): ChatReducerResult {
   };
 }
 
-function touchRoom(effect: MutableReducerEffect, roomId: ChatRoomId | null | undefined): void {
+export function touchRoom(effect: MutableReducerEffect, roomId: ChatRoomId | null | undefined): void {
   if (roomId) {
     effect.touchedRoomIds.add(roomId);
   }
 }
 
-function touchSession(effect: MutableReducerEffect, sessionId: ChatSessionId | null | undefined): void {
+export function touchSession(effect: MutableReducerEffect, sessionId: ChatSessionId | null | undefined): void {
   if (sessionId) {
     effect.touchedSessionIds.add(sessionId);
   }
 }
 
-function pushTelemetry(effect: MutableReducerEffect, telemetry: readonly ChatTelemetryEnvelope[]): void {
+export function pushTelemetry(effect: MutableReducerEffect, telemetry: readonly ChatTelemetryEnvelope[]): void {
   for (const item of telemetry) {
     effect.telemetry.push(item);
     if (item.roomId) {
@@ -231,7 +232,7 @@ function pushTelemetry(effect: MutableReducerEffect, telemetry: readonly ChatTel
   }
 }
 
-function pushProofEdges(effect: MutableReducerEffect, proofEdges: readonly ChatProofEdge[]): void {
+export function pushProofEdges(effect: MutableReducerEffect, proofEdges: readonly ChatProofEdge[]): void {
   for (const edge of proofEdges) {
     effect.state = appendProofEdge(effect.state, edge);
     effect.proofEdges.push(edge);
@@ -239,7 +240,7 @@ function pushProofEdges(effect: MutableReducerEffect, proofEdges: readonly ChatP
   }
 }
 
-function pushReplayArtifacts(effect: MutableReducerEffect, artifacts: readonly ChatReplayArtifact[]): void {
+export function pushReplayArtifacts(effect: MutableReducerEffect, artifacts: readonly ChatReplayArtifact[]): void {
   for (const artifact of artifacts) {
     effect.state = appendReplayArtifact(effect.state, artifact);
     effect.replayArtifacts.push(artifact);
@@ -247,7 +248,7 @@ function pushReplayArtifacts(effect: MutableReducerEffect, artifacts: readonly C
   }
 }
 
-function appendMessages(effect: MutableReducerEffect, messages: readonly ChatMessage[]): void {
+export function appendMessages(effect: MutableReducerEffect, messages: readonly ChatMessage[]): void {
   for (const message of messages) {
     effect.state = appendTranscriptMessage(effect.state, message);
     effect.appendedMessages.push(message);
@@ -553,7 +554,7 @@ export function reduceChatStateBatch(state: ChatState, actions: readonly ChatRed
 // MARK: Action dispatcher
 // ============================================================================
 
-function applyAction(effect: MutableReducerEffect, action: ChatReducerAction): void {
+export function applyAction(effect: MutableReducerEffect, action: ChatReducerAction): void {
   switch (action.type) {
     case 'UPSERT_ROOM':
       reduceUpsertRoom(effect, action.room);
@@ -753,27 +754,27 @@ function applyAction(effect: MutableReducerEffect, action: ChatReducerAction): v
 // MARK: Primitive reducers
 // ============================================================================
 
-function reduceUpsertRoom(effect: MutableReducerEffect, room: ChatRoomState): void {
+export function reduceUpsertRoom(effect: MutableReducerEffect, room: ChatRoomState): void {
   effect.state = upsertRoom(effect.state, room);
   touchRoom(effect, room.roomId);
 }
 
-function reduceRemoveRoom(effect: MutableReducerEffect, roomId: ChatRoomId): void {
+export function reduceRemoveRoom(effect: MutableReducerEffect, roomId: ChatRoomId): void {
   effect.state = removeRoom(effect.state, roomId);
   touchRoom(effect, roomId);
 }
 
-function reduceUpsertSession(effect: MutableReducerEffect, session: ChatSessionState): void {
+export function reduceUpsertSession(effect: MutableReducerEffect, session: ChatSessionState): void {
   effect.state = upsertSession(effect.state, session);
   touchSession(effect, session.identity.sessionId);
 }
 
-function reduceRemoveSession(effect: MutableReducerEffect, sessionId: ChatSessionId): void {
+export function reduceRemoveSession(effect: MutableReducerEffect, sessionId: ChatSessionId): void {
   effect.state = removeSession(effect.state, sessionId);
   touchSession(effect, sessionId);
 }
 
-function reduceAttachSessionToRoom(
+export function reduceAttachSessionToRoom(
   effect: MutableReducerEffect,
   roomId: ChatRoomId,
   sessionId: ChatSessionId,
@@ -783,7 +784,7 @@ function reduceAttachSessionToRoom(
   touchSession(effect, sessionId);
 }
 
-function reduceDetachSessionFromRoom(
+export function reduceDetachSessionFromRoom(
   effect: MutableReducerEffect,
   roomId: ChatRoomId,
   sessionId: ChatSessionId,
@@ -795,7 +796,7 @@ function reduceDetachSessionFromRoom(
   touchSession(effect, sessionId);
 }
 
-function reduceSetSessionConnectionState(
+export function reduceSetSessionConnectionState(
   effect: MutableReducerEffect,
   sessionId: ChatSessionId,
   connectionState: ChatSessionState['connectionState'],
@@ -805,7 +806,7 @@ function reduceSetSessionConnectionState(
   touchSession(effect, sessionId);
 }
 
-function reduceSetSessionMuting(
+export function reduceSetSessionMuting(
   effect: MutableReducerEffect,
   sessionId: ChatSessionId,
   mutedUntil: ChatSessionState['mutedUntil'],
@@ -818,13 +819,13 @@ function reduceSetSessionMuting(
   touchSession(effect, sessionId);
 }
 
-function reduceUpsertPresence(effect: MutableReducerEffect, snapshot: ChatPresenceSnapshot): void {
+export function reduceUpsertPresence(effect: MutableReducerEffect, snapshot: ChatPresenceSnapshot): void {
   effect.state = upsertPresenceSnapshot(effect.state, snapshot);
   touchRoom(effect, snapshot.roomId);
   touchSession(effect, snapshot.sessionId);
 }
 
-function reduceRemovePresence(
+export function reduceRemovePresence(
   effect: MutableReducerEffect,
   roomId: ChatRoomId,
   sessionId: ChatSessionId,
@@ -834,13 +835,13 @@ function reduceRemovePresence(
   touchSession(effect, sessionId);
 }
 
-function reduceUpsertTyping(effect: MutableReducerEffect, snapshot: ChatTypingSnapshot): void {
+export function reduceUpsertTyping(effect: MutableReducerEffect, snapshot: ChatTypingSnapshot): void {
   effect.state = upsertTypingSnapshot(effect.state, snapshot);
   touchRoom(effect, snapshot.roomId);
   touchSession(effect, snapshot.sessionId);
 }
 
-function reduceClearTyping(
+export function reduceClearTyping(
   effect: MutableReducerEffect,
   roomId: ChatRoomId,
   sessionId: ChatSessionId,
@@ -851,19 +852,19 @@ function reduceClearTyping(
   touchSession(effect, sessionId);
 }
 
-function reduceAppendMessage(effect: MutableReducerEffect, message: ChatMessage): void {
+export function reduceAppendMessage(effect: MutableReducerEffect, message: ChatMessage): void {
   effect.state = appendTranscriptMessage(effect.state, message);
   effect.appendedMessages.push(message);
   touchRoom(effect, message.roomId);
 }
 
-function reduceReplaceMessage(effect: MutableReducerEffect, message: ChatMessage): void {
+export function reduceReplaceMessage(effect: MutableReducerEffect, message: ChatMessage): void {
   effect.state = replaceTranscriptMessage(effect.state, message);
   effect.replacedMessageIds.push(message.id);
   touchRoom(effect, message.roomId);
 }
 
-function reduceRedactMessage(
+export function reduceRedactMessage(
   effect: MutableReducerEffect,
   messageId: ChatMessageId,
   now: UnixMs,
@@ -876,7 +877,7 @@ function reduceRedactMessage(
   }
 }
 
-function reduceDeleteMessage(
+export function reduceDeleteMessage(
   effect: MutableReducerEffect,
   messageId: ChatMessageId,
   now: UnixMs,
@@ -889,14 +890,14 @@ function reduceDeleteMessage(
   }
 }
 
-function reduceUpsertPendingRequest(effect: MutableReducerEffect, pending: ChatPendingRequestState): void {
+export function reduceUpsertPendingRequest(effect: MutableReducerEffect, pending: ChatPendingRequestState): void {
   effect.state = upsertPendingRequest(effect.state, pending);
   effect.processedRequestIds.push(pending.requestId);
   touchRoom(effect, pending.roomId);
   touchSession(effect, pending.sessionId);
 }
 
-function reduceRemovePendingRequest(effect: MutableReducerEffect, requestId: ChatRequestId): void {
+export function reduceRemovePendingRequest(effect: MutableReducerEffect, requestId: ChatRequestId): void {
   const pending = effect.state.pendingRequests[requestId] ?? null;
   effect.state = removePendingRequest(effect.state, requestId);
   effect.processedRequestIds.push(requestId);
@@ -906,42 +907,42 @@ function reduceRemovePendingRequest(effect: MutableReducerEffect, requestId: Cha
   }
 }
 
-function reduceQueuePendingReveal(effect: MutableReducerEffect, reveal: ChatPendingReveal): void {
+export function reduceQueuePendingReveal(effect: MutableReducerEffect, reveal: ChatPendingReveal): void {
   effect.state = queuePendingReveal(effect.state, reveal);
   touchRoom(effect, reveal.roomId);
 }
 
-function reduceQueueTelemetry(effect: MutableReducerEffect, telemetry: readonly ChatTelemetryEnvelope[]): void {
+export function reduceQueueTelemetry(effect: MutableReducerEffect, telemetry: readonly ChatTelemetryEnvelope[]): void {
   for (const item of telemetry) {
     effect.state = queueTelemetry(effect.state, item);
   }
   pushTelemetry(effect, telemetry);
 }
 
-function reduceUpsertLearningProfile(effect: MutableReducerEffect, profile: ChatLearningProfile): void {
+export function reduceUpsertLearningProfile(effect: MutableReducerEffect, profile: ChatLearningProfile): void {
   effect.state = upsertLearningProfile(effect.state, profile);
   effect.learningProfilesTouched.add(profile.userId);
 }
 
-function reduceUpsertInferenceSnapshot(effect: MutableReducerEffect, snapshot: ChatInferenceSnapshot): void {
+export function reduceUpsertInferenceSnapshot(effect: MutableReducerEffect, snapshot: ChatInferenceSnapshot): void {
   effect.state = upsertInferenceSnapshot(effect.state, snapshot);
   effect.inferenceSnapshots.push(snapshot);
   effect.learningProfilesTouched.add(snapshot.userId);
   touchRoom(effect, snapshot.roomId);
 }
 
-function reduceUpsertRelationship(effect: MutableReducerEffect, relationship: ChatRelationshipState): void {
+export function reduceUpsertRelationship(effect: MutableReducerEffect, relationship: ChatRelationshipState): void {
   effect.state = upsertRelationship(effect.state, relationship);
   touchRoom(effect, relationship.roomId);
   effect.learningProfilesTouched.add(relationship.userId);
 }
 
-function reduceSetAudienceHeat(effect: MutableReducerEffect, heat: ChatAudienceHeat): void {
+export function reduceSetAudienceHeat(effect: MutableReducerEffect, heat: ChatAudienceHeat): void {
   effect.state = setAudienceHeat(effect.state, heat);
   touchRoom(effect, heat.roomId);
 }
 
-function reduceApplyAudienceHeatDelta(
+export function reduceApplyAudienceHeatDelta(
   effect: MutableReducerEffect,
   roomId: ChatRoomId,
   channelId: ChatVisibleChannel,
@@ -952,7 +953,7 @@ function reduceApplyAudienceHeatDelta(
   touchRoom(effect, roomId);
 }
 
-function reduceSetRoomStageMood(
+export function reduceSetRoomStageMood(
   effect: MutableReducerEffect,
   roomId: ChatRoomId,
   stageMood: ChatRoomState['stageMood'],
@@ -961,7 +962,7 @@ function reduceSetRoomStageMood(
   touchRoom(effect, roomId);
 }
 
-function reduceSetRoomCollapsed(
+export function reduceSetRoomCollapsed(
   effect: MutableReducerEffect,
   roomId: ChatRoomId,
   collapsed: boolean,
@@ -970,7 +971,7 @@ function reduceSetRoomCollapsed(
   touchRoom(effect, roomId);
 }
 
-function reduceSetRoomScene(
+export function reduceSetRoomScene(
   effect: MutableReducerEffect,
   roomId: ChatRoomId,
   sceneId: ChatRoomState['activeSceneId'],
@@ -979,7 +980,7 @@ function reduceSetRoomScene(
   touchRoom(effect, roomId);
 }
 
-function reduceSetActiveVisibleChannel(
+export function reduceSetActiveVisibleChannel(
   effect: MutableReducerEffect,
   roomId: ChatRoomId,
   channelId: ChatVisibleChannel,
@@ -988,7 +989,7 @@ function reduceSetActiveVisibleChannel(
   touchRoom(effect, roomId);
 }
 
-function reduceResetUnreadByChannel(
+export function reduceResetUnreadByChannel(
   effect: MutableReducerEffect,
   roomId: ChatRoomId,
   channelId: ChatVisibleChannel,
@@ -997,13 +998,13 @@ function reduceResetUnreadByChannel(
   touchRoom(effect, roomId);
 }
 
-function reduceOpenInvasion(effect: MutableReducerEffect, invasion: ChatInvasionState): void {
+export function reduceOpenInvasion(effect: MutableReducerEffect, invasion: ChatInvasionState): void {
   effect.state = openInvasion(effect.state, invasion);
   effect.openedInvasionIds.push(invasion.invasionId);
   touchRoom(effect, invasion.roomId);
 }
 
-function reduceCloseInvasion(effect: MutableReducerEffect, invasionId: ChatInvasionId): void {
+export function reduceCloseInvasion(effect: MutableReducerEffect, invasionId: ChatInvasionId): void {
   const existing = effect.state.activeInvasions[invasionId] ?? null;
   effect.state = closeInvasion(effect.state, invasionId);
   if (existing) {
@@ -1012,7 +1013,7 @@ function reduceCloseInvasion(effect: MutableReducerEffect, invasionId: ChatInvas
   }
 }
 
-function reduceSetSilence(
+export function reduceSetSilence(
   effect: MutableReducerEffect,
   roomId: ChatRoomId,
   silence: ChatSilenceDecision,
@@ -1021,12 +1022,12 @@ function reduceSetSilence(
   touchRoom(effect, roomId);
 }
 
-function reduceClearSilence(effect: MutableReducerEffect, roomId: ChatRoomId): void {
+export function reduceClearSilence(effect: MutableReducerEffect, roomId: ChatRoomId): void {
   effect.state = clearSilenceDecision(effect.state, roomId);
   touchRoom(effect, roomId);
 }
 
-function reduceMarkRoomEvent(
+export function reduceMarkRoomEvent(
   effect: MutableReducerEffect,
   roomId: ChatRoomId,
   eventId: ChatState['lastEventByRoom'][ChatRoomId],
@@ -1036,7 +1037,7 @@ function reduceMarkRoomEvent(
   touchRoom(effect, roomId);
 }
 
-function reduceMaintenanceTick(effect: MutableReducerEffect, now: UnixMs, flushTelemetryFlag: boolean): void {
+export function reduceMaintenanceTick(effect: MutableReducerEffect, now: UnixMs, flushTelemetryFlag: boolean): void {
   effect.state = pruneExpiredTyping(effect.state, now);
   effect.state = pruneExpiredSilences(effect.state, now);
   effect.state = pruneExpiredInvasions(effect.state, now);
@@ -1060,7 +1061,7 @@ function reduceMaintenanceTick(effect: MutableReducerEffect, now: UnixMs, flushT
 // MARK: Semantic reducers
 // ============================================================================
 
-function reduceApplyJoinAccepted(
+export function reduceApplyJoinAccepted(
   effect: MutableReducerEffect,
   action: Extract<ChatReducerSemanticAction, { type: 'APPLY_JOIN_ACCEPTED' }>,
 ): void {
@@ -1158,7 +1159,7 @@ function reduceApplyJoinAccepted(
   }
 }
 
-function reduceApplyJoinRejected(
+export function reduceApplyJoinRejected(
   effect: MutableReducerEffect,
   action: Extract<ChatReducerSemanticAction, { type: 'APPLY_JOIN_REJECTED' }>,
 ): void {
@@ -1172,7 +1173,7 @@ function reduceApplyJoinRejected(
   }
 }
 
-function reduceApplyLeaveAccepted(
+export function reduceApplyLeaveAccepted(
   effect: MutableReducerEffect,
   action: Extract<ChatReducerSemanticAction, { type: 'APPLY_LEAVE_ACCEPTED' }>,
 ): void {
@@ -1233,7 +1234,7 @@ function reduceApplyLeaveAccepted(
   }
 }
 
-function reduceApplyPlayerMessageAccepted(
+export function reduceApplyPlayerMessageAccepted(
   effect: MutableReducerEffect,
   action: Extract<ChatReducerSemanticAction, { type: 'APPLY_PLAYER_MESSAGE_ACCEPTED' }>,
 ): void {
@@ -1342,7 +1343,7 @@ function reduceApplyPlayerMessageAccepted(
   }
 }
 
-function reduceApplyPlayerMessageRejected(
+export function reduceApplyPlayerMessageRejected(
   effect: MutableReducerEffect,
   action: Extract<ChatReducerSemanticAction, { type: 'APPLY_PLAYER_MESSAGE_REJECTED' }>,
 ): void {
@@ -1362,7 +1363,7 @@ function reduceApplyPlayerMessageRejected(
   }
 }
 
-function reduceApplySystemSignal(
+export function reduceApplySystemSignal(
   effect: MutableReducerEffect,
   action: Extract<ChatReducerSemanticAction, { type: 'APPLY_SYSTEM_SIGNAL' }>,
 ): void {
@@ -1430,7 +1431,7 @@ function reduceApplySystemSignal(
   }
 }
 
-function reduceApplyNpcScene(
+export function reduceApplyNpcScene(
   effect: MutableReducerEffect,
   action: Extract<ChatReducerSemanticAction, { type: 'APPLY_NPC_SCENE' }>,
 ): void {
@@ -1771,7 +1772,7 @@ export function reducerOpenedOrClosedInvasion(result: ChatReducerResult): boolea
 // MARK: Internal utility helpers
 // ============================================================================
 
-function visibleChannelOrFallback(channelId: ChatMessage['channelId']): ChatVisibleChannel {
+export function visibleChannelOrFallback(channelId: ChatMessage['channelId']): ChatVisibleChannel {
   switch (channelId) {
     case 'GLOBAL':
     case 'SYNDICATE':
@@ -2086,6 +2087,610 @@ export function reducerSequenceAsNumber(seq: SequenceNumber): number {
   return seq as unknown as number;
 }
 
+// ============================================================================
+// MARK: UX-focused computed state helpers
+// ============================================================================
+
+/**
+ * Sum all unread counts across all visible channels in a room.
+ * Used to drive badge counts, attention indicators, and notification dots.
+ */
+export function reducerComputeRoomUnreadCount(state: ChatState, roomId: ChatRoomId): number {
+  const room = state.rooms[roomId];
+  if (!room) return 0;
+  const byChannel = (room.unreadByChannel ?? {}) as Record<string, number | undefined>;
+  return Object.values(byChannel).reduce((sum, n) => sum + (n ?? 0), 0);
+}
+
+/**
+ * Count of sessions that have a live presence snapshot in a room.
+ * Drives "X people here" occupancy UI for deal rooms, lobbies, and global.
+ */
+export function reducerComputeRoomPresenceCount(state: ChatState, roomId: ChatRoomId): number {
+  return Object.keys(state.presence.byRoom[roomId] ?? {}).length;
+}
+
+/**
+ * Count of sessions currently showing a typing indicator in a room.
+ * Used to control the typing bubble visiblity and pulse animation.
+ */
+export function reducerComputeRoomTypingCount(state: ChatState, roomId: ChatRoomId): number {
+  return (state.typing.byRoom[roomId] ?? []).length;
+}
+
+/**
+ * All roomIds a session is currently attached to.
+ * Used to efficiently compute session-scope notifications and cross-room state.
+ */
+export function reducerComputeSessionRoomIds(state: ChatState, sessionId: ChatSessionId): readonly ChatRoomId[] {
+  return (state.roomSessions as unknown as Record<string, Record<string, string[]>>).bySession?.[sessionId] as unknown as readonly ChatRoomId[] ?? [];
+}
+
+/**
+ * All live presence snapshots for a room, as an ordered array.
+ * Used to render participant panels, avatars, and spectator lists.
+ */
+export function reducerComputeActivePresenceList(
+  state: ChatState,
+  roomId: ChatRoomId,
+): readonly ChatPresenceSnapshot[] {
+  const bySession = state.presence.byRoom[roomId] ?? ({} as Record<ChatSessionId, ChatPresenceSnapshot>);
+  return Object.values(bySession).filter((s): s is ChatPresenceSnapshot => !!s);
+}
+
+/**
+ * Display names of sessions actively typing in a given channel.
+ * Drives the "{name} is typing..." footer text shown to all room participants.
+ */
+export function reducerComputeTypingActorLabels(
+  state: ChatState,
+  roomId: ChatRoomId,
+  channelId: ChatVisibleChannel,
+): readonly string[] {
+  return (state.typing.byRoom[roomId] ?? [])
+    .filter((s) => s.channelId === channelId && s.mode === 'TYPING')
+    .map((s) => {
+      const presence = state.presence.byRoom[roomId]?.[s.sessionId];
+      return presence?.actorLabel ?? (s.sessionId as string);
+    });
+}
+
+/**
+ * Whether any active invasion is targeting a given room.
+ * Used to drive alert banners, invasion overlays, and room state coloring.
+ */
+export function reducerComputeRoomHasActiveInvasion(state: ChatState, roomId: ChatRoomId): boolean {
+  return Object.values(state.activeInvasions).some((inv) => inv?.roomId === roomId);
+}
+
+/**
+ * All active invasion records for a given room.
+ * Used to render stacked invasion notices and determine escalation level.
+ */
+export function reducerComputeRoomActiveInvasions(state: ChatState, roomId: ChatRoomId): readonly ChatInvasionState[] {
+  return Object.values(state.activeInvasions).filter(
+    (inv): inv is ChatInvasionState => !!(inv) && inv.roomId === roomId,
+  );
+}
+
+/**
+ * Whether a silence decision currently exists for a room (expiry not evaluated here).
+ * Used to prevent user input and show "room is silenced" banners immediately.
+ */
+export function reducerComputeIsRoomSilenced(state: ChatState, roomId: ChatRoomId, _now: UnixMs): boolean {
+  return !!(state.silencesByRoom[roomId]);
+}
+
+/**
+ * Whether a session has a live presence snapshot in a specific room.
+ * Used to gate chat input UI and mark sessions as "in room" vs. "spectating".
+ */
+export function reducerComputeSessionIsPresent(
+  state: ChatState,
+  roomId: ChatRoomId,
+  sessionId: ChatSessionId,
+): boolean {
+  return !!(state.presence.byRoom[roomId]?.[sessionId]);
+}
+
+/**
+ * Most recent non-deleted message in a specific visible channel.
+ * Used to render channel previews, last-message footers, and reply targets.
+ */
+export function reducerComputeLatestMessageInChannel(
+  state: ChatState,
+  roomId: ChatRoomId,
+  channelId: ChatVisibleChannel,
+): ChatMessage | null {
+  const entries = state.transcript.byRoom[roomId] ?? [];
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const entry = entries[i];
+    if (entry?.message.channelId === channelId) {
+      return entry.message;
+    }
+  }
+  return null;
+}
+
+/**
+ * Latest N non-deleted messages in a room, ordered oldest-first.
+ * Used to populate initial chat window renders without scanning the full transcript.
+ */
+export function reducerComputeRecentMessages(
+  state: ChatState,
+  roomId: ChatRoomId,
+  limit: number,
+): readonly ChatMessage[] {
+  const entries = state.transcript.byRoom[roomId] ?? [];
+  const result: ChatMessage[] = [];
+  for (let i = entries.length - 1; i >= 0 && result.length < limit; i--) {
+    const entry = entries[i];
+    if (entry) {
+      result.unshift(entry.message);
+    }
+  }
+  return result;
+}
+
+/**
+ * Timestamp of the last known activity in a room.
+ * Used to sort room list by recency, highlight newly active rooms.
+ */
+export function reducerComputeRoomLastActivityTime(
+  state: ChatState,
+  roomId: ChatRoomId,
+): UnixMs | null {
+  return (state.rooms[roomId] as unknown as Record<string, UnixMs | undefined>)?.lastActivityAt ?? null;
+}
+
+/**
+ * Current connection state of a session.
+ * Drives session icon state (online dot, disconnected, idle) across all room panels.
+ */
+export function reducerComputeSessionConnectionState(
+  state: ChatState,
+  sessionId: ChatSessionId,
+): ChatSessionState['connectionState'] | null {
+  return state.sessions[sessionId]?.connectionState ?? null;
+}
+
+/**
+ * Ratio of current presence count to a given max occupancy ceiling (clamped 0–1).
+ * Used to render room fullness progress bars and soft-cap warning indicators.
+ */
+export function reducerComputeRoomOccupancyRatio(
+  state: ChatState,
+  roomId: ChatRoomId,
+  maxOccupants: number,
+): number {
+  if (maxOccupants <= 0) return 0;
+  const count = reducerComputeRoomPresenceCount(state, roomId);
+  return Math.min(1, count / maxOccupants);
+}
+
+/**
+ * Number of pending delayed-reveal messages queued for a room.
+ * Used to display a "pending messages" indicator and control NPC scene timing.
+ */
+export function reducerComputePendingRevealCount(state: ChatState, roomId: ChatRoomId): number {
+  return state.pendingReveals.filter((r) => r.roomId === roomId).length;
+}
+
+/**
+ * Total number of proof edges anchored to a room's proof chain.
+ * Used in audit UIs and replay verification views.
+ */
+export function reducerComputeProofChainLength(state: ChatState, roomId: ChatRoomId): number {
+  return state.proofChain.byRoom[roomId]?.length ?? 0;
+}
+
+/**
+ * All relationship records owned by a given user.
+ * Used to drive the relationship graph panel and trust/distrust indicators.
+ */
+export function reducerComputeRelationshipsByUser(
+  state: ChatState,
+  userId: ChatUserId,
+): readonly ChatRelationshipState[] {
+  return Object.values(state.relationships).filter(
+    (r): r is ChatRelationshipState => !!(r) && r.userId === userId,
+  );
+}
+
+/**
+ * Active scene id for a room.
+ * Used to synchronize scene transitions across connected viewers in deal rooms.
+ */
+export function reducerComputeRoomSceneId(
+  state: ChatState,
+  roomId: ChatRoomId,
+): ChatRoomState['activeSceneId'] | null {
+  return state.rooms[roomId]?.activeSceneId ?? null;
+}
+
+/**
+ * Current stage mood for a room.
+ * Used to drive ambient audio, background color shifts, and NPC tone transitions.
+ */
+export function reducerComputeRoomStageMood(
+  state: ChatState,
+  roomId: ChatRoomId,
+): ChatRoomState['stageMood'] | null {
+  return state.rooms[roomId]?.stageMood ?? null;
+}
+
+/**
+ * Whether a room's panel is currently in collapsed (minimized) state.
+ * Used to control room card expansion and preserve layout intent across refreshes.
+ */
+export function reducerComputeIsRoomCollapsed(state: ChatState, roomId: ChatRoomId): boolean {
+  return state.rooms[roomId]?.collapsed ?? false;
+}
+
+/**
+ * The currently active visible channel for a room.
+ * Used to focus the message input, filter the transcript, and route typing events.
+ */
+export function reducerComputeActiveVisibleChannel(
+  state: ChatState,
+  roomId: ChatRoomId,
+): ChatVisibleChannel {
+  return state.rooms[roomId]?.activeVisibleChannel ?? 'GLOBAL';
+}
+
+/**
+ * Full mute and visibility status for a session at a given moment.
+ * Used to gate message submission, dim user avatars, and show "you are muted" notices.
+ */
+export function reducerComputeSessionMuteStatus(
+  state: ChatState,
+  sessionId: ChatSessionId,
+  now: UnixMs,
+): { readonly muted: boolean; readonly shadowMuted: boolean; readonly invisible: boolean } {
+  const session = state.sessions[sessionId];
+  if (!session) return { muted: false, shadowMuted: false, invisible: false };
+  return Object.freeze({
+    muted: session.mutedUntil != null && session.mutedUntil > now,
+    shadowMuted: (session as unknown as Record<string, boolean>).shadowMuted ?? false,
+    invisible: (session as unknown as Record<string, boolean>).invisible ?? false,
+  });
+}
+
+/**
+ * All inference snapshots for a given userId across all rooms.
+ * Used to render the player model panel and animate learning signal visualizations.
+ */
+export function reducerComputeInferenceSnapshotsByUser(
+  state: ChatState,
+  userId: ChatUserId,
+): readonly ChatInferenceSnapshot[] {
+  return Object.values(state.inferenceSnapshots).filter(
+    (s): s is ChatInferenceSnapshot => !!(s) && s.userId === userId,
+  );
+}
+
+/**
+ * Whether a pending request exists in the current state for the given requestId.
+ * Used to show optimistic "sending..." state and detect double-submission attempts.
+ */
+export function reducerComputeHasPendingRequest(
+  state: ChatState,
+  requestId: ChatRequestId,
+): boolean {
+  return !!(state.pendingRequests[requestId]);
+}
+
+/**
+ * Total number of replay artifacts recorded for a room.
+ * Used to determine replay availability and build replay scrubber bounds.
+ */
+export function reducerComputeReplayDepth(state: ChatState, roomId: ChatRoomId): number {
+  return state.replay.byRoom[roomId]?.length ?? 0;
+}
+
+/**
+ * All room IDs present in the current state.
+ * Used to enumerate active rooms for presence sweeps, telemetry, and room list renders.
+ */
+export function reducerComputeAllRoomIds(state: ChatState): readonly ChatRoomId[] {
+  return Object.keys(state.rooms) as unknown as readonly ChatRoomId[];
+}
+
+/**
+ * All session IDs present in the current state.
+ * Used to enumerate connected participants for connection audits and sweep operations.
+ */
+export function reducerComputeAllSessionIds(state: ChatState): readonly ChatSessionId[] {
+  return Object.keys(state.sessions) as unknown as readonly ChatSessionId[];
+}
+
+/**
+ * First and last sequence numbers of the transcript in a room.
+ * Used to compute scroll anchors, jump-to-bottom targets, and replay range labels.
+ */
+export function reducerComputeRoomTranscriptRange(
+  state: ChatState,
+  roomId: ChatRoomId,
+): { readonly first: SequenceNumber | null; readonly last: SequenceNumber | null } {
+  const entries = state.transcript.byRoom[roomId] ?? [];
+  if (entries.length === 0) return { first: null, last: null };
+  const firstEntry = entries[0];
+  const lastEntry = entries[entries.length - 1];
+  return Object.freeze({
+    first: firstEntry?.message.sequenceNumber ?? null,
+    last: lastEntry?.message.sequenceNumber ?? null,
+  });
+}
+
+/**
+ * Count of messages sent by a specific session in a room.
+ * Used for per-user contribution meters in competitive syndicate rooms.
+ */
+export function reducerComputeSessionMessageCount(
+  state: ChatState,
+  roomId: ChatRoomId,
+  sessionId: ChatSessionId,
+): number {
+  const entries = state.transcript.byRoom[roomId] ?? [];
+  let count = 0;
+  for (const entry of entries) {
+    if (entry?.message.attribution.authorSessionId === sessionId) {
+      count++;
+    }
+  }
+  return count;
+}
+
+/**
+ * Whether a room currently exists in state (not removed).
+ * Used in guards before attempting room-specific operations in derived hooks.
+ */
+export function reducerComputeRoomExists(state: ChatState, roomId: ChatRoomId): boolean {
+  return !!(state.rooms[roomId]);
+}
+
+/**
+ * Whether a session currently exists in state (not removed).
+ * Used in guards before attempting session-specific UI or telemetry operations.
+ */
+export function reducerComputeSessionExists(state: ChatState, sessionId: ChatSessionId): boolean {
+  return !!(state.sessions[sessionId]);
+}
+
+/**
+ * Current room kind for a given roomId.
+ * Used to conditionally render room-type-specific UI (lobby vs. deal_room vs. syndicate).
+ */
+export function reducerComputeRoomKind(
+  state: ChatState,
+  roomId: ChatRoomId,
+): ChatRoomState['roomKind'] | null {
+  return state.rooms[roomId]?.roomKind ?? null;
+}
+
+/**
+ * Count of open invasion records across ALL rooms.
+ * Used for global alert badges and engine-level capacity throttling checks.
+ */
+export function reducerComputeTotalActiveInvasionCount(state: ChatState): number {
+  return Object.keys(state.activeInvasions).length;
+}
+
+/**
+ * All learning profile IDs currently stored in state.
+ * Used to determine which user models have accumulated enough signal for inference.
+ */
+export function reducerComputeAllLearningProfileUserIds(state: ChatState): readonly ChatUserId[] {
+  return Object.keys(state.learningProfiles) as unknown as readonly ChatUserId[];
+}
+
+/**
+ * Number of messages currently in the telemetry flush queue.
+ * Used to determine whether to trigger an early flush before a maintenance tick.
+ */
+export function reducerComputeTelemetryQueueDepth(state: ChatState): number {
+  return state.telemetryQueue.length;
+}
+
+// ============================================================================
+// MARK: Diagnostic observability helpers
+// ============================================================================
+
+/**
+ * Compact cross-sectional summary of the entire chat state volume.
+ * Used by the engine health endpoint, admin debug panels, and load dashboards.
+ */
+export interface ChatReducerStateSummary {
+  readonly roomCount: number;
+  readonly sessionCount: number;
+  readonly transcriptMessageCount: number;
+  readonly activeInvasionCount: number;
+  readonly pendingRevealCount: number;
+  readonly proofEdgeTotal: number;
+  readonly telemetryQueueDepth: number;
+  readonly learningProfileCount: number;
+  readonly inferenceSnapshotCount: number;
+  readonly relationshipCount: number;
+  readonly pendingRequestCount: number;
+  readonly replayArtifactTotal: number;
+}
+
+export function reducerComputeStateSummary(state: ChatState): ChatReducerStateSummary {
+  const transcriptMessageCount = Object.keys(state.transcript.byMessageId).length;
+  const proofEdgeTotal = Object.values(state.proofChain.byRoom).reduce(
+    (sum, arr) => sum + (arr?.length ?? 0),
+    0,
+  );
+  const replayArtifactTotal = Object.values(state.replay.byRoom).reduce(
+    (sum, arr) => sum + (arr?.length ?? 0),
+    0,
+  );
+  return Object.freeze({
+    roomCount: Object.keys(state.rooms).length,
+    sessionCount: Object.keys(state.sessions).length,
+    transcriptMessageCount,
+    activeInvasionCount: Object.keys(state.activeInvasions).length,
+    pendingRevealCount: state.pendingReveals.length,
+    proofEdgeTotal,
+    telemetryQueueDepth: state.telemetryQueue.length,
+    learningProfileCount: Object.keys(state.learningProfiles).length,
+    inferenceSnapshotCount: Object.keys(state.inferenceSnapshots).length,
+    relationshipCount: Object.keys(state.relationships).length,
+    pendingRequestCount: Object.keys(state.pendingRequests).length,
+    replayArtifactTotal,
+  });
+}
+
+/**
+ * Full per-room diagnostic record covering all mutable state categories.
+ * Used by admin room inspection tooling, alerting pipelines, and engine invariant checks.
+ */
+export interface ChatReducerRoomDiagnostic {
+  readonly roomId: ChatRoomId;
+  readonly roomKind: ChatRoomState['roomKind'] | null;
+  readonly sessionCount: number;
+  readonly presenceCount: number;
+  readonly typingCount: number;
+  readonly messageCount: number;
+  readonly unreadTotal: number;
+  readonly hasActiveInvasion: boolean;
+  readonly isSilenced: boolean;
+  readonly pendingRevealCount: number;
+  readonly replayDepth: number;
+  readonly proofChainLength: number;
+  readonly stageMood: ChatRoomState['stageMood'] | null;
+  readonly activeScene: ChatRoomState['activeSceneId'] | null;
+  readonly collapsed: boolean;
+  readonly activeChannel: ChatVisibleChannel;
+  readonly lastActivityAt: UnixMs | null;
+  readonly occupancyRatio: number;
+}
+
+export function reducerComputeRoomDiagnostic(
+  state: ChatState,
+  roomId: ChatRoomId,
+  now: UnixMs,
+  maxOccupants = 100,
+): ChatReducerRoomDiagnostic {
+  return Object.freeze({
+    roomId,
+    roomKind: reducerComputeRoomKind(state, roomId),
+    sessionCount: reducerGetRoomSessionCount(state, roomId),
+    presenceCount: reducerComputeRoomPresenceCount(state, roomId),
+    typingCount: reducerComputeRoomTypingCount(state, roomId),
+    messageCount: reducerGetRoomMessageCount(state, roomId),
+    unreadTotal: reducerComputeRoomUnreadCount(state, roomId),
+    hasActiveInvasion: reducerComputeRoomHasActiveInvasion(state, roomId),
+    isSilenced: reducerComputeIsRoomSilenced(state, roomId, now),
+    pendingRevealCount: reducerComputePendingRevealCount(state, roomId),
+    replayDepth: reducerComputeReplayDepth(state, roomId),
+    proofChainLength: reducerComputeProofChainLength(state, roomId),
+    stageMood: reducerComputeRoomStageMood(state, roomId),
+    activeScene: reducerComputeRoomSceneId(state, roomId),
+    collapsed: reducerComputeIsRoomCollapsed(state, roomId),
+    activeChannel: reducerComputeActiveVisibleChannel(state, roomId),
+    lastActivityAt: reducerComputeRoomLastActivityTime(state, roomId),
+    occupancyRatio: reducerComputeRoomOccupancyRatio(state, roomId, maxOccupants),
+  });
+}
+
+/**
+ * Diagnostic records for every room currently in state.
+ * Used by the engine's health broadcast and admin dashboard fleet view.
+ */
+export function reducerComputeAllRoomDiagnostics(
+  state: ChatState,
+  now: UnixMs,
+  maxOccupants = 100,
+): readonly ChatReducerRoomDiagnostic[] {
+  return reducerComputeAllRoomIds(state).map((roomId) =>
+    reducerComputeRoomDiagnostic(state, roomId, now, maxOccupants),
+  );
+}
+
+/**
+ * Determine whether a result represents a complete no-op (nothing was touched).
+ * Used to skip downstream dispatch when batched actions produce no state change.
+ */
+export function reducerResultIsNoOp(result: ChatReducerResult): boolean {
+  return (
+    result.touchedRoomIds.length === 0 &&
+    result.touchedSessionIds.length === 0 &&
+    result.appendedMessages.length === 0 &&
+    result.replacedMessageIds.length === 0 &&
+    result.redactedMessageIds.length === 0 &&
+    result.deletedMessageIds.length === 0 &&
+    result.replayArtifacts.length === 0 &&
+    result.proofEdges.length === 0 &&
+    result.telemetry.length === 0 &&
+    result.openedInvasionIds.length === 0 &&
+    result.closedInvasionIds.length === 0 &&
+    result.processedRequestIds.length === 0 &&
+    result.revealedMessages.length === 0
+  );
+}
+
+/**
+ * Serialize a result's key mutation vectors as a compact diagnostic label.
+ * Used in debug logs, tracing spans, and replay event metadata.
+ */
+export function reducerResultLabel(result: ChatReducerResult): string {
+  const parts: string[] = [];
+  if (result.appendedMessages.length > 0) parts.push(`+${result.appendedMessages.length}msg`);
+  if (result.deletedMessageIds.length > 0) parts.push(`-${result.deletedMessageIds.length}del`);
+  if (result.redactedMessageIds.length > 0) parts.push(`~${result.redactedMessageIds.length}redact`);
+  if (result.openedInvasionIds.length > 0) parts.push(`invasion:open(${result.openedInvasionIds.length})`);
+  if (result.closedInvasionIds.length > 0) parts.push(`invasion:close(${result.closedInvasionIds.length})`);
+  if (result.proofEdges.length > 0) parts.push(`proof:${result.proofEdges.length}`);
+  if (result.telemetry.length > 0) parts.push(`telemetry:${result.telemetry.length}`);
+  if (result.revealedMessages.length > 0) parts.push(`reveal:${result.revealedMessages.length}`);
+  if (parts.length === 0) return 'noop';
+  return parts.join(' ');
+}
+
+/**
+ * Merge the mutations from two results into a single logical summary.
+ * Used when replaying batched history to produce a unified change envelope.
+ */
+export function reducerResultMerge(
+  a: ChatReducerResult,
+  b: ChatReducerResult,
+): Omit<ChatReducerResult, 'state'> {
+  return {
+    touchedRoomIds: [...new Set([...a.touchedRoomIds, ...b.touchedRoomIds])],
+    touchedSessionIds: [...new Set([...a.touchedSessionIds, ...b.touchedSessionIds])],
+    appendedMessages: [...a.appendedMessages, ...b.appendedMessages],
+    replacedMessageIds: [...a.replacedMessageIds, ...b.replacedMessageIds],
+    redactedMessageIds: [...a.redactedMessageIds, ...b.redactedMessageIds],
+    deletedMessageIds: [...a.deletedMessageIds, ...b.deletedMessageIds],
+    replayArtifacts: [...a.replayArtifacts, ...b.replayArtifacts],
+    proofEdges: [...a.proofEdges, ...b.proofEdges],
+    telemetry: [...a.telemetry, ...b.telemetry],
+    learningProfilesTouched: [...new Set([...a.learningProfilesTouched, ...b.learningProfilesTouched])],
+    inferenceSnapshots: [...a.inferenceSnapshots, ...b.inferenceSnapshots],
+    openedInvasionIds: [...a.openedInvasionIds, ...b.openedInvasionIds],
+    closedInvasionIds: [...a.closedInvasionIds, ...b.closedInvasionIds],
+    processedRequestIds: [...a.processedRequestIds, ...b.processedRequestIds],
+    revealedMessages: [...a.revealedMessages, ...b.revealedMessages],
+  };
+}
+
+// ============================================================================
+// MARK: Factory functions
+// ============================================================================
+
+export function createReducerWatchBus(): ChatReducerWatchBus {
+  return new ChatReducerWatchBus();
+}
+
+export function createReducerEpochTracker(): ChatReducerEpochTracker {
+  return new ChatReducerEpochTracker();
+}
+
+export function describeReducerModule(): string {
+  return `${CHAT_REDUCER_MODULE_ID}@${CHAT_REDUCER_MODULE_VERSION}`;
+}
+
 export const CHAT_REDUCER_FULL_MODULE = Object.freeze({
   descriptor: CHAT_REDUCER_MODULE_DESCRIPTOR,
   createWatchBus: () => new ChatReducerWatchBus(),
@@ -2096,4 +2701,200 @@ export const CHAT_REDUCER_FULL_MODULE = Object.freeze({
   resultHasSessionChanges: reducerResultHasSessionChanges,
   resultHasInvasionChanges: reducerResultHasInvasionChanges,
 });
+
+// ============================================================================
+// MARK: Comprehensive module authority object
+// ============================================================================
+
+export const ChatReducerModule = Object.freeze({
+  // ── Identity ────────────────────────────────────────────────────────────
+  moduleId: CHAT_REDUCER_MODULE_ID,
+  version: CHAT_REDUCER_MODULE_VERSION,
+  descriptor: CHAT_REDUCER_MODULE_DESCRIPTOR,
+
+  // ── Core entry points ───────────────────────────────────────────────────
+  reduceChatState,
+  reduceChatStateBatch,
+
+  // ── High-level semantic wrappers ────────────────────────────────────────
+  reduceJoinRequestAccepted,
+  reduceLeaveRequestAccepted,
+  reducePresenceUpdate,
+  reduceTypingUpdate,
+  reduceAcceptedPlayerMessage,
+  reduceRejectedPlayerMessage,
+  reduceSystemSignalMutation,
+  reduceNpcSceneMutation,
+
+  // ── Primitive reducers — room ────────────────────────────────────────────
+  reduceUpsertRoom,
+  reduceRemoveRoom,
+  reduceSetRoomStageMood,
+  reduceSetRoomCollapsed,
+  reduceSetRoomScene,
+  reduceSetActiveVisibleChannel,
+  reduceResetUnreadByChannel,
+  reduceMarkRoomEvent,
+
+  // ── Primitive reducers — session ─────────────────────────────────────────
+  reduceUpsertSession,
+  reduceRemoveSession,
+  reduceAttachSessionToRoom,
+  reduceDetachSessionFromRoom,
+  reduceSetSessionConnectionState,
+  reduceSetSessionMuting,
+
+  // ── Primitive reducers — presence & typing ───────────────────────────────
+  reduceUpsertPresence,
+  reduceRemovePresence,
+  reduceUpsertTyping,
+  reduceClearTyping,
+
+  // ── Primitive reducers — transcript ──────────────────────────────────────
+  reduceAppendMessage,
+  reduceReplaceMessage,
+  reduceRedactMessage,
+  reduceDeleteMessage,
+
+  // ── Primitive reducers — requests & reveals ──────────────────────────────
+  reduceUpsertPendingRequest,
+  reduceRemovePendingRequest,
+  reduceQueuePendingReveal,
+
+  // ── Primitive reducers — telemetry ────────────────────────────────────────
+  reduceQueueTelemetry,
+
+  // ── Primitive reducers — learning & inference ────────────────────────────
+  reduceUpsertLearningProfile,
+  reduceUpsertInferenceSnapshot,
+  reduceUpsertRelationship,
+
+  // ── Primitive reducers — audience & heat ─────────────────────────────────
+  reduceSetAudienceHeat,
+  reduceApplyAudienceHeatDelta,
+
+  // ── Primitive reducers — invasions & silence ─────────────────────────────
+  reduceOpenInvasion,
+  reduceCloseInvasion,
+  reduceSetSilence,
+  reduceClearSilence,
+
+  // ── Primitive reducers — maintenance ─────────────────────────────────────
+  reduceMaintenanceTick,
+
+  // ── Semantic reducers (exposed for testing & composition) ─────────────────
+  reduceApplyJoinAccepted,
+  reduceApplyJoinRejected,
+  reduceApplyLeaveAccepted,
+  reduceApplyPlayerMessageAccepted,
+  reduceApplyPlayerMessageRejected,
+  reduceApplySystemSignal,
+  reduceApplyNpcScene,
+
+  // ── Effect machinery ──────────────────────────────────────────────────────
+  createEffect,
+  freezeEffect,
+  touchRoom,
+  touchSession,
+  pushTelemetry,
+  pushProofEdges,
+  pushReplayArtifacts,
+  appendMessages,
+  applyAction,
+  visibleChannelOrFallback,
+
+  // ── Query helpers over results ────────────────────────────────────────────
+  didReducerTouchRoom,
+  didReducerTouchSession,
+  reducerAppendedVisibleSequenceRange,
+  reducerNetTranscriptGrowth,
+  reducerOpenedOrClosedInvasion,
+
+  // ── Result inspection ─────────────────────────────────────────────────────
+  reducerResultHasNewMessages,
+  reducerResultHasDeletions,
+  reducerResultHasSessionChanges,
+  reducerResultHasInvasionChanges,
+  reducerResultMessageIds,
+  reducerResultTouchedSessionIds,
+  reducerResultOpenedInvasionIds,
+  reducerResultClosedInvasionIds,
+  reducerResultIsNoOp,
+  reducerResultLabel,
+  reducerResultMerge,
+
+  // ── Point state inspection ─────────────────────────────────────────────────
+  reducerGetRoomAudienceHeat,
+  reducerGetInvasionState,
+  reducerGetRoomSilenceDecision,
+  reducerGetRoomSessionCount,
+  reducerGetRoomMessageCount,
+  reducerGetInferenceSnapshots,
+  reducerGetLearningProfile,
+  reducerGetPresenceSnapshot,
+  reducerGetTypingSnapshot,
+  reducerGetRelationshipState,
+  reducerGetReplayArtifact,
+  reducerGetPendingRequestState,
+  reducerGetPendingReveal,
+  reducerGetProofEdge,
+  reducerGetTelemetryEnvelope,
+  reducerGetRoomState,
+  reducerGetSessionState,
+  reducerGetJoinRequest,
+  reducerGetLeaveRequest,
+  reducerGetVisibleChannelUnread,
+  reducerSequenceAsNumber,
+
+  // ── UX-focused computed helpers ───────────────────────────────────────────
+  reducerComputeRoomUnreadCount,
+  reducerComputeRoomPresenceCount,
+  reducerComputeRoomTypingCount,
+  reducerComputeSessionRoomIds,
+  reducerComputeActivePresenceList,
+  reducerComputeTypingActorLabels,
+  reducerComputeRoomHasActiveInvasion,
+  reducerComputeRoomActiveInvasions,
+  reducerComputeIsRoomSilenced,
+  reducerComputeSessionIsPresent,
+  reducerComputeLatestMessageInChannel,
+  reducerComputeRecentMessages,
+  reducerComputeRoomLastActivityTime,
+  reducerComputeSessionConnectionState,
+  reducerComputeRoomOccupancyRatio,
+  reducerComputePendingRevealCount,
+  reducerComputeProofChainLength,
+  reducerComputeRelationshipsByUser,
+  reducerComputeRoomSceneId,
+  reducerComputeRoomStageMood,
+  reducerComputeIsRoomCollapsed,
+  reducerComputeActiveVisibleChannel,
+  reducerComputeSessionMuteStatus,
+  reducerComputeInferenceSnapshotsByUser,
+  reducerComputeHasPendingRequest,
+  reducerComputeReplayDepth,
+  reducerComputeAllRoomIds,
+  reducerComputeAllSessionIds,
+  reducerComputeRoomTranscriptRange,
+  reducerComputeSessionMessageCount,
+  reducerComputeRoomExists,
+  reducerComputeSessionExists,
+  reducerComputeRoomKind,
+  reducerComputeTotalActiveInvasionCount,
+  reducerComputeAllLearningProfileUserIds,
+  reducerComputeTelemetryQueueDepth,
+
+  // ── Diagnostics ──────────────────────────────────────────────────────────
+  reducerComputeStateSummary,
+  reducerComputeRoomDiagnostic,
+  reducerComputeAllRoomDiagnostics,
+
+  // ── Construction utilities ────────────────────────────────────────────────
+  createReplacementMessageFromPrevious,
+  deriveReducerReplayAnchorSequence,
+  computeReducerFingerprint,
+  createReducerWatchBus,
+  createReducerEpochTracker,
+  describeReducerModule,
+} as const);
 

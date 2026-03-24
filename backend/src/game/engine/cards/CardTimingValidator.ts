@@ -2040,6 +2040,500 @@ export class CardTimingValidator {
         return -1;
     }
   }
+
+  /* ──────────────────────────────────────────────────────────────────────────
+   * Phase boundary urgency classification
+   * ────────────────────────────────────────────────────────────────────────── */
+
+  /**
+   * Classifies the urgency level for playing a phase-boundary card (PHZ) based
+   * on how many phase-boundary windows remain in the current snapshot.
+   *
+   * Uses the three threshold constants:
+   * - `PHASE_BOUNDARY_HIGH_URGENCY_REMAINING` (1) → CRITICAL
+   * - `PHASE_BOUNDARY_MEDIUM_URGENCY_REMAINING` (2) → HIGH
+   * - `PHASE_BOUNDARY_LOW_URGENCY_REMAINING` (4) → MEDIUM
+   *
+   * Consumed by:
+   * - UX urgency badge on phase-boundary cards
+   * - AI planner: prioritize PHZ cards when windows are low
+   * - Chat narrator: "You are running out of phase-boundary windows."
+   */
+  public classifyPhaseBoundaryUrgency(
+    windowsRemaining: number,
+  ): 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' | 'NONE' {
+    if (windowsRemaining <= 0) {
+      return 'NONE';
+    }
+    if (windowsRemaining <= PHASE_BOUNDARY_HIGH_URGENCY_REMAINING) {
+      return 'CRITICAL';
+    }
+    if (windowsRemaining <= PHASE_BOUNDARY_MEDIUM_URGENCY_REMAINING) {
+      return 'HIGH';
+    }
+    if (windowsRemaining <= PHASE_BOUNDARY_LOW_URGENCY_REMAINING) {
+      return 'MEDIUM';
+    }
+    return 'LOW';
+  }
+
+  /**
+   * Returns the phase-boundary urgency label for the current snapshot's
+   * remaining phase-boundary windows. Convenience wrapper over
+   * `classifyPhaseBoundaryUrgency` that reads the snapshot directly.
+   */
+  public getPhaseBoundaryUrgencyFromSnapshot(
+    snapshot: RunStateSnapshot,
+  ): 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' | 'NONE' {
+    return this.classifyPhaseBoundaryUrgency(
+      snapshot.modeState.phaseBoundaryWindowsRemaining,
+    );
+  }
+
+  /* ──────────────────────────────────────────────────────────────────────────
+   * Trust-based timing opportunity classification
+   * ────────────────────────────────────────────────────────────────────────── */
+
+  /**
+   * Classifies whether a timing opportunity exists based on trust health.
+   *
+   * Uses `LOW_TRUST_THRESHOLD` (45) to detect low-trust states.
+   * In coop mode a trust level below 45 is a strong signal to play
+   * RESCUE / AID / TRUST timing-class cards urgently.
+   *
+   * Consumed by:
+   * - AID / RESCUE card urgency overlay
+   * - AI planner: escalate cooperative card priority when trust is low
+   * - Chat narrator: "Your team's trust is critically low."
+   */
+  public classifyTrustTimingOpportunity(
+    snapshot: RunStateSnapshot,
+    card: CardInstance,
+  ): 'TRUST_CRITICAL' | 'TRUST_LOW' | 'TRUST_OK' | 'NOT_APPLICABLE' {
+    if (snapshot.mode !== 'coop') {
+      return 'NOT_APPLICABLE';
+    }
+    if (
+      !card.timingClass.includes('AID') &&
+      !card.timingClass.includes('RES') &&
+      !card.card.tags.includes('trust')
+    ) {
+      return 'NOT_APPLICABLE';
+    }
+    const trustScores = Object.values(snapshot.modeState.trustScores);
+    if (trustScores.length === 0) {
+      return 'TRUST_OK';
+    }
+    const minTrust = Math.min(...trustScores);
+    if (minTrust < RESCUE_TRUST_THRESHOLD) {
+      return 'TRUST_CRITICAL';
+    }
+    if (minTrust < LOW_TRUST_THRESHOLD) {
+      return 'TRUST_LOW';
+    }
+    return 'TRUST_OK';
+  }
+
+  /* ──────────────────────────────────────────────────────────────────────────
+   * Pressure-based timing opportunity classification
+   * ────────────────────────────────────────────────────────────────────────── */
+
+  /**
+   * Classifies the timing opportunity for pressure-sensitive cards based on
+   * the current snapshot pressure score.
+   *
+   * Uses `ELEVATED_PRESSURE_SCORE` (0.5) as the floor for flagging that
+   * pressure-reactive cards (PSK / CAS / CTR timings) should be considered
+   * more urgently.
+   *
+   * Consumed by:
+   * - PSK / CAS card urgency overlay
+   * - AI planner: escalate pressure-reactive cards when pressure is elevated
+   * - Chat narrator: "Pressure is building — consider your reaction cards."
+   */
+  public classifyPressureTimingOpportunity(
+    snapshot: RunStateSnapshot,
+    card: CardInstance,
+  ): 'CRITICAL' | 'ELEVATED' | 'NORMAL' | 'NOT_APPLICABLE' {
+    const isPressureCard =
+      card.timingClass.includes('PSK') ||
+      card.timingClass.includes('CAS') ||
+      card.timingClass.includes('CTR') ||
+      card.card.tags.includes('resilience') ||
+      card.card.tags.includes('cascade');
+
+    if (!isPressureCard) {
+      return 'NOT_APPLICABLE';
+    }
+
+    const pressureScore = snapshot.pressure.score;
+
+    if (pressureScore >= CRITICAL_PRESSURE_SCORE) {
+      return 'CRITICAL';
+    }
+    if (pressureScore >= ELEVATED_PRESSURE_SCORE) {
+      return 'ELEVATED';
+    }
+    return 'NORMAL';
+  }
+
+  /**
+   * Returns whether elevated pressure conditions make pressure-reactive cards
+   * worth playing NOW rather than holding for a better window.
+   * Uses `ELEVATED_PRESSURE_SCORE` (0.5) as the activation threshold.
+   */
+  public isElevatedPressureOpportunityActive(
+    snapshot: RunStateSnapshot,
+  ): boolean {
+    const pressureScore = snapshot.pressure.score;
+    return pressureScore >= ELEVATED_PRESSURE_SCORE;
+  }
+
+  /* ──────────────────────────────────────────────────────────────────────────
+   * Comprehensive timing window advisory
+   * ────────────────────────────────────────────────────────────────────────── */
+
+  /**
+   * Builds a comprehensive timing window advisory for a specific card in the
+   * current snapshot, combining:
+   * - Base timing legality (`audit`)
+   * - Phase boundary urgency (uses `PHASE_BOUNDARY_*` constants)
+   * - Trust opportunity (uses `LOW_TRUST_THRESHOLD`)
+   * - Pressure opportunity (uses `ELEVATED_PRESSURE_SCORE`)
+   *
+   * Consumed by:
+   * - UX card tooltip "Is now a good time to play this?"
+   * - AI hand planner urgency scoring
+   * - Chat narrator scenario framing
+   */
+  public buildTimingWindowAdvisory(
+    snapshot: RunStateSnapshot,
+    card: CardInstance,
+  ): TimingWindowAdvisory {
+    const auditResult = this.evaluate(snapshot, card);
+    const phaseBoundaryUrgency = this.getPhaseBoundaryUrgencyFromSnapshot(snapshot);
+    const trustOpportunity = this.classifyTrustTimingOpportunity(snapshot, card);
+    const pressureOpportunity = this.classifyPressureTimingOpportunity(snapshot, card);
+
+    const isPhaseBoundaryCard = card.timingClass.includes('PHZ');
+    const isReactionCard =
+      card.timingClass.includes('CTR') ||
+      card.timingClass.includes('RES') ||
+      card.timingClass.includes('AID') ||
+      card.timingClass.includes('CAS') ||
+      card.timingClass.includes('PSK');
+
+    let overallUrgency: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' | 'OK';
+
+    if (!auditResult.allowed) {
+      overallUrgency = 'LOW';
+    } else if (
+      isPhaseBoundaryCard &&
+      (phaseBoundaryUrgency === 'CRITICAL' || phaseBoundaryUrgency === 'HIGH')
+    ) {
+      overallUrgency = 'CRITICAL';
+    } else if (
+      trustOpportunity === 'TRUST_CRITICAL' ||
+      pressureOpportunity === 'CRITICAL'
+    ) {
+      overallUrgency = 'CRITICAL';
+    } else if (
+      trustOpportunity === 'TRUST_LOW' ||
+      pressureOpportunity === 'ELEVATED' ||
+      (isPhaseBoundaryCard && phaseBoundaryUrgency === 'MEDIUM')
+    ) {
+      overallUrgency = 'HIGH';
+    } else if (isReactionCard && auditResult.legalTimings.length > 0) {
+      overallUrgency = 'MEDIUM';
+    } else {
+      overallUrgency = 'OK';
+    }
+
+    const narrativeFragments: string[] = [];
+
+    if (!auditResult.allowed) {
+      narrativeFragments.push(
+        `${card.definitionId} cannot be played right now: ${auditResult.summary}`,
+      );
+    } else {
+      narrativeFragments.push(
+        `${card.definitionId} may be played in timing: ${auditResult.legalTimings.join(', ')}.`,
+      );
+    }
+
+    if (isPhaseBoundaryCard && phaseBoundaryUrgency !== 'LOW') {
+      narrativeFragments.push(
+        `Phase-boundary urgency: ${phaseBoundaryUrgency} (${snapshot.modeState.phaseBoundaryWindowsRemaining} windows remaining).`,
+      );
+    }
+
+    if (trustOpportunity !== 'NOT_APPLICABLE' && trustOpportunity !== 'TRUST_OK') {
+      narrativeFragments.push(`Trust state: ${trustOpportunity}.`);
+    }
+
+    if (pressureOpportunity !== 'NOT_APPLICABLE' && pressureOpportunity !== 'NORMAL') {
+      narrativeFragments.push(`Pressure state: ${pressureOpportunity}.`);
+    }
+
+    return Object.freeze({
+      card,
+      auditResult,
+      overallUrgency,
+      phaseBoundaryUrgency,
+      trustOpportunity,
+      pressureOpportunity,
+      narrative: narrativeFragments.join(' '),
+    });
+  }
+
+  /**
+   * Builds a timing hand summary for an entire hand of cards, returning
+   * aggregate counts, urgency distribution, and per-timing-class counts.
+   *
+   * Consumed by:
+   * - UX hand-state header ("3 reaction cards available")
+   * - AI planner: know what timing coverage the hand provides
+   * - Chat narrator: describe the hand posture
+   */
+  public buildHandTimingSummary(
+    snapshot: RunStateSnapshot,
+    hand: readonly CardInstance[],
+  ): TimingHandSummary {
+    let legalCount = 0;
+    let blockedCount = 0;
+    let criticalUrgencyCount = 0;
+    const timingClassCounts: Record<string, number> = {};
+
+    for (const card of hand) {
+      const audit = this.evaluate(snapshot, card);
+      if (audit.allowed) {
+        legalCount++;
+        for (const tc of audit.legalTimings) {
+          timingClassCounts[tc] = (timingClassCounts[tc] ?? 0) + 1;
+        }
+      } else {
+        blockedCount++;
+      }
+      const advisory = this.buildTimingWindowAdvisory(snapshot, card);
+      if (advisory.overallUrgency === 'CRITICAL') {
+        criticalUrgencyCount++;
+      }
+    }
+
+    const phaseBoundaryUrgency = this.getPhaseBoundaryUrgencyFromSnapshot(snapshot);
+    const pressureActive = this.isElevatedPressureOpportunityActive(snapshot);
+
+    return Object.freeze({
+      mode: snapshot.mode,
+      totalCards: hand.length,
+      legalCards: legalCount,
+      blockedCards: blockedCount,
+      criticalUrgencyCount,
+      timingClassCounts: Object.freeze({ ...timingClassCounts }),
+      phaseBoundaryUrgency,
+      isPressureElevated: pressureActive,
+    });
+  }
+
+  /**
+   * Evaluates a batch of cards and returns their timing audit results.
+   * Useful for AI hand analysis and legality report generation.
+   */
+  public evaluateBatch(
+    snapshot: RunStateSnapshot,
+    cards: readonly CardInstance[],
+  ): readonly CardTimingAudit[] {
+    return Object.freeze(cards.map((card) => this.evaluate(snapshot, card)));
+  }
+
+  /**
+   * Returns the subset of cards from a hand that have at least one legal
+   * timing in the current snapshot.
+   */
+  public filterLegalCards(
+    snapshot: RunStateSnapshot,
+    hand: readonly CardInstance[],
+  ): readonly CardInstance[] {
+    return Object.freeze(
+      hand.filter((card) => this.isLegal(snapshot, card)),
+    );
+  }
+
+  /**
+   * Returns the subset of cards whose timing urgency is CRITICAL or HIGH,
+   * i.e. cards that should be considered for immediate play.
+   * Uses `PHASE_BOUNDARY_*` and `ELEVATED_PRESSURE_SCORE` thresholds internally.
+   */
+  public filterUrgentCards(
+    snapshot: RunStateSnapshot,
+    hand: readonly CardInstance[],
+  ): readonly CardInstance[] {
+    return Object.freeze(
+      hand.filter((card) => {
+        const advisory = this.buildTimingWindowAdvisory(snapshot, card);
+        return advisory.overallUrgency === 'CRITICAL' || advisory.overallUrgency === 'HIGH';
+      }),
+    );
+  }
 }
 
 const EMPTY_TIMINGS: readonly TimingClass[] = Object.freeze([] as readonly TimingClass[]);
+
+/* ──────────────────────────────────────────────────────────────────────────────
+ * Batch / advisory / hand summary result shapes
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+export interface TimingWindowAdvisory {
+  readonly card: CardInstance;
+  readonly auditResult: CardTimingAudit;
+  readonly overallUrgency: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' | 'OK';
+  readonly phaseBoundaryUrgency: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' | 'NONE';
+  readonly trustOpportunity: 'TRUST_CRITICAL' | 'TRUST_LOW' | 'TRUST_OK' | 'NOT_APPLICABLE';
+  readonly pressureOpportunity: 'CRITICAL' | 'ELEVATED' | 'NORMAL' | 'NOT_APPLICABLE';
+  readonly narrative: string;
+}
+
+export interface TimingHandSummary {
+  readonly mode: string;
+  readonly totalCards: number;
+  readonly legalCards: number;
+  readonly blockedCards: number;
+  readonly criticalUrgencyCount: number;
+  readonly timingClassCounts: Readonly<Record<string, number>>;
+  readonly phaseBoundaryUrgency: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' | 'NONE';
+  readonly isPressureElevated: boolean;
+}
+
+/* ──────────────────────────────────────────────────────────────────────────────
+ * Doctrine utility helpers
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+/** Returns all timing classes supported by a given mode. */
+export function getTimingClassesForMode(mode: string): readonly TimingClass[] {
+  return MODE_TIMING_DOCTRINE[mode] ?? (EMPTY_TIMINGS as readonly TimingClass[]);
+}
+
+/** Returns all timing classes associated with a given deck type by doctrine. */
+export function getTimingClassesForDeckType(deckType: DeckType): readonly TimingClass[] {
+  return DECK_TIMING_DOCTRINE[deckType] ?? (EMPTY_TIMINGS as readonly TimingClass[]);
+}
+
+/** Returns all timing classes associated with a given tag. */
+export function getTimingClassesForTag(tag: string): readonly TimingClass[] {
+  return TAG_TIMING_DOCTRINE[tag] ?? (EMPTY_TIMINGS as readonly TimingClass[]);
+}
+
+/** Returns the END_WINDOW_MS threshold in milliseconds. */
+export function getEndWindowMs(): number {
+  return END_WINDOW_MS;
+}
+
+/** Returns the GHOST_MARKER_WINDOW_TICKS threshold. */
+export function getGhostMarkerWindowTicks(): number {
+  return GHOST_MARKER_WINDOW_TICKS;
+}
+
+/** Returns the GHOST_MARKER_HARD_WINDOW_TICKS threshold. */
+export function getGhostMarkerHardWindowTicks(): number {
+  return GHOST_MARKER_HARD_WINDOW_TICKS;
+}
+
+/** Returns the RESCUE_TRUST_THRESHOLD. */
+export function getRescueTrustThreshold(): number {
+  return RESCUE_TRUST_THRESHOLD;
+}
+
+/** Returns the LOW_TRUST_THRESHOLD (45) — trust below this is considered "low". */
+export function getLowTrustThreshold(): number {
+  return LOW_TRUST_THRESHOLD;
+}
+
+/** Returns the STABLE_TRUST_THRESHOLD. */
+export function getStableTrustThreshold(): number {
+  return STABLE_TRUST_THRESHOLD;
+}
+
+/** Returns the ELEVATED_PRESSURE_SCORE (0.5) — pressure above this warrants urgency. */
+export function getElevatedPressureScore(): number {
+  return ELEVATED_PRESSURE_SCORE;
+}
+
+/** Returns the CRITICAL_PRESSURE_SCORE. */
+export function getCriticalPressureScore(): number {
+  return CRITICAL_PRESSURE_SCORE;
+}
+
+/** Returns the HIGH_PRESSURE_SCORE. */
+export function getHighPressureScore(): number {
+  return HIGH_PRESSURE_SCORE;
+}
+
+/** Returns the PHASE_BOUNDARY_HIGH_URGENCY_REMAINING threshold (1 window = CRITICAL). */
+export function getPhaseBoundaryHighUrgencyRemaining(): number {
+  return PHASE_BOUNDARY_HIGH_URGENCY_REMAINING;
+}
+
+/** Returns the PHASE_BOUNDARY_MEDIUM_URGENCY_REMAINING threshold (2 windows = HIGH). */
+export function getPhaseBoundaryMediumUrgencyRemaining(): number {
+  return PHASE_BOUNDARY_MEDIUM_URGENCY_REMAINING;
+}
+
+/** Returns the PHASE_BOUNDARY_LOW_URGENCY_REMAINING threshold (4 windows = MEDIUM). */
+export function getPhaseBoundaryLowUrgencyRemaining(): number {
+  return PHASE_BOUNDARY_LOW_URGENCY_REMAINING;
+}
+
+/** Returns all counterable attack categories. */
+export function getCounterableAttackCategories(): readonly string[] {
+  return COUNTERABLE_ATTACK_CATEGORIES;
+}
+
+/** Returns all negative attack categories (a superset of counterable). */
+export function getNegativeAttackCategories(): readonly string[] {
+  return NEGATIVE_ATTACK_CATEGORIES;
+}
+
+/** Returns all timing classes in canonical order. */
+export function getTimingOrder(): readonly TimingClass[] {
+  return TIMING_ORDER;
+}
+
+/** Returns all mode timing doctrine entries. */
+export function getModeDoctrine(mode: string): readonly TimingClass[] {
+  return MODE_TIMING_DOCTRINE[mode] ?? (EMPTY_TIMINGS as readonly TimingClass[]);
+}
+
+/* ──────────────────────────────────────────────────────────────────────────────
+ * Module authority object
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+export const CARD_TIMING_VALIDATOR_MODULE_AUTHORITY = Object.freeze({
+  module: 'CardTimingValidator',
+  version: '2.0.0',
+  surface: 'engine/cards/timing',
+  exports: Object.freeze([
+    'CardTimingValidator',
+    'TimingWindowAdvisory',
+    'TimingHandSummary',
+    'getTimingClassesForMode',
+    'getTimingClassesForDeckType',
+    'getTimingClassesForTag',
+    'getEndWindowMs',
+    'getGhostMarkerWindowTicks',
+    'getGhostMarkerHardWindowTicks',
+    'getRescueTrustThreshold',
+    'getLowTrustThreshold',
+    'getStableTrustThreshold',
+    'getElevatedPressureScore',
+    'getCriticalPressureScore',
+    'getHighPressureScore',
+    'getPhaseBoundaryHighUrgencyRemaining',
+    'getPhaseBoundaryMediumUrgencyRemaining',
+    'getPhaseBoundaryLowUrgencyRemaining',
+    'getCounterableAttackCategories',
+    'getNegativeAttackCategories',
+    'getTimingOrder',
+    'getModeDoctrine',
+    'CARD_TIMING_VALIDATOR_MODULE_AUTHORITY',
+  ] as const),
+});

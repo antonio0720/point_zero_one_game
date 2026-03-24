@@ -95,6 +95,7 @@ import {
   type ChatTelemetrySinkDiagnostics,
   type ChatTelemetrySinkOptions,
   type ChatTelemetrySinkSnapshot,
+  type ChatTelemetrySinkFingerprint,
   type ChatTelemetrySinkUrgency,
   type ChatTelemetryTransactionBuildResult,
 } from './ChatTelemetrySink';
@@ -1736,4 +1737,21 @@ export function isLearningRelevantEnvelope(envelope: ChatTelemetryEnvelope): boo
     envelope.eventName === 'learning_updated' ||
     envelope.eventName === 'channel_switched'
   );
+}
+
+// ============================================================================
+// MARK: Helper utilities — fingerprinting / checksums
+// ============================================================================
+
+export function computeEnvelopeFingerprint(
+  envelope: ChatTelemetryEnvelope,
+  dedupeWindowMs: number = 0,
+): ChatTelemetrySinkFingerprint {
+  return buildFingerprint(envelope, dedupeWindowMs);
+}
+
+export function computePayloadChecksum(
+  payload: Readonly<Record<string, JsonValue>>,
+): string {
+  return hash32(stableJsonStringify(payload));
 }

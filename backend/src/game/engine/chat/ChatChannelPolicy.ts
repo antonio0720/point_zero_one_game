@@ -2048,3 +2048,158 @@ export function getAllReplayEligibleChannels(): readonly ChatChannelId[] {
       .map(([id]) => id),
   );
 }
+
+// ============================================================================
+// MARK: Session user identity accessor (uses ChatUserId)
+// ============================================================================
+
+export function resolveSessionUserId(session: ChatSessionState): ChatUserId {
+  return session.identity.userId;
+}
+
+// ============================================================================
+// MARK: Module authority object
+// ============================================================================
+
+export const ChatChannelPolicyModule = Object.freeze({
+  version: CHAT_CHANNEL_POLICY_MODULE_VERSION,
+  moduleName: CHAT_CHANNEL_POLICY_MODULE_NAME,
+  laws: CHAT_CHANNEL_POLICY_LAWS,
+  descriptor: CHAT_CHANNEL_POLICY_MODULE_DESCRIPTOR,
+  // Context
+  createContext: createChatChannelPolicyContext,
+  mergeRuntime: mergeChannelRuntime,
+  // Core policy evaluators
+  evaluateJoinChannelPolicy,
+  computeAllowedVisibleChannels,
+  resolveInitialVisibleChannel,
+  evaluateComposeChannelPolicy,
+  evaluateSwitchChannelPolicy,
+  evaluateNpcEmitChannelPolicy,
+  evaluateSystemEmitChannelPolicy,
+  evaluateShadowMirrorPolicy,
+  evaluateReplayVisibilityPolicy,
+  // Diagnostics / audit
+  buildChannelDiagnostic,
+  createChannelAuditRecord,
+  auditRoomChannelPolicy,
+  auditAllRoomsChannelPolicy,
+  // Room-kind helpers
+  defaultVisibleChannelsForRoomKind,
+  fallbackVisibleChannelForRoomKind,
+  defaultStageMoodForRoomKind,
+  channelIsAllowedForRoom,
+  roomSupportsChannel,
+  // Shadow channel selectors
+  selectPlayerShadowChannel,
+  selectNpcShadowChannel,
+  selectSystemShadowChannel,
+  // NPC / system channel resolvers
+  resolveNpcPreferredChannel,
+  fallbackNpcChannel,
+  selectSystemChannelFromSignal,
+  resolveReplayChannel,
+  // Room state helpers
+  roomHasActiveInvasion,
+  roomAudienceHeat,
+  roomTypingOccupancy,
+  roomVisibleOccupancy,
+  // Session helpers
+  isSessionJoinVisible,
+  isSessionVisibleWriter,
+  sessionOwnsRoom,
+  resolveSessionUserId,
+  // Occupancy selectors
+  selectVisibleOccupants,
+  selectTypingOccupants,
+  selectRoomSessions,
+  // Sensitivity heuristics
+  looksNegotiationSensitive,
+  isVisibleChannel,
+  roomSupportsNegotiation,
+  roomSupportsRescue,
+  roomSupportsCrowdHeat,
+  // Visible channel capability testers
+  visibleChannelSupportsTyping,
+  visibleChannelSupportsPresence,
+  visibleChannelSupportsReplay,
+  visibleChannelSupportsComposer,
+  visibleChannelSupportsReadReceipts,
+  // Explainers
+  explainJoinChannelDecision,
+  explainChannelDecision,
+  explainSwitchChannelDecision,
+  explainReplayVisibilityDecision,
+  explainShadowMirrorDecision,
+  // Metrics
+  countRoomsWithDealRoom,
+  countRoomsWithGlobal,
+  countRoomsWithLobby,
+  countPredatoryRooms,
+  countMournfulRooms,
+  countRoomsUnderInvasion,
+  countVisibleReplayEligibleRooms,
+  // Routing plans
+  buildRoomRoutingPlan,
+  buildAllRoomRoutingPlans,
+  // Replay artifact helpers
+  replayArtifactIsVisibleToPlayer,
+  replayArtifactRequiresShadowUnlock,
+  resolveReplayFocusChannel,
+  // Signal helpers
+  inferJoinPlanFromEnvelope,
+  signalSuggestsGlobalTheater,
+  signalSuggestsNegotiation,
+  signalSuggestsLobby,
+  // Descriptor assertions / lookups
+  assertVisibleChannelDescriptor,
+  assertShadowChannelDescriptor,
+  summarizeRoomChannelState,
+  summarizeChannelDescriptor,
+  getChannelDescriptor,
+  getChannelPersistenceClass,
+  // Channel capability testers (by ID)
+  isChannelVisibleToPlayer,
+  isChannelShadowChannel,
+  isChannelVisibleToPlayerById,
+  isShadowChannelById,
+  doesChannelSupportComposer,
+  doesChannelSupportReplay,
+  doesChannelSupportNpcInjection,
+  doesChannelSupportShadowWrites,
+  doesChannelSupportNegotiation,
+  doesChannelSupportRescue,
+  doesChannelSupportCompose,
+  doesChannelSupportReplayById,
+  // Watch bus
+  ChannelPolicyWatchBus,
+  buildChannelPolicyAnalytics,
+  // Mount policy
+  resolveMountPolicy,
+  findMountPoliciesForChannel,
+  // Permission / rate / NPC matrices
+  buildComposePermissionMatrix,
+  buildChannelRateDecisionContext,
+  buildNpcChannelVisibility,
+  // Typing / signal / heat routing
+  checkTypingEligibility,
+  routeSignalToChannel,
+  routeAudienceHeatToChannel,
+  enrichInputEnvelope,
+  getChannelRouteForSourceType,
+  // Stage mood / read receipts / crowd heat / NPC injection
+  buildRoomStageMoodPolicy,
+  getReadReceiptPolicy,
+  buildReadReceiptPolicies,
+  checkCrowdHeatEligibility,
+  getChannelsEligibleForCrowdHeat,
+  buildNpcInjectionMatrix,
+  getChannelsForNpcInjection,
+  // Persistence / switch / unread / scene / replay window
+  buildChannelPersistenceReport,
+  validateChannelSwitchRequest,
+  buildChannelUnreadReport,
+  buildChannelActiveSceneContext,
+  validateChannelForReplay,
+  getAllReplayEligibleChannels,
+});

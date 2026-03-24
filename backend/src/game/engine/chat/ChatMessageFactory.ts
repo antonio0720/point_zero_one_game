@@ -1668,7 +1668,7 @@ function truncateForQuote(text: string): string {
   return clampText(collapseWhitespace(text), 160);
 }
 
-function buildTags(text: string): readonly string[] {
+export function buildTags(text: string): readonly string[] {
   const tokens = tokenize(text)
     .filter((token) => token.length >= 4)
     .slice(0, 12)
@@ -1676,7 +1676,7 @@ function buildTags(text: string): readonly string[] {
   return uniqueStrings(tokens);
 }
 
-function tokenize(text: string): string[] {
+export function tokenize(text: string): string[] {
   return text
     .toLowerCase()
     .replace(/[^a-z0-9\s_-]/g, ' ')
@@ -2139,4 +2139,88 @@ export const CHAT_MESSAGE_FACTORY_FULL_MODULE = Object.freeze({
   attributionLabel,
   bodyPartsToPlainText,
 });
+
+// ============================================================================
+// MARK: Score wiring
+// ============================================================================
+
+export function clampMessageScore(raw: number): Score01 {
+  return clamp01(raw);
+}
+
+// ============================================================================
+// MARK: Module authority object
+// ============================================================================
+
+export const ChatMessageFactoryModule = Object.freeze({
+  moduleId: CHAT_MESSAGE_FACTORY_MODULE_ID,
+  version: CHAT_MESSAGE_FACTORY_MODULE_VERSION,
+  descriptor: CHAT_MESSAGE_FACTORY_MODULE_DESCRIPTOR,
+  createChatMessageFactory,
+  createCanonicalMessage,
+  createPlayerMessage,
+  createSystemMessage,
+  createNpcMessage,
+  createHelperInterventionMessage,
+  createHaterEscalationMessage,
+  createDealRoomOfferMessage,
+  createQuoteCallbackMessage,
+  createLegendMomentMessage,
+  createShadowAnnotation,
+  createCommandSystemMessages,
+  createSceneMessages,
+  reviseMessageText,
+  redactMessage,
+  softDeleteMessage,
+  derivePlayerCallbackQuote,
+  derivePersonaPreferredChannel,
+  deriveRelationshipTag,
+  deriveLearningSeedFromProfile,
+  derivePlayerEchoShadowMessage,
+  validateMessage,
+  compilePlainText,
+  resolveRoomAndSessionOrThrow,
+  deriveMessageSeedFromSignal,
+  deriveJoinAnnouncementText,
+  deriveMessageWindowSummary,
+  ChatMessageFactoryWatchBus,
+  computeMessageFactoryFingerprint,
+  messageIsVisible,
+  messageIsFromPlayer,
+  messageIsFromNpc,
+  messageIsFromSystem,
+  messageBodyLength,
+  messageHasProof,
+  messageHasReplay,
+  messageHasLearningMetadata,
+  messageChannelIsVisible,
+  messageHasPolicyMetadata,
+  messageIsFromPersona,
+  messageIsInRoom,
+  messageIsInChannel,
+  messageIsFromSession,
+  attributionLabel,
+  attributionIsAnonymous,
+  bodyPartsToPlainText,
+  bodyPartCount,
+  proofMetadataLabel,
+  replayMetadataLabel,
+  learningMetadataLabel,
+  policyMetadataLabel,
+  factoryGetLatestMessage,
+  factoryGetNextSequence,
+  factoryGetRelationship,
+  factoryGetRoom,
+  factoryGetSession,
+  factoryGetTranscript,
+  factoryChannelDescriptor,
+  factoryRuntimeDefault,
+  pendingRequestLabel,
+  pendingRevealLabel,
+  factorySignalHasBattle,
+  factoryAffectLabel,
+  buildTags,
+  tokenize,
+  clampMessageScore,
+} as const);
 

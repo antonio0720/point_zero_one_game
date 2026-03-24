@@ -100,25 +100,25 @@ export interface ChatProofChainContext {
   readonly ports: ChatProofChainPorts;
 }
 
-const DEFAULT_CLOCK: ChatProofChainClockPort = {
+export const DEFAULT_CLOCK: ChatProofChainClockPort = {
   now: () => Date.now(),
 };
 
-const DEFAULT_IDS: ChatProofChainIdPort = {
+export const DEFAULT_IDS: ChatProofChainIdPort = {
   proofEdgeId: (prefix = 'prf') => `${prefix}_${Date.now()}_${randomBase36(12)}` as ChatProofEdgeId,
 };
 
-const DEFAULT_HASH: ChatHashPort = {
+export const DEFAULT_HASH: ChatHashPort = {
   hash: (input: string) => fnv1a32(input) as ChatProofHash,
 };
 
-const DEFAULT_LOGGER: ChatProofChainLoggerPort = {
+export const DEFAULT_LOGGER: ChatProofChainLoggerPort = {
   debug: () => undefined,
   warn: () => undefined,
   error: () => undefined,
 };
 
-const DEFAULT_PORTS: ChatProofChainPorts = {
+export const DEFAULT_PORTS: ChatProofChainPorts = {
   clock: DEFAULT_CLOCK,
   ids: DEFAULT_IDS,
   hash: DEFAULT_HASH,
@@ -1459,7 +1459,7 @@ export function canonicalizeJson(value: JsonValue): string {
   return `{${keys.map((key) => `${JSON.stringify(key)}:${canonicalizeJson((value as Record<string, JsonValue>)[key])}`).join(',')}}`;
 }
 
-function fnv1a32(input: string): string {
+export function fnv1a32(input: string): string {
   let hash = 0x811c9dc5;
   for (let i = 0; i < input.length; i += 1) {
     hash ^= input.charCodeAt(i);
@@ -1468,7 +1468,7 @@ function fnv1a32(input: string): string {
   return `fnv1a32_${(hash >>> 0).toString(16).padStart(8, '0')}`;
 }
 
-function randomBase36(length: number): string {
+export function randomBase36(length: number): string {
   let output = '';
   while (output.length < length) {
     output += Math.random().toString(36).slice(2);
@@ -1995,3 +1995,90 @@ export function countUncoveredMessages(state: ChatState, roomId: ChatRoomId): nu
 }
 
 export const PROOF_CHAIN_INTEGRITY_THRESHOLD = 0.95 as const;
+
+export const ChatProofChainModule = Object.freeze({
+  name: CHAT_PROOF_CHAIN_MODULE_NAME,
+  version: CHAT_PROOF_CHAIN_MODULE_VERSION,
+  versionExtended: CHAT_PROOF_CHAIN_MODULE_VERSION_EXTENDED,
+  laws: CHAT_PROOF_CHAIN_MODULE_LAWS,
+  descriptor: CHAT_PROOF_CHAIN_MODULE_DESCRIPTOR,
+  integrityThreshold: PROOF_CHAIN_INTEGRITY_THRESHOLD,
+  DEFAULT_CLOCK,
+  DEFAULT_IDS,
+  DEFAULT_HASH,
+  DEFAULT_LOGGER,
+  DEFAULT_PORTS,
+  fnv1a32,
+  randomBase36,
+  createChatProofChainContext,
+  createEmptyProofChain,
+  cloneProofChain,
+  cloneProofEdge,
+  createProofEdge,
+  createMessageToMessageProofEdge,
+  createEventToMessageProofEdge,
+  createMessageToReplayProofEdge,
+  createMessageToTelemetryProofEdge,
+  createMessageToInferenceProofEdge,
+  createModerationDecisionProofEdge,
+  createProofEdgesForMessage,
+  appendProofEdge,
+  appendProofEdges,
+  applyProofEdge,
+  applyProofEdges,
+  removeProofEdge,
+  dedupeProofEdges,
+  selectProofEdge,
+  selectProofEdgesForRoom,
+  selectProofEdgesFromMessage,
+  selectProofEdgesToMessage,
+  selectProofEdgesForMessage,
+  selectProofEdgesFromEvent,
+  selectProofEdgesToReplay,
+  selectProofEdgesToTelemetry,
+  selectProofEdgesToInference,
+  selectModerationProofEdges,
+  selectProofEdgesWithinTimeRange,
+  verifyProofEdgeHash,
+  verifyRoomProofChain,
+  verifyStateProofIntegrity,
+  createProofDigest,
+  buildTranscriptRangeProof,
+  buildRoomProofTimeline,
+  buildMessageCausalClosure,
+  createProofEdgesForReplayArtifacts,
+  createProofEdgesForTelemetryBatch,
+  createProofEdgesForInferenceBatch,
+  findTranscriptMessagesWithoutProofCoverage,
+  findReplayArtifactsWithoutProofCoverage,
+  findInferenceSnapshotsWithoutProofCoverage,
+  reconcileRoomProofCoverage,
+  createCanonicalProofMaterial,
+  createCanonicalTranscriptMaterial,
+  summarizeProofChain,
+  canonicalizeJson,
+  ProofWatchBus,
+  createProofWatchBus,
+  ProofEdgeLedger,
+  createProofEdgeLedger,
+  ProofEdgeKindCounter,
+  createProofEdgeKindCounter,
+  computeProofEdgeFingerprint,
+  buildProofChainIntegrityReport,
+  diffProofChains,
+  buildReplayProofLink,
+  buildInferenceProofLink,
+  buildTelemetryProofLink,
+  buildProofChainSnapshot,
+  buildProofCoverageReport,
+  findEdgeByMessageId,
+  findEdgesByEventId,
+  findEdgesByKind,
+  buildProofChainAgeReport,
+  verifyMessageBodyHash,
+  exportProofChainSummary,
+  countProofEdgesForRoom,
+  isProofChainEmpty,
+  getProofHashForMessage,
+  countUncoveredMessages,
+} as const);

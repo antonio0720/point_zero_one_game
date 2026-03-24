@@ -69,6 +69,7 @@ import {
   type ChatRelationshipState,
   type ChatResponseCandidate,
   type ChatRoomId,
+  type ChatUserId,
   type ChatRoomKind,
   type ChatRoomStageMood,
   type ChatRoomState,
@@ -83,6 +84,9 @@ import {
   type Score01,
   type UnixMs,
 } from './types';
+
+export type { ChatRelationshipState, ChatUserId };
+
 import {
   DEFAULT_BACKEND_CHAT_RUNTIME,
   mergeRuntimeConfig,
@@ -1758,7 +1762,22 @@ export function runHelperBatchPlanning(
   let accepted = 0;
   let rejected = 0;
   for (const ctx of contexts) {
-    const plan = authority.plan(ctx.state, ctx.roomId, ctx.signal, ctx.now);
+    const room = ctx.state.rooms[ctx.roomId];
+    if (!room) {
+      rejected++;
+      continue;
+    }
+    const triggerCtx: HelperTriggerContext = {
+      kind: 'BATTLE_SIGNAL',
+      state: ctx.state,
+      room,
+      now: ctx.now,
+      causeEventId: null,
+      signal: ctx.signal,
+      playerMessage: null,
+      preferredChannelId: null,
+    };
+    const plan = authority.plan(triggerCtx);
     const fingerprint = computeHelperResponseFingerprint(ctx.roomId, plan, now);
     entries.push({ roomId: ctx.roomId, plan, fingerprint });
     if (plan.accepted) accepted++;
@@ -1936,21 +1955,26 @@ export namespace ChatHelperResponseOrchestratorModuleExtended {
 
 export function helperTacticLabel(tactic: HelperUrgencyVector['tactic']): string {
   const map: Record<HelperUrgencyVector['tactic'], string> = {
-    rescue: 'Rescue Intervention',
-    encourage: 'Encouragement',
-    redirect: 'Redirect Support',
-    whisper: 'Quiet Whisper',
-    none: 'No Intervention',
+    STEADY_HAND: 'Steady Hand',
+    RAPID_REFRAME: 'Rapid Reframe',
+    ONE_CARD_EXIT: 'One Card Exit',
+    CONFIDENCE_RESET: 'Confidence Reset',
+    SHIELD_TRIAGE: 'Shield Triage',
+    DEALROOM_WARNING: 'Deal Room Warning',
+    SILENT_SUPPORT: 'Silent Support',
+    RESCUE_SHADOW: 'Rescue Shadow',
+    BREATH_GATE: 'Breath Gate',
+    POST_RUN_DEBRIEF: 'Post-Run Debrief',
   };
   return map[tactic] ?? tactic;
 }
 
 export function isHighPriorityTactic(tactic: HelperUrgencyVector['tactic']): boolean {
-  return tactic === 'rescue';
+  return tactic === 'RESCUE_SHADOW' || tactic === 'SHIELD_TRIAGE';
 }
 
 export function isSilentTactic(tactic: HelperUrgencyVector['tactic']): boolean {
-  return tactic === 'whisper' || tactic === 'none';
+  return tactic === 'SILENT_SUPPORT' || tactic === 'BREATH_GATE';
 }
 
 // ============================================================================
@@ -1982,7 +2006,7 @@ export function signalHasEconomyContext(signal: ChatSignalEnvelope): boolean {
 }
 
 export function signalHasPresenceContext(signal: ChatSignalEnvelope): boolean {
-  return Boolean(signal.presence);
+  return Boolean(signal.multiplayer);
 }
 
 export function getSignalRoomId(signal: ChatSignalEnvelope): ChatRoomId | null {
@@ -1990,7 +2014,7 @@ export function getSignalRoomId(signal: ChatSignalEnvelope): ChatRoomId | null {
 }
 
 export function getSignalEventId(signal: ChatSignalEnvelope): ChatEventId | null {
-  return signal.eventId ?? null;
+  return (signal.metadata?.['eventId'] as ChatEventId | undefined) ?? null;
 }
 
 // ============================================================================
@@ -2008,7 +2032,13 @@ export function helperRoomKindIsAllowed(
   config: ReturnType<typeof mergeRuntimeConfig>,
   roomKind: ChatRoomKind,
 ): boolean {
-  return (config.allowRoomKinds ?? []).includes(roomKind);
+  // ChatRuntimeConfig does not carry allowRoomKinds; shadow rooms need at
+  // least one shadow channel configured, everything else just needs visible channels.
+  const shadowOnlyKinds: readonly ChatRoomKind[] = ['DEAL_ROOM', 'PRIVATE', 'SYNDICATE'];
+  if (shadowOnlyKinds.includes(roomKind)) {
+    return config.allowShadowChannels.length > 0;
+  }
+  return config.allowVisibleChannels.length > 0;
 }
 
 // ============================================================================
@@ -2069,7 +2099,7 @@ export function roomHasActiveInvasion(state: ChatState, roomId: ChatRoomId): boo
 }
 
 export function roomIsCurrentlySilenced(state: ChatState, roomId: ChatRoomId, now: UnixMs): boolean {
-  void pruneExpiredSilences(state, roomId, now);
+  void pruneExpiredSilences(state, now);
   return isRoomSilenced(state, roomId, now);
 }
 
@@ -2081,16 +2111,16 @@ export function getRoomAudienceHeat(state: ChatState, roomId: ChatRoomId): ChatA
   return selectAudienceHeat(state, roomId);
 }
 
-export function getRoomLearningProfile(state: ChatState, roomId: ChatRoomId, userId: string): ChatLearningProfile | null {
-  return selectLearningProfile(state, roomId, userId);
+export function getRoomLearningProfile(state: ChatState, _roomId: ChatRoomId, userId: ChatUserId): ChatLearningProfile | null {
+  return selectLearningProfile(state, userId);
 }
 
-export function getRoomInferenceSnapshots(state: ChatState, roomId: ChatRoomId, userId: string): readonly ChatInferenceSnapshot[] {
-  return selectInferenceSnapshotsForUser(state, roomId, userId);
+export function getRoomInferenceSnapshots(state: ChatState, _roomId: ChatRoomId, userId: ChatUserId): readonly ChatInferenceSnapshot[] {
+  return selectInferenceSnapshotsForUser(state, userId);
 }
 
-export function getRoomRelationship(state: ChatState, roomId: ChatRoomId, actorId: string): ChatRelationshipState | null {
-  return selectRelationshipForActor(state, roomId, actorId);
+export function getRoomRelationship(state: ChatState, roomId: ChatRoomId, actorId: string, userId: ChatUserId): ChatRelationshipState | null {
+  return selectRelationshipForActor(state, roomId, actorId, userId);
 }
 
 export function getRoomPresence(state: ChatState, roomId: ChatRoomId): ReturnType<typeof selectRoomPresence> {
@@ -2101,8 +2131,8 @@ export function getRoomVisibleMessages(state: ChatState, roomId: ChatRoomId): re
   return selectVisibleMessages(state, roomId);
 }
 
-export function applyHelperScenePlan(state: ChatState, roomId: ChatRoomId, sceneId: ChatSceneId, plan: ChatScenePlan): ChatState {
-  return setRoomScene(state, roomId, sceneId, plan);
+export function applyHelperScenePlan(state: ChatState, roomId: ChatRoomId, sceneId: ChatSceneId, _plan: ChatScenePlan): ChatState {
+  return setRoomScene(state, roomId, sceneId);
 }
 
 export function applyHelperSilenceDecision(state: ChatState, roomId: ChatRoomId, decision: ChatSilenceDecision): ChatState {
@@ -2122,7 +2152,7 @@ export function personaSupportsChannel(persona: ChatPersonaDescriptor, channelId
 }
 
 export function personaDisplayLabel(persona: ChatPersonaDescriptor): string {
-  return `${persona.displayName} [${persona.id}]`;
+  return `${persona.displayName} [${persona.personaId}]`;
 }
 
 // ============================================================================
@@ -2147,7 +2177,7 @@ export function candidateHasBody(candidate: ChatResponseCandidate): boolean {
 }
 
 export function candidateBodyLength(candidate: ChatResponseCandidate): number {
-  return candidate.body.length;
+  return candidate.text.length;
 }
 
 export function sortCandidatesByScore(candidates: readonly ChatResponseCandidate[]): readonly ChatResponseCandidate[] {
@@ -2183,5 +2213,61 @@ export const CHAT_HELPER_RESPONSE_FULL_MODULE = Object.freeze({
   buildUrgencyStats: buildHelperUrgencyStats,
   countPersonaFrequency,
   computeFingerprint: computeHelperResponseFingerprint,
+  // tactic utilities
+  tacticLabel: helperTacticLabel,
+  isHighPriority: isHighPriorityTactic,
+  isSilent: isSilentTactic,
+  // relationship utilities
+  isHighTrust: isHighTrustRelationship,
+  isLowTrust: isLowTrustRelationship,
+  hasDebt: hasSignificantDebt,
+  // signal utilities
+  signalHasBattle: signalHasBattleContext,
+  signalHasEconomy: signalHasEconomyContext,
+  signalHasPresence: signalHasPresenceContext,
+  getSignalRoomId,
+  getSignalEventId,
+  // runtime config
+  channelIsAllowed: helperChannelIsAllowed,
+  roomKindIsAllowed: helperRoomKindIsAllowed,
+  // affect utilities
+  isHighEmbarrassment: isHighEmbarrassmentAffect,
+  isHighFrustration: isHighFrustrationAffect,
+  isHighConfidence: isHighConfidenceAffect,
+  // audience heat
+  audienceIsHot,
+  audienceIsVeryHot,
+  audienceHeatLabel,
+  // learning profile
+  hasHighReceptivity: hasHighHelperReceptivity,
+  hasLowReceptivity: hasLowHelperReceptivity,
+  // room state
+  roomHasInvasion: roomHasActiveInvasion,
+  roomIsSilenced: roomIsCurrentlySilenced,
+  getLatestMessage: getLatestRoomMessage,
+  getAudienceHeat: getRoomAudienceHeat,
+  getLearningProfile: getRoomLearningProfile,
+  getInferenceSnapshots: getRoomInferenceSnapshots,
+  getRelationship: getRoomRelationship,
+  getPresence: getRoomPresence,
+  getVisibleMessages: getRoomVisibleMessages,
+  // state application
+  applyScenePlan: applyHelperScenePlan,
+  applySilenceDecision: applyHelperSilenceDecision,
+  // persona utilities
+  personaChannels: personaChannelIds,
+  personaSupportsChannel,
+  personaLabel: personaDisplayLabel,
+  // inference
+  latestInference,
+  inferenceEngagementAbove,
+  // candidates
+  candidateHasBody,
+  candidateBodyLength,
+  sortCandidates: sortCandidatesByScore,
+  topCandidate,
+  // nullable
+  isNullable,
+  unwrapNullable,
 });
 

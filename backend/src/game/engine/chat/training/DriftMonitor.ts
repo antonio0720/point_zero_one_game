@@ -1666,6 +1666,18 @@ export function compareDriftReports(
 }
 
 // ============================================================================
+// MARK: Baseline + histogram bin accessors
+// ============================================================================
+
+export function extractTaskDriftBaseline(policy: TrainedTaskPolicy): TaskDriftBaseline {
+  return policy.driftBaseline;
+}
+
+export function extractHistogramBins(profile: HistogramProfile): readonly HistogramBin[] {
+  return profile.bins;
+}
+
+// ============================================================================
 // MARK: Drift export utilities
 // ============================================================================
 
@@ -1988,6 +2000,8 @@ export const ChatDriftMonitorModuleExtended = Object.freeze({
   buildDriftTrendReport,
   buildAllDriftTrendReports,
   evaluateDriftAlert,
+  extractTaskDriftBaseline,
+  extractHistogramBins,
   DEFAULT_DRIFT_ALERT_THRESHOLDS,
 });
 

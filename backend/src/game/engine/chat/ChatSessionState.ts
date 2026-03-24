@@ -406,6 +406,8 @@ export function normalizeSessionRole(role: ChatSessionRole): ChatSessionRole {
     case 'PLAYER':
     case 'MODERATOR':
     case 'SYSTEM':
+    case 'SPECTATOR':
+    case 'NPC':
       return role;
     default:
       return 'PLAYER';
@@ -1513,10 +1515,11 @@ export interface SessionFingerprint {
 }
 
 export function computeSessionFingerprint(session: ChatSessionModel): SessionFingerprint {
+  const primaryRoomId = session.roomIds[0] ?? ('' as ChatRoomId);
   const hash = [
     session.identity.sessionId,
-    session.roomId,
-    session.role,
+    primaryRoomId,
+    session.identity.role,
     session.connectionState,
     session.invisible,
     session.shadowMuted,
@@ -1524,8 +1527,8 @@ export function computeSessionFingerprint(session: ChatSessionModel): SessionFin
 
   return Object.freeze({
     sessionId: session.identity.sessionId,
-    roomId: session.roomId,
-    role: session.role,
+    roomId: primaryRoomId,
+    role: session.identity.role,
     connectionState: session.connectionState,
     invisible: session.invisible,
     shadowMuted: session.shadowMuted,
@@ -1577,10 +1580,10 @@ export type SessionCapability =
 export const ROLE_CAPABILITY_MAP: Readonly<Record<ChatSessionRole, readonly SessionCapability[]>> =
   Object.freeze({
     PLAYER: ['CAN_SEND_MESSAGES', 'CAN_CHANGE_CHANNEL', 'CAN_USE_COMMANDS', 'CAN_TRIGGER_REPLAY'],
-    OPERATOR: ['CAN_SEND_MESSAGES', 'CAN_CHANGE_CHANNEL', 'CAN_USE_COMMANDS', 'CAN_SEE_SHADOW_CHANNEL', 'CAN_TRIGGER_REPLAY', 'CAN_KICK_SESSIONS'],
+    MODERATOR: ['CAN_SEND_MESSAGES', 'CAN_CHANGE_CHANNEL', 'CAN_USE_COMMANDS', 'CAN_SEE_SHADOW_CHANNEL', 'CAN_TRIGGER_REPLAY', 'CAN_KICK_SESSIONS'],
     SPECTATOR: ['CAN_TRIGGER_REPLAY'],
-    NARRATOR: ['CAN_SEND_MESSAGES', 'CAN_SEE_SHADOW_CHANNEL'],
-    OBSERVER: [],
+    NPC: ['CAN_SEND_MESSAGES', 'CAN_SEE_SHADOW_CHANNEL'],
+    SYSTEM: [],
   } as const);
 
 export function sessionHasCapability(role: ChatSessionRole, cap: SessionCapability): boolean {
@@ -1596,7 +1599,7 @@ export function querySessionsByRoom(
   roomId: ChatRoomId,
 ): readonly ChatSessionModel[] {
   return Object.values(state.sessions).filter(
-    (s): s is ChatSessionModel => s !== undefined && s.roomId === roomId,
+    (s): s is ChatSessionModel => s !== undefined && s.roomIds.includes(roomId),
   );
 }
 
@@ -1605,7 +1608,7 @@ export function queryActiveSessionsByRoom(
   roomId: ChatRoomId,
 ): readonly ChatSessionModel[] {
   return querySessionsByRoom(state, roomId).filter(
-    (s) => s.connectionState === 'CONNECTED',
+    (s) => s.connectionState === 'ATTACHED',
   );
 }
 
@@ -1645,8 +1648,8 @@ export function diffSessionStates(
     connectionChanged: before.connectionState !== after.connectionState,
     invisibilityChanged: before.invisible !== after.invisible,
     shadowMuteChanged: before.shadowMuted !== after.shadowMuted,
-    roleChanged: before.role !== after.role,
-    roomChanged: before.roomId !== after.roomId,
+    roleChanged: before.identity.role !== after.identity.role,
+    roomChanged: before.roomIds.join(',') !== after.roomIds.join(','),
   });
 }
 
@@ -1656,12 +1659,12 @@ export function diffSessionStates(
 
 export function isSessionCurrentlyMuted(session: ChatSessionModel, now: UnixMs): boolean {
   if (!session.mutedUntil) return false;
-  return (session.mutedUntil as unknown as number) > (now as unknown as number);
+  return Number(asUnixMs(session.mutedUntil)) > Number(asUnixMs(now));
 }
 
 export function remainingMuteDurationMs(session: ChatSessionModel, now: UnixMs): number {
   if (!session.mutedUntil) return 0;
-  const remaining = (session.mutedUntil as unknown as number) - (now as unknown as number);
+  const remaining = Number(asUnixMs(session.mutedUntil)) - Number(asUnixMs(now));
   return remaining > 0 ? remaining : 0;
 }
 
@@ -1688,7 +1691,7 @@ export function buildSessionRoomStats(
   return Object.freeze({
     roomId,
     totalSessions: all.length,
-    activeSessions: all.filter((s) => s.connectionState === 'CONNECTED').length,
+    activeSessions: all.filter((s) => s.connectionState === 'ATTACHED').length,
     invisibleSessions: all.filter((s) => s.invisible).length,
     shadowMutedSessions: all.filter((s) => s.shadowMuted).length,
     mutedSessions: all.filter((s) => isSessionCurrentlyMuted(s, now)).length,
@@ -1717,7 +1720,7 @@ export class SessionEpochTracker {
     this.epochs.get(id)!.push(Object.freeze({
       epochId: `epoch:${id}:${now}`,
       sessionId: id,
-      roomId: session.roomId,
+      roomId: session.roomIds[0] ?? ('' as ChatRoomId),
       recordedAt: now,
       connectionState: session.connectionState,
     }));
@@ -1746,9 +1749,9 @@ export function buildSessionAdmissionRecord(
 ): Readonly<Record<string, string>> {
   return Object.freeze({
     sessionId: stringifySessionId(session.identity.sessionId),
-    roomId: stringifyRoomId(session.roomId),
+    roomId: stringifyRoomId(session.roomIds[0] ?? ('' as ChatRoomId)),
     userId: stringifyUserId(session.identity.userId),
-    role: session.role,
+    role: session.identity.role,
     connectionState: session.connectionState,
     admittedAt: String(now),
   });
@@ -1807,8 +1810,8 @@ export function isWithinReconnectWindow(
   windowMs: number = DEFAULT_SESSION_ADMISSION_POLICY.maxReconnectWindowMs,
 ): boolean {
   if (session.connectionState !== 'RECONNECTING') return false;
-  if (!session.disconnectedAt) return false;
-  const elapsed = (now as unknown as number) - (session.disconnectedAt as unknown as number);
+  if (!session.lastSeenAt) return false;
+  const elapsed = Number(asUnixMs(now)) - Number(asUnixMs(session.lastSeenAt));
   return elapsed <= windowMs;
 }
 
@@ -1834,10 +1837,10 @@ export function buildSessionProjection(
 ): SessionProjection {
   return Object.freeze({
     sessionId: session.identity.sessionId,
-    roomId: session.roomId,
+    roomId: session.roomIds[0] ?? ('' as ChatRoomId),
     userId: stringifyUserId(session.identity.userId),
-    role: session.role,
-    isActive: session.connectionState === 'CONNECTED',
+    role: session.identity.role,
+    isActive: session.connectionState === 'ATTACHED',
     isMuted: isSessionCurrentlyMuted(session, now),
     isInvisible: session.invisible,
     isShadowMuted: session.shadowMuted,
@@ -1904,6 +1907,25 @@ export const ChatSessionStateModuleExtended = Object.freeze({
   buildRoomSessionProjections,
   buildSessionMuteReport,
   isWithinReconnectWindow,
+  buildRoomRoleDistribution,
+  getModeratorSessionsInRoom,
+  getPlayerSessionsInRoom,
+  getSpectatorSessionsInRoom,
+  getNpcSessionsInRoom,
+  getSystemSessionsInRoom,
+  hasSessionById,
+  getRoomSessionCount,
+  isRoomEmpty,
+  isRoomOverCapacity,
+  listAllRoomIds,
+  countActiveSessionsInState,
+  countTotalSessionsInState,
+  findSessionByUserId,
+  getSessionRoomKind,
+  buildRoomStateWithSessions,
+  getRoomStateById,
+  buildAllRoomStateViews,
+  isRoomKindMatch,
   ROLE_CAPABILITY_MAP,
   DEFAULT_SESSION_ADMISSION_POLICY,
   CHAT_SESSION_STATE_MODULE_DESCRIPTOR,
@@ -1917,10 +1939,10 @@ export const ChatSessionStateModuleExtended = Object.freeze({
 export interface RoomRoleDistribution {
   readonly roomId: ChatRoomId;
   readonly playerCount: number;
-  readonly operatorCount: number;
+  readonly moderatorCount: number;
   readonly spectatorCount: number;
-  readonly narratorCount: number;
-  readonly observerCount: number;
+  readonly npcCount: number;
+  readonly systemCount: number;
 }
 
 export function buildRoomRoleDistribution(
@@ -1928,20 +1950,60 @@ export function buildRoomRoleDistribution(
   roomId: ChatRoomId,
 ): RoomRoleDistribution {
   const sessions = querySessionsByRoom(state, roomId);
-  let players = 0, operators = 0, spectators = 0, narrators = 0, observers = 0;
+  let players = 0, moderators = 0, spectators = 0, npcs = 0, systems = 0;
   for (const s of sessions) {
-    if (s.role === 'PLAYER') players++;
-    else if (s.role === 'OPERATOR') operators++;
-    else if (s.role === 'SPECTATOR') spectators++;
-    else if (s.role === 'NARRATOR') narrators++;
-    else if (s.role === 'OBSERVER') observers++;
+    if (s.identity.role === 'PLAYER') players++;
+    else if (s.identity.role === 'MODERATOR') moderators++;
+    else if (s.identity.role === 'SPECTATOR') spectators++;
+    else if (s.identity.role === 'NPC') npcs++;
+    else if (s.identity.role === 'SYSTEM') systems++;
   }
-  return Object.freeze({ roomId, playerCount: players, operatorCount: operators, spectatorCount: spectators, narratorCount: narrators, observerCount: observers });
+  return Object.freeze({ roomId, playerCount: players, moderatorCount: moderators, spectatorCount: spectators, npcCount: npcs, systemCount: systems });
 }
 
 // ============================================================================
 // MARK: Session identity lookup helpers
 // ============================================================================
+
+// ============================================================================
+// MARK: Room state helpers
+// ============================================================================
+
+export interface ChatRoomStateWithSessions {
+  readonly room: ChatRoomState;
+  readonly sessions: readonly ChatSessionModel[];
+  readonly attachedCount: number;
+  readonly visibleCount: number;
+  readonly shadowMutedCount: number;
+}
+
+export function buildRoomStateWithSessions(
+  roomState: ChatRoomState,
+  state: ChatState,
+): ChatRoomStateWithSessions {
+  const sessions = getSessionsForRoom(state, roomState.roomId);
+  return Object.freeze({
+    room: roomState,
+    sessions,
+    attachedCount: sessions.filter((s) => s.connectionState === 'ATTACHED').length,
+    visibleCount: sessions.filter((s) => !s.invisible).length,
+    shadowMutedCount: sessions.filter((s) => s.shadowMuted).length,
+  });
+}
+
+export function getRoomStateById(state: ChatState, roomId: ChatRoomId): ChatRoomState | null {
+  return state.rooms[roomId] ?? null;
+}
+
+export function buildAllRoomStateViews(state: ChatState): readonly ChatRoomStateWithSessions[] {
+  return Object.values(state.rooms)
+    .filter((room): room is ChatRoomState => room !== undefined)
+    .map((room) => buildRoomStateWithSessions(room, state));
+}
+
+export function isRoomKindMatch(room: ChatRoomState, kind: ChatRoomKind): boolean {
+  return room.roomKind === kind;
+}
 
 export function findSessionByUserId(
   state: ChatState,
@@ -1957,13 +2019,14 @@ export function getSessionRoomKind(
   state: ChatState,
   session: ChatSessionModel,
 ): ChatRoomKind | null {
-  const room = state.rooms[session.roomId];
+  const primaryRoomId = session.roomIds[0];
+  const room = primaryRoomId != null ? state.rooms[primaryRoomId] : undefined;
   return room?.roomKind ?? null;
 }
 
 export function countActiveSessionsInState(state: ChatState): number {
   return Object.values(state.sessions).filter(
-    (s) => s !== undefined && s.connectionState === 'CONNECTED',
+    (s) => s !== undefined && s.connectionState === 'ATTACHED',
   ).length;
 }
 
@@ -1971,16 +2034,22 @@ export function countTotalSessionsInState(state: ChatState): number {
   return Object.keys(state.sessions).length;
 }
 
-export function getOperatorSessionsInRoom(state: ChatState, roomId: ChatRoomId): readonly ChatSessionModel[] {
-  return querySessionsByRoom(state, roomId).filter((s) => s.role === 'OPERATOR');
+export function getModeratorSessionsInRoom(state: ChatState, roomId: ChatRoomId): readonly ChatSessionModel[] {
+  return querySessionsByRoom(state, roomId).filter((s) => s.identity.role === 'MODERATOR');
 }
 export function getPlayerSessionsInRoom(state: ChatState, roomId: ChatRoomId): readonly ChatSessionModel[] {
-  return querySessionsByRoom(state, roomId).filter((s) => s.role === 'PLAYER');
+  return querySessionsByRoom(state, roomId).filter((s) => s.identity.role === 'PLAYER');
 }
 export function getSpectatorSessionsInRoom(state: ChatState, roomId: ChatRoomId): readonly ChatSessionModel[] {
-  return querySessionsByRoom(state, roomId).filter((s) => s.role === 'SPECTATOR');
+  return querySessionsByRoom(state, roomId).filter((s) => s.identity.role === 'SPECTATOR');
 }
-export function hasSession(state: ChatState, sessionId: ChatSessionId): boolean {
+export function getNpcSessionsInRoom(state: ChatState, roomId: ChatRoomId): readonly ChatSessionModel[] {
+  return querySessionsByRoom(state, roomId).filter((s) => s.identity.role === 'NPC');
+}
+export function getSystemSessionsInRoom(state: ChatState, roomId: ChatRoomId): readonly ChatSessionModel[] {
+  return querySessionsByRoom(state, roomId).filter((s) => s.identity.role === 'SYSTEM');
+}
+export function hasSessionById(state: ChatState, sessionId: ChatSessionId): boolean {
   return sessionId in state.sessions;
 }
 export function getRoomSessionCount(state: ChatState, roomId: ChatRoomId): number {

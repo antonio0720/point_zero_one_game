@@ -67,6 +67,7 @@ import {
   type ChatShadowChannel,
   type ChatVisibleChannel,
   type JsonValue,
+  type UnixMs,
 } from './types';
 
 // ============================================================================
@@ -1555,6 +1556,24 @@ export function getShadowChannelDescriptors(runtime: ChatRuntimeConfig): readonl
   return Object.freeze(runtime.allowShadowChannels.map((channelId) => CHAT_CHANNEL_DESCRIPTORS[channelId]));
 }
 
+export function getChannelDescriptor(channelId: ChatChannelId): ChatChannelDescriptor {
+  return CHAT_CHANNEL_DESCRIPTORS[channelId];
+}
+
+export function isChannelInRuntime(runtime: ChatRuntimeConfig, channelId: ChatChannelId): boolean {
+  return (runtime.allowVisibleChannels as readonly ChatChannelId[]).includes(channelId) ||
+         (runtime.allowShadowChannels as readonly ChatChannelId[]).includes(channelId);
+}
+
+export function getAllRuntimeChannelIds(runtime: ChatRuntimeConfig): readonly ChatChannelId[] {
+  return Object.freeze([
+    ...(runtime.allowVisibleChannels as readonly ChatChannelId[]),
+    ...(runtime.allowShadowChannels as readonly ChatChannelId[]),
+  ]);
+}
+
+export type { ChatChannelId };
+
 export function runtimeAllowsVisibleChannel(runtime: ChatRuntimeConfig, channelId: ChatVisibleChannel): boolean {
   return runtime.allowVisibleChannels.includes(channelId);
 }
@@ -1657,16 +1676,17 @@ export interface RuntimeConfigFingerprint {
 }
 
 export function computeRuntimeConfigFingerprint(config: ChatRuntimeConfig): RuntimeConfigFingerprint {
+  const maxMessageLength = config.moderationPolicy.maxCharactersPerMessage;
   const hash = [
-    (config.allowedRoomKinds ?? []).join(','),
+    CHAT_ROOM_KINDS.join(','),
     (config.allowVisibleChannels ?? []).join(','),
-    config.maxMessageLength ?? 0,
+    maxMessageLength,
   ].join('|');
 
   return Object.freeze({
-    allowedRoomKinds: Object.freeze([...(config.allowedRoomKinds ?? [])]),
+    allowedRoomKinds: Object.freeze([...CHAT_ROOM_KINDS]),
     allowedVisibleChannels: Object.freeze([...(config.allowVisibleChannels ?? [])]),
-    maxMessageLength: config.maxMessageLength ?? 0,
+    maxMessageLength,
     hash,
   });
 }
@@ -1689,19 +1709,21 @@ export function diffRuntimeConfigs(
 ): RuntimeConfigDiff {
   const beforeChannels = new Set(before.allowVisibleChannels ?? []);
   const afterChannels = new Set(after.allowVisibleChannels ?? []);
-  const beforeRooms = new Set(before.allowedRoomKinds ?? []);
-  const afterRooms = new Set(after.allowedRoomKinds ?? []);
+  // Room kinds are a fixed registry — diff is always empty
+  const addedRoomKinds: string[] = [];
+  const removedRoomKinds: string[] = [];
 
   const addedChannels = [...afterChannels].filter((c) => !beforeChannels.has(c));
   const removedChannels = [...beforeChannels].filter((c) => !afterChannels.has(c));
-  const addedRoomKinds = [...afterRooms].filter((r) => !beforeRooms.has(r));
-  const removedRoomKinds = [...beforeRooms].filter((r) => !afterRooms.has(r));
 
   const changedKeys: string[] = [];
-  if (before.maxMessageLength !== after.maxMessageLength) changedKeys.push('maxMessageLength');
-  if (before.typingTimeoutMs !== after.typingTimeoutMs) changedKeys.push('typingTimeoutMs');
+  if (before.moderationPolicy.maxCharactersPerMessage !== after.moderationPolicy.maxCharactersPerMessage) {
+    changedKeys.push('maxMessageLength');
+  }
+  if (before.ratePolicy.typingHeartbeatWindowMs !== after.ratePolicy.typingHeartbeatWindowMs) {
+    changedKeys.push('typingTimeoutMs');
+  }
   if (addedChannels.length || removedChannels.length) changedKeys.push('allowVisibleChannels');
-  if (addedRoomKinds.length || removedRoomKinds.length) changedKeys.push('allowedRoomKinds');
 
   return Object.freeze({
     changedKeys: Object.freeze(changedKeys),
@@ -1721,13 +1743,15 @@ export interface RuntimeConfigValidationResult {
   readonly violations: readonly string[];
 }
 
-export function validateRuntimeConfig(config: ChatRuntimeConfig): RuntimeConfigValidationResult {
+export function validateRuntimeConfigStrict(config: ChatRuntimeConfig): RuntimeConfigValidationResult {
   const violations: string[] = [];
 
-  if (config.maxMessageLength !== undefined && config.maxMessageLength <= 0) {
+  const maxMsgLen = config.moderationPolicy.maxCharactersPerMessage;
+  if (maxMsgLen !== undefined && maxMsgLen <= 0) {
     violations.push('maxMessageLength_must_be_positive');
   }
-  if (config.typingTimeoutMs !== undefined && config.typingTimeoutMs <= 0) {
+  const typingTimeout = config.ratePolicy.typingHeartbeatWindowMs;
+  if (typingTimeout !== undefined && typingTimeout <= 0) {
     violations.push('typingTimeoutMs_must_be_positive');
   }
   if (config.allowVisibleChannels !== undefined && config.allowVisibleChannels.length === 0) {
@@ -1798,7 +1822,7 @@ export function createRuntimeConfigWatchBus(): RuntimeConfigWatchBus {
 export function mergeRuntimeConfigChain(
   ...configs: Partial<ChatRuntimeConfig>[]
 ): ChatRuntimeConfig {
-  return configs.reduce(
+  return configs.reduce<ChatRuntimeConfig>(
     (acc, cfg) => mergeRuntimeConfig({ ...acc, ...cfg }),
     createDefaultRuntimeConfig(),
   );
@@ -1821,12 +1845,12 @@ export function buildRuntimeConfigAuditReport(
   config: ChatRuntimeConfig,
 ): RuntimeConfigAuditReport {
   return Object.freeze({
-    allowedRoomKindCount: config.allowedRoomKinds?.length ?? 0,
+    allowedRoomKindCount: CHAT_ROOM_KINDS.length,
     allowedVisibleChannelCount: config.allowVisibleChannels?.length ?? 0,
     shadowChannelCount: config.allowShadowChannels?.length ?? 0,
-    maxMessageLength: config.maxMessageLength ?? 0,
-    typingTimeoutMs: config.typingTimeoutMs ?? 0,
-    validationResult: validateRuntimeConfig(config),
+    maxMessageLength: config.moderationPolicy.maxCharactersPerMessage,
+    typingTimeoutMs: config.ratePolicy.typingHeartbeatWindowMs,
+    validationResult: validateRuntimeConfigStrict(config),
   });
 }
 
@@ -1844,7 +1868,7 @@ export interface RoomKindConfigResolution {
 export function resolveRoomKindConfig(roomKind: ChatRoomKind): RoomKindConfigResolution {
   const config = buildRoomKindRuntimeOverride(roomKind);
   const channelCount = config.allowVisibleChannels?.length ?? 0;
-  const hasNpcSupport = config.allowedRoomKinds?.includes(roomKind) ?? false;
+  const hasNpcSupport = config.invasionPolicy.enabled && (CHAT_ROOM_KINDS as readonly string[]).includes(roomKind);
 
   return Object.freeze({
     roomKind,
@@ -1876,11 +1900,26 @@ export const ChatRuntimeConfigModuleExtended = Object.freeze({
   computeRuntimeConfigFingerprint,
   diffRuntimeConfigs,
   validateRuntimeConfig,
+  validateRuntimeConfigStrict,
   buildRoomKindRuntimeOverride,
   mergeRuntimeConfigChain,
   buildRuntimeConfigAuditReport,
   resolveRoomKindConfig,
   runtimeConfigsAreEqual,
+  runtimeConfigSummary,
+  getEnabledFeaturesFromConfig,
+  getAllowedRoomKindList,
+  getAllowedChannelList,
+  isChannelAllowedByConfig,
+  isRoomKindAllowedByConfig,
+  configHasChannel,
+  getChannelDescriptor,
+  isChannelInRuntime,
+  getAllRuntimeChannelIds,
+  getVisibleChannelDescriptors,
+  getShadowChannelDescriptors,
+  createRuntimeConfigSnapshotStore,
+  getChannelOverridesForSourceType,
   RUNTIME_CONFIG_PRESETS,
   CHAT_RUNTIME_CONFIG_MODULE_DESCRIPTOR,
   CHAT_RUNTIME_CONFIG_MODULE_LAWS,
@@ -1930,10 +1969,10 @@ export function getChannelOverridesForSourceType(sourceType: string): Partial<Ch
 
 export function runtimeConfigSummary(config: ChatRuntimeConfig): string {
   return [
-    `rooms:${(config.allowedRoomKinds ?? []).join(',')}`,
+    `rooms:${CHAT_ROOM_KINDS.join(',')}`,
     `channels:${(config.allowVisibleChannels ?? []).join(',')}`,
-    `maxLen:${config.maxMessageLength ?? 'default'}`,
-    `typing:${config.typingTimeoutMs ?? 'default'}ms`,
+    `maxLen:${config.moderationPolicy.maxCharactersPerMessage}`,
+    `typing:${config.ratePolicy.typingHeartbeatWindowMs}ms`,
   ].join(' ');
 }
 
@@ -1958,12 +1997,12 @@ export function getEnabledFeaturesFromConfig(
   config: ChatRuntimeConfig,
 ): RuntimeConfigEnabledFeatures {
   return Object.freeze({
-    npcEnabled: config.npcEnabled ?? true,
-    replayEnabled: config.replayEnabled ?? true,
-    presenceEnabled: config.presenceEnabled ?? true,
-    typingEnabled: config.typingEnabled ?? true,
-    readReceiptsEnabled: config.readReceiptsEnabled ?? true,
-    shadowWritesEnabled: config.shadowWritesEnabled ?? true,
+    npcEnabled: config.invasionPolicy.enabled,
+    replayEnabled: config.replayPolicy.enabled,
+    presenceEnabled: config.learningPolicy.enabled,
+    typingEnabled: config.ratePolicy.typingHeartbeatWindowMs > 0,
+    readReceiptsEnabled: config.proofPolicy.enabled,
+    shadowWritesEnabled: config.allowShadowChannels.length > 0,
   });
 }
 
@@ -1981,8 +2020,8 @@ export function getAllowedChannelList(config: ChatRuntimeConfig): readonly ChatV
   return config.allowVisibleChannels ?? [];
 }
 
-export function getAllowedRoomKindList(config: ChatRuntimeConfig): readonly ChatRoomKind[] {
-  return config.allowedRoomKinds ?? [];
+export function getAllowedRoomKindList(_config: ChatRuntimeConfig): readonly ChatRoomKind[] {
+  return CHAT_ROOM_KINDS;
 }
 
 export function configHasChannel(config: ChatRuntimeConfig, channel: ChatVisibleChannel): boolean {

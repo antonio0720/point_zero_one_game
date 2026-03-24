@@ -2023,3 +2023,150 @@ export const CHAT_EVENT_BRIDGE_FULL_MODULE = Object.freeze({
     'buildBridgeEconomySnapshot',
   ],
 });
+
+// ============================================================================
+// MARK: Module authority object
+// ============================================================================
+
+export const ChatEventBridgeModule = Object.freeze({
+  // Module constants
+  name: CHAT_EVENT_BRIDGE_MODULE_NAME,
+  version: CHAT_EVENT_BRIDGE_MODULE_VERSION,
+  laws: CHAT_EVENT_BRIDGE_MODULE_LAWS,
+  descriptor: CHAT_EVENT_BRIDGE_MODULE_DESCRIPTOR,
+
+  // Core class and factory
+  ChatEventBridge,
+  createChatEventBridge,
+
+  // Normalize facades
+  normalizeChatInputEnvelope,
+  normalizeChatInputBatch,
+
+  // Signal canonicalization
+  canonicalizeSignalEnvelope,
+  canonicalizeBattleSnapshot,
+  canonicalizeRunSnapshot,
+  canonicalizeMultiplayerSnapshot,
+  canonicalizeEconomySnapshot,
+  canonicalizeLiveOpsSnapshot,
+
+  // Signal inference
+  resolveRuntimeForRoomKind,
+  resolveNormalizedRoomKind,
+  inferRoomKindFromSignal,
+  deriveMoodFromSignal,
+  deriveSignalChannelRecommendation,
+  deriveSignalHeatDelta,
+  deriveSignalRiskLabel,
+  roomKindToDefaultChannel,
+  kindToSignalType,
+  classifySignalKind,
+
+  // State resolution
+  resolveRoomId,
+  resolveJoinRoomKind,
+  resolveSignalSessionId,
+  resolveMostRecentRoomId,
+
+  // Dedupe
+  dedupeKeyForEvent,
+  pruneExpiredDedupeEntries,
+  dedupePayloadSignature,
+
+  // Normalization helpers
+  normalizeRoomKind,
+  normalizeVisibleChannel,
+  normalizeRequestedVisibleChannel,
+  normalizePresenceMode,
+  normalizeTypingMode,
+  normalizeSessionRole,
+  normalizePressureTier,
+  normalizeTickTier,
+  normalizeRunOutcome,
+  normalizeAttackType,
+  normalizeBotId,
+
+  // ID / string / time helpers
+  asRoomId,
+  asSessionId,
+  asUserId,
+  asRequestId,
+  sanitizeIdLike,
+  sanitizeOptionalString,
+  sanitizeDisplayName,
+  sanitizeRoomTitle,
+  sanitizeReason,
+  sanitizeMessageText,
+  countLogicalLines,
+  coerceUnixMs,
+  nullableUnixMs,
+  asJsonRecord,
+  stringValue,
+  numberValue,
+  booleanValue,
+  extractVisibleChannelFromPayload,
+  classifyLeaveReason,
+  stableStringify,
+
+  // Fingerprint
+  computeNormalizedInputFingerprint,
+
+  // Summary / report
+  buildRoomEventSummary,
+  buildBatchNormalizationReport,
+
+  // Validation
+  validateSignalEnvelope,
+  validateJoinRequest,
+
+  // Envelope helpers
+  extractRoomIdFromEnvelope,
+  extractSessionIdFromEnvelope,
+  getEnvelopeKindLabel,
+
+  // Runtime config helpers
+  buildBridgeRuntimeConfig,
+  isBridgeRoomAllowed,
+  isBridgeChannelAllowed,
+  getRoomKindOverride,
+
+  // Stage mood map
+  STAGE_MOOD_SIGNAL_MAP,
+  getSignalMappingForMood,
+
+  // Heat / economy snapshots
+  buildBridgeHeatSnapshot,
+  buildBridgeEconomySnapshot,
+
+  // Presence mode
+  classifyPresenceMode,
+  isActivePresenceMode,
+  clampPresenceScore,
+  isSignificantPresenceChange,
+  presenceModeTransitionLabel,
+
+  // Channel descriptor helpers
+  isSupportedBridgeChannel,
+  getBridgeChannelPresenceSupport,
+  getBridgeChannelTypingSupport,
+
+  // Typing classifier
+  classifyTypingUpdate,
+
+  // Watch bus
+  EventBridgeWatchBus,
+  createEventBridgeWatchBus,
+
+  // Event kind counter
+  EventKindCounter,
+  createEventKindCounter,
+
+  // Epoch tracker
+  NormalizationEpochTracker,
+  createNormalizationEpochTracker,
+
+  // Defaults
+  createDefaultLogger,
+  createDefaultIdFactory,
+} as const);

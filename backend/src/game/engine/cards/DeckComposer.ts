@@ -193,6 +193,18 @@ export interface DeckComposerSelectionSummary {
   readonly averageBaseCost: number;
 }
 
+export interface EffectMagnitudeProfile {
+  readonly cards: readonly CardDefinition[];
+  readonly mode: ModeCode;
+  readonly magnitudes: readonly number[];
+  readonly total: number;
+  readonly average: number;
+  readonly max: number;
+  readonly min: number;
+  readonly topThreeIds: readonly string[];
+  readonly bottomThreeIds: readonly string[];
+}
+
 export interface DeckCompositionResult {
   readonly mode: ModeCode;
   readonly archetype: DeckComposerArchetype;
@@ -2258,6 +2270,12 @@ export class DeckComposer {
   ): number {
     let score = doctrine.deckBias[card.deckType] ?? 0;
 
+    // Wire `mode` — apply mode-native card score as a preference signal.
+    // scoreCardForMode returns a 0–100 score capturing mode affinity,
+    // so we blend it in at a low weight to nudge mode-native cards up
+    // without overriding doctrine biases.
+    score += scoreCardForMode(card, mode) * 0.08;
+
     if (preferences?.preferSabotage && card.tags.includes('sabotage')) {
       score += doctrine.sabotageBias;
     }
@@ -2899,6 +2917,265 @@ export class DeckComposer {
     }
 
     return compareString(left.definition.id, right.definition.id);
+  }
+
+  /* ──────────────────────────────────────────────────────────────────────────
+   * Mode-exclusive deck queries — wires `MODE_EXCLUSIVE_DECKS`
+   * ────────────────────────────────────────────────────────────────────────── */
+
+  /**
+   * Returns the deck types that are exclusive to a given mode.
+   * These are decks whose targeting and doctrine is only meaningful in that mode.
+   *
+   * Wires `MODE_EXCLUSIVE_DECKS`.
+   *
+   * Consumed by:
+   * - Deck composition filters ("only include mode-appropriate deck types")
+   * - Chat narrator ("In Predator mode, SABOTAGE and BLUFF decks are unlocked.")
+   * - UX mode onboarding ("these cards are special to your mode")
+   */
+  public listModeExclusiveDecks(mode: ModeCode): readonly DeckType[] {
+    return MODE_EXCLUSIVE_DECKS[mode];
+  }
+
+  /**
+   * Returns whether a given deck type is exclusive to a specific mode.
+   * Wires `MODE_EXCLUSIVE_DECKS`.
+   */
+  public isDeckTypeExclusiveToMode(deckType: DeckType, mode: ModeCode): boolean {
+    return MODE_EXCLUSIVE_DECKS[mode].includes(deckType as never);
+  }
+
+  /**
+   * Returns all cards from the registry whose deck type is exclusive to the
+   * given mode. These are the "signature" cards for that mode's doctrine.
+   * Wires `MODE_EXCLUSIVE_DECKS`.
+   */
+  public getModeSignatureCards(mode: ModeCode): readonly CardDefinition[] {
+    const exclusiveDecks = MODE_EXCLUSIVE_DECKS[mode];
+    const all = this.registry.all();
+    return Object.freeze(
+      all.filter(
+        (card) =>
+          (exclusiveDecks as readonly string[]).includes(card.deckType) &&
+          this.isModeLegal(card, mode),
+      ),
+    );
+  }
+
+  /* ──────────────────────────────────────────────────────────────────────────
+   * Archetype ordering — wires `ARCHETYPE_PRIORITY_ORDER`
+   * ────────────────────────────────────────────────────────────────────────── */
+
+  /**
+   * Returns the canonical archetype priority order.
+   * This is the order in which archetypes are considered when building a deck.
+   *
+   * Wires `ARCHETYPE_PRIORITY_ORDER`.
+   *
+   * Consumed by:
+   * - AI planner ("what archetype should I prioritize for this mode?")
+   * - Deck composer default selection ("fall back to GENERAL if nothing else fits")
+   * - UX mode select screen ("show archetypes in priority order")
+   */
+  public getArchetypePriorityOrder(): readonly DeckComposerArchetype[] {
+    return ARCHETYPE_PRIORITY_ORDER;
+  }
+
+  /**
+   * Returns the priority rank of a given archetype (lower = higher priority).
+   * Wires `ARCHETYPE_PRIORITY_ORDER`.
+   */
+  public getArchetypePriorityRank(archetype: DeckComposerArchetype): number {
+    const idx = ARCHETYPE_PRIORITY_ORDER.indexOf(archetype);
+    return idx === -1 ? Number.MAX_SAFE_INTEGER : idx;
+  }
+
+  /**
+   * Sorts a list of archetypes by their priority rank.
+   * Wires `ARCHETYPE_PRIORITY_ORDER`.
+   */
+  public sortArchetypesByPriority(
+    archetypes: readonly DeckComposerArchetype[],
+  ): readonly DeckComposerArchetype[] {
+    return Object.freeze(
+      [...archetypes].sort(
+        (a, b) =>
+          this.getArchetypePriorityRank(a) - this.getArchetypePriorityRank(b),
+      ),
+    );
+  }
+
+  /* ──────────────────────────────────────────────────────────────────────────
+   * Deck-type sort — wires `compareDeckType`
+   * ────────────────────────────────────────────────────────────────────────── */
+
+  /**
+   * Sorts card definitions by deck type in canonical `ALL_DECK_TYPES` order.
+   *
+   * Wires `compareDeckType`.
+   *
+   * Consumed by:
+   * - Deck catalog display (consistent deck-type grouping)
+   * - Proof chain artifact serialization (deterministic order)
+   * - Audit exports (group by deck type in a canonical way)
+   */
+  public sortCardsByDeckType(
+    cards: readonly CardDefinition[],
+  ): readonly CardDefinition[] {
+    return Object.freeze(
+      [...cards].sort((a, b) => compareDeckType(a.deckType, b.deckType)),
+    );
+  }
+
+  /**
+   * Groups card definitions by deck type and sorts each bucket internally by
+   * deck type order and then by definition ID.
+   * Wires `compareDeckType`.
+   */
+  public groupAndSortByDeckType(
+    cards: readonly CardDefinition[],
+  ): Readonly<Record<DeckType, readonly CardDefinition[]>> {
+    const buckets: Record<string, CardDefinition[]> = {};
+
+    for (const card of cards) {
+      if (!buckets[card.deckType]) {
+        buckets[card.deckType] = [];
+      }
+      buckets[card.deckType].push(card);
+    }
+
+    // Sort each bucket by definition ID for determinism
+    for (const dt of Object.keys(buckets)) {
+      buckets[dt].sort((a, b) => a.id.localeCompare(b.id));
+    }
+
+    // Build sorted output ordered by ALL_DECK_TYPES canonical order
+    const sorted: Partial<Record<DeckType, readonly CardDefinition[]>> = {};
+    const sortedKeys = Object.keys(buckets).sort((a, b) =>
+      compareDeckType(a as DeckType, b as DeckType),
+    );
+    for (const key of sortedKeys) {
+      sorted[key as DeckType] = Object.freeze(buckets[key]);
+    }
+
+    return Object.freeze(sorted) as Readonly<Record<DeckType, readonly CardDefinition[]>>;
+  }
+
+  /* ──────────────────────────────────────────────────────────────────────────
+   * Effect magnitude scoring — wires `buildEffectMagnitude`
+   * ────────────────────────────────────────────────────────────────────────── */
+
+  /**
+   * Scores the effect magnitude for a single card given a mode overlay.
+   *
+   * Wires `buildEffectMagnitude`.
+   *
+   * Consumed by:
+   * - AI planner: rank cards by raw effect power before mode-specific scoring
+   * - Deck composition "budget" planning: how much power does this deck have?
+   * - Chat narrator: "This card has a high effect magnitude for this mode."
+   * - UX card detail tooltip: numerical power display
+   */
+  public scoreCardEffectMagnitude(card: CardDefinition, mode: ModeCode): number {
+    const overlay = resolveModeOverlay(card, mode);
+    return buildEffectMagnitude(card, overlay);
+  }
+
+  /**
+   * Builds an effect magnitude profile for a set of cards in a given mode,
+   * returning per-card magnitudes plus aggregate statistics.
+   *
+   * Wires `buildEffectMagnitude`.
+   *
+   * Consumed by:
+   * - Deck health report ("your deck's average power level")
+   * - AI planner hand power assessment
+   * - Composition review: outlier detection (very high or very low magnitude cards)
+   */
+  public buildEffectMagnitudeProfile(
+    cards: readonly CardDefinition[],
+    mode: ModeCode,
+  ): EffectMagnitudeProfile {
+    if (cards.length === 0) {
+      return Object.freeze({
+        cards: Object.freeze([]),
+        mode,
+        magnitudes: Object.freeze([]),
+        total: 0,
+        average: 0,
+        max: 0,
+        min: 0,
+        topThreeIds: Object.freeze([]),
+        bottomThreeIds: Object.freeze([]),
+      });
+    }
+
+    const entries: Array<{ id: string; magnitude: number }> = cards.map((card) => ({
+      id: card.id,
+      magnitude: buildEffectMagnitude(card, resolveModeOverlay(card, mode)),
+    }));
+
+    const magnitudes = entries.map((e) => e.magnitude);
+    const total = round4(magnitudes.reduce((s, m) => s + m, 0));
+    const average = round4(total / magnitudes.length);
+    const max = Math.max(...magnitudes);
+    const min = Math.min(...magnitudes);
+
+    const sorted = [...entries].sort((a, b) => b.magnitude - a.magnitude);
+    const topThreeIds = Object.freeze(sorted.slice(0, 3).map((e) => e.id));
+    const bottomThreeIds = Object.freeze(
+      sorted.slice(-3).map((e) => e.id).reverse(),
+    );
+
+    return Object.freeze({
+      cards: Object.freeze(cards),
+      mode,
+      magnitudes: Object.freeze(magnitudes),
+      total,
+      average,
+      max,
+      min,
+      topThreeIds,
+      bottomThreeIds,
+    });
+  }
+
+  /**
+   * Returns the top N cards by effect magnitude for a given mode.
+   * Wires `buildEffectMagnitude` and `compareDeckType`.
+   *
+   * Useful for "power pick" suggestions and AI planning.
+   */
+  public topCardsByMagnitude(
+    mode: ModeCode,
+    n: number,
+    deckTypeFilter?: readonly DeckType[],
+  ): readonly CardDefinition[] {
+    let candidates = this.registry.all().filter(
+      (card) => this.isModeLegal(card, mode),
+    );
+
+    if (deckTypeFilter && deckTypeFilter.length > 0) {
+      candidates = candidates.filter((c) => deckTypeFilter.includes(c.deckType));
+    }
+
+    return Object.freeze(
+      candidates
+        .map((card) => ({
+          card,
+          magnitude: buildEffectMagnitude(card, resolveModeOverlay(card, mode)),
+        }))
+        .sort((a, b) => {
+          if (b.magnitude !== a.magnitude) {
+            return b.magnitude - a.magnitude;
+          }
+          // Tie-break by deck type canonical order
+          return compareDeckType(a.card.deckType, b.card.deckType);
+        })
+        .slice(0, n)
+        .map((e) => e.card),
+    );
   }
 
   private isModeLegal(card: CardDefinition, mode: ModeCode): boolean {

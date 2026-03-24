@@ -2088,3 +2088,74 @@ export const CHAT_MODERATION_POLICY_FULL_MODULE = Object.freeze({
   decisionIsHighRisk: moderationDecisionIsHighRisk,
 });
 
+export function createChatModerationWatchBus(): ChatModerationWatchBus {
+  return new ChatModerationWatchBus();
+}
+
+export function createChatModerationEpochTracker(): ChatModerationEpochTracker {
+  return new ChatModerationEpochTracker();
+}
+
+// ============================================================================
+// MARK: Module authority object
+// ============================================================================
+
+export const ChatModerationPolicyModule = Object.freeze({
+  moduleId: CHAT_MODERATION_POLICY_MODULE_ID,
+  version: CHAT_MODERATION_POLICY_MODULE_VERSION,
+  descriptor: CHAT_MODERATION_POLICY_MODULE_DESCRIPTOR,
+  createChatModerationPolicyContext,
+  mergeModerationRuntime,
+  evaluatePlayerModeration,
+  evaluateNpcModeration,
+  evaluateSystemModeration,
+  buildModerationDiagnostic,
+  createModerationAuditRecord,
+  auditRoomModerationEnvelope,
+  createPlayerCompositeRequest,
+  createNpcCompositeRequest,
+  createSystemCompositeRequest,
+  createRoomSnapshot,
+  aggregateRisk,
+  normalizeTextForDiagnostics,
+  createSelfHarmRejectRule,
+  createDoxQuarantineRule,
+  createNegotiationLeakShadowRule,
+  createCrowdBaitRule,
+  runModerationRules,
+  createDefaultModerationRules,
+  explainModerationDecision,
+  summarizeLexemeHits,
+  summarizeRiskVector,
+  auditAllRoomsModeration,
+  countShadowModerationRecords,
+  countRejectedModerationRecords,
+  countQuarantinedModerationRecords,
+  maxRoomModerationRisk,
+  ChatModerationWatchBus,
+  createChatModerationWatchBus,
+  computeModerationFingerprint,
+  ChatModerationEpochTracker,
+  createChatModerationEpochTracker,
+  moderationOutcomeIsPermissive,
+  moderationOutcomeIsBlocking,
+  moderationDecisionIsHighRisk,
+  moderationDecisionIsShadowOnly,
+  moderationSignalHasBattle,
+  moderationSignalHasEconomy,
+  moderationAffectIsHighFrustration,
+  moderationRoomKindIsCompetitive,
+  moderationStageMoodIsTense,
+  moderationSessionIsOperator,
+  moderationSessionIsBot,
+  moderationChannelSupportsComposer,
+  moderationRoomIsOverPressureTier,
+  moderationLiveOpsIsActive,
+  moderationEconomyHasSignificantBalance,
+  moderationInvasionKind,
+  moderationBotIdLabel,
+  moderationAttackTypeLabel,
+  moderationInferenceSourceLabel,
+  moderationUserIdLabel,
+} as const);
+

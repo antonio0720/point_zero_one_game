@@ -21,10 +21,11 @@ interface PlayerModelBucket {
   snapshot: ChatPlayerModelSnapshot;
 }
 
-function now(): number { return Date.now(); }
+export function now(): number { return Date.now(); }
 function clamp01(value: number): number { return clampNovelty(value); }
+export const clampPlayerModelValue: (value: number) => number = clamp01;
 
-function emptyVector(): ChatPlayerModelVector {
+export function emptyVector(): ChatPlayerModelVector {
   return {
     impulsive01: 0.5,
     patient01: 0.5,
@@ -44,7 +45,7 @@ function emptyVector(): ChatPlayerModelVector {
   };
 }
 
-function dominantAxes(vector: ChatPlayerModelVector): readonly ChatPlayerModelAxis[] {
+export function dominantAxes(vector: ChatPlayerModelVector): readonly ChatPlayerModelAxis[] {
   return [
     ['IMPULSIVE', vector.impulsive01],
     ['PATIENT', vector.patient01],
@@ -286,7 +287,7 @@ export class ChatPlayerModelService {
 // VECTOR UTILITIES
 // ============================================================================
 
-function axisToVectorKey(axis: ChatPlayerModelAxis): keyof ChatPlayerModelVector | null {
+export function axisToVectorKey(axis: ChatPlayerModelAxis): keyof ChatPlayerModelVector | null {
   const MAP: Partial<Record<ChatPlayerModelAxis, keyof ChatPlayerModelVector>> = {
     IMPULSIVE: 'impulsive01',
     PATIENT: 'patient01',
@@ -307,7 +308,7 @@ function axisToVectorKey(axis: ChatPlayerModelAxis): keyof ChatPlayerModelVector
   return MAP[axis] ?? null;
 }
 
-function decayVector(v: ChatPlayerModelVector, rate: number): ChatPlayerModelVector {
+export function decayVector(v: ChatPlayerModelVector, rate: number): ChatPlayerModelVector {
   const neutral = 0.5;
   const decay = (x: number) => clamp01(x + (neutral - x) * rate);
   return {
@@ -329,7 +330,7 @@ function decayVector(v: ChatPlayerModelVector, rate: number): ChatPlayerModelVec
   };
 }
 
-function detectPolarDominance(v: ChatPlayerModelVector): boolean {
+export function detectPolarDominance(v: ChatPlayerModelVector): boolean {
   const POLAR_PAIRS: [keyof ChatPlayerModelVector, keyof ChatPlayerModelVector][] = [
     ['impulsive01', 'patient01'],
     ['greedy01', 'defensive01'],
@@ -358,7 +359,7 @@ export interface PlayerRiskProfile {
   readonly riskLabel: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
 }
 
-function buildRiskProfile(snapshot: ChatPlayerModelSnapshot): PlayerRiskProfile {
+export function buildRiskProfile(snapshot: ChatPlayerModelSnapshot): PlayerRiskProfile {
   const v = snapshot.vector;
   const collapseRisk01 = clamp01(v.collapseProne01 * 0.6 + v.rescueReliant01 * 0.4);
   const bluffExposureRisk01 = clamp01(v.bluffHeavy01 * 0.7 + (1 - v.literal01) * 0.3);
@@ -397,7 +398,7 @@ export interface PlayerModelVectorDelta {
   readonly mostAlignedAxis: string;
 }
 
-function computeVectorDelta(
+export function computeVectorDelta(
   a: ChatPlayerModelVector,
   b: ChatPlayerModelVector,
   playerIdA: string = '',
@@ -443,7 +444,7 @@ export interface PlayerModelDriftReport {
   readonly driftLabel: 'STABLE' | 'DRIFTING' | 'SHIFTING' | 'VOLATILE';
 }
 
-function computeModelDrift(snapshot: ChatPlayerModelSnapshot): PlayerModelDriftReport {
+export function computeModelDrift(snapshot: ChatPlayerModelSnapshot): PlayerModelDriftReport {
   const tail = snapshot.evidenceTail;
   if (tail.length < 2) {
     return Object.freeze({
@@ -515,7 +516,7 @@ export interface PlayerModelSimilarityScore {
   readonly label: 'MIRROR' | 'ALIGNED' | 'MIXED' | 'DIVERGENT' | 'OPPOSITE';
 }
 
-function computeSimilarityScore(
+export function computeSimilarityScore(
   snapshotA: ChatPlayerModelSnapshot,
   snapshotB: ChatPlayerModelSnapshot,
 ): PlayerModelSimilarityScore {
@@ -561,7 +562,7 @@ export interface PlayerModelCohortSummary {
   readonly evidenceDensity: number;
 }
 
-function buildCohortSummary(snapshots: readonly ChatPlayerModelSnapshot[]): PlayerModelCohortSummary {
+export function buildCohortSummary(snapshots: readonly ChatPlayerModelSnapshot[]): PlayerModelCohortSummary {
   if (snapshots.length === 0) {
     return Object.freeze({
       playerCount: 0,
@@ -632,7 +633,7 @@ export interface PlayerModelConfidenceScore {
   readonly label: 'SPARSE' | 'LOW' | 'MODERATE' | 'HIGH' | 'SATURATED';
 }
 
-function computeConfidenceScore(snapshot: ChatPlayerModelSnapshot): PlayerModelConfidenceScore {
+export function computeConfidenceScore(snapshot: ChatPlayerModelSnapshot): PlayerModelConfidenceScore {
   const evidenceCount = snapshot.evidenceTail.length;
   const evidenceCountFactor = clamp01(evidenceCount / 64);
 
@@ -1350,7 +1351,7 @@ export interface PlayerModelComparisonMatrix {
   readonly generatedAt: number;
 }
 
-function vectorToRecord(v: ChatPlayerModelVector): Record<string, number> {
+export function vectorToRecord(v: ChatPlayerModelVector): Record<string, number> {
   return v as unknown as Record<string, number>;
 }
 
@@ -2036,3 +2037,83 @@ export function validatePlayerModelLaws(snapshot: ChatPlayerModelSnapshot): Play
 
   return Object.freeze({ playerId: snapshot.playerId, passed: violations.length === 0, violations: Object.freeze(violations), validatedAt: Date.now() });
 }
+
+export function createPlayerModelWatchBus(): PlayerModelWatchBus {
+  return new PlayerModelWatchBus();
+}
+
+export function createPlayerModelEvidenceReplayIterator(
+  evidence: readonly ChatPlayerModelEvidence[],
+): PlayerModelEvidenceReplayIterator {
+  return new PlayerModelEvidenceReplayIterator(evidence);
+}
+
+export const ChatPlayerModelServiceModule = Object.freeze({
+  name: CHAT_PLAYER_MODEL_MODULE_NAME,
+  version: CHAT_PLAYER_MODEL_MODULE_VERSION,
+  laws: CHAT_PLAYER_MODEL_LAWS,
+  descriptor: CHAT_PLAYER_MODEL_MODULE_DESCRIPTOR,
+  axisCount: 15,
+  DEFAULT_CHAT_PLAYER_MODEL_SERVICE_CONFIG,
+  CHAT_PLAYER_MODEL_AXIS_POLARITIES,
+  AXIS_SENSITIVITY_MATRIX,
+  DEFAULT_PLAYER_MODEL_DECAY_CURVE,
+  ChatPlayerModelService,
+  ChatPlayerModelServiceExtended,
+  PlayerModelWatchBus,
+  PlayerModelEvidenceReplayIterator,
+  createChatPlayerModelService,
+  createPlayerModelWatchBus,
+  createPlayerModelEvidenceReplayIterator,
+  now,
+  clampPlayerModelValue,
+  emptyVector,
+  dominantAxes,
+  axisToVectorKey,
+  decayVector,
+  detectPolarDominance,
+  buildRiskProfile,
+  computeVectorDelta,
+  computeModelDrift,
+  computeSimilarityScore,
+  buildCohortSummary,
+  computeConfidenceScore,
+  vectorToRecord,
+  buildTranscriptEvidence,
+  buildMemoryEvidence,
+  buildSceneEvidence,
+  axisLabel,
+  snapshotFingerprint,
+  snapshotsHaveDiverged,
+  vectorNorm,
+  sortSnapshotsByRisk,
+  groupSnapshotsByDominantAxis,
+  computeActionPressure01,
+  computeVolatility01,
+  interpolateVectors,
+  getAxisSensitivity,
+  assignBehavioralArchetype,
+  deduplicateEvidence,
+  buildAxisHeatMap,
+  computeAxisTrajectories,
+  captureSnapshotDeltaEntry,
+  inferRelationshipDynamic,
+  computePlayerModelFingerprint,
+  buildAxisSensitivityMap,
+  buildPlayerModelEpoch,
+  buildPlayerModelComparisonMatrix,
+  buildPlayerModelAggregateReport,
+  validateSnapshotChain,
+  exportPlayerModelBatch,
+  importPlayerModelBatch,
+  scorePlayerModelPressure,
+  detectStalePlayerModels,
+  computeAxisCorrelations,
+  computeDecayMultiplier,
+  applyDecayCurveToVector,
+  buildEvidenceTypeFrequency,
+  interpolatePlayerModelVectors,
+  rebasePlayerModelVector,
+  predictPlayerStance,
+  validatePlayerModelLaws,
+} as const);

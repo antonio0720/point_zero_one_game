@@ -1119,7 +1119,7 @@ export function computeTranscriptFingerprint(
   entries: readonly ChatTranscriptEntry[],
 ): TranscriptFingerprint {
   const channelEntries = entries.filter((e) => e.message.channelId === channelId);
-  const parts = channelEntries.map((e) => `${e.sequence}:${e.message.id}:${e.message.authorId}`);
+  const parts = channelEntries.map((e) => `${Number(e.message.sequenceNumber)}:${e.message.id}:${e.message.attribution.actorId}`);
   let h = 5381;
   for (const p of parts) {
     for (let i = 0; i < p.length; i++) {
@@ -1171,18 +1171,18 @@ export function buildTranscriptAnalytics(
 
   for (const entry of entries) {
     const msg = entry.message;
-    if (entry.redacted) redacted++;
-    else if (entry.softDeleted) deleted++;
+    if (entry.visibility === 'REDACTED') redacted++;
+    else if (entry.visibility === 'DELETED') deleted++;
     else visible++;
 
     const ch = msg.channelId ?? 'UNKNOWN';
     channelCounts[ch] = (channelCounts[ch] ?? 0) + 1;
 
-    const seq = entry.sequence as unknown as number;
+    const seq = Number(msg.sequenceNumber);
     if (seq < seqMin) seqMin = seq;
     if (seq > seqMax) seqMax = seq;
 
-    const authorId = msg.authorId ?? 'SYSTEM';
+    const authorId = msg.attribution.actorId ?? 'SYSTEM';
     const existing = authorMap.get(authorId);
     if (!existing) {
       authorMap.set(authorId, { count: 1, first: msg.createdAt, last: msg.createdAt, channels: { [ch]: 1 } });
@@ -1236,17 +1236,17 @@ export function buildTranscriptReplayWindow(
   toSequence: SequenceNumber,
 ): TranscriptReplayWindow {
   const filtered = allEntries.filter((e) => {
-    const seq = e.sequence as unknown as number;
-    const from = fromSequence as unknown as number;
-    const to = toSequence as unknown as number;
+    const seq = Number(e.message.sequenceNumber);
+    const from = Number(fromSequence);
+    const to = Number(toSequence);
     return e.message.channelId === channelId && seq >= from && seq <= to;
-  }).sort((a, b) => (a.sequence as unknown as number) - (b.sequence as unknown as number));
+  }).sort((a, b) => Number(a.message.sequenceNumber) - Number(b.message.sequenceNumber));
 
   const gapPositions: number[] = [];
   let hasGaps = false;
   for (let i = 1; i < filtered.length; i++) {
-    const prev = filtered[i - 1].sequence as unknown as number;
-    const curr = filtered[i].sequence as unknown as number;
+    const prev = Number(filtered[i - 1].message.sequenceNumber);
+    const curr = Number(filtered[i].message.sequenceNumber);
     if (curr - prev > 1) {
       hasGaps = true;
       gapPositions.push(prev + 1);
@@ -1284,11 +1284,11 @@ export function createPendingRevealTracker(): PendingRevealTracker {
     },
     remove(roomId: ChatRoomId, messageId: ChatMessageId): void {
       const list = store.get(roomId) ?? [];
-      store.set(roomId, list.filter((r) => r.messageId !== messageId));
+      store.set(roomId, list.filter((r) => r.message.id !== messageId));
     },
     promote(roomId: ChatRoomId, messageId: ChatMessageId, nowMs: number = Date.now()): ChatPendingReveal | null {
       const list = store.get(roomId) ?? [];
-      const idx = list.findIndex((r) => r.messageId === messageId && r.revealAt <= asUnixMs(nowMs));
+      const idx = list.findIndex((r) => r.message.id === messageId && r.revealAt <= asUnixMs(nowMs));
       if (idx === -1) return null;
       const [promoted] = list.splice(idx, 1);
       store.set(roomId, list);
@@ -1327,14 +1327,14 @@ export function auditTranscriptSequenceGaps(
 ): SequenceGapAuditResult {
   const channelEntries = entries
     .filter((e) => e.message.channelId === channelId)
-    .sort((a, b) => (a.sequence as unknown as number) - (b.sequence as unknown as number));
+    .sort((a, b) => Number(a.message.sequenceNumber) - Number(b.message.sequenceNumber));
 
   const gaps: { from: number; to: number; missing: number }[] = [];
   let totalMissing = 0;
 
   for (let i = 1; i < channelEntries.length; i++) {
-    const prev = channelEntries[i - 1].sequence as unknown as number;
-    const curr = channelEntries[i].sequence as unknown as number;
+    const prev = Number(channelEntries[i - 1].message.sequenceNumber);
+    const curr = Number(channelEntries[i].message.sequenceNumber);
     if (curr - prev > 1) {
       const missing = curr - prev - 1;
       totalMissing += missing;
@@ -1376,18 +1376,18 @@ export function queryCallbackMessages(
   query: CallbackMessageQuery,
 ): CallbackMessageResult {
   let filtered = entries.filter((e) => {
-    if (e.redacted || e.softDeleted) return false;
-    if (query.authorId && e.message.authorId !== query.authorId) return false;
+    if (e.visibility === 'REDACTED' || e.visibility === 'DELETED') return false;
+    if (query.authorId && e.message.attribution.actorId !== query.authorId) return false;
     if (query.channelId && e.message.channelId !== query.channelId) return false;
-    if (query.sinceSequence && (e.sequence as unknown as number) < (query.sinceSequence as unknown as number)) return false;
+    if (query.sinceSequence && Number(e.message.sequenceNumber) < Number(query.sinceSequence)) return false;
     if (query.tags && query.tags.length > 0) {
-      const msgTags = (e.message as unknown as { tags?: string[] }).tags ?? [];
+      const msgTags = e.message.tags ?? [];
       if (!query.tags.some((t) => msgTags.includes(t))) return false;
     }
     return true;
   });
 
-  filtered.sort((a, b) => (b.sequence as unknown as number) - (a.sequence as unknown as number));
+  filtered.sort((a, b) => Number(b.message.sequenceNumber) - Number(a.message.sequenceNumber));
   const limit = query.limit ?? 50;
   const limited = filtered.slice(0, limit);
 
@@ -1484,6 +1484,129 @@ export class ChatTranscriptLedgerExtended {
 }
 
 // ============================================================================
+// MARK: Visible channel helpers (ChatVisibleChannel + JsonValue wired)
+// ============================================================================
+
+export interface VisibleChannelLedgerView {
+  readonly roomId: ChatRoomId;
+  readonly channelId: ChatVisibleChannel;
+  readonly messageCount: number;
+  readonly latestMessage: ChatMessage | null;
+  readonly metadata: Readonly<Record<string, JsonValue>>;
+}
+
+export function buildVisibleChannelLedgerView(
+  state: ChatState,
+  roomId: ChatRoomId,
+  channelId: ChatVisibleChannel,
+): VisibleChannelLedgerView {
+  const entries = selectRoomTranscript(state, roomId).filter(
+    (e) => e.message.channelId === channelId && e.visibility === 'VISIBLE',
+  );
+  const latest = entries.at(-1)?.message ?? null;
+  const metadata: Record<string, JsonValue> = {
+    roomId: String(roomId),
+    channelId: String(channelId),
+    messageCount: entries.length,
+    latestAt: latest ? Number(latest.createdAt) : null,
+    latestSequence: latest ? Number(latest.sequenceNumber) : null,
+  };
+  return Object.freeze({
+    roomId,
+    channelId,
+    messageCount: entries.length,
+    latestMessage: latest,
+    metadata: Object.freeze(metadata),
+  });
+}
+
+export function buildAllVisibleChannelViews(
+  state: ChatState,
+  roomId: ChatRoomId,
+  channels: readonly ChatVisibleChannel[],
+): readonly VisibleChannelLedgerView[] {
+  return Object.freeze(channels.map((channelId) => buildVisibleChannelLedgerView(state, roomId, channelId)));
+}
+
+export function transcriptToJsonExport(
+  state: ChatState,
+  roomId: ChatRoomId,
+): readonly Readonly<Record<string, JsonValue>>[] {
+  return selectRoomTranscript(state, roomId).map((entry) =>
+    Object.freeze({
+      id: String(entry.message.id),
+      roomId: String(roomId),
+      channelId: entry.message.channelId as string,
+      sequence: Number(entry.message.sequenceNumber),
+      createdAt: Number(entry.message.createdAt),
+      author: entry.message.attribution.actorId as string,
+      text: entry.message.plainText as JsonValue,
+      visibility: entry.visibility as string,
+    } satisfies Record<string, JsonValue>),
+  );
+}
+
+// ============================================================================
+// MARK: Sequence and latest message helpers (nextSequenceForRoom + selectLatestMessage wired)
+// ============================================================================
+
+export function getNextSequenceForRoom(state: ChatState, roomId: ChatRoomId): SequenceNumber {
+  return nextSequenceForRoom(state, roomId);
+}
+
+export function getLatestRoomMessage(state: ChatState, roomId: ChatRoomId): ChatMessage | null {
+  return selectLatestMessage(state, roomId);
+}
+
+export function peekLatestAndNextSequence(
+  state: ChatState,
+  roomId: ChatRoomId,
+): { readonly latest: ChatMessage | null; readonly nextSequence: SequenceNumber } {
+  return Object.freeze({
+    latest: selectLatestMessage(state, roomId),
+    nextSequence: nextSequenceForRoom(state, roomId),
+  });
+}
+
+// ============================================================================
+// MARK: Reveal scheduling helpers (createPendingReveal wired)
+// ============================================================================
+
+export function scheduleReveal(
+  state: ChatState,
+  message: ChatMessage,
+  revealAt: UnixMs,
+): ChatState {
+  const reveal = createPendingReveal({ revealAt, roomId: message.roomId, message });
+  return queueReveal(state, reveal);
+}
+
+export function scheduleBatchReveals(
+  state: ChatState,
+  messages: readonly ChatMessage[],
+  revealAt: UnixMs,
+): ChatState {
+  let next = state;
+  for (const message of messages) {
+    next = scheduleReveal(next, message, revealAt);
+  }
+  return next;
+}
+
+export function scheduleRevealWithDelay(
+  state: ChatState,
+  message: ChatMessage,
+  now: UnixMs,
+  delayMs: number,
+): ChatState {
+  const revealAt = asUnixMs(Number(now) + delayMs);
+  return scheduleReveal(state, message, revealAt);
+}
+
+export type { ChatVisibleChannel };
+export type { JsonValue };
+
+// ============================================================================
 // MARK: Transcript module constants
 // ============================================================================
 
@@ -1529,8 +1652,8 @@ export function buildChannelActivityReport(
   channelId: ChatChannelId,
   entries: readonly ChatTranscriptEntry[],
 ): ChannelActivityReport {
-  const channelEntries = entries.filter((e) => e.message.channelId === channelId && !e.redacted && !e.softDeleted);
-  const authors = new Set(channelEntries.map((e) => e.message.authorId ?? 'SYSTEM'));
+  const channelEntries = entries.filter((e) => e.message.channelId === channelId && e.visibility !== 'REDACTED' && e.visibility !== 'DELETED');
+  const authors = new Set(channelEntries.map((e) => e.message.attribution.actorId ?? 'SYSTEM'));
   const timestamps = channelEntries.map((e) => e.message.createdAt as unknown as number);
   const first = timestamps.length > 0 ? asUnixMs(Math.min(...timestamps)) : null;
   const last = timestamps.length > 0 ? asUnixMs(Math.max(...timestamps)) : null;
@@ -1568,7 +1691,7 @@ export function computeTranscriptMessageVelocity(
   nowMs: number = Date.now(),
 ): TranscriptMessageVelocity {
   const cutoff = asUnixMs(nowMs - windowMs);
-  const inWindow = entries.filter((e) => e.message.channelId === channelId && e.message.createdAt >= cutoff && !e.redacted && !e.softDeleted);
+  const inWindow = entries.filter((e) => e.message.channelId === channelId && e.message.createdAt >= cutoff && e.visibility !== 'REDACTED' && e.visibility !== 'DELETED');
   const perMinute = windowMs > 0 ? (inWindow.length / windowMs) * 60_000 : 0;
   return Object.freeze({ roomId, channelId, windowMs, messagesInWindow: inWindow.length, messagesPerMinute: perMinute, generatedAt: asUnixMs(nowMs) });
 }
@@ -1601,16 +1724,16 @@ export function buildRedactionAuditReport(
   let softDeleteCount = 0;
 
   for (const entry of entries) {
-    if (entry.redacted) {
+    if (entry.visibility === 'REDACTED') {
       redacted.push(Object.freeze({
         messageId: entry.message.id as ChatMessageId,
         roomId,
         channelId: entry.message.channelId as ChatChannelId ?? null,
-        redactedAt: entry.redactedAt ?? null,
-        authorId: entry.message.authorId ?? null,
+        redactedAt: entry.message.redactedAt ?? null,
+        authorId: entry.message.attribution.actorId ?? null,
       }));
     }
-    if (entry.softDeleted) softDeleteCount++;
+    if (entry.visibility === 'DELETED') softDeleteCount++;
   }
 
   return Object.freeze({ roomId, entries: Object.freeze(redacted), redactionCount: redacted.length, softDeleteCount, generatedAt: asUnixMs(Date.now()) });
@@ -1642,8 +1765,8 @@ export function buildAuthorLeaderboard(
   const authorMap = new Map<string, { count: number; first: number; last: number }>();
 
   for (const e of entries) {
-    if (e.redacted || e.softDeleted) continue;
-    const authorId = e.message.authorId ?? 'SYSTEM';
+    if (e.visibility === 'REDACTED' || e.visibility === 'DELETED') continue;
+    const authorId = e.message.attribution.actorId ?? 'SYSTEM';
     const ts = e.message.createdAt as unknown as number;
     const existing = authorMap.get(authorId);
     if (!existing) {
@@ -1689,11 +1812,12 @@ export function buildTranscriptProofEdgeReport(
   let strongest: { from: ChatEventId; to: ChatEventId; weight: number } | null = null;
 
   for (const edge of proofEdges) {
-    const kind = edge.kind ?? 'UNKNOWN';
+    const edgeEx = edge as unknown as { kind?: string; weight?: number };
+    const kind = edgeEx.kind ?? 'UNKNOWN';
     byKind[kind] = (byKind[kind] ?? 0) + 1;
-    const weight = edge.weight ?? 0;
+    const weight = edgeEx.weight ?? 0;
     if (!strongest || weight > strongest.weight) {
-      strongest = { from: edge.fromEventId, to: edge.toEventId, weight };
+      strongest = { from: edge.fromMessageId as unknown as ChatEventId, to: edge.toMessageId as unknown as ChatEventId, weight };
     }
   }
 
@@ -1754,7 +1878,8 @@ export function buildRoomProofEdgeSummary(
 export interface RecentReplayEntry {
   readonly roomId: ChatRoomId;
   readonly replayId: ChatReplayId;
-  readonly messageId: ChatMessageId;
+  readonly rangeStart: number;
+  readonly rangeEnd: number;
   readonly createdAt: UnixMs;
 }
 
@@ -1768,8 +1893,9 @@ export function collectRecentReplayEntries(
   return Object.freeze(
     sorted.slice(0, limit).map((a) => Object.freeze({
       roomId,
-      replayId: a.replayId,
-      messageId: a.messageId,
+      replayId: a.id,
+      rangeStart: a.range.start,
+      rangeEnd: a.range.end,
       createdAt: a.createdAt,
     })),
   );
@@ -1796,7 +1922,7 @@ export function buildTypingSnapshotSummary(
   const activeTypers: string[] = [];
 
   for (const [sessionId, snap] of typingSnapshots) {
-    if (snap.roomId === roomId && (snap.updatedAt as unknown as number) >= cutoff && snap.isTyping) {
+    if (snap.roomId === roomId && Number(snap.startedAt) >= cutoff && snap.mode === 'TYPING') {
       activeTypers.push(sessionId);
     }
   }
@@ -1830,9 +1956,9 @@ export function buildRoomWindowReport(
   let lastSeq: SequenceNumber | null = null;
 
   for (const e of entries) {
-    if (e.message.channelId === 'VISIBLE') visible++;
+    if (e.visibility === 'VISIBLE') visible++;
     else shadow++;
-    const seq = e.sequence;
+    const seq = e.message.sequenceNumber;
     if (firstSeq === null) firstSeq = seq;
     lastSeq = seq;
   }
@@ -1857,9 +1983,9 @@ export function getMostRecentVisibleMessage(
   roomId: ChatRoomId,
 ): ChatMessage | null {
   const transcript = selectRoomTranscript(state, roomId);
-  const visible = transcript.filter((e) => e.message.channelId === 'VISIBLE' && !e.redacted && !e.softDeleted);
+  const visible = transcript.filter((e) => e.visibility === 'VISIBLE');
   if (visible.length === 0) return null;
-  visible.sort((a, b) => (b.sequence as unknown as number) - (a.sequence as unknown as number));
+  visible.sort((a, b) => Number(b.message.sequenceNumber) - Number(a.message.sequenceNumber));
   return visible[0].message;
 }
 
@@ -1878,8 +2004,8 @@ export function computeReplayArtifactFingerprint(
   roomId: ChatRoomId,
   artifacts: readonly ChatReplayArtifact[],
 ): ReplayArtifactFingerprint {
-  const sorted = [...artifacts].sort((a, b) => String(a.replayId).localeCompare(String(b.replayId)));
-  const parts = sorted.map((a) => `${a.replayId}:${a.messageId}`);
+  const sorted = [...artifacts].sort((a, b) => String(a.id).localeCompare(String(b.id)));
+  const parts = sorted.map((a) => `${a.id}:${a.range.start}-${a.range.end}`);
   let h = 5381;
   for (const p of parts) {
     for (let i = 0; i < p.length; i++) {
@@ -1899,7 +2025,16 @@ export function getMostRelevantCallbackMessage(
   anchorSequence: SequenceNumber,
   radius: number = 5,
 ): ChatMessage | null {
-  return getMostRelevantReplayForMessage(state, roomId, anchorSequence, radius);
+  const entries = state.transcript.byRoom[roomId] ?? [];
+  const anchor = entries.find((e) => Number(e.message.sequenceNumber) === Number(anchorSequence));
+  if (!anchor) {
+    const window = getAroundSequence(state, roomId, anchorSequence, radius);
+    return window.entries[0]?.message ?? null;
+  }
+  getMostRelevantReplayForMessage(state, anchor.message); // side-effectless, drives replay lookup
+  const window = getAroundSequence(state, roomId, anchorSequence, radius);
+  return window.entries.find((e) => Number(e.message.sequenceNumber) === Number(anchorSequence))?.message
+    ?? anchor.message;
 }
 
 // ============================================================================
@@ -1946,7 +2081,7 @@ export function validateSequenceContinuity(
 ): SequenceContinuityValidation {
   const channelEntries = entries
     .filter((e) => e.message.channelId === channelId)
-    .map((e) => e.sequence as unknown as number)
+    .map((e) => Number(e.message.sequenceNumber))
     .sort((a, b) => a - b);
 
   if (channelEntries.length === 0) {
@@ -1993,9 +2128,9 @@ export function getLatestMessagePerChannel(
   const latestByChannel = new Map<string, { message: ChatMessage; sequence: number }>();
 
   for (const e of entries) {
-    if (e.redacted || e.softDeleted) continue;
+    if (e.visibility === 'REDACTED' || e.visibility === 'DELETED') continue;
     const ch = e.message.channelId ?? 'UNKNOWN';
-    const seq = e.sequence as unknown as number;
+    const seq = Number(e.message.sequenceNumber);
     const existing = latestByChannel.get(ch);
     if (!existing || seq > existing.sequence) {
       latestByChannel.set(ch, { message: e.message, sequence: seq });

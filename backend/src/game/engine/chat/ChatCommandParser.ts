@@ -255,6 +255,14 @@ const PRESENCE_ALIAS_MAP: Readonly<Record<string, ChatPresenceCommandMode>> = Ob
   invisible: 'HIDE',
 });
 
+// ============================================================================
+// MARK: Presence mode resolver
+// ============================================================================
+
+export function resolvePresenceMode(raw: string): ChatPresenceCommandMode | null {
+  return PRESENCE_ALIAS_MAP[raw.toLowerCase()] ?? null;
+}
+
 const HELP_SECTIONS: Readonly<Record<ChatRoomKind, readonly ChatCommandName[]>> = Object.freeze({
   GLOBAL: ['help', 'clear', 'mood', 'focus', 'channel', 'who', 'away', 'back', 'hide', 'proof', 'replay', 'heat', 'ping', 'legend'],
   SYNDICATE: ['help', 'clear', 'mood', 'focus', 'channel', 'who', 'away', 'back', 'hide', 'proof', 'replay', 'heat', 'hush', 'ping', 'legend'],
@@ -2026,3 +2034,78 @@ export class CommandParseEpochTracker {
 export function createCommandParseEpochTracker(): CommandParseEpochTracker {
   return new CommandParseEpochTracker();
 }
+
+// ============================================================================
+// MARK: Module authority object
+// ============================================================================
+
+export const ChatCommandParserModule = Object.freeze({
+  // Module constants
+  name: CHAT_COMMAND_PARSER_MODULE_NAME,
+  version: CHAT_COMMAND_PARSER_MODULE_VERSION,
+  laws: CHAT_COMMAND_PARSER_MODULE_LAWS,
+  descriptor: CHAT_COMMAND_PARSER_MODULE_DESCRIPTOR,
+
+  // Parser class and singleton
+  ChatCommandParser,
+  DEFAULT_BACKEND_CHAT_COMMAND_PARSER,
+  evaluateChatCommand,
+
+  // Envelope helpers
+  summarizeCommandEnvelope,
+  formatCommandExecutionSummary,
+  validateExecutionEnvelope,
+
+  // Presence
+  resolvePresenceMode,
+
+  // Channel / room helpers
+  listAllowedCommandsForRoomKind,
+  validateChannelSwitch,
+  buildCommandRoomSummary,
+
+  // Command legality
+  COMMAND_LEGALITY_MATRIX,
+  isCommandLegalInContext,
+  isCommandAllowedForRole,
+  ROLE_COMMAND_ALLOWLIST,
+
+  // Batch parse
+  runBatchCommandParse,
+
+  // Fingerprint
+  computeCommandParseFingerprint,
+
+  // Watch bus
+  CommandParseWatchBus,
+  createCommandParseWatchBus,
+
+  // Frequency counter
+  CommandFrequencyCounter,
+  createCommandFrequencyCounter,
+
+  // History tracker
+  SessionCommandHistoryTracker,
+  createSessionCommandHistoryTracker,
+
+  // Audit report
+  buildCommandAuditReport,
+
+  // State snapshot
+  buildCommandParserStateSnapshot,
+
+  // Source type classifier
+  classifyCommandSourceType,
+
+  // Prefix / name utilities
+  detectCommandPrefix,
+  stripCommandPrefix,
+  normalizeCommandName,
+
+  // Context builder
+  buildParseRequestFromState,
+
+  // Epoch tracker
+  CommandParseEpochTracker,
+  createCommandParseEpochTracker,
+} as const);

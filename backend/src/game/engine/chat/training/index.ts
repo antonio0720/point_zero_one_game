@@ -1715,11 +1715,21 @@ export function buildSuiteExportManifest(
 }
 
 // ============================================================================
+// MARK: Training lane version sentinel
+// ============================================================================
+
+export const CHAT_TRAINING_LANE_VERSION = '2026.03.14' as const;
+export const CHAT_TRAINING_LANE_SIGNATURE =
+  'backend/src/game/engine/chat/training#lane-v' + CHAT_TRAINING_LANE_VERSION as string;
+
+// ============================================================================
 // MARK: Full training module re-export object
 // ============================================================================
 
 export const ChatTrainingModuleAll = Object.freeze({
   ...ChatTrainingSuiteModule,
+  ChatTrainingSuite,
+  ChatTrainingSuiteOptionsBuilder,
   AuditedChatTrainingSuite,
   InstrumentedChatTrainingSuite,
   ChatTrainingEventBus,
@@ -1728,17 +1738,26 @@ export const ChatTrainingModuleAll = Object.freeze({
   createInstrumentedSuite,
   createTrainingEventBus,
   createSuiteOptionsBuilder,
+  createExperimentalSuite,
+  createProductionGateSuite,
+  createAuditedTestSuite,
   validateSuitePipeline,
+  buildTaskScorecard,
   buildAllTaskScorecards,
   exportTaskScorecardsNdjson,
+  extractHarnessArtifacts,
   evaluateCorpusQuality,
   evaluateLabeledCorpusQuality,
   comparePolicyBundles,
   diffSuiteSnapshots,
   aggregateTrainingSignals,
   buildSuiteExportManifest,
+  buildTaskReadinessReport,
+  probeSuiteHealth,
   CHAT_TRAINING_SUITE_MODULE_ID,
   CHAT_TRAINING_SUITE_VERSION_MANIFEST,
+  CHAT_TRAINING_LANE_VERSION,
+  CHAT_TRAINING_LANE_SIGNATURE,
 });
 
 // ============================================================================
@@ -1940,14 +1959,6 @@ export type ChatTrainingRisk = EvaluationHarnessReport['overall']['risk'];
 export type ChatTrainingTaskVerdict = TaskHarnessReport['verdict'];
 export type ChatTrainingCycleSuiteOptions = ChatTrainingSuiteOptions;
 export type ChatTrainingCycleSnapshot = ChatTrainingSuiteSnapshot;
-
-// ============================================================================
-// MARK: Training lane version sentinel
-// ============================================================================
-
-export const CHAT_TRAINING_LANE_VERSION = '2026.03.14' as const;
-export const CHAT_TRAINING_LANE_SIGNATURE =
-  'backend/src/game/engine/chat/training#lane-v' + CHAT_TRAINING_LANE_VERSION as string;
 
 // ============================================================================
 // MARK: Complete lane registration manifest

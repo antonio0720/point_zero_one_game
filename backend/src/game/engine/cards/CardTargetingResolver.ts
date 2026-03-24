@@ -1660,6 +1660,292 @@ export class CardTargetingResolver {
     return this.resolveAllowedTargets(snapshot, card).includes('OPPONENT');
   }
 
+  /* ──────────────────────────────────────────────────────────────────────────
+   * Batch / hand / advisory APIs
+   * ────────────────────────────────────────────────────────────────────────── */
+
+  /**
+   * Resolves the UNION of allowed targeting classes across a hand of cards.
+   *
+   * Uses `unionTargetings` to aggregate every reachable target class so the
+   * UX "show all playable zones" layer can highlight exactly which lanes have
+   * at least one playable card without iterating cards themselves.
+   *
+   * Consumed by:
+   * - Hand highlight layer (which target-class icons are lit)
+   * - AI planner first-pass scan (what is reachable at all?)
+   * - Chat narration pre-filter (which zones can we describe?)
+   */
+  public resolveUnionTargeting(
+    snapshot: RunStateSnapshot,
+    cards: readonly CardInstance[],
+  ): readonly Targeting[] {
+    const targetingLists = cards.map(
+      (card) => this.resolveAllowedTargets(snapshot, card),
+    );
+    if (targetingLists.length === 0) {
+      return EMPTY_TARGETINGS;
+    }
+    return unionTargetings(...targetingLists);
+  }
+
+  /**
+   * Summarizes the targeting posture of an entire hand: union coverage,
+   * per-target-class card counts, deck-type breakdown, and cooperative /
+   * opponent / global presence flags.
+   *
+   * Consumed by:
+   * - UX hand-state layer (highlights which lanes are reachable)
+   * - AI hand planner (know full option set before single-card decisions)
+   * - Chat narration (describe what the player can do from this hand)
+   * - Telemetry (measure targeting distribution across sessions)
+   */
+  public buildHandTargetingSummary(
+    snapshot: RunStateSnapshot,
+    hand: readonly CardInstance[],
+  ): TargetingHandSummary {
+    const mode = snapshot.mode;
+    let selfCount = 0;
+    let opponentCount = 0;
+    let teammateCount = 0;
+    let teamCount = 0;
+    let globalCount = 0;
+    let playableCount = 0;
+    const deckTypeBreakdown: Record<string, number> = {};
+    const targetingLists: (readonly Targeting[])[] = [];
+
+    for (const card of hand) {
+      const allowed = this.resolveAllowedTargets(snapshot, card);
+
+      if (allowed.length > 0) {
+        playableCount++;
+        targetingLists.push(allowed);
+      }
+
+      if (allowed.includes('SELF')) selfCount++;
+      if (allowed.includes('OPPONENT')) opponentCount++;
+      if (allowed.includes('TEAMMATE')) teammateCount++;
+      if (allowed.includes('TEAM')) teamCount++;
+      if (allowed.includes('GLOBAL')) globalCount++;
+
+      const dt = card.card.deckType;
+      deckTypeBreakdown[dt] = (deckTypeBreakdown[dt] ?? 0) + 1;
+    }
+
+    const unionAllTargetings =
+      targetingLists.length > 0
+        ? unionTargetings(...targetingLists)
+        : EMPTY_TARGETINGS;
+
+    return Object.freeze({
+      mode,
+      totalCards: hand.length,
+      playableCards: playableCount,
+      blockedCards: hand.length - playableCount,
+      selfTargetableCount: selfCount,
+      opponentTargetableCount: opponentCount,
+      teammateTargetableCount: teammateCount,
+      teamTargetableCount: teamCount,
+      globalTargetableCount: globalCount,
+      unionAllTargetings,
+      deckTypeBreakdown: Object.freeze({ ...deckTypeBreakdown }),
+      hasAnyCooperativeTarget: teammateCount > 0 || teamCount > 0,
+      hasAnyOpponentTarget: opponentCount > 0,
+      hasAnyGlobalTarget: globalCount > 0,
+    });
+  }
+
+  /**
+   * Builds a targeting advisory for a specific card + requested targeting:
+   * includes alternative targets, mode-default union, urgency label, and a
+   * natural-language narrative suitable for UX tooltips or chat narration.
+   *
+   * Consumed by:
+   * - UX card-hover state: "This card cannot target OPPONENT right now."
+   * - Chat narrator: "You could target your TEAM instead."
+   * - AI planner fallback: try alternatives in advisory order.
+   */
+  public buildTargetingAdvisory(
+    snapshot: RunStateSnapshot,
+    card: CardInstance,
+    requested: Targeting,
+  ): TargetingAdvisory {
+    const allowance = this.evaluate(snapshot, card, requested);
+    const allowed = this.resolveAllowedTargets(snapshot, card);
+    const modeDefaults = TARGET_MATRIX[snapshot.mode][card.targeting];
+    const alternativeTargets = allowed.filter((t) => t !== requested);
+    const unionWithModeDefaults = unionTargetings(allowed, modeDefaults);
+
+    let urgencyLabel: 'CRITICAL' | 'WARNING' | 'INFO' | 'OK';
+
+    if (!allowance.allowed && allowed.length === 0) {
+      urgencyLabel = 'CRITICAL';
+    } else if (!allowance.allowed) {
+      urgencyLabel = 'WARNING';
+    } else if (
+      allowance.reasons.includes('TARGET_ALLOWED_AFTER_CANONICALIZATION')
+    ) {
+      urgencyLabel = 'INFO';
+    } else {
+      urgencyLabel = 'OK';
+    }
+
+    const narrative = allowance.allowed
+      ? [
+          `${card.definitionId}: target class ${requested} is allowed in ${snapshot.mode}.`,
+          alternativeTargets.length > 0
+            ? `Alternative targets: ${alternativeTargets.join(', ')}.`
+            : 'No other target classes available for this card right now.',
+        ].join(' ')
+      : [
+          `${card.definitionId}: target class ${requested} is blocked in ${snapshot.mode}.`,
+          `Reason: ${allowance.reasons.join(', ')}.`,
+          alternativeTargets.length > 0
+            ? `You may use: ${alternativeTargets.join(', ')} instead.`
+            : 'No valid targets remain for this card in the current state.',
+        ].join(' ');
+
+    return Object.freeze({
+      card,
+      requestedTargeting: requested,
+      allowance,
+      alternativeTargets: Object.freeze(alternativeTargets),
+      unionWithModeDefaults,
+      narrative,
+      urgencyLabel,
+    });
+  }
+
+  /**
+   * Evaluates a batch of cards against a specific target class.
+   * Returns a `TargetingBatchResult` per card — used by AI planning,
+   * legality audits, and UX hand filtering (e.g. "which cards can hit OPPONENT?").
+   */
+  public evaluateBatch(
+    snapshot: RunStateSnapshot,
+    cards: readonly CardInstance[],
+    targeting: Targeting,
+  ): readonly TargetingBatchResult[] {
+    return Object.freeze(
+      cards.map((card) => ({
+        card,
+        targeting,
+        allowance: this.evaluate(snapshot, card, targeting),
+      })),
+    );
+  }
+
+  /**
+   * Full diagnostic report for a specific card + targeting request.
+   * Includes all context layers, union-resolved targetings, doctrine summary,
+   * and a 0–100 health score for the targeting request.
+   *
+   * Consumed by:
+   * - Proof audit / replay annotation
+   * - Chat narration deep-dive ("here is why your card cannot hit OPPONENT")
+   * - Backend integration tests
+   * - Dev/ops diagnostics tooling
+   */
+  public buildDiagnosticReport(
+    snapshot: RunStateSnapshot,
+    card: CardInstance,
+    targeting: Targeting,
+  ): TargetingDiagnosticReport {
+    const allowance = this.evaluate(snapshot, card, targeting);
+    const cardContext = buildCardContext(snapshot, card, targeting);
+    const modeContext = buildModeContext(snapshot);
+    const windowState = readWindowState(snapshot);
+    const allowed = this.resolveAllowedTargets(snapshot, card);
+    const modeDefaults = TARGET_MATRIX[snapshot.mode][card.targeting];
+    const unionAllowedTargetings = unionTargetings(allowed, modeDefaults);
+
+    const isCooperativeCard =
+      card.card.deckType === 'AID' ||
+      card.card.deckType === 'RESCUE' ||
+      card.card.deckType === 'TRUST' ||
+      card.card.deckType === 'COUNTER';
+
+    const isPredatorCard =
+      card.card.deckType === 'SABOTAGE' || card.card.deckType === 'BLUFF';
+
+    const isGhostCard = card.card.deckType === 'GHOST';
+
+    const passedChecks = [
+      allowance.reasons.includes('TARGET_SUPPORTED'),
+      !allowance.reasons.includes('TARGET_NOT_IN_CARD_CLASS_MATRIX'),
+      !allowance.reasons.includes('TARGET_NOT_IN_DECK_DOCTRINE'),
+      !allowance.reasons.includes('TARGET_NOT_IN_TIMING_DOCTRINE'),
+      !allowance.reasons.includes('TARGET_NOT_IN_TAG_DOCTRINE'),
+    ].filter(Boolean).length;
+
+    const healthScore = Math.round((passedChecks / 5) * 100);
+
+    const doctrineSummary = [
+      `Mode: ${snapshot.mode} — ${MODE_SUMMARY[snapshot.mode]}`,
+      `Deck: ${card.card.deckType} — ${DECK_SUMMARY[card.card.deckType]}`,
+      `Timing: ${card.timingClass.join(', ') || 'none'}`,
+      `Tags: ${card.tags.join(', ') || 'none'}`,
+      `Union resolved: ${unionAllowedTargetings.join(', ') || 'none'}`,
+    ].join(' | ');
+
+    return Object.freeze({
+      definitionId: card.definitionId,
+      mode: snapshot.mode,
+      deckType: card.card.deckType,
+      requestedTargeting: targeting,
+      allowance,
+      cardContext,
+      modeContext,
+      windowState,
+      doctrineSummary,
+      unionAllowedTargetings,
+      isGlobalShape: this.isGlobalShape(snapshot, card),
+      isCooperativeCard,
+      isPredatorCard,
+      isGhostCard,
+      healthScore,
+    });
+  }
+
+  /**
+   * Returns whether ANY card in the provided hand can reach the requested
+   * target class in the current snapshot. Useful for fast "is this lane alive?"
+   * checks before building a full summary.
+   */
+  public handCanReachTarget(
+    snapshot: RunStateSnapshot,
+    hand: readonly CardInstance[],
+    targeting: Targeting,
+  ): boolean {
+    return hand.some((card) => this.isAllowed(snapshot, card, targeting));
+  }
+
+  /**
+   * Returns the subset of cards in `hand` that are allowed to target the
+   * provided `targeting` class. Useful for AI hand selection and UX filters.
+   */
+  public filterByTargeting(
+    snapshot: RunStateSnapshot,
+    hand: readonly CardInstance[],
+    targeting: Targeting,
+  ): readonly CardInstance[] {
+    return Object.freeze(
+      hand.filter((card) => this.isAllowed(snapshot, card, targeting)),
+    );
+  }
+
+  /**
+   * Returns the union of allowed targetings for cards that have AT LEAST ONE
+   * cooperative lane. Useful for composing Syndicate hand narratives.
+   */
+  public resolveCoopUnionTargeting(
+    snapshot: RunStateSnapshot,
+    hand: readonly CardInstance[],
+  ): readonly Targeting[] {
+    const coopCards = hand.filter((c) => this.hasCooperativeTargetLane(snapshot, c));
+    return this.resolveUnionTargeting(snapshot, coopCards);
+  }
+
   private finish(
     snapshot: RunStateSnapshot,
     card: CardInstance,
@@ -2013,3 +2299,459 @@ export function assertTargetDoctrineHealthy(): void {
 export function warmCardTargetingDoctrine(): void {
   assertTargetDoctrineHealthy();
 }
+
+/* ──────────────────────────────────────────────────────────────────────────────
+ * Batch / hand / advisory / diagnostic result shapes
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+export interface TargetingBatchResult {
+  readonly card: CardInstance;
+  readonly targeting: Targeting;
+  readonly allowance: TargetAllowance;
+}
+
+export interface TargetingHandSummary {
+  readonly mode: ModeCode;
+  readonly totalCards: number;
+  readonly playableCards: number;
+  readonly blockedCards: number;
+  readonly selfTargetableCount: number;
+  readonly opponentTargetableCount: number;
+  readonly teammateTargetableCount: number;
+  readonly teamTargetableCount: number;
+  readonly globalTargetableCount: number;
+  readonly unionAllTargetings: readonly Targeting[];
+  readonly deckTypeBreakdown: Readonly<Record<string, number>>;
+  readonly hasAnyCooperativeTarget: boolean;
+  readonly hasAnyOpponentTarget: boolean;
+  readonly hasAnyGlobalTarget: boolean;
+}
+
+export interface TargetingAdvisory {
+  readonly card: CardInstance;
+  readonly requestedTargeting: Targeting;
+  readonly allowance: TargetAllowance;
+  readonly alternativeTargets: readonly Targeting[];
+  readonly unionWithModeDefaults: readonly Targeting[];
+  readonly narrative: string;
+  readonly urgencyLabel: 'CRITICAL' | 'WARNING' | 'INFO' | 'OK';
+}
+
+export interface TargetingDiagnosticReport {
+  readonly definitionId: string;
+  readonly mode: ModeCode;
+  readonly deckType: DeckType;
+  readonly requestedTargeting: Targeting;
+  readonly allowance: TargetAllowance;
+  readonly cardContext: TargetCardContext;
+  readonly modeContext: TargetModeContext;
+  readonly windowState: TargetWindowState;
+  readonly doctrineSummary: string;
+  readonly unionAllowedTargetings: readonly Targeting[];
+  readonly isGlobalShape: boolean;
+  readonly isCooperativeCard: boolean;
+  readonly isPredatorCard: boolean;
+  readonly isGhostCard: boolean;
+  readonly healthScore: number;
+}
+
+/* ──────────────────────────────────────────────────────────────────────────────
+ * Doctrine utility helpers
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+/** Returns all defined targeting classes in canonical order. */
+export function listAllTargetings(): readonly Targeting[] {
+  return ALL_TARGETINGS;
+}
+
+/**
+ * Returns all targeting classes that are allowed in a mode's base matrix —
+ * i.e. the set of targetings for which TARGET_MATRIX[mode][t] is non-empty.
+ */
+export function getTargetingsByMode(mode: ModeCode): readonly Targeting[] {
+  const result: Targeting[] = [];
+  for (const targeting of ALL_TARGETINGS) {
+    if (TARGET_MATRIX[mode][targeting].length > 0) {
+      result.push(targeting);
+    }
+  }
+  return Object.freeze(result);
+}
+
+/**
+ * Returns all targeting classes reachable by a given deck type, taking the
+ * union across all four modes from `DECK_TARGET_DOCTRINE`.
+ */
+export function getTargetingsByDeckType(deckType: DeckType): readonly Targeting[] {
+  const doctrine = DECK_TARGET_DOCTRINE[deckType];
+  const union: Targeting[] = [];
+  for (const mode of Object.keys(doctrine) as ModeCode[]) {
+    for (const t of doctrine[mode]) {
+      union.push(t);
+    }
+  }
+  return uniqueTargetings(union);
+}
+
+/**
+ * Returns all targeting classes reachable by a timing class, taking the
+ * union across all four modes from `TIMING_TARGET_DOCTRINE`.
+ */
+export function getTargetingsByTimingClass(timingClass: TimingClass): readonly Targeting[] {
+  const doctrine = TIMING_TARGET_DOCTRINE[timingClass];
+  const union: Targeting[] = [];
+  for (const mode of Object.keys(doctrine) as ModeCode[]) {
+    for (const t of doctrine[mode]) {
+      union.push(t);
+    }
+  }
+  return uniqueTargetings(union);
+}
+
+/** True if the targeting class requires a cooperative lane to be meaningful. */
+export function isCoopOnlyTarget(targeting: Targeting): boolean {
+  return targeting === 'TEAMMATE' || targeting === 'TEAM';
+}
+
+/** True if the targeting class requires a live opponent lane. */
+export function isPvpOnlyTarget(targeting: Targeting): boolean {
+  return targeting === 'OPPONENT';
+}
+
+/** True if the targeting class is self-directed. */
+export function isSelfTarget(targeting: Targeting): boolean {
+  return targeting === 'SELF';
+}
+
+/** True if the targeting class is system-wide. */
+export function isGlobalTarget(targeting: Targeting): boolean {
+  return targeting === 'GLOBAL';
+}
+
+/** Returns the deck doctrine targeting list for a deck type in a specific mode. */
+export function unionDeckModeTargetings(deckType: DeckType, mode: ModeCode): readonly Targeting[] {
+  return DECK_TARGET_DOCTRINE[deckType][mode];
+}
+
+/** Returns the union of targeting classes across ALL modes for a deck type. */
+export function unionDeckAllModesTargetings(deckType: DeckType): readonly Targeting[] {
+  const doctrine = DECK_TARGET_DOCTRINE[deckType];
+  const lists = (Object.keys(doctrine) as ModeCode[]).map((mode) => doctrine[mode]);
+  return unionTargetings(...lists);
+}
+
+/** Returns the timing doctrine targeting list for a timing class in a specific mode. */
+export function unionTimingModeTargetings(timingClass: TimingClass, mode: ModeCode): readonly Targeting[] {
+  return TIMING_TARGET_DOCTRINE[timingClass][mode];
+}
+
+/** Returns the union of targeting classes across ALL modes for a timing class. */
+export function unionTimingAllModesTargetings(timingClass: TimingClass): readonly Targeting[] {
+  const doctrine = TIMING_TARGET_DOCTRINE[timingClass];
+  const lists = (Object.keys(doctrine) as ModeCode[]).map((mode) => doctrine[mode]);
+  return unionTargetings(...lists);
+}
+
+/** Returns the mode targeting summary label for narration surfaces. */
+export function getModeTargetingSummary(mode: ModeCode): string {
+  return MODE_SUMMARY[mode];
+}
+
+/** Returns the deck targeting summary label for narration surfaces. */
+export function getDeckTargetingSummary(deckType: DeckType): string {
+  return DECK_SUMMARY[deckType];
+}
+
+/** Returns all timing classes that are only active in cooperative (coop) mode. */
+export function listCoopExclusiveTimingClasses(): readonly TimingClass[] {
+  return Object.freeze(['RES', 'AID'] as const);
+}
+
+/** Returns all timing classes that are PvP reaction timing classes. */
+export function listPvpReactionTimingClasses(): readonly TimingClass[] {
+  return Object.freeze(['CTR'] as const);
+}
+
+/** Returns all timing classes that are ghost-mode-exclusive. */
+export function listGhostExclusiveTimingClasses(): readonly TimingClass[] {
+  return Object.freeze(['GBM'] as const);
+}
+
+/** Returns all deck types that are coop-exclusive (no targeting in pvp/solo/ghost). */
+export function listCoopExclusiveDeckTypes(): readonly DeckType[] {
+  return Object.freeze(['AID', 'RESCUE', 'TRUST'] as const);
+}
+
+/** Returns all deck types that are pvp-exclusive (no targeting outside pvp). */
+export function listPvpExclusiveDeckTypes(): readonly DeckType[] {
+  return Object.freeze(['SABOTAGE', 'BLUFF'] as const);
+}
+
+/** Returns all deck types that are ghost-mode-exclusive. */
+export function listGhostExclusiveDeckTypes(): readonly DeckType[] {
+  return Object.freeze(['GHOST'] as const);
+}
+
+/**
+ * Returns whether a given DeckType has any reachable target class in the
+ * given mode from pure deck doctrine — does not account for runtime gating.
+ */
+export function isDeckTypePlayableInMode(deckType: DeckType, mode: ModeCode): boolean {
+  return DECK_TARGET_DOCTRINE[deckType][mode].length > 0;
+}
+
+/**
+ * Returns whether a TimingClass requires an active decision window to be
+ * legal (as opposed to being always-evaluatable from snapshot context alone).
+ */
+export function isTimingClassWindowDependent(timingClass: TimingClass): boolean {
+  return (
+    timingClass === 'CTR' ||
+    timingClass === 'RES' ||
+    timingClass === 'AID' ||
+    timingClass === 'GBM' ||
+    timingClass === 'CAS' ||
+    timingClass === 'PHZ'
+  );
+}
+
+/** Returns the canonical timing order index for a TimingClass (for sorting). */
+export function getTimingClassOrderIndex(timingClass: TimingClass): number {
+  const TIMING_ORDER_MAP: Readonly<Record<TimingClass, number>> = Object.freeze({
+    PRE: 0,
+    POST: 1,
+    FATE: 2,
+    CTR: 3,
+    RES: 4,
+    AID: 5,
+    GBM: 6,
+    CAS: 7,
+    PHZ: 8,
+    PSK: 9,
+    END: 10,
+    ANY: 11,
+  });
+  return TIMING_ORDER_MAP[timingClass];
+}
+
+/** Sorts targeting classes by their position in `ALL_TARGETINGS` canonical order. */
+export function sortTargetingsByCanonicalOrder(targetings: readonly Targeting[]): readonly Targeting[] {
+  return Object.freeze(
+    [...targetings].sort(
+      (a, b) => ALL_TARGETINGS.indexOf(a) - ALL_TARGETINGS.indexOf(b),
+    ),
+  );
+}
+
+/** Returns whether two targeting arrays are set-equivalent (same members, any order). */
+export function targetingsAreEquivalent(
+  a: readonly Targeting[],
+  b: readonly Targeting[],
+): boolean {
+  if (a.length !== b.length) {
+    return false;
+  }
+  const setA = new Set<Targeting>(a);
+  for (const t of b) {
+    if (!setA.has(t)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Returns the targeting coverage score (0–1) for a card in the current snapshot.
+ * A score of 1.0 means all 5 targeting classes are reachable.
+ */
+export function computeTargetingCoverageScore(
+  snapshot: RunStateSnapshot,
+  card: CardInstance,
+): number {
+  const allowed = new CardTargetingResolver().resolveAllowedTargets(snapshot, card);
+  return allowed.length / ALL_TARGETINGS.length;
+}
+
+/**
+ * Returns a human-readable, mode-native label for a targeting class.
+ * Suitable for UX tooltips and chat narration.
+ */
+export function getTargetingLabel(targeting: Targeting, mode: ModeCode): string {
+  const labels: Readonly<Record<ModeCode, Readonly<Record<Targeting, string>>>> = Object.freeze({
+    solo: Object.freeze({
+      SELF: 'Your Empire',
+      OPPONENT: 'No opponent lane (Empire)',
+      TEAMMATE: 'No teammate lane (Empire)',
+      TEAM: 'No team lane (Empire)',
+      GLOBAL: 'All systems',
+    }),
+    pvp: Object.freeze({
+      SELF: 'Your position',
+      OPPONENT: 'Opponent position',
+      TEAMMATE: 'No teammate lane (Predator)',
+      TEAM: 'No team lane (Predator)',
+      GLOBAL: 'All combatants',
+    }),
+    coop: Object.freeze({
+      SELF: 'Your position',
+      OPPONENT: 'No opponent lane (Syndicate)',
+      TEAMMATE: 'Specific teammate',
+      TEAM: 'Full team',
+      GLOBAL: 'All Syndicate',
+    }),
+    ghost: Object.freeze({
+      SELF: 'Your Phantom run',
+      OPPONENT: 'No opponent lane (Ghost)',
+      TEAMMATE: 'No teammate lane (Ghost)',
+      TEAM: 'No team lane (Ghost)',
+      GLOBAL: 'Legend system',
+    }),
+  });
+  return labels[mode][targeting];
+}
+
+/**
+ * Returns a short UX-ready status badge for a target class allowance result.
+ * Suitable for icon overlay labels and card-frame tinting.
+ */
+export function getTargetingStatusBadge(allowance: TargetAllowance): string {
+  if (allowance.allowed) {
+    return allowance.reasons.includes('TARGET_ALLOWED_AFTER_CANONICALIZATION')
+      ? 'ALLOWED_CANONICAL'
+      : 'ALLOWED';
+  }
+  if (allowance.allowedTargets.length === 0) {
+    return 'BLOCKED_NO_TARGET';
+  }
+  return 'BLOCKED_WRONG_TARGET';
+}
+
+/**
+ * Returns the first blocking reason code from an allowance result, or null
+ * if the targeting was allowed. Useful for surfacing the primary block reason
+ * in UX tooltips without listing all reason codes.
+ */
+export function getFirstBlockingReason(allowance: TargetAllowance): TargetReasonCode | null {
+  if (allowance.allowed) {
+    return null;
+  }
+  return (
+    allowance.reasons.find(
+      (r) =>
+        r !== 'TARGET_SUPPORTED' &&
+        r !== 'TARGET_ALLOWED_AFTER_CANONICALIZATION',
+    ) ?? null
+  );
+}
+
+/**
+ * Returns a player-facing explanation string for the first blocking reason,
+ * formatted for inline UX display (not the full summary).
+ */
+export function explainBlockingReason(reason: TargetReasonCode): string {
+  const EXPLANATIONS: Readonly<Record<TargetReasonCode, string>> = Object.freeze({
+    TARGET_SUPPORTED: 'Target class supported.',
+    TARGET_NOT_IN_BASE_MODE_MATRIX: 'This target class is not available in this mode.',
+    TARGET_NOT_IN_CARD_CLASS_MATRIX: 'This card type cannot reach this target class.',
+    TARGET_NOT_IN_DECK_DOCTRINE: 'Deck doctrine does not allow this target class here.',
+    TARGET_NOT_IN_TIMING_DOCTRINE: 'Timing doctrine narrows this card away from this target.',
+    TARGET_NOT_IN_TAG_DOCTRINE: 'Card tags restrict this targeting direction.',
+    TARGET_BLOCKED_BY_COUNTER_WINDOW_REQUIREMENT: 'Counter window is not active.',
+    TARGET_BLOCKED_BY_RESCUE_WINDOW_REQUIREMENT: 'Rescue window is not active.',
+    TARGET_BLOCKED_BY_AID_WINDOW_REQUIREMENT: 'Aid window is not active.',
+    TARGET_BLOCKED_BY_PHASE_BOUNDARY_REQUIREMENT: 'No phase boundary window is open.',
+    TARGET_BLOCKED_BY_CASCADE_WINDOW_REQUIREMENT: 'No cascade window or active chain.',
+    TARGET_BLOCKED_BY_GHOST_MARKER_REQUIREMENT: 'Ghost marker lane is not active.',
+    TARGET_BLOCKED_BY_SHARED_TREASURY_REQUIREMENT: 'No shared treasury lane.',
+    TARGET_BLOCKED_BY_COOP_CONTEXT_REQUIREMENT: 'No cooperative lane is active.',
+    TARGET_BLOCKED_BY_PVP_CONTEXT_REQUIREMENT: 'No opponent lane is active.',
+    TARGET_BLOCKED_BY_GHOST_CONTEXT_REQUIREMENT: 'Ghost mode is not active.',
+    TARGET_BLOCKED_BY_EXTRACTION_CONTEXT_REQUIREMENT: 'No extraction pressure is active.',
+    TARGET_BLOCKED_BY_COUNTER_INTEL_REQUIREMENT: 'Counter-intel lane is not active.',
+    TARGET_BLOCKED_BY_DISABLED_BOT_CONTEXT: 'Bot context prevents this target.',
+    TARGET_BLOCKED_BY_ROLE_LOCK: 'Role lock prevents this target direction.',
+    TARGET_BLOCKED_BY_WARNING_QUARANTINE: 'Runtime is in a warning quarantine state.',
+    TARGET_BLOCKED_BY_OUTCOME_FINALIZED: 'Run outcome has already been finalized.',
+    TARGET_BLOCKED_BY_CARD_STATE: 'Card decay has expired.',
+    TARGET_BLOCKED_BY_REQUEST_CANONICALIZATION: 'Target class shape mismatch with card base.',
+    TARGET_BLOCKED_BY_CARD_DOCTRINE: 'Named-card doctrine overrides this target class.',
+    TARGET_BLOCKED_BY_MODE_DOCTRINE: 'Mode doctrine hard-blocks this target class.',
+    TARGET_BLOCKED_BY_RUNTIME_RULE: 'Runtime rule prevents this target class.',
+    TARGET_ALLOWED_AFTER_CANONICALIZATION: 'Target allowed after canonical rewrite.',
+  });
+  return EXPLANATIONS[reason] ?? `Unknown block reason: ${reason}`;
+}
+
+/* ──────────────────────────────────────────────────────────────────────────────
+ * Module authority object
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+export const CARD_TARGETING_RESOLVER_MODULE_AUTHORITY = Object.freeze({
+  module: 'CardTargetingResolver',
+  version: '2.0.0',
+  surface: 'engine/cards/targeting',
+  exports: Object.freeze([
+    'CardTargetingResolver',
+    'CARD_TARGETING_DOCTRINE',
+    'TargetingBatchResult',
+    'TargetingHandSummary',
+    'TargetingAdvisory',
+    'TargetingDiagnosticReport',
+    'getBaseModeTargetMatrix',
+    'getDeckTargetDoctrine',
+    'getTimingTargetDoctrine',
+    'getTagTargetDoctrine',
+    'projectTargetWindows',
+    'projectTargetModeContext',
+    'projectTargetCardContext',
+    'deriveAllowedTargetsForCard',
+    'canResolveTargetClass',
+    'cardRepresentsPredatorPressure',
+    'cardRepresentsSyndicateRescue',
+    'cardRepresentsSyndicateAid',
+    'cardRepresentsGhostInstrumentation',
+    'cardRepresentsPhaseBoundaryMacroDecision',
+    'cardRepresentsCascadeIntervention',
+    'cardRequiresSharedTreasuryLane',
+    'cardRequiresCounterIntelLane',
+    'cardRequiresLegendLane',
+    'cardRequiresExtractionLane',
+    'cardTargetNarrativeLabel',
+    'hasCompleteModeMatrixCoverage',
+    'hasCompleteDeckDoctrineCoverage',
+    'hasCompleteTimingDoctrineCoverage',
+    'assertTargetDoctrineHealthy',
+    'warmCardTargetingDoctrine',
+    'listAllTargetings',
+    'getTargetingsByMode',
+    'getTargetingsByDeckType',
+    'getTargetingsByTimingClass',
+    'isCoopOnlyTarget',
+    'isPvpOnlyTarget',
+    'isSelfTarget',
+    'isGlobalTarget',
+    'unionDeckModeTargetings',
+    'unionDeckAllModesTargetings',
+    'unionTimingModeTargetings',
+    'unionTimingAllModesTargetings',
+    'getModeTargetingSummary',
+    'getDeckTargetingSummary',
+    'listCoopExclusiveTimingClasses',
+    'listPvpReactionTimingClasses',
+    'listGhostExclusiveTimingClasses',
+    'listCoopExclusiveDeckTypes',
+    'listPvpExclusiveDeckTypes',
+    'listGhostExclusiveDeckTypes',
+    'isDeckTypePlayableInMode',
+    'isTimingClassWindowDependent',
+    'getTimingClassOrderIndex',
+    'sortTargetingsByCanonicalOrder',
+    'targetingsAreEquivalent',
+    'computeTargetingCoverageScore',
+    'getTargetingLabel',
+    'getTargetingStatusBadge',
+    'getFirstBlockingReason',
+    'explainBlockingReason',
+    'CARD_TARGETING_RESOLVER_MODULE_AUTHORITY',
+  ] as const),
+});

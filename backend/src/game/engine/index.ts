@@ -39,3 +39,17 @@ export * as TimingValidator from './timing_validator';
 export * as HeadToHeadMode from '../modes/head_to_head_mode';
 export * as TeamUpMode from '../modes/team_up_mode';
 export * as ChaseALegendMode from '../modes/chase_a_legend_mode';
+
+/**
+ * Cards engine sub-system — compiler, executor, legality, registry,
+ * targeting, timing, overlay, and deck composition all live here.
+ *
+ * Namespaced to prevent TS2308 collisions with the legacy card_types /
+ * card_registry / card_effects_executor exports already in this barrel.
+ *
+ * Usage:
+ *   import { Cards } from '../../engine';
+ *   const compiler = new Cards.CardEffectCompiler(overlay);
+ *   const service  = new Cards.CardLegalityService(registry);
+ */
+export * as Cards from './cards';

@@ -216,6 +216,8 @@ export interface ChurnRescuePolicyRequest {
   readonly learning?: Partial<ChatLearningProfile> | null;
   readonly reputation?: Partial<ChatReputationState> | null;
   readonly telemetry?: ChurnRescueTelemetryFrame | null;
+  readonly audienceHeat?: ChatAudienceHeat | null;
+  readonly pressureTier?: PressureTier | null;
   readonly helperActor?: Partial<ChatRescueActor> | null;
   readonly notes?: readonly string[];
 }
@@ -253,6 +255,9 @@ export interface ChurnRescuePolicyDecision {
   readonly predictedOutcome: ChatRecoveryOutcome | null;
   readonly rescueDigest: ChatRescueDigest | null;
   readonly recoveryDigest: ChatRecoveryDigest | null;
+  readonly recoveryBundle: ChatRecoveryBundle | null;
+  readonly recoveryEntryPoint: ChatRecoveryEntryPoint | null;
+  readonly recoveryVisibility: ChatRecoveryVisibility | null;
   readonly notes: readonly string[];
 }
 
@@ -789,6 +794,9 @@ export class ChurnRescuePolicy {
         predictedOutcome: null,
         rescueDigest: null,
         recoveryDigest: null,
+        recoveryBundle: null,
+        recoveryEntryPoint: null,
+        recoveryVisibility: null,
         notes: risk.reasonTrail.reasons,
       };
     }
@@ -830,6 +838,9 @@ export class ChurnRescuePolicy {
         predictedOutcome: null,
         rescueDigest: null,
         recoveryDigest: null,
+        recoveryBundle: null,
+        recoveryEntryPoint: null,
+        recoveryVisibility: null,
         notes: [...risk.reasonTrail.reasons, 'shared rescue contract suppressed or returned null'],
       };
     }
@@ -901,6 +912,9 @@ export class ChurnRescuePolicy {
       predictedOutcome,
       rescueDigest,
       recoveryDigest,
+      recoveryBundle: recoveryPlan.bundle,
+      recoveryEntryPoint: recoveryPlan.entryPoint,
+      recoveryVisibility: (recoveryPlan.bundle.options[0]?.visibility ?? null) as ChatRecoveryVisibility | null,
       notes: [...risk.reasonTrail.reasons, ...(rescuePlan.notes ?? []), ...(predictedOutcome.notes ?? [])],
     };
   }
@@ -1787,6 +1801,78 @@ export function deserializeRescueDecisionPartial(raw: Readonly<Record<string, un
 }
 
 // ============================================================================
+// MARK: Extended rescue and recovery surface
+// ============================================================================
+
+export function getRescueTrigger(plan: ChatRescuePlan): ChatRescueTrigger {
+  return plan.trigger;
+}
+
+export function getRescueHelperPosture(plan: ChatRescuePlan): ChatRescueHelperPosture {
+  return plan.helperPosture;
+}
+
+export function getRescueSelectedOffer(plan: ChatRescuePlan): ChatRescueOffer {
+  return plan.selectedOffer;
+}
+
+export function getRescueOfferActions(offer: ChatRescueOffer): readonly ChatRescueAction[] {
+  return offer.actions;
+}
+
+export function getRescueGuardrail(plan: ChatRescuePlan): ChatRescueGuardrail {
+  return plan.guardrail;
+}
+
+export function getRescuePlanOutcome(plan: ChatRescuePlan): ChatRescueOutcome {
+  return plan.state;
+}
+
+export function computeRescueTriggerCandidates(
+  feature: ChatFeatureSnapshot,
+  affect: ChatAffectSnapshot,
+  telemetry: ChatRescueTelemetrySnapshot,
+): readonly ChatRescueSignalVector[] {
+  return deriveRescueTriggerCandidates(feature, affect, telemetry);
+}
+
+export function checkRescueSuppression(input: {
+  readonly publicRisk01: Score01;
+  readonly recoverability01: Score01;
+  readonly confidence: Score100;
+  readonly silencePreferred: boolean;
+  readonly helperAlreadyActive: boolean;
+  readonly supportedChannel: boolean;
+  readonly guardrail?: ChatRescueGuardrail;
+}): ChatRescueSuppressionReason | null {
+  return shouldSuppressRescue(input);
+}
+
+export function computeRecoverySuccessBand(input: {
+  readonly stabilityLift01: Score01;
+  readonly embarrassmentReduction01: Score01;
+  readonly confidenceLift01: Score01;
+}): ChatRecoverySuccessBand {
+  return deriveRecoverySuccessBand(input);
+}
+
+export function rescueScore01(value: number): Score01 {
+  return toRescueScore01(value);
+}
+
+export function rescueScore100(value: number): Score100 {
+  return toRescueScore100(value);
+}
+
+export function recoveryScore01(value: number): Score01 {
+  return toRecoveryScore01(value);
+}
+
+export function recoveryScore100(value: number): Score100 {
+  return toRecoveryScore100(value);
+}
+
+// ============================================================================
 // MARK: ChurnRescuePolicyModule — combined barrel export
 // ============================================================================
 
@@ -1840,6 +1926,23 @@ export const ChurnRescuePolicyModule = Object.freeze({
   REASON_PRIORITY: CHURN_RESCUE_REASON_PRIORITY,
   CHANNEL_LAW: CHURN_RESCUE_CHANNEL_LAW,
   STYLE_NOTES: CHURN_RESCUE_STYLE_NOTES,
+
+  // Rescue plan field accessors
+  getRescueTrigger,
+  getRescueHelperPosture,
+  getRescueSelectedOffer,
+  getRescueOfferActions,
+  getRescueGuardrail,
+  getRescuePlanOutcome,
+
+  // Extended rescue and recovery computations
+  computeRescueTriggerCandidates,
+  checkRescueSuppression,
+  computeRecoverySuccessBand,
+  rescueScore01,
+  rescueScore100,
+  recoveryScore01,
+  recoveryScore100,
 } as const);
 
 // ============================================================================

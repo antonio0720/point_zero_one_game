@@ -1858,6 +1858,23 @@ function buildReleaseNoteText(
 }
 
 // ============================================================================
+// MARK: Split-level evaluation accessors
+// ============================================================================
+
+export function extractPolicySplitReports(
+  policy: TrainedTaskPolicy,
+): { readonly validation: SplitEvaluationReport; readonly test: SplitEvaluationReport } {
+  return Object.freeze({
+    validation: policy.evaluation.validation,
+    test: policy.evaluation.test,
+  });
+}
+
+export function computeBooleanActivationRate(features: TrainingExampleFeatures): number {
+  return proportion(Object.values(features.boolean));
+}
+
+// ============================================================================
 // MARK: Canonical module object
 // ============================================================================
 
@@ -1868,6 +1885,11 @@ export const ChatEvaluationHarnessModule = Object.freeze({
   annotateDriftDisposition,
   buildDriftDispositionAnnotations,
   buildHarnessReleaseCard,
+  extractPolicySplitReports,
+  computeBooleanActivationRate,
+  compareHarnessCycles,
+  exportHarnessTaskReportsNdjson,
+  resolveHarnessReadinessGate,
 });
 
 // ============================================================================

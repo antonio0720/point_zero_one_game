@@ -693,7 +693,7 @@ function buildVariantStyle(
         styleKind: 'HATER_STALK',
         typingTheater: 'WEAPONIZED_DELAY',
         readDelayPolicy: 'HATER_STARE',
-        typicalLatencyMs: round(240 + vector.pressure01 * 260 + vector.audienceHeat01 * 110),
+        typicalLatencyMs: clamp(round(240 + vector.pressure01 * 260 + vector.audienceHeat01 * 110) + deterministicRange(0, 80, input.seed ?? input.actorId), 240, 690),
         typingBurstMinMs: 1150,
         typingBurstMaxMs: 3900,
         pauseMinMs: 920,
@@ -763,7 +763,7 @@ function buildVariantStyle(
         styleKind: 'NPC_LURK',
         typingTheater: 'WEAPONIZED_DELAY',
         readDelayPolicy: 'NEGOTIATION_PRESSURE',
-        typicalLatencyMs: round(260 + vector.negotiationPressure01 * 420),
+        typicalLatencyMs: clamp(round(260 + vector.negotiationPressure01 * 420) + deterministicRange(0, 60, input.seed ?? input.actorId), 260, 740),
         typingBurstMinMs: 980,
         typingBurstMaxMs: 3200,
         pauseMinMs: 860,
@@ -843,8 +843,8 @@ function buildVariantReadPolicy(
       return cloneReadPolicy(DEFAULT_NEGOTIATION_READ_POLICY, {
         policyId: `${styleProfile.styleId}-read` as ChatReadPolicyId,
         visibilityMode: 'SENDER_ONLY',
-        minDelayMs: round(900 + vector.negotiationPressure01 * 1100),
-        maxDelayMs: round(3200 + vector.negotiationPressure01 * 2800),
+        minDelayMs: clamp(round(900 + vector.negotiationPressure01 * 1100), 900, 2000),
+        maxDelayMs: clamp(round(3200 + vector.negotiationPressure01 * 2800), 3200, 6000),
         playerVisible: true,
       });
 
@@ -852,8 +852,8 @@ function buildVariantReadPolicy(
       return cloneReadPolicy(DEFAULT_PUBLIC_READ_POLICY, {
         policyId: `${styleProfile.styleId}-read` as ChatReadPolicyId,
         visibilityMode: input.shouldSuppressVisibleReceipt ? 'SENDER_ONLY' : 'PUBLIC',
-        minDelayMs: round(850 + vector.pressure01 * 1300),
-        maxDelayMs: round(2200 + vector.pressure01 * 2600),
+        minDelayMs: clamp(round(850 + vector.pressure01 * 1300), 850, 2150),
+        maxDelayMs: clamp(round(2200 + vector.pressure01 * 2600), 2200, 4800),
         playerVisible: !input.shouldSuppressVisibleReceipt,
       });
 

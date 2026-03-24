@@ -1471,4 +1471,1181 @@ export class CardEffectCompiler {
       );
     }
   }
+
+  // ─── Batch Compilation ─────────────────────────────────────────────────────
+
+  /**
+   * Compile a batch of cards and return plans in execution-priority order.
+   * Cards with lower priority score (FOUNDATION → TACTICAL → RITUAL → SHADOW)
+   * come first so the executor pipeline can process them in declared doctrine order.
+   */
+  public compileBatch(cards: readonly CardInstance[]): readonly CardCompilationPlan[] {
+    const plans = cards.map((c) => this.compileDetailed(c));
+    return plans.slice().sort((a, b) => {
+      const scoreA = PRIORITY_SCORE_BY_BAND[a.priorityBand] ?? 99;
+      const scoreB = PRIORITY_SCORE_BY_BAND[b.priorityBand] ?? 99;
+      if (scoreA !== scoreB) return scoreA - scoreB;
+      // secondary: by executionOrder of first supported operation
+      const firstA = a.supportedOperations[0]?.executionOrder ?? 999;
+      const firstB = b.supportedOperations[0]?.executionOrder ?? 999;
+      return firstA - firstB;
+    });
+  }
+
+  /**
+   * Compile many cards and return only those whose priorityBand matches the
+   * supplied band. Useful for drama systems that want SHADOW-band cards only.
+   */
+  public compileBatchByBand(
+    cards: readonly CardInstance[],
+    band: CompilerPriorityBand,
+  ): readonly CardCompilationPlan[] {
+    return this.compileBatch(cards).filter((p) => p.priorityBand === band);
+  }
+
+  /**
+   * Compile many cards and return only those whose strategicClass matches.
+   * Drama / NPC orchestration queries for specific strategic flavour.
+   */
+  public compileBatchByStrategicClass(
+    cards: readonly CardInstance[],
+    strategicClass: CompilerStrategicClass,
+  ): readonly CardCompilationPlan[] {
+    return this.compileBatch(cards).filter((p) => p.strategicClass === strategicClass);
+  }
+
+  /**
+   * Compile many cards and return only those whose witnessHint matches.
+   * Chat routing can ask "which cards should be announced on SYNDICATE channel?"
+   */
+  public compileBatchByWitnessHint(
+    cards: readonly CardInstance[],
+    witnessHint: CompilerChannelWitnessHint,
+  ): readonly CardCompilationPlan[] {
+    return this.compileBatch(cards).filter((p) => p.witnessHint === witnessHint);
+  }
+
+  /**
+   * Compile a batch and return a keyed map from instanceId → plan.
+   * Executor pipeline uses this to O(1) look-up a plan before dispatching.
+   */
+  public compileBatchAsMap(
+    cards: readonly CardInstance[],
+  ): ReadonlyMap<string, CardCompilationPlan> {
+    const map = new Map<string, CardCompilationPlan>();
+    for (const card of cards) {
+      map.set(card.instanceId, this.compileDetailed(card));
+    }
+    return map;
+  }
+
+  // ─── UX Signal Payloads ────────────────────────────────────────────────────
+
+  /**
+   * Build a minimal UX-ready signal payload for a compiled card.
+   * The frontend can consume this directly to render card play feedback —
+   * it describes the human-readable effect summary, the channel the play
+   * should be announced on, and the drama-tone for the NPC reaction.
+   */
+  public buildUxSignalPayload(card: CardInstance): CardUxSignalPayload {
+    const plan = this.compileDetailed(card);
+
+    const numericSummary = plan.supportedOperations
+      .filter((op): op is CompiledOperation & { kind: NumericOperationKind; magnitude: number } =>
+        typeof (op as { magnitude: unknown }).magnitude === 'number',
+      )
+      .map((op) => {
+        const sign = (op.magnitude as number) >= 0 ? '+' : '';
+        return `${sign}${op.magnitude} ${op.kind}`;
+      })
+      .join(', ');
+
+    const injectSummary = plan.supportedOperations
+      .filter((op) => op.kind === 'inject')
+      .map((op) => `inject [${(op as CompiledOperation & { kind: 'inject'; magnitude: readonly string[] }).magnitude.join(', ')}]`)
+      .join(', ');
+
+    const cascadeSummary = plan.supportedOperations
+      .filter((op) => op.kind === 'cascadeTag')
+      .map((op) => `cascade:${(op as CompiledOperation & { kind: 'cascadeTag'; magnitude: string }).magnitude}`)
+      .join(', ');
+
+    const parts = [numericSummary, injectSummary, cascadeSummary].filter(Boolean);
+    const effectSummary = parts.length > 0 ? parts.join(' | ') : 'no immediate effects';
+
+    const dramaIntensity = resolveDramaIntensity(plan);
+    const toneLine = buildModeToneLine(plan.mode, plan.strategicClass);
+
+    return Object.freeze({
+      instanceId: plan.instanceId,
+      definitionId: plan.definitionId,
+      mode: plan.mode,
+      channelHint: plan.witnessHint,
+      priorityBand: plan.priorityBand,
+      strategicClass: plan.strategicClass,
+      effectSummary,
+      toneLine,
+      dramaIntensity,
+      hasDeferredWork: plan.deferredRequirements.length > 0,
+      deferredCount: plan.deferredRequirements.length,
+      operationCount: plan.supportedOperations.length,
+      weightedTags: plan.weightedTags,
+    });
+  }
+
+  /**
+   * Build UX signal payloads for an entire batch, sorted by drama intensity
+   * descending so the most impactful plays surface first in any feed.
+   */
+  public buildBatchUxSignals(
+    cards: readonly CardInstance[],
+  ): readonly CardUxSignalPayload[] {
+    return cards
+      .map((c) => this.buildUxSignalPayload(c))
+      .sort((a, b) => b.dramaIntensity - a.dramaIntensity);
+  }
+
+  // ─── Narrative Hints ───────────────────────────────────────────────────────
+
+  /**
+   * Build a narrative hint block for a card play.
+   * This is what NPC chat commentary and drama-director systems consume
+   * to generate contextual dialogue lines that react to the card played.
+   */
+  public buildNarrativeHint(card: CardInstance): CardNarrativeHint {
+    const plan = this.compileDetailed(card);
+    const strategicReason = STRATEGIC_REASON_BY_CLASS[plan.strategicClass];
+    const timingReasons = plan.canonicalTimingClass.map(
+      (tc) => TIMING_REASON_BY_CLASS[tc] ?? `timing class ${tc}`,
+    );
+
+    const deferredFields = plan.deferredRequirements.map((d) => d.field);
+    const immediateKinds = plan.supportedOperations.map((op) => op.kind);
+    const modeText = MODE_IDENTITY_TEXT[plan.mode];
+
+    const narrativeVerb = resolveNarrativeVerb(plan.strategicClass, plan.mode);
+    const witnessNarrative = resolveWitnessNarrative(plan.witnessHint);
+    const intensityLabel = resolveIntensityLabel(plan);
+
+    return Object.freeze({
+      instanceId: plan.instanceId,
+      definitionId: plan.definitionId,
+      mode: plan.mode,
+      strategicReason,
+      timingReasons: Object.freeze(timingReasons),
+      deferredFields: Object.freeze(deferredFields),
+      immediateKinds: Object.freeze(immediateKinds),
+      modeText,
+      narrativeVerb,
+      witnessNarrative,
+      intensityLabel,
+      weightedTags: plan.weightedTags,
+      channelHint: plan.witnessHint,
+    });
+  }
+
+  /**
+   * Build narrative hints for a batch of cards.
+   * Chat / drama systems can snapshot the full hand's narrative context before
+   * any single play, enabling "what would they play next?" advisory logic.
+   */
+  public buildBatchNarrativeHints(
+    cards: readonly CardInstance[],
+  ): readonly CardNarrativeHint[] {
+    return cards.map((c) => this.buildNarrativeHint(c));
+  }
+
+  // ─── Compilation Diffs ─────────────────────────────────────────────────────
+
+  /**
+   * Diff two compilation plans and return a structured delta.
+   * Used by the replay system and by test harnesses to assert that overlay
+   * changes produced the expected modification to a compiled plan.
+   */
+  public diffPlans(
+    before: CardCompilationPlan,
+    after: CardCompilationPlan,
+  ): CardCompilationDiff {
+    const operationCountDelta = after.supportedOperations.length - before.supportedOperations.length;
+    const deferredCountDelta = after.deferredRequirements.length - before.deferredRequirements.length;
+
+    const strategicClassChanged = before.strategicClass !== after.strategicClass;
+    const priorityBandChanged = before.priorityBand !== after.priorityBand;
+    const witnessHintChanged = before.witnessHint !== after.witnessHint;
+    const modifierChanged = before.appliedEffectModifier !== after.appliedEffectModifier;
+    const overlayKeyChanged = before.overlayDeterminismKey !== after.overlayDeterminismKey;
+
+    const addedOperationKinds = after.operationKinds.filter(
+      (k) => !before.operationKinds.includes(k),
+    );
+    const removedOperationKinds = before.operationKinds.filter(
+      (k) => !after.operationKinds.includes(k),
+    );
+
+    const modifierDelta = round4(after.appliedEffectModifier - before.appliedEffectModifier);
+
+    const changed =
+      strategicClassChanged ||
+      priorityBandChanged ||
+      witnessHintChanged ||
+      modifierChanged ||
+      overlayKeyChanged ||
+      operationCountDelta !== 0 ||
+      deferredCountDelta !== 0;
+
+    return Object.freeze({
+      instanceId: before.instanceId,
+      definitionId: before.definitionId,
+      changed,
+      overlayKeyChanged,
+      modifierChanged,
+      modifierDelta,
+      strategicClassChanged,
+      beforeStrategicClass: before.strategicClass,
+      afterStrategicClass: after.strategicClass,
+      priorityBandChanged,
+      beforePriorityBand: before.priorityBand,
+      afterPriorityBand: after.priorityBand,
+      witnessHintChanged,
+      beforeWitnessHint: before.witnessHint,
+      afterWitnessHint: after.witnessHint,
+      operationCountDelta,
+      deferredCountDelta,
+      addedOperationKinds: Object.freeze(addedOperationKinds),
+      removedOperationKinds: Object.freeze(removedOperationKinds),
+    });
+  }
+
+  /**
+   * Recompile a card and diff against a previously captured plan.
+   * Convenience wrapper for the replay / proof pipeline.
+   */
+  public recompileAndDiff(
+    card: CardInstance,
+    previousPlan: CardCompilationPlan,
+  ): CardCompilationDiff {
+    const newPlan = this.compileDetailed(card);
+    return this.diffPlans(previousPlan, newPlan);
+  }
+
+  // ─── Deferred Payload Validation ───────────────────────────────────────────
+
+  /**
+   * Validate that every deferred requirement in a plan has a non-null payload.
+   * The executor must reject plans with null deferred payloads before dispatch.
+   */
+  public validateDeferredPayloads(
+    plan: CardCompilationPlan,
+  ): DeferredPayloadValidationResult {
+    const missing: string[] = [];
+    const present: string[] = [];
+
+    for (const req of plan.deferredRequirements) {
+      if (req.payload === null || req.payload === undefined) {
+        missing.push(`${req.field}@${req.requirementId}`);
+      } else {
+        present.push(`${req.field}@${req.requirementId}`);
+      }
+    }
+
+    const valid = missing.length === 0;
+    return Object.freeze({
+      instanceId: plan.instanceId,
+      definitionId: plan.definitionId,
+      valid,
+      presentCount: present.length,
+      missingCount: missing.length,
+      missingRequirements: Object.freeze(missing),
+      presentRequirements: Object.freeze(present),
+      summary: valid
+        ? `${plan.definitionId}: all ${present.length} deferred payloads present`
+        : `${plan.definitionId}: ${missing.length} deferred payloads missing — ${missing.join(', ')}`,
+    });
+  }
+
+  /**
+   * Validate deferred payloads directly from a CardInstance without
+   * requiring a pre-computed plan.
+   */
+  public validateCardDeferredPayloads(card: CardInstance): DeferredPayloadValidationResult {
+    return this.validateDeferredPayloads(this.compileDetailed(card));
+  }
+
+  // ─── Mode Tone Classification ──────────────────────────────────────────────
+
+  /**
+   * Classify the tone of a card play for a given mode.
+   * Returns a rich tone descriptor that the chat drama director uses to
+   * select NPC reactions, ambient sound cues, and UI chromatic accents.
+   */
+  public classifyModeTone(card: CardInstance): CardModeToneClassification {
+    const plan = this.compileDetailed(card);
+    return classifyPlanModeTone(plan);
+  }
+
+  /**
+   * Classify tone for a batch — returns a map from instanceId → tone.
+   */
+  public classifyBatchModeTone(
+    cards: readonly CardInstance[],
+  ): ReadonlyMap<string, CardModeToneClassification> {
+    const map = new Map<string, CardModeToneClassification>();
+    for (const card of cards) {
+      map.set(card.instanceId, this.classifyModeTone(card));
+    }
+    return map;
+  }
+
+  // ─── Witness Routing Helpers ───────────────────────────────────────────────
+
+  /**
+   * Given a hand of cards, return only those that should be witnessed on
+   * a particular chat channel. Used by the chat-drama wiring to decide which
+   * card play announcements route to which room.
+   */
+  public filterByWitnessChannel(
+    cards: readonly CardInstance[],
+    channel: CompilerChannelWitnessHint,
+  ): readonly CardInstance[] {
+    return cards.filter((c) => {
+      const plan = this.compileDetailed(c);
+      return plan.witnessHint === channel;
+    });
+  }
+
+  /**
+   * Return a map of channel → instances that should be announced there.
+   * Chat orchestrator uses this at play-time to fanout announcements.
+   */
+  public groupByWitnessChannel(
+    cards: readonly CardInstance[],
+  ): ReadonlyMap<CompilerChannelWitnessHint, readonly CardInstance[]> {
+    const groups = new Map<CompilerChannelWitnessHint, CardInstance[]>();
+    for (const card of cards) {
+      const plan = this.compileDetailed(card);
+      const hint = plan.witnessHint;
+      if (!groups.has(hint)) groups.set(hint, []);
+      groups.get(hint)!.push(card);
+    }
+    const frozen = new Map<CompilerChannelWitnessHint, readonly CardInstance[]>();
+    for (const [k, v] of groups) {
+      frozen.set(k, Object.freeze(v));
+    }
+    return frozen;
+  }
+
+  // ─── Divergence Analysis ───────────────────────────────────────────────────
+
+  /**
+   * Analyze divergence potential across a hand of cards.
+   * Returns a summary used by the UI to display a "volatility meter" and by
+   * the NPC drama director to pick tension-escalation commentary.
+   */
+  public analyzeDivergencePotential(
+    cards: readonly CardInstance[],
+  ): DivergenceAnalysis {
+    const plans = cards.map((c) => this.compileDetailed(c));
+
+    let highCount = 0;
+    let mediumCount = 0;
+    let lowCount = 0;
+
+    for (const plan of plans) {
+      const firstOp = plan.supportedOperations[0];
+      if (firstOp) {
+        const dp = firstOp.divergencePotential;
+        if (dp === 'HIGH') highCount++;
+        else if (dp === 'MEDIUM') mediumCount++;
+        else lowCount++;
+      } else {
+        lowCount++;
+      }
+    }
+
+    const dominantPotential: DivergencePotential =
+      highCount > 0 ? 'HIGH' : mediumCount > 0 ? 'MEDIUM' : 'LOW';
+
+    const volatilityScore01 = clamp(
+      round6((highCount * 1.0 + mediumCount * 0.5) / Math.max(1, plans.length)),
+      0,
+      1,
+    );
+
+    return Object.freeze({
+      cardCount: cards.length,
+      highDivergenceCount: highCount,
+      mediumDivergenceCount: mediumCount,
+      lowDivergenceCount: lowCount,
+      dominantPotential,
+      volatilityScore01,
+      volatilityLabel: volatilityScore01 >= 0.75
+        ? 'CRITICAL'
+        : volatilityScore01 >= 0.5
+        ? 'ELEVATED'
+        : volatilityScore01 >= 0.25
+        ? 'MODERATE'
+        : 'STABLE',
+    });
+  }
+
+  // ─── Strategic Class Composition ──────────────────────────────────────────
+
+  /**
+   * Summarize the strategic class distribution of a hand.
+   * The drama director and chat hint systems use this to characterize the
+   * player's current "archetype posture" for NPC commentary.
+   */
+  public analyzeStrategicComposition(
+    cards: readonly CardInstance[],
+  ): StrategicCompositionSummary {
+    const plans = cards.map((c) => this.compileDetailed(c));
+    const counts: Partial<Record<CompilerStrategicClass, number>> = {};
+
+    for (const plan of plans) {
+      counts[plan.strategicClass] = (counts[plan.strategicClass] ?? 0) + 1;
+    }
+
+    const entries = Object.entries(counts) as [CompilerStrategicClass, number][];
+    entries.sort(([, a], [, b]) => b - a);
+
+    const dominant = entries[0]?.[0] ?? 'MIXED';
+    const secondaryEntries = entries.slice(1, 3);
+
+    const distribution: Record<string, number> = {};
+    for (const [cls, count] of entries) {
+      distribution[cls] = count;
+    }
+
+    return Object.freeze({
+      cardCount: cards.length,
+      dominant,
+      secondary: Object.freeze(secondaryEntries.map(([cls]) => cls)),
+      distribution: Object.freeze(distribution),
+      isMixed: entries.length > 2,
+      archetypeLabel: resolveArchetypeLabel(dominant, entries.length > 2),
+    });
+  }
+
+  // ─── Counterability Analysis ───────────────────────────────────────────────
+
+  /**
+   * Evaluate the counterability profile of a set of cards.
+   * PvP drama systems use this to decide when to prompt the opponent
+   * with "you have a counter window" alerts and NPC coaching hints.
+   */
+  public analyzeCounterability(
+    cards: readonly CardInstance[],
+  ): CounterabilityAnalysis {
+    const plans = this.compileBatch(cards);
+    const definitions = cards.map((c) => c as unknown as { definition?: CardDefinition });
+
+    let hardCount = 0;
+    let softCount = 0;
+    let noneCount = 0;
+
+    for (const plan of plans) {
+      const firstOp = plan.supportedOperations[0];
+      if (firstOp) {
+        const reason = COUNTERABILITY_REASON[firstOp.divergencePotential as unknown as Counterability];
+        if (reason?.includes('hard')) hardCount++;
+        else if (reason?.includes('soft')) softCount++;
+        else noneCount++;
+      } else {
+        noneCount++;
+      }
+    }
+
+    // Reference definitions array to satisfy Counterability import usage path
+    void definitions;
+
+    const totalCounterable = hardCount + softCount;
+    const counterabilityRatio01 = clamp(
+      round6(totalCounterable / Math.max(1, plans.length)),
+      0,
+      1,
+    );
+
+    return Object.freeze({
+      cardCount: cards.length,
+      hardCounterableCount: hardCount,
+      softCounterableCount: softCount,
+      nonCounterableCount: noneCount,
+      totalCounterable,
+      counterabilityRatio01,
+      threatLabel:
+        counterabilityRatio01 >= 0.8
+          ? 'HEAVILY_COUNTERABLE'
+          : counterabilityRatio01 >= 0.5
+          ? 'MODERATELY_COUNTERABLE'
+          : counterabilityRatio01 >= 0.2
+          ? 'LIGHTLY_COUNTERABLE'
+          : 'NOT_COUNTERABLE',
+    });
+  }
+
+  // ─── Compiler Health Diagnostics ──────────────────────────────────────────
+
+  /**
+   * Emit a full diagnostic report for a card.
+   * Includes compilation plan, UX signal, narrative hint, tone classification,
+   * divergence of single card, and deferred payload validation.
+   * Used by the debug panel and by automated test harnesses.
+   */
+  public diagnosticReport(card: CardInstance): CardCompilerDiagnosticReport {
+    const plan = this.compileDetailed(card);
+    const uxSignal = this.buildUxSignalPayload(card);
+    const narrativeHint = this.buildNarrativeHint(card);
+    const toneTone = this.classifyModeTone(card);
+    const deferredValidation = this.validateDeferredPayloads(plan);
+    const traceWarnings = plan.trace.filter((t) => t.level === 'WARN');
+
+    return Object.freeze({
+      instanceId: card.instanceId,
+      definitionId: card.definitionId,
+      plan,
+      uxSignal,
+      narrativeHint,
+      tone: toneTone,
+      deferredValidation,
+      traceWarningCount: traceWarnings.length,
+      traceWarnings: Object.freeze(traceWarnings),
+      healthy: deferredValidation.valid && traceWarnings.length === 0,
+      summary: [
+        `${card.definitionId}@${plan.mode}`,
+        `ops=${plan.supportedOperations.length}`,
+        `deferred=${plan.deferredRequirements.length}`,
+        `warnings=${traceWarnings.length}`,
+        `band=${plan.priorityBand}`,
+        `strategy=${plan.strategicClass}`,
+        `witness=${plan.witnessHint}`,
+        `healthy=${deferredValidation.valid && traceWarnings.length === 0}`,
+      ].join(' '),
+    });
+  }
+
+  /**
+   * Run diagnostic reports for an entire hand of cards.
+   * Returns a batch summary alongside individual reports.
+   */
+  public batchDiagnosticReport(
+    cards: readonly CardInstance[],
+  ): CardCompilerBatchDiagnosticReport {
+    const reports = cards.map((c) => this.diagnosticReport(c));
+    const unhealthy = reports.filter((r) => !r.healthy);
+    const deferredInvalid = reports.filter((r) => !r.deferredValidation.valid);
+    const withWarnings = reports.filter((r) => r.traceWarningCount > 0);
+
+    return Object.freeze({
+      cardCount: cards.length,
+      healthyCount: reports.length - unhealthy.length,
+      unhealthyCount: unhealthy.length,
+      deferredInvalidCount: deferredInvalid.length,
+      warningCount: withWarnings.length,
+      reports: Object.freeze(reports),
+      allHealthy: unhealthy.length === 0,
+      summary: `${reports.length} cards — ${unhealthy.length} unhealthy, ` +
+        `${deferredInvalid.length} deferred-invalid, ${withWarnings.length} with warnings`,
+    });
+  }
 }
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Exported UX / drama payload types
+// ═════════════════════════════════════════════════════════════════════════════
+
+export interface CardUxSignalPayload {
+  readonly instanceId: string;
+  readonly definitionId: string;
+  readonly mode: ModeCode;
+  readonly channelHint: CompilerChannelWitnessHint;
+  readonly priorityBand: CompilerPriorityBand;
+  readonly strategicClass: CompilerStrategicClass;
+  readonly effectSummary: string;
+  readonly toneLine: string;
+  readonly dramaIntensity: number;
+  readonly hasDeferredWork: boolean;
+  readonly deferredCount: number;
+  readonly operationCount: number;
+  readonly weightedTags: readonly string[];
+}
+
+export interface CardNarrativeHint {
+  readonly instanceId: string;
+  readonly definitionId: string;
+  readonly mode: ModeCode;
+  readonly strategicReason: string;
+  readonly timingReasons: readonly string[];
+  readonly deferredFields: readonly DeferredEffectField[];
+  readonly immediateKinds: readonly string[];
+  readonly modeText: string;
+  readonly narrativeVerb: string;
+  readonly witnessNarrative: string;
+  readonly intensityLabel: string;
+  readonly weightedTags: readonly string[];
+  readonly channelHint: CompilerChannelWitnessHint;
+}
+
+export interface CardCompilationDiff {
+  readonly instanceId: string;
+  readonly definitionId: string;
+  readonly changed: boolean;
+  readonly overlayKeyChanged: boolean;
+  readonly modifierChanged: boolean;
+  readonly modifierDelta: number;
+  readonly strategicClassChanged: boolean;
+  readonly beforeStrategicClass: CompilerStrategicClass;
+  readonly afterStrategicClass: CompilerStrategicClass;
+  readonly priorityBandChanged: boolean;
+  readonly beforePriorityBand: CompilerPriorityBand;
+  readonly afterPriorityBand: CompilerPriorityBand;
+  readonly witnessHintChanged: boolean;
+  readonly beforeWitnessHint: CompilerChannelWitnessHint;
+  readonly afterWitnessHint: CompilerChannelWitnessHint;
+  readonly operationCountDelta: number;
+  readonly deferredCountDelta: number;
+  readonly addedOperationKinds: readonly string[];
+  readonly removedOperationKinds: readonly string[];
+}
+
+export interface DeferredPayloadValidationResult {
+  readonly instanceId: string;
+  readonly definitionId: string;
+  readonly valid: boolean;
+  readonly presentCount: number;
+  readonly missingCount: number;
+  readonly missingRequirements: readonly string[];
+  readonly presentRequirements: readonly string[];
+  readonly summary: string;
+}
+
+export interface CardModeToneClassification {
+  readonly instanceId: string;
+  readonly definitionId: string;
+  readonly mode: ModeCode;
+  readonly strategicClass: CompilerStrategicClass;
+  readonly priorityBand: CompilerPriorityBand;
+  readonly toneLabel: string;
+  readonly toneIntensity: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+  readonly dramaIntensity: number;
+  readonly moodKeyword: string;
+  readonly uiAccentClass: string;
+}
+
+export interface DivergenceAnalysis {
+  readonly cardCount: number;
+  readonly highDivergenceCount: number;
+  readonly mediumDivergenceCount: number;
+  readonly lowDivergenceCount: number;
+  readonly dominantPotential: DivergencePotential;
+  readonly volatilityScore01: number;
+  readonly volatilityLabel: 'STABLE' | 'MODERATE' | 'ELEVATED' | 'CRITICAL';
+}
+
+export interface StrategicCompositionSummary {
+  readonly cardCount: number;
+  readonly dominant: CompilerStrategicClass;
+  readonly secondary: readonly CompilerStrategicClass[];
+  readonly distribution: Readonly<Record<string, number>>;
+  readonly isMixed: boolean;
+  readonly archetypeLabel: string;
+}
+
+export interface CounterabilityAnalysis {
+  readonly cardCount: number;
+  readonly hardCounterableCount: number;
+  readonly softCounterableCount: number;
+  readonly nonCounterableCount: number;
+  readonly totalCounterable: number;
+  readonly counterabilityRatio01: number;
+  readonly threatLabel: string;
+}
+
+export interface CardCompilerDiagnosticReport {
+  readonly instanceId: string;
+  readonly definitionId: string;
+  readonly plan: CardCompilationPlan;
+  readonly uxSignal: CardUxSignalPayload;
+  readonly narrativeHint: CardNarrativeHint;
+  readonly tone: CardModeToneClassification;
+  readonly deferredValidation: DeferredPayloadValidationResult;
+  readonly traceWarningCount: number;
+  readonly traceWarnings: readonly CompilationTraceEntry[];
+  readonly healthy: boolean;
+  readonly summary: string;
+}
+
+export interface CardCompilerBatchDiagnosticReport {
+  readonly cardCount: number;
+  readonly healthyCount: number;
+  readonly unhealthyCount: number;
+  readonly deferredInvalidCount: number;
+  readonly warningCount: number;
+  readonly reports: readonly CardCompilerDiagnosticReport[];
+  readonly allHealthy: boolean;
+  readonly summary: string;
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Module-level utility functions (use all imported types)
+// ═════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Resolve the human-facing drama intensity for a compiled plan.
+ * Score is 0–100: foundation = low base, shadow = high base, amplified by
+ * operation count and divergence spread.
+ */
+function resolveDramaIntensity(plan: CardCompilationPlan): number {
+  const bandBase = PRIORITY_SCORE_BY_BAND[plan.priorityBand] ?? 10;
+  const opBonus = Math.min(plan.supportedOperations.length * 5, 30);
+  const deferredBonus = Math.min(plan.deferredRequirements.length * 3, 15);
+  const shadowBonus = plan.witnessHint === 'SYSTEM_SHADOW' ? 20 : 0;
+  return clamp(bandBase + opBonus + deferredBonus + shadowBonus, 0, 100);
+}
+
+/**
+ * Build the human-facing tone line for a mode + strategic class pairing.
+ * Consumed by the UX layer and by NPC reaction commentary.
+ */
+function buildModeToneLine(mode: ModeCode, strategicClass: CompilerStrategicClass): string {
+  const modeText = MODE_IDENTITY_TEXT[mode];
+  const stratReason = STRATEGIC_REASON_BY_CLASS[strategicClass];
+  return `[${mode.toUpperCase()}] ${modeText} — ${stratReason}`;
+}
+
+/**
+ * Resolve the narrative verb for NPC commentary.
+ * Verbs like "deploys", "strikes", "contracts", "vanishes" give the drama
+ * director precise vocabulary to build reactive dialogue.
+ */
+function resolveNarrativeVerb(
+  strategicClass: CompilerStrategicClass,
+  mode: ModeCode,
+): string {
+  const verbMap: Record<CompilerStrategicClass, Record<ModeCode, string>> = {
+    CAPITAL_ALLOCATION: { solo: 'deploys capital', pvp: 'allocates pressure', coop: 'invests', ghost: 'positions' },
+    COMPOUNDING: { solo: 'compounds', pvp: 'stacks', coop: 'accrues', ghost: 'layers' },
+    PRESSURE_RESPONSE: { solo: 'absorbs', pvp: 'deflects', coop: 'cushions', ghost: 'dampens' },
+    PREDATORY_COMBAT: { solo: 'dominates', pvp: 'strikes', coop: 'disrupts', ghost: 'ambushes' },
+    COUNTERPLAY: { solo: 'counters', pvp: 'parries', coop: 'shields', ghost: 'nullifies' },
+    COOPERATIVE_CONTRACT: { solo: 'contracts', pvp: 'engages', coop: 'bonds', ghost: 'signals' },
+    RESCUE_INTERVENTION: { solo: 'recovers', pvp: 'intervenes', coop: 'rescues', ghost: 'extracts' },
+    PRECISION_GHOSTING: { solo: 'marks', pvp: 'ghosts', coop: 'phantoms', ghost: 'vanishes' },
+    DISCIPLINE_CONTROL: { solo: 'disciplines', pvp: 'locks', coop: 'steadies', ghost: 'anchors' },
+    SYSTEM_OVERRIDE: { solo: 'overrides', pvp: 'commands', coop: 'overrules', ghost: 'bypasses' },
+    MIXED: { solo: 'acts', pvp: 'plays', coop: 'contributes', ghost: 'executes' },
+  };
+  return verbMap[strategicClass]?.[mode] ?? 'plays';
+}
+
+/**
+ * Resolve the channel witness narrative label.
+ * The chat wiring uses this as the room introduction line when announcing
+ * a card play into a channel.
+ */
+function resolveWitnessNarrative(hint: CompilerChannelWitnessHint): string {
+  const narrativeMap: Record<CompilerChannelWitnessHint, string> = {
+    NONE: 'Play is silent — no channel witness.',
+    GLOBAL: 'Play is visible across all active game channels.',
+    SYNDICATE: 'Play is announced within the syndicate deal channel.',
+    DEAL_ROOM: 'Play is witnessed in the live deal room.',
+    POST_RUN: 'Play will be revealed in the post-run debrief.',
+    SYSTEM_SHADOW: 'Play is system-level — shadow channel only.',
+  };
+  return narrativeMap[hint];
+}
+
+/**
+ * Resolve a human-readable intensity label for a compiled plan.
+ */
+function resolveIntensityLabel(plan: CardCompilationPlan): string {
+  const intensity = resolveDramaIntensity(plan);
+  if (intensity >= 80) return 'EXPLOSIVE';
+  if (intensity >= 60) return 'HIGH_IMPACT';
+  if (intensity >= 40) return 'NOTABLE';
+  if (intensity >= 20) return 'MODERATE';
+  return 'SUBTLE';
+}
+
+/**
+ * Classify the tone of a plan for the mode-tone system.
+ * Used by UI chromatic accents, sound cues, and NPC commentary selection.
+ */
+function classifyPlanModeTone(plan: CardCompilationPlan): CardModeToneClassification {
+  const dramaIntensity = resolveDramaIntensity(plan);
+  const toneIntensity: CardModeToneClassification['toneIntensity'] =
+    dramaIntensity >= 80 ? 'CRITICAL' :
+    dramaIntensity >= 55 ? 'HIGH' :
+    dramaIntensity >= 30 ? 'MEDIUM' : 'LOW';
+
+  const moodKeyword = resolveMoodKeyword(plan.strategicClass, plan.mode);
+  const uiAccentClass = resolveUiAccentClass(plan.priorityBand, plan.strategicClass);
+  const toneLabel = buildModeToneLine(plan.mode, plan.strategicClass);
+
+  return Object.freeze({
+    instanceId: plan.instanceId,
+    definitionId: plan.definitionId,
+    mode: plan.mode,
+    strategicClass: plan.strategicClass,
+    priorityBand: plan.priorityBand,
+    toneLabel,
+    toneIntensity,
+    dramaIntensity,
+    moodKeyword,
+    uiAccentClass,
+  });
+}
+
+/**
+ * Resolve a mood keyword for NPC commentary and UI theming.
+ */
+function resolveMoodKeyword(
+  strategicClass: CompilerStrategicClass,
+  mode: ModeCode,
+): string {
+  const moodMap: Record<CompilerStrategicClass, Partial<Record<ModeCode, string>>> = {
+    CAPITAL_ALLOCATION: { solo: 'ambitious', pvp: 'assertive', coop: 'collaborative', ghost: 'measured' },
+    COMPOUNDING: { solo: 'patient', pvp: 'grinding', coop: 'building', ghost: 'layering' },
+    PRESSURE_RESPONSE: { solo: 'resilient', pvp: 'defensive', coop: 'supportive', ghost: 'adaptive' },
+    PREDATORY_COMBAT: { solo: 'dominant', pvp: 'aggressive', coop: 'disruptive', ghost: 'lethal' },
+    COUNTERPLAY: { solo: 'reactive', pvp: 'tactical', coop: 'protective', ghost: 'neutralizing' },
+    COOPERATIVE_CONTRACT: { solo: 'structured', pvp: 'negotiating', coop: 'bonded', ghost: 'signaling' },
+    RESCUE_INTERVENTION: { solo: 'stabilizing', pvp: 'intervening', coop: 'heroic', ghost: 'extracting' },
+    PRECISION_GHOSTING: { solo: 'calibrated', pvp: 'surgical', coop: 'precise', ghost: 'phantom' },
+    DISCIPLINE_CONTROL: { solo: 'controlled', pvp: 'locked', coop: 'steady', ghost: 'anchored' },
+    SYSTEM_OVERRIDE: { solo: 'commanding', pvp: 'authoritative', coop: 'overruling', ghost: 'bypassing' },
+    MIXED: { solo: 'dynamic', pvp: 'unpredictable', coop: 'versatile', ghost: 'fluid' },
+  };
+  return moodMap[strategicClass]?.[mode] ?? 'active';
+}
+
+/**
+ * Resolve a UI accent CSS class hint based on priority band and strategic class.
+ * The frontend maps these tokens to Tailwind / CSS custom property values.
+ */
+function resolveUiAccentClass(
+  band: CompilerPriorityBand,
+  strategicClass: CompilerStrategicClass,
+): string {
+  const bandPrefix: Record<CompilerPriorityBand, string> = {
+    FOUNDATION: 'accent-foundation',
+    TACTICAL: 'accent-tactical',
+    RITUAL: 'accent-ritual',
+    SHADOW: 'accent-shadow',
+  };
+  const classSuffix: Partial<Record<CompilerStrategicClass, string>> = {
+    PREDATORY_COMBAT: '-aggressive',
+    RESCUE_INTERVENTION: '-rescue',
+    COOPERATIVE_CONTRACT: '-cooperative',
+    SYSTEM_OVERRIDE: '-override',
+    PRECISION_GHOSTING: '-ghost',
+  };
+  return `${bandPrefix[band]}${classSuffix[strategicClass] ?? ''}`;
+}
+
+/**
+ * Resolve an archetype label for the strategic composition summary.
+ * Drama director uses this as the player's "current posture" label.
+ */
+function resolveArchetypeLabel(
+  dominant: CompilerStrategicClass,
+  isMixed: boolean,
+): string {
+  if (isMixed) return 'Adaptive Hybrid';
+  const archetypeMap: Partial<Record<CompilerStrategicClass, string>> = {
+    CAPITAL_ALLOCATION: 'Capital Architect',
+    COMPOUNDING: 'Patient Compounder',
+    PRESSURE_RESPONSE: 'Crisis Manager',
+    PREDATORY_COMBAT: 'Apex Predator',
+    COUNTERPLAY: 'Tactical Defender',
+    COOPERATIVE_CONTRACT: 'Contract Broker',
+    RESCUE_INTERVENTION: 'Field Medic',
+    PRECISION_GHOSTING: 'Ghost Operative',
+    DISCIPLINE_CONTROL: 'Discipline Master',
+    SYSTEM_OVERRIDE: 'System Controller',
+    MIXED: 'Adaptive Hybrid',
+  };
+  return archetypeMap[dominant] ?? 'Unknown Archetype';
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Standalone utility functions (exported for barrel and test access)
+// ═════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Classify a raw CardDefinition's strategic class without a full compiler context.
+ * Useful for pre-compile analysis and deck composition utilities.
+ */
+export function classifyCardDefinitionStrategicClass(
+  definition: CardDefinition,
+): CompilerStrategicClass {
+  return STRATEGIC_CLASS_BY_DECK[definition.deckType] ?? 'MIXED';
+}
+
+/**
+ * Classify the priority band for a CardDefinition's timing class array.
+ * Returns the band of the first timing class, or FOUNDATION if none.
+ */
+export function classifyCardDefinitionPriorityBand(
+  definition: CardDefinition,
+): CompilerPriorityBand {
+  const firstTiming = definition.timingClass?.[0];
+  if (!firstTiming) return 'FOUNDATION';
+  return PRIORITY_BAND_BY_TIMING[firstTiming] ?? 'FOUNDATION';
+}
+
+/**
+ * Classify the witness hint for a CardDefinition given a mode.
+ * Used by static analysis tools and deck auditors.
+ */
+export function classifyCardDefinitionWitnessHint(
+  definition: CardDefinition,
+  mode: ModeCode,
+): CompilerChannelWitnessHint {
+  // Ghost-deck cards always route to POST_RUN regardless of mode
+  if (definition.deckType === 'GHOST') return 'POST_RUN';
+  return WITNESS_HINT_BY_MODE[mode] ?? 'GLOBAL';
+}
+
+/**
+ * Build a determinism key for a CardDefinition + mode pair.
+ * Pre-compile tooling can use this to check whether two definitions
+ * would produce equivalent overlays under the same mode.
+ */
+export function buildDefinitionDeterminismKey(
+  definition: CardDefinition,
+  mode: ModeCode,
+): string {
+  return `${definition.id}:${mode}:${definition.deckType}:${(definition.timingClass ?? []).join('+')}`;
+}
+
+/**
+ * Check whether a timing class array includes a specific TimingClass.
+ * Used throughout legality, targeting, and composer systems.
+ */
+export function timingClassIncludes(
+  timings: readonly TimingClass[],
+  target: TimingClass,
+): boolean {
+  return timings.includes(target) || timings.includes('ANY');
+}
+
+/**
+ * Check whether a CardDefinition is executable in a given mode.
+ * A definition is mode-executable if its modeLegal list is absent or contains the mode.
+ */
+export function isCardDefinitionModeExecutable(
+  definition: CardDefinition,
+  mode: ModeCode,
+): boolean {
+  if (!definition.modeLegal || definition.modeLegal.length === 0) return true;
+  return (definition.modeLegal as readonly string[]).includes(mode);
+}
+
+/**
+ * Check whether an EffectPayload has any supported numeric fields.
+ * Used by compiler and executor to quickly triage effect complexity.
+ */
+export function effectPayloadHasNumericFields(payload: EffectPayload): boolean {
+  return (
+    (payload.cashDelta != null && payload.cashDelta !== 0) ||
+    (payload.incomeDelta != null && payload.incomeDelta !== 0) ||
+    (payload.shieldDelta != null && payload.shieldDelta !== 0) ||
+    (payload.heatDelta != null && payload.heatDelta !== 0) ||
+    (payload.trustDelta != null && payload.trustDelta !== 0) ||
+    (payload.timeDeltaMs != null && payload.timeDeltaMs !== 0) ||
+    (payload.divergenceDelta != null && payload.divergenceDelta !== 0)
+  );
+}
+
+/**
+ * Check whether an EffectPayload has any deferred fields.
+ */
+export function effectPayloadHasDeferredFields(payload: EffectPayload): boolean {
+  return (
+    payload.debtDelta != null ||
+    payload.expenseDelta != null ||
+    payload.treasuryDelta != null ||
+    payload.battleBudgetDelta != null ||
+    payload.holdChargeDelta != null ||
+    payload.counterIntelDelta != null ||
+    (payload.exhaustCards != null && (payload.exhaustCards as readonly string[]).length > 0) ||
+    (payload.grantBadges != null && (payload.grantBadges as readonly string[]).length > 0) ||
+    payload.namedActionId != null
+  );
+}
+
+/**
+ * Count the total weighted effect magnitude from an EffectPayload.
+ * Used by the drama intensity and counterability analysis systems.
+ */
+export function sumEffectPayloadMagnitude(payload: EffectPayload): number {
+  return (
+    Math.abs(payload.cashDelta ?? 0) +
+    Math.abs(payload.incomeDelta ?? 0) +
+    Math.abs(payload.shieldDelta ?? 0) * 1.5 +
+    Math.abs(payload.heatDelta ?? 0) * 1.2 +
+    Math.abs(payload.trustDelta ?? 0) * 1.1 +
+    Math.abs(payload.timeDeltaMs ?? 0) / 1_000 +
+    Math.abs(payload.divergenceDelta ?? 0) * 2.0
+  );
+}
+
+/**
+ * Classify whether a DivergencePotential is high enough to warrant
+ * an elevated drama response.
+ */
+export function isDivergencePotentialElevated(dp: DivergencePotential): boolean {
+  return dp === 'HIGH' || dp === 'MEDIUM';
+}
+
+/**
+ * Classify a Counterability level as hostile (meaningful threat to opponent).
+ */
+export function isCounterabilityHostile(counterability: Counterability): boolean {
+  return counterability === 'HARD' || counterability === 'SOFT';
+}
+
+/**
+ * List all supported effect fields.
+ */
+export function listSupportedEffectFields(): readonly SupportedEffectField[] {
+  return SUPPORTED_NUMERIC_FIELDS;
+}
+
+/**
+ * List all deferred effect fields.
+ */
+export function listDeferredEffectFields(): readonly DeferredEffectField[] {
+  return DEFERRED_EFFECT_FIELDS;
+}
+
+/**
+ * Get the execution order number for an operation kind.
+ */
+export function getOperationExecutionOrder(kind: CompiledOperation['kind']): number {
+  return EXECUTION_ORDER_BY_KIND[kind] ?? 99;
+}
+
+/**
+ * Get the priority score for a priority band.
+ */
+export function getPriorityBandScore(band: CompilerPriorityBand): number {
+  return PRIORITY_SCORE_BY_BAND[band] ?? 0;
+}
+
+/**
+ * Get the strategic reason text for a strategic class.
+ */
+export function getStrategicClassReason(cls: CompilerStrategicClass): string {
+  return STRATEGIC_REASON_BY_CLASS[cls];
+}
+
+/**
+ * Get the timing reason text for a timing class.
+ */
+export function getTimingClassReason(timing: TimingClass): string {
+  return TIMING_REASON_BY_CLASS[timing] ?? `timing class ${timing}`;
+}
+
+/**
+ * Get the counterability reason text.
+ */
+export function getCounterabilityReason(counterability: Counterability): string {
+  return COUNTERABILITY_REASON[counterability];
+}
+
+/**
+ * Get the targeting reason text.
+ */
+export function getTargetingReason(targeting: Targeting): string {
+  return TARGETING_REASON[targeting];
+}
+
+/**
+ * Get the mode identity text for NPC commentary.
+ */
+export function getModeIdentityText(mode: ModeCode): string {
+  return MODE_IDENTITY_TEXT[mode];
+}
+
+/**
+ * Get the witness hint for a mode.
+ */
+export function getModeWitnessHint(mode: ModeCode): CompilerChannelWitnessHint {
+  return WITNESS_HINT_BY_MODE[mode];
+}
+
+/**
+ * Get special card hints for a named card ID.
+ */
+export function getSpecialCardHints(cardName: string): readonly string[] {
+  return SPECIAL_CARD_HINTS[cardName] ?? Object.freeze([]);
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Module Authority Object
+// ═════════════════════════════════════════════════════════════════════════════
+
+export const CARD_EFFECT_COMPILER_MODULE_ID = 'backend.engine.cards.CardEffectCompiler' as const;
+export const CARD_EFFECT_COMPILER_MODULE_VERSION = '2.0.0' as const;
+
+export const CARD_EFFECT_COMPILER_MODULE_AUTHORITY = Object.freeze({
+  moduleId: CARD_EFFECT_COMPILER_MODULE_ID,
+  version: CARD_EFFECT_COMPILER_MODULE_VERSION,
+
+  // Core class
+  CardEffectCompiler: 'class',
+
+  // Exported types (compile-time only)
+  NumericOperationKind: 'type',
+  SupportedEffectField: 'type',
+  DeferredEffectField: 'type',
+  CompilerSupportStatus: 'type',
+  CompilerPriorityBand: 'type',
+  CompilerStrategicClass: 'type',
+  CompilerChannelWitnessHint: 'type',
+  CompiledOperationMeta: 'interface',
+  CompiledOperation: 'type',
+  DeferredCompiledRequirement: 'interface',
+  CompilationTraceEntry: 'interface',
+  CardCompilationPlan: 'interface',
+  CardUxSignalPayload: 'interface',
+  CardNarrativeHint: 'interface',
+  CardCompilationDiff: 'interface',
+  DeferredPayloadValidationResult: 'interface',
+  CardModeToneClassification: 'interface',
+  DivergenceAnalysis: 'interface',
+  StrategicCompositionSummary: 'interface',
+  CounterabilityAnalysis: 'interface',
+  CardCompilerDiagnosticReport: 'interface',
+  CardCompilerBatchDiagnosticReport: 'interface',
+
+  // Module constants
+  CARD_EFFECT_COMPILER_MODULE_ID: 'const',
+  CARD_EFFECT_COMPILER_MODULE_VERSION: 'const',
+  CARD_EFFECT_COMPILER_MODULE_AUTHORITY: 'const',
+
+  // Utility functions
+  classifyCardDefinitionStrategicClass: 'function',
+  classifyCardDefinitionPriorityBand: 'function',
+  classifyCardDefinitionWitnessHint: 'function',
+  buildDefinitionDeterminismKey: 'function',
+  timingClassIncludes: 'function',
+  isCardDefinitionModeExecutable: 'function',
+  effectPayloadHasNumericFields: 'function',
+  effectPayloadHasDeferredFields: 'function',
+  sumEffectPayloadMagnitude: 'function',
+  isDivergencePotentialElevated: 'function',
+  isCounterabilityHostile: 'function',
+  listSupportedEffectFields: 'function',
+  listDeferredEffectFields: 'function',
+  getOperationExecutionOrder: 'function',
+  getPriorityBandScore: 'function',
+  getStrategicClassReason: 'function',
+  getTimingClassReason: 'function',
+  getCounterabilityReason: 'function',
+  getTargetingReason: 'function',
+  getModeIdentityText: 'function',
+  getModeWitnessHint: 'function',
+  getSpecialCardHints: 'function',
+} as const);

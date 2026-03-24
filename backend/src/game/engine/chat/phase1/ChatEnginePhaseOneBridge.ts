@@ -1050,8 +1050,8 @@ export class ChatEnginePhaseOneBridge {
     now: UnixMs = nowMs(),
   ): ChatPhaseOneBridgeSyncReport {
     this.ensureHydrated(state);
-    const noveltySnap = this.novelty.snapshot(now);
-    const memorySnap = this.memory.snapshot();
+    const noveltySnap: ChatNoveltyLedgerSnapshot = this.novelty.snapshot(now);
+    const memorySnap: ChatEpisodicMemorySnapshot = this.memory.snapshot();
     return {
       syncedAt: now,
       recommendedCandidateId,
@@ -1450,6 +1450,22 @@ export class ChatEnginePhaseOneBridge {
     return getPhaseOneState(state);
   }
 
+  /**
+   * Return the live novelty ledger snapshot at the given timestamp.
+   */
+  public getNoveltySnapshot(state: ChatStateWithPhaseOne, now: UnixMs = nowMs()): ChatNoveltyLedgerSnapshot {
+    this.ensureHydrated(state);
+    return this.novelty.snapshot(now);
+  }
+
+  /**
+   * Return the live episodic memory snapshot.
+   */
+  public getMemorySnapshot(state: ChatStateWithPhaseOne): ChatEpisodicMemorySnapshot {
+    this.ensureHydrated(state);
+    return this.memory.snapshot();
+  }
+
   // --------------------------------------------------------------------------
   // MARK: Private — Signal dispatch
   // --------------------------------------------------------------------------
@@ -1475,7 +1491,7 @@ export class ChatEnginePhaseOneBridge {
    * an episodic event type + fingerprint nudges.
    */
   private describeBattleSignal(signal: ChatSignalEnvelope): ChatPhaseOneBridgeSignalSummary | null {
-    const battle = signal.battle;
+    const battle: ChatBattleSnapshot | undefined = signal.battle;
     if (!battle) return null;
 
     const pressure = normalizeUpperCase(battle.pressureTier);
@@ -1545,7 +1561,7 @@ export class ChatEnginePhaseOneBridge {
    * Describe a RUN signal — maps ChatRunSnapshot to episodic event.
    */
   private describeRunSignal(signal: ChatSignalEnvelope): ChatPhaseOneBridgeSignalSummary | null {
-    const run = signal.run;
+    const run: ChatRunSnapshot | undefined = signal.run;
     if (!run) return null;
 
     const phase = normalizeUpperCase(run.runPhase);
@@ -1613,7 +1629,7 @@ export class ChatEnginePhaseOneBridge {
    * Describe an ECONOMY signal — maps ChatEconomySnapshot to episodic event.
    */
   private describeEconomySignal(signal: ChatSignalEnvelope): ChatPhaseOneBridgeSignalSummary | null {
-    const economy = signal.economy;
+    const economy: ChatEconomySnapshot | undefined = signal.economy;
     if (!economy) return null;
 
     const bluffRisk = Number(economy.bluffRisk01 ?? 0);
@@ -1678,7 +1694,7 @@ export class ChatEnginePhaseOneBridge {
    * Describe a MULTIPLAYER signal — maps ChatMultiplayerSnapshot to episodic event.
    */
   private describeMultiplayerSignal(signal: ChatSignalEnvelope): ChatPhaseOneBridgeSignalSummary | null {
-    const mp = signal.multiplayer;
+    const mp: ChatMultiplayerSnapshot | undefined = signal.multiplayer;
     if (!mp) return null;
 
     const memberCount = Number(mp.roomMemberCount ?? 0);
@@ -1733,7 +1749,7 @@ export class ChatEnginePhaseOneBridge {
    * Describe a LIVEOPS signal — maps ChatLiveOpsSnapshot to episodic event.
    */
   private describeLiveOpsSignal(signal: ChatSignalEnvelope): ChatPhaseOneBridgeSignalSummary | null {
-    const liveops = signal.liveops;
+    const liveops: ChatLiveOpsSnapshot | undefined = signal.liveops;
     if (!liveops) return null;
 
     const heatMultiplier = Number(liveops.heatMultiplier01 ?? 1.0);
@@ -2339,6 +2355,33 @@ export function applyFeatureSnapshotToPhaseOne(
   return bridge.applyFeatureSnapshot(state, snapshot, now ?? snapshot.generatedAt);
 }
 
+/**
+ * One-shot novelty snapshot — returns the current novelty ledger snapshot
+ * without managing bridge lifecycle.
+ */
+export function getPhaseOneNoveltySnapshot(
+  state: ChatStateWithPhaseOne,
+  now?: UnixMs,
+  options?: ChatPhaseOneBridgeOptions,
+): ChatNoveltyLedgerSnapshot {
+  const bridge = new ChatEnginePhaseOneBridge(options ?? {});
+  bridge.ensureHydrated(state);
+  return bridge.getNoveltySnapshot(state, now ?? nowMs());
+}
+
+/**
+ * One-shot memory snapshot — returns the current episodic memory snapshot
+ * without managing bridge lifecycle.
+ */
+export function getPhaseOneMemorySnapshot(
+  state: ChatStateWithPhaseOne,
+  options?: ChatPhaseOneBridgeOptions,
+): ChatEpisodicMemorySnapshot {
+  const bridge = new ChatEnginePhaseOneBridge(options ?? {});
+  bridge.ensureHydrated(state);
+  return bridge.getMemorySnapshot(state);
+}
+
 // ============================================================================
 // MARK: Namespace export
 // ============================================================================
@@ -2362,6 +2405,8 @@ export const ChatEnginePhaseOneBridgeNS = Object.freeze({
   rankCandidatesOnce,
   buildPhaseOneHealth,
   applyFeatureSnapshotToPhaseOne,
+  getPhaseOneNoveltySnapshot,
+  getPhaseOneMemorySnapshot,
 
   /* Accessor helpers (re-exported for test inspection) */
   readMsgText,

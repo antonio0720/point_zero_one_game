@@ -2140,4 +2140,579 @@ export class CardEffectExecutor {
 
     return next;
   }
+
+  // ─── Batch execution ───────────────────────────────────────────────────────
+
+  /**
+   * Execute a batch of cards in compiler-priority order.
+   * Each card's execution is applied sequentially to the snapshot so that
+   * earlier plays can affect the state available to later plays in the same batch.
+   * Returns the final snapshot plus a per-card result log.
+   */
+  public executeBatch(
+    snapshot: RunStateSnapshot,
+    cards: readonly CardInstance[],
+    actorId: string,
+  ): CardExecutorBatchResult {
+    const compiler = new CardEffectCompiler();
+    const sortedPlans = compiler.compileBatch(cards);
+    const results: CardExecutionResult[] = [];
+    let current = snapshot;
+
+    for (const plan of sortedPlans) {
+      const card = cards.find((c) => c.instanceId === plan.instanceId);
+      if (!card) continue;
+
+      try {
+        const before = current;
+        current = this.apply(current, card, actorId);
+        results.push(Object.freeze({
+          instanceId: plan.instanceId,
+          definitionId: plan.definitionId,
+          applied: true,
+          strategicClass: plan.strategicClass,
+          priorityBand: plan.priorityBand,
+          witnessHint: plan.witnessHint,
+          economyCashDelta: current.economy.cash - before.economy.cash,
+          economyIncomeDelta: current.economy.incomePerTick - before.economy.incomePerTick,
+          error: null,
+        }));
+      } catch (err) {
+        results.push(Object.freeze({
+          instanceId: plan.instanceId,
+          definitionId: plan.definitionId,
+          applied: false,
+          strategicClass: plan.strategicClass,
+          priorityBand: plan.priorityBand,
+          witnessHint: plan.witnessHint,
+          economyCashDelta: 0,
+          economyIncomeDelta: 0,
+          error: err instanceof Error ? err.message : String(err),
+        }));
+      }
+    }
+
+    const appliedCount = results.filter((r) => r.applied).length;
+    const failedCount = results.length - appliedCount;
+
+    return Object.freeze({
+      finalSnapshot: current,
+      results: Object.freeze(results),
+      appliedCount,
+      failedCount,
+      summary: `${appliedCount}/${cards.length} cards applied — ${failedCount} failed`,
+    });
+  }
+
+  // ─── Execution preview (read-only) ─────────────────────────────────────────
+
+  /**
+   * Preview what executing a card would do — without mutating state.
+   * The UX card hover tooltip and the AI planning system call this to project
+   * the effect of a play before committing to it.
+   */
+  public previewExecution(
+    snapshot: RunStateSnapshot,
+    card: CardInstance,
+    actorId: string,
+  ): CardExecutionPreview {
+    const compiler = new CardEffectCompiler();
+    const plan = compiler.compileDetailed(card);
+    const cost = resolveCostPool(snapshot, card);
+    const trustBefore = getActorTrust(snapshot, actorId);
+    const trustBand = findTrustBand(trustBefore);
+
+    const cashAvailable = resolveAvailableResource(snapshot, cost.pool);
+    const canAfford = cashAvailable >= cost.amount;
+
+    // Project numeric deltas from the compiled operations
+    let projectedCashDelta = 0;
+    let projectedIncomeDelta = 0;
+    let projectedShieldDelta = 0;
+    let projectedHeatDelta = 0;
+    let projectedTrustDelta = 0;
+
+    for (const op of plan.supportedOperations) {
+      if (op.kind === 'inject' || op.kind === 'cascadeTag') continue;
+      const mag = (op as { magnitude: number }).magnitude * plan.appliedEffectModifier;
+      switch (op.kind) {
+        case 'cash': projectedCashDelta += mag; break;
+        case 'income': projectedIncomeDelta += mag; break;
+        case 'shield': projectedShieldDelta += mag; break;
+        case 'heat': projectedHeatDelta += mag; break;
+        case 'trust': projectedTrustDelta += mag; break;
+      }
+    }
+
+    // Apply cost deduction to projected cash
+    if (cost.pool === 'CASH') projectedCashDelta -= cost.amount;
+
+    const projectedTrustBand = findTrustBand(
+      clamp(trustBefore + projectedTrustDelta, TRUST_MIN, TRUST_MAX),
+    );
+
+    return Object.freeze({
+      instanceId: card.instanceId,
+      definitionId: card.definitionId,
+      mode: card.overlayAppliedForMode,
+      canAfford,
+      costPool: cost.pool,
+      costAmount: cost.amount,
+      cashAvailable,
+      projectedCashDelta: round4(projectedCashDelta),
+      projectedIncomeDelta: round4(projectedIncomeDelta),
+      projectedShieldDelta: round4(projectedShieldDelta),
+      projectedHeatDelta: round4(projectedHeatDelta),
+      projectedTrustDelta: round4(projectedTrustDelta),
+      trustBefore,
+      trustBandBefore: trustBand.code,
+      trustBandAfter: projectedTrustBand.code,
+      trustBandChanged: trustBand.code !== projectedTrustBand.code,
+      hasDeferredWork: plan.deferredRequirements.length > 0,
+      deferredCount: plan.deferredRequirements.length,
+      operationCount: plan.supportedOperations.length,
+      strategicClass: plan.strategicClass,
+      priorityBand: plan.priorityBand,
+      witnessHint: plan.witnessHint,
+      effectModifier: plan.appliedEffectModifier,
+      summary: buildPreviewSummary(plan, cost, projectedCashDelta, projectedTrustDelta, canAfford),
+    });
+  }
+
+  // ─── Cost breakdown ────────────────────────────────────────────────────────
+
+  /**
+   * Build a detailed cost breakdown for a card play.
+   * The UX card tooltip and the AI resource planner both need to know exactly
+   * which resource pool is being drawn from and how much is available.
+   */
+  public buildCostBreakdown(
+    snapshot: RunStateSnapshot,
+    card: CardInstance,
+    actorId: string,
+  ): CardExecutionCostBreakdown {
+    const cost = resolveCostPool(snapshot, card);
+    const available = resolveAvailableResource(snapshot, cost.pool);
+    const trustBefore = getActorTrust(snapshot, actorId);
+    const trustBand = findTrustBand(trustBefore);
+
+    const canAfford = available >= cost.amount;
+    const deficit = canAfford ? 0 : Math.ceil(cost.amount - available);
+
+    return Object.freeze({
+      instanceId: card.instanceId,
+      definitionId: card.definitionId,
+      costPool: cost.pool,
+      baseCost: card.card.baseCost,
+      resolvedCost: cost.amount,
+      available,
+      canAfford,
+      deficit,
+      explanation: cost.explanation,
+      trustBand: trustBand.code,
+      trustAidEfficiency: trustBand.aidEfficiency,
+      trustComboMultiplier: trustBand.comboMultiplier,
+      trustLoanAccessRatio: trustBand.loanAccessRatio,
+      trustRiskSignal: trustBand.riskSignal,
+      costLabel: cost.pool === 'FREE'
+        ? 'Free play'
+        : `${cost.amount} from ${cost.pool} (${available} available)`,
+    });
+  }
+
+  // ─── Trust projection ──────────────────────────────────────────────────────
+
+  /**
+   * Build a trust projection for a card play.
+   * Shows how trust will change before and after the play — the UX trust
+   * indicator and NPC commentary system consume this for context-aware feedback.
+   */
+  public buildTrustProjection(
+    snapshot: RunStateSnapshot,
+    card: CardInstance,
+    actorId: string,
+  ): CardTrustProjection {
+    const compiler = new CardEffectCompiler();
+    const plan = compiler.compileDetailed(card);
+
+    const trustBefore = getActorTrust(snapshot, actorId);
+    const opposingTrustAvg = getOpposingTrustAverage(snapshot, actorId);
+
+    let trustDelta = 0;
+    for (const op of plan.supportedOperations) {
+      if (op.kind === 'trust') {
+        trustDelta += (op as { magnitude: number }).magnitude * plan.appliedEffectModifier;
+      }
+    }
+
+    const trustAfter = clamp(round4(trustBefore + trustDelta), TRUST_MIN, TRUST_MAX);
+    const bandBefore = findTrustBand(trustBefore);
+    const bandAfter = findTrustBand(trustAfter);
+
+    const crossedAlertThreshold =
+      (trustBefore > TRUST_ALERT_THRESHOLD && trustAfter <= TRUST_ALERT_THRESHOLD) ||
+      (trustBefore <= TRUST_ALERT_THRESHOLD && trustAfter > TRUST_ALERT_THRESHOLD);
+
+    return Object.freeze({
+      instanceId: card.instanceId,
+      definitionId: card.definitionId,
+      actorId,
+      trustBefore,
+      trustAfter,
+      trustDelta: round4(trustDelta),
+      bandBefore: bandBefore.code,
+      bandAfter: bandAfter.code,
+      bandChanged: bandBefore.code !== bandAfter.code,
+      crossedAlertThreshold,
+      opposingTrustAvg: round4(opposingTrustAvg),
+      trustGapVsOpponents: round4(trustAfter - opposingTrustAvg),
+      isTrustCard: trustDelta !== 0,
+      alertThreshold: TRUST_ALERT_THRESHOLD,
+      summary: trustDelta === 0
+        ? `Trust unchanged at ${trustBefore}`
+        : trustDelta > 0
+        ? `Trust ${trustBefore} → ${trustAfter} (+${round4(trustDelta)})`
+        : `Trust ${trustBefore} → ${trustAfter} (${round4(trustDelta)})`,
+    });
+  }
+
+  // ─── Diagnostic report ─────────────────────────────────────────────────────
+
+  /**
+   * Generate a full diagnostic report for a card execution.
+   * Includes the compilation plan, cost breakdown, trust projection, and
+   * execution preview — used by the debug panel and AI explain-mode.
+   */
+  public diagnosticReport(
+    snapshot: RunStateSnapshot,
+    card: CardInstance,
+    actorId: string,
+  ): CardExecutorDiagnosticReport {
+    const compiler = new CardEffectCompiler();
+    const plan = compiler.compileDetailed(card);
+    const preview = this.previewExecution(snapshot, card, actorId);
+    const costBreakdown = this.buildCostBreakdown(snapshot, card, actorId);
+    const trustProjection = this.buildTrustProjection(snapshot, card, actorId);
+
+    const modeLabel = snapshot.mode === 'solo' ? 'EMPIRE'
+      : snapshot.mode === 'pvp' ? 'PREDATOR'
+      : snapshot.mode === 'coop' ? 'SYNDICATE'
+      : 'PHANTOM';
+
+    return Object.freeze({
+      instanceId: card.instanceId,
+      definitionId: card.definitionId,
+      actorId,
+      mode: snapshot.mode,
+      modeLabel,
+      plan,
+      preview,
+      costBreakdown,
+      trustProjection,
+      canExecute: preview.canAfford,
+      hasDeferredWork: plan.deferredRequirements.length > 0,
+      operationCount: plan.supportedOperations.length,
+      traceWarningCount: plan.trace.filter((t) => t.level === 'WARN').length,
+      summary: [
+        `${card.definitionId}@${snapshot.mode}`,
+        `canExecute=${preview.canAfford}`,
+        `ops=${plan.supportedOperations.length}`,
+        `deferred=${plan.deferredRequirements.length}`,
+        `cost=${costBreakdown.resolvedCost}/${costBreakdown.available}`,
+        `trust=${trustProjection.trustBefore}→${trustProjection.trustAfter}`,
+      ].join(' '),
+    });
+  }
+
+  // ─── Trust band access ─────────────────────────────────────────────────────
+
+  /**
+   * Get the trust band for a given actor in the current snapshot.
+   * Used by UX trust indicators, NPC commentary, and AI planner decisions.
+   */
+  public getActorTrustBand(
+    snapshot: RunStateSnapshot,
+    actorId: string,
+  ): TrustBandProfile {
+    return findTrustBand(getActorTrust(snapshot, actorId));
+  }
+
+  /**
+   * List all defined trust bands in ascending order.
+   */
+  public listTrustBands(): readonly TrustBandProfile[] {
+    return TRUST_BANDS;
+  }
 }
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Exported types for new public APIs
+// ═════════════════════════════════════════════════════════════════════════════
+
+export type { TrustBandProfile };
+
+export interface CardExecutionResult {
+  readonly instanceId: string;
+  readonly definitionId: string;
+  readonly applied: boolean;
+  readonly strategicClass: string;
+  readonly priorityBand: string;
+  readonly witnessHint: string;
+  readonly economyCashDelta: number;
+  readonly economyIncomeDelta: number;
+  readonly error: string | null;
+}
+
+export interface CardExecutorBatchResult {
+  readonly finalSnapshot: RunStateSnapshot;
+  readonly results: readonly CardExecutionResult[];
+  readonly appliedCount: number;
+  readonly failedCount: number;
+  readonly summary: string;
+}
+
+export interface CardExecutionPreview {
+  readonly instanceId: string;
+  readonly definitionId: string;
+  readonly mode: ModeCode;
+  readonly canAfford: boolean;
+  readonly costPool: CostPool;
+  readonly costAmount: number;
+  readonly cashAvailable: number;
+  readonly projectedCashDelta: number;
+  readonly projectedIncomeDelta: number;
+  readonly projectedShieldDelta: number;
+  readonly projectedHeatDelta: number;
+  readonly projectedTrustDelta: number;
+  readonly trustBefore: number;
+  readonly trustBandBefore: TrustBandCode;
+  readonly trustBandAfter: TrustBandCode;
+  readonly trustBandChanged: boolean;
+  readonly hasDeferredWork: boolean;
+  readonly deferredCount: number;
+  readonly operationCount: number;
+  readonly strategicClass: string;
+  readonly priorityBand: string;
+  readonly witnessHint: string;
+  readonly effectModifier: number;
+  readonly summary: string;
+}
+
+export interface CardExecutionCostBreakdown {
+  readonly instanceId: string;
+  readonly definitionId: string;
+  readonly costPool: CostPool;
+  readonly baseCost: number;
+  readonly resolvedCost: number;
+  readonly available: number;
+  readonly canAfford: boolean;
+  readonly deficit: number;
+  readonly explanation: string;
+  readonly trustBand: TrustBandCode;
+  readonly trustAidEfficiency: number;
+  readonly trustComboMultiplier: number;
+  readonly trustLoanAccessRatio: number;
+  readonly trustRiskSignal: 'NONE' | 'WATCH' | 'ALERT';
+  readonly costLabel: string;
+}
+
+export interface CardTrustProjection {
+  readonly instanceId: string;
+  readonly definitionId: string;
+  readonly actorId: string;
+  readonly trustBefore: number;
+  readonly trustAfter: number;
+  readonly trustDelta: number;
+  readonly bandBefore: TrustBandCode;
+  readonly bandAfter: TrustBandCode;
+  readonly bandChanged: boolean;
+  readonly crossedAlertThreshold: boolean;
+  readonly opposingTrustAvg: number;
+  readonly trustGapVsOpponents: number;
+  readonly isTrustCard: boolean;
+  readonly alertThreshold: number;
+  readonly summary: string;
+}
+
+export interface CardExecutorDiagnosticReport {
+  readonly instanceId: string;
+  readonly definitionId: string;
+  readonly actorId: string;
+  readonly mode: ModeCode;
+  readonly modeLabel: string;
+  readonly plan: CardCompilationPlan;
+  readonly preview: CardExecutionPreview;
+  readonly costBreakdown: CardExecutionCostBreakdown;
+  readonly trustProjection: CardTrustProjection;
+  readonly canExecute: boolean;
+  readonly hasDeferredWork: boolean;
+  readonly operationCount: number;
+  readonly traceWarningCount: number;
+  readonly summary: string;
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Module-level utility functions
+// ═════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Build a human-readable preview summary for UX tooltips.
+ */
+function buildPreviewSummary(
+  plan: CardCompilationPlan,
+  cost: CostResolution,
+  projectedCashDelta: number,
+  projectedTrustDelta: number,
+  canAfford: boolean,
+): string {
+  if (!canAfford) {
+    return `${plan.definitionId}: Cannot afford — need ${cost.amount} from ${cost.pool}`;
+  }
+  const cashStr = projectedCashDelta === 0
+    ? 'no cash change'
+    : projectedCashDelta > 0
+    ? `+${round4(projectedCashDelta)} cash`
+    : `${round4(projectedCashDelta)} cash`;
+  const trustStr = projectedTrustDelta === 0 ? '' : `, trust ${projectedTrustDelta > 0 ? '+' : ''}${round4(projectedTrustDelta)}`;
+  return `${plan.definitionId}: ${cashStr}${trustStr} [${plan.strategicClass}/${plan.priorityBand}]`;
+}
+
+/**
+ * Get the trust constants used by the executor.
+ */
+export function getExecutorTrustConstants(): Readonly<Record<string, number>> {
+  return Object.freeze({
+    default: TRUST_DEFAULT,
+    min: TRUST_MIN,
+    max: TRUST_MAX,
+    alertThreshold: TRUST_ALERT_THRESHOLD,
+  });
+}
+
+/**
+ * Get the resource limit constants used by the executor.
+ */
+export function getExecutorResourceLimits(): Readonly<Record<string, number>> {
+  return Object.freeze({
+    lastPlayedLimit: LAST_PLAYED_LIMIT,
+    drawHistoryLimit: DRAW_HISTORY_LIMIT,
+    positiveTrackerLimit: POSITIVE_TRACKER_LIMIT,
+    badgeLimit: BADGE_LIMIT,
+    telemetryHintLimit: TELEMETRY_HINT_LIMIT,
+    telemetryWarningLimit: TELEMETRY_WARNING_LIMIT,
+    discardLimit: DISCARD_LIMIT,
+    exhaustLimit: EXHAUST_LIMIT,
+    checksumLimit: CHECKSUM_LIMIT,
+  });
+}
+
+/**
+ * Get the battle resource limit constants.
+ */
+export function getExecutorBattleConstants(): Readonly<Record<string, number>> {
+  return Object.freeze({
+    battleBudgetMin: BATTLE_BUDGET_MIN,
+    counterIntelMin: COUNTER_INTEL_MIN,
+    counterIntelMax: COUNTER_INTEL_MAX,
+    holdChargeMin: HOLD_CHARGE_MIN,
+    sharedTreasuryMin: SHARED_TREASURY_MIN,
+  });
+}
+
+/**
+ * Get the special-action constants used by named action handlers.
+ */
+export function getExecutorSpecialActionConstants(): Readonly<Record<string, number | string>> {
+  return Object.freeze({
+    heatMin: HEAT_MIN,
+    deckEntropyMin: DECK_ENTROPY_MIN,
+    deckEntropyMax: DECK_ENTROPY_MAX,
+    maxTraceMarkers: MAX_TRACE_MARKERS,
+    defectorHeatOnFinalize: DEFECTOR_HEAT_ON_FINALIZE,
+    defectionTreasuryShare: DEFECTION_TREASURY_SHARE,
+    defectionCordPenalty: DEFECTION_CORD_PENALTY,
+    loyaltySignalSelfBoost: LOYALTY_SIGNAL_SELF_BOOST,
+    loyaltySignalTeamEcho: LOYALTY_SIGNAL_TEAM_ECHO,
+    cascadeBreakCoopTrustBonus: CASCADE_BREAK_COOP_TRUST_BONUS,
+    shieldEmergencyL4Full: SHIELD_EMERGENCY_L4_FULL,
+    shieldEmergencyL4Delayed: SHIELD_EMERGENCY_L4_DELAYED,
+    rescueCapitalFull: RESCUE_CAPITAL_FULL,
+    liquidityBridgeRepayMultiplier: LIQUIDITY_BRIDGE_REPAY_MULTIPLIER,
+    expansionLeaseSoloIncome: EXPANSION_LEASE_SOLO_INCOME,
+    expansionLeaseComboIncome: EXPANSION_LEASE_COMBO_INCOME,
+    phantomGhostPassWindows: PHANTOM_GHOST_PASS_WINDOWS,
+    phantomLeverageRequiredBadge: PHANTOM_LEVERAGE_REQUIRED_BADGE,
+    systemicOverrideBotHeat: SYSTEMIC_OVERRIDE_BOT_HEAT,
+    phantomMinimumCashThreshold: PHANTOM_MINIMUM_CASH_THRESHOLD,
+    pvpSovereignLeverageBonusBB: PVP_SOVEREIGN_LEVERAGE_BONUS_BB,
+    pvpSovereigntyLockPenaltyBB: PVP_SOVEREIGNTY_LOCK_PENALTY_BB,
+  });
+}
+
+/**
+ * List all trust band profiles in ascending minimum order.
+ */
+export function listTrustBandProfiles(): readonly TrustBandProfile[] {
+  return TRUST_BANDS;
+}
+
+/**
+ * Get the targeting audit weight for display/sorting purposes.
+ */
+export function getTargetingAuditWeight(targeting: Targeting): number {
+  return TARGETING_AUDIT_WEIGHT[targeting] ?? 0;
+}
+
+/**
+ * Get the timing class audit weight for display/sorting purposes.
+ */
+export function getTimingClassAuditWeight(timing: TimingClass): number {
+  return TIMING_CLASS_AUDIT_WEIGHT[timing] ?? 0;
+}
+
+/**
+ * Check whether a deck type is mode-legal in the given mode.
+ * Exposed for deck-building validation and AI planning systems.
+ */
+export function isDeckTypeModeExecutable(mode: ModeCode, deckType: DeckType): boolean {
+  return deckIsModeLegal(mode, deckType);
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Module Authority Object
+// ═════════════════════════════════════════════════════════════════════════════
+
+export const CARD_EFFECT_EXECUTOR_MODULE_ID =
+  'backend.engine.cards.CardEffectExecutor' as const;
+export const CARD_EFFECT_EXECUTOR_MODULE_VERSION = '2.0.0' as const;
+
+export const CARD_EFFECT_EXECUTOR_MODULE_AUTHORITY = Object.freeze({
+  moduleId: CARD_EFFECT_EXECUTOR_MODULE_ID,
+  version: CARD_EFFECT_EXECUTOR_MODULE_VERSION,
+
+  CardEffectExecutor: 'class',
+
+  // Exported types
+  TrustBandProfile: 'interface',
+  CardExecutionResult: 'interface',
+  CardExecutorBatchResult: 'interface',
+  CardExecutionPreview: 'interface',
+  CardExecutionCostBreakdown: 'interface',
+  CardTrustProjection: 'interface',
+  CardExecutorDiagnosticReport: 'interface',
+
+  // Module constants
+  CARD_EFFECT_EXECUTOR_MODULE_ID: 'const',
+  CARD_EFFECT_EXECUTOR_MODULE_VERSION: 'const',
+  CARD_EFFECT_EXECUTOR_MODULE_AUTHORITY: 'const',
+
+  // Utility functions
+  getExecutorTrustConstants: 'function',
+  getExecutorResourceLimits: 'function',
+  getExecutorBattleConstants: 'function',
+  getExecutorSpecialActionConstants: 'function',
+  listTrustBandProfiles: 'function',
+  getTargetingAuditWeight: 'function',
+  getTimingClassAuditWeight: 'function',
+  isDeckTypeModeExecutable: 'function',
+} as const);

@@ -1782,4 +1782,847 @@ export class CardLegalityService {
       );
     }
   }
+
+  // ─── Batch Evaluation ──────────────────────────────────────────────────────
+
+  /**
+   * Evaluate multiple card+target pairs in a single call.
+   * Returns a batch report with per-card reports and aggregate stats.
+   * Used by the AI planner, test harnesses, and the UX "hand state" system.
+   */
+  public evaluateBatch(
+    snapshot: RunStateSnapshot,
+    requests: readonly { readonly definitionId: string; readonly target: Targeting }[],
+    options: CardLegalityOptions = {},
+  ): CardLegalityBatchReport {
+    const reports = requests.map((req) =>
+      this.evaluateForActor(snapshot, req.definitionId, req.target, options),
+    );
+
+    const legalCount = reports.filter((r) => r.legal).length;
+    const illegalCount = reports.length - legalCount;
+
+    return Object.freeze({
+      mode: snapshot.mode,
+      actorId: options.actorId ?? snapshot.userId,
+      totalEvaluated: reports.length,
+      legalCount,
+      illegalCount,
+      reports: Object.freeze(reports),
+      allLegal: illegalCount === 0,
+      noneLegal: legalCount === 0,
+      summary: `${legalCount}/${reports.length} legal`,
+    });
+  }
+
+  /**
+   * Filter a list of definition IDs to only those currently playable
+   * against the supplied target. Returns playable IDs in registry order.
+   */
+  public filterPlayableCards(
+    snapshot: RunStateSnapshot,
+    definitionIds: readonly string[],
+    target: Targeting,
+    options: CardLegalityOptions = {},
+  ): readonly string[] {
+    return definitionIds.filter((id) => {
+      const report = this.evaluateForActor(snapshot, id, target, options);
+      return report.legal;
+    });
+  }
+
+  // ─── Hand Summary ──────────────────────────────────────────────────────────
+
+  /**
+   * Build a comprehensive summary of the entire legal state of a hand.
+   * The UX "hand overlay" system calls this once per tick to compute which
+   * cards are highlighted, dimmed, urgent, or blocked.
+   */
+  public buildLegalHandSummary(
+    snapshot: RunStateSnapshot,
+    hand: readonly { readonly definitionId: string; readonly target: Targeting }[],
+    options: CardLegalityOptions = {},
+  ): LegalHandSummary {
+    const reports = this.evaluateBatch(snapshot, hand, options);
+
+    const playableIds: string[] = [];
+    const blockedIds: string[] = [];
+    const urgentIds: string[] = [];
+
+    for (const report of reports.reports) {
+      if (report.legal) {
+        playableIds.push(report.definitionId);
+        const urgency = this.classifyReportUrgency(snapshot, report);
+        if (urgency === 'CRITICAL' || urgency === 'HIGH') {
+          urgentIds.push(report.definitionId);
+        }
+      } else {
+        blockedIds.push(report.definitionId);
+      }
+    }
+
+    const playableRatio01 = round4(
+      playableIds.length / Math.max(1, hand.length),
+    );
+
+    const handIsFullyBlocked = playableIds.length === 0 && hand.length > 0;
+    const handIsFullyOpen = blockedIds.length === 0 && hand.length > 0;
+
+    return Object.freeze({
+      mode: snapshot.mode,
+      actorId: options.actorId ?? snapshot.userId,
+      handSize: hand.length,
+      playableCount: playableIds.length,
+      blockedCount: blockedIds.length,
+      urgentCount: urgentIds.length,
+      playableIds: Object.freeze(playableIds),
+      blockedIds: Object.freeze(blockedIds),
+      urgentIds: Object.freeze(urgentIds),
+      playableRatio01,
+      handIsFullyBlocked,
+      handIsFullyOpen,
+      summary: handIsFullyBlocked
+        ? `Hand fully blocked — no legal plays available (${hand.length} cards).`
+        : handIsFullyOpen
+        ? `Hand fully open — all ${hand.length} cards are legal.`
+        : `${playableIds.length}/${hand.length} cards playable, ${urgentIds.length} urgent.`,
+    });
+  }
+
+  /**
+   * Count playable cards in a hand for a given target.
+   * Lightweight version of buildLegalHandSummary for quick checks.
+   */
+  public resolvePlayableCount(
+    snapshot: RunStateSnapshot,
+    hand: readonly { readonly definitionId: string; readonly target: Targeting }[],
+    options: CardLegalityOptions = {},
+  ): number {
+    return hand.filter((h) =>
+      this.evaluateForActor(snapshot, h.definitionId, h.target, options).legal,
+    ).length;
+  }
+
+  // ─── Window Advisory ──────────────────────────────────────────────────────
+
+  /**
+   * Build a timing-window advisory for a card.
+   * Tells the UI exactly which windows are open and what the player needs to
+   * do to unlock blocked timing classes — feeds NPC hint commentary.
+   */
+  public buildWindowAdvisory(
+    snapshot: RunStateSnapshot,
+    definitionId: string,
+    target: Targeting,
+    options: CardLegalityOptions = {},
+  ): CardWindowAdvisory {
+    const report = this.evaluateForActor(snapshot, definitionId, target, options);
+    const base = this.registry.get(definitionId);
+
+    const timingCheck = report.candidateReports
+      .flatMap((r) => r.checks)
+      .find((c) => c.stage === 'TIMING');
+
+    const targetingCheck = report.candidateReports
+      .flatMap((r) => r.checks)
+      .find((c) => c.stage === 'TARGETING');
+
+    const resourceCheck = report.candidateReports
+      .flatMap((r) => r.checks)
+      .find((c) => c.stage === 'RESOURCE_LANES' && !c.passed);
+
+    const windowBlocked =
+      (timingCheck && !timingCheck.passed) ? timingCheck.message : null;
+
+    const targetingBlocked =
+      (targetingCheck && !targetingCheck.passed) ? targetingCheck.message : null;
+
+    const resourceBlocked =
+      resourceCheck ? resourceCheck.message : null;
+
+    const legalTimings = report.candidateReports
+      .flatMap((r) => r.legalTimings);
+    const uniqueLegalTimings = [...new Set(legalTimings)];
+
+    return Object.freeze({
+      definitionId,
+      mode: snapshot.mode,
+      isLegal: report.legal,
+      windowBlocked,
+      targetingBlocked,
+      resourceBlocked,
+      legalTimings: Object.freeze(uniqueLegalTimings),
+      deckType: base?.deckType ?? null,
+      advisoryText: buildWindowAdvisoryText(report, windowBlocked, targetingBlocked, resourceBlocked),
+    });
+  }
+
+  // ─── UX Card State ─────────────────────────────────────────────────────────
+
+  /**
+   * Build the complete UX card state for a single card.
+   * The frontend card component renders directly from this — no additional
+   * legality checks are needed on the client side.
+   */
+  public buildUXCardState(
+    snapshot: RunStateSnapshot,
+    definitionId: string,
+    target: Targeting,
+    options: CardLegalityOptions = {},
+  ): CardUXState {
+    const report = this.evaluateForActor(snapshot, definitionId, target, options);
+    const base = this.registry.get(definitionId);
+
+    const urgency = this.classifyReportUrgency(snapshot, report);
+    const spendLane = base
+      ? resolveSpendLane(snapshot, base, target)
+      : ('NONE' as CardSpendLane);
+
+    const resourceQuote =
+      report.selectedCard
+        ? (report.candidateReports.find(
+            (r) => r.instanceId === report.selectedInstanceId,
+          )?.resourceQuote ?? null)
+        : null;
+
+    const blockingCheck = report.candidateReports
+      .flatMap((r) => r.checks)
+      .find((c) => !c.passed) ?? null;
+
+    const effectLabel = base
+      ? summarizeEffectPayloadForLegality(base.baseEffect)
+      : 'unknown effect';
+
+    return Object.freeze({
+      definitionId,
+      mode: snapshot.mode,
+      isLegal: report.legal,
+      urgency,
+      spendLane,
+      resourceQuote: resourceQuote ?? null,
+      blockingStage: blockingCheck?.stage ?? null,
+      blockingCode: blockingCheck?.code ?? null,
+      blockingMessage: blockingCheck?.message ?? null,
+      effectLabel,
+      legalTimings: Object.freeze(
+        report.candidateReports.flatMap((r) => r.legalTimings),
+      ),
+      summary: report.summary,
+    });
+  }
+
+  /**
+   * Build UX card states for an entire hand in one call.
+   * Returns a map from definitionId → UXState.
+   */
+  public buildHandUXStates(
+    snapshot: RunStateSnapshot,
+    hand: readonly { readonly definitionId: string; readonly target: Targeting }[],
+    options: CardLegalityOptions = {},
+  ): ReadonlyMap<string, CardUXState> {
+    const map = new Map<string, CardUXState>();
+    for (const { definitionId, target } of hand) {
+      map.set(definitionId, this.buildUXCardState(snapshot, definitionId, target, options));
+    }
+    return map;
+  }
+
+  // ─── Urgency Classification ────────────────────────────────────────────────
+
+  /**
+   * Classify a card's urgency level for the current snapshot.
+   * Urgency drives the UX priority ring, audio cues, and NPC hint triggers.
+   */
+  public classifyCardUrgency(
+    snapshot: RunStateSnapshot,
+    definitionId: string,
+    target: Targeting,
+    options: CardLegalityOptions = {},
+  ): CardUrgencyLevel {
+    const report = this.evaluateForActor(snapshot, definitionId, target, options);
+    return this.classifyReportUrgency(snapshot, report);
+  }
+
+  private classifyReportUrgency(
+    snapshot: RunStateSnapshot,
+    report: CardLegalityReport,
+  ): CardUrgencyLevel {
+    if (!report.legal) return 'BLOCKED';
+
+    const base = this.registry.get(report.definitionId);
+    if (!base) return 'LOW';
+
+    // Rescue deck card + teammate in critical pressure → CRITICAL
+    if (
+      RESCUE_ANCHORED_DECKS.has(base.deckType) &&
+      snapshot.mode === 'coop'
+    ) {
+      const pressureRankValue = pressureRank(snapshot.pressure.tier);
+      if (pressureRankValue >= 3) return 'CRITICAL';
+    }
+
+    // Counter deck card + active counter window → CRITICAL
+    if (
+      COUNTER_ANCHORED_DECKS.has(base.deckType) &&
+      report.candidateReports.some((r) =>
+        r.legalTimings.includes('CTR'),
+      )
+    ) {
+      return 'CRITICAL';
+    }
+
+    // Ghost deck + ghost baseline exists → HIGH
+    if (
+      GHOST_ANCHORED_DECKS.has(base.deckType) &&
+      snapshot.mode === 'ghost'
+    ) {
+      return 'HIGH';
+    }
+
+    // Pressure is elevated and card is response-type → HIGH
+    const pressureRankValue = pressureRank(snapshot.pressure.tier);
+    if (pressureRankValue >= 2 && (base.deckType === 'FUBAR' || base.deckType === 'SO')) {
+      return 'HIGH';
+    }
+
+    // Battle deck + pvp mode → MEDIUM
+    if (BATTLE_BUDGET_DECKS.has(base.deckType) && snapshot.mode === 'pvp') {
+      return 'MEDIUM';
+    }
+
+    return 'LOW';
+  }
+
+  // ─── Diagnostic Report ────────────────────────────────────────────────────
+
+  /**
+   * Generate a full diagnostic report for a card evaluation.
+   * Used by the debug panel, AI planner explain-mode, and test assertions.
+   */
+  public diagnosticReport(
+    snapshot: RunStateSnapshot,
+    definitionId: string,
+    target: Targeting,
+    options: CardLegalityOptions = {},
+  ): CardLegalityDiagnosticReport {
+    const report = this.evaluateForActor(snapshot, definitionId, target, options);
+    const base = this.registry.get(definitionId);
+    const urgency = this.classifyReportUrgency(snapshot, report);
+    const uxState = this.buildUXCardState(snapshot, definitionId, target, options);
+    const windowAdvisory = this.buildWindowAdvisory(snapshot, definitionId, target, options);
+
+    const allChecks = report.candidateReports.flatMap((r) => r.checks);
+    const failedChecks = allChecks.filter((c) => !c.passed);
+    const passedChecks = allChecks.filter((c) => c.passed);
+
+    const defectionStep = isDefectionCard(definitionId)
+      ? resolveDefectionStep(definitionId)
+      : null;
+
+    const effectLabel = base
+      ? summarizeEffectPayloadForLegality(base.baseEffect)
+      : 'unknown';
+
+    return Object.freeze({
+      definitionId,
+      actorId: options.actorId ?? snapshot.userId,
+      mode: snapshot.mode,
+      target,
+      isLegal: report.legal,
+      urgency,
+      uxState,
+      windowAdvisory,
+      report,
+      candidateCount: report.candidateReports.length,
+      passedCheckCount: passedChecks.length,
+      failedCheckCount: failedChecks.length,
+      failedChecks: Object.freeze(failedChecks),
+      defectionStep,
+      effectLabel,
+      deckType: base?.deckType ?? null,
+      healthy: report.legal && failedChecks.length === 0,
+      summary: [
+        `${definitionId}@${snapshot.mode} → ${target}`,
+        `legal=${report.legal}`,
+        `urgency=${urgency}`,
+        `checks=${passedChecks.length}/${allChecks.length}`,
+        `candidates=${report.candidateReports.length}`,
+      ].join(' '),
+    });
+  }
+
+  /**
+   * Run diagnostics for a full hand at once.
+   */
+  public batchDiagnosticReport(
+    snapshot: RunStateSnapshot,
+    hand: readonly { readonly definitionId: string; readonly target: Targeting }[],
+    options: CardLegalityOptions = {},
+  ): CardLegalityBatchDiagnosticReport {
+    const reports = hand.map((h) =>
+      this.diagnosticReport(snapshot, h.definitionId, h.target, options),
+    );
+
+    const legalReports = reports.filter((r) => r.isLegal);
+    const blockedReports = reports.filter((r) => !r.isLegal);
+    const urgentReports = reports.filter(
+      (r) => r.urgency === 'CRITICAL' || r.urgency === 'HIGH',
+    );
+
+    return Object.freeze({
+      mode: snapshot.mode,
+      actorId: options.actorId ?? snapshot.userId,
+      handSize: hand.length,
+      legalCount: legalReports.length,
+      blockedCount: blockedReports.length,
+      urgentCount: urgentReports.length,
+      reports: Object.freeze(reports),
+      allLegal: blockedReports.length === 0,
+      noneLegal: legalReports.length === 0,
+      summary: `${legalReports.length}/${reports.length} legal — ${urgentReports.length} urgent`,
+    });
+  }
 }
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Exported types for new public APIs
+// ═════════════════════════════════════════════════════════════════════════════
+
+export type CardUrgencyLevel = 'BLOCKED' | 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+
+export interface LegalHandSummary {
+  readonly mode: ModeCode;
+  readonly actorId: string;
+  readonly handSize: number;
+  readonly playableCount: number;
+  readonly blockedCount: number;
+  readonly urgentCount: number;
+  readonly playableIds: readonly string[];
+  readonly blockedIds: readonly string[];
+  readonly urgentIds: readonly string[];
+  readonly playableRatio01: number;
+  readonly handIsFullyBlocked: boolean;
+  readonly handIsFullyOpen: boolean;
+  readonly summary: string;
+}
+
+export interface CardWindowAdvisory {
+  readonly definitionId: string;
+  readonly mode: ModeCode;
+  readonly isLegal: boolean;
+  readonly windowBlocked: string | null;
+  readonly targetingBlocked: string | null;
+  readonly resourceBlocked: string | null;
+  readonly legalTimings: readonly TimingClass[];
+  readonly deckType: DeckType | null;
+  readonly advisoryText: string;
+}
+
+export interface CardUXState {
+  readonly definitionId: string;
+  readonly mode: ModeCode;
+  readonly isLegal: boolean;
+  readonly urgency: CardUrgencyLevel;
+  readonly spendLane: CardSpendLane;
+  readonly resourceQuote: CardResourceQuote | null;
+  readonly blockingStage: CardLegalityStage | null;
+  readonly blockingCode: CardLegalityFailureCode | 'PASS' | null;
+  readonly blockingMessage: string | null;
+  readonly effectLabel: string;
+  readonly legalTimings: readonly TimingClass[];
+  readonly summary: string;
+}
+
+export interface CardLegalityBatchReport {
+  readonly mode: ModeCode;
+  readonly actorId: string;
+  readonly totalEvaluated: number;
+  readonly legalCount: number;
+  readonly illegalCount: number;
+  readonly reports: readonly CardLegalityReport[];
+  readonly allLegal: boolean;
+  readonly noneLegal: boolean;
+  readonly summary: string;
+}
+
+export interface CardLegalityDiagnosticReport {
+  readonly definitionId: string;
+  readonly actorId: string;
+  readonly mode: ModeCode;
+  readonly target: Targeting;
+  readonly isLegal: boolean;
+  readonly urgency: CardUrgencyLevel;
+  readonly uxState: CardUXState;
+  readonly windowAdvisory: CardWindowAdvisory;
+  readonly report: CardLegalityReport;
+  readonly candidateCount: number;
+  readonly passedCheckCount: number;
+  readonly failedCheckCount: number;
+  readonly failedChecks: readonly CardLegalityCheck[];
+  readonly defectionStep: 1 | 2 | 3 | null;
+  readonly effectLabel: string;
+  readonly deckType: DeckType | null;
+  readonly healthy: boolean;
+  readonly summary: string;
+}
+
+export interface CardLegalityBatchDiagnosticReport {
+  readonly mode: ModeCode;
+  readonly actorId: string;
+  readonly handSize: number;
+  readonly legalCount: number;
+  readonly blockedCount: number;
+  readonly urgentCount: number;
+  readonly reports: readonly CardLegalityDiagnosticReport[];
+  readonly allLegal: boolean;
+  readonly noneLegal: boolean;
+  readonly summary: string;
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Module-level utility functions (use all imported types)
+// ═════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Build a human-readable summary of an EffectPayload for legality context.
+ * Used by buildUXCardState and diagnosticReport to label the card's effect
+ * without requiring the compiler to be available.
+ */
+export function summarizeEffectPayloadForLegality(payload: EffectPayload): string {
+  const parts: string[] = [];
+
+  if (payload.cashDelta != null && payload.cashDelta !== 0) {
+    parts.push(`${payload.cashDelta >= 0 ? '+' : ''}${payload.cashDelta} cash`);
+  }
+  if (payload.incomeDelta != null && payload.incomeDelta !== 0) {
+    parts.push(`${payload.incomeDelta >= 0 ? '+' : ''}${payload.incomeDelta} income`);
+  }
+  if (payload.shieldDelta != null && payload.shieldDelta !== 0) {
+    parts.push(`${payload.shieldDelta >= 0 ? '+' : ''}${payload.shieldDelta} shield`);
+  }
+  if (payload.heatDelta != null && payload.heatDelta !== 0) {
+    parts.push(`${payload.heatDelta >= 0 ? '+' : ''}${payload.heatDelta} heat`);
+  }
+  if (payload.trustDelta != null && payload.trustDelta !== 0) {
+    parts.push(`${payload.trustDelta >= 0 ? '+' : ''}${payload.trustDelta} trust`);
+  }
+  if (payload.timeDeltaMs != null && payload.timeDeltaMs !== 0) {
+    parts.push(`${payload.timeDeltaMs >= 0 ? '+' : ''}${payload.timeDeltaMs}ms time`);
+  }
+  if (payload.divergenceDelta != null && payload.divergenceDelta !== 0) {
+    parts.push(`${payload.divergenceDelta >= 0 ? '+' : ''}${payload.divergenceDelta} divergence`);
+  }
+  if (payload.debtDelta != null && payload.debtDelta !== 0) {
+    parts.push(`${payload.debtDelta >= 0 ? '+' : ''}${payload.debtDelta} debt [deferred]`);
+  }
+  if (payload.treasuryDelta != null && payload.treasuryDelta !== 0) {
+    parts.push(`${payload.treasuryDelta >= 0 ? '+' : ''}${payload.treasuryDelta} treasury [deferred]`);
+  }
+  if (payload.battleBudgetDelta != null && payload.battleBudgetDelta !== 0) {
+    parts.push(`${payload.battleBudgetDelta >= 0 ? '+' : ''}${payload.battleBudgetDelta} battle budget [deferred]`);
+  }
+  if (payload.injectCards && payload.injectCards.length > 0) {
+    parts.push(`inject [${payload.injectCards.slice(0, 3).join(', ')}${payload.injectCards.length > 3 ? '…' : ''}]`);
+  }
+  if (payload.grantBadges && payload.grantBadges.length > 0) {
+    parts.push(`grant badges [${payload.grantBadges.join(', ')}]`);
+  }
+  if (payload.namedActionId) {
+    parts.push(`action:${payload.namedActionId}`);
+  }
+
+  return parts.length > 0 ? parts.join(' | ') : 'no quantified effects';
+}
+
+/**
+ * Check whether an EffectPayload will require battle budget spending.
+ * Used by legality pre-screening before a full evaluation.
+ */
+export function effectPayloadRequiresBattleBudget(payload: EffectPayload): boolean {
+  return (payload.battleBudgetDelta ?? 0) < 0;
+}
+
+/**
+ * Check whether an EffectPayload will require shared treasury access.
+ */
+export function effectPayloadRequiresSharedTreasury(payload: EffectPayload): boolean {
+  return (
+    (payload.treasuryDelta ?? 0) < 0 ||
+    payload.namedActionId === 'shared-treasury-spend'
+  );
+}
+
+/**
+ * Compute the net cash impact of an EffectPayload.
+ * Positive = player gains cash. Negative = player spends cash.
+ */
+export function effectPayloadNetCashImpact(payload: EffectPayload): number {
+  return (payload.cashDelta ?? 0) - Math.abs(payload.debtDelta ?? 0);
+}
+
+/**
+ * Check whether an EffectPayload has any resource-spending side effects
+ * that require a legality resource lane check.
+ */
+export function effectPayloadHasResourceSpend(payload: EffectPayload): boolean {
+  return (
+    (payload.cashDelta ?? 0) < 0 ||
+    (payload.battleBudgetDelta ?? 0) < 0 ||
+    (payload.treasuryDelta ?? 0) < 0 ||
+    (payload.holdChargeDelta ?? 0) < 0 ||
+    (payload.counterIntelDelta ?? 0) < 0
+  );
+}
+
+/**
+ * Build the advisory text for a window advisory object.
+ */
+function buildWindowAdvisoryText(
+  report: CardLegalityReport,
+  windowBlocked: string | null,
+  targetingBlocked: string | null,
+  resourceBlocked: string | null,
+): string {
+  if (report.legal) {
+    return `${report.definitionId} is legal — play is available.`;
+  }
+
+  const reasons: string[] = [];
+  if (windowBlocked) reasons.push(`Timing: ${windowBlocked}`);
+  if (targetingBlocked) reasons.push(`Targeting: ${targetingBlocked}`);
+  if (resourceBlocked) reasons.push(`Resources: ${resourceBlocked}`);
+
+  if (reasons.length > 0) {
+    return `${report.definitionId} is blocked — ${reasons.join(' | ')}`;
+  }
+
+  return `${report.definitionId} is blocked — ${report.summary}`;
+}
+
+/**
+ * Classify the urgency label text for UI display.
+ */
+export function cardUrgencyLevelLabel(urgency: CardUrgencyLevel): string {
+  switch (urgency) {
+    case 'CRITICAL': return 'Play immediately — critical window closing.';
+    case 'HIGH': return 'High-value play available — act soon.';
+    case 'MEDIUM': return 'Situational play — consider timing.';
+    case 'LOW': return 'Available when ready.';
+    case 'BLOCKED': return 'Card is not currently legal.';
+  }
+}
+
+/**
+ * Return the CSS accent class for an urgency level.
+ * Matches the design system token names used in the UX layer.
+ */
+export function cardUrgencyAccentClass(urgency: CardUrgencyLevel): string {
+  switch (urgency) {
+    case 'CRITICAL': return 'urgency-critical';
+    case 'HIGH': return 'urgency-high';
+    case 'MEDIUM': return 'urgency-medium';
+    case 'LOW': return 'urgency-low';
+    case 'BLOCKED': return 'urgency-blocked';
+  }
+}
+
+/**
+ * Check whether a CardLegalityReport failed at a specific stage.
+ */
+export function reportFailedAtStage(
+  report: CardLegalityReport,
+  stage: CardLegalityStage,
+): boolean {
+  return report.candidateReports
+    .flatMap((r) => r.checks)
+    .some((c) => c.stage === stage && !c.passed);
+}
+
+/**
+ * Get the first failing stage name from a report.
+ * UI uses this to display a concise "blocked at: TIMING" label.
+ */
+export function reportFirstFailingStage(
+  report: CardLegalityReport,
+): CardLegalityStage | null {
+  for (const candidate of report.candidateReports) {
+    for (const check of candidate.checks) {
+      if (!check.passed) return check.stage;
+    }
+  }
+  return null;
+}
+
+/**
+ * Get the first failing code from a report.
+ */
+export function reportFirstFailingCode(
+  report: CardLegalityReport,
+): CardLegalityFailureCode | null {
+  for (const candidate of report.candidateReports) {
+    for (const check of candidate.checks) {
+      if (!check.passed && check.code !== 'PASS') {
+        return check.code as CardLegalityFailureCode;
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Check whether a batch report has any critical urgency cards.
+ */
+export function batchReportHasCriticalUrgency(
+  report: CardLegalityBatchDiagnosticReport,
+): boolean {
+  return report.reports.some((r) => r.urgency === 'CRITICAL');
+}
+
+/**
+ * Extract all unique blocking stages from a batch diagnostic report.
+ */
+export function batchReportBlockingStages(
+  report: CardLegalityBatchDiagnosticReport,
+): readonly CardLegalityStage[] {
+  const stages = new Set<CardLegalityStage>();
+  for (const r of report.reports) {
+    if (r.uxState.blockingStage) {
+      stages.add(r.uxState.blockingStage);
+    }
+  }
+  return Object.freeze([...stages]);
+}
+
+/**
+ * List all deck types that consume battle budget.
+ */
+export function listBattleBudgetDeckTypes(): readonly DeckType[] {
+  return Object.freeze([...BATTLE_BUDGET_DECKS]);
+}
+
+/**
+ * List all deck types anchored to ghost mechanics.
+ */
+export function listGhostAnchoredDeckTypes(): readonly DeckType[] {
+  return Object.freeze([...GHOST_ANCHORED_DECKS]);
+}
+
+/**
+ * List all deck types anchored to rescue mechanics.
+ */
+export function listRescueAnchoredDeckTypes(): readonly DeckType[] {
+  return Object.freeze([...RESCUE_ANCHORED_DECKS]);
+}
+
+/**
+ * List all deck types anchored to counter mechanics.
+ */
+export function listCounterAnchoredDeckTypes(): readonly DeckType[] {
+  return Object.freeze([...COUNTER_ANCHORED_DECKS]);
+}
+
+/**
+ * List all deck types anchored to aid mechanics.
+ */
+export function listAidAnchoredDeckTypes(): readonly DeckType[] {
+  return Object.freeze([...AID_ANCHORED_DECKS]);
+}
+
+/**
+ * List the defection sequence card IDs in play order.
+ */
+export function listDefectionSequenceIds(): readonly string[] {
+  return Object.freeze([
+    SPECIAL_CARD_IDS.BREAK_PACT,
+    SPECIAL_CARD_IDS.SILENT_EXIT,
+    SPECIAL_CARD_IDS.ASSET_SEIZURE,
+  ]);
+}
+
+/**
+ * Check whether a definition ID is a special system card.
+ */
+export function isSpecialCardId(definitionId: string): boolean {
+  return Object.values(SPECIAL_CARD_IDS).includes(
+    definitionId as typeof SPECIAL_CARD_IDS[keyof typeof SPECIAL_CARD_IDS],
+  );
+}
+
+/**
+ * Get the timing window end-of-run threshold in ms.
+ */
+export function getEndWindowThresholdMs(): number {
+  return END_WINDOW_MS;
+}
+
+/**
+ * Get the ghost marker timing window in ticks.
+ */
+export function getGhostMarkerWindowTicks(): number {
+  return GHOST_MARKER_WINDOW_TICKS;
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Module Authority Object
+// ═════════════════════════════════════════════════════════════════════════════
+
+export const CARD_LEGALITY_SERVICE_MODULE_ID =
+  'backend.engine.cards.CardLegalityService' as const;
+export const CARD_LEGALITY_SERVICE_MODULE_VERSION = '2.0.0' as const;
+
+export const CARD_LEGALITY_SERVICE_MODULE_AUTHORITY = Object.freeze({
+  moduleId: CARD_LEGALITY_SERVICE_MODULE_ID,
+  version: CARD_LEGALITY_SERVICE_MODULE_VERSION,
+
+  // Core class
+  CardLegalityService: 'class',
+
+  // Exported types (compile-time only)
+  CardLegalityStage: 'type',
+  CardLegalityFailureCode: 'type',
+  CardRequirementKind: 'type',
+  CardSpendLane: 'type',
+  CardLegalityDetailValue: 'type',
+  CardLegalityDetails: 'type',
+  CardLegalityCheck: 'interface',
+  CardLegalityRequirement: 'interface',
+  CardResourceQuote: 'interface',
+  CardCandidateLegalityReport: 'interface',
+  CardLegalityReport: 'interface',
+  CardLegalityOptions: 'interface',
+  CardUrgencyLevel: 'type',
+  LegalHandSummary: 'interface',
+  CardWindowAdvisory: 'interface',
+  CardUXState: 'interface',
+  CardLegalityBatchReport: 'interface',
+  CardLegalityDiagnosticReport: 'interface',
+  CardLegalityBatchDiagnosticReport: 'interface',
+
+  // Module constants
+  CARD_LEGALITY_SERVICE_MODULE_ID: 'const',
+  CARD_LEGALITY_SERVICE_MODULE_VERSION: 'const',
+  CARD_LEGALITY_SERVICE_MODULE_AUTHORITY: 'const',
+
+  // Utility functions
+  summarizeEffectPayloadForLegality: 'function',
+  effectPayloadRequiresBattleBudget: 'function',
+  effectPayloadRequiresSharedTreasury: 'function',
+  effectPayloadNetCashImpact: 'function',
+  effectPayloadHasResourceSpend: 'function',
+  cardUrgencyLevelLabel: 'function',
+  cardUrgencyAccentClass: 'function',
+  reportFailedAtStage: 'function',
+  reportFirstFailingStage: 'function',
+  reportFirstFailingCode: 'function',
+  batchReportHasCriticalUrgency: 'function',
+  batchReportBlockingStages: 'function',
+  listBattleBudgetDeckTypes: 'function',
+  listGhostAnchoredDeckTypes: 'function',
+  listRescueAnchoredDeckTypes: 'function',
+  listCounterAnchoredDeckTypes: 'function',
+  listAidAnchoredDeckTypes: 'function',
+  listDefectionSequenceIds: 'function',
+  isSpecialCardId: 'function',
+  getEndWindowThresholdMs: 'function',
+  getGhostMarkerWindowTicks: 'function',
+} as const);

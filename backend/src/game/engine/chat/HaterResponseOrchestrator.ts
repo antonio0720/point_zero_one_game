@@ -63,8 +63,10 @@ import {
   type ChatMessage,
   type ChatPersonaDescriptor,
   type ChatPersonaId,
+  type ChatRelationshipState,
   type ChatResponseCandidate,
   type ChatRoomId,
+  type ChatUserId,
   type ChatRoomKind,
   type ChatRoomStageMood,
   type ChatRoomState,
@@ -78,6 +80,8 @@ import {
   type Score01,
   type UnixMs,
 } from './types';
+
+export type { ChatRelationshipState };
 import {
   DEFAULT_BACKEND_CHAT_RUNTIME,
   mergeRuntimeConfig,
@@ -1925,7 +1929,20 @@ export function runHaterBatchPlanning(
   let accepted = 0;
   let rejected = 0;
   for (const ctx of contexts) {
-    const plan = authority.plan(ctx.state, ctx.roomId, ctx.signal, ctx.now);
+    const room = ctx.state.rooms[ctx.roomId];
+    if (!room) {
+      rejected++;
+      continue;
+    }
+    const triggerCtx: HaterTriggerContext = {
+      kind: 'BATTLE_SIGNAL',
+      state: ctx.state,
+      room,
+      now: ctx.now,
+      causeEventId: null,
+      signal: ctx.signal,
+    };
+    const plan = authority.plan(triggerCtx);
     const fingerprint = computeHaterResponseFingerprint(ctx.roomId, plan, now);
     entries.push({ roomId: ctx.roomId, plan, fingerprint });
     if (plan.accepted) accepted++;
@@ -2044,11 +2061,11 @@ export function haterAffectIsFrustrated(affect: ChatAffectSnapshot): boolean {
 }
 
 export function haterBattleIsActive(battle: ChatBattleSnapshot): boolean {
-  return battle.isActive ?? false;
+  return battle.activeAttackType != null;
 }
 
 export function haterInferenceIsHighConfidence(snapshot: ChatInferenceSnapshot): boolean {
-  return (Number(snapshot.confidence01) as number) >= 0.7;
+  return (Number(snapshot.haterTargeting01) as number) >= 0.7;
 }
 
 export function haterLearningIsReceptive(profile: ChatLearningProfile): boolean {
@@ -2076,7 +2093,7 @@ export function haterRoomPresence(state: ChatState, roomId: ChatRoomId): ReturnT
 }
 
 export function haterPersonaLabel(persona: ChatPersonaDescriptor): string {
-  return `${persona.displayName} [${persona.id}]`;
+  return `${persona.displayName} [${persona.personaId}]`;
 }
 
 export function haterCandidateHasBody(candidate: ChatResponseCandidate): boolean {
@@ -2102,11 +2119,18 @@ export function haterRoomKindIsAllowed(
   config: ReturnType<typeof mergeRuntimeConfig>,
   roomKind: ChatRoomKind,
 ): boolean {
-  return (config.allowRoomKinds ?? []).includes(roomKind);
+  // ChatRuntimeConfig does not carry an allowRoomKinds list.
+  // Shadow-only room kinds require at least one shadow channel to be configured;
+  // all other kinds are gated only on visible channel availability.
+  const shadowOnlyKinds: readonly ChatRoomKind[] = ['DEAL_ROOM', 'PRIVATE', 'SYNDICATE'];
+  if (shadowOnlyKinds.includes(roomKind)) {
+    return config.allowShadowChannels.length > 0;
+  }
+  return config.allowVisibleChannels.length > 0;
 }
 
 export function haterStageMoodIsHostile(mood: ChatRoomStageMood): boolean {
-  return mood === 'hostile';
+  return mood === 'HOSTILE';
 }
 
 export function haterRoomHasInvasion(state: ChatState, roomId: ChatRoomId): boolean {
@@ -2117,16 +2141,16 @@ export function haterRoomIsSilenced(state: ChatState, roomId: ChatRoomId, now: U
   return isRoomSilenced(state, roomId, now);
 }
 
-export function haterRoomInferenceSnapshots(state: ChatState, roomId: ChatRoomId, userId: string): readonly ChatInferenceSnapshot[] {
-  return selectInferenceSnapshotsForUser(state, roomId, userId);
+export function haterRoomInferenceSnapshots(state: ChatState, _roomId: ChatRoomId, userId: ChatUserId): readonly ChatInferenceSnapshot[] {
+  return selectInferenceSnapshotsForUser(state, userId);
 }
 
-export function haterRoomLearningProfile(state: ChatState, roomId: ChatRoomId, userId: string): ChatLearningProfile | null {
-  return selectLearningProfile(state, roomId, userId);
+export function haterRoomLearningProfile(state: ChatState, _roomId: ChatRoomId, userId: ChatUserId): ChatLearningProfile | null {
+  return selectLearningProfile(state, userId);
 }
 
-export function haterRoomRelationship(state: ChatState, roomId: ChatRoomId, actorId: string): ChatRelationshipState | null {
-  return selectRelationshipForActor(state, roomId, actorId);
+export function haterRoomRelationship(state: ChatState, roomId: ChatRoomId, actorId: string, userId: ChatUserId): ChatRelationshipState | null {
+  return selectRelationshipForActor(state, roomId, actorId, userId);
 }
 
 export function haterIsNullable<T>(value: Nullable<T>): value is null | undefined {
@@ -2135,6 +2159,10 @@ export function haterIsNullable<T>(value: Nullable<T>): value is null | undefine
 
 export function haterClampScore(value: number): Score01 {
   return clamp01(value) as Score01;
+}
+
+export function haterClampScore100(value: number): number {
+  return clamp100(value);
 }
 
 export function haterPersonaChannels(persona: ChatPersonaDescriptor): readonly ChatChannelId[] {
@@ -2148,5 +2176,34 @@ export const CHAT_HATER_RESPONSE_FULL_MODULE = Object.freeze({
   runBatch: runHaterBatchPlanning,
   buildHostilityStats: buildHaterHostilityStats,
   computeFingerprint: computeHaterResponseFingerprint,
+  // inspection utilities
+  isHighHostility: haterPlanIsHighHostility,
+  escalationBand: haterPlanEscalationBand,
+  audienceIsHot: haterAudienceIsHot,
+  affectIsFrustrated: haterAffectIsFrustrated,
+  battleIsActive: haterBattleIsActive,
+  inferenceIsHighConfidence: haterInferenceIsHighConfidence,
+  learningIsReceptive: haterLearningIsReceptive,
+  relationshipIsHostile: haterRelationshipIsHostile,
+  roomVisibleMessages: haterRoomVisibleMessages,
+  roomAudienceHeat: haterRoomAudienceHeat,
+  roomLatestMessage: haterRoomLatestMessage,
+  roomPresence: haterRoomPresence,
+  personaLabel: haterPersonaLabel,
+  candidateHasBody: haterCandidateHasBody,
+  sortCandidates: haterSortCandidates,
+  topCandidate: haterTopCandidate,
+  channelIsAllowed: haterChannelIsAllowed,
+  roomKindIsAllowed: haterRoomKindIsAllowed,
+  stageMoodIsHostile: haterStageMoodIsHostile,
+  roomHasInvasion: haterRoomHasInvasion,
+  roomIsSilenced: haterRoomIsSilenced,
+  roomInferenceSnapshots: haterRoomInferenceSnapshots,
+  roomLearningProfile: haterRoomLearningProfile,
+  roomRelationship: haterRoomRelationship,
+  isNullable: haterIsNullable,
+  clampScore: haterClampScore,
+  clampScore100: haterClampScore100,
+  personaChannels: haterPersonaChannels,
 });
 

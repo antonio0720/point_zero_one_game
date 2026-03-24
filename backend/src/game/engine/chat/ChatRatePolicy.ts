@@ -105,16 +105,16 @@ export interface ChatRatePolicyContext {
   readonly ports: ChatRatePolicyPorts;
 }
 
-const DEFAULT_CLOCK: ChatRatePolicyClockPort = {
+export const DEFAULT_CLOCK: ChatRatePolicyClockPort = {
   now: () => Date.now(),
 };
 
-const DEFAULT_LOGGER: ChatRatePolicyLoggerPort = {
+export const DEFAULT_LOGGER: ChatRatePolicyLoggerPort = {
   debug: () => undefined,
   warn: () => undefined,
 };
 
-const DEFAULT_PORTS: ChatRatePolicyPorts = {
+export const DEFAULT_PORTS: ChatRatePolicyPorts = {
   clock: DEFAULT_CLOCK,
   logger: DEFAULT_LOGGER,
 };
@@ -1263,7 +1263,7 @@ export function auditAllRoomsCadence(
 // MARK: Internal utility
 // ============================================================================
 
-function allowRate(): ChatRateDecision {
+export function allowRate(): ChatRateDecision {
   return {
     outcome: 'ALLOW',
     retryAfterMs: 0,
@@ -1271,7 +1271,7 @@ function allowRate(): ChatRateDecision {
   };
 }
 
-function rejectRate(
+export function rejectRate(
   outcome: Exclude<ChatRateOutcome, 'ALLOW'>,
   retryAfterMs: number,
   reasons: readonly string[],
@@ -1283,14 +1283,14 @@ function rejectRate(
   };
 }
 
-function normalizeText(value: string): string {
+export function normalizeText(value: string): string {
   return value
     .trim()
     .replace(/\s+/g, ' ')
     .toLowerCase();
 }
 
-function computeBurstRetryAfter(
+export function computeBurstRetryAfter(
   entries: readonly { readonly message: ChatMessage }[] | readonly ChatMessage[],
   now: UnixMs,
   windowMs: number,
@@ -1564,17 +1564,18 @@ export function computeRateDecisionFingerprint(
   session: ChatSessionState,
   channel: ChatVisibleChannel,
 ): RateDecisionFingerprint {
+  const primaryRoomId = session.roomIds[0] ?? null;
   const hash = [
     session.identity.sessionId,
-    session.roomId,
+    primaryRoomId,
     decision.outcome,
     channel,
-    decision.decidedAt,
+    decision.retryAfterMs,
   ].join('|');
 
   return Object.freeze({
     sessionId: session.identity.sessionId,
-    roomId: session.roomId,
+    roomId: primaryRoomId as ChatRoomId,
     outcome: decision.outcome,
     channel,
     hash,
@@ -1810,7 +1811,7 @@ export function aggregateRateWindowDecisions(
 
 export function typingModeRateImpact(mode: ChatTypingMode): number {
   switch (mode) {
-    case 'COMPOSING': return 0.0;  // no penalty while composing
+    case 'TYPING': return 0.0;  // no penalty while actively typing
     case 'PAUSED': return 0.05;
     case 'IDLE': return 0.1;
     default: return 0.0;
@@ -1826,7 +1827,7 @@ export function isPresenceSnapshotRateLimited(
   nowMs: number,
   minGapMs: number,
 ): boolean {
-  const lastSeen = presence.lastSeenAt as unknown as number;
+  const lastSeen = presence.updatedAt as unknown as number;
   return nowMs - lastSeen < minGapMs;
 }
 
@@ -1876,11 +1877,11 @@ export function buildChannelRateReport(
   const transcript = selectRoomTranscript(state, roomId);
   const recent = transcript.filter(
     (e) =>
-      e.message.attribution.channel === channel &&
+      e.message.channelId === channel &&
       (now as unknown as number) - (e.message.createdAt as unknown as number) <= windowMs,
   ).length;
 
-  const silenced = isRoomSilenced(state, roomId);
+  const silenced = isRoomSilenced(state, roomId, now);
   const invasions = getActiveRoomInvasions(state, roomId);
   const hasInvasion = invasions.some((i) => i.status === 'ACTIVE');
 
@@ -1986,3 +1987,98 @@ export function computeEffectiveRateLimitForSignal(signal: ChatSignalEnvelope, b
   if (signal.economy) return Math.min(baseLimit, 6);
   return baseLimit;
 }
+
+export const ChatRatePolicyModule = Object.freeze({
+  name: CHAT_RATE_POLICY_MODULE_NAME,
+  version: CHAT_RATE_POLICY_MODULE_VERSION,
+  versionExtended: CHAT_RATE_POLICY_MODULE_VERSION_EXTENDED,
+  laws: CHAT_RATE_POLICY_MODULE_LAWS,
+  descriptor: CHAT_RATE_POLICY_MODULE_DESCRIPTOR,
+  DEFAULT_CLOCK,
+  DEFAULT_LOGGER,
+  DEFAULT_PORTS,
+  DEFAULT_BOT_RATE_PROFILES,
+  NPC_ROLE_RATE_BUDGETS,
+  RateWatchBus,
+  RateDecisionEpochTracker,
+  createChatRatePolicyContext,
+  createRateWatchBus,
+  createRateDecisionEpochTracker,
+  allowRate,
+  rejectRate,
+  normalizeText,
+  computeBurstRetryAfter,
+  evaluatePlayerRate,
+  evaluateNpcRate,
+  evaluateSystemRate,
+  evaluateTypingRate,
+  evaluateInvasionRate,
+  buildCadenceSnapshot,
+  buildActorCadenceStats,
+  buildPlayerRateDiagnostic,
+  buildNpcRateDiagnostic,
+  evaluateConnectionGate,
+  evaluateVisibleChannelMembership,
+  evaluatePlayerBurstWindows,
+  evaluatePlayerRepetitionGate,
+  evaluatePlayerInvasionGate,
+  evaluateRoomFloodGate,
+  evaluateNpcInvasionGate,
+  evaluateNpcCadenceGate,
+  evaluateNpcRepeatGate,
+  evaluateNpcCrowdingGate,
+  evaluateHaterHostileSpacing,
+  evaluateHelperSpacing,
+  buildWindowStatsForSession,
+  buildWindowStatsForActor,
+  selectRecentMessagesForSession,
+  selectRecentMessagesForActor,
+  selectRecentNpcMessagesByRole,
+  selectActiveVisibleOccupants,
+  minimumGapForNpcRole,
+  explainPlayerRateDecision,
+  explainNpcRateDecision,
+  createRateAuditRecord,
+  createRoomFloodRule,
+  createHelperSpacingRule,
+  createHaterSpacingRule,
+  runRateRules,
+  auditRoomCadence,
+  auditAllRoomsCadence,
+  isSessionMuted,
+  isSessionShadowMuted,
+  isSessionInvisible,
+  isSessionAttached,
+  isSessionReconnecting,
+  isSessionDetached,
+  isSessionDisconnected,
+  isSessionSuspended,
+  roomHasVisibleOccupants,
+  roomHasTypingActivity,
+  roomHasActiveInvasion,
+  roomHasRecentPlayerSpeech,
+  roomHasRecentNpcSpeech,
+  explainRecentHelperWindow,
+  explainRecentHaterWindow,
+  explainRecentAmbientWindow,
+  countMessagesByChannelInWindow,
+  countMessagesBySourceTypeInWindow,
+  countMessagesByNpcRoleInWindow,
+  computeRateDecisionFingerprint,
+  buildRateDecisionStats,
+  aggregateRateWindowDecisions,
+  typingModeRateImpact,
+  isPresenceSnapshotRateLimited,
+  getBotRateProfile,
+  buildChannelRateReport,
+  scoreRatePressure,
+  buildInvasionRateImpactReport,
+  getNpcRoleBudget,
+  rateOutcomeLabel,
+  isBlockingOutcome,
+  isPermissiveOutcome,
+  rateOutcomeSeverity,
+  shouldRateGateNpcRole,
+  isInvasionBasedLockActive,
+  computeEffectiveRateLimitForSignal,
+} as const);

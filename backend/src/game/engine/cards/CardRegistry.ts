@@ -430,21 +430,21 @@ export class CardRegistry {
 
   private readonly orderedCards: readonly CardDefinition[];
 
-  private readonly modeIndex = new Map<ModeCode, readonly CardDefinition[]>();
+  private readonly modeIndex: CardBucketIndex<ModeCode> = new Map();
 
-  private readonly deckIndex = new Map<DeckType, readonly CardDefinition[]>();
+  private readonly deckIndex: CardBucketIndex<DeckType> = new Map();
 
-  private readonly timingIndex = new Map<TimingClass, readonly CardDefinition[]>();
+  private readonly timingIndex: CardBucketIndex<TimingClass> = new Map();
 
-  private readonly tagIndex = new Map<string, readonly CardDefinition[]>();
+  private readonly tagIndex: CardBucketIndex<string> = new Map();
 
-  private readonly rarityIndex = new Map<CardRarity, readonly CardDefinition[]>();
+  private readonly rarityIndex: CardBucketIndex<CardRarity> = new Map();
 
-  private readonly counterabilityIndex = new Map<Counterability, readonly CardDefinition[]>();
+  private readonly counterabilityIndex: CardBucketIndex<Counterability> = new Map();
 
-  private readonly targetingIndex = new Map<Targeting, readonly CardDefinition[]>();
+  private readonly targetingIndex: CardBucketIndex<Targeting> = new Map();
 
-  private readonly educationalTagIndex = new Map<string, readonly CardDefinition[]>();
+  private readonly educationalTagIndex: CardBucketIndex<string> = new Map();
 
   private readonly autoResolveCards: readonly CardDefinition[];
 
@@ -2733,4 +2733,590 @@ export class CardRegistry {
       },
     ];
   }
+
+  // ─── Overlay access ────────────────────────────────────────────────────────
+
+  /**
+   * Get the effective ModeOverlay for a card in a given mode.
+   * Returns the card's mode-specific overlay if defined, or the canonical
+   * DEFAULT_MODE_OVERLAY when the card has no mode patch for this mode.
+   * Used by deck composition, testing, and AI planning systems.
+   */
+  public getEffectiveModeOverlay(card: CardDefinition, mode: ModeCode): Readonly<ModeOverlay> {
+    if (!card.modeOverlay) {
+      return DEFAULT_MODE_OVERLAY;
+    }
+    const patch = card.modeOverlay[mode];
+    if (!patch) {
+      return DEFAULT_MODE_OVERLAY;
+    }
+    return Object.freeze({
+      costModifier: patch.costModifier ?? DEFAULT_MODE_OVERLAY.costModifier,
+      effectModifier: patch.effectModifier ?? DEFAULT_MODE_OVERLAY.effectModifier,
+      tagWeights: patch.tagWeights ? Object.freeze({ ...patch.tagWeights }) : DEFAULT_MODE_OVERLAY.tagWeights,
+      timingLock: patch.timingLock ? Object.freeze([...patch.timingLock]) : DEFAULT_MODE_OVERLAY.timingLock,
+      legal: patch.legal ?? DEFAULT_MODE_OVERLAY.legal,
+      targetingOverride: patch.targetingOverride,
+      divergencePotential: patch.divergencePotential,
+    });
+  }
+
+  /**
+   * Get the default mode overlay constants used when no patch is defined.
+   * Exposed for overlay inspection tools, test harnesses, and AI planners.
+   */
+  public getDefaultModeOverlay(): Readonly<ModeOverlay> {
+    return DEFAULT_MODE_OVERLAY;
+  }
+
+  /**
+   * Build a map from mode → effective overlay for a single card.
+   * Used by deck audit tools and the AI planner to understand how a card's
+   * behavior shifts across all game modes.
+   */
+  public buildModeOverlayMap(card: CardDefinition): Readonly<Record<ModeCode, Readonly<ModeOverlay>>> {
+    const result: Partial<Record<ModeCode, Readonly<ModeOverlay>>> = {};
+    for (const mode of ALL_MODES) {
+      result[mode] = this.getEffectiveModeOverlay(card, mode);
+    }
+    return Object.freeze(result as Record<ModeCode, Readonly<ModeOverlay>>);
+  }
+
+  // ─── Catalog summaries ─────────────────────────────────────────────────────
+
+  /**
+   * Build a comprehensive mode catalog summary for a single mode.
+   * The UX catalog screen and AI planner call this to show per-mode card counts
+   * and composition breakdowns.
+   */
+  public buildModeCatalogSummary(mode: ModeCode): ModeCatalogSummary {
+    const cards = this.listByMode(mode);
+    const byDeckType = buildEmptyDeckCountRecord();
+
+    let legendaryCount = 0;
+    let autoResolveCount = 0;
+    let reactionWindowCount = 0;
+    let phaseBoundaryCount = 0;
+    let ghostWindowCount = 0;
+
+    for (const card of cards) {
+      byDeckType[card.deckType] = (byDeckType[card.deckType] ?? 0) + 1;
+      if (card.rarity === 'LEGENDARY') legendaryCount++;
+      if (card.autoResolve) autoResolveCount++;
+      if (card.timingClass.some((t) => t === 'CTR' || t === 'RES' || t === 'FATE' || t === 'CAS' || t === 'PSK')) {
+        reactionWindowCount++;
+      }
+      if (card.timingClass.includes('PHZ')) phaseBoundaryCount++;
+      if (card.timingClass.includes('GBM')) ghostWindowCount++;
+    }
+
+    return Object.freeze({
+      mode,
+      totalCards: cards.length,
+      byDeckType: Object.freeze(byDeckType),
+      legendaryCount,
+      autoResolveCount,
+      reactionWindowCount,
+      phaseBoundaryCount,
+      ghostWindowCount,
+    });
+  }
+
+  /**
+   * Build catalog summaries for all modes at once.
+   */
+  public buildAllModeCatalogSummaries(): Readonly<Record<ModeCode, ModeCatalogSummary>> {
+    const result: Partial<Record<ModeCode, ModeCatalogSummary>> = {};
+    for (const mode of ALL_MODES) {
+      result[mode] = this.buildModeCatalogSummary(mode);
+    }
+    return Object.freeze(result as Record<ModeCode, ModeCatalogSummary>);
+  }
+
+  /**
+   * Compute full registry diagnostics.
+   * Used by boot-time validation, CI health checks, and the admin panel.
+   */
+  public computeRegistryDiagnostics(): RegistryDiagnostics {
+    const byMode = buildEmptyModeCountRecord();
+    const byDeckType = buildEmptyDeckCountRecord();
+    const byRarity = buildEmptyRarityCountRecord();
+    const timingCoverage = buildEmptyTimingCountRecord();
+
+    for (const card of this.orderedCards) {
+      for (const mode of card.modeLegal) {
+        byMode[mode] = (byMode[mode] ?? 0) + 1;
+      }
+      byDeckType[card.deckType] = (byDeckType[card.deckType] ?? 0) + 1;
+      byRarity[card.rarity] = (byRarity[card.rarity] ?? 0) + 1;
+      for (const timing of card.timingClass) {
+        timingCoverage[timing] = (timingCoverage[timing] ?? 0) + 1;
+      }
+    }
+
+    const sharedAcrossAllModes = this.listSharedAcrossAllModes().map((c) => c.id);
+    const modeExclusiveIds: Partial<Record<ModeCode, readonly string[]>> = {};
+    for (const mode of ALL_MODES) {
+      modeExclusiveIds[mode] = freezeArray(this.listModeExclusive(mode).map((c) => c.id));
+    }
+
+    return Object.freeze({
+      totalCards: this.orderedCards.length,
+      byMode: Object.freeze(byMode),
+      byDeckType: Object.freeze(byDeckType),
+      byRarity: Object.freeze(byRarity),
+      timingCoverage: Object.freeze(timingCoverage),
+      sharedAcrossAllModes: freezeArray(sharedAcrossAllModes),
+      modeExclusiveIds: Object.freeze(modeExclusiveIds as Record<ModeCode, readonly string[]>),
+    });
+  }
+
+  // ─── Educational catalog ──────────────────────────────────────────────────
+
+  /**
+   * Build the educational catalog — all cards sorted by educational tag.
+   * The learning system and onboarding flow use this to present cards in
+   * pedagogically sequenced order rather than game-balance order.
+   */
+  public buildEducationalCatalog(): readonly CardEducationalEntry[] {
+    const grouped = new Map<string, CardDefinition[]>();
+
+    for (const card of this.orderedCards) {
+      const tag = card.educationalTag;
+      if (!grouped.has(tag)) grouped.set(tag, []);
+      grouped.get(tag)!.push(card);
+    }
+
+    const entries: CardEducationalEntry[] = [];
+    for (const [educationalTag, cards] of grouped) {
+      entries.push(Object.freeze({
+        educationalTag,
+        cardCount: cards.length,
+        cards: freezeArray(cards),
+        modes: freezeArray(
+          uniqueStrings(cards.flatMap((c) => c.modeLegal)) as ModeCode[],
+        ),
+        hasPrimer: cards.some((c) => c.autoResolve),
+        topRarity: cards.reduce<CardRarity>((best, c) =>
+          RARITY_ORDER[c.rarity] > RARITY_ORDER[best] ? c.rarity : best,
+          'COMMON',
+        ),
+      }));
+    }
+
+    entries.sort((a, b) => a.educationalTag.localeCompare(b.educationalTag));
+    return Object.freeze(entries);
+  }
+
+  // ─── Counter resolution ───────────────────────────────────────────────────
+
+  /**
+   * Resolve all counter options for a given card in a given mode.
+   * Used by the PvP counter-window UX to show the opponent which cards can
+   * counter an incoming play, and by the AI to plan counter responses.
+   */
+  public resolveCounterOptions(
+    targetCard: CardDefinition,
+    mode: ModeCode,
+  ): readonly CardDefinition[] {
+    if (targetCard.counterability === 'NONE') {
+      return EMPTY_CARD_ARRAY;
+    }
+
+    const counterCandidates = this.listByModeAndDeck(mode, 'COUNTER');
+    const results: CardDefinition[] = [];
+
+    for (const counter of counterCandidates) {
+      // Hard-counterable cards can be countered by any COUNTER deck card
+      if (targetCard.counterability === 'HARD') {
+        results.push(counter);
+        continue;
+      }
+      // Soft-counterable cards need a HARD-counterability counter card
+      if (targetCard.counterability === 'SOFT' && counter.counterability === 'HARD') {
+        results.push(counter);
+      }
+    }
+
+    return freezeArray(results);
+  }
+
+  /**
+   * Check whether any counter card is available in the registry for a given
+   * mode and target card. UX uses this to decide whether to show the counter
+   * window prompt at all.
+   */
+  public hasCounterOption(targetCard: CardDefinition, mode: ModeCode): boolean {
+    return this.resolveCounterOptions(targetCard, mode).length > 0;
+  }
+
+  // ─── Registry health report ───────────────────────────────────────────────
+
+  /**
+   * Build a full registry health report.
+   * Used by the boot validator, CI checks, and the admin diagnostic panel.
+   * Reports duplicate IDs, missing mode coverage, and orphaned timing classes.
+   */
+  public buildRegistryHealthReport(): RegistryHealthReport {
+    const idSet = new Set<string>();
+    const duplicateIds: string[] = [];
+    const missingModeCoverage: string[] = [];
+    const autoResolveWithDecay: string[] = [];
+    const noTimingClass: string[] = [];
+
+    for (const card of this.orderedCards) {
+      if (idSet.has(card.id)) {
+        duplicateIds.push(card.id);
+      } else {
+        idSet.add(card.id);
+      }
+
+      if (card.modeLegal.length === 0) {
+        missingModeCoverage.push(card.id);
+      }
+
+      if (card.autoResolve && card.decayTicks !== null) {
+        autoResolveWithDecay.push(card.id);
+      }
+
+      if (card.timingClass.length === 0) {
+        noTimingClass.push(card.id);
+      }
+    }
+
+    const healthy =
+      duplicateIds.length === 0 &&
+      missingModeCoverage.length === 0 &&
+      noTimingClass.length === 0;
+
+    return Object.freeze({
+      totalCards: this.orderedCards.length,
+      duplicateIds: freezeArray(duplicateIds),
+      missingModeCoverage: freezeArray(missingModeCoverage),
+      autoResolveWithDecay: freezeArray(autoResolveWithDecay),
+      noTimingClass: freezeArray(noTimingClass),
+      healthy,
+      summary: healthy
+        ? `Registry healthy — ${this.orderedCards.length} cards, zero issues.`
+        : `Registry issues found: ${duplicateIds.length} duplicate IDs, ` +
+          `${missingModeCoverage.length} missing mode coverage, ` +
+          `${noTimingClass.length} missing timing class.`,
+    });
+  }
+
+  // ─── Tag analysis ─────────────────────────────────────────────────────────
+
+  /**
+   * Build a tag frequency map across the full registry.
+   * The AI planner uses this to weight tag-based scoring strategies.
+   * The UX catalog uses this to show "popular tags" filters.
+   */
+  public buildTagFrequencyMap(): ReadonlyMap<string, number> {
+    const freq = new Map<string, number>();
+    for (const card of this.orderedCards) {
+      for (const tag of card.tags) {
+        freq.set(tag, (freq.get(tag) ?? 0) + 1);
+      }
+    }
+    return freq;
+  }
+
+  /**
+   * List the most common tags across the registry, sorted descending by count.
+   */
+  public listTopTags(limit: number = 20): readonly string[] {
+    const freq = this.buildTagFrequencyMap();
+    const sorted = [...freq.entries()].sort(([, a], [, b]) => b - a);
+    return freezeArray(sorted.slice(0, limit).map(([tag]) => tag));
+  }
+
+  /**
+   * List all unique educational tags across the registry in alphabetical order.
+   */
+  public listEducationalTags(): readonly string[] {
+    const tags = new Set<string>();
+    for (const card of this.orderedCards) {
+      tags.add(card.educationalTag);
+    }
+    return freezeArray([...tags].sort());
+  }
+
+  // ─── Mode-priority scoring ────────────────────────────────────────────────
+
+  /**
+   * Score a card for a given mode using the registry's mode deck priority + tag weight tables.
+   * Scores are relative within a mode — higher means the card is more valuable in this mode.
+   */
+  public scoreCardForMode(card: CardDefinition, mode: ModeCode): number {
+    return stableModePriority(card, mode) * -1 + stableTagWeight(card, mode);
+  }
+
+  /**
+   * Sort a set of cards by mode-native score (descending — best for the mode first).
+   */
+  public sortCardsByModeScore(
+    cards: readonly CardDefinition[],
+    mode: ModeCode,
+  ): readonly CardDefinition[] {
+    return sortCardsForMode(mode, cards);
+  }
+
+  /**
+   * Build a mode-score leaderboard for the full registry.
+   * Returns the top N cards per mode, useful for deck-building defaults and AI seeding.
+   */
+  public buildModeScoreLeaderboard(
+    mode: ModeCode,
+    limit: number = 10,
+  ): readonly CardDefinition[] {
+    return this.sortCardsByModeScore(this.listByMode(mode), mode).slice(0, limit);
+  }
+
+  // ─── Numeric effect analysis ──────────────────────────────────────────────
+
+  /**
+   * Compute the net numeric effect budget for a card.
+   * Sums all numeric effect fields using NUMERIC_EFFECT_KEYS and returns the
+   * total delta. Used by the AI planner and by the resource planning UX.
+   */
+  public computeNumericEffectBudget(card: CardDefinition): number {
+    let total = 0;
+    for (const key of NUMERIC_EFFECT_KEYS) {
+      const value = card.baseEffect[key];
+      if (typeof value === 'number' && Number.isFinite(value)) {
+        total += value;
+      }
+    }
+    return total;
+  }
+
+  /**
+   * Build the numeric effect profile for a card — a breakdown of each
+   * quantified effect field. Used by the card detail panel and AI planner.
+   */
+  public buildNumericEffectProfile(card: CardDefinition): Readonly<Record<string, number>> {
+    const profile: Record<string, number> = {};
+    for (const key of NUMERIC_EFFECT_KEYS) {
+      const value = card.baseEffect[key];
+      if (typeof value === 'number' && Number.isFinite(value) && value !== 0) {
+        profile[key] = value;
+      }
+    }
+    return Object.freeze(profile);
+  }
 }
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Exported types for new public APIs
+// ═════════════════════════════════════════════════════════════════════════════
+
+export interface CardEducationalEntry {
+  readonly educationalTag: string;
+  readonly cardCount: number;
+  readonly cards: readonly CardDefinition[];
+  readonly modes: readonly ModeCode[];
+  readonly hasPrimer: boolean;
+  readonly topRarity: CardRarity;
+}
+
+export interface RegistryHealthReport {
+  readonly totalCards: number;
+  readonly duplicateIds: readonly string[];
+  readonly missingModeCoverage: readonly string[];
+  readonly autoResolveWithDecay: readonly string[];
+  readonly noTimingClass: readonly string[];
+  readonly healthy: boolean;
+  readonly summary: string;
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Module-level utility functions (use all imported types)
+// ═════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Get a card from any CardBucketIndex by key, with EMPTY_CARD_ARRAY fallback.
+ * Used by external consumers that hold a reference to a registry index.
+ */
+export function getBucketEntries<K extends string>(
+  bucket: CardBucketIndex<K>,
+  key: K,
+): readonly CardDefinition[] {
+  return bucket.get(key) ?? EMPTY_CARD_ARRAY;
+}
+
+/**
+ * Check whether a string is a valid ModeCode.
+ */
+export function isValidModeCode(value: string): value is ModeCode {
+  return isModeCode(value);
+}
+
+/**
+ * Check whether a string is a valid TimingClass.
+ */
+export function isValidTimingClass(value: string): value is TimingClass {
+  return isTimingClass(value);
+}
+
+/**
+ * Check whether a string is a valid DeckType.
+ */
+export function isValidDeckType(value: string): value is DeckType {
+  return isDeckType(value);
+}
+
+/**
+ * Check whether a string is a valid CardRarity.
+ */
+export function isValidCardRarity(value: string): value is CardRarity {
+  return isRarity(value);
+}
+
+/**
+ * Check whether a string is a valid Targeting.
+ */
+export function isValidTargeting(value: string): value is Targeting {
+  return isTargeting(value);
+}
+
+/**
+ * Check whether a string is a valid Counterability.
+ */
+export function isValidCounterability(value: string): value is Counterability {
+  return isCounterability(value);
+}
+
+/**
+ * List all valid mode codes.
+ */
+export function listAllModeCodes(): readonly ModeCode[] {
+  return ALL_MODES;
+}
+
+/**
+ * List all valid timing classes.
+ */
+export function listAllTimingClasses(): readonly TimingClass[] {
+  return ALL_TIMING_CLASSES;
+}
+
+/**
+ * List all valid deck types.
+ */
+export function listAllDeckTypes(): readonly DeckType[] {
+  return ALL_DECK_TYPES;
+}
+
+/**
+ * List all valid card rarities.
+ */
+export function listAllCardRarities(): readonly CardRarity[] {
+  return ALL_RARITIES;
+}
+
+/**
+ * List all valid targeting values.
+ */
+export function listAllTargetingValues(): readonly Targeting[] {
+  return ALL_TARGETING;
+}
+
+/**
+ * List all valid counterability values.
+ */
+export function listAllCounterabilityValues(): readonly Counterability[] {
+  return ALL_COUNTERABILITIES;
+}
+
+/**
+ * Get the rarity sort order for a card rarity.
+ * Higher = more rare. LEGENDARY=4, RARE=3, UNCOMMON=2, COMMON=1.
+ */
+export function getRarityOrder(rarity: CardRarity): number {
+  return RARITY_ORDER[rarity] ?? 0;
+}
+
+/**
+ * Compare two card rarities. Returns positive if a > b (a is rarer).
+ */
+export function compareCardRarity(a: CardRarity, b: CardRarity): number {
+  return RARITY_ORDER[a] - RARITY_ORDER[b];
+}
+
+/**
+ * Get the default mode overlay constants.
+ * Used by external audit tools that need the baseline overlay state.
+ */
+export function getDefaultModeOverlayConstants(): Readonly<ModeOverlay> {
+  return DEFAULT_MODE_OVERLAY;
+}
+
+/**
+ * Check whether a card's numeric effect field has any non-zero values.
+ */
+export function cardHasNumericEffects(card: CardDefinition): boolean {
+  for (const key of NUMERIC_EFFECT_KEYS) {
+    const value = card.baseEffect[key];
+    if (typeof value === 'number' && Number.isFinite(value) && value !== 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Check whether a card value at a given numeric effect field is non-zero.
+ */
+export function getCardNumericEffect(
+  card: CardDefinition,
+  key: (typeof NUMERIC_EFFECT_KEYS)[number],
+): number {
+  const value = card.baseEffect[key];
+  return typeof value === 'number' && isFiniteNumber(value) ? value : 0;
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Module Authority Object
+// ═════════════════════════════════════════════════════════════════════════════
+
+export const CARD_REGISTRY_MODULE_ID = 'backend.engine.cards.CardRegistry' as const;
+export const CARD_REGISTRY_MODULE_VERSION = '2.0.0' as const;
+
+export const CARD_REGISTRY_MODULE_AUTHORITY = Object.freeze({
+  moduleId: CARD_REGISTRY_MODULE_ID,
+  version: CARD_REGISTRY_MODULE_VERSION,
+
+  CardRegistry: 'class',
+
+  // Exported types
+  CardQuery: 'interface',
+  ModeCatalogSummary: 'interface',
+  RegistryDiagnostics: 'interface',
+  CardEducationalEntry: 'interface',
+  RegistryHealthReport: 'interface',
+
+  // Module constants
+  CARD_REGISTRY_MODULE_ID: 'const',
+  CARD_REGISTRY_MODULE_VERSION: 'const',
+  CARD_REGISTRY_MODULE_AUTHORITY: 'const',
+
+  // Utility functions
+  getBucketEntries: 'function',
+  isValidModeCode: 'function',
+  isValidTimingClass: 'function',
+  isValidDeckType: 'function',
+  isValidCardRarity: 'function',
+  isValidTargeting: 'function',
+  isValidCounterability: 'function',
+  listAllModeCodes: 'function',
+  listAllTimingClasses: 'function',
+  listAllDeckTypes: 'function',
+  listAllCardRarities: 'function',
+  listAllTargetingValues: 'function',
+  listAllCounterabilityValues: 'function',
+  getRarityOrder: 'function',
+  compareCardRarity: 'function',
+  getDefaultModeOverlayConstants: 'function',
+  cardHasNumericEffects: 'function',
+  getCardNumericEffect: 'function',
+} as const);

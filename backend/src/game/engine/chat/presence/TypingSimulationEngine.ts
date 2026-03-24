@@ -1015,6 +1015,7 @@ function buildFallbackLatency(
           : presence.variantKey === 'DEAL_PREDATOR'
             ? 'NEGOTIATION_PRESSURE'
             : 'DEFAULT_CADENCE',
+    cadenceBand: (presence.styleProfile as any)?.cadenceBand ?? 'DEFAULT',
     delayMs,
     revealAt,
     entryStyle: presence.behavior.shouldLurk ? 'LURK_THEN_STRIKE' : 'TYPING_REVEAL',

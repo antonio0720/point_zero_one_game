@@ -231,6 +231,10 @@ function rewardHintsFromLegend(record: LegendMomentRecord): readonly ChatLegendR
   return freezeArray(((record.acceptedEvent as { rewardHints?: readonly ChatLegendRewardHint[] }).rewardHints ?? []) as readonly ChatLegendRewardHint[]);
 }
 
+export function extractRewardHintsFromEvent(event: ChatLegendEvent): readonly ChatLegendRewardHint[] {
+  return freezeArray(((event as { rewardHints?: readonly ChatLegendRewardHint[] }).rewardHints ?? []) as readonly ChatLegendRewardHint[]);
+}
+
 function rewardClassFromHint(hint: ChatLegendRewardHint): ChatRewardClass | null {
   return ((hint as { rewardClass?: ChatRewardClass | null }).rewardClass ?? null) as ChatRewardClass | null;
 }
@@ -794,6 +798,7 @@ export const ChatRewardGrantResolverModule = Object.freeze({
   defaults: DEFAULT_REWARD_GRANT_RESOLVER_CONFIG,
   createRewardGrantResolver,
   resolveLegendRewardBatch,
+  extractRewardHintsFromEvent,
   RewardGrantResolver,
 } as const);
 

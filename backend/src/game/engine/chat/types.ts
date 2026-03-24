@@ -2036,7 +2036,7 @@ export function rateOutcomeAllows(outcome: ChatRateOutcome): boolean {
 }
 
 export function rateOutcomeBlocks(outcome: ChatRateOutcome): boolean {
-  return outcome === 'BLOCK' || outcome === 'THROTTLE';
+  return outcome === 'LOCK' || outcome === 'THROTTLE';
 }
 
 // ============================================================================
@@ -2060,4 +2060,1609 @@ export const CHAT_TYPES_MODULE_DESCRIPTOR = Object.freeze({
   typingModeCount: CHAT_TYPING_STATES.length,
   moderationOutcomeCount: CHAT_MODERATION_OUTCOMES.length,
 });
+
+// ============================================================================
+// MARK: Additional branded cast helpers
+// ============================================================================
+
+export function asChatOfferId(value: string): ChatOfferId {
+  return value as ChatOfferId;
+}
+
+export function asChatDriftId(value: string): ChatDriftId {
+  return value as ChatDriftId;
+}
+
+// ============================================================================
+// MARK: Additional type predicate helpers
+// ============================================================================
+
+export function isChatSessionRole(value: string): value is ChatSessionRole {
+  return (CHAT_SESSION_ROLES as readonly string[]).includes(value);
+}
+
+export function isChatNpcRole(value: string): value is ChatNpcRole {
+  return (CHAT_NPC_ROLES as readonly string[]).includes(value);
+}
+
+export function isChatInferenceSource(value: string): value is ChatInferenceSource {
+  return (CHAT_INFERENCE_SOURCES as readonly string[]).includes(value);
+}
+
+export function isChatRoomStageMood(value: string): value is ChatRoomStageMood {
+  return (CHAT_ROOM_STAGE_MOODS as readonly string[]).includes(value);
+}
+
+export function isChatChannelMood(value: string): value is ChatChannelMood {
+  return (CHAT_CHANNEL_MOODS as readonly string[]).includes(value);
+}
+
+export function isChatSignalType(value: string): value is ChatSignalType {
+  return (CHAT_SIGNAL_TYPES as readonly string[]).includes(value);
+}
+
+export function isChatRateOutcome(value: string): value is ChatRateOutcome {
+  return (CHAT_RATE_OUTCOMES as readonly string[]).includes(value);
+}
+
+export function isChatPressureTier(value: string): value is PressureTier {
+  const tiers: readonly string[] = ['NONE', 'BUILDING', 'ELEVATED', 'HIGH', 'CRITICAL'];
+  return tiers.includes(value);
+}
+
+export function isChatTickTier(value: string): value is TickTier {
+  const tiers: readonly string[] = ['SETUP', 'WINDOW', 'COMMIT', 'RESOLUTION', 'SEAL'];
+  return tiers.includes(value);
+}
+
+export function isChatAuthorityRootKey(value: string): value is ChatAuthorityRootKey {
+  return Object.prototype.hasOwnProperty.call(CHAT_AUTHORITY_ROOTS, value);
+}
+
+// ============================================================================
+// MARK: Authority root accessors
+// ============================================================================
+
+/** Returns the filesystem root for the given chat authority domain. */
+export function getAuthorityRoot(key: ChatAuthorityRootKey): string {
+  return CHAT_AUTHORITY_ROOTS[key];
+}
+
+/** Joins a sub-path onto the backend engine root. */
+export function resolveBackendEnginePath(subPath: string): string {
+  return `${CHAT_AUTHORITY_ROOTS.backendEngineRoot}/${subPath}`;
+}
+
+/** Joins a sub-path onto the backend learning root. */
+export function resolveBackendLearningPath(subPath: string): string {
+  return `${CHAT_AUTHORITY_ROOTS.backendLearningRoot}/${subPath}`;
+}
+
+/** Joins a sub-path onto the shared contracts root. */
+export function resolveSharedContractPath(subPath: string): string {
+  return `${CHAT_AUTHORITY_ROOTS.sharedContractsRoot}/${subPath}`;
+}
+
+/** Joins a sub-path onto the shared learning contracts root. */
+export function resolveSharedLearningPath(subPath: string): string {
+  return `${CHAT_AUTHORITY_ROOTS.sharedLearningRoot}/${subPath}`;
+}
+
+/** Joins a sub-path onto the frontend engine root. */
+export function resolveFrontendEnginePath(subPath: string): string {
+  return `${CHAT_AUTHORITY_ROOTS.frontendEngineRoot}/${subPath}`;
+}
+
+/** Joins a sub-path onto the frontend UI root. */
+export function resolveFrontendUiPath(subPath: string): string {
+  return `${CHAT_AUTHORITY_ROOTS.frontendUiRoot}/${subPath}`;
+}
+
+/** Joins a sub-path onto the server transport root. */
+export function resolveServerTransportPath(subPath: string): string {
+  return `${CHAT_AUTHORITY_ROOTS.serverTransportRoot}/${subPath}`;
+}
+
+/** Returns all defined authority root keys. */
+export function listAuthorityRootKeys(): readonly ChatAuthorityRootKey[] {
+  return Object.freeze(Object.keys(CHAT_AUTHORITY_ROOTS) as ChatAuthorityRootKey[]);
+}
+
+// ============================================================================
+// MARK: Channel descriptor accessors
+// ============================================================================
+
+/** Returns the full descriptor for the given channel. */
+export function getChannelDescriptor(channelId: ChatChannelId): ChatChannelDescriptor {
+  return CHAT_CHANNEL_DESCRIPTORS[channelId];
+}
+
+/** Returns true if the channel supports a composer (players can type). */
+export function channelSupportsComposer(channelId: ChatChannelId): boolean {
+  return CHAT_CHANNEL_DESCRIPTORS[channelId].supportsComposer;
+}
+
+/** Returns true if the channel tracks per-session presence. */
+export function channelSupportsPresence(channelId: ChatChannelId): boolean {
+  return CHAT_CHANNEL_DESCRIPTORS[channelId].supportsPresence;
+}
+
+/** Returns true if the channel emits typing indicators. */
+export function channelSupportsTyping(channelId: ChatChannelId): boolean {
+  return CHAT_CHANNEL_DESCRIPTORS[channelId].supportsTyping;
+}
+
+/** Returns true if the channel tracks read receipts. */
+export function channelSupportsReadReceipts(channelId: ChatChannelId): boolean {
+  return CHAT_CHANNEL_DESCRIPTORS[channelId].supportsReadReceipts;
+}
+
+/** Returns true if the channel produces replay artifacts. */
+export function channelSupportsReplay(channelId: ChatChannelId): boolean {
+  return CHAT_CHANNEL_DESCRIPTORS[channelId].supportsReplay;
+}
+
+/** Returns true if the channel contributes to crowd heat scoring. */
+export function channelSupportsCrowdHeat(channelId: ChatChannelId): boolean {
+  return CHAT_CHANNEL_DESCRIPTORS[channelId].supportsCrowdHeat;
+}
+
+/** Returns true if the channel accepts NPC injections. */
+export function channelSupportsNpcInjection(channelId: ChatChannelId): boolean {
+  return CHAT_CHANNEL_DESCRIPTORS[channelId].supportsNpcInjection;
+}
+
+/** Returns true if the channel is a deal / negotiation channel. */
+export function channelSupportsNegotiation(channelId: ChatChannelId): boolean {
+  return CHAT_CHANNEL_DESCRIPTORS[channelId].supportsNegotiation;
+}
+
+/** Returns true if the channel can host helper rescue sequences. */
+export function channelSupportsRescue(channelId: ChatChannelId): boolean {
+  return CHAT_CHANNEL_DESCRIPTORS[channelId].supportsRescue;
+}
+
+/** Returns true if the channel allows shadow-lane writes. */
+export function channelSupportsShadowWrites(channelId: ChatChannelId): boolean {
+  return CHAT_CHANNEL_DESCRIPTORS[channelId].supportsShadowWrites;
+}
+
+/** Returns true if the channel is visible to the player. */
+export function channelIsVisibleToPlayer(channelId: ChatChannelId): boolean {
+  return CHAT_CHANNEL_DESCRIPTORS[channelId].visibleToPlayer;
+}
+
+/** Returns the persistence class for a given channel. */
+export function channelPersistenceClass(
+  channelId: ChatChannelId,
+): ChatChannelDescriptor['persistenceClass'] {
+  return CHAT_CHANNEL_DESCRIPTORS[channelId].persistenceClass;
+}
+
+/** Returns true if the channel's persistence is transient (cleared after run). */
+export function channelIsTransient(channelId: ChatChannelId): boolean {
+  return CHAT_CHANNEL_DESCRIPTORS[channelId].persistenceClass === 'TRANSIENT';
+}
+
+/** Returns true if the channel's messages are scoped to a single run. */
+export function channelIsRunScoped(channelId: ChatChannelId): boolean {
+  return CHAT_CHANNEL_DESCRIPTORS[channelId].persistenceClass === 'RUN_SCOPED';
+}
+
+/** Returns true if the channel's messages persist across runs (account-scoped). */
+export function channelIsAccountScoped(channelId: ChatChannelId): boolean {
+  return CHAT_CHANNEL_DESCRIPTORS[channelId].persistenceClass === 'ACCOUNT_SCOPED';
+}
+
+/** Returns all visible channels whose descriptors match the given predicate. */
+export function filterVisibleChannelsByDescriptor(
+  predicate: (descriptor: ChatChannelDescriptor) => boolean,
+): readonly ChatVisibleChannel[] {
+  return CHAT_VISIBLE_CHANNELS.filter((ch) => predicate(CHAT_CHANNEL_DESCRIPTORS[ch]));
+}
+
+/** Returns all shadow channels whose descriptors match the given predicate. */
+export function filterShadowChannelsByDescriptor(
+  predicate: (descriptor: ChatChannelDescriptor) => boolean,
+): readonly ChatShadowChannel[] {
+  return CHAT_SHADOW_CHANNELS.filter((ch) => predicate(CHAT_CHANNEL_DESCRIPTORS[ch]));
+}
+
+/** Returns all channels (visible + shadow) that support NPC injection. */
+export function listNpcInjectionChannels(): readonly ChatChannelId[] {
+  return CHAT_ALL_CHANNELS.filter((ch) => CHAT_CHANNEL_DESCRIPTORS[ch].supportsNpcInjection);
+}
+
+/** Returns all channels that support crowd heat signals. */
+export function listCrowdHeatChannels(): readonly ChatChannelId[] {
+  return CHAT_ALL_CHANNELS.filter((ch) => CHAT_CHANNEL_DESCRIPTORS[ch].supportsCrowdHeat);
+}
+
+/** Returns all channels that support rescue sequences. */
+export function listRescueChannels(): readonly ChatChannelId[] {
+  return CHAT_ALL_CHANNELS.filter((ch) => CHAT_CHANNEL_DESCRIPTORS[ch].supportsRescue);
+}
+
+/** Returns all channels that support shadow writes. */
+export function listShadowWriteChannels(): readonly ChatChannelId[] {
+  return CHAT_ALL_CHANNELS.filter((ch) => CHAT_CHANNEL_DESCRIPTORS[ch].supportsShadowWrites);
+}
+
+// ============================================================================
+// MARK: Mount policy accessors
+// ============================================================================
+
+export type ChatMountTarget = ChatMountPolicy['mountTarget'];
+
+/** Returns all valid mount targets. */
+export const CHAT_MOUNT_TARGETS: readonly ChatMountTarget[] = Object.freeze([
+  'BATTLE_HUD',
+  'CLUB_UI',
+  'EMPIRE_GAME_SCREEN',
+  'GAME_BOARD',
+  'LEAGUE_UI',
+  'LOBBY_SCREEN',
+  'PHANTOM_GAME_SCREEN',
+  'PREDATOR_GAME_SCREEN',
+  'SYNDICATE_GAME_SCREEN',
+  'POST_RUN_SUMMARY',
+] as const);
+
+/** Returns true if the value is a valid mount target. */
+export function isChatMountTarget(value: string): value is ChatMountTarget {
+  return (CHAT_MOUNT_TARGETS as readonly string[]).includes(value);
+}
+
+/** Returns the full mount policy for the given target. */
+export function getMountPolicy(target: ChatMountTarget): ChatMountPolicy {
+  return CHAT_MOUNT_POLICIES[target];
+}
+
+/** Returns the default visible channel for the given mount target. */
+export function mountTargetDefaultChannel(target: ChatMountTarget): ChatVisibleChannel {
+  return CHAT_MOUNT_POLICIES[target].defaultVisibleChannel;
+}
+
+/** Returns the allowed visible channels for the given mount target. */
+export function mountTargetAllowedChannels(target: ChatMountTarget): readonly ChatVisibleChannel[] {
+  return CHAT_MOUNT_POLICIES[target].allowedVisibleChannels;
+}
+
+/** Returns true if the chat panel can be collapsed at this mount target. */
+export function mountTargetAllowsCollapse(target: ChatMountTarget): boolean {
+  return CHAT_MOUNT_POLICIES[target].allowCollapse;
+}
+
+/** Returns true if the chat panel should start collapsed at this mount target. */
+export function mountTargetDefaultsCollapsed(target: ChatMountTarget): boolean {
+  return CHAT_MOUNT_POLICIES[target].defaultCollapsed;
+}
+
+/** Returns the stage mood associated with the given mount target. */
+export function mountTargetStageMood(target: ChatMountTarget): ChatRoomStageMood {
+  return CHAT_MOUNT_POLICIES[target].stageMood;
+}
+
+/** Returns the composer placeholder text for the given mount target. */
+export function mountTargetComposerPlaceholder(target: ChatMountTarget): string {
+  return CHAT_MOUNT_POLICIES[target].defaultComposerPlaceholder;
+}
+
+/** Returns true if the given channel is allowed at the given mount target. */
+export function mountTargetAllowsChannel(
+  target: ChatMountTarget,
+  channelId: ChatVisibleChannel,
+): boolean {
+  return CHAT_MOUNT_POLICIES[target].allowedVisibleChannels.includes(channelId);
+}
+
+/** Returns all mount targets that expose the given visible channel by default. */
+export function listMountTargetsWithDefaultChannel(
+  channelId: ChatVisibleChannel,
+): readonly ChatMountTarget[] {
+  return CHAT_MOUNT_TARGETS.filter(
+    (t) => CHAT_MOUNT_POLICIES[t].defaultVisibleChannel === channelId,
+  );
+}
+
+/** Returns all mount targets whose default stage mood matches the given value. */
+export function listMountTargetsByStageMood(mood: ChatRoomStageMood): readonly ChatMountTarget[] {
+  return CHAT_MOUNT_TARGETS.filter((t) => CHAT_MOUNT_POLICIES[t].stageMood === mood);
+}
+
+/** Returns all mount targets that start collapsed. */
+export function listCollapsedByDefaultMountTargets(): readonly ChatMountTarget[] {
+  return CHAT_MOUNT_TARGETS.filter((t) => CHAT_MOUNT_POLICIES[t].defaultCollapsed);
+}
+
+// ============================================================================
+// MARK: Runtime config helpers
+// ============================================================================
+
+/**
+ * Creates a fully populated runtime config by merging a partial override
+ * onto the authoritative defaults. Safe to call at engine boot time.
+ */
+export function mergeRuntimeConfig(
+  partial: Partial<ChatRuntimeConfig>,
+): Readonly<ChatRuntimeConfig> {
+  return Object.freeze({
+    ...CHAT_RUNTIME_DEFAULTS,
+    ...partial,
+    ratePolicy: Object.freeze({
+      ...CHAT_RUNTIME_DEFAULTS.ratePolicy,
+      ...(partial.ratePolicy ?? {}),
+    }),
+    moderationPolicy: Object.freeze({
+      ...CHAT_RUNTIME_DEFAULTS.moderationPolicy,
+      ...(partial.moderationPolicy ?? {}),
+    }),
+    replayPolicy: Object.freeze({
+      ...CHAT_RUNTIME_DEFAULTS.replayPolicy,
+      ...(partial.replayPolicy ?? {}),
+    }),
+    learningPolicy: Object.freeze({
+      ...CHAT_RUNTIME_DEFAULTS.learningPolicy,
+      ...(partial.learningPolicy ?? {}),
+    }),
+    proofPolicy: Object.freeze({
+      ...CHAT_RUNTIME_DEFAULTS.proofPolicy,
+      ...(partial.proofPolicy ?? {}),
+    }),
+    invasionPolicy: Object.freeze({
+      ...CHAT_RUNTIME_DEFAULTS.invasionPolicy,
+      ...(partial.invasionPolicy ?? {}),
+    }),
+  });
+}
+
+/** Returns a pristine copy of the authoritative runtime defaults. */
+export function createDefaultRuntimeConfig(): Readonly<ChatRuntimeConfig> {
+  return CHAT_RUNTIME_DEFAULTS;
+}
+
+/** Returns true if the runtime config permits visible-channel chat. */
+export function runtimeAllowsVisibleChat(config: ChatRuntimeConfig): boolean {
+  return config.allowVisibleChannels.length > 0;
+}
+
+/** Returns true if the runtime config permits shadow-lane writes. */
+export function runtimeAllowsShadowChat(config: ChatRuntimeConfig): boolean {
+  return config.allowShadowChannels.length > 0;
+}
+
+/** Returns true if the given visible channel is enabled in this runtime config. */
+export function runtimeAllowsChannel(
+  config: ChatRuntimeConfig,
+  channelId: ChatVisibleChannel,
+): boolean {
+  return config.allowVisibleChannels.includes(channelId);
+}
+
+/** Returns true if the given shadow channel is enabled in this runtime config. */
+export function runtimeAllowsShadowChannel(
+  config: ChatRuntimeConfig,
+  channelId: ChatShadowChannel,
+): boolean {
+  return config.allowShadowChannels.includes(channelId);
+}
+
+/** Returns true if learning is enabled in the runtime config. */
+export function runtimeLearningEnabled(config: ChatRuntimeConfig): boolean {
+  return config.learningPolicy.enabled;
+}
+
+/** Returns true if replay is enabled in the runtime config. */
+export function runtimeReplayEnabled(config: ChatRuntimeConfig): boolean {
+  return config.replayPolicy.enabled;
+}
+
+/** Returns true if proof-chain recording is enabled in the runtime config. */
+export function runtimeProofEnabled(config: ChatRuntimeConfig): boolean {
+  return config.proofPolicy.enabled;
+}
+
+/** Returns true if invasion mechanics are enabled in the runtime config. */
+export function runtimeInvasionsEnabled(config: ChatRuntimeConfig): boolean {
+  return config.invasionPolicy.enabled;
+}
+
+/** Returns the maximum characters allowed per player message. */
+export function runtimeMaxMessageLength(config: ChatRuntimeConfig): number {
+  return config.moderationPolicy.maxCharactersPerMessage;
+}
+
+/** Returns the per-second burst ceiling for player messages. */
+export function runtimeBurstLimit(config: ChatRuntimeConfig): number {
+  return config.ratePolicy.perSecondBurstLimit;
+}
+
+// ============================================================================
+// MARK: Relationship state helpers
+// ============================================================================
+
+/** Returns true if the relationship indicates baseline trust (trust01 >= 0.5). */
+export function relationshipHasTrust(rel: ChatRelationshipState): boolean {
+  return (rel.trust01 as unknown as number) >= 0.5;
+}
+
+/** Returns true if the relationship is dominated by fear (fear01 >= 0.6). */
+export function relationshipIsFearDominated(rel: ChatRelationshipState): boolean {
+  return (rel.fear01 as unknown as number) >= 0.6;
+}
+
+/** Returns true if contempt is dangerously high (contempt01 >= 0.7). */
+export function relationshipIsContemptDominated(rel: ChatRelationshipState): boolean {
+  return (rel.contempt01 as unknown as number) >= 0.7;
+}
+
+/** Returns true if the user is fascinated by this NPC actor (fascination01 >= 0.6). */
+export function relationshipIsFascinationActive(rel: ChatRelationshipState): boolean {
+  return (rel.fascination01 as unknown as number) >= 0.6;
+}
+
+/** Returns true if rivalry is active (rivalry01 >= 0.5). */
+export function relationshipIsRivalryActive(rel: ChatRelationshipState): boolean {
+  return (rel.rivalry01 as unknown as number) >= 0.5;
+}
+
+/** Returns true if the helper has accumulated rescue debt (rescueDebt01 >= 0.3). */
+export function relationshipHasRescueDebt(rel: ChatRelationshipState): boolean {
+  return (rel.rescueDebt01 as unknown as number) >= 0.3;
+}
+
+/**
+ * Returns a rough dominant affect label for this relationship, useful for
+ * logging, diagnostics, and UX annotation in replay / debrief views.
+ */
+export function relationshipDominantAffect(
+  rel: ChatRelationshipState,
+): 'TRUST' | 'FEAR' | 'CONTEMPT' | 'FASCINATION' | 'RIVALRY' | 'RESCUE_DEBT' | 'NEUTRAL' {
+  const scores: Array<[string, number]> = [
+    ['TRUST', rel.trust01 as unknown as number],
+    ['FEAR', rel.fear01 as unknown as number],
+    ['CONTEMPT', rel.contempt01 as unknown as number],
+    ['FASCINATION', rel.fascination01 as unknown as number],
+    ['RIVALRY', rel.rivalry01 as unknown as number],
+    ['RESCUE_DEBT', rel.rescueDebt01 as unknown as number],
+  ];
+  let bestLabel = 'NEUTRAL';
+  let bestScore = 0.35; // minimum threshold to claim a dominant affect
+  for (const [label, score] of scores) {
+    if (score > bestScore) {
+      bestScore = score;
+      bestLabel = label;
+    }
+  }
+  return bestLabel as ReturnType<typeof relationshipDominantAffect>;
+}
+
+/**
+ * Returns a 0–100 relationship intensity score derived from all affect axes.
+ * Used in UI intensity rings and NPC pacing decisions.
+ */
+export function relationshipIntensity(rel: ChatRelationshipState): Score100 {
+  const raw =
+    (rel.trust01 as unknown as number) * 0.15 +
+    (rel.fear01 as unknown as number) * 0.25 +
+    (rel.contempt01 as unknown as number) * 0.25 +
+    (rel.fascination01 as unknown as number) * 0.15 +
+    (rel.rivalry01 as unknown as number) * 0.1 +
+    (rel.rescueDebt01 as unknown as number) * 0.1;
+  return clamp100(Math.round(raw * 100));
+}
+
+/**
+ * Produces a compact digest string of this relationship's current affect axes.
+ * Format: "T:0.72|F:0.10|C:0.20|Fa:0.55|Ri:0.30|RD:0.05"
+ * Suitable for telemetry tags and debrief overlays.
+ */
+export function relationshipAffectDigest(rel: ChatRelationshipState): string {
+  const fmt = (n: Score01) => ((n as unknown as number) * 100).toFixed(0).padStart(3, ' ');
+  return (
+    `T:${fmt(rel.trust01)}` +
+    `|F:${fmt(rel.fear01)}` +
+    `|C:${fmt(rel.contempt01)}` +
+    `|Fa:${fmt(rel.fascination01)}` +
+    `|Ri:${fmt(rel.rivalry01)}` +
+    `|RD:${fmt(rel.rescueDebt01)}`
+  );
+}
+
+/**
+ * Returns true if the relationship is fresh enough to drive NPC decisions
+ * (updated within the last `windowMs` milliseconds).
+ */
+export function relationshipIsFresh(
+  rel: ChatRelationshipState,
+  now: UnixMs,
+  windowMs: number,
+): boolean {
+  return unixMsAge(rel.updatedAt, now) <= windowMs;
+}
+
+/** Returns true if the relationship has never been updated (default zero state). */
+export function relationshipIsDefault(rel: ChatRelationshipState): boolean {
+  return (
+    (rel.trust01 as unknown as number) === 0 &&
+    (rel.fear01 as unknown as number) === 0 &&
+    (rel.contempt01 as unknown as number) === 0 &&
+    (rel.fascination01 as unknown as number) === 0 &&
+    (rel.rivalry01 as unknown as number) === 0 &&
+    (rel.rescueDebt01 as unknown as number) === 0
+  );
+}
+
+// ============================================================================
+// MARK: Learning profile helpers
+// ============================================================================
+
+/** Returns true if this user is in the cold-start phase (no meaningful history). */
+export function learningProfileIsColdStart(profile: ChatLearningProfile): boolean {
+  return profile.coldStart;
+}
+
+/** Returns true if this user has high churn risk (churnRisk01 >= 0.65). */
+export function learningProfileIsHighChurnRisk(profile: ChatLearningProfile): boolean {
+  return (profile.churnRisk01 as unknown as number) >= 0.65;
+}
+
+/** Returns true if this user is highly receptive to helper interventions. */
+export function learningProfileIsHelperReceptive(profile: ChatLearningProfile): boolean {
+  return (profile.helperReceptivity01 as unknown as number) >= 0.6;
+}
+
+/** Returns true if this user is highly susceptible to hater pressure. */
+export function learningProfileIsHaterSusceptible(profile: ChatLearningProfile): boolean {
+  return (profile.haterSusceptibility01 as unknown as number) >= 0.6;
+}
+
+/** Returns true if this user plays aggressively in negotiations. */
+export function learningProfileIsAggressiveNegotiator(profile: ChatLearningProfile): boolean {
+  return (profile.negotiationAggression01 as unknown as number) >= 0.7;
+}
+
+/** Returns true if this user has been rescued before (rescueHistoryCount >= 1). */
+export function learningProfileHasRescueHistory(profile: ChatLearningProfile): boolean {
+  return profile.rescueHistoryCount >= 1;
+}
+
+/** Returns this user's strongest channel affinity. */
+export function learningProfileStrongestChannelAffinity(
+  profile: ChatLearningProfile,
+): ChatVisibleChannel {
+  let best: ChatVisibleChannel = 'GLOBAL';
+  let bestScore = -1;
+  for (const ch of CHAT_VISIBLE_CHANNELS) {
+    const score = profile.channelAffinity[ch] as unknown as number;
+    if (score > bestScore) {
+      bestScore = score;
+      best = ch;
+    }
+  }
+  return best;
+}
+
+/** Returns the user's affinity score for the given channel, as a percentage 0–100. */
+export function learningProfileChannelAffinityPct(
+  profile: ChatLearningProfile,
+  channelId: ChatVisibleChannel,
+): number {
+  return Math.round((profile.channelAffinity[channelId] as unknown as number) * 100);
+}
+
+/** Returns the overall engagement baseline as a percentage 0–100. */
+export function learningProfileEngagementPct(profile: ChatLearningProfile): number {
+  return Math.round((profile.engagementBaseline01 as unknown as number) * 100);
+}
+
+/**
+ * Returns a compact affect digest from the user's learning profile's affect snapshot.
+ * Useful for attaching to telemetry entries and debrief summaries.
+ */
+export function learningProfileAffectDigest(profile: ChatLearningProfile): string {
+  const a = profile.affect;
+  const fmt = (n: Score01) => ((n as unknown as number) * 100).toFixed(0).padStart(3, ' ');
+  return (
+    `conf:${fmt(a.confidence01)}` +
+    `|frust:${fmt(a.frustration01)}` +
+    `|intim:${fmt(a.intimidation01)}` +
+    `|attach:${fmt(a.attachment01)}` +
+    `|cur:${fmt(a.curiosity01)}` +
+    `|emb:${fmt(a.embarrassment01)}` +
+    `|relief:${fmt(a.relief01)}`
+  );
+}
+
+/**
+ * Returns a combined "distress score" derived from the affect snapshot in the
+ * learning profile. High distress signals the helper should escalate urgency.
+ * Range: 0.0 – 1.0.
+ */
+export function learningProfileDistressScore(profile: ChatLearningProfile): Score01 {
+  const a = profile.affect;
+  const raw =
+    (a.frustration01 as unknown as number) * 0.35 +
+    (a.intimidation01 as unknown as number) * 0.30 +
+    (a.embarrassment01 as unknown as number) * 0.20 +
+    (1.0 - (a.confidence01 as unknown as number)) * 0.15;
+  return clamp01(raw);
+}
+
+/**
+ * Returns a combined "engagement pull" score. High values indicate the user is
+ * leaned in and should be rewarded with higher-stakes NPC interactions.
+ * Range: 0.0 – 1.0.
+ */
+export function learningProfileEngagementPull(profile: ChatLearningProfile): Score01 {
+  const a = profile.affect;
+  const raw =
+    (profile.engagementBaseline01 as unknown as number) * 0.40 +
+    (a.curiosity01 as unknown as number) * 0.25 +
+    (a.attachment01 as unknown as number) * 0.20 +
+    (a.relief01 as unknown as number) * 0.15;
+  return clamp01(raw);
+}
+
+/**
+ * Classifies the user into a concise experience archetype based on their
+ * learning profile. Used in debrief overlays and NPC persona selection.
+ */
+export function learningProfileArchetype(
+  profile: ChatLearningProfile,
+): 'COLD_START' | 'THREATENED' | 'INVESTED' | 'HOSTILE_NEGOTIATOR' | 'RECOVERING' | 'ANCHORED' {
+  if (profile.coldStart) return 'COLD_START';
+  if ((profile.churnRisk01 as unknown as number) >= 0.65) return 'THREATENED';
+  if (profile.rescueHistoryCount >= 3 && (profile.helperReceptivity01 as unknown as number) >= 0.5)
+    return 'RECOVERING';
+  if ((profile.negotiationAggression01 as unknown as number) >= 0.7) return 'HOSTILE_NEGOTIATOR';
+  if (
+    (profile.engagementBaseline01 as unknown as number) >= 0.65 &&
+    profile.salienceAnchorIds.length >= 2
+  )
+    return 'ANCHORED';
+  return 'INVESTED';
+}
+
+// ============================================================================
+// MARK: Inference snapshot helpers
+// ============================================================================
+
+/** Returns true if the inference snapshot recommends a helper intervention. */
+export function inferenceRecommendsHelper(snapshot: ChatInferenceSnapshot): boolean {
+  return (
+    snapshot.interventionPolicy === 'LIGHT_HELPER' ||
+    snapshot.interventionPolicy === 'HARD_HELPER'
+  );
+}
+
+/** Returns true if the inference snapshot recommends a hard (immediate) helper intervention. */
+export function inferenceRecommendsHardHelper(snapshot: ChatInferenceSnapshot): boolean {
+  return snapshot.interventionPolicy === 'HARD_HELPER';
+}
+
+/** Returns true if the inference snapshot recommends a hater escalation. */
+export function inferenceRecommendsHaterEscalation(snapshot: ChatInferenceSnapshot): boolean {
+  return snapshot.interventionPolicy === 'HATER_ESCALATE';
+}
+
+/** Returns true if the inference snapshot says to defer all NPC action. */
+export function inferenceRecommendsDefer(snapshot: ChatInferenceSnapshot): boolean {
+  return snapshot.interventionPolicy === 'DEFER';
+}
+
+/** Returns true if hater targeting is above the danger threshold (>= 0.6). */
+export function inferenceHaterTargetingIsDangerous(snapshot: ChatInferenceSnapshot): boolean {
+  return (snapshot.haterTargeting01 as unknown as number) >= 0.6;
+}
+
+/** Returns true if churn risk is critically elevated (>= 0.7). */
+export function inferenceChurnRiskIsCritical(snapshot: ChatInferenceSnapshot): boolean {
+  return (snapshot.churnRisk01 as unknown as number) >= 0.7;
+}
+
+/** Returns true if toxicity risk is critically elevated (>= 0.7). */
+export function inferenceToxicityRiskIsCritical(snapshot: ChatInferenceSnapshot): boolean {
+  return (snapshot.toxicityRisk01 as unknown as number) >= 0.7;
+}
+
+/** Returns true if the snapshot's engagement score is high (>= 0.65). */
+export function inferenceEngagementIsHigh(snapshot: ChatInferenceSnapshot): boolean {
+  return (snapshot.engagement01 as unknown as number) >= 0.65;
+}
+
+/** Returns true if the helper timing score makes now a good window (>= 0.55). */
+export function inferenceHelperTimingIsGood(snapshot: ChatInferenceSnapshot): boolean {
+  return (snapshot.helperTiming01 as unknown as number) >= 0.55;
+}
+
+/**
+ * Returns the strongest channel affinity from this inference snapshot.
+ * Used to route NPC responses to the channel the user is most engaged with.
+ */
+export function inferenceStrongestChannelAffinity(
+  snapshot: ChatInferenceSnapshot,
+): ChatVisibleChannel {
+  let best: ChatVisibleChannel = 'GLOBAL';
+  let bestScore = -1;
+  for (const ch of CHAT_VISIBLE_CHANNELS) {
+    const score = snapshot.channelAffinity[ch] as unknown as number;
+    if (score > bestScore) {
+      bestScore = score;
+      best = ch;
+    }
+  }
+  return best;
+}
+
+/**
+ * Returns a compact diagnostic digest of this inference snapshot's key scores.
+ * Format: "eng:72|ht:85|hater:40|tox:15|churn:30"
+ */
+export function inferenceScoreDigest(snapshot: ChatInferenceSnapshot): string {
+  const pct = (s: Score01) => Math.round((s as unknown as number) * 100);
+  return (
+    `eng:${pct(snapshot.engagement01)}` +
+    `|ht:${pct(snapshot.helperTiming01)}` +
+    `|hater:${pct(snapshot.haterTargeting01)}` +
+    `|tox:${pct(snapshot.toxicityRisk01)}` +
+    `|churn:${pct(snapshot.churnRisk01)}`
+  );
+}
+
+/**
+ * Returns true if this snapshot is fresh enough to drive decisions.
+ * Staleness window defaults to 30 seconds.
+ */
+export function inferenceSnapshotIsFresh(
+  snapshot: ChatInferenceSnapshot,
+  now: UnixMs,
+  windowMs = 30_000,
+): boolean {
+  return unixMsAge(snapshot.generatedAt, now) <= windowMs;
+}
+
+// ============================================================================
+// MARK: Audience heat helpers
+// ============================================================================
+
+/** Returns true if the audience heat is critically elevated (heat01 >= 0.75). */
+export function audienceHeatIsCritical(heat: ChatAudienceHeat): boolean {
+  return (heat.heat01 as unknown as number) >= 0.75;
+}
+
+/** Returns true if the crowd is swinging positive. */
+export function audienceHeatIsPositive(heat: ChatAudienceHeat): boolean {
+  return heat.swarmDirection === 'POSITIVE';
+}
+
+/** Returns true if the crowd is swinging negative. */
+export function audienceHeatIsNegative(heat: ChatAudienceHeat): boolean {
+  return heat.swarmDirection === 'NEGATIVE';
+}
+
+/** Returns the heat score as a percentage 0–100. */
+export function audienceHeatPct(heat: ChatAudienceHeat): number {
+  return Math.round((heat.heat01 as unknown as number) * 100);
+}
+
+/**
+ * Returns a label string for the audience heat level.
+ * Used in debug overlays, event annotations, and debrief summaries.
+ */
+export function audienceHeatLabel(heat: ChatAudienceHeat): string {
+  const pct = audienceHeatPct(heat);
+  if (pct >= 90) return 'VOLCANIC';
+  if (pct >= 75) return 'CRITICAL';
+  if (pct >= 55) return 'ELEVATED';
+  if (pct >= 35) return 'WARM';
+  if (pct >= 15) return 'COOL';
+  return 'COLD';
+}
+
+// ============================================================================
+// MARK: Silence decision helpers
+// ============================================================================
+
+/** Returns true if the silence window is currently active (not yet expired). */
+export function silenceIsActive(silence: ChatSilenceDecision, now: UnixMs): boolean {
+  return silence.active && unixMsIsInFuture(silence.endsAt, now);
+}
+
+/** Returns the remaining silence duration in milliseconds, or 0 if expired. */
+export function silenceRemainingMs(silence: ChatSilenceDecision, now: UnixMs): number {
+  if (!silence.active) return 0;
+  return Math.max(0, (silence.endsAt as unknown as number) - (now as unknown as number));
+}
+
+/** Returns the total duration of this silence window in milliseconds. */
+export function silenceTotalDurationMs(silence: ChatSilenceDecision): number {
+  return (silence.endsAt as unknown as number) - (silence.startedAt as unknown as number);
+}
+
+/** Returns how far (0.0–1.0) into the silence window we currently are. */
+export function silenceProgress01(silence: ChatSilenceDecision, now: UnixMs): Score01 {
+  const total = silenceTotalDurationMs(silence);
+  if (total <= 0) return clamp01(1);
+  const elapsed = unixMsAge(silence.startedAt, now);
+  return clamp01(elapsed / total);
+}
+
+// ============================================================================
+// MARK: Invasion state helpers
+// ============================================================================
+
+/** Returns true if the invasion is in the shadow-priming phase. */
+export function invasionIsPriming(invasion: ChatInvasionState): boolean {
+  return invasion.status === 'PRIMING';
+}
+
+/** Returns true if the invasion is fully active. */
+export function invasionIsActive(invasion: ChatInvasionState): boolean {
+  return invasion.status === 'ACTIVE';
+}
+
+/** Returns true if the invasion has been resolved. */
+export function invasionIsResolved(invasion: ChatInvasionState): boolean {
+  return invasion.status === 'RESOLVED';
+}
+
+/** Returns true if the invasion closes before the given timestamp. */
+export function invasionClosesBy(invasion: ChatInvasionState, deadline: UnixMs): boolean {
+  return (invasion.closesAt as unknown as number) <= (deadline as unknown as number);
+}
+
+/** Returns the remaining duration of the invasion in milliseconds, or 0 if closed. */
+export function invasionRemainingMs(invasion: ChatInvasionState, now: UnixMs): number {
+  return Math.max(0, (invasion.closesAt as unknown as number) - (now as unknown as number));
+}
+
+/** Returns a classification label string for the invasion kind. */
+export function invasionKindLabel(invasion: ChatInvasionState): string {
+  const labels: Record<ChatInvasionState['kind'], string> = {
+    HATER_RAID: 'Hater Raid',
+    RUMOR_BURST: 'Rumor Burst',
+    HELPER_BLACKOUT: 'Helper Blackout',
+    LIQUIDATOR_SWEEP: 'Liquidator Sweep',
+    SYSTEM_SHOCK: 'System Shock',
+  };
+  return labels[invasion.kind] ?? invasion.kind;
+}
+
+// ============================================================================
+// MARK: Battle snapshot helpers
+// ============================================================================
+
+/** Returns true if there is an active attack on the player. */
+export function battleHasActiveAttack(battle: ChatBattleSnapshot): boolean {
+  return battle.activeAttackType != null;
+}
+
+/** Returns true if the rescue window is open and a helper can intervene. */
+export function battleRescueWindowIsOpen(battle: ChatBattleSnapshot): boolean {
+  return battle.rescueWindowOpen;
+}
+
+/** Returns true if the shield integrity is critically low (shieldIntegrity01 <= 0.25). */
+export function battleShieldIsCritical(battle: ChatBattleSnapshot): boolean {
+  return (battle.shieldIntegrity01 as unknown as number) <= 0.25;
+}
+
+/** Returns true if momentum is dangerously high (>= 75). */
+export function battleMomentumIsDangerous(battle: ChatBattleSnapshot): boolean {
+  return (battle.hostileMomentum as unknown as number) >= 75;
+}
+
+/** Returns the pressure tier label for UX display. */
+export function battlePressureTierLabel(tier: PressureTier): string {
+  const labels: Record<PressureTier, string> = {
+    NONE: 'Stable',
+    BUILDING: 'Building',
+    ELEVATED: 'Elevated',
+    HIGH: 'High Pressure',
+    CRITICAL: 'Critical',
+  };
+  return labels[tier];
+}
+
+// ============================================================================
+// MARK: ChatState cross-entity diagnostics
+// ============================================================================
+
+/**
+ * Returns a count of currently active invasions across all rooms.
+ */
+export function chatStateTotalActiveInvasions(state: ChatState): number {
+  return Object.values(state.activeInvasions).filter((inv) => inv.status === 'ACTIVE').length;
+}
+
+/**
+ * Returns a count of currently silenced rooms.
+ */
+export function chatStateSilencedRoomCount(state: ChatState): number {
+  return Object.values(state.silencesByRoom).filter((s) => s.active).length;
+}
+
+/**
+ * Returns all room IDs that currently have an active silence.
+ */
+export function chatStateSilencedRoomIds(state: ChatState): readonly ChatRoomId[] {
+  return Object.entries(state.silencesByRoom)
+    .filter(([, s]) => s.active)
+    .map(([id]) => id as ChatRoomId);
+}
+
+/**
+ * Returns all room IDs that have at least one pending reveal.
+ */
+export function chatStatePendingRevealRoomIds(state: ChatState): readonly ChatRoomId[] {
+  const ids = new Set<ChatRoomId>();
+  for (const reveal of state.pendingReveals) ids.add(reveal.roomId);
+  return Object.freeze([...ids]);
+}
+
+/**
+ * Returns the number of pending reveals for a given room.
+ */
+export function chatStatePendingRevealCountForRoom(
+  state: ChatState,
+  roomId: ChatRoomId,
+): number {
+  return state.pendingReveals.filter((r) => r.roomId === roomId).length;
+}
+
+/**
+ * Returns all pending reveals for a given room, sorted by revealAt ascending.
+ */
+export function chatStateGetPendingRevealsForRoom(
+  state: ChatState,
+  roomId: ChatRoomId,
+): readonly ChatPendingReveal[] {
+  return state.pendingReveals
+    .filter((r) => r.roomId === roomId)
+    .sort((a, b) => (a.revealAt as unknown as number) - (b.revealAt as unknown as number));
+}
+
+/**
+ * Returns the count of pending requests.
+ */
+export function chatStatePendingRequestCount(state: ChatState): number {
+  return Object.keys(state.pendingRequests).length;
+}
+
+/**
+ * Returns the count of telemetry envelopes waiting in the queue.
+ */
+export function chatStateTelemetryQueueLength(state: ChatState): number {
+  return state.telemetryQueue.length;
+}
+
+/**
+ * Returns the total number of relationships tracked across all rooms.
+ */
+export function chatStateTotalRelationshipCount(state: ChatState): number {
+  return Object.keys(state.relationships).length;
+}
+
+/**
+ * Returns the total number of learning profiles tracked.
+ */
+export function chatStateTotalLearningProfileCount(state: ChatState): number {
+  return Object.keys(state.learningProfiles).length;
+}
+
+/**
+ * Returns the total number of inference snapshots tracked.
+ */
+export function chatStateTotalInferenceSnapshotCount(state: ChatState): number {
+  return Object.keys(state.inferenceSnapshots).length;
+}
+
+/**
+ * Returns true if the state has been fully booted (rooms, sessions, runtime all populated).
+ */
+export function chatStateIsBootComplete(state: ChatState): boolean {
+  return state.bootedAt > (0 as UnixMs) && state.version === BACKEND_CHAT_ENGINE_VERSION;
+}
+
+/**
+ * Returns the uptime of this chat engine state in milliseconds.
+ */
+export function chatStateUptimeMs(state: ChatState, now: UnixMs): number {
+  return unixMsAge(state.bootedAt, now);
+}
+
+/**
+ * Returns a concise health summary for this state, useful in diagnostics endpoints
+ * and operator dashboards.
+ */
+export function chatStateHealthSummary(
+  state: ChatState,
+  now: UnixMs,
+): Readonly<{
+  uptimeMs: number;
+  roomCount: number;
+  sessionCount: number;
+  activeInvasionCount: number;
+  silencedRoomCount: number;
+  pendingRevealCount: number;
+  pendingRequestCount: number;
+  telemetryQueueLength: number;
+  relationshipCount: number;
+  learningProfileCount: number;
+  inferenceSnapshotCount: number;
+}> {
+  return Object.freeze({
+    uptimeMs: chatStateUptimeMs(state, now),
+    roomCount: chatStateRoomCount(state),
+    sessionCount: chatStateSessionCount(state),
+    activeInvasionCount: chatStateTotalActiveInvasions(state),
+    silencedRoomCount: chatStateSilencedRoomCount(state),
+    pendingRevealCount: state.pendingReveals.length,
+    pendingRequestCount: chatStatePendingRequestCount(state),
+    telemetryQueueLength: chatStateTelemetryQueueLength(state),
+    relationshipCount: chatStateTotalRelationshipCount(state),
+    learningProfileCount: chatStateTotalLearningProfileCount(state),
+    inferenceSnapshotCount: chatStateTotalInferenceSnapshotCount(state),
+  });
+}
+
+// ============================================================================
+// MARK: Persona descriptor helpers
+// ============================================================================
+
+/** Returns true if this persona is a hater NPC. */
+export function personaIsHater(persona: ChatPersonaDescriptor): boolean {
+  return persona.role === 'HATER';
+}
+
+/** Returns true if this persona is a helper NPC. */
+export function personaIsHelper(persona: ChatPersonaDescriptor): boolean {
+  return persona.role === 'HELPER';
+}
+
+/** Returns true if this persona is ambient (background NPC). */
+export function personaIsAmbient(persona: ChatPersonaDescriptor): boolean {
+  return persona.role === 'AMBIENT';
+}
+
+/** Returns true if this persona is a narrator NPC. */
+export function personaIsNarrator(persona: ChatPersonaDescriptor): boolean {
+  return persona.role === 'NARRATOR';
+}
+
+/** Returns true if the given channel is in this persona's preferred channels list. */
+export function personaPrefersChannel(
+  persona: ChatPersonaDescriptor,
+  channelId: ChatChannelId,
+): boolean {
+  return persona.preferredChannels.includes(channelId);
+}
+
+/** Returns true if the persona has the given tag. */
+export function personaHasTag(persona: ChatPersonaDescriptor, tag: string): boolean {
+  return persona.tags.includes(tag);
+}
+
+/**
+ * Returns the expected response delay for this persona, sampled from its voiceprint range.
+ * Caller provides a 0–1 random value; the function maps it to [delayFloorMs, delayCeilingMs].
+ */
+export function personaSampleResponseDelayMs(
+  persona: ChatPersonaDescriptor,
+  rand01: number,
+): number {
+  const floor = persona.voiceprint.delayFloorMs;
+  const ceiling = persona.voiceprint.delayCeilingMs;
+  return Math.round(floor + (ceiling - floor) * Math.max(0, Math.min(1, rand01)));
+}
+
+// ============================================================================
+// MARK: Response candidate helpers
+// ============================================================================
+
+/** Returns true if the candidate is high priority (priority >= 80). */
+export function candidateIsHighPriority(candidate: ChatResponseCandidate): boolean {
+  return candidate.priority >= 80;
+}
+
+/** Returns true if this candidate is long (text >= 120 characters). */
+export function candidateIsLong(candidate: ChatResponseCandidate): boolean {
+  return candidate.text.length >= 120;
+}
+
+/** Returns true if this candidate is short (text < 40 characters). */
+export function candidateIsShort(candidate: ChatResponseCandidate): boolean {
+  return candidate.text.length < 40;
+}
+
+/** Returns true if this candidate bypasses moderation. */
+export function candidateBypassesModeration(candidate: ChatResponseCandidate): boolean {
+  return candidate.moderationBypassAllowed;
+}
+
+/** Returns the total estimated delivery time for this candidate in ms (delayMs + text render). */
+export function candidateTotalDeliveryMs(candidate: ChatResponseCandidate): number {
+  // Approximate 20 ms per character for "typewriter" animations on fast paths.
+  return candidate.delayMs + candidate.text.length * 20;
+}
+
+// ============================================================================
+// MARK: Score comparison extended helpers
+// ============================================================================
+
+/**
+ * Computes the absolute delta between two Score01 values.
+ * Useful for detecting if a relationship axis has shifted enough to matter.
+ */
+export function scoreDelta(a: Score01, b: Score01): Score01 {
+  return clamp01(Math.abs((a as unknown as number) - (b as unknown as number)));
+}
+
+/**
+ * Linearly interpolates between two Score01 values.
+ * `t` must be in [0, 1]; 0 returns `a`, 1 returns `b`.
+ */
+export function scoreLerp(a: Score01, b: Score01, t: number): Score01 {
+  const clamped = Math.max(0, Math.min(1, t));
+  const result = (a as unknown as number) * (1 - clamped) + (b as unknown as number) * clamped;
+  return clamp01(result);
+}
+
+/**
+ * Returns the weighted average of multiple Score01 values with corresponding weights.
+ * Weights are normalized internally (they do not need to sum to 1).
+ */
+export function scoreWeightedAverage(pairs: ReadonlyArray<[Score01, number]>): Score01 {
+  let numerator = 0;
+  let denominator = 0;
+  for (const [score, weight] of pairs) {
+    const w = Math.max(0, weight);
+    numerator += (score as unknown as number) * w;
+    denominator += w;
+  }
+  if (denominator === 0) return clamp01(0);
+  return clamp01(numerator / denominator);
+}
+
+/**
+ * Computes an exponential decay of a Score01 value.
+ * `halfLifeMs` is the time in ms for the score to halve.
+ * Used for time-decaying relationship scores and heat values.
+ */
+export function scoreDecay(
+  score: Score01,
+  elapsedMs: number,
+  halfLifeMs: number,
+): Score01 {
+  if (halfLifeMs <= 0) return clamp01(0);
+  const decayFactor = Math.pow(0.5, elapsedMs / halfLifeMs);
+  return clamp01((score as unknown as number) * decayFactor);
+}
+
+// ============================================================================
+// MARK: ChatEngineTransaction helpers
+// ============================================================================
+
+/** Returns true if the transaction was accepted (event processed successfully). */
+export function transactionWasAccepted(tx: ChatEngineTransaction): boolean {
+  return tx.accepted;
+}
+
+/** Returns true if the transaction was rejected by policy. */
+export function transactionWasRejected(tx: ChatEngineTransaction): boolean {
+  return tx.rejected;
+}
+
+/** Returns the first rejection reason, or null if not rejected. */
+export function transactionFirstRejectionReason(tx: ChatEngineTransaction): string | null {
+  return tx.rejectionReasons[0] ?? null;
+}
+
+/** Returns the count of messages appended in this transaction. */
+export function transactionAppendedMessageCount(tx: ChatEngineTransaction): number {
+  return tx.delta?.appendedMessages.length ?? 0;
+}
+
+/** Returns the count of fanout packets emitted in this transaction. */
+export function transactionFanoutPacketCount(tx: ChatEngineTransaction): number {
+  return tx.fanout.length;
+}
+
+/** Returns true if the transaction includes telemetry in the delta. */
+export function transactionHasTelemetry(tx: ChatEngineTransaction): boolean {
+  return (tx.delta?.telemetry.length ?? 0) > 0;
+}
+
+/** Returns all room IDs touched in this transaction. */
+export function transactionTouchedRoomIds(tx: ChatEngineTransaction): readonly ChatRoomId[] {
+  return tx.delta?.touchedRoomIds ?? [];
+}
+
+// ============================================================================
+// MARK: ChatStateDelta helpers
+// ============================================================================
+
+/** Returns true if the delta touched any rooms. */
+export function deltaHasTouchedRooms(delta: ChatStateDelta): boolean {
+  return delta.touchedRoomIds.length > 0;
+}
+
+/** Returns true if the delta includes at least one appended message. */
+export function deltaHasMessages(delta: ChatStateDelta): boolean {
+  return delta.appendedMessages.length > 0;
+}
+
+/** Returns true if the delta includes replay artifacts. */
+export function deltaHasReplayArtifacts(delta: ChatStateDelta): boolean {
+  return delta.replayArtifacts.length > 0;
+}
+
+/** Returns true if the delta includes learning profile updates. */
+export function deltaHasLearningUpdates(delta: ChatStateDelta): boolean {
+  return delta.learningProfilesTouched.length > 0;
+}
+
+/** Returns true if the delta includes new inference snapshots. */
+export function deltaHasInferenceSnapshots(delta: ChatStateDelta): boolean {
+  return delta.inferenceSnapshots.length > 0;
+}
+
+// ============================================================================
+// MARK: Module authority object
+// ============================================================================
+
+/**
+ * CHAT_TYPES_MODULE_AUTHORITY
+ * ─────────────────────────────────────────────────────────────────────────────
+ * Frozen registry of all exported symbols from this module. Used by
+ * phase4_index.ts and other barrel exports to verify coverage, perform
+ * diagnostic health checks, and power operator dashboards.
+ *
+ * Every exported function, constant, and utility belongs here.
+ * ─────────────────────────────────────────────────────────────────────────────
+ */
+export const CHAT_TYPES_MODULE_AUTHORITY = Object.freeze({
+  // Identity
+  moduleId: CHAT_TYPES_MODULE_ID,
+  version: CHAT_TYPES_MODULE_VERSION,
+  publicApiVersion: BACKEND_CHAT_ENGINE_PUBLIC_API_VERSION,
+  descriptor: CHAT_TYPES_MODULE_DESCRIPTOR,
+  authorityRoots: CHAT_AUTHORITY_ROOTS,
+
+  // Constants
+  CHAT_VISIBLE_CHANNELS,
+  CHAT_SHADOW_CHANNELS,
+  CHAT_ALL_CHANNELS,
+  CHAT_ROOM_KINDS,
+  CHAT_SOURCE_TYPES,
+  CHAT_EVENT_KINDS,
+  CHAT_CONNECTION_STATES,
+  CHAT_PRESENCE_STATES,
+  CHAT_TYPING_STATES,
+  CHAT_MODERATION_OUTCOMES,
+  CHAT_RATE_OUTCOMES,
+  CHAT_SESSION_ROLES,
+  CHAT_NPC_ROLES,
+  CHAT_INFERENCE_SOURCES,
+  CHAT_ROOM_STAGE_MOODS,
+  CHAT_CHANNEL_MOODS,
+  CHAT_SIGNAL_TYPES,
+  CHAT_CHANNEL_DESCRIPTORS,
+  CHAT_MOUNT_POLICIES,
+  CHAT_MOUNT_TARGETS,
+  CHAT_RUNTIME_DEFAULTS,
+
+  // Channel predicates
+  isVisibleChannelId,
+  isShadowChannelId,
+  isAnyChannelId,
+  isRoomKind,
+  isChatSessionRole,
+  isChatNpcRole,
+  isChatInferenceSource,
+  isChatRoomStageMood,
+  isChatChannelMood,
+  isChatSignalType,
+  isChatRateOutcome,
+  isChatPressureTier,
+  isChatTickTier,
+  isChatEventKind,
+  isChatConnectionState,
+  isChatPresenceMode,
+  isChatTypingMode,
+  isChatModerationOutcome,
+  isChatSourceType,
+  isChatMountTarget,
+  isChatAuthorityRootKey,
+  isChatRoomId,
+  isChatSessionId,
+  isChatUserId,
+  isChatMessageId,
+
+  // Branded casts
+  asChatRoomId,
+  asChatSessionId,
+  asChatUserId,
+  asChatMessageId,
+  asChatEventId,
+  asChatInvasionId,
+  asChatPersonaId,
+  asChatSceneId,
+  asChatProofHash,
+  asChatRelationshipId,
+  asChatRequestId,
+  asChatReplayId,
+  asChatTelemetryId,
+  asChatInferenceId,
+  asChatMomentId,
+  asChatLegendId,
+  asChatMemoryAnchorId,
+  asChatProofEdgeId,
+  asChatTypingToken,
+  asChatOfferId,
+  asChatDriftId,
+
+  // Numeric helpers
+  clamp01,
+  clamp100,
+  asUnixMs,
+  asSequenceNumber,
+  scoreAbove,
+  scoreBelow,
+  scoreToPercent,
+  scoreDelta,
+  scoreLerp,
+  scoreWeightedAverage,
+  scoreDecay,
+
+  // UnixMs helpers
+  unixMsToDate,
+  unixMsAge,
+  unixMsIsExpired,
+  unixMsIsInFuture,
+  unixMsAdd,
+  unixMsSub,
+
+  // Null helpers
+  isNullable,
+  unwrapNullable,
+  assertDefined,
+
+  // JSON helpers
+  isJsonPrimitive,
+  isJsonObject,
+  isJsonArray,
+  jsonValueToString,
+
+  // Presence / connection
+  presenceModeIsActive,
+  presenceModeIsOffline,
+  connectionStateIsLive,
+  connectionStateIsDetached,
+
+  // Channel helpers
+  channelIsVisible,
+  channelIsShadow,
+  visibleChannelIndex,
+  channelSupportsComposer,
+  channelSupportsPresence,
+  channelSupportsTyping,
+  channelSupportsReadReceipts,
+  channelSupportsReplay,
+  channelSupportsCrowdHeat,
+  channelSupportsNpcInjection,
+  channelSupportsNegotiation,
+  channelSupportsRescue,
+  channelSupportsShadowWrites,
+  channelIsVisibleToPlayer,
+  channelPersistenceClass,
+  channelIsTransient,
+  channelIsRunScoped,
+  channelIsAccountScoped,
+  filterVisibleChannelsByDescriptor,
+  filterShadowChannelsByDescriptor,
+  listNpcInjectionChannels,
+  listCrowdHeatChannels,
+  listRescueChannels,
+  listShadowWriteChannels,
+  getChannelDescriptor,
+
+  // Room kind helpers
+  roomKindIsGlobal,
+  roomKindIsPrivate,
+  roomKindIsSystem,
+
+  // Mount policy helpers
+  getMountPolicy,
+  mountTargetDefaultChannel,
+  mountTargetAllowedChannels,
+  mountTargetAllowsCollapse,
+  mountTargetDefaultsCollapsed,
+  mountTargetStageMood,
+  mountTargetComposerPlaceholder,
+  mountTargetAllowsChannel,
+  listMountTargetsWithDefaultChannel,
+  listMountTargetsByStageMood,
+  listCollapsedByDefaultMountTargets,
+
+  // Runtime config helpers
+  mergeRuntimeConfig,
+  createDefaultRuntimeConfig,
+  runtimeAllowsVisibleChat,
+  runtimeAllowsShadowChat,
+  runtimeAllowsChannel,
+  runtimeAllowsShadowChannel,
+  runtimeLearningEnabled,
+  runtimeReplayEnabled,
+  runtimeProofEnabled,
+  runtimeInvasionsEnabled,
+  runtimeMaxMessageLength,
+  runtimeBurstLimit,
+
+  // Authority root helpers
+  getAuthorityRoot,
+  resolveBackendEnginePath,
+  resolveBackendLearningPath,
+  resolveSharedContractPath,
+  resolveSharedLearningPath,
+  resolveFrontendEnginePath,
+  resolveFrontendUiPath,
+  resolveServerTransportPath,
+  listAuthorityRootKeys,
+
+  // Relationship helpers
+  relationshipHasTrust,
+  relationshipIsFearDominated,
+  relationshipIsContemptDominated,
+  relationshipIsFascinationActive,
+  relationshipIsRivalryActive,
+  relationshipHasRescueDebt,
+  relationshipDominantAffect,
+  relationshipIntensity,
+  relationshipAffectDigest,
+  relationshipIsFresh,
+  relationshipIsDefault,
+
+  // Learning profile helpers
+  learningProfileIsColdStart,
+  learningProfileIsHighChurnRisk,
+  learningProfileIsHelperReceptive,
+  learningProfileIsHaterSusceptible,
+  learningProfileIsAggressiveNegotiator,
+  learningProfileHasRescueHistory,
+  learningProfileStrongestChannelAffinity,
+  learningProfileChannelAffinityPct,
+  learningProfileEngagementPct,
+  learningProfileAffectDigest,
+  learningProfileDistressScore,
+  learningProfileEngagementPull,
+  learningProfileArchetype,
+
+  // Inference helpers
+  inferenceRecommendsHelper,
+  inferenceRecommendsHardHelper,
+  inferenceRecommendsHaterEscalation,
+  inferenceRecommendsDefer,
+  inferenceHaterTargetingIsDangerous,
+  inferenceChurnRiskIsCritical,
+  inferenceToxicityRiskIsCritical,
+  inferenceEngagementIsHigh,
+  inferenceHelperTimingIsGood,
+  inferenceStrongestChannelAffinity,
+  inferenceScoreDigest,
+  inferenceSnapshotIsFresh,
+
+  // Audience heat helpers
+  audienceHeatIsCritical,
+  audienceHeatIsPositive,
+  audienceHeatIsNegative,
+  audienceHeatPct,
+  audienceHeatLabel,
+
+  // Silence helpers
+  silenceIsActive,
+  silenceRemainingMs,
+  silenceTotalDurationMs,
+  silenceProgress01,
+
+  // Invasion helpers
+  invasionKindIsHaterRaid,
+  invasionKindIsHelperBlackout,
+  invasionKindIsSystemShock,
+  invasionStatusIsActive,
+  invasionStatusIsResolved,
+  invasionIsPriming,
+  invasionIsActive,
+  invasionIsResolved,
+  invasionClosesBy,
+  invasionRemainingMs,
+  invasionKindLabel,
+
+  // Battle helpers
+  battleHasActiveAttack,
+  battleRescueWindowIsOpen,
+  battleShieldIsCritical,
+  battleMomentumIsDangerous,
+  battlePressureTierLabel,
+
+  // Moderation helpers
+  moderationOutcomeAllows,
+  moderationOutcomeBlocks,
+  rateOutcomeAllows,
+  rateOutcomeBlocks,
+
+  // Persona helpers
+  personaIsHater,
+  personaIsHelper,
+  personaIsAmbient,
+  personaIsNarrator,
+  personaPrefersChannel,
+  personaHasTag,
+  personaSampleResponseDelayMs,
+
+  // Response candidate helpers
+  candidateIsHighPriority,
+  candidateIsLong,
+  candidateIsShort,
+  candidateBypassesModeration,
+  candidateTotalDeliveryMs,
+
+  // ChatState accessors
+  chatStateRoomIds,
+  chatStateSessionIds,
+  chatStateActiveInvasionIds,
+  chatStateHasRoom,
+  chatStateHasSession,
+  chatStateRoomCount,
+  chatStateSessionCount,
+  chatStateActiveInvasionCount,
+  chatStateGetRoom,
+  chatStateGetSession,
+  chatStateGetAudienceHeat,
+  chatStateGetSilence,
+  chatStateGetLastEventId,
+  chatStateGetLastEventAt,
+  chatStateGetInvasion,
+  chatStateGetLearningProfile,
+  chatStateGetRelationship,
+  chatStateGetPresence,
+  chatStateGetTyping,
+  chatStateGetProofEdges,
+  chatStateGetReplayArtifacts,
+  chatStateGetSessionsForRoom,
+  chatStateGetRoomsForSession,
+
+  // ChatState diagnostics
+  chatStateTotalActiveInvasions,
+  chatStateSilencedRoomCount,
+  chatStateSilencedRoomIds,
+  chatStatePendingRevealRoomIds,
+  chatStatePendingRevealCountForRoom,
+  chatStateGetPendingRevealsForRoom,
+  chatStatePendingRequestCount,
+  chatStateTelemetryQueueLength,
+  chatStateTotalRelationshipCount,
+  chatStateTotalLearningProfileCount,
+  chatStateTotalInferenceSnapshotCount,
+  chatStateIsBootComplete,
+  chatStateUptimeMs,
+  chatStateHealthSummary,
+
+  // Transaction helpers
+  transactionWasAccepted,
+  transactionWasRejected,
+  transactionFirstRejectionReason,
+  transactionAppendedMessageCount,
+  transactionFanoutPacketCount,
+  transactionHasTelemetry,
+  transactionTouchedRoomIds,
+
+  // Delta helpers
+  deltaHasTouchedRooms,
+  deltaHasMessages,
+  deltaHasReplayArtifacts,
+  deltaHasLearningUpdates,
+  deltaHasInferenceSnapshots,
+} as const);
 

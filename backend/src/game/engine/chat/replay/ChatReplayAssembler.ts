@@ -2425,6 +2425,50 @@ export function createMinimalReplayAssembler(
 }
 
 // ============================================================================
+// MARK: Extended query helpers
+// ============================================================================
+
+export function getReplayAssemblerDefaults() {
+  return CHAT_RUNTIME_DEFAULTS;
+}
+
+export function selectRecentReplayAroundSequence(
+  state: ChatState,
+  roomId: ChatRoomId,
+  sequence: SequenceNumber,
+) {
+  return selectMostRecentReplayAroundSequence(state, roomId, sequence);
+}
+
+export function getRoomProofEdgeList(state: ChatState, roomId: ChatRoomId): readonly ChatProofEdge[] {
+  return selectRoomProofEdges(state, roomId);
+}
+
+export function assembleConversationWindowForMessage(
+  state: ChatState,
+  roomId: ChatRoomId,
+  messageId: ChatMessageId,
+  radius: number = 4,
+): ChatTranscriptRoomWindow {
+  return collectConversationWindowForMessage(state, roomId, messageId, radius);
+}
+
+export function getProofEdgesForMessage(
+  state: ChatState,
+  roomId: ChatRoomId,
+  messageId: ChatMessageId,
+): readonly ChatProofEdge[] {
+  return collectProofEdgesForMessage(state, roomId, messageId);
+}
+
+export function findRelevantReplayForMessage(
+  state: ChatState,
+  message: ChatMessage,
+) {
+  return getMostRelevantReplayForMessage(state, message);
+}
+
+// ============================================================================
 // MARK: Combined module object
 // ============================================================================
 
@@ -2471,4 +2515,10 @@ export const ChatReplayAssemblerModule = Object.freeze({
   classifyAnchorQuality,
   estimateDensity: estimateBundleDensity,
   profiles: ASSEMBLER_PROFILE_OPTIONS,
+  getDefaults: getReplayAssemblerDefaults,
+  selectRecentReplayAroundSequence,
+  getRoomProofEdges: getRoomProofEdgeList,
+  assembleConversationWindow: assembleConversationWindowForMessage,
+  getProofEdgesForMessage,
+  findRelevantReplayForMessage,
 } as const);

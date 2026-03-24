@@ -1606,6 +1606,12 @@ export const RescueInterventionPlannerModule = Object.freeze({
   buildRoomNarrative: buildPlannerRoomNarrative,
   buildTrackerProjection: buildRescueInterventionTrackerProjection,
 
+  // Signal analysis
+  buildPlannerSignalDigest,
+  buildPlannerOfferAnalysis,
+  derivePlannerRescueState,
+  extractStateContext: extractPlannerStateContext,
+
   // Serialization
   serializeResult: serializePlannerResult,
 
@@ -2064,6 +2070,11 @@ export interface PlannerSignalContext {
   readonly audience: ChatAudienceHeat | null;
   readonly bossFight: ChatBossFightState | null;
   readonly telemetry: ChatRescueTelemetrySnapshot | null;
+  readonly state?: ChatState | null;
+  readonly room?: ChatRoomState | null;
+  readonly session?: ChatSessionState | null;
+  readonly sessionId?: ChatSessionId | null;
+  readonly pendingSignals?: readonly ChatSignalEnvelope[] | null;
 }
 
 /**
@@ -2283,4 +2294,26 @@ export function derivePlannerRescueState(
   now: UnixMs,
 ): ChatRescueStateSnapshot {
   return deriveRescueStateSnapshot(rescuePlan, affect, now, null) as ChatRescueStateSnapshot;
+}
+
+/**
+ * Extract the optional state-layer context from a PlannerSignalContext.
+ * Provides typed access to ChatState, ChatRoomState, ChatSessionState,
+ * ChatSessionId, and pending ChatSignalEnvelope entries that a planner
+ * consumer may have attached for deep signal analysis.
+ */
+export function extractPlannerStateContext(context: PlannerSignalContext): {
+  readonly state: ChatState | null;
+  readonly room: ChatRoomState | null;
+  readonly session: ChatSessionState | null;
+  readonly sessionId: ChatSessionId | null;
+  readonly pendingSignals: readonly ChatSignalEnvelope[];
+} {
+  return Object.freeze({
+    state: context.state ?? null,
+    room: context.room ?? null,
+    session: context.session ?? null,
+    sessionId: context.sessionId ?? null,
+    pendingSignals: context.pendingSignals ?? [],
+  });
 }

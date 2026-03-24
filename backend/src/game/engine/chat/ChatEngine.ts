@@ -3621,7 +3621,7 @@ function uniqueIds<T>(input: readonly T[]): readonly T[] {
   return Array.from(new Set(input));
 }
 
-function uniqueStrings(input: readonly string[]): string[] {
+export function uniqueStrings(input: readonly string[]): string[] {
   return Array.from(new Set(input));
 }
 
@@ -3725,3 +3725,128 @@ function fnv1a32(input: string): string {
 function pickOne<T>(input: readonly T[]): T {
   return input[Math.floor(Math.random() * input.length)];
 }
+
+// ============================================================================
+// MARK: Exported accessors and type wiring
+// ============================================================================
+
+export function toScore01(raw: number): Score01 {
+  return clamp01(raw);
+}
+
+export function toScore100(raw: number): Score100 {
+  return clamp100(raw);
+}
+
+export function buildTextBodyPart(text: string): ChatMessageBodyPart {
+  return { type: 'TEXT', text };
+}
+
+export function getPresenceMode(snapshot: ChatPresenceSnapshot): ChatPresenceMode {
+  return snapshot.mode;
+}
+
+export function getNpcRole(message: ChatMessage): ChatNpcRole | null {
+  return message.attribution.npcRole;
+}
+
+export function isTypingActive(mode: ChatTypingMode): boolean {
+  return mode === 'TYPING';
+}
+
+export function isDueReveal(reveal: ChatPendingReveal, now: UnixMs): boolean {
+  return Number(reveal.revealAt) <= Number(now);
+}
+
+export function getSessionIdentity(session: ChatSessionState): ChatSessionIdentity {
+  return session.identity;
+}
+
+export function listRelationships(state: ChatState): readonly ChatRelationshipState[] {
+  return Object.values(state.relationships);
+}
+
+export function describeAttackType(type: AttackType): string {
+  return String(type);
+}
+
+export function asNormalizedEvent(event: ChatNormalizedEvent): ChatNormalizedEvent {
+  return event;
+}
+
+export function readProofChain(state: ChatState): ChatProofChain {
+  return state.proofChain;
+}
+
+export function readTranscriptLedger(state: ChatState): ChatTranscriptLedger {
+  return state.transcript;
+}
+
+export function readTypingState(state: ChatState): ChatTypingState {
+  return state.typing;
+}
+
+export function readReplayIndex(state: ChatState): ChatReplayIndex {
+  return state.replay;
+}
+
+export function readRoomSessionIndex(state: ChatState): ChatRoomSessionIndex {
+  return state.roomSessions;
+}
+
+export function asScenePlan(plan: ChatScenePlan): ChatScenePlan {
+  return plan;
+}
+
+// ============================================================================
+// MARK: Module authority object
+// ============================================================================
+
+export const ChatEngineModule = Object.freeze({
+  // Core engine class
+  ChatEngine,
+
+  // Score utilities
+  toScore01,
+  toScore100,
+
+  // Message body
+  buildTextBodyPart,
+
+  // Presence
+  getPresenceMode,
+
+  // NPC role
+  getNpcRole,
+
+  // Typing
+  isTypingActive,
+
+  // Pending reveal
+  isDueReveal,
+
+  // Session identity
+  getSessionIdentity,
+
+  // Relationships
+  listRelationships,
+
+  // Attack type
+  describeAttackType,
+
+  // Normalized event
+  asNormalizedEvent,
+
+  // State sub-structure readers
+  readProofChain,
+  readTranscriptLedger,
+  readTypingState,
+  readReplayIndex,
+  readRoomSessionIndex,
+
+  // Scene plan
+  asScenePlan,
+
+  // String utilities
+  uniqueStrings,
+} as const);

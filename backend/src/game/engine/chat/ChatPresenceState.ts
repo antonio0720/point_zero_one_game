@@ -1054,7 +1054,7 @@ export function computePresenceFingerprint(
   snapshots: readonly ChatPresenceSnapshot[],
 ): PresenceFingerprint {
   const sorted = [...snapshots].sort((a, b) => a.sessionId.localeCompare(b.sessionId));
-  const parts = sorted.map((s) => `${s.sessionId}:${s.mode}:${s.visible}`);
+  const parts = sorted.map((s) => `${s.sessionId}:${s.mode}:${s.visibleToRoom}`);
   let h = 5381;
   for (const p of parts) {
     for (let i = 0; i < p.length; i++) {
@@ -1124,14 +1124,16 @@ export function buildPresenceCohortReport(
   const roleDist: Record<string, number> = {};
   const occupancyByRoom: Map<string, number> = new Map();
 
-  for (const [_sessionId, snapshot] of state.snapshots) {
-    modeDist[snapshot.mode] = (modeDist[snapshot.mode] ?? 0) + 1;
-    occupancyByRoom.set(snapshot.roomId, (occupancyByRoom.get(snapshot.roomId) ?? 0) + 1);
+  for (const roomSnaps of Object.values(state.byRoom)) {
+    for (const snapshot of Object.values(roomSnaps)) {
+      modeDist[snapshot.mode] = (modeDist[snapshot.mode] ?? 0) + 1;
+      occupancyByRoom.set(snapshot.roomId, (occupancyByRoom.get(snapshot.roomId) ?? 0) + 1);
 
-    const session = sessions.get(snapshot.sessionId as ChatSessionId);
-    if (session) {
-      const role = session.identity.role;
-      roleDist[role] = (roleDist[role] ?? 0) + 1;
+      const session = sessions.get(snapshot.sessionId as ChatSessionId);
+      if (session) {
+        const role = session.identity.role;
+        roleDist[role] = (roleDist[role] ?? 0) + 1;
+      }
     }
   }
 
@@ -1141,7 +1143,7 @@ export function buildPresenceCohortReport(
     if (cnt > maxOcc) { maxOcc = cnt; mostPopulous = rid as ChatRoomId; }
   }
 
-  const totalSessions = state.snapshots.size;
+  const totalSessions = Object.values(state.byRoom).reduce((sum, r) => sum + Object.keys(r).length, 0);
   const totalRooms = occupancyByRoom.size;
 
   return Object.freeze({
@@ -1220,12 +1222,14 @@ export interface PresenceHeatMap {
 export function buildPresenceHeatMap(state: AuthoritativePresenceState): PresenceHeatMap {
   const byRoom = new Map<string, { visible: number; hidden: number; spectator: number }>();
 
-  for (const [_sid, snap] of state.snapshots) {
-    const r = byRoom.get(snap.roomId) ?? { visible: 0, hidden: 0, spectator: 0 };
-    if (snap.mode === 'SPECTATING') r.spectator++;
-    else if (snap.visible) r.visible++;
-    else r.hidden++;
-    byRoom.set(snap.roomId, r);
+  for (const roomSnaps of Object.values(state.byRoom)) {
+    for (const snap of Object.values(roomSnaps)) {
+      const r = byRoom.get(snap.roomId) ?? { visible: 0, hidden: 0, spectator: 0 };
+      if (snap.mode === 'SPECTATING') r.spectator++;
+      else if (snap.visibleToRoom) r.visible++;
+      else r.hidden++;
+      byRoom.set(snap.roomId, r);
+    }
   }
 
   const entries: PresenceHeatEntry[] = [];
@@ -1261,7 +1265,7 @@ export function checkAudienceHeatEligibility(
   const reasons: string[] = [];
   let eligible = true;
 
-  if (!snapshot.visible) { eligible = false; reasons.push('not visible'); }
+  if (!snapshot.visibleToRoom) { eligible = false; reasons.push('not visible'); }
   if (snapshot.mode === 'SPECTATING') { eligible = false; reasons.push('spectating'); }
   if (session.shadowMuted) { eligible = false; reasons.push('shadow muted'); }
   if (session.mutedUntil !== null && session.mutedUntil > asUnixMs(Date.now())) {
@@ -1334,7 +1338,7 @@ export function buildPresenceSnapshotDiff(
     } else {
       const prev = before.get(sid)!;
       if (prev.mode !== snap.mode) modeChanged.push({ sessionId: sid, oldMode: prev.mode, newMode: snap.mode });
-      if (prev.visible !== snap.visible) visibilityChanged.push({ sessionId: sid, nowVisible: snap.visible });
+      if (prev.visibleToRoom !== snap.visibleToRoom) visibilityChanged.push({ sessionId: sid, nowVisible: snap.visibleToRoom });
     }
   }
 
@@ -1584,13 +1588,14 @@ export interface RoomCapacityPolicy {
   readonly spectatorCap: number;
 }
 
-export const DEFAULT_ROOM_CAPACITY_POLICIES: ReadonlyMap<ChatRoomKind, RoomCapacityPolicy> = new Map([
-  ['MAIN', Object.freeze({ roomKind: 'MAIN' as ChatRoomKind, maxOccupants: 500, softCap: 400, allowSpectators: true, spectatorCap: 200 })],
-  ['BATTLE', Object.freeze({ roomKind: 'BATTLE' as ChatRoomKind, maxOccupants: 50, softCap: 40, allowSpectators: true, spectatorCap: 500 })],
-  ['LOBBY', Object.freeze({ roomKind: 'LOBBY' as ChatRoomKind, maxOccupants: 100, softCap: 80, allowSpectators: false, spectatorCap: 0 })],
-  ['DM', Object.freeze({ roomKind: 'DM' as ChatRoomKind, maxOccupants: 2, softCap: 2, allowSpectators: false, spectatorCap: 0 })],
-  ['ADMIN', Object.freeze({ roomKind: 'ADMIN' as ChatRoomKind, maxOccupants: 20, softCap: 15, allowSpectators: false, spectatorCap: 0 })],
-]) as ReadonlyMap<ChatRoomKind, RoomCapacityPolicy>;
+export const DEFAULT_ROOM_CAPACITY_POLICIES: ReadonlyMap<ChatRoomKind, RoomCapacityPolicy> = new Map<ChatRoomKind, RoomCapacityPolicy>([
+  ['GLOBAL',    Object.freeze<RoomCapacityPolicy>({ roomKind: 'GLOBAL',    maxOccupants: 500, softCap: 400, allowSpectators: true,  spectatorCap: 200 })],
+  ['SYNDICATE', Object.freeze<RoomCapacityPolicy>({ roomKind: 'SYNDICATE', maxOccupants: 50,  softCap: 40,  allowSpectators: true,  spectatorCap: 500 })],
+  ['DEAL_ROOM', Object.freeze<RoomCapacityPolicy>({ roomKind: 'DEAL_ROOM', maxOccupants: 50,  softCap: 40,  allowSpectators: true,  spectatorCap: 100 })],
+  ['LOBBY',     Object.freeze<RoomCapacityPolicy>({ roomKind: 'LOBBY',     maxOccupants: 100, softCap: 80,  allowSpectators: false, spectatorCap: 0   })],
+  ['PRIVATE',   Object.freeze<RoomCapacityPolicy>({ roomKind: 'PRIVATE',   maxOccupants: 2,   softCap: 2,   allowSpectators: false, spectatorCap: 0   })],
+  ['SYSTEM',    Object.freeze<RoomCapacityPolicy>({ roomKind: 'SYSTEM',    maxOccupants: 20,  softCap: 15,  allowSpectators: false, spectatorCap: 0   })],
+]);
 
 export function checkRoomCapacity(
   roomKind: ChatRoomKind,
@@ -1649,7 +1654,7 @@ export function aggregateRoomSnapshots(
       case 'SPECTATING': spectating++; break;
       case 'DISCONNECTED': disconnected++; break;
     }
-    if (snap.visible) visible++; else hidden++;
+    if (snap.visibleToRoom) visible++; else hidden++;
 
     const session = sessions.get(snap.sessionId as ChatSessionId);
     if (session) {
@@ -1731,19 +1736,21 @@ export function validatePresenceStateIntegrity(
 ): PresenceIntegrityCheckResult {
   const issues: string[] = [];
 
-  for (const [key, snap] of state.snapshots) {
-    // Session existence check
-    if (!sessions.has(snap.sessionId as ChatSessionId)) {
-      issues.push(`Orphaned presence: session ${snap.sessionId} has no session record (key=${key})`);
-    }
-    // Room existence check
-    if (!rooms.has(snap.roomId as ChatRoomId)) {
-      issues.push(`Orphaned presence: room ${snap.roomId} does not exist (session=${snap.sessionId})`);
-    }
-    // Mode sanity
-    const VALID_MODES: ChatPresenceMode[] = ['ONLINE', 'AWAY', 'RECONNECTING', 'DISCONNECTED', 'SPECTATING'];
-    if (!VALID_MODES.includes(snap.mode)) {
-      issues.push(`Invalid mode '${snap.mode}' for session ${snap.sessionId}`);
+  for (const [_roomId, roomSnaps] of Object.entries(state.byRoom)) {
+    for (const [key, snap] of Object.entries(roomSnaps)) {
+      // Session existence check
+      if (!sessions.has(snap.sessionId as ChatSessionId)) {
+        issues.push(`Orphaned presence: session ${snap.sessionId} has no session record (key=${key})`);
+      }
+      // Room existence check
+      if (!rooms.has(snap.roomId as ChatRoomId)) {
+        issues.push(`Orphaned presence: room ${snap.roomId} does not exist (session=${snap.sessionId})`);
+      }
+      // Mode sanity
+      const VALID_MODES: ChatPresenceMode[] = ['ONLINE', 'AWAY', 'RECONNECTING', 'DISCONNECTED', 'SPECTATING'];
+      if (!VALID_MODES.includes(snap.mode)) {
+        issues.push(`Invalid mode '${snap.mode}' for session ${snap.sessionId}`);
+      }
     }
   }
 
@@ -1941,7 +1948,7 @@ export function projectExternalPresenceView(
     sessionId: snapshot.sessionId as ChatSessionId,
     roomId: snapshot.roomId as ChatRoomId,
     mode: snapshot.mode,
-    visible: snapshot.visible,
+    visible: snapshot.visibleToRoom,
     role: session?.identity.role ?? null,
     displayName: session?.identity.displayName ?? null,
     projectedAt: asUnixMs(Date.now()),
@@ -2014,3 +2021,113 @@ export class PresenceVisibilityOverrideStore {
     return Object.freeze(Array.from(this.overrides.values()));
   }
 }
+
+export function createPresenceWatchBus(): PresenceWatchBus {
+  return new PresenceWatchBus();
+}
+
+export function createPresenceAnnotationStore(): PresenceAnnotationStore {
+  return new PresenceAnnotationStore();
+}
+
+export function createPresenceVisibilityOverrideStore(): PresenceVisibilityOverrideStore {
+  return new PresenceVisibilityOverrideStore();
+}
+
+export const ChatPresenceStateModule = Object.freeze({
+  name: CHAT_PRESENCE_MODULE_NAME,
+  version: CHAT_PRESENCE_MODULE_VERSION,
+  laws: CHAT_PRESENCE_LAWS,
+  descriptor: CHAT_PRESENCE_MODULE_DESCRIPTOR,
+  PRESENCE_MODE_TRANSITION_RULES,
+  DEFAULT_RECONNECT_BACKOFF_POLICY,
+  DEFAULT_ROOM_CAPACITY_POLICIES,
+  DEFAULT_PRESENCE_EVICTION_POLICY,
+  ChatPresenceAuthority,
+  ChatPresenceAuthorityExtended,
+  PresenceWatchBus,
+  PresenceAnnotationStore,
+  PresenceVisibilityOverrideStore,
+  createPresenceAuthority,
+  createPresenceContext,
+  createPresenceWatchBus,
+  createPresenceAnnotationStore,
+  createPresenceVisibilityOverrideStore,
+  createPresencePulseStore,
+  createDefaultPresenceLogger,
+  createEmptyPresenceState,
+  createPresenceSnapshot,
+  createPresenceSnapshotFromSession,
+  createPresenceDiff,
+  upsertPresenceSnapshot,
+  upsertPresenceSnapshots,
+  removePresenceSnapshot,
+  removePresenceSnapshotsForRoom,
+  removePresenceSnapshotsForSession,
+  mergePresenceStates,
+  getPresenceForRoom,
+  getPresenceForSession,
+  getVisiblePresenceForRoom,
+  getHiddenPresenceForRoom,
+  getSpectatingPresenceForRoom,
+  getReconnectPresenceForRoom,
+  getDisconnectedPresenceForRoom,
+  hasPresenceForRoom,
+  hasPresenceForSession,
+  inferPresenceModeFromSession,
+  shouldPresenceBeVisible,
+  isPresenceSessionSpectator,
+  isPresenceSessionNpc,
+  isPresenceSessionModerator,
+  isPresenceSessionSystem,
+  isPresenceSessionPlayer,
+  isPresenceSessionAway,
+  isPresenceSessionOnline,
+  isPresenceSessionReconnecting,
+  isPresenceSessionDisconnected,
+  isPresenceSessionHidden,
+  summarizePresenceRoom,
+  summarizeAllPresenceRooms,
+  computeRoomCounts,
+  mostRecentPresenceUpdate,
+  reconcilePresenceForSession,
+  reconcilePresenceForAllSessions,
+  reconcilePresenceAgainstRoomExistence,
+  reconcilePresenceAgainstSessionExistence,
+  sweepPresenceMaintenance,
+  applyPresenceMaintenance,
+  upsertPresenceInState,
+  removePresenceFromState,
+  removePresenceForSessionFromState,
+  removePresenceForRoomFromState,
+  projectVisiblePresenceLabels,
+  projectAllPresenceLabels,
+  isSamePresenceSnapshot,
+  uniquePresenceList,
+  uniqueStrings,
+  uniqueRoomIdsFromPresence,
+  sanitizeActorLabel,
+  nullSessionIdentity,
+  nullSessionState,
+  computePresenceFingerprint,
+  computePresenceVelocity,
+  buildPresenceCohortReport,
+  detectStalePresence,
+  buildPresenceHeatMap,
+  checkAudienceHeatEligibility,
+  checkBatchAudienceHeatEligibility,
+  buildPresenceSnapshotDiff,
+  isPresenceModeTransitionAllowed,
+  getPresenceModeTransitionReason,
+  forecastOccupancy,
+  checkPresenceRoleGate,
+  computeReconnectDelay,
+  buildPresenceSessionTimeline,
+  checkRoomCapacity,
+  aggregateRoomSnapshots,
+  selectEvictionCandidates,
+  validatePresenceStateIntegrity,
+  buildPresenceEpoch,
+  projectExternalPresenceView,
+  projectExternalPresenceViewBatch,
+} as const);

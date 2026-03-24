@@ -2168,3 +2168,97 @@ export function createInvasionCooldownTracker(): InvasionCooldownTracker {
 export function createInvasionWatchBus(): InvasionWatchBus {
   return new InvasionWatchBus();
 }
+
+// ============================================================================
+// MARK: Score and identity wiring
+// ============================================================================
+
+export function toInvasionScore100(raw: number): ReturnType<typeof clamp100> {
+  return clamp100(raw);
+}
+
+export function getActiveBotId(signal: ChatSignalEnvelope): BotId | null {
+  return (signal.battle?.activeBotId ?? null) as BotId | null;
+}
+
+// ============================================================================
+// MARK: Module authority object
+// ============================================================================
+
+export const ChatInvasionOrchestratorModule = Object.freeze({
+  name: CHAT_INVASION_MODULE_NAME,
+  version: CHAT_INVASION_MODULE_VERSION,
+  laws: CHAT_INVASION_LAWS,
+  descriptor: CHAT_INVASION_MODULE_DESCRIPTOR,
+  INVASION_PERSONAS,
+  INVASION_TIMING_POLICIES,
+  INVASION_KIND_TRANSITION_RULES,
+  ChatInvasionAuthority,
+  createInvasionAuthority,
+  createInvasionContext,
+  createDefaultInvasionLogger,
+  createDefaultInvasionClock,
+  createDefaultInvasionIds,
+  createDefaultInvasionRandom,
+  resolveInvasionRuntime,
+  planInvasionFromSignal,
+  rejectInvasionPlan,
+  evaluateInvasionEligibility,
+  deriveInvasionKind,
+  deriveInvasionChannelId,
+  describeEligibility,
+  createInvasionState,
+  applyInvasionPlan,
+  createInvasionSceneArtifacts,
+  createInvasionScenePlan,
+  createInvasionResponseCandidates,
+  createInvasionSilence,
+  shouldPlanSilence,
+  resolveSilenceMs,
+  invasionAnnouncement,
+  invasionShadowAnnouncement,
+  resolveInvasionDurationMs,
+  resolveShadowPriming,
+  collectClosureCandidates,
+  maintainInvasions,
+  computeTimeSinceLastRoomActivity,
+  getRoomHeat,
+  describeInvasionState,
+  invasionMaintenanceReportToJson,
+  invasionPlanToJson,
+  createResponseCandidate,
+  resolvePersonaDelayMs,
+  pickRaidLine,
+  pickLiquidatorLine,
+  toVisibleChannel,
+  deriveAttackPressureLabel,
+  describeSignalEnvelope,
+  InvasionWatchBus,
+  createInvasionWatchBus,
+  buildInvasionAnalytics,
+  computeInvasionFingerprint,
+  scoreInvasionSeverity,
+  getInvasionTimingPolicy,
+  validateInvasionChannel,
+  buildInvasionRoomSnapshot,
+  buildInvasionEligibilityMatrix,
+  computeInvasionSilencePolicy,
+  buildInvasionDecisionTrace,
+  buildInvasionBatchReport,
+  isInvasionCooldown,
+  remainingCooldownMs,
+  InvasionCooldownTracker,
+  createInvasionCooldownTracker,
+  buildRoomInvasionHistorySummary,
+  computeInvasionPhaseReport,
+  gradeInvasionQuality,
+  classifyInvasionSignal,
+  runInvasionBatchDecisions,
+  compareInvasionRooms,
+  isInvasionKindTransitionAllowed,
+  clampThreshold,
+  uniqueInvasionIds,
+  randomBase36,
+  toInvasionScore100,
+  getActiveBotId,
+} as const);

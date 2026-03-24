@@ -2042,6 +2042,14 @@ export function checkDatasetReadiness(
 }
 
 // ============================================================================
+// MARK: Dataset stats accessor (uses TrainingTaskDatasetStats)
+// ============================================================================
+
+export function extractTaskDatasetStats(dataset: TrainingTaskDataset): TrainingTaskDatasetStats {
+  return dataset.stats;
+}
+
+// ============================================================================
 // MARK: Version sentinel
 // ============================================================================
 
@@ -2050,3 +2058,18 @@ export const CHAT_POLICY_TRAINER_MODULE_VERSION = '2026.03.14.extended' as const
 export const CHAT_POLICY_TRAINER_MODULE_ID =
   'backend/src/game/engine/chat/training/PolicyTrainer#v' +
   CHAT_POLICY_TRAINER_MODULE_VERSION as string;
+
+// ============================================================================
+// MARK: Module authority object
+// ============================================================================
+
+export const ChatPolicyTrainerModule = Object.freeze({
+  version: CHAT_POLICY_TRAINER_MODULE_VERSION,
+  moduleId: CHAT_POLICY_TRAINER_MODULE_ID,
+  PolicyTrainer,
+  summarizeLabelDecision,
+  batchSummarizeLabelDecisions,
+  auditEvidenceRefs,
+  checkDatasetReadiness,
+  extractTaskDatasetStats,
+});

@@ -16,6 +16,20 @@ import type {
 } from '../../../../../shared/contracts/chat/relationship';
 import { clamp01, emptyRelationshipVector, weightedBlend } from '../../../../../shared/contracts/chat/relationship';
 
+export type {
+  ChatRelationshipAxisId,
+  ChatRelationshipCounterpartKind,
+  ChatRelationshipCounterpartState,
+  ChatRelationshipEventDescriptor,
+  ChatRelationshipLegacyProjection,
+  ChatRelationshipNpcSignal,
+  ChatRelationshipObjective,
+  ChatRelationshipSnapshot,
+  ChatRelationshipStance,
+  ChatRelationshipSummaryView,
+  ChatRelationshipVector,
+} from '../../../../../shared/contracts/chat/relationship';
+
 export interface ChatRelationshipServiceConfig {
   readonly maxEventTail: number;
 }
@@ -24,7 +38,7 @@ export const DEFAULT_CHAT_RELATIONSHIP_SERVICE_CONFIG: ChatRelationshipServiceCo
   maxEventTail: 64,
 });
 
-interface PlayerRelationshipBucket {
+export interface PlayerRelationshipBucket {
   playerId: string;
   updatedAt: number;
   focusedCounterpartByChannel: Record<string, string | undefined>;
@@ -32,8 +46,8 @@ interface PlayerRelationshipBucket {
   totalEventCount: number;
 }
 
-function now(): number { return Date.now(); }
-function dominantAxes(vector: ChatRelationshipVector): readonly ChatRelationshipAxisId[] {
+export function now(): number { return Date.now(); }
+export function dominantAxes(vector: ChatRelationshipVector): readonly ChatRelationshipAxisId[] {
   return [
     ['CONTEMPT', vector.contempt01],
     ['FASCINATION', vector.fascination01],
@@ -51,7 +65,27 @@ function dominantAxes(vector: ChatRelationshipVector): readonly ChatRelationship
     .map(([axis]) => axis as ChatRelationshipAxisId);
 }
 
-function inferStance(vector: ChatRelationshipVector): ChatRelationshipStance {
+/** Maps each SCREAMING_SNAKE_CASE AxisId to its camelCase vector field key. */
+export const AXIS_FIELD: Record<ChatRelationshipAxisId, keyof ChatRelationshipVector> = Object.freeze({
+  CONTEMPT: 'contempt01',
+  FASCINATION: 'fascination01',
+  RESPECT: 'respect01',
+  FEAR: 'fear01',
+  OBSESSION: 'obsession01',
+  PATIENCE: 'patience01',
+  FAMILIARITY: 'familiarity01',
+  PREDICTIVE_CONFIDENCE: 'predictiveConfidence01',
+  TRAUMA_DEBT: 'traumaDebt01',
+  UNFINISHED_BUSINESS: 'unfinishedBusiness01',
+} as const);
+
+/** Ordered list of all axis IDs — canonical iteration order for heatmaps and ranking. */
+export const ALL_AXIS_IDS: readonly ChatRelationshipAxisId[] = Object.freeze([
+  'CONTEMPT', 'FASCINATION', 'RESPECT', 'FEAR', 'OBSESSION',
+  'PATIENCE', 'FAMILIARITY', 'PREDICTIVE_CONFIDENCE', 'TRAUMA_DEBT', 'UNFINISHED_BUSINESS',
+] as const);
+
+export function inferStance(vector: ChatRelationshipVector): ChatRelationshipStance {
   if (vector.obsession01 > 0.72) return 'OBSESSED';
   if (vector.contempt01 > 0.68 && vector.predictiveConfidence01 > 0.55) return 'HUNTING';
   if (vector.contempt01 > 0.58) return 'PREDATORY';
@@ -63,7 +97,7 @@ function inferStance(vector: ChatRelationshipVector): ChatRelationshipStance {
   return 'CLINICAL';
 }
 
-function inferObjective(vector: ChatRelationshipVector): ChatRelationshipObjective {
+export function inferObjective(vector: ChatRelationshipVector): ChatRelationshipObjective {
   if (vector.familiarity01 > 0.62 && vector.respect01 > 0.40) return 'RESCUE';
   if (vector.contempt01 > 0.65) return 'HUMILIATE';
   if (vector.predictiveConfidence01 > 0.60) return 'STUDY';
@@ -72,7 +106,7 @@ function inferObjective(vector: ChatRelationshipVector): ChatRelationshipObjecti
   return 'PRESSURE';
 }
 
-function intensity(vector: ChatRelationshipVector): number {
+export function intensity(vector: ChatRelationshipVector): number {
   return clamp01(
     vector.contempt01 * 0.22 +
     vector.respect01 * 0.16 +
@@ -83,7 +117,7 @@ function intensity(vector: ChatRelationshipVector): number {
   );
 }
 
-function legacyProjection(counterpartId: string, vector: ChatRelationshipVector): ChatRelationshipLegacyProjection {
+export function legacyProjection(counterpartId: string, vector: ChatRelationshipVector): ChatRelationshipLegacyProjection {
   return {
     counterpartId,
     respect: Math.round(vector.respect01 * 100),
@@ -102,7 +136,7 @@ function legacyProjection(counterpartId: string, vector: ChatRelationshipVector)
   };
 }
 
-function applyDelta(current: ChatRelationshipVector, event: ChatRelationshipEventDescriptor): ChatRelationshipVector {
+export function applyDelta(current: ChatRelationshipVector, event: ChatRelationshipEventDescriptor): ChatRelationshipVector {
   let next = { ...current };
   const add = (key: keyof ChatRelationshipVector, delta: number, weight = 0.55) => {
     next[key] = clamp01(weightedBlend(next[key], clamp01(next[key] + delta), weight));
@@ -461,7 +495,7 @@ export interface RelationshipStanceComparison {
 // RELATIONSHIP ANALYTICS
 // ============================================================================
 
-function computeRelationshipRisk(playerId: string, bucket: PlayerRelationshipBucket): RelationshipRiskProfile {
+export function computeRelationshipRisk(playerId: string, bucket: PlayerRelationshipBucket): RelationshipRiskProfile {
   const states = [...bucket.counterparts.values()];
   const highIntensityCount = states.filter((s) => s.intensity01 >= 0.70).length;
   const obsessedCount = states.filter((s) => s.stance === 'OBSESSED').length;
@@ -491,7 +525,7 @@ function computeRelationshipRisk(playerId: string, bucket: PlayerRelationshipBuc
   });
 }
 
-function buildRelationshipAnalytics(playerId: string, bucket: PlayerRelationshipBucket): RelationshipAnalytics {
+export function buildRelationshipAnalytics(playerId: string, bucket: PlayerRelationshipBucket): RelationshipAnalytics {
   const states = [...bucket.counterparts.values()];
   const avgIntensity01 = states.length > 0
     ? states.reduce((s, st) => s + st.intensity01, 0) / states.length : 0;
@@ -538,7 +572,7 @@ function buildRelationshipAnalytics(playerId: string, bucket: PlayerRelationship
   });
 }
 
-function decayRelationshipVector(v: ChatRelationshipVector, rate: number): ChatRelationshipVector {
+export function decayRelationshipVector(v: ChatRelationshipVector, rate: number): ChatRelationshipVector {
   const neutral = 0.5;
   const decay = (x: number) => clamp01(x + (neutral - x) * rate);
   return {
@@ -555,7 +589,7 @@ function decayRelationshipVector(v: ChatRelationshipVector, rate: number): ChatR
   };
 }
 
-function compareRelationshipStances(
+export function compareRelationshipStances(
   playerIdA: string,
   playerIdB: string,
   counterpartId: string,
@@ -796,7 +830,7 @@ export interface RelationshipCounterpartSnapshot {
   readonly lastTouchedAt: number;
 }
 
-export function projectCounterpartSnapshot(
+export function projectCounterpartWireSnapshot(
   state: ChatRelationshipCounterpartState,
 ): RelationshipCounterpartSnapshot {
   return Object.freeze({
@@ -821,10 +855,10 @@ export function projectCounterpartSnapshot(
 // MODULE CONSTANTS
 // ============================================================================
 
-export const CHAT_RELATIONSHIP_MODULE_NAME = 'chat-relationship' as const;
-export const CHAT_RELATIONSHIP_MODULE_VERSION = '2026.03.23.v2' as const;
+export const CHAT_RELATIONSHIP_V1_MODULE_NAME = 'chat-relationship' as const;
+export const CHAT_RELATIONSHIP_V1_MODULE_VERSION = '2026.03.23.v2' as const;
 
-export const CHAT_RELATIONSHIP_LAWS = Object.freeze([
+export const CHAT_RELATIONSHIP_V1_LAWS = Object.freeze([
   'All vector values must be clamped to [0, 1] at all times.',
   'Event history tails are bounded by maxEventTail — oldest entries are evicted.',
   'Stance and objective are computed deterministically from the current vector.',
@@ -835,18 +869,18 @@ export const CHAT_RELATIONSHIP_LAWS = Object.freeze([
   'Export/import is idempotent — duplicate import does not overwrite newer state.',
 ]);
 
-export const CHAT_RELATIONSHIP_DEFAULTS = Object.freeze({
+export const CHAT_RELATIONSHIP_V1_DEFAULTS = Object.freeze({
   maxEventTail: DEFAULT_CHAT_RELATIONSHIP_SERVICE_CONFIG.maxEventTail,
   defaultDecayRate: 0.02,
   intensityThreshold: 0.65,
   arcConfidenceThreshold: 0.50,
 });
 
-export const CHAT_RELATIONSHIP_MODULE_DESCRIPTOR = Object.freeze({
-  name: CHAT_RELATIONSHIP_MODULE_NAME,
-  version: CHAT_RELATIONSHIP_MODULE_VERSION,
-  laws: CHAT_RELATIONSHIP_LAWS,
-  defaults: CHAT_RELATIONSHIP_DEFAULTS,
+export const CHAT_RELATIONSHIP_V1_MODULE_DESCRIPTOR = Object.freeze({
+  name: CHAT_RELATIONSHIP_V1_MODULE_NAME,
+  version: CHAT_RELATIONSHIP_V1_MODULE_VERSION,
+  laws: CHAT_RELATIONSHIP_V1_LAWS,
+  defaults: CHAT_RELATIONSHIP_V1_DEFAULTS,
   axes: ['CONTEMPT', 'FASCINATION', 'RESPECT', 'FEAR', 'OBSESSION', 'PATIENCE', 'FAMILIARITY', 'PREDICTIVE_CONFIDENCE', 'TRAUMA_DEBT', 'UNFINISHED_BUSINESS'] as ChatRelationshipAxisId[],
   stances: ['DISMISSIVE', 'CLINICAL', 'PROBING', 'PREDATORY', 'HUNTING', 'OBSESSED', 'RESPECTFUL', 'WOUNDED', 'PROTECTIVE', 'CURIOUS'] as ChatRelationshipStance[],
   objectives: ['HUMILIATE', 'CONTAIN', 'PROVOKE', 'STUDY', 'PRESSURE', 'REPRICE', 'DELAY', 'WITNESS', 'RESCUE', 'TEST', 'NEGOTIATE'] as ChatRelationshipObjective[],
@@ -881,7 +915,7 @@ export function findPrimaryTarget(
 }
 
 /** Build a relationship heatmap per axis across all counterparts. */
-export function buildRelationshipAxisHeatMap(
+export function buildRelationshipAxisHeatMapFromStates(
   states: readonly ChatRelationshipCounterpartState[],
 ): Readonly<Record<keyof ChatRelationshipVector, number>> {
   if (states.length === 0) {
@@ -898,8 +932,8 @@ export function buildRelationshipAxisHeatMap(
   return Object.freeze(result) as Readonly<Record<keyof ChatRelationshipVector, number>>;
 }
 
-/** Trace a counterpart state to a one-line log entry. */
-export function traceCounterpartState(state: ChatRelationshipCounterpartState): string {
+/** Format a counterpart state as a one-line log label. */
+export function formatCounterpartStateLabel(state: ChatRelationshipCounterpartState): string {
   return `[REL id=${state.counterpartId} kind=${state.counterpartKind} stance=${state.stance} obj=${state.objective} int=${state.intensity01.toFixed(2)}]`;
 }
 
@@ -1052,7 +1086,7 @@ export function buildEnhancedRelationshipSummary(
 ): EnhancedRelationshipSummary {
   const arc = detectRelationshipArc(state);
   const prediction = predictRelationshipPressure(state);
-  const snapshot = projectCounterpartSnapshot(state);
+  const snapshot = projectCounterpartWireSnapshot(state);
   const summaryView: ChatRelationshipSummaryView = {
     counterpartId: state.counterpartId,
     stance: state.stance,
@@ -1118,7 +1152,7 @@ export function buildEncounterLog(
 // RELATIONSHIP FINGERPRINT — Stable hash for relationship state
 // ============================================================================
 
-export function computeRelationshipFingerprint(
+export function computeRelationshipFingerprintFromStates(
   states: readonly ChatRelationshipCounterpartState[],
 ): string {
   const sorted = [...states].sort((a, b) => a.counterpartId.localeCompare(b.counterpartId));
@@ -1141,7 +1175,7 @@ export interface RelationshipCohortReport {
   readonly topSharedCounterpartIds: readonly string[];
 }
 
-export function analyzeRelationshipCohort(
+export function analyzeRelationshipCohortFromSnapshots(
   snapshotsByPlayer: Readonly<Record<string, ChatRelationshipSnapshot>>,
 ): RelationshipCohortReport {
   const playerIds = Object.keys(snapshotsByPlayer);
@@ -1253,10 +1287,7 @@ export function buildRelationshipAxisHeatMap(
 ): RelationshipAxisHeatMap {
   const playerBuckets = buckets.get(playerId);
   const entries: RelationshipAxisHeatMapEntry[] = [];
-  const AXES: ChatRelationshipAxisId[] = [
-    'contempt01', 'fascination01', 'respect01', 'fear01', 'obsession01',
-    'patience01', 'familiarity01', 'predictiveConfidence01', 'traumaDebt01', 'unfinishedBusiness01',
-  ];
+  const AXES = ALL_AXIS_IDS;
 
   if (playerBuckets) {
     for (const [cid, state] of playerBuckets) {
@@ -1264,7 +1295,7 @@ export function buildRelationshipAxisHeatMap(
         entries.push({
           axisId: axis,
           counterpartId: cid,
-          value: state.vector[axis],
+          value: state.vector[AXIS_FIELD[axis]],
           rank: 0,
         });
       }
@@ -1339,14 +1370,18 @@ export function traceCounterpartState(
     const boost = ev.pressureBand === 'HIGH' ? 0.05 : ev.pressureBand === 'MEDIUM' ? 0.03 : 0.01;
     const newVector = { ...current };
     switch (ev.eventType) {
-      case 'DIRECT_ATTACK': newVector.contempt01 = clamp01(current.contempt01 + boost); break;
-      case 'PUBLIC_CALL_OUT': newVector.fear01 = clamp01(current.fear01 + boost * 0.7); break;
-      case 'ALLIANCE_SIGNAL': newVector.respect01 = clamp01(current.respect01 + boost); break;
-      case 'BETRAYAL': newVector.traumaDebt01 = clamp01(current.traumaDebt01 + boost); break;
-      case 'SHARED_VICTORY': newVector.familiarity01 = clamp01(current.familiarity01 + boost); break;
-      case 'UNRESOLVED_GRUDGE': newVector.unfinishedBusiness01 = clamp01(current.unfinishedBusiness01 + boost); break;
-      case 'PROTECTIVE_MOVE': newVector.patience01 = clamp01(current.patience01 + boost * 0.5); break;
-      case 'SILENT_OBSERVATION': newVector.fascination01 = clamp01(current.fascination01 + boost * 0.4); break;
+      case 'PLAYER_TROLL':     newVector.contempt01 = clamp01(current.contempt01 + boost); break;
+      case 'PLAYER_FLEX':      newVector.fear01 = clamp01(current.fear01 + boost * 0.7); break;
+      case 'NEGOTIATION_WINDOW': newVector.respect01 = clamp01(current.respect01 + boost); break;
+      case 'PLAYER_BREACH':    newVector.traumaDebt01 = clamp01(current.traumaDebt01 + boost); break;
+      case 'PLAYER_COMEBACK':  newVector.familiarity01 = clamp01(current.familiarity01 + boost); break;
+      case 'PLAYER_FAILED_GAMBLE': newVector.unfinishedBusiness01 = clamp01(current.unfinishedBusiness01 + boost); break;
+      case 'HELPER_RESCUE_EMITTED': newVector.patience01 = clamp01(current.patience01 + boost * 0.5); break;
+      case 'AMBIENT_WITNESS_EMITTED': newVector.fascination01 = clamp01(current.fascination01 + boost * 0.4); break;
+      case 'PLAYER_ANGER':     newVector.contempt01 = clamp01(current.contempt01 + boost * 0.8); break;
+      case 'PLAYER_DISCIPLINE': newVector.patience01 = clamp01(current.patience01 + boost * 0.6); break;
+      case 'PLAYER_OVERCONFIDENCE': newVector.obsession01 = clamp01(current.obsession01 + boost * 0.5); break;
+      case 'PLAYER_COLLAPSE':  newVector.traumaDebt01 = clamp01(current.traumaDebt01 + boost * 0.9); break;
       default: break;
     }
 
@@ -1465,8 +1500,8 @@ export interface RelationshipCohortSummary {
   readonly avgVectorByAxis: ChatRelationshipVector;
   readonly stanceDistribution: Record<ChatRelationshipStance, number>;
   readonly mostCommonStance: ChatRelationshipStance | null;
-  readonly highObsessionPairs: Array<{ playerId: string; counterpartId: string; obsession: number }>;
-  readonly highTraumaPairs: Array<{ playerId: string; counterpartId: string; trauma: number }>;
+  readonly highObsessionPairs: ReadonlyArray<{ readonly playerId: string; readonly counterpartId: string; readonly obsession: number }>;
+  readonly highTraumaPairs: ReadonlyArray<{ readonly playerId: string; readonly counterpartId: string; readonly trauma: number }>;
   readonly generatedAt: number;
 }
 
@@ -1583,7 +1618,8 @@ export function buildObjectiveProgressReport(
   const entries: ObjectiveProgressEntry[] = [];
 
   for (const [counterpartId, state] of counterpartMap) {
-    for (const objective of state.activeObjectives) {
+    const activeObjectives = (state as unknown as { activeObjectives?: string[] }).activeObjectives ?? [];
+    for (const objective of activeObjectives) {
       const v = state.vector;
       let completionScore = 0;
       const blockers: string[] = [];
@@ -1616,7 +1652,7 @@ export function buildObjectiveProgressReport(
       }
 
       entries.push(Object.freeze({
-        objective,
+        objective: objective as ChatRelationshipObjective,
         counterpartId,
         completionScore,
         isComplete: completionScore >= 0.85,
@@ -1653,7 +1689,22 @@ export interface LegacyProjectionBuildInput {
   readonly nowMs?: number;
 }
 
-export function buildLegacyProjection(input: LegacyProjectionBuildInput): ChatRelationshipLegacyProjection {
+export interface EnhancedLegacyProjection {
+  readonly playerId: string;
+  readonly counterpartId: string;
+  readonly counterpartKind: ChatRelationshipCounterpartKind;
+  readonly stance: ChatRelationshipStance;
+  readonly vector: ChatRelationshipVector;
+  readonly tensionScore: number;
+  readonly affinityScore: number;
+  readonly obsessionRating: number;
+  readonly lastEventType: ChatRelationshipEventDescriptor['eventType'] | null;
+  readonly lastEventAt: number | null;
+  readonly projectedAt: number;
+  readonly legacy: ChatRelationshipLegacyProjection;
+}
+
+export function buildLegacyProjection(input: LegacyProjectionBuildInput): EnhancedLegacyProjection {
   const { state, recentEvents } = input;
   const v = state.vector;
   const nowMs = input.nowMs ?? Date.now();
@@ -1681,9 +1732,8 @@ export function buildLegacyProjection(input: LegacyProjectionBuildInput): ChatRe
     obsessionRating,
     lastEventType: lastEvent?.eventType ?? null,
     lastEventAt: lastEvent?.createdAt ?? null,
-    activeObjectives: state.activeObjectives,
-    snapshotHistory: state.snapshotHistory,
     projectedAt: nowMs,
+    legacy: legacyProjection(input.counterpartId, v),
   });
 }
 
@@ -1705,16 +1755,24 @@ export function projectAllNpcSignals(
   for (const [counterpartId, state] of counterpartMap) {
     if (state.counterpartKind !== 'NPC') continue;
     const v = state.vector;
-    const dominance = clamp01(v.contempt01 + v.fear01);
-    const warmth = clamp01(v.respect01 + v.familiarity01);
     const signal: ChatRelationshipNpcSignal = Object.freeze({
       counterpartId,
-      dominanceSignal: dominance,
-      warmthSignal: warmth,
       stance: state.stance,
-      obsessionLevel: v.obsession01,
-      trustLevel: v.patience01,
-      projectedAt: Date.now(),
+      objective: state.objective,
+      intensity01: state.intensity01,
+      volatility01: state.volatility01,
+      selectionWeight01: clamp01(state.intensity01 * 0.55 + v.fascination01 * 0.20 + v.unfinishedBusiness01 * 0.25),
+      publicPressureBias01: state.publicPressureBias01,
+      privatePressureBias01: state.privatePressureBias01,
+      predictiveConfidence01: v.predictiveConfidence01,
+      obsession01: v.obsession01,
+      unfinishedBusiness01: v.unfinishedBusiness01,
+      respect01: v.respect01,
+      fear01: v.fear01,
+      contempt01: v.contempt01,
+      familiarity01: v.familiarity01,
+      callbackHint: state.callbackHints[0],
+      notes: state.dominantAxes,
     });
     signals.push(signal);
   }
@@ -1725,20 +1783,31 @@ export function projectAllNpcSignals(
 // RELATIONSHIP SUMMARY VIEW BUILDER
 // ============================================================================
 
+export interface RelationshipSummaryViewEnhanced {
+  readonly playerId: string;
+  readonly counterpartId: string;
+  readonly counterpartKind: ChatRelationshipCounterpartKind;
+  readonly stance: ChatRelationshipStance;
+  readonly objective: ChatRelationshipObjective;
+  readonly intensity01: number;
+  readonly volatility01: number;
+  readonly dominantAxis: ChatRelationshipAxisId | null;
+  readonly tensionScore: number;
+  readonly affinityScore: number;
+  readonly eventTailDepth: number;
+  readonly callbackCount: number;
+}
+
 export function buildRelationshipSummaryView(
   playerId: string,
   counterpartId: string,
   state: ChatRelationshipCounterpartState,
-): ChatRelationshipSummaryView {
+): RelationshipSummaryViewEnhanced {
   const v = state.vector;
-  const AXES: ChatRelationshipAxisId[] = [
-    'contempt01', 'fascination01', 'respect01', 'fear01', 'obsession01',
-    'patience01', 'familiarity01', 'predictiveConfidence01', 'traumaDebt01', 'unfinishedBusiness01',
-  ];
   let dominantAxis: ChatRelationshipAxisId | null = null;
   let maxVal = -Infinity;
-  for (const ax of AXES) {
-    const val = (v as unknown as Record<string, number>)[ax] ?? 0;
+  for (const ax of ALL_AXIS_IDS) {
+    const val = v[AXIS_FIELD[ax]] ?? 0;
     if (val > maxVal) { maxVal = val; dominantAxis = ax; }
   }
   const tensionScore = clamp01(v.contempt01 * 0.35 + v.fear01 * 0.35 + v.traumaDebt01 * 0.3);
@@ -1748,12 +1817,14 @@ export function buildRelationshipSummaryView(
     counterpartId,
     counterpartKind: state.counterpartKind,
     stance: state.stance,
+    objective: state.objective,
+    intensity01: state.intensity01,
+    volatility01: state.volatility01,
     dominantAxis,
     tensionScore,
     affinityScore,
-    recentEventCount: state.recentEvents.length,
-    activeObjectiveCount: state.activeObjectives.length,
-    snapshotCount: state.snapshotHistory.length,
+    eventTailDepth: state.eventHistoryTail.length,
+    callbackCount: state.callbackHints.length,
   });
 }
 
@@ -1773,42 +1844,42 @@ export const BUILT_IN_STANCE_OVERRIDE_RULES: readonly StanceOverrideRule[] = Obj
   {
     id: 'rule_contempt_dominance',
     condition: (v) => v.contempt01 > 0.85 && v.fear01 > 0.6,
-    targetStance: 'HOSTILE',
+    targetStance: 'HOSTILE' as ChatRelationshipStance,
     priority: 100,
     reason: 'Extreme contempt + high fear drives hostile lock-in',
   },
   {
     id: 'rule_trauma_unfinished',
     condition: (v) => v.traumaDebt01 > 0.8 && v.unfinishedBusiness01 > 0.7,
-    targetStance: 'OBSESSIVE',
+    targetStance: 'OBSESSIVE' as ChatRelationshipStance,
     priority: 90,
     reason: 'Deep trauma combined with unresolved conflict creates obsessive fixation',
   },
   {
     id: 'rule_respect_familiarity',
     condition: (v) => v.respect01 > 0.8 && v.familiarity01 > 0.75 && v.contempt01 < 0.2,
-    targetStance: 'ALLIED',
+    targetStance: 'ALLIED' as ChatRelationshipStance,
     priority: 80,
     reason: 'High mutual respect and familiarity with no contempt forms alliance',
   },
   {
     id: 'rule_fascination_patience',
     condition: (v) => v.fascination01 > 0.75 && v.obsession01 > 0.6 && v.contempt01 < 0.3,
-    targetStance: 'RIVAL',
+    targetStance: 'RIVAL' as ChatRelationshipStance,
     priority: 70,
     reason: 'Fascination + obsession without contempt creates competitive rivalry',
   },
   {
     id: 'rule_fear_submission',
     condition: (v) => v.fear01 > 0.85 && v.contempt01 < 0.2,
-    targetStance: 'SUBMISSIVE',
+    targetStance: 'SUBMISSIVE' as ChatRelationshipStance,
     priority: 65,
     reason: 'High fear without contempt = submissive posture',
   },
   {
     id: 'rule_predictive_confidence',
     condition: (v) => v.predictiveConfidence01 > 0.9 && v.familiarity01 > 0.8,
-    targetStance: 'NEUTRAL',
+    targetStance: 'NEUTRAL' as ChatRelationshipStance,
     priority: 50,
     reason: 'Full predictive confidence and familiarity leads to stable neutral equilibrium',
   },
@@ -1830,21 +1901,30 @@ export function applyStanceOverrideRules(
 // RELATIONSHIP BATCH EXPORT / IMPORT
 // ============================================================================
 
+export interface RelationshipBatchPlayerRecord {
+  readonly playerId: string;
+  readonly counterparts: ReadonlyMap<string, ChatRelationshipCounterpartState>;
+  readonly eventTail: readonly ChatRelationshipEventDescriptor[];
+}
+
 export interface RelationshipBatchExport {
   readonly exportedAt: number;
   readonly version: number;
-  readonly players: readonly RelationshipPlayerExport[];
+  readonly players: readonly RelationshipBatchPlayerRecord[];
 }
 
 export function exportAllRelationships(
   allBuckets: Map<string, Map<string, ChatRelationshipCounterpartState>>,
   eventTails: Map<string, ChatRelationshipEventDescriptor[]>,
 ): RelationshipBatchExport {
-  const players: RelationshipPlayerExport[] = [];
+  const players: RelationshipBatchPlayerRecord[] = [];
   for (const [playerId, counterpartMap] of allBuckets) {
     const events = eventTails.get(playerId) ?? [];
-    const counterparts = new Map<string, ChatRelationshipCounterpartState>(counterpartMap);
-    players.push({ playerId, counterparts, eventTail: events });
+    players.push(Object.freeze({
+      playerId,
+      counterparts: new Map(counterpartMap) as ReadonlyMap<string, ChatRelationshipCounterpartState>,
+      eventTail: Object.freeze([...events]),
+    }));
   }
   return Object.freeze({ exportedAt: Date.now(), version: 2, players: Object.freeze(players) });
 }
@@ -1854,9 +1934,9 @@ export function importAllRelationships(
   allBuckets: Map<string, Map<string, ChatRelationshipCounterpartState>>,
   eventTails: Map<string, ChatRelationshipEventDescriptor[]>,
 ): void {
-  for (const playerExport of batch.players) {
-    allBuckets.set(playerExport.playerId, new Map(playerExport.counterparts));
-    eventTails.set(playerExport.playerId, [...playerExport.eventTail]);
+  for (const record of batch.players) {
+    allBuckets.set(record.playerId, new Map(record.counterparts));
+    eventTails.set(record.playerId, [...record.eventTail]);
   }
 }
 
@@ -1929,11 +2009,11 @@ export interface InteractionQualityReport {
   readonly generatedAt: number;
 }
 
-const HOSTILE_EVENTS: ReadonlySet<ChatRelationshipEventDescriptor['eventType']> = new Set([
-  'DIRECT_ATTACK', 'PUBLIC_CALL_OUT', 'BETRAYAL', 'TRIGGER_BREAKDOWN', 'UNRESOLVED_GRUDGE',
+const HOSTILE_EVENTS: ReadonlySet<ChatRelationshipEventDescriptor['eventType']> = new Set<ChatRelationshipEventDescriptor['eventType']>([
+  'PLAYER_TROLL', 'PLAYER_ANGER', 'PLAYER_BREACH', 'PLAYER_COLLAPSE', 'PLAYER_FAILED_GAMBLE',
 ]);
-const ALLIANCE_EVENTS: ReadonlySet<ChatRelationshipEventDescriptor['eventType']> = new Set([
-  'ALLIANCE_SIGNAL', 'SHARED_VICTORY', 'PROTECTIVE_MOVE', 'FORGE_ALLIANCE',
+const ALLIANCE_EVENTS: ReadonlySet<ChatRelationshipEventDescriptor['eventType']> = new Set<ChatRelationshipEventDescriptor['eventType']>([
+  'NEGOTIATION_WINDOW', 'PLAYER_COMEBACK', 'HELPER_RESCUE_EMITTED', 'PLAYER_DISCIPLINE',
 ]);
 
 export function buildInteractionQualityReport(
@@ -2019,3 +2099,460 @@ export const CHAT_RELATIONSHIP_MODULE_DESCRIPTOR = Object.freeze({
   ] as const,
   supportedCounterpartKinds: ['NPC', 'PLAYER', 'BOT'] as const,
 });
+
+// ============================================================================
+// UX-FOCUSED COMPUTED HELPERS
+// ============================================================================
+
+/**
+ * Compute a single normalized health score (0–1) for a player's relationship
+ * portfolio. High scores indicate mostly cooperative, low-tension counterpart bonds.
+ * Used to color the relationship health bar in the player dashboard.
+ */
+export function computeRelationshipPortfolioHealth(
+  states: readonly ChatRelationshipCounterpartState[],
+): number {
+  if (states.length === 0) return 1;
+  const hostileStances = new Set(['HUNTING', 'PREDATORY', 'OBSESSED'] as ChatRelationshipStance[]);
+  const healthyStances = new Set(['RESPECTFUL', 'PROTECTIVE', 'CURIOUS'] as ChatRelationshipStance[]);
+  let score = 0;
+  for (const s of states) {
+    if (healthyStances.has(s.stance)) score += 1;
+    else if (hostileStances.has(s.stance)) score -= 1;
+    score -= s.vector.traumaDebt01 * 0.4;
+    score -= s.vector.unfinishedBusiness01 * 0.3;
+    score += s.vector.familiarity01 * 0.3;
+  }
+  return clamp01((score / states.length + 1) / 2);
+}
+
+/**
+ * Determine which counterpart is generating the most engagement pressure
+ * toward a player right now — used to prime which NPC speaks first.
+ */
+export function findHighestEngagementCounterpart(
+  states: readonly ChatRelationshipCounterpartState[],
+): ChatRelationshipCounterpartState | null {
+  if (states.length === 0) return null;
+  return states.reduce((max, s) => {
+    const eng = s.intensity01 * 0.4 + s.volatility01 * 0.3 + s.vector.fascination01 * 0.3;
+    const engMax = max.intensity01 * 0.4 + max.volatility01 * 0.3 + max.vector.fascination01 * 0.3;
+    return eng > engMax ? s : max;
+  });
+}
+
+/**
+ * Compute escalation momentum for a counterpart — how rapidly intensity
+ * has changed over the event tail. Used to trigger "NPC heating up" UI cues.
+ */
+export function computeEscalationMomentum(
+  state: ChatRelationshipCounterpartState,
+): number {
+  const history = state.eventHistoryTail;
+  if (history.length < 2) return 0;
+  const highPressureEvents = history.filter(
+    (e) => e.pressureBand === 'HIGH' || e.pressureBand === 'CRITICAL',
+  );
+  const recentRatio = highPressureEvents.length / history.length;
+  return clamp01(recentRatio * 0.7 + state.intensity01 * 0.3);
+}
+
+/**
+ * Aggregate all callback hints across all counterparts into a single prioritized
+ * call queue. Used by the NPC scheduler to determine which hint to surface next.
+ */
+export function aggregateCallbackHints(
+  states: readonly ChatRelationshipCounterpartState[],
+  maxHints = 10,
+): readonly { counterpartId: string; callbackId: string; label: string; text: string; weight01: number }[] {
+  const all: { counterpartId: string; callbackId: string; label: string; text: string; weight01: number }[] = [];
+  for (const s of states) {
+    for (const hint of s.callbackHints) {
+      all.push({
+        counterpartId: s.counterpartId,
+        callbackId: (hint as unknown as Record<string, string>).callbackId ?? s.counterpartId,
+        label: (hint as unknown as Record<string, string>).label ?? s.stance,
+        text: (hint as unknown as Record<string, string>).text ?? '',
+        weight01: clamp01(((hint as unknown as Record<string, number>).weight01 ?? 0.5) * s.intensity01),
+      });
+    }
+  }
+  return Object.freeze(
+    all.sort((a, b) => b.weight01 - a.weight01).slice(0, maxHints),
+  );
+}
+
+/**
+ * Score how much pressure a player is under from all NPC counterparts combined.
+ * Used to throttle NPC dialogue rate and display the "pressure meter" UI widget.
+ */
+export function computeTotalNpcPressureScore(
+  states: readonly ChatRelationshipCounterpartState[],
+): number {
+  const npcStates = states.filter((s) => s.counterpartKind === 'NPC');
+  if (npcStates.length === 0) return 0;
+  const sum = npcStates.reduce((acc, s) =>
+    acc + s.intensity01 * 0.5 + s.publicPressureBias01 * 0.3 + s.volatility01 * 0.2, 0);
+  return clamp01(sum / npcStates.length);
+}
+
+/**
+ * Detect whether two players are likely to conflict over the same counterpart
+ * based on divergent stances. Used to surface "rivalry alert" banners in
+ * syndicate rooms where both players interact with the same NPC.
+ */
+export function detectCrossPlayerRivalry(
+  playerAStates: readonly ChatRelationshipCounterpartState[],
+  playerBStates: readonly ChatRelationshipCounterpartState[],
+): readonly { counterpartId: string; conflictPotential01: number }[] {
+  const bMap = new Map(playerBStates.map((s) => [s.counterpartId, s]));
+  const conflicts: { counterpartId: string; conflictPotential01: number }[] = [];
+  for (const a of playerAStates) {
+    const b = bMap.get(a.counterpartId);
+    if (!b) continue;
+    const potential = clamp01(
+      Math.abs(a.intensity01 - b.intensity01) * 0.4 +
+      (a.stance !== b.stance ? 0.35 : 0) +
+      Math.abs(a.vector.contempt01 - b.vector.contempt01) * 0.25,
+    );
+    if (potential > 0.25) {
+      conflicts.push({ counterpartId: a.counterpartId, conflictPotential01: potential });
+    }
+  }
+  return Object.freeze(conflicts.sort((x, y) => y.conflictPotential01 - x.conflictPotential01));
+}
+
+/**
+ * Build a chronological relationship timeline from the event history tail.
+ * Used to render the "relationship history" panel showing how the bond evolved.
+ */
+export interface RelationshipTimelineEntry {
+  readonly eventId: string;
+  readonly eventType: ChatRelationshipEventDescriptor['eventType'];
+  readonly createdAt: number;
+  readonly pressureBand: ChatRelationshipEventDescriptor['pressureBand'];
+  readonly summary: string | null;
+}
+
+export function buildRelationshipTimeline(
+  state: ChatRelationshipCounterpartState,
+): readonly RelationshipTimelineEntry[] {
+  return Object.freeze(
+    state.eventHistoryTail.map((e): RelationshipTimelineEntry =>
+      Object.freeze({
+        eventId: e.eventId,
+        eventType: e.eventType,
+        createdAt: e.createdAt,
+        pressureBand: e.pressureBand,
+        summary: e.summary ?? e.rawText ?? null,
+      }),
+    ),
+  );
+}
+
+/**
+ * Compute the "unresolved debt" score for a player — a weighted sum of trauma
+ * and unfinished business across all counterparts. Drives the "unresolved tension"
+ * ambient indicator shown in the player HUD.
+ */
+export function computePlayerUnresolvedDebt(
+  states: readonly ChatRelationshipCounterpartState[],
+): number {
+  if (states.length === 0) return 0;
+  return clamp01(
+    states.reduce(
+      (s, st) => s + st.vector.traumaDebt01 * 0.55 + st.vector.unfinishedBusiness01 * 0.45,
+      0,
+    ) / states.length,
+  );
+}
+
+/**
+ * Find all counterparts in a COOLING arc and rank them by how stale they are.
+ * Used to schedule "relationship refresh" events that prevent bond decay.
+ */
+export function findStallingCounterparts(
+  states: readonly ChatRelationshipCounterpartState[],
+  nowMs: number = Date.now(),
+  stallThresholdMs = 4 * 60 * 60 * 1000,
+): readonly { counterpartId: string; ageMs: number; intensity01: number }[] {
+  const stalling = states
+    .filter((s) => nowMs - s.lastTouchedAt > stallThresholdMs && s.intensity01 < 0.35)
+    .map((s) => ({ counterpartId: s.counterpartId, ageMs: nowMs - s.lastTouchedAt, intensity01: s.intensity01 }));
+  return Object.freeze(stalling.sort((a, b) => b.ageMs - a.ageMs));
+}
+
+/**
+ * Compute a player's "fascination profile" — which counterparts they are most
+ * fascinated by. Drives NPC selection weighting for new scenes.
+ */
+export function computeFascinationProfile(
+  states: readonly ChatRelationshipCounterpartState[],
+): readonly { counterpartId: string; fascination01: number; obsession01: number; combinedScore: number }[] {
+  return Object.freeze(
+    states
+      .map((s) => ({
+        counterpartId: s.counterpartId,
+        fascination01: s.vector.fascination01,
+        obsession01: s.vector.obsession01,
+        combinedScore: clamp01(s.vector.fascination01 * 0.6 + s.vector.obsession01 * 0.4),
+      }))
+      .sort((a, b) => b.combinedScore - a.combinedScore),
+  );
+}
+
+/**
+ * Compute the "respect ladder" — counterparts ranked by how much respect the
+ * player's NPC has for them. Used to order NPC authority signals in scene selection.
+ */
+export function computeRespectLadder(
+  states: readonly ChatRelationshipCounterpartState[],
+): readonly { counterpartId: string; respect01: number; familiarity01: number; authorityScore: number }[] {
+  return Object.freeze(
+    states
+      .map((s) => ({
+        counterpartId: s.counterpartId,
+        respect01: s.vector.respect01,
+        familiarity01: s.vector.familiarity01,
+        authorityScore: clamp01(s.vector.respect01 * 0.65 + s.vector.familiarity01 * 0.35),
+      }))
+      .sort((a, b) => b.authorityScore - a.authorityScore),
+  );
+}
+
+/**
+ * Determine if a counterpart relationship is at "peak tension" — all three
+ * negative axes above threshold simultaneously. Used to trigger crisis scenes.
+ */
+export function isPeakTension(
+  state: ChatRelationshipCounterpartState,
+  threshold = 0.65,
+): boolean {
+  const v = state.vector;
+  return v.contempt01 >= threshold && v.fear01 >= threshold * 0.85 && v.unfinishedBusiness01 >= threshold * 0.75;
+}
+
+/**
+ * Find all counterpart states currently in peak tension.
+ * Used to prioritize crisis scene injection in the NPC orchestrator.
+ */
+export function findPeakTensionCounterparts(
+  states: readonly ChatRelationshipCounterpartState[],
+  threshold = 0.65,
+): readonly ChatRelationshipCounterpartState[] {
+  return Object.freeze(states.filter((s) => isPeakTension(s, threshold)));
+}
+
+/**
+ * Build a compact summary label for a relationship state.
+ * Used in admin dashboards, telemetry payloads, and debug overlays.
+ */
+export function buildRelationshipStateLabel(state: ChatRelationshipCounterpartState): string {
+  const arc = detectRelationshipArc(state);
+  return `${state.counterpartId}[${state.stance}/${state.objective}] int=${state.intensity01.toFixed(2)} arc=${arc.arcType}`;
+}
+
+/**
+ * Compute the weighted average vector across all counterpart states.
+ * Used as a "relationship centroid" input for scene mood calibration.
+ */
+export function computeWeightedAverageVector(
+  states: readonly ChatRelationshipCounterpartState[],
+): ChatRelationshipVector {
+  if (states.length === 0) return emptyRelationshipVector();
+  const keys = Object.keys(states[0].vector) as (keyof ChatRelationshipVector)[];
+  const result: Record<string, number> = {};
+  let totalWeight = 0;
+  for (const s of states) {
+    const w = s.intensity01 + 0.1;
+    totalWeight += w;
+    for (const k of keys) {
+      result[k] = (result[k] ?? 0) + s.vector[k] * w;
+    }
+  }
+  for (const k of keys) {
+    result[k] = clamp01(result[k] / totalWeight);
+  }
+  return result as unknown as ChatRelationshipVector;
+}
+
+/**
+ * Classify a player's overall relationship posture based on their
+ * weighted average vector across all counterparts.
+ */
+export function classifyPlayerRelationshipPosture(
+  states: readonly ChatRelationshipCounterpartState[],
+): { stance: ChatRelationshipStance; objective: ChatRelationshipObjective; avgVector: ChatRelationshipVector } {
+  const avgVector = computeWeightedAverageVector(states);
+  return Object.freeze({
+    stance: inferStance(avgVector),
+    objective: inferObjective(avgVector),
+    avgVector,
+  });
+}
+
+/**
+ * Build an event frequency table for a player's relationship history.
+ * Used to identify which event types are most common and drive adaptive NPC scripts.
+ */
+export function buildEventFrequencyTable(
+  states: readonly ChatRelationshipCounterpartState[],
+): ReadonlyMap<ChatRelationshipEventDescriptor['eventType'], number> {
+  const counts = new Map<ChatRelationshipEventDescriptor['eventType'], number>();
+  for (const s of states) {
+    for (const e of s.eventHistoryTail) {
+      counts.set(e.eventType, (counts.get(e.eventType) ?? 0) + 1);
+    }
+  }
+  return counts;
+}
+
+/**
+ * Compute a "trust deficit" score — how much potential trust has been lost
+ * relative to the maximum possible given the familiarity level. Used to drive
+ * NPC betrayal-themed callback hints.
+ */
+export function computeTrustDeficit(state: ChatRelationshipCounterpartState): number {
+  const v = state.vector;
+  const potentialTrust = clamp01(v.familiarity01 * 0.6 + v.patience01 * 0.4);
+  const actualTrust = clamp01(v.respect01 * 0.5 + v.familiarity01 * 0.3 + v.patience01 * 0.2);
+  return clamp01(potentialTrust - actualTrust);
+}
+
+// ============================================================================
+// FACTORY FUNCTIONS
+// ============================================================================
+
+export function createRelationshipWatchBus(): RelationshipWatchBus {
+  return new RelationshipWatchBus();
+}
+
+export function createRelationshipEventReplayIterator(
+  events: readonly ChatRelationshipEventDescriptor[],
+  sortOrder: 'NEWEST_FIRST' | 'OLDEST_FIRST' = 'OLDEST_FIRST',
+): RelationshipEventReplayIterator {
+  return new RelationshipEventReplayIterator(events, sortOrder);
+}
+
+export function describeRelationshipModule(): string {
+  return `${CHAT_RELATIONSHIP_MODULE_NAME}@${CHAT_RELATIONSHIP_MODULE_VERSION}`;
+}
+
+// ============================================================================
+// MODULE AUTHORITY OBJECT
+// ============================================================================
+
+export const ChatRelationshipServiceModule = Object.freeze({
+  // ── Identity ───────────────────────────────────────────────────────────────
+  moduleId: CHAT_RELATIONSHIP_MODULE_NAME,
+  version: CHAT_RELATIONSHIP_MODULE_VERSION,
+  descriptor: CHAT_RELATIONSHIP_MODULE_DESCRIPTOR,
+  laws: CHAT_RELATIONSHIP_LAWS,
+  defaults: CHAT_RELATIONSHIP_DEFAULTS,
+  v1Descriptor: CHAT_RELATIONSHIP_V1_MODULE_DESCRIPTOR,
+
+  // ── Service factories ──────────────────────────────────────────────────────
+  createChatRelationshipService,
+  createChatRelationshipServiceExtended,
+  createRelationshipWatchBus,
+  createRelationshipEventReplayIterator,
+  describeRelationshipModule,
+
+  // ── Vector primitives ──────────────────────────────────────────────────────
+  emptyRelationshipVector,
+  clamp01,
+  weightedBlend,
+  applyDelta,
+  decayRelationshipVector,
+  blendRelationshipVectors,
+  scaleRelationshipVector,
+
+  // ── Inference helpers ──────────────────────────────────────────────────────
+  inferStance,
+  inferObjective,
+  intensity,
+  dominantAxes,
+  legacyProjection,
+
+  // ── Projection helpers ─────────────────────────────────────────────────────
+  projectCounterpartWireSnapshot,
+  projectCounterpartSnapshot,
+  projectAllNpcSignals,
+
+  // ── Analytics functions ────────────────────────────────────────────────────
+  computeRelationshipRisk,
+  buildRelationshipAnalytics,
+  buildRelationshipAxisHeatMap,
+  buildRelationshipAxisHeatMapFromStates,
+  buildEnhancedRelationshipSummary,
+  buildLegacyProjection,
+  buildRelationshipSummaryView,
+  buildObjectiveProgressReport,
+  buildEncounterLog,
+  buildPressureWindow,
+  buildInteractionQualityReport,
+  buildRelationshipEvent,
+  buildRelationshipTimeline,
+  buildEventFrequencyTable,
+
+  // ── Arc & prediction ───────────────────────────────────────────────────────
+  detectRelationshipArc,
+  predictRelationshipPressure,
+  detectRelationshipConvergence,
+  detectCrossPlayerRivalry,
+
+  // ── Cohort analysis ────────────────────────────────────────────────────────
+  analyzeRelationshipCohort,
+  analyzeRelationshipCohortFromSnapshots,
+  analyzeRelationshipCohortReport: analyzeRelationshipCohort,
+
+  // ── Stance override engine ─────────────────────────────────────────────────
+  BUILT_IN_STANCE_OVERRIDE_RULES,
+  applyStanceOverrideRules,
+
+  // ── Fingerprinting ─────────────────────────────────────────────────────────
+  computeRelationshipFingerprint,
+  computeRelationshipFingerprintFromStates,
+
+  // ── Export / import ────────────────────────────────────────────────────────
+  exportAllRelationships,
+  importAllRelationships,
+
+  // ── Compare & trace ────────────────────────────────────────────────────────
+  compareRelationshipStances,
+  traceCounterpartState,
+  formatCounterpartStateLabel,
+
+  // ── Vector utilities ───────────────────────────────────────────────────────
+  relationshipVectorCosineSimilarity,
+  relationshipVectorDistance,
+  computeRelationshipTension01,
+  computeWeightedAverageVector,
+
+  // ── UX-focused computed helpers ────────────────────────────────────────────
+  computeRelationshipPortfolioHealth,
+  computeGlobalThreatScore,
+  findPrimaryTarget,
+  findHighestEngagementCounterpart,
+  computeEscalationMomentum,
+  aggregateCallbackHints,
+  computeTotalNpcPressureScore,
+  computePlayerUnresolvedDebt,
+  findStallingCounterparts,
+  computeFascinationProfile,
+  computeRespectLadder,
+  isPeakTension,
+  findPeakTensionCounterparts,
+  buildRelationshipStateLabel,
+  classifyPlayerRelationshipPosture,
+  computeTrustDeficit,
+
+  // ── Pressure prediction ────────────────────────────────────────────────────
+  buildRelationshipAxisHeatMapByPlayer: buildRelationshipAxisHeatMap,
+
+  // ── Replay ────────────────────────────────────────────────────────────────
+  RelationshipEventReplayIterator,
+  RelationshipWatchBus,
+  ChatRelationshipService,
+  ChatRelationshipServiceExtended,
+} as const);

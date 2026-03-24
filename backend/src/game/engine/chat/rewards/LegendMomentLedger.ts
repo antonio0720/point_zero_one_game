@@ -248,6 +248,7 @@ export interface LegendMomentAdmitInput {
   readonly sourceTranscript?: readonly ChatTranscriptEntry[];
   readonly sourceProofEdges?: readonly ChatProofEdge[];
   readonly preferredPrimaryMessageId?: ChatMessageId | null;
+  readonly primaryMessage?: ChatMessage | null;
   readonly metadata?: Readonly<Record<string, JsonValue>>;
 }
 
@@ -1397,6 +1398,7 @@ export interface LegendPrestigeScore {
   readonly roomId: ChatRoomId;
   readonly rawScore: number;
   readonly normalizedScore01: number;
+  readonly normalizedScore100: Score100;
   readonly band: LegendPrestigeBand;
   readonly tierWeight: number;
   readonly severityWeight: number;
@@ -1444,6 +1446,7 @@ export function scoreLegendMoment(record: LegendMomentRecord): LegendPrestigeSco
     roomId: record.roomId,
     rawScore,
     normalizedScore01,
+    normalizedScore100: Math.round(normalizedScore01 * 100) as Score100,
     band: derivePrestigeBand(normalizedScore01),
     tierWeight,
     severityWeight,

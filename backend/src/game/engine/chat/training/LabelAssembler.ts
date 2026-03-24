@@ -1969,6 +1969,24 @@ export function decideLabelReadinessAll(
 }
 
 // ============================================================================
+// MARK: Lexicon signal accessors — recovery / escalation / label value
+// ============================================================================
+
+export function detectRecoveryLanguage(text: string): number {
+  return lexiconHits(text, RECOVERY_WORDS);
+}
+
+export function detectEscalationLanguage(text: string): number {
+  return lexiconHits(text, ESCALATION_WORDS);
+}
+
+export function normalizeLabelValue(raw: unknown): LabelValue {
+  if (raw === null || raw === undefined) return null;
+  if (typeof raw === 'string' || typeof raw === 'number' || typeof raw === 'boolean') return raw;
+  return String(raw);
+}
+
+// ============================================================================
 // MARK: Module authority object
 // ============================================================================
 
@@ -2016,4 +2034,7 @@ export const ChatLabelAssemblerModule = Object.freeze({
   batchBuildInferenceLabelDecisions,
   inferenceAcceptanceRate01,
   inferenceAverageScore01,
+  detectRecoveryLanguage,
+  detectEscalationLanguage,
+  normalizeLabelValue,
 });

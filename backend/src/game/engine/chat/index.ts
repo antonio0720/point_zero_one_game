@@ -162,6 +162,26 @@ export * from './phase2';
 export * from './intelligence/ml/EmotionModel';
 export * from './intelligence/ml/PressureAffectModel';
 export * from './intelligence/ml/AttachmentModel';
+export * from './telemetry';
+export * from './training';
+
+// ── Disambiguation overrides: explicit re-exports resolve TS2308 ambiguity ──
+// createDefaultRuntimeConfig, getChannelDescriptor, mergeRuntimeConfig,
+// runtimeAllowsShadowChannel all live in both ./types and ./ChatRuntimeConfig.
+// ChatRuntimeConfig is the authoritative runtime service; types.ts is the type
+// spine. Prefer the richer ChatRuntimeConfig implementations.
+export {
+  createDefaultRuntimeConfig,
+  getChannelDescriptor,
+  mergeRuntimeConfig,
+  runtimeAllowsShadowChannel,
+} from './ChatRuntimeConfig';
+// uniqueStrings is internal infra shared by ChatEngine and telemetry; prefer
+// the ChatEngine version which was registered first.
+export { uniqueStrings } from './ChatEngine';
+// JsonPrimitive, JsonValue, Score01 etc. are canonical types from ./types.
+// ./training re-exports them transitively — prefer the primary source.
+export type { JsonPrimitive, JsonValue, Percentage, Score01, Score100, UnixMs } from './types';
 
 // ── LiveOps world-event authority lane ─────────────────────────────────────
 export {

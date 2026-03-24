@@ -288,6 +288,11 @@ export interface ChatTelemetryEnvelopeSeed {
   readonly userId?: Nullable<ChatUserId>;
   readonly createdAt: UnixMs;
   readonly payload?: Readonly<Record<string, JsonValue>>;
+  readonly messageId?: Nullable<ChatMessageId>;
+  readonly requestId?: Nullable<ChatRequestId>;
+  readonly replayId?: Nullable<ChatReplayId>;
+  readonly sequence?: Nullable<SequenceNumber>;
+  readonly roomStageMood?: Nullable<ChatRoomStageMood>;
 }
 
 // ============================================================================
@@ -1208,6 +1213,60 @@ export function buildInvasionTelemetry(
     envelopes: envelopes,
     reasons,
   };
+}
+
+// ============================================================================
+// MARK: Snapshot context payload builder
+// ============================================================================
+
+export interface ChatTelemetrySnapshotContext {
+  readonly affect?: ChatAffectSnapshot | null;
+  readonly learning?: ChatLearningProfile | null;
+  readonly presence?: ChatPresenceSnapshot | null;
+  readonly typing?: ChatTypingSnapshot | null;
+  readonly pendingRequest?: ChatPendingRequestState | null;
+  readonly replayArtifact?: ChatReplayArtifact | null;
+  readonly fanoutPacket?: ChatFanoutPacket | null;
+}
+
+export function buildSnapshotContextPayload(
+  context: ChatTelemetrySnapshotContext,
+): Readonly<Record<string, JsonValue>> {
+  const out: Record<string, JsonValue> = Object.create(null);
+  if (context.affect) {
+    out.affectActorId = String((context.affect as any).actorId ?? '');
+    out.frustration01 = Number((context.affect as any).frustration01 ?? 0);
+    out.engagement01 = Number((context.affect as any).engagement01 ?? 0);
+    out.desperation01 = Number((context.affect as any).desperation01 ?? 0);
+  }
+  if (context.learning) {
+    out.learningUserId = String((context.learning as any).userId ?? (context.learning as any).actorId ?? '');
+    out.churnRisk01 = Number((context.learning as any).churnRisk01 ?? 0);
+    out.learningConfidence01 = Number((context.learning as any).confidence01 ?? 0);
+  }
+  if (context.presence) {
+    out.presenceActorId = String((context.presence as any).actorId ?? '');
+    out.presenceState = String((context.presence as any).presence ?? (context.presence as any).state ?? '');
+    out.presenceLastSeenAt = Number((context.presence as any).lastSeenAt ?? 0);
+  }
+  if (context.typing) {
+    out.typingActorId = String((context.typing as any).actorId ?? '');
+    out.isTyping = Boolean((context.typing as any).isTyping ?? false);
+    out.typingLastAt = Number((context.typing as any).lastTypingAt ?? 0);
+  }
+  if (context.pendingRequest) {
+    out.pendingRequestId = String((context.pendingRequest as any).requestId ?? '');
+    out.pendingRequestKind = String((context.pendingRequest as any).kind ?? '');
+  }
+  if (context.replayArtifact) {
+    out.replayArtifactId = String((context.replayArtifact as any).id ?? '');
+    out.replayAnchorKey = String((context.replayArtifact as any).anchorKey ?? '');
+  }
+  if (context.fanoutPacket) {
+    out.fanoutKind = String((context.fanoutPacket as any).kind ?? '');
+    out.fanoutRoomId = String((context.fanoutPacket as any).roomId ?? '');
+  }
+  return normalizePayloadRecord(out);
 }
 
 // ============================================================================

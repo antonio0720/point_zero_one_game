@@ -1927,8 +1927,11 @@ export interface ChatStateFingerprint {
 
 export function computeChatStateFingerprint(state: ChatState, now: UnixMs): ChatStateFingerprint {
   const rooms = Object.values(state.rooms);
-  const totalSessionCount = rooms.reduce((sum, r) => sum + Object.keys(r.sessions ?? {}).length, 0);
-  const totalMessageCount = rooms.reduce((sum, r) => sum + (r.transcript?.messageIds?.length ?? 0), 0);
+  const totalSessionCount = Object.keys(state.sessions).length;
+  const totalMessageCount = Object.values(state.transcript.byRoom).reduce(
+    (sum, entries) => sum + (entries?.length ?? 0),
+    0,
+  );
   return Object.freeze({
     roomCount: rooms.length,
     totalSessionCount,
@@ -2004,6 +2007,315 @@ export function getFirstMessage(state: ChatState, roomId: ChatRoomId): ChatMessa
 }
 
 // ============================================================================
+// MARK: Persona and rescue helpers (ChatPersonaId-consuming)
+// ============================================================================
+
+export function createTriggeredRescueDecision(
+  helperPersonaId: ChatPersonaId,
+  urgency: ChatRescueDecision['urgency'],
+  reason: string,
+): ChatRescueDecision {
+  return {
+    triggered: true,
+    urgency,
+    reason,
+    helperPersonaId,
+    shouldOpenRecoveryWindow: true,
+  };
+}
+
+export function createSuppressedRescueDecision(
+  helperPersonaId: ChatPersonaId,
+  reason: string,
+): ChatRescueDecision {
+  return {
+    triggered: false,
+    urgency: 'NONE',
+    reason,
+    helperPersonaId,
+    shouldOpenRecoveryWindow: false,
+  };
+}
+
+export function buildPersonaPresenceArgs(
+  roomId: ChatRoomId,
+  sessionId: ChatSessionId,
+  personaId: ChatPersonaId,
+  now: UnixMs,
+): CreateChatPresenceSnapshotArgs {
+  return {
+    roomId,
+    sessionId,
+    mode: 'ONLINE',
+    visibleToRoom: true,
+    spectating: false,
+    actorLabel: String(personaId),
+    now,
+  };
+}
+
+export function buildPersonaPresenceSnapshot(
+  roomId: ChatRoomId,
+  sessionId: ChatSessionId,
+  personaId: ChatPersonaId,
+  now: UnixMs,
+): ChatPresenceSnapshot {
+  return createChatPresenceSnapshot(buildPersonaPresenceArgs(roomId, sessionId, personaId, now));
+}
+
+export function upsertPersonaPresence(
+  state: ChatState,
+  roomId: ChatRoomId,
+  sessionId: ChatSessionId,
+  personaId: ChatPersonaId,
+  now: UnixMs,
+): ChatState {
+  const snapshot = buildPersonaPresenceSnapshot(roomId, sessionId, personaId, now);
+  return upsertPresenceSnapshot(state, snapshot);
+}
+
+export function selectPersonaInvasions(
+  state: ChatState,
+  roomId: ChatRoomId,
+): readonly ChatInvasionState[] {
+  return getActiveRoomInvasions(state, roomId);
+}
+
+export function isPersonaActiveInRoom(
+  state: ChatState,
+  roomId: ChatRoomId,
+  personaId: ChatPersonaId,
+): boolean {
+  return getActiveRoomInvasions(state, roomId).some(
+    (inv) => String((inv as unknown as { personaId?: unknown }).personaId ?? '') === String(personaId),
+  );
+}
+
+export function getPersonaRescueHistory(
+  state: ChatState,
+  personaId: ChatPersonaId,
+): readonly ChatTelemetryEnvelope[] {
+  return state.telemetryQueue.filter(
+    (env) => String((env as unknown as { personaId?: unknown }).personaId ?? '') === String(personaId),
+  );
+}
+
+export function describePersonaPresenceInRoom(
+  state: ChatState,
+  roomId: ChatRoomId,
+  personaId: ChatPersonaId,
+): string {
+  const presences = selectRoomPresence(state, roomId);
+  const match = presences.find((p) => p.actorLabel === String(personaId));
+  if (!match) return `persona:${String(personaId)} not present in room:${String(roomId)}`;
+  return `persona:${String(personaId)} | room:${String(roomId)} | mode:${match.mode} | visible:${match.visibleToRoom}`;
+}
+
+export type { ChatPersonaId };
+
+// ============================================================================
+// MARK: Room channel analytics (user experience depth)
+// ============================================================================
+
+export interface RoomChannelActivitySummary {
+  readonly roomId: ChatRoomId;
+  readonly channelId: ChatChannelId;
+  readonly messageCount: number;
+  readonly unreadCount: number;
+  readonly latestMessage: Nullable<ChatMessage>;
+  readonly heat01: Nullable<Score01>;
+}
+
+export function buildRoomChannelActivitySummary(
+  state: ChatState,
+  roomId: ChatRoomId,
+  channelId: ChatChannelId,
+): RoomChannelActivitySummary {
+  const entries = (state.transcript.byRoom[roomId] ?? []).filter(
+    (entry) => entry.message.channelId === channelId,
+  );
+  const room = state.rooms[roomId];
+  const heat = state.audienceHeatByRoom[roomId];
+  const unreadCount = (room?.unreadByChannel as Record<string, number>)?.[channelId] ?? 0;
+  const latestMessage = entries.at(-1)?.message ?? null;
+
+  return Object.freeze({
+    roomId,
+    channelId,
+    messageCount: entries.length,
+    unreadCount,
+    latestMessage,
+    heat01: heat?.heat01 ?? null,
+  });
+}
+
+export function buildAllChannelSummariesForRoom(
+  state: ChatState,
+  roomId: ChatRoomId,
+): readonly RoomChannelActivitySummary[] {
+  const channelIds = Object.keys(CHAT_CHANNEL_DESCRIPTORS) as ChatChannelId[];
+  return Object.freeze(channelIds.map((channelId) => buildRoomChannelActivitySummary(state, roomId, channelId)));
+}
+
+// ============================================================================
+// MARK: Relationship analytics
+// ============================================================================
+
+export interface RelationshipSummaryForRoom {
+  readonly roomId: ChatRoomId;
+  readonly totalRelationships: number;
+  readonly avgTrust01: number;
+  readonly avgFear01: number;
+  readonly avgContempt01: number;
+  readonly avgFascination01: number;
+  readonly highestTrustActorId: Nullable<string>;
+  readonly lowestTrustActorId: Nullable<string>;
+}
+
+export function buildRelationshipSummaryForRoom(
+  state: ChatState,
+  roomId: ChatRoomId,
+): RelationshipSummaryForRoom {
+  const relationships = selectRoomRelationships(state, roomId);
+  if (relationships.length === 0) {
+    return Object.freeze({
+      roomId,
+      totalRelationships: 0,
+      avgTrust01: 0,
+      avgFear01: 0,
+      avgContempt01: 0,
+      avgFascination01: 0,
+      highestTrustActorId: null,
+      lowestTrustActorId: null,
+    });
+  }
+
+  const rel = relationships as unknown as ReadonlyArray<{
+    readonly actorId: string;
+    readonly trust01?: number;
+    readonly fear01?: number;
+    readonly contempt01?: number;
+    readonly fascination01?: number;
+  }>;
+
+  const avgTrust01 = rel.reduce((sum, r) => sum + (r.trust01 ?? 0), 0) / rel.length;
+  const avgFear01 = rel.reduce((sum, r) => sum + (r.fear01 ?? 0), 0) / rel.length;
+  const avgContempt01 = rel.reduce((sum, r) => sum + (r.contempt01 ?? 0), 0) / rel.length;
+  const avgFascination01 = rel.reduce((sum, r) => sum + (r.fascination01 ?? 0), 0) / rel.length;
+
+  const sorted = [...rel].sort((a, b) => (b.trust01 ?? 0) - (a.trust01 ?? 0));
+  const highestTrustActorId = sorted[0]?.actorId ?? null;
+  const lowestTrustActorId = sorted.at(-1)?.actorId ?? null;
+
+  return Object.freeze({
+    roomId,
+    totalRelationships: relationships.length,
+    avgTrust01: clamp01(avgTrust01),
+    avgFear01: clamp01(avgFear01),
+    avgContempt01: clamp01(avgContempt01),
+    avgFascination01: clamp01(avgFascination01),
+    highestTrustActorId,
+    lowestTrustActorId,
+  });
+}
+
+// ============================================================================
+// MARK: Pending reveal analytics
+// ============================================================================
+
+export interface PendingRevealSummary {
+  readonly count: number;
+  readonly nextRevealAt: Nullable<UnixMs>;
+  readonly roomIds: readonly ChatRoomId[];
+}
+
+export function buildPendingRevealSummary(state: ChatState): PendingRevealSummary {
+  const reveals = state.pendingReveals;
+  const roomIds = [...new Set(reveals.map((r) => r.roomId))] as ChatRoomId[];
+  const nextRevealAt = reveals.length > 0 ? reveals[0]!.revealAt : null;
+  return Object.freeze({
+    count: reveals.length,
+    nextRevealAt,
+    roomIds: Object.freeze(roomIds),
+  });
+}
+
+export function hasPendingRevealsForRoom(state: ChatState, roomId: ChatRoomId): boolean {
+  return state.pendingReveals.some((r) => r.roomId === roomId);
+}
+
+export function countPendingRevealsForRoom(state: ChatState, roomId: ChatRoomId): number {
+  return state.pendingReveals.filter((r) => r.roomId === roomId).length;
+}
+
+// ============================================================================
+// MARK: Proof chain analytics
+// ============================================================================
+
+export interface ProofChainSummary {
+  readonly roomId: ChatRoomId;
+  readonly edgeCount: number;
+  readonly latestEdgeId: Nullable<string>;
+}
+
+export function buildProofChainSummary(state: ChatState, roomId: ChatRoomId): ProofChainSummary {
+  const edges = selectRoomProofEdges(state, roomId);
+  const latestEdge = edges.at(-1);
+  return Object.freeze({
+    roomId,
+    edgeCount: edges.length,
+    latestEdgeId: latestEdge?.id ?? null,
+  });
+}
+
+// ============================================================================
+// MARK: Replay analytics
+// ============================================================================
+
+export interface ReplaySummary {
+  readonly roomId: ChatRoomId;
+  readonly artifactCount: number;
+  readonly earliestStart: Nullable<number>;
+  readonly latestEnd: Nullable<number>;
+}
+
+export function buildReplaySummary(state: ChatState, roomId: ChatRoomId): ReplaySummary {
+  const artifacts = selectRoomReplayArtifacts(state, roomId);
+  if (artifacts.length === 0) {
+    return Object.freeze({ roomId, artifactCount: 0, earliestStart: null, latestEnd: null });
+  }
+  const starts = artifacts.map((a) => a.range.start);
+  const ends = artifacts.map((a) => a.range.end);
+  return Object.freeze({
+    roomId,
+    artifactCount: artifacts.length,
+    earliestStart: Math.min(...starts),
+    latestEnd: Math.max(...ends),
+  });
+}
+
+// ============================================================================
+// MARK: Telemetry analytics
+// ============================================================================
+
+export interface TelemetryQueueSummary {
+  readonly totalEnqueued: number;
+  readonly roomIds: readonly ChatRoomId[];
+  readonly sessionIds: readonly ChatSessionId[];
+}
+
+export function buildTelemetryQueueSummary(state: ChatState): TelemetryQueueSummary {
+  const items = state.telemetryQueue;
+  const roomIds = [...new Set(items.map((t) => t.roomId))].filter(Boolean) as ChatRoomId[];
+  const sessionIds = [...new Set(items.map((t) => t.sessionId))].filter(Boolean) as ChatSessionId[];
+  return Object.freeze({
+    totalEnqueued: items.length,
+    roomIds: Object.freeze(roomIds),
+    sessionIds: Object.freeze(sessionIds),
+  });
+}
+
+// ============================================================================
 // MARK: Module descriptor
 // ============================================================================
 
@@ -2050,13 +2362,43 @@ export namespace ChatStateModuleExtended {
 
 export const CHAT_STATE_FULL_MODULE = Object.freeze({
   descriptor: CHAT_STATE_MODULE_DESCRIPTOR,
+  // watch bus
   createWatchBus: () => new ChatStateWatchBus(),
+  // fingerprint
   computeFingerprint: computeChatStateFingerprint,
+  // room + presence summaries
   buildRoomPresenceSummary,
   buildRoomTypingSummary,
   buildActiveInvasionSummary,
+  // channel analytics
+  buildRoomChannelActivitySummary,
+  buildAllChannelSummariesForRoom,
+  // relationship analytics
+  buildRelationshipSummaryForRoom,
+  // proof / replay analytics
+  buildProofChainSummary,
+  buildReplaySummary,
+  // pending reveal analytics
+  buildPendingRevealSummary,
+  hasPendingRevealsForRoom,
+  countPendingRevealsForRoom,
+  // telemetry analytics
+  buildTelemetryQueueSummary,
+  // persona / rescue
+  createTriggeredRescueDecision,
+  createSuppressedRescueDecision,
+  buildPersonaPresenceArgs,
+  buildPersonaPresenceSnapshot,
+  upsertPersonaPresence,
+  selectPersonaInvasions,
+  isPersonaActiveInRoom,
+  getPersonaRescueHistory,
+  describePersonaPresenceInRoom,
+  // transcript helpers
   countTranscriptMessages,
   countVisibleMessages,
+  getFirstMessage,
+  // utility
   normalizeHeat,
   stampNow,
   uniqueBy,
