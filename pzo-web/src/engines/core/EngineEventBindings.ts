@@ -286,7 +286,7 @@ export class EngineEventBindings {
     });
   }
 
-  private subscribe(eventName: EngineEventName, handler: (event: unknown) => void): void {
+  private subscribe(eventName: string, handler: (event: unknown) => void): void {
     const bus = this.eventBus as unknown as {
       subscribe?: (event: string, handler: (event: unknown) => void) => (() => void) | void;
       on?: (event: string, handler: (event: unknown) => void) => (() => void) | void;
