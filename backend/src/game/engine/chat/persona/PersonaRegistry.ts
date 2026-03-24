@@ -1579,6 +1579,28 @@ export function sampleLineBankCoverage(
 }
 
 // ============================================================================
+// MARK: Descriptor, voiceprint, and cadence profile access
+// ============================================================================
+
+export function getPersonaBaseDescriptor(
+  identity: string | ChatKnownNpcKey,
+): ChatNpcDescriptor | null {
+  const entry = resolvePersonaEntry(identity);
+  return entry ? (entry.descriptor as ChatNpcDescriptor) : null;
+}
+
+export function getPersonaVoiceprint(
+  identity: string | ChatKnownNpcKey,
+): ChatNpcVoiceprint | null {
+  const entry = resolvePersonaEntry(identity);
+  return entry?.descriptor.voiceprint ?? null;
+}
+
+export function getPersonaCadenceProfile(sharedKey: ChatKnownNpcKey) {
+  return CHAT_NPC_CADENCE_PROFILES[sharedKey];
+}
+
+// ============================================================================
 // MARK: Namespace export
 // ============================================================================
 
@@ -1665,4 +1687,9 @@ export const PersonaRegistryNS = Object.freeze({
   listPersonasWithBotBinding,
   getBotIdForPersona,
   resolveBotIdToSharedKey,
+
+  // Descriptor, voiceprint, and cadence profile access
+  getPersonaBaseDescriptor,
+  getPersonaVoiceprint,
+  getPersonaCadenceProfile,
 });

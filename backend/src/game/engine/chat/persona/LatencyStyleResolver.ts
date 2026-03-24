@@ -114,6 +114,7 @@ export interface BackendTypingEnvelope {
 export interface BackendLatencyResolution {
   readonly urgency: BackendLatencyUrgencyBand;
   readonly reason: BackendLatencyReason;
+  readonly cadenceBand: ChatNpcCadenceBand;
   readonly delayMs: number;
   readonly revealAt: number;
   readonly entryStyle: ChatNpcEntryStyle;
@@ -249,6 +250,7 @@ export function resolveLatencyStyle(
   return Object.freeze({
     urgency,
     reason,
+    cadenceBand: descriptor.cadence.band,
     delayMs,
     revealAt,
     entryStyle,
@@ -673,6 +675,10 @@ export function resolveLingerMs(
   }
   if (descriptor.npcClass === 'HATER' && urgency === 'CRITICAL') return 220;
   return 120;
+}
+
+export function resolveCadenceBand(descriptor: ChatAnyNpcDescriptor): ChatNpcCadenceBand {
+  return descriptor.cadence.band;
 }
 
 // ============================================================================
