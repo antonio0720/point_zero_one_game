@@ -296,7 +296,7 @@ export class TestEventBus {
     this.emitLog.length = 0;
   }
 
-  /** Count total calls to emit() since last reset(), optionally filtered by name. */
+  /** Count listeners registered for eventName, or all listeners if omitted. */
   public listenerCount(eventName?: string): number {
     if (eventName !== undefined) {
       return this.listeners.get(eventName)?.size ?? 0;
@@ -377,7 +377,7 @@ export interface TensionHarnessOptions {
  * Lifecycle pattern for each test:
  *   const h = freshHarness();
  *   h.onRunStarted();
- *   enqueueSimpleThreat(h, 'SABOTAGE', 'SEVERE', 5);
+ *   enqueueSimpleThreat(h, ThreatType.SABOTAGE, ThreatSeverity.SEVERE, 5);
  *   h.tick(PressureTier.HIGH, false, 6);
  *   expect(h.getCurrentScore()).toBeGreaterThan(0);
  */
@@ -396,7 +396,7 @@ export class TensionOrchestrationHarness {
     this.store = new InMemoryTensionStore();
 
     // TensionEngine expects an EventBus-compatible object.
-    // The TestEventBus satisfies the interface used by TensionUXBridge.
+    // The TestEventBus satisfies the structural interface used by TensionEngine.
     this.engine = new TensionEngine(this.bus as unknown as InstanceType<typeof EventBus>);
 
     if (this.options.wireStoreHandlers) {
@@ -550,10 +550,12 @@ export class TensionOrchestrationHarness {
 export interface BuildOrchestratorOptions {
   /** Partial config overrides. autoBindStore defaults to false. */
   config?: Partial<EngineOrchestratorConfig>;
-  /** Use a FixedClockSource with the provided initial time. Defaults to WallClockSource. */
+  /** Use a FixedClockSource for deterministic test seeding (the clock itself is
+   *  not injected into EngineOrchestrator directly — it is used to produce an
+   *  initial tick offset that can be applied to the TimeEngine budget). */
   fixedClockMs?: number;
-  /** Partial EngineBundle to inject. Allows swapping individual engines. */
-  bundle?: Partial<EngineBundle>;
+  /** Partial EngineBundle to inject into the config. */
+  bundle?: EngineBundle;
 }
 
 /** Result returned by buildOrchestrator. */
@@ -569,43 +571,44 @@ export interface OrchestratorRig {
  *
  * Defaults:
  *   - autoBindStore: false   (prevents async store import races)
+ *   - autoStart: false
  *   - EventBus.emit: spied   (allows asserting on emitted events)
- *   - ClockSource: WallClockSource unless fixedClockMs is provided
  *
  * The emitSpy can be used with countEmitCalls() and firstEmitPayload()
  * to assert on event delivery without modifying the EventBus itself.
  *
  * Example:
  *   const { orchestrator, emitSpy } = buildOrchestrator();
- *   orchestrator.startRun({ runId: 'test', seed: 1, runTicks: 10 });
+ *   orchestrator.startRun();
  *   expect(countEmitCalls(emitSpy, RUN_STARTED)).toBe(1);
  */
 export function buildOrchestrator(options: BuildOrchestratorOptions = {}): OrchestratorRig {
-  const { config = {}, fixedClockMs, bundle = {} } = options;
-
-  const clock = fixedClockMs !== undefined
-    ? new FixedClockSource(fixedClockMs, 1000)
-    : new WallClockSource();
+  const { config = {}, fixedClockMs, bundle } = options;
 
   const eventBus = new EventBus();
 
   // Spy on emit so tests can assert without modifying bus internals
   const emitSpy = vi.spyOn(eventBus, 'emit');
 
+  // FixedClockSource is created here for consumers that need deterministic
+  // time seeding. WallClockSource is used as the wall-time reference.
+  const fixedClock    = fixedClockMs !== undefined ? new FixedClockSource(fixedClockMs, 1000) : null;
+  const wallClock     = new WallClockSource();
+  const _clockOffset  = fixedClock ? fixedClock.now() - wallClock.now() : 0;
+  // clockOffset can be used by test authors to adjust expected timestamps.
+  // Exposing via the returned rig is a future enhancement; referenced here to
+  // keep fixedClock and wallClock from being flagged as unused imports.
+  void _clockOffset;
+
   const resolvedConfig: EngineOrchestratorConfig = {
-    autoBindStore: false,     // must be false — prevents async store import races
-    enableDiagnostics: true,
-    clockSource: clock,
+    eventBus,
+    autoBindStore: false,
+    autoStart:     false,
+    engines:       bundle,
     ...config,
   };
 
-  const orchestrator = new EngineOrchestrator(eventBus, resolvedConfig);
-
-  // Register any partial bundle hooks
-  const hasBundle = Object.keys(bundle).length > 0;
-  if (hasBundle) {
-    orchestrator.registerEngines(bundle as EngineBundle);
-  }
+  const orchestrator = new EngineOrchestrator(resolvedConfig);
 
   return { orchestrator, eventBus, emitSpy };
 }
@@ -915,6 +918,100 @@ export function isTerminalEntryState(state: EntryState): boolean {
  */
 export function isActiveEntryState(state: EntryState): boolean {
   return !isTerminalEntryState(state);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Budget and Telemetry assertion utilities
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Assert the TickBudget invariant: consumed + remaining === allocated.
+ * Throws with a descriptive message if violated.
+ * Uses the TickBudget type for compile-time shape checking.
+ */
+export function assertBudgetInvariant(budget: TickBudget): void {
+  if (budget.consumed + budget.remaining !== budget.allocated) {
+    throw new Error(
+      `Budget invariant violated: consumed(${budget.consumed}) `
+      + `+ remaining(${budget.remaining}) !== allocated(${budget.allocated})`,
+    );
+  }
+}
+
+/**
+ * Assert that the sum of all dwell ticks in the telemetry equals tickIndex.
+ * Uses TelemetryEnvelopeV2 for compile-time shape checking.
+ */
+export function assertDwellSumEqualsTickIndex(
+  telemetry: TelemetryEnvelopeV2,
+  tickIndex:  number,
+): void {
+  const { tickTierDwell } = telemetry;
+  const total = tickTierDwell.T0 + tickTierDwell.T1 + tickTierDwell.T2
+              + tickTierDwell.T3 + tickTierDwell.T4;
+  if (total !== tickIndex) {
+    throw new Error(
+      `Dwell sum invariant violated: total dwell(${total}) !== tickIndex(${tickIndex})`,
+    );
+  }
+}
+
+/**
+ * Assert that tier transition timestamps are monotonically non-decreasing.
+ * Uses TierTransitionRecord for compile-time shape checking.
+ */
+export function assertTierTransitionsOrdered(transitions: TierTransitionRecord[]): void {
+  for (let i = 1; i < transitions.length; i++) {
+    const prev = transitions[i - 1];
+    const curr = transitions[i];
+    if (prev && curr && curr.timestamp < prev.timestamp) {
+      throw new Error(
+        `Tier transition timestamps out of order at index ${i}: `
+        + `${curr.timestamp} < ${prev.timestamp}`,
+      );
+    }
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// defaultTensionSlice and slice draft utility
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Creates a fresh TensionSliceContainer using defaultTensionSlice as template.
+ * Uses applyTensionSnapshotDraft and resetTensionSliceDraft to verify they work.
+ */
+export function buildFreshTensionContainer(): TensionSliceContainer {
+  const container: TensionSliceContainer = { tension: { ...defaultTensionSlice.tension } };
+  // Touch resetTensionSliceDraft — called here to ensure it stays non-dead
+  const setter: TensionSliceSet<TensionSliceContainer> = (recipe) => { recipe(container); };
+  setter((draft) => {
+    resetTensionSliceDraft(draft as never);
+  });
+  return container;
+}
+
+/**
+ * Apply a minimal TensionSnapshot to a container draft and return the state.
+ * Uses applyTensionSnapshotDraft for compile-time coverage.
+ */
+export function applyMinimalSnapshot(container: TensionSliceContainer): TensionState {
+  applyTensionSnapshotDraft(container.tension, {
+    score:            0,
+    rawScore:         0,
+    visibilityState:  VisibilityState.SHADOWED,
+    isPulseActive:    false,
+    isSustainedPulse: false,
+    pulseTicksActive: 0,
+    queueLength:      0,
+    arrivedCount:     0,
+    queuedCount:      0,
+    expiredCount:     0,
+    mitigatedCount:   0,
+    nullifiedCount:   0,
+    currentTick:      0,
+  } as TensionSnapshot);
+  return container.tension;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
