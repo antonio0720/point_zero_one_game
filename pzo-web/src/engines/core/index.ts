@@ -27,7 +27,16 @@
 export * from './EventBus';
 export * from './types';
 export * from './ClockSource';
-export * from './RunStateSnapshot';
+// RunStateSnapshot re-export: 'RunStateSnapshot' type already exported by './types'.
+// Only the additional runtime symbols from RunStateSnapshot.ts are re-exported here.
+export {
+  buildSnapshot,
+  createInitialLiveState,
+  type TickMetrics,
+  type LiveRunState,
+  type MutableShieldState,
+  type MutableShieldLayer,
+} from './RunStateSnapshot';
 export * from './OrchestratorDiagnostics';
 export * from './EngineOrchestrator';
 
@@ -141,13 +150,14 @@ export const CORE_ENGINE_TICK_TIERS = Object.freeze([
 
 export type CoreEngineTierId = (typeof CORE_ENGINE_TICK_TIERS)[number];
 
-export const CORE_ENGINE_TIER_LABELS = Object.freeze({
+const _CORE_ENGINE_TIER_LABELS_BASE: Record<CoreEngineTierId, string> = {
   T0: 'SOVEREIGN',
   T1: 'STABLE',
   T2: 'COMPRESSED',
   T3: 'CRISIS',
   T4: 'COLLAPSE_IMMINENT',
-} as const satisfies Record<CoreEngineTierId, string>);
+};
+export const CORE_ENGINE_TIER_LABELS = Object.freeze(_CORE_ENGINE_TIER_LABELS_BASE);
 
 // ── Architecture laws ─────────────────────────────────────────────────────────
 

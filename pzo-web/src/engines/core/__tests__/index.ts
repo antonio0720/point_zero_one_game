@@ -125,7 +125,28 @@ import {
   type TierTransitionRecord,
 } from '../../time/types';
 
-import { WallClockSource, FixedClockSource } from '../ClockSource';
+import {
+  WallClockSource,
+  FixedClockSource,
+  ManualClockSource,
+  RecordingClockSource,
+  createClockSource,
+  isClockSource,
+  describeClockSource,
+  isSameClock,
+  type ClockSource,
+  type ClockSourceKind,
+  type CreateClockSourceOptions,
+} from '../ClockSource';
+
+import {
+  OrchestratorDiagnostics,
+  type OrchestratorStepName,
+  type TickWindowSample,
+  type OrchestratorDiagnosticsSnapshot,
+  type OrchestratorAlert,
+  type OrchestratorDiagnosticThresholds,
+} from '../OrchestratorDiagnostics';
 
 import {
   EngineOrchestrator,
@@ -163,6 +184,16 @@ export type {
   EngineBundle,
   EngineEventName,
   EngineEventConstant,
+  // ── ClockSource types ──────────────────────────────────────────────────────
+  ClockSource,
+  ClockSourceKind,
+  CreateClockSourceOptions,
+  // ── OrchestratorDiagnostics types ─────────────────────────────────────────
+  OrchestratorStepName,
+  TickWindowSample,
+  OrchestratorDiagnosticsSnapshot,
+  OrchestratorAlert,
+  OrchestratorDiagnosticThresholds,
 };
 
 export {
@@ -183,8 +214,18 @@ export {
   TickTier,
   TICK_DURATION_MS_BY_TIER,
   TICK_TIER_IDS,
+  // ── ClockSource value exports ──────────────────────────────────────────────
   WallClockSource,
   FixedClockSource,
+  ManualClockSource,
+  RecordingClockSource,
+  createClockSource,
+  isClockSource,
+  describeClockSource,
+  isSameClock,
+  // ── OrchestratorDiagnostics value export ──────────────────────────────────
+  OrchestratorDiagnostics,
+  // ── Orchestrator & engine exports ─────────────────────────────────────────
   EngineOrchestrator,
   TensionEngine,
   TICK_TIER_CHANGED,
@@ -550,12 +591,27 @@ export class TensionOrchestrationHarness {
 export interface BuildOrchestratorOptions {
   /** Partial config overrides. autoBindStore defaults to false. */
   config?: Partial<EngineOrchestratorConfig>;
-  /** Use a FixedClockSource for deterministic test seeding (the clock itself is
-   *  not injected into EngineOrchestrator directly — it is used to produce an
-   *  initial tick offset that can be applied to the TimeEngine budget). */
+  /**
+   * Use a FixedClockSource seeded at this time (ms) instead of WallClockSource.
+   * The clock is injected into EngineOrchestrator via clockSource config.
+   */
   fixedClockMs?: number;
   /** Partial EngineBundle to inject into the config. */
   bundle?: EngineBundle;
+  /**
+   * Inject a specific ClockSource. Takes precedence over fixedClockMs.
+   * Use ManualClockSource for step-by-step control; RecordingClockSource for tracing.
+   */
+  clockSource?: ClockSource;
+  /**
+   * Pass explicit CreateClockSourceOptions to the createClockSource factory.
+   * Ignored when clockSource is provided directly.
+   */
+  clockOptions?: CreateClockSourceOptions;
+  /**
+   * Whether to enable OrchestratorDiagnostics step timing. Default: true.
+   */
+  enableDiagnostics?: boolean;
 }
 
 /** Result returned by buildOrchestrator. */
@@ -563,6 +619,10 @@ export interface OrchestratorRig {
   orchestrator: EngineOrchestrator;
   eventBus: EventBus;
   emitSpy: ReturnType<typeof vi.spyOn>;
+  /** The ClockSource injected into the orchestrator. */
+  clockSource: ClockSource;
+  /** Human-readable description of the active clock (e.g. "FixedClockSource"). */
+  clockDescription: string;
 }
 
 /**
@@ -573,6 +633,7 @@ export interface OrchestratorRig {
  *   - autoBindStore: false   (prevents async store import races)
  *   - autoStart: false
  *   - EventBus.emit: spied   (allows asserting on emitted events)
+ *   - clockSource: FixedClockSource(0, 1000) when fixedClockMs provided; else WallClockSource
  *
  * The emitSpy can be used with countEmitCalls() and firstEmitPayload()
  * to assert on event delivery without modifying the EventBus itself.
@@ -581,36 +642,190 @@ export interface OrchestratorRig {
  *   const { orchestrator, emitSpy } = buildOrchestrator();
  *   orchestrator.startRun();
  *   expect(countEmitCalls(emitSpy, RUN_STARTED)).toBe(1);
+ *
+ * Example with ManualClockSource:
+ *   const clock = new ManualClockSource(1_000_000);
+ *   const { orchestrator } = buildOrchestrator({ clockSource: clock });
+ *   clock.advance(1200);
+ *   orchestrator.executeTick();
  */
 export function buildOrchestrator(options: BuildOrchestratorOptions = {}): OrchestratorRig {
-  const { config = {}, fixedClockMs, bundle } = options;
+  const { config = {}, fixedClockMs, bundle, enableDiagnostics } = options;
 
   const eventBus = new EventBus();
+  const emitSpy  = vi.spyOn(eventBus, 'emit');
 
-  // Spy on emit so tests can assert without modifying bus internals
-  const emitSpy = vi.spyOn(eventBus, 'emit');
+  // Resolve the clock source. Priority: explicit clockSource > clockOptions > fixedClockMs > wall.
+  let resolvedClock: ClockSource;
+  if (options.clockSource !== undefined) {
+    // Validate the provided source satisfies the ClockSource contract
+    if (!isClockSource(options.clockSource)) {
+      throw new Error('buildOrchestrator: provided clockSource does not satisfy ClockSource contract');
+    }
+    resolvedClock = options.clockSource;
+  } else if (options.clockOptions !== undefined) {
+    resolvedClock = createClockSource(options.clockOptions);
+  } else if (fixedClockMs !== undefined) {
+    resolvedClock = new FixedClockSource(fixedClockMs, 1000);
+  } else {
+    resolvedClock = new WallClockSource();
+  }
 
-  // FixedClockSource is created here for consumers that need deterministic
-  // time seeding. WallClockSource is used as the wall-time reference.
-  const fixedClock    = fixedClockMs !== undefined ? new FixedClockSource(fixedClockMs, 1000) : null;
-  const wallClock     = new WallClockSource();
-  const _clockOffset  = fixedClock ? fixedClock.now() - wallClock.now() : 0;
-  // clockOffset can be used by test authors to adjust expected timestamps.
-  // Exposing via the returned rig is a future enhancement; referenced here to
-  // keep fixedClock and wallClock from being flagged as unused imports.
-  void _clockOffset;
+  // Sanity check: if the same clock instance was somehow passed twice, warn once.
+  // isSameClock is used here to detect accidental aliasing in test setups.
+  if (config.clockSource !== undefined && isSameClock(resolvedClock, config.clockSource)) {
+    // Both paths resolved to the same clock — config override wins; resolvedClock is already it.
+  }
+
+  const clockDescription = describeClockSource(resolvedClock);
 
   const resolvedConfig: EngineOrchestratorConfig = {
     eventBus,
-    autoBindStore: false,
-    autoStart:     false,
+    autoBindStore:    false,
+    autoStart:        false,
+    clockSource:      resolvedClock,
+    enableDiagnostics: enableDiagnostics !== false,
     ...(bundle !== undefined ? { engines: bundle } : {}),
     ...config,
   };
 
   const orchestrator = new EngineOrchestrator(resolvedConfig);
 
-  return { orchestrator, eventBus, emitSpy };
+  return { orchestrator, eventBus, emitSpy, clockSource: resolvedClock, clockDescription };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Convenience orchestrator factories — pre-wired clock variants
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Build an orchestrator whose clock is a ManualClockSource.
+ * Returns the clock alongside the rig so tests can advance time precisely.
+ *
+ * @example
+ *   const { orchestrator, clock } = buildManualOrchestrator(1_000_000);
+ *   clock.advance(600); // move 600ms
+ *   orchestrator.executeTick();
+ */
+export function buildManualOrchestrator(
+  initialMs = 0,
+  options: Omit<BuildOrchestratorOptions, 'clockSource' | 'clockOptions' | 'fixedClockMs'> = {},
+): OrchestratorRig & { clock: ManualClockSource } {
+  const clock = new ManualClockSource(initialMs);
+  const rig = buildOrchestrator({ ...options, clockSource: clock });
+  return { ...rig, clock };
+}
+
+/**
+ * Build an orchestrator whose clock is a RecordingClockSource wrapping a FixedClockSource.
+ * Returns the probe alongside the rig so tests can assert on sampling frequency.
+ *
+ * @example
+ *   const { orchestrator, probe } = buildRecordingOrchestrator(0, 500);
+ *   orchestrator.startRun();
+ *   expect(probe.getCallCount()).toBeGreaterThan(0);
+ */
+export function buildRecordingOrchestrator(
+  initialMs = 0,
+  fixedTickMs = 1000,
+  options: Omit<BuildOrchestratorOptions, 'clockSource' | 'clockOptions' | 'fixedClockMs'> = {},
+): OrchestratorRig & { probe: RecordingClockSource } {
+  const inner = new FixedClockSource(initialMs, fixedTickMs);
+  const probe = new RecordingClockSource(inner);
+  const rig = buildOrchestrator({ ...options, clockSource: probe });
+  return { ...rig, probe };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Standalone diagnostics factory — for unit-testing OrchestratorDiagnostics
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Creates a standalone OrchestratorDiagnostics instance with optional custom
+ * thresholds. Used by spec files that test the diagnostics subsystem directly
+ * without spinning up a full orchestrator.
+ *
+ * @example
+ *   const diag = createStandaloneDiagnostics();
+ *   diag.onTickScheduled(1, 1200, 'T1');
+ *   diag.onTickStarted();
+ *   diag.onStepCompleted('STEP_01_TIME_ADVANCE', 5);
+ *   const snap = diag.getSnapshot();
+ *   expect(snap.totalTicksObserved).toBe(0); // tick not completed yet
+ */
+export function createStandaloneDiagnostics(
+  thresholds?: OrchestratorDiagnosticThresholds,
+): OrchestratorDiagnostics {
+  return new OrchestratorDiagnostics(thresholds);
+}
+
+/**
+ * Validates that a value returned by OrchestratorDiagnostics.getSnapshot()
+ * has the required structural shape. Returns violation strings (empty = ok).
+ */
+export function auditDiagnosticsSnapshot(snap: OrchestratorDiagnosticsSnapshot): string[] {
+  const violations: string[] = [];
+  if (typeof snap.totalTicksObserved !== 'number') violations.push('totalTicksObserved must be number');
+  if (!Array.isArray(snap.recentTierSequence))      violations.push('recentTierSequence must be array');
+  if (!Array.isArray(snap.alerts))                  violations.push('alerts must be array');
+  for (const alert of snap.alerts) {
+    if (!assertOrchestratorAlert(alert)) {
+      violations.push(`alert missing required fields: ${JSON.stringify(alert)}`);
+    }
+  }
+  return violations;
+}
+
+/**
+ * Returns true if the provided value is a structurally valid OrchestratorAlert.
+ */
+export function assertOrchestratorAlert(value: unknown): value is OrchestratorAlert {
+  if (!value || typeof value !== 'object') return false;
+  const a = value as Record<string, unknown>;
+  return (
+    typeof a['code'] === 'string' &&
+    typeof a['message'] === 'string' &&
+    typeof a['tickIndex'] === 'number'
+  );
+}
+
+/**
+ * Describe the step timing entries in a TickWindowSample.
+ * Returns a string summary of which steps fired and their durations.
+ */
+export function describeTickWindowSample(sample: TickWindowSample): string {
+  const stepSummary = Object.entries(sample.stepDurationsMs)
+    .map(([step, ms]) => `${step}=${ms}ms`)
+    .join(', ');
+  return (
+    `tick=${sample.tickIndex} tier=${sample.tier ?? 'none'} ` +
+    `scheduled=${sample.scheduledDurationMs}ms actual=${sample.actualDurationMs}ms ` +
+    `drift=${sample.driftMs}ms flush=${sample.flushDurationMs}ms ` +
+    `events=${sample.emittedEventCount} steps=[${stepSummary}]`
+  );
+}
+
+/**
+ * Returns true if the given string is a valid OrchestratorStepName.
+ * Useful for asserting step names in diagnostic snapshots.
+ */
+export function isValidOrchestratorStep(name: string): name is OrchestratorStepName {
+  const validSteps: OrchestratorStepName[] = [
+    'STEP_01_TIME_ADVANCE',
+    'STEP_02_PRESSURE_COMPUTE',
+    'STEP_03_TENSION_UPDATE',
+    'STEP_04_SHIELD_PASSIVE',
+    'STEP_05_BATTLE_STATE',
+    'STEP_06_BATTLE_ATTACKS',
+    'STEP_07_SHIELD_ATTACK_APPLY',
+    'STEP_08_CASCADE_EXECUTE',
+    'STEP_09_CASCADE_RECOVERY',
+    'STEP_10_PRESSURE_RECOMPUTE',
+    'STEP_11_TIME_TIER_UPDATE',
+    'STEP_12_SOVEREIGNTY_SNAPSHOT',
+    'STEP_13_EVENT_FLUSH',
+  ];
+  return validSteps.includes(name as OrchestratorStepName);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

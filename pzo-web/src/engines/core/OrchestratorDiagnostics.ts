@@ -9,7 +9,7 @@
  * - Produce operator-grade snapshots without mutating gameplay state
  */
 
-import type { TickTier } from '../../engines/core/types';
+import type { TickTier } from './types';
 
 export type OrchestratorStepName =
   | 'STEP_01_TIME_ADVANCE'
@@ -294,7 +294,7 @@ export class OrchestratorDiagnostics {
       tierTransitionCount: this.tierTransitionCount,
       recentTierSequence: [...this.recentTiers],
       alerts: [...this.alerts],
-      lastTick: this.history.length ? this.history[this.history.length - 1] : null,
+      lastTick: this.history[this.history.length - 1] ?? null,
     };
   }
 

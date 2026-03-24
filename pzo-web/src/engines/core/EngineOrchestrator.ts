@@ -29,6 +29,8 @@
  */
 
 import { sharedEventBus, type EventBus } from './EventBus';
+import { OrchestratorDiagnostics, type OrchestratorStepName } from './OrchestratorDiagnostics';
+import { WallClockSource, type ClockSource } from './ClockSource';
 import { DecisionTimer } from '../time/DecisionTimer';
 import { TimeEngine } from '../time/TimeEngine';
 import type { PressureReader } from '../pressure/types';
@@ -106,6 +108,10 @@ export interface EngineOrchestratorConfig {
   readonly defaultSeasonTickBudget?: number;
   readonly autoBindStore?: boolean;
   readonly autoStart?: boolean;
+  /** Injected clock — default WallClockSource. Use FixedClockSource/ManualClockSource in tests. */
+  readonly clockSource?: ClockSource;
+  /** When true, OrchestratorDiagnostics runs per-step timing. Default: true. */
+  readonly enableDiagnostics?: boolean;
 }
 
 export interface StartRunOptions {
@@ -155,9 +161,12 @@ export class EngineOrchestrator {
   private readonly timeEngine: TimeEngine;
   private readonly decisionTimer: DecisionTimer;
   private readonly pressureReader: PressureReader | null;
-  private readonly engines: EngineBundle;
+  private engines: EngineBundle;
   private readonly snapshotProvider: () => Record<string, unknown>;
   private readonly outcomeResolver: (snapshot: OrchestratorSnapshot) => RunOutcome | null;
+  private readonly clock: ClockSource;
+  private readonly diagnostics: OrchestratorDiagnostics;
+  private readonly diagnosticsEnabled: boolean;
 
   private lifecycleState: RunLifecycleState = 'IDLE';
   private readonly defaultSeasonTickBudget: number;
@@ -179,10 +188,11 @@ export class EngineOrchestrator {
     this.decisionTimer = config.decisionTimer ?? new DecisionTimer(this.eventBus);
     this.engines = config.engines ?? {};
     this.snapshotProvider = config.snapshotProvider ?? (() => ({}));
-    this.outcomeResolver =
-      config.outcomeResolver ??
-      (() => null);
+    this.outcomeResolver = config.outcomeResolver ?? (() => null);
     this.defaultSeasonTickBudget = Math.max(1, config.defaultSeasonTickBudget ?? 300);
+    this.clock = config.clockSource ?? new WallClockSource();
+    this.diagnosticsEnabled = config.enableDiagnostics !== false;
+    this.diagnostics = new OrchestratorDiagnostics();
 
     if (this.pressureReader && 'setPressureReader' in this.timeEngine) {
       this.timeEngine.setPressureReader(this.pressureReader);
@@ -230,7 +240,7 @@ export class EngineOrchestrator {
       tickIndex: 0,
       tickTier: this.timeEngine.getCurrentTier(),
       tickDurationMs: this.timeEngine.getTickDurationMs(),
-      timestamp: Date.now(),
+      timestamp: this.clock.now(),
     };
 
     this.eventBus.emit('RUN_STARTED' as never, startedPayload as never);
@@ -276,7 +286,7 @@ export class EngineOrchestrator {
       tickIndex: this.timeEngine.getTickIndex(),
       tickTier: this.timeEngine.getCurrentTier(),
       ticksRemaining: this.timeEngine.getTicksRemaining(),
-      timestamp: Date.now(),
+      timestamp: this.clock.now(),
     } as never);
     this.eventBus.flush();
 
@@ -333,13 +343,20 @@ export class EngineOrchestrator {
     this.lifecycleState = 'TICK_LOCKED';
     this.stepMetrics.length = 0;
 
+    const nextTickIndex = this.timeEngine.getTickIndex() + 1;
+    const tickDurationMs = this.timeEngine.getTickDurationMs();
+    const currentTierForDiag = this.timeEngine.getCurrentTier() as import('./types').TickTier | null;
+    if (this.diagnosticsEnabled) {
+      this.diagnostics.onTickScheduled(nextTickIndex, tickDurationMs, currentTierForDiag);
+      this.diagnostics.onTickStarted();
+    }
+
     const attacksFired: unknown[] = [];
     const damageResults: unknown[] = [];
     const cascadeEffects: unknown[] = [];
     const recoveryResults: unknown[] = [];
 
     try {
-      const nextTickIndex = this.timeEngine.getTickIndex() + 1;
       this.eventBus.setTickContext(nextTickIndex);
 
       const preSnapshot = this.captureSnapshot();
@@ -420,11 +437,21 @@ export class EngineOrchestrator {
         seasonBudget: this.timeEngine.getSeasonBudget(),
         timeoutImminent: this.timeEngine.isTimeoutImminent(),
         pendingEventCount: this.eventBus.getPendingCount(),
-        timestamp: Date.now(),
+        timestamp: this.clock.now(),
       };
+
+      if (this.diagnosticsEnabled) {
+        this.diagnostics.onFlushStarted();
+        this.diagnostics.onEventEmitted(this.eventBus.getPendingCount());
+        this.diagnostics.onDecisionWindowCountUpdated(this.decisionTimer.getActiveWindows().length);
+      }
 
       this.eventBus.emit('TICK_COMPLETE' as never, tickCompletePayload as never);
       this.eventBus.flush();
+
+      if (this.diagnosticsEnabled) {
+        this.diagnostics.onTickCompleted();
+      }
 
       this.lastTickRecord = {
         tickIndex: this.timeEngine.getTickIndex(),
@@ -481,32 +508,78 @@ export class EngineOrchestrator {
     return this.decisionTimer;
   }
 
+  /**
+   * Returns the current OrchestratorSnapshot (a read-only structural view of live
+   * orchestrator state). Safe to call at any time — never mutates internal state.
+   */
+  public getSnapshot(): OrchestratorSnapshot {
+    return this.captureSnapshot();
+  }
+
+  /**
+   * Replaces the engine bundle at runtime. Safe to call between ticks (not
+   * while isTickExecuting). Calling mid-tick has no effect on the current tick.
+   */
+  public registerEngines(bundle: EngineBundle): void {
+    this.engines = { ...this.engines, ...bundle };
+  }
+
+  /**
+   * Returns a frozen copy of the current engine bundle. Useful in tests to
+   * verify which engines are wired to the orchestrator.
+   */
+  public getEngineBundle(): Readonly<EngineBundle> {
+    return Object.freeze({ ...this.engines });
+  }
+
+  /**
+   * Returns the OrchestratorDiagnostics snapshot. Only populated when
+   * enableDiagnostics was not set to false in config.
+   */
+  public getDiagnosticsSnapshot(): ReturnType<OrchestratorDiagnostics['getSnapshot']> | null {
+    if (!this.diagnosticsEnabled) return null;
+    return this.diagnostics.getSnapshot();
+  }
+
+  /**
+   * Returns the injected ClockSource so consumers can inspect which clock
+   * implementation is active (wall vs fixed vs manual).
+   */
+  public getClockSource(): ClockSource {
+    return this.clock;
+  }
+
   // ───────────────────────────────────────────────────────────────────────────
   // Internal helpers
   // ───────────────────────────────────────────────────────────────────────────
 
   private runStep<T>(step: string, fn: () => T): T | null {
-    const startedAtMs = Date.now();
+    const startedAtMs = this.clock.now();
     try {
       const result = fn();
-      const endedAtMs = Date.now();
+      const endedAtMs = this.clock.now();
+      const durationMs = endedAtMs - startedAtMs;
       this.stepMetrics.push({
         step,
         startedAtMs,
         endedAtMs,
-        durationMs: endedAtMs - startedAtMs,
+        durationMs,
         ok: true,
         errorMessage: null,
       });
+      if (this.diagnosticsEnabled) {
+        this.diagnostics.onStepCompleted(step as OrchestratorStepName, durationMs);
+      }
       return result;
     } catch (error) {
-      const endedAtMs = Date.now();
+      const endedAtMs = this.clock.now();
+      const durationMs = endedAtMs - startedAtMs;
       const errorMessage = error instanceof Error ? error.message : String(error);
       this.stepMetrics.push({
         step,
         startedAtMs,
         endedAtMs,
-        durationMs: endedAtMs - startedAtMs,
+        durationMs,
         ok: false,
         errorMessage,
       });
@@ -610,7 +683,12 @@ export class EngineOrchestrator {
     });
 
     on('TICK_TIER_CHANGED', (event) => {
-      const payload = this.unwrapEventPayload(event);
+      const payload = this.unwrapEventPayload<{ from?: string; to?: string }>(event);
+      if (this.diagnosticsEnabled && payload?.to) {
+        const from = (payload.from ?? null) as import('./types').TickTier | null;
+        const to = payload.to as import('./types').TickTier;
+        this.diagnostics.onTierChanged(from, to);
+      }
       void this.resolveStoreDispatch().then((store) => {
         store?.onTierChanged?.(payload);
       });
