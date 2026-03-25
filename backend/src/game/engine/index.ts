@@ -83,3 +83,54 @@ export * as Cascade from './cascade';
  *   const projection = policy.project(request);
  */
 export * as Chat from './chat';
+
+/**
+ * Core engine subsystem — the authoritative production runtime layer.
+ *
+ * Covers: GamePrimitives, RunStateSnapshot, RunStateFactory, Deterministic,
+ * ClockSource, EventBus, EngineContracts, EngineRegistry, TickSequence,
+ * DecisionWindowService, CardOverlayResolver, EngineOrchestrator,
+ * EngineRuntime, EngineTickTransaction, RunStateInvariantGuard,
+ * RuntimeOutcomeResolver, RuntimeCheckpointStore, TickTraceRecorder,
+ * ProofSealer, ThreatRoutingService, ModeRuleCompiler.
+ *
+ * Also exports ML/DL wiring surfaces (CoreMLRouter, CoreSnapshotInspector,
+ * CoreEventRouter) and the buildCoreEngineStack factory.
+ *
+ * Usage:
+ *   import { Core } from '../../engine';
+ *   const stack = Core.buildCoreEngineStack({ mode: 'solo', seed: 'abc' });
+ *   const result = stack.orchestrator.startRun(input);
+ *   const mlSummary = result.mlContext;
+ */
+export * as Core from './core';
+
+/**
+ * Mode subsystem — all four game mode adapters, registry, runtime director,
+ * and contracts. Includes ModeSignalAdapter bridge for chat lane integration.
+ *
+ * Usage:
+ *   import { Modes } from '../../engine';
+ *   const registry = new Modes.ModeRegistry();
+ *   const director = new Modes.ModeRuntimeDirector(registry);
+ */
+export * as Modes from './modes';
+
+/**
+ * Pressure subsystem — authoritative pressure engine, signal collector,
+ * decay controller, event emitter, ML/DL extraction, trend analysis,
+ * recovery forecasting, and chat adapter.
+ *
+ * All pressure truth flows through this namespace. The PressureEngine is
+ * wired into the EngineOrchestrator at STEP_03_PRESSURE. The PressureSignalAdapter
+ * is consumed by the backend chat lane for tier/band/signal→chat translation.
+ *
+ * Usage:
+ *   import { Pressure } from '../../engine';
+ *   const engine = new Pressure.PressureEngine();
+ *   const result = engine.tick(snapshot, context);
+ *   const mlVec = engine.getLastMLVector();
+ *   const forecast = engine.computeRecoveryForecast(snapshot);
+ *   const adapter = Pressure.createPressureEngine();
+ */
+export * as Pressure from './pressure';

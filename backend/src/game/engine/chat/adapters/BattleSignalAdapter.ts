@@ -1329,8 +1329,8 @@ export class BattleSignalAdapter {
       .slice()
       .sort((a, b) =>
         sortByChannelPriority(
-          a.visibleChannel as ChatVisibleChannel,
-          b.visibleChannel as ChatVisibleChannel,
+          a.routeChannel,
+          b.routeChannel,
         ),
       );
   }

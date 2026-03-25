@@ -380,6 +380,24 @@ describe('SyndicateModeAdapter', () => {
     expect(configured.shield.weakestLayerRatio).toBe(1);
   });
 
+  it('normalizes missing teammate roles without leaving the team unassigned', () => {
+    const configured = adapter.configure(createSnapshot(), {
+      teammateUserIds: ['user-2', 'user-3'],
+      roleAssignments: {
+        'user-1': 'INCOME_BUILDER',
+      },
+      sharedTreasuryStart: 32_000,
+    });
+
+    expect(Object.keys(configured.modeState.roleAssignments)).toEqual([
+      'user-1',
+      'user-2',
+      'user-3',
+    ]);
+    expect(configured.tags).toContain('coop:roles_normalized');
+    expect(configured.tags).toContain('coop:counter_intel_tier:0');
+  });
+
   it('syncs economy cash from the shared treasury on tick start', () => {
     const base = createSnapshot();
     const started = adapter.onTickStart({
@@ -556,6 +574,12 @@ describe('SyndicateModeAdapter', () => {
           'user-2': 88,
           'user-3': 85,
           'user-4': 87,
+        },
+        roleAssignments: {
+          'user-1': 'INCOME_BUILDER',
+          'user-2': 'SHIELD_ARCHITECT',
+          'user-3': 'OPPORTUNITY_HUNTER',
+          'user-4': 'COUNTER_INTEL',
         },
       },
       sovereignty: {

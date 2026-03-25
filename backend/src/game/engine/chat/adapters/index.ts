@@ -133,6 +133,344 @@ import {
   type EconomySignalAdapterState,
 } from './EconomySignalAdapter';
 
+import {
+  CoreMLSignalAdapter,
+  type CoreDLPacketInput,
+  type CoreMLSignalAdapterArtifact,
+  type CoreMLSignalAdapterContext,
+  type CoreMLSignalAdapterOptions,
+  type CoreMLSignalAdapterReport,
+  type CoreMLSignalAdapterState,
+  type CoreMLSignalInput,
+  type CoreMLSignalNarrativeWeight,
+  type CoreMLSignalSeverity,
+} from './CoreMLSignalAdapter';
+
+import {
+  EngineSignalChatAdapter,
+  type EngineMLSignalInput,
+  type EngineSignalChatAdapterContext,
+  type EngineSignalChatAdapterOptions,
+  type EngineSignalChatAdapterReport,
+  type EngineSignalChatAdapterState,
+  type EngineSignalInput,
+  type WindowMLContextInput,
+  type EngineSignalAggregatorInput,
+  type EngineSignalChatArtifact,
+  createEngineSignalChatAdapter,
+} from './EngineSignalChatAdapter';
+
+import {
+  GamePrimitivesSignalAdapter,
+  createGamePrimitivesSignalAdapter,
+  type GamePrimitivesAttackCompat,
+  type GamePrimitivesCascadeCompat,
+  type GamePrimitivesChatSignalCompat,
+  type GamePrimitivesLegendMarkerCompat,
+  type GamePrimitivesMLVectorCompat,
+  type GamePrimitivesPressureCompat,
+  type GamePrimitivesRunExperienceCompat,
+  type GamePrimitivesSignalAdapterArtifact,
+  type GamePrimitivesSignalAdapterContext,
+  type GamePrimitivesSignalAdapterDeduped,
+  type GamePrimitivesSignalAdapterEventName,
+  type GamePrimitivesSignalAdapterHistoryEntry,
+  type GamePrimitivesSignalAdapterNarrativeWeight,
+  type GamePrimitivesSignalAdapterOptions,
+  type GamePrimitivesSignalAdapterRejection,
+  type GamePrimitivesSignalAdapterReport,
+  type GamePrimitivesSignalAdapterSeverity,
+  type GamePrimitivesSignalAdapterState,
+} from './GamePrimitivesSignalAdapter';
+
+import {
+  RegistrySignalAdapter,
+  createRegistrySignalAdapter,
+  type RegistryCapabilityReportCompat,
+  type RegistryChatSignalCompat,
+  type RegistryEngineHealthCompat,
+  type RegistryMLVectorCompat,
+  type RegistrySignalAdapterArtifact,
+  type RegistrySignalAdapterContext,
+  type RegistrySignalAdapterDeduped,
+  type RegistrySignalAdapterEventName,
+  type RegistrySignalAdapterHistoryEntry,
+  type RegistrySignalAdapterNarrativeWeight,
+  type RegistrySignalAdapterOptions,
+  type RegistrySignalAdapterRejection,
+  type RegistrySignalAdapterReport,
+  type RegistrySignalAdapterSeverity,
+  type RegistrySignalAdapterState,
+} from './RegistrySignalAdapter';
+
+import {
+  TickTransactionSignalAdapter,
+  createTickTransactionSignalAdapter,
+  type TickTransactionChatSignalCompat,
+  type TickTransactionHealthReportCompat,
+  type TickTransactionSignalAdapterArtifact,
+  type TickTransactionSignalAdapterContext,
+  type TickTransactionSignalAdapterDeduped,
+  type TickTransactionSignalAdapterEventName,
+  type TickTransactionSignalAdapterHistoryEntry,
+  type TickTransactionSignalAdapterNarrativeWeight,
+  type TickTransactionSignalAdapterOptions,
+  type TickTransactionSignalAdapterRejection,
+  type TickTransactionSignalAdapterReport,
+  type TickTransactionSignalAdapterSeverity,
+  type TickTransactionSignalAdapterState,
+  type TickTransactionUXReportCompat,
+} from './TickTransactionSignalAdapter';
+
+import {
+  EventBusSignalAdapter,
+  createEventBusSignalAdapter,
+  type EventBusAnalyticsReportCompat,
+  type EventBusChatSignalCompat,
+  type EventBusHealthReportCompat,
+  type EventBusMLVectorCompat,
+  type EventBusSignalAdapterArtifact,
+  type EventBusSignalAdapterContext,
+  type EventBusSignalAdapterDeduped,
+  type EventBusSignalAdapterEventName,
+  type EventBusSignalAdapterHistoryEntry,
+  type EventBusSignalAdapterNarrativeWeight,
+  type EventBusSignalAdapterOptions,
+  type EventBusSignalAdapterRejection,
+  type EventBusSignalAdapterReport,
+  type EventBusSignalAdapterSeverity,
+  type EventBusSignalAdapterState,
+} from './EventBusSignalAdapter';
+
+import {
+  CheckpointSignalAdapter,
+  createCheckpointSignalAdapter,
+  type CheckpointChatSignalCompat,
+  type CheckpointDLTensorCompat,
+  type CheckpointMLVectorCompat,
+  type CheckpointRollbackRiskCompat,
+  type CheckpointSignalAdapterArtifact,
+  type CheckpointSignalAdapterContext,
+  type CheckpointSignalAdapterDeduped,
+  type CheckpointSignalAdapterEventName,
+  type CheckpointSignalAdapterHistoryEntry,
+  type CheckpointSignalAdapterNarrativeWeight,
+  type CheckpointSignalAdapterOptions,
+  type CheckpointSignalAdapterRejection,
+  type CheckpointSignalAdapterReport,
+  type CheckpointSignalAdapterSeverity,
+  type CheckpointSignalAdapterState,
+} from './CheckpointSignalAdapter';
+
+import {
+  OutcomeSignalAdapter,
+  createOutcomeSignalAdapter,
+  type OutcomeDecisionContextCompat,
+  type OutcomeDLTensorCompat,
+  type OutcomeForecastCompat,
+  type OutcomeMLVectorCompat,
+  type OutcomeNarrationHintCompat,
+  type OutcomeProximityCompat,
+  type OutcomeSignalAdapterArtifact,
+  type OutcomeSignalAdapterContext,
+  type OutcomeSignalAdapterDeduped,
+  type OutcomeSignalAdapterEventName,
+  type OutcomeSignalAdapterHistoryEntry,
+  type OutcomeSignalAdapterNarrativeWeight,
+  type OutcomeSignalAdapterOptions,
+  type OutcomeSignalAdapterRejection,
+  type OutcomeSignalAdapterReport,
+  type OutcomeSignalAdapterSeverity,
+  type OutcomeSignalAdapterState,
+} from './OutcomeSignalAdapter';
+
+import {
+  ThreatRoutingSignalAdapter,
+  createThreatRoutingSignalAdapter,
+  type CounterStrategyAdviceCompat,
+  type ThreatBotPredictionCompat,
+  type ThreatChatSignalCompat,
+  type ThreatDLTensorCompat,
+  type ThreatMLVectorCompat,
+  type ThreatRoutingSignalAdapterArtifact,
+  type ThreatRoutingSignalAdapterContext,
+  type ThreatRoutingSignalAdapterDeduped,
+  type ThreatRoutingSignalAdapterEventName,
+  type ThreatRoutingSignalAdapterHistoryEntry,
+  type ThreatRoutingSignalAdapterNarrativeWeight,
+  type ThreatRoutingSignalAdapterOptions,
+  type ThreatRoutingSignalAdapterRejection,
+  type ThreatRoutingSignalAdapterReport,
+  type ThreatRoutingSignalAdapterSeverity,
+  type ThreatRoutingSignalAdapterState,
+  type ThreatSurgeEventCompat,
+} from './ThreatRoutingSignalAdapter';
+
+import {
+  TickTraceSignalAdapter,
+  createTickTraceSignalAdapter,
+  type TickTraceChatSignalCompat,
+  type TickTraceDLTensorCompat,
+  type TickTraceHealthReportCompat,
+  type TickTraceMLVectorCompat,
+  type TickTraceRunCoverageCompat,
+  type TickTraceSignalAdapterArtifact,
+  type TickTraceSignalAdapterContext,
+  type TickTraceSignalAdapterDeduped,
+  type TickTraceSignalAdapterEventName,
+  type TickTraceSignalAdapterHistoryEntry,
+  type TickTraceSignalAdapterNarrativeWeight,
+  type TickTraceSignalAdapterOptions,
+  type TickTraceSignalAdapterRejection,
+  type TickTraceSignalAdapterReport,
+  type TickTraceSignalAdapterSeverity,
+  type TickTraceSignalAdapterState,
+  type TickTraceWindowSnapshotCompat,
+} from './TickTraceSignalAdapter';
+
+import {
+  TickSequenceSignalAdapter,
+  createTickSequenceSignalAdapter,
+  type TickSequenceChatSignalCompat,
+  type TickSequenceDLTensorCompat,
+  type TickSequenceHealthReportCompat,
+  type TickSequenceMLVectorCompat,
+  type TickSequenceSignalAdapterArtifact,
+  type TickSequenceSignalAdapterContext,
+  type TickSequenceSignalAdapterDeduped,
+  type TickSequenceSignalAdapterEventName,
+  type TickSequenceSignalAdapterHistoryEntry,
+  type TickSequenceSignalAdapterNarrativeWeight,
+  type TickSequenceSignalAdapterOptions,
+  type TickSequenceSignalAdapterRejection,
+  type TickSequenceSignalAdapterReport,
+  type TickSequenceSignalAdapterSeverity,
+  type TickSequenceSignalAdapterState,
+  type TickPhaseTimingSummaryCompat,
+  type TickSequenceStatCompat,
+  type TickStepPerformanceSummaryCompat,
+} from './TickSequenceSignalAdapter';
+
+import {
+  ModeSignalAdapter,
+  ModeSignalAnalytics,
+  ModeSignalBatchProcessor,
+  ModeMlFeatureExtractor,
+  ModeDlTensorBuilder,
+  ModeSignalRiskScorer,
+  ModeSignalPriorityClassifier,
+  ModeSignalChannelRouter,
+  ModeSignalUxLabelGenerator,
+  ModeSignalDeduplicator,
+  buildModeSignalAdapter,
+  buildModeSignalBatchProcessor,
+  extractModeMLVector,
+  buildModeDLTensor,
+  scoreModeRisk,
+  getModeChatChannel,
+  type ChatModeSignal,
+  type ModeSignalKind,
+  type ModeSignalPriority,
+  type ModeSignalChannelRecommendation,
+  type ModeLifecyclePhase,
+  type ModeMlVector,
+  type ModeDlTensor,
+  type ModeConfiguredPayload,
+  type ModeTickPayload,
+  type ModeActionPayload,
+  type ModeFinalizedPayload,
+  type ModeSignalPayload,
+  type ModeSignalAdapterOptions,
+  type ModeSignalBatchEntry,
+  type ModeSignalBatchResult,
+  type ModeSignalAnalyticsSummary,
+} from './ModeSignalAdapter';
+
+import {
+  PressureSignalAdapter,
+  createPressureSignalAdapter,
+  extractPressureMLVector,
+  scorePressureRisk,
+  getPressureChatChannel,
+  buildPressureNarrativeWeight,
+  buildPressureThresholdReport,
+  PRESSURE_SIGNAL_ADAPTER_VERSION,
+  PRESSURE_SIGNAL_ADAPTER_ML_FEATURE_COUNT,
+  PRESSURE_SIGNAL_ADAPTER_DL_FEATURE_COUNT,
+  PRESSURE_SIGNAL_ADAPTER_DEDUPE_WINDOW_TICKS,
+  PRESSURE_SIGNAL_ADAPTER_MAX_BATCH_SIZE,
+  PRESSURE_SIGNAL_ADAPTER_EVENT_NAMES,
+  PRESSURE_SIGNAL_ADAPTER_MANIFEST,
+  type PressureSignalAdapterEventName,
+  type PressureSignalAdapterOptions,
+  type PressureSignalAdapterLogger,
+  type PressureSignalAdapterClock,
+  type PressureSignalAdapterContext,
+  type PressureSignalAdapterState,
+  type PressureSignalAdapterReport,
+  type PressureSignalAdapterArtifact,
+  type PressureSignalAdapterDeduped,
+  type PressureSignalAdapterRejection,
+  type PressureSignalAdapterHistoryEntry,
+  type PressureSignalAdapterSeverity,
+  type PressureSignalAdapterPriority,
+  type PressureSignalAdapterNarrativeWeight,
+  type PressureSignalAdapterChannelRecommendation,
+  type PressureSnapshotCompat,
+  type PressureSignalInput,
+  type PressureChatSignalCompat,
+  type PressureMLVectorCompat,
+  type PressureDLTensorCompat,
+  type PressureForecastCompat,
+  type PressureUXHintCompat,
+  type PressureAnnotationCompat,
+  type PressureAdapterMLVector,
+} from './PressureSignalAdapter';
+
+import {
+  DecaySignalAdapter,
+  createDecaySignalAdapter,
+  extractDecayAdapterMLVector,
+  scoreDecayRisk,
+  getDecayChatChannel,
+  buildDecayNarrativeWeight,
+  buildDecayConstraintReport,
+  buildDecayCompatBundle,
+  DECAY_SIGNAL_ADAPTER_VERSION,
+  DECAY_SIGNAL_ADAPTER_ML_FEATURE_COUNT,
+  DECAY_SIGNAL_ADAPTER_DL_FEATURE_COUNT,
+  DECAY_SIGNAL_ADAPTER_DL_SEQUENCE_LENGTH,
+  DECAY_SIGNAL_ADAPTER_DEDUPE_WINDOW_TICKS,
+  DECAY_SIGNAL_ADAPTER_MAX_BATCH_SIZE,
+  DECAY_SIGNAL_ADAPTER_EVENT_NAMES,
+  DECAY_ADAPTER_FORECAST_DELTA_THRESHOLD,
+  DECAY_ADAPTER_POLICY_SHIFT_THRESHOLD,
+  DECAY_SIGNAL_ADAPTER_MANIFEST,
+  type DecaySignalAdapterEventName,
+  type DecaySignalAdapterOptions,
+  type DecaySignalAdapterLogger,
+  type DecaySignalAdapterClock,
+  type DecaySignalAdapterContext,
+  type DecaySignalAdapterState,
+  type DecaySignalAdapterReport,
+  type DecaySignalAdapterArtifact,
+  type DecaySignalAdapterDeduped,
+  type DecaySignalAdapterRejection,
+  type DecaySignalAdapterHistoryEntry,
+  type DecaySignalAdapterSeverity,
+  type DecaySignalAdapterNarrativeWeight,
+  type DecaySignalAdapterChannelRecommendation,
+  type DecaySnapshotCompat,
+  type DecaySignalInput,
+  type DecayChatSignalCompat,
+  type DecayMLVectorCompat,
+  type DecayDLTensorCompat,
+  type DecayForecastCompat,
+  type DecayAnnotationCompat,
+  type DecayPolicySummaryCompat,
+  type DecayAdapterMLVector,
+} from './DecaySignalAdapter';
+
 // ============================================================================
 // MARK: Re-export authoritative adapter modules and their key public surfaces
 // ============================================================================
@@ -142,6 +480,80 @@ export {
   RunSignalAdapter,
   MultiplayerSignalAdapter,
   EconomySignalAdapter,
+  CoreMLSignalAdapter,
+  EngineSignalChatAdapter,
+  createEngineSignalChatAdapter,
+  GamePrimitivesSignalAdapter,
+  createGamePrimitivesSignalAdapter,
+  RegistrySignalAdapter,
+  createRegistrySignalAdapter,
+  TickTransactionSignalAdapter,
+  createTickTransactionSignalAdapter,
+  EventBusSignalAdapter,
+  createEventBusSignalAdapter,
+  // Checkpoint / Outcome / ThreatRouting signal adapters
+  CheckpointSignalAdapter,
+  createCheckpointSignalAdapter,
+  OutcomeSignalAdapter,
+  createOutcomeSignalAdapter,
+  ThreatRoutingSignalAdapter,
+  createThreatRoutingSignalAdapter,
+  // TickTrace / TickSequence signal adapters
+  TickTraceSignalAdapter,
+  createTickTraceSignalAdapter,
+  TickSequenceSignalAdapter,
+  createTickSequenceSignalAdapter,
+  // Mode signal adapter — lifecycle bridge for all four game modes
+  ModeSignalAdapter,
+  ModeSignalAnalytics,
+  ModeSignalBatchProcessor,
+  ModeMlFeatureExtractor,
+  ModeDlTensorBuilder,
+  ModeSignalRiskScorer,
+  ModeSignalPriorityClassifier,
+  ModeSignalChannelRouter,
+  ModeSignalUxLabelGenerator,
+  ModeSignalDeduplicator,
+  buildModeSignalAdapter,
+  buildModeSignalBatchProcessor,
+  extractModeMLVector,
+  buildModeDLTensor,
+  scoreModeRisk,
+  getModeChatChannel,
+  // Pressure signal adapter — authoritative pressure → chat translation lane
+  PressureSignalAdapter,
+  createPressureSignalAdapter,
+  extractPressureMLVector,
+  scorePressureRisk,
+  getPressureChatChannel,
+  buildPressureNarrativeWeight,
+  buildPressureThresholdReport,
+  PRESSURE_SIGNAL_ADAPTER_VERSION,
+  PRESSURE_SIGNAL_ADAPTER_ML_FEATURE_COUNT,
+  PRESSURE_SIGNAL_ADAPTER_DL_FEATURE_COUNT,
+  PRESSURE_SIGNAL_ADAPTER_DEDUPE_WINDOW_TICKS,
+  PRESSURE_SIGNAL_ADAPTER_MAX_BATCH_SIZE,
+  PRESSURE_SIGNAL_ADAPTER_EVENT_NAMES,
+  PRESSURE_SIGNAL_ADAPTER_MANIFEST,
+  // Decay signal adapter — PressureDecayController → chat decay lane
+  DecaySignalAdapter,
+  createDecaySignalAdapter,
+  extractDecayAdapterMLVector,
+  scoreDecayRisk,
+  getDecayChatChannel,
+  buildDecayNarrativeWeight,
+  buildDecayConstraintReport,
+  buildDecayCompatBundle,
+  DECAY_SIGNAL_ADAPTER_VERSION,
+  DECAY_SIGNAL_ADAPTER_ML_FEATURE_COUNT,
+  DECAY_SIGNAL_ADAPTER_DL_FEATURE_COUNT,
+  DECAY_SIGNAL_ADAPTER_DL_SEQUENCE_LENGTH,
+  DECAY_SIGNAL_ADAPTER_DEDUPE_WINDOW_TICKS,
+  DECAY_SIGNAL_ADAPTER_MAX_BATCH_SIZE,
+  DECAY_SIGNAL_ADAPTER_EVENT_NAMES,
+  DECAY_ADAPTER_FORECAST_DELTA_THRESHOLD,
+  DECAY_ADAPTER_POLICY_SHIFT_THRESHOLD,
+  DECAY_SIGNAL_ADAPTER_MANIFEST,
 };
 
 export type {
@@ -180,6 +592,247 @@ export type {
   EconomySignalAdapterRejected,
   EconomySignalAdapterReport,
   EconomySignalAdapterState,
+  // Core ML signal bridge
+  CoreDLPacketInput,
+  CoreMLSignalAdapterArtifact,
+  // Engine signal chat adapter
+  EngineMLSignalInput,
+  EngineSignalAggregatorInput,
+  EngineSignalChatAdapterContext,
+  EngineSignalChatAdapterOptions,
+  EngineSignalChatAdapterReport,
+  EngineSignalChatAdapterState,
+  EngineSignalChatArtifact,
+  EngineSignalInput,
+  WindowMLContextInput,
+  CoreMLSignalAdapterContext,
+  CoreMLSignalAdapterOptions,
+  CoreMLSignalAdapterReport,
+  CoreMLSignalAdapterState,
+  CoreMLSignalInput,
+  CoreMLSignalNarrativeWeight,
+  CoreMLSignalSeverity,
+  // GamePrimitives signal adapter
+  GamePrimitivesAttackCompat,
+  GamePrimitivesCascadeCompat,
+  GamePrimitivesChatSignalCompat,
+  GamePrimitivesLegendMarkerCompat,
+  GamePrimitivesMLVectorCompat,
+  GamePrimitivesPressureCompat,
+  GamePrimitivesRunExperienceCompat,
+  GamePrimitivesSignalAdapterArtifact,
+  GamePrimitivesSignalAdapterContext,
+  GamePrimitivesSignalAdapterDeduped,
+  GamePrimitivesSignalAdapterEventName,
+  GamePrimitivesSignalAdapterHistoryEntry,
+  GamePrimitivesSignalAdapterNarrativeWeight,
+  GamePrimitivesSignalAdapterOptions,
+  GamePrimitivesSignalAdapterRejection,
+  GamePrimitivesSignalAdapterReport,
+  GamePrimitivesSignalAdapterSeverity,
+  GamePrimitivesSignalAdapterState,
+  // Registry signal adapter
+  RegistryCapabilityReportCompat,
+  RegistryChatSignalCompat,
+  RegistryEngineHealthCompat,
+  RegistryMLVectorCompat,
+  RegistrySignalAdapterArtifact,
+  RegistrySignalAdapterContext,
+  RegistrySignalAdapterDeduped,
+  RegistrySignalAdapterEventName,
+  RegistrySignalAdapterHistoryEntry,
+  RegistrySignalAdapterNarrativeWeight,
+  RegistrySignalAdapterOptions,
+  RegistrySignalAdapterRejection,
+  RegistrySignalAdapterReport,
+  RegistrySignalAdapterSeverity,
+  RegistrySignalAdapterState,
+  // TickTransaction signal adapter
+  TickTransactionChatSignalCompat,
+  TickTransactionHealthReportCompat,
+  TickTransactionSignalAdapterArtifact,
+  TickTransactionSignalAdapterContext,
+  TickTransactionSignalAdapterDeduped,
+  TickTransactionSignalAdapterEventName,
+  TickTransactionSignalAdapterHistoryEntry,
+  TickTransactionSignalAdapterNarrativeWeight,
+  TickTransactionSignalAdapterOptions,
+  TickTransactionSignalAdapterRejection,
+  TickTransactionSignalAdapterReport,
+  TickTransactionSignalAdapterSeverity,
+  TickTransactionSignalAdapterState,
+  TickTransactionUXReportCompat,
+  // EventBus signal adapter
+  EventBusAnalyticsReportCompat,
+  EventBusChatSignalCompat,
+  EventBusHealthReportCompat,
+  EventBusMLVectorCompat,
+  EventBusSignalAdapterArtifact,
+  EventBusSignalAdapterContext,
+  EventBusSignalAdapterDeduped,
+  EventBusSignalAdapterEventName,
+  EventBusSignalAdapterHistoryEntry,
+  EventBusSignalAdapterNarrativeWeight,
+  EventBusSignalAdapterOptions,
+  EventBusSignalAdapterRejection,
+  EventBusSignalAdapterReport,
+  EventBusSignalAdapterSeverity,
+  EventBusSignalAdapterState,
+  // Checkpoint signal adapter
+  CheckpointChatSignalCompat,
+  CheckpointDLTensorCompat,
+  CheckpointMLVectorCompat,
+  CheckpointRollbackRiskCompat,
+  CheckpointSignalAdapterArtifact,
+  CheckpointSignalAdapterContext,
+  CheckpointSignalAdapterDeduped,
+  CheckpointSignalAdapterEventName,
+  CheckpointSignalAdapterHistoryEntry,
+  CheckpointSignalAdapterNarrativeWeight,
+  CheckpointSignalAdapterOptions,
+  CheckpointSignalAdapterRejection,
+  CheckpointSignalAdapterReport,
+  CheckpointSignalAdapterSeverity,
+  CheckpointSignalAdapterState,
+  // Outcome signal adapter
+  OutcomeDecisionContextCompat,
+  OutcomeDLTensorCompat,
+  OutcomeForecastCompat,
+  OutcomeMLVectorCompat,
+  OutcomeNarrationHintCompat,
+  OutcomeProximityCompat,
+  OutcomeSignalAdapterArtifact,
+  OutcomeSignalAdapterContext,
+  OutcomeSignalAdapterDeduped,
+  OutcomeSignalAdapterEventName,
+  OutcomeSignalAdapterHistoryEntry,
+  OutcomeSignalAdapterNarrativeWeight,
+  OutcomeSignalAdapterOptions,
+  OutcomeSignalAdapterRejection,
+  OutcomeSignalAdapterReport,
+  OutcomeSignalAdapterSeverity,
+  OutcomeSignalAdapterState,
+  // ThreatRouting signal adapter
+  CounterStrategyAdviceCompat,
+  ThreatBotPredictionCompat,
+  ThreatChatSignalCompat,
+  ThreatDLTensorCompat,
+  ThreatMLVectorCompat,
+  ThreatRoutingSignalAdapterArtifact,
+  ThreatRoutingSignalAdapterContext,
+  ThreatRoutingSignalAdapterDeduped,
+  ThreatRoutingSignalAdapterEventName,
+  ThreatRoutingSignalAdapterHistoryEntry,
+  ThreatRoutingSignalAdapterNarrativeWeight,
+  ThreatRoutingSignalAdapterOptions,
+  ThreatRoutingSignalAdapterRejection,
+  ThreatRoutingSignalAdapterReport,
+  ThreatRoutingSignalAdapterSeverity,
+  ThreatRoutingSignalAdapterState,
+  ThreatSurgeEventCompat,
+  // TickTrace signal adapter
+  TickTraceChatSignalCompat,
+  TickTraceDLTensorCompat,
+  TickTraceHealthReportCompat,
+  TickTraceMLVectorCompat,
+  TickTraceRunCoverageCompat,
+  TickTraceSignalAdapterArtifact,
+  TickTraceSignalAdapterContext,
+  TickTraceSignalAdapterDeduped,
+  TickTraceSignalAdapterEventName,
+  TickTraceSignalAdapterHistoryEntry,
+  TickTraceSignalAdapterNarrativeWeight,
+  TickTraceSignalAdapterOptions,
+  TickTraceSignalAdapterRejection,
+  TickTraceSignalAdapterReport,
+  TickTraceSignalAdapterSeverity,
+  TickTraceSignalAdapterState,
+  TickTraceWindowSnapshotCompat,
+  // TickSequence signal adapter
+  TickSequenceChatSignalCompat,
+  TickSequenceDLTensorCompat,
+  TickSequenceHealthReportCompat,
+  TickSequenceMLVectorCompat,
+  TickSequenceSignalAdapterArtifact,
+  TickSequenceSignalAdapterContext,
+  TickSequenceSignalAdapterDeduped,
+  TickSequenceSignalAdapterEventName,
+  TickSequenceSignalAdapterHistoryEntry,
+  TickSequenceSignalAdapterNarrativeWeight,
+  TickSequenceSignalAdapterOptions,
+  TickSequenceSignalAdapterRejection,
+  TickSequenceSignalAdapterReport,
+  TickSequenceSignalAdapterSeverity,
+  TickSequenceSignalAdapterState,
+  TickPhaseTimingSummaryCompat,
+  TickSequenceStatCompat,
+  TickStepPerformanceSummaryCompat,
+  // Mode signal adapter types
+  ChatModeSignal,
+  ModeSignalKind,
+  ModeSignalPriority,
+  ModeSignalChannelRecommendation,
+  ModeLifecyclePhase,
+  ModeMlVector,
+  ModeDlTensor,
+  ModeConfiguredPayload,
+  ModeTickPayload,
+  ModeActionPayload,
+  ModeFinalizedPayload,
+  ModeSignalPayload,
+  ModeSignalAdapterOptions,
+  ModeSignalBatchEntry,
+  ModeSignalBatchResult,
+  ModeSignalAnalyticsSummary,
+  // Pressure signal adapter types
+  PressureSignalAdapterEventName,
+  PressureSignalAdapterOptions,
+  PressureSignalAdapterLogger,
+  PressureSignalAdapterClock,
+  PressureSignalAdapterContext,
+  PressureSignalAdapterState,
+  PressureSignalAdapterReport,
+  PressureSignalAdapterArtifact,
+  PressureSignalAdapterDeduped,
+  PressureSignalAdapterRejection,
+  PressureSignalAdapterHistoryEntry,
+  PressureSignalAdapterSeverity,
+  PressureSignalAdapterPriority,
+  PressureSignalAdapterNarrativeWeight,
+  PressureSignalAdapterChannelRecommendation,
+  PressureSnapshotCompat,
+  PressureSignalInput,
+  PressureChatSignalCompat,
+  PressureMLVectorCompat,
+  PressureDLTensorCompat,
+  PressureForecastCompat,
+  PressureUXHintCompat,
+  PressureAnnotationCompat,
+  PressureAdapterMLVector,
+  // Decay signal adapter types
+  DecaySignalAdapterEventName,
+  DecaySignalAdapterOptions,
+  DecaySignalAdapterLogger,
+  DecaySignalAdapterClock,
+  DecaySignalAdapterContext,
+  DecaySignalAdapterState,
+  DecaySignalAdapterReport,
+  DecaySignalAdapterArtifact,
+  DecaySignalAdapterDeduped,
+  DecaySignalAdapterRejection,
+  DecaySignalAdapterHistoryEntry,
+  DecaySignalAdapterSeverity,
+  DecaySignalAdapterNarrativeWeight,
+  DecaySignalAdapterChannelRecommendation,
+  DecaySnapshotCompat,
+  DecaySignalInput,
+  DecayChatSignalCompat,
+  DecayMLVectorCompat,
+  DecayDLTensorCompat,
+  DecayForecastCompat,
+  DecayAnnotationCompat,
+  DecayPolicySummaryCompat,
+  DecayAdapterMLVector,
 };
 
 // ============================================================================
@@ -194,6 +847,15 @@ export const BACKEND_CHAT_ADAPTER_DOMAIN_IDS = Object.freeze([
   'RUN',
   'MULTIPLAYER',
   'ECONOMY',
+  'GAME_PRIMITIVES',
+  'ENGINE_REGISTRY',
+  'TICK_TRANSACTION',
+  'EVENT_BUS',
+  'CHECKPOINT',
+  'OUTCOME',
+  'THREAT_ROUTING',
+  'PRESSURE',
+  'DECAY',
 ] as const);
 
 export type BackendChatAdapterDomainId =
@@ -207,6 +869,8 @@ export const BACKEND_CHAT_ADAPTER_TREE_PATHS = Object.freeze({
   multiplayer:
     'backend/src/game/engine/chat/adapters/MultiplayerSignalAdapter.ts',
   economy: 'backend/src/game/engine/chat/adapters/EconomySignalAdapter.ts',
+  pressure: 'backend/src/game/engine/chat/adapters/PressureSignalAdapter.ts',
+  decay: 'backend/src/game/engine/chat/adapters/DecaySignalAdapter.ts',
 } as const);
 
 export interface BackendChatAdapterModuleDescriptor {
@@ -251,6 +915,22 @@ export const BACKEND_CHAT_ADAPTER_MODULES = Object.freeze<
     ownsTruth: false,
     description:
       'Translates deal-room/liquidity/offer authority into backend-chat economy ingress.',
+  },
+  {
+    domain: 'PRESSURE',
+    className: 'PressureSignalAdapter',
+    relativePath: BACKEND_CHAT_ADAPTER_TREE_PATHS.pressure,
+    ownsTruth: false,
+    description:
+      'Translates backend pressure engine state into backend-chat pressure ingress — tier changes, band crossings, ML vectors, DL tensors, UX hints, and recovery forecasts.',
+  },
+  {
+    domain: 'DECAY',
+    className: 'DecaySignalAdapter',
+    relativePath: BACKEND_CHAT_ADAPTER_TREE_PATHS.decay,
+    ownsTruth: false,
+    description:
+      'Translates PressureDecayController outputs into backend-chat decay ingress — constraint activation, tier blocking, sticky floor, policy shifts, forecasts, ML vectors, and DL tensors.',
   },
 ]);
 
@@ -309,9 +989,25 @@ export interface BackendChatEconomyIngress {
   readonly context?: EconomySignalAdapterContext;
 }
 
+export interface BackendChatPressureIngress {
+  readonly domain: 'PRESSURE';
+  readonly eventName: PressureSignalAdapterEventName;
+  readonly payload: PressureSignalInput;
+  readonly context?: PressureSignalAdapterContext;
+}
+
+export interface BackendChatDecayIngress {
+  readonly domain: 'DECAY';
+  readonly eventName: DecaySignalAdapterEventName;
+  readonly payload: DecaySignalInput;
+  readonly context?: DecaySignalAdapterContext;
+}
+
 export type BackendChatAdapterIngress =
   | BackendChatBattleIngress
   | BackendChatRunIngress
+  | BackendChatPressureIngress
+  | BackendChatDecayIngress
   | BackendChatMultiplayerIngress
   | BackendChatEconomyIngress;
 
@@ -372,6 +1068,8 @@ export interface BackendChatAdapterSuiteOptions {
   readonly run?: Partial<RunSignalAdapterOptions>;
   readonly multiplayer?: Partial<MultiplayerSignalAdapterOptions>;
   readonly economy?: Partial<EconomySignalAdapterOptions>;
+  readonly coreML?: Partial<CoreMLSignalAdapterOptions>;
+  readonly engineSignal?: Partial<EngineSignalChatAdapterOptions>;
 }
 
 export interface BackendChatResolvedAdapterSuiteOptions {
@@ -426,6 +1124,8 @@ export interface BackendChatAdapterSuiteState {
   readonly run: RunSignalAdapterState;
   readonly multiplayer: MultiplayerSignalAdapterState;
   readonly economy: EconomySignalAdapterState;
+  readonly coreML: CoreMLSignalAdapterState;
+  readonly engineSignal: EngineSignalChatAdapterState;
   readonly totals: Readonly<Record<BackendChatAdapterDomainId, BackendChatAdapterDomainCounters>>;
 }
 
@@ -908,6 +1608,8 @@ export class BackendChatAdapterSuite {
   public readonly run: RunSignalAdapter;
   public readonly multiplayer: MultiplayerSignalAdapter;
   public readonly economy: EconomySignalAdapter;
+  public readonly coreML: CoreMLSignalAdapter;
+  public readonly engineSignal: EngineSignalChatAdapter;
 
   private readonly logger: BackendChatAdapterSuiteLogger;
   private readonly clock: BackendChatAdapterSuiteClock;
@@ -922,6 +1624,16 @@ export class BackendChatAdapterSuite {
     this.run = new RunSignalAdapter(this.options.run);
     this.multiplayer = new MultiplayerSignalAdapter(this.options.multiplayer);
     this.economy = new EconomySignalAdapter(this.options.economy);
+    this.coreML = new CoreMLSignalAdapter({
+      defaultRoomId: options.defaultRoomId,
+      defaultVisibleChannel: options.defaultVisibleChannel,
+      ...(options.coreML ?? {}),
+    });
+    this.engineSignal = createEngineSignalChatAdapter({
+      defaultRoomId: options.defaultRoomId,
+      defaultVisibleChannel: options.defaultVisibleChannel,
+      ...(options.engineSignal ?? {}),
+    });
   }
 
   // -------------------------------------------------------------------------
@@ -933,6 +1645,8 @@ export class BackendChatAdapterSuite {
     this.run.reset();
     this.multiplayer.reset();
     this.economy.reset();
+    this.coreML.reset();
+    this.engineSignal.reset();
   }
 
   public getResolvedOptions(): BackendChatResolvedAdapterSuiteOptions {
@@ -944,6 +1658,7 @@ export class BackendChatAdapterSuite {
     const run = this.run.getState();
     const multiplayer = this.multiplayer.getState();
     const economy = this.economy.getState();
+    const coreML = this.coreML.getState();
 
     const totals: Readonly<
       Record<BackendChatAdapterDomainId, BackendChatAdapterDomainCounters>
@@ -964,6 +1679,15 @@ export class BackendChatAdapterSuite {
         economy.dedupedCount,
         economy.rejectedCount,
       ),
+      GAME_PRIMITIVES: emptyDomainCounters(),
+      ENGINE_REGISTRY: emptyDomainCounters(),
+      TICK_TRANSACTION: emptyDomainCounters(),
+      EVENT_BUS: emptyDomainCounters(),
+      CHECKPOINT: emptyDomainCounters(),
+      OUTCOME: emptyDomainCounters(),
+      THREAT_ROUTING: emptyDomainCounters(),
+      PRESSURE: emptyDomainCounters(),
+      DECAY: emptyDomainCounters(),
     });
 
     return Object.freeze({
@@ -971,6 +1695,8 @@ export class BackendChatAdapterSuite {
       run,
       multiplayer,
       economy,
+      coreML,
+      engineSignal: this.engineSignal.getState(),
       totals,
     });
   }
@@ -1035,6 +1761,63 @@ export class BackendChatAdapterSuite {
     context?: EconomySignalAdapterContext,
   ): BackendChatAdapterSuiteReport {
     return this.fromEconomyReport(this.economy.adaptEvent(eventName, payload, context));
+  }
+
+  /**
+   * Adapt a core ML tick summary (from EngineOrchestrator or EngineRuntime)
+   * into a backend-chat run signal artifact via the CoreMLSignalAdapter bridge.
+   *
+   * Called once per tick when the orchestrator emits a TickMLSummary:
+   *
+   *   const result = orchestrator.executeTick();
+   *   suite.adaptCoreMLSignal(result.mlSummary, { runId: snapshot.runId });
+   */
+  public adaptCoreMLSignal(
+    summary: CoreMLSignalInput,
+    context?: CoreMLSignalAdapterContext,
+  ): CoreMLSignalAdapterReport {
+    this.logger.debug('BackendChatAdapterSuite.adaptCoreMLSignal', {
+      tick: summary.tick,
+      tier: summary.tier,
+      phase: summary.phase,
+      urgencyScore: summary.urgencyScore,
+      compositeRiskScore: summary.compositeRiskScore,
+      recommendedAction: summary.recommendedAction,
+    });
+    return this.coreML.adaptMLSummary(summary, context);
+  }
+
+  /**
+   * Adapt a core DL packet (from EngineOrchestrator or EngineRuntime)
+   * into a backend-chat DL signal artifact.
+   *
+   *   const result = orchestrator.executeTick();
+   *   suite.adaptCoreDLPacket(result.dlPacket, { runId: snapshot.runId });
+   */
+  public adaptCoreDLPacket(
+    packet: CoreDLPacketInput,
+    context?: CoreMLSignalAdapterContext,
+  ): CoreMLSignalAdapterReport {
+    this.logger.debug('BackendChatAdapterSuite.adaptCoreDLPacket', {
+      runId: packet.runId,
+      tick: packet.tick,
+      featureCount: packet.inputVector.length,
+    });
+    return this.coreML.adaptDLPacket(packet, context);
+  }
+
+  /**
+   * Translate a core ML summary into a RunSnapshotCompat and pipe it through
+   * the RunSignalAdapter — the most deeply integrated path for per-tick ML
+   * signals feeding the run-chat lane.
+   */
+  public adaptCoreMLSignalAsRunSnapshot(
+    summary: CoreMLSignalInput,
+    runId: string | null,
+    context?: RunSignalAdapterContext,
+  ): BackendChatAdapterSuiteReport {
+    const snapshot = CoreMLSignalAdapter.translateMLSummaryToRunSnapshot(summary, runId);
+    return this.fromRunReport(this.run.adaptSnapshot(snapshot as RunSnapshotCompat, context));
   }
 
   // -------------------------------------------------------------------------
@@ -1275,6 +2058,15 @@ export class BackendChatAdapterSuite {
         RUN: emptyDomainCounters(),
         MULTIPLAYER: emptyDomainCounters(),
         ECONOMY: emptyDomainCounters(),
+        GAME_PRIMITIVES: emptyDomainCounters(),
+        ENGINE_REGISTRY: emptyDomainCounters(),
+        TICK_TRANSACTION: emptyDomainCounters(),
+        EVENT_BUS: emptyDomainCounters(),
+        CHECKPOINT: emptyDomainCounters(),
+        OUTCOME: emptyDomainCounters(),
+        THREAT_ROUTING: emptyDomainCounters(),
+        PRESSURE: emptyDomainCounters(),
+        DECAY: emptyDomainCounters(),
       }),
     });
   }
@@ -1317,6 +2109,15 @@ export class BackendChatAdapterSuite {
         ),
         MULTIPLAYER: emptyDomainCounters(),
         ECONOMY: emptyDomainCounters(),
+        GAME_PRIMITIVES: emptyDomainCounters(),
+        ENGINE_REGISTRY: emptyDomainCounters(),
+        TICK_TRANSACTION: emptyDomainCounters(),
+        EVENT_BUS: emptyDomainCounters(),
+        CHECKPOINT: emptyDomainCounters(),
+        OUTCOME: emptyDomainCounters(),
+        THREAT_ROUTING: emptyDomainCounters(),
+        PRESSURE: emptyDomainCounters(),
+        DECAY: emptyDomainCounters(),
       }),
     });
   }
@@ -1361,6 +2162,15 @@ export class BackendChatAdapterSuite {
           report.rejected.length,
         ),
         ECONOMY: emptyDomainCounters(),
+        GAME_PRIMITIVES: emptyDomainCounters(),
+        ENGINE_REGISTRY: emptyDomainCounters(),
+        TICK_TRANSACTION: emptyDomainCounters(),
+        EVENT_BUS: emptyDomainCounters(),
+        CHECKPOINT: emptyDomainCounters(),
+        OUTCOME: emptyDomainCounters(),
+        THREAT_ROUTING: emptyDomainCounters(),
+        PRESSURE: emptyDomainCounters(),
+        DECAY: emptyDomainCounters(),
       }),
     });
   }
@@ -1395,8 +2205,104 @@ export class BackendChatAdapterSuite {
           report.deduped.length,
           report.rejected.length,
         ),
+        GAME_PRIMITIVES: emptyDomainCounters(),
+        ENGINE_REGISTRY: emptyDomainCounters(),
+        TICK_TRANSACTION: emptyDomainCounters(),
+        EVENT_BUS: emptyDomainCounters(),
+        CHECKPOINT: emptyDomainCounters(),
+        OUTCOME: emptyDomainCounters(),
+        THREAT_ROUTING: emptyDomainCounters(),
+        PRESSURE: emptyDomainCounters(),
+        DECAY: emptyDomainCounters(),
       }),
     });
+  }
+
+  // -------------------------------------------------------------------------
+  // Engine signal adapter entry points
+  // -------------------------------------------------------------------------
+
+  /**
+   * Translate a batch of EngineSignals from the 7 simulation engines into
+   * backend-chat artifacts. ERROR signals are routed to COMBAT channel;
+   * WARN signals to GLOBAL. INFO signals are suppressed by default.
+   */
+  public adaptEngineSignals(
+    signals: readonly EngineSignalInput[],
+    context?: EngineSignalChatAdapterContext,
+  ): EngineSignalChatAdapterReport {
+    return this.engineSignal.adaptEngineSignals(signals, context);
+  }
+
+  /**
+   * Translate ML-enriched engine signals with risk classification into
+   * backend-chat artifacts. Always forwarded regardless of INFO suppression.
+   */
+  public adaptEngineMLSignals(
+    signals: readonly EngineMLSignalInput[],
+    context?: EngineSignalChatAdapterContext,
+  ): EngineSignalChatAdapterReport {
+    return this.engineSignal.adaptEngineMLSignals(signals, context);
+  }
+
+  /**
+   * Translate a WindowMLContext into a chat urgency artifact.
+   * Returns null if urgency is below the configured threshold.
+   */
+  public adaptWindowMLContext(
+    ctx: WindowMLContextInput,
+    context?: EngineSignalChatAdapterContext,
+  ): EngineSignalChatArtifact | null {
+    return this.engineSignal.adaptWindowMLContext(ctx, context);
+  }
+
+  /**
+   * Translate a tick-level SignalAggregatorReport into a single summary artifact.
+   * Only forwarded if the tick has errors or warnings.
+   */
+  public adaptSignalAggregatorReport(
+    report: EngineSignalAggregatorInput,
+    context?: EngineSignalChatAdapterContext,
+  ): EngineSignalChatArtifact | null {
+    return this.engineSignal.adaptSignalAggregatorReport(report, context);
+  }
+
+  /**
+   * Full-tick engine signal adaptation: signals + ML signals + window context
+   * + aggregator report in one call. The recommended integration point for
+   * the engine orchestrator at end-of-tick.
+   *
+   *   const tick = orchestrator.executeTick();
+   *   suite.adaptEngineTickFull(
+   *     tick.signals, tick.mlSignals, tick.windowCtx, tick.aggregatorReport,
+   *     { runId: snapshot.runId },
+   *   );
+   */
+  public adaptEngineTickFull(
+    signals: readonly EngineSignalInput[],
+    mlSignals: readonly EngineMLSignalInput[],
+    windowCtx: WindowMLContextInput | null,
+    aggregatorReport: EngineSignalAggregatorInput | null,
+    context?: EngineSignalChatAdapterContext,
+  ): {
+    signalReport: EngineSignalChatAdapterReport;
+    mlReport: EngineSignalChatAdapterReport;
+    windowArtifact: EngineSignalChatArtifact | null;
+    aggregatorArtifact: EngineSignalChatArtifact | null;
+    hasUrgentSignal: boolean;
+    peakRiskScore: number;
+  } {
+    const result = this.engineSignal.adaptTickFull(
+      signals, mlSignals, windowCtx, aggregatorReport, context,
+    );
+    this.logger.debug('BackendChatAdapterSuite.adaptEngineTickFull', {
+      tick: aggregatorReport?.tick ?? signals[0]?.tick ?? 0,
+      signalCount: signals.length,
+      mlSignalCount: mlSignals.length,
+      hasUrgentSignal: result.hasUrgentSignal,
+      peakRiskScore: result.peakRiskScore,
+    });
+    return result;
   }
 
   // -------------------------------------------------------------------------
@@ -1586,6 +2492,15 @@ function createEmptyMutableSuiteAccumulator(): MutableSuiteAccumulator {
       RUN: { accepted: 0, deduped: 0, rejected: 0 },
       MULTIPLAYER: { accepted: 0, deduped: 0, rejected: 0 },
       ECONOMY: { accepted: 0, deduped: 0, rejected: 0 },
+      GAME_PRIMITIVES: { accepted: 0, deduped: 0, rejected: 0 },
+      ENGINE_REGISTRY: { accepted: 0, deduped: 0, rejected: 0 },
+      TICK_TRANSACTION: { accepted: 0, deduped: 0, rejected: 0 },
+      EVENT_BUS: { accepted: 0, deduped: 0, rejected: 0 },
+      CHECKPOINT: { accepted: 0, deduped: 0, rejected: 0 },
+      OUTCOME: { accepted: 0, deduped: 0, rejected: 0 },
+      THREAT_ROUTING: { accepted: 0, deduped: 0, rejected: 0 },
+      PRESSURE: { accepted: 0, deduped: 0, rejected: 0 },
+      DECAY: { accepted: 0, deduped: 0, rejected: 0 },
     },
   };
 }
@@ -1663,6 +2578,15 @@ function freezeMutableSuiteAccumulator(
       RUN: value.counters.RUN,
       MULTIPLAYER: value.counters.MULTIPLAYER,
       ECONOMY: value.counters.ECONOMY,
+      GAME_PRIMITIVES: value.counters.GAME_PRIMITIVES,
+      ENGINE_REGISTRY: value.counters.ENGINE_REGISTRY,
+      TICK_TRANSACTION: value.counters.TICK_TRANSACTION,
+      EVENT_BUS: value.counters.EVENT_BUS,
+      CHECKPOINT: value.counters.CHECKPOINT,
+      OUTCOME: value.counters.OUTCOME,
+      THREAT_ROUTING: value.counters.THREAT_ROUTING,
+      PRESSURE: value.counters.PRESSURE,
+      DECAY: value.counters.DECAY,
     }),
   });
 }
