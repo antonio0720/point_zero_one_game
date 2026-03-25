@@ -13,11 +13,12 @@
  * Consumers:
  *   import { Pressure } from '../../engine';
  *   const engine = new Pressure.PressureEngine();
- *   const mlVec = engine.getLastMLVector();
- *   const forecast = engine.computeRecoveryForecast(snapshot);
+ *   const mlVec  = engine.getLastMLVector();
+ *   const collector = new Pressure.PressureSignalCollector();
+ *   const ensemble  = Pressure.createPressureCollectorWithAnalytics();
  */
 
-// ── Core engine and sub-components
+// ── Core engine and sub-components ─────────────────────────────────────────
 export {
   PressureEngine,
   PressureMLExtractor,
@@ -46,10 +47,9 @@ export type {
   PressureInspectorState,
 } from './PressureEngine';
 
-// ── Decay controller — full surface including ML/DL classes and all helpers
+// ── Decay controller ─────────────────────────────────────────────────────────
 export {
   PressureDecayController,
-  // Companion analysis classes
   DecayMLExtractor,
   DecayDLBuilder,
   DecayTrendAnalyzer,
@@ -57,13 +57,11 @@ export {
   DecayScenarioSimulator,
   DecayAnnotator,
   DecayInspector,
-  // Standalone helpers
   createDecayController,
   buildDecayAnnotation,
   simulateDecayToCalm,
   buildDecayPolicySummary,
   extractDecayMLVector,
-  // Module constants
   DECAY_CONTROLLER_MODULE_VERSION,
   DECAY_ML_FEATURE_COUNT,
   DECAY_DL_FEATURE_COUNT,
@@ -92,23 +90,20 @@ export type {
   DecayPolicyImpact,
 } from './PressureDecayController';
 
-// ── Event emitter — full surface including analytics/ML/DL classes and all helpers
+// ── Event emitter ────────────────────────────────────────────────────────────
 export {
   PressureEventEmitter,
-  // Companion classes
   PressureEmitterStateTracker,
   PressureEmitterMLExtractor,
   PressureEmitterDLBuilder,
   PressureEmitterAnalytics,
   PressureEmitterSignalRouter,
   PressureEmitterBatchProcessor,
-  // Standalone helpers
   createPressureEventEmitter,
   createPressureEmitterBatchProcessor,
   extractEmitterMLVector,
   getEmitterChannelRecommendation,
   buildEmitterAnalyticsSummary,
-  // Module constants
   PRESSURE_EMITTER_MODULE_VERSION,
   PRESSURE_EMITTER_ML_FEATURE_COUNT,
   PRESSURE_EMITTER_DL_FEATURE_COUNT,
@@ -135,10 +130,31 @@ export type {
   EmitterBatchResult,
 } from './PressureEventEmitter';
 
-// ── Signal collector
-export { PressureSignalCollector } from './PressureSignalCollector';
+// ── Signal collector — full surface ─────────────────────────────────────────
+export {
+  PressureSignalCollector,
+  // Companion classes
+  CollectorMLExtractor,
+  CollectorDLBuilder,
+  CollectorTrendAnalyzer,
+  CollectorForecaster,
+  CollectorAnnotator,
+  CollectorInspector,
+  CollectorAnalytics,
+  // Standalone helpers
+  createPressureCollectorWithAnalytics,
+  extractCollectorSnapshot,
+  buildCollectorBundle,
+  // Module constants
+  COLLECTOR_MODULE_VERSION,
+  COLLECTOR_MANIFEST,
+} from './PressureSignalCollector';
 
-// ── Full types surface
+export type {
+  CollectorEnsemble,
+} from './PressureSignalCollector';
+
+// ── Full types surface ───────────────────────────────────────────────────────
 export {
   PRESSURE_TIER_CONFIGS,
   PRESSURE_THRESHOLDS,
@@ -161,6 +177,72 @@ export {
   rankPressureTier,
   rankPressureBand,
   createZeroPressureSignalMap,
+  // §5: Collector module constants
+  COLLECTOR_ML_FEATURE_COUNT,
+  COLLECTOR_DL_FEATURE_COUNT,
+  COLLECTOR_DL_SEQUENCE_LENGTH,
+  COLLECTOR_HISTORY_DEPTH,
+  COLLECTOR_TREND_WINDOW,
+  COLLECTOR_PLATEAU_TICKS,
+  COLLECTOR_SPIKE_THRESHOLD,
+  COLLECTOR_PLATEAU_TOLERANCE,
+  COLLECTOR_ESCALATION_RISK_HIGH,
+  COLLECTOR_ESCALATION_RISK_MEDIUM,
+  COLLECTOR_RECOVERY_PROB_HIGH,
+  COLLECTOR_CHAT_HOOK_MAP,
+  COLLECTOR_SIGNAL_CHAT_HOOKS,
+  COLLECTOR_URGENCY_THRESHOLDS,
+  COLLECTOR_SIGNAL_CATEGORIES,
+  COLLECTOR_RELIEF_PRIORITIES,
+  COLLECTOR_MODE_PROFILES,
+  COLLECTOR_PHASE_PROFILES,
+  // §6: Feature label arrays
+  COLLECTOR_ML_FEATURE_LABELS,
+  COLLECTOR_DL_FEATURE_LABELS,
+  // §10: Normalization and composite helpers
+  normalizeSignalByWeight,
+  scoreToPercentage,
+  computeModeScopeRatio,
+  computeTierCrossing,
+  computeBandCrossing,
+  computeStressIndex,
+  computeReliefBalance,
+  rankTopContributors,
+  // §11: Urgency and chat hook helpers
+  computeEscalationRisk,
+  computeRecoveryProbability,
+  classifyUrgency,
+  buildChatHook,
+  // §12: ML feature extraction
+  extractCollectorMLFeatures,
+  // §13: DL row construction
+  buildCollectorDLRow,
+  // §14: Trend analysis helpers
+  computeCollectorVelocity,
+  computeCollectorVelocityAvg,
+  computeCollectorAcceleration,
+  computeCollectorAccelerationAvg,
+  computeCollectorPlateauTicks,
+  detectPressureSpike,
+  detectPressurePlateau,
+  computeRunningAvgScore,
+  computeScoreStdDev,
+  // §15: Annotation, UX hint, and history helpers
+  buildCollectorAnnotation,
+  buildCollectorUXHint,
+  buildCollectorHistoryEntry,
+  // §9: Mode / phase profile builders
+  buildCollectorModeProfile,
+  buildCollectorPhaseProfile,
+  // §16: Forecast helpers
+  buildCollectorForecast,
+  computePhaseAdjustedEscalationRisk,
+  computePhaseAdjustedRecoveryProbability,
+  computeModeAdjustedStressIndex,
+  // §17: Threat, resilience, and validation
+  computeCollectorThreatScore,
+  computeCollectorResilienceScore,
+  validateCollectorWeights,
 } from './types';
 
 export type {
@@ -176,4 +258,27 @@ export type {
   PressureSignalContribution,
   PressureSignalCollection,
   PressureDecayProfile,
+  // §7: Collector output types
+  CollectorUrgencyLabel,
+  CollectorTrendLabel,
+  CollectorMLVector,
+  CollectorDLTensor,
+  CollectorTrendSummary,
+  CollectorAnnotationBundle,
+  CollectorForecast,
+  CollectorUXHint,
+  CollectorAnalyticsSummary,
+  CollectorHealthState,
+  // §8: History, watermark, inspector types
+  CollectorHistoryEntry,
+  CollectorWatermark,
+  CollectorInspectorState,
+  // §9: Mode / phase profile types
+  CollectorModeProfile,
+  CollectorPhaseProfile,
+  // §12-§16: Params interfaces
+  CollectorMLFeaturesParams,
+  CollectorDLRowParams,
+  CollectorAnnotationParams,
+  CollectorForecastParams,
 } from './types';

@@ -471,6 +471,53 @@ import {
   type DecayAdapterMLVector,
 } from './DecaySignalAdapter';
 
+import {
+  CollectorSignalAdapter,
+  createCollectorSignalAdapter,
+  extractCollectorAdapterMLVector,
+  scoreCollectorRisk,
+  getCollectorChatChannel,
+  buildCollectorNarrativeWeight,
+  buildCollectorThresholdReport,
+  buildCollectorCompatBundle,
+  buildCollectorAdapterBundle,
+  COLLECTOR_SIGNAL_ADAPTER_VERSION,
+  COLLECTOR_SIGNAL_ADAPTER_ML_FEATURE_COUNT,
+  COLLECTOR_SIGNAL_ADAPTER_DL_FEATURE_COUNT,
+  COLLECTOR_SIGNAL_ADAPTER_DL_SEQUENCE_LENGTH,
+  COLLECTOR_SIGNAL_ADAPTER_DEDUPE_WINDOW_TICKS,
+  COLLECTOR_SIGNAL_ADAPTER_MAX_BATCH_SIZE,
+  COLLECTOR_SIGNAL_ADAPTER_EVENT_NAMES,
+  COLLECTOR_SIGNAL_ADAPTER_MANIFEST,
+  type CollectorSignalAdapterEventName,
+  type CollectorSignalAdapterOptions,
+  type CollectorSignalAdapterLogger,
+  type CollectorSignalAdapterClock,
+  type CollectorSignalAdapterContext,
+  type CollectorSignalAdapterState,
+  type CollectorSignalAdapterReport,
+  type CollectorSignalAdapterArtifact,
+  type CollectorSignalAdapterDeduped,
+  type CollectorSignalAdapterRejection,
+  type CollectorSignalAdapterHistoryEntry,
+  type CollectorSignalAdapterSeverity,
+  type CollectorSignalAdapterPriority,
+  type CollectorSignalAdapterNarrativeWeight,
+  type CollectorSignalAdapterChannelRecommendation,
+  type CollectorSnapshotCompat,
+  type CollectorSignalInput,
+  type CollectorChatSignalCompat,
+  type CollectorMLVectorCompat,
+  type CollectorDLTensorCompat,
+  type CollectorForecastCompat,
+  type CollectorUXHintCompat,
+  type CollectorAnnotationCompat,
+  type CollectorAdapterMLVector,
+  type CollectorCompatBundle,
+  type CollectorAdapterFullBundle,
+  type CollectorThresholdReport,
+} from './CollectorSignalAdapter';
+
 // ============================================================================
 // MARK: Re-export authoritative adapter modules and their key public surfaces
 // ============================================================================
@@ -537,6 +584,7 @@ export {
   PRESSURE_SIGNAL_ADAPTER_MANIFEST,
   // Decay signal adapter — PressureDecayController → chat decay lane
   DecaySignalAdapter,
+
   createDecaySignalAdapter,
   extractDecayAdapterMLVector,
   scoreDecayRisk,
@@ -554,6 +602,24 @@ export {
   DECAY_ADAPTER_FORECAST_DELTA_THRESHOLD,
   DECAY_ADAPTER_POLICY_SHIFT_THRESHOLD,
   DECAY_SIGNAL_ADAPTER_MANIFEST,
+  // Collector signal adapter — PressureSignalCollector → chat collector lane
+  CollectorSignalAdapter,
+  createCollectorSignalAdapter,
+  extractCollectorAdapterMLVector,
+  scoreCollectorRisk,
+  getCollectorChatChannel,
+  buildCollectorNarrativeWeight,
+  buildCollectorThresholdReport,
+  buildCollectorCompatBundle,
+  buildCollectorAdapterBundle,
+  COLLECTOR_SIGNAL_ADAPTER_VERSION,
+  COLLECTOR_SIGNAL_ADAPTER_ML_FEATURE_COUNT,
+  COLLECTOR_SIGNAL_ADAPTER_DL_FEATURE_COUNT,
+  COLLECTOR_SIGNAL_ADAPTER_DL_SEQUENCE_LENGTH,
+  COLLECTOR_SIGNAL_ADAPTER_DEDUPE_WINDOW_TICKS,
+  COLLECTOR_SIGNAL_ADAPTER_MAX_BATCH_SIZE,
+  COLLECTOR_SIGNAL_ADAPTER_EVENT_NAMES,
+  COLLECTOR_SIGNAL_ADAPTER_MANIFEST,
 };
 
 export type {
@@ -833,6 +899,34 @@ export type {
   DecayAnnotationCompat,
   DecayPolicySummaryCompat,
   DecayAdapterMLVector,
+  // Collector signal adapter types
+  CollectorSignalAdapterEventName,
+  CollectorSignalAdapterOptions,
+  CollectorSignalAdapterLogger,
+  CollectorSignalAdapterClock,
+  CollectorSignalAdapterContext,
+  CollectorSignalAdapterState,
+  CollectorSignalAdapterReport,
+  CollectorSignalAdapterArtifact,
+  CollectorSignalAdapterDeduped,
+  CollectorSignalAdapterRejection,
+  CollectorSignalAdapterHistoryEntry,
+  CollectorSignalAdapterSeverity,
+  CollectorSignalAdapterPriority,
+  CollectorSignalAdapterNarrativeWeight,
+  CollectorSignalAdapterChannelRecommendation,
+  CollectorSnapshotCompat,
+  CollectorSignalInput,
+  CollectorChatSignalCompat,
+  CollectorMLVectorCompat,
+  CollectorDLTensorCompat,
+  CollectorForecastCompat,
+  CollectorUXHintCompat,
+  CollectorAnnotationCompat,
+  CollectorAdapterMLVector,
+  CollectorCompatBundle,
+  CollectorAdapterFullBundle,
+  CollectorThresholdReport,
 };
 
 // ============================================================================
@@ -856,6 +950,7 @@ export const BACKEND_CHAT_ADAPTER_DOMAIN_IDS = Object.freeze([
   'THREAT_ROUTING',
   'PRESSURE',
   'DECAY',
+  'COLLECTOR',
 ] as const);
 
 export type BackendChatAdapterDomainId =
@@ -871,6 +966,7 @@ export const BACKEND_CHAT_ADAPTER_TREE_PATHS = Object.freeze({
   economy: 'backend/src/game/engine/chat/adapters/EconomySignalAdapter.ts',
   pressure: 'backend/src/game/engine/chat/adapters/PressureSignalAdapter.ts',
   decay: 'backend/src/game/engine/chat/adapters/DecaySignalAdapter.ts',
+  collector: 'backend/src/game/engine/chat/adapters/CollectorSignalAdapter.ts',
 } as const);
 
 export interface BackendChatAdapterModuleDescriptor {
@@ -931,6 +1027,14 @@ export const BACKEND_CHAT_ADAPTER_MODULES = Object.freeze<
     ownsTruth: false,
     description:
       'Translates PressureDecayController outputs into backend-chat decay ingress — constraint activation, tier blocking, sticky floor, policy shifts, forecasts, ML vectors, and DL tensors.',
+  },
+  {
+    domain: 'COLLECTOR',
+    className: 'CollectorSignalAdapter',
+    relativePath: BACKEND_CHAT_ADAPTER_TREE_PATHS.collector,
+    ownsTruth: false,
+    description:
+      'Translates PressureSignalCollector outputs into backend-chat collector ingress — urgency escalations, tier/band crossings, trend spikes, plateaux, relief events, recovery forecasts, ML vectors, and DL tensors.',
   },
 ]);
 
@@ -1003,11 +1107,19 @@ export interface BackendChatDecayIngress {
   readonly context?: DecaySignalAdapterContext;
 }
 
+export interface BackendChatCollectorIngress {
+  readonly domain: 'COLLECTOR';
+  readonly eventName: CollectorSignalAdapterEventName;
+  readonly payload: CollectorSignalInput;
+  readonly context?: CollectorSignalAdapterContext;
+}
+
 export type BackendChatAdapterIngress =
   | BackendChatBattleIngress
   | BackendChatRunIngress
   | BackendChatPressureIngress
   | BackendChatDecayIngress
+  | BackendChatCollectorIngress
   | BackendChatMultiplayerIngress
   | BackendChatEconomyIngress;
 
@@ -1688,6 +1800,7 @@ export class BackendChatAdapterSuite {
       THREAT_ROUTING: emptyDomainCounters(),
       PRESSURE: emptyDomainCounters(),
       DECAY: emptyDomainCounters(),
+      COLLECTOR: emptyDomainCounters(),
     });
 
     return Object.freeze({
@@ -2067,6 +2180,7 @@ export class BackendChatAdapterSuite {
         THREAT_ROUTING: emptyDomainCounters(),
         PRESSURE: emptyDomainCounters(),
         DECAY: emptyDomainCounters(),
+        COLLECTOR: emptyDomainCounters(),
       }),
     });
   }
@@ -2118,6 +2232,7 @@ export class BackendChatAdapterSuite {
         THREAT_ROUTING: emptyDomainCounters(),
         PRESSURE: emptyDomainCounters(),
         DECAY: emptyDomainCounters(),
+        COLLECTOR: emptyDomainCounters(),
       }),
     });
   }
@@ -2171,6 +2286,7 @@ export class BackendChatAdapterSuite {
         THREAT_ROUTING: emptyDomainCounters(),
         PRESSURE: emptyDomainCounters(),
         DECAY: emptyDomainCounters(),
+        COLLECTOR: emptyDomainCounters(),
       }),
     });
   }
@@ -2214,6 +2330,7 @@ export class BackendChatAdapterSuite {
         THREAT_ROUTING: emptyDomainCounters(),
         PRESSURE: emptyDomainCounters(),
         DECAY: emptyDomainCounters(),
+        COLLECTOR: emptyDomainCounters(),
       }),
     });
   }
@@ -2501,6 +2618,7 @@ function createEmptyMutableSuiteAccumulator(): MutableSuiteAccumulator {
       THREAT_ROUTING: { accepted: 0, deduped: 0, rejected: 0 },
       PRESSURE: { accepted: 0, deduped: 0, rejected: 0 },
       DECAY: { accepted: 0, deduped: 0, rejected: 0 },
+      COLLECTOR: { accepted: 0, deduped: 0, rejected: 0 },
     },
   };
 }
@@ -2587,6 +2705,7 @@ function freezeMutableSuiteAccumulator(
       THREAT_ROUTING: value.counters.THREAT_ROUTING,
       PRESSURE: value.counters.PRESSURE,
       DECAY: value.counters.DECAY,
+      COLLECTOR: value.counters.COLLECTOR,
     }),
   });
 }
