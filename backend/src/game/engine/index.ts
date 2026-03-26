@@ -142,9 +142,12 @@ export * as Pressure from './pressure';
  * Covers: AttackRouter (doctrine-based L1–L4 routing for all eight
  * ShieldDoctrineAttackTypes), BreachCascadeResolver (ghost L3 + L4 cascade
  * chains, sovereignty fatality), ShieldLayerManager (CASH_RESERVE / CREDIT_LINE /
- * INCOME_BASE / NETWORK_CORE integrity state), ShieldRepairQueue (repair
- * scheduling), ShieldUXBridge (UX translation), and ShieldEngine (full ML/DL
- * extraction, trend analysis, resilience forecasting).
+ * INCOME_BASE / NETWORK_CORE integrity state, 32-feature ML vector, 40×6 DL tensor,
+ * trend analysis, resilience forecasting, annotation bundles, session analytics —
+ * companions: MLExtractor, DLBuilder, TrendAnalyzer, ResilienceForecaster, Annotator,
+ * Inspector, Analytics), ShieldRepairQueue (repair scheduling), ShieldUXBridge
+ * (UX translation), and ShieldEngine (full ML/DL extraction, trend analysis,
+ * resilience forecasting).
  *
  * All shield truth flows through this namespace. The ShieldSignalAdapter is
  * consumed by the backend chat lane for attack/cascade → chat translation.
