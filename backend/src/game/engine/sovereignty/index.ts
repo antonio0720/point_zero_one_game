@@ -182,7 +182,49 @@ export type { SovereigntyGrade as RunGradeAssignerGrade } from './RunGradeAssign
 export { SovereigntySnapshotAdapter } from './SovereigntySnapshotAdapter';
 
 // ── Export Adapter ───────────────────────────────────────────────────────────
-export { SovereigntyExportAdapter } from './SovereigntyExportAdapter';
+export {
+  SovereigntyExportAdapter,
+  ExportRunContext,
+  // Constants
+  EXPORT_ADAPTER_VERSION,
+  EXPORT_ML_FEATURE_COUNT,
+  EXPORT_DL_FEATURE_COUNT,
+  EXPORT_ML_FEATURE_LABELS,
+  EXPORT_DL_FEATURE_LABELS,
+  // Validation
+  validateExportInputs,
+  // Diffing
+  diffExportArtifacts,
+  // ML / DL
+  computeExportMLVector,
+  computeExportDLTensor,
+  // UX narratives
+  generateExportNarrative,
+  generateExportCompletionMessage,
+  // Batch
+  batchExportArtifacts,
+  // Leaderboard
+  buildExportLeaderboard,
+  // Serialization
+  serializeExportBundle,
+  deserializeExportBundle,
+  // Audit trail
+  buildExportAuditEntry,
+  verifyExportAuditEntry,
+  // Self-test
+  runExportSelfTest,
+} from './SovereigntyExportAdapter';
+export type {
+  ExportValidationResult,
+  ExportMLVector,
+  ExportDLTensor,
+  ExportBatchResult,
+  ExportAuditEntry,
+  ExportSerializedBundle,
+  ExportSelfTestResult,
+  ExportDiffResult,
+  ExportLeaderboardProjection,
+} from './SovereigntyExportAdapter';
 
 // ── Exporter ─────────────────────────────────────────────────────────────────
 export { SovereigntyExporter } from './SovereigntyExporter';

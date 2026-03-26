@@ -905,6 +905,43 @@ import {
   type GradeSignalAdapterStats,
 } from './RunGradeSignalAdapter';
 
+import {
+  SovereigntyExportSignalAdapter,
+  createSovereigntyExportSignalAdapter,
+  buildExportSignalPayload,
+  buildProofCardPayload,
+  adaptAllExportSignals,
+  adaptExportBundle,
+  adaptExportAuditBatch,
+  artifactFormatHeadline,
+  artifactCoachingMessage,
+  gradeExportNote,
+  proofCardHeadline,
+  proofCardCoachingMessage,
+  leaderboardHeadline,
+  leaderboardCoachingMessage,
+  gradeNarrativeHeadline,
+  auditEntryHeadline,
+  batchCompleteHeadline,
+  batchCompleteCoachingMessage,
+  EXPORT_SIGNAL_ADAPTER_MANIFEST,
+  type ExportArtifactCompat,
+  type ProofCardCompat,
+  type ExportMLVectorCompat,
+  type ExportDLTensorCompat,
+  type ExportAuditEntryCompat,
+  type LeaderboardProjectionCompat,
+  type ExplorerCardCompat,
+  type GradeNarrativeCompat,
+  type ExportSignalAdapterContext,
+  type ExportSignalAdapterLogger,
+  type ExportSignalAdapterClock,
+  type ExportSignalAdapterSeverity,
+  type ExportSignalAdapterEventName,
+  type SovereigntyExportSignalAdapterOptions,
+  type ExportSignalAdapterStats,
+} from './SovereigntyExportSignalAdapter';
+
 // ============================================================================
 // MARK: Re-export authoritative adapter modules and their key public surfaces
 // ============================================================================
@@ -1253,6 +1290,26 @@ export {
   comparisonCoachingMessage,
   gradeAuditMessage,
   GRADE_SIGNAL_ADAPTER_MANIFEST,
+  // SovereigntyExport signal adapter
+  SovereigntyExportSignalAdapter,
+  createSovereigntyExportSignalAdapter,
+  buildExportSignalPayload,
+  buildProofCardPayload,
+  adaptAllExportSignals,
+  adaptExportBundle,
+  adaptExportAuditBatch,
+  artifactFormatHeadline,
+  artifactCoachingMessage,
+  gradeExportNote,
+  proofCardHeadline,
+  proofCardCoachingMessage,
+  leaderboardHeadline,
+  leaderboardCoachingMessage,
+  gradeNarrativeHeadline,
+  auditEntryHeadline,
+  batchCompleteHeadline,
+  batchCompleteCoachingMessage,
+  EXPORT_SIGNAL_ADAPTER_MANIFEST,
 };
 
 export type {
@@ -1688,6 +1745,22 @@ export type {
   GradeSignalAdapterEventName,
   RunGradeSignalAdapterOptions,
   GradeSignalAdapterStats,
+  // SovereigntyExport signal adapter types
+  ExportArtifactCompat,
+  ProofCardCompat,
+  ExportMLVectorCompat,
+  ExportDLTensorCompat,
+  ExportAuditEntryCompat,
+  LeaderboardProjectionCompat,
+  ExplorerCardCompat,
+  GradeNarrativeCompat,
+  ExportSignalAdapterContext,
+  ExportSignalAdapterLogger,
+  ExportSignalAdapterClock,
+  ExportSignalAdapterSeverity,
+  ExportSignalAdapterEventName,
+  SovereigntyExportSignalAdapterOptions,
+  ExportSignalAdapterStats,
 };
 
 // ============================================================================
