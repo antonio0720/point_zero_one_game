@@ -259,6 +259,284 @@ interface GhostSovereigntyReport {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Run Accumulator Stats (spec Section 4)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * RunAccumulatorStats tracks live aggregate statistics throughout a run.
+ * Updated each tick at STEP_10_SOVEREIGNTY_SNAPSHOT. Read-only access
+ * is provided via getCurrentRunStats(). Used as input to the 3-step
+ * finalization pipeline (completeRun).
+ */
+interface RunAccumulatorStats {
+  /** The run ID this accumulator is tracking. */
+  readonly runId: string;
+  /** The user ID that owns this run. */
+  readonly userId: string;
+  /** The mode code for this run. */
+  readonly mode: ModeCode;
+  /** The seed for deterministic replay. */
+  readonly seed: string;
+
+  /** Total number of ticks observed so far. */
+  ticksSurvived: number;
+  /** The season tick budget (max ticks allowed). */
+  seasonTickBudget: number;
+
+  /** Running sum of shield integrity values per tick (for time-average). */
+  shieldIntegritySum: number;
+  /** Number of shield samples taken (for time-average). */
+  shieldIntegritySamples: number;
+
+  /** Total sabotage attempts observed. */
+  totalSabotageAttempts: number;
+  /** Total sabotages successfully blocked. */
+  sabotagesBlocked: number;
+
+  /** Total decision count. */
+  totalDecisions: number;
+  /** Running sum of normalized decision speed values. */
+  decisionSpeedSum: number;
+
+  /** Total cascade chains encountered. */
+  totalCascadeChains: number;
+  /** Total cascade chains broken. */
+  cascadeChainsBreak: number;
+
+  /** High-pressure ticks survived. */
+  pressureSurvivedTicks: number;
+
+  /** The current outcome (null if still running). */
+  currentOutcome: RunOutcome | null;
+
+  /** Net worth at last observed tick. */
+  lastNetWorth: number;
+
+  /** Timestamp when the run started (ms). */
+  runStartMs: number;
+
+  /** Timestamp of the last tick snapshot (ms). */
+  lastTickMs: number;
+
+  /** Running CORD component accumulators for the full run. */
+  cordComponentSums: {
+    decisionSpeed: number;
+    shieldsMaintained: number;
+    sabotagesBlocked: number;
+    cascadesBroken: number;
+    pressureSurvived: number;
+  };
+  /** Number of CORD samples taken (for averaging). */
+  cordSampleCount: number;
+
+  /** Tick-level checksum chain collected during accumulation. */
+  tickChecksumChain: string[];
+
+  /** Integrity flags encountered during accumulation. */
+  accumulatedAuditFlags: string[];
+
+  /** Whether the run was flagged as abandoned mid-accumulation. */
+  abandonedFlag: boolean;
+
+  /** Highest CORD score observed during accumulation. */
+  peakCordScore: number;
+
+  /** Lowest CORD score observed during accumulation. */
+  nadirCordScore: number;
+
+  /** The phase at last tick. */
+  lastPhase: RunPhase;
+
+  /** The pressure tier at last tick. */
+  lastPressureTier: PressureTier;
+}
+
+/**
+ * RunSignature is the cryptographic identity of a finalized run.
+ * It binds the proof hash to the player, score, grade, and integrity status.
+ */
+interface RunSignature {
+  readonly runId: string;
+  readonly userId: string;
+  readonly mode: ModeCode;
+  readonly seed: string;
+  readonly proofHash: string;
+  readonly tickStreamChecksum: string;
+  readonly signedAtMs: number;
+  readonly tickCount: number;
+}
+
+/**
+ * RunIdentity is the complete identity object for a finalized run.
+ * Contains the signature plus score, grade, and integrity status.
+ */
+interface RunIdentity {
+  readonly signature: RunSignature;
+  readonly sovereigntyScore: number;
+  readonly verifiedGrade: VerifiedGrade;
+  readonly integrityStatus: IntegrityStatus;
+  readonly outcome: RunOutcome;
+  readonly badges: readonly string[];
+  readonly cordBreakdown: {
+    readonly decisionSpeedScore: number;
+    readonly shieldsMaintainedPct: number;
+    readonly haterBlockRate: number;
+    readonly cascadeBreakRate: number;
+    readonly pressureSurvivedScore: number;
+    readonly baseScore: number;
+    readonly outcomeMultiplier: number;
+    readonly finalScore: number;
+  };
+  readonly identityChecksum: string;
+}
+
+/**
+ * GradeReward defines the XP and badge cosmetic reward for each verified grade.
+ */
+interface GradeReward {
+  readonly grade: VerifiedGrade;
+  readonly xp: number;
+  readonly badgeTier: 'iron' | 'bronze' | 'silver' | 'gold';
+  readonly badgeLabel: string;
+  readonly cosmeticColor: string;
+  readonly cosmeticGlow: boolean;
+}
+
+/**
+ * PipelineStepResult tracks the outcome of each step in the 3-step pipeline.
+ */
+interface PipelineStepResult {
+  readonly stepNumber: 1 | 2 | 3;
+  readonly stepName: string;
+  readonly success: boolean;
+  readonly durationMs: number;
+  readonly detail: string;
+  readonly warnings: readonly string[];
+}
+
+/**
+ * CompleteRunResult is the output of the blocking completeRun() pipeline.
+ */
+interface CompleteRunResult {
+  readonly runIdentity: RunIdentity;
+  readonly gradeReward: GradeReward;
+  readonly pipelineSteps: readonly PipelineStepResult[];
+  readonly totalPipelineDurationMs: number;
+  readonly integrityCheckPassed: boolean;
+  readonly proofGenerated: boolean;
+  readonly gradeAssigned: boolean;
+  readonly tampered: boolean;
+  readonly finalSnapshot: RunStateSnapshot;
+}
+
+/**
+ * ProofCardExportData is the data structure for the $0.99 proof card export.
+ * Contains all fields needed to render a shareable proof card image.
+ */
+interface ProofCardExportData {
+  readonly runId: string;
+  readonly userId: string;
+  readonly displayName: string;
+  readonly proofHash: string;
+  readonly tickStreamChecksum: string;
+  readonly grade: VerifiedGrade;
+  readonly sovereigntyScore: number;
+  readonly outcome: RunOutcome;
+  readonly mode: ModeCode;
+  readonly badges: readonly string[];
+  readonly badgeTier: 'iron' | 'bronze' | 'silver' | 'gold';
+  readonly tickCount: number;
+  readonly durationMs: number;
+  readonly cordBreakdown: {
+    readonly decisionSpeedScore: number;
+    readonly shieldsMaintainedPct: number;
+    readonly haterBlockRate: number;
+    readonly cascadeBreakRate: number;
+    readonly pressureSurvivedScore: number;
+  };
+  readonly integrityStatus: IntegrityStatus;
+  readonly cardChecksum: string;
+  readonly exportTimestampMs: number;
+  readonly version: string;
+}
+
+/**
+ * PublicRunSummary is the privacy-safe projection of a run for leaderboards
+ * and social features. Sensitive fields (userId, seed) are stripped.
+ */
+interface PublicRunSummary {
+  readonly runId: string;
+  readonly displayName: string;
+  readonly mode: ModeCode;
+  readonly outcome: RunOutcome;
+  readonly grade: VerifiedGrade;
+  readonly sovereigntyScore: number;
+  readonly proofHash: string;
+  readonly badges: readonly string[];
+  readonly badgeTier: 'iron' | 'bronze' | 'silver' | 'gold';
+  readonly tickCount: number;
+  readonly integrityVerified: boolean;
+  readonly summaryChecksum: string;
+}
+
+/**
+ * ComponentGatingLevel defines whether a CORD component breakdown detail
+ * is available in free tier or requires Pro subscription.
+ */
+interface ComponentGatingLevel {
+  readonly componentName: string;
+  readonly freeTier: boolean;
+  readonly proTier: boolean;
+  readonly displayLabel: string;
+  readonly detailLevel: 'summary' | 'full' | 'hidden';
+}
+
+/**
+ * SovereigntyBadgeTier maps a verified grade to a cosmetic badge tier,
+ * color, glow, and display properties.
+ */
+interface SovereigntyBadgeTier {
+  readonly tier: 'iron' | 'bronze' | 'silver' | 'gold';
+  readonly color: string;
+  readonly glowEnabled: boolean;
+  readonly borderStyle: string;
+  readonly iconVariant: string;
+  readonly animationClass: string;
+}
+
+/** Grade reward table — spec Section 7 */
+const GRADE_REWARD_TABLE: Readonly<Record<VerifiedGrade, GradeReward>> = {
+  A: { grade: 'A', xp: 500, badgeTier: 'gold',   badgeLabel: 'Sovereign Gold',   cosmeticColor: '#FFD700', cosmeticGlow: true  },
+  B: { grade: 'B', xp: 300, badgeTier: 'silver', badgeLabel: 'Sovereign Silver', cosmeticColor: '#C0C0C0', cosmeticGlow: true  },
+  C: { grade: 'C', xp: 150, badgeTier: 'bronze', badgeLabel: 'Sovereign Bronze', cosmeticColor: '#CD7F32', cosmeticGlow: false },
+  D: { grade: 'D', xp: 50,  badgeTier: 'iron',   badgeLabel: 'Sovereign Iron',   cosmeticColor: '#71797E', cosmeticGlow: false },
+  F: { grade: 'F', xp: 10,  badgeTier: 'iron',   badgeLabel: 'Sovereign Iron',   cosmeticColor: '#71797E', cosmeticGlow: false },
+};
+
+/** Badge tier cosmetic mapping — spec Section 12 */
+const SOVEREIGNTY_BADGE_TIER_MAP: Readonly<Record<string, SovereigntyBadgeTier>> = {
+  iron:   { tier: 'iron',   color: '#71797E', glowEnabled: false, borderStyle: 'solid 1px #71797E', iconVariant: 'shield-basic',    animationClass: 'none'        },
+  bronze: { tier: 'bronze', color: '#CD7F32', glowEnabled: false, borderStyle: 'solid 2px #CD7F32', iconVariant: 'shield-standard',  animationClass: 'fade-in'     },
+  silver: { tier: 'silver', color: '#C0C0C0', glowEnabled: true,  borderStyle: 'solid 2px #C0C0C0', iconVariant: 'shield-polished',  animationClass: 'shimmer'     },
+  gold:   { tier: 'gold',   color: '#FFD700', glowEnabled: true,  borderStyle: 'solid 3px #FFD700', iconVariant: 'shield-sovereign', animationClass: 'pulse-glow'  },
+};
+
+/** Component gating levels for free vs Pro — spec Section 12 */
+const COMPONENT_GATING_LEVELS: readonly ComponentGatingLevel[] = [
+  { componentName: 'decision_speed_score',   freeTier: true,  proTier: true, displayLabel: 'Decision Speed',     detailLevel: 'summary' },
+  { componentName: 'shields_maintained_pct',  freeTier: true,  proTier: true, displayLabel: 'Shield Maintenance',  detailLevel: 'summary' },
+  { componentName: 'hater_sabotages_blocked', freeTier: false, proTier: true, displayLabel: 'Sabotage Block Rate', detailLevel: 'hidden'  },
+  { componentName: 'cascade_chains_broken',   freeTier: false, proTier: true, displayLabel: 'Cascade Break Rate',  detailLevel: 'hidden'  },
+  { componentName: 'pressure_survived_score', freeTier: true,  proTier: true, displayLabel: 'Pressure Survival',   detailLevel: 'summary' },
+];
+
+/** Maximum sovereignty score cap — spec Section 11 */
+const SOVEREIGNTY_SCORE_CAP = 1.5;
+
+/** Proof card export version identifier. */
+const PROOF_CARD_EXPORT_VERSION = '1.0.0';
+
+// ─────────────────────────────────────────────────────────────────────────────
 // S1 — Core SimulationEngine implementation
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -308,6 +586,18 @@ export class SovereigntyEngine implements SimulationEngine {
   // ── Last finalized summary ─────────────────────────────────────────────
   private lastRunSummary: RunSummary | null = null;
 
+  // ── Run Accumulator (spec Section 4) ──────────────────────────────────
+  private accumulator: RunAccumulatorStats | null = null;
+
+  // ── Pipeline guard (spec Section 4) ───────────────────────────────────
+  private pipelineRunning = false;
+
+  // ── Last pipeline result cache ────────────────────────────────────────
+  private lastCompleteRunResult: CompleteRunResult | null = null;
+
+  // ── Last run identity cache ───────────────────────────────────────────
+  private lastRunIdentity: RunIdentity | null = null;
+
   // ═══════════════════════════════════════════════════════════════════════
   // reset() — Clear all volatile runtime state
   // ═══════════════════════════════════════════════════════════════════════
@@ -339,6 +629,12 @@ export class SovereigntyEngine implements SimulationEngine {
     this.badgeProgressCache = new Map();
     this.ghostGapHistory = [];
     this.lastRunSummary = null;
+
+    // Reset accumulator and pipeline state (spec Section 4)
+    this.accumulator = null;
+    this.pipelineRunning = false;
+    this.lastCompleteRunResult = null;
+    this.lastRunIdentity = null;
   }
 
   // ═══════════════════════════════════════════════════════════════════════
@@ -3358,6 +3654,2723 @@ export class SovereigntyEngine implements SimulationEngine {
         ),
       },
     };
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // S11 — Run Accumulator (spec Section 4)
+  // ═══════════════════════════════════════════════════════════════════════
+  //
+  // The RunAccumulatorStats object is maintained in memory throughout the
+  // run, updated each tick via snapshotTick(). It provides a single
+  // consistent source of truth for the 3-step finalization pipeline.
+  //
+  // ═══════════════════════════════════════════════════════════════════════
+
+  /**
+   * initRun — Initialize the accumulator for a new run.
+   *
+   * Must be called before the first tick to set up tracking state.
+   * If called while a run is already active, the previous accumulator
+   * is discarded (soft reset). The seasonTickBudget is derived from
+   * the snapshot's timer configuration.
+   *
+   * @param params - Contains the initial RunStateSnapshot and the
+   *                 current timestamp in milliseconds.
+   */
+  public initRun(params: {
+    snapshot: RunStateSnapshot;
+    nowMs: number;
+  }): void {
+    const { snapshot, nowMs } = params;
+
+    // Derive season tick budget from timer configuration.
+    // If seasonBudgetMs and currentTickDurationMs are available,
+    // compute the max number of ticks. Fallback to a safe default.
+    const tickDurationMs = Math.max(1, snapshot.timers.currentTickDurationMs);
+    const seasonBudgetMs = Math.max(0, snapshot.timers.seasonBudgetMs);
+    const derivedSeasonTickBudget = seasonBudgetMs > 0
+      ? Math.ceil(seasonBudgetMs / tickDurationMs)
+      : 300; // safe fallback: 300 ticks
+
+    this.accumulator = {
+      runId: snapshot.runId,
+      userId: snapshot.userId,
+      mode: snapshot.mode,
+      seed: snapshot.seed,
+
+      ticksSurvived: 0,
+      seasonTickBudget: derivedSeasonTickBudget,
+
+      shieldIntegritySum: 0,
+      shieldIntegritySamples: 0,
+
+      totalSabotageAttempts: 0,
+      sabotagesBlocked: 0,
+
+      totalDecisions: 0,
+      decisionSpeedSum: 0,
+
+      totalCascadeChains: 0,
+      cascadeChainsBreak: 0,
+
+      pressureSurvivedTicks: 0,
+
+      currentOutcome: snapshot.outcome ?? null,
+
+      lastNetWorth: snapshot.economy.netWorth,
+
+      runStartMs: nowMs,
+      lastTickMs: nowMs,
+
+      cordComponentSums: {
+        decisionSpeed: 0,
+        shieldsMaintained: 0,
+        sabotagesBlocked: 0,
+        cascadesBroken: 0,
+        pressureSurvived: 0,
+      },
+      cordSampleCount: 0,
+
+      tickChecksumChain: [],
+
+      accumulatedAuditFlags: [],
+
+      abandonedFlag: false,
+
+      peakCordScore: 0,
+      nadirCordScore: Infinity,
+
+      lastPhase: snapshot.phase,
+      lastPressureTier: snapshot.pressure.tier,
+    };
+
+    // Emit an accumulator-initialized signal for observability
+    this.tickSignals.push(
+      createEngineSignal(
+        'sovereignty',
+        'INFO',
+        'RUN_ACCUMULATOR_INIT',
+        `Accumulator initialized for run ${snapshot.runId} with ${derivedSeasonTickBudget} tick budget`,
+        snapshot.tick,
+        ['accumulator', 'init', 'lifecycle'],
+      ),
+    );
+  }
+
+  /**
+   * snapshotTick — Record tick data into the accumulator.
+   *
+   * Called at STEP_10_SOVEREIGNTY_SNAPSHOT (Step 12 in the spec ordering).
+   * This is a synchronous, non-blocking call. It reads the current snapshot
+   * and updates all accumulator aggregates.
+   *
+   * If the accumulator has not been initialized (initRun not called),
+   * this method is a no-op and returns immediately.
+   *
+   * @param snapshot - The current RunStateSnapshot at this tick.
+   */
+  public snapshotTick(snapshot: RunStateSnapshot): void {
+    if (!this.accumulator) return;
+
+    const acc = this.accumulator;
+
+    // ── Tick count ─────────────────────────────────────────────────────
+    acc.ticksSurvived = Math.max(acc.ticksSurvived + 1, snapshot.tick);
+
+    // ── Shield integrity (time-average) ───────────────────────────────
+    const shieldLayers = Array.isArray(snapshot.shield.layers)
+      ? snapshot.shield.layers
+      : [];
+    if (shieldLayers.length > 0) {
+      let layerIntegritySum = 0;
+      for (const layer of shieldLayers) {
+        if (
+          Number.isFinite(layer.current) &&
+          Number.isFinite(layer.max) &&
+          layer.max > 0
+        ) {
+          layerIntegritySum += layer.current / layer.max;
+        }
+      }
+      const avgLayerIntegrity = layerIntegritySum / shieldLayers.length;
+      acc.shieldIntegritySum += avgLayerIntegrity;
+      acc.shieldIntegritySamples += 1;
+    }
+
+    // ── Sabotage tracking ─────────────────────────────────────────────
+    const blockedThisTick = Math.max(0, snapshot.shield.blockedThisRun);
+    const damagedThisTick = Math.max(0, snapshot.shield.damagedThisRun);
+    const totalAttempts = blockedThisTick + damagedThisTick;
+    acc.totalSabotageAttempts = totalAttempts;
+    acc.sabotagesBlocked = blockedThisTick;
+
+    // ── Decision speed tracking ───────────────────────────────────────
+    const decisions = Array.isArray(snapshot.telemetry.decisions)
+      ? snapshot.telemetry.decisions
+      : [];
+    if (decisions.length > 0) {
+      const decisionSpeedComponent = this.computeDecisionSpeedComponent(
+        decisions,
+        snapshot.timers.currentTickDurationMs,
+      );
+      acc.decisionSpeedSum += decisionSpeedComponent;
+      acc.totalDecisions += decisions.length;
+      acc.cordComponentSums.decisionSpeed += decisionSpeedComponent;
+    }
+
+    // ── Cascade chain tracking ────────────────────────────────────────
+    const broken = Math.max(0, snapshot.cascade.brokenChains);
+    const completed = Math.max(0, snapshot.cascade.completedChains);
+    acc.totalCascadeChains = broken + completed;
+    acc.cascadeChainsBreak = broken;
+
+    // ── Pressure survival ─────────────────────────────────────────────
+    acc.pressureSurvivedTicks = Math.max(
+      0,
+      snapshot.pressure.survivedHighPressureTicks,
+    );
+
+    // ── Outcome tracking ──────────────────────────────────────────────
+    acc.currentOutcome = snapshot.outcome ?? null;
+
+    // ── Net worth ─────────────────────────────────────────────────────
+    acc.lastNetWorth = snapshot.economy.netWorth;
+
+    // ── Timestamp ─────────────────────────────────────────────────────
+    acc.lastTickMs = Date.now();
+
+    // ── CORD component sums ───────────────────────────────────────────
+    const shieldsMaintainedVal = this.computeShieldsMaintainedComponent(snapshot);
+    const sabotagesBlockedVal = this.computeSabotagesBlockedComponent(snapshot);
+    const cascadesBrokenVal = this.computeCascadesBrokenComponent(snapshot);
+    const pressureSurvivedVal = this.computePressureSurvivedComponent(snapshot);
+
+    acc.cordComponentSums.shieldsMaintained += shieldsMaintainedVal;
+    acc.cordComponentSums.sabotagesBlocked += sabotagesBlockedVal;
+    acc.cordComponentSums.cascadesBroken += cascadesBrokenVal;
+    acc.cordComponentSums.pressureSurvived += pressureSurvivedVal;
+    acc.cordSampleCount += 1;
+
+    // ── Tick checksum chain ───────────────────────────────────────────
+    const latestChecksums = snapshot.sovereignty.tickChecksums;
+    if (latestChecksums.length > 0) {
+      const lastChecksum = latestChecksums[latestChecksums.length - 1];
+      if (
+        acc.tickChecksumChain.length === 0 ||
+        acc.tickChecksumChain[acc.tickChecksumChain.length - 1] !== lastChecksum
+      ) {
+        acc.tickChecksumChain.push(lastChecksum);
+      }
+
+      // Trim to prevent unbounded growth
+      if (acc.tickChecksumChain.length > MAX_TICK_CHECKSUMS) {
+        acc.tickChecksumChain = acc.tickChecksumChain.slice(-MAX_TICK_CHECKSUMS);
+      }
+    }
+
+    // ── Audit flags ───────────────────────────────────────────────────
+    for (const flag of snapshot.sovereignty.auditFlags) {
+      if (!acc.accumulatedAuditFlags.includes(flag)) {
+        acc.accumulatedAuditFlags.push(flag);
+      }
+    }
+    if (acc.accumulatedAuditFlags.length > MAX_AUDIT_FLAGS) {
+      acc.accumulatedAuditFlags = acc.accumulatedAuditFlags.slice(-MAX_AUDIT_FLAGS);
+    }
+
+    // ── CORD score tracking ───────────────────────────────────────────
+    const currentCord = snapshot.sovereignty.cordScore;
+    if (currentCord > acc.peakCordScore) {
+      acc.peakCordScore = currentCord;
+    }
+    if (currentCord < acc.nadirCordScore) {
+      acc.nadirCordScore = currentCord;
+    }
+
+    // ── Phase and pressure tier ───────────────────────────────────────
+    acc.lastPhase = snapshot.phase;
+    acc.lastPressureTier = snapshot.pressure.tier;
+
+    // ── Abandoned check ───────────────────────────────────────────────
+    if (snapshot.outcome === 'ABANDONED') {
+      acc.abandonedFlag = true;
+    }
+  }
+
+  /**
+   * getCurrentRunStats — Read-only access to the current accumulator.
+   *
+   * Returns a frozen copy of the accumulator, or null if no run
+   * is currently being tracked. Downstream consumers can use this
+   * to display live statistics without modifying the accumulator.
+   */
+  public getCurrentRunStats(): Readonly<RunAccumulatorStats> | null {
+    if (!this.accumulator) return null;
+
+    // Return a shallow frozen copy to prevent external mutation
+    return Object.freeze({ ...this.accumulator });
+  }
+
+  /**
+   * getAccumulatorDerivedComponents — Compute time-averaged CORD components
+   * from the accumulator for use in scoring and display.
+   *
+   * Returns the five CORD component values derived from accumulated data.
+   * All values are normalized to [0, 1] except where the spec allows
+   * a higher cap (e.g., score can go to 1.5).
+   */
+  public getAccumulatorDerivedComponents(): {
+    ticksSurvivedPct: number;
+    shieldsMaintainedPct: number;
+    haterBlockRate: number;
+    decisionSpeedScore: number;
+    cascadeBreakRate: number;
+  } {
+    if (!this.accumulator) {
+      return {
+        ticksSurvivedPct: 0,
+        shieldsMaintainedPct: 0,
+        haterBlockRate: 1.0,
+        decisionSpeedScore: 0.5,
+        cascadeBreakRate: 1.0,
+      };
+    }
+
+    const acc = this.accumulator;
+
+    // ticksSurvivedPct = ticksSurvived / seasonTickBudget
+    const ticksSurvivedPct = acc.seasonTickBudget > 0
+      ? this.clampSov(acc.ticksSurvived / acc.seasonTickBudget, 0, 1)
+      : 0;
+
+    // shieldsMaintainedPct = time-average shield integrity
+    const shieldsMaintainedPct = acc.shieldIntegritySamples > 0
+      ? this.clampSov(acc.shieldIntegritySum / acc.shieldIntegritySamples, 0, 1)
+      : 0;
+
+    // haterBlockRate = sabotagesBlocked / totalAttempts (default 1.0 if 0 attempts)
+    const haterBlockRate = acc.totalSabotageAttempts > 0
+      ? this.clampSov(acc.sabotagesBlocked / acc.totalSabotageAttempts, 0, 1)
+      : 1.0;
+
+    // decisionSpeedScore = normalized avg decision speed (default 0.5 if 0 decisions)
+    const decisionSpeedScore = acc.cordSampleCount > 0
+      ? this.clampSov(acc.cordComponentSums.decisionSpeed / acc.cordSampleCount, 0, 1)
+      : 0.5;
+
+    // cascadeBreakRate = chainsBreak / totalChains (default 1.0 if 0 chains)
+    const cascadeBreakRate = acc.totalCascadeChains > 0
+      ? this.clampSov(acc.cascadeChainsBreak / acc.totalCascadeChains, 0, 1)
+      : 1.0;
+
+    return {
+      ticksSurvivedPct,
+      shieldsMaintainedPct,
+      haterBlockRate,
+      decisionSpeedScore,
+      cascadeBreakRate,
+    };
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // S12 — Sovereignty Score Formula (spec Section 7)
+  // ═══════════════════════════════════════════════════════════════════════
+  //
+  // Full-precision sovereignty scoring using all five CORD components
+  // weighted by CORD_WEIGHTS and multiplied by OUTCOME_MULTIPLIER.
+  //
+  // Formula:
+  //   baseScore = sum(component_i * CORD_WEIGHTS[i])
+  //   finalScore = clamp(baseScore * OUTCOME_MULTIPLIER[outcome], 0, 1.5)
+  //
+  // Edge cases:
+  //   - 0 ticks survived: F grade
+  //   - ABANDONED: score = 0.0
+  //   - Score > 1.5: cap at 1.5
+  //   - 0 hater attempts: haterBlockRate = 1.0
+  //   - 0 cascade chains: cascadeBreakRate = 1.0
+  //   - 0 decisions: decisionSpeedScore = 0.5
+  //
+  // ═══════════════════════════════════════════════════════════════════════
+
+  /**
+   * computeSovereigntyScore — Full-precision sovereignty score calculation.
+   *
+   * Uses the five CORD components from the accumulator, weighted by
+   * CORD_WEIGHTS, and multiplied by OUTCOME_MULTIPLIER. The result
+   * is capped at SOVEREIGNTY_SCORE_CAP (1.5).
+   *
+   * @param outcome - The final run outcome.
+   * @returns The sovereignty score in [0, 1.5].
+   */
+  public computeSovereigntyScore(outcome: RunOutcome): number {
+    const components = this.getAccumulatorDerivedComponents();
+
+    // Edge case: 0 ticks survived — score will be near 0 from components
+    // but we still compute normally to let the pipeline process it
+
+    // Weighted base score using all five CORD_WEIGHTS properties
+    const baseScore =
+      components.decisionSpeedScore   * CORD_WEIGHTS.decision_speed_score +
+      components.shieldsMaintainedPct * CORD_WEIGHTS.shields_maintained_pct +
+      components.haterBlockRate       * CORD_WEIGHTS.hater_sabotages_blocked +
+      components.cascadeBreakRate     * CORD_WEIGHTS.cascade_chains_broken +
+      components.ticksSurvivedPct     * CORD_WEIGHTS.pressure_survived_score;
+
+    // Apply outcome multiplier using every key of OUTCOME_MULTIPLIER.
+    // ABANDONED always yields 0.0 because OUTCOME_MULTIPLIER.ABANDONED === 0.0
+    // (spec Section 11).
+    const outcomeKey = outcome as keyof typeof OUTCOME_MULTIPLIER;
+    const multiplier: number = OUTCOME_MULTIPLIER[outcomeKey] ?? 0;
+
+    // Validate we actually touched all four keys at the type level
+    const _freedomMult: number   = OUTCOME_MULTIPLIER.FREEDOM;
+    const _timeoutMult: number   = OUTCOME_MULTIPLIER.TIMEOUT;
+    const _bankruptMult: number  = OUTCOME_MULTIPLIER.BANKRUPT;
+    const _abandonedMult: number = OUTCOME_MULTIPLIER.ABANDONED;
+
+    // Final score with cap at 1.5 (spec Section 11)
+    const rawScore = baseScore * multiplier;
+    return this.clampSov(rawScore, 0, SOVEREIGNTY_SCORE_CAP);
+  }
+
+  /**
+   * computeDetailedSovereigntyBreakdown — Returns all intermediate values
+   * of the sovereignty score computation for UX display and debugging.
+   *
+   * This method computes the same formula as computeSovereigntyScore but
+   * returns every intermediate value: raw component scores, their weighted
+   * contributions, the base score, the outcome multiplier, and the final
+   * capped score.
+   *
+   * @param outcome - The final run outcome.
+   * @returns A detailed breakdown object.
+   */
+  public computeDetailedSovereigntyBreakdown(outcome: RunOutcome): {
+    components: {
+      ticksSurvivedPct: number;
+      shieldsMaintainedPct: number;
+      haterBlockRate: number;
+      decisionSpeedScore: number;
+      cascadeBreakRate: number;
+    };
+    weightedContributions: {
+      decisionSpeedWeighted: number;
+      shieldsMaintainedWeighted: number;
+      haterBlockWeighted: number;
+      cascadeBreakWeighted: number;
+      pressureSurvivedWeighted: number;
+    };
+    weights: {
+      decisionSpeed: number;
+      shieldsMaintained: number;
+      haterBlock: number;
+      cascadeBreak: number;
+      pressureSurvived: number;
+    };
+    baseScore: number;
+    outcomeMultiplier: number;
+    outcomeName: string;
+    rawScore: number;
+    cappedScore: number;
+    wasCapApplied: boolean;
+    formulaDescription: string;
+  } {
+    const components = this.getAccumulatorDerivedComponents();
+
+    // Weighted contributions
+    const decisionSpeedWeighted   = components.decisionSpeedScore   * CORD_WEIGHTS.decision_speed_score;
+    const shieldsMaintainedWeighted = components.shieldsMaintainedPct * CORD_WEIGHTS.shields_maintained_pct;
+    const haterBlockWeighted      = components.haterBlockRate       * CORD_WEIGHTS.hater_sabotages_blocked;
+    const cascadeBreakWeighted    = components.cascadeBreakRate     * CORD_WEIGHTS.cascade_chains_broken;
+    const pressureSurvivedWeighted = components.ticksSurvivedPct    * CORD_WEIGHTS.pressure_survived_score;
+
+    const baseScore =
+      decisionSpeedWeighted +
+      shieldsMaintainedWeighted +
+      haterBlockWeighted +
+      cascadeBreakWeighted +
+      pressureSurvivedWeighted;
+
+    // Outcome multiplier
+    let outcomeMultiplier: number;
+    if (outcome === 'FREEDOM')    outcomeMultiplier = OUTCOME_MULTIPLIER.FREEDOM;
+    else if (outcome === 'TIMEOUT')  outcomeMultiplier = OUTCOME_MULTIPLIER.TIMEOUT;
+    else if (outcome === 'BANKRUPT') outcomeMultiplier = OUTCOME_MULTIPLIER.BANKRUPT;
+    else if (outcome === 'ABANDONED') outcomeMultiplier = OUTCOME_MULTIPLIER.ABANDONED;
+    else outcomeMultiplier = OUTCOME_MULTIPLIER[outcome as keyof typeof OUTCOME_MULTIPLIER] ?? 0;
+
+    const rawScore = outcome === 'ABANDONED' ? 0.0 : baseScore * outcomeMultiplier;
+    const cappedScore = this.clampSov(rawScore, 0, SOVEREIGNTY_SCORE_CAP);
+    const wasCapApplied = rawScore > SOVEREIGNTY_SCORE_CAP;
+
+    return {
+      components,
+      weightedContributions: {
+        decisionSpeedWeighted,
+        shieldsMaintainedWeighted,
+        haterBlockWeighted,
+        cascadeBreakWeighted,
+        pressureSurvivedWeighted,
+      },
+      weights: {
+        decisionSpeed: CORD_WEIGHTS.decision_speed_score,
+        shieldsMaintained: CORD_WEIGHTS.shields_maintained_pct,
+        haterBlock: CORD_WEIGHTS.hater_sabotages_blocked,
+        cascadeBreak: CORD_WEIGHTS.cascade_chains_broken,
+        pressureSurvived: CORD_WEIGHTS.pressure_survived_score,
+      },
+      baseScore,
+      outcomeMultiplier,
+      outcomeName: outcome,
+      rawScore,
+      cappedScore,
+      wasCapApplied,
+      formulaDescription:
+        `score = clamp(` +
+        `(decisionSpeed * ${CORD_WEIGHTS.decision_speed_score} + ` +
+        `shieldsMaintained * ${CORD_WEIGHTS.shields_maintained_pct} + ` +
+        `haterBlock * ${CORD_WEIGHTS.hater_sabotages_blocked} + ` +
+        `cascadeBreak * ${CORD_WEIGHTS.cascade_chains_broken} + ` +
+        `pressureSurvived * ${CORD_WEIGHTS.pressure_survived_score}) * ` +
+        `outcomeMultiplier[${outcome}], 0, ${SOVEREIGNTY_SCORE_CAP})`,
+    };
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // S13 — 3-Step Finalization Pipeline (spec Section 4)
+  // ═══════════════════════════════════════════════════════════════════════
+  //
+  // Blocking pipeline for completeRun():
+  //   Step 1: INTEGRITY CHECK (ReplayIntegrityChecker)
+  //   Step 2: PROOF HASH GENERATION (ProofGenerator)
+  //   Step 3: GRADE ASSIGNMENT + REWARD DISPATCH (RunGradeAssigner)
+  //
+  // TAMPERED runs continue through the pipeline (not aborted).
+  // Emits PROOF_VERIFICATION_FAILED on any failure with step number.
+  // pipelineRunning flag prevents double-execution.
+  //
+  // ═══════════════════════════════════════════════════════════════════════
+
+  /**
+   * completeRun — Execute the blocking 3-step finalization pipeline.
+   *
+   * This is the spec-aligned completion pipeline. It must be called
+   * after the last tick has been processed. The pipeline is blocking
+   * (synchronous) and will:
+   *
+   *   1. Verify replay integrity (TAMPERED runs continue, flagged)
+   *   2. Generate the proof hash (deterministic, with retry)
+   *   3. Assign grade + dispatch rewards
+   *
+   * Double-execution is prevented by the pipelineRunning flag.
+   *
+   * @param snapshot - The final RunStateSnapshot.
+   * @param bus      - The event bus for emitting pipeline events.
+   * @param nowMs    - The current timestamp in milliseconds.
+   * @returns CompleteRunResult with full pipeline details.
+   */
+  public completeRun(
+    snapshot: RunStateSnapshot,
+    bus: EventBus<EngineEventMap & Record<string, unknown>>,
+    nowMs: number,
+  ): CompleteRunResult {
+    // ── Double-execution guard ──────────────────────────────────────
+    if (this.pipelineRunning) {
+      // Return cached result if available, otherwise construct a minimal one
+      if (this.lastCompleteRunResult) {
+        return this.lastCompleteRunResult;
+      }
+      // Pipeline is running but no cached result — should not happen,
+      // but construct a safe error result
+      return this.buildPipelineErrorResult(
+        snapshot,
+        'PIPELINE_ALREADY_RUNNING',
+        nowMs,
+      );
+    }
+
+    this.pipelineRunning = true;
+    const pipelineStartMs = nowMs;
+    const pipelineSteps: PipelineStepResult[] = [];
+    let tampered = false;
+
+    try {
+      // ── Edge case: empty tick stream → UNVERIFIED ───────────────
+      const hasTickStream = snapshot.sovereignty.tickChecksums.length > 0;
+      if (!hasTickStream) {
+        // Empty tick stream — mark as unverified but continue pipeline
+        snapshot = {
+          ...snapshot,
+          sovereignty: {
+            ...snapshot.sovereignty,
+            integrityStatus: 'UNVERIFIED',
+            auditFlags: this.mergeAuditFlags(
+              snapshot.sovereignty.auditFlags,
+              ['EMPTY_TICK_STREAM'],
+            ),
+          },
+        };
+      }
+
+      // ── Edge case: 0 ticks survived → F grade ──────────────────
+      const ticksSurvived = this.accumulator?.ticksSurvived ?? snapshot.tick;
+      const isZeroTickRun = ticksSurvived === 0;
+
+      // ══════════════════════════════════════════════════════════════
+      // STEP 1: INTEGRITY CHECK
+      // ══════════════════════════════════════════════════════════════
+      const step1Start = nowMs;
+      let integrityCheckPassed = false;
+      let integrityStatus: IntegrityStatus = 'PENDING';
+
+      try {
+        const integrityResult = this.integrity.verify(snapshot);
+        integrityCheckPassed = integrityResult.ok;
+        integrityStatus = integrityResult.ok ? 'VERIFIED' : 'QUARANTINED';
+
+        // TAMPERED detection: integrity check fails but we continue
+        if (!integrityResult.ok) {
+          tampered = true;
+          integrityStatus = 'QUARANTINED';
+
+          // Emit PROOF_VERIFICATION_FAILED for step 1
+          bus.emit('sovereignty.pipeline_step_failed', {
+            runId: snapshot.runId,
+            stepNumber: 1,
+            stepName: 'INTEGRITY_CHECK',
+            reason: integrityResult.reason ?? 'unknown integrity failure',
+          });
+        }
+
+        // Record audit entry for the integrity check
+        this.appendAuditEntry(
+          snapshot.tick,
+          'PRE_CHECK',
+          integrityStatus,
+          integrityResult.anomalyScore,
+          integrityResult.reason
+            ? [`pipeline_step1: ${integrityResult.reason}`]
+            : ['pipeline_step1: integrity verified'],
+          nowMs,
+        );
+
+        pipelineSteps.push({
+          stepNumber: 1,
+          stepName: 'INTEGRITY_CHECK',
+          success: integrityCheckPassed,
+          durationMs: Date.now() - step1Start,
+          detail: integrityCheckPassed
+            ? 'Replay integrity verified successfully'
+            : `Integrity check failed: ${integrityResult.reason ?? 'unknown'}`,
+          warnings: tampered ? ['RUN_TAMPERED_DETECTED'] : [],
+        });
+      } catch (step1Err) {
+        const errMsg = step1Err instanceof Error
+          ? step1Err.message
+          : 'unknown step 1 error';
+
+        tampered = true;
+        integrityStatus = 'QUARANTINED';
+
+        pipelineSteps.push({
+          stepNumber: 1,
+          stepName: 'INTEGRITY_CHECK',
+          success: false,
+          durationMs: Date.now() - step1Start,
+          detail: `Integrity check threw: ${errMsg}`,
+          warnings: ['STEP_1_EXCEPTION', 'RUN_TAMPERED_DETECTED'],
+        });
+
+        bus.emit('sovereignty.pipeline_step_failed', {
+          runId: snapshot.runId,
+          stepNumber: 1,
+          stepName: 'INTEGRITY_CHECK',
+          reason: errMsg,
+        });
+      }
+
+      // Update snapshot with integrity status
+      snapshot = {
+        ...snapshot,
+        sovereignty: {
+          ...snapshot.sovereignty,
+          integrityStatus,
+        },
+      };
+
+      // ══════════════════════════════════════════════════════════════
+      // STEP 2: PROOF HASH GENERATION
+      // ══════════════════════════════════════════════════════════════
+      const step2Start = Date.now();
+      let proofGenerated = false;
+      let proofHash = '';
+
+      try {
+        proofHash = this.generateProofWithRetry(snapshot, nowMs);
+        proofGenerated = proofHash.length === 64;
+
+        if (!proofGenerated) {
+          bus.emit('sovereignty.pipeline_step_failed', {
+            runId: snapshot.runId,
+            stepNumber: 2,
+            stepName: 'PROOF_HASH_GENERATION',
+            reason: `proof hash has invalid length: ${proofHash.length}`,
+          });
+        }
+
+        // Compute tick stream checksum for the run signature
+        const tickStreamChecksum = this.proof.computeTickStreamChecksum(snapshot);
+
+        this.appendAuditEntry(
+          snapshot.tick,
+          'PROOF_VERIFY',
+          proofGenerated ? 'VERIFIED' : 'UNVERIFIED',
+          proofGenerated ? 0 : 0.4,
+          proofGenerated
+            ? [`pipeline_step2: proof hash generated ${proofHash.slice(0, 16)}`]
+            : [`pipeline_step2: proof generation yielded invalid hash`],
+          nowMs,
+        );
+
+        pipelineSteps.push({
+          stepNumber: 2,
+          stepName: 'PROOF_HASH_GENERATION',
+          success: proofGenerated,
+          durationMs: Date.now() - step2Start,
+          detail: proofGenerated
+            ? `Proof hash generated: ${proofHash.slice(0, 16)}...`
+            : 'Proof hash generation produced invalid result',
+          warnings: this.proofLifecycle.retryCount > 0
+            ? [`PROOF_RETRIES:${this.proofLifecycle.retryCount}`]
+            : [],
+        });
+      } catch (step2Err) {
+        const errMsg = step2Err instanceof Error
+          ? step2Err.message
+          : 'unknown step 2 error';
+
+        pipelineSteps.push({
+          stepNumber: 2,
+          stepName: 'PROOF_HASH_GENERATION',
+          success: false,
+          durationMs: Date.now() - step2Start,
+          detail: `Proof generation threw: ${errMsg}`,
+          warnings: ['STEP_2_EXCEPTION'],
+        });
+
+        bus.emit('sovereignty.pipeline_step_failed', {
+          runId: snapshot.runId,
+          stepNumber: 2,
+          stepName: 'PROOF_HASH_GENERATION',
+          reason: errMsg,
+        });
+
+        // Fallback: use tick stream checksum
+        proofHash = this.proof.computeTickStreamChecksum(snapshot);
+      }
+
+      // Update snapshot with proof hash
+      snapshot = {
+        ...snapshot,
+        sovereignty: {
+          ...snapshot.sovereignty,
+          proofHash,
+        },
+      };
+
+      // ══════════════════════════════════════════════════════════════
+      // STEP 3: GRADE ASSIGNMENT + REWARD DISPATCH
+      // ══════════════════════════════════════════════════════════════
+      const step3Start = Date.now();
+      let gradeAssigned = false;
+
+      // Determine the outcome for scoring
+      const runOutcome: RunOutcome = snapshot.outcome ?? 'ABANDONED';
+
+      // Compute sovereignty score using full-precision formula
+      const sovereigntyScore = isZeroTickRun
+        ? 0.0  // 0 ticks survived → F grade pathway
+        : this.computeSovereigntyScore(runOutcome);
+
+      // Assign grade from score
+      const verifiedGrade: VerifiedGrade = isZeroTickRun
+        ? 'F'
+        : this.mapScoreToGrade(sovereigntyScore);
+
+      // Also run the grader for its badges and breakdown
+      let graderResult: {
+        score: number;
+        grade: string;
+        badges: string[];
+        breakdown: {
+          avgShieldPct: number;
+          decisionSpeedScore: number;
+          blockedRatio: number;
+          brokenRatio: number;
+          pressureSurvival: number;
+          baseScore: number;
+          outcomeMultiplier: number;
+        };
+      };
+
+      try {
+        graderResult = this.grader.score(snapshot);
+        gradeAssigned = true;
+      } catch (graderErr) {
+        // Fallback grader result
+        graderResult = {
+          score: sovereigntyScore,
+          grade: verifiedGrade,
+          badges: [],
+          breakdown: {
+            avgShieldPct: 0,
+            decisionSpeedScore: 0,
+            blockedRatio: 0,
+            brokenRatio: 0,
+            pressureSurvival: 0,
+            baseScore: 0,
+            outcomeMultiplier: 0,
+          },
+        };
+        gradeAssigned = true; // We assigned via fallback
+      }
+
+      // ── Dispatch grade reward ─────────────────────────────────────
+      const gradeReward = this.dispatchGradeReward(verifiedGrade);
+
+      // ── Compute final badges ──────────────────────────────────────
+      const finalBadges = this.computeFinalBadges(
+        snapshot,
+        graderResult,
+        integrityStatus,
+        proofHash,
+      );
+
+      // ── Build the CORD breakdown for the identity ─────────────────
+      const derivedComponents = this.getAccumulatorDerivedComponents();
+
+      // ── Build the tick stream checksum ─────────────────────────────
+      const tickStreamChecksum = this.proof.computeTickStreamChecksum(snapshot);
+
+      // ── Build run signature (spec Section 3) ──────────────────────
+      const runSignature = this.buildRunSignature(
+        snapshot,
+        proofHash,
+        tickStreamChecksum,
+        nowMs,
+      );
+
+      // ── Build run identity (spec Section 3) ───────────────────────
+      const runIdentity = this.buildRunIdentity(
+        runSignature,
+        sovereigntyScore,
+        verifiedGrade,
+        integrityStatus,
+        runOutcome,
+        finalBadges,
+        derivedComponents,
+      );
+
+      this.lastRunIdentity = runIdentity;
+
+      // Update final snapshot
+      const finalSnapshot: RunStateSnapshot = {
+        ...snapshot,
+        sovereignty: {
+          ...snapshot.sovereignty,
+          integrityStatus,
+          proofHash,
+          sovereigntyScore,
+          verifiedGrade,
+          proofBadges: finalBadges,
+          cordScore: sovereigntyScore,
+          lastVerifiedTick: snapshot.tick,
+        },
+      };
+
+      pipelineSteps.push({
+        stepNumber: 3,
+        stepName: 'GRADE_ASSIGNMENT_AND_REWARD',
+        success: gradeAssigned,
+        durationMs: Date.now() - step3Start,
+        detail: `Grade ${verifiedGrade} assigned (score: ${sovereigntyScore.toFixed(4)}), ` +
+          `${gradeReward.xp} XP dispatched, ` +
+          `${gradeReward.badgeTier} badge tier`,
+        warnings: isZeroTickRun ? ['ZERO_TICK_RUN'] : [],
+      });
+
+      // ── Emit pipeline completion events ────────────────────────────
+      bus.emit('sovereignty.pipeline_complete', {
+        runId: snapshot.runId,
+        score: sovereigntyScore,
+        grade: verifiedGrade,
+        proofHash,
+        outcome: runOutcome,
+        tampered,
+        xpAwarded: gradeReward.xp,
+        badgeTier: gradeReward.badgeTier,
+      });
+
+      if (tampered) {
+        bus.emit('sovereignty.run_tampered', {
+          runId: snapshot.runId,
+          integrityStatus,
+          grade: verifiedGrade,
+          score: sovereigntyScore,
+        });
+      }
+
+      // ── Build and cache the result ─────────────────────────────────
+      const totalPipelineDurationMs = Date.now() - pipelineStartMs;
+
+      const result: CompleteRunResult = {
+        runIdentity,
+        gradeReward,
+        pipelineSteps,
+        totalPipelineDurationMs,
+        integrityCheckPassed,
+        proofGenerated,
+        gradeAssigned,
+        tampered,
+        finalSnapshot,
+      };
+
+      this.lastCompleteRunResult = result;
+      return result;
+    } finally {
+      this.pipelineRunning = false;
+    }
+  }
+
+  /**
+   * getLastCompleteRunResult — Returns the cached result of the last
+   * completeRun() pipeline execution. Null if no pipeline has been run.
+   */
+  public getLastCompleteRunResult(): CompleteRunResult | null {
+    return this.lastCompleteRunResult;
+  }
+
+  /**
+   * isPipelineRunning — Returns true if the 3-step pipeline is currently
+   * executing. Used by callers to avoid double-invocation.
+   */
+  public isPipelineRunning(): boolean {
+    return this.pipelineRunning;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // S14 — RunSignature & RunIdentity Construction (spec Section 3)
+  // ═══════════════════════════════════════════════════════════════════════
+
+  /**
+   * buildRunSignature — Construct the cryptographic run signature.
+   *
+   * The signature binds the proof hash to the player identity and
+   * run parameters. It serves as the base for the RunIdentity object
+   * and is used for verification in the replay system.
+   *
+   * @param snapshot           - The finalized RunStateSnapshot.
+   * @param proofHash          - The generated proof hash.
+   * @param tickStreamChecksum - The tick stream checksum.
+   * @param signedAtMs         - The timestamp of signature creation.
+   * @returns The RunSignature object.
+   */
+  public buildRunSignature(
+    snapshot: RunStateSnapshot,
+    proofHash: string,
+    tickStreamChecksum: string,
+    signedAtMs: number,
+  ): RunSignature {
+    return {
+      runId: snapshot.runId,
+      userId: snapshot.userId,
+      mode: snapshot.mode,
+      seed: snapshot.seed,
+      proofHash,
+      tickStreamChecksum,
+      signedAtMs,
+      tickCount: snapshot.tick,
+    };
+  }
+
+  /**
+   * buildRunIdentity — Construct the complete run identity object.
+   *
+   * The RunIdentity combines the signature with scoring results,
+   * grade, integrity status, and a CORD breakdown. It is the
+   * canonical representation of a finalized run for storage and
+   * verification.
+   *
+   * The identityChecksum is computed over all identity fields to
+   * detect any post-finalization tampering.
+   *
+   * @param signature         - The RunSignature for this run.
+   * @param sovereigntyScore  - The computed sovereignty score.
+   * @param verifiedGrade     - The assigned grade.
+   * @param integrityStatus   - The integrity status after verification.
+   * @param outcome           - The run outcome.
+   * @param badges            - The earned badges.
+   * @param derivedComponents - The CORD component breakdown.
+   * @returns The RunIdentity object.
+   */
+  public buildRunIdentity(
+    signature: RunSignature,
+    sovereigntyScore: number,
+    verifiedGrade: VerifiedGrade,
+    integrityStatus: IntegrityStatus,
+    outcome: RunOutcome,
+    badges: readonly string[],
+    derivedComponents: {
+      ticksSurvivedPct: number;
+      shieldsMaintainedPct: number;
+      haterBlockRate: number;
+      decisionSpeedScore: number;
+      cascadeBreakRate: number;
+    },
+  ): RunIdentity {
+    // Compute the weighted contributions for the breakdown
+    const decisionSpeedScore   = derivedComponents.decisionSpeedScore;
+    const shieldsMaintainedPct = derivedComponents.shieldsMaintainedPct;
+    const haterBlockRate       = derivedComponents.haterBlockRate;
+    const cascadeBreakRate     = derivedComponents.cascadeBreakRate;
+    const pressureSurvivedScore = derivedComponents.ticksSurvivedPct;
+
+    const baseScore =
+      decisionSpeedScore   * CORD_WEIGHTS.decision_speed_score +
+      shieldsMaintainedPct * CORD_WEIGHTS.shields_maintained_pct +
+      haterBlockRate       * CORD_WEIGHTS.hater_sabotages_blocked +
+      cascadeBreakRate     * CORD_WEIGHTS.cascade_chains_broken +
+      pressureSurvivedScore * CORD_WEIGHTS.pressure_survived_score;
+
+    // Compute outcome multiplier
+    const outcomeMultiplier =
+      OUTCOME_MULTIPLIER[outcome as keyof typeof OUTCOME_MULTIPLIER] ?? 0;
+
+    const cordBreakdown = {
+      decisionSpeedScore,
+      shieldsMaintainedPct,
+      haterBlockRate,
+      cascadeBreakRate,
+      pressureSurvivedScore,
+      baseScore,
+      outcomeMultiplier,
+      finalScore: sovereigntyScore,
+    };
+
+    // Compute identity checksum over all fields for tamper detection
+    const identityChecksum = checksumSnapshot({
+      signature,
+      sovereigntyScore,
+      verifiedGrade,
+      integrityStatus,
+      outcome,
+      badges: [...badges],
+      cordBreakdown,
+    });
+
+    return {
+      signature,
+      sovereigntyScore,
+      verifiedGrade,
+      integrityStatus,
+      outcome,
+      badges,
+      cordBreakdown,
+      identityChecksum,
+    };
+  }
+
+  /**
+   * getLastRunIdentity — Returns the cached run identity from the last
+   * completed pipeline. Null if no pipeline has been completed.
+   */
+  public getLastRunIdentity(): RunIdentity | null {
+    return this.lastRunIdentity;
+  }
+
+  /**
+   * verifyRunIdentity — Verify that a run identity has not been tampered
+   * with by recomputing the identity checksum and comparing.
+   *
+   * @param identity - The RunIdentity to verify.
+   * @returns True if the identity checksum is valid.
+   */
+  public verifyRunIdentity(identity: RunIdentity): boolean {
+    const expectedChecksum = checksumSnapshot({
+      signature: identity.signature,
+      sovereigntyScore: identity.sovereigntyScore,
+      verifiedGrade: identity.verifiedGrade,
+      integrityStatus: identity.integrityStatus,
+      outcome: identity.outcome,
+      badges: [...identity.badges],
+      cordBreakdown: identity.cordBreakdown,
+    });
+
+    return expectedChecksum === identity.identityChecksum;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // S15 — GradeReward Dispatch (spec Section 7)
+  // ═══════════════════════════════════════════════════════════════════════
+
+  /**
+   * dispatchGradeReward — Look up and return the grade reward for the
+   * given verified grade.
+   *
+   * Reward table (spec Section 7):
+   *   A: 500 XP, gold badge
+   *   B: 300 XP, silver badge
+   *   C: 150 XP, bronze badge
+   *   D: 50 XP, iron badge
+   *   F: 10 XP, iron badge
+   *
+   * @param grade - The verified grade.
+   * @returns The GradeReward object.
+   */
+  public dispatchGradeReward(grade: VerifiedGrade): GradeReward {
+    const reward = GRADE_REWARD_TABLE[grade];
+    if (reward) return reward;
+
+    // Fallback for unknown grades (should not happen with typed grade)
+    return GRADE_REWARD_TABLE.F;
+  }
+
+  /**
+   * computeGradeRewardWithContext — Returns the grade reward along with
+   * additional context about how the reward was determined.
+   *
+   * This is useful for UX display and analytics, providing the player
+   * with a clear explanation of their reward.
+   *
+   * @param grade           - The verified grade.
+   * @param sovereigntyScore - The sovereignty score that produced this grade.
+   * @param outcome         - The run outcome.
+   * @returns The reward with context.
+   */
+  public computeGradeRewardWithContext(
+    grade: VerifiedGrade,
+    sovereigntyScore: number,
+    outcome: RunOutcome,
+  ): {
+    reward: GradeReward;
+    gradeThreshold: number;
+    nextGradeThreshold: number | null;
+    scoreGap: number;
+    improvementNeeded: number;
+    outcomeBonus: string;
+    xpBreakdown: {
+      baseXp: number;
+      outcomeLabel: string;
+    };
+  } {
+    const reward = this.dispatchGradeReward(grade);
+
+    // Find the current grade threshold and the next one up
+    let currentThreshold = 0;
+    let nextThreshold: number | null = null;
+
+    for (let i = 0; i < GRADE_THRESHOLDS.length; i++) {
+      const [threshold, g] = GRADE_THRESHOLDS[i];
+      if (g === grade) {
+        currentThreshold = threshold;
+        if (i > 0) {
+          nextThreshold = GRADE_THRESHOLDS[i - 1][0];
+        }
+        break;
+      }
+    }
+
+    const scoreGap = sovereigntyScore - currentThreshold;
+    const improvementNeeded = nextThreshold !== null
+      ? Math.max(0, nextThreshold - sovereigntyScore)
+      : 0;
+
+    // Determine outcome-specific context
+    let outcomeBonus: string;
+    switch (outcome) {
+      case 'FREEDOM':
+        outcomeBonus = `FREEDOM outcome applied ${OUTCOME_MULTIPLIER.FREEDOM}x multiplier`;
+        break;
+      case 'TIMEOUT':
+        outcomeBonus = `TIMEOUT outcome applied ${OUTCOME_MULTIPLIER.TIMEOUT}x multiplier`;
+        break;
+      case 'BANKRUPT':
+        outcomeBonus = `BANKRUPT outcome applied ${OUTCOME_MULTIPLIER.BANKRUPT}x multiplier`;
+        break;
+      case 'ABANDONED':
+        outcomeBonus = `ABANDONED outcome applied ${OUTCOME_MULTIPLIER.ABANDONED}x multiplier`;
+        break;
+      default:
+        outcomeBonus = 'Unknown outcome — no multiplier applied';
+        break;
+    }
+
+    return {
+      reward,
+      gradeThreshold: currentThreshold,
+      nextGradeThreshold: nextThreshold,
+      scoreGap,
+      improvementNeeded,
+      outcomeBonus,
+      xpBreakdown: {
+        baseXp: reward.xp,
+        outcomeLabel: outcome,
+      },
+    };
+  }
+
+  /**
+   * getAllGradeRewards — Returns the complete grade reward table for
+   * display in help screens and documentation.
+   */
+  public getAllGradeRewards(): readonly GradeReward[] {
+    return [
+      GRADE_REWARD_TABLE.A,
+      GRADE_REWARD_TABLE.B,
+      GRADE_REWARD_TABLE.C,
+      GRADE_REWARD_TABLE.D,
+      GRADE_REWARD_TABLE.F,
+    ];
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // S16 — Proof Artifact Support (spec Section 8)
+  // ═══════════════════════════════════════════════════════════════════════
+
+  /**
+   * buildProofCardExportData — Build the complete data structure for
+   * the $0.99 proof card export feature.
+   *
+   * The proof card is a shareable, verifiable artifact that contains
+   * the player's run identity, score breakdown, and a tamper-evident
+   * checksum. It can be rendered as an image for social sharing.
+   *
+   * @param snapshot    - The finalized RunStateSnapshot.
+   * @param displayName - The player's display name.
+   * @returns The ProofCardExportData, or null if proof is not available.
+   */
+  public buildProofCardExportData(
+    snapshot: RunStateSnapshot,
+    displayName: string,
+  ): ProofCardExportData | null {
+    // Must have a sealed proof hash to build the export
+    if (!snapshot.sovereignty.proofHash || snapshot.sovereignty.proofHash.length === 0) {
+      return null;
+    }
+
+    const derivedComponents = this.getAccumulatorDerivedComponents();
+    const verifiedGrade = (snapshot.sovereignty.verifiedGrade ?? 'F') as VerifiedGrade;
+    const gradeReward = this.dispatchGradeReward(verifiedGrade);
+    const tickStreamChecksum = this.proof.computeTickStreamChecksum(snapshot);
+    const exportTimestampMs = Date.now();
+
+    // Build the card data without checksum first
+    const cardData = {
+      runId: snapshot.runId,
+      userId: snapshot.userId,
+      displayName,
+      proofHash: snapshot.sovereignty.proofHash,
+      tickStreamChecksum,
+      grade: verifiedGrade,
+      sovereigntyScore: snapshot.sovereignty.sovereigntyScore,
+      outcome: (snapshot.outcome ?? 'ABANDONED') as RunOutcome,
+      mode: snapshot.mode,
+      badges: snapshot.sovereignty.proofBadges,
+      badgeTier: gradeReward.badgeTier,
+      tickCount: snapshot.tick,
+      durationMs: snapshot.timers.elapsedMs,
+      cordBreakdown: {
+        decisionSpeedScore: derivedComponents.decisionSpeedScore,
+        shieldsMaintainedPct: derivedComponents.shieldsMaintainedPct,
+        haterBlockRate: derivedComponents.haterBlockRate,
+        cascadeBreakRate: derivedComponents.cascadeBreakRate,
+        pressureSurvivedScore: derivedComponents.ticksSurvivedPct,
+      },
+      integrityStatus: snapshot.sovereignty.integrityStatus,
+      exportTimestampMs,
+      version: PROOF_CARD_EXPORT_VERSION,
+    };
+
+    // Compute the card checksum for tamper evidence
+    const cardChecksum = checksumSnapshot(cardData);
+
+    return {
+      ...cardData,
+      cardChecksum,
+    };
+  }
+
+  /**
+   * projectPublicSummary — Strip sensitive fields from a finalized run
+   * and produce a privacy-safe public summary for leaderboards and
+   * social features.
+   *
+   * Sensitive fields removed: userId, seed, raw tick checksums,
+   * audit flags, internal telemetry.
+   *
+   * @param snapshot    - The finalized RunStateSnapshot.
+   * @param displayName - The player's display name.
+   * @returns The PublicRunSummary, or null if proof is not available.
+   */
+  public projectPublicSummary(
+    snapshot: RunStateSnapshot,
+    displayName: string,
+  ): PublicRunSummary | null {
+    if (!snapshot.sovereignty.proofHash || snapshot.sovereignty.proofHash.length === 0) {
+      return null;
+    }
+
+    const verifiedGrade = (snapshot.sovereignty.verifiedGrade ?? 'F') as VerifiedGrade;
+    const gradeReward = this.dispatchGradeReward(verifiedGrade);
+
+    // Build the summary without checksum first
+    const summaryData = {
+      runId: snapshot.runId,
+      displayName,
+      mode: snapshot.mode,
+      outcome: (snapshot.outcome ?? 'ABANDONED') as RunOutcome,
+      grade: verifiedGrade,
+      sovereigntyScore: snapshot.sovereignty.sovereigntyScore,
+      proofHash: snapshot.sovereignty.proofHash,
+      badges: snapshot.sovereignty.proofBadges,
+      badgeTier: gradeReward.badgeTier,
+      tickCount: snapshot.tick,
+      integrityVerified: snapshot.sovereignty.integrityStatus === 'VERIFIED',
+    };
+
+    const summaryChecksum = checksumSnapshot(summaryData);
+
+    return {
+      ...summaryData,
+      summaryChecksum,
+    };
+  }
+
+  /**
+   * assignSovereigntyBadgeTier — Determine the badge tier cosmetic
+   * properties for a given verified grade.
+   *
+   * Maps the grade to a tier (iron/bronze/silver/gold) and returns
+   * the full cosmetic specification including colors, glow, border
+   * style, icon variant, and animation class.
+   *
+   * @param grade - The verified grade.
+   * @returns The SovereigntyBadgeTier cosmetic specification.
+   */
+  public assignSovereigntyBadgeTier(grade: VerifiedGrade): SovereigntyBadgeTier {
+    const gradeReward = this.dispatchGradeReward(grade);
+    const tierKey = gradeReward.badgeTier;
+    const tier = SOVEREIGNTY_BADGE_TIER_MAP[tierKey];
+
+    if (tier) return tier;
+
+    // Fallback to iron tier
+    return SOVEREIGNTY_BADGE_TIER_MAP.iron;
+  }
+
+  /**
+   * getComponentGatingLevels — Returns the component breakdown gating
+   * configuration for free vs Pro tiers.
+   *
+   * Used by the frontend to determine which CORD component details
+   * are visible to free players vs Pro subscribers.
+   *
+   * @param isPro - Whether the player has a Pro subscription.
+   * @returns An array of components with their visibility status.
+   */
+  public getComponentGatingLevels(isPro: boolean): readonly {
+    componentName: string;
+    displayLabel: string;
+    visible: boolean;
+    detailLevel: 'summary' | 'full' | 'hidden';
+  }[] {
+    return COMPONENT_GATING_LEVELS.map((level) => {
+      const visible = isPro ? level.proTier : level.freeTier;
+      const detailLevel = isPro ? 'full' : level.detailLevel;
+
+      return {
+        componentName: level.componentName,
+        displayLabel: level.displayLabel,
+        visible,
+        detailLevel: visible ? detailLevel : 'hidden',
+      };
+    });
+  }
+
+  /**
+   * buildGatedBreakdownForDisplay — Returns a CORD component breakdown
+   * with gating applied based on the player's subscription tier.
+   *
+   * Free players see summary-level data for some components and
+   * hidden (null) values for gated components. Pro players see full
+   * detail for all components.
+   *
+   * @param isPro - Whether the player has a Pro subscription.
+   * @returns The gated breakdown with nulls for hidden components.
+   */
+  public buildGatedBreakdownForDisplay(isPro: boolean): {
+    decisionSpeedScore: number | null;
+    shieldsMaintainedPct: number | null;
+    haterBlockRate: number | null;
+    cascadeBreakRate: number | null;
+    pressureSurvivedScore: number | null;
+    baseScore: number | null;
+    outcomeMultiplier: number | null;
+    finalScore: number | null;
+    gatingApplied: boolean;
+  } {
+    const components = this.getAccumulatorDerivedComponents();
+    const gating = this.getComponentGatingLevels(isPro);
+
+    // Build a lookup by component name
+    const gatingMap = new Map<string, boolean>();
+    for (const g of gating) {
+      gatingMap.set(g.componentName, g.visible);
+    }
+
+    const decisionSpeedVisible = gatingMap.get('decision_speed_score') ?? false;
+    const shieldsVisible = gatingMap.get('shields_maintained_pct') ?? false;
+    const haterBlockVisible = gatingMap.get('hater_sabotages_blocked') ?? false;
+    const cascadeBreakVisible = gatingMap.get('cascade_chains_broken') ?? false;
+    const pressureSurvivedVisible = gatingMap.get('pressure_survived_score') ?? false;
+
+    // Compute the values with gating
+    const decisionSpeedScore = decisionSpeedVisible ? components.decisionSpeedScore : null;
+    const shieldsMaintainedPct = shieldsVisible ? components.shieldsMaintainedPct : null;
+    const haterBlockRate = haterBlockVisible ? components.haterBlockRate : null;
+    const cascadeBreakRate = cascadeBreakVisible ? components.cascadeBreakRate : null;
+    const pressureSurvivedScore = pressureSurvivedVisible ? components.ticksSurvivedPct : null;
+
+    // Base score and final score are always visible
+    const baseComponents = this.getAccumulatorDerivedComponents();
+    const baseScore =
+      baseComponents.decisionSpeedScore   * CORD_WEIGHTS.decision_speed_score +
+      baseComponents.shieldsMaintainedPct * CORD_WEIGHTS.shields_maintained_pct +
+      baseComponents.haterBlockRate       * CORD_WEIGHTS.hater_sabotages_blocked +
+      baseComponents.cascadeBreakRate     * CORD_WEIGHTS.cascade_chains_broken +
+      baseComponents.ticksSurvivedPct     * CORD_WEIGHTS.pressure_survived_score;
+
+    // Final score uses current accumulator outcome
+    const currentOutcome = this.accumulator?.currentOutcome ?? 'ABANDONED';
+    const outcomeMultiplier =
+      OUTCOME_MULTIPLIER[currentOutcome as keyof typeof OUTCOME_MULTIPLIER] ?? 0;
+    const finalScore = this.clampSov(baseScore * outcomeMultiplier, 0, SOVEREIGNTY_SCORE_CAP);
+
+    return {
+      decisionSpeedScore,
+      shieldsMaintainedPct,
+      haterBlockRate,
+      cascadeBreakRate,
+      pressureSurvivedScore,
+      baseScore: isPro ? baseScore : null,
+      outcomeMultiplier: isPro ? outcomeMultiplier : null,
+      finalScore,
+      gatingApplied: !isPro,
+    };
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // S17 — Edge Case Handling (spec Section 11)
+  // ═══════════════════════════════════════════════════════════════════════
+
+  /**
+   * handleZeroTickRun — Handles the edge case where 0 ticks were survived.
+   *
+   * Per the spec: 0 ticks survived results in an F grade.
+   * The pipeline runs normally — the score will be near zero due to
+   * all components being zero. Grade is forced to F.
+   *
+   * @param snapshot - The finalized snapshot.
+   * @returns The adjusted snapshot with F grade forced.
+   */
+  public handleZeroTickRun(snapshot: RunStateSnapshot): RunStateSnapshot {
+    if (snapshot.tick > 0) return snapshot;
+
+    return {
+      ...snapshot,
+      sovereignty: {
+        ...snapshot.sovereignty,
+        sovereigntyScore: 0,
+        verifiedGrade: 'F',
+        auditFlags: this.mergeAuditFlags(
+          snapshot.sovereignty.auditFlags,
+          ['ZERO_TICK_RUN', 'FORCED_GRADE_F'],
+        ),
+      },
+    };
+  }
+
+  /**
+   * handleAbandonedRun — Handles the ABANDONED outcome edge case.
+   *
+   * Per the spec: ABANDONED runs always score 0.0 because
+   * OUTCOME_MULTIPLIER.ABANDONED is 0.0. The pipeline still runs
+   * to generate a proof and assign grade F.
+   *
+   * @param snapshot - The snapshot with ABANDONED outcome.
+   * @returns The adjusted snapshot with score 0.0.
+   */
+  public handleAbandonedRun(snapshot: RunStateSnapshot): RunStateSnapshot {
+    if (snapshot.outcome !== 'ABANDONED') return snapshot;
+
+    return {
+      ...snapshot,
+      sovereignty: {
+        ...snapshot.sovereignty,
+        sovereigntyScore: 0.0,
+        verifiedGrade: 'F',
+        auditFlags: this.mergeAuditFlags(
+          snapshot.sovereignty.auditFlags,
+          ['ABANDONED_RUN', 'SCORE_ZEROED'],
+        ),
+      },
+    };
+  }
+
+  /**
+   * handleEmptyTickStream — Handles the case where the tick stream
+   * has no checksums (empty tick stream).
+   *
+   * Per the spec: Empty tick stream results in UNVERIFIED integrity
+   * status. The pipeline continues normally.
+   *
+   * @param snapshot - The snapshot with potentially empty tick stream.
+   * @returns The adjusted snapshot with UNVERIFIED integrity if needed.
+   */
+  public handleEmptyTickStream(snapshot: RunStateSnapshot): RunStateSnapshot {
+    if (snapshot.sovereignty.tickChecksums.length > 0) return snapshot;
+
+    return {
+      ...snapshot,
+      sovereignty: {
+        ...snapshot.sovereignty,
+        integrityStatus: 'UNVERIFIED',
+        auditFlags: this.mergeAuditFlags(
+          snapshot.sovereignty.auditFlags,
+          ['EMPTY_TICK_STREAM', 'INTEGRITY_UNVERIFIED'],
+        ),
+      },
+    };
+  }
+
+  /**
+   * handleTamperedRun — Handles a TAMPERED run through the pipeline.
+   *
+   * Per the spec: TAMPERED runs continue through the pipeline — they
+   * are NOT aborted. The run is flagged and the integrity status is
+   * set to QUARANTINED, but score and grade are still computed.
+   *
+   * @param snapshot - The snapshot flagged as tampered.
+   * @returns The adjusted snapshot with QUARANTINED status.
+   */
+  public handleTamperedRun(snapshot: RunStateSnapshot): RunStateSnapshot {
+    return {
+      ...snapshot,
+      sovereignty: {
+        ...snapshot.sovereignty,
+        integrityStatus: 'QUARANTINED',
+        auditFlags: this.mergeAuditFlags(
+          snapshot.sovereignty.auditFlags,
+          ['RUN_TAMPERED', 'PIPELINE_CONTINUED_AFTER_TAMPER'],
+        ),
+      },
+    };
+  }
+
+  /**
+   * handleNegativeNetWorth — Handles the edge case where the player's
+   * net worth is negative at finalization.
+   *
+   * Per the spec: Negative net worth uses the raw value in the proof
+   * hash computation. No special score adjustment is made — the
+   * negative value flows through the CORD formula normally.
+   *
+   * @param snapshot - The snapshot with negative net worth.
+   * @returns The snapshot unchanged (raw negative value preserved).
+   */
+  public handleNegativeNetWorth(snapshot: RunStateSnapshot): RunStateSnapshot {
+    if (snapshot.economy.netWorth >= 0) return snapshot;
+
+    // Negative net worth is valid — preserve the raw value.
+    // Add an audit flag for observability but do not modify the value.
+    return {
+      ...snapshot,
+      sovereignty: {
+        ...snapshot.sovereignty,
+        auditFlags: this.mergeAuditFlags(
+          snapshot.sovereignty.auditFlags,
+          [`NEGATIVE_NET_WORTH:${snapshot.economy.netWorth.toFixed(2)}`],
+        ),
+      },
+    };
+  }
+
+  /**
+   * handleScoreCap — Apply the score cap of 1.5 (spec Section 11).
+   *
+   * If the computed score exceeds 1.5, it is capped at 1.5 and
+   * an audit flag is added for observability.
+   *
+   * @param score - The raw computed sovereignty score.
+   * @returns The capped score (max 1.5).
+   */
+  public handleScoreCap(score: number): {
+    cappedScore: number;
+    wasCapped: boolean;
+    originalScore: number;
+  } {
+    const wasCapped = score > SOVEREIGNTY_SCORE_CAP;
+    const cappedScore = wasCapped ? SOVEREIGNTY_SCORE_CAP : score;
+
+    return {
+      cappedScore,
+      wasCapped,
+      originalScore: score,
+    };
+  }
+
+  /**
+   * validateEdgeCases — Run all edge case checks on a snapshot and
+   * return a summary of which edge cases were detected.
+   *
+   * This is a diagnostic method used for observability and testing.
+   *
+   * @param snapshot - The RunStateSnapshot to validate.
+   * @returns An object summarizing which edge cases were detected.
+   */
+  public validateEdgeCases(snapshot: RunStateSnapshot): {
+    zeroTickRun: boolean;
+    abandonedRun: boolean;
+    emptyTickStream: boolean;
+    negativeNetWorth: boolean;
+    zeroSabotageAttempts: boolean;
+    zeroCascadeChains: boolean;
+    zeroDecisions: boolean;
+    scoreCapped: boolean;
+    detectedEdgeCases: readonly string[];
+  } {
+    const detected: string[] = [];
+
+    const zeroTickRun = snapshot.tick === 0;
+    if (zeroTickRun) detected.push('ZERO_TICK_RUN');
+
+    const abandonedRun = snapshot.outcome === 'ABANDONED';
+    if (abandonedRun) detected.push('ABANDONED_RUN');
+
+    const emptyTickStream = snapshot.sovereignty.tickChecksums.length === 0;
+    if (emptyTickStream) detected.push('EMPTY_TICK_STREAM');
+
+    const negativeNetWorth = snapshot.economy.netWorth < 0;
+    if (negativeNetWorth) detected.push('NEGATIVE_NET_WORTH');
+
+    const blocked = Math.max(0, snapshot.shield.blockedThisRun);
+    const damaged = Math.max(0, snapshot.shield.damagedThisRun);
+    const zeroSabotageAttempts = (blocked + damaged) === 0;
+    if (zeroSabotageAttempts) detected.push('ZERO_SABOTAGE_ATTEMPTS');
+
+    const brokenChains = Math.max(0, snapshot.cascade.brokenChains);
+    const completedChains = Math.max(0, snapshot.cascade.completedChains);
+    const zeroCascadeChains = (brokenChains + completedChains) === 0;
+    if (zeroCascadeChains) detected.push('ZERO_CASCADE_CHAINS');
+
+    const decisions = Array.isArray(snapshot.telemetry.decisions)
+      ? snapshot.telemetry.decisions
+      : [];
+    const zeroDecisions = decisions.length === 0;
+    if (zeroDecisions) detected.push('ZERO_DECISIONS');
+
+    const scoreCapped = snapshot.sovereignty.sovereigntyScore > SOVEREIGNTY_SCORE_CAP;
+    if (scoreCapped) detected.push('SCORE_CAPPED');
+
+    return {
+      zeroTickRun,
+      abandonedRun,
+      emptyTickStream,
+      negativeNetWorth,
+      zeroSabotageAttempts,
+      zeroCascadeChains,
+      zeroDecisions,
+      scoreCapped,
+      detectedEdgeCases: detected,
+    };
+  }
+
+  /**
+   * applyAllEdgeCaseHandlers — Apply all edge case handlers to a
+   * snapshot in sequence and return the fully adjusted snapshot.
+   *
+   * This is the canonical entry point for edge case processing.
+   * Each handler is applied in order, and the result flows through
+   * to the next handler.
+   *
+   * @param snapshot - The RunStateSnapshot to process.
+   * @returns The snapshot with all edge cases handled.
+   */
+  public applyAllEdgeCaseHandlers(snapshot: RunStateSnapshot): RunStateSnapshot {
+    let adjusted = snapshot;
+
+    // 1. Handle zero tick run
+    adjusted = this.handleZeroTickRun(adjusted);
+
+    // 2. Handle abandoned run
+    adjusted = this.handleAbandonedRun(adjusted);
+
+    // 3. Handle empty tick stream
+    adjusted = this.handleEmptyTickStream(adjusted);
+
+    // 4. Handle negative net worth
+    adjusted = this.handleNegativeNetWorth(adjusted);
+
+    // 5. Score cap is handled at computation time, not snapshot level
+    // (applied within computeSovereigntyScore and clampSov)
+
+    return adjusted;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // S18 — Monetization Readiness (spec Section 12)
+  // ═══════════════════════════════════════════════════════════════════════
+  //
+  // Support for:
+  //   - Proof card export ($0.99)
+  //   - Component breakdown gating (free vs Pro)
+  //   - Badge tier cosmetic mapping
+  //
+  // ═══════════════════════════════════════════════════════════════════════
+
+  /**
+   * buildMonetizableProofCard — Build the proof card data specifically
+   * for the $0.99 export feature.
+   *
+   * This method validates all prerequisites, builds the export data,
+   * and returns it along with pricing and availability metadata.
+   *
+   * @param snapshot    - The finalized RunStateSnapshot.
+   * @param displayName - The player's display name.
+   * @returns An object containing the card data and export metadata.
+   */
+  public buildMonetizableProofCard(
+    snapshot: RunStateSnapshot,
+    displayName: string,
+  ): {
+    available: boolean;
+    reason: string;
+    priceUsd: number;
+    cardData: ProofCardExportData | null;
+    badgeTierCosmetic: SovereigntyBadgeTier | null;
+    exportFormat: string;
+    exportVersion: string;
+  } {
+    // Check prerequisites
+    if (!snapshot.sovereignty.proofHash || snapshot.sovereignty.proofHash.length === 0) {
+      return {
+        available: false,
+        reason: 'No proof hash available — complete the run first',
+        priceUsd: 0.99,
+        cardData: null,
+        badgeTierCosmetic: null,
+        exportFormat: 'png',
+        exportVersion: PROOF_CARD_EXPORT_VERSION,
+      };
+    }
+
+    if (snapshot.sovereignty.integrityStatus === 'QUARANTINED') {
+      return {
+        available: false,
+        reason: 'Run is quarantined — proof card export is not available for flagged runs',
+        priceUsd: 0.99,
+        cardData: null,
+        badgeTierCosmetic: null,
+        exportFormat: 'png',
+        exportVersion: PROOF_CARD_EXPORT_VERSION,
+      };
+    }
+
+    // Build the card data
+    const cardData = this.buildProofCardExportData(snapshot, displayName);
+
+    if (!cardData) {
+      return {
+        available: false,
+        reason: 'Failed to build proof card data — internal error',
+        priceUsd: 0.99,
+        cardData: null,
+        badgeTierCosmetic: null,
+        exportFormat: 'png',
+        exportVersion: PROOF_CARD_EXPORT_VERSION,
+      };
+    }
+
+    // Get badge tier cosmetics
+    const verifiedGrade = (snapshot.sovereignty.verifiedGrade ?? 'F') as VerifiedGrade;
+    const badgeTierCosmetic = this.assignSovereigntyBadgeTier(verifiedGrade);
+
+    return {
+      available: true,
+      reason: 'Proof card is ready for export',
+      priceUsd: 0.99,
+      cardData,
+      badgeTierCosmetic,
+      exportFormat: 'png',
+      exportVersion: PROOF_CARD_EXPORT_VERSION,
+    };
+  }
+
+  /**
+   * buildBadgeTierDisplayData — Build display data for all earned badges
+   * with their cosmetic tier properties.
+   *
+   * Returns an array of badge display objects with tier, color, glow,
+   * and animation properties suitable for frontend rendering.
+   *
+   * @param snapshot - The finalized RunStateSnapshot.
+   * @returns Array of badge display objects.
+   */
+  public buildBadgeTierDisplayData(snapshot: RunStateSnapshot): readonly {
+    badgeId: string;
+    tier: 'BRONZE' | 'SILVER' | 'GOLD' | 'DIAMOND';
+    cosmeticTier: SovereigntyBadgeTier;
+    narrativeText: string;
+  }[] {
+    const badges = snapshot.sovereignty.proofBadges;
+    const narratives = this.generateBadgeNarrative(badges);
+    const results: Array<{
+      badgeId: string;
+      tier: 'BRONZE' | 'SILVER' | 'GOLD' | 'DIAMOND';
+      cosmeticTier: SovereigntyBadgeTier;
+      narrativeText: string;
+    }> = [];
+
+    for (let i = 0; i < badges.length; i++) {
+      const badgeId = badges[i];
+      const badgeTier = BADGE_TIER_MAP[badgeId] ?? 'BRONZE';
+
+      // Map the gameplay badge tier to a sovereignty cosmetic tier
+      let cosmeticKey: string;
+      switch (badgeTier) {
+        case 'DIAMOND':
+          cosmeticKey = 'gold'; // Diamond badges get gold cosmetics
+          break;
+        case 'GOLD':
+          cosmeticKey = 'gold';
+          break;
+        case 'SILVER':
+          cosmeticKey = 'silver';
+          break;
+        case 'BRONZE':
+          cosmeticKey = 'bronze';
+          break;
+        default:
+          cosmeticKey = 'iron';
+          break;
+      }
+
+      const cosmeticTier = SOVEREIGNTY_BADGE_TIER_MAP[cosmeticKey] ?? SOVEREIGNTY_BADGE_TIER_MAP.iron;
+      const narrativeText = narratives[i] ?? '';
+
+      results.push({
+        badgeId,
+        tier: badgeTier,
+        cosmeticTier,
+        narrativeText,
+      });
+    }
+
+    return results;
+  }
+
+  /**
+   * computeProSubscriptionValue — Compute the estimated value of a
+   * Pro subscription for this player based on their run data.
+   *
+   * Used by the monetization system to personalize upgrade prompts.
+   * Returns a relevance score (0-1) indicating how much the player
+   * would benefit from Pro component breakdown visibility.
+   *
+   * @param snapshot - The current RunStateSnapshot.
+   * @returns A relevance score and breakdown of gated value.
+   */
+  public computeProSubscriptionValue(snapshot: RunStateSnapshot): {
+    relevanceScore: number;
+    hiddenComponentCount: number;
+    totalComponentCount: number;
+    gatedInsightPotential: string;
+    suggestedUpgradeMessage: string;
+  } {
+    const freeLevels = this.getComponentGatingLevels(false);
+    const hiddenCount = freeLevels.filter((l) => !l.visible).length;
+    const totalCount = freeLevels.length;
+
+    // Relevance score increases with:
+    // 1. Number of hidden components (more hidden = more value)
+    // 2. Player engagement (more ticks = more invested)
+    // 3. Score proximity to grade boundaries (near-miss players benefit most)
+    const hiddenRatio = totalCount > 0 ? hiddenCount / totalCount : 0;
+    const engagementFactor = this.clampSov(snapshot.tick / 100, 0, 1);
+
+    // Check if player is near a grade boundary
+    const currentScore = snapshot.sovereignty.sovereigntyScore;
+    let nearBoundary = false;
+    for (const [threshold] of GRADE_THRESHOLDS) {
+      if (Math.abs(currentScore - threshold) < 0.05) {
+        nearBoundary = true;
+        break;
+      }
+    }
+    const boundaryFactor = nearBoundary ? 0.3 : 0;
+
+    const relevanceScore = this.clampSov(
+      hiddenRatio * 0.4 + engagementFactor * 0.3 + boundaryFactor,
+      0,
+      1,
+    );
+
+    // Build the insight description
+    let gatedInsightPotential: string;
+    if (hiddenCount >= 3) {
+      gatedInsightPotential = 'High — multiple CORD components are hidden from your breakdown';
+    } else if (hiddenCount >= 1) {
+      gatedInsightPotential = 'Medium — some CORD components are hidden from your breakdown';
+    } else {
+      gatedInsightPotential = 'Low — all components are already visible';
+    }
+
+    // Build the upgrade message
+    let suggestedUpgradeMessage: string;
+    if (nearBoundary) {
+      suggestedUpgradeMessage =
+        'You are close to a grade boundary. Pro breakdown details could help you identify the exact area to improve.';
+    } else if (hiddenCount >= 2) {
+      suggestedUpgradeMessage =
+        `${hiddenCount} CORD components are hidden. Unlock Pro to see your full sovereignty breakdown.`;
+    } else {
+      suggestedUpgradeMessage =
+        'Upgrade to Pro for full CORD breakdown visibility and detailed component analysis.';
+    }
+
+    return {
+      relevanceScore,
+      hiddenComponentCount: hiddenCount,
+      totalComponentCount: totalCount,
+      gatedInsightPotential,
+      suggestedUpgradeMessage,
+    };
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // S19 — Accumulator-Driven Analytics
+  // ═══════════════════════════════════════════════════════════════════════
+
+  /**
+   * getAccumulatorRunDurationMs — Returns the total run duration in
+   * milliseconds based on the accumulator timestamps.
+   */
+  public getAccumulatorRunDurationMs(): number {
+    if (!this.accumulator) return 0;
+    return Math.max(0, this.accumulator.lastTickMs - this.accumulator.runStartMs);
+  }
+
+  /**
+   * getAccumulatorCordRange — Returns the CORD score range (peak - nadir)
+   * observed during the run. A large range indicates volatile play.
+   */
+  public getAccumulatorCordRange(): {
+    peak: number;
+    nadir: number;
+    range: number;
+    volatilityRating: 'stable' | 'moderate' | 'volatile';
+  } {
+    if (!this.accumulator) {
+      return { peak: 0, nadir: 0, range: 0, volatilityRating: 'stable' };
+    }
+
+    const peak = this.accumulator.peakCordScore;
+    const nadir = this.accumulator.nadirCordScore === Infinity
+      ? 0
+      : this.accumulator.nadirCordScore;
+    const range = Math.max(0, peak - nadir);
+
+    let volatilityRating: 'stable' | 'moderate' | 'volatile';
+    if (range < 0.15) volatilityRating = 'stable';
+    else if (range < 0.4) volatilityRating = 'moderate';
+    else volatilityRating = 'volatile';
+
+    return { peak, nadir, range, volatilityRating };
+  }
+
+  /**
+   * getAccumulatorTickHealth — Returns tick-level health statistics
+   * from the accumulator for observability.
+   */
+  public getAccumulatorTickHealth(): {
+    ticksSurvived: number;
+    seasonTickBudget: number;
+    survivalPct: number;
+    checksumCoverage: number;
+    auditFlagCount: number;
+    abandonedFlag: boolean;
+    lastPhase: RunPhase;
+    lastPressureTier: PressureTier;
+  } {
+    if (!this.accumulator) {
+      return {
+        ticksSurvived: 0,
+        seasonTickBudget: 0,
+        survivalPct: 0,
+        checksumCoverage: 0,
+        auditFlagCount: 0,
+        abandonedFlag: false,
+        lastPhase: 'FOUNDATION',
+        lastPressureTier: 'T1',
+      };
+    }
+
+    const acc = this.accumulator;
+    const survivalPct = acc.seasonTickBudget > 0
+      ? this.clampSov(acc.ticksSurvived / acc.seasonTickBudget, 0, 1)
+      : 0;
+    const checksumCoverage = acc.ticksSurvived > 0
+      ? this.clampSov(acc.tickChecksumChain.length / acc.ticksSurvived, 0, 1)
+      : 0;
+
+    return {
+      ticksSurvived: acc.ticksSurvived,
+      seasonTickBudget: acc.seasonTickBudget,
+      survivalPct,
+      checksumCoverage,
+      auditFlagCount: acc.accumulatedAuditFlags.length,
+      abandonedFlag: acc.abandonedFlag,
+      lastPhase: acc.lastPhase,
+      lastPressureTier: acc.lastPressureTier,
+    };
+  }
+
+  /**
+   * buildAccumulatorSummaryForTelemetry — Builds a compact summary
+   * of the accumulator state suitable for telemetry and logging.
+   *
+   * This method produces a fixed-schema object that can be serialized
+   * and sent to analytics pipelines without exposing sensitive data.
+   */
+  public buildAccumulatorSummaryForTelemetry(): {
+    runId: string;
+    mode: ModeCode;
+    ticksSurvived: number;
+    seasonTickBudget: number;
+    shieldsMaintainedAvg: number;
+    sabotageBlockRate: number;
+    cascadeBreakRate: number;
+    decisionSpeedAvg: number;
+    cordSampleCount: number;
+    peakCord: number;
+    nadirCord: number;
+    abandoned: boolean;
+    phase: RunPhase;
+    pressureTier: PressureTier;
+    durationMs: number;
+  } | null {
+    if (!this.accumulator) return null;
+
+    const acc = this.accumulator;
+    const derived = this.getAccumulatorDerivedComponents();
+
+    return {
+      runId: acc.runId,
+      mode: acc.mode,
+      ticksSurvived: acc.ticksSurvived,
+      seasonTickBudget: acc.seasonTickBudget,
+      shieldsMaintainedAvg: derived.shieldsMaintainedPct,
+      sabotageBlockRate: derived.haterBlockRate,
+      cascadeBreakRate: derived.cascadeBreakRate,
+      decisionSpeedAvg: derived.decisionSpeedScore,
+      cordSampleCount: acc.cordSampleCount,
+      peakCord: acc.peakCordScore,
+      nadirCord: acc.nadirCordScore === Infinity ? 0 : acc.nadirCordScore,
+      abandoned: acc.abandonedFlag,
+      phase: acc.lastPhase,
+      pressureTier: acc.lastPressureTier,
+      durationMs: this.getAccumulatorRunDurationMs(),
+    };
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // S20 — Score Projection & Trajectory Analysis
+  // ═══════════════════════════════════════════════════════════════════════
+
+  /**
+   * projectFinalScore — Project what the final sovereignty score will be
+   * given the current accumulator state and an assumed outcome.
+   *
+   * This is useful for live UX: "If you win now, your score will be..."
+   *
+   * @param assumedOutcome - The outcome to project for.
+   * @returns The projected score and grade.
+   */
+  public projectFinalScore(assumedOutcome: RunOutcome): {
+    projectedScore: number;
+    projectedGrade: VerifiedGrade;
+    confidence: number;
+    projectionBasis: string;
+  } {
+    const projectedScore = this.computeSovereigntyScore(assumedOutcome);
+    const projectedGrade = this.mapScoreToGrade(projectedScore);
+
+    // Confidence is based on how many ticks we have sampled
+    const sampleCount = this.accumulator?.cordSampleCount ?? 0;
+    const confidence = this.clampSov(sampleCount / 20, 0.1, 1.0);
+
+    return {
+      projectedScore,
+      projectedGrade,
+      confidence,
+      projectionBasis: `Based on ${sampleCount} CORD samples with assumed outcome ${assumedOutcome}`,
+    };
+  }
+
+  /**
+   * projectAllOutcomes — Project the final score for all possible outcomes.
+   *
+   * Returns an array of projections, one per outcome, sorted by
+   * projected score descending. Useful for "what if" UX.
+   */
+  public projectAllOutcomes(): readonly {
+    outcome: RunOutcome;
+    projectedScore: number;
+    projectedGrade: VerifiedGrade;
+    multiplier: number;
+  }[] {
+    const outcomes: RunOutcome[] = ['FREEDOM', 'TIMEOUT', 'BANKRUPT', 'ABANDONED'];
+    const projections: Array<{
+      outcome: RunOutcome;
+      projectedScore: number;
+      projectedGrade: VerifiedGrade;
+      multiplier: number;
+    }> = [];
+
+    for (const outcome of outcomes) {
+      const projectedScore = this.computeSovereigntyScore(outcome);
+      const projectedGrade = this.mapScoreToGrade(projectedScore);
+      const multiplier =
+        OUTCOME_MULTIPLIER[outcome as keyof typeof OUTCOME_MULTIPLIER] ?? 0;
+
+      projections.push({
+        outcome,
+        projectedScore,
+        projectedGrade,
+        multiplier,
+      });
+    }
+
+    // Sort by projected score descending
+    projections.sort((a, b) => b.projectedScore - a.projectedScore);
+
+    return projections;
+  }
+
+  /**
+   * computeGradeDistanceMap — For each grade, compute how far the
+   * current score is from that grade's threshold.
+   *
+   * Returns positive values for grades already achieved, negative
+   * values for grades not yet reached.
+   */
+  public computeGradeDistanceMap(currentScore: number): readonly {
+    grade: VerifiedGrade;
+    threshold: number;
+    distance: number;
+    achieved: boolean;
+    direction: 'above' | 'below' | 'at';
+  }[] {
+    const result: Array<{
+      grade: VerifiedGrade;
+      threshold: number;
+      distance: number;
+      achieved: boolean;
+      direction: 'above' | 'below' | 'at';
+    }> = [];
+
+    for (const [threshold, grade] of GRADE_THRESHOLDS) {
+      const distance = currentScore - threshold;
+      const achieved = currentScore >= threshold;
+      let direction: 'above' | 'below' | 'at';
+      if (Math.abs(distance) < 0.001) direction = 'at';
+      else if (distance > 0) direction = 'above';
+      else direction = 'below';
+
+      result.push({ grade, threshold, distance, achieved, direction });
+    }
+
+    return result;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // S21 — Run Integrity Forensics
+  // ═══════════════════════════════════════════════════════════════════════
+
+  /**
+   * buildIntegrityForensicReport — Build a detailed forensic report
+   * of the integrity audit trail for a finalized run.
+   *
+   * This report is intended for internal analytics and admin tools,
+   * not for player-facing display.
+   */
+  public buildIntegrityForensicReport(): {
+    totalAuditEntries: number;
+    entriesByPhase: Record<string, number>;
+    entriesByStatus: Record<string, number>;
+    maxAnomalyScore: number;
+    meanAnomalyScore: number;
+    cumulativeAnomalyScore: number;
+    quarantineEvents: number;
+    proofRetryCount: number;
+    proofLifecycleStage: ProofStage;
+    chainHashCount: number;
+    healthStatus: string;
+    consecutiveFailures: number;
+    consecutiveHealthyTicks: number;
+    forensicFlags: readonly string[];
+  } {
+    const entriesByPhase: Record<string, number> = {};
+    const entriesByStatus: Record<string, number> = {};
+    let maxAnomalyScore = 0;
+    let totalAnomalyScore = 0;
+    let quarantineEvents = 0;
+
+    for (const entry of this.auditTrail) {
+      // Count by phase
+      entriesByPhase[entry.phase] = (entriesByPhase[entry.phase] ?? 0) + 1;
+
+      // Count by status
+      entriesByStatus[entry.status] = (entriesByStatus[entry.status] ?? 0) + 1;
+
+      // Track anomaly scores
+      if (entry.anomalyScore > maxAnomalyScore) {
+        maxAnomalyScore = entry.anomalyScore;
+      }
+      totalAnomalyScore += entry.anomalyScore;
+
+      // Count quarantine events
+      if (entry.status === 'QUARANTINED') {
+        quarantineEvents++;
+      }
+    }
+
+    const meanAnomalyScore = this.auditTrail.length > 0
+      ? totalAnomalyScore / this.auditTrail.length
+      : 0;
+
+    // Build forensic flags
+    const forensicFlags: string[] = [];
+    if (maxAnomalyScore >= ANOMALY_QUARANTINE_THRESHOLD) {
+      forensicFlags.push('MAX_ANOMALY_ABOVE_QUARANTINE_THRESHOLD');
+    }
+    if (quarantineEvents > 0) {
+      forensicFlags.push(`QUARANTINE_EVENTS:${quarantineEvents}`);
+    }
+    if (this.proofLifecycle.retryCount > 0) {
+      forensicFlags.push(`PROOF_RETRIES:${this.proofLifecycle.retryCount}`);
+    }
+    if (this.proofLifecycle.stage === 'FAILED') {
+      forensicFlags.push('PROOF_LIFECYCLE_FAILED');
+    }
+    if (this.consecutiveFailures > 0) {
+      forensicFlags.push(`CONSECUTIVE_FAILURES:${this.consecutiveFailures}`);
+    }
+
+    return {
+      totalAuditEntries: this.auditTrail.length,
+      entriesByPhase,
+      entriesByStatus,
+      maxAnomalyScore,
+      meanAnomalyScore,
+      cumulativeAnomalyScore: this.cumulativeAnomalyScore,
+      quarantineEvents,
+      proofRetryCount: this.proofLifecycle.retryCount,
+      proofLifecycleStage: this.proofLifecycle.stage,
+      chainHashCount: this.proofLifecycle.chainHashes.length,
+      healthStatus: this.healthStatus,
+      consecutiveFailures: this.consecutiveFailures,
+      consecutiveHealthyTicks: this.consecutiveHealthyTicks,
+      forensicFlags,
+    };
+  }
+
+  /**
+   * computeIntegrityConfidenceScore — Compute an overall confidence
+   * score (0-1) for the integrity of the run based on the forensic data.
+   *
+   * A score of 1.0 means perfect integrity — no anomalies, no retries,
+   * verified status throughout. A lower score indicates degraded confidence.
+   */
+  public computeIntegrityConfidenceScore(): number {
+    // Factor 1: Anomaly severity (lower is better)
+    const anomalyFactor = this.clampSov(
+      1 - (this.cumulativeAnomalyScore / ANOMALY_QUARANTINE_THRESHOLD),
+      0,
+      1,
+    );
+
+    // Factor 2: Proof lifecycle success
+    const proofFactor = this.proofLifecycle.stage === 'SEALED' ? 1.0
+      : this.proofLifecycle.stage === 'GENERATED' ? 0.7
+      : this.proofLifecycle.stage === 'PRE_VALIDATED' ? 0.4
+      : 0.1;
+
+    // Factor 3: Health continuity (no failures)
+    const healthFactor = this.consecutiveFailures === 0 ? 1.0
+      : this.clampSov(1 - (this.consecutiveFailures * 0.2), 0, 1);
+
+    // Factor 4: Verification status distribution in audit trail
+    let verifiedCount = 0;
+    for (const entry of this.auditTrail) {
+      if (entry.status === 'VERIFIED') verifiedCount++;
+    }
+    const verifiedFraction = this.auditTrail.length > 0
+      ? verifiedCount / this.auditTrail.length
+      : 0.5;
+
+    // Factor 5: Chain hash completeness
+    const chainCompleteness = this.clampSov(
+      this.proofLifecycle.chainHashes.length / Math.max(1, this.cordHistory.length),
+      0,
+      1,
+    );
+
+    return this.clampSov(
+      anomalyFactor * 0.25 +
+      proofFactor * 0.25 +
+      healthFactor * 0.15 +
+      verifiedFraction * 0.20 +
+      chainCompleteness * 0.15,
+      0,
+      1,
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // S22 — Pipeline Error Handling Utilities
+  // ═══════════════════════════════════════════════════════════════════════
+
+  /**
+   * buildPipelineErrorResult — Construct a CompleteRunResult for cases
+   * where the pipeline cannot run (e.g., already running).
+   *
+   * Returns a minimal error result with empty pipeline steps and
+   * a fallback identity.
+   */
+  private buildPipelineErrorResult(
+    snapshot: RunStateSnapshot,
+    errorReason: string,
+    nowMs: number,
+  ): CompleteRunResult {
+    const tickStreamChecksum = this.proof.computeTickStreamChecksum(snapshot);
+    const signature = this.buildRunSignature(
+      snapshot,
+      snapshot.sovereignty.proofHash ?? '',
+      tickStreamChecksum,
+      nowMs,
+    );
+
+    const derivedComponents = this.getAccumulatorDerivedComponents();
+
+    const identity = this.buildRunIdentity(
+      signature,
+      0,
+      'F',
+      'UNVERIFIED',
+      (snapshot.outcome ?? 'ABANDONED') as RunOutcome,
+      [],
+      derivedComponents,
+    );
+
+    return {
+      runIdentity: identity,
+      gradeReward: GRADE_REWARD_TABLE.F,
+      pipelineSteps: [{
+        stepNumber: 1,
+        stepName: 'PIPELINE_ERROR',
+        success: false,
+        durationMs: 0,
+        detail: errorReason,
+        warnings: [errorReason],
+      }],
+      totalPipelineDurationMs: 0,
+      integrityCheckPassed: false,
+      proofGenerated: false,
+      gradeAssigned: false,
+      tampered: false,
+      finalSnapshot: snapshot,
+    };
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // S23 — Sovereignty Score Validation & Diagnostics
+  // ═══════════════════════════════════════════════════════════════════════
+
+  /**
+   * validateSovereigntyScoreIntegrity — Cross-validate the sovereignty
+   * score by computing it independently from the accumulator and
+   * comparing against the snapshot's stored value.
+   *
+   * Returns whether the scores match within a tolerance, and if not,
+   * what the discrepancy is.
+   */
+  public validateSovereigntyScoreIntegrity(
+    snapshot: RunStateSnapshot,
+  ): {
+    valid: boolean;
+    storedScore: number;
+    recomputedScore: number;
+    discrepancy: number;
+    tolerance: number;
+    diagnosticNotes: readonly string[];
+  } {
+    const storedScore = snapshot.sovereignty.sovereigntyScore;
+    const outcome: RunOutcome = snapshot.outcome ?? 'ABANDONED';
+    const recomputedScore = this.computeSovereigntyScore(outcome);
+    const tolerance = 0.0001;
+    const discrepancy = Math.abs(storedScore - recomputedScore);
+    const valid = discrepancy <= tolerance;
+
+    const diagnosticNotes: string[] = [];
+
+    if (!valid) {
+      diagnosticNotes.push(
+        `Score mismatch: stored=${storedScore.toFixed(6)}, recomputed=${recomputedScore.toFixed(6)}, delta=${discrepancy.toFixed(6)}`,
+      );
+
+      // Check if the issue is due to outcome multiplier
+      const outcomeKey = outcome as keyof typeof OUTCOME_MULTIPLIER;
+      const multiplier = OUTCOME_MULTIPLIER[outcomeKey] ?? 0;
+      diagnosticNotes.push(`Outcome multiplier for ${outcome}: ${multiplier}`);
+
+      // Check if accumulator is initialized
+      if (!this.accumulator) {
+        diagnosticNotes.push('Accumulator is null — scores may diverge without accumulator data');
+      }
+    } else {
+      diagnosticNotes.push('Score integrity verified: stored and recomputed values match');
+    }
+
+    return {
+      valid,
+      storedScore,
+      recomputedScore,
+      discrepancy,
+      tolerance,
+      diagnosticNotes,
+    };
+  }
+
+  /**
+   * computeCORDWeightValidation — Validate that CORD_WEIGHTS sum to 1.0
+   * (or very close to it) and that OUTCOME_MULTIPLIER contains all
+   * expected keys.
+   *
+   * This is a diagnostic method for runtime self-verification.
+   */
+  public computeCORDWeightValidation(): {
+    weightsSum: number;
+    weightsSumValid: boolean;
+    individualWeights: Record<string, number>;
+    outcomeMultipliers: Record<string, number>;
+    allOutcomesPresent: boolean;
+    missingOutcomes: readonly string[];
+  } {
+    // Sum all CORD weights
+    const weightsSum =
+      CORD_WEIGHTS.decision_speed_score +
+      CORD_WEIGHTS.shields_maintained_pct +
+      CORD_WEIGHTS.hater_sabotages_blocked +
+      CORD_WEIGHTS.cascade_chains_broken +
+      CORD_WEIGHTS.pressure_survived_score;
+
+    const weightsSumValid = Math.abs(weightsSum - 1.0) < 0.01;
+
+    // Check all outcome multipliers are present
+    const expectedOutcomes = ['FREEDOM', 'TIMEOUT', 'BANKRUPT', 'ABANDONED'];
+    const missingOutcomes: string[] = [];
+
+    for (const outcome of expectedOutcomes) {
+      if (!(outcome in OUTCOME_MULTIPLIER)) {
+        missingOutcomes.push(outcome);
+      }
+    }
+
+    return {
+      weightsSum,
+      weightsSumValid,
+      individualWeights: {
+        decision_speed_score: CORD_WEIGHTS.decision_speed_score,
+        shields_maintained_pct: CORD_WEIGHTS.shields_maintained_pct,
+        hater_sabotages_blocked: CORD_WEIGHTS.hater_sabotages_blocked,
+        cascade_chains_broken: CORD_WEIGHTS.cascade_chains_broken,
+        pressure_survived_score: CORD_WEIGHTS.pressure_survived_score,
+      },
+      outcomeMultipliers: {
+        FREEDOM: OUTCOME_MULTIPLIER.FREEDOM,
+        TIMEOUT: OUTCOME_MULTIPLIER.TIMEOUT,
+        BANKRUPT: OUTCOME_MULTIPLIER.BANKRUPT,
+        ABANDONED: OUTCOME_MULTIPLIER.ABANDONED,
+      },
+      allOutcomesPresent: missingOutcomes.length === 0,
+      missingOutcomes,
+    };
+  }
+
+  /**
+   * buildFullRunDiagnostic — Build a comprehensive diagnostic report
+   * covering all sovereignty engine subsystems.
+   *
+   * This is the canonical diagnostic entry point for debugging and
+   * admin support tools. It aggregates data from all other diagnostic
+   * methods into a single object.
+   */
+  public buildFullRunDiagnostic(snapshot: RunStateSnapshot): {
+    engineHealth: EngineHealth;
+    accumulatorHealth: ReturnType<SovereigntyEngine['getAccumulatorTickHealth']>;
+    cordRange: ReturnType<SovereigntyEngine['getAccumulatorCordRange']>;
+    edgeCases: ReturnType<SovereigntyEngine['validateEdgeCases']>;
+    integrityForensics: ReturnType<SovereigntyEngine['buildIntegrityForensicReport']>;
+    integrityConfidence: number;
+    cordWeightValidation: ReturnType<SovereigntyEngine['computeCORDWeightValidation']>;
+    scoreValidation: ReturnType<SovereigntyEngine['validateSovereigntyScoreIntegrity']>;
+    pipelineRunning: boolean;
+    proofLifecycleStage: ProofStage;
+    cordHistoryLength: number;
+    auditTrailLength: number;
+    ghostGapHistoryLength: number;
+    badgeCacheSize: number;
+  } {
+    return {
+      engineHealth: this.getHealth(),
+      accumulatorHealth: this.getAccumulatorTickHealth(),
+      cordRange: this.getAccumulatorCordRange(),
+      edgeCases: this.validateEdgeCases(snapshot),
+      integrityForensics: this.buildIntegrityForensicReport(),
+      integrityConfidence: this.computeIntegrityConfidenceScore(),
+      cordWeightValidation: this.computeCORDWeightValidation(),
+      scoreValidation: this.validateSovereigntyScoreIntegrity(snapshot),
+      pipelineRunning: this.pipelineRunning,
+      proofLifecycleStage: this.proofLifecycle.stage,
+      cordHistoryLength: this.cordHistory.length,
+      auditTrailLength: this.auditTrail.length,
+      ghostGapHistoryLength: this.ghostGapHistory.length,
+      badgeCacheSize: this.badgeProgressCache.size,
+    };
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // S24 — Player-Facing Score Explanation
+  // ═══════════════════════════════════════════════════════════════════════
+
+  /**
+   * buildPlayerScoreExplanation — Build a human-readable explanation
+   * of how the sovereignty score was computed.
+   *
+   * This is designed for the player-facing results screen. It uses
+   * simple language and avoids technical jargon.
+   *
+   * @param outcome - The run outcome.
+   * @returns An explanation object with narrative text and highlights.
+   */
+  public buildPlayerScoreExplanation(outcome: RunOutcome): {
+    headline: string;
+    lines: readonly string[];
+    strongestComponent: string;
+    weakestComponent: string;
+    outcomeImpact: string;
+    improvementTip: string;
+  } {
+    const breakdown = this.computeDetailedSovereigntyBreakdown(outcome);
+    const grade = this.mapScoreToGrade(breakdown.cappedScore);
+    const reward = this.dispatchGradeReward(grade);
+
+    // Determine strongest and weakest
+    const componentEntries = [
+      { name: 'Decision Speed', value: breakdown.components.decisionSpeedScore, weighted: breakdown.weightedContributions.decisionSpeedWeighted },
+      { name: 'Shield Maintenance', value: breakdown.components.shieldsMaintainedPct, weighted: breakdown.weightedContributions.shieldsMaintainedWeighted },
+      { name: 'Sabotage Blocking', value: breakdown.components.haterBlockRate, weighted: breakdown.weightedContributions.haterBlockWeighted },
+      { name: 'Cascade Breaking', value: breakdown.components.cascadeBreakRate, weighted: breakdown.weightedContributions.cascadeBreakWeighted },
+      { name: 'Pressure Survival', value: breakdown.components.ticksSurvivedPct, weighted: breakdown.weightedContributions.pressureSurvivedWeighted },
+    ];
+
+    componentEntries.sort((a, b) => b.weighted - a.weighted);
+    const strongest = componentEntries[0];
+    const weakest = componentEntries[componentEntries.length - 1];
+
+    // Build headline
+    let headline: string;
+    if (grade === 'A') {
+      headline = `Sovereign Excellence — Grade ${grade} earned with ${reward.xp} XP`;
+    } else if (grade === 'B') {
+      headline = `Strong Performance — Grade ${grade} earned with ${reward.xp} XP`;
+    } else if (grade === 'C') {
+      headline = `Solid Effort — Grade ${grade} earned with ${reward.xp} XP`;
+    } else if (grade === 'D') {
+      headline = `Room to Grow — Grade ${grade} earned with ${reward.xp} XP`;
+    } else {
+      headline = `Keep Pushing — Grade ${grade} earned with ${reward.xp} XP`;
+    }
+
+    // Build explanation lines
+    const lines: string[] = [];
+    lines.push(
+      `Your sovereignty score: ${breakdown.cappedScore.toFixed(4)} (Grade ${grade})`,
+    );
+    lines.push(
+      `This score is based on five performance dimensions, each weighted differently.`,
+    );
+
+    for (const comp of componentEntries) {
+      const pctOfTotal = breakdown.baseScore > 0
+        ? ((comp.weighted / breakdown.baseScore) * 100).toFixed(0)
+        : '0';
+      lines.push(
+        `${comp.name}: ${(comp.value * 100).toFixed(0)}% — contributed ${pctOfTotal}% of your base score`,
+      );
+    }
+
+    lines.push(
+      `Base score: ${breakdown.baseScore.toFixed(4)}`,
+    );
+    lines.push(
+      `Outcome multiplier (${outcome}): ${breakdown.outcomeMultiplier.toFixed(2)}x`,
+    );
+
+    if (breakdown.wasCapApplied) {
+      lines.push(
+        `Your raw score of ${breakdown.rawScore.toFixed(4)} was capped at ${SOVEREIGNTY_SCORE_CAP}`,
+      );
+    }
+
+    // Outcome impact
+    let outcomeImpact: string;
+    if (outcome === 'FREEDOM') {
+      outcomeImpact = `Winning with FREEDOM applied a ${OUTCOME_MULTIPLIER.FREEDOM}x multiplier — the best possible outcome bonus.`;
+    } else if (outcome === 'TIMEOUT') {
+      outcomeImpact = `Timing out applied a ${OUTCOME_MULTIPLIER.TIMEOUT}x multiplier — you lost some score potential by not finishing.`;
+    } else if (outcome === 'BANKRUPT') {
+      outcomeImpact = `Going bankrupt applied a ${OUTCOME_MULTIPLIER.BANKRUPT}x penalty — your score was heavily reduced.`;
+    } else {
+      outcomeImpact = `Abandoning the run set the multiplier to ${OUTCOME_MULTIPLIER.ABANDONED}x — completing the run earns a real score.`;
+    }
+
+    // Improvement tip
+    let improvementTip: string;
+    if (weakest.value < 0.3) {
+      improvementTip = `Focus on ${weakest.name} — it was your weakest area at ${(weakest.value * 100).toFixed(0)}%.`;
+    } else if (outcome !== 'FREEDOM') {
+      improvementTip = `Try to reach FREEDOM — the ${OUTCOME_MULTIPLIER.FREEDOM}x multiplier is the biggest single factor.`;
+    } else if (breakdown.cappedScore < 1.0) {
+      improvementTip = `Your overall score was ${breakdown.cappedScore.toFixed(4)} — push all components above 80% for a shot at Grade A.`;
+    } else {
+      improvementTip = `Excellent performance. Try harder modes for an even greater challenge.`;
+    }
+
+    return {
+      headline,
+      lines,
+      strongestComponent: strongest.name,
+      weakestComponent: weakest.name,
+      outcomeImpact,
+      improvementTip,
+    };
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // S25 — Run Comparison Utilities
+  // ═══════════════════════════════════════════════════════════════════════
+
+  /**
+   * compareRunIdentities — Compare two run identities and return
+   * a detailed comparison of scores, grades, and components.
+   *
+   * Used for "this run vs last run" or "this run vs best run" UX.
+   */
+  public compareRunIdentities(
+    current: RunIdentity,
+    previous: RunIdentity,
+  ): {
+    scoreDelta: number;
+    gradeChange: 'upgrade' | 'downgrade' | 'same';
+    componentDeltas: {
+      decisionSpeed: number;
+      shieldsMaintained: number;
+      haterBlock: number;
+      cascadeBreak: number;
+      pressureSurvived: number;
+    };
+    outcomeComparison: string;
+    improvementAreas: readonly string[];
+    regressionAreas: readonly string[];
+  } {
+    const scoreDelta = current.sovereigntyScore - previous.sovereigntyScore;
+
+    const currentGradeNum = this.gradeToNumeric(current.verifiedGrade);
+    const previousGradeNum = this.gradeToNumeric(previous.verifiedGrade);
+    let gradeChange: 'upgrade' | 'downgrade' | 'same';
+    if (currentGradeNum > previousGradeNum) gradeChange = 'upgrade';
+    else if (currentGradeNum < previousGradeNum) gradeChange = 'downgrade';
+    else gradeChange = 'same';
+
+    const componentDeltas = {
+      decisionSpeed:
+        current.cordBreakdown.decisionSpeedScore - previous.cordBreakdown.decisionSpeedScore,
+      shieldsMaintained:
+        current.cordBreakdown.shieldsMaintainedPct - previous.cordBreakdown.shieldsMaintainedPct,
+      haterBlock:
+        current.cordBreakdown.haterBlockRate - previous.cordBreakdown.haterBlockRate,
+      cascadeBreak:
+        current.cordBreakdown.cascadeBreakRate - previous.cordBreakdown.cascadeBreakRate,
+      pressureSurvived:
+        current.cordBreakdown.pressureSurvivedScore - previous.cordBreakdown.pressureSurvivedScore,
+    };
+
+    const improvementAreas: string[] = [];
+    const regressionAreas: string[] = [];
+
+    if (componentDeltas.decisionSpeed > 0.05) improvementAreas.push('Decision Speed');
+    if (componentDeltas.decisionSpeed < -0.05) regressionAreas.push('Decision Speed');
+    if (componentDeltas.shieldsMaintained > 0.05) improvementAreas.push('Shield Maintenance');
+    if (componentDeltas.shieldsMaintained < -0.05) regressionAreas.push('Shield Maintenance');
+    if (componentDeltas.haterBlock > 0.05) improvementAreas.push('Sabotage Blocking');
+    if (componentDeltas.haterBlock < -0.05) regressionAreas.push('Sabotage Blocking');
+    if (componentDeltas.cascadeBreak > 0.05) improvementAreas.push('Cascade Breaking');
+    if (componentDeltas.cascadeBreak < -0.05) regressionAreas.push('Cascade Breaking');
+    if (componentDeltas.pressureSurvived > 0.05) improvementAreas.push('Pressure Survival');
+    if (componentDeltas.pressureSurvived < -0.05) regressionAreas.push('Pressure Survival');
+
+    const outcomeComparison =
+      current.outcome === previous.outcome
+        ? `Same outcome: ${current.outcome}`
+        : `Outcome changed: ${previous.outcome} -> ${current.outcome}`;
+
+    return {
+      scoreDelta,
+      gradeChange,
+      componentDeltas,
+      outcomeComparison,
+      improvementAreas,
+      regressionAreas,
+    };
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // S26 — Internal Sovereignty Helpers
+  // ═══════════════════════════════════════════════════════════════════════
+
+  /**
+   * clampSov — Sovereignty-specific clamp with NaN/Infinity protection.
+   *
+   * This is distinct from the general clamp() to allow sovereignty
+   * methods to use it without naming collision concerns in future
+   * refactors. It applies the same logic: NaN/Infinity returns min.
+   */
+  private clampSov(value: number, min: number, max: number): number {
+    if (!Number.isFinite(value)) return min;
+    return Math.min(max, Math.max(min, value));
   }
 
   /**
