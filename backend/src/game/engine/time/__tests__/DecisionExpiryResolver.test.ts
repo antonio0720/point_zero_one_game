@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { RunStateSnapshot } from '../../core/RunStateSnapshot';
 import { DecisionExpiryResolver } from '../DecisionExpiryResolver';
+import { DecisionCardType } from '../types';
 
 type DeepPartial<T> = {
   [K in keyof T]?: T[K] extends readonly (infer U)[]
@@ -175,7 +176,7 @@ describe('backend time/DecisionExpiryResolver', () => {
         windowId: 'window_alpha',
         cardId: 'card_alpha',
         actorId: 'actor_alpha',
-        cardType: 'FORCED_FATE',
+        cardType: DecisionCardType.FORCED_FATE,
         openedAtTick: 2,
         openedAtMs: 1_500,
         durationMs: 8_000,
@@ -209,7 +210,7 @@ describe('backend time/DecisionExpiryResolver', () => {
       {
         windowId: 'window_beta',
         cardId: 'card_beta',
-        cardType: 'CRISIS_EVENT',
+        cardType: DecisionCardType.CRISIS_EVENT,
         openedAtTick: 3,
         openedAtMs: 2_000,
         durationMs: 5_000,
@@ -241,7 +242,7 @@ describe('backend time/DecisionExpiryResolver', () => {
       {
         windowId: 'window_live',
         cardId: 'card_live',
-        cardType: 'HATER_INJECTION',
+        cardType: DecisionCardType.HATER_INJECTION,
         openedAtTick: 1,
         openedAtMs: 1_000,
         durationMs: 9_000,
@@ -254,7 +255,7 @@ describe('backend time/DecisionExpiryResolver', () => {
       {
         windowId: 'window_stale',
         cardId: 'card_stale',
-        cardType: 'FORCED_FATE',
+        cardType: DecisionCardType.FORCED_FATE,
         openedAtTick: 1,
         openedAtMs: 1_000,
         durationMs: 9_000,
@@ -280,7 +281,7 @@ describe('backend time/DecisionExpiryResolver', () => {
       {
         windowId: 'window_expired',
         cardId: 'card_expired',
-        cardType: 'HATER_INJECTION',
+        cardType: DecisionCardType.HATER_INJECTION,
         openedAtTick: 3,
         openedAtMs: 1_000,
         durationMs: 5_000,
@@ -326,7 +327,7 @@ describe('backend time/DecisionExpiryResolver', () => {
       {
         windowId: 'window_empty',
         cardId: 'card_empty',
-        cardType: 'CRISIS_EVENT',
+        cardType: DecisionCardType.CRISIS_EVENT,
         openedAtTick: 1,
         openedAtMs: 500,
         durationMs: 3_000,

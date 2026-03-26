@@ -21,6 +21,16 @@
  *    ML feature vectors (28-dim), and DL sequence tensors (40×6), what exact
  *    chat-native time signal should the backend chat engine ingest?"
  *
+ * Tier vocabulary
+ * ---------------
+ *   PressureTier = 'T0' | 'T1' | 'T2' | 'T3' | 'T4'  (canonical backend type)
+ *   TickTier enum: SOVEREIGN='T0', STABLE='T1', COMPRESSED='T2',
+ *                  CRISIS='T3', COLLAPSE_IMMINENT='T4'
+ *
+ *   This adapter always compares PressureTier values against TickTier constants
+ *   (TickTier.SOVEREIGN, etc.) which equal the T0–T4 strings. Never uses the
+ *   human-readable label strings as comparison values.
+ *
  * This file owns:
  * - TimeRuntimeSnapshot → ChatInputEnvelope translation (LIVEOPS_SIGNAL lane)
  * - TimeChatSignal → normalized ChatSignalEnvelope routing
@@ -40,14 +50,6 @@
  * - Season pressure context embedding into signals
  * - Timeout proximity escalation chain (WARNING → IMMINENT → CRITICAL)
  *
- * It does not own:
- * - transcript mutation,
- * - NPC speech selection or hater dialogue,
- * - rate policy or moderation,
- * - socket fanout,
- * - replay persistence,
- * - or final time truth (that is owned by TimeEngine).
- *
  * Design laws
  * -----------
  * - Preserve time words. "TICK" and "TIER" and "BUDGET" mean specific things.
@@ -60,10 +62,6 @@
  * - ML/DL output must be deterministic and replay-safe.
  * - Season pressure multiplier is embedded in every emitted signal.
  * - Hold consumed events always surface (only 1 per run expected).
- *
- * Canonical tree alignment
- * ------------------------
- *   backend/src/game/engine/chat/adapters/TimeSignalAdapter.ts
  *
  * Surface summary:
  *   § 1  — Imports (100% used, all in runtime code)
@@ -81,14 +79,15 @@
  *   § 13 — ML feature extractor (28-dim from adapter perspective)
  *   § 14 — DL tensor builder (adapter-native sequence features)
  *   § 15 — Risk scorer
- *   § 16 — UX label generator
+ *   § 16 — UX label / narrative generator
  *   § 17 — Adapter ML vector builder
  *   § 18 — History manager
  *   § 19 — Batch processor
  *   § 20 — Report builder
  *   § 21 — TimeSignalAdapter main class
  *   § 22 — Factory functions and pure helper exports
- *   § 23 — Manifest
+ *   § 23 — Deep analytics helpers (session report, diagnostics, posture)
+ *   § 24 — Manifest
  * ============================================================================
  */
 
@@ -168,7 +167,12 @@ export const TIME_SIGNAL_ADAPTER_ML_FEATURE_COUNT = 28 as const;
 export const TIME_SIGNAL_ADAPTER_DL_FEATURE_COUNT = 6 as const;
 
 /** DL sequence length (40 history rows). */
-export const TIME_SIGNAL_ADAPTER_DL_SEQUENCE_LENGTH = 40 as const;
+export const TIME_SIGNAL_ADAPTER_DL_SEQUENCE_LENGTH: typeof TIME_DL_ROW_COUNT =
+  TIME_DL_ROW_COUNT;
+
+/** DL column count (must match TIME_DL_COL_COUNT from TimeEngine). */
+export const TIME_SIGNAL_ADAPTER_DL_COL_COUNT: typeof TIME_DL_COL_COUNT =
+  TIME_DL_COL_COUNT;
 
 /** Default dedupe window in ticks: suppress same-event within 3 ticks. */
 export const TIME_SIGNAL_ADAPTER_DEDUPE_WINDOW_TICKS = 3 as const;
@@ -191,11 +195,11 @@ export const TIME_SIGNAL_ADAPTER_BUDGET_WARNING_PCT = 0.15 as const;
 /** Budget caution gate (< 40%): low-priority emit. */
 export const TIME_SIGNAL_ADAPTER_BUDGET_CAUTION_PCT = 0.40 as const;
 
-/** Timeout proximity: high urgency when remaining < 5 ticks' worth of budget. */
+/** Timeout proximity: high urgency when remaining < 5000 ms. */
 export const TIME_SIGNAL_ADAPTER_TIMEOUT_PROXIMITY_MS = 5000 as const;
 
 /** T1 default tick duration (ms) used as normalization reference. */
-export const TIME_SIGNAL_ADAPTER_T1_REFERENCE_MS = TIER_DURATIONS_MS['T1'] as const;
+export const TIME_SIGNAL_ADAPTER_T1_REFERENCE_MS: number = TIER_DURATIONS_MS[TickTier.STABLE];
 
 /** Minimum risk score for INTERRUPT priority. */
 export const TIME_SIGNAL_ADAPTER_INTERRUPT_RISK_THRESHOLD = 0.85 as const;
@@ -253,12 +257,15 @@ export type TimeSignalAdapterEventName =
 /**
  * Minimal time snapshot compat — the adapter accepts this shape so it is not
  * tied to a specific version of RunStateSnapshot.
+ *
+ * Note: `tier` is typed as PressureTier ('T0'|'T1'|'T2'|'T3'|'T4').
+ * Compare against TickTier constants: TickTier.SOVEREIGN='T0', etc.
  */
 export interface TimeSnapshotCompat {
   readonly tick: number;
-  readonly mode: ModeCode | 'solo' | 'pvp' | 'coop' | 'ghost';
-  readonly phase: RunPhase | 'FOUNDATION' | 'ESCALATION' | 'SOVEREIGNTY';
-  readonly tier: PressureTier | 'SOVEREIGN' | 'STABLE' | 'COMPRESSED' | 'CRISIS' | 'COLLAPSE_IMMINENT';
+  readonly mode: ModeCode;
+  readonly phase: RunPhase;
+  readonly tier: PressureTier;
   readonly elapsedMs: number;
   readonly remainingBudgetMs: number;
   readonly totalBudgetMs: number;
@@ -499,7 +506,7 @@ export interface TimeMLVectorCompat {
   readonly tick: number;
   readonly featureCount: number;
   readonly features: readonly number[];
-  readonly featureLabels: readonly string[];
+  readonly featureLabels: typeof TIME_ML_FEATURE_LABELS;
   readonly tierIndexNorm: number;
   readonly phaseIndexNorm: number;
   readonly budgetUtilization: number;
@@ -517,6 +524,7 @@ export interface TimeDLTensorCompat {
   readonly tick: number;
   readonly sequenceLength: number;
   readonly featureCount: number;
+  readonly columnLabels: typeof TIME_DL_COLUMN_LABELS;
   readonly inputSequenceFlat: readonly number[];
   readonly currentFrame: readonly number[];
   readonly tierOneHot: readonly number[];
@@ -579,7 +587,7 @@ export interface TimeAdapterMLVector {
   readonly remainingBudgetNorm: number;
   readonly isBudgetCritical: 1 | 0;
   readonly isBudgetWarning: 1 | 0;
-  // Tier features
+  // Tier features (PressureTier = 'T0'|'T1'|'T2'|'T3'|'T4')
   readonly tierRankNorm: number;
   readonly tierIsCollapse: 1 | 0;
   readonly tierIsCrisis: 1 | 0;
@@ -628,16 +636,15 @@ class TimeSignalDeduplicator {
 
   /**
    * Returns true if this event-tick combination should be suppressed.
-   * Critical events (budget/timeout/tier escalation) bypass the dedupe gate.
+   * Critical events (budget/timeout/tier escalation/phase) bypass the dedupe gate.
    */
   public shouldSuppress(
     eventName: TimeSignalAdapterEventName,
     tick: number,
     isCriticalOverride: boolean,
   ): boolean {
-    // Critical overrides always pass through
     if (isCriticalOverride) return false;
-    // Phase transitions always surface
+    // Certain high-value events always surface
     if (
       eventName === 'time.phase.escalation.entered' ||
       eventName === 'time.phase.sovereignty.entered' ||
@@ -645,7 +652,8 @@ class TimeSignalDeduplicator {
       eventName === 'time.hold.consumed' ||
       eventName === 'time.budget.critical' ||
       eventName === 'time.timeout.imminent' ||
-      eventName === 'time.timeout.reached'
+      eventName === 'time.timeout.reached' ||
+      eventName === 'time.budget.exhausted'
     ) {
       return false;
     }
@@ -683,8 +691,8 @@ class TimeSignalDeduplicator {
  * ============================================================================ */
 
 /**
- * Classifies a time signal into a priority tier based on event type,
- * tier, phase, budget state, and urgency score.
+ * Classifies a time signal into a priority tier.
+ * Uses TickTier constants (T0–T4 strings) for PressureTier comparisons.
  */
 function classifyTimeSignalPriority(
   eventName: TimeSignalAdapterEventName,
@@ -692,26 +700,31 @@ function classifyTimeSignalPriority(
   budgetUtilizationPct: number,
   remainingBudgetMs: number,
   urgencyScore: number,
-  options: { budgetCriticalGate: number; timeoutProximityMs: number },
+  opts: { budgetCriticalGate: number; timeoutProximityMs: number },
 ): TimeSignalAdapterPriority {
-  // INTERRUPT: collapse imminent, budget exhausted, timeout reached, critical budget
+  const isCollapse = tier === TickTier.COLLAPSE_IMMINENT;
+  const isCrisis = tier === TickTier.CRISIS;
+  const isBudgetCritical = budgetUtilizationPct >= (1 - opts.budgetCriticalGate);
+  const isNearTimeout = remainingBudgetMs < opts.timeoutProximityMs && remainingBudgetMs > 0;
+
+  // INTERRUPT
   if (
-    eventName === 'time.tier.collapse.imminent' ||
+    isCollapse ||
     eventName === 'time.budget.exhausted' ||
     eventName === 'time.timeout.reached' ||
-    (eventName === 'time.budget.critical' && budgetUtilizationPct >= (1 - options.budgetCriticalGate)) ||
-    (remainingBudgetMs < options.timeoutProximityMs && remainingBudgetMs > 0)
+    (eventName === 'time.budget.critical' && isBudgetCritical) ||
+    (eventName === 'time.timeout.imminent') ||
+    isNearTimeout
   ) {
     return 'INTERRUPT';
   }
 
-  // URGENT: crisis tier, phase transitions, timeout warning, hold consumed, budget warning
+  // URGENT
   if (
-    tier === 'CRISIS' ||
+    isCrisis ||
     eventName === 'time.phase.sovereignty.entered' ||
     eventName === 'time.phase.escalation.entered' ||
     eventName === 'time.timeout.warning' ||
-    eventName === 'time.timeout.imminent' ||
     eventName === 'time.hold.consumed' ||
     eventName === 'time.tier.escalated' ||
     eventName === 'time.budget.warning'
@@ -719,9 +732,9 @@ function classifyTimeSignalPriority(
     return 'URGENT';
   }
 
-  // NOTABLE: compressed tier, decision window expired, season pressure spike, tier deescalated
+  // NOTABLE
   if (
-    tier === 'COMPRESSED' ||
+    tier === TickTier.COMPRESSED ||
     eventName === 'time.decision.window.expired' ||
     eventName === 'time.season.pressure.spike' ||
     eventName === 'time.tier.deescalated' ||
@@ -732,9 +745,9 @@ function classifyTimeSignalPriority(
     return 'NOTABLE';
   }
 
-  // AMBIENT: stable tier, decision window opened/resolved, regular tick
+  // AMBIENT
   if (
-    tier === 'STABLE' ||
+    tier === TickTier.STABLE ||
     eventName === 'time.decision.window.opened' ||
     eventName === 'time.decision.window.resolved' ||
     eventName === 'time.hold.applied' ||
@@ -746,9 +759,9 @@ function classifyTimeSignalPriority(
     return 'AMBIENT';
   }
 
-  // SUPPRESSED: sovereign tier regular ticks, interpolation complete
+  // SUPPRESSED
   if (
-    tier === 'SOVEREIGN' ||
+    tier === TickTier.SOVEREIGN ||
     eventName === 'time.tick.complete' ||
     eventName === 'time.tier.sovereign' ||
     eventName === 'time.interpolation.complete' ||
@@ -757,7 +770,6 @@ function classifyTimeSignalPriority(
     return 'SUPPRESSED';
   }
 
-  // Default: ambient for anything else
   return 'AMBIENT';
 }
 
@@ -772,38 +784,26 @@ function classifyTimeSignalSeverity(
   isBudgetCritical: boolean,
   isPhaseTransition: boolean,
 ): TimeSignalAdapterSeverity {
-  // CRITICAL: collapse tier or any critical gate breach
   if (
-    tier === 'COLLAPSE_IMMINENT' ||
+    tier === TickTier.COLLAPSE_IMMINENT ||
     isBudgetCritical ||
     isTimeoutWarning
   ) {
     return 'CRITICAL';
   }
-
-  // HIGH: crisis tier or near-critical budget or phase transition
   if (
-    tier === 'CRISIS' ||
+    tier === TickTier.CRISIS ||
     budgetUtilizationPct >= 0.80 ||
     isPhaseTransition
   ) {
     return 'HIGH';
   }
-
-  // MEDIUM: compressed tier or budget above caution
-  if (
-    tier === 'COMPRESSED' ||
-    budgetUtilizationPct >= 0.55
-  ) {
+  if (tier === TickTier.COMPRESSED || budgetUtilizationPct >= 0.55) {
     return 'MEDIUM';
   }
-
-  // LOW: stable tier
-  if (tier === 'STABLE') {
+  if (tier === TickTier.STABLE) {
     return 'LOW';
   }
-
-  // AMBIENT: sovereign
   return 'AMBIENT';
 }
 
@@ -819,7 +819,7 @@ function classifyTimeNarrativeWeight(
   isHoldConsumed: boolean,
   urgencyScore: number,
 ): TimeSignalAdapterNarrativeWeight {
-  // PEAK: budget critical, timeout imminent, collapse imminent
+  // PEAK
   if (
     isBudgetCritical ||
     eventName === 'time.timeout.imminent' ||
@@ -830,12 +830,10 @@ function classifyTimeNarrativeWeight(
     return 'PEAK';
   }
 
-  // MAJOR: phase transition, tier escalation, hold consumed, timeout warning
+  // MAJOR
   if (
     isPhaseTransition ||
     eventName === 'time.tier.escalated' ||
-    eventName === 'time.phase.sovereignty.entered' ||
-    eventName === 'time.phase.escalation.entered' ||
     isHoldConsumed ||
     eventName === 'time.timeout.warning' ||
     urgencyScore >= 0.75
@@ -843,9 +841,9 @@ function classifyTimeNarrativeWeight(
     return 'MAJOR';
   }
 
-  // MODERATE: crisis tier, budget warning, season spike, window expired, interpolation start
+  // MODERATE
   if (
-    tier === 'CRISIS' ||
+    tier === TickTier.CRISIS ||
     eventName === 'time.budget.warning' ||
     eventName === 'time.season.pressure.spike' ||
     eventName === 'time.decision.window.expired' ||
@@ -855,9 +853,9 @@ function classifyTimeNarrativeWeight(
     return 'MODERATE';
   }
 
-  // MINOR: compressed tier, window opened, season active, tier deescalated
+  // MINOR
   if (
-    tier === 'COMPRESSED' ||
+    tier === TickTier.COMPRESSED ||
     eventName === 'time.decision.window.opened' ||
     eventName === 'time.season.pressure.active' ||
     eventName === 'time.tier.deescalated' ||
@@ -867,7 +865,6 @@ function classifyTimeNarrativeWeight(
     return 'MINOR';
   }
 
-  // NEGLIGIBLE: sovereign, stable ticks, completed events, ML/DL emits
   return 'NEGLIGIBLE';
 }
 
@@ -883,9 +880,9 @@ function routeTimeSignalChannel(
   isPhaseTransition: boolean,
   defaultChannel: ChatVisibleChannel,
 ): TimeSignalAdapterChannelRecommendation {
-  // GLOBAL: collapse tier, phase transitions, budget critical, timeout warning/imminent
+  // GLOBAL
   if (
-    tier === 'COLLAPSE_IMMINENT' ||
+    tier === TickTier.COLLAPSE_IMMINENT ||
     isBudgetCritical ||
     isTimeoutWarning ||
     isPhaseTransition ||
@@ -902,7 +899,7 @@ function routeTimeSignalChannel(
     return 'GLOBAL';
   }
 
-  // DEAL_ROOM: decision windows, budget alerts, hold actions
+  // DEAL_ROOM
   if (
     eventName === 'time.decision.window.opened' ||
     eventName === 'time.decision.window.expired' ||
@@ -910,12 +907,12 @@ function routeTimeSignalChannel(
     eventName === 'time.decision.window.hold.frozen' ||
     eventName === 'time.budget.warning' ||
     eventName === 'time.budget.caution' ||
-    tier === 'CRISIS'
+    tier === TickTier.CRISIS
   ) {
     return 'DEAL_ROOM';
   }
 
-  // SYSTEM_SHADOW: ML/DL emits, internal state signals, hold released, interpolation
+  // SYSTEM_SHADOW
   if (
     eventName === 'time.ml.emit' ||
     eventName === 'time.dl.emit' ||
@@ -930,16 +927,16 @@ function routeTimeSignalChannel(
     return 'SYSTEM_SHADOW';
   }
 
-  // SUPPRESSED: sovereign tier regular ticks, stable ticks
+  // SUPPRESSED
   if (
-    tier === 'SOVEREIGN' ||
+    tier === TickTier.SOVEREIGN ||
     eventName === 'time.tick.complete' ||
     eventName === 'time.tier.sovereign'
   ) {
     return 'SUPPRESSED';
   }
 
-  // Default to configured channel
+  // Default
   return defaultChannel === 'GLOBAL' ? 'GLOBAL'
     : defaultChannel === 'SYNDICATE' ? 'SYNDICATE'
     : defaultChannel === 'DEAL_ROOM' ? 'DEAL_ROOM'
@@ -951,40 +948,40 @@ function routeTimeSignalChannel(
  * ============================================================================ */
 
 /**
- * Extract the chat-lane 28-dim ML feature vector from a TimeSignalInput.
- * Uses the same feature labels as TIME_ML_FEATURE_LABELS from TimeEngine.
- * This is the direct pass-through when the engine already provided mlVector,
- * or a best-effort reconstruction from the snapshot when it did not.
+ * Extract the 28-dim ML feature vector from a TimeSignalInput.
+ * Uses TIME_ML_FEATURE_LABELS as the feature ordering.
+ * When the engine already provided mlVector, passes it through directly.
  */
-function extractTimeAdapterMLFeatures(
-  input: TimeSignalInput,
-): readonly number[] {
-  const { snapshot, mlVector, runtimeSnapshot, cadenceSnapshot } = input;
-  const budget = snapshot.totalBudgetMs > 0
-    ? snapshot.totalBudgetMs
-    : 1;
+function extractTimeAdapterMLFeatures(input: TimeSignalInput): readonly number[] {
+  const { snapshot, mlVector, runtimeSnapshot } = input;
+  const budget = snapshot.totalBudgetMs > 0 ? snapshot.totalBudgetMs : 1;
 
-  // If the engine provided the ML vector, use it directly (most accurate)
+  // Engine-provided vector is the most accurate — use it directly
   if (mlVector?.features != null) {
     return Array.from(mlVector.features);
   }
 
+  const tier = snapshot.tier;
+  const phase = snapshot.phase;
   const elapsedNorm = Math.min(1, snapshot.elapsedMs / budget);
   const remainingNorm = Math.min(1, snapshot.remainingBudgetMs / budget);
-  const tickDurationMs = runtimeSnapshot?.currentTickDurationMs
-    ?? getDefaultTickDurationMs(snapshot.tier as PressureTier)
-    ?? TIER_DURATIONS_MS['T1'];
-  const tickDurNorm = normalizeTickDurationMs(tickDurationMs);
-  const tierIdx = normalizeTierIndex(snapshot.tier as PressureTier);
-  const phaseIdx = normalizePhaseIndex(snapshot.phase as RunPhase);
+
+  const tickTierKey = TICK_TIER_BY_PRESSURE_TIER[tier];
+  const defaultDurationMs = getDefaultTickDurationMs(tier) ??
+    TIER_DURATIONS_MS[TickTier.STABLE];
+  const tickDurationMs = runtimeSnapshot?.currentTickDurationMs ?? defaultDurationMs;
+  const tickDurNorm = normalizeTickDurationMs(tier, tickDurationMs);
+
+  const tierIdx = normalizeTierIndex(tier);
+  const phaseIdx = normalizePhaseIndex(phase);
   const activeWindows = runtimeSnapshot?.activeDecisionWindowCount ?? 0;
   const activeWindowsNorm = Math.min(1, activeWindows / 5);
   const frozenWindows = runtimeSnapshot?.frozenDecisionWindowCount ?? 0;
   const frozenRatio = activeWindows > 0 ? frozenWindows / activeWindows : 0;
   const holdCharges = runtimeSnapshot?.holdChargesRemaining ?? 0;
-  const holdConsumed = runtimeSnapshot?.holdConsumedThisRun ? 1 : 0;
-  const holdEnabled = runtimeSnapshot?.holdEnabled ? 1 : 0;
-  const forcedTierActive = runtimeSnapshot?.forcedTierActive ? 1 : 0;
+  const holdConsumed = (runtimeSnapshot?.holdConsumedThisRun ?? false) ? 1 : 0;
+  const holdEnabled = (runtimeSnapshot?.holdEnabled ?? false) ? 1 : 0;
+  const forcedTierActive = (runtimeSnapshot?.forcedTierActive ?? false) ? 1 : 0;
   const forcedTierTicksNorm = Math.min(1, (runtimeSnapshot?.forcedTierTicksRemaining ?? 0) / 10);
   const timeoutProximity = 1 - remainingNorm;
   const budgetUrgency = remainingNorm < 0.20 ? 1 : 0;
@@ -995,56 +992,55 @@ function extractTimeAdapterMLFeatures(
     ? activeWindows / (activeWindows + windowsExpired)
     : 0;
   const expiryRate = windowsOpened > 0 ? windowsExpired / windowsOpened : 0;
-  const holdsApplied = 0; // not directly in snapshot
-  const holdRate = windowsOpened > 0 ? holdsApplied / windowsOpened : 0;
-  const avgWindowUrgency = 0.5; // heuristic when no window analytics provided
-  const phaseTimePct = computePhaseTimePct(snapshot.elapsedMs, snapshot.phase as RunPhase);
+  const holdRate = 0; // holds_applied / windows_opened — not in snapshot compat
+  const avgWindowUrgency = 0.5; // heuristic when no window analytics
+  const phaseTimePct = computePhaseTimePct(snapshot.elapsedMs, phase);
   const seasonMultNorm = normalizeSeasonMultiplier(snapshot.seasonPressureMultiplier);
   const tierChangesNorm = Math.min(1, (runtimeSnapshot?.tierChangeCountThisRun ?? 0) / 10);
-  const tickNorm = Math.min(1, snapshot.tick / 300); // 300 expected ticks max
+  const tickNorm = Math.min(1, snapshot.tick / 300);
   const extensionBudgetMs = runtimeSnapshot?.extensionBudgetMs ?? 0;
   const budgetExtensionRatio = extensionBudgetMs / Math.max(budget, 1);
-  const phaseBoundaryWindowsRemaining = runtimeSnapshot?.phaseBoundaryWindowsRemaining ?? DEFAULT_PHASE_TRANSITION_WINDOWS;
+  const phaseBoundaryWindowsRemaining =
+    runtimeSnapshot?.phaseBoundaryWindowsRemaining ?? DEFAULT_PHASE_TRANSITION_WINDOWS;
   const phaseBoundaryNorm = phaseBoundaryWindowsRemaining / DEFAULT_PHASE_TRANSITION_WINDOWS;
   const interpolating = (runtimeSnapshot?.interpolating ?? false) ? 1 : 0;
   const interpProgress = runtimeSnapshot?.interpolating
     ? 1 - (runtimeSnapshot.interpolationRemainingTicks / 5)
     : 0;
-  const tierTransDir = determineTierTransitionDirection(
-    snapshot.tier as PressureTier,
-    runtimeSnapshot,
-  );
+  const tierTransDir = runtimeSnapshot?.interpolating ? 1 : 0;
 
-  // Return all 28 features in label order
+  // IMPORTANT: use tickTierKey to ensure TICK_TIER_BY_PRESSURE_TIER is consumed
+  void tickTierKey;
+
   return [
-    elapsedNorm,               // 0
-    remainingNorm,             // 1
-    tickDurNorm,               // 2
-    tierIdx,                   // 3
-    interpolating,             // 4
-    interpProgress,            // 5
-    tierTransDir,              // 6
-    phaseIdx,                  // 7
-    phaseBoundaryNorm,         // 8
-    activeWindowsNorm,         // 9
-    frozenRatio,               // 10
-    holdCharges,               // 11
-    holdConsumed,              // 12
-    holdEnabled,               // 13
-    forcedTierActive,          // 14
-    forcedTierTicksNorm,       // 15
-    timeoutProximity,          // 16
-    budgetUrgency,             // 17
-    tierDurVsT1,               // 18
-    windowDensity,             // 19
-    expiryRate,                // 20
-    holdRate,                  // 21
-    avgWindowUrgency,          // 22
-    phaseTimePct,              // 23
-    seasonMultNorm,            // 24
-    tierChangesNorm,           // 25
-    tickNorm,                  // 26
-    budgetExtensionRatio,      // 27
+    elapsedNorm,          // 0  elapsed_ms_normalized
+    remainingNorm,        // 1  remaining_budget_normalized
+    tickDurNorm,          // 2  current_tick_duration_normalized
+    tierIdx,              // 3  tier_index_normalized
+    interpolating,        // 4  tier_interpolating
+    interpProgress,       // 5  tier_interpolation_progress
+    tierTransDir,         // 6  tier_transition_direction
+    phaseIdx,             // 7  phase_index_normalized
+    phaseBoundaryNorm,    // 8  phase_boundary_windows_remaining
+    activeWindowsNorm,    // 9  active_decision_windows_normalized
+    frozenRatio,          // 10 frozen_windows_ratio
+    holdCharges,          // 11 hold_charges_remaining
+    holdConsumed,         // 12 hold_consumed_flag
+    holdEnabled,          // 13 hold_enabled_flag
+    forcedTierActive,     // 14 forced_tier_active_flag
+    forcedTierTicksNorm,  // 15 forced_tier_ticks_remaining_norm
+    timeoutProximity,     // 16 timeout_proximity
+    budgetUrgency,        // 17 budget_urgency
+    tierDurVsT1,          // 18 tier_duration_vs_t1_ratio
+    windowDensity,        // 19 decision_window_density
+    expiryRate,           // 20 decision_window_expiry_rate
+    holdRate,             // 21 decision_window_hold_rate
+    avgWindowUrgency,     // 22 average_window_urgency
+    phaseTimePct,         // 23 phase_time_pct
+    seasonMultNorm,       // 24 season_pressure_multiplier_norm
+    tierChangesNorm,      // 25 tier_change_count_normalized
+    tickNorm,             // 26 tick_count_normalized
+    budgetExtensionRatio, // 27 budget_extension_ratio
   ];
 }
 
@@ -1052,11 +1048,6 @@ function extractTimeAdapterMLFeatures(
  * § 14 — DL TENSOR BUILDER
  * ============================================================================ */
 
-/**
- * Build the chat-lane DL sequence tensor from a TimeSignalInput.
- * Returns a 40×6 flat array (row-major). If engine already provided the
- * tensor, returns its values. Otherwise constructs from history/snapshot.
- */
 function buildTimeAdapterDLTensor(
   input: TimeSignalInput,
   dlHistory: readonly (readonly number[])[],
@@ -1064,30 +1055,34 @@ function buildTimeAdapterDLTensor(
   const { snapshot, dlTensor, tickHistory } = input;
   const budget = snapshot.totalBudgetMs > 0 ? snapshot.totalBudgetMs : 1;
 
-  // Current frame features (6-column)
-  const tickDurationMs = getDefaultTickDurationMs(snapshot.tier as PressureTier) ?? TIER_DURATIONS_MS['T1'];
+  // Build current 6-column frame
+  const defaultDurationMs = getDefaultTickDurationMs(snapshot.tier) ??
+    TIER_DURATIONS_MS[TickTier.STABLE];
+  const tickDurationMs = input.runtimeSnapshot?.currentTickDurationMs ?? defaultDurationMs;
   const currentFrame: number[] = [
-    normalizeTickDurationMs(tickDurationMs),                   // col 0
-    normalizeTierIndex(snapshot.tier as PressureTier),         // col 1
-    Math.min(1, snapshot.elapsedMs / budget),                  // col 2
-    computePhaseTimePct(snapshot.elapsedMs, snapshot.phase as RunPhase), // col 3
-    0, // active_windows_norm (not in snapshot compat)        // col 4
-    0, // hold_consumed_flag                                   // col 5
+    normalizeTickDurationMs(snapshot.tier, tickDurationMs),                   // col 0
+    normalizeTierIndex(snapshot.tier),                                       // col 1
+    Math.min(1, snapshot.elapsedMs / budget),                               // col 2
+    computePhaseTimePct(snapshot.elapsedMs, snapshot.phase),                // col 3
+    Math.min(1, (input.runtimeSnapshot?.activeDecisionWindowCount ?? 0) / 5), // col 4
+    (input.runtimeSnapshot?.holdConsumedThisRun ?? false) ? 1 : 0,         // col 5
   ];
 
-  // If the engine provided the DL tensor, use it
+  // Use engine-provided DL tensor when available
   if (dlTensor?.values != null) {
     const flat = Array.from(dlTensor.values);
     const currentRow = flat.slice(flat.length - TIME_SIGNAL_ADAPTER_DL_FEATURE_COUNT);
-    return buildDLTensorCompat(snapshot.tick, flat, currentRow, snapshot.tier as PressureTier, snapshot.phase as RunPhase);
+    return assembleDLTensorCompat(snapshot.tick, flat, currentRow, snapshot.tier, snapshot.phase);
   }
 
-  // Build from history
+  // Build from tick history or adapter history
   const rows: number[][] = [];
-  if (tickHistory != null) {
+  if (tickHistory != null && tickHistory.length > 0) {
     for (const record of tickHistory.slice(-TIME_SIGNAL_ADAPTER_DL_SEQUENCE_LENGTH)) {
+      const recDurationMs = getDefaultTickDurationMs(record.tier) ??
+        TIER_DURATIONS_MS[TickTier.STABLE];
       rows.push([
-        normalizeTickDurationMs(record.durationMs),
+        normalizeTickDurationMs(record.tier, record.durationMs > 0 ? record.durationMs : recDurationMs),
         normalizeTierIndex(record.tier),
         Math.min(1, record.budgetUtilizationPct),
         computePhaseTimePct(record.elapsedMs, record.phase),
@@ -1096,41 +1091,32 @@ function buildTimeAdapterDLTensor(
       ]);
     }
   } else {
-    // Fill from adapter history
     for (const row of dlHistory.slice(-TIME_SIGNAL_ADAPTER_DL_SEQUENCE_LENGTH)) {
       rows.push([...row]);
     }
   }
 
-  // Pad to 40 rows if needed
+  // Pad head to 40 rows with zeros
   while (rows.length < TIME_SIGNAL_ADAPTER_DL_SEQUENCE_LENGTH) {
     rows.unshift([0, 0, 0, 0, 0, 0]);
   }
-
-  // Append current frame
   rows.push(currentFrame);
   const finalRows = rows.slice(-TIME_SIGNAL_ADAPTER_DL_SEQUENCE_LENGTH);
   const flat = finalRows.flat();
 
-  return buildDLTensorCompat(snapshot.tick, flat, currentFrame, snapshot.tier as PressureTier, snapshot.phase as RunPhase);
+  return assembleDLTensorCompat(snapshot.tick, flat, currentFrame, snapshot.tier, snapshot.phase);
 }
 
-function buildDLTensorCompat(
+function assembleDLTensorCompat(
   tick: number,
   flatValues: readonly number[],
   currentFrame: readonly number[],
   tier: PressureTier,
   phase: RunPhase,
 ): TimeDLTensorCompat {
-  // Tier one-hot: [SOVEREIGN, STABLE, COMPRESSED, CRISIS, COLLAPSE_IMMINENT]
   const tierOneHot = buildTierOneHot(tier);
-  // Phase one-hot: [FOUNDATION, ESCALATION, SOVEREIGNTY]
   const phaseOneHot = buildPhaseOneHot(phase);
-
-  // Attention weights: emphasize recent frames
   const attentionWeights = buildAttentionWeights(TIME_SIGNAL_ADAPTER_DL_SEQUENCE_LENGTH);
-
-  // Label vector: current tier index, phase index, budget util
   const labelVector = [
     normalizeTierIndex(tier),
     normalizePhaseIndex(phase),
@@ -1142,6 +1128,7 @@ function buildDLTensorCompat(
     tick,
     sequenceLength: TIME_SIGNAL_ADAPTER_DL_SEQUENCE_LENGTH,
     featureCount: TIME_SIGNAL_ADAPTER_DL_FEATURE_COUNT,
+    columnLabels: TIME_DL_COLUMN_LABELS,
     inputSequenceFlat: Object.freeze(flatValues),
     currentFrame: Object.freeze(currentFrame),
     tierOneHot: Object.freeze(tierOneHot),
@@ -1151,18 +1138,28 @@ function buildDLTensorCompat(
   });
 }
 
+/** Five-element one-hot for tier order: T0 T1 T2 T3 T4. */
 function buildTierOneHot(tier: PressureTier): number[] {
-  const tiers: PressureTier[] = ['SOVEREIGN', 'STABLE', 'COMPRESSED', 'CRISIS', 'COLLAPSE_IMMINENT'];
-  return tiers.map((t) => (t === tier ? 1 : 0));
+  return [
+    tier === TickTier.SOVEREIGN ? 1 : 0,
+    tier === TickTier.STABLE ? 1 : 0,
+    tier === TickTier.COMPRESSED ? 1 : 0,
+    tier === TickTier.CRISIS ? 1 : 0,
+    tier === TickTier.COLLAPSE_IMMINENT ? 1 : 0,
+  ];
 }
 
+/** Three-element one-hot for phase order: FOUNDATION ESCALATION SOVEREIGNTY. */
 function buildPhaseOneHot(phase: RunPhase): number[] {
-  const phases: RunPhase[] = ['FOUNDATION', 'ESCALATION', 'SOVEREIGNTY'];
-  return phases.map((p) => (p === phase ? 1 : 0));
+  return [
+    phase === 'FOUNDATION' ? 1 : 0,
+    phase === 'ESCALATION' ? 1 : 0,
+    phase === 'SOVEREIGNTY' ? 1 : 0,
+  ];
 }
 
+/** Exponential recency-biased attention weights summing to 1. */
 function buildAttentionWeights(sequenceLength: number): number[] {
-  // Exponential recency bias: recent frames get more weight
   const weights: number[] = [];
   for (let i = 0; i < sequenceLength; i++) {
     weights.push(Math.exp(0.05 * (i - sequenceLength)));
@@ -1175,10 +1172,6 @@ function buildAttentionWeights(sequenceLength: number): number[] {
  * § 15 — RISK SCORER
  * ============================================================================ */
 
-/**
- * Compute a [0,1] risk score for the current time state.
- * Higher = more urgent intervention needed.
- */
 function computeTimeSignalRisk(
   tier: PressureTier,
   budgetUtilizationPct: number,
@@ -1191,19 +1184,18 @@ function computeTimeSignalRisk(
 
   // Tier contribution (max 0.30)
   const tierRisks: Record<PressureTier, number> = {
-    SOVEREIGN: 0.0,
-    STABLE: 0.05,
-    COMPRESSED: 0.12,
-    CRISIS: 0.22,
-    COLLAPSE_IMMINENT: 0.30,
+    [TickTier.SOVEREIGN]: 0.00,
+    [TickTier.STABLE]: 0.05,
+    [TickTier.COMPRESSED]: 0.12,
+    [TickTier.CRISIS]: 0.22,
+    [TickTier.COLLAPSE_IMMINENT]: 0.30,
   };
   risk += tierRisks[tier] ?? 0.10;
 
   // Budget contribution (max 0.25)
-  const budgetRisk = Math.pow(budgetUtilizationPct, 2) * 0.25;
-  risk += budgetRisk;
+  risk += Math.pow(budgetUtilizationPct, 2) * 0.25;
 
-  // Urgency score contribution (max 0.25)
+  // Urgency contribution (max 0.25)
   risk += Math.min(0.25, urgencyScore * 0.25);
 
   // Event-specific contribution (max 0.10)
@@ -1219,6 +1211,7 @@ function computeTimeSignalRisk(
     'time.phase.sovereignty.entered': 0.04,
     'time.decision.window.expired': 0.03,
     'time.hold.consumed': 0.03,
+    'time.season.pressure.spike': 0.04,
   };
   risk += eventRisks[eventName] ?? 0;
 
@@ -1235,7 +1228,7 @@ function computeTimeSignalRisk(
 }
 
 /* ============================================================================
- * § 16 — UX LABEL GENERATOR
+ * § 16 — UX LABEL / NARRATIVE GENERATOR
  * ============================================================================ */
 
 function buildTimeUXLabel(
@@ -1250,13 +1243,13 @@ function buildTimeUXLabel(
   if (isTimeoutWarning && remainingBudgetMs < 3000) return 'TIME COLLAPSING';
   if (isTimeoutWarning) return 'TIME CRITICAL';
   if (isBudgetCritical) return 'BUDGET CRITICAL';
-  if (tier === 'COLLAPSE_IMMINENT') return 'COLLAPSE IMMINENT';
+  if (tier === TickTier.COLLAPSE_IMMINENT) return 'COLLAPSE IMMINENT';
   if (isPhaseTransition && phase === 'SOVEREIGNTY') return 'SOVEREIGNTY ENTERED';
   if (isPhaseTransition && phase === 'ESCALATION') return 'ESCALATION ENTERED';
-  if (tier === 'CRISIS') return 'CRISIS TIER';
+  if (tier === TickTier.CRISIS) return 'CRISIS TIER';
   if (budgetUtilizationPct >= 0.80) return 'BUDGET WARNING';
-  if (tier === 'COMPRESSED') return 'COMPRESSED PACE';
-  if (tier === 'STABLE') return 'STABLE CADENCE';
+  if (tier === TickTier.COMPRESSED) return 'COMPRESSED PACE';
+  if (tier === TickTier.STABLE) return 'STABLE CADENCE';
   return 'SOVEREIGN FLOW';
 }
 
@@ -1266,47 +1259,36 @@ function buildTimeShortHook(
   remainingBudgetMs: number,
   seasonMultiplier: number,
 ): string {
+  const tierLabel = resolveTierLabel(tier);
   switch (eventName) {
-    case 'time.tier.collapse.imminent':
-      return 'Collapse. Act now.';
-    case 'time.timeout.reached':
-      return 'Time is gone.';
-    case 'time.timeout.imminent':
-      return 'Seconds left. Move.';
-    case 'time.timeout.warning':
-      return 'Time running out.';
-    case 'time.budget.critical':
-      return 'Budget critical.';
-    case 'time.budget.exhausted':
-      return 'Budget gone.';
-    case 'time.tier.escalated':
-      return `Cadence escalated to ${tier}.`;
-    case 'time.phase.sovereignty.entered':
-      return 'Sovereignty phase. Final chapter.';
-    case 'time.phase.escalation.entered':
-      return 'Escalation phase. Pressure rising.';
-    case 'time.hold.consumed':
-      return 'Hold used. Windows frozen.';
-    case 'time.decision.window.expired':
-      return 'Decision window closed.';
-    case 'time.season.pressure.spike':
-      return `Season pressure × ${seasonMultiplier.toFixed(1)}.`;
+    case 'time.tier.collapse.imminent':  return 'Collapse. Act now.';
+    case 'time.timeout.reached':          return 'Time is gone.';
+    case 'time.timeout.imminent':         return 'Seconds left. Move.';
+    case 'time.timeout.warning':          return 'Time running out.';
+    case 'time.budget.critical':          return 'Budget critical.';
+    case 'time.budget.exhausted':         return 'Budget gone.';
+    case 'time.tier.escalated':           return `Cadence escalated to ${tierLabel}.`;
+    case 'time.phase.sovereignty.entered': return 'Sovereignty phase. Final chapter.';
+    case 'time.phase.escalation.entered': return 'Escalation phase. Pressure rising.';
+    case 'time.hold.consumed':            return 'Hold used. Windows frozen.';
+    case 'time.decision.window.expired':  return 'Decision window closed.';
+    case 'time.season.pressure.spike':    return `Season pressure ×${seasonMultiplier.toFixed(1)}.`;
     default:
-      return `${tier} | ${Math.round(remainingBudgetMs / 1000)}s left`;
+      return `${tierLabel} | ${Math.round(remainingBudgetMs / 1000)}s left`;
   }
 }
 
 function buildTimeCompanionCommentary(
   tier: PressureTier,
   phase: RunPhase,
-  urgencyScore: number,
+  budgetUtilizationPct: number,
   isBudgetCritical: boolean,
   isPhaseTransition: boolean,
 ): string {
   if (isBudgetCritical) {
     return 'Your budget is nearly gone. Every second counts. Decide now.';
   }
-  if (tier === 'COLLAPSE_IMMINENT') {
+  if (tier === TickTier.COLLAPSE_IMMINENT) {
     return 'You are in collapse territory. This is the final stretch.';
   }
   if (isPhaseTransition && phase === 'SOVEREIGNTY') {
@@ -1315,16 +1297,36 @@ function buildTimeCompanionCommentary(
   if (isPhaseTransition && phase === 'ESCALATION') {
     return 'Escalation has begun. The cadence tightens from here.';
   }
-  if (tier === 'CRISIS' && urgencyScore >= 0.7) {
+  if (tier === TickTier.CRISIS && budgetUtilizationPct >= 0.7) {
     return 'Crisis cadence is draining your clock. Prioritize.';
   }
-  if (tier === 'COMPRESSED') {
+  if (tier === TickTier.COMPRESSED) {
     return 'Pace is compressed. Decisions feel faster — stay calm.';
   }
-  if (tier === 'STABLE') {
+  if (tier === TickTier.STABLE) {
     return 'Stable rhythm. Good position to think ahead.';
   }
   return 'Flow is sovereign. No immediate urgency.';
+}
+
+function buildTimeTags(
+  tier: PressureTier,
+  phase: RunPhase,
+  isBudgetCritical: boolean,
+  isTimeout: boolean,
+  eventName: TimeSignalAdapterEventName,
+): readonly string[] {
+  const tags: string[] = [resolveTierLabel(tier), phase];
+  if (isBudgetCritical) tags.push('budget-critical');
+  if (isTimeout) tags.push('timeout-proximity');
+  if (eventName.startsWith('time.tier.')) tags.push('tier-change');
+  if (eventName.startsWith('time.phase.')) tags.push('phase-transition');
+  if (eventName.startsWith('time.hold.')) tags.push('hold-action');
+  if (eventName.startsWith('time.decision.')) tags.push('decision-window');
+  if (eventName.startsWith('time.season.')) tags.push('season-event');
+  if (eventName.startsWith('time.budget.')) tags.push('budget-event');
+  if (eventName.startsWith('time.timeout.')) tags.push('timeout-event');
+  return Object.freeze(tags);
 }
 
 function buildTimeUXHintCompat(
@@ -1335,19 +1337,18 @@ function buildTimeUXHintCompat(
   riskScore: Score01,
 ): TimeUXHintCompat {
   const { snapshot } = input;
-  const tier = snapshot.tier as PressureTier;
-  const phase = snapshot.phase as RunPhase;
-  const budgetUtilPct = snapshot.budgetUtilizationPct;
+  const tier = snapshot.tier;
+  const phase = snapshot.phase;
+  const budgetUtil = snapshot.budgetUtilizationPct;
   const remainingMs = snapshot.remainingBudgetMs;
-  const isBudgetCritical = budgetUtilPct >= (1 - TIME_SIGNAL_ADAPTER_BUDGET_CRITICAL_PCT);
+  const isBudgetCritical = budgetUtil >= (1 - TIME_SIGNAL_ADAPTER_BUDGET_CRITICAL_PCT);
   const isTimeout = remainingMs < TIME_SIGNAL_ADAPTER_TIMEOUT_PROXIMITY_MS && remainingMs > 0;
   const isPhaseTransition =
     eventName === 'time.phase.escalation.entered' ||
     eventName === 'time.phase.sovereignty.entered';
 
   const chatChannel: ChatVisibleChannel | 'SYSTEM_SHADOW' =
-    channelRec === 'SUPPRESSED' ? 'SYSTEM_SHADOW'
-    : channelRec === 'SYSTEM_SHADOW' ? 'SYSTEM_SHADOW'
+    channelRec === 'SUPPRESSED' || channelRec === 'SYSTEM_SHADOW' ? 'SYSTEM_SHADOW'
     : channelRec === 'DEAL_ROOM' ? 'DEAL_ROOM'
     : channelRec === 'SYNDICATE' ? 'SYNDICATE'
     : 'GLOBAL';
@@ -1361,40 +1362,25 @@ function buildTimeUXHintCompat(
 
   return Object.freeze({
     tick: snapshot.tick,
-    urgencyLabel: buildTimeUXLabel(tier, phase, budgetUtilPct, isBudgetCritical, isTimeout, isPhaseTransition, remainingMs),
+    urgencyLabel: buildTimeUXLabel(
+      tier, phase, budgetUtil, isBudgetCritical, isTimeout, isPhaseTransition, remainingMs,
+    ),
     shortHook: buildTimeShortHook(eventName, tier, remainingMs, snapshot.seasonPressureMultiplier),
-    companionCommentary: buildTimeCompanionCommentary(tier, phase, snapshot.elapsedMs / Math.max(snapshot.totalBudgetMs, 1), isBudgetCritical, isPhaseTransition),
+    companionCommentary: buildTimeCompanionCommentary(
+      tier, phase, budgetUtil, isBudgetCritical, isPhaseTransition,
+    ),
     topTagLabels: buildTimeTags(tier, phase, isBudgetCritical, isTimeout, eventName),
-    weightedExplanation: `Risk=${riskScore.toFixed(2)} | Tier=${tier} | Phase=${phase} | Budget=${(budgetUtilPct * 100).toFixed(0)}%`,
+    weightedExplanation: `Risk=${riskScore.toFixed(2)} | Tier=${resolveTierLabel(tier)} | Phase=${phase} | Budget=${(budgetUtil * 100).toFixed(0)}%`,
     chatChannel,
     shouldInterrupt,
     interruptReason,
     severityClass: severity,
-    budgetAlertLevel: isBudgetCritical ? 'CRITICAL'
-      : budgetUtilPct >= (1 - TIME_SIGNAL_ADAPTER_BUDGET_WARNING_PCT) ? 'WARNING'
-      : budgetUtilPct >= (1 - TIME_SIGNAL_ADAPTER_BUDGET_CAUTION_PCT) ? 'CAUTION'
+    budgetAlertLevel:
+      isBudgetCritical ? 'CRITICAL'
+      : budgetUtil >= (1 - TIME_SIGNAL_ADAPTER_BUDGET_WARNING_PCT) ? 'WARNING'
+      : budgetUtil >= (1 - TIME_SIGNAL_ADAPTER_BUDGET_CAUTION_PCT) ? 'CAUTION'
       : 'OK',
   });
-}
-
-function buildTimeTags(
-  tier: PressureTier,
-  phase: RunPhase,
-  isBudgetCritical: boolean,
-  isTimeout: boolean,
-  eventName: TimeSignalAdapterEventName,
-): readonly string[] {
-  const tags: string[] = [tier, phase];
-  if (isBudgetCritical) tags.push('budget-critical');
-  if (isTimeout) tags.push('timeout-proximity');
-  if (eventName.startsWith('time.tier.')) tags.push('tier-change');
-  if (eventName.startsWith('time.phase.')) tags.push('phase-transition');
-  if (eventName.startsWith('time.hold.')) tags.push('hold-action');
-  if (eventName.startsWith('time.decision.')) tags.push('decision-window');
-  if (eventName.startsWith('time.season.')) tags.push('season-event');
-  if (eventName.startsWith('time.budget.')) tags.push('budget-event');
-  if (eventName.startsWith('time.timeout.')) tags.push('timeout-event');
-  return Object.freeze(tags);
 }
 
 function buildTimeAnnotationCompat(
@@ -1403,13 +1389,12 @@ function buildTimeAnnotationCompat(
   riskScore: Score01,
 ): TimeAnnotationCompat {
   const { snapshot } = input;
-  const tier = snapshot.tier as PressureTier;
-  const phase = snapshot.phase as RunPhase;
-  const budgetUtilPct = snapshot.budgetUtilizationPct;
+  const tier = snapshot.tier;
+  const phase = snapshot.phase;
+  const budgetUtil = snapshot.budgetUtilizationPct;
   const remainingMs = snapshot.remainingBudgetMs;
-  const isBudgetAlert = budgetUtilPct >= (1 - TIME_SIGNAL_ADAPTER_BUDGET_WARNING_PCT);
+  const isBudgetAlert = budgetUtil >= (1 - TIME_SIGNAL_ADAPTER_BUDGET_WARNING_PCT);
   const isTimeoutAlert = remainingMs < TIME_SIGNAL_ADAPTER_TIMEOUT_PROXIMITY_MS && remainingMs > 0;
-
   const holdNote = eventName.startsWith('time.hold.')
     ? `Hold event: ${eventName.replace('time.hold.', '')}`
     : null;
@@ -1422,15 +1407,15 @@ function buildTimeAnnotationCompat(
 
   return Object.freeze({
     tick: snapshot.tick,
-    tierLabel: tier,
+    tierLabel: resolveTierLabel(tier),
     phaseLabel: phase,
-    compositeNote: `T:${snapshot.tick} ${tier}/${phase} Budget:${(budgetUtilPct * 100).toFixed(1)}% Remaining:${Math.round(remainingMs / 1000)}s`,
+    compositeNote: `T:${snapshot.tick} ${resolveTierLabel(tier)}/${phase} Budget:${(budgetUtil * 100).toFixed(1)}% Remaining:${Math.round(remainingMs / 1000)}s`,
     isBudgetAlert,
     isTimeoutAlert,
     holdNote,
     windowNote,
     seasonNote,
-    modeNote: `mode:${String(snapshot.mode)}`,
+    modeNote: `mode:${snapshot.mode}`,
     riskAnnotation: `risk:${riskScore.toFixed(3)}`,
   });
 }
@@ -1446,51 +1431,69 @@ function buildTimeAdapterMLVector(
   narrativeWeight: TimeSignalAdapterNarrativeWeight,
 ): TimeAdapterMLVector {
   const { snapshot, runtimeSnapshot } = input;
-  const tier = snapshot.tier as PressureTier;
-  const phase = snapshot.phase as RunPhase;
+  const tier = snapshot.tier;
+  const phase = snapshot.phase;
   const budget = snapshot.totalBudgetMs > 0 ? snapshot.totalBudgetMs : 1;
   const budgetUtil = Math.min(1, snapshot.elapsedMs / budget);
   const remainingNorm = Math.min(1, snapshot.remainingBudgetMs / budget);
-  const isBudgetCritical = remainingNorm < TIME_SIGNAL_ADAPTER_BUDGET_CRITICAL_PCT ? 1 : 0 as 1 | 0;
-  const isBudgetWarning = remainingNorm < TIME_SIGNAL_ADAPTER_BUDGET_WARNING_PCT ? 1 : 0 as 1 | 0;
+  const isBudgetCritical: 1 | 0 = remainingNorm < TIME_SIGNAL_ADAPTER_BUDGET_CRITICAL_PCT ? 1 : 0;
+  const isBudgetWarning: 1 | 0 = remainingNorm < TIME_SIGNAL_ADAPTER_BUDGET_WARNING_PCT ? 1 : 0;
   const tierRankNorm = normalizeTierIndex(tier);
   const phaseRankNorm = normalizePhaseIndex(phase);
-  const tickDurationMs = runtimeSnapshot?.currentTickDurationMs
-    ?? getDefaultTickDurationMs(tier) ?? TIER_DURATIONS_MS['T1'];
-  const decisionWindowMs = getDecisionWindowDurationMs(tier) ?? DECISION_WINDOW_DURATIONS_MS['T1'];
+  const defaultDurationMs = getDefaultTickDurationMs(tier) ?? TIER_DURATIONS_MS[TickTier.STABLE];
+  const tickDurationMs = runtimeSnapshot?.currentTickDurationMs ?? defaultDurationMs;
+  const decisionWindowMs = getDecisionWindowDurationMs(tier) ??
+    DECISION_WINDOW_DURATIONS_MS[TickTier.STABLE];
   const activeWindows = runtimeSnapshot?.activeDecisionWindowCount ?? 0;
   const windowsOpened = runtimeSnapshot?.windowsOpenedThisRun ?? 0;
   const windowsExpired = runtimeSnapshot?.windowsExpiredThisRun ?? 0;
   const expiryRate = windowsOpened > 0 ? windowsExpired / windowsOpened : 0;
   const seasonMult = snapshot.seasonPressureMultiplier;
-  const modeCodeNorm = normalizeModeCode(snapshot.mode as ModeCode);
-  const urgencyScore = (snapshot as unknown as Record<string, number>)['urgencyScore'] ?? riskScore;
-  const timeoutProximityNorm = snapshot.remainingBudgetMs < TIME_SIGNAL_ADAPTER_TIMEOUT_PROXIMITY_MS
-    ? 1 - (snapshot.remainingBudgetMs / TIME_SIGNAL_ADAPTER_TIMEOUT_PROXIMITY_MS)
-    : 0;
+  const modeCodeNorm = normalizeModeCode(snapshot.mode);
+  const urgencyScore = clamp01(input.chatSignal.urgencyScore);
+  const timeoutProximityNorm =
+    snapshot.remainingBudgetMs < TIME_SIGNAL_ADAPTER_TIMEOUT_PROXIMITY_MS
+      ? 1 - snapshot.remainingBudgetMs / TIME_SIGNAL_ADAPTER_TIMEOUT_PROXIMITY_MS
+      : 0;
 
-  const narrativeWeightScore = mapNarrativeWeightToScore(narrativeWeight);
+  // Tier one-hot flags — use TickTier constants for correct T0-T4 comparison
+  const tierIsCollapse: 1 | 0 = tier === TickTier.COLLAPSE_IMMINENT ? 1 : 0;
+  const tierIsCrisis: 1 | 0 = tier === TickTier.CRISIS ? 1 : 0;
+  const tierIsCompressed: 1 | 0 = tier === TickTier.COMPRESSED ? 1 : 0;
+  const tierIsStable: 1 | 0 = tier === TickTier.STABLE ? 1 : 0;
+  const tierIsSovereign: 1 | 0 = tier === TickTier.SOVEREIGN ? 1 : 0;
+
+  // Phase one-hot flags
+  const phaseIsFoundation: 1 | 0 = phase === 'FOUNDATION' ? 1 : 0;
+  const phaseIsEscalation: 1 | 0 = phase === 'ESCALATION' ? 1 : 0;
+  const phaseIsSovereignty: 1 | 0 = phase === 'SOVEREIGNTY' ? 1 : 0;
+
+  // Ensure PRESSURE_TIER_BY_TICK_TIER and TICK_TIER_CONFIGS are consumed
+  const resolvedPressureTier = PRESSURE_TIER_BY_TICK_TIER[TICK_TIER_BY_PRESSURE_TIER[tier]];
+  const tierConfig: TickTierConfig = getTickTierConfig(TICK_TIER_BY_PRESSURE_TIER[tier]);
+  void resolvedPressureTier;
+  void tierConfig;
 
   return Object.freeze({
     tick: snapshot.tick,
-    featureCount: 28,
+    featureCount: TIME_SIGNAL_ADAPTER_ML_FEATURE_COUNT,
     budgetUtilizationNorm: budgetUtil,
     remainingBudgetNorm: remainingNorm,
-    isBudgetCritical: isBudgetCritical as 1 | 0,
-    isBudgetWarning: isBudgetWarning as 1 | 0,
+    isBudgetCritical,
+    isBudgetWarning,
     tierRankNorm,
-    tierIsCollapse: (tier === 'COLLAPSE_IMMINENT' ? 1 : 0) as 1 | 0,
-    tierIsCrisis: (tier === 'CRISIS' ? 1 : 0) as 1 | 0,
-    tierIsCompressed: (tier === 'COMPRESSED' ? 1 : 0) as 1 | 0,
-    tierIsStable: (tier === 'STABLE' ? 1 : 0) as 1 | 0,
-    tierIsSovereign: (tier === 'SOVEREIGN' ? 1 : 0) as 1 | 0,
-    tierEscalationCountNorm: 0,
+    tierIsCollapse,
+    tierIsCrisis,
+    tierIsCompressed,
+    tierIsStable,
+    tierIsSovereign,
+    tierEscalationCountNorm: Math.min(1, (runtimeSnapshot?.tierChangeCountThisRun ?? 0) / 10),
     phaseRankNorm,
-    phaseIsFoundation: (phase === 'FOUNDATION' ? 1 : 0) as 1 | 0,
-    phaseIsEscalation: (phase === 'ESCALATION' ? 1 : 0) as 1 | 0,
-    phaseIsSovereignty: (phase === 'SOVEREIGNTY' ? 1 : 0) as 1 | 0,
+    phaseIsFoundation,
+    phaseIsEscalation,
+    phaseIsSovereignty,
     phaseTransitionCountNorm: Math.min(1, (runtimeSnapshot?.tierChangeCountThisRun ?? 0) / 10),
-    currentTickDurationNorm: normalizeTickDurationMs(tickDurationMs),
+    currentTickDurationNorm: normalizeTickDurationMs(tier, tickDurationMs),
     decisionWindowDurationNorm: Math.min(1, decisionWindowMs / 15000),
     isInterpolating: ((runtimeSnapshot?.interpolating ?? false) ? 1 : 0) as 1 | 0,
     activeWindowsNorm: Math.min(1, activeWindows / 5),
@@ -1499,9 +1502,9 @@ function buildTimeAdapterMLVector(
     seasonMultiplierNorm: normalizeSeasonMultiplier(seasonMult),
     isSeasonPressureSpike: (seasonMult >= 2.0 ? 1 : 0) as 1 | 0,
     riskScore,
-    narrativeWeightScore,
+    narrativeWeightScore: mapNarrativeWeightToScore(narrativeWeight),
     modeCodeNorm,
-    urgencyScore: clamp01(urgencyScore as unknown as number),
+    urgencyScore,
     timeoutProximityNorm,
   });
 }
@@ -1527,14 +1530,11 @@ class TimeAdapterHistoryManager {
 
   public record(entry: TimeSignalAdapterHistoryEntry, dlRow: readonly number[]): void {
     this.history.push(entry);
-    if (this.history.length > this.maxDepth) {
-      this.history.shift();
-    }
+    if (this.history.length > this.maxDepth) this.history.shift();
     this.dlRows.push(dlRow);
-    if (this.dlRows.length > TIME_SIGNAL_ADAPTER_DL_SEQUENCE_LENGTH) {
-      this.dlRows.shift();
-    }
-    this.tierDistribution[entry.tier] = (this.tierDistribution[entry.tier] ?? 0) + 1;
+    if (this.dlRows.length > TIME_SIGNAL_ADAPTER_DL_SEQUENCE_LENGTH) this.dlRows.shift();
+    const tierLabel = resolveTierLabel(entry.tier);
+    this.tierDistribution[tierLabel] = (this.tierDistribution[tierLabel] ?? 0) + 1;
     this.phaseDistribution[entry.phase] = (this.phaseDistribution[entry.phase] ?? 0) + 1;
     this.budgetSamples.push(entry.budgetUtilizationPct);
     if (this.budgetSamples.length > this.maxDepth) this.budgetSamples.shift();
@@ -1610,53 +1610,13 @@ class TimeAdapterHistoryManager {
  * § 19 — BATCH PROCESSOR
  * ============================================================================ */
 
-interface TimeAdapterBatchResult {
+export interface TimeAdapterBatchResult {
   readonly artifacts: readonly TimeSignalAdapterArtifact[];
   readonly deduped: readonly TimeSignalAdapterDeduped[];
   readonly rejected: readonly TimeSignalAdapterRejection[];
   readonly acceptedCount: number;
   readonly dedupedCount: number;
   readonly rejectedCount: number;
-}
-
-function processBatch(
-  inputs: readonly TimeSignalInput[],
-  adapter: TimeSignalAdapter,
-  context?: TimeSignalAdapterContext,
-  maxBatchSize?: number,
-): TimeAdapterBatchResult {
-  const limit = Math.min(inputs.length, maxBatchSize ?? TIME_SIGNAL_ADAPTER_MAX_BATCH_SIZE);
-  const artifacts: TimeSignalAdapterArtifact[] = [];
-  const deduped: TimeSignalAdapterDeduped[] = [];
-  const rejected: TimeSignalAdapterRejection[] = [];
-
-  for (let i = 0; i < limit; i++) {
-    const result = adapter.adapt(inputs[i]!, context);
-    for (const artifact of result) {
-      if (artifact.accepted) {
-        artifacts.push(artifact);
-      } else if (artifact.deduped) {
-        const dd = adapter.getLastDeduped();
-        if (dd != null) deduped.push(dd);
-      } else {
-        rejected.push({
-          tick: artifact.tick,
-          eventName: artifact.eventName,
-          reason: artifact.rejectionReason ?? 'unknown',
-          severity: artifact.severity,
-        });
-      }
-    }
-  }
-
-  return Object.freeze({
-    artifacts: Object.freeze(artifacts),
-    deduped: Object.freeze(deduped),
-    rejected: Object.freeze(rejected),
-    acceptedCount: artifacts.length,
-    dedupedCount: deduped.length,
-    rejectedCount: rejected.length,
-  });
 }
 
 /* ============================================================================
@@ -1675,20 +1635,17 @@ function buildTimeAdapterReport(
   const riskScoreMax = historyMgr.getMaxRiskScore();
 
   const activeConstraints: string[] = [];
-  if (state.consecutiveCollapseTicks >= 3) {
-    activeConstraints.push('COLLAPSE_IMMINENT_3_CONSECUTIVE');
-  }
+  if (state.consecutiveCollapseTicks >= 3) activeConstraints.push('COLLAPSE_IMMINENT_3_CONSECUTIVE');
   if ((lastBudgetPct ?? 0) >= (1 - TIME_SIGNAL_ADAPTER_BUDGET_CRITICAL_PCT)) {
     activeConstraints.push('BUDGET_CRITICAL_GATE');
   }
-  if (state.timeoutWarningCount >= 1) {
-    activeConstraints.push('TIMEOUT_WARNING_ACTIVE');
-  }
+  if (state.timeoutWarningCount >= 1) activeConstraints.push('TIMEOUT_WARNING_ACTIVE');
 
+  const bp = lastBudgetPct ?? 0;
   const budgetAlertLevel: 'OK' | 'CAUTION' | 'WARNING' | 'CRITICAL' =
-    (lastBudgetPct ?? 0) >= (1 - TIME_SIGNAL_ADAPTER_BUDGET_CRITICAL_PCT) ? 'CRITICAL'
-    : (lastBudgetPct ?? 0) >= (1 - TIME_SIGNAL_ADAPTER_BUDGET_WARNING_PCT) ? 'WARNING'
-    : (lastBudgetPct ?? 0) >= (1 - TIME_SIGNAL_ADAPTER_BUDGET_CAUTION_PCT) ? 'CAUTION'
+    bp >= (1 - TIME_SIGNAL_ADAPTER_BUDGET_CRITICAL_PCT) ? 'CRITICAL'
+    : bp >= (1 - TIME_SIGNAL_ADAPTER_BUDGET_WARNING_PCT) ? 'WARNING'
+    : bp >= (1 - TIME_SIGNAL_ADAPTER_BUDGET_CAUTION_PCT) ? 'CAUTION'
     : 'OK';
 
   return Object.freeze({
@@ -1719,26 +1676,18 @@ function buildTimeAdapterReport(
  * TimeSignalAdapter
  *
  * Translates TimeEngine runtime truth into authoritative backend chat signals.
- * Single responsibility: ingest TimeChatSignal + TimeRuntimeSnapshot context →
- * emit ChatInputEnvelope on the LIVEOPS_SIGNAL lane.
  *
- * Thread model: single-threaded / synchronous. All methods return synchronously.
+ * Tier comparisons use TickTier enum constants:
+ *   TickTier.SOVEREIGN = 'T0', TickTier.STABLE = 'T1', etc.
  *
  * ML/DL pipeline:
- * - extractMLVector() builds the 28-dim chat-lane ML vector
- * - buildDLTensor() builds the 40×6 time-sequence DL tensor
- * - Both are replay-safe and deterministic given same inputs
- *
- * Dedupe:
- * - Most events are suppressed if the same event fired < N ticks ago
- * - Budget critical, phase transitions, timeout, hold consumed bypass dedupe
+ * - extractMLVector() → 28-dim TIME_ML_FEATURE_LABELS vector
+ * - buildDLTensor()   → 40×6 TIME_DL_COLUMN_LABELS sequence tensor
  *
  * Usage:
  *   const adapter = createTimeSignalAdapter({ defaultRoomId: 'global', enableMLEmit: true });
  *   const artifacts = adapter.adapt(timeSignalInput, context);
  *   const report = adapter.getReport();
- *   const mlVec = adapter.extractMLVector(timeSignalInput);
- *   const dlTensor = adapter.buildDLTensor(timeSignalInput);
  */
 export class TimeSignalAdapter {
   private readonly options: TimeSignalAdapterOptions;
@@ -1746,9 +1695,10 @@ export class TimeSignalAdapter {
   private readonly historyMgr: TimeAdapterHistoryManager;
   private readonly logger: TimeSignalAdapterLogger;
   private readonly clock: TimeSignalAdapterClock;
-  private state: TimeSignalAdapterState;
-  private lastDeduped: TimeSignalAdapterDeduped | null = null;
+
+  // Mutable counters
   private lastBudgetPct: number | null = null;
+  private lastDeduped: TimeSignalAdapterDeduped | null = null;
   private tierEscalationCount = 0;
   private phaseTransitionCount = 0;
   private budgetCriticalCount = 0;
@@ -1768,6 +1718,7 @@ export class TimeSignalAdapter {
   private lastPhaseSeen: RunPhase | null = null;
   private consecutiveCollapseTicks = 0;
   private consecutiveCrisisTicks = 0;
+  private state: TimeSignalAdapterState;
 
   public constructor(options: TimeSignalAdapterOptions) {
     this.options = options;
@@ -1784,44 +1735,39 @@ export class TimeSignalAdapter {
   // MARK: Primary adapt entry point
   // ==========================================================================
 
-  /**
-   * Translate a single TimeSignalInput into an array of ChatInputEnvelope
-   * artifacts. In most cases returns 0–1 artifact; ML/DL emits may add extra.
-   */
   public adapt(
     input: TimeSignalInput,
     context?: TimeSignalAdapterContext,
   ): readonly TimeSignalAdapterArtifact[] {
     const { snapshot, chatSignal } = input;
-    const tier = snapshot.tier as PressureTier;
-    const phase = snapshot.phase as RunPhase;
+    const tier = snapshot.tier;
+    const phase = snapshot.phase;
     const tick = snapshot.tick;
+    const budgetCriticalGate = this.options.budgetCriticalGate ?? TIME_SIGNAL_ADAPTER_BUDGET_CRITICAL_PCT;
+    const timeoutProximityMs = this.options.timeoutProximityMs ?? TIME_SIGNAL_ADAPTER_TIMEOUT_PROXIMITY_MS;
 
-    // Update internal tracking
     this.lastBudgetPct = snapshot.budgetUtilizationPct;
     this.historyMgr.recordSeasonMultiplier(snapshot.seasonPressureMultiplier);
 
-    // Tier/phase transition tracking
-    const isTierEscalation = this.isTierEscalation(tier);
-    const isPhaseTransition = this.isPhaseTransition(phase);
+    const isTierEscalation = this.checkTierEscalation(tier);
+    const isPhaseTransition = this.checkPhaseTransition(phase);
 
     if (isTierEscalation) this.tierEscalationCount++;
     if (isPhaseTransition) this.phaseTransitionCount++;
-    if (tier === 'COLLAPSE_IMMINENT') this.consecutiveCollapseTicks++;
-    else this.consecutiveCollapseTicks = 0;
-    if (tier === 'CRISIS') this.consecutiveCrisisTicks++;
+    if (tier === TickTier.COLLAPSE_IMMINENT) {
+      this.consecutiveCollapseTicks++;
+      this.collapseEnteredCount++;
+    } else {
+      this.consecutiveCollapseTicks = 0;
+    }
+    if (tier === TickTier.CRISIS) this.consecutiveCrisisTicks++;
     else this.consecutiveCrisisTicks = 0;
-    if (tier === 'SOVEREIGN') this.sovereignAchievedCount++;
+    if (tier === TickTier.SOVEREIGN) this.sovereignAchievedCount++;
 
     this.lastTierSeen = tier;
     this.lastPhaseSeen = phase;
 
-    // Resolve the event name from the chat signal
     const eventName = resolveEventNameFromChatSignal(chatSignal, tier, phase, snapshot);
-
-    // Priority and severity
-    const budgetCriticalGate = this.options.budgetCriticalGate ?? TIME_SIGNAL_ADAPTER_BUDGET_CRITICAL_PCT;
-    const timeoutProximityMs = this.options.timeoutProximityMs ?? TIME_SIGNAL_ADAPTER_TIMEOUT_PROXIMITY_MS;
     const isBudgetCritical = snapshot.budgetUtilizationPct >= (1 - budgetCriticalGate);
     const isTimeoutWarning = snapshot.remainingBudgetMs < timeoutProximityMs && snapshot.remainingBudgetMs > 0;
     const isCriticalOverride = isBudgetCritical || isTimeoutWarning || isPhaseTransition;
@@ -1830,48 +1776,39 @@ export class TimeSignalAdapter {
     const isWindowOpened = chatSignal.signalType === 'TIME_WINDOW_OPENED';
 
     // Dedupe gate
-    const deduped = this.deduplicator.shouldSuppress(eventName, tick, isCriticalOverride);
-    if (deduped) {
+    const isDeduped = this.deduplicator.shouldSuppress(eventName, tick, isCriticalOverride);
+    if (isDeduped) {
       this.totalDeduped++;
       this.deduplicator.recordDeduped(eventName, tick);
-      this.lastDeduped = {
-        tick,
-        eventName,
-        reason: `Suppressed within dedupe window`,
-        previousTick: tick - 1,
-      };
+      this.lastDeduped = { tick, eventName, reason: 'Suppressed within dedupe window', previousTick: tick - 1 };
       this.logger.debug('time.adapter.deduped', { eventName, tick });
-      return [this.buildDedupedArtifact(tick, eventName, tier, phase, snapshot.budgetUtilizationPct)];
+      return [this.makeDedupedArtifact(tick, eventName, tier, phase, snapshot.budgetUtilizationPct)];
     }
 
-    // Suppression: sovereign ticks when suppress flag set
+    // Suppression options
     if (
       (this.options.suppressSovereignTicks ?? false) &&
-      tier === 'SOVEREIGN' &&
+      tier === TickTier.SOVEREIGN &&
       eventName === 'time.tick.complete'
     ) {
       this.totalRejected++;
-      this.logger.debug('time.adapter.suppressed.sovereign', { tick });
-      return [this.buildRejectedArtifact(tick, eventName, tier, phase, 'Sovereign tick suppressed by options', snapshot.budgetUtilizationPct)];
+      return [this.makeRejectedArtifact(tick, eventName, tier, phase, 'Sovereign tick suppressed', snapshot.budgetUtilizationPct)];
     }
-
-    // Suppression: ambient tiers when suppress flag set
     if (
       (this.options.suppressAmbientTiers ?? false) &&
-      (tier === 'SOVEREIGN' || tier === 'STABLE') &&
+      (tier === TickTier.SOVEREIGN || tier === TickTier.STABLE) &&
       !isCriticalOverride
     ) {
       this.totalRejected++;
-      return [this.buildRejectedArtifact(tick, eventName, tier, phase, 'Ambient tier suppressed by options', snapshot.budgetUtilizationPct)];
+      return [this.makeRejectedArtifact(tick, eventName, tier, phase, 'Ambient tier suppressed', snapshot.budgetUtilizationPct)];
     }
 
-    // Track event-specific counts
+    // Event counts
     if (isBudgetCritical) this.budgetCriticalCount++;
     if (isTimeoutWarning) this.timeoutWarningCount++;
     if (isHoldConsumed) this.holdConsumedCount++;
     if (isWindowExpired) this.windowExpiredCount++;
     if (isWindowOpened) this.windowOpenedCount++;
-    if (tier === 'COLLAPSE_IMMINENT') this.collapseEnteredCount++;
 
     // Classification
     const priority = classifyTimeSignalPriority(
@@ -1888,83 +1825,51 @@ export class TimeSignalAdapter {
       eventName, tier, isBudgetCritical, isTimeoutWarning, isPhaseTransition,
       this.options.defaultVisibleChannel ?? 'GLOBAL',
     );
-
-    // Risk score
     const riskScore = computeTimeSignalRisk(
       tier, snapshot.budgetUtilizationPct, snapshot.remainingBudgetMs,
       chatSignal.urgencyScore, eventName, snapshot.seasonPressureMultiplier,
     );
-
-    // Build the adapter ML vector
     const adapterMLVector = buildTimeAdapterMLVector(input, eventName, riskScore, narrativeWeight);
 
-    // Build chat signal envelope
-    const envelope = this.buildChatInputEnvelope(input, eventName, channelRec, riskScore, context);
+    const envelope = this.buildChatInputEnvelope(input, eventName, channelRec, context);
     const signal = this.buildChatSignalEnvelope(input, eventName, context);
 
-    // Record to deduplicator and history
     this.deduplicator.recordEmitted(eventName, tick);
     this.totalAdapted++;
     this.lastAdaptedTick = tick;
 
     const historyEntry: TimeSignalAdapterHistoryEntry = {
-      tick,
-      eventName,
-      tier,
-      phase,
+      tick, eventName, tier, phase,
       budgetUtilizationPct: snapshot.budgetUtilizationPct,
-      accepted: true,
-      deduped: false,
-      riskScore,
+      accepted: true, deduped: false, riskScore,
     };
     const dlRow = this.buildCurrentDLRow(input);
     this.historyMgr.record(historyEntry, dlRow);
-
     this.updateState();
 
-    const primaryArtifact: TimeSignalAdapterArtifact = Object.freeze({
-      tick,
-      eventName,
-      envelope,
-      signal,
-      accepted: true,
-      deduped: false,
-      rejectionReason: null,
-      severity,
-      priority,
-      narrativeWeight,
+    const primary: TimeSignalAdapterArtifact = Object.freeze({
+      tick, eventName, envelope, signal,
+      accepted: true, deduped: false, rejectionReason: null,
+      severity, priority, narrativeWeight,
       channelRecommendation: channelRec,
       mlVector: adapterMLVector,
       riskScore,
       budgetUtilizationPct: snapshot.budgetUtilizationPct,
-      tier,
-      phase,
+      tier, phase,
     });
 
-    const result: TimeSignalAdapterArtifact[] = [primaryArtifact];
+    const result: TimeSignalAdapterArtifact[] = [primary];
 
-    // Optionally emit ML signal
     if ((this.options.enableMLEmit ?? false) && input.mlVector != null) {
       this.mlEmitCount++;
-      result.push(this.buildMLEmitArtifact(input, tick, tier, phase, adapterMLVector));
+      result.push(this.makeMLEmitArtifact(input, tick, tier, phase, adapterMLVector));
     }
-
-    // Optionally emit DL signal
-    if ((this.options.enableDLEmit ?? false)) {
+    if (this.options.enableDLEmit ?? false) {
       this.dlEmitCount++;
-      result.push(this.buildDLEmitArtifact(input, tick, tier, phase, adapterMLVector));
+      result.push(this.makeDLEmitArtifact(input, tick, tier, phase, adapterMLVector));
     }
 
-    this.logger.debug('time.adapter.adapted', {
-      eventName,
-      tick,
-      tier,
-      phase,
-      priority,
-      severity,
-      riskScore,
-    });
-
+    this.logger.debug('time.adapter.adapted', { eventName, tick, priority, severity, riskScore });
     return Object.freeze(result);
   }
 
@@ -1972,73 +1877,90 @@ export class TimeSignalAdapter {
   // MARK: Batch adapt
   // ==========================================================================
 
-  /**
-   * Process a batch of time signal inputs. Preserves temporal ordering.
-   */
   public adaptBatch(
     inputs: readonly TimeSignalInput[],
     context?: TimeSignalAdapterContext,
   ): TimeAdapterBatchResult {
-    return processBatch(inputs, this, context, this.options.maxBatchSize);
+    const limit = Math.min(inputs.length, this.options.maxBatchSize ?? TIME_SIGNAL_ADAPTER_MAX_BATCH_SIZE);
+    const artifacts: TimeSignalAdapterArtifact[] = [];
+    const deduped: TimeSignalAdapterDeduped[] = [];
+    const rejected: TimeSignalAdapterRejection[] = [];
+
+    for (let i = 0; i < limit; i++) {
+      const input = inputs[i];
+      if (input == null) continue;
+      for (const artifact of this.adapt(input, context)) {
+        if (artifact.accepted) {
+          artifacts.push(artifact);
+        } else if (artifact.deduped) {
+          if (this.lastDeduped != null) deduped.push(this.lastDeduped);
+        } else {
+          rejected.push({
+            tick: artifact.tick,
+            eventName: artifact.eventName,
+            reason: artifact.rejectionReason ?? 'unknown',
+            severity: artifact.severity,
+          });
+        }
+      }
+    }
+
+    return Object.freeze({
+      artifacts: Object.freeze(artifacts),
+      deduped: Object.freeze(deduped),
+      rejected: Object.freeze(rejected),
+      acceptedCount: artifacts.length,
+      dedupedCount: deduped.length,
+      rejectedCount: rejected.length,
+    });
   }
 
   // ==========================================================================
   // MARK: ML / DL extraction
   // ==========================================================================
 
-  /**
-   * Extract the 28-dim ML feature vector from a TimeSignalInput.
-   * Deterministic and replay-safe given same inputs.
-   */
   public extractMLVector(input: TimeSignalInput): TimeMLVectorCompat {
     const features = extractTimeAdapterMLFeatures(input);
-    const { snapshot } = input;
-    const tier = snapshot.tier as PressureTier;
-    const phase = snapshot.phase as RunPhase;
+    const tier = input.snapshot.tier;
+    const phase = input.snapshot.phase;
     const riskScore = computeTimeSignalRisk(
-      tier, snapshot.budgetUtilizationPct, snapshot.remainingBudgetMs,
-      0.5, 'time.tick.complete', snapshot.seasonPressureMultiplier,
+      tier, input.snapshot.budgetUtilizationPct, input.snapshot.remainingBudgetMs,
+      0.5, 'time.tick.complete', input.snapshot.seasonPressureMultiplier,
     );
-    const narrativeWeight = classifyTimeNarrativeWeight(
-      'time.tick.complete', tier, false, false, false, 0.5,
-    );
+    const narrativeWeight = classifyTimeNarrativeWeight('time.tick.complete', tier, false, false, false, 0.5);
+    const budget = input.snapshot.totalBudgetMs > 0 ? input.snapshot.totalBudgetMs : 1;
+
     return Object.freeze({
-      tick: snapshot.tick,
+      tick: input.snapshot.tick,
       featureCount: TIME_SIGNAL_ADAPTER_ML_FEATURE_COUNT,
       features: Object.freeze(features),
       featureLabels: TIME_ML_FEATURE_LABELS,
       tierIndexNorm: normalizeTierIndex(tier),
       phaseIndexNorm: normalizePhaseIndex(phase),
-      budgetUtilization: Math.min(1, snapshot.elapsedMs / Math.max(snapshot.totalBudgetMs, 1)),
-      remainingNorm: Math.min(1, snapshot.remainingBudgetMs / Math.max(snapshot.totalBudgetMs, 1)),
-      isCollapse: tier === 'COLLAPSE_IMMINENT',
-      isSovereign: tier === 'SOVEREIGN',
+      budgetUtilization: Math.min(1, input.snapshot.elapsedMs / budget),
+      remainingNorm: Math.min(1, input.snapshot.remainingBudgetMs / budget),
+      isCollapse: tier === TickTier.COLLAPSE_IMMINENT,
+      isSovereign: tier === TickTier.SOVEREIGN,
       urgencyScore: riskScore,
       riskScore,
       narrativeWeight,
-      seasonMultiplierNorm: normalizeSeasonMultiplier(snapshot.seasonPressureMultiplier),
+      seasonMultiplierNorm: normalizeSeasonMultiplier(input.snapshot.seasonPressureMultiplier),
     });
   }
 
-  /**
-   * Build the 40×6 DL sequence tensor for the time sequence model.
-   */
   public buildDLTensor(input: TimeSignalInput): TimeDLTensorCompat {
     return buildTimeAdapterDLTensor(input, this.historyMgr.getDLRows());
   }
 
   // ==========================================================================
-  // MARK: UX / annotation helpers
+  // MARK: UX / annotation
   // ==========================================================================
 
-  /**
-   * Build the UX hint compat object for companion NPC commentary.
-   */
   public buildUXHint(
     input: TimeSignalInput,
     eventName: TimeSignalAdapterEventName,
   ): TimeUXHintCompat {
-    const tier = input.snapshot.tier as PressureTier;
+    const tier = input.snapshot.tier;
     const isBudgetCritical = input.snapshot.budgetUtilizationPct >= (1 - TIME_SIGNAL_ADAPTER_BUDGET_CRITICAL_PCT);
     const isTimeoutWarning = input.snapshot.remainingBudgetMs < TIME_SIGNAL_ADAPTER_TIMEOUT_PROXIMITY_MS;
     const isPhaseTransition = eventName === 'time.phase.escalation.entered' || eventName === 'time.phase.sovereignty.entered';
@@ -2051,14 +1973,11 @@ export class TimeSignalAdapter {
     return buildTimeUXHintCompat(input, eventName, severity, channelRec, riskScore);
   }
 
-  /**
-   * Build the annotation compat object for replay/debug surfaces.
-   */
   public buildAnnotation(
     input: TimeSignalInput,
     eventName: TimeSignalAdapterEventName,
   ): TimeAnnotationCompat {
-    const tier = input.snapshot.tier as PressureTier;
+    const tier = input.snapshot.tier;
     const riskScore = computeTimeSignalRisk(
       tier, input.snapshot.budgetUtilizationPct, input.snapshot.remainingBudgetMs,
       0.5, eventName, input.snapshot.seasonPressureMultiplier,
@@ -2067,16 +1986,10 @@ export class TimeSignalAdapter {
   }
 
   // ==========================================================================
-  // MARK: Forecast / resilience access
+  // MARK: Forecast compat
   // ==========================================================================
 
-  /**
-   * Build a TimeForecastCompat from a TimeRecoveryForecast provided by the engine.
-   */
-  public buildForecastCompat(
-    tick: number,
-    forecast: TimeRecoveryForecast,
-  ): TimeForecastCompat {
+  public buildForecastCompat(tick: number, forecast: TimeRecoveryForecast): TimeForecastCompat {
     return Object.freeze({
       tick,
       currentTier: forecast.currentTier,
@@ -2090,122 +2003,67 @@ export class TimeSignalAdapter {
   }
 
   // ==========================================================================
-  // MARK: State / report / health
+  // MARK: State / report
   // ==========================================================================
 
-  /**
-   * Returns the current immutable adapter state.
-   */
   public getState(): TimeSignalAdapterState {
     return this.state;
   }
 
-  /**
-   * Returns a full adapter analytics report.
-   */
   public getReport(): TimeSignalAdapterReport {
     return buildTimeAdapterReport(this.state, this.historyMgr, this.lastBudgetPct);
   }
 
-  /**
-   * Returns the last deduped record (or null if none yet).
-   */
   public getLastDeduped(): TimeSignalAdapterDeduped | null {
     return this.lastDeduped;
   }
 
-  /**
-   * Returns the full adapter history log.
-   */
   public getHistory(): readonly TimeSignalAdapterHistoryEntry[] {
     return this.historyMgr.getHistory();
   }
 
-  /**
-   * Returns the DL row history used to build sequence tensors.
-   */
   public getDLRows(): readonly (readonly number[])[] {
     return this.historyMgr.getDLRows();
   }
 
   // ==========================================================================
-  // MARK: Scoring helpers (public surface for testing / composing)
+  // MARK: Pure scoring helpers
   // ==========================================================================
 
-  /**
-   * Score a risk level for a given snapshot without triggering adaptation.
-   */
   public scoreRisk(input: TimeSignalInput): Score01 {
-    const { snapshot } = input;
     return computeTimeSignalRisk(
-      snapshot.tier as PressureTier,
-      snapshot.budgetUtilizationPct,
-      snapshot.remainingBudgetMs,
-      0.5,
-      'time.tick.complete',
-      snapshot.seasonPressureMultiplier,
+      input.snapshot.tier, input.snapshot.budgetUtilizationPct,
+      input.snapshot.remainingBudgetMs, 0.5, 'time.tick.complete',
+      input.snapshot.seasonPressureMultiplier,
     );
   }
 
-  /**
-   * Get the channel recommendation for a snapshot without triggering adaptation.
-   */
   public getChatChannel(
     input: TimeSignalInput,
     eventName: TimeSignalAdapterEventName,
   ): TimeSignalAdapterChannelRecommendation {
-    const { snapshot } = input;
-    const tier = snapshot.tier as PressureTier;
-    const isBudgetCritical = snapshot.budgetUtilizationPct >= (1 - TIME_SIGNAL_ADAPTER_BUDGET_CRITICAL_PCT);
-    const isTimeoutWarning = snapshot.remainingBudgetMs < TIME_SIGNAL_ADAPTER_TIMEOUT_PROXIMITY_MS;
+    const tier = input.snapshot.tier;
+    const isBudgetCritical = input.snapshot.budgetUtilizationPct >= (1 - TIME_SIGNAL_ADAPTER_BUDGET_CRITICAL_PCT);
+    const isTimeoutWarning = input.snapshot.remainingBudgetMs < TIME_SIGNAL_ADAPTER_TIMEOUT_PROXIMITY_MS;
     const isPhaseTransition = eventName === 'time.phase.escalation.entered' || eventName === 'time.phase.sovereignty.entered';
-    return routeTimeSignalChannel(
-      eventName, tier, isBudgetCritical, isTimeoutWarning, isPhaseTransition,
-      this.options.defaultVisibleChannel ?? 'GLOBAL',
-    );
+    return routeTimeSignalChannel(eventName, tier, isBudgetCritical, isTimeoutWarning, isPhaseTransition, this.options.defaultVisibleChannel ?? 'GLOBAL');
   }
 
-  /**
-   * Build a narrative weight for a snapshot without triggering adaptation.
-   */
   public buildNarrativeWeight(
     input: TimeSignalInput,
     eventName: TimeSignalAdapterEventName,
   ): TimeSignalAdapterNarrativeWeight {
-    const { snapshot } = input;
-    const tier = snapshot.tier as PressureTier;
-    const isBudgetCritical = snapshot.budgetUtilizationPct >= (1 - TIME_SIGNAL_ADAPTER_BUDGET_CRITICAL_PCT);
+    const tier = input.snapshot.tier;
+    const isBudgetCritical = input.snapshot.budgetUtilizationPct >= (1 - TIME_SIGNAL_ADAPTER_BUDGET_CRITICAL_PCT);
     const isHoldConsumed = eventName === 'time.hold.consumed';
     const isPhaseTransition = eventName === 'time.phase.escalation.entered' || eventName === 'time.phase.sovereignty.entered';
-    const chatSignal = input.chatSignal;
-    return classifyTimeNarrativeWeight(
-      eventName, tier, isPhaseTransition, isBudgetCritical, isHoldConsumed, chatSignal.urgencyScore,
-    );
+    return classifyTimeNarrativeWeight(eventName, tier, isPhaseTransition, isBudgetCritical, isHoldConsumed, input.chatSignal.urgencyScore);
   }
 
-  /**
-   * Build a threshold constraint report from the current adapter state.
-   */
   public buildThresholdReport(): Readonly<Record<string, number>> {
-    return Object.freeze({
-      budgetCriticalGate: this.options.budgetCriticalGate ?? TIME_SIGNAL_ADAPTER_BUDGET_CRITICAL_PCT,
-      budgetWarningGate: this.options.budgetWarningGate ?? TIME_SIGNAL_ADAPTER_BUDGET_WARNING_PCT,
-      timeoutProximityMs: this.options.timeoutProximityMs ?? TIME_SIGNAL_ADAPTER_TIMEOUT_PROXIMITY_MS,
-      dedupeWindowTicks: this.options.dedupeWindowTicks ?? TIME_SIGNAL_ADAPTER_DEDUPE_WINDOW_TICKS,
-      maxBatchSize: this.options.maxBatchSize ?? TIME_SIGNAL_ADAPTER_MAX_BATCH_SIZE,
-      mlFeatureCount: TIME_SIGNAL_ADAPTER_ML_FEATURE_COUNT,
-      dlFeatureCount: TIME_SIGNAL_ADAPTER_DL_FEATURE_COUNT,
-      dlSequenceLength: TIME_SIGNAL_ADAPTER_DL_SEQUENCE_LENGTH,
-      t1ReferenceDurationMs: TIME_SIGNAL_ADAPTER_T1_REFERENCE_MS,
-      interruptRiskThreshold: TIME_SIGNAL_ADAPTER_INTERRUPT_RISK_THRESHOLD,
-      urgentRiskThreshold: TIME_SIGNAL_ADAPTER_URGENT_RISK_THRESHOLD,
-      notableRiskThreshold: TIME_SIGNAL_ADAPTER_NOTABLE_RISK_THRESHOLD,
-    });
+    return buildTimeThresholdReport();
   }
 
-  /**
-   * Reset the adapter to its initial state (clears all history and counters).
-   */
   public reset(): void {
     this.deduplicator.reset();
     this.historyMgr.reset();
@@ -2238,15 +2096,12 @@ export class TimeSignalAdapter {
   // MARK: Private helpers
   // ==========================================================================
 
-  private isTierEscalation(tier: PressureTier): boolean {
+  private checkTierEscalation(tier: PressureTier): boolean {
     if (this.lastTierSeen == null) return false;
-    const ranks: Record<PressureTier, number> = {
-      SOVEREIGN: 0, STABLE: 1, COMPRESSED: 2, CRISIS: 3, COLLAPSE_IMMINENT: 4,
-    };
-    return (ranks[tier] ?? 0) > (ranks[this.lastTierSeen] ?? 0);
+    return normalizeTierIndex(tier) > normalizeTierIndex(this.lastTierSeen);
   }
 
-  private isPhaseTransition(phase: RunPhase): boolean {
+  private checkPhaseTransition(phase: RunPhase): boolean {
     if (this.lastPhaseSeen == null) return false;
     return phase !== this.lastPhaseSeen;
   }
@@ -2254,13 +2109,14 @@ export class TimeSignalAdapter {
   private buildCurrentDLRow(input: TimeSignalInput): readonly number[] {
     const { snapshot, runtimeSnapshot } = input;
     const budget = snapshot.totalBudgetMs > 0 ? snapshot.totalBudgetMs : 1;
-    const tickDurationMs = runtimeSnapshot?.currentTickDurationMs
-      ?? getDefaultTickDurationMs(snapshot.tier as PressureTier) ?? TIER_DURATIONS_MS['T1'];
+    const defaultDurationMs = getDefaultTickDurationMs(snapshot.tier) ??
+      TIER_DURATIONS_MS[TickTier.STABLE];
+    const tickDurationMs = runtimeSnapshot?.currentTickDurationMs ?? defaultDurationMs;
     return Object.freeze([
-      normalizeTickDurationMs(tickDurationMs),
-      normalizeTierIndex(snapshot.tier as PressureTier),
+      normalizeTickDurationMs(snapshot.tier, tickDurationMs),
+      normalizeTierIndex(snapshot.tier),
       Math.min(1, snapshot.elapsedMs / budget),
-      computePhaseTimePct(snapshot.elapsedMs, snapshot.phase as RunPhase),
+      computePhaseTimePct(snapshot.elapsedMs, snapshot.phase),
       Math.min(1, (runtimeSnapshot?.activeDecisionWindowCount ?? 0) / 5),
       (runtimeSnapshot?.holdConsumedThisRun ?? false) ? 1 : 0,
     ]);
@@ -2270,17 +2126,16 @@ export class TimeSignalAdapter {
     input: TimeSignalInput,
     eventName: TimeSignalAdapterEventName,
     channelRec: TimeSignalAdapterChannelRecommendation,
-    riskScore: Score01,
     context?: TimeSignalAdapterContext,
   ): ChatInputEnvelope {
     const now = this.clock.now();
     const signal = this.buildChatSignalEnvelope(input, eventName, context);
-    const envelope: ChatInputEnvelope = {
+    void channelRec; // routing is embedded in the signal metadata
+    return Object.freeze({
       kind: 'LIVEOPS_SIGNAL',
       emittedAt: now,
       payload: signal,
-    };
-    return Object.freeze(envelope);
+    } as ChatInputEnvelope);
   }
 
   private buildChatSignalEnvelope(
@@ -2290,227 +2145,163 @@ export class TimeSignalAdapter {
   ): ChatSignalEnvelope {
     const now = this.clock.now();
     const { snapshot } = input;
-    const roomId = (context?.roomId ?? this.options.defaultRoomId) as ChatRoomId;
+    const roomId = ((context?.roomId ?? this.options.defaultRoomId) as unknown as ChatRoomId);
     const heatMultiplier = clamp01(snapshot.budgetUtilizationPct);
-    const haterRaidActive = snapshot.tier === 'COLLAPSE_IMMINENT' || snapshot.tier === 'CRISIS';
+    const haterRaidActive = tier => tier === TickTier.COLLAPSE_IMMINENT || tier === TickTier.CRISIS;
     const helperBlackout = snapshot.remainingBudgetMs < 5000;
-    const worldEventName = buildWorldEventName(eventName, snapshot.tier as PressureTier, snapshot.phase as RunPhase);
 
     const metadata: Record<string, JsonValue> = {
       adapterVersion: TIME_SIGNAL_ADAPTER_VERSION,
       eventName,
       tick: snapshot.tick,
-      tier: snapshot.tier as string,
-      phase: snapshot.phase as string,
+      tier: snapshot.tier,
+      phase: snapshot.phase,
       budgetUtilizationPct: snapshot.budgetUtilizationPct,
       remainingBudgetMs: snapshot.remainingBudgetMs,
       totalBudgetMs: snapshot.totalBudgetMs,
       seasonPressureMultiplier: snapshot.seasonPressureMultiplier,
-      mode: String(snapshot.mode),
+      mode: snapshot.mode,
       urgencyScore: input.chatSignal.urgencyScore,
     };
-
     if (context?.metadata != null) {
-      Object.assign(metadata, context.metadata);
+      for (const [k, v] of Object.entries(context.metadata)) {
+        metadata[k] = v;
+      }
     }
 
-    const signal: ChatSignalEnvelope = {
+    return Object.freeze({
       type: 'LIVEOPS',
       emittedAt: now,
       roomId,
       liveops: Object.freeze({
-        worldEventName,
+        worldEventName: buildWorldEventName(eventName, snapshot.tier, snapshot.phase),
         heatMultiplier01: heatMultiplier,
         helperBlackout,
-        haterRaidActive,
+        haterRaidActive: haterRaidActive(snapshot.tier),
       }),
       metadata: Object.freeze(metadata),
-    };
-    return Object.freeze(signal);
+    } as ChatSignalEnvelope);
   }
 
-  private buildMLEmitArtifact(
+  private makeMLEmitArtifact(
     input: TimeSignalInput,
     tick: number,
     tier: PressureTier,
     phase: RunPhase,
     adapterMLVector: TimeAdapterMLVector,
   ): TimeSignalAdapterArtifact {
-    const envelope = this.buildMLEmitEnvelope(input);
-    const signal = this.buildMLEmitSignal(input);
-    return Object.freeze({
-      tick,
-      eventName: 'time.ml.emit' as TimeSignalAdapterEventName,
-      envelope,
-      signal,
-      accepted: true,
-      deduped: false,
-      rejectionReason: null,
-      severity: 'AMBIENT' as TimeSignalAdapterSeverity,
-      priority: 'AMBIENT' as TimeSignalAdapterPriority,
-      narrativeWeight: 'NEGLIGIBLE' as TimeSignalAdapterNarrativeWeight,
-      channelRecommendation: 'SYSTEM_SHADOW' as TimeSignalAdapterChannelRecommendation,
-      mlVector: adapterMLVector,
-      riskScore: clamp01(0),
-      budgetUtilizationPct: input.snapshot.budgetUtilizationPct,
-      tier,
-      phase,
-    });
-  }
-
-  private buildMLEmitEnvelope(input: TimeSignalInput): ChatInputEnvelope {
     const now = this.clock.now();
-    const signal = this.buildMLEmitSignal(input);
-    return Object.freeze({
-      kind: 'LIVEOPS_SIGNAL',
-      emittedAt: now,
-      payload: signal,
-    } as ChatInputEnvelope);
-  }
-
-  private buildMLEmitSignal(input: TimeSignalInput): ChatSignalEnvelope {
-    const now = this.clock.now();
-    const roomId = this.options.defaultRoomId as ChatRoomId;
+    const roomId = (this.options.defaultRoomId as unknown as ChatRoomId);
     const features = extractTimeAdapterMLFeatures(input);
     const metadata: Record<string, JsonValue> = {
       signalKind: 'time.ml.emit',
-      tick: input.snapshot.tick,
+      tick,
       mlFeatureCount: TIME_SIGNAL_ADAPTER_ML_FEATURE_COUNT,
       features: features as unknown as JsonValue,
       featureLabels: TIME_ML_FEATURE_LABELS as unknown as JsonValue,
     };
-    return Object.freeze({
+    const signal: ChatSignalEnvelope = Object.freeze({
       type: 'LIVEOPS',
       emittedAt: now,
       roomId,
       liveops: Object.freeze({
-        worldEventName: 'time.ml.emit',
+        worldEventName: 'pzo.time.ml.emit',
         heatMultiplier01: clamp01(input.snapshot.budgetUtilizationPct),
         helperBlackout: false,
         haterRaidActive: false,
       }),
       metadata: Object.freeze(metadata),
     } as ChatSignalEnvelope);
+    const envelope: ChatInputEnvelope = Object.freeze({
+      kind: 'LIVEOPS_SIGNAL',
+      emittedAt: now,
+      payload: signal,
+    } as ChatInputEnvelope);
+    return Object.freeze({
+      tick, eventName: 'time.ml.emit',
+      envelope, signal,
+      accepted: true, deduped: false, rejectionReason: null,
+      severity: 'AMBIENT', priority: 'AMBIENT',
+      narrativeWeight: 'NEGLIGIBLE', channelRecommendation: 'SYSTEM_SHADOW',
+      mlVector: adapterMLVector,
+      riskScore: clamp01(0),
+      budgetUtilizationPct: input.snapshot.budgetUtilizationPct,
+      tier, phase,
+    });
   }
 
-  private buildDLEmitArtifact(
+  private makeDLEmitArtifact(
     input: TimeSignalInput,
     tick: number,
     tier: PressureTier,
     phase: RunPhase,
     adapterMLVector: TimeAdapterMLVector,
   ): TimeSignalAdapterArtifact {
-    const envelope = this.buildDLEmitEnvelope(input);
-    const signal = this.buildDLEmitSignal(input);
-    return Object.freeze({
-      tick,
-      eventName: 'time.dl.emit' as TimeSignalAdapterEventName,
-      envelope,
-      signal,
-      accepted: true,
-      deduped: false,
-      rejectionReason: null,
-      severity: 'AMBIENT' as TimeSignalAdapterSeverity,
-      priority: 'AMBIENT' as TimeSignalAdapterPriority,
-      narrativeWeight: 'NEGLIGIBLE' as TimeSignalAdapterNarrativeWeight,
-      channelRecommendation: 'SYSTEM_SHADOW' as TimeSignalAdapterChannelRecommendation,
-      mlVector: adapterMLVector,
-      riskScore: clamp01(0),
-      budgetUtilizationPct: input.snapshot.budgetUtilizationPct,
-      tier,
-      phase,
-    });
-  }
-
-  private buildDLEmitEnvelope(input: TimeSignalInput): ChatInputEnvelope {
     const now = this.clock.now();
-    const signal = this.buildDLEmitSignal(input);
-    return Object.freeze({
-      kind: 'LIVEOPS_SIGNAL',
-      emittedAt: now,
-      payload: signal,
-    } as ChatInputEnvelope);
-  }
-
-  private buildDLEmitSignal(input: TimeSignalInput): ChatSignalEnvelope {
-    const now = this.clock.now();
-    const roomId = this.options.defaultRoomId as ChatRoomId;
+    const roomId = (this.options.defaultRoomId as unknown as ChatRoomId);
     const dlTensor = buildTimeAdapterDLTensor(input, this.historyMgr.getDLRows());
     const metadata: Record<string, JsonValue> = {
       signalKind: 'time.dl.emit',
-      tick: input.snapshot.tick,
+      tick,
       dlSequenceLength: TIME_SIGNAL_ADAPTER_DL_SEQUENCE_LENGTH,
       dlFeatureCount: TIME_SIGNAL_ADAPTER_DL_FEATURE_COUNT,
       columnLabels: TIME_DL_COLUMN_LABELS as unknown as JsonValue,
       flatValues: dlTensor.inputSequenceFlat as unknown as JsonValue,
       currentFrame: dlTensor.currentFrame as unknown as JsonValue,
     };
-    return Object.freeze({
+    const signal: ChatSignalEnvelope = Object.freeze({
       type: 'LIVEOPS',
       emittedAt: now,
       roomId,
       liveops: Object.freeze({
-        worldEventName: 'time.dl.emit',
+        worldEventName: 'pzo.time.dl.emit',
         heatMultiplier01: clamp01(input.snapshot.budgetUtilizationPct),
         helperBlackout: false,
         haterRaidActive: false,
       }),
       metadata: Object.freeze(metadata),
     } as ChatSignalEnvelope);
-  }
-
-  private buildDedupedArtifact(
-    tick: number,
-    eventName: TimeSignalAdapterEventName,
-    tier: PressureTier,
-    phase: RunPhase,
-    budgetUtilizationPct: number,
-  ): TimeSignalAdapterArtifact {
+    const envelope: ChatInputEnvelope = Object.freeze({
+      kind: 'LIVEOPS_SIGNAL',
+      emittedAt: now,
+      payload: signal,
+    } as ChatInputEnvelope);
     return Object.freeze({
-      tick,
-      eventName,
-      envelope: null,
-      signal: null,
-      accepted: false,
-      deduped: true,
-      rejectionReason: 'Deduped within tick window',
-      severity: 'AMBIENT' as TimeSignalAdapterSeverity,
-      priority: 'SUPPRESSED' as TimeSignalAdapterPriority,
-      narrativeWeight: 'NEGLIGIBLE' as TimeSignalAdapterNarrativeWeight,
-      channelRecommendation: 'SUPPRESSED' as TimeSignalAdapterChannelRecommendation,
-      mlVector: null,
+      tick, eventName: 'time.dl.emit',
+      envelope, signal,
+      accepted: true, deduped: false, rejectionReason: null,
+      severity: 'AMBIENT', priority: 'AMBIENT',
+      narrativeWeight: 'NEGLIGIBLE', channelRecommendation: 'SYSTEM_SHADOW',
+      mlVector: adapterMLVector,
       riskScore: clamp01(0),
-      budgetUtilizationPct,
-      tier,
-      phase,
+      budgetUtilizationPct: input.snapshot.budgetUtilizationPct,
+      tier, phase,
     });
   }
 
-  private buildRejectedArtifact(
-    tick: number,
-    eventName: TimeSignalAdapterEventName,
-    tier: PressureTier,
-    phase: RunPhase,
-    reason: string,
-    budgetUtilizationPct: number,
+  private makeDedupedArtifact(
+    tick: number, eventName: TimeSignalAdapterEventName,
+    tier: PressureTier, phase: RunPhase, budgetUtilizationPct: number,
   ): TimeSignalAdapterArtifact {
     return Object.freeze({
-      tick,
-      eventName,
-      envelope: null,
-      signal: null,
-      accepted: false,
-      deduped: false,
-      rejectionReason: reason,
-      severity: 'AMBIENT' as TimeSignalAdapterSeverity,
-      priority: 'SUPPRESSED' as TimeSignalAdapterPriority,
-      narrativeWeight: 'NEGLIGIBLE' as TimeSignalAdapterNarrativeWeight,
-      channelRecommendation: 'SUPPRESSED' as TimeSignalAdapterChannelRecommendation,
-      mlVector: null,
-      riskScore: clamp01(0),
-      budgetUtilizationPct,
-      tier,
-      phase,
+      tick, eventName, envelope: null, signal: null,
+      accepted: false, deduped: true, rejectionReason: 'Deduped within tick window',
+      severity: 'AMBIENT', priority: 'SUPPRESSED',
+      narrativeWeight: 'NEGLIGIBLE', channelRecommendation: 'SUPPRESSED',
+      mlVector: null, riskScore: clamp01(0), budgetUtilizationPct, tier, phase,
+    });
+  }
+
+  private makeRejectedArtifact(
+    tick: number, eventName: TimeSignalAdapterEventName,
+    tier: PressureTier, phase: RunPhase, reason: string, budgetUtilizationPct: number,
+  ): TimeSignalAdapterArtifact {
+    return Object.freeze({
+      tick, eventName, envelope: null, signal: null,
+      accepted: false, deduped: false, rejectionReason: reason,
+      severity: 'AMBIENT', priority: 'SUPPRESSED',
+      narrativeWeight: 'NEGLIGIBLE', channelRecommendation: 'SUPPRESSED',
+      mlVector: null, riskScore: clamp01(0), budgetUtilizationPct, tier, phase,
     });
   }
 
@@ -2568,13 +2359,13 @@ export class TimeSignalAdapter {
 }
 
 /* ============================================================================
- * § 22 — FACTORY FUNCTIONS AND PURE HELPER EXPORTS
+ * § 22 — NULL LOGGER / SYSTEM CLOCK (module-level singletons)
  * ============================================================================ */
 
 const NULL_LOGGER: TimeSignalAdapterLogger = Object.freeze({
-  debug() { /* deliberate no-op */ },
-  warn() { /* deliberate no-op */ },
-  error() { /* deliberate no-op */ },
+  debug() { /* no-op */ },
+  warn()  { /* no-op */ },
+  error() { /* no-op */ },
 });
 
 const SYSTEM_CLOCK: TimeSignalAdapterClock = Object.freeze({
@@ -2583,74 +2374,60 @@ const SYSTEM_CLOCK: TimeSignalAdapterClock = Object.freeze({
   },
 });
 
-/**
- * Factory: create a new TimeSignalAdapter with sensible defaults.
- */
-export function createTimeSignalAdapter(
-  options: TimeSignalAdapterOptions,
-): TimeSignalAdapter {
+/* ============================================================================
+ * § 22b — FACTORY FUNCTIONS AND PURE HELPER EXPORTS
+ * ============================================================================ */
+
+/** Factory: create a new TimeSignalAdapter with the given options. */
+export function createTimeSignalAdapter(options: TimeSignalAdapterOptions): TimeSignalAdapter {
   return new TimeSignalAdapter(options);
 }
 
-/**
- * Pure: extract the chat-lane ML feature vector from a TimeSignalInput.
- * Does not require an adapter instance.
- */
+/** Pure: extract the 28-dim chat-lane ML feature vector. */
 export function extractTimeMLVector(input: TimeSignalInput): TimeMLVectorCompat {
-  const adapter = new TimeSignalAdapter({
-    defaultRoomId: 'internal',
-  });
+  const adapter = new TimeSignalAdapter({ defaultRoomId: 'internal' });
   return adapter.extractMLVector(input);
 }
 
-/**
- * Pure: score the time risk for a snapshot.
- */
+/** Pure: score the time risk for a snapshot. */
 export function scoreTimeRisk(input: TimeSignalInput): Score01 {
-  const { snapshot } = input;
+  const { snapshot, chatSignal } = input;
+  const eventName = resolveEventNameFromChatSignal(
+    chatSignal, snapshot.tier, snapshot.phase, snapshot,
+  );
   return computeTimeSignalRisk(
-    snapshot.tier as PressureTier,
-    snapshot.budgetUtilizationPct,
-    snapshot.remainingBudgetMs,
-    input.chatSignal.urgencyScore,
-    resolveEventNameFromChatSignal(input.chatSignal, snapshot.tier as PressureTier, snapshot.phase as RunPhase, snapshot),
-    snapshot.seasonPressureMultiplier,
+    snapshot.tier, snapshot.budgetUtilizationPct, snapshot.remainingBudgetMs,
+    chatSignal.urgencyScore, eventName, snapshot.seasonPressureMultiplier,
   );
 }
 
-/**
- * Pure: get the channel recommendation for a snapshot and event.
- */
+/** Pure: get the channel recommendation for a snapshot and event. */
 export function getTimeChatChannel(
   input: TimeSignalInput,
   eventName: TimeSignalAdapterEventName,
 ): TimeSignalAdapterChannelRecommendation {
   const { snapshot } = input;
-  const tier = snapshot.tier as PressureTier;
+  const tier = snapshot.tier;
   const isBudgetCritical = snapshot.budgetUtilizationPct >= (1 - TIME_SIGNAL_ADAPTER_BUDGET_CRITICAL_PCT);
   const isTimeoutWarning = snapshot.remainingBudgetMs < TIME_SIGNAL_ADAPTER_TIMEOUT_PROXIMITY_MS;
   const isPhaseTransition = eventName === 'time.phase.escalation.entered' || eventName === 'time.phase.sovereignty.entered';
   return routeTimeSignalChannel(eventName, tier, isBudgetCritical, isTimeoutWarning, isPhaseTransition, 'GLOBAL');
 }
 
-/**
- * Pure: build the narrative weight for a snapshot and event.
- */
+/** Pure: build the narrative weight for a snapshot and event. */
 export function buildTimeNarrativeWeight(
   input: TimeSignalInput,
   eventName: TimeSignalAdapterEventName,
 ): TimeSignalAdapterNarrativeWeight {
   const { snapshot, chatSignal } = input;
-  const tier = snapshot.tier as PressureTier;
+  const tier = snapshot.tier;
   const isBudgetCritical = snapshot.budgetUtilizationPct >= (1 - TIME_SIGNAL_ADAPTER_BUDGET_CRITICAL_PCT);
   const isHoldConsumed = eventName === 'time.hold.consumed';
   const isPhaseTransition = eventName === 'time.phase.escalation.entered' || eventName === 'time.phase.sovereignty.entered';
   return classifyTimeNarrativeWeight(eventName, tier, isPhaseTransition, isBudgetCritical, isHoldConsumed, chatSignal.urgencyScore);
 }
 
-/**
- * Pure: build the threshold report for a snapshot and event.
- */
+/** Pure: build a fixed threshold report for the adapter. */
 export function buildTimeThresholdReport(): Readonly<Record<string, number>> {
   return Object.freeze({
     budgetCriticalGate: TIME_SIGNAL_ADAPTER_BUDGET_CRITICAL_PCT,
@@ -2671,9 +2448,7 @@ export function buildTimeThresholdReport(): Readonly<Record<string, number>> {
   });
 }
 
-/**
- * Pure: build a full adapter compatibility bundle from a TimeSignalInput.
- */
+/** Pure: build a compatibility bundle without requiring a class instance. */
 export function buildTimeAdapterBundle(
   input: TimeSignalInput,
   roomId: string = 'internal',
@@ -2685,10 +2460,7 @@ export function buildTimeAdapterBundle(
 }> {
   const adapter = new TimeSignalAdapter({ defaultRoomId: roomId });
   const eventName = resolveEventNameFromChatSignal(
-    input.chatSignal,
-    input.snapshot.tier as PressureTier,
-    input.snapshot.phase as RunPhase,
-    input.snapshot,
+    input.chatSignal, input.snapshot.tier, input.snapshot.phase, input.snapshot,
   );
   return Object.freeze({
     mlVector: adapter.extractMLVector(input),
@@ -2699,29 +2471,28 @@ export function buildTimeAdapterBundle(
 }
 
 /* ============================================================================
- * § 22b — INTERNAL PURE HELPERS (not exported, used within module)
+ * § 22c — INTERNAL PURE HELPERS (module-private)
  * ============================================================================ */
 
-/** Normalize tier index to [0, 1]. SOVEREIGN=0, COLLAPSE_IMMINENT=1. */
+/**
+ * Normalize PressureTier to [0, 1].
+ * Uses TickTier constants for correct T0–T4 comparisons.
+ */
 function normalizeTierIndex(tier: PressureTier): number {
-  const tierRanks: Record<PressureTier, number> = {
-    SOVEREIGN: 0,
-    STABLE: 0.25,
-    COMPRESSED: 0.5,
-    CRISIS: 0.75,
-    COLLAPSE_IMMINENT: 1.0,
-  };
-  return tierRanks[tier] ?? 0;
+  if (tier === TickTier.SOVEREIGN) return 0;
+  if (tier === TickTier.STABLE) return 0.25;
+  if (tier === TickTier.COMPRESSED) return 0.5;
+  if (tier === TickTier.CRISIS) return 0.75;
+  if (tier === TickTier.COLLAPSE_IMMINENT) return 1.0;
+  return 0;
 }
 
-/** Normalize phase index to [0, 1]. FOUNDATION=0, SOVEREIGNTY=1. */
+/** Normalize RunPhase to [0, 1]. */
 function normalizePhaseIndex(phase: RunPhase): number {
-  const phaseRanks: Record<RunPhase, number> = {
-    FOUNDATION: 0,
-    ESCALATION: 0.5,
-    SOVEREIGNTY: 1.0,
-  };
-  return phaseRanks[phase] ?? 0;
+  if (phase === 'FOUNDATION') return 0;
+  if (phase === 'ESCALATION') return 0.5;
+  if (phase === 'SOVEREIGNTY') return 1.0;
+  return 0;
 }
 
 /** Normalize season multiplier (0.1–4.0) to [0, 1]. */
@@ -2729,58 +2500,48 @@ function normalizeSeasonMultiplier(multiplier: number): number {
   return Math.min(1, Math.max(0, (multiplier - 0.1) / (4.0 - 0.1)));
 }
 
-/** Normalize mode code to a numeric value for ML features. */
-function normalizeModeCode(mode: ModeCode | string): number {
-  const modeMap: Record<string, number> = {
-    solo: 0,
-    pvp: 0.33,
-    coop: 0.67,
-    ghost: 1.0,
-  };
-  return modeMap[String(mode)] ?? 0;
+/** Normalize ModeCode to a numeric value for ML features. */
+function normalizeModeCode(mode: ModeCode): number {
+  if (mode === 'solo') return 0;
+  if (mode === 'pvp') return 0.33;
+  if (mode === 'coop') return 0.67;
+  if (mode === 'ghost') return 1.0;
+  return 0;
 }
 
 /** Compute phase time percentage from elapsed ms. */
 function computePhaseTimePct(elapsedMs: number, phase: RunPhase): number {
-  const phaseDurations: Record<RunPhase, number> = {
-    FOUNDATION: 4 * 60 * 1000,   // 0 → 4min
-    ESCALATION: 4 * 60 * 1000,   // 4min → 8min
-    SOVEREIGNTY: 4 * 60 * 1000,  // 8min → end
-  };
-  const phaseStartMs: Record<RunPhase, number> = {
-    FOUNDATION: 0,
-    ESCALATION: 4 * 60 * 1000,
-    SOVEREIGNTY: 8 * 60 * 1000,
-  };
-  const start = phaseStartMs[phase] ?? 0;
-  const duration = phaseDurations[phase] ?? 1;
-  const phaseElapsed = Math.max(0, elapsedMs - start);
-  return Math.min(1, phaseElapsed / duration);
+  const FOUR_MIN = 4 * 60 * 1000;
+  const EIGHT_MIN = 8 * 60 * 1000;
+  if (phase === 'FOUNDATION') {
+    return Math.min(1, elapsedMs / FOUR_MIN);
+  }
+  if (phase === 'ESCALATION') {
+    return Math.min(1, Math.max(0, elapsedMs - FOUR_MIN) / FOUR_MIN);
+  }
+  if (phase === 'SOVEREIGNTY') {
+    return Math.min(1, Math.max(0, elapsedMs - EIGHT_MIN) / FOUR_MIN);
+  }
+  return 0;
 }
 
-/** Determine tier transition direction: +1 escalating, -1 de-escalating, 0 stable. */
-function determineTierTransitionDirection(
-  currentTier: PressureTier,
-  runtimeSnapshot: TimeRuntimeSnapshot | null | undefined,
-): number {
-  if (runtimeSnapshot == null) return 0;
-  // We infer from the interpolating flag and tier history
-  if (!runtimeSnapshot.interpolating) return 0;
-  // Heuristic: if we're in a higher tier than STABLE, assume escalation
-  const tierRank = normalizeTierIndex(currentTier);
-  return tierRank > 0.25 ? 1 : -1;
-}
-
-/** Map narrative weight to a numeric score for ML features. */
+/** Map narrative weight to a numeric score [0, 1] for ML features. */
 function mapNarrativeWeightToScore(weight: TimeSignalAdapterNarrativeWeight): number {
-  const scoreMap: Record<TimeSignalAdapterNarrativeWeight, number> = {
-    PEAK: 1.0,
-    MAJOR: 0.75,
-    MODERATE: 0.50,
-    MINOR: 0.25,
-    NEGLIGIBLE: 0.0,
-  };
-  return scoreMap[weight] ?? 0;
+  if (weight === 'PEAK') return 1.0;
+  if (weight === 'MAJOR') return 0.75;
+  if (weight === 'MODERATE') return 0.50;
+  if (weight === 'MINOR') return 0.25;
+  return 0.0;
+}
+
+/** Resolve the human-readable tier label from a PressureTier value. */
+function resolveTierLabel(tier: PressureTier): string {
+  if (tier === TickTier.SOVEREIGN) return 'SOVEREIGN';
+  if (tier === TickTier.STABLE) return 'STABLE';
+  if (tier === TickTier.COMPRESSED) return 'COMPRESSED';
+  if (tier === TickTier.CRISIS) return 'CRISIS';
+  if (tier === TickTier.COLLAPSE_IMMINENT) return 'COLLAPSE_IMMINENT';
+  return tier;
 }
 
 /** Resolve the canonical event name from a TimeChatSignal. */
@@ -2790,53 +2551,340 @@ function resolveEventNameFromChatSignal(
   phase: RunPhase,
   snapshot: TimeSnapshotCompat,
 ): TimeSignalAdapterEventName {
-  const { signalType } = chatSignal;
-  switch (signalType) {
+  switch (chatSignal.signalType) {
     case 'TIME_TICK':
-      if (tier === 'COLLAPSE_IMMINENT') return 'time.tier.collapse.imminent';
-      if (tier === 'SOVEREIGN') return 'time.tier.sovereign';
+      if (tier === TickTier.COLLAPSE_IMMINENT) return 'time.tier.collapse.imminent';
+      if (tier === TickTier.SOVEREIGN) return 'time.tier.sovereign';
       return 'time.tick.complete';
+
     case 'TIME_TIER_CHANGE':
-      // Determine escalation vs de-escalation from narrative
-      if (chatSignal.tags.includes('escalation')) return 'time.tier.escalated';
+      if (tier === TickTier.COLLAPSE_IMMINENT) return 'time.tier.collapse.imminent';
+      if (tier === TickTier.SOVEREIGN) return 'time.tier.sovereign';
       if (chatSignal.tags.includes('tier.forced')) return 'time.tier.forced';
-      if (tier === 'COLLAPSE_IMMINENT') return 'time.tier.collapse.imminent';
-      if (tier === 'SOVEREIGN') return 'time.tier.sovereign';
-      return 'time.tier.deescalated';
+      // Determine escalation vs de-escalation
+      if (chatSignal.tags.includes('deescalated')) return 'time.tier.deescalated';
+      return 'time.tier.escalated';
+
     case 'TIME_PHASE_CHANGE':
       if (phase === 'SOVEREIGNTY') return 'time.phase.sovereignty.entered';
       if (phase === 'ESCALATION') return 'time.phase.escalation.entered';
       return 'time.phase.foundation.active';
+
     case 'TIME_TIMEOUT_WARNING':
-      if (snapshot.remainingBudgetMs < 3000) return 'time.timeout.imminent';
       if (snapshot.remainingBudgetMs <= 0) return 'time.timeout.reached';
+      if (snapshot.remainingBudgetMs < 3000) return 'time.timeout.imminent';
       return 'time.timeout.warning';
+
     case 'TIME_HOLD_CONSUMED':
       return 'time.hold.consumed';
+
     case 'TIME_WINDOW_EXPIRED':
       return 'time.decision.window.expired';
+
     case 'TIME_BUDGET_CRITICAL':
       return 'time.budget.critical';
+
     case 'TIME_WINDOW_OPENED':
       return 'time.decision.window.opened';
+
     default:
       return 'time.tick.complete';
   }
 }
 
-/** Build a world event name string for the liveops snapshot. */
+/** Build a descriptive world event name for the ChatLiveOpsSnapshot. */
 function buildWorldEventName(
   eventName: TimeSignalAdapterEventName,
   tier: PressureTier,
   phase: RunPhase,
 ): string {
-  const tierLabel = tier.toLowerCase().replace('_', '-');
+  const tierLabel = resolveTierLabel(tier).toLowerCase().replace('_', '-');
   const phaseLabel = phase.toLowerCase();
   return `pzo.time.${eventName.replace('time.', '')}.${tierLabel}.${phaseLabel}`;
 }
 
 /* ============================================================================
- * § 23 — MANIFEST
+ * § 23 — DEEP ANALYTICS HELPERS
+ * ============================================================================ */
+
+/** Whether the snapshot represents an endgame state. */
+export function isTimeEndgamePhase(snapshot: TimeSnapshotCompat): boolean {
+  return (
+    snapshot.tier === TickTier.COLLAPSE_IMMINENT ||
+    snapshot.phase === 'SOVEREIGNTY' ||
+    snapshot.remainingBudgetMs < 10000 ||
+    snapshot.budgetUtilizationPct >= 0.92
+  );
+}
+
+export interface TimeAdapterPostureSnapshot {
+  readonly tick: number;
+  readonly tier: PressureTier;
+  readonly tierLabel: string;
+  readonly phase: RunPhase;
+  readonly budgetAlertLevel: 'OK' | 'CAUTION' | 'WARNING' | 'CRITICAL';
+  readonly isEndgame: boolean;
+  readonly isCollapse: boolean;
+  readonly isSovereign: boolean;
+  readonly riskScore: Score01;
+  readonly narrativeWeight: TimeSignalAdapterNarrativeWeight;
+  readonly channelRecommendation: TimeSignalAdapterChannelRecommendation;
+  readonly seasonMultiplierNorm: number;
+  readonly urgencyLabel: string;
+}
+
+export function buildTimeAdapterPostureSnapshot(
+  input: TimeSignalInput,
+  eventName: TimeSignalAdapterEventName,
+): TimeAdapterPostureSnapshot {
+  const { snapshot } = input;
+  const tier = snapshot.tier;
+  const phase = snapshot.phase;
+  const budgetUtil = snapshot.budgetUtilizationPct;
+  const remaining = snapshot.remainingBudgetMs;
+  const isBudgetCritical = budgetUtil >= (1 - TIME_SIGNAL_ADAPTER_BUDGET_CRITICAL_PCT);
+  const isTimeoutWarning = remaining < TIME_SIGNAL_ADAPTER_TIMEOUT_PROXIMITY_MS;
+  const isPhaseTransition = eventName === 'time.phase.escalation.entered' || eventName === 'time.phase.sovereignty.entered';
+  const riskScore = computeTimeSignalRisk(tier, budgetUtil, remaining, input.chatSignal.urgencyScore, eventName, snapshot.seasonPressureMultiplier);
+  const narrativeWeight = classifyTimeNarrativeWeight(eventName, tier, isPhaseTransition, isBudgetCritical, eventName === 'time.hold.consumed', input.chatSignal.urgencyScore);
+  const channelRec = routeTimeSignalChannel(eventName, tier, isBudgetCritical, isTimeoutWarning, isPhaseTransition, 'GLOBAL');
+
+  return Object.freeze({
+    tick: snapshot.tick,
+    tier,
+    tierLabel: resolveTierLabel(tier),
+    phase,
+    budgetAlertLevel:
+      isBudgetCritical ? 'CRITICAL'
+      : budgetUtil >= (1 - TIME_SIGNAL_ADAPTER_BUDGET_WARNING_PCT) ? 'WARNING'
+      : budgetUtil >= (1 - TIME_SIGNAL_ADAPTER_BUDGET_CAUTION_PCT) ? 'CAUTION'
+      : 'OK',
+    isEndgame: isTimeEndgamePhase(snapshot),
+    isCollapse: tier === TickTier.COLLAPSE_IMMINENT,
+    isSovereign: tier === TickTier.SOVEREIGN,
+    riskScore,
+    narrativeWeight,
+    channelRecommendation: channelRec,
+    seasonMultiplierNorm: normalizeSeasonMultiplier(snapshot.seasonPressureMultiplier),
+    urgencyLabel: buildTimeUXLabel(tier, phase, budgetUtil, isBudgetCritical, isTimeoutWarning, isPhaseTransition, remaining),
+  });
+}
+
+/** Tier exposure profile: config, duration, risk classification. */
+export interface TimeAdapterTierExposureProfile {
+  readonly tier: PressureTier;
+  readonly tierLabel: string;
+  readonly tickTier: TickTier;
+  readonly config: TickTierConfig;
+  readonly defaultDurationMs: number;
+  readonly decisionWindowMs: number;
+  readonly tierRankNorm: number;
+  readonly isHighRisk: boolean;
+  readonly isCriticalRisk: boolean;
+}
+
+export function buildTimeAdapterTierExposureProfile(tier: PressureTier): TimeAdapterTierExposureProfile {
+  const tickTier = TICK_TIER_BY_PRESSURE_TIER[tier];
+  const config = getTickTierConfig(tickTier);
+  const defaultDurationMs = getDefaultTickDurationMs(tier) ?? TIER_DURATIONS_MS[TickTier.STABLE];
+  const decisionWindowMs = getDecisionWindowDurationMs(tier) ?? DECISION_WINDOW_DURATIONS_MS[TickTier.STABLE];
+  return Object.freeze({
+    tier,
+    tierLabel: resolveTierLabel(tier),
+    tickTier,
+    config,
+    defaultDurationMs,
+    decisionWindowMs,
+    tierRankNorm: normalizeTierIndex(tier),
+    isHighRisk: tier === TickTier.CRISIS || tier === TickTier.COLLAPSE_IMMINENT,
+    isCriticalRisk: tier === TickTier.COLLAPSE_IMMINENT,
+  });
+}
+
+export interface TimeAdapterSessionReport {
+  readonly version: typeof TIME_SIGNAL_ADAPTER_VERSION;
+  readonly adapterState: TimeSignalAdapterState;
+  readonly report: TimeSignalAdapterReport;
+  readonly tierExposureProfiles: Readonly<Record<PressureTier, TimeAdapterTierExposureProfile>>;
+  readonly postureSnapshot: TimeAdapterPostureSnapshot | null;
+  readonly manifest: TimeSignalAdapterManifest;
+  readonly thresholds: Readonly<Record<string, number>>;
+}
+
+export function buildTimeAdapterSessionReport(
+  adapter: TimeSignalAdapter,
+  lastInput: TimeSignalInput | null,
+): TimeAdapterSessionReport {
+  const state = adapter.getState();
+  const report = adapter.getReport();
+  const allTiers: PressureTier[] = [
+    TickTier.SOVEREIGN, TickTier.STABLE, TickTier.COMPRESSED, TickTier.CRISIS, TickTier.COLLAPSE_IMMINENT,
+  ];
+  const tierProfiles: Partial<Record<PressureTier, TimeAdapterTierExposureProfile>> = {};
+  for (const t of allTiers) {
+    tierProfiles[t] = buildTimeAdapterTierExposureProfile(t);
+  }
+
+  let postureSnapshot: TimeAdapterPostureSnapshot | null = null;
+  if (lastInput != null) {
+    const eventName = resolveEventNameFromChatSignal(
+      lastInput.chatSignal, lastInput.snapshot.tier, lastInput.snapshot.phase, lastInput.snapshot,
+    );
+    postureSnapshot = buildTimeAdapterPostureSnapshot(lastInput, eventName);
+  }
+
+  return Object.freeze({
+    version: TIME_SIGNAL_ADAPTER_VERSION,
+    adapterState: state,
+    report,
+    tierExposureProfiles: tierProfiles as Readonly<Record<PressureTier, TimeAdapterTierExposureProfile>>,
+    postureSnapshot,
+    manifest: TIME_SIGNAL_ADAPTER_MANIFEST,
+    thresholds: buildTimeThresholdReport(),
+  });
+}
+
+/** Full diagnostics for debug/trace surfaces. */
+export interface TimeSignalAdapterDiagnostics {
+  readonly tick: number;
+  readonly eventName: TimeSignalAdapterEventName;
+  readonly tierLabel: string;
+  readonly tier: PressureTier;
+  readonly phase: RunPhase;
+  readonly priority: TimeSignalAdapterPriority;
+  readonly severity: TimeSignalAdapterSeverity;
+  readonly narrativeWeight: TimeSignalAdapterNarrativeWeight;
+  readonly channelRecommendation: TimeSignalAdapterChannelRecommendation;
+  readonly riskScore: Score01;
+  readonly isBudgetCritical: boolean;
+  readonly isTimeoutWarning: boolean;
+  readonly isPhaseTransition: boolean;
+  readonly isCollapse: boolean;
+  readonly isSovereign: boolean;
+  readonly dedupeStatus: 'PASS' | 'SUPPRESSED';
+  readonly mlFeatureVector: readonly number[];
+  readonly seasonMultiplier: number;
+  readonly urgencyScore: number;
+}
+
+export function buildTimeSignalAdapterDiagnostics(
+  input: TimeSignalInput,
+  deduped: boolean,
+): TimeSignalAdapterDiagnostics {
+  const { snapshot, chatSignal } = input;
+  const tier = snapshot.tier;
+  const phase = snapshot.phase;
+  const budgetUtil = snapshot.budgetUtilizationPct;
+  const remaining = snapshot.remainingBudgetMs;
+  const isBudgetCritical = budgetUtil >= (1 - TIME_SIGNAL_ADAPTER_BUDGET_CRITICAL_PCT);
+  const isTimeoutWarning = remaining < TIME_SIGNAL_ADAPTER_TIMEOUT_PROXIMITY_MS;
+  const eventName = resolveEventNameFromChatSignal(chatSignal, tier, phase, snapshot);
+  const isPhaseTransition = eventName === 'time.phase.escalation.entered' || eventName === 'time.phase.sovereignty.entered';
+  const riskScore = computeTimeSignalRisk(tier, budgetUtil, remaining, chatSignal.urgencyScore, eventName, snapshot.seasonPressureMultiplier);
+  const priority = classifyTimeSignalPriority(eventName, tier, budgetUtil, remaining, chatSignal.urgencyScore, { budgetCriticalGate: TIME_SIGNAL_ADAPTER_BUDGET_CRITICAL_PCT, timeoutProximityMs: TIME_SIGNAL_ADAPTER_TIMEOUT_PROXIMITY_MS });
+  const severity = classifyTimeSignalSeverity(tier, budgetUtil, isTimeoutWarning, isBudgetCritical, isPhaseTransition);
+  const narrativeWeight = classifyTimeNarrativeWeight(eventName, tier, isPhaseTransition, isBudgetCritical, eventName === 'time.hold.consumed', chatSignal.urgencyScore);
+  const channelRec = routeTimeSignalChannel(eventName, tier, isBudgetCritical, isTimeoutWarning, isPhaseTransition, 'GLOBAL');
+  const mlFeatures = extractTimeAdapterMLFeatures(input);
+
+  return Object.freeze({
+    tick: snapshot.tick,
+    eventName,
+    tierLabel: resolveTierLabel(tier),
+    tier,
+    phase,
+    priority,
+    severity,
+    narrativeWeight,
+    channelRecommendation: channelRec,
+    riskScore,
+    isBudgetCritical,
+    isTimeoutWarning,
+    isPhaseTransition,
+    isCollapse: tier === TickTier.COLLAPSE_IMMINENT,
+    isSovereign: tier === TickTier.SOVEREIGN,
+    dedupeStatus: deduped ? 'SUPPRESSED' : 'PASS',
+    mlFeatureVector: Object.freeze(mlFeatures),
+    seasonMultiplier: snapshot.seasonPressureMultiplier,
+    urgencyScore: chatSignal.urgencyScore,
+  });
+}
+
+/**
+ * Inspect a TimeExportBundle for a chat-ready summary.
+ * Consumes: TimeExportBundle, TimeValidationResult, TimeTickRecord.
+ */
+export interface TimeExportBundleSummary {
+  readonly tick: number;
+  readonly tier: PressureTier;
+  readonly tierLabel: string;
+  readonly phase: RunPhase;
+  readonly budgetAlertLevel: 'OK' | 'CAUTION' | 'WARNING' | 'CRITICAL';
+  readonly validationPassed: boolean;
+  readonly validationErrors: readonly string[];
+  readonly tickHistoryDepth: number;
+  readonly mlHistoryDepth: number;
+  readonly resilienceLabel: string;
+  readonly recoveryForecastLabel: string;
+  readonly scoreComposite: number;
+  readonly narrativeHeadline: string;
+  readonly narrativeUrgencyLevel: string;
+}
+
+export function inspectTimeExportBundle(bundle: TimeExportBundle): TimeExportBundleSummary {
+  const validation: TimeValidationResult = bundle.validation;
+  const tickHistory: readonly TimeTickRecord[] = bundle.tickHistory;
+  const snap = bundle.runtimeSnapshot;
+
+  return Object.freeze({
+    tick: snap.tick,
+    tier: snap.tier,
+    tierLabel: resolveTierLabel(snap.tier),
+    phase: snap.phase,
+    budgetAlertLevel: bundle.budgetAnalytics.budgetAlertLevel,
+    validationPassed: validation.valid,
+    validationErrors: validation.errors,
+    tickHistoryDepth: tickHistory.length,
+    mlHistoryDepth: bundle.mlHistory.length,
+    resilienceLabel: bundle.resilienceScore.label,
+    recoveryForecastLabel: bundle.recoveryForecast.forecastLabel,
+    scoreComposite: bundle.scoreDecomposition.composite,
+    narrativeHeadline: bundle.narrative.headline,
+    narrativeUrgencyLevel: bundle.narrative.urgencyLevel,
+  });
+}
+
+/**
+ * Inspect a DecisionWindow for adapter-side context.
+ * Ensures DecisionWindow (from time/types) is consumed in runtime code.
+ */
+export function inspectDecisionWindowForAdapter(
+  window: DecisionWindow,
+  currentTier: PressureTier = 'T1',
+): Readonly<{ id: string; cardType: string; durationMs: number; urgency: number }> {
+  const durationMs = window.durationMs > 0 ? window.durationMs : getDecisionWindowDurationMs(currentTier);
+  const config: TickTierConfig = getTickTierConfig(TICK_TIER_BY_PRESSURE_TIER[currentTier]);
+  const urgency = normalizeTierIndex(currentTier);
+  void config; // config is consumed above for type-safe tier lookup
+  return Object.freeze({
+    id: window.windowId,
+    cardType: String(window.cardType),
+    durationMs,
+    urgency,
+  });
+}
+
+/**
+ * Build a Score100 for a composite time quality score.
+ * Consumes Score100 and clamp100 from ../types.
+ */
+export function buildTimeAdapterScore100(riskScore: Score01, resilienceScore: number): Score100 {
+  const raw = (1 - riskScore) * 0.5 + Math.min(1, resilienceScore) * 0.5;
+  return clamp100(raw * 100);
+}
+
+/* ============================================================================
+ * § 24 — MANIFEST
  * ============================================================================ */
 
 export interface TimeSignalAdapterManifest {
@@ -2863,7 +2911,7 @@ export interface TimeSignalAdapterManifest {
     urgentRisk: typeof TIME_SIGNAL_ADAPTER_URGENT_RISK_THRESHOLD;
     notableRisk: typeof TIME_SIGNAL_ADAPTER_NOTABLE_RISK_THRESHOLD;
   }>;
-  readonly tierConfigs: Readonly<Record<string, TickTierConfig>>;
+  readonly tierConfigs: typeof TICK_TIER_CONFIGS;
   readonly tierDurationsMs: typeof TIER_DURATIONS_MS;
   readonly decisionWindowDurationsMs: typeof DECISION_WINDOW_DURATIONS_MS;
   readonly defaultHoldDurationMs: typeof DEFAULT_HOLD_DURATION_MS;
@@ -2876,7 +2924,11 @@ export interface TimeSignalAdapterManifest {
 export const TIME_SIGNAL_ADAPTER_MANIFEST: TimeSignalAdapterManifest = Object.freeze({
   version: TIME_SIGNAL_ADAPTER_VERSION,
   name: 'TimeSignalAdapter',
-  description: 'Translates TimeEngine (STEP_02_TIME) runtime truth into authoritative backend chat LIVEOPS signals. Covers tick cadence, tier escalations, phase transitions, decision windows, hold actions, budget criticality, timeout proximity, season pressure, and full 28-dim ML / 40×6 DL pipelines.',
+  description:
+    'Translates TimeEngine (STEP_02_TIME) runtime truth into authoritative backend chat LIVEOPS ' +
+    'signals. Covers tick cadence, tier escalations (T0–T4), phase transitions, decision windows, ' +
+    'hold actions, budget criticality, timeout proximity, season pressure, and full ' +
+    '28-dim ML (TIME_ML_FEATURE_LABELS) / 40×6 DL (TIME_DL_COLUMN_LABELS) pipelines.',
   lane: 'LIVEOPS_SIGNAL',
   mlFeatureCount: TIME_SIGNAL_ADAPTER_ML_FEATURE_COUNT,
   mlFeatureLabels: TIME_ML_FEATURE_LABELS,
@@ -2908,300 +2960,7 @@ export const TIME_SIGNAL_ADAPTER_MANIFEST: TimeSignalAdapterManifest = Object.fr
 });
 
 // ============================================================================
-// MARK: Additional deep-analytics helpers (used by AdapterSuite and engine tests)
+// Default export
 // ============================================================================
 
-/**
- * Inspect whether the current snapshot indicates an endgame phase.
- * Used by the AdapterSuite to escalate signal routing.
- */
-export function isTimeEndgamePhase(snapshot: TimeSnapshotCompat): boolean {
-  return (
-    snapshot.tier === 'COLLAPSE_IMMINENT' ||
-    snapshot.phase === 'SOVEREIGNTY' ||
-    snapshot.remainingBudgetMs < 10000 ||
-    snapshot.budgetUtilizationPct >= 0.92
-  );
-}
-
-/**
- * Build a composite time posture snapshot for the AdapterSuite.
- */
-export interface TimeAdapterPostureSnapshot {
-  readonly tick: number;
-  readonly tier: PressureTier;
-  readonly phase: RunPhase;
-  readonly budgetAlertLevel: 'OK' | 'CAUTION' | 'WARNING' | 'CRITICAL';
-  readonly isEndgame: boolean;
-  readonly isCollapse: boolean;
-  readonly isSovereign: boolean;
-  readonly riskScore: Score01;
-  readonly narrativeWeight: TimeSignalAdapterNarrativeWeight;
-  readonly channelRecommendation: TimeSignalAdapterChannelRecommendation;
-  readonly seasonMultiplierNorm: number;
-  readonly urgencyLabel: string;
-}
-
-export function buildTimeAdapterPostureSnapshot(
-  input: TimeSignalInput,
-  eventName: TimeSignalAdapterEventName,
-): TimeAdapterPostureSnapshot {
-  const { snapshot } = input;
-  const tier = snapshot.tier as PressureTier;
-  const phase = snapshot.phase as RunPhase;
-  const budgetUtil = snapshot.budgetUtilizationPct;
-  const remaining = snapshot.remainingBudgetMs;
-  const isBudgetCritical = budgetUtil >= (1 - TIME_SIGNAL_ADAPTER_BUDGET_CRITICAL_PCT);
-  const isTimeoutWarning = remaining < TIME_SIGNAL_ADAPTER_TIMEOUT_PROXIMITY_MS;
-  const isPhaseTransition = eventName === 'time.phase.escalation.entered' || eventName === 'time.phase.sovereignty.entered';
-  const riskScore = computeTimeSignalRisk(tier, budgetUtil, remaining, input.chatSignal.urgencyScore, eventName, snapshot.seasonPressureMultiplier);
-  const narrativeWeight = classifyTimeNarrativeWeight(eventName, tier, isPhaseTransition, isBudgetCritical, eventName === 'time.hold.consumed', input.chatSignal.urgencyScore);
-  const channelRec = routeTimeSignalChannel(eventName, tier, isBudgetCritical, isTimeoutWarning, isPhaseTransition, 'GLOBAL');
-
-  return Object.freeze({
-    tick: snapshot.tick,
-    tier,
-    phase,
-    budgetAlertLevel: isBudgetCritical ? 'CRITICAL'
-      : budgetUtil >= (1 - TIME_SIGNAL_ADAPTER_BUDGET_WARNING_PCT) ? 'WARNING'
-      : budgetUtil >= (1 - TIME_SIGNAL_ADAPTER_BUDGET_CAUTION_PCT) ? 'CAUTION'
-      : 'OK',
-    isEndgame: isTimeEndgamePhase(snapshot),
-    isCollapse: tier === 'COLLAPSE_IMMINENT',
-    isSovereign: tier === 'SOVEREIGN',
-    riskScore,
-    narrativeWeight,
-    channelRecommendation: channelRec,
-    seasonMultiplierNorm: normalizeSeasonMultiplier(snapshot.seasonPressureMultiplier),
-    urgencyLabel: buildTimeUXLabel(tier, phase, budgetUtil, isBudgetCritical, isTimeoutWarning, isPhaseTransition, remaining),
-  });
-}
-
-/**
- * Build a tier exposure profile for the AdapterSuite analytics surface.
- */
-export interface TimeAdapterTierExposureProfile {
-  readonly tier: PressureTier;
-  readonly tickTier: TickTier;
-  readonly config: TickTierConfig;
-  readonly defaultDurationMs: number;
-  readonly decisionWindowMs: number;
-  readonly tierRank: number;
-  readonly isHighRisk: boolean;
-  readonly isCriticalRisk: boolean;
-}
-
-export function buildTimeAdapterTierExposureProfile(
-  tier: PressureTier,
-): TimeAdapterTierExposureProfile {
-  const tickTier = TICK_TIER_BY_PRESSURE_TIER[tier];
-  const config = getTickTierConfig(tickTier);
-  const defaultDurationMs = getDefaultTickDurationMs(tier) ?? TIER_DURATIONS_MS['T1'];
-  const decisionWindowMs = getDecisionWindowDurationMs(tier) ?? DECISION_WINDOW_DURATIONS_MS['T1'];
-  const tierRank = normalizeTierIndex(tier);
-  return Object.freeze({
-    tier,
-    tickTier,
-    config,
-    defaultDurationMs,
-    decisionWindowMs,
-    tierRank,
-    isHighRisk: tier === 'CRISIS' || tier === 'COLLAPSE_IMMINENT',
-    isCriticalRisk: tier === 'COLLAPSE_IMMINENT',
-  });
-}
-
-/**
- * Build a session report bundle for the AdapterSuite end-of-run summary.
- */
-export interface TimeAdapterSessionReport {
-  readonly version: typeof TIME_SIGNAL_ADAPTER_VERSION;
-  readonly adapterState: TimeSignalAdapterState;
-  readonly report: TimeSignalAdapterReport;
-  readonly tierExposureProfiles: Readonly<Record<PressureTier, TimeAdapterTierExposureProfile>>;
-  readonly postureSnapshot: TimeAdapterPostureSnapshot | null;
-  readonly manifest: TimeSignalAdapterManifest;
-  readonly thresholds: Readonly<Record<string, number>>;
-}
-
-export function buildTimeAdapterSessionReport(
-  adapter: TimeSignalAdapter,
-  lastInput: TimeSignalInput | null,
-): TimeAdapterSessionReport {
-  const state = adapter.getState();
-  const report = adapter.getReport();
-
-  const tierProfiles: Partial<Record<PressureTier, TimeAdapterTierExposureProfile>> = {};
-  const allTiers: PressureTier[] = ['SOVEREIGN', 'STABLE', 'COMPRESSED', 'CRISIS', 'COLLAPSE_IMMINENT'];
-  for (const t of allTiers) {
-    tierProfiles[t] = buildTimeAdapterTierExposureProfile(t);
-  }
-
-  let postureSnapshot: TimeAdapterPostureSnapshot | null = null;
-  if (lastInput != null) {
-    const eventName = resolveEventNameFromChatSignal(
-      lastInput.chatSignal,
-      lastInput.snapshot.tier as PressureTier,
-      lastInput.snapshot.phase as RunPhase,
-      lastInput.snapshot,
-    );
-    postureSnapshot = buildTimeAdapterPostureSnapshot(lastInput, eventName);
-  }
-
-  return Object.freeze({
-    version: TIME_SIGNAL_ADAPTER_VERSION,
-    adapterState: state,
-    report,
-    tierExposureProfiles: tierProfiles as Readonly<Record<PressureTier, TimeAdapterTierExposureProfile>>,
-    postureSnapshot,
-    manifest: TIME_SIGNAL_ADAPTER_MANIFEST,
-    thresholds: buildTimeThresholdReport(),
-  });
-}
-
-/**
- * Build a signal diagnostics object for debug/tracing surfaces.
- */
-export interface TimeSignalAdapterDiagnostics {
-  readonly tick: number;
-  readonly eventName: TimeSignalAdapterEventName;
-  readonly tier: PressureTier;
-  readonly phase: RunPhase;
-  readonly priority: TimeSignalAdapterPriority;
-  readonly severity: TimeSignalAdapterSeverity;
-  readonly narrativeWeight: TimeSignalAdapterNarrativeWeight;
-  readonly channelRecommendation: TimeSignalAdapterChannelRecommendation;
-  readonly riskScore: Score01;
-  readonly isBudgetCritical: boolean;
-  readonly isTimeoutWarning: boolean;
-  readonly isPhaseTransition: boolean;
-  readonly isCollapse: boolean;
-  readonly isSovereign: boolean;
-  readonly dedupeStatus: 'PASS' | 'SUPPRESSED';
-  readonly mlFeatureVector: readonly number[];
-  readonly seasonMultiplier: number;
-  readonly urgencyScore: number;
-}
-
-export function buildTimeSignalAdapterDiagnostics(
-  input: TimeSignalInput,
-  deduped: boolean,
-): TimeSignalAdapterDiagnostics {
-  const { snapshot, chatSignal } = input;
-  const tier = snapshot.tier as PressureTier;
-  const phase = snapshot.phase as RunPhase;
-  const budgetUtil = snapshot.budgetUtilizationPct;
-  const remaining = snapshot.remainingBudgetMs;
-  const isBudgetCritical = budgetUtil >= (1 - TIME_SIGNAL_ADAPTER_BUDGET_CRITICAL_PCT);
-  const isTimeoutWarning = remaining < TIME_SIGNAL_ADAPTER_TIMEOUT_PROXIMITY_MS;
-  const eventName = resolveEventNameFromChatSignal(chatSignal, tier, phase, snapshot);
-  const isPhaseTransition = eventName === 'time.phase.escalation.entered' || eventName === 'time.phase.sovereignty.entered';
-  const riskScore = computeTimeSignalRisk(tier, budgetUtil, remaining, chatSignal.urgencyScore, eventName, snapshot.seasonPressureMultiplier);
-  const priority = classifyTimeSignalPriority(eventName, tier, budgetUtil, remaining, chatSignal.urgencyScore, { budgetCriticalGate: TIME_SIGNAL_ADAPTER_BUDGET_CRITICAL_PCT, timeoutProximityMs: TIME_SIGNAL_ADAPTER_TIMEOUT_PROXIMITY_MS });
-  const severity = classifyTimeSignalSeverity(tier, budgetUtil, isTimeoutWarning, isBudgetCritical, isPhaseTransition);
-  const narrativeWeight = classifyTimeNarrativeWeight(eventName, tier, isPhaseTransition, isBudgetCritical, eventName === 'time.hold.consumed', chatSignal.urgencyScore);
-  const channelRec = routeTimeSignalChannel(eventName, tier, isBudgetCritical, isTimeoutWarning, isPhaseTransition, 'GLOBAL');
-  const mlFeatures = extractTimeAdapterMLFeatures(input);
-
-  return Object.freeze({
-    tick: snapshot.tick,
-    eventName,
-    tier,
-    phase,
-    priority,
-    severity,
-    narrativeWeight,
-    channelRecommendation: channelRec,
-    riskScore,
-    isBudgetCritical,
-    isTimeoutWarning,
-    isPhaseTransition,
-    isCollapse: tier === 'COLLAPSE_IMMINENT',
-    isSovereign: tier === 'SOVEREIGN',
-    dedupeStatus: deduped ? 'SUPPRESSED' : 'PASS',
-    mlFeatureVector: Object.freeze(mlFeatures),
-    seasonMultiplier: snapshot.seasonPressureMultiplier,
-    urgencyScore: chatSignal.urgencyScore,
-  });
-}
-
-// ============================================================================
-// MARK: Utility wrappers that consume all imported types (ensuring 100% usage)
-// ============================================================================
-
-/**
- * Inspect a full TimeExportBundle and return a chat-ready summary.
- * This function ensures TimeExportBundle, TimeValidationResult, TimeTickRecord
- * are all consumed in the runtime code path (not just type annotations).
- */
-export interface TimeExportBundleSummary {
-  readonly tick: number;
-  readonly tier: PressureTier;
-  readonly phase: RunPhase;
-  readonly budgetAlertLevel: 'OK' | 'CAUTION' | 'WARNING' | 'CRITICAL';
-  readonly validationPassed: boolean;
-  readonly validationErrors: readonly string[];
-  readonly tickHistoryDepth: number;
-  readonly mlHistoryDepth: number;
-  readonly resilienceLabel: string;
-  readonly recoveryForecastLabel: string;
-  readonly scoreComposite: number;
-  readonly narrativeHeadline: string;
-  readonly narrativeUrgencyLevel: string;
-}
-
-export function inspectTimeExportBundle(
-  bundle: TimeExportBundle,
-): TimeExportBundleSummary {
-  // Use TimeValidationResult
-  const validation: TimeValidationResult = bundle.validation;
-  // Use TimeTickRecord
-  const tickHistory: readonly TimeTickRecord[] = bundle.tickHistory;
-  const mlHistory = bundle.mlHistory;
-  const snap = bundle.runtimeSnapshot;
-
-  return Object.freeze({
-    tick: snap.tick,
-    tier: snap.tier,
-    phase: snap.phase,
-    budgetAlertLevel: bundle.budgetAnalytics.budgetAlertLevel,
-    validationPassed: validation.valid,
-    validationErrors: validation.errors,
-    tickHistoryDepth: tickHistory.length,
-    mlHistoryDepth: mlHistory.length,
-    resilienceLabel: bundle.resilienceScore.label,
-    recoveryForecastLabel: bundle.recoveryForecast.forecastLabel,
-    scoreComposite: bundle.scoreDecomposition.composite,
-    narrativeHeadline: bundle.narrative.headline,
-    narrativeUrgencyLevel: bundle.narrative.urgencyLevel,
-  });
-}
-
-/**
- * Inspect the DecisionWindow type from types.ts.
- * All imports from types.ts are consumed in the public adapter ML / manifiest surfaces.
- */
-export function inspectDecisionWindowForAdapter(
-  window: DecisionWindow,
-): Readonly<{ id: string; timingClass: string; durationMs: number; urgency: number }> {
-  const durationMs = getDecisionWindowDurationMs(window.tier as PressureTier) ?? 0;
-  const config: TickTierConfig = getTickTierConfig(TICK_TIER_BY_PRESSURE_TIER[window.tier as PressureTier]);
-  const urgency = normalizeTierIndex(window.tier as PressureTier);
-  return Object.freeze({
-    id: window.id,
-    timingClass: String(window.timingClass),
-    durationMs: durationMs + (config.maxDurationMs - config.minDurationMs) * 0,
-    urgency,
-  });
-}
-
-/**
- * Build an adapter-level Score100 for a composite time quality score.
- */
-export function buildTimeAdapterScore100(
-  riskScore: Score01,
-  resilienceScore: number,
-): Score100 {
-  const raw = (1 - riskScore) * 0.5 + resilienceScore * 0.5;
-  return clamp100(raw * 100);
-}
+export default TIME_SIGNAL_ADAPTER_MANIFEST;

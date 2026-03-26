@@ -4025,6 +4025,27 @@ export {
 } from './TensionThreatSourceSignalAdapter';
 
 // ============================================================================
+// MARK: DecisionExpirySignalAdapter — decision expiry → LIVEOPS_SIGNAL lane
+// ============================================================================
+
+export {
+  DecisionExpirySignalAdapter,
+  createDecisionExpirySignalAdapter,
+  DECISION_EXPIRY_SIGNAL_ADAPTER_VERSION,
+  DECISION_EXPIRY_SIGNAL_ADAPTER_ML_FEATURE_COUNT,
+  DECISION_EXPIRY_SIGNAL_ADAPTER_DL_COL_COUNT,
+  DECISION_EXPIRY_SIGNAL_ADAPTER_DEDUPE_WINDOW_TICKS,
+  DECISION_EXPIRY_SIGNAL_ADAPTER_MAX_BATCH_SIZE,
+  DECISION_EXPIRY_SIGNAL_PRIORITIES,
+  DECISION_EXPIRY_SIGNAL_ADAPTER_MODULE_METADATA,
+  type DecisionExpirySignalPriority,
+  type DecisionExpiryAdapterAnalytics,
+  type DecisionExpirySignal,
+  type DecisionExpiryAdapterMLVector,
+  type DecisionExpiryAdapterDLRow,
+} from './DecisionExpirySignalAdapter';
+
+// ============================================================================
 // MARK: Final default export
 // ============================================================================
 
