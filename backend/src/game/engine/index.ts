@@ -162,3 +162,26 @@ export * as Pressure from './pressure';
  *   const layerManager = new Shield.ShieldLayerManager();
  */
 export * as Shield from './shield';
+
+/**
+ * Sovereignty subsystem — authoritative proof generation, integrity verification,
+ * CORD scoring, grade assignment, badge computation, and run finalization.
+ *
+ * Covers: SovereigntyEngine (SimulationEngine at STEP_10), ProofGenerator
+ * (deterministic SHA-256 proof hashing), ReplayIntegrityChecker (structural +
+ * state + proof hash validation), RunGradeAssigner (CORD-weighted S/A/B/C/D/F
+ * grading), SovereigntySnapshotAdapter (snapshot→record conversion),
+ * SovereigntyExportAdapter (JSON/PDF/PNG artifact projection),
+ * SovereigntyPersistenceWriter (DB write orchestration), and full contract
+ * types for ticks, runs, artifacts, and audit trails.
+ *
+ * All sovereignty truth flows through this namespace. The sovereignty.completed
+ * event is emitted on run finalization and is consumed by the chat lane.
+ *
+ * Usage:
+ *   import { Sovereignty } from '../../engine';
+ *   const engine = new Sovereignty.SovereigntyEngine();
+ *   const adapter = new Sovereignty.SovereigntySnapshotAdapter();
+ *   const grade = Sovereignty.normalizeGrade(snapshot.sovereignty.verifiedGrade);
+ */
+export * as Sovereignty from './sovereignty';
