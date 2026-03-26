@@ -973,6 +973,23 @@ import {
   type PersistenceSignalAdapterStats,
 } from './PersistenceWriterSignalAdapter';
 
+import {
+  SnapshotAdapterSignalAdapter,
+  createSnapshotAdapterSignalAdapter,
+  adaptSnapshotSummarySignals,
+  adaptSnapshotBundle,
+  SNAPSHOT_ADAPTER_SIGNAL_MANIFEST,
+  type TickRecordCompat,
+  type RunSummaryCompat,
+  type SnapshotDeltaCompat,
+  type AdapterMLVectorCompat as SnapshotAdapterMLVectorCompat,
+  type AdapterDLTensorCompat as SnapshotAdapterDLTensorCompat,
+  type AdapterAuditEntryCompat as SnapshotAdapterAuditEntryCompat,
+  type SnapshotAdapterSignalContext as SnapshotSignalAdapterContext,
+  type SnapshotAdapterSignalAdapterOptions,
+  type SnapshotAdapterSignalStats as SnapshotSignalAdapterStats,
+} from './SnapshotAdapterSignalAdapter';
+
 // ============================================================================
 // MARK: Re-export authoritative adapter modules and their key public surfaces
 // ============================================================================
@@ -1353,6 +1370,12 @@ export {
   adaptAllPersistenceSignals,
   adaptPersistenceBundle,
   PERSISTENCE_SIGNAL_ADAPTER_MANIFEST,
+  // SnapshotAdapter signal adapter
+  SnapshotAdapterSignalAdapter,
+  createSnapshotAdapterSignalAdapter,
+  adaptSnapshotSummarySignals,
+  adaptSnapshotBundle,
+  SNAPSHOT_ADAPTER_SIGNAL_MANIFEST,
 };
 
 export type {
@@ -1821,6 +1844,16 @@ export type {
   PersistenceSignalAdapterContext,
   PersistenceSignalAdapterOptions,
   PersistenceSignalAdapterStats,
+  // SnapshotAdapter signal adapter types
+  TickRecordCompat,
+  RunSummaryCompat,
+  SnapshotDeltaCompat,
+  SnapshotAdapterMLVectorCompat,
+  SnapshotAdapterDLTensorCompat,
+  SnapshotAdapterAuditEntryCompat,
+  SnapshotSignalAdapterContext,
+  SnapshotAdapterSignalAdapterOptions,
+  SnapshotSignalAdapterStats,
 };
 
 // ============================================================================

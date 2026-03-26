@@ -179,7 +179,37 @@ export type {
 export type { SovereigntyGrade as RunGradeAssignerGrade } from './RunGradeAssigner';
 
 // ── Snapshot Adapter ─────────────────────────────────────────────────────────
-export { SovereigntySnapshotAdapter } from './SovereigntySnapshotAdapter';
+export {
+  SovereigntySnapshotAdapter,
+  SnapshotAdapterRunContext,
+  SNAPSHOT_ADAPTER_VERSION,
+  ADAPTER_ML_FEATURE_COUNT,
+  ADAPTER_DL_FEATURE_COUNT,
+  ADAPTER_ML_FEATURE_LABELS,
+  ADAPTER_DL_FEATURE_LABELS,
+  validateSnapshotForAdapter,
+  validateSnapshotPair,
+  createAdapterTickRecord,
+  enrichTickRecordWithMLFeatures,
+  createAdapterRunSummary,
+  enrichRunSummaryWithMLFeatures,
+  computeAdapterCORDScore,
+  assignAdapterGrade,
+  assignAdapterBadgeTier,
+  verifyCordWeights,
+  runAdapterSelfTest,
+} from './SovereigntySnapshotAdapter';
+export type {
+  SnapshotValidationResult,
+  AdapterMLFeatureResult,
+  AdapterDLTensorResult,
+  TickNarrative,
+  RunNarrative,
+  BatchAdaptationResult,
+  SerializedAdapterOutput,
+  AdapterAuditEntry as SnapshotAdapterAuditEntry,
+  SnapshotDeltaSummary,
+} from './SovereigntySnapshotAdapter';
 
 // ── Export Adapter ───────────────────────────────────────────────────────────
 export {
@@ -287,8 +317,102 @@ export type {
   PersistenceWriteStats,
 } from './SovereigntyPersistenceWriter';
 
-// ── Types ────────────────────────────────────────────────────────────────────
-export { CORD_WEIGHTS, OUTCOME_MULTIPLIER } from './types';
+// ── Types (sovereignty domain foundation) ───────────────────────────────────
+export {
+  CORD_WEIGHTS,
+  OUTCOME_MULTIPLIER,
+  SOVEREIGNTY_TYPES_VERSION,
+  CORD_WEIGHT_KEYS,
+  CORD_COMPONENT_COUNT,
+  CORD_COMPONENT_LABELS,
+  CORD_COMPONENT_DESCRIPTIONS,
+  OUTCOME_KEYS,
+  OUTCOME_LABELS,
+  OUTCOME_DESCRIPTIONS,
+  OUTCOME_SEVERITY,
+  CORD_WEIGHT_SUM,
+  SOVEREIGNTY_MIN_CORD_SCORE,
+  SOVEREIGNTY_MAX_RAW_CORD_SCORE,
+  SOVEREIGNTY_MIN_DECISIONS,
+  SOVEREIGNTY_MIN_TICKS,
+  SOVEREIGNTY_VERIFIED_BONUS,
+  INTEGRITY_RISK_CONFIG,
+  INTEGRITY_RISK_LEVELS,
+  // CORD scoring
+  computeWeightedCordScore,
+  computeCordComponentScore,
+  resolveOutcomeMultiplier,
+  classifyOutcome,
+  // Integrity
+  classifyIntegrityRisk,
+  isIntegrityReviewRequired,
+  computeIntegrityScoreAdjustment,
+  computeIntegrityCappedScore,
+  // Snapshot analysis
+  extractSovereigntySignals,
+  extractCordRawValues,
+  computeSnapshotEffectiveStakes,
+  computeDecisionSpeedPercentile,
+  computeBotNeutralizationRatio,
+  computeShieldBreachDensity,
+  computeCascadeBrokenRatio,
+  computeCascadeRecoveryRate,
+  computeSnapshotSovereigntyHealth,
+  // Grade/badge
+  getGradeBracket,
+  computeBadgeTierFromGrade,
+  getQualifiedBadges,
+  computeDistanceToNextGrade,
+  computeGradeNumericScore,
+  resolveGradeBadgePair,
+  // ML / DL
+  computeSovereigntyMLVector,
+  computeSovereigntyDLTensor,
+  // UX labels
+  generateSovereigntyLabel,
+  generateCordComponentLabel,
+  generateOutcomeLabel,
+  generateIntegrityRiskLabel,
+  generateSovereigntyUXBundle,
+  generateSovereigntySummary,
+  generateGradeComparisonLabel,
+  // Validation
+  validateSovereigntyTypes,
+  validateCordRawValues,
+  validateOutcomeKey,
+  validateGrade,
+  validateIntegrityStatus as validateIntegrityStatusTypes,
+  validateSovereigntyScore,
+  validateModeForSovereignty,
+  validateSovereigntySignals,
+  // Serialization
+  serializeSovereigntyConfig,
+  deserializeSovereigntyConfig,
+  computeSovereigntyConfigFingerprint,
+  computeSovereigntyTypesChecksum,
+  // Self-test
+  runSovereigntyTypesSelfTest,
+} from './types';
+export type {
+  CordWeightKey,
+  OutcomeKey,
+  CordComponent,
+  CordScoreResult,
+  OutcomeClassification,
+  SovereigntyGradeBracket,
+  SovereigntyBadgeTierConfig,
+  IntegrityRiskLevel,
+  IntegrityRiskClassification,
+  ModeSovereigntyRules,
+  SovereigntySignals,
+  SovereigntyTypesSelfTestResult,
+  SerializedSovereigntyConfig,
+  SovereigntyMLVectorResult,
+  SovereigntyDLTensorResult,
+  CordComponentAnalysis,
+  SovereigntyUXLabelBundle,
+  SovereigntyTypesValidationResult,
+} from './types';
 
 // ── Contracts: Constants ─────────────────────────────────────────────────────
 export {
