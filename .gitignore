@@ -58,3 +58,5 @@ Thumbs.db
 .idea/
 frontend/packages/engine/dist/
 frontend/packages/engine/node_modules/
+# Claude Code worktrees
+.claude/worktrees/
