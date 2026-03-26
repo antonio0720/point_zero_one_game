@@ -3959,6 +3959,72 @@ export const BACKEND_CHAT_ADAPTER_SUITE_BUNDLE: BackendChatAdapterSuiteBundle =
   });
 
 // ============================================================================
+// MARK: TensionMetricsSignalAdapter — tension metrics → chat lane translation
+// ============================================================================
+
+export {
+  TensionMetricsSignalAdapter,
+  createTensionMetricsSignalAdapter,
+  adaptTensionMetricsSnapshot,
+  type AdapterAnalytics as TensionMetricsAdapterAnalytics,
+  type TensionMetricsSignal,
+} from './TensionMetricsSignalAdapter';
+
+// ============================================================================
+// MARK: TensionPolicySignalAdapter — tension policy resolution → chat lane
+// ============================================================================
+
+export {
+  TensionPolicySignalAdapter,
+  createTensionPolicySignalAdapter,
+  adaptTensionPolicyResult,
+  computePolicyRiskScore,
+  narratePolicyVisibilityChange,
+  narratePolicyQueueHealth,
+  resolvePolicySignalPriority,
+  resolvePolicySignalChannel,
+  extractPolicyMLFeatures,
+  TENSION_POLICY_SIGNAL_ADAPTER_VERSION,
+  TENSION_POLICY_SIGNAL_ADAPTER_ML_FEATURE_COUNT,
+  TENSION_POLICY_SIGNAL_ADAPTER_DL_FEATURE_COUNT,
+  TENSION_POLICY_SIGNAL_ADAPTER_DEDUPE_WINDOW_TICKS,
+  TENSION_POLICY_SIGNAL_ADAPTER_MAX_BATCH_SIZE,
+  POLICY_SIGNAL_PRIORITIES,
+  POLICY_PRIORITY_TO_CHANNEL_TABLE,
+  TENSION_POLICY_SIGNAL_ADAPTER_META,
+  type PolicySignalPriority,
+  type PolicyAdapterAnalytics,
+  type TensionPolicySignal,
+  type PolicyAdapterOptions,
+  type PolicyAdapterContext,
+  type PolicySignalBatch,
+  type PolicyMLExtract,
+} from './TensionPolicySignalAdapter';
+
+// ============================================================================
+// MARK: TensionThreatSourceSignalAdapter — threat discovery → chat lane
+// ============================================================================
+
+export {
+  TensionThreatSourceSignalAdapter,
+  createTensionThreatSourceSignalAdapter,
+  adaptThreatSourceBundle,
+  TENSION_THREAT_SOURCE_SIGNAL_ADAPTER_VERSION,
+  TENSION_THREAT_SOURCE_SIGNAL_ADAPTER_ML_FEATURE_COUNT,
+  TENSION_THREAT_SOURCE_SIGNAL_ADAPTER_DL_FEATURE_COUNT,
+  TENSION_THREAT_SOURCE_SIGNAL_ADAPTER_DEDUPE_WINDOW_TICKS,
+  TENSION_THREAT_SOURCE_SIGNAL_ADAPTER_MAX_BATCH_SIZE,
+  THREAT_SOURCE_SIGNAL_PRIORITIES,
+  type ThreatSourceSignalPriority,
+  type ThreatSourceAdapterAnalytics,
+  type TensionThreatSourceSignal,
+  type ThreatSourceAdapterOptions,
+  type ThreatSourceAdapterContext,
+  type ThreatSourceSignalBatch,
+  type ThreatSourceMLExtract,
+} from './TensionThreatSourceSignalAdapter';
+
+// ============================================================================
 // MARK: Final default export
 // ============================================================================
 
