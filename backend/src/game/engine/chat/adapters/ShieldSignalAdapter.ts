@@ -89,8 +89,6 @@ import {
   AttackRouterAnalytics,
   // ── Attack Router — factories and standalone helpers ──────────────────────
   createAttackRouterWithAnalytics,
-  getAttackChatChannel,
-  buildAttackNarrativeWeight,
   scoreAttackBatchRisk,
   extractAttackRouterMLArray,
   describeRoutingDecision,
@@ -248,14 +246,11 @@ import {
   ShieldInspector,
   ShieldAnalytics,
   createShieldEngineWithAnalytics as createShieldEngineWithAnalyticsInternal,
-  scoreShieldBreachRisk as scoreShieldEngineBreachRisk,
   getShieldChatChannel as getShieldEngineChatChannel,
-  buildShieldNarrativeWeight as buildShieldEngineNarrativeWeight,
   // ── Shield types — constants, helpers, domain types ───────────────────────
   SHIELD_LAYER_ORDER,
   SHIELD_LAYER_CONFIGS,
   SHIELD_CONSTANTS,
-  SHIELD_ATTACK_ALIASES,
   isShieldLayerId,
   getLayerConfig,
   buildShieldLayerState,
@@ -766,14 +761,19 @@ export function getShieldAdapterChatChannel(
   }
 
   // Engine-level channel assessment
-  const engineChannel = getShieldEngineChatChannel(decisions, mode, phase);
+  const cascadePending = cascadeContext != null && cascadeContext.resolution.triggered;
+  const engineUrgency = decisions.some((d) => d.l4CascadeRisk) ? 'CRITICAL' as const
+    : decisions.some((d) => d.sovereigntyEscalated) ? 'HIGH' as const
+    : 'MODERATE' as const;
+  const engineChannel = getShieldEngineChatChannel(engineUrgency, cascadePending);
   if (engineChannel === 'COMBAT' || engineChannel === 'ALERT') return 'SYNDICATE';
   if (engineChannel === 'COMMENTARY') return 'DEAL_ROOM';
 
-  // Attack router channel
-  const attackChannel = getAttackChatChannel(decisions, mode, phase);
-  if (attackChannel === 'COMBAT') return 'SYNDICATE';
-  if (attackChannel === 'ALERT') return 'DEAL_ROOM';
+  // Attack router channel — needs full batch result; derive inline from decisions
+  const attackL4Count = decisions.filter((d) => d.l4CascadeRisk).length;
+  const attackMaxSev = decisions.some((d) => d.sovereigntyEscalated) ? 'CATASTROPHIC' : 'MINOR';
+  if (attackL4Count > 0) return 'SYNDICATE';
+  if (attackMaxSev === 'CATASTROPHIC') return 'DEAL_ROOM';
 
   // Cascade channel (if cascade context present)
   if (cascadeContext) {
@@ -797,8 +797,11 @@ export function buildShieldAdapterNarrativeWeight(
   phase: RunPhase,
   pressureTier: PressureTier,
 ): number {
-  const attackWeight = buildAttackNarrativeWeight(decisions, layers, mode, phase, pressureTier);
-  const engineWeight = buildShieldEngineNarrativeWeight(decisions, layers, mode, phase, pressureTier);
+  // Attack narrative weight: derived from pressure tier (batch not available in standalone context)
+  const attackWeight = ATTACK_ROUTER_PRESSURE_TIER_URGENCY[pressureTier]
+    * ATTACK_ROUTER_PHASE_ESCALATION_FACTOR[phase];
+  // Engine narrative weight: phase-scaled estimate (urgency/trend not available in standalone context)
+  const engineWeight = isEndgamePhase(phase) ? 0.7 : 0.4;
 
   let cascadeWeight = 0;
   if (cascadeContext) {
@@ -834,7 +837,12 @@ export function scoreShieldAdapterRisk(
 ): number {
   const attackBatchRisk = scoreAttackBatchRisk(batchResult, layers);
   const cascadeRisk = scoreCascadeRisk(layers, mode, phase, cascadeCount);
-  const engineBreachRisk = scoreShieldEngineBreachRisk(layers, mode, phase);
+  // Engine breach risk: scoreShieldEngineBreachRisk requires full RunStateSnapshot;
+  // approximate from layer integrity (0 = all breached → 10, 1 = all full → 0)
+  const avgIntegrity = layers.length > 0
+    ? layers.reduce((sum, l) => sum + l.current / Math.max(1, l.max), 0) / layers.length
+    : 1;
+  const engineBreachRisk = (1 - avgIntegrity) * 10;
 
   const l4Imminent = computeL4CascadeImminentScore(layers, mode, phase);
   const ghostL3Imminent = computeGhostL3CascadeImminentScore(layers, mode);
@@ -1024,18 +1032,21 @@ export function computeShieldPreRoutingProfile(
   // Resolve any alias in note tags to canonical doctrine type
   const firstAttack = attacks[0];
   const aliasedDoctrine = firstAttack
-    ? resolveShieldAlias(SHIELD_ATTACK_ALIASES, firstAttack.category as unknown as string)
+    ? resolveShieldAlias([firstAttack.category as unknown as string])
     : null;
   void aliasedDoctrine;
 
   // Build pre-routing profile with strict type safety
+  const shieldTargetedCount = attacks.filter((a) => (a.targetLayer as string) !== 'DIRECT').length;
   const profile: PreRoutingAttackProfile = {
-    attackCount: attacks.length,
-    haterBotCount,
+    totalAttacks: attacks.length,
+    counterableCount: 0,
+    shieldTargetedCount,
+    botSourceCount: haterBotCount,
+    totalEffectiveDamage: 0,
+    counterableRatio: 0,
     avgEffectiveDamage: 0,
-    shieldTargetedRatio: attacks.length > 0
-      ? attacks.filter((a) => (a.targetLayer as string) !== 'DIRECT').length / attacks.length
-      : 0,
+    shieldTargetedRatio: attacks.length > 0 ? shieldTargetedCount / attacks.length : 0,
     botSourceRatio: attacks.length > 0 ? haterBotCount / attacks.length : 0,
   };
 
@@ -1105,7 +1116,7 @@ export function computeShieldCascadeExposureProfile(
   }));
 
   // Bot state score
-  const botStateScore = scoreCascadeFromBotStates(botStates, layers, mode);
+  const botStateScore = scoreCascadeFromBotStates(botStates, layers, mode, phase);
 
   // Attack impact profiles
   const attackImpactProfiles = attacks.length > 0
@@ -1171,7 +1182,7 @@ export function buildShieldModeMetadata(
  * Uses SHIELD_ATTACK_ALIASES and resolveShieldAlias.
  */
 export function resolveAttackDoctrineAlias(rawAlias: string): ShieldDoctrineAttackType | null {
-  return resolveShieldAlias(SHIELD_ATTACK_ALIASES, rawAlias);
+  return resolveShieldAlias([rawAlias]);
 }
 
 /**
@@ -1312,7 +1323,7 @@ export function inspectGhostDoctrineFlags(
  * Resolve urgency classification for a pressure tier in the context of attack routing.
  * Uses ATTACK_ROUTER_PRESSURE_TIER_URGENCY.
  */
-export function resolveShieldPressureTierUrgency(tier: PressureTier): string {
+export function resolveShieldPressureTierUrgency(tier: PressureTier): number {
   return ATTACK_ROUTER_PRESSURE_TIER_URGENCY[tier];
 }
 
@@ -1322,7 +1333,7 @@ export function resolveShieldPressureTierUrgency(tier: PressureTier): string {
  */
 export function buildDefaultShieldLayerState(layerId: ShieldLayerId): ShieldLayerState {
   const config = SHIELD_LAYER_CONFIGS[layerId];
-  return buildShieldLayerState(config.layerId, config.max, config.max);
+  return buildShieldLayerState(config.layerId, config.max, null, null);
 }
 
 /**
@@ -1420,7 +1431,7 @@ export class ShieldSignalAdapter {
   public constructor(options: ShieldSignalAdapterOptions) {
     this.options = {
       defaultRoomId: options.defaultRoomId,
-      defaultVisibleChannel: options.defaultVisibleChannel ?? 'SYSTEM_SHADOW',
+      defaultVisibleChannel: options.defaultVisibleChannel ?? 'LOBBY',
       dedupeWindowTicks: options.dedupeWindowTicks ?? SHIELD_SIGNAL_ADAPTER_DEDUPE_WINDOW_TICKS,
       maxHistory: options.maxHistory ?? SHIELD_SIGNAL_ADAPTER_HISTORY_DEPTH,
       logger: options.logger ?? (null as unknown as ShieldSignalAdapterLogger),
@@ -2117,26 +2128,26 @@ export class ShieldSignalAdapter {
   ): ShieldSignalAdapterArtifact {
     const routeChannel = (context.routeChannel ?? this.options.defaultVisibleChannel) as ChatVisibleChannel;
 
-    const envelope: ChatInputEnvelope = Object.freeze({
-      roomId: roomId as ChatRoomId,
-      eventKind: 'BATTLE_SIGNAL',
-      payload: Object.freeze({
+    const signal: ChatSignalEnvelope = Object.freeze({
+      type: 'BATTLE' as const,
+      emittedAt,
+      roomId: (roomId as ChatRoomId) ?? null,
+      metadata: Object.freeze({
         eventName,
         source: 'ShieldSignalAdapter',
         annotation: annotation.summary,
-        uxHint: uxHint.urgencyLabel,
+        uxHint: uxHint.priority,
+        severity,
+        narrativeWeight,
+        dedupeKey,
         ...diagnostics,
       }),
-      emittedAt,
-      tags: context.tags ?? [],
     });
 
-    const signal: ChatSignalEnvelope = Object.freeze({
-      eventName,
-      severity,
-      narrativeWeight,
-      dedupeKey,
+    const envelope: ChatInputEnvelope = Object.freeze({
+      kind: 'BATTLE_SIGNAL' as const,
       emittedAt,
+      payload: signal,
     });
 
     const artifact: ShieldSignalAdapterArtifact = {
@@ -2169,26 +2180,26 @@ export class ShieldSignalAdapter {
   ): ShieldSignalAdapterArtifact {
     const routeChannel = (context.routeChannel ?? this.options.defaultVisibleChannel) as ChatVisibleChannel;
 
-    const envelope: ChatInputEnvelope = Object.freeze({
-      roomId: roomId as ChatRoomId,
-      eventKind: 'BATTLE_SIGNAL',
-      payload: Object.freeze({
+    const signal: ChatSignalEnvelope = Object.freeze({
+      type: 'BATTLE' as const,
+      emittedAt,
+      roomId: (roomId as ChatRoomId) ?? null,
+      metadata: Object.freeze({
         eventName,
         source: 'ShieldSignalAdapter.cascade',
         annotation: annotation.summary,
-        uxHint: uxHint.urgencyLabel,
+        uxHint: uxHint.priority,
+        severity,
+        narrativeWeight,
+        dedupeKey,
         ...diagnostics,
       }),
-      emittedAt,
-      tags: context.tags ?? [],
     });
 
-    const signal: ChatSignalEnvelope = Object.freeze({
-      eventName,
-      severity,
-      narrativeWeight,
-      dedupeKey,
+    const envelope: ChatInputEnvelope = Object.freeze({
+      kind: 'BATTLE_SIGNAL' as const,
       emittedAt,
+      payload: signal,
     });
 
     const artifact: ShieldSignalAdapterArtifact = {
@@ -2458,7 +2469,9 @@ export function buildShieldCompatBundle(
     narrativeWeight: buildShieldAdapterNarrativeWeight(
       decisions, cascadeContext, input.layers, mode, phase, snapshot.pressureTier,
     ) > 0.7 ? 'CRITICAL' : 'TACTICAL',
-    dominantDoctrine: batchResult.dominantDoctrine ?? null,
+    dominantDoctrine: (Object.entries(batchResult.doctrineBreakdown)
+      .reduce<[string | null, number]>(([bestKey, bestVal], [key, val]) =>
+        val > bestVal ? [key, val] : [bestKey, bestVal], [null, 0])[0] as ShieldDoctrineAttackType | null),
     attackAnnotation: annotation,
     cascadeAnnotation,
   });
@@ -2478,7 +2491,7 @@ export function buildShieldCompatBundle(
     attackUXHint: uxHint,
     cascadeUXHint,
     primaryAction,
-    urgencyLabel: uxHint.urgencyLabel,
+    urgencyLabel: uxHint.priority,
     channelRecommendation: getShieldAdapterChatChannel(decisions, cascadeContext, mode, phase),
   });
 
@@ -2643,7 +2656,7 @@ export function scoreShieldCascadeThreatBatch(
   const envelopeScore = threats.length > 0
     ? scoreCascadeThreatFromEnvelopes(threats, tick, mode, phase)
     : 0;
-  const botStateScore = scoreCascadeFromBotStates(botStates, layers, mode);
+  const botStateScore = scoreCascadeFromBotStates(botStates, layers, mode, phase);
   const chainIntegrityRatio = computeCascadeChainIntegrityRatio(cascadeCount, maxExpectedCascades);
   const classified = threats.length > 0
     ? classifyCascadeThreatBatch(threats, tick).map((c) => ({ score: c.score }))
@@ -2826,7 +2839,7 @@ export function validateAndMapShieldLayers(
       const cfg = SHIELD_LAYER_CONFIGS[layerId];
       const orderIdx = layerOrderIndex(layerId);
       void orderIdx;
-      defaultStatesRaw[layerId] = buildShieldLayerState(cfg.layerId, cfg.max, cfg.max);
+      defaultStatesRaw[layerId] = buildShieldLayerState(cfg.layerId, cfg.max, null, null);
     }
   }
 
@@ -2855,7 +2868,7 @@ export function buildShieldCascadeBotThreatProfile(
   readonly totalRisk: number;
 } {
   const cascadeBotThreatWeight = computeCascadeBotThreatWeight(botStates);
-  const botStateScore = scoreCascadeFromBotStates(botStates, layers, mode);
+  const botStateScore = scoreCascadeFromBotStates(botStates, layers, mode, phase);
   const l4ImminentScore = computeL4CascadeImminentScore(layers, mode, phase);
   const ghostL3ImminentScore = computeGhostL3CascadeImminentScore(layers, mode);
   const totalRisk = clamp01(

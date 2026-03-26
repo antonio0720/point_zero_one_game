@@ -2041,6 +2041,7 @@ export class BackendChatAdapterSuite {
       PRESSURE: emptyDomainCounters(),
       DECAY: emptyDomainCounters(),
       COLLECTOR: emptyDomainCounters(),
+      SHIELD: emptyDomainCounters(),
     });
 
     return Object.freeze({
@@ -2421,6 +2422,7 @@ export class BackendChatAdapterSuite {
         PRESSURE: emptyDomainCounters(),
         DECAY: emptyDomainCounters(),
         COLLECTOR: emptyDomainCounters(),
+        SHIELD: emptyDomainCounters(),
       }),
     });
   }
@@ -2473,6 +2475,7 @@ export class BackendChatAdapterSuite {
         PRESSURE: emptyDomainCounters(),
         DECAY: emptyDomainCounters(),
         COLLECTOR: emptyDomainCounters(),
+        SHIELD: emptyDomainCounters(),
       }),
     });
   }
@@ -2527,6 +2530,7 @@ export class BackendChatAdapterSuite {
         PRESSURE: emptyDomainCounters(),
         DECAY: emptyDomainCounters(),
         COLLECTOR: emptyDomainCounters(),
+        SHIELD: emptyDomainCounters(),
       }),
     });
   }
@@ -2571,6 +2575,7 @@ export class BackendChatAdapterSuite {
         PRESSURE: emptyDomainCounters(),
         DECAY: emptyDomainCounters(),
         COLLECTOR: emptyDomainCounters(),
+        SHIELD: emptyDomainCounters(),
       }),
     });
   }
@@ -2859,6 +2864,7 @@ function createEmptyMutableSuiteAccumulator(): MutableSuiteAccumulator {
       PRESSURE: { accepted: 0, deduped: 0, rejected: 0 },
       DECAY: { accepted: 0, deduped: 0, rejected: 0 },
       COLLECTOR: { accepted: 0, deduped: 0, rejected: 0 },
+      SHIELD: { accepted: 0, deduped: 0, rejected: 0 },
     },
   };
 }
@@ -2946,6 +2952,7 @@ function freezeMutableSuiteAccumulator(
       PRESSURE: value.counters.PRESSURE,
       DECAY: value.counters.DECAY,
       COLLECTOR: value.counters.COLLECTOR,
+      SHIELD: value.counters.SHIELD,
     }),
   });
 }

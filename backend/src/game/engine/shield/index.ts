@@ -1,7 +1,7 @@
 /*
  * POINT ZERO ONE — BACKEND SHIELD SUBSYSTEM BARREL
  * /backend/src/game/engine/shield/index.ts
- * VERSION: 2026.03.25
+ * VERSION: 2026.03.25-v2
  *
  * Doctrine:
  * - authoritative barrel for the full shield subsystem
@@ -16,6 +16,8 @@
  *   const resolver = new Shield.BreachCascadeResolver();
  *   const ensemble = Shield.createBreachCascadeResolverWithAnalytics();
  *   const modeProfile = Shield.buildAttackRouterModeProfile('ghost');
+ *   const report = Shield.buildShieldHealthReport(layers);
+ *   const bridge = new Shield.ShieldUXBridge();
  */
 
 // ── Attack Router ─────────────────────────────────────────────────────────────
@@ -53,7 +55,6 @@ export {
   buildLayerAttackPressureMap,
   computePerLayerBreachRisk,
   normalizeBatchSize,
-  computeLayerVulnerabilities,
   mapLayersForIntegrity,
   scoreL4RouteRisk,
   computeDoctrineConfidence,
@@ -234,12 +235,14 @@ export {
   buildShieldNarrativeWeight,
 } from './ShieldEngine';
 
-// ── Types ─────────────────────────────────────────────────────────────────────
+// ── Types: Original Exports ──────────────────────────────────────────────────
 export {
+  // Core constants
   SHIELD_LAYER_ORDER,
   SHIELD_LAYER_CONFIGS,
   SHIELD_CONSTANTS,
   SHIELD_ATTACK_ALIASES,
+  // Core functions
   isShieldLayerId,
   getLayerConfig,
   buildShieldLayerState,
@@ -249,6 +252,7 @@ export {
 } from './types';
 
 export type {
+  // Core types
   RepairLayerId,
   ShieldDoctrineAttackType,
   ShieldLayerConfig,
@@ -258,4 +262,234 @@ export type {
   RoutedAttack,
   DamageResolution,
   CascadeResolution,
+} from './types';
+
+// ── Types: New Type Exports (v2) ─────────────────────────────────────────────
+export type {
+  ShieldHealthGrade,
+  ShieldStatusBand,
+  AttackSeverityTier,
+  RepairStrategyKind,
+  LayerDangerLevel,
+  ShieldEventKind,
+  ShieldHealthReport,
+  LayerGradeEntry,
+  LayerVulnerabilityScore,
+  ShieldRecoveryEstimate,
+  FortificationProgress,
+  AttackAnalysisResult,
+  AttackBatchAnalysis,
+  DoctrineCoherenceResult,
+  AttackPatternSignal,
+  RepairPriorityEntry,
+  RepairCostEstimate,
+  RepairStrategyRecommendation,
+  RepairQueueSaturationReport,
+  RepairEffectivenessPrediction,
+  ShieldMLFeatureVector,
+  AttackPatternFeatureVector,
+  RepairEfficiencyFeatureVector,
+  ShieldUXSnapshot,
+  ShieldEventUXCopy,
+} from './types';
+
+// ── Types: New Constant Exports (v2) — UX Maps ──────────────────────────────
+export {
+  // Attack category maps
+  ATTACK_CATEGORY_DOCTRINE_MAP,
+  ATTACK_CATEGORY_SEVERITY_WEIGHT,
+  ATTACK_CATEGORY_PREFERRED_LAYER,
+  ATTACK_CATEGORY_UX_DESCRIPTION,
+  ATTACK_CATEGORY_UX_SHORT_NAME,
+  ATTACK_CATEGORY_ORDER,
+  ATTACK_SOURCE_UX_LABEL,
+  // Doctrine maps
+  DOCTRINE_TYPE_UX_DESCRIPTION,
+  DOCTRINE_TYPE_ORDER,
+  // Layer label maps
+  LAYER_LABEL_DISPLAY_NAME,
+  LAYER_LABEL_UX_DESCRIPTION,
+  LAYER_LABEL_ICON_KEY,
+  LAYER_LABEL_SHORT_NAME,
+  // Layer danger maps
+  LAYER_DANGER_THRESHOLDS,
+  DANGER_LEVEL_UX_DESCRIPTION,
+  DANGER_LEVEL_STATUS_TEMPLATE,
+  // Status band maps
+  STATUS_BAND_ICON_KEY,
+  STATUS_BAND_UX_NARRATIVE,
+  // Grade maps
+  GRADE_SCORE_BOUNDARIES,
+  GRADE_UX_NARRATIVE,
+  // Severity tier maps
+  SEVERITY_TIER_BOUNDARIES,
+  SEVERITY_TIER_UX_DESCRIPTION,
+  SEVERITY_TIER_ORDER,
+  // Repair maps
+  REPAIR_SOURCE_UX_LABEL,
+  REPAIR_STRATEGY_UX_DESCRIPTION,
+  // Shield event UX maps
+  SHIELD_EVENT_UX_HEADLINE,
+  SHIELD_EVENT_UX_BODY,
+  // Layer scoring maps
+  LAYER_HEALTH_WEIGHT,
+  LAYER_REPAIR_COST_PER_HP,
+  LAYER_REPAIR_SPEED,
+} from './types';
+
+// ── Types: New Function Exports (v2) — Shield Diagnostics & UX ──────────────
+export {
+  // Shield health grading
+  computeLayerDangerLevel,
+  computeGradeFromScore,
+  gradeToNumericMidpoint,
+  computeStatusBand,
+  // Layer UX text
+  generateLayerStatusLine,
+  generateLayerDetailLine,
+  buildLayerGradeEntry,
+  // Weighted integrity
+  computeWeightedIntegrity,
+  // Health reports
+  buildShieldHealthReport,
+  buildShieldNarrativeSummary,
+  buildShieldShortStatus,
+  buildShieldStatusSummary,
+  // Vulnerability analysis
+  computeLayerVulnerabilities as computeLayerVulnerabilitiesV2,
+  // Recovery estimation
+  estimateShieldRecovery,
+  // Fortification progress
+  computeFortificationProgress,
+  // Deflection
+  computeLayerDeflection,
+  isLayerAtCascadeRisk,
+  // Defensive posture
+  scoreDefensivePosture,
+  computeLayerDistressDuration,
+  generatePlayerActionHint,
+} from './types';
+
+// ── Types: New Function Exports (v2) — Attack Analysis ──────────────────────
+export {
+  mapAttackCategoryToDoctrine,
+  getAttackCategorySeverityWeight,
+  getAttackCategoryPreferredLayer,
+  classifyAttackSeverity,
+  classifyAttackEventSeverity,
+  validateAttackForShield,
+  isAttackSourceBot,
+  getAttackSourceUXLabel,
+  analyzeAttack,
+  analyzeAttackBatch,
+  computeDoctrineCoherence,
+  detectAttackPatterns,
+  isAttackOnPreferredLayer,
+  computeLayerHeatConcentration,
+  generateAttackUXCopy,
+} from './types';
+
+// ── Types: New Function Exports (v2) — Repair Planning ──────────────────────
+export {
+  scoreRepairPriorities,
+  estimateRepairCosts,
+  recommendRepairStrategy,
+  analyzeRepairQueueSaturation,
+  predictRepairEffectiveness,
+  computeOptimalRepairDistribution,
+  estimateRepairJobCompletion,
+  generateRepairJobUXCopy,
+} from './types';
+
+// ── Types: New Function Exports (v2) — ML/DL Features ──────────────────────
+export {
+  buildShieldMLFeatureVector,
+  extractLayerIntegrityFeatures,
+  buildAttackPatternFeatureVector,
+  buildRepairEfficiencyFeatureVector,
+  flattenShieldMLFeatures,
+  flattenAttackPatternFeatures,
+  flattenRepairEfficiencyFeatures,
+  buildCombinedMLFeatureVector,
+  getMLFeatureDimensions,
+} from './types';
+
+// ── Types: New Function Exports (v2) — Shield Event UX Copy ─────────────────
+export {
+  buildDamageEventUXCopy,
+  buildBreachEventUXCopy,
+  buildRepairStartedEventUXCopy,
+  buildRepairCompletedEventUXCopy,
+  buildFortificationReachedEventUXCopy,
+  buildCascadeTriggeredEventUXCopy,
+  buildDeflectionEventUXCopy,
+  buildRegenTickEventUXCopy,
+} from './types';
+
+// ── Types: New Function Exports (v2) — UX Snapshot & Comparison ─────────────
+export {
+  buildShieldUXSnapshot,
+  compareShieldStates,
+  computeShieldMomentum,
+  generateTurnShieldNarrative,
+} from './types';
+
+// ── Types: New Function Exports (v2) — Advanced Scoring ─────────────────────
+export {
+  computeThreatAbsorptionCapacity,
+  computeEffectiveLayerHP,
+  computeShieldResilienceIndex,
+  isShieldInDeathSpiral,
+  computeCriticalPathToCascade,
+  scoreShieldBalance,
+} from './types';
+
+// ── Types: New Function Exports (v2) — Historical Trend Analysis ────────────
+export {
+  computeRollingIntegrity,
+  detectShieldTrend,
+  computeBreachFrequency,
+  generateTrendNarrative,
+} from './types';
+
+// ── Types: New Function Exports (v2) — Attack Response ──────────────────────
+export {
+  scoreAttackResponseUrgency,
+  rankAttacksByUrgency,
+  getCounterDoctrineHint,
+  generateTacticalAssessment,
+} from './types';
+
+// ── Types: New Function Exports (v2) — Validation ───────────────────────────
+export {
+  validateShieldLayerState,
+  validateShieldLayerArray,
+  validateRoutedAttack,
+  validateRepairJob,
+} from './types';
+
+// ── Types: New Function Exports (v2) — State Factories ──────────────────────
+export {
+  buildFullShieldState,
+  buildFullHealthShieldState,
+  buildBreachedShieldState,
+  buildShieldStateAtRatio,
+  applyDamageToShieldState,
+  applyRepairToShieldState,
+  applyRegenTick,
+} from './types';
+
+// ── Types: New Function Exports (v2) — Resolution Analysis ──────────────────
+export {
+  analyzeDamageResolution,
+  analyzeCascadeResolution,
+} from './types';
+
+// ── Types: New Function Exports (v2) — Simulation Helpers ───────────────────
+export {
+  simulateRegenTicks,
+  simulateAttackImpact,
+  simulateRepairOutcome,
+  computeMinRepairToSurvive,
+  computeSteadyStateDamageCapacity,
 } from './types';
