@@ -1535,7 +1535,7 @@ export class SovereigntyEngine implements SimulationEngine {
    * Build a CORD component breakdown report.
    */
   private buildCORDBreakdown(
-    graded: { score: number; grade: string; badges: string[]; breakdown: {
+    graded: { score: number; grade: string; badges: readonly string[]; breakdown: {
       avgShieldPct: number;
       decisionSpeedScore: number;
       blockedRatio: number;
@@ -2024,7 +2024,7 @@ export class SovereigntyEngine implements SimulationEngine {
    */
   private computeFinalBadges(
     snapshot: RunStateSnapshot,
-    graded: { score: number; grade: string; badges: string[] },
+    graded: { score: number; grade: string; badges: readonly string[] },
     integrityStatus: IntegrityStatus,
     proofHash: string,
   ): string[] {
@@ -3137,7 +3137,7 @@ export class SovereigntyEngine implements SimulationEngine {
    */
   private buildRunSummary(
     snapshot: RunStateSnapshot,
-    graded: { score: number; grade: string; badges: string[]; breakdown: {
+    graded: { score: number; grade: string; badges: readonly string[]; breakdown: {
       avgShieldPct: number;
       decisionSpeedScore: number;
       blockedRatio: number;
@@ -3201,7 +3201,7 @@ export class SovereigntyEngine implements SimulationEngine {
    */
   private computeHighlightMoments(
     snapshot: RunStateSnapshot,
-    graded: { score: number; grade: string; badges: string[]; breakdown: {
+    graded: { score: number; grade: string; badges: readonly string[]; breakdown: {
       avgShieldPct: number;
       decisionSpeedScore: number;
       blockedRatio: number;
@@ -4399,20 +4399,20 @@ export class SovereigntyEngine implements SimulationEngine {
         : this.mapScoreToGrade(sovereigntyScore);
 
       // Also run the grader for its badges and breakdown
-      let graderResult: {
-        score: number;
-        grade: string;
-        badges: string[];
-        breakdown: {
-          avgShieldPct: number;
-          decisionSpeedScore: number;
-          blockedRatio: number;
-          brokenRatio: number;
-          pressureSurvival: number;
-          baseScore: number;
-          outcomeMultiplier: number;
-        };
-      };
+            let graderResult: {
+              score: number;
+              grade: string;
+              badges: readonly string[];
+              breakdown: {
+                avgShieldPct: number;
+                decisionSpeedScore: number;
+                blockedRatio: number;
+                brokenRatio: number;
+                pressureSurvival: number;
+                baseScore: number;
+                outcomeMultiplier: number;
+              };
+            };
 
       try {
         graderResult = this.grader.score(snapshot);
