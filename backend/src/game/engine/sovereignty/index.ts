@@ -88,14 +88,93 @@ export type {
 } from './ProofGenerator';
 
 // ── Replay Integrity Checker ─────────────────────────────────────────────────
-export { ReplayIntegrityChecker } from './ReplayIntegrityChecker';
-export type { ReplayIntegrityResult } from './ReplayIntegrityChecker';
+export {
+  ReplayIntegrityChecker,
+  IntegrityRunContext,
+  // Constants
+  REPLAY_INTEGRITY_VERSION,
+  INTEGRITY_ML_FEATURE_COUNT,
+  INTEGRITY_DL_FEATURE_COUNT,
+  INTEGRITY_ML_FEATURE_LABELS,
+  INTEGRITY_DL_FEATURE_LABELS,
+  ANOMALY_CATEGORY_WEIGHTS,
+  // Validation
+  validateIntegritySnapshot,
+  // ML / DL
+  computeIntegrityMLVector,
+  computeIntegrityDLTensor,
+  // UX narratives
+  generateIntegrityNarrative as generateReplayIntegrityNarrative,
+  generateAnomalyExplanation,
+  // Batch
+  batchVerifyIntegrity,
+  // Serialization
+  serializeIntegrityResult,
+  deserializeIntegrityResult,
+  // Audit trail
+  buildIntegrityAuditEntry,
+  verifyIntegrityAuditEntry,
+  // Self-test
+  runIntegritySelfTest,
+} from './ReplayIntegrityChecker';
+export type {
+  ReplayIntegrityResult,
+  IntegrityAnomalyCategory,
+  IntegrityAnomalyDetail,
+  IntegrityMLVector,
+  IntegrityDLTensor,
+  IntegrityBatchResult,
+  IntegrityAuditEntry,
+  IntegritySerializedResult,
+  IntegritySelfTestResult,
+} from './ReplayIntegrityChecker';
 
 // ── Run Grade Assigner ───────────────────────────────────────────────────────
-export { RunGradeAssigner } from './RunGradeAssigner';
+export {
+  RunGradeAssigner,
+  GradeRunContext,
+  // Constants
+  RUN_GRADE_VERSION,
+  GRADE_ML_FEATURE_COUNT,
+  GRADE_DL_FEATURE_COUNT,
+  GRADE_ML_FEATURE_LABELS,
+  GRADE_DL_FEATURE_LABELS,
+  GRADE_BRACKETS,
+  BADGE_CATALOG,
+  // Analytics
+  computeGradePercentile,
+  identifyWeakestComponent,
+  compareGradeResults,
+  // ML / DL
+  computeGradeMLVector,
+  computeGradeDLTensor,
+  // UX narratives
+  generateGradeNarrativeText,
+  generateGradeCoachingMessage,
+  generateBadgeNarrative,
+  // Batch
+  batchGradeRuns,
+  // Serialization
+  serializeGradeResult,
+  deserializeGradeResult,
+  // Audit trail
+  buildGradeAuditEntry,
+  verifyGradeAuditEntry,
+  // Self-test
+  runGradeSelfTest,
+} from './RunGradeAssigner';
 export type {
   RunGradeScoreResult,
   RunGradeComponentBreakdown,
+  GradeMLVector,
+  GradeDLTensor,
+  GradeBatchResult,
+  GradeAuditEntry,
+  GradeSerializedResult,
+  GradeSelfTestResult,
+  GradeAnalytics,
+  GradeComparisonResult,
+  BadgeCatalogEntry,
 } from './RunGradeAssigner';
 export type { SovereigntyGrade as RunGradeAssignerGrade } from './RunGradeAssigner';
 
