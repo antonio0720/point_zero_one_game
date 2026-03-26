@@ -942,6 +942,37 @@ import {
   type ExportSignalAdapterStats,
 } from './SovereigntyExportSignalAdapter';
 
+import {
+  SovereigntyExporterSignalAdapter,
+  createSovereigntyExporterSignalAdapter,
+  adaptAllExporterSignals,
+  adaptExporterBundle,
+  EXPORTER_SIGNAL_ADAPTER_MANIFEST,
+  type ExporterPipelineResultCompat,
+  type ExporterMLVectorCompat as ExporterAdapterMLVectorCompat,
+  type ExporterDLTensorCompat as ExporterAdapterDLTensorCompat,
+  type ExporterAuditEntryCompat as ExporterAdapterAuditEntryCompat,
+  type ExporterSignalAdapterContext,
+  type SovereigntyExporterSignalAdapterOptions as ExporterSignalAdapterOptions,
+  type ExporterSignalAdapterStats,
+} from './SovereigntyExporterSignalAdapter';
+
+import {
+  PersistenceWriterSignalAdapter,
+  createPersistenceWriterSignalAdapter,
+  adaptAllPersistenceSignals,
+  adaptPersistenceBundle,
+  PERSISTENCE_SIGNAL_ADAPTER_MANIFEST,
+  type PersistenceEnvelopeCompat,
+  type PersistenceWriteStatsCompat,
+  type PersistenceMLVectorCompat as PersistenceAdapterMLVectorCompat,
+  type PersistenceDLTensorCompat as PersistenceAdapterDLTensorCompat,
+  type PersistenceAuditEntryCompat as PersistenceAdapterAuditEntryCompat,
+  type PersistenceSignalAdapterContext,
+  type PersistenceWriterSignalAdapterOptions as PersistenceSignalAdapterOptions,
+  type PersistenceSignalAdapterStats,
+} from './PersistenceWriterSignalAdapter';
+
 // ============================================================================
 // MARK: Re-export authoritative adapter modules and their key public surfaces
 // ============================================================================
@@ -1310,6 +1341,18 @@ export {
   batchCompleteHeadline,
   batchCompleteCoachingMessage,
   EXPORT_SIGNAL_ADAPTER_MANIFEST,
+  // SovereigntyExporter signal adapter
+  SovereigntyExporterSignalAdapter,
+  createSovereigntyExporterSignalAdapter,
+  adaptAllExporterSignals,
+  adaptExporterBundle,
+  EXPORTER_SIGNAL_ADAPTER_MANIFEST,
+  // PersistenceWriter signal adapter
+  PersistenceWriterSignalAdapter,
+  createPersistenceWriterSignalAdapter,
+  adaptAllPersistenceSignals,
+  adaptPersistenceBundle,
+  PERSISTENCE_SIGNAL_ADAPTER_MANIFEST,
 };
 
 export type {
@@ -1761,6 +1804,23 @@ export type {
   ExportSignalAdapterEventName,
   SovereigntyExportSignalAdapterOptions,
   ExportSignalAdapterStats,
+  // SovereigntyExporter signal adapter types
+  ExporterPipelineResultCompat,
+  ExporterAdapterMLVectorCompat,
+  ExporterAdapterDLTensorCompat,
+  ExporterAdapterAuditEntryCompat,
+  ExporterSignalAdapterContext,
+  ExporterSignalAdapterOptions,
+  ExporterSignalAdapterStats,
+  // PersistenceWriter signal adapter types
+  PersistenceEnvelopeCompat,
+  PersistenceWriteStatsCompat,
+  PersistenceAdapterMLVectorCompat,
+  PersistenceAdapterDLTensorCompat,
+  PersistenceAdapterAuditEntryCompat,
+  PersistenceSignalAdapterContext,
+  PersistenceSignalAdapterOptions,
+  PersistenceSignalAdapterStats,
 };
 
 // ============================================================================

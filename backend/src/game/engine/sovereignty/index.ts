@@ -227,10 +227,65 @@ export type {
 } from './SovereigntyExportAdapter';
 
 // ── Exporter ─────────────────────────────────────────────────────────────────
-export { SovereigntyExporter } from './SovereigntyExporter';
+export {
+  SovereigntyExporter,
+  ExporterRunContext,
+  EXPORTER_VERSION,
+  EXPORTER_ML_FEATURE_COUNT,
+  EXPORTER_DL_FEATURE_COUNT,
+  EXPORTER_ML_FEATURE_LABELS,
+  EXPORTER_DL_FEATURE_LABELS,
+  validateExporterInputs,
+  computeExporterMLVector,
+  computeExporterDLTensor,
+  generateExporterNarrative,
+  batchExport,
+  serializeExporterResult,
+  deserializeExporterResult,
+  buildExporterAuditEntry,
+  verifyExporterAuditEntry,
+  runExporterSelfTest,
+} from './SovereigntyExporter';
+export type {
+  ExporterValidationResult,
+  ExporterMLVector,
+  ExporterDLTensor,
+  ExporterBatchResult,
+  ExporterAuditEntry,
+  ExporterSerializedResult,
+  ExporterSelfTestResult,
+} from './SovereigntyExporter';
 
 // ── Persistence Writer ───────────────────────────────────────────────────────
-export { SovereigntyPersistenceWriter } from './SovereigntyPersistenceWriter';
+export {
+  SovereigntyPersistenceWriter,
+  PersistenceRunContext,
+  PERSISTENCE_WRITER_VERSION,
+  PERSISTENCE_ML_FEATURE_COUNT,
+  PERSISTENCE_DL_FEATURE_COUNT,
+  PERSISTENCE_ML_FEATURE_LABELS,
+  PERSISTENCE_DL_FEATURE_LABELS,
+  validatePersistenceInputs,
+  computePersistenceMLVector,
+  computePersistenceDLTensor,
+  generatePersistenceNarrative,
+  batchPersist,
+  serializePersistenceResult,
+  deserializePersistenceResult,
+  buildPersistenceAuditEntry,
+  verifyPersistenceAuditEntry,
+  runPersistenceSelfTest,
+} from './SovereigntyPersistenceWriter';
+export type {
+  PersistenceValidationResult,
+  PersistenceMLVector,
+  PersistenceDLTensor,
+  PersistenceBatchResult,
+  PersistenceAuditEntry,
+  PersistenceSerializedResult,
+  PersistenceSelfTestResult,
+  PersistenceWriteStats,
+} from './SovereigntyPersistenceWriter';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 export { CORD_WEIGHTS, OUTCOME_MULTIPLIER } from './types';
