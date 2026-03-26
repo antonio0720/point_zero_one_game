@@ -134,3 +134,28 @@ export * as Modes from './modes';
  *   const adapter = Pressure.createPressureEngine();
  */
 export * as Pressure from './pressure';
+
+/**
+ * Shield subsystem — authoritative attack routing, breach cascade resolution,
+ * layer management, repair queue, UX bridge, and ShieldEngine ML/DL pipeline.
+ *
+ * Covers: AttackRouter (doctrine-based L1–L4 routing for all eight
+ * ShieldDoctrineAttackTypes), BreachCascadeResolver (ghost L3 + L4 cascade
+ * chains, sovereignty fatality), ShieldLayerManager (CASH_RESERVE / CREDIT_LINE /
+ * INCOME_BASE / NETWORK_CORE integrity state), ShieldRepairQueue (repair
+ * scheduling), ShieldUXBridge (UX translation), and ShieldEngine (full ML/DL
+ * extraction, trend analysis, resilience forecasting).
+ *
+ * All shield truth flows through this namespace. The ShieldSignalAdapter is
+ * consumed by the backend chat lane for attack/cascade → chat translation.
+ * Sovereignty L4 fatality signals are CRITICAL and never suppressed.
+ *
+ * Usage:
+ *   import { Shield } from '../../engine';
+ *   const router = new Shield.AttackRouter();
+ *   const resolver = new Shield.BreachCascadeResolver();
+ *   const ensemble = Shield.createBreachCascadeResolverWithAnalytics();
+ *   const modeProfile = Shield.buildAttackRouterModeProfile('ghost');
+ *   const layerManager = new Shield.ShieldLayerManager();
+ */
+export * as Shield from './shield';
