@@ -185,3 +185,37 @@ export * as Shield from './shield';
  *   const grade = Sovereignty.normalizeGrade(snapshot.sovereignty.verifiedGrade);
  */
 export * as Sovereignty from './sovereignty';
+
+/**
+ * Tension subsystem — authoritative anticipation queue, threat visibility,
+ * tension score accumulation/decay, ML/DL feature extraction, UX narrative
+ * generation, trend analysis, recovery forecasting, resilience scoring,
+ * and the TensionEngine (SimulationEngine at STEP_04_TENSION).
+ *
+ * Covers: TensionEngine (core orchestrator with 32-dim ML vector, 48×8 DL
+ * tensor, UX narrative, trend snapshot, queue analytics, visibility analytics,
+ * session analytics, resilience scoring, ghost penalty analysis, pulse analytics,
+ * pressure-tension correlation, queue simulation, mitigation recommendations,
+ * decay scenario simulation, and complete export bundles), AnticipationQueue
+ * (threat scheduling and lifecycle), ThreatVisibilityManager (information
+ * exposure control by pressure tier), TensionDecayController (score math),
+ * TensionThreatProjector (queue→ThreatEnvelope projection), TensionUXBridge
+ * (EventBus broadcasting), TensionThreatSourceAdapter (snapshot→threat
+ * discovery), TensionMetricsCollector (higher-order operational metrics),
+ * TensionPolicyResolver (centralized policy decisions), and
+ * TensionSnapshotAdapter (runtime→RunStateSnapshot bridge).
+ *
+ * All tension truth flows through this namespace. The TensionEngine reads
+ * threat state and pressure tier; it NEVER writes to game state directly.
+ * All outbound signals flow through TensionUXBridge → EventBus.emit().
+ *
+ * Usage:
+ *   import { Tension } from '../../engine';
+ *   const engine = new Tension.TensionEngine();
+ *   const snapshot = engine.getRuntimeSnapshot();
+ *   const mlVec = engine.extractMLVector();
+ *   const narrative = engine.generateNarrative();
+ *   const forecast = engine.computeRecoveryForecast();
+ *   const recommendations = engine.computeMitigationRecommendations();
+ */
+export * as Tension from './tension';
